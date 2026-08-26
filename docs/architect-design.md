@@ -72,24 +72,24 @@ opencode 与 deepseek-harness 都是本地子进程形态，走 stdio 是零摩�
 
 ```mermaid
 graph TB
-    subgraph FE[前端面板 (frontend/apps/panel)]
-        PA[Agents 页]
-        PS[Sessions 页]
-        PR[Runtimes 页]
+    subgraph FE["前端面板 (frontend/apps/panel)"]
+        PA["Agents 页"]
+        PS["Sessions 页"]
+        PR["Runtimes 页"]
     end
 
-    subgraph BE[Go daemon (cmd/forge)]
-        API["server/http + ws 控制面 API"]
+    subgraph BE["Go daemon (cmd/forge)"]
+        API["server/http + sse 控制面 API"]
         MGR["manager (agent 生命周期/会话编排)"]
         ACL["acl (ACP client: transport + 状态机)"]
-        subgraph RT[runtime adapters]
+        subgraph RT["runtime adapters"]
             O["opencode adapter"]
             H["deepseek-harness adapter"]
         end
         INFRA["infra: config/store/logger"]
     end
 
-    subgraph AGENTS[外部 Agent Runtime 进程]
+    subgraph AGENTS["外部 Agent Runtime 进程"]
         OPROC["opencode (ACP server / stdio)"]
         HPROC["deepseek-harness (ACP server / stdio)"]
     end
