@@ -1,0 +1,9 @@
+{
+  "name": "ark-forge-frontend",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @ark/panel dev",
+    "build": "pnpm --filter @ark/panel build",
+    "typecheck": "pnpm --filter @ark/panel typecheck"
+  }
+}

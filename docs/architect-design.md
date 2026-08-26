@@ -54,7 +54,7 @@ opencode 与 deepseek-harness 都是本地子进程形态，走 stdio 是零摩�
 
 ```mermaid
 graph TB
-    subgraph FE[Web 面板 (web/)]
+    subgraph FE[前端面板 (frontend/apps/panel)]
         PA[Agents 页]
         PS[Sessions 页]
         PR[Runtimes 页]
@@ -86,47 +86,72 @@ graph TB
     MGR --> INFRA
 ```
 
-## 5. 目录结构（monorepo）
+## 5. 目录结构（双层 monorepo）
+
+本项目采用**双层 monorepo**：
+
+- **Go 侧**：用 `go.work`（Workspace）管理多个独立 Go module，`internal/` 内每一层（acl / runtime / manager /
+  server / infra）各自 `go.mod`，方便独立的 `acl` 等层对外复用。
+- **前端侧**：`frontend/` 内部是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合。
 
 ```
 ark-forge/
+├── go.work                # Go workspace：union(acl, runtime, manager, server, infra, cmd/forge)
+├── Makefile               # make server / make web / make all
+│
 ├── cmd/
-│   ├── forge/              # daemon 入口：ACP host 控制面服务
-│   └── forge-cli/          # 命令行工具（创建/运行/管理 agent，可选，二期）
-├── internal/
-│   ├── acl/                # ACP 接入层
-│   │   ├── transport.go    #   Transport 抽象（首版 StdioTransport）
-│   │   ├── client.go       #   ACP client 句柄（封装 coder/acp-go-sdk）
-│   │   └── request.go      #   请求/通知分发、会话生命周期辅助
-│   ├── runtime/            # runtime adapter 层（对齐 OpenBee internal/ai）
-│   │   ├── contracts.go    #   Runtime 统一接口
-│   │   ├── registry.go     #   runtime 注册表（可插拔）
-│   │   ├── opencode/       #   opencode adapter（启动命令 + capability 断言）
-│   │   └── deepseekharness/#   deepseek-harness adapter
-│   ├── manager/            # Agent 生命周期 + Registry
-│   │   ├── agent.go        #   Agent 模型
-│   │   ├── lifecycle.go    #   创建/启动/停止/销毁
-│   │   └── session.go      #   会话编排：initialize→new→prompt→cancel→close
-│   ├── server/             # 控制面 API
-│   │   ├── http.go         #   REST 端点（runtimes/agents/sessions）
-│   │   └── ws.go           #   WebSocket 流式推送（通知/消息/token 流）
-│   └── infra/              # 基础设施
-│       ├── config/         #   环境变量驱动配置
-│       ├── store/          #   SQLite（agents、sessions、runtime config）
+│   ├── forge/             # module: forge —— daemon 入口，依赖其余各 module
+│   │   ├── main.go
+│   │   └── go.mod
+│   └── forge-cli/         # module: forge-cli（可选、二期）
+│
+├── internal/              # 每层一个独立 Go module（业务模块）
+│   ├── acl/               # module: forge-acl —— ACP Host 接入层（可独立复用）
+│   │   ├── go.mod
+│   │   ├── transport.go   #   Transport 抽象（首版 StdioTransport）
+│   │   ├── client.go      #   ACP client 句柄（封装 coder/acp-go-sdk）
+│   │   └── request.go     #   请求/通知分发、会话生命周期辅助
+│   ├── runtime/           # module: forge-runtime —— runtime adapter 层
+│   │   ├── go.mod
+│   │   ├── contracts.go   #   Runtime 统一接口
+│   │   ├── registry.go    #   runtime 注册表（可插拔）
+│   │   ├── opencode/      #   opencode adapter
+│   │   └── deepseekharness/  # deepseek-harness adapter
+│   ├── manager/           # module: forge-manager —— Agent 生命周期 + Registry
+│   │   ├── go.mod
+│   │   ├── agent.go
+│   │   ├── lifecycle.go
+│   │   └── session.go
+│   ├── server/            # module: forge-server —— 控制面 API
+│   │   ├── go.mod
+│   │   ├── http.go        #   REST 端点
+│   │   └── ws.go          #   WebSocket 流式推送
+│   └── infra/             # module: forge-infra —— 基础设施
+│       ├── go.mod
+│       ├── config/
+│       ├── store/         #   SQLite
 │       └── logger/
-├── web/                    # Vite + React 面板
-│   ├── embed.go            #   go:embed 打包前端产物进二进制
-│   └── src/
-│       ├── pages/          #   Agents / Sessions / Runtimes
-│       ├── api/            #   REST + WS client
-│       └── ...
-├── docs/                   # 设计文档
+│
+├── frontend/              # 前端 monorepo（pnpm workspace）
+│   ├── pnpm-workspace.yaml
+│   ├── package.json
+│   ├── apps/
+│   │   └── panel/         #   主面板（Vite + React + TS）
+│   │       ├── dist/      #   构建产物，供后端 go:embed 嵌入
+│   │       └── src/
+│   │           ├── pages/ #   Agents / Sessions / Runtimes
+│   │           └── api/
+│   └── packages/          #   共享前端包（api client、ui 等）
+│
+├── docs/
 │   └── architect-design.md # 本文件
-├── LICENSE                 # MIT（已就位）
-├── README.md               # 中英简介（已就位）
-├── go.mod
-└── Makefile                # make server / make web / make all
+├── LICENSE                # MIT（已就位）
+└── README.md              # 中英简介（已就位）
 ```
+
+### 前后端交付关系
+`frontend/apps/panel` 构建产物（`dist/`）由 Go 侧通过 `go:embed` 打入最终二进制，产出单文件自托管底座
+（参照 OpenBee 的 `web/embed.go` 模式）。二者通过 **REST + WebSocket** 通信，不共享代码/依赖。
 
 ## 6. 模块职责与数据流
 
@@ -160,8 +185,8 @@ ark-forge/
 - REST：管理类操作（列/创建 Agent、列 Runtime、启停、列会话）。
 - WebSocket：**流式会话**优先落地——前端发起 prompt，daemon 将 ACP 的 notification（token 块、thought、tool_call、message chunk）实时推给前端。这是首版的第一优先级能力。
 
-### 6.5 `web/` — 面板
-- Sessions 页为主：输入 → WS 流式出结果；Agents 页、Runtimes 页为辅。
+### 6.5 `frontend/` — 前端 monorepo
+- `apps/panel`：Sessions 页为主（输入 → WS 流式出结果）；Agents 页、Runtimes 页为辅。
 
 ## 7. 首版范围（MVP）
 

@@ -3,11 +3,19 @@
 *.exe
 *.test
 *.out
+/forge
+cmd/**/forge
+internal/**/forge
 
-# Node / Web
-web/node_modules/
-web/dist/
-web/.vite/
+# Go workspace
+go.work.sum
+
+# Node / Web (frontend monorepo)
+frontend/node_modules/
+frontend/**/node_modules/
+frontend/**/dist/
+frontend/**/.vite/
+frontend/pnpm-lock.yaml
 
 # Env
 .env

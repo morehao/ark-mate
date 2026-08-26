@@ -1,0 +1,10 @@
+go 1.26
+
+use (
+	./cmd/forge
+	./internal/acl
+	./internal/runtime
+	./internal/manager
+	./internal/server
+	./internal/infra
+)
