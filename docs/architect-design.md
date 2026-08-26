@@ -29,6 +29,24 @@
 | ACP Client 实现 | **引入现有库 `github.com/coder/acp-go-sdk`** | 227★、Coder 官方团队维护、覆盖 client/server 侧 |
 | 交付 | 单二进制（前端经 `go:embed` 嵌入） | 参照 OpenBee |
 
+### 流式输出传输选型（控制面 → 面板）
+流式会话有两段链路，传输选型需分开说明，避免混淆：
+
+- **ACP 层（daemon ↔ agent）**：JSON-RPC over stdio，agent 以 **notification** 流式推送 token/thought/tool_call/message chunk。这层没有 HTTP 语义。
+- **控制面层（daemon ↔ 前端面板）**：把上层的 ACP notification 转发给前端。**主流且首选是 SSE（Server-Sent Events）**，而非 WebSocket。
+
+主流传真：
+
+| 方案 | 场景 | 代表项目 |
+|------|------|----------|
+| **SSE**（`text/event-stream`，HTTP 单向流） | 服务器 → 客户端**单向流式**推送（token 流、事件、消息增量） | **opencode**（`Event` 端点，opencode/architecture.md:337）、**Coze Studio**（SSE 基础设施）；LLM 厂商侧（OpenAI/DeepSeek 等）本就是 SSE 事实标准 |
+| **WebSocket**（全双工） | **双向**交互：命令上行 + 事件下行、协作广播、实时终端 PTY、低延迟密集消息 | **Tutti**（`WS 业务事件流`）、**AionUi**（`WebSocket 对话`） |
+
+**设计决策**：
+- 首版「流式会话」落点取 **SSE**：session/prompt 的结果用 `text/event-stream` 逐块推给面板。理由——这正是 SSE 的设计目标（单向流式、基于 HTTP、天然支持 chunked 与自动重连、对 HTTP/2/代理友好），也是 opencode/Coze/LLM 厂商的主流路径。
+- WebSocket 不做首版标配，仅在出现**双向**需求时引入（如未来 PTY 实时终端、协作广播、控制信号上行），对齐 Tutti/AionUi 的使用场景。
+- 可在 `server` 内预留统一的事件订阅抽象，SSE 与（未来的）WS 都作为其输出适配器。
+
 ### ACP 传输现状（为何首版只做 stdio）
 ACP 官方 v1 传输：
 
@@ -42,13 +60,13 @@ opencode 与 deepseek-harness 都是本地子进程形态，走 stdio 是零摩�
 ## 3. 技术栈选型
 
 ### 后端
-- Go 1.26+，标准库为主；HTTP 用 `net/http`（控制面 REST + WebSocket，首版负载小，暂不引入重型 Web 框架）。
+- Go 1.26+，标准库为主；HTTP 用 `net/http`（控制面 REST + SSE 流式推送，首版负载小，暂不引入重型 Web 框架）。
 - ACP Client：`github.com/coder/acp-go-sdk`。
 - 持久化：`database/sql` + SQLite（agents、sessions、runtime 配置）；无外部中间件，契合自托管底座。
 
 ### 前端
 - Vite + React + TS；UI 轻量（不绑定重型组件库）。
-- 实时会话通过 WebSocket 消费后端转发的 ACP notification 流。
+- 实时会话通过 SSE 消费后端转发的 ACP notification 流。
 
 ## 4. 架构总览
 
@@ -76,7 +94,7 @@ graph TB
         HPROC["deepseek-harness (ACP server / stdio)"]
     end
 
-    FE -->|REST/WS| API
+    FE -->|REST + SSE| API
     API --> MGR
     MGR --> ACL
     ACL --> O
@@ -125,7 +143,7 @@ ark-forge/
 │   ├── server/            # module: forge-server —— 控制面 API
 │   │   ├── go.mod
 │   │   ├── http.go        #   REST 端点
-│   │   └── ws.go          #   WebSocket 流式推送
+│   │   └── sse.go         #   SSE 流式推送（session/prompt 事件流）
 │   └── infra/             # module: forge-infra —— 基础设施
 │       ├── go.mod
 │       ├── config/
@@ -151,7 +169,7 @@ ark-forge/
 
 ### 前后端交付关系
 `frontend/apps/panel` 构建产物（`dist/`）由 Go 侧通过 `go:embed` 打入最终二进制，产出单文件自托管底座
-（参照 OpenBee 的 `web/embed.go` 模式）。二者通过 **REST + WebSocket** 通信，不共享代码/依赖。
+（参照 OpenBee 的 `web/embed.go` 模式）。二者通过 **REST + SSE** 通信，不共享代码/依赖。
 
 ## 6. 模块职责与数据流
 
@@ -183,10 +201,10 @@ ark-forge/
 
 ### 6.4 `internal/server` — 控制面 API
 - REST：管理类操作（列/创建 Agent、列 Runtime、启停、列会话）。
-- WebSocket：**流式会话**优先落地——前端发起 prompt，daemon 将 ACP 的 notification（token 块、thought、tool_call、message chunk）实时推给前端。这是首版的第一优先级能力。
+- SSE：**流式会话**优先落地——前端发起 prompt，daemon 将 ACP 的 notification（token 块、thought、tool_call、message chunk）以 `text/event-stream` 实时推给前端。这是首版的第一优先级能力。
 
 ### 6.5 `frontend/` — 前端 monorepo
-- `apps/panel`：Sessions 页为主（输入 → WS 流式出结果）；Agents 页、Runtimes 页为辅。
+- `apps/panel`：Sessions 页为主（输入 → SSE 流式出结果）；Agents 页、Runtimes 页为辅。
 
 ## 7. 首版范围（MVP）
 
@@ -203,7 +221,7 @@ ark-forge/
 - `go build ./...` && `go vet ./...` && `go test ./...`
 - `cd web && pnpm build`
 - `make all`：产出单二进制，`go run ./cmd/forge` 拉起。
-- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 WS 流式回包；再切换 deepseek-harness 验证跨 runtime 可切换。
+- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness 验证跨 runtime 可切换。
 
 ## 9. 待办 / 风险
 
