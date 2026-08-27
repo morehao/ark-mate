@@ -74,7 +74,8 @@ opencode 与 deepseek-harness 都是本地子进程形态，走 stdio 是零摩�
 ## 3. 技术栈选型
 
 ### 后端
-- Go 1.26+，标准库为主；HTTP 用 `net/http`（控制面 REST + SSE 流式推送，首版负载小，暂不引入重型 Web 框架）。
+- Go 1.26+；HTTP 用 **Gin**（`github.com/gin-gonic/gin`）承载控制面 REST + SSE。**按需引用 `github.com/morehao/golib`**（作者自研库）：`glog`（zap 日志）、`biz/gcontext/gincontext`（`Success/Fail` 响应封装 + requestID）、`biz/gserver/ginserver`（版本化路由分组 `/{version}/{appName}`，自动挂 otelgin + AccessLog）。golib 的 go.mod 虽整体 require AWS/ES/Redis/GORM/OTel，但 Go 仅编译实际 import 的子包，不影响运行时加载。
+- 状态：`internal/server` 为起始模块，其余各层（acl/runtime/manager/infra）为占位骨架，后续按 §5 落地。
 - ACP Client：`github.com/coder/acp-go-sdk`。
 - 持久化：`database/sql` + SQLite（agents、sessions、runtime 配置）；无外部中间件，契合自托管底座。
 
@@ -93,7 +94,7 @@ graph TB
     end
 
     subgraph BE["Go daemon (cmd/forge)"]
-        API["server/http + sse 控制面 API"]
+        API["server: gin router+handler + eventbus (REST + SSE)"]
         MGR["manager (agent 生命周期/会话编排)"]
         ACL["acl (ACP client: transport + 状态机)"]
         subgraph RT["runtime adapters"]
@@ -123,7 +124,7 @@ graph TB
 本项目采用**双层 monorepo**：
 
 - **Go 侧**：用 `go.work`（Workspace）管理多个独立 Go module，`internal/` 内每一层（acl / runtime / manager /
-  server / infra）各自 `go.mod`，方便独立的 `acl` 等层对外复用。
+  server / infra）各自 `go.mod`，方便独立的 `acl` 等层对外复用。**workspace 内模块互相用 `import` 时不必在 `go.mod` 里互相 `require`**（否则会尝试把 `v0.0.0` 当远程模块解析而失败），仅由 `go.work` 的 `use()` 联合构建即可——此为 go-ark-template 验证过的可行模式；只有第三方依赖（如 `gin`）才写入各自 `go.mod`。
 - **前端侧**：`frontend/` 内部是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合。
 
 ```
@@ -154,10 +155,20 @@ ark-forge/
 │   │   ├── agent.go
 │   │   ├── lifecycle.go
 │   │   └── session.go
-│   ├── server/            # module: forge-server —— 控制面 API
+│   ├── server/            # module: forge-server —— 控制面 API（Gin + golib 按需引用）
 │   │   ├── go.mod
-│   │   ├── http.go        #   REST 端点
-│   │   └── sse.go         #   SSE 流式推送（session/prompt 事件流）
+│   │   ├── server.go      #   Server 生命周期（Start/Stop），组装 handler+router
+│   │   ├── router/        #   路由注册：ginserver 版本分组 /{v1}/{forge}，挂 REST+SSE
+│   │   │   └── router.go
+│   │   ├── handler/       #   各功能 handler（响应用 gincontext.Success/Fail）
+│   │   │   ├── handler.go #   Service 接口 + Handler 聚合（注入 eventbus）
+│   │   │   ├── agent.go   #   agents 列表
+│   │   │   ├── session.go #   sessions 列表
+│   │   │   ├── runtime.go #   runtimes 列表
+│   │   │   ├── sse.go     #   SSE 薄适配层：订阅 eventbus → 转发帧 + 编排帧
+│   │   │   └── mock.go    #   mock Service 占位（manager 实现前可独立冒烟）
+│   │   └── eventbus/      #   会话事件总线（单一通道 + after 续传，见 §2）
+│   │       └── bus.go     #   Publish/Subscribe/Unsubscribe/LastSeq + history 缓冲
 │   └── infra/             # module: forge-infra —— 基础设施
 │       ├── go.mod
 │       ├── config/
@@ -233,10 +244,13 @@ ark-forge/
 - **会话事件流走「单一通道 + type 判别」**：manager 产出的会话事件（token delta、thought、tool_call、message chunk、终态）统一走一条**进程内事件流**（`internal/acl` 订阅 ACP notification → 归一化 → manager 事件），由 `internal/server` 以单 SSE 通道转发，前端按 `type` 判别处理（见 §2「SSE 会话事件流范式」）；流式增量 live-only、终态持久化，支持 `after` 续传。
 
 ### 6.4 `internal/server` — 控制面 API
+- 用 **Gin + golib按需引用**组织：`router/` 用 `ginserver` 版本分组（`/{v1}/{forge}`，自动挂 otelgin + AccessLog）；`handler/` 按功能实现各处理函数，响应封装统一用 `gincontext` 的 `Success/Fail`（`{code, requestID, msg, data}`）。
 - REST：管理类操作（列/创建 Agent、列 Runtime、启停、列会话）。
-- SSE：**流式会话**优先落地——前端发起 prompt，daemon 将 ACP 的 notification（token 块、thought、tool_call、message chunk）以 `text/event-stream` 实时推给前端。这是首版的第一优先级能力。
-- **单一 SSE 通道 + 编排帧**：会话事件流沿用 §2 范式——单端点、`type` 判别 union、`server.connected`/`server.heartbeat`/`server.instance.disposed` 编排帧。
-- **断线续传（可选）**：事件先写进 `processEventStream` 缓冲（首版内存实现），前端重连后以 `after=seq` 续拉历史再继续 live。
+- **SSE：事件总线 + 薄适配层（合理性优先的重新设计）**。会话事件不内联在 controller，而是抽独立 **`eventbus`** 层（单一事件通道）承载：
+  - `eventbus.Bus`：`Publish(type, aggID, version, payload)` 分配全局递增 `seq`、写入内存历史缓冲、广播给订阅者；`Subscribe(after)` **先按 `seq > after` 同步回放历史、再收 live 增量**；`Unsubscribe` 释放；`LastSeq` 供 heartbeat 标注位置。
+  - `handler/sse.go` 只做**协议薄适配**：订阅 `eventbus` → 把每个事件转成标准 `text/event-stream` 帧（`id: <seq>` + `event: <type>` + `data: {type,seq,agg_id,version,payload}`），叠加 `server.connected`/`server.heartbeat` 编排帧；`after` 从 query 或 `Last-Event-ID` 读取实现断线续传。业务与协议解耦：后续 manager 把归一化的 ACP notification 事件 `Publish` 进总线即可，SSE 无需感知域变化。
+- **单一 SSE 通道 + 编排帧**：单端点 `/v1/forge/sse/stream`、`type` 判别 union、`server.connected`/`server.heartbeat` 编排帧（`server.instance.disposed` 预留）。
+- **断线续传**：`eventbus` 的 history 缓冲即首版内存缓冲，前端重连带 `after=seq` 续拉历史再继续 live。
 
 ### 6.5 `frontend/` — 前端 monorepo
 - `apps/panel`：Sessions 页为主（输入 → SSE 流式出结果）；Agents 页、Runtimes 页为辅。
