@@ -4,18 +4,23 @@
 *.test
 *.out
 /forge
-cmd/**/forge
-internal/**/forge
+# 在 main module 目录里误跑 `go build` 产生的同名二进制。
+# 注意不要写成 backend/**/forge：该模式会连同 backend/cmd/forge 目录本身一起命中，
+# 导致日后该目录新增的源码文件被静默忽略（只能 git add -f 强制入库）。
+backend/cmd/forge/forge
 
-# Go workspace
+# Go workspace（当前单 module 无 go.work；未来抽独立 module 联调时仍生效）
 go.work.sum
+
+# Go: 前端产物 embed 宿主副本（真源在 frontend/，make web 刷新）
+backend/internal/web/dist/
 
 # Node / Web (frontend monorepo)
 frontend/node_modules/
 frontend/**/node_modules/
 frontend/**/dist/
 frontend/**/.vite/
-frontend/pnpm-lock.yaml
+# 注意：pnpm-lock.yaml 应入库（应用锁版本保证可复现安装），故不在此忽略。
 
 # Env
 .env

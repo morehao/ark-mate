@@ -21,6 +21,7 @@
 | 决策 | 结论 | 说明 |
 |------|------|------|
 | 仓库结构 | **monorepo** | 前后端在同一仓库 |
+| 后端 module 粒度 | **单 module**（`backend/`，`github.com/morehao/ark-forge`）+ `internal/` 分层目录 | 抽离公共逻辑用「包」即可，无需 module；层目录保留 seam，待出现跨项目复用/独立版本化需求时再按层抽独立 module/仓（演进见 §5） |
 | 后端 | **Go** | daemon / 控制面 / ACP Host |
 | 前端 | **TypeScript + Vite(React)** | 面板 |
 | ACP 角色 | **Host（Client 侧）** | 拉起并连接 Agent 为 ACP server |
@@ -28,7 +29,7 @@
 | 传输 | **stdio**（本地子进程） | 两 runtime 均原生 ACP server over stdio |
 | ACP Client 实现 | **引入现有库 `github.com/coder/acp-go-sdk`** | 纯 Go、覆盖 client/server 侧；`internal/acl` 封装它并抽象兜底（见 §9） |
 | Runtime 技术栈 | opencode（TS/Effect）、deepseek-harness（TS/Node） | 均为 Node 系；Go 后端**只拉其 ACP 子进程**，经 stdio 通信，**无语言/库耦合** |
-| 交付 | 单二进制（前端经 `go:embed` 嵌入） | 前端构建产物经 `go:embed` 打入 Go 二进制 |
+| 交付 | 单二进制（前端经 `go:embed` 嵌入）；前端产物亦可独立部署 | `make web` 将前端构建产物拷入 `backend/internal/web/dist`，`-tags release` 下经 `//go:embed` 打入 Go 二进制；独立部署则直接托管 `frontend/apps/panel/dist` |
 
 ### 流式输出传输选型（控制面 → 面板）
 流式会话有两段链路，传输选型需分开说明，避免混淆：
@@ -75,7 +76,7 @@ opencode 与 deepseek-harness 都是本地子进程形态，走 stdio 是零摩�
 
 ### 后端
 - Go 1.26+；HTTP 用 **Gin**（`github.com/gin-gonic/gin`）承载控制面 REST + SSE。**按需引用 `github.com/morehao/golib`**（作者自研库）：`glog`（zap 日志）、`biz/gcontext/gincontext`（`Success/Fail` 响应封装 + requestID）、`biz/gserver/ginserver`（版本化路由分组 `/{version}/{appName}`，自动挂 otelgin + AccessLog）。golib 的 go.mod 虽整体 require AWS/ES/Redis/GORM/OTel，但 Go 仅编译实际 import 的子包，不影响运行时加载。
-- 状态：`internal/server` 为起始模块，其余各层（acl/runtime/manager/infra）为占位骨架，后续按 §5 落地。
+- 状态：`internal/server` 为起始层（mock 冒烟可用），其余各层（acl/runtime/manager/infra）为占位骨架，`internal/web` 为 embed 宿主骨架，后续按 §5 落地。
 - ACP Client：`github.com/coder/acp-go-sdk`。
 - 持久化：`database/sql` + SQLite（agents、sessions、runtime 配置）；无外部中间件，契合自托管底座。
 
@@ -119,88 +120,110 @@ graph TB
     MGR --> INFRA
 ```
 
-## 5. 目录结构（双层 monorepo）
+## 5. 目录结构（同仓：backend/ 单 Go module + frontend/ pnpm workspace）
 
-本项目采用**双层 monorepo**：
+本项目采用**前后端平级 monorepo**（`backend/` 与 `frontend/` 同仓平级）：
 
-- **Go 侧**：用 `go.work`（Workspace）管理多个独立 Go module，`internal/` 内每一层（acl / runtime / manager /
-  server / infra）各自 `go.mod`，方便独立的 `acl` 等层对外复用。**workspace 内模块互相用 `import` 时不必在 `go.mod` 里互相 `require`**（否则会尝试把 `v0.0.0` 当远程模块解析而失败），仅由 `go.work` 的 `use()` 联合构建即可——此为 go-ark-template 验证过的可行模式；只有第三方依赖（如 `gin`）才写入各自 `go.mod`。
-- **前端侧**：`frontend/` 内部是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合。
+- **后端侧**：单 module `github.com/morehao/ark-forge`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
+  go.mod/go.sum），`internal/` 下每层（acl / runtime / manager / server / infra / web）是一个**普通包目录**；
+  Go 的 `internal/` 可见性保证仅本仓可 import，形成天然的分层边界，跨层 import 方向靠目录约定保证。
+- **前端侧**：`frontend/` 是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合；因其产物
+  可单独部署/运行，可视作仓库内自足的独立子项目（双宿主说明见文末「前后端交付关系」）。
+
+**演进：保留多 module / 独立仓可能性**。抽离公共逻辑用「包」就够（单 module 内建共享包即可被各层复用）；
+module / 独立仓解决的是**跨项目共享 + 独立版本/发布**。`internal/` 的层目录即 seam——当某层出现以下任一触发
+条件时，将其抽为独立 Go module；若需对外复用则移出 `internal/`（对齐 golib / ark-iam 惯例做独立仓），
+本地多仓联调时再在仓库根临时加 `go.work`：
+
+- 触发 ①：某层要被**本仓之外的项目 import**（如 `acl` 作为 ACP Host 库对外发布）；
+- 触发 ②：某层需要**独立版本/发布节奏**（独立 tag / 独立 CI）；
+- 触发 ③：某层需要**依赖隔离**（如对外库不希望把 gin/golib 的依赖树带给消费者）。
+
+当前阶段（代码总量小、各层多为占位）不具备任一触发条件，故收敛单 module，避免为空壳层付逐 module
+构建/tidy 的持续摩擦；需要约束跨层 import 方向时，用 golangci-lint 的 `depguard` 在 CI 强制即可。
 
 ```
 ark-forge/
-├── go.work                # Go workspace：union(acl, runtime, manager, server, infra, cmd/forge)
-├── Makefile               # make server / make web / make all
+├── Makefile               # 根编排入口：make web / make server / make build|vet|test / make all
+├── docs/
+│   └── architect-design.md # 本文件
+├── LICENSE                # MIT（已就位）
+├── README.md              # 中英简介（已就位）
 │
-├── cmd/
-│   ├── forge/             # module: forge —— daemon 入口，依赖其余各 module
-│   │   ├── main.go
-│   │   └── go.mod
-│   └── forge-cli/         # module: forge-cli（可选、二期）
+├── backend/               # 后端：单 Go module（github.com/morehao/ark-forge）
+│   ├── go.mod             #   依赖统一收敛于此（gin/golib；单一 go.sum）
+│   ├── go.sum
+│   ├── cmd/
+│   │   ├── forge/         #   daemon 入口（main）
+│   │   │   └── main.go
+│   │   └── forge-cli/     #   可选、二期
+│   │
+│   └── internal/          # 分层目录即包边界（Go internal：仅本仓可 import；目录即未来抽离的 seam）
+│       ├── acl/           #   ACP Host 接入层（封装 coder/acp-go-sdk；候选抽离层，见上文「演进」）
+│       │   ├── transport.go   #   Transport 抽象（首版 StdioTransport）
+│       │   ├── client.go      #   ACP client 句柄（封装 coder/acp-go-sdk）
+│       │   └── request.go     #   请求/通知分发、会话生命周期辅助
+│       ├── runtime/       #   runtime adapter 层
+│       │   ├── contracts.go   #   Runtime 统一接口
+│       │   ├── registry.go    #   runtime 注册表（可插拔）
+│       │   ├── opencode/      #   opencode adapter
+│       │   └── deepseekharness/  # deepseek-harness adapter
+│       ├── manager/       #   Agent 生命周期 + Registry
+│       │   ├── agent.go
+│       │   ├── lifecycle.go
+│       │   └── session.go
+│       ├── server/        #   控制面 API（Gin + golib 按需引用）
+│       │   ├── server.go      #   Server 生命周期（Start/Stop），组装 handler+router
+│       │   ├── router/        #   路由注册：ginserver 版本分组 /{v1}/{forge}，挂 REST+SSE
+│       │   │   └── router.go
+│       │   ├── handler/       #   各功能 handler（响应用 gincontext.Success/Fail）
+│       │   │   ├── handler.go #   Service 接口 + Handler 聚合（注入 eventbus）
+│       │   │   ├── agent.go   #   agents 列表
+│       │   │   ├── session.go #   sessions 列表
+│       │   │   ├── runtime.go #   runtimes 列表
+│       │   │   ├── sse.go     #   SSE 薄适配层：订阅 eventbus → 转发帧 + 编排帧
+│       │   │   └── mock.go    #   mock Service 占位（manager 实现前可独立冒烟）
+│       │   └── eventbus/      #   会话事件总线（单一通道 + after 续传，见 §2）
+│       │       └── bus.go     #   Publish/Subscribe/Unsubscribe/LastSeq + history 缓冲
+│       ├── infra/         #   基础设施
+│       │   ├── config/
+│       │   ├── store/     #   SQLite
+│       │   └── logger/
+│       └── web/           #   前端产物 go:embed 宿主（release 编译）
+│           ├── doc.go     #   包说明：产物来源 / 编译形态 / 三种运行形态
+│           ├── web.go     #   //go:build release；//go:embed dist
+│           └── dist/      #   make web 从 frontend 拷贝的产物副本（不入库，见 .gitignore）
 │
-├── internal/              # 每层一个独立 Go module（业务模块）
-│   ├── acl/               # module: forge-acl —— ACP Host 接入层（可独立复用）
-│   │   ├── go.mod
-│   │   ├── transport.go   #   Transport 抽象（首版 StdioTransport）
-│   │   ├── client.go      #   ACP client 句柄（封装 coder/acp-go-sdk）
-│   │   └── request.go     #   请求/通知分发、会话生命周期辅助
-│   ├── runtime/           # module: forge-runtime —— runtime adapter 层
-│   │   ├── go.mod
-│   │   ├── contracts.go   #   Runtime 统一接口
-│   │   ├── registry.go    #   runtime 注册表（可插拔）
-│   │   ├── opencode/      #   opencode adapter
-│   │   └── deepseekharness/  # deepseek-harness adapter
-│   ├── manager/           # module: forge-manager —— Agent 生命周期 + Registry
-│   │   ├── go.mod
-│   │   ├── agent.go
-│   │   ├── lifecycle.go
-│   │   └── session.go
-│   ├── server/            # module: forge-server —— 控制面 API（Gin + golib 按需引用）
-│   │   ├── go.mod
-│   │   ├── server.go      #   Server 生命周期（Start/Stop），组装 handler+router
-│   │   ├── router/        #   路由注册：ginserver 版本分组 /{v1}/{forge}，挂 REST+SSE
-│   │   │   └── router.go
-│   │   ├── handler/       #   各功能 handler（响应用 gincontext.Success/Fail）
-│   │   │   ├── handler.go #   Service 接口 + Handler 聚合（注入 eventbus）
-│   │   │   ├── agent.go   #   agents 列表
-│   │   │   ├── session.go #   sessions 列表
-│   │   │   ├── runtime.go #   runtimes 列表
-│   │   │   ├── sse.go     #   SSE 薄适配层：订阅 eventbus → 转发帧 + 编排帧
-│   │   │   └── mock.go    #   mock Service 占位（manager 实现前可独立冒烟）
-│   │   └── eventbus/      #   会话事件总线（单一通道 + after 续传，见 §2）
-│   │       └── bus.go     #   Publish/Subscribe/Unsubscribe/LastSeq + history 缓冲
-│   └── infra/             # module: forge-infra —— 基础设施
-│       ├── go.mod
-│       ├── config/
-│       ├── store/         #   SQLite
-│       └── logger/
-│
-├── frontend/              # 前端 monorepo（pnpm workspace）
+├── frontend/              # 前端 monorepo（pnpm workspace；可独立部署/单独运行）
 │   ├── pnpm-workspace.yaml
 │   ├── package.json
 │   ├── apps/
 │   │   └── panel/         #   主面板（Vite + React + TS）
-│   │       ├── dist/      #   构建产物，供后端 go:embed 嵌入
+│   │       ├── dist/      #   构建产物（唯一真源）：供独立部署；make web 拷入 backend/internal/web/dist
 │   │       └── src/
 │   │           ├── pages/ #   Agents / Sessions / Runtimes
 │   │           └── api/
 │   └── packages/          #   共享前端包（api client、ui 等）
-│
-├── docs/
-│   └── architect-design.md # 本文件
-├── LICENSE                # MIT（已就位）
-└── README.md              # 中英简介（已就位）
 ```
 
-### 前后端交付关系
-`frontend/apps/panel` 构建产物（`dist/`）由 Go 侧通过 `go:embed` 打入最终二进制，产出单文件自托管底座。二者通过 **REST + SSE** 通信，不共享代码/依赖。
+### 前后端交付关系（embed + 独立部署双宿主）
+`frontend/apps/panel` 构建产物（`dist/`）是**唯一真源**，支持两种宿主：
+
+1. **单二进制（默认交付）**：`make web` 把 `dist/` 拷入 `backend/internal/web/dist`（该副本不入库），
+   `make all` 以 `-tags release` 编译，`web` 包经 `//go:embed dist` 把前端打入最终二进制，产出根目录 `./forge`。
+2. **前端独立部署/运行**：直接托管 `frontend/apps/panel/dist`（nginx 等任意静态宿主，配 SPA fallback）；
+   开发期跑 `pnpm dev` + vite proxy（`/v1 → :8099`）联调。独立形态下前端 API base 可配置（`VITE_API_BASE`），
+   跨域时后端按需开 CORS。
+
+默认（不带 release tag）的 `go build` 不编译 `web` 包，后端可独立起服冒烟，不受前端产物有无影响。
+二者通过 **REST + SSE** 通信，不共享代码/依赖。
 
 ## 6. 模块职责与数据流
 
 ### 6.1 `internal/acl` — ACP Host 接入层
 - `Transport` 接口：`Start(ctx) `、`Send`、`Read`、`Close`。首版仅 `StdioTransport`：拉起子进程，接入其 stdin/stdout（`\n` 分帧），stderr 透出为日志。
 - `Client`：封装 `coder/acp-go-sdk` 的 client API，提供 `Initialize`、`NewSession`、`Prompt`、`Cancel`、`Close` 等高级方法；内部完成 ACP v1 版本协商与能力断言。
-- 依赖方向：`internal/runtime` → 使用 `acl.Client`；`acl` 不依赖 `runtime`，保持可独立复用。
+- 依赖方向：`internal/runtime` → 使用 `acl.Client`；`acl` 不依赖 `runtime`，保持单向依赖与接口自洽——对外复用时按 §5 演进将其抽为独立 module/仓。
 
 ### 6.2 `internal/runtime` — Runtime adapter
 - `Contracts` 定义统一接口，例如：
@@ -272,9 +295,10 @@ ark-forge/
 
 ## 8. 验证方式（实现后执行）
 
-- `go build ./...` && `go vet ./...` && `go test ./...`
-- `cd web && pnpm build`
-- `make all`：产出单二进制，`go run ./cmd/forge` 拉起。
+- `make build` && `make vet` && `make test`：即 `cd backend && go build/vet/test ./...`（单 module，覆盖全部包）。
+- `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/internal/web/dist`。
+- `make server`：`go run ./cmd/forge` 拉起后端（开发联调，不起前端）。
+- `make all`：产出仓库根单二进制 `./forge`（`-tags release` 内嵌前端）；`./forge` 拉起后冒烟。
 - 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
 
 ## 9. 待办 / 风险

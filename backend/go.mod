@@ -1,4 +1,4 @@
-module github.com/morehao/ark-forge/internal/server
+module github.com/morehao/ark-forge
 
 go 1.26.1
 
