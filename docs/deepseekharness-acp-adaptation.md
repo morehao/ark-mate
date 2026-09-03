@@ -23,6 +23,9 @@
 
 - 安装/运行：`npx @deepseek-ai/dsh --profile acp`；`web/headless/sdk/sdk-minimal/acp`
   五个 profile 首次使用时从内置模板自动初始化到 `$DSH_HOME/profiles/`。
+  **版本注意（实测）**：npm `latest`（0.1.1-rc.2）安装包**不含 acp profile 模板**，直接跑会报
+  `profile "acp" does not exist`；请用 `@deepseek-ai/dsh@next`（0.1.2-rc.1，与本文档源码快照对应）
+  或更新版本，或随仓库源码构建。
 - stdout 只承载 NDJSON ACP 帧（诊断走 stderr）；stdin EOF、ACP 连接关闭、SIGINT/SIGTERM
   均触发 bounded shutdown（先 drain agent 再退出）。
 - `dsh --profile acp --help` 打印帮助即退出，不占用 stdio。
@@ -48,9 +51,10 @@
    面板/M1 的 resume 入口按 `Client.Capabilities()` 裁剪（opencode 多 load/resume/fork，harness 无 load/fork）。
 3. `--config <cordis.yml>` 形态废弃：config 归属 `$DSH_HOME/profiles/acp`（或 `--patch` 覆盖），
    不再由 ark-forge 传路径；若需自定义 profile 行，走 `dsh plugin --profile acp add/...` 或追加 `--patch`。
-4. harness 冒烟（本机验证）：确保 `dsh` 在 PATH（或 `npx @deepseek-ai/dsh`），导出 `DEEPSEEK_API_KEY`，
-   运行 `forge demo --runtime deepseekharness --prompt "..." --allow-all`（cwd 建议绝对路径）；
-   预期 initialize 无鉴权直通 → session/new → prompt 流 → turn.ended。
+4. harness 冒烟（本机实测记录，2026-09-03）：`dsh@next`（0.1.2-rc.1）经 npx 缓存
+   `~/.npm/_npx/<hash>/node_modules/.bin` 注入 PATH 后，`forge demo --runtime deepseekharness
+   --prompt "请只回复两个字：明白"` 跑通：`session.created → thought/message 流 → turn.ended
+   (end_turn)`，会话 id 形如 UUID（645fb04e-…）。agent=agent-deepseekharness。
 
 ## 引用文件（外部仓库）
 

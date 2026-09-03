@@ -48,4 +48,7 @@ var Caps = DeclaredCapabilities{
 //  4. 需绝对路径 cwd 且先校验；provider/model 在 profile 行配置（默认 deepseek-official/deepseek-v4-flash），
 //     DEEPSEEK_API_KEY 由 provider 从其进程环境读取（无需额外注入，可随子进程环境透传）。
 //  5. 接口迭代快，可能 breaking（README 明示开发者预览期）。
-const Notes = "ACP server 由统一 dsh 启动器提供（dsh --profile acp）；无鉴权；会话可持久化（list/resume/close 跨进程）；不支持 load/fork/删除/附加目录/终端/客户端 FS；DEEPSEEK_API_KEY 走子进程环境透传；迭代快可能 breaking"
+//  6. 版本要求：须含 acp profile 模板的 dsh（实测 npm latest=0.1.1-rc.2 缺 acp profile，
+//     报 "profile \"acp\" does not exist"；用 `@deepseek-ai/dsh@next` 0.1.2-rc.1 或更新，
+//     或随 deepseek-harness 仓库源码构建）。
+const Notes = "ACP server 由统一 dsh 启动器提供（dsh --profile acp）；无鉴权；会话可持久化（list/resume/close 跨进程）；不支持 load/fork/删除/附加目录/终端/客户端 FS；DEEPSEEK_API_KEY 走子进程环境透传；需含 acp profile 模板的 dsh（npm latest 0.1.1-rc.2 缺失，用 @next 0.1.2-rc.1+）；迭代快可能 breaking"
