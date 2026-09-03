@@ -31,3 +31,6 @@ frontend/**/.vite/
 .DS_Store
 .idea/
 .vscode/
+
+# Local Go build/module cache (sandbox builds only)
+.cache/
