@@ -666,6 +666,15 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 >   runtime version），与 sessions 列表同页。
 > 至此 M1「要做」1–5 全部落地（settings/agents 页、能力标记裁剪入口属 M2 #2/#5，见下节）。
 
+> **前端形态补记（2026-09-04，提交见 feat(panel)）**：§4.8 路由骨架补齐——react-router 多页
+> `/sessions`（主视图，`/sessions/:id` 直达激活/刷新续看）、`/agents`、`/runtimes` 只读页、
+> `/settings` M2 占位；store 提升为 context Provider（单实例 transport 跨页保活，且 transport
+> 惰性实例化修复「子组件 effect 先于父组件导致冷加载丢 attach」）；reconnecting 横幅（WS 非 open
+> 可见，重连按水位续传）。**浏览器验收（真实 Chrome headless 驱动 release 单二进制）**：新建会话
+> dsh 流式文本→turn.ended、composer 多轮回显（完成标记 1→2）、刷新续看、cancel 触达终态、
+> /agents·/runtimes·/settings 页、新 tab 冷启动直达 /sessions/:id——全过，无页面错误
+> （脚本 /tmp/pbtest/panel-browser-check.mjs 与 focus-multiturn.mjs）。
+
 ### M2 — 可扩展底座（不写代码接入第三个 ACP agent）
 
 **目标**：平台化第一步——Agent 定义成为一等可管理资源；runtime 接入成本从「写 Go adapter」降到「配置」。

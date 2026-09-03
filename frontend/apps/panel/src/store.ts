@@ -213,11 +213,13 @@ export function reducer(s: PanelState, a: PanelAction): PanelState {
 /** 面板控制器：REST 动作 + WS 订阅接线（transport 常驻，重连/重订阅自处理）。 */
 export function usePanel() {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const transportRef = useRef<WsTransport | null>(null)
   const [wsState, setWsState] = useState<WsState>("idle")
 
-  useEffect(() => {
-    if (transportRef.current) return
+  // transport 惰性创建（render 期实例化，而非 effect 内）：子组件（如 SessionsPage 的
+  // URL 直达激活 effect）先于父组件 effect 执行，若在 effect 里建 transport，
+  // 冷加载 /sessions/:id 时 activate 会拿到空 transport 而丢 attach（刷新续看失败）。
+  const transportRef = useRef<WsTransport | null>(null)
+  if (transportRef.current === null) {
     const t = new WsTransport(
       (f) => {
         // 水位推进（供重连续传）
@@ -230,8 +232,11 @@ export function usePanel() {
       },
     )
     transportRef.current = t
+  }
+  // 卸载收尾（StrictMode 下 dev 双挂载：第二次挂载会重建；生产单次）
+  useEffect(() => {
     return () => {
-      t.close()
+      transportRef.current?.close()
       transportRef.current = null
     }
   }, [])
@@ -292,9 +297,9 @@ export function usePanel() {
   )
 
   /** 新建会话：POST /sessions（首轮即后台跑）→ attach（since=event_seq 续传首轮）→ 高亮。
-   *  本地先落一条用户气泡（echo 事件 seq 与水位相等，重放会跳过它）。 */
+   *  本地先落一条用户气泡（echo 事件 seq 与水位相等，重放会跳过它）。返回新会话 id（供路由跳转）。 */
   const createAndRun = useCallback(
-    async (agentId: string, prompt: string) => {
+    async (agentId: string, prompt: string): Promise<string | undefined> => {
       try {
         const resp = await createSession(agentId, prompt)
         dispatch({ type: "resetView", id: resp.id })
@@ -302,8 +307,10 @@ export function usePanel() {
         dispatch({ type: "markStreaming", id: resp.id })
         activate(resp.id, resp.event_seq)
         void refreshSessions()
+        return resp.id
       } catch (err) {
         showToast(asApiError(err).msg)
+        return undefined
       }
     },
     [activate, refreshSessions, showToast],

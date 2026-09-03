@@ -10,7 +10,7 @@
 - **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /sessions`（指定 agent + prompt 后台起真实会话）、`GET /sessions/:id/history`（事件回放分页）、`POST /sessions/:id/prompt`（同会话多轮）、`POST /sessions/:id/cancel`。
 - **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；传输层 `github.com/coder/websocket`。
 - **会话 wire transcript**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写），daemon 重启后仍是可续看/调试/未来会话导入的原始事实源；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`。
-- **前端面板**：新建会话（选 agent、发首轮 prompt）、会话列表、流式渲染（消息/思考/工具卡）、composer 追加、取消、断线自动重连（浏览器原生 WebSocket）；左侧附 Agents/Runtimes 只读状态列表。
+- **前端面板**（react-router 多页：`/sessions` 会话列表/详情、`/agents`、`/runtimes` 只读页、`/settings` M2 占位）：新建会话（选 agent、发首轮 prompt）、会话列表、流式渲染（消息/思考/工具卡）、composer 追加、取消、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；`/sessions/:id` 直达激活，刷新/冷启动即续看。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
 - **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **无外部依赖进程**：M0/M1 会话与事件均为进程内内存态（重启即失），持久化属 M2 规划。
 
