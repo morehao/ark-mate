@@ -19,20 +19,30 @@ func MountWeb(r *gin.Engine) {
 		// make all 未先拷贝前端产物即带 -tags release 编译：显式失败（见 Makefile web 目标）
 		panic("web dist 未内嵌：请先执行 make web 再 release 编译")
 	}
+	index, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic("web dist 缺少 index.html")
+	}
+	indexResp := func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", index)
+	}
 	hfs := http.FS(sub)
 
-	index := func(c *gin.Context) { c.FileFromFS("index.html", hfs) }
-	r.GET("/", index)
+	r.GET("/", indexResp)
 	r.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
 			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "not found"})
 			return
 		}
 		p := strings.TrimPrefix(c.Request.URL.Path, "/")
-		if _, err := fs.Stat(sub, p); err == nil && p != "" {
+		if p == "index.html" {
+			indexResp(c)
+			return
+		}
+		if _, err := fs.Stat(sub, p); err == nil && p != "" && !strings.HasSuffix(p, "/") {
 			c.FileFromFS(p, hfs)
 			return
 		}
-		index(c)
+		indexResp(c)
 	})
 }
