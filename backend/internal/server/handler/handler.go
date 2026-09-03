@@ -38,28 +38,27 @@ type SessionResp struct {
 	History []eventbus.Event `json:"history,omitempty"`
 }
 
-// Handler 汇总各功能的链式入口（agents / sessions / runtimes / sse）。
+// Handler 汇总各功能的链式入口（agents / sessions / runtimes）。
+// 实时事件通道（WS）经 Bus() 订阅 eventbus，见设计文档 §4.5（M0 落地）。
 type Handler struct {
 	Agent   *AgentHandler
 	Session *SessionHandler
 	Runtime *RuntimeHandler
-	SSE     *SSEHandler
 	bus     *eventbus.Bus
 	svc     Service
 }
 
 // New 组装 Handler，注入领域服务与会话事件总线。
-// bus 承载会话事件流（架构文档 §2），SSE 据此做流式推送。
+// bus 承载归一化会话事件（架构文档 §2 范式），由实时通道（WS，M0 落地）订阅推送。
 func New(svc Service, bus *eventbus.Bus) *Handler {
 	return &Handler{
 		Agent:   &AgentHandler{svc: svc},
 		Session: &SessionHandler{svc: svc},
 		Runtime: &RuntimeHandler{svc: svc},
-		SSE:     &SSEHandler{bus: bus},
 		bus:     bus,
 		svc:     svc,
 	}
 }
 
-// Bus 返回内部事件总线（供后续 manager 注入真实 ACP 事件）。
+// Bus 返回内部事件总线（供实时通道适配器订阅，及后续 manager 注入真实 ACP 事件）。
 func (h *Handler) Bus() *eventbus.Bus { return h.bus }

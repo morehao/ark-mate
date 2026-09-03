@@ -1,7 +1,7 @@
-// Package eventbus 实现进程内会话事件总线（单一事件通道）。
-// 设计对应架构文档 §2「SSE 会话事件流范式」：
+// Package eventbus 实现进程内会话事件总线（单一事件通道，与传输无关）。
+// 设计对应架构文档 §2 实时会话事件流范式（载荷经 WS 通道推送，见设计文档 §4.5）：
 //   - 单一通道 + type 判别 union：事件为带判别字段的 tagged union
-//   - 可重放会话流：全局单调递增 seq，订阅方带 after 游标续传，支持断线重连
+//   - 可重放会话流：全局单调递增 seq，订阅方带 after/since_seq 游标续传，支持断线重连
 //   - 缓冲：事件先落内存历史缓冲，再分发给 live 订阅者，断连后可从 after 续拉
 package eventbus
 
@@ -73,7 +73,7 @@ func (b *Bus) Unsubscribe(sub *Subscription) {
 	b.mu.Unlock()
 }
 
-// LastSeq 返回已发布的最后一个序号（heartbeat 编排帧标注监听位置用）。
+// LastSeq 返回已发布的最后一个序号（供订阅方对齐游标/判断快照回退用）。
 func (b *Bus) LastSeq() int64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
