@@ -168,8 +168,13 @@ const statusColor: Record<string, string> = {
   failed: c.err,
 }
 
+const stateColor: Record<string, string> = {
+  running: c.ok,
+  stopped: c.muted,
+}
+
 function StatusDot({ st }: { st: string }) {
-  return <span style={{ ...s.dot, background: statusColor[st] ?? c.muted }} title={st} />
+  return <span style={{ ...s.dot, background: statusColor[st] ?? stateColor[st] ?? c.muted }} title={st} />
 }
 
 function EntryView({ e }: { e: StreamEntry }) {
@@ -325,6 +330,29 @@ export function App() {
               </div>
             )
           })}
+
+          {/* Agents / Runtimes 只读列表（M1 #2：状态一瞥；点击无动作） */}
+          <div style={s.label}>
+            Agents（{state.agents.length}） · Runtimes（{state.runtimes.length}）
+          </div>
+          {state.agents.map((a) => (
+            <div key={a.id} style={{ ...s.card, cursor: "default", fontSize: 12, padding: "6px 12px" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <StatusDot st={a.state} />
+                <b>{a.name}</b>
+                <span style={s.chip}>{a.runtime}</span>
+                <span style={{ color: c.muted, fontSize: 11 }}>{a.state}</span>
+              </span>
+            </div>
+          ))}
+          {state.runtimes.map((rt) => (
+            <div key={rt.name} style={{ ...s.card, cursor: "default", fontSize: 12, padding: "6px 12px" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                🧩 <b>{rt.name}</b>
+                <span style={{ color: c.muted, fontSize: 11 }}>{rt.version}</span>
+              </span>
+            </div>
+          ))}
         </aside>
 
         {/* 主区：会话视图 + 输入 */}

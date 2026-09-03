@@ -4,6 +4,7 @@ import {
   cancelSession,
   createSession,
   listAgents,
+  listRuntimes,
   listSessions,
   promptSession,
 } from "./api"
@@ -12,6 +13,7 @@ import type {
   Agent,
   BusEvent,
   EntryKind,
+  Runtime,
   SessionSummary,
   StreamEntry,
   WsServerFrame,
@@ -28,6 +30,7 @@ export interface SessionView {
 
 export interface PanelState {
   agents: Agent[]
+  runtimes: Runtime[]
   sessions: SessionSummary[]
   views: Record<string, SessionView>
   activeId: string | null
@@ -42,6 +45,7 @@ const nextId = (): string => `e${++uidCounter}`
 
 export const initialState: PanelState = {
   agents: [],
+  runtimes: [],
   sessions: [],
   views: {},
   activeId: null,
@@ -136,6 +140,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
 export type PanelAction =
   | { type: "frame"; f: WsServerFrame }
   | { type: "agents"; agents: Agent[] }
+  | { type: "runtimes"; runtimes: Runtime[] }
   | { type: "sessions"; sessions: SessionSummary[] }
   | { type: "activate"; id: string | null }
   | { type: "resetView"; id: string }
@@ -147,6 +152,8 @@ export function reducer(s: PanelState, a: PanelAction): PanelState {
   switch (a.type) {
     case "agents":
       return { ...s, agents: a.agents }
+    case "runtimes":
+      return { ...s, runtimes: a.runtimes }
     case "sessions":
       return { ...s, sessions: a.sessions }
     case "activate":
@@ -250,10 +257,19 @@ export function usePanel() {
     }
   }, [showToast])
 
+  const refreshRuntimes = useCallback(async () => {
+    try {
+      dispatch({ type: "runtimes", runtimes: await listRuntimes() })
+    } catch (err) {
+      showToast(asApiError(err).msg)
+    }
+  }, [showToast])
+
   const boot = useCallback(() => {
     void refreshAgents()
     void refreshSessions()
-  }, [refreshAgents, refreshSessions])
+    void refreshRuntimes()
+  }, [refreshAgents, refreshSessions, refreshRuntimes])
 
   const activate = useCallback(
     (id: string | null, sinceSeq?: number) => {
@@ -325,6 +341,7 @@ export function usePanel() {
     boot,
     refreshAgents,
     refreshSessions,
+    refreshRuntimes,
     activate,
     createAndRun,
     sendPrompt,
