@@ -7,9 +7,10 @@
 ## 特性（当前形态）
 
 - **ACP 直连运行时**：内置 `opencode`（`opencode acp`）与 `deepseekharness`（`dsh --profile acp`）两个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
-- **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /sessions`（指定 agent + prompt 后台起真实会话）、`POST /sessions/:id/prompt`（同会话多轮）、`POST /sessions/:id/cancel`。
-- **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，心跳与断线重连；传输层 `github.com/coder/websocket`。
-- **前端面板**：新建会话（选 agent、发首轮 prompt）、会话列表、流式渲染（消息/思考/工具卡）、composer 追加、取消、断线自动重连（浏览器原生 WebSocket）。
+- **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /sessions`（指定 agent + prompt 后台起真实会话）、`GET /sessions/:id/history`（事件回放分页）、`POST /sessions/:id/prompt`（同会话多轮）、`POST /sessions/:id/cancel`。
+- **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；传输层 `github.com/coder/websocket`。
+- **会话 wire transcript**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写），daemon 重启后仍是可续看/调试/未来会话导入的原始事实源；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`。
+- **前端面板**：新建会话（选 agent、发首轮 prompt）、会话列表、流式渲染（消息/思考/工具卡）、composer 追加、取消、断线自动重连（浏览器原生 WebSocket）；左侧附 Agents/Runtimes 只读状态列表。
 - **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **无外部依赖进程**：M0/M1 会话与事件均为进程内内存态（重启即失），持久化属 M2 规划。
 
@@ -55,7 +56,9 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 3. 回复期间可点「⏹ 取消」；结束后可在 composer 输入下一条（多轮同会话）；
 4. 断开/刷新后重新点选会话，会按游标全量/增量续传补齐会话视图。
 
-监听地址也可用环境变量覆盖：`FORGE_ADDR=:9999 ./forge serve`。
+监听地址也可用环境变量覆盖：`FORGE_ADDR=:9999 ./forge serve`。会话 wire transcript 默认落
+`~/.forge/transcripts/`，可用 `FORGE_TRANSCRIPTS=/path/to/dir` 改目录（每会话一个
+`<sessionID>.jsonl`，schema v1，可直接查看/留档）。
 
 ### 4. 命令行冒烟（不经面板）
 
@@ -90,6 +93,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | --- | --- | --- |
 | GET | `/agents` `/runtimes` `/sessions` | 列表 |
 | POST | `/sessions` | `{agent_id, prompt, cwd?}` → `{id, event_seq, …}` |
+| GET | `/sessions/:id/history` | 事件回放（`?after=&limit=` 分页，默认 200/上限 1000） |
 | POST | `/sessions/:id/prompt` | `{prompt}` → `{id, event_seq}`（多轮） |
 | POST | `/sessions/:id/cancel` | 取消进行中的 turn（幂等） |
 | GET | `/ws/events` | 实时事件通道（见下） |

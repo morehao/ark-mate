@@ -652,6 +652,20 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 > - 前端面板骨架随前哨交付（列表/新建/流式渲染/多轮/取消/断线重连），release 内嵌单二进制。
 > M1 剩余项（wire transcript JSONL、能力标记裁剪入口、settings/agents 页等）维持 M1 范围。
 
+> **M1 剩余项（已补，2026-09-03，提交见 feat(eventbus|server|manager|panel)）**：
+> - **会话 wire transcript JSONL 落盘**（M1 #5，schema v1）：每 session 一个
+>   `<sessionID>.jsonl`（首行 header + prompt/update 原语行，append-only 不重写）；目录
+>   `FORGE_TRANSCRIPTS`/默认 `~/.forge/transcripts`，serve 与 demo 均落盘；写入失败仅告警
+>   （尽力而为旁路事实源，对齐 codeg acp_transcript.rs，§5.3/§5.7）。
+> - **REST `GET /sessions/:id/history`**（§4.4 M1 冻结面补缺）：eventbus 按聚合回放，
+>   `after`/`limit` 分页（默认 200、上限 1000、`has_more` 翻页），未知会话 40401。
+> - **per-agg 历史淘汰 + 快照回退**（§5.2/§5.7 M1 落地）：Bus 保留上限（默认 65536）超限
+>   淘汰最旧并抬高该聚合 `EvictedThrough` 水位；WS attach `since_seq` 低于水位 → 回 snapshot
+>   （快照/重放二分补齐；M2 落库后由 events 表兜底更久历史）。
+> - **面板 Agents/Runtimes 只读列表**（M1 #2 子项）：左栏状态一瞥（agent state 点、
+>   runtime version），与 sessions 列表同页。
+> 至此 M1「要做」1–5 全部落地（settings/agents 页、能力标记裁剪入口属 M2 #2/#5，见下节）。
+
 ### M2 — 可扩展底座（不写代码接入第三个 ACP agent）
 
 **目标**：平台化第一步——Agent 定义成为一等可管理资源；runtime 接入成本从「写 Go adapter」降到「配置」。
