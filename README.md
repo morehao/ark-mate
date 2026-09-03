@@ -34,6 +34,10 @@ npm i -g @deepseek-ai/dsh@next     # 或不经安装：npx --yes @deepseek-ai/ds
 dsh --profile acp --help           # 验证可用（首用会自动初始化 profile）
 ```
 
+**版本混装排查**：若 forge 日志里 dsh 子进程启动即崩、ACP 连接随即断开（`connection closed … cause="peer connection closed"`），且 stderr 出现
+`stdio app: the launcher must provide ctx.appExit and ctx.appReady before the tree mounts`
+（堆栈同时含 `…/installation/lib/node_modules/@deepseek-ai/dsh` 与 `~/.npm/_npx/…/@deepseek-ai/dsh-acp-app`），说明 **dsh 启动器与 acp 插件来自两棵不同版本树**（典型：全局 `latest` 0.1.1-rc.2 启动器 + npx 缓存里 @next 的 acp 插件）。修法：`npm i -g @deepseek-ai/dsh@next` 让全局树自洽后 `dsh --version` 应为 ≥ 0.1.2-rc.1（forge 按 PATH spawn dsh，升级后无需重启 serve）；仍报错则备份重建 `~/.dsh/profiles/acp`（曾被混装写坏时）。
+
 模型凭证：harness 读取进程环境 `DEEPSEEK_API_KEY`；若你本机 `dsh` 已配好 profile/home 设置，无 shell 环境变量也能跑。
 
 ### 2. 构建单二进制
