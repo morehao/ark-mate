@@ -34,3 +34,4 @@ frontend/**/.vite/
 
 # Local Go build/module cache (sandbox builds only)
 .cache/
+frontend/**/*.tsbuildinfo
