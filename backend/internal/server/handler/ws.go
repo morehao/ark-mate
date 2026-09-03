@@ -161,6 +161,12 @@ func (h *WSHandler) attach(st *connState, f wsClientFrame) {
 	if since < 0 {
 		since = 0
 	}
+	// 淘汰即快照回退（§5.2）：请求起点早于该聚合的缓冲淘汰水位 → 该区间已不可增量续传，
+	// 回整包 snapshot（M0/M1 snapshot 为空终态 + 当前水位，客户端据此重建游标并清空视图）。
+	if low := h.bus.EvictedThrough(f.AggID); low > 0 && since < low {
+		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(), State: json.RawMessage(`{}`)})
+		return
+	}
 	for _, evt := range h.bus.EventsAfter(since) {
 		if evt.AggregID == f.AggID {
 			h.send(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt})

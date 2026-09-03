@@ -167,3 +167,40 @@ func TestWSHandlerFullReplaySinceZero(t *testing.T) {
 		t.Fatalf("全量回放序号不符: %v", seqs)
 	}
 }
+
+// TestWSHandlerSnapshotFallbackOnEviction 验证 attach 的 since 低于该聚合淘汰水位
+// （eventbus 超限淘汰后）→ 回 snapshot（§5.2 快照/重放二分）。
+func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
+	bus := eventbus.NewWithLimit(2)
+	conn := startWS(t, bus)
+
+	// 同聚合发布 4 条：limit=2，seq1-3 时淘汰水位到 2（seq1/seq2 出缓冲）
+	bus.Publish("session.message", "s1", 1, map[string]any{"text": "a"}) // seq 1
+	bus.Publish("session.message", "s1", 1, map[string]any{"text": "b"}) // seq 2
+	bus.Publish("session.message", "s1", 1, map[string]any{"text": "c"}) // seq 3
+	bus.Publish("session.message", "s1", 1, map[string]any{"text": "d"}) // seq 4
+
+	// since=1 < 水位 2 → snapshot
+	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(1)})
+	var snap frame
+	wsRead(t, conn, &snap)
+	if snap.Type != "snapshot" || snap.AggID != "s1" {
+		t.Fatalf("淘汰回退应回 snapshot，got %+v", snap)
+	}
+
+	// 第二条连接 since=2（≥ 水位）→ 重放 seq3/seq4
+	conn2 := startWS(t, bus)
+	wsWrite(t, conn2, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(2)})
+	var seqs []int64
+	for len(seqs) < 2 {
+		var f frame
+		wsRead(t, conn2, &f)
+		if f.Type != "event" || f.AggID != "s1" || f.Event == nil {
+			t.Fatalf("期望 s1 事件帧，got %+v", f)
+		}
+		seqs = append(seqs, f.Event.Seq)
+	}
+	if seqs[0] != 3 || seqs[1] != 4 {
+		t.Fatalf("水位后重放序号不符: %v", seqs)
+	}
+}

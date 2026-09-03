@@ -171,10 +171,19 @@ export function reducer(s: PanelState, a: PanelAction): PanelState {
       const f = a.f
       switch (f.type) {
         case "snapshot": {
-          const view = s.views[f.agg_id] ?? emptyView
+          // snapshot = 服务端整包终态视图（冷挂载或「淘汰即快照回退」）：
+          // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标，
+          // 后续 live 增量从该水位继续。
           return {
             ...s,
-            views: { ...s.views, [f.agg_id]: { ...view, lastSeq: Math.max(view.lastSeq, f.event_seq) } },
+            views: {
+              ...s.views,
+              [f.agg_id]: {
+                entries: [],
+                streaming: false,
+                lastSeq: Math.max(f.event_seq, 0),
+              },
+            },
           }
         }
         case "event": {

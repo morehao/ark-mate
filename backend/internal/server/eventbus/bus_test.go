@@ -42,3 +42,31 @@ func TestEventsAfter(t *testing.T) {
 		t.Fatalf("LastSeq=%d want 3", b.LastSeq())
 	}
 }
+
+// TestEvictionWatermark 验证 per-agg 淘汰与低水位（EvictedThrough）：
+// 缓冲超限淘汰最旧事件并抬高对应聚合水位；重放只能覆盖水位之后。
+func TestEvictionWatermark(t *testing.T) {
+	b := NewWithLimit(2)                       // 保留上限 2 条
+	b.Publish("session.message", "s1", 1, nil) // seq 1
+	b.Publish("session.message", "s1", 1, nil) // seq 2
+	if b.EvictedThrough("s1") != 0 {
+		t.Fatalf("前两条不应淘汰: %d", b.EvictedThrough("s1"))
+	}
+	b.Publish("session.message", "s1", 1, nil) // seq 3 → 淘汰 seq1
+	if w := b.EvictedThrough("s1"); w != 1 {
+		t.Fatalf("EvictedThrough(s1)=%d want 1", w)
+	}
+	b.Publish("session.message", "s2", 1, nil) // seq 4 → 淘汰 seq2（s1 水位 → 2）
+	if w := b.EvictedThrough("s1"); w != 2 {
+		t.Fatalf("EvictedThrough(s1)=%d want 2", w)
+	}
+	// 重放 after=1：仅剩 s1 seq3、s2 seq4
+	after := b.EventsAfter(1)
+	if len(after) != 2 || after[0].Seq != 3 || after[1].Seq != 4 {
+		t.Fatalf("淘汰后 EventsAfter(1) = %+v", after)
+	}
+	// s2 未淘汰（seq4 仍在缓冲）
+	if b.EvictedThrough("s2") != 0 {
+		t.Fatalf("s2 不应淘汰: %d", b.EvictedThrough("s2"))
+	}
+}
