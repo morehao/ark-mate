@@ -76,8 +76,10 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 
 1. **协议是第一公民**：统一在 **ACP v1（stdio JSON-RPC/NDJSON）** 之上抽象 runtime；绝不与具体 runtime 的
    私有 API 耦合（仅允许为诊断/降级读取其 stderr / 配置文件）。
-2. **能力不对称是常态，接口必须显式降级**（沿用架构文档 §6.2）：opencode 会话能力完整；deepseek-harness
-   仅 fresh session、断连即失效。所有上层 API 把「runtime 能力」当作一等数据返回，前端据此裁剪入口。
+2. **能力不对称是常态，接口必须显式降级**（沿用架构文档 §6.2）：opencode 会话能力完整
+   （load/resume/fork）；deepseek-harness（dsh）支持 list/resume/close、无 load/fork（核实见
+   `docs/deepseekharness-acp-adaptation.md`）。所有上层 API 把「runtime 能力」当作一等数据返回，
+   前端据此裁剪入口。
 3. **事件流可重放、增量与终态分离**（沿用架构文档 §2 五条范式，载体见 §4.5/§4.6 决策 v2①）：单一事件
    通道 + 全局单调 seq + `after`/快照续传 + 内存缓冲；终态落库、流式增量 live-only。
 4. **Web/多用户语义先于桌面语义**：自托管 daemon 天然要回答「谁在连、连哪个 runtime、鉴权怎么过」，
@@ -189,7 +191,9 @@ func (c *Client) Prompt(ctx, req) (PromptHandle, error)   // 返回后可 Cancel
    归一化为 §4.1 事件，交给注入的回调（manager 的 event sink），acl 不感知总线。
 3. **错误分类**：把 ACP/连接错误归类为可操作集合（connection/access/limit/request_rejected/service/…），
    与 codeg `feedback.rs` 对齐，随 `turn.error` 事件上抛，前端据此渲染「重试/重新登录/开新会话」条。
-4. **断连语义**：连接 `Done()` 触发 manager 的会话失效处理（harness「断连即释放」在此收敛）。
+4. **断连语义**：连接 `Done()` 触发 manager 把进行中会话标记失败（终止 in-flight turn）；
+   会话本体是否可续依 runtime 能力——harness（dsh）断开走 quiescent teardown，持久会话仍可
+   list/resume；opencode 断开则其会话随之终止。resume 入口按 `Client.Capabilities()` 裁剪。
 
 ### 4.3 `internal/runtime`（adapter）与 `internal/manager`（编排）设计
 
@@ -585,8 +589,10 @@ prompt → 事件流入 eventbus → **经 WS 端点出流**（attach/快照/事
 1. `internal/acl`：`Transport`(StdioTransport) + `Client`（基于 acp-go-sdk v0.13.x，方法面已核实，§4.2）+
    notification 归一化回调 + 能力断言 + 错误分类骨架。
 2. `internal/runtime`：`contracts.go` + `registry.go`（map 注册）+ `opencode/` 与 `deepseekharness/`
-   两个 adapter（启动命令/参数/env/能力基线按架构文档 §6.2 落地：`opencode acp`；`dsh-acp-demo --config
-   <cordis.yml>` + `DEEPSEEK_API_KEY` 注入；harness 仅 fresh session）。
+   两个 adapter（启动命令/参数/能力基线：`opencode acp`；harness 为 `dsh --profile acp`
+   （@deepseek-ai/dsh，统一启动器 profile，旧 `dsh-acp-demo` 已废弃，核实见
+   `docs/deepseekharness-acp-adaptation.md`）；DEEPSEEK_API_KEY 随子进程环境透传；
+   harness 会话可持久化：list/resume/close、无 load/fork）。
 3. `internal/manager`：最简 `SessionOrchestrator`（连接获取→session/new→prompt→cancel/close）实现
    `handler.Service`（替换 mock），把归一化事件 Publish 进 eventbus。
 4. `internal/infra/config`：runtime 配置加载（CLI flag/env/配置文件三选一起步）；日志（golib glog）。
@@ -659,7 +665,8 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 
 **要做**：
 1. 多会话并发与真实恢复：daemon 重启后按 `sessions`/`runs` 恢复终态视图；opencode 会话 load/resume
-   贯通（harness 断连即失效的 UI 表达：会话过期横幅）；切换会话/新建会话时按需**指定 runtime**
+   贯通；harness（dsh）会话经同一 `$DSH_HOME` 持久化根 list/resume（断连后仍可续，无「过期横幅」
+   一说，resume 入口按 caps 裁剪）；切换会话/新建会话时按需**指定 runtime**
    （决策 v2②：一次会话一个 runtime，切换 = 开新会话）；
 2. 基础鉴权与多用户（保守）：面板登录 token（首版单管理员 + 只读访问位）；REST 走 header、WS 走子协议
    （`forge-token.{b64url}`）；统一鉴权中间件；

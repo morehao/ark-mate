@@ -9,6 +9,10 @@
 >    事件流五条范式不变，仅换载体。
 > ② 产品定位收敛为**一次会话/一次运行指定一个 Agent Runtime，无跨 agent 协作**（多 runtime = 注册表 +
 >    按会话选择切换）。本文档后续章节中与上述冲突的表述（如 SSE 首选、跨 runtime 编排）以该更新为准。
+> ③ **deepseek-harness 启动形态勘误**：本文档 §2/§6.2/§7 所述 `dsh-acp-demo --config <cordis.yml>`
+>    已随上游演进废弃，现为统一启动器 `dsh --profile acp`（会话可持久化 list/resume/close、无 load/fork），
+>    以 [design-and-roadmap.md](./design-and-roadmap.md) 与
+>    [deepseekharness-acp-adaptation.md](./deepseekharness-acp-adaptation.md) 为准。
 
 ## 1. 定位与目标
 
