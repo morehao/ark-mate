@@ -22,6 +22,8 @@ type Service interface {
 	PromptSession(ctx context.Context, id, prompt string) (*SessionPromptResp, error)
 	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
 	CancelTurn(ctx context.Context, id string) error
+	// SessionHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
+	SessionHistory(ctx context.Context, id string, after int64, limit int) (*SessionHistoryResp, error)
 }
 
 // AgentResp Agent 的对外表示。
@@ -68,6 +70,13 @@ type SessionPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
+}
+
+// SessionHistoryResp 会话历史分页响应（事件按 seq 升序）。
+type SessionHistoryResp struct {
+	ID      string           `json:"id"`
+	Events  []eventbus.Event `json:"events"`
+	HasMore bool             `json:"has_more"` // 是否还有更早/后续页（客户端用末条 seq 作为下页 after）
 }
 
 // Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。

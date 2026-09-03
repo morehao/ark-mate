@@ -3,12 +3,17 @@
 // 目录化引入（见 docs/design-and-roadmap.md §6 M2）。
 package config
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 // Config 是进程级配置。
 type Config struct {
 	// Addr HTTP 监听地址。
 	Addr string
+	// TranscriptDir 会话 wire transcript 落盘目录（M1 #5；空 = 禁用）。
+	TranscriptDir string
 }
 
 // Default 返回默认配置。
@@ -21,6 +26,13 @@ func Load() Config {
 	c := Default()
 	if v := os.Getenv("FORGE_ADDR"); v != "" {
 		c.Addr = v
+	}
+	if v := os.Getenv("FORGE_TRANSCRIPTS"); v != "" {
+		c.TranscriptDir = v
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		c.TranscriptDir = filepath.Join(home, ".forge", "transcripts")
+	} else {
+		c.TranscriptDir = ".forge/transcripts"
 	}
 	return c
 }

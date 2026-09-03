@@ -39,6 +39,7 @@ type Service struct {
 	reg  *runtime.Registry
 	bus  *eventbus.Bus
 	orch *Orchestrator
+	tx   *transcriptRecorder // 会话 wire transcript（nil = 未启用，见 SetTranscriptDir）
 
 	mu       sync.Mutex
 	agents   map[string]*AgentRec
@@ -70,6 +71,33 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 
 // SetBus 注入事件总线（Orchestrator 构造时调用；与 handler.New 共用同一 bus）。
 func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
+
+// SetTranscriptDir 启用会话 wire transcript 落盘（目录不存在会自动创建；
+// dir 为空 = 禁用）。须在任何会话开始前调用（serve/demo 装配时）。
+func (s *Service) SetTranscriptDir(dir string) {
+	if dir == "" {
+		s.tx = nil
+		return
+	}
+	s.tx = newTranscriptRecorder(dir)
+}
+
+// beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
+func (s *Service) beginTranscript(sessionID, agentID, runtimeID, cwd string) {
+	if s.tx == nil {
+		return
+	}
+	s.tx.begin(sessionID, agentID, runtimeID, cwd)
+}
+
+// closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
+func (s *Service) closeTranscripts() {
+	if s.tx == nil {
+		return
+	}
+	s.tx.closeAll()
+	s.tx = nil
+}
 
 // ListAgents 返回播种的全部 Agent。
 func (s *Service) ListAgents() ([]handler.AgentResp, error) {
@@ -145,7 +173,8 @@ func (s *Service) markSession(id, status string) {
 	}
 }
 
-// publish 把域事件发布进 eventbus（agg = sessionID；每 agg 版本递增）。
+// publish 把域事件发布进 eventbus（agg = sessionID；每 agg 版本递增），
+// 并旁路追加到该会话的 wire transcript（未启用/非 map 载荷时跳过）。
 // 未注入 bus 时静默丢弃（仅出现在纯列表/单测场景）。
 func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
 	s.mu.Lock()
@@ -154,10 +183,16 @@ func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
 	s.mu.Unlock()
 
 	bus := s.bus
+	var evt eventbus.Event
 	if bus == nil {
-		return eventbus.Event{}
+		evt = eventbus.Event{Type: typ, AggregID: sessionID, Version: v}
+	} else {
+		evt = bus.Publish(typ, sessionID, v, payload)
 	}
-	return bus.Publish(typ, sessionID, v, payload)
+	if m, ok := payload.(map[string]any); ok {
+		s.tx.appendLine(sessionID, evt.Seq, typ, m)
+	}
+	return evt
 }
 
 // requireAgent 供 Orchestrator 用 runtimeID 取播种 Agent。
@@ -268,4 +303,40 @@ func (s *Service) restErr(err error) error {
 		msg = ae.Code
 	}
 	return gerror.Error{Code: code, Msg: msg}
+}
+
+// SessionHistory 返回会话事件历史（eventbus 按聚合回放，after/limit 分页，seq 升序）。
+// M1 为内存回放：会话须在本进程登记过（进程内即 daemon 会话表），未知会话 → 40401。
+func (s *Service) SessionHistory(ctx context.Context, id string, after int64, limit int) (*handler.SessionHistoryResp, error) {
+	if !s.hasSession(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	if after < 0 {
+		after = 0
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	all := s.bus.EventsAfter(after)
+	events := make([]eventbus.Event, 0, min(limit, len(all)))
+	hasMore := false
+	for _, evt := range all {
+		if evt.AggregID != id {
+			continue
+		}
+		if len(events) >= limit {
+			hasMore = true
+			break
+		}
+		events = append(events, evt)
+	}
+	return &handler.SessionHistoryResp{ID: id, Events: events, HasMore: hasMore}, nil
+}
+
+// hasSession 判断会话是否在本进程登记。
+func (s *Service) hasSession(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.sessions[id]
+	return ok
 }

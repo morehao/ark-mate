@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"errors"
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
-// SessionHandler 处理会话相关 REST 请求（列表 + create/prompt/cancel）。
+// SessionHandler 处理会话相关 REST 请求（列表 + create/prompt/cancel/history）。
 type SessionHandler struct {
 	svc Service
 }
@@ -64,4 +67,48 @@ func (h *SessionHandler) Cancel(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, gin.H{"id": id, "status": "cancelling"})
+}
+
+// History 返回会话事件历史（分页）：query `after`（起点 seq，含之后，默认 0）、
+// `limit`（默认 200，上限 1000）。事件按 seq 升序；翻页用末条 seq 作下页 after。
+func (h *SessionHandler) History(c *gin.Context) {
+	id := c.Param("id")
+	after, limit := int64(0), 200
+	if v := c.Query("after"); v != "" {
+		n, err := parseNonNeg(v)
+		if err != nil {
+			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "after 需为非负整数"})
+			return
+		}
+		after = n
+	}
+	if v := c.Query("limit"); v != "" {
+		n, err := parseNonNeg(v)
+		if err != nil {
+			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "limit 需为非负整数"})
+			return
+		}
+		limit = int(n)
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	resp, err := h.svc.SessionHistory(c.Request.Context(), id, after, limit)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// parseNonNeg 解析非负整数查询参数。
+func parseNonNeg(v string) (int64, error) {
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, errors.New("bad non-negative int")
+	}
+	return n, nil
 }

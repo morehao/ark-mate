@@ -143,6 +143,7 @@ func (o *Orchestrator) StartSession(ctx context.Context, agentID, cwd string) (*
 	o.mu.Unlock()
 
 	o.svc.registerSession(&SessionRec{ID: as.ID, AgentID: agent.ID, Runtime: spec.ID, Status: SessionStatusInProgress})
+	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
 	})
@@ -469,6 +470,7 @@ func (o *Orchestrator) Close() {
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 		_ = rc.client.Close()
 	}
+	o.svc.closeTranscripts()
 }
 
 func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {

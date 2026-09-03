@@ -28,6 +28,7 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.GET("/agents", h.Agent.List)
 	v1.GET("/sessions", h.Session.List)
 	v1.POST("/sessions", h.Session.Create)
+	v1.GET("/sessions/:id/history", h.Session.History)
 	v1.POST("/sessions/:id/prompt", h.Session.Prompt)
 	v1.POST("/sessions/:id/cancel", h.Session.Cancel)
 	v1.GET("/runtimes", h.Runtime.List)
