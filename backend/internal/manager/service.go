@@ -1,14 +1,17 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/golib/gerror"
 )
 
 // AgentRec 是进程内 Agent 定义（M0 为每个已注册 runtime 播种一个默认 Agent）。
@@ -19,7 +22,7 @@ type AgentRec struct {
 	State   string
 }
 
-// SessionRec 是进程内会话终态记录（M0 内存态；M2 落 SQLite 后由 events 表回放）。
+// SessionRec 是进程内会话终态记录（M0/M1 内存态；M2 落 SQLite 后由 events 表回放）。
 type SessionRec struct {
 	ID        string
 	AgentID   string
@@ -29,11 +32,13 @@ type SessionRec struct {
 	UpdatedAt time.Time
 }
 
-// Service 实现 handler.Service（替换 mock），为控制面列表提供「真实」数据：
-// runtime 来自注册表；agent 为每 runtime 的默认播种；会话来自本进程内存存储。
+// Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
+// runtime 来自注册表；agent 为每 runtime 的默认播种；会话来自本进程内存存储；
+// 会话动作（create/prompt/cancel）委托 Orchestrator（其内部持真实 ACP 连接）。
 type Service struct {
-	reg *runtime.Registry
-	bus *eventbus.Bus
+	reg  *runtime.Registry
+	bus  *eventbus.Bus
+	orch *Orchestrator
 
 	mu       sync.Mutex
 	agents   map[string]*AgentRec
@@ -162,4 +167,105 @@ func (s *Service) requireAgent(runtimeID string) (*AgentRec, error) {
 		return nil, fmt.Errorf("runtime %q 无默认 Agent（注册表未含该 runtime）", runtimeID)
 	}
 	return a, nil
+}
+
+// AgentByID 按 ID 取 Agent（会话动作/REST 用）。
+func (s *Service) AgentByID(id string) (*AgentRec, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[id]
+	return a, ok
+}
+
+// attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
+func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
+
+// ——— handler.Service 的会话动作实现（REST：create/prompt/cancel） ———
+
+// CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮
+// （后台执行，事件经 bus/WS 出流）。返回的 EventSeq 为「已发布事件」后的水位，
+// 前端 WS attach 传 since_seq=该值即可续传首轮增量。
+func (s *Service) CreateSession(ctx context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
+	if s.orch == nil {
+		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	if req.AgentID == "" {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_required", "agent_id 必填", nil))
+	}
+	// 会话与 turn 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
+	//（turn 由 Orchestrator 持有，取消走 POST /sessions/:id/cancel）。
+	runCtx := context.WithoutCancel(ctx)
+	res, err := s.orch.StartSession(runCtx, req.AgentID, req.Cwd)
+	if err != nil {
+		return nil, s.restErr(err)
+	}
+	resp := &handler.SessionCreateResp{
+		ID: res.SessionID, AgentID: res.AgentID, Runtime: res.Runtime, Status: res.Status, EventSeq: res.EventSeq,
+	}
+	if req.Prompt != "" {
+		seq, err := s.orch.Prompt(runCtx, res.SessionID, req.Prompt)
+		if err != nil {
+			return nil, s.restErr(err)
+		}
+		resp.EventSeq = seq
+		resp.Status = SessionStatusInProgress
+	}
+	return resp, nil
+}
+
+// PromptSession 向既有会话追加一轮 prompt（后台执行）。
+// turn 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
+// POST /sessions/:id/cancel 决定。
+func (s *Service) PromptSession(ctx context.Context, id, prompt string) (*handler.SessionPromptResp, error) {
+	if s.orch == nil {
+		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	if id == "" || prompt == "" {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "prompt_required", "session_id 与 prompt 必填", nil))
+	}
+	seq, err := s.orch.Prompt(context.WithoutCancel(ctx), id, prompt)
+	if err != nil {
+		return nil, s.restErr(err)
+	}
+	return &handler.SessionPromptResp{ID: id, Status: SessionStatusInProgress, EventSeq: seq}, nil
+}
+
+// CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。
+func (s *Service) CancelTurn(ctx context.Context, id string) error {
+	if s.orch == nil {
+		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	if err := s.orch.CancelTurn(ctx, id); err != nil {
+		return s.restErr(err)
+	}
+	return nil
+}
+
+// restErr 把领域错误（acl 分类）映射为对外可操作的业务错误码（gerror.Error）。
+func (s *Service) restErr(err error) error {
+	ae, ok := acl.As(err)
+	if !ok {
+		return gerror.Error{Code: 50000, Msg: err.Error()}
+	}
+	code := 50001
+	switch ae.Class {
+	case acl.ClassRequest:
+		code = 40001
+		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" {
+			code = 40401
+		}
+	case acl.ClassLimit:
+		code = 40901
+	case acl.ClassAccess:
+		code = 40101
+	case acl.ClassUnsupported:
+		code = 40501
+	case acl.ClassService, acl.ClassConnection:
+		code = 50201
+	}
+	msg := ae.Details
+	if msg == "" {
+		msg = ae.Code
+	}
+	return gerror.Error{Code: code, Msg: msg}
 }
