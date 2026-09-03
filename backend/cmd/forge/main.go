@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/infra/config"
@@ -42,9 +44,9 @@ func main() {
 	}
 }
 
-// serve 启动控制面：REST 列表来自 manager（runtime 注册表 + 进程内会话存储），
-// WS /ws/events 订阅 eventbus 推送事件。M0 尚无 REST 触发 prompt（属 M1），
-// 真实链路用 forge demo 独立验证。
+// serve 启动控制面：REST（列表 + sessions create/prompt/cancel）+ WS /ws/events。
+// 会话动作由 Orchestrator 跑真实 ACP runtime；事件经 eventbus 出流。M1 前哨起
+// REST 可触发会话（此前仅 forge demo 可跑真实链路）。
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`:8099`）")
@@ -58,8 +60,21 @@ func serve(args []string) {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
+	orch := manager.NewOrchestrator(svc, reg)
+	defer orch.Close()
 
 	srv := server.New(server.Config{Addr: cfg.Addr}, svc, bus)
+
+	// 优雅退出：信号 → 停 HTTP → 关编排器（回收 runtime 子进程）。
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = srv.Stop(stopCtx)
+	}()
+
 	if err := srv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 		os.Exit(1)
