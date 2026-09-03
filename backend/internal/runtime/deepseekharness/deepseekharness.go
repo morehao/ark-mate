@@ -1,5 +1,9 @@
-// Package deepseekharness 声明 deepseek-harness（dsh-acp-demo）的 ACP server
-// 启动形态与能力基线（纯数据，不依赖父包）。
+// Package deepseekharness 声明 deepseek-harness（dsh）的 ACP server 启动形态与
+// 能力基线（纯数据，不依赖父包）。
+//
+// 形态说明（基于 deepseek-harness 源码 2026-08 快照核实，见
+// docs/deepseekharness-acp-adaptation.md）：当前版本不再提供独立 `dsh-acp-demo`
+// bin，ACP server 是统一启动器 `dsh` 的一个 profile：`dsh --profile acp`。
 package deepseekharness
 
 // ID 是注册表键。
@@ -9,16 +13,18 @@ const ID = "deepseekharness"
 const Name = "deepseek-harness"
 
 // Version 是展示用启动形态。
-const Version = "dsh-acp-demo --config <cordis.yml>"
+const Version = "dsh --profile acp"
 
-// Command：独立 bin `@deepseek-ai/dsh-acp-demo`（非 dsh 子命令），stdio NDJSON 承载 ACP server。
-const Command = "dsh-acp-demo"
+// Command：统一启动器 `dsh`（@deepseek-ai/dsh，npm 分发，bin=dsh）。
+// 未安装时可经 `npx @deepseek-ai/dsh --profile acp` 启动；profile 首用自动初始化。
+const Command = "dsh"
 
-// Args 模板：--config <cordis.yml>（实际路径由启动方替换 {config} 占位）。
-var Args = []string{"--config", "{config}"}
+// Args：--profile acp 选择 ACP profile；其余参数（--patch 覆盖等）留待上层按需追加。
+var Args = []string{"--profile", "acp"}
 
 // Caps 是静态能力基线声明（真实值以 ACP initialize 探测为准）：
-// 仅 fresh session，不支持 load/list/resume/fork/delete；断连即释放。
+// initialize 广告 sessionCapabilities { close, list, resume }（无 load/fork）、
+// authMethods 为空、audio/embeddedContext 为 false、image 视持久附件仓与精确路由而定。
 type DeclaredCapabilities struct {
 	SessionsPersistent     bool
 	MultiSessionConcurrent bool
@@ -26,13 +32,20 @@ type DeclaredCapabilities struct {
 	EmbeddedContext        bool
 }
 
-// Caps 依据 deepseek-harness README 声明的最小能力。
+// Caps 依据 packages/acp/acp（dsh-acp bridge）源码声明的基线。
 var Caps = DeclaredCapabilities{
-	SessionsPersistent:     false,
-	MultiSessionConcurrent: false,
+	SessionsPersistent:     true, // list/resume/close 跨进程持久（同一 $DSH_HOME profile 持久化根）
+	MultiSessionConcurrent: true, // 同连接可并行多会话
 	Images:                 false,
 	EmbeddedContext:        false,
 }
 
 // Notes 约束说明（给 README/文档位，暂不外露 REST）。
-const Notes = "仅 fresh session；同连接会话断连即失效；需注入 DEEPSEEK_API_KEY；接口迭代快可能 breaking"
+//  1. 无鉴权：authenticate 立即成功（authMethods 为空）。
+//  2. 会话持久化：session/new 即持久；disconnect/close 走同一 quiescent teardown，
+//     结束后仍可 list/resume（「断连即失效」不成立；断连时进行中的 turn 被取消）。
+//  3. 不支持：session/load、fork/delete、additional directories、终端、客户端 FS、SSE/传输级 MCP。
+//  4. 需绝对路径 cwd 且先校验；provider/model 在 profile 行配置（默认 deepseek-official/deepseek-v4-flash），
+//     DEEPSEEK_API_KEY 由 provider 从其进程环境读取（无需额外注入，可随子进程环境透传）。
+//  5. 接口迭代快，可能 breaking（README 明示开发者预览期）。
+const Notes = "ACP server 由统一 dsh 启动器提供（dsh --profile acp）；无鉴权；会话可持久化（list/resume/close 跨进程）；不支持 load/fork/删除/附加目录/终端/客户端 FS；DEEPSEEK_API_KEY 走子进程环境透传；迭代快可能 breaking"

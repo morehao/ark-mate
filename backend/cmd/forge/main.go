@@ -72,7 +72,7 @@ func demo(args []string) {
 	runtimeID := fs.String("runtime", "", "runtime id（opencode / deepseekharness）")
 	prompt := fs.String("prompt", "你好，请用一句话介绍你自己。", "发送给 agent 的 prompt")
 	cwd := fs.String("cwd", "", "会话工作目录（默认当前目录）")
-	configPath := fs.String("config", "", "harness 专用：cordis.yml 路径（替换 --config {config} 占位）")
+	configPath := fs.String("config", "", "自定义 adapter 的 {config} 占位替换（当前内置 runtime 均无占位，预留扩展）")
 	allowAll := fs.Bool("allow-all", false, "放行一切权限请求（仅调试；默认拒绝）")
 	timeout := fs.Duration("timeout", 5*time.Minute, "单次运行超时")
 	_ = fs.Parse(args)

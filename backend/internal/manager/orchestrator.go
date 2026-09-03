@@ -36,7 +36,7 @@ type RunOptions struct {
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录
 	Env        []string // 附加环境（如 DEEPSEEK_API_KEY 已导出时无需）
-	ConfigPath string   // harness 专用：替换 Launch.Args 里的 {config} 占位
+	ConfigPath string   // 自定义 adapter 的 {config} 占位替换（内置 runtime 无占位，预留扩展）
 }
 
 // RunResult 一次 RunOnce 的结果。
@@ -142,7 +142,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	if rc != nil {
 		select {
 		case <-rc.client.Done():
-			// 断连即失效：旧连接作废重拨
+			// 旧连接已断开：作废重拨（断开语义依 runtime，见 watchDisconnect）
 		default:
 			return rc, nil
 		}
@@ -231,7 +231,9 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 	}
 }
 
-// watchDisconnect 监听连接断开，把该连接上的会话标为失效（harness「断连即释放」收敛点）。
+// watchDisconnect 监听连接断开：进行中的会话收敛为失败态。
+// 语义随 runtime 能力而异：harness 断连走 quiescent teardown，会话持久化后仍可
+// list/resume（见 deepseekharness adapter Notes）；opencode 断开则其会话随之终止。
 func (o *Orchestrator) watchDisconnect(c *acl.Client, sessionID string) {
 	go func() {
 		select {
@@ -239,7 +241,7 @@ func (o *Orchestrator) watchDisconnect(c *acl.Client, sessionID string) {
 			o.svc.markSession(sessionID, SessionStatusFailed)
 			o.svc.publish(BusTurnError, sessionID, map[string]any{
 				"session_id": sessionID, "code": "connection_lost", "class": "connection",
-				"details": "agent 连接断开（deepseek-harness 会话断连即失效）",
+				"details": "agent 连接断开（进行中 turn 终止；是否可 resume 依 runtime 能力，M1 起按 caps 指引）",
 			})
 		}
 	}()
@@ -255,7 +257,8 @@ func (o *Orchestrator) publishError(sessionID string, err error) {
 	})
 }
 
-// resolveArgs 替换 Launch.Args 中的占位（如 harness 的 {config}）。
+// resolveArgs 替换 Launch.Args 中的 {config} 占位（保留给自定义 adapter 模板；
+// 当前内置 runtime 的 Args 均已不含占位，此函数为幂等空操作）。
 func resolveArgs(args []string, opt RunOptions) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
