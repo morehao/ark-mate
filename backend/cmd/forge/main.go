@@ -60,6 +60,7 @@ func serve(args []string) {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
+	svc.SetTranscriptDir(cfg.TranscriptDir) // 会话 wire transcript（M1 #5，~/.forge/transcripts 或 FORGE_TRANSCRIPTS）
 	orch := manager.NewOrchestrator(svc, reg)
 	defer orch.Close()
 
@@ -107,6 +108,8 @@ func demo(args []string) {
 
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
+	cfg := config.Load()
+	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := manager.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
 	defer orch.Close()
