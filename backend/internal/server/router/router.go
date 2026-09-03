@@ -12,8 +12,8 @@ import (
 // AppName 控制面应用的业务标识，构成路由前缀部分。
 const AppName = "forge"
 
-// New 构建 gin.Engine 并注册控制面 REST 路由。
-// 实时事件通道（WS `/ws/events`）随 M0 引入，见设计文档 §4.5。
+// New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
+// 实时通道契约见 docs/design-and-roadmap.md §4.5（M0 无鉴权）。
 func New(h *handler.Handler) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -28,6 +28,7 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.GET("/agents", h.Agent.List)
 	v1.GET("/sessions", h.Session.List)
 	v1.GET("/runtimes", h.Runtime.List)
+	v1.GET("/ws/events", h.WS.Handle)
 
 	return r
 }

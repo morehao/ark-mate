@@ -79,3 +79,16 @@ func (b *Bus) LastSeq() int64 {
 	defer b.mu.RUnlock()
 	return b.nextSeq - 1
 }
+
+// EventsAfter 返回 seq > after 的历史事件快照（拷贝，供实时通道按聚合做重放）。
+func (b *Bus) EventsAfter(after int64) []Event {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	out := make([]Event, 0, len(b.history))
+	for _, evt := range b.history {
+		if evt.Seq > after {
+			out = append(out, evt)
+		}
+	}
+	return out
+}
