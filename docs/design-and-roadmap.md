@@ -638,6 +638,20 @@ shell 均不做，见 §5.4）。
 snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 runtime 均可在面板跑通 fresh session 流式对话。
 **量级**：3–4 周。
 
+> **M1 前哨（已落，2026-09-03）**：按 M1 后端子集先行打通真实链路，交付面见提交
+> `feat(manager|server|cmd)`（Orchestrator 持久会话多轮 / REST sessions create/prompt/cancel /
+> WS attach since=0 全量回放 / serve 装配编排器）：
+> - REST：`POST /sessions`（agent_id+prompt，返回 `event_seq` 水位）、`POST /sessions/:id/prompt`、`POST /sessions/:id/cancel`；
+>   turn 生命周期脱离 HTTP ctx（`context.WithoutCancel`），取消仅经 cancel 端点/agent 停止；
+>   业务错误码 `restErr`（40401 未知 agent/session、40901 turn_in_progress、40101/40501/50201）。
+> - WS attach 语义细化：`since_seq` 省略 → snapshot+live（冷挂载）；提供（含 0）→ `EventsAfter` 重放 + live
+>   （UI 冷开启既有会话传 0 全量重建视图；断线重连传 lastSeq 增量续传）。
+> - Orchestrator：ActiveSession（busy 单飞）句柄 + StartSession/Prompt/CancelTurn；终态分类
+>   end_turn→completed，取消类（cancelReq/stop=cancelled/“Request cancelled”/ctx.Canceled）→ run.cancelled；
+>   RunOnce（demo）改建于其上。实机冒烟：两 runtime 均经 REST 创建→WS 收流→多轮→cancel 全通。
+> - 前端面板骨架随前哨交付（列表/新建/流式渲染/多轮/取消/断线重连），release 内嵌单二进制。
+> M1 剩余项（wire transcript JSONL、能力标记裁剪入口、settings/agents 页等）维持 M1 范围。
+
 ### M2 — 可扩展底座（不写代码接入第三个 ACP agent）
 
 **目标**：平台化第一步——Agent 定义成为一等可管理资源；runtime 接入成本从「写 Go adapter」降到「配置」。
