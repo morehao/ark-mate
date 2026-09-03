@@ -132,3 +132,45 @@ func TestWSHandlerReplayAfterSince(t *testing.T) {
 		t.Fatalf("重放帧不符: %+v", replay)
 	}
 }
+
+// TestWSHandlerFullReplaySinceZero 验证 since_seq=0 → 全量回放（UI 冷开启既有会话重建视图）。
+func TestWSHandlerFullReplaySinceZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	bus := eventbus.New()
+	bus.Publish("session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
+	bus.Publish("session.thought", "s1", 1, map[string]any{"text": "t"})   // seq 2
+	bus.Publish("session.message", "s2", 1, map[string]any{"text": "no"})  // seq 3
+
+	h := handler.NewWSHandler(bus)
+	eng := gin.New()
+	eng.GET("/ws/events", h.Handle)
+	srv := httptest.NewServer(eng)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/events"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	since := int64(0)
+	if err := conn.WriteJSON(map[string]any{"action": "attach", "agg_id": "s1", "since_seq": since}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	var seqs []int64
+	for len(seqs) < 2 {
+		var f frame
+		if err := conn.ReadJSON(&f); err != nil {
+			t.Fatalf("read replay frame: %v", err)
+		}
+		if f.Type != "event" || f.AggID != "s1" || f.Event == nil {
+			t.Fatalf("期望 s1 的事件帧，got %+v", f)
+		}
+		seqs = append(seqs, f.Event.Seq)
+	}
+	if seqs[0] != 1 || seqs[1] != 2 {
+		t.Fatalf("全量回放序号不符: %v", seqs)
+	}
+}

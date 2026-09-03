@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 )
 
@@ -13,6 +15,13 @@ type Service interface {
 	ListRuntimes() ([]RuntimeResp, error)
 	// ListSessions 返回会话概要。
 	ListSessions() ([]SessionResp, error)
+
+	// CreateSession 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
+	CreateSession(ctx context.Context, req SessionCreateReq) (*SessionCreateResp, error)
+	// PromptSession 向既有会话追加一轮 prompt。
+	PromptSession(ctx context.Context, id, prompt string) (*SessionPromptResp, error)
+	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
+	CancelTurn(ctx context.Context, id string) error
 }
 
 // AgentResp Agent 的对外表示。
@@ -36,6 +45,29 @@ type SessionResp struct {
 	Runtime string           `json:"runtime"`
 	Status  string           `json:"status"`
 	History []eventbus.Event `json:"history,omitempty"`
+}
+
+// SessionCreateReq 新建会话请求体。
+type SessionCreateReq struct {
+	AgentID string `json:"agent_id" binding:"required"`
+	Prompt  string `json:"prompt"`
+	Cwd     string `json:"cwd,omitempty"`
+}
+
+// SessionCreateResp 新建会话响应。
+type SessionCreateResp struct {
+	ID       string `json:"id"`
+	AgentID  string `json:"agent_id"`
+	Runtime  string `json:"runtime"`
+	Status   string `json:"status"`
+	EventSeq int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
+}
+
+// SessionPromptResp 追加 prompt 响应。
+type SessionPromptResp struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
 }
 
 // Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。

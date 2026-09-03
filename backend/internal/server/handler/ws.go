@@ -125,8 +125,11 @@ func (h *WSHandler) readLoop(st *connState) {
 	}
 }
 
-// attach 执行「决策 + 注册」：since 空/0 → snapshot（冷挂载）+ 后续 live；
-// since>0 → EventsAfter(since) 重放该聚合 + 后续 live。
+// attach 执行「决策 + 注册」：
+//   - since_seq 省略（nil）→ snapshot（冷挂载：空 state + 水位）+ 后续 live；
+//   - since_seq 提供（≥0）→ EventsAfter(since_seq) 全量/增量重放该聚合 + 后续 live
+//     （UI 冷开启既有会话传 0 = 全量回放重建会话视图；断线重连传 lastSeq = 增量续传）。
+//
 // 简化说明：attach 的重放与 live 分属两条入队路径，极端并发下事件可能交错；
 // M1 的 §4.5 冻结面（持锁原子决策 + 单写者重放）再收敛顺序。
 func (h *WSHandler) attach(st *connState, f wsClientFrame) {
@@ -142,14 +145,14 @@ func (h *WSHandler) attach(st *connState, f wsClientFrame) {
 	st.attached[f.AggID] = true
 	st.mu.Unlock()
 
-	since := int64(0)
-	if f.SinceSeq != nil && *f.SinceSeq > 0 {
-		since = *f.SinceSeq
-	}
-	if since == 0 {
+	if f.SinceSeq == nil {
 		// 冷挂载：整包终态视图（M0 无持久化 → 空 state + 当前水位，客户端以此初始化游标）。
 		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(), State: json.RawMessage(`{}`)})
 		return
+	}
+	since := *f.SinceSeq
+	if since < 0 {
+		since = 0
 	}
 	for _, evt := range h.bus.EventsAfter(since) {
 		if evt.AggregID == f.AggID {
