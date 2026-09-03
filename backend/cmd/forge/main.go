@@ -17,11 +17,11 @@ import (
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 )
 
-const usageText = `forge — ark-forge 控制面 daemon（M0：打通 ACP 直连）
+const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
-  forge serve [--addr :8099]    启动控制面服务（REST 列表 + WS /ws/events 实时通道）
-  forge demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（M0 冒烟）
+  forge serve [--addr :8099]    启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
+  forge demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（冒烟）
 
 子命令帮助：forge serve -h / forge demo -h
 `
