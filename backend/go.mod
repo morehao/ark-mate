@@ -4,8 +4,8 @@ go 1.26.1
 
 require (
 	github.com/coder/acp-go-sdk v0.13.5
+	github.com/coder/websocket v1.8.15
 	github.com/gin-gonic/gin v1.12.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/morehao/golib v1.32.12
 )
 
