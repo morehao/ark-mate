@@ -596,6 +596,11 @@ prompt → 事件流入 eventbus → **经 WS 端点出流**（attach/快照/事
 
 **不做**：SQLite、Agent CRUD、断线续传的持久化、前端改动。
 
+**实现落点（M0 代码提交）**：1–6 全部落地。其中 acl 层对「agent 自托管鉴权」做直通
+（Authenticate methodId 取 `AuthMethodAgent.Id`，opencode 即此形态；env_var/terminal 仍报
+`access/auth_required`，M3 补全流程）；验证方式 `forge demo --runtime opencode --allow-all`
+（真实 opencode 1.18.27 冒烟：session.created → thought/message 流 → turn.ended）。
+
 **DoD（验收）**：`make server` 起服后，经 WS 客户端（wscat / 小型 Go client / 单测）attach 会话能看到
 真实 opencode/harness 会话产生的 token/thought 事件流（快照 + 增量）；`GET /runtimes /agents /sessions`
 返回真实数据；对 harness 的 resume/fork 返回「unsupported」；代码中已无 SSE 端点/适配器；
