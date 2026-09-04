@@ -13,6 +13,16 @@
 >    已随上游演进废弃，现为统一启动器 `dsh --profile acp`（会话可持久化 list/resume/close、无 load/fork），
 >    以 [design-and-roadmap.md](./design-and-roadmap.md) 与
 >    [deepseekharness-acp-adaptation.md](./deepseekharness-acp-adaptation.md) 为准。
+> ④ **定位边界（决策 v3，见 [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v3」）**：
+>    **能力不重造**——skills/MCP 等运行时能力复用底层 runtime 原生实现，本项目只做其数据/配置管理层
+>    （会话、skill、MCP 数据统一管理）；**单机单操作员**——不做多人协作/多用户鉴权/远程聊天通道，
+>    M3 的「基础鉴权与多用户」取消。本文档与 roadmap 中与 v3 冲突的表述以 v3 为准。
+> ⑤ **管理面范围校准（决策 v4，见 roadmap 文首「决策变更 v4」）**：参照应用型 Agent 工作台 AionUi，
+>    把「数据/配置管理层」做厚——M2 增权限策略数据位、M3 增会话数据管理面（分组/归档/搜索/导出）与
+>    usage 快照粒度、P1+/P2 冻结 cron/MCP/skills 数据契约（详见 roadmap §5.8 与对应里程碑）。
+> ⑥ **WS 载荷契约校准（决策 v5，见 roadmap 文首「决策变更 v5」）**：传输层（seq/agg/attach/重放）不动；
+>    载荷层增可选 `msg_id`（消息分组键）与工具 `kind/input/output`、usage 载荷字段化、预留
+>    `session.permission_request`/`session.runtime`（M2 发布），前端补 seq 幂等去重（roadmap §4.5 载荷契约）。
 
 ## 1. 定位与目标
 
@@ -26,6 +36,11 @@
 
 元定位：**是底座/平台，不是单纯的 Agent SDK**。核心差异化是靠统一协议（ACP）承载多个外部 Agent 运行时，
 让用户在同一面板内切换与控制不同的底层 Agent。
+
+定位边界（与 [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v3」一致）：
+- **能力不重造**：skills/MCP/推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
+- **数据管理是平台职责**：统一管理会话数据（wire transcript/历史）、skill 数据、MCP 服务器数据；
+- **单机单操作员**：不做多人协作、多用户鉴权与远程聊天通道。
 
 ## 2. 关键决策（已确认）
 

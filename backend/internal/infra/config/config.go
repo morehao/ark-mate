@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Config 是进程级配置。
@@ -14,6 +15,9 @@ type Config struct {
 	Addr string
 	// TranscriptDir 会话 wire transcript 落盘目录（M1 #5；空 = 禁用）。
 	TranscriptDir string
+	// TurnTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
+	// 只记自己日志不上报）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
+	TurnTimeout time.Duration
 }
 
 // Default 返回默认配置。
@@ -33,6 +37,12 @@ func Load() Config {
 		c.TranscriptDir = filepath.Join(home, ".forge", "transcripts")
 	} else {
 		c.TranscriptDir = ".forge/transcripts"
+	}
+	// FORGE_TURN_TIMEOUT：Go duration 文本（如 10m/1h）；非法值视为 0（关闭看门狗）。
+	if v := os.Getenv("FORGE_TURN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.TurnTimeout = d
+		}
 	}
 	return c
 }

@@ -7,6 +7,10 @@ export const Ev = {
   ToolCall: 'session.tool_call',
   ToolUpdate: 'session.tool_update',
   Usage: 'session.usage',
+  Permission: 'session.permission',
+  // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
+  PermissionRequest: 'session.permission_request',
+  Runtime: 'session.runtime',
   TurnEnded: 'turn.ended',
   TurnError: 'turn.error',
   RunCancelled: 'run.cancelled',
@@ -30,6 +34,7 @@ export interface StreamEntry {
   kind: EntryKind
   id: string // 稳定 id（生成/合并时复用）
   text?: string
+  msgId?: string // 可选：ACP unstable messageId（决策 v5①；同 msgId 文本段跨工具归并）
   toolId?: string
   title?: string
   status?: string

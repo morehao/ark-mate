@@ -52,6 +52,27 @@ func TestNormalizeUpdateMessageKinds(t *testing.T) {
 			t.Fatalf("SessionID 未透传: %+v", evs[0])
 		}
 	})
+	t.Run("message_id_passthrough", func(t *testing.T) {
+		// ACP unstable messageId（决策 v5①）：同 MessageID 的 chunk 归同一条消息。
+		mid := "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+		upd := acpsdk.SessionUpdate{AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
+			Content: acpsdk.TextBlock("seg"), MessageId: &mid,
+		}}
+		evs := collect(acpsdk.SessionNotification{SessionId: sid, Update: upd})
+		if len(evs) != 1 || evs[0].Kind != KindMessage {
+			t.Fatalf("message 归一不符: %+v", evs)
+		}
+		if d := evs[0].Payload.(MessageDelta); d.Text != "seg" || d.MessageID != mid {
+			t.Fatalf("message_id 未透传: %+v", d)
+		}
+	})
+	t.Run("message_id_absent", func(t *testing.T) {
+		// agent 未实现 messageId 时为可选空串（向后兼容，前端回退 tail 拼接）。
+		evs := collect(acpsdk.SessionNotification{SessionId: sid, Update: acpsdk.UpdateAgentMessageText("no-id")})
+		if d := evs[0].Payload.(MessageDelta); d.MessageID != "" {
+			t.Fatalf("空 messageId 应为空串: %+v", d)
+		}
+	})
 }
 
 // TestNormalizeUpdateToolKinds 工具调用发起/更新/用量事件。

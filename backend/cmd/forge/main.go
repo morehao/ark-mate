@@ -50,11 +50,15 @@ func main() {
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`:8099`）")
+	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
 	_ = fs.Parse(args)
 
 	cfg := config.Load()
 	if *addr != "" {
 		cfg.Addr = *addr
+	}
+	if *turnTimeout > 0 {
+		cfg.TurnTimeout = *turnTimeout
 	}
 
 	reg := runtime.DefaultRegistry()
@@ -62,6 +66,9 @@ func serve(args []string) {
 	svc := manager.NewService(reg, bus)
 	svc.SetTranscriptDir(cfg.TranscriptDir) // 会话 wire transcript（M1 #5，~/.forge/transcripts 或 FORGE_TRANSCRIPTS）
 	orch := manager.NewOrchestrator(svc, reg)
+	if cfg.TurnTimeout > 0 {
+		orch.SetTurnTimeout(cfg.TurnTimeout)
+	}
 	defer orch.Close()
 
 	srv := server.New(server.Config{Addr: cfg.Addr}, svc, bus)

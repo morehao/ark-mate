@@ -13,7 +13,7 @@
 4.1 / acl 4.2 / runtime+manager 4.3 / REST 4.4 / 实时事件流(WS 唯一) 4.5 / 实时通道决策 4.6 / 存储 4.7 /
 前端 4.8 / 演进位 4.9）
 · §5 codeg 对照与取舍（纪律 5.1 / 服务端与事件流 5.2 / 可扩展面 5.3 / 取舍矩阵 5.4 / 定位差异 5.5 /
-ACP 内核迁移清单 5.6 / 对齐修正 5.7） · §6 Roadmap 详解（M0–M3 + P1+） · §7 风险与验证
+ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Roadmap 详解（M0–M3 + P1+） · §7 风险与验证
 
 > **决策变更 v2（本节以下均已按此更新）**：
 > ① **实时通道仅 WebSocket**——「REST 命令 + WS 事件推送」为唯一实时形态（codeg 同款），
@@ -23,12 +23,68 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7） · §6 Roadmap 详解（M0–M3
 >    多 runtime 的意义 = 注册表 + 按会话/运行选择与切换，**不做** @委托/子 agent/并行协作（codeg 的
 >    delegation 相关内容从路线中移除，见 §5.4 矩阵更新）。
 
+> **决策变更 v3（定位边界，2026-09-04；本节以下均已按此更新）**：
+> ① **能力不重造**——skills/MCP/推理等「运行时能力」一律**直接复用底层 runtime 的原生实现**
+>    （skill 执行、MCP 工具调用等归 runtime），ark-forge **不实现**任何 agent 运行时功能本身。
+> ② **数据管理是平台职责**——平台只做三类数据的**管理层**：会话数据（session/run/wire transcript、
+>    M2 起落库）、skill 数据（技能包存储/分发/启用的数据面）、MCP 数据（服务器定义/注册/注入面）。
+> ③ **单机单操作员（无多人协作）**——当前**不做**多用户/团队共享语义：M3 的「基础鉴权与多用户」取消、
+>    P3+ 聊天/webhook/IM 远程通道位从路线移除；daemon 面向单操作员、默认仅监听本机，多会话并发与
+>    runtime 切换仍保留。对外暴露时的「单操作员 token」仅在确有需求时最小评估（当前不排期）。
+> ④ 无跨 agent 协作（决策 v2②）与无多人协作（v3③）是两条独立边界，叠加后平台完全面向
+>    「单个操作员 · 一次运行单 runtime」。
+
+> **决策变更 v4（管理面范围校准，2026-09-04；基于对 iOfficeAI/AionUi 的只读调研，本节以下均已按此更新）**：
+> AionUi 是**应用型** Agent 工作台（Electron/Web 壳 + 外部 aioncore(Rust) 引擎 + ACP 接入外部 CLI
+> agent），与 ark-forge 同为「薄控制面 + 外部宿主内核」结构；其「数据/配置管理层」做得厚，可整体当
+> 蓝本。校准结论（执行与协作边界不因参照改变，仍守 v2② / v3③ / 能力不重造）：
+> ① **权限策略位**（M2 纳入）：权限请求 = 数据管理面——语义收敛 allow/reject × once/always，确认
+>    通道与消息流解耦、策略记忆落库（现状：`acl.AllowPermission` 布尔回调默认一律拒绝，无 confirm
+>    通道、无记忆）。
+> ② **会话数据管理面做厚**（M3 纳入）：侧栏分组读模型 + 游标（置顶/项目目录/时间线）、软归档切面、
+>    全局消息搜索、批量导出；usage 按「per-turn 明细（input/output/thought/cached）+ 会话快照」粒度
+>    落库（`runs.usage_json`）。
+> ③ **会话态与 runtime 态分离**（M3）：`session.status` 与「连接 runtime 态（ensure/restart/cancel/
+>    lease + pending_confirmations + can_send）」分开建模；会话 = 外部会话镜像（remote_session_id 锚点），
+>    连接可被杀后重 spawn 续会话；daemon 侧进程注册表 JSON 兜底回收孤儿进程。
+> ④ **P1+/P2 数据契约具体化**：automation 先定 cron 数据契约（schedule at/every/cron+tz × target/
+>    message × execution_mode existing|new_conversation × state{next_run,retry}，执行归 runtime 后随
+>    P1 排期）；MCP 位数据模型采用判别联合 stdio(command/args/env)/sse/http/streamable_http(url/headers)
+>    + toggle/test-connection/OAuth/original_json 保真 + per-agent 子集 + 会话启用集「仅建会话时注入」；
+>    skills 位最小闭环 = 注册与目录管理（import/scan，与物化下发分离）+ 会话级技能快照 + 聊天头指示器。
+> 参照细节与「不借鉴清单」（内置引擎/Team 协作/远程通道/扩展 Hub 生态）见 §5.8。
+
+> **决策变更 v5（WS 载荷契约校准，2026-09-04；基于对 AionUi 的 WS 流式契约调研与 acp-go-sdk v0.13.5
+> wire 字段核验，本节以下均已按此更新）**：
+> 传输层不动：`seq / agg / attach / snapshot-重放` 契约保留（AionUi 用「msg_id 幂等 + 后端 DB 权威补拉」
+> 替代游标——其事件流只是渲染消息、权威在 DB；ark-forge 事件流是事实源，不降级）。
+> 载荷语义层校准五处：
+> ① **消息分组键透传**——text/thought/user 增量 payload 增**可选** `msg_id`（ACP unstable messageId，uuid；
+>    runtime 未实现则为空）；前端并入同 `(kind, msg_id)` 文本段（跨工具穿插可归并），无 msg_id 回退
+>    「同 kind 尾拼接」。
+> ② **工具事件补内容**——`session.tool_call/tool_update` payload 增**可选** `kind`（ACP ToolKind）/
+>    `input`/`output`（rawInput/rawOutput）；状态沿用 ACP 四态 pending/in_progress/completed/failed
+>    （`acl.ToolStatus*`）。
+> ③ **usage 载荷字段化**——`session.usage` 载荷定死 per-turn 明细 shape（与 M3 `runs.usage_json` 同源，
+>    见 §4.5），turn 结束随 `PromptResponse.usage` 填实；无数据时仅发占位帧（现状）。
+> ④ **确认/运行态事件契约预留**（M2 起发布，先冻结）——`session.permission_request`（挂起态：
+>    call_id/title/options[]，与留痕事件 `session.permission` 分离，对应 v4① 权限策略位）与
+>    `session.runtime`（phase/pending_confirmations/can_send，对应 v4③ 会话态分离）。
+> ⑤ **前端 seq 幂等去重落地**——store `applyEvent` 前置 `seq ≤ lastSeq` 丢弃（§4.5 承诺的幂等，此前未实现）。
+> 影响面：载荷均为**可选增字段**，事件 type 枚举不变（除 ④ 预留两个）、transcript JSONL schema v1 不变
+> （append-only，多出的可选键直接随行落盘）。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-forge 共享同一个
 核心命题：**作为 ACP Host，用统一控制面连接、运行、管理多个外部 Agent Runtime**（codeg 内置 15 个 agent，
 ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已到 0.30 版本、形态完整**的参考系，其
 宿主角色的实现分层可直接映射到 ark-forge 的 `acl / runtime / manager / server`：
+
+> 另有**第二参照物（应用型）AionUi**（iOfficeAI；Electron/Web 壳 + 外部 aioncore 引擎 + ACP 接入外部
+> CLI agent，见 §5.8）：与 ark-forge 同为「薄控制面 + 外部宿主内核」结构，其**数据/配置管理层**
+> （权限策略、会话管理、usage 快照、cron/MCP/skills 数据契约）可整体当蓝本；执行层（内置引擎）/
+> Team 协作 / 远程通道 / 扩展 Hub 生态**不借鉴**（撞 v2② / v3③ / 能力不重造边界，见文首「决策变更 v4」）。
 
 | codeg（参考实现） | 角色 | ark-forge 对应层 | 借鉴程度 |
 |---|---|---|---|
@@ -42,7 +98,8 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 参考时的**立场**（避免照抄成一个桌面 IDE）：
 
 - ark-forge 交付的是**自托管 daemon（`./forge` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
-  特性属于**应用层体验**，ark-forge 默认不做，仅在「面向 Web 多用户/多租户」的语义上保留等价能力位（见 §5.4）。
+  特性属于**应用层体验**，ark-forge 默认不做；当前定位为**单机单操作员**（决策 v3③），不保留
+  「面向 Web 多用户/多租户」的能力位。
 - codeg 桌面经 Tauri 事件通道直连内核、服务端经 WebSocket；ark-forge 采纳同款形态：**REST 命令 +
   WebSocket 事件推送为唯一实时通道**（不设 SSE 出口，决策 v2①，详见 §4.5/§4.6）。面板与 daemon 间
   **无多 agent 协作语义**：一次会话指定一个 runtime（决策 v2②）。
@@ -82,12 +139,17 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
    前端据此裁剪入口。
 3. **事件流可重放、增量与终态分离**（沿用架构文档 §2 五条范式，载体见 §4.5/§4.6 决策 v2①）：单一事件
    通道 + 全局单调 seq + `after`/快照续传 + 内存缓冲；终态落库、流式增量 live-only。
-4. **Web/多用户语义先于桌面语义**：自托管 daemon 天然要回答「谁在连、连哪个 runtime、鉴权怎么过」，
-   因此控制面把 runtime 配置、密钥注入、会话归属显式建模；不做本地 IDE 假设。
+4. **单机单操作员（无多人协作，决策 v3③）**：不做多用户/团队共享语义与登录/RBAC——daemon 面向单个
+   操作员、默认仅监听本机（127.0.0.1）；鉴权不在当前路线，仅当确需对外暴露时按「单操作员 token」
+   最小实现评估。控制面仍把 runtime 配置、密钥注入、会话归属**显式建模**（单操作员也要可配置、可备份、
+   可审计），但不做本地 IDE 假设。
 5. **层 seam 即未来模块边界**：`acl` 可抽独立 module/仓（对外发布 ACP Host 库）的演进路径保持开放（架构文档 §5）。
 6. **一次运行只指定一个 runtime（无跨 agent 协作）**：会话/运行在创建时绑定并固定一个 Agent（其下唯一
    Runtime）；「多 runtime」只表现为注册表与**按会话/运行选择切换**，不存在 @委托、子 agent、并行跨 runtime
    协作。所有编排语义（任务/自动化等，若未来引入）同样遵守「一次运行单 runtime」约束。
+7. **能力不重造，平台只做数据/管理层（决策 v3①②）**：skills/MCP/推理等执行能力一律复用底层 runtime
+   原生实现——ark-forge **不实现** skill 执行器、MCP 客户端等运行时功能；平台职责限定为管理这些能力
+   对应的**数据与配置**：会话数据、skill 包数据、MCP 服务器定义/注入面。
 
 ## 3. Roadmap 总览（先给骨架，细节见 §6）
 
@@ -95,10 +157,10 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 |---|---|---|---|
 | **M0** | 打通 ACP 直连 | acl+runtime+manager 落地，真实拉起 opencode/harness，事件流入 eventbus 并经 **WS 端点（attach/快照/事件，无鉴权）** 出流 | `make server` 后经 WS 客户端（wscat/小 Go 客户端/后续面板）可见真实 token 流 |
 | **M1** | 面板 MVP | Sessions 流式页 + Agents/Runtimes 列表，REST+WS 全链路 | 浏览器完成「选一个 agent → 发 prompt → 看流式回包 → 中断」 |
-| **M2** | 可扩展底座 | 持久化(SQLite)、Agent 定义 CRUD + 自定义 ACP agent 注册、provider 配置注入、断线续传（快照/重放） | 不写代码即可接入第三个 ACP agent |
-| **M3** | 平台化一期 | 多会话并发与恢复、切换指定 runtime、用量/日志、基础鉴权与多用户 | 自托管 daemon 可作为团队共享底座冒烟 |
-| **P1+** | 单 runtime 自动化与生态 | 任务板(worktree 隔离)/automation 等自动化位、MCP/skills 位（均单 runtime 指定；无跨 agent 协作） | 见 §5.4 取舍矩阵 |
-| **不做** | — | 桌面 IDE 外壳（编辑器/终端/Split View）、移动端、聊天通道、跨 agent 协作/委托 | 见 §5.4 |
+| **M2** | 可扩展底座 | 持久化(SQLite)、Agent 定义 CRUD + 自定义 ACP agent 注册、provider 配置注入、**权限策略位**（决策 v4①）、断线续传（快照/重放） | 不写代码即可接入第三个 ACP agent |
+| **M3** | 平台化一期 | 多会话并发与恢复、切换指定 runtime、**会话数据管理面**（分组/归档/搜索/导出，决策 v4②）、用量/日志（per-turn 明细 + 会话快照） | 自托管 daemon 可作为单操作员底座稳定冒烟（多会话并发 + 重启恢复 + 会话管理 + 可观测） |
+| **P1+** | 单 runtime 自动化与生态 | 任务板(worktree 隔离)、automation（先定 **cron 数据契约**，决策 v4④）、MCP/skills **数据管理**位（执行复用 runtime 能力，决策 v3①/v4④；均单 runtime 指定；无跨 agent 协作） | 见 §5.4 取舍矩阵 |
+| **不做** | — | 桌面 IDE 外壳（编辑器/终端/Split View）、移动端、多人协作（多用户/团队共享/鉴权登录）、聊天/远程通道（webhook/IM）、跨 agent 协作/委托（决策 v2②/v3③） | 见 §5.4 |
 
 > 说明：M0–M3 为当前工作焦点（本文档主体），P1+ 为方向性路线（能力位保留，不排期承诺）。
 > 详细到「每个阶段：做什么 / 怎么做 / 验收」见 §6。
@@ -149,6 +211,14 @@ Event（会话事件流的原子载荷，eventbus 单一通道，见 §4.5）
 | `turn.tool_call` / `turn.tool_result` | 工具 | ✅（结果） | 增量 live-only |
 | `turn.error` | 错误分类 | ✅ | 携带稳定 code + actions（分类词汇见 §5.6） |
 | `turn.required_action` | 权限/询问 | ✅ | 未来 question/permission 位 |
+
+> **实装与契约校准（决策 v5）**：首版实装 type 以 `manager/events.go`（与前端 `events.ts` 同源）为准：
+> `session.created / session.user_message / session.message / session.thought / session.tool_call /
+> session.tool_update / session.usage / session.permission（acl 决策留痕）/ turn.ended / turn.error /
+> run.cancelled`；一轮的流式片段由 `turn.ended/turn.error/run.cancelled` 统一收口，上表
+> `turn.text.ended / turn.thought.ended` 等细粒度终态事件不再逐条实现。M2 预留
+> `session.permission_request / session.runtime`（决策 v5④，仅契约先行）。各增量载荷的字段与归并语义
+> 见 §4.5「事件载荷契约（决策 v5 校准）」。
 
 > 对照 codeg：其会话事件先归一化为**统一 union**再达 UI（`session_state.rs`/`types.rs`）；ark-forge 用
 > eventbus 的 `type` 判别 union + WS 事件帧承载（§4.5），等价但更薄。codeg 的事件更多维
@@ -219,7 +289,16 @@ type Session interface {
 - **SessionOrchestrator**：把「对 Agent 的一次会话」编排为 ACP 连接获取 → session/new（或 load/resume）→
   prompt → 事件流 → cancel/close；对 harness 将 `load/resume/fork` 显式返回「unsupported」；
 - **连接池**：runtime 子进程按需拉起/空闲回收（对齐 codeg `idle_sweep`，M2 引入超时回收）；
-- **事件注入**：归一化事件 Publish 进 eventbus（`server/handler` 无需感知域变化，seam 已就位）。
+- **事件注入**：归一化事件 Publish 进 eventbus（`server/handler` 无需感知域变化，seam 已就位）；
+- **runtime 启动环境透传**：opencode 子进程透传 daemon 的 `OPENCODE_MODEL`。原因：opencode 的 ACP
+  **忽略客户端传入的模型选择**（[issue #13644](https://github.com/anomalyco/opencode/issues/13644)），
+  且默认模型不可用/被限流时可能「发起即静默挂起」（stream error 只写自身日志、不上报，
+  [issue #24494](https://github.com/anomalyco/opencode/issues/24494)）。指定可用模型须走启动环境：
+  `export OPENCODE_MODEL=yygu-v2/deepseek-v4-flash`（并在 opencode.json 配 `"model":"{env:OPENCODE_MODEL}"` 引用）。
+  单机单 operator 下与 dsh 的 `DEEPSEEK_API_KEY` 透传同模式；
+- **单轮 turn 看门狗**：`FORGE_TURN_TIMEOUT`（serve 亦支持 `--turn-timeout`，Go duration，0=关闭，
+  默认关）——turn 超时自动 cancel（复用有界取消路径）并发终态事件，兜住「吞错挂起 → busy 永久占用」，
+  前端配合「服务端忙水位 + 停止按钮」即可自愈。
 
 ### 4.4 REST API 契约（M1 冻结面）
 
@@ -238,7 +317,7 @@ type Session interface {
 | POST | `/sessions/:id/prompt` | 发 prompt（返回 run_id；流式走实时事件流 §4.5） | M1 |
 | POST | `/sessions/:id/cancel` | 取消当前 run | M1 |
 | POST | `/runs/:id/cancel` | 取消指定 run | M1 |
-| WS | `/ws/events` | 实时事件流唯一通道：attach/detach/ping、snapshot/replay/event 帧（§4.5） | M0（无鉴权）→ M3（token） |
+| WS | `/ws/events` | 实时事件流唯一通道：attach/detach/ping、snapshot/replay/event 帧（§4.5） | M0 起（单操作员默认无鉴权，决策 v3③） |
 | GET | `/providers` / `/providers/:id` | 模型提供商 CRUD | M2 |
 | GET | `/agents/definitions`（POST 自定义注册） | Agent 定义目录 | M2 |
 
@@ -256,7 +335,7 @@ type Session interface {
 { "type": "<事件type>", "seq": n, "agg_id": "s1|r1", "version": n, "payload": {...} }
 ```
 
-**端点 `/v1/forge/ws/events`（M0 起可用，无鉴权；M3 起 token 鉴权）**：
+**端点 `/v1/forge/ws/events`（M0 起可用；单操作员默认无鉴权，决策 v3③）**：
 - 一条 WS 承载「订阅控制 + 事件推送」，客户端帧与服务端帧按顶层 `action`/`type` 判别：
   - 客户端 → 服务端：`{action:"attach", agg_id, since_seq?}` / `{action:"detach", agg_id}` /
     `{action:"ping"}`；可同时 attach 多个聚合（会话/运行）。
@@ -267,9 +346,39 @@ type Session interface {
   「决策 + 注册订阅」，杜绝快照与首事件竞态。
 - 心跳：WS 协议层 ping/pong（30s）；应用层编排帧 `server.connected`（连接建立）/`server.instance.disposed`
   （daemon 关闭）各推一次，供客户端感知。
-- 鉴权：M3 起 token 经 WS 子协议（`forge-token.{b64url}`，浏览器可用）或首帧 auth，REST 走 header。
+- 鉴权：默认无（单操作员，本机监听）；若确需对外暴露，再按「单操作员 token」最小实现评估——token 经 WS
+  子协议（`forge-token.{b64url}`，浏览器可用）或首帧 auth，REST 走 header（协议位仅为该场景预留）。
 - **刻意不做**（相对 codeg 传输层）：多路复用/逐订阅 forwarder、多通道并存——一条 WS 即一个面板实例的
   全部实时面；事件按 `agg_id` 路由到会话视图、按 `seq` 幂等去重（前端只前进不回退）。
+
+**事件载荷契约（决策 v5 校准；可选字段缺省不出现在载荷/transcript 行中）**：
+
+| type | payload（稳定键） | 可选键（决策 v5） |
+|---|---|---|
+| `session.created` | session_id, agent_id, runtime | — |
+| `session.user_message` | session_id, agent_id, text | `msg_id` ① |
+| `session.message` / `session.thought` | session_id, agent_id, text | `msg_id` ① |
+| `session.tool_call` | session_id, agent_id, tool_call_id, title, status | `kind`/`input`/`output` ② |
+| `session.tool_update` | session_id, agent_id, tool_call_id, title, status | `kind`/`input`/`output` ② |
+| `session.usage` | session_id, agent_id | ③：input_tokens/output_tokens/thought_tokens/cached_read_tokens/cached_write_tokens/total_tokens/cost（随 turn 结束的 PromptResponse.usage 填实；shape 即 M3 `runs.usage_json`） |
+| `session.permission` | session_id, title, allowed（acl.PermissionInfo，决策后留痕） | — |
+| `turn.ended` | session_id, agent_id, stop_reason | — |
+| `turn.error` | session_id, code, class, details | — |
+| `run.cancelled` | session_id, stop_reason | — |
+
+> 说明：`msg_id` 为 ACP unstable `messageId`（acp-go-sdk v0.13.5：user/agent/thought chunk 均携带；
+> tool 更新仅 toolCallId，无 msg_id）——透传字段，runtime 不实现则为空，前端据此回退拼接（决策 v5①）。
+> 工具 `status` 沿用 ACP 四态 `pending/in_progress/completed/failed`；`tool_call`（发起）与
+> `tool_update`（更新/终态）共用载荷形状，终端状态看最后一次 update（决策 v5②）。
+
+**权限/确认位（决策 v5④，M2 发布、契约先行）**：当前（M0/M1）权限为同步布尔决策
+（`acl.AllowPermission`，默认拒绝），仅以 `session.permission` 留痕。M2 起权限请求 = **挂起态事件**
+`session.permission_request`：payload `{session_id, call_id, title, options:[{label,value}]}`（call_id
+关联 ACP 工具调用）；操作员经 REST 回执 confirm（allow/reject × once/always，决策 v4① 策略位）后，由
+`session.permission` 落决策留痕、pending 撤下。会话连接态由 `session.runtime`（payload
+`{session_id, phase, pending_confirmations, can_send}`；phase: starting/running/waiting_confirmation/
+cancelling/idle）承载——供侧栏/徽标与「等确认」指示，UI 不持进程（决策 v4③，镜像 AionUi
+`turn.completed`/`runtime.statusChanged` 语义，§5.8）。
 
 ### 4.6 实时通道决策：仅 WebSocket（相对架构文档 §2 的更新）
 
@@ -280,7 +389,7 @@ type Session interface {
 | 考量 | WebSocket（唯一实时通道） | SSE（已否决，作为对照） |
 |---|---|---|
 | 订阅控制（attach 带 since_seq / detach / 重连续传） | attach 帧是协议一等公民，快照/重放二分 first-class | 得借 REST query 表达，控制面别扭；多会话多 tab 只能全局流（前端去重噩梦）或每会话一连接（连接爆炸） |
-| 鉴权（M3 多用户 + 未来 CLI/移动/webhook 等非浏览器消费者） | 子协议携带 token，浏览器与非浏览器一致 | EventSource 不能带自定义头 → cookie/query，泄漏/CSRF 面差 |
+| 鉴权（决策 v3③ 下无多用户；仅「确需对外暴露时的单操作员 token」与未来非浏览器消费者） | 子协议携带 token，浏览器与非浏览器一致 | EventSource 不能带自定义头 → cookie/query，泄漏/CSRF 面差 |
 | 双向实时（控制信号、断连感知、未来 permission 应答/PTY） | 原生全双工 | 需另开通道 |
 | 反代/网关 | upgrade 后隧道式转发，配置成熟 | 需关 proxy_buffering、防空闲超时 |
 | 断线重连 | 显式 attach 协议承载（重连后按 lastAppliedSeq 补发） | 浏览器自带重连但与快照/重放语义叠加反而绕 |
@@ -322,8 +431,8 @@ providers(id TEXT PK, name TEXT, kind TEXT, base_url TEXT, model TEXT,
   `events.seq` 与 eventbus 全局 seq 同源（或落库后回填），供 `/sessions/:id/history` 与 WS 实时通道的
   after/快照续传共用。
 - **密钥加密**：`providers.api_key_enc` 首版可先用环境变量/配置注入 + OS keyring 的简化等价物（如
-  本地 master key 文件），M3 引入正式 secret 管理位；codeg 桌面用系统 keyring、服务端用 token 鉴权，
-  ark-forge 以「自托管 daemon 密钥文件 + 文件权限」起步，避免首版引入外部依赖。
+  本地 master key 文件）；单操作员定位下以「自托管 daemon 密钥文件 + 文件权限」为常态，无需多用户密钥
+  分发/secret 管理位（决策 v3③；codeg 桌面用系统 keyring、服务端用 token 鉴权），避免首版引入外部依赖。
 - events/runs 增量为零，历史查询走 `events` 表回放（可分页）。
 
 ### 4.8 前端架构（M1 冻结面，`frontend/apps/panel`）
@@ -346,10 +455,18 @@ apps/panel/src/
 **会话运行时 store 关键语义**（对齐 codeg `conversation-runtime-store.ts` 的职责，但只保留 Web 单面板子集）：
 - 面板经 WS 主通道 attach 会话：连接即订阅（`since_seq` 缺省 → 收 `snapshot` 冷挂载），随后收增量事件；
   消费游标（`seq`）从 `/sessions/:id/history` 尾部或 snapshot 的 `event_seq` 初始化；
-- live 增量（token delta）就地追加到当前消息；`*.ended` 终态事件把片段定稿为不可变消息（可折叠/重放）；
+- live 增量按文本段就地追加：带 `msg_id`（决策 v5①）并入同 kind/同段，否则同 kind 尾拼接；整轮终态由
+  `turn.ended / turn.error / run.cancelled` 收口（片段随之定稿为不可变，可折叠/重放）；事件按 `seq`
+  幂等去重（`applyEvent` 前置 `seq ≤ lastSeq` 丢弃，只前进不回退，决策 v5⑤）；
 - 断线自动重连（指数退避，重连后按上次已应用 seq 重新 attach，服务端按快照/重放二分补发），重连期间
   UI 显示「reconnecting」条；终态缺失时从 history REST 补齐；
 - `turn.error` 渲染错误横幅（重试 = 重新 POST prompt；分类为 auth 时引导去 settings）。
+- prompt 发送前**乐观置忙**（`streaming:true`，POST 返回前即禁用 Composer）并做防重入守卫，消除
+  「请求在途仍可再发」打到后端 `turn_in_progress` 的竞态；失败时回退非忙以便重试。
+- **服务端忙水位**：刷新/重启后本地 `streaming` 会重置，此时以 REST 会话列表 `status == in_progress`
+  兜底判定会话忙（本地视图无终态条目时），照常展示「停止」按钮——后端 `cancel` 幂等且能解开
+  卡住的 turn（agent 无响应时有界等待后本地解除），避免「看不到停止按钮 → 只能重启」的死胡同；
+  收到终态事件后自动刷新列表使状态收敛。
 - 前端 **不做**：编辑器/终端/文件树/Split View（对照 codeg workspace/layout 组件族，见 §5.4）。
 
 ### 4.9 M0/M1 之外的演进位（M2/M3 骨架预留，详 §5.4/§6）
@@ -362,10 +479,23 @@ apps/panel/src/
 - 会话导入（读取 runtime 原生会话存储：dsh `~/.dsh/sessions/<munged-cwd>/<uuid>/` jsonl、opencode 单文件
   SQLite `opencode.db`——对齐 codeg `src/parsers/` 每 agent 一 parser 的思路，M3 后评估；wire transcript
   是通用兜底，见 M1 #5 与 §5.3）；
-- MCP 位（统一 canonical spec + per-adapter 翻译器；harness 原生不读 MCP 配置，须经 ACP `session/new`
-  wire 送达 mcpServers、拒 sse——对齐 §5.3）→ P1 评估；
-- skills 位（集中仓 + symlink 启用 + 声明式 SkillStorageSpec）→ P2 评估；
-- 用量/日志统计（`runs.usage_json` + stderr 日志尾巴——对齐 codeg `stderr_tail.rs` 诊断思路）。
+- MCP **数据管理**位（决策 v3①②/v4④）：平台管理 MCP 服务器定义/注册与注入面——统一 canonical spec 采用
+  判别联合：stdio(`command/args/env`)、sse/http/streamable_http(`url/headers`)，含 enabled/toggle/
+  test-connection/OAuth 状态（login/logout/check-status）/original_json 保真 + per-agent 子集 +
+  会话级启用集（「仅建会话时注入」）；harness 原生不读 MCP 配置，须经 ACP `session/new` wire 送达
+  mcpServers、拒 sse（对齐 §5.3，传输支持随 runtime 能力裁剪）。工具执行由 runtime 完成，
+  ark-forge 不实现 MCP 客户端。→ P1 评估；
+- skills **数据管理**位（决策 v3①②/v4④）：技能包的存储/分发/启用数据面（集中仓 + symlink 启用 + 声明式
+  SkillStorageSpec）；skill 解析与执行归 runtime。最小闭环 = **注册与目录管理**（import/scan/路径检测，
+  与「物化下发」分离）+ **会话级技能快照 + 聊天头指示器**（面板只读快照、不复算执行态）。→ P2 评估；
+- automation **cron 数据契约**（决策 v4④，P1）：先冻结数据实体——`schedule`（kind at|every|cron，5 字段
+  expr + tz）× `target.payload.message` × `execution_mode: existing|new_conversation` ×
+  `state{next_run,retry}` + runNow；调度执行归 runtime（single-run 约束下「续会话 vs 新会话」两种执行
+  语义天然成立），平台只做建/停/查。
+- 会话数据管理 UI 面（决策 v4②，M3）：侧栏分组读模型 + 游标（置顶/项目目录/时间线）、软归档切面、
+  全局消息搜索 + 锚点、批量导出——wire transcript 为导出事实源，不另造导出存储。
+- 用量/日志统计（决策 v4②粒度）：`runs.usage_json` 按 per-turn 明细（input/output/thought/cached）+
+  会话快照落库 + stderr 日志尾巴（对齐 codeg `stderr_tail.rs` 诊断思路）。
 
 ## 5. codeg 能力对照与取舍矩阵
 
@@ -394,7 +524,8 @@ apps/panel/src/
 - **命令走 REST `POST /api/{command}`**（Bearer token，无信封：命令名即 URL、入参即 body），**推送走单一
   WebSocket `/ws/events`**；浏览器握手不能自定义头，token 经子协议 `codeg-token.{base64url}`。
   → ark-forge **采纳同一形态**：REST 命令 + WS 事件推送，WS 为唯一实时通道（决策 v2①，§4.5/§4.6）。
-  子协议方案在 ark-forge M3 鉴权时复用（`forge-token.{b64url}`，浏览器与非浏览器一致）。
+  子协议方案在 ark-forge 若需对外暴露（单操作员 token，决策 v3③）时复用
+  （`forge-token.{b64url}`，浏览器与非浏览器一致）。
 - codeg 教训一：早期全局 JSON 广播迫使前端做 receiver 去重与「未映射事件缓冲」，后来改为
   **per-connection attach**。→ ark-forge 的事件必须携带 `session_id/agent_id` 供前端按会话过滤，并把
   「续传口径」做成 first-class（快照/重放二分，见下），否则会重演去重噩梦。
@@ -454,6 +585,9 @@ apps/panel/src/
 - skills：集中仓 `~/.codeg/skills/<id>/SKILL.md`，「启用」= symlink/junction 链到各 agent 技能目录；
   声明式 `SkillStorageSpec{global_dirs, project_rel_dirs, kind}`；dsh 技能位 `$DSH_HOME/skills` + 项目
   `.dsh/skills` / `.agents/skills`（深挖至最近 .git）。
+- **ark-forge 立场（决策 v3①）**：以上 MCP/skills 机制只取「**数据/配置管理层**」——canonical spec 定义、
+  服务器/技能包注册、per-adapter 翻译与注入/送达；**执行**（MCP 工具调用、skill 解析与运行）一律由
+  runtime 原生完成，ark-forge 不实现运行时能力。
 
 **会话聚合/导入（src/parsers/）**
 - 每 agent 一个 parser（统一 `AgentParser{list_conversations, get_conversation}`）发现/解析**原生存储**：
@@ -467,8 +601,9 @@ apps/panel/src/
 
 **Go 侧分层优先级建议（映射 M0–M3/P1）**：① registry（AgentSpec + 自定义 CRUD + hydrate + preflight）→ M2；
 ② runtime adapters（spawn env / ACP 会话管理 + env key 注入 + fingerprint）→ M0/M2；③ model-provider
-（cascade + stale）→ M2；④ mcp（canonical spec + 翻译器；harness 走 wire）→ P1；⑤ sessions/import
-（dsh/opencode 两 parser + reconcile）→ P1–P2；⑥ skills（集中仓 + symlink + SkillStorageSpec）→ P2；
+（cascade + stale）→ M2；④ mcp 数据管理（canonical spec + 翻译器；harness 走 wire；执行归 runtime，
+决策 v3①）→ P1；⑤ sessions/import（dsh/opencode 两 parser + reconcile）→ P1–P2；⑥ skills 数据管理
+（集中仓 + symlink + SkillStorageSpec；执行归 runtime）→ P2；
 ⑦ 远端 ACP registry 浏览 → P3。②③④⑤⑥ 全部挂在 **adapter 接口**之后、daemon 只懂统一结构——这正是
 「可插拔 runtime」的平台价值所在。
 
@@ -486,10 +621,10 @@ apps/panel/src/
 | @协作 delegation（broker/spawner/独立子 ACP 会话 + one-shot/resume + 级联 cancel + 深度限制） | **不做（决策 v2②）**：当前定位无跨 agent 协作，一次运行只指定一个 runtime；该机制在定位扩展前不进路线。其在「CAS/事件同事务/异步跟踪」上的纪律已由 §5.1 吸收 | — | 定位约束；避免为「平台卖点」提前堆协作复杂度 |
 | 任务板 todo→…→review→merge（worktree 隔离 + git truth 校验） | P1 候选：服务端 repo 副本/分支隔离 + 产物 diff 展示 + 人工采纳（review 门保留）；每次运行仍单 runtime 指定；merge 自动合入延后 | P1 | worktree 模型天然适配服务端沙箱；远端 forge 集成成本高 |
 | automation（composer 快照重放 + cron/on-demand + LaunchSession/EnqueueTask） | P1 候选，与任务板同期；动作只留 LaunchSession（单 runtime 会话） | P1 | 纯服务端逻辑可搬 |
-| chat channel（backend trait + session bridge） | 三期 webhook/IM 插件位（预留接口，不实现） | P3+ | 价值在远程驱动/推送；平台集成点 |
+| chat channel / 远程驱动（webhook/IM bridge） | **不做（决策 v3③）**：多人/远程协作语义不在当前定位，接口不留排期位 | — | 无多用户场景则无远程驱动价值；定位扩展前不进路线 |
 | 编辑器/终端/文件树/Split View/canvas 桌面体验 | **不做**；Web 只做只读文件树 + 变更 diff 页帮用户验收 | — | 桌面专属；编辑归 agent/外部 IDE |
 | background_watch（transcript 反代） | 不做；当成协议问题 | — | 避免逆向耦合 runtime 私有存储 |
-| MCP 服务器扫描/注册、skills 包 | M3 后评估（MCP 能力位已在 acl.caps 预留） | P1+ | 平台生态方向，优先级低于 M0–M3 主线 |
+| MCP/skills **数据管理**（定义/注册、注入/送达、技能包分发；执行归 runtime，决策 v3①） | M3 后评估（MCP 能力位已在 acl.caps 预留） | P1+ | 数据管理层，不实现运行时能力；优先级低于 M0–M3 主线 |
 
 ### 5.5 定位差异一句话
 
@@ -497,6 +632,12 @@ codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度�
 「**可自托管的 agent 底座**」——价值在**统一拉起、管理、切换指定**多 runtime（一次运行一个 runtime，
 无跨 agent 协作），并通过 REST + WS 把能力开放给任意前端。凡 codeg 中「依赖本地桌面形态」或
 「依赖多 agent 协作」的能力，ark-forge 一律降级或不做；凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。
+
+在此基础上，定位边界由**决策 v3** 明确为三点：
+- **能力不重造**：skills/MCP 等运行时能力复用底层 runtime 原生实现，ark-forge 只管理其数据与配置；
+- **数据管理是平台职责**：会话、skill、MCP 三类数据由平台统一管理（管理面，非运行时面）；
+- **无多人协作**：单机单操作员，多用户/鉴权登录/聊天远程通道不在路线——与决策 v2② 的「无跨 agent
+  协作」叠加为「一个操作员 × 一次运行一个 runtime」。
 
 ### 5.6 codeg ACP 内核 → ark-forge acl/runtime/manager 迁移清单（精读证据）
 
@@ -562,8 +703,8 @@ opencode/harness 两形状）。
 - §4.5 实时通道（仅 WS，决策 v2①）：`after`/`since_seq` 续传为**快照/重放二分**——落后于缓冲淘汰点
   （或 daemon 重启）先推整包 `snapshot` 再推增量，否则回放 + live（对齐 §5.2 的 attach 协议）；eventbus
   history 增加 per-aggregate 条数/字节双上限，超限淘汰并把「该聚合已不可增量续传」记为快照回退信号。
-  事件必须携带 `session_id/agent_id`（现 agg_id 已含），前端按会话过滤而非全量消费。鉴权（M3）：WS 子协议
-  `forge-token.{b64url}`，REST 走 header。
+  事件必须携带 `session_id/agent_id`（现 agg_id 已含），前端按会话过滤而非全量消费。鉴权：默认无
+  （决策 v3③，单操作员）；若对外暴露，WS 子协议 `forge-token.{b64url}`、REST 走 header（单操作员 token）。
 - §4.8 前端：会话运行时采用**双层结构**（连接/活状态层 + 时间线渲染层分离，按最小 slice 订阅）与
   **批量 flush**（高频 delta 16ms/攒批一次进 reducer）、seq 幂等去重（`seq <= lastAppliedSeq` 丢弃、
   游标只前进）——面板流式渲染不卡的纪律，见 §5.2。
@@ -575,6 +716,39 @@ opencode/harness 两形状）。
   在 acl 层产出、manager 语义化、实时通道原样透传，前端只做展示与动作分发。
 - §4.1/§4.3 运行时语义（决策 v2②）：Session/Run 创建时即绑定唯一 Agent/Runtime，会话期内不换 runtime；
   删除一切「跨 runtime 委托/协作」相关接口与事件的演进位（delegation、子代理卡片、级联 cancel 的子任务面）。
+
+### 5.8 参照 AionUi（应用型对照物，只读）——管理面蓝本与不借鉴清单
+
+- 参照仓库：`/Users/morehao/Documents/study/ai-agent/AionUi`（iOfficeAI/AionUi，Apache-2.0，v2.2.1 快照；
+  2026-09-04 只读调研，本仓库未动）。下文行号为该仓库相对路径，读于当日。
+- **一句话分层**：AionUi = Electron/Web 壳 + React UI，经 REST/WS 调**外部 aioncore 引擎**
+  （`packages/desktop/src/common/adapter/ipcBridge.ts` 自述「replaces the original IPC bridge calls with
+  HTTP REST and WebSocket calls routed to aioncore」）；外部 CLI agent（Claude Code/Codex/…）经 **ACP**
+  接入（readme.md:186），协议形状镜像于 `common/types/platform/acpTypes.ts`；会话/引擎/skills/MCP/cron
+  的**执行实现均在外部 AionCore 仓库**（readme.md:713），本仓库只见数据模型、API 面与 UI。
+  即：AionUi 与 ark-forge 同为「薄控制面 + 外部宿主内核」，但它是「自带引擎的应用型工作台」——
+  其**数据/配置管理层**可当蓝本，引擎/协作/远程层不借鉴。
+
+| AionUi 数据管理面形态（证据） | ark-forge 落点 |
+|---|---|
+| 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | M2 权限策略数据位（v4①） |
+| 会话 = 强类型定列 + extra JSON 快照；侧栏服务端分组读模型（pinned/项目/时间线）+ 软归档（archived_at 切片）+ 全局消息搜索 + 批量导出（`sidebar.ts`、`ipcBridge.ts:2423-2497`） | M3 会话数据管理面（v4②） |
+| 会话 runtime 摘要状态机：ensure/restart/cancel/lease + pending_confirmations + can_send，UI 不持进程（`ipcBridge.ts:341-361`、`runtime/agent-process-registry.ts`） | M3 会话态/连接态分离（v4③） |
+| MCP：IMcpServer 判别联合传输（stdio/sse/http/streamable_http）+ toggle/test-connection/OAuth/original_json 保真 + per-agent 子集 + 会话启用集「仅建会话时注入」（`common/config/storage.ts:595-640`、`ipcBridge.ts:1205-1269`） | P1 MCP 数据模型（v4④） |
+| skills：注册与目录管理（import/scan，与物化下发分离）+ 会话级快照 + 聊天头指示器（`ipcBridge.ts:918`、`ConversationSkillsIndicator.tsx`） | P2 skills 最小闭环（v4④） |
+| cron：ICronJob schedule at/every/cron+tz × target.message × execution_mode existing/new_conversation × state（`ipcBridge.ts:1629-1705`） | P1 automation cron 数据契约（v4④） |
+| usage：TokenUsageData 明细+成本随会话快照 + usage_update 事件（`storage.ts` last_token_usage） | M3 runs.usage_json 粒度（v4②） |
+| 消息 = msg_id 幂等 + 类型化合并（append 默认、`replace:true` 才替换；tool 按 call_id 原位合并；
+  `hooks.ts:293-323`、`chatLib.ts:369`、`acpTypes.ts:143-156`） | WS 载荷透传 `msg_id` + 前端同段归并
+  （决策 v5①）；其「无游标 + DB 权威补拉」传输方式不借鉴 |
+
+**不借鉴清单**（保持定位边界；AionUi 的这些卖点恰好撞 v2②/v3③/能力不重造）：
+1. **内置 agent 引擎**（embedded aionrs + AionCore 全套能力）——与 v3①「能力不重造」相反，ark-forge 能力委托 runtime；
+2. **Team 多 agent 协作**（Leader/Teammate + mailbox + 共享任务板）——撞 v2②；
+3. **远程与 IM 通道**（WebUI remote / Telegram / Lark / DingTalk / WeChat，users/teams 表、QR+JWT 多端）——撞 v3③；
+4. **扩展 Hub 生态**（extension contributes + tarball+SHA-512 + permissions/risk 门禁）——单操作员自托管优先级低；
+   仅未来若做「现成 agent/mcp 目录」再参考其 integrity 与版本门禁；
+5. **Office/文档垂直应用**（PPT/Word/Excel 助手、多格式预览面板）——应用层，不在底座定位。
 
 ## 6. Roadmap 详解（M0–M3）
 
@@ -689,6 +863,10 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 4. 连接池化与空闲回收（对照 codeg idle_sweep）、Agent 启停（lifecycle 状态机 running/paused/stopped）；
 5. 会话能力标记（`capabilities_json`）驱动前端入口裁剪（harness 隐藏续谈/派生）；
 6. 端到端测试基建：adapter 冒烟用「假 ACP server」测试夹具（echo/慢流 agent），与真实 runtime 冒烟分离。
+7. **权限策略数据位**（决策 v4①）：permission 请求归一 allow/reject × once/always；confirm 通道（REST
+   按 call_id 回执 + always_allow 回灌）+ 策略记忆查询/落库（默认策略 per-agent：deny/ask/allow）；
+   前端 permission 卡片与侧栏待批计数——为自定义 agent 的真实工具会话解锁（替换当前默认一律拒绝的
+   布尔回调）。
 
 **不做**：多用户/鉴权、用量统计、会话导入、MCP/skills（位预留）。
 
@@ -696,31 +874,42 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 对话；重启 daemon 后会话终态可经 history 恢复；`make test` 含 adapter 夹具测试。
 **量级**：4–6 周。
 
-### M3 — 平台化一期（自托管底座冒烟）
+### M3 — 平台化一期（单操作员底座稳定冒烟）
 
-**目标**：`./forge` 可作为团队共享底座冒烟：多会话并发、基础安全、可观测。
+**目标**：`./forge` 可作为单操作员底座稳定运行：多会话并发、重启恢复、可观测
+（决策 v3③：无多用户/团队共享语义，无登录鉴权排期）。
 
 **要做**：
 1. 多会话并发与真实恢复：daemon 重启后按 `sessions`/`runs` 恢复终态视图；opencode 会话 load/resume
    贯通；harness（dsh）会话经同一 `$DSH_HOME` 持久化根 list/resume（断连后仍可续，无「过期横幅」
    一说，resume 入口按 caps 裁剪）；切换会话/新建会话时按需**指定 runtime**
-   （决策 v2②：一次会话一个 runtime，切换 = 开新会话）；
-2. 基础鉴权与多用户（保守）：面板登录 token（首版单管理员 + 只读访问位）；REST 走 header、WS 走子协议
-   （`forge-token.{b64url}`）；统一鉴权中间件；
-3. 用量/日志：runs.usage_json 落库 + 会话粒度 token 统计 API；stderr 诊断尾巴（对照 codeg stderr_tail）；
+   （决策 v2②：一次会话一个 runtime，切换 = 开新会话）；会话态与连接 runtime 态分离建模
+   （决策 v4③：status vs ensure/restart/cancel/lease + pending_confirmations，连接可杀后重 spawn
+   续会话；daemon 侧进程注册表兜底回收孤儿进程）；
+2. 会话数据管理面（决策 v4②）：侧栏分组读模型 + 游标窗口（置顶/项目目录/时间线 Today~Earlier）、
+   软归档切面（archived_at 切片/恢复/清空硬删）、全局消息搜索 + 锚点跳转、批量导出
+   （wire transcript 已是事实源，导出直接基于它：JSON/纯文本）；
+3. 用量/日志：runs.usage_json 按「per-turn 明细（input/output/thought/cached）+ 会话快照」粒度落库 +
+   会话粒度 token 统计 API；stderr 诊断尾巴（对照 codeg stderr_tail）；
 4. 审计与配置管理：`.forge/config` 目录化（runtimes/agents/providers 的可导出配置，备份友好）；
-5. 可选：远程 runtime（Streamable HTTP/WS 传输）评估——`acl.Transport` 第二实现验证 seam。
+5. 可选① 远程 runtime（Streamable HTTP/WS 传输）评估——`acl.Transport` 第二实现验证 seam；
+6. 可选② 对外暴露评估（决策 v3③）：默认仅监听本机（127.0.0.1）；若确需监听非本机地址，按
+   「单操作员 token」最小实现（REST header + WS 子协议 `forge-token.{b64url}`），不做多用户/RBAC。
 
-**不做**：多租户隔离与 RBAC 完整版、计费、跨 agent 协作（决策 v2②，定位外）。
+**不做**：多租户隔离与 RBAC、计费、登录/多用户鉴权（决策 v3③，单操作员定位外）、
+跨 agent 协作（决策 v2②，定位外）。
 
-**DoD**：两个浏览器用户同时跑会话互不阻塞；daemon 重启后历史会话可查、opencode 会话可续谈；
-未授权访问被拒（REST/WS 一致）；关键操作有日志。产出部署文档（systemd/container 二选一）。
+**DoD**：多会话并发互不阻塞（单操作员开多个会话）；daemon 重启后历史会话可查、opencode 会话可续谈；
+会话可分组/归档/搜索/导出；关键操作有日志。产出部署文档（systemd/container 二选一）。
 **量级**：4–6 周。
 
 ### P1+ — 单 runtime 自动化与生态（方向性路线，能力位保留，不排期承诺）
 
 详见 §5.4 取舍矩阵；按依赖排序的候选队列：任务板（worktree 隔离 + review 合入）→ automation
-（定时/触发跑已配置的单 runtime 会话）→ MCP 服务器扫描/注册 → skills 包。全部遵守决策 v2②
+（定时/触发跑已配置的单 runtime 会话；**先定 cron 数据契约**——schedule at/every/cron+tz × target/
+message × execution_mode existing|new_conversation × state{next_run,retry}，决策 v4④，执行归 runtime
+后随 P1 排期）→ MCP 数据管理 → skills 数据管理（决策 v3①②/v4④：执行复用 runtime 能力，平台只做
+数据/配置层）。全部遵守决策 v2②
 （每次运行指定且仅指定一个 runtime，无跨 agent 协作）。每一项都先回答
 「谁是用户、和 codeg 桌面场景差在哪、ark-forge 的 Web/平台等价物长什么样」再立项。
 
@@ -736,8 +925,8 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 | 4 | WS 长连接在反代/网关下的保活与续传（空闲超时、升级路径、缓冲） | M0/M1 体验 | WS 协议层 ping/pong + 应用层 attach 重试（指数退避）；文档给出 nginx/反代配置建议（WS upgrade、read 超时） |
 | 5 | 事件体积膨胀（harness 高频 thought/token） | M2 前 | 增量 live-only、终态落库（§2 范式已定）；必要时增量节流/批量合并；前端批量 flush（§4.8） |
 | 6 | 断连续传依赖内存缓冲，daemon 重启即丢 | M2 边界内 | M2 起 durable 终态落 `events` 表，实时通道 `after`/快照从库补历史；内存缓冲只兜 live 段（快照/重放二分，§4.5） |
-| 7 | 多用户语义（M3）被首版单用户结构拖累 | M3 | 领域模型从一开始带 owner/鉴权位（§4.7 schema 预留），不做「先单用户后重构」 |
-| 8 | 平台定位漂移成「又一个桌面 IDE」或「偷偷长出多 agent 协作」 | 全程 | 以 §2 六条总则为评审红线；P1+ 立项先过 §5.4 矩阵；新增「协作类」需求必须显式走定位评审 |
+| 7 | 单操作员 daemon 被误暴露（默认 127.0.0.1 被改成公网监听却无鉴权） | M3 | 默认仅监听本机；确需对外暴露先过「单操作员 token」最小实现（§6 M3 #6）；部署文档给出反代/防火墙建议 |
+| 8 | 平台定位漂移成「又一个桌面 IDE」「偷偷长出多 agent 协作」或「长出多人协作/多用户」 | 全程 | 以 §2 七条总则为评审红线；P1+ 立项先过 §5.4 矩阵；新增「协作类」需求（含多人/远程）必须显式走定位评审（决策 v2②/v3③） |
 
 ### 7.2 验证方式（每里程碑重复执行）
 
