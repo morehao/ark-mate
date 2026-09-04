@@ -159,3 +159,44 @@ func TestErrLooksCancelled(t *testing.T) {
 		t.Fatal("普通错误不应判为取消")
 	}
 }
+
+// stuckCancel 的 Cancel 仅在 ctx 到期（agentCancelTimeout 兜底）时返回：
+// 模拟 runtime 对 session/cancel 无响应（如模型限流重试挂起）。
+type stuckCancel struct {
+	*stubSession
+}
+
+func (s *stuckCancel) Cancel(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestCancelTurnAgentUnresponsive agent 无响应时 CancelTurn 有界返回并本地解除：
+// 不依赖 session/cancel RPC，Prompt 总是被 ctx 取消打断 → run.cancelled。
+func TestCancelTurnAgentUnresponsive(t *testing.T) {
+	svc, orch, bus := newTestRig(t)
+	as := &ActiveSession{
+		ID: "s1", AgentID: "a", Runtime: "r",
+		sess: &stuckCancel{stubSession: &stubSession{cancelOnCtx: true}},
+	}
+	orch.sessions["s1"] = as
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+
+	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	start := time.Now()
+	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelTurn: %v", err)
+	}
+	if el := time.Since(start); el > agentCancelTimeout+2*time.Second {
+		t.Fatalf("CancelTurn 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
+	}
+	evts := feed(bus, "s1", 2)
+	if len(evts) < 2 || evts[len(evts)-1].Type != BusRunCancelled {
+		t.Fatalf("期望 run.cancelled，got %+v", evts)
+	}
+	if svc.sessions["s1"].Status != SessionStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	}
+}

@@ -1,90 +1,128 @@
-// 应用壳（§4.8）：顶栏（标题 + 导航 + WS 状态/刷新）+ reconnecting 横幅 + 路由区。
-import { NavLink, Navigate, Route, Routes } from "react-router-dom"
-import { PanelProvider, usePanelCtx } from "./panel-context"
-import { AgentsPage } from "./pages/AgentsPage"
-import { RuntimesPage } from "./pages/RuntimesPage"
-import { SessionsPage } from "./pages/SessionsPage"
-import { SettingsPage } from "./pages/SettingsPage"
-import { c, s } from "./ui"
+// 应用壳（console.html .app）：顶栏 + WS reconnecting 横幅 + 路由区 + 全局 toast。
+import { useEffect, type ReactNode } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { tokens } from '@ark/ui'
+import { consoleStyleSheet } from './console.css'
+import { TopBar } from './components/TopBar'
+import { useForge } from './store'
+import { ChatPage } from './pages/ChatPage'
+import { AgentsPage } from './pages/AgentsPage'
+import { RuntimesPage } from './pages/RuntimesPage'
+import { SettingsPage } from './pages/SettingsPage'
 
-const navStyle = (active: boolean): React.CSSProperties => ({
-  color: active ? c.text : c.muted,
-  textDecoration: "none",
-  fontSize: 13,
-  fontWeight: active ? 700 : 400,
-  borderBottom: active ? `2px solid ${c.accent}` : "2px solid transparent",
-  paddingBottom: 2,
-})
-
-function Header() {
-  const p = usePanelCtx()
-  const { wsState } = p.state
-  const wsColor = wsState === "open" ? c.ok : wsState === "connecting" ? c.busy : c.err
-  const wsLabel = wsState === "open" ? "WS 已连接" : wsState === "connecting" ? "连接中…" : "WS 断开"
+function Manage({ children }: { children: ReactNode }) {
   return (
-    <>
-      <header style={s.header}>
-        <span style={s.title}>ark-forge</span>
-        <span style={s.sub}>ACP 会话控制面 · M1</span>
-        <nav style={{ display: "flex", gap: 14, marginLeft: 16, alignItems: "center" }}>
-          <NavLink to="/sessions" style={({ isActive }) => navStyle(isActive)}>
-            会话
-          </NavLink>
-          <NavLink to="/agents" style={({ isActive }) => navStyle(isActive)}>
-            Agents
-          </NavLink>
-          <NavLink to="/runtimes" style={({ isActive }) => navStyle(isActive)}>
-            Runtimes
-          </NavLink>
-          <NavLink to="/settings" style={({ isActive }) => navStyle(isActive)}>
-            Settings
-          </NavLink>
-        </nav>
-        <span style={{ flex: 1 }} />
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, color: c.muted }}>
-          <span style={{ ...s.dot, background: wsColor }} />
-          {wsLabel}
-        </span>
-        <button style={s.btnGhost} onClick={() => void p.refreshSessions()}>
-          刷新会话
-        </button>
-      </header>
-      {/* reconnecting 提示条（§4.8）：非 open 时可见（首连前的 idle 除外），
-          transport 指数退避自动重连 + 按水位重订阅，无需人工介入。 */}
-      {wsState !== "idle" && wsState !== "open" && (
-        <div style={s.banner}>
-          <span style={{ ...s.dot, background: c.busy }} />
-          {wsState === "connecting" ? "连接中…" : "WS 已断开，正在自动重连（重连后按上次水位续传）…"}
-        </div>
-      )}
-    </>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', background: tokens.bg }}>
+      {children}
+    </div>
   )
 }
 
 export function App() {
+  // 启动一次：常驻 WS 连接 + 拉取 agents/runtimes/sessions（跨路由共享一份状态）
+  useEffect(() => {
+    useForge.getState().boot()
+  }, [])
+
+  const wsState = useForge((s) => s.wsState)
+  const toast = useForge((s) => s.toast)
+
   return (
-    <PanelProvider>
-      <div style={s.page}>
-        <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} } body{margin:0}`}</style>
-        <ReconnectToast />
-        <Header />
+    <div
+      style={{
+        height: '100dvh',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        background: tokens.bg,
+        color: tokens.text,
+      }}
+    >
+      <style>{consoleStyleSheet}</style>
+      <TopBar />
+
+      {/* reconnecting 提示条：非 open 时可见（首连前的 idle 除外） */}
+      {wsState !== 'idle' && wsState !== 'open' && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 16px',
+            fontSize: 12,
+            background: tokens.warningBg,
+            color: tokens.warning,
+            borderBottom: `1px solid ${tokens.warningBorder}`,
+            flex: 'none',
+          }}
+        >
+          <span
+            className="fg-anim-pulse"
+            style={{ width: 7, height: 7, borderRadius: '50%', background: tokens.warning, display: 'inline-block' }}
+          />
+          {wsState === 'connecting' ? '连接中…' : 'WS 已断开，正在自动重连（重连后按会话水位续传）…'}
+        </div>
+      )}
+
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Routes>
           <Route path="/" element={<Navigate to="/sessions" replace />} />
-          <Route path="/sessions" element={<SessionsPage />} />
-          <Route path="/sessions/:id" element={<SessionsPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/runtimes" element={<RuntimesPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/sessions" element={<ChatPage />} />
+          <Route path="/sessions/:id" element={<ChatPage />} />
+          <Route
+            path="/agents"
+            element={
+              <Manage>
+                <AgentsPage />
+              </Manage>
+            }
+          />
+          <Route
+            path="/runtimes"
+            element={
+              <Manage>
+                <RuntimesPage />
+              </Manage>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Manage>
+                <SettingsPage />
+              </Manage>
+            }
+          />
           <Route path="*" element={<Navigate to="/sessions" replace />} />
         </Routes>
       </div>
-    </PanelProvider>
-  )
-}
 
-/** 全局 toast（跨页） */
-function ReconnectToast() {
-  const p = usePanelCtx()
-  const toast = p.state.toast
-  return toast ? <div style={s.toast}>⚠ {toast.msg}</div> : null
+      {/* 全局 toast（错误/提示，轻量浮层） */}
+      {toast && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 16,
+            top: 64,
+            maxWidth: 420,
+            zIndex: 90,
+            background: tokens.surface,
+            border: `1px solid ${tokens.borderStrong}`,
+            borderRadius: 12,
+            boxShadow: '0 8px 30px rgba(15, 23, 42, 0.14)',
+            padding: '10px 14px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            color: tokens.text,
+          }}
+        >
+          <span style={{ color: tokens.error, flex: 'none' }}>⚠</span>
+          <span style={{ overflowWrap: 'anywhere' }}>{toast.msg}</span>
+        </div>
+      )}
+    </div>
+  )
 }

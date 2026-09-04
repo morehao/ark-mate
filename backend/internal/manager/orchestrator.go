@@ -8,10 +8,15 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/runtime"
 )
+
+// agentCancelTimeout session/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
+// 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
+const agentCancelTimeout = 3 * time.Second
 
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
 type acpSession interface {
@@ -240,8 +245,22 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
 	if t == nil {
 		return nil
 	}
-	_ = as.sess.Cancel(ctx) // agent 侧取消（session/cancel）
-	t.cancel()              // 解除 SDK 阻塞
+	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
+	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（runTurn 收尾不依赖 RPC）。
+	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), agentCancelTimeout)
+	defer ccancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = as.sess.Cancel(cctx)
+	}()
+	select {
+	case <-done:
+	case <-cctx.Done():
+		o.logger.Debug("session/cancel RPC 未在限期内响应，本地强制解除",
+			"session", sessionID, "timeout", agentCancelTimeout.String())
+	}
+	t.cancel() // 解除 SDK 阻塞
 	return nil
 }
 

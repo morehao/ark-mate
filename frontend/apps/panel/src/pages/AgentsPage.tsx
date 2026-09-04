@@ -1,33 +1,57 @@
-// Agents 只读列表页（M1 #2；M2 增 CRUD/注册向导，§4.8）。
-import { useEffect } from "react"
-import { usePanelCtx } from "../panel-context"
-import { c, s, StatusDot } from "../ui"
+import { useEffect } from 'react'
+import { Button } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
+import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
+import { useForge } from '../store'
 
+/** Agents 只读页（console 管理入口，M1）：每 runtime 一个默认播种 Agent。 */
 export function AgentsPage() {
-  const p = usePanelCtx()
-  const { agents } = p.state
+  const agents = useForge((s) => s.agents)
+  const refreshAgents = useForge((s) => s.refreshAgents)
+
   useEffect(() => {
-    void p.refreshAgents()
+    void refreshAgents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
-    <div style={{ padding: 20, maxWidth: 960, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
-      <div style={{ fontSize: 16, fontWeight: 700 }}>Agents</div>
-      <div style={s.sub}>每 runtime 一个默认播种 Agent；CRUD/自定义注册为 M2（§4.4/§5.3）</div>
-      {agents.length === 0 && <div style={{ color: c.muted, marginTop: 12 }}>（空）</div>}
-      {agents.map((a) => (
-        <div key={a.id} style={{ ...s.card, cursor: "default", display: "flex", alignItems: "center", gap: 10 }}>
-          <StatusDot st={a.state} />
-          <b>{a.name}</b>
-          <span style={s.chip}>{a.runtime}</span>
-          <span style={s.chip}>{a.state}</span>
-          <span style={{ color: c.muted, fontSize: 12, fontFamily: "monospace", marginLeft: "auto" }}>{a.id}</span>
+    <PageContainer
+      title="Agents"
+      description="控制面已注册的 Agent。每个 runtime 播种一个默认 Agent；自定义注册 / 能力标记 / provider 注入为 M2。"
+      extra={
+        <Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshAgents()}>
+          刷新
+        </Button>
+      }
+    >
+      {agents.length === 0 && (
+        <div style={{ padding: 32, textAlign: 'center', color: tokens.textPlaceholder, fontSize: 13 }}>
+          暂无 Agent（服务不可达或未播种）。检查后端 forge serve 是否在运行。
         </div>
-      ))}
-      <button style={{ ...s.btnGhost, marginTop: 8 }} onClick={() => void p.refreshAgents()}>
-        刷新
-      </button>
-    </div>
+      )}
+      {agents.map((a, i) => {
+        const st = agentStateMeta(a.state)
+        return (
+          <div
+            key={a.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '12px 18px',
+              borderBottom: i === agents.length - 1 ? 'none' : `1px solid ${tokens.border}`,
+            }}
+          >
+            <Dot color={st.color} size={7} />
+            <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
+            <Pill>{a.runtime}</Pill>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <span style={{ color: st.color }}>{st.label}</span>
+            </span>
+            <span style={{ marginLeft: 'auto', fontFamily: tokens.fontMono, fontSize: 11.5, color: tokens.textSecondary }}>{a.id}</span>
+          </div>
+        )
+      })}
+    </PageContainer>
   )
 }

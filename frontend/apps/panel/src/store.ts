@@ -1,26 +1,18 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { create } from 'zustand'
 import {
-  asApiError,
   cancelSession,
   createSession,
   listAgents,
   listRuntimes,
   listSessions,
   promptSession,
-} from "./api"
-import { WsTransport } from "./transport/ws"
-import type {
-  Agent,
-  BusEvent,
-  EntryKind,
-  Runtime,
-  SessionSummary,
-  StreamEntry,
-  WsServerFrame,
-} from "./types"
-import { Ev } from "./types"
+  toErrorMessage,
+} from '@ark/api'
+import type { Agent, BusEvent, Runtime, SessionSummary, StreamEntry, WsServerFrame } from '@ark/types'
+import { Ev } from '@ark/types'
+import { WsTransport } from './transport/ws'
 
-export type WsState = "idle" | "connecting" | "open" | "closed"
+export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
 export interface SessionView {
   entries: StreamEntry[]
@@ -28,43 +20,26 @@ export interface SessionView {
   lastSeq: number
 }
 
-export interface PanelState {
-  agents: Agent[]
-  runtimes: Runtime[]
-  sessions: SessionSummary[]
-  views: Record<string, SessionView>
-  activeId: string | null
-  wsState: WsState
-  toast: { code: number; msg: string } | null
-}
+const emptyView = (): SessionView => ({ entries: [], streaming: false, lastSeq: 0 })
 
-const emptyView: SessionView = { entries: [], streaming: false, lastSeq: 0 }
+let uid = 0
+const nextId = (): string => `e${++uid}`
 
-let uidCounter = 0
-const nextId = (): string => `e${++uidCounter}`
-
-export const initialState: PanelState = {
-  agents: [],
-  runtimes: [],
-  sessions: [],
-  views: {},
-  activeId: null,
-  wsState: "idle",
-  toast: null,
-}
-
-/** 事件应用（纯函数）：user/assistant/thought 增量合并、tool 卡更新、终态收流。 */
+/**
+ * 事件应用（纯函数）：user/assistant/thought 增量合并、tool 卡更新、终态收流。
+ * 语义与旧 useReducer 版一致（M1 DoD 验收过），原样迁移到 zustand。
+ */
 export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   const entries = v.entries
   const lastSeq = Math.max(v.lastSeq, e.seq)
-  const text = String(e.payload?.text ?? "")
+  const text = String(e.payload?.text ?? '')
 
-  const push = (kind: EntryKind, text_?: string, extra?: Partial<StreamEntry>): StreamEntry[] =>
+  const push = (kind: StreamEntry['kind'], text_?: string, extra?: Partial<StreamEntry>): StreamEntry[] =>
     [...entries, { kind, id: nextId(), text: text_, ...extra }]
 
-  const appendToTail = (kind: EntryKind, text_: string): StreamEntry[] => {
+  const appendToTail = (kind: StreamEntry['kind'], text_: string): StreamEntry[] => {
     const tail = entries[entries.length - 1]
-    if (tail && tail.kind === kind && typeof tail.text === "string") {
+    if (tail && tail.kind === kind && typeof tail.text === 'string') {
       const next = [...entries]
       next[next.length - 1] = { ...tail, text: tail.text + text_ }
       return next
@@ -74,27 +49,27 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
 
   switch (e.type) {
     case Ev.UserMessage:
-      return { ...v, entries: push("user", text), lastSeq }
+      return { ...v, entries: push('user', text), lastSeq }
     case Ev.Message:
-      return { ...v, entries: appendToTail("assistant", text), lastSeq }
+      return { ...v, entries: appendToTail('assistant', text), lastSeq }
     case Ev.Thought:
-      return { ...v, entries: appendToTail("thought", text), lastSeq }
+      return { ...v, entries: appendToTail('thought', text), lastSeq }
     case Ev.ToolCall: {
-      const id = String(e.payload?.tool_call_id ?? "")
+      const id = String(e.payload?.tool_call_id ?? '')
       const title = String(e.payload?.title ?? id)
-      const status = String(e.payload?.status ?? "")
-      return { ...v, entries: push("tool", undefined, { toolId: id, title, status }), lastSeq }
+      const status = String(e.payload?.status ?? '')
+      return { ...v, entries: push('tool', undefined, { toolId: id, title, status }), lastSeq }
     }
     case Ev.ToolUpdate: {
-      const id = String(e.payload?.tool_call_id ?? "")
+      const id = String(e.payload?.tool_call_id ?? '')
       return {
         ...v,
         entries: entries.map((en) =>
-          en.kind === "tool" && en.toolId === id
+          en.kind === 'tool' && en.toolId === id
             ? {
                 ...en,
                 title: String(e.payload?.title ?? en.title ?? id),
-                status: String(e.payload?.status ?? en.status ?? ""),
+                status: String(e.payload?.status ?? en.status ?? ''),
               }
             : en,
         ),
@@ -104,9 +79,9 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.TurnEnded:
       return {
         ...v,
-        entries: push("system", undefined, {
-          tone: "ok",
-          text: `完成 · ${String(e.payload?.stop_reason ?? "")}`,
+        entries: push('system', undefined, {
+          tone: 'ok',
+          text: `完成 · ${String(e.payload?.stop_reason ?? '')}`.replace(/ · $/, ''),
         }),
         streaming: false,
         lastSeq,
@@ -114,10 +89,10 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.TurnError:
       return {
         ...v,
-        entries: push("system", undefined, {
-          tone: "err",
-          text: `失败 [${String(e.payload?.class ?? "")}/${String(e.payload?.code ?? "")}] ${String(
-            e.payload?.details ?? "",
+        entries: push('system', undefined, {
+          tone: 'err',
+          text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
+            e.payload?.details ?? '',
           )}`,
         }),
         streaming: false,
@@ -126,7 +101,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.RunCancelled:
       return {
         ...v,
-        entries: push("system", undefined, { tone: "cancel", text: "已取消" }),
+        entries: push('system', undefined, { tone: 'cancel', text: '已取消' }),
         streaming: false,
         lastSeq,
       }
@@ -137,222 +112,212 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   }
 }
 
-export type PanelAction =
-  | { type: "frame"; f: WsServerFrame }
-  | { type: "agents"; agents: Agent[] }
-  | { type: "runtimes"; runtimes: Runtime[] }
-  | { type: "sessions"; sessions: SessionSummary[] }
-  | { type: "activate"; id: string | null }
-  | { type: "resetView"; id: string }
-  | { type: "createLocal"; id: string; text: string }
-  | { type: "markStreaming"; id: string }
-  | { type: "toast"; toast: { code: number; msg: string } | null }
-
-export function reducer(s: PanelState, a: PanelAction): PanelState {
-  switch (a.type) {
-    case "agents":
-      return { ...s, agents: a.agents }
-    case "runtimes":
-      return { ...s, runtimes: a.runtimes }
-    case "sessions":
-      return { ...s, sessions: a.sessions }
-    case "activate":
-      return { ...s, activeId: a.id }
-    case "resetView": {
-      const cur = s.views[a.id]
-      if (cur && cur.entries.length === 0) return s
-      return { ...s, views: { ...s.views, [a.id]: { entries: [], streaming: false, lastSeq: 0 } } }
-    }
-    case "createLocal": {
-      const view = s.views[a.id] ?? emptyView
-      const entries = [...view.entries, { kind: "user" as const, id: nextId(), text: a.text }]
-      return { ...s, views: { ...s.views, [a.id]: { ...view, entries } } }
-    }
-    case "markStreaming": {
-      const view = s.views[a.id] ?? emptyView
-      return { ...s, views: { ...s.views, [a.id]: { ...view, streaming: true } } }
-    }
-    case "toast":
-      return { ...s, toast: a.toast }
-    case "frame": {
-      const f = a.f
-      switch (f.type) {
-        case "snapshot": {
-          // snapshot = 服务端整包终态视图（冷挂载或「淘汰即快照回退」）：
-          // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标，
-          // 后续 live 增量从该水位继续。
-          return {
-            ...s,
-            views: {
-              ...s.views,
-              [f.agg_id]: {
-                entries: [],
-                streaming: false,
-                lastSeq: Math.max(f.event_seq, 0),
-              },
-            },
-          }
-        }
-        case "event": {
-          const view = applyEvent(s.views[f.agg_id] ?? emptyView, f.event)
-          return { ...s, views: { ...s.views, [f.agg_id]: view } }
-        }
-        case "detached":
-          return s
-        case "pong":
-          return s
-        default:
-          return s
-      }
-    }
-    default:
-      return s
-  }
+interface Toast {
+  id: number
+  msg: string
 }
 
-/** 面板控制器：REST 动作 + WS 订阅接线（transport 常驻，重连/重订阅自处理）。 */
-export function usePanel() {
-  const [state, dispatch] = useReducer(reducer, initialState)
-  const [wsState, setWsState] = useState<WsState>("idle")
+export interface ForgeState {
+  agents: Agent[]
+  runtimes: Runtime[]
+  sessions: SessionSummary[]
+  views: Record<string, SessionView>
+  activeId: string | null
+  wsState: WsState
+  toast: Toast | null
+  drawerOpen: boolean
+}
 
-  // transport 惰性创建（render 期实例化，而非 effect 内）：子组件（如 SessionsPage 的
-  // URL 直达激活 effect）先于父组件 effect 执行，若在 effect 里建 transport，
-  // 冷加载 /sessions/:id 时 activate 会拿到空 transport 而丢 attach（刷新续看失败）。
-  const transportRef = useRef<WsTransport | null>(null)
-  if (transportRef.current === null) {
-    const t = new WsTransport(
-      (f) => {
-        // 水位推进（供重连续传）
-        if (f.type === "event") t.ackSeq(f.agg_id, f.event.seq)
-        if (f.type === "snapshot") t.ackSeq(f.agg_id, f.event_seq)
-        dispatch({ type: "frame", f })
-      },
-      (st) => {
-        setWsState(st === "open" ? "open" : st === "connecting" ? "connecting" : "closed")
-      },
-    )
-    transportRef.current = t
+export interface ForgeActions {
+  boot: () => void
+  refreshAgents: () => Promise<void>
+  refreshRuntimes: () => Promise<void>
+  refreshSessions: () => Promise<void>
+  activate: (id: string | null, sinceSeq?: number) => void
+  createAndRun: (agentId: string, prompt: string) => Promise<string | undefined>
+  sendPrompt: (text: string) => Promise<void>
+  cancel: () => Promise<void>
+  showToast: (msg: string) => void
+  hideToast: (id: number) => void
+  setDrawer: (open: boolean) => void
+  // transport 接线（内部）
+  setWsState: (st: WsState) => void
+  applyFrame: (f: WsServerFrame) => void
+}
+
+export type ForgeStore = ForgeState & ForgeActions
+
+export const initialState: ForgeState = {
+  agents: [],
+  runtimes: [],
+  sessions: [],
+  views: {},
+  activeId: null,
+  wsState: 'idle',
+  toast: null,
+  drawerOpen: false,
+}
+
+let toastSeq = 0
+let transportRef: WsTransport | null = null
+
+// transport 单例：常驻整个会话生命周期（跨路由保活），重连/重订阅由 transport 自理。
+function ensureTransport(): WsTransport {
+  if (transportRef) return transportRef
+  transportRef = new WsTransport(
+    (f) => {
+      // 水位推进（供重连续传）
+      if (f.type === 'event') transportRef?.ackSeq(f.agg_id, f.event.seq)
+      if (f.type === 'snapshot') transportRef?.ackSeq(f.agg_id, f.event_seq)
+      useForge.getState().applyFrame(f)
+    },
+    (st) => {
+      useForge.getState().setWsState(st === 'open' ? 'open' : st === 'connecting' ? 'connecting' : 'closed')
+    },
+  )
+  return transportRef
+}
+
+export const useForge = create<ForgeStore>((set, get) => {
+  const showToast = (msg: string): void => {
+    const id = ++toastSeq
+    set({ toast: { id, msg } })
+    window.setTimeout(() => get().hideToast(id), 4200)
   }
-  // 卸载收尾（StrictMode 下 dev 双挂载：第二次挂载会重建；生产单次）
-  useEffect(() => {
-    return () => {
-      transportRef.current?.close()
-      transportRef.current = null
-    }
-  }, [])
 
-  const showToast = useCallback((msg: string, code = -1) => {
-    dispatch({ type: "toast", toast: { code, msg } })
-    setTimeout(() => dispatch({ type: "toast", toast: null }), 4000)
-  }, [])
+  return {
+    ...initialState,
 
-  const refreshAgents = useCallback(async () => {
-    try {
-      dispatch({ type: "agents", agents: await listAgents() })
-    } catch (err) {
-      showToast(asApiError(err).msg)
-    }
-  }, [showToast])
+    hideToast: (id) => {
+      const cur = get().toast
+      if (cur && cur.id === id) set({ toast: null })
+    },
+    showToast,
 
-  const refreshSessions = useCallback(async () => {
-    try {
-      dispatch({ type: "sessions", sessions: await listSessions() })
-    } catch (err) {
-      showToast(asApiError(err).msg)
-    }
-  }, [showToast])
+    setWsState: (st) => {
+      if (get().wsState !== st) set({ wsState: st })
+    },
 
-  const refreshRuntimes = useCallback(async () => {
-    try {
-      dispatch({ type: "runtimes", runtimes: await listRuntimes() })
-    } catch (err) {
-      showToast(asApiError(err).msg)
-    }
-  }, [showToast])
-
-  const boot = useCallback(() => {
-    void refreshAgents()
-    void refreshSessions()
-    void refreshRuntimes()
-  }, [refreshAgents, refreshSessions, refreshRuntimes])
-
-  const activate = useCallback(
-    (id: string | null, sinceSeq?: number) => {
-      const t = transportRef.current
-      const prev = state.activeId
-      if (prev && prev !== id) t?.detach(prev)
-      if (id) {
-        t?.connect()
-        if (t && !t.isAttached(id)) {
-          // 首次挂载/切回：视图按重放重建（防重复）
-          dispatch({ type: "resetView", id })
-          t.attach(id, sinceSeq)
+    applyFrame: (f) => {
+      set((s) => {
+        switch (f.type) {
+          case 'snapshot': {
+            // snapshot = 服务端整包终态视图（冷挂载或「淘汰即快照回退」）：
+            // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标。
+            return {
+              ...s,
+              views: { ...s.views, [f.agg_id]: { entries: [], streaming: false, lastSeq: Math.max(f.event_seq, 0) } },
+            }
+          }
+          case 'event': {
+            const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
+            return { ...s, views: { ...s.views, [f.agg_id]: view } }
+          }
+          default:
+            return s
         }
-        dispatch({ type: "activate", id })
-      } else {
-        dispatch({ type: "activate", id: null })
+      })
+    },
+
+    setDrawer: (open) => set({ drawerOpen: open }),
+
+    refreshAgents: async () => {
+      try {
+        set({ agents: await listAgents() })
+      } catch (err) {
+        showToast(toErrorMessage(err))
       }
     },
-    [state.activeId],
-  )
-
-  /** 新建会话：POST /sessions（首轮即后台跑）→ attach（since=event_seq 续传首轮）→ 高亮。
-   *  本地先落一条用户气泡（echo 事件 seq 与水位相等，重放会跳过它）。返回新会话 id（供路由跳转）。 */
-  const createAndRun = useCallback(
-    async (agentId: string, prompt: string): Promise<string | undefined> => {
+    refreshRuntimes: async () => {
       try {
-        const resp = await createSession(agentId, prompt)
-        dispatch({ type: "resetView", id: resp.id })
-        dispatch({ type: "createLocal", id: resp.id, text: prompt })
-        dispatch({ type: "markStreaming", id: resp.id })
-        activate(resp.id, resp.event_seq)
-        void refreshSessions()
+        set({ runtimes: await listRuntimes() })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+    refreshSessions: async () => {
+      try {
+        set({ sessions: await listSessions() })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    boot: () => {
+      // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
+      ensureTransport().connect()
+      void get().refreshAgents()
+      void get().refreshSessions()
+      void get().refreshRuntimes()
+    },
+
+    activate: (id, sinceSeq) => {
+      const s = get()
+      const t = ensureTransport()
+      if (s.activeId && s.activeId !== id) t.detach(s.activeId)
+      if (id) {
+        t.connect()
+        if (!t.isAttached(id)) {
+          // 首次挂载/切回：视图先清空，attach（since_seq）后按序重放重建（防重复）
+          const cur = s.views[id]
+          if (cur && cur.entries.length > 0) {
+            set((st) => ({ views: { ...st.views, [id]: emptyView() } }))
+          }
+          t.attach(id, sinceSeq)
+        }
+        set({ activeId: id, drawerOpen: false })
+      } else {
+        set({ activeId: null })
+      }
+    },
+
+    createAndRun: async (agentId, prompt) => {
+      try {
+        const resp = await createSession({ agent_id: agentId, prompt })
+        // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
+        // attach since_seq=event_seq（exclusive）续传首轮后续事件。
+        set((s) => ({
+          views: {
+            ...s.views,
+            [resp.id]: {
+              entries: [{ kind: 'user', id: nextId(), text: prompt }],
+              streaming: true,
+              lastSeq: resp.event_seq,
+            },
+          },
+        }))
+        get().activate(resp.id, resp.event_seq)
+        void get().refreshSessions()
         return resp.id
       } catch (err) {
-        showToast(asApiError(err).msg)
+        showToast(toErrorMessage(err))
         return undefined
       }
     },
-    [activate, refreshSessions, showToast],
-  )
 
-  /** 追加 prompt：REST 触发 → 置 streaming（用户回显经 WS live/重放到达；若 socket 断开，
-   *  connect 重连后 transport 会按水位自动重订阅补齐缺口）。 */
-  const sendPrompt = useCallback(
-    async (text: string) => {
-      const id = state.activeId
+    sendPrompt: async (text) => {
+      const id = get().activeId
       if (!id) return
       try {
-        transportRef.current?.connect()
-        await promptSession(id, text)
-        dispatch({ type: "markStreaming", id })
+        ensureTransport().connect()
+        await promptSession(id, { prompt: text })
+        set((s) => {
+          const view = s.views[id] ?? emptyView()
+          return { views: { ...s.views, [id]: { ...view, streaming: true } } }
+        })
       } catch (err) {
-        showToast(asApiError(err).msg)
+        showToast(toErrorMessage(err))
       }
     },
-    [state.activeId, showToast],
-  )
 
-  const cancel = useCallback(async () => {
-    const id = state.activeId
-    if (!id) return
-    try {
-      await cancelSession(id)
-    } catch (err) {
-      showToast(asApiError(err).msg)
-    }
-  }, [state.activeId, showToast])
-
-  return {
-    state: { ...state, wsState },
-    boot,
-    refreshAgents,
-    refreshSessions,
-    refreshRuntimes,
-    activate,
-    createAndRun,
-    sendPrompt,
-    cancel,
-    showToast,
+    cancel: async () => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        await cancelSession(id)
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
   }
-}
+})

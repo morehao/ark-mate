@@ -1,11 +1,11 @@
-import type { WsClientFrame, WsServerFrame } from "../types"
+import type { WsClientFrame, WsServerFrame } from '@ark/types'
 
 /**
- * WS 事件传输（对照设计 §4.5）：
+ * WS 事件传输：
  * - 浏览器原生 WebSocket；路径 = 同源 /v1/forge/ws/events（dev 走 vite 代理，prod 内嵌同源）
  * - 指数退避断线重连（300ms 起、封顶 8s）；重连后对全部订阅 agg 按 lastSeq 重新 attach
- *   （0 = 全量回放，>0 = 增量续传）
- * - 连接存活期间每 25s ping（服务端 60s 未 pong 会断连，见 ws.go）
+ *   （0 = 全量回放，>0 = 增量续传；服务端 EventsAfter 为开区间，见 ws.go）
+ * - 连接存活期间每 25s ping（服务端 60s 未 pong 会断连）
  */
 export class WsTransport {
   private ws: WebSocket | null = null
@@ -16,23 +16,22 @@ export class WsTransport {
 
   /** aggId → 已确认水位（last applied event_seq；未知=0 → 全量回放） */
   private att = new Map<string, number>()
-  private frameQueue: WsServerFrame[] = []
 
   constructor(
     private onFrame: (f: WsServerFrame) => void,
-    private onState: (s: "connecting" | "open" | "closed") => void,
+    private onState: (s: 'connecting' | 'open' | 'closed') => void,
   ) {}
 
   /** 订阅一个会话流：sinceSeq 为空时按 lastSeq（无记录则 0 = 全量）。 */
   attach(aggId: string, sinceSeq?: number): void {
     const since = sinceSeq ?? this.att.get(aggId) ?? 0
     this.att.set(aggId, since)
-    this.send({ action: "attach", agg_id: aggId, since_seq: since })
+    this.send({ action: 'attach', agg_id: aggId, since_seq: since })
   }
 
   detach(aggId: string): void {
     this.att.delete(aggId)
-    this.send({ action: "detach", agg_id: aggId })
+    this.send({ action: 'detach', agg_id: aggId })
   }
 
   /** 收到 seq 后更新水位（重连续传游标）。 */
@@ -66,30 +65,29 @@ export class WsTransport {
 
   private open(): void {
     if (this.closedByUser) return
-    const proto = location.protocol === "https:" ? "wss" : "ws"
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const url = `${proto}://${location.host}/v1/forge/ws/events`
-    this.onState("connecting")
+    this.onState('connecting')
     let ws: WebSocket
     try {
       ws = new WebSocket(url)
-    } catch (err) {
+    } catch {
       this.scheduleReconnect()
       return
     }
     this.ws = ws
     ws.onopen = () => {
-      this.onState("open")
+      this.onState('open')
       this.reconnectDelay = 300
       this.startPing()
       // 全量重新订阅（重连后服务端按各自水位重放）
       for (const [aggId, since] of this.att) {
-        this.rawSend({ action: "attach", agg_id: aggId, since_seq: since })
+        this.rawSend({ action: 'attach', agg_id: aggId, since_seq: since })
       }
     }
     ws.onmessage = (ev) => {
       try {
         const f = JSON.parse(String(ev.data)) as WsServerFrame
-        this.frameQueue.push(f)
         this.onFrame(f)
       } catch {
         // 忽略坏帧
@@ -100,7 +98,7 @@ export class WsTransport {
     }
     ws.onclose = () => {
       this.stopPing()
-      this.onState("closed")
+      this.onState('closed')
       if (!this.closedByUser) this.scheduleReconnect()
     }
   }
@@ -117,7 +115,7 @@ export class WsTransport {
   private startPing(): void {
     this.stopPing()
     this.pingTimer = setInterval(() => {
-      this.rawSend({ action: "ping" })
+      this.rawSend({ action: 'ping' })
     }, 25000)
   }
 

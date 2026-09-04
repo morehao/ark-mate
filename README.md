@@ -10,7 +10,7 @@
 - **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /sessions`（指定 agent + prompt 后台起真实会话）、`GET /sessions/:id/history`（事件回放分页）、`POST /sessions/:id/prompt`（同会话多轮）、`POST /sessions/:id/cancel`。
 - **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；传输层 `github.com/coder/websocket`。
 - **会话 wire transcript**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写），daemon 重启后仍是可续看/调试/未来会话导入的原始事实源；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`。
-- **前端面板**（react-router 多页：`/sessions` 会话列表/详情、`/agents`、`/runtimes` 只读页、`/settings` M2 占位）：新建会话（选 agent、发首轮 prompt）、会话列表、流式渲染（消息/思考/工具卡）、composer 追加、取消、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；`/sessions/:id` 直达激活，刷新/冷启动即续看。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
+- **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-forge-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / meta 行）、composer 追加、停止、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；`/sessions/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、`/settings` 为管理次要页。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
 - **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **无外部依赖进程**：M0/M1 会话与事件均为进程内内存态（重启即失），持久化属 M2 规划。
 
@@ -83,8 +83,12 @@ curl -s localhost:8099/v1/forge/sessions \
 ### 5. 前后端分离开发
 
 ```bash
+# 方式 A：一条命令同时起前后端（Ctrl-C 一起收掉）
+make dev
+
+# 方式 B：分开两个终端（日志可分别看）
 # 终端 A：后端（默认 :8099）
-make server            # = cd backend && go run ./cmd/forge
+make server            # = cd backend && go run ./cmd/forge serve
 # 终端 B：前端（vite dev :5173，/v1 代理到 127.0.0.1:8099，含 ws）
 cd frontend && pnpm dev
 ```
@@ -123,8 +127,12 @@ backend/                单 Go module（github.com/morehao/ark-forge）
   internal/manager      Service + Orchestrator（会话编排、事件发布）
   internal/server/      REST handler / WS / eventbus / router
   internal/web/         release 内嵌前端产物宿主（go:embed dist）
-frontend/               pnpm workspace
-  apps/panel/           React 面板（vite；src/{api,store,transport/ws,types}.ts）
+frontend/               pnpm workspace（apps/* + packages/*）
+  apps/panel/           Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
+  packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
+  packages/types        @ark/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
+  packages/api          @ark/api（axios 客户端 + /v1/forge resources）
+  packages/ui           @ark/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
 docs/                   设计/路线图 + runtime 适配核实
 ```
 

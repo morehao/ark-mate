@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
+
+// defaultDialTimeout Dial 未显式配置且调用方 ctx 无截止时间时的握手上限。
+const defaultDialTimeout = 15 * time.Second
 
 // ClientOptions 配置一次 ACP 连接。
 type ClientOptions struct {
@@ -19,6 +23,9 @@ type ClientOptions struct {
 	// AllowPermission 决定 agent 的权限请求（tool 执行许可）是否放行；nil 表示一律拒绝。
 	// 参数：ctx/sessionID/tool 标题/可选动作数；返回 true 表示选择第一个动作放行。
 	AllowPermission func(ctx context.Context, sessionID, toolTitle string, options int) bool
+	// DialTimeout 限制 initialize/authenticate 握手时长；0 → 调用方 ctx 有截止时间则沿用，
+	// 否则用 defaultDialTimeout。runtime 无响应（如等待交互登录）时拨号不会无限挂起。
+	DialTimeout time.Duration
 	// ClientName / ClientVersion 用于 initialize 的 clientInfo。
 	ClientName    string
 	ClientVersion string
@@ -49,17 +56,33 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		conn.SetLogger(opts.Logger)
 	}
 
+	// 握手限时：runtime 只起进程不答 initialize（如卡在交互登录）时拨号有界返回，
+	// 归类 connection/timeout，避免 REST 创建会话无限挂起。
+	dctx := ctx
+	if opts.DialTimeout > 0 {
+		var cancel context.CancelFunc
+		dctx, cancel = context.WithTimeout(ctx, opts.DialTimeout)
+		defer cancel()
+	} else if _, has := ctx.Deadline(); !has {
+		var cancel context.CancelFunc
+		dctx, cancel = context.WithTimeout(ctx, defaultDialTimeout)
+		defer cancel()
+	}
+
 	impl := acpsdk.Implementation{
 		Name:    firstNonEmpty(opts.ClientName, "ark-forge"),
 		Version: firstNonEmpty(opts.ClientVersion, "dev-m0"),
 	}
-	initResp, err := conn.Initialize(ctx, acpsdk.InitializeRequest{
+	initResp, err := conn.Initialize(dctx, acpsdk.InitializeRequest{
 		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: acpsdk.ClientCapabilities{},
 		ClientInfo:         &impl,
 	})
 	if err != nil {
 		_ = t.Close()
+		if errors.Is(dctx.Err(), context.DeadlineExceeded) {
+			return nil, NewError(ClassConnection, "timeout", "runtime 未在握手限期内响应 initialize", dctx.Err())
+		}
 		return nil, Classify(err)
 	}
 	if initResp.ProtocolVersion != acpsdk.ProtocolVersionNumber {
@@ -87,8 +110,11 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			return nil, NewError(ClassAccess, "auth_required",
 				fmt.Sprintf("agent 要求鉴权（%v），M0 仅支持 agent 自托管鉴权", describeAuthMethods(initResp.AuthMethods)), nil)
 		}
-		if _, err := conn.Authenticate(ctx, acpsdk.AuthenticateRequest{MethodId: agentIDs[0]}); err != nil {
+		if _, err := conn.Authenticate(dctx, acpsdk.AuthenticateRequest{MethodId: agentIDs[0]}); err != nil {
 			_ = t.Close()
+			if errors.Is(dctx.Err(), context.DeadlineExceeded) {
+				return nil, NewError(ClassConnection, "timeout", "runtime 未在握手限期内完成鉴权", dctx.Err())
+			}
 			return nil, Classify(err)
 		}
 	}
