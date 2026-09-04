@@ -70,6 +70,9 @@ type Orchestrator struct {
 	sessions map[string]*ActiveSession
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
+	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
+	turnTimeout time.Duration
+
 	logger *slog.Logger
 }
 
@@ -110,6 +113,9 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 
 // SetAllowAll 放开权限请求（仅调试/冒烟；默认一律拒绝）。
 func (o *Orchestrator) SetAllowAll(v bool) { o.allowAll = v }
+
+// SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
+func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
 
 // SetLogger 设置编排日志。
 func (o *Orchestrator) SetLogger(l *slog.Logger) {
@@ -182,7 +188,25 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 		"session_id": as.ID, "agent_id": as.AgentID, "text": text,
 	})
 	go o.runTurn(as, t, text)
+	// 看门狗：turnTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
+	if o.turnTimeout > 0 {
+		go o.watchdogTurn(as, sessionID, t)
+	}
 	return ue.Seq, nil
+}
+
+// watchdogTurn 单轮超时兜底：超时后走 CancelTurn 的有界取消路径（agent 无响应也本地解除），
+// 终态事件由 runTurn 依取消语义发布（run.cancelled）。与用户手动取消幂等共存：turn 已结束时
+// select 到 t.done 直接退出；已取消则 CancelTurn 对 nil turn 为 no-op。
+func (o *Orchestrator) watchdogTurn(as *ActiveSession, sessionID string, t *Turn) {
+	timer := time.NewTimer(o.turnTimeout)
+	defer timer.Stop()
+	select {
+	case <-t.done:
+	case <-timer.C:
+		o.logger.Warn("turn 超过看门狗时限，自动取消", "session", sessionID, "timeout", o.turnTimeout.String())
+		_ = o.CancelTurn(context.Background(), sessionID)
+	}
 }
 
 // runTurn 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 turn 终态）。

@@ -44,6 +44,21 @@ export function ChatPage() {
   const view = activeId ? views[activeId] : undefined
   const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
+  // 服务端忙水位：本地无流（streaming=false）但会话在服务端仍 in_progress 且本地视图没有终态条目
+  // （如刷新/重启后该 turn 仍在跑或已卡住）→ 视为 busy：展示「停止」以自愈（后端 cancel 幂等解 busy）。
+  // 一旦本地已收到终态条目（tone ok/err/cancel 的 system 尾条），即使列表 status 还没刷新也不当 busy。
+  const lastSettledTone = (() => {
+    if (!view) return undefined
+    for (let i = view.entries.length - 1; i >= 0; i--) {
+      const en = view.entries[i]
+      if (en.kind === 'system') return en.tone
+      if (en.kind !== 'tool' && en.kind !== 'thought') break // 越过尾部流式/工具残留即停
+    }
+    return undefined
+  })()
+  const serverBusy =
+    activeSum?.status === 'in_progress' && !streaming && lastSettledTone !== 'ok' && lastSettledTone !== 'err' && lastSettledTone !== 'cancel'
+  const busy = streaming || serverBusy
   const agent = agentOf(agents, activeSum?.agent_id)
   const title = activeId ? titleFor(activeSum, view, agents) : ''
   // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
@@ -127,7 +142,7 @@ export function ChatPage() {
             )}
             <span style={{ color: streaming ? tokens.text : tokens.textSecondary, fontWeight: streaming ? 600 : 400 }}>{metaText}</span>
           </span>
-          {streaming && (
+          {busy && (
             <Button size="small" onClick={() => void cancel()} style={{ borderRadius: 8 }}>
               停止
             </Button>
@@ -276,9 +291,17 @@ export function ChatPage() {
               </div>
               {activeId && (
                 <Composer
-                  busy={streaming}
-                  busyNote={streaming ? `turn 进行中 · ${agent ? agent.name : ''}` : undefined}
-                  placeholder={streaming ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`}
+                  busy={busy}
+                  busyNote={
+                    streaming
+                      ? `turn 进行中 · ${agent ? agent.name : ''}`
+                      : serverBusy
+                        ? '会话在服务端仍处运行中 — 可点「停止」解除'
+                        : undefined
+                  }
+                  placeholder={
+                    busy ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`
+                  }
                   onSend={onSend}
                 />
               )}

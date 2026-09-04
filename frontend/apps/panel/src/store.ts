@@ -29,6 +29,9 @@ const nextId = (): string => `e${++uid}`
  * 事件应用（纯函数）：user/assistant/thought 增量合并、tool 卡更新、终态收流。
  * 语义与旧 useReducer 版一致（M1 DoD 验收过），原样迁移到 zustand。
  */
+// 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
+const TERMINAL_TYPES = new Set<string>([Ev.TurnEnded, Ev.TurnError, Ev.RunCancelled])
+
 export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
   // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
@@ -220,6 +223,7 @@ export const useForge = create<ForgeStore>((set, get) => {
     },
 
     applyFrame: (f) => {
+      let terminal = false
       set((s) => {
         switch (f.type) {
           case 'snapshot': {
@@ -231,6 +235,7 @@ export const useForge = create<ForgeStore>((set, get) => {
             }
           }
           case 'event': {
+            terminal = TERMINAL_TYPES.has(f.event.type)
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
             return { ...s, views: { ...s.views, [f.agg_id]: view } }
           }
@@ -238,6 +243,8 @@ export const useForge = create<ForgeStore>((set, get) => {
             return s
         }
       })
+      // 终态已到：会话列表 status 同步刷新（侧栏/服务端忙水位随之收敛）。
+      if (terminal) void get().refreshSessions()
     },
 
     setDrawer: (open) => set({ drawerOpen: open }),

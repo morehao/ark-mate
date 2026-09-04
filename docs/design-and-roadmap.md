@@ -289,7 +289,16 @@ type Session interface {
 - **SessionOrchestrator**：把「对 Agent 的一次会话」编排为 ACP 连接获取 → session/new（或 load/resume）→
   prompt → 事件流 → cancel/close；对 harness 将 `load/resume/fork` 显式返回「unsupported」；
 - **连接池**：runtime 子进程按需拉起/空闲回收（对齐 codeg `idle_sweep`，M2 引入超时回收）；
-- **事件注入**：归一化事件 Publish 进 eventbus（`server/handler` 无需感知域变化，seam 已就位）。
+- **事件注入**：归一化事件 Publish 进 eventbus（`server/handler` 无需感知域变化，seam 已就位）；
+- **runtime 启动环境透传**：opencode 子进程透传 daemon 的 `OPENCODE_MODEL`。原因：opencode 的 ACP
+  **忽略客户端传入的模型选择**（[issue #13644](https://github.com/anomalyco/opencode/issues/13644)），
+  且默认模型不可用/被限流时可能「发起即静默挂起」（stream error 只写自身日志、不上报，
+  [issue #24494](https://github.com/anomalyco/opencode/issues/24494)）。指定可用模型须走启动环境：
+  `export OPENCODE_MODEL=yygu-v2/deepseek-v4-flash`（并在 opencode.json 配 `"model":"{env:OPENCODE_MODEL}"` 引用）。
+  单机单 operator 下与 dsh 的 `DEEPSEEK_API_KEY` 透传同模式；
+- **单轮 turn 看门狗**：`FORGE_TURN_TIMEOUT`（serve 亦支持 `--turn-timeout`，Go duration，0=关闭，
+  默认关）——turn 超时自动 cancel（复用有界取消路径）并发终态事件，兜住「吞错挂起 → busy 永久占用」，
+  前端配合「服务端忙水位 + 停止按钮」即可自愈。
 
 ### 4.4 REST API 契约（M1 冻结面）
 
@@ -454,6 +463,10 @@ apps/panel/src/
 - `turn.error` 渲染错误横幅（重试 = 重新 POST prompt；分类为 auth 时引导去 settings）。
 - prompt 发送前**乐观置忙**（`streaming:true`，POST 返回前即禁用 Composer）并做防重入守卫，消除
   「请求在途仍可再发」打到后端 `turn_in_progress` 的竞态；失败时回退非忙以便重试。
+- **服务端忙水位**：刷新/重启后本地 `streaming` 会重置，此时以 REST 会话列表 `status == in_progress`
+  兜底判定会话忙（本地视图无终态条目时），照常展示「停止」按钮——后端 `cancel` 幂等且能解开
+  卡住的 turn（agent 无响应时有界等待后本地解除），避免「看不到停止按钮 → 只能重启」的死胡同；
+  收到终态事件后自动刷新列表使状态收敛。
 - 前端 **不做**：编辑器/终端/文件树/Split View（对照 codeg workspace/layout 组件族，见 §5.4）。
 
 ### 4.9 M0/M1 之外的演进位（M2/M3 骨架预留，详 §5.4/§6）
