@@ -30,9 +30,13 @@ const nextId = (): string => `e${++uid}`
  * 语义与旧 useReducer 版一致（M1 DoD 验收过），原样迁移到 zustand。
  */
 export function applyEvent(v: SessionView, e: BusEvent): SessionView {
+  // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
+  // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
+  if (e.seq <= v.lastSeq) return v
   const entries = v.entries
-  const lastSeq = Math.max(v.lastSeq, e.seq)
+  const lastSeq = e.seq
   const text = String(e.payload?.text ?? '')
+  const msgId = e.payload?.msg_id !== undefined && e.payload.msg_id !== null ? String(e.payload.msg_id) : ''
 
   const push = (kind: StreamEntry['kind'], text_?: string, extra?: Partial<StreamEntry>): StreamEntry[] =>
     [...entries, { kind, id: nextId(), text: text_, ...extra }]
@@ -47,13 +51,30 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     return push(kind, text_)
   }
 
+  // 文本段归并：带 msg_id（ACP unstable messageId）时并入同 kind、同 msgId 的既有段
+  // （允许跨工具穿插，决策 v5①）；无 msg_id 回退「同 kind 尾拼接」（老行为）。
+  const mergeText = (kind: StreamEntry['kind'], text_: string): StreamEntry[] => {
+    if (msgId) {
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const en = entries[i]
+        if (en.kind === kind && en.msgId === msgId && typeof en.text === 'string') {
+          const next = [...entries]
+          next[i] = { ...en, text: en.text + text_ }
+          return next
+        }
+      }
+      return push(kind, text_, { msgId })
+    }
+    return appendToTail(kind, text_)
+  }
+
   switch (e.type) {
     case Ev.UserMessage:
-      return { ...v, entries: push('user', text), lastSeq }
+      return { ...v, entries: mergeText('user', text), lastSeq }
     case Ev.Message:
-      return { ...v, entries: appendToTail('assistant', text), lastSeq }
+      return { ...v, entries: mergeText('assistant', text), lastSeq }
     case Ev.Thought:
-      return { ...v, entries: appendToTail('thought', text), lastSeq }
+      return { ...v, entries: mergeText('thought', text), lastSeq }
     case Ev.ToolCall: {
       const id = String(e.payload?.tool_call_id ?? '')
       const title = String(e.payload?.title ?? id)
@@ -298,14 +319,23 @@ export const useForge = create<ForgeStore>((set, get) => {
     sendPrompt: async (text) => {
       const id = get().activeId
       if (!id) return
+      if (get().views[id]?.streaming) return // 已有一轮在跑，防重入（连点/并发）
       try {
-        ensureTransport().connect()
-        await promptSession(id, { prompt: text })
+        // 乐观置忙：在 POST 返回前就把 Composer 置为禁用，消除「请求在途仍可再发」的竞态窗口，
+        // 避免第二次 send 打到后端 turn_in_progress（决策 v5 前修复）。
         set((s) => {
           const view = s.views[id] ?? emptyView()
           return { views: { ...s.views, [id]: { ...view, streaming: true } } }
         })
+        ensureTransport().connect()
+        await promptSession(id, { prompt: text })
       } catch (err) {
+        // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          return { views: { ...s.views, [id]: { ...view, streaming: false } } }
+        })
         showToast(toErrorMessage(err))
       }
     },

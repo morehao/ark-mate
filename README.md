@@ -4,6 +4,11 @@
 
 > A self-hostable forge for building, running, extending, and managing AI agents. Hosts multiple agent runtimes — OpenCode, DeepSeek Harness, and ACP-compatible executors — under one unified control plane.
 
+**定位边界**（详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v3」）：
+- **能力不重造**：skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
+- **数据管理是平台职责**：统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据；
+- **单机单操作员**：不做多人协作 / 多用户鉴权 / 远程聊天通道（跨 agent 协作亦不在定位内）。
+
 ## 特性（当前形态）
 
 - **ACP 直连运行时**：内置 `opencode`（`opencode acp`）与 `deepseekharness`（`dsh --profile acp`）两个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。

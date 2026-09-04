@@ -424,44 +424,66 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			typ = BusMessage
 			if d, ok := ev.Payload.(acl.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				if d.MessageID != "" {
+					payload.(map[string]any)["msg_id"] = d.MessageID
+				}
 			}
 		case acl.KindThought:
 			typ = BusThought
 			if d, ok := ev.Payload.(acl.ThoughtDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				if d.MessageID != "" {
+					payload.(map[string]any)["msg_id"] = d.MessageID
+				}
 			}
 		case acl.KindToolCall:
 			typ = BusToolCall
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
-				payload = map[string]any{
-					"session_id": ev.SessionID, "agent_id": agentID,
-					"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
-				}
+				payload = toolPayload(ev.SessionID, agentID, d)
 			}
 		case acl.KindToolUpdate:
 			typ = BusToolUpdate
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
-				payload = map[string]any{
-					"session_id": ev.SessionID, "agent_id": agentID,
-					"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
-				}
+				payload = toolPayload(ev.SessionID, agentID, d)
 			}
 		case acl.KindUserMessage:
 			typ = BusUserMessage
 			if d, ok := ev.Payload.(acl.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				if d.MessageID != "" {
+					payload.(map[string]any)["msg_id"] = d.MessageID
+				}
 			}
 		case acl.KindUsage:
 			typ = BusUsage
 			payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
 		case acl.KindPermission:
-			typ = "session.permission"
+			typ = BusPermission
 			payload = ev.Payload
 		}
 		if typ != "" && payload != nil {
 			o.svc.publish(typ, ev.SessionID, payload)
 		}
 	}
+}
+
+// toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
+// （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
+func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
+	p := map[string]any{
+		"session_id": sessionID, "agent_id": agentID,
+		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
+	}
+	if d.Kind != "" {
+		p["kind"] = d.Kind
+	}
+	if d.Input != nil {
+		p["input"] = d.Input
+	}
+	if d.Output != nil {
+		p["output"] = d.Output
+	}
+	return p
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error。

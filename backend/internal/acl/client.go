@@ -230,15 +230,15 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 	switch {
 	case u.UserMessageChunk != nil:
 		if txt := textOf(u.UserMessageChunk.Content); txt != "" {
-			add(KindUserMessage, MessageDelta{Text: txt})
+			add(KindUserMessage, MessageDelta{Text: txt, MessageID: idOf(u.UserMessageChunk.MessageId)})
 		}
 	case u.AgentMessageChunk != nil:
 		if txt := textOf(u.AgentMessageChunk.Content); txt != "" {
-			add(KindMessage, MessageDelta{Text: txt})
+			add(KindMessage, MessageDelta{Text: txt, MessageID: idOf(u.AgentMessageChunk.MessageId)})
 		}
 	case u.AgentThoughtChunk != nil:
 		if txt := textOf(u.AgentThoughtChunk.Content); txt != "" {
-			add(KindThought, ThoughtDelta{Text: txt})
+			add(KindThought, ThoughtDelta{Text: txt, MessageID: idOf(u.AgentThoughtChunk.MessageId)})
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
@@ -246,7 +246,9 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 			ID:     string(tc.ToolCallId),
 			Title:  tc.Title,
 			Status: string(tc.Status),
+			Kind:   string(tc.Kind),
 			Input:  tc.RawInput,
+			Output: tc.RawOutput,
 		})
 	case u.ToolCallUpdate != nil:
 		tu := u.ToolCallUpdate
@@ -254,10 +256,17 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 		if tu.Status != nil {
 			status = string(*tu.Status)
 		}
+		kind := ""
+		if tu.Kind != nil {
+			kind = string(*tu.Kind)
+		}
 		add(KindToolUpdate, ToolCallInfo{
 			ID:     string(tu.ToolCallId),
 			Title:  firstNonEmptyPtr(tu.Title),
 			Status: status,
+			Kind:   kind,
+			Input:  tu.RawInput,
+			Output: tu.RawOutput,
 		})
 	case u.UsageUpdate != nil:
 		add(KindUsage, nil)
@@ -265,6 +274,14 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 		// plan/session 元数据类更新：M0 不建模（前端尚不消费）。
 	}
 	return evs
+}
+
+// idOf 解引用 ACP unstable messageId（nil → 空串，表示 agent 未实现消息分组）。
+func idOf(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // textOf 提取 ContentBlock 的文本（仅 text 变体；其余变体 M0 忽略）。
