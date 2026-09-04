@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
@@ -6,7 +6,6 @@ import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { useForge } from '../store'
 import { SessionRail } from '../components/SessionRail'
-import { NewSessionModal } from '../components/NewSessionModal'
 import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
@@ -27,8 +26,6 @@ export function ChatPage() {
   const sendPrompt = useForge((s) => s.sendPrompt)
   const cancel = useForge((s) => s.cancel)
   const setDrawer = useForge((s) => s.setDrawer)
-
-  const [modalOpen, setModalOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
@@ -72,11 +69,6 @@ export function ChatPage() {
   const onSend = (text: string) => {
     if (!activeId) return
     void sendPrompt(text)
-  }
-
-  const onCreated = (id: string) => {
-    setModalOpen(false)
-    navigate(`/sessions/${id}`)
   }
 
   const renderChatHead = () => {
@@ -187,7 +179,7 @@ export function ChatPage() {
       <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
         会话绑定唯一的 Agent 底座。从左侧选择一个会话续看，或新建会话并选择 opencode / deepseek-harness 底座。
       </p>
-      <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} style={{ marginTop: 4 }}>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/new')} style={{ marginTop: 4 }}>
         新建会话
       </Button>
     </div>
@@ -236,7 +228,7 @@ export function ChatPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        <SessionRail onCreate={() => setModalOpen(true)} />
+        <SessionRail onCreate={() => navigate('/new')} />
         {drawerOpen && (
           <div
             className="fg-scrim-mobile"
@@ -310,7 +302,6 @@ export function ChatPage() {
         </section>
       </div>
       <StatusBar />
-      <NewSessionModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={onCreated} />
     </div>
   )
 }

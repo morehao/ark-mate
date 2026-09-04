@@ -74,6 +74,19 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 > 影响面：载荷均为**可选增字段**，事件 type 枚举不变（除 ④ 预留两个）、transcript JSONL schema v1 不变
 > （append-only，多出的可选键直接随行落盘）。
 
+> **决策变更 v6（面板「发起问答」交互校准，2026-09-04；AionUi 只读调研，详见 §5.8）**：
+> ① **会话绑底座不可中途换，维持现状**——AionUi 同构：会话创建即按 runtime 定型 + assistant 快照
+>    （`storage.ts:154-160,237-296`），renderer 侧 conversation IPC 无「切底座」通道；「换底座 = 新开会话」。
+> ② **新建会话 = 整页 `/new`（对照 AionUi /guid，无弹窗，已落地）**——hero「Hi，今天有什么安排？」+
+>    助手胶囊条（选底座，含状态点）+ 内嵌输入卡（右下模型 pill **只读展示** + 圆形发送）+「试试这些指令」
+>    示例；记住上次底座（localStorage，参照 AionUi lastAssistantId 持久化）。仅不照搬 assistant 人格
+>    包装 / 目录与 model·权限 override 选择器（见 ③）。
+> ③ **首轮前明示「模型 = 底座自身默认」，面板不设模型选择器**——2026-09-04 实测：opencode ACP 忽略客户端
+>    传入的模型选择（[issue #13644](https://github.com/anomalyco/opencode/issues/13644)，与当日 big-pickle
+>    默认模型限流同源）；AionUi 对 CLI(ACP) 底座同样**不传 model override**（未显式选 = 交 CLI 默认，
+>    `useGuidSend.ts:140-171`）。AionUi 的 model/permission override 交互只适用于内嵌引擎/遵守 config
+>    option 的后端，**不作为 ACP 底座交互照搬**（权限 mode override 留待 M2 v4①，按 runtime 支持度再议）。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-forge 共享同一个
@@ -742,6 +755,22 @@ opencode/harness 两形状）。
   `hooks.ts:293-323`、`chatLib.ts:369`、`acpTypes.ts:143-156`） | WS 载荷透传 `msg_id` + 前端同段归并
   （决策 v5①）；其「无游标 + DB 权威补拉」传输方式不借鉴 |
 
+**发起问答前选择底座（面板交互校准，决策 v6）**：AionUi 的「新建会话」= **/guid 整页**（index 恒重定向：
+`Router.tsx:75-79`；侧栏新建 → `/guid resetAssistant`：`Sider/index.tsx:50`）+ 顶部**助手胶囊栏**
+（头像+名+底座 key `data-assistant-backend`、溢出 More + 搜索：`AssistantSelectionArea.tsx:224-324`）→
+选中后按该 runtime 能力把 model/权限 mode/thought level 装配进**输入卡**（`GuidPage.tsx:592-604`、
+`GuidActionRow.tsx:632-650`；选项来自握手目录快照 `agentRuntimeCatalog.ts:155-232`，非前端硬编码）→
+create 仅带 `assistant.id + overrides`（`useGuidSend.ts:162-195,233-249`），**CLI(ACP) 底座未显式选模型则
+不传 model**、交 CLI 自身默认（`useGuidSend.ts:140-171`）；会话**不可中途换底座**（会话 = 按 runtime
+判别联合 + assistant 快照：`storage.ts:154-160,237-296`），与 ark-forge「一次会话绑定一个 agent runtime」
+（v2②）一致。
+ark-forge 落点（决策 v6②③，面板已落地）：① 新建会话 = **整页 `/new`**（无弹窗；hero + 助手胶囊条 +
+内嵌输入卡[模型 pill 只读 + 圆形发送] + 示例指令，对照 AionUi /guid 形态）；② 默认选中**上次底座**
+（localStorage `forge.panel.lastAgentId`；AionUi 持久化 lastAssistantId：`useGuidAssistantSelection.ts:92-111`）；
+③ 底座选择呈**胶囊卡片**（`StartPage.tsx`，图标 = runtime 缩写 + 状态点，点击即选 + 记忆）；④ 首轮前
+标注「模型 = 底座自身默认，不在此选模型」（对应 AionUi「CLI 不传 model」语义 + opencode
+ACP 忽略客户端模型选择的实测约束，issue #13644）。
+
 **不借鉴清单**（保持定位边界；AionUi 的这些卖点恰好撞 v2②/v3③/能力不重造）：
 1. **内置 agent 引擎**（embedded aionrs + AionCore 全套能力）——与 v3①「能力不重造」相反，ark-forge 能力委托 runtime；
 2. **Team 多 agent 协作**（Leader/Teammate + mailbox + 共享任务板）——撞 v2②；
@@ -749,6 +778,12 @@ opencode/harness 两形状）。
 4. **扩展 Hub 生态**（extension contributes + tarball+SHA-512 + permissions/risk 门禁）——单操作员自托管优先级低；
    仅未来若做「现成 agent/mcp 目录」再参考其 integrity 与版本门禁；
 5. **Office/文档垂直应用**（PPT/Word/Excel 助手、多格式预览面板）——应用层，不在底座定位。
+6. **assistant 人格/目录层**（头像人格包装、内置办公助手目录、生成式 assistant 与 CLI 1:1 管理
+   ——AionCore-internal）——底座定位不引入「人格包装」层；agent 注册表条目只有 name/runtime/state。
+7. **ACP 底座上的 model/permission override 交互照搬**——AionUi 会向后端传 `conversation_overrides.model`，
+   但 opencode **忽略 ACP 客户端模型选择**（issue #13644，2026-09-04 实测）；会误导「选了没生效」。
+   模型只经 runtime 自身配置/启动环境注入（见决策 v6③ 与 §4.3 env 透传）；权限 mode override 留 M2
+   （v4①）按 runtime config_options 支持度再议。
 
 ## 6. Roadmap 详解（M0–M3）
 

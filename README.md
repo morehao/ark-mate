@@ -28,9 +28,17 @@
 | 依赖 | 说明 |
 | --- | --- |
 | Go ≥ 1.26 | `go.mod` 声明 `go 1.26.1` |
-| Node + pnpm | 构建前端面板（仓库为 pnpm workspace） |
+| Node 24.x（LTS） | 见 `frontend/.nvmrc`（精确版本，唯一事实源） |
+| pnpm 11.x | 见 `frontend/package.json` 的 `packageManager` 字段 |
 | opencode | 本机安装且支持 `opencode acp` 子命令 |
 | dsh（deepseek-harness） | npm 包 `@deepseek-ai/dsh`，见下方版本注意 |
+
+**前端工具链约定（Node / pnpm）**：版本声明全部收在 `frontend/` 内、仓库根不持有——
+Node 看 `frontend/.nvmrc`（现为 `24.16.0`），pnpm 看 `frontend/package.json` 的 `packageManager`（现为 `pnpm@11.24.0`）。
+
+- 团队统一用 **fnm** 管理 Node（`fnm env --use-on-cd` 后进目录自动按 `.nvmrc` 切换）；用其它管理器（nvm/Volta/mise）不破坏仓库，只要 node 落在 24 主版本即可。
+- 选 Node 24 线的原因：Node 24 是 **LTS** 线（2025-10 起），团队/生产默认的稳定选择。注意 Node 24 仍捆绑 corepack（Node ≥ 25 才移除）：fnm + Node 24 下 `pnpm` 由 corepack shim 提供，首次运行会打印一次 `! Corepack is about to download …` 并把 `packageManager` 锁定的 pnpm 下载入缓存，之后静默；想彻底消除这行可机器级二选一：`corepack disable`（改走独立安装的 pnpm）或 `corepack prepare pnpm@11.24.0 --activate`（预热）。pnpm ≥ 11 也会在本机版本与 `packageManager` 不一致时自动按其下载运行。
+- 兜底两层：`engines.node`（`>=24 <25`）保证 node 不符时 `pnpm install` 直接失败；`make dev` / `make web` 在启动前端前校验 node 主版本并给出切换提示。CI（`setup-node` 的 `node-version-file: frontend/.nvmrc`）与本地读同一份声明，杜绝漂移。
 
 **dsh 版本注意**：统一启动器 `dsh` 的 npm `latest`（如 0.1.1-rc.2）**缺 `acp` profile 模板**，需 `@next`（≥ 0.1.2-rc.1）。安装：
 

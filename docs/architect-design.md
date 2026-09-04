@@ -23,6 +23,11 @@
 > ⑥ **WS 载荷契约校准（决策 v5，见 roadmap 文首「决策变更 v5」）**：传输层（seq/agg/attach/重放）不动；
 >    载荷层增可选 `msg_id`（消息分组键）与工具 `kind/input/output`、usage 载荷字段化、预留
 >    `session.permission_request`/`session.runtime`（M2 发布），前端补 seq 幂等去重（roadmap §4.5 载荷契约）。
+> ⑦ **面板「发起问答」交互校准（决策 v6，见 roadmap 文首「决策变更 v6」）**：会话绑底座不可中途换维持
+>    现状（与 AionUi 同构）；新建会话 = 整页 `/new`（无弹窗；hero + 助手胶囊条 + 内嵌输入卡[模型 pill
+>    只读 + 发送] + 示例指令，对照 AionUi /guid）；首轮前明示「模型 = 底座自身默认」，面板不设模型选择器
+>    （opencode ACP 忽略客户端模型选择，issue #13644；模型只经 runtime 自身配置/启动环境注入）。
+>    详见 roadmap §5.8 与决策 v6。
 
 ## 1. 定位与目标
 
