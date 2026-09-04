@@ -1,0 +1,178 @@
+package acl
+
+import (
+	"bufio"
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"os/exec"
+	"sync"
+)
+
+// Transport 抽象「一个 ACP server 进程」的接入面：Start 拉起并接好 stdio，
+// Stdin/Stdout 即 ACP 线协议读写端，StderrTail 提供最近诊断输出（透出日志 + 环形缓冲）。
+type Transport interface {
+	// Start 拉起子进程并接入 stdio。ctx 取消仅影响后续生命周期，进程回收走 Close。
+	Start(ctx context.Context) error
+	// Stdin 返回进程 stdin（Start 之后可用），Host 在此写 JSON-RPC 请求。
+	Stdin() io.Writer
+	// Stdout 返回进程 stdout（Start 之后可用），Host 在此读 JSON-RPC 响应/通知。
+	Stdout() io.Reader
+	// StderrTail 返回最近 stderr 行（进程退出诊断用，自动透出到日志）。
+	StderrTail() []string
+	// Close 关闭进程：杀进程树（含孙进程）并释放管道。
+	Close() error
+}
+
+const stderrTailCap = 200
+
+// StdioTransport 是首版唯一 Transport：exec 一个 runtime 命令，接入 stdin/stdout/stderr。
+type StdioTransport struct {
+	command string
+	args    []string
+	env     []string // 追加环境（如 DEEPSEEK_API_KEY），叠加在 os.Environ 之上
+	dir     string
+
+	startOnce sync.Once
+	closeOnce sync.Once
+	closeErr  error
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    io.ReadCloser
+	stderr    io.ReadCloser
+
+	mu      sync.RWMutex
+	tail    []string
+	logger  *slog.Logger
+	started bool
+}
+
+// NewStdioTransport 构造 StdioTransport。env 为附加环境变量（KEY=VALUE 形式）。
+func NewStdioTransport(command string, args, env []string) *StdioTransport {
+	return &StdioTransport{
+		command: command,
+		args:    args,
+		env:     env,
+		logger:  slog.Default(),
+	}
+}
+
+// SetDir 设置子进程工作目录（NewSession 的 cwd 在 ACP 层表达，dir 留给诊断场景）。
+func (t *StdioTransport) SetDir(dir string) { t.dir = dir }
+
+// SetLogger 设置 stderr 透出日志目标（默认 slog.Default）。
+func (t *StdioTransport) SetLogger(l *slog.Logger) {
+	if l != nil {
+		t.logger = l
+	}
+}
+
+func (t *StdioTransport) Start(ctx context.Context) error {
+	var err error
+	t.startOnce.Do(func() {
+		err = t.start(ctx)
+	})
+	return err
+}
+
+func (t *StdioTransport) start(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, t.command, t.args...)
+	cmd.Dir = t.dir
+	cmd.Env = append(os.Environ(), t.env...)
+	setupProcAttr(cmd) // unix: 新进程组，Close 时杀整棵进程树
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return NewError(ClassConnection, "pipe_stdin", "创建 stdin 管道失败", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return NewError(ClassConnection, "pipe_stdout", "创建 stdout 管道失败", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return NewError(ClassConnection, "pipe_stderr", "创建 stderr 管道失败", err)
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return NewError(ClassConnection, "spawn_failed",
+			"拉起 runtime 子进程失败（命令: "+t.command+"），请确认其已安装且在 PATH 中", err)
+	}
+
+	t.cmd = cmd
+	t.stdin = stdin
+	t.stdout = stdout
+	t.stderr = stderr
+	t.started = true
+
+	// stderr 透出：逐行写日志 + 保留最近 N 行环形缓冲（进程退出诊断）。
+	go t.drainStderr()
+
+	_ = ctx // ctx 取消由外部 Close/CommandContext 语义处理
+	return nil
+}
+
+func (t *StdioTransport) drainStderr() {
+	sc := bufio.NewScanner(t.stderr)
+	sc.Buffer(make([]byte, 64*1024), 64*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		t.mu.Lock()
+		if len(t.tail) >= stderrTailCap {
+			copy(t.tail, t.tail[1:])
+			t.tail[len(t.tail)-1] = line
+		} else {
+			t.tail = append(t.tail, line)
+		}
+		t.mu.Unlock()
+		t.logger.Info("runtime stderr", "cmd", t.command, "line", line)
+	}
+}
+
+func (t *StdioTransport) Stdin() io.Writer {
+	if !t.started {
+		return nil
+	}
+	return t.stdin
+}
+
+func (t *StdioTransport) Stdout() io.Reader {
+	if !t.started {
+		return nil
+	}
+	return t.stdout
+}
+
+func (t *StdioTransport) StderrTail() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := make([]string, len(t.tail))
+	copy(out, t.tail)
+	return out
+}
+
+// Close 关闭进程：杀进程树并回收管道（幂等）。
+func (t *StdioTransport) Close() error {
+	t.closeOnce.Do(func() {
+		if !t.started || t.cmd == nil {
+			return
+		}
+		if t.stdin != nil {
+			_ = t.stdin.Close()
+		}
+		if err := killProc(t.cmd); err != nil {
+			t.closeErr = NewError(ClassConnection, "kill_failed", "关闭 runtime 进程失败", err)
+		}
+		_ = t.cmd.Wait()
+		if t.stdout != nil {
+			_ = t.stdout.Close()
+		}
+		if t.stderr != nil {
+			_ = t.stderr.Close()
+		}
+	})
+	return t.closeErr
+}

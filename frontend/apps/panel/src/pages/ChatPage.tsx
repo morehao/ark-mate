@@ -1,0 +1,303 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Button } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { tokens } from '@ark/ui'
+import { Pill } from '@ark/ui'
+import { useForge } from '../store'
+import { SessionRail } from '../components/SessionRail'
+import { NewSessionModal } from '../components/NewSessionModal'
+import { Composer } from '../components/Composer'
+import { StatusBar } from '../components/StatusBar'
+import { EntryView } from '../components/Transcript'
+import { agentOf, agentNameOf, titleFor } from '../console/util'
+
+/** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
+export function ChatPage() {
+  const navigate = useNavigate()
+  const params = useParams<{ id: string }>()
+  const paramId = params.id ?? null
+
+  const agents = useForge((s) => s.agents)
+  const sessions = useForge((s) => s.sessions)
+  const views = useForge((s) => s.views)
+  const activeId = useForge((s) => s.activeId)
+  const drawerOpen = useForge((s) => s.drawerOpen)
+  const activate = useForge((s) => s.activate)
+  const sendPrompt = useForge((s) => s.sendPrompt)
+  const cancel = useForge((s) => s.cancel)
+  const setDrawer = useForge((s) => s.setDrawer)
+
+  const [modalOpen, setModalOpen] = useState(false)
+
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const lastParamRef = useRef<string | null | undefined>(undefined)
+
+  // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
+  useEffect(() => {
+    if (lastParamRef.current === paramId) return
+    lastParamRef.current = paramId
+    if (paramId) activate(paramId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramId])
+
+  const view = activeId ? views[activeId] : undefined
+  const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
+  const streaming = view?.streaming ?? false
+  const agent = agentOf(agents, activeSum?.agent_id)
+  const title = activeId ? titleFor(activeSum, view, agents) : ''
+  // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (nearBottom) el.scrollTop = el.scrollHeight
+  }, [view?.entries, view?.streaming, view?.lastSeq])
+
+  const onSend = (text: string) => {
+    if (!activeId) return
+    void sendPrompt(text)
+  }
+
+  const onCreated = (id: string) => {
+    setModalOpen(false)
+    navigate(`/sessions/${id}`)
+  }
+
+  const renderChatHead = () => {
+    if (!activeId) return null
+    const seq = view?.lastSeq ?? 0
+    const metaText = streaming
+      ? '进行中'
+      : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq > 0 ? ` · seq ${seq}` : ''}`
+    return (
+      <div
+        style={{
+          flex: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          padding: '10px 20px',
+          borderBottom: `1px solid ${tokens.border}`,
+          background: tokens.surface,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title}>
+            {title}
+          </div>
+          <div
+            style={{
+              marginTop: 4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              minWidth: 0,
+              fontFamily: tokens.fontMono,
+              fontSize: 10.5,
+              color: tokens.textSecondary,
+            }}
+          >
+            <Pill maxWidth={180}>{agent ? agent.name : agentNameOf(agents, activeSum?.agent_id)}</Pill>
+            <span>{activeSum?.runtime ?? '—'}</span>
+            <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
+              {activeId}
+            </span>
+          </div>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              fontFamily: tokens.fontMono,
+              fontSize: 11,
+              color: tokens.textSecondary,
+            }}
+          >
+            {streaming && (
+              <span
+                className="fg-anim-pulse"
+                style={{ width: 7, height: 7, borderRadius: '50%', background: tokens.primary, display: 'inline-block' }}
+              />
+            )}
+            <span style={{ color: streaming ? tokens.text : tokens.textSecondary, fontWeight: streaming ? 600 : 400 }}>{metaText}</span>
+          </span>
+          {streaming && (
+            <Button size="small" onClick={() => void cancel()} style={{ borderRadius: 8 }}>
+              停止
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderEmptyPick = () => (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        gap: 12,
+        padding: 24,
+        minHeight: 0,
+        background: tokens.bg,
+      }}
+    >
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 14,
+          border: `1px solid ${tokens.border}`,
+          background: tokens.surface,
+          display: 'grid',
+          placeItems: 'center',
+          color: tokens.text,
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" />
+        </svg>
+      </div>
+      <div style={{ fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>开始问答</div>
+      <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
+        会话绑定唯一的 Agent 底座。从左侧选择一个会话续看，或新建会话并选择 opencode / deepseek-harness 底座。
+      </p>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} style={{ marginTop: 4 }}>
+        新建会话
+      </Button>
+    </div>
+  )
+
+  const renderEmptyTranscript = () => {
+    const a = agent
+    const agentDesc = a ? `${a.name}（${a.runtime}）` : activeId ?? '该会话'
+    return (
+      <div
+        style={{
+          padding: '12vh 24px 0',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            border: `1px solid ${tokens.border}`,
+            background: tokens.surface,
+            display: 'grid',
+            placeItems: 'center',
+            color: tokens.text,
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" />
+          </svg>
+        </div>
+        <h1 style={{ margin: '4px 0 0', fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>问点什么？</h1>
+        <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
+          当前会话绑定{' '}
+          <b style={{ fontFamily: tokens.fontMono, fontWeight: 600, color: tokens.text }}>{agentDesc}</b>
+          。在下方输入问题，回复将以流式事件渲染：思考、工具调用与正文实时出现，可随时停止。
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
+        <SessionRail onCreate={() => setModalOpen(true)} />
+        {drawerOpen && (
+          <div
+            className="fg-scrim-mobile"
+            style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.34)', zIndex: 35 }}
+            onClick={() => setDrawer(false)}
+          />
+        )}
+
+        <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
+          {!activeId ? (
+            renderEmptyPick()
+          ) : (
+            <>
+              {renderChatHead()}
+              <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, scrollBehavior: 'smooth' }}>
+                <div
+                  style={{
+                    maxWidth: 840,
+                    margin: '0 auto',
+                    padding: '28px 24px 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 20,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {(view?.entries.length ?? 0) === 0 ? (
+                    renderEmptyTranscript()
+                  ) : (
+                    <>
+                      {view?.entries.map((e) => (
+                        <EntryView key={e.id} e={e} />
+                      ))}
+                      {streaming && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>
+                          <span
+                            className="fg-anim-blink"
+                            style={{
+                              display: 'inline-block',
+                              width: 2,
+                              height: '1em',
+                              background: tokens.primary,
+                              verticalAlign: '-0.12em',
+                              marginLeft: 1,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+              {activeId && (
+                <Composer
+                  busy={streaming}
+                  busyNote={streaming ? `turn 进行中 · ${agent ? agent.name : ''}` : undefined}
+                  placeholder={streaming ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`}
+                  onSend={onSend}
+                />
+              )}
+            </>
+          )}
+        </section>
+      </div>
+      <StatusBar />
+      <NewSessionModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={onCreated} />
+    </div>
+  )
+}
+
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    in_progress: '进行中',
+    completed: '已完成',
+    cancelled: '已取消',
+    failed: '失败',
+  }
+  return map[status] ?? status
+}

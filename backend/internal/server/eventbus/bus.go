@@ -1,7 +1,7 @@
-// Package eventbus 实现进程内会话事件总线（单一事件通道）。
-// 设计对应架构文档 §2「SSE 会话事件流范式」：
+// Package eventbus 实现进程内会话事件总线（单一事件通道，与传输无关）。
+// 设计对应架构文档 §2 实时会话事件流范式（载荷经 WS 通道推送，见设计文档 §4.5）：
 //   - 单一通道 + type 判别 union：事件为带判别字段的 tagged union
-//   - 可重放会话流：全局单调递增 seq，订阅方带 after 游标续传，支持断线重连
+//   - 可重放会话流：全局单调递增 seq，订阅方带 after/since_seq 游标续传，支持断线重连
 //   - 缓冲：事件先落内存历史缓冲，再分发给 live 订阅者，断连后可从 after 续拉
 package eventbus
 
@@ -25,22 +25,50 @@ type Subscription struct {
 type Bus struct {
 	mu      sync.RWMutex
 	nextSeq int64
-	history []Event // 内存历史缓冲，用于 after 续传回放
+	history []Event          // 内存历史缓冲（per-agg 淘汰，见 NewWithLimit），用于 after 续传回放
+	limit   int              // history 保留上限（条数；淘汰即快照回退信号，见 §5.2/§5.7）
+	evicted map[string]int64 // 每聚合已淘汰的最大 seq（0 = 该聚合未淘汰）；low 水位供实时通道判定快照回退
 	subs    map[*Subscription]struct{}
 }
 
-// New 创建事件总线。
+// defaultHistoryLimit 默认历史缓冲条数上限。超限淘汰最旧事件并抬高该聚合
+// 的淘汰水位（evicted[agg]）：实时通道 attach 的 since 若低于水位 → 回 snapshot
+// （§5.2「since_seq 落后于缓冲淘汰点 → 回 snapshot」；M1 内存版，M2 落库后由 events 表兜底）。
+const defaultHistoryLimit = 65536
+
+// New 创建事件总线（默认历史上限）。
 func New() *Bus {
-	return &Bus{nextSeq: 1, history: make([]Event, 0), subs: make(map[*Subscription]struct{})}
+	return NewWithLimit(defaultHistoryLimit)
+}
+
+// NewWithLimit 创建事件总线并指定 history 保留上限（≤0 时按默认）。
+func NewWithLimit(n int) *Bus {
+	if n <= 0 {
+		n = defaultHistoryLimit
+	}
+	return &Bus{
+		nextSeq: 1,
+		limit:   n,
+		evicted: make(map[string]int64),
+		subs:    make(map[*Subscription]struct{}),
+	}
 }
 
 // Publish 向总线发布一个事件：分配 seq、写入历史缓冲并广播给全部订阅者。
+// 缓冲超限时淘汰最旧事件，并把其 seq 记为对应聚合的淘汰水位。
 // 订阅者消费不及时则丢弃该事件，由断线后以 after 续传兜底。
 func (b *Bus) Publish(typ, aggID string, version int64, payload any) Event {
 	b.mu.Lock()
 	evt := Event{Type: typ, Seq: b.nextSeq, AggregID: aggID, Version: version, Payload: payload}
 	b.nextSeq++
 	b.history = append(b.history, evt)
+	for len(b.history) > b.limit {
+		old := b.history[0]
+		b.history = b.history[1:]
+		if old.Seq > b.evicted[old.AggregID] {
+			b.evicted[old.AggregID] = old.Seq
+		}
+	}
 	for sub := range b.subs {
 		select {
 		case sub.C <- evt:
@@ -49,6 +77,14 @@ func (b *Bus) Publish(typ, aggID string, version int64, payload any) Event {
 	}
 	b.mu.Unlock()
 	return evt
+}
+
+// EvictedThrough 返回某聚合已被淘汰的最大 seq（0 = 尚无淘汰）：
+// 重放请求的 since 若低于该水位，说明请求区间起点已不在缓冲内 → 应回 snapshot。
+func (b *Bus) EvictedThrough(aggID string) int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.evicted[aggID]
 }
 
 // Subscribe 订阅事件流。after 为起始游标：先同步回放 history 中 seq 大于 after 的历史，
@@ -73,9 +109,22 @@ func (b *Bus) Unsubscribe(sub *Subscription) {
 	b.mu.Unlock()
 }
 
-// LastSeq 返回已发布的最后一个序号（heartbeat 编排帧标注监听位置用）。
+// LastSeq 返回已发布的最后一个序号（供订阅方对齐游标/判断快照回退用）。
 func (b *Bus) LastSeq() int64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.nextSeq - 1
+}
+
+// EventsAfter 返回 seq > after 的历史事件快照（拷贝，供实时通道按聚合做重放）。
+func (b *Bus) EventsAfter(after int64) []Event {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	out := make([]Event, 0, len(b.history))
+	for _, evt := range b.history {
+		if evt.Seq > after {
+			out = append(out, evt)
+		}
+	}
+	return out
 }

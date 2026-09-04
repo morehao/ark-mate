@@ -9,9 +9,10 @@
 #   make all   —— 单二进制：前端产物拷入 backend/internal/web/dist 后，
 #                 以 -tags release 编译（启用 //go:embed），输出根目录 ./forge
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
-#   make server —— 后端开发起服（不起前端，面板经 vite dev proxy 联调）
+#   make dev   —— 前后端联调单命令起服：后端 go run（:8099）+ 前端 vite dev（:5173），Ctrl-C 一起收
+#   make server —— 仅后端开发起服（不起前端，面板经 vite dev proxy 联调）
 
-.PHONY: web server build vet test all clean
+.PHONY: dev web server build vet test all clean
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/internal/web/dist
@@ -22,9 +23,20 @@ web:
 	rm -rf $(WEB_DIST_DIR)
 	cp -r $(FRONTEND_ROOT)/apps/panel/dist $(WEB_DIST_DIR)
 
-# 后端开发起服
+# 后端开发起服（forge 无默认子命令，需显式 serve）
 server:
-	cd backend && go run ./cmd/forge
+	cd backend && go run ./cmd/forge serve
+
+# 前后端联调单命令：后端 go run serve（默认 127.0.0.1:8099）+ 前端 vite dev
+# （:5173，/v1 代理到后端含 ws）。任一进程退出 / Ctrl-C 时把两个进程一起收掉。
+dev:
+	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:8099)"
+	@echo "==> 前端  pnpm dev                  (vite :5173 -> /v1 proxy :8099)"
+	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
+	trap 'kill 0 2>/dev/null || true' EXIT; \
+	cd backend && go run ./cmd/forge serve & \
+	cd $(FRONTEND_ROOT) && pnpm dev & \
+	wait
 
 # 默认构建：不带 release tag，web 包的 embed 不参与编译、不依赖前端产物
 build:

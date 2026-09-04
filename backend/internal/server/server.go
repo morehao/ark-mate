@@ -1,4 +1,4 @@
-// Package server 是控制面服务模块：基于 Gin 组织 REST + SSE 控制面 API。
+// Package server 是控制面服务模块：基于 Gin 组织 REST API 与实时事件通道（WS，M0 落地）。
 // 结构：router 负责 gin.Engine 初始化与路由注册，handler 按功能实现业务处理。
 package server
 
@@ -28,7 +28,7 @@ type Config struct {
 }
 
 // New 构造控制面 Server。svc 为领域服务实现（manager 落地前可用 handler.NewMockService）。
-// bus 承载会话事件流（架构文档 §2），由 SSE 进行流式推送。
+// bus 承载归一化会话事件（架构文档 §2 范式），由实时通道（WS，M0 落地）订阅推送。
 func New(cfg Config, svc handler.Service, bus *eventbus.Bus) *Server {
 	h := handler.New(svc, bus)
 	engine := router.New(h)

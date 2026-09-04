@@ -1,9 +1,16 @@
 {
   "name": "ark-forge-frontend",
   "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.24.0",
   "scripts": {
     "dev": "pnpm --filter @ark/panel dev",
-    "build": "pnpm --filter @ark/panel build",
-    "typecheck": "pnpm --filter @ark/panel typecheck"
+    "dev:panel": "pnpm --filter @ark/panel dev",
+    "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
+    "build:panel": "pnpm --filter @ark/panel build",
+    "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
+    "typecheck:panel": "pnpm --filter @ark/panel typecheck",
+    "smoke:e2e": "node scripts/smoke-e2e.mjs",
+    "smoke:e2e:live": "node scripts/e2e-live-turn.mjs"
   }
 }

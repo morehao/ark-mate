@@ -3,6 +3,17 @@
 > 面向 Agent 应用开发的通用底座/平台（monorepo）：创建、运行、扩展与统一管理 Agent，
 > 作为 ACP Host，经 stdio 连接 opencode 与 deepseek-harness 等多个 Agent Runtime。
 
+> **决策更新（见 [design-and-roadmap.md](./design-and-roadmap.md) §0「决策变更 v2」）**：
+> ① 控制面 → 面板的实时传输由「SSE 首选、WS 仅双向需求时引入」调整为 **仅 WebSocket（不设 SSE 出口）**：
+>    REST 命令 + WS 事件推送（attach/快照/重放协议）；脚手架期遗留的 SSE 端点/适配器代码随 M0 移除。
+>    事件流五条范式不变，仅换载体。
+> ② 产品定位收敛为**一次会话/一次运行指定一个 Agent Runtime，无跨 agent 协作**（多 runtime = 注册表 +
+>    按会话选择切换）。本文档后续章节中与上述冲突的表述（如 SSE 首选、跨 runtime 编排）以该更新为准。
+> ③ **deepseek-harness 启动形态勘误**：本文档 §2/§6.2/§7 所述 `dsh-acp-demo --config <cordis.yml>`
+>    已随上游演进废弃，现为统一启动器 `dsh --profile acp`（会话可持久化 list/resume/close、无 load/fork），
+>    以 [design-and-roadmap.md](./design-and-roadmap.md) 与
+>    [deepseekharness-acp-adaptation.md](./deepseekharness-acp-adaptation.md) 为准。
+
 ## 1. 定位与目标
 
 一款可自托管的 Agent 平台底座。与前缀 `ark-`（个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，
