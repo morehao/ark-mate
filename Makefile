@@ -17,8 +17,23 @@
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/internal/web/dist
 
+# —— 前端工具链（Node / pnpm）——
+# 唯一事实源在 frontend/ 内：Node 版本 = frontend/.nvmrc，pnpm 版本 = frontend/package.json 的
+# packageManager 字段（pnpm >= 11 会在本机版本不一致时自动按其下载运行，无需 corepack）。
+# make dev / make web 在调用 pnpm 前校验当前 node 主版本与 .nvmrc 一致（install 阶段由
+# engines 兜底无条件失败，run 阶段由这里兜底），详见 README「前端工具链约定」。
+NODE_VERSION_FILE  := $(FRONTEND_ROOT)/.nvmrc
+NODE_VERSION       := $(shell sed 's/^v//' $(NODE_VERSION_FILE) 2>/dev/null)
+NODE_VERSION_MAJOR := $(word 1,$(subst ., ,$(NODE_VERSION)))
+
+# 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
+define require-node
+	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
+endef
+
 # 前端产物 → embed 宿主（backend/internal/web/dist，不入库）
 web:
+	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm build
 	rm -rf $(WEB_DIST_DIR)
 	cp -r $(FRONTEND_ROOT)/apps/panel/dist $(WEB_DIST_DIR)
@@ -32,6 +47,7 @@ server:
 # 避免后端尚未 listen 时 vite ws 代理出现 ECONNREFUSED 的启动竞态。
 # 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
 dev:
+	$(require-node)
 	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:8099)"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \

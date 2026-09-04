@@ -6,6 +6,7 @@ import { consoleStyleSheet } from './console.css'
 import { TopBar } from './components/TopBar'
 import { useForge } from './store'
 import { ChatPage } from './pages/ChatPage'
+import { StartPage } from './pages/StartPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { RuntimesPage } from './pages/RuntimesPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -66,7 +67,8 @@ export function App() {
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Routes>
-          <Route path="/" element={<Navigate to="/sessions" replace />} />
+          <Route path="/" element={<Navigate to="/new" replace />} />
+          <Route path="/new" element={<StartPage />} />
           <Route path="/sessions" element={<ChatPage />} />
           <Route path="/sessions/:id" element={<ChatPage />} />
           <Route
@@ -93,7 +95,7 @@ export function App() {
               </Manage>
             }
           />
-          <Route path="*" element={<Navigate to="/sessions" replace />} />
+          <Route path="*" element={<Navigate to="/new" replace />} />
         </Routes>
       </div>
 
