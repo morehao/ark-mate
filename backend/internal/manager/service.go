@@ -78,12 +78,14 @@ func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
 
 // SetTranscriptDir 启用会话 wire transcript 落盘（目录不存在会自动创建；
 // dir 为空 = 禁用）。须在任何会话开始前调用（serve/demo 装配时）。
+// 启用后立即回读已落盘 transcript，重建会话列表与历史（会话重启存活）。
 func (s *Service) SetTranscriptDir(dir string) {
 	if dir == "" {
 		s.tx = nil
 		return
 	}
 	s.tx = newTranscriptRecorder(dir)
+	s.loadTranscripts()
 }
 
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
@@ -289,12 +291,18 @@ func (s *Service) setAgentState(agentID, state string) {
 }
 
 // registerSession 登记一个新会话，返回记录指针。
+// registerSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
+// loadTranscripts 回灌时保留原 created_at/updated_at。
 func (s *Service) registerSession(rec *SessionRec) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
-	rec.CreatedAt = now
-	rec.UpdatedAt = now
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = now
+	}
+	if rec.UpdatedAt.IsZero() {
+		rec.UpdatedAt = now
+	}
 	s.sessions[rec.ID] = rec
 }
 

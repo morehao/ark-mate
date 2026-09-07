@@ -533,7 +533,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 	if d, ok := o.perm.AutoDecision(req.SessionID, req); ok {
 		return d
 	}
-	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption) {
+	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time) {
 		o.svc.publish(BusPermissionRequest, req.SessionID, map[string]any{
 			"session_id":   req.SessionID,
 			"call_id":      callID,
@@ -542,6 +542,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 			"kind":         tool.Kind,
 			"input":        tool.Input,
 			"options":      opts,
+			"timeout_at":   timeout.UTC().Format(time.RFC3339), // UI 端超时收敛（无用户决策时自动拒绝）
 		})
 	}
 	return o.perm.RegisterAndWait(ctx, req.SessionID, req, publish)

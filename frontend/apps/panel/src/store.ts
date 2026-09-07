@@ -56,6 +56,13 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     return push(kind, text_)
   }
 
+  // 终态/取消收敛：把未决权限卡标记为已结束（不再显示待决按钮）。
+  // 覆盖「会话被取消/结束但仍挂着权限卡」的边缘（如超时后端已拒、agent 继续产生末尾终态）。
+  const settlePerms = (list: StreamEntry[], label: string): StreamEntry[] =>
+    list.map((en): StreamEntry =>
+      en.kind === 'permission' && !en.resolved ? { ...en, resolved: true, decision: label } : en,
+    )
+
   // 文本段归并：带 msg_id（ACP unstable messageId）时并入同 kind、同 msgId 的既有段
   // （允许跨工具穿插，决策 v5①）；无 msg_id 回退「同 kind 尾拼接」（老行为）。
   const mergeText = (kind: StreamEntry['kind'], text_: string): StreamEntry[] => {
@@ -105,29 +112,35 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.TurnEnded:
       return {
         ...v,
-        entries: push('system', undefined, {
-          tone: 'ok',
-          text: `完成 · ${String(e.payload?.stop_reason ?? '')}`.replace(/ · $/, ''),
-        }),
+        entries: settlePerms(
+          push('system', undefined, {
+            tone: 'ok',
+            text: `完成 · ${String(e.payload?.stop_reason ?? '')}`.replace(/ · $/, ''),
+          }),
+          '已结束',
+        ),
         streaming: false,
         lastSeq,
       }
     case Ev.TurnError:
       return {
         ...v,
-        entries: push('system', undefined, {
-          tone: 'err',
-          text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
-            e.payload?.details ?? '',
-          )}`,
-        }),
+        entries: settlePerms(
+          push('system', undefined, {
+            tone: 'err',
+            text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
+              e.payload?.details ?? '',
+            )}`,
+          }),
+          '已结束',
+        ),
         streaming: false,
         lastSeq,
       }
     case Ev.RunCancelled:
       return {
         ...v,
-        entries: push('system', undefined, { tone: 'cancel', text: '已取消' }),
+        entries: settlePerms(push('system', undefined, { tone: 'cancel', text: '已取消' }), '已取消'),
         streaming: false,
         lastSeq,
       }
@@ -138,12 +151,13 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       const title = String(e.payload?.title ?? '权限请求')
       const toolKind = String(e.payload?.kind ?? '')
       const toolCallId = String(e.payload?.tool_call_id ?? '')
+      const timeoutAt = e.payload?.timeout_at != null ? String(e.payload.timeout_at) : undefined
       const optionKinds = Array.isArray(e.payload?.options)
         ? (e.payload.options as PermissionOption[])
         : []
       return {
         ...v,
-        entries: push('permission', undefined, { callId, title, optionKinds, toolKind, toolCallId, resolved: false }),
+        entries: push('permission', undefined, { callId, title, optionKinds, toolKind, toolCallId, resolved: false, timeoutAt }),
         lastSeq,
       }
     }
@@ -187,6 +201,7 @@ export interface ForgeActions {
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
+  expirePermission: (callId: string) => void
   renameSession: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
   showToast: (msg: string) => void
@@ -409,6 +424,22 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
       }
+    },
+
+    expirePermission: (callId) => {
+      // 服务端超时自动拒绝（无用户决策）→ 前端把对应卡片就地标记为已收敛，不发 API。
+      const id = get().activeId
+      if (!id) return
+      set((s) => {
+        const view = s.views[id]
+        if (!view) return {}
+        const entries = view.entries.map((en): StreamEntry =>
+          en.kind === 'permission' && en.callId === callId && !en.resolved
+            ? { ...en, resolved: true, decision: '超时自动拒绝' }
+            : en,
+        )
+        return { views: { ...s.views, [id]: { ...view, entries } } }
+      })
     },
 
     renameSession: async (id, title) => {

@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Button } from 'antd'
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
@@ -53,8 +53,23 @@ function decisionFor(opt: PermissionOption): PermissionDecision {
 /** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
 function PermissionCard({ e }: { e: StreamEntry }) {
   const respond = useForge((s) => s.respondPermission)
+  const expire = useForge((s) => s.expirePermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
+  const timeoutAt = e.timeoutAt
+
+  // 服务端超时自动拒绝的收敛：客户端按 timeout_at 定时把未决卡片标记为已收敛（同一宿主机器，时钟偏差可忽略）。
+  useEffect(() => {
+    if (resolved || !timeoutAt || !e.callId) return
+    const ms = new Date(timeoutAt).getTime() - Date.now()
+    if (ms <= 0) {
+      expire(e.callId)
+      return
+    }
+    const timer = window.setTimeout(() => expire(e.callId as string), ms + 60)
+    return () => window.clearTimeout(timer)
+  }, [resolved, timeoutAt, e.callId, expire])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
       <Role>assistant · permission</Role>

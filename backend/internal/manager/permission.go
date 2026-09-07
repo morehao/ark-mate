@@ -168,9 +168,10 @@ func (m *PermissionManager) pendingForSession(sessionID string) []*pendingPermis
 }
 
 // RegisterAndWait 注册一条权限请求并阻塞等待决策（SDK 派发 goroutine 中调用）。
-// publish 副作用（发布 session.permission_request 事件）由调用方注入，避免 manager 依赖 bus。
+// publish 副作用（发布 session.permission_request 事件）由调用方注入，避免 manager 依赖 bus；
+// publisher 携带超时时刻（timeout），供 UI 端到前端判断卡片过期收敛。
 // 返回最终决策；超时/上下文取消时自动拒绝。
-func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.PermissionRequest, publish func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption)) acl.PermissionDecision {
+func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.PermissionRequest, publish func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time)) acl.PermissionDecision {
 	callID := genCallID()
 	p := &pendingPermission{
 		callID:    callID,
@@ -187,7 +188,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID strin
 	m.logger.Info("permission: request registered", "session", sessionID, "call_id", callID, "title", req.ToolCall.Title)
 
 	if publish != nil {
-		publish(callID, req.ToolCall.Title, req.ToolCall, req.Options)
+		publish(callID, req.ToolCall.Title, req.ToolCall, req.Options, p.timeout)
 	}
 
 	timer := time.NewTimer(m.timeout)

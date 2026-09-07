@@ -777,8 +777,14 @@ opencode/harness 两形状）。
 - 会话元数据：`title`（首条用户消息自动推导，可 `PATCH` 覆盖）、`pinned`、`archived`、`created_at/updated_at`，
   经 `GET /sessions` / `GET /sessions/:id` 暴露；`PATCH /sessions/:id` 做元数据子集更新。
 - runtime 能力基线（capabilities）只读暴露在 `GET /runtimes`；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组 + 置顶。
+- **会话重启存活（轻量，2026-09-07 增补）**：daemon 启动回读 transcript 目录，重建会话列表与元数据
+  （标题/状态/时间，状态由最后一条终态事件推导），并把历史事件注入 eventbus——管理面在重启后仍有会话可见、
+  旧会话可经 WS/history 回看。**仍不引入 DB**（落库属 M2 的 events 表/快照兜底）；transcript header 仅在文件为空时
+  写入（重启 resume 不重写 header，保持「首行=header」不变式）。
+- 权限超时自动拒绝的前端收敛：请求事件携带 `timeout_at`，前端按该时刻定时把未决卡标记收敛（不发 API）；
+  会话终态/取消事件也会就地收起未决卡。
 - 不做：skills / MCP / cron 的**数据 CRUD**（当前 backend 无此类数据源，虚构会失真；仍按 §6 P1/P2 规划），
-  亦不做会话持久化落库（重启即失，transcript 文件仍落盘待未来导入）。
+  **不引入 DB 的会话/事件持久化**（transcript 落盘 + 重启回读 = 轻量存活；events 表落库属 M2）。
 
 **验收**：`make all` 单二进制 33MB 构建通过；`go test ./...` 全绿（含新增 `internal/acl` 端到端权限集成测试、
 `internal/manager` permission 单元测试）；真实 opencode ACP 会话跑通（tool_call→tool_update→thought/message→

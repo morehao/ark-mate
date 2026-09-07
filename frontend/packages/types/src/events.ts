@@ -48,4 +48,5 @@ export interface StreamEntry {
   toolCallId?: string
   resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
   decision?: string // resolved 时的决策摘要
+  timeoutAt?: string // 服务端超时时刻（ISO）；过期即自动拒绝，UI 据此收敛卡片
 }
