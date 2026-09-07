@@ -178,7 +178,7 @@ func toSessionResp(r *SessionRec) handler.SessionResp {
 	}
 }
 
-// GetSession 返回单会话详情（元数据 + 挂起权限）。
+// GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
 func (s *Service) GetSession(ctx context.Context, id string) (*handler.SessionDetailResp, error) {
 	if !s.hasSession(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
@@ -188,7 +188,11 @@ func (s *Service) GetSession(ctx context.Context, id string) (*handler.SessionDe
 	for _, p := range pending {
 		perms = append(perms, toPermissionResp(p))
 	}
-	detail := handler.SessionDetailResp{SessionResp: s.sessionResp(id), Pending: perms}
+	always := make([]handler.AlwaysAllowResp, 0)
+	for _, it := range s.AlwaysAllowed(id) {
+		always = append(always, handler.AlwaysAllowResp{Title: it.Title, Kind: it.Kind, Since: it.Since.UTC().Format(time.RFC3339)})
+	}
+	detail := handler.SessionDetailResp{SessionResp: s.sessionResp(id), Pending: perms, AlwaysAllowed: always}
 	return &detail, nil
 }
 
@@ -255,6 +259,28 @@ func (s *Service) PendingPermissions(id string) []PermissionItem {
 		return nil
 	}
 	return s.orch.PendingPermissions(id)
+}
+
+// AlwaysAllowed 直接透传编排器的会话级「始终允许」记忆（供 GetSession 复用）。
+func (s *Service) AlwaysAllowed(id string) []AlwaysAllowItem {
+	if s.orch == nil {
+		return nil
+	}
+	return s.orch.AlwaysAllowed(id)
+}
+
+// RevokeAlways 撤销会话级「始终允许」记忆（title+kind 均空 = 一键撤销全部）。
+func (s *Service) RevokeAlways(ctx context.Context, id, title, kind string) error {
+	if !s.hasSession(id) {
+		return s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	if s.orch == nil {
+		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	if _, err := s.orch.RevokeAlways(id, title, kind); err != nil {
+		return s.restErr(err)
+	}
+	return nil
 }
 
 // toPermissionResp 把 manager.PermissionItem 折叠为 handler.PermissionResp。

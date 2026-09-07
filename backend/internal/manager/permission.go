@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -40,10 +41,24 @@ type pendingPermission struct {
 // mock 不了，权限决策的 RPC 阻塞在 SDK 派发的 goroutine 里（见 acl/client.go 说明）。
 type PermissionManager struct {
 	mu       sync.Mutex
-	pending  map[string]*pendingPermission   // key = callID
-	alwaysOK map[string]map[string]*struct{} // sessionID → action+identifier 始终允许集合
+	pending  map[string]*pendingPermission     // key = callID
+	alwaysOK map[string]map[string]alwaysEntry // sessionID → action+identifier 始终允许记忆
 	timeout  time.Duration
 	logger   *slog.Logger
+}
+
+// alwaysEntry 是一条会话级「始终允许」记忆（决策 v4① allow_always / reject_always 的 allow 侧）。
+type alwaysEntry struct {
+	title string
+	kind  string
+	since time.Time
+}
+
+// AlwaysAllowItem 是「始终允许」记忆的对外表示（REST/详情载荷）。
+type AlwaysAllowItem struct {
+	Title string    `json:"title"`
+	Kind  string    `json:"kind"`
+	Since time.Time `json:"since"`
 }
 
 // NewPermissionManager 构造权限管理器。
@@ -53,7 +68,7 @@ func NewPermissionManager(timeout time.Duration) *PermissionManager {
 	}
 	return &PermissionManager{
 		pending:  make(map[string]*pendingPermission),
-		alwaysOK: make(map[string]map[string]*struct{}),
+		alwaysOK: make(map[string]map[string]alwaysEntry),
 		timeout:  timeout,
 		logger:   slog.Default(),
 	}
@@ -80,10 +95,11 @@ func genCallID() string {
 	return "perm-" + hex.EncodeToString(b)
 }
 
-// alwaysKey 归一化「action+identifier」集合键：以 tool title + kind 作为可辨识键。
-func alwaysKey(t acl.ToolCallInfo) string {
-	return t.Title + "|" + t.Kind
-}
+// alwaysKeyOf 归一化「action+identifier」集合键：以 tool title + kind 作为可辨识键。
+func alwaysKeyOf(title, kind string) string { return title + "|" + kind }
+
+// alwaysKey 由工具信息算集合键。
+func alwaysKey(t acl.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) }
 
 // AutoDecision 决定「无需征询」的快速路径：会话级始终允许记忆命中 → 直接放行。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
@@ -112,17 +128,52 @@ func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo) {
 	defer m.mu.Unlock()
 	set := m.alwaysOK[sessionID]
 	if set == nil {
-		set = make(map[string]*struct{})
+		set = make(map[string]alwaysEntry)
 		m.alwaysOK[sessionID] = set
 	}
-	set[alwaysKey(t)] = &struct{}{}
+	k := alwaysKey(t)
+	if _, ok := set[k]; !ok {
+		set[k] = alwaysEntry{title: t.Title, kind: t.Kind, since: time.Now().UTC()}
+	}
 }
 
-// ForgetSession 清除整会话的始终允许记忆（会话结束/重置）。
+// ForgetSession 清除整会话的始终允许记忆（会话结束/重置/一键撤销）。
 func (m *PermissionManager) ForgetSession(sessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.alwaysOK, sessionID)
+}
+
+// RevokeAlways 撤销一条会话级「始终允许」记忆；返回该条是否存在。
+func (m *PermissionManager) RevokeAlways(sessionID, title, kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := m.alwaysOK[sessionID]
+	if set == nil {
+		return false
+	}
+	k := alwaysKeyOf(title, kind)
+	if _, ok := set[k]; !ok {
+		return false
+	}
+	delete(set, k)
+	if len(set) == 0 {
+		delete(m.alwaysOK, sessionID)
+	}
+	return true
+}
+
+// AlwaysAllowed 列出某会话的全部「始终允许」记忆（按授予时间升序）。
+func (m *PermissionManager) AlwaysAllowed(sessionID string) []AlwaysAllowItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := m.alwaysOK[sessionID]
+	out := make([]AlwaysAllowItem, 0, len(set))
+	for _, e := range set {
+		out = append(out, AlwaysAllowItem{Title: e.title, Kind: e.kind, Since: e.since})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
+	return out
 }
 
 // CancelSession 取消某会话的全部挂起权限请求（session/cancel 后按 ACP 规范回 Cancelled）。

@@ -45,6 +45,12 @@ type stubSvc struct {
 	historyLimit  int
 	historyResp   *handler.SessionHistoryResp
 	historyErr    error
+
+	alwaysList  []handler.AlwaysAllowResp
+	revokeID    string
+	revokeTitle string
+	revokeKind  string
+	revokeErr   error
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -66,7 +72,10 @@ func (s *stubSvc) ListSessions(_ bool) ([]handler.SessionResp, error) {
 	return s.sessions, nil
 }
 func (s *stubSvc) GetSession(_ context.Context, id string) (*handler.SessionDetailResp, error) {
-	return &handler.SessionDetailResp{SessionResp: handler.SessionResp{ID: id}}, nil
+	return &handler.SessionDetailResp{
+		SessionResp:   handler.SessionResp{ID: id},
+		AlwaysAllowed: s.alwaysList,
+	}, nil
 }
 func (s *stubSvc) UpdateSession(_ context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
 	resp := handler.SessionResp{ID: id}
@@ -86,6 +95,12 @@ func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]handle
 }
 func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) error {
 	return nil
+}
+func (s *stubSvc) RevokeAlways(_ context.Context, id, title, kind string) error {
+	s.revokeID = id
+	s.revokeTitle = title
+	s.revokeKind = kind
+	return s.revokeErr
 }
 func (s *stubSvc) CreateSession(_ context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
 	s.createCalled = true
@@ -154,6 +169,8 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.POST("/sessions/:id/cancel", h.Session.Cancel)
 	g.GET("/sessions/:id/permissions", h.Session.Permissions)
 	g.POST("/sessions/:id/permission", h.Session.ResolvePermission)
+	g.GET("/sessions/:id/permissions/always", h.Session.AlwaysAllowed)
+	g.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeAlways)
 	g.GET("/runtimes", h.Runtime.List)
 	return r
 }
@@ -366,5 +383,44 @@ func TestHistorySuccess(t *testing.T) {
 	}
 	if err := json.Unmarshal(env.Data, &out); err != nil || out.ID != "s1" {
 		t.Fatalf("history data 不符: %s", env.Data)
+	}
+}
+
+// TestAlwaysAllowedList GET /sessions/:id/permissions/always 返回会话级「始终允许」记忆。
+func TestAlwaysAllowedList(t *testing.T) {
+	svc := &stubSvc{alwaysList: []handler.AlwaysAllowResp{
+		{Title: "运行演示命令 echo hello", Kind: "execute", Since: "2026-01-02T03:04:05Z"},
+	}}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/permissions/always", "")
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	var out []handler.AlwaysAllowResp
+	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" {
+		t.Fatalf("always data 不符: %s", env.Data)
+	}
+}
+
+// TestRevokeAlways 单条撤销（title+kind）与一键撤销（均空）都正确透传。
+func TestRevokeAlways(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+
+	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/permissions/always/revoke",
+		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	if svc.revokeID != "s1" || svc.revokeTitle != "运行演示命令 echo hello" || svc.revokeKind != "execute" {
+		t.Fatalf("撤销单条透传不符: %+v", svc)
+	}
+
+	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/permissions/always/revoke", `{}`)
+	if env.Code != 0 {
+		t.Fatalf("一键撤销信封不符: %+v", env)
+	}
+	if svc.revokeTitle != "" || svc.revokeKind != "" {
+		t.Fatalf("一键撤销应传空 title/kind: %+v", svc)
 	}
 }

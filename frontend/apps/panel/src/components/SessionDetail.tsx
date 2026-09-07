@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Button, Drawer, Input, Spin } from 'antd'
-import { CheckOutlined, CloseOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Drawer, Input, Popconfirm, Spin } from 'antd'
+import {
+  CheckOutlined,
+  CloseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Dot, Pill, sessionStatusMeta } from '@ark/ui'
-import type { PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
-import { getSession, toErrorMessage } from '@ark/api'
+import type { AlwaysAllowItem, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
+import { getSession, revokeAlways, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
 import { agentNameOf } from '../console/util'
 
@@ -87,6 +93,18 @@ export function SessionDetailDrawer({
           ? { allowed: true, always: true, optionId: optionId(p, 'allow_always'), label: '始终允许' }
           : { allowed: false, always: false, optionId: optionId(p, 'reject_once'), label: '拒绝' }
     void respond(p.call_id, decision).then(() => load())
+  }
+
+  // —— 会话级「始终允许」记忆：撤销（单条 / 全部）后刷新 ——
+  const revokeOne = (item: AlwaysAllowItem) => {
+    void revokeAlways(sessionId, { title: item.title, kind: item.kind })
+      .then(() => load())
+      .catch((e) => setErr(toErrorMessage(e)))
+  }
+  const revokeAll = () => {
+    void revokeAlways(sessionId, {})
+      .then(() => load())
+      .catch((e) => setErr(toErrorMessage(e)))
   }
 
   const s = detail
@@ -302,6 +320,104 @@ export function SessionDetailDrawer({
                         {actBtn('始终允许', 'allow_always', p)}
                         {actBtn('拒绝', 'reject', p)}
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 会话级「始终允许」记忆（allow_always 已授，可逐条/全部撤销） */}
+            <div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  fontWeight: 620,
+                  color: tokens.textSecondary,
+                }}
+              >
+                <span>始终允许记忆</span>
+                {(s.always_allowed ?? []).length > 0 && (
+                  <Popconfirm
+                    title="撤销全部「始终允许」记忆？"
+                    description="此后同类工具调用需重新逐次确认。"
+                    okText="撤销全部"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => revokeAll()}
+                  >
+                    <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 12 }}>
+                      撤销全部
+                    </Button>
+                  </Popconfirm>
+                )}
+              </div>
+              {(s.always_allowed ?? []).length === 0 ? (
+                <div
+                  style={{
+                    border: `1px dashed ${tokens.border}`,
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    fontSize: 12.5,
+                    color: tokens.textPlaceholder,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  无「始终允许」记忆。对权限确认卡点「始终允许」后会记录在这里，后续同类请求自动放行。
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(s.always_allowed ?? []).map((item) => (
+                    <div
+                      key={`${item.kind}|${item.title}`}
+                      style={{
+                        border: `1px solid ${tokens.border}`,
+                        background: tokens.surface,
+                        borderRadius: 10,
+                        padding: '8px 10px 8px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            lineHeight: 1.4,
+                            overflowWrap: 'anywhere',
+                            color: tokens.text,
+                          }}
+                        >
+                          {item.title}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 1,
+                            display: 'flex',
+                            gap: 8,
+                            fontFamily: tokens.fontMono,
+                            fontSize: 10.5,
+                            color: tokens.textSecondary,
+                          }}
+                        >
+                          <span>kind: {item.kind || '—'}</span>
+                          <span>授予 {fmtLocal(item.since)}</span>
+                        </div>
+                      </div>
+                      <Popconfirm
+                        title="撤销这条「始终允许」？"
+                        okText="撤销"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => revokeOne(item)}
+                      >
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />} title="撤销" aria-label="撤销" />
+                      </Popconfirm>
                     </div>
                   ))}
                 </div>
