@@ -1,9 +1,11 @@
-import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from 'antd'
-import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import type { PermissionOption, StreamEntry } from '@ark/types'
 import { useForge, type PermissionDecision } from '../store'
+import { copyText } from '../console/clipboard'
+import { parseMsg } from '../console/message'
 
 const roleLabel: CSSProperties = {
   fontFamily: tokens.fontMono,
@@ -172,6 +174,118 @@ function PermissionCard({ e }: { e: StreamEntry }) {
   )
 }
 
+/** 消息头右侧的「复制整条消息」小按钮（Clipboard API + execCommand 兜底）。 */
+function MsgCopy({ text }: { text: string }) {
+  const toast = useForge((s) => s.showToast)
+  return (
+    <Button
+      type="text"
+      size="small"
+      icon={<CopyOutlined />}
+      title="复制消息全文"
+      aria-label="复制消息全文"
+      disabled={!text}
+      onClick={async () => {
+        const ok = await copyText(text)
+        toast(ok ? '已复制消息' : '复制失败，请手动选择文本')
+      }}
+      style={{ flex: 'none', color: tokens.textPlaceholder, height: 20, minWidth: 20, padding: 0 }}
+    />
+  )
+}
+
+/** 围栏代码块：mono 卡片 + 语言/行数 + 一键复制 + 长块折叠。 */
+function CodeBlock({ lang, text }: { lang?: string; text: string }) {
+  const toast = useForge((s) => s.showToast)
+  const code = text
+  const lines = code.split('\n').length
+  const long = code.length > 700 || lines > 22
+  const [folded, setFolded] = useState(long)
+  return (
+    <div
+      style={{
+        margin: '8px 0',
+        border: `1px solid ${tokens.border}`,
+        borderRadius: 10,
+        overflow: 'hidden',
+        background: tokens.codeBg,
+        fontFamily: tokens.fontMono,
+        maxWidth: '100%',
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '4px 6px 4px 11px',
+          background: tokens.surface,
+          borderBottom: `1px solid ${tokens.border}`,
+        }}
+      >
+        <span style={{ fontSize: 11, fontWeight: 600, color: tokens.textSecondary, textTransform: 'lowercase' }}>
+          {lang || 'code'}
+        </span>
+        <span style={{ fontSize: 10, color: tokens.textPlaceholder }}>{lines} 行</span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          {long && (
+            <Button type="text" size="small" onClick={() => setFolded((v) => !v)} style={{ fontSize: 11, color: tokens.textSecondary }}>
+              {folded ? '展开' : '收起'}
+            </Button>
+          )}
+          <Button
+            type="text"
+            size="small"
+            icon={<CopyOutlined />}
+            title="复制代码"
+            onClick={async () => {
+              const ok = await copyText(code)
+              toast(ok ? '已复制代码' : '复制失败，请手动选择')
+            }}
+            style={{ fontSize: 11, color: tokens.textSecondary }}
+          >
+            复制
+          </Button>
+        </span>
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          padding: '10px 12px',
+          fontSize: 12,
+          lineHeight: 1.6,
+          whiteSpace: 'pre',
+          overflow: 'auto',
+          maxHeight: folded ? 264 : undefined,
+          color: tokens.text,
+        }}
+      >
+        {code}
+      </pre>
+    </div>
+  )
+}
+
+/** 消息富文本：普通文本按 pre-wrap 原样呈现，``` 围栏段渲染为可复制/折叠的代码块。 */
+function RichText({ text }: { text: string }) {
+  const parts = parseMsg(text)
+  if (parts.length === 1 && parts[0].kind === 'text') return <>{parts[0].text}</>
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.kind === 'code' ? (
+          <CodeBlock key={i} lang={p.lang} text={p.text} />
+        ) : (
+          <span key={i} style={{ whiteSpace: 'pre-wrap' }}>
+            {p.text}
+          </span>
+        ),
+      )}
+    </>
+  )
+}
+
 /** 一条流式会话条目（console.html .msg 家族：气泡 / 思考 / 工具卡 / meta 行）。 */
 export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void }) {
   switch (e.kind) {
@@ -179,10 +293,14 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
       return <PermissionCard e={e} />
     case 'user':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
-          <Role>user</Role>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+            <MsgCopy text={e.text ?? ''} />
+            <Role>user</Role>
+          </div>
           <div
             style={{
+              alignSelf: 'flex-end',
               maxWidth: 'min(78%, 560px)',
               background: tokens.softFill,
               border: `1px solid ${tokens.border}`,
@@ -193,9 +311,10 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
               whiteSpace: 'pre-wrap',
               overflowWrap: 'anywhere',
               color: tokens.text,
+              minWidth: 0,
             }}
           >
-            {e.text}
+            <RichText text={e.text ?? ''} />
           </div>
         </div>
       )
@@ -203,7 +322,10 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
     case 'assistant':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-          <Role>assistant</Role>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+            <Role>assistant</Role>
+            <MsgCopy text={e.text ?? ''} />
+          </div>
           <div
             style={{
               color: tokens.text,
@@ -214,7 +336,7 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
               padding: '0 2px',
             }}
           >
-            {e.text}
+            <RichText text={e.text ?? ''} />
           </div>
         </div>
       )
