@@ -14,6 +14,20 @@ export interface SessionSummary {
 
 export interface SessionDetail extends SessionSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
+  always_allowed?: AlwaysAllowItem[] // 会话级「始终允许」记忆（allow_always 已授）
+}
+
+/** 会话级「始终允许」记忆条目。 */
+export interface AlwaysAllowItem {
+  title: string
+  kind: string
+  since: string // ISO（RFC3339 UTC），授予时刻
+}
+
+/** 撤销「始终允许」记忆（title+kind 均空 = 一键撤销全部）。 */
+export interface RevokeAlwaysReq {
+  title?: string
+  kind?: string
 }
 
 /** 会话元数据子集更新（nil/零值不更新）。 */

@@ -32,6 +32,8 @@ type Service interface {
 	ListPendingPermissions(ctx context.Context, id string) ([]PermissionResp, error)
 	// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
 	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error
+	// RevokeAlways 撤销会话级「始终允许」记忆（title+kind 均空 = 一键撤销全部）。
+	RevokeAlways(ctx context.Context, id, title, kind string) error
 }
 
 // AgentResp Agent 的对外表示。
@@ -69,10 +71,24 @@ type SessionResp struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// SessionDetailResp 单会话详情（元数据 + 挂起权限）。
+// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
 type SessionDetailResp struct {
 	SessionResp
-	Pending []PermissionResp `json:"pending"`
+	Pending       []PermissionResp  `json:"pending"`
+	AlwaysAllowed []AlwaysAllowResp `json:"always_allowed"`
+}
+
+// AlwaysAllowResp 会话级「始终允许」记忆的对外表示。
+type AlwaysAllowResp struct {
+	Title string `json:"title"`
+	Kind  string `json:"kind"`
+	Since string `json:"since"` // RFC3339，授予时刻
+}
+
+// AlwaysRevokeReq 撤销「始终允许」记忆请求体（title+kind 均空 = 一键撤销全部）。
+type AlwaysRevokeReq struct {
+	Title string `json:"title"`
+	Kind  string `json:"kind"`
 }
 
 // SessionPatch 会话元数据子集更新（nil/零值不更新）。

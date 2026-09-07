@@ -576,6 +576,25 @@ func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowe
 	return o.perm.ResolveReject(callID), nil
 }
 
+// AlwaysAllowed 列出某会话的会话级「始终允许」记忆（决策 v4① 的 allow_always 侧）。
+func (o *Orchestrator) AlwaysAllowed(sessionID string) []AlwaysAllowItem {
+	return o.perm.AlwaysAllowed(sessionID)
+}
+
+// RevokeAlways 撤销会话级「始终允许」记忆。
+//   - title、kind 均非空 → 撤销单条（精确匹配 action+identifier）；
+//   - 两者均为空 → 一键撤销整会话全部记忆（= ForgetSession）。
+func (o *Orchestrator) RevokeAlways(sessionID, title, kind string) (bool, error) {
+	switch {
+	case title == "" && kind == "":
+		o.perm.ForgetSession(sessionID)
+		return true, nil
+	case title == "" || kind == "":
+		return false, acl.NewError(acl.ClassRequest, "always_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
+	}
+	return o.perm.RevokeAlways(sessionID, title, kind), nil
+}
+
 // publishError 把错误按 acl 分类发布为 turn.error。
 func (o *Orchestrator) publishError(sessionID string, err error) {
 	ae := acl.Classify(err)

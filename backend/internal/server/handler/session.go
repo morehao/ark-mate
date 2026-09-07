@@ -60,6 +60,30 @@ func (h *SessionHandler) Permissions(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// AlwaysAllowed 列出会话级「始终允许」记忆。
+func (h *SessionHandler) AlwaysAllowed(c *gin.Context) {
+	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp.AlwaysAllowed)
+}
+
+// RevokeAlways 撤销会话级「始终允许」记忆（body title+kind 均空 = 一键撤销全部）。
+func (h *SessionHandler) RevokeAlways(c *gin.Context) {
+	var req AlwaysRevokeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	if err := h.svc.RevokeAlways(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, gin.H{"title": req.Title, "kind": req.Kind})
+}
+
 // ResolvePermission 对挂起权限请求做出决策（allow/reject × once/always）。
 func (h *SessionHandler) ResolvePermission(c *gin.Context) {
 	var req PermissionResolveReq

@@ -9,6 +9,7 @@ import type {
   PromptResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
+  RevokeAlwaysReq,
   Runtime,
   SessionDetail,
   SessionPatch,
@@ -50,3 +51,10 @@ export const listPendingPermissions = (id: string): Promise<PermissionResp[]> =>
 /** 对挂起权限请求决策（allow/reject × once/always）。 */
 export const resolvePermission = (id: string, req: ResolvePermissionReq): Promise<ResolvePermissionResp> =>
   http.post<ResolvePermissionResp>(`/forge/sessions/${encodeURIComponent(id)}/permission`, req)
+
+/** 撤销会话级「始终允许」记忆（title+kind 均空 = 一键撤销全部）。 */
+export const revokeAlways = (id: string, req: RevokeAlwaysReq = {}): Promise<{ title: string; kind: string }> =>
+  http.post<{ title: string; kind: string }>(
+    `/forge/sessions/${encodeURIComponent(id)}/permissions/always/revoke`,
+    req,
+  )
