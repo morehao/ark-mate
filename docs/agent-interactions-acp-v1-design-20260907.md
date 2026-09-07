@@ -69,7 +69,7 @@ Rev2 DoD：
 - [x] 移除 `_meta.sessionId`：acl/echo 不再读写该键；acl 集成测试断言宿主收到的 `ElicitationRequest.SessionID` 为空（由上层注入）。
 - [x] echo 单选/多选/复合表单/URL 提问卡演示无 `_meta` 仍端到端闭环（REST 冒烟）。
 - [x] README 交互表与「协议现状」更新：elicitation 已稳定、宿主用连接上下文过渡归属、scope 补丁列为触发式预案（不 fork）。
-- [ ] （环境允许时）审批在真实 runtime（dsh/opencode）上跑通一次（外部工具调用触发 allow/reject），记录结果。
+- [x] （2026-09-08 完成）审批在真实 runtime 跑通：`agent-opencode`（默认模型 yygu-v2/deepseek-v4-flash）——「写文件」触发真实 `session/request_permission`（allow_once/always + reject），**Allow once → 文件创建成功、turn completed**；**Reject → 文件未创建、turn completed**。另实证：opencode 对 `bash` 工具默认放行、不请求权限（无卡属预期，非宿主缺失）。
 - [ ] （触发式，不排期）首个真实 elicitation wire 出现时按 §0 预案一次性对齐 scope。
 
 ~~Rev1 DoD（预案，已不适用）~~：~~scope 顶层解析、服务端权威校验 400 错误面、complete 通知收尾、request-scope 全局弹层~~ —— 细节仍见 §4 与上方 Rev1 正文。
