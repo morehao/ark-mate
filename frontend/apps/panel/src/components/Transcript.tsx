@@ -1,7 +1,9 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { Button } from 'antd'
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import type { StreamEntry } from '@ark/types'
+import type { PermissionOption, StreamEntry } from '@ark/types'
+import { useForge, type PermissionDecision } from '../store'
 
 const roleLabel: CSSProperties = {
   fontFamily: tokens.fontMono,
@@ -40,9 +42,141 @@ const systemIcon = {
   info: <CheckOutlined style={{ fontSize: 11, color: tokens.textSecondary }} />,
 }
 
+/** 由选项 kind 推导决策（allow/reject × once/always 映射为 ACP 选项语义）。 */
+function decisionFor(opt: PermissionOption): PermissionDecision {
+  const allowed = opt.kind.startsWith('allow')
+  const always = opt.kind.includes('_always')
+  const label = `${allowed ? '允许' : '拒绝'} · ${always ? '始终' : '本次'}`
+  return { allowed, optionId: opt.option_id, always, label }
+}
+
+/** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
+function PermissionCard({ e }: { e: StreamEntry }) {
+  const respond = useForge((s) => s.respondPermission)
+  const expire = useForge((s) => s.expirePermission)
+  const options = e.optionKinds ?? []
+  const resolved = e.resolved ?? false
+  const timeoutAt = e.timeoutAt
+
+  // 服务端超时自动拒绝的收敛：客户端按 timeout_at 定时把未决卡片标记为已收敛（同一宿主机器，时钟偏差可忽略）。
+  useEffect(() => {
+    if (resolved || !timeoutAt || !e.callId) return
+    const ms = new Date(timeoutAt).getTime() - Date.now()
+    if (ms <= 0) {
+      expire(e.callId)
+      return
+    }
+    const timer = window.setTimeout(() => expire(e.callId as string), ms + 60)
+    return () => window.clearTimeout(timer)
+  }, [resolved, timeoutAt, e.callId, expire])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+      <Role>assistant · permission</Role>
+      <div
+        style={{
+          border: `1px solid ${tokens.warning}`,
+          borderRadius: 12,
+          background: tokens.surface,
+          padding: '11px 13px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          maxWidth: 720,
+          minWidth: 0,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 620, color: tokens.text }}>
+            {e.title || '工具权限请求'}
+          </span>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontFamily: tokens.fontMono,
+              fontSize: 10.5,
+              color: tokens.textSecondary,
+            }}
+          >
+            {e.toolKind && <span>{e.toolKind}</span>}
+            {e.toolKind && e.toolCallId && <span style={{ color: tokens.textPlaceholder }}>·</span>}
+            {e.toolCallId && <span>{e.toolCallId}</span>}
+          </span>
+        </div>
+        {resolved ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              fontFamily: tokens.fontMono,
+              fontSize: 11,
+              color: tokens.textSecondary,
+            }}
+          >
+            <CheckOutlined style={{ fontSize: 11, color: tokens.success }} />
+            已确认：{e.decision ?? '已响应'}
+          </span>
+        ) : options.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {options.map((opt) => (
+              <Button
+                key={opt.option_id}
+                size="small"
+                onClick={() => void respond(e.callId ?? '', decisionFor(opt))}
+                style={{ borderRadius: 8, margin: 0 }}
+              >
+                {opt.name || decisionFor(opt).label}
+              </Button>
+            ))}
+            <Button
+              size="small"
+              danger
+              onClick={() => void respond(e.callId ?? '', { allowed: false, always: false, label: '拒绝 · 本次' })}
+              style={{ borderRadius: 8, margin: 0 }}
+            >
+              拒绝
+            </Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              size="small"
+              type="primary"
+              onClick={() => void respond(e.callId ?? '', { allowed: true, always: false, label: '允许 · 本次' })}
+              style={{ borderRadius: 8, margin: 0 }}
+            >
+              允许 · 本次
+            </Button>
+            <Button
+              size="small"
+              onClick={() => void respond(e.callId ?? '', { allowed: true, always: true, label: '允许 · 始终' })}
+              style={{ borderRadius: 8, margin: 0 }}
+            >
+              允许 · 始终
+            </Button>
+            <Button
+              size="small"
+              danger
+              onClick={() => void respond(e.callId ?? '', { allowed: false, always: false, label: '拒绝' })}
+              style={{ borderRadius: 8, margin: 0 }}
+            >
+              拒绝
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** 一条流式会话条目（console.html .msg 家族：气泡 / 思考 / 工具卡 / meta 行）。 */
 export function EntryView({ e }: { e: StreamEntry }) {
   switch (e.kind) {
+    case 'permission':
+      return <PermissionCard e={e} />
     case 'user':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>

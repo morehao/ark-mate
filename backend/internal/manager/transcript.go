@@ -97,11 +97,16 @@ func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string) {
 		Cwd:       cwd,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := writeJSONLine(f, h); err != nil {
-		_ = f.Close()
-		r.log.Warn("transcript: header write failed", "session", sessionID, "err", err)
-		r.markFailedLocked(sessionID)
-		return
+	// 仅在文件为空（新会话）时写 header：重启后 resume 同一会话时 O_APPEND 打开的是已有文件，
+	// 不重写 header，保持「首行=header」不变式（loadTranscripts 依赖它）。
+	st, stErr := f.Stat()
+	if stErr != nil || st.Size() == 0 {
+		if err := writeJSONLine(f, h); err != nil {
+			_ = f.Close()
+			r.log.Warn("transcript: header write failed", "session", sessionID, "err", err)
+			r.markFailedLocked(sessionID)
+			return
+		}
 	}
 	r.open[sessionID] = f
 }

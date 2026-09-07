@@ -13,8 +13,12 @@ type Service interface {
 	ListAgents() ([]AgentResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
-	// ListSessions 返回会话概要。
-	ListSessions() ([]SessionResp, error)
+	// ListSessions 返回会话概要（可按 archived 过滤）。
+	ListSessions(archived bool) ([]SessionResp, error)
+	// GetSession 返回单会话详情（含元数据 + 挂起权限）。
+	GetSession(ctx context.Context, id string) (*SessionDetailResp, error)
+	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
+	UpdateSession(ctx context.Context, id string, patch SessionPatch) (*SessionResp, error)
 
 	// CreateSession 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
 	CreateSession(ctx context.Context, req SessionCreateReq) (*SessionCreateResp, error)
@@ -24,6 +28,10 @@ type Service interface {
 	CancelTurn(ctx context.Context, id string) error
 	// SessionHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
 	SessionHistory(ctx context.Context, id string, after int64, limit int) (*SessionHistoryResp, error)
+	// ListPendingPermissions 列出某会话的挂起权限请求。
+	ListPendingPermissions(ctx context.Context, id string) ([]PermissionResp, error)
+	// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
+	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error
 }
 
 // AgentResp Agent 的对外表示。
@@ -36,17 +44,42 @@ type AgentResp struct {
 
 // RuntimeResp Runtime 的对外表示。
 type RuntimeResp struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name string         `json:"name"`
+	ID   string         `json:"id"`
+	Vers string         `json:"version"`
+	Caps []CapabilityKV `json:"capabilities"`
+}
+
+// CapabilityKV 单个能力基线（静态声明）的 key/value 表示。
+type CapabilityKV struct {
+	Key   string `json:"key"`
+	Value bool   `json:"value"`
 }
 
 // SessionResp 会话的对外表示。
 type SessionResp struct {
-	ID      string           `json:"id"`
-	AgentID string           `json:"agent_id"`
-	Runtime string           `json:"runtime"`
-	Status  string           `json:"status"`
-	History []eventbus.Event `json:"history,omitempty"`
+	ID        string `json:"id"`
+	AgentID   string `json:"agent_id"`
+	Runtime   string `json:"runtime"`
+	Status    string `json:"status"`
+	Title     string `json:"title"`
+	Pinned    bool   `json:"pinned"`
+	Archived  bool   `json:"archived"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// SessionDetailResp 单会话详情（元数据 + 挂起权限）。
+type SessionDetailResp struct {
+	SessionResp
+	Pending []PermissionResp `json:"pending"`
+}
+
+// SessionPatch 会话元数据子集更新（nil/零值不更新）。
+type SessionPatch struct {
+	Title    *string `json:"title"`
+	Pinned   *bool   `json:"pinned"`
+	Archived *bool   `json:"archived"`
 }
 
 // SessionCreateReq 新建会话请求体。
@@ -77,6 +110,33 @@ type SessionHistoryResp struct {
 	ID      string           `json:"id"`
 	Events  []eventbus.Event `json:"events"`
 	HasMore bool             `json:"has_more"` // 是否还有更早/后续页（客户端用末条 seq 作为下页 after）
+}
+
+// PermissionResp 挂起权限请求的对外表示。
+type PermissionResp struct {
+	CallID    string                 `json:"call_id"`
+	SessionID string                 `json:"session_id"`
+	Title     string                 `json:"title"`
+	ToolCall  string                 `json:"tool_call_id"`
+	Kind      string                 `json:"kind"`
+	Input     any                    `json:"input,omitempty"`
+	Options   []PermissionOptionResp `json:"options"`
+	TimeoutAt string                 `json:"timeout_at"`
+}
+
+// PermissionOptionResp 权限可选项的对外表示。
+type PermissionOptionResp struct {
+	OptionID string `json:"option_id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+}
+
+// PermissionResolveReq 权限决策请求体。
+type PermissionResolveReq struct {
+	CallID   string `json:"call_id" binding:"required"`
+	OptionID string `json:"option_id"`
+	Always   bool   `json:"always"`
+	Allowed  bool   `json:"allowed"`
 }
 
 // Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。

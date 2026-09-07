@@ -1,5 +1,5 @@
 import { Button } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark/ui'
 import { Dot, sessionStatusMeta } from '@ark/ui'
@@ -11,7 +11,35 @@ interface Props {
   onCreate: () => void
 }
 
-/** 会话侧栏（console.html .side）：新建入口 + 会话列表 + 底座 foot。 */
+/** 置顶组 + 按创建日分组的未置顶会话（轻量时间线管理面）。 */
+function groupSessions(all: SessionSummary[]): Array<{ label: string; items: SessionSummary[]; pinned: boolean }> {
+  const groups: Array<{ label: string; items: SessionSummary[]; pinned: boolean }> = []
+  const pinned = all.filter((s) => s.pinned)
+  if (pinned.length > 0) groups.push({ label: '置顶', items: pinned, pinned: true })
+  const rest = all.filter((s) => !s.pinned)
+  const byDay = new Map<string, SessionSummary[]>()
+  for (const s of rest) {
+    const label = dayLabel(s.created_at)
+    const arr = byDay.get(label)
+    if (arr) arr.push(s)
+    else byDay.set(label, [s])
+  }
+  for (const [label, items] of byDay) groups.push({ label, items, pinned: false })
+  return groups
+}
+
+function dayLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '更早'
+  const now = new Date()
+  const sd = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diff = Math.round((sd(now) - sd(d)) / 86_400_000)
+  if (diff <= 0) return '今天'
+  if (diff === 1) return '昨天'
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+/** 会话侧栏（console.html .side）：新建入口 + 会话列表（分组/置顶）+ 底座 foot。 */
 export function SessionRail({ onCreate }: Props) {
   const navigate = useNavigate()
   const sessions = useForge((s) => s.sessions)
@@ -21,12 +49,129 @@ export function SessionRail({ onCreate }: Props) {
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
   const setDrawer = useForge((s) => s.setDrawer)
+  const togglePin = useForge((s) => s.togglePin)
 
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
 
   const openSession = (id: string) => {
     setDrawer(false)
     navigate(`/sessions/${id}`)
+  }
+
+  const renderItem = (sm: SessionSummary) => {
+    const view = views[sm.id]
+    const meta = sessionStatusMeta(sm.status)
+    const running = sm.status === 'in_progress'
+    const on = sm.id === activeId
+    return (
+      <div
+        key={sm.id}
+        className={`fg-sess-item${on ? ' fg-on' : ''}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          width: '100%',
+          borderRadius: 10,
+          padding: '4px 4px 4px 12px',
+          marginBottom: 2,
+          border: '1px solid transparent',
+          color: tokens.text,
+        }}
+      >
+        <button
+          type="button"
+          role="listitem"
+          disabled={busy && !on}
+          onClick={() => openSession(sm.id)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            textAlign: 'left',
+            background: 'transparent',
+            border: 0,
+            padding: '5px 0',
+            color: 'inherit',
+            cursor: busy && !on ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <span
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              fontSize: 13.5,
+              fontWeight: 560,
+              letterSpacing: '-0.005em',
+              lineHeight: 1.4,
+              color: tokens.text,
+            }}
+          >
+            {titleFor(sm, view, agents)}
+          </span>
+          <span
+            style={{
+              marginTop: 7,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              minWidth: 0,
+              fontFamily: tokens.fontMono,
+              fontSize: 10.5,
+              color: tokens.textSecondary,
+            }}
+          >
+            <span
+              title={sm.agent_id}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                border: `1px solid ${tokens.border}`,
+                borderRadius: 999,
+                padding: '1px 7px',
+                color: tokens.text,
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                maxWidth: 150,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {agentNameOf(agents, sm.agent_id)}
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
+              <Dot color={meta.color} pulse={running} size={6} />
+              <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
+            </span>
+            <span style={{ marginLeft: 'auto', flex: 'none' }}>
+              {view && view.lastSeq > 0 ? `seq ${view.lastSeq}` : ''}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          title={sm.pinned ? '取消置顶' : '置顶'}
+          aria-label={sm.pinned ? '取消置顶' : '置顶'}
+          onClick={() => void togglePin(sm.id)}
+          style={{
+            flex: 'none',
+            display: 'inline-grid',
+            placeItems: 'center',
+            width: 26,
+            height: 26,
+            border: 0,
+            borderRadius: 8,
+            background: 'transparent',
+            color: sm.pinned ? tokens.primary : tokens.textPlaceholder,
+            cursor: 'pointer',
+          }}
+        >
+          {sm.pinned ? <PushpinFilled style={{ fontSize: 13 }} /> : <PushpinOutlined style={{ fontSize: 13 }} />}
+        </button>
+      </div>
+    )
   }
 
   return (
@@ -52,86 +197,23 @@ export function SessionRail({ onCreate }: Props) {
             暂无会话。点击右上「新建会话」，选择 Agent 底座并发起首轮问答。
           </div>
         )}
-        {sessions.map((sm: SessionSummary) => {
-          const view = views[sm.id]
-          const meta = sessionStatusMeta(sm.status)
-          const running = sm.status === 'in_progress'
-          const on = sm.id === activeId
-          return (
-            <button
-              key={sm.id}
-              type="button"
-              role="listitem"
-              className={`fg-sess-item${on ? ' fg-on' : ''}`}
-              disabled={busy && !on}
-              onClick={() => openSession(sm.id)}
+        {groupSessions(sessions).map((g) => (
+          <div key={g.label} role="group" aria-label={g.label}>
+            <div
               style={{
-                width: '100%',
-                display: 'block',
-                textAlign: 'left',
-                borderRadius: 10,
-                padding: '9px 10px 9px 12px',
-                marginBottom: 2,
-                border: '1px solid transparent',
-                color: tokens.text,
-                cursor: busy && !on ? 'not-allowed' : 'pointer',
+                padding: '10px 12px 5px',
+                fontFamily: tokens.fontMono,
+                fontSize: 10,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: tokens.textPlaceholder,
               }}
             >
-              <span
-                style={{
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                  fontSize: 13.5,
-                  fontWeight: 560,
-                  letterSpacing: '-0.005em',
-                  lineHeight: 1.4,
-                  color: tokens.text,
-                }}
-              >
-                {titleFor(sm, view, agents)}
-              </span>
-              <span
-                style={{
-                  marginTop: 7,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  minWidth: 0,
-                  fontFamily: tokens.fontMono,
-                  fontSize: 10.5,
-                  color: tokens.textSecondary,
-                }}
-              >
-                <span
-                  title={sm.agent_id}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    border: `1px solid ${tokens.border}`,
-                    borderRadius: 999,
-                    padding: '1px 7px',
-                    color: tokens.text,
-                    fontWeight: 500,
-                    whiteSpace: 'nowrap',
-                    maxWidth: 150,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {agentNameOf(agents, sm.agent_id)}
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
-                  <Dot color={meta.color} pulse={running} size={6} />
-                  <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
-                </span>
-                <span style={{ marginLeft: 'auto', flex: 'none' }}>{view && view.lastSeq > 0 ? `seq ${view.lastSeq}` : ''}</span>
-              </span>
-            </button>
-          )
-        })}
+              {g.label}
+            </div>
+            {g.items.map(renderItem)}
+          </div>
+        ))}
       </div>
 
       <div

@@ -28,7 +28,9 @@ export interface BusEvent {
 
 // ——— 会话运行视图（前端侧拼接的事件模型） ———
 
-export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system'
+import type { PermissionOption } from './session'
+
+export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission'
 
 export interface StreamEntry {
   kind: EntryKind
@@ -39,4 +41,12 @@ export interface StreamEntry {
   title?: string
   status?: string
   tone?: 'ok' | 'err' | 'cancel' | 'info'
+  // —— 权限确认卡（kind='permission'）——
+  callId?: string // 决策回传锚点（POST /sessions/:id/permission）
+  optionKinds?: PermissionOption[] // ACP 可选项（allow/reject × once/always）
+  toolKind?: string // 底层工具 kind（bash/read/write…）
+  toolCallId?: string
+  resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
+  decision?: string // resolved 时的决策摘要
+  timeoutAt?: string // 服务端超时时刻（ISO）；过期即自动拒绝，UI 据此收敛卡片
 }

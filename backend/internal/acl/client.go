@@ -20,8 +20,12 @@ type ClientOptions struct {
 	OnEvent func(Event)
 	// Logger 透传给 SDK 连接诊断（nil → 静默）。
 	Logger *slog.Logger
-	// AllowPermission 决定 agent 的权限请求（tool 执行许可）是否放行；nil 表示一律拒绝。
-	// 参数：ctx/sessionID/tool 标题/可选动作数；返回 true 表示选择第一个动作放行。
+	// RequestPermission 处理 agent 的一次权限请求并**阻塞等待宿主决策**（同步变体，
+	// 由 SDK 在独立的 goroutine 中调用，见 acp-go-sdk connection.go 的 go func 分发，
+	// 阻塞不会卡死通知读循环）。nil 时回退旧 AllowPermission（若也 nil 则一律拒绝）。
+	// 实现应返回 PermissionDecision（Allowed + Always + OptionID）；供确认通道（`/permission`）复用。
+	RequestPermission func(ctx context.Context, req PermissionRequest) PermissionDecision
+	// AllowPermission 旧式同步布尔决策（兼容 demo/测试注入）；RequestPermission 非空时忽略。
 	AllowPermission func(ctx context.Context, sessionID, toolTitle string, options int) bool
 	// DialTimeout 限制 initialize/authenticate 握手时长；0 → 调用方 ctx 有截止时间则沿用，
 	// 否则用 defaultDialTimeout。runtime 无响应（如等待交互登录）时拨号不会无限挂起。
@@ -166,33 +170,28 @@ func (h *hostClient) SessionUpdate(ctx context.Context, n acpsdk.SessionNotifica
 }
 
 func (h *hostClient) RequestPermission(ctx context.Context, p acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	title := firstNonEmptyPtr(p.ToolCall.Title)
-	allowed := false
-	if h.opts.AllowPermission != nil {
-		allowed = h.opts.AllowPermission(ctx, string(p.SessionId), title, len(p.Options))
+	var d PermissionDecision
+	switch {
+	case h.opts.RequestPermission != nil:
+		// 现代确认通道：阻塞等待宿主决策（含 once/always + 会话级记忆）。
+		d = h.opts.RequestPermission(ctx, permissionRequestFromSDK(p))
+	case h.opts.AllowPermission != nil:
+		// 旧式同步布尔决策（demo/测试注入）：放行即选第一个选项。
+		allowed := h.opts.AllowPermission(ctx, string(p.SessionId), firstNonEmptyPtr(p.ToolCall.Title), len(p.Options))
+		d = PermissionDecision{Allowed: allowed}
+	default:
+		// 两者皆 nil → 一律拒绝。
+		d = PermissionDecision{}
 	}
 	if h.opts.OnEvent != nil {
 		h.opts.OnEvent(Event{
 			Kind:      KindPermission,
 			SessionID: string(p.SessionId),
-			Payload:   PermissionInfo{SessionID: string(p.SessionId), Title: title, Allowed: allowed},
+			Payload: PermissionInfo{SessionID: string(p.SessionId),
+				Title: firstNonEmptyPtr(p.ToolCall.Title), Allowed: d.Allowed},
 		})
 	}
-	if allowed && len(p.Options) > 0 {
-		return acpsdk.RequestPermissionResponse{
-			Outcome: acpsdk.RequestPermissionOutcome{
-				Selected: &acpsdk.RequestPermissionOutcomeSelected{
-					OptionId: p.Options[0].OptionId,
-					Outcome:  "selected",
-				},
-			},
-		}, nil
-	}
-	return acpsdk.RequestPermissionResponse{
-		Outcome: acpsdk.RequestPermissionOutcome{
-			Cancelled: &acpsdk.RequestPermissionOutcomeCancelled{Outcome: "cancelled"},
-		},
-	}, nil
+	return permissionResponseFromDecision(d, p.Options), nil
 }
 
 // hostClient 未开放的能力（fs/terminal）一律返回错误；ark-forge M0 不在
