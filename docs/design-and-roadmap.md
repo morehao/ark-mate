@@ -918,6 +918,21 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 > dsh 流式文本→turn.ended、composer 多轮回显（完成标记 1→2）、刷新续看、cancel 触达终态、
 > /agents·/runtimes·/settings 页、新 tab 冷启动直达 /sessions/:id——全过，无页面错误
 > （脚本 /tmp/pbtest/panel-browser-check.mjs 与 focus-multiturn.mjs）。
+> **轻量管理面补记（2026-09-07，提交见 feat(permission|session)：d5f165f / 491acab）**：参照 AionUi 的
+> 轻量化决策（§5.8.1），在 M1 面板之上补齐两件事，其余仍按 M2/M3/P1 规划：
+> - **会话重启存活**：daemon 启动回读 `FORGE_TRANSCRIPTS` 下 transcript，重建会话列表与元数据
+>   （标题/状态/时间，状态由最后一条终态事件推导）+ 把历史事件注入 eventbus——管理面在重启后仍有
+>   会话可见、旧会话可经 history/WS 回看。**仍不引入 DB**（属 M2 §4.7）；transcript header 仅文件为空时写
+>   （重启 resume 不重写，保持「首行=header」不变式）。实现见 `internal/manager/transcript_load.go`、
+>   `service.go SetTranscriptDir`、`transcript_load_test.go`。→ M2 DoD「重启后 history 恢复」经 transcript
+>   回读**轻量提前兑现**（非 SQLite events 表）。
+> - **权限确认通道（轻量化，详见 §5.8.1）**：`session/request_permission` → `session.permission_request` 事件
+>   （options + `timeout_at`）→ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝
+>   （默认 30min，`FORGE_PERMISSION_TIMEOUT`）；前端权限确认卡 + 聊天头待决角标 + **超时/取消/终态就地收敛**
+>   （`expirePermission` + `settlePerms`，不发 API）。→ M2 #7 的 confirm 通道 + 策略记忆（记忆部分）**提前
+>   轻量落地**；仅「按 per-agent 默认策略落库/查询」仍留 M2。
+> - **会话元数据 + 侧栏增强**：`title/pinned/archived/created_at/updated_at`（REST list/get/patch + 标题自动推导、
+>   可覆盖）+ 侧栏按日分组·置顶。属 M1 会话列表的轻量读模型；§4.9 v4② 的软归档切面/搜索/导出仍属 M3。
 
 ### M2 — 可扩展底座（不写代码接入第三个 ACP agent）
 
