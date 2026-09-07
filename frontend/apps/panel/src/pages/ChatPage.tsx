@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Button } from 'antd'
-import { InfoCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { Button, Dropdown } from 'antd'
+import { InfoCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
@@ -28,6 +28,8 @@ export function ChatPage() {
   const activate = useForge((s) => s.activate)
   const sendPrompt = useForge((s) => s.sendPrompt)
   const cancel = useForge((s) => s.cancel)
+  const archiveSession = useForge((s) => s.archiveSession)
+  const showToast = useForge((s) => s.showToast)
   const setDrawer = useForge((s) => s.setDrawer)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -118,6 +120,26 @@ export function ChatPage() {
     void sendPrompt(text)
   }
 
+  // 软清空：归档当前会话（数据保留，可在「归档」视图恢复）→ 跳 /new 并预选同 Agent 开新会话。
+  const softClear = async () => {
+    if (!activeId || !activeSum?.agent_id) return
+    const agentId = activeSum.agent_id
+    try {
+      await archiveSession(activeId, true)
+      showToast('当前会话已归档，可随时从「归档」恢复')
+      navigate(`/new?agent=${encodeURIComponent(agentId)}`)
+    } catch {
+      /* archiveSession 内部已 toast 错误 */
+    }
+  }
+
+  const headMenu = {
+    items: [{ key: 'soft-clear', label: '归档并新建会话（同底座）', title: '保留数据到归档，另开同 Agent 新会话' }],
+    onClick: (info: { key: string }) => {
+      if (info.key === 'soft-clear') void softClear()
+    },
+  }
+
   const renderChatHead = () => {
     if (!activeId) return null
     const seq = view?.lastSeq ?? 0
@@ -163,6 +185,16 @@ export function ChatPage() {
           </div>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          <Dropdown menu={headMenu} trigger={['click']} placement="bottomRight">
+            <Button
+              size="small"
+              type="text"
+              icon={<MoreOutlined />}
+              title="会话操作"
+              aria-label="会话操作"
+              style={{ borderRadius: 8, color: tokens.textSecondary }}
+            />
+          </Dropdown>
           <Button
             size="small"
             type="text"

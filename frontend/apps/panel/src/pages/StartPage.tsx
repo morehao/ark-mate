@@ -7,6 +7,7 @@ import { useForge } from '../store'
 import { SessionRail } from '../components/SessionRail'
 import { StatusBar } from '../components/StatusBar'
 import { shortFor } from '../console/util'
+import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
 const EXAMPLES = [
@@ -37,13 +38,21 @@ export function StartPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
 
-  // 默认选中上次使用的底座（localStorage），无则第一个可用 agent
+  // 预选逻辑：① URL 显式 ?agent= 优先（软清空跳转带同底座）；② 否则上次使用（localStorage）；③ 否则第一个可用。
   useEffect(() => {
     if (selectedId && agents.some((a) => a.id === selectedId)) return
+    const urlAgent = new URLSearchParams(window.location.search).get('agent')
+    const fromUrl = urlAgent ? agents.find((a) => a.id === urlAgent) : undefined
+    if (fromUrl) {
+      pick(fromUrl.id)
+      return
+    }
     const last = localStorage.getItem(LS_LAST_AGENT)
     const prev = agents.find((a) => a.id === last)
     setSelectedId(prev?.id ?? agents[0]?.id ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, selectedId])
 
   const selected = agents.find((a) => a.id === selectedId) ?? null
@@ -174,13 +183,26 @@ export function StartPage() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (shouldSendKey(e, sendMode)) {
                   e.preventDefault()
                   void send()
                 }
               }}
+              onPaste={(e) => {
+                if (!e.clipboardData || !e.clipboardData.types.includes('text/html')) return
+                const plain = e.clipboardData.getData('text/plain')
+                e.preventDefault()
+                const ta = e.currentTarget
+                const s = ta.selectionStart
+                const en = ta.selectionEnd
+                setDraft(draft.slice(0, s) + plain + draft.slice(en))
+                requestAnimationFrame(() => {
+                  const p = s + plain.length
+                  ta.setSelectionRange(p, p)
+                })
+              }}
               rows={2}
-              placeholder={'输入你的问题，或点下方示例…（Enter 发送 / Shift+Enter 换行）'}
+              placeholder={'输入你的问题，或点下方示例…'}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
@@ -199,13 +221,34 @@ export function StartPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span
                 style={{
-                  fontFamily: tokens.fontMono,
-                  fontSize: 11.5,
-                  color: tokens.textSecondary,
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 1,
+                  minWidth: 0,
                 }}
               >
-                在项目中工作
+                <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5, color: tokens.textSecondary, whiteSpace: 'nowrap' }}>
+                  在项目中工作
+                </span>
+                <button
+                  type="button"
+                  title="点击切换发送键：Enter 发送 / Enter 换行"
+                  onClick={() => setSendMode((m) => toggleSendKey(m))}
+                  className="fg-hint-kbd"
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    padding: 0,
+                    margin: 0,
+                    cursor: 'pointer',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 10.5,
+                    color: tokens.textPlaceholder,
+                  }}
+                >
+                  {sendKeyHint(sendMode)} ⇄
+                </button>
               </span>
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>

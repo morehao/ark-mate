@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
+import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
 interface Props {
   busy: boolean
@@ -11,9 +12,10 @@ interface Props {
   autoFocus?: boolean
 }
 
-/** 输入区（console.html .composer）：自动增高 textarea + 底部提示行 + 发送按钮。 */
+/** 输入区（console.html .composer）：自动增高 textarea + 底部提示行（可切发送键档）+ 发送按钮。 */
 export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Props) {
   const [draft, setDraft] = useState('')
+  const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const empty = draft.trim().length === 0
@@ -34,6 +36,31 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
     taRef.current?.focus()
   }
 
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (shouldSendKey(e, sendMode)) {
+      e.preventDefault()
+      send()
+    }
+  }
+
+  // 粘贴时若带富文本（HTML）则改为纯文本插入，避免样式/链接污染正文。
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!e.clipboardData) return
+    if (!e.clipboardData.types.includes('text/html')) return
+    const plain = e.clipboardData.getData('text/plain')
+    e.preventDefault()
+    const ta = taRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const next = draft.slice(0, start) + plain + draft.slice(end)
+    setDraft(next)
+    requestAnimationFrame(() => {
+      const p = start + plain.length
+      ta.setSelectionRange(p, p)
+    })
+  }
+
   return (
     <div style={{ flex: 'none', padding: '10px 20px 6px', background: tokens.bg }}>
       <div className="fg-composer" style={{ maxWidth: 840, margin: '0 auto', padding: '10px 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -43,14 +70,10 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
           value={draft}
           disabled={busy}
           autoFocus={autoFocus}
-          placeholder={placeholder ?? (busy ? 'agent 正在回复…' : '向当前 Agent 底座提问…（Enter 发送）')}
+          placeholder={placeholder ?? (busy ? 'agent 正在回复…' : '向当前 Agent 底座提问…')}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
           style={{
             width: '100%',
             border: 0,
@@ -82,7 +105,24 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
             }}
           >
             {busy && busyNote && <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>}
-            <span className="fg-hint-kbd">Enter 发送 · Shift+Enter 换行</span>
+            <button
+              type="button"
+              title="点击切换发送键：Enter 发送 / Enter 换行"
+              onClick={() => setSendMode((m) => toggleSendKey(m))}
+              className="fg-hint-kbd"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                padding: 0,
+                margin: 0,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 'inherit',
+                color: 'inherit',
+              }}
+            >
+              {sendKeyHint(sendMode)} ⇄
+            </button>
             {busy && <span>单飞 turn 门控</span>}
           </span>
           <Button
