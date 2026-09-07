@@ -449,10 +449,12 @@ func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
 
 // deriveTitle 从首条用户消息推导会话标题（单行、截断、折叠空白）。
+// 截断按 rune 数判断（len() 是字节数，CJK 一个字符占 3 字节：按字节判断会
+// 在「字节够长但字符不足 48」时对 runes[:48] 越界 panic）。
 func deriveTitle(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
-	if len(text) > 48 {
-		runes := []rune(text)
+	runes := []rune(text)
+	if len(runes) > 48 {
 		text = string(runes[:48]) + "…"
 	}
 	return text
