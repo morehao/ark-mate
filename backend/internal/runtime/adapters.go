@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/morehao/ark-forge/internal/runtime/deepseekharness"
+	"github.com/morehao/ark-forge/internal/runtime/echo"
 	"github.com/morehao/ark-forge/internal/runtime/opencode"
 )
 
@@ -58,5 +59,24 @@ func deepseekharnessSpec() Spec {
 			EmbeddedContext:        deepseekharness.Caps.EmbeddedContext,
 		},
 		Notes: deepseekharness.Notes,
+	}
+}
+
+// echoSpec 汇入 echo 演示底座的启动/能力描述。它自派生：以当前可执行文件（forge）的
+// acp-demo 子命令作为 ACP server，与 opencode/dsh 同构走 stdio；无需外部安装/模型 key。
+func echoSpec() Spec {
+	cmd := "forge" // 兜底；正常取 os.Executable()
+	if exe, err := echo.Command(); err == nil && exe != "" {
+		cmd = exe
+	}
+	return Spec{
+		ID:      echo.ID,
+		Name:    echo.Name,
+		Version: echo.Version,
+		Launch: LaunchSpec{
+			Command: cmd,
+			Args:    echo.Args,
+		},
+		Notes: echo.Notes,
 	}
 }

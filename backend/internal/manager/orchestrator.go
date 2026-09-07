@@ -87,7 +87,7 @@ type runtimeConn struct {
 
 // RunOptions 一次 RunOnce（demo）的入参。
 type RunOptions struct {
-	RuntimeID  string // opencode / deepseekharness
+	RuntimeID  string // opencode / deepseekharness / echo
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录
 	Env        []string // 附加环境
