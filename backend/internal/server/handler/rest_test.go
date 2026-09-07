@@ -71,6 +71,9 @@ func (s *stubSvc) ListSessions(_ bool) ([]handler.SessionResp, error) {
 	}
 	return s.sessions, nil
 }
+func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]handler.SessionSearchHit, error) {
+	return nil, nil
+}
 func (s *stubSvc) GetSession(_ context.Context, id string) (*handler.SessionDetailResp, error) {
 	return &handler.SessionDetailResp{
 		SessionResp:   handler.SessionResp{ID: id},

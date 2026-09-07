@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Dropdown, Input, Modal } from 'antd'
 import {
   EditOutlined,
@@ -7,13 +7,15 @@ import {
   PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
+  SearchOutlined,
   UndoOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark/ui'
 import { Dot, sessionStatusMeta } from '@ark/ui'
 import type { MenuProps } from 'antd'
-import type { SessionSummary } from '@ark/types'
+import type { SessionSearchHit, SessionSummary } from '@ark/types'
+import { sessionSearch } from '@ark/api'
 import { useForge } from '../store'
 import { agentNameOf, titleFor } from '../console/util'
 
@@ -101,6 +103,32 @@ export function SessionRail({ onCreate }: Props) {
   const [renaming, setRenaming] = useState<{ id: string; init: string } | null>(null)
   const [draft, setDraft] = useState('')
 
+  // 会话搜索：后端扫 transcript（标题/Agent/用户消息正文；含归档），250ms 防抖。
+  const [searchQ, setSearchQ] = useState('')
+  const [hits, setHits] = useState<SessionSearchHit[] | null>(null) // null = 未搜索
+  const [searchBusy, setSearchBusy] = useState(false)
+
+  useEffect(() => {
+    const q = searchQ.trim()
+    if (!q) {
+      setHits(null)
+      setSearchBusy(false)
+      return
+    }
+    let live = true
+    const t = setTimeout(() => {
+      setSearchBusy(true)
+      sessionSearch(q)
+        .then((h) => live && setHits(h))
+        .catch(() => live && setHits([]))
+        .finally(() => live && setSearchBusy(false))
+    }, 250)
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [searchQ])
+
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
   const archivedView = railMode === 'archived'
 
@@ -116,6 +144,110 @@ export function SessionRail({ onCreate }: Props) {
     setRenaming(null)
     if (t && t !== target.init) void renameSession(target.id, t)
   }
+
+  const openHit = (h: SessionSearchHit) => {
+    setSearchQ('')
+    setHits(null)
+    openSession(h.id)
+  }
+
+  /** 搜索结果行：标题 + 命中片段 + 底座/归档/命中数。 */
+  const renderHit = (h: SessionSearchHit) => (
+    <button
+      key={h.id}
+      type="button"
+      onClick={() => openHit(h)}
+      style={{
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        background: 'transparent',
+        border: 0,
+        padding: '7px 12px',
+        borderRadius: 10,
+        cursor: 'pointer',
+        color: tokens.text,
+      }}
+    >
+      <span
+        style={{
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          fontSize: 13.5,
+          fontWeight: 600,
+          letterSpacing: '-0.005em',
+          lineHeight: 1.4,
+          color: h.archived ? tokens.textSecondary : tokens.text,
+        }}
+      >
+        {h.title || h.agent_id}
+      </span>
+      {h.snippet ? (
+        <span
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            marginTop: 3,
+            fontSize: 12.5,
+            lineHeight: 1.5,
+            color: tokens.textSecondary,
+          }}
+        >
+          {h.snippet}
+        </span>
+      ) : (
+        <span style={{ marginTop: 3, display: 'block', fontSize: 11.5, color: tokens.textPlaceholder }}>（元数据命中）</span>
+      )}
+      <span
+        style={{
+          marginTop: 7,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          minWidth: 0,
+          fontFamily: tokens.fontMono,
+          fontSize: 10.5,
+          color: tokens.textSecondary,
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 999,
+            padding: '0 7px',
+            whiteSpace: 'nowrap',
+            color: tokens.text,
+          }}
+        >
+          {agentNameOf(agents, h.agent_id)}
+        </span>
+        {h.archived && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              border: `1px solid ${tokens.warningBorder}`,
+              background: tokens.warningBg,
+              color: tokens.warning,
+              borderRadius: 999,
+              padding: '0 7px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            归档
+          </span>
+        )}
+        {h.matches > 1 && <span>命中 {h.matches}</span>}
+      </span>
+    </button>
+  )
 
   const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
@@ -308,35 +440,79 @@ export function SessionRail({ onCreate }: Props) {
         )}
       </div>
 
+      <div style={{ flex: 'none', padding: '0 10px 4px' }}>
+        <Input
+          allowClear
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          prefix={<SearchOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />}
+          placeholder="搜索会话（标题 / 消息内容）"
+          aria-label="搜索会话"
+          style={{
+            borderRadius: 8,
+            fontSize: 12.5,
+            background: tokens.softFill,
+            border: '1px solid transparent',
+            height: 30,
+          }}
+          variant="filled"
+        />
+      </div>
+
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 12px' }} role="list">
-        {sessions.length === 0 && (
+        {searchBusy ? (
+          <div style={{ padding: '14px 12px', color: tokens.textPlaceholder, fontSize: 12.5 }}>搜索中…</div>
+        ) : hits !== null ? (
+          hits.length === 0 ? (
+            <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
+              无匹配「{searchQ.trim()}」的会话。可换关键词，或直接发起新会话。
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  padding: '10px 12px 5px',
+                  fontFamily: tokens.fontMono,
+                  fontSize: 10,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: tokens.textPlaceholder,
+                }}
+              >
+                {hits.length} 个匹配{hits.some((x) => x.archived) ? ' · 含归档' : ''}
+              </div>
+              {hits.map(renderHit)}
+            </>
+          )
+        ) : sessions.length === 0 ? (
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
             {archivedView
               ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
               : '暂无会话。点击右上「新建会话」，选择 Agent 底座并发起首轮问答。'}
           </div>
-        )}
-        {groupSessions(sessions).map((g) => (
-          <div key={g.label} role="group" aria-label={g.label}>
-            <div
-              style={{
-                padding: '10px 12px 5px',
-                fontFamily: tokens.fontMono,
-                fontSize: 10,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: tokens.textPlaceholder,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <span>{g.label}</span>
-              {archivedView && <span>{g.items.length}</span>}
+        ) : (
+          groupSessions(sessions).map((g) => (
+            <div key={g.label} role="group" aria-label={g.label}>
+              <div
+                style={{
+                  padding: '10px 12px 5px',
+                  fontFamily: tokens.fontMono,
+                  fontSize: 10,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: tokens.textPlaceholder,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span>{g.label}</span>
+                {archivedView && <span>{g.items.length}</span>}
+              </div>
+              {g.items.map(renderItem)}
             </div>
-            {g.items.map(renderItem)}
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       <div
