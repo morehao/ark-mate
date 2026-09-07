@@ -29,7 +29,7 @@ export const tokens = {
 
   // 文字 Text（三级灰阶）
   text: '#1f2430',
-  textSecondary: '#64748d',
+  textSecondary: '#56637a',
   textPlaceholder: '#94a3b8',
 
   // 语义色 Semantic（状态专用）
