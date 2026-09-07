@@ -777,6 +777,10 @@ opencode/harness 两形状）。
 - 会话元数据：`title`（首条用户消息自动推导，可 `PATCH` 覆盖）、`pinned`、`archived`、`created_at/updated_at`，
   经 `GET /sessions` / `GET /sessions/:id` 暴露；`PATCH /sessions/:id` 做元数据子集更新。
 - runtime 能力基线（capabilities）只读暴露在 `GET /runtimes`；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组 + 置顶。
+- **归档 / 重命名 / 详情面板（轻量，2026-09-07 增补）**：会话侧栏「会话 / 归档」双视图（REST `archived=true`
+  列表），行内 ⋯ 更多 = 重命名（弹窗）/ 置顶 / 归档（或从归档恢复）；聊天头「会话详情」面板（`GET /sessions/:id`
+  元数据只读 + 挂起权限列表可就地 allow/reject × once/always 决策）。软归档数据保留可恢复；
+  §4.9 v4② 的**全局搜索 / 导出**仍属 M3。
 - **会话重启存活（轻量，2026-09-07 增补）**：daemon 启动回读 transcript 目录，重建会话列表与元数据
   （标题/状态/时间，状态由最后一条终态事件推导），并把历史事件注入 eventbus——管理面在重启后仍有会话可见、
   旧会话可经 WS/history 回看。**仍不引入 DB**（落库属 M2 的 events 表/快照兜底）；transcript header 仅在文件为空时
@@ -788,7 +792,7 @@ opencode/harness 两形状）。
 
 **验收**：`make all` 单二进制 33MB 构建通过；`go test ./...` 全绿（含新增 `internal/acl` 端到端权限集成测试、
 `internal/manager` permission 单元测试）；真实 opencode ACP 会话跑通（tool_call→tool_update→thought/message→
-turn.ended），title/置顶等管理端点实测生效。
+turn.ended），title/置顶/归档等管理端点实测生效。
 
 **发起问答前选择底座（面板交互校准，决策 v6）**：AionUi 的「新建会话」= **/guid 整页**（index 恒重定向：
 `Router.tsx:75-79`；侧栏新建 → `/guid resetAssistant`：`Sider/index.tsx:50`）+ 顶部**助手胶囊栏**

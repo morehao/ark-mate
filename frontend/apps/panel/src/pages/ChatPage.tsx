@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { InfoCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { useForge } from '../store'
 import { SessionRail } from '../components/SessionRail'
+import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
@@ -29,6 +30,7 @@ export function ChatPage() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
+  const [detailOpen, setDetailOpen] = useState(false)
 
   // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
   useEffect(() => {
@@ -118,6 +120,15 @@ export function ChatPage() {
           </div>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          <Button
+            size="small"
+            type="text"
+            icon={<InfoCircleOutlined />}
+            title="会话详情"
+            aria-label="会话详情"
+            onClick={() => setDetailOpen(true)}
+            style={{ borderRadius: 8, color: tokens.textSecondary }}
+          />
           {pendingPerms > 0 && (
             <span
               title={`${pendingPerms} 条挂起权限请求待确认`}
@@ -327,6 +338,13 @@ export function ChatPage() {
         </section>
       </div>
       <StatusBar />
+      {activeId && (
+        <SessionDetailDrawer
+          open={detailOpen}
+          sessionId={activeId}
+          onClose={() => setDetailOpen(false)}
+        />
+      )}
     </div>
   )
 }

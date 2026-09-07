@@ -17,7 +17,7 @@
 - **轻量会话管理面**：会话元数据（title 由首条用户消息自动推导、pinned/archived、created_at/updated_at）经列表/详情暴露；runtime 能力基线（capabilities）只读暴露；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组并支持置顶。
 - **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；传输层 `github.com/coder/websocket`。
 - **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`。
-- **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-forge-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（按日分组 · 置顶 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / meta 行）、composer 追加、停止、权限角标（含超时/取消自动收敛）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；`/sessions/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、`/settings` 为管理次要页。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
+- **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-forge-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（**会话/归档双视图** · 按日分组 · 置顶 · 行内更多操作=重命名/归档/恢复 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / meta 行）、composer 追加、停止、权限角标（含超时/取消自动收敛）、**会话详情面板**（元数据 + 挂起权限就地决策）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；`/sessions/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、`/settings` 为管理次要页。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
 - **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **无外部依赖进程**：会话/事件为进程内内存态，但**会话列表与历史经 transcript 落盘在重启后重建**（不引入 DB）；持久化落库仍属 M2 规划。
 

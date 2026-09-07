@@ -110,4 +110,12 @@ export const consoleStyleSheet = `
     border-color: ${tokens.borderStrong};
     box-shadow: 0 0 0 3px ${tokens.primarySoft};
   }
+
+  /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
+  .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
+  .fg-sess-item:hover .fg-sess-more,
+  .fg-sess-more.fg-keep { opacity: 1; }
+  @media (max-width: 920px) {
+    .fg-sess-more { opacity: 1; }
+  }
 `

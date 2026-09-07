@@ -1,8 +1,18 @@
-import { Button } from 'antd'
-import { PlusOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons'
+import { useState, type ReactNode } from 'react'
+import { Button, Dropdown, Input, Modal } from 'antd'
+import {
+  EditOutlined,
+  InboxOutlined,
+  MoreOutlined,
+  PlusOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+  UndoOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark/ui'
 import { Dot, sessionStatusMeta } from '@ark/ui'
+import type { MenuProps } from 'antd'
 import type { SessionSummary } from '@ark/types'
 import { useForge } from '../store'
 import { agentNameOf, titleFor } from '../console/util'
@@ -39,7 +49,39 @@ function dayLabel(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-/** 会话侧栏（console.html .side）：新建入口 + 会话列表（分组/置顶）+ 底座 foot。 */
+/** 会话侧栏「会话 / 归档」视图切换小标签。 */
+function ViewTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 'none',
+        border: 0,
+        borderRadius: 8,
+        padding: '3px 11px',
+        fontSize: 12.5,
+        fontWeight: 620,
+        letterSpacing: '-0.005em',
+        background: active ? tokens.selectedBg : 'transparent',
+        color: active ? tokens.text : tokens.textSecondary,
+        cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）+ 底座 foot。 */
 export function SessionRail({ onCreate }: Props) {
   const navigate = useNavigate()
   const sessions = useForge((s) => s.sessions)
@@ -48,14 +90,31 @@ export function SessionRail({ onCreate }: Props) {
   const views = useForge((s) => s.views)
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
+  const railMode = useForge((s) => s.railMode)
   const setDrawer = useForge((s) => s.setDrawer)
   const togglePin = useForge((s) => s.togglePin)
+  const archiveSession = useForge((s) => s.archiveSession)
+  const renameSession = useForge((s) => s.renameSession)
+  const setRailMode = useForge((s) => s.setRailMode)
+
+  // 行内「重命名」弹窗
+  const [renaming, setRenaming] = useState<{ id: string; init: string } | null>(null)
+  const [draft, setDraft] = useState('')
 
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
+  const archivedView = railMode === 'archived'
 
   const openSession = (id: string) => {
     setDrawer(false)
     navigate(`/sessions/${id}`)
+  }
+
+  const submitRename = () => {
+    if (!renaming) return
+    const t = draft.trim()
+    const target = renaming
+    setRenaming(null)
+    if (t && t !== target.init) void renameSession(target.id, t)
   }
 
   const renderItem = (sm: SessionSummary) => {
@@ -63,6 +122,32 @@ export function SessionRail({ onCreate }: Props) {
     const meta = sessionStatusMeta(sm.status)
     const running = sm.status === 'in_progress'
     const on = sm.id === activeId
+
+    // 行内「更多」：重命名 / 置顶·取消置顶 / 归档（或恢复）
+    const menuItems: MenuProps['items'] = [
+      {
+        key: 'rename',
+        icon: <EditOutlined />,
+        label: '重命名',
+        onClick: () => {
+          setDraft(sm.title || titleFor(sm, view, agents))
+          setRenaming({ id: sm.id, init: sm.title || titleFor(sm, view, agents) })
+        },
+      },
+      { type: 'divider' },
+      sm.pinned
+        ? { key: 'unpin', icon: <PushpinFilled />, label: '取消置顶' }
+        : { key: 'pin', icon: <PushpinOutlined />, label: '置顶' },
+      sm.archived
+        ? { key: 'restore', icon: <UndoOutlined />, label: '从归档恢复' }
+        : { key: 'archive', icon: <InboxOutlined />, label: '归档' },
+    ]
+    const onMenu: MenuProps['onClick'] = ({ key }) => {
+      if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
+      else if (key === 'archive') void archiveSession(sm.id, true)
+      else if (key === 'restore') void archiveSession(sm.id, false)
+    }
+
     return (
       <div
         key={sm.id}
@@ -70,7 +155,7 @@ export function SessionRail({ onCreate }: Props) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
+          gap: 2,
           width: '100%',
           borderRadius: 10,
           padding: '4px 4px 4px 12px',
@@ -105,7 +190,7 @@ export function SessionRail({ onCreate }: Props) {
               fontWeight: 560,
               letterSpacing: '-0.005em',
               lineHeight: 1.4,
-              color: tokens.text,
+              color: sm.archived ? tokens.textSecondary : tokens.text,
             }}
           >
             {titleFor(sm, view, agents)}
@@ -170,6 +255,29 @@ export function SessionRail({ onCreate }: Props) {
         >
           {sm.pinned ? <PushpinFilled style={{ fontSize: 13 }} /> : <PushpinOutlined style={{ fontSize: 13 }} />}
         </button>
+        <Dropdown menu={{ items: menuItems, onClick: onMenu }} trigger={['click']} placement="bottomRight">
+          <button
+            type="button"
+            className={`fg-sess-more${on ? ' fg-keep' : ''}`}
+            title="更多操作"
+            aria-label="更多操作"
+            onClick={(ev) => ev.stopPropagation()}
+            style={{
+              flex: 'none',
+              display: 'inline-grid',
+              placeItems: 'center',
+              width: 26,
+              height: 26,
+              border: 0,
+              borderRadius: 8,
+              background: 'transparent',
+              color: tokens.textSecondary,
+              cursor: 'pointer',
+            }}
+          >
+            <MoreOutlined style={{ fontSize: 14 }} />
+          </button>
+        </Dropdown>
       </div>
     )
   }
@@ -181,20 +289,31 @@ export function SessionRail({ onCreate }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 10,
-          padding: '14px 14px 10px',
+          gap: 8,
+          padding: '12px 12px 8px',
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 660, letterSpacing: '-0.01em' }}>会话</span>
-        <Button size="small" icon={<PlusOutlined />} onClick={onCreate}>
-          新建会话
-        </Button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10 }}>
+          <ViewTab active={!archivedView} onClick={() => setRailMode('active')}>
+            会话
+          </ViewTab>
+          <ViewTab active={archivedView} onClick={() => setRailMode('archived')}>
+            归档
+          </ViewTab>
+        </span>
+        {!archivedView && (
+          <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
+            新建会话
+          </Button>
+        )}
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 12px' }} role="list">
         {sessions.length === 0 && (
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
-            暂无会话。点击右上「新建会话」，选择 Agent 底座并发起首轮问答。
+            {archivedView
+              ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
+              : '暂无会话。点击右上「新建会话」，选择 Agent 底座并发起首轮问答。'}
           </div>
         )}
         {groupSessions(sessions).map((g) => (
@@ -207,9 +326,13 @@ export function SessionRail({ onCreate }: Props) {
                 letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 color: tokens.textPlaceholder,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
               }}
             >
-              {g.label}
+              <span>{g.label}</span>
+              {archivedView && <span>{g.items.length}</span>}
             </div>
             {g.items.map(renderItem)}
           </div>
@@ -241,6 +364,27 @@ export function SessionRail({ onCreate }: Props) {
           ))
         )}
       </div>
+
+      <Modal
+        open={renaming !== null}
+        title="重命名会话"
+        okText="保存"
+        cancelText="取消"
+        width={380}
+        onOk={submitRename}
+        onCancel={() => setRenaming(null)}
+        destroyOnHidden
+        style={{ top: 120 }}
+      >
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPressEnter={submitRename}
+          placeholder="会话标题"
+          autoFocus
+          maxLength={80}
+        />
+      </Modal>
     </aside>
   )
 }
