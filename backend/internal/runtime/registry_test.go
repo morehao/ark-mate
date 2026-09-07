@@ -6,17 +6,18 @@ import (
 	"testing"
 )
 
-// TestDefaultRegistry 内置两 runtime 的注册与静态能力基线（M0 DoD：
+// TestDefaultRegistry 内置 runtime 的注册与静态能力基线（M0 DoD：
 // GET /runtimes、/agents 返回真实数据的前提）。
 func TestDefaultRegistry(t *testing.T) {
 	reg := DefaultRegistry()
 	items := reg.ListItems()
 
-	if len(items) != 2 {
-		t.Fatalf("期望 2 个 runtime，got %d: %+v", len(items), items)
+	// opencode / deepseekharness / echo 演示。
+	if len(items) != 3 {
+		t.Fatalf("期望 3 个 runtime，got %d: %+v", len(items), items)
 	}
-	// List/ListItems 按 ID 排序：deepseekharness 在 opencode 前。
-	if items[0].ID != "deepseekharness" || items[1].ID != "opencode" {
+	// List/ListItems 按 ID 排序：deepseekharness < echo < opencode。
+	if items[0].ID != "deepseekharness" || items[1].ID != "echo" || items[2].ID != "opencode" {
 		t.Fatalf("排序不符: %+v", items)
 	}
 
@@ -58,6 +59,20 @@ func TestDefaultRegistry(t *testing.T) {
 	}
 	if !strings.Contains(dh.Notes, "dsh --profile acp") {
 		t.Fatalf("harness Notes 应说明启动形态: %s", dh.Notes)
+	}
+
+	ec, ok := reg.Get("echo")
+	if !ok {
+		t.Fatal("echo 未注册")
+	}
+	if !strings.HasSuffix(ec.Version, "echo acp-demo") && !strings.Contains(ec.Version, "echo acp-demo") {
+		t.Fatalf("echo version 不符: %+v", ec)
+	}
+	if !reflect.DeepEqual(ec.Launch.Args, []string{"acp-demo"}) || ec.Launch.Command == "" {
+		t.Fatalf("echo launch 不符（应自派生 forge acp-demo）: %+v", ec.Launch)
+	}
+	if !strings.Contains(ec.Notes, "request_permission") && !strings.Contains(ec.Notes, "权限确认") {
+		t.Fatalf("echo Notes 应说明权限演示用途: %s", ec.Notes)
 	}
 }
 

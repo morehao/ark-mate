@@ -11,8 +11,9 @@
 
 ## 特性（当前形态）
 
-- **ACP 直连运行时**：内置 `opencode`（`opencode acp`）与 `deepseekharness`（`dsh --profile acp`）两个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
+- **ACP 直连运行时**：内置 `opencode`（`opencode acp`）、`deepseekharness`（`dsh --profile acp`）与本地自包含 `echo`（`forge acp-demo`，权限演示）三个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
 - **权限确认通道（ACP 一致）**：agent 发起 `session/request_permission` → 服务端发布 `session.permission_request` 事件（含 options：allow/reject × once/always）→ 用户经 `POST /sessions/:id/permission` 决策 → 决策回流给 agent（Selected/Cancelled）；支持会话级「始终允许」记忆与超时自动拒绝（默认 30min，`FORGE_PERMISSION_TIMEOUT` 可覆盖）；`session/cancel` 按 ACP 规范回 Cancelled 全部挂起。
+- **权限真实链路演示（echo 演示底座）**：内置 `echo` runtime——daemon 自派生 `forge acp-demo` 子进程充当 ACP server（与 opencode/dsh 同构的 stdio NDJSON 链路），每轮 prompt 发起一次真实 `session/request_permission`（allow/reject × once/always），按决策回显授权/拒绝与模拟工具卡；**无需安装 opencode/dsh、无需模型 key**，即可在 Web 面板全链路点选权限确认卡验证通道。
 - **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /sessions`（指定 agent + prompt 后台起真实会话）、`GET /sessions/:id`（详情 + 挂起权限）、`GET /sessions/:id/history`（事件回放分页）、`POST /sessions/:id/prompt`（同会话多轮）、`POST /sessions/:id/cancel`、`PATCH /sessions/:id`（title/pinned/archived 元数据）、`GET /sessions/:id/permissions`、`POST /sessions/:id/permission`（决策）。
 - **轻量会话管理面**：会话元数据（title 由首条用户消息自动推导、pinned/archived、created_at/updated_at）经列表/详情暴露；runtime 能力基线（capabilities）只读暴露；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组并支持置顶。
 - **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；传输层 `github.com/coder/websocket`。
@@ -34,6 +35,7 @@
 | pnpm 11.x | 见 `frontend/package.json` 的 `packageManager` 字段 |
 | opencode | 本机安装且支持 `opencode acp` 子命令 |
 | dsh（deepseek-harness） | npm 包 `@deepseek-ai/dsh`，见下方版本注意 |
+| echo（演示底座） | 无需安装/模型 key；`acp-demo` 子命令内建于单二进制（本 runtime 自派生） |
 
 **前端工具链约定（Node / pnpm）**：版本声明全部收在 `frontend/` 内、仓库根不持有——
 Node 看 `frontend/.nvmrc`（现为 `24.16.0`），pnpm 看 `frontend/package.json` 的 `packageManager`（现为 `pnpm@11.24.0`）。
@@ -70,7 +72,7 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 
 浏览器打开 <http://127.0.0.1:8099>：
 
-1. 左侧「新建会话」选择 agent（如 `deepseek-harness-agent` / `opencode`）并输入首轮 prompt；
+1. 左侧「新建会话」选择 agent——先试 `agent-echo`（本地演示底座，无需模型 key）或 `deepseek-harness-agent` / `agent-opencode`——并输入首轮 prompt；
 2. 点击「创建并发送」→ 右侧即时流式渲染 assistant 消息/思考/工具卡；
 3. 回复期间可点「⏹ 取消」；结束后可在 composer 输入下一条（多轮同会话）；
 4. 断开/刷新后重新点选会话，会按游标全量/增量续传补齐会话视图。
@@ -86,6 +88,9 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 ./forge demo --runtime opencode --prompt "你好，请用一句话介绍你自己"
 ./forge demo --runtime deepseekharness --prompt "你好，请用一句话介绍你自己"
 
+# echo 演示底座：无需外部 runtime/模型 key（--allow-all 即时放行权限请求）
+./forge demo --runtime echo --allow-all --prompt "跑个演示"
+
 # REST 触发 + WS 收流（可用任意 WS 客户端，如 wscat / 浏览器控制台）
 curl -s localhost:8099/v1/forge/sessions \
   -H 'content-type: application/json' \
@@ -93,7 +98,9 @@ curl -s localhost:8099/v1/forge/sessions \
 # → {"code":0,...,"data":{"id":"...","event_seq":7,...}}，随后 WS attach 该会话即可收增量
 ```
 
-> `demo` 默认拒绝一切工具权限请求（仅回复型 prompt 可直通）；`--allow-all` 仅调试放行。控制面 REST（serve）同样默认拒绝权限请求——当前 M1 只保证对话流，涉及工具调用的会话留待 M2/自定义 adapter。
+> `demo` 默认拒绝一切工具权限请求（仅回复型 prompt 可直通）；`--allow-all` 仅调试放行。控制面 REST（serve）同样默认拒绝权限请求——当前 M1 只保证对话流，涉及工具调用的会话留待 M2/自定义 adapter（权限通道的零依赖演示见下）。
+
+> **零依赖演示权限通道（echo）**：面板左侧「新建会话」选 `agent-echo` 并发送任意消息 → 右侧即时出现权限确认卡（工具「运行演示命令 echo hello」+ 允许一次/始终允许/拒绝一次/始终拒绝）→ 点选后看到授权消息 + 模拟工具卡（允许）或「未获授权」（拒绝）；「始终允许」记为会话级记忆，后续轮次同键自动放行不再弹卡。对应 REST：`GET/POST /sessions/:id/permissions|permission`。
 
 ### 5. 前后端分离开发
 
@@ -136,9 +143,9 @@ make vet / test   # go vet / go test ./...
 
 ```
 backend/                单 Go module（github.com/morehao/ark-forge）
-  cmd/forge             CLI（serve / demo 子命令）
+  cmd/forge             CLI（serve / demo / acp-demo 子命令）
   internal/acl          ACP 客户端（stdio 传输、能力探测、权限、错误分类）
-  internal/runtime/     运行时注册表 + adapter（opencode/、deepseekharness/，纯数据）
+  internal/runtime/     运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
   internal/manager      Service + Orchestrator（会话编排、事件发布）
   internal/server/      REST handler / WS / eventbus / router
   internal/web/         release 内嵌前端产物宿主（go:embed dist）

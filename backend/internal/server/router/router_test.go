@@ -57,7 +57,8 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：agents 每 runtime 播种一个、runtimes 2 个。
+// TestRouterListRealService 经真实 Service 的列表端点：agents 每 runtime 播种一个、runtimes 3 个
+// （opencode / deepseekharness / echo 演示）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
@@ -66,13 +67,13 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
 	var agents []map[string]any
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 2 {
+	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 3 {
 		t.Fatalf("agents data 不符: %s", env.Data)
 	}
 
 	env = get(t, e, "/v1/forge/runtimes")
 	var rts []map[string]any
-	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 {
+	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 3 {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 

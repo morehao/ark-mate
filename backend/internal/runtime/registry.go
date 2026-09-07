@@ -19,12 +19,13 @@ func NewRegistry(specs ...Spec) *Registry {
 	return r
 }
 
-// DefaultRegistry 返回内置两 runtime 的注册表（opencode / deepseekharness）。
+// DefaultRegistry 返回内置 runtime 的注册表（opencode / deepseekharness / echo 演示）。
 // adapter 子包只提供纯数据，父包在此汇入统一 Spec（避免父子 import 环）。
 func DefaultRegistry() *Registry {
 	oc := opencodeSpec()
 	dh := deepseekharnessSpec()
-	return NewRegistry(oc, dh)
+	ec := echoSpec()
+	return NewRegistry(oc, dh, ec)
 }
 
 // Get 按 ID 取 Spec。
