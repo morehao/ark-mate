@@ -1,6 +1,7 @@
 import { http } from '../request'
 import type {
   Agent,
+  BusEvent,
   CancelSessionResp,
   CreateSessionReq,
   CreateSessionResp,
@@ -58,3 +59,22 @@ export const revokeAlways = (id: string, req: RevokeAlwaysReq = {}): Promise<{ t
     `/forge/sessions/${encodeURIComponent(id)}/permissions/always/revoke`,
     req,
   )
+
+/** 会话历史页（事件按 seq 升序）。 */
+export interface SessionHistoryPage {
+  id: string
+  events: BusEvent[]
+  has_more: boolean
+}
+
+/** 事件回放（`after` 为开区间游标；默认 200/上限 1000）。 */
+export const sessionHistory = (
+  id: string,
+  opts: { after?: number; limit?: number } = {},
+): Promise<SessionHistoryPage> => {
+  const q = new URLSearchParams()
+  if (opts.after != null) q.set('after', String(opts.after))
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  const s = q.toString()
+  return http.get<SessionHistoryPage>(`/forge/sessions/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
+}

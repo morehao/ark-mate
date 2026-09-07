@@ -9,11 +9,13 @@ package echo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,7 +28,8 @@ const (
 	Name    = "echo"
 	Version = "echo acp-demo（本地自包含权限演示）"
 	Notes   = "自包含本地演示：每轮 prompt 发起一次真实权限确认（allow/reject × once/always），" +
-		"用于端到端验证权限确认通道；无需模型 key / 外部安装。以 forge acp-demo 子进程形态提供 ACP server。"
+		"用于端到端验证权限确认通道；无需模型 key / 外部安装。以 forge acp-demo 子进程形态提供 ACP server；" +
+		"输入首次含 boom 会模拟一次运行失败（供错误 turn 一键重试演示）。"
 )
 
 // Args 是 serve/manager 拉起本 runtime 的子命令参数。
@@ -54,15 +57,33 @@ func Serve(peerInput io.Writer, peerOutput io.Reader) *acpsdk.AgentSideConnectio
 }
 
 // New 构造 echoAgent（未绑定连接前 Prompt 不会被调用）。
-func New() *EchoAgent { return &EchoAgent{} }
+func New() *EchoAgent { return &EchoAgent{boomOnce: make(map[acpsdk.SessionId]bool)} }
 
 // EchoAgent 实现 acpsdk.Agent（ACP server 侧）。
 type EchoAgent struct {
 	conn *acpsdk.AgentSideConnection
 	n    atomic.Int64
+	// boomOnce：每个会话的输入首次含 "boom" 时模拟一次运行失败（Prompt 转 error），
+	// 使「错误 turn → 一键重试」可零依赖端到端演示；同会话后续轮次恢复正常。
+	mu       sync.Mutex
+	boomOnce map[acpsdk.SessionId]bool
 }
 
 func (a *EchoAgent) attach(asc *acpsdk.AgentSideConnection) { a.conn = asc }
+
+// markBoomOnce 判定并消费本会话的首次「模拟失败」；返回 true 时 Prompt 应直接报错。
+func (a *EchoAgent) markBoomOnce(sid acpsdk.SessionId, text string) bool {
+	if !strings.Contains(text, "boom") {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.boomOnce[sid] {
+		return false
+	}
+	a.boomOnce[sid] = true
+	return true
+}
 
 // 权限请求的可选项（decision v4①：allow/reject × once/always）。
 var permOptions = []acpsdk.PermissionOption{
@@ -115,10 +136,15 @@ func (a *EchoAgent) SetSessionConfigOption(context.Context, acpsdk.SetSessionCon
 }
 
 // Prompt 一轮演示：先流式思考/正文，再发起真实权限确认；按用户决策回显结果与模拟工具卡。
+// 输入首次含 "boom" 的轮次会直接返回错误（模拟一次运行失败，供重试链路演示；同会话下一轮恢复）。
 func (a *EchoAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	sid := params.SessionId
 	text := promptText(params.Prompt)
 	toolID := acpsdk.ToolCallId(fmt.Sprintf("tc-echo-%d", a.n.Add(1)))
+
+	if a.markBoomOnce(sid, text) {
+		return acpsdk.PromptResponse{}, errors.New("boom: 模拟一次运行失败（演示用，同会话下一轮将恢复正常）")
+	}
 
 	push := func(updates ...acpsdk.SessionUpdate) {
 		if a.conn == nil {

@@ -10,9 +10,10 @@ import {
 import { tokens } from '@ark/ui'
 import { Dot, Pill, sessionStatusMeta } from '@ark/ui'
 import type { AlwaysAllowItem, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
-import { getSession, revokeAlways, toErrorMessage } from '@ark/api'
+import { getSession, promptSession, revokeAlways, sessionHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
 import { agentNameOf } from '../console/util'
+import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
 
 function fmtLocal(iso?: string): string {
   if (!iso) return '—'
@@ -42,8 +43,10 @@ export function SessionDetailDrawer({
   const renameSession = useForge((s) => s.renameSession)
   const togglePin = useForge((s) => s.togglePin)
   const archiveSession = useForge((s) => s.archiveSession)
+  const showToast = useForge((s) => s.showToast)
 
   const [detail, setDetail] = useState<SessionDetail | null>(null)
+  const [run, setRun] = useState<RunSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -57,6 +60,13 @@ export function SessionDetailDrawer({
       setDetail(await getSession(sessionId))
     } catch (e) {
       setErr(toErrorMessage(e))
+    }
+    // 运行统计/失败轮由历史推导；读不到不阻塞主数据。
+    try {
+      const page = await sessionHistory(sessionId, { limit: 500 })
+      setRun(summarizeRun(page.events))
+    } catch {
+      setRun(null)
     } finally {
       setLoading(false)
     }
@@ -104,6 +114,17 @@ export function SessionDetailDrawer({
   const revokeAll = () => {
     void revokeAlways(sessionId, {})
       .then(() => load())
+      .catch((e) => setErr(toErrorMessage(e)))
+  }
+
+  // —— 失败轮一键重试：重发该轮用户输入（事件经 WS 续流），随后刷新统计 ——
+  const retryFailedTurn = (ft: FailedTurn) => {
+    if (!ft.text) return
+    void promptSession(sessionId, { prompt: ft.text })
+      .then(() => {
+        showToast('已重发该轮输入，结果将实时流出…')
+        window.setTimeout(() => void load(), 1500)
+      })
       .catch((e) => setErr(toErrorMessage(e)))
   }
 
@@ -254,6 +275,144 @@ export function SessionDetailDrawer({
                   {!s.pinned && !s.archived && <span style={{ color: tokens.textPlaceholder }}>—</span>}
                 </span>,
               )}
+            </div>
+
+            {/* 运行统计 + 失败轮（由历史推导；失败轮可就地一键重试） */}
+            <div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  fontWeight: 620,
+                  color: tokens.textSecondary,
+                }}
+              >
+                <span>运行统计</span>
+                <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
+                  {run ? `轮次 ${run.completed + run.failed + run.cancelled}` : '—'}
+                </span>
+              </div>
+              <div
+                style={{
+                  border: `1px solid ${tokens.border}`,
+                  borderRadius: 12,
+                  background: tokens.surface,
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                {run ? (
+                  <>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {[
+                        { label: '完成', n: run.completed, color: tokens.success },
+                        { label: '失败', n: run.failed, color: tokens.error },
+                        { label: '取消', n: run.cancelled, color: tokens.warning },
+                        { label: '工具', n: run.tools, color: tokens.textSecondary },
+                      ].map((st) => (
+                        <span
+                          key={st.label}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'baseline',
+                            gap: 4,
+                            border: `1px solid ${tokens.border}`,
+                            background: tokens.bg,
+                            borderRadius: 999,
+                            padding: '1px 9px',
+                            fontFamily: tokens.fontMono,
+                            fontSize: 11,
+                            color: st.color,
+                          }}
+                        >
+                          <b style={{ fontWeight: 650 }}>{st.n}</b>
+                          {st.label}
+                        </span>
+                      ))}
+                    </div>
+                    {run.failedTurns.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {run.failedTurns.map((ft) => (
+                          <div
+                            key={ft.seq}
+                            style={{
+                              border: `1px solid ${tokens.error}33`,
+                              background: `${tokens.error}0a`,
+                              borderRadius: 10,
+                              padding: '8px 10px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontFamily: tokens.fontMono,
+                                  fontSize: 10.5,
+                                  color: tokens.error,
+                                  display: 'flex',
+                                  gap: 8,
+                                }}
+                              >
+                                <span>seq {ft.seq}</span>
+                                {ft.code && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ft.code}</span>}
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: 2,
+                                  fontSize: 12,
+                                  lineHeight: 1.5,
+                                  overflowWrap: 'anywhere',
+                                  color: tokens.text,
+                                }}
+                              >
+                                {ft.text ? `「${ft.text}」` : '该轮无输入记录'}
+                              </div>
+                              {ft.details && (
+                                <div
+                                  style={{
+                                    marginTop: 2,
+                                    fontSize: 11,
+                                    lineHeight: 1.5,
+                                    color: tokens.textSecondary,
+                                    overflowWrap: 'anywhere',
+                                  }}
+                                >
+                                  {ft.details}
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              disabled={!ft.text}
+                              title={ft.text ? '重新发送该轮输入' : '该轮无输入可重试'}
+                              onClick={() => retryFailedTurn(ft)}
+                              style={{ borderRadius: 8, flex: 'none' }}
+                            >
+                              重试
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: tokens.textPlaceholder, lineHeight: 1.6 }}>
+                        无失败轮次。agent 运行出错时，可在此一键重试该轮。
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: tokens.textPlaceholder, lineHeight: 1.6 }}>
+                    运行统计不可用（历史读取失败）。
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 挂起权限（ACP 确认通道待决项，可就地决策） */}

@@ -147,6 +147,46 @@ func TestEchoAgentPermissionReject(t *testing.T) {
 	}
 }
 
+// TestEchoAgentSimulatedFailure boom 模拟失败：首次含 boom 的轮次返回 error，
+// 同会话再次发同一文本恢复正常（end_turn）——为「错误 turn → 一键重试」提供确定性演示。
+func TestEchoAgentSimulatedFailure(t *testing.T) {
+	tp := newPipeTransport()
+	echo.Serve(tp.a2cW, tp.c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cl, err := Dial(ctx, tp, ClientOptions{
+		OnEvent: func(Event) {},
+		RequestPermission: func(_ context.Context, _ PermissionRequest) PermissionDecision {
+			return PermissionDecision{Allowed: true, OptionID: "allow-once"}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() {
+		_ = cl.Close()
+		tp.Close()
+	}()
+
+	sess, err := cl.NewSession(context.Background(), SessionOptions{Cwd: "/work"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	// 首次：失败。
+	if _, err := sess.Prompt(context.Background(), "boom 跑一下"); err == nil {
+		t.Fatal("首次 boom 轮应返回错误")
+	}
+	// 同会话重试同一文本：成功。
+	stop, err := sess.Prompt(context.Background(), "boom 跑一下")
+	if err != nil {
+		t.Fatalf("重试应成功: %v", err)
+	}
+	if stop != "end_turn" {
+		t.Fatalf("重试 stop 不符: %q", stop)
+	}
+}
+
 func summarizeEvents(evs []Event) []string {
 	out := make([]string, 0, len(evs))
 	for _, e := range evs {

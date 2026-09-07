@@ -62,6 +62,20 @@ export function ChatPage() {
   const busy = streaming || serverBusy
   const agent = agentOf(agents, activeSum?.agent_id)
   const title = activeId ? titleFor(activeSum, view, agents) : ''
+  // 失败 turn 一键重试：仅当最新一条为 turn.error（无流/非 busy）时，取其所属轮的用户输入重发。
+  const entries = view?.entries ?? []
+  const lastEntry = entries[entries.length - 1]
+  const retryLastText = (() => {
+    if (busy || !lastEntry || lastEntry.kind !== 'system' || lastEntry.tone !== 'err') return null
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const en = entries[i]
+      if (en === lastEntry) continue
+      if (en.kind === 'system') return null
+      if (en.kind === 'user' && typeof en.text === 'string' && en.text.trim()) return en.text
+    }
+    return null
+  })()
+  const retryLast = retryLastText ? () => void sendPrompt(retryLastText as string) : undefined
   // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
   useEffect(() => {
     const el = scrollRef.current
@@ -296,7 +310,7 @@ export function ChatPage() {
                   ) : (
                     <>
                       {view?.entries.map((e) => (
-                        <EntryView key={e.id} e={e} />
+                        <EntryView key={e.id} e={e} onRetry={e === lastEntry ? retryLast : undefined} />
                       ))}
                       {streaming && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>

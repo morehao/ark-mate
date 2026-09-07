@@ -1,6 +1,6 @@
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Button } from 'antd'
-import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import type { PermissionOption, StreamEntry } from '@ark/types'
 import { useForge, type PermissionDecision } from '../store'
@@ -173,7 +173,7 @@ function PermissionCard({ e }: { e: StreamEntry }) {
 }
 
 /** 一条流式会话条目（console.html .msg 家族：气泡 / 思考 / 工具卡 / meta 行）。 */
-export function EntryView({ e }: { e: StreamEntry }) {
+export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void }) {
   switch (e.kind) {
     case 'permission':
       return <PermissionCard e={e} />
@@ -325,21 +325,44 @@ export function EntryView({ e }: { e: StreamEntry }) {
 
     case 'system': {
       const tone = (e.tone ?? 'info') as NonNullable<StreamEntry['tone']>
+      const retry = tone === 'err' && !!onRetry
       return (
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: 7,
+            gap: 6,
             margin: '4px 0',
-            fontFamily: tokens.fontMono,
-            fontSize: 10.5,
-            color: toneColor[tone],
           }}
         >
-          {systemIcon[tone]}
-          <span>{e.text}</span>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              fontFamily: tokens.fontMono,
+              fontSize: 10.5,
+              color: toneColor[tone],
+              textAlign: 'center',
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {systemIcon[tone]}
+            <span>{e.text}</span>
+          </div>
+          {retry && (
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={onRetry}
+              title="重新发送该轮输入"
+              style={{ borderRadius: 8, fontSize: 12 }}
+            >
+              重试该轮
+            </Button>
+          )}
         </div>
       )
     }
