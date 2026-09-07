@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,12 +23,15 @@ type AgentRec struct {
 	State   string
 }
 
-// SessionRec 是进程内会话终态记录（M0/M1 内存态；M2 落 SQLite 后由 events 表回放）。
+// SessionRec 是进程内会话终态记录（M1 内存态；M2 落 SQLite 后由 events 表回放）。
 type SessionRec struct {
 	ID        string
 	AgentID   string
 	Runtime   string
 	Status    string
+	Title     string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
+	Pinned    bool   // 置顶（侧栏/管理面用）
+	Archived  bool   // 归档（软删除；会话列表默认不展示）
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -116,26 +120,157 @@ func (s *Service) ListRuntimes() ([]handler.RuntimeResp, error) {
 	specs := s.reg.List()
 	out := make([]handler.RuntimeResp, 0, len(specs))
 	for _, sp := range specs {
-		out = append(out, handler.RuntimeResp{Name: sp.ID, Version: sp.Version})
+		out = append(out, handler.RuntimeResp{
+			Name: sp.ID,
+			ID:   sp.ID,
+			Vers: sp.Version,
+			Caps: capabilityKVs(sp.Caps),
+		})
 	}
 	return out, nil
 }
 
-// ListSessions 返回本进程内全部会话（按创建时间倒序）。
-func (s *Service) ListSessions() ([]handler.SessionResp, error) {
+// capabilityKVs 把 runtime.Capabilities 展开为 key/value 列表（稳定序）。
+func capabilityKVs(c runtime.Capabilities) []handler.CapabilityKV {
+	return []handler.CapabilityKV{
+		{Key: "sessions_persistent", Value: c.SessionsPersistent},
+		{Key: "multi_session_concurrent", Value: c.MultiSessionConcurrent},
+		{Key: "images", Value: c.Images},
+		{Key: "embedded_context", Value: c.EmbeddedContext},
+	}
+}
+
+// ListSessions 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
+// 按创建时间倒序（置顶优先）。
+func (s *Service) ListSessions(archived bool) ([]handler.SessionResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]handler.SessionResp, 0, len(s.sessions))
 	for _, r := range s.sessions {
-		out = append(out, handler.SessionResp{
-			ID:      r.ID,
-			AgentID: r.AgentID,
-			Runtime: r.Runtime,
-			Status:  r.Status,
-		})
+		if r.Archived != archived {
+			continue
+		}
+		out = append(out, toSessionResp(r))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pinned != out[j].Pinned {
+			return out[i].Pinned
+		}
+		return out[i].CreatedAt > out[j].CreatedAt
+	})
 	return out, nil
+}
+
+// toSessionResp 把 SessionRec 折叠为 handler.SessionResp。
+func toSessionResp(r *SessionRec) handler.SessionResp {
+	return handler.SessionResp{
+		ID:        r.ID,
+		AgentID:   r.AgentID,
+		Runtime:   r.Runtime,
+		Status:    r.Status,
+		Title:     r.Title,
+		Pinned:    r.Pinned,
+		Archived:  r.Archived,
+		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// GetSession 返回单会话详情（元数据 + 挂起权限）。
+func (s *Service) GetSession(ctx context.Context, id string) (*handler.SessionDetailResp, error) {
+	if !s.hasSession(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	pending := s.PendingPermissions(id)
+	perms := make([]handler.PermissionResp, 0, len(pending))
+	for _, p := range pending {
+		perms = append(perms, toPermissionResp(p))
+	}
+	detail := handler.SessionDetailResp{SessionResp: s.sessionResp(id), Pending: perms}
+	return &detail, nil
+}
+
+// UpdateSession 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
+func (s *Service) UpdateSession(ctx context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
+	s.mu.Lock()
+	r, ok := s.sessions[id]
+	if !ok {
+		s.mu.Unlock()
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	if patch.Title != nil {
+		r.Title = *patch.Title
+	}
+	if patch.Pinned != nil {
+		r.Pinned = *patch.Pinned
+	}
+	if patch.Archived != nil {
+		r.Archived = *patch.Archived
+	}
+	r.UpdatedAt = time.Now().UTC()
+	resp := toSessionResp(r)
+	s.mu.Unlock()
+	return &resp, nil
+}
+
+// sessionResp 返回单个会话的轻量表示（须持锁调用）。
+func (s *Service) sessionResp(id string) handler.SessionResp {
+	r := s.sessions[id]
+	return toSessionResp(r)
+}
+
+// ListPendingPermissions 列出某会话的挂起权限请求。
+func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]handler.PermissionResp, error) {
+	if !s.hasSession(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	pending := s.PendingPermissions(id)
+	out := make([]handler.PermissionResp, 0, len(pending))
+	for _, p := range pending {
+		out = append(out, toPermissionResp(p))
+	}
+	return out, nil
+}
+
+// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
+func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error {
+	if s.orch == nil {
+		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	ok, err := s.orch.ResolvePermission(callID, optionID, always, allowed)
+	if err != nil {
+		return s.restErr(err)
+	}
+	if !ok {
+		return s.restErr(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
+	}
+	return nil
+}
+
+// PendingPermissions 直接透传编排器的挂起权限（供 GetSession/ListPendingPermissions 复用）。
+func (s *Service) PendingPermissions(id string) []PermissionItem {
+	if s.orch == nil {
+		return nil
+	}
+	return s.orch.PendingPermissions(id)
+}
+
+// toPermissionResp 把 manager.PermissionItem 折叠为 handler.PermissionResp。
+func toPermissionResp(p PermissionItem) handler.PermissionResp {
+	opts := make([]handler.PermissionOptionResp, 0, len(p.Options))
+	for _, o := range p.Options {
+		opts = append(opts, handler.PermissionOptionResp{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
+	}
+	return handler.PermissionResp{
+		CallID:    p.CallID,
+		SessionID: p.SessionID,
+		Title:     p.Title,
+		ToolCall:  p.ToolCall.ID,
+		Kind:      p.ToolCall.Kind,
+		Input:     p.ToolCall.Input,
+		Options:   opts,
+		TimeoutAt: p.TimeoutAt.UTC().Format(time.RFC3339),
+	}
 }
 
 // agentForRuntime 返回指定 runtime 的默认播种 Agent。
@@ -191,6 +326,14 @@ func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
 	}
 	if m, ok := payload.(map[string]any); ok {
 		s.tx.appendLine(sessionID, evt.Seq, typ, m)
+		// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateSession）。
+		if typ == BusUserMessage {
+			if r, ok := s.sessions[sessionID]; ok && strings.TrimSpace(r.Title) == "" {
+				if text, _ := m["text"].(string); text != "" {
+					r.Title = deriveTitle(text)
+				}
+			}
+		}
 	}
 	return evt
 }
@@ -214,6 +357,16 @@ func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
 func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
+
+// deriveTitle 从首条用户消息推导会话标题（单行、截断、折叠空白）。
+func deriveTitle(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 48 {
+		runes := []rune(text)
+		text = string(runes[:48]) + "…"
+	}
+	return text
+}
 
 // ——— handler.Service 的会话动作实现（REST：create/prompt/cancel） ———
 

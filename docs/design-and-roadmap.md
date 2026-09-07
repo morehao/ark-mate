@@ -744,7 +744,7 @@ opencode/harness 两形状）。
 
 | AionUi 数据管理面形态（证据） | ark-forge 落点 |
 |---|---|
-| 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | M2 权限策略数据位（v4①） |
+| 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | **已落地（轻量化）**：ACP `session/request_permission` → `session.permission_request` 事件（options 透传）+ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝（默认 30min，`FORGE_PERMISSION_TIMEOUT`）。详见 §5.8.1 |
 | 会话 = 强类型定列 + extra JSON 快照；侧栏服务端分组读模型（pinned/项目/时间线）+ 软归档（archived_at 切片）+ 全局消息搜索 + 批量导出（`sidebar.ts`、`ipcBridge.ts:2423-2497`） | M3 会话数据管理面（v4②） |
 | 会话 runtime 摘要状态机：ensure/restart/cancel/lease + pending_confirmations + can_send，UI 不持进程（`ipcBridge.ts:341-361`、`runtime/agent-process-registry.ts`） | M3 会话态/连接态分离（v4③） |
 | MCP：IMcpServer 判别联合传输（stdio/sse/http/streamable_http）+ toggle/test-connection/OAuth/original_json 保真 + per-agent 子集 + 会话启用集「仅建会话时注入」（`common/config/storage.ts:595-640`、`ipcBridge.ts:1205-1269`） | P1 MCP 数据模型（v4④） |
@@ -754,6 +754,35 @@ opencode/harness 两形状）。
 | 消息 = msg_id 幂等 + 类型化合并（append 默认、`replace:true` 才替换；tool 按 call_id 原位合并；
   `hooks.ts:293-323`、`chatLib.ts:369`、`acpTypes.ts:143-156`） | WS 载荷透传 `msg_id` + 前端同段归并
   （决策 v5①）；其「无游标 + DB 权威补拉」传输方式不借鉴 |
+
+#### 5.8.1 已落地「权限确认通道 + 轻量管理面」（轻量化决策，2026-09-07）
+
+用户明确「不想做得太重」，scope = 单二进制最小版 + 权限确认通道 + 轻量管理面（前端技术栈不变：
+保留 React + antd，不做零构建重写）。据此从 AionUi 蓝本中**优先引下两件事**，其余仍按 §6 M2/P1/P2 规划：
+
+**① 权限确认通道（ACP 一致）**——链路与映射：
+- agent 在 Prompt 中途发 `session/request_permission`（SDK 在其读循环派发的 goroutine 中处理，阻塞不卡读循环，
+  已核实 acp-go-sdk `connection.go` 的 `go func` 分发 + acp_test.go「Prompt 内调 RequestPermission 不 deadlock」）。
+- `hostClient.RequestPermission` 归一化为 `acl.PermissionRequest`（tool 信息 + options），调用方注入的
+  `RequestPermission` 回调**阻塞等待宿主决策**；`acl.PermissionDecision{Allowed, OptionID, Always}` 折叠回
+  ACP `Selected`/`Cancelled`。
+- `internal/manager.PermissionManager`：按 `call_id` 注册挂起 → `session.permission_request` 事件（含 options）→
+  阻塞等 `ResolveAllow/ResolveReject`（经 `POST /sessions/:id/permission`）→ 超时（默认 30min）自动拒绝；
+  `allow_always` 记录「action+identifier」会话级记忆，同键后续请求走快速放行；`session/cancel` 按 ACP 规范
+  回 Cancelled 全部挂起。
+- 前端：流式正文渲染**权限确认卡**（选项 allow/reject × once/always 按钮 / 无选项时的 允许本次·始终·拒绝 兜底），
+  点选经 REST 回传并置灰；聊天头显示待决权限角标。
+
+**② 轻量会话管理面**：
+- 会话元数据：`title`（首条用户消息自动推导，可 `PATCH` 覆盖）、`pinned`、`archived`、`created_at/updated_at`，
+  经 `GET /sessions` / `GET /sessions/:id` 暴露；`PATCH /sessions/:id` 做元数据子集更新。
+- runtime 能力基线（capabilities）只读暴露在 `GET /runtimes`；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组 + 置顶。
+- 不做：skills / MCP / cron 的**数据 CRUD**（当前 backend 无此类数据源，虚构会失真；仍按 §6 P1/P2 规划），
+  亦不做会话持久化落库（重启即失，transcript 文件仍落盘待未来导入）。
+
+**验收**：`make all` 单二进制 33MB 构建通过；`go test ./...` 全绿（含新增 `internal/acl` 端到端权限集成测试、
+`internal/manager` permission 单元测试）；真实 opencode ACP 会话跑通（tool_call→tool_update→thought/message→
+turn.ended），title/置顶等管理端点实测生效。
 
 **发起问答前选择底座（面板交互校准，决策 v6）**：AionUi 的「新建会话」= **/guid 整页**（index 恒重定向：
 `Router.tsx:75-79`；侧栏新建 → `/guid resetAssistant`：`Sider/index.tsx:50`）+ 顶部**助手胶囊栏**

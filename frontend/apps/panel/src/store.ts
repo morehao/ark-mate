@@ -6,9 +6,11 @@ import {
   listRuntimes,
   listSessions,
   promptSession,
+  resolvePermission,
   toErrorMessage,
+  updateSession,
 } from '@ark/api'
-import type { Agent, BusEvent, Runtime, SessionSummary, StreamEntry, WsServerFrame } from '@ark/types'
+import type { Agent, BusEvent, PermissionOption, Runtime, SessionSummary, StreamEntry, WsServerFrame } from '@ark/types'
 import { Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
 
@@ -129,6 +131,22 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         streaming: false,
         lastSeq,
       }
+    case Ev.PermissionRequest: {
+      // ACP 权限确认：agent 发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
+      // 用户点选 allow/reject × once/always 后经 POST /sessions/:id/permission 回传。
+      const callId = String(e.payload?.call_id ?? '')
+      const title = String(e.payload?.title ?? '权限请求')
+      const toolKind = String(e.payload?.kind ?? '')
+      const toolCallId = String(e.payload?.tool_call_id ?? '')
+      const optionKinds = Array.isArray(e.payload?.options)
+        ? (e.payload.options as PermissionOption[])
+        : []
+      return {
+        ...v,
+        entries: push('permission', undefined, { callId, title, optionKinds, toolKind, toolCallId, resolved: false }),
+        lastSeq,
+      }
+    }
     case Ev.Usage:
       return { ...v, lastSeq }
     default:
@@ -152,6 +170,13 @@ export interface ForgeState {
   drawerOpen: boolean
 }
 
+export interface PermissionDecision {
+  allowed: boolean
+  optionId?: string
+  always: boolean
+  label: string
+}
+
 export interface ForgeActions {
   boot: () => void
   refreshAgents: () => Promise<void>
@@ -161,6 +186,9 @@ export interface ForgeActions {
   createAndRun: (agentId: string, prompt: string) => Promise<string | undefined>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
+  respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
+  renameSession: (id: string, title: string) => Promise<void>
+  togglePin: (id: string) => Promise<void>
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
@@ -352,6 +380,52 @@ export const useForge = create<ForgeStore>((set, get) => {
       if (!id) return
       try {
         await cancelSession(id)
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    respondPermission: async (callId, decision) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        await resolvePermission(id, {
+          call_id: callId,
+          option_id: decision.optionId,
+          always: decision.always,
+          allowed: decision.allowed,
+        })
+        // 本地就地标记该权限卡已决策（按钮禁用 + 展示决策），agent 随后经 WS 续流。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          const entries = view.entries.map((en): StreamEntry =>
+            en.kind === 'permission' && en.callId === callId
+              ? { ...en, resolved: true, decision: decision.label }
+              : en,
+          )
+          return { views: { ...s.views, [id]: { ...view, entries } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    renameSession: async (id, title) => {
+      try {
+        await updateSession(id, { title })
+        void get().refreshSessions()
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    togglePin: async (id) => {
+      const cur = get().sessions.find((x) => x.id === id)
+      if (!cur) return
+      try {
+        await updateSession(id, { pinned: !cur.pinned })
+        void get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }

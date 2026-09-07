@@ -41,6 +41,8 @@ export function ChatPage() {
   const view = activeId ? views[activeId] : undefined
   const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
+  // 挂起权限请求条数（确认通道待决项；聊天头角标）
+  const pendingPerms = activeId && view ? view.entries.filter((en) => en.kind === 'permission' && !en.resolved).length : 0
   // 服务端忙水位：本地无流（streaming=false）但会话在服务端仍 in_progress 且本地视图没有终态条目
   // （如刷新/重启后该 turn 仍在跑或已卡住）→ 视为 busy：展示「停止」以自愈（后端 cancel 幂等解 busy）。
   // 一旦本地已收到终态条目（tone ok/err/cancel 的 system 尾条），即使列表 status 还没刷新也不当 busy。
@@ -116,6 +118,29 @@ export function ChatPage() {
           </div>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          {pendingPerms > 0 && (
+            <span
+              title={`${pendingPerms} 条挂起权限请求待确认`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                border: `1px solid ${tokens.warning}`,
+                background: `${tokens.warning}14`,
+                color: tokens.warning,
+                borderRadius: 999,
+                padding: '2px 9px',
+                fontFamily: tokens.fontMono,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+              </svg>
+              权限 {pendingPerms}
+            </span>
+          )}
           <span
             style={{
               display: 'inline-flex',

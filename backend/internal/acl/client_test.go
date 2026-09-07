@@ -90,6 +90,9 @@ type fakeAgent struct {
 	promptErr     error
 	promptUpdates []acpsdk.SessionUpdate // Prompt 时先推送的流式更新
 	stopReason    acpsdk.StopReason
+	// promptHook 若设置，在推送流式更新前调用（用于在 Prompt 中途发起
+	// session/request_permission 等交互，验证权限确认通道不阻塞读循环）。
+	promptHook func(ctx context.Context, req acpsdk.PromptRequest)
 }
 
 var _ acpsdk.Agent = (*fakeAgent)(nil)
@@ -148,6 +151,10 @@ func (f *fakeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsd
 	f.mu.Unlock()
 	if err != nil {
 		return acpsdk.PromptResponse{}, err
+	}
+	// 交互钩子（可在流式更新前发起权限请求等）
+	if f.promptHook != nil {
+		f.promptHook(ctx, req)
 	}
 	// 先推送流式更新（通知），再返回终态：验证客户端先收增量、后收 stop reason。
 	for _, u := range updates {

@@ -59,11 +59,33 @@ func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	}
 	return s.runtimes, nil
 }
-func (s *stubSvc) ListSessions() ([]handler.SessionResp, error) {
+func (s *stubSvc) ListSessions(_ bool) ([]handler.SessionResp, error) {
 	if s.listSessionsErr != nil {
 		return nil, s.listSessionsErr
 	}
 	return s.sessions, nil
+}
+func (s *stubSvc) GetSession(_ context.Context, id string) (*handler.SessionDetailResp, error) {
+	return &handler.SessionDetailResp{SessionResp: handler.SessionResp{ID: id}}, nil
+}
+func (s *stubSvc) UpdateSession(_ context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
+	resp := handler.SessionResp{ID: id}
+	if patch.Title != nil {
+		resp.Title = *patch.Title
+	}
+	if patch.Pinned != nil {
+		resp.Pinned = *patch.Pinned
+	}
+	if patch.Archived != nil {
+		resp.Archived = *patch.Archived
+	}
+	return &resp, nil
+}
+func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]handler.PermissionResp, error) {
+	return nil, nil
+}
+func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) error {
+	return nil
 }
 func (s *stubSvc) CreateSession(_ context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
 	s.createCalled = true
@@ -125,9 +147,13 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/agents", h.Agent.List)
 	g.GET("/sessions", h.Session.List)
 	g.POST("/sessions", h.Session.Create)
+	g.GET("/sessions/:id", h.Session.Get)
+	g.PATCH("/sessions/:id", h.Session.Update)
 	g.GET("/sessions/:id/history", h.Session.History)
 	g.POST("/sessions/:id/prompt", h.Session.Prompt)
 	g.POST("/sessions/:id/cancel", h.Session.Cancel)
+	g.GET("/sessions/:id/permissions", h.Session.Permissions)
+	g.POST("/sessions/:id/permission", h.Session.ResolvePermission)
 	g.GET("/runtimes", h.Runtime.List)
 	return r
 }
@@ -160,8 +186,8 @@ func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
 		agents: []handler.AgentResp{{ID: "agent-opencode", Name: "opencode-agent", Runtime: "opencode", State: "stopped"}},
 		runtimes: []handler.RuntimeResp{
-			{Name: "opencode", Version: "opencode acp"},
-			{Name: "deepseekharness", Version: "dsh --profile acp"},
+			{Name: "opencode", ID: "opencode", Vers: "opencode acp"},
+			{Name: "deepseekharness", ID: "deepseekharness", Vers: "dsh --profile acp"},
 		},
 		sessions: []handler.SessionResp{{ID: "s1", AgentID: "a", Runtime: "r", Status: "completed"}},
 	}

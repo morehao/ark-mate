@@ -9,19 +9,69 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
-// SessionHandler 处理会话相关 REST 请求（列表 + create/prompt/cancel/history）。
+// SessionHandler 处理会话相关 REST 请求（列表 + create/prompt/cancel/history + 元数据 + 权限）。
 type SessionHandler struct {
 	svc Service
 }
 
-// List 列出全部会话。
+// List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
 func (h *SessionHandler) List(c *gin.Context) {
-	sessions, err := h.svc.ListSessions()
+	archived := c.Query("archived") == "true"
+	sessions, err := h.svc.ListSessions(archived)
 	if err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
 		return
 	}
 	gincontext.Success(c, sessions)
+}
+
+// Get 返回单会话详情（元数据 + 挂起权限）。
+func (h *SessionHandler) Get(c *gin.Context) {
+	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Update 更新会话元数据（title/pinned/archived 子集）。
+func (h *SessionHandler) Update(c *gin.Context) {
+	var req SessionPatch
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	resp, err := h.svc.UpdateSession(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Permissions 列出会话的挂起权限请求。
+func (h *SessionHandler) Permissions(c *gin.Context) {
+	resp, err := h.svc.ListPendingPermissions(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// ResolvePermission 对挂起权限请求做出决策（allow/reject × once/always）。
+func (h *SessionHandler) ResolvePermission(c *gin.Context) {
+	var req PermissionResolveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	if err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed); err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, gin.H{"call_id": req.CallID, "allowed": req.Allowed})
 }
 
 // Create 建立会话（agent_id + 可选首轮 prompt）。

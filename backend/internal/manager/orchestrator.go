@@ -70,6 +70,9 @@ type Orchestrator struct {
 	sessions map[string]*ActiveSession
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
+	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
+	perm *PermissionManager
+
 	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
 
@@ -105,6 +108,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		reg:      reg,
 		conns:    make(map[string]*runtimeConn),
 		sessions: make(map[string]*ActiveSession),
+		perm:     NewPermissionManager(DefaultPermissionTimeout),
 		logger:   slog.Default(),
 	}
 	svc.attachOrchestrator(o)
@@ -113,6 +117,9 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 
 // SetAllowAll 放开权限请求（仅调试/冒烟；默认一律拒绝）。
 func (o *Orchestrator) SetAllowAll(v bool) { o.allowAll = v }
+
+// SetPermissionTimeout 覆盖挂起权限请求的自动拒绝超时（0 → 默认 30min）。
+func (o *Orchestrator) SetPermissionTimeout(d time.Duration) { o.perm.SetTimeout(d) }
 
 // SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
 func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
@@ -284,7 +291,8 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
 		o.logger.Debug("session/cancel RPC 未在限期内响应，本地强制解除",
 			"session", sessionID, "timeout", agentCancelTimeout.String())
 	}
-	t.cancel() // 解除 SDK 阻塞
+	t.cancel()                      // 解除 SDK 阻塞
+	o.perm.CancelSession(sessionID) // session/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
 	return nil
 }
 
@@ -359,11 +367,16 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	logger := o.logger.With("runtime", spec.ID, "cmd", spec.Launch.Command)
 	t.SetLogger(logger)
 
-	allowPerm := func(context.Context, string, string, int) bool { return o.allowAll }
+	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
+		if o.allowAll {
+			return acl.PermissionDecision{Allowed: true}
+		}
+		return o.requestPermission(ctx, req)
+	}
 	client, err := acl.Dial(ctx, t, acl.ClientOptions{
-		OnEvent:         o.eventSink(agent.ID, spec.ID),
-		Logger:          logger,
-		AllowPermission: allowPerm,
+		OnEvent:           o.eventSink(agent.ID, spec.ID),
+		Logger:            logger,
+		RequestPermission: reqPerm,
 	})
 	if err != nil {
 		_ = t.Close()
@@ -508,6 +521,58 @@ func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
 		p["output"] = d.Output
 	}
 	return p
+}
+
+// requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
+//   - 会话级始终允许记忆命中 → 直接放行（快速路径）；
+//   - 否则发布 session.permission_request 事件（含 call_id/options）并阻塞等待
+//     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
+//
+// 事件发布（publish）注入的给 PermissionManager，避免 manager 依赖 bus。
+func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
+	if d, ok := o.perm.AutoDecision(req.SessionID, req); ok {
+		return d
+	}
+	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption) {
+		o.svc.publish(BusPermissionRequest, req.SessionID, map[string]any{
+			"session_id":   req.SessionID,
+			"call_id":      callID,
+			"title":        title,
+			"tool_call_id": tool.ID,
+			"kind":         tool.Kind,
+			"input":        tool.Input,
+			"options":      opts,
+		})
+	}
+	return o.perm.RegisterAndWait(ctx, req.SessionID, req, publish)
+}
+
+// PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
+func (o *Orchestrator) PendingPermissions(sessionID string) []PermissionItem {
+	ps := o.perm.pendingForSession(sessionID)
+	out := make([]PermissionItem, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, PermissionItem{
+			CallID:    p.callID,
+			SessionID: p.sessionID,
+			Title:     p.title,
+			ToolCall:  p.toolCall,
+			Options:   p.options,
+			TimeoutAt: p.timeout,
+		})
+	}
+	return out
+}
+
+// ResolvePermission 按 call_id 投递决策（allow/reject × once/always）。
+func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowed bool) (bool, error) {
+	if callID == "" {
+		return false, acl.NewError(acl.ClassRequest, "call_id_required", "call_id 必填", nil)
+	}
+	if allowed {
+		return o.perm.ResolveAllow(callID, optionID, always), nil
+	}
+	return o.perm.ResolveReject(callID), nil
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error。
