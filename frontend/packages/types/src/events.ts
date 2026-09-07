@@ -8,8 +8,9 @@ export const Ev = {
   ToolUpdate: 'session.tool_update',
   Usage: 'session.usage',
   Permission: 'session.permission',
-  // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   PermissionRequest: 'session.permission_request',
+  ElicitationRequest: 'session.elicitation_request',
+  // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   Runtime: 'session.runtime',
   TurnEnded: 'turn.ended',
   TurnError: 'turn.error',
@@ -28,9 +29,9 @@ export interface BusEvent {
 
 // ——— 会话运行视图（前端侧拼接的事件模型） ———
 
-import type { PermissionOption } from './session'
+import type { ElicitationFormSchema, PermissionOption } from './session'
 
-export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission'
+export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission' | 'elicitation'
 
 export interface StreamEntry {
   kind: EntryKind
@@ -49,4 +50,11 @@ export interface StreamEntry {
   resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
   decision?: string // resolved 时的决策摘要
   timeoutAt?: string // 服务端超时时刻（ISO）；过期即自动拒绝，UI 据此收敛卡片
+  // —— 结构化提问卡（kind='elicitation'）——
+  elicitationId?: string // 决策回传锚点（POST /sessions/:id/elicitation）
+  mode?: 'form' | 'url' // form=表单渲染 schema；url=引导链接
+  message?: string // agent 的提问引导文案
+  schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）
+  url?: string // url 模式链接
+  content?: Record<string, unknown> // accept 时用户提交的内容（结果展示）
 }

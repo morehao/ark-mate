@@ -200,3 +200,77 @@ func TestCancelTurnAgentUnresponsive(t *testing.T) {
 		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
 	}
 }
+
+// TestBusyAttributionHelpers 验证 busyConn 归属表：登记/撤销/唯一性判定/nil 安全。
+func TestBusyAttributionHelpers(t *testing.T) {
+	orch := &Orchestrator{busyConn: make(map[*acl.Client]map[string]struct{})}
+	c1 := &acl.Client{}
+	c2 := &acl.Client{}
+
+	// 未登记 / nil client → 空
+	if got := orch.busySessionForClient(c1); got != "" {
+		t.Fatalf("未登记应返回空: %q", got)
+	}
+	if got := orch.busySessionForClient(nil); got != "" {
+		t.Fatalf("nil client 应返回空: %q", got)
+	}
+	orch.markBusy(nil, "s1") // no-op 不 panic
+
+	orch.markBusy(c1, "s1")
+	if got := orch.busySessionForClient(c1); got != "s1" {
+		t.Fatalf("唯一在途应为 s1: %q", got)
+	}
+	orch.markBusy(c1, "s2")
+	if got := orch.busySessionForClient(c1); got != "" {
+		t.Fatalf("两会话并发在途不应猜测: %q", got)
+	}
+	orch.unmarkBusy(c1, "s2")
+	if got := orch.busySessionForClient(c1); got != "s1" {
+		t.Fatalf("撤销 s2 后应回到 s1: %q", got)
+	}
+	orch.unmarkBusy(c1, "s1")
+	if got := orch.busySessionForClient(c1); got != "" {
+		t.Fatalf("全部撤销后应为空: %q", got)
+	}
+
+	// 不同连接互不影响
+	orch.markBusy(c2, "s3")
+	if got := orch.busySessionForClient(c1); got != "" {
+		t.Fatalf("c1 不应受 c2 影响: %q", got)
+	}
+	if got := orch.busySessionForClient(c2); got != "s3" {
+		t.Fatalf("c2 唯一在途应为 s3: %q", got)
+	}
+	orch.unmarkBusy(c2, "s3")
+}
+
+// TestBusyAttributionLifecycle Prompt 到收尾的登记/撤销生命周期：
+// turn 进行中能唯一归属会话，取消收尾后归属清除。
+func TestBusyAttributionLifecycle(t *testing.T) {
+	svc, orch, _ := newTestRig(t)
+	c1 := &acl.Client{}
+	as := &ActiveSession{
+		ID: "s1", AgentID: "a", Runtime: "r", client: c1,
+		sess: &stubSession{cancelOnCtx: true},
+	}
+	orch.sessions["s1"] = as
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+
+	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if got := orch.busySessionForClient(c1); got != "s1" {
+		t.Fatalf("turn 进行中应归属 s1: %q", got)
+	}
+	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelTurn: %v", err)
+	}
+	// runTurn 收尾后 busyConn 应清空（轮询等待，2s 防御）
+	deadline := time.Now().Add(2 * time.Second)
+	for orch.busySessionForClient(c1) != "" {
+		if time.Now().After(deadline) {
+			t.Fatal("turn 收尾后 busyConn 未清除")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

@@ -38,6 +38,8 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.POST("/sessions/:id/permission", h.Session.ResolvePermission)
 	v1.GET("/sessions/:id/permissions/always", h.Session.AlwaysAllowed)
 	v1.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeAlways)
+	v1.GET("/sessions/:id/elicitations", h.Session.Elicitations)
+	v1.POST("/sessions/:id/elicitation", h.Session.ResolveElicitation)
 	v1.GET("/runtimes", h.Runtime.List)
 	v1.GET("/ws/events", h.WS.Handle)
 

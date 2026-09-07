@@ -120,6 +120,30 @@ func (h *SessionHandler) ResolvePermission(c *gin.Context) {
 	gincontext.Success(c, gin.H{"call_id": req.CallID, "allowed": req.Allowed})
 }
 
+// Elicitations 列出会话的挂起结构化提问（elicitation/create 表单/URL 卡）。
+func (h *SessionHandler) Elicitations(c *gin.Context) {
+	resp, err := h.svc.ListPendingElicitations(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// ResolveElicitation 对挂起结构化提问做出决策（accept/decline/cancel；accept 可带 content）。
+func (h *SessionHandler) ResolveElicitation(c *gin.Context) {
+	var req ElicitationResolveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	if err := h.svc.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, gin.H{"elicitation_id": req.ElicitationID, "action": req.Action})
+}
+
 // Create 建立会话（agent_id + 可选首轮 prompt）。
 // 返回 session id 与 event_seq 水位：前端 WS attach 传 since_seq=event_seq 即可
 // 续传首轮增量事件（§4.5 attach/续传语义；EventSeq=0 表示 bus 未启用，attach since=0 走快照）。

@@ -27,6 +27,11 @@ type ClientOptions struct {
 	RequestPermission func(ctx context.Context, req PermissionRequest) PermissionDecision
 	// AllowPermission 旧式同步布尔决策（兼容 demo/测试注入）；RequestPermission 非空时忽略。
 	AllowPermission func(ctx context.Context, sessionID, toolTitle string, options int) bool
+	// CreateElicitation 处理 agent 的一次结构化提问（elicitation/create：表单或 URL）并
+	// **阻塞等待宿主决策**（由 SDK 在独立 goroutine 中调用，阻塞不卡通知读循环）。
+	// nil 时一律按取消（cancelled）回应。实现应返回 ElicitationOutcome
+	// （accept/decline/cancel；accept 可带用户提交的 content）。
+	CreateElicitation func(ctx context.Context, req ElicitationRequest) ElicitationOutcome
 	// DialTimeout 限制 initialize/authenticate 握手时长；0 → 调用方 ctx 有截止时间则沿用，
 	// 否则用 defaultDialTimeout。runtime 无响应（如等待交互登录）时拨号不会无限挂起。
 	DialTimeout time.Duration
@@ -77,9 +82,18 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		Name:    firstNonEmpty(opts.ClientName, "ark-forge"),
 		Version: firstNonEmpty(opts.ClientVersion, "dev-m0"),
 	}
+	// 宿主能力声明：本层实现了 elicitation（表单/URL）与 session/request_permission 等交互通道，
+	// 声明后 agent 才可能在初始化阶段得知可用交互（opencode/dsh 等不支持的 agent 会忽略，
+	// 不影响既有流程；elicitation 为 unstable 能力，随 SDK 演进集中在此收敛）。
+	clientCaps := acpsdk.ClientCapabilities{
+		Elicitation: &acpsdk.ElicitationCapabilities{
+			Form: &acpsdk.ElicitationFormCapabilities{},
+			Url:  &acpsdk.ElicitationUrlCapabilities{},
+		},
+	}
 	initResp, err := conn.Initialize(dctx, acpsdk.InitializeRequest{
 		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
-		ClientCapabilities: acpsdk.ClientCapabilities{},
+		ClientCapabilities: clientCaps,
 		ClientInfo:         &impl,
 	})
 	if err != nil {

@@ -6,11 +6,21 @@ import {
   listRuntimes,
   listSessions,
   promptSession,
+  resolveElicitation,
   resolvePermission,
   toErrorMessage,
   updateSession,
 } from '@ark/api'
-import type { Agent, BusEvent, PermissionOption, Runtime, SessionSummary, StreamEntry, WsServerFrame } from '@ark/types'
+import type {
+  Agent,
+  BusEvent,
+  ElicitationFormSchema,
+  PermissionOption,
+  Runtime,
+  SessionSummary,
+  StreamEntry,
+  WsServerFrame,
+} from '@ark/types'
 import { Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
 
@@ -56,12 +66,14 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     return push(kind, text_)
   }
 
-  // 终态/取消收敛：把未决权限卡标记为已结束（不再显示待决按钮）。
-  // 覆盖「会话被取消/结束但仍挂着权限卡」的边缘（如超时后端已拒、agent 继续产生末尾终态）。
-  const settlePerms = (list: StreamEntry[], label: string): StreamEntry[] =>
-    list.map((en): StreamEntry =>
-      en.kind === 'permission' && !en.resolved ? { ...en, resolved: true, decision: label } : en,
-    )
+  // 终态/取消收敛：把未决的交互卡（权限/结构化提问）标记为已结束（不再显示待决按钮）。
+  // 覆盖「会话被取消/结束但仍挂着卡」的边缘（如超时后端已收敛、agent 继续产生末尾终态）。
+  const settleCards = (list: StreamEntry[], label: string): StreamEntry[] =>
+    list.map((en): StreamEntry => {
+      if (en.resolved) return en
+      if (en.kind === 'permission' || en.kind === 'elicitation') return { ...en, resolved: true, decision: label }
+      return en
+    })
 
   // 文本段归并：带 msg_id（ACP unstable messageId）时并入同 kind、同 msgId 的既有段
   // （允许跨工具穿插，决策 v5①）；无 msg_id 回退「同 kind 尾拼接」（老行为）。
@@ -112,7 +124,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.TurnEnded:
       return {
         ...v,
-        entries: settlePerms(
+        entries: settleCards(
           push('system', undefined, {
             tone: 'ok',
             text: `完成 · ${String(e.payload?.stop_reason ?? '')}`.replace(/ · $/, ''),
@@ -125,7 +137,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.TurnError:
       return {
         ...v,
-        entries: settlePerms(
+        entries: settleCards(
           push('system', undefined, {
             tone: 'err',
             text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
@@ -140,7 +152,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     case Ev.RunCancelled:
       return {
         ...v,
-        entries: settlePerms(push('system', undefined, { tone: 'cancel', text: '已取消' }), '已取消'),
+        entries: settleCards(push('system', undefined, { tone: 'cancel', text: '已取消' }), '已取消'),
         streaming: false,
         lastSeq,
       }
@@ -158,6 +170,29 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       return {
         ...v,
         entries: push('permission', undefined, { callId, title, optionKinds, toolKind, toolCallId, resolved: false, timeoutAt }),
+        lastSeq,
+      }
+    }
+    case Ev.ElicitationRequest: {
+      // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
+      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
+      const elicitationId = String(e.payload?.elicitation_id ?? '')
+      const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
+      const message = String(e.payload?.message ?? '')
+      const timeoutAt = e.payload?.timeout_at != null ? String(e.payload.timeout_at) : undefined
+      const schema = (e.payload?.schema as ElicitationFormSchema | undefined) ?? undefined
+      const url = e.payload?.url != null ? String(e.payload.url) : undefined
+      return {
+        ...v,
+        entries: push('elicitation', undefined, {
+          elicitationId,
+          mode,
+          message,
+          schema,
+          url,
+          resolved: false,
+          timeoutAt,
+        }),
         lastSeq,
       }
     }
@@ -193,6 +228,12 @@ export interface PermissionDecision {
   label: string
 }
 
+export interface ElicitationDecision {
+  action: 'accept' | 'decline' | 'cancel'
+  content?: Record<string, unknown>
+  label: string
+}
+
 export interface ForgeActions {
   boot: () => void
   refreshAgents: () => Promise<void>
@@ -204,6 +245,8 @@ export interface ForgeActions {
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
   expirePermission: (callId: string) => void
+  respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
+  expireElicitation: (elicitationId: string) => void
   renameSession: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
   archiveSession: (id: string, archived: boolean) => Promise<void>
@@ -444,6 +487,47 @@ export const useForge = create<ForgeStore>((set, get) => {
         const entries = view.entries.map((en): StreamEntry =>
           en.kind === 'permission' && en.callId === callId && !en.resolved
             ? { ...en, resolved: true, decision: '超时自动拒绝' }
+            : en,
+        )
+        return { views: { ...s.views, [id]: { ...view, entries } } }
+      })
+    },
+
+    respondElicitation: async (elicitationId, decision) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        await resolveElicitation(id, {
+          elicitation_id: elicitationId,
+          action: decision.action,
+          content: decision.content,
+        })
+        // 本地就地标记该提问卡已决策（按钮禁用 + 展示结果），agent 随后经 WS 续流。
+        set((s) => {
+          const view = s.views[id]
+          if (!view) return {}
+          const entries = view.entries.map((en): StreamEntry =>
+            en.kind === 'elicitation' && en.elicitationId === elicitationId
+              ? { ...en, resolved: true, decision: decision.label, content: decision.content }
+              : en,
+          )
+          return { views: { ...s.views, [id]: { ...view, entries } } }
+        })
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    expireElicitation: (elicitationId) => {
+      // 服务端超时自动取消（无用户决策）→ 前端把对应卡片就地标记为已收敛，不发 API。
+      const id = get().activeId
+      if (!id) return
+      set((s) => {
+        const view = s.views[id]
+        if (!view) return {}
+        const entries = view.entries.map((en): StreamEntry =>
+          en.kind === 'elicitation' && en.elicitationId === elicitationId && !en.resolved
+            ? { ...en, resolved: true, decision: '超时自动取消' }
             : en,
         )
         return { views: { ...s.views, [id]: { ...view, entries } } }

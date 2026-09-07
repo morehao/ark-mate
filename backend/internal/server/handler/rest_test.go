@@ -51,6 +51,12 @@ type stubSvc struct {
 	revokeTitle string
 	revokeKind  string
 	revokeErr   error
+
+	elicitations        []handler.ElicitationResp
+	resolvedElicID      string
+	resolvedElicAction  string
+	resolvedElicContent map[string]any
+	resolveElicErr      error
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -104,6 +110,15 @@ func (s *stubSvc) RevokeAlways(_ context.Context, id, title, kind string) error 
 	s.revokeTitle = title
 	s.revokeKind = kind
 	return s.revokeErr
+}
+func (s *stubSvc) ListPendingElicitations(_ context.Context, id string) ([]handler.ElicitationResp, error) {
+	return s.elicitations, nil
+}
+func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error {
+	s.resolvedElicID = elicitationID
+	s.resolvedElicAction = action
+	s.resolvedElicContent = content
+	return s.resolveElicErr
 }
 func (s *stubSvc) CreateSession(_ context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
 	s.createCalled = true
@@ -174,6 +189,8 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.POST("/sessions/:id/permission", h.Session.ResolvePermission)
 	g.GET("/sessions/:id/permissions/always", h.Session.AlwaysAllowed)
 	g.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeAlways)
+	g.GET("/sessions/:id/elicitations", h.Session.Elicitations)
+	g.POST("/sessions/:id/elicitation", h.Session.ResolveElicitation)
 	g.GET("/runtimes", h.Runtime.List)
 	return r
 }
@@ -425,5 +442,51 @@ func TestRevokeAlways(t *testing.T) {
 	}
 	if svc.revokeTitle != "" || svc.revokeKind != "" {
 		t.Fatalf("一键撤销应传空 title/kind: %+v", svc)
+	}
+}
+
+// TestElicitationList GET /sessions/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
+func TestElicitationList(t *testing.T) {
+	svc := &stubSvc{elicitations: []handler.ElicitationResp{{
+		ElicitationID: "el-abc", SessionID: "s1", Mode: "form",
+		Message: "请选择一个环境", TimeoutAt: "2026-01-02T03:04:05Z",
+		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
+	}}}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/elicitations", "")
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	var out []handler.ElicitationResp
+	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].ElicitationID != "el-abc" || out[0].Mode != "form" {
+		t.Fatalf("elicitations data 不符: %s", env.Data)
+	}
+}
+
+// TestResolveElicitation POST /sessions/:id/elicitation 决策透传（accept + content）。
+func TestResolveElicitation(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/elicitation",
+		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
+	if env.Code != 0 {
+		t.Fatalf("信封不符: %+v", env)
+	}
+	if svc.resolvedElicID != "el-abc" || svc.resolvedElicAction != "accept" || svc.resolvedElicContent["env"] != "prod" {
+		t.Fatalf("决策透传不符: %+v", svc)
+	}
+}
+
+// TestResolveElicitationBadBody 缺 elicitation_id/action → code 40000。
+func TestResolveElicitationBadBody(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/elicitation", `{"action":"accept"}`)
+	if env.Code != 40000 {
+		t.Fatalf("缺 elicitation_id 应 40000: %+v", env)
+	}
+	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/elicitation", `{"elicitation_id":"el-abc"}`)
+	if env.Code != 40000 {
+		t.Fatalf("缺 action 应 40000: %+v", env)
 	}
 }

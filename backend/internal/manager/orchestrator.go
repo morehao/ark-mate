@@ -68,10 +68,17 @@ type Orchestrator struct {
 	mu       sync.Mutex
 	conns    map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
 	sessions map[string]*ActiveSession
+	// busyConn 记录每连接上正在执行 turn 的会话（Prompt 开始 mark、runTurn 收尾 unmark）。
+	// 用途：SDK v0.13.5 未建模 elicitation 的 scope 字段，宿主读不到顶层 sessionId；
+	// 过渡期用「该连接上唯一在途 turn」推断 elicitation 的会话归属（见 §1.5 决策修订）。
+	// 多会话并发在途时归属不唯一 → 不猜测，按取消回应。
+	busyConn map[*acl.Client]map[string]struct{}
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
 	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
 	perm *PermissionManager
+	// elic 管理挂起结构化提问（elicitation/create：表单/URL + 超时自动取消）。
+	elic *ElicitationManager
 
 	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
@@ -108,7 +115,9 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		reg:      reg,
 		conns:    make(map[string]*runtimeConn),
 		sessions: make(map[string]*ActiveSession),
+		busyConn: make(map[*acl.Client]map[string]struct{}),
 		perm:     NewPermissionManager(DefaultPermissionTimeout),
+		elic:     NewElicitationManager(DefaultElicitationTimeout),
 		logger:   slog.Default(),
 	}
 	svc.attachOrchestrator(o)
@@ -120,6 +129,9 @@ func (o *Orchestrator) SetAllowAll(v bool) { o.allowAll = v }
 
 // SetPermissionTimeout 覆盖挂起权限请求的自动拒绝超时（0 → 默认 30min）。
 func (o *Orchestrator) SetPermissionTimeout(d time.Duration) { o.perm.SetTimeout(d) }
+
+// SetElicitationTimeout 覆盖挂起结构化提问的自动取消超时（0 → 默认 30min）。
+func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeout(d) }
 
 // SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
 func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
@@ -188,7 +200,9 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 	t := &Turn{done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.turn = t
 	as.busy = true
+	client := as.client
 	as.mu.Unlock()
+	o.markBusy(client, as.ID)
 
 	o.svc.markSession(as.ID, SessionStatusInProgress)
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
@@ -228,7 +242,9 @@ func (o *Orchestrator) runTurn(as *ActiveSession, t *Turn, text string) {
 	}
 	as.busy = false
 	as.turn = nil
+	client := as.client
 	as.mu.Unlock()
+	o.unmarkBusy(client, as.ID)
 	t.stop = stop
 	t.err = err
 
@@ -293,6 +309,7 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
 	}
 	t.cancel()                      // 解除 SDK 阻塞
 	o.perm.CancelSession(sessionID) // session/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
+	o.elic.CancelSession(sessionID) // 挂起的结构化提问一并按取消回馈
 	return nil
 }
 
@@ -373,15 +390,33 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		}
 		return o.requestPermission(ctx, req)
 	}
+	var cli *acl.Client // Dial 成功后回填；hook 都在连接读循环里被调用，晚于 Dial 返回
+	reqElic := func(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
+		if o.allowAll {
+			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
+			return acl.ElicitationOutcome{Action: "accept"}
+		}
+		sid := o.busySessionForClient(cli)
+		if sid == "" {
+			// SDK 未建模 elicitation scope → 无法读顶层 sessionId；连接上无唯一在途 turn
+			// （空闲 / 会话外 request-scope / 多会话并发）时不做猜测，按取消回应。
+			o.logger.Warn("elicitation: 连接上无唯一在途 turn，无法归属会话，按取消处理")
+			return acl.ElicitationOutcome{Action: "cancel"}
+		}
+		req.SessionID = sid
+		return o.requestElicitation(ctx, req)
+	}
 	client, err := acl.Dial(ctx, t, acl.ClientOptions{
 		OnEvent:           o.eventSink(agent.ID, spec.ID),
 		Logger:            logger,
 		RequestPermission: reqPerm,
+		CreateElicitation: reqElic,
 	})
 	if err != nil {
 		_ = t.Close()
 		return nil, err
 	}
+	cli = client
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
 	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec}
@@ -390,6 +425,55 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	o.mu.Unlock()
 	go o.watchConn(rc)
 	return rc, nil
+}
+
+// markBusy / unmarkBusy 维护 busyConn：会话进入 turn 时登记、收尾时撤销。
+// client 为 nil（理论上不应出现）或未登记时均安全 no-op。
+func (o *Orchestrator) markBusy(client *acl.Client, sessionID string) {
+	if client == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	set := o.busyConn[client]
+	if set == nil {
+		set = make(map[string]struct{})
+		o.busyConn[client] = set
+	}
+	set[sessionID] = struct{}{}
+}
+
+func (o *Orchestrator) unmarkBusy(client *acl.Client, sessionID string) {
+	if client == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	set := o.busyConn[client]
+	if set == nil {
+		return
+	}
+	delete(set, sessionID)
+	if len(set) == 0 {
+		delete(o.busyConn, client)
+	}
+}
+
+// busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
+func (o *Orchestrator) busySessionForClient(client *acl.Client) string {
+	if client == nil {
+		return ""
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	set := o.busyConn[client]
+	if len(set) != 1 {
+		return ""
+	}
+	for sid := range set {
+		return sid
+	}
+	return ""
 }
 
 // watchConn 监听连接断开：清理注册、失活其上会话、标记 agent stopped。
@@ -403,6 +487,7 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	if o.conns[rc.spec.ID] == rc {
 		delete(o.conns, rc.spec.ID)
 	}
+	delete(o.busyConn, rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已删键为 no-op）
 	var victims []*ActiveSession
 	for _, as := range o.sessions {
 		if as.client == rc.client {
@@ -593,6 +678,67 @@ func (o *Orchestrator) RevokeAlways(sessionID, title, kind string) (bool, error)
 		return false, acl.NewError(acl.ClassRequest, "always_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
 	}
 	return o.perm.RevokeAlways(sessionID, title, kind), nil
+}
+
+// requestElicitation 处理一次 ACP 结构化提问请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
+//   - 发布 session.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
+//     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
+//
+// 事件发布（publish）注入给 ElicitationManager，避免 manager 依赖 bus。
+func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
+	publish := func(it ElicitationItem) {
+		payload := map[string]any{
+			"session_id":     it.SessionID,
+			"elicitation_id": it.ID,
+			"mode":           it.Mode,
+			"message":        it.Message,
+			"timeout_at":     it.TimeoutAt.UTC().Format(time.RFC3339),
+		}
+		if it.Mode == "form" {
+			payload["schema"] = it.Schema
+		} else {
+			payload["url"] = it.URL
+		}
+		o.svc.publish(BusElicitationRequest, it.SessionID, payload)
+	}
+	return o.elic.RegisterAndWait(ctx, req.SessionID, req, publish)
+}
+
+// PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
+func (o *Orchestrator) PendingElicitations(sessionID string) []ElicitationItem {
+	ps := o.elic.pendingForSession(sessionID)
+	out := make([]ElicitationItem, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, ElicitationItem{
+			ID:        p.id,
+			SessionID: p.sessionID,
+			Mode:      p.mode,
+			Message:   p.message,
+			Schema:    p.schema,
+			URL:       p.url,
+			TimeoutAt: p.timeout,
+		})
+	}
+	return out
+}
+
+// ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
+func (o *Orchestrator) ResolveElicitation(elicitationID, action string, content map[string]any) (bool, error) {
+	if elicitationID == "" {
+		return false, acl.NewError(acl.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
+	}
+	var ok bool
+	switch action {
+	case "accept":
+		ok = o.elic.ResolveAccept(elicitationID, content)
+	case "decline":
+		ok = o.elic.ResolveDecline(elicitationID)
+	case "cancel":
+		ok = o.elic.ResolveCancel(elicitationID)
+	default:
+		return false, acl.NewError(acl.ClassRequest, "elicitation_action", "action 需为 accept/decline/cancel 之一", nil)
+	}
+	return ok, nil
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error。

@@ -22,6 +22,9 @@ const (
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"
+	// BusElicitationRequest 结构化提问请求（elicitation/create 挂起态：payload = 表单 schema /
+	// URL + message + id；前端据此渲染提问卡，用户提交/放弃经 POST /sessions/:id/elicitation 回传）。
+	BusElicitationRequest = "session.elicitation_request"
 	// BusRuntime 会话/runtime 连接态事件（phase/pending_confirmations/can_send；M2「会话态与
 	// runtime 态分离」起发布，M1 预留——payload 契约见设计文档 §4.5）。
 	BusRuntime = "session.runtime"

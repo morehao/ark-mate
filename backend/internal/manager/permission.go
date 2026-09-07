@@ -188,7 +188,11 @@ func (m *PermissionManager) CancelSession(sessionID string) {
 	}
 	m.mu.Unlock()
 	for _, p := range victims {
-		m.resolve(p.callID, acl.PermissionDecision{}) // 拒绝/取消
+		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 call_id 的 resolve）。
+		select {
+		case p.ch <- acl.PermissionDecision{}: // 拒绝/取消
+		default:
+		}
 	}
 }
 
