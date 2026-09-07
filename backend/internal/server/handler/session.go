@@ -3,13 +3,14 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
-// SessionHandler 处理会话相关 REST 请求（列表 + create/prompt/cancel/history + 元数据 + 权限）。
+// SessionHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
 type SessionHandler struct {
 	svc Service
 }
@@ -23,6 +24,27 @@ func (h *SessionHandler) List(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, sessions)
+}
+
+// Search 搜索会话（query `q` 必填；`limit` 默认 30 上限 50；含归档；updated 降序）。
+func (h *SessionHandler) Search(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: q 必填"})
+		return
+	}
+	limit := 30
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+	hits, err := h.svc.SearchSessions(c.Request.Context(), q, limit)
+	if err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		return
+	}
+	gincontext.Success(c, hits)
 }
 
 // Get 返回单会话详情（元数据 + 挂起权限）。

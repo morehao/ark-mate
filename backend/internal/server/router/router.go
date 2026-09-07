@@ -27,6 +27,7 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.GET("/health", health)
 	v1.GET("/agents", h.Agent.List)
 	v1.GET("/sessions", h.Session.List)
+	v1.GET("/sessions/search", h.Session.Search)
 	v1.POST("/sessions", h.Session.Create)
 	v1.GET("/sessions/:id", h.Session.Get)
 	v1.PATCH("/sessions/:id", h.Session.Update)

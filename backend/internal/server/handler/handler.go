@@ -15,6 +15,8 @@ type Service interface {
 	ListRuntimes() ([]RuntimeResp, error)
 	// ListSessions 返回会话概要（可按 archived 过滤）。
 	ListSessions(archived bool) ([]SessionResp, error)
+	// SearchSessions 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
+	SearchSessions(ctx context.Context, q string, limit int) ([]SessionSearchHit, error)
 	// GetSession 返回单会话详情（含元数据 + 挂起权限）。
 	GetSession(ctx context.Context, id string) (*SessionDetailResp, error)
 	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
@@ -69,6 +71,13 @@ type SessionResp struct {
 	Archived  bool   `json:"archived"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+// SessionSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
+type SessionSearchHit struct {
+	SessionResp
+	Snippet string `json:"snippet"`
+	Matches int    `json:"matches"`
 }
 
 // SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。

@@ -14,6 +14,7 @@ import type {
   Runtime,
   SessionDetail,
   SessionPatch,
+  SessionSearchHit,
   SessionSummary,
 } from '@ark/types'
 
@@ -26,6 +27,12 @@ export const listRuntimes = (): Promise<Runtime[]> => http.get<Runtime[]>('/forg
 /** 列出未归档会话（`archived=true` 列出已归档）。 */
 export const listSessions = (archived = false): Promise<SessionSummary[]> =>
   http.get<SessionSummary[]>(`/forge/sessions${archived ? '?archived=true' : ''}`)
+
+/** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
+export const sessionSearch = (q: string, limit = 30): Promise<SessionSearchHit[]> => {
+  const s = new URLSearchParams({ q, limit: String(limit) })
+  return http.get<SessionSearchHit[]>(`/forge/sessions/search?${s.toString()}`)
+}
 
 /** 单会话详情（元数据 + 挂起权限）。 */
 export const getSession = (id: string): Promise<SessionDetail> =>

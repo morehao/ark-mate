@@ -12,6 +12,12 @@ export interface SessionSummary {
   updated_at: string
 }
 
+/** 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中；含归档）。 */
+export interface SessionSearchHit extends SessionSummary {
+  snippet: string
+  matches: number
+}
+
 export interface SessionDetail extends SessionSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   always_allowed?: AlwaysAllowItem[] // 会话级「始终允许」记忆（allow_always 已授）
