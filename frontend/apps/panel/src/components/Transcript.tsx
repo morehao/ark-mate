@@ -6,6 +6,7 @@ import type { PermissionOption, StreamEntry } from '@ark/types'
 import { useForge, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { parseMsg } from '../console/message'
+import { Md } from './Md'
 
 const roleLabel: CSSProperties = {
   fontFamily: tokens.fontMono,
@@ -270,16 +271,13 @@ function CodeBlock({ lang, text }: { lang?: string; text: string }) {
 /** 消息富文本：普通文本按 pre-wrap 原样呈现，``` 围栏段渲染为可复制/折叠的代码块。 */
 function RichText({ text }: { text: string }) {
   const parts = parseMsg(text)
-  if (parts.length === 1 && parts[0].kind === 'text') return <>{parts[0].text}</>
   return (
     <>
       {parts.map((p, i) =>
         p.kind === 'code' ? (
           <CodeBlock key={i} lang={p.lang} text={p.text} />
         ) : (
-          <span key={i} style={{ whiteSpace: 'pre-wrap' }}>
-            {p.text}
-          </span>
+          <Md key={i} text={p.text} />
         ),
       )}
     </>
