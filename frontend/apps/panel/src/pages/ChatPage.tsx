@@ -4,6 +4,8 @@ import { Button } from 'antd'
 import { InfoCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
+import { Ev } from '@ark/types'
+import { sessionHistory } from '@ark/api'
 import { useForge } from '../store'
 import { SessionRail } from '../components/SessionRail'
 import { SessionDetailDrawer } from '../components/SessionDetail'
@@ -31,6 +33,8 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
   const [detailOpen, setDetailOpen] = useState(false)
+  // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
+  const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
 
   // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
   useEffect(() => {
@@ -63,10 +67,12 @@ export function ChatPage() {
   const agent = agentOf(agents, activeSum?.agent_id)
   const title = activeId ? titleFor(activeSum, view, agents) : ''
   // 失败 turn 一键重试：仅当最新一条为 turn.error（无流/非 busy）时，取其所属轮的用户输入重发。
+  // 视图可能是服务端快照的部分重放（该轮 user 气泡不在本地条目里），此时回退到历史事件取输入。
   const entries = view?.entries ?? []
   const lastEntry = entries[entries.length - 1]
-  const retryLastText = (() => {
-    if (busy || !lastEntry || lastEntry.kind !== 'system' || lastEntry.tone !== 'err') return null
+  const hasErrTail = !!(!busy && lastEntry && lastEntry.kind === 'system' && lastEntry.tone === 'err')
+  const retryLocalText = (() => {
+    if (!hasErrTail) return null
     for (let i = entries.length - 1; i >= 0; i--) {
       const en = entries[i]
       if (en === lastEntry) continue
@@ -75,7 +81,30 @@ export function ChatPage() {
     }
     return null
   })()
-  const retryLast = retryLastText ? () => void sendPrompt(retryLastText as string) : undefined
+  const errFallbackText = activeId ? errFallback[activeId] : undefined
+  const retryText = hasErrTail ? retryLocalText ?? (errFallbackText || undefined) : undefined
+  const retryLast = retryText ? () => void sendPrompt(retryText) : undefined
+
+  // 本地无该轮输入（部分重放/冷挂载后直接失败）时，从历史取最后一条 user_message 作为重试文本。
+  useEffect(() => {
+    const id = activeId
+    if (!id || !hasErrTail || retryLocalText !== null || errFallback[id] !== undefined) return
+    let dead = false
+    void (async () => {
+      let txt = ''
+      try {
+        const page = await sessionHistory(id, { limit: 30 })
+        const last = [...page.events].reverse().find((ev) => ev.type === Ev.UserMessage)
+        if (last && typeof last.payload?.text === 'string') txt = last.payload.text
+      } catch {
+        txt = ''
+      }
+      if (!dead) setErrFallback((p) => (p[id] !== undefined ? p : { ...p, [id]: txt }))
+    })()
+    return () => {
+      dead = true
+    }
+  }, [activeId, hasErrTail, retryLocalText, errFallback])
   // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
   useEffect(() => {
     const el = scrollRef.current
