@@ -17,7 +17,7 @@ colors:
   border-hairline: "#e6e9ef"
   border-strong: "#d3d8e0"
   text-primary: "#1f2430"
-  text-secondary: "#64748d"
+  text-secondary: "#56637a"
   text-placeholder: "#94a3b8"
   semantic-success: "#22c55e"
   semantic-warning: "#f59e0b"
