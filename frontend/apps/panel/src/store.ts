@@ -182,6 +182,8 @@ export interface ForgeState {
   wsState: WsState
   toast: Toast | null
   drawerOpen: boolean
+  /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
+  railMode: 'active' | 'archived'
 }
 
 export interface PermissionDecision {
@@ -204,6 +206,8 @@ export interface ForgeActions {
   expirePermission: (callId: string) => void
   renameSession: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
+  archiveSession: (id: string, archived: boolean) => Promise<void>
+  setRailMode: (mode: 'active' | 'archived') => void
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
@@ -223,6 +227,7 @@ export const initialState: ForgeState = {
   wsState: 'idle',
   toast: null,
   drawerOpen: false,
+  railMode: 'active',
 }
 
 let toastSeq = 0
@@ -308,7 +313,8 @@ export const useForge = create<ForgeStore>((set, get) => {
     },
     refreshSessions: async () => {
       try {
-        set({ sessions: await listSessions() })
+        // 按侧栏当前视图拉取：active=未归档；archived=已归档。
+        set({ sessions: await listSessions(get().railMode === 'archived') })
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -358,6 +364,8 @@ export const useForge = create<ForgeStore>((set, get) => {
           },
         }))
         get().activate(resp.id, resp.event_seq)
+        // 新建后回「会话」视图并刷新列表（避免停在归档视图看不到新会话）。
+        if (get().railMode !== 'active') set({ railMode: 'active' })
         void get().refreshSessions()
         return resp.id
       } catch (err) {
@@ -460,6 +468,22 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
       }
+    },
+
+    archiveSession: async (id, archived) => {
+      // 归档/恢复（软归档：archived 为真即从「会话」移入「归档」视图，数据不删）。
+      try {
+        await updateSession(id, { archived })
+        void get().refreshSessions()
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    setRailMode: (mode) => {
+      if (get().railMode === mode) return
+      set({ railMode: mode })
+      void get().refreshSessions()
     },
   }
 })
