@@ -696,8 +696,12 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
 - **echo**：未声明 `sessionCapabilities.resume` → `acl.ResumeSession` 在**能力门被拒**
   （`resume_session_unsupported`，wire 前，不会发到 agent）——实测守卫单测锁定
   （注：echo agent 有 ResumeSession handler 但无能力声明，能力门先行）。
-- **opencode / dsh**：未实证（需 ACP 握手能力断言 + 跨进程恢复探测；forge P0 明确不做进程
-  重启断点恢复，见 ADR-4 P3）→ 投影 `Resume` 保持 `unsupported_resume`。
+- **opencode / dsh**：已实测（2026-09-08 握手能力断言，forge serve INFO 日志，无模型 turn）：
+  opencode `sessions_persistent/multi_session_concurrent/load_session/resume/list/fork/close` 全
+  true；dsh `sessions_persistent/multi_session_concurrent/resume/list/close` true、
+  `load_session=false`、`fork=false`。→ 两底座 **resume 握手级支持**（`acl.Client.ResumeSession`
+  能力门通过），剩余为 forge 侧恢复流程接入（重建投影）——投影 `Resume` 仍按单会话投影语义
+  不支持隐式热切换，接入随 §5.6 后续推进；forge P0 仍不做进程重启断点恢复（ADR-4 P3）。
 - 结论：三投影「不支持面」明确；与 §5.6 原生 resume 蓝图的对齐点 = `acl.Client.ResumeSession`
   能力门（已实现，按 caps 门控）+ 重建投影；backend-wide 多会话重构时按底座探测接入。
 
@@ -779,5 +783,7 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
 一致、并发语义经实测）。**开放项（未实证/待演进，非本次范围）**：
 1. elicitation 归属在「多会话并发在途」下仍需 SDK scope 建模（v0.13.5 缺失）→ 维持不猜测；
 2. Resume 按底座实测接入（echo 已明确不支持；dsh 连接模型同构，E2 后可按需复测）；
-3. dsh 共享连接多会话并发行为未实测（opencode 已实测；dsh 结构同构，风险低，按需补测）；
+3. ~~dsh 共享连接多会话并发行为未实测~~（已实测 2026-09-08：握手声明
+   `multi_session_concurrent=true` + 真进程两会话重叠各自 usage/turn.ended 无错误 →
+   与 opencode 同为方案 B 可行；观测日志：serve INFO「runtime 握手能力」）；
 4. 会话 provider_session_id 持久化与断点恢复属 P0 之外（ADR-4 P3），不在本重构范围。

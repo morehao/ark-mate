@@ -511,9 +511,10 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	cli = client
 	// §16.6/§17.4 开放项实测：握手能力断言留档日志（观测用，无行为变化）——
 	// 底座调研/诊断依赖（sessionCapabilities resume/list/fork/close、loadSession 声明）。
+	// INFO 级：每 runtime 连接仅一次，serve 默认级别可见。
 	caps := client.Capabilities()
 	sc := caps.Raw.SessionCapabilities
-	o.logger.Debug("runtime 握手能力",
+	o.logger.Info("runtime 握手能力",
 		"runtime", spec.ID,
 		"sessions_persistent", caps.SessionsPersistent,
 		"multi_session_concurrent", caps.MultiSessionConcurrent,
