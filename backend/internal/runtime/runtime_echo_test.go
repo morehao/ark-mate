@@ -186,3 +186,30 @@ func TestThreeProjectionConstructors(t *testing.T) {
 		}
 	}
 }
+
+// TestNewProjectionDispatcher 分发器（Orchestrator 采用接缝）：三投影按 Spec.ID 路由、
+// 未知 id 返回 nil；构造不触碰会话（nil sess 亦返回非 nil 实例，方法调用方负责非 nil）。
+func TestNewProjectionDispatcher(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{"echo", true},
+		{"opencode", true},
+		{"deepseekharness", true},
+		{"unknown-rt", false},
+	} {
+		spec := Spec{ID: tc.id}
+		rt := NewProjection(spec, nil)
+		if tc.want {
+			if rt == nil || rt.ID() != tc.id {
+				t.Fatalf("%s 应分发到投影（ID=%s），got %+v", tc.id, tc.id, rt)
+			}
+			if !rt.ManagesOwnContext() {
+				t.Fatalf("%s 投影应自管上下文", tc.id)
+			}
+		} else if rt != nil {
+			t.Fatalf("未知 runtime %q 应返回 nil，got %+v", tc.id, rt)
+		}
+	}
+}

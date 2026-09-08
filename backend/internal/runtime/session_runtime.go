@@ -94,3 +94,19 @@ func NewOpencodeRuntime(sess *acl.Session) *OpencodeRuntime {
 func NewDeepseekHarnessRuntime(sess *acl.Session) *DeepseekHarnessRuntime {
 	return newSessionRuntime(deepseekharnessSpec(), sess)
 }
+
+// NewProjection 依 Spec 分发到对应投影构造器（Orchestrator 采用 Runtime 的单一接缝，
+// design doc §16）。未知/未投影 runtime id 返回 nil（调用方保持原直连路径）。
+// sess 为 nil 时已知投影仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
+func NewProjection(spec Spec, sess *acl.Session) Runtime {
+	switch spec.ID {
+	case "echo":
+		return NewEchoRuntime(sess)
+	case "opencode":
+		return NewOpencodeRuntime(sess)
+	case "deepseekharness":
+		return NewDeepseekHarnessRuntime(sess)
+	default:
+		return nil
+	}
+}

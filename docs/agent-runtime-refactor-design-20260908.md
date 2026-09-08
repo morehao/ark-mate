@@ -634,3 +634,35 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - **P2 剩余（未含，留后续评审）**：Orchestrator 采用 Runtime 接口（会话模型重构评审点）、
   skill 物化接入（§5.4，opencode 目录已实证）、会话恢复 Resume 按底座实测。P2 验收三项
   （race 全绿 / echo 全链路 / opencode+dsh 冒烟）均已达成，见上。
+
+## 16. P2 后续：Orchestrator 采用 Runtime（会话模型重构方案）
+
+### 16.1 目标与边界
+
+P2 已把 `runtime` 升级为可执行投影（§4.2 会话边界版接口 + 三投影 + `runtime.Connect` 拨号底座）。
+本节让 **Orchestrator 正式采用 Runtime 接口**：会话生命周期内一切对底层 ACP 会话的操作经由投影
+表达。设计约束：**行为零变化**（投影方法目前等价直连会话：Prompt 透传、Capabilities/
+ProviderSessionID 同源）；采用的价值是给未来 backend-wide Runtime（多会话/恢复/模式）留出单一
+接缝，杜绝再往 orchestrator 里堆直连会话调用。
+
+### 16.2 采用接缝（切片落地）
+
+- `runtime.NewProjection(spec, sess) Runtime`：按 Spec.ID 分发到 echo/opencode/deepseekharness
+  投影；未知 runtime 返回 nil（orchestrator 保持直连回退）。
+- `ActiveConversation.proj runtime.Runtime`：`startConversationOn` 建会话后构造并持有；
+  `runTurn` 的 Prompt 走 `proj.Prompt(ctx, PromptRequest{Text})`；proj 为 nil（测试假会话/
+  未投影 runtime）回退 `sess.Prompt`——两路径语义一致。
+- Cancel 等无投影方法仍走底层会话；ApplyMode/ApplyModel/Resume 语义落平台（§15 实测结论）。
+
+### 16.3 遗留（后续评审点，非本节范围）
+
+- backend-wide Runtime（连接/会话多路复用）重构：需要「每 runtime 多会话」能力（现每 runtime
+  单连接）。opencode/dsh 的会话恢复承载按底座实测后接 Resume。
+- skill 物化接入（§5.4）：opencode 物化目录已实证（config `skills:` 源 / `~/.config/opencode/skills`）；
+  dsh 未实证 → 不臆造，按能力数据面降级。
+
+### 16.4 采用记录
+
+- **切片 A（2026-09-08）**：`NewProjection` 分发器 + `ActiveConversation.proj` +
+  `runTurn` 走接口（nil 回退直连）；分发器单测（三投影路由/未知 nil/构造不触碰会话）；
+  echo 全链路真进程冒烟回归验证行为零变化；`go vet` + `go test -race ./...` 全绿。

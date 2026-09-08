@@ -33,6 +33,9 @@ type ActiveConversation struct {
 
 	client *acl.Client
 	sess   acpSession
+	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
+	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
+	proj runtime.Runtime
 
 	mu      sync.Mutex
 	busy    bool
@@ -234,7 +237,8 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 		return nil, err
 	}
 
-	as := &ActiveConversation{ID: sess.ID(), AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess}
+	as := &ActiveConversation{ID: sess.ID(), AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
+		proj: runtime.NewProjection(spec, sess)}
 	o.mu.Lock()
 	o.conversations[as.ID] = as
 	o.mu.Unlock()
@@ -299,8 +303,18 @@ func (o *Orchestrator) watchdogTurn(as *ActiveConversation, conversationID strin
 }
 
 // runTurn 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 turn 终态）。
+// Prompt 走 ActiveConversation.proj（Runtime 接口；§16 采用），proj 为 nil（测试假会话/
+// 未投影 runtime）时回退底层会话直连——两路径语义一致。
 func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
-	stop, err := as.sess.Prompt(t.ctx, text)
+	var (
+		stop string
+		err  error
+	)
+	if as.proj != nil {
+		stop, err = as.proj.Prompt(t.ctx, runtime.PromptRequest{Text: text})
+	} else {
+		stop, err = as.sess.Prompt(t.ctx, text)
+	}
 
 	as.mu.Lock()
 	cancelled := t.cancelReq || (err == nil && strings.EqualFold(stop, "cancelled"))
