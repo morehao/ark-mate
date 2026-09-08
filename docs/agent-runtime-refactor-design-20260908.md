@@ -554,7 +554,8 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - Service `McpServersForRuntime(runtimeID)`：注册表全量 → 按该 runtime `McpTransports` 过滤 → `acl.McpServer`
   （headers/凭证随 wire 下发，不进 REST）；orchestrator `startConversationOn` 建会话时随 `session/new` 下发。
 - 验收状态：`go vet ./...` 通过、`go test -race ./...` 全绿；新增 acl 转换器单测 + manager 注入过滤单测
-  （echo 仅 stdio 取 1、opencode 取 3、未知 runtime 不下发、未声明传输保守 stdio）。
+  （echo 仅 stdio 取 1、opencode 取 3、未知 runtime 不下发、未声明传输保守 stdio）；另增 acl 真 stdio
+  往返集成断言（`TestMcpServersInjectionOverWire`：判别联合各子对象 + 有序 headers + 空列表保 `[]`）。
 - **冒烟 DoD（人工，需真实底座）**：`echo` 全链路新建会话无回归；置 `~/.forge/capabilities/mcp/fs.json`
   （stdio server）后 `opencode`/`dsh` 各起一轮，观察底座是否拉起注入的 MCP server。
 - **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影（§6.1 字段级），skill 物化（§5.4），
