@@ -823,6 +823,17 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
 
 #### 18.4 后端切片任务（每步独立提交 + 全绿 + echo 回归）
 
+- **F0 决策记录（2026-09-08）**：D-1 = 采纳平台 uuid 双 id（用户授权破坏性变更）——会话对外
+  id 改 `uuid.NewString()`，原生 provider id 存新列 `provider_session_id`；D-2 恢复承载 =
+  opencode LoadSession / dsh ResumeSession / echo memo 兜底；D-3 memo 预算 env 参数化（F3
+  落地时定默认值）。
+- **F1 双 id 持久化（2026-09-08，完成）**：schema v2 `ALTER TABLE conversations ADD
+  provider_session_id`；store/manager 全链路（Conversation/ConversationRec/upsert/restore）
+  贯通该列；建会话改用平台 uuid（REST/eventbus/transcript/权限记忆全部以 uuid 会话 id 键控，
+  对外不再泄露 `ses_*`/底座 id 形状）。**同切片修复**：底层事件/权限请求只携带原生 id →
+  新增 `byProvider`（原生→平台）映射于 eventSink/requestPermission 解析后再发布，dropConn
+  清理映射（迟到事件丢弃）；echo 全链路（含权限 round）在 uuid 会话下回归。端到端：sqlite
+  建会话 → conversations.id=uuid、provider_session_id=原生 echo id。vet + race 全绿。
 - **F0 决策与勘察**：D-1/D-2/D-3 结论写入本文档；细读 RestoreFromStore/会话列表语义定恢复
   触发面（首轮 prompt 前按需恢复 vs 启动批量恢复——推荐按需，冷启动开销小）。
 - **F1 持久化 provider_session_id**：schema 加列 + ConversationRec/register 路径传值（

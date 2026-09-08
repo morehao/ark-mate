@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/runtime"
 )
@@ -71,7 +72,11 @@ type Orchestrator struct {
 	mu            sync.Mutex
 	conns         map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
 	conversations map[string]*ActiveConversation
-	reapStop      context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
+	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
+	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此
+	// 解析为平台会话 id 再发布/键控；会话失活（dropConn）时随 victim 一并清除。
+	byProvider map[string]string
+	reapStop   context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
 	// inflight 记录每连接上正在执行 turn 的会话（inFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
@@ -119,6 +124,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		reg:           reg,
 		conns:         make(map[string]*runtimeConn),
 		conversations: make(map[string]*ActiveConversation),
+		byProvider:    make(map[string]string),
 		inflight:      newInFlightTracker(),
 		perm:          NewPermissionManager(DefaultPermissionTimeout),
 		elic:          NewElicitationManager(DefaultElicitationTimeout),
@@ -235,13 +241,18 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 		return nil, err
 	}
 
-	as := &ActiveConversation{ID: sess.ID(), AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
+	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台 uuid（隐藏底座 id 形状、
+	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
+	convID := uuid.NewString()
+	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
 		proj: runtime.NewProjection(spec, sess)}
 	o.mu.Lock()
 	o.conversations[as.ID] = as
+	o.byProvider[sess.ID()] = as.ID
 	o.mu.Unlock()
 
-	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, RuntimeHint: spec.ID, Status: ConversationStatusInProgress})
+	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, RuntimeHint: spec.ID,
+		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
@@ -548,6 +559,25 @@ func (o *Orchestrator) busyConversationForClient(client *acl.Client) string {
 	return o.inflight.SoleOwner(client)
 }
 
+// resolveProvider 把原生 provider session id 解析为平台会话 uuid（P3 双 id）。
+// 底层回调（事件/权限请求）只携带原生 id；未登记（如断连后迟到事件）返回空串。
+func (o *Orchestrator) resolveProvider(providerID string) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.byProvider[providerID]
+}
+
+// unregisterConversationProvider 移除某会话的原生→平台映射（连接失活/会话清理时调用）。
+func (o *Orchestrator) unregisterConversationProvider(conversationID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for k, v := range o.byProvider {
+		if v == conversationID {
+			delete(o.byProvider, k)
+		}
+	}
+}
+
 // watchConn 监听连接断开：清理注册、失活其上会话、标记 agent stopped。
 func (o *Orchestrator) watchConn(rc *runtimeConn) {
 	<-rc.client.Done()
@@ -568,6 +598,9 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		}
 	}
 	o.mu.Unlock()
+	for _, as := range victims {
+		o.unregisterConversationProvider(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
+	}
 	for _, as := range victims {
 		o.disconnectConversation(as)
 	}
@@ -610,12 +643,20 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation) {
 	}
 }
 
-// eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = conversation id）。
+// eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
 func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 	return func(ev acl.Event) {
 		if ev.SessionID == "" {
 			return
 		}
+		// P3 双 id：底层事件只携带原生 session id，host 侧解析为平台会话 uuid 再发布；
+		// 断连后迟到事件（映射已清）不再落入孤儿聚合，丢弃并留 debug。
+		cid := o.resolveProvider(ev.SessionID)
+		if cid == "" {
+			o.logger.Debug("event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
+			return
+		}
+		ev.SessionID = cid
 		typ := ""
 		var payload any
 		switch ev.Kind {
@@ -689,7 +730,12 @@ func toolPayload(conversationID, agentID string, d acl.ToolCallInfo) map[string]
 //
 // 事件发布（publish）注入的给 PermissionManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
-	sid := req.SessionID // 断点恢复别名归一（记忆/挂起/事件均以外部会话 id 为键）
+	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
+	// 均以平台会话 id 为键，与 conversations/events/permission_memories 一致）。
+	sid := o.resolveProvider(req.SessionID)
+	if sid == "" {
+		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
+	}
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
 	}

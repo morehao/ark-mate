@@ -67,9 +67,13 @@ func TestRestErrMapping(t *testing.T) {
 	}
 }
 
-// TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=conversation id）。
+// TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
+// P3 双 id：原生 session id 经 byProvider 解析后发布）。
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
+	orch.mu.Lock()
+	orch.byProvider["s1"] = "conv-1" // 原生 echo/opencode session id → 平台会话 uuid
+	orch.mu.Unlock()
 	sink := orch.eventSink("agent-opencode", "opencode")
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
@@ -105,7 +109,7 @@ func TestEventSinkMapping(t *testing.T) {
 		if types[i] != want[i] {
 			t.Fatalf("type 序列不符: %v", types)
 		}
-		if evs[i].AggregID != "s1" {
+		if evs[i].AggregID != "conv-1" {
 			t.Fatalf("agg 不符: %+v", evs[i])
 		}
 	}

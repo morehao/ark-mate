@@ -85,13 +85,16 @@ type Conversation struct {
 	AgentID     string
 	Cwd         string
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份，用户不可见）
-	Title       string
-	Pinned      bool
-	Archived    bool
-	Status      string
-	LastSeq     int64 // 该会话已落库事件的最后 seq（events.seq 全局单调）
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid/echo id）。P3 双 id：
+	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
+	ProviderSessionID string
+	Title             string
+	Pinned            bool
+	Archived          bool
+	Status            string
+	LastSeq           int64 // 该会话已落库事件的最后 seq（events.seq 全局单调）
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Event 是 events 表的一行（facts 的唯一事实源）。

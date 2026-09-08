@@ -127,12 +127,15 @@ type ConversationRec struct {
 	AgentID     string
 	Cwd         string // 会话工作目录（绝对路径；仅 sqlite 持久化）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
-	Status      string
-	Title       string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned      bool   // 置顶（侧栏/管理面用）
-	Archived    bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
+	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
+	ProviderSessionID string
+	Status            string
+	Title             string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
+	Pinned            bool   // 置顶（侧栏/管理面用）
+	Archived          bool   // 归档（软删除；会话列表默认不展示）
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
@@ -537,7 +540,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	for _, sess := range list {
 		rec := &ConversationRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, RuntimeHint: sess.RuntimeHint,
-			Title: sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
+			ProviderSessionID: sess.ProviderSessionID,
+			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, CreatedAt: sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
 		s.registerConversation(rec) // restoring=true → 不重复回写 DB
@@ -594,16 +598,17 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := s.st.UpsertConversation(ctx, store.Conversation{
-		ID:          rec.ID,
-		AgentID:     rec.AgentID,
-		Cwd:         rec.Cwd,
-		RuntimeHint: rec.RuntimeHint,
-		Title:       rec.Title,
-		Pinned:      rec.Pinned,
-		Archived:    rec.Archived,
-		Status:      rec.Status,
-		CreatedAt:   rec.CreatedAt,
-		UpdatedAt:   rec.UpdatedAt,
+		ID:                rec.ID,
+		AgentID:           rec.AgentID,
+		Cwd:               rec.Cwd,
+		RuntimeHint:       rec.RuntimeHint,
+		ProviderSessionID: rec.ProviderSessionID,
+		Title:             rec.Title,
+		Pinned:            rec.Pinned,
+		Archived:          rec.Archived,
+		Status:            rec.Status,
+		CreatedAt:         rec.CreatedAt,
+		UpdatedAt:         rec.UpdatedAt,
 	})
 	if err != nil {
 		slog.Default().Warn("store: upsert conversation failed", "conversation", rec.ID, "err", err)

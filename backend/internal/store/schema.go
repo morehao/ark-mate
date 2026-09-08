@@ -87,6 +87,13 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_memories_conversation ON permission_memories(conversation_id)`,
 		},
 	},
+	{
+		version: 2,
+		name:    "conversations.provider_session_id（P3 双 id：平台 uuid 会话 id + 原生 provider 列）",
+		statements: []string{
+			`ALTER TABLE conversations ADD COLUMN provider_session_id TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
