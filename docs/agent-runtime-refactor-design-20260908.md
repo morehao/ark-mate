@@ -567,5 +567,11 @@ runtime 作为 hint），不保留 runtime 身份语义。
   Service 选择方法改为 `McpServersFor(agent, runtimeID)`（注册表 → 传输过滤 → 白名单）；orchestrator
   `session/new` 注入改走 agent 维度；`syncAgentDef` 持久化保留 `mcps` 不丢字段。
   REST create/patch 暂不暴露 `mcps`（定义文件级；§8.1 Agent.capabilities 统一面时并入）。
+- **路由引擎 FirstAvailable 切片（§7，2026-09-08）**：新增 `internal/routing`——`Installed(spec)`
+  判定启动命令可执行（PATH 查找 / 路径 stat），`FirstAvailable(reg, candidates)` 按候选顺序取首个
+  「已注册 + 可执行」，未采用候选按 NotFound/NotInstalled 分类返回。Service `ResolveRuntime(agent)`
+  映射错误码（全未注册 → runtime_not_found，与既有单候选语义一致；存在已注册但不可执行 →
+  runtime_unavailable；空候选 → no_runtime）；orchestrator `StartConversation` 由「首候选」升级为
+  路由选定（RunOnce 显式 --runtime 不变）。能力匹配/Sticky 粘滞/handoff 迁移依赖 Runtime 接口，留后续。
 - **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影（§6.1 字段级，ModeMapping 待实测），
-  skill 物化（§5.4），路由引擎（§7，`routing.Resolve` + Agent 能力/路由字段）。
+  skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7），opencode/dsh 真实冒烟（需 CLI/凭证）。

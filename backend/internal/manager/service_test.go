@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +291,48 @@ func TestRunOnceUnknownRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t)
 	if _, err := orch.RunOnce(context.Background(), RunOptions{RuntimeID: "nope", Prompt: "x"}); err == nil {
 		t.Fatal("未知 runtime 应报错")
+	}
+}
+
+// TestServiceResolveRuntime FirstAvailable 路由（§7 切片 4）：首候选不可执行 → 取次候选；
+// 已注册但不可执行 → runtime_unavailable；全未注册 → runtime_not_found；空候选 → no_runtime。
+func TestServiceResolveRuntime(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _, _ := rigWithRuntime(t,
+		runtime.Spec{ID: "echo", Launch: runtime.LaunchSpec{Command: exe}},
+		runtime.Spec{ID: "ghost", Launch: runtime.LaunchSpec{Command: "ghost-cmd-zzz-not-exist"}},
+	)
+	seed := func(id string, runtimes ...string) {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		svc.agents[id] = &AgentRec{ID: id, Name: id, Runtimes: runtimes}
+	}
+	codeOf := func(err error) string {
+		var ae *acl.Error
+		if errors.As(err, &ae) {
+			return ae.Code
+		}
+		return ""
+	}
+
+	seed("a1", "ghost", "echo")
+	if id, err := svc.ResolveRuntime(svc.agents["a1"]); err != nil || id != "echo" {
+		t.Fatalf("应回退取 echo，id=%q err=%v", id, err)
+	}
+	seed("a2", "ghost")
+	if _, err := svc.ResolveRuntime(svc.agents["a2"]); codeOf(err) != "runtime_unavailable" {
+		t.Fatalf("期望 runtime_unavailable，got %v", err)
+	}
+	seed("a3", "nope", "nope2")
+	if _, err := svc.ResolveRuntime(svc.agents["a3"]); codeOf(err) != "runtime_not_found" {
+		t.Fatalf("期望 runtime_not_found，got %v", err)
+	}
+	seed("a4")
+	if _, err := svc.ResolveRuntime(svc.agents["a4"]); codeOf(err) != "no_runtime" {
+		t.Fatalf("期望 no_runtime，got %v", err)
 	}
 }
 

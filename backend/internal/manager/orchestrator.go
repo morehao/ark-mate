@@ -195,14 +195,19 @@ func (o *Orchestrator) SetLogger(l *slog.Logger) {
 	}
 }
 
-// StartConversation 在 agent 路由首候选 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
+// StartConversation 在 agent 路由选定的 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
 // 并发布 conversation.created。不发起 prompt；Prompt 负责每轮。
+// 路由 = ResolveRuntime（§7 FirstAvailable：候选顺序 × 已注册 × 命令可执行）。
 func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd string) (*CreateResult, error) {
 	agent, ok := o.svc.AgentByID(agentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
 	}
-	return o.startConversationOn(ctx, agent, agent.pickRuntime(), cwd)
+	runtimeID, err := o.svc.ResolveRuntime(agent)
+	if err != nil {
+		return nil, err
+	}
+	return o.startConversationOn(ctx, agent, runtimeID, cwd)
 }
 
 // startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、

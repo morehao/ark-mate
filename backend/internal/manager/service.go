@@ -12,6 +12,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
+	"github.com/morehao/ark-forge/internal/routing"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -51,6 +52,26 @@ func (a *AgentRec) pickRuntime() string {
 		return ""
 	}
 	return a.Runtimes[0]
+}
+
+// ResolveRuntime 依 agent 路由候选做 FirstAvailable 路由（§7 切片 4）：候选顺序 → 已注册 +
+// 启动命令可执行。全部未采用时按分类报错：全未注册 → runtime_not_found（单候选场景与既有
+// 语义一致）；存在已注册但命令不可执行 → runtime_unavailable。空候选 → no_runtime。
+func (s *Service) ResolveRuntime(agent *AgentRec) (string, error) {
+	if len(agent.Runtimes) == 0 {
+		return "", acl.NewError(acl.ClassRequest, "no_runtime",
+			fmt.Sprintf("agent %q 未配置 runtime 候选", agent.ID), nil)
+	}
+	id, av := routing.FirstAvailable(s.reg, agent.Runtimes)
+	if id != "" {
+		return id, nil
+	}
+	if len(av.NotInstalled) == 0 {
+		return "", acl.NewError(acl.ClassRequest, "runtime_not_found",
+			fmt.Sprintf("agent %q 候选 runtime 均未注册：%v", agent.ID, av.NotFound), nil)
+	}
+	return "", acl.NewError(acl.ClassRequest, "runtime_unavailable",
+		fmt.Sprintf("agent %q 候选 runtime 均不可用：未注册 %v；命令不可执行 %v", agent.ID, av.NotFound, av.NotInstalled), nil)
 }
 
 // IsDefault 报告该 Agent 是否为默认播种 Agent。
