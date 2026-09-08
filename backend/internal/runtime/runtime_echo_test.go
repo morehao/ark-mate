@@ -135,3 +135,54 @@ func TestEchoRuntimeExecutableProjection(t *testing.T) {
 		}
 	}
 }
+
+// TestThreeProjectionConstructors 验证 opencode / deepseekharness / echo 三投影各自携带
+// §6.2 Spec 身份（ID/ManagesOwnContext），共用同一「活会话」实现。
+func TestThreeProjectionConstructors(t *testing.T) {
+	tp := newInProcEchoTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cl, err := acl.Dial(ctx, tp, acl.ClientOptions{
+		RequestPermission: func(_ context.Context, _ acl.PermissionRequest) acl.PermissionDecision {
+			return acl.PermissionDecision{Allowed: true}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() {
+		_ = cl.Close()
+		_ = tp.Close()
+	}()
+
+	sess, err := cl.NewSession(context.Background(), acl.SessionOptions{Cwd: "/work"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// 三个投影共享同一活会话做身份断言（ID/自管上下文取自各自 Spec）。
+	for _, tc := range []struct {
+		id     string
+		build  func(*acl.Session) Runtime
+		ownCtx bool
+	}{
+		{"echo", func(s *acl.Session) Runtime { return NewEchoRuntime(s) }, true},
+		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true},
+		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true},
+	} {
+		rt := tc.build(sess)
+		if rt.ID() != tc.id {
+			t.Fatalf("%s 投影 ID 不符: %q", tc.id, rt.ID())
+		}
+		if rt.ManagesOwnContext() != tc.ownCtx {
+			t.Fatalf("%s 投影 ManagesOwnContext 不符: %v", tc.id, rt.ManagesOwnContext())
+		}
+		if rt.ProviderSessionID() != sess.ID() {
+			t.Fatalf("%s 投影 ProviderSessionID 不符", tc.id)
+		}
+		// 模型切换需 env/provider 配置路径（ModelConfigOptionID 空）→ 不支持错误。
+		if err := rt.ApplyModel(ctx, ModelConfig{Model: "x"}); err == nil {
+			t.Fatalf("%s ApplyModel 应返回不支持错误", tc.id)
+		}
+	}
+}

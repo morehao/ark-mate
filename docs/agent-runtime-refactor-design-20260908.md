@@ -600,7 +600,12 @@ runtime 作为 hint），不保留 runtime 身份语义。
   `NewEchoRuntime` 为 echo 投影可执行形态：ID=echo、ManagesOwnContext=true、透传会话 Prompt；
   无原生模式/模型/持久会话 → Apply*/Resume 显式返回 `unsupported_*` acl 错误（不静默吞掉）。
   集成测试在**进程内真实 EchoAgent** 上 Dial→NewSession→Prompt×2→契约断言（无子进程依赖）。
-- **P2 剩余（未含，留后续）**：opencode/dsh 投影可执行形态（复刻 EchoRuntime；ModeMapping 待实测
-  回填后 ApplyMode 才有原生映射可落地，open items §6.2/§12）、skill 物化（§5.4）、路由能力匹配/
-  粘滞切片（§7）、Orchestrator 采用 Runtime 接口（会话模型重构评审点）。P2 验收三项（race 全绿 /
-  echo 全链路 / opencode+dsh 冒烟）均已达成，见上。
+- **三投影可执行形态齐备（2026-09-08）**：把 echo 投影泛化为 `sessionRuntime`（同一「活会话」
+  实现：ID/ManagesOwnContext 取自各自 §6.2 Spec，Prompt/Capabilities/ProviderSessionID 透传
+  acl.Session），`NewEchoRuntime / NewOpencodeRuntime / NewDeepseekHarnessRuntime` 三公开构造各以
+  对应 Spec 实例化（opencode/dsh 后端自管上下文）。ApplyMode/ApplyModel/Resume 统一显式返回
+  `unsupported_*`（ModeMapping/模型切换原语/会话恢复承载均待实测，见 §12 开放项）。测试：三个构造
+  器在同一活会话上断言身份 + 契约；echo 全链路可执行投影测试不变。
+- **P2 剩余（未含，留后续）**：ModeMapping 实测回填后 ApplyMode 落地、会话恢复 Resume 按底座实测
+  接入、skill 物化（§5.4）、路由能力匹配/粘滞切片（§7）、Orchestrator 正式采用 Runtime 接口
+  （会话模型重构评审点）。P2 验收三项（race 全绿 / echo 全链路 / opencode+dsh 冒烟）均已达成，见上。
