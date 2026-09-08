@@ -561,7 +561,11 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - **echo 全链路自动化冒烟（2026-09-08）**：构建真实 `forge` 二进制 + `serve`（memory 模式，agents/caps
   临时目录）+ REST 驱动：新建会话 → 权限 round×2 resolve（allow-once）→ boom 错误轮（`turn.error`）→
   同会话重试恢复 → 多轮文本标记命中；`/agents` 列出种子 + echo 自定义 agent、`/mcps` 列出 stdio server。
-  事件谱系 `turn.ended×3 / permission_request×3 / turn.error×1`。opencode/dsh 冒烟仍需真实 CLI/凭证（手动 DoD）。
+  事件谱系 `turn.ended×3 / permission_request×3 / turn.error×1`。
+- **opencode / dsh 真实冒烟（2026-09-08，DoD 完成）**：同一 serve（真进程）按默认种子 agent 各起一轮——
+  `opencode acp` 与 `dsh --profile acp`（本机 CLI 均在 PATH 且有模型凭证）真实完成会话：
+  二者事件谱系均为 `session.created / user_message / message / usage / turn.ended`（含真实 usage）。
+  注：dsh 的 acp profile 固定写真实 `~/.dsh`（不受 $HOME 重定向影响），冒烟需 home 目录写权限。
 - **按 Agent 选 MCP 子集（§5.2 收口，2026-09-08）**：`AgentRec`/agent 定义文件新增可选 `mcps`
   白名单（指针三态：缺省 nil = 全启用按 runtime 传输过滤；非 nil = 白名单；`[]` = 本 agent 禁用注入）。
   Service 选择方法改为 `McpServersFor(agent, runtimeID)`（注册表 → 传输过滤 → 白名单）；orchestrator
@@ -579,4 +583,6 @@ runtime 作为 hint），不保留 runtime 身份语义。
   三投影（echo/opencode/deepseekharness）按 §6.2 填 `Description` 与 `ManagesOwnContext=true`；
   新增声明值守门单测。另修 `TestPermissionCancelSession` 时序抖动（等齐 2 条挂起再断言）。
 - **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影可执行半场（§4.2；ModeMapping 待实测），
-  skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7），opencode/dsh 真实冒烟（需 CLI/凭证）。
+  skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7）。P2 验收三项（race 全绿 / echo 全链路 /
+  opencode+dsh 冒烟）均已达成，见上。skill 物化依赖各 runtime 原生 skill 目录约定；Runtime 接口
+  落地涉及 orchestrator 会话模型重构与 ModeMapping 实测，建议作为下一设计评审点。
