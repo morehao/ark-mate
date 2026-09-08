@@ -33,6 +33,11 @@ type Config struct {
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
 	// FORGE_CAPABILITIES 覆盖，默认 ~/.forge/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
+	// SkillMaterializeDir skill 物化目标根目录（§5.4/§16.5；FORGE_SKILLS_MATERIALIZE_DIR 覆盖，
+	// 默认空 = 关闭）。非空时 serve 启动装载能力后把 opencode SKILL.md 源 skill 物化到该目录
+	// （<dir>/<skillID>/SKILL.md，opencode v1 自动扫描约定）。目标多为真实 opencode 用户目录，
+	// 须显式开启（默认不写用户机器配置）。
+	SkillMaterializeDir string
 	// IdleTimeout 空闲回收阈值：StartAgent 暖进程闲置超过该时长自动停进程（P2；
 	// FORGE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
 	IdleTimeout time.Duration
@@ -92,6 +97,9 @@ func Load() Config {
 	}
 	if v := os.Getenv("FORGE_CAPABILITIES"); v != "" {
 		c.CapabilityDir = v
+	}
+	if v := os.Getenv("FORGE_SKILLS_MATERIALIZE_DIR"); v != "" {
+		c.SkillMaterializeDir = v
 	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
 		c.CapabilityDir = filepath.Join(home, ".forge", "capabilities")
 	} else {

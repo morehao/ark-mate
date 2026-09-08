@@ -137,3 +137,38 @@ func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
 		t.Fatalf("缺省 mcps 应为 nil（全启用），got %v", c.Mcps)
 	}
 }
+
+// TestServiceMaterializeSkills 启用物化：Service.MaterializeSkills 把 opencode SKILL.md 源
+// skill 写为 <root>/<id>/SKILL.md 并计数；无源/不可物化者跳过不中断。
+func TestServiceMaterializeSkills(t *testing.T) {
+	svc, _, _ := rigWithRuntime(t)
+	if err := svc.caps.RegisterSkill(&capability.Skill{
+		ID: "forge-demo", Name: "Demo", Body: "# demo body",
+		Sources: []capability.SkillSource{
+			{Runtime: "opencode", Path: "/unused", Format: "SKILL.md"}, // root 覆盖 Path
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.caps.RegisterSkill(&capability.Skill{
+		ID: "plain", Name: "P", Body: "# p", // 无 source → 跳过
+	}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	n, err := svc.MaterializeSkills(root)
+	if err != nil {
+		t.Fatalf("MaterializeSkills: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("期望物化 1 条，got %d", n)
+	}
+	p := filepath.Join(root, "forge-demo", "SKILL.md")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "# demo body" {
+		t.Fatal("物化内容不符")
+	}
+}
