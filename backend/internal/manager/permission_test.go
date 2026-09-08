@@ -97,6 +97,11 @@ func TestPermissionCancelSession(t *testing.T) {
 		go func() { exited <- m.RegisterAndWait(context.Background(), "s5", req, nil) }()
 	}
 	waitRegistered(t, m, "s5")
+	// 两个注册 goroutine 各自抢锁写入；等齐 2 条再断言（避免全量并行负载下的调度抖动）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && m.pendingCount("s5") < 2 {
+		time.Sleep(2 * time.Millisecond)
+	}
 	if m.pendingCount("s5") != 2 {
 		t.Fatalf("期望 2 条挂起，got %d", m.pendingCount("s5"))
 	}

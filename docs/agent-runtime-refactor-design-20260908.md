@@ -573,5 +573,10 @@ runtime 作为 hint），不保留 runtime 身份语义。
   映射错误码（全未注册 → runtime_not_found，与既有单候选语义一致；存在已注册但不可执行 →
   runtime_unavailable；空候选 → no_runtime）；orchestrator `StartConversation` 由「首候选」升级为
   路由选定（RunOnce 显式 --runtime 不变）。能力匹配/Sticky 粘滞/handoff 迁移依赖 Runtime 接口，留后续。
-- **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影（§6.1 字段级，ModeMapping 待实测），
+- **投影声明升级（§6.1/§6.2，2026-09-08）**：`runtime.Spec` 补齐 ProjectionSpec 字段——
+  `Description`、`ManagesOwnContext`、`ModeMapping`（统一模式→原生 mode，opencode/dsh 待实测
+  本轮留空不臆造，见 §12）、`ModelConfigOptionID`（空 = 走 env/provider 配置）、`SetupSteps`（预留）。
+  三投影（echo/opencode/deepseekharness）按 §6.2 填 `Description` 与 `ManagesOwnContext=true`；
+  新增声明值守门单测。另修 `TestPermissionCancelSession` 时序抖动（等齐 2 条挂起再断言）。
+- **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影可执行半场（§4.2；ModeMapping 待实测），
   skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7），opencode/dsh 真实冒烟（需 CLI/凭证）。

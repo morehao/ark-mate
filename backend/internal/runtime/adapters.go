@@ -38,8 +38,10 @@ func opencodeSpec() Spec {
 			Images:                 opencode.Caps.Images,
 			EmbeddedContext:        opencode.Caps.EmbeddedContext,
 		},
-		McpTransports: []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
-		Notes:         opencode.Notes,
+		Description:       "opencode（terminal AI）ACP 执行后端",
+		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
+		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
+		Notes:             opencode.Notes,
 	}
 }
 
@@ -59,8 +61,10 @@ func deepseekharnessSpec() Spec {
 			Images:                 deepseekharness.Caps.Images,
 			EmbeddedContext:        deepseekharness.Caps.EmbeddedContext,
 		},
-		McpTransports: []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
-		Notes:         deepseekharness.Notes,
+		Description:       "deepseek-harness ACP 执行后端",
+		McpTransports:     []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
+		ManagesOwnContext: true,                                 // §6.2：后端自管上下文/工具
+		Notes:             deepseekharness.Notes,
 	}
 }
 
@@ -79,7 +83,9 @@ func echoSpec() Spec {
 			Command: cmd,
 			Args:    echo.Args,
 		},
-		McpTransports: []string{"stdio"}, // 演示底座仅 stdio
-		Notes:         echo.Notes,
+		Description:       "echo 本地自包含 ACP 演示底座（权限/elicitation 演示，免模型 key）",
+		McpTransports:     []string{"stdio"}, // 演示底座仅 stdio
+		ManagesOwnContext: true,              // §6.2：后端自管上下文/工具
+		Notes:             echo.Notes,
 	}
 }
