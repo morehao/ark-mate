@@ -57,8 +57,8 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：默认 agent assistant 一个、runtimes 3 个
-// （opencode / deepseekharness / echo 演示）。
+// TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）、
+// runtimes 3 个（opencode / deepseekharness / echo 演示）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
@@ -67,8 +67,11 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
 	var agents []map[string]any
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 || agents[0]["id"] != "assistant" {
+	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 2 || agents[0]["id"] != "dsh" {
 		t.Fatalf("agents data 不符: %s", env.Data)
+	}
+	if agents[0]["is_default"] != true || agents[1]["id"] != "opencode" || agents[1]["is_default"] != false {
+		t.Fatalf("agents 默认标记不符: %s", env.Data)
 	}
 
 	env = get(t, e, "/v1/forge/runtimes")

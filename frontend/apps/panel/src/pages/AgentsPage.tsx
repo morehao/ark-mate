@@ -157,6 +157,7 @@ export function AgentsPage() {
           >
             <Dot color={st.color} size={7} />
             <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
+            {a.is_default && <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>默认</Tag>}
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <span style={{ color: st.color }}>{st.label}</span>

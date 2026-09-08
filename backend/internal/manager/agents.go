@@ -289,5 +289,5 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 	if !ok {
 		return nil
 	}
-	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State}
+	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State, IsDefault: a.IsDefault()}
 }

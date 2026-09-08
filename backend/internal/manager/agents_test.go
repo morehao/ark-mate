@@ -11,10 +11,14 @@ import (
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
-// agentTestReg 只播 echo（避免真实子进程参与；启停相关仅测守卫路径）。
+// agentTestSvc 播 deepseekharness/opencode/echo（内置 agent 播种 + echo 自定义；不拨真实子进程）。
 func agentTestSvc(t *testing.T, agentDir string) *Service {
 	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := runtime.NewRegistry(
+		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"},
+		runtime.Spec{ID: "opencode", Name: "opencode"},
+		runtime.Spec{ID: "echo", Name: "Echo"},
+	)
 	svc := NewService(reg, eventbus.New())
 	if agentDir != "" {
 		svc.LoadAgentDefinitions(agentDir)
@@ -23,7 +27,7 @@ func agentTestSvc(t *testing.T, agentDir string) *Service {
 }
 
 // TestAgentRegistryDefinitionsCRUD P2 definitions：注册持久化 + 重启（新 Service）加载 +
-// PATCH 热更新 + 删除；默认 agent assistant 由播种提供。
+// PATCH 热更新 + 删除；内置 agent dsh/opencode 由播种提供（dsh 默认）。
 func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
@@ -58,9 +62,12 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 		t.Fatalf("name 未更新: %+v", a)
 	}
 
-	// 默认 Agent 已播种（用户选 Agent 而非 runtime）。
-	if _, ok := svc2.AgentByID("assistant"); !ok {
-		t.Fatal("默认 agent assistant 应播种")
+	// 内置 Agent 已播种（用户选 Agent 而非 runtime；dsh 为默认）。
+	if a, ok := svc2.AgentByID("dsh"); !ok || !a.IsDefault() {
+		t.Fatalf("默认 agent dsh 应播种且为默认: %+v ok=%v", a, ok)
+	}
+	if a, ok := svc2.AgentByID("opencode"); !ok || a.IsDefault() {
+		t.Fatalf("内置 agent opencode 应播种且非默认: %+v ok=%v", a, ok)
 	}
 
 	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。

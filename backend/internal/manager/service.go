@@ -28,7 +28,18 @@ type AgentRec struct {
 }
 
 // defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。
-const defaultAgentID = "assistant"
+const defaultAgentID = "dsh"
+
+// builtinAgents 内置 Agent 播种表：每个内置 runtime 一个 Agent（dsh 为默认）。
+// echo 演示底座不播种（仅供自定义 agent / 权限演示用）。
+var builtinAgents = []struct {
+	id      string
+	name    string
+	runtime string
+}{
+	{id: "dsh", name: "dsh", runtime: "deepseekharness"},
+	{id: "opencode", name: "opencode", runtime: "opencode"},
+}
 
 // pickRuntime 返回 Agent 的路由首选 runtime（P0 取首候选；P2 升级为路由引擎）。
 func (a *AgentRec) pickRuntime() string {
@@ -37,6 +48,9 @@ func (a *AgentRec) pickRuntime() string {
 	}
 	return a.Runtimes[0]
 }
+
+// IsDefault 报告该 Agent 是否为默认播种 Agent。
+func (a *AgentRec) IsDefault() bool { return a.ID == defaultAgentID }
 
 // ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。
 // P0 起不再记录 runtime 身份；RuntimeHint 仅为最近/首选 runtime 的执行提示（非身份，用户不可见）。
@@ -83,16 +97,17 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		ver:           make(map[string]int64),
 		providers:     make(map[string]*providerDef),
 	}
-	// 播种默认 Agent：路由候选 = 全部已注册 runtime（P0 取首候选；用户不感知 runtime）。
-	runtimes := make([]string, 0, len(reg.List()))
-	for _, spec := range reg.List() {
-		runtimes = append(runtimes, spec.ID)
-	}
-	s.agents[defaultAgentID] = &AgentRec{
-		ID:       defaultAgentID,
-		Name:     "Assistant",
-		Runtimes: runtimes,
-		State:    AgentStateStopped,
+	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
+	for _, b := range builtinAgents {
+		if _, ok := reg.Get(b.runtime); !ok {
+			continue
+		}
+		s.agents[b.id] = &AgentRec{
+			ID:       b.id,
+			Name:     b.name,
+			Runtimes: []string{b.runtime},
+			State:    AgentStateStopped,
+		}
 	}
 	return s
 }
@@ -135,7 +150,7 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	defer s.mu.Unlock()
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
-		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, State: a.State})
+		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State, IsDefault: a.IsDefault()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

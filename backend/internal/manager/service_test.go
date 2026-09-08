@@ -139,7 +139,7 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 func TestDisconnectIdleConversation(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
 	as := &ActiveConversation{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
-	rc := &runtimeConn{agentID: "assistant", client: nil}                               // client 亦 nil → 相等匹配
+	rc := &runtimeConn{agentID: "opencode", client: nil}                                // client 亦 nil → 相等匹配
 	orch.conversations["s1"] = as
 	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode", Status: ConversationStatusInProgress})
 
@@ -167,7 +167,7 @@ func TestDisconnectIdleConversation(t *testing.T) {
 	if svc.conversations["s1"].Status != ConversationStatusFailed {
 		t.Fatalf("会话应 failed: %s", svc.conversations["s1"].Status)
 	}
-	if a, _ := svc.AgentByID("assistant"); a.State != AgentStateStopped {
+	if a, _ := svc.AgentByID("opencode"); a.State != AgentStateStopped {
 		t.Fatalf("agent 应 stopped: %s", a.State)
 	}
 

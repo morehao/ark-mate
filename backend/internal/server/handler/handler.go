@@ -62,10 +62,11 @@ type Service interface {
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
 type AgentResp struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider,omitempty"`
-	State    string `json:"state"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Provider  string `json:"provider,omitempty"`
+	State     string `json:"state"`
+	IsDefault bool   `json:"is_default"` // 默认播种 Agent（前端预选 + 徽标）
 }
 
 // AgentCreateReq 注册自定义 agent（对既有 runtime 的命名配置，不写代码即新增）。

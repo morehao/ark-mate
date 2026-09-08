@@ -6,6 +6,8 @@ export interface Agent {
   /** provider 档案 id（P2 注入面）；空 = 默认。 */
   provider?: string
   state: AgentState
+  /** 默认播种 Agent（前端预选 + 徽标）。 */
+  is_default?: boolean
 }
 
 export interface Provider {

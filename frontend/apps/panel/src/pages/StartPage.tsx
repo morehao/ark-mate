@@ -32,7 +32,7 @@ export function StartPage() {
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
 
-  // 预选逻辑：① URL 显式 ?agent= 优先（软清空跳转带同 Agent）；② 否则上次使用（localStorage）；③ 否则第一个可用。
+  // 预选逻辑：① URL 显式 ?agent= 优先（软清空跳转带同 Agent）；② 否则上次使用（localStorage）；③ 否则默认 Agent（is_default），退化为第一个。
   useEffect(() => {
     if (selectedId && agents.some((a) => a.id === selectedId)) return
     const urlAgent = new URLSearchParams(window.location.search).get('agent')
@@ -43,7 +43,8 @@ export function StartPage() {
     }
     const last = localStorage.getItem(LS_LAST_AGENT)
     const prev = agents.find((a) => a.id === last)
-    setSelectedId(prev?.id ?? agents[0]?.id ?? null)
+    const fallback = agents.find((a) => a.is_default)?.id ?? agents[0]?.id ?? null
+    setSelectedId(prev?.id ?? fallback)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, selectedId])
 
@@ -148,6 +149,20 @@ export function StartPage() {
                       <span style={{ fontFamily: tokens.fontMono, fontSize: 13.5, fontWeight: sel ? 700 : 550, whiteSpace: 'nowrap' }}>
                         {a.name}
                       </span>
+                      {a.is_default && (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: tokens.textSecondary,
+                            border: `1px solid ${tokens.border}`,
+                            borderRadius: 999,
+                            padding: '0 5px',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          默认
+                        </span>
+                      )}
                       <Dot color={st.color} size={6} />
                     </span>
                   </div>
