@@ -1,10 +1,9 @@
-export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+export type ConversationStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
-export interface SessionSummary {
+export interface ConversationSummary {
   id: string
   agent_id: string
-  runtime: string
-  status: SessionStatus
+  status: ConversationStatus
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
@@ -13,12 +12,12 @@ export interface SessionSummary {
 }
 
 /** 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中；含归档）。 */
-export interface SessionSearchHit extends SessionSummary {
+export interface ConversationSearchHit extends ConversationSummary {
   snippet: string
   matches: number
 }
 
-export interface SessionDetail extends SessionSummary {
+export interface ConversationDetail extends ConversationSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
 }
@@ -38,7 +37,7 @@ export interface RevokeMemoryReq {
 }
 
 /** 会话元数据子集更新（nil/零值不更新）。 */
-export interface SessionPatch {
+export interface ConversationPatch {
   title?: string
   pinned?: boolean
   archived?: boolean
@@ -141,17 +140,16 @@ export interface ResolveElicitationResp {
   action: ElicitationAction
 }
 
-export interface CreateSessionReq {
+export interface CreateConversationReq {
   agent_id: string
   prompt: string
   cwd?: string
 }
 
-export interface CreateSessionResp {
+export interface CreateConversationResp {
   id: string
   agent_id: string
-  runtime: string
-  status: SessionStatus
+  status: ConversationStatus
   event_seq: number // 已发布事件水位：WS attach 续传起点
 }
 
@@ -159,13 +157,13 @@ export interface PromptReq {
   prompt: string
 }
 
-export interface PromptResp {
+export interface ConversationPromptResp {
   id: string
-  status: SessionStatus
+  status: ConversationStatus
   event_seq: number
 }
 
-export interface CancelSessionResp {
+export interface CancelConversationResp {
   id: string
-  status: SessionStatus
+  status: ConversationStatus
 }

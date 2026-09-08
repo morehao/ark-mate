@@ -4,7 +4,7 @@ import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens, Pill, agentStateMeta, Dot } from '@ark/ui'
 import { useForge } from '../store'
-import { SessionRail } from '../components/SessionRail'
+import { ConversationRail } from '../components/ConversationRail'
 import { StatusBar } from '../components/StatusBar'
 import { shortFor } from '../console/util'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
@@ -18,17 +18,9 @@ const EXAMPLES = [
 
 const LS_LAST_AGENT = 'forge.panel.lastAgentId'
 
-// 模型提示：我们不做模型选择器（决策 v6③，opencode ACP 忽略客户端模型选择），
-// 仅展示该底座将使用的默认模型，避免「选了没生效」的误导。
-function modelLabel(runtime: string): string {
-  if (runtime === 'opencode') return 'opencode 默认'
-  if (runtime === 'deepseekharness') return 'harness 默认'
-  return '底座默认'
-}
-
 /**
  * 新建会话整页（路由 /new，参照 AionUi /guid：无弹窗）。
- * hero + 助手胶囊栏（选底座）+ 内嵌输入卡（模型 pill + 发送）+ 示例指令。
+ * hero + 助手胶囊栏（选 Agent）+ 内嵌输入卡（模型 pill + 发送）+ 示例指令。
  */
 export function StartPage() {
   const navigate = useNavigate()
@@ -73,7 +65,7 @@ export function StartPage() {
     setSending(true)
     try {
       const id = await createAndRun(selected.id, draft.trim())
-      if (id) navigate(`/sessions/${id}`)
+      if (id) navigate(`/conversations/${id}`)
     } finally {
       setSending(false)
     }
@@ -82,7 +74,7 @@ export function StartPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <SessionRail onCreate={() => navigate('/new')} />
+        <ConversationRail onCreate={() => navigate('/new')} />
 
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflowY: 'auto', background: tokens.bg }}>
         <div
@@ -119,7 +111,7 @@ export function StartPage() {
                     key={a.id}
                     role="radio"
                     aria-checked={sel}
-                    title={`${a.name} · ${a.runtime}${a.state === 'running' ? '' : '（已停止）'}`}
+                    title={`${a.name}${a.state === 'running' ? '' : '（已停止）'}`}
                     onClick={() => pick(a.id)}
                     style={{
                       display: 'inline-flex',
@@ -150,7 +142,7 @@ export function StartPage() {
                         color: tokens.text,
                       }}
                     >
-                      {shortFor(a.runtime)}
+                      {shortFor(a.name || a.id)}
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
                       <span style={{ fontFamily: tokens.fontMono, fontSize: 13.5, fontWeight: sel ? 700 : 550, whiteSpace: 'nowrap' }}>
@@ -253,14 +245,8 @@ export function StartPage() {
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 {/* 模型 pill（只读展示，不做选择器——决策 v6③） */}
-                <Pill
-                  title={
-                    selected?.runtime === 'opencode'
-                      ? '模型 = opencode 自身默认（见其 opencode.json 的 "model"，当前 yygu-v2/deepseek-v4-flash）；本面板不在此选模型。'
-                      : '模型 = 该底座自身默认；本面板不在此选模型。'
-                  }
-                >
-                  {selected ? `${modelLabel(selected.runtime)}` : '模型 · 底座默认'}
+                <Pill title="模型由 Agent 底座自身默认决定；本面板不在此选模型。">
+                  模型 · 底座默认
                 </Pill>
 
                 <Button

@@ -3,7 +3,6 @@ export type AgentState = 'running' | 'stopped'
 export interface Agent {
   id: string
   name: string
-  runtime: string
   /** provider 档案 id（P2 注入面）；空 = 默认。 */
   provider?: string
   state: AgentState

@@ -1,6 +1,6 @@
 export * from './response'
 export * from './agent'
 export * from './runtime'
-export * from './session'
+export * from './conversation'
 export * from './events'
 export * from './ws'

@@ -12,7 +12,7 @@ const isSeed = (id: string): boolean => id.startsWith('agent-')
 interface AgentFormValues {
   id?: string
   name?: string
-  runtime: string
+  runtimes: string[]
   provider?: string
 }
 
@@ -25,9 +25,7 @@ interface ProviderFormValues {
 /** Agents 管理页（P2）：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除 + provider 注入面。 */
 export function AgentsPage() {
   const agents = useForge((s) => s.agents)
-  const runtimes = useForge((s) => s.runtimes)
   const refreshAgents = useForge((s) => s.refreshAgents)
-  const refreshRuntimes = useForge((s) => s.refreshRuntimes)
   const showToast = useForge((s) => s.showToast)
 
   const [providers, setProviders] = useState<Provider[]>([])
@@ -47,7 +45,6 @@ export function AgentsPage() {
 
   useEffect(() => {
     void refreshAgents()
-    void refreshRuntimes()
     void loadProviders()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -78,13 +75,12 @@ export function AgentsPage() {
   }
 
   const openCreate = (): void => {
-    const firstRuntime = runtimes[0]?.id ?? ''
-    agentForm.setFieldsValue({ runtime: firstRuntime })
+    agentForm.setFieldsValue({ runtimes: [] })
     setAgentModal({ mode: 'create' })
   }
 
   const openEdit = (a: Agent): void => {
-    agentForm.setFieldsValue({ name: a.name, runtime: a.runtime, provider: a.provider })
+    agentForm.setFieldsValue({ name: a.name, runtimes: [], provider: a.provider })
     setAgentModal({ mode: 'edit', agent: a })
   }
 
@@ -93,16 +89,15 @@ export function AgentsPage() {
     const v = await agentForm.validateFields()
     if (agentModal.mode === 'create') {
       const ok = await guard(
-        createAgent({ id: v.id ?? '', name: v.name, runtime: v.runtime, provider: v.provider || undefined }),
+        createAgent({ id: v.id ?? '', name: v.name, runtimes: v.runtimes ?? [], provider: v.provider || undefined }),
       )
       if (ok === undefined) return
     } else {
-      const seed = isSeed(agentModal.agent.id)
       const ok = await guard(
         patchAgent(agentModal.agent.id, {
           name: v.name,
           provider: v.provider || undefined,
-          runtime: seed ? undefined : v.runtime,
+          runtimes: v.runtimes?.length ? v.runtimes : undefined,
         }),
       )
       if (ok === undefined) return
@@ -129,7 +124,7 @@ export function AgentsPage() {
   return (
     <PageContainer
       title="Agents"
-      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新；种子 agent-* 的 runtime 只读。下方 provider 档案供密钥注入（只写不读回）。"
+      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新。下方 provider 档案供密钥注入（只写不读回）。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => { void refreshAgents(); void loadProviders() }}>
@@ -162,7 +157,6 @@ export function AgentsPage() {
           >
             <Dot color={st.color} size={7} />
             <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
-            <Pill>{a.runtime}</Pill>
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <span style={{ color: st.color }}>{st.label}</span>
@@ -185,7 +179,7 @@ export function AgentsPage() {
               {!seed && (
                 <Popconfirm
                   title={`删除 ${a.name}？`}
-                  description="仅删除自定义 agent 定义（不写 Go 代码、不影响 runtime）。"
+                  description="仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。"
                   okText="删除"
                   okButtonProps={{ danger: true }}
                   onConfirm={async () => {
@@ -264,13 +258,15 @@ export function AgentsPage() {
             <Input placeholder="展示名（留空 = 用 ID）" autoComplete="off" />
           </Form.Item>
           <Form.Item
-            name="runtime"
-            label={agentModal?.mode === 'edit' && agentModal.agent.id.startsWith('agent-') ? 'Runtime（种子只读）' : 'Runtime 底座'}
-            rules={[{ required: true, message: '必选' }]}
+            name="runtimes"
+            label="Runtimes（逗号/回车分隔，可多个）"
+            rules={agentModal?.mode === 'create' ? [{ required: true, message: '至少一个 runtime' }] : []}
           >
             <Select
-              disabled={agentModal?.mode === 'edit' && agentModal.agent.id.startsWith('agent-')}
-              options={runtimes.map((rt) => ({ value: rt.id, label: `${rt.name}（${rt.id}）` }))}
+              mode="tags"
+              open={false}
+              placeholder="如 opencode, deepseek-harness"
+              tokenSeparators={[',']}
             />
           </Form.Item>
           <Form.Item name="provider" label="Provider 档案（可选）">

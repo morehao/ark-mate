@@ -1,23 +1,21 @@
 import { create } from 'zustand'
 import {
-  cancelSession,
-  createSession,
+  cancelConversation,
+  createConversation,
   listAgents,
-  listRuntimes,
-  listSessions,
-  promptSession,
+  listConversations,
+  promptConversation,
   resolveElicitation,
   resolvePermission,
   toErrorMessage,
-  updateSession,
+  updateConversation,
 } from '@ark/api'
 import type {
   Agent,
   BusEvent,
   ElicitationFormSchema,
   PermissionOption,
-  Runtime,
-  SessionSummary,
+  ConversationSummary,
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
@@ -26,7 +24,7 @@ import { WsTransport } from './transport/ws'
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
-export interface SessionView {
+export interface ConversationView {
   entries: StreamEntry[]
   streaming: boolean
   lastSeq: number
@@ -34,7 +32,7 @@ export interface SessionView {
   hydrating: boolean
 }
 
-const emptyView = (): SessionView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
+const emptyView = (): ConversationView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
 
 /** 权限终局事件载荷 → 卡片决策摘要（reason/allowed/rejected/always 组合出可读文案）。 */
 function permissionResolvedLabel(p: Record<string, unknown> | undefined): string {
@@ -67,7 +65,7 @@ const nextId = (): string => `e${++uid}`
 // 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
 const TERMINAL_TYPES = new Set<string>([Ev.TurnEnded, Ev.TurnError, Ev.RunCancelled])
 
-export function applyEvent(v: SessionView, e: BusEvent): SessionView {
+export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
   // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
   if (e.seq <= v.lastSeq) return v
@@ -181,7 +179,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       }
     case Ev.PermissionRequest: {
       // ACP 权限确认：agent 发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
-      // 用户点选 allow/reject × once/always 后经 POST /sessions/:id/permission 回传。
+      // 用户点选 allow/reject × once/always 后经 POST /conversations/:id/permission 回传。
       const callId = String(e.payload?.call_id ?? '')
       const title = String(e.payload?.title ?? '权限请求')
       const toolKind = String(e.payload?.kind ?? '')
@@ -224,7 +222,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     }
     case Ev.ElicitationRequest: {
       // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
-      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
+      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /conversations/:id/elicitation 回传。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
       const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
       const message = String(e.payload?.message ?? '')
@@ -259,9 +257,8 @@ interface Toast {
 
 export interface ForgeState {
   agents: Agent[]
-  runtimes: Runtime[]
-  sessions: SessionSummary[]
-  views: Record<string, SessionView>
+  conversations: ConversationSummary[]
+  views: Record<string, ConversationView>
   activeId: string | null
   wsState: WsState
   toast: Toast | null
@@ -286,17 +283,16 @@ export interface ElicitationDecision {
 export interface ForgeActions {
   boot: () => void
   refreshAgents: () => Promise<void>
-  refreshRuntimes: () => Promise<void>
-  refreshSessions: () => Promise<void>
+  refreshConversations: () => Promise<void>
   activate: (id: string | null, sinceSeq?: number) => void
   createAndRun: (agentId: string, prompt: string) => Promise<string | undefined>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
   respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
-  renameSession: (id: string, title: string) => Promise<void>
+  renameConversation: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
-  archiveSession: (id: string, archived: boolean) => Promise<void>
+  archiveConversation: (id: string, archived: boolean) => Promise<void>
   setRailMode: (mode: 'active' | 'archived') => void
   showToast: (msg: string) => void
   hideToast: (id: number) => void
@@ -312,8 +308,7 @@ export type ForgeStore = ForgeState & ForgeActions
 
 export const initialState: ForgeState = {
   agents: [],
-  runtimes: [],
-  sessions: [],
+  conversations: [],
   views: {},
   activeId: null,
   wsState: 'idle',
@@ -395,7 +390,7 @@ export const useForge = create<ForgeStore>((set, get) => {
         }
       })
       // 终态已到：会话列表 status 同步刷新（侧栏/服务端忙水位随之收敛）。
-      if (terminal) void get().refreshSessions()
+      if (terminal) void get().refreshConversations()
     },
 
     setDrawer: (open) => set({ drawerOpen: open }),
@@ -407,17 +402,10 @@ export const useForge = create<ForgeStore>((set, get) => {
         showToast(toErrorMessage(err))
       }
     },
-    refreshRuntimes: async () => {
-      try {
-        set({ runtimes: await listRuntimes() })
-      } catch (err) {
-        showToast(toErrorMessage(err))
-      }
-    },
-    refreshSessions: async () => {
+    refreshConversations: async () => {
       try {
         // 按侧栏当前视图拉取：active=未归档；archived=已归档。
-        set({ sessions: await listSessions(get().railMode === 'archived') })
+        set({ conversations: await listConversations(get().railMode === 'archived') })
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -427,8 +415,7 @@ export const useForge = create<ForgeStore>((set, get) => {
       // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
       ensureTransport().connect()
       void get().refreshAgents()
-      void get().refreshSessions()
-      void get().refreshRuntimes()
+      void get().refreshConversations()
     },
 
     activate: (id, sinceSeq) => {
@@ -460,7 +447,7 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     createAndRun: async (agentId, prompt) => {
       try {
-        const resp = await createSession({ agent_id: agentId, prompt })
+        const resp = await createConversation({ agent_id: agentId, prompt })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({
@@ -477,7 +464,7 @@ export const useForge = create<ForgeStore>((set, get) => {
         get().activate(resp.id, resp.event_seq)
         // 新建后回「会话」视图并刷新列表（避免停在归档视图看不到新会话）。
         if (get().railMode !== 'active') set({ railMode: 'active' })
-        void get().refreshSessions()
+        void get().refreshConversations()
         return resp.id
       } catch (err) {
         showToast(toErrorMessage(err))
@@ -497,7 +484,7 @@ export const useForge = create<ForgeStore>((set, get) => {
           return { views: { ...s.views, [id]: { ...view, streaming: true } } }
         })
         ensureTransport().connect()
-        await promptSession(id, { prompt: text })
+        await promptConversation(id, { prompt: text })
       } catch (err) {
         // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。
         set((s) => {
@@ -513,7 +500,7 @@ export const useForge = create<ForgeStore>((set, get) => {
       const id = get().activeId
       if (!id) return
       try {
-        await cancelSession(id)
+        await cancelConversation(id)
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -570,31 +557,31 @@ export const useForge = create<ForgeStore>((set, get) => {
       }
     },
 
-    renameSession: async (id, title) => {
+    renameConversation: async (id, title) => {
       try {
-        await updateSession(id, { title })
-        void get().refreshSessions()
+        await updateConversation(id, { title })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
     togglePin: async (id) => {
-      const cur = get().sessions.find((x) => x.id === id)
+      const cur = get().conversations.find((x) => x.id === id)
       if (!cur) return
       try {
-        await updateSession(id, { pinned: !cur.pinned })
-        void get().refreshSessions()
+        await updateConversation(id, { pinned: !cur.pinned })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
-    archiveSession: async (id, archived) => {
+    archiveConversation: async (id, archived) => {
       // 归档/恢复（软归档：archived 为真即从「会话」移入「归档」视图，数据不删）。
       try {
-        await updateSession(id, { archived })
-        void get().refreshSessions()
+        await updateConversation(id, { archived })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -611,7 +598,7 @@ export const useForge = create<ForgeStore>((set, get) => {
     setRailMode: (mode) => {
       if (get().railMode === mode) return
       set({ railMode: mode })
-      void get().refreshSessions()
+      void get().refreshConversations()
     },
   }
 })

@@ -1,8 +1,12 @@
-import type { Agent, SessionSummary, StreamEntry } from '@ark/types'
-import type { SessionView } from '../store'
+import type { Agent, ConversationSummary, StreamEntry } from '@ark/types'
+import type { ConversationView } from '../store'
 
 /** 会话标题：服务端已推导（sm.title，可被 PATCH 覆盖）优先；其次首条用户消息/正文；最后「新会话 · <agent>」。 */
-export function titleFor(sm: SessionSummary | undefined, view: SessionView | undefined, agents: Agent[]): string {
+export function titleFor(
+  sm: ConversationSummary | undefined,
+  view: ConversationView | undefined,
+  agents: Agent[],
+): string {
   if (sm && sm.title) return sm.title
   if (view) {
     const user = view.entries.find((e) => e.kind === 'user')
@@ -25,17 +29,17 @@ export function agentNameOf(agents: Agent[], id: string | undefined): string {
   return agentOf(agents, id)?.name ?? id ?? '未知 agent'
 }
 
-/** 由 runtime 派生的短标识（新建会话选项卡的角标）：opencode→OC / deepseek-harness→DS。 */
-export function shortFor(runtime: string): string {
-  const lower = runtime.toLowerCase()
+/** 由名称派生的短标识（新建会话选项卡的角标）：deepseek→DS / opencode→OC，其余取词首字母。 */
+export function shortFor(label: string): string {
+  const lower = label.toLowerCase()
   if (lower.includes('deepseek') || lower.includes('dsh')) return 'DS'
   if (lower.includes('opencode') || lower.includes('open')) return 'OC'
-  const words = runtime.split(/[-_\s]+/).filter(Boolean)
+  const words = label.split(/[-_\s]+/).filter(Boolean)
   const letters = words
     .slice(0, 2)
     .map((w) => w[0] ?? '')
     .join('')
-  return (letters || runtime.slice(0, 2)).toUpperCase()
+  return (letters || label.slice(0, 2)).toUpperCase()
 }
 
 export function findUserText(entries: StreamEntry[] | undefined): string | undefined {

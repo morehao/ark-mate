@@ -5,10 +5,10 @@ import { InfoCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icon
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
-import { sessionHistory } from '@ark/api'
+import { conversationHistory } from '@ark/api'
 import { useForge } from '../store'
-import { SessionRail } from '../components/SessionRail'
-import { SessionDetailDrawer } from '../components/SessionDetail'
+import { ConversationRail } from '../components/ConversationRail'
+import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
@@ -21,7 +21,7 @@ export function ChatPage() {
   const paramId = params.id ?? null
 
   const agents = useForge((s) => s.agents)
-  const sessions = useForge((s) => s.sessions)
+  const conversations = useForge((s) => s.conversations)
   const views = useForge((s) => s.views)
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
@@ -29,7 +29,7 @@ export function ChatPage() {
   const expireHydration = useForge((s) => s.expireHydration)
   const sendPrompt = useForge((s) => s.sendPrompt)
   const cancel = useForge((s) => s.cancel)
-  const archiveSession = useForge((s) => s.archiveSession)
+  const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
   const setDrawer = useForge((s) => s.setDrawer)
 
@@ -39,7 +39,7 @@ export function ChatPage() {
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
 
-  // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
+  // URL → 激活（刷新/直达 /conversations/:id 续看；参数不变不重复 attach）
   useEffect(() => {
     if (lastParamRef.current === paramId) return
     lastParamRef.current = paramId
@@ -48,7 +48,7 @@ export function ChatPage() {
   }, [paramId])
 
   const view = activeId ? views[activeId] : undefined
-  const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
+  const activeSum = activeId ? conversations.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
   // 挂起交互请求条数（权限确认 + 结构化提问的待决项；聊天头角标）
@@ -98,7 +98,7 @@ export function ChatPage() {
     void (async () => {
       let txt = ''
       try {
-        const page = await sessionHistory(id, { limit: 30 })
+        const page = await conversationHistory(id, { limit: 30 })
         const last = [...page.events].reverse().find((ev) => ev.type === Ev.UserMessage)
         if (last && typeof last.payload?.text === 'string') txt = last.payload.text
       } catch {
@@ -137,11 +137,11 @@ export function ChatPage() {
     if (!activeId || !activeSum?.agent_id) return
     const agentId = activeSum.agent_id
     try {
-      await archiveSession(activeId, true)
+      await archiveConversation(activeId, true)
       showToast('当前会话已归档，可随时从「归档」恢复')
       navigate(`/new?agent=${encodeURIComponent(agentId)}`)
     } catch {
-      /* archiveSession 内部已 toast 错误 */
+      /* archiveConversation 内部已 toast 错误 */
     }
   }
 
@@ -190,7 +190,6 @@ export function ChatPage() {
             }}
           >
             <Pill maxWidth={180}>{agent ? agent.name : agentNameOf(agents, activeSum?.agent_id)}</Pill>
-            <span>{activeSum?.runtime ?? '—'}</span>
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>
@@ -310,7 +309,7 @@ export function ChatPage() {
 
   const renderEmptyTranscript = () => {
     const a = agent
-    const agentDesc = a ? `${a.name}（${a.runtime}）` : activeId ?? '该会话'
+    const agentDesc = a ? `${a.name}` : activeId ?? '该会话'
     return (
       <div
         style={{
@@ -351,7 +350,7 @@ export function ChatPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        <SessionRail onCreate={() => navigate('/new')} />
+        <ConversationRail onCreate={() => navigate('/new')} />
         {drawerOpen && (
           <div
             className="fg-scrim-mobile"
@@ -433,9 +432,9 @@ export function ChatPage() {
       </div>
       <StatusBar />
       {activeId && (
-        <SessionDetailDrawer
+        <ConversationDetailDrawer
           open={detailOpen}
-          sessionId={activeId}
+          conversationId={activeId}
           onClose={() => setDetailOpen(false)}
         />
       )}

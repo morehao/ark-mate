@@ -5,14 +5,13 @@ import { tokens } from '@ark/ui'
 import { useForge } from '../store'
 
 const NAV = [
-  { to: '/sessions', label: '问答' },
+  { to: '/conversations', label: '问答' },
   { to: '/agents', label: 'Agents' },
-  { to: '/runtimes', label: 'Runtimes' },
   { to: '/settings', label: '设置' },
 ] as const
 
 function isNavActive(pathname: string, to: string): boolean {
-  if (to === '/sessions') return pathname.startsWith('/sessions')
+  if (to === '/conversations') return pathname.startsWith('/conversations')
   return pathname === to
 }
 
@@ -31,7 +30,7 @@ function navStyle(active: boolean): CSSProperties {
 /** 顶栏（console.html .appbar）：burger + logo + 视图 chip + 管理入口 + WS 状态。 */
 export function TopBar() {
   const location = useLocation()
-  const sessions = useForge((s) => s.sessions)
+  const conversations = useForge((s) => s.conversations)
   const wsState = useForge((s) => s.wsState)
   const setDrawer = useForge((s) => s.setDrawer)
 
@@ -82,7 +81,7 @@ export function TopBar() {
       </button>
 
       <NavLink
-        to="/sessions"
+        to="/conversations"
         title="ark-forge 问答控制台"
         style={{
           fontSize: 15,
@@ -113,9 +112,9 @@ export function TopBar() {
         }}
       >
         {current.label}
-        {current.to === '/sessions' && (
+        {current.to === '/conversations' && (
           <span style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textSecondary }}>
-            {String(sessions.length).padStart(2, '0')}
+            {String(conversations.length).padStart(2, '0')}
           </span>
         )}
       </span>

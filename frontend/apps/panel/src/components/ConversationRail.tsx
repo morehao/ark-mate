@@ -12,10 +12,10 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark/ui'
-import { Dot, sessionStatusMeta } from '@ark/ui'
+import { Dot, conversationStatusMeta } from '@ark/ui'
 import type { MenuProps } from 'antd'
-import type { SessionSearchHit, SessionSummary } from '@ark/types'
-import { sessionSearch } from '@ark/api'
+import type { ConversationSearchHit, ConversationSummary } from '@ark/types'
+import { conversationSearch } from '@ark/api'
 import { useForge } from '../store'
 import { agentNameOf, titleFor } from '../console/util'
 
@@ -24,12 +24,14 @@ interface Props {
 }
 
 /** 置顶组 + 按创建日分组的未置顶会话（轻量时间线管理面）。 */
-function groupSessions(all: SessionSummary[]): Array<{ label: string; items: SessionSummary[]; pinned: boolean }> {
-  const groups: Array<{ label: string; items: SessionSummary[]; pinned: boolean }> = []
+function groupConversations(
+  all: ConversationSummary[],
+): Array<{ label: string; items: ConversationSummary[]; pinned: boolean }> {
+  const groups: Array<{ label: string; items: ConversationSummary[]; pinned: boolean }> = []
   const pinned = all.filter((s) => s.pinned)
   if (pinned.length > 0) groups.push({ label: '置顶', items: pinned, pinned: true })
   const rest = all.filter((s) => !s.pinned)
-  const byDay = new Map<string, SessionSummary[]>()
+  const byDay = new Map<string, ConversationSummary[]>()
   for (const s of rest) {
     const label = dayLabel(s.created_at)
     const arr = byDay.get(label)
@@ -84,19 +86,18 @@ function ViewTab({
 }
 
 /** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）+ 底座 foot。 */
-export function SessionRail({ onCreate }: Props) {
+export function ConversationRail({ onCreate }: Props) {
   const navigate = useNavigate()
-  const sessions = useForge((s) => s.sessions)
+  const conversations = useForge((s) => s.conversations)
   const agents = useForge((s) => s.agents)
-  const runtimes = useForge((s) => s.runtimes)
   const views = useForge((s) => s.views)
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
   const railMode = useForge((s) => s.railMode)
   const setDrawer = useForge((s) => s.setDrawer)
   const togglePin = useForge((s) => s.togglePin)
-  const archiveSession = useForge((s) => s.archiveSession)
-  const renameSession = useForge((s) => s.renameSession)
+  const archiveConversation = useForge((s) => s.archiveConversation)
+  const renameConversation = useForge((s) => s.renameConversation)
   const setRailMode = useForge((s) => s.setRailMode)
 
   // 行内「重命名」弹窗
@@ -105,7 +106,7 @@ export function SessionRail({ onCreate }: Props) {
 
   // 会话搜索：后端扫 transcript（标题/Agent/用户消息正文；含归档），250ms 防抖。
   const [searchQ, setSearchQ] = useState('')
-  const [hits, setHits] = useState<SessionSearchHit[] | null>(null) // null = 未搜索
+  const [hits, setHits] = useState<ConversationSearchHit[] | null>(null) // null = 未搜索
   const [searchBusy, setSearchBusy] = useState(false)
 
   useEffect(() => {
@@ -118,7 +119,7 @@ export function SessionRail({ onCreate }: Props) {
     let live = true
     const t = setTimeout(() => {
       setSearchBusy(true)
-      sessionSearch(q)
+      conversationSearch(q)
         .then((h) => live && setHits(h))
         .catch(() => live && setHits([]))
         .finally(() => live && setSearchBusy(false))
@@ -132,9 +133,9 @@ export function SessionRail({ onCreate }: Props) {
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
   const archivedView = railMode === 'archived'
 
-  const openSession = (id: string) => {
+  const openConversation = (id: string) => {
     setDrawer(false)
-    navigate(`/sessions/${id}`)
+    navigate(`/conversations/${id}`)
   }
 
   const submitRename = () => {
@@ -142,17 +143,17 @@ export function SessionRail({ onCreate }: Props) {
     const t = draft.trim()
     const target = renaming
     setRenaming(null)
-    if (t && t !== target.init) void renameSession(target.id, t)
+    if (t && t !== target.init) void renameConversation(target.id, t)
   }
 
-  const openHit = (h: SessionSearchHit) => {
+  const openHit = (h: ConversationSearchHit) => {
     setSearchQ('')
     setHits(null)
-    openSession(h.id)
+    openConversation(h.id)
   }
 
   /** 搜索结果行：标题 + 命中片段 + 底座/归档/命中数。 */
-  const renderHit = (h: SessionSearchHit) => (
+  const renderHit = (h: ConversationSearchHit) => (
     <button
       key={h.id}
       type="button"
@@ -249,9 +250,9 @@ export function SessionRail({ onCreate }: Props) {
     </button>
   )
 
-  const renderItem = (sm: SessionSummary) => {
+  const renderItem = (sm: ConversationSummary) => {
     const view = views[sm.id]
-    const meta = sessionStatusMeta(sm.status)
+    const meta = conversationStatusMeta(sm.status)
     const running = sm.status === 'in_progress'
     const on = sm.id === activeId
 
@@ -276,8 +277,8 @@ export function SessionRail({ onCreate }: Props) {
     ]
     const onMenu: MenuProps['onClick'] = ({ key }) => {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
-      else if (key === 'archive') void archiveSession(sm.id, true)
-      else if (key === 'restore') void archiveSession(sm.id, false)
+      else if (key === 'archive') void archiveConversation(sm.id, true)
+      else if (key === 'restore') void archiveConversation(sm.id, false)
     }
 
     return (
@@ -300,7 +301,7 @@ export function SessionRail({ onCreate }: Props) {
           type="button"
           role="listitem"
           disabled={busy && !on}
-          onClick={() => openSession(sm.id)}
+          onClick={() => openConversation(sm.id)}
           style={{
             flex: 1,
             minWidth: 0,
@@ -484,14 +485,14 @@ export function SessionRail({ onCreate }: Props) {
               {hits.map(renderHit)}
             </>
           )
-        ) : sessions.length === 0 ? (
+        ) : conversations.length === 0 ? (
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
             {archivedView
               ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
-              : '暂无会话。点击右上「新建会话」，选择 Agent 底座并发起首轮问答。'}
+              : '暂无会话。点击右上「新建会话」，选择 Agent 并发起首轮问答。'}
           </div>
         ) : (
-          groupSessions(sessions).map((g) => (
+          groupConversations(conversations).map((g) => (
             <div key={g.label} role="group" aria-label={g.label}>
               <div
                 style={{
@@ -511,32 +512,6 @@ export function SessionRail({ onCreate }: Props) {
               </div>
               {g.items.map(renderItem)}
             </div>
-          ))
-        )}
-      </div>
-
-      <div
-        style={{
-          flex: 'none',
-          borderTop: `1px solid ${tokens.border}`,
-          padding: '10px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          fontFamily: tokens.fontMono,
-          fontSize: 10.5,
-          color: tokens.textSecondary,
-        }}
-      >
-        {runtimes.length === 0 ? (
-          <span>底座未知（服务不可达）</span>
-        ) : (
-          runtimes.map((rt) => (
-            <span key={rt.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Dot color={tokens.success} size={6} />
-              {rt.name}
-            </span>
           ))
         )}
       </div>

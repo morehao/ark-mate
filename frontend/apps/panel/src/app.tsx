@@ -8,7 +8,6 @@ import { useForge } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { StartPage } from './pages/StartPage'
 import { AgentsPage } from './pages/AgentsPage'
-import { RuntimesPage } from './pages/RuntimesPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function Manage({ children }: { children: ReactNode }) {
@@ -20,7 +19,7 @@ function Manage({ children }: { children: ReactNode }) {
 }
 
 export function App() {
-  // 启动一次：常驻 WS 连接 + 拉取 agents/runtimes/sessions（跨路由共享一份状态）
+  // 启动一次：常驻 WS 连接 + 拉取 agents/conversations（跨路由共享一份状态）
   useEffect(() => {
     useForge.getState().boot()
   }, [])
@@ -69,21 +68,13 @@ export function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/new" replace />} />
           <Route path="/new" element={<StartPage />} />
-          <Route path="/sessions" element={<ChatPage />} />
-          <Route path="/sessions/:id" element={<ChatPage />} />
+          <Route path="/conversations" element={<ChatPage />} />
+          <Route path="/conversations/:id" element={<ChatPage />} />
           <Route
             path="/agents"
             element={
               <Manage>
                 <AgentsPage />
-              </Manage>
-            }
-          />
-          <Route
-            path="/runtimes"
-            element={
-              <Manage>
-                <RuntimesPage />
               </Manage>
             }
           />
