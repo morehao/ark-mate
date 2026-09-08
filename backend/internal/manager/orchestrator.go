@@ -509,6 +509,19 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		return nil, err
 	}
 	cli = client
+	// §16.6/§17.4 开放项实测：握手能力断言留档日志（观测用，无行为变化）——
+	// 底座调研/诊断依赖（sessionCapabilities resume/list/fork/close、loadSession 声明）。
+	caps := client.Capabilities()
+	sc := caps.Raw.SessionCapabilities
+	o.logger.Debug("runtime 握手能力",
+		"runtime", spec.ID,
+		"sessions_persistent", caps.SessionsPersistent,
+		"multi_session_concurrent", caps.MultiSessionConcurrent,
+		"load_session", caps.Raw.LoadSession,
+		"resume", sc.Resume != nil,
+		"list", sc.List != nil,
+		"fork", sc.Fork != nil,
+		"close", sc.Close != nil)
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
 	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, started: time.Now()}
