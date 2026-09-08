@@ -134,6 +134,14 @@ func TestEchoRuntimeExecutableProjection(t *testing.T) {
 			t.Fatalf("%s 应为 acl 错误且带 code: %v", tc.name, err)
 		}
 	}
+
+	// Resume 实测守卫（2026-09-08）：echo 未声明 sessionCapabilities.resume →
+	// acl.ResumeSession 在能力门被拒（resume_session_unsupported，wire 前），不会发到 agent。
+	if _, err := cl.ResumeSession(ctx, sess.ID(), acl.SessionOptions{Cwd: "/work"}); err == nil {
+		t.Fatal("echo 未声明 resume 能力，ResumeSession 应被拒")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "resume_session_unsupported" {
+		t.Fatalf("期望 resume_session_unsupported，got %v", err)
+	}
 }
 
 // TestThreeProjectionConstructors 验证 opencode / deepseekharness / echo 三投影各自携带

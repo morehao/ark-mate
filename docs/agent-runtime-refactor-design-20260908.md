@@ -685,3 +685,13 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
 - **enable 决策（遗留，部署评审）**：目标目录为真实 opencode 用户配置时须运维显式开启；
   删除联动（平台 skill 移除 → 物化清理）留后续（当前启动全量重写幂等）。dsh 未实证 → 降级
   只列不物化。
+
+### 16.6 Resume 承载矩阵（§16 切片 C，实测/记录 2026-09-08）
+
+- **echo**：未声明 `sessionCapabilities.resume` → `acl.ResumeSession` 在**能力门被拒**
+  （`resume_session_unsupported`，wire 前，不会发到 agent）——实测守卫单测锁定
+  （注：echo agent 有 ResumeSession handler 但无能力声明，能力门先行）。
+- **opencode / dsh**：未实证（需 ACP 握手能力断言 + 跨进程恢复探测；forge P0 明确不做进程
+  重启断点恢复，见 ADR-4 P3）→ 投影 `Resume` 保持 `unsupported_resume`。
+- 结论：三投影「不支持面」明确；与 §5.6 原生 resume 蓝图的对齐点 = `acl.Client.ResumeSession`
+  能力门（已实现，按 caps 门控）+ 重建投影；backend-wide 多会话重构时按底座探测接入。
