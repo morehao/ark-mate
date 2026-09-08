@@ -77,6 +77,69 @@ export interface ResolvePermissionResp {
   allowed: boolean
 }
 
+// ——— 结构化提问通道（ACP elicitation/* ↔ 用户提交） ———
+
+/** 单选枚举选项（oneOf：带标题的 const 选项；enum 为无标题裸值列表）。 */
+export interface ElicitationEnumOption {
+  const: string
+  title: string
+}
+
+/** elicitation 表单字段的 JSON Schema 属性（宿主据此渲染控件；宽类型透传服务端原文）。 */
+export interface ElicitationFieldSchema {
+  type?: 'string' | 'integer' | 'number' | 'boolean' | 'array'
+  title?: string
+  description?: string
+  default?: unknown
+  enum?: string[]
+  oneOf?: ElicitationEnumOption[]
+  minLength?: number
+  maxLength?: number
+  pattern?: string
+  minimum?: number
+  maximum?: number
+  minItems?: number
+  maxItems?: number
+  /** array（多选）模式的允许项定义。 */
+  items?: { type?: string; enum?: string[]; oneOf?: ElicitationEnumOption[] }
+}
+
+/** elicitation form 请求的 JSON Schema 对象。 */
+export interface ElicitationFormSchema {
+  type?: string
+  title?: string
+  description?: string
+  properties?: Record<string, ElicitationFieldSchema>
+  required?: string[]
+}
+
+export type ElicitationMode = 'form' | 'url'
+
+/** 挂起结构化提问（服务端 /elicitations 与 WS 事件共用载荷）。 */
+export interface ElicitationResp {
+  elicitation_id: string
+  session_id: string
+  mode: ElicitationMode
+  message: string
+  schema?: ElicitationFormSchema // form 模式
+  url?: string // url 模式
+  timeout_at: string // ISO；过期即 service 自动取消
+}
+
+export type ElicitationAction = 'accept' | 'decline' | 'cancel'
+
+/** 决策体：accept=提交（content 为表单内容对象）；decline=拒绝提供；cancel=取消本次提问。 */
+export interface ResolveElicitationReq {
+  elicitation_id: string
+  action: ElicitationAction
+  content?: Record<string, unknown>
+}
+
+export interface ResolveElicitationResp {
+  elicitation_id: string
+  action: ElicitationAction
+}
+
 export interface CreateSessionReq {
   agent_id: string
   prompt: string

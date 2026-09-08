@@ -261,6 +261,45 @@ func (s *Service) PendingPermissions(id string) []PermissionItem {
 	return s.orch.PendingPermissions(id)
 }
 
+// PendingElicitations 直接透传编排器的挂起结构化提问（供 ListPendingElicitations 复用）。
+func (s *Service) PendingElicitations(id string) []ElicitationItem {
+	if s.orch == nil {
+		return nil
+	}
+	return s.orch.PendingElicitations(id)
+}
+
+// ListPendingElicitations 列出某会话的挂起结构化提问。
+func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]handler.ElicitationResp, error) {
+	if !s.hasSession(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	pending := s.PendingElicitations(id)
+	out := make([]handler.ElicitationResp, 0, len(pending))
+	for _, p := range pending {
+		out = append(out, toElicitationResp(p))
+	}
+	return out, nil
+}
+
+// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel；accept 可带 content）。
+func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error {
+	if !s.hasSession(id) {
+		return s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	if s.orch == nil {
+		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+	}
+	ok, err := s.orch.ResolveElicitation(elicitationID, action, content)
+	if err != nil {
+		return s.restErr(err)
+	}
+	if !ok {
+		return s.restErr(acl.NewError(acl.ClassRequest, "elicitation_not_found", fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil))
+	}
+	return nil
+}
+
 // AlwaysAllowed 直接透传编排器的会话级「始终允许」记忆（供 GetSession 复用）。
 func (s *Service) AlwaysAllowed(id string) []AlwaysAllowItem {
 	if s.orch == nil {
@@ -299,6 +338,23 @@ func toPermissionResp(p PermissionItem) handler.PermissionResp {
 		Options:   opts,
 		TimeoutAt: p.TimeoutAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// toElicitationResp 把 manager.ElicitationItem 折叠为 handler.ElicitationResp。
+func toElicitationResp(p ElicitationItem) handler.ElicitationResp {
+	resp := handler.ElicitationResp{
+		ElicitationID: p.ID,
+		SessionID:     p.SessionID,
+		Mode:          p.Mode,
+		Message:       p.Message,
+		TimeoutAt:     p.TimeoutAt.UTC().Format(time.RFC3339),
+	}
+	if p.Mode == "form" {
+		resp.Schema = p.Schema
+	} else {
+		resp.URL = p.URL
+	}
+	return resp
 }
 
 // agentForRuntime 返回指定 runtime 的默认播种 Agent。
@@ -393,10 +449,12 @@ func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
 
 // deriveTitle 从首条用户消息推导会话标题（单行、截断、折叠空白）。
+// 截断按 rune 数判断（len() 是字节数，CJK 一个字符占 3 字节：按字节判断会
+// 在「字节够长但字符不足 48」时对 runes[:48] 越界 panic）。
 func deriveTitle(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
-	if len(text) > 48 {
-		runes := []rune(text)
+	runes := []rune(text)
+	if len(runes) > 48 {
 		text = string(runes[:48]) + "…"
 	}
 	return text

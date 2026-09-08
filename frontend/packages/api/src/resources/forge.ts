@@ -5,9 +5,12 @@ import type {
   CancelSessionResp,
   CreateSessionReq,
   CreateSessionResp,
+  ElicitationResp,
   PermissionResp,
   PromptReq,
   PromptResp,
+  ResolveElicitationReq,
+  ResolveElicitationResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
   RevokeAlwaysReq,
@@ -66,6 +69,14 @@ export const revokeAlways = (id: string, req: RevokeAlwaysReq = {}): Promise<{ t
     `/forge/sessions/${encodeURIComponent(id)}/permissions/always/revoke`,
     req,
   )
+
+/** 列出会话的挂起结构化提问（elicitation 表单/URL 卡）。 */
+export const listPendingElicitations = (id: string): Promise<ElicitationResp[]> =>
+  http.get<ElicitationResp[]>(`/forge/sessions/${encodeURIComponent(id)}/elicitations`)
+
+/** 对挂起结构化提问决策（accept/decline/cancel；accept 可带 content）。 */
+export const resolveElicitation = (id: string, req: ResolveElicitationReq): Promise<ResolveElicitationResp> =>
+  http.post<ResolveElicitationResp>(`/forge/sessions/${encodeURIComponent(id)}/elicitation`, req)
 
 /** 会话历史页（事件按 seq 升序）。 */
 export interface SessionHistoryPage {

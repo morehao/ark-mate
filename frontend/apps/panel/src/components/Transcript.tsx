@@ -1,8 +1,8 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Button } from 'antd'
+import { Button, Checkbox, Input, InputNumber, Radio } from 'antd'
 import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import type { PermissionOption, StreamEntry } from '@ark/types'
+import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark/types'
 import { useForge, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { parseMsg } from '../console/message'
@@ -175,6 +175,327 @@ function PermissionCard({ e }: { e: StreamEntry }) {
   )
 }
 
+/** 单选项可读名（oneOf 标题优先；enum/多选项用裸值）。 */
+function labelOf(value: unknown, titles?: { const: string; title: string }[]): string {
+  if (titles) {
+    for (const o of titles) if (o.const === value) return o.title
+  }
+  return String(value ?? '')
+}
+
+/** 提交内容 → 可读摘要（键稳定序，单选/多选回显标题，供已决卡片展示）。 */
+function summarizeContent(schema: StreamEntry['schema'], content?: Record<string, unknown>): string {
+  if (!content || Object.keys(content).length === 0) return '（未提供内容）'
+  const props = schema?.properties ?? {}
+  const entries = Object.keys(content)
+    .sort()
+    .map((k) => {
+      const f = props[k]
+      const v = content[k]
+      if (f?.type === 'array' && Array.isArray(v)) {
+        const titles = f.items?.oneOf
+        return `${k} = [${(v as unknown[]).map((x) => labelOf(x, titles)).join(', ')}]`
+      }
+      if (f?.type === 'boolean') return `${k} = ${v ? '是' : '否'}`
+      return `${k} = ${labelOf(v, f?.oneOf)}`
+    })
+  return entries.join('；')
+}
+
+/** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
+function ElicitationCard({ e }: { e: StreamEntry }) {
+  const respond = useForge((s) => s.respondElicitation)
+  const expire = useForge((s) => s.expireElicitation)
+  const resolved = e.resolved ?? false
+  const timeoutAt = e.timeoutAt
+  const busy = useForge((s) => {
+    const v = s.activeId ? s.views[s.activeId] : undefined
+    return v?.streaming ?? false
+  })
+
+  // 服务端超时自动取消的收敛：客户端按 timeout_at 定时把未决卡片标记为已收敛（同宿主机器，时钟偏差可忽略）。
+  useEffect(() => {
+    if (resolved || !timeoutAt || !e.elicitationId) return
+    const ms = new Date(timeoutAt).getTime() - Date.now()
+    if (ms <= 0) {
+      expire(e.elicitationId)
+      return
+    }
+    const timer = window.setTimeout(() => expire(e.elicitationId as string), ms + 60)
+    return () => window.clearTimeout(timer)
+  }, [resolved, timeoutAt, e.elicitationId, expire])
+
+  const form = e.mode === 'url'
+    ? null
+    : { properties: e.schema?.properties ?? {}, required: new Set(e.schema?.required ?? []) }
+
+  const [answers, setAnswers] = useState<Record<string, unknown>>(() => {
+    const init: Record<string, unknown> = {}
+    if (form) {
+      for (const [k, f] of Object.entries(form.properties)) {
+        if (f.default !== undefined) init[k] = f.default
+        if (f.type === 'boolean' && init[k] === undefined) init[k] = false
+      }
+    }
+    return init
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const validate = (): Record<string, unknown> | null => {
+    if (!form) return null
+    const out: Record<string, unknown> = {}
+    for (const [k, f] of Object.entries(form.properties)) {
+      const v = answers[k]
+      const required = form.required.has(k)
+      if (f.type === 'boolean') {
+        out[k] = v === true || v === false ? v : false
+        continue
+      }
+      if (v === undefined || v === null || v === '') {
+        if (required) {
+          setError(`「${f.title ?? k}」为必填项`)
+          return null
+        }
+        continue
+      }
+      if (f.type === 'array') {
+        const list = Array.isArray(v) ? v : []
+        if (required && list.length === 0) {
+          setError(`「${f.title ?? k}」至少选择 1 项`)
+          return null
+        }
+        if (f.minItems != null && list.length < f.minItems) {
+          setError(`「${f.title ?? k}」至少选择 ${f.minItems} 项`)
+          return null
+        }
+        if (f.maxItems != null && list.length > f.maxItems) {
+          setError(`「${f.title ?? k}」最多选择 ${f.maxItems} 项`)
+          return null
+        }
+        out[k] = list
+        continue
+      }
+      if (f.type === 'integer' || f.type === 'number') {
+        const n = typeof v === 'number' ? v : Number(v)
+        if (!Number.isFinite(n)) {
+          setError(`「${f.title ?? k}」需为数字`)
+          return null
+        }
+        if (f.type === 'integer' && !Number.isInteger(n)) {
+          setError(`「${f.title ?? k}」需为整数`)
+          return null
+        }
+        if (f.minimum != null && n < f.minimum) {
+          setError(`「${f.title ?? k}」不能小于 ${f.minimum}`)
+          return null
+        }
+        if (f.maximum != null && n > f.maximum) {
+          setError(`「${f.title ?? k}」不能大于 ${f.maximum}`)
+          return null
+        }
+        out[k] = n
+        continue
+      }
+      const str = String(v)
+      if (f.minLength != null && str.length < f.minLength) {
+        setError(`「${f.title ?? k}」至少 ${f.minLength} 个字符`)
+        return null
+      }
+      if (f.maxLength != null && str.length > f.maxLength) {
+        setError(`「${f.title ?? k}」至多 ${f.maxLength} 个字符`)
+        return null
+      }
+      out[k] = str
+    }
+    return out
+  }
+
+  const submit = () => {
+    const content = validate()
+    if (!e.elicitationId) return
+    if (form && content === null) return // 校验失败，错误已置位
+    setError(null)
+    void respond(e.elicitationId, { action: 'accept', content: content ?? {}, label: '已提交' })
+  }
+  const decline = () => {
+    if (!e.elicitationId) return
+    setError(null)
+    void respond(e.elicitationId, { action: 'decline', label: '已拒绝' })
+  }
+  const cancel = () => {
+    if (!e.elicitationId) return
+    setError(null)
+    void respond(e.elicitationId, { action: 'cancel', label: '已取消' })
+  }
+
+  const fieldTitle = (k: string, f: NonNullable<typeof form>['properties'][string]): string =>
+    `${f?.title ?? k}${form?.required.has(k) ? ' *' : ''}`
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+      <Role>assistant · question</Role>
+      <div
+        style={{
+          border: `1px solid ${tokens.primary}`,
+          borderRadius: 12,
+          background: tokens.surface,
+          padding: '11px 13px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          maxWidth: 720,
+          minWidth: 0,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 620, color: tokens.text }}>{e.message || '需要你确认一些信息'}</span>
+          <span style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textSecondary }}>
+            elicitation · {form ? 'form' : 'url'}
+            {e.elicitationId ? ` · ${e.elicitationId}` : ''}
+          </span>
+        </div>
+
+        {resolved ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              fontFamily: tokens.fontMono,
+              fontSize: 11,
+              color: tokens.textSecondary,
+              overflowWrap: 'anywhere',
+            }}
+          >
+            <CheckOutlined style={{ fontSize: 11, color: tokens.success }} />
+            {e.decision ?? '已响应'}
+            {e.content && Object.keys(e.content).length > 0 && `：${summarizeContent(e.schema, e.content)}`}
+          </span>
+        ) : form ? (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+              {Object.entries(form.properties).map(([k, f]) => (
+                <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: tokens.textSecondary }}>{fieldTitle(k, f)}</span>
+                  {f?.description && (
+                    <span style={{ fontSize: 11, color: tokens.textPlaceholder }}>{f.description}</span>
+                  )}
+                  <ElicitationField k={k} f={f} value={answers[k]} onChange={(v) => setAnswers((a) => ({ ...a, [k]: v }))} />
+                </div>
+              ))}
+            </div>
+            {error && (
+              <span style={{ fontSize: 11.5, color: tokens.error }}>{error}</span>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ borderRadius: 8, margin: 0 }}>
+                提交
+              </Button>
+              <Button size="small" danger disabled={busy} onClick={decline} style={{ borderRadius: 8, margin: 0 }}>
+                拒绝提供
+              </Button>
+              <Button size="small" disabled={busy} onClick={cancel} style={{ borderRadius: 8, margin: 0 }}>
+                取消
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              {e.url && (
+                <a href={e.url} target="_blank" rel="noreferrer" style={{ color: tokens.primary, fontSize: 12.5, overflowWrap: 'anywhere' }}>
+                  {e.url}
+                </a>
+              )}
+              <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>完成外部操作后回到这里告知 agent（URL 模式演示）。</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ borderRadius: 8, margin: 0 }}>
+                我已完成
+              </Button>
+              <Button size="small" danger disabled={busy} onClick={decline} style={{ borderRadius: 8, margin: 0 }}>
+                拒绝
+              </Button>
+              <Button size="small" disabled={busy} onClick={cancel} style={{ borderRadius: 8, margin: 0 }}>
+                取消
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** 单个表单字段控件：单选（enum/oneOf）→ radio；多选（array）→ checkbox；布尔 → 是/否；其余按类型输入。 */
+function ElicitationField({
+  k,
+  f,
+  value,
+  onChange,
+}: {
+  k: string
+  f: ElicitationFieldSchema
+  value: unknown
+  onChange: (v: unknown) => void
+}) {
+  if (f.type === 'array') {
+    const items = f.items
+    const opts = items?.oneOf ?? (items?.enum ?? []).map((v) => ({ const: v, title: v }))
+    const chosen = Array.isArray(value) ? (value as string[]) : []
+    return (
+      <Checkbox.Group
+        options={opts.map((o) => ({ label: o.title, value: o.const }))}
+        value={chosen}
+        onChange={(vals) => onChange(vals as string[])}
+        style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+      />
+    )
+  }
+  if (f.oneOf || (f.type === 'string' && f.enum)) {
+    const opts = f.oneOf ?? (f.enum ?? []).map((v) => ({ const: v, title: v }))
+    return (
+      <Radio.Group value={value as string} onChange={(ev) => onChange(ev.target.value)}>
+        {opts.map((o) => (
+          <Radio key={o.const} value={o.const}>
+            {o.title}
+          </Radio>
+        ))}
+      </Radio.Group>
+    )
+  }
+  if (f.type === 'boolean') {
+    return (
+      <Radio.Group
+        value={value === true || value === false ? value : undefined}
+        onChange={(ev) => onChange(ev.target.value === true)}
+      >
+        <Radio value={false as unknown}>否</Radio>
+        <Radio value={true as unknown}>是</Radio>
+      </Radio.Group>
+    )
+  }
+  if (f.type === 'integer' || f.type === 'number') {
+    return (
+      <InputNumber
+        size="small"
+        style={{ width: 160 }}
+        value={typeof value === 'number' ? value : undefined}
+        onChange={(v) => onChange(v)}
+      />
+    )
+  }
+  return (
+    <Input
+      size="small"
+      value={typeof value === 'string' ? value : ''}
+      onChange={(ev) => onChange(ev.target.value)}
+      placeholder={f?.description || `${k}…`}
+      style={{ maxWidth: 420 }}
+    />
+  )
+}
+
 /** 消息头右侧的「复制整条消息」小按钮（Clipboard API + execCommand 兜底）。 */
 function MsgCopy({ text }: { text: string }) {
   const toast = useForge((s) => s.showToast)
@@ -289,6 +610,8 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
   switch (e.kind) {
     case 'permission':
       return <PermissionCard e={e} />
+    case 'elicitation':
+      return <ElicitationCard e={e} />
     case 'user':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>

@@ -26,10 +26,10 @@ import (
 const (
 	ID      = "echo"
 	Name    = "echo"
-	Version = "echo acp-demo（本地自包含权限演示）"
-	Notes   = "自包含本地演示：每轮 prompt 发起一次真实权限确认（allow/reject × once/always），" +
-		"用于端到端验证权限确认通道；无需模型 key / 外部安装。以 forge acp-demo 子进程形态提供 ACP server；" +
-		"输入首次含 boom 会模拟一次运行失败（供错误 turn 一键重试演示）。"
+	Version = "echo acp-demo（本地自包含：权限确认 + elicitation 结构化提问演示）"
+	Notes   = "自包含本地演示：每轮 prompt 发起一次真实权限确认（allow/reject × once/always，权限确认通道 e2e）；" +
+		"输入含「单选 / 多选 / 表单 / 链接」时改为发起 elicitation 结构化提问（表单或 URL 卡，结构化提问通道 e2e）。" +
+		"无需模型 key / 外部安装；以 forge acp-demo 子进程形态提供 ACP server；输入首次含 boom 会模拟一次运行失败（供错误 turn 一键重试演示）。"
 )
 
 // Args 是 serve/manager 拉起本 runtime 的子命令参数。
@@ -135,8 +135,11 @@ func (a *EchoAgent) SetSessionConfigOption(context.Context, acpsdk.SetSessionCon
 	return acpsdk.SetSessionConfigOptionResponse{}, nil
 }
 
-// Prompt 一轮演示：先流式思考/正文，再发起真实权限确认；按用户决策回显结果与模拟工具卡。
-// 输入首次含 "boom" 的轮次会直接返回错误（模拟一次运行失败，供重试链路演示；同会话下一轮恢复）。
+// Prompt 一轮演示：
+//   - 输入含 boom → 首次返回错误（模拟失败轮，供重试链路演示）；
+//   - 含 elicitation 关键词（单选/多选/表单/链接 等）→ 发起一次结构化提问（elicitation/create
+//     表单或 URL 卡），阻塞等待用户提交后回显继续；
+//   - 否则 → 权限确认演示：发起 session/request_permission，按决策回显结果与模拟工具卡。
 func (a *EchoAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	sid := params.SessionId
 	text := promptText(params.Prompt)
@@ -144,6 +147,10 @@ func (a *EchoAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 
 	if a.markBoomOnce(sid, text) {
 		return acpsdk.PromptResponse{}, errors.New("boom: 模拟一次运行失败（演示用，同会话下一轮将恢复正常）")
+	}
+	// elicitation 场景（结构化提问通道演示）：命中即收尾本轮（场景内部自行推送/回显）。
+	if handled, err := a.maybeElicitation(ctx, sid, text); handled {
+		return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, err
 	}
 
 	push := func(updates ...acpsdk.SessionUpdate) {

@@ -36,6 +36,10 @@ type Service interface {
 	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error
 	// RevokeAlways 撤销会话级「始终允许」记忆（title+kind 均空 = 一键撤销全部）。
 	RevokeAlways(ctx context.Context, id, title, kind string) error
+	// ListPendingElicitations 列出某会话的挂起结构化提问（elicitation/create）。
+	ListPendingElicitations(ctx context.Context, id string) ([]ElicitationResp, error)
+	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
+	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
 }
 
 // AgentResp Agent 的对外表示。
@@ -162,6 +166,24 @@ type PermissionResolveReq struct {
 	OptionID string `json:"option_id"`
 	Always   bool   `json:"always"`
 	Allowed  bool   `json:"allowed"`
+}
+
+// ElicitationResp 挂起结构化提问的对外表示。
+type ElicitationResp struct {
+	ElicitationID string `json:"elicitation_id"`
+	SessionID     string `json:"session_id"`
+	Mode          string `json:"mode"` // form | url
+	Message       string `json:"message"`
+	Schema        any    `json:"schema,omitempty"` // form：JSON Schema 对象（UI 据此渲染控件）
+	URL           string `json:"url,omitempty"`    // url：引导用户打开的链接
+	TimeoutAt     string `json:"timeout_at"`
+}
+
+// ElicitationResolveReq 结构化提问决策请求体。
+type ElicitationResolveReq struct {
+	ElicitationID string         `json:"elicitation_id" binding:"required"`
+	Action        string         `json:"action" binding:"required"` // accept | decline | cancel
+	Content       map[string]any `json:"content,omitempty"`         // accept 时用户提交的表单内容
 }
 
 // Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。
