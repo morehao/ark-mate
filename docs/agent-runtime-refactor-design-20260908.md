@@ -591,7 +591,16 @@ runtime 作为 hint），不保留 runtime 身份语义。
   server 加绝对路径校验（坏文件跳过告警；sse/http 走 URL 不受影响）。注入端到端已由 opencode 真底座
   收文 + fake-agent wire 解码验证；dsh 对注入 server 还会要求其真实可握手（/bin/echo 等非 MCP server
   会被拒）——属底座行为，非平台缺陷（dsh 冒烟本体于无注入配置下通过，见上）。
-- **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影可执行半场（§4.2；ModeMapping 待实测），
-  skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7）。P2 验收三项（race 全绿 / echo 全链路 /
-  opencode+dsh 冒烟）均已达成；skill 物化依赖各 runtime 原生 skill 目录约定；Runtime 接口落地涉及
-  orchestrator 会话模型重构与 ModeMapping 实测，建议作为下一设计评审点。
+- **`runtime.Runtime` 接口 + echo 可执行投影（§4.2 会话边界版，2026-09-08）**：
+  `runtime/runtime.go` 落地接口（ID/ManagesOwnContext/Capabilities/ProviderSessionID/Prompt/
+  ApplyMode/ApplyModel/Resume）与平台词汇 Mode（auto/smart_approve/approve/chat）/
+  ModelConfig/PromptRequest（Text 已接入；McpServers/HandoffMemo 规划占位）。
+  **偏差文档化**：本平台一对话即一活跃 ACP 连接（Orchestrator 管连接与决策钩子），故按「会话边界」
+  落地，Prompt 返回 stop reason（事件流在连接层 OnEvent），backend-wide 生命周期管理仍在 Orchestrator。
+  `NewEchoRuntime` 为 echo 投影可执行形态：ID=echo、ManagesOwnContext=true、透传会话 Prompt；
+  无原生模式/模型/持久会话 → Apply*/Resume 显式返回 `unsupported_*` acl 错误（不静默吞掉）。
+  集成测试在**进程内真实 EchoAgent** 上 Dial→NewSession→Prompt×2→契约断言（无子进程依赖）。
+- **P2 剩余（未含，留后续）**：opencode/dsh 投影可执行形态（复刻 EchoRuntime；ModeMapping 待实测
+  回填后 ApplyMode 才有原生映射可落地，open items §6.2/§12）、skill 物化（§5.4）、路由能力匹配/
+  粘滞切片（§7）、Orchestrator 采用 Runtime 接口（会话模型重构评审点）。P2 验收三项（race 全绿 /
+  echo 全链路 / opencode+dsh 冒烟）均已达成，见上。
