@@ -32,7 +32,7 @@ export function StartPage() {
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
 
-  // 预选逻辑：① URL 显式 ?agent= 优先（软清空跳转带同底座）；② 否则上次使用（localStorage）；③ 否则第一个可用。
+  // 预选逻辑：① URL 显式 ?agent= 优先（软清空跳转带同 Agent）；② 否则上次使用（localStorage）；③ 否则第一个可用。
   useEffect(() => {
     if (selectedId && agents.some((a) => a.id === selectedId)) return
     const urlAgent = new URLSearchParams(window.location.search).get('agent')
@@ -95,7 +95,7 @@ export function StartPage() {
             Hi，今天有什么安排？
           </h1>
 
-          {/* 助手胶囊栏（选定底座） */}
+          {/* 助手胶囊栏（选定 Agent） */}
           {agents.length === 0 ? (
             <div style={{ color: tokens.textPlaceholder, fontSize: 12.5 }}>暂无可用 Agent（服务不可达或未播种）</div>
           ) : (
@@ -245,8 +245,8 @@ export function StartPage() {
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 {/* 模型 pill（只读展示，不做选择器——决策 v6③） */}
-                <Pill title="模型由 Agent 底座自身默认决定；本面板不在此选模型。">
-                  模型 · 底座默认
+                <Pill title="模型由 Agent 自身默认决定；本面板不在此选模型。">
+                  模型 · Agent 默认
                 </Pill>
 
                 <Button

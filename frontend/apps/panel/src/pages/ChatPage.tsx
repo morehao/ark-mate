@@ -146,7 +146,7 @@ export function ChatPage() {
   }
 
   const headMenu = {
-    items: [{ key: 'soft-clear', label: '归档并新建会话（同底座）', title: '保留数据到归档，另开同 Agent 新会话' }],
+    items: [{ key: 'soft-clear', label: '归档并新建会话（同 Agent）', title: '保留数据到归档，另开同 Agent 新会话' }],
     onClick: (info: { key: string }) => {
       if (info.key === 'soft-clear') void softClear()
     },
@@ -299,7 +299,7 @@ export function ChatPage() {
       </div>
       <div style={{ fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>开始问答</div>
       <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
-        会话绑定唯一的 Agent 底座。从左侧选择一个会话续看，或新建会话并选择 opencode / deepseek-harness 底座。
+        会话绑定唯一的 Agent。从左侧选择一个会话续看，或新建一个会话。
       </p>
       <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/new')} style={{ marginTop: 4 }}>
         新建会话

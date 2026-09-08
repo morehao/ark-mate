@@ -85,7 +85,7 @@ function ViewTab({
   )
 }
 
-/** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）+ 底座 foot。 */
+/** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）。 */
 export function ConversationRail({ onCreate }: Props) {
   const navigate = useNavigate()
   const conversations = useForge((s) => s.conversations)
@@ -152,7 +152,7 @@ export function ConversationRail({ onCreate }: Props) {
     openConversation(h.id)
   }
 
-  /** 搜索结果行：标题 + 命中片段 + 底座/归档/命中数。 */
+  /** 搜索结果行：标题 + 命中片段 + Agent/归档/命中数。 */
   const renderHit = (h: ConversationSearchHit) => (
     <button
       key={h.id}
