@@ -682,9 +682,14 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
   `Service.MaterializeSkills(dir)` 把 opencode SKILL.md 源 skill 物化到该目录（部分失败
   告警可容忍，全失败才报错）。端到端验证：temp 能力目录 + enable 目录 → 写出
   `<root>/forge-demo/SKILL.md`（body 一致）+ serve 日志 count=1；echo 全链路回归通过。
-- **enable 决策（遗留，部署评审）**：目标目录为真实 opencode 用户配置时须运维显式开启；
-  删除联动（平台 skill 移除 → 物化清理）留后续（当前启动全量重写幂等）。dsh 未实证 → 降级
-  只列不物化。
+- **切片 D（2026-09-08，删除联动 + 启动重校）**：物化目录写 forge 归属标记
+  `<skillID>/.forge-managed`；`capability.ReconcileSkills(root, current)` 启动重校——内容一致
+  跳过（幂等计数）、缺失/更新写出，仅删「带标记且不在注册表」目录，**用户自有目录绝不动**；
+  Service 增 `ReconcileSkills`（返回 written/removed）替换 serve 装配调用，日志 written/removed。
+  端到端验证：run1 写 skill-a → run2（删 a 增 b + 用户目录 user-x）written=1 removed=1，产物 =
+  skill-b + user-x（skill-a 清、user-x 保留）；echo 全链路回归通过；vet + race 全绿。
+- **enable 决策（遗留，部署评审）**：目标目录为真实 opencode 用户配置时须运维显式开启
+  （`FORGE_SKILLS_MATERIALIZE_DIR`）。dsh 未实证 → 降级只列不物化。
 
 ### 16.6 Resume 承载矩阵（§16 切片 C，实测/记录 2026-09-08）
 

@@ -60,3 +60,57 @@ func TestMaterializeSkillValidation(t *testing.T) {
 		t.Fatal("无可物化 source 应报错")
 	}
 }
+
+// TestReconcileSkills 删除联动 + 重校：带 forge 标记且不在注册表的目录被清，
+// 用户自有（无标记）目录绝不动；注册表 skill 缺失则写出。
+func TestReconcileSkills(t *testing.T) {
+	root := t.TempDir()
+	// 预置：forge 管理的 stale 目录（带标记）+ 用户自有 user-x（无标记）。
+	if err := os.MkdirAll(filepath.Join(root, "stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stale", forgeMarker), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "user-x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "user-x", "SKILL.md"), []byte("user skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current := []Skill{{ID: "keep", Name: "Keep", Body: "# keep",
+		Sources: []SkillSource{{Runtime: "opencode", Path: root, Format: "SKILL.md"}}}}
+
+	w, r, err := ReconcileSkills(root, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w != 1 || r != 1 {
+		t.Fatalf("期望 written=1 removed=1，got w=%d r=%d", w, r)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "keep", "SKILL.md")); err != nil || string(b) != "# keep" {
+		t.Fatal("keep 未写出")
+	}
+	if _, err := os.Stat(filepath.Join(root, "stale")); !os.IsNotExist(err) {
+		t.Fatal("stale（forge 标记、不在注册表）应被删除联动")
+	}
+	if _, err := os.Stat(filepath.Join(root, "user-x")); err != nil {
+		t.Fatal("用户自有目录不应被动")
+	}
+	// 幂等重校：再跑应无写无删。
+	if w, r, err := ReconcileSkills(root, current); err != nil || w != 0 || r != 0 {
+		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
+	}
+}
+
+// TestMaterializeWritesMarker 物化写归属标记（删除联动依据）。
+func TestMaterializeWritesMarker(t *testing.T) {
+	root := t.TempDir()
+	sk := Skill{ID: "m1", Body: "# m1", Sources: []SkillSource{{Runtime: "opencode", Format: "SKILL.md"}}}
+	if _, err := MaterializeSkill(root, sk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "m1", forgeMarker)); err != nil {
+		t.Fatalf("归属标记缺失: %v", err)
+	}
+}

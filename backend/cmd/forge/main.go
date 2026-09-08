@@ -130,13 +130,14 @@ func serve(args []string) {
 	svc.LoadAgentDefinitions(cfg.AgentDir)
 	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
 	svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
-	// skill 物化（§16.5 切片 B2）：FORGE_SKILLS_MATERIALIZE_DIR 显式开启时，把 opencode
-	// SKILL.md 源 skill 物化到该目录（opencode v1 自动扫描约定）；默认关闭（不写用户目录）。
+	// skill 物化（§16.5 切片 D）：FORGE_SKILLS_MATERIALIZE_DIR 显式开启时，把 opencode
+	// SKILL.md 源 skill 与目标目录重校（物化缺失/更新 + 删除联动，只删 forge 标记目录）；
+	// 默认关闭（不写用户目录）。
 	if dir := cfg.SkillMaterializeDir; dir != "" {
-		if n, mErr := svc.MaterializeSkills(dir); mErr != nil {
-			slog.Warn("serve: skill 物化部分失败", "dir", dir, "err", mErr)
-		} else if n > 0 {
-			slog.Info("serve: skill 已物化", "dir", dir, "count", n)
+		if w, r, mErr := svc.ReconcileSkills(dir); mErr != nil {
+			slog.Warn("serve: skill 物化重校失败", "dir", dir, "err", mErr)
+		} else if w > 0 || r > 0 {
+			slog.Info("serve: skill 物化重校完成", "dir", dir, "written", w, "removed", r)
 		}
 	}
 	if mode == "sqlite" {

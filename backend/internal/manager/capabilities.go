@@ -1,8 +1,6 @@
 package manager
 
 import (
-	"log/slog"
-
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -24,34 +22,15 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	return s.caps.LoadDir(dir).Total()
 }
 
-// MaterializeSkills 把能力数据面里的 opencode SKILL.md 源 skill 物化到目标根目录
-// （§5.4/§16.5 切片 B2：serve 启动装载后、FORGE_SKILLS_MATERIALIZE_DIR 非空时调用）。
-// 返回成功物化数；单条失败/无可物化源仅告警跳过（不中断其余）。物化默认不写用户目录——
-// 由调用方（serve 显式 enable）决定目标。
-func (s *Service) MaterializeSkills(root string) (int, error) {
-	if s.caps == nil {
-		return 0, nil
+// ReconcileSkills 把能力数据面里的 opencode SKILL.md 源 skill 与目标根目录做重校
+// （§5.4/§16.5：物化缺失/更新 + 删除联动——只删带 forge 归属标记且已不在注册表的目录，
+// 用户自有目录绝不动）。返回 (written, removed)。serve 启动装载能力后、
+// FORGE_SKILLS_MATERIALIZE_DIR 非空时调用。物化默认不写用户目录——由调用方显式 enable。
+func (s *Service) ReconcileSkills(root string) (int, int, error) {
+	if s.caps == nil || root == "" {
+		return 0, 0, nil
 	}
-	if root == "" {
-		return 0, nil
-	}
-	count := 0
-	var firstErr error
-	for _, sk := range s.caps.ListSkills() {
-		if _, err := capability.MaterializeSkill(root, sk); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			slog.Warn("skill 物化跳过", "skill", sk.ID, "err", err)
-			continue
-		}
-		count++
-	}
-	// 部分失败可容忍（多数 skill 只声明其它 runtime 源属常态）；全部失败才报错。
-	if count == 0 && firstErr != nil {
-		return 0, firstErr
-	}
-	return count, nil
+	return capability.ReconcileSkills(root, s.caps.ListSkills())
 }
 
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。

@@ -138,9 +138,9 @@ func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
 	}
 }
 
-// TestServiceMaterializeSkills 启用物化：Service.MaterializeSkills 把 opencode SKILL.md 源
-// skill 写为 <root>/<id>/SKILL.md 并计数；无源/不可物化者跳过不中断。
-func TestServiceMaterializeSkills(t *testing.T) {
+// TestServiceReconcileSkills 启用物化重校：Service.ReconcileSkills 把 opencode SKILL.md 源
+// skill 写为 <root>/<id>/SKILL.md 并计数；无源 skill 跳过；幂等重跑 0 写。
+func TestServiceReconcileSkills(t *testing.T) {
 	svc, _, _ := rigWithRuntime(t)
 	if err := svc.caps.RegisterSkill(&capability.Skill{
 		ID: "forge-demo", Name: "Demo", Body: "# demo body",
@@ -156,12 +156,12 @@ func TestServiceMaterializeSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	n, err := svc.MaterializeSkills(root)
+	w, r, err := svc.ReconcileSkills(root)
 	if err != nil {
-		t.Fatalf("MaterializeSkills: %v", err)
+		t.Fatalf("ReconcileSkills: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("期望物化 1 条，got %d", n)
+	if w != 1 || r != 0 {
+		t.Fatalf("期望 written=1 removed=0，got w=%d r=%d", w, r)
 	}
 	p := filepath.Join(root, "forge-demo", "SKILL.md")
 	b, err := os.ReadFile(p)
@@ -170,5 +170,9 @@ func TestServiceMaterializeSkills(t *testing.T) {
 	}
 	if string(b) != "# demo body" {
 		t.Fatal("物化内容不符")
+	}
+	// 幂等重跑：无写无删。
+	if w, r, err := svc.ReconcileSkills(root); err != nil || w != 0 || r != 0 {
+		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
 	}
 }
