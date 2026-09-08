@@ -135,6 +135,10 @@ func TestEchoRuntimeExecutableProjection(t *testing.T) {
 		}
 	}
 
+	// Cancel 契约（§17 E2：会话级取消经投影；echo 的 Cancel handler 为 nil 成功）。
+	if err := rt.Cancel(ctx); err != nil {
+		t.Fatalf("Cancel 应成功: %v", err)
+	}
 	// Resume 实测守卫（2026-09-08）：echo 未声明 sessionCapabilities.resume →
 	// acl.ResumeSession 在能力门被拒（resume_session_unsupported，wire 前），不会发到 agent。
 	if _, err := cl.ResumeSession(ctx, sess.ID(), acl.SessionOptions{Cwd: "/work"}); err == nil {

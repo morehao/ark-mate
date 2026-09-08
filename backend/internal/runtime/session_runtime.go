@@ -39,6 +39,11 @@ func (r *sessionRuntime) Capabilities() acl.Capabilities {
 }
 func (r *sessionRuntime) ProviderSessionID() string { return r.sess.ID() }
 
+// Cancel 取消本会话进行中的 turn（透传底层会话取消；best-effort，错误由调用方决定是否吞）。
+func (r *sessionRuntime) Cancel(ctx context.Context) error {
+	return r.sess.Cancel(ctx)
+}
+
 // Prompt 透传底层会话 Prompt（权限/elicitation 决策由 Orchestrator 经 Dial 的 ClientOptions
 // 钩子注入）。
 func (r *sessionRuntime) Prompt(ctx context.Context, req PromptRequest) (string, error) {

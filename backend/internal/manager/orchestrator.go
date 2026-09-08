@@ -379,6 +379,12 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) er
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// §17 E2：会话级取消走投影（Cancel 已入 Runtime 接口）；proj nil（测试注入假会话）
+		// 回退直连 sess.Cancel，语义一致。
+		if as.proj != nil {
+			_ = as.proj.Cancel(cctx)
+			return
+		}
 		_ = as.sess.Cancel(cctx)
 	}()
 	select {

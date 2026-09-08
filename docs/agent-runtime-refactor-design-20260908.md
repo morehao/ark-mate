@@ -755,5 +755,10 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
    猜测；nil client 安全）。行为零变化（markBusy/unmarkBusy/busyConversationForClient/
    reap/StopAgent/dropConn 调用点原样换封），单测（语义表 + 8×200 并发 race）+ 既有归属
    测试适配；vet + race 全绿，echo 全链路回归通过。E2 在此接缝上演进并发语义。
-3. **切片 E2…**：按主方案逐项迁移（归属推断替换、回收/取消/看门狗适配、ProviderSessionID/
+3. **切片 E2（2026-09-08，Cancellation 通路）**：Runtime 接口补 `Cancel(ctx)`（会话级执行
+   原语；连接生命周期仍归 Orchestrator，§4.2 偏差）；sessionRuntime 透传 `sess.Cancel`；
+   `CancelTurn` 经投影取消（proj nil 回退直连，语义一致）——会话执行面自此全由投影表达
+   （Prompt/Cancel/ID/Capabilities/ProviderSessionID）。契约单测（echo Cancel nil 成功）+ 归属
+   生命周期既有用例；vet + race 全绿，echo 全链路回归通过。
+4. **切片 E3…**：按主方案逐项迁移（归属推断演进、回收/看门狗适配、ProviderSessionID/
    Resume 通路按实测接入），每步 echo 回归 + 全量 race。
