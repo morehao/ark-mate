@@ -606,6 +606,15 @@ runtime 作为 hint），不保留 runtime 身份语义。
   对应 Spec 实例化（opencode/dsh 后端自管上下文）。ApplyMode/ApplyModel/Resume 统一显式返回
   `unsupported_*`（ModeMapping/模型切换原语/会话恢复承载均待实测，见 §12 开放项）。测试：三个构造
   器在同一活会话上断言身份 + 契约；echo 全链路可执行投影测试不变。
+- **路由能力匹配切片（§7 CapabilityRouted，2026-09-08）**：routing 引擎增
+  `Strategy`（first_available 默认 / capability_routed）、`ParseStrategy`、`SupportsTransports`
+  （spec.McpTransports 空 = 保守 stdio）、`CapabilityRouted`（候选须承载 requiredTransports，
+  不符记入 `Availability.CapabilityMismatch`）。agent 定义增可选 `routing_policy`（文件面，
+  未知值宽容回退默认）。`Service.ResolveRuntime` 按策略分发：capability_routed 下由 Agent 显式
+  MCP 白名单 ∩ 能力数据面推导 requiredTransports（`requiredMcpTransports`；Mcps nil = 无硬约束，
+  等价 first_available），全不满足时报 `runtime_capability_mismatch`。测试：引擎单测 + manager
+  策略接入（跳过不承载 runtime / mismatch 码 / nil 白名单 / 未知策略回退）。
 - **P2 剩余（未含，留后续）**：ModeMapping 实测回填后 ApplyMode 落地、会话恢复 Resume 按底座实测
-  接入、skill 物化（§5.4）、路由能力匹配/粘滞切片（§7）、Orchestrator 正式采用 Runtime 接口
-  （会话模型重构评审点）。P2 验收三项（race 全绿 / echo 全链路 / opencode+dsh 冒烟）均已达成，见上。
+  接入、skill 物化（§5.4）、Sticky 会话粘滞（RuntimeHint 优先，需持久会话数据）、Orchestrator
+  正式采用 Runtime 接口（会话模型重构评审点）。P2 验收三项（race 全绿 / echo 全链路 /
+  opencode+dsh 冒烟）均已达成，见上。

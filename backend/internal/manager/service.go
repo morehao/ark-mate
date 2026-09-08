@@ -28,8 +28,10 @@ type AgentRec struct {
 	Provider string   // provider 档案 id（P2 provider 注入面）；空 = 默认
 	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。nil = 未声明（默认：注册表全量按
 	// runtime 传输过滤注入）；非 nil（可为空数组）= 白名单（空 = 本 agent 禁用 MCP 注入）。
-	Mcps  *[]string
-	State string
+	Mcps *[]string
+	// RoutingPolicy 路由策略声明（P2 §7）：first_available | capability_routed；空 = 默认。
+	RoutingPolicy string
+	State         string
 }
 
 // defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。
@@ -62,9 +64,27 @@ func (s *Service) ResolveRuntime(agent *AgentRec) (string, error) {
 		return "", acl.NewError(acl.ClassRequest, "no_runtime",
 			fmt.Sprintf("agent %q 未配置 runtime 候选", agent.ID), nil)
 	}
-	id, av := routing.FirstAvailable(s.reg, agent.Runtimes)
+	strategy, known := routing.ParseStrategy(agent.RoutingPolicy)
+	if !known {
+		// 未知声明回退默认（design doc §15：宽容处理，不因坏策略拒绝会话）。
+		strategy = routing.StrategyFirstAvailable
+	}
+	var (
+		id string
+		av routing.Availability
+	)
+	if strategy == routing.StrategyCapabilityRouted {
+		id, av = routing.CapabilityRouted(s.reg, agent.Runtimes, s.requiredMcpTransports(agent))
+	} else {
+		id, av = routing.FirstAvailable(s.reg, agent.Runtimes)
+	}
 	if id != "" {
 		return id, nil
+	}
+	if len(av.CapabilityMismatch) > 0 {
+		return "", acl.NewError(acl.ClassRequest, "runtime_capability_mismatch",
+			fmt.Sprintf("agent %q 候选 runtime 均不满足所需 MCP transport：未注册 %v；命令不可执行 %v；能力不符 %v",
+				agent.ID, av.NotFound, av.NotInstalled, av.CapabilityMismatch), nil)
 	}
 	if len(av.NotInstalled) == 0 {
 		return "", acl.NewError(acl.ClassRequest, "runtime_not_found",
@@ -72,6 +92,29 @@ func (s *Service) ResolveRuntime(agent *AgentRec) (string, error) {
 	}
 	return "", acl.NewError(acl.ClassRequest, "runtime_unavailable",
 		fmt.Sprintf("agent %q 候选 runtime 均不可用：未注册 %v；命令不可执行 %v", agent.ID, av.NotFound, av.NotInstalled), nil)
+}
+
+// requiredMcpTransports 由 agent 显式 MCP 白名单推导「能力路由」所需的 transport 集合
+// （§7 CapabilityRouted）：取白名单 ∩ 能力数据面注册表中的 server transport 去重。
+// Mcps == nil（未声明/全量）不构成硬约束 → 返回 nil（等价 FirstAvailable 的可选性：
+// 全量注入时由各 runtime 自身传输过滤兜底，不做路由排除）。
+func (s *Service) requiredMcpTransports(agent *AgentRec) []string {
+	if agent.Mcps == nil || s.caps == nil {
+		return nil
+	}
+	want := make(map[string]bool, len(*agent.Mcps))
+	for _, id := range *agent.Mcps {
+		want[id] = true
+	}
+	var out []string
+	seen := make(map[string]bool)
+	for _, m := range s.caps.ListMcpServers() {
+		if want[m.ID] && !seen[m.Transport] {
+			seen[m.Transport] = true
+			out = append(out, m.Transport)
+		}
+	}
+	return out
 }
 
 // IsDefault 报告该 Agent 是否为默认播种 Agent。

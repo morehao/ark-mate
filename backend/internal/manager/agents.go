@@ -38,6 +38,10 @@ type agentDefinitionFile struct {
 	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。缺省 = 未声明（全启用按 runtime 传输
 	// 过滤）；`mcps: []` = 本 agent 禁用 MCP 注入。指针以区分「未声明」与「空白名单」。
 	Mcps *[]string `json:"mcps,omitempty"`
+	// RoutingPolicy 路由策略（P2 §7）：first_available（默认）| capability_routed。
+	// 缺省/空 = first_available；capability_routed 下若声明 Mcps 白名单，则只在能承载
+	// 所需 MCP transport 的 runtime 里选。未知值回退默认（解析见 Service.ResolveRuntime）。
+	RoutingPolicy string `json:"routing_policy,omitempty"`
 }
 
 // LoadAgentDefinitions 加载 definitions 目录并合并到 agents 表（启动时调用；
@@ -111,10 +115,14 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 		if d.Mcps != nil {
 			cur.Mcps = d.Mcps
 		}
+		if d.RoutingPolicy != "" {
+			cur.RoutingPolicy = d.RoutingPolicy
+		}
 		return nil
 	}
 	s.agents[d.ID] = &AgentRec{
-		ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, Mcps: d.Mcps, State: AgentStateStopped,
+		ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, Mcps: d.Mcps,
+		RoutingPolicy: d.RoutingPolicy, State: AgentStateStopped,
 	}
 	return nil
 }
@@ -286,7 +294,8 @@ func (s *Service) syncAgentDef(id string) error {
 	if !ok {
 		return nil
 	}
-	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider, Mcps: cur.Mcps})
+	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes,
+		Provider: cur.Provider, Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy})
 }
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
