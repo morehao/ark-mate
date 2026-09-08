@@ -16,13 +16,13 @@ import (
 // ——— stub Service（handler.Service 的测试替身，记录调用） ———
 
 type stubSvc struct {
-	agents   []handler.AgentResp
-	runtimes []handler.RuntimeResp
-	sessions []handler.SessionResp
+	agents        []handler.AgentResp
+	runtimes      []handler.RuntimeResp
+	conversations []handler.ConversationResp
 
-	listAgentsErr   error
-	listRuntimesErr error
-	listSessionsErr error
+	listAgentsErr        error
+	listRuntimesErr      error
+	listConversationsErr error
 
 	agentErr    error  // P2 管理面桩错误注入
 	agentAction string // 最近一次 delete/start/stop 动作（P2 桩）
@@ -31,14 +31,14 @@ type stubSvc struct {
 	providers   []handler.ProviderResp
 
 	createCalled bool
-	createReq    handler.SessionCreateReq
-	createResp   *handler.SessionCreateResp
+	createReq    handler.ConversationCreateReq
+	createResp   *handler.ConversationCreateResp
 	createErr    error
 
 	promptCalled bool
 	promptID     string
 	promptText   string
-	promptResp   *handler.SessionPromptResp
+	promptResp   *handler.ConversationPromptResp
 	promptErr    error
 
 	cancelCalled bool
@@ -49,7 +49,7 @@ type stubSvc struct {
 	historyID     string
 	historyAfter  int64
 	historyLimit  int
-	historyResp   *handler.SessionHistoryResp
+	historyResp   *handler.ConversationHistoryResp
 	historyErr    error
 
 	memList     []handler.MemoryResp
@@ -77,7 +77,7 @@ func (s *stubSvc) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 	if s.agentErr != nil {
 		return nil, s.agentErr
 	}
-	resp := &handler.AgentResp{ID: req.ID, Name: req.Name, Runtime: req.Runtime, Provider: req.Provider, State: "stopped"}
+	resp := &handler.AgentResp{ID: req.ID, Name: req.Name, Provider: req.Provider, State: "stopped"}
 	s.agents = append(s.agents, *resp)
 	return resp, nil
 }
@@ -126,23 +126,23 @@ func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	}
 	return s.runtimes, nil
 }
-func (s *stubSvc) ListSessions(_ bool) ([]handler.SessionResp, error) {
-	if s.listSessionsErr != nil {
-		return nil, s.listSessionsErr
+func (s *stubSvc) ListConversations(_ bool) ([]handler.ConversationResp, error) {
+	if s.listConversationsErr != nil {
+		return nil, s.listConversationsErr
 	}
-	return s.sessions, nil
+	return s.conversations, nil
 }
-func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]handler.SessionSearchHit, error) {
+func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]handler.ConversationSearchHit, error) {
 	return nil, nil
 }
-func (s *stubSvc) GetSession(_ context.Context, id string) (*handler.SessionDetailResp, error) {
-	return &handler.SessionDetailResp{
-		SessionResp: handler.SessionResp{ID: id},
-		Memories:    s.memList,
+func (s *stubSvc) GetConversation(_ context.Context, id string) (*handler.ConversationDetailResp, error) {
+	return &handler.ConversationDetailResp{
+		ConversationResp: handler.ConversationResp{ID: id},
+		Memories:         s.memList,
 	}, nil
 }
-func (s *stubSvc) UpdateSession(_ context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
-	resp := handler.SessionResp{ID: id}
+func (s *stubSvc) UpdateConversation(_ context.Context, id string, patch handler.ConversationPatch) (*handler.ConversationResp, error) {
+	resp := handler.ConversationResp{ID: id}
 	if patch.Title != nil {
 		resp.Title = *patch.Title
 	}
@@ -178,7 +178,7 @@ func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, actio
 	s.resolvedElicContent = content
 	return s.resolveElicErr
 }
-func (s *stubSvc) CreateSession(_ context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
+func (s *stubSvc) CreateConversation(_ context.Context, req handler.ConversationCreateReq) (*handler.ConversationCreateResp, error) {
 	s.createCalled = true
 	s.createReq = req
 	if s.createErr != nil {
@@ -187,9 +187,9 @@ func (s *stubSvc) CreateSession(_ context.Context, req handler.SessionCreateReq)
 	if s.createResp != nil {
 		return s.createResp, nil
 	}
-	return &handler.SessionCreateResp{ID: "s-new"}, nil
+	return &handler.ConversationCreateResp{ID: "s-new"}, nil
 }
-func (s *stubSvc) PromptSession(_ context.Context, id, prompt string) (*handler.SessionPromptResp, error) {
+func (s *stubSvc) PromptConversation(_ context.Context, id, prompt string) (*handler.ConversationPromptResp, error) {
 	s.promptCalled = true
 	s.promptID = id
 	s.promptText = prompt
@@ -199,14 +199,14 @@ func (s *stubSvc) PromptSession(_ context.Context, id, prompt string) (*handler.
 	if s.promptResp != nil {
 		return s.promptResp, nil
 	}
-	return &handler.SessionPromptResp{ID: id, EventSeq: 5}, nil
+	return &handler.ConversationPromptResp{ID: id, EventSeq: 5}, nil
 }
 func (s *stubSvc) CancelTurn(_ context.Context, id string) error {
 	s.cancelCalled = true
 	s.cancelID = id
 	return s.cancelErr
 }
-func (s *stubSvc) SessionHistory(_ context.Context, id string, after int64, limit int) (*handler.SessionHistoryResp, error) {
+func (s *stubSvc) ConversationHistory(_ context.Context, id string, after int64, limit int) (*handler.ConversationHistoryResp, error) {
 	s.historyCalled = true
 	s.historyID = id
 	s.historyAfter = after
@@ -217,7 +217,7 @@ func (s *stubSvc) SessionHistory(_ context.Context, id string, after int64, limi
 	if s.historyResp != nil {
 		return s.historyResp, nil
 	}
-	return &handler.SessionHistoryResp{ID: id}, nil
+	return &handler.ConversationHistoryResp{ID: id}, nil
 }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
@@ -246,19 +246,19 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.DELETE("/agents/:id", h.Agent.Delete)
 	g.POST("/agents/:id/start", h.Agent.Start)
 	g.POST("/agents/:id/stop", h.Agent.Stop)
-	g.GET("/sessions", h.Session.List)
-	g.POST("/sessions", h.Session.Create)
-	g.GET("/sessions/:id", h.Session.Get)
-	g.PATCH("/sessions/:id", h.Session.Update)
-	g.GET("/sessions/:id/history", h.Session.History)
-	g.POST("/sessions/:id/prompt", h.Session.Prompt)
-	g.POST("/sessions/:id/cancel", h.Session.Cancel)
-	g.GET("/sessions/:id/permissions", h.Session.Permissions)
-	g.POST("/sessions/:id/permission", h.Session.ResolvePermission)
-	g.GET("/sessions/:id/permissions/memories", h.Session.PermissionMemories)
-	g.POST("/sessions/:id/permissions/memories/revoke", h.Session.RevokeMemory)
-	g.GET("/sessions/:id/elicitations", h.Session.Elicitations)
-	g.POST("/sessions/:id/elicitation", h.Session.ResolveElicitation)
+	g.GET("/conversations", h.Conversation.List)
+	g.POST("/conversations", h.Conversation.Create)
+	g.GET("/conversations/:id", h.Conversation.Get)
+	g.PATCH("/conversations/:id", h.Conversation.Update)
+	g.GET("/conversations/:id/history", h.Conversation.History)
+	g.POST("/conversations/:id/prompt", h.Conversation.Prompt)
+	g.POST("/conversations/:id/cancel", h.Conversation.Cancel)
+	g.GET("/conversations/:id/permissions", h.Conversation.Permissions)
+	g.POST("/conversations/:id/permission", h.Conversation.ResolvePermission)
+	g.GET("/conversations/:id/permissions/memories", h.Conversation.PermissionMemories)
+	g.POST("/conversations/:id/permissions/memories/revoke", h.Conversation.RevokeMemory)
+	g.GET("/conversations/:id/elicitations", h.Conversation.Elicitations)
+	g.POST("/conversations/:id/elicitation", h.Conversation.ResolveElicitation)
 	g.GET("/runtimes", h.Runtime.List)
 	g.GET("/providers", h.Provider.List)
 	g.PATCH("/providers/:id", h.Provider.Update)
@@ -288,15 +288,15 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 
 // ——— 用例 ———
 
-// TestListEndpoints GET /agents /runtimes /sessions 返回 code=0 + 真实列表载荷。
+// TestListEndpoints GET /agents /runtimes /conversations 返回 code=0 + 真实列表载荷。
 func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
-		agents: []handler.AgentResp{{ID: "agent-opencode", Name: "opencode-agent", Runtime: "opencode", State: "stopped"}},
+		agents: []handler.AgentResp{{ID: "agent-opencode", Name: "opencode-agent", State: "stopped"}},
 		runtimes: []handler.RuntimeResp{
 			{Name: "opencode", ID: "opencode", Vers: "opencode acp"},
 			{Name: "deepseekharness", ID: "deepseekharness", Vers: "dsh --profile acp"},
 		},
-		sessions: []handler.SessionResp{{ID: "s1", AgentID: "a", Runtime: "r", Status: "completed"}},
+		conversations: []handler.ConversationResp{{ID: "s1", AgentID: "a", Status: "completed"}},
 	}
 	r := newRestEngine(svc)
 
@@ -315,10 +315,10 @@ func TestListEndpoints(t *testing.T) {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
-	env, _ = do(t, r, "GET", "/v1/forge/sessions", "")
-	var sess []handler.SessionResp
+	env, _ = do(t, r, "GET", "/v1/forge/conversations", "")
+	var sess []handler.ConversationResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
-		t.Fatalf("sessions data 不符: %s", env.Data)
+		t.Fatalf("conversations data 不符: %s", env.Data)
 	}
 }
 
@@ -332,11 +332,11 @@ func TestListFailure(t *testing.T) {
 	}
 }
 
-// TestCreateSession 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
-func TestCreateSession(t *testing.T) {
-	svc := &stubSvc{createResp: &handler.SessionCreateResp{ID: "s-abc", AgentID: "agent-opencode", Runtime: "opencode", Status: "in_progress", EventSeq: 9}}
+// TestCreateConversation 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
+func TestCreateConversation(t *testing.T) {
+	svc := &stubSvc{createResp: &handler.ConversationCreateResp{ID: "s-abc", AgentID: "agent-opencode", Status: "in_progress", EventSeq: 9}}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "POST", "/v1/forge/sessions", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -352,24 +352,24 @@ func TestCreateSession(t *testing.T) {
 	}
 }
 
-// TestCreateSessionBadBody 缺 agent_id（binding required）→ code 40000。
-func TestCreateSessionBadBody(t *testing.T) {
+// TestCreateConversationBadBody 缺 agent_id（binding required）→ code 40000。
+func TestCreateConversationBadBody(t *testing.T) {
 	r := newRestEngine(&stubSvc{})
-	env, _ := do(t, r, "POST", "/v1/forge/sessions", `{"prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"prompt":"hi"}`)
 	if env.Code != 40000 {
 		t.Fatalf("期望 40000，got %+v", env)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/sessions", `not-json{`)
+	env, _ = do(t, r, "POST", "/v1/forge/conversations", `not-json{`)
 	if env.Code != 40000 {
 		t.Fatalf("非 JSON 期望 40000，got %+v", env)
 	}
 }
 
-// TestCreateSessionServiceError svc 业务错误原样透出（40901 忙）。
-func TestCreateSessionServiceError(t *testing.T) {
+// TestCreateConversationServiceError svc 业务错误原样透出（40901 忙）。
+func TestCreateConversationServiceError(t *testing.T) {
 	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "turn in progress"}}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "POST", "/v1/forge/sessions", `{"agent_id":"a","prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"agent_id":"a","prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "turn in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
 	}
@@ -381,12 +381,12 @@ func TestPromptAndCancel(t *testing.T) {
 	r := newRestEngine(svc)
 
 	// prompt 缺 prompt → 40000。
-	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/prompt", `{}`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{}`)
 	if env.Code != 40000 {
 		t.Fatalf("prompt 缺参期望 40000，got %+v", env)
 	}
 	// 正常 prompt。
-	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/prompt", `{"prompt":"再来一轮"}`)
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{"prompt":"再来一轮"}`)
 	if env.Code != 0 || !svc.promptCalled || svc.promptID != "s1" || svc.promptText != "再来一轮" {
 		t.Fatalf("prompt 调用不符: called=%v id=%s env=%+v", svc.promptCalled, svc.promptID, env)
 	}
@@ -399,7 +399,7 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// cancel。
-	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/cancel", "")
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/cancel", "")
 	if env.Code != 0 || !svc.cancelCalled || svc.cancelID != "s1" {
 		t.Fatalf("cancel 调用不符: env=%+v called=%v", env, svc.cancelCalled)
 	}
@@ -418,39 +418,39 @@ func TestHistoryParamParsing(t *testing.T) {
 	r := newRestEngine(svc)
 
 	// 默认 after=0 limit=200。
-	do(t, r, "GET", "/v1/forge/sessions/s1/history", "")
+	do(t, r, "GET", "/v1/forge/conversations/s1/history", "")
 	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyLimit != 200 {
 		t.Fatalf("默认参数不符: %+v %d %d", svc.historyID, svc.historyAfter, svc.historyLimit)
 	}
 
 	// 显式 after/limit。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/sessions/s1/history?after=7&limit=50", "")
+	do(t, r, "GET", "/v1/forge/conversations/s1/history?after=7&limit=50", "")
 	if svc.historyAfter != 7 || svc.historyLimit != 50 {
 		t.Fatalf("显式参数不符: after=%d limit=%d", svc.historyAfter, svc.historyLimit)
 	}
 
 	// limit 上限 1000 夹取。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/sessions/s1/history?limit=999999", "")
+	do(t, r, "GET", "/v1/forge/conversations/s1/history?limit=999999", "")
 	if svc.historyLimit != 1000 {
 		t.Fatalf("limit 应夹到 1000，got %d", svc.historyLimit)
 	}
 
 	// limit=0 → 1。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/sessions/s1/history?limit=0", "")
+	do(t, r, "GET", "/v1/forge/conversations/s1/history?limit=0", "")
 	if svc.historyLimit != 1 {
 		t.Fatalf("limit=0 应夹到 1，got %d", svc.historyLimit)
 	}
 
 	// 非法 after → 40000。
 	svc.historyCalled = false
-	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/history?after=-1", "")
+	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=-1", "")
 	if env.Code != 40000 {
 		t.Fatalf("负 after 期望 40000，got %+v", env)
 	}
-	env, _ = do(t, r, "GET", "/v1/forge/sessions/s1/history?after=abc", "")
+	env, _ = do(t, r, "GET", "/v1/forge/conversations/s1/history?after=abc", "")
 	if env.Code != 40000 {
 		t.Fatalf("非数字 after 期望 40000，got %+v", env)
 	}
@@ -463,7 +463,7 @@ func TestHistoryParamParsing(t *testing.T) {
 func TestHistorySuccess(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/history?after=1&limit=10", "")
+	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=1&limit=10", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -476,14 +476,14 @@ func TestHistorySuccess(t *testing.T) {
 	}
 }
 
-// TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
+// TestPermissionMemoriesList GET /conversations/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
 func TestPermissionMemoriesList(t *testing.T) {
 	svc := &stubSvc{memList: []handler.MemoryResp{
 		{Title: "运行演示命令 echo hello", Kind: "execute", Decision: "allow", Since: "2026-01-02T03:04:05Z"},
 		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
 	}}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/permissions/memories", "")
+	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -500,7 +500,7 @@ func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
 
-	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/permissions/memories/revoke",
+	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -509,7 +509,7 @@ func TestRevokeMemory(t *testing.T) {
 		t.Fatalf("撤销单条透传不符: %+v", svc)
 	}
 
-	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/permissions/memories/revoke", `{}`)
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/permissions/memories/revoke", `{}`)
 	if env.Code != 0 {
 		t.Fatalf("一键撤销信封不符: %+v", env)
 	}
@@ -518,7 +518,7 @@ func TestRevokeMemory(t *testing.T) {
 	}
 }
 
-// TestElicitationList GET /sessions/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
+// TestElicitationList GET /conversations/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
 func TestElicitationList(t *testing.T) {
 	svc := &stubSvc{elicitations: []handler.ElicitationResp{{
 		ElicitationID: "el-abc", SessionID: "s1", Mode: "form",
@@ -526,7 +526,7 @@ func TestElicitationList(t *testing.T) {
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/elicitations", "")
+	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/elicitations", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -536,11 +536,11 @@ func TestElicitationList(t *testing.T) {
 	}
 }
 
-// TestResolveElicitation POST /sessions/:id/elicitation 决策透传（accept + content）。
+// TestResolveElicitation POST /conversations/:id/elicitation 决策透传（accept + content）。
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/elicitation",
+	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -554,11 +554,11 @@ func TestResolveElicitation(t *testing.T) {
 func TestResolveElicitationBadBody(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/elicitation", `{"action":"accept"}`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/elicitation", `{"action":"accept"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 elicitation_id 应 40000: %+v", env)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/elicitation", `{"elicitation_id":"el-abc"}`)
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/elicitation", `{"elicitation_id":"el-abc"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 action 应 40000: %+v", env)
 	}
@@ -569,7 +569,7 @@ func TestAgentManagementRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
 
-	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-echo","name":"别名echo","runtime":"echo"}`)
+	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-echo","name":"别名echo","runtimes":["echo"]}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}

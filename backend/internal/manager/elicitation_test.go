@@ -79,7 +79,7 @@ func TestElicitationResolveUnknown(t *testing.T) {
 	}
 }
 
-// TestElicitationCancelSession session/cancel 把挂起提问按取消回馈并清空挂起表。
+// TestElicitationCancelConversation conversation/cancel 把挂起提问按取消回馈并清空挂起表。
 func TestElicitationCancelSession(t *testing.T) {
 	m := NewElicitationManager(30 * time.Second)
 	registered := make(chan string, 1)
@@ -102,12 +102,12 @@ func TestElicitationCancelSession(t *testing.T) {
 }
 
 // pendingCount 供单测断言挂起表收敛。
-func (m *ElicitationManager) pendingCount(sessionID string) int {
+func (m *ElicitationManager) pendingCount(conversationID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, p := range m.pending {
-		if p.sessionID == sessionID {
+		if p.conversationID == conversationID {
 			n++
 		}
 	}

@@ -14,7 +14,7 @@ func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
 	t.Helper()
 	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
 	svc := NewService(reg, nil)
-	_, _ = svc.CreateAgent(context.Background(), handler.AgentCreateReq{ID: "alias-echo", Runtime: "echo"})
+	_, _ = svc.CreateAgent(context.Background(), handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}})
 	o := NewOrchestrator(svc, reg)
 	t.Cleanup(o.Close)
 	return o, svc
@@ -25,7 +25,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	o.mu.Lock()
-	o.conns["echo"] = &runtimeConn{agentID: "agent-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
+	o.conns["echo"] = &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
 	o.mu.Unlock()
 
 	n := o.reapIdleOnce(now, 5*time.Minute)
@@ -38,7 +38,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	if ok {
 		t.Fatal("连接应已摘除")
 	}
-	rec, _ := svc.AgentByID("agent-echo")
+	rec, _ := svc.AgentByID("alias-echo")
 	if rec.State != AgentStateStopped {
 		t.Fatalf("回收后状态应 stopped: %s", rec.State)
 	}
@@ -49,20 +49,20 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	old := func() *runtimeConn {
-		return &runtimeConn{agentID: "agent-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
+		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
 	}
 	fresh := func() *runtimeConn {
-		return &runtimeConn{agentID: "agent-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-time.Minute)}
+		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-time.Minute)}
 	}
 	busy := old()
-	withSession := old()
+	withConversation := old()
 	// 四种连接分四个 runtime 槽（避免互相干扰）。
 	o.mu.Lock()
 	o.conns["echo"] = fresh()
 	o.conns["opencode"] = busy
 	o.busyConn[busy.client] = map[string]struct{}{"s1": {}}
-	o.conns["deepseekharness"] = withSession
-	o.sessions["s-x"] = &ActiveSession{client: withSession.client}
+	o.conns["deepseekharness"] = withConversation
+	o.conversations["s-x"] = &ActiveConversation{client: withConversation.client}
 	o.mu.Unlock()
 
 	if n := o.reapIdleOnce(now, 5*time.Minute); n != 0 {

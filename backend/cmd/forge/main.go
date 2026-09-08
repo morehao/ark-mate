@@ -69,7 +69,7 @@ func main() {
 	}
 }
 
-// serve 启动控制面：REST（列表 + sessions create/prompt/cancel）+ WS /ws/events。
+// serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。
 // 会话动作由 Orchestrator 跑真实 ACP runtime；事件经 eventbus 出流。M1 前哨起
 // REST 可触发会话（此前仅 forge demo 可跑真实链路）。
 func serve(args []string) {
@@ -108,12 +108,12 @@ func serve(args []string) {
 		}
 		defer st.Close()
 		svc.EnableStore(st)
-		sessions, events, rErr := svc.RestoreFromStore(context.Background())
+		conversations, events, rErr := svc.RestoreFromStore(context.Background())
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)
 		}
 		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `forge migrate`。
-		if sessions == 0 && events == 0 {
+		if conversations == 0 && events == 0 {
 			if files, gErr := filepath.Glob(filepath.Join(cfg.TranscriptDir, "*.jsonl")); gErr == nil && len(files) > 0 {
 				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `forge migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
 			}
@@ -228,12 +228,12 @@ func demo(args []string) {
 	}
 	// 让已入队的尾部事件被打印协程消费后退出。
 	time.Sleep(300 * time.Millisecond)
-	fmt.Printf("✔ demo 完成 session=%s agent=%s stop_reason=%q\n", res.SessionID, res.AgentID, res.StopReason)
+	fmt.Printf("✔ demo 完成 conversation=%s agent=%s stop_reason=%q\n", res.ConversationID, res.AgentID, res.StopReason)
 }
 
 // migrate 把 transcript 目录（默认 ~/.forge/transcripts）全量导入 SQLite（P1 迁移关键路径）：
 //   - 解析全部 *.jsonl（复用 manager 复读器；坏文件告警跳过）；
-//   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → sessions → 数量校验 → 导入标记）；
+//   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → conversations → 数量校验 → 导入标记）；
 //   - 幂等：同目录指纹已导入过则跳过；任一步失败整体回滚（原 transcript 目录不动）。
 func migrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
@@ -280,10 +280,9 @@ func migrate(args []string) {
 		}
 		lineCount += len(events)
 		items = append(items, store.ImportItem{
-			Session: store.Session{
+			Conversation: store.Conversation{
 				ID:        data.SessionID,
 				AgentID:   data.AgentID,
-				RuntimeID: data.RuntimeID,
 				Title:     data.Title,
 				Status:    data.Status,
 				CreatedAt: data.CreatedAt,
@@ -400,7 +399,7 @@ func printEvent(evt eventbus.Event) {
 	sid, _ := p["session_id"].(string)
 	switch evt.Type {
 	case manager.BusSessionCreated:
-		fmt.Printf("🆕 session.created  id=%s\n", sid)
+		fmt.Printf("🆕 conversation.created  id=%s\n", sid)
 	case manager.BusMessage:
 		if text != "" {
 			fmt.Print(text)

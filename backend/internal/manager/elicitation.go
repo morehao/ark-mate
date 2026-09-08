@@ -20,14 +20,14 @@ const (
 
 // pendingElicitation 是一条挂起中的结构化提问：持有一个「待用户决策」的通道与超时。
 type pendingElicitation struct {
-	id        string // 稳定 id（决策回传锚点）
-	sessionID string
-	mode      string // form | url
-	message   string
-	schema    map[string]any // form 模式的 JSON Schema 对象（对外载荷）
-	url       string         // url 模式
-	ch        chan acl.ElicitationOutcome
-	timeout   time.Time
+	id             string // 稳定 id（决策回传锚点）
+	conversationID string
+	mode           string // form | url
+	message        string
+	schema         map[string]any // form 模式的 JSON Schema 对象（对外载荷）
+	url            string         // url 模式
+	ch             chan acl.ElicitationOutcome
+	timeout        time.Time
 }
 
 // ElicitationManager 管理挂起结构化提问：注册 → 发布事件 → 等待决策 → 按 id 回馈。
@@ -37,7 +37,7 @@ type ElicitationManager struct {
 	pending    map[string]*pendingElicitation
 	timeout    time.Duration
 	logger     *slog.Logger
-	onResolved func(sessionID, id, reason string, d acl.ElicitationOutcome)
+	onResolved func(conversationID, id, reason string, d acl.ElicitationOutcome)
 }
 
 // NewElicitationManager 构造提问管理器。
@@ -67,7 +67,7 @@ func (m *ElicitationManager) SetTimeout(d time.Duration) {
 }
 
 // SetOnResolved 注入「挂起提问已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
-func (m *ElicitationManager) SetOnResolved(fn func(sessionID, id, reason string, d acl.ElicitationOutcome)) {
+func (m *ElicitationManager) SetOnResolved(fn func(conversationID, id, reason string, d acl.ElicitationOutcome)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onResolved = fn
@@ -99,12 +99,12 @@ func schemaMap(s *acl.ElicitationSchema) map[string]any {
 	return out
 }
 
-// CancelSession 取消某会话的全部挂起提问（session/cancel 后按 Cancelled 回馈 agent）。
-func (m *ElicitationManager) CancelSession(sessionID string) {
+// CancelConversation 取消某会话的全部挂起提问（conversation/cancel 后按 Cancelled 回馈 agent）。
+func (m *ElicitationManager) CancelSession(conversationID string) {
 	m.mu.Lock()
 	var victims []*pendingElicitation
 	for _, p := range m.pending {
-		if p.sessionID == sessionID {
+		if p.conversationID == conversationID {
 			victims = append(victims, p)
 			delete(m.pending, p.id) // 立即不再挂起；消费方后续 delete 幂等
 		}
@@ -119,13 +119,13 @@ func (m *ElicitationManager) CancelSession(sessionID string) {
 	}
 }
 
-// pendingForSession 列出某会话的全部挂起提问（按 id 稳定序）。
-func (m *ElicitationManager) pendingForSession(sessionID string) []*pendingElicitation {
+// pendingForConversation 列出某会话的全部挂起提问（按 id 稳定序）。
+func (m *ElicitationManager) pendingForSession(conversationID string) []*pendingElicitation {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*pendingElicitation
 	for _, p := range m.pending {
-		if p.sessionID == sessionID {
+		if p.conversationID == conversationID {
 			out = append(out, p)
 		}
 	}
@@ -133,29 +133,29 @@ func (m *ElicitationManager) pendingForSession(sessionID string) []*pendingElici
 }
 
 // RegisterAndWait 注册一条结构化提问并阻塞等待决策（SDK 派发 goroutine 中调用）。
-// publish 副作用（发布 session.elicitation_request 事件）由调用方注入，避免 manager 依赖 bus。
+// publish 副作用（发布 conversation.elicitation_request 事件）由调用方注入，避免 manager 依赖 bus。
 // 返回最终决策；超时/上下文取消时自动按取消处理。
-func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.ElicitationRequest, publish func(ElicitationItem)) acl.ElicitationOutcome {
+func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID string, req acl.ElicitationRequest, publish func(ElicitationItem)) acl.ElicitationOutcome {
 	id := genElicitationID()
 	p := &pendingElicitation{
-		id:        id,
-		sessionID: sessionID,
-		mode:      req.Mode,
-		message:   req.Message,
-		schema:    schemaMap(req.Schema),
-		url:       req.URL,
-		ch:        make(chan acl.ElicitationOutcome, 1),
-		timeout:   time.Now().Add(m.timeout),
+		id:             id,
+		conversationID: conversationID,
+		mode:           req.Mode,
+		message:        req.Message,
+		schema:         schemaMap(req.Schema),
+		url:            req.URL,
+		ch:             make(chan acl.ElicitationOutcome, 1),
+		timeout:        time.Now().Add(m.timeout),
 	}
 	m.mu.Lock()
 	m.pending[id] = p
 	m.mu.Unlock()
-	m.logger.Info("elicitation: request registered", "session", sessionID, "id", id, "mode", req.Mode)
+	m.logger.Info("elicitation: request registered", "conversation", conversationID, "id", id, "mode", req.Mode)
 
 	if publish != nil {
 		publish(ElicitationItem{
 			ID:        id,
-			SessionID: p.sessionID,
+			SessionID: p.conversationID,
 			Mode:      p.mode,
 			Message:   p.message,
 			Schema:    p.schema,
@@ -176,7 +176,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
 		reason = "cancel"
 	case <-timer.C:
-		m.logger.Warn("elicitation: request timeout, auto-cancel", "session", sessionID, "id", id)
+		m.logger.Warn("elicitation: request timeout, auto-cancel", "conversation", conversationID, "id", id)
 		d = acl.ElicitationOutcome{Action: "cancel"}
 		reason = "timeout"
 	}
@@ -185,9 +185,9 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 	onResolved := m.onResolved
 	m.mu.Unlock()
 	if onResolved != nil {
-		onResolved(sessionID, id, reason, d)
+		onResolved(conversationID, id, reason, d)
 	}
-	m.logger.Info("elicitation: resolved", "session", sessionID, "id", id, "action", d.Action, "reason", reason)
+	m.logger.Info("elicitation: resolved", "conversation", conversationID, "id", id, "action", d.Action, "reason", reason)
 	return d
 }
 

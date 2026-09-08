@@ -37,15 +37,15 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 
-	sessions, err := svc.ListSessions(false)
+	conversations, err := svc.ListConversations(false)
 	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+		t.Fatalf("ListConversations: %v", err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("期望回灌 1 个会话，got %d: %+v", len(sessions), sessions)
+	if len(conversations) != 1 {
+		t.Fatalf("期望回灌 1 个会话，got %d: %+v", len(conversations), conversations)
 	}
-	s := sessions[0]
-	if s.ID != "ses_old1" || s.Title != "列出当前目录文件" || s.Status != SessionStatusCompleted {
+	s := conversations[0]
+	if s.ID != "ses_old1" || s.Title != "列出当前目录文件" || s.Status != ConversationStatusCompleted {
 		t.Fatalf("回灌元数据不符: %+v", s)
 	}
 	if s.CreatedAt == "" || s.UpdatedAt == "" {
@@ -53,9 +53,9 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	}
 
 	// 事件已注入 bus：history 可按 agg 回放。
-	hist, err := svc.SessionHistory(t.Context(), "ses_old1", 0, 100)
+	hist, err := svc.ConversationHistory(t.Context(), "ses_old1", 0, 100)
 	if err != nil {
-		t.Fatalf("SessionHistory: %v", err)
+		t.Fatalf("ConversationHistory: %v", err)
 	}
 	if len(hist.Events) != 3 {
 		t.Fatalf("期望注入 3 条事件，got %d", len(hist.Events))
@@ -75,9 +75,9 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 	})
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
-	sessions, _ := svc.ListSessions(false)
-	if len(sessions) != 1 || sessions[0].Status != SessionStatusInProgress {
-		t.Fatalf("无终态应为 in_progress: %+v", sessions)
+	conversations, _ := svc.ListConversations(false)
+	if len(conversations) != 1 || conversations[0].Status != ConversationStatusInProgress {
+		t.Fatalf("无终态应为 in_progress: %+v", conversations)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 	svc.SetTranscriptDir(dir) // 二次调用：也应幂等（无重复注入/覆盖）
-	sessions, _ := svc.ListSessions(false)
-	if len(sessions) != 1 {
-		t.Fatalf("重复回灌导致的会话数异常: %d", len(sessions))
+	conversations, _ := svc.ListConversations(false)
+	if len(conversations) != 1 {
+		t.Fatalf("重复回灌导致的会话数异常: %d", len(conversations))
 	}
 }

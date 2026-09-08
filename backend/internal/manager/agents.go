@@ -32,7 +32,7 @@ var agentIDRE = regexp.MustCompile(agentIDPattern)
 type agentDefinitionFile struct {
 	ID       string            `json:"id"`
 	Name     string            `json:"name"`
-	Runtime  string            `json:"runtime"`
+	Runtimes []string          `json:"runtimes"`           // 路由候选 runtime（P0 取首候选）
 	Provider string            `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
 	Env      map[string]string `json:"env,omitempty"`      // 预留：按 agent 附加 env（本轮不注入，仅持久化）
 }
@@ -81,60 +81,33 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 }
 
 // applyDefinition 合并一条定义进 agents 表（启动静默 / 运行期需鉴权由调用方保证）。
-// 种子 agent 允许改 name/provider；用户 agent 全量登记。
 func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	if !agentIDRE.MatchString(d.ID) {
 		return acl.NewError(acl.ClassRequest, "invalid_agent_id", fmt.Sprintf("id 非法（须 %s）", agentIDPattern), nil)
 	}
-	seeded := strings.HasPrefix(d.ID, reservedAgentPrefix)
-	if seeded && d.Runtime != "" {
-		if _, ok := s.reg.Get(d.Runtime); !ok {
-			return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", d.Runtime), nil)
+	for _, r := range d.Runtimes {
+		if _, ok := s.reg.Get(r); !ok {
+			return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
 		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if seeded {
-		// 种子只更新元数据（name/provider）；runtime 以现有为准。
-		cur, ok := s.agents[d.ID]
-		if !ok {
-			if !silent {
-				return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("种子 agent %q 不存在", d.ID), nil)
-			}
-			return nil
-		}
-		if d.Name != "" {
-			cur.Name = d.Name
-		}
-		if d.Provider != "" {
-			cur.Provider = d.Provider
-		}
-		return nil
-	}
-	if _, exists := s.agents[d.ID]; exists {
+	if cur, exists := s.agents[d.ID]; exists {
 		if !silent {
 			return acl.NewError(acl.ClassRequest, "agent_exists", fmt.Sprintf("agent %q 已存在", d.ID), nil)
 		}
-		cur := s.agents[d.ID]
 		if d.Name != "" {
 			cur.Name = d.Name
 		}
-		if d.Runtime != "" && cur.Runtime != d.Runtime {
-			// 运行期重载 runtime 变更：允许（等同先删后建语义），但需 runtime 存在。
-			if _, ok := s.reg.Get(d.Runtime); !ok {
-				return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", d.Runtime), nil)
-			}
-			cur.Runtime = d.Runtime
+		if len(d.Runtimes) > 0 {
+			cur.Runtimes = d.Runtimes
 		}
 		if d.Provider != "" {
 			cur.Provider = d.Provider
 		}
 		return nil
 	}
-	if _, ok := s.reg.Get(d.Runtime); !ok {
-		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", d.Runtime), nil)
-	}
-	s.agents[d.ID] = &AgentRec{ID: d.ID, Name: d.Name, Runtime: d.Runtime, Provider: d.Provider, State: AgentStateStopped}
+	s.agents[d.ID] = &AgentRec{ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, State: AgentStateStopped}
 	return nil
 }
 
@@ -147,7 +120,7 @@ func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 	if req.Name == "" {
 		req.Name = req.ID
 	}
-	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtime: req.Runtime, Provider: req.Provider}
+	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider}
 	if err := s.applyDefinition(d, false); err != nil {
 		return nil, err
 	}
@@ -161,26 +134,22 @@ func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 	return s.agentRespLocked(req.ID), nil
 }
 
-// UpdateAgent 更新 agent 元数据（name/provider 子集；种子 runtime 只读、可改名/provider；
-// provider 传空串 = 清除）。
+// UpdateAgent 更新 agent 元数据（name/runtimes/provider 子集；provider 传空串 = 清除）。
 func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentUpdateReq) (*handler.AgentResp, error) {
-	seeded := strings.HasPrefix(id, reservedAgentPrefix)
 	s.mu.Lock()
 	cur, ok := s.agents[id]
 	if !ok {
 		s.mu.Unlock()
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	if patch.Runtime != nil && *patch.Runtime != "" {
-		if seeded {
-			s.mu.Unlock()
-			return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 的 runtime 不可变更（直接编辑 definitions 亦只读）", nil)
+	if patch.Runtimes != nil && len(*patch.Runtimes) > 0 {
+		for _, r := range *patch.Runtimes {
+			if _, rok := s.reg.Get(r); !rok {
+				s.mu.Unlock()
+				return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
+			}
 		}
-		if _, rok := s.reg.Get(*patch.Runtime); !rok {
-			s.mu.Unlock()
-			return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", *patch.Runtime), nil)
-		}
-		cur.Runtime = *patch.Runtime
+		cur.Runtimes = *patch.Runtimes
 	}
 	if patch.Name != nil {
 		cur.Name = *patch.Name
@@ -227,9 +196,9 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	spec, ok := s.reg.Get(agent.Runtime)
+	spec, ok := s.reg.Get(agent.pickRuntime())
 	if !ok {
-		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.Runtime), nil)
+		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
 	}
 	if _, err := s.orch.acquire(ctx, agent, spec); err != nil {
 		s.setAgentState(id, AgentStateStopped)
@@ -250,9 +219,9 @@ func (s *Service) StopAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	spec, ok := s.reg.Get(agent.Runtime)
+	spec, ok := s.reg.Get(agent.pickRuntime())
 	if !ok {
-		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.Runtime), nil)
+		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
 	}
 	return s.orch.stopAgent(ctx, agent, spec)
 }
@@ -268,9 +237,9 @@ func (s *Service) persistAgentDef(d agentDefinitionFile) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if d.Runtime == "" {
+	if len(d.Runtimes) == 0 {
 		if a, ok := s.AgentByID(d.ID); ok {
-			d.Runtime = a.Runtime
+			d.Runtimes = a.Runtimes
 		}
 	}
 	if d.Name == "" {
@@ -309,7 +278,7 @@ func (s *Service) syncAgentDef(id string) error {
 	if !ok {
 		return nil
 	}
-	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtime: cur.Runtime, Provider: cur.Provider})
+	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider})
 }
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
@@ -320,5 +289,5 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 	if !ok {
 		return nil
 	}
-	return &handler.AgentResp{ID: a.ID, Name: a.Name, Runtime: a.Runtime, Provider: a.Provider, State: a.State}
+	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State}
 }

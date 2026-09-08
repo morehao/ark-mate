@@ -13,7 +13,7 @@ import (
 
 // TestPermissionMemoriesPersistAcrossRestart 验证 P1 权限记忆持久化不变量：
 //  1. Remember（allow/reject 双侧）经 hooks 落 permission_memories 表；
-//  2. Revoke / ForgetSession 同步删库；
+//  2. Revoke / ForgetConversation 同步删库；
 //  3. 重启恢复：新 Orchestrator.RestoreMemoriesFromStore 从表装载，AutoDecision 双侧语义不丢
 //     （reject 记忆 → 直接 Rejected，allow 记忆 → 直接 Allowed），跨重启可追溯。
 func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
@@ -29,7 +29,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc1 := NewService(reg, nil)
 	svc1.EnableStore(st1)
 	orch1 := NewOrchestrator(svc1, reg)
-	svc1.registerSession(&SessionRec{ID: "s1", AgentID: "agent-echo", Runtime: "echo"})
+	svc1.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-echo"})
 
 	toolRun := acl.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
 	orch1.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")
@@ -50,7 +50,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("同键覆盖/双侧不符: %+v", decisionOf)
 	}
 
-	// Revoke（写文件）→ DB 同步删；ForgetSession 其余 → 整会话删。
+	// Revoke（写文件）→ DB 同步删；ForgetConversation 其余 → 整会话删。
 	if !orch1.perm.Revoke("s1", "写文件", "write") {
 		t.Fatal("Revoke 应命中")
 	}
@@ -59,7 +59,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	}
 	orch1.perm.ForgetSession("s1")
 	if n, _ := st1.ListMemories(ctx, "s1"); len(n) != 0 {
-		t.Fatalf("ForgetSession 后 DB 应为空: %+v", n)
+		t.Fatalf("ForgetConversation 后 DB 应为空: %+v", n)
 	}
 	_ = st1.Close()
 
@@ -72,8 +72,8 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc2 := NewService(reg, nil)
 	svc2.EnableStore(st2)
 	orch2 := NewOrchestrator(svc2, reg)
-	svc2.registerSession(&SessionRec{ID: "s1", AgentID: "agent-echo", Runtime: "echo"})
-	svc2.registerSession(&SessionRec{ID: "s2", AgentID: "agent-echo", Runtime: "echo"})
+	svc2.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-echo"})
+	svc2.registerConversation(&ConversationRec{ID: "s2", AgentID: "agent-echo"})
 
 	// 恢复前先记录（模拟重启前的历史记忆），恢复后二者叠加。
 	orch2.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")

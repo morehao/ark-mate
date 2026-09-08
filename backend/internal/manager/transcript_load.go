@@ -28,11 +28,11 @@ func (s *Service) loadTranscripts() {
 		if rec == nil {
 			continue
 		}
-		s.registerSession(rec.session)
-		// 注入历史事件到 bus（agg=sessionID），使 history/WS 可对旧会话回放。
+		s.registerConversation(rec.conversation)
+		// 注入历史事件到 bus（agg=conversationID），使 history/WS 可对旧会话回放。
 		if s.bus != nil {
 			for _, line := range rec.lines {
-				s.bus.Publish(line.typ, rec.session.ID, line.version, line.payload)
+				s.bus.Publish(line.typ, rec.conversation.ID, line.version, line.payload)
 			}
 		}
 	}
@@ -48,8 +48,8 @@ type transcriptLine struct {
 
 // transcriptFile 是回读一个 transcript 文件的结果。
 type transcriptFile struct {
-	session *SessionRec
-	lines   []transcriptLine
+	conversation *ConversationRec
+	lines        []transcriptLine
 }
 
 // loadTranscriptFile 解析一个 JSONL transcript 文件（首行 header + 事件行），
@@ -117,10 +117,9 @@ func loadTranscriptFile(path string) *transcriptFile {
 	}
 
 	return &transcriptFile{
-		session: &SessionRec{
+		conversation: &ConversationRec{
 			ID:        hdr.SessionID,
 			AgentID:   hdr.AgentID,
-			Runtime:   hdr.Runtime,
 			Status:    statusFromLastEventType(lastType),
 			Title:     firstUserText,
 			CreatedAt: createdAt,
@@ -135,13 +134,13 @@ func loadTranscriptFile(path string) *transcriptFile {
 func statusFromLastEventType(ltype string) string {
 	switch ltype {
 	case BusTurnError:
-		return SessionStatusFailed
+		return ConversationStatusFailed
 	case BusRunCancelled:
-		return SessionStatusCancelled
+		return ConversationStatusCancelled
 	case BusTurnEnded:
-		return SessionStatusCompleted
+		return ConversationStatusCompleted
 	default:
-		return SessionStatusInProgress
+		return ConversationStatusInProgress
 	}
 }
 
@@ -187,13 +186,12 @@ func ReadTranscriptFile(path string) (*TranscriptData, bool) {
 		return nil, false
 	}
 	data := &TranscriptData{
-		SessionID: rec.session.ID,
-		AgentID:   rec.session.AgentID,
-		RuntimeID: rec.session.Runtime,
-		Title:     rec.session.Title,
-		Status:    rec.session.Status,
-		CreatedAt: rec.session.CreatedAt,
-		UpdatedAt: rec.session.UpdatedAt,
+		SessionID: rec.conversation.ID,
+		AgentID:   rec.conversation.AgentID,
+		Title:     rec.conversation.Title,
+		Status:    rec.conversation.Status,
+		CreatedAt: rec.conversation.CreatedAt,
+		UpdatedAt: rec.conversation.UpdatedAt,
 		Lines:     make([]TranscriptEvent, 0, len(rec.lines)),
 	}
 	for _, l := range rec.lines {

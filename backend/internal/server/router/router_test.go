@@ -57,7 +57,7 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：agents 每 runtime 播种一个、runtimes 3 个
+// TestRouterListRealService 经真实 Service 的列表端点：默认 agent assistant 一个、runtimes 3 个
 // （opencode / deepseekharness / echo 演示）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
@@ -67,7 +67,7 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
 	var agents []map[string]any
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 3 {
+	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 || agents[0]["id"] != "assistant" {
 		t.Fatalf("agents data 不符: %s", env.Data)
 	}
 
@@ -77,9 +77,9 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
-	env = get(t, e, "/v1/forge/sessions")
+	env = get(t, e, "/v1/forge/conversations")
 	if env.Code != 0 {
-		t.Fatalf("sessions 信封不符: %+v", env)
+		t.Fatalf("conversations 信封不符: %+v", env)
 	}
 }
 
@@ -96,11 +96,11 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"GET /v1/forge/health",
 		"GET /v1/forge/agents",
 		"GET /v1/forge/runtimes",
-		"GET /v1/forge/sessions",
-		"POST /v1/forge/sessions",
-		"GET /v1/forge/sessions/:id/history",
-		"POST /v1/forge/sessions/:id/prompt",
-		"POST /v1/forge/sessions/:id/cancel",
+		"GET /v1/forge/conversations",
+		"POST /v1/forge/conversations",
+		"GET /v1/forge/conversations/:id/history",
+		"POST /v1/forge/conversations/:id/prompt",
+		"POST /v1/forge/conversations/:id/cancel",
 		"GET /v1/forge/ws/events",
 	} {
 		if !found[want] {

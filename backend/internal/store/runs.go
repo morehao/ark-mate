@@ -19,10 +19,10 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 		ended = r.EndedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO runs(id, session_id, user_text, status, error_code, stop_reason, usage_json,
+		INSERT OR IGNORE INTO runs(id, conversation_id, user_text, status, error_code, stop_reason, usage_json,
 		                           first_seq, last_seq, started_at, ended_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.SessionID, r.UserText, r.Status, r.ErrorCode, r.StopReason, r.UsageJSON,
+		r.ID, r.ConversationID, r.UserText, r.Status, r.ErrorCode, r.StopReason, r.UsageJSON,
 		r.FirstSeq, r.LastSeq, started, ended)
 	return err
 }
@@ -46,11 +46,11 @@ func (s *Store) FinishRun(ctx context.Context, id string, status, stopReason, er
 }
 
 // ListRuns 列出某会话全部 run（started_at 升序；失败轮重试/统计按此序回溯）。
-func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]Run, error) {
+func (s *Store) ListRuns(ctx context.Context, conversationID string) ([]Run, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, session_id, user_text, status, error_code, stop_reason, usage_json,
+		SELECT id, conversation_id, user_text, status, error_code, stop_reason, usage_json,
 		       first_seq, last_seq, started_at, ended_at
-		FROM runs WHERE session_id = ? ORDER BY started_at ASC, first_seq ASC`, sessionID)
+		FROM runs WHERE conversation_id = ? ORDER BY started_at ASC, first_seq ASC`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]Run, error) {
 	for rows.Next() {
 		var r Run
 		var started, ended string
-		if err := rows.Scan(&r.ID, &r.SessionID, &r.UserText, &r.Status, &r.ErrorCode, &r.StopReason,
+		if err := rows.Scan(&r.ID, &r.ConversationID, &r.UserText, &r.Status, &r.ErrorCode, &r.StopReason,
 			&r.UsageJSON, &r.FirstSeq, &r.LastSeq, &started, &ended); err != nil {
 			return nil, err
 		}
@@ -74,9 +74,9 @@ func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]Run, error) {
 }
 
 // RunLastSeq 返回某会话最后一条 run 的 last_seq（0 = 尚无 run；供下一 run 的事件窗口起点）。
-func (s *Store) RunLastSeq(ctx context.Context, sessionID string) (int64, error) {
+func (s *Store) RunLastSeq(ctx context.Context, conversationID string) (int64, error) {
 	var v int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(last_seq), 0) FROM runs WHERE session_id = ?`, sessionID).Scan(&v)
+		`SELECT COALESCE(MAX(last_seq), 0) FROM runs WHERE conversation_id = ?`, conversationID).Scan(&v)
 	return v, err
 }

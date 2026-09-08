@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-forge/internal/runtime"
 )
 
-// agentCancelTimeout session/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
+// agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
 // 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
 const agentCancelTimeout = 3 * time.Second
 
@@ -24,9 +24,9 @@ type acpSession interface {
 	Cancel(ctx context.Context) error
 }
 
-// ActiveSession 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
-// 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = session id）。
-type ActiveSession struct {
+// ActiveConversation 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
+// 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = conversation id）。
+type ActiveConversation struct {
 	ID      string
 	AgentID string
 	Runtime string
@@ -51,30 +51,27 @@ type Turn struct {
 	err       error
 }
 
-// CreateResult 是 StartSession 的结果。
+// CreateResult 是 StartConversation 的结果。
 type CreateResult struct {
-	SessionID string
-	AgentID   string
-	Runtime   string
-	Status    string
-	EventSeq  int64 // session.created 事件的 bus 水位（供 WS attach 续传）
+	ConversationID string
+	AgentID        string
+	Runtime        string
+	Status         string
+	EventSeq       int64 // conversation.created 事件的 bus 水位（供 WS attach 续传）
 }
 
-// Orchestrator 编排 Agent 生命周期与会话执行（连接获取→session/new→多轮 prompt→cancel）。
+// Orchestrator 编排 Agent 生命周期与会话执行（连接获取→conversation/new→多轮 prompt→cancel）。
 type Orchestrator struct {
 	svc *Service
 	reg *runtime.Registry
 
-	mu       sync.Mutex
-	conns    map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
-	sessions map[string]*ActiveSession
-	// aliases：runtime/ACP 会话 id → 外部会话 id（P1-f4 断点恢复：重启后 runtime 无法按同名
-	// resume 时新建 ACP 会话，事件/权限/提问归属经 alias 映射回原外部 id；identity 会话可不登记）。
-	aliases  map[string]string
-	reapStop context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
+	mu            sync.Mutex
+	conns         map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
+	conversations map[string]*ActiveConversation
+	reapStop      context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
 	// busyConn 记录每连接上正在执行 turn 的会话（Prompt 开始 mark、runTurn 收尾 unmark）。
-	// 用途：SDK v0.13.5 未建模 elicitation 的 scope 字段，宿主读不到顶层 sessionId；
+	// 用途：SDK v0.13.5 未建模 elicitation 的 scope 字段，宿主读不到顶层 conversationId；
 	// 过渡期用「该连接上唯一在途 turn」推断 elicitation 的会话归属（见 §1.5 决策修订）。
 	// 多会话并发在途时归属不唯一 → 不猜测，按取消回应。
 	busyConn map[*acl.Client]map[string]struct{}
@@ -109,33 +106,32 @@ type RunOptions struct {
 
 // RunResult 一次 RunOnce（demo）的结果。
 type RunResult struct {
-	SessionID  string
-	AgentID    string
-	StopReason string
+	ConversationID string
+	AgentID        string
+	StopReason     string
 }
 
 // NewOrchestrator 构造编排器并回挂到 Service（Service 负责 bus/存储/REST 方法）。
 func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o := &Orchestrator{
-		svc:      svc,
-		reg:      reg,
-		conns:    make(map[string]*runtimeConn),
-		sessions: make(map[string]*ActiveSession),
-		aliases:  make(map[string]string),
-		busyConn: make(map[*acl.Client]map[string]struct{}),
-		perm:     NewPermissionManager(DefaultPermissionTimeout),
-		elic:     NewElicitationManager(DefaultElicitationTimeout),
-		logger:   slog.Default(),
+		svc:           svc,
+		reg:           reg,
+		conns:         make(map[string]*runtimeConn),
+		conversations: make(map[string]*ActiveConversation),
+		busyConn:      make(map[*acl.Client]map[string]struct{}),
+		perm:          NewPermissionManager(DefaultPermissionTimeout),
+		elic:          NewElicitationManager(DefaultElicitationTimeout),
+		logger:        slog.Default(),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
-	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
-	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acl.PermissionDecision) {
+	// （conversation.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
+	o.perm.SetOnResolved(func(conversationID, callID, reason string, d acl.PermissionDecision) {
 		outcome := "cancelled"
 		if d.Allowed || (d.Rejected && d.OptionID != "") {
 			outcome = "selected"
 		}
-		o.svc.publish(BusPermissionResolved, sessionID, map[string]any{
-			"session_id": sessionID,
+		o.svc.publish(BusPermissionResolved, conversationID, map[string]any{
+			"session_id": conversationID,
 			"call_id":    callID,
 			"outcome":    outcome,
 			"reason":     reason,
@@ -148,10 +144,10 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	// 会话级记忆持久化挂钩（sqlite 模式写 permission_memories 表；st 为 nil 时 no-op）。
 	o.perm.SetMemoryHooks(o.svc.persistMemoryAdd, o.svc.persistMemoryDel, o.svc.persistMemoryDelAll)
 	// 挂起提问一旦有终局（accept/decline/cancel/超时自动取消/会话取消），发布收敛事件
-	// （session.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
-	o.elic.SetOnResolved(func(sessionID, id, reason string, d acl.ElicitationOutcome) {
-		o.svc.publish(BusElicitationResolved, sessionID, map[string]any{
-			"session_id":     sessionID,
+	// （conversation.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
+	o.elic.SetOnResolved(func(conversationID, id, reason string, d acl.ElicitationOutcome) {
+		o.svc.publish(BusElicitationResolved, conversationID, map[string]any{
+			"session_id":     conversationID,
 			"elicitation_id": id,
 			"action":         d.Action,
 			"reason":         reason,
@@ -174,7 +170,7 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 	items := make([]MemoryItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, MemoryItem{
-			sessionID: r.SessionID, Title: r.Title, Kind: r.Kind,
+			conversationID: r.ConversationID, Title: r.Title, Kind: r.Kind,
 			Decision: r.Decision, Since: r.CreatedAt,
 		})
 	}
@@ -199,66 +195,22 @@ func (o *Orchestrator) SetLogger(l *slog.Logger) {
 	}
 }
 
-// recoverSession 断点恢复：会话在 svc 有记录但编排器无活跃 ACP 会话（进程重启后）。
-// 按会话记录的 agent/runtime/cwd 重建：拨 runtime 连接（复用/重拨）→ 新建 ACP 会话 →
-// 登记 o.sessions[外部 id]（ActiveSession.ID = 外部 id，可与 runtime 新 ACP 会话 id 不同）
-// 并登记 alias（runtime id → 外部 id），使事件/权限/提问继续归属原外部会话。
-func (o *Orchestrator) recoverSession(ctx context.Context, sessionID string) (*ActiveSession, error) {
-	rec := o.svc.sessionRec(sessionID)
-	if rec == nil {
-		return nil, acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
-	}
-	if as := o.session(sessionID); as != nil { // 并发已恢复
-		return as, nil
-	}
-	agent, ok := o.svc.AgentByID(rec.AgentID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("agent %q 已不存在，无法恢复会话 %q", rec.AgentID, sessionID), nil)
-	}
-	spec, ok := o.reg.Get(agent.Runtime)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册，无法恢复会话 %q", agent.Runtime, sessionID), nil)
-	}
-	rc, err := o.acquire(ctx, agent, spec)
-	if err != nil {
-		o.svc.setAgentState(agent.ID, AgentStateStopped)
-		return nil, err
-	}
-	cwd := rec.Cwd
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{Cwd: cwd})
-	if err != nil {
-		return nil, err
-	}
-	rtID := sess.ID()
-	o.mu.Lock()
-	if ext := o.aliases[rtID]; ext != "" && ext != sessionID {
-		o.mu.Unlock()
-		return nil, acl.NewError(acl.ClassConnection, "runtime_session_conflict",
-			fmt.Sprintf("runtime 会话 %q 已归属外部会话 %q，无法再绑定 %q", rtID, ext, sessionID), nil)
-	}
-	as := &ActiveSession{ID: sessionID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess}
-	o.sessions[sessionID] = as
-	o.aliases[rtID] = sessionID
-	o.mu.Unlock()
-	o.svc.markSession(sessionID, SessionStatusInProgress)
-	o.logger.Info("session recovered（断点恢复：重建 ACP 会话）",
-		"session", sessionID, "runtime_session", rtID, "runtime", spec.ID, "cwd", cwd)
-	return as, nil
-}
-
-// StartSession 在 agent 对应 runtime 上建立持久 ACP 会话（session/new，绝对 cwd），
-// 并发布 session.created。不发起 prompt；Prompt 负责每轮。
-func (o *Orchestrator) StartSession(ctx context.Context, agentID, cwd string) (*CreateResult, error) {
+// StartConversation 在 agent 路由首候选 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
+// 并发布 conversation.created。不发起 prompt；Prompt 负责每轮。
+func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd string) (*CreateResult, error) {
 	agent, ok := o.svc.AgentByID(agentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
 	}
-	spec, ok := o.reg.Get(agent.Runtime)
+	return o.startConversationOn(ctx, agent, agent.pickRuntime(), cwd)
+}
+
+// startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
+// RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
+func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID, cwd string) (*CreateResult, error) {
+	spec, ok := o.reg.Get(runtimeID)
 	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.Runtime), nil)
+		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
 	rc, err := o.acquire(ctx, agent, spec)
 	if err != nil {
@@ -273,32 +225,26 @@ func (o *Orchestrator) StartSession(ctx context.Context, agentID, cwd string) (*
 		return nil, err
 	}
 
-	as := &ActiveSession{ID: sess.ID(), AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess}
+	as := &ActiveConversation{ID: sess.ID(), AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess}
 	o.mu.Lock()
-	o.sessions[as.ID] = as
-	o.aliases[as.ID] = as.ID // identity 别名（断点恢复按新 ACP id 登记时以 alias 归一）
+	o.conversations[as.ID] = as
 	o.mu.Unlock()
 
-	o.svc.registerSession(&SessionRec{ID: as.ID, AgentID: agent.ID, Runtime: spec.ID, Cwd: cwd, Status: SessionStatusInProgress})
+	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, Status: ConversationStatusInProgress})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
 	})
-	return &CreateResult{SessionID: as.ID, AgentID: agent.ID, Runtime: spec.ID, Status: SessionStatusInProgress, EventSeq: evt.Seq}, nil
+	return &CreateResult{ConversationID: as.ID, AgentID: agent.ID, Runtime: spec.ID, Status: ConversationStatusInProgress, EventSeq: evt.Seq}, nil
 }
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
 // 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 turn_in_progress。
-// 会话不在活跃集合（如进程重启后）且 svc 仍登记着它 → 断点恢复：按会话记录的
-// agent/runtime/cwd 重建 ACP 会话并别名归属（runtime 会话 id 可能 ≠ 外部 id），再继续本轮。
-func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
-	as := o.session(sessionID)
+// 会话不在活跃集合（如进程重启后）→ conversation_not_found（P0 不做断点恢复；见设计 ADR-4 的 P3）。
+func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) (int64, error) {
+	as := o.conversation(conversationID)
 	if as == nil {
-		recovered, err := o.recoverSession(ctx, sessionID)
-		if err != nil {
-			return 0, err
-		}
-		as = recovered
+		return 0, acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
 	}
 	as.mu.Lock()
 	if as.dead {
@@ -317,14 +263,14 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 	as.mu.Unlock()
 	o.markBusy(client, as.ID)
 
-	o.svc.markSession(as.ID, SessionStatusInProgress)
+	o.svc.markConversation(as.ID, ConversationStatusInProgress)
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": as.AgentID, "text": text,
 	})
 	go o.runTurn(as, t, text)
 	// 看门狗：turnTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
 	if o.turnTimeout > 0 {
-		go o.watchdogTurn(as, sessionID, t)
+		go o.watchdogTurn(as, conversationID, t)
 	}
 	return ue.Seq, nil
 }
@@ -332,19 +278,19 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 // watchdogTurn 单轮超时兜底：超时后走 CancelTurn 的有界取消路径（agent 无响应也本地解除），
 // 终态事件由 runTurn 依取消语义发布（run.cancelled）。与用户手动取消幂等共存：turn 已结束时
 // select 到 t.done 直接退出；已取消则 CancelTurn 对 nil turn 为 no-op。
-func (o *Orchestrator) watchdogTurn(as *ActiveSession, sessionID string, t *Turn) {
+func (o *Orchestrator) watchdogTurn(as *ActiveConversation, conversationID string, t *Turn) {
 	timer := time.NewTimer(o.turnTimeout)
 	defer timer.Stop()
 	select {
 	case <-t.done:
 	case <-timer.C:
-		o.logger.Warn("turn 超过看门狗时限，自动取消", "session", sessionID, "timeout", o.turnTimeout.String())
-		_ = o.CancelTurn(context.Background(), sessionID)
+		o.logger.Warn("turn 超过看门狗时限，自动取消", "conversation", conversationID, "timeout", o.turnTimeout.String())
+		_ = o.CancelTurn(context.Background(), conversationID)
 	}
 }
 
 // runTurn 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 turn 终态）。
-func (o *Orchestrator) runTurn(as *ActiveSession, t *Turn, text string) {
+func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 	stop, err := as.sess.Prompt(t.ctx, text)
 
 	as.mu.Lock()
@@ -363,13 +309,13 @@ func (o *Orchestrator) runTurn(as *ActiveSession, t *Turn, text string) {
 
 	switch {
 	case cancelled:
-		o.svc.markSession(as.ID, SessionStatusCancelled)
+		o.svc.markConversation(as.ID, ConversationStatusCancelled)
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
 	case err != nil:
-		o.svc.markSession(as.ID, SessionStatusFailed)
+		o.svc.markConversation(as.ID, ConversationStatusFailed)
 		o.publishError(as.ID, err)
 	default:
-		o.svc.markSession(as.ID, SessionStatusCompleted)
+		o.svc.markConversation(as.ID, ConversationStatusCompleted)
 		o.svc.publish(BusTurnEnded, as.ID, map[string]any{
 			"session_id": as.ID, "agent_id": as.AgentID, "stop_reason": stop,
 		})
@@ -391,10 +337,10 @@ func errLooksCancelled(err error) bool {
 }
 
 // CancelTurn 取消会话进行中的 turn（无 turn 时为幂等 no-op）。
-func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
-	as := o.session(sessionID)
+func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) error {
+	as := o.conversation(conversationID)
 	if as == nil {
-		return acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
 	}
 	as.mu.Lock()
 	t := as.turn
@@ -405,7 +351,7 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
 	if t == nil {
 		return nil
 	}
-	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
+	// agent 侧取消（conversation/cancel）有界执行：runtime 无响应时不阻塞本地解除。
 	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（runTurn 收尾不依赖 RPC）。
 	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), agentCancelTimeout)
 	defer ccancel()
@@ -417,20 +363,20 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
 	select {
 	case <-done:
 	case <-cctx.Done():
-		o.logger.Debug("session/cancel RPC 未在限期内响应，本地强制解除",
-			"session", sessionID, "timeout", agentCancelTimeout.String())
+		o.logger.Debug("conversation/cancel RPC 未在限期内响应，本地强制解除",
+			"conversation", conversationID, "timeout", agentCancelTimeout.String())
 	}
-	t.cancel()                      // 解除 SDK 阻塞
-	o.perm.CancelSession(sessionID) // session/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
-	o.elic.CancelSession(sessionID) // 挂起的结构化提问一并按取消回馈
+	t.cancel()                           // 解除 SDK 阻塞
+	o.perm.CancelSession(conversationID) // conversation/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
+	o.elic.CancelSession(conversationID) // 挂起的结构化提问一并按取消回馈
 	return nil
 }
 
 // WaitTurn 阻塞至当前 turn 结束（demo/同步路径用）；无 turn 立即返回。
-func (o *Orchestrator) WaitTurn(ctx context.Context, sessionID string) (string, error) {
-	as := o.session(sessionID)
+func (o *Orchestrator) WaitTurn(ctx context.Context, conversationID string) (string, error) {
+	as := o.conversation(conversationID)
 	if as == nil {
-		return "", acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
+		return "", acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
 	}
 	as.mu.Lock()
 	t := as.turn
@@ -446,61 +392,35 @@ func (o *Orchestrator) WaitTurn(ctx context.Context, sessionID string) (string, 
 	return t.stop, t.err
 }
 
-// RunOnce 在指定 runtime 上跑一次 fresh session + prompt 并等待结束（forge demo 用）。
+// RunOnce 在指定 runtime 上跑一次 fresh conversation + prompt 并等待结束（forge demo 用）。
 func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult, error) {
-	agent, err := o.svc.requireAgent(opt.RuntimeID)
+	agent, err := o.svc.requireDefaultAgent()
 	if err != nil {
 		return nil, err
 	}
-	res, err := o.StartSession(ctx, agent.ID, opt.Cwd)
+	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, opt.Cwd)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := o.Prompt(ctx, res.SessionID, opt.Prompt); err != nil {
+	if _, err := o.Prompt(ctx, res.ConversationID, opt.Prompt); err != nil {
 		return nil, err
 	}
-	stop, err := o.WaitTurn(ctx, res.SessionID)
+	stop, err := o.WaitTurn(ctx, res.ConversationID)
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID}, err
+		return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID}, err
 	}
 	if err != nil {
 		// 父 ctx 超时/取消：runTurn 已按其 err 归为 failed/cancelled
-		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, err
+		return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID, StopReason: stop}, err
 	}
-	return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, nil
+	return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID, StopReason: stop}, nil
 }
 
-// session 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
-func (o *Orchestrator) session(id string) *ActiveSession {
+// conversation 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
+func (o *Orchestrator) conversation(id string) *ActiveConversation {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.sessions[id]
-}
-
-// resolveSessionID 把 runtime/ACP 会话 id 归一到外部会话 id（P1-f4 断点恢复别名）；
-// 未登记别名（identity 会话）时原样返回。
-func (o *Orchestrator) resolveSessionID(rtSessionID string) string {
-	if ext, ok := o.aliases[rtSessionID]; ok {
-		return ext
-	}
-	return rtSessionID
-}
-
-// registerAlias 登记 runtime 会话 → 外部会话映射（供断点恢复的别名事件归属）。
-func (o *Orchestrator) registerAlias(rtSessionID, extSessionID string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.aliases[rtSessionID] = extSessionID
-}
-
-// remapSessionPayload 把事件 payload 内的 session_id 字段改写为外部会话 id
-// （tool/message/thought 等 map 载荷在断点恢复别名下仍以外部 id 呈现）。
-func remapSessionPayload(payload any, ext string) {
-	if m, ok := payload.(map[string]any); ok {
-		if _, has := m["session_id"]; has {
-			m["session_id"] = ext
-		}
-	}
+	return o.conversations[id]
 }
 
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
@@ -539,9 +459,9 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
 			return acl.ElicitationOutcome{Action: "accept"}
 		}
-		sid := o.busySessionForClient(cli)
+		sid := o.busyConversationForClient(cli)
 		if sid == "" {
-			// SDK 未建模 elicitation scope → 无法读顶层 sessionId；连接上无唯一在途 turn
+			// SDK 未建模 elicitation scope → 无法读顶层 conversationId；连接上无唯一在途 turn
 			// （空闲 / 会话外 request-scope / 多会话并发）时不做猜测，按取消回应。
 			o.logger.Warn("elicitation: 连接上无唯一在途 turn，无法归属会话，按取消处理")
 			return acl.ElicitationOutcome{Action: "cancel"}
@@ -576,7 +496,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 
 // markBusy / unmarkBusy 维护 busyConn：会话进入 turn 时登记、收尾时撤销。
 // client 为 nil（理论上不应出现）或未登记时均安全 no-op。
-func (o *Orchestrator) markBusy(client *acl.Client, sessionID string) {
+func (o *Orchestrator) markBusy(client *acl.Client, conversationID string) {
 	if client == nil {
 		return
 	}
@@ -587,10 +507,10 @@ func (o *Orchestrator) markBusy(client *acl.Client, sessionID string) {
 		set = make(map[string]struct{})
 		o.busyConn[client] = set
 	}
-	set[sessionID] = struct{}{}
+	set[conversationID] = struct{}{}
 }
 
-func (o *Orchestrator) unmarkBusy(client *acl.Client, sessionID string) {
+func (o *Orchestrator) unmarkBusy(client *acl.Client, conversationID string) {
 	if client == nil {
 		return
 	}
@@ -600,14 +520,14 @@ func (o *Orchestrator) unmarkBusy(client *acl.Client, sessionID string) {
 	if set == nil {
 		return
 	}
-	delete(set, sessionID)
+	delete(set, conversationID)
 	if len(set) == 0 {
 		delete(o.busyConn, client)
 	}
 }
 
-// busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
-func (o *Orchestrator) busySessionForClient(client *acl.Client) string {
+// busyConversationForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
+func (o *Orchestrator) busyConversationForClient(client *acl.Client) string {
 	if client == nil {
 		return ""
 	}
@@ -636,15 +556,15 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		delete(o.conns, rc.spec.ID)
 	}
 	delete(o.busyConn, rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已删键为 no-op）
-	var victims []*ActiveSession
-	for _, as := range o.sessions {
+	var victims []*ActiveConversation
+	for _, as := range o.conversations {
 		if as.client == rc.client {
 			victims = append(victims, as)
 		}
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.disconnectSession(as)
+		o.disconnectConversation(as)
 	}
 	// 状态回落仅当仍是该 runtime 的当前连接（旧连接收尾不得覆盖新连接的 running——
 	// 空闲回收后立刻被 StartAgent/会话按需重拨的场景）。
@@ -653,9 +573,9 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	}
 }
 
-// disconnectSession 把某断连连接上的会话失活：进行中 turn 解除阻塞（runTurn 依 err 收尾），
+// disconnectConversation 把某断连连接上的会话失活：进行中 turn 解除阻塞（runTurn 依 err 收尾），
 // 空闲会话直接标记 failed 并发布 connection_lost（幂等）。
-func (o *Orchestrator) disconnectSession(as *ActiveSession) {
+func (o *Orchestrator) disconnectConversation(as *ActiveConversation) {
 	as.mu.Lock()
 	if as.dead {
 		as.mu.Unlock()
@@ -676,7 +596,7 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession) {
 		as.dropPub = true
 		as.mu.Unlock()
 		if !pub {
-			o.svc.markSession(as.ID, SessionStatusFailed)
+			o.svc.markConversation(as.ID, ConversationStatusFailed)
 			o.svc.publish(BusTurnError, as.ID, map[string]any{
 				"session_id": as.ID, "code": "connection_lost", "class": "connection",
 				"details": "agent 连接断开（会话失活；是否可 resume 依 runtime 能力）",
@@ -685,7 +605,7 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession) {
 	}
 }
 
-// eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = session id）。
+// eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = conversation id）。
 func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 	return func(ev acl.Event) {
 		if ev.SessionID == "" {
@@ -724,7 +644,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
-			o.logger.Debug("skip agent-echoed user_message (host publishes user input)", "session", ev.SessionID)
+			o.logger.Debug("skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
 		case acl.KindUsage:
 			typ = BusUsage
 			payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
@@ -733,18 +653,16 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			payload = ev.Payload
 		}
 		if typ != "" && payload != nil {
-			ext := o.resolveSessionID(ev.SessionID) // 断点恢复别名归一
-			remapSessionPayload(payload, ext)
-			o.svc.publish(typ, ext, payload)
+			o.svc.publish(typ, ev.SessionID, payload)
 		}
 	}
 }
 
 // toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
 // （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
-func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
+func toolPayload(conversationID, agentID string, d acl.ToolCallInfo) map[string]any {
 	p := map[string]any{
-		"session_id": sessionID, "agent_id": agentID,
+		"session_id": conversationID, "agent_id": agentID,
 		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
 	}
 	if d.Kind != "" {
@@ -761,12 +679,12 @@ func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
 //   - 会话级始终允许记忆命中 → 直接放行（快速路径）；
-//   - 否则发布 session.permission_request 事件（含 call_id/options）并阻塞等待
+//   - 否则发布 conversation.permission_request 事件（含 call_id/options）并阻塞等待
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
 // 事件发布（publish）注入的给 PermissionManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
-	sid := o.resolveSessionID(req.SessionID) // 断点恢复别名归一（记忆/挂起/事件均以外部会话 id 为键）
+	sid := req.SessionID // 断点恢复别名归一（记忆/挂起/事件均以外部会话 id 为键）
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
 	}
@@ -786,13 +704,13 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 }
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingPermissions(sessionID string) []PermissionItem {
-	ps := o.perm.pendingForSession(sessionID)
+func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionItem {
+	ps := o.perm.pendingForSession(conversationID)
 	out := make([]PermissionItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, PermissionItem{
 			CallID:    p.callID,
-			SessionID: p.sessionID,
+			SessionID: p.conversationID,
 			Title:     p.title,
 			ToolCall:  p.toolCall,
 			Options:   p.options,
@@ -816,31 +734,31 @@ func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowe
 }
 
 // PermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧；供详情/撤销 UI）。
-func (o *Orchestrator) PermissionMemories(sessionID string) []MemoryItem {
-	return o.perm.List(sessionID)
+func (o *Orchestrator) PermissionMemories(conversationID string) []MemoryItem {
+	return o.perm.List(conversationID)
 }
 
 // RevokeMemory 撤销会话级权限记忆。
 //   - title、kind 均非空 → 撤销单条（精确匹配 action+identifier）；
-//   - 两者均为空 → 一键撤销整会话全部记忆（= ForgetSession）。
-func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error) {
+//   - 两者均为空 → 一键撤销整会话全部记忆（= ForgetConversation）。
+func (o *Orchestrator) RevokeMemory(conversationID, title, kind string) (bool, error) {
 	switch {
 	case title == "" && kind == "":
-		o.perm.ForgetSession(sessionID)
+		o.perm.ForgetSession(conversationID)
 		return true, nil
 	case title == "" || kind == "":
 		return false, acl.NewError(acl.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
 	}
-	return o.perm.Revoke(sessionID, title, kind), nil
+	return o.perm.Revoke(conversationID, title, kind), nil
 }
 
 // requestElicitation 处理一次 ACP 结构化提问请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
-//   - 发布 session.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
+//   - 发布 conversation.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
 // 事件发布（publish）注入给 ElicitationManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
-	sid := o.resolveSessionID(req.SessionID) // 断点恢复别名归一
+	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it ElicitationItem) {
 		payload := map[string]any{
 			"session_id":     sid,
@@ -860,13 +778,13 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 }
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingElicitations(sessionID string) []ElicitationItem {
-	ps := o.elic.pendingForSession(sessionID)
+func (o *Orchestrator) PendingElicitations(conversationID string) []ElicitationItem {
+	ps := o.elic.pendingForSession(conversationID)
 	out := make([]ElicitationItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, ElicitationItem{
 			ID:        p.id,
-			SessionID: p.sessionID,
+			SessionID: p.conversationID,
 			Mode:      p.mode,
 			Message:   p.message,
 			Schema:    p.schema,
@@ -897,10 +815,10 @@ func (o *Orchestrator) ResolveElicitation(elicitationID, action string, content 
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error。
-func (o *Orchestrator) publishError(sessionID string, err error) {
+func (o *Orchestrator) publishError(conversationID string, err error) {
 	ae := acl.Classify(err)
-	o.svc.publish(BusTurnError, sessionID, map[string]any{
-		"session_id": sessionID,
+	o.svc.publish(BusTurnError, conversationID, map[string]any{
+		"session_id": conversationID,
 		"code":       ae.Code,
 		"class":      string(ae.Class),
 		"details":    ae.Details,
@@ -923,7 +841,7 @@ func (o *Orchestrator) Close() {
 	o.conns = make(map[string]*runtimeConn)
 	o.mu.Unlock()
 	for _, rc := range conns {
-		o.disconnectSessionAll(rc)
+		o.disconnectConversationAll(rc)
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 		if rc.client != nil {
 			_ = rc.client.Close()
@@ -932,17 +850,17 @@ func (o *Orchestrator) Close() {
 	o.svc.closeTranscripts()
 }
 
-func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {
+func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
 	o.mu.Lock()
-	var victims []*ActiveSession
-	for _, as := range o.sessions {
+	var victims []*ActiveConversation
+	for _, as := range o.conversations {
 		if as.client == rc.client {
 			victims = append(victims, as)
 		}
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.disconnectSession(as)
+		o.disconnectConversation(as)
 	}
 }
 
@@ -960,14 +878,14 @@ func (o *Orchestrator) reapIdleOnce(now time.Time, idle time.Duration) int {
 		if len(o.busyConn[rc.client]) > 0 {
 			continue // 有在途 turn，不回收
 		}
-		hasSession := false
-		for _, as := range o.sessions {
+		hasConversation := false
+		for _, as := range o.conversations {
 			if as.client == rc.client {
-				hasSession = true
+				hasConversation = true
 				break
 			}
 		}
-		if hasSession {
+		if hasConversation {
 			continue // 仍有会话引用（含已完成态），不回收（回收语义只覆盖暖进程）
 		}
 		victims = append(victims, rc)
@@ -1015,7 +933,7 @@ func (o *Orchestrator) StartIdleReaper(interval, idle time.Duration) {
 
 // stopAgent 停止某 agent 对应 runtime 的进程（P2 启停）：
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
-// 空闲 → 关连接（watchConn/dropConn 清 sessions 与状态；下次会话自动按需重拨）。
+// 空闲 → 关连接（watchConn/dropConn 清 conversations 与状态；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
 	o.mu.Lock()
 	rc := o.conns[spec.ID]
@@ -1035,7 +953,7 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 	if err := rc.client.Close(); err != nil {
 		return err
 	}
-	// watchConn → dropConn 会清 sessions 并置 stopped；这里等它跑完再返回。
+	// watchConn → dropConn 会清 conversations 并置 stopped；这里等它跑完再返回。
 	select {
 	case <-rc.client.Done():
 	case <-ctx.Done():

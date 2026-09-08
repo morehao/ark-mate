@@ -23,18 +23,18 @@ func agentTestSvc(t *testing.T, agentDir string) *Service {
 }
 
 // TestAgentRegistryDefinitionsCRUD P2 definitions：注册持久化 + 重启（新 Service）加载 +
-// PATCH 热更新 + 删除；种子 agent-* 只读。
+// PATCH 热更新 + 删除；默认 agent assistant 由播种提供。
 func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir)
 
 	// 注册自定义 agent（echo runtime 上的别名，不写代码新增 ACP agent）。
-	resp, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Name: "别名echo", Runtime: "echo", Provider: "openai:gpt-4o"})
+	resp, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Name: "别名echo", Runtimes: []string{"echo"}, Provider: "openai:gpt-4o"})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if resp.ID != "alias-echo" || resp.Runtime != "echo" || resp.Provider != "openai:gpt-4o" {
+	if resp.ID != "alias-echo" || resp.Provider != "openai:gpt-4o" {
 		t.Fatalf("resp 不符: %+v", resp)
 	}
 	// 定义文件已落盘。
@@ -44,7 +44,7 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 
 	// 重启（新 Service + 同一目录）→ definitions 加载。
 	svc2 := agentTestSvc(t, dir)
-	if a, ok := svc2.AgentByID("alias-echo"); !ok || a.Runtime != "echo" || a.Provider != "openai:gpt-4o" {
+	if a, ok := svc2.AgentByID("alias-echo"); !ok || len(a.Runtimes) != 1 || a.Runtimes[0] != "echo" || a.Provider != "openai:gpt-4o" {
 		t.Fatalf("重启后未加载 definition: %+v ok=%v", a, ok)
 	}
 
@@ -58,23 +58,19 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 		t.Fatalf("name 未更新: %+v", a)
 	}
 
-	// 种子只读：删除拒绝、runtime 不可改。
-	if err := svc2.DeleteAgent(ctx, "agent-echo"); err == nil {
-		t.Fatal("种子 agent 删除应拒绝")
-	}
-	rt := "opencode"
-	if _, err := svc2.UpdateAgent(ctx, "agent-echo", handler.AgentUpdateReq{Runtime: &rt}); err == nil {
-		t.Fatal("种子 runtime 变更应拒绝")
+	// 默认 Agent 已播种（用户选 Agent 而非 runtime）。
+	if _, ok := svc2.AgentByID("assistant"); !ok {
+		t.Fatal("默认 agent assistant 应播种")
 	}
 
 	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "agent-x", Runtime: "echo"}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "agent-x", Runtimes: []string{"echo"}}); err == nil {
 		t.Fatal("保留前缀应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtime: "echo"}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err == nil {
 		t.Fatal("重复 id 应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "ghost", Runtime: "no-such-runtime"}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "ghost", Runtimes: []string{"no-such-runtime"}}); err == nil {
 		t.Fatal("未知 runtime 应拒绝")
 	}
 
@@ -94,9 +90,9 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agents")
 	_ = os.MkdirAll(dir, 0o755)
-	_ = os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"id":"good-echo","name":"好","runtime":"echo"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"id":"good-echo","name":"好","runtimes":["echo"]}`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`{not json`), 0o644)
-	_ = os.WriteFile(filepath.Join(dir, "noruntime.json"), []byte(`{"id":"x1","runtime":"nope"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "noruntime.json"), []byte(`{"id":"x1","runtimes":["nope"]}`), 0o644)
 	svc := agentTestSvc(t, dir)
 	if _, ok := svc.AgentByID("good-echo"); !ok {
 		t.Fatal("good 应加载")
@@ -113,7 +109,7 @@ func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 func TestAgentStartStopGuards(t *testing.T) {
 	ctx := context.Background()
 	svc := agentTestSvc(t, "")
-	if _, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtime: "echo"}); err != nil {
+	if _, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.StartAgent(ctx, "alias-echo"); err == nil {

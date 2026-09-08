@@ -18,21 +18,31 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
-// AgentRec 是进程内 Agent 定义（M0 为每个已注册 runtime 播种一个默认 Agent）。
+// AgentRec 是进程内 Agent 定义（P0：Agent 不再绑定单一 runtime，路由候选见 Runtimes）。
 type AgentRec struct {
 	ID       string
 	Name     string
-	Runtime  string
-	Provider string // provider 档案 id（P2 provider 注入面）；空 = 默认
+	Runtimes []string // 路由候选 runtime（P0 取首候选；P2 升级为路由引擎）
+	Provider string   // provider 档案 id（P2 provider 注入面）；空 = 默认
 	State    string
 }
 
-// SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源，
-// Cwd 供断点恢复重建 ACP 会话时还原工作目录）。
-type SessionRec struct {
+// defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。
+const defaultAgentID = "assistant"
+
+// pickRuntime 返回 Agent 的路由首选 runtime（P0 取首候选；P2 升级为路由引擎）。
+func (a *AgentRec) pickRuntime() string {
+	if len(a.Runtimes) == 0 {
+		return ""
+	}
+	return a.Runtimes[0]
+}
+
+// ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。
+// P0 起不再记录 runtime：路由选择是 execution 期产物，不进入会话身份。
+type ConversationRec struct {
 	ID        string
 	AgentID   string
-	Runtime   string
 	Cwd       string // 会话工作目录（绝对路径；仅 sqlite 持久化）
 	Status    string
 	Title     string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
@@ -55,32 +65,33 @@ type Service struct {
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
 
-	mu        sync.Mutex
-	agents    map[string]*AgentRec
-	sessions  map[string]*SessionRec
-	ver       map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
-	restoring bool             // RestoreFromStore 进行中：registerSession 跳过 DB 回写
+	mu            sync.Mutex
+	agents        map[string]*AgentRec
+	conversations map[string]*ConversationRec
+	ver           map[string]int64 // 每 agg(conversation) 的版本计数（域事件递增）
+	restoring     bool             // RestoreFromStore 进行中：registerConversation 跳过 DB 回写
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
 func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s := &Service{
-		reg:       reg,
-		bus:       bus,
-		agents:    make(map[string]*AgentRec),
-		sessions:  make(map[string]*SessionRec),
-		ver:       make(map[string]int64),
-		providers: make(map[string]*providerDef),
+		reg:           reg,
+		bus:           bus,
+		agents:        make(map[string]*AgentRec),
+		conversations: make(map[string]*ConversationRec),
+		ver:           make(map[string]int64),
+		providers:     make(map[string]*providerDef),
 	}
-	// 每 runtime 播种一个默认 Agent（M0 简化：无 Agent CRUD，见 roadmap M2）。
+	// 播种默认 Agent：路由候选 = 全部已注册 runtime（P0 取首候选；用户不感知 runtime）。
+	runtimes := make([]string, 0, len(reg.List()))
 	for _, spec := range reg.List() {
-		id := "agent-" + spec.ID
-		s.agents[id] = &AgentRec{
-			ID:      id,
-			Name:    spec.Name + "-agent",
-			Runtime: spec.ID,
-			State:   AgentStateStopped,
-		}
+		runtimes = append(runtimes, spec.ID)
+	}
+	s.agents[defaultAgentID] = &AgentRec{
+		ID:       defaultAgentID,
+		Name:     "Assistant",
+		Runtimes: runtimes,
+		State:    AgentStateStopped,
 	}
 	return s
 }
@@ -101,11 +112,11 @@ func (s *Service) SetTranscriptDir(dir string) {
 }
 
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
-func (s *Service) beginTranscript(sessionID, agentID, runtimeID, cwd string) {
+func (s *Service) beginTranscript(conversationID, agentID, runtimeID, cwd string) {
 	if s.tx == nil {
 		return
 	}
-	s.tx.begin(sessionID, agentID, runtimeID, cwd)
+	s.tx.begin(conversationID, agentID, runtimeID, cwd)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
@@ -123,7 +134,7 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	defer s.mu.Unlock()
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
-		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Runtime: a.Runtime, State: a.State})
+		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, State: a.State})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -154,17 +165,17 @@ func capabilityKVs(c runtime.Capabilities) []handler.CapabilityKV {
 	}
 }
 
-// ListSessions 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
+// ListConversations 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
 // 按创建时间倒序（置顶优先）。
-func (s *Service) ListSessions(archived bool) ([]handler.SessionResp, error) {
+func (s *Service) ListConversations(archived bool) ([]handler.ConversationResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]handler.SessionResp, 0, len(s.sessions))
-	for _, r := range s.sessions {
+	out := make([]handler.ConversationResp, 0, len(s.conversations))
+	for _, r := range s.conversations {
 		if r.Archived != archived {
 			continue
 		}
-		out = append(out, toSessionResp(r))
+		out = append(out, toConversationResp(r))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
@@ -175,12 +186,11 @@ func (s *Service) ListSessions(archived bool) ([]handler.SessionResp, error) {
 	return out, nil
 }
 
-// toSessionResp 把 SessionRec 折叠为 handler.SessionResp。
-func toSessionResp(r *SessionRec) handler.SessionResp {
-	return handler.SessionResp{
+// toConversationResp 把 ConversationRec 折叠为 handler.ConversationResp。
+func toConversationResp(r *ConversationRec) handler.ConversationResp {
+	return handler.ConversationResp{
 		ID:        r.ID,
 		AgentID:   r.AgentID,
-		Runtime:   r.Runtime,
 		Status:    r.Status,
 		Title:     r.Title,
 		Pinned:    r.Pinned,
@@ -190,10 +200,10 @@ func toSessionResp(r *SessionRec) handler.SessionResp {
 	}
 }
 
-// GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
-func (s *Service) GetSession(ctx context.Context, id string) (*handler.SessionDetailResp, error) {
-	if !s.hasSession(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+// GetConversation 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
+func (s *Service) GetConversation(ctx context.Context, id string) (*handler.ConversationDetailResp, error) {
+	if !s.hasConversation(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
 	perms := make([]handler.PermissionResp, 0, len(pending))
@@ -204,18 +214,18 @@ func (s *Service) GetSession(ctx context.Context, id string) (*handler.SessionDe
 	for _, it := range s.PermissionMemories(id) {
 		mems = append(mems, handler.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
 	}
-	detail := handler.SessionDetailResp{SessionResp: s.sessionResp(id), Pending: perms, Memories: mems}
+	detail := handler.ConversationDetailResp{ConversationResp: s.conversationResp(id), Pending: perms, Memories: mems}
 	return &detail, nil
 }
 
-// UpdateSession 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
-// sqlite 模式下同步写库（sessions 为 DB 权威元数据镜像）。
-func (s *Service) UpdateSession(ctx context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
+// UpdateConversation 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
+// sqlite 模式下同步写库（conversations 为 DB 权威元数据镜像）。
+func (s *Service) UpdateConversation(ctx context.Context, id string, patch handler.ConversationPatch) (*handler.ConversationResp, error) {
 	s.mu.Lock()
-	r, ok := s.sessions[id]
+	r, ok := s.conversations[id]
 	if !ok {
 		s.mu.Unlock()
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if patch.Title != nil {
 		r.Title = *patch.Title
@@ -227,30 +237,30 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch handler.Se
 		r.Archived = *patch.Archived
 	}
 	r.UpdatedAt = time.Now().UTC()
-	resp := toSessionResp(r)
+	resp := toConversationResp(r)
 	s.mu.Unlock()
 
 	if s.st != nil {
-		meta := store.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived}
+		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived}
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
-		if err := s.st.UpdateSessionMeta(ctx2, id, meta); err != nil {
-			slog.Default().Warn("store: update session meta failed", "session", id, "err", err)
+		if err := s.st.UpdateConversationMeta(ctx2, id, meta); err != nil {
+			slog.Default().Warn("store: update conversation meta failed", "conversation", id, "err", err)
 		}
 	}
 	return &resp, nil
 }
 
-// sessionResp 返回单个会话的轻量表示（须持锁调用）。
-func (s *Service) sessionResp(id string) handler.SessionResp {
-	r := s.sessions[id]
-	return toSessionResp(r)
+// conversationResp 返回单个会话的轻量表示（须持锁调用）。
+func (s *Service) conversationResp(id string) handler.ConversationResp {
+	r := s.conversations[id]
+	return toConversationResp(r)
 }
 
 // ListPendingPermissions 列出某会话的挂起权限请求。
 func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]handler.PermissionResp, error) {
-	if !s.hasSession(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	if !s.hasConversation(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
 	out := make([]handler.PermissionResp, 0, len(pending))
@@ -275,7 +285,7 @@ func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID st
 	return nil
 }
 
-// PendingPermissions 直接透传编排器的挂起权限（供 GetSession/ListPendingPermissions 复用）。
+// PendingPermissions 直接透传编排器的挂起权限（供 GetConversation/ListPendingPermissions 复用）。
 func (s *Service) PendingPermissions(id string) []PermissionItem {
 	if s.orch == nil {
 		return nil
@@ -293,8 +303,8 @@ func (s *Service) PendingElicitations(id string) []ElicitationItem {
 
 // ListPendingElicitations 列出某会话的挂起结构化提问。
 func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]handler.ElicitationResp, error) {
-	if !s.hasSession(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	if !s.hasConversation(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingElicitations(id)
 	out := make([]handler.ElicitationResp, 0, len(pending))
@@ -306,8 +316,8 @@ func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]han
 
 // ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel；accept 可带 content）。
 func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error {
-	if !s.hasSession(id) {
-		return s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	if !s.hasConversation(id) {
+		return s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if s.orch == nil {
 		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
@@ -322,7 +332,7 @@ func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, act
 	return nil
 }
 
-// PermissionMemories 直接透传编排器的会话级权限记忆（供 GetSession 复用；REST 见 ListPermissionMemories）。
+// PermissionMemories 直接透传编排器的会话级权限记忆（供 GetConversation 复用；REST 见 ListPermissionMemories）。
 func (s *Service) PermissionMemories(id string) []MemoryItem {
 	if s.orch == nil {
 		return nil
@@ -332,8 +342,8 @@ func (s *Service) PermissionMemories(id string) []MemoryItem {
 
 // ListPermissionMemories 校验会话存在后透传会话级权限记忆（allow/reject 双侧）。
 func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]handler.MemoryResp, error) {
-	if !s.hasSession(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	if !s.hasConversation(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	mems := make([]handler.MemoryResp, 0)
 	for _, it := range s.PermissionMemories(id) {
@@ -344,8 +354,8 @@ func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]hand
 
 // RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 func (s *Service) RevokeMemory(ctx context.Context, id, title, kind string) error {
-	if !s.hasSession(id) {
-		return s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	if !s.hasConversation(id) {
+		return s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if s.orch == nil {
 		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
@@ -391,9 +401,9 @@ func toElicitationResp(p ElicitationItem) handler.ElicitationResp {
 	return resp
 }
 
-// agentForRuntime 返回指定 runtime 的默认播种 Agent。
-func (s *Service) agentForRuntime(runtimeID string) (*AgentRec, bool) {
-	a, ok := s.agents["agent-"+runtimeID]
+// defaultAgent 返回默认播种 Agent。
+func (s *Service) defaultAgent() (*AgentRec, bool) {
+	a, ok := s.agents[defaultAgentID]
 	return a, ok
 }
 
@@ -406,10 +416,10 @@ func (s *Service) setAgentState(agentID, state string) {
 	}
 }
 
-// registerSession 登记一个新会话，返回记录指针。
+// registerConversation 登记一个新会话，返回记录指针。
 // EnableStore 启用 SQLite 持久层（P1 live 接线）。启用后：
 //   - publish 以 store.AppendEvent 事务内分配的全局 seq 为权威，bus 用 PublishAt 镜像同一号序；
-//   - registerSession/markSession/UpdateSession 同步写库（sessions 为 DB 权威元数据镜像）；
+//   - registerConversation/markConversation/UpdateConversation 同步写库（conversations 为 DB 权威元数据镜像）；
 //   - transcript recorder 视为停写（serve 装配时不再 SetTranscriptDir）。
 //
 // 须在 RestoreFromStore 之前、任何会话动作之前调用。
@@ -422,9 +432,9 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	if s.st == nil {
 		return 0, 0, nil
 	}
-	list, err := s.st.ListSessions(ctx, nil)
+	list, err := s.st.ListConversations(ctx, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("restore: list sessions: %w", err)
+		return 0, 0, fmt.Errorf("restore: list conversations: %w", err)
 	}
 	s.mu.Lock()
 	s.restoring = true
@@ -435,21 +445,21 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		s.mu.Unlock()
 	}()
 
-	sessions, injected := 0, 0
+	conversations, injected := 0, 0
 	interrupted := 0
 	ver := map[string]int64{}
 	for _, sess := range list {
-		rec := &SessionRec{
-			ID: sess.ID, AgentID: sess.AgentID, Runtime: sess.RuntimeID, Cwd: sess.Cwd,
+		rec := &ConversationRec{
+			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
 			Title: sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, CreatedAt: sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
-		s.registerSession(rec) // restoring=true → 不重复回写 DB
-		sessions++
+		s.registerConversation(rec) // restoring=true → 不重复回写 DB
+		conversations++
 		// interrupted 收敛：残留 in_progress（崩溃/重启中断，无终态）→ 可操作态（列表可停止/重发）。
 		// 事件保持原样：续聊时 materializeRun 以「上一 run 之后」窗口重建本轮，不受影响。
-		if rec.Status == SessionStatusInProgress {
-			s.markSession(rec.ID, SessionStatusInterrupted)
+		if rec.Status == ConversationStatusInProgress {
+			s.markConversation(rec.ID, ConversationStatusInterrupted)
 			interrupted++
 		}
 	}
@@ -464,8 +474,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 				break
 			}
 			for _, ev := range evs {
-				ver[ev.SessionID]++
-				s.bus.PublishAt(ev.Seq, ev.Type, ev.SessionID, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
+				ver[ev.ConversationID]++
+				s.bus.PublishAt(ev.Seq, ev.Type, ev.ConversationID, ver[ev.ConversationID], decodePayload(ev.PayloadJSON))
 				injected++
 				after = ev.Seq
 			}
@@ -474,8 +484,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			}
 		}
 	}
-	slog.Default().Info("store restored", "sessions", sessions, "events", injected)
-	return sessions, injected, nil
+	slog.Default().Info("store restored", "conversations", conversations, "events", injected)
+	return conversations, injected, nil
 }
 
 // decodePayload 把 events.payload_json 解码回 map（历史/WS 载荷形态），坏 JSON 回落原文串。
@@ -490,17 +500,16 @@ func decodePayload(raw string) any {
 	return raw
 }
 
-// persistSession 把会话记录同步写库（best-effort：失败告警不阻断会话流程）。
-func (s *Service) persistSession(rec *SessionRec) {
+// persistConversation 把会话记录同步写库（best-effort：失败告警不阻断会话流程）。
+func (s *Service) persistConversation(rec *ConversationRec) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := s.st.UpsertSession(ctx, store.Session{
+	err := s.st.UpsertConversation(ctx, store.Conversation{
 		ID:        rec.ID,
 		AgentID:   rec.AgentID,
-		RuntimeID: rec.Runtime,
 		Cwd:       rec.Cwd,
 		Title:     rec.Title,
 		Pinned:    rec.Pinned,
@@ -510,47 +519,47 @@ func (s *Service) persistSession(rec *SessionRec) {
 		UpdatedAt: rec.UpdatedAt,
 	})
 	if err != nil {
-		slog.Default().Warn("store: upsert session failed", "session", rec.ID, "err", err)
+		slog.Default().Warn("store: upsert conversation failed", "conversation", rec.ID, "err", err)
 	}
 }
 
 // ——— 会话级权限记忆持久化（PermissionManager 挂钩，best-effort） ———
 
 // persistMemoryAdd 写一条权限记忆（permission_memories 表；同键覆盖，since 为授予时刻）。
-func (s *Service) persistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
+func (s *Service) persistMemoryAdd(conversationID, title, kind, decision string, since time.Time) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.st.AddMemory(ctx, store.Memory{
-		SessionID: sessionID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
+		ConversationID: conversationID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
 	}); err != nil {
-		slog.Default().Warn("store: add permission memory failed", "session", sessionID, "title", title, "err", err)
+		slog.Default().Warn("store: add permission memory failed", "conversation", conversationID, "title", title, "err", err)
 	}
 }
 
 // persistMemoryDel 撤销一条权限记忆。
-func (s *Service) persistMemoryDel(sessionID, title, kind string) {
+func (s *Service) persistMemoryDel(conversationID, title, kind string) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := s.st.DeleteMemory(ctx, sessionID, title, kind); err != nil {
-		slog.Default().Warn("store: delete permission memory failed", "session", sessionID, "title", title, "err", err)
+	if _, err := s.st.DeleteMemory(ctx, conversationID, title, kind); err != nil {
+		slog.Default().Warn("store: delete permission memory failed", "conversation", conversationID, "title", title, "err", err)
 	}
 }
 
 // persistMemoryDelAll 一键撤销整会话权限记忆。
-func (s *Service) persistMemoryDelAll(sessionID string) {
+func (s *Service) persistMemoryDelAll(conversationID string) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := s.st.DeleteSessionMemories(ctx, sessionID); err != nil {
-		slog.Default().Warn("store: delete session memories failed", "session", sessionID, "err", err)
+	if err := s.st.DeleteConversationMemories(ctx, conversationID); err != nil {
+		slog.Default().Warn("store: delete conversation memories failed", "conversation", conversationID, "err", err)
 	}
 }
 
@@ -568,11 +577,11 @@ func (s *Service) memoryRows(ctx context.Context) ([]store.Memory, error) {
 func terminalRunStatus(typ string) string {
 	switch typ {
 	case BusTurnEnded:
-		return SessionStatusCompleted
+		return ConversationStatusCompleted
 	case BusTurnError:
-		return SessionStatusFailed
+		return ConversationStatusFailed
 	case BusRunCancelled:
-		return SessionStatusCancelled
+		return ConversationStatusCancelled
 	}
 	return ""
 }
@@ -580,7 +589,7 @@ func terminalRunStatus(typ string) string {
 // materializeRun 在 sqlite 模式下把「上一 run 之后到当前终态」的事件窗口物化为 runs 行：
 // user_text 取窗口首条用户消息；first/last_seq 记录窗口（失败轮输入/统计精确回溯）。
 // 幂等：窗口无新事件（重复调用/无 run）时直接返回。best-effort：失败仅告警。
-func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) {
+func (s *Service) materializeRun(conversationID, typ string, payload map[string]any) {
 	if s.st == nil {
 		return
 	}
@@ -591,24 +600,24 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	last, err := s.st.RunLastSeq(ctx, sessionID)
+	last, err := s.st.RunLastSeq(ctx, conversationID)
 	if err != nil {
-		slog.Default().Warn("store: run last seq failed", "session", sessionID, "err", err)
+		slog.Default().Warn("store: run last seq failed", "conversation", conversationID, "err", err)
 		return
 	}
-	evs, more, err := s.st.EventsAfter(ctx, sessionID, last, 5000)
+	evs, more, err := s.st.EventsAfter(ctx, conversationID, last, 5000)
 	if err != nil {
-		slog.Default().Warn("store: run window read failed", "session", sessionID, "err", err)
+		slog.Default().Warn("store: run window read failed", "conversation", conversationID, "err", err)
 		return
 	}
 	if more {
-		slog.Default().Warn("store: run window 超 5000 条被截断", "session", sessionID)
+		slog.Default().Warn("store: run window 超 5000 条被截断", "conversation", conversationID)
 	}
 	if len(evs) == 0 {
 		return // 无新事件（重复终态调用等）→ 幂等跳过
 	}
 	firstSeq, lastSeq := evs[0].Seq, evs[len(evs)-1].Seq
-	runID := fmt.Sprintf("r-%s-%d", sessionID, firstSeq)
+	runID := fmt.Sprintf("r-%s-%d", conversationID, firstSeq)
 
 	userText, stopReason, errCode := "", "", ""
 	if payload != nil {
@@ -645,19 +654,19 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 	started := evs[0].CreatedAt
 	ended := evs[len(evs)-1].CreatedAt
 	r := store.Run{
-		ID: runID, SessionID: sessionID, UserText: userText, Status: status,
+		ID: runID, ConversationID: conversationID, UserText: userText, Status: status,
 		ErrorCode: errCode, StopReason: stopReason,
 		FirstSeq: firstSeq, LastSeq: lastSeq,
 		StartedAt: started, EndedAt: ended,
 	}
 	if err := s.st.CreateRun(ctx, r); err != nil {
-		slog.Default().Warn("store: create run failed", "session", sessionID, "run", runID, "err", err)
+		slog.Default().Warn("store: create run failed", "conversation", conversationID, "run", runID, "err", err)
 		return
 	}
 	// 终态补齐（CreateRun 直接带终态写入，FinishRun 幂等再走一遍以统一 ended 口径）。
 	_ = s.st.FinishRun(ctx, runID, status, stopReason, errCode, "", ended)
 	// 消息物化：同窗口 events → messages 行（user 原文 + assistant 文本片段/时间线/工具最终态）。
-	s.materializeMessages(sessionID, runID, evs)
+	s.materializeMessages(conversationID, runID, evs)
 }
 
 // ListRuns 列出某会话的轮次明细（runs 表，started_at 升序；失败轮重试/统计用）。
@@ -686,10 +695,10 @@ func (s *Service) ListRuns(ctx context.Context, id string) ([]handler.RunResp, e
 	return out, nil
 }
 
-// registerSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
+// registerConversation 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
 // loadTranscripts 回灌时保留原 created_at/updated_at。
 // sqlite 模式下（st != nil 且非恢复过程）同步写库。
-func (s *Service) registerSession(rec *SessionRec) {
+func (s *Service) registerConversation(rec *ConversationRec) {
 	s.mu.Lock()
 	now := time.Now().UTC()
 	if rec.CreatedAt.IsZero() {
@@ -698,19 +707,19 @@ func (s *Service) registerSession(rec *SessionRec) {
 	if rec.UpdatedAt.IsZero() {
 		rec.UpdatedAt = now
 	}
-	s.sessions[rec.ID] = rec
+	s.conversations[rec.ID] = rec
 	restoring := s.restoring
 	s.mu.Unlock()
 	if !restoring {
-		s.persistSession(rec)
+		s.persistConversation(rec)
 	}
 }
 
-// sessionRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
-func (s *Service) sessionRec(id string) *SessionRec {
+// conversationRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
+func (s *Service) conversationRec(id string) *ConversationRec {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, ok := s.sessions[id]
+	rec, ok := s.conversations[id]
 	if !ok {
 		return nil
 	}
@@ -718,10 +727,10 @@ func (s *Service) sessionRec(id string) *SessionRec {
 	return &cp
 }
 
-// markSession 更新会话终态（sqlite 模式下同步写库 status）。
-func (s *Service) markSession(id, status string) {
+// markConversation 更新会话终态（sqlite 模式下同步写库 status）。
+func (s *Service) markConversation(id, status string) {
 	s.mu.Lock()
-	if r, ok := s.sessions[id]; ok {
+	if r, ok := s.conversations[id]; ok {
 		r.Status = status
 		r.UpdatedAt = time.Now().UTC()
 	}
@@ -729,49 +738,49 @@ func (s *Service) markSession(id, status string) {
 	if s.st != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := s.st.UpdateSessionMeta(ctx, id, store.SessionMetaPatch{Status: &status}); err != nil {
-			slog.Default().Warn("store: mark session failed", "session", id, "err", err)
+		if err := s.st.UpdateConversationMeta(ctx, id, store.ConversationMetaPatch{Status: &status}); err != nil {
+			slog.Default().Warn("store: mark conversation failed", "conversation", id, "err", err)
 		}
 	}
 }
 
-// publish 把域事件发布进 eventbus（agg = sessionID；每 agg 版本递增），
+// publish 把域事件发布进 eventbus（agg = conversationID；每 agg 版本递增），
 // 并旁路追加到该会话的 wire transcript（未启用/非 map 载荷时跳过）。
 // sqlite 模式下（st != nil）：事件先经 store.AppendEvent 在事务内取全局 seq，
 // bus 以 PublishAt 镜像同一号序（跨重启连续）；DB 写失败时退化进程内取号并告警（不阻断会话）。
 // 未注入 bus 时静默丢弃（仅出现在纯列表/单测场景）。
-func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
+func (s *Service) publish(typ, conversationID string, payload any) eventbus.Event {
 	s.mu.Lock()
-	s.ver[sessionID]++
-	v := s.ver[sessionID]
+	s.ver[conversationID]++
+	v := s.ver[conversationID]
 	s.mu.Unlock()
 
 	bus := s.bus
 	seq := int64(0)
 	if st := s.st; st != nil {
-		got, err := st.AppendEvent(context.Background(), sessionID, typ, payload)
+		got, err := st.AppendEvent(context.Background(), conversationID, typ, payload)
 		if err != nil {
 			slog.Default().Warn("store: append event failed（退化为进程内取号）",
-				"session", sessionID, "type", typ, "err", err)
+				"conversation", conversationID, "type", typ, "err", err)
 		} else {
 			seq = got
 		}
 	}
 	var evt eventbus.Event
 	if bus == nil {
-		evt = eventbus.Event{Type: typ, AggregID: sessionID, Version: v, Seq: seq}
+		evt = eventbus.Event{Type: typ, AggregID: conversationID, Version: v, Seq: seq}
 	} else if seq > 0 {
-		evt = bus.PublishAt(seq, typ, sessionID, v, payload)
+		evt = bus.PublishAt(seq, typ, conversationID, v, payload)
 	} else {
-		evt = bus.Publish(typ, sessionID, v, payload)
+		evt = bus.Publish(typ, conversationID, v, payload)
 	}
 	if m, ok := payload.(map[string]any); ok {
-		s.publishSideEffects(sessionID, typ, m, evt.Seq)
+		s.publishSideEffects(conversationID, typ, m, evt.Seq)
 	}
 	// 终态事件 → runs 物化（sqlite 模式；窗口无新事件时幂等跳过）。
 	if s.st != nil && terminalRunStatus(typ) != "" {
 		if m, ok := payload.(map[string]any); ok {
-			s.materializeRun(sessionID, typ, m)
+			s.materializeRun(conversationID, typ, m)
 		}
 	}
 	return evt
@@ -779,14 +788,14 @@ func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
 
 // publishSideEffects 非 map 载荷不触发的旁路副作用：
 // wire transcript 追加 + 会话标题自动推导（首个用户消息；PATCH 可覆盖）。
-func (s *Service) publishSideEffects(sessionID, typ string, m map[string]any, seq int64) {
-	s.tx.appendLine(sessionID, seq, typ, m)
-	// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateSession）。
-	// 须持 s.mu 写 Title（与 UpdateSession/sessionResp 并发读写作同步，避免数据竞争）。
+func (s *Service) publishSideEffects(conversationID, typ string, m map[string]any, seq int64) {
+	s.tx.appendLine(conversationID, seq, typ, m)
+	// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateConversation）。
+	// 须持 s.mu 写 Title（与 UpdateConversation/conversationResp 并发读写作同步，避免数据竞争）。
 	if typ == BusUserMessage {
 		var derived string
 		s.mu.Lock()
-		if r, ok := s.sessions[sessionID]; ok && strings.TrimSpace(r.Title) == "" {
+		if r, ok := s.conversations[conversationID]; ok && strings.TrimSpace(r.Title) == "" {
 			if text, _ := m["text"].(string); text != "" {
 				derived = deriveTitle(text)
 				r.Title = derived
@@ -797,18 +806,18 @@ func (s *Service) publishSideEffects(sessionID, typ string, m map[string]any, se
 		if derived != "" && s.st != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err := s.st.UpdateSessionMeta(ctx, sessionID, store.SessionMetaPatch{Title: &derived}); err != nil {
-				slog.Default().Warn("store: derive title persist failed", "session", sessionID, "err", err)
+			if err := s.st.UpdateConversationMeta(ctx, conversationID, store.ConversationMetaPatch{Title: &derived}); err != nil {
+				slog.Default().Warn("store: derive title persist failed", "conversation", conversationID, "err", err)
 			}
 		}
 	}
 }
 
-// requireAgent 供 Orchestrator 用 runtimeID 取播种 Agent。
-func (s *Service) requireAgent(runtimeID string) (*AgentRec, error) {
-	a, ok := s.agentForRuntime(runtimeID)
+// requireDefaultAgent 供 Orchestrator 取默认播种 Agent。
+func (s *Service) requireDefaultAgent() (*AgentRec, error) {
+	a, ok := s.defaultAgent()
 	if !ok {
-		return nil, fmt.Errorf("runtime %q 无默认 Agent（注册表未含该 runtime）", runtimeID)
+		return nil, fmt.Errorf("默认 Agent %q 未播种（注册表为空）", defaultAgentID)
 	}
 	return a, nil
 }
@@ -838,10 +847,10 @@ func deriveTitle(text string) string {
 
 // ——— handler.Service 的会话动作实现（REST：create/prompt/cancel） ———
 
-// CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮
+// CreateConversation 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮
 // （后台执行，事件经 bus/WS 出流）。返回的 EventSeq 为「已发布事件」后的水位，
 // 前端 WS attach 传 since_seq=该值即可续传首轮增量。
-func (s *Service) CreateSession(ctx context.Context, req handler.SessionCreateReq) (*handler.SessionCreateResp, error) {
+func (s *Service) CreateConversation(ctx context.Context, req handler.ConversationCreateReq) (*handler.ConversationCreateResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
@@ -849,41 +858,41 @@ func (s *Service) CreateSession(ctx context.Context, req handler.SessionCreateRe
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_required", "agent_id 必填", nil))
 	}
 	// 会话与 turn 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
-	//（turn 由 Orchestrator 持有，取消走 POST /sessions/:id/cancel）。
+	//（turn 由 Orchestrator 持有，取消走 POST /conversations/:id/cancel）。
 	runCtx := context.WithoutCancel(ctx)
-	res, err := s.orch.StartSession(runCtx, req.AgentID, req.Cwd)
+	res, err := s.orch.StartConversation(runCtx, req.AgentID, req.Cwd)
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	resp := &handler.SessionCreateResp{
-		ID: res.SessionID, AgentID: res.AgentID, Runtime: res.Runtime, Status: res.Status, EventSeq: res.EventSeq,
+	resp := &handler.ConversationCreateResp{
+		ID: res.ConversationID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
 	}
 	if req.Prompt != "" {
-		seq, err := s.orch.Prompt(runCtx, res.SessionID, req.Prompt)
+		seq, err := s.orch.Prompt(runCtx, res.ConversationID, req.Prompt)
 		if err != nil {
 			return nil, s.restErr(err)
 		}
 		resp.EventSeq = seq
-		resp.Status = SessionStatusInProgress
+		resp.Status = ConversationStatusInProgress
 	}
 	return resp, nil
 }
 
-// PromptSession 向既有会话追加一轮 prompt（后台执行）。
+// PromptConversation 向既有会话追加一轮 prompt（后台执行）。
 // turn 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
-// POST /sessions/:id/cancel 决定。
-func (s *Service) PromptSession(ctx context.Context, id, prompt string) (*handler.SessionPromptResp, error) {
+// POST /conversations/:id/cancel 决定。
+func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*handler.ConversationPromptResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	if id == "" || prompt == "" {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "prompt_required", "session_id 与 prompt 必填", nil))
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "prompt_required", "conversation_id 与 prompt 必填", nil))
 	}
 	seq, err := s.orch.Prompt(context.WithoutCancel(ctx), id, prompt)
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	return &handler.SessionPromptResp{ID: id, Status: SessionStatusInProgress, EventSeq: seq}, nil
+	return &handler.ConversationPromptResp{ID: id, Status: ConversationStatusInProgress, EventSeq: seq}, nil
 }
 
 // CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。
@@ -907,7 +916,7 @@ func (s *Service) restErr(err error) error {
 	switch ae.Class {
 	case acl.ClassRequest:
 		code = 40001
-		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" {
+		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" {
 			code = 40401
 		}
 	case acl.ClassLimit:
@@ -926,11 +935,11 @@ func (s *Service) restErr(err error) error {
 	return gerror.Error{Code: code, Msg: msg}
 }
 
-// SessionHistory 返回会话事件历史（eventbus 按聚合回放，after/limit 分页，seq 升序）。
+// ConversationHistory 返回会话事件历史（eventbus 按聚合回放，after/limit 分页，seq 升序）。
 // M1 为内存回放：会话须在本进程登记过（进程内即 daemon 会话表），未知会话 → 40401。
-func (s *Service) SessionHistory(ctx context.Context, id string, after int64, limit int) (*handler.SessionHistoryResp, error) {
-	if !s.hasSession(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+func (s *Service) ConversationHistory(ctx context.Context, id string, after int64, limit int) (*handler.ConversationHistoryResp, error) {
+	if !s.hasConversation(id) {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if after < 0 {
 		after = 0
@@ -951,13 +960,13 @@ func (s *Service) SessionHistory(ctx context.Context, id string, after int64, li
 		}
 		events = append(events, evt)
 	}
-	return &handler.SessionHistoryResp{ID: id, Events: events, HasMore: hasMore}, nil
+	return &handler.ConversationHistoryResp{ID: id, Events: events, HasMore: hasMore}, nil
 }
 
-// hasSession 判断会话是否在本进程登记。
-func (s *Service) hasSession(id string) bool {
+// hasConversation 判断会话是否在本进程登记。
+func (s *Service) hasConversation(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.sessions[id]
+	_, ok := s.conversations[id]
 	return ok
 }

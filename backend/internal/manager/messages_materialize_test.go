@@ -27,7 +27,7 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-msg", AgentID: "agent-echo", Runtime: "echo"})
+	svc.registerConversation(&ConversationRec{ID: "s-msg", AgentID: "agent-echo"})
 
 	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第一问：关键词甲"})
 	svc.publish(BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
@@ -97,17 +97,17 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 }
 
 // queryMessages 是 store 内部读（测试专用：messages 表全量）。
-func queryMessages(ctx context.Context, st *store.Store, sessionID string) ([]store.Message, error) {
-	rows, err := st.ListMessages(ctx, sessionID)
+func queryMessages(ctx context.Context, st *store.Store, conversationID string) ([]store.Message, error) {
+	rows, err := st.ListMessages(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-// TestSearchSessionsPrefersMessagesTable sqlite 模式：SearchSessions 正文命中走 messages 表
+// TestSearchConversationsPrefersMessagesTable sqlite 模式：SearchConversations 正文命中走 messages 表
 // （无 transcript 亦命中；片段为用户原文折叠预览）。
-func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
+func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "forge.db")
 	ctx := context.Background()
 	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
@@ -118,12 +118,12 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-s", AgentID: "agent-echo", Runtime: "echo"})
+	svc.registerConversation(&ConversationRec{ID: "s-s", AgentID: "agent-echo"})
 	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 forge 服务"})
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
 	svc.publish(BusTurnEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
 
-	hits, err := svc.SearchSessions(ctx, "部署", 5)
+	hits, err := svc.SearchConversations(ctx, "部署", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 		t.Fatalf("matches 应 ≥1: %+v", hits[0])
 	}
 	// 无关词不命中。
-	if h2, _ := svc.SearchSessions(ctx, "不存在词xyz", 5); len(h2) != 0 {
+	if h2, _ := svc.SearchConversations(ctx, "不存在词xyz", 5); len(h2) != 0 {
 		t.Fatalf("无关词不应命中: %+v", h2)
 	}
 }

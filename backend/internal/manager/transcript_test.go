@@ -54,33 +54,33 @@ func TestTranscriptJSONL(t *testing.T) {
 	}
 }
 
-// TestSessionHistoryPaging 验证 history 分页（after/limit、has_more、仅本聚合、未知会话 40401）。
-func TestSessionHistoryPaging(t *testing.T) {
+// TestConversationHistoryPaging 验证 history 分页（after/limit、has_more、仅本聚合、未知会话 40401）。
+func TestConversationHistoryPaging(t *testing.T) {
 	reg := runtime.NewRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"})
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
 
 	for i := 0; i < 5; i++ {
 		svc.publish(BusMessage, "s1", map[string]any{"text": "msg"})
 	}
 	svc.publish(BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
 
-	page1, err := svc.SessionHistory(context.Background(), "s1", 0, 2)
+	page1, err := svc.ConversationHistory(context.Background(), "s1", 0, 2)
 	if err != nil {
 		t.Fatalf("history page1: %v", err)
 	}
 	if len(page1.Events) != 2 || !page1.HasMore {
 		t.Fatalf("page1 不符: %+v", page1)
 	}
-	page2, err := svc.SessionHistory(context.Background(), "s1", page1.Events[1].Seq, 2)
+	page2, err := svc.ConversationHistory(context.Background(), "s1", page1.Events[1].Seq, 2)
 	if err != nil {
 		t.Fatalf("history page2: %v", err)
 	}
 	if len(page2.Events) != 2 || !page2.HasMore || page2.Events[0].AggregID != "s1" {
 		t.Fatalf("page2 不符: %+v", page2)
 	}
-	tail, err := svc.SessionHistory(context.Background(), "s1", page2.Events[1].Seq, 2)
+	tail, err := svc.ConversationHistory(context.Background(), "s1", page2.Events[1].Seq, 2)
 	if err != nil {
 		t.Fatalf("history tail: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestSessionHistoryPaging(t *testing.T) {
 		t.Fatalf("tail 不符: %+v", tail)
 	}
 
-	if _, err := svc.SessionHistory(context.Background(), "ghost", 0, 10); err == nil {
+	if _, err := svc.ConversationHistory(context.Background(), "ghost", 0, 10); err == nil {
 		t.Fatal("未知会话应报错")
 	} else {
 		var ge gerror.Error

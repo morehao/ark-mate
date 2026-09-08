@@ -13,11 +13,11 @@ import (
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
-// SearchSessions 按关键词搜索会话（标题 / Agent / Runtime / ID / 用户消息正文；含归档）。
+// SearchConversations 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。
 // 元数据命中计 1 次；正文命中逐条累计（片段取首条命中用户消息）。
 // 排序：updated_at 降序，截断 limit（调用方已校验 >0）。
 // 复杂度说明：本地工具态直接扫 transcript 文件（文件小、量级低）；不引入索引/DB（决策范围外）。
-func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]handler.SessionSearchHit, error) {
+func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([]handler.ConversationSearchHit, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, nil
@@ -25,14 +25,14 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]hand
 	qLower := strings.ToLower(q)
 
 	s.mu.Lock()
-	recs := make([]*SessionRec, 0, len(s.sessions))
-	for _, r := range s.sessions {
+	recs := make([]*ConversationRec, 0, len(s.conversations))
+	for _, r := range s.conversations {
 		recs = append(recs, r)
 	}
 	s.mu.Unlock()
 
 	type cand struct {
-		rec     *SessionRec
+		rec     *ConversationRec
 		snippet string
 		matches int
 	}
@@ -40,7 +40,6 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]hand
 	for _, r := range recs {
 		metaHit := strings.Contains(strings.ToLower(r.ID), qLower) ||
 			strings.Contains(strings.ToLower(r.AgentID), qLower) ||
-			strings.Contains(strings.ToLower(r.Runtime), qLower) ||
 			(r.Title != "" && strings.Contains(strings.ToLower(r.Title), qLower))
 		snippet, bodyMatches := "", 0
 		if s.st != nil {
@@ -79,14 +78,13 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]hand
 		out = out[:limit]
 	}
 
-	hits := make([]handler.SessionSearchHit, 0, len(out))
+	hits := make([]handler.ConversationSearchHit, 0, len(out))
 	for _, c := range out {
 		r := c.rec
-		hits = append(hits, handler.SessionSearchHit{
-			SessionResp: handler.SessionResp{
+		hits = append(hits, handler.ConversationSearchHit{
+			ConversationResp: handler.ConversationResp{
 				ID:        r.ID,
 				AgentID:   r.AgentID,
-				Runtime:   r.Runtime,
 				Status:    r.Status,
 				Title:     r.Title,
 				Pinned:    r.Pinned,
@@ -104,8 +102,8 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]hand
 // scanTranscriptText 在单会话 transcript 文件中搜索 qLower（大小写不敏感、子串），
 // 返回（首条命中用户消息文本的折叠预览, 命中用户消息条数, 是否有正文命中）。
 // 文件缺失/不可读 → ok=false（调用方按「无正文命中」处理）。
-func scanTranscriptText(dir, sessionID, qLower string) (string, int, bool) {
-	f, err := os.Open(filepath.Join(dir, sessionID+".jsonl"))
+func scanTranscriptText(dir, conversationID, qLower string) (string, int, bool) {
+	f, err := os.Open(filepath.Join(dir, conversationID+".jsonl"))
 	if err != nil {
 		return "", 0, false
 	}

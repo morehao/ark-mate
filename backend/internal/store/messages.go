@@ -26,10 +26,10 @@ func (s *Store) CreateMessages(ctx context.Context, msgs []Message) error {
 	for _, m := range msgs {
 		at := m.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO messages(session_id, run_id, role, text, events_json, tool_details_json,
+			INSERT INTO messages(conversation_id, run_id, role, text, events_json, tool_details_json,
 			                     seq_lo, seq_hi, created_at)
 			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.SessionID, m.RunID, m.Role, m.Text, m.EventsJSON, m.ToolDetailsJSON,
+			m.ConversationID, m.RunID, m.Role, m.Text, m.EventsJSON, m.ToolDetailsJSON,
 			m.SeqLo, m.SeqHi, at); err != nil {
 			return err
 		}
@@ -39,19 +39,19 @@ func (s *Store) CreateMessages(ctx context.Context, msgs []Message) error {
 
 // MessageTextHit 一条命中（搜索片段与计数用）。
 type MessageTextHit struct {
-	SessionID string
-	Role      string
-	Text      string
+	ConversationID string
+	Role           string
+	Text           string
 }
 
 // SearchUserMessages 在指定会话的 user 消息中做子串检索（大小写不敏感；LIKE 通配转义），
 // 返回全部命中行（service 侧折叠片段/计数）。
-func (s *Store) SearchUserMessages(ctx context.Context, sessionID, q string) ([]MessageTextHit, error) {
+func (s *Store) SearchUserMessages(ctx context.Context, conversationID, q string) ([]MessageTextHit, error) {
 	like := "%" + escapeLike(q) + "%"
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, role, text FROM messages
-		WHERE session_id = ? AND role = 'user' AND text LIKE ? ESCAPE '\'
-		ORDER BY seq_lo ASC`, sessionID, like)
+		SELECT conversation_id, role, text FROM messages
+		WHERE conversation_id = ? AND role = 'user' AND text LIKE ? ESCAPE '\'
+		ORDER BY seq_lo ASC`, conversationID, like)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (s *Store) SearchUserMessages(ctx context.Context, sessionID, q string) ([]
 	out := []MessageTextHit{}
 	for rows.Next() {
 		var h MessageTextHit
-		if err := rows.Scan(&h.SessionID, &h.Role, &h.Text); err != nil {
+		if err := rows.Scan(&h.ConversationID, &h.Role, &h.Text); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -78,11 +78,11 @@ func escapeLike(s string) string {
 }
 
 // ListMessages 列出某会话全部消息行（seq 序；测试与后续 REST 用）。
-func (s *Store) ListMessages(ctx context.Context, sessionID string) ([]Message, error) {
+func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, session_id, run_id, role, text, events_json, tool_details_json,
+		SELECT id, conversation_id, run_id, role, text, events_json, tool_details_json,
 		       seq_lo, seq_hi, created_at
-		FROM messages WHERE session_id = ? ORDER BY seq_lo ASC, id ASC`, sessionID)
+		FROM messages WHERE conversation_id = ? ORDER BY seq_lo ASC, id ASC`, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string) ([]Message, 
 	for rows.Next() {
 		var m Message
 		var at string
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.RunID, &m.Role, &m.Text,
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.RunID, &m.Role, &m.Text,
 			&m.EventsJSON, &m.ToolDetailsJSON, &m.SeqLo, &m.SeqHi, &at); err != nil {
 			return nil, err
 		}

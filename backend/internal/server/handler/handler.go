@@ -27,23 +27,23 @@ type Service interface {
 	UpdateProvider(ctx context.Context, id string, patch ProviderPatchReq) (*ProviderResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
-	// ListSessions 返回会话概要（可按 archived 过滤）。
-	ListSessions(archived bool) ([]SessionResp, error)
-	// SearchSessions 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
-	SearchSessions(ctx context.Context, q string, limit int) ([]SessionSearchHit, error)
-	// GetSession 返回单会话详情（含元数据 + 挂起权限）。
-	GetSession(ctx context.Context, id string) (*SessionDetailResp, error)
-	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
-	UpdateSession(ctx context.Context, id string, patch SessionPatch) (*SessionResp, error)
+	// ListConversations 返回会话概要（可按 archived 过滤）。
+	ListConversations(archived bool) ([]ConversationResp, error)
+	// SearchConversations 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
+	SearchConversations(ctx context.Context, q string, limit int) ([]ConversationSearchHit, error)
+	// GetConversation 返回单会话详情（含元数据 + 挂起权限）。
+	GetConversation(ctx context.Context, id string) (*ConversationDetailResp, error)
+	// UpdateConversation 更新会话元数据（title/pinned/archived 子集更新）。
+	UpdateConversation(ctx context.Context, id string, patch ConversationPatch) (*ConversationResp, error)
 
-	// CreateSession 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
-	CreateSession(ctx context.Context, req SessionCreateReq) (*SessionCreateResp, error)
-	// PromptSession 向既有会话追加一轮 prompt。
-	PromptSession(ctx context.Context, id, prompt string) (*SessionPromptResp, error)
+	// CreateConversation 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
+	CreateConversation(ctx context.Context, req ConversationCreateReq) (*ConversationCreateResp, error)
+	// PromptConversation 向既有会话追加一轮 prompt。
+	PromptConversation(ctx context.Context, id, prompt string) (*ConversationPromptResp, error)
 	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
 	CancelTurn(ctx context.Context, id string) error
-	// SessionHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
-	SessionHistory(ctx context.Context, id string, after int64, limit int) (*SessionHistoryResp, error)
+	// ConversationHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
+	ConversationHistory(ctx context.Context, id string, after int64, limit int) (*ConversationHistoryResp, error)
 	// ListRuns 列出某会话的轮次明细（runs 表读模型：状态/耗时/usage/失败轮回溯；内存模式返回空）。
 	ListRuns(ctx context.Context, id string) ([]RunResp, error)
 	// ListPendingPermissions 列出某会话的挂起权限请求。
@@ -60,28 +60,27 @@ type Service interface {
 	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
 }
 
-// AgentResp Agent 的对外表示。
+// AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
 type AgentResp struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
-	Runtime  string `json:"runtime"`
 	Provider string `json:"provider,omitempty"`
 	State    string `json:"state"`
 }
 
 // AgentCreateReq 注册自定义 agent（对既有 runtime 的命名配置，不写代码即新增）。
 type AgentCreateReq struct {
-	ID       string `json:"id" binding:"required"`
-	Name     string `json:"name"`
-	Runtime  string `json:"runtime" binding:"required"`
-	Provider string `json:"provider,omitempty"`
+	ID       string   `json:"id" binding:"required"`
+	Name     string   `json:"name"`
+	Runtimes []string `json:"runtimes" binding:"required"`
+	Provider string   `json:"provider,omitempty"`
 }
 
 // AgentUpdateReq PATCH agent 元数据（指针字段：nil 不更新）。
 type AgentUpdateReq struct {
-	Name     *string `json:"name"`
-	Runtime  *string `json:"runtime"`
-	Provider *string `json:"provider"`
+	Name     *string   `json:"name"`
+	Runtimes *[]string `json:"runtimes"`
+	Provider *string   `json:"provider"`
 }
 
 // ProviderResp provider 档案对外表示（密钥只以 has_key 呈现，绝不读回）。
@@ -113,11 +112,10 @@ type CapabilityKV struct {
 	Value bool   `json:"value"`
 }
 
-// SessionResp 会话的对外表示。
-type SessionResp struct {
+// ConversationResp 会话的对外表示（P0 起不含 runtime）。
+type ConversationResp struct {
 	ID        string `json:"id"`
 	AgentID   string `json:"agent_id"`
-	Runtime   string `json:"runtime"`
 	Status    string `json:"status"`
 	Title     string `json:"title"`
 	Pinned    bool   `json:"pinned"`
@@ -126,16 +124,16 @@ type SessionResp struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// SessionSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
-type SessionSearchHit struct {
-	SessionResp
+// ConversationSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
+type ConversationSearchHit struct {
+	ConversationResp
 	Snippet string `json:"snippet"`
 	Matches int    `json:"matches"`
 }
 
-// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
-type SessionDetailResp struct {
-	SessionResp
+// ConversationDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
+type ConversationDetailResp struct {
+	ConversationResp
 	Pending  []PermissionResp `json:"pending"`
 	Memories []MemoryResp     `json:"memories"`
 }
@@ -154,38 +152,37 @@ type MemoryRevokeReq struct {
 	Kind  string `json:"kind"`
 }
 
-// SessionPatch 会话元数据子集更新（nil/零值不更新）。
-type SessionPatch struct {
+// ConversationPatch 会话元数据子集更新（nil/零值不更新）。
+type ConversationPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
 }
 
-// SessionCreateReq 新建会话请求体。
-type SessionCreateReq struct {
+// ConversationCreateReq 新建会话请求体。
+type ConversationCreateReq struct {
 	AgentID string `json:"agent_id" binding:"required"`
 	Prompt  string `json:"prompt"`
 	Cwd     string `json:"cwd,omitempty"`
 }
 
-// SessionCreateResp 新建会话响应。
-type SessionCreateResp struct {
+// ConversationCreateResp 新建会话响应（P0 起不含 runtime）。
+type ConversationCreateResp struct {
 	ID       string `json:"id"`
 	AgentID  string `json:"agent_id"`
-	Runtime  string `json:"runtime"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
 }
 
-// SessionPromptResp 追加 prompt 响应。
-type SessionPromptResp struct {
+// ConversationPromptResp 追加 prompt 响应。
+type ConversationPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
 }
 
-// SessionHistoryResp 会话历史分页响应（事件按 seq 升序）。
-type SessionHistoryResp struct {
+// ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
+type ConversationHistoryResp struct {
 	ID      string           `json:"id"`
 	Events  []eventbus.Event `json:"events"`
 	HasMore bool             `json:"has_more"` // 是否还有更早/后续页（客户端用末条 seq 作为下页 after）
@@ -249,28 +246,28 @@ type ElicitationResolveReq struct {
 	Content       map[string]any `json:"content,omitempty"`         // accept 时用户提交的表单内容
 }
 
-// Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。
+// Handler 汇总各功能的链式入口（agents / conversations / runtimes / ws 事件通道）。
 type Handler struct {
-	Agent    *AgentHandler
-	Session  *SessionHandler
-	Runtime  *RuntimeHandler
-	Provider *ProviderHandler
-	WS       *WSHandler
-	bus      *eventbus.Bus
-	svc      Service
+	Agent        *AgentHandler
+	Conversation *ConversationHandler
+	Runtime      *RuntimeHandler
+	Provider     *ProviderHandler
+	WS           *WSHandler
+	bus          *eventbus.Bus
+	svc          Service
 }
 
 // New 组装 Handler，注入领域服务与会话事件总线。
 // bus 承载归一化会话事件（架构文档 §2 范式）；WS 事件通道（M0）与后续 manager 事件注入共用它。
 func New(svc Service, bus *eventbus.Bus) *Handler {
 	return &Handler{
-		Agent:    &AgentHandler{svc: svc},
-		Session:  &SessionHandler{svc: svc},
-		Runtime:  &RuntimeHandler{svc: svc},
-		Provider: &ProviderHandler{svc: svc},
-		WS:       NewWSHandler(bus),
-		bus:      bus,
-		svc:      svc,
+		Agent:        &AgentHandler{svc: svc},
+		Conversation: &ConversationHandler{svc: svc},
+		Runtime:      &RuntimeHandler{svc: svc},
+		Provider:     &ProviderHandler{svc: svc},
+		WS:           NewWSHandler(bus),
+		bus:          bus,
+		svc:          svc,
 	}
 }
 
