@@ -749,7 +749,11 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
    无错误无串扰 → **共享连接多会话并发在 opencode 上稳定**。dsh 未测（连接模型同构，留 E2
    按需）。→ §17.2 倾向 **方案 B（每 runtime 一连接 + 会话独立 + conn 级在途语义显式化）**，
    改动最小且已实测可行；方案 A 仅作不支持共享会话底座的后备（当前无证据需要）。
-2. **切片 E1**：按测量选定主方案落地的数据模型前置（如 conn 级串行门闩或 per-conversation 独立
-   conn 的映射结构调整），行为零变化（沿用既有事件语义与回收）。
+2. **切片 E1（2026-09-08，完成）**：方案 B 数据模型前置——把 Orchestrator 直接操作的
+   `busyConn map[*acl.Client]map[string]struct{}` 簿记显式化为 `inFlightTracker`
+   （Mark/Unmark/SoleOwner/Len/Clear，自持锁；语义同 §1.5 修订：唯一在途才归属、并发在途不
+   猜测；nil client 安全）。行为零变化（markBusy/unmarkBusy/busyConversationForClient/
+   reap/StopAgent/dropConn 调用点原样换封），单测（语义表 + 8×200 并发 race）+ 既有归属
+   测试适配；vet + race 全绿，echo 全链路回归通过。E2 在此接缝上演进并发语义。
 3. **切片 E2…**：按主方案逐项迁移（归属推断替换、回收/取消/看门狗适配、ProviderSessionID/
    Resume 通路按实测接入），每步 echo 回归 + 全量 race。

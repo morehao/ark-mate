@@ -201,9 +201,10 @@ func TestCancelTurnAgentUnresponsive(t *testing.T) {
 	}
 }
 
-// TestBusyAttributionHelpers 验证 busyConn 归属表：登记/撤销/唯一性判定/nil 安全。
+// TestBusyAttributionHelpers 验证在途归属表（§17 E1：inFlightTracker 语义同 §1.5 修订）：
+// 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
-	orch := &Orchestrator{busyConn: make(map[*acl.Client]map[string]struct{})}
+	orch := &Orchestrator{inflight: newInFlightTracker()}
 	c1 := &acl.Client{}
 	c2 := &acl.Client{}
 
@@ -265,11 +266,11 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelTurn: %v", err)
 	}
-	// runTurn 收尾后 busyConn 应清空（轮询等待，2s 防御）
+	// runTurn 收尾后在途登记应清空（轮询等待，2s 防御）
 	deadline := time.Now().Add(2 * time.Second)
 	for orch.busyConversationForClient(c1) != "" {
 		if time.Now().After(deadline) {
-			t.Fatal("turn 收尾后 busyConn 未清除")
+			t.Fatal("turn 收尾后在途登记未清除")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

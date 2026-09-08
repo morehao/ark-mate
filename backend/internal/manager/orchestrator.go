@@ -73,11 +73,9 @@ type Orchestrator struct {
 	conversations map[string]*ActiveConversation
 	reapStop      context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
-	// busyConn 记录每连接上正在执行 turn 的会话（Prompt 开始 mark、runTurn 收尾 unmark）。
-	// 用途：SDK v0.13.5 未建模 elicitation 的 scope 字段，宿主读不到顶层 conversationId；
-	// 过渡期用「该连接上唯一在途 turn」推断 elicitation 的会话归属（见 §1.5 决策修订）。
-	// 多会话并发在途时归属不唯一 → 不猜测，按取消回应。
-	busyConn map[*acl.Client]map[string]struct{}
+	// inflight 记录每连接上正在执行 turn 的会话（inFlightTracker：§17 E1 显式化簿记，
+	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
+	inflight *inFlightTracker
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
 	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
@@ -121,7 +119,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		reg:           reg,
 		conns:         make(map[string]*runtimeConn),
 		conversations: make(map[string]*ActiveConversation),
-		busyConn:      make(map[*acl.Client]map[string]struct{}),
+		inflight:      newInFlightTracker(),
 		perm:          NewPermissionManager(DefaultPermissionTimeout),
 		elic:          NewElicitationManager(DefaultElicitationTimeout),
 		logger:        slog.Default(),
@@ -515,53 +513,19 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	return rc, nil
 }
 
-// markBusy / unmarkBusy 维护 busyConn：会话进入 turn 时登记、收尾时撤销。
+// markBusy / unmarkBusy 委托 inFlightTracker（§17 E1 显式化簿记；语义不变）。
 // client 为 nil（理论上不应出现）或未登记时均安全 no-op。
 func (o *Orchestrator) markBusy(client *acl.Client, conversationID string) {
-	if client == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	set := o.busyConn[client]
-	if set == nil {
-		set = make(map[string]struct{})
-		o.busyConn[client] = set
-	}
-	set[conversationID] = struct{}{}
+	o.inflight.Mark(client, conversationID)
 }
 
 func (o *Orchestrator) unmarkBusy(client *acl.Client, conversationID string) {
-	if client == nil {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	set := o.busyConn[client]
-	if set == nil {
-		return
-	}
-	delete(set, conversationID)
-	if len(set) == 0 {
-		delete(o.busyConn, client)
-	}
+	o.inflight.Unmark(client, conversationID)
 }
 
 // busyConversationForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
 func (o *Orchestrator) busyConversationForClient(client *acl.Client) string {
-	if client == nil {
-		return ""
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	set := o.busyConn[client]
-	if len(set) != 1 {
-		return ""
-	}
-	for sid := range set {
-		return sid
-	}
-	return ""
+	return o.inflight.SoleOwner(client)
 }
 
 // watchConn 监听连接断开：清理注册、失活其上会话、标记 agent stopped。
@@ -576,7 +540,7 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	if ownerBefore {
 		delete(o.conns, rc.spec.ID)
 	}
-	delete(o.busyConn, rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已删键为 no-op）
+	o.inflight.Clear(rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已清键为 no-op）
 	var victims []*ActiveConversation
 	for _, as := range o.conversations {
 		if as.client == rc.client {
@@ -896,7 +860,7 @@ func (o *Orchestrator) reapIdleOnce(now time.Time, idle time.Duration) int {
 		if rc.started.IsZero() || now.Sub(rc.started) < idle {
 			continue
 		}
-		if len(o.busyConn[rc.client]) > 0 {
+		if o.inflight.Len(rc.client) > 0 {
 			continue // 有在途 turn，不回收
 		}
 		hasConversation := false
@@ -960,7 +924,7 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 	rc := o.conns[spec.ID]
 	busy := 0
 	if rc != nil {
-		busy = len(o.busyConn[rc.client])
+		busy = o.inflight.Len(rc.client)
 	}
 	o.mu.Unlock()
 	if rc == nil {

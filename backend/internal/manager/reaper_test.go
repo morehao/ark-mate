@@ -60,7 +60,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o.mu.Lock()
 	o.conns["echo"] = fresh()
 	o.conns["opencode"] = busy
-	o.busyConn[busy.client] = map[string]struct{}{"s1": {}}
+	o.inflight.Mark(busy.client, "s1")
 	o.conns["deepseekharness"] = withConversation
 	o.conversations["s-x"] = &ActiveConversation{client: withConversation.client}
 	o.mu.Unlock()
