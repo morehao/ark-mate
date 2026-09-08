@@ -787,3 +787,57 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
    `multi_session_concurrent=true` + 真进程两会话重叠各自 usage/turn.ended 无错误 →
    与 opencode 同为方案 B 可行；观测日志：serve INFO「runtime 握手能力」）；
 4. 会话 provider_session_id 持久化与断点恢复属 P0 之外（ADR-4 P3），不在本重构范围。
+
+### 18. P3 会话可移植规划（§11 P3；backend 优先，2026-09-08 起草）
+
+#### 18.1 目标与边界
+
+§11 路线 P3 验收：**kill -9 恢复 + 跨 runtime 续聊 DoD**。本期范围 = 后端（经决策确认：后端
+优先、前端随后）。边界同单机单操作员；elicitation scope、断点恢复的 provider 侧、多用户均不
+在本期。
+
+#### 18.2 现状基线（真码/实测）
+
+- 会话 id = 原生 provider session id（`ActiveConversation.ID = sess.ID()`，orchestrator.go:240）；
+  已随 `conversations` 表持久化（id 列）+ runtime_hint/cwd/agent_id（store/schema.go）。
+- 底座能力实测（§16.6，2026-09-08 握手级）：opencode load/resume/list/fork 全支持；dsh
+  resume/list/close 支持、load=false；echo 无持久会话能力。
+- 进程重启后：store 恢复仅元数据，不在活跃集合 → Prompt 报 conversation_not_found
+  （orchestrator.go 注释，P0 不做断点恢复，ADR-4 P3）。
+- §5.6 机制（原生 resume 为主 + bounded handoff memo 兜底 + 拒绝自动重试）；`PromptRequest`
+  HandoffMemo 占位已留（runtime.go）。
+- 用户不得感知底座的约束（P0 主线）：会话 id 直接暴露 `ses_*`/uuid 属隐患，双 id 价值即
+  会话对外身份与底座解耦。
+
+#### 18.3 决策点（切片 F0 产出结论，不臆造）
+
+- **D-1 双 id 引入时点**：会话对外 id 现为原生 id。P3 恢复需要「平台定位 id → provider id」
+  映射。选项：(a) 会话对外 id 改平台 uuid + 新列 provider_session_id（对外稳定、隐藏底座、
+  跨 runtime 同会话 id；但 REST/eventbus/前端 id 语义为一次破坏性变更，按 P0 式一次性排期）；
+  (b) 保持 id=provider id 并冗余 provider_session_id 列（零破坏，但底座泄露依旧、跨底座续聊
+  id 漂移）。推荐 (a)，在 P3 内一次性完成（kill -9 恢复的稳定会话定位需要对外 id 稳定）。
+- **D-2 恢复承载**：opencode 走 `LoadSession`（实测 load=true）；dsh 走 `ResumeSession`
+  （load=false, resume=true）；echo 无能力 → 明确不支持 + memo 兜底（若会话在 echo 上）。
+- **D-3 memo 预算参数**：bounded handoff memo 的 token 预算/压缩算法参数化（env/默认），
+  拒绝自动重试一次（§5.6）。
+
+#### 18.4 后端切片任务（每步独立提交 + 全绿 + echo 回归）
+
+- **F0 决策与勘察**：D-1/D-2/D-3 结论写入本文档；细读 RestoreFromStore/会话列表语义定恢复
+  触发面（首轮 prompt 前按需恢复 vs 启动批量恢复——推荐按需，冷启动开销小）。
+- **F1 持久化 provider_session_id**：schema 加列 + ConversationRec/register 路径传值（
+  memory/sqlite 同构）+ 迁移；若 D-1=(a) 则同切片引入平台 uuid 会话 id 与 provider 列双轨。
+- **F2 恢复执行面**：会话从 store 恢复后首轮 prompt 前 acquire conn → Load/Resume（按 D-2
+  + runtime_hint/agent/cwd）→ 重建投影 → 发恢复事件（如 session.resumed）→ 既有 runTurn/
+  watchConn 全复用；kill -9 恢复 DoD（sqlite + opencode/dsh 真进程，授权实测）。
+- **F3 handoff memo 兜底**：历史 entries → bounded memo 构建（token 预算参数）→
+  PromptRequest.HandoffMemo 贯通 → 拒绝自动退回裸 prompt；跨 runtime 续聊语义（会话切
+  runtime：新 runtime 无原会话 → memo 路径）DoD。
+- **F4（后续，非本期）前端依赖标注**：会话恢复态呈现（resumed/reconnecting）、对外 id
+  展示策略、agent picker 保持隐藏——后端完成后单独排期。
+
+#### 18.5 验收与纪律
+
+每切片：go build + go vet + go test -race ./... 全绿、独立提交推送、echo 全链路回归冒烟；
+行为不回归、不臆造（开放项文档化）。阶段 DoD：kill -9 后恢复会话续聊（sqlite 模式，真进程
+opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
