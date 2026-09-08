@@ -762,3 +762,22 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
    生命周期既有用例；vet + race 全绿，echo 全链路回归通过。
 4. **切片 E3…**：按主方案逐项迁移（归属推断演进、回收/看门狗适配、ProviderSessionID/
    Resume 通路按实测接入），每步 echo 回归 + 全量 race。
+
+#### 17.4 backend-wide 采用收口（2026-09-08）
+
+逐项对照 §17.1 现状清单的终态：
+
+| 现状项 | 终态 |
+|---|---|
+| Runtime 接口含全会话字段 | 执行面全投影：`Prompt`/`Cancel`(E2)/`ID`/`Capabilities`/`ProviderSessionID`/`Apply*`/`Resume` |
+| Orchestrator 直接 acl 触点（Prompt/Cancel） | 清零；仅剩连接级生命周期（NewSession/Done/Close，归 Orchestrator，§4.2 既定偏差） |
+| busyConn 跨会话在途推断（§1.5 修订） | `inFlightTracker` 显式簿记（E1）；语义不变：唯一在途才归属、并发在途不猜测 |
+| 共享连接多会话并发 | E0 实测 echo/opencode 稳定 → 方案 B 成立：每 runtime 一连接 + 会话独立（多会话） |
+| Resume | 不支持面明确（§16.6）；接入路径 = acl.Client.ResumeSession 能力门 + 重建投影 |
+
+**结论**：backend-wide Runtime 采用完成（编排层会话执行面全投影、连接模型与 §4.2 会话边界版
+一致、并发语义经实测）。**开放项（未实证/待演进，非本次范围）**：
+1. elicitation 归属在「多会话并发在途」下仍需 SDK scope 建模（v0.13.5 缺失）→ 维持不猜测；
+2. Resume 按底座实测接入（echo 已明确不支持；dsh 连接模型同构，E2 后可按需复测）；
+3. dsh 共享连接多会话并发行为未实测（opencode 已实测；dsh 结构同构，风险低，按需补测）；
+4. 会话 provider_session_id 持久化与断点恢复属 P0 之外（ADR-4 P3），不在本重构范围。
