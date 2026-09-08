@@ -16,10 +16,22 @@ type Event struct {
 	Payload  any    `json:"payload"` // 事件负载
 }
 
-// Subscription 是一次事件流订阅：内含历史回放 + 实时增量通道。
-type Subscription struct {
-	C chan Event // 消费通道（复用 Bus 的历史 + 增量投递）
+// GapNotice 一条「慢订阅丢帧」提示：消费者落后导致事件被丢弃时发出，
+// 携带首个被丢事件的 agg 与 seq（消费端据此重挂续传；修复丢帧无补偿）。
+type GapNotice struct {
+	Seq      int64  `json:"seq"`
+	AggregID string `json:"agg_id"`
 }
+
+// Subscription 是一次事件流订阅：内含历史回放 + 实时增量通道；
+// 慢订阅丢帧经 gaps 通道提示（容量 16，超限只保留最新缺口——丢帧重挂只需最新水位）。
+type Subscription struct {
+	C    chan Event     // 消费通道（复用 Bus 的历史 + 增量投递）
+	gaps chan GapNotice // 丢帧提示（可选消费；未消费不影响事件流）
+}
+
+// Gap 返回该订阅的丢帧提示通道（无丢帧时零事件）。
+func (s *Subscription) Gap() <-chan GapNotice { return s.gaps }
 
 // Bus 是单一通道的事件总线。
 type Bus struct {
@@ -59,8 +71,29 @@ func NewWithLimit(n int) *Bus {
 // 订阅者消费不及时则丢弃该事件，由断线后以 after 续传兜底。
 func (b *Bus) Publish(typ, aggID string, version int64, payload any) Event {
 	b.mu.Lock()
-	evt := Event{Type: typ, Seq: b.nextSeq, AggregID: aggID, Version: version, Payload: payload}
-	b.nextSeq++
+	defer b.mu.Unlock()
+	return b.publishLocked(typ, aggID, version, payload, b.nextSeq)
+}
+
+// PublishAt 以显式 seq 发布事件（P1 SQLite 模式下 DB 为全局 seq 权威：
+// 调用方已从事务内取号，bus 仅镜像——重启恢复注入既有事件与 live 新事件共用同一条号序）。
+// seq ≤0 或小于当前 nextSeq 时回落为进程内取号（防取号异常导致重复/倒退）。
+func (b *Bus) PublishAt(seq int64, typ, aggID string, version int64, payload any) Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if seq < b.nextSeq {
+		seq = b.nextSeq
+	}
+	return b.publishLocked(typ, aggID, version, payload, seq)
+}
+
+// publishLocked 以给定 seq 完成「写入缓冲 → 淘汰 → 广播」并推进 nextSeq（须持 b.mu）。
+func (b *Bus) publishLocked(typ, aggID string, version int64, payload any, seq int64) Event {
+	if seq < b.nextSeq {
+		seq = b.nextSeq
+	}
+	evt := Event{Type: typ, Seq: seq, AggregID: aggID, Version: version, Payload: payload}
+	b.nextSeq = seq + 1
 	b.history = append(b.history, evt)
 	for len(b.history) > b.limit {
 		old := b.history[0]
@@ -73,9 +106,22 @@ func (b *Bus) Publish(typ, aggID string, version int64, payload any) Event {
 		select {
 		case sub.C <- evt:
 		default:
+			// 慢订阅：缓冲区满 → 丢帧并提示（gap 只保留最新缺口；丢帧由消费端重挂续传兜底）。
+			n := GapNotice{Seq: evt.Seq, AggregID: evt.AggregID}
+			select {
+			case sub.gaps <- n:
+			default:
+				select {
+				case <-sub.gaps: // 挤掉旧缺口
+				default:
+				}
+				select {
+				case sub.gaps <- n:
+				default:
+				}
+			}
 		}
 	}
-	b.mu.Unlock()
 	return evt
 }
 
@@ -90,7 +136,7 @@ func (b *Bus) EvictedThrough(aggID string) int64 {
 // Subscribe 订阅事件流。after 为起始游标：先同步回放 history 中 seq 大于 after 的历史，
 // 再持续接收后续 live 增量。返回的订阅需在结束后调用 Unsubscribe 释放。
 func (b *Bus) Subscribe(after int64) *Subscription {
-	sub := &Subscription{C: make(chan Event, 256)}
+	sub := &Subscription{C: make(chan Event, 256), gaps: make(chan GapNotice, 16)}
 	b.mu.Lock()
 	for _, evt := range b.history {
 		if evt.Seq > after {

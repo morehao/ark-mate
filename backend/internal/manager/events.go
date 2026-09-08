@@ -22,9 +22,17 @@ const (
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"
+	// BusPermissionResolved 挂起权限终局（用户决策 / 超时自动拒绝 / 会话取消）——前端收敛权限卡的
+	// 唯一事实（不依赖前端时钟）。payload = {session_id, call_id, outcome(selected|cancelled),
+	// reason(user|timeout|cancel), allowed, rejected, option_id, always}。
+	BusPermissionResolved = "session.permission_resolved"
 	// BusElicitationRequest 结构化提问请求（elicitation/create 挂起态：payload = 表单 schema /
 	// URL + message + id；前端据此渲染提问卡，用户提交/放弃经 POST /sessions/:id/elicitation 回传）。
 	BusElicitationRequest = "session.elicitation_request"
+	// BusElicitationResolved 挂起提问终局（accept/decline/cancel/超时/取消）——前端收敛提问卡的
+	// 唯一事实（不依赖前端时钟）。payload = {session_id, elicitation_id, action(accept|decline|cancel),
+	// reason(user|timeout|cancel)}。
+	BusElicitationResolved = "session.elicitation_resolved"
 	// BusRuntime 会话/runtime 连接态事件（phase/pending_confirmations/can_send；M2「会话态与
 	// runtime 态分离」起发布，M1 预留——payload 契约见设计文档 §4.5）。
 	BusRuntime = "session.runtime"
@@ -38,10 +46,11 @@ const (
 
 // 会话状态（进程内存储的展示值）。
 const (
-	SessionStatusInProgress = "in_progress"
-	SessionStatusCompleted  = "completed"
-	SessionStatusFailed     = "failed"
-	SessionStatusCancelled  = "cancelled"
+	SessionStatusInProgress  = "in_progress"
+	SessionStatusCompleted   = "completed"
+	SessionStatusFailed      = "failed"
+	SessionStatusCancelled   = "cancelled"
+	SessionStatusInterrupted = "interrupted" // 恢复后残留 in_progress（崩溃/重启中断，无终态）
 )
 
 // AgentState 取值。

@@ -18,6 +18,12 @@ const (
 	DefaultPermissionTimeout = 30 * time.Minute
 )
 
+// 会话级权限记忆的决策侧（与 allow_always / reject_always 选项一一对应）。
+const (
+	memDecisionAllow  = "allow"  // 会话级「始终允许」
+	memDecisionReject = "reject" // 会话级「始终拒绝」
+)
+
 // permissionRequestKind 对应 acl.PermissionOption.Kind 的可读判别（透传）。
 const (
 	permKindAllowOnce    = "allow_once"
@@ -37,28 +43,41 @@ type pendingPermission struct {
 	timeout   time.Time
 }
 
-// PermissionManager 管理挂起权限请求：注册 → 发布事件 → 等待决策 → 按 call_id 回馈。
+// memoryEntry 是一条会话级权限记忆（allow_always / reject_always 双侧对称，同键互斥覆盖）。
+type memoryEntry struct {
+	title    string
+	kind     string
+	decision string // memDecisionAllow | memDecisionReject
+	optionID string // 用户当初选择的选项（auto-decision 时尽量沿用）
+	since    time.Time
+}
+
+// MemoryItem 是一条会话级权限记忆的对外表示（REST/详情载荷；decision 区分始终允许/始终拒绝）。
+// sessionID 仅用于装载（sqlite 恢复），不进对外载荷。
+type MemoryItem struct {
+	sessionID string
+	Title     string    `json:"title"`
+	Kind      string    `json:"kind"`
+	Decision  string    `json:"decision"` // allow | reject
+	Since     time.Time `json:"since"`
+}
+
+// PermissionManager 管理挂起权限请求：注册 → 发布事件 → 等待决策 → 按 call_id 回馈；
+// 并维护会话级 allow/reject 双侧记忆（AutoDecision 快路径）。
 // mock 不了，权限决策的 RPC 阻塞在 SDK 派发的 goroutine 里（见 acl/client.go 说明）。
 type PermissionManager struct {
-	mu       sync.Mutex
-	pending  map[string]*pendingPermission     // key = callID
-	alwaysOK map[string]map[string]alwaysEntry // sessionID → action+identifier 始终允许记忆
-	timeout  time.Duration
-	logger   *slog.Logger
-}
+	mu         sync.Mutex
+	pending    map[string]*pendingPermission     // key = callID
+	mem        map[string]map[string]memoryEntry // sessionID → action+identifier → 记忆（allow/reject 同键互斥）
+	timeout    time.Duration
+	logger     *slog.Logger
+	onResolved func(sessionID, callID, reason string, d acl.PermissionDecision)
 
-// alwaysEntry 是一条会话级「始终允许」记忆（决策 v4① allow_always / reject_always 的 allow 侧）。
-type alwaysEntry struct {
-	title string
-	kind  string
-	since time.Time
-}
-
-// AlwaysAllowItem 是「始终允许」记忆的对外表示（REST/详情载荷）。
-type AlwaysAllowItem struct {
-	Title string    `json:"title"`
-	Kind  string    `json:"kind"`
-	Since time.Time `json:"since"`
+	// 会话级记忆持久化挂钩（sqlite 模式：写 permission_memories 表；nil = 不持久化）。
+	// 所有记忆变更（Remember/Revoke/ForgetSession）都经此旁路，进程内存与 DB 保持一致。
+	memAdd    func(sessionID, title, kind, decision string, since time.Time)
+	memDel    func(sessionID, title, kind string)
+	memDelAll func(sessionID string)
 }
 
 // NewPermissionManager 构造权限管理器。
@@ -67,10 +86,10 @@ func NewPermissionManager(timeout time.Duration) *PermissionManager {
 		timeout = DefaultPermissionTimeout
 	}
 	return &PermissionManager{
-		pending:  make(map[string]*pendingPermission),
-		alwaysOK: make(map[string]map[string]alwaysEntry),
-		timeout:  timeout,
-		logger:   slog.Default(),
+		pending: make(map[string]*pendingPermission),
+		mem:     make(map[string]map[string]memoryEntry),
+		timeout: timeout,
+		logger:  slog.Default(),
 	}
 }
 
@@ -88,6 +107,24 @@ func (m *PermissionManager) SetTimeout(d time.Duration) {
 	}
 }
 
+// SetOnResolved 注入「挂起请求已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
+func (m *PermissionManager) SetOnResolved(fn func(sessionID, callID, reason string, d acl.PermissionDecision)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onResolved = fn
+}
+
+// SetMemoryHooks 注入会话级记忆持久化挂钩（sqlite 模式；可为 nil 表示不持久化）。
+// 挂钩在锁外调用（DB 写是 best-effort，不入关键路径）。
+func (m *PermissionManager) SetMemoryHooks(add func(sessionID, title, kind, decision string, since time.Time),
+	del func(sessionID, title, kind string), delAll func(sessionID string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.memAdd = add
+	m.memDel = del
+	m.memDelAll = delAll
+}
+
 // genCallID 生成稳定 call_id。
 func genCallID() string {
 	b := make([]byte, 8)
@@ -101,76 +138,133 @@ func alwaysKeyOf(title, kind string) string { return title + "|" + kind }
 // alwaysKey 由工具信息算集合键。
 func alwaysKey(t acl.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) }
 
-// AutoDecision 决定「无需征询」的快速路径：会话级始终允许记忆命中 → 直接放行。
+// AutoDecision 决定「无需征询」的快速路径：会话级记忆命中 → 直接放行/拒绝。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
 func (m *PermissionManager) AutoDecision(sessionID string, req acl.PermissionRequest) (acl.PermissionDecision, bool) {
-	if sessionID != "" && m.isAlwaysAllowed(sessionID, req.ToolCall) {
-		return acl.PermissionDecision{Allowed: true}, true
-	}
-	return acl.PermissionDecision{}, false
-}
-
-// isAlwaysAllowed 判断该会话是否已对某 action+identifier 授过「始终允许」。
-func (m *PermissionManager) isAlwaysAllowed(sessionID string, t acl.ToolCallInfo) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := m.alwaysOK[sessionID]
-	if set == nil {
-		return false
+	e := m.lookupLocked(sessionID, req.ToolCall)
+	if e == nil {
+		return acl.PermissionDecision{}, false
 	}
-	_, ok := set[alwaysKey(t)]
-	return ok
+	switch e.decision {
+	case memDecisionAllow:
+		return acl.PermissionDecision{Allowed: true, OptionID: e.optionID}, true
+	case memDecisionReject:
+		return acl.PermissionDecision{Rejected: true, OptionID: e.optionID}, true
+	default:
+		return acl.PermissionDecision{}, false
+	}
 }
 
-// Remember 记录「始终允许」到会话级记忆。
-func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	set := m.alwaysOK[sessionID]
+// lookupLocked 查某会话对某工具的会话级记忆（须持锁）。
+func (m *PermissionManager) lookupLocked(sessionID string, t acl.ToolCallInfo) *memoryEntry {
+	set := m.mem[sessionID]
 	if set == nil {
-		set = make(map[string]alwaysEntry)
-		m.alwaysOK[sessionID] = set
+		return nil
+	}
+	e, ok := set[alwaysKey(t)]
+	if !ok {
+		return nil
+	}
+	cp := e
+	return &cp
+}
+
+// Remember 记录（或覆盖）一条会话级权限记忆。decision ∈ allow|reject。
+// sqlite 模式下同步旁路持久化（permission_memories 表，同键覆盖）。
+func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decision, optionID string) {
+	m.mu.Lock()
+	set := m.mem[sessionID]
+	if set == nil {
+		set = make(map[string]memoryEntry)
+		m.mem[sessionID] = set
 	}
 	k := alwaysKey(t)
-	if _, ok := set[k]; !ok {
-		set[k] = alwaysEntry{title: t.Title, kind: t.Kind, since: time.Now().UTC()}
+	prev, ok := set[k]
+	since := time.Now().UTC()
+	if ok && prev.decision == decision {
+		since = prev.since // 同侧重复授权不刷新授予时间
+	}
+	set[k] = memoryEntry{title: t.Title, kind: t.Kind, decision: decision, optionID: optionID, since: since}
+	add := m.memAdd
+	m.mu.Unlock()
+	if add != nil {
+		add(sessionID, t.Title, t.Kind, decision, since)
 	}
 }
 
-// ForgetSession 清除整会话的始终允许记忆（会话结束/重置/一键撤销）。
-func (m *PermissionManager) ForgetSession(sessionID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.alwaysOK, sessionID)
+// LoadMemories 恢复会话级权限记忆（sqlite 启动恢复：从 permission_memories 表装载，
+// 双侧 allow/reject 一并重建；重复装载按 since 覆盖，行为与 Remember 一致）。
+func (m *PermissionManager) LoadMemories(items []MemoryItem) {
+	for _, it := range items {
+		m.memPut(it)
+	}
 }
 
-// RevokeAlways 撤销一条会话级「始终允许」记忆；返回该条是否存在。
-func (m *PermissionManager) RevokeAlways(sessionID, title, kind string) bool {
+// memPut 装载单条记忆（给定 since，复用同键覆盖语义）。
+func (m *PermissionManager) memPut(it MemoryItem) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := m.alwaysOK[sessionID]
+	set := m.mem[it.sessionID]
 	if set == nil {
+		set = make(map[string]memoryEntry)
+		m.mem[it.sessionID] = set
+	}
+	k := alwaysKeyOf(it.Title, it.Kind)
+	since := it.Since
+	if since.IsZero() {
+		since = time.Now().UTC()
+	}
+	set[k] = memoryEntry{title: it.Title, kind: it.Kind, decision: it.Decision, since: since}
+}
+
+// ForgetSession 清除整会话的权限记忆（会话结束/重置/一键撤销）。
+// sqlite 模式下同步旁路删除（permission_memories 表整会话）。
+func (m *PermissionManager) ForgetSession(sessionID string) {
+	m.mu.Lock()
+	delete(m.mem, sessionID)
+	delAll := m.memDelAll
+	m.mu.Unlock()
+	if delAll != nil {
+		delAll(sessionID)
+	}
+}
+
+// Revoke 撤销一条会话级权限记忆（title+kind 精确匹配，不区分 decision）；返回该条是否存在。
+// sqlite 模式下同步旁路删除（permission_memories 表同键）。
+func (m *PermissionManager) Revoke(sessionID, title, kind string) bool {
+	m.mu.Lock()
+	set := m.mem[sessionID]
+	if set == nil {
+		m.mu.Unlock()
 		return false
 	}
 	k := alwaysKeyOf(title, kind)
 	if _, ok := set[k]; !ok {
+		m.mu.Unlock()
 		return false
 	}
 	delete(set, k)
 	if len(set) == 0 {
-		delete(m.alwaysOK, sessionID)
+		delete(m.mem, sessionID)
+	}
+	del := m.memDel
+	m.mu.Unlock()
+	if del != nil {
+		del(sessionID, title, kind)
 	}
 	return true
 }
 
-// AlwaysAllowed 列出某会话的全部「始终允许」记忆（按授予时间升序）。
-func (m *PermissionManager) AlwaysAllowed(sessionID string) []AlwaysAllowItem {
+// List 列出某会话的全部权限记忆（按授予时间升序；decision 区分 allow/reject）。
+func (m *PermissionManager) List(sessionID string) []MemoryItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := m.alwaysOK[sessionID]
-	out := make([]AlwaysAllowItem, 0, len(set))
+	set := m.mem[sessionID]
+	out := make([]MemoryItem, 0, len(set))
 	for _, e := range set {
-		out = append(out, AlwaysAllowItem{Title: e.title, Kind: e.kind, Since: e.since})
+		out = append(out, MemoryItem{Title: e.title, Kind: e.kind, Decision: e.decision, Since: e.since})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
 	return out
@@ -190,7 +284,7 @@ func (m *PermissionManager) CancelSession(sessionID string) {
 	for _, p := range victims {
 		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 call_id 的 resolve）。
 		select {
-		case p.ch <- acl.PermissionDecision{}: // 拒绝/取消
+		case p.ch <- acl.PermissionDecision{}: // 取消 → Cancelled
 		default:
 		}
 	}
@@ -224,8 +318,8 @@ func (m *PermissionManager) pendingForSession(sessionID string) []*pendingPermis
 
 // RegisterAndWait 注册一条权限请求并阻塞等待决策（SDK 派发 goroutine 中调用）。
 // publish 副作用（发布 session.permission_request 事件）由调用方注入，避免 manager 依赖 bus；
-// publisher 携带超时时刻（timeout），供 UI 端到前端判断卡片过期收敛。
-// 返回最终决策；超时/上下文取消时自动拒绝。
+// publisher 携带超时时刻（timeout），供 UI 端判断卡片展示。
+// 返回最终决策；超时/上下文取消时自动拒绝（Cancelled）。
 func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.PermissionRequest, publish func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time)) acl.PermissionDecision {
 	callID := genCallID()
 	p := &pendingPermission{
@@ -250,25 +344,41 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID strin
 	defer timer.Stop()
 
 	var d acl.PermissionDecision
+	reason := "user"
 	select {
 	case d = <-p.ch:
-		// 用户已决策
+		// 用户已决策（allow/reject × once/always）
 	case <-ctx.Done():
-		d = acl.PermissionDecision{} // 取消 → 拒绝
+		d = acl.PermissionDecision{} // 取消 → Cancelled
+		reason = "cancel"
 	case <-timer.C:
 		m.logger.Warn("permission: request timeout, auto-reject", "session", sessionID, "call_id", callID, "title", req.ToolCall.Title)
 		d = acl.PermissionDecision{}
+		reason = "timeout"
 	}
 	m.mu.Lock()
 	delete(m.pending, callID)
+	onResolved := m.onResolved
 	m.mu.Unlock()
 
-	// 决策为 allow_always / reject_always（或用户明示 always）：记录会话级记忆。
-	if d.Allowed && d.Always {
-		m.Remember(sessionID, req.ToolCall)
+	// 决策为 allow_always / reject_always（或用户明示 always）：记录会话级记忆（双侧对称，同键互斥覆盖）。
+	if d.Always {
+		decision := ""
+		switch {
+		case d.Allowed:
+			decision = memDecisionAllow
+		case d.Rejected:
+			decision = memDecisionReject
+		}
+		if decision != "" {
+			m.Remember(sessionID, req.ToolCall, decision, d.OptionID)
+		}
+	}
+	if onResolved != nil {
+		onResolved(sessionID, callID, reason, d)
 	}
 	m.logger.Info("permission: resolved", "session", sessionID, "call_id", callID,
-		"allowed", d.Allowed, "always", d.Always, "option_id", d.OptionID)
+		"reason", reason, "allowed", d.Allowed, "rejected", d.Rejected, "always", d.Always, "option_id", d.OptionID)
 	return d
 }
 
@@ -293,9 +403,10 @@ func (m *PermissionManager) ResolveAllow(callID, optionID string, always bool) b
 	return m.resolve(callID, acl.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
 }
 
-// ResolveReject 拒绝。
-func (m *PermissionManager) ResolveReject(callID string) bool {
-	return m.resolve(callID, acl.PermissionDecision{})
+// ResolveReject 显式拒绝。optionID 为所选 deny 选项（ACP 层会 Selected 回执，agent 可区分拒绝与取消）；
+// always=true 时记录会话级「始终拒绝」记忆。
+func (m *PermissionManager) ResolveReject(callID, optionID string, always bool) bool {
+	return m.resolve(callID, acl.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
 }
 
 // PermissionItem 是一条挂起权限请求的对外表示（REST/WS 载荷；options 为 ACP 可读子集）。

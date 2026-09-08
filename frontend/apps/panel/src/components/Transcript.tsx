@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { Button, Checkbox, Input, InputNumber, Radio } from 'antd'
 import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
@@ -56,22 +56,10 @@ function decisionFor(opt: PermissionOption): PermissionDecision {
 /** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
 function PermissionCard({ e }: { e: StreamEntry }) {
   const respond = useForge((s) => s.respondPermission)
-  const expire = useForge((s) => s.expirePermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
-  const timeoutAt = e.timeoutAt
-
-  // 服务端超时自动拒绝的收敛：客户端按 timeout_at 定时把未决卡片标记为已收敛（同一宿主机器，时钟偏差可忽略）。
-  useEffect(() => {
-    if (resolved || !timeoutAt || !e.callId) return
-    const ms = new Date(timeoutAt).getTime() - Date.now()
-    if (ms <= 0) {
-      expire(e.callId)
-      return
-    }
-    const timer = window.setTimeout(() => expire(e.callId as string), ms + 60)
-    return () => window.clearTimeout(timer)
-  }, [resolved, timeoutAt, e.callId, expire])
+  // 兜底「拒绝」在 agent 提供 deny 选项时自动带选首个（拒绝与取消/超时保持可区分）。
+  const denyOption = options.find((o) => o.kind.startsWith('reject'))?.option_id
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
@@ -137,7 +125,9 @@ function PermissionCard({ e }: { e: StreamEntry }) {
             <Button
               size="small"
               danger
-              onClick={() => void respond(e.callId ?? '', { allowed: false, always: false, label: '拒绝 · 本次' })}
+              onClick={() =>
+                void respond(e.callId ?? '', { allowed: false, always: false, optionId: denyOption, label: '拒绝 · 本次' })
+              }
               style={{ borderRadius: 8, margin: 0 }}
             >
               拒绝
@@ -205,25 +195,11 @@ function summarizeContent(schema: StreamEntry['schema'], content?: Record<string
 /** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
 function ElicitationCard({ e }: { e: StreamEntry }) {
   const respond = useForge((s) => s.respondElicitation)
-  const expire = useForge((s) => s.expireElicitation)
   const resolved = e.resolved ?? false
-  const timeoutAt = e.timeoutAt
   const busy = useForge((s) => {
     const v = s.activeId ? s.views[s.activeId] : undefined
     return v?.streaming ?? false
   })
-
-  // 服务端超时自动取消的收敛：客户端按 timeout_at 定时把未决卡片标记为已收敛（同宿主机器，时钟偏差可忽略）。
-  useEffect(() => {
-    if (resolved || !timeoutAt || !e.elicitationId) return
-    const ms = new Date(timeoutAt).getTime() - Date.now()
-    if (ms <= 0) {
-      expire(e.elicitationId)
-      return
-    }
-    const timer = window.setTimeout(() => expire(e.elicitationId as string), ms + 60)
-    return () => window.clearTimeout(timer)
-  }, [resolved, timeoutAt, e.elicitationId, expire])
 
   const form = e.mode === 'url'
     ? null

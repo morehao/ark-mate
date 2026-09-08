@@ -24,6 +24,12 @@ type stubSvc struct {
 	listRuntimesErr error
 	listSessionsErr error
 
+	agentErr    error  // P2 管理面桩错误注入
+	agentAction string // 最近一次 delete/start/stop 动作（P2 桩）
+
+	providerErr error // P2 provider 桩错误注入
+	providers   []handler.ProviderResp
+
 	createCalled bool
 	createReq    handler.SessionCreateReq
 	createResp   *handler.SessionCreateResp
@@ -46,7 +52,7 @@ type stubSvc struct {
 	historyResp   *handler.SessionHistoryResp
 	historyErr    error
 
-	alwaysList  []handler.AlwaysAllowResp
+	memList     []handler.MemoryResp
 	revokeID    string
 	revokeTitle string
 	revokeKind  string
@@ -65,6 +71,55 @@ func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
 	}
 	return s.agents, nil
 }
+
+// ——— P2 Agent 管理面桩（Create/Update/Delete/Start/Stop） ———
+func (s *stubSvc) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*handler.AgentResp, error) {
+	if s.agentErr != nil {
+		return nil, s.agentErr
+	}
+	resp := &handler.AgentResp{ID: req.ID, Name: req.Name, Runtime: req.Runtime, Provider: req.Provider, State: "stopped"}
+	s.agents = append(s.agents, *resp)
+	return resp, nil
+}
+func (s *stubSvc) UpdateAgent(_ context.Context, id string, patch handler.AgentUpdateReq) (*handler.AgentResp, error) {
+	if s.agentErr != nil {
+		return nil, s.agentErr
+	}
+	return &handler.AgentResp{ID: id, State: "stopped"}, nil
+}
+func (s *stubSvc) DeleteAgent(_ context.Context, id string) error {
+	if s.agentErr != nil {
+		return s.agentErr
+	}
+	s.agentAction = "delete:" + id
+	return nil
+}
+func (s *stubSvc) StartAgent(_ context.Context, id string) error {
+	if s.agentErr != nil {
+		return s.agentErr
+	}
+	s.agentAction = "start:" + id
+	return nil
+}
+func (s *stubSvc) StopAgent(_ context.Context, id string) error {
+	if s.agentErr != nil {
+		return s.agentErr
+	}
+	s.agentAction = "stop:" + id
+	return nil
+}
+func (s *stubSvc) ListProviders() ([]handler.ProviderResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return s.providers, nil
+}
+func (s *stubSvc) UpdateProvider(_ context.Context, id string, patch handler.ProviderPatchReq) (*handler.ProviderResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &handler.ProviderResp{ID: id, HasKey: patch.Key != nil && *patch.Key != ""}, nil
+}
 func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	if s.listRuntimesErr != nil {
 		return nil, s.listRuntimesErr
@@ -82,8 +137,8 @@ func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]handler.
 }
 func (s *stubSvc) GetSession(_ context.Context, id string) (*handler.SessionDetailResp, error) {
 	return &handler.SessionDetailResp{
-		SessionResp:   handler.SessionResp{ID: id},
-		AlwaysAllowed: s.alwaysList,
+		SessionResp: handler.SessionResp{ID: id},
+		Memories:    s.memList,
 	}, nil
 }
 func (s *stubSvc) UpdateSession(_ context.Context, id string, patch handler.SessionPatch) (*handler.SessionResp, error) {
@@ -105,7 +160,10 @@ func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]handle
 func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) error {
 	return nil
 }
-func (s *stubSvc) RevokeAlways(_ context.Context, id, title, kind string) error {
+func (s *stubSvc) ListPermissionMemories(_ context.Context, id string) ([]handler.MemoryResp, error) {
+	return s.memList, nil
+}
+func (s *stubSvc) RevokeMemory(_ context.Context, id, title, kind string) error {
 	s.revokeID = id
 	s.revokeTitle = title
 	s.revokeKind = kind
@@ -162,6 +220,11 @@ func (s *stubSvc) SessionHistory(_ context.Context, id string, after int64, limi
 	return &handler.SessionHistoryResp{ID: id}, nil
 }
 
+// ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
+func (s *stubSvc) ListRuns(_ context.Context, id string) ([]handler.RunResp, error) {
+	return []handler.RunResp{}, nil
+}
+
 // ——— 测试基建 ———
 
 type envelope struct {
@@ -178,6 +241,11 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	r := gin.New()
 	g := r.Group("/v1/forge")
 	g.GET("/agents", h.Agent.List)
+	g.POST("/agents", h.Agent.Create)
+	g.PATCH("/agents/:id", h.Agent.Update)
+	g.DELETE("/agents/:id", h.Agent.Delete)
+	g.POST("/agents/:id/start", h.Agent.Start)
+	g.POST("/agents/:id/stop", h.Agent.Stop)
 	g.GET("/sessions", h.Session.List)
 	g.POST("/sessions", h.Session.Create)
 	g.GET("/sessions/:id", h.Session.Get)
@@ -187,11 +255,13 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.POST("/sessions/:id/cancel", h.Session.Cancel)
 	g.GET("/sessions/:id/permissions", h.Session.Permissions)
 	g.POST("/sessions/:id/permission", h.Session.ResolvePermission)
-	g.GET("/sessions/:id/permissions/always", h.Session.AlwaysAllowed)
-	g.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeAlways)
+	g.GET("/sessions/:id/permissions/memories", h.Session.PermissionMemories)
+	g.POST("/sessions/:id/permissions/memories/revoke", h.Session.RevokeMemory)
 	g.GET("/sessions/:id/elicitations", h.Session.Elicitations)
 	g.POST("/sessions/:id/elicitation", h.Session.ResolveElicitation)
 	g.GET("/runtimes", h.Runtime.List)
+	g.GET("/providers", h.Provider.List)
+	g.PATCH("/providers/:id", h.Provider.Update)
 	return r
 }
 
@@ -406,28 +476,31 @@ func TestHistorySuccess(t *testing.T) {
 	}
 }
 
-// TestAlwaysAllowedList GET /sessions/:id/permissions/always 返回会话级「始终允许」记忆。
-func TestAlwaysAllowedList(t *testing.T) {
-	svc := &stubSvc{alwaysList: []handler.AlwaysAllowResp{
-		{Title: "运行演示命令 echo hello", Kind: "execute", Since: "2026-01-02T03:04:05Z"},
+// TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
+func TestPermissionMemoriesList(t *testing.T) {
+	svc := &stubSvc{memList: []handler.MemoryResp{
+		{Title: "运行演示命令 echo hello", Kind: "execute", Decision: "allow", Since: "2026-01-02T03:04:05Z"},
+		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
 	}}
 	r := newRestEngine(svc)
-	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/permissions/always", "")
+	env, _ := do(t, r, "GET", "/v1/forge/sessions/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
-	var out []handler.AlwaysAllowResp
-	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" {
-		t.Fatalf("always data 不符: %s", env.Data)
+	var out []handler.MemoryResp
+	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 2 ||
+		out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" || out[0].Decision != "allow" ||
+		out[1].Decision != "reject" {
+		t.Fatalf("memories data 不符: %s", env.Data)
 	}
 }
 
-// TestRevokeAlways 单条撤销（title+kind）与一键撤销（均空）都正确透传。
-func TestRevokeAlways(t *testing.T) {
+// TestRevokeMemory 单条撤销（title+kind）与一键撤销（均空）都正确透传。
+func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(svc)
 
-	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/permissions/always/revoke",
+	env, _ := do(t, r, "POST", "/v1/forge/sessions/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -436,7 +509,7 @@ func TestRevokeAlways(t *testing.T) {
 		t.Fatalf("撤销单条透传不符: %+v", svc)
 	}
 
-	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/permissions/always/revoke", `{}`)
+	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/permissions/memories/revoke", `{}`)
 	if env.Code != 0 {
 		t.Fatalf("一键撤销信封不符: %+v", env)
 	}
@@ -488,5 +561,46 @@ func TestResolveElicitationBadBody(t *testing.T) {
 	env, _ = do(t, r, "POST", "/v1/forge/sessions/s1/elicitation", `{"elicitation_id":"el-abc"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 action 应 40000: %+v", env)
+	}
+}
+
+// TestAgentManagementRoutes P2 管理面路由：注册/启停/热更新/删除经 stub 桩往返。
+func TestAgentManagementRoutes(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-echo","name":"别名echo","runtime":"echo"}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
+	}
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/start", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-echo" {
+		t.Fatalf("start 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/stop", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-echo" {
+		t.Fatalf("stop 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-echo", `{"name":"别名echo v2"}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
+	}
+	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-echo", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-echo" {
+		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+}
+
+// TestProviderRoutes provider 注入面路由：GET 列表 + PATCH upsert（密钥只写不读回）。
+func TestProviderRoutes(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+	env, code := do(t, r, "PATCH", "/v1/forge/providers/default", `{"type":"openai","model":"gpt-4o","key":"sk-x"}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("PATCH provider 失败 code=%d env=%d", code, env.Code)
+	}
+	env, code = do(t, r, "GET", "/v1/forge/providers", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET providers 失败 code=%d env=%d", code, env.Code)
 	}
 }

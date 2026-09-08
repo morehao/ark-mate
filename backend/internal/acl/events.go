@@ -58,9 +58,12 @@ type ToolCallInfo struct {
 	Output any    `json:"output,omitempty"` // 调用结果（rawOutput；仅 ToolCallUpdate 携带时非空）
 }
 
-// PermissionInfo 权限请求（按策略拒绝后仍上抛，供上层留痕）。
+// PermissionInfo 权限请求决策留痕（每次决策后上抛，供上层留痕/审计）。
 type PermissionInfo struct {
 	SessionID string `json:"session_id"`
 	Title     string `json:"title"`
 	Allowed   bool   `json:"allowed"`
+	Rejected  bool   `json:"rejected,omitempty"` // 显式拒绝（区别于取消/超时）
+	OptionID  string `json:"option_id,omitempty"`
+	Always    bool   `json:"always,omitempty"`
 }

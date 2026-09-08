@@ -79,11 +79,11 @@ func TestPermissionReject(t *testing.T) {
 	go func() { exited <- m.RegisterAndWait(context.Background(), "s4", req, nil) }()
 	waitRegistered(t, m, "s4")
 	callID := pendingCallID(t, m, "s4")
-	if !m.ResolveReject(callID) {
+	if !m.ResolveReject(callID, "", false) {
 		t.Fatalf("ResolveReject 未命中")
 	}
 	d := <-exited
-	if d.Allowed || d.Always {
+	if d.Allowed || d.Always || !d.Rejected {
 		t.Fatalf("拒绝决策不符: %+v", d)
 	}
 }

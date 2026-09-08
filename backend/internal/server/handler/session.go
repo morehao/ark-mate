@@ -82,24 +82,24 @@ func (h *SessionHandler) Permissions(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// AlwaysAllowed 列出会话级「始终允许」记忆。
-func (h *SessionHandler) AlwaysAllowed(c *gin.Context) {
-	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
+// PermissionMemories 列出会话级权限记忆（allow/reject 双侧，详情/撤销 UI 数据源）。
+func (h *SessionHandler) PermissionMemories(c *gin.Context) {
+	resp, err := h.svc.ListPermissionMemories(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, err)
 		return
 	}
-	gincontext.Success(c, resp.AlwaysAllowed)
+	gincontext.Success(c, resp)
 }
 
-// RevokeAlways 撤销会话级「始终允许」记忆（body title+kind 均空 = 一键撤销全部）。
-func (h *SessionHandler) RevokeAlways(c *gin.Context) {
-	var req AlwaysRevokeReq
+// RevokeMemory 撤销会话级权限记忆（body title+kind 均空 = 一键撤销全部）。
+func (h *SessionHandler) RevokeMemory(c *gin.Context) {
+	var req MemoryRevokeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
 	}
-	if err := h.svc.RevokeAlways(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
+	if err := h.svc.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
 		gincontext.Fail(c, err)
 		return
 	}
@@ -222,6 +222,17 @@ func (h *SessionHandler) History(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, resp)
+}
+
+// Runs 列出某会话的轮次明细（runs 表读模型；内存模式返回空数组）。
+func (h *SessionHandler) Runs(c *gin.Context) {
+	id := c.Param("id")
+	runs, err := h.svc.ListRuns(c.Request.Context(), id)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, gin.H{"id": id, "runs": runs})
 }
 
 // parseNonNeg 解析非负整数查询参数。

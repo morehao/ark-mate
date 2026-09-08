@@ -44,9 +44,10 @@ type wsClientFrame struct {
 
 // wsServerFrame 服务端 → 客户端帧。
 type wsServerFrame struct {
-	Type     string          `json:"type"`                // snapshot | event | detached | pong
+	Type     string          `json:"type"`                // snapshot | event | gap | detached | pong
 	AggID    string          `json:"agg_id,omitempty"`    // 归属聚合
-	EventSeq int64           `json:"event_seq,omitempty"` // snapshot 水位 / event 的 seq
+	EventSeq int64           `json:"event_seq,omitempty"` // snapshot 水位 / event 的 seq / gap 的首丢 seq
+	FromSeq  int64           `json:"from_seq,omitempty"`  // gap：重挂起点（= 首丢 seq）
 	Event    *eventbus.Event `json:"event,omitempty"`     // event 帧载荷（type/seq/agg_id/version/payload）
 	Reason   string          `json:"reason,omitempty"`    // detached 原因
 	State    json.RawMessage `json:"state,omitempty"`     // snapshot 终态视图（M0 空对象）
@@ -181,7 +182,8 @@ func (h *WSHandler) detach(st *connState, aggID string) {
 	h.send(st, wsServerFrame{Type: "detached", AggID: aggID, Reason: "detached"})
 }
 
-// livePump 把 bus live 增量按已 attach 聚合过滤后投递到写队列。
+// livePump 把 bus live 增量按已 attach 聚合过滤后投递到写队列；
+// 慢订阅丢帧（bus gap 提示）→ 转 gap 帧，客户端据此立即重挂该聚合（按水位重放续传）。
 func (h *WSHandler) livePump(st *connState, live *eventbus.Subscription) {
 	for {
 		select {
@@ -193,6 +195,18 @@ func (h *WSHandler) livePump(st *connState, live *eventbus.Subscription) {
 			st.mu.Unlock()
 			if ok {
 				frame := wsServerFrame{Type: "event", AggID: evt.AggregID, EventSeq: evt.Seq, Event: &evt}
+				select {
+				case st.write <- frame:
+				case <-st.closed:
+					return
+				}
+			}
+		case g := <-live.Gap():
+			st.mu.Lock()
+			ok := st.attached[g.AggregID]
+			st.mu.Unlock()
+			if ok {
+				frame := wsServerFrame{Type: "gap", AggID: g.AggregID, EventSeq: g.Seq, FromSeq: g.Seq}
 				select {
 				case st.write <- frame:
 				case <-st.closed:

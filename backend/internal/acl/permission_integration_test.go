@@ -132,6 +132,95 @@ func TestRequestPermissionReject(t *testing.T) {
 	}
 }
 
+// TestRequestPermissionRejectSelected 显式拒绝且选了 deny 选项 → agent 收到 Selected{reject 选项}
+// （与取消/超时的 Cancelled 可区分，决策 v2 语义）。
+func TestRequestPermissionRejectSelected(t *testing.T) {
+	agentRes := make(chan string, 1)
+	agent := &fakeAgent{
+		init: fakeInit(int(acpsdk.ProtocolVersionNumber), dialCaps(true, true, false), nil),
+	}
+	agent.promptHook = func(ctx context.Context, req acpsdk.PromptRequest) {
+		resp, err := agent.conn.RequestPermission(ctx, acpsdk.RequestPermissionRequest{
+			SessionId: req.SessionId,
+			ToolCall:  acpsdk.ToolCallUpdate{ToolCallId: "tc3", Title: ptrString("删除文件")},
+			Options: []acpsdk.PermissionOption{
+				{OptionId: "allow-once", Kind: acpsdk.PermissionOptionKindAllowOnce},
+				{OptionId: "reject-once", Name: "拒绝一次", Kind: acpsdk.PermissionOptionKindRejectOnce},
+			},
+		})
+		if err != nil {
+			t.Errorf("agent RequestPermission: %v", err)
+			return
+		}
+		if resp.Outcome.Selected != nil {
+			agentRes <- "selected:" + string(resp.Outcome.Selected.OptionId)
+		} else if resp.Outcome.Cancelled != nil {
+			agentRes <- "cancelled"
+		} else {
+			agentRes <- "unknown"
+		}
+	}
+	cl := dialFake(t, agent, ClientOptions{
+		RequestPermission: func(_ context.Context, _ PermissionRequest) PermissionDecision {
+			// 宿主决策：显式拒绝并选中「拒绝一次」（reject-once）。
+			return PermissionDecision{Rejected: true, OptionID: "reject-once"}
+		},
+	})
+	sess, err := cl.NewSession(context.Background(), SessionOptions{Cwd: "/work"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if got := <-agentRes; got != "selected:reject-once" {
+		t.Fatalf("agent 收到的拒绝决策不符: %q（期望 Selected{reject-once}）", got)
+	}
+}
+
+// TestRequestPermissionRejectWithoutOption 显式拒绝但所选 deny 选项不在 agent 提供的选项内
+// → 兜底 Cancelled（无法 Selected 时不得伪造选项）。
+func TestRequestPermissionRejectWithoutOption(t *testing.T) {
+	agentRes := make(chan string, 1)
+	agent := &fakeAgent{
+		init: fakeInit(int(acpsdk.ProtocolVersionNumber), dialCaps(true, true, false), nil),
+	}
+	agent.promptHook = func(ctx context.Context, req acpsdk.PromptRequest) {
+		resp, err := agent.conn.RequestPermission(ctx, acpsdk.RequestPermissionRequest{
+			SessionId: req.SessionId,
+			ToolCall:  acpsdk.ToolCallUpdate{ToolCallId: "tc4", Title: ptrString("写文件")},
+			Options: []acpsdk.PermissionOption{
+				{OptionId: "allow-once", Kind: acpsdk.PermissionOptionKindAllowOnce},
+			},
+		})
+		if err != nil {
+			t.Errorf("agent RequestPermission: %v", err)
+			return
+		}
+		if resp.Outcome.Cancelled != nil {
+			agentRes <- "cancelled"
+		} else {
+			agentRes <- "not-cancelled"
+		}
+	}
+	cl := dialFake(t, agent, ClientOptions{
+		RequestPermission: func(_ context.Context, _ PermissionRequest) PermissionDecision {
+			// 宿主想拒绝并选了 deny 选项，但 agent 没提供该选项 → 兜底 Cancelled。
+			return PermissionDecision{Rejected: true, OptionID: "reject-once"}
+		},
+	})
+	sess, err := cl.NewSession(context.Background(), SessionOptions{Cwd: "/work"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if got := <-agentRes; got != "cancelled" {
+		t.Fatalf("无 deny 选项时拒绝应兜底 Cancelled: %q", got)
+	}
+}
+
 func ptrString(s string) *string { return &s }
 
 func toolKindPtr(k acpsdk.ToolKind) *acpsdk.ToolKind { return &k }
