@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -79,6 +80,7 @@ type Service struct {
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
+	caps      *capability.Registry    // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 
 	mu            sync.Mutex
 	agents        map[string]*AgentRec
@@ -96,6 +98,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		conversations: make(map[string]*ConversationRec),
 		ver:           make(map[string]int64),
 		providers:     make(map[string]*providerDef),
+		caps:          capability.NewRegistry(),
 	}
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	for _, b := range builtinAgents {

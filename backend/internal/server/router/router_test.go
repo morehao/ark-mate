@@ -86,6 +86,22 @@ func TestRouterListRealService(t *testing.T) {
 	}
 }
 
+// TestRouterCapabilitiesListRealService P1 能力数据面经真实 Service：未装配目录时
+// /skills /mcps /tools 返回空数组（REST 可列出能力的最小形态）。
+func TestRouterCapabilitiesListRealService(t *testing.T) {
+	e := newEngine()
+	for _, p := range []string{"/skills", "/mcps", "/tools"} {
+		env := get(t, e, "/v1/forge"+p)
+		if env.Code != 0 {
+			t.Fatalf("%s 信封不符: %+v", p, env)
+		}
+		var items []map[string]any
+		if err := json.Unmarshal(env.Data, &items); err != nil || len(items) != 0 {
+			t.Fatalf("%s 应为空数组: %s", p, env.Data)
+		}
+	}
+}
+
 // TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/forge 前缀。
 func TestRouterRoutesRegistered(t *testing.T) {
 	e := newEngine()
@@ -104,6 +120,10 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"GET /v1/forge/conversations/:id/history",
 		"POST /v1/forge/conversations/:id/prompt",
 		"POST /v1/forge/conversations/:id/cancel",
+		"GET /v1/forge/providers",
+		"GET /v1/forge/skills",
+		"GET /v1/forge/mcps",
+		"GET /v1/forge/tools",
 		"GET /v1/forge/ws/events",
 	} {
 		if !found[want] {

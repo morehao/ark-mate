@@ -63,6 +63,11 @@ type stubSvc struct {
 	resolvedElicAction  string
 	resolvedElicContent map[string]any
 	resolveElicErr      error
+
+	skills []handler.SkillResp // P1 能力数据面桩
+	mcps   []handler.McpServerResp
+	tools  []handler.ToolResp
+	capErr error // 能力列表桩错误注入
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -119,6 +124,26 @@ func (s *stubSvc) UpdateProvider(_ context.Context, id string, patch handler.Pro
 		return nil, s.providerErr
 	}
 	return &handler.ProviderResp{ID: id, HasKey: patch.Key != nil && *patch.Key != ""}, nil
+}
+
+// ——— P1 能力数据面桩（ListSkills/ListMcpServers/ListTools） ———
+func (s *stubSvc) ListSkills() ([]handler.SkillResp, error) {
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return s.skills, nil
+}
+func (s *stubSvc) ListMcpServers() ([]handler.McpServerResp, error) {
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return s.mcps, nil
+}
+func (s *stubSvc) ListTools() ([]handler.ToolResp, error) {
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return s.tools, nil
 }
 func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	if s.listRuntimesErr != nil {
@@ -262,6 +287,9 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/runtimes", h.Runtime.List)
 	g.GET("/providers", h.Provider.List)
 	g.PATCH("/providers/:id", h.Provider.Update)
+	g.GET("/skills", h.Capability.ListSkills)
+	g.GET("/mcps", h.Capability.ListMcpServers)
+	g.GET("/tools", h.Capability.ListTools)
 	return r
 }
 
@@ -611,5 +639,42 @@ func TestProviderRoutes(t *testing.T) {
 	env, code = do(t, r, "GET", "/v1/forge/providers", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET providers 失败 code=%d env=%d", code, env.Code)
+	}
+}
+
+// TestCapabilityRoutes P1 能力数据面路由：GET /skills /mcps /tools 列出目录（信封 data 数组）。
+func TestCapabilityRoutes(t *testing.T) {
+	svc := &stubSvc{
+		skills: []handler.SkillResp{{ID: "plan", Name: "plan", Description: "先规划再动手"}},
+		mcps:   []handler.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
+		tools:  []handler.ToolResp{{Name: "web_search", Source: "builtin", Description: "联网搜索"}},
+	}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "GET", "/v1/forge/skills", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET skills 失败 code=%d env=%d", code, env.Code)
+	}
+	var skills []handler.SkillResp
+	if err := json.Unmarshal(env.Data, &skills); err != nil || len(skills) != 1 || skills[0].ID != "plan" {
+		t.Fatalf("skills data 不符: %s", env.Data)
+	}
+
+	env, code = do(t, r, "GET", "/v1/forge/mcps", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET mcps 失败 code=%d env=%d", code, env.Code)
+	}
+	var mcps []handler.McpServerResp
+	if err := json.Unmarshal(env.Data, &mcps); err != nil || len(mcps) != 1 || mcps[0].ID != "fs" {
+		t.Fatalf("mcps data 不符: %s", env.Data)
+	}
+
+	env, code = do(t, r, "GET", "/v1/forge/tools", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET tools 失败 code=%d env=%d", code, env.Code)
+	}
+	var tools []handler.ToolResp
+	if err := json.Unmarshal(env.Data, &tools); err != nil || len(tools) != 1 || tools[0].Name != "web_search" {
+		t.Fatalf("tools data 不符: %s", env.Data)
 	}
 }

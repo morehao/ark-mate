@@ -55,6 +55,10 @@ func New(h *handler.Handler) *gin.Engine {
 	// P2 provider 注入面：密钥只写不读回。
 	v1.GET("/providers", h.Provider.List)
 	v1.PATCH("/providers/:id", h.Provider.Update)
+	// P1 能力数据面：Skill/MCP/Tool 目录（platform 唯一事实源，REST 列出能力）。
+	v1.GET("/skills", h.Capability.ListSkills)
+	v1.GET("/mcps", h.Capability.ListMcpServers)
+	v1.GET("/tools", h.Capability.ListTools)
 	v1.GET("/ws/events", h.WS.Handle)
 
 	MountWeb(r)

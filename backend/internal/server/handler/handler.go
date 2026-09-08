@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 )
@@ -58,6 +59,13 @@ type Service interface {
 	ListPendingElicitations(ctx context.Context, id string) ([]ElicitationResp, error)
 	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
 	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
+
+	// ListSkills 返回 Skill 目录（P1 能力数据面）。
+	ListSkills() ([]SkillResp, error)
+	// ListMcpServers 返回 MCP 注册表（P1；headers/凭证不读回）。
+	ListMcpServers() ([]McpServerResp, error)
+	// ListTools 返回 Tool 目录（P1；静态/平台/观察条目）。
+	ListTools() ([]ToolResp, error)
 }
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
@@ -111,6 +119,43 @@ type RuntimeResp struct {
 type CapabilityKV struct {
 	Key   string `json:"key"`
 	Value bool   `json:"value"`
+}
+
+// ——— P1 能力数据面对外表示（Skill/MCP/Tool 目录；design doc §8.3 能力卡数据源） ———
+
+// SkillResp Skill 目录条目。
+type SkillResp struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Body        string            `json:"body,omitempty"` // SKILL.md 内容（P2 物化源）
+	Sources     []SkillSourceResp `json:"sources,omitempty"`
+}
+
+// SkillSourceResp 一条 skill 在某 runtime 的物化目标。
+type SkillSourceResp struct {
+	Runtime string `json:"runtime"`
+	Path    string `json:"path"`
+	Format  string `json:"format"`
+}
+
+// McpServerResp MCP 注册表条目。Headers/访问凭证只存内部（P2 session/new 注入），
+// 列表一律不读回（同 ProviderResp 只给 has_key 的立场）。
+type McpServerResp struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Transport string   `json:"transport"` // stdio | sse | http | streamable_http
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	URL       string   `json:"url,omitempty"`
+}
+
+// ToolResp Tool 目录条目。
+type ToolResp struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Source      string          `json:"source"`           // builtin | mcp | observed
+	Schema      json.RawMessage `json:"schema,omitempty"` // 参数 JSON Schema（原样保真）
 }
 
 // ConversationResp 会话的对外表示（P0 起不含 runtime）。
@@ -247,12 +292,13 @@ type ElicitationResolveReq struct {
 	Content       map[string]any `json:"content,omitempty"`         // accept 时用户提交的表单内容
 }
 
-// Handler 汇总各功能的链式入口（agents / conversations / runtimes / ws 事件通道）。
+// Handler 汇总各功能的链式入口（agents / conversations / runtimes / 能力目录 / ws 事件通道）。
 type Handler struct {
 	Agent        *AgentHandler
 	Conversation *ConversationHandler
 	Runtime      *RuntimeHandler
 	Provider     *ProviderHandler
+	Capability   *CapabilityHandler
 	WS           *WSHandler
 	bus          *eventbus.Bus
 	svc          Service
@@ -266,6 +312,7 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 		Conversation: &ConversationHandler{svc: svc},
 		Runtime:      &RuntimeHandler{svc: svc},
 		Provider:     &ProviderHandler{svc: svc},
+		Capability:   &CapabilityHandler{svc: svc},
 		WS:           NewWSHandler(bus),
 		bus:          bus,
 		svc:          svc,

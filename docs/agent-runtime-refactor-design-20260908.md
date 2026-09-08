@@ -522,3 +522,19 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - [x] ADR-2「工具 = 平台拥有 + MCP 化」——**确认**（理由据 goose 校正：ACP 无法枚举 CLI 原生工具，属协议约束而非透明取舍；「泄露身份」不作为约束）。
 - [x] ADR-4「双 id + 原生 resume 为主 + handoff memo 兜底」——**确认**（据 goose 校正，memo 为兜底非主路径）。
 - [x] §11 分批——**确认按破坏性重排**：P0 合并模型/存储/契约一次性破坏，不保留兼容；共 P0–P3 四阶段。
+
+## 14. P1 落地记录（能力数据面后端切片，2026-09-08）
+
+按 §11 P1 落「Skill 目录 + MCP 注册表 + Tool 目录（REST 可列出能力）」的后端切片：
+
+- 新增 `internal/capability` 包：§4.4 领域类型（Skill/SkillSource/McpServer/Tool，磁盘 JSON 定义
+  与内存 Registry 共用）+ `Registry`（目录加载 `<dir>/{skills,mcp,tools}/*.json` + Register* 注入
+  + 按 id/name 排序列表；坏文件/非法条目跳过告警，对齐 LoadAgentDefinitions 容错）。
+- Service 集成（`manager/capabilities.go`）：`LoadCapabilityDefinitions`（serve 装配；数据源默认
+  `~/.forge/capabilities`，FORGE_CAPABILITIES 覆盖）+ `ListSkills/ListMcpServers/ListTools`——
+  MCP headers/凭证只存内部供 P2 注入、REST 不读回（同 providers has_key 立场）。
+- REST：`GET /v1/forge/skills|mcps|tools`（信封 `data` 数组；空目录返回 `[]`，非 null）。
+- 验收状态：`go build/vet ./...` 通过、`go test -race ./...` 全绿；capability/manager/handler/router
+  新增单测覆盖目录加载、排序、非法条目、空表形态与 REST 列表。
+- **P1 剩余（未含，留后续）**：`/agents/:id/capabilities` 统一目录与前端能力卡（§8.1/§8.3）；
+  P2 消费侧接线（`mcpServers` → session/new 注入、skill 物化、MCP `tools/list` live 探测写 Tool 目录）。

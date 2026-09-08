@@ -128,6 +128,8 @@ func serve(args []string) {
 	orch := manager.NewOrchestrator(svc, reg)
 	// Agent definitions（P2）：FORGE_AGENTS 目录下 <id>.json → 注册到 agents 表（服务端无页面时也热加载）。
 	svc.LoadAgentDefinitions(cfg.AgentDir)
+	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
+	svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
 	if mode == "sqlite" {
 		// 启动恢复会话级权限记忆（permission_memories 表 → perm.mem，allow/reject 双侧）。
 		if err := orch.RestoreMemoriesFromStore(context.Background()); err != nil {

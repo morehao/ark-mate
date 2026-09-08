@@ -30,6 +30,9 @@ type Config struct {
 	// AgentDir Agent definitions 目录（P2：<id>.json 文件定义自定义 agent；FORGE_AGENTS 覆盖，
 	// 默认 ~/.forge/agents；空 = 不启用 definitions 落盘，仅内存注册）。
 	AgentDir string
+	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
+	// FORGE_CAPABILITIES 覆盖，默认 ~/.forge/capabilities；空 = 不启用文件数据面）。
+	CapabilityDir string
 	// IdleTimeout 空闲回收阈值：StartAgent 暖进程闲置超过该时长自动停进程（P2；
 	// FORGE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
 	IdleTimeout time.Duration
@@ -86,6 +89,13 @@ func Load() Config {
 		c.AgentDir = filepath.Join(home, ".forge", "agents")
 	} else {
 		c.AgentDir = ".forge/agents"
+	}
+	if v := os.Getenv("FORGE_CAPABILITIES"); v != "" {
+		c.CapabilityDir = v
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		c.CapabilityDir = filepath.Join(home, ".forge", "capabilities")
+	} else {
+		c.CapabilityDir = ".forge/capabilities"
 	}
 	// FORGE_IDLE_TIMEOUT / FORGE_REAP_INTERVAL：Go duration 文本（如 30s/2m/1h）；
 	// FORGE_IDLE_TIMEOUT 非法或 0 = 关闭回收；间隔非法回落默认 5m。
