@@ -388,12 +388,13 @@ type ProjectionSpec struct {
 |---|---|---|---|
 | Command/Args | `opencode acp` | `dsh --profile acp` | `forge acp-demo` |
 | McpTransportSupport | http / sse / stdio | stdio / streamable-http | stdio（演示） |
-| ModeMapping | 待实测 opencode 权限模式 | 待实测 dsh 模式 | allow/reject × once/always |
+| ModeMapping | 空（实测：无一一对应词表，per-action permission） | 空（实测：DSH_PERMISSION_MODE env + 预设） | allow/reject × once/always |
 | ModelConfigOptionID | 空（走 `OPENCODE_MODEL` env） | provider 配置 | 空 |
 | ManagesOwnContext | true | true | true |
 
-> opencode / dsh 的 ModeMapping 精确映射需实测各自原生权限模式后填写（参照
-> `docs/deepseekharness-acp-adaptation.md` 与 opencode ACP 文档），设计阶段留空为开放项。
+> ModeMapping 实测结论（2026-09-08）：opencode 权限为 per-action/per-agent 配置（ACP 面无 mode
+> 参数），dsh 权限经 `DSH_PERMISSION_MODE` env + approval 预设表达——均无与平台四统一模式
+> 一一对应的原生词表，留空为有据结论（详见 §15 实测记录）。
 
 ---
 
@@ -508,7 +509,9 @@ runtime 作为 hint），不保留 runtime 身份语义。
    若某能力缺失，降级在能力层，不 shim（shim = 重造，违反能力不重造边界）。
 2. **skill 跨 runtime 格式兼容是真实成本**：需约定两方都能消费的 skill 格式；做不到的 skill 标
    「仅某 runtime 可用」并作为路由约束。
-3. **opencode / dsh 的 ModeMapping 精确映射**：需实测各自原生权限模式（开放项，见 §6.2）。
+3. **opencode / dsh 无与平台统一模式一一对应的原生权限词表**（实测结论 2026-09-08，见 §6.2/§15）：
+   统一模式语义落平台 permission 面；若后续要按底座放松（如 dsh `DSH_PERMISSION_MODE`、opencode
+   `permission` 预设），以「按能力降级」同款纪律做白名单式映射，不做隐式放宽。
 4. **opencode 忽略客户端模型选择**（issue #13644）：模型走 env/config 投影，不走 ACP wire。
 5. **dsh 接口迭代快**：投影层需对 dsh 的 initialize 能力断言做运行时探测 + 降级（现状已如此，保留）。
 6. **`internal/runtime` 目录名与「运行时投影」语义**：ADR-1 保留目录，仅升级内容；若审核倾向重命名
@@ -578,8 +581,8 @@ runtime 作为 hint），不保留 runtime 身份语义。
   runtime_unavailable；空候选 → no_runtime）；orchestrator `StartConversation` 由「首候选」升级为
   路由选定（RunOnce 显式 --runtime 不变）。能力匹配/Sticky 粘滞/handoff 迁移依赖 Runtime 接口，留后续。
 - **投影声明升级（§6.1/§6.2，2026-09-08）**：`runtime.Spec` 补齐 ProjectionSpec 字段——
-  `Description`、`ManagesOwnContext`、`ModeMapping`（统一模式→原生 mode，opencode/dsh 待实测
-  本轮留空不臆造，见 §12）、`ModelConfigOptionID`（空 = 走 env/provider 配置）、`SetupSteps`（预留）。
+  `Description`、`ManagesOwnContext`、`ModeMapping`（统一模式→原生 mode；实测后确认两底座无
+  一一对应词表 → 留空为有据结论，见 §15）、`ModelConfigOptionID`（空 = 走 env/provider 配置）、`SetupSteps`（预留）。
   三投影（echo/opencode/deepseekharness）按 §6.2 填 `Description` 与 `ManagesOwnContext=true`；
   新增声明值守门单测。另修 `TestPermissionCancelSession` 时序抖动（等齐 2 条挂起再断言）。
 - **拨号底座 `runtime.Connect`（§4.2 可执行半场基础，2026-09-08）**：spawn + initialize 握手从
@@ -614,7 +617,20 @@ runtime 作为 hint），不保留 runtime 身份语义。
   MCP 白名单 ∩ 能力数据面推导 requiredTransports（`requiredMcpTransports`；Mcps nil = 无硬约束，
   等价 first_available），全不满足时报 `runtime_capability_mismatch`。测试：引擎单测 + manager
   策略接入（跳过不承载 runtime / mismatch 码 / nil 白名单 / 未知策略回退）。
-- **P2 剩余（未含，留后续）**：ModeMapping 实测回填后 ApplyMode 落地、会话恢复 Resume 按底座实测
-  接入、skill 物化（§5.4）、Sticky 会话粘滞（RuntimeHint 优先，需持久会话数据）、Orchestrator
-  正式采用 Runtime 接口（会话模型重构评审点）。P2 验收三项（race 全绿 / echo 全链路 /
-  opencode+dsh 冒烟）均已达成，见上。
+- **§6.2 ModeMapping / §5.4 skill 物化 实测结论（2026-09-08，用户授权实测；开放项关闭/定位）**：
+  - dsh（acp profile `--dump-config` 353 行实探）：权限由 `DSH_PERMISSION_MODE` env
+    （sandbox 模式：workspace-write / danger-full-access …）+ per-plugin approval 预设
+    （ask/never）表达，另有独立 plan-mode 会话层模式与 telemetry mode——无与平台四统一模式
+    （auto/smart_approve/approve/chat）一一对应的原生词表。
+  - opencode：权限为 per-action/per-tool 配置（`permission: {"edit":"ask","bash":"allow"…}`，
+    per-agent 亦同，见 [Permissions](https://opencode.ai/docs/permissions/)），ACP 面无 mode
+    参数（`opencode acp --help` 无 mode 选项，决策走 request_permission）；skill 为一等公民：
+    用户目录 `~/.config/opencode/skills`、项目 `.opencode/skills/` 与 config `skills:` 源列表
+    （见 [Skills](https://opencode.ai/v2/docs/skills/)）。
+  - 结论：ModeMapping 保持空映射是**有据**结论（无一一对应原生词表；统一模式语义落平台
+    permission 面，ApplyMode 会话内切换原语不存在，勿臆造词表）；skill 物化（§5.4）opencode 侧
+    物化目录已实证（config skills 源 / 用户目录），dsh 侧未实证——物化为下一评审项，P2「按需」
+    未触发（当前 skills 仅数据面列表，未向 agent 会话注入）。
+- **P2 剩余（未含，留后续评审）**：Orchestrator 采用 Runtime 接口（会话模型重构评审点）、
+  skill 物化接入（§5.4，opencode 目录已实证）、会话恢复 Resume 按底座实测。P2 验收三项
+  （race 全绿 / echo 全链路 / opencode+dsh 冒烟）均已达成，见上。

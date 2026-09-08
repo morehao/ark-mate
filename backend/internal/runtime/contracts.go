@@ -31,8 +31,10 @@ type Spec struct {
 	McpTransports []string
 	// ManagesOwnContext 后端自管上下文/工具（对应 §4.2 ManagesOwnContext；§6.2 三投影均 true）。
 	ManagesOwnContext bool
-	// ModeMapping 统一权限模式（§5.5）→ 该 runtime 原生 mode。opencode/dsh 精确映射待实测
-	// （§6.2/§12 开放项），本轮三投影均留空，不臆造。
+	// ModeMapping 统一权限模式（§5.5）→ 该 runtime 原生 mode。实测结论（2026-09-08）：
+	// dsh acp 权限=DSH_PERMISSION_MODE env + approval 预设、opencode=per-action permission
+	// （ACP 面无 mode 参数），均无与平台四统一模式一一对应的原生词表 → 空 = 有据结论，
+	// 不臆造（见 design doc §15）；统一模式语义落平台 permission 面。
 	ModeMapping map[string][]string
 	// ModelConfigOptionID 模型选择的 config option（如 "model"；空 = 走 env/provider 配置，
 	// 对应 §5.5：opencode 走 OPENCODE_MODEL env、dsh 走 provider 配置）。
