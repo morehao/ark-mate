@@ -666,3 +666,18 @@ ProviderSessionID 同源）；采用的价值是给未来 backend-wide Runtime�
 - **切片 A（2026-09-08）**：`NewProjection` 分发器 + `ActiveConversation.proj` +
   `runTurn` 走接口（nil 回退直连）；分发器单测（三投影路由/未知 nil/构造不触碰会话）；
   echo 全链路真进程冒烟回归验证行为零变化；`go vet` + `go test -race ./...` 全绿。
+
+### 16.5 skill 物化接入（§5.4 落地切片）
+
+**实证（2026-09-08，opencode v1.18.29 spike）**：opencode 自动扫描
+`~/.config/opencode/skills/<skill>/…`（无需 config 项）；`config.skills` 数组为 v2 语法，
+v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 "Skill not found"）。
+物化约定：`format == "SKILL.md"` → `<root>/<skillID>/SKILL.md`（body 即内容），幂等覆盖。
+
+- **切片 B1（2026-09-08）**：`capability.MaterializeSkill(root, skill)` /
+  `RemoveSkillDir(root, id)`（按上述约定写/删；未实测 format（如 dsh "agents/skills"）
+  跳过告警，不臆造）+ 单测（约定路径/内容/幂等/删除/校验）。
+- **enable 决策（待部署评审，未自动接线）**：物化目标 = 真实 `~/.config/opencode/skills`
+  属用户机器配置，平台默认**不写**；接线候选：serve/CLI 显式 enable（如
+  `FORGE_SKILLS_MATERIALIZE_DIR`）时在能力装载后物化 opencode 源子集 + 平台 skill 删除联动。
+  dsh 未实证 → 降级只列不物化。
