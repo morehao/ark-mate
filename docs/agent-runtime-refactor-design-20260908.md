@@ -536,5 +536,7 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - REST：`GET /v1/forge/skills|mcps|tools`（信封 `data` 数组；空目录返回 `[]`，非 null）。
 - 验收状态：`go build/vet ./...` 通过、`go test -race ./...` 全绿；capability/manager/handler/router
   新增单测覆盖目录加载、排序、非法条目、空表形态与 REST 列表。
-- **P1 剩余（未含，留后续）**：`/agents/:id/capabilities` 统一目录与前端能力卡（§8.1/§8.3）；
+- 前端能力卡（§8.3）：`/capabilities` 管理页（Skills / MCP Servers / Tools 三组只读目录，
+  TopBar「能力」入口 + types/api 接线），读取本批三个端点（2026-09-08 同批落地）。
+- **P1 剩余（未含，留后续）**：`/agents/:id/capabilities` 统一目录（§8.1）；
   P2 消费侧接线（`mcpServers` → session/new 注入、skill 物化、MCP `tools/list` live 探测写 Tool 目录）。

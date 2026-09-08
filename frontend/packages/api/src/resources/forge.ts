@@ -8,6 +8,7 @@ import type {
   CreateConversationReq,
   CreateConversationResp,
   ElicitationResp,
+  McpServer,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -16,6 +17,8 @@ import type {
   ResolvePermissionReq,
   ResolvePermissionResp,
   RevokeMemoryReq,
+  Skill,
+  Tool,
   ConversationDetail,
   ConversationPatch,
   ConversationSearchHit,
@@ -95,6 +98,14 @@ export const conversationHistory = (
   const s = q.toString()
   return http.get<ConversationHistoryPage>(`/forge/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
 }
+
+// ——— P1 能力数据面（Skill/MCP/Tool 目录，REST 列出能力） ———
+
+export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/forge/skills')
+
+export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/forge/mcps')
+
+export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/forge/tools')
 
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 

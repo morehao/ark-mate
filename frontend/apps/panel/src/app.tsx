@@ -8,6 +8,7 @@ import { useForge } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { StartPage } from './pages/StartPage'
 import { AgentsPage } from './pages/AgentsPage'
+import { CapabilitiesPage } from './pages/CapabilitiesPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function Manage({ children }: { children: ReactNode }) {
@@ -75,6 +76,14 @@ export function App() {
             element={
               <Manage>
                 <AgentsPage />
+              </Manage>
+            }
+          />
+          <Route
+            path="/capabilities"
+            element={
+              <Manage>
+                <CapabilitiesPage />
               </Manage>
             }
           />
