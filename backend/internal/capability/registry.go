@@ -75,6 +75,11 @@ func (r *Registry) RegisterMcpServer(m *McpServer) error {
 	if !ValidTransports[m.Transport] {
 		return fmt.Errorf("capability mcp: transport %q 非法（stdio|sse|http|streamable_http）", m.Transport)
 	}
+	// stdio 注入命令须绝对路径：ACP 底座（如 dsh）按绝对路径拉起并严格校验，相对命令被拒
+	// （session/new invalid_params）。注册/文件装载统一拦截，坏文件跳过告警。
+	if m.Transport == TransportStdio && !filepath.IsAbs(m.Command) {
+		return fmt.Errorf("capability mcp: stdio server %q 的 command 须为绝对路径（当前 %q）", m.ID, m.Command)
+	}
 	r.mu.Lock()
 	r.mcps[m.ID] = m
 	r.mu.Unlock()

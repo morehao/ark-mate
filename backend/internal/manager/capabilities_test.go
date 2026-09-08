@@ -25,7 +25,7 @@ func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 	dir := t.TempDir()
 	writeCapFile(t, filepath.Join(dir, "skills", "plan.json"), `{"id":"plan","name":"规划","description":"先规划"}`)
 	writeCapFile(t, filepath.Join(dir, "mcp", "fs.json"),
-		`{"id":"fs","name":"Files","transport":"stdio","command":"npx","headers":{"Authorization":"Bearer x"}}`)
+		`{"id":"fs","name":"Files","transport":"stdio","command":"/usr/local/bin/npx","headers":{"Authorization":"Bearer x"}}`)
 	writeCapFile(t, filepath.Join(dir, "tools", "web.json"), `{"name":"web_search","source":"builtin"}`)
 
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
@@ -75,7 +75,8 @@ func TestMcpServersFor(t *testing.T) {
 	svc := NewService(reg, eventbus.New())
 	must := func(id, transport string) {
 		t.Helper()
-		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: id, Name: id, Transport: transport}); err != nil {
+		// stdio server 须绝对 command（ACP 校验；注册表已拦相对路径）。
+		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: id, Name: id, Transport: transport, Command: "/usr/local/bin/npx"}); err != nil {
 			t.Fatal(err)
 		}
 	}

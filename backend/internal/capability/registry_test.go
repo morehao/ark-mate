@@ -23,7 +23,7 @@ func TestRegistryLoadDirAndList(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "skills", "a-skill.json"),
 		`{"id":"a-skill","name":"A","body":"# A","sources":[{"runtime":"opencode","path":"x","format":"SKILL.md"}]}`)
 	writeFile(t, filepath.Join(dir, "skills", "bad.json"), `not-json{`)
-	writeFile(t, filepath.Join(dir, "mcp", "m2.json"), `{"id":"m2","transport":"stdio","command":"npx","args":["-y","pkg"]}`)
+	writeFile(t, filepath.Join(dir, "mcp", "m2.json"), `{"id":"m2","transport":"stdio","command":"/usr/local/bin/npx","args":["-y","pkg"]}`)
 	writeFile(t, filepath.Join(dir, "mcp", "m1.json"), `{"id":"m1","name":"Files","transport":"sse","url":"http://localhost:9999"}`)
 	writeFile(t, filepath.Join(dir, "tools", "web.json"), `{"name":"web_search","description":"search","source":"builtin","schema":{"type":"object"}}`)
 	writeFile(t, filepath.Join(dir, "tools", "ghost.json"), `{"name":"ghost","source":"bogus"}`) // 非法 source → 跳过
@@ -46,7 +46,7 @@ func TestRegistryLoadDirAndList(t *testing.T) {
 	if len(mcps) != 2 || mcps[0].ID != "m1" || mcps[1].ID != "m2" {
 		t.Fatalf("mcps 排序不符: %+v", mcps)
 	}
-	if mcps[0].Transport != "sse" || mcps[1].Command != "npx" {
+	if mcps[0].Transport != "sse" || mcps[1].Command != "/usr/local/bin/npx" {
 		t.Fatalf("mcp 字段不符: %+v", mcps)
 	}
 
@@ -82,7 +82,10 @@ func TestRegistryValidation(t *testing.T) {
 	if err := r.RegisterTool(&Tool{Name: "x", Source: "nope"}); err == nil {
 		t.Fatal("tool 坏 source 应报错")
 	}
-	if err := r.RegisterMcpServer(&McpServer{ID: "fs", Transport: "stdio", Command: "npx"}); err != nil {
-		t.Fatalf("合法 mcp 应通过: %v", err)
+	if err := r.RegisterMcpServer(&McpServer{ID: "rel", Transport: "stdio", Command: "npx"}); err == nil {
+		t.Fatal("stdio 相对 command 应报错（ACP 需绝对路径）")
+	}
+	if err := r.RegisterMcpServer(&McpServer{ID: "fs", Transport: "stdio", Command: "/usr/local/bin/npx"}); err != nil {
+		t.Fatalf("绝对路径 stdio mcp 应通过: %v", err)
 	}
 }

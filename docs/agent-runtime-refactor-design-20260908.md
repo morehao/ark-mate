@@ -582,7 +582,16 @@ runtime 作为 hint），不保留 runtime 身份语义。
   本轮留空不臆造，见 §12）、`ModelConfigOptionID`（空 = 走 env/provider 配置）、`SetupSteps`（预留）。
   三投影（echo/opencode/deepseekharness）按 §6.2 填 `Description` 与 `ManagesOwnContext=true`；
   新增声明值守门单测。另修 `TestPermissionCancelSession` 时序抖动（等齐 2 条挂起再断言）。
+- **拨号底座 `runtime.Connect`（§4.2 可执行半场基础，2026-09-08）**：spawn + initialize 握手从
+  orchestrator.acquire 下沉为 `runtime.Connect(ctx, spec, args, env, opts)`（stdio；env 叠加于
+  spec.Launch.Env 之后；决策钩子仍由调用方经 ClientOptions 注入；脱离请求 ctx 语义不变）。
+  acquire 改用它——`Runtime` 接口落地时各投影复用同一拨号路径。
+- **stdio MCP command 须绝对路径（2026-09-08，真底座发现）**：dsh `session/new` 严格校验并拒绝
+  相对命令（`mcpServers[0].command must be an absolute path`）。注册表 `RegisterMcpServer` 对 stdio
+  server 加绝对路径校验（坏文件跳过告警；sse/http 走 URL 不受影响）。注入端到端已由 opencode 真底座
+  收文 + fake-agent wire 解码验证；dsh 对注入 server 还会要求其真实可握手（/bin/echo 等非 MCP server
+  会被拒）——属底座行为，非平台缺陷（dsh 冒烟本体于无注入配置下通过，见上）。
 - **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影可执行半场（§4.2；ModeMapping 待实测），
   skill 物化（§5.4），路由引擎能力匹配/粘滞切片（§7）。P2 验收三项（race 全绿 / echo 全链路 /
-  opencode+dsh 冒烟）均已达成，见上。skill 物化依赖各 runtime 原生 skill 目录约定；Runtime 接口
-  落地涉及 orchestrator 会话模型重构与 ModeMapping 实测，建议作为下一设计评审点。
+  opencode+dsh 冒烟）均已达成；skill 物化依赖各 runtime 原生 skill 目录约定；Runtime 接口落地涉及
+  orchestrator 会话模型重构与 ModeMapping 实测，建议作为下一设计评审点。
