@@ -281,12 +281,13 @@ func migrate(args []string) {
 		lineCount += len(events)
 		items = append(items, store.ImportItem{
 			Conversation: store.Conversation{
-				ID:        data.SessionID,
-				AgentID:   data.AgentID,
-				Title:     data.Title,
-				Status:    data.Status,
-				CreatedAt: data.CreatedAt,
-				UpdatedAt: data.UpdatedAt,
+				ID:          data.SessionID,
+				AgentID:     data.AgentID,
+				RuntimeHint: data.RuntimeHint,
+				Title:       data.Title,
+				Status:      data.Status,
+				CreatedAt:   data.CreatedAt,
+				UpdatedAt:   data.UpdatedAt,
 			},
 			Events: events,
 		})

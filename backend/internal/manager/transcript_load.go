@@ -118,12 +118,13 @@ func loadTranscriptFile(path string) *transcriptFile {
 
 	return &transcriptFile{
 		conversation: &ConversationRec{
-			ID:        hdr.SessionID,
-			AgentID:   hdr.AgentID,
-			Status:    statusFromLastEventType(lastType),
-			Title:     firstUserText,
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
+			ID:          hdr.SessionID,
+			AgentID:     hdr.AgentID,
+			RuntimeHint: hdr.Runtime,
+			Status:      statusFromLastEventType(lastType),
+			Title:       firstUserText,
+			CreatedAt:   createdAt,
+			UpdatedAt:   updatedAt,
 		},
 		lines: lines,
 	}
@@ -168,14 +169,14 @@ type TranscriptEvent struct {
 
 // TranscriptData 是单个 transcript 文件的复读结果（会话元数据 + 事件原语）。
 type TranscriptData struct {
-	SessionID string
-	AgentID   string
-	RuntimeID string
-	Title     string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Lines     []TranscriptEvent
+	SessionID   string
+	AgentID     string
+	RuntimeHint string
+	Title       string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Lines       []TranscriptEvent
 }
 
 // ReadTranscriptFile 复读一个 JSONL transcript 文件（首行 header + 事件行）。
@@ -186,13 +187,14 @@ func ReadTranscriptFile(path string) (*TranscriptData, bool) {
 		return nil, false
 	}
 	data := &TranscriptData{
-		SessionID: rec.conversation.ID,
-		AgentID:   rec.conversation.AgentID,
-		Title:     rec.conversation.Title,
-		Status:    rec.conversation.Status,
-		CreatedAt: rec.conversation.CreatedAt,
-		UpdatedAt: rec.conversation.UpdatedAt,
-		Lines:     make([]TranscriptEvent, 0, len(rec.lines)),
+		SessionID:   rec.conversation.ID,
+		AgentID:     rec.conversation.AgentID,
+		RuntimeHint: rec.conversation.RuntimeHint,
+		Title:       rec.conversation.Title,
+		Status:      rec.conversation.Status,
+		CreatedAt:   rec.conversation.CreatedAt,
+		UpdatedAt:   rec.conversation.UpdatedAt,
+		Lines:       make([]TranscriptEvent, 0, len(rec.lines)),
 	}
 	for _, l := range rec.lines {
 		data.Lines = append(data.Lines, TranscriptEvent{Type: l.typ, Payload: l.payload})

@@ -27,10 +27,11 @@ var schemaMigrations = []migration{
 				value TEXT NOT NULL
 			)`,
 			`CREATE TABLE conversations (
-				id         TEXT PRIMARY KEY,
-				agent_id   TEXT NOT NULL,
-				cwd        TEXT NOT NULL DEFAULT '',
-				title      TEXT NOT NULL DEFAULT '',
+				id           TEXT PRIMARY KEY,
+				agent_id     TEXT NOT NULL,
+				cwd          TEXT NOT NULL DEFAULT '',
+				runtime_hint TEXT NOT NULL DEFAULT '',
+				title        TEXT NOT NULL DEFAULT '',
 				pinned     INTEGER NOT NULL DEFAULT 0,
 				archived   INTEGER NOT NULL DEFAULT 0,
 				status     TEXT NOT NULL DEFAULT 'in_progress',

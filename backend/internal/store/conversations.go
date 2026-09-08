@@ -7,13 +7,13 @@ import (
 )
 
 // conversationColumns 全列查询（scanConversations 用）。
-const conversationColumns = `id, agent_id, cwd, title, pinned, archived, status, last_seq, created_at, updated_at`
+const conversationColumns = `id, agent_id, cwd, runtime_hint, title, pinned, archived, status, last_seq, created_at, updated_at`
 
 func scanConversation(row interface{ Scan(...any) error }) (Conversation, error) {
 	var s Conversation
 	var pinned, archived int
 	var created, updated string
-	if err := row.Scan(&s.ID, &s.AgentID, &s.Cwd, &s.Title,
+	if err := row.Scan(&s.ID, &s.AgentID, &s.Cwd, &s.RuntimeHint, &s.Title,
 		&pinned, &archived, &s.Status, &s.LastSeq, &created, &updated); err != nil {
 		return Conversation{}, err
 	}
@@ -35,19 +35,20 @@ func (s *Store) UpsertConversation(ctx context.Context, sess Conversation) error
 		updated = nowRFC3339()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversations(id, agent_id, cwd, title, pinned, archived, status, last_seq, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO conversations(id, agent_id, cwd, runtime_hint, title, pinned, archived, status, last_seq, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-			agent_id   = excluded.agent_id,
-			cwd        = excluded.cwd,
-			title      = excluded.title,
-			pinned     = excluded.pinned,
-			archived   = excluded.archived,
-			status     = excluded.status,
-			last_seq   = MAX(conversations.last_seq, excluded.last_seq),
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at`,
-		sess.ID, sess.AgentID, sess.Cwd, sess.Title,
+			agent_id     = excluded.agent_id,
+			cwd          = excluded.cwd,
+			runtime_hint = excluded.runtime_hint,
+			title        = excluded.title,
+			pinned       = excluded.pinned,
+			archived     = excluded.archived,
+			status       = excluded.status,
+			last_seq     = MAX(conversations.last_seq, excluded.last_seq),
+			created_at   = excluded.created_at,
+			updated_at   = excluded.updated_at`,
+		sess.ID, sess.AgentID, sess.Cwd, sess.RuntimeHint, sess.Title,
 		boolInt(sess.Pinned), boolInt(sess.Archived), sess.Status, sess.LastSeq, created, updated)
 	return err
 }
