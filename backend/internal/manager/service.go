@@ -25,7 +25,10 @@ type AgentRec struct {
 	Name     string
 	Runtimes []string // 路由候选 runtime（P0 取首候选；P2 升级为路由引擎）
 	Provider string   // provider 档案 id（P2 provider 注入面）；空 = 默认
-	State    string
+	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。nil = 未声明（默认：注册表全量按
+	// runtime 传输过滤注入）；非 nil（可为空数组）= 白名单（空 = 本 agent 禁用 MCP 注入）。
+	Mcps  *[]string
+	State string
 }
 
 // defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。

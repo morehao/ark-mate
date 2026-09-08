@@ -35,6 +35,9 @@ type agentDefinitionFile struct {
 	Runtimes []string          `json:"runtimes"`           // 路由候选 runtime（P0 取首候选）
 	Provider string            `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
 	Env      map[string]string `json:"env,omitempty"`      // 预留：按 agent 附加 env（本轮不注入，仅持久化）
+	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。缺省 = 未声明（全启用按 runtime 传输
+	// 过滤）；`mcps: []` = 本 agent 禁用 MCP 注入。指针以区分「未声明」与「空白名单」。
+	Mcps *[]string `json:"mcps,omitempty"`
 }
 
 // LoadAgentDefinitions 加载 definitions 目录并合并到 agents 表（启动时调用；
@@ -105,9 +108,14 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 		if d.Provider != "" {
 			cur.Provider = d.Provider
 		}
+		if d.Mcps != nil {
+			cur.Mcps = d.Mcps
+		}
 		return nil
 	}
-	s.agents[d.ID] = &AgentRec{ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, State: AgentStateStopped}
+	s.agents[d.ID] = &AgentRec{
+		ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, Mcps: d.Mcps, State: AgentStateStopped,
+	}
 	return nil
 }
 
@@ -278,7 +286,7 @@ func (s *Service) syncAgentDef(id string) error {
 	if !ok {
 		return nil
 	}
-	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider})
+	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider, Mcps: cur.Mcps})
 }
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。

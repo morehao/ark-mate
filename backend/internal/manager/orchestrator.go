@@ -220,10 +220,10 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	// P2 MCP 注入：平台注册表 MCP 子集按本 runtime 传输能力过滤后随 session/new 下发（§5.2/§5.3）。
+	// P2 MCP 注入：平台注册表 MCP 子集按 agent 白名单 + runtime 传输能力过滤后随 session/new 下发（§5.2/§5.3）。
 	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
 		Cwd:        cwd,
-		McpServers: o.svc.McpServersForRuntime(spec.ID),
+		McpServers: o.svc.McpServersFor(agent, spec.ID),
 	})
 	if err != nil {
 		return nil, err

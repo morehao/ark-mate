@@ -64,9 +64,9 @@ func TestRegisterToolAndSort(t *testing.T) {
 	}
 }
 
-// TestMcpServersForRuntime P2 MCP 注入选择（§5.2/§5.3）：平台注册表全量按 runtime 的
-// McpTransports 过滤；未知 runtime → 不下发（维持现状空注入）；headers/凭证随 acl.McpServer 携带。
-func TestMcpServersForRuntime(t *testing.T) {
+// TestMcpServersFor P2 MCP 注入选择（§5.2/§5.3）：注册表全量 → runtime 的 McpTransports 过滤 →
+// agent.Mcps 白名单（nil = 全量；非 nil = 白名单；空 = 本 agent 禁用注入）。未知 runtime → 不下发。
+func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "echo", McpTransports: []string{"stdio"}},
 		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
@@ -83,18 +83,56 @@ func TestMcpServersForRuntime(t *testing.T) {
 	must("evt_sse", capability.TransportSSE)
 	must("web_http", capability.TransportHTTP)
 
-	got := svc.McpServersForRuntime("echo")
+	noBind := &AgentRec{ID: "a0"} // Mcps nil = 未声明 → 全量
+	onlyFS := &AgentRec{ID: "a1", Mcps: ptrOf([]string{"fs_stdio"})}
+	denyAll := &AgentRec{ID: "a2", Mcps: ptrOf([]string{})}
+
+	got := svc.McpServersFor(noBind, "echo")
 	if len(got) != 1 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
 		t.Fatalf("echo 仅 stdio 应取 1 条，got %+v", got)
 	}
-	if got := svc.McpServersForRuntime("opencode"); len(got) != 3 {
-		t.Fatalf("opencode 应取 3 条，got %+v", got)
+	if got := svc.McpServersFor(noBind, "opencode"); len(got) != 3 {
+		t.Fatalf("opencode 未声明白名单应取 3 条，got %+v", got)
 	}
-	if got := svc.McpServersForRuntime("ghost"); len(got) != 0 {
+	if got := svc.McpServersFor(onlyFS, "opencode"); len(got) != 1 || got[0].Name != "fs_stdio" {
+		t.Fatalf("白名单 fs_stdio 应取 1 条，got %+v", got)
+	}
+	if got := svc.McpServersFor(denyAll, "opencode"); len(got) != 0 {
+		t.Fatalf("空白名单应禁用注入，got %+v", got)
+	}
+	if got := svc.McpServersFor(noBind, "ghost"); len(got) != 0 {
 		t.Fatalf("未知 runtime 应不下发，got %+v", got)
 	}
 	// Spec.McpTransports 为空 → 保守仅 stdio（ACP 全 agent 必须支持）。
-	if got := svc.McpServersForRuntime("plain"); len(got) != 1 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor(noBind, "plain"); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("未声明传输的 runtime 应保守取 stdio，got %+v", got)
+	}
+}
+
+func ptrOf[T any](v T) *T { return &v }
+
+// TestAgentMcpAllowlistFromDefinitions agent 定义文件 `mcps` 三态：缺省 → nil（全启用）；
+// 声明白名单 → 指针携带；`[]` → 非 nil 空指针（禁用注入）。经 LoadAgentDefinitions 装载。
+func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
+	dir := t.TempDir()
+	writeCapFile(t, filepath.Join(dir, "a.json"), `{"id":"a","runtimes":["echo"],"mcps":["fs_stdio"]}`)
+	writeCapFile(t, filepath.Join(dir, "b.json"), `{"id":"b","runtimes":["echo"],"mcps":[]}`)
+	writeCapFile(t, filepath.Join(dir, "c.json"), `{"id":"c","runtimes":["echo"]}`)
+
+	svc := NewService(runtime.NewRegistry(runtime.Spec{ID: "echo"}), eventbus.New()) // 定义引用 echo runtime
+	if n := svc.LoadAgentDefinitions(dir); n != 3 {
+		t.Fatalf("期望装载 3 条，got %d", n)
+	}
+	a, _ := svc.AgentByID("a")
+	if a.Mcps == nil || len(*a.Mcps) != 1 || (*a.Mcps)[0] != "fs_stdio" {
+		t.Fatalf("白名单应携带 fs_stdio，got %v", a.Mcps)
+	}
+	b, _ := svc.AgentByID("b")
+	if b.Mcps == nil || len(*b.Mcps) != 0 {
+		t.Fatalf("mcps:[] 应得非 nil 空指针，got %v", b.Mcps)
+	}
+	c, _ := svc.AgentByID("c")
+	if c.Mcps != nil {
+		t.Fatalf("缺省 mcps 应为 nil（全启用），got %v", c.Mcps)
 	}
 }

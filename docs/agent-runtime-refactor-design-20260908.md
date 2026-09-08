@@ -558,5 +558,10 @@ runtime 作为 hint），不保留 runtime 身份语义。
   往返集成断言（`TestMcpServersInjectionOverWire`：判别联合各子对象 + 有序 headers + 空列表保 `[]`）。
 - **冒烟 DoD（人工，需真实底座）**：`echo` 全链路新建会话无回归；置 `~/.forge/capabilities/mcp/fs.json`
   （stdio server）后 `opencode`/`dsh` 各起一轮，观察底座是否拉起注入的 MCP server。
-- **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影（§6.1 字段级），skill 物化（§5.4），
-  路由引擎（§7，`routing.Resolve` + Agent 能力/路由字段），以及按 Agent 选 MCP 子集（现为按 runtime 全量）。
+- **按 Agent 选 MCP 子集（§5.2 收口，2026-09-08）**：`AgentRec`/agent 定义文件新增可选 `mcps`
+  白名单（指针三态：缺省 nil = 全启用按 runtime 传输过滤；非 nil = 白名单；`[]` = 本 agent 禁用注入）。
+  Service 选择方法改为 `McpServersFor(agent, runtimeID)`（注册表 → 传输过滤 → 白名单）；orchestrator
+  `session/new` 注入改走 agent 维度；`syncAgentDef` 持久化保留 `mcps` 不丢字段。
+  REST create/patch 暂不暴露 `mcps`（定义文件级；§8.1 Agent.capabilities 统一面时并入）。
+- **P2 剩余（未含，留后续）**：`runtime.Runtime` 接口与三投影（§6.1 字段级，ModeMapping 待实测），
+  skill 物化（§5.4），路由引擎（§7，`routing.Resolve` + Agent 能力/路由字段）。

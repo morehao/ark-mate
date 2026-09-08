@@ -68,10 +68,11 @@ func (s *Service) ListTools() ([]handler.ToolResp, error) {
 	return out, nil
 }
 
-// McpServersForRuntime 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 平台注册表全量 → 按该 runtime 的 McpTransports 过滤（headers/凭证一并携带，走 ACP wire）。
-// 未知 runtime / 无注册表 → nil（维持现状不下发）。
-func (s *Service) McpServersForRuntime(runtimeID string) []acl.McpServer {
+// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
+// 注册表全量 → 该 runtime 的 McpTransports 过滤 → agent.Mcps 白名单（nil = 未声明 → 全量；
+// 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
+// 未知 runtime → nil（维持现状不下发）。
+func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
 	spec, ok := s.reg.Get(runtimeID)
 	if !ok {
 		return nil
@@ -84,11 +85,21 @@ func (s *Service) McpServersForRuntime(runtimeID string) []acl.McpServer {
 	for _, t := range supported {
 		want[t] = true
 	}
+	var allow map[string]bool
+	if agent != nil && agent.Mcps != nil {
+		allow = make(map[string]bool, len(*agent.Mcps))
+		for _, id := range *agent.Mcps {
+			allow[id] = true
+		}
+	}
 	servers := s.caps.ListMcpServers()
 	out := make([]acl.McpServer, 0, len(servers))
 	for _, m := range servers {
 		if !want[m.Transport] {
 			continue
+		}
+		if allow != nil && !allow[m.ID] {
+			continue // agent 白名单未启用该 server（含空白名单 = 全部跳过）
 		}
 		name := m.Name
 		if name == "" {
