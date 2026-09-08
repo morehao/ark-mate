@@ -285,7 +285,7 @@ export interface ForgeActions {
   refreshAgents: () => Promise<void>
   refreshConversations: () => Promise<void>
   activate: (id: string | null, sinceSeq?: number) => void
-  createAndRun: (agentId: string, prompt: string) => Promise<string | undefined>
+  createAndRun: (prompt: string) => Promise<string | undefined>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
@@ -445,9 +445,9 @@ export const useForge = create<ForgeStore>((set, get) => {
       }
     },
 
-    createAndRun: async (agentId, prompt) => {
+    createAndRun: async (prompt) => {
       try {
-        const resp = await createConversation({ agent_id: agentId, prompt })
+        const resp = await createConversation({ prompt })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({

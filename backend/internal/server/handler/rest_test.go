@@ -352,16 +352,25 @@ func TestCreateConversation(t *testing.T) {
 	}
 }
 
-// TestCreateConversationBadBody 缺 agent_id（binding required）→ code 40000。
+// TestCreateConversationBadBody 非 JSON 请求体 → code 40000（agent_id 现为可选，不再校验缺失）。
 func TestCreateConversationBadBody(t *testing.T) {
 	r := newRestEngine(&stubSvc{})
-	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"prompt":"hi"}`)
-	if env.Code != 40000 {
-		t.Fatalf("期望 40000，got %+v", env)
-	}
-	env, _ = do(t, r, "POST", "/v1/forge/conversations", `not-json{`)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations", `not-json{`)
 	if env.Code != 40000 {
 		t.Fatalf("非 JSON 期望 40000，got %+v", env)
+	}
+}
+
+// TestCreateConversationOptionalAgent 省略 agent_id 应被接受并透传给 service（默认在 service 层解析）。
+func TestCreateConversationOptionalAgent(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"prompt":"hi"}`)
+	if env.Code != 0 {
+		t.Fatalf("省略 agent_id 应被接受: %+v", env)
+	}
+	if !svc.createCalled || svc.createReq.AgentID != "" || svc.createReq.Prompt != "hi" {
+		t.Fatalf("create 未正确透传（agent_id 应为空）: %+v", svc.createReq)
 	}
 }
 

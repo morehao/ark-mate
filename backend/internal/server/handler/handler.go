@@ -162,7 +162,7 @@ type ConversationPatch struct {
 
 // ConversationCreateReq 新建会话请求体。
 type ConversationCreateReq struct {
-	AgentID string `json:"agent_id" binding:"required"`
+	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
 	Cwd     string `json:"cwd,omitempty"`
 }

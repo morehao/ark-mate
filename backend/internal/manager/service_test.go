@@ -273,6 +273,18 @@ func TestStartConversationUnknownRuntime(t *testing.T) {
 	}
 }
 
+// TestResolveConversationAgent 空 agent_id → 默认播种 Agent（dsh）；非空原样返回。
+func TestResolveConversationAgent(t *testing.T) {
+	reg := runtime.NewRegistry(runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"})
+	svc := NewService(reg, nil) // 默认 agent dsh 已播种
+	if id, err := svc.resolveConversationAgent(""); err != nil || id != "dsh" {
+		t.Fatalf("空 agent_id 应落到默认 dsh: id=%q err=%v", id, err)
+	}
+	if id, err := svc.resolveConversationAgent("opencode"); err != nil || id != "opencode" {
+		t.Fatalf("非空 agent_id 应原样返回: id=%q err=%v", id, err)
+	}
+}
+
 // TestRunOnceUnknownRuntime demo 路径未知 runtime 直接报错。
 func TestRunOnceUnknownRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t)

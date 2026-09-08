@@ -839,6 +839,18 @@ func (s *Service) requireDefaultAgent() (*AgentRec, error) {
 	return a, nil
 }
 
+// resolveConversationAgent 归一新建会话的 agent_id：空 → 默认播种 Agent（dsh）；非空 → 原样。
+func (s *Service) resolveConversationAgent(agentID string) (string, error) {
+	if agentID != "" {
+		return agentID, nil
+	}
+	def, err := s.requireDefaultAgent()
+	if err != nil {
+		return "", err
+	}
+	return def.ID, nil
+}
+
 // AgentByID 按 ID 取 Agent（会话动作/REST 用）。
 func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 	s.mu.Lock()
@@ -871,13 +883,14 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	if req.AgentID == "" {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_required", "agent_id 必填", nil))
-	}
 	// 会话与 turn 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
 	//（turn 由 Orchestrator 持有，取消走 POST /conversations/:id/cancel）。
 	runCtx := context.WithoutCancel(ctx)
-	res, err := s.orch.StartConversation(runCtx, req.AgentID, req.Cwd)
+	agentID, err := s.resolveConversationAgent(req.AgentID)
+	if err != nil {
+		return nil, s.restErr(err)
+	}
+	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd)
 	if err != nil {
 		return nil, s.restErr(err)
 	}

@@ -141,7 +141,8 @@ export interface ResolveElicitationResp {
 }
 
 export interface CreateConversationReq {
-  agent_id: string
+  /** 空 = 后端默认播种 Agent（dsh）。 */
+  agent_id?: string
   prompt: string
   cwd?: string
 }

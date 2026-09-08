@@ -28,16 +28,16 @@ export function StartPage() {
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
 
-  // 新建会话固定用默认 Agent（is_default），不在本页展示可用 agent 列表。
-  const defaultAgent = agents.find((a) => a.is_default) ?? agents[0] ?? null
+  // 新建固定用默认 Agent（后端在 agent_id 缺省时落到 dsh），前端无需再传 agent。
+  const hasAgent = agents.length > 0
   const empty = draft.trim().length === 0
-  const canSend = !!defaultAgent && !empty && !sending
+  const canSend = hasAgent && !empty && !sending
 
   const send = async () => {
-    if (!canSend || !defaultAgent) return
+    if (!canSend) return
     setSending(true)
     try {
-      const id = await createAndRun(defaultAgent.id, draft.trim())
+      const id = await createAndRun(draft.trim())
       if (id) navigate(`/conversations/${id}`)
     } finally {
       setSending(false)
