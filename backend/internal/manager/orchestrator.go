@@ -447,14 +447,12 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	}
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
-	env := append([]string(nil), spec.Launch.Env...)
+	var env []string
 	// provider 注入面（P2）：agent 引用 provider 档案时把其密钥注入子进程 env（见 Service.providerEnvFor）。
 	if agent.Provider != "" {
-		env = append(env, o.svc.providerEnvFor(agent.Provider)...)
+		env = o.svc.providerEnvFor(agent.Provider)
 	}
-	t := acl.NewStdioTransport(spec.Launch.Command, args, env)
 	logger := o.logger.With("runtime", spec.ID, "cmd", spec.Launch.Command)
-	t.SetLogger(logger)
 
 	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 		if o.allowAll {
@@ -481,15 +479,15 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
 	// 请求返回即被杀（如 P2 StartAgent 暖启动后立刻断连）。WithoutCancel 后 Dial 自带的
 	// 默认握手限时仍保证拨号有界；连接生命周期归编排器（watchConn/Stop/Close），与任一请求无关。
+	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座，语义与此前内联实现一致）。
 	dialCtx := context.WithoutCancel(ctx)
-	client, err := acl.Dial(dialCtx, t, acl.ClientOptions{
+	client, err := runtime.Connect(dialCtx, spec, args, env, acl.ClientOptions{
 		OnEvent:           o.eventSink(agent.ID, spec.ID),
 		Logger:            logger,
 		RequestPermission: reqPerm,
 		CreateElicitation: reqElic,
 	})
 	if err != nil {
-		_ = t.Close()
 		return nil, err
 	}
 	cli = client
