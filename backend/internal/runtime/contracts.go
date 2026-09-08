@@ -23,7 +23,10 @@ type Spec struct {
 	Version string // 展示用启动形态描述
 	Launch  LaunchSpec
 	Caps    Capabilities // 静态能力基线声明
-	Notes   string       // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）
+	// McpTransports 该 runtime 支持的 MCP 传输（token：stdio|sse|http|streamable_http；
+	// 空 = 仅 stdio——ACP 全 agent 必须支持）。P2 注入时据此过滤平台 MCP 子集（§5.2）。
+	McpTransports []string
+	Notes         string // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）
 }
 
 // ListItem 是 /runtimes 列表项的对外表示（由控制面 handler 消费）。

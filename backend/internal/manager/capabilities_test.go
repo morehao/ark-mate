@@ -63,3 +63,38 @@ func TestRegisterToolAndSort(t *testing.T) {
 		t.Fatalf("tools 排序不符: %+v", tools)
 	}
 }
+
+// TestMcpServersForRuntime P2 MCP 注入选择（§5.2/§5.3）：平台注册表全量按 runtime 的
+// McpTransports 过滤；未知 runtime → 不下发（维持现状空注入）；headers/凭证随 acl.McpServer 携带。
+func TestMcpServersForRuntime(t *testing.T) {
+	reg := runtime.NewRegistry(
+		runtime.Spec{ID: "echo", McpTransports: []string{"stdio"}},
+		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
+		runtime.Spec{ID: "plain"}, // 未声明 → 保守仅 stdio
+	)
+	svc := NewService(reg, eventbus.New())
+	must := func(id, transport string) {
+		t.Helper()
+		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: id, Name: id, Transport: transport}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	must("fs_stdio", capability.TransportStdio)
+	must("evt_sse", capability.TransportSSE)
+	must("web_http", capability.TransportHTTP)
+
+	got := svc.McpServersForRuntime("echo")
+	if len(got) != 1 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
+		t.Fatalf("echo 仅 stdio 应取 1 条，got %+v", got)
+	}
+	if got := svc.McpServersForRuntime("opencode"); len(got) != 3 {
+		t.Fatalf("opencode 应取 3 条，got %+v", got)
+	}
+	if got := svc.McpServersForRuntime("ghost"); len(got) != 0 {
+		t.Fatalf("未知 runtime 应不下发，got %+v", got)
+	}
+	// Spec.McpTransports 为空 → 保守仅 stdio（ACP 全 agent 必须支持）。
+	if got := svc.McpServersForRuntime("plain"); len(got) != 1 || got[0].Name != "fs_stdio" {
+		t.Fatalf("未声明传输的 runtime 应保守取 stdio，got %+v", got)
+	}
+}

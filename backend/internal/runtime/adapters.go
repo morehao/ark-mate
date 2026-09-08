@@ -38,7 +38,8 @@ func opencodeSpec() Spec {
 			Images:                 opencode.Caps.Images,
 			EmbeddedContext:        opencode.Caps.EmbeddedContext,
 		},
-		Notes: opencode.Notes,
+		McpTransports: []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
+		Notes:         opencode.Notes,
 	}
 }
 
@@ -58,7 +59,8 @@ func deepseekharnessSpec() Spec {
 			Images:                 deepseekharness.Caps.Images,
 			EmbeddedContext:        deepseekharness.Caps.EmbeddedContext,
 		},
-		Notes: deepseekharness.Notes,
+		McpTransports: []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
+		Notes:         deepseekharness.Notes,
 	}
 }
 
@@ -77,6 +79,7 @@ func echoSpec() Spec {
 			Command: cmd,
 			Args:    echo.Args,
 		},
-		Notes: echo.Notes,
+		McpTransports: []string{"stdio"}, // 演示底座仅 stdio
+		Notes:         echo.Notes,
 	}
 }

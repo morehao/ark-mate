@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
@@ -65,4 +66,38 @@ func (s *Service) ListTools() ([]handler.ToolResp, error) {
 		})
 	}
 	return out, nil
+}
+
+// McpServersForRuntime 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
+// 平台注册表全量 → 按该 runtime 的 McpTransports 过滤（headers/凭证一并携带，走 ACP wire）。
+// 未知 runtime / 无注册表 → nil（维持现状不下发）。
+func (s *Service) McpServersForRuntime(runtimeID string) []acl.McpServer {
+	spec, ok := s.reg.Get(runtimeID)
+	if !ok {
+		return nil
+	}
+	supported := spec.McpTransports
+	if len(supported) == 0 {
+		supported = []string{capability.TransportStdio} // ACP 全 agent 必须支持 stdio
+	}
+	want := make(map[string]bool, len(supported))
+	for _, t := range supported {
+		want[t] = true
+	}
+	servers := s.caps.ListMcpServers()
+	out := make([]acl.McpServer, 0, len(servers))
+	for _, m := range servers {
+		if !want[m.Transport] {
+			continue
+		}
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		out = append(out, acl.McpServer{
+			Name: name, Transport: m.Transport,
+			Command: m.Command, Args: m.Args, URL: m.URL, Headers: m.Headers,
+		})
+	}
+	return out
 }
