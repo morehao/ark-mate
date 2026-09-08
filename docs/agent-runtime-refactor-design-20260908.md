@@ -700,3 +700,50 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
   重启断点恢复，见 ADR-4 P3）→ 投影 `Resume` 保持 `unsupported_resume`。
 - 结论：三投影「不支持面」明确；与 §5.6 原生 resume 蓝图的对齐点 = `acl.Client.ResumeSession`
   能力门（已实现，按 caps 门控）+ 重建投影；backend-wide 多会话重构时按底座探测接入。
+
+### 17. backend-wide Runtime 会话模型重构（§16.3 遗留评审点）
+
+#### 17.1 现状勘察（真实代码，2026-09-08）
+
+- 连接模型：`Orchestrator.conns map[string]*runtimeConn`（key=runtime ID，每 runtime 至多一条连接，
+  orchestrator.go:72）；`acquire`（orchestrator.go:450）复用既有连接。
+- 会话模型：每次建会话在共享连接上 `rc.client.NewSession(...)`（orchestrator.go:232）→ 每个
+  `ActiveConversation` 持有自己的 `acl.Session` + `runtime.NewProjection(spec, sess)`（:240-241）。
+  即**连接共享、会话独立**；多会话同连接并发在途 turn 在接口上未被禁止（Prompt 仅检查
+  `as.busy`，:267）。
+- 在途归属：SDK v0.13.5 的 elicitation 未建模 scope（宿主读不到顶层 conversationId）→
+  `busyConn map[*acl.Client]map[string]struct{}`（:80）以「该连接唯一在途 turn」推断会话归属；
+  多会话并发在途时归属不唯一 → 不猜测按取消回应（§1.5 决策修订，:76-79 注释）。
+- Runtime 接口已含 Capabilities()/ProviderSessionID()/Prompt/ApplyMode/ApplyModel/Resume
+  （runtime.go）；Orchestrator 执行面已走 proj（runTurn，:314），直接 acl 触点仅剩
+  NewSession/Done/Close/Cancel（连接生命周期 + 取消），见 §16.2 采用接缝。
+- 会话恢复：P0 无进程重启断点恢复（ADR-4 P3）；acl.Client.ResumeSession/LoadSession/ListSessions
+  已按握手能力门控（§16.6）。
+
+#### 17.2 目标与方案评审
+
+backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话模型一致，消除每 runtime 单连接
+假设，让「一个 conversation 的活跃执行面」完全由投影表达。候选：
+
+- **A：每会话独立连接（每 conversation 一条 runtime 连接/进程）**。隔离最强、权限/elicitation
+  归属天然唯一（client==conversation，busyConn 启发式可整体删除）；代价：dsh/opencode 每会话
+  一进程，资源重、启动慢，且与「暖进程空闲回收」（idle reaper）收益相悖。
+- **B：保持每 runtime 一连接，会话独立（现况），但把并发在途语义显式化**：每连接同时至多一个
+  在途 turn（conn 级串行门闩，替代跨会话忙推断），或运行时支持多会话并发则归属走会话级 scope
+  （需 SDK/底座升级）。代价：先要实证各底座在共享连接上多会话并发的行为。
+- **C：每会话独立连接仅对不支持共享会话的底座（无 MultiSessionConcurrent 能力）启用**，其余保
+  B——能力驱动混合，最贴 acl 能力面但模型最复杂。
+
+倾向：**先测量再定 A/B/C**（不臆造，同 §6.2 纪律）。测量点 = 各底座在一条连接上并发
+两个会话/两个在途 turn 的行为（echo/opencode/dsh）。测量结果决定主方案：
+- 若共享连接多会话并发稳定 → B + conn 级串行（或会话级归属），改动最小；
+- 若任一底座异常/不支持 → A（或 C 能力驱动）作为该底座路径。
+
+#### 17.3 迁移步骤（每步独立提交 + 全绿 + echo 回归）
+
+1. **切片 E0（测量，2026-09-08）**：并发探测——同 runtime 连接上两会话同时在途 turn 的事件
+   谱系/归属（echo 免费真进程；opencode/dsh 授权短模型调用）。产出写入 §17.2 决策依据。
+2. **切片 E1**：按测量选定主方案落地的数据模型前置（如 conn 级串行门闩或 per-conversation 独立
+   conn 的映射结构调整），行为零变化（沿用既有事件语义与回收）。
+3. **切片 E2…**：按主方案逐项迁移（归属推断替换、回收/取消/看门狗适配、ProviderSessionID/
+   Resume 通路按实测接入），每步 echo 回归 + 全量 race。
