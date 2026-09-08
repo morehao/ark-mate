@@ -12,5 +12,6 @@ export type WsClientFrame =
 export type WsServerFrame =
   | { type: 'snapshot'; agg_id: string; event_seq: number; state: Record<string, unknown> }
   | { type: 'event'; agg_id: string; event_seq: number; event: BusEvent }
+  | { type: 'gap'; agg_id: string; event_seq: number; from_seq: number }
   | { type: 'detached'; agg_id: string; reason?: string }
   | { type: 'pong' }

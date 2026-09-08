@@ -11,6 +11,20 @@ import (
 type Service interface {
 	// ListAgents 返回注册的全部 Agent 概要。
 	ListAgents() ([]AgentResp, error)
+	// CreateAgent 注册自定义 agent（definitions 持久化；校验 runtime 已注册）。
+	CreateAgent(ctx context.Context, req AgentCreateReq) (*AgentResp, error)
+	// UpdateAgent 更新 agent 元数据（name/runtime/provider 子集）。
+	UpdateAgent(ctx context.Context, id string, patch AgentUpdateReq) (*AgentResp, error)
+	// DeleteAgent 删除自定义 agent（种子不可删）。
+	DeleteAgent(ctx context.Context, id string) error
+	// StartAgent 启动 agent 对应 runtime 连接（校验可启动）。
+	StartAgent(ctx context.Context, id string) error
+	// StopAgent 停止 agent 对应 runtime 进程（有在途 turn 时拒绝）。
+	StopAgent(ctx context.Context, id string) error
+	// ListProviders 列出 provider 档案概要（密钥只写不读回）。
+	ListProviders() ([]ProviderResp, error)
+	// UpdateProvider upsert provider 档案（type/model/key 子集；key 空串 = 清除）。
+	UpdateProvider(ctx context.Context, id string, patch ProviderPatchReq) (*ProviderResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
 	// ListSessions 返回会话概要（可按 archived 过滤）。
@@ -30,12 +44,16 @@ type Service interface {
 	CancelTurn(ctx context.Context, id string) error
 	// SessionHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
 	SessionHistory(ctx context.Context, id string, after int64, limit int) (*SessionHistoryResp, error)
+	// ListRuns 列出某会话的轮次明细（runs 表读模型：状态/耗时/usage/失败轮回溯；内存模式返回空）。
+	ListRuns(ctx context.Context, id string) ([]RunResp, error)
 	// ListPendingPermissions 列出某会话的挂起权限请求。
 	ListPendingPermissions(ctx context.Context, id string) ([]PermissionResp, error)
 	// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
 	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error
-	// RevokeAlways 撤销会话级「始终允许」记忆（title+kind 均空 = 一键撤销全部）。
-	RevokeAlways(ctx context.Context, id, title, kind string) error
+	// ListPermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧，供详情/撤销 UI）。
+	ListPermissionMemories(ctx context.Context, id string) ([]MemoryResp, error)
+	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
+	RevokeMemory(ctx context.Context, id, title, kind string) error
 	// ListPendingElicitations 列出某会话的挂起结构化提问（elicitation/create）。
 	ListPendingElicitations(ctx context.Context, id string) ([]ElicitationResp, error)
 	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
@@ -44,10 +62,41 @@ type Service interface {
 
 // AgentResp Agent 的对外表示。
 type AgentResp struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Runtime string `json:"runtime"`
-	State   string `json:"state"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Runtime  string `json:"runtime"`
+	Provider string `json:"provider,omitempty"`
+	State    string `json:"state"`
+}
+
+// AgentCreateReq 注册自定义 agent（对既有 runtime 的命名配置，不写代码即新增）。
+type AgentCreateReq struct {
+	ID       string `json:"id" binding:"required"`
+	Name     string `json:"name"`
+	Runtime  string `json:"runtime" binding:"required"`
+	Provider string `json:"provider,omitempty"`
+}
+
+// AgentUpdateReq PATCH agent 元数据（指针字段：nil 不更新）。
+type AgentUpdateReq struct {
+	Name     *string `json:"name"`
+	Runtime  *string `json:"runtime"`
+	Provider *string `json:"provider"`
+}
+
+// ProviderResp provider 档案对外表示（密钥只以 has_key 呈现，绝不读回）。
+type ProviderResp struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Model  string `json:"model,omitempty"`
+	HasKey bool   `json:"has_key"`
+}
+
+// ProviderPatchReq PATCH provider 档案：type/model 指针更新；key 非 nil 即覆盖/清除（空串清除）。
+type ProviderPatchReq struct {
+	Type  *string `json:"type"`
+	Model *string `json:"model"`
+	Key   *string `json:"key"`
 }
 
 // RuntimeResp Runtime 的对外表示。
@@ -84,22 +133,23 @@ type SessionSearchHit struct {
 	Matches int    `json:"matches"`
 }
 
-// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
+// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
 type SessionDetailResp struct {
 	SessionResp
-	Pending       []PermissionResp  `json:"pending"`
-	AlwaysAllowed []AlwaysAllowResp `json:"always_allowed"`
+	Pending  []PermissionResp `json:"pending"`
+	Memories []MemoryResp     `json:"memories"`
 }
 
-// AlwaysAllowResp 会话级「始终允许」记忆的对外表示。
-type AlwaysAllowResp struct {
-	Title string `json:"title"`
-	Kind  string `json:"kind"`
-	Since string `json:"since"` // RFC3339，授予时刻
+// MemoryResp 会话级权限记忆的对外表示（decision 区分始终允许/始终拒绝）。
+type MemoryResp struct {
+	Title    string `json:"title"`
+	Kind     string `json:"kind"`
+	Decision string `json:"decision"` // allow | reject
+	Since    string `json:"since"`    // RFC3339，授予时刻
 }
 
-// AlwaysRevokeReq 撤销「始终允许」记忆请求体（title+kind 均空 = 一键撤销全部）。
-type AlwaysRevokeReq struct {
+// MemoryRevokeReq 撤销权限记忆请求体（title+kind 均空 = 一键撤销全部）。
+type MemoryRevokeReq struct {
 	Title string `json:"title"`
 	Kind  string `json:"kind"`
 }
@@ -139,6 +189,19 @@ type SessionHistoryResp struct {
 	ID      string           `json:"id"`
 	Events  []eventbus.Event `json:"events"`
 	HasMore bool             `json:"has_more"` // 是否还有更早/后续页（客户端用末条 seq 作为下页 after）
+}
+
+// RunResp 轮次明细的对外表示（runs 表读模型：失败轮输入/重试/统计回溯）。
+type RunResp struct {
+	ID         string `json:"id"`
+	UserText   string `json:"user_text"`
+	Status     string `json:"status"` // running | completed | failed | cancelled
+	ErrorCode  string `json:"error_code,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+	FirstSeq   int64  `json:"first_seq"`
+	LastSeq    int64  `json:"last_seq"`
+	StartedAt  string `json:"started_at"`
+	EndedAt    string `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
 }
 
 // PermissionResp 挂起权限请求的对外表示。
@@ -188,24 +251,26 @@ type ElicitationResolveReq struct {
 
 // Handler 汇总各功能的链式入口（agents / sessions / runtimes / ws 事件通道）。
 type Handler struct {
-	Agent   *AgentHandler
-	Session *SessionHandler
-	Runtime *RuntimeHandler
-	WS      *WSHandler
-	bus     *eventbus.Bus
-	svc     Service
+	Agent    *AgentHandler
+	Session  *SessionHandler
+	Runtime  *RuntimeHandler
+	Provider *ProviderHandler
+	WS       *WSHandler
+	bus      *eventbus.Bus
+	svc      Service
 }
 
 // New 组装 Handler，注入领域服务与会话事件总线。
 // bus 承载归一化会话事件（架构文档 §2 范式）；WS 事件通道（M0）与后续 manager 事件注入共用它。
 func New(svc Service, bus *eventbus.Bus) *Handler {
 	return &Handler{
-		Agent:   &AgentHandler{svc: svc},
-		Session: &SessionHandler{svc: svc},
-		Runtime: &RuntimeHandler{svc: svc},
-		WS:      NewWSHandler(bus),
-		bus:     bus,
-		svc:     svc,
+		Agent:    &AgentHandler{svc: svc},
+		Session:  &SessionHandler{svc: svc},
+		Runtime:  &RuntimeHandler{svc: svc},
+		Provider: &ProviderHandler{svc: svc},
+		WS:       NewWSHandler(bus),
+		bus:      bus,
+		svc:      svc,
 	}
 }
 

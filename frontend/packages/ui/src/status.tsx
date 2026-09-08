@@ -17,6 +17,8 @@ export function sessionStatusMeta(status: string): StateMeta {
       return { label: '已取消', color: tokens.warning }
     case 'failed':
       return { label: '失败', color: tokens.error }
+    case 'interrupted':
+      return { label: '已中断（重启前）', color: tokens.warning }
     default:
       return { label: status, color: tokens.textSecondary }
   }

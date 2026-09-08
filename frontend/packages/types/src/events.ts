@@ -9,7 +9,9 @@ export const Ev = {
   Usage: 'session.usage',
   Permission: 'session.permission',
   PermissionRequest: 'session.permission_request',
+  PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
+  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消）
   // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   Runtime: 'session.runtime',
   TurnEnded: 'turn.ended',
@@ -49,7 +51,7 @@ export interface StreamEntry {
   toolCallId?: string
   resolved?: boolean // 已由用户决策（按钮禁用/展示结果）
   decision?: string // resolved 时的决策摘要
-  timeoutAt?: string // 服务端超时时刻（ISO）；过期即自动拒绝，UI 据此收敛卡片
+  timeoutAt?: string // 服务端超时时刻（ISO）；仅做倒计时展示，收敛以 session.permission_resolved 事件为准
   // —— 结构化提问卡（kind='elicitation'）——
   elicitationId?: string // 决策回传锚点（POST /sessions/:id/elicitation）
   mode?: 'form' | 'url' // form=表单渲染 schema；url=引导链接

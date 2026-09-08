@@ -158,3 +158,46 @@ func parseRFC3339(s string) time.Time {
 	}
 	return time.Time{}
 }
+
+// ——— 导出面（供 `forge migrate` 等外部命令复读 transcript，避免重复解析） ———
+
+// TranscriptEvent 是一条可复读的事件原语（type + payload）。
+type TranscriptEvent struct {
+	Type    string
+	Payload map[string]any
+}
+
+// TranscriptData 是单个 transcript 文件的复读结果（会话元数据 + 事件原语）。
+type TranscriptData struct {
+	SessionID string
+	AgentID   string
+	RuntimeID string
+	Title     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Lines     []TranscriptEvent
+}
+
+// ReadTranscriptFile 复读一个 JSONL transcript 文件（首行 header + 事件行）。
+// 坏文件/非本仓库 schema 返回 (nil, false)。
+func ReadTranscriptFile(path string) (*TranscriptData, bool) {
+	rec := loadTranscriptFile(path)
+	if rec == nil {
+		return nil, false
+	}
+	data := &TranscriptData{
+		SessionID: rec.session.ID,
+		AgentID:   rec.session.AgentID,
+		RuntimeID: rec.session.Runtime,
+		Title:     rec.session.Title,
+		Status:    rec.session.Status,
+		CreatedAt: rec.session.CreatedAt,
+		UpdatedAt: rec.session.UpdatedAt,
+		Lines:     make([]TranscriptEvent, 0, len(rec.lines)),
+	}
+	for _, l := range rec.lines {
+		data.Lines = append(data.Lines, TranscriptEvent{Type: l.typ, Payload: l.payload})
+	}
+	return data, true
+}

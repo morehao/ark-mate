@@ -43,7 +43,23 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]hand
 			strings.Contains(strings.ToLower(r.Runtime), qLower) ||
 			(r.Title != "" && strings.Contains(strings.ToLower(r.Title), qLower))
 		snippet, bodyMatches := "", 0
-		if s.tx != nil && s.tx.dir != "" {
+		if s.st != nil {
+			// sqlite 模式：正文检索走 messages 表（user 行原文；读模型，逐轮物化）。
+			if hits, err := s.st.SearchUserMessages(context.Background(), r.ID, q); err == nil {
+				for _, h := range hits {
+					bodyMatches++
+					if snippet == "" {
+						snippet = foldPreview(h.Text)
+					}
+				}
+			}
+			// 过渡期兜底：DB 尚无 messages（如仅 migrate events 未物化 messages）时回扫 transcript。
+			if bodyMatches == 0 && s.tx != nil && s.tx.dir != "" {
+				if sc, n, ok := scanTranscriptText(s.tx.dir, r.ID, qLower); ok {
+					snippet, bodyMatches = sc, n
+				}
+			}
+		} else if s.tx != nil && s.tx.dir != "" {
 			if sc, n, ok := scanTranscriptText(s.tx.dir, r.ID, qLower); ok {
 				snippet, bodyMatches = sc, n
 			}

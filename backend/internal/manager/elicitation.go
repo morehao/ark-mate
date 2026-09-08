@@ -33,10 +33,11 @@ type pendingElicitation struct {
 // ElicitationManager 管理挂起结构化提问：注册 → 发布事件 → 等待决策 → 按 id 回馈。
 // 与 PermissionManager 同构（无「始终允许」类记忆：每次提问独立征询）。
 type ElicitationManager struct {
-	mu      sync.Mutex
-	pending map[string]*pendingElicitation
-	timeout time.Duration
-	logger  *slog.Logger
+	mu         sync.Mutex
+	pending    map[string]*pendingElicitation
+	timeout    time.Duration
+	logger     *slog.Logger
+	onResolved func(sessionID, id, reason string, d acl.ElicitationOutcome)
 }
 
 // NewElicitationManager 构造提问管理器。
@@ -63,6 +64,13 @@ func (m *ElicitationManager) SetTimeout(d time.Duration) {
 	if d > 0 {
 		m.timeout = d
 	}
+}
+
+// SetOnResolved 注入「挂起提问已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
+func (m *ElicitationManager) SetOnResolved(fn func(sessionID, id, reason string, d acl.ElicitationOutcome)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onResolved = fn
 }
 
 // genElicitationID 生成稳定 id。
@@ -160,19 +168,26 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, sessionID stri
 	defer timer.Stop()
 
 	var d acl.ElicitationOutcome
+	reason := "user"
 	select {
 	case d = <-p.ch:
 		// 用户已决策
 	case <-ctx.Done():
 		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
+		reason = "cancel"
 	case <-timer.C:
 		m.logger.Warn("elicitation: request timeout, auto-cancel", "session", sessionID, "id", id)
 		d = acl.ElicitationOutcome{Action: "cancel"}
+		reason = "timeout"
 	}
 	m.mu.Lock()
 	delete(m.pending, id)
+	onResolved := m.onResolved
 	m.mu.Unlock()
-	m.logger.Info("elicitation: resolved", "session", sessionID, "id", id, "action", d.Action)
+	if onResolved != nil {
+		onResolved(sessionID, id, reason, d)
+	}
+	m.logger.Info("elicitation: resolved", "session", sessionID, "id", id, "action", d.Action, "reason", reason)
 	return d
 }
 

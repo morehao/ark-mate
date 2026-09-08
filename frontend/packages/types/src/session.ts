@@ -1,4 +1,4 @@
-export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed'
+export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
 export interface SessionSummary {
   id: string
@@ -20,18 +20,19 @@ export interface SessionSearchHit extends SessionSummary {
 
 export interface SessionDetail extends SessionSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
-  always_allowed?: AlwaysAllowItem[] // 会话级「始终允许」记忆（allow_always 已授）
+  memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
 }
 
-/** 会话级「始终允许」记忆条目。 */
-export interface AlwaysAllowItem {
+/** 会话级权限记忆（decision 区分「始终允许」与「始终拒绝」，对称语义）。 */
+export interface PermissionMemory {
   title: string
   kind: string
+  decision: 'allow' | 'reject'
   since: string // ISO（RFC3339 UTC），授予时刻
 }
 
-/** 撤销「始终允许」记忆（title+kind 均空 = 一键撤销全部）。 */
-export interface RevokeAlwaysReq {
+/** 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。 */
+export interface RevokeMemoryReq {
   title?: string
   kind?: string
 }

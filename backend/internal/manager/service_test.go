@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,6 +73,7 @@ func TestEventSinkMapping(t *testing.T) {
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
+	// agent 回传的 user_message 是会话镜像（宿主已在 Prompt 提交时发布 BusUserMessage）→ eventSink 丢弃。
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindUserMessage, Payload: acl.MessageDelta{Text: "me"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: acl.ToolCallInfo{ID: "c1", Title: "edit", Status: "pending"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolUpdate, Payload: acl.ToolCallInfo{ID: "c1", Status: "completed"}})
@@ -84,19 +87,19 @@ func TestEventSinkMapping(t *testing.T) {
 	defer bus.Unsubscribe(sub)
 	var evs []eventbus.Event
 	timeout := afterShort()
-	for len(evs) < 7 {
+	for len(evs) < 6 {
 		select {
 		case e := <-sub.C:
 			evs = append(evs, e)
 		case <-timeout:
-			t.Fatalf("事件不足: got %d want 7, events=%+v", len(evs), evs)
+			t.Fatalf("事件不足: got %d want 6, events=%+v", len(evs), evs)
 		}
 	}
 	types := make([]string, 0, len(evs))
 	for _, e := range evs {
 		types = append(types, e.Type)
 	}
-	want := []string{BusMessage, BusThought, BusUserMessage, BusToolCall, BusToolUpdate, BusUsage, "session.permission"}
+	want := []string{BusMessage, BusThought, BusToolCall, BusToolUpdate, BusUsage, "session.permission"}
 	for i := range want {
 		if types[i] != want[i] {
 			t.Fatalf("type 序列不符: %v", types)
@@ -110,13 +113,13 @@ func TestEventSinkMapping(t *testing.T) {
 	if m["text"] != "hi" || m["agent_id"] != "agent-opencode" {
 		t.Fatalf("message payload 不符: %+v", evs[0].Payload)
 	}
-	tc, _ := evs[3].Payload.(map[string]any)
+	tc, _ := evs[2].Payload.(map[string]any)
 	if tc["tool_call_id"] != "c1" || tc["title"] != "edit" {
-		t.Fatalf("tool_call payload 不符: %+v", evs[3].Payload)
+		t.Fatalf("tool_call payload 不符: %+v", evs[2].Payload)
 	}
-	perm, _ := evs[6].Payload.(acl.PermissionInfo)
+	perm, _ := evs[5].Payload.(acl.PermissionInfo)
 	if perm.Title != "t" || perm.Allowed {
-		t.Fatalf("permission payload 应透传: %+v", evs[6].Payload)
+		t.Fatalf("permission payload 应透传: %+v", evs[5].Payload)
 	}
 }
 
@@ -276,4 +279,56 @@ func TestRunOnceUnknownRuntime(t *testing.T) {
 	if _, err := orch.RunOnce(context.Background(), RunOptions{RuntimeID: "nope", Prompt: "x"}); err == nil {
 		t.Fatal("未知 runtime 应报错")
 	}
+}
+
+// TestPublishTitleConcurrentUpdate 并发下 BusUserMessage 标题自动推导与 PATCH 覆盖标题
+// 都须持锁（旧实现 publish 在锁外读写 Title → 数据竞争）；-race 下本用例作为守门测试。
+func TestPublishTitleConcurrentUpdate(t *testing.T) {
+	svc, _, _ := newTestRig(t)
+	id := "s-title-race"
+	svc.mu.Lock()
+	svc.sessions[id] = &SessionRec{ID: id, AgentID: "agent-opencode", Runtime: "echo", Status: SessionStatusInProgress}
+	svc.ver[id] = 0
+	svc.mu.Unlock()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = svc.publish(BusUserMessage, id, map[string]any{
+					"session_id": id, "agent_id": "agent-opencode", "text": fmt.Sprintf("消息 %d-%d", n, j),
+				})
+			}
+		}(i)
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				title := fmt.Sprintf("PATCH 标题 %d-%d", n, j)
+				_, _ = svc.UpdateSession(context.Background(), id, handler.SessionPatch{Title: &title})
+			}
+		}(i)
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		close(stop)
+		t.Fatal("并发守门测试超时（疑似死锁）")
+	}
+	// 不做终值断言：并发写序不定，仅守门数据竞争/panic。
 }

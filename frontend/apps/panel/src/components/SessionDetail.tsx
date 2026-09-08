@@ -9,8 +9,8 @@ import {
 } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Dot, Pill, sessionStatusMeta } from '@ark/ui'
-import type { AlwaysAllowItem, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
-import { getSession, promptSession, revokeAlways, sessionHistory, toErrorMessage } from '@ark/api'
+import type { PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
+import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
 import { agentNameOf } from '../console/util'
 import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
@@ -101,18 +101,18 @@ export function SessionDetailDrawer({
         ? { allowed: true, always: false, optionId: optionId(p, 'allow_once'), label: '允许本次' }
         : kind === 'allow_always'
           ? { allowed: true, always: true, optionId: optionId(p, 'allow_always'), label: '始终允许' }
-          : { allowed: false, always: false, optionId: optionId(p, 'reject_once'), label: '拒绝' }
+          : { allowed: false, always: false, optionId: optionId(p, 'reject_once') ?? optionId(p, 'reject_always'), label: '拒绝' }
     void respond(p.call_id, decision).then(() => load())
   }
 
-  // —— 会话级「始终允许」记忆：撤销（单条 / 全部）后刷新 ——
-  const revokeOne = (item: AlwaysAllowItem) => {
-    void revokeAlways(sessionId, { title: item.title, kind: item.kind })
+  // —— 会话级权限记忆（始终允许 / 始终拒绝，对称）：撤销（单条 / 全部）后刷新 ——
+  const revokeOne = (item: PermissionMemory) => {
+    void revokeMemory(sessionId, { title: item.title, kind: item.kind })
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
   const revokeAll = () => {
-    void revokeAlways(sessionId, {})
+    void revokeMemory(sessionId, {})
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
@@ -485,7 +485,7 @@ export function SessionDetailDrawer({
               )}
             </div>
 
-            {/* 会话级「始终允许」记忆（allow_always 已授，可逐条/全部撤销） */}
+            {/* 会话级权限记忆（始终允许 / 始终拒绝，对称语义；可逐条/全部撤销） */}
             <div>
               <div
                 style={{
@@ -498,11 +498,11 @@ export function SessionDetailDrawer({
                   color: tokens.textSecondary,
                 }}
               >
-                <span>始终允许记忆</span>
-                {(s.always_allowed ?? []).length > 0 && (
+                <span>权限记忆</span>
+                {(s.memories ?? []).length > 0 && (
                   <Popconfirm
-                    title="撤销全部「始终允许」记忆？"
-                    description="此后同类工具调用需重新逐次确认。"
+                    title="撤销全部权限记忆？"
+                    description="始终允许 / 始终拒绝都将清除，此后同类工具调用需重新逐次确认。"
                     okText="撤销全部"
                     cancelText="取消"
                     okButtonProps={{ danger: true }}
@@ -514,7 +514,7 @@ export function SessionDetailDrawer({
                   </Popconfirm>
                 )}
               </div>
-              {(s.always_allowed ?? []).length === 0 ? (
+              {(s.memories ?? []).length === 0 ? (
                 <div
                   style={{
                     border: `1px dashed ${tokens.border}`,
@@ -525,13 +525,13 @@ export function SessionDetailDrawer({
                     lineHeight: 1.6,
                   }}
                 >
-                  无「始终允许」记忆。对权限确认卡点「始终允许」后会记录在这里，后续同类请求自动放行。
+                  无会话级权限记忆。对权限确认卡点「始终允许 / 始终拒绝」后会记录在这里，后续同类请求自动放行 / 自动拒绝。
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {(s.always_allowed ?? []).map((item) => (
+                  {(s.memories ?? []).map((item) => (
                     <div
-                      key={`${item.kind}|${item.title}`}
+                      key={`${item.kind}|${item.title}|${item.decision}`}
                       style={{
                         border: `1px solid ${tokens.border}`,
                         background: tokens.surface,
@@ -556,7 +556,7 @@ export function SessionDetailDrawer({
                         </div>
                         <div
                           style={{
-                            marginTop: 1,
+                            marginTop: 2,
                             display: 'flex',
                             gap: 8,
                             fontFamily: tokens.fontMono,
@@ -564,12 +564,15 @@ export function SessionDetailDrawer({
                             color: tokens.textSecondary,
                           }}
                         >
+                          <span style={{ color: item.decision === 'allow' ? tokens.success : tokens.error }}>
+                            {item.decision === 'allow' ? '始终允许' : '始终拒绝'}
+                          </span>
                           <span>kind: {item.kind || '—'}</span>
                           <span>授予 {fmtLocal(item.since)}</span>
                         </div>
                       </div>
                       <Popconfirm
-                        title="撤销这条「始终允许」？"
+                        title={`撤销这条「${item.decision === 'allow' ? '始终允许' : '始终拒绝'}」？`}
                         okText="撤销"
                         cancelText="取消"
                         okButtonProps={{ danger: true }}

@@ -26,6 +26,7 @@ export function ChatPage() {
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
   const activate = useForge((s) => s.activate)
+  const expireHydration = useForge((s) => s.expireHydration)
   const sendPrompt = useForge((s) => s.sendPrompt)
   const cancel = useForge((s) => s.cancel)
   const archiveSession = useForge((s) => s.archiveSession)
@@ -49,6 +50,7 @@ export function ChatPage() {
   const view = activeId ? views[activeId] : undefined
   const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
+  const hydrating = view?.hydrating ?? false
   // 挂起交互请求条数（权限确认 + 结构化提问的待决项；聊天头角标）
   const pendingPerms =
     activeId && view ? view.entries.filter((en) => (en.kind === 'permission' || en.kind === 'elicitation') && !en.resolved).length : 0
@@ -108,6 +110,15 @@ export function ChatPage() {
       dead = true
     }
   }, [activeId, hasErrTail, retryLocalText, errFallback])
+  // P3 加载四态：hydration 超时兜底——attach 后长时间无 snapshot/事件（连接被熔断重连中、
+  // 服务端无响应）→ 退出加载态回空态（stalled 保险丝随后会触发重连恢复）。
+  useEffect(() => {
+    const id = activeId
+    if (!id || !hydrating) return
+    const t = window.setTimeout(() => expireHydration(id), 12000)
+    return () => window.clearTimeout(t)
+  }, [activeId, hydrating, expireHydration])
+
   // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
   useEffect(() => {
     const el = scrollRef.current
@@ -368,7 +379,14 @@ export function ChatPage() {
                   }}
                 >
                   {(view?.entries.length ?? 0) === 0 ? (
-                    renderEmptyTranscript()
+                    hydrating ? (
+                      <div style={{ paddingTop: 56, textAlign: 'center', color: tokens.textSecondary, fontSize: 13 }}>
+                        连接会话…
+                        <span className="fg-anim-blink" style={{ display: 'inline-block', marginLeft: 6, width: 2, height: '1em', background: tokens.primary, verticalAlign: '-0.12em' }} />
+                      </div>
+                    ) : (
+                      renderEmptyTranscript()
+                    )
                   ) : (
                     <>
                       {view?.entries.map((e) => (

@@ -26,21 +26,35 @@ func New(h *handler.Handler) *gin.Engine {
 
 	v1.GET("/health", health)
 	v1.GET("/agents", h.Agent.List)
+	// P2 Agent 管理面：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除。
+	v1.POST("/agents", h.Agent.Create)
+	v1.PATCH("/agents/:id", h.Agent.Update)
+	v1.DELETE("/agents/:id", h.Agent.Delete)
+	v1.POST("/agents/:id/start", h.Agent.Start)
+	v1.POST("/agents/:id/stop", h.Agent.Stop)
 	v1.GET("/sessions", h.Session.List)
 	v1.GET("/sessions/search", h.Session.Search)
 	v1.POST("/sessions", h.Session.Create)
 	v1.GET("/sessions/:id", h.Session.Get)
 	v1.PATCH("/sessions/:id", h.Session.Update)
 	v1.GET("/sessions/:id/history", h.Session.History)
+	v1.GET("/sessions/:id/runs", h.Session.Runs)
 	v1.POST("/sessions/:id/prompt", h.Session.Prompt)
 	v1.POST("/sessions/:id/cancel", h.Session.Cancel)
 	v1.GET("/sessions/:id/permissions", h.Session.Permissions)
 	v1.POST("/sessions/:id/permission", h.Session.ResolvePermission)
-	v1.GET("/sessions/:id/permissions/always", h.Session.AlwaysAllowed)
-	v1.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeAlways)
+	// 会话级权限记忆（allow/reject 双侧，P0 起对称语义）。
+	v1.GET("/sessions/:id/permissions/memories", h.Session.PermissionMemories)
+	v1.POST("/sessions/:id/permissions/memories/revoke", h.Session.RevokeMemory)
+	// 兼容别名：旧路径 /permissions/always（历史客户端/脚本）；新路径语义一致。
+	v1.GET("/sessions/:id/permissions/always", h.Session.PermissionMemories)
+	v1.POST("/sessions/:id/permissions/always/revoke", h.Session.RevokeMemory)
 	v1.GET("/sessions/:id/elicitations", h.Session.Elicitations)
 	v1.POST("/sessions/:id/elicitation", h.Session.ResolveElicitation)
 	v1.GET("/runtimes", h.Runtime.List)
+	// P2 provider 注入面：密钥只写不读回。
+	v1.GET("/providers", h.Provider.List)
+	v1.PATCH("/providers/:id", h.Provider.Update)
 	v1.GET("/ws/events", h.WS.Handle)
 
 	MountWeb(r)

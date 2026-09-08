@@ -202,7 +202,8 @@ func (h *hostClient) RequestPermission(ctx context.Context, p acpsdk.RequestPerm
 			Kind:      KindPermission,
 			SessionID: string(p.SessionId),
 			Payload: PermissionInfo{SessionID: string(p.SessionId),
-				Title: firstNonEmptyPtr(p.ToolCall.Title), Allowed: d.Allowed},
+				Title: firstNonEmptyPtr(p.ToolCall.Title), Allowed: d.Allowed,
+				Rejected: d.Rejected, OptionID: d.OptionID, Always: d.Always},
 		})
 	}
 	return permissionResponseFromDecision(d, p.Options), nil

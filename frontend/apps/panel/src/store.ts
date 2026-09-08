@@ -30,9 +30,32 @@ export interface SessionView {
   entries: StreamEntry[]
   streaming: boolean
   lastSeq: number
+  /** 冷挂载 hydration：activate 全量 attach（snapshot 到达）前为 true（P3 加载四态）。 */
+  hydrating: boolean
 }
 
-const emptyView = (): SessionView => ({ entries: [], streaming: false, lastSeq: 0 })
+const emptyView = (): SessionView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
+
+/** 权限终局事件载荷 → 卡片决策摘要（reason/allowed/rejected/always 组合出可读文案）。 */
+function permissionResolvedLabel(p: Record<string, unknown> | undefined): string {
+  const reason = String(p?.reason ?? '')
+  const always = p?.always === true
+  if (reason === 'timeout') return '超时自动拒绝'
+  if (reason === 'cancel') return '已取消'
+  if (p?.allowed === true) return always ? '允许 · 始终' : '允许 · 本次'
+  if (p?.rejected === true) return always ? '拒绝 · 始终' : '拒绝 · 本次'
+  return '已结束'
+}
+
+/** 提问终局事件载荷 → 卡片决策摘要。 */
+function elicitationResolvedLabel(p: Record<string, unknown> | undefined): string {
+  const reason = String(p?.reason ?? '')
+  const action = String(p?.action ?? '')
+  if (action === 'accept') return '已提交'
+  if (action === 'decline') return '已拒绝'
+  if (reason === 'timeout') return '超时自动取消'
+  return '已取消'
+}
 
 let uid = 0
 const nextId = (): string => `e${++uid}`
@@ -173,6 +196,32 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         lastSeq,
       }
     }
+    case Ev.PermissionResolved: {
+      // 挂起权限终局（用户决策/超时自动拒绝/会话取消）——服务端事件是收敛唯一事实，前端不再自设时钟。
+      const callId = String(e.payload?.call_id ?? '')
+      return {
+        ...v,
+        entries: entries.map((en): StreamEntry =>
+          en.kind === 'permission' && en.callId === callId && !en.resolved
+            ? { ...en, resolved: true, decision: permissionResolvedLabel(e.payload) }
+            : en,
+        ),
+        lastSeq,
+      }
+    }
+    case Ev.ElicitationResolved: {
+      // 挂起提问终局（accept/decline/cancel/超时自动取消）——同上，收敛以服务端事件为准。
+      const elicitationId = String(e.payload?.elicitation_id ?? '')
+      return {
+        ...v,
+        entries: entries.map((en): StreamEntry =>
+          en.kind === 'elicitation' && en.elicitationId === elicitationId && !en.resolved
+            ? { ...en, resolved: true, decision: elicitationResolvedLabel(e.payload) }
+            : en,
+        ),
+        lastSeq,
+      }
+    }
     case Ev.ElicitationRequest: {
       // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
       // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
@@ -244,9 +293,7 @@ export interface ForgeActions {
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
-  expirePermission: (callId: string) => void
   respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
-  expireElicitation: (elicitationId: string) => void
   renameSession: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
   archiveSession: (id: string, archived: boolean) => Promise<void>
@@ -254,6 +301,8 @@ export interface ForgeActions {
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
+  /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
+  expireHydration: (id: string) => void
   // transport 接线（内部）
   setWsState: (st: WsState) => void
   applyFrame: (f: WsServerFrame) => void
@@ -284,6 +333,12 @@ function ensureTransport(): WsTransport {
       // 水位推进（供重连续传）
       if (f.type === 'event') transportRef?.ackSeq(f.agg_id, f.event.seq)
       if (f.type === 'snapshot') transportRef?.ackSeq(f.agg_id, f.event_seq)
+      if (f.type === 'gap') {
+        // 慢订阅丢帧（服务端缓冲满）：按当前已应用水位立即重挂该聚合——
+        // 服务端 EventsAfter 为开区间（seq > since），重放不会重复已应用事件；若起点已被淘汰则回 snapshot。
+        transportRef?.attach(f.agg_id)
+        return
+      }
       useForge.getState().applyFrame(f)
     },
     (st) => {
@@ -322,12 +377,17 @@ export const useForge = create<ForgeStore>((set, get) => {
             // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标。
             return {
               ...s,
-              views: { ...s.views, [f.agg_id]: { entries: [], streaming: false, lastSeq: Math.max(f.event_seq, 0) } },
+              views: {
+                ...s.views,
+                [f.agg_id]: { entries: [], streaming: false, lastSeq: Math.max(f.event_seq, 0), hydrating: false },
+              },
             }
           }
           case 'event': {
             terminal = TERMINAL_TYPES.has(f.event.type)
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
+            // 首个事件即证明已就绪（配合 snapshot 与 hydration 超时兜底）
+            if (view.hydrating) view.hydrating = false
             return { ...s, views: { ...s.views, [f.agg_id]: view } }
           }
           default:
@@ -378,9 +438,16 @@ export const useForge = create<ForgeStore>((set, get) => {
       if (id) {
         t.connect()
         if (!t.isAttached(id)) {
-          // 首次挂载/切回：视图先清空，attach（since_seq）后按序重放重建（防重复）
           const cur = s.views[id]
-          if (cur && cur.entries.length > 0) {
+          // 冷挂载/切回（无 since_seq）：视图重置为 hydrating（P3 四态），等服务端
+          // snapshot（或首个事件）置回就绪；带 since_seq 的增量续传（createAndRun
+          // 本地气泡续流）不视为冷挂载。
+          const cold = sinceSeq === undefined
+          if (cold && (!cur || cur.entries.length === 0)) {
+            set((st) => ({
+              views: { ...st.views, [id]: { ...emptyView(), hydrating: true } },
+            }))
+          } else if (cold) {
             set((st) => ({ views: { ...st.views, [id]: emptyView() } }))
           }
           t.attach(id, sinceSeq)
@@ -403,6 +470,7 @@ export const useForge = create<ForgeStore>((set, get) => {
               entries: [{ kind: 'user', id: nextId(), text: prompt }],
               streaming: true,
               lastSeq: resp.event_seq,
+              hydrating: false,
             },
           },
         }))
@@ -477,22 +545,6 @@ export const useForge = create<ForgeStore>((set, get) => {
       }
     },
 
-    expirePermission: (callId) => {
-      // 服务端超时自动拒绝（无用户决策）→ 前端把对应卡片就地标记为已收敛，不发 API。
-      const id = get().activeId
-      if (!id) return
-      set((s) => {
-        const view = s.views[id]
-        if (!view) return {}
-        const entries = view.entries.map((en): StreamEntry =>
-          en.kind === 'permission' && en.callId === callId && !en.resolved
-            ? { ...en, resolved: true, decision: '超时自动拒绝' }
-            : en,
-        )
-        return { views: { ...s.views, [id]: { ...view, entries } } }
-      })
-    },
-
     respondElicitation: async (elicitationId, decision) => {
       const id = get().activeId
       if (!id) return
@@ -516,22 +568,6 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
       }
-    },
-
-    expireElicitation: (elicitationId) => {
-      // 服务端超时自动取消（无用户决策）→ 前端把对应卡片就地标记为已收敛，不发 API。
-      const id = get().activeId
-      if (!id) return
-      set((s) => {
-        const view = s.views[id]
-        if (!view) return {}
-        const entries = view.entries.map((en): StreamEntry =>
-          en.kind === 'elicitation' && en.elicitationId === elicitationId && !en.resolved
-            ? { ...en, resolved: true, decision: '超时自动取消' }
-            : en,
-        )
-        return { views: { ...s.views, [id]: { ...view, entries } } }
-      })
     },
 
     renameSession: async (id, title) => {
@@ -562,6 +598,14 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
       }
+    },
+
+    expireHydration: (id) => {
+      set((s) => {
+        const view = s.views[id]
+        if (!view || !view.hydrating) return {}
+        return { views: { ...s.views, [id]: { ...view, hydrating: false } } }
+      })
     },
 
     setRailMode: (mode) => {
