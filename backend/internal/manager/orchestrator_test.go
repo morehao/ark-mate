@@ -275,3 +275,33 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// TestEnsureConversationResumeGating P3 F2 恢复门控（无子进程路径）：
+// 未知/终态会话 → conversation_not_found；无 provider session（echo 类）→ resume_unavailable。
+func TestEnsureConversationResumeGating(t *testing.T) {
+	svc, orch, _ := newTestRig(t)
+	svc.registerConversation(&ConversationRec{
+		ID: "c-echo", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID
+	})
+	svc.registerConversation(&ConversationRec{
+		ID: "c-term", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusCompleted,
+		ProviderSessionID: "echo-x",
+	})
+	ctx := context.Background()
+
+	if _, err := orch.Prompt(ctx, "c-echo", "hi"); err == nil {
+		t.Fatal("echo 类无 provider session 应 resume_unavailable")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "resume_unavailable" {
+		t.Fatalf("期望 resume_unavailable，got %v", err)
+	}
+	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
+		t.Fatal("终态会话应 conversation_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
+		t.Fatalf("期望 conversation_not_found，got %v", err)
+	}
+	if _, err := orch.Prompt(ctx, "no-such", "hi"); err == nil {
+		t.Fatal("未知会话应 conversation_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
+		t.Fatalf("期望 conversation_not_found，got %v", err)
+	}
+}

@@ -827,6 +827,16 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
   id 改 `uuid.NewString()`，原生 provider id 存新列 `provider_session_id`；D-2 恢复承载 =
   opencode LoadSession / dsh ResumeSession / echo memo 兜底；D-3 memo 预算 env 参数化（F3
   落地时定默认值）。
+- **F2 恢复执行面（2026-09-09，完成）**：会话不在活跃集合时 Prompt 按需恢复——持久层记录
+  可恢复（in_progress/interrupted）且有 provider_session_id → acquire 连接后按能力驱动
+  LoadSession（opencode load=true）/ ResumeSession（dsh resume=true，capability 判别）重建
+  投影并登记 byProvider → 发布 session.resumed（reason=restart）→ 续跑该轮；终态/无 provider
+  会话仍走原 conversation_not_found 语义（echo 无原生恢复 → resume_unavailable，memo 兜底归 F3）。
+  **kill -9 DoD 实测（真进程 + sqlite）**：opencode 与 dsh 均在「生成中途 kill -9」→ 重启 →
+  同 uuid prompt 恢复成功：事件序列含 session.resumed + 续轮 turn.ended；DB 保持同一会话 id、
+  provider_session_id 不变（opencode ses_*/dsh uuid）、status 终态 completed；无重复建会话。
+  注意：实测发现 pkill -f 匹配不到 env 前缀进程（argv 不含 FORGE_ADDR），杀服务须按端口
+  lsof -ti tcp:<port> kill -9；巨型 opencode.log（316MB）会致后续 spawn FileSystem.open 失败。
 - **F1 双 id 持久化（2026-09-08，完成）**：schema v2 `ALTER TABLE conversations ADD
   provider_session_id`；store/manager 全链路（Conversation/ConversationRec/upsert/restore）
   贯通该列；建会话改用平台 uuid（REST/eventbus/transcript/权限记忆全部以 uuid 会话 id 键控，

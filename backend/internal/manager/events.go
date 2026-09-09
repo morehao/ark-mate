@@ -5,6 +5,9 @@ package manager
 const (
 	// BusSessionCreated 会话建立（含 conversation id）。
 	BusSessionCreated = "session.created"
+	// BusSessionResumed 进程重启后会话按需恢复（P3 F2：acquire → Load/Resume 原生会话 →
+	// 重建投影）。payload = {session_id, agent_id, runtime, reason}。
+	BusSessionResumed = "session.resumed"
 	// BusUserMessage 用户消息回显。
 	BusUserMessage = "session.user_message"
 	// BusMessage agent 消息文本增量。

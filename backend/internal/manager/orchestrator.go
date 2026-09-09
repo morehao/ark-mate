@@ -262,11 +262,16 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
 // 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 turn_in_progress。
-// 会话不在活跃集合（如进程重启后）→ conversation_not_found（P0 不做断点恢复；见设计 ADR-4 的 P3）。
+// 会话不在活跃集合：P3 F2 起按需恢复（持久层有可恢复记录 → ensureConversation 重建活会话）；
+// 无记录/终态 → conversation_not_found（对齐 P0 语义）。
 func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) (int64, error) {
 	as := o.conversation(conversationID)
 	if as == nil {
-		return 0, acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
+		var err error
+		as, err = o.ensureConversation(ctx, conversationID)
+		if err != nil {
+			return 0, err
+		}
 	}
 	as.mu.Lock()
 	if as.dead {
@@ -459,6 +464,74 @@ func (o *Orchestrator) conversation(id string) *ActiveConversation {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.conversations[id]
+}
+
+// resumableStatus 报告会话状态是否允许按需恢复（P3 F2：in_progress / interrupted 可续聊；
+// 终态会话沿用旧语义不可恢复，按未找到处理）。
+func resumableStatus(status string) bool {
+	return status == ConversationStatusInProgress || status == ConversationStatusInterrupted
+}
+
+// ensureConversation 返回活跃会话；不在活跃集合但持久层有可恢复记录时按需重建（P3 F2 恢复
+// 执行面）：acquire conn → 按能力选 LoadSession（实测 opencode load=true）或 ResumeSession
+// （dsh load=false、resume=true）恢复原生会话 → 重建投影 → 登记映射 → session.resumed 事件。
+// 无可恢复 provider session（echo 等）或终态会话 → 返回明确错误，不改写旧「未找到」语义。
+func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID string) (*ActiveConversation, error) {
+	if as := o.conversation(conversationID); as != nil {
+		return as, nil
+	}
+	rec := o.svc.conversationRec(conversationID)
+	if rec == nil || !resumableStatus(rec.Status) {
+		return nil, acl.NewError(acl.ClassRequest, "conversation_not_found",
+			fmt.Sprintf("未知或不可恢复会话 %q", conversationID), nil)
+	}
+	if rec.ProviderSessionID == "" {
+		return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
+			fmt.Sprintf("会话 %q 无持久 provider session（runtime %q 底座不可原生恢复；handoff memo 兜底见 F3）",
+				conversationID, rec.RuntimeHint), nil)
+	}
+	agent, ok := o.svc.AgentByID(rec.AgentID)
+	if !ok {
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", rec.AgentID), nil)
+	}
+	spec, ok := o.reg.Get(rec.RuntimeHint)
+	if !ok {
+		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", rec.RuntimeHint), nil)
+	}
+	cwd := rec.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	rc, err := o.acquire(ctx, agent, spec)
+	if err != nil {
+		return nil, err
+	}
+	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID)}
+	caps := rc.client.Capabilities()
+	var sess *acl.Session
+	switch {
+	case caps.Raw.LoadSession:
+		sess, err = rc.client.LoadSession(ctx, rec.ProviderSessionID, opts)
+	case caps.Raw.SessionCapabilities.Resume != nil:
+		sess, err = rc.client.ResumeSession(ctx, rec.ProviderSessionID, opts)
+	default:
+		return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
+			fmt.Sprintf("runtime %q 未声明 load/resume 能力，无法原生恢复会话 %q", spec.ID, conversationID), nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
+		proj: runtime.NewProjection(spec, sess)}
+	o.mu.Lock()
+	o.conversations[as.ID] = as
+	o.byProvider[sess.ID()] = as.ID
+	o.mu.Unlock()
+	o.svc.markConversation(as.ID, ConversationStatusInProgress)
+	o.svc.publish(BusSessionResumed, as.ID, map[string]any{
+		"session_id": as.ID, "agent_id": as.AgentID, "runtime": spec.ID, "reason": "restart",
+	})
+	return as, nil
 }
 
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
