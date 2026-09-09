@@ -232,3 +232,59 @@ func TestLoadResolvedExplicitDir(t *testing.T) {
 		t.Fatalf("显式目录未生效: %+v %v", c, src)
 	}
 }
+
+// TestRemoteRuntimesJSON 远程 runtime 声明（runtimes.json，A5）：解析 + 归一化。
+func TestRemoteRuntimesJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "runtimes.json"), []byte(`[
+  {"id":"remote-echo","name":"Remote Echo","transport":"WS","endpoint":"ws://127.0.0.1:10020/acp","headers":{"Authorization":"Bearer t"}},
+  {"id":"remote-http","transport":"streamable_http","endpoint":"http://127.0.0.1:10021/acp"}
+]`), 0o600); err != nil {
+		t.Fatalf("写 runtimes.json: %v", err)
+	}
+	c, _, err := LoadResolved(dir)
+	if err != nil {
+		t.Fatalf("LoadResolved: %v", err)
+	}
+	if len(c.RemoteRuntimes) != 2 {
+		t.Fatalf("远程 runtime 数量不符: %+v", c.RemoteRuntimes)
+	}
+	if got := c.RemoteRuntimes[0]; got.ID != "remote-echo" || got.Transport != "ws" ||
+		got.Endpoint != "ws://127.0.0.1:10020/acp" || got.Headers["Authorization"] != "Bearer t" {
+		t.Fatalf("第一条归一化不符: %+v", got)
+	}
+	if got := c.RemoteRuntimes[1]; got.Transport != "http" || got.Endpoint != "http://127.0.0.1:10021/acp" {
+		t.Fatalf("第二条归一化不符: %+v", got)
+	}
+	// 未提供 name → 留空（注册层回落到 id）。
+	if c.RemoteRuntimes[1].Name != "" {
+		t.Fatalf("name 应留空: %q", c.RemoteRuntimes[1].Name)
+	}
+}
+
+// TestRemoteRuntimesJSONErrors 非法声明必须启动即报错。
+func TestRemoteRuntimesJSONErrors(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"缺 id", `[{"transport":"ws","endpoint":"ws://127.0.0.1:1/acp"}]`, "id 必填"},
+		{"id 非法", `[{"id":"Remote Echo","transport":"ws","endpoint":"ws://127.0.0.1:1/acp"}]`, "id"},
+		{"id 重复", `[{"id":"a","transport":"ws","endpoint":"ws://127.0.0.1:1/a"},{"id":"a","transport":"ws","endpoint":"ws://127.0.0.1:1/b"}]`, "重复"},
+		{"缺 transport", `[{"id":"a","endpoint":"ws://127.0.0.1:1/a"}]`, "transport 必填"},
+		{"transport 不支持", `[{"id":"a","transport":"grpc","endpoint":"ws://127.0.0.1:1/a"}]`, "不支持"},
+		{"scheme 不匹配", `[{"id":"a","transport":"ws","endpoint":"http://127.0.0.1:1/a"}]`, "ws(s)"},
+		{"endpoint 非法", `[{"id":"a","transport":"ws","endpoint":"nope"}]`, "endpoint"},
+		{"非数组", `{"id":"a"}`, "JSON 数组"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "runtimes.json"), []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := LoadResolved(dir); err == nil {
+				t.Fatal("应报错")
+			} else if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("错误信息应含 %q，got %v", tc.want, err)
+			}
+		})
+	}
+}

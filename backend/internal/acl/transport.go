@@ -58,6 +58,11 @@ func NewStdioTransport(command string, args, env []string) *StdioTransport {
 	}
 }
 
+// LoggerSetter 由可设置诊断日志目标的传输实现（stdio 的 stderr 透出、远程传输的连接诊断）。
+type LoggerSetter interface {
+	SetLogger(*slog.Logger)
+}
+
 // PidInfo 子进程标识（进程注册表 / 孤儿回收用）。
 type PidInfo struct {
 	PID     int    // 子进程 pid（0 = 未启动）

@@ -1432,3 +1432,57 @@ A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
 **遗留/降级**：不做配置热重载（改文件需重启，与「连接/进程生命周期」强耦合，热重载的收益不足以
 承担一致性风险）；不自动创建配置目录/示例文件（不写用户机器）；`env` 文件不做变量插值/转义
 （需要复杂值请写 `config.json`）；不支持 YAML/TOML（避免新增依赖）。
+
+#### 19.14 切片 A5：远程 runtime 传输（Streamable HTTP / WebSocket，完成）
+
+**动机**：此前 `acl.Transport` 只有 `StdioTransport` 一种实现，runtime 只能是「本机子进程」。
+A5 补上远程端点接入，使 ark-forge 既能驱动本机 CLI，也能接远端/容器内/另一台机器上的 ACP server。
+
+**关键设计决策：不新增连接抽象，把网络连接伪装成 io 流。**
+`acpsdk.NewClientSideConnection(client, peerInput io.Writer, peerOutput io.Reader)` 只吃流，
+因此远程传输实现为「一对 io.Pipe 适配器」：`Stdin()` 收到的 NDJSON 逐行投递到远端，
+远端消息逐行写回 `Stdout()`。好处是握手、能力断言、权限确认、elicitation、会话生命周期
+**一行都不用改**，也不存在第二套客户端实现与随之而来的语义漂移。
+
+1. **ws 形态**（`acl/remote.go`）：一条 WebSocket 长连接，一条文本帧 = 一条 ACP 消息
+   （ACP 的 NDJSON 语义原样保留）；读上限放宽到 16MiB（长工具输出/大 diff）。
+2. **http 形态**（Streamable HTTP，对齐 MCP 规范与本项目 `internal/mcp` 既有做法）：
+   每条客户端消息一个 POST（`Accept: application/json, text/event-stream`）；响应可以是单个
+   JSON，也可以是 SSE 流——后者承载同一请求期间的 `session/update` 通知与
+   `session/request_permission` 等**服务端发起**消息；另起一条 GET SSE 长流接收「没有在途
+   请求时」的服务端消息（服务端不支持则降级为「仅请求期间收消息」并记入诊断尾巴）；
+   响应头 `Acp-Session-Id`（兼容 `Mcp-Session-Id`）由传输层捕获并在后续请求回带。
+3. **诊断尾巴复用 A3**：建连失败、HTTP 状态码与响应体、被丢弃的非 JSON 消息都进
+   `StderrTail()`，经 `/agents/:id/diagnostics` 外露（远程 agent `connected=true, pid=0`）。
+4. **服务端半场**（`acl/remoteserver.go`）：`ServeWSSession` 与 `NewRemoteHandler`
+   （POST 请求流 + GET 长流 + 按 id 精确投递/通知广播 + 会话 id 下发）。新增 CLI
+   `forge acp-serve --transport ws|http --listen --path`，把内置 echo 底座暴露成远程端点——
+   免模型 key 即可跨进程/跨机演示远程链路，也让端到端测试用**同一套生产代码**两侧对打。
+5. **注册面**：`.forge/config/runtimes.json`（A4 的配置目录）声明
+   `{id,name,transport,endpoint,headers}`；serve 启动注册进同一注册表（与内置 id 冲突即退出 2），
+   agent 的 `runtimes` 字段直接引用。`runtime.Connect` 按 `LaunchSpec.Transport` 分派。
+6. **可用性判定修正**：`routing.Installed` 原先只查 `exec.LookPath(Command)`，远程 runtime
+   `Command` 为空 → 永远「命令不可执行」、无法被采用（真实 daemon 暴露后才发现）。现按传输
+   分派：远程只看端点是否声明，可达性交给拨号阶段（失败归类 `connection`）。
+
+**证据**：
+- 单测（两侧都是真 SDK，服务端用生产半场）：`acl.TestWSTransportEndToEnd` /
+  `TestHTTPTransportEndToEnd`（initialize → session/new → 流式 message/thought → Prompt 中途
+  `request_permission` 往返 → `Acp-Session-Id` 回带断言 → POST 次数断言）、
+  `TestRemoteTransportErrors`（不支持传输 / scheme 不匹配 / URL 非法 / ws 连不上 / HTTP 502
+  含状态与响应体 / Close 幂等）；`runtime.TestConnectRemoteTransport`（ws+http 两形态，远端跑
+  真实 echo 底座，含权限往返）、`TestConnectUnsupportedTransport`；`routing.TestInstalled`
+  补远程用例；`config.TestRemoteRuntimesJSON{,Errors}`（归一化 + 8 个非法用例）。
+- 真进程：`forge acp-serve` 起 ws(10020)/http(10021) 两个 echo 端点 → `runtimes.json` 声明 →
+  `forge serve` 注册成功 → `GET /runtimes` 5 项 → 两个远程 agent 各跑一轮（权限请求 → REST
+  决策 → 工具卡 → `turn.ended`）→ 杀掉 ws 端点后重建会话得 `50201` + `stderr_source=last_error`
+  + 尾巴 `ws read: … EOF`。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿。
+
+**遗留/降级**：① 远程端点无鉴权面（`headers` 可带 token，但平台侧不做 OAuth/mTLS）；
+② HTTP 形态的 GET 长流在会话建立前会被服务端以 404 拒绝（客户端记一条诊断并降级），
+不影响请求期消息投递；③ 服务端半场的会话只在内存（重启即失效），未做持久会话恢复；
+④ `runtimes.json` 变更需重启（与 A4 一致，不做热重载）；
+⑤ 顺带发现（未修，留给后续切片）：`POST /conversations/:id/permission` 的响应体回显的是
+请求里的 `allowed` 字段而非「有效决策」，若调用方只传 `option_id`（不传 `allowed`）会得到
+`allowed:false` 而实际按所选选项放行——前端始终同时传两个字段，故 UI 路径无影响。

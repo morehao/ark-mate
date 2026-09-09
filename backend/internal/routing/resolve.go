@@ -17,6 +17,12 @@ import (
 //   - 含路径分隔符 → 直接 stat（如 forge acp-demo 的自派生可执行文件、绝对路径）；
 //   - 否则按 PATH 查找（opencode/dsh 等须在 PATH 中的 CLI）。
 func Installed(spec runtime.Spec) bool {
+	// 远程 runtime（A5）：没有本地启动命令，可达性由拨号阶段判定（配置加载时已校验
+	// URL 形态与传输匹配），这里只要求端点非空——否则远程 runtime 永远无法被采用。
+	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
+	case "http", "ws", "websocket", "streamable_http", "streamable-http":
+		return strings.TrimSpace(spec.Launch.Endpoint) != ""
+	}
 	cmd := spec.Launch.Command
 	if cmd == "" {
 		return false

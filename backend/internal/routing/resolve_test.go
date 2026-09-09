@@ -52,6 +52,16 @@ func TestInstalled(t *testing.T) {
 	if Installed(runtime.Spec{}) {
 		t.Fatal("空命令应判未安装")
 	}
+	// 远程 runtime（A5）：无本地命令，端点非空即视为可用（可达性由拨号判定）。
+	if !Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "ws", Endpoint: "ws://127.0.0.1:1/acp"}}) {
+		t.Fatal("远程 runtime 端点非空应判 installed")
+	}
+	if !Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "http", Endpoint: "http://127.0.0.1:1/acp"}}) {
+		t.Fatal("远程 http runtime 端点非空应判 installed")
+	}
+	if Installed(runtime.Spec{Launch: runtime.LaunchSpec{Transport: "ws"}}) {
+		t.Fatal("远程 runtime 端点为空应判未安装")
+	}
 }
 
 // TestSupportsTransports 传输承载判定：白名单含 required；空传输列表保守按 stdio。

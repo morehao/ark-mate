@@ -8,15 +8,21 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/coder/websocket"
+
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/infra/config"
 	"github.com/morehao/ark-forge/internal/infra/procreg"
 	"github.com/morehao/ark-forge/internal/manager"
@@ -70,7 +76,8 @@ func configCmd(args []string) {
 				"proc_registry":          cfg.ProcRegistryPath,
 				"reap_grace":             cfg.ReapGrace.String(),
 			},
-			"sources": sources,
+			"remote_runtimes": cfg.RemoteRuntimes,
+			"sources":         sources,
 		}
 		b, err := json.MarshalIndent(doc, "", "  ")
 		if err != nil {
@@ -102,6 +109,12 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
+	if len(cfg.RemoteRuntimes) == 0 {
+		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
+	}
+	for _, rt := range cfg.RemoteRuntimes {
+		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtime:"+rt.ID, rt.Transport+" "+rt.Endpoint, string(config.SourceFile))
+	}
 }
 
 func storeModeLabel(mode string) string {
@@ -118,6 +131,49 @@ func emptyLabel(v string) string {
 	return v
 }
 
+// acpServe 把内置 echo ACP 底座暴露成远程端点（A5）：
+// 本机/跨机的另一个 ark-forge 可以在 .forge/config/runtimes.json 里把它声明为远程 runtime，
+// 从而在不装 opencode/dsh、不用模型 key 的前提下演示/验证远程 ACP 链路。
+func acpServe(args []string) {
+	fs := flag.NewFlagSet("acp-serve", flag.ExitOnError)
+	transport := fs.String("transport", "ws", "远程传输形态：ws（WebSocket）| http（Streamable HTTP）")
+	listen := fs.String("listen", "127.0.0.1:10020", "监听地址（默认仅回环）")
+	path := fs.String("path", "/acp", "端点路径")
+	_ = fs.Parse(args)
+
+	opts := acl.RemoteServerOptions{
+		Serve:           func(in io.Writer, out io.Reader) { echo.Serve(in, out) },
+		SessionIDPrefix: "echo",
+		Logger:          slog.Default(),
+	}
+	mux := http.NewServeMux()
+	switch strings.ToLower(strings.TrimSpace(*transport)) {
+	case "ws", "websocket":
+		mux.HandleFunc(*path, func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+			if err != nil {
+				return
+			}
+			defer conn.CloseNow()
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			_ = acl.ServeWSSession(ctx, conn, opts)
+		})
+	case "http", "streamable_http", "streamable-http":
+		mux.Handle(*path, acl.NewRemoteHandler(opts))
+	default:
+		fmt.Fprintf(os.Stderr, "acp-serve: 不支持的 transport %q（ws|http）\n", *transport)
+		os.Exit(2)
+	}
+
+	srv := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	slog.Info("acp-serve: echo ACP 底座已暴露为远程端点", "transport", *transport, "listen", *listen, "path", *path)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		fmt.Fprintf(os.Stderr, "acp-serve: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
@@ -127,8 +183,10 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
   forge config [--json]         打印解析后的配置与每项来源（配置目录 .forge/config 目录化）
+  forge acp-serve [--transport ws|http] [--listen host:port] [--path /acp]
+                                把内置 echo ACP 底座暴露成远程端点（A5 远程传输的服务端半场）
 
-子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
+子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h / forge acp-serve -h
 `
 
 func main() {
@@ -151,6 +209,8 @@ func main() {
 		transcriptsPrune(os.Args[3:])
 	case "config":
 		configCmd(os.Args[2:])
+	case "acp-serve":
+		acpServe(os.Args[2:])
 	case "acp-demo":
 		// echo 演示底座的 ACP server 子进程（由 serve 经 stdio 拉起，勿手动运行）。
 		if err := echo.RunServer(); err != nil {
@@ -183,6 +243,16 @@ func serve(args []string) {
 	}
 
 	reg := runtime.DefaultRegistry()
+	// 远程 runtime（A5）：配置目录 runtimes.json 声明的远程 ACP 端点注册进同一注册表，
+	// agent 的 runtimes 字段即可引用；与内置 id 冲突时启动即失败（不静默覆盖内置底座）。
+	for _, rt := range cfg.RemoteRuntimes {
+		if _, exists := reg.Get(rt.ID); exists {
+			fmt.Fprintf(os.Stderr, "serve: runtimes.json 的 id %q 与内置 runtime 冲突\n", rt.ID)
+			os.Exit(2)
+		}
+		reg.Register(runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
+		slog.Info("serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
+	}
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 

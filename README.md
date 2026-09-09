@@ -12,6 +12,7 @@
 ## 特性（当前形态）
 
 - **ACP 直连运行时**：内置 `opencode`（`opencode acp`）、`deepseekharness`（`dsh --profile acp`）与本地自包含 `echo`（`forge acp-demo`，权限演示）三个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
+- **远程 runtime（A5）**：除本地子进程外，同一套 ACP 客户端还可接**远程端点**——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知/权限请求，另开 GET 长流收无在途请求时的服务端消息，响应头 `Acp-Session-Id` 回带）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.forge/config/runtimes.json` 声明（`id/name/transport/endpoint/headers`），启动即注册进同一 runtime 注册表，agent 的 `runtimes` 字段直接引用；传输层不新增依赖、不加第二套客户端（把网络连接伪装成 io 流，握手/权限/elicitation 逻辑与 stdio 完全同构）。`forge acp-serve --transport ws|http` 可把内置 echo 底座暴露成远程端点，用于免模型 key 的跨进程/跨机演示。远程 runtime 无 pid（进程注册表/孤儿回收不适用），连接级诊断（建连失败、HTTP 状态、被丢弃的非 JSON 消息）进 `/agents/:id/diagnostics` 的 `stderr_tail`。
 - **结构化提问通道（ACP `elicitation/*`，unstable 契约）**：agent 发起 `elicitation/create`——form 模式携带 JSON Schema 表单（单选/多选/文本/数字/布尔等字段 + required/default/枚举约束）、url 模式携带引导链接——服务端发布 `session.elicitation_request` 事件 → UI 依据 schema 渲染提问卡 → 用户提交（content）/拒绝/取消经 `POST /conversations/:id/elicitation` 决策回流给 agent；超时自动取消（默认 30min，`FORGE_ELICITATION_TIMEOUT` 可覆盖）；宿主在 Initialize 中声明 `ClientCapabilities.Elicitation{Form,Url}`。**会话归属（过渡实现）**：Go SDK（coder/acp-go-sdk v0.13.5）未建模规范 scope 字段、顶层 `sessionId` 在解码时被丢弃，宿主改按「连接上唯一在途 turn」归属会话（`orchestrator.busyConn`，多会话并发在途不猜测、按取消），不再使用 `_meta`；规范 scope 解析列为触发式能力位（首个真实 elicitation wire 出现时启用，预案见 `docs/agent-interactions-acp-v1-design-20260907.md` §0/§2.4A）。
 - **权限确认通道（ACP 一致）**：agent 发起 `session/request_permission` → 服务端发布 `session.permission_request` 事件（含 options：allow/reject × once/always）→ 用户经 `POST /conversations/:id/permission` 决策 → 决策回流给 agent（**显式拒绝带 deny 选项时回 Selected{该选项}，agent 可区分拒绝/取消/超时**；无可选 deny 选项时兜底 Cancelled）；支持会话级权限记忆——「始终允许」与「始终拒绝」**双侧对称、同键互斥覆盖**（决策 `{title, kind, decision: allow|reject}`，可见可撤销：`GET /conversations/:id/permissions/memories` 列出、`POST …/memories/revoke` 单条或一键撤销，旧 `/permissions/always` 路径兼容别名）；挂起超时自动拒绝/取消（默认 30min，`FORGE_PERMISSION_TIMEOUT`/`FORGE_ELICITATION_TIMEOUT` 可覆盖）；`session/cancel` 按 ACP 规范回 Cancelled 全部挂起。**任何挂起（权限/提问）一旦终局即发布收敛事件**（`session.permission_resolved` / `session.elicitation_resolved`），前端以服务端事件为唯一事实收敛卡片（`timeout_at` 仅作展示，无前端自设时钟）。
 - **权限真实链路演示（echo 演示底座）**：内置 `echo` runtime——daemon 自派生 `forge acp-demo` 子进程充当 ACP server（与 opencode/dsh 同构的 stdio NDJSON 链路），每轮 prompt 发起一次真实 `session/request_permission`（allow/reject × once/always），按决策回显授权/拒绝与模拟工具卡；**无需安装 opencode/dsh、无需模型 key**，即可在 Web 面板全链路点选权限确认卡验证通道。除权限外，echo 还可按 prompt 关键词触发**结构化提问**（单选/多选/复合表单/URL 引导，见下）与**失败轮重试**（`boom`），覆盖 ACP 三种主要「agent↔用户」交互。
@@ -107,6 +108,7 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 ```
 ~/.forge/config/config.json   # {"addr":"127.0.0.1:10001","store":"sqlite","db":"/data/forge.db","idle_timeout":"5m"}
 ~/.forge/config/env           # dotenv：FORGE_TRANSCRIPTS=/data/transcripts（# 注释、可 export 前缀）
+~/.forge/config/runtimes.json # 远程 runtime 声明（A5）：[{"id":"remote-echo","transport":"ws","endpoint":"ws://127.0.0.1:10020/acp"}]
 ```
 
 优先级：默认值 < `config.json` < `env` < 进程环境变量 `FORGE_*` < CLI flag。目录/文件不存在
@@ -219,6 +221,7 @@ make vet / test   # go vet / go test ./...
 CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真实会话冒烟）、
 `forge migrate`（transcript → SQLite 幂等导入）、`forge transcripts prune --older-than <dur>`
 （显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
+`forge acp-serve`（把 echo 底座暴露成远程 ACP 端点：`--transport ws|http`）、
 `forge acp-demo`（作为 echo 底座被 daemon 派生的 ACP server 入口）。
 
 部署形态（单二进制 / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。

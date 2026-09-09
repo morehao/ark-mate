@@ -14,8 +14,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,6 +84,22 @@ type Config struct {
 	ReapGrace time.Duration
 	// ConfigDir 本次加载使用的配置目录（`forge config` 展示用；空 = 未解析）。
 	ConfigDir string
+	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
+	RemoteRuntimes []RemoteRuntime
+}
+
+// RemoteRuntime 是一条「远程 ACP 端点」runtime 声明（配置目录 runtimes.json 的数组元素）。
+type RemoteRuntime struct {
+	// ID 注册表键（小写字母/数字/_/-；不得与内置 runtime 冲突，冲突由 serve 启动时拒绝）。
+	ID string `json:"id"`
+	// Name 展示名（空 = 用 ID）。
+	Name string `json:"name"`
+	// Transport 传输形态："http"（Streamable HTTP）| "ws"（WebSocket）。
+	Transport string `json:"transport"`
+	// Endpoint 端点 URL（http(s):// 对应 http，ws(s):// 对应 ws）。
+	Endpoint string `json:"endpoint"`
+	// Headers 附加请求头（鉴权等）。
+	Headers map[string]string `json:"headers"`
 }
 
 // 默认超时（与 manager.DefaultPermissionTimeout/DefaultElicitationTimeout 对齐）。
@@ -228,9 +246,80 @@ func LoadResolved(dir string) (Config, Sources, error) {
 	if err != nil {
 		return Default(), nil, err
 	}
+	remotes, err := loadRuntimesJSON(filepath.Join(dir, "runtimes.json"))
+	if err != nil {
+		return Default(), nil, err
+	}
+	c.RemoteRuntimes = remotes
 	c.ConfigDir = dir
 	return c, r.sources(), nil
 }
+
+// loadRuntimesJSON 读取 <dir>/runtimes.json（远程 runtime 数组；缺失 = 跳过）。
+func loadRuntimesJSON(path string) ([]RemoteRuntime, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取 %s: %w", path, err)
+	}
+	var list []RemoteRuntime
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("%s 不是合法的 JSON 数组: %w", path, err)
+	}
+	seen := map[string]bool{}
+	for i, rt := range list {
+		id := strings.TrimSpace(rt.ID)
+		if id == "" {
+			return nil, fmt.Errorf("%s[%d]: id 必填", path, i)
+		}
+		if !runtimeIDRe.MatchString(id) {
+			return nil, fmt.Errorf("%s[%d]: id %q 非法（小写字母/数字/_/-，首字符为字母或数字）", path, i, rt.ID)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("%s[%d]: id %q 重复", path, i, id)
+		}
+		seen[id] = true
+		tr := strings.ToLower(strings.TrimSpace(rt.Transport))
+		switch tr {
+		case "http", "streamable_http", "streamable-http", "https":
+			tr = "http"
+		case "ws", "wss", "websocket":
+			tr = "ws"
+		case "":
+			return nil, fmt.Errorf("%s[%d]: transport 必填（http|ws）", path, i)
+		default:
+			return nil, fmt.Errorf("%s[%d]: transport %q 不支持（http|ws）", path, i, rt.Transport)
+		}
+		endpoint := strings.TrimSpace(rt.Endpoint)
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" {
+			return nil, fmt.Errorf("%s[%d]: endpoint %q 非法", path, i, rt.Endpoint)
+		}
+		switch tr {
+		case "http":
+			if u.Scheme != "http" && u.Scheme != "https" {
+				return nil, fmt.Errorf("%s[%d]: http 传输的 endpoint 需为 http(s)://，得到 %q", path, i, rt.Endpoint)
+			}
+		case "ws":
+			if u.Scheme != "ws" && u.Scheme != "wss" {
+				return nil, fmt.Errorf("%s[%d]: ws 传输的 endpoint 需为 ws(s)://，得到 %q", path, i, rt.Endpoint)
+			}
+		}
+		list[i] = RemoteRuntime{
+			ID:        id,
+			Name:      strings.TrimSpace(rt.Name),
+			Transport: tr,
+			Endpoint:  u.String(),
+			Headers:   rt.Headers,
+		}
+	}
+	return list, nil
+}
+
+// runtimeIDRe runtime id 形态（与内置 id 同构）。
+var runtimeIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // Load 兼容旧签名：读取配置；文件非法时回落默认值（仅测试/兼容路径使用；
 // daemon 启动请用 LoadResolved，以便把配置错误暴露给操作员）。

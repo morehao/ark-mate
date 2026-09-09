@@ -9,11 +9,21 @@ type Capabilities struct {
 	EmbeddedContext        bool // prompt 可内嵌 Resource
 }
 
-// LaunchSpec 描述如何拉起该 runtime 的 ACP server 子进程（stdio）。
+// LaunchSpec 描述如何接入该 runtime 的 ACP server。
+//
+// 两种形态（A5）：
+//   - 本地子进程（默认，Transport 为空/"stdio"）：Command/Args/Env 生效，stdio 传输；
+//   - 远程端点（Transport="http"|"ws"）：Endpoint/Headers 生效，Command/Args 忽略。
 type LaunchSpec struct {
-	Command string   // 可执行文件（须在 PATH 中）
-	Args    []string // 参数（如 opencode acp 的子命令/--config 路径）
-	Env     []string // 附加环境（KEY=VALUE，叠加在 os.Environ 之上）
+	Command string   // 可执行文件（须在 PATH 中；stdio 形态）
+	Args    []string // 参数（如 opencode acp 的子命令/--config 路径；stdio 形态）
+	Env     []string // 附加环境（KEY=VALUE，叠加在 os.Environ 之上；stdio 形态）
+	// Transport 传输形态："stdio"（默认）| "http"（Streamable HTTP）| "ws"（WebSocket）。
+	Transport string
+	// Endpoint 远程 ACP 端点 URL（Transport=http|ws 时必填）。
+	Endpoint string
+	// Headers 远程端点附加请求头（鉴权等；http/ws 均带上）。
+	Headers map[string]string
 }
 
 // Spec 是注册表里一个 runtime 的投影描述（§6.1 ProjectionSpec 的声明式半场：

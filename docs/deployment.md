@@ -84,6 +84,12 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 ~/.forge/config/env           # dotenv 风格（KEY=VALUE；# 注释、空行、可选 export 前缀与成对引号）
 ```
 
+同目录可选 `runtimes.json`（A5）：远程 runtime 声明数组
+`[{"id","name","transport":"ws|http","endpoint","headers"}]`，启动时注册进 runtime 注册表，
+agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形态非法都会让 `forge serve`
+启动即退出（退出码 2）。远程 runtime 无本地命令，可用性判定只看端点是否声明，可达性在拨号
+阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
+
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
 `skills_materialize_dir` `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace`；另可用 `FORGE_*` 原名、
@@ -290,3 +296,15 @@ sudo systemctl restart ark-forge
   minutes"` → `forge config` 与 `forge serve` 均退出码 2 并给出文件路径与合法键清单。目录缺失
   = 默认值（`127.0.0.1:10001`，来源全 `default`）。顺带修：sqlite 模式启动前 `MkdirAll` DB
   父目录（此前 DB 路径父目录不存在会以 `unable to open database file` 失败）。
+
+- 远程 runtime 传输（A5）：`forge acp-serve --transport ws --listen 127.0.0.1:10020` +
+  `--transport http --listen 127.0.0.1:10021`，`.forge/config/runtimes.json` 声明两个端点后
+  `forge serve` 注册成功（日志 `注册远程 runtime`），`GET /runtimes` 返回 5 个（3 内置 + 2 远程）。
+  两个远程 agent 各建一次会话：事件链 `session.created → user_message → thought → message →
+  permission_request`，`POST /conversations/:id/permission`（`allowed=true, option_id=allow-all`）
+  → `permission_resolved → permission → tool_call → tool_update → message → usage → turn.ended`
+  （echo 远端底座回显「已授权（始终允许）。模拟执行完成」）。`GET /agents/:id/diagnostics`
+  显示远程 agent `connected=true, pid=None`（无子进程）。把远端 `acp-serve` 杀掉后重建会话 →
+  `code=50201`「连接远程 ACP 端点失败（ws: ws://127.0.0.1:10020/acp）」，诊断 `connected=false,
+  stderr_source=last_error`，尾巴含 `ws read: ... EOF`，`last_error.code=connection_lost`。
+  能力探测（`/agents/:id/capabilities`）经远程传输正常返回。
