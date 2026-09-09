@@ -1,2 +1,2 @@
-export { http, HttpError, toErrorMessage } from './request'
+export { http, HttpError, toErrorMessage, getToken, setToken } from './request'
 export * from './resources/forge'

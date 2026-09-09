@@ -17,6 +17,11 @@
  */
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/forge'
+// A6：后端启用 FORGE_TOKEN 时，同一套脚本带上令牌（REST 走 Authorization 头，
+// WS 因浏览器/Node 无法设握手头走 ?token= ——与面板 transport 的取法一致）。
+const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
+const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
+const WS_QS = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''
 
 let failed = 0
 const ok = (name) => console.log(`  ✔ ${name}`)
@@ -28,7 +33,7 @@ const bad = (name, why) => {
 // ——— 通用工具 ———
 
 async function apiGet(path) {
-  const r = await fetch(API + path)
+  const r = await fetch(API + path, { headers: AUTH })
   const env = await r.json()
   if (typeof env.code !== 'number') throw new Error(`非信封响应: ${JSON.stringify(env)}`)
   return { http: r.status, env }
@@ -37,7 +42,7 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const r = await fetch(API + path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify(body),
   })
   const env = await r.json()
@@ -186,7 +191,7 @@ async function checkBizError() {
   console.log('· REST 业务错误（HTTP 200 + 信封 code≠0，前端 HttpError 依据）')
   const r = await fetch(API + '/conversations', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify({ agent_id: 'agent-no-such', prompt: 'hi' }),
   })
   const env = await r.json()
@@ -197,7 +202,7 @@ async function checkBizError() {
   }
 
   // P2 §5.2 未知 MCP server 探测 → 40401（前端 HttpError 提示依据；不真的 spawn 任何进程）。
-  const pr = await fetch(API + '/mcps/no-such-server/probe', { method: 'POST' })
+  const pr = await fetch(API + '/mcps/no-such-server/probe', { method: 'POST', headers: AUTH })
   const pEnv = await pr.json()
   if (pr.status === 200 && pEnv.code === 40401) {
     ok(`POST /mcps/:id/probe 未知 server → HTTP 200 code=${pEnv.code}`)
@@ -210,14 +215,14 @@ async function checkBizError() {
 
 async function checkWs() {
   console.log('· WS 实时通道帧契约（经 vite proxy ws:true）')
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events' + WS_QS
   const ws = new WebSocket(wsUrl)
   const opened = new Promise((resolve, reject) => {
     ws.onopen = () => resolve()
     ws.onerror = () => reject(new Error('WS 连接错误/升级失败'))
   })
   await withTimeout(opened, 8000, 'WS open')
-  ok('WS 升级成功（proxy ws:true 生效）')
+  ok(`WS 升级成功（proxy ws:true 生效${TOKEN ? '，带 ?token=' : ''}）`)
 
   const nextFrame = (what, ms = 8000) =>
     withTimeout(

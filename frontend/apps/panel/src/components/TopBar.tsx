@@ -1,6 +1,7 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { MenuOutlined } from '@ant-design/icons'
+import { LockOutlined, MenuOutlined, UnlockOutlined } from '@ant-design/icons'
+import { Button, Input, Modal } from 'antd'
 import { tokens } from '@ark/ui'
 import { useForge } from '../store'
 
@@ -34,6 +35,17 @@ export function TopBar() {
   const conversations = useForge((s) => s.conversations)
   const wsState = useForge((s) => s.wsState)
   const setDrawer = useForge((s) => s.setDrawer)
+
+  const token = useForge((s) => s.token)
+  const tokenModalOpen = useForge((s) => s.tokenModalOpen)
+  const saveToken = useForge((s) => s.saveToken)
+  const setTokenModal = useForge((s) => s.setTokenModal)
+  const [draft, setDraft] = useState(token)
+
+  // 弹窗打开时同步当前令牌（外部清除后再次打开不应显示旧值）。
+  useEffect(() => {
+    if (tokenModalOpen) setDraft(token)
+  }, [tokenModalOpen, token])
 
   const current = NAV.find((n) => isNavActive(location.pathname, n.to)) ?? NAV[0]
   const others = NAV.filter((n) => n !== current)
@@ -130,6 +142,29 @@ export function TopBar() {
         ))}
       </nav>
 
+      {/* A6 单操作员令牌：后端启用鉴权时此处设置；未设置时按钮呈灰色提示 */}
+      <button
+        type="button"
+        onClick={() => setTokenModal(true)}
+        title={token ? '已配置访问令牌（点击修改/清除）' : '未配置访问令牌（后端启用 FORGE_TOKEN 时必填）'}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '4px 9px',
+          borderRadius: 8,
+          border: `1px solid ${token ? tokens.borderStrong : tokens.border}`,
+          background: token ? tokens.softFill : 'transparent',
+          color: token ? tokens.text : tokens.textPlaceholder,
+          fontSize: 11.5,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {token ? <LockOutlined style={{ fontSize: 12 }} /> : <UnlockOutlined style={{ fontSize: 12 }} />}
+        令牌
+      </button>
+
       <span
         style={{
           display: 'inline-flex',
@@ -147,6 +182,35 @@ export function TopBar() {
         />
         {wsMeta.text}
       </span>
+
+      <Modal
+        title="访问令牌（单操作员）"
+        open={tokenModalOpen}
+        onCancel={() => setTokenModal(false)}
+        onOk={() => saveToken(draft)}
+        okText="保存并重连"
+        cancelText="取消"
+        width={460}
+      >
+        <div style={{ fontSize: 12.5, lineHeight: 1.8, color: tokens.textSecondary, marginBottom: 10 }}>
+          后端以 <code style={{ fontFamily: tokens.fontMono }}>FORGE_TOKEN</code>（或
+          <code style={{ fontFamily: tokens.fontMono }}> .forge/config</code> 的 <code>token</code>）启用鉴权后，
+          除 <code>/health</code> 外的所有接口都需要该令牌。令牌只保存在本浏览器（localStorage），
+          不会写入 URL 或日志。
+        </div>
+        <Input.Password
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPressEnter={() => saveToken(draft)}
+          placeholder="粘贴 FORGE_TOKEN；留空 = 清除"
+          autoComplete="off"
+        />
+        <div style={{ marginTop: 10 }}>
+          <Button size="small" onClick={() => saveToken('')} disabled={!token && !draft}>
+            清除令牌
+          </Button>
+        </div>
+      </Modal>
     </header>
   )
 }

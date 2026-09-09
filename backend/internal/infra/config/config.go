@@ -86,6 +86,9 @@ type Config struct {
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
 	RemoteRuntimes []RemoteRuntime
+	// Token 单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
+	// 非空时除 /health 外的所有 /v1/forge 路由都要求 Bearer token（WS 可用 ?token=）。
+	Token string
 }
 
 // RemoteRuntime 是一条「远程 ACP 端点」runtime 声明（配置目录 runtimes.json 的数组元素）。
@@ -142,6 +145,7 @@ var knownKeys = map[string]string{
 	"elicitation_timeout":    "FORGE_ELICITATION_TIMEOUT",
 	"proc_registry":          "FORGE_PROC_REGISTRY",
 	"reap_grace":             "FORGE_REAP_GRACE",
+	"token":                  "FORGE_TOKEN",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -382,6 +386,9 @@ func materialize(r *resolver) (Config, error) {
 	}
 	if v, ok := r.get("skills_materialize_dir"); ok {
 		c.SkillMaterializeDir = v
+	}
+	if v, ok := r.get("token"); ok {
+		c.Token = strings.TrimSpace(v)
 	}
 
 	// 依赖家目录的派生默认值（未被任何来源显式设置时）。

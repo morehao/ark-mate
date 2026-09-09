@@ -4,17 +4,33 @@
 package router
 
 import (
+	"crypto/subtle"
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
 // AppName 控制面应用的业务标识，构成路由前缀部分。
 const AppName = "forge"
 
+// Options 控制面装配选项（A6：单操作员 token）。
+type Options struct {
+	// Token 非空时，除 /health 外的所有 /v1/forge 路由都要求 Bearer token：
+	// REST 用 `Authorization: Bearer <token>`；WS 因浏览器无法设握手头，额外接受 `?token=<token>`。
+	// 空 = 不鉴权（默认，仅绑定回环地址时的历史行为）。
+	Token string
+}
+
+// 未授权错误码（REST 信封 code；HTTP 状态同时为 401，便于前端与反代统一处理）。
+const codeUnauthorized = 40101
+
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
-// 实时通道契约见 docs/design-and-roadmap.md §4.5（M0 无鉴权）。
-func New(h *handler.Handler) *gin.Engine {
+// 实时通道契约见 docs/design-and-roadmap.md §4.5；A6 起可选单操作员 token 鉴权。
+func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20
@@ -24,7 +40,12 @@ func New(h *handler.Handler) *gin.Engine {
 	})
 	v1 := groups.MustGetGroup(ginserver.ApiVersionV1)
 
+	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）；
+	// 之后的全部路由挂鉴权中间件（含 WS）。
 	v1.GET("/health", health)
+	if len(opts) > 0 && strings.TrimSpace(opts[0].Token) != "" {
+		v1.Use(authToken(opts[0].Token))
+	}
 	v1.GET("/agents", h.Agent.List)
 	// P2 Agent 管理面：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除。
 	v1.POST("/agents", h.Agent.Create)
@@ -74,6 +95,35 @@ func New(h *handler.Handler) *gin.Engine {
 
 	MountWeb(r)
 	return r
+}
+
+// authToken 单操作员 token 鉴权中间件（A6）：
+//   - `Authorization: Bearer <token>`（大小写不敏感、允许多余空白）；
+//   - WS/EventSource 等无法设置请求头的场景接受 `?token=<token>`；
+//   - 恒定时间比较（避免逐字符计时侧信道）；失败返回 HTTP 401 + REST 信封（code=40101）。
+func authToken(token string) gin.HandlerFunc {
+	want := []byte(token)
+	return func(c *gin.Context) {
+		got := ""
+		if h := c.GetHeader("Authorization"); h != "" {
+			if len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
+				got = strings.TrimSpace(h[7:])
+			}
+		}
+		if got == "" {
+			got = strings.TrimSpace(c.Query("token"))
+		}
+		if got != "" && subtle.ConstantTimeCompare([]byte(got), want) == 1 {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gincontext.DtoRender{
+			Code:      codeUnauthorized,
+			RequestID: gincontext.GetRequestID(c),
+			Msg:       "未授权：缺少或无效的访问令牌（Authorization: Bearer <FORGE_TOKEN> 或 ?token=）",
+			Data:      gin.H{},
+		})
+	}
 }
 
 // health 健康检查。

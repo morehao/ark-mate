@@ -105,6 +105,24 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 
 systemd 场景可直接用同一目录：`EnvironmentFile=-%h/.forge/config/env`（§3 单元里已注释示例）。
 
+### 2.3.2 单操作员令牌（A6）
+
+`FORGE_TOKEN`（或配置目录 `token`）非空时，除 `/health` 外**全部** `/v1/forge` 路由要求令牌：
+
+```
+FORGE_TOKEN=$(openssl rand -hex 24) ./forge serve --addr 0.0.0.0:10001
+curl -H "Authorization: Bearer $FORGE_TOKEN" http://127.0.0.1:10001/v1/forge/agents
+```
+
+- REST：`Authorization: Bearer <token>`（大小写不敏感，允许多余空白）；失败返回 HTTP 401 +
+  信封 `{code:40101,...}`（不是 HTTP 200 的业务错误——鉴权失败在传输层就该是 401）。
+- WS `/v1/forge/ws/events`：浏览器无法为握手设置请求头，故接受 `?token=<token>`。
+- `/health` 保持免鉴权（容器编排/反代 liveness 探针）。
+- 恒定时间比较；令牌不出现在日志里，`forge config` 只打印掩码。
+- 面板：顶栏「令牌」按钮填写（localStorage，仅本浏览器）；401 时自动弹出提示。
+- 这是**单操作员**令牌，不是多用户/RBAC：无用户、无角色、无审计区分。多人共用请置于
+  带认证的反向代理之后（或等后续切片）。
+
 ### 2.4 底座前置条件
 
 - `opencode`：需本机可执行 `opencode acp`。
@@ -308,3 +326,11 @@ sudo systemctl restart ark-forge
   `code=50201`「连接远程 ACP 端点失败（ws: ws://127.0.0.1:10020/acp）」，诊断 `connected=false,
   stderr_source=last_error`，尾巴含 `ws read: ... EOF`，`last_error.code=connection_lost`。
   能力探测（`/agents/:id/capabilities`）经远程传输正常返回。
+
+- 单操作员令牌（A6）：`token: cfg-token-9f3a`（config.json）→ `forge config` 输出掩码
+  `cf…3a（14 字符）`；`/health` 无令牌 200；`/agents` 无令牌/错令牌 → **HTTP 401 +
+  `code=40101`**（信封含 requestID 与提示文案），正确 `Bearer` 与 `?token=` 均 200；
+  `POST /conversations/export` 无令牌 401、带令牌 200。WS 探针（Node 24 内置 WebSocket）：
+  无令牌 `ERROR → CLOSE 1006`、错令牌同样被拒、带 `?token=` `OPEN → {"type":"pong"}`。
+  `FORGE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS（含 WS 带令牌升级）；`FORGE_SMOKE_TOKEN=…
+  node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（REST+WS 均带令牌的真实 dsh 轮次）。

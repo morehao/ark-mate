@@ -1486,3 +1486,42 @@ A5 补上远程端点接入，使 ark-forge 既能驱动本机 CLI，也能接�
 ⑤ 顺带发现（未修，留给后续切片）：`POST /conversations/:id/permission` 的响应体回显的是
 请求里的 `allowed` 字段而非「有效决策」，若调用方只传 `option_id`（不传 `allowed`）会得到
 `allowed:false` 而实际按所选选项放行——前端始终同时传两个字段，故 UI 路径无影响。
+
+#### 19.15 切片 A6：单操作员访问令牌（完成）
+
+**动机**：控制面从 M0 起无鉴权，因此默认只绑回环；一旦要跨机访问，`--addr 0.0.0.0` 就等于把
+「任意人可建会话、可跑任意 agent 命令」暴露到网络上。A6 提供最小可用的单操作员令牌。
+
+**设计**：
+1. **配置**：`FORGE_TOKEN`（或 `.forge/config` 的 `token`，复用 A4 的配置目录）。空 = 不鉴权
+   （历史行为，仍建议只绑回环）。
+2. **鉴权面**：`router.Options{Token}` → `authToken` 中间件挂在 `/health` **之后**注册的
+   全部路由上（含 WS）。REST 读 `Authorization: Bearer <token>`；WS 因浏览器无法设置握手头，
+   额外接受 `?token=<token>`。`/health` 保持免鉴权（liveness 探针不携带令牌）。
+3. **失败语义**：HTTP **401** + REST 信封 `{code:40101,requestID,msg,data:{}}`——鉴权失败属于
+   传输层，不套用「业务错误一律 HTTP 200」的约定（否则 axios 拦截器无法区分）。比较用
+   `subtle.ConstantTimeCompare`，避免逐字符计时侧信道。
+4. **令牌不外泄**：`forge config`（文本/JSON）只打印掩码 `cf…3a（14 字符）`；日志不打令牌。
+5. **前端**：`@ark/api` 新增 `getToken/setToken`（localStorage），axios 请求拦截器自动加头；
+   WS URL 追加 `?token=`；顶栏新增「令牌」按钮（锁图标，已配置时高亮）+ 设置弹窗（保存后
+   自动重连 WS 并重新拉数据）；收到 `code=40101` 自动弹窗提示。
+6. 顺带：`scripts/smoke-e2e.mjs` 与 `scripts/e2e-live-turn.mjs` 支持 `FORGE_SMOKE_TOKEN`
+   （REST 头 + WS 查询参数），使既有联调脚本在鉴权模式下继续可用；鉴权模式下可直接把
+   `E2E_BASE` 指向 daemon 端口（不经 vite 代理，避免为联调改 vite 配置）。
+
+**证据**：
+- 单测 `internal/server/router.TestAuthToken`（11 个子用例：health 免鉴权 / 缺令牌 / 错令牌 /
+  非 Bearer 方案 / 正确 Bearer / 大小写不敏感 / `?token=` 正误 / POST 受保护 / WS 无令牌 401 /
+  WS 带令牌进入升级逻辑）+ `TestAuthTokenDisabled`（未配置 = 放行）。
+- 真进程（config.json 的 `token`）：`/health` 200；`/agents` 无令牌/错令牌 → HTTP 401 +
+  `code=40101`（含 requestID 与提示）；正确 Bearer 与 `?token=` → 200；`POST /conversations/export`
+  同样受保护。WS 探针（Node 24 内置 WebSocket）：无令牌 `ERROR → CLOSE 1006`、错令牌被拒、
+  带 `?token=` `OPEN → {"type":"pong"}`。`FORGE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS；
+  `FORGE_SMOKE_TOKEN=… node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（真实 dsh 轮次，
+  REST 头 + WS 查询参数都带令牌）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；前端 typecheck + build 通过。
+
+**遗留/降级**：① 单令牌、无用户/角色/审计——不是多租户方案；② 无速率限制/防爆破（令牌应取
+高熵随机值，配合反代限流）；③ 无令牌轮换/过期机制（改配置即轮换，需重启）；④ 静态资源
+（面板 HTML/JS）不鉴权——其中不含任何密钥，接口面才是保护对象；⑤ 令牌经 `?token=` 出现在
+WS URL 中，可能被反代访问日志记录（建议反代对 `/ws/events` 关闭查询串日志）。

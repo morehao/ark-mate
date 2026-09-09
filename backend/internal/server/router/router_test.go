@@ -207,3 +207,80 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	}
 	t.Logf("README 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
 }
+
+// newAuthEngine 装配带单操作员令牌的引擎（A6）。
+func newAuthEngine(token string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	reg := runtime.DefaultRegistry()
+	bus := eventbus.New()
+	svc := manager.NewService(reg, bus)
+	h := handler.New(svc, bus)
+	return router.New(h, router.Options{Token: token})
+}
+
+// TestAuthToken 单操作员令牌：/health 免鉴权，其余 REST/WS 路由要求 Bearer 或 ?token=。
+func TestAuthToken(t *testing.T) {
+	const token = "s3cret-token"
+	eng := newAuthEngine(token)
+
+	type probe struct {
+		name       string
+		method     string
+		path       string
+		authHeader string
+		wantStatus int
+		wantCode   int
+	}
+	cases := []probe{
+		{"health 免鉴权", "GET", "/v1/forge/health", "", 200, 0},
+		{"缺令牌", "GET", "/v1/forge/agents", "", 401, 40101},
+		{"错令牌", "GET", "/v1/forge/agents", "Bearer wrong", 401, 40101},
+		{"非 Bearer 方案", "GET", "/v1/forge/agents", "Basic s3cret-token", 401, 40101},
+		{"正确 Bearer", "GET", "/v1/forge/agents", "Bearer " + token, 200, 0},
+		{"方案大小写不敏感", "GET", "/v1/forge/agents", "bearer " + token, 200, 0},
+		{"查询参数（WS/EventSource 兼容）", "GET", "/v1/forge/agents?token=" + token, "", 200, 0},
+		{"查询参数错值", "GET", "/v1/forge/agents?token=nope", "", 401, 40101},
+		{"POST 也受保护", "POST", "/v1/forge/conversations/export", "", 401, 40101},
+		{"WS 无令牌被拦", "GET", "/v1/forge/ws/events", "", 401, 40101},
+		// 放行后进入 WS 升级逻辑：非升级请求被升级库拒绝（426 Upgrade Required），
+		// 关键是「不再是 401」。
+		{"WS 带查询令牌放行（进入升级逻辑）", "GET", "/v1/forge/ws/events?token=" + token, "", 426, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			w := httptest.NewRecorder()
+			eng.ServeHTTP(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("HTTP 状态不符: got %d want %d（body=%s）", w.Code, tc.wantStatus, w.Body.String())
+			}
+			if tc.wantStatus == 401 {
+				var env struct {
+					Code      int    `json:"code"`
+					RequestID string `json:"requestID"`
+					Msg       string `json:"msg"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+					t.Fatalf("401 应返回 REST 信封: %v（body=%s）", err, w.Body.String())
+				}
+				if env.Code != tc.wantCode || env.RequestID == "" || env.Msg == "" {
+					t.Fatalf("401 信封不符: %+v", env)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthTokenDisabled 未配置令牌 = 历史行为（不鉴权）。
+func TestAuthTokenDisabled(t *testing.T) {
+	eng := newAuthEngine("")
+	req := httptest.NewRequest("GET", "/v1/forge/agents", nil)
+	w := httptest.NewRecorder()
+	eng.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("未配置令牌应放行: %d %s", w.Code, w.Body.String())
+	}
+}

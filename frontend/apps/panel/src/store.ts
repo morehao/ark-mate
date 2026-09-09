@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  HttpError,
   cancelConversation,
   createConversation,
   listAgents,
@@ -7,6 +8,8 @@ import {
   promptConversation,
   resolveElicitation,
   resolvePermission,
+  setToken as persistToken,
+  getToken,
   toErrorMessage,
   updateConversation,
 } from '@ark/api'
@@ -19,7 +22,7 @@ import type {
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
-import { Ev } from '@ark/types'
+import { BizCode, Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
@@ -288,6 +291,10 @@ export interface ForgeState {
   railMode: 'active' | 'archived'
   /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
   anchorSeq: number | null
+  /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
+  token: string
+  /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
+  tokenModalOpen: boolean
 }
 
 export interface PermissionDecision {
@@ -324,6 +331,9 @@ export interface ForgeActions {
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
+  /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
+  saveToken: (token: string) => void
+  setTokenModal: (open: boolean) => void
   /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
   expireHydration: (id: string) => void
   // transport 接线（内部）
@@ -343,10 +353,22 @@ export const initialState: ForgeState = {
   toast: null,
   drawerOpen: false,
   railMode: 'active',
+  token: getToken(),
+  tokenModalOpen: false,
 }
 
 let toastSeq = 0
 let transportRef: WsTransport | null = null
+
+// reportApiError：401（A6 令牌缺失/无效）时自动打开令牌弹窗，其余走 toast。
+function reportApiError(err: unknown): void {
+  if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
+    useForge.setState({ tokenModalOpen: true })
+    useForge.getState().showToast('需要访问令牌：请在顶栏「令牌」中填写 FORGE_TOKEN')
+    return
+  }
+  useForge.getState().showToast(toErrorMessage(err))
+}
 
 // transport 单例：常驻整个会话生命周期（跨路由保活），重连/重订阅由 transport 自理。
 function ensureTransport(): WsTransport {
@@ -427,7 +449,7 @@ export const useForge = create<ForgeStore>((set, get) => {
       try {
         set({ agents: await listAgents() })
       } catch (err) {
-        showToast(toErrorMessage(err))
+        reportApiError(err)
       }
     },
     refreshConversations: async () => {
@@ -435,9 +457,22 @@ export const useForge = create<ForgeStore>((set, get) => {
         // 按侧栏当前视图拉取：active=未归档；archived=已归档。
         set({ conversations: await listConversations(get().railMode === 'archived') })
       } catch (err) {
-        showToast(toErrorMessage(err))
+        reportApiError(err)
       }
     },
+
+    saveToken: (token) => {
+      const v = token.trim()
+      persistToken(v)
+      set({ token: v, tokenModalOpen: false })
+      // 令牌变化必须重连 WS（握手时经 ?token= 传递）并重新拉取数据。
+      transportRef?.close()
+      ensureTransport().connect()
+      void get().refreshAgents()
+      void get().refreshConversations()
+      get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
+    },
+    setTokenModal: (open) => set({ tokenModalOpen: open }),
 
     boot: () => {
       // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待

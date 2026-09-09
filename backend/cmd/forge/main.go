@@ -75,6 +75,7 @@ func configCmd(args []string) {
 				"elicitation_timeout":    cfg.ElicitationTimeout.String(),
 				"proc_registry":          cfg.ProcRegistryPath,
 				"reap_grace":             cfg.ReapGrace.String(),
+				"token":                  maskToken(cfg.Token),
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
 			"sources":         sources,
@@ -109,12 +110,24 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
 	if len(cfg.RemoteRuntimes) == 0 {
 		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
 	}
 	for _, rt := range cfg.RemoteRuntimes {
 		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtime:"+rt.ID, rt.Transport+" "+rt.Endpoint, string(config.SourceFile))
 	}
+}
+
+// maskToken 令牌只显示长度与首尾各 2 字符（避免配置核对时把令牌打进日志/截图）。
+func maskToken(t string) string {
+	if t == "" {
+		return "(未设置，不鉴权)"
+	}
+	if len(t) <= 8 {
+		return fmt.Sprintf("(已设置，%d 字符)", len(t))
+	}
+	return fmt.Sprintf("%s…%s（%d 字符）", t[:2], t[len(t)-2:], len(t))
 }
 
 func storeModeLabel(mode string) string {
@@ -347,7 +360,10 @@ func serve(args []string) {
 	orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	defer orch.Close()
 
-	srv := server.New(server.Config{Addr: cfg.Addr}, svc, bus)
+	srv := server.New(server.Config{Addr: cfg.Addr, Token: cfg.Token}, svc, bus)
+	if cfg.Token != "" {
+		slog.Info("serve: 已启用单操作员令牌鉴权（除 /health 外全部 /v1/forge 路由要求 Bearer token）")
+	}
 
 	// 优雅退出：信号 → 停 HTTP → 关编排器（回收 runtime 子进程）。
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

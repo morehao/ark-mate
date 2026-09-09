@@ -10,6 +10,8 @@ export interface Envelope<T> {
 /** 业务码常量（与 backend 约定一致：0 为成功）。 */
 export const BizCode = {
   Success: 0,
+  /** 单操作员令牌缺失/无效（A6；HTTP 状态同时为 401）。 */
+  Unauthorized: 40101,
 } as const
 
 export type BizCodeValue = (typeof BizCode)[keyof typeof BizCode]

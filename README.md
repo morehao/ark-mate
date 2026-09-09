@@ -81,10 +81,16 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 ```
 
 > **默认监听地址（安全相关）**：`forge serve` 不带 `--addr` 时读 `FORGE_ADDR`，默认
-> `127.0.0.1:10001`——**仅回环，不对外**（控制面无鉴权，故默认收窄；`lsof` 可见
-> `127.0.0.1:10001`）。确需跨机访问时显式改 `--addr 0.0.0.0:10001`（或 `FORGE_ADDR`）并自担风险，
-> 务必置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。生产建议同时
-> `export GIN_MODE=release`（消除 debug 模式告警）。
+> `127.0.0.1:10001`——**仅回环，不对外**（默认无鉴权，故默认收窄；`lsof` 可见
+> `127.0.0.1:10001`）。确需跨机访问时**先设 `FORGE_TOKEN`**（A6 单操作员令牌，见下）再显式改
+> `--addr 0.0.0.0:10001`，并置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。
+> 生产建议同时 `export GIN_MODE=release`（消除 debug 模式告警）。
+
+**单操作员令牌（A6）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的 `token`）后，除
+`/health` 外的**全部** `/v1/forge` 路由都要求 `Authorization: Bearer <token>`；WS 因浏览器无法
+设置握手头，接受 `?token=<token>`。面板顶栏「令牌」按钮可填写/清除（只存本浏览器 localStorage），
+收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码（`cf…3a（14 字符）`）。
+未设置令牌 = 历史行为（不鉴权，仅建议回环使用）。
 
 浏览器打开 <http://127.0.0.1:10001>：
 
