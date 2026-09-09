@@ -327,14 +327,24 @@ async function checkUsage() {
   if (typeof d.source !== 'string' || typeof d.group_by !== 'string' || !d.totals || !Array.isArray(d.buckets)) {
     return bad('GET /usage/summary 载荷', JSON.stringify(d))
   }
-  for (const k of ['key', 'runs', 'completed', 'failed', 'cancelled', 'duration_ms', 'context_used', 'cost_amount']) {
+  for (const k of ['key', 'runs', 'completed', 'failed', 'cancelled', 'duration_ms', 'context_used', 'cost_amount', 'usage_reported', 'cost_reported']) {
     if (!(k in d.totals)) return bad('GET /usage/summary totals 字段', `缺 ${k}: ${JSON.stringify(d.totals)}`)
+  }
+  // 口径回显：上下文/费用均为区间末快照；桶可加性与分组绑定（day 不可加）。
+  if (typeof d.context_semantics !== 'string' || typeof d.cost_semantics !== 'string' || typeof d.buckets_additive !== 'boolean') {
+    return bad('GET /usage/summary 口径字段', JSON.stringify(d))
+  }
+  if (d.buckets_additive !== (d.group_by === 'agent')) {
+    return bad('GET /usage/summary buckets_additive', `group_by=${d.group_by} additive=${d.buckets_additive}`)
   }
   ok(`GET /usage/summary source=${d.source} group_by=${d.group_by} totals.runs=${d.totals.runs} buckets=${d.buckets.length}`)
 
   const day = await apiGet('/usage/summary?group_by=day')
   if (day.env.code !== 0 || day.env.data?.group_by !== 'day') return bad('GET /usage/summary group_by=day', JSON.stringify(day.env))
-  ok(`GET /usage/summary group_by=day buckets=${day.env.data.buckets.length}`)
+  if (day.env.data?.buckets_additive !== false) {
+    return bad('GET /usage/summary group_by=day buckets_additive', JSON.stringify(day.env.data))
+  }
+  ok(`GET /usage/summary group_by=day buckets=${day.env.data.buckets.length}（快照口径，桶不可加）`)
 
   const badGroup = await apiGet('/usage/summary?group_by=tool')
   if (badGroup.http !== 200 || badGroup.env.code !== 40001) {

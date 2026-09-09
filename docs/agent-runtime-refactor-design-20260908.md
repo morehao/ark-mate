@@ -1154,8 +1154,86 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   断言后仍全 PASS（无回归）。
 
 **遗留**：前端尚无用量视图（REST 面与 smoke 断言已就绪）；逐轮 token/费用明细受 ACP 通道限制
-（底座只给上下文快照 + 可选累计费用）；`runs` 的 REST 明细未暴露 `usage_json`（统计 API 是唯一读面）；
+（底座只给上下文快照 + 可选累计费用）；`runs` 的 REST 明细原未暴露 `usage_json`（统计 API 是唯一读面，
+P1 已补：`GET /conversations/:id/runs` 现含每轮 `usage`，会话视图在终态轮后渲染单轮用量行）；
 大规模数据下聚合在 Go 侧完成（区间过滤已下推 SQL），如需再优化可加物化日表。
+
+#### 19.7.1 用量口径收口（P0 修正：快照语义显式化 + 上报率分列 + 多币种不混加）
+
+**动机**：§19.7 的快照口径只写在注释里，API 消费者无法区分「区间末快照」与「区间增量」，且四处
+实现/展示与语义不一致——① day 分桶的成本/上下文是「每会话累计快照」，同一会话跨天会在多天各出现
+一次，前端却把「合计」摆在表底（读起来像各行之和）；② 卡片标题「上下文峰值」实际是「区间末各会话
+占用之和」，既不是峰值也不是增量；③ `Reported()` 把「只报了费用」的会话算进 `usage_reported`，
+上下文/费用上报率混为一谈；④ 多币种金额被直接相加。
+
+**改动（只显式化口径，不新增数据源、不做估算）**：
+
+- `acl.UsageInfo` 拆出 `HasContext()` / `HasCost()`（`Reported()` = 二者之一）：上下文与费用分别计数；
+  压缩后 `Used=0` 而 `Size>0` 仍属有效上下文上报。
+- `store.UsageSummary`：上下文/费用改为**字段级**取区间内每会话最后一次上报（只带上下文的一轮不再
+  抹掉此前上报的费用，反之亦然）；新增 `cost_reported`；多币种 → `cost_amount=0` +
+  `cost_currency=MIXED` + `cost_by_currency` 明细；空币种归一 `USD`（与前端 `$` 展示一致）。
+- `GET /usage/summary` 回显 `context_semantics`（`end_of_window_snapshot_sum`）、`cost_semantics`
+  （`session_cumulative_end_of_window`）、`buckets_additive`（agent 分组 true；day 分组 false）。
+- 前端：`上下文峰值` → `上下文占用（区间末）`；day 分组时合计行改标「区间末」并注明「不可与上方
+  各行相加」；上下文/成本列 tooltip 显示上报覆盖率（`上报 x/y 会话`）；成本列渲染多币种明细。
+
+**证据**：
+
+- 单测：`TestUsageSummaryFieldWiseSnapshotAndCurrency`（字段级快照 + 空币种归一 + 多币种 MIXED 明细
+  + 单币种求和）、`TestUsageInfoReported`（HasContext/HasCost 分列判定）、`TestUsageSummaryAggregate`
+  与 `TestUsageSummaryService` 增补 `cost_reported`、口径字段与 `buckets_additive` 断言。
+- 真进程（`forge serve` :18099 sqlite，直接写库构造 3 会话 4 轮）：agent 分组
+  `usage_reported=2 cost_reported=3 cost_currency=MIXED cost_by_currency={EUR:0.2,USD:0.6}
+  context_used=280 context_size=1300`；`agent-echo` 桶 `MIXED{EUR:0.2,USD:0.5}`、
+  `agent-other` 桶 `USD 0.1`（空币种归一）；day 分组 `buckets_additive=false`，
+  两日桶 `2026-10-01`（ctx 250/1000）/ `2026-10-02`（ctx 30/300）。
+- `go vet ./...` + 相关包 `go test` 全绿；前端 `pnpm typecheck` 通过；`smoke:e2e` 增补口径字段、
+  `cost_reported` 与 `buckets_additive` 断言。
+
+**遗留**：费用仍依赖底座上报 `usage.cost`（见 §20 D4）；「区间增量」口径需底座提供逐轮 token/费用
+明细——ACP 标准 `session/usage_update` 只有快照，扩展通道（`usage_update._meta` 或厂商自定义通知）
+见 §20 O8。
+
+#### 19.7.2 会话视图单轮用量（P1：`runs` 暴露 `usage` + 前端渲染）
+
+**动机**：用量曾在会话详情面板与「用量」页有**汇总**，但主会话视图（transcript）里看不到**每一轮**
+的用量——用户在一轮结束后无从得知这轮上下文占用/成本。数据（`runs.usage_json`）一直在落库，缺的只是
+暴露与渲染。
+
+**改动**：
+
+- 后端 `RunResp` 增加 `usage`（解析 `runs.usage_json`，与 `acl.UsageInfo` 同构：`used/size/cost`；
+  无上报 → `omitempty`，保持「不臆造零值」）。`GET /conversations/:id/runs` 现返回每轮用量。
+- 前端：`conversationRuns(id)` API + `ConversationRun/RunUsage` 类型；`ChatPage` 在会话切换或轮次
+  终态（`streaming` true→false）后重拉 runs，构建 `run.last_seq → 用量展示` 映射（轮次窗口语义
+  使 `run.last_seq` 恰为该轮 `turn.ended` 事件 seq，与 transcript 终态条目的 `seq` 精确对应）；
+  `EntryView` 的终态系统行（`完成 · …`）据此渲染单轮用量行：`上下文 30.0k / 128.0k`[` · Δ +3.2k`]
+  [` · $0.5`]。
+- **goose 风格单轮用量（真实数据，不估算）**（P0 后续迭代）：`runs` 增加 `first_token_ms`（turn
+  收口由 `materializeRun` 取窗口内**首个 assistant 输出**事件——`session.message/thought/tool_call`
+  任一——相对用户消息的时刻；无输出 → 0），读面 `RunResp` 透传。前端把单轮用量行包成 hover popover，
+  展示真实明细：`上下文占用（快照）/ 首令牌 / 总耗时 / 成本`，并注明「上下文为窗口快照（非增量）；
+  input/output 明细未由底座上报」。composer 下方常驻一行最近一轮汇总：`首令牌 714ms · 总耗时 1.5s ·
+  上下文 30k/128k · $0.5`（`fmtRunDockLine`）。**口径**：首令牌/总耗时来自真实 run 时间戳，成本来自
+  底座上报；**不估算** token 数——逐轮输入/输出 token 需底座经 ACP 提供（见 §20 O8），故 popover
+  无 goose 的「输入/输出/总计」与「速度」（= token/时长，依赖 token 数）。总耗时为 `ended−started`，
+  含权限等待等真实耗时。
+- 口径说明：`used` 是上下文窗口占用**快照**（会话累计），`Δ` = 相对上一有上报轮的增长——**不是**
+  「本轮消耗 token」（压缩后可能 Δ≤0）；这与 §19.7.1 的快照语义一致，前端如实标注。
+
+**证据**：
+
+- 单测：`TestRunUsageExposedInListRuns`（有上报 → `Usage` 结构体；空串 → `nil`；`FirstTokenMS` 透传）、
+  `TestRunMaterializationAtTurnEnd`（不回归，且无 assistant 输出轮 `first_token_ms=0`）。
+- 真进程（`forge serve` sqlite）：echo 底座一轮 `runs` 返回 `usage {used:135,size:128000,cost_amount:0.00135}`、
+  `duration_s≈2.07`；`first_token_ms` 逻辑正确（echo 亚毫秒响应 → 0 被 `omitempty` 省略；真实底座有模型延迟）。
+- 前端 `pnpm typecheck` + `pnpm --filter @ark/panel build` 通过；后端 `go test` 全绿（store/manager）。
+
+**遗留**：单轮用量只在**轮次终态后**显示（runs 落库于 turn 收口）；轮进行中的实时用量尚未接（WS
+`session.usage` 事件已在流内，可后续在 assistant 尾部滚动显示）；goose 风格的「输入/输出/总计」与
+「速度」因缺逐轮 token 数而**不显示**（不估算）；`Δ` 非「本轮消耗 token」，逐轮输入/输出 token 需底座
+经 ACP 提供（§20 O8）。
 
 #### 19.8 切片 H1：文档一致性收口 + 部署文档（完成）
 
@@ -1965,7 +2043,7 @@ oc 摘除登记且目录保留 → dsh 也退出 → 目录删除）、`TestRead
 | D1 | **elicitation 会话归属只能推断**：Go SDK v0.13.5 丢弃顶层 `sessionId`，宿主按「连接上唯一在途 turn」归属；同连接多会话并发在途时**无法唯一归属 → 按取消处理**（WARN 留痕，不猜测），载荷用 `scope_source=inferred_inflight` 标明来源 | SDK 补规范 scope 字段（届时置 `wire`）；或改连接级串行执行（牺牲并发，§17 E2 开放项） | §19.23 |
 | D2 | **dsh 的 skill root 不可按会话/agent 指定**：provider 构造时读 `DSH_AGENTS_HOME`/`DSH_BUNDLED_SKILL_DIR`，但 dsh 运行时的插件接线不可从 ACP 观测（实测 `initialize`/`session/new` 无 skill 帧），且 `DSH_AGENTS_HOME` 是 dsh 通用 agents 家目录，按会话覆盖会越界 | 出现「同一部署内多 agent 需不同 skill 集合」的真实需求（opencode 侧注入方式已实证可用） | §19.26 |
 | D3 | **底座原生权限开关只覆盖已知键**：opencode 只映射已知权限键、未知键跳过（仍由平台拦截面裁决）；dsh `read-only` 下底座会发起沙箱升级请求，该请求走平台权限通道——**策略 allow 时会被平台放行**，即原生沙箱不构成对平台 allow 的否决；echo 无原生开关 | 需要「原生沙箱否决平台放行」时（需底座提供不可绕过的策略位） | §19.20 |
-| D4 | **用量成本依赖底座上报**：`usage.cost` 需底座主动上报，当前 echo 与实测 runtime 均未上报 → 前端显示 `—`，**不做估算**；逐轮 token/费用明细受 ACP 通道限制（只有上下文快照 + 可选累计费用） | 底座开始上报 cost 或提供逐轮用量 | §19.7 · §19.21 |
+| D4 | **用量成本依赖底座上报**：`usage.cost` 需底座主动上报，当前 echo 与实测 runtime 均未上报 → 前端显示 `—`，**不做估算**；逐轮 token/费用明细受 ACP 通道限制（只有上下文快照 + 可选累计费用）；快照口径/上报率/多币种已显式化（§19.7.1） | 底座开始上报 cost 或提供逐轮用量 | §19.7 · §19.7.1 · §19.21 |
 | D5 | **dsh 的 `.system` 子目录与可选键未映射**（`user-invocable`/`disable-model-invocation` 等）；`resources/subscribe`、`prompts` 的 `completion/complete` 未支持（B2）；MCP 服务端反向请求（sampling/roots）只回 `method_not_found`（B3） | 有真实使用场景再评估（当前不在平台范围） | §19.4 · §19.17 · §19.18 |
 
 ### 20.2 平台自身未做（OPEN）
@@ -1979,7 +2057,7 @@ oc 摘除登记且目录保留 → dsh 也退出 → 目录删除）、`TestRead
 | O5 | **远程 runtime 无鉴权面**（`headers` 可带 token，平台不做 OAuth/mTLS）；HTTP 形态 GET 长流在建会话前被 404（降级记诊断）；服务端半场会话只在内存 | 跨机/跨组织接入 | §19.14 |
 | O6 | **进程回收边界**：非 unix 无进程组信号（降级不支持）；已 `setsid` 脱离进程组的孙进程不在回收范围；注册表无跨实例锁 | 非 unix 部署或需要更严回收 | §19.10 |
 | O7 | **导出/检索增强**：导出无 zip 打包、无「导出全部会话」服务端游标（ids 上限 50）；检索为子串匹配，无分词/相关性排序 | 大规模导出或需要相关性排序 | §19.11 |
-| O8 | **用量视图增强**：无图表（不引图表库）、时间区间按本地日期而后端按 UTC 半开区间（跨时区 ≤1 天偏差）、`runs` 的 REST 明细未暴露 `usage_json` | 需要图表/时区精确/逐轮明细 | §19.21 · §19.7 |
+| O8 | **用量视图增强**：无图表（不引图表库）、时间区间按本地日期而后端按 UTC 半开区间（跨时区 ≤1 天偏差）、逐轮 token/费用明细仍受 ACP 通道限制（仅上下文快照 + 可选累计费用）；day 桶不可加已由 `buckets_additive` 显式标注（§19.7.1），`runs` 每轮 `usage` 已暴露并在会话视图渲染（§19.7.2） | 需要图表/时区精确/逐轮输入输出 token 明细 | §19.21 · §19.7 · §19.7.1 · §19.7.2 |
 | O9 | **历史分页增强**：前端「加载更早」50 条/页无虚拟滚动；不支持 `before`+`after` 组合区间；空视图点击「加载更早」等价取末尾一页 | 长会话性能或区间查询需求 | §19.22 |
 | O10 | **skill 投影增强**：无「按 agent/cwd 动态 root」（见 D2 结论）、无 skill 文件变更热重载 | 多 agent skill 隔离 / 免重启更新 | §19.24 · §19.26 |
 | O11 | **权限策略增强**：无「按工具参数模式匹配」（如 bash 命令白名单）；前端策略编辑的工具项是 JSON 文本域（无键值行编辑器）；原生配置在连接建立时固定，运行中 PATCH 只影响新连接 | 精细化策略 / 更好的编辑体验 | §19.5 · §19.20 · §19.21 |

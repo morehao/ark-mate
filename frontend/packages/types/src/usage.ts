@@ -22,9 +22,15 @@ export interface UsageBucket {
   duration_ms: number
   context_used: number
   context_size: number
+  /** 上报过上下文的会话数（与 cost_reported 分开，二者不可互相替代）。 */
   usage_reported: number
+  /** 上报过费用的会话数。 */
+  cost_reported: number
   cost_amount: number
+  /** `USD` 等；多币种为 `MIXED`（此时 cost_amount=0，明细见 cost_by_currency）。 */
   cost_currency?: string
+  /** 多币种时的分币种金额；单币种为空。 */
+  cost_by_currency?: Record<string, number>
 }
 
 /** 用量汇总：总计 + 分组桶 + 生效条件回显。 */
@@ -35,6 +41,12 @@ export interface UsageSummary {
   group_by: string
   /** sqlite | memory（memory 模式无统计）。 */
   source: string
+  /** 上下文口径：`end_of_window_snapshot_sum`（区间末快照，非增量）。 */
+  context_semantics: string
+  /** 费用口径：`session_cumulative_end_of_window`（会话累计快照，非增量）。 */
+  cost_semantics: string
+  /** 桶之间能否相加：agent 分组 true；day 分组 false（跨天会话的累计快照会重复出现）。 */
+  buckets_additive: boolean
   totals: UsageBucket
   buckets: UsageBucket[]
 }

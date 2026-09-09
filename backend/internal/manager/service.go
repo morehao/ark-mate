@@ -798,6 +798,14 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 
 	started := evs[0].CreatedAt
 	ended := evs[len(evs)-1].CreatedAt
+	// 首令牌耗时：首个 assistant 输出（文本/思考/工具）事件相对窗口起点的时刻；无输出则为 0。
+	var firstTokenMS int64
+	for _, e := range evs {
+		if e.Type == BusMessage || e.Type == BusThought || e.Type == BusToolCall {
+			firstTokenMS = e.CreatedAt.Sub(started).Milliseconds()
+			break
+		}
+	}
 	// M3 用量统计：随 run 落库该会话最近一次 ACP 用量快照（无上报 → 空串，不臆造数值）。
 	usageJSON := ""
 	if s.orch != nil {
@@ -810,7 +818,7 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 	r := store.Run{
 		ID: runID, ConversationID: conversationID, UserText: userText, Status: status,
 		ErrorCode: errCode, StopReason: stopReason, UsageJSON: usageJSON,
-		FirstSeq: firstSeq, LastSeq: lastSeq,
+		FirstSeq: firstSeq, LastSeq: lastSeq, FirstTokenMS: firstTokenMS,
 		StartedAt: started, EndedAt: ended,
 	}
 	if err := s.st.CreateRun(ctx, r); err != nil {
@@ -838,11 +846,19 @@ func (s *Service) ListRuns(ctx context.Context, id string) ([]handler.RunResp, e
 		resp := handler.RunResp{
 			ID: r.ID, UserText: r.UserText, Status: r.Status,
 			ErrorCode: r.ErrorCode, StopReason: r.StopReason,
-			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq,
+			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
 			StartedAt: r.StartedAt.UTC().Format(time.RFC3339Nano),
 		}
 		if !r.EndedAt.IsZero() {
 			resp.EndedAt = r.EndedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if r.UsageJSON != "" {
+			var u acl.UsageInfo
+			if err := json.Unmarshal([]byte(r.UsageJSON), &u); err == nil && u.Reported() {
+				resp.Usage = &handler.RunUsageResp{
+					Used: u.Used, Size: u.Size, CostAmount: u.CostAmount, CostCurrency: u.CostCurrency,
+				}
+			}
 		}
 		out = append(out, resp)
 	}

@@ -36,8 +36,18 @@ type UsageInfo struct {
 	CostCurrency string  `json:"cost_currency,omitempty"`
 }
 
-// Reported 是否携带可用信息（全零视为「无上报」，统计时不计入上报会话数）。
-func (u UsageInfo) Reported() bool { return u.Used > 0 || u.Size > 0 || u.CostAmount > 0 }
+// HasContext 是否携带可用的上下文占用快照（Used/Size 至少一项为正）。
+// 压缩后 Used=0 而 Size 仍为正属正常上报；两者全零视为未上报上下文。
+func (u UsageInfo) HasContext() bool { return u.Used > 0 || u.Size > 0 }
+
+// HasCost 是否携带可用的费用（正金额）。底座上报「0 元」与「未上报」在 wire 上不可区分，
+// 一律按未上报处理（不臆造零成本）。
+func (u UsageInfo) HasCost() bool { return u.CostAmount > 0 }
+
+// Reported 是否携带任一可用字段（上下文或费用）。
+// 上下文与费用的上报率不同（实测底座多只报上下文），统计时分别用 HasContext/HasCost 计数，
+// 避免「只报了费用」的会话被算进上下文上报数。
+func (u UsageInfo) Reported() bool { return u.HasContext() || u.HasCost() }
 
 // Event 是归一化后的 ACP 事件，交给注入的 OnEvent 回调（manager 的 event sink）。
 type Event struct {

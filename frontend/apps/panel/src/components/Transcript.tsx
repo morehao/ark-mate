@@ -1,11 +1,12 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { Button, Checkbox, Input, InputNumber, Radio } from 'antd'
+import { Button, Checkbox, Input, InputNumber, Popover, Radio } from 'antd'
 import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark/types'
 import { useForge, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { parseMsg } from '../console/message'
+import { runStatRows, type RunUsageInfo } from '../console/usageView'
 import { Md } from './Md'
 
 const roleLabel: CSSProperties = {
@@ -582,7 +583,19 @@ function RichText({ text }: { text: string }) {
 }
 
 /** 一条流式会话条目（console.html .msg 家族：气泡 / 思考 / 工具卡 / meta 行）。 */
-export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void }) {
+export function EntryView({
+  e,
+  onRetry,
+  usageText,
+  runInfo,
+}: {
+  e: StreamEntry
+  onRetry?: () => void
+  /** 该轮用量展示行（如 `上下文 30.0k / 128.0k · Δ +3.2k`；仅终态轮的 turn-end 条目有值）。 */
+  usageText?: string
+  /** 该轮用量的结构化数据（含首令牌/总耗时/成本），供 goose 风格 popover；无则仅显示 usageText。 */
+  runInfo?: RunUsageInfo
+}) {
   switch (e.kind) {
     case 'permission':
       return <PermissionCard e={e} />
@@ -770,6 +783,53 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
           >
             {systemIcon[tone]}
             <span>{e.text}</span>
+            {usageText && (
+              <Popover
+                title="本轮用量"
+                trigger="hover"
+                placement="bottom"
+                content={
+                  runInfo ? (
+                    <div style={{ minWidth: 230 }}>
+                      {runStatRows(runInfo).map((r) => (
+                        <div
+                          key={r.label}
+                          style={{ display: 'flex', justifyContent: 'space-between', gap: 24, padding: '2px 0' }}
+                        >
+                          <span style={{ color: tokens.textSecondary }}>{r.label}</span>
+                          <span style={{ fontFamily: tokens.fontMono }}>{r.value}</span>
+                        </div>
+                      ))}
+                      <div
+                        style={{
+                          marginTop: 6,
+                          paddingTop: 6,
+                          borderTop: `1px solid ${tokens.border}`,
+                          color: tokens.textPlaceholder,
+                          fontSize: 11,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        上下文为窗口快照（非增量）；input/output 明细未由底座上报。
+                      </div>
+                    </div>
+                  ) : null
+                }
+              >
+                <span
+                  style={{
+                    color: tokens.textSecondary,
+                    display: 'inline-flex',
+                    gap: 7,
+                    alignItems: 'center',
+                    cursor: runInfo ? 'help' : 'default',
+                  }}
+                >
+                  <span style={{ color: tokens.border }}>·</span>
+                  {usageText}
+                </span>
+              </Popover>
+            )}
           </div>
           {retry && (
             <Button

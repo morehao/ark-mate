@@ -31,6 +31,7 @@ import type {
   Tool,
   ConversationDetail,
   ConversationPatch,
+  ConversationRun,
   ConversationSearchHit,
   ConversationSummary,
   MessageSearchResp,
@@ -70,6 +71,10 @@ export const exportConversations = (ids: string[], format: 'markdown' | 'text' |
 /** 单会话详情（元数据 + 挂起权限）。 */
 export const getConversation = (id: string): Promise<ConversationDetail> =>
   http.get<ConversationDetail>(`/forge/conversations/${encodeURIComponent(id)}`)
+
+/** 某会话的轮次明细（runs 表读模型；含每轮用量快照。内存模式返回空数组）。 */
+export const conversationRuns = (id: string): Promise<{ id: string; runs: ConversationRun[] }> =>
+  http.get<{ id: string; runs: ConversationRun[] }>(`/forge/conversations/${encodeURIComponent(id)}/runs`)
 
 /** 更新会话元数据（title/pinned/archived 子集，nil 不更新）。 */
 export const updateConversation = (id: string, patch: ConversationPatch): Promise<ConversationSummary> =>

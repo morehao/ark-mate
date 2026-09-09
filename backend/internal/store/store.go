@@ -127,8 +127,10 @@ type Run struct {
 	UsageJSON      string
 	FirstSeq       int64
 	LastSeq        int64
-	StartedAt      time.Time
-	EndedAt        time.Time
+	// FirstTokenMS 本轮从用户消息到首个 assistant 输出（文本/思考/工具）的耗时（ms）；0 = 未记录。
+	FirstTokenMS int64
+	StartedAt    time.Time
+	EndedAt      time.Time
 }
 
 // Message 是 messages 表的一行（消息物化：role/text + 交错时间线 + 工具最终态）。
