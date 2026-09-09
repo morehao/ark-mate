@@ -8,7 +8,8 @@
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
- *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误。
+ *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
+ *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
  *
  * 用法（先起 make dev，或后端 127.0.0.1:10001 + 前端 vite dev :5173）：
  *   E2E_BASE=http://localhost:5173 node scripts/smoke-e2e.mjs
@@ -147,15 +148,24 @@ async function checkRest() {
   ok(`GET /mcps → 数组信封（含 tool_count 等探测状态；${mcps.env.data.length} 条）`)
 
   // M3 用量统计：聚合信封 + 分桶形态 + 参数校验（业务错误 HTTP 200 + code≠0）。
+  // 内存模式（未启用 store）按设计返回 40501 usage_stats_unsupported（不返回假零值）——
+  // 这是显式降级，脚本按「已降级」记 PASS 并注明，避免默认启动下出现误导性 FAIL；
+  // sqlite 模式才做完整形状断言。
   const usage = await apiGet('/usage/summary')
-  if (usage.http !== 200 || usage.env.code !== 0) return bad('GET /usage/summary', `HTTP ${usage.http} code=${usage.env.code} msg=${usage.env.msg}`)
-  const u = usage.env.data
-  if (u.group_by !== 'agent' || u.source !== 'sqlite' || typeof u.totals?.runs !== 'number' || !Array.isArray(u.buckets))
-    return bad('GET /usage/summary 载荷', JSON.stringify(u))
-  ok(`GET /usage/summary → totals.runs=${u.totals.runs} buckets=${u.buckets.length} source=${u.source}`)
-  const usageBad = await apiGet('/usage/summary?group_by=tool')
-  if (usageBad.http !== 200 || usageBad.env.code !== 40001) return bad('GET /usage/summary 非法 group_by', `HTTP ${usageBad.http} code=${usageBad.env.code}`)
-  ok('GET /usage/summary?group_by=tool → HTTP 200 code=40001')
+  if (usage.http === 200 && usage.env.code === 40501) {
+    if (!String(usage.env.msg || '').includes('usage_stats_unsupported'))
+      return bad('GET /usage/summary 降级标记', `code=40501 但 msg 缺 usage_stats_unsupported: ${usage.env.msg}`)
+    ok('GET /usage/summary → 40501 usage_stats_unsupported（内存模式按设计降级，跳过形状断言）')
+  } else {
+    if (usage.http !== 200 || usage.env.code !== 0) return bad('GET /usage/summary', `HTTP ${usage.http} code=${usage.env.code} msg=${usage.env.msg}`)
+    const u = usage.env.data
+    if (u.group_by !== 'agent' || u.source !== 'sqlite' || typeof u.totals?.runs !== 'number' || !Array.isArray(u.buckets))
+      return bad('GET /usage/summary 载荷', JSON.stringify(u))
+    ok(`GET /usage/summary → totals.runs=${u.totals.runs} buckets=${u.buckets.length} source=${u.source}`)
+    const usageBad = await apiGet('/usage/summary?group_by=tool')
+    if (usageBad.http !== 200 || usageBad.env.code !== 40001) return bad('GET /usage/summary 非法 group_by', `HTTP ${usageBad.http} code=${usageBad.env.code}`)
+    ok('GET /usage/summary?group_by=tool → HTTP 200 code=40001')
+  }
 
   // M3 ② 消息级检索（锚点跳转数据面）：信封形状 + 锚点字段 + 参数校验。
   const ms = await apiGet('/search/messages?q=forge-smoke-never-matches&limit=5')

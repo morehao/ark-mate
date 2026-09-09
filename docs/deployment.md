@@ -418,3 +418,8 @@ sudo systemctl restart ark-forge
   删除联动：移除 `dsh-only.json` 重启 → `dir=/tmp/c4/dsh runtime=deepseekharness written=0 removed=1`，
   oc root 不受影响。兼容路径：`FORGE_SKILLS_MATERIALIZE_DIR=/tmp/c4/shared` 单 root → 3 个 skill 全物化
   （同一目标文件多 format 时按既有约定取首个并告警）。
+- smoke 脚本模式自适应（C4 附带）：`E2E_BASE=http://127.0.0.1:10001 node frontend/scripts/smoke-e2e.mjs`
+  在**内存模式**（默认启动）下 `/usage/summary` 按设计返回 `40501 usage_stats_unsupported`，
+  脚本记 PASS 并注明降级（不再误报 FAIL）；**sqlite 模式**下做完整形状断言
+  （`source=sqlite`、`group_by=agent|day` 分桶、非法 `group_by=tool` → 40001）。两种模式实测均
+  `✅ 通路全部 PASS`。
