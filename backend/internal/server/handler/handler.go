@@ -43,8 +43,9 @@ type Service interface {
 	PromptConversation(ctx context.Context, id, prompt string) (*ConversationPromptResp, error)
 	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
 	CancelTurn(ctx context.Context, id string) error
-	// ConversationHistory 返回会话的事件历史（eventbus 按聚合回放；after/limit 分页）。
-	ConversationHistory(ctx context.Context, id string, after int64, limit int) (*ConversationHistoryResp, error)
+	// ConversationHistory 返回会话的事件历史（sqlite 模式读 events 表，内存模式回放 eventbus；
+	// after（向后）/before（向前）互斥游标 + limit 分页）。
+	ConversationHistory(ctx context.Context, id string, q HistoryQuery) (*ConversationHistoryResp, error)
 	// ListRuns 列出某会话的轮次明细（runs 表读模型：状态/耗时/usage/失败轮回溯；内存模式返回空）。
 	ListRuns(ctx context.Context, id string) ([]RunResp, error)
 	// ListPendingPermissions 列出某会话的挂起权限请求。
@@ -560,11 +561,26 @@ type ConversationPromptResp struct {
 	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
 }
 
+// HistoryQuery 会话历史分页参数（GET /conversations/:id/history）。
+// After/Before 互斥：After 向后（seq > after，升序）；Before 向前（seq < before，仍升序返回，
+// 用于「加载更早」）。Limit 1..1000（0 → 默认 200）。
+type HistoryQuery struct {
+	After int64
+	// Before 向前游标（seq < Before）；Before=0 且 HasBefore=true = 取末尾一页。
+	Before    int64
+	HasBefore bool
+	Limit     int
+}
+
 // ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
 type ConversationHistoryResp struct {
-	ID      string           `json:"id"`
-	Events  []eventbus.Event `json:"events"`
-	HasMore bool             `json:"has_more"` // 是否还有更早/后续页（客户端用末条 seq 作为下页 after）
+	ID     string           `json:"id"`
+	Events []eventbus.Event `json:"events"`
+	// HasMore 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。
+	HasMore bool `json:"has_more"`
+	// FirstSeq/LastSeq 本页首尾事件 seq（空页为 0）；客户端据此继续向前/向后翻页。
+	FirstSeq int64 `json:"first_seq"`
+	LastSeq  int64 `json:"last_seq"`
 }
 
 // RunResp 轮次明细的对外表示（runs 表读模型：失败轮输入/重试/统计回溯）。

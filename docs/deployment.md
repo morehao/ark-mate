@@ -391,3 +391,10 @@ sudo systemctl restart ark-forge
   非法 `native_mode` → `40001 permission_policy.native_mode: 取值 "yolo" 非法（auto|off|read-only|workspace-write|danger-full-access）`。
   `scripts/smoke-e2e.mjs` 新增 3 项用量断言全 PASS（含 group_by=day 与非法分组）。
   视图纯函数 Node 侧校验 34 项 PASS（`fmtDuration/fmtCost/fmtContext/successRate/usageRows/parsePolicyTools/policySummary/policyColor`）。
+- `/history` before 游标（C2）：真进程（release 二进制 127.0.0.1:10019，sqlite，单会话 65540 条事件，
+  会话 id 为平台 uuid `b937db79-750c-4406-ae6c-9cfa91916605`）
+  `?before=0&limit=3` → `first=65538 last=65540 texts=[m65538,m65539,m65540] has_more=true`；
+  连续 `before=<first>` 逐页回退（65535→65532→65529…）；`limit=1000` 翻 66 页到 `first_seq=1`（`m1`）且
+  `has_more=false`。同库对照：WS `attach(since_seq=0)` 回 `snapshot` 且重放事件数 0（eventbus 上限 65536，
+  seq 1..4 已被淘汰）——REST 仍能翻到 seq 1，证明历史读 SQLite events 表而非 bus。
+  `after=1&before=2` → `40001 after 与 before 互斥`；`before=-1` → `40000 before 需为非负整数`。

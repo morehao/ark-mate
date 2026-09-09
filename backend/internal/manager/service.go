@@ -1107,32 +1107,90 @@ func (s *Service) restErr(err error) error {
 	return gerror.Error{Code: code, Msg: msg}
 }
 
-// ConversationHistory 返回会话事件历史（eventbus 按聚合回放，after/limit 分页，seq 升序）。
-// M1 为内存回放：会话须在本进程登记过（进程内即 daemon 会话表），未知会话 → 40401。
-func (s *Service) ConversationHistory(ctx context.Context, id string, after int64, limit int) (*handler.ConversationHistoryResp, error) {
+// ConversationHistory 返回会话事件历史（seq 升序，after 向后 / before 向前）。
+//
+// 数据源：sqlite 模式（st != nil）读 events 表——durable、不受 eventbus 内存上限（65536）约束，
+// 「加载更早」可一直翻到会话第一条；内存模式回放 eventbus（进程内）。
+// 语义：after（开区间，seq > after）与 before（开区间，seq < before，返回最近 limit 条并升序排列）
+// 互斥（handler 已拦，服务层再兜一次 → 40001）；has_more 沿当前方向；首尾 seq 一并回带。
+func (s *Service) ConversationHistory(ctx context.Context, id string, q handler.HistoryQuery) (*handler.ConversationHistoryResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
-	if after < 0 {
-		after = 0
+	if q.After > 0 && q.HasBefore {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "history_cursor_conflict",
+			"after 与 before 互斥（一个向后、一个向前）", nil))
 	}
-	if limit < 1 {
-		limit = 1
+	if q.After < 0 {
+		q.After = 0
 	}
-	all := s.bus.EventsAfter(after)
-	events := make([]eventbus.Event, 0, min(limit, len(all)))
-	hasMore := false
-	for _, evt := range all {
-		if evt.AggregID != id {
-			continue
+	if q.Before < 0 {
+		q.Before = 0
+	}
+	if q.Limit < 1 {
+		q.Limit = 1
+	}
+	if q.Limit > 1000 {
+		q.Limit = 1000
+	}
+
+	var (
+		events  []eventbus.Event
+		hasMore bool
+	)
+	if s.st != nil {
+		var batch []store.Event
+		var err error
+		if q.HasBefore {
+			batch, hasMore, err = s.st.EventsBefore(ctx, id, q.Before, int64(q.Limit))
+		} else {
+			batch, hasMore, err = s.st.EventsAfter(ctx, id, q.After, int64(q.Limit))
 		}
-		if len(events) >= limit {
+		if err != nil {
+			return nil, s.restErr(acl.NewError(acl.ClassService, "history_read_failed",
+				fmt.Sprintf("读取会话历史失败：%v", err), nil))
+		}
+		events = make([]eventbus.Event, 0, len(batch))
+		for _, e := range batch {
+			events = append(events, eventbus.Event{
+				Type: e.Type, Seq: e.Seq, AggregID: e.ConversationID, Payload: decodePayload(e.PayloadJSON),
+			})
+		}
+	} else {
+		all := s.bus.EventsAfter(0)
+		mine := make([]eventbus.Event, 0, len(all))
+		for _, evt := range all {
+			if evt.AggregID != id {
+				continue
+			}
+			if q.HasBefore {
+				if q.Before > 0 && evt.Seq >= q.Before {
+					continue
+				}
+			} else if evt.Seq <= q.After {
+				continue
+			}
+			mine = append(mine, evt)
+		}
+		if q.HasBefore {
+			// 取窗口末尾 limit 条（保持升序）；窗口外还有更早 → has_more。
+			if len(mine) > q.Limit {
+				hasMore = true
+				mine = mine[len(mine)-q.Limit:]
+			}
+		} else if len(mine) > q.Limit {
 			hasMore = true
-			break
+			mine = mine[:q.Limit]
 		}
-		events = append(events, evt)
+		events = mine
 	}
-	return &handler.ConversationHistoryResp{ID: id, Events: events, HasMore: hasMore}, nil
+
+	resp := &handler.ConversationHistoryResp{ID: id, Events: events, HasMore: hasMore}
+	if len(events) > 0 {
+		resp.FirstSeq = events[0].Seq
+		resp.LastSeq = events[len(events)-1].Seq
+	}
+	return resp, nil
 }
 
 // hasConversation 判断会话是否在本进程登记。

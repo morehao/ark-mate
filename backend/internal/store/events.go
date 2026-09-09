@@ -177,3 +177,48 @@ func (s *Store) EventsAllAfter(ctx context.Context, after, limit int64) ([]Event
 	}
 	return out, hasMore, nil
 }
+
+// EventsBefore 反向分页：返回 seq < before 的最近 limit 条事件（结果仍按 seq 升序）。
+// hasMore 表示窗口之外还有更早的事件（即返回的第一条不是该会话最早的一条）。
+// before<=0 时按「从最新往回」处理（等价于取末尾 limit 条）。
+func (s *Store) EventsBefore(ctx context.Context, conversationID string, before, limit int64) ([]Event, bool, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	// 先按 seq 降序取 limit+1 条（多取一条判断是否还有更早），再反转为升序返回。
+	query := `SELECT seq, conversation_id, type, payload_json, created_at FROM events
+		 WHERE conversation_id = ? ORDER BY seq DESC LIMIT ?`
+	args := []any{conversationID, limit + 1}
+	if before > 0 {
+		query = `SELECT seq, conversation_id, type, payload_json, created_at FROM events
+		 WHERE conversation_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`
+		args = []any{conversationID, before, limit + 1}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	desc := make([]Event, 0, limit)
+	for rows.Next() {
+		var e Event
+		var created string
+		if err := rows.Scan(&e.Seq, &e.ConversationID, &e.Type, &e.PayloadJSON, &created); err != nil {
+			return nil, false, err
+		}
+		e.CreatedAt = parseTS(created)
+		desc = append(desc, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := int64(len(desc)) > limit
+	if hasMore {
+		desc = desc[:limit]
+	}
+	out := make([]Event, 0, len(desc))
+	for i := len(desc) - 1; i >= 0; i-- {
+		out = append(out, desc[i])
+	}
+	return out, hasMore, nil
+}

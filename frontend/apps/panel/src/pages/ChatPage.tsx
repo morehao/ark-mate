@@ -36,6 +36,8 @@ export function ChatPage() {
   const setDrawer = useForge((s) => s.setDrawer)
   const anchorSeq = useForge((s) => s.anchorSeq)
   const clearAnchor = useForge((s) => s.clearAnchor)
+  const loadOlder = useForge((s) => s.loadOlder)
+  const historyStart = useForge((s) => s.historyStart)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
@@ -51,6 +53,8 @@ export function ChatPage() {
   const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
+  // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   // URL → 激活（刷新/直达 /conversations/:id 续看；参数不变不重复 attach）
   useEffect(() => {
@@ -457,6 +461,27 @@ export function ChatPage() {
                     )
                   ) : (
                     <>
+                      {/* C2：服务端更早一页（before 游标）——SQLite 模式下可一直翻到会话第一条；
+                          翻到最早后隐藏。与下方「折叠 N 条」是两层：这里拉数据，那里展开已加载的条目。 */}
+                      {activeId && !historyStart[activeId] && !streaming && (
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <Button
+                            size="small"
+                            type="link"
+                            loading={loadingOlder}
+                            onClick={async () => {
+                              setLoadingOlder(true)
+                              try {
+                                await loadOlder(activeId)
+                              } finally {
+                                setLoadingOlder(false)
+                              }
+                            }}
+                          >
+                            加载更早的消息
+                          </Button>
+                        </div>
+                      )}
                       {entryWindow.hidden > 0 && (
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
                           <Button

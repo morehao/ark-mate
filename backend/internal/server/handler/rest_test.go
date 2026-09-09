@@ -59,12 +59,14 @@ type stubSvc struct {
 	cancelID     string
 	cancelErr    error
 
-	historyCalled bool
-	historyID     string
-	historyAfter  int64
-	historyLimit  int
-	historyResp   *handler.ConversationHistoryResp
-	historyErr    error
+	historyCalled    bool
+	historyID        string
+	historyAfter     int64
+	historyBefore    int64
+	historyHasBefore bool
+	historyLimit     int
+	historyResp      *handler.ConversationHistoryResp
+	historyErr       error
 
 	memList     []handler.MemoryResp
 	revokeID    string
@@ -411,11 +413,13 @@ func (s *stubSvc) CancelTurn(_ context.Context, id string) error {
 	s.cancelID = id
 	return s.cancelErr
 }
-func (s *stubSvc) ConversationHistory(_ context.Context, id string, after int64, limit int) (*handler.ConversationHistoryResp, error) {
+func (s *stubSvc) ConversationHistory(_ context.Context, id string, q handler.HistoryQuery) (*handler.ConversationHistoryResp, error) {
 	s.historyCalled = true
 	s.historyID = id
-	s.historyAfter = after
-	s.historyLimit = limit
+	s.historyAfter = q.After
+	s.historyBefore = q.Before
+	s.historyHasBefore = q.HasBefore
+	s.historyLimit = q.Limit
 	if s.historyErr != nil {
 		return nil, s.historyErr
 	}
@@ -727,8 +731,8 @@ func TestHistoryParamParsing(t *testing.T) {
 
 	// 默认 after=0 limit=200。
 	do(t, r, "GET", "/v1/forge/conversations/s1/history", "")
-	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyLimit != 200 {
-		t.Fatalf("默认参数不符: %+v %d %d", svc.historyID, svc.historyAfter, svc.historyLimit)
+	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyBefore != 0 || svc.historyLimit != 200 {
+		t.Fatalf("默认参数不符: %+v %d/%d %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
 	}
 
 	// 显式 after/limit。
@@ -736,6 +740,28 @@ func TestHistoryParamParsing(t *testing.T) {
 	do(t, r, "GET", "/v1/forge/conversations/s1/history?after=7&limit=50", "")
 	if svc.historyAfter != 7 || svc.historyLimit != 50 {
 		t.Fatalf("显式参数不符: after=%d limit=%d", svc.historyAfter, svc.historyLimit)
+	}
+
+	// before 游标（C2：向前翻页）；after/before 同时给 → 40001（互斥）。
+	svc.historyCalled = false
+	do(t, r, "GET", "/v1/forge/conversations/s1/history?before=42&limit=5", "")
+	if svc.historyBefore != 42 || svc.historyAfter != 0 || svc.historyLimit != 5 || !svc.historyHasBefore {
+		t.Fatalf("before 参数不符: before=%d after=%d limit=%d has=%v", svc.historyBefore, svc.historyAfter, svc.historyLimit, svc.historyHasBefore)
+	}
+	// before=0 显式给出 = 取末尾一页（HasBefore 区分「未给 before」与「before=0」）。
+	svc.historyCalled = false
+	do(t, r, "GET", "/v1/forge/conversations/s1/history?before=0", "")
+	if !svc.historyHasBefore || svc.historyBefore != 0 {
+		t.Fatalf("before=0 应置 HasBefore: %+v", svc)
+	}
+	svc.historyCalled = false
+	envBoth, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=1&before=2", "")
+	if envBoth.Code != 40001 {
+		t.Fatalf("after+before 期望 40001，got %+v", envBoth)
+	}
+	envBadBefore, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?before=-3", "")
+	if envBadBefore.Code != 40000 {
+		t.Fatalf("负 before 期望 40000，got %+v", envBadBefore)
 	}
 
 	// limit 上限 1000 夹取。

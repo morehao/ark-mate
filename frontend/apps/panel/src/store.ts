@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   HttpError,
   cancelConversation,
+  conversationHistory,
   createConversation,
   listAgents,
   listConversations,
@@ -24,6 +25,7 @@ import type {
 } from '@ark/types'
 import { BizCode, Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
+import { olderCursor, prependOlder } from './console/transcriptView'
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
@@ -295,6 +297,8 @@ export interface ForgeState {
   token: string
   /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
   tokenModalOpen: boolean
+  /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
+  historyStart: Record<string, boolean>
 }
 
 export interface PermissionDecision {
@@ -334,6 +338,8 @@ export interface ForgeActions {
   /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
   saveToken: (token: string) => void
   setTokenModal: (open: boolean) => void
+  /** C2：向服务端翻页加载更早的事件（before 游标），返回本页是否还有更早。 */
+  loadOlder: (id: string) => Promise<boolean>
   /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
   expireHydration: (id: string) => void
   // transport 接线（内部）
@@ -355,7 +361,11 @@ export const initialState: ForgeState = {
   railMode: 'active',
   token: getToken(),
   tokenModalOpen: false,
+  historyStart: {},
 }
+
+/** C2：服务端「加载更早」每页条数。 */
+const HISTORY_PAGE = 50
 
 let toastSeq = 0
 let transportRef: WsTransport | null = null
@@ -408,6 +418,33 @@ export const useForge = create<ForgeStore>((set, get) => {
       if (cur && cur.id === id) set({ toast: null })
     },
     showToast,
+
+    // C2：向服务端翻页加载更早的事件（before 游标）。
+    // 取当前视图最小事件 seq 作为游标（新会话/空视图 → before=0 = 取末尾一页），
+    // 折叠到空视图后整体前插（事件 seq 全小于游标 → 与现有条目天然不重叠），lastSeq 不回退。
+    loadOlder: async (id) => {
+      const cur = get().views[id] ?? emptyView()
+      const before = olderCursor(cur.entries)
+      try {
+        const page = await conversationHistory(id, { before, limit: HISTORY_PAGE })
+        let older = emptyView()
+        for (const e of page.events) older = applyEvent(older, e)
+        set((s) => {
+          const view = s.views[id] ?? emptyView()
+          const merged = prependOlder(older.entries, view.entries, before)
+          return {
+            ...s,
+            views: { ...s.views, [id]: { ...view, entries: merged } },
+            historyStart: { ...s.historyStart, [id]: !page.has_more },
+          }
+        })
+        if (page.events.length === 0) showToast('已到会话最早一条')
+        return page.has_more
+      } catch (err) {
+        reportApiError(err)
+        return true
+      }
+    },
 
     setWsState: (st) => {
       if (get().wsState !== st) set({ wsState: st })

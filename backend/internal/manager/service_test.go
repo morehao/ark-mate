@@ -205,7 +205,7 @@ func TestConversationHistoryClamp(t *testing.T) {
 	svc.publish(BusMessage, "s1", map[string]any{"text": "one"})
 	svc.publish(BusMessage, "s1", map[string]any{"text": "two"})
 
-	p, err := svc.ConversationHistory(context.Background(), "s1", -5, 0)
+	p, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: -5, Limit: 0})
 	if err != nil {
 		t.Fatalf("ConversationHistory: %v", err)
 	}

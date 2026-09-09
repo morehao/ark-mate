@@ -112,16 +112,25 @@ export const resolveElicitation = (id: string, req: ResolveElicitationReq): Prom
 export interface ConversationHistoryPage {
   id: string
   events: BusEvent[]
+  /** 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。 */
   has_more: boolean
+  /** 本页首尾事件 seq（空页为 0）；继续向前/向后翻页的游标。 */
+  first_seq: number
+  last_seq: number
 }
 
-/** 事件回放（`after` 为开区间游标；默认 200/上限 1000）。 */
+/**
+ * 事件回放。`after` 向后（seq > after）、`before` 向前（seq < before，仍升序返回，
+ * 用于「加载更早」）——两者互斥（后端 40001）；默认 200/上限 1000。
+ * sqlite 模式读 events 表（可一直翻到会话第一条）；内存模式回放 eventbus。
+ */
 export const conversationHistory = (
   id: string,
-  opts: { after?: number; limit?: number } = {},
+  opts: { after?: number; before?: number; limit?: number } = {},
 ): Promise<ConversationHistoryPage> => {
   const q = new URLSearchParams()
   if (opts.after != null) q.set('after', String(opts.after))
+  if (opts.before != null) q.set('before', String(opts.before))
   if (opts.limit != null) q.set('limit', String(opts.limit))
   const s = q.toString()
   return http.get<ConversationHistoryPage>(`/forge/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)

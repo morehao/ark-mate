@@ -8,6 +8,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
 // writeTranscriptJSONL 直接落一个合法 transcript 文件（header + 事件行），用于回读测试。
@@ -53,7 +54,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	}
 
 	// 事件已注入 bus：history 可按 agg 回放。
-	hist, err := svc.ConversationHistory(t.Context(), "ses_old1", 0, 100)
+	hist, err := svc.ConversationHistory(t.Context(), "ses_old1", handler.HistoryQuery{Limit: 100})
 	if err != nil {
 		t.Fatalf("ConversationHistory: %v", err)
 	}

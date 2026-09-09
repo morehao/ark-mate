@@ -193,14 +193,27 @@ func (h *ConversationHandler) Cancel(c *gin.Context) {
 // `limit`（默认 200，上限 1000）。事件按 seq 升序；翻页用末条 seq 作下页 after。
 func (h *ConversationHandler) History(c *gin.Context) {
 	id := c.Param("id")
-	after, limit := int64(0), 200
+	q := HistoryQuery{Limit: 200}
 	if v := c.Query("after"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {
 			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "after 需为非负整数"})
 			return
 		}
-		after = n
+		q.After = n
+	}
+	if v := c.Query("before"); v != "" {
+		n, err := parseNonNeg(v)
+		if err != nil {
+			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "before 需为非负整数"})
+			return
+		}
+		q.Before = n
+		q.HasBefore = true
+	}
+	if q.After > 0 && q.HasBefore {
+		gincontext.Fail(c, gerror.Error{Code: 40001, Msg: "after 与 before 互斥（一个向后、一个向前）"})
+		return
 	}
 	if v := c.Query("limit"); v != "" {
 		n, err := parseNonNeg(v)
@@ -208,15 +221,15 @@ func (h *ConversationHandler) History(c *gin.Context) {
 			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "limit 需为非负整数"})
 			return
 		}
-		limit = int(n)
+		q.Limit = int(n)
 	}
-	if limit < 1 {
-		limit = 1
+	if q.Limit < 1 {
+		q.Limit = 1
 	}
-	if limit > 1000 {
-		limit = 1000
+	if q.Limit > 1000 {
+		q.Limit = 1000
 	}
-	resp, err := h.svc.ConversationHistory(c.Request.Context(), id, after, limit)
+	resp, err := h.svc.ConversationHistory(c.Request.Context(), id, q)
 	if err != nil {
 		gincontext.Fail(c, err)
 		return

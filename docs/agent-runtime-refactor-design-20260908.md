@@ -1778,3 +1778,36 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 ② 用量页无图表（只做数字表，不引图表库）；③ 成本依赖底座上报 `usage.cost`，当前 echo/实测 runtime 均未上报
 （显示 `—`），不做估算；④ 策略编辑的工具项为 JSON 文本域（未做键值对行编辑器）；⑤ 时间区间按本地日期，
 后端按 UTC 半开区间处理，跨时区边界会有 1 天偏差（未做时区显式化）。
+
+#### 19.22 切片 C2：`/history` before 游标（完成）
+
+**动机**：`GET /conversations/:id/history` 只有 `after`（向后），且实现只读 eventbus 内存缓冲
+（上限 65536，且每 agg 会被淘汰）。面板要「往上翻历史」既没有游标也没有数据源——长会话最老的段落在
+进程内缓冲淘汰后就取不到了（WS attach 会退化成 snapshot，等于丢失）。
+
+**实现**：
+1. `store.EventsBefore(ctx, id, before, limit)`：`seq < before ORDER BY seq DESC LIMIT limit+1` 再反转为升序；
+   `before=0` 取末尾一页；`has_more` 指向「更早还有」。
+2. `manager.ConversationHistory` 改为 `HistoryQuery{After, Before, HasBefore, Limit}`：
+   - **数据源**：sqlite 模式（`st != nil`）读 events 表（durable、不受 bus 上限约束）；内存模式回放 eventbus。
+   - 语义：`after`/`before` 互斥（服务层兜底 40001）；`has_more` 沿当前方向；响应新增 `first_seq`/`last_seq`。
+   - `HasBefore` 区分「未给 before」与「`before=0`（显式取末尾一页）」。
+3. handler 绑定 `before` 并校验（负值 40000、互斥 40001）。
+4. 前端：`@ark/api.conversationHistory` 支持 `before` + `first_seq/last_seq`；store 新增 `loadOlder(id)`
+   （游标 = 当前视图最小 seq，折叠到空视图后整体前插，`lastSeq` 不回退；翻到最早后置 `historyStart[id]=true`）；
+   ChatPage 在流式结束且未到最早时显示「加载更早的消息」。纯函数 `olderCursor`/`prependOlder`
+   落在 `console/transcriptView.ts`（Node 侧可校验）。
+
+**证据**：
+- 单测：`store.TestEventsBefore`（窗口/升序/末尾页/跨会话隔离）、
+  `manager.TestConversationHistoryStoreBacked`（store 路径双向游标 + 载荷解码）、
+  `manager.TestConversationHistoryPaging` 增补 before 断言、`handler.TestHistoryParamParsing` 增补
+  before/before=0/互斥/负值；`go vet` + `go test -race -count=1 ./...` 全绿。
+- 真进程：65540 条事件的会话上 `before=0` 取末尾、逐页回退、66 页翻到 `first_seq=1`（详见 deployment.md）；
+  WS `attach(since_seq=0)` 回 snapshot（bus 已淘汰 seq 1..4）而 REST 仍能翻到 1。
+- 前端：`tsc -b --noEmit` 通过；`olderCursor/prependOlder` Node 断言 9 项 PASS。
+
+**遗留/降级**：① 历史读 SQLite 时不与 eventbus 的「DB 写失败退化为进程内取号」路径合并——极少数
+`AppendEvent` 失败的事件不会出现在 REST 历史里（该路径本就会告警，且 bus 侧仍有）；② 前端「加载更早」按
+50 条/页，无虚拟滚动（长会话靠既有尾部窗口折叠）；③ 空视图点击「加载更早」等价于取末尾一页（冷挂载兜底），
+不做「首次进入自动加载最早页」；④ 未做 `before` + `after` 组合区间查询。

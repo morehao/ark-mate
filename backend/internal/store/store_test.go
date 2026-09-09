@@ -300,3 +300,51 @@ func TestSearchMessages(t *testing.T) {
 		t.Fatalf("limit 截断不符: %v %+v", err, hits)
 	}
 }
+
+// TestEventsBefore 反向分页（C2「加载更早」）：seq < before 的最近 limit 条、升序返回、
+// has_more 指向「更早还有」、before=0 取末尾、跨会话不混入。
+func TestEventsBefore(t *testing.T) {
+	s := openMem(t)
+	seedConversation(t, s, "s1")
+	seedConversation(t, s, "s2")
+	var seqs []int64
+	for i := 0; i < 5; i++ {
+		seq, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"i": i})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		seqs = append(seqs, seq)
+	}
+	_, _ = s.AppendEvent(ctxT(), "s2", "session.message", map[string]any{"other": true})
+
+	got, more, err := s.EventsBefore(ctxT(), "s1", seqs[3], 2)
+	if err != nil {
+		t.Fatalf("EventsBefore: %v", err)
+	}
+	if len(got) != 2 || !more {
+		t.Fatalf("窗口不符: len=%d more=%v", len(got), more)
+	}
+	if got[0].Seq != seqs[1] || got[1].Seq != seqs[2] {
+		t.Fatalf("应升序返回 [seq2,seq3]: %+v", got)
+	}
+	if got[0].ConversationID != "s1" || got[1].ConversationID != "s1" {
+		t.Fatalf("跨会话混入: %+v", got)
+	}
+
+	oldest, more2, err := s.EventsBefore(ctxT(), "s1", seqs[1], 5)
+	if err != nil {
+		t.Fatalf("EventsBefore oldest: %v", err)
+	}
+	if len(oldest) != 1 || more2 || oldest[0].Seq != seqs[0] {
+		t.Fatalf("最早一页不符: len=%d more=%v %+v", len(oldest), more2, oldest)
+	}
+
+	// before=0 → 取末尾 limit 条（仍升序）。
+	tail, more3, err := s.EventsBefore(ctxT(), "s1", 0, 2)
+	if err != nil {
+		t.Fatalf("EventsBefore tail: %v", err)
+	}
+	if len(tail) != 2 || !more3 || tail[0].Seq != seqs[3] || tail[1].Seq != seqs[4] {
+		t.Fatalf("末尾页不符: len=%d more=%v %+v", len(tail), more3, tail)
+	}
+}
