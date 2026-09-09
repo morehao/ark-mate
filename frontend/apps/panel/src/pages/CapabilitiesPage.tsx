@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Select, Space, Tag, Tooltip } from 'antd'
-import { ExperimentOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Button, Input, Modal, Select, Space, Tag, Tooltip } from 'antd'
+import { ExperimentOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark/ui'
-import { getAgentCapabilities, listMcpServers, listSkills, listTools, probeMcpServer, toErrorMessage } from '@ark/api'
-import type { AgentCapabilities, McpServer, Skill, Tool } from '@ark/types'
+import {
+  callMcpTool,
+  getAgentCapabilities,
+  listMcpServers,
+  listSkills,
+  listTools,
+  probeMcpServer,
+  toErrorMessage,
+} from '@ark/api'
+import type { AgentCapabilities, McpServer, McpToolCallResult, Skill, Tool } from '@ark/types'
 import { useForge } from '../store'
 import { fmtProbeAt, mcpRows, probeSummary, toolSourceLabel } from '../console/capabilityView'
 
@@ -84,6 +92,12 @@ export function CapabilitiesPage() {
   const [tools, setTools] = useState<Tool[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [probing, setProbing] = useState<string | null>(null)
+  // B1 工具调用：目标（server+tool）+ 入参文本 + 结果/错误。
+  const [callTarget, setCallTarget] = useState<{ server: string; tool: string } | null>(null)
+  const [callArgs, setCallArgs] = useState('{}')
+  const [callBusy, setCallBusy] = useState(false)
+  const [callResult, setCallResult] = useState<McpToolCallResult | null>(null)
+  const [callErr, setCallErr] = useState<string | null>(null)
 
   // 默认选中第一个 Agent（Agent 列表由 store 统一维护）。
   useEffect(() => {
@@ -183,6 +197,37 @@ export function CapabilitiesPage() {
       </Button>
     </Tooltip>
   )
+
+  // openCall 打开调用弹窗（默认参数取工具 schema 的 properties 骨架，纯便利、非校验）。
+  const openCall = (server: string, tool: Tool): void => {
+    setCallTarget({ server, tool: tool.name })
+    setCallResult(null)
+    setCallErr(null)
+    setCallArgs(schemaSkeleton(tool.schema))
+  }
+
+  const doCall = async (): Promise<void> => {
+    if (!callTarget) return
+    let args: unknown
+    try {
+      args = callArgs.trim() ? JSON.parse(callArgs) : undefined
+    } catch (err) {
+      setCallErr(`arguments 不是合法 JSON：${toErrorMessage(err)}`)
+      return
+    }
+    setCallBusy(true)
+    setCallErr(null)
+    try {
+      const res = await callMcpTool(callTarget.server, callTarget.tool, args === undefined ? {} : { arguments: args })
+      setCallResult(res)
+      showToast(res.is_error ? `${callTarget.tool} 返回工具级失败（is_error=true）` : `${callTarget.tool} 调用完成（${res.duration_ms}ms）`)
+    } catch (err) {
+      setCallResult(null)
+      setCallErr(toErrorMessage(err))
+    } finally {
+      setCallBusy(false)
+    }
+  }
 
   const probeStatus = (row: { toolCount: number; lastProbeAt?: string; lastProbeError?: string }): ReactNode =>
     row.lastProbeError ? (
@@ -425,12 +470,96 @@ export function CapabilitiesPage() {
                       {t.description || (t.schema ? '（含参数 Schema）' : '')}
                     </span>
                   </Tooltip>
+                  {t.mcp_server && (
+                    <Tooltip title={`调用 ${t.mcp_server}.${t.name}（tools/call，独立会话）`}>
+                      <Button size="small" icon={<PlayCircleOutlined />} onClick={() => openCall(t.mcp_server!, t)}>
+                        调用
+                      </Button>
+                    </Tooltip>
+                  )}
                 </Row>
               ))
             )}
           </div>
         </Card>
+
+        {/* ——— B1：MCP 工具调用（tools/call） ——— */}
+        <Modal
+          title={callTarget ? `调用工具 ${callTarget.server}.${callTarget.tool}` : '调用工具'}
+          open={callTarget !== null}
+          onCancel={() => setCallTarget(null)}
+          onOk={() => void doCall()}
+          okText="调用"
+          confirmLoading={callBusy}
+          width={680}
+        >
+          <div style={{ fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
+            参数为 JSON 对象（`arguments`）；后端每次调用建独立 MCP 会话（不做连接池）。
+            工具级失败（服务端 <code>isError</code>）会以 <code>is_error=true</code> 正常返回，
+            只有传输/协议/超时才报错。
+          </div>
+          <Input.TextArea
+            value={callArgs}
+            onChange={(e) => setCallArgs(e.target.value)}
+            rows={5}
+            spellCheck={false}
+            style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
+            placeholder='{"path": "/tmp/a"}'
+          />
+          {callErr && (
+            <Alert type="error" showIcon style={{ marginTop: 10 }} message="调用失败" description={callErr} />
+          )}
+          {callResult && (
+            <div style={{ marginTop: 10 }}>
+              <Space size={8} wrap style={{ marginBottom: 6 }}>
+                <Tag color={callResult.is_error ? 'red' : 'green'} style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                  {callResult.is_error ? 'is_error=true（工具级失败）' : 'ok'}
+                </Tag>
+                <span style={{ fontSize: 11.5, color: tokens.textSecondary, fontFamily: tokens.fontMono }}>
+                  {callResult.duration_ms}ms
+                  {callResult.server_name ? ` · ${callResult.server_name}` : ''}
+                  {callResult.server_version ? ` ${callResult.server_version}` : ''}
+                </span>
+              </Space>
+              <pre
+                style={{
+                  ...mono,
+                  margin: 0,
+                  padding: 10,
+                  maxHeight: 260,
+                  overflow: 'auto',
+                  background: tokens.softFill,
+                  borderRadius: 8,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {callResult.text || JSON.stringify(callResult.content, null, 2)}
+                {callResult.structured_content
+                  ? `\n\nstructuredContent:\n${JSON.stringify(callResult.structured_content, null, 2)}`
+                  : ''}
+              </pre>
+            </div>
+          )}
+        </Modal>
       </div>
     </PageContainer>
   )
+}
+
+// schemaSkeleton 由工具 inputSchema 生成参数骨架（properties 键 + 类型占位；无 schema → "{}"）。
+// 仅作输入便利：不做校验（服务端才是权威），也不猜默认值。
+function schemaSkeleton(schema: unknown): string {
+  if (!schema || typeof schema !== 'object') return '{}'
+  const props = (schema as { properties?: Record<string, { type?: string; default?: unknown }> }).properties
+  if (!props || typeof props !== 'object') return '{}'
+  const out: Record<string, unknown> = {}
+  for (const [key, def] of Object.entries(props)) {
+    if (def && typeof def === 'object' && 'default' in def) {
+      out[key] = def.default
+      continue
+    }
+    const type = def && typeof def === 'object' ? def.type : undefined
+    out[key] = type === 'number' || type === 'integer' ? 0 : type === 'boolean' ? false : type === 'array' ? [] : type === 'object' ? {} : ''
+  }
+  return JSON.stringify(out, null, 2)
 }

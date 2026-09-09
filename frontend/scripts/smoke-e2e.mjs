@@ -209,6 +209,30 @@ async function checkBizError() {
   } else {
     bad('POST /mcps/:id/probe 未知 server', `http=${pr.status} ${JSON.stringify(pEnv)}`)
   }
+
+  // B1：MCP 工具调用路由契约（未知 server → 40401；不依赖真实 MCP server）。
+  const cr = await fetch(API + '/mcps/no-such-server/tools/any_tool/call', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...AUTH },
+    body: '{"arguments":{}}',
+  })
+  const cEnv = await cr.json()
+  if (cr.status === 200 && cEnv.code === 40401) {
+    ok('POST /mcps/:id/tools/:tool/call 未知 server → HTTP 200 code=40401')
+  } else {
+    bad('POST /mcps/:id/tools/:tool/call 未知 server', `http=${cr.status} ${JSON.stringify(cEnv)}`)
+  }
+  const badArgs = await fetch(API + '/mcps/no-such-server/tools/any_tool/call', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...AUTH },
+    body: '{oops', // 非法 JSON（参数对象本身非法由 mcp 层 40001 表达，需真实 server）
+  })
+  const bEnv = await badArgs.json()
+  if (badArgs.status === 200 && bEnv.code === 40000) {
+    ok('POST /mcps/:id/tools/:tool/call 非法 JSON body → HTTP 200 code=40000')
+  } else {
+    bad('POST /mcps/:id/tools/:tool/call 非法 body', `http=${badArgs.status} ${JSON.stringify(bEnv)}`)
+  }
 }
 
 // ——— 3. WS 帧契约 ———

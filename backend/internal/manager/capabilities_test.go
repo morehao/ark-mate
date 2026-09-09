@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/runtime"
@@ -435,5 +436,135 @@ func TestServiceReconcileSkills(t *testing.T) {
 	// 幂等重跑：无写无删。
 	if w, r, err := svc.ReconcileSkills(root); err != nil || w != 0 || r != 0 {
 		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
+	}
+}
+
+// restCode 取 REST 信封错误码（非 gerror → -1）。
+func restCode(err error) int {
+	var ge gerror.Error
+	if errors.As(err, &ge) {
+		return ge.Code
+	}
+	return -1
+}
+
+// TestCallMcpTool B1：MCP 工具调用（http 传输）——参数透传、工具级失败透传、未知 server 40401、
+// sse 40501、超时 40901、非法 arguments 40001。
+func TestCallMcpTool(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result map[string]any
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": "mgr-call", "version": "1.0"}}
+		case "tools/call":
+			switch msg.Params.Name {
+			case "boom":
+				result = map[string]any{"content": []map[string]any{{"type": "text", "text": "工具内部失败"}}, "isError": true}
+			default:
+				result = map[string]any{
+					"content": []map[string]any{
+						{"type": "text", "text": "called " + msg.Params.Name},
+						{"type": "text", "text": "args " + string(msg.Params.Arguments)},
+					},
+					"structuredContent": map[string]any{"echo": true},
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+	}))
+	defer srv.Close()
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.CallMcpTool(context.Background(), "h", "read_file", handler.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
+	if err != nil {
+		t.Fatalf("CallMcpTool: %v", err)
+	}
+	if got.ServerID != "h" || got.Tool != "read_file" || got.IsError {
+		t.Fatalf("结果元数据不符: %+v", got)
+	}
+	if got.Text != "called read_file\nargs {\"path\":\"/tmp/a\"}" {
+		t.Fatalf("文本块拼接不符: %q", got.Text)
+	}
+	if string(got.StructuredContent) != `{"echo":true}` || got.ServerName != "mgr-call" {
+		t.Fatalf("structuredContent/serverName 不符: %+v", got)
+	}
+
+	// 工具级失败：不是平台错误。
+	gotErr, err := svc.CallMcpTool(context.Background(), "h", "boom", handler.McpToolCallReq{})
+	if err != nil {
+		t.Fatalf("工具级失败不应报错: %v", err)
+	}
+	if !gotErr.IsError || gotErr.Text != "工具内部失败" {
+		t.Fatalf("is_error 透传不符: %+v", gotErr)
+	}
+
+	// 未知 server → 40401。
+	if _, err := svc.CallMcpTool(context.Background(), "nope", "t", handler.McpToolCallReq{}); restCode(err) != 40401 {
+		t.Fatalf("未知 server 应 40401，got %v", err)
+	}
+	// sse → 40501（明确降级）。
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CallMcpTool(context.Background(), "s", "t", handler.McpToolCallReq{}); restCode(err) != 40501 {
+		t.Fatalf("sse 应 40501，got %v", err)
+	}
+	// 非法 arguments → 40001（ClassRequest）。
+	if _, err := svc.CallMcpTool(context.Background(), "h", "read_file", handler.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
+		t.Fatalf("非法 arguments 应 40001，got %v", err)
+	}
+	// 空工具名 → 40001。
+	if _, err := svc.CallMcpTool(context.Background(), "h", "", handler.McpToolCallReq{}); restCode(err) != 40001 {
+		t.Fatalf("空工具名应 40001，got %v", err)
+	}
+}
+
+// TestCallMcpToolTimeout B1：调用预算经 ctx 生效 → 40901（ClassLimit）。
+func TestCallMcpToolTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if msg.Method == "tools/call" {
+			time.Sleep(400 * time.Millisecond) // 超过下方 timeout_ms
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+			"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": "slow"}, "content": []map[string]any{},
+		}})
+	}))
+	defer srv.Close()
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "slow", Name: "Slow", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.CallMcpTool(context.Background(), "slow", "t", handler.McpToolCallReq{TimeoutMS: 50})
+	if restCode(err) != 40901 {
+		t.Fatalf("超时应 40901，got %v (code=%d)", err, restCode(err))
 	}
 }

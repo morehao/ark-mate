@@ -89,6 +89,8 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	v1.GET("/tools", h.Capability.ListTools)
 	// P2 §5.2 MCP live 探测：tools/list → 写 Tool 目录（显式触发；不做隐式启动探测，行为不回归）。
 	v1.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
+	// B1：MCP 工具调用（tools/call，独立会话；工具名不含 "/"——gin 路径参数不匹配斜杠）。
+	v1.POST("/mcps/:id/tools/:tool/call", h.Capability.CallMcpTool)
 	// M3 首项 用量统计：runs 计数/时长 + 会话上下文/费用快照聚合（只读）。
 	v1.GET("/usage/summary", h.Usage.Summary)
 	v1.GET("/ws/events", h.WS.Handle)

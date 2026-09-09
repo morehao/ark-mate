@@ -94,6 +94,12 @@ type stubSvc struct {
 	probeErr        error
 	probeID         string
 
+	callMcpResp *handler.McpToolCallResp // B1 tools/call 桩
+	callMcpErr  error
+	callMcpID   string
+	callMcpTool string
+	callMcpReq  handler.McpToolCallReq
+
 	usageResp  *handler.UsageSummaryResp // M3 GET /usage/summary 桩
 	usageQuery handler.UsageQueryReq     // 捕获查询参数
 	usageErr   error
@@ -228,6 +234,16 @@ func (s *stubSvc) UsageSummary(_ context.Context, q handler.UsageQueryReq) (*han
 		return s.usageResp, nil
 	}
 	return &handler.UsageSummaryResp{GroupBy: "agent", Source: "sqlite", Buckets: []handler.UsageBucketResp{}}, nil
+}
+func (s *stubSvc) CallMcpTool(_ context.Context, id, tool string, req handler.McpToolCallReq) (*handler.McpToolCallResp, error) {
+	s.callMcpID, s.callMcpTool, s.callMcpReq = id, tool, req
+	if s.callMcpErr != nil {
+		return nil, s.callMcpErr
+	}
+	if s.callMcpResp != nil {
+		return s.callMcpResp, nil
+	}
+	return &handler.McpToolCallResp{ServerID: id, Tool: tool, Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"ok"}`)}, Text: "ok"}, nil
 }
 func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*handler.McpProbeResp, error) {
 	s.probeID = id
@@ -421,6 +437,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/mcps", h.Capability.ListMcpServers)
 	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
+	g.POST("/mcps/:id/tools/:tool/call", h.Capability.CallMcpTool)
 	g.GET("/tools", h.Capability.ListTools)
 	g.GET("/usage/summary", h.Usage.Summary)
 	g.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
@@ -1123,5 +1140,73 @@ func TestAgentDiagnosticsRoute(t *testing.T) {
 	env, http = do(t, r2, "GET", "/v1/forge/agents/nope/diagnostics", "")
 	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "未知 agent") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
+	}
+}
+
+// TestCallMcpToolRoute B1 MCP 工具调用路由：参数透传（server/tool/arguments/timeout_ms）、
+// 工具级失败（is_error=true）仍是 code=0，传输/协议错误透传信封码。
+func TestCallMcpToolRoute(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+
+	body := `{"arguments":{"path":"/tmp/a"},"timeout_ms":1500}`
+	env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/read_file/call", body)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("POST call 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
+	}
+	if svc.callMcpID != "fs" || svc.callMcpTool != "read_file" {
+		t.Fatalf("路径参数未透传: id=%q tool=%q", svc.callMcpID, svc.callMcpTool)
+	}
+	if string(svc.callMcpReq.Arguments) != `{"path":"/tmp/a"}` || svc.callMcpReq.TimeoutMS != 1500 {
+		t.Fatalf("请求体未透传: %+v", svc.callMcpReq)
+	}
+	var got handler.McpToolCallResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 反序列化失败: %v", err)
+	}
+	if got.Text != "ok" || len(got.Content) != 1 {
+		t.Fatalf("结果不符: %+v", got)
+	}
+
+	// 空 body = 无参数调用（不应报参数错误）。
+	svc.callMcpReq = handler.McpToolCallReq{}
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/t/call", ""); code != 200 || env.Code != 0 {
+		t.Fatalf("空 body 应放行，got http=%d code=%d", code, env.Code)
+	}
+	if len(svc.callMcpReq.Arguments) != 0 || svc.callMcpReq.TimeoutMS != 0 {
+		t.Fatalf("空 body 应零值: %+v", svc.callMcpReq)
+	}
+
+	// 非法 JSON body → 40000（参数错误）。
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/t/call", "{oops"); code != 200 || env.Code != 40000 {
+		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
+	}
+
+	// 工具级失败：仍 code=0，is_error 表达。
+	svc.callMcpResp = &handler.McpToolCallResp{
+		ServerID: "fs", Tool: "read_file", IsError: true,
+		Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"权限不足"}`)}, Text: "权限不足",
+	}
+	env, _ = do(t, r, "POST", "/v1/forge/mcps/fs/tools/read_file/call", "")
+	var failed handler.McpToolCallResp
+	_ = json.Unmarshal(env.Data, &failed)
+	if env.Code != 0 || !failed.IsError {
+		t.Fatalf("工具级失败应 code=0 + is_error=true，got code=%d %+v", env.Code, failed)
+	}
+
+	// 未知 server → 40401；传输不支持 → 40501；超时 → 40901。
+	svc.callMcpResp = nil
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{
+		{gerror.Error{Code: 40401, Msg: `未知 MCP server "nope"`}, 40401},
+		{gerror.Error{Code: 40501, Msg: "MCP sse 传输暂不支持"}, 40501},
+		{gerror.Error{Code: 40901, Msg: "[mcp_timeout] tools/call 失败"}, 40901},
+	} {
+		svc.callMcpErr = tc.err
+		if env, code := do(t, r, "POST", "/v1/forge/mcps/x/tools/t/call", ""); code != 200 || env.Code != tc.want {
+			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
+		}
 	}
 }

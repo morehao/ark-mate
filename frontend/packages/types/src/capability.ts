@@ -44,6 +44,34 @@ export interface Tool {
   schema?: unknown
 }
 
+// ——— B1 MCP 工具调用（POST /mcps/:id/tools/:tool/call） ———
+
+/** 一次 MCP 工具调用请求体。 */
+export interface McpToolCallReq {
+  /** 工具入参对象（原样透传；缺省 = 无参数）。 */
+  arguments?: unknown
+  /** 调用超时（毫秒；0/缺省 = 后端默认 30s，上限 5min）。 */
+  timeout_ms?: number
+}
+
+/**
+ * 一次 MCP 工具调用结果。
+ *
+ * `content` 保持 MCP 联合类型原样（文本/图片/资源链接…）；`text` 是文本块拼接的摘要；
+ * `is_error` 是**工具级**失败（服务端明确报告），与传输/协议错误（信封 code≠0）区分。
+ */
+export interface McpToolCallResult {
+  server_id: string
+  tool: string
+  is_error: boolean
+  content: unknown[]
+  text?: string
+  structured_content?: unknown
+  server_name?: string
+  server_version?: string
+  duration_ms: number
+}
+
 // ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
 
 /** 某 Agent 可见的 skill（sources 已按该 Agent 候选 runtime 裁剪）。 */

@@ -53,37 +53,31 @@ func (b *tailBuffer) String() string {
 	return string(b.data)
 }
 
-func listToolsStdio(ctx context.Context, s Server) (Result, error) {
+// dialStdio 拉起 stdio MCP server 子进程并接好 JSON-RPC 管道（生命周期由调用方 close）。
+func dialStdio(ctx context.Context, s Server) (transport, error) {
 	if !filepath.IsAbs(s.Command) {
-		return Result{}, errf("mcp_command_invalid", "stdio server %q 的 command 须为绝对路径（当前 %q）", s.ID, s.Command)
+		return nil, errf("mcp_command_invalid", "stdio server %q 的 command 须为绝对路径（当前 %q）", s.ID, s.Command)
 	}
 	cmd := exec.CommandContext(ctx, s.Command, s.Args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return Result{}, errf("mcp_spawn_failed", "stdin 管道创建失败：%v", err)
+		return nil, errf("mcp_spawn_failed", "stdin 管道创建失败：%v", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return Result{}, errf("mcp_spawn_failed", "stdout 管道创建失败：%v", err)
+		return nil, errf("mcp_spawn_failed", "stdout 管道创建失败：%v", err)
 	}
 	tail := newTailBuffer(4 << 10)
 	cmd.Stderr = tail
 	if err := cmd.Start(); err != nil {
-		return Result{}, errf("mcp_spawn_failed", "启动 %q 失败：%v", s.Command, err)
+		return nil, errf("mcp_spawn_failed", "启动 %q 失败：%v", s.Command, err)
 	}
-	tr := &stdioTransport{
+	return &stdioTransport{
 		cmd:    cmd,
 		stdin:  stdin,
 		rd:     bufio.NewReaderSize(stdout, 64<<10),
 		stderr: tail,
-	}
-	res, err := probe(ctx, tr)
-	if err != nil {
-		if tail := tr.stderr.String(); tail != "" {
-			return Result{}, fmt.Errorf("%w（stderr: %s）", err, lastLine(tail))
-		}
-	}
-	return res, err
+	}, nil
 }
 
 func (t *stdioTransport) close() {

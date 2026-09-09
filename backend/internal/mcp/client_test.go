@@ -55,6 +55,31 @@ func runHelper() {
 				"capabilities":    map[string]any{},
 				"serverInfo":      map[string]any{"name": "helper", "version": "1.2.3"},
 			}})
+		case "tools/call":
+			var p struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			_ = json.Unmarshal(msg.Params, &p)
+			switch mode {
+			case "call_rpc_error":
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+					"error": map[string]any{"code": -32602, "message": "unknown tool " + p.Name}})
+			case "call_is_error":
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "工具执行失败：权限不足"}},
+					"isError": true,
+				}})
+			default:
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+					"content": []map[string]any{
+						{"type": "text", "text": "tool=" + p.Name},
+						{"type": "text", "text": "args=" + string(p.Arguments)},
+						{"type": "image", "data": "aGk=", "mimeType": "text/plain"},
+					},
+					"structuredContent": map[string]any{"ok": true},
+				}})
+			}
 		case "tools/list":
 			if mode == "no_response" {
 				continue // 故意不回：测 ctx 超时
@@ -273,4 +298,120 @@ func TestHTTPErrorStatus(t *testing.T) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ——— B1：tools/call ———
+
+// TestCallToolStdioOK 调用工具全流程：文本块拼接、非文本块跳过、structuredContent 保真。
+func TestCallToolStdioOK(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := CallTool(ctx, stdioServer(t), "read_file", json.RawMessage(`{"path":"/tmp/a"}`))
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatal("不应是工具级错误")
+	}
+	if res.ServerName != "helper" || res.ServerVersion != "1.2.3" {
+		t.Fatalf("握手自述不符: %+v", res)
+	}
+	if len(res.Content) != 3 {
+		t.Fatalf("content 应原样保真 3 块: %+v", res.Content)
+	}
+	want := "tool=read_file\nargs={\"path\":\"/tmp/a\"}"
+	if got := res.TextOf(); got != want {
+		t.Fatalf("文本块拼接不符:\n got %q\nwant %q", got, want)
+	}
+	if string(res.StructuredContent) != `{"ok":true}` {
+		t.Fatalf("structuredContent 应原样保真: %s", res.StructuredContent)
+	}
+}
+
+// TestCallToolIsError 工具级失败（isError=true）不是传输/协议错误，须原样透传。
+func TestCallToolIsError(t *testing.T) {
+	t.Setenv("FORGE_MCP_HELPER_MODE", "call_is_error")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := CallTool(ctx, stdioServer(t), "read_file", nil)
+	if err != nil {
+		t.Fatalf("CallTool 不应报错（工具级失败经 isError 表达）: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.TextOf(), "权限不足") {
+		t.Fatalf("isError/文本不符: %+v", res)
+	}
+}
+
+// TestCallToolRPCError JSON-RPC 错误 → mcp_tools_call_failed（带稳定 code）。
+func TestCallToolRPCError(t *testing.T) {
+	t.Setenv("FORGE_MCP_HELPER_MODE", "call_rpc_error")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := CallTool(ctx, stdioServer(t), "no_such_tool", nil)
+	if CodeOf(err) != "mcp_tools_call_failed" {
+		t.Fatalf("期望 mcp_tools_call_failed，got %v (code=%q)", err, CodeOf(err))
+	}
+	if !strings.Contains(err.Error(), "unknown tool no_such_tool") {
+		t.Fatalf("错误应带服务端原因: %v", err)
+	}
+}
+
+// TestCallToolNameRequired 空工具名在本地即拒绝（不发请求）。
+func TestCallToolNameRequired(t *testing.T) {
+	_, err := CallTool(context.Background(), stdioServer(t), "  ", nil)
+	if CodeOf(err) != "mcp_tool_name_required" {
+		t.Fatalf("期望 mcp_tool_name_required，got %v", err)
+	}
+}
+
+// TestCallToolHTTP http/streamable_http 传输同样支持 tools/call。
+func TestCallToolHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg rpcMessage
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		switch msg.Method {
+		case "initialize":
+			writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"protocolVersion": protocolVersion,
+				"serverInfo":      map[string]any{"name": "http-call", "version": "3.0"},
+			}})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/call":
+			writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"content": []map[string]any{{"type": "text", "text": "http-tool-ok"}},
+			}})
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := CallTool(ctx, Server{ID: "http-call", Transport: "streamable_http", URL: srv.URL}, "t", nil)
+	if err != nil {
+		t.Fatalf("CallTool(http): %v", err)
+	}
+	if res.TextOf() != "http-tool-ok" || res.ServerName != "http-call" {
+		t.Fatalf("结果不符: %+v", res)
+	}
+}
+
+// TestCallToolSSEUnsupported sse 传输仍明确不支持（不臆造）。
+func TestCallToolSSEUnsupported(t *testing.T) {
+	_, err := CallTool(context.Background(), Server{ID: "s", Transport: "sse", URL: "http://127.0.0.1:1"}, "t", nil)
+	if CodeOf(err) != "mcp_transport_unsupported" {
+		t.Fatalf("期望 mcp_transport_unsupported，got %v", err)
+	}
+}
+
+// TestCallToolArgsNotObject arguments 非对象在本地拒绝（MCP 规定 arguments 为对象）。
+func TestCallToolArgsNotObject(t *testing.T) {
+	_, err := CallTool(context.Background(), stdioServer(t), "echo", json.RawMessage(`"not-an-object"`))
+	if CodeOf(err) != "mcp_tool_args_invalid" {
+		t.Fatalf("期望 mcp_tool_args_invalid，got %v (code=%q)", err, CodeOf(err))
+	}
+	// null 合法（= 无参数）。
+	if _, err := CallTool(context.Background(), stdioServer(t), "echo", json.RawMessage(`null`)); err != nil {
+		t.Fatalf("null 应等价无参数: %v", err)
+	}
 }

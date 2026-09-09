@@ -29,17 +29,14 @@ type httpTransport struct {
 	sessionID string
 }
 
-func listToolsHTTP(ctx context.Context, s Server) (Result, error) {
-	if s.URL == "" {
-		return Result{}, errf("mcp_url_invalid", "http/streamable_http server %q 缺少 url", s.ID)
-	}
-	tr := &httpTransport{
+// dialHTTP 构造 http/streamable_http 传输（无连接状态，建连即返回）。
+func dialHTTP(s Server) transport {
+	return &httpTransport{
 		url:     s.URL,
 		headers: s.Headers,
-		// 传输层不设全局超时：由调用方 ctx 控制（探测总预算）。
+		// 传输层不设全局超时：由调用方 ctx 控制（探测/调用总预算）。
 		client: &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second}},
 	}
-	return probe(ctx, tr)
 }
 
 func (t *httpTransport) close() {}

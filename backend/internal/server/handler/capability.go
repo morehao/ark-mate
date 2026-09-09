@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"errors"
+	"io"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
@@ -54,6 +57,22 @@ func (h *CapabilityHandler) AgentCapabilities(c *gin.Context) {
 
 // ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
 // 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
+// CallMcpTool 调用 MCP server 的工具（B1：tools/call）。
+func (h *CapabilityHandler) CallMcpTool(c *gin.Context) {
+	var req McpToolCallReq
+	// 空 body 合法（= 无参数调用）；非空但非法才拒绝。
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	resp, err := h.svc.CallMcpTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
 func (h *CapabilityHandler) ProbeMcpServer(c *gin.Context) {
 	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
 	if err != nil {

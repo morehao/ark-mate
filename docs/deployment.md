@@ -334,3 +334,13 @@ sudo systemctl restart ark-forge
   无令牌 `ERROR → CLOSE 1006`、错令牌同样被拒、带 `?token=` `OPEN → {"type":"pong"}`。
   `FORGE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS（含 WS 带令牌升级）；`FORGE_SMOKE_TOKEN=…
   node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（REST+WS 均带令牌的真实 dsh 轮次）。
+
+- MCP 工具调用（B1）：真实 stdio MCP server（`/tmp/b1/mcp_pyecho.py`，`FORGE_CAPABILITIES` 指向
+  含 `pyecho.json` 的目录）→ `POST /mcps/pyecho/probe` `added=3`（echo/boom/slow）；
+  `POST /mcps/pyecho/tools/echo/call` body `{"arguments":{"msg":"你好","n":42}}` → `code=0`、
+  `content=[{type:text,text:"echo: {...}"}]`、`structured_content.echoed` 保真、`duration_ms=22`；
+  `boom` → **`code=0` + `is_error=true`**（工具级失败）；未知工具 → `50201`
+  `[mcp_tools_call_failed] JSON-RPC 错误 code=-32602`；未知 server → `40401`；`slow` +
+  `timeout_ms=300` → `40901` `[mcp_timeout]`；`arguments` 传字符串 → `40001`
+  `[mcp_tool_args_invalid]`；`arguments:null` / 空 body → 无参数调用成功。
+  `pnpm smoke:e2e`（E2E_BASE 指向该 daemon）新增两条契约断言并全 PASS。

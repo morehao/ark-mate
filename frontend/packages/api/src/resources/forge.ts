@@ -12,6 +12,8 @@ import type {
   ElicitationResp,
   McpServer,
   McpProbeResult,
+  McpToolCallReq,
+  McpToolCallResult,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -135,6 +137,22 @@ export const getAgentCapabilities = (agentId: string): Promise<AgentCapabilities
 /** 对某 MCP server 做一次 live tools/list 探测（结果写 Tool 目录，返回本轮增删）。 */
 export const probeMcpServer = (id: string): Promise<McpProbeResult> =>
   http.post<McpProbeResult>(`/forge/mcps/${encodeURIComponent(id)}/probe`)
+
+/**
+ * 调用某 MCP server 的工具（B1：tools/call）。
+ *
+ * 工具级失败（服务端 result.isError=true）不是平台错误：返回结果的 `is_error` 为 true 且
+ * 请求本身成功；只有传输/协议/超时才抛 HttpError。
+ */
+export const callMcpTool = (
+  serverId: string,
+  tool: string,
+  req: McpToolCallReq = {},
+): Promise<McpToolCallResult> =>
+  http.post<McpToolCallResult>(
+    `/forge/mcps/${encodeURIComponent(serverId)}/tools/${encodeURIComponent(tool)}/call`,
+    req,
+  )
 
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 

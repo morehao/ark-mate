@@ -70,6 +70,8 @@ type Service interface {
 	AgentCapabilities(agentID string) (*AgentCapabilitiesResp, error)
 	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
 	ProbeMcpServer(ctx context.Context, id string) (*McpProbeResp, error)
+	// CallMcpTool 调用某 MCP server 的工具（B1：tools/call；独立会话，不做连接池）。
+	CallMcpTool(ctx context.Context, id, tool string, req McpToolCallReq) (*McpToolCallResp, error)
 
 	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
 	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
@@ -240,6 +242,30 @@ type McpProbeResp struct {
 	Skipped       int        `json:"skipped"`    // 非法/无名条目（跳过，不臆造）
 	ToolCount     int        `json:"tool_count"` // 探测后该 server 归属条目总数
 	Tools         []ToolResp `json:"tools"`
+}
+
+// McpToolCallReq 一次 MCP 工具调用请求（POST /mcps/:id/tools/:tool/call）。
+type McpToolCallReq struct {
+	// Arguments 工具入参对象（原样透传；nil/缺省 = 无参数）。
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// TimeoutMS 调用超时（毫秒；0 = 默认 30s，上限 5min）。
+	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+// McpToolCallResp 一次 MCP 工具调用结果。
+//
+// Content 保持 MCP 联合类型原样（文本/图片/资源链接…）；Text 是文本块拼接的可读摘要；
+// IsError 是 **工具级** 失败（服务端明确报告），与传输/协议错误（HTTP 信封 code≠0）区分。
+type McpToolCallResp struct {
+	ServerID          string            `json:"server_id"`
+	Tool              string            `json:"tool"`
+	IsError           bool              `json:"is_error"`
+	Content           []json.RawMessage `json:"content"`
+	Text              string            `json:"text,omitempty"`
+	StructuredContent json.RawMessage   `json:"structured_content,omitempty"`
+	ServerName        string            `json:"server_name,omitempty"`
+	ServerVersion     string            `json:"server_version,omitempty"`
+	DurationMS        int64             `json:"duration_ms"`
 }
 
 // ToolResp Tool 目录条目。

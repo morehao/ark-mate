@@ -1525,3 +1525,47 @@ A5 补上远程端点接入，使 ark-forge 既能驱动本机 CLI，也能接�
 高熵随机值，配合反代限流）；③ 无令牌轮换/过期机制（改配置即轮换，需重启）；④ 静态资源
 （面板 HTML/JS）不鉴权——其中不含任何密钥，接口面才是保护对象；⑤ 令牌经 `?token=` 出现在
 WS URL 中，可能被反代访问日志记录（建议反代对 `/ws/events` 关闭查询串日志）。
+
+#### 19.16 切片 B1：MCP tools/call（完成）
+
+**动机**：P2 的 MCP 支持只到「live 探测 tools/list 并写目录」——目录里能看到工具，但平台**不能调用**
+它们（底座侧 runtime 自行连接 MCP 的能力不受影响，缺的是平台数据面）。B1 补齐调用面。
+
+**设计**：
+1. **会话抽象**：`internal/mcp` 把「建连 → initialize → notifications/initialized → 具体能力 → 关闭」
+   抽成 `session(ctx, server, fn)`，`ListTools` 与 `CallTool` 共用；传输分派抽成 `dial()`，
+   `listToolsStdio/listToolsHTTP` 相应改为 `dialStdio/dialHTTP`。加能力不再复制握手代码。
+2. **每次调用独立会话**：不做连接池/会话复用——MCP 会话是服务端有状态资源，池化的失效与并发
+   语义需要单独设计，首版不臆造（代价：每次调用一次 spawn/握手；stdio 探测耗时 ~20ms 量级）。
+3. **结果保真**：`CallResult{Content []json.RawMessage, IsError, StructuredContent}` 原样透传
+   MCP 联合类型与 `structuredContent`；`TextOf()` 只把文本块拼成可读摘要（非文本块跳过）。
+4. **错误分层**：
+   - **工具级失败**（服务端 `result.isError=true`）→ 信封 `code=0` + `is_error=true` + 原样 content
+     （调用成功，业务失败）；
+   - 传输/协议/超时 → 信封错误码：`mcp_transport_unsupported`→40501、
+     `mcp_command_invalid`/`mcp_url_invalid`/`mcp_tool_name_required`/`mcp_tool_args_invalid`→40001、
+     `mcp_timeout`→40901（ClassLimit）、其余（`mcp_initialize_failed`/`mcp_tools_call_failed`…）→50201；
+     稳定 code 保留在信封 msg（`[mcp_tools_call_failed] …`），排障可精确定位。
+5. **参数校验**：MCP 规定 `arguments` 是对象 → 非对象（字符串/数组）在本地即拒绝（40001），
+   不把协议外载荷透传给服务端；`null`/空 body = 无参数调用。
+6. **预算**：默认 30s，请求体 `timeout_ms` 可调，硬上限 5min（防挂死）。
+7. **REST**：`POST /mcps/:id/tools/:tool/call`（工具名不含 `/`——gin 路径参数不匹配斜杠，已在
+   README 注明）。**前端**：能力页 Tools 表对 `source=mcp` 的行加「调用」按钮 → 弹窗（参数 JSON，
+   按 `inputSchema.properties` 生成骨架；结果区展示 text/structuredContent 与 is_error 标签）。
+
+**证据**：
+- 单测：`internal/mcp`（stdio 全流程/`isError` 透传/JSON-RPC 错误/空工具名/非对象参数/null 参数/
+  http 传输/sse 明确不支持）、`internal/manager`（http 传输端到端、工具级失败、40401/40501/40001、
+  超时 40901）、`internal/server/handler`（路由参数与 body 透传、空 body、非法 JSON 40000、
+  工具级失败 code=0、错误码透传）。
+- 真进程：python 写的 stdio MCP server（initialize/tools/list/tools/call）→ `probe` 得 3 个工具；
+  `echo` 调用返回 `text` + `structuredContent` 保真（`duration_ms=22`）；`boom` → `code=0` +
+  `is_error=true`；未知工具 → `50201 [mcp_tools_call_failed]`；未知 server → `40401`；
+  `timeout_ms=300` 打慢工具 → `40901 [mcp_timeout]`；`arguments` 传字符串 → `40001`。
+  `pnpm smoke:e2e` 全 PASS（含新增两条 MCP 调用契约断言）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；前端 typecheck + build + `make all` 通过。
+
+**遗留/降级**：① 无连接池（每次调用一次 spawn/握手）；② 无并发限流/队列（并发调用各自独立会话，
+服务端压力由 MCP server 自担）；③ 调用结果不进事件流/审计（只在日志留一行）；④ 工具名含 `/`
+的 server 无法经此路由调用（路径参数限制）；⑤ `resources`/`prompts`/`sse`/auto-probe/原生权限映射
+仍待后续切片。

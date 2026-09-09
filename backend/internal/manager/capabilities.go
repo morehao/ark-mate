@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/acl"
@@ -89,6 +90,12 @@ func (s *Service) ListMcpServers() ([]handler.McpServerResp, error) {
 
 // defaultMCPProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。
 const defaultMCPProbeTimeout = 15 * time.Second
+
+// MCP 工具调用预算（B1）：默认 30s（工具可能慢），上限 5min（防请求挂死）。
+const (
+	defaultMcpCallTimeout = 30 * time.Second
+	maxMcpCallTimeout     = 5 * time.Minute
+)
 
 // mcpProbeStatus 一个 server 的最近一次探测状态（At 零值 = 从未探测）。
 type mcpProbeStatus struct {
@@ -209,6 +216,65 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpPr
 	}
 	out.ToolCount = len(out.Tools)
 	return out, nil
+}
+
+// CallMcpTool 调用某 MCP server 的工具（B1：tools/call）。
+//
+// 语义要点：
+//   - 每次调用是独立会话（建连 → initialize → initialized → tools/call → 关闭）：不做连接池，
+//     MCP 会话是有状态资源，池化的失效/并发语义需单独设计（不臆造）。
+//   - 不要求先探测：server 才是工具存在性的权威（未探测也能调用；调用失败按 server 的
+//     JSON-RPC 错误返回）。
+//   - **工具级失败**（服务端 result.isError=true）不是平台错误：原样透传 is_error + content，
+//     信封 code=0（调用方据 is_error 判断）；只有传输/协议/超时才映射为信封错误码。
+func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req handler.McpToolCallReq) (*handler.McpToolCallResp, error) {
+	server, ok := s.caps.GetMcpServer(id)
+	if !ok {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+			fmt.Sprintf("未知 MCP server %q", id), nil))
+	}
+	budget := defaultMcpCallTimeout
+	if req.TimeoutMS > 0 {
+		budget = time.Duration(req.TimeoutMS) * time.Millisecond
+		if budget > maxMcpCallTimeout {
+			budget = maxMcpCallTimeout
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	start := time.Now()
+	res, err := mcp.CallTool(cctx, mcp.Server{
+		ID: server.ID, Transport: server.Transport, Command: server.Command,
+		Args: server.Args, URL: server.URL, Headers: server.Headers,
+	}, tool, req.Arguments)
+	if err != nil {
+		// 稳定 code 进信封 msg（同探测）：信封 code 只有分类粒度，排障需要精确原因。
+		return nil, s.restErr(acl.NewError(mcpCallClass(err), mcp.CodeOf(err),
+			fmt.Sprintf("[%s] %s", mcp.CodeOf(err), err.Error()), nil))
+	}
+	slog.Default().Info("mcp 工具调用完成", "server", id, "tool", tool,
+		"is_error", res.IsError, "blocks", len(res.Content), "ms", time.Since(start).Milliseconds())
+	return &handler.McpToolCallResp{
+		ServerID: id, Tool: tool, IsError: res.IsError,
+		Content: res.Content, Text: res.TextOf(), StructuredContent: res.StructuredContent,
+		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
+		DurationMS: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// mcpCallClass 工具调用错误的 REST 分类（与探测同构：传输不支持→Unsupported，参数/超时→Request/Service）。
+func mcpCallClass(err error) acl.Class {
+	switch mcp.CodeOf(err) {
+	case "mcp_transport_unsupported":
+		return acl.ClassUnsupported
+	case "mcp_command_invalid", "mcp_url_invalid", "mcp_tool_name_required", "mcp_tool_args_invalid":
+		return acl.ClassRequest
+	case "mcp_timeout":
+		return acl.ClassLimit
+	default:
+		return acl.ClassService
+	}
 }
 
 // ListTools 返回 Tool 目录（按 name 排序）。
