@@ -13,6 +13,7 @@ import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
+import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -35,6 +36,12 @@ export function ChatPage() {
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
+  // 尾部窗口（P3 余留）：长会话只渲染尾部 TRANSCRIPT_WINDOW 条，更早的按需展开。
+  const [revealed, setRevealed] = useState(0)
+  // 首次定位到底部：每个会话只在首次拿到条目时执行一次（切回不打扰用户阅读位置）。
+  const anchoredRef = useRef<string | null>(null)
+  // 「显示更早」前后的高度差补偿（保持视口停在原处）。
+  const pendingAnchorRef = useRef<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
@@ -119,13 +126,38 @@ export function ChatPage() {
     return () => window.clearTimeout(t)
   }, [activeId, hydrating, expireHydration])
 
-  // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
+  // 首次挂载/切换会话：条目首次出现时定位到底部（此前实现只做「近底跟随」，
+  // 冷挂载 scrollTop=0 → 打开会话看到的是最早的消息）。
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !activeId) return
+    if ((view?.entries.length ?? 0) === 0) return
+    if (anchoredRef.current === activeId) return
+    anchoredRef.current = activeId
+    el.scrollTop = el.scrollHeight
+  }, [activeId, view?.entries])
+
+  // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）；「显示更早」用高度差补偿保持视口。
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [view?.entries, view?.streaming, view?.lastSeq])
+    const prevHeight = pendingAnchorRef.current
+    if (prevHeight !== null) {
+      pendingAnchorRef.current = null
+      el.scrollTop += el.scrollHeight - prevHeight
+      return
+    }
+    if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [view?.entries, view?.streaming, view?.lastSeq, revealed])
+
+  const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
+
+  // 切换会话：复位尾部窗口（新会话从尾部一页开始）。
+  useEffect(() => {
+    setRevealed(0)
+  }, [activeId])
 
   const onSend = (text: string) => {
     if (!activeId) return
@@ -388,7 +420,21 @@ export function ChatPage() {
                     )
                   ) : (
                     <>
-                      {view?.entries.map((e) => (
+                      {entryWindow.hidden > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              const el = scrollRef.current
+                              if (el) pendingAnchorRef.current = el.scrollHeight
+                              setRevealed((n) => n + TRANSCRIPT_WINDOW)
+                            }}
+                          >
+                            显示更早的 {Math.min(TRANSCRIPT_WINDOW, entryWindow.hidden)} 条（共折叠 {entryWindow.hidden} 条）
+                          </Button>
+                        </div>
+                      )}
+                      {entryWindow.visible.map((e) => (
                         <EntryView key={e.id} e={e} onRetry={e === lastEntry ? retryLast : undefined} />
                       ))}
                       {streaming && (

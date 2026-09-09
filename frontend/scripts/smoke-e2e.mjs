@@ -80,7 +80,10 @@ async function checkRest() {
     (c) => typeof c?.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.id),
   )
   if (badId) return bad('会话 id 形状', `应平台 uuid，got ${JSON.stringify(badId.id)}`)
-  ok(`GET /conversations → 数组信封（id 全为平台 uuid；${convs.env.data.length} 条）`)
+  // P3 余留（侧栏相对时间/排序）依赖 updated_at；缺字段会让列表退化成「空时间」。
+  const noTime = convs.env.data.find((c) => typeof c?.updated_at !== 'string' || Number.isNaN(Date.parse(c.updated_at)))
+  if (noTime) return bad('会话列表时间字段', `updated_at 应为可解析时间戳，got ${JSON.stringify(noTime.updated_at)}`)
+  ok(`GET /conversations → 数组信封（id 全为平台 uuid、updated_at 可解析；${convs.env.data.length} 条）`)
 
   // P2 §8.1 能力卡数据源：Agent 统一能力目录（形状 + agent_id 一致）。
   const caps = await apiGet(`/agents/${encodeURIComponent(a0.id)}/capabilities`)

@@ -1077,3 +1077,35 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 **遗留**：策略目前只作用于「用户确认位」（ACP 权限请求），不下发到底座原生 permission 配置
 （opencode `permission` / dsh 权限模型映射未实证）；前端尚未展示 `permission_policy`（只读面已就绪）；
 策略无「按工具参数模式匹配」（如 bash 命令白名单），如需再评估。
+
+#### 19.6 切片 G6：前端 P3 余留（列表分页 + active 提升 + 相对时间 + 长会话尾部窗口与滚动）（完成）
+
+**落地**：
+
+- `apps/panel/src/console/railView.ts`（纯函数）：`pageConversations(all, limit=RAIL_PAGE 40, activeId)`
+  → `{visible, remaining, promoted}`——一页截断，**当前会话若落在页外则额外纳入并置页首**（深链/搜索
+  跳转/长列表下侧栏始终可见，分组语义不变）；`relTime(iso, now)` → 刚刚 / N 分钟前 / N 小时前 /
+  昨天 / N 天前 / MM-DD / YYYY-MM-DD（`now` 可注入；未来时间与非法值有兜底）。
+- `ConversationRail`：默认渲染一页 + 底部「显示更早的 N 条（还有 M 条）」增量展开；行内新增相对时间
+  （hover 显示绝对时间，保留 seq 便于排障）；切视图复位分页。
+- `apps/panel/src/console/transcriptView.ts`（纯函数）：`windowEntries(entries, TRANSCRIPT_WINDOW 200,
+  revealed)` → 尾部窗口 + 折叠计数；`stickToBottom(metrics, threshold=80)` → 是否跟随滚动。
+- `ChatPage`：长会话只渲染尾部窗口，顶部「显示更早的 N 条」按需展开（展开前后用高度差补偿
+  **保持视口位置**）；**首次挂载/切换会话定位到底部**（此前只有「近底跟随」，冷挂载 scrollTop=0 →
+  打开会话看到的是最早消息，属实际缺陷）；跟随判定改用 `stickToBottom`（距底 <80 才跟随，上翻阅读不打扰）。
+
+**证据**：
+
+- `pnpm typecheck` + `pnpm --filter @ark/panel typecheck` + `pnpm build` 全绿。
+- 纯函数 Node 直调（vite lib 打包真实模块）：25 项断言全 PASS（分页截断/顺序保留/active 提升与
+  remaining/active 不存在不提升/全量展开；相对时间 9 档含未来与非法输入；尾部窗口 4 档；
+  滚动跟随 4 档）。
+- 真实联调（vite dev :5173 → forge serve :8099 sqlite + echo 底座）：播种 **45 个会话** →
+  `smoke:e2e` 全 PASS（新增断言「`updated_at` 可解析」，相对时间/排序的数据前提）；
+  `GET /conversations` 45 条 > RAIL_PAGE 40 → 真实触发「显示更早」分支。
+- 构建产物校验：`apps/panel/dist` 内含新增文案（显示更早的 / 分钟前 / 刚刚 / 昨天 / 天前）；
+  dev 页面 `GET /` 200。
+
+**遗留**：浏览器视觉走查仍缺（环境无浏览器；本次为纯函数级 + 构建/契约级验证）；
+「更早历史」仍是**渲染层窗口**（模型全量在内存，服务端 snapshot 全量回放）——若要真正按需拉取
+更早历史，需后端补 `before` 游标分页（`/history` 当前仅 `after`），未做（避免半成品语义）。

@@ -17,6 +17,7 @@ import type { MenuProps } from 'antd'
 import type { ConversationSearchHit, ConversationSummary } from '@ark/types'
 import { conversationSearch } from '@ark/api'
 import { useForge } from '../store'
+import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
 import { agentNameOf, titleFor } from '../console/util'
 
 interface Props {
@@ -132,6 +133,11 @@ export function ConversationRail({ onCreate }: Props) {
 
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
   const archivedView = railMode === 'archived'
+
+  // 列表分页（P3 余留）：默认渲染一页，超出的以「显示更早」增量展开；切视图/搜索时复位。
+  const [shown, setShown] = useState(RAIL_PAGE)
+  useEffect(() => setShown(RAIL_PAGE), [railMode])
+  const railPage = pageConversations(conversations, shown, activeId)
 
   const openConversation = (id: string) => {
     setDrawer(false)
@@ -363,8 +369,12 @@ export function ConversationRail({ onCreate }: Props) {
               <Dot color={meta.color} pulse={running} size={6} />
               <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
             </span>
-            <span style={{ marginLeft: 'auto', flex: 'none' }}>
-              {view && view.lastSeq > 0 ? `seq ${view.lastSeq}` : ''}
+            <span
+              style={{ marginLeft: 'auto', flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title={sm.updated_at}
+            >
+              <span>{relTime(sm.updated_at)}</span>
+              {view && view.lastSeq > 0 && <span style={{ color: tokens.textPlaceholder }}>seq {view.lastSeq}</span>}
             </span>
           </span>
         </button>
@@ -492,7 +502,8 @@ export function ConversationRail({ onCreate }: Props) {
               : '暂无会话。点击右上「新建会话」，选择 Agent 并发起首轮问答。'}
           </div>
         ) : (
-          groupConversations(conversations).map((g) => (
+          <>
+            {groupConversations(railPage.visible).map((g) => (
             <div key={g.label} role="group" aria-label={g.label}>
               <div
                 style={{
@@ -512,7 +523,28 @@ export function ConversationRail({ onCreate }: Props) {
               </div>
               {g.items.map(renderItem)}
             </div>
-          ))
+          ))}
+            {railPage.remaining > 0 && (
+              <button
+                type="button"
+                onClick={() => setShown((n) => n + RAIL_PAGE)}
+                style={{
+                  display: 'block',
+                  width: 'calc(100% - 16px)',
+                  margin: '8px 8px 4px',
+                  padding: '7px 10px',
+                  background: 'transparent',
+                  border: `1px dashed ${tokens.border}`,
+                  borderRadius: 10,
+                  color: tokens.textSecondary,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                显示更早的 {Math.min(RAIL_PAGE, railPage.remaining)} 条（还有 {railPage.remaining} 条）
+              </button>
+            )}
+          </>
         )}
       </div>
 
