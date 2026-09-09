@@ -276,12 +276,13 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 	}
 }
 
-// TestEnsureConversationResumeGating P3 F2 恢复门控（无子进程路径）：
-// 未知/终态会话 → conversation_not_found；无 provider session（echo 类）→ resume_unavailable。
+// TestEnsureConversationResumeGating P3 F2/F3 恢复门控（无子进程路径）：
+// 未知/终态会话 → conversation_not_found；可恢复会话但 agent 不存在 → agent_not_found
+// （无原生恢复时的 memo 兜底路径由 e2e 冒烟覆盖，单测不拨子进程）。
 func TestEnsureConversationResumeGating(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	svc.registerConversation(&ConversationRec{
-		ID: "c-echo", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID
+		ID: "c-echo", AgentID: "no-such-agent", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
 	})
 	svc.registerConversation(&ConversationRec{
 		ID: "c-term", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusCompleted,
@@ -290,9 +291,9 @@ func TestEnsureConversationResumeGating(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := orch.Prompt(ctx, "c-echo", "hi"); err == nil {
-		t.Fatal("echo 类无 provider session 应 resume_unavailable")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "resume_unavailable" {
-		t.Fatalf("期望 resume_unavailable，got %v", err)
+		t.Fatal("可恢复但 agent 不存在应 agent_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "agent_not_found" {
+		t.Fatalf("期望 agent_not_found，got %v", err)
 	}
 	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
 		t.Fatal("终态会话应 conversation_not_found")
@@ -303,5 +304,40 @@ func TestEnsureConversationResumeGating(t *testing.T) {
 		t.Fatal("未知会话应 conversation_not_found")
 	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
 		t.Fatalf("期望 conversation_not_found，got %v", err)
+	}
+}
+
+// TestHandoffMemoBudget P3 F3 memo 压缩：用户原文收录 + 助手聚合、跨轮分隔、预算截断保最新。
+func TestHandoffMemoBudget(t *testing.T) {
+	svc, _, _ := newTestRig(t)
+	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到A"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "补充A"})
+	svc.publish(BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
+	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到B"})
+
+	memo := svc.HandoffMemo("cv1", 6000)
+	for _, want := range []string{"任务A", "任务B", "收到A补充A", "收到B"} {
+		if !strings.Contains(memo, want) {
+			t.Fatalf("memo 应含 %q，got: %s", want, memo)
+		}
+	}
+	if strings.Contains(memo, "噪音思考") {
+		t.Fatalf("memo 不应含 thought 噪音: %s", memo)
+	}
+	// 预算收紧：小到只能放下 header 片段 → 历史轮次被丢弃、输出不超预算。
+	tight := svc.HandoffMemo("cv1", 24)
+	if strings.Contains(tight, "任务A") || strings.Contains(tight, "任务B") {
+		t.Fatalf("紧预算应丢弃历史轮：%s", tight)
+	}
+	if runeLen(tight) > 24 {
+		t.Fatalf("memo 不应超过预算：%d > 24", runeLen(tight))
+	}
+	if got := svc.HandoffMemo("cv1", 0); got != "" {
+		t.Fatalf("0 预算应返回空: %q", got)
+	}
+	if got := svc.HandoffMemo("no-such", 6000); got != "" {
+		t.Fatalf("无事件会话应返回空: %q", got)
 	}
 }

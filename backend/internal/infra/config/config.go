@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -20,6 +21,10 @@ type Config struct {
 	// StoreMode 持久层开关："sqlite" | "memory" | ""(auto：DB 文件已存在 → sqlite，否则 memory)。
 	// FORGE_STORE 覆盖。
 	StoreMode string
+	// HandoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；FORGE_HANDOFF_MAX_CHARS
+	// 覆盖，默认 6000；0 = 关闭 memo 兜底）。跨 runtime / 无原生 resume 时把历史压成摘要注入
+	// 首条 prompt。
+	HandoffMaxChars int
 	// TurnTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
 	// 只记自己日志不上报）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
 	TurnTimeout time.Duration
@@ -121,6 +126,13 @@ func Load() Config {
 	if v := os.Getenv("FORGE_TURN_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.TurnTimeout = d
+		}
+	}
+	// FORGE_HANDOFF_MAX_CHARS：bounded handoff memo 字符预算；非法值回落默认 6000。
+	c.HandoffMaxChars = 6000
+	if v := os.Getenv("FORGE_HANDOFF_MAX_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.HandoffMaxChars = n
 		}
 	}
 	// FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT：Go duration 文本；非法值回落默认 30min。

@@ -19,6 +19,9 @@ import (
 // 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
 const agentCancelTimeout = 3 * time.Second
 
+// DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env FORGE_HANDOFF_MAX_CHARS 覆盖）。
+const DefaultHandoffMaxChars = 6000
+
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
 type acpSession interface {
 	Prompt(ctx context.Context, text string) (string, error)
@@ -43,6 +46,9 @@ type ActiveConversation struct {
 	turn    *Turn
 	dead    bool // 连接已断开，本会话不可再用
 	dropPub bool // 断连错误事件已发布（幂等）
+	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
+	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
+	memo string
 }
 
 // Turn 一轮 prompt 的运行状态。
@@ -91,6 +97,10 @@ type Orchestrator struct {
 	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
 
+	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
+	// FORGE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
+	handoffMaxChars int
+
 	logger *slog.Logger
 }
 
@@ -120,15 +130,16 @@ type RunResult struct {
 // NewOrchestrator 构造编排器并回挂到 Service（Service 负责 bus/存储/REST 方法）。
 func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	o := &Orchestrator{
-		svc:           svc,
-		reg:           reg,
-		conns:         make(map[string]*runtimeConn),
-		conversations: make(map[string]*ActiveConversation),
-		byProvider:    make(map[string]string),
-		inflight:      newInFlightTracker(),
-		perm:          NewPermissionManager(DefaultPermissionTimeout),
-		elic:          NewElicitationManager(DefaultElicitationTimeout),
-		logger:        slog.Default(),
+		svc:             svc,
+		reg:             reg,
+		conns:           make(map[string]*runtimeConn),
+		conversations:   make(map[string]*ActiveConversation),
+		byProvider:      make(map[string]string),
+		inflight:        newInFlightTracker(),
+		perm:            NewPermissionManager(DefaultPermissionTimeout),
+		elic:            NewElicitationManager(DefaultElicitationTimeout),
+		handoffMaxChars: DefaultHandoffMaxChars,
+		logger:          slog.Default(),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （conversation.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
@@ -194,6 +205,9 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 
 // SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
 func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
+
+// SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureConversation。
+func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
 
 // SetLogger 设置编排日志。
 func (o *Orchestrator) SetLogger(l *slog.Logger) {
@@ -282,6 +296,8 @@ func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) 
 		as.mu.Unlock()
 		return 0, acl.NewError(acl.ClassLimit, "turn_in_progress", "该会话正有 turn 在执行，请等待结束", nil)
 	}
+	memo := as.memo
+	as.memo = "" // 一次性消费：仅 fresh+handoff 会话首条 prompt 注入 memo
 	tctx, cancel := context.WithCancel(ctx)
 	t := &Turn{done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.turn = t
@@ -294,6 +310,12 @@ func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) 
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": as.AgentID, "text": text,
 	})
+	// P3 F3 memo 注入：摘要仅作为发给 runtime 的首条 prompt 引导（user_message 事件保持用户
+	// 原文，不含摘要）。SDK v0.13.5 无 provider handoff 通道 → 文本前缀承载；provider 侧拒绝
+	// 重试语义随 SDK 能力后置，不臆造。
+	if memo != "" {
+		text = memo + "\n\n" + text
+	}
 	go o.runTurn(as, t, text)
 	// 看门狗：turnTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
 	if o.turnTimeout > 0 {
@@ -472,10 +494,17 @@ func resumableStatus(status string) bool {
 	return status == ConversationStatusInProgress || status == ConversationStatusInterrupted
 }
 
-// ensureConversation 返回活跃会话；不在活跃集合但持久层有可恢复记录时按需重建（P3 F2 恢复
-// 执行面）：acquire conn → 按能力选 LoadSession（实测 opencode load=true）或 ResumeSession
-// （dsh load=false、resume=true）恢复原生会话 → 重建投影 → 登记映射 → session.resumed 事件。
-// 无可恢复 provider session（echo 等）或终态会话 → 返回明确错误，不改写旧「未找到」语义。
+// ensureConversation 返回活跃会话；不在活跃集合但持久层有可恢复记录时按需重建。
+// 恢复次序（P3 F2/F3，§5.6）：
+//  1. 原生 resume（首选）：acquire conn → 按能力 LoadSession（opencode load=true）或
+//     ResumeSession（dsh resume=true）恢复同一 provider session → reason=restart。
+//  2. handoff memo 兜底（原生不可用时）：无 load/resume 能力（echo）、无 provider session
+//     （旧数据）、agent 现路由 runtime ≠ 会话原 runtime（跨 runtime 续聊）、或原生恢复失败 →
+//     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
+//     并更新 rec 的 provider_session_id / runtime_hint（记忆与 sqlite 同步）。
+//
+// 终态/未知会话 → conversation_not_found（不改写旧语义）。memo 预算由 SetHandoffMaxChars 控制
+// （0 = 关闭 memo 兜底 → 原生不可用时回退明确错误）。
 func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID string) (*ActiveConversation, error) {
 	if as := o.conversation(conversationID); as != nil {
 		return as, nil
@@ -485,18 +514,24 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 		return nil, acl.NewError(acl.ClassRequest, "conversation_not_found",
 			fmt.Sprintf("未知或不可恢复会话 %q", conversationID), nil)
 	}
-	if rec.ProviderSessionID == "" {
-		return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
-			fmt.Sprintf("会话 %q 无持久 provider session（runtime %q 底座不可原生恢复；handoff memo 兜底见 F3）",
-				conversationID, rec.RuntimeHint), nil)
-	}
 	agent, ok := o.svc.AgentByID(rec.AgentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", rec.AgentID), nil)
 	}
-	spec, ok := o.reg.Get(rec.RuntimeHint)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", rec.RuntimeHint), nil)
+	// runtime 选择：会话原 runtime 未注册 / agent 现路由首选已迁移（跨 runtime 续聊，§18 F3）
+	// → 取 agent 现路由 runtime；否则沿用 rec.RuntimeHint。
+	target := rec.RuntimeHint
+	if _, ok := o.reg.Get(target); !ok {
+		target = ""
+	}
+	if resolved, err := o.svc.ResolveRuntime(agent); err == nil && resolved != "" && resolved != target {
+		// agent 定义已更新/原 runtime 失联：切到现首选 runtime（fresh + memo 重灌）。
+		target = resolved
+	}
+	spec, ok := o.reg.Get(target)
+	if !ok || target == "" {
+		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found",
+			fmt.Sprintf("runtime %q 未注册（agent %q 亦无可路由 runtime）", target, rec.AgentID), nil)
 	}
 	cwd := rec.Cwd
 	if cwd == "" {
@@ -508,28 +543,55 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	}
 	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID)}
 	caps := rc.client.Capabilities()
+	sameRuntime := target == rec.RuntimeHint && rec.RuntimeHint != ""
+	nativeID := rec.ProviderSessionID
+	resumeOK := sameRuntime && nativeID != "" &&
+		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
+
 	var sess *acl.Session
+	var memo string
+	reason := "restart"
 	switch {
-	case caps.Raw.LoadSession:
-		sess, err = rc.client.LoadSession(ctx, rec.ProviderSessionID, opts)
-	case caps.Raw.SessionCapabilities.Resume != nil:
-		sess, err = rc.client.ResumeSession(ctx, rec.ProviderSessionID, opts)
-	default:
-		return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
-			fmt.Sprintf("runtime %q 未声明 load/resume 能力，无法原生恢复会话 %q", spec.ID, conversationID), nil)
+	case resumeOK:
+		if caps.Raw.LoadSession {
+			sess, err = rc.client.LoadSession(ctx, nativeID, opts)
+		} else {
+			sess, err = rc.client.ResumeSession(ctx, nativeID, opts)
+		}
+		if err != nil {
+			o.logger.Warn("原生恢复失败，转 handoff memo 兜底", "conversation", conversationID,
+				"runtime", spec.ID, "provider_session", nativeID, "err", err)
+			resumeOK = false
+		}
 	}
-	if err != nil {
-		return nil, err
+	if !resumeOK {
+		if o.handoffMaxChars <= 0 {
+			return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
+				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
+					conversationID, spec.ID), nil)
+		}
+		sess, err = rc.client.NewSession(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		memo = o.svc.HandoffMemo(conversationID, o.handoffMaxChars)
+		reason = "handoff"
+		// 迁移登记：fresh session 顶替原 provider id；跨 runtime 时同步 runtime_hint。
+		if nativeID != sess.ID() || target != rec.RuntimeHint {
+			rec.ProviderSessionID = sess.ID()
+			rec.RuntimeHint = spec.ID
+			o.svc.registerConversation(rec)
+		}
 	}
 	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
-		proj: runtime.NewProjection(spec, sess)}
+		proj: runtime.NewProjection(spec, sess), memo: memo}
 	o.mu.Lock()
 	o.conversations[as.ID] = as
 	o.byProvider[sess.ID()] = as.ID
 	o.mu.Unlock()
 	o.svc.markConversation(as.ID, ConversationStatusInProgress)
 	o.svc.publish(BusSessionResumed, as.ID, map[string]any{
-		"session_id": as.ID, "agent_id": as.AgentID, "runtime": spec.ID, "reason": "restart",
+		"session_id": as.ID, "agent_id": as.AgentID, "runtime": spec.ID, "reason": reason,
 	})
 	return as, nil
 }

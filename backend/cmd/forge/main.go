@@ -149,6 +149,8 @@ func serve(args []string) {
 	if cfg.TurnTimeout > 0 {
 		orch.SetTurnTimeout(cfg.TurnTimeout)
 	}
+	// handoff memo 字符预算（P3 F3；FORGE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
+	orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
 	// 权限/elicitation 挂起超时（默认 30min；FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT 覆盖）。
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)

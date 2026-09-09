@@ -837,6 +837,17 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
   provider_session_id 不变（opencode ses_*/dsh uuid）、status 终态 completed；无重复建会话。
   注意：实测发现 pkill -f 匹配不到 env 前缀进程（argv 不含 FORGE_ADDR），杀服务须按端口
   lsof -ti tcp:<port> kill -9；巨型 opencode.log（316MB）会致后续 spawn FileSystem.open 失败。
+- **F3 handoff memo 兜底 + 跨 runtime 续聊（2026-09-09，完成）**：历史 → bounded memo
+  （svc.HandoffMemo：用户轮聚合、滤 thought/tool/usage、rune 安全预算截断保最新，预算 env
+  FORGE_HANDOFF_MAX_CHARS 默认 6000 / SetHandoffMaxChars，0=关闭）→ 无原生 resume（echo/无
+  provider/原生恢复失败/agent 路由已迁移）时建 fresh session，memo 注入首条 prompt（仅发
+  runtime 的文本前缀，user_message 事件保持用户原文）→ session.resumed reason=handoff，并更新
+  rec 的 provider_session_id/runtime_hint。SDK v0.13.5 无 provider handoff 通道 → 拒绝自动
+  重试语义随 SDK 能力后置（不臆造）。**DoD 实测（真进程 + sqlite）**：①echo kill-9 重启续聊
+  ——reason=handoff、fresh provider id 顶替、同 uuid 无重复行、权限 round 回归；②跨 runtime：
+  opencode 会话（含暗号 青瓷-4711）kill-9 中断 → agent 定义切 deepseekharness → 重启同 uuid
+  prompt → 迁移到 dsh + memo → dsh 正确复述暗号（历史确实跨底座携带）→ runtime_hint/
+  provider_session_id 更新、completed。
 - **F1 双 id 持久化（2026-09-08，完成）**：schema v2 `ALTER TABLE conversations ADD
   provider_session_id`；store/manager 全链路（Conversation/ConversationRec/upsert/restore）
   贯通该列；建会话改用平台 uuid（REST/eventbus/transcript/权限记忆全部以 uuid 会话 id 键控，
