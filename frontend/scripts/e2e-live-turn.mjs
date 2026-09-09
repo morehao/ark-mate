@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 真会话端到端联调：REST 创建会话（真实 runtime 子进程）→ WS attach 续传 → 收流至终态。
- * 需要：vite dev（默认 :5173，/v1 代理 :8099）、真实 runtime + 模型额度。
+ * 需要：vite dev（默认 :5173，/v1 代理 127.0.0.1:10001）、真实 runtime + 模型额度。
  *
  * 用法：
  *   node scripts/e2e-live-turn.mjs <agent_id> "<prompt>"
@@ -12,6 +12,10 @@
  */
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/forge'
+// A6：后端启用 FORGE_TOKEN 时用 FORGE_SMOKE_TOKEN 传入（REST 头 + WS ?token=）。
+const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
+const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
+const WS_QS = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''
 
 const [, , AGENT_ID = '', PROMPT = ''] = process.argv
 if (!AGENT_ID || !PROMPT) {
@@ -27,10 +31,10 @@ async function main() {
   console.log(`真会话 e2e  agent=${AGENT_ID} prompt=${JSON.stringify(PROMPT)} base=${E2E_BASE}\n`)
 
   // 1) REST 创建（真实 dial + session/new；带 prompt → 首轮异步开跑）
-  console.log('· POST /v1/forge/sessions …')
-  const r = await fetch(API + '/sessions', {
+  console.log('· POST /v1/forge/conversations …')
+  const r = await fetch(API + '/conversations', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify({ agent_id: AGENT_ID, prompt: PROMPT }),
   })
   const env = await r.json()
@@ -42,7 +46,7 @@ async function main() {
   console.log(`  ✔ 会话 ${id} status=${status} 水位 event_seq=${event_seq}`)
 
   // 2) WS attach（since_seq = 创建返回水位 → 只收首轮增量）
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events' + WS_QS
   const ws = new WebSocket(wsUrl)
   await new Promise((resolve, reject) => {
     ws.onopen = resolve

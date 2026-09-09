@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -54,33 +58,33 @@ func TestTranscriptJSONL(t *testing.T) {
 	}
 }
 
-// TestSessionHistoryPaging 验证 history 分页（after/limit、has_more、仅本聚合、未知会话 40401）。
-func TestSessionHistoryPaging(t *testing.T) {
+// TestConversationHistoryPaging 验证 history 分页（after/limit、has_more、仅本聚合、未知会话 40401）。
+func TestConversationHistoryPaging(t *testing.T) {
 	reg := runtime.NewRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"})
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
 
 	for i := 0; i < 5; i++ {
 		svc.publish(BusMessage, "s1", map[string]any{"text": "msg"})
 	}
 	svc.publish(BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
 
-	page1, err := svc.SessionHistory(context.Background(), "s1", 0, 2)
+	page1, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Limit: 2})
 	if err != nil {
 		t.Fatalf("history page1: %v", err)
 	}
 	if len(page1.Events) != 2 || !page1.HasMore {
 		t.Fatalf("page1 不符: %+v", page1)
 	}
-	page2, err := svc.SessionHistory(context.Background(), "s1", page1.Events[1].Seq, 2)
+	page2, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: page1.Events[1].Seq, Limit: 2})
 	if err != nil {
 		t.Fatalf("history page2: %v", err)
 	}
 	if len(page2.Events) != 2 || !page2.HasMore || page2.Events[0].AggregID != "s1" {
 		t.Fatalf("page2 不符: %+v", page2)
 	}
-	tail, err := svc.SessionHistory(context.Background(), "s1", page2.Events[1].Seq, 2)
+	tail, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: page2.Events[1].Seq, Limit: 2})
 	if err != nil {
 		t.Fatalf("history tail: %v", err)
 	}
@@ -88,7 +92,37 @@ func TestSessionHistoryPaging(t *testing.T) {
 		t.Fatalf("tail 不符: %+v", tail)
 	}
 
-	if _, err := svc.SessionHistory(context.Background(), "ghost", 0, 10); err == nil {
+	// C2：before 向前分页——从末尾往回翻，升序返回，has_more 指向「更早还有」。
+	lastPage, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Before: tail.Events[0].Seq, HasBefore: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("before 分页: %v", err)
+	}
+	if len(lastPage.Events) != 2 || !lastPage.HasMore {
+		t.Fatalf("before 分页不符: %+v", lastPage)
+	}
+	if lastPage.Events[0].Seq >= lastPage.Events[1].Seq {
+		t.Fatalf("before 分页应升序返回: %+v", lastPage.Events)
+	}
+	if lastPage.LastSeq >= tail.Events[0].Seq {
+		t.Fatalf("before 页末条应早于游标: last=%d cursor=%d", lastPage.LastSeq, tail.Events[0].Seq)
+	}
+	oldest, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Before: lastPage.FirstSeq, HasBefore: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("before 到底: %v", err)
+	}
+	if len(oldest.Events) != 2 || oldest.HasMore || oldest.FirstSeq != 1 {
+		t.Fatalf("翻到最早一页应 has_more=false 且首条 seq=1: %+v", oldest)
+	}
+	// 互斥游标 → 40001（服务层兜底）。
+	if _, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: 1, Before: 2, HasBefore: true}); err == nil {
+		t.Fatal("after+before 应报错")
+	} else {
+		var ge gerror.Error
+		if !errors.As(err, &ge) || ge.Code != 40001 {
+			t.Fatalf("期望 40001，got %v", err)
+		}
+	}
+	if _, err := svc.ConversationHistory(context.Background(), "ghost", handler.HistoryQuery{Limit: 10}); err == nil {
 		t.Fatal("未知会话应报错")
 	} else {
 		var ge gerror.Error
@@ -107,4 +141,74 @@ func splitNonEmpty(s string) []string {
 		}
 	}
 	return out
+}
+
+// TestConversationHistoryStoreBacked sqlite 模式（C2）：历史读 events 表而非 eventbus——
+// 双向游标（after/before）、has_more 沿方向、首尾 seq、载荷解码、跨会话隔离。
+func TestConversationHistoryStoreBacked(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	now := time.Now().UTC()
+	if err := st.UpsertConversation(context.Background(), store.Conversation{
+		ID: "s1", AgentID: "agent-opencode", Status: "in_progress", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+
+	svc, _, _ := newTestRig(t)
+	svc.EnableStore(st)
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
+	for i := 0; i < 5; i++ {
+		svc.publish(BusMessage, "s1", map[string]any{"text": fmt.Sprintf("m%d", i)})
+	}
+	svc.publish(BusMessage, "s2", map[string]any{"text": "other"})
+
+	// 向后分页（after）。
+	p1, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Limit: 3})
+	if err != nil {
+		t.Fatalf("store history p1: %v", err)
+	}
+	if len(p1.Events) != 3 || !p1.HasMore || p1.FirstSeq == 0 || p1.LastSeq != p1.Events[2].Seq {
+		t.Fatalf("store 首页不符: %+v", p1)
+	}
+	if m, ok := p1.Events[0].Payload.(map[string]any); !ok || m["text"] != "m0" {
+		t.Fatalf("载荷未解码: %#v", p1.Events[0].Payload)
+	}
+	p2, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: p1.LastSeq, Limit: 3})
+	if err != nil {
+		t.Fatalf("store history p2: %v", err)
+	}
+	if len(p2.Events) != 2 || p2.HasMore {
+		t.Fatalf("store 末页不符: %+v", p2)
+	}
+
+	// 向前分页（before）：从末页首条往回翻。
+	back, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Before: p2.FirstSeq, HasBefore: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("store history before: %v", err)
+	}
+	if len(back.Events) != 2 || !back.HasMore {
+		t.Fatalf("before 页不符: %+v", back)
+	}
+	if back.LastSeq >= p2.FirstSeq {
+		t.Fatalf("before 页应早于游标: last=%d cursor=%d", back.LastSeq, p2.FirstSeq)
+	}
+	back0, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{Before: back.FirstSeq, HasBefore: true, Limit: 5})
+	if err != nil {
+		t.Fatalf("store history before 到底: %v", err)
+	}
+	if len(back0.Events) != 1 || back0.HasMore {
+		t.Fatalf("最早一页不符: %+v", back0)
+	}
+	if m, ok := back0.Events[0].Payload.(map[string]any); !ok || m["text"] != "m0" {
+		t.Fatalf("最早事件应为 m0: %#v", back0.Events[0].Payload)
+	}
+	for _, e := range append(append([]eventbus.Event{}, p1.Events...), back.Events...) {
+		if e.AggregID != "s1" {
+			t.Fatalf("跨会话混入: %+v", e)
+		}
+	}
 }

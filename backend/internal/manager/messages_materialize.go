@@ -31,22 +31,22 @@ type msgRowBuilder struct {
 
 // materializeMessages 把一轮窗口事件物化为 messages 行（assistant 文本片段 + 时间线 + 工具最终态）。
 // best-effort：失败仅告警，不影响 events 事实源。
-func (s *Service) materializeMessages(sessionID, runID string, evs []store.Event) {
+func (s *Service) materializeMessages(conversationID, runID string, evs []store.Event) {
 	if s.st == nil || len(evs) == 0 {
 		return
 	}
-	rows := buildMessageRows(sessionID, runID, evs)
+	rows := buildMessageRows(conversationID, runID, evs)
 	if len(rows) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.st.CreateMessages(ctx, rows); err != nil {
-		slog.Default().Warn("store: create messages failed", "session", sessionID, "run", runID, "err", err)
+		slog.Default().Warn("store: create messages failed", "conversation", conversationID, "run", runID, "err", err)
 	}
 }
 
-func buildMessageRows(sessionID, runID string, evs []store.Event) []store.Message {
+func buildMessageRows(conversationID, runID string, evs []store.Event) []store.Message {
 	var out []store.Message
 	var cur *msgRowBuilder
 	flush := func() {
@@ -66,7 +66,7 @@ func buildMessageRows(sessionID, runID string, evs []store.Event) []store.Messag
 			at = time.Now().UTC()
 		}
 		out = append(out, store.Message{
-			SessionID: sessionID, RunID: runID, Role: cur.role, Text: cur.text,
+			ConversationID: conversationID, RunID: runID, Role: cur.role, Text: cur.text,
 			EventsJSON: string(ej), ToolDetailsJSON: string(td),
 			SeqLo: cur.seqLo, SeqHi: cur.seqHi, CreatedAt: at,
 		})
@@ -85,7 +85,7 @@ func buildMessageRows(sessionID, runID string, evs []store.Event) []store.Messag
 			flush()
 			text, _ := m["text"].(string)
 			out = append(out, store.Message{
-				SessionID: sessionID, RunID: runID, Role: "user", Text: text,
+				ConversationID: conversationID, RunID: runID, Role: "user", Text: text,
 				EventsJSON: mustJSON([]map[string]any{evObj}),
 				SeqLo:      e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
 			})

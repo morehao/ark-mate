@@ -78,10 +78,10 @@ func TestPermissionMemoryBothSides(t *testing.T) {
 	// 整会话撤销（一键）清空。
 	pm.ForgetSession("s1")
 	if got := len(pm.List("s1")); got != 0 {
-		t.Fatalf("ForgetSession 后应为空，got %d", got)
+		t.Fatalf("ForgetConversation 后应为空，got %d", got)
 	}
 	if _, ok := pm.AutoDecision("s1", req(other)); ok {
-		t.Fatal("ForgetSession 后不应命中")
+		t.Fatal("ForgetConversation 后不应命中")
 	}
 }
 

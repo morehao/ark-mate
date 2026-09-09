@@ -70,7 +70,7 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
           value={draft}
           disabled={busy}
           autoFocus={autoFocus}
-          placeholder={placeholder ?? (busy ? 'agent 正在回复…' : '向当前 Agent 底座提问…')}
+          placeholder={placeholder ?? (busy ? 'agent 正在回复…' : '向当前 Agent 提问…')}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}

@@ -24,14 +24,16 @@ type Server struct {
 
 // Config 控制面服务配置。
 type Config struct {
-	Addr string // 监听地址，如 ":8099"
+	Addr string // 监听地址，如 "127.0.0.1:10001"
+	// Token 单操作员访问令牌（A6）：非空时除 /health 外全部 /v1/forge 路由要求 Bearer token。
+	Token string
 }
 
 // New 构造控制面 Server。svc 为领域服务实现（manager 落地前可用 handler.NewMockService）。
 // bus 承载归一化会话事件（架构文档 §2 范式），由实时通道（WS，M0 落地）订阅推送。
 func New(cfg Config, svc handler.Service, bus *eventbus.Bus) *Server {
 	h := handler.New(svc, bus)
-	engine := router.New(h)
+	engine := router.New(h, router.Options{Token: cfg.Token})
 
 	engine.ForwardedByClientIP = true
 	httpSrv := &http.Server{

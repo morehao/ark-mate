@@ -224,3 +224,37 @@ func TestRequestPermissionRejectWithoutOption(t *testing.T) {
 func ptrString(s string) *string { return &s }
 
 func toolKindPtr(k acpsdk.ToolKind) *acpsdk.ToolKind { return &k }
+
+// TestEffectivePermissionOutcome 决策 → ACP 回执形态的唯一事实源（permissionResponseFromDecision
+// 与 REST 回执共用）：覆盖放行兜底、无选项、显式拒绝回执、拒绝无 deny 选项降级。
+func TestEffectivePermissionOutcome(t *testing.T) {
+	opts := []PermissionOption{
+		{OptionID: "allow_once", Name: "允许一次", Kind: "allow_once"},
+		{OptionID: "allow_always", Name: "始终允许", Kind: "allow_always"},
+		{OptionID: "reject_once", Name: "拒绝一次", Kind: "reject_once"},
+	}
+	cases := []struct {
+		name   string
+		d      PermissionDecision
+		opts   []PermissionOption
+		kind   string
+		option string
+	}{
+		{"放行+指定有效选项", PermissionDecision{Allowed: true, OptionID: "allow_always"}, opts, OutcomeSelected, "allow_always"},
+		{"放行+未指定→第一个选项", PermissionDecision{Allowed: true}, opts, OutcomeSelected, "allow_once"},
+		{"放行+无效选项→第一个选项", PermissionDecision{Allowed: true, OptionID: "nope"}, opts, OutcomeSelected, "allow_once"},
+		{"放行+无选项→取消", PermissionDecision{Allowed: true}, nil, OutcomeCancelled, ""},
+		{"拒绝+deny 选项→Selected（agent 可区分）", PermissionDecision{Rejected: true, OptionID: "reject_once"}, opts, OutcomeSelected, "reject_once"},
+		{"拒绝+无 deny 选项→Cancelled", PermissionDecision{Rejected: true}, opts, OutcomeCancelled, ""},
+		{"拒绝+无效选项→Cancelled", PermissionDecision{Rejected: true, OptionID: "nope"}, opts, OutcomeCancelled, ""},
+		{"取消/超时→Cancelled", PermissionDecision{}, opts, OutcomeCancelled, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, oid := EffectivePermissionOutcome(tc.d, tc.opts)
+			if kind != tc.kind || oid != tc.option {
+				t.Fatalf("期望 (%s,%q)，得到 (%s,%q)", tc.kind, tc.option, kind, oid)
+			}
+		})
+	}
+}

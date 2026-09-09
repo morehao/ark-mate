@@ -7,7 +7,7 @@ export function StatusBar() {
   const wsState = useForge((s) => s.wsState)
   const activeId = useForge((s) => s.activeId)
   const views = useForge((s) => s.views)
-  const sessions = useForge((s) => s.sessions)
+  const conversations = useForge((s) => s.conversations)
 
   const wsMeta =
     wsState === 'open'
@@ -21,7 +21,7 @@ export function StatusBar() {
   const seq = activeId ? (views[activeId]?.lastSeq ?? 0) : 0
   const seqText = activeId
     ? `eventbus seq ${seq} · 已 attach ${activeId.length > 16 ? `${activeId.slice(0, 16)}…` : activeId}`
-    : `eventbus seq ${seq} · 未 attach 会话（共 ${sessions.length} 个）`
+    : `eventbus seq ${seq} · 未 attach 会话（共 ${conversations.length} 个）`
 
   return (
     <footer
@@ -50,7 +50,7 @@ export function StatusBar() {
         <span style={{ opacity: 0.6 }}>·</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{seqText}</span>
       </span>
-      <span style={{ flex: 'none', opacity: 0.85 }}>问答会话绑定唯一 Agent 底座 · 切换底座 = 新建会话</span>
+      <span style={{ flex: 'none', opacity: 0.85 }}>问答会话绑定唯一 Agent · 切换 Agent = 新建会话</span>
     </footer>
   )
 }

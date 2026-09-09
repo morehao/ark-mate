@@ -12,8 +12,8 @@ import (
 )
 
 // TestSQLiteLivePersistenceAcrossRestart 验证 P1 live 接线核心不变量：
-//  1. publish 落库（events + session.last_seq + 元数据），bus 与 DB 共用同一全局号序；
-//  2. markSession/UpdateSession/标题自动推导同步写库；
+//  1. publish 落库（events + conversation.last_seq + 元数据），bus 与 DB 共用同一全局号序；
+//  2. markConversation/UpdateConversation/标题自动推导同步写库；
 //  3. 重启恢复：新 Service + 新 bus 从 DB 载入会话并把事件原样注入（PublishAt），
 //     旧游标可续传；后续新事件 seq 跨重启连续（不重叠、不倒退）。
 func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
@@ -30,15 +30,15 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1 := NewService(reg, bus1)
 	svc1.EnableStore(st1)
 
-	svc1.registerSession(&SessionRec{ID: "s-live", AgentID: "agent-echo", Runtime: "echo"})
+	svc1.registerConversation(&ConversationRec{ID: "s-live", AgentID: "agent-echo"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
 	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
 	eMsg := svc1.publish(BusMessage, "s-live", map[string]any{"text": "答案是 2"})
-	svc1.markSession("s-live", SessionStatusCompleted)
+	svc1.markConversation("s-live", ConversationStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
-	if _, err := svc1.UpdateSession(ctx, "s-live", handler.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
-		t.Fatalf("UpdateSession: %v", err)
+	if _, err := svc1.UpdateConversation(ctx, "s-live", handler.ConversationPatch{Pinned: &pinned, Title: &title}); err != nil {
+		t.Fatalf("UpdateConversation: %v", err)
 	}
 	if eMsg.Seq != eUser.Seq+1 {
 		t.Fatalf("live seq 应连续: %d %d", eUser.Seq, eMsg.Seq)
@@ -46,8 +46,8 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if got, _ := st1.LastSeq(ctx); got != eMsg.Seq {
 		t.Fatalf("DB LastSeq=%d want %d", got, eMsg.Seq)
 	}
-	sess1, ok, _ := st1.GetSession(ctx, "s-live")
-	if !ok || sess1.Status != SessionStatusCompleted || sess1.LastSeq != eMsg.Seq || !sess1.Pinned {
+	sess1, ok, _ := st1.GetConversation(ctx, "s-live")
+	if !ok || sess1.Status != ConversationStatusCompleted || sess1.LastSeq != eMsg.Seq || !sess1.Pinned {
 		t.Fatalf("DB 会话元数据未同步: %+v ok=%v", sess1, ok)
 	}
 	_ = st1.Close() // 释放文件句柄，模拟进程退出
@@ -67,10 +67,10 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
 	if n != 1 || injected != 2 {
-		t.Fatalf("恢复统计: sessions=%d events=%d", n, injected)
+		t.Fatalf("恢复统计: conversations=%d events=%d", n, injected)
 	}
-	list, _ := svc2.ListSessions(false)
-	if len(list) != 1 || list[0].Status != SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
+	list, _ := svc2.ListConversations(false)
+	if len(list) != 1 || list[0].Status != ConversationStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}
 	// bus 按 DB 号序回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
@@ -92,9 +92,9 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	}
 }
 
-// TestSQLiteRestoreAcrossSessions 恢复注入跨会话也必须全局 seq 升序
+// TestSQLiteRestoreAcrossConversations 恢复注入跨会话也必须全局 seq 升序
 // （防止 PublishAt 遇小号回退取号导致乱序/丢事件）。
-func TestSQLiteRestoreAcrossSessions(t *testing.T) {
+func TestSQLiteRestoreAcrossConversations(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "forge.db")
 	ctx := context.Background()
 	st, err := store.Open(dbPath)
@@ -103,9 +103,9 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	}
 	svc := NewService(runtime.NewRegistry(), nil)
 	svc.EnableStore(st)
-	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListSessions 按 updated_at 降序可能先 s-a 后 s-b）。
-	svc.registerSession(&SessionRec{ID: "s-a", AgentID: "a", Runtime: "echo"})
-	svc.registerSession(&SessionRec{ID: "s-b", AgentID: "b", Runtime: "echo"})
+	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListConversations 按 updated_at 降序可能先 s-a 后 s-b）。
+	svc.registerConversation(&ConversationRec{ID: "s-a", AgentID: "a"})
+	svc.registerConversation(&ConversationRec{ID: "s-b", AgentID: "b"})
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-b", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})

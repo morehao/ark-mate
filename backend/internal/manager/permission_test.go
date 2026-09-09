@@ -20,7 +20,7 @@ func TestPermissionResolveOnce(t *testing.T) {
 	// 等注册就绪后投递「允许」。
 	waitRegistered(t, m, "s1")
 	if !m.ResolveAllow("", "o1", false) {
-		// 未知 call_id（空）应返回 false；这里我们从 pendingForSession 取真实 call_id。
+		// 未知 call_id（空）应返回 false；这里我们从 pendingForConversation 取真实 call_id。
 	}
 	callID := pendingCallID(t, m, "s1")
 	if !m.ResolveAllow(callID, "o1", false) {
@@ -88,7 +88,7 @@ func TestPermissionReject(t *testing.T) {
 	}
 }
 
-// TestPermissionCancelSession verify session/cancel 后全部挂起被取消（ACP 规范）。
+// TestPermissionCancelConversation verify conversation/cancel 后全部挂起被取消（ACP 规范）。
 func TestPermissionCancelSession(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
 	for i := 0; i < 2; i++ {
@@ -97,6 +97,11 @@ func TestPermissionCancelSession(t *testing.T) {
 		go func() { exited <- m.RegisterAndWait(context.Background(), "s5", req, nil) }()
 	}
 	waitRegistered(t, m, "s5")
+	// 两个注册 goroutine 各自抢锁写入；等齐 2 条再断言（避免全量并行负载下的调度抖动）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && m.pendingCount("s5") < 2 {
+		time.Sleep(2 * time.Millisecond)
+	}
 	if m.pendingCount("s5") != 2 {
 		t.Fatalf("期望 2 条挂起，got %d", m.pendingCount("s5"))
 	}
@@ -108,11 +113,11 @@ func TestPermissionCancelSession(t *testing.T) {
 
 // ——— helpers ———
 
-func waitRegistered(t *testing.T, m *PermissionManager, sessionID string) {
+func waitRegistered(t *testing.T, m *PermissionManager, conversationID string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(m.pendingForSession(sessionID)) > 0 {
+		if len(m.pendingForSession(conversationID)) > 0 {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -120,11 +125,57 @@ func waitRegistered(t *testing.T, m *PermissionManager, sessionID string) {
 	t.Fatal("权限请求未在限期内注册")
 }
 
-func pendingCallID(t *testing.T, m *PermissionManager, sessionID string) string {
+func pendingCallID(t *testing.T, m *PermissionManager, conversationID string) string {
 	t.Helper()
-	ps := m.pendingForSession(sessionID)
+	ps := m.pendingForSession(conversationID)
 	if len(ps) == 0 {
 		t.Fatal("无挂起请求")
 	}
 	return ps[0].callID
+}
+
+// TestResolveDecisionReportsEffectiveOutcome 决策回执是「实际投递结果」而非请求参数回显：
+// option_id 缺省/无效时兜底为第一个选项，显式拒绝无 deny 选项时降级 cancelled。
+func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
+	cases := []struct {
+		name     string
+		options  []acl.PermissionOption
+		d        acl.PermissionDecision
+		kind     string
+		selected string
+	}{
+		{"放行+指定选项", []acl.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			acl.PermissionDecision{Allowed: true, OptionID: "allow_always"}, acl.OutcomeSelected, "allow_always"},
+		{"放行+缺省→第一个", []acl.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			acl.PermissionDecision{Allowed: true}, acl.OutcomeSelected, "allow_once"},
+		{"放行+无效→第一个", []acl.PermissionOption{{OptionID: "allow_once"}},
+			acl.PermissionDecision{Allowed: true, OptionID: "nope"}, acl.OutcomeSelected, "allow_once"},
+		{"拒绝+deny 选项→selected", []acl.PermissionOption{{OptionID: "reject_once"}},
+			acl.PermissionDecision{Rejected: true, OptionID: "reject_once"}, acl.OutcomeSelected, "reject_once"},
+		{"拒绝+无 deny 选项→cancelled", []acl.PermissionOption{{OptionID: "allow_once"}},
+			acl.PermissionDecision{Rejected: true}, acl.OutcomeCancelled, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPermissionManager(2 * time.Second)
+			req := acl.PermissionRequest{ToolCall: acl.ToolCallInfo{ID: "tc1", Title: "运行命令"}, Options: tc.options}
+			got := make(chan acl.PermissionDecision, 1)
+			go func() { got <- m.RegisterAndWait(context.Background(), "s1", req, nil) }()
+			waitRegistered(t, m, "s1")
+			callID := pendingCallID(t, m, "s1")
+			found, out := m.ResolveDecision(callID, tc.d)
+			if !found {
+				t.Fatal("决策未命中 call_id")
+			}
+			if out.Kind != tc.kind || out.OptionID != tc.selected {
+				t.Fatalf("回执期望 (%s,%q)，得到 (%s,%q)", tc.kind, tc.selected, out.Kind, out.OptionID)
+			}
+			<-got // 等消费者退出，避免泄漏
+		})
+	}
+	// 未知 call_id：found=false + 零值回执（不猜测）。
+	m := NewPermissionManager(time.Second)
+	if found, out := m.ResolveDecision("no-such", acl.PermissionDecision{Allowed: true}); found || out.Kind != "" {
+		t.Fatalf("未知 call_id 应为 (false, 零值)，得到 (%v,%+v)", found, out)
+	}
 }

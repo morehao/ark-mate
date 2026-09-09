@@ -58,6 +58,32 @@ func NewStdioTransport(command string, args, env []string) *StdioTransport {
 	}
 }
 
+// LoggerSetter 由可设置诊断日志目标的传输实现（stdio 的 stderr 透出、远程传输的连接诊断）。
+type LoggerSetter interface {
+	SetLogger(*slog.Logger)
+}
+
+// PidInfo 子进程标识（进程注册表 / 孤儿回收用）。
+type PidInfo struct {
+	PID     int    // 子进程 pid（0 = 未启动）
+	PGID    int    // 进程组 id（0 = 平台不支持/未启用进程组）
+	Command string // 启动命令（诊断与 PID 复用判定的辅助信息）
+}
+
+// PidReporter 由可上报子进程标识的传输实现（stdio）。
+type PidReporter interface {
+	PidInfo() PidInfo
+}
+
+// PidInfo 返回子进程标识；传输不支持时返回零值（调用方据此跳过登记）。
+func (t *StdioTransport) PidInfo() PidInfo {
+	if !t.started || t.cmd == nil || t.cmd.Process == nil {
+		return PidInfo{}
+	}
+	pid := t.cmd.Process.Pid
+	return PidInfo{PID: pid, PGID: procPgid(pid), Command: t.command}
+}
+
 // SetDir 设置子进程工作目录（NewSession 的 cwd 在 ACP 层表达，dir 留给诊断场景）。
 func (t *StdioTransport) SetDir(dir string) { t.dir = dir }
 

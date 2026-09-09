@@ -13,7 +13,7 @@ import (
 )
 
 // WSHandler 是实时事件通道（WS）的协议薄适配层（M0 基本版，无鉴权）：
-// 订阅 eventbus → 按 attach 的聚合（session id）推送 event/snapshot 帧；
+// 订阅 eventbus → 按 attach 的聚合（conversation id）推送 event/snapshot 帧；
 // 客户端帧 action=attach/detach/ping；服务端帧 type=snapshot/event/detached/pong。
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
@@ -38,7 +38,7 @@ const (
 // wsClientFrame 客户端 → 服务端帧。
 type wsClientFrame struct {
 	Action   string `json:"action"`              // attach | detach | ping
-	AggID    string `json:"agg_id"`              // attach/detach 目标聚合（session id）
+	AggID    string `json:"agg_id"`              // attach/detach 目标聚合（conversation id）
 	SinceSeq *int64 `json:"since_seq,omitempty"` // attach 续传游标（省略→snapshot；数字含 0→重放）
 }
 

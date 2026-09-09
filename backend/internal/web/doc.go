@@ -13,7 +13,7 @@
 //
 // # 前端的三种运行形态
 //
-//   - dev 联调：面板跑 vite dev server（proxy /v1 -> :8099），后端只管 API；
+//   - dev 联调：面板跑 vite dev server（proxy /v1 -> 127.0.0.1:10001），后端只管 API；
 //   - 独立部署：直接托管 frontend/apps/panel/dist 到任意静态宿主（nginx 等），
 //     前端经可配置 API base（VITE_API_BASE）指向后端，后端按需开 CORS；
 //   - 单二进制：make all 先拷贝 dist 再以 -tags release 编译，本包 embed 进产物。

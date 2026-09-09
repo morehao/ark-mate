@@ -45,14 +45,7 @@ func permissionRequestFromSDK(p acpsdk.RequestPermissionRequest) PermissionReque
 			Status: stringPtrValue(p.ToolCall.Status),
 			Input:  p.ToolCall.RawInput,
 		},
-		Options: make([]PermissionOption, 0, len(p.Options)),
-	}
-	for _, o := range p.Options {
-		req.Options = append(req.Options, PermissionOption{
-			OptionID: string(o.OptionId),
-			Name:     o.Name,
-			Kind:     string(o.Kind),
-		})
+		Options: toPermissionOptions(p.Options),
 	}
 	return req
 }
@@ -64,7 +57,8 @@ func permissionRequestFromSDK(p acpsdk.RequestPermissionRequest) PermissionReque
 //   - Rejected 且 OptionID 是 agent 提供的选项 → Selected{该 deny 选项}（显式拒绝可被 agent 区分）；
 //   - 其余（Rejected 无可用选项 / 取消 / 超时 / 默认拒绝）→ Cancelled。
 func permissionResponseFromDecision(d PermissionDecision, opts []acpsdk.PermissionOption) acpsdk.RequestPermissionResponse {
-	selected := func(oid string) acpsdk.RequestPermissionResponse {
+	kind, oid := EffectivePermissionOutcome(d, toPermissionOptions(opts))
+	if kind == OutcomeSelected {
 		return acpsdk.RequestPermissionResponse{Outcome: acpsdk.RequestPermissionOutcome{
 			Selected: &acpsdk.RequestPermissionOutcomeSelected{
 				OptionId: acpsdk.PermissionOptionId(oid),
@@ -72,29 +66,65 @@ func permissionResponseFromDecision(d PermissionDecision, opts []acpsdk.Permissi
 			},
 		}}
 	}
-	cancelled := func() acpsdk.RequestPermissionResponse {
-		return acpsdk.RequestPermissionResponse{Outcome: acpsdk.RequestPermissionOutcome{
-			Cancelled: &acpsdk.RequestPermissionOutcomeCancelled{Outcome: "cancelled"},
-		}}
+	return acpsdk.RequestPermissionResponse{Outcome: acpsdk.RequestPermissionOutcome{
+		Cancelled: &acpsdk.RequestPermissionOutcomeCancelled{Outcome: "cancelled"},
+	}}
+}
+
+// ACP 回执形态（对外可观测；与 acpsdk 的 outcome 字段同字面值）。
+const (
+	OutcomeSelected  = "selected"
+	OutcomeCancelled = "cancelled"
+)
+
+// EffectivePermissionOutcome 返回决策**实际投递给 agent** 的回执形态与有效 option_id
+// （单一事实源：permissionResponseFromDecision 与 REST 决策回执共用，避免两处规则漂移）。
+//   - Allowed 且 agent 提供了选项 → (selected, OptionID 有效则用之，否则第一个选项)；
+//   - Allowed 但无选项 → (cancelled, "")（无法 Selected）；
+//   - Rejected 且 OptionID 是 agent 提供的选项 → (selected, 该选项)（显式拒绝，agent 可区分）；
+//   - 其余（Rejected 无 deny 选项 / 取消 / 超时）→ (cancelled, "")。
+func EffectivePermissionOutcome(d PermissionDecision, opts []PermissionOption) (kind, optionID string) {
+	has := func(oid string) bool {
+		if oid == "" {
+			return false
+		}
+		for _, o := range opts {
+			if o.OptionID == oid {
+				return true
+			}
+		}
+		return false
 	}
 	switch {
 	case d.Allowed:
 		if len(opts) == 0 {
-			return cancelled() // 无可用选项时无法 Selected（同历史行为：一律取消）
+			return OutcomeCancelled, ""
 		}
-		oid := d.OptionID
-		if !hasPermissionOption(opts, oid) {
-			oid = string(opts[0].OptionId) // 缺省选第一个选项（对应「放行」）
+		if has(d.OptionID) {
+			return OutcomeSelected, d.OptionID
 		}
-		return selected(oid)
+		return OutcomeSelected, opts[0].OptionID
 	case d.Rejected:
-		if d.OptionID != "" && hasPermissionOption(opts, d.OptionID) {
-			return selected(d.OptionID) // 显式拒绝且 agent 提供了该 deny 选项 → Selected
+		if has(d.OptionID) {
+			return OutcomeSelected, d.OptionID
 		}
-		return cancelled() // 无 deny 选项可回执 → 兜底 Cancelled
+		return OutcomeCancelled, ""
 	default:
-		return cancelled()
+		return OutcomeCancelled, ""
 	}
+}
+
+// toPermissionOptions 把 SDK 选项折叠为内部表示（EffectivePermissionOutcome 入参）。
+func toPermissionOptions(opts []acpsdk.PermissionOption) []PermissionOption {
+	out := make([]PermissionOption, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, PermissionOption{
+			OptionID: string(o.OptionId),
+			Name:     o.Name,
+			Kind:     string(o.Kind),
+		})
+	}
+	return out
 }
 
 // hasPermissionOption 判断 opts 是否含指定 option_id。

@@ -1,10 +1,9 @@
-export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+export type ConversationStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
-export interface SessionSummary {
+export interface ConversationSummary {
   id: string
   agent_id: string
-  runtime: string
-  status: SessionStatus
+  status: ConversationStatus
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
@@ -13,12 +12,58 @@ export interface SessionSummary {
 }
 
 /** 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中；含归档）。 */
-export interface SessionSearchHit extends SessionSummary {
+export interface ConversationSearchHit extends ConversationSummary {
   snippet: string
   matches: number
 }
 
-export interface SessionDetail extends SessionSummary {
+/** 跨会话消息级搜索命中（M3 ②：seq 为锚点，前端据此滚动定位）。 */
+export interface MessageSearchHit {
+  conversation_id: string
+  title?: string
+  agent_id?: string
+  role: 'user' | 'assistant' | string
+  seq: number
+  seq_hi?: number
+  message_id?: number
+  run_id?: string
+  snippet: string
+  created_at: string
+}
+
+export interface MessageSearchResp {
+  query: string
+  /** 数据面：sqlite（messages 读模型）| transcript（无 DB 时的回扫降级）。 */
+  source: 'sqlite' | 'transcript' | string
+  hits: MessageSearchHit[]
+  total: number
+  has_more: boolean
+}
+
+/** 批量导出产物（M3 ②：content 可直接落盘）。 */
+export interface ExportFile {
+  conversation_id: string
+  title?: string
+  agent_id?: string
+  status?: string
+  filename: string
+  format: 'markdown' | 'text' | 'json' | string
+  events: number
+  bytes: number
+  truncated?: boolean
+  content: string
+}
+
+export interface ExportResp {
+  generated_at: string
+  format: string
+  exported: number
+  total_bytes: number
+  skipped?: string[]
+  files: ExportFile[]
+}
+
+export interface ConversationDetail extends ConversationSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
 }
@@ -38,7 +83,7 @@ export interface RevokeMemoryReq {
 }
 
 /** 会话元数据子集更新（nil/零值不更新）。 */
-export interface SessionPatch {
+export interface ConversationPatch {
   title?: string
   pinned?: boolean
   archived?: boolean
@@ -73,9 +118,22 @@ export interface ResolvePermissionReq {
   allowed: boolean
 }
 
+/**
+ * 决策回执：描述**实际投递给 agent** 的结果（不是请求参数回显）。
+ * `option_id` 可能被兜底为第一个选项，或显式拒绝因无 deny 选项降级 `cancelled`——
+ * 以 `outcome`/`selected_option_id` 为准。
+ */
 export interface ResolvePermissionResp {
   call_id: string
   allowed: boolean
+  rejected: boolean
+  always: boolean
+  /** 请求里指定的 option_id（原样回带，便于核对）。 */
+  option_id: string
+  /** 实际 ACP 回执形态。 */
+  outcome: 'selected' | 'cancelled'
+  /** 实际选中的 option_id（outcome=cancelled 时为空串）。 */
+  selected_option_id: string
 }
 
 // ——— 结构化提问通道（ACP elicitation/* ↔ 用户提交） ———
@@ -120,6 +178,10 @@ export type ElicitationMode = 'form' | 'url'
 export interface ElicitationResp {
   elicitation_id: string
   session_id: string
+  /** 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起，跨会话按「不存在」处理）。 */
+  conversation_id: string
+  /** 归属来源：wire（wire 提供）| inferred_inflight（宿主按连接上唯一在途 turn 推断）。 */
+  scope_source: string
   mode: ElicitationMode
   message: string
   schema?: ElicitationFormSchema // form 模式
@@ -141,17 +203,17 @@ export interface ResolveElicitationResp {
   action: ElicitationAction
 }
 
-export interface CreateSessionReq {
-  agent_id: string
+export interface CreateConversationReq {
+  /** 空 = 后端默认播种 Agent（dsh）。 */
+  agent_id?: string
   prompt: string
   cwd?: string
 }
 
-export interface CreateSessionResp {
+export interface CreateConversationResp {
   id: string
   agent_id: string
-  runtime: string
-  status: SessionStatus
+  status: ConversationStatus
   event_seq: number // 已发布事件水位：WS attach 续传起点
 }
 
@@ -159,13 +221,13 @@ export interface PromptReq {
   prompt: string
 }
 
-export interface PromptResp {
+export interface ConversationPromptResp {
   id: string
-  status: SessionStatus
+  status: ConversationStatus
   event_seq: number
 }
 
-export interface CancelSessionResp {
+export interface CancelConversationResp {
   id: string
-  status: SessionStatus
+  status: ConversationStatus
 }

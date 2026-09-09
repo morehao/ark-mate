@@ -28,6 +28,9 @@ type Error struct {
 	Code    string
 	Details string
 	Err     error
+	// StderrTail 失败时子进程 stderr 的最近若干行（诊断尾巴；空 = 未采集/无输出）。
+	// 传输层在「进程起不来/握手失败」路径上采集，供上层 REST/事件外露（A3）。
+	StderrTail []string
 }
 
 func (e *Error) Error() string {
@@ -42,6 +45,29 @@ func (e *Error) Unwrap() error { return e.Err }
 // NewError 构造 acl.Error。cause 可为 nil。
 func NewError(class Class, code, details string, cause error) *Error {
 	return &Error{Class: class, Code: code, Details: details, Err: cause}
+}
+
+// AttachStderr 把传输层的 stderr 诊断尾巴挂到错误上（已有尾巴则不覆盖；最多保留 tailCap 行）。
+func AttachStderr(err error, t Transport) error {
+	ae, ok := As(err)
+	if !ok || ae == nil || t == nil || len(ae.StderrTail) > 0 {
+		return err
+	}
+	ae.StderrTail = TailLines(t.StderrTail(), stderrTailCap)
+	return err
+}
+
+// TailLines 截取最近 n 行（超出保留尾部），供诊断外露统一裁剪。
+func TailLines(lines []string, n int) []string {
+	if n <= 0 || len(lines) == 0 {
+		return nil
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	out := make([]string, len(lines))
+	copy(out, lines)
+	return out
 }
 
 // As 返回 err 链中的 *Error（含直接类型）。

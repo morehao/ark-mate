@@ -1,32 +1,35 @@
 import { create } from 'zustand'
 import {
-  cancelSession,
-  createSession,
+  HttpError,
+  cancelConversation,
+  conversationHistory,
+  createConversation,
   listAgents,
-  listRuntimes,
-  listSessions,
-  promptSession,
+  listConversations,
+  promptConversation,
   resolveElicitation,
   resolvePermission,
+  setToken as persistToken,
+  getToken,
   toErrorMessage,
-  updateSession,
+  updateConversation,
 } from '@ark/api'
 import type {
   Agent,
   BusEvent,
   ElicitationFormSchema,
   PermissionOption,
-  Runtime,
-  SessionSummary,
+  ConversationSummary,
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
-import { Ev } from '@ark/types'
+import { BizCode, Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
+import { olderCursor, prependOlder } from './console/transcriptView'
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
-export interface SessionView {
+export interface ConversationView {
   entries: StreamEntry[]
   streaming: boolean
   lastSeq: number
@@ -34,7 +37,7 @@ export interface SessionView {
   hydrating: boolean
 }
 
-const emptyView = (): SessionView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
+const emptyView = (): ConversationView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
 
 /** 权限终局事件载荷 → 卡片决策摘要（reason/allowed/rejected/always 组合出可读文案）。 */
 function permissionResolvedLabel(p: Record<string, unknown> | undefined): string {
@@ -67,7 +70,7 @@ const nextId = (): string => `e${++uid}`
 // 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
 const TERMINAL_TYPES = new Set<string>([Ev.TurnEnded, Ev.TurnError, Ev.RunCancelled])
 
-export function applyEvent(v: SessionView, e: BusEvent): SessionView {
+export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
   // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
   if (e.seq <= v.lastSeq) return v
@@ -77,7 +80,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   const msgId = e.payload?.msg_id !== undefined && e.payload.msg_id !== null ? String(e.payload.msg_id) : ''
 
   const push = (kind: StreamEntry['kind'], text_?: string, extra?: Partial<StreamEntry>): StreamEntry[] =>
-    [...entries, { kind, id: nextId(), text: text_, ...extra }]
+    [...entries, { kind, id: nextId(), text: text_, seq: e.seq, ...extra }]
 
   const appendToTail = (kind: StreamEntry['kind'], text_: string): StreamEntry[] => {
     const tail = entries[entries.length - 1]
@@ -144,6 +147,22 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         lastSeq,
       }
     }
+    case Ev.SessionResumed: {
+      // P3 会话可移植：进程重启/跨 runtime 后会话按需恢复（reason=restart 原生会话续接 /
+      // handoff 历史摘要重灌）。以系统提示入流，避免用户误以为会话被「重新开始」。
+      const reason = String(e.payload?.reason ?? '')
+      const runtime = String(e.payload?.runtime ?? '')
+      const label =
+        reason === 'handoff' ? '会话已恢复（历史摘要重灌）' : '会话已恢复（原生会话续接）'
+      return {
+        ...v,
+        entries: push('system', undefined, {
+          tone: 'info',
+          text: runtime ? `${label} · ${runtime}` : label,
+        }),
+        lastSeq,
+      }
+    }
     case Ev.TurnEnded:
       return {
         ...v,
@@ -157,7 +176,10 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         streaming: false,
         lastSeq,
       }
-    case Ev.TurnError:
+    case Ev.TurnError: {
+      // A3：失败事件可能携带 runtime stderr 诊断尾巴（数组；非数组/空则忽略）。
+      const rawTail = e.payload?.stderr_tail
+      const stderrTail = Array.isArray(rawTail) ? rawTail.map((l) => String(l)) : undefined
       return {
         ...v,
         entries: settleCards(
@@ -166,12 +188,14 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
             text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
               e.payload?.details ?? '',
             )}`,
+            stderrTail: stderrTail && stderrTail.length > 0 ? stderrTail : undefined,
           }),
           '已结束',
         ),
         streaming: false,
         lastSeq,
       }
+    }
     case Ev.RunCancelled:
       return {
         ...v,
@@ -181,7 +205,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       }
     case Ev.PermissionRequest: {
       // ACP 权限确认：agent 发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
-      // 用户点选 allow/reject × once/always 后经 POST /sessions/:id/permission 回传。
+      // 用户点选 allow/reject × once/always 后经 POST /conversations/:id/permission 回传。
       const callId = String(e.payload?.call_id ?? '')
       const title = String(e.payload?.title ?? '权限请求')
       const toolKind = String(e.payload?.kind ?? '')
@@ -224,7 +248,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
     }
     case Ev.ElicitationRequest: {
       // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
-      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
+      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /conversations/:id/elicitation 回传。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
       const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
       const message = String(e.payload?.message ?? '')
@@ -259,15 +283,22 @@ interface Toast {
 
 export interface ForgeState {
   agents: Agent[]
-  runtimes: Runtime[]
-  sessions: SessionSummary[]
-  views: Record<string, SessionView>
+  conversations: ConversationSummary[]
+  views: Record<string, ConversationView>
   activeId: string | null
   wsState: WsState
   toast: Toast | null
   drawerOpen: boolean
   /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
   railMode: 'active' | 'archived'
+  /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
+  anchorSeq: number | null
+  /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
+  token: string
+  /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
+  tokenModalOpen: boolean
+  /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
+  historyStart: Record<string, boolean>
 }
 
 export interface PermissionDecision {
@@ -286,21 +317,29 @@ export interface ElicitationDecision {
 export interface ForgeActions {
   boot: () => void
   refreshAgents: () => Promise<void>
-  refreshRuntimes: () => Promise<void>
-  refreshSessions: () => Promise<void>
+  refreshConversations: () => Promise<void>
   activate: (id: string | null, sinceSeq?: number) => void
-  createAndRun: (agentId: string, prompt: string) => Promise<string | undefined>
+  /** 跳转到某会话的锚点消息（搜索命中点击）；activate 后由 ChatPage 滚动定位并清空。 */
+  jumpToAnchor: (id: string, seq: number) => void
+  /** 清除跳转锚点（ChatPage 定位完成后调用）。 */
+  clearAnchor: () => void
+  createAndRun: (prompt: string) => Promise<string | undefined>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
   respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
-  renameSession: (id: string, title: string) => Promise<void>
+  renameConversation: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
-  archiveSession: (id: string, archived: boolean) => Promise<void>
+  archiveConversation: (id: string, archived: boolean) => Promise<void>
   setRailMode: (mode: 'active' | 'archived') => void
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
+  /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
+  saveToken: (token: string) => void
+  setTokenModal: (open: boolean) => void
+  /** C2：向服务端翻页加载更早的事件（before 游标），返回本页是否还有更早。 */
+  loadOlder: (id: string) => Promise<boolean>
   /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
   expireHydration: (id: string) => void
   // transport 接线（内部）
@@ -312,18 +351,34 @@ export type ForgeStore = ForgeState & ForgeActions
 
 export const initialState: ForgeState = {
   agents: [],
-  runtimes: [],
-  sessions: [],
+  conversations: [],
   views: {},
   activeId: null,
+  anchorSeq: null,
   wsState: 'idle',
   toast: null,
   drawerOpen: false,
   railMode: 'active',
+  token: getToken(),
+  tokenModalOpen: false,
+  historyStart: {},
 }
+
+/** C2：服务端「加载更早」每页条数。 */
+const HISTORY_PAGE = 50
 
 let toastSeq = 0
 let transportRef: WsTransport | null = null
+
+// reportApiError：401（A6 令牌缺失/无效）时自动打开令牌弹窗，其余走 toast。
+function reportApiError(err: unknown): void {
+  if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
+    useForge.setState({ tokenModalOpen: true })
+    useForge.getState().showToast('需要访问令牌：请在顶栏「令牌」中填写 FORGE_TOKEN')
+    return
+  }
+  useForge.getState().showToast(toErrorMessage(err))
+}
 
 // transport 单例：常驻整个会话生命周期（跨路由保活），重连/重订阅由 transport 自理。
 function ensureTransport(): WsTransport {
@@ -364,6 +419,33 @@ export const useForge = create<ForgeStore>((set, get) => {
     },
     showToast,
 
+    // C2：向服务端翻页加载更早的事件（before 游标）。
+    // 取当前视图最小事件 seq 作为游标（新会话/空视图 → before=0 = 取末尾一页），
+    // 折叠到空视图后整体前插（事件 seq 全小于游标 → 与现有条目天然不重叠），lastSeq 不回退。
+    loadOlder: async (id) => {
+      const cur = get().views[id] ?? emptyView()
+      const before = olderCursor(cur.entries)
+      try {
+        const page = await conversationHistory(id, { before, limit: HISTORY_PAGE })
+        let older = emptyView()
+        for (const e of page.events) older = applyEvent(older, e)
+        set((s) => {
+          const view = s.views[id] ?? emptyView()
+          const merged = prependOlder(older.entries, view.entries, before)
+          return {
+            ...s,
+            views: { ...s.views, [id]: { ...view, entries: merged } },
+            historyStart: { ...s.historyStart, [id]: !page.has_more },
+          }
+        })
+        if (page.events.length === 0) showToast('已到会话最早一条')
+        return page.has_more
+      } catch (err) {
+        reportApiError(err)
+        return true
+      }
+    },
+
     setWsState: (st) => {
       if (get().wsState !== st) set({ wsState: st })
     },
@@ -395,7 +477,7 @@ export const useForge = create<ForgeStore>((set, get) => {
         }
       })
       // 终态已到：会话列表 status 同步刷新（侧栏/服务端忙水位随之收敛）。
-      if (terminal) void get().refreshSessions()
+      if (terminal) void get().refreshConversations()
     },
 
     setDrawer: (open) => set({ drawerOpen: open }),
@@ -404,31 +486,36 @@ export const useForge = create<ForgeStore>((set, get) => {
       try {
         set({ agents: await listAgents() })
       } catch (err) {
-        showToast(toErrorMessage(err))
+        reportApiError(err)
       }
     },
-    refreshRuntimes: async () => {
-      try {
-        set({ runtimes: await listRuntimes() })
-      } catch (err) {
-        showToast(toErrorMessage(err))
-      }
-    },
-    refreshSessions: async () => {
+    refreshConversations: async () => {
       try {
         // 按侧栏当前视图拉取：active=未归档；archived=已归档。
-        set({ sessions: await listSessions(get().railMode === 'archived') })
+        set({ conversations: await listConversations(get().railMode === 'archived') })
       } catch (err) {
-        showToast(toErrorMessage(err))
+        reportApiError(err)
       }
     },
+
+    saveToken: (token) => {
+      const v = token.trim()
+      persistToken(v)
+      set({ token: v, tokenModalOpen: false })
+      // 令牌变化必须重连 WS（握手时经 ?token= 传递）并重新拉取数据。
+      transportRef?.close()
+      ensureTransport().connect()
+      void get().refreshAgents()
+      void get().refreshConversations()
+      get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
+    },
+    setTokenModal: (open) => set({ tokenModalOpen: open }),
 
     boot: () => {
       // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
       ensureTransport().connect()
       void get().refreshAgents()
-      void get().refreshSessions()
-      void get().refreshRuntimes()
+      void get().refreshConversations()
     },
 
     activate: (id, sinceSeq) => {
@@ -452,15 +539,24 @@ export const useForge = create<ForgeStore>((set, get) => {
           }
           t.attach(id, sinceSeq)
         }
-        set({ activeId: id, drawerOpen: false })
+        set({ activeId: id, drawerOpen: false, anchorSeq: null })
       } else {
         set({ activeId: null })
       }
     },
 
-    createAndRun: async (agentId, prompt) => {
+    jumpToAnchor: (id, seq) => {
+      // 复用 activate 的挂载/续传语义，再把锚点交给 ChatPage（先清空再设置，保证跨会话重复跳转也触发）。
+      set({ anchorSeq: null })
+      get().activate(id)
+      set({ anchorSeq: seq })
+    },
+
+    clearAnchor: () => set({ anchorSeq: null }),
+
+    createAndRun: async (prompt) => {
       try {
-        const resp = await createSession({ agent_id: agentId, prompt })
+        const resp = await createConversation({ prompt })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({
@@ -477,7 +573,7 @@ export const useForge = create<ForgeStore>((set, get) => {
         get().activate(resp.id, resp.event_seq)
         // 新建后回「会话」视图并刷新列表（避免停在归档视图看不到新会话）。
         if (get().railMode !== 'active') set({ railMode: 'active' })
-        void get().refreshSessions()
+        void get().refreshConversations()
         return resp.id
       } catch (err) {
         showToast(toErrorMessage(err))
@@ -497,7 +593,7 @@ export const useForge = create<ForgeStore>((set, get) => {
           return { views: { ...s.views, [id]: { ...view, streaming: true } } }
         })
         ensureTransport().connect()
-        await promptSession(id, { prompt: text })
+        await promptConversation(id, { prompt: text })
       } catch (err) {
         // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。
         set((s) => {
@@ -513,7 +609,7 @@ export const useForge = create<ForgeStore>((set, get) => {
       const id = get().activeId
       if (!id) return
       try {
-        await cancelSession(id)
+        await cancelConversation(id)
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -570,31 +666,31 @@ export const useForge = create<ForgeStore>((set, get) => {
       }
     },
 
-    renameSession: async (id, title) => {
+    renameConversation: async (id, title) => {
       try {
-        await updateSession(id, { title })
-        void get().refreshSessions()
+        await updateConversation(id, { title })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
     togglePin: async (id) => {
-      const cur = get().sessions.find((x) => x.id === id)
+      const cur = get().conversations.find((x) => x.id === id)
       if (!cur) return
       try {
-        await updateSession(id, { pinned: !cur.pinned })
-        void get().refreshSessions()
+        await updateConversation(id, { pinned: !cur.pinned })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
-    archiveSession: async (id, archived) => {
+    archiveConversation: async (id, archived) => {
       // 归档/恢复（软归档：archived 为真即从「会话」移入「归档」视图，数据不删）。
       try {
-        await updateSession(id, { archived })
-        void get().refreshSessions()
+        await updateConversation(id, { archived })
+        void get().refreshConversations()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -611,7 +707,7 @@ export const useForge = create<ForgeStore>((set, get) => {
     setRailMode: (mode) => {
       if (get().railMode === mode) return
       set({ railMode: mode })
-      void get().refreshSessions()
+      void get().refreshConversations()
     },
   }
 })

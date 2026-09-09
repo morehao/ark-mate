@@ -11,11 +11,11 @@ import (
 )
 
 // 会话 wire transcript JSONL（M1 #5，对齐 codeg acp_transcript.rs，§5.3/§5.7）：
-// 每 session 一个 JSONL 文件，schema v1，append-only（写后不重写）——
+// 每 conversation 一个 JSONL 文件，schema v1，append-only（写后不重写）——
 // 作为「续看/调试/未来跨 agent 会话导入」的原始事实源：daemon 重启后 bus 历史丢失，
 // transcript 仍保有每轮 prompt/update 原语（用户输入与 agent 增量/终态）。
 //
-// 文件：<dir>/<sessionID>.jsonl
+// 文件：<dir>/<conversationID>.jsonl
 // 首行 header，之后每行一个事件原语：
 //
 //	{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"...","agent_id":"...",
@@ -47,14 +47,14 @@ type wireTranscriptLine struct {
 	Payload map[string]any `json:"payload"`
 }
 
-// transcriptRecorder 按 session 维护打开的 JSONL 文件（单写者：publish 串行路径）。
+// transcriptRecorder 按 conversation 维护打开的 JSONL 文件（单写者：publish 串行路径）。
 type transcriptRecorder struct {
 	dir string
 	log *slog.Logger
 
 	mu     sync.Mutex
 	open   map[string]*os.File
-	failed map[string]bool // 该 session 文件写入已失败（跳过后续，防刷屏）
+	failed map[string]bool // 该 conversation 文件写入已失败（跳过后续，防刷屏）
 }
 
 // newTranscriptRecorder 构造 recorder（dir 为空则禁用）。
@@ -68,30 +68,30 @@ func newTranscriptRecorder(dir string) *transcriptRecorder {
 }
 
 // begin 为会话创建/打开 JSONL 并写 header（幂等：已开则忽略）。
-func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string) {
-	if r == nil || r.dir == "" || sessionID == "" {
+func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd string) {
+	if r == nil || r.dir == "" || conversationID == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.open[sessionID]; ok || r.failed[sessionID] {
+	if _, ok := r.open[conversationID]; ok || r.failed[conversationID] {
 		return
 	}
 	if err := os.MkdirAll(r.dir, 0o755); err != nil {
-		r.markFailedLocked(sessionID)
+		r.markFailedLocked(conversationID)
 		return
 	}
-	path := filepath.Join(r.dir, sessionID+".jsonl")
+	path := filepath.Join(r.dir, conversationID+".jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		r.log.Warn("transcript: open failed", "session", sessionID, "err", err)
-		r.markFailedLocked(sessionID)
+		r.log.Warn("transcript: open failed", "conversation", conversationID, "err", err)
+		r.markFailedLocked(conversationID)
 		return
 	}
 	h := wireTranscriptHeader{
 		Schema:    wireTranscriptSchema,
 		Version:   1,
-		SessionID: sessionID,
+		SessionID: conversationID,
 		AgentID:   agentID,
 		Runtime:   runtimeID,
 		Cwd:       cwd,
@@ -103,31 +103,31 @@ func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string) {
 	if stErr != nil || st.Size() == 0 {
 		if err := writeJSONLine(f, h); err != nil {
 			_ = f.Close()
-			r.log.Warn("transcript: header write failed", "session", sessionID, "err", err)
-			r.markFailedLocked(sessionID)
+			r.log.Warn("transcript: header write failed", "conversation", conversationID, "err", err)
+			r.markFailedLocked(conversationID)
 			return
 		}
 	}
-	r.open[sessionID] = f
+	r.open[conversationID] = f
 }
 
 // appendLine 追加一个事件原语行。
-func (r *transcriptRecorder) appendLine(sessionID string, seq int64, typ string, payload map[string]any) {
+func (r *transcriptRecorder) appendLine(conversationID string, seq int64, typ string, payload map[string]any) {
 	if r == nil || r.dir == "" {
 		return
 	}
 	line := wireTranscriptLine{Seq: seq, TS: time.Now().UTC().Format(time.RFC3339Nano), Type: typ, Payload: payload}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	f, ok := r.open[sessionID]
-	if !ok || r.failed[sessionID] {
+	f, ok := r.open[conversationID]
+	if !ok || r.failed[conversationID] {
 		return
 	}
 	if err := writeJSONLine(f, line); err != nil {
-		r.log.Warn("transcript: append failed", "session", sessionID, "err", err)
+		r.log.Warn("transcript: append failed", "conversation", conversationID, "err", err)
 		_ = f.Close()
-		delete(r.open, sessionID)
-		r.markFailedLocked(sessionID)
+		delete(r.open, conversationID)
+		r.markFailedLocked(conversationID)
 	}
 }
 
@@ -144,8 +144,8 @@ func (r *transcriptRecorder) closeAll() {
 	}
 }
 
-func (r *transcriptRecorder) markFailedLocked(sessionID string) {
-	r.failed[sessionID] = true
+func (r *transcriptRecorder) markFailedLocked(conversationID string) {
+	r.failed[conversationID] = true
 }
 
 // writeJSONLine 序列化 v 并写一行（编码器自带换行）。

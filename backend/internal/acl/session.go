@@ -51,10 +51,12 @@ func (s *Session) Close(ctx context.Context) error {
 	return nil
 }
 
-// SessionOptions 用于 new/load/resume 的会话参数（M0 仅 cwd + 附加目录）。
+// SessionOptions 用于 new/load/resume 的会话参数。
+// McpServers 为平台选出的 MCP 注入子集（nil/空 = 不下发；P2 由能力数据面提供）。
 type SessionOptions struct {
 	Cwd                   string
 	AdditionalDirectories []string
+	McpServers            []McpServer
 }
 
 // NewSession 创建 fresh session（对应 ACP session/new）。
@@ -62,7 +64,7 @@ func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, 
 	resp, err := c.conn.NewSession(ctx, acpsdk.NewSessionRequest{
 		Cwd:                   opt.Cwd,
 		AdditionalDirectories: opt.AdditionalDirectories,
-		McpServers:            []acpsdk.McpServer{},
+		McpServers:            toAcpMcpServers(opt.McpServers),
 	})
 	if err != nil {
 		return nil, Classify(err)
@@ -80,7 +82,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionO
 	resp, err := c.conn.LoadSession(ctx, acpsdk.LoadSessionRequest{
 		Cwd:                   opt.Cwd,
 		AdditionalDirectories: opt.AdditionalDirectories,
-		McpServers:            []acpsdk.McpServer{},
+		McpServers:            toAcpMcpServers(opt.McpServers),
 		SessionId:             acpsdk.SessionId(sessionID),
 	})
 	if err != nil {
@@ -99,7 +101,7 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, opt Sessio
 	if _, err := c.conn.ResumeSession(ctx, acpsdk.ResumeSessionRequest{
 		Cwd:                   opt.Cwd,
 		AdditionalDirectories: opt.AdditionalDirectories,
-		McpServers:            []acpsdk.McpServer{},
+		McpServers:            toAcpMcpServers(opt.McpServers),
 		SessionId:             acpsdk.SessionId(sessionID),
 	}); err != nil {
 		return nil, Classify(err)

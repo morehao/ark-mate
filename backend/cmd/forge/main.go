@@ -8,16 +8,23 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/coder/websocket"
+
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/infra/config"
+	"github.com/morehao/ark-forge/internal/infra/procreg"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/runtime/echo"
@@ -26,15 +33,179 @@ import (
 	"github.com/morehao/ark-forge/internal/store"
 )
 
+// mustConfig 解析配置（含 .forge/config 目录化）。配置文件非法时打印明确错误并退出 2
+// （配置错误必须在启动阶段暴露，而不是静默回落默认值）。
+func mustConfig() config.Config {
+	cfg, _, err := config.LoadResolved("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "配置错误: %v\n\n配置目录: %s（FORGE_CONFIG_DIR 可改）\n", err, config.ConfigDirFromEnv())
+		os.Exit(2)
+	}
+	return cfg
+}
+
+// configCmd 打印解析后的配置与每项来源（排障/上线核对用；不启动任何进程）。
+func configCmd(args []string) {
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "以 JSON 输出（含每项来源）")
+	dir := fs.String("config-dir", "", "配置目录（默认 FORGE_CONFIG_DIR 或 ~/.forge/config）")
+	_ = fs.Parse(args)
+
+	cfg, sources, err := config.LoadResolved(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "配置错误: %v\n", err)
+		os.Exit(2)
+	}
+	if *asJSON {
+		doc := map[string]any{
+			"config_dir": cfg.ConfigDir,
+			"config": map[string]any{
+				"addr":                    cfg.Addr,
+				"transcripts":             cfg.TranscriptDir,
+				"db":                      cfg.DBPath,
+				"store":                   cfg.StoreMode,
+				"agents":                  cfg.AgentDir,
+				"capabilities":            cfg.CapabilityDir,
+				"skills_materialize_dir":  cfg.SkillMaterializeDir,
+				"skills_materialize_dirs": formatMaterializeDirs(cfg.SkillMaterializeDirs),
+				"idle_timeout":            cfg.IdleTimeout.String(),
+				"reap_interval":           cfg.ReapInterval.String(),
+				"turn_timeout":            cfg.TurnTimeout.String(),
+				"handoff_max_chars":       cfg.HandoffMaxChars,
+				"permission_timeout":      cfg.PermissionTimeout.String(),
+				"elicitation_timeout":     cfg.ElicitationTimeout.String(),
+				"proc_registry":           cfg.ProcRegistryPath,
+				"reap_grace":              cfg.ReapGrace.String(),
+				"token":                   maskToken(cfg.Token),
+				"mcp_auto_probe":          cfg.McpAutoProbe,
+				"native_permission":       cfg.NativePermission,
+			},
+			"remote_runtimes": cfg.RemoteRuntimes,
+			"sources":         sources,
+		}
+		b, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "序列化失败: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(b))
+		return
+	}
+	src := func(k string) string {
+		if s, ok := sources[k]; ok {
+			return string(s)
+		}
+		return string(config.SourceDefault)
+	}
+	fmt.Printf("配置目录: %s\n", cfg.ConfigDir)
+	fmt.Printf("  %-22s %-38s [%s]\n", "addr", cfg.Addr, src("addr"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "transcripts", cfg.TranscriptDir, src("transcripts"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "db", cfg.DBPath, src("db"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "store", storeModeLabel(cfg.StoreMode), src("store"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "agents", cfg.AgentDir, src("agents"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dirs", emptyLabel(formatMaterializeDirs(cfg.SkillMaterializeDirs)), src("skills_materialize_dirs"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "reap_interval", cfg.ReapInterval.String(), src("reap_interval"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
+	fmt.Printf("  %-22s %-38d [%s]\n", "handoff_max_chars", cfg.HandoffMaxChars, src("handoff_max_chars"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "permission_timeout", cfg.PermissionTimeout.String(), src("permission_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "native_permission", emptyLabel(cfg.NativePermission), src("native_permission"))
+	if len(cfg.RemoteRuntimes) == 0 {
+		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
+	}
+	for _, rt := range cfg.RemoteRuntimes {
+		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtime:"+rt.ID, rt.Transport+" "+rt.Endpoint, string(config.SourceFile))
+	}
+}
+
+// maskToken 令牌只显示长度与首尾各 2 字符（避免配置核对时把令牌打进日志/截图）。
+func maskToken(t string) string {
+	if t == "" {
+		return "(未设置，不鉴权)"
+	}
+	if len(t) <= 8 {
+		return fmt.Sprintf("(已设置，%d 字符)", len(t))
+	}
+	return fmt.Sprintf("%s…%s（%d 字符）", t[:2], t[len(t)-2:], len(t))
+}
+
+func storeModeLabel(mode string) string {
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
+func emptyLabel(v string) string {
+	if v == "" {
+		return "(空)"
+	}
+	return v
+}
+
+// acpServe 把内置 echo ACP 底座暴露成远程端点（A5）：
+// 本机/跨机的另一个 ark-forge 可以在 .forge/config/runtimes.json 里把它声明为远程 runtime，
+// 从而在不装 opencode/dsh、不用模型 key 的前提下演示/验证远程 ACP 链路。
+func acpServe(args []string) {
+	fs := flag.NewFlagSet("acp-serve", flag.ExitOnError)
+	transport := fs.String("transport", "ws", "远程传输形态：ws（WebSocket）| http（Streamable HTTP）")
+	listen := fs.String("listen", "127.0.0.1:10020", "监听地址（默认仅回环）")
+	path := fs.String("path", "/acp", "端点路径")
+	_ = fs.Parse(args)
+
+	opts := acl.RemoteServerOptions{
+		Serve:           func(in io.Writer, out io.Reader) { echo.Serve(in, out) },
+		SessionIDPrefix: "echo",
+		Logger:          slog.Default(),
+	}
+	mux := http.NewServeMux()
+	switch strings.ToLower(strings.TrimSpace(*transport)) {
+	case "ws", "websocket":
+		mux.HandleFunc(*path, func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+			if err != nil {
+				return
+			}
+			defer conn.CloseNow()
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			_ = acl.ServeWSSession(ctx, conn, opts)
+		})
+	case "http", "streamable_http", "streamable-http":
+		mux.Handle(*path, acl.NewRemoteHandler(opts))
+	default:
+		fmt.Fprintf(os.Stderr, "acp-serve: 不支持的 transport %q（ws|http）\n", *transport)
+		os.Exit(2)
+	}
+
+	srv := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	slog.Info("acp-serve: echo ACP 底座已暴露为远程端点", "transport", *transport, "listen", *listen, "path", *path)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		fmt.Fprintf(os.Stderr, "acp-serve: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
-  forge serve [--addr :8099]    启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
+  forge serve [--addr 127.0.0.1:10001]
+                                启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
   forge demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（冒烟）
   forge migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
+  forge config [--json]         打印解析后的配置与每项来源（配置目录 .forge/config 目录化）
+  forge acp-serve [--transport ws|http] [--listen host:port] [--path /acp]
+                                把内置 echo ACP 底座暴露成远程端点（A5 远程传输的服务端半场）
 
-子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h
+子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h / forge acp-serve -h
 `
 
 func main() {
@@ -55,6 +226,10 @@ func main() {
 			os.Exit(2)
 		}
 		transcriptsPrune(os.Args[3:])
+	case "config":
+		configCmd(os.Args[2:])
+	case "acp-serve":
+		acpServe(os.Args[2:])
 	case "acp-demo":
 		// echo 演示底座的 ACP server 子进程（由 serve 经 stdio 拉起，勿手动运行）。
 		if err := echo.RunServer(); err != nil {
@@ -69,16 +244,16 @@ func main() {
 	}
 }
 
-// serve 启动控制面：REST（列表 + sessions create/prompt/cancel）+ WS /ws/events。
+// serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。
 // 会话动作由 Orchestrator 跑真实 ACP runtime；事件经 eventbus 出流。M1 前哨起
 // REST 可触发会话（此前仅 forge demo 可跑真实链路）。
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`:8099`）")
+	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
 	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
 	_ = fs.Parse(args)
 
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
@@ -87,6 +262,16 @@ func serve(args []string) {
 	}
 
 	reg := runtime.DefaultRegistry()
+	// 远程 runtime（A5）：配置目录 runtimes.json 声明的远程 ACP 端点注册进同一注册表，
+	// agent 的 runtimes 字段即可引用；与内置 id 冲突时启动即失败（不静默覆盖内置底座）。
+	for _, rt := range cfg.RemoteRuntimes {
+		if _, exists := reg.Get(rt.ID); exists {
+			fmt.Fprintf(os.Stderr, "serve: runtimes.json 的 id %q 与内置 runtime 冲突\n", rt.ID)
+			os.Exit(2)
+		}
+		reg.Register(runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
+		slog.Info("serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
+	}
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 
@@ -101,6 +286,13 @@ func serve(args []string) {
 	}
 	switch mode {
 	case "sqlite":
+		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。
+		if dir := filepath.Dir(cfg.DBPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "serve: 创建 DB 目录 %s: %v\n", dir, err)
+				os.Exit(1)
+			}
+		}
 		st, err := store.Open(cfg.DBPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "serve: 打开持久层 %s: %v\n", cfg.DBPath, err)
@@ -108,12 +300,12 @@ func serve(args []string) {
 		}
 		defer st.Close()
 		svc.EnableStore(st)
-		sessions, events, rErr := svc.RestoreFromStore(context.Background())
+		conversations, events, rErr := svc.RestoreFromStore(context.Background())
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)
 		}
 		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `forge migrate`。
-		if sessions == 0 && events == 0 {
+		if conversations == 0 && events == 0 {
 			if files, gErr := filepath.Glob(filepath.Join(cfg.TranscriptDir, "*.jsonl")); gErr == nil && len(files) > 0 {
 				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `forge migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
 			}
@@ -126,8 +318,56 @@ func serve(args []string) {
 	}
 
 	orch := manager.NewOrchestrator(svc, reg)
+	// 进程注册表（M3 v4③）：登记本 daemon 拉起的 runtime 子进程；启动时回收上一实例遗留的
+	// 孤儿进程（daemon 被 SIGKILL/崩溃时子进程因独立进程组而存活）。
+	if p := cfg.ProcRegistryPath; p != "" {
+		reg2, prErr := procreg.Open(p)
+		if prErr != nil {
+			slog.Warn("serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
+		} else {
+			orch.SetProcRegistry(reg2)
+			if rep, rErr := orch.ReapOrphans(cfg.ReapGrace); rErr != nil {
+				slog.Warn("serve: 孤儿进程回收失败", "err", rErr)
+			} else if rep.Total() > 0 {
+				slog.Info("serve: 孤儿进程回收", "reaped", len(rep.Reaped),
+					"cleaned", len(rep.Cleaned), "skipped", len(rep.Skipped), "registry", p)
+			}
+		}
+	}
 	// Agent definitions（P2）：FORGE_AGENTS 目录下 <id>.json → 注册到 agents 表（服务端无页面时也热加载）。
 	svc.LoadAgentDefinitions(cfg.AgentDir)
+	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
+	svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
+	// skill 物化（§16.5 切片 D）：FORGE_SKILLS_MATERIALIZE_DIR 显式开启时，把 opencode
+	// SKILL.md 源 skill 与目标目录重校（物化缺失/更新 + 删除联动，只删 forge 标记目录）；
+	// 默认关闭（不写用户目录）。
+	if dir := cfg.SkillMaterializeDir; dir != "" {
+		if w, r, mErr := svc.ReconcileSkills(dir); mErr != nil {
+			slog.Warn("serve: skill 物化重校失败", "dir", dir, "err", mErr)
+		} else if w > 0 || r > 0 {
+			slog.Info("serve: skill 物化重校完成", "dir", dir, "written", w, "removed", r)
+		}
+	}
+	// C4 多 root 投影：按 runtime 各写自己的根目录（只物化声明该 runtime 的 skill）。
+	// 排序遍历保证日志与执行顺序稳定（map 迭代无序）。
+	if len(cfg.SkillMaterializeDirs) > 0 {
+		runtimes := make([]string, 0, len(cfg.SkillMaterializeDirs))
+		for rt := range cfg.SkillMaterializeDirs {
+			runtimes = append(runtimes, rt)
+		}
+		sort.Strings(runtimes)
+		for _, rt := range runtimes {
+			dir := cfg.SkillMaterializeDirs[rt]
+			w, r, mErr := svc.ReconcileSkillsFor(dir, rt)
+			if mErr != nil {
+				slog.Warn("serve: skill 物化重校失败", "dir", dir, "runtime", rt, "err", mErr)
+				continue
+			}
+			if w > 0 || r > 0 {
+				slog.Info("serve: skill 物化重校完成", "dir", dir, "runtime", rt, "written", w, "removed", r)
+			}
+		}
+	}
 	if mode == "sqlite" {
 		// 启动恢复会话级权限记忆（permission_memories 表 → perm.mem，allow/reject 双侧）。
 		if err := orch.RestoreMemoriesFromStore(context.Background()); err != nil {
@@ -137,14 +377,24 @@ func serve(args []string) {
 	if cfg.TurnTimeout > 0 {
 		orch.SetTurnTimeout(cfg.TurnTimeout)
 	}
+	// handoff memo 字符预算（P3 F3；FORGE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
+	orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
 	// 权限/elicitation 挂起超时（默认 30min；FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT 覆盖）。
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)
+	// 原生权限映射（B5）：FORGE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
+	if cfg.NativePermission == config.NativePermissionOff {
+		svc.SetNativePermission(false)
+		slog.Info("serve: 原生权限映射已关闭（FORGE_NATIVE_PERMISSION=off）")
+	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（FORGE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	defer orch.Close()
 
-	srv := server.New(server.Config{Addr: cfg.Addr}, svc, bus)
+	srv := server.New(server.Config{Addr: cfg.Addr, Token: cfg.Token}, svc, bus)
+	if cfg.Token != "" {
+		slog.Info("serve: 已启用单操作员令牌鉴权（除 /health 外全部 /v1/forge 路由要求 Bearer token）")
+	}
 
 	// 优雅退出：信号 → 停 HTTP → 关编排器（回收 runtime 子进程）。
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -155,6 +405,15 @@ func serve(args []string) {
 		defer stopCancel()
 		_ = srv.Stop(stopCtx)
 	}()
+
+	// MCP 自动探测（B4；FORGE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
+	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
+	if cfg.McpAutoProbe == config.McpAutoProbeStartup {
+		go func() {
+			slog.Info("serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
+			_ = svc.AutoProbeMcpServers(ctx)
+		}()
+	}
 
 	if err := srv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
@@ -188,7 +447,7 @@ func demo(args []string) {
 
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	cfg := config.Load()
+	cfg := mustConfig()
 	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := manager.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
@@ -228,12 +487,12 @@ func demo(args []string) {
 	}
 	// 让已入队的尾部事件被打印协程消费后退出。
 	time.Sleep(300 * time.Millisecond)
-	fmt.Printf("✔ demo 完成 session=%s agent=%s stop_reason=%q\n", res.SessionID, res.AgentID, res.StopReason)
+	fmt.Printf("✔ demo 完成 conversation=%s agent=%s stop_reason=%q\n", res.ConversationID, res.AgentID, res.StopReason)
 }
 
 // migrate 把 transcript 目录（默认 ~/.forge/transcripts）全量导入 SQLite（P1 迁移关键路径）：
 //   - 解析全部 *.jsonl（复用 manager 复读器；坏文件告警跳过）；
-//   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → sessions → 数量校验 → 导入标记）；
+//   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → conversations → 数量校验 → 导入标记）；
 //   - 幂等：同目录指纹已导入过则跳过；任一步失败整体回滚（原 transcript 目录不动）。
 func migrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
@@ -241,7 +500,7 @@ func migrate(args []string) {
 	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
 
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *dbPath != "" {
 		cfg.DBPath = *dbPath
 	}
@@ -280,14 +539,14 @@ func migrate(args []string) {
 		}
 		lineCount += len(events)
 		items = append(items, store.ImportItem{
-			Session: store.Session{
-				ID:        data.SessionID,
-				AgentID:   data.AgentID,
-				RuntimeID: data.RuntimeID,
-				Title:     data.Title,
-				Status:    data.Status,
-				CreatedAt: data.CreatedAt,
-				UpdatedAt: data.UpdatedAt,
+			Conversation: store.Conversation{
+				ID:          data.SessionID,
+				AgentID:     data.AgentID,
+				RuntimeHint: data.RuntimeHint,
+				Title:       data.Title,
+				Status:      data.Status,
+				CreatedAt:   data.CreatedAt,
+				UpdatedAt:   data.UpdatedAt,
 			},
 			Events: events,
 		})
@@ -329,7 +588,7 @@ func transcriptsPrune(args []string) {
 	olderThan := fs.String("older-than", "", "删除修改时间早于此时长的 *.jsonl（必填；支持 30d / 168h / 72h30m 等）")
 	dir := fs.String("dir", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *dir != "" {
 		cfg.TranscriptDir = *dir
 	}
@@ -400,7 +659,7 @@ func printEvent(evt eventbus.Event) {
 	sid, _ := p["session_id"].(string)
 	switch evt.Type {
 	case manager.BusSessionCreated:
-		fmt.Printf("🆕 session.created  id=%s\n", sid)
+		fmt.Printf("🆕 conversation.created  id=%s\n", sid)
 	case manager.BusMessage:
 		if text != "" {
 			fmt.Print(text)
@@ -425,4 +684,21 @@ func printEvent(evt eventbus.Event) {
 	case manager.BusRunCancelled:
 		fmt.Printf("\n⛔ run.cancelled\n")
 	}
+}
+
+// formatMaterializeDirs 把 runtime→dir 映射渲染为稳定的 `runtime=dir,…`（config 命令输出用）。
+func formatMaterializeDirs(dirs map[string]string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	runtimes := make([]string, 0, len(dirs))
+	for rt := range dirs {
+		runtimes = append(runtimes, rt)
+	}
+	sort.Strings(runtimes)
+	parts := make([]string, 0, len(runtimes))
+	for _, rt := range runtimes {
+		parts = append(parts, rt+"="+dirs[rt])
+	}
+	return strings.Join(parts, ",")
 }

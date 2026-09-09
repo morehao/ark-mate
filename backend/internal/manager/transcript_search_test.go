@@ -10,9 +10,9 @@ import (
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 )
 
-// TestSearchSessions 验证会话搜索：正文命中 + 片段、元数据命中、大小写不敏感、
+// TestSearchConversations 验证会话搜索：正文命中 + 片段、元数据命中、大小写不敏感、
 // 多命中计数、归档可见、排序 updated_at 降序、limit 截断。
-func TestSearchSessions(t *testing.T) {
+func TestSearchConversations(t *testing.T) {
 	reg := runtime.NewRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
@@ -21,8 +21,8 @@ func TestSearchSessions(t *testing.T) {
 	defer svc.closeTranscripts()
 
 	register := func(id, title, agent, runtimeID string, archived bool, at time.Time) {
-		svc.registerSession(&SessionRec{
-			ID: id, AgentID: agent, Runtime: runtimeID, Status: SessionStatusCompleted,
+		svc.registerConversation(&ConversationRec{
+			ID: id, AgentID: agent, Status: ConversationStatusCompleted,
 			Title: title, Archived: archived, CreatedAt: at, UpdatedAt: at,
 		})
 		svc.beginTranscript(id, agent, runtimeID, "/tmp")
@@ -42,7 +42,7 @@ func TestSearchSessions(t *testing.T) {
 	ctx := context.Background()
 
 	// 1) 正文命中 + 片段 + 双命中计数；sA 排最前（updated 更早…见排序断言用 q 单会话）
-	hits, err := svc.SearchSessions(ctx, "银河", 30)
+	hits, err := svc.SearchConversations(ctx, "银河", 30)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestSearchSessions(t *testing.T) {
 	}
 
 	// 2) 标题命中（含归档 sB）+ 大小写不敏感（"mac" 命中正文）
-	hits, err = svc.SearchSessions(ctx, "MAC", 30)
+	hits, err = svc.SearchConversations(ctx, "MAC", 30)
 	if err != nil {
 		t.Fatalf("search mac: %v", err)
 	}
@@ -73,13 +73,13 @@ func TestSearchSessions(t *testing.T) {
 	}
 
 	// 3) 无命中 → 空
-	hits, err = svc.SearchSessions(ctx, "不存在的词", 30)
+	hits, err = svc.SearchConversations(ctx, "不存在的词", 30)
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("期望空结果，got %+v err=%v", hits, err)
 	}
 
 	// 4) limit=0（调用方已校验但防御）不 panic
-	if _, err := svc.SearchSessions(ctx, "银河", 0); err != nil {
+	if _, err := svc.SearchConversations(ctx, "银河", 0); err != nil {
 		t.Fatalf("limit=0 不 panic: %v", err)
 	}
 }

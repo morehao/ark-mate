@@ -782,6 +782,40 @@ export function EntryView({ e, onRetry }: { e: StreamEntry; onRetry?: () => void
               重试该轮
             </Button>
           )}
+          {e.stderrTail && e.stderrTail.length > 0 && (
+            // A3：runtime stderr 诊断尾巴（默认折叠，避免长输出挤压对话区）。
+            <details
+              style={{
+                width: '100%',
+                maxWidth: 720,
+                border: `1px solid ${tokens.border}`,
+                borderRadius: 10,
+                background: tokens.softFill,
+                padding: '6px 10px',
+                fontSize: 11.5,
+                color: tokens.textSecondary,
+              }}
+            >
+              <summary style={{ cursor: 'pointer', fontFamily: tokens.fontMono, fontSize: 11 }}>
+                runtime stderr 诊断尾巴（{e.stderrTail.length} 行）
+              </summary>
+              <pre
+                style={{
+                  margin: '6px 0 0',
+                  maxHeight: 220,
+                  overflow: 'auto',
+                  fontFamily: tokens.fontMono,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                  color: tokens.text,
+                }}
+              >
+                {e.stderrTail.join('\n')}
+              </pre>
+            </details>
+          )}
         </div>
       )
     }

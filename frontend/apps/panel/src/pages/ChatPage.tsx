@@ -5,14 +5,16 @@ import { InfoCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icon
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
-import { sessionHistory } from '@ark/api'
+import { conversationHistory } from '@ark/api'
 import { useForge } from '../store'
-import { SessionRail } from '../components/SessionRail'
-import { SessionDetailDrawer } from '../components/SessionDetail'
+import { ConversationRail } from '../components/ConversationRail'
+import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
+import { anchorIndex } from '../console/searchView'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
+import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -21,7 +23,7 @@ export function ChatPage() {
   const paramId = params.id ?? null
 
   const agents = useForge((s) => s.agents)
-  const sessions = useForge((s) => s.sessions)
+  const conversations = useForge((s) => s.conversations)
   const views = useForge((s) => s.views)
   const activeId = useForge((s) => s.activeId)
   const drawerOpen = useForge((s) => s.drawerOpen)
@@ -29,17 +31,32 @@ export function ChatPage() {
   const expireHydration = useForge((s) => s.expireHydration)
   const sendPrompt = useForge((s) => s.sendPrompt)
   const cancel = useForge((s) => s.cancel)
-  const archiveSession = useForge((s) => s.archiveSession)
+  const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
   const setDrawer = useForge((s) => s.setDrawer)
+  const anchorSeq = useForge((s) => s.anchorSeq)
+  const clearAnchor = useForge((s) => s.clearAnchor)
+  const loadOlder = useForge((s) => s.loadOlder)
+  const historyStart = useForge((s) => s.historyStart)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
+  // 尾部窗口（P3 余留）：长会话只渲染尾部 TRANSCRIPT_WINDOW 条，更早的按需展开。
+  const [revealed, setRevealed] = useState(0)
+  // 首次定位到底部：每个会话只在首次拿到条目时执行一次（切回不打扰用户阅读位置）。
+  const anchoredRef = useRef<string | null>(null)
+  // 「显示更早」前后的高度差补偿（保持视口停在原处）。
+  const pendingAnchorRef = useRef<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
+  const anchorAppliedRef = useRef<string | null>(null)
+  const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
+  // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
-  // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
+  // URL → 激活（刷新/直达 /conversations/:id 续看；参数不变不重复 attach）
   useEffect(() => {
     if (lastParamRef.current === paramId) return
     lastParamRef.current = paramId
@@ -48,7 +65,7 @@ export function ChatPage() {
   }, [paramId])
 
   const view = activeId ? views[activeId] : undefined
-  const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
+  const activeSum = activeId ? conversations.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
   // 挂起交互请求条数（权限确认 + 结构化提问的待决项；聊天头角标）
@@ -98,7 +115,7 @@ export function ChatPage() {
     void (async () => {
       let txt = ''
       try {
-        const page = await sessionHistory(id, { limit: 30 })
+        const page = await conversationHistory(id, { limit: 30 })
         const last = [...page.events].reverse().find((ev) => ev.type === Ev.UserMessage)
         if (last && typeof last.payload?.text === 'string') txt = last.payload.text
       } catch {
@@ -119,13 +136,69 @@ export function ChatPage() {
     return () => window.clearTimeout(t)
   }, [activeId, hydrating, expireHydration])
 
-  // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）
+  // 首次挂载/切换会话：条目首次出现时定位到底部（此前实现只做「近底跟随」，
+  // 冷挂载 scrollTop=0 → 打开会话看到的是最早的消息）。
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !activeId) return
+    if ((view?.entries.length ?? 0) === 0) return
+    if (anchoredRef.current === activeId) return
+    anchoredRef.current = activeId
+    el.scrollTop = el.scrollHeight
+  }, [activeId, view?.entries])
+
+  // 事件增长时若已近底部则跟随滚动（避免打扰上翻阅读）；「显示更早」用高度差补偿保持视口。
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [view?.entries, view?.streaming, view?.lastSeq])
+    const prevHeight = pendingAnchorRef.current
+    if (prevHeight !== null) {
+      pendingAnchorRef.current = null
+      el.scrollTop += el.scrollHeight - prevHeight
+      return
+    }
+    if (stickToBottom({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [view?.entries, view?.streaming, view?.lastSeq, revealed])
+
+
+  // 搜索命中跳转（M3 ②）：条目就绪后滚动到锚点条目并短暂高亮。
+  // 锚点早于折叠窗口 → 先展开到该条（下一轮渲染再滚动）；无法定位（早于窗口起点）→ 就近落到首条。
+  useEffect(() => {
+    if (anchorSeq === null || !activeId) return
+    if (hydrating || entries.length === 0) return
+    const key = `${activeId}#${anchorSeq}`
+    if (anchorAppliedRef.current === key) return
+    const idx = anchorIndex(entries, anchorSeq)
+    if (idx < 0) {
+      clearAnchor()
+      return
+    }
+    const hidden = Math.max(0, entries.length - (TRANSCRIPT_WINDOW + revealed))
+    if (idx < hidden) {
+      setRevealed((n) => n + (hidden - idx)) // 展开后由下一轮 effect 完成滚动
+      return
+    }
+    const el = scrollRef.current
+    const node = el?.querySelector<HTMLElement>(`[data-fg-idx="${idx}"]`)
+    anchorAppliedRef.current = key
+    setFlashEntryId(entries[idx].id)
+    window.setTimeout(() => setFlashEntryId(null), 2400)
+    clearAnchor()
+    if (!el || !node) return
+    const box = node.getBoundingClientRect()
+    const base = el.getBoundingClientRect()
+    el.scrollTo({ top: Math.max(0, el.scrollTop + (box.top - base.top) - 16), behavior: 'smooth' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorSeq, activeId, hydrating, entries, revealed])
+
+  const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
+
+  // 切换会话：复位尾部窗口（新会话从尾部一页开始）。
+  useEffect(() => {
+    setRevealed(0)
+  }, [activeId])
 
   const onSend = (text: string) => {
     if (!activeId) return
@@ -137,16 +210,16 @@ export function ChatPage() {
     if (!activeId || !activeSum?.agent_id) return
     const agentId = activeSum.agent_id
     try {
-      await archiveSession(activeId, true)
+      await archiveConversation(activeId, true)
       showToast('当前会话已归档，可随时从「归档」恢复')
       navigate(`/new?agent=${encodeURIComponent(agentId)}`)
     } catch {
-      /* archiveSession 内部已 toast 错误 */
+      /* archiveConversation 内部已 toast 错误 */
     }
   }
 
   const headMenu = {
-    items: [{ key: 'soft-clear', label: '归档并新建会话（同底座）', title: '保留数据到归档，另开同 Agent 新会话' }],
+    items: [{ key: 'soft-clear', label: '归档并新建会话（同 Agent）', title: '保留数据到归档，另开同 Agent 新会话' }],
     onClick: (info: { key: string }) => {
       if (info.key === 'soft-clear') void softClear()
     },
@@ -190,7 +263,6 @@ export function ChatPage() {
             }}
           >
             <Pill maxWidth={180}>{agent ? agent.name : agentNameOf(agents, activeSum?.agent_id)}</Pill>
-            <span>{activeSum?.runtime ?? '—'}</span>
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>
@@ -300,7 +372,7 @@ export function ChatPage() {
       </div>
       <div style={{ fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>开始问答</div>
       <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
-        会话绑定唯一的 Agent 底座。从左侧选择一个会话续看，或新建会话并选择 opencode / deepseek-harness 底座。
+        会话绑定唯一的 Agent。从左侧选择一个会话续看，或新建一个会话。
       </p>
       <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/new')} style={{ marginTop: 4 }}>
         新建会话
@@ -310,7 +382,7 @@ export function ChatPage() {
 
   const renderEmptyTranscript = () => {
     const a = agent
-    const agentDesc = a ? `${a.name}（${a.runtime}）` : activeId ?? '该会话'
+    const agentDesc = a ? `${a.name}` : activeId ?? '该会话'
     return (
       <div
         style={{
@@ -351,7 +423,7 @@ export function ChatPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        <SessionRail onCreate={() => navigate('/new')} />
+        <ConversationRail onCreate={() => navigate('/new')} />
         {drawerOpen && (
           <div
             className="fg-scrim-mobile"
@@ -389,8 +461,55 @@ export function ChatPage() {
                     )
                   ) : (
                     <>
-                      {view?.entries.map((e) => (
-                        <EntryView key={e.id} e={e} onRetry={e === lastEntry ? retryLast : undefined} />
+                      {/* C2：服务端更早一页（before 游标）——SQLite 模式下可一直翻到会话第一条；
+                          翻到最早后隐藏。与下方「折叠 N 条」是两层：这里拉数据，那里展开已加载的条目。 */}
+                      {activeId && !historyStart[activeId] && !streaming && (
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <Button
+                            size="small"
+                            type="link"
+                            loading={loadingOlder}
+                            onClick={async () => {
+                              setLoadingOlder(true)
+                              try {
+                                await loadOlder(activeId)
+                              } finally {
+                                setLoadingOlder(false)
+                              }
+                            }}
+                          >
+                            加载更早的消息
+                          </Button>
+                        </div>
+                      )}
+                      {entryWindow.hidden > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              const el = scrollRef.current
+                              if (el) pendingAnchorRef.current = el.scrollHeight
+                              setRevealed((n) => n + TRANSCRIPT_WINDOW)
+                            }}
+                          >
+                            显示更早的 {Math.min(TRANSCRIPT_WINDOW, entryWindow.hidden)} 条（共折叠 {entryWindow.hidden} 条）
+                          </Button>
+                        </div>
+                      )}
+                      {entryWindow.visible.map((e, i) => (
+                        <div
+                          key={e.id}
+                          data-fg-idx={entryWindow.hidden + i}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            borderRadius: 12,
+                            transition: 'box-shadow .35s ease',
+                            boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
+                          }}
+                        >
+                          <EntryView e={e} onRetry={e === lastEntry ? retryLast : undefined} />
+                        </div>
                       ))}
                       {streaming && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>
@@ -433,9 +552,9 @@ export function ChatPage() {
       </div>
       <StatusBar />
       {activeId && (
-        <SessionDetailDrawer
+        <ConversationDetailDrawer
           open={detailOpen}
-          sessionId={activeId}
+          conversationId={activeId}
           onClose={() => setDetailOpen(false)}
         />
       )}

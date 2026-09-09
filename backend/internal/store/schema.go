@@ -16,22 +16,22 @@ type migration struct {
 }
 
 // schemaMigrations 是版本-迁移表（有序；追加迁移 = 在尾部新增，绝不回改历史）。
-// v1 baseline：meta / sessions / events / runs / messages / permission_memories + 索引。
+// v1 baseline：meta / conversations / events / runs / messages / permission_memories + 索引。
 var schemaMigrations = []migration{
 	{
 		version: 1,
-		name:    "baseline: meta/sessions/events/runs/messages/permission_memories",
+		name:    "baseline: meta/conversations/events/runs/messages/permission_memories",
 		statements: []string{
 			`CREATE TABLE meta (
 				key   TEXT PRIMARY KEY,
 				value TEXT NOT NULL
 			)`,
-			`CREATE TABLE sessions (
-				id         TEXT PRIMARY KEY,
-				agent_id   TEXT NOT NULL,
-				runtime_id TEXT NOT NULL,
-				cwd        TEXT NOT NULL DEFAULT '',
-				title      TEXT NOT NULL DEFAULT '',
+			`CREATE TABLE conversations (
+				id           TEXT PRIMARY KEY,
+				agent_id     TEXT NOT NULL,
+				cwd          TEXT NOT NULL DEFAULT '',
+				runtime_hint TEXT NOT NULL DEFAULT '',
+				title        TEXT NOT NULL DEFAULT '',
 				pinned     INTEGER NOT NULL DEFAULT 0,
 				archived   INTEGER NOT NULL DEFAULT 0,
 				status     TEXT NOT NULL DEFAULT 'in_progress',
@@ -39,18 +39,18 @@ var schemaMigrations = []migration{
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			)`,
-			`CREATE INDEX idx_sessions_list ON sessions(archived, updated_at)`,
+			`CREATE INDEX idx_conversations_list ON conversations(archived, updated_at)`,
 			`CREATE TABLE events (
 				seq          INTEGER PRIMARY KEY,
-				session_id   TEXT NOT NULL REFERENCES sessions(id),
+				conversation_id   TEXT NOT NULL REFERENCES conversations(id),
 				type         TEXT NOT NULL,
 				payload_json TEXT NOT NULL DEFAULT '',
 				created_at   TEXT NOT NULL
 			)`,
-			`CREATE INDEX idx_events_session ON events(session_id, seq)`,
+			`CREATE INDEX idx_events_conversation ON events(conversation_id, seq)`,
 			`CREATE TABLE runs (
 				id          TEXT PRIMARY KEY,
-				session_id  TEXT NOT NULL REFERENCES sessions(id),
+				conversation_id  TEXT NOT NULL REFERENCES conversations(id),
 				user_text   TEXT NOT NULL DEFAULT '',
 				status      TEXT NOT NULL DEFAULT 'running',
 				error_code  TEXT NOT NULL DEFAULT '',
@@ -61,10 +61,10 @@ var schemaMigrations = []migration{
 				started_at  TEXT NOT NULL,
 				ended_at    TEXT NOT NULL DEFAULT ''
 			)`,
-			`CREATE INDEX idx_runs_session ON runs(session_id, started_at)`,
+			`CREATE INDEX idx_runs_conversation ON runs(conversation_id, started_at)`,
 			`CREATE TABLE messages (
 				id                INTEGER PRIMARY KEY AUTOINCREMENT,
-				session_id        TEXT NOT NULL REFERENCES sessions(id),
+				conversation_id        TEXT NOT NULL REFERENCES conversations(id),
 				run_id            TEXT NOT NULL DEFAULT '',
 				role              TEXT NOT NULL,
 				text              TEXT NOT NULL DEFAULT '',
@@ -74,17 +74,24 @@ var schemaMigrations = []migration{
 				seq_hi            INTEGER NOT NULL DEFAULT 0,
 				created_at        TEXT NOT NULL
 			)`,
-			`CREATE INDEX idx_messages_session ON messages(session_id, run_id)`,
+			`CREATE INDEX idx_messages_conversation ON messages(conversation_id, run_id)`,
 			`CREATE TABLE permission_memories (
 				id         INTEGER PRIMARY KEY AUTOINCREMENT,
-				session_id TEXT NOT NULL REFERENCES sessions(id),
+				conversation_id TEXT NOT NULL REFERENCES conversations(id),
 				title      TEXT NOT NULL,
 				kind       TEXT NOT NULL DEFAULT '',
 				decision   TEXT NOT NULL,
 				created_at TEXT NOT NULL,
-				UNIQUE(session_id, title, kind)
+				UNIQUE(conversation_id, title, kind)
 			)`,
-			`CREATE INDEX idx_memories_session ON permission_memories(session_id)`,
+			`CREATE INDEX idx_memories_conversation ON permission_memories(conversation_id)`,
+		},
+	},
+	{
+		version: 2,
+		name:    "conversations.provider_session_id（P3 双 id：平台 uuid 会话 id + 原生 provider 列）",
+		statements: []string{
+			`ALTER TABLE conversations ADD COLUMN provider_session_id TEXT NOT NULL DEFAULT ''`,
 		},
 	},
 }

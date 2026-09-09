@@ -23,3 +23,12 @@ func killProc(cmd *exec.Cmd) error {
 	}
 	return nil
 }
+
+// procPgid 取进程组 id（失败返回 0；供 PidInfo 登记进程组用）。
+func procPgid(pid int) int {
+	pg, err := syscall.Getpgid(pid)
+	if err != nil {
+		return 0
+	}
+	return pg
+}

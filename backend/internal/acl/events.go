@@ -26,6 +26,19 @@ const (
 	ToolStatusFailed     = "failed"
 )
 
+// UsageInfo 会话用量快照（ACP session/usage_update，M3 用量统计）：
+// Used/Size 为「当前上下文窗口占用/窗口大小」（快照语义，同一会话以最后一次为准）；
+// Cost 为该会话累计费用（可选，底座不上报时为零值）。
+type UsageInfo struct {
+	Used         int64   `json:"used"`
+	Size         int64   `json:"size"`
+	CostAmount   float64 `json:"cost_amount,omitempty"`
+	CostCurrency string  `json:"cost_currency,omitempty"`
+}
+
+// Reported 是否携带可用信息（全零视为「无上报」，统计时不计入上报会话数）。
+func (u UsageInfo) Reported() bool { return u.Used > 0 || u.Size > 0 || u.CostAmount > 0 }
+
 // Event 是归一化后的 ACP 事件，交给注入的 OnEvent 回调（manager 的 event sink）。
 type Event struct {
 	Kind      string // 见 Kind* 常量

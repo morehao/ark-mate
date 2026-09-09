@@ -1,5 +1,5 @@
 // Package store 实现 ark-forge 的 SQLite 持久层（P1：events 为唯一事实源，
-// sessions/runs/messages/permission_memories 为可重建读模型投影；设计文档
+// conversations/runs/messages/permission_memories 为可重建读模型投影；设计文档
 // docs/zacp-alignment-refactor-design-20260908.md「数据模型」）。
 //
 // 设计约束：
@@ -79,59 +79,62 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Close 关闭数据库。
 func (s *Store) Close() error { return s.db.Close() }
 
-// Session 是 sessions 表的一行（DB 权威元数据；字段对齐 manager.SessionRec + transcript header）。
-type Session struct {
-	ID        string
-	AgentID   string
-	RuntimeID string
-	Cwd       string
-	Title     string
-	Pinned    bool
-	Archived  bool
-	Status    string
-	LastSeq   int64 // 该会话已落库事件的最后 seq（events.seq 全局单调）
-	CreatedAt time.Time
-	UpdatedAt time.Time
+// Conversation 是 conversations 表的一行（DB 权威元数据；字段对齐 manager.ConversationRec + transcript header）。
+type Conversation struct {
+	ID          string
+	AgentID     string
+	Cwd         string
+	RuntimeHint string // 最近/首选 runtime（执行提示，非身份，用户不可见）
+	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid/echo id）。P3 双 id：
+	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
+	ProviderSessionID string
+	Title             string
+	Pinned            bool
+	Archived          bool
+	Status            string
+	LastSeq           int64 // 该会话已落库事件的最后 seq（events.seq 全局单调）
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Event 是 events 表的一行（facts 的唯一事实源）。
 type Event struct {
-	Seq         int64
-	SessionID   string
-	Type        string
-	PayloadJSON string
-	CreatedAt   time.Time
+	Seq            int64
+	ConversationID string
+	Type           string
+	PayloadJSON    string
+	CreatedAt      time.Time
 }
 
 // Memory 是 permission_memories 表的一行（会话级权限记忆，allow/reject 双侧对称）。
 type Memory struct {
-	ID        int64
-	SessionID string
-	Title     string
-	Kind      string
-	Decision  string // allow | reject
-	CreatedAt time.Time
+	ID             int64
+	ConversationID string
+	Title          string
+	Kind           string
+	Decision       string // allow | reject
+	CreatedAt      time.Time
 }
 
 // Run 是 runs 表的一行（一轮 prompt 的物化行，turn 收口处写入）。
 type Run struct {
-	ID         string
-	SessionID  string
-	UserText   string
-	Status     string // running | completed | failed | cancelled | interrupted
-	ErrorCode  string
-	StopReason string
-	UsageJSON  string
-	FirstSeq   int64
-	LastSeq    int64
-	StartedAt  time.Time
-	EndedAt    time.Time
+	ID             string
+	ConversationID string
+	UserText       string
+	Status         string // running | completed | failed | cancelled | interrupted
+	ErrorCode      string
+	StopReason     string
+	UsageJSON      string
+	FirstSeq       int64
+	LastSeq        int64
+	StartedAt      time.Time
+	EndedAt        time.Time
 }
 
 // Message 是 messages 表的一行（消息物化：role/text + 交错时间线 + 工具最终态）。
 type Message struct {
 	ID              int64
-	SessionID       string
+	ConversationID  string
 	RunID           string
 	Role            string // user | assistant
 	Text            string

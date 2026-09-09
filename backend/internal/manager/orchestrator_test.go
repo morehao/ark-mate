@@ -14,8 +14,8 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
-// stubSession 代替 acl.Session（Prompt/Cancel 可按脚本返回）。
-type stubSession struct {
+// stubConversation 代替 acl.Session（Prompt/Cancel 可按脚本返回）。
+type stubConversation struct {
 	stop string
 	err  error
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
@@ -23,7 +23,7 @@ type stubSession struct {
 	cancelled   chan struct{}
 }
 
-func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
+func (s *stubConversation) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {
 		select {
 		case <-ctx.Done():
@@ -38,7 +38,7 @@ func (s *stubSession) Prompt(ctx context.Context, _ string) (string, error) {
 	return s.stop, s.err
 }
 
-func (s *stubSession) Cancel(context.Context) error { return nil }
+func (s *stubConversation) Cancel(context.Context) error { return nil }
 
 // newTestRig 组装 svc+orch+bus（不拨真实连接）。
 func newTestRig(t *testing.T) (*Service, *Orchestrator, *eventbus.Bus) {
@@ -73,9 +73,9 @@ func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
 // TestPromptTurnEnded 正常 end_turn → turn.ended + completed。
 func TestPromptTurnEnded(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode", sess: &stubSession{stop: "end_turn"}}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"})
+	as := &ActiveConversation{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode", sess: &stubConversation{stop: "end_turn"}}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -87,8 +87,8 @@ func TestPromptTurnEnded(t *testing.T) {
 	if evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusTurnEnded {
 		t.Fatalf("事件序列不符: %+v", evts)
 	}
-	rec, ok := svc.sessions["s1"]
-	if !ok || rec.Status != SessionStatusCompleted {
+	rec, ok := svc.conversations["s1"]
+	if !ok || rec.Status != ConversationStatusCompleted {
 		t.Fatalf("会话状态应 completed: %+v", rec)
 	}
 }
@@ -96,9 +96,9 @@ func TestPromptTurnEnded(t *testing.T) {
 // TestPromptBusy 忙时第二轮返回 turn_in_progress。
 func TestPromptBusy(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	as := &ActiveConversation{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubConversation{cancelOnCtx: true}}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "first"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -115,9 +115,9 @@ func TestPromptBusy(t *testing.T) {
 // TestCancelTurn 取消 → run.cancelled + cancelled 状态。
 func TestCancelTurn(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	as := &ActiveConversation{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubConversation{cancelOnCtx: true}}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -129,15 +129,15 @@ func TestCancelTurn(t *testing.T) {
 	if evts[len(evts)-1].Type != BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if svc.conversations["s1"].Status != ConversationStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", svc.conversations["s1"].Status)
 	}
 }
 
-// TestServiceRESTErrors 会话动作错误映射为对外错误码（不存在 agent/session → 40401）。
+// TestServiceRESTErrors 会话动作错误映射为对外错误码（不存在 agent/conversation → 40401）。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateSession(context.Background(), handler.SessionCreateReq{AgentID: "nope", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "nope", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
@@ -161,9 +161,9 @@ func TestErrLooksCancelled(t *testing.T) {
 }
 
 // stuckCancel 的 Cancel 仅在 ctx 到期（agentCancelTimeout 兜底）时返回：
-// 模拟 runtime 对 session/cancel 无响应（如模型限流重试挂起）。
+// 模拟 runtime 对 conversation/cancel 无响应（如模型限流重试挂起）。
 type stuckCancel struct {
-	*stubSession
+	*stubConversation
 }
 
 func (s *stuckCancel) Cancel(ctx context.Context) error {
@@ -172,15 +172,15 @@ func (s *stuckCancel) Cancel(ctx context.Context) error {
 }
 
 // TestCancelTurnAgentUnresponsive agent 无响应时 CancelTurn 有界返回并本地解除：
-// 不依赖 session/cancel RPC，Prompt 总是被 ctx 取消打断 → run.cancelled。
+// 不依赖 conversation/cancel RPC，Prompt 总是被 ctx 取消打断 → run.cancelled。
 func TestCancelTurnAgentUnresponsive(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{
+	as := &ActiveConversation{
 		ID: "s1", AgentID: "a", Runtime: "r",
-		sess: &stuckCancel{stubSession: &stubSession{cancelOnCtx: true}},
+		sess: &stuckCancel{stubConversation: &stubConversation{cancelOnCtx: true}},
 	}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -196,49 +196,50 @@ func TestCancelTurnAgentUnresponsive(t *testing.T) {
 	if len(evts) < 2 || evts[len(evts)-1].Type != BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
-		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
+	if svc.conversations["s1"].Status != ConversationStatusCancelled {
+		t.Fatalf("状态应 cancelled: %v", svc.conversations["s1"].Status)
 	}
 }
 
-// TestBusyAttributionHelpers 验证 busyConn 归属表：登记/撤销/唯一性判定/nil 安全。
+// TestBusyAttributionHelpers 验证在途归属表（§17 E1：inFlightTracker 语义同 §1.5 修订）：
+// 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
-	orch := &Orchestrator{busyConn: make(map[*acl.Client]map[string]struct{})}
+	orch := &Orchestrator{inflight: newInFlightTracker()}
 	c1 := &acl.Client{}
 	c2 := &acl.Client{}
 
 	// 未登记 / nil client → 空
-	if got := orch.busySessionForClient(c1); got != "" {
+	if got := orch.busyConversationForClient(c1); got != "" {
 		t.Fatalf("未登记应返回空: %q", got)
 	}
-	if got := orch.busySessionForClient(nil); got != "" {
+	if got := orch.busyConversationForClient(nil); got != "" {
 		t.Fatalf("nil client 应返回空: %q", got)
 	}
 	orch.markBusy(nil, "s1") // no-op 不 panic
 
 	orch.markBusy(c1, "s1")
-	if got := orch.busySessionForClient(c1); got != "s1" {
+	if got := orch.busyConversationForClient(c1); got != "s1" {
 		t.Fatalf("唯一在途应为 s1: %q", got)
 	}
 	orch.markBusy(c1, "s2")
-	if got := orch.busySessionForClient(c1); got != "" {
+	if got := orch.busyConversationForClient(c1); got != "" {
 		t.Fatalf("两会话并发在途不应猜测: %q", got)
 	}
 	orch.unmarkBusy(c1, "s2")
-	if got := orch.busySessionForClient(c1); got != "s1" {
+	if got := orch.busyConversationForClient(c1); got != "s1" {
 		t.Fatalf("撤销 s2 后应回到 s1: %q", got)
 	}
 	orch.unmarkBusy(c1, "s1")
-	if got := orch.busySessionForClient(c1); got != "" {
+	if got := orch.busyConversationForClient(c1); got != "" {
 		t.Fatalf("全部撤销后应为空: %q", got)
 	}
 
 	// 不同连接互不影响
 	orch.markBusy(c2, "s3")
-	if got := orch.busySessionForClient(c1); got != "" {
+	if got := orch.busyConversationForClient(c1); got != "" {
 		t.Fatalf("c1 不应受 c2 影响: %q", got)
 	}
-	if got := orch.busySessionForClient(c2); got != "s3" {
+	if got := orch.busyConversationForClient(c2); got != "s3" {
 		t.Fatalf("c2 唯一在途应为 s3: %q", got)
 	}
 	orch.unmarkBusy(c2, "s3")
@@ -249,28 +250,94 @@ func TestBusyAttributionHelpers(t *testing.T) {
 func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	c1 := &acl.Client{}
-	as := &ActiveSession{
+	as := &ActiveConversation{
 		ID: "s1", AgentID: "a", Runtime: "r", client: c1,
-		sess: &stubSession{cancelOnCtx: true},
+		sess: &stubConversation{cancelOnCtx: true},
 	}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if got := orch.busySessionForClient(c1); got != "s1" {
+	if got := orch.busyConversationForClient(c1); got != "s1" {
 		t.Fatalf("turn 进行中应归属 s1: %q", got)
 	}
 	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelTurn: %v", err)
 	}
-	// runTurn 收尾后 busyConn 应清空（轮询等待，2s 防御）
+	// runTurn 收尾后在途登记应清空（轮询等待，2s 防御）
 	deadline := time.Now().Add(2 * time.Second)
-	for orch.busySessionForClient(c1) != "" {
+	for orch.busyConversationForClient(c1) != "" {
 		if time.Now().After(deadline) {
-			t.Fatal("turn 收尾后 busyConn 未清除")
+			t.Fatal("turn 收尾后在途登记未清除")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestEnsureConversationResumeGating P3 F2/F3 恢复门控（无子进程路径）：
+// 未知/终态会话 → conversation_not_found；可恢复会话但 agent 不存在 → agent_not_found
+// （无原生恢复时的 memo 兜底路径由 e2e 冒烟覆盖，单测不拨子进程）。
+func TestEnsureConversationResumeGating(t *testing.T) {
+	svc, orch, _ := newTestRig(t)
+	svc.registerConversation(&ConversationRec{
+		ID: "c-echo", AgentID: "no-such-agent", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
+	})
+	svc.registerConversation(&ConversationRec{
+		ID: "c-term", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusCompleted,
+		ProviderSessionID: "echo-x",
+	})
+	ctx := context.Background()
+
+	if _, err := orch.Prompt(ctx, "c-echo", "hi"); err == nil {
+		t.Fatal("可恢复但 agent 不存在应 agent_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "agent_not_found" {
+		t.Fatalf("期望 agent_not_found，got %v", err)
+	}
+	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
+		t.Fatal("终态会话应 conversation_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
+		t.Fatalf("期望 conversation_not_found，got %v", err)
+	}
+	if _, err := orch.Prompt(ctx, "no-such", "hi"); err == nil {
+		t.Fatal("未知会话应 conversation_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
+		t.Fatalf("期望 conversation_not_found，got %v", err)
+	}
+}
+
+// TestHandoffMemoBudget P3 F3 memo 压缩：用户原文收录 + 助手聚合、跨轮分隔、预算截断保最新。
+func TestHandoffMemoBudget(t *testing.T) {
+	svc, _, _ := newTestRig(t)
+	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到A"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "补充A"})
+	svc.publish(BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
+	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
+	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到B"})
+
+	memo := svc.HandoffMemo("cv1", 6000)
+	for _, want := range []string{"任务A", "任务B", "收到A补充A", "收到B"} {
+		if !strings.Contains(memo, want) {
+			t.Fatalf("memo 应含 %q，got: %s", want, memo)
+		}
+	}
+	if strings.Contains(memo, "噪音思考") {
+		t.Fatalf("memo 不应含 thought 噪音: %s", memo)
+	}
+	// 预算收紧：小到只能放下 header 片段 → 历史轮次被丢弃、输出不超预算。
+	tight := svc.HandoffMemo("cv1", 24)
+	if strings.Contains(tight, "任务A") || strings.Contains(tight, "任务B") {
+		t.Fatalf("紧预算应丢弃历史轮：%s", tight)
+	}
+	if runeLen(tight) > 24 {
+		t.Fatalf("memo 不应超过预算：%d > 24", runeLen(tight))
+	}
+	if got := svc.HandoffMemo("cv1", 0); got != "" {
+		t.Fatalf("0 预算应返回空: %q", got)
+	}
+	if got := svc.HandoffMemo("no-such", 6000); got != "" {
+		t.Fatalf("无事件会话应返回空: %q", got)
 	}
 }

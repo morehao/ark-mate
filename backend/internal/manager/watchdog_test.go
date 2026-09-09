@@ -10,9 +10,9 @@ import (
 func TestTurnTimeoutWatchdog(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	orch.SetTurnTimeout(80 * time.Millisecond)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	as := &ActiveConversation{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubConversation{cancelOnCtx: true}}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -21,8 +21,8 @@ func TestTurnTimeoutWatchdog(t *testing.T) {
 	if len(evts) < 2 || evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunCancelled {
 		t.Fatalf("期望 user_message + run.cancelled（看门狗取消），got %+v", evts)
 	}
-	rec, ok := svc.sessions["s1"]
-	if !ok || rec.Status != SessionStatusCancelled {
+	rec, ok := svc.conversations["s1"]
+	if !ok || rec.Status != ConversationStatusCancelled {
 		t.Fatalf("会话状态应 cancelled: %+v", rec)
 	}
 	// busy 必须已释放（否则后续 prompt 仍报 turn_in_progress）。
@@ -44,9 +44,9 @@ func TestTurnTimeoutWatchdog(t *testing.T) {
 // TestTurnTimeoutOff 看门狗关闭时挂起 turn 不自动取消（保持 busy，等外部 cancel）。
 func TestTurnTimeoutOff(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	as := &ActiveConversation{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubConversation{cancelOnCtx: true}}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)

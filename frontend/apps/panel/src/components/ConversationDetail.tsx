@@ -3,16 +3,18 @@ import { Button, Drawer, Input, Popconfirm, Spin } from 'antd'
 import {
   CheckOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import { Dot, Pill, sessionStatusMeta } from '@ark/ui'
-import type { PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark/types'
-import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage } from '@ark/api'
+import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
+import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
+import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
-import { agentNameOf } from '../console/util'
+import { agentNameOf, shortId } from '../console/util'
+import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
 
 function fmtLocal(iso?: string): string {
@@ -27,25 +29,25 @@ function optionId(p: PermissionResp, kind: PermissionOptionKind): string | undef
   return p.options.find((o) => o.kind === kind)?.option_id
 }
 
-/** 会话详情面板（管理面）：元数据只读一瞥 + 挂起权限列表（可就地决策）。数据来自 GET /sessions/:id。 */
-export function SessionDetailDrawer({
+/** 会话详情面板（管理面）：元数据只读一瞥 + 挂起权限列表（可就地决策）。数据来自 GET /conversations/:id。 */
+export function ConversationDetailDrawer({
   open,
-  sessionId,
+  conversationId,
   onClose,
 }: {
   open: boolean
-  sessionId: string
+  conversationId: string
   onClose: () => void
 }) {
   const agents = useForge((s) => s.agents)
   const views = useForge((s) => s.views)
   const respond = useForge((s) => s.respondPermission)
-  const renameSession = useForge((s) => s.renameSession)
+  const renameConversation = useForge((s) => s.renameConversation)
   const togglePin = useForge((s) => s.togglePin)
-  const archiveSession = useForge((s) => s.archiveSession)
+  const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
 
-  const [detail, setDetail] = useState<SessionDetail | null>(null)
+  const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [run, setRun] = useState<RunSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -53,24 +55,24 @@ export function SessionDetailDrawer({
   const [titleDraft, setTitleDraft] = useState('')
 
   const load = useCallback(async () => {
-    if (!sessionId) return
+    if (!conversationId) return
     setLoading(true)
     setErr(null)
     try {
-      setDetail(await getSession(sessionId))
+      setDetail(await getConversation(conversationId))
     } catch (e) {
       setErr(toErrorMessage(e))
     }
     // 运行统计/失败轮由历史推导；读不到不阻塞主数据。
     try {
-      const page = await sessionHistory(sessionId, { limit: 500 })
+      const page = await conversationHistory(conversationId, { limit: 500 })
       setRun(summarizeRun(page.events))
     } catch {
       setRun(null)
     } finally {
       setLoading(false)
     }
-  }, [sessionId])
+  }, [conversationId])
 
   useEffect(() => {
     if (open) {
@@ -78,21 +80,21 @@ export function SessionDetailDrawer({
       void load()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, sessionId])
+  }, [open, conversationId])
 
-  const view = views[sessionId]
+  const view = views[conversationId]
   const viewTitle = detail?.title
   const smTitle =
     detail?.title ||
     view?.entries.find((e) => e.kind === 'user')?.text ||
     view?.entries.find((e) => e.kind === 'assistant')?.text ||
-    sessionId
-  const title = viewTitle || smTitle || sessionId
+    conversationId
+  const title = viewTitle || smTitle || conversationId
 
   const saveTitle = () => {
     const t = titleDraft.trim()
     setEditingTitle(false)
-    if (t && t !== title) void renameSession(sessionId, t).then(() => load())
+    if (t && t !== title) void renameConversation(conversationId, t).then(() => load())
   }
 
   const act = (p: PermissionResp, kind: 'allow' | 'allow_always' | 'reject') => {
@@ -107,12 +109,12 @@ export function SessionDetailDrawer({
 
   // —— 会话级权限记忆（始终允许 / 始终拒绝，对称）：撤销（单条 / 全部）后刷新 ——
   const revokeOne = (item: PermissionMemory) => {
-    void revokeMemory(sessionId, { title: item.title, kind: item.kind })
+    void revokeMemory(conversationId, { title: item.title, kind: item.kind })
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
   const revokeAll = () => {
-    void revokeMemory(sessionId, {})
+    void revokeMemory(conversationId, {})
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
@@ -120,7 +122,7 @@ export function SessionDetailDrawer({
   // —— 失败轮一键重试：重发该轮用户输入（事件经 WS 续流），随后刷新统计 ——
   const retryFailedTurn = (ft: FailedTurn) => {
     if (!ft.text) return
-    void promptSession(sessionId, { prompt: ft.text })
+    void promptConversation(conversationId, { prompt: ft.text })
       .then(() => {
         showToast('已重发该轮输入，结果将实时流出…')
         window.setTimeout(() => void load(), 1500)
@@ -129,7 +131,7 @@ export function SessionDetailDrawer({
   }
 
   const s = detail
-  const meta = s ? sessionStatusMeta(s.status) : undefined
+  const meta = s ? conversationStatusMeta(s.status) : undefined
 
   const row = (label: string, value: ReactNode) => (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, lineHeight: 1.9 }}>
@@ -234,7 +236,7 @@ export function SessionDetailDrawer({
               <Button size="small" onClick={() => void togglePin(s.id).then(() => load())} style={{ borderRadius: 8 }}>
                 {s.pinned ? '取消置顶' : '置顶'}
               </Button>
-              <Button size="small" onClick={() => void archiveSession(s.id, !s.archived).then(() => load())} style={{ borderRadius: 8 }}>
+              <Button size="small" onClick={() => void archiveConversation(s.id, !s.archived).then(() => load())} style={{ borderRadius: 8 }}>
                 {s.archived ? '从归档恢复' : '归档'}
               </Button>
             </div>
@@ -252,7 +254,6 @@ export function SessionDetailDrawer({
               }}
             >
               {row('Agent', agentNameOf(agents, s.agent_id))}
-              {row('Runtime', s.runtime)}
               {row(
                 '状态',
                 meta ? (
@@ -264,7 +265,32 @@ export function SessionDetailDrawer({
                   s.status
                 ),
               )}
-              {row('会话 ID', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{s.id}</span>)}
+              {row(
+                '会话 ID',
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontFamily: tokens.fontMono,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span title={s.id}>{shortId(s.id)}</span>
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="复制会话 ID"
+                    title="复制完整会话 ID"
+                    icon={<CopyOutlined style={{ fontSize: 11 }} />}
+                    onClick={() =>
+                      void copyText(s.id).then((copied) =>
+                        showToast(copied ? '已复制会话 ID' : '复制失败（浏览器未授权剪贴板）'),
+                      )
+                    }
+                  />
+                </span>,
+              )}
               {row('创建', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.created_at)}</span>)}
               {row('更新', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.updated_at)}</span>)}
               {row(

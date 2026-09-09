@@ -213,6 +213,17 @@ func (a *EchoAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		push(acpsdk.UpdateAgentMessageText(fmt.Sprintf("已拒绝（%s）。跳过该演示命令。", label)))
 	}
 
+	// M3 用量统计：上报一次会话用量快照（ACP session/usage_update 标准通道）。
+	// 演示底座给确定性数值（按输入长度线性），用于验证「底座上报 → 域事件 → 落库 → 统计 API」
+	// 全链路；真实底座按其自身上报（未上报则统计不计数，不估算）。
+	used := 128 + len([]rune(text))
+	push(acpsdk.SessionUpdate{UsageUpdate: &acpsdk.SessionUsageUpdate{
+		SessionUpdate: "usage_update",
+		Used:          used,
+		Size:          128000,
+		Cost:          &acpsdk.Cost{Amount: float64(used) / 100000.0, Currency: "USD"},
+	}})
+
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 

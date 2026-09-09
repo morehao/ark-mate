@@ -1,4 +1,5 @@
 import type { WsClientFrame, WsServerFrame } from '@ark/types'
+import { getToken } from '@ark/api'
 
 /**
  * WS 事件传输（P3 可靠性细节）：
@@ -80,7 +81,9 @@ export class WsTransport {
   private open(): void {
     if (this.closedByUser) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${location.host}/v1/forge/ws/events`
+    // A6：后端启用单操作员令牌时，浏览器无法为 WS 握手设置请求头 → 用查询参数传递。
+    const token = getToken()
+    const url = `${proto}://${location.host}/v1/forge/ws/events${token ? `?token=${encodeURIComponent(token)}` : ''}`
     this.onState('connecting')
     let ws: WebSocket
     try {

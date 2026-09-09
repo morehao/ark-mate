@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestRestErrMapping(t *testing.T) {
 		want int
 	}{
 		{"agent_not_found", acl.NewError(acl.ClassRequest, "agent_not_found", "x", nil), 40401},
-		{"session_not_found", acl.NewError(acl.ClassRequest, "session_not_found", "x", nil), 40401},
+		{"conversation_not_found", acl.NewError(acl.ClassRequest, "conversation_not_found", "x", nil), 40401},
 		{"runtime_not_found", acl.NewError(acl.ClassRequest, "runtime_not_found", "x", nil), 40401},
 		{"request_other", acl.NewError(acl.ClassRequest, "agent_required", "x", nil), 40001},
 		{"limit", acl.NewError(acl.ClassLimit, "turn_in_progress", "x", nil), 40901},
@@ -66,9 +67,13 @@ func TestRestErrMapping(t *testing.T) {
 	}
 }
 
-// TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=session id）。
+// TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
+// P3 双 id：原生 session id 经 byProvider 解析后发布）。
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
+	orch.mu.Lock()
+	orch.byProvider["s1"] = "conv-1" // 原生 echo/opencode session id → 平台会话 uuid
+	orch.mu.Unlock()
 	sink := orch.eventSink("agent-opencode", "opencode")
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
@@ -79,7 +84,7 @@ func TestEventSinkMapping(t *testing.T) {
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolUpdate, Payload: acl.ToolCallInfo{ID: "c1", Status: "completed"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindUsage, Payload: nil})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindPermission, Payload: acl.PermissionInfo{Title: "t", Allowed: false}})
-	// 空 session id / 未知 kind → 丢弃。
+	// 空 conversation id / 未知 kind → 丢弃。
 	sink(acl.Event{SessionID: "", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "x"}})
 	sink(acl.Event{SessionID: "s1", Kind: "bogus_kind", Payload: "whatever"})
 
@@ -104,7 +109,7 @@ func TestEventSinkMapping(t *testing.T) {
 		if types[i] != want[i] {
 			t.Fatalf("type 序列不符: %v", types)
 		}
-		if evs[i].AggregID != "s1" {
+		if evs[i].AggregID != "conv-1" {
 			t.Fatalf("agg 不符: %+v", evs[i])
 		}
 	}
@@ -134,14 +139,14 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 	}
 }
 
-// TestDisconnectIdleSession 连接断开时空闲会话 → turn.error(connection_lost) + failed + agent stopped，
+// TestDisconnectIdleConversation 连接断开时空闲会话 → turn.error(connection_lost) + failed + agent stopped，
 // 且幂等（只发一次）。
-func TestDisconnectIdleSession(t *testing.T) {
+func TestDisconnectIdleConversation(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
-	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
-	rc := &runtimeConn{agentID: "agent-opencode", client: nil}                     // client 亦 nil → 相等匹配
-	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode", Status: SessionStatusInProgress})
+	as := &ActiveConversation{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
+	rc := &runtimeConn{agentID: "opencode", client: nil}                                // client 亦 nil → 相等匹配
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode", Status: ConversationStatusInProgress})
 
 	orch.dropConn(rc)
 
@@ -164,10 +169,10 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if payload["code"] != "connection_lost" || payload["class"] != "connection" {
 		t.Fatalf("错误分类不符: %+v", payload)
 	}
-	if svc.sessions["s1"].Status != SessionStatusFailed {
-		t.Fatalf("会话应 failed: %s", svc.sessions["s1"].Status)
+	if svc.conversations["s1"].Status != ConversationStatusFailed {
+		t.Fatalf("会话应 failed: %s", svc.conversations["s1"].Status)
 	}
-	if a, _ := svc.AgentByID("agent-opencode"); a.State != AgentStateStopped {
+	if a, _ := svc.AgentByID("opencode"); a.State != AgentStateStopped {
 		t.Fatalf("agent 应 stopped: %s", a.State)
 	}
 
@@ -193,16 +198,16 @@ func TestPublishVersionAndBusNil(t *testing.T) {
 	}
 }
 
-// TestSessionHistoryClamp service 层参数夹取：after<0→0、limit<1→1。
-func TestSessionHistoryClamp(t *testing.T) {
+// TestConversationHistoryClamp service 层参数夹取：after<0→0、limit<1→1。
+func TestConversationHistoryClamp(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a", Runtime: "r"})
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
 	svc.publish(BusMessage, "s1", map[string]any{"text": "one"})
 	svc.publish(BusMessage, "s1", map[string]any{"text": "two"})
 
-	p, err := svc.SessionHistory(context.Background(), "s1", -5, 0)
+	p, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: -5, Limit: 0})
 	if err != nil {
-		t.Fatalf("SessionHistory: %v", err)
+		t.Fatalf("ConversationHistory: %v", err)
 	}
 	if len(p.Events) != 1 { // limit 0→1
 		t.Fatalf("limit 夹取不符: %+v", p)
@@ -212,16 +217,16 @@ func TestSessionHistoryClamp(t *testing.T) {
 	}
 }
 
-// TestCreateSessionWithoutOrchestrator 未装配编排器 → 50201 业务错误。
-func TestCreateSessionWithoutOrchestrator(t *testing.T) {
+// TestCreateConversationWithoutOrchestrator 未装配编排器 → 50201 业务错误。
+func TestCreateConversationWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateSession(context.Background(), handler.SessionCreateReq{AgentID: "agent-x", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "agent-x", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
 	}
-	if _, err := svc.PromptSession(context.Background(), "s1", "x"); err == nil {
+	if _, err := svc.PromptConversation(context.Background(), "s1", "x"); err == nil {
 		t.Fatal("无 orch 应报错")
 	} else {
 		var ge2 gerror.Error
@@ -231,10 +236,10 @@ func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 	}
 }
 
-// TestPromptSessionUnknown 既有编排器下未知会话 → 40401。
-func TestPromptSessionUnknown(t *testing.T) {
+// TestPromptConversationUnknown 既有编排器下未知会话 → 40401。
+func TestPromptConversationUnknown(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.PromptSession(context.Background(), "ghost", "hi")
+	_, err := svc.PromptConversation(context.Background(), "ghost", "hi")
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
@@ -244,32 +249,44 @@ func TestPromptSessionUnknown(t *testing.T) {
 // TestServiceRESTValidation Prompt 必填校验（service 层，无 orch 前置）。
 func TestServiceRESTValidation(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	if _, err := svc.PromptSession(context.Background(), "", ""); err == nil {
+	if _, err := svc.PromptConversation(context.Background(), "", ""); err == nil {
 		t.Fatal("空 id/prompt 应报错")
 	}
 }
 
-// TestStartSessionUnknownAgent 未知 agent → agent_not_found（拨号前拦截，不发网络）。
-func TestStartSessionUnknownAgent(t *testing.T) {
+// TestStartConversationUnknownAgent 未知 agent → agent_not_found（拨号前拦截，不发网络）。
+func TestStartConversationUnknownAgent(t *testing.T) {
 	_, orch, _ := newTestRig(t)
-	_, err := orch.StartSession(context.Background(), "ghost-agent", "/tmp")
+	_, err := orch.StartConversation(context.Background(), "ghost-agent", "/tmp")
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "agent_not_found" {
 		t.Fatalf("期望 agent_not_found，got %v", err)
 	}
 }
 
-// TestStartSessionUnknownRuntime agent 指向未注册 runtime → runtime_not_found（拨号前拦截）。
-func TestStartSessionUnknownRuntime(t *testing.T) {
+// TestStartConversationUnknownRuntime agent 指向未注册 runtime → runtime_not_found（拨号前拦截）。
+func TestStartConversationUnknownRuntime(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	// 手工种一个指向未注册 runtime 的 agent（真实场景来自配置漂移）。
 	svc.mu.Lock()
-	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost", Runtime: "not-registered"}
+	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost", Runtimes: []string{"not-registered"}}
 	svc.mu.Unlock()
-	_, err := orch.StartSession(context.Background(), "agent-ghost", "/tmp")
+	_, err := orch.StartConversation(context.Background(), "agent-ghost", "/tmp")
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
+	}
+}
+
+// TestResolveConversationAgent 空 agent_id → 默认播种 Agent（dsh）；非空原样返回。
+func TestResolveConversationAgent(t *testing.T) {
+	reg := runtime.NewRegistry(runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"})
+	svc := NewService(reg, nil) // 默认 agent dsh 已播种
+	if id, err := svc.resolveConversationAgent(""); err != nil || id != "dsh" {
+		t.Fatalf("空 agent_id 应落到默认 dsh: id=%q err=%v", id, err)
+	}
+	if id, err := svc.resolveConversationAgent("opencode"); err != nil || id != "opencode" {
+		t.Fatalf("非空 agent_id 应原样返回: id=%q err=%v", id, err)
 	}
 }
 
@@ -281,13 +298,55 @@ func TestRunOnceUnknownRuntime(t *testing.T) {
 	}
 }
 
+// TestServiceResolveRuntime FirstAvailable 路由（§7 切片 4）：首候选不可执行 → 取次候选；
+// 已注册但不可执行 → runtime_unavailable；全未注册 → runtime_not_found；空候选 → no_runtime。
+func TestServiceResolveRuntime(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _, _ := rigWithRuntime(t,
+		runtime.Spec{ID: "echo", Launch: runtime.LaunchSpec{Command: exe}},
+		runtime.Spec{ID: "ghost", Launch: runtime.LaunchSpec{Command: "ghost-cmd-zzz-not-exist"}},
+	)
+	seed := func(id string, runtimes ...string) {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		svc.agents[id] = &AgentRec{ID: id, Name: id, Runtimes: runtimes}
+	}
+	codeOf := func(err error) string {
+		var ae *acl.Error
+		if errors.As(err, &ae) {
+			return ae.Code
+		}
+		return ""
+	}
+
+	seed("a1", "ghost", "echo")
+	if id, err := svc.ResolveRuntime(svc.agents["a1"]); err != nil || id != "echo" {
+		t.Fatalf("应回退取 echo，id=%q err=%v", id, err)
+	}
+	seed("a2", "ghost")
+	if _, err := svc.ResolveRuntime(svc.agents["a2"]); codeOf(err) != "runtime_unavailable" {
+		t.Fatalf("期望 runtime_unavailable，got %v", err)
+	}
+	seed("a3", "nope", "nope2")
+	if _, err := svc.ResolveRuntime(svc.agents["a3"]); codeOf(err) != "runtime_not_found" {
+		t.Fatalf("期望 runtime_not_found，got %v", err)
+	}
+	seed("a4")
+	if _, err := svc.ResolveRuntime(svc.agents["a4"]); codeOf(err) != "no_runtime" {
+		t.Fatalf("期望 no_runtime，got %v", err)
+	}
+}
+
 // TestPublishTitleConcurrentUpdate 并发下 BusUserMessage 标题自动推导与 PATCH 覆盖标题
 // 都须持锁（旧实现 publish 在锁外读写 Title → 数据竞争）；-race 下本用例作为守门测试。
 func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
 	svc.mu.Lock()
-	svc.sessions[id] = &SessionRec{ID: id, AgentID: "agent-opencode", Runtime: "echo", Status: SessionStatusInProgress}
+	svc.conversations[id] = &ConversationRec{ID: id, AgentID: "agent-opencode", Status: ConversationStatusInProgress}
 	svc.ver[id] = 0
 	svc.mu.Unlock()
 
@@ -318,7 +377,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				title := fmt.Sprintf("PATCH 标题 %d-%d", n, j)
-				_, _ = svc.UpdateSession(context.Background(), id, handler.SessionPatch{Title: &title})
+				_, _ = svc.UpdateConversation(context.Background(), id, handler.ConversationPatch{Title: &title})
 			}
 		}(i)
 	}

@@ -6,7 +6,7 @@ import { BizCode } from '@ark/types'
 /**
  * forge 控制面 HTTP 客户端。
  *
- * - baseURL '/v1'，dev 走 vite proxy（127.0.0.1:8099），release 内嵌同源；
+ * - baseURL '/v1'，dev 走 vite proxy（127.0.0.1:10001），release 内嵌同源；
  * - 后端统一信封 {code, requestID, msg, data}：code=0 时返回 data，
  *   否则抛出带 code 的 HttpError（业务错误仍为 HTTP 200，网络层错误 code=-1）。
  */
@@ -21,6 +21,36 @@ export class HttpError extends Error {
 }
 
 const instance = axios.create({ baseURL: '/v1', timeout: 30_000 })
+
+/**
+ * 单操作员令牌（A6）：后端配置 FORGE_TOKEN 后，除 /health 外所有接口都要求 Bearer token。
+ * 令牌只存在浏览器本地（localStorage），不写进 URL/日志；面板顶栏可设置/清除。
+ */
+const TOKEN_KEY = 'forge.token'
+
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    const v = token.trim()
+    if (v) localStorage.setItem(TOKEN_KEY, v)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // localStorage 不可用（隐私模式）时静默降级：本次会话内仍可通过请求头传递。
+  }
+}
+
+instance.interceptors.request.use((cfg) => {
+  const t = getToken()
+  if (t) cfg.headers.set('Authorization', `Bearer ${t}`)
+  return cfg
+})
 
 function unwrap<T>(env: Envelope<T> | undefined): T {
   if (!env || env.code !== BizCode.Success) {
