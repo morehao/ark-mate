@@ -83,6 +83,9 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	// P2 provider 注入面：密钥只写不读回。
 	v1.GET("/providers", h.Provider.List)
 	v1.PATCH("/providers/:id", h.Provider.Update)
+	// 模型目录（三段式：live → 缓存 → 快照；`?provider=<type>` 或 `?agent=<id>` 过滤）。
+	v1.GET("/providers/:id/models", h.Provider.Models)
+	v1.GET("/models", h.Model.List)
 	// P1 能力数据面：Skill/MCP/Tool 目录（platform 唯一事实源，REST 列出能力）。
 	v1.GET("/skills", h.Capability.ListSkills)
 	v1.GET("/mcps", h.Capability.ListMcpServers)

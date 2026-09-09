@@ -1117,7 +1117,7 @@ func (s *Service) restErr(err error) error {
 	switch ae.Class {
 	case acl.ClassRequest:
 		code = 40001
-		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
+		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" || ae.Code == "provider_not_found" {
 			code = 40401
 		}
 	case acl.ClassLimit:

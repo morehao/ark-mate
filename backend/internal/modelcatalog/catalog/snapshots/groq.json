@@ -1,0 +1,7 @@
+{
+  "source": "snapshot",
+  "models": [
+    { "id": "llama-3.3-70b-versatile", "title": "Llama 3.3 70B Versatile", "recommended": true },
+    { "id": "llama-3.1-8b-instant", "title": "Llama 3.1 8B Instant" }
+  ]
+}

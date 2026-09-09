@@ -1,0 +1,8 @@
+{
+  "source": "snapshot",
+  "models": [
+    { "id": "anthropic/claude-opus-4", "title": "Claude Opus 4 (OpenRouter)", "recommended": true },
+    { "id": "openai/gpt-4o", "title": "GPT-4o (OpenRouter)" },
+    { "id": "deepseek/deepseek-chat", "title": "DeepSeek Chat (OpenRouter)" }
+  ]
+}

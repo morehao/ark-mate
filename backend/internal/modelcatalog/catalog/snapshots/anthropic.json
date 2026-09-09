@@ -1,0 +1,8 @@
+{
+  "source": "snapshot",
+  "models": [
+    { "id": "claude-opus-4", "title": "Claude Opus 4", "recommended": true },
+    { "id": "claude-sonnet-4", "title": "Claude Sonnet 4", "recommended": true },
+    { "id": "claude-3-5-haiku", "title": "Claude 3.5 Haiku" }
+  ]
+}

@@ -26,6 +26,11 @@ type Service interface {
 	ListProviders() ([]ProviderResp, error)
 	// UpdateProvider upsert provider 档案（type/model/key 子集；key 空串 = 清除）。
 	UpdateProvider(ctx context.Context, id string, patch ProviderPatchReq) (*ProviderResp, error)
+	// ListModels 返回模型目录（三段式：live → 缓存 → 快照）。providerType/agentID 任一可为空：
+	// 空则按全部受支持类型聚合；agentID 非空则解析该 agent 的 provider 类型。
+	ListModels(ctx context.Context, providerType, agentID string) (*ModelCatalogResp, error)
+	// ListProviderModels 返回某 provider 档案的可选模型目录（live 优先，兜底快照）。
+	ListProviderModels(ctx context.Context, id string) (*ModelCatalogResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
 	// ListConversations 返回会话概要（可按 archived 过滤）。
@@ -201,6 +206,24 @@ type ProviderPatchReq struct {
 	Type  *string `json:"type"`
 	Model *string `json:"model"`
 	Key   *string `json:"key"`
+}
+
+// ModelOptionResp 目录中的一个可选模型条目（设计文档 §11.2 归一化表示；Provider 为 provider 类型）。
+type ModelOptionResp struct {
+	Provider    string   `json:"provider"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Behavior    []string `json:"behavior,omitempty"`
+	Recommended bool     `json:"recommended,omitempty"`
+	IsFree      bool     `json:"is_free,omitempty"`
+}
+
+// ModelCatalogResp 模型目录响应：Source 标数据来源（live|cache|snapshot；降级可观测）。
+type ModelCatalogResp struct {
+	Source string            `json:"source"`
+	Models []ModelOptionResp `json:"models"`
+	Note   string            `json:"note,omitempty"`
 }
 
 // RuntimeResp Runtime 的对外表示。
@@ -686,6 +709,7 @@ type Handler struct {
 	Conversation *ConversationHandler
 	Runtime      *RuntimeHandler
 	Provider     *ProviderHandler
+	Model        *ModelsHandler
 	Capability   *CapabilityHandler
 	Usage        *UsageHandler
 	Search       *SearchHandler
@@ -703,6 +727,7 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 		Conversation: &ConversationHandler{svc: svc},
 		Runtime:      &RuntimeHandler{svc: svc},
 		Provider:     &ProviderHandler{svc: svc},
+		Model:        &ModelsHandler{svc: svc},
 		Capability:   &CapabilityHandler{svc: svc},
 		Usage:        &UsageHandler{svc: svc},
 		Search:       &SearchHandler{svc: svc},

@@ -22,6 +22,7 @@
 - **Agent 管理面（P2：注册 + 启停 + 热更新）**：REST `POST /agents`（注册，校验 runtime 已注册即「可启动预检」）、`PATCH /agents/:id`（name/provider/runtime 热更新）、`DELETE /agents/:id`、`POST /agents/:id/start|stop`（真实进程级启停；有在途 turn 时 stop 报 `agent_busy`）；definitions 目录 `FORGE_AGENTS`（默认 `~/.forge/agents`，`<id>.json`）持久化并在 serve 启动时热加载——**不写代码即可注册第三个 ACP agent**（复用既有 runtime + provider 档案）；内置播种 agent `dsh`/`opencode` 与保留前缀 `agent-*` 只读（runtime 不可改、不可删；`AgentResp.seed` 为服务端权威标记，历史上前端按 id 前缀猜测，播种 id 改名后失效）。修复一个潜伏缺陷：runtime 子进程此前以 `exec.CommandContext(请求 ctx)` 启动，请求返回即被杀（StartAgent 暖启动断连）——现拨号用脱离请求的上下文，连接生命周期归编排器（watchConn/Stop/Close）。
 - **P2 页面（Agents 管理页）**：原只读列表升级为管理面——注册向导（ID/名称/Runtime/Provider 档案，`agent-` 保留前缀与格式校验）、启动/停止按钮、编辑（热更新 name/provider；种子 runtime 只读）、删除（仅自定义，Popconfirm）；下方 Provider 档案区（新建/编辑：type/model/密钥输入，`has_key` 标签只写不读回、留空不变更）。Settings 页文案同步指向该页。
 - **P2 provider 注入面**：`GET /providers` + `PATCH /providers/:id`（档案 upsert；密钥**只写不读回**——GET 只给 `has_key`；`key` 空串=清除）；agent 引用 provider 档案时启动拨号注入 `<TYPE>_API_KEY`（type 未知取大写 type + `_API_KEY`），档案落 `<AgentDir>/providers.json`。
+- **模型目录（三段式）**：`GET /models` 与 `GET /providers/:id/models` 给出可选模型列表——`live`（上游 `/models`，用档案密钥）→ 磁盘缓存（`~/.forge/cache/models`，TTL 24h）→ **go:embed 内置快照**（`internal/modelcatalog`，随 `-tags release` 进二进制），响应 `source`（`live|cache|snapshot`）标注来源；`?provider=<type>` 或 `?agent=<id>` 过滤（设计文档 §11 三段式降级）。
 - **进程注册表 + 孤儿回收（M3 v4③）**：daemon 把拉起的 runtime 子进程（pid/pgid/命令/runtime/agent/实例 id）登记到 `<数据目录>/processes.json`（`FORGE_PROC_REGISTRY` 覆盖，`off` 关闭），正常停止/断连时摘除；启动时回收**上一实例遗留**的孤儿进程（SIGTERM → 宽限期 → SIGKILL 整个进程组），并以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。实测：echo/opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出，故孤儿多出现在「runtime 忽略 EOF / 派生孙进程」场景，注册表为兜底防线。
 - **P2 空闲回收 + 按需拉起**：reapLoop（`FORGE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `FORGE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
 - **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`；P1 起提供 `forge migrate` 把既有 transcript 幂等导入 SQLite、`forge transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
@@ -204,6 +205,8 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/agents/:id/diagnostics` | agent 诊断快照（连接态 + `pid` + `stderr_tail` + 最近失败；`stderr_source` 标来源 live/last_error/none） |
 | GET | `/runtimes` | 底座列表（ACP adapter 注册表） |
 | GET | `/providers` · PATCH `/providers/:id` | provider 档案列表 / 更新 `{type?, model?, key?}`（密钥只写不读回，仅 `has_key`） |
+| GET | `/models` | 模型目录（`?provider=<type>` 或 `?agent=<id>` 过滤；三段式 live→缓存→快照，`source` 标数据来源） |
+| GET | `/providers/:id/models` | 某 provider 档案的可选模型目录（live 优先，兜底快照；密钥不读回） |
 | GET | `/conversations` | 会话列表（`?archived=true` 过滤归档） |
 | GET | `/conversations/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |

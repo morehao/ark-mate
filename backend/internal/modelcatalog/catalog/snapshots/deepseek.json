@@ -1,0 +1,9 @@
+{
+  "source": "snapshot",
+  "models": [
+    { "id": "deepseek-v4-flash", "title": "DeepSeek V4 Flash", "recommended": true },
+    { "id": "deepseek-v4", "title": "DeepSeek V4", "behavior": ["low", "medium", "high"] },
+    { "id": "deepseek-chat", "title": "DeepSeek Chat" },
+    { "id": "deepseek-reasoner", "title": "DeepSeek Reasoner" }
+  ]
+}

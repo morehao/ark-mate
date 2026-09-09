@@ -205,6 +205,18 @@ func (s *stubSvc) UpdateProvider(_ context.Context, id string, patch handler.Pro
 	}
 	return &handler.ProviderResp{ID: id, HasKey: patch.Key != nil && *patch.Key != ""}, nil
 }
+func (s *stubSvc) ListModels(_ context.Context, providerType, agentID string) (*handler.ModelCatalogResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &handler.ModelCatalogResp{Source: "snapshot"}, nil
+}
+func (s *stubSvc) ListProviderModels(_ context.Context, id string) (*handler.ModelCatalogResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &handler.ModelCatalogResp{Source: "snapshot"}, nil
+}
 
 // ——— P1 能力数据面桩（ListSkills/ListMcpServers/ListTools） ———
 func (s *stubSvc) ListSkills() ([]handler.SkillResp, error) {

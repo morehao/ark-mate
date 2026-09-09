@@ -105,6 +105,44 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 	}
 }
 
+// TestRouterModelCatalog 模型目录经真实 Service：无 provider 密钥（无 live）→ 快照降级，
+// 返回非空模型 + source=snapshot。缓存目录指到临时目录，避免污染宿主 ~/.forge。
+func TestRouterModelCatalog(t *testing.T) {
+	prev := os.Getenv("FORGE_MODEL_CACHE_DIR")
+	t.Cleanup(func() { _ = os.Setenv("FORGE_MODEL_CACHE_DIR", prev) })
+	if err := os.Setenv("FORGE_MODEL_CACHE_DIR", t.TempDir()); err != nil {
+		t.Fatalf("setenv: %v", err)
+	}
+
+	e := newEngine()
+	env := get(t, e, "/v1/forge/models")
+	if env.Code != 0 {
+		t.Fatalf("/models 信封不符: %+v", env)
+	}
+	var resp struct {
+		Source string               `json:"source"`
+		Models []map[string]any     `json:"models"`
+	}
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("/models data 解析: %v", err)
+	}
+	if resp.Source != "snapshot" {
+		t.Fatalf("无密钥应回快照: %s", resp.Source)
+	}
+	if len(resp.Models) == 0 {
+		t.Fatalf("/models 应为非空目录: %s", env.Data)
+	}
+	if _, ok := resp.Models[0]["provider"]; !ok {
+		t.Fatalf("模型条目缺 provider 字段: %v", resp.Models[0])
+	}
+
+	// 未知 provider 档案 → 40401（provider_not_found）。
+	env = get(t, e, "/v1/forge/providers/nope/models")
+	if env.Code != 40401 {
+		t.Fatalf("未知 provider 应 40401: %+v", env)
+	}
+}
+
 // TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/forge 前缀。
 func TestRouterRoutesRegistered(t *testing.T) {
 	e := newEngine()
@@ -124,6 +162,8 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"POST /v1/forge/conversations/:id/prompt",
 		"POST /v1/forge/conversations/:id/cancel",
 		"GET /v1/forge/providers",
+		"GET /v1/forge/providers/:id/models",
+		"GET /v1/forge/models",
 		"GET /v1/forge/skills",
 		"GET /v1/forge/mcps",
 		"GET /v1/forge/tools",
@@ -173,6 +213,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 		p := m[1]
 		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/conversations") &&
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
+			!strings.HasPrefix(p, "/models") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
 			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/health") &&

@@ -1,0 +1,11 @@
+{
+  "source": "snapshot",
+  "models": [
+    { "id": "gpt-4o", "title": "GPT-4o", "recommended": true },
+    { "id": "gpt-4o-mini", "title": "GPT-4o mini", "recommended": true },
+    { "id": "gpt-4.1", "title": "GPT-4.1" },
+    { "id": "gpt-4.1-mini", "title": "GPT-4.1 mini" },
+    { "id": "gpt-4.1-nano", "title": "GPT-4.1 nano" },
+    { "id": "o3", "title": "o3", "behavior": ["low", "medium", "high"] }
+  ]
+}
