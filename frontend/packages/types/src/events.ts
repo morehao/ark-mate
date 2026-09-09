@@ -41,6 +41,8 @@ export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | '
 export interface StreamEntry {
   kind: EntryKind
   id: string // 稳定 id（生成/合并时复用）
+  /** 该条目首帧事件的全局 seq（搜索锚点跳转用；合并/续传保留最早值）。 */
+  seq?: number
   text?: string
   msgId?: string // 可选：ACP unstable messageId（决策 v5①；同 msgId 文本段跨工具归并）
   toolId?: string

@@ -34,6 +34,17 @@ async function apiGet(path) {
   return { http: r.status, env }
 }
 
+async function apiPost(path, body) {
+  const r = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const env = await r.json()
+  if (typeof env.code !== 'number') throw new Error(`非信封响应: ${JSON.stringify(env)}`)
+  return { http: r.status, env }
+}
+
 function withTimeout(promise, ms, what) {
   let timer
   return Promise.race([
@@ -124,6 +135,34 @@ async function checkRest() {
   const usageBad = await apiGet('/usage/summary?group_by=tool')
   if (usageBad.http !== 200 || usageBad.env.code !== 40001) return bad('GET /usage/summary 非法 group_by', `HTTP ${usageBad.http} code=${usageBad.env.code}`)
   ok('GET /usage/summary?group_by=tool → HTTP 200 code=40001')
+
+  // M3 ② 消息级检索（锚点跳转数据面）：信封形状 + 锚点字段 + 参数校验。
+  const ms = await apiGet('/search/messages?q=forge-smoke-never-matches&limit=5')
+  if (ms.http !== 200 || ms.env.code !== 0) return bad('GET /search/messages', `HTTP ${ms.http} code=${ms.env.code} msg=${ms.env.msg}`)
+  const m = ms.env.data
+  if (typeof m.source !== 'string' || !Array.isArray(m.hits) || typeof m.total !== 'number' || typeof m.has_more !== 'boolean')
+    return bad('GET /search/messages 载荷', JSON.stringify(m))
+  for (const h of m.hits) {
+    for (const key of ['conversation_id', 'role', 'seq', 'snippet', 'created_at']) {
+      if (!(key in h)) return bad('GET /search/messages 命中字段', `缺 ${key}: ${JSON.stringify(h).slice(0, 200)}`)
+    }
+    if (!(typeof h.seq === 'number' && h.seq > 0)) return bad('GET /search/messages 锚点', `seq 非法: ${JSON.stringify(h).slice(0, 200)}`)
+  }
+  ok(`GET /search/messages → source=${m.source} total=${m.total}（锚点字段齐备）`)
+  const msBad = await apiGet('/search/messages')
+  if (msBad.http !== 200 || msBad.env.code !== 40001) return bad('GET /search/messages 缺 q', `HTTP ${msBad.http} code=${msBad.env.code}`)
+  ok('GET /search/messages 缺 q → HTTP 200 code=40001')
+
+  // M3 ② 批量导出：未知会话进 skipped（不静默丢弃）+ 非法格式 40001。
+  const ex = await apiPost('/conversations/export', { ids: ['no-such-conversation'], format: 'markdown' })
+  if (ex.http !== 200 || ex.env.code !== 0) return bad('POST /conversations/export', `HTTP ${ex.http} code=${ex.env.code} msg=${ex.env.msg}`)
+  const e = ex.env.data
+  if (e.exported !== 0 || !Array.isArray(e.skipped) || e.skipped[0] !== 'no-such-conversation' || !Array.isArray(e.files))
+    return bad('POST /conversations/export 载荷', JSON.stringify(e))
+  ok('POST /conversations/export 未知会话 → exported=0 + skipped 明确列出')
+  const exBad = await apiPost('/conversations/export', { ids: ['x'], format: 'pdf' })
+  if (exBad.http !== 200 || exBad.env.code !== 40001) return bad('POST /conversations/export 非法格式', `HTTP ${exBad.http} code=${exBad.env.code}`)
+  ok('POST /conversations/export format=pdf → HTTP 200 code=40001')
 }
 
 // ——— 2. REST 业务错误信封 ———

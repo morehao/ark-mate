@@ -74,6 +74,11 @@ type Service interface {
 	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
 	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
 
+	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
+	SearchMessages(ctx context.Context, q string, limit int) (*MessageSearchResp, error)
+	// ExportConversations 批量导出会话（M3 ②：wire transcript/事件事实源 → JSON/文本/Markdown）。
+	ExportConversations(ctx context.Context, req ExportReq) (*ExportResp, error)
+
 	// RestErr 把领域错误（acl 分类）映射为 REST 信封错误码（40001/40401/40501/40901/50201…）；
 	// 已映射的 gerror.Error 原样透传。handler 必须经此出口，避免裸错误漏成 code=-1。
 	RestErr(err error) error
@@ -299,6 +304,59 @@ type ConversationSearchHit struct {
 	Matches int    `json:"matches"`
 }
 
+// MessageSearchHit 一条消息级命中（跨会话；seq 为锚点，前端据此滚动定位）。
+type MessageSearchHit struct {
+	ConversationID string `json:"conversation_id"`
+	Title          string `json:"title,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	Role           string `json:"role"` // user | assistant
+	Seq            int64  `json:"seq"`
+	SeqHi          int64  `json:"seq_hi,omitempty"`
+	MessageID      int64  `json:"message_id,omitempty"`
+	RunID          string `json:"run_id,omitempty"`
+	Snippet        string `json:"snippet"`
+	CreatedAt      string `json:"created_at"`
+}
+
+// MessageSearchResp 消息级搜索响应（source 标明数据面，便于排障与降级提示）。
+type MessageSearchResp struct {
+	Query   string             `json:"query"`
+	Source  string             `json:"source"` // sqlite | transcript
+	Hits    []MessageSearchHit `json:"hits"`
+	Total   int                `json:"total"`
+	HasMore bool               `json:"has_more"`
+}
+
+// ExportReq 批量导出请求（ids 上限 50；format 默认 markdown）。
+type ExportReq struct {
+	IDs    []string `json:"ids" binding:"required"`
+	Format string   `json:"format"` // markdown | text | json
+}
+
+// ExportFile 单会话导出产物（content 为可直接落盘的正文）。
+type ExportFile struct {
+	ConversationID string `json:"conversation_id"`
+	Title          string `json:"title,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Filename       string `json:"filename"`
+	Format         string `json:"format"`
+	Events         int    `json:"events"`
+	Bytes          int    `json:"bytes"`
+	Truncated      bool   `json:"truncated,omitempty"` // 事件数超上限（明确标注，不静默截断）
+	Content        string `json:"content"`
+}
+
+// ExportResp 批量导出响应（skipped 列出无数据/未知会话，不静默丢弃）。
+type ExportResp struct {
+	GeneratedAt string       `json:"generated_at"`
+	Format      string       `json:"format"`
+	Exported    int          `json:"exported"`
+	TotalBytes  int          `json:"total_bytes"`
+	Skipped     []string     `json:"skipped,omitempty"`
+	Files       []ExportFile `json:"files"`
+}
+
 // ConversationDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
 type ConversationDetailResp struct {
 	ConversationResp
@@ -422,6 +480,8 @@ type Handler struct {
 	Provider     *ProviderHandler
 	Capability   *CapabilityHandler
 	Usage        *UsageHandler
+	Search       *SearchHandler
+	Export       *ExportHandler
 	WS           *WSHandler
 	bus          *eventbus.Bus
 	svc          Service
@@ -437,6 +497,8 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 		Provider:     &ProviderHandler{svc: svc},
 		Capability:   &CapabilityHandler{svc: svc},
 		Usage:        &UsageHandler{svc: svc},
+		Search:       &SearchHandler{svc: svc},
+		Export:       &ExportHandler{svc: svc},
 		WS:           NewWSHandler(bus),
 		bus:          bus,
 		svc:          svc,

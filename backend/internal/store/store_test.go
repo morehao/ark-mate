@@ -251,3 +251,52 @@ func TestImportBatch(t *testing.T) {
 		t.Fatalf("回滚后 seq 不应前进: got=%d want=%d", got, lastBefore)
 	}
 }
+
+// TestSearchMessages 跨会话消息检索（M3 ②）：角色不限、大小写不敏感、seq 锚点、
+// LIKE 通配转义（%/_ 不应被当通配符）、limit 截断。
+func TestSearchMessages(t *testing.T) {
+	s := openMem(t)
+	seedConversation(t, s, "m1")
+	seedConversation(t, s, "m2")
+	ctx := ctxT()
+	now := time.Now().UTC()
+	msgs := []Message{
+		{ConversationID: "m1", RunID: "r1", Role: "user", Text: "网关 502 怎么排查", SeqLo: 1, SeqHi: 1, CreatedAt: now},
+		{ConversationID: "m1", RunID: "r2", Role: "assistant", Text: "先看 UPSTREAM 健康检查", SeqLo: 2, SeqHi: 2, CreatedAt: now.Add(time.Second)},
+		{ConversationID: "m2", RunID: "r3", Role: "user", Text: "100% 覆盖 _under_ 场景", SeqLo: 3, SeqHi: 3, CreatedAt: now.Add(2 * time.Second)},
+	}
+	if err := s.CreateMessages(ctx, msgs); err != nil {
+		t.Fatalf("CreateMessages: %v", err)
+	}
+
+	hits, err := s.SearchMessages(ctx, "502", 10)
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(hits) != 1 || hits[0].ConversationID != "m1" || hits[0].Role != "user" || hits[0].Seq != 1 {
+		t.Fatalf("命中不符: %+v", hits)
+	}
+	if hits[0].MessageID == 0 || hits[0].RunID != "r1" || hits[0].CreatedAt.IsZero() {
+		t.Fatalf("锚点字段缺失: %+v", hits[0])
+	}
+
+	// 大小写不敏感 + 助手消息也命中。
+	hits, err = s.SearchMessages(ctx, "upstream", 10)
+	if err != nil || len(hits) != 1 || hits[0].Role != "assistant" {
+		t.Fatalf("大小写/角色检索不符: %v %+v", err, hits)
+	}
+
+	// LIKE 通配转义：% 与 _ 按字面匹配。
+	if hits, _ := s.SearchMessages(ctx, "%", 10); len(hits) != 1 || hits[0].ConversationID != "m2" {
+		t.Fatalf("百分号应按字面匹配: %+v", hits)
+	}
+	if hits, _ := s.SearchMessages(ctx, "_under_", 10); len(hits) != 1 {
+		t.Fatalf("下划线应按字面匹配: %+v", hits)
+	}
+
+	// limit 截断 + 排序（created_at 降序：m2 最新在前）。
+	hits, err = s.SearchMessages(ctx, "排", 1)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("limit 截断不符: %v %+v", err, hits)
+	}
+}

@@ -25,6 +25,15 @@ type stubSvc struct {
 	listRuntimesErr      error
 	listConversationsErr error
 
+	searchMsgQuery string
+	searchMsgLimit int
+	searchMsgResp  *handler.MessageSearchResp
+	searchMsgErr   error
+
+	exportReq  handler.ExportReq
+	exportResp *handler.ExportResp
+	exportErr  error
+
 	agentErr    error  // P2 管理面桩错误注入
 	agentAction string // 最近一次 delete/start/stop 动作（P2 桩）
 
@@ -241,6 +250,29 @@ func (s *stubSvc) ListConversations(_ bool) ([]handler.ConversationResp, error) 
 func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]handler.ConversationSearchHit, error) {
 	return nil, nil
 }
+
+// ——— M3 ② 消息检索 / 批量导出桩 ———
+func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*handler.MessageSearchResp, error) {
+	s.searchMsgQuery, s.searchMsgLimit = q, limit
+	if s.searchMsgErr != nil {
+		return nil, s.searchMsgErr
+	}
+	if s.searchMsgResp != nil {
+		return s.searchMsgResp, nil
+	}
+	return &handler.MessageSearchResp{Query: q, Source: "sqlite", Hits: []handler.MessageSearchHit{}}, nil
+}
+
+func (s *stubSvc) ExportConversations(_ context.Context, req handler.ExportReq) (*handler.ExportResp, error) {
+	s.exportReq = req
+	if s.exportErr != nil {
+		return nil, s.exportErr
+	}
+	if s.exportResp != nil {
+		return s.exportResp, nil
+	}
+	return &handler.ExportResp{Format: "markdown", Files: []handler.ExportFile{}}, nil
+}
 func (s *stubSvc) GetConversation(_ context.Context, id string) (*handler.ConversationDetailResp, error) {
 	return &handler.ConversationDetailResp{
 		ConversationResp: handler.ConversationResp{ID: id},
@@ -374,6 +406,8 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	g.GET("/tools", h.Capability.ListTools)
 	g.GET("/usage/summary", h.Usage.Summary)
+	g.GET("/search/messages", h.Search.Messages)
+	g.POST("/conversations/export", h.Export.Conversations)
 	return r
 }
 
@@ -968,5 +1002,75 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 	env, _ := do(t, r, "DELETE", "/v1/forge/agents/nope", "")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
+	}
+}
+
+// TestMessageSearchRoute GET /search/messages：参数校验（q 必填、limit 正整数）、
+// 查询透传与信封形状（M3 ② 锚点跳转数据面）。
+func TestMessageSearchRoute(t *testing.T) {
+	svc := &stubSvc{searchMsgResp: &handler.MessageSearchResp{
+		Query: "502", Source: "sqlite", Total: 1, HasMore: false,
+		Hits: []handler.MessageSearchHit{{ConversationID: "c-1", Title: "部署", Role: "user", Seq: 7, Snippet: "网关 502"}},
+	}}
+	r := newRestEngine(svc)
+
+	env, http := do(t, r, "GET", "/v1/forge/search/messages?q=502&limit=5", "")
+	if http != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d %+v", http, env)
+	}
+	if svc.searchMsgQuery != "502" || svc.searchMsgLimit != 5 {
+		t.Fatalf("参数透传不符: q=%q limit=%d", svc.searchMsgQuery, svc.searchMsgLimit)
+	}
+	if !strings.Contains(string(env.Data), `"seq":7`) || !strings.Contains(string(env.Data), `"source":"sqlite"`) {
+		t.Fatalf("响应载荷不符: %s", env.Data)
+	}
+
+	// 缺 q → 40001（HTTP 200 + 信封非 0）。
+	env, http = do(t, r, "GET", "/v1/forge/search/messages", "")
+	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_query") {
+		t.Fatalf("缺 q 校验不符: http=%d %+v", http, env)
+	}
+	// 非法 limit → 40001。
+	env, http = do(t, r, "GET", "/v1/forge/search/messages?q=a&limit=abc", "")
+	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_limit") {
+		t.Fatalf("limit 校验不符: http=%d %+v", http, env)
+	}
+	// 默认 limit=30。
+	_, _ = do(t, r, "GET", "/v1/forge/search/messages?q=a", "")
+	if svc.searchMsgLimit != 30 {
+		t.Fatalf("默认 limit 应为 30: %d", svc.searchMsgLimit)
+	}
+}
+
+// TestExportRoute POST /conversations/export：请求体校验 + 响应形状 + 错误映射。
+func TestExportRoute(t *testing.T) {
+	svc := &stubSvc{exportResp: &handler.ExportResp{
+		GeneratedAt: "2026-09-09T00:00:00Z", Format: "markdown", Exported: 1, TotalBytes: 12,
+		Files: []handler.ExportFile{{ConversationID: "c-1", Filename: "部署-c-1.md", Format: "markdown", Bytes: 12, Content: "# 部署\n\nhi"}},
+	}}
+	r := newRestEngine(svc)
+
+	env, http := do(t, r, "POST", "/v1/forge/conversations/export", `{"ids":["c-1"],"format":"markdown"}`)
+	if http != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d %+v", http, env)
+	}
+	if svc.exportReq.Format != "markdown" || len(svc.exportReq.IDs) != 1 {
+		t.Fatalf("请求透传不符: %+v", svc.exportReq)
+	}
+	if !strings.Contains(string(env.Data), `"filename":"部署-c-1.md"`) || !strings.Contains(string(env.Data), `"total_bytes":12`) {
+		t.Fatalf("响应载荷不符: %s", env.Data)
+	}
+
+	// 缺 ids → 40000（参数绑定失败）。
+	env, http = do(t, r, "POST", "/v1/forge/conversations/export", `{"format":"text"}`)
+	if http != 200 || env.Code != 40000 {
+		t.Fatalf("缺 ids 校验不符: http=%d %+v", http, env)
+	}
+	// 服务错误映射（40001 非法格式）。
+	svc2 := &stubSvc{exportErr: gerror.Error{Code: 40001, Msg: "不支持的导出格式 [invalid_export_format]"}}
+	r2 := newRestEngine(svc2)
+	env, http = do(t, r2, "POST", "/v1/forge/conversations/export", `{"ids":["c-1"],"format":"pdf"}`)
+	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_export_format") {
+		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
 }

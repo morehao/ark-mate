@@ -25,6 +25,8 @@ import type {
   ConversationPatch,
   ConversationSearchHit,
   ConversationSummary,
+  MessageSearchResp,
+  ExportResp,
 } from '@ark/types'
 
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
@@ -40,6 +42,16 @@ export const conversationSearch = (q: string, limit = 30): Promise<ConversationS
   const s = new URLSearchParams({ q, limit: String(limit) })
   return http.get<ConversationSearchHit[]>(`/forge/conversations/search?${s.toString()}`)
 }
+
+/** 跨会话消息级检索（M3 ②：返回 seq 锚点，用于跳转定位）。 */
+export const messageSearch = (q: string, limit = 30): Promise<MessageSearchResp> => {
+  const s = new URLSearchParams({ q, limit: String(limit) })
+  return http.get<MessageSearchResp>(`/forge/search/messages?${s.toString()}`)
+}
+
+/** 批量导出会话（markdown|text|json；ids 上限 50）。 */
+export const exportConversations = (ids: string[], format: 'markdown' | 'text' | 'json' = 'markdown'): Promise<ExportResp> =>
+  http.post<ExportResp>('/forge/conversations/export', { ids, format })
 
 /** 单会话详情（元数据 + 挂起权限）。 */
 export const getConversation = (id: string): Promise<ConversationDetail> =>

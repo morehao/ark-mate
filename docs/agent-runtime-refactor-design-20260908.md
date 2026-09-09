@@ -1288,3 +1288,58 @@ daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）�
 **遗留**：非 unix 平台无进程组信号（回收降级为不支持，已在代码注释与部署文档标注）；孙进程若已
 `setsid` 脱离进程组则不在回收范围（登记只覆盖 daemon 直接拉起的组）；注册表未做跨实例锁（同一
 数据目录并行跑两个 daemon 本就非支持用法）。
+
+#### 19.11 切片 A2：跨会话消息级检索 + 批量导出（完成）
+
+**动机**：`GET /conversations/search` 只回会话级聚合（标题/Agent/命中次数），用户拿到「哪个会话里有
+这句话」却无法直接跳到那句话；会话也没有导出通路（数据只在库里与 transcript 里，用户无法带走）。
+两项都是「读模型已经有的东西没有出口」——A2 只加出口，不改事实源。
+
+**接口**（README 路由表 29 条已同步；`TestReadmeRoutesMatchRouter` 守卫生效）：
+- `GET /search/messages?q=&limit=`（q 必填、limit 默认 30 上限 200）→
+  `{query, source, hits:[{conversation_id, title, agent_id, role, seq, seq_hi, message_id, run_id,
+  snippet, created_at}], total, has_more}`。
+- `POST /conversations/export` body `{ids[], format?: markdown|text|json}`（ids 去重后上限 50）→
+  `{generated_at, format, exported, total_bytes, skipped[], files:[{conversation_id, title, agent_id,
+  status, filename, format, events, bytes, truncated?, content}]}`。
+
+**实现要点**：
+1. **锚点语义**：`seq` 是全局单调事件号（events.seq），前端 `anchorIndex()` 用「精确命中 → 就近前一条
+   → 首条」三级回退定位条目。sqlite 模式的 `seq` 来自 `messages.seq_lo`（该消息行的首事件）：user 命中
+   即 `session.user_message`，assistant 命中为该行首事件——行内首个事件若是 `session.thought`，锚点落
+   在思考条目上（同一条 assistant 消息块的起点），实测真 `dsh` 会话 assistant 命中 `seq=3` 与
+   `session.message` 事件号完全一致。
+2. **双数据面**：sqlite 走新增 `store.SearchMessages`（`messages` 表 JOIN `conversations` 取标题/
+   Agent，`LIKE` 通配转义，`created_at DESC` 排序）；memory 模式回扫 transcript 的 `user_message`/
+   `session.message` 事件（`source=transcript` 明确标注降级）。两模式都返回 seq。
+3. **导出事实源 = 事件序列**（`store.EventsAfter` 分页 / eventbus 回放），因此两模式产物一致，且
+   markdown/text/json 三种渲染共用同一份事件流：markdown 出标题 + 元信息 + `## 用户/## 助手` +
+   `> 思考` + `- 工具 …`；text 出纯文本行；json 出 `{conversation, events}` 可直接 `json.loads`。
+4. **不静默**：未知/无事件会话进 `skipped`；事件数超 20000 或单文件超 4 MiB 置 `truncated:true`
+   （防御性上限，正常会话不会触发）；非法格式/空 ids/超 50 个 id 都是 40001 并带稳定 token
+   （`[invalid_export_format]` 等），文件名净化 `/ \ :` 与控制字符。
+
+**前端**（后端先行的跟随面）：
+- 侧栏搜索框同时拉会话命中与消息命中（250ms 防抖、`Promise.allSettled` 任一失败即降级为空），消息
+  命中行显示角色徽标 + 片段 + 所属会话 + 数据面标签；点击 → `jumpToAnchor(conversation_id, seq)` +
+  路由跳转，`ChatPage` 等条目就绪后按锚点滚动并短暂高亮（折叠窗口之外先展开再滚）。
+- 会话行 ⋯ 菜单新增「导出 Markdown」（单会话）；侧栏标题栏新增「导出」（当前列表全部，逐个下载）。
+- `StreamEntry` 新增 `seq`（首帧事件号；合并/续传保留最早值）——锚点定位的 DOM 依据是
+  `data-fg-idx`（条目绝对下标），条目外层容器不产生布局位移。
+
+**证据**：
+- 单测：`internal/store.TestSearchMessages`（角色不限/大小写/`%`与`_`字面转义/锚点字段/limit）；
+  `internal/manager.TestSearchMessagesSQLite`（含 limit 截断 `has_more`、空关键词 40001）、
+  `TestSearchMessagesTranscriptFallback`（`source=transcript`）、`TestExportConversations`（三格式
+  渲染细节 + `skipped` + 三类 40001）、`TestExportMarkdownFileWritable`（文件名净化 + 真实落盘）；
+  `internal/server/handler.TestMessageSearchRoute`/`TestExportRoute`（参数校验/信封/错误映射）。
+- 真进程（sqlite，echo 两轮 + 真 `dsh` 一轮）：搜索 4 命中、逐个锚点回查 history 命中同一事件；
+  三格式导出、`skipped`、`format=pdf` 40001、缺 q 40001；memory 模式 `source=transcript` 且导出正常。
+- 前端：`typecheck` + `build` 通过；`console/searchView.ts` 以 Node 24 原生类型擦除加载实跑 17 条
+  断言；`pnpm smoke:e2e` 新增 4 项断言全 PASS；`e2e-live-turn.mjs dsh` 收到 `turn.ended`。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿。
+
+**遗留/降级**：导出无 zip 打包（浏览器端逐个下载，避免新增二进制依赖）；无「导出全部会话」的
+服务端游标（ids 上限 50，前端只导当前可见页）；memory 模式的命中 `seq` 来自事件本身、sqlite 模式来自
+消息行首事件，两者对 assistant 命中可能差一个 thought 事件（已在上面说明）；检索是子串匹配，
+无分词/排序相关性（`created_at DESC` 固定序）。

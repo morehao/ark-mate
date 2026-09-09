@@ -12,6 +12,7 @@ import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
+import { anchorIndex } from '../console/searchView'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
 import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
 
@@ -33,6 +34,8 @@ export function ChatPage() {
   const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
   const setDrawer = useForge((s) => s.setDrawer)
+  const anchorSeq = useForge((s) => s.anchorSeq)
+  const clearAnchor = useForge((s) => s.clearAnchor)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)
@@ -43,6 +46,9 @@ export function ChatPage() {
   // 「显示更早」前后的高度差补偿（保持视口停在原处）。
   const pendingAnchorRef = useRef<number | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  // 搜索命中跳转（M3 ②）：已应用的锚点 key（防重复滚动）+ 高亮条目 id。
+  const anchorAppliedRef = useRef<string | null>(null)
+  const [flashEntryId, setFlashEntryId] = useState<string | null>(null)
   // err 轮重试文本回退（会话 id → 历史最后 user_message；undefined=未取）
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
 
@@ -151,6 +157,37 @@ export function ChatPage() {
       el.scrollTop = el.scrollHeight
     }
   }, [view?.entries, view?.streaming, view?.lastSeq, revealed])
+
+
+  // 搜索命中跳转（M3 ②）：条目就绪后滚动到锚点条目并短暂高亮。
+  // 锚点早于折叠窗口 → 先展开到该条（下一轮渲染再滚动）；无法定位（早于窗口起点）→ 就近落到首条。
+  useEffect(() => {
+    if (anchorSeq === null || !activeId) return
+    if (hydrating || entries.length === 0) return
+    const key = `${activeId}#${anchorSeq}`
+    if (anchorAppliedRef.current === key) return
+    const idx = anchorIndex(entries, anchorSeq)
+    if (idx < 0) {
+      clearAnchor()
+      return
+    }
+    const hidden = Math.max(0, entries.length - (TRANSCRIPT_WINDOW + revealed))
+    if (idx < hidden) {
+      setRevealed((n) => n + (hidden - idx)) // 展开后由下一轮 effect 完成滚动
+      return
+    }
+    const el = scrollRef.current
+    const node = el?.querySelector<HTMLElement>(`[data-fg-idx="${idx}"]`)
+    anchorAppliedRef.current = key
+    setFlashEntryId(entries[idx].id)
+    window.setTimeout(() => setFlashEntryId(null), 2400)
+    clearAnchor()
+    if (!el || !node) return
+    const box = node.getBoundingClientRect()
+    const base = el.getBoundingClientRect()
+    el.scrollTo({ top: Math.max(0, el.scrollTop + (box.top - base.top) - 16), behavior: 'smooth' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorSeq, activeId, hydrating, entries, revealed])
 
   const entryWindow = windowEntries(view?.entries ?? [], TRANSCRIPT_WINDOW, revealed)
 
@@ -434,8 +471,20 @@ export function ChatPage() {
                           </Button>
                         </div>
                       )}
-                      {entryWindow.visible.map((e) => (
-                        <EntryView key={e.id} e={e} onRetry={e === lastEntry ? retryLast : undefined} />
+                      {entryWindow.visible.map((e, i) => (
+                        <div
+                          key={e.id}
+                          data-fg-idx={entryWindow.hidden + i}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            borderRadius: 12,
+                            transition: 'box-shadow .35s ease',
+                            boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
+                          }}
+                        >
+                          <EntryView e={e} onRetry={e === lastEntry ? retryLast : undefined} />
+                        </div>
                       ))}
                       {streaming && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: tokens.text }}>

@@ -17,6 +17,52 @@ export interface ConversationSearchHit extends ConversationSummary {
   matches: number
 }
 
+/** 跨会话消息级搜索命中（M3 ②：seq 为锚点，前端据此滚动定位）。 */
+export interface MessageSearchHit {
+  conversation_id: string
+  title?: string
+  agent_id?: string
+  role: 'user' | 'assistant' | string
+  seq: number
+  seq_hi?: number
+  message_id?: number
+  run_id?: string
+  snippet: string
+  created_at: string
+}
+
+export interface MessageSearchResp {
+  query: string
+  /** 数据面：sqlite（messages 读模型）| transcript（无 DB 时的回扫降级）。 */
+  source: 'sqlite' | 'transcript' | string
+  hits: MessageSearchHit[]
+  total: number
+  has_more: boolean
+}
+
+/** 批量导出产物（M3 ②：content 可直接落盘）。 */
+export interface ExportFile {
+  conversation_id: string
+  title?: string
+  agent_id?: string
+  status?: string
+  filename: string
+  format: 'markdown' | 'text' | 'json' | string
+  events: number
+  bytes: number
+  truncated?: boolean
+  content: string
+}
+
+export interface ExportResp {
+  generated_at: string
+  format: string
+  exported: number
+  total_bytes: number
+  skipped?: string[]
+  files: ExportFile[]
+}
+
 export interface ConversationDetail extends ConversationSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）

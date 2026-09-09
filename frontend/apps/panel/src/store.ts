@@ -75,7 +75,7 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
   const msgId = e.payload?.msg_id !== undefined && e.payload.msg_id !== null ? String(e.payload.msg_id) : ''
 
   const push = (kind: StreamEntry['kind'], text_?: string, extra?: Partial<StreamEntry>): StreamEntry[] =>
-    [...entries, { kind, id: nextId(), text: text_, ...extra }]
+    [...entries, { kind, id: nextId(), text: text_, seq: e.seq, ...extra }]
 
   const appendToTail = (kind: StreamEntry['kind'], text_: string): StreamEntry[] => {
     const tail = entries[entries.length - 1]
@@ -281,6 +281,8 @@ export interface ForgeState {
   drawerOpen: boolean
   /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
   railMode: 'active' | 'archived'
+  /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
+  anchorSeq: number | null
 }
 
 export interface PermissionDecision {
@@ -301,6 +303,10 @@ export interface ForgeActions {
   refreshAgents: () => Promise<void>
   refreshConversations: () => Promise<void>
   activate: (id: string | null, sinceSeq?: number) => void
+  /** 跳转到某会话的锚点消息（搜索命中点击）；activate 后由 ChatPage 滚动定位并清空。 */
+  jumpToAnchor: (id: string, seq: number) => void
+  /** 清除跳转锚点（ChatPage 定位完成后调用）。 */
+  clearAnchor: () => void
   createAndRun: (prompt: string) => Promise<string | undefined>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
@@ -327,6 +333,7 @@ export const initialState: ForgeState = {
   conversations: [],
   views: {},
   activeId: null,
+  anchorSeq: null,
   wsState: 'idle',
   toast: null,
   drawerOpen: false,
@@ -455,11 +462,20 @@ export const useForge = create<ForgeStore>((set, get) => {
           }
           t.attach(id, sinceSeq)
         }
-        set({ activeId: id, drawerOpen: false })
+        set({ activeId: id, drawerOpen: false, anchorSeq: null })
       } else {
         set({ activeId: null })
       }
     },
+
+    jumpToAnchor: (id, seq) => {
+      // 复用 activate 的挂载/续传语义，再把锚点交给 ChatPage（先清空再设置，保证跨会话重复跳转也触发）。
+      set({ anchorSeq: null })
+      get().activate(id)
+      set({ anchorSeq: seq })
+    },
+
+    clearAnchor: () => set({ anchorSeq: null }),
 
     createAndRun: async (prompt) => {
       try {

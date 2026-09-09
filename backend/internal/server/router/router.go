@@ -36,6 +36,9 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	v1.GET("/conversations", h.Conversation.List)
 	v1.GET("/conversations/search", h.Conversation.Search)
+	// M3 ②：跨会话消息级检索（锚点 = seq）与批量导出（markdown|text|json）。
+	v1.GET("/search/messages", h.Search.Messages)
+	v1.POST("/conversations/export", h.Export.Conversations)
 	v1.POST("/conversations", h.Conversation.Create)
 	v1.GET("/conversations/:id", h.Conversation.Get)
 	v1.PATCH("/conversations/:id", h.Conversation.Update)
