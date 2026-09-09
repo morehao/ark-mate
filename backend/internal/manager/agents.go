@@ -351,6 +351,6 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 		return nil
 	}
 	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-		IsDefault: a.IsDefault(), Seed: seedAgent(a.ID),
+		IsDefault: a.IsDefault(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 		PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
 }

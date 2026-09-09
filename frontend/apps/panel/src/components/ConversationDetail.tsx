@@ -13,6 +13,7 @@ import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
 import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
+import { ModelSelect } from './ModelSelect'
 import { agentNameOf, shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
@@ -46,6 +47,9 @@ export function ConversationDetailDrawer({
   const togglePin = useForge((s) => s.togglePin)
   const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
+  const modelCatalog = useForge((s) => s.modelCatalog)
+  const loadModelCatalog = useForge((s) => s.loadModelCatalog)
+  const updateConversationModel = useForge((s) => s.updateConversationModel)
 
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [run, setRun] = useState<RunSummary | null>(null)
@@ -81,6 +85,15 @@ export function ConversationDetailDrawer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, conversationId])
+
+  // 会话级模型目录：非 echo 会话进入时拉取该 agent 的 provider 目录（opencode 锁定 / dsh 可改）。
+  const detailAgentId = detail?.agent_id
+  useEffect(() => {
+    if (open && detailAgentId) {
+      void loadModelCatalog(agents.find((a) => a.id === detailAgentId)?.provider ? detailAgentId : undefined)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, detailAgentId])
 
   const view = views[conversationId]
   const viewTitle = detail?.title
@@ -254,6 +267,32 @@ export function ConversationDetailDrawer({
               }}
             >
               {row('Agent', agentNameOf(agents, s.agent_id))}
+              {(() => {
+                const convAgent = agents.find((a) => a.id === s.agent_id)
+                const runtime = convAgent?.runtimes?.[0]
+                const editable = runtime === 'deepseekharness' // 会话级：会话内经 set_config_option 即时
+                // opencode 仅创建时（拨号 env 进程级）；echo 无模型。
+                const showPicker = editable || runtime === 'opencode'
+                if (!showPicker) {
+                  return row('模型', runtime === 'echo' ? '无模型' : s.model || 'Agent 默认')
+                }
+                return row(
+                  '模型',
+                  <ModelSelect
+                    models={modelCatalog}
+                    value={s.model ?? null}
+                    disabled={!editable}
+                    allowClear
+                    size="small"
+                    style={{ minWidth: 180 }}
+                    defaultLabel="Agent 默认"
+                    onChange={(id) => {
+                      if ((id ?? undefined) === s.model) return
+                      void updateConversationModel(s.id, id ?? undefined).then(() => void load())
+                    }}
+                  />,
+                )
+              })()}
               {row(
                 '状态',
                 meta ? (

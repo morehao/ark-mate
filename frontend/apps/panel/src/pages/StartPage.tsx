@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
-import { tokens, Pill } from '@ark/ui'
+import { tokens } from '@ark/ui'
 import { useForge } from '../store'
 import { ConversationRail } from '../components/ConversationRail'
+import { ModelSelect } from '../components/ModelSelect'
 import { StatusBar } from '../components/StatusBar'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+
+// 新建会话时记住的「上次所选模型」。
+const LAST_MODEL_KEY = 'forge.panel.lastModel'
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
 const EXAMPLES = [
@@ -23,21 +27,37 @@ export function StartPage() {
   const navigate = useNavigate()
   const agents = useForge((s) => s.agents)
   const createAndRun = useForge((s) => s.createAndRun)
+  const modelCatalog = useForge((s) => s.modelCatalog)
+  const loadModelCatalog = useForge((s) => s.loadModelCatalog)
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
+  const [model, setModel] = useState<string | null>(() => {
+    const v = localStorage.getItem(LAST_MODEL_KEY)
+    return v && v.trim() ? v : null
+  })
 
   // 新建固定用默认 Agent（后端在 agent_id 缺省时落到 dsh），前端无需再传 agent。
+  const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
   const hasAgent = agents.length > 0
   const empty = draft.trim().length === 0
   const canSend = hasAgent && !empty && !sending
+
+  // 拉取当前默认 Agent 的模型目录；无 provider 时拉聚合目录（兜底可选）。
+  useEffect(() => {
+    if (!defaultAgent) return
+    void loadModelCatalog(defaultAgent.provider ? defaultAgent.id : undefined)
+    // defaultAgent 引用随 agents 每次刷新变化，仅以 id + provider 判定触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAgent?.id, defaultAgent?.provider, loadModelCatalog])
 
   const send = async () => {
     if (!canSend) return
     setSending(true)
     try {
-      const id = await createAndRun(draft.trim())
+      const id = await createAndRun(draft.trim(), model ? { modelID: model } : undefined)
+      if (model) localStorage.setItem(LAST_MODEL_KEY, model)
       if (id) navigate(`/conversations/${id}`)
     } finally {
       setSending(false)
@@ -161,10 +181,16 @@ export function StartPage() {
               </span>
 
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                {/* 模型 pill（只读展示，不做选择器——决策 v6③） */}
-                <Pill title="模型由 Agent 自身默认决定；本面板不在此选模型。">
-                  模型 · Agent 默认
-                </Pill>
+                {/* 会话级模型选择器（Phase C）：opencode 仅创建时（拨号 env），dsh 会话内经 set_config_option。 */}
+                <ModelSelect
+                  models={modelCatalog}
+                  value={model}
+                  onChange={setModel}
+                  allowClear
+                  size="small"
+                  style={{ minWidth: 180 }}
+                  defaultLabel="Agent 默认"
+                />
 
                 <Button
                   type="primary"

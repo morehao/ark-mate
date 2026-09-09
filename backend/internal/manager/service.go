@@ -265,7 +265,7 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
 		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID),
+			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

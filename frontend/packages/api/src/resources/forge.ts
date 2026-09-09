@@ -19,6 +19,7 @@ import type {
   McpResourceReadResult,
   McpPromptsResult,
   McpPromptGetResult,
+  ModelCatalogResp,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -229,6 +230,16 @@ export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/f
 /** upsert provider 档案；key 传空串清除密钥。 */
 export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
   http.patch<Provider>(`/forge/providers/${encodeURIComponent(id)}`, patch)
+
+// ——— 模型目录（三段式 live → 磁盘缓存 → go:embed 快照） ———
+
+/** 模型目录：`?agent=<id>` 取该 agent 的 provider 类型；空 = 聚合全部受支持类型。 */
+export const listModels = (agentId?: string): Promise<ModelCatalogResp> =>
+  http.get<ModelCatalogResp>(`/forge/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
+
+/** 某 provider 档案的可选模型目录（live 优先，兜底快照）。 */
+export const listProviderModels = (id: string): Promise<ModelCatalogResp> =>
+  http.get<ModelCatalogResp>(`/forge/providers/${encodeURIComponent(id)}/models`)
 
 // ——— M3 用量统计 ———
 

@@ -6,6 +6,7 @@ import {
   createConversation,
   listAgents,
   listConversations,
+  listModels,
   promptConversation,
   resolveElicitation,
   resolvePermission,
@@ -20,6 +21,8 @@ import type {
   ElicitationFormSchema,
   PermissionOption,
   ConversationSummary,
+  ModelOption,
+  ModelRef,
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
@@ -299,6 +302,10 @@ export interface ForgeState {
   tokenModalOpen: boolean
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
+  /** 模型目录（当前 agent/provider 的候选；三段式降级由服务端完成）。 */
+  modelCatalog: ModelOption[]
+  /** 模型目录数据来源（live|cache|snapshot；空 = 未加载）。 */
+  modelSource: string
 }
 
 export interface PermissionDecision {
@@ -323,7 +330,11 @@ export interface ForgeActions {
   jumpToAnchor: (id: string, seq: number) => void
   /** 清除跳转锚点（ChatPage 定位完成后调用）。 */
   clearAnchor: () => void
-  createAndRun: (prompt: string) => Promise<string | undefined>
+  createAndRun: (prompt: string, model?: ModelRef) => Promise<string | undefined>
+  /** 拉取模型目录（`?agent=<id>` 过滤当前 agent 的 provider 类型；失败 → 兜底提示）。 */
+  loadModelCatalog: (agentId?: string) => Promise<void>
+  /** 会话级模型变更（opencode 仅创建时锁定；dsh 会话内经 updateConversation 生效）。 */
+  updateConversationModel: (id: string, model?: string) => Promise<void>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
@@ -362,6 +373,8 @@ export const initialState: ForgeState = {
   token: getToken(),
   tokenModalOpen: false,
   historyStart: {},
+  modelCatalog: [],
+  modelSource: '',
 }
 
 /** C2：服务端「加载更早」每页条数。 */
@@ -554,9 +567,9 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt) => {
+    createAndRun: async (prompt, model) => {
       try {
-        const resp = await createConversation({ prompt })
+        const resp = await createConversation({ prompt, model: model?.modelID })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({
@@ -578,6 +591,26 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
         return undefined
+      }
+    },
+
+    loadModelCatalog: async (agentId) => {
+      try {
+        const resp = await listModels(agentId || undefined)
+        set({ modelCatalog: resp.models, modelSource: resp.source })
+      } catch (err) {
+        // 目录为空/live 失败仍可手动输入（不校验），避免死锁（§13.5/§8）。
+        set({ modelCatalog: [], modelSource: '' })
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    updateConversationModel: async (id, model) => {
+      try {
+        await updateConversation(id, { model })
+        await get().refreshConversations()
+      } catch (err) {
+        showToast(toErrorMessage(err))
       }
     },
 

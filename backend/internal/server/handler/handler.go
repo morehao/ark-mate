@@ -161,6 +161,9 @@ type AgentResp struct {
 	// Seed 内置播种/保留前缀 Agent：只读（不可删、runtime 不可改；name/provider/策略可改）。
 	// 由服务端权威判定（历史上前端按 id 前缀猜，与播种 id 改名后不一致）。
 	Seed bool `json:"seed"`
+	// Runtimes 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探；0/1 个即确定）。
+	// 供前端判定模型作用域（opencode=进程级锁定 / dsh=会话级可改）；空 = 未知。
+	Runtimes []string `json:"runtimes,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 }

@@ -531,10 +531,26 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 
 ### 13.6 文件清单
 
-`packages/types/src/{agent,conversation}.ts`、`packages/api/src/resources/forge.ts`、
+`packages/types/src/{agent,conversation,model}.ts`、`packages/api/src/resources/forge.ts`、
 `apps/panel/src/components/{ModelSelect,ModelPickerModal}.tsx`、
 `apps/panel/src/pages/{StartPage,ChatPage,AgentsPage}.tsx`、`apps/panel/src/store.ts`、
 `apps/panel/src/console.css.ts`（新增交互态）。
+
+> **实现注（2026-09-09）**：本 Phase 已落地核心子集。与上文推导的偏差：
+>   - `GET /agents` 增 `runtimes`（agent 候选 runtime 顺序，ResolveRuntime 按此试探），供前端判定
+>     模型作用域（`opencode`=创建时锁定 / `deepseekharness`=会话内可改 / `echo`=无模型）。
+>   - 类型以**后端 DTO 为准**收敛：`ModelOption{provider,id,title,description?,behavior?,recommended?,is_free?}`，
+>     目录响应为 `ModelCatalogResp{source,models,note?}`（`listModels(agentId?)`/`listProviderModels(id)` 均返回
+>     `ModelCatalogResp`，非 §13.1 的裸数组）；`ModelRef{providerID?,modelID}` 中 `providerID` 目前仅作展示分组。
+>   - `createConversation`/`updateConversation` 经 `@ark/api` 透传 `model`（`CreateConversationReq.model/effort`、
+>     `ConversationPatch.model`、`ConversationSummary.provider/model`）。
+>   - UI：新建会话（StartPage）用 `ModelSelect`（antd Select + provider 分组 + 推荐星标 + 搜索，
+>     允许清空回「Agent 默认」；记住 `forge.panel.lastModel`）；会话详情抽屉「模型」行——`deepseekharness`
+>     显示可改 `ModelSelect`（选后 `updateConversation({model})`，dsh 即时），`opencode` 只读（label 提示仅创建时），
+>     `echo` 显示「无模型」。
+>   - **未做**（留待打磨）：`ModelPickerModal` 全览弹窗、AgentsPage provider 表单单模型改 Select、
+>     ChatPage 头像行内 `ModelSelect`（已在会话详情抽屉等价覆盖）、effort 二级面板（dsh
+>     `behavior` 目前只作标签展示；后端已支持 `effort` 字段）。
 
 ---
 
