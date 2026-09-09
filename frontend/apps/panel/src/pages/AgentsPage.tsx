@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag } from 'antd'
+import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
 import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
-import type { Agent, AgentDiagnostics, Provider } from '@ark/types'
+import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
 import { useForge } from '../store'
+import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 /** 种子判定：服务端权威字段（内置播种 dsh/opencode + 历史保留前缀 agent-）。 */
@@ -17,7 +18,27 @@ interface AgentFormValues {
   name?: string
   runtimes: string[]
   provider?: string
+  /** 权限策略（C1 起可编辑）：默认动作 + 原生模式 + 工具项 JSON。 */
+  policy_default?: PermissionAction
+  policy_native?: NativePermissionMode
+  policy_tools?: string
 }
+
+const POLICY_DEFAULT_OPTIONS: { label: string; value: PermissionAction }[] = [
+  { label: 'ask（征询）', value: 'ask' },
+  { label: 'allow（自动放行）', value: 'allow' },
+  { label: 'deny（自动拒绝）', value: 'deny' },
+]
+
+const POLICY_NATIVE_OPTIONS: { label: string; value: NativePermissionMode }[] = [
+  { label: 'auto（按 default 推导）', value: 'auto' },
+  { label: 'off（不注入原生配置）', value: 'off' },
+  { label: 'read-only（只读沙箱）', value: 'read-only' },
+  { label: 'workspace-write（工作区可写）', value: 'workspace-write' },
+  { label: 'danger-full-access（完全访问）', value: 'danger-full-access' },
+]
+
+
 
 interface ProviderFormValues {
   type: string
@@ -85,7 +106,15 @@ export function AgentsPage() {
   }
 
   const openEdit = (a: Agent): void => {
-    agentForm.setFieldsValue({ name: a.name, runtimes: [], provider: a.provider })
+    const p = a.permission_policy
+    agentForm.setFieldsValue({
+      name: a.name,
+      runtimes: [],
+      provider: a.provider,
+      policy_default: p?.default ?? 'ask',
+      policy_native: p?.native_mode ?? 'auto',
+      policy_tools: p?.tools && Object.keys(p.tools).length > 0 ? JSON.stringify(p.tools) : '',
+    })
     setAgentModal({ mode: 'edit', agent: a })
   }
 
@@ -98,11 +127,23 @@ export function AgentsPage() {
       )
       if (ok === undefined) return
     } else {
+      let tools: Record<string, PermissionAction> | undefined
+      try {
+        tools = parsePolicyTools(v.policy_tools)
+      } catch (e) {
+        showToast(toErrorMessage(e))
+        return
+      }
       const ok = await guard(
         patchAgent(agentModal.agent.id, {
           name: v.name,
           provider: v.provider || undefined,
           runtimes: v.runtimes?.length ? v.runtimes : undefined,
+          permission_policy: {
+            default: v.policy_default ?? 'ask',
+            native_mode: v.policy_native ?? 'auto',
+            tools,
+          },
         }),
       )
       if (ok === undefined) return
@@ -186,6 +227,33 @@ export function AgentsPage() {
             <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
             {a.is_default && <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>默认</Tag>}
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
+            <Tooltip
+              title={
+                a.permission_policy ? (
+                  <div style={{ fontSize: 12 }}>
+                    <div>default：{a.permission_policy.default || 'ask'}</div>
+                    {a.permission_policy.native_mode && a.permission_policy.native_mode !== 'auto' && (
+                      <div>native_mode：{a.permission_policy.native_mode}</div>
+                    )}
+                    {Object.entries(a.permission_policy.tools ?? {}).length > 0 ? (
+                      Object.entries(a.permission_policy.tools ?? {}).map(([k, v]) => (
+                        <div key={k}>
+                          {k}：{v}
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ color: tokens.textPlaceholder }}>无工具粒度项</div>
+                    )}
+                  </div>
+                ) : (
+                  '未声明权限策略（全 ask：每个工具都征询）'
+                )
+              }
+            >
+              <Tag color={policyColor(a.permission_policy?.default)} style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                策略 {policySummary(a.permission_policy)}
+              </Tag>
+            </Tooltip>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <span style={{ color: st.color }}>{st.label}</span>
               {seed && <span style={{ color: tokens.textPlaceholder }}>（种子）</span>}
@@ -404,6 +472,37 @@ export function AgentsPage() {
               options={providerOptions.map((id) => ({ value: id, label: id }))}
             />
           </Form.Item>
+          {agentModal?.mode === 'edit' && (
+            <>
+              <Form.Item name="policy_default" label="权限策略 · 默认动作（未匹配工具时）">
+                <Select options={POLICY_DEFAULT_OPTIONS} />
+              </Form.Item>
+              <Form.Item
+                name="policy_native"
+                label="权限策略 · 原生模式（投影到底座开关：dsh DSH_PERMISSION_MODE / opencode permission）"
+              >
+                <Select options={POLICY_NATIVE_OPTIONS} />
+              </Form.Item>
+              <Form.Item
+                name="policy_tools"
+                label='权限策略 · 工具项（JSON，如 {"bash":"deny"}；留空 = 无工具粒度项）'
+                rules={[
+                  () => ({
+                    validator: (_r, value: string) => {
+                      try {
+                        parsePolicyTools(value)
+                        return Promise.resolve()
+                      } catch (e) {
+                        return Promise.reject(e as Error)
+                      }
+                    },
+                  }),
+                ]}
+              >
+                <Input.TextArea rows={2} placeholder='{"bash":"deny","edit":"allow"}' style={{ fontFamily: tokens.fontMono, fontSize: 12 }} />
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Modal>
 

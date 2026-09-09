@@ -382,3 +382,12 @@ sudo systemctl restart ark-forge
   `session.permission_request`（`echo hi`），`bash:deny` 的 agent **无任何权限请求**；
   ③ 平台内 dsh `default:deny` + read-only → 写入被沙箱拒绝、文件未生成、无挂起请求。
   `FORGE_NATIVE_PERMISSION=off` → 两个 runtime 的子进程均无原生权限 env（实测）。
+- 前端用量视图 + 权限策略展示（C1）：`GET /usage/summary` 实测 `code=0 source=sqlite group_by=agent`
+  （`totals runs=5 completed=4 failed=1 duration_ms=25029 context_used=28577`，3 个 agent 桶）；
+  `group_by=day&from=2026-09-08` → `buckets=[("2026-09-09",5)]`；`group_by=tool` → `40001
+  [invalid_usage_group_by]`。`make all` 后 release 二进制同源服务：`/` 200、bundle
+  `/assets/index-74hlEOI0.js` 含「用量」「权限策略」「danger-full-access」字样。策略 PATCH 实测（前端同形载荷）
+  → `code=0` 且 `GET /agents` 回读 `{"default":"allow","tools":{"bash":"deny"},"native_mode":"auto"}`；
+  非法 `native_mode` → `40001 permission_policy.native_mode: 取值 "yolo" 非法（auto|off|read-only|workspace-write|danger-full-access）`。
+  `scripts/smoke-e2e.mjs` 新增 3 项用量断言全 PASS（含 group_by=day 与非法分组）。
+  视图纯函数 Node 侧校验 34 项 PASS（`fmtDuration/fmtCost/fmtContext/successRate/usageRows/parsePolicyTools/policySummary/policyColor`）。

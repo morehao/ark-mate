@@ -9,6 +9,7 @@ const NAV = [
   { to: '/conversations', label: '问答' },
   { to: '/agents', label: 'Agents' },
   { to: '/capabilities', label: '能力' },
+  { to: '/usage', label: '用量' },
   { to: '/settings', label: '设置' },
 ] as const
 

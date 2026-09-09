@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentCapabilities,
   AgentDiagnostics,
+  PermissionPolicy,
   Provider,
   ProviderPatch,
   BusEvent,
@@ -34,6 +35,8 @@ import type {
   ConversationSummary,
   MessageSearchResp,
   ExportResp,
+  UsageQuery,
+  UsageSummary,
 } from '@ark/types'
 
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
@@ -187,7 +190,10 @@ export const createAgent = (req: { id: string; name?: string; runtimes: string[]
   http.post<Agent>('/forge/agents', req)
 
 /** 热更新 agent 元数据（name/provider/runtimes 子集；种子 runtimes 只读）。 */
-export const patchAgent = (id: string, patch: { name?: string; provider?: string; runtimes?: string[] }): Promise<Agent> =>
+export const patchAgent = (
+  id: string,
+  patch: { name?: string; provider?: string; runtimes?: string[]; permission_policy?: PermissionPolicy },
+): Promise<Agent> =>
   http.patch<Agent>(`/forge/agents/${encodeURIComponent(id)}`, patch)
 
 /** 删除自定义 agent（种子 agent-* 返回只读错误）。 */
@@ -209,3 +215,16 @@ export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/f
 /** upsert provider 档案；key 传空串清除密钥。 */
 export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
   http.patch<Provider>(`/forge/providers/${encodeURIComponent(id)}`, patch)
+
+// ——— M3 用量统计 ———
+
+/** 用量汇总（GET /usage/summary）：from/to 半开区间、agent_id、group_by=agent|day。 */
+export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
+  const p = new URLSearchParams()
+  if (q.from) p.set('from', q.from)
+  if (q.to) p.set('to', q.to)
+  if (q.agent_id) p.set('agent_id', q.agent_id)
+  if (q.group_by) p.set('group_by', q.group_by)
+  const qs = p.toString()
+  return http.get<UsageSummary>(`/forge/usage/summary${qs ? `?${qs}` : ''}`)
+}

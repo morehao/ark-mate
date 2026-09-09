@@ -7,7 +7,8 @@
  *   1. REST 信封（health / agents / runtimes / conversations）——@ark/api 的 unwrap 语义前提；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
- *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached。
+ *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
+ *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误。
  *
  * 用法（先起 make dev，或后端 127.0.0.1:10001 + 前端 vite dev :5173）：
  *   E2E_BASE=http://localhost:5173 node scripts/smoke-e2e.mjs
@@ -302,6 +303,36 @@ async function checkWs() {
   ws.close()
 }
 
+// ——— C1：用量视图数据面（GET /usage/summary） ———
+
+async function checkUsage() {
+  const { http, env } = await apiGet('/usage/summary?group_by=agent')
+  if (http !== 200) return bad('GET /usage/summary', `HTTP ${http}`)
+  if (env.code === 40501) {
+    ok('GET /usage/summary → code=40501（内存模式无统计，前端显示降级提示）')
+    return
+  }
+  if (env.code !== 0) return bad('GET /usage/summary', `code=${env.code} msg=${env.msg}`)
+  const d = env.data ?? {}
+  if (typeof d.source !== 'string' || typeof d.group_by !== 'string' || !d.totals || !Array.isArray(d.buckets)) {
+    return bad('GET /usage/summary 载荷', JSON.stringify(d))
+  }
+  for (const k of ['key', 'runs', 'completed', 'failed', 'cancelled', 'duration_ms', 'context_used', 'cost_amount']) {
+    if (!(k in d.totals)) return bad('GET /usage/summary totals 字段', `缺 ${k}: ${JSON.stringify(d.totals)}`)
+  }
+  ok(`GET /usage/summary source=${d.source} group_by=${d.group_by} totals.runs=${d.totals.runs} buckets=${d.buckets.length}`)
+
+  const day = await apiGet('/usage/summary?group_by=day')
+  if (day.env.code !== 0 || day.env.data?.group_by !== 'day') return bad('GET /usage/summary group_by=day', JSON.stringify(day.env))
+  ok(`GET /usage/summary group_by=day buckets=${day.env.data.buckets.length}`)
+
+  const badGroup = await apiGet('/usage/summary?group_by=tool')
+  if (badGroup.http !== 200 || badGroup.env.code !== 40001) {
+    return bad('GET /usage/summary group_by=tool', `HTTP ${badGroup.http} code=${badGroup.env.code}`)
+  }
+  ok('GET /usage/summary group_by=tool → HTTP 200 code=40001')
+}
+
 // ——— 主流程 ———
 
 async function main() {
@@ -309,6 +340,7 @@ async function main() {
   try {
     await checkRest()
     await checkBizError()
+    await checkUsage()
     await checkWs()
   } catch (err) {
     bad('未预期异常', err?.stack || String(err))

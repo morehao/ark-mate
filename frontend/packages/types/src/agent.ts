@@ -1,5 +1,24 @@
 export type AgentState = 'running' | 'stopped'
 
+/** 权限动作（平台拦截面）。 */
+export type PermissionAction = 'ask' | 'allow' | 'deny'
+
+/** 原生权限模式（B5；作用于底座进程级开关）。 */
+export type NativePermissionMode = 'auto' | 'off' | 'read-only' | 'workspace-write' | 'danger-full-access'
+
+/**
+ * 每 agent 的默认权限策略（M2 #7 拦截面 + B5 原生映射）。
+ * default/tools 决定 ACP 权限请求的自动裁决；native_mode 决定底座原生权限开关的注入。
+ */
+export interface PermissionPolicy {
+  /** 未匹配到具体工具时的动作（缺省 ask）。 */
+  default?: PermissionAction
+  /** 工具粒度动作：键 = 工具 title 或 ACP kind。 */
+  tools?: Record<string, PermissionAction>
+  /** 原生权限模式：auto（按 default 推导）| off | read-only | workspace-write | danger-full-access。 */
+  native_mode?: NativePermissionMode
+}
+
 export interface Agent {
   id: string
   name: string
@@ -10,6 +29,8 @@ export interface Agent {
   is_default?: boolean
   /** 种子 agent（内置播种/保留前缀）：只读（不可删、runtime 不可改）；由服务端权威判定。 */
   seed?: boolean
+  /** 默认权限策略（只读面；未声明 = 全 ask）。 */
+  permission_policy?: PermissionPolicy
 }
 
 export interface Provider {

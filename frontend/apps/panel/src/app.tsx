@@ -10,6 +10,7 @@ import { StartPage } from './pages/StartPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { CapabilitiesPage } from './pages/CapabilitiesPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { UsagePage } from './pages/UsagePage'
 
 function Manage({ children }: { children: ReactNode }) {
   return (
@@ -84,6 +85,14 @@ export function App() {
             element={
               <Manage>
                 <CapabilitiesPage />
+              </Manage>
+            }
+          />
+          <Route
+            path="/usage"
+            element={
+              <Manage>
+                <UsagePage />
               </Manage>
             }
           />

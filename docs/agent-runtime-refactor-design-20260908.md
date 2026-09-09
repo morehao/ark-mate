@@ -1744,3 +1744,37 @@ danger-full-access 会同时关掉沙箱与审批——要完全放开必须显�
 **发起沙箱升级请求**（`sandbox_permissions`），该请求走平台权限通道——策略 `allow` 时会被平台放行，
 即原生沙箱不构成对平台 allow 的否决；④ 原生配置在**连接建立时**固定，运行中 PATCH 策略只影响新连接
 （旧暖进程沿用旧配置，需 stop/start 或等空闲回收）；⑤ 未做「每 runtime 单独开关」粒度。
+
+#### 19.21 切片 C1：前端用量视图 + permission_policy 展示（完成）
+
+**动机**：`GET /usage/summary`（M3 首项）与 `permission_policy`（M2 #7 + B5）都只有 REST 面，
+面板里看不到——运维要在命令行拼 curl 才知道花了多少轮次、某 agent 是不是「全 ask」。
+
+**实现**：
+1. `packages/types/src/usage.ts`（UsageQuery/UsageBucket/UsageSummary）+ `agent.ts` 增
+   `PermissionPolicy`（default/tools/native_mode）与 `Agent.permission_policy`。
+2. `packages/api`：`usageSummary(q)`（URLSearchParams 组装，空值不发）；`patchAgent` 支持
+   `permission_policy`（此前前端类型漏了该字段，后端一直支持）。
+3. 新页 `/usage`（`UsagePage.tsx` + 顶栏「用量」）：统计卡（轮次/完成·失败/总时长/成本/上下文峰值/会话数）
+   + 分组表（按 agent 或按日期）+ 时间区间（近 7/30 天 / 自定义起止（含当天，转半开）/ 全部）+ agent 筛选。
+   数据面降级诚实呈现：内存模式（`source=memory`）时后端返回 40501，页面显示 `Alert` 原文，不画假数字。
+4. Agents 页：每行 `策略 {default · N 个工具项 · 原生 <mode>}` Tag（hover 展开 default/native_mode/逐工具明细），
+   编辑弹窗新增 `default` 下拉、`native_mode` 下拉（auto/off/read-only/workspace-write/danger-full-access）、
+   工具项 JSON 文本域（本地校验动作值 ∈ ask|allow|deny，非法即拒绝提交）。
+5. 视图纯函数拆到 `console/usageView.ts`（格式化/行模型）与 `console/policyView.ts`（策略摘要/JSON 解析），
+   便于 Node 侧独立校验（前端无测试框架，沿用「纯函数 + Node 断言」的既有做法）。
+
+**证据**：
+- `pnpm --filter @ark/panel typecheck` 通过；`make all` 通过（web 构建 + 内嵌 + release 二进制）。
+- 真进程（release 二进制 127.0.0.1:10018，sqlite 库）：`/usage/summary` 三组查询与非法分组返回值见
+  deployment.md；`/` 200 且 bundle 含新 UI 字样；策略 PATCH 往返一致、非法 `native_mode` 40001。
+- `frontend/scripts/smoke-e2e.mjs` 新增 `checkUsage()`（totals 字段齐备、group_by=day、非法分组 40001）→
+  全部 PASS（含既有 REST/WS 通路）。
+- 视图纯函数 Node 断言 34 项 PASS（`fmtDuration` 6 例、`fmtCost` 4 例、`fmtContext` 2 例、`successRate` 2 例、
+  `usageRows` 3 例、`parsePolicyTools` 6 例、`policySummary` 4 例、`policyColor` 2 例…）。
+
+**遗留/降级**：① 前端无浏览器渲染自动化（仓库无 Playwright/Puppeteer 依赖），页面渲染仅由
+typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像素级验收；
+② 用量页无图表（只做数字表，不引图表库）；③ 成本依赖底座上报 `usage.cost`，当前 echo/实测 runtime 均未上报
+（显示 `—`），不做估算；④ 策略编辑的工具项为 JSON 文本域（未做键值对行编辑器）；⑤ 时间区间按本地日期，
+后端按 UTC 半开区间处理，跨时区边界会有 1 天偏差（未做时区显式化）。
