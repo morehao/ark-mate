@@ -41,7 +41,12 @@ func opencodeSpec() Spec {
 		Description:       "opencode（terminal AI）ACP 执行后端",
 		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
 		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
-		Notes:             opencode.Notes,
+		// 模型经启动 env 注入（opencode 忽略 ACP 客户端模型选择，issue #13644）：
+		// ModelConfigOptionID 空（无 ACP 会话配置项）、ModelEnvKey=OPENCODE_MODEL（进程级）。
+		ModelConfigOptionID: "",
+		EffortConfigOptionID: "",
+		ModelEnvKey:          "OPENCODE_MODEL",
+		Notes:                opencode.Notes,
 	}
 }
 
@@ -64,7 +69,12 @@ func deepseekharnessSpec() Spec {
 		Description:       "deepseek-harness ACP 执行后端",
 		McpTransports:     []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
 		ManagesOwnContext: true,                                 // §6.2：后端自管上下文/工具
-		Notes:             deepseekharness.Notes,
+		// 模型走 ACP 会话配置项（session/set_config_option；会话级，可共享连接）：
+		// ModelConfigOptionID="model"、EffortConfigOptionID="reasoning_effort"、ModelEnvKey 空。
+		ModelConfigOptionID: "model",
+		EffortConfigOptionID: "reasoning_effort",
+		ModelEnvKey:          "",
+		Notes:                deepseekharness.Notes,
 	}
 }
 

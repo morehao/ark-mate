@@ -19,8 +19,9 @@ const (
 
 // ModelConfig 平台侧模型选择。Provider 为空 = 跟随 provider 档案/env 注入（§5.5 模型面）。
 type ModelConfig struct {
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"` // provider 档案 id（Phase B：拨号/应用用）
+	Model    string `json:"model,omitempty"`    // 模型 id；空 = 底座默认
+	Effort   string `json:"effort,omitempty"`   // effort/reasoning 档位（如 "low|medium|high"；空 = 不设置）
 }
 
 // PromptRequest 一次 Prompt 的入参（§4.2 PromptRequest）。本版「会话即连接」：Text 为已接入

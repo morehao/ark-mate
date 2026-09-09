@@ -41,6 +41,8 @@ type ActiveConversation struct {
 	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
 	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
 	proj runtime.Runtime
+	// model 会话级模型配置（opencode 经 env 注入；dsh 经 session/set_config_option 应用）。
+	model runtime.ModelConfig
 
 	mu      sync.Mutex
 	busy    bool
@@ -231,7 +233,7 @@ func (o *Orchestrator) SetLogger(l *slog.Logger) {
 // StartConversation 在 agent 路由选定的 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
 // 并发布 conversation.created。不发起 prompt；Prompt 负责每轮。
 // 路由 = ResolveRuntime（§7 FirstAvailable：候选顺序 × 已注册 × 命令可执行）。
-func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd string) (*CreateResult, error) {
+func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd string, model runtime.ModelConfig) (*CreateResult, error) {
 	agent, ok := o.svc.AgentByID(agentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
@@ -240,17 +242,17 @@ func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd strin
 	if err != nil {
 		return nil, err
 	}
-	return o.startConversationOn(ctx, agent, runtimeID, cwd)
+	return o.startConversationOn(ctx, agent, runtimeID, cwd, model)
 }
 
 // startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
 // RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
-func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID, cwd string) (*CreateResult, error) {
+func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID, cwd string, model runtime.ModelConfig) (*CreateResult, error) {
 	spec, ok := o.reg.Get(runtimeID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	rc, err := o.acquire(ctx, agent, spec, model)
 	if err != nil {
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil, err
@@ -271,13 +273,27 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
 	convID := uuid.NewString()
 	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
-		proj: runtime.NewProjection(spec, sess)}
+		proj: runtime.NewProjection(spec, sess), model: model}
+	// 会话级模型应用（Phase B）：
+	//   - opencode：模型经拨号 env（acquire 内注入），ApplyModel 返回 unsupported → 忽略；
+	//   - dsh：经 session/set_config_option 会话级即时生效（失败告警不阻断会话建立）；
+	//   - echo：无模型 → 忽略。
+	if model.Model != "" {
+		if err := as.proj.ApplyModel(ctx, model); err != nil {
+			// unsupported_*（opencode 模型走 env/provider 配置、echo 无模型）→ 忽略；
+			// 其余（dsh set_config_option 失败）→ 告警但不阻断会话建立。
+			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
+				slog.Default().Warn("apply model failed", "conversation", convID, "runtime", spec.ID, "err", err)
+			}
+		}
+	}
 	o.mu.Lock()
 	o.conversations[as.ID] = as
 	o.byProvider[sess.ID()] = as.ID
 	o.mu.Unlock()
 
-	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, RuntimeHint: spec.ID,
+	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, Provider: agent.Provider,
+		Model: model.Model, Effort: model.Effort, RuntimeHint: spec.ID,
 		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
@@ -475,7 +491,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult,
 	if err != nil {
 		return nil, err
 	}
-	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, opt.Cwd)
+	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, opt.Cwd, runtime.ModelConfig{})
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +565,7 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	rc, err := o.acquire(ctx, agent, spec, runtime.ModelConfig{})
 	if err != nil {
 		return nil, err
 	}
@@ -676,22 +692,39 @@ func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
 	}
 }
 
-// connKey 计算连接缓存键：runtime ID + 原生权限 env 签名（B5）。
-// 同 runtime 且原生权限配置相同的 agent 共享暖进程；配置不同则各自独立进程。
-func connKey(runtimeID string, nativeEnv []string) string {
-	if len(nativeEnv) == 0 {
+// connKey 计算连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
+// 同 runtime 且影响线程行为的 env 组合相同 → 共享暖进程；任一不同 → 各自独立进程。
+// 传入组约定：nativeEnv（原生权限开关）、keyEnv（provider 密钥）、modelEnv（仅进程级模型）。
+func connKey(runtimeID string, envs ...[]string) string {
+	var parts []string
+	for _, e := range envs {
+		if len(e) == 0 {
+			continue
+		}
+		parts = append(parts, strings.Join(e, "\x00"))
+	}
+	if len(parts) == 0 {
 		return runtimeID
 	}
-	return runtimeID + "\x00" + strings.Join(nativeEnv, "\x00")
+	return runtimeID + "\x00" + strings.Join(parts, "\x00")
 }
 
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
-func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec) (*runtimeConn, error) {
+func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec, model runtime.ModelConfig) (*runtimeConn, error) {
 	// B5 原生权限映射：把 agent 的 permission_policy 投影为底座原生权限开关
 	// （dsh: DSH_PERMISSION_MODE；opencode: OPENCODE_CONFIG_CONTENT 的 permission 表）。
 	// 先算 env 再定缓存键——权限开关是进程级，配置不同的 agent 不能复用同一子进程。
 	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	key := connKey(spec.ID, nativeEnv)
+	// provider 注入面（P2）：provider 档案密钥 env。并入缓存键，修复「同 runtime+权限、
+	// 不同 provider 共享子进程」的潜在串键（B5 修复）。
+	keyEnv := o.svc.providerEnvFor(agent.Provider)
+	// 模型 env：仅进程级模型（opencode）经启动 env 注入并并入缓存键——不同模型=不同进程；
+	// 会话级模型（dsh）走 session/set_config_option，不进 env/缓存键（可共享连接）。
+	var modelEnv []string
+	if spec.ModelConfigOptionID == "" && spec.ModelEnvKey != "" && model.Model != "" {
+		modelEnv = []string{spec.ModelEnvKey + "=" + model.Model}
+	}
+	key := connKey(spec.ID, nativeEnv, keyEnv, modelEnv)
 
 	o.mu.Lock()
 	rc := o.conns[key]
@@ -707,11 +740,9 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
 	var env []string
-	// provider 注入面（P2）：agent 引用 provider 档案时把其密钥注入子进程 env（见 Service.providerEnvFor）。
-	if agent.Provider != "" {
-		env = o.svc.providerEnvFor(agent.Provider)
-	}
+	env = append(env, keyEnv...)
 	env = append(env, nativeEnv...)
+	env = append(env, modelEnv...) // 模型 env 最后追加，覆盖底座 passthrough 的默认值
 	logger := o.logger.With("runtime", spec.ID, "cmd", spec.Launch.Command)
 
 	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
@@ -1317,7 +1348,7 @@ func (o *Orchestrator) StartIdleReaper(interval, idle time.Duration) {
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
 // 空闲 → 关连接（watchConn/dropConn 清 conversations 与状态；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
-	key := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy))
+	key := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), o.svc.providerEnvFor(agent.Provider))
 	o.mu.Lock()
 	rc := o.conns[key]
 	busy := 0

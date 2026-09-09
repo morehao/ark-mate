@@ -130,6 +130,9 @@ type ConversationRec struct {
 	ID          string
 	AgentID     string
 	Cwd         string // 会话工作目录（绝对路径；仅 sqlite 持久化）
+	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model       string // 会话级模型 id（空 = 底座默认）
+	Effort      string // effort/reasoning 档位（空 = 不设置）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
@@ -324,6 +327,8 @@ func toConversationResp(r *ConversationRec) handler.ConversationResp {
 		Title:     r.Title,
 		Pinned:    r.Pinned,
 		Archived:  r.Archived,
+		Provider:  r.Provider,
+		Model:     r.Model,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -365,12 +370,15 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch handl
 	if patch.Archived != nil {
 		r.Archived = *patch.Archived
 	}
+	if patch.Model != nil {
+		r.Model = *patch.Model
+	}
 	r.UpdatedAt = time.Now().UTC()
 	resp := toConversationResp(r)
 	s.mu.Unlock()
 
 	if s.st != nil {
-		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived}
+		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, Model: patch.Model}
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateConversationMeta(ctx2, id, meta); err != nil {
@@ -592,7 +600,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &ConversationRec{
-			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, RuntimeHint: sess.RuntimeHint,
+			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, Provider: sess.Provider,
+			Model: sess.Model, RuntimeHint: sess.RuntimeHint,
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, CreatedAt: sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
@@ -654,6 +663,8 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		ID:                rec.ID,
 		AgentID:           rec.AgentID,
 		Cwd:               rec.Cwd,
+		Provider:          rec.Provider,
+		Model:             rec.Model,
 		RuntimeHint:       rec.RuntimeHint,
 		ProviderSessionID: rec.ProviderSessionID,
 		Title:             rec.Title,
@@ -1053,7 +1064,10 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd)
+	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd, runtime.ModelConfig{
+		Model: req.Model,
+		Effort: req.Effort,
+	})
 	if err != nil {
 		return nil, s.restErr(err)
 	}

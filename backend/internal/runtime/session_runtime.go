@@ -58,14 +58,23 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 }
 
 // ApplyModel 切换模型。投影 Spec.ModelConfigOptionID 为空 = 模型走 env/provider 配置
-// （§5.5 模型面，无运行时切换原语），不支持；非空时亦需 ACP 侧支持后落地。
-func (r *sessionRuntime) ApplyModel(_ context.Context, _ ModelConfig) error {
+// （§5.5 模型面，无运行时切换原语），不支持；非空（dsh）则经 ACP session/set_config_option
+// 应用到本会话（会话级即时生效；opencode 模型为进程级 env，在此返回不支持，由拨号 env 承担）。
+func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) error {
 	if r.spec.ModelConfigOptionID == "" {
 		return unsupported("unsupported_model",
-			"runtime "+r.spec.ID+" 不支持 ApplyModel：模型走 env/provider 配置（ModelConfigOptionID 空）")
+			"runtime "+r.spec.ID+" 不支持 ApplyModel：模型经 env/provider 配置（ModelConfigOptionID 空）")
 	}
-	return unsupported("unsupported_model",
-		"runtime "+r.spec.ID+" 的模型切换原语未接入 ACP 会话")
+	if m.Model == "" {
+		return nil // 空模型 = 底座默认，不设置
+	}
+	if err := r.sess.SetConfigOption(ctx, r.spec.ModelConfigOptionID, m.Model); err != nil {
+		return err
+	}
+	if r.spec.EffortConfigOptionID != "" && m.Effort != "" {
+		return r.sess.SetConfigOption(ctx, r.spec.EffortConfigOptionID, m.Effort)
+	}
+	return nil
 }
 
 // Resume 热切换会话。会话恢复的 ACP 承载为 acl.Client.ResumeSession（session/resume 支持随

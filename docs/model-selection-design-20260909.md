@@ -332,6 +332,20 @@ func cachePath(typ ProviderType) (string, error)
 >     同一连接可承载不同模型的会话（每会话各调一次 `set_config_option`）；
 >   - **echo**：无模型，明确 unsupported。
 
+> **实现注（2026-09-09）**：本 Phase 已落地。与上文推导一致，但补三处实现细节：
+>   - `Spec` 增 `EffortConfigOptionID`（dsh="reasoning_effort"）与 `ModelEnvKey`（opencode="OPENCODE_MODEL"），
+>     用于区分「模型经 env 注入（进程级）」与「经 set_config_option（会话级）」；`ModelConfig` 增 `Effort`。
+>   - `connKey` 改为变长 env 组签名 `connKey(runtimeID, nativeEnv, keyEnv, modelEnv)`：**provider 密钥 env
+>     并入连接键**（B5 修复项——避免同 runtime+权限不同 provider 误共享子进程），模型 env 仅当
+>     `ModelConfigOptionID==""`（opencode 进程级）时并入。
+>   - `orchestrator.startConversationOn` 在 `NewSession` 后调 `proj.ApplyModel`：opencode/echo 返回
+>     `unsupported_*`（忽略，模型已由拨号 env 注入）；dsh `set_config_option` 失败仅告警、不阻断会话。
+>   - store 迁移 v4：`conversations` 增 `provider`/`model` 列；`ConversationMetaPatch` 增 `Model`。
+>   - 会话记录在 `ConversationRec` 增 `Provider/Model/Effort`，经 `POST /conversations`（`model`/`effort`）
+>     与 `PATCH /conversations/:id`（`model`）写入。
+>   - 未做（属 Phase C/D 前端）：UI 上的「opencode 模型创建时锁定、dsh 会话内可改」。后端已按
+>     §14.1 语义实现（opencode 模型经拨号 env，无会话内切换原语）。
+
 ### 12.1 acl：暴露 `session/set_config_option`
 
 `internal/acl/session.go` 新增（acp-go-sdk `ClientSideConnection.SetSessionConfigOption` 已存在，

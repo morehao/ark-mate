@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -177,10 +178,13 @@ func TestThreeProjectionConstructors(t *testing.T) {
 		id     string
 		build  func(*acl.Session) Runtime
 		ownCtx bool
+		// applyUnsupported：模型走 env/provider 配置（ModelConfigOptionID 空 → echo/opencode）
+		// 时 ApplyModel 返回 unsupported；会话级配置（deepseekharness set_config_option）则否。
+		applyUnsupported bool
 	}{
-		{"echo", func(s *acl.Session) Runtime { return NewEchoRuntime(s) }, true},
-		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true},
-		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true},
+		{"echo", func(s *acl.Session) Runtime { return NewEchoRuntime(s) }, true, true},
+		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true, true},
+		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true, false},
 	} {
 		rt := tc.build(sess)
 		if rt.ID() != tc.id {
@@ -192,9 +196,15 @@ func TestThreeProjectionConstructors(t *testing.T) {
 		if rt.ProviderSessionID() != sess.ID() {
 			t.Fatalf("%s 投影 ProviderSessionID 不符", tc.id)
 		}
-		// 模型切换需 env/provider 配置路径（ModelConfigOptionID 空）→ 不支持错误。
-		if err := rt.ApplyModel(ctx, ModelConfig{Model: "x"}); err == nil {
-			t.Fatalf("%s ApplyModel 应返回不支持错误", tc.id)
+		// 模型切换行为：echo/opencode 需 env/provider 配置路径（ModelConfigOptionID 空）
+		// → unsupported_* 错误；deepseekharness 走 set_config_option（若无该能力则非 unsupported 错误）。
+		err := rt.ApplyModel(ctx, ModelConfig{Model: "x"})
+		unsupported := false
+		if ae, ok := acl.As(err); ok {
+			unsupported = strings.HasPrefix(ae.Code, "unsupported_")
+		}
+		if unsupported != tc.applyUnsupported {
+			t.Fatalf("%s ApplyModel unsupported 期望=%v 实际=%v (err=%v)", tc.id, tc.applyUnsupported, unsupported, err)
 		}
 	}
 }

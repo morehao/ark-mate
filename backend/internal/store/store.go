@@ -84,6 +84,8 @@ type Conversation struct {
 	ID          string
 	AgentID     string
 	Cwd         string
+	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model       string // 会话级模型 id（空 = 底座默认）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份，用户不可见）
 	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid/echo id）。P3 双 id：
 	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。

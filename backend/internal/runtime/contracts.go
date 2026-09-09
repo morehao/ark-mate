@@ -49,6 +49,11 @@ type Spec struct {
 	// ModelConfigOptionID 模型选择的 config option（如 "model"；空 = 走 env/provider 配置，
 	// 对应 §5.5：opencode 走 OPENCODE_MODEL env、dsh 走 provider 配置）。
 	ModelConfigOptionID string
+	// EffortConfigOptionID 思考强度的 config option（如 "reasoning_effort"；空 = 无）。
+	EffortConfigOptionID string
+	// ModelEnvKey 模型经启动 env 注入的键（如 "OPENCODE_MODEL"；空 = 模型不经 env，走会话配置）。
+	// 仅当 ModelConfigOptionID 为空（模型进程级）时，该 env 并入连接缓存键。
+	ModelEnvKey string
 	// SetupSteps 首启引导步骤（§6.1 预留；本轮不消费）。
 	SetupSteps []string
 	Notes      string // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）

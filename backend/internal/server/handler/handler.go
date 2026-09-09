@@ -454,6 +454,8 @@ type ConversationResp struct {
 	Title     string `json:"title"`
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
+	Provider  string `json:"provider,omitempty"` // provider 档案 id（会话级模型选择）
+	Model     string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -570,6 +572,7 @@ type ConversationPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
+	Model    *string `json:"model"` // 会话级模型（opencode 仅创建时可选；dsh 会话内即时）
 }
 
 // ConversationCreateReq 新建会话请求体。
@@ -577,6 +580,8 @@ type ConversationCreateReq struct {
 	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
 	Cwd     string `json:"cwd,omitempty"`
+	Model   string `json:"model,omitempty"`  // 会话级模型 id（空 = 底座默认）
+	Effort  string `json:"effort,omitempty"` // effort/reasoning 档位（仅 dsh；空 = 默认）
 }
 
 // ConversationCreateResp 新建会话响应（P0 起不含 runtime）。

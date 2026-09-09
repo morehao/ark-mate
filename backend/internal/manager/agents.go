@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
@@ -256,7 +257,7 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
 	}
-	if _, err := s.orch.acquire(ctx, agent, spec); err != nil {
+	if _, err := s.orch.acquire(ctx, agent, spec, runtime.ModelConfig{}); err != nil {
 		s.setAgentState(id, AgentStateStopped)
 		// A3：启动失败时记录诊断（含握手/起进程阶段的 stderr 尾巴），供 /diagnostics 外露。
 		s.recordAgentError(id, "", acl.Classify(err), acl.Classify(err).StderrTail)

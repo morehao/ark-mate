@@ -51,6 +51,22 @@ func (s *Session) Close(ctx context.Context) error {
 	return nil
 }
 
+// SetConfigOption 对本会话设置一个会话配置选项（ACP session/set_config_option）。
+// configID 如 "model" / "reasoning_effort"；value 为 id（如模型 id / effort 档位）。
+// agent 不支持该能力时返回 unsupported。
+func (s *Session) SetConfigOption(ctx context.Context, configID, value string) error {
+	if _, err := s.client.conn.SetSessionConfigOption(ctx, acpsdk.SetSessionConfigOptionRequest{
+		ValueId: &acpsdk.SetSessionConfigOptionValueId{
+			SessionId: s.id,
+			ConfigId:  acpsdk.SessionConfigId(configID),
+			Value:     acpsdk.SessionConfigValueId(value),
+		},
+	}); err != nil {
+		return Classify(err)
+	}
+	return nil
+}
+
 // SessionOptions 用于 new/load/resume 的会话参数。
 // McpServers 为平台选出的 MCP 注入子集（nil/空 = 不下发；P2 由能力数据面提供）。
 type SessionOptions struct {
