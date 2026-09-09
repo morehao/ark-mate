@@ -1654,3 +1654,37 @@ MCP 行为）。
 ③ 无断线重连（一次会话内单流，断了即失败，由上层重新建连）；
 ④ `endpoint` 事件到达前不接受请求（部分实现先 POST 后发 endpoint 的非常规行为不支持）；
 ⑤ 与 B1/B2 相同：每次操作独立会话，无连接池。
+
+#### 19.19 切片 B4：MCP 自动探测（完成）
+
+**动机**：P2 起探测只有显式入口（`POST /mcps/:id/probe` 或前端按钮），因此新装/新配的 MCP server
+在首次点击前，`/tools` 与 agent 能力视图都是空的——目录「看起来没生效」。B4 提供启动时自动探测。
+
+**设计**：
+1. **配置项**：`mcp_auto_probe`（`FORGE_MCP_AUTO_PROBE` 覆盖），取值 `off`（默认）| `startup`；
+   非法值 → 启动 exit 2 并列出合法取值（复用 A4 的配置校验路径）。`forge config` 展示取值与来源。
+2. **默认 off 是有意的**：stdio 探测会**拉起用户配置的子进程**（http/sse 会向外发请求）。
+   自动执行属于「改变用户机器行为」，必须显式开启；不开时与历史行为完全一致。
+3. **实现**：`manager.Service.AutoProbeMcpServers(ctx)` 串行遍历已注册 server（避免同时拉起大量
+   子进程），复用 `ProbeMcpServer`——结果与手动探测**逐字段一致**（写 Tool 目录 + 状态）。
+   单点失败只记 `last_probe_error` 与日志，不中断其余；ctx 取消立即返回。
+4. **不阻塞启动**：`serve` 在 HTTP 起来后 `go svc.AutoProbeMcpServers(ctx)`；日志记录
+   开始/单个完成/失败/汇总（ok/failed）。优雅退出时 ctx 一并取消。
+5. 前端与 REST 无需改动：探测结果直接体现在 `/mcps`、`/tools`、`/agents/:id/capabilities`。
+
+**证据**：
+- 单测：`internal/infra/config`（默认 off / startup / 大小写不敏感 / 非法值报错含合法取值）；
+  `internal/manager`（两个 httptest server 一个不可达 → Tool 目录写入成功者、失败者记状态、
+  返回 nil（尽力而为）、ctx 取消返回错误）。
+- 真进程：默认 off → `/mcps` 全零、`/tools` 空（无回归）；`startup` → 5s 内 `/mcps` 出现
+  `last_probe_at`（pyecho `tool_count=3`；不可达 server 记连接失败）、`/tools=[boom,echo,slow]`；
+  日志 `开始 servers=2` → `完成 tools=3` / `失败 server=down` → `结束 ok=1 failed=1`。
+  **不阻塞**：慢 server（initialize 睡 4s）下 t+2s `GET /health` 27ms 返回 200、快 server 工具已入目录，
+  t+7s 慢 server 也完成（`slow_tool`）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；`make all` 通过（前端无改动）。
+
+**遗留/降级**：① 只在启动探测一次，**无定时刷新/文件变更监听**（MCP server 的工具集变化需重启或
+手动探测）；② 串行探测：server 很多时启动后台耗时线性增长（不阻塞服务，但目录收敛慢）；
+③ **同名工具冲突**（预存在的能力注册表语义）：Tool 目录以 name 为键，两个 server 暴露同名工具时
+后探测者覆盖前者，前者的 `tool_count` 会归零——需要工具命名空间的话要改目录模型（未做）；
+④ 无「按 server 单独开关自动探测」的粒度；⑤ 探测失败不会重试（下次启动或手动触发）。

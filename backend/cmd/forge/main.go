@@ -76,6 +76,7 @@ func configCmd(args []string) {
 				"proc_registry":          cfg.ProcRegistryPath,
 				"reap_grace":             cfg.ReapGrace.String(),
 				"token":                  maskToken(cfg.Token),
+				"mcp_auto_probe":         cfg.McpAutoProbe,
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
 			"sources":         sources,
@@ -111,6 +112,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))
 	if len(cfg.RemoteRuntimes) == 0 {
 		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
 	}
@@ -374,6 +376,15 @@ func serve(args []string) {
 		defer stopCancel()
 		_ = srv.Stop(stopCtx)
 	}()
+
+	// MCP 自动探测（B4；FORGE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
+	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
+	if cfg.McpAutoProbe == config.McpAutoProbeStartup {
+		go func() {
+			slog.Info("serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
+			_ = svc.AutoProbeMcpServers(ctx)
+		}()
+	}
 
 	if err := srv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)

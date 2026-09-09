@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -670,5 +671,74 @@ func TestMcpResourcesPrompts(t *testing.T) {
 	}
 	if _, err := svc.ListMcpPrompts(context.Background(), "s"); restCode(err) != 50201 {
 		t.Fatalf("sse 不可达应 50201，got %v", err)
+	}
+}
+
+// TestAutoProbeMcpServers B4：后台自动探测全部已注册 server——成功者写 Tool 目录，
+// 失败者记状态且不中断其余；ctx 取消即返回。
+func TestAutoProbeMcpServers(t *testing.T) {
+	okServer := func(name string, tools []map[string]any) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var msg struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&msg)
+			if msg.Method == "notifications/initialized" {
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			var result map[string]any
+			switch msg.Method {
+			case "initialize":
+				result = map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": name}}
+			case "tools/list":
+				result = map[string]any{"tools": tools}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	srvA := okServer("a", []map[string]any{{"name": "tool_a"}})
+	srvB := okServer("b", []map[string]any{{"name": "tool_b"}})
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	for _, in := range []struct{ id, url string }{{"a", srvA.URL}, {"b", srvB.URL}, {"down", "http://127.0.0.1:1"}} {
+		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: in.id, Name: in.id, Transport: capability.TransportHTTP, URL: in.url}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := svc.AutoProbeMcpServers(context.Background()); err != nil {
+		t.Fatalf("AutoProbeMcpServers 应为尽力而为（不返回单个失败）: %v", err)
+	}
+	tools := svc.caps.ListTools()
+	names := make([]string, 0, len(tools))
+	for _, tl := range tools {
+		names = append(names, tl.Name)
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "tool_a,tool_b" {
+		t.Fatalf("Tool 目录应含两个自动探测结果: %v", names)
+	}
+	mcps, _ := svc.ListMcpServers()
+	byID := map[string]handler.McpServerResp{}
+	for _, m := range mcps {
+		byID[m.ID] = m
+	}
+	if byID["a"].LastProbeAt == "" || byID["b"].LastProbeAt == "" {
+		t.Fatalf("成功者应有 last_probe_at: %+v", byID)
+	}
+	if byID["down"].LastProbeErr == "" {
+		t.Fatalf("失败者应记 last_probe_error: %+v", byID["down"])
+	}
+
+	// ctx 取消：立即返回 ctx.Err()。
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := svc.AutoProbeMcpServers(ctx); err == nil {
+		t.Fatal("ctx 已取消应返回错误")
 	}
 }

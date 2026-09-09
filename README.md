@@ -246,7 +246,7 @@ backend/                单 Go module（github.com/morehao/ark-forge）
   internal/runtime/     运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
   internal/manager      Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
   internal/capability   Skill/MCP/Tool 能力数据面（定义装载 + skill 物化）
-  internal/mcp          自研最小 MCP 客户端（stdio / http / streamable_http；tools/list 探测）
+  internal/mcp          自研最小 MCP 客户端（stdio / http / streamable_http / sse；探测 + 工具调用 + 资源/提示词）
   internal/store        SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
   internal/server/      REST handler / WS / eventbus / router
   internal/infra/config 进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）

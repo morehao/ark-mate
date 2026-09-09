@@ -89,7 +89,21 @@ type Config struct {
 	// Token 单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
 	// 非空时除 /health 外的所有 /v1/forge 路由都要求 Bearer token（WS 可用 ?token=）。
 	Token string
+	// McpAutoProbe MCP 自动探测模式（B4；FORGE_MCP_AUTO_PROBE 覆盖，默认 off）：
+	//   off      = 不自动探测（历史行为：只由 POST /mcps/:id/probe 显式触发）；
+	//   startup  = serve 启动后后台逐个探测全部已注册 MCP server（写 Tool 目录 + 探测状态）。
+	// 默认 off 是有意的：stdio server 探测会**拉起用户配置的子进程**，不宜默认执行。
+	McpAutoProbe string
 }
+
+// MCP 自动探测模式取值。
+const (
+	McpAutoProbeOff     = "off"
+	McpAutoProbeStartup = "startup"
+)
+
+// ValidMcpAutoProbeModes 合法取值（错误提示用）。
+var ValidMcpAutoProbeModes = []string{McpAutoProbeOff, McpAutoProbeStartup}
 
 // RemoteRuntime 是一条「远程 ACP 端点」runtime 声明（配置目录 runtimes.json 的数组元素）。
 type RemoteRuntime struct {
@@ -125,6 +139,7 @@ func Default() Config {
 		ReapInterval:       DefaultReapInterval,
 		ReapGrace:          DefaultReapGrace,
 		HandoffMaxChars:    DefaultHandoffMaxChars,
+		McpAutoProbe:       McpAutoProbeOff,
 	}
 }
 
@@ -146,6 +161,7 @@ var knownKeys = map[string]string{
 	"proc_registry":          "FORGE_PROC_REGISTRY",
 	"reap_grace":             "FORGE_REAP_GRACE",
 	"token":                  "FORGE_TOKEN",
+	"mcp_auto_probe":         "FORGE_MCP_AUTO_PROBE",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -389,6 +405,18 @@ func materialize(r *resolver) (Config, error) {
 	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
+	}
+	if v, ok := r.get("mcp_auto_probe"); ok {
+		mode := strings.ToLower(strings.TrimSpace(v))
+		switch mode {
+		case McpAutoProbeStartup:
+			c.McpAutoProbe = McpAutoProbeStartup
+		case McpAutoProbeOff, "":
+			c.McpAutoProbe = McpAutoProbeOff
+		default:
+			return bad("mcp_auto_probe", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidMcpAutoProbeModes, "|"), v))
+		}
 	}
 
 	// 依赖家目录的派生默认值（未被任何来源显式设置时）。

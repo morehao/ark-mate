@@ -403,6 +403,40 @@ func (s *Service) mcpLiveErr(err error, fallbackCode string) error {
 	return s.restErr(acl.NewError(mcpCallClass(err), code, fmt.Sprintf("[%s] %s", code, err.Error()), nil))
 }
 
+// AutoProbeMcpServers 后台探测全部已注册 MCP server（B4：`mcp_auto_probe=startup`）。
+//
+// 语义：
+//   - **尽力而为**：逐个探测（串行，避免同时拉起大量子进程），单个失败只记状态与日志，
+//     不中断其余；返回值仅表示「遍历是否被 ctx 打断」；
+//   - 结果与 `POST /mcps/:id/probe` 完全一致（写 Tool 目录 + last_probe_at/error）；
+//   - 探测预算沿用 `mcpProbeBudget()`（默认 15s/server）。
+func (s *Service) AutoProbeMcpServers(ctx context.Context) error {
+	servers := s.caps.ListMcpServers()
+	if len(servers) == 0 {
+		slog.Default().Info("mcp 自动探测：无已注册 server，跳过")
+		return nil
+	}
+	slog.Default().Info("mcp 自动探测开始", "servers", len(servers))
+	var okCount, failCount int
+	for _, sv := range servers {
+		if err := ctx.Err(); err != nil {
+			slog.Default().Warn("mcp 自动探测被中断", "done", okCount+failCount, "total", len(servers), "err", err)
+			return err
+		}
+		res, err := s.ProbeMcpServer(ctx, sv.ID)
+		if err != nil {
+			failCount++
+			slog.Default().Warn("mcp 自动探测失败", "server", sv.ID, "err", err)
+			continue
+		}
+		okCount++
+		slog.Default().Info("mcp 自动探测完成", "server", sv.ID,
+			"tools", res.ToolCount, "added", res.Added, "removed", res.Removed)
+	}
+	slog.Default().Info("mcp 自动探测结束", "ok", okCount, "failed", failCount)
+	return nil
+}
+
 // ListTools 返回 Tool 目录（按 name 排序）。
 func (s *Service) ListTools() ([]handler.ToolResp, error) {
 	items := s.caps.ListTools()

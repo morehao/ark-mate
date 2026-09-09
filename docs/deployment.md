@@ -33,9 +33,9 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
   只监听本机（实测 `lsof -nP -iTCP -sTCP:LISTEN` 显示 `127.0.0.1:10001`，非 `*:10001`）。控制面
   **无鉴权**，因此：
   - 单机自用：保持默认即可，无需额外参数；
-  - 需跨机访问：显式 `--addr 0.0.0.0:10001`（或 `FORGE_ADDR=0.0.0.0:10001`）并置于反向代理/内网
-    之后，用防火墙或安全组限制来源；**不要**直接暴露到公网（M3 可选②「单操作员 token」尚未实现，
-    见路线图）。容器场景需显式 `FORGE_ADDR=0.0.0.0:10001`（见 §4）。
+  - 需跨机访问：**先设 `FORGE_TOKEN`（A6 单操作员令牌，见 §2.3.2）**，再显式
+    `--addr 0.0.0.0:10001`（或 `FORGE_ADDR=0.0.0.0:10001`）并置于反向代理/内网之后，用防火墙或
+    安全组限制来源；**不要**无令牌直接暴露到公网。容器场景需显式 `FORGE_ADDR=0.0.0.0:10001`（见 §4）。
 - 生产建议 `GIN_MODE=release`（否则每次启动打印 debug 模式告警）。
 - 会话 wire transcript（`~/.forge/transcripts/*.jsonl`）与 SQLite 库含**完整对话原文**，按敏感数据
   对待（文件权限、备份加密）。
@@ -364,3 +364,11 @@ sudo systemctl restart ark-forge
   → `text='sse: {"msg": "你好 SSE"}'`（连续 3 次调用均成功）；未知工具 → `50201
   [mcp_tools_call_failed] JSON-RPC 错误 code=-32602`；端点不可达 → `50201
   [mcp_sse_connect_failed] sse GET 连接失败：connection refused`。
+
+- MCP 自动探测（B4）：默认 `off` → 启动后 `/mcps` 全为 `tool_count=0`、`/tools` 为空（无行为变化）；
+  `FORGE_MCP_AUTO_PROBE=startup` → 启动 5s 内 `/mcps` 出现 `last_probe_at`（pyecho `tool_count=3`、
+  down 记 `last_probe_error` 连接失败）、`/tools` 自动含 `boom/echo/slow`，无需任何手动 POST；
+  日志 `mcp 自动探测开始 servers=2` → 完成/失败各一行 → `mcp 自动探测结束 ok=1 failed=1`。
+  **不阻塞启动实测**：慢 server（initialize 睡 4s）→ t+2s `GET /health` 立即 200（27ms）、快 server
+  的工具已入目录，t+7s 慢 server 也完成（`slow_tool`）。`FORGE_MCP_AUTO_PROBE=bogus` → 启动即
+  exit 2 并列出合法取值。

@@ -288,3 +288,44 @@ func TestRemoteRuntimesJSONErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestMcpAutoProbeMode B4：mcp_auto_probe 取值解析（off 默认 / startup / 大小写 / 非法值报错）。
+func TestMcpAutoProbeMode(t *testing.T) {
+	hermetic(t)
+	unset(t, "FORGE_MCP_AUTO_PROBE")
+
+	c, _, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("默认加载失败: %v", err)
+	}
+	if c.McpAutoProbe != McpAutoProbeOff {
+		t.Fatalf("默认应为 off，got %q", c.McpAutoProbe)
+	}
+
+	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "startup")
+	c, srcs, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("startup 加载失败: %v", err)
+	}
+	if c.McpAutoProbe != McpAutoProbeStartup {
+		t.Fatalf("应为 startup，got %q", c.McpAutoProbe)
+	}
+	if srcs["mcp_auto_probe"] == "" {
+		t.Fatal("应记录取值来源")
+	}
+
+	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "STARTUP")
+	if c, _, err := LoadResolved(""); err != nil || c.McpAutoProbe != McpAutoProbeStartup {
+		t.Fatalf("大小写不敏感失败: %v %q", err, c.McpAutoProbe)
+	}
+
+	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "off")
+	if c, _, err := LoadResolved(""); err != nil || c.McpAutoProbe != McpAutoProbeOff {
+		t.Fatalf("off 解析失败: %v %q", err, c.McpAutoProbe)
+	}
+
+	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "bogus")
+	if _, _, err := LoadResolved(""); err == nil || !strings.Contains(err.Error(), "off|startup") {
+		t.Fatalf("非法值应报错并列出合法取值，got %v", err)
+	}
+}
