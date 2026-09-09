@@ -444,6 +444,7 @@ func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]han
 }
 
 // ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel；accept 可带 content）。
+// C3 scope 归属：只有登记该提问的会话能决策；跨会话调用按「不存在」处理（40401，不泄露他会话挂起项）。
 func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error {
 	if !s.hasConversation(id) {
 		return s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
@@ -451,7 +452,7 @@ func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, act
 	if s.orch == nil {
 		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	ok, err := s.orch.ResolveElicitation(elicitationID, action, content)
+	ok, err := s.orch.ResolveElicitation(id, elicitationID, action, content)
 	if err != nil {
 		return s.restErr(err)
 	}
@@ -516,11 +517,13 @@ func toPermissionResp(p PermissionItem) handler.PermissionResp {
 // toElicitationResp 把 manager.ElicitationItem 折叠为 handler.ElicitationResp。
 func toElicitationResp(p ElicitationItem) handler.ElicitationResp {
 	resp := handler.ElicitationResp{
-		ElicitationID: p.ID,
-		SessionID:     p.SessionID,
-		Mode:          p.Mode,
-		Message:       p.Message,
-		TimeoutAt:     p.TimeoutAt.UTC().Format(time.RFC3339),
+		ElicitationID:  p.ID,
+		SessionID:      p.SessionID,
+		ConversationID: p.ConversationID,
+		ScopeSource:    p.ScopeSource,
+		Mode:           p.Mode,
+		Message:        p.Message,
+		TimeoutAt:      p.TimeoutAt.UTC().Format(time.RFC3339),
 	}
 	if p.Mode == "form" {
 		resp.Schema = p.Schema

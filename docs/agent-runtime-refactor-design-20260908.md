@@ -1811,3 +1811,36 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 `AppendEvent` 失败的事件不会出现在 REST 历史里（该路径本就会告警，且 bus 侧仍有）；② 前端「加载更早」按
 50 条/页，无虚拟滚动（长会话靠既有尾部窗口折叠）；③ 空视图点击「加载更早」等价于取末尾一页（冷挂载兜底），
 不做「首次进入自动加载最早页」；④ 未做 `before` + `after` 组合区间查询。
+
+#### 19.23 切片 C3：elicitation scope 归属（完成）
+
+**动机**：结构化提问的「归属会话」此前只用于**发布**事件（`session.elicitation_request` 的 agg），
+**决策路径完全没有 scope 校验**——`POST /conversations/:id/elicitation` 只按 `elicitation_id` 投递，
+传任意会话 id 都能替他会话作答（陈旧标签页、脚本串号、越权调用都命中）。且归属来源（wire 还是推断）
+在对外载荷里不可见，排障只能翻日志。
+
+**实现**：
+1. `acl.ElicitationRequest` 增 `ScopeSource`（`wire` | `inferred_inflight`）与对应常量；acl 层仍不猜 wire。
+2. `manager.ElicitationManager`：`pendingElicitation` 记 `scopeSource`；`resolve` 改为
+   `resolve(conversationID, id, d) (found, mismatch)`——**只有归属会话能决策**，跨会话既不投递也不删除
+   挂起项；`ResolveAccept/Decline/Cancel` 签名带上 conversationID；新增 `Owner(id)` 供诊断/测试。
+3. `Orchestrator.ResolveElicitation(conversationID, elicitationID, action, content)`：mismatch 时返回与
+   「未知 id」完全相同的错误（`elicitation_not_found` → 40001，同文案），**不泄露他会话挂起项的存在**。
+4. 对外载荷带 scope：`ElicitationItem`/`ElicitationResp` 增 `conversation_id`（与 `session_id` 同值，
+   语义显式化）与 `scope_source`；WS `session.elicitation_request` 载荷同步补 `conversation_id`/`scope_source`；
+   `session.elicitation_resolved` 增 `conversation_id`。前端 `@ark/types` 同步字段。
+5. 推断注入点标注来源：`reqElic` 成功推断后置 `ScopeSource=inferred_inflight`（SDK 补上 scope 后改置 `wire`）。
+
+**证据**：
+- 单测：`manager.TestElicitationScopeMismatch`（跨会话不投递/不删项 + Owner 来源）、
+  `manager.TestElicitationScopeSourceWire`、`manager.TestServiceResolveElicitationScope`
+  （跨会话 40001 同文案 + 挂起项仍在 + 归属会话成功 + 列表带 conversation_id/scope_source）；
+  `go vet` + `go test -count=1 ./...` 全绿。
+- 真进程：挂起项载荷、跨会话拒绝（含服务端 WARN）、归属会话成功、WS 载荷 scope 字段（见 deployment.md）。
+- 前端：`tsc -b --noEmit` 通过（类型同步）。
+
+**遗留/降级**：① 归属仍是**推断**（SDK v0.13.5 丢弃顶层 sessionId）——同连接多会话并发在途时无法唯一
+归属，按取消处理（WARN 留痕，不猜测）；根治需 SDK 补 scope 或改连接级串行（§17 E2 开放项）；
+② 跨会话决策与「未知 id」同码同文案（40001），排障细节只在服务端 WARN 日志；
+③ `permission` 通道不受影响（其 scope 来自 wire 的 `sessionId`，本就权威）；
+④ 未做「按 elicitation_id 反查归属会话」的对外查询接口（`Owner` 仅进程内诊断用）。

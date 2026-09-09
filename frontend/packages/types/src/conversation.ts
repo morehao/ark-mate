@@ -165,6 +165,10 @@ export type ElicitationMode = 'form' | 'url'
 export interface ElicitationResp {
   elicitation_id: string
   session_id: string
+  /** 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起，跨会话按「不存在」处理）。 */
+  conversation_id: string
+  /** 归属来源：wire（wire 提供）| inferred_inflight（宿主按连接上唯一在途 turn 推断）。 */
+  scope_source: string
   mode: ElicitationMode
   message: string
   schema?: ElicitationFormSchema // form 模式

@@ -19,9 +19,10 @@ import (
 // 会话归属（过渡实现，Rev2 决策，见 docs/agent-interactions-acp-v1-design-20260907.md）：
 // SDK v0.13.5 的 UnstableCreateElicitationForm/Url 未建模规范 scope 字段，顶层 sessionId/
 // requestId 在 SDK 解码时被丢弃，本层读不到。因此 ElicitationRequest.SessionID **不由本层
-// 填充**，由宿主（manager/orchestrator 按「连接上唯一在途 turn」推断）在调用钩子前注入；
+// 填充**，由宿主（manager/orchestrator 按「连接上唯一在途 turn」推断）在调用钩子前注入，
+// 并把注入方式写进 ScopeSource（C3：归属来源显式化，REST/WS 载荷可观测）；
 // acl 层保持零假设（不复用 _meta，也不猜 wire）。真实 runtime 首现 elicitation 时再切标准
-// scope 解析（SDK 补丁预案见 §6 文档），宿主仅需改注入点为 scope 读取。
+// scope 解析（SDK 补丁预案见 §6 文档），宿主仅需改注入点为 scope 读取并置 ScopeWire。
 
 // ElicitationSchema 是表单字段的 JSON Schema 表示（属性为原始 schema 对象，
 // 本层不做逐字段校验，原样透传给 UI 渲染控件）。
@@ -32,15 +33,25 @@ type ElicitationSchema struct {
 	Required    []string
 }
 
+// ElicitationRequest.ScopeSource 取值（C3 归属来源）。
+const (
+	// ScopeWire：scope 由 wire（SDK 顶层 sessionId/_meta）提供——SDK 支持后启用。
+	ScopeWire = "wire"
+	// ScopeInferred：scope 由宿主按「连接上唯一在途 turn」推断（SDK 未建模时的过渡实现）。
+	ScopeInferred = "inferred_inflight"
+)
+
 // ElicitationRequest 是 agent 发起的一次结构化提问请求（宿主需渲染并征询用户）。
 type ElicitationRequest struct {
 	// SessionID 会话归属：过渡期由宿主（orchestrator）按连接上下文注入，acl 层恒为空。
 	SessionID string
-	Mode      string // "form" | "url"
-	Message   string
-	Schema    *ElicitationSchema // Mode=form
-	URL       string             // Mode=url
-	URLID     string             // Mode=url：ACP 侧 elicitationId（透传）
+	// ScopeSource 归属来源（wire | inferred_inflight）：由注入方填写，供 REST/WS 载荷与排障展示。
+	ScopeSource string
+	Mode        string // "form" | "url"
+	Message     string
+	Schema      *ElicitationSchema // Mode=form
+	URL         string             // Mode=url
+	URLID       string             // Mode=url：ACP 侧 elicitationId（透传）
 }
 
 // ElicitationOutcome 是宿主对一次结构化提问的决策。

@@ -734,6 +734,10 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			return acl.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID = sid
+		// C3：SDK v0.13.5 未建模 elicitation scope → 归属只能推断，来源显式标注（REST/WS 可观测）。
+		if req.ScopeSource == "" {
+			req.ScopeSource = acl.ScopeInferred
+		}
 		return o.requestElicitation(ctx, req)
 	}
 	// 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
@@ -1099,11 +1103,13 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it ElicitationItem) {
 		payload := map[string]any{
-			"session_id":     sid,
-			"elicitation_id": it.ID,
-			"mode":           it.Mode,
-			"message":        it.Message,
-			"timeout_at":     it.TimeoutAt.UTC().Format(time.RFC3339),
+			"session_id":      sid,
+			"conversation_id": sid,
+			"scope_source":    it.ScopeSource,
+			"elicitation_id":  it.ID,
+			"mode":            it.Mode,
+			"message":         it.Message,
+			"timeout_at":      it.TimeoutAt.UTC().Format(time.RFC3339),
 		}
 		if it.Mode == "form" {
 			payload["schema"] = it.Schema
@@ -1121,35 +1127,43 @@ func (o *Orchestrator) PendingElicitations(conversationID string) []ElicitationI
 	out := make([]ElicitationItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, ElicitationItem{
-			ID:        p.id,
-			SessionID: p.conversationID,
-			Mode:      p.mode,
-			Message:   p.message,
-			Schema:    p.schema,
-			URL:       p.url,
-			TimeoutAt: p.timeout,
+			ID:             p.id,
+			SessionID:      p.conversationID,
+			ConversationID: p.conversationID,
+			ScopeSource:    p.scopeSource,
+			Mode:           p.mode,
+			Message:        p.message,
+			Schema:         p.schema,
+			URL:            p.url,
+			TimeoutAt:      p.timeout,
 		})
 	}
 	return out
 }
 
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
-func (o *Orchestrator) ResolveElicitation(elicitationID, action string, content map[string]any) (bool, error) {
+// conversationID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
+func (o *Orchestrator) ResolveElicitation(conversationID, elicitationID, action string, content map[string]any) (bool, error) {
 	if elicitationID == "" {
 		return false, acl.NewError(acl.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
 	}
-	var ok bool
+	var found, mismatch bool
 	switch action {
 	case "accept":
-		ok = o.elic.ResolveAccept(elicitationID, content)
+		found, mismatch = o.elic.ResolveAccept(conversationID, elicitationID, content)
 	case "decline":
-		ok = o.elic.ResolveDecline(elicitationID)
+		found, mismatch = o.elic.ResolveDecline(conversationID, elicitationID)
 	case "cancel":
-		ok = o.elic.ResolveCancel(elicitationID)
+		found, mismatch = o.elic.ResolveCancel(conversationID, elicitationID)
 	default:
 		return false, acl.NewError(acl.ClassRequest, "elicitation_action", "action 需为 accept/decline/cancel 之一", nil)
 	}
-	return ok, nil
+	if mismatch {
+		// 归属不符：对外与「不存在」同表现（不泄露其它会话的挂起项），细节已在 manager 侧告警。
+		return false, acl.NewError(acl.ClassRequest, "elicitation_not_found",
+			fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil)
+	}
+	return found, nil
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。

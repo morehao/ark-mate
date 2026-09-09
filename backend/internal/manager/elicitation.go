@@ -21,7 +21,8 @@ const (
 // pendingElicitation 是一条挂起中的结构化提问：持有一个「待用户决策」的通道与超时。
 type pendingElicitation struct {
 	id             string // 稳定 id（决策回传锚点）
-	conversationID string
+	conversationID string // 归属会话（scope；C3：决策必须由该会话发起，见 resolve）
+	scopeSource    string // 归属来源：wire | inferred_inflight（SDK 未建模时的推断）
 	mode           string // form | url
 	message        string
 	schema         map[string]any // form 模式的 JSON Schema 对象（对外载荷）
@@ -137,9 +138,14 @@ func (m *ElicitationManager) pendingForSession(conversationID string) []*pending
 // 返回最终决策；超时/上下文取消时自动按取消处理。
 func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID string, req acl.ElicitationRequest, publish func(ElicitationItem)) acl.ElicitationOutcome {
 	id := genElicitationID()
+	scopeSource := req.ScopeSource
+	if scopeSource == "" {
+		scopeSource = acl.ScopeInferred
+	}
 	p := &pendingElicitation{
 		id:             id,
 		conversationID: conversationID,
+		scopeSource:    scopeSource,
 		mode:           req.Mode,
 		message:        req.Message,
 		schema:         schemaMap(req.Schema),
@@ -150,17 +156,20 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	m.mu.Lock()
 	m.pending[id] = p
 	m.mu.Unlock()
-	m.logger.Info("elicitation: request registered", "conversation", conversationID, "id", id, "mode", req.Mode)
+	m.logger.Info("elicitation: request registered", "conversation", conversationID, "id", id,
+		"mode", req.Mode, "scope_source", scopeSource)
 
 	if publish != nil {
 		publish(ElicitationItem{
-			ID:        id,
-			SessionID: p.conversationID,
-			Mode:      p.mode,
-			Message:   p.message,
-			Schema:    p.schema,
-			URL:       p.url,
-			TimeoutAt: p.timeout,
+			ID:             id,
+			SessionID:      p.conversationID,
+			ConversationID: p.conversationID,
+			ScopeSource:    p.scopeSource,
+			Mode:           p.mode,
+			Message:        p.message,
+			Schema:         p.schema,
+			URL:            p.url,
+			TimeoutAt:      p.timeout,
 		})
 	}
 
@@ -191,43 +200,65 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	return d
 }
 
-// resolve 按 id 投递一次决策；返回是否存在该挂起请求。
-func (m *ElicitationManager) resolve(id string, d acl.ElicitationOutcome) bool {
+// resolve 按 id 投递一次决策，并校验**归属会话**（C3 scope 归属）：
+// 只有登记该提问的会话才能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，
+// 既不投递也不删除挂起项，调用方拿到 mismatch=true（对外统一表现为「不存在」）。
+func (m *ElicitationManager) resolve(conversationID, id string, d acl.ElicitationOutcome) (found, mismatch bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.pending[id]
 	if !ok {
-		return false
+		return false, false
+	}
+	if conversationID != "" && p.conversationID != conversationID {
+		m.logger.Warn("elicitation: 决策会话与归属会话不符，拒绝（scope mismatch）",
+			"id", id, "owner", p.conversationID, "caller", conversationID)
+		return true, true
 	}
 	select {
 	case p.ch <- d:
 	default:
 	}
-	return true
+	return true, false
 }
 
-// ResolveAccept 接受（可携带用户提交的 content）。
-func (m *ElicitationManager) ResolveAccept(id string, content map[string]any) bool {
-	return m.resolve(id, acl.ElicitationOutcome{Action: "accept", Content: content})
+// ResolveAccept 接受（可携带用户提交的 content）；conversationID 为决策发起方会话（scope 校验）。
+func (m *ElicitationManager) ResolveAccept(conversationID, id string, content map[string]any) (found, mismatch bool) {
+	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "accept", Content: content})
 }
 
 // ResolveDecline 用户拒绝提供信息。
-func (m *ElicitationManager) ResolveDecline(id string) bool {
-	return m.resolve(id, acl.ElicitationOutcome{Action: "decline"})
+func (m *ElicitationManager) ResolveDecline(conversationID, id string) (found, mismatch bool) {
+	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "decline"})
 }
 
 // ResolveCancel 取消本次提问。
-func (m *ElicitationManager) ResolveCancel(id string) bool {
-	return m.resolve(id, acl.ElicitationOutcome{Action: "cancel"})
+func (m *ElicitationManager) ResolveCancel(conversationID, id string) (found, mismatch bool) {
+	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "cancel"})
+}
+
+// Owner 返回挂起提问的归属会话与来源（诊断/测试用）。
+func (m *ElicitationManager) Owner(id string) (conversationID, scopeSource string, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.pending[id]
+	if !ok {
+		return "", "", false
+	}
+	return p.conversationID, p.scopeSource, true
 }
 
 // ElicitationItem 是一条挂起结构化提问的对外表示（REST/WS 载荷）。
 type ElicitationItem struct {
 	ID        string
 	SessionID string
-	Mode      string
-	Message   string
-	Schema    map[string]any // form 模式；url 模式为空
-	URL       string         // url 模式
-	TimeoutAt time.Time
+	// ConversationID 归属会话（scope，C3：与 SessionID 同值，语义更明确——决策必须由它发起）。
+	ConversationID string
+	// ScopeSource 归属来源：wire（wire 提供）| inferred_inflight（宿主按唯一在途 turn 推断）。
+	ScopeSource string
+	Mode        string
+	Message     string
+	Schema      map[string]any // form 模式；url 模式为空
+	URL         string         // url 模式
+	TimeoutAt   time.Time
 }

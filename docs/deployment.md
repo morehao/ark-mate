@@ -398,3 +398,12 @@ sudo systemctl restart ark-forge
   `has_more=false`。同库对照：WS `attach(since_seq=0)` 回 `snapshot` 且重放事件数 0（eventbus 上限 65536，
   seq 1..4 已被淘汰）——REST 仍能翻到 seq 1，证明历史读 SQLite events 表而非 bus。
   `after=1&before=2` → `40001 after 与 before 互斥`；`before=-1` → `40000 before 需为非负整数`。
+- elicitation scope 归属（C3）：真进程（release 二进制 127.0.0.1:10020，echo agent）
+  `POST /conversations`（prompt 含「表单」）→ `GET /conversations/:id/elicitations` 回带
+  `conversation_id=d24de5af-… scope_source=inferred_inflight mode=form`；用**另一真实会话**
+  `POST /conversations/5a393b1e-…/elicitation` 决策同一 `elicitation_id` → `40001 结构化提问 "…" 不存在或已过期`
+  且归属会话挂起项仍在（1 条），服务端日志 `WARN elicitation: 决策会话与归属会话不符，拒绝（scope mismatch）
+  owner=d24de5af-… caller=5a393b1e-…`；归属会话决策 → `code=0`，随后挂起 0 条。
+  未知会话 → `40401 未知会话 "…"`（先于 elicitation 校验）。WS 事件 `session.elicitation_request` 载荷实测
+  `{"session_id":"3adc5250-…","conversation_id":"3adc5250-…","scope_source":"inferred_inflight","mode":"form"}`。
+  同连接两会话并发在途时仍按取消处理并留 WARN（SDK 无 scope，不猜测）。

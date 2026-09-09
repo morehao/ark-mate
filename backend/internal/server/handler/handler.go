@@ -627,11 +627,15 @@ type PermissionResolveReq struct {
 type ElicitationResp struct {
 	ElicitationID string `json:"elicitation_id"`
 	SessionID     string `json:"session_id"`
-	Mode          string `json:"mode"` // form | url
-	Message       string `json:"message"`
-	Schema        any    `json:"schema,omitempty"` // form：JSON Schema 对象（UI 据此渲染控件）
-	URL           string `json:"url,omitempty"`    // url：引导用户打开的链接
-	TimeoutAt     string `json:"timeout_at"`
+	// ConversationID 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起）。
+	ConversationID string `json:"conversation_id"`
+	// ScopeSource 归属来源：wire | inferred_inflight（SDK 未建模 scope 时由宿主按唯一在途 turn 推断）。
+	ScopeSource string         `json:"scope_source"`
+	Mode        string         `json:"mode"`
+	Message     string         `json:"message"`
+	Schema      map[string]any `json:"schema,omitempty"`
+	URL         string         `json:"url,omitempty"`
+	TimeoutAt   string         `json:"timeout_at"`
 }
 
 // ElicitationResolveReq 结构化提问决策请求体。
