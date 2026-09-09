@@ -183,3 +183,32 @@ func TestNoGapOnPromptConsumer(t *testing.T) {
 	default:
 	}
 }
+
+// TestSubscribeReplayBeyondBuffer 回归：回放条数超过默认缓冲（256）时 Subscribe 不得阻塞/死锁。
+// 历史上 Subscribe 用固定 256 缓冲同步投递且持锁，历史 >256 且 after 小时直接死锁
+// （`forge demo` 的 bus.Subscribe(0) 即触发点）。
+func TestSubscribeReplayBeyondBuffer(t *testing.T) {
+	b := New()
+	const n = 1000
+	for i := 0; i < n; i++ {
+		b.Publish("token", "agg", int64(i+1), map[string]any{"i": i})
+	}
+	done := make(chan *Subscription, 1)
+	go func() { done <- b.Subscribe(0) }()
+	var sub *Subscription
+	select {
+	case sub = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Subscribe 阻塞（回放超过缓冲导致死锁）")
+	}
+	defer b.Unsubscribe(sub)
+	got := 0
+	for got < n {
+		select {
+		case <-sub.C:
+			got++
+		case <-time.After(5 * time.Second):
+			t.Fatalf("回放只收到 %d/%d 条", got, n)
+		}
+	}
+}

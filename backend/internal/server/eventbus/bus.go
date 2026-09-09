@@ -136,15 +136,23 @@ func (b *Bus) EvictedThrough(aggID string) int64 {
 // Subscribe 订阅事件流。after 为起始游标：先同步回放 history 中 seq 大于 after 的历史，
 // 再持续接收后续 live 增量。返回的订阅需在结束后调用 Unsubscribe 释放。
 func (b *Bus) Subscribe(after int64) *Subscription {
-	sub := &Subscription{C: make(chan Event, 256), gaps: make(chan GapNotice, 16)}
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	// 缓冲按「回放条数 + 256 增量余量」分配：回放是**同步**投递（订阅者协程此时还没起来），
+	// 若历史条数超过固定缓冲，投递会阻塞在持锁状态 → 死锁（历史>256 且 after 很小时必现）。
+	n := 0
+	for _, evt := range b.history {
+		if evt.Seq > after {
+			n++
+		}
+	}
+	sub := &Subscription{C: make(chan Event, n+256), gaps: make(chan GapNotice, 16)}
 	for _, evt := range b.history {
 		if evt.Seq > after {
 			sub.C <- evt
 		}
 	}
 	b.subs[sub] = struct{}{}
-	b.mu.Unlock()
 	return sub
 }
 
