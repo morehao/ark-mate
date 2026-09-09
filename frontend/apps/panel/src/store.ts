@@ -569,7 +569,7 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     createAndRun: async (prompt, model) => {
       try {
-        const resp = await createConversation({ prompt, model: model?.modelID })
+        const resp = await createConversation({ prompt, model: model?.modelID, effort: model?.effort })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({

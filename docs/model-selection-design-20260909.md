@@ -638,6 +638,21 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 | C | 面板可选模型；effort（dsh）可交互；provider 表单目录化；typecheck 通过 |
 | D | 边界文案齐；测试矩阵绿；README/设计文档定稿 |
 
+> **实现注（2026-09-09）**：Phase D 落地子集。与上文推导的偏差：
+>   - **effort 二级面板**：以模型的 `behavior` 字段为档位来源（deepseek 快照里
+>     `deepseek-v4` 带 `["low","medium","high"]`），仅当默认 agent runtime 为 `deepseekharness`
+>     且选中模型带 `behavior` 时，在新建会话（StartPage）展示「推理档位」`Select`；选值经
+>     `createAndRun` 的 `ModelRef.effort` 传 `CreateConversationReq.effort`（后端落
+>     `set_config_option(reasoning_effort)`）。会话内改 effort 未接入（后端 `ConversationPatch`
+>     无 effort 字段，留待后续）。
+>   - **ModelPickerModal**：全览弹窗（搜索 + provider 分组 + 推荐星标 + 恢复默认），从 StartPage
+>     「浏览全部」进入，选择模型并关闭（effort 由内联 Select 承担）；未做收藏（star 切换，单操作员场景省略）。
+>   - **AgentsPage provider 表单**：`Model` 字段由 `Input` 改 `AutoComplete`（可手动输入 / 从目录选，
+>     不校验），编辑已有 provider 时经 `listProviderModels(id)` 拉取候选（live 优先，兜底快照）。
+>   - **opencode 会话内锁定**：会话详情抽屉「模型」行对 opencode 显示只读（`Select` `disabled` +
+>     placeholder「仅随创建时选定」）；dsh 可改；echo 显示「无模型」（对齐 §14.1 语义表）。
+>   - 设计文档此前的「opencode stale/重连后生效」措辞按 §14.1 收敛为「**仅随新建会话生效**」。
+
 ---
 
 ## 15. 开放项

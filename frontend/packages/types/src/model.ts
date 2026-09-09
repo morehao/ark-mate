@@ -24,9 +24,11 @@ export interface ModelCatalogResp {
   note?: string
 }
 
-/** 模型引用：创建/切换会话时选定的 provider 档案 id + 模型 id。 */
+/** 模型引用：创建/切换会话时选定的 provider 档案 id + 模型 id +（可选）会话模型档位。 */
 export interface ModelRef {
   /** provider 档案 id（会话级模型选择的 provider 面；创建时后端用 agent.provider 决定）。 */
   providerID?: string
   modelID: string
+  /** effort/reasoning 档位（如 low/medium/high；仅 dsh，空 = 交给后端默认）。 */
+  effort?: string
 }

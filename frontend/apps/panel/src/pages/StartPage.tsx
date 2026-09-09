@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from 'antd'
+import { Button, Select } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { useForge } from '../store'
 import { ConversationRail } from '../components/ConversationRail'
 import { ModelSelect } from '../components/ModelSelect'
+import { ModelPickerModal } from '../components/ModelPickerModal'
 import { StatusBar } from '../components/StatusBar'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
@@ -37,12 +38,20 @@ export function StartPage() {
     const v = localStorage.getItem(LAST_MODEL_KEY)
     return v && v.trim() ? v : null
   })
+  const [effort, setEffort] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // 新建固定用默认 Agent（后端在 agent_id 缺省时落到 dsh），前端无需再传 agent。
   const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
   const hasAgent = agents.length > 0
   const empty = draft.trim().length === 0
   const canSend = hasAgent && !empty && !sending
+
+  // effort 二级（dsh）：选中模型带 behavior（如 low/medium/high）且默认 agent 为 dsh 时展示。
+  const selectedModel = modelCatalog.find((m) => m.id === model)
+  const isDsh = defaultAgent?.runtimes?.[0] === 'deepseekharness'
+  const effortOptions = selectedModel?.behavior ?? []
+  const showEffort = isDsh && !!model && effortOptions.length > 0
 
   // 拉取当前默认 Agent 的模型目录；无 provider 时拉聚合目录（兜底可选）。
   useEffect(() => {
@@ -56,7 +65,10 @@ export function StartPage() {
     if (!canSend) return
     setSending(true)
     try {
-      const id = await createAndRun(draft.trim(), model ? { modelID: model } : undefined)
+      const id = await createAndRun(
+        draft.trim(),
+        model ? { modelID: model, effort: showEffort ? (effort ?? undefined) : undefined } : undefined,
+      )
       if (model) localStorage.setItem(LAST_MODEL_KEY, model)
       if (id) navigate(`/conversations/${id}`)
     } finally {
@@ -185,12 +197,36 @@ export function StartPage() {
                 <ModelSelect
                   models={modelCatalog}
                   value={model}
-                  onChange={setModel}
+                  onChange={(v) => {
+                    setModel(v)
+                    setEffort(null) // 模型变化 → 重置 effort（各模型 behavior 可能不同）
+                  }}
                   allowClear
                   size="small"
                   style={{ minWidth: 180 }}
                   defaultLabel="Agent 默认"
                 />
+
+                {showEffort && (
+                  <Select
+                    size="small"
+                    allowClear
+                    value={effort ?? undefined}
+                    placeholder="推理档位"
+                    onChange={(v) => setEffort(typeof v === 'string' ? v : null)}
+                    style={{ minWidth: 120 }}
+                    options={effortOptions.map((e) => ({ value: e, label: e }))}
+                  />
+                )}
+
+                <Button
+                  size="small"
+                  type="text"
+                  onClick={() => setPickerOpen(true)}
+                  style={{ color: tokens.textSecondary }}
+                >
+                  浏览全部
+                </Button>
 
                 <Button
                   type="primary"
@@ -236,6 +272,17 @@ export function StartPage() {
       </div>
 
       <StatusBar />
+
+      <ModelPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        models={modelCatalog}
+        value={model}
+        onSelect={(id) => {
+          setModel(id)
+          setEffort(null)
+        }}
+      />
     </div>
   )
 }
