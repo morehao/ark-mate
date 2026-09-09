@@ -25,6 +25,10 @@ type stubSvc struct {
 	listRuntimesErr      error
 	listConversationsErr error
 
+	diagID   string
+	diagResp *handler.AgentDiagnosticsResp
+	diagErr  error
+
 	searchMsgQuery string
 	searchMsgLimit int
 	searchMsgResp  *handler.MessageSearchResp
@@ -251,6 +255,19 @@ func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]han
 	return nil, nil
 }
 
+// ——— A3 agent 诊断桩 ———
+func (s *stubSvc) AgentDiagnostics(_ context.Context, id string) (*handler.AgentDiagnosticsResp, error) {
+	s.diagID = id
+	if s.diagErr != nil {
+		return nil, s.diagErr
+	}
+	if s.diagResp != nil {
+		return s.diagResp, nil
+	}
+	return &handler.AgentDiagnosticsResp{AgentID: id, State: "stopped", StderrSource: "none",
+		StderrTail: []string{}, CheckedAt: "2026-09-09T00:00:00Z"}, nil
+}
+
 // ——— M3 ② 消息检索 / 批量导出桩 ———
 func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*handler.MessageSearchResp, error) {
 	s.searchMsgQuery, s.searchMsgLimit = q, limit
@@ -406,6 +423,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	g.GET("/tools", h.Capability.ListTools)
 	g.GET("/usage/summary", h.Usage.Summary)
+	g.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
 	g.GET("/search/messages", h.Search.Messages)
 	g.POST("/conversations/export", h.Export.Conversations)
 	return r
@@ -1071,6 +1089,39 @@ func TestExportRoute(t *testing.T) {
 	r2 := newRestEngine(svc2)
 	env, http = do(t, r2, "POST", "/v1/forge/conversations/export", `{"ids":["c-1"],"format":"pdf"}`)
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_export_format") {
+		t.Fatalf("错误映射不符: http=%d %+v", http, env)
+	}
+}
+
+// TestAgentDiagnosticsRoute GET /agents/:id/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
+func TestAgentDiagnosticsRoute(t *testing.T) {
+	svc := &stubSvc{diagResp: &handler.AgentDiagnosticsResp{
+		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "echo", Command: "sh",
+		Connected: false, StderrSource: "last_error", CheckedAt: "2026-09-09T00:00:00Z",
+		StderrTail: []string{"[warn] boom"},
+		LastError:  &handler.AgentLastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
+	}}
+	r := newRestEngine(svc)
+
+	env, http := do(t, r, "GET", "/v1/forge/agents/a1/diagnostics", "")
+	if http != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d %+v", http, env)
+	}
+	if svc.diagID != "a1" {
+		t.Fatalf("id 透传不符: %q", svc.diagID)
+	}
+	body := string(env.Data)
+	for _, want := range []string{`"stderr_source":"last_error"`, `"[warn] boom"`, `"code":"timeout"`, `"connected":false`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("响应缺 %s: %s", want, body)
+		}
+	}
+
+	// 未知 agent → 40401（handler 经 svc.RestErr 映射）。
+	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil)}
+	r2 := newRestEngine(svc2)
+	env, http = do(t, r2, "GET", "/v1/forge/agents/nope/diagnostics", "")
+	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "未知 agent") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
 }

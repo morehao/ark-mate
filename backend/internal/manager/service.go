@@ -165,6 +165,10 @@ type Service struct {
 	mcpMu           sync.Mutex
 	mcpProbes       map[string]mcpProbeStatus
 	mcpProbeTimeout time.Duration
+
+	// A3 诊断：每 agent 最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
+	diagMu   sync.Mutex
+	lastErrs map[string]agentLastErr
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
@@ -179,6 +183,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		caps:            capability.NewRegistry(),
 		mcpProbes:       make(map[string]mcpProbeStatus),
 		mcpProbeTimeout: defaultMCPProbeTimeout,
+		lastErrs:        make(map[string]agentLastErr),
 	}
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	for _, b := range builtinAgents {

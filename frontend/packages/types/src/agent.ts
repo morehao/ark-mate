@@ -26,3 +26,30 @@ export interface ProviderPatch {
   /** 非 nil 即覆盖/清除（空串 = 清除）。 */
   key?: string
 }
+
+/** 某 agent 最近一次失败的诊断快照（A3）。 */
+export interface AgentLastError {
+  at: string
+  conversation_id?: string
+  code: string
+  class: string
+  details: string
+  stderr_tail?: string[]
+}
+
+/** agent 诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。 */
+export interface AgentDiagnostics {
+  agent_id: string
+  name: string
+  state: AgentState
+  runtime: string
+  runtime_name?: string
+  command?: string
+  connected: boolean
+  pid?: number
+  /** 尾巴来源：live（当前子进程实时）| last_error（上次失败采集）| none。 */
+  stderr_source: 'live' | 'last_error' | 'none' | string
+  stderr_tail: string[]
+  last_error?: AgentLastError
+  checked_at: string
+}

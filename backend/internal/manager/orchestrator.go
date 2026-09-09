@@ -381,7 +381,7 @@ func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
 	case err != nil:
 		o.svc.markConversation(as.ID, ConversationStatusFailed)
-		o.publishError(as.ID, err)
+		o.publishError(as.ID, err, client)
 	default:
 		o.svc.markConversation(as.ID, ConversationStatusCompleted)
 		o.svc.publish(BusTurnEnded, as.ID, map[string]any{
@@ -632,17 +632,20 @@ func (o *Orchestrator) ReapOrphans(grace time.Duration) (procreg.Report, error) 
 
 // registerProc 登记刚拉起的子进程（失败只告警，不影响会话可用性）。
 func (o *Orchestrator) registerProc(rc *runtimeConn) {
+	if rc == nil || rc.client == nil {
+		return
+	}
+	// pid 先落到连接上：诊断面（A3 /diagnostics）不依赖进程注册表是否启用。
+	info := rc.client.PidInfo()
+	if info.PID > 0 {
+		rc.pid = info.PID
+	}
 	o.mu.Lock()
 	reg := o.procReg
 	o.mu.Unlock()
-	if reg == nil || rc == nil || rc.client == nil {
+	if reg == nil || info.PID <= 0 {
 		return
 	}
-	info := rc.client.PidInfo()
-	if info.PID <= 0 {
-		return
-	}
-	rc.pid = info.PID
 	if err := reg.Add(procreg.Entry{
 		PID: info.PID, PGID: info.PGID, Command: info.Command,
 		Runtime: rc.spec.ID, AgentID: rc.agentID,
@@ -846,10 +849,21 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation) {
 		as.mu.Unlock()
 		if !pub {
 			o.svc.markConversation(as.ID, ConversationStatusFailed)
-			o.svc.publish(BusTurnError, as.ID, map[string]any{
-				"session_id": as.ID, "code": "connection_lost", "class": "connection",
-				"details": "agent 连接断开（会话失活；是否可 resume 依 runtime 能力）",
-			})
+			ae := acl.NewError(acl.ClassConnection, "connection_lost",
+				"agent 连接断开（会话失活；是否可 resume 依 runtime 能力）", nil)
+			var tail []string
+			if as.client != nil {
+				tail = acl.TailLines(as.client.StderrTail(), maxDiagStderrLines)
+			}
+			ae.StderrTail = tail
+			o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
+			payload := map[string]any{
+				"session_id": as.ID, "code": ae.Code, "class": string(ae.Class), "details": ae.Details,
+			}
+			if len(tail) > 0 {
+				payload["stderr_tail"] = tail
+			}
+			o.svc.publish(BusTurnError, as.ID, payload)
 		}
 	}
 }
@@ -1119,15 +1133,24 @@ func (o *Orchestrator) ResolveElicitation(elicitationID, action string, content 
 	return ok, nil
 }
 
-// publishError 把错误按 acl 分类发布为 turn.error。
-func (o *Orchestrator) publishError(conversationID string, err error) {
+// publishError 把错误按 acl 分类发布为 turn.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
+func (o *Orchestrator) publishError(conversationID string, err error, cli *acl.Client) {
 	ae := acl.Classify(err)
-	o.svc.publish(BusTurnError, conversationID, map[string]any{
+	tail := ae.StderrTail
+	if len(tail) == 0 && cli != nil {
+		tail = acl.TailLines(cli.StderrTail(), maxDiagStderrLines)
+	}
+	o.svc.recordAgentError("", conversationID, ae, tail)
+	payload := map[string]any{
 		"session_id": conversationID,
 		"code":       ae.Code,
 		"class":      string(ae.Class),
 		"details":    ae.Details,
-	})
+	}
+	if len(tail) > 0 {
+		payload["stderr_tail"] = tail
+	}
+	o.svc.publish(BusTurnError, conversationID, payload)
 }
 
 // Close 关闭全部连接并清理（daemon 退出/测试收尾）。

@@ -1343,3 +1343,50 @@ daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）�
 服务端游标（ids 上限 50，前端只导当前可见页）；memory 模式的命中 `seq` 来自事件本身、sqlite 模式来自
 消息行首事件，两者对 assistant 命中可能差一个 thought 事件（已在上面说明）；检索是子串匹配，
 无分词/排序相关性（`created_at DESC` 固定序）。
+
+#### 19.12 切片 A3：runtime stderr 诊断尾巴外露（完成）
+
+**动机**：`acl.Client.StderrTail()` 早就存在（200 行环形缓冲 + 逐行透出 daemon 日志），但**没有任何
+消费者**——runtime 起不来时 REST 只回一句 `connection/timeout`，用户要排障必须去翻 daemon 日志。
+A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
+
+**设计**：
+1. **采集点前移**：`acl.Error` 新增 `StderrTail []string`；`Dial` 在**关闭传输之前**采集尾巴并挂到
+   失败错误上（起进程失败 / initialize 超时 / 协议不匹配 / 鉴权失败四条路径），另有
+   `acl.AttachStderr`、`acl.TailLines` 供上层裁剪。这样「进程起不来」这类最有价值的尾巴不会因为
+   `Close()` 关管道而丢掉。
+2. **两条外露出口**：
+   - **事件面**：`turn.error` 载荷新增可选 `stderr_tail`（最多 20 行），`connection_lost` 路径同样携带；
+     前端错误条目以折叠块展示（不挤压对话区）。
+   - **快照面**：新增 `GET /agents/:id/diagnostics` → `{agent_id, name, state, runtime, runtime_name,
+     command, connected, pid, stderr_source, stderr_tail, last_error{at, conversation_id, code, class,
+     details, stderr_tail}, checked_at}`；`stderr_source` 明确标 `live`（当前子进程实时）/`last_error`
+     （上次失败采集）/`none`。Service 侧新增 `diagMu` + `lastErrs`（每 agent 最近一次失败，会话→agent
+     反查），启动失败与轮次失败都写入。
+3. **pid 与进程注册表解耦**：`registerProc` 现在无条件把 `client.PidInfo().PID` 落到连接上（注册表未
+   启用时 pid 仍可用于诊断），修掉「未配 `FORGE_PROC_REGISTRY` 时 diagnostics.pid 恒为 0」。
+4. 前端：Agents 页每行新增「诊断」按钮 → 弹窗展示连接态/pid/启动命令/最近失败/stderr 尾巴 +
+   「重新采集」；错误条目内折叠展示尾巴。
+
+**证据**：
+- 单测：`internal/acl.TestDialErrorCarriesStderrTail`（真实 `sh -c` 进程写 2 行 stderr 后退出 → 错误
+  带 2 行尾巴且顺序为写入序）、`TestTailLines`、`TestAttachStderr`；
+  `internal/manager.TestAgentDiagnosticsStartFailure`（真实 `sh` 失败进程 → `stderr_source=last_error`
+  + 尾巴含 `broken runtime 起不来` + 未知 agent 报 `agent_not_found`）、
+  `TestAgentDiagnosticsLiveTail`（**真实 python ACP 桩子进程 + 真实 initialize 握手** → `connected=true`、
+  `pid>0`、`stderr_source=live`、尾巴含 `live-tail line`；停止后归位 `none`）、
+  `TestPublishErrorCarriesStderrTail`（事件载荷 + 诊断快照双写）；
+  `internal/server/handler.TestAgentDiagnosticsRoute`（载荷形状 + 40401 映射）。
+- 真进程（daemon 10007，sqlite）：未启动 `dsh` → `connected=false stderr_source=none`；`POST
+  /agents/dsh/start` → `connected=true pid=91586`；`kill -9` 该 pid → 历史出现 `turn.error`
+  (`jsonrpc_error` → `connection_lost`) 且 `last_error` 记录 `code=connection_lost class=connection`
+  与 `conversation_id`。
+- 前端 `typecheck` + `build` 通过；`pnpm smoke:e2e` 新增 2 项断言全 PASS（`diagnostics` 载荷 +
+  未知 agent 40401）；`e2e-live-turn.mjs dsh` 收到 `turn.ended`。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿。
+- 顺带修：README 路由守卫此前只白名单 `/agents|/conversations|/runtimes|…`，A2 的 `/search/messages`
+  与 A3 的 `/agents/:id/diagnostics` 会被静默跳过；已把 `/search` 前缀纳入白名单（覆盖数 29 → 31）。
+
+**诚实记录（降级）**：真实 dsh 与 opencode 在本次实测中**不写 stderr**（`stderr_source=none`、0 行），
+所以「非空尾巴」的证据来自真实子进程（python ACP 桩、`sh` 失败进程）而非 dsh/opencode；这不是能力
+缺失，而是这两个底座安静。尾巴上限 20 行/200 行环形缓冲，超出即截断（只保留最近），不做落盘。

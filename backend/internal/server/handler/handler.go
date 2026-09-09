@@ -74,6 +74,9 @@ type Service interface {
 	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
 	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
 
+	// AgentDiagnostics 返回某 agent 的诊断快照（A3：stderr 诊断尾巴外露）。
+	AgentDiagnostics(ctx context.Context, id string) (*AgentDiagnosticsResp, error)
+
 	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
 	SearchMessages(ctx context.Context, q string, limit int) (*MessageSearchResp, error)
 	// ExportConversations 批量导出会话（M3 ②：wire transcript/事件事实源 → JSON/文本/Markdown）。
@@ -302,6 +305,32 @@ type ConversationSearchHit struct {
 	ConversationResp
 	Snippet string `json:"snippet"`
 	Matches int    `json:"matches"`
+}
+
+// AgentLastErrorResp 某 agent 最近一次失败的诊断快照。
+type AgentLastErrorResp struct {
+	At             string   `json:"at"`
+	ConversationID string   `json:"conversation_id,omitempty"`
+	Code           string   `json:"code"`
+	Class          string   `json:"class"`
+	Details        string   `json:"details"`
+	StderrTail     []string `json:"stderr_tail,omitempty"`
+}
+
+// AgentDiagnosticsResp agent 诊断快照（A3）：连接态 + stderr 尾巴 + 最近失败。
+type AgentDiagnosticsResp struct {
+	AgentID      string              `json:"agent_id"`
+	Name         string              `json:"name"`
+	State        string              `json:"state"`
+	Runtime      string              `json:"runtime"`
+	RuntimeName  string              `json:"runtime_name,omitempty"`
+	Command      string              `json:"command,omitempty"`
+	Connected    bool                `json:"connected"`
+	PID          int                 `json:"pid,omitempty"`
+	StderrSource string              `json:"stderr_source"` // live | last_error | none
+	StderrTail   []string            `json:"stderr_tail"`
+	LastError    *AgentLastErrorResp `json:"last_error,omitempty"`
+	CheckedAt    string              `json:"checked_at"`
 }
 
 // MessageSearchHit 一条消息级命中（跨会话；seq 为锚点，前端据此滚动定位）。

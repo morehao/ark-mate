@@ -68,7 +68,7 @@ func (c *Client) PidInfo() PidInfo {
 // ClientSideConnection 并完成 v1 握手。失败时负责回收 Transport。
 func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error) {
 	if err := t.Start(ctx); err != nil {
-		return nil, err
+		return nil, AttachStderr(err, t)
 	}
 	host := &hostClient{opts: opts}
 	conn := acpsdk.NewClientSideConnection(host, t.Stdin(), t.Stdout())
@@ -108,16 +108,23 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		ClientInfo:         &impl,
 	})
 	if err != nil {
+		// 先采集诊断尾巴再 Close（Close 会杀进程并关管道，之后读到的是空）。
+		tail := TailLines(t.StderrTail(), stderrTailCap)
 		_ = t.Close()
 		if errors.Is(dctx.Err(), context.DeadlineExceeded) {
-			return nil, NewError(ClassConnection, "timeout", "runtime 未在握手限期内响应 initialize", dctx.Err())
+			ae := NewError(ClassConnection, "timeout", "runtime 未在握手限期内响应 initialize", dctx.Err())
+			ae.StderrTail = tail
+			return nil, ae
 		}
-		return nil, Classify(err)
+		return nil, withStderr(Classify(err), tail)
 	}
 	if initResp.ProtocolVersion != acpsdk.ProtocolVersionNumber {
+		tail := TailLines(t.StderrTail(), stderrTailCap)
 		_ = t.Close()
-		return nil, NewError(ClassUnsupported, "protocol_mismatch",
+		ae := NewError(ClassUnsupported, "protocol_mismatch",
 			fmt.Sprintf("agent 协商到协议 v%d，本层仅支持 v%d", initResp.ProtocolVersion, acpsdk.ProtocolVersionNumber), nil)
+		ae.StderrTail = tail
+		return nil, ae
 	}
 	caps := capabilityFromAgent(initResp.AgentCapabilities, initResp.AuthMethods)
 	// M0 鉴权收敛：仅支持 agent 自托管方式（agent 自行完成登录，opencode 即此形态，methodId
@@ -135,16 +142,22 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			}
 		}
 		if len(agentIDs) == 0 {
+			tail := TailLines(t.StderrTail(), stderrTailCap)
 			_ = t.Close()
-			return nil, NewError(ClassAccess, "auth_required",
+			ae := NewError(ClassAccess, "auth_required",
 				fmt.Sprintf("agent 要求鉴权（%v），M0 仅支持 agent 自托管鉴权", describeAuthMethods(initResp.AuthMethods)), nil)
+			ae.StderrTail = tail
+			return nil, ae
 		}
 		if _, err := conn.Authenticate(dctx, acpsdk.AuthenticateRequest{MethodId: agentIDs[0]}); err != nil {
+			tail := TailLines(t.StderrTail(), stderrTailCap)
 			_ = t.Close()
 			if errors.Is(dctx.Err(), context.DeadlineExceeded) {
-				return nil, NewError(ClassConnection, "timeout", "runtime 未在握手限期内完成鉴权", dctx.Err())
+				ae := NewError(ClassConnection, "timeout", "runtime 未在握手限期内完成鉴权", dctx.Err())
+				ae.StderrTail = tail
+				return nil, ae
 			}
-			return nil, Classify(err)
+			return nil, withStderr(Classify(err), tail)
 		}
 	}
 
@@ -156,6 +169,17 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		host:   host,
 		closed: make(chan struct{}),
 	}, nil
+}
+
+// withStderr 把已采集的 stderr 尾巴挂到 acl.Error（非 acl.Error 时原样返回）。
+func withStderr(err error, tail []string) error {
+	if len(tail) == 0 {
+		return err
+	}
+	if ae, ok := As(err); ok && ae != nil && len(ae.StderrTail) == 0 {
+		ae.StderrTail = tail
+	}
+	return err
 }
 
 // Capabilities 返回 initialize 阶段冻结的能力断言。

@@ -117,6 +117,21 @@ async function checkRest() {
   }
   ok(`GET /agents/:id/capabilities → agent_id 一致（skills=${cap.skills.length} mcps=${cap.mcp_servers.length} tools=${cap.tools.length}）`)
 
+  // A3 诊断面：信封形状 + stderr 尾巴字段（不启动真实进程，只读快照）。
+  const dg = await apiGet(`/agents/${a0.id}/diagnostics`)
+  if (dg.http !== 200 || dg.env.code !== 0) return bad('GET /agents/:id/diagnostics', `HTTP ${dg.http} code=${dg.env.code} msg=${dg.env.msg}`)
+  const d = dg.env.data
+  for (const key of ['agent_id', 'state', 'runtime', 'connected', 'stderr_source', 'stderr_tail', 'checked_at']) {
+    if (!(key in d)) return bad('GET /agents/:id/diagnostics 载荷', `缺字段 ${key}: ${JSON.stringify(d).slice(0, 200)}`)
+  }
+  if (d.agent_id !== a0.id || !Array.isArray(d.stderr_tail) || typeof d.connected !== 'boolean') {
+    return bad('GET /agents/:id/diagnostics 载荷', `agent_id/stderr_tail/connected 不符: ${JSON.stringify(d).slice(0, 200)}`)
+  }
+  ok(`GET /agents/:id/diagnostics → state=${d.state} connected=${d.connected} stderr_source=${d.stderr_source}（尾巴 ${d.stderr_tail.length} 行）`)
+  const dgBad = await apiGet('/agents/no-such-agent/diagnostics')
+  if (dgBad.http !== 200 || dgBad.env.code !== 40401) return bad('GET /agents/:id/diagnostics 未知 agent', `HTTP ${dgBad.http} code=${dgBad.env.code}`)
+  ok('GET /agents/no-such-agent/diagnostics → HTTP 200 code=40401')
+
   // P2 §5.2 探测状态字段（能力卡「探测」列渲染依据）。
   const mcps = await apiGet('/mcps')
   if (mcps.env.code !== 0 || !Array.isArray(mcps.env.data)) return bad('GET /mcps', JSON.stringify(mcps.env))

@@ -167,6 +167,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | DELETE | `/agents/:id` | 删除 Agent（种子 agent 只读，报 `seed_agent_readonly`） |
 | POST | `/agents/:id/start` · `/agents/:id/stop` | 启停底座进程（无编排器装配时报明确错误） |
 | GET | `/agents/:id/capabilities` | 该 Agent 视角的统一能力目录（按候选 runtime 聚合 skill/MCP/tool + runtimes） |
+| GET | `/agents/:id/diagnostics` | agent 诊断快照（连接态 + `pid` + `stderr_tail` + 最近失败；`stderr_source` 标来源 live/last_error/none） |
 | GET | `/runtimes` | 底座列表（ACP adapter 注册表） |
 | GET | `/providers` · PATCH `/providers/:id` | provider 档案列表 / 更新 `{type?, model?, key?}`（密钥只写不读回，仅 `has_key`） |
 | GET | `/conversations` | 会话列表（`?archived=true` 过滤归档） |

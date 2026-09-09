@@ -250,3 +250,10 @@ sudo systemctl restart ark-forge
   降级面）。`pnpm smoke:e2e` 新增 4 项断言全 PASS；真会话 `e2e-live-turn.mjs dsh` 收到
   `turn.ended`。前端 `typecheck` + `build` 通过；`console/searchView.ts` 纯函数用 Node 24 原生
   类型擦除加载实跑 17 条断言（锚点定位/去重/导出摘要）。
+
+- agent 诊断面（A3）：`GET /agents/:id/diagnostics` 实测——未启动 `dsh` → `connected=false
+  stderr_source=none stderr_tail=[]`；`POST /agents/dsh/start` → `connected=true pid=91586`；
+  `kill -9 91586` → 历史出现 `turn.error connection_lost`，`last_error` 记录 `code/class/
+  conversation_id`。`GET /agents/nope/diagnostics` → `code=40401`。真实 dsh/opencode **不写
+  stderr**（`stderr_source=none`，0 行），非空尾巴的证据来自真实子进程单测（python ACP 桩 /
+  `sh` 失败进程）。`pnpm smoke:e2e` 新增 2 项断言全 PASS。

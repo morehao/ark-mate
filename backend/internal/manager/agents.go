@@ -258,6 +258,8 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	}
 	if _, err := s.orch.acquire(ctx, agent, spec); err != nil {
 		s.setAgentState(id, AgentStateStopped)
+		// A3：启动失败时记录诊断（含握手/起进程阶段的 stderr 尾巴），供 /diagnostics 外露。
+		s.recordAgentError(id, "", acl.Classify(err), acl.Classify(err).StderrTail)
 		return err
 	}
 	s.setAgentState(id, AgentStateRunning)

@@ -32,6 +32,8 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.DELETE("/agents/:id", h.Agent.Delete)
 	v1.POST("/agents/:id/start", h.Agent.Start)
 	v1.POST("/agents/:id/stop", h.Agent.Stop)
+	// A3：agent 诊断快照（连接态 + stderr 诊断尾巴 + 最近失败）。
+	v1.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
 	// P2 §8.1 统一能力目录：某 Agent 可见的 skill/MCP/tool（按候选 runtime 聚合，只读）。
 	v1.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	v1.GET("/conversations", h.Conversation.List)

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag } from 'antd'
-import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
-import { createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
-import type { Agent, Provider } from '@ark/types'
+import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
+import type { Agent, AgentDiagnostics, Provider } from '@ark/types'
 import { useForge } from '../store'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
@@ -35,6 +35,8 @@ export function AgentsPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [agentModal, setAgentModal] = useState<{ mode: 'create' } | { mode: 'edit'; agent: Agent } | null>(null)
   const [providerModal, setProviderModal] = useState<{ id: string; existing: Provider | null } | null>(null)
+  // A3 诊断抽屉：{ agentId, data | null（加载中）, err }
+  const [diag, setDiag] = useState<{ id: string; name: string; data: AgentDiagnostics | null; err: string | null } | null>(null)
   const [agentForm] = Form.useForm<AgentFormValues>()
   const [providerForm] = Form.useForm<ProviderFormValues>()
 
@@ -122,6 +124,28 @@ export function AgentsPage() {
     afterMutate()
   }
 
+  // 打开/刷新诊断（A3：stderr 诊断尾巴外露，排障不必翻 daemon 日志）。
+  const openDiagnostics = async (a: Agent) => {
+    setDiag({ id: a.id, name: a.name, data: null, err: null })
+    try {
+      const data = await agentDiagnostics(a.id)
+      setDiag({ id: a.id, name: a.name, data, err: null })
+    } catch (e) {
+      setDiag({ id: a.id, name: a.name, data: null, err: toErrorMessage(e) })
+    }
+  }
+  const refreshDiagnostics = async () => {
+    if (!diag) return
+    const cur = diag
+    setDiag({ ...cur, data: null, err: null })
+    try {
+      const data = await agentDiagnostics(cur.id)
+      setDiag({ ...cur, data, err: null })
+    } catch (e) {
+      setDiag({ ...cur, data: null, err: toErrorMessage(e) })
+    }
+  }
+
   const providerOptions = providers.map((p) => p.id)
 
   return (
@@ -177,6 +201,9 @@ export function AgentsPage() {
               >
                 {a.state === 'running' ? '停止' : '启动'}
               </Button>
+              <Button size="small" icon={<MedicineBoxOutlined />} onClick={() => void openDiagnostics(a)}>
+                诊断
+              </Button>
               <Button size="small" onClick={() => openEdit(a)}>
                 编辑
               </Button>
@@ -230,6 +257,103 @@ export function AgentsPage() {
           </span>
         </div>
       ))}
+
+
+      {/* A3 诊断（stderr 诊断尾巴 + 最近失败；连接态） */}
+      <Modal
+        title={diag ? `诊断 · ${diag.name}` : '诊断'}
+        open={diag !== null}
+        onCancel={() => setDiag(null)}
+        footer={[
+          <Button key="refresh" size="small" icon={<ReloadOutlined />} onClick={() => void refreshDiagnostics()}>
+            重新采集
+          </Button>,
+          <Button key="close" size="small" type="primary" onClick={() => setDiag(null)}>
+            关闭
+          </Button>,
+        ]}
+        width={720}
+      >
+        {diag?.err ? (
+          <div style={{ color: tokens.textSecondary, fontSize: 12.5, lineHeight: 1.7 }}>
+            采集失败：{diag.err}
+            <div style={{ marginTop: 6, color: tokens.textPlaceholder }}>
+              daemon 可能不可达或 agent 已被删除。
+            </div>
+          </div>
+        ) : !diag?.data ? (
+          <div style={{ color: tokens.textPlaceholder, fontSize: 12.5, padding: '12px 0' }}>采集诊断快照…</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span>状态：<b>{diag.data.state}</b></span>
+              <span>runtime：<code>{diag.data.runtime}</code>{diag.data.runtime_name ? `（${diag.data.runtime_name}）` : ''}</span>
+              <span>
+                连接：
+                <b style={{ color: diag.data.connected ? tokens.primary : tokens.textSecondary }}>
+                  {diag.data.connected ? '已连接' : '未连接'}
+                </b>
+                {diag.data.connected && diag.data.pid ? ` · pid ${diag.data.pid}` : ''}
+              </span>
+            </div>
+            {diag.data.command && (
+              <div style={{ color: tokens.textSecondary }}>
+                启动命令：<code>{diag.data.command}</code>
+              </div>
+            )}
+            {diag.data.last_error && (
+              <div
+                style={{
+                  border: `1px solid ${tokens.border}`,
+                  borderRadius: 10,
+                  padding: '8px 12px',
+                  background: tokens.softFill,
+                }}
+              >
+                <div style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPlaceholder }}>
+                  最近失败 · {diag.data.last_error.at} · [{diag.data.last_error.class}/{diag.data.last_error.code}]
+                </div>
+                <div style={{ marginTop: 4 }}>{diag.data.last_error.details}</div>
+                {diag.data.last_error.conversation_id && (
+                  <div style={{ marginTop: 4, fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textSecondary }}>
+                    会话 {diag.data.last_error.conversation_id}
+                  </div>
+                )}
+              </div>
+            )}
+            <div>
+              <div style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPlaceholder, marginBottom: 4 }}>
+                stderr 诊断尾巴 · 来源 {diag.data.stderr_source === 'live' ? '当前子进程（实时）' : diag.data.stderr_source === 'last_error' ? '上次失败时采集' : '无（无连接且无失败记录）'}
+              </div>
+              {diag.data.stderr_tail.length === 0 ? (
+                <div style={{ color: tokens.textPlaceholder }}>
+                  无输出。runtime 可能不写 stderr，或进程尚未产生输出。
+                </div>
+              ) : (
+                <pre
+                  style={{
+                    margin: 0,
+                    maxHeight: 260,
+                    overflow: 'auto',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 11,
+                    lineHeight: 1.55,
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                    border: `1px solid ${tokens.border}`,
+                    borderRadius: 10,
+                    padding: '8px 12px',
+                    background: tokens.softFill,
+                  }}
+                >
+                  {diag.data.stderr_tail.join('\n')}
+                </pre>
+              )}
+            </div>
+            <div style={{ color: tokens.textPlaceholder, fontSize: 11 }}>采集时刻：{diag.data.checked_at}</div>
+          </div>
+        )}
+      </Modal>
 
       {/* Agent 注册/编辑向导 */}
       <Modal

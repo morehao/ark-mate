@@ -78,3 +78,13 @@ func (h *AgentHandler) Stop(c *gin.Context) {
 	}
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "stopped"})
 }
+
+// Diagnostics agent 诊断快照：GET /agents/:id/diagnostics（A3：stderr 诊断尾巴外露）。
+func (h *AgentHandler) Diagnostics(c *gin.Context) {
+	resp, err := h.svc.AgentDiagnostics(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, h.svc.RestErr(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}

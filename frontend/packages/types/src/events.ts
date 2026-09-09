@@ -64,4 +64,6 @@ export interface StreamEntry {
   schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）
   url?: string // url 模式链接
   content?: Record<string, unknown> // accept 时用户提交的内容（结果展示）
+  /** 失败时的 runtime stderr 诊断尾巴（A3；错误条目可展开查看，空 = 无采集）。 */
+  stderrTail?: string[]
 }

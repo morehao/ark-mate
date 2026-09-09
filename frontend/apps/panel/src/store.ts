@@ -171,7 +171,10 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
         streaming: false,
         lastSeq,
       }
-    case Ev.TurnError:
+    case Ev.TurnError: {
+      // A3：失败事件可能携带 runtime stderr 诊断尾巴（数组；非数组/空则忽略）。
+      const rawTail = e.payload?.stderr_tail
+      const stderrTail = Array.isArray(rawTail) ? rawTail.map((l) => String(l)) : undefined
       return {
         ...v,
         entries: settleCards(
@@ -180,12 +183,14 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
             text: `失败 [${String(e.payload?.class ?? '')}/${String(e.payload?.code ?? '')}] ${String(
               e.payload?.details ?? '',
             )}`,
+            stderrTail: stderrTail && stderrTail.length > 0 ? stderrTail : undefined,
           }),
           '已结束',
         ),
         streaming: false,
         lastSeq,
       }
+    }
     case Ev.RunCancelled:
       return {
         ...v,

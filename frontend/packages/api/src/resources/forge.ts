@@ -2,6 +2,7 @@ import { http } from '../request'
 import type {
   Agent,
   AgentCapabilities,
+  AgentDiagnostics,
   Provider,
   ProviderPatch,
   BusEvent,
@@ -32,6 +33,10 @@ import type {
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
 
 export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/forge/agents')
+
+/** agent 诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。 */
+export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
+  http.get<AgentDiagnostics>(`/forge/agents/${encodeURIComponent(id)}/diagnostics`)
 
 /** 列出未归档会话（`archived=true` 列出已归档）。 */
 export const listConversations = (archived = false): Promise<ConversationSummary[]> =>
