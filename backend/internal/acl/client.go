@@ -283,7 +283,13 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 			Output: tu.RawOutput,
 		})
 	case u.UsageUpdate != nil:
-		add(KindUsage, nil)
+		uu := u.UsageUpdate
+		info := UsageInfo{Used: int64(uu.Used), Size: int64(uu.Size)}
+		if uu.Cost != nil {
+			info.CostAmount = uu.Cost.Amount
+			info.CostCurrency = uu.Cost.Currency
+		}
+		add(KindUsage, info)
 	default:
 		// plan/session 元数据类更新：M0 不建模（前端尚不消费）。
 	}

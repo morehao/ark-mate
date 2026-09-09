@@ -1109,3 +1109,49 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 **遗留**：浏览器视觉走查仍缺（环境无浏览器；本次为纯函数级 + 构建/契约级验证）；
 「更早历史」仍是**渲染层窗口**（模型全量在内存，服务端 snapshot 全量回放）——若要真正按需拉取
 更早历史，需后端补 `before` 游标分页（`/history` 当前仅 `after`），未做（避免半成品语义）。
+
+#### 19.7 切片 G7：M3 首项——用量统计 API（完成）
+
+**能力边界（以 ACP 实际提供为准，不臆造 token/费用）**：ACP v1 的用量通道只有
+`session/usage_update`（`Used`/`Size` 上下文窗口占用快照 + 可选 `Cost{Amount,Currency}` 累计费用），
+**没有**逐轮 input/output token 明细。因此本切片交付的是「可核实」的统计：轮次计数/时长 +
+每会话上下文/费用**快照**（取区间内每会话最后一次上报，不累加历史，避免重复计费）。
+
+**链路（底座 → 事件 → 落库 → API）**：
+
+- `acl.UsageInfo{Used,Size,CostAmount,CostCurrency}` + `Reported()`（全零 = 无上报）；
+  `normalizeUpdate` 透传 `SessionUsageUpdate`（此前丢弃明细，仅发空事件）。
+- 编排：`session.usage` 事件载荷补齐 used/size/cost；`Orchestrator.recordUsage/LatestUsage`
+  维护「每平台会话最近一次快照」（空快照忽略，后到覆盖先到）。
+- 落库：turn 收口 `materializeRun` 把该会话最近快照写入 `runs.usage_json`（无上报 → 空串）。
+- 读模型：`store.UsageSummary`（runs ⨝ conversations；区间半开 `[from,to)`、agent 过滤、
+  `group_by=agent|day`（UTC 日期））；计数/时长全量累加，上下文/费用按会话取最后快照。
+- REST：`GET /usage/summary?from=&to=&agent_id=&group_by=`（`from`/`to` 支持 RFC3339 或
+  `YYYY-MM-DD`，日期 = 当日 00:00 UTC；响应回显生效区间 + `source`）。
+- 错误码：`invalid_usage_range` / `invalid_usage_group_by` → 40001，`agent_not_found` → 40401，
+  内存模式（无 store，无 runs 读模型）→ **40501 `usage_stats_unsupported`**（明确降级，不返回假零值）。
+
+**证据**：
+
+- 单测：`TestUsageSummaryAggregate`（计数/时长/会话数、快照覆盖、费用、区间半开、agent 过滤、
+  day 分桶、空区间零值）、`TestUsageSummaryService`（服务面 + 5 组参数校验 + 内存模式降级）、
+  `TestOrchestratorUsageEvent`（事件载荷 + 快照覆盖 + 全零不污染）、`TestUsageSummaryRoute`
+  （参数透传 + 信封 + 40001/40501）、acl `usage`/`usage_with_cost` 归一化、`TestUsageInfoReported`。
+- **真进程**（`forge serve` :18127 sqlite + echo 底座）：echo 演示底座新增标准
+  `session/usage_update` 上报（按输入长度确定性取值，用于打通链路；真实底座按其自身上报）：
+  - 三轮（echo1×2 会话 + echo2×1）→ `/usage/summary` `runs=3 conversations=3 context_used=422
+    context_size=384000 usage_reported=3 cost=0.00422 USD`，与
+    `135+146+141` 逐会话快照和**完全一致**；sqlite 直查 `runs.usage_json` 为
+    `{"used":135,"size":128000,...}` 等真实值；
+  - 同一会话追加一轮 → `runs 4→5`、`conversations` 不变（3）、`context_used 425→429`
+    （旧快照 146 被 150 覆盖，非累加）；
+  - WS `session.usage` 载荷 = `{session_id,agent_id,used:137,size:128000,cost_amount,cost_currency}`；
+  - 参数校验真进程返回：非法 group_by → 40001 `[invalid_usage_group_by]`、未知 agent → 40401
+    `[agent_not_found]`、from≥to → 40001 `[invalid_usage_range]`、空区间 → 零值；
+  - 内存模式 serve（:18128）→ 40501 `[usage_stats_unsupported]`。
+- `go vet` + `go test -race ./...` 全绿；前端 `smoke:e2e` 新增 `/usage/summary` 形状与 40001
+  断言后仍全 PASS（无回归）。
+
+**遗留**：前端尚无用量视图（REST 面与 smoke 断言已就绪）；逐轮 token/费用明细受 ACP 通道限制
+（底座只给上下文快照 + 可选累计费用）；`runs` 的 REST 明细未暴露 `usage_json`（统计 API 是唯一读面）；
+大规模数据下聚合在 Go 侧完成（区间过滤已下推 SQL），如需再优化可加物化日表。

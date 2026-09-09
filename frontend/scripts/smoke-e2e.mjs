@@ -110,6 +110,17 @@ async function checkRest() {
     return bad('GET /mcps 载荷', 'McpServer 缺探测状态字段 tool_count')
   }
   ok(`GET /mcps → 数组信封（含 tool_count 等探测状态；${mcps.env.data.length} 条）`)
+
+  // M3 用量统计：聚合信封 + 分桶形态 + 参数校验（业务错误 HTTP 200 + code≠0）。
+  const usage = await apiGet('/usage/summary')
+  if (usage.http !== 200 || usage.env.code !== 0) return bad('GET /usage/summary', `HTTP ${usage.http} code=${usage.env.code} msg=${usage.env.msg}`)
+  const u = usage.env.data
+  if (u.group_by !== 'agent' || u.source !== 'sqlite' || typeof u.totals?.runs !== 'number' || !Array.isArray(u.buckets))
+    return bad('GET /usage/summary 载荷', JSON.stringify(u))
+  ok(`GET /usage/summary → totals.runs=${u.totals.runs} buckets=${u.buckets.length} source=${u.source}`)
+  const usageBad = await apiGet('/usage/summary?group_by=tool')
+  if (usageBad.http !== 200 || usageBad.env.code !== 40001) return bad('GET /usage/summary 非法 group_by', `HTTP ${usageBad.http} code=${usageBad.env.code}`)
+  ok('GET /usage/summary?group_by=tool → HTTP 200 code=40001')
 }
 
 // ——— 2. REST 业务错误信封 ———

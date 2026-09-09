@@ -755,9 +755,18 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 
 	started := evs[0].CreatedAt
 	ended := evs[len(evs)-1].CreatedAt
+	// M3 用量统计：随 run 落库该会话最近一次 ACP 用量快照（无上报 → 空串，不臆造数值）。
+	usageJSON := ""
+	if s.orch != nil {
+		if u, ok := s.orch.LatestUsage(conversationID); ok {
+			if b, err := json.Marshal(u); err == nil {
+				usageJSON = string(b)
+			}
+		}
+	}
 	r := store.Run{
 		ID: runID, ConversationID: conversationID, UserText: userText, Status: status,
-		ErrorCode: errCode, StopReason: stopReason,
+		ErrorCode: errCode, StopReason: stopReason, UsageJSON: usageJSON,
 		FirstSeq: firstSeq, LastSeq: lastSeq,
 		StartedAt: started, EndedAt: ended,
 	}
@@ -766,7 +775,7 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 		return
 	}
 	// 终态补齐（CreateRun 直接带终态写入，FinishRun 幂等再走一遍以统一 ended 口径）。
-	_ = s.st.FinishRun(ctx, runID, status, stopReason, errCode, "", ended)
+	_ = s.st.FinishRun(ctx, runID, status, stopReason, errCode, usageJSON, ended)
 	// 消息物化：同窗口 events → messages 行（user 原文 + assistant 文本片段/时间线/工具最终态）。
 	s.materializeMessages(conversationID, runID, evs)
 }

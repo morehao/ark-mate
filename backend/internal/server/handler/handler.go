@@ -70,6 +70,49 @@ type Service interface {
 	AgentCapabilities(agentID string) (*AgentCapabilitiesResp, error)
 	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
 	ProbeMcpServer(ctx context.Context, id string) (*McpProbeResp, error)
+
+	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
+	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
+}
+
+// UsageQueryReq 用量统计查询参数（GET /usage/summary）。
+type UsageQueryReq struct {
+	// From/To 半开区间 [From, To)（RFC3339 或 YYYY-MM-DD；空 = 不限该侧）。
+	From string
+	To   string
+	// AgentID 仅统计该 agent（空 = 全部；未知 agent → 40401）。
+	AgentID string
+	// GroupBy agent（默认）| day（UTC 日期）。
+	GroupBy string
+}
+
+// UsageBucketResp 一行用量聚合（group_by=agent → key=agent_id；=day → key=YYYY-MM-DD）。
+type UsageBucketResp struct {
+	Key           string  `json:"key"`
+	AgentID       string  `json:"agent_id,omitempty"`
+	Runs          int     `json:"runs"`
+	Completed     int     `json:"completed"`
+	Failed        int     `json:"failed"`
+	Cancelled     int     `json:"cancelled"`
+	Running       int     `json:"running"`
+	Conversations int     `json:"conversations"`
+	DurationMS    int64   `json:"duration_ms"`
+	ContextUsed   int64   `json:"context_used"`
+	ContextSize   int64   `json:"context_size"`
+	UsageReported int     `json:"usage_reported"`
+	CostAmount    float64 `json:"cost_amount"`
+	CostCurrency  string  `json:"cost_currency,omitempty"`
+}
+
+// UsageSummaryResp 用量统计响应：总计 + 分组桶 + 生效条件回显。
+type UsageSummaryResp struct {
+	From    string            `json:"from,omitempty"`
+	To      string            `json:"to,omitempty"`
+	AgentID string            `json:"agent_id,omitempty"`
+	GroupBy string            `json:"group_by"`
+	Source  string            `json:"source"` // sqlite | memory（memory 模式无统计，返回 40501）
+	Totals  UsageBucketResp   `json:"totals"`
+	Buckets []UsageBucketResp `json:"buckets"`
 }
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
@@ -371,6 +414,7 @@ type Handler struct {
 	Runtime      *RuntimeHandler
 	Provider     *ProviderHandler
 	Capability   *CapabilityHandler
+	Usage        *UsageHandler
 	WS           *WSHandler
 	bus          *eventbus.Bus
 	svc          Service
@@ -385,6 +429,7 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 		Runtime:      &RuntimeHandler{svc: svc},
 		Provider:     &ProviderHandler{svc: svc},
 		Capability:   &CapabilityHandler{svc: svc},
+		Usage:        &UsageHandler{svc: svc},
 		WS:           NewWSHandler(bus),
 		bus:          bus,
 		svc:          svc,

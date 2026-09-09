@@ -94,6 +94,11 @@ type Orchestrator struct {
 	// elic 管理挂起结构化提问（elicitation/create：表单/URL + 超时自动取消）。
 	elic *ElicitationManager
 
+	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：turn 收口时
+	// 随 runs.usage_json 落库；底座不上报时无条目）。
+	usageMu sync.Mutex
+	usage   map[string]acl.UsageInfo
+
 	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
 
@@ -138,6 +143,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		inflight:        newInFlightTracker(),
 		perm:            NewPermissionManager(DefaultPermissionTimeout),
 		elic:            NewElicitationManager(DefaultElicitationTimeout),
+		usage:           make(map[string]acl.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
 		logger:          slog.Default(),
 	}
@@ -828,7 +834,16 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			o.logger.Debug("skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
 		case acl.KindUsage:
 			typ = BusUsage
-			payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
+			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
+			p := map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
+			if d, ok := ev.Payload.(acl.UsageInfo); ok {
+				p["used"], p["size"] = d.Used, d.Size
+				if d.CostAmount > 0 {
+					p["cost_amount"], p["cost_currency"] = d.CostAmount, d.CostCurrency
+				}
+				o.recordUsage(ev.SessionID, d)
+			}
+			payload = p
 		case acl.KindPermission:
 			typ = BusPermission
 			payload = ev.Payload
@@ -903,6 +918,24 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 		})
 	}
 	return o.perm.RegisterAndWait(ctx, sid, req, publish)
+}
+
+// recordUsage 记录平台会话最近一次用量快照（同会话后到覆盖先到；空快照忽略）。
+func (o *Orchestrator) recordUsage(conversationID string, u acl.UsageInfo) {
+	if conversationID == "" || !u.Reported() {
+		return
+	}
+	o.usageMu.Lock()
+	o.usage[conversationID] = u
+	o.usageMu.Unlock()
+}
+
+// LatestUsage 取会话最近一次用量快照（无上报 → false）。turn 收口落库用。
+func (o *Orchestrator) LatestUsage(conversationID string) (acl.UsageInfo, bool) {
+	o.usageMu.Lock()
+	defer o.usageMu.Unlock()
+	u, ok := o.usage[conversationID]
+	return u, ok
 }
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。

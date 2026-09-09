@@ -79,6 +79,10 @@ type stubSvc struct {
 	probeResp       *handler.McpProbeResp // P2 §5.2 MCP live 探测桩
 	probeErr        error
 	probeID         string
+
+	usageResp  *handler.UsageSummaryResp // M3 GET /usage/summary 桩
+	usageQuery handler.UsageQueryReq     // 捕获查询参数
+	usageErr   error
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -172,6 +176,16 @@ func (s *stubSvc) AgentCapabilities(id string) (*handler.AgentCapabilitiesResp, 
 		return s.agentCapResp, nil
 	}
 	return &handler.AgentCapabilitiesResp{AgentID: id}, nil
+}
+func (s *stubSvc) UsageSummary(_ context.Context, q handler.UsageQueryReq) (*handler.UsageSummaryResp, error) {
+	s.usageQuery = q
+	if s.usageErr != nil {
+		return nil, s.usageErr
+	}
+	if s.usageResp != nil {
+		return s.usageResp, nil
+	}
+	return &handler.UsageSummaryResp{GroupBy: "agent", Source: "sqlite", Buckets: []handler.UsageBucketResp{}}, nil
 }
 func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*handler.McpProbeResp, error) {
 	s.probeID = id
@@ -330,6 +344,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	g.GET("/tools", h.Capability.ListTools)
+	g.GET("/usage/summary", h.Usage.Summary)
 	return r
 }
 
@@ -422,6 +437,44 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 	svc.updateAgentErr = gerror.Error{Code: 40001, Msg: `permission_policy.default: 动作 "sometimes" 非法`}
 	if env, code := do(t, r, "PATCH", "/v1/forge/agents/pol", `{"permission_policy":{"default":"sometimes"}}`); code != 200 || env.Code != 40001 {
 		t.Fatalf("非法策略应 40001，got http=%d code=%d", code, env.Code)
+	}
+}
+
+// TestUsageSummaryRoute M3：GET /usage/summary 参数绑定/透传 + 信封形态 + 业务错误透传。
+func TestUsageSummaryRoute(t *testing.T) {
+	svc := &stubSvc{usageResp: &handler.UsageSummaryResp{
+		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-echo",
+		GroupBy: "day", Source: "sqlite",
+		Totals:  handler.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
+		Buckets: []handler.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
+	}}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-echo&group_by=day", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d env=%+v", code, env)
+	}
+	if svc.usageQuery.From != "2026-09-01" || svc.usageQuery.To != "2026-09-09" ||
+		svc.usageQuery.AgentID != "agent-echo" || svc.usageQuery.GroupBy != "day" {
+		t.Fatalf("查询参数未透传: %+v", svc.usageQuery)
+	}
+	var resp handler.UsageSummaryResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if resp.GroupBy != "day" || resp.Source != "sqlite" || resp.Totals.Runs != 3 ||
+		len(resp.Buckets) != 1 || resp.Buckets[0].Key != "2026-09-08" {
+		t.Fatalf("响应载荷不符: %+v", resp)
+	}
+
+	// 业务错误（40001/40501）→ HTTP 200 + code≠0 透传。
+	svc.usageErr = gerror.Error{Code: 40001, Msg: `[invalid_usage_group_by] group_by 仅支持 agent|day："tool"`}
+	if env, code := do(t, r, "GET", "/v1/forge/usage/summary?group_by=tool", ""); code != 200 || env.Code != 40001 {
+		t.Fatalf("非法 group_by 应 40001: http=%d env=%+v", code, env)
+	}
+	svc.usageErr = gerror.Error{Code: 40501, Msg: "[usage_stats_unsupported] 内存模式无统计"}
+	if env, _ := do(t, r, "GET", "/v1/forge/usage/summary", ""); env.Code != 40501 {
+		t.Fatalf("内存模式应 40501: %+v", env)
 	}
 }
 
