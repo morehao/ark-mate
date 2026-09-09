@@ -142,6 +142,12 @@ curl -s localhost:10001/v1/forge/conversations \
 > （serve）的权限语义是「**征询**」：默认 `ask` → 发布 `session.permission_request` 挂起等用户决策，
 > 超时自动拒绝；可按 agent 配 `permission_policy`（`allow`/`deny` 直接决策，见「控制面接口摘要」），
 > 或由用户在会话内决策并形成会话级记忆。
+>
+> **原生权限映射（B5）**：`permission_policy` 同时投影到底座**原生**权限开关（双层防护，策略仍是拦截面）——
+> dsh 注入 `DSH_PERMISSION_MODE`（`default:deny` → `read-only`；显式 `native_mode: workspace-write|danger-full-access`
+> 原样使用；其余不注入以免覆盖环境值），opencode 注入 `OPENCODE_CONFIG_CONTENT` 的 `permission` 表
+> （`tools` 的 bash/edit/read/write/fetch 等键按别名映射，全 ask 时不注入）。`native_mode: off`
+> 或 `FORGE_NATIVE_PERMISSION=off` 可整体关闭。未声明策略的 agent 行为不变。
 
 > **零依赖演示权限通道（echo）**：先建指向 `echo` runtime 的 agent（见上「启动并打开面板」第 1 步），
 > 面板左侧「新建会话」选它并发送任意消息 → 右侧即时出现权限确认卡（工具「运行演示命令 echo hello」
@@ -181,7 +187,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |
-| GET | `/agents` | Agent 列表（含 `permission_policy` 只读面） |
+| GET | `/agents` | Agent 列表（含 `permission_policy` 只读面，含 `native_mode`） |
 | POST | `/agents` | 注册 Agent `{id, name?, runtimes[], provider?, permission_policy?}`（落 definitions 文件） |
 | PATCH | `/agents/:id` | 热更新 `{name?, runtimes?, provider?, permission_policy?}`（指针字段，nil 不更新） |
 | DELETE | `/agents/:id` | 删除 Agent（种子 agent 只读，报 `seed_agent_readonly`） |

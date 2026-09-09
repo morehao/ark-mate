@@ -372,3 +372,13 @@ sudo systemctl restart ark-forge
   **不阻塞启动实测**：慢 server（initialize 睡 4s）→ t+2s `GET /health` 立即 200（27ms）、快 server
   的工具已入目录，t+7s 慢 server 也完成（`slow_tool`）。`FORGE_MCP_AUTO_PROBE=bogus` → 启动即
   exit 2 并列出合法取值。
+- 原生权限映射（B5）：4 个 agent 的 runtime 子进程 env 实测——`dsh-ro-deny`/`dsh-native-ro`
+  `DSH_PERMISSION_MODE=read-only`、`dsh-native-full` `=danger-full-access`、`oc-nobash`
+  `OPENCODE_CONFIG_CONTENT={"permission":{"*":"ask","bash":"deny","edit":"deny"}}`（`ps eww -p <pid>` 读取）；
+  同一 runtime 不同原生配置**各自独立进程**（连接缓存键含原生 env 签名）。效果实测：
+  ① 隔离 ACP 客户端（无平台介入）read-only/workspace-write 写工作区外路径 →
+  `bash: ...: Operation not permitted` + `[sandbox: file access denied under <mode> mode]`，
+  danger-full-access 同命令直接成功；② 平台内 opencode 对照：无原生配置的 agent 收到
+  `session.permission_request`（`echo hi`），`bash:deny` 的 agent **无任何权限请求**；
+  ③ 平台内 dsh `default:deny` + read-only → 写入被沙箱拒绝、文件未生成、无挂起请求。
+  `FORGE_NATIVE_PERMISSION=off` → 两个 runtime 的子进程均无原生权限 env（实测）。

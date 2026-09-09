@@ -170,10 +170,11 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 		t.Fatalf("AgentResp 未暴露策略: %+v", found)
 	}
 
-	// PATCH 更新策略（并落盘）。
-	pol := &handler.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}}
+	// PATCH 更新策略（并落盘）；B5 起含 native_mode（原生权限模式）。
+	pol := &handler.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}, NativeMode: "danger-full-access"}
 	u, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{PermissionPolicy: pol})
-	if err != nil || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "allow" {
+	if err != nil || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "allow" ||
+		u.PermissionPolicy.NativeMode != "danger-full-access" {
 		t.Fatalf("PATCH 策略失败: %v %+v", err, u)
 	}
 	// PATCH 非法策略 → acl request 类 + 稳定 code（REST 层映射 40001），且内存不变。
@@ -184,6 +185,12 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	} else if !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" || ae.Class != acl.ClassRequest {
 		t.Fatalf("非法策略应为 request/invalid_permission_policy，got %v", err)
 	}
+	// B5：非法 native_mode 同样被拒（不静默生效）。
+	if _, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{
+		PermissionPolicy: &handler.PermissionPolicyResp{NativeMode: "yolo"},
+	}); err == nil || !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" {
+		t.Fatalf("非法 native_mode 应报 invalid_permission_policy，got %v", err)
+	}
 	if a, _ := svc.AgentByID("pol-echo"); a.PermissionPolicy.Default != "allow" {
 		t.Fatalf("非法 PATCH 不应改动内存策略: %+v", a.PermissionPolicy)
 	}
@@ -192,7 +199,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	svc2 := agentTestSvc(t, dir)
 	a2, ok := svc2.AgentByID("pol-echo")
 	if !ok || a2.PermissionPolicy == nil || a2.PermissionPolicy.Default != "allow" ||
-		a2.PermissionPolicy.Tools["write"] != "deny" {
+		a2.PermissionPolicy.Tools["write"] != "deny" || a2.PermissionPolicy.NativeMode != "danger-full-access" {
 		t.Fatalf("重启后策略未恢复: %+v ok=%v", a2, ok)
 	}
 

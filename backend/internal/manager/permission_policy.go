@@ -32,6 +32,11 @@ type PermissionPolicy struct {
 	Default string `json:"default,omitempty"`
 	// Tools 工具粒度动作：键 = 工具 title 或 ACP kind，值 = ask | allow | deny。
 	Tools map[string]string `json:"tools,omitempty"`
+	// NativeMode 原生权限模式（B5）：""/"auto" = 按 Default 推导；"off" = 不注入；
+	// "read-only"|"workspace-write"|"danger-full-access" = 显式指定。
+	// 仅对声明了原生开关的 runtime 生效（当前 deepseekharness 的 DSH_PERMISSION_MODE；
+	// opencode 用本策略的 default/tools 生成 permission 表，mode 只认 off）。
+	NativeMode string `json:"native_mode,omitempty"`
 }
 
 // Validate 校验策略取值（未知动作值报错，避免「写了但不生效」的静默失败）。
@@ -41,6 +46,9 @@ func (p *PermissionPolicy) Validate() error {
 	}
 	if err := validatePermissionAction(p.Default); err != nil {
 		return fmt.Errorf("permission_policy.default: %w", err)
+	}
+	if err := validateNativeMode(p.NativeMode); err != nil {
+		return fmt.Errorf("permission_policy.native_mode: %w", err)
 	}
 	for k, v := range p.Tools {
 		if strings.TrimSpace(k) == "" {
@@ -59,6 +67,16 @@ func validatePermissionAction(v string) error {
 		return nil
 	default:
 		return fmt.Errorf("动作 %q 非法（ask|allow|deny）", v)
+	}
+}
+
+// validateNativeMode 校验 native_mode 取值（空 = auto）。
+func validateNativeMode(v string) error {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", NativeModeAuto, NativeModeOff, NativeModeReadOnly, NativeModeWorkspaceWrite, NativeModeFullAccess:
+		return nil
+	default:
+		return fmt.Errorf("取值 %q 非法（%s）", v, strings.Join(ValidNativeModes, "|"))
 	}
 }
 
@@ -166,7 +184,7 @@ func toPermissionPolicyResp(p *PermissionPolicy) *handler.PermissionPolicyResp {
 	if p == nil {
 		return nil
 	}
-	return &handler.PermissionPolicyResp{Default: p.Default, Tools: p.Tools}
+	return &handler.PermissionPolicyResp{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
 }
 
 // fromPermissionPolicyResp 对外表示 → 内部策略（nil → nil）。
@@ -174,5 +192,5 @@ func fromPermissionPolicyResp(p *handler.PermissionPolicyResp) *PermissionPolicy
 	if p == nil {
 		return nil
 	}
-	return &PermissionPolicy{Default: p.Default, Tools: p.Tools}
+	return &PermissionPolicy{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
 }

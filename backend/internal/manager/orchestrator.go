@@ -77,7 +77,7 @@ type Orchestrator struct {
 	reg *runtime.Registry
 
 	mu            sync.Mutex
-	conns         map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
+	conns         map[string]*runtimeConn // key = connKey(runtime, 原生权限 env)；同配置共享暖进程
 	procReg       *procreg.Registry       // runtime 子进程注册表（孤儿回收；nil = 禁用）
 	conversations map[string]*ActiveConversation
 	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
@@ -115,6 +115,9 @@ type runtimeConn struct {
 	client  *acl.Client
 	agentID string
 	spec    runtime.Spec
+	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名）。同一 runtime 但原生权限配置不同的
+	// agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
+	key     string
 	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
 	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 }
@@ -673,10 +676,25 @@ func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
 	}
 }
 
+// connKey 计算连接缓存键：runtime ID + 原生权限 env 签名（B5）。
+// 同 runtime 且原生权限配置相同的 agent 共享暖进程；配置不同则各自独立进程。
+func connKey(runtimeID string, nativeEnv []string) string {
+	if len(nativeEnv) == 0 {
+		return runtimeID
+	}
+	return runtimeID + "\x00" + strings.Join(nativeEnv, "\x00")
+}
+
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec) (*runtimeConn, error) {
+	// B5 原生权限映射：把 agent 的 permission_policy 投影为底座原生权限开关
+	// （dsh: DSH_PERMISSION_MODE；opencode: OPENCODE_CONFIG_CONTENT 的 permission 表）。
+	// 先算 env 再定缓存键——权限开关是进程级，配置不同的 agent 不能复用同一子进程。
+	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
+	key := connKey(spec.ID, nativeEnv)
+
 	o.mu.Lock()
-	rc := o.conns[spec.ID]
+	rc := o.conns[key]
 	o.mu.Unlock()
 	if rc != nil {
 		select {
@@ -693,6 +711,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	if agent.Provider != "" {
 		env = o.svc.providerEnvFor(agent.Provider)
 	}
+	env = append(env, nativeEnv...)
 	logger := o.logger.With("runtime", spec.ID, "cmd", spec.Launch.Command)
 
 	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
@@ -748,10 +767,10 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		"close", sc.Close != nil)
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
-	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, started: time.Now()}
+	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, started: time.Now()}
 	o.registerProc(rc)
 	o.mu.Lock()
-	o.conns[spec.ID] = rc
+	o.conns[key] = rc
 	o.mu.Unlock()
 	go o.watchConn(rc)
 	return rc, nil
@@ -800,9 +819,9 @@ func (o *Orchestrator) watchConn(rc *runtimeConn) {
 func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	o.unregisterProc(rc)
 	o.mu.Lock()
-	ownerBefore := o.conns[rc.spec.ID] == rc
+	ownerBefore := o.conns[rc.key] == rc
 	if ownerBefore {
-		delete(o.conns, rc.spec.ID)
+		delete(o.conns, rc.key)
 	}
 	o.inflight.Clear(rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已清键为 no-op）
 	var victims []*ActiveConversation
@@ -1264,8 +1283,9 @@ func (o *Orchestrator) StartIdleReaper(interval, idle time.Duration) {
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
 // 空闲 → 关连接（watchConn/dropConn 清 conversations 与状态；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
+	key := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy))
 	o.mu.Lock()
-	rc := o.conns[spec.ID]
+	rc := o.conns[key]
 	busy := 0
 	if rc != nil {
 		busy = o.inflight.Len(rc.client)

@@ -77,6 +77,7 @@ func configCmd(args []string) {
 				"reap_grace":             cfg.ReapGrace.String(),
 				"token":                  maskToken(cfg.Token),
 				"mcp_auto_probe":         cfg.McpAutoProbe,
+				"native_permission":      cfg.NativePermission,
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
 			"sources":         sources,
@@ -113,6 +114,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "native_permission", emptyLabel(cfg.NativePermission), src("native_permission"))
 	if len(cfg.RemoteRuntimes) == 0 {
 		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
 	}
@@ -358,6 +360,11 @@ func serve(args []string) {
 	// 权限/elicitation 挂起超时（默认 30min；FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT 覆盖）。
 	orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	orch.SetElicitationTimeout(cfg.ElicitationTimeout)
+	// 原生权限映射（B5）：FORGE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
+	if cfg.NativePermission == config.NativePermissionOff {
+		svc.SetNativePermission(false)
+		slog.Info("serve: 原生权限映射已关闭（FORGE_NATIVE_PERMISSION=off）")
+	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（FORGE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	defer orch.Close()

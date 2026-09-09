@@ -1688,3 +1688,59 @@ MCP 行为）。
 ③ **同名工具冲突**（预存在的能力注册表语义）：Tool 目录以 name 为键，两个 server 暴露同名工具时
 后探测者覆盖前者，前者的 `tool_count` 会归零——需要工具命名空间的话要改目录模型（未做）；
 ④ 无「按 server 单独开关自动探测」的粒度；⑤ 探测失败不会重试（下次启动或手动触发）。
+
+#### 19.20 切片 B5：原生权限映射（完成）
+
+**动机**：`permission_policy` 此前只在**平台拦截面**生效——策略判定发生在 ACP
+`session/request_permission` 到达之后。底座自己的权限机制（沙箱模式、审批策略、工具级 permission 表）
+不联动会有两个缺口：① 底座「不问就执行」的工具，拦截面看不到；② 底座沙箱比策略更严/更松
+（策略放行了写文件，沙箱仍可能拒绝工作区外写入）。B5 在**启动时**把策略投影到底座原生开关，形成双层。
+
+**底座原生开关（源码/实测核实）**：
+- `deepseekharness`：`DSH_PERMISSION_MODE` ∈ `read-only|workspace-write|danger-full-access`
+  （`@deepseek-ai/dsh-base` patch 里 `sandbox-policy.config.mode` 与 `approval.config.policy` 都取自它：
+  仅 `danger-full-access` 时 approval=`never`）。沙箱实现是 macOS Seatbelt / Linux bwrap+Landlock；
+  `writableRoots` 仅 `workspace-write` 非空（= workspaceRoot + `/tmp` + `os.tmpdir()`），`read-only` 为空。
+- `opencode`：`OPENCODE_CONFIG_CONTENT` 内联 JSON 覆盖 `permission` 表（`*`/`bash`/`edit`/`read`/`webfetch`…），
+  值同为 `ask|allow|deny`；实测 `opencode debug config` 能读到注入值（`opencode acp` 无权限命令行开关）。
+
+**映射规则**（保守，不臆造）：
+| 策略 | dsh | opencode |
+| --- | --- | --- |
+| 未声明（nil） | 不注入 | 不注入 |
+| `default: deny` | `read-only` | `{"*":"deny"}` |
+| `default: ask/allow`（auto） | **不注入**（dsh 默认即 workspace-write，注入只会覆盖环境值） | 全 ask → 不注入 |
+| `tools` 键 | 不参与（dsh 无工具级开关） | 按别名映射到 permission 键；同键冲突取更严者；未映射键跳过并记日志 |
+| `native_mode` | 显式 `read-only/workspace-write/danger-full-access` 原样注入 | 只认 `off` |
+| `native_mode: off` / `FORGE_NATIVE_PERMISSION=off` | 不注入 | 不注入 |
+
+`default: allow` **不**自动升级为 `danger-full-access`：allow 的语义是「平台自动放行」，而
+danger-full-access 会同时关掉沙箱与审批——要完全放开必须显式写 `native_mode: danger-full-access`。
+
+**连接隔离**：原生权限是**进程级**配置，而此前连接缓存键是 runtime ID（同 runtime 的多个 agent 共享
+一条 ACP 连接）。B5 把键改为 `runtime + 原生权限 env 签名`：配置不同的 agent 各自独立子进程
+（`connKey`），配置相同仍共享暖进程。`LiveClient(runtimeID)` 相应改为返回该 runtime 任一活连接，
+`stopAgent` 按 agent 自己的键定位连接。
+
+**证据**：
+- 单测 `internal/manager/native_permission_test.go`：dsh 12 例（nil/ask/空/allow/deny/大小写/显式三模式/off/未知）、
+  opencode（别名映射、同键取更严、未映射键跳过并记说明、全 ask 不注入、空策略不注入、off 不注入）、
+  echo 降级说明、`native_mode` 校验、`connKey` 隔离与稳定性、Service 开关；
+  `TestAgentPermissionPolicyPersist` 扩展 `native_mode` 的 PATCH/落盘/重启恢复/非法值拒绝。
+- 隔离 ACP 客户端（`@agentclientprotocol/sdk`，不经平台）：同一写工作区外路径命令——
+  `read-only` → `Operation not permitted` + `[sandbox: file access denied under read-only mode]`（文件未生成）；
+  `workspace-write` → `[sandbox: file access denied under workspace-write mode]`（同上）；
+  `danger-full-access` → 成功写入。证明 `DSH_PERMISSION_MODE` 真实生效。
+- 平台真进程（daemon 10016）：`ps eww` 读到 4 个子进程的原生权限 env（见 deployment.md）；
+  opencode A/B（`oc-ask` 有挂起权限请求 / `oc-nobash` 无）；dsh `default:deny`+read-only 写入被拒且文件未生成；
+  `FORGE_NATIVE_PERMISSION=off` → 两个 runtime 均无注入。
+- 顺带修复：`eventbus.Subscribe` 固定 256 缓冲同步回放，历史 >256 且 after 小时**持锁死锁**
+  （`forge demo` 的 `Subscribe(0)` 必现，本次实测复现）→ 缓冲按回放条数分配 + 回归测试（独立提交 757cbba）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；`make all` 通过。
+
+**遗留/降级**：① 底座「不问就执行」的缺口只对**有原生开关**的 runtime 有效（echo 无开关；远程 runtime
+不注入）；② opencode 映射只覆盖已知权限键，未知键跳过（仍由拦截面裁决），且注入的 `permission` 表
+与用户全局配置的合并语义依赖底座实现（实测为覆盖 `permission` 段）；③ dsh 的 `read-only` 下底座会
+**发起沙箱升级请求**（`sandbox_permissions`），该请求走平台权限通道——策略 `allow` 时会被平台放行，
+即原生沙箱不构成对平台 allow 的否决；④ 原生配置在**连接建立时**固定，运行中 PATCH 策略只影响新连接
+（旧暖进程沿用旧配置，需 stop/start 或等空闲回收）；⑤ 未做「每 runtime 单独开关」粒度。

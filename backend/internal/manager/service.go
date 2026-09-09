@@ -33,6 +33,7 @@ type AgentRec struct {
 	// RoutingPolicy 路由策略声明（P2 §7）：first_available | capability_routed；空 = 默认。
 	RoutingPolicy string
 	// PermissionPolicy 默认权限策略（M2 #7）：nil = 全 ask（历史行为）。
+	// 注：B5 起该策略还会投影到底座原生权限开关（见 native_permission.go）。
 	PermissionPolicy *PermissionPolicy
 	State            string
 }
@@ -169,6 +170,11 @@ type Service struct {
 	// A3 诊断：每 agent 最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
 	diagMu   sync.Mutex
 	lastErrs map[string]agentLastErr
+
+	// B5 原生权限映射开关（FORGE_NATIVE_PERMISSION=off 关闭；默认开启）。
+	nativePermMu      sync.Mutex
+	nativePermEnabled bool
+	nativePermSet     bool
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
@@ -184,6 +190,8 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		mcpProbes:       make(map[string]mcpProbeStatus),
 		mcpProbeTimeout: defaultMCPProbeTimeout,
 		lastErrs:        make(map[string]agentLastErr),
+		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
+		nativePermEnabled: true,
 	}
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	for _, b := range builtinAgents {
@@ -202,6 +210,21 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 
 // SetBus 注入事件总线（Orchestrator 构造时调用；与 handler.New 共用同一 bus）。
 func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
+
+// SetNativePermission 开关 B5 原生权限映射（false = 不向底座注入权限配置）。
+func (s *Service) SetNativePermission(enabled bool) {
+	s.nativePermMu.Lock()
+	defer s.nativePermMu.Unlock()
+	s.nativePermEnabled = enabled
+	s.nativePermSet = true
+}
+
+// NativePermissionEnabled 读取 B5 开关（默认 true）。
+func (s *Service) NativePermissionEnabled() bool {
+	s.nativePermMu.Lock()
+	defer s.nativePermMu.Unlock()
+	return s.nativePermEnabled
+}
 
 // SetTranscriptDir 启用会话 wire transcript 落盘（目录不存在会自动创建；
 // dir 为空 = 禁用）。须在任何会话开始前调用（serve/demo 装配时）。

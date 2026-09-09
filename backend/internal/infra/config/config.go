@@ -89,12 +89,25 @@ type Config struct {
 	// Token 单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
 	// 非空时除 /health 外的所有 /v1/forge 路由都要求 Bearer token（WS 可用 ?token=）。
 	Token string
+	// NativePermission 原生权限映射开关（B5；FORGE_NATIVE_PERMISSION 覆盖，默认 auto）：
+	//   auto = 把 agent 的 permission_policy 投影到底座原生权限开关；
+	//   off  = 不注入（底座走自身默认，平台拦截面照常生效）。
+	NativePermission string
 	// McpAutoProbe MCP 自动探测模式（B4；FORGE_MCP_AUTO_PROBE 覆盖，默认 off）：
 	//   off      = 不自动探测（历史行为：只由 POST /mcps/:id/probe 显式触发）；
 	//   startup  = serve 启动后后台逐个探测全部已注册 MCP server（写 Tool 目录 + 探测状态）。
 	// 默认 off 是有意的：stdio server 探测会**拉起用户配置的子进程**，不宜默认执行。
 	McpAutoProbe string
 }
+
+// 原生权限映射开关取值。
+const (
+	NativePermissionAuto = "auto"
+	NativePermissionOff  = "off"
+)
+
+// ValidNativePermissionModes 合法取值（错误提示用）。
+var ValidNativePermissionModes = []string{NativePermissionAuto, NativePermissionOff}
 
 // MCP 自动探测模式取值。
 const (
@@ -140,6 +153,7 @@ func Default() Config {
 		ReapGrace:          DefaultReapGrace,
 		HandoffMaxChars:    DefaultHandoffMaxChars,
 		McpAutoProbe:       McpAutoProbeOff,
+		NativePermission:   NativePermissionAuto,
 	}
 }
 
@@ -162,6 +176,7 @@ var knownKeys = map[string]string{
 	"reap_grace":             "FORGE_REAP_GRACE",
 	"token":                  "FORGE_TOKEN",
 	"mcp_auto_probe":         "FORGE_MCP_AUTO_PROBE",
+	"native_permission":      "FORGE_NATIVE_PERMISSION",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -405,6 +420,18 @@ func materialize(r *resolver) (Config, error) {
 	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
+	}
+	if v, ok := r.get("native_permission"); ok {
+		mode := strings.ToLower(strings.TrimSpace(v))
+		switch mode {
+		case NativePermissionAuto, "":
+			c.NativePermission = NativePermissionAuto
+		case NativePermissionOff:
+			c.NativePermission = NativePermissionOff
+		default:
+			return bad("native_permission", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidNativePermissionModes, "|"), v))
+		}
 	}
 	if v, ok := r.get("mcp_auto_probe"); ok {
 		mode := strings.ToLower(strings.TrimSpace(v))

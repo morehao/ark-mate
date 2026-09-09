@@ -112,9 +112,15 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.Agent
 // LiveClient 返回某 runtime 当前连接（未断开时）；pid 为子进程号（0 = 未登记）。
 func (o *Orchestrator) LiveClient(runtimeID string) (*acl.Client, int, bool) {
 	o.mu.Lock()
-	rc := o.conns[runtimeID]
+	var rc *runtimeConn
+	for _, c := range o.conns {
+		if c.spec.ID == runtimeID && c.client != nil {
+			rc = c
+			break
+		}
+	}
 	o.mu.Unlock()
-	if rc == nil || rc.client == nil {
+	if rc == nil {
 		return nil, 0, false
 	}
 	select {

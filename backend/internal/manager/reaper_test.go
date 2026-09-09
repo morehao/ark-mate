@@ -25,7 +25,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	o.mu.Lock()
-	o.conns["echo"] = &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
+	o.conns["echo"] = &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
 	o.mu.Unlock()
 
 	n := o.reapIdleOnce(now, 5*time.Minute)
@@ -49,10 +49,10 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	old := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
+		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
 	}
 	fresh := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-time.Minute)}
+		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-time.Minute)}
 	}
 	busy := old()
 	withConversation := old()
@@ -84,8 +84,8 @@ func TestReapIdleOnceSkips(t *testing.T) {
 func TestReapThenReacquireState(t *testing.T) {
 	o, _ := testReapHarness(t)
 	now := time.Now()
-	old := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now.Add(-10 * time.Minute)}
-	newer := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, started: now}
+	old := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
+	newer := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now}
 	o.mu.Lock()
 	o.conns["echo"] = newer
 	o.mu.Unlock()

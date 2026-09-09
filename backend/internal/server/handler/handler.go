@@ -155,6 +155,9 @@ type PermissionPolicyResp struct {
 	Default string `json:"default,omitempty"`
 	// Tools 工具粒度动作：键 = 工具 title 或 ACP kind，值 = ask | allow | deny。
 	Tools map[string]string `json:"tools,omitempty"`
+	// NativeMode 原生权限模式（B5）：""/"auto" 推导；"off" 不注入；
+	// "read-only"|"workspace-write"|"danger-full-access" 显式指定（当前作用于 deepseekharness）。
+	NativeMode string `json:"native_mode,omitempty"`
 }
 
 // AgentCreateReq 注册自定义 agent（对既有 runtime 的命名配置，不写代码即新增）。
