@@ -50,8 +50,8 @@ type Service interface {
 	ListRuns(ctx context.Context, id string) ([]RunResp, error)
 	// ListPendingPermissions 列出某会话的挂起权限请求。
 	ListPendingPermissions(ctx context.Context, id string) ([]PermissionResp, error)
-	// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
-	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error
+	// ResolvePermission 按 call_id 决策（allow/reject × once/always），返回实际回执。
+	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*PermissionDecisionResp, error)
 	// ListPermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧，供详情/撤销 UI）。
 	ListPermissionMemories(ctx context.Context, id string) ([]MemoryResp, error)
 	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
@@ -613,6 +613,18 @@ type PermissionOptionResp struct {
 	OptionID string `json:"option_id"`
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
+}
+
+// PermissionDecisionResp 权限决策回执：描述**实际投递给 agent** 的决策与 ACP 回执形态
+// （不是请求参数回显——option_id 可能被兜底为第一个选项，或显式拒绝因无 deny 选项降级 cancelled）。
+type PermissionDecisionResp struct {
+	CallID           string `json:"call_id"`
+	Allowed          bool   `json:"allowed"`
+	Rejected         bool   `json:"rejected"`
+	Always           bool   `json:"always"`
+	OptionID         string `json:"option_id"`
+	Outcome          string `json:"outcome"`
+	SelectedOptionID string `json:"selected_option_id"`
 }
 
 // PermissionResolveReq 权限决策请求体。

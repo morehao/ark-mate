@@ -133,3 +133,49 @@ func pendingCallID(t *testing.T, m *PermissionManager, conversationID string) st
 	}
 	return ps[0].callID
 }
+
+// TestResolveDecisionReportsEffectiveOutcome 决策回执是「实际投递结果」而非请求参数回显：
+// option_id 缺省/无效时兜底为第一个选项，显式拒绝无 deny 选项时降级 cancelled。
+func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
+	cases := []struct {
+		name     string
+		options  []acl.PermissionOption
+		d        acl.PermissionDecision
+		kind     string
+		selected string
+	}{
+		{"放行+指定选项", []acl.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			acl.PermissionDecision{Allowed: true, OptionID: "allow_always"}, acl.OutcomeSelected, "allow_always"},
+		{"放行+缺省→第一个", []acl.PermissionOption{{OptionID: "allow_once"}, {OptionID: "allow_always"}},
+			acl.PermissionDecision{Allowed: true}, acl.OutcomeSelected, "allow_once"},
+		{"放行+无效→第一个", []acl.PermissionOption{{OptionID: "allow_once"}},
+			acl.PermissionDecision{Allowed: true, OptionID: "nope"}, acl.OutcomeSelected, "allow_once"},
+		{"拒绝+deny 选项→selected", []acl.PermissionOption{{OptionID: "reject_once"}},
+			acl.PermissionDecision{Rejected: true, OptionID: "reject_once"}, acl.OutcomeSelected, "reject_once"},
+		{"拒绝+无 deny 选项→cancelled", []acl.PermissionOption{{OptionID: "allow_once"}},
+			acl.PermissionDecision{Rejected: true}, acl.OutcomeCancelled, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewPermissionManager(2 * time.Second)
+			req := acl.PermissionRequest{ToolCall: acl.ToolCallInfo{ID: "tc1", Title: "运行命令"}, Options: tc.options}
+			got := make(chan acl.PermissionDecision, 1)
+			go func() { got <- m.RegisterAndWait(context.Background(), "s1", req, nil) }()
+			waitRegistered(t, m, "s1")
+			callID := pendingCallID(t, m, "s1")
+			found, out := m.ResolveDecision(callID, tc.d)
+			if !found {
+				t.Fatal("决策未命中 call_id")
+			}
+			if out.Kind != tc.kind || out.OptionID != tc.selected {
+				t.Fatalf("回执期望 (%s,%q)，得到 (%s,%q)", tc.kind, tc.selected, out.Kind, out.OptionID)
+			}
+			<-got // 等消费者退出，避免泄漏
+		})
+	}
+	// 未知 call_id：found=false + 零值回执（不猜测）。
+	m := NewPermissionManager(time.Second)
+	if found, out := m.ResolveDecision("no-such", acl.PermissionDecision{Allowed: true}); found || out.Kind != "" {
+		t.Fatalf("未知 call_id 应为 (false, 零值)，得到 (%v,%+v)", found, out)
+	}
+}

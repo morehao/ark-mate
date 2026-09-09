@@ -382,31 +382,48 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 	return d
 }
 
-// resolve 按 call_id 投递一次决策；返回是否存在该挂起请求。
-func (m *PermissionManager) resolve(callID string, d acl.PermissionDecision) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.pending[callID]
-	if !ok {
-		return false
-	}
-	// 非阻塞投递（通道容量 1）。若消费者（RegisterAndWait）已退出，静默丢弃。
-	select {
-	case p.ch <- d:
-	default:
-	}
-	return true
-}
-
 // ResolveAllow 允许（选中指定/第一个可选项）。带 always 标记会话级始终允许。
 func (m *PermissionManager) ResolveAllow(callID, optionID string, always bool) bool {
-	return m.resolve(callID, acl.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision(callID, acl.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
+	return ok
 }
 
 // ResolveReject 显式拒绝。optionID 为所选 deny 选项（ACP 层会 Selected 回执，agent 可区分拒绝与取消）；
 // always=true 时记录会话级「始终拒绝」记忆。
 func (m *PermissionManager) ResolveReject(callID, optionID string, always bool) bool {
-	return m.resolve(callID, acl.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision(callID, acl.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
+	return ok
+}
+
+// DecisionOutcome 是一次权限决策的**实际回执**（投递给 agent 的 ACP 结果），供 REST 回执如实描述。
+type DecisionOutcome struct {
+	// Kind ACP 回执形态：selected | cancelled（acl.OutcomeSelected/OutcomeCancelled）。
+	Kind string
+	// OptionID 实际选中的 option_id（Kind=cancelled 时为空）。
+	OptionID string
+}
+
+// ResolveDecision 投递一次决策并返回**实际回执**（按该请求的 options 计算，与 ACP 层同一规则，
+// 见 acl.EffectivePermissionOutcome）：请求不存在/已过期时 found=false、回执为零值。
+// 这是 REST 回执的事实来源——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
+func (m *PermissionManager) ResolveDecision(callID string, d acl.PermissionDecision) (found bool, out DecisionOutcome) {
+	if callID == "" {
+		return false, DecisionOutcome{}
+	}
+	m.mu.Lock()
+	p, ok := m.pending[callID]
+	if !ok {
+		m.mu.Unlock()
+		return false, DecisionOutcome{}
+	}
+	kind, oid := acl.EffectivePermissionOutcome(d, p.options)
+	// 非阻塞投递（通道容量 1）。若消费者（RegisterAndWait）已退出，静默丢弃。
+	select {
+	case p.ch <- d:
+	default:
+	}
+	m.mu.Unlock()
+	return true, DecisionOutcome{Kind: kind, OptionID: oid}
 }
 
 // PermissionItem 是一条挂起权限请求的对外表示（REST/WS 载荷；options 为 ACP 可读子集）。

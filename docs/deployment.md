@@ -423,3 +423,12 @@ sudo systemctl restart ark-forge
   脚本记 PASS 并注明降级（不再误报 FAIL）；**sqlite 模式**下做完整形状断言
   （`source=sqlite`、`group_by=agent|day` 分桶、非法 `group_by=tool` → 40001）。两种模式实测均
   `✅ 通路全部 PASS`。
+- 权限决策回执（C5）：真进程（release 二进制 127.0.0.1:10023，echo agent，选项
+  `allow-once/allow-all/reject-once/reject-all`）：
+  - **放行但不传 option_id** → `{"allowed":true,"rejected":false,"option_id":"","outcome":"selected",
+    "selected_option_id":"allow-once"}`——回执给出兜底选中的选项（证明不是参数回显）；
+    同一会话事件里 agent 回「已授权（允许一次）。模拟执行完成：`echo hello` → hello。」
+  - **拒绝且传无效 option_id（`nope`）** → `{"rejected":true,"option_id":"nope","outcome":"cancelled",
+    "selected_option_id":""}`，agent 回「未获授权（决策被拒绝或取消，按 ACP 语义即 Cancelled）」；
+  - **拒绝且传有效 `reject-once`** → `outcome=selected`、`selected_option_id=reject-once`，
+    agent 回「已拒绝（拒绝一次）」——回执与 agent 侧行为一致。

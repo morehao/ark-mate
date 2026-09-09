@@ -1062,17 +1062,37 @@ func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionIte
 	return out
 }
 
-// ResolvePermission 按 call_id 投递决策（allow/reject × once/always）。
+// ResolvePermission 按 call_id 投递决策（allow/reject × once/always），并返回**实际回执**
+// （ACP 形态 selected/cancelled + 有效 option_id；规则见 acl.EffectivePermissionOutcome）。
 // 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
-func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowed bool) (bool, error) {
+func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
 	if callID == "" {
-		return false, acl.NewError(acl.ClassRequest, "call_id_required", "call_id 必填", nil)
+		return PermissionDecisionOutcome{}, false, acl.NewError(acl.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
-	if allowed {
-		return o.perm.ResolveAllow(callID, optionID, always), nil
+	d := acl.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
+	found, out := o.perm.ResolveDecision(callID, d)
+	if !found {
+		return PermissionDecisionOutcome{}, false, nil
 	}
-	return o.perm.ResolveReject(callID, optionID, always), nil
+	return PermissionDecisionOutcome{
+		Allowed:  d.Allowed,
+		Rejected: d.Rejected,
+		Always:   d.Always,
+		OptionID: optionID,
+		Kind:     out.Kind,
+		Selected: out.OptionID,
+	}, true, nil
+}
+
+// PermissionDecisionOutcome 是权限决策的对外回执（REST 响应字段来源；不含任何请求参数回显猜测）。
+type PermissionDecisionOutcome struct {
+	Allowed  bool   // 决策是否放行
+	Rejected bool   // 决策是否显式拒绝
+	Always   bool   // 是否要求写入会话级记忆
+	OptionID string // 请求里指定的 option_id（原样回带，便于前端核对）
+	Kind     string // 实际 ACP 回执形态：selected | cancelled
+	Selected string // 实际选中的 option_id（Kind=cancelled 时为空）
 }
 
 // PermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧；供详情/撤销 UI）。

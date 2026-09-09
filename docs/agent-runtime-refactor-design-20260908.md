@@ -1875,3 +1875,32 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 该 runtime 不再声明时由它删除，别的 runtime 的重校不会代删——可能残留，推荐按 runtime 分 root；
 ② 未做「按 agent/cwd 动态 root」（仍是启动时按配置物化）；③ 未做 skill 文件变更热重载
 （`serve` 启动重校 + 后续 REST 变更时重校，见既有实现）；④ dsh 的 `.system`/可选键仍未平台化映射。
+
+#### 19.25 切片 C5：权限决策回执如实化（完成）
+
+**问题**：`POST /conversations/:id/permission` 的响应是 `{"call_id":…, "allowed": <请求里的布尔>}`——
+纯参数回显。但**实际投递结果可能与请求不同**：`option_id` 缺省/无效时 ACP 层兜底选第一个选项；
+显式拒绝在 agent 未提供 deny 选项时降级 `Cancelled`。前端/脚本若按该字段判断，会得到与 agent 实收不符的
+「能力假象」（例如传 `rejected` 语义却看到 `allowed:false`，或以为选中了某个不存在的选项）。
+
+**实现**：
+1. `acl.EffectivePermissionOutcome(d, opts) (kind, optionID)`：决策 → ACP 回执形态的**唯一事实源**
+   （`OutcomeSelected`/`OutcomeCancelled` 常量 + 规则注释），`permissionResponseFromDecision` 改为调用它
+   （顺带把 `permissionRequestFromSDK` 的选项折叠抽成 `toPermissionOptions`）。
+2. `PermissionManager.ResolveDecision(callID, d) (found bool, DecisionOutcome)`：在持锁下按该请求的
+   options 计算回执再投递；`ResolveAllow/ResolveReject` 变薄封装（旧调用点与测试不变）。
+   旧的私有 `resolve` 删除（语义并入 `ResolveDecision`）。
+3. `Orchestrator.ResolvePermission(...) (PermissionDecisionOutcome, bool, error)`；
+   `Service.ResolvePermission(...) (*handler.PermissionDecisionResp, error)`；
+   handler 直接回 `{call_id, allowed, rejected, always, option_id, outcome, selected_option_id}`。
+4. 前端 `@ark/types` 的 `ResolvePermissionResp` 同步扩字段（面板不改行为，仍以 WS 事件收敛卡片）。
+
+**证据**：
+- 单测：`acl.TestEffectivePermissionOutcome`（8 例矩阵：放行指定/缺省/无效/无选项、拒绝 deny/无 deny/无效、
+  取消超时）、`manager.TestResolveDecisionReportsEffectiveOutcome`（5 例 + 未知 call_id → found=false 零值）、
+  `handler.TestResolvePermissionReceiptShape`（REST 字段齐备 + 拒绝分支 rejected=true）。
+- 真进程：见 deployment.md（三种决策的回执与 agent 侧实际行为逐条一致）。
+- `go vet` + `go test -race -count=1 ./...` 全绿；前端 `tsc -b --noEmit` 通过。
+
+**遗留**：回执里的 `always` 是**请求意图**（是否要求写会话级记忆），不是「记忆是否真的写入」——
+记忆副作用仍以 `GET /conversations/:id/permissions/memories` 为事实源（避免在回执里复述内部副作用）。

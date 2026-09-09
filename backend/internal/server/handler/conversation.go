@@ -113,11 +113,12 @@ func (h *ConversationHandler) ResolvePermission(c *gin.Context) {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
 	}
-	if err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed); err != nil {
+	resp, err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
+	if err != nil {
 		gincontext.Fail(c, err)
 		return
 	}
-	gincontext.Success(c, gin.H{"call_id": req.CallID, "allowed": req.Allowed})
+	gincontext.Success(c, resp)
 }
 
 // Elicitations 列出会话的挂起结构化提问（elicitation/create 表单/URL 卡）。

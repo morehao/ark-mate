@@ -399,19 +399,29 @@ func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]hand
 	return out, nil
 }
 
-// ResolvePermission 按 call_id 决策（allow/reject × once/always）。
-func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) error {
+// ResolvePermission 按 call_id 决策（allow/reject × once/always），返回**实际投递给 agent 的回执**
+// （allowed/rejected/always/请求 option_id + ACP 形态 outcome/selected_option_id），
+// 供 REST 如实回执——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
+func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*handler.PermissionDecisionResp, error) {
 	if s.orch == nil {
-		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	ok, err := s.orch.ResolvePermission(callID, optionID, always, allowed)
+	out, ok, err := s.orch.ResolvePermission(callID, optionID, always, allowed)
 	if err != nil {
-		return s.restErr(err)
+		return nil, s.restErr(err)
 	}
 	if !ok {
-		return s.restErr(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
 	}
-	return nil
+	return &handler.PermissionDecisionResp{
+		CallID:           callID,
+		Allowed:          out.Allowed,
+		Rejected:         out.Rejected,
+		Always:           out.Always,
+		OptionID:         out.OptionID,
+		Outcome:          out.Kind,
+		SelectedOptionID: out.Selected,
+	}, nil
 }
 
 // PendingPermissions 直接透传编排器的挂起权限（供 GetConversation/ListPendingPermissions 复用）。

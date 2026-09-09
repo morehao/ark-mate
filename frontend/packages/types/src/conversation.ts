@@ -118,9 +118,22 @@ export interface ResolvePermissionReq {
   allowed: boolean
 }
 
+/**
+ * 决策回执：描述**实际投递给 agent** 的结果（不是请求参数回显）。
+ * `option_id` 可能被兜底为第一个选项，或显式拒绝因无 deny 选项降级 `cancelled`——
+ * 以 `outcome`/`selected_option_id` 为准。
+ */
 export interface ResolvePermissionResp {
   call_id: string
   allowed: boolean
+  rejected: boolean
+  always: boolean
+  /** 请求里指定的 option_id（原样回带，便于核对）。 */
+  option_id: string
+  /** 实际 ACP 回执形态。 */
+  outcome: 'selected' | 'cancelled'
+  /** 实际选中的 option_id（outcome=cancelled 时为空串）。 */
+  selected_option_id: string
 }
 
 // ——— 结构化提问通道（ACP elicitation/* ↔ 用户提交） ———

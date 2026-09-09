@@ -38,8 +38,10 @@ type stubSvc struct {
 	exportResp *handler.ExportResp
 	exportErr  error
 
-	agentErr    error  // P2 管理面桩错误注入
-	agentAction string // 最近一次 delete/start/stop 动作（P2 桩）
+	agentErr        error                           // P2 管理面桩错误注入
+	resolvePermErr  *gerror.Error                   // 权限决策桩错误注入
+	resolvePermResp *handler.PermissionDecisionResp // 权限决策桩回执（nil = 默认构造）
+	agentAction     string                          // 最近一次 delete/start/stop 动作（P2 桩）
 
 	providerErr error // P2 provider 桩错误注入
 	providers   []handler.ProviderResp
@@ -364,8 +366,14 @@ func (s *stubSvc) UpdateConversation(_ context.Context, id string, patch handler
 func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]handler.PermissionResp, error) {
 	return nil, nil
 }
-func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) error {
-	return nil
+func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*handler.PermissionDecisionResp, error) {
+	if s.resolvePermErr != nil {
+		return nil, *s.resolvePermErr
+	}
+	return &handler.PermissionDecisionResp{
+		CallID: callID, Allowed: allowed, Rejected: !allowed, Always: always,
+		OptionID: optionID, Outcome: "selected", SelectedOptionID: optionID,
+	}, nil
 }
 func (s *stubSvc) ListPermissionMemories(_ context.Context, id string) ([]handler.MemoryResp, error) {
 	return s.memList, nil
@@ -1343,5 +1351,40 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		if env, code := do(t, r, "GET", tc.path, ""); code != 200 || env.Code != tc.want {
 			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
 		}
+	}
+}
+
+// TestResolvePermissionReceiptShape C5：POST /conversations/:id/permission 回执描述
+// **实际投递结果**（allowed/rejected/always/请求 option_id/outcome/selected_option_id），
+// 不再是 `{call_id, allowed}` 的请求参数回显。
+func TestResolvePermissionReceiptShape(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+	env, code := do(t, r, "POST", "/v1/forge/conversations/s1/permission",
+		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("决策信封不符: code=%d env=%+v", code, env)
+	}
+	var resp handler.PermissionDecisionResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("回执解析失败: %v data=%s", err, env.Data)
+	}
+	if resp.CallID != "tc1" || !resp.Allowed || resp.Rejected || !resp.Always ||
+		resp.OptionID != "allow_always" || resp.Outcome != "selected" || resp.SelectedOptionID != "allow_always" {
+		t.Fatalf("回执字段不符: %+v", resp)
+	}
+	for _, key := range []string{`"rejected"`, `"always"`, `"outcome"`, `"selected_option_id"`} {
+		if !strings.Contains(string(env.Data), key) {
+			t.Fatalf("回执缺字段 %s: %s", key, env.Data)
+		}
+	}
+	// 拒绝决策：rejected=true、allowed=false（不再出现「allowed:false 但语义是拒绝」的含糊回执）。
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/permission",
+		`{"call_id":"tc2","option_id":"reject_once","allowed":false}`)
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("拒绝回执解析失败: %v", err)
+	}
+	if resp.Allowed || !resp.Rejected || resp.OptionID != "reject_once" {
+		t.Fatalf("拒绝回执字段不符: %+v", resp)
 	}
 }
