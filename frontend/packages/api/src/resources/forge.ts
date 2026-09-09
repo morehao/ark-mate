@@ -1,6 +1,7 @@
 import { http } from '../request'
 import type {
   Agent,
+  AgentCapabilities,
   Provider,
   ProviderPatch,
   BusEvent,
@@ -9,6 +10,7 @@ import type {
   CreateConversationResp,
   ElicitationResp,
   McpServer,
+  McpProbeResult,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -106,6 +108,16 @@ export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/forge/skil
 export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/forge/mcps')
 
 export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/forge/tools')
+
+// ——— P2 §8.1/§5.2：Agent 统一能力目录 + MCP live 探测 ———
+
+/** 某 Agent 的统一能力目录（skills 已按候选 runtime 裁剪；MCP 带 enabled/runtimes 标注）。 */
+export const getAgentCapabilities = (agentId: string): Promise<AgentCapabilities> =>
+  http.get<AgentCapabilities>(`/forge/agents/${encodeURIComponent(agentId)}/capabilities`)
+
+/** 对某 MCP server 做一次 live tools/list 探测（结果写 Tool 目录，返回本轮增删）。 */
+export const probeMcpServer = (id: string): Promise<McpProbeResult> =>
+  http.post<McpProbeResult>(`/forge/mcps/${encodeURIComponent(id)}/probe`)
 
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 

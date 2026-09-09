@@ -81,6 +81,32 @@ async function checkRest() {
   )
   if (badId) return bad('会话 id 形状', `应平台 uuid，got ${JSON.stringify(badId.id)}`)
   ok(`GET /conversations → 数组信封（id 全为平台 uuid；${convs.env.data.length} 条）`)
+
+  // P2 §8.1 能力卡数据源：Agent 统一能力目录（形状 + agent_id 一致）。
+  const caps = await apiGet(`/agents/${encodeURIComponent(a0.id)}/capabilities`)
+  if (caps.env.code !== 0) return bad('GET /agents/:id/capabilities 信封', JSON.stringify(caps.env))
+  const cap = caps.env.data
+  for (const key of ['agent_id', 'runtimes', 'skills', 'mcp_servers', 'tools']) {
+    if (!(key in cap)) return bad('能力目录载荷', `缺字段 ${key}`)
+  }
+  if (cap.agent_id !== a0.id || !Array.isArray(cap.runtimes) || !Array.isArray(cap.mcp_servers)) {
+    return bad('能力目录载荷', `agent_id/runtimes/mcp_servers 不符: ${JSON.stringify(cap).slice(0, 200)}`)
+  }
+  const m0 = cap.mcp_servers[0]
+  if (m0) {
+    for (const key of ['id', 'transport', 'enabled', 'runtimes']) {
+      if (!(key in m0)) return bad('能力目录 MCP 条目', `缺字段 ${key}`)
+    }
+  }
+  ok(`GET /agents/:id/capabilities → agent_id 一致（skills=${cap.skills.length} mcps=${cap.mcp_servers.length} tools=${cap.tools.length}）`)
+
+  // P2 §5.2 探测状态字段（能力卡「探测」列渲染依据）。
+  const mcps = await apiGet('/mcps')
+  if (mcps.env.code !== 0 || !Array.isArray(mcps.env.data)) return bad('GET /mcps', JSON.stringify(mcps.env))
+  if (mcps.env.data.length > 0 && !('tool_count' in mcps.env.data[0])) {
+    return bad('GET /mcps 载荷', 'McpServer 缺探测状态字段 tool_count')
+  }
+  ok(`GET /mcps → 数组信封（含 tool_count 等探测状态；${mcps.env.data.length} 条）`)
 }
 
 // ——— 2. REST 业务错误信封 ———
@@ -97,6 +123,15 @@ async function checkBizError() {
     ok(`POST /conversations 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
   } else {
     bad('POST /conversations 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
+  }
+
+  // P2 §5.2 未知 MCP server 探测 → 40401（前端 HttpError 提示依据；不真的 spawn 任何进程）。
+  const pr = await fetch(API + '/mcps/no-such-server/probe', { method: 'POST' })
+  const pEnv = await pr.json()
+  if (pr.status === 200 && pEnv.code === 40401) {
+    ok(`POST /mcps/:id/probe 未知 server → HTTP 200 code=${pEnv.code}`)
+  } else {
+    bad('POST /mcps/:id/probe 未知 server', `http=${pr.status} ${JSON.stringify(pEnv)}`)
   }
 }
 

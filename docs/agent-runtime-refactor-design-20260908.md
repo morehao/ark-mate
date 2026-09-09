@@ -446,7 +446,7 @@ func Resolve(ctx context.Context, agent agent.Agent, conv conversation.Conversat
 
 - 「选底座」胶囊栏 → 「选 Agent」（`StartPage.tsx:106-153`、`ChatPage.tsx:303`）；
 - Runtimes 页移出主导航，并入「高级设置」；
-- 能力卡（Skills / MCP / Tools）新增，数据来自 `/agents/:id/capabilities`。
+- 能力卡（Skills / MCP / Tools）新增，数据来自 `/agents/:id/capabilities`（2026-09-09 落地，见 §19.3）。
 
 ---
 
@@ -960,3 +960,33 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 
 **遗留（有据，非本次）**：MCP 工具**执行**（tools/call）不在平台范围（平台只做目录化 + 注入）；
 `resources`/`prompts` 目录化未做；`sse` 传输未支持；探测为显式触发，未做定时/启动自动探测。
+
+#### 19.3 切片 G3：前端能力卡（完成）
+
+**落地**：
+
+- `packages/types/src/capability.ts`：新增 `AgentCapabilities`/`AgentSkill`/`AgentMcpServer`/
+  `McpProbeResult`；`McpServer` 增 `tool_count`/`last_probe_at`/`last_probe_error`，`Tool` 增
+  `mcp_server` 归属。
+- `packages/api`：`getAgentCapabilities(agentId)`、`probeMcpServer(id)`。
+- `apps/panel/src/console/capabilityView.ts`（纯函数，可 Node 侧校验）：`mcpRows` 合并「Agent 视角
+  MCP 条目（enabled/runtimes）」与「全局注册表（探测状态）」→ 行模型；`probeSummary` 生成探测
+  结果摘要；`toolSourceLabel` 展示 mcp 工具归属；`fmtProbeAt` 时间格式化。
+- `CapabilitiesPage`：新增「Agent 视角」卡片（Agent 选择器 → skills/MCP/tools 三组 + 候选底座 +
+  notes 降级提示），MCP 行展示 `已启用/未启用`、可承载底座、探测状态（工具数/未探测/失败原因），
+  并提供「探测」按钮（**sse 禁用并说明原因**，不臆造）；全局三张表保留（无回归），MCP 段同享探测
+  按钮与状态。探测成功/失败都刷新全局表 + 当前 Agent 视图（失败原因经 `last_probe_error` 读回）。
+
+**证据**：
+
+- `pnpm typecheck` + `pnpm --filter @ark/panel typecheck` + `pnpm build` 全绿。
+- 真实联调（vite dev :5173 → forge serve :8099，sqlite + caps fixtures）：`smoke:e2e` 全 PASS，
+  新增断言「`/agents/:id/capabilities` 形状 + agent_id 一致」「`/mcps` 含 tool_count 等探测状态」
+  「未知 server 探测 → 40401」；经 vite proxy 触发 stdio 探测（`forge-demo-mcp 0.2.0`，added=2）
+  与 streamable_http 探测（`forge-http-mcp 0.3.0`，added=1），`/mcps` 状态回读正确；
+  `alias-echo`（白名单 fs_demo）只见 `fs_read`，`mix`（无白名单）见全部 mcp 工具 —— 与后端
+  可见性规则一致。
+- 代码级：vite lib 打包真实 `capabilityView.ts` 后在 Node 调用 `mcpRows`/`probeSummary`/
+  `toolSourceLabel`/`fmtProbeAt`，合并语义、sse 不可探测、归属标签、时间格式化均 PASS。
+
+**遗留**：浏览器视觉走查仍缺（环境无浏览器）；探测为手动触发（未做定时/启动自动探测）。
