@@ -42,6 +42,8 @@ type agentDefinitionFile struct {
 	// 缺省/空 = first_available；capability_routed 下若声明 Mcps 白名单，则只在能承载
 	// 所需 MCP transport 的 runtime 里选。未知值回退默认（解析见 Service.ResolveRuntime）。
 	RoutingPolicy string `json:"routing_policy,omitempty"`
+	// PermissionPolicy 默认权限策略（M2 #7）：缺省 = 全 ask（行为与历史一致）。
+	PermissionPolicy *PermissionPolicy `json:"permission_policy,omitempty"`
 }
 
 // LoadAgentDefinitions 加载 definitions 目录并合并到 agents 表（启动时调用；
@@ -97,6 +99,9 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 			return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
 		}
 	}
+	if err := d.PermissionPolicy.Validate(); err != nil {
+		return acl.NewError(acl.ClassRequest, "invalid_permission_policy", err.Error(), nil)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cur, exists := s.agents[d.ID]; exists {
@@ -118,11 +123,14 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 		if d.RoutingPolicy != "" {
 			cur.RoutingPolicy = d.RoutingPolicy
 		}
+		if d.PermissionPolicy != nil {
+			cur.PermissionPolicy = d.PermissionPolicy
+		}
 		return nil
 	}
 	s.agents[d.ID] = &AgentRec{
 		ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, Mcps: d.Mcps,
-		RoutingPolicy: d.RoutingPolicy, State: AgentStateStopped,
+		RoutingPolicy: d.RoutingPolicy, PermissionPolicy: d.PermissionPolicy, State: AgentStateStopped,
 	}
 	return nil
 }
@@ -136,7 +144,8 @@ func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 	if req.Name == "" {
 		req.Name = req.ID
 	}
-	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider}
+	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider,
+		PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
 	if err := s.applyDefinition(d, false); err != nil {
 		return nil, err
 	}
@@ -172,6 +181,14 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 	}
 	if patch.Provider != nil {
 		cur.Provider = *patch.Provider
+	}
+	if patch.PermissionPolicy != nil {
+		pol := fromPermissionPolicyResp(patch.PermissionPolicy)
+		if err := pol.Validate(); err != nil {
+			s.mu.Unlock()
+			return nil, acl.NewError(acl.ClassRequest, "invalid_permission_policy", err.Error(), nil)
+		}
+		cur.PermissionPolicy = pol
 	}
 	s.mu.Unlock()
 	if err := s.syncAgentDef(id); err != nil {
@@ -295,7 +312,8 @@ func (s *Service) syncAgentDef(id string) error {
 		return nil
 	}
 	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes,
-		Provider: cur.Provider, Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy})
+		Provider: cur.Provider, Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy,
+		PermissionPolicy: cur.PermissionPolicy})
 }
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
@@ -306,5 +324,6 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 	if !ok {
 		return nil
 	}
-	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State, IsDefault: a.IsDefault()}
+	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
+		IsDefault: a.IsDefault(), PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
 }

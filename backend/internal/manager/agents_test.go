@@ -2,10 +2,13 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -127,5 +130,80 @@ func TestAgentStartStopGuards(t *testing.T) {
 	}
 	if err := svc.StartAgent(ctx, "nope"); err == nil {
 		t.Fatal("未知 agent 应拒绝")
+	}
+}
+
+// TestAgentPermissionPolicyPersist M2 #7：permission_policy 定义加载 → AgentResp 只读面 →
+// PATCH 校验/热更新 → 落盘 → 重启可恢复；非法动作的定义文件被跳过（不静默生效）。
+func TestAgentPermissionPolicyPersist(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "agents")
+	_ = os.MkdirAll(dir, 0o755)
+	// 定义文件带策略 + 一个非法策略（应跳过）。
+	_ = os.WriteFile(filepath.Join(dir, "pol-echo.json"),
+		[]byte(`{"id":"pol-echo","name":"策略echo","runtimes":["echo"],"permission_policy":{"default":"deny","tools":{"bash":"allow"}}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "bad-pol.json"),
+		[]byte(`{"id":"bad-pol","runtimes":["echo"],"permission_policy":{"tools":{"bash":"yes"}}}`), 0o644)
+	svc := agentTestSvc(t, dir)
+
+	a, ok := svc.AgentByID("pol-echo")
+	if !ok || a.PermissionPolicy == nil || a.PermissionPolicy.Default != "deny" ||
+		a.PermissionPolicy.Decide("bash", "execute") != PermissionAllow {
+		t.Fatalf("策略定义未加载: %+v ok=%v", a, ok)
+	}
+	if _, ok := svc.AgentByID("bad-pol"); ok {
+		t.Fatal("非法策略定义应被跳过")
+	}
+
+	// REST 只读面（GET /agents 的 AgentResp）暴露策略。
+	list, err := svc.ListAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *handler.AgentResp
+	for i := range list {
+		if list[i].ID == "pol-echo" {
+			found = &list[i]
+		}
+	}
+	if found == nil || found.PermissionPolicy == nil || found.PermissionPolicy.Tools["bash"] != "allow" {
+		t.Fatalf("AgentResp 未暴露策略: %+v", found)
+	}
+
+	// PATCH 更新策略（并落盘）。
+	pol := &handler.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}}
+	u, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{PermissionPolicy: pol})
+	if err != nil || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "allow" {
+		t.Fatalf("PATCH 策略失败: %v %+v", err, u)
+	}
+	// PATCH 非法策略 → acl request 类 + 稳定 code（REST 层映射 40001），且内存不变。
+	bad := &handler.PermissionPolicyResp{Default: "sometimes"}
+	var ae *acl.Error
+	if _, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{PermissionPolicy: bad}); err == nil {
+		t.Fatal("非法策略应报错")
+	} else if !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" || ae.Class != acl.ClassRequest {
+		t.Fatalf("非法策略应为 request/invalid_permission_policy，got %v", err)
+	}
+	if a, _ := svc.AgentByID("pol-echo"); a.PermissionPolicy.Default != "allow" {
+		t.Fatalf("非法 PATCH 不应改动内存策略: %+v", a.PermissionPolicy)
+	}
+
+	// 重启加载：策略随定义文件恢复。
+	svc2 := agentTestSvc(t, dir)
+	a2, ok := svc2.AgentByID("pol-echo")
+	if !ok || a2.PermissionPolicy == nil || a2.PermissionPolicy.Default != "allow" ||
+		a2.PermissionPolicy.Tools["write"] != "deny" {
+		t.Fatalf("重启后策略未恢复: %+v ok=%v", a2, ok)
+	}
+
+	// CreateAgent 带策略 → 落盘 + 可读回。
+	created, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "new-pol", Runtimes: []string{"echo"},
+		PermissionPolicy: &handler.PermissionPolicyResp{Default: "deny"}})
+	if err != nil || created.PermissionPolicy == nil || created.PermissionPolicy.Default != "deny" {
+		t.Fatalf("CreateAgent 带策略失败: %v %+v", err, created)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "new-pol.json"))
+	if !strings.Contains(string(b), `"permission_policy"`) {
+		t.Fatalf("策略未落盘: %s", b)
 	}
 }

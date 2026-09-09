@@ -871,6 +871,22 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
 	}
+	// M2 #7 per-agent 默认权限策略：运维护栏优先于会话级记忆（策略 allow/deny 直接决策，
+	// 不经用户；审计事件 session.permission_policy 留痕）。ask/未声明 → 回落既有路径。
+	if action, agentID, ok := o.policyAction(sid, req); ok {
+		if d, dok := autoPermissionDecision(action, req.Options); dok {
+			o.svc.publish(BusPermissionPolicy, sid, map[string]any{
+				"session_id": sid, "agent_id": agentID, "action": action,
+				"title": req.ToolCall.Title, "kind": req.ToolCall.Kind,
+				"allowed": d.Allowed, "rejected": d.Rejected, "option_id": d.OptionID,
+			})
+			o.logger.Info("permission: auto-decided by agent policy", "conversation", sid,
+				"agent", agentID, "action", action, "title", req.ToolCall.Title, "kind", req.ToolCall.Kind)
+			return d
+		}
+		o.logger.Warn("permission: agent policy action has no matching option, fallback to ask",
+			"conversation", sid, "agent", agentID, "action", action, "options", len(req.Options))
+	}
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
 	}

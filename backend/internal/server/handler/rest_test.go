@@ -73,9 +73,12 @@ type stubSvc struct {
 	agentCapErr  error
 	agentCapID   string
 
-	probeResp *handler.McpProbeResp // P2 §5.2 MCP live 探测桩
-	probeErr  error
-	probeID   string
+	updateAgentResp *handler.AgentResp     // PATCH /agents/:id 桩
+	updateAgentReq  handler.AgentUpdateReq // 捕获 PATCH 入参（策略透传断言）
+	updateAgentErr  error
+	probeResp       *handler.McpProbeResp // P2 §5.2 MCP live 探测桩
+	probeErr        error
+	probeID         string
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -95,8 +98,15 @@ func (s *stubSvc) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 	return resp, nil
 }
 func (s *stubSvc) UpdateAgent(_ context.Context, id string, patch handler.AgentUpdateReq) (*handler.AgentResp, error) {
+	s.updateAgentReq = patch
 	if s.agentErr != nil {
 		return nil, s.agentErr
+	}
+	if s.updateAgentErr != nil {
+		return nil, s.updateAgentErr
+	}
+	if s.updateAgentResp != nil {
+		return s.updateAgentResp, nil
 	}
 	return &handler.AgentResp{ID: id, State: "stopped"}, nil
 }
@@ -377,6 +387,41 @@ func TestListEndpoints(t *testing.T) {
 	var sess []handler.ConversationResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
 		t.Fatalf("conversations data 不符: %s", env.Data)
+	}
+}
+
+// TestAgentPermissionPolicyRoute M2 #7：GET /agents 暴露只读 permission_policy；
+// PATCH /agents/:id 透传策略入参（handler 只做绑定/透传，校验在 manager）。
+func TestAgentPermissionPolicyRoute(t *testing.T) {
+	svc := &stubSvc{agents: []handler.AgentResp{{
+		ID: "pol", Name: "策略", State: "stopped",
+		PermissionPolicy: &handler.PermissionPolicyResp{Default: "deny", Tools: map[string]string{"bash": "allow"}},
+	}}}
+	r := newRestEngine(svc)
+
+	env, _ := do(t, r, "GET", "/v1/forge/agents", "")
+	var agents []handler.AgentResp
+	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 {
+		t.Fatalf("agents data 不符: %s", env.Data)
+	}
+	if agents[0].PermissionPolicy == nil || agents[0].PermissionPolicy.Default != "deny" ||
+		agents[0].PermissionPolicy.Tools["bash"] != "allow" {
+		t.Fatalf("permission_policy 未透传: %+v", agents[0])
+	}
+
+	svc.updateAgentResp = &handler.AgentResp{ID: "pol", Name: "策略", State: "stopped",
+		PermissionPolicy: &handler.PermissionPolicyResp{Default: "allow"}}
+	env, code := do(t, r, "PATCH", "/v1/forge/agents/pol", `{"permission_policy":{"default":"allow"}}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("PATCH 失败: http=%d env=%+v", code, env)
+	}
+	if svc.updateAgentReq.PermissionPolicy == nil || svc.updateAgentReq.PermissionPolicy.Default != "allow" {
+		t.Fatalf("策略未透传到 service: %+v", svc.updateAgentReq)
+	}
+	// 非法策略由 manager 返回 request 类错误 → 信封透传（HTTP 200 + code≠0）。
+	svc.updateAgentErr = gerror.Error{Code: 40001, Msg: `permission_policy.default: 动作 "sometimes" 非法`}
+	if env, code := do(t, r, "PATCH", "/v1/forge/agents/pol", `{"permission_policy":{"default":"sometimes"}}`); code != 200 || env.Code != 40001 {
+		t.Fatalf("非法策略应 40001，got http=%d code=%d", code, env.Code)
 	}
 }
 

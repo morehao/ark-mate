@@ -25,6 +25,9 @@ const (
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"
+	// BusPermissionPolicy per-agent 默认权限策略自动决策留痕（M2 #7）：payload =
+	// {session_id, agent_id, action(allow|deny), title, kind, allowed, rejected, option_id}。
+	BusPermissionPolicy = "session.permission_policy"
 	// BusPermissionResolved 挂起权限终局（用户决策 / 超时自动拒绝 / 会话取消）——前端收敛权限卡的
 	// 唯一事实（不依赖前端时钟）。payload = {conversation_id, call_id, outcome(selected|cancelled),
 	// reason(user|timeout|cancel), allowed, rejected, option_id, always}。

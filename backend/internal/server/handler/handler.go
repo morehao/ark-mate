@@ -79,21 +79,33 @@ type AgentResp struct {
 	Provider  string `json:"provider,omitempty"`
 	State     string `json:"state"`
 	IsDefault bool   `json:"is_default"` // 默认播种 Agent（前端预选 + 徽标）
+	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
+	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
+}
+
+// PermissionPolicyResp 每 agent 默认权限策略对外表示（只读面 + 创建/PATCH 入参）。
+type PermissionPolicyResp struct {
+	// Default 未匹配到具体工具时的动作：ask | allow | deny（空 = ask）。
+	Default string `json:"default,omitempty"`
+	// Tools 工具粒度动作：键 = 工具 title 或 ACP kind，值 = ask | allow | deny。
+	Tools map[string]string `json:"tools,omitempty"`
 }
 
 // AgentCreateReq 注册自定义 agent（对既有 runtime 的命名配置，不写代码即新增）。
 type AgentCreateReq struct {
-	ID       string   `json:"id" binding:"required"`
-	Name     string   `json:"name"`
-	Runtimes []string `json:"runtimes" binding:"required"`
-	Provider string   `json:"provider,omitempty"`
+	ID               string                `json:"id" binding:"required"`
+	Name             string                `json:"name"`
+	Runtimes         []string              `json:"runtimes" binding:"required"`
+	Provider         string                `json:"provider,omitempty"`
+	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 }
 
 // AgentUpdateReq PATCH agent 元数据（指针字段：nil 不更新）。
 type AgentUpdateReq struct {
-	Name     *string   `json:"name"`
-	Runtimes *[]string `json:"runtimes"`
-	Provider *string   `json:"provider"`
+	Name             *string               `json:"name"`
+	Runtimes         *[]string             `json:"runtimes"`
+	Provider         *string               `json:"provider"`
+	PermissionPolicy *PermissionPolicyResp `json:"permission_policy"`
 }
 
 // ProviderResp provider 档案对外表示（密钥只以 has_key 呈现，绝不读回）。

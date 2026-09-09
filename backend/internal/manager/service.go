@@ -31,7 +31,9 @@ type AgentRec struct {
 	Mcps *[]string
 	// RoutingPolicy 路由策略声明（P2 §7）：first_available | capability_routed；空 = 默认。
 	RoutingPolicy string
-	State         string
+	// PermissionPolicy 默认权限策略（M2 #7）：nil = 全 ask（历史行为）。
+	PermissionPolicy *PermissionPolicy
+	State            string
 }
 
 // defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。
@@ -230,7 +232,8 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	defer s.mu.Unlock()
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
-		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State, IsDefault: a.IsDefault()})
+		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
+			IsDefault: a.IsDefault(), PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -939,6 +942,16 @@ func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 	defer s.mu.Unlock()
 	a, ok := s.agents[id]
 	return a, ok
+}
+
+// ConversationAgentID 返回会话归属的 agent id（无此会话 → 空串）。供权限策略等按 agent 判定。
+func (s *Service) ConversationAgentID(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.conversations[id]; ok {
+		return r.AgentID
+	}
+	return ""
 }
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。

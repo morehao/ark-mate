@@ -1035,3 +1035,45 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 **遗留**：单 root 投影下「同一 skill 同时服务两个 runtime」只取首个 format（当前两 format 等价，
 故不影响可用性；若未来出现真正互斥的 format 需按 runtime 分 root）；dsh 的 `.system` 子目录、
 `user-invocable`/`disable-model-invocation` 等可选键未做平台化映射（不在平台范围）。
+
+#### 19.5 切片 G5：per-agent 默认权限策略（完成）
+
+**数据面（定义文件 → 内存 → 落盘 → REST）**：agent 定义新增
+`permission_policy: {default: ask|allow|deny, tools: {<title 或 ACP kind>: ask|allow|deny}}`。
+
+- `AgentRec.PermissionPolicy`（nil = 全 ask = 历史行为，不回归）；`applyDefinition` 校验取值
+  （未知动作值 → 定义跳过告警 / REST 40001 `invalid_permission_policy`，避免「写了但不生效」的静默失败）；
+- 落盘：`persistAgentDef`/`syncAgentDef` 随定义文件持久化，重启加载恢复；
+- REST：`GET /agents` 暴露只读 `permission_policy`；`POST /agents`、`PATCH /agents/:id` 可写
+  （校验同定义文件）。
+
+**编排消费（M2 #7）**：`Orchestrator.requestPermission` 在**会话级记忆之前**判定 agent 策略：
+
+- `allow` → 自动放行（选 `allow_once`，不写会话记忆）；`deny` → 自动拒绝（选 `reject_once`）；
+  `ask`/未声明 → 回落既有路径（记忆 → 发布挂起请求等用户决策）；
+- 匹配优先级：工具 `title` → ACP `kind` → `default`（键值大小写不敏感）；
+- 无匹配选项时不臆造（告警并回落征询）；
+- 审计事件 `session.permission_policy`（payload = session_id/agent_id/action/title/kind/allowed/
+  rejected/option_id）+ serve 日志 `permission: auto-decided by agent policy`。
+
+**语义约定**：策略是运维护栏，**优先于会话级记忆**（用户「始终允许」不覆盖运维 `deny`）；
+自动决策不写记忆，避免污染用户会话决策。
+
+**证据**：
+
+- 单测：`TestPermissionPolicyDecide`（匹配矩阵/大小写/nil/非法 default）、
+  `TestPermissionPolicyValidate`、`TestAutoPermissionDecision`（once 优先/回落/无选项不决策）、
+  `TestOrchestratorPermissionPolicyAutoDecide`（allow 自动放行+审计事件+无挂起+无记忆；deny 自动拒绝；
+  ask 回落挂起；nil 策略行为不变）、`TestAgentPermissionPolicyPersist`（加载/只读面/PATCH 校验/落盘/
+  重启恢复/非法定义跳过）、`TestAgentPermissionPolicyRoute`（REST 透传 + 40001）。
+- **真进程**（`:18126`，echo 底座，`FORGE_PERMISSION_TIMEOUT=3s`）：
+  - `allow-echo`（`default: allow`）→ 事件序列 `thought → message → session.permission_policy(allow/allow)
+    → session.permission → tool_call → tool_update → message → turn.ended`，**用户零征询**；
+  - `deny-echo`（`tools: {execute: deny}`）→ `session.permission_policy(deny/reject)`，**用户零征询**，
+    工具未执行；
+  - `plain-echo`（无策略）→ 仍发布 `session.permission_request` 并等待用户决策（行为不变）。
+- `go vet` + `go test -race ./...` 全绿；前端对未知事件类型默认忽略（reducer default 分支）→ 无回归。
+
+**遗留**：策略目前只作用于「用户确认位」（ACP 权限请求），不下发到底座原生 permission 配置
+（opencode `permission` / dsh 权限模型映射未实证）；前端尚未展示 `permission_policy`（只读面已就绪）；
+策略无「按工具参数模式匹配」（如 bash 命令白名单），如需再评估。
