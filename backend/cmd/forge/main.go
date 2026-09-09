@@ -27,6 +27,97 @@ import (
 	"github.com/morehao/ark-forge/internal/store"
 )
 
+// mustConfig 解析配置（含 .forge/config 目录化）。配置文件非法时打印明确错误并退出 2
+// （配置错误必须在启动阶段暴露，而不是静默回落默认值）。
+func mustConfig() config.Config {
+	cfg, _, err := config.LoadResolved("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "配置错误: %v\n\n配置目录: %s（FORGE_CONFIG_DIR 可改）\n", err, config.ConfigDirFromEnv())
+		os.Exit(2)
+	}
+	return cfg
+}
+
+// configCmd 打印解析后的配置与每项来源（排障/上线核对用；不启动任何进程）。
+func configCmd(args []string) {
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "以 JSON 输出（含每项来源）")
+	dir := fs.String("config-dir", "", "配置目录（默认 FORGE_CONFIG_DIR 或 ~/.forge/config）")
+	_ = fs.Parse(args)
+
+	cfg, sources, err := config.LoadResolved(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "配置错误: %v\n", err)
+		os.Exit(2)
+	}
+	if *asJSON {
+		doc := map[string]any{
+			"config_dir": cfg.ConfigDir,
+			"config": map[string]any{
+				"addr":                   cfg.Addr,
+				"transcripts":            cfg.TranscriptDir,
+				"db":                     cfg.DBPath,
+				"store":                  cfg.StoreMode,
+				"agents":                 cfg.AgentDir,
+				"capabilities":           cfg.CapabilityDir,
+				"skills_materialize_dir": cfg.SkillMaterializeDir,
+				"idle_timeout":           cfg.IdleTimeout.String(),
+				"reap_interval":          cfg.ReapInterval.String(),
+				"turn_timeout":           cfg.TurnTimeout.String(),
+				"handoff_max_chars":      cfg.HandoffMaxChars,
+				"permission_timeout":     cfg.PermissionTimeout.String(),
+				"elicitation_timeout":    cfg.ElicitationTimeout.String(),
+				"proc_registry":          cfg.ProcRegistryPath,
+				"reap_grace":             cfg.ReapGrace.String(),
+			},
+			"sources": sources,
+		}
+		b, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "序列化失败: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(b))
+		return
+	}
+	src := func(k string) string {
+		if s, ok := sources[k]; ok {
+			return string(s)
+		}
+		return string(config.SourceDefault)
+	}
+	fmt.Printf("配置目录: %s\n", cfg.ConfigDir)
+	fmt.Printf("  %-22s %-38s [%s]\n", "addr", cfg.Addr, src("addr"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "transcripts", cfg.TranscriptDir, src("transcripts"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "db", cfg.DBPath, src("db"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "store", storeModeLabel(cfg.StoreMode), src("store"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "agents", cfg.AgentDir, src("agents"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "reap_interval", cfg.ReapInterval.String(), src("reap_interval"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
+	fmt.Printf("  %-22s %-38d [%s]\n", "handoff_max_chars", cfg.HandoffMaxChars, src("handoff_max_chars"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "permission_timeout", cfg.PermissionTimeout.String(), src("permission_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
+}
+
+func storeModeLabel(mode string) string {
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
+func emptyLabel(v string) string {
+	if v == "" {
+		return "(空)"
+	}
+	return v
+}
+
 const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
@@ -35,8 +126,9 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（冒烟）
   forge migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
+  forge config [--json]         打印解析后的配置与每项来源（配置目录 .forge/config 目录化）
 
-子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h
+子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
 `
 
 func main() {
@@ -57,6 +149,8 @@ func main() {
 			os.Exit(2)
 		}
 		transcriptsPrune(os.Args[3:])
+	case "config":
+		configCmd(os.Args[2:])
 	case "acp-demo":
 		// echo 演示底座的 ACP server 子进程（由 serve 经 stdio 拉起，勿手动运行）。
 		if err := echo.RunServer(); err != nil {
@@ -80,7 +174,7 @@ func serve(args []string) {
 	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
 	_ = fs.Parse(args)
 
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
@@ -103,6 +197,13 @@ func serve(args []string) {
 	}
 	switch mode {
 	case "sqlite":
+		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。
+		if dir := filepath.Dir(cfg.DBPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "serve: 创建 DB 目录 %s: %v\n", dir, err)
+				os.Exit(1)
+			}
+		}
 		st, err := store.Open(cfg.DBPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "serve: 打开持久层 %s: %v\n", cfg.DBPath, err)
@@ -220,7 +321,7 @@ func demo(args []string) {
 
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	cfg := config.Load()
+	cfg := mustConfig()
 	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := manager.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
@@ -273,7 +374,7 @@ func migrate(args []string) {
 	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
 
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *dbPath != "" {
 		cfg.DBPath = *dbPath
 	}
@@ -361,7 +462,7 @@ func transcriptsPrune(args []string) {
 	olderThan := fs.String("older-than", "", "删除修改时间早于此时长的 *.jsonl（必填；支持 30d / 168h / 72h30m 等）")
 	dir := fs.String("dir", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
-	cfg := config.Load()
+	cfg := mustConfig()
 	if *dir != "" {
 		cfg.TranscriptDir = *dir
 	}

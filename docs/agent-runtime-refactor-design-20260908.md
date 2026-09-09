@@ -1390,3 +1390,45 @@ A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
 **诚实记录（降级）**：真实 dsh 与 opencode 在本次实测中**不写 stderr**（`stderr_source=none`、0 行），
 所以「非空尾巴」的证据来自真实子进程（python ACP 桩、`sh` 失败进程）而非 dsh/opencode；这不是能力
 缺失，而是这两个底座安静。尾巴上限 20 行/200 行环形缓冲，超出即截断（只保留最近），不做落盘。
+
+#### 19.13 切片 A4：`.forge/config` 目录化（完成）
+
+**动机**：`config.go` 的包注释从 M0 起就写着「配置文件随 M2 的 `.forge/config` 目录化引入」，但
+15 个 `FORGE_*` 环境变量始终只能靠 shell/systemd/docker 三处各写一遍。A4 落地配置目录，且**不破坏
+既有环境变量语义**（目录不存在时行为与之前逐字节一致）。
+
+**设计**：
+1. **目录约定**：`FORGE_CONFIG_DIR`（默认 `~/.forge/config`）下两个可选文件——
+   `config.json`（JSON 对象）与 `env`（dotenv：`#` 注释、空行、可选 `export ` 前缀、成对引号）。
+   键名接受规范名（`addr`）、`FORGE_*` 原名、`-` 分隔写法与少量别名（`transcript`/`db_path`/
+   `agent_dir`/`capability_dir`）。
+2. **优先级**：默认值 < `config.json` < `env` < 进程环境变量 < CLI flag。实现上是
+   `resolver`（键值 + 来源）逐层覆盖，最后 `materialize` 一次性解析成 `Config` 并补齐**派生默认值**
+   （`transcripts`/`db`/`agents`/`capabilities` 依赖家目录，`proc_registry` 依赖 `dir(DBPath)`）——
+   派生必须发生在全部覆盖之后，否则「文件里改了 db，proc_registry 仍指向旧目录」。
+3. **严格性**：未知键/非法 JSON/非标量/非法 duration/非法整数 → `LoadResolved` 返回错误，
+   `forge serve` 退出码 2 并在 stderr 打印文件路径、问题键与合法键清单。环境变量的历史宽容语义
+   保留（如 `FORGE_STORE=foo` 仍视为 auto），避免旧部署脚本因一个拼写把 daemon 卡死。
+4. **可核对面**：新增 `forge config [--json] [--config-dir]`，打印解析结果与**每项来源**
+   （`default|config.json|env|env(process)`）；不启动任何进程、不写任何文件。
+5. 顺带修：sqlite 模式启动前 `MkdirAll(dir(DBPath))`——配置目录化后 DB 路径可由文件指定，父目录
+   不存在时此前直接 `unable to open database file` 失败（实测暴露）。
+
+**证据**：
+- 单测 `internal/infra/config`：`TestConfigDirFilePriority`（三层覆盖 + 别名/`FORGE_` 原名/数字
+  标量/含空格值 + proc_registry 派生）、`TestConfigDirMissingIsNoop`（无文件 → 来源全空、默认
+  行为不变）、`TestConfigDirErrors`（7 个非法用例：未知键/坏 JSON/非标量/坏 duration/坏整数/
+  env 未知键/缺等号）、`TestLoadResolvedExplicitDir`；既有 4 个测试加 `FORGE_CONFIG_DIR` 指向临时
+  目录（防开发者本机配置污染断言）。
+- 真进程：`forge config` 文本/`--json` 两种输出实测（来源标注正确）；`forge serve` 按
+  `config.json` 监听 `127.0.0.1:10008` + sqlite + DB 落 `/tmp/a4/data/forge.db`（经该 daemon 建的
+  会话在 DB 中可查、events 5 行）；非法配置两种（未知键、坏 duration）→ `forge config`/`forge
+  serve` 均退出码 2；`FORGE_ADDR` 覆盖时来源变 `env(process)`；目录缺失时 `addr` 回落
+  `127.0.0.1:10001`（来源 default）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿。**诚实记录**：其中一次全量 race 运行
+  出现 `FAIL internal/manager` 但未打印失败用例；随后该包 6 次单跑（含 `-count=3`）与全量 2 次
+  运行均全绿，未能复现（疑似全包并行下的时序敏感用例），记录在此以便后续复现时定位。
+
+**遗留/降级**：不做配置热重载（改文件需重启，与「连接/进程生命周期」强耦合，热重载的收益不足以
+承担一致性风险）；不自动创建配置目录/示例文件（不写用户机器）；`env` 文件不做变量插值/转义
+（需要复杂值请写 `config.json`）；不支持 YAML/TOML（避免新增依赖）。

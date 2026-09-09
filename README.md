@@ -101,6 +101,18 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 （`FORGE_DB` 覆盖，`FORGE_STORE=sqlite|memory|auto` 控制持久层）。完整环境变量与部署形态见
 `docs/deployment.md`。
 
+**配置目录（`.forge/config` 目录化，M3 A4）**：不想导 15 个环境变量时，把配置写在
+`~/.forge/config/`（`FORGE_CONFIG_DIR` 覆盖）：
+
+```
+~/.forge/config/config.json   # {"addr":"127.0.0.1:10001","store":"sqlite","db":"/data/forge.db","idle_timeout":"5m"}
+~/.forge/config/env           # dotenv：FORGE_TRANSCRIPTS=/data/transcripts（# 注释、可 export 前缀）
+```
+
+优先级：默认值 < `config.json` < `env` < 进程环境变量 `FORGE_*` < CLI flag。目录/文件不存在
+= 完全维持历史行为；**键名或取值非法则启动即报错**（不静默回落）。`forge config`（`--json` 可
+带来源）打印最终配置与每项来源，上线前可直接核对。
+
 ### 4. 命令行冒烟（不经面板）
 
 ```bash
@@ -206,7 +218,8 @@ make vet / test   # go vet / go test ./...
 
 CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真实会话冒烟）、
 `forge migrate`（transcript → SQLite 幂等导入）、`forge transcripts prune --older-than <dur>`
-（显式清理 transcript；不设自动删除）、`forge acp-demo`（作为 echo 底座被 daemon 派生的 ACP server 入口）。
+（显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
+`forge acp-demo`（作为 echo 底座被 daemon 派生的 ACP server 入口）。
 
 部署形态（单二进制 / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。
 
@@ -222,7 +235,7 @@ backend/                单 Go module（github.com/morehao/ark-forge）
   internal/mcp          自研最小 MCP 客户端（stdio / http / streamable_http；tools/list 探测）
   internal/store        SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
   internal/server/      REST handler / WS / eventbus / router
-  internal/infra/config 进程配置（flag + FORGE_* 环境变量）
+  internal/infra/config 进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
   internal/web/         release 内嵌前端产物宿主（go:embed dist）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/panel/           Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）

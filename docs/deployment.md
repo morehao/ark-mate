@@ -75,6 +75,30 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 | `FORGE_REAP_GRACE` | `2s` | 孤儿回收 SIGTERM → SIGKILL 的宽限期 |
 | `GIN_MODE` | `debug` | 设 `release` 关闭 gin debug 告警 |
 
+### 2.3.1 配置目录 `.forge/config`（A4）
+
+环境变量多到需要脚本管理时，改用配置目录（目录不存在 = 完全维持环境变量行为）：
+
+```
+~/.forge/config/config.json   # 主配置（JSON 对象，键名可用 addr 或 FORGE_ADDR）
+~/.forge/config/env           # dotenv 风格（KEY=VALUE；# 注释、空行、可选 export 前缀与成对引号）
+```
+
+支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
+`skills_materialize_dir` `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
+`permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace`；另可用 `FORGE_*` 原名、
+`-` 写成分隔符，以及少量别名（`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+
+**优先级**：内置默认值 < `config.json` < `env` < 进程环境变量 `FORGE_*` < CLI flag。所以
+「文件里写基线，环境变量做覆盖，flag 做临时调试」三段式可用。目录路径由 `FORGE_CONFIG_DIR`
+决定（默认 `~/.forge/config`）。
+
+**严格性**：未知键、非法 JSON、非法 duration/整数都会让 `forge serve` 在启动阶段退出（退出码
+2，stderr 带文件路径与合法键清单）——不静默回落，避免「改了配置却没生效」。核对用
+`forge config`（文本）或 `forge config --json`（含每项来源 `default|config.json|env|env(process)`）。
+
+systemd 场景可直接用同一目录：`EnvironmentFile=-%h/.forge/config/env`（§3 单元里已注释示例）。
+
 ### 2.4 底座前置条件
 
 - `opencode`：需本机可执行 `opencode acp`。
@@ -257,3 +281,12 @@ sudo systemctl restart ark-forge
   conversation_id`。`GET /agents/nope/diagnostics` → `code=40401`。真实 dsh/opencode **不写
   stderr**（`stderr_source=none`，0 行），非空尾巴的证据来自真实子进程单测（python ACP 桩 /
   `sh` 失败进程）。`pnpm smoke:e2e` 新增 2 项断言全 PASS。
+
+- 配置目录化（A4）：`FORGE_CONFIG_DIR=/tmp/a4/cfg forge config` 实测打印 15 项与来源
+  （`addr`/`db`/`store`/`idle_timeout`/`handoff_max_chars` 来自 `config.json`；`transcripts`/
+  `agents`/`reap_grace` 来自 `env`；`FORGE_ADDR=…` 时 `addr` 来源变 `env(process)`）；
+  `forge serve` 按文件生效（监听 `127.0.0.1:10008`、sqlite、DB 落 `/tmp/a4/data/forge.db`，
+  经该 daemon 建的会话在 DB 中可查、events 5 行）。非法配置 `{"adr":…}` / `idle_timeout:"5
+  minutes"` → `forge config` 与 `forge serve` 均退出码 2 并给出文件路径与合法键清单。目录缺失
+  = 默认值（`127.0.0.1:10001`，来源全 `default`）。顺带修：sqlite 模式启动前 `MkdirAll` DB
+  父目录（此前 DB 路径父目录不存在会以 `unable to open database file` 失败）。
