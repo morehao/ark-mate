@@ -1871,8 +1871,8 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 - 真进程 + **真实底座解析**：见 deployment.md（opencode v1.18.29 `debug skill` 与真实 dsh
   `dsh-skill-filesystem` provider 各自只列出本 root 的 skill，dsh 零告警；删除联动与单 root 兼容路径实测）。
 
-**遗留/降级**：① 共享 root（多个 runtime 指向同一目录）下目录归属「首个物化它的 runtime」，
-该 runtime 不再声明时由它删除，别的 runtime 的重校不会代删——可能残留，推荐按 runtime 分 root；
+**遗留/降级**：① ~~共享 root 下目录归属首个物化它的 runtime，可能残留~~ —— **已由 §19.26 C6 修复**
+（归属标记升级为 runtime 集合，逐方摘除、集合空才删目录）；
 ② 未做「按 agent/cwd 动态 root」（仍是启动时按配置物化）；③ 未做 skill 文件变更热重载
 （`serve` 启动重校 + 后续 REST 变更时重校，见既有实现）；④ dsh 的 `.system`/可选键仍未平台化映射。
 
@@ -1904,3 +1904,44 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 
 **遗留**：回执里的 `always` 是**请求意图**（是否要求写会话级记忆），不是「记忆是否真的写入」——
 记忆副作用仍以 `GET /conversations/:id/permissions/memories` 为事实源（避免在回执里复述内部副作用）。
+
+#### 19.26 切片 C6：共享 root 残留清理 + 动态 root 可行性评估（完成）
+
+**一、共享 root 残留清理（实现）**
+
+**问题（C4 遗留）**：归属标记只记一个 runtime（「首个物化它的 runtime」）。共享 root 下若该 runtime 先退出投影，
+别的 runtime 的重校不会代删，目录永久残留。
+
+**实现**：标记第二行升级为**逗号分隔的 runtime 归属集合**（有序、去重）：
+
+- `MaterializeSkillFor` 写入时把自身 runtime 并入已有集合（`addRuntime`）；
+- 重校幂等判定要求「内容一致 **且** 归属集合已含本 runtime」——共享 root 下两个 runtime 各登记一次后即幂等，
+  不再互相改写（不会写-写乒乓）；
+- 删除联动改为**逐方摘除**（`removeRuntime`）：本 runtime 退出投影时只摘掉自己的登记并保留目录（他方仍在用），
+  集合变空才 `RemoveAll`；不属于本 runtime 的目录一律不碰；单 root 兼容路径（runtime==""）保持整 root 拥有语义；
+- `readMarker` 兼容旧格式（第二行单个 runtime → 单元素集合）与空归属（单 root 路径）。
+
+**证据**：单测 `capability.TestReconcileSharedRootResidualCleanup`（双 runtime 登记 → 幂等 0/0 →
+oc 摘除登记且目录保留 → dsh 也退出 → 目录删除）、`TestReadMarkerLegacy`（旧格式/空归属解析）；
+真进程（`FORGE_SKILLS_MATERIALIZE_DIRS=opencode=/tmp/c6/shared,deepseekharness=/tmp/c6/shared`）：
+首轮标记 `both|deepseekharness,opencode`；移除 oc-only 声明 → `removed=1` 且 `both` 归属不变；
+把 both 的 oc 源删掉 → 标记降为 `deepseekharness`（目录保留）；再删 both 声明 → `removed=1`、目录消失、
+无残留（见 deployment.md）。`go vet` + `go test -race -count=1 ./...` 全绿。
+
+**二、按 agent/cwd 动态 root 的可行性评估（不实现，明确降级）**
+
+| 底座 | 能否按会话/agent 指定 skill root | 实证 |
+|---|---|---|
+| opencode | **可以**：`OPENCODE_CONFIG_CONTENT` 注入 `{"skills":["<dir>"]}` 被真实二进制接受 | `XDG_CONFIG_HOME` 隔离下 `OPENCODE_CONFIG_CONTENT='{"skills":["/tmp/c6/probe"]}' opencode debug skill` → 列出 `probe-skill`（真实解析） |
+| dsh | **未证实**：provider 构造时读 `process.env.DSH_AGENTS_HOME`（默认 `~/.agents`）与 `process.env.DSH_BUNDLED_SKILL_DIR`（仅 `includeDefaultRoots=true` 时生效），roots = `<dshHome>/skills` + `<agentsHome>/skills` + `bundledSkillDir`；但 dsh **运行时的插件接线不可从 ACP 观测** | 真实源码 `dsh-skill-filesystem/lib/index.js`（roots 构造 + 两处 env 读取）；最小 ACP 客户端实测 `initialize`/`session/new` 全程 **无任何 skill 相关帧**，故 env 是否被运行时采纳无法在无模型凭证下证实 |
+
+**结论与降级**：
+1. **不实现**按 agent/cwd 动态 root。理由：① dsh 侧无法证实（且 `DSH_AGENTS_HOME` 是 dsh 的通用 agents 家目录，
+   按会话覆盖会影响 skills 之外的 dsh 行为，属越界）；② 平台当前数据模型里 agent 只声明 `runtimes`、不声明 skills，
+   引入 per-agent root 等于新增一层「agent→skill 绑定」语义，超出「投影层同步」范围；③ 只做 opencode 会造成
+   「同一平台能力按底座不对称且不可解释」。
+2. 保留**触发式能力位**：若后续出现「同一部署内多 agent 需要不同 skill 集合」的真实需求，按
+   §19.26 表里的注入方式（opencode `OPENCODE_CONFIG_CONTENT.skills`）实现 opencode 侧，并在 dsh 侧标注降级
+   （回落到进程级 root，即现在的按 runtime 分 root）。
+3. 现状可用的等价手段：**按 runtime 分 root**（§19.24）+ 共享 root 归属集合（本节第一部分）已覆盖
+   「多底座共存」；「同一底座多 agent 隔离」需 agent 级 skill 绑定，属未实现能力，文档显式声明。

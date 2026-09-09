@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -161,40 +162,93 @@ func MaterializeSkillFor(root, runtime string, s Skill) (string, error) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写 %s 失败: %w", p, err)
 	}
-	// 归属标记（删除联动依据）：首行 skill id，第二行 runtime（C4 多 root 下删除联动只动自己的目录）。
+	// 归属标记（删除联动依据）：首行 skill id，第二行**逗号分隔的 runtime 集合**（有序）。
+	// C6：同一目录可能被多个 runtime 投影（共享 root），集合记录全部投影方——某个 runtime 退出投影时
+	// 只从集合里摘除自己，集合空了才删除目录（避免「先投影方退出后目录永久残留」）。
 	marker := filepath.Join(root, s.ID, forgeMarker)
-	if err := os.WriteFile(marker, []byte(markerContent(s.ID, runtime)), 0o644); err != nil {
+	_, owners, _ := readMarker(marker)
+	if err := os.WriteFile(marker, []byte(markerContent(s.ID, addRuntime(owners, runtime))), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写归属标记 %s 失败: %w", marker, err)
 	}
 	return p, nil
 }
 
-// markerContent 生成归属标记内容：首行 skill id，第二行 runtime（空 runtime = 单 root 兼容路径）。
-func markerContent(skillID, runtime string) string {
-	return skillID + "\n" + runtime + "\n"
+// markerContent 生成归属标记内容：首行 skill id，第二行逗号分隔的 runtime 集合（空 = 单 root 兼容路径）。
+func markerContent(skillID string, runtimes []string) string {
+	return skillID + "\n" + strings.Join(runtimes, ",") + "\n"
 }
 
-// readMarker 解析归属标记（首行 id，第二行 runtime）；文件缺失/为空 → ok=false。
-func readMarker(path string) (skillID, runtime string, ok bool) {
+// addRuntime 把 runtime 并入归属集合（去重 + 排序；空 runtime 不入集合——单 root 兼容路径不登记归属方）。
+func addRuntime(owners []string, runtime string) []string {
+	if runtime == "" {
+		return owners
+	}
+	for _, o := range owners {
+		if o == runtime {
+			return owners
+		}
+	}
+	out := append(append([]string{}, owners...), runtime)
+	sort.Strings(out)
+	return out
+}
+
+// removeRuntime 从归属集合摘除 runtime（返回剩余集合与是否发生摘除）。
+func removeRuntime(owners []string, runtime string) ([]string, bool) {
+	out := make([]string, 0, len(owners))
+	removed := false
+	for _, o := range owners {
+		if o == runtime {
+			removed = true
+			continue
+		}
+		out = append(out, o)
+	}
+	return out, removed
+}
+
+// markerHas 报告归属集合是否含该 runtime。
+func markerHas(owners []string, runtime string) bool {
+	for _, o := range owners {
+		if o == runtime {
+			return true
+		}
+	}
+	return false
+}
+
+// readMarker 解析归属标记（首行 skill id，第二行逗号分隔的 runtime 集合）；文件缺失/为空 → ok=false。
+// 兼容旧格式（第二行单个 runtime）：解析结果同为单元素集合。
+func readMarker(path string) (skillID string, owners []string, ok bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", false
+		return "", nil, false
 	}
 	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-		return "", "", false
+		return "", nil, false
 	}
 	if len(lines) > 1 {
-		runtime = strings.TrimSpace(lines[1])
+		for _, part := range strings.Split(lines[1], ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				owners = append(owners, part)
+			}
+		}
+		sort.Strings(owners)
 	}
-	return strings.TrimSpace(lines[0]), runtime, true
+	return strings.TrimSpace(lines[0]), owners, true
 }
 
-// skillUpToDate 报告 <root>/<id> 是否已按当前内容物化且带归属标记（重校幂等判定）。
-// 只看「标记存在 + SKILL.md 内容一致」：标记里的 runtime 仅用于删除联动范围，
-// 不参与幂等判定——否则多个 runtime 共享同一 root 时会互相改写标记，形成写-写乒乓（非幂等）。
-func skillUpToDate(dir, content string) bool {
-	if _, _, ok := readMarker(filepath.Join(dir, forgeMarker)); !ok {
+// skillUpToDate 报告 <root>/<id> 是否已按当前内容物化、且归属集合已登记该 runtime（重校幂等判定）。
+// runtime=="" 只校验「标记存在 + 内容一致」（单 root 兼容路径不登记归属方）；
+// runtime!="" 还要求归属集合含该 runtime——否则本次投影要补登记（共享 root 下各 runtime 各自登记一次，
+// 登记完成后即幂等，不会互相改写）。
+func skillUpToDate(dir, content, runtime string) bool {
+	_, owners, ok := readMarker(filepath.Join(dir, forgeMarker))
+	if !ok {
+		return false
+	}
+	if runtime != "" && !markerHas(owners, runtime) {
 		return false
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
@@ -232,7 +286,7 @@ func ReconcileSkillsFor(root, runtime string, current []Skill) (written, removed
 			continue
 		}
 		dir := filepath.Join(root, sk.ID)
-		if skillUpToDate(dir, content) {
+		if skillUpToDate(dir, content, runtime) {
 			continue
 		}
 		if _, mErr := MaterializeSkillFor(root, runtime, sk); mErr != nil {
@@ -253,13 +307,23 @@ func ReconcileSkillsFor(root, runtime string, current []Skill) (written, removed
 			continue
 		}
 		marker := filepath.Join(root, e.Name(), forgeMarker)
-		_, mRuntime, mOK := readMarker(marker)
+		skillID, owners, mOK := readMarker(marker)
 		if !mOK {
 			continue // 无归属标记：用户自有/他方目录，不动
 		}
-		// 共享 root：只删本次投影范围内的目录（旧标记无 runtime → 视为兼容路径，可删）。
-		if runtime != "" && mRuntime != "" && mRuntime != runtime {
-			continue
+		// 单 root 兼容路径（runtime==""）：本路径拥有该 root，整目录删除联动。
+		// 多 root 路径：只摘除自己在归属集合里的登记，集合空了才删目录（共享 root 下不误删他方产物）。
+		if runtime != "" {
+			if !markerHas(owners, runtime) {
+				continue
+			}
+			rest, _ := removeRuntime(owners, runtime)
+			if len(rest) > 0 {
+				if wErr := os.WriteFile(marker, []byte(markerContent(skillID, rest)), 0o644); wErr != nil {
+					slog.Warn("skill 物化: 更新归属标记失败", "dir", e.Name(), "err", wErr)
+				}
+				continue // 仍被他方投影：保留目录，仅摘除自己的登记
+			}
 		}
 		if dErr := os.RemoveAll(filepath.Join(root, e.Name())); dErr != nil {
 			slog.Warn("skill 物化: 删除联动失败", "dir", e.Name(), "err", dErr)

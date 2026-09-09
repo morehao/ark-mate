@@ -432,3 +432,9 @@ sudo systemctl restart ark-forge
     "selected_option_id":""}`，agent 回「未获授权（决策被拒绝或取消，按 ACP 语义即 Cancelled）」；
   - **拒绝且传有效 `reject-once`** → `outcome=selected`、`selected_option_id=reject-once`，
     agent 回「已拒绝（拒绝一次）」——回执与 agent 侧行为一致。
+- 共享 root 归属集合与残留清理（C6）：真进程（127.0.0.1:10025，
+  `FORGE_SKILLS_MATERIALIZE_DIRS=opencode=/tmp/c6/shared,deepseekharness=/tmp/c6/shared`，两 runtime 同 root）
+  首轮标记 `both|deepseekharness,opencode`、`dsh-only|deepseekharness`、`oc-only|opencode`；
+  移除 `oc-only.json` 重启 → `runtime=opencode written=0 removed=1`，`both` 归属不变；
+  去掉 both 的 opencode 源重启 → 标记降为 `both|deepseekharness`（目录保留，他方仍在用）；
+  再删 `both.json` 重启 → `runtime=deepseekharness written=0 removed=1`，`/tmp/c6/shared` 仅剩 `dsh-only`，无残留。

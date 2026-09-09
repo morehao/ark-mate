@@ -223,9 +223,9 @@ func TestMaterializeSkillForPerRuntime(t *testing.T) {
 		if err != nil || !strings.Contains(string(b), "name: \"both\"") {
 			t.Fatalf("%s 产物不符: %q err=%v", tc.runtime, b, err)
 		}
-		id, rt, ok := readMarker(filepath.Join(tc.root, "both", forgeMarker))
-		if !ok || id != "both" || rt != tc.runtime {
-			t.Fatalf("%s 标记不符: id=%q rt=%q ok=%v", tc.runtime, id, rt, ok)
+		id, owners, ok := readMarker(filepath.Join(tc.root, "both", forgeMarker))
+		if !ok || id != "both" || !markerHas(owners, tc.runtime) {
+			t.Fatalf("%s 标记不符: id=%q owners=%v ok=%v", tc.runtime, id, owners, ok)
 		}
 	}
 	// 未声明该 runtime 的 skill → 报错（不臆造跨 runtime 物化）。
@@ -307,5 +307,84 @@ func TestReconcileSkillsForPerRuntime(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(shared, "dsh-only")); err != nil {
 		t.Fatal("共享 root 下 dsh-only 不应被 oc 重校删除")
+	}
+}
+
+// TestReconcileSharedRootResidualCleanup C6：共享 root 下归属集合登记/摘除——
+// 两个 runtime 先后投影同一目录后，各自退出投影只摘除自己的登记，集合空了才删除目录
+// （修复 C4 遗留的「先投影方退出后目录永久残留」）。
+func TestReconcileSharedRootResidualCleanup(t *testing.T) {
+	shared := t.TempDir()
+	both := Skill{ID: "both", Name: "双", Description: "d", Body: "# both", Sources: []SkillSource{
+		{Runtime: "opencode", Format: FormatSkillMD},
+		{Runtime: "deepseekharness", Format: FormatSkillMDFrontmatter},
+	}}
+	onlyOC := Skill{ID: "oc", Name: "oc", Description: "d", Body: "# oc",
+		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
+	skills := []Skill{both, onlyOC}
+
+	// 两个 runtime 各自投影到共享 root：标记应累计两个归属方。
+	if _, _, err := ReconcileSkillsFor(shared, "opencode", skills); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReconcileSkillsFor(shared, "deepseekharness", skills); err != nil {
+		t.Fatal(err)
+	}
+	_, owners, _ := readMarker(filepath.Join(shared, "both", forgeMarker))
+	if len(owners) != 2 || !markerHas(owners, "opencode") || !markerHas(owners, "deepseekharness") {
+		t.Fatalf("共享 root 归属集合应含两个 runtime，got %v", owners)
+	}
+	// 幂等：两边再跑都 0/0（登记已完成，不再互相改写标记）。
+	for _, rt := range []string{"opencode", "deepseekharness"} {
+		if w, r, err := ReconcileSkillsFor(shared, rt, skills); err != nil || w != 0 || r != 0 {
+			t.Fatalf("%s 幂等期望 0/0，got w=%d r=%d err=%v", rt, w, r, err)
+		}
+	}
+
+	// opencode 退出 both 的投影：只摘除自己的登记，目录保留（dsh 仍投影）。
+	ocOnlySet := []Skill{onlyOC}
+	if w, r, err := ReconcileSkillsFor(shared, "opencode", ocOnlySet); err != nil || r != 0 {
+		t.Fatalf("oc 摘除登记不应删除目录: w=%d r=%d err=%v", w, r, err)
+	}
+	_, owners, _ = readMarker(filepath.Join(shared, "both", forgeMarker))
+	if len(owners) != 1 || owners[0] != "deepseekharness" {
+		t.Fatalf("摘除后应只剩 dsh，got %v", owners)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "both")); err != nil {
+		t.Fatal("他方仍投影时目录不应被删")
+	}
+
+	// dsh 也退出：集合空 → 目录删除（无残留）。
+	if w, r, err := ReconcileSkillsFor(shared, "deepseekharness", nil); err != nil || r != 1 {
+		t.Fatalf("dsh 退出后应删除残留目录: w=%d r=%d err=%v", w, r, err)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "both")); !os.IsNotExist(err) {
+		t.Fatal("两方都退出后目录应被删除")
+	}
+}
+
+// TestReadMarkerLegacy 兼容旧标记格式（第二行单个 runtime）与空归属（单 root 兼容路径）。
+func TestReadMarkerLegacy(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "legacy")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, forgeMarker), []byte("legacy\nopencode\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id, owners, ok := readMarker(filepath.Join(legacy, forgeMarker))
+	if !ok || id != "legacy" || len(owners) != 1 || owners[0] != "opencode" {
+		t.Fatalf("旧格式解析不符: id=%q owners=%v ok=%v", id, owners, ok)
+	}
+	global := filepath.Join(dir, "global")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(global, forgeMarker), []byte("global\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if id, owners, ok := readMarker(filepath.Join(global, forgeMarker)); !ok || id != "global" || len(owners) != 0 {
+		t.Fatalf("空归属解析不符: id=%q owners=%v ok=%v", id, owners, ok)
 	}
 }
