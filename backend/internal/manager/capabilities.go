@@ -1,10 +1,13 @@
 package manager
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
+	"github.com/morehao/ark-forge/internal/mcp"
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
@@ -57,15 +60,152 @@ func (s *Service) ListSkills() ([]handler.SkillResp, error) {
 }
 
 // ListMcpServers 返回 MCP 注册表（按 ID 排序）。headers/凭证只存内部供 P2 注入，不读回。
+// 附 live 探测状态（tool_count / last_probe_at / last_probe_error，P2 §5.2）。
 func (s *Service) ListMcpServers() ([]handler.McpServerResp, error) {
 	items := s.caps.ListMcpServers()
+	counts := s.mcpToolCounts()
+	probes := s.mcpProbeSnapshot()
 	out := make([]handler.McpServerResp, 0, len(items))
 	for _, m := range items {
-		out = append(out, handler.McpServerResp{
+		resp := handler.McpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
+			ToolCount: counts[m.ID],
+		}
+		if st, ok := probes[m.ID]; ok {
+			if !st.At.IsZero() {
+				resp.LastProbeAt = st.At.UTC().Format(time.RFC3339)
+			}
+			resp.LastProbeErr = st.Err
+		}
+		out = append(out, resp)
+	}
+	return out, nil
+}
+
+// ——— P2 §5.2 MCP live 探测（tools/list → Tool 目录） ———
+
+// defaultMCPProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。
+const defaultMCPProbeTimeout = 15 * time.Second
+
+// mcpProbeStatus 一个 server 的最近一次探测状态（At 零值 = 从未探测）。
+type mcpProbeStatus struct {
+	At  time.Time
+	Err string // 空 = 成功
+}
+
+// SetMcpProbeTimeout 覆盖单次探测预算（<=0 → 默认 15s；测试注入短预算用）。
+func (s *Service) SetMcpProbeTimeout(d time.Duration) {
+	if d <= 0 {
+		d = defaultMCPProbeTimeout
+	}
+	s.mcpMu.Lock()
+	s.mcpProbeTimeout = d
+	s.mcpMu.Unlock()
+}
+
+func (s *Service) mcpProbeBudget() time.Duration {
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	if s.mcpProbeTimeout <= 0 {
+		return defaultMCPProbeTimeout
+	}
+	return s.mcpProbeTimeout
+}
+
+func (s *Service) recordMcpProbe(id string, err error) {
+	st := mcpProbeStatus{At: time.Now()}
+	if err != nil {
+		st.Err = err.Error()
+	}
+	s.mcpMu.Lock()
+	s.mcpProbes[id] = st
+	s.mcpMu.Unlock()
+}
+
+func (s *Service) mcpProbeSnapshot() map[string]mcpProbeStatus {
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	out := make(map[string]mcpProbeStatus, len(s.mcpProbes))
+	for k, v := range s.mcpProbes {
+		out[k] = v
+	}
+	return out
+}
+
+// mcpToolCounts 统计各 server 当前归属的 Tool 条目数。
+func (s *Service) mcpToolCounts() map[string]int {
+	out := map[string]int{}
+	for _, t := range s.caps.ListTools() {
+		if t.Source == capability.ToolSourceMCP && t.McpServer != "" {
+			out[t.McpServer]++
+		}
+	}
+	return out
+}
+
+// mcpProbeClass 探测错误 → acl 分类（决定 REST 信封码，见 restErr）。
+func mcpProbeClass(err error) acl.Class {
+	switch mcp.CodeOf(err) {
+	case "mcp_transport_unsupported":
+		return acl.ClassUnsupported
+	case "mcp_command_invalid", "mcp_url_invalid":
+		return acl.ClassRequest
+	default:
+		return acl.ClassService
+	}
+}
+
+// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：
+// 建连（stdio/http/streamable_http；sse 明确不支持）→ initialize 握手 → tools/list（翻页）
+// → **整体替换**该 server 归属的 Tool 目录条目（tools/list 是权威快照）。
+// 成功/失败都会记录探测状态（GET /mcps 可读回 last_probe_*）。未知 server → 40401。
+func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpProbeResp, error) {
+	server, ok := s.caps.GetMcpServer(id)
+	if !ok {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+			fmt.Sprintf("未知 MCP server %q", id), nil))
+	}
+	pctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
+	defer cancel()
+
+	res, err := mcp.ListTools(pctx, mcp.Server{
+		ID: server.ID, Transport: server.Transport, Command: server.Command,
+		Args: server.Args, URL: server.URL, Headers: server.Headers,
+	})
+	if err != nil {
+		s.recordMcpProbe(id, err)
+		// 信封 msg 带稳定 code（[mcp_timeout]/[mcp_spawn_failed]…）：信封 code 只有分类粒度，
+		// 排障需要精确原因（同 last_probe_error 可经 GET /mcps 读回）。
+		return nil, s.restErr(acl.NewError(mcpProbeClass(err), mcp.CodeOf(err),
+			fmt.Sprintf("[%s] %s", mcp.CodeOf(err), err.Error()), nil))
+	}
+
+	tools := make([]capability.Tool, 0, len(res.Tools))
+	for _, t := range res.Tools {
+		tools = append(tools, capability.Tool{
+			Name: t.Name, Description: t.Description,
+			Source: capability.ToolSourceMCP, McpServer: id, Schema: t.InputSchema,
 		})
 	}
+	added, removed, skipped := s.caps.ReplaceToolsForMcpServer(id, tools)
+	s.recordMcpProbe(id, nil)
+
+	out := &handler.McpProbeResp{
+		ID: id, Transport: server.Transport,
+		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
+		ProbedAt: time.Now().UTC().Format(time.RFC3339),
+		Added:    added, Removed: removed, Skipped: skipped,
+	}
+	for _, t := range s.caps.ListTools() {
+		if t.McpServer == id {
+			out.Tools = append(out.Tools, handler.ToolResp{
+				Name: t.Name, Description: t.Description, Source: t.Source,
+				McpServer: t.McpServer, Schema: t.Schema,
+			})
+		}
+	}
+	out.ToolCount = len(out.Tools)
 	return out, nil
 }
 

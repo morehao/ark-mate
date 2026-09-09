@@ -1,7 +1,11 @@
 package manager
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,6 +248,130 @@ func TestAgentCapabilities(t *testing.T) {
 }
 
 func ptrOf[T any](v T) *T { return &v }
+
+// TestProbeMcpServer MCP live 探测（P2 §5.2）：http 探测成功 → Tool 目录整体替换 + 归属
+// 标注 + 状态记录；重复探测收敛（旧条目删除）；失败记录 last_probe_error；未知 id → 40401；
+// sse 传输明确降级 → 40501（ClassUnsupported）。
+func TestProbeMcpServer(t *testing.T) {
+	// 可切换返回的 tools/list 结果（验证「整体替换」语义）。
+	tools := []map[string]any{{"name": "read_file", "description": "读文件"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result map[string]any
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": "mgr-helper", "version": "3.1"}}
+		case "tools/list":
+			result = map[string]any{"tools": tools}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+	}))
+	defer srv.Close()
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	// 预置一条同名旧条目 + 一条 builtin（替换不得误伤）。
+	if err := svc.caps.RegisterTool(&capability.Tool{Name: "read_file", Source: capability.ToolSourceMCP, McpServer: "h", Description: "旧描述"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.caps.RegisterTool(&capability.Tool{Name: "web_search", Source: capability.ToolSourceBuiltin}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.ProbeMcpServer(context.Background(), "h")
+	if err != nil {
+		t.Fatalf("ProbeMcpServer: %v", err)
+	}
+	if got.ServerName != "mgr-helper" || got.ServerVersion != "3.1" || got.Added != 1 || got.Removed != 1 || got.ToolCount != 1 {
+		t.Fatalf("探测结果不符: %+v", got)
+	}
+	if got.ProbedAt == "" {
+		t.Fatal("ProbedAt 不应为空")
+	}
+	if len(got.Tools) != 1 || got.Tools[0].McpServer != "h" || got.Tools[0].Description != "读文件" {
+		t.Fatalf("tools 归属/内容不符: %+v", got.Tools)
+	}
+	// 旧条目被替换（描述更新），builtin 保留。
+	all, _ := svc.ListTools()
+	if len(all) != 2 {
+		t.Fatalf("tools 应 2 条（mcp+builtin），got %+v", all)
+	}
+	for _, tl := range all {
+		if tl.Name == "read_file" && tl.Description != "读文件" {
+			t.Fatalf("旧条目未被替换: %+v", tl)
+		}
+	}
+	// 状态写回 GET /mcps。
+	mcps, _ := svc.ListMcpServers()
+	if len(mcps) != 1 || mcps[0].ToolCount != 1 || mcps[0].LastProbeAt == "" || mcps[0].LastProbeErr != "" {
+		t.Fatalf("mcps 探测状态不符: %+v", mcps)
+	}
+
+	// 第二轮：server 只剩 write_file → read_file 删除、write_file 写入（整体替换）。
+	tools = []map[string]any{{"name": "write_file"}}
+	got2, err := svc.ProbeMcpServer(context.Background(), "h")
+	if err != nil {
+		t.Fatalf("二次探测: %v", err)
+	}
+	if got2.Added != 1 || got2.Removed != 1 || got2.ToolCount != 1 {
+		t.Fatalf("二次探测增删不符: %+v", got2)
+	}
+	names := map[string]bool{}
+	for _, tl := range mustListTools(t, svc) {
+		names[tl.Name] = true
+	}
+	if names["read_file"] || !names["write_file"] || !names["web_search"] {
+		t.Fatalf("二次探测后目录不符: %+v", names)
+	}
+
+	// 未知 id → 40401；sse 传输 → 40501（明确降级，不臆造）。
+	if _, err := svc.ProbeMcpServer(context.Background(), "nope"); err == nil {
+		t.Fatal("未知 server 应报错")
+	} else {
+		var ge gerror.Error
+		if !errors.As(err, &ge) || ge.Code != 40401 {
+			t.Fatalf("未知 server 应 40401，got %v", err)
+		}
+	}
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "sse1", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ProbeMcpServer(context.Background(), "sse1"); err == nil {
+		t.Fatal("sse 应报错")
+	} else {
+		var ge gerror.Error
+		if !errors.As(err, &ge) || ge.Code != 40501 {
+			t.Fatalf("sse 应 40501，got %v", err)
+		}
+	}
+	// 失败状态落盘可读回。
+	mcps, _ = svc.ListMcpServers()
+	for _, m := range mcps {
+		if m.ID == "sse1" && !strings.Contains(m.LastProbeErr, "sse") {
+			t.Fatalf("sse1 应记录 last_probe_error，got %+v", m)
+		}
+	}
+}
+
+func mustListTools(t *testing.T, svc *Service) []handler.ToolResp {
+	t.Helper()
+	out, err := svc.ListTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
 
 // TestAgentMcpAllowlistFromDefinitions agent 定义文件 `mcps` 三态：缺省 → nil（全启用）；
 // 声明白名单 → 指针携带；`[]` → 非 nil 空指针（禁用注入）。经 LoadAgentDefinitions 装载。

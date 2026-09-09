@@ -68,6 +68,8 @@ type Service interface {
 	ListTools() ([]ToolResp, error)
 	// AgentCapabilities 返回某 Agent 的统一能力目录（P2 §8.1：按候选 runtime 聚合 skill/MCP/tool）。
 	AgentCapabilities(agentID string) (*AgentCapabilitiesResp, error)
+	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
+	ProbeMcpServer(ctx context.Context, id string) (*McpProbeResp, error)
 }
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
@@ -150,15 +152,33 @@ type McpServerResp struct {
 	Command   string   `json:"command,omitempty"`
 	Args      []string `json:"args,omitempty"`
 	URL       string   `json:"url,omitempty"`
+	// 以下为 live 探测状态（P2 §5.2；从未探测则零值/空）。
+	ToolCount    int    `json:"tool_count"`                 // 该 server 当前归属的 Tool 条目数
+	LastProbeAt  string `json:"last_probe_at,omitempty"`    // 最近一次探测时间（RFC3339）
+	LastProbeErr string `json:"last_probe_error,omitempty"` // 最近一次探测失败原因（成功则空）
+}
+
+// McpProbeResp 一次 MCP live 探测（tools/list）的结果。
+type McpProbeResp struct {
+	ID            string     `json:"id"`
+	Transport     string     `json:"transport"`
+	ServerName    string     `json:"server_name,omitempty"`
+	ServerVersion string     `json:"server_version,omitempty"`
+	ProbedAt      string     `json:"probed_at"`
+	Added         int        `json:"added"`      // 本轮写入的 Tool 条目
+	Removed       int        `json:"removed"`    // 被本轮替换掉的旧条目
+	Skipped       int        `json:"skipped"`    // 非法/无名条目（跳过，不臆造）
+	ToolCount     int        `json:"tool_count"` // 探测后该 server 归属条目总数
+	Tools         []ToolResp `json:"tools"`
 }
 
 // ToolResp Tool 目录条目。
 type ToolResp struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	Source      string          `json:"source"`                // builtin | mcp | observed
-	McpServer   string          `json:"mcp_server,omitempty"`  // source=mcp 时的归属 server id（按 agent 可见性过滤）
-	Schema      json.RawMessage `json:"schema,omitempty"`      // 参数 JSON Schema（原样保真）
+	Source      string          `json:"source"`               // builtin | mcp | observed
+	McpServer   string          `json:"mcp_server,omitempty"` // source=mcp 时的归属 server id（按 agent 可见性过滤）
+	Schema      json.RawMessage `json:"schema,omitempty"`     // 参数 JSON Schema（原样保真）
 }
 
 // ——— P2 §8.1 统一能力目录（/agents/:id/capabilities） ———

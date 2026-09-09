@@ -61,6 +61,8 @@ func New(h *handler.Handler) *gin.Engine {
 	v1.GET("/skills", h.Capability.ListSkills)
 	v1.GET("/mcps", h.Capability.ListMcpServers)
 	v1.GET("/tools", h.Capability.ListTools)
+	// P2 §5.2 MCP live 探测：tools/list → 写 Tool 目录（显式触发；不做隐式启动探测，行为不回归）。
+	v1.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	v1.GET("/ws/events", h.WS.Handle)
 
 	MountWeb(r)

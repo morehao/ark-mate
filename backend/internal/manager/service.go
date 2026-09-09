@@ -157,18 +157,25 @@ type Service struct {
 	conversations map[string]*ConversationRec
 	ver           map[string]int64 // 每 agg(conversation) 的版本计数（域事件递增）
 	restoring     bool             // RestoreFromStore 进行中：registerConversation 跳过 DB 回写
+
+	// MCP live 探测状态（P2 §5.2）：独立锁——探测可能耗时，不阻塞会话面。
+	mcpMu           sync.Mutex
+	mcpProbes       map[string]mcpProbeStatus
+	mcpProbeTimeout time.Duration
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
 func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s := &Service{
-		reg:           reg,
-		bus:           bus,
-		agents:        make(map[string]*AgentRec),
-		conversations: make(map[string]*ConversationRec),
-		ver:           make(map[string]int64),
-		providers:     make(map[string]*providerDef),
-		caps:          capability.NewRegistry(),
+		reg:             reg,
+		bus:             bus,
+		agents:          make(map[string]*AgentRec),
+		conversations:   make(map[string]*ConversationRec),
+		ver:             make(map[string]int64),
+		providers:       make(map[string]*providerDef),
+		caps:            capability.NewRegistry(),
+		mcpProbes:       make(map[string]mcpProbeStatus),
+		mcpProbeTimeout: defaultMCPProbeTimeout,
 	}
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	for _, b := range builtinAgents {
@@ -1021,7 +1028,7 @@ func (s *Service) restErr(err error) error {
 	switch ae.Class {
 	case acl.ClassRequest:
 		code = 40001
-		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" {
+		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
 			code = 40401
 		}
 	case acl.ClassLimit:

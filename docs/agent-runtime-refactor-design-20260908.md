@@ -924,9 +924,39 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   平级端点 `/skills` `/mcps` `/tools` 回归正常（1/2/2 条）。
 - `go build` + `go vet` + `go test -race ./...` 全绿。
 
-#### 19.2 切片 G2：MCP `tools/list` live 探测（排期）
+#### 19.2 切片 G2：MCP `tools/list` live 探测（完成）
 
-边界与已知约束：MCP 客户端自研（不引第三方 SDK，仓库依赖克制）；stdio 与 http/streamable_http
-先落地，**sse 明确降级**（legacy HTTP+SSE 双向通道，首版不实现，报 `mcp_transport_unsupported`，
-不臆造）；探测结果写 Tool 目录并带 `mcp_server` 归属；触发面 = REST 显式探测（serve 启动是否
-默认探测待定，默认关闭以保持行为不回归）。
+**落地**：新增 `internal/mcp`（自研最小 MCP 客户端，不引第三方 SDK）：
+
+- 传输：`stdio`（换行分隔 JSON-RPC 2.0，spawn 子进程 + `initialize` 握手 + `notifications/initialized`
+  + `tools/list`）与 `http`/`streamable_http`（POST，响应兼容 JSON 与 SSE `data:` 两种；`Mcp-Session-Id`
+  自动回带）；**`sse` 明确降级** → `mcp_transport_unsupported`（不臆造 legacy 双向通道）。
+- 只覆盖探测所需子集：tools/list 支持 `nextCursor` 翻页（≤20 页防死循环）、忽略通知、应答服务端
+  `ping`；不实现 tools/call、resources/prompts、sampling/roots、断线重连。
+- 稳定错误码：`mcp_transport_unsupported` / `mcp_command_invalid` / `mcp_url_invalid` /
+  `mcp_spawn_failed` / `mcp_initialize_failed` / `mcp_tools_list_failed` / `mcp_timeout`；
+  manager 按类映射信封码（传输不支持→40501、命令非法→40001、其余上游故障→50201），
+  msg 前缀 `[<code>]` 便于排障。
+
+**REST/状态**：`POST /mcps/:id/probe` 显式触发（**不做隐式启动探测**，保持行为不回归）；
+结果写 Tool 目录并带 `mcp_server` 归属，`tools/list` 视为**权威快照**（`ReplaceToolsForMcpServer`
+整体替换该 server 旧条目，不动 builtin/observed/其它 server）；`GET /mcps` 增 `tool_count` /
+`last_probe_at` / `last_probe_error`。**失败保留上次快照**（无新快照不删旧条目）+ 记录
+`last_probe_error`。探测预算默认 15s（`SetMcpProbeTimeout` 可覆盖）。
+
+**证据**：
+
+- 单测：`internal/mcp` 11 项（stdio 全流程/翻页/握手失败/坏 JSON/超时/相对命令/spawn 失败、
+  sse 降级、http JSON、http SSE、HTTP 5xx），`TestProbeMcpServer`（成功替换 + 二次探测收敛 +
+  归属标注 + 状态回读 + 未知 id 40401 + sse 40501）、`TestProbeMcpServerRoute`。
+- 真进程（`:18122`，memory + caps fixtures）：
+  - stdio：Node 写的真实 MCP 服务端 → 握手 `forge-demo-mcp 0.2.0`、`added=2`、schema 保真；
+    切换服务端输出后二次探测 `added=1 removed=2`（旧条目删除、builtin/静态条目保留）；
+  - 失败：`/nonexistent/mcp-server-xyz` → `50201` + `last_probe_error` 记录，且**目录保留上次快照**；
+  - 超时：服务端不回 → 15s 后 `50201 [mcp_timeout] tools/list 失败：context deadline exceeded`；
+  - streamable_http：真实 Node HTTP 进程（校验 `Mcp-Session-Id` 回带，否则 400）→ 探测成功；
+  - sse → `40501`；未知 server → `40401`。
+- `go build` + `go vet` + `go test -race ./...` 全绿。
+
+**遗留（有据，非本次）**：MCP 工具**执行**（tools/call）不在平台范围（平台只做目录化 + 注入）；
+`resources`/`prompts` 目录化未做；`sse` 传输未支持；探测为显式触发，未做定时/启动自动探测。

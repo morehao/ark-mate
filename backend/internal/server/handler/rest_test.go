@@ -72,6 +72,10 @@ type stubSvc struct {
 	agentCapResp *handler.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
 	agentCapErr  error
 	agentCapID   string
+
+	probeResp *handler.McpProbeResp // P2 §5.2 MCP live 探测桩
+	probeErr  error
+	probeID   string
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -158,6 +162,16 @@ func (s *stubSvc) AgentCapabilities(id string) (*handler.AgentCapabilitiesResp, 
 		return s.agentCapResp, nil
 	}
 	return &handler.AgentCapabilitiesResp{AgentID: id}, nil
+}
+func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*handler.McpProbeResp, error) {
+	s.probeID = id
+	if s.probeErr != nil {
+		return nil, s.probeErr
+	}
+	if s.probeResp != nil {
+		return s.probeResp, nil
+	}
+	return &handler.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
 func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	if s.listRuntimesErr != nil {
@@ -304,6 +318,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/skills", h.Capability.ListSkills)
 	g.GET("/mcps", h.Capability.ListMcpServers)
 	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
+	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	g.GET("/tools", h.Capability.ListTools)
 	return r
 }
@@ -734,5 +749,42 @@ func TestAgentCapabilitiesRoute(t *testing.T) {
 	env, code = do(t, r, "GET", "/v1/forge/agents/nope/capabilities", "")
 	if code != 200 || env.Code != 40401 {
 		t.Fatalf("未知 agent 应 40401，got http=%d code=%d", code, env.Code)
+	}
+}
+
+// TestProbeMcpServerRoute P2 §5.2 MCP live 探测路由：POST /mcps/:id/probe 返回探测结果；
+// 未知 server 透传 40401；传输不支持透传 40501。
+func TestProbeMcpServerRoute(t *testing.T) {
+	svc := &stubSvc{
+		probeResp: &handler.McpProbeResp{
+			ID: "fs", Transport: "stdio", ServerName: "helper", ProbedAt: "2026-09-09T10:00:00Z",
+			Added: 2, Removed: 1, ToolCount: 2,
+			Tools: []handler.ToolResp{{Name: "read_file", Source: "mcp", McpServer: "fs"}},
+		},
+	}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "POST", "/v1/forge/mcps/fs/probe", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("POST probe 失败 code=%d env=%d", code, env.Code)
+	}
+	var got handler.McpProbeResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 反序列化失败: %v (%s)", err, env.Data)
+	}
+	if got.ID != "fs" || svc.probeID != "fs" || got.Added != 2 || got.ToolCount != 2 {
+		t.Fatalf("探测结果不符: %+v stub=%q", got, svc.probeID)
+	}
+	if len(got.Tools) != 1 || got.Tools[0].McpServer != "fs" {
+		t.Fatalf("tools 不符: %+v", got.Tools)
+	}
+
+	svc.probeErr = gerror.Error{Code: 40401, Msg: `未知 MCP server "nope"`}
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/nope/probe", ""); code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
+	}
+	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP sse 传输暂不支持探测"}
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/sse1/probe", ""); code != 200 || env.Code != 40501 {
+		t.Fatalf("sse 应 40501，got http=%d code=%d", code, env.Code)
 	}
 }

@@ -136,6 +136,45 @@ func (r *Registry) ListTools() []Tool {
 	return out
 }
 
+// GetMcpServer 按 id 取 MCP server（ok=false 表示未注册）。
+func (r *Registry) GetMcpServer(id string) (McpServer, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.mcps[id]
+	if !ok {
+		return McpServer{}, false
+	}
+	return *m, true
+}
+
+// ReplaceToolsForMcpServer 用一次 live 探测结果整体替换某 MCP server 归属的 Tool 条目
+// （P2 §5.2：tools/list 是权威快照——同 server 上一轮的条目全删，再写入本轮；不动 builtin/
+// observed/其它 server 的条目）。非法 name 跳过并计入 skipped。返回 (added, removed, skipped)。
+func (r *Registry) ReplaceToolsForMcpServer(serverID string, tools []Tool) (int, int, int) {
+	added, removed, skipped := 0, 0, 0
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, t := range r.tools {
+		if t.McpServer == serverID && t.Source == ToolSourceMCP {
+			delete(r.tools, name)
+			removed++
+		}
+	}
+	for i := range tools {
+		t := tools[i]
+		if t.Name == "" || !nameRE.MatchString(t.Name) {
+			skipped++
+			continue
+		}
+		t.Source = ToolSourceMCP
+		t.McpServer = serverID
+		cp := t
+		r.tools[cp.Name] = &cp
+		added++
+	}
+	return added, removed, skipped
+}
+
 // idOf/nameOf nil 安全的错误回显。
 func idOf(s *Skill) string {
 	if s == nil {
