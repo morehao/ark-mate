@@ -14,6 +14,10 @@ import type {
   McpProbeResult,
   McpToolCallReq,
   McpToolCallResult,
+  McpResourcesResult,
+  McpResourceReadResult,
+  McpPromptsResult,
+  McpPromptGetResult,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -153,6 +157,28 @@ export const callMcpTool = (
     `/forge/mcps/${encodeURIComponent(serverId)}/tools/${encodeURIComponent(tool)}/call`,
     req,
   )
+
+/** 实时拉取某 MCP server 的资源列表（B2：resources/list + resources/templates/list）。 */
+export const listMcpResources = (id: string): Promise<McpResourcesResult> =>
+  http.get<McpResourcesResult>(`/forge/mcps/${encodeURIComponent(id)}/resources`)
+
+/** 读取一个 MCP 资源（B2：resources/read）。 */
+export const readMcpResource = (id: string, uri: string): Promise<McpResourceReadResult> =>
+  http.post<McpResourceReadResult>(`/forge/mcps/${encodeURIComponent(id)}/resources/read`, { uri })
+
+/** 实时拉取某 MCP server 的提示词模板（B2：prompts/list）。 */
+export const listMcpPrompts = (id: string): Promise<McpPromptsResult> =>
+  http.get<McpPromptsResult>(`/forge/mcps/${encodeURIComponent(id)}/prompts`)
+
+/** 取用一条 MCP 提示词（B2：prompts/get；参数值必须是字符串）。 */
+export const getMcpPrompt = (
+  id: string,
+  name: string,
+  args: Record<string, string> = {},
+): Promise<McpPromptGetResult> =>
+  http.post<McpPromptGetResult>(`/forge/mcps/${encodeURIComponent(id)}/prompts/${encodeURIComponent(name)}/get`, {
+    arguments: args,
+  })
 
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 

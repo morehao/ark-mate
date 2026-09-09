@@ -73,6 +73,12 @@ type Service interface {
 	// CallMcpTool 调用某 MCP server 的工具（B1：tools/call；独立会话，不做连接池）。
 	CallMcpTool(ctx context.Context, id, tool string, req McpToolCallReq) (*McpToolCallResp, error)
 
+	// B2：MCP 资源与提示词（live 拉取，不落盘/不目录化）。
+	ListMcpResources(ctx context.Context, id string) (*McpResourcesResp, error)
+	ReadMcpResource(ctx context.Context, id, uri string) (*McpResourceReadResp, error)
+	ListMcpPrompts(ctx context.Context, id string) (*McpPromptsResp, error)
+	GetMcpPrompt(ctx context.Context, id, name string, req McpPromptGetReq) (*McpPromptGetResp, error)
+
 	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
 	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
 
@@ -266,6 +272,95 @@ type McpToolCallResp struct {
 	ServerName        string            `json:"server_name,omitempty"`
 	ServerVersion     string            `json:"server_version,omitempty"`
 	DurationMS        int64             `json:"duration_ms"`
+}
+
+// ——— B2：MCP 资源与提示词（live 拉取） ———
+
+// McpResourcesResp resources/list（+ resources/templates/list）的实时结果。
+// 资源与提示词**不做目录化**（不写 capabilities 目录、不落盘）：它们是 server 的实时视图，
+// 且可能随权限/时间变化；每次请求现拉，语义最诚实。
+type McpResourcesResp struct {
+	ServerID       string                    `json:"server_id"`
+	Resources      []McpResourceResp         `json:"resources"`
+	Templates      []McpResourceTemplateResp `json:"templates,omitempty"`
+	TemplatesError string                    `json:"templates_error,omitempty"`
+	ServerName     string                    `json:"server_name,omitempty"`
+	ServerVersion  string                    `json:"server_version,omitempty"`
+}
+
+type McpResourceResp struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mime_type,omitempty"`
+	Size        *int64 `json:"size,omitempty"`
+}
+
+type McpResourceTemplateResp struct {
+	URITemplate string `json:"uri_template"`
+	Name        string `json:"name,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mime_type,omitempty"`
+}
+
+// McpResourceReadReq resources/read 请求体。
+type McpResourceReadReq struct {
+	URI string `json:"uri"`
+}
+
+// McpResourceReadResp resources/read 结果（text 与 blob 二选一，原样保真）。
+type McpResourceReadResp struct {
+	ServerID string               `json:"server_id"`
+	URI      string               `json:"uri"`
+	Contents []McpResourceContent `json:"contents"`
+}
+
+type McpResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mime_type,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
+}
+
+// McpPromptsResp prompts/list 的实时结果。
+type McpPromptsResp struct {
+	ServerID   string          `json:"server_id"`
+	Prompts    []McpPromptResp `json:"prompts"`
+	ServerName string          `json:"server_name,omitempty"`
+}
+
+type McpPromptResp struct {
+	Name        string                  `json:"name"`
+	Title       string                  `json:"title,omitempty"`
+	Description string                  `json:"description,omitempty"`
+	Arguments   []McpPromptArgumentResp `json:"arguments,omitempty"`
+}
+
+type McpPromptArgumentResp struct {
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// McpPromptGetReq prompts/get 请求体（MCP 规定参数值为字符串）。
+type McpPromptGetReq struct {
+	Arguments map[string]string `json:"arguments,omitempty"`
+}
+
+// McpPromptGetResp prompts/get 结果（content 保持 MCP 联合类型原样）。
+type McpPromptGetResp struct {
+	ServerID    string             `json:"server_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Messages    []McpPromptMessage `json:"messages"`
+}
+
+type McpPromptMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 // ToolResp Tool 目录条目。

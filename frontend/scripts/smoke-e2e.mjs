@@ -222,6 +222,20 @@ async function checkBizError() {
   } else {
     bad('POST /mcps/:id/tools/:tool/call 未知 server', `http=${cr.status} ${JSON.stringify(cEnv)}`)
   }
+  // B2：资源/提示词路由契约（未知 server → 40401）。
+  for (const [path, label] of [
+    ['/mcps/no-such-server/resources', 'GET /mcps/:id/resources'],
+    ['/mcps/no-such-server/prompts', 'GET /mcps/:id/prompts'],
+  ]) {
+    const lr = await fetch(API + path, { headers: AUTH })
+    const lEnv = await lr.json()
+    if (lr.status === 200 && lEnv.code === 40401) {
+      ok(`${label} 未知 server → HTTP 200 code=40401`)
+    } else {
+      bad(label, `http=${lr.status} ${JSON.stringify(lEnv)}`)
+    }
+  }
+
   const badArgs = await fetch(API + '/mcps/no-such-server/tools/any_tool/call', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },

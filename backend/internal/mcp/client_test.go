@@ -55,6 +55,64 @@ func runHelper() {
 				"capabilities":    map[string]any{},
 				"serverInfo":      map[string]any{"name": "helper", "version": "1.2.3"},
 			}})
+		case "resources/list":
+			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"resources": []map[string]any{
+					{"uri": "file:///tmp/a.txt", "name": "a.txt", "mimeType": "text/plain", "size": 3},
+					{"uri": "", "name": "无名 uri 应被保留（不臆造过滤）"},
+				},
+			}})
+		case "resources/templates/list":
+			if mode == "no_templates" {
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+					"error": map[string]any{"code": -32601, "message": "method not found"}})
+				continue
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"resourceTemplates": []map[string]any{{"uriTemplate": "file:///{path}", "name": "file"}},
+			}})
+		case "resources/read":
+			var p struct {
+				URI string `json:"uri"`
+			}
+			_ = json.Unmarshal(msg.Params, &p)
+			if p.URI == "file:///missing" {
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+					"error": map[string]any{"code": -32002, "message": "resource not found"}})
+				continue
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"contents": []map[string]any{
+					{"uri": p.URI, "mimeType": "text/plain", "text": "hello " + p.URI},
+					{"uri": p.URI, "mimeType": "application/octet-stream", "blob": "aGk="},
+				},
+			}})
+		case "prompts/list":
+			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"prompts": []map[string]any{
+					{"name": "greet", "description": "打招呼", "arguments": []map[string]any{
+						{"name": "who", "required": true}, {"name": "lang"},
+					}},
+					{"name": ""}, // 无名条目：不目录化，但列表原样保留
+				},
+			}})
+		case "prompts/get":
+			var p struct {
+				Name      string            `json:"name"`
+				Arguments map[string]string `json:"arguments"`
+			}
+			_ = json.Unmarshal(msg.Params, &p)
+			if p.Name == "missing" {
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+					"error": map[string]any{"code": -32602, "message": "unknown prompt " + p.Name}})
+				continue
+			}
+			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+				"description": "问候模板",
+				"messages": []map[string]any{
+					{"role": "user", "content": map[string]any{"type": "text", "text": "你好 " + p.Arguments["who"]}},
+				},
+			}})
 		case "tools/call":
 			var p struct {
 				Name      string          `json:"name"`
@@ -413,5 +471,106 @@ func TestCallToolArgsNotObject(t *testing.T) {
 	// null 合法（= 无参数）。
 	if _, err := CallTool(context.Background(), stdioServer(t), "echo", json.RawMessage(`null`)); err != nil {
 		t.Fatalf("null 应等价无参数: %v", err)
+	}
+}
+
+// ——— B2：resources / prompts ———
+
+// TestListResourcesAndTemplates resources/list + resources/templates/list（uri 原样保真）。
+func TestListResourcesAndTemplates(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := ListResources(ctx, stdioServer(t))
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if res.ServerName != "helper" || len(res.Resources) != 2 {
+		t.Fatalf("资源列表不符: %+v", res)
+	}
+	if res.Resources[0].URI != "file:///tmp/a.txt" || res.Resources[0].MimeType != "text/plain" {
+		t.Fatalf("资源条目不符: %+v", res.Resources[0])
+	}
+	if res.Resources[0].Size == nil || *res.Resources[0].Size != 3 {
+		t.Fatalf("size 应保真: %+v", res.Resources[0])
+	}
+	if len(res.Templates) != 1 || res.Templates[0].URITemplate != "file:///{path}" || res.TemplatesError != "" {
+		t.Fatalf("模板不符: %+v", res)
+	}
+}
+
+// TestListResourcesTemplatesUnsupported 服务端未实现 templates → 降级为空 + 记录原因（不报错）。
+func TestListResourcesTemplatesUnsupported(t *testing.T) {
+	t.Setenv("FORGE_MCP_HELPER_MODE", "no_templates")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := ListResources(ctx, stdioServer(t))
+	if err != nil {
+		t.Fatalf("模板不支持不应使整体失败: %v", err)
+	}
+	if len(res.Resources) != 2 || len(res.Templates) != 0 || res.TemplatesError == "" {
+		t.Fatalf("降级结果不符: %+v", res)
+	}
+}
+
+// TestReadResource text 与 blob 两种内容块原样保真。
+func TestReadResource(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := ReadResource(ctx, stdioServer(t), "file:///tmp/a.txt")
+	if err != nil {
+		t.Fatalf("ReadResource: %v", err)
+	}
+	if len(res.Contents) != 2 {
+		t.Fatalf("contents 不符: %+v", res.Contents)
+	}
+	if res.Contents[0].Text != "hello file:///tmp/a.txt" || res.Contents[1].Blob != "aGk=" {
+		t.Fatalf("内容不符: %+v", res.Contents)
+	}
+	// 空 uri 本地拒绝。
+	if _, err := ReadResource(ctx, stdioServer(t), "  "); CodeOf(err) != "mcp_resource_uri_required" {
+		t.Fatalf("空 uri 应本地拒绝，got %v", err)
+	}
+	// 服务端错误 → mcp_resource_read_failed。
+	if _, err := ReadResource(ctx, stdioServer(t), "file:///missing"); CodeOf(err) != "mcp_resource_read_failed" {
+		t.Fatalf("期望 mcp_resource_read_failed，got %v", err)
+	}
+}
+
+// TestListPromptsAndGet prompts/list 原样保留（含无名条目）+ prompts/get 参数透传。
+func TestListPromptsAndGet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	prompts, err := ListPrompts(ctx, stdioServer(t))
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
+	if len(prompts) != 2 || prompts[0].Name != "greet" || len(prompts[0].Arguments) != 2 {
+		t.Fatalf("提示词列表不符: %+v", prompts)
+	}
+	if !prompts[0].Arguments[0].Required || prompts[0].Arguments[1].Required {
+		t.Fatalf("参数 required 不符: %+v", prompts[0].Arguments)
+	}
+
+	got, err := GetPrompt(ctx, stdioServer(t), "greet", map[string]string{"who": "世界"})
+	if err != nil {
+		t.Fatalf("GetPrompt: %v", err)
+	}
+	if got.Description != "问候模板" || len(got.Messages) != 1 || got.Messages[0].Role != "user" {
+		t.Fatalf("prompts/get 结果不符: %+v", got)
+	}
+	var content struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(got.Messages[0].Content, &content); err != nil || content.Text != "你好 世界" {
+		t.Fatalf("消息内容不符: %s (%v)", got.Messages[0].Content, err)
+	}
+
+	// 空名本地拒绝；服务端未知 → mcp_prompt_get_failed。
+	if _, err := GetPrompt(ctx, stdioServer(t), "", nil); CodeOf(err) != "mcp_prompt_name_required" {
+		t.Fatalf("空提示词名应本地拒绝，got %v", err)
+	}
+	if _, err := GetPrompt(ctx, stdioServer(t), "missing", nil); CodeOf(err) != "mcp_prompt_get_failed" {
+		t.Fatalf("期望 mcp_prompt_get_failed，got %v", err)
 	}
 }

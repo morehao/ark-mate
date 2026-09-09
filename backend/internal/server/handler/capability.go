@@ -73,6 +73,57 @@ func (h *CapabilityHandler) CallMcpTool(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// ListMcpResources 拉取 MCP server 的资源列表（B2：resources/list + resources/templates/list）。
+func (h *CapabilityHandler) ListMcpResources(c *gin.Context) {
+	resp, err := h.svc.ListMcpResources(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// ReadMcpResource 读取一个资源（B2：resources/read）。
+func (h *CapabilityHandler) ReadMcpResource(c *gin.Context) {
+	var req McpResourceReadReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	resp, err := h.svc.ReadMcpResource(c.Request.Context(), c.Param("id"), req.URI)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// ListMcpPrompts 拉取 MCP server 的提示词模板（B2：prompts/list）。
+func (h *CapabilityHandler) ListMcpPrompts(c *gin.Context) {
+	resp, err := h.svc.ListMcpPrompts(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// GetMcpPrompt 取用一条提示词模板（B2：prompts/get）。
+func (h *CapabilityHandler) GetMcpPrompt(c *gin.Context) {
+	var req McpPromptGetReq
+	// 空 body 合法（= 无参数）；非空但非法才拒绝。
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	resp, err := h.svc.GetMcpPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
 func (h *CapabilityHandler) ProbeMcpServer(c *gin.Context) {
 	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
 	if err != nil {

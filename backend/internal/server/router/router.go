@@ -91,6 +91,11 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	v1.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	// B1：MCP 工具调用（tools/call，独立会话；工具名不含 "/"——gin 路径参数不匹配斜杠）。
 	v1.POST("/mcps/:id/tools/:tool/call", h.Capability.CallMcpTool)
+	// B2：MCP 资源与提示词（live 拉取，不落盘/不目录化）。
+	v1.GET("/mcps/:id/resources", h.Capability.ListMcpResources)
+	v1.POST("/mcps/:id/resources/read", h.Capability.ReadMcpResource)
+	v1.GET("/mcps/:id/prompts", h.Capability.ListMcpPrompts)
+	v1.POST("/mcps/:id/prompts/:name/get", h.Capability.GetMcpPrompt)
 	// M3 首项 用量统计：runs 计数/时长 + 会话上下文/费用快照聚合（只读）。
 	v1.GET("/usage/summary", h.Usage.Summary)
 	v1.GET("/ws/events", h.WS.Handle)

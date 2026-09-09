@@ -568,3 +568,106 @@ func TestCallMcpToolTimeout(t *testing.T) {
 		t.Fatalf("超时应 40901，got %v (code=%d)", err, restCode(err))
 	}
 }
+
+// TestMcpResourcesPrompts B2：资源/提示词 live 拉取（http 传输）——字段映射、模板降级、
+// 空 uri/空名 40001、未知 server 40401、sse 40501、服务端错误 50201。
+func TestMcpResourcesPrompts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result map[string]any
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": "mgr-b2", "version": "2.0"}}
+		case "resources/list":
+			result = map[string]any{"resources": []map[string]any{
+				{"uri": "file:///tmp/a.txt", "name": "a", "mimeType": "text/plain", "size": 3},
+			}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []map[string]any{{"uriTemplate": "file:///{p}", "name": "f"}}}
+		case "resources/read":
+			result = map[string]any{"contents": []map[string]any{{"uri": "file:///tmp/a.txt", "mimeType": "text/plain", "text": "内容"}}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []map[string]any{
+				{"name": "greet", "description": "问候", "arguments": []map[string]any{{"name": "who", "required": true}}},
+			}}
+		case "prompts/get":
+			result = map[string]any{"description": "问候模板", "messages": []map[string]any{
+				{"role": "user", "content": map[string]any{"type": "text", "text": "你好"}},
+			}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+	}))
+	defer srv.Close()
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "h", Name: "H", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.ListMcpResources(context.Background(), "h")
+	if err != nil {
+		t.Fatalf("ListMcpResources: %v", err)
+	}
+	if res.ServerID != "h" || res.ServerName != "mgr-b2" || len(res.Resources) != 1 {
+		t.Fatalf("资源列表不符: %+v", res)
+	}
+	if res.Resources[0].URI != "file:///tmp/a.txt" || res.Resources[0].MimeType != "text/plain" ||
+		res.Resources[0].Size == nil || *res.Resources[0].Size != 3 {
+		t.Fatalf("资源条目不符: %+v", res.Resources[0])
+	}
+	if len(res.Templates) != 1 || res.Templates[0].URITemplate != "file:///{p}" || res.TemplatesError != "" {
+		t.Fatalf("模板不符: %+v", res)
+	}
+
+	rd, err := svc.ReadMcpResource(context.Background(), "h", "file:///tmp/a.txt")
+	if err != nil {
+		t.Fatalf("ReadMcpResource: %v", err)
+	}
+	if len(rd.Contents) != 1 || rd.Contents[0].Text != "内容" || rd.URI != "file:///tmp/a.txt" {
+		t.Fatalf("读取结果不符: %+v", rd)
+	}
+	if _, err := svc.ReadMcpResource(context.Background(), "h", "  "); restCode(err) != 40001 {
+		t.Fatalf("空 uri 应 40001，got %v", err)
+	}
+
+	ps, err := svc.ListMcpPrompts(context.Background(), "h")
+	if err != nil {
+		t.Fatalf("ListMcpPrompts: %v", err)
+	}
+	if len(ps.Prompts) != 1 || ps.Prompts[0].Name != "greet" || len(ps.Prompts[0].Arguments) != 1 ||
+		!ps.Prompts[0].Arguments[0].Required {
+		t.Fatalf("提示词列表不符: %+v", ps)
+	}
+
+	gp, err := svc.GetMcpPrompt(context.Background(), "h", "greet", handler.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
+	if err != nil {
+		t.Fatalf("GetMcpPrompt: %v", err)
+	}
+	if gp.Description != "问候模板" || len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
+		t.Fatalf("提示词结果不符: %+v", gp)
+	}
+	if _, err := svc.GetMcpPrompt(context.Background(), "h", "", handler.McpPromptGetReq{}); restCode(err) != 40001 {
+		t.Fatalf("空提示词名应 40001，got %v", err)
+	}
+
+	// 未知 server → 40401；sse → 40501。
+	if _, err := svc.ListMcpResources(context.Background(), "nope"); restCode(err) != 40401 {
+		t.Fatalf("未知 server 应 40401，got %v", err)
+	}
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ListMcpPrompts(context.Background(), "s"); restCode(err) != 40501 {
+		t.Fatalf("sse 应 40501，got %v", err)
+	}
+}

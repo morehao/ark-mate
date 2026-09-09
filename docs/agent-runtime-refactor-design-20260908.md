@@ -1569,3 +1569,47 @@ WS URL 中，可能被反代访问日志记录（建议反代对 `/ws/events` �
 服务端压力由 MCP server 自担）；③ 调用结果不进事件流/审计（只在日志留一行）；④ 工具名含 `/`
 的 server 无法经此路由调用（路径参数限制）；⑤ `resources`/`prompts`/`sse`/auto-probe/原生权限映射
 仍待后续切片。
+
+#### 19.17 切片 B2：MCP resources / prompts（完成）
+
+**动机**：MCP 的三大数据面里，B1 补齐了 tools；resources（可读数据）与 prompts（模板）此前
+完全没有入口。B2 把两者接到平台数据面（仍然只做「平台侧读取」，不改变底座侧 runtime 自身的
+MCP 行为）。
+
+**设计**：
+1. **live-only，不落盘**：资源与提示词**不进能力目录**（不写 `~/.forge/capabilities/*`、不落库）——
+   它们是 server 的实时视图（随权限/内容变化），每次请求现拉。对比：tools 会写目录（探测结果需要
+   被 agent 能力视图引用），而 resources/prompts 目前没有消费方需要缓存。这是有意的取舍，不是遗漏。
+2. **方法面**（MCP 2025-06-18）：
+   - `resources/list`（翻页）+ `resources/templates/list` → `ResourceList{Resources, Templates, TemplatesError}`；
+   - `resources/read` → `ResourceContent{URI, MimeType, Text|Blob}`（text/blob 二选一，原样保真）；
+   - `prompts/list`（翻页）→ `Prompt{Name, Title, Description, Arguments[]}`；
+   - `prompts/get`（参数值按 MCP 约定必须是字符串）→ `GetPromptResult{Description, Messages[]}`，
+     消息 content 保持 MCP 联合类型原样（`json.RawMessage`）。
+3. **翻页与错误码复用**：新增泛型 `paginate[T]`（上限 `maxListPages=20`，防 nextCursor 死循环），
+   `tools/list` 一并迁到该实现；错误码 `mcp_resources_list_failed` / `mcp_resource_read_failed` /
+   `mcp_prompts_list_failed` / `mcp_prompt_get_failed`，本地参数错误 `mcp_resource_uri_required` /
+   `mcp_prompt_name_required` → 40001，其余 → 50201，超时 → 40901（分类同 B1）。
+4. **模板能力差异不算错误**：server 未实现 `resources/templates/list`（JSON-RPC -32601）时，
+   资源列表照常返回，模板降级为空并把原因写进 `templates_error`——**明确降级、如实外露**。
+5. **REST**：`GET /mcps/:id/resources`、`POST /mcps/:id/resources/read`、`GET /mcps/:id/prompts`、
+   `POST /mcps/:id/prompts/:name/get`。**前端**：MCP 行新增「资源/提示词」按钮 → 弹窗双 Tab
+   （资源可「读取」并就地展示 text/blob 提示；提示词按 `arguments` 渲染输入框 → 「取用」展示消息）。
+
+**证据**：
+- 单测：`internal/mcp`（资源/模板列表、模板不支持降级、text+blob 读取、空 uri 本地拒绝、服务端错误、
+  提示词列表与 required 标注、prompts/get 参数透传与错误）、`internal/manager`（http 传输端到端映射、
+  40001/40401/40501）、`internal/server/handler`（四条路由的路径与 body 透传、空 body、非法 JSON 40000、
+  错误码透传）。
+- 真进程（python stdio MCP server）：资源列表 2 条 + 模板 1 条；text 与 blob 读取保真；
+  未知 uri → `50201 [mcp_resource_read_failed]`；提示词列表（含 required）；`greet` 取用渲染出
+  `你好 世界（zh）`；未知提示词 → `50201 [mcp_prompt_get_failed]`；未知 server → `40401`；
+  另一 server 条目返回 -32601 → `code=0` + `templates_error` 记录原因（降级实测）。
+  `pnpm smoke:e2e` 全 PASS（含新增两条 B2 契约断言）。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；前端 typecheck + build + `make all` 通过。
+
+**遗留/降级**：① live-only：没有目录/缓存，每次调用一次建连+握手（无连接池，同 B1）；
+② 资源内容不做大小限制以外的处理（blob 原样 base64 透传，前端不自动解码）；
+③ 不支持 `resources/subscribe`（变更通知）与 `prompts` 的 `completion/complete`；
+④ 工具名/提示词名含 `/` 的 server 无法经路由调用（gin 路径参数限制）；
+⑤ 能力目录文件无热重载（新增 server 需重启 daemon）。

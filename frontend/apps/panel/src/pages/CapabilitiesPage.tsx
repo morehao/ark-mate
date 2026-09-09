@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Tag, Tooltip } from 'antd'
-import { ExperimentOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tabs, Tag, Tooltip } from 'antd'
+import { ExperimentOutlined, FileTextOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark/ui'
 import {
   callMcpTool,
   getAgentCapabilities,
+  getMcpPrompt,
+  listMcpPrompts,
+  listMcpResources,
   listMcpServers,
   listSkills,
   listTools,
   probeMcpServer,
+  readMcpResource,
   toErrorMessage,
 } from '@ark/api'
-import type { AgentCapabilities, McpServer, McpToolCallResult, Skill, Tool } from '@ark/types'
+import type {
+  AgentCapabilities,
+  McpPrompt,
+  McpPromptsResult,
+  McpPromptGetResult,
+  McpResourceReadResult,
+  McpResourcesResult,
+  McpServer,
+  McpToolCallResult,
+  Skill,
+  Tool,
+} from '@ark/types'
 import { useForge } from '../store'
-import { fmtProbeAt, mcpRows, probeSummary, toolSourceLabel } from '../console/capabilityView'
+import { fmtProbeAt, mcpRows, probeSummary, toolSourceLabel, type McpRow } from '../console/capabilityView'
 
 // ——— 能力目录页（§8.3 能力卡） ———
 // 上半：Agent 视角统一能力目录（GET /agents/:id/capabilities，§8.1）——按候选 runtime 裁剪/标注；
@@ -98,6 +113,17 @@ export function CapabilitiesPage() {
   const [callBusy, setCallBusy] = useState(false)
   const [callResult, setCallResult] = useState<McpToolCallResult | null>(null)
   const [callErr, setCallErr] = useState<string | null>(null)
+
+  // B2 资源/提示词弹窗：按需 live 拉取（打开时加载，不缓存）。
+  const [liveServer, setLiveServer] = useState<{ id: string; name: string } | null>(null)
+  const [liveTab, setLiveTab] = useState<'resources' | 'prompts'>('resources')
+  const [liveBusy, setLiveBusy] = useState(false)
+  const [liveErr, setLiveErr] = useState<string | null>(null)
+  const [resResult, setResResult] = useState<McpResourcesResult | null>(null)
+  const [resRead, setResRead] = useState<{ uri: string; data?: McpResourceReadResult; err?: string } | null>(null)
+  const [promptResult, setPromptResult] = useState<McpPromptsResult | null>(null)
+  const [promptArgs, setPromptArgs] = useState<Record<string, string>>({})
+  const [promptGot, setPromptGot] = useState<{ name: string; data?: McpPromptGetResult; err?: string } | null>(null)
 
   // 默认选中第一个 Agent（Agent 列表由 store 统一维护）。
   useEffect(() => {
@@ -228,6 +254,67 @@ export function CapabilitiesPage() {
       setCallBusy(false)
     }
   }
+
+  // openLive 打开资源/提示词弹窗（按当前 tab 立即 live 拉取）。
+  const openLive = (m: McpRow, tab: 'resources' | 'prompts'): void => {
+    setLiveServer({ id: m.id, name: m.name })
+    setLiveTab(tab)
+    setLiveErr(null)
+    setResResult(null)
+    setResRead(null)
+    setPromptResult(null)
+    setPromptGot(null)
+    setPromptArgs({})
+    void loadLive(m.id, tab)
+  }
+
+  const loadLive = async (id: string, tab: 'resources' | 'prompts'): Promise<void> => {
+    setLiveBusy(true)
+    setLiveErr(null)
+    try {
+      if (tab === 'resources') {
+        setResResult(await listMcpResources(id))
+      } else {
+        setPromptResult(await listMcpPrompts(id))
+      }
+    } catch (err) {
+      setLiveErr(toErrorMessage(err))
+    } finally {
+      setLiveBusy(false)
+    }
+  }
+
+  const doReadResource = async (id: string, uri: string): Promise<void> => {
+    setResRead({ uri })
+    try {
+      setResRead({ uri, data: await readMcpResource(id, uri) })
+    } catch (err) {
+      setResRead({ uri, err: toErrorMessage(err) })
+    }
+  }
+
+  const doGetPrompt = async (id: string, p: McpPrompt): Promise<void> => {
+    setPromptGot({ name: p.name })
+    try {
+      setPromptGot({ name: p.name, data: await getMcpPrompt(id, p.name, promptArgs) })
+    } catch (err) {
+      setPromptGot({ name: p.name, err: toErrorMessage(err) })
+    }
+  }
+
+  // liveButton：MCP server 行的「资源/提示词」入口（sse 传输同样不可用，与探测一致）。
+  const liveButton = (m: McpRow): ReactNode => (
+    <Tooltip title={m.transport === 'sse' ? 'sse 传输暂不支持（后端明确降级）' : '实时拉取该 server 的 resources/prompts（不落盘）'}>
+      <Button
+        size="small"
+        icon={<FileTextOutlined />}
+        disabled={m.transport === 'sse'}
+        onClick={() => openLive(m, 'resources')}
+      >
+        资源/提示词
+      </Button>
+    </Tooltip>
+  )
 
   const probeStatus = (row: { toolCount: number; lastProbeAt?: string; lastProbeError?: string }): ReactNode =>
     row.lastProbeError ? (
@@ -362,6 +449,7 @@ export function CapabilitiesPage() {
                         )}
                       </span>
                       {probeButton(m.id, m.probeable)}
+                      {liveButton(m)}
                     </Row>
                   ))
                 )}
@@ -440,6 +528,7 @@ export function CapabilitiesPage() {
                     <span style={mono}>{m.endpoint}</span>
                   </span>
                   {probeButton(m.id, m.probeable)}
+                  {liveButton(m)}
                 </Row>
               ))
             )}
@@ -482,6 +571,171 @@ export function CapabilitiesPage() {
             )}
           </div>
         </Card>
+
+        {/* ——— B2：MCP 资源 / 提示词（live 拉取） ——— */}
+        <Modal
+          title={liveServer ? `${liveServer.name} · 资源与提示词` : '资源与提示词'}
+          open={liveServer !== null}
+          onCancel={() => setLiveServer(null)}
+          footer={null}
+          width={760}
+        >
+          <div style={{ fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
+            实时向该 MCP server 拉取（<code>resources/list</code> + <code>resources/templates/list</code> /
+            <code> prompts/list</code>）：**不落盘、不目录化**——资源与提示词随 server 权限/状态变化，
+            每次打开现拉最诚实。
+          </div>
+          <Tabs
+            activeKey={liveTab}
+            onChange={(k) => {
+              const tab = k as 'resources' | 'prompts'
+              setLiveTab(tab)
+              setLiveErr(null)
+              if (liveServer) void loadLive(liveServer.id, tab)
+            }}
+            items={[
+              {
+                key: 'resources',
+                label: `资源${resResult ? ` (${resResult.resources.length})` : ''}`,
+                children: (
+                  <Spin spinning={liveBusy}>
+                    {liveErr && liveTab === 'resources' ? (
+                      <Alert type="error" showIcon message="资源拉取失败" description={liveErr} />
+                    ) : !resResult || resResult.resources.length === 0 ? (
+                      <Empty description="该 server 未暴露资源（或未实现 resources/list）" />
+                    ) : (
+                      <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                        {resResult.templates_error && (
+                          <Alert
+                            type="info"
+                            showIcon
+                            style={{ marginBottom: 8 }}
+                            message="该 server 未实现 resources/templates/list（降级为空）"
+                            description={resResult.templates_error}
+                          />
+                        )}
+                        {(resResult.templates ?? []).map((t) => (
+                          <Row key={`tpl-${t.uri_template}`}>
+                            <Tag color="purple" style={{ marginInlineEnd: 0, fontSize: 10.5 }}>
+                              模板
+                            </Tag>
+                            <span style={{ ...mono, flex: 1 }}>{t.uri_template}</span>
+                            <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>{t.name}</span>
+                          </Row>
+                        ))}
+                        {resResult.resources.map((r) => (
+                          <div key={r.uri}>
+                            <Row>
+                              <span style={{ ...mono, flex: 1 }}>{r.uri}</span>
+                              <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
+                                {r.name}
+                                {r.mime_type ? ` · ${r.mime_type}` : ''}
+                                {typeof r.size === 'number' ? ` · ${r.size}B` : ''}
+                              </span>
+                              <Button size="small" onClick={() => void doReadResource(liveServer!.id, r.uri)}>
+                                读取
+                              </Button>
+                            </Row>
+                            {resRead?.uri === r.uri && (
+                              <div style={{ padding: '0 16px 8px' }}>
+                                {resRead.err ? (
+                                  <Alert type="error" showIcon message="读取失败" description={resRead.err} />
+                                ) : (
+                                  (resRead.data?.contents ?? []).map((c, i) => (
+                                    <pre
+                                      key={i}
+                                      style={{
+                                        ...mono,
+                                        margin: '0 0 6px',
+                                        padding: 8,
+                                        maxHeight: 200,
+                                        overflow: 'auto',
+                                        background: tokens.softFill,
+                                        borderRadius: 8,
+                                        whiteSpace: 'pre-wrap',
+                                      }}
+                                    >
+                                      {c.text ?? `（二进制 blob，base64 ${c.blob?.length ?? 0} 字符，前端不自动解码）`}
+                                    </pre>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Spin>
+                ),
+              },
+              {
+                key: 'prompts',
+                label: `提示词${promptResult ? ` (${promptResult.prompts.length})` : ''}`,
+                children: (
+                  <Spin spinning={liveBusy}>
+                    {liveErr && liveTab === 'prompts' ? (
+                      <Alert type="error" showIcon message="提示词拉取失败" description={liveErr} />
+                    ) : !promptResult || promptResult.prompts.length === 0 ? (
+                      <Empty description="该 server 未暴露提示词（或未实现 prompts/list）" />
+                    ) : (
+                      <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                        {promptResult.prompts.map((p) => (
+                          <div key={p.name}>
+                            <Row>
+                              <span style={{ ...mono, minWidth: 140 }}>{p.name}</span>
+                              <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{p.description}</span>
+                              <Button size="small" onClick={() => void doGetPrompt(liveServer!.id, p)}>
+                                取用
+                              </Button>
+                            </Row>
+                            {(p.arguments ?? []).length > 0 && (
+                              <div style={{ padding: '0 16px 8px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {(p.arguments ?? []).map((a) => (
+                                  <Input
+                                    key={a.name}
+                                    size="small"
+                                    style={{ width: 180 }}
+                                    placeholder={`${a.name}${a.required ? '（必填）' : ''}`}
+                                    value={promptArgs[a.name] ?? ''}
+                                    onChange={(e) => setPromptArgs((cur) => ({ ...cur, [a.name]: e.target.value }))}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {promptGot?.name === p.name && (
+                              <div style={{ padding: '0 16px 8px' }}>
+                                {promptGot.err ? (
+                                  <Alert type="error" showIcon message="取用失败" description={promptGot.err} />
+                                ) : (
+                                  <pre
+                                    style={{
+                                      ...mono,
+                                      margin: 0,
+                                      padding: 8,
+                                      maxHeight: 200,
+                                      overflow: 'auto',
+                                      background: tokens.softFill,
+                                      borderRadius: 8,
+                                      whiteSpace: 'pre-wrap',
+                                    }}
+                                  >
+                                    {(promptGot.data?.messages ?? [])
+                                      .map((m) => `${m.role}: ${promptText(m.content)}`)
+                                      .join('\n')}
+                                  </pre>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Spin>
+                ),
+              },
+            ]}
+          />
+        </Modal>
 
         {/* ——— B1：MCP 工具调用（tools/call） ——— */}
         <Modal
@@ -544,6 +798,20 @@ export function CapabilitiesPage() {
       </div>
     </PageContainer>
   )
+}
+
+// promptText 把 prompts/get 的 content（MCP 联合类型）取成可读文本：
+// 文本块取 text，其余类型原样 JSON 展示（不猜语义）。
+function promptText(content: unknown): string {
+  if (content && typeof content === 'object') {
+    const blk = content as { type?: string; text?: string }
+    if (blk.type === 'text' && typeof blk.text === 'string') return blk.text
+  }
+  try {
+    return JSON.stringify(content)
+  } catch {
+    return String(content)
+  }
 }
 
 // schemaSkeleton 由工具 inputSchema 生成参数骨架（properties 键 + 类型占位；无 schema → "{}"）。

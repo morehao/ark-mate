@@ -100,6 +100,12 @@ type stubSvc struct {
 	callMcpTool string
 	callMcpReq  handler.McpToolCallReq
 
+	mcpLiveID   string // B2 资源/提示词桩
+	mcpLiveURI  string
+	mcpLiveName string
+	mcpLiveArgs map[string]string
+	mcpLiveErr  error
+
 	usageResp  *handler.UsageSummaryResp // M3 GET /usage/summary 桩
 	usageQuery handler.UsageQueryReq     // 捕获查询参数
 	usageErr   error
@@ -244,6 +250,34 @@ func (s *stubSvc) CallMcpTool(_ context.Context, id, tool string, req handler.Mc
 		return s.callMcpResp, nil
 	}
 	return &handler.McpToolCallResp{ServerID: id, Tool: tool, Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"ok"}`)}, Text: "ok"}, nil
+}
+func (s *stubSvc) ListMcpResources(_ context.Context, id string) (*handler.McpResourcesResp, error) {
+	s.mcpLiveID = id
+	if s.mcpLiveErr != nil {
+		return nil, s.mcpLiveErr
+	}
+	return &handler.McpResourcesResp{ServerID: id, Resources: []handler.McpResourceResp{{URI: "file:///tmp/a.txt", MimeType: "text/plain"}}}, nil
+}
+func (s *stubSvc) ReadMcpResource(_ context.Context, id, uri string) (*handler.McpResourceReadResp, error) {
+	s.mcpLiveID, s.mcpLiveURI = id, uri
+	if s.mcpLiveErr != nil {
+		return nil, s.mcpLiveErr
+	}
+	return &handler.McpResourceReadResp{ServerID: id, URI: uri, Contents: []handler.McpResourceContent{{URI: uri, Text: "hi"}}}, nil
+}
+func (s *stubSvc) ListMcpPrompts(_ context.Context, id string) (*handler.McpPromptsResp, error) {
+	s.mcpLiveID = id
+	if s.mcpLiveErr != nil {
+		return nil, s.mcpLiveErr
+	}
+	return &handler.McpPromptsResp{ServerID: id, Prompts: []handler.McpPromptResp{{Name: "greet"}}}, nil
+}
+func (s *stubSvc) GetMcpPrompt(_ context.Context, id, name string, req handler.McpPromptGetReq) (*handler.McpPromptGetResp, error) {
+	s.mcpLiveID, s.mcpLiveName, s.mcpLiveArgs = id, name, req.Arguments
+	if s.mcpLiveErr != nil {
+		return nil, s.mcpLiveErr
+	}
+	return &handler.McpPromptGetResp{ServerID: id, Name: name, Messages: []handler.McpPromptMessage{{Role: "user", Content: json.RawMessage(`{"type":"text","text":"hi"}`)}}}, nil
 }
 func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*handler.McpProbeResp, error) {
 	s.probeID = id
@@ -438,6 +472,10 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
 	g.POST("/mcps/:id/tools/:tool/call", h.Capability.CallMcpTool)
+	g.GET("/mcps/:id/resources", h.Capability.ListMcpResources)
+	g.POST("/mcps/:id/resources/read", h.Capability.ReadMcpResource)
+	g.GET("/mcps/:id/prompts", h.Capability.ListMcpPrompts)
+	g.POST("/mcps/:id/prompts/:name/get", h.Capability.GetMcpPrompt)
 	g.GET("/tools", h.Capability.ListTools)
 	g.GET("/usage/summary", h.Usage.Summary)
 	g.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
@@ -1206,6 +1244,77 @@ func TestCallMcpToolRoute(t *testing.T) {
 	} {
 		svc.callMcpErr = tc.err
 		if env, code := do(t, r, "POST", "/v1/forge/mcps/x/tools/t/call", ""); code != 200 || env.Code != tc.want {
+			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
+		}
+	}
+}
+
+// TestMcpResourcesPromptsRoutes B2：资源/提示词四条路由（路径与 body 参数透传、错误码透传）。
+func TestMcpResourcesPromptsRoutes(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "GET", "/v1/forge/mcps/fs/resources", "")
+	if code != 200 || env.Code != 0 || svc.mcpLiveID != "fs" {
+		t.Fatalf("GET resources 失败 http=%d code=%d id=%q", code, env.Code, svc.mcpLiveID)
+	}
+	var res handler.McpResourcesResp
+	_ = json.Unmarshal(env.Data, &res)
+	if len(res.Resources) != 1 || res.Resources[0].URI != "file:///tmp/a.txt" {
+		t.Fatalf("资源结果不符: %+v", res)
+	}
+
+	env, code = do(t, r, "POST", "/v1/forge/mcps/fs/resources/read", `{"uri":"file:///tmp/a.txt"}`)
+	if code != 200 || env.Code != 0 || svc.mcpLiveURI != "file:///tmp/a.txt" {
+		t.Fatalf("POST resources/read 失败 http=%d code=%d uri=%q", code, env.Code, svc.mcpLiveURI)
+	}
+	var rd handler.McpResourceReadResp
+	_ = json.Unmarshal(env.Data, &rd)
+	if len(rd.Contents) != 1 || rd.Contents[0].Text != "hi" {
+		t.Fatalf("读取结果不符: %+v", rd)
+	}
+	// 缺 uri → 桩返回空（真实实现报 40001）；非法 JSON → 40000。
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/resources/read", "{oops"); code != 200 || env.Code != 40000 {
+		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
+	}
+
+	env, code = do(t, r, "GET", "/v1/forge/mcps/fs/prompts", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET prompts 失败 http=%d code=%d", code, env.Code)
+	}
+	var ps handler.McpPromptsResp
+	_ = json.Unmarshal(env.Data, &ps)
+	if len(ps.Prompts) != 1 || ps.Prompts[0].Name != "greet" {
+		t.Fatalf("提示词列表不符: %+v", ps)
+	}
+
+	env, code = do(t, r, "POST", "/v1/forge/mcps/fs/prompts/greet/get", `{"arguments":{"who":"世界"}}`)
+	if code != 200 || env.Code != 0 || svc.mcpLiveName != "greet" || svc.mcpLiveArgs["who"] != "世界" {
+		t.Fatalf("POST prompts/get 失败 http=%d code=%d name=%q args=%v", code, env.Code, svc.mcpLiveName, svc.mcpLiveArgs)
+	}
+	var gp handler.McpPromptGetResp
+	_ = json.Unmarshal(env.Data, &gp)
+	if len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
+		t.Fatalf("提示词结果不符: %+v", gp)
+	}
+	// 空 body = 无参数取用。
+	svc.mcpLiveArgs = map[string]string{"x": "y"}
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/prompts/greet/get", ""); code != 200 || env.Code != 0 || len(svc.mcpLiveArgs) != 0 {
+		t.Fatalf("空 body 应零值，got http=%d code=%d args=%v", code, env.Code, svc.mcpLiveArgs)
+	}
+
+	// 错误码透传：40401 / 40501 / 50201。
+	for _, tc := range []struct {
+		err  error
+		want int
+		path string
+	}{
+		{gerror.Error{Code: 40401, Msg: "未知 MCP server"}, 40401, "/v1/forge/mcps/nope/resources"},
+		{gerror.Error{Code: 40501, Msg: "sse 不支持"}, 40501, "/v1/forge/mcps/s/prompts"},
+		{gerror.Error{Code: 50201, Msg: "[mcp_resource_read_failed] x"}, 50201, "/v1/forge/mcps/fs/resources"},
+	} {
+		svc.mcpLiveErr = tc.err
+		if env, code := do(t, r, "GET", tc.path, ""); code != 200 || env.Code != tc.want {
 			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
 		}
 	}

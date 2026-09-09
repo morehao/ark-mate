@@ -268,13 +268,139 @@ func mcpCallClass(err error) acl.Class {
 	switch mcp.CodeOf(err) {
 	case "mcp_transport_unsupported":
 		return acl.ClassUnsupported
-	case "mcp_command_invalid", "mcp_url_invalid", "mcp_tool_name_required", "mcp_tool_args_invalid":
+	case "mcp_command_invalid", "mcp_url_invalid", "mcp_tool_name_required", "mcp_tool_args_invalid",
+		"mcp_resource_uri_required", "mcp_prompt_name_required":
 		return acl.ClassRequest
 	case "mcp_timeout":
 		return acl.ClassLimit
 	default:
 		return acl.ClassService
 	}
+}
+
+// ——— B2：MCP 资源与提示词（live 拉取，不落盘/不目录化） ———
+
+// mcpCallBudget 资源/提示词拉取的统一预算（与探测同量级：一次建连 + 一次列表/读取）。
+func (s *Service) mcpLiveServer(id string) (capability.McpServer, error) {
+	server, ok := s.caps.GetMcpServer(id)
+	if !ok {
+		return capability.McpServer{}, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+			fmt.Sprintf("未知 MCP server %q", id), nil))
+	}
+	return server, nil
+}
+
+// ListMcpResources 拉取某 MCP server 的资源列表（resources/list + resources/templates/list）。
+func (s *Service) ListMcpResources(ctx context.Context, id string) (*handler.McpResourcesResp, error) {
+	server, err := s.mcpLiveServer(id)
+	if err != nil {
+		return nil, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
+	defer cancel()
+	res, err := mcp.ListResources(rctx, mcpServerOf(server))
+	if err != nil {
+		return nil, s.mcpLiveErr(err, "mcp_resources_list_failed")
+	}
+	out := &handler.McpResourcesResp{
+		ServerID: id, ServerName: res.ServerName, ServerVersion: res.ServerVersion,
+		TemplatesError: res.TemplatesError,
+		Resources:      make([]handler.McpResourceResp, 0, len(res.Resources)),
+	}
+	for _, r := range res.Resources {
+		out.Resources = append(out.Resources, handler.McpResourceResp{
+			URI: r.URI, Name: r.Name, Title: r.Title, Description: r.Description,
+			MimeType: r.MimeType, Size: r.Size,
+		})
+	}
+	for _, t := range res.Templates {
+		out.Templates = append(out.Templates, handler.McpResourceTemplateResp{
+			URITemplate: t.URITemplate, Name: t.Name, Title: t.Title,
+			Description: t.Description, MimeType: t.MimeType,
+		})
+	}
+	return out, nil
+}
+
+// ReadMcpResource 读取一个资源（resources/read）。
+func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*handler.McpResourceReadResp, error) {
+	server, err := s.mcpLiveServer(id)
+	if err != nil {
+		return nil, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
+	defer cancel()
+	res, err := mcp.ReadResource(rctx, mcpServerOf(server), uri)
+	if err != nil {
+		return nil, s.mcpLiveErr(err, "mcp_resource_read_failed")
+	}
+	out := &handler.McpResourceReadResp{ServerID: id, URI: uri, Contents: make([]handler.McpResourceContent, 0, len(res.Contents))}
+	for _, c := range res.Contents {
+		out.Contents = append(out.Contents, handler.McpResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text, Blob: c.Blob})
+	}
+	return out, nil
+}
+
+// ListMcpPrompts 拉取某 MCP server 的提示词模板（prompts/list）。
+func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*handler.McpPromptsResp, error) {
+	server, err := s.mcpLiveServer(id)
+	if err != nil {
+		return nil, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
+	defer cancel()
+	prompts, err := mcp.ListPrompts(rctx, mcpServerOf(server))
+	if err != nil {
+		return nil, s.mcpLiveErr(err, "mcp_prompts_list_failed")
+	}
+	out := &handler.McpPromptsResp{ServerID: id, Prompts: make([]handler.McpPromptResp, 0, len(prompts))}
+	for _, p := range prompts {
+		item := handler.McpPromptResp{Name: p.Name, Title: p.Title, Description: p.Description}
+		for _, a := range p.Arguments {
+			item.Arguments = append(item.Arguments, handler.McpPromptArgumentResp{
+				Name: a.Name, Title: a.Title, Description: a.Description, Required: a.Required,
+			})
+		}
+		out.Prompts = append(out.Prompts, item)
+	}
+	return out, nil
+}
+
+// GetMcpPrompt 取用一条提示词模板（prompts/get）。
+func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req handler.McpPromptGetReq) (*handler.McpPromptGetResp, error) {
+	server, err := s.mcpLiveServer(id)
+	if err != nil {
+		return nil, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
+	defer cancel()
+	res, err := mcp.GetPrompt(rctx, mcpServerOf(server), name, req.Arguments)
+	if err != nil {
+		return nil, s.mcpLiveErr(err, "mcp_prompt_get_failed")
+	}
+	out := &handler.McpPromptGetResp{ServerID: id, Name: name, Description: res.Description,
+		Messages: make([]handler.McpPromptMessage, 0, len(res.Messages))}
+	for _, m := range res.Messages {
+		out.Messages = append(out.Messages, handler.McpPromptMessage{Role: m.Role, Content: m.Content})
+	}
+	return out, nil
+}
+
+// mcpServerOf 把能力目录条目映射为 mcp 包输入。
+func mcpServerOf(server capability.McpServer) mcp.Server {
+	return mcp.Server{
+		ID: server.ID, Transport: server.Transport, Command: server.Command,
+		Args: server.Args, URL: server.URL, Headers: server.Headers,
+	}
+}
+
+// mcpLiveErr 把 mcp 层错误映射为 REST 信封错误（稳定 code 进 msg，分类决定信封码）。
+func (s *Service) mcpLiveErr(err error, fallbackCode string) error {
+	code := mcp.CodeOf(err)
+	if code == "" {
+		code = fallbackCode
+	}
+	return s.restErr(acl.NewError(mcpCallClass(err), code, fmt.Sprintf("[%s] %s", code, err.Error()), nil))
 }
 
 // ListTools 返回 Tool 目录（按 name 排序）。

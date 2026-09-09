@@ -344,3 +344,16 @@ sudo systemctl restart ark-forge
   `timeout_ms=300` → `40901` `[mcp_timeout]`；`arguments` 传字符串 → `40001`
   `[mcp_tool_args_invalid]`；`arguments:null` / 空 body → 无参数调用成功。
   `pnpm smoke:e2e`（E2E_BASE 指向该 daemon）新增两条契约断言并全 PASS。
+
+- MCP 资源与提示词（B2，同一 stdio server）：`GET /mcps/pyecho/resources` → 2 条资源
+  （uri/name/mime_type/size 保真）+ 1 条 `resourceTemplates`；`POST /mcps/pyecho/resources/read`
+  `{"uri":"file:///tmp/b2/notes.txt"}` → `text="hello b2\n"`；blob 资源 → `blob="AAECAwQ="`
+  （base64 原样，不自动解码）；未知 uri → `50201 [mcp_resource_read_failed]`。
+  `GET /mcps/pyecho/prompts` → 1 条模板（含 `arguments` 的 `required` 标注）；
+  `POST /mcps/pyecho/prompts/greet/get` `{"arguments":{"who":"世界","lang":"zh"}}` →
+  `messages[0].content.text="你好 世界（zh）"`；未知提示词 → `50201 [mcp_prompt_get_failed]`。
+  未知 server（资源/提示词）→ `40401`。**模板降级实测**：另一个条目
+  `pyecho_notpl`（脚本返回 -32601）→ `code=0`、`resources=2`、`templates=0`、
+  `templates_error="resources/templates/list 失败：JSON-RPC 错误：code=-32601 …"`。
+  注：新增能力目录文件需重启 daemon（目录启动时加载，无热重载）。
+  `pnpm smoke:e2e` 新增两条 B2 契约断言，全 PASS。

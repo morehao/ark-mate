@@ -72,6 +72,88 @@ export interface McpToolCallResult {
   duration_ms: number
 }
 
+// ——— B2 MCP 资源与提示词（live 拉取，不落盘/不目录化） ———
+
+/** 一条可读资源（resources/list）。 */
+export interface McpResource {
+  uri: string
+  name?: string
+  title?: string
+  description?: string
+  mime_type?: string
+  size?: number
+}
+
+/** 一条 URI 模板（resources/templates/list）。 */
+export interface McpResourceTemplate {
+  uri_template: string
+  name?: string
+  title?: string
+  description?: string
+  mime_type?: string
+}
+
+/** resources/list + resources/templates/list 的实时结果。 */
+export interface McpResourcesResult {
+  server_id: string
+  resources: McpResource[]
+  templates?: McpResourceTemplate[]
+  /** 非空 = 该 server 未实现 templates 接口（服务端能力差异，非平台错误）。 */
+  templates_error?: string
+  server_name?: string
+  server_version?: string
+}
+
+/** 一条资源内容（text 与 blob 二选一）。 */
+export interface McpResourceContent {
+  uri: string
+  mime_type?: string
+  text?: string
+  /** base64（二进制资源原样保真，前端不自动解码）。 */
+  blob?: string
+}
+
+export interface McpResourceReadResult {
+  server_id: string
+  uri: string
+  contents: McpResourceContent[]
+}
+
+/** 提示词参数声明。 */
+export interface McpPromptArgument {
+  name: string
+  title?: string
+  description?: string
+  required?: boolean
+}
+
+/** 一条提示词模板（prompts/list）。 */
+export interface McpPrompt {
+  name: string
+  title?: string
+  description?: string
+  arguments?: McpPromptArgument[]
+}
+
+export interface McpPromptsResult {
+  server_id: string
+  prompts: McpPrompt[]
+  server_name?: string
+}
+
+/** prompts/get 的一条消息（content 保持 MCP 联合类型原样）。 */
+export interface McpPromptMessage {
+  role: string
+  content: unknown
+}
+
+export interface McpPromptGetResult {
+  server_id: string
+  name: string
+  description?: string
+  messages: McpPromptMessage[]
+}
+
 // ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
 
 /** 某 Agent 可见的 skill（sources 已按该 Agent 候选 runtime 裁剪）。 */
