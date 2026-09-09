@@ -27,10 +27,12 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	return s.caps.LoadDir(dir).Total()
 }
 
-// ReconcileSkills 把能力数据面里的 opencode SKILL.md 源 skill 与目标根目录做重校
+// ReconcileSkills 把能力数据面里已实证 format 的 skill 与目标根目录做重校
 // （§5.4/§16.5：物化缺失/更新 + 删除联动——只删带 forge 归属标记且已不在注册表的目录，
-// 用户自有目录绝不动）。返回 (written, removed)。serve 启动装载能力后、
-// FORGE_SKILLS_MATERIALIZE_DIR 非空时调用。物化默认不写用户目录——由调用方显式 enable。
+// 用户自有目录绝不动）。支持两种已实证 format：`SKILL.md`（opencode 原样）与
+// `SKILL.md+frontmatter`（dsh 需 YAML frontmatter）。返回 (written, removed)。
+// serve 启动装载能力后、FORGE_SKILLS_MATERIALIZE_DIR 非空时调用。
+// 物化默认不写用户目录——由调用方显式 enable。
 func (s *Service) ReconcileSkills(root string) (int, int, error) {
 	if s.caps == nil || root == "" {
 		return 0, 0, nil

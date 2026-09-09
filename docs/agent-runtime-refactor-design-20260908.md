@@ -691,6 +691,7 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
   skill-b + user-x（skill-a 清、user-x 保留）；echo 全链路回归通过；vet + race 全绿。
 - **enable 决策（遗留，部署评审）**：目标目录为真实 opencode 用户配置时须运维显式开启
   （`FORGE_SKILLS_MATERIALIZE_DIR`）。dsh 未实证 → 降级只列不物化。
+  （**2026-09-09 已实证并修正，见 §19.4**：原「body 即内容」约定被双底座实测证伪。）
 
 ### 16.6 Resume 承载矩阵（§16 切片 C，实测/记录 2026-09-08）
 
@@ -990,3 +991,47 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   `toolSourceLabel`/`fmtProbeAt`，合并语义、sse 不可探测、归属标签、时间格式化均 PASS。
 
 **遗留**：浏览器视觉走查仍缺（环境无浏览器）；探测为手动触发（未做定时/启动自动探测）。
+
+#### 19.4 切片 G4：dsh skill 物化实证与物化内容修正（完成）
+
+**实证方法（不依赖模型凭证，直接驱动真实实现）**：
+
+- dsh：`@deepseek-ai/dsh-skill-filesystem@0.1.2-rc.1`（dsh 自带包）真实 provider
+  （`new FileSystemSkillProvider(ctx, control, {includeDefaultRoots:false, customSkillDirs:[root], watch:false})`
+  → `list({cwd})`）直接扫描候选根目录。
+- opencode：`opencode debug skill`（v1.18.29，`XDG_CONFIG_HOME` 隔离到临时目录，不触碰用户真实配置）。
+
+**实测结论**：
+
+| 输入形态 | dsh 0.1.2-rc.1 | opencode 1.18.29 |
+|---|---|---|
+| `<id>/SKILL.md` 无 frontmatter | 丢弃（`missing YAML frontmatter`） | **不加载** |
+| 只有 `name` 或只有 `description` | 丢弃（`frontmatter requires name and description`） | 加载（无 description 时后续过滤） |
+| `name`+`description` | 加载（`name` 不要求等于目录名） | 加载（`name` 与目录不一致也加载） |
+| 嵌套 `<a>/<b>/SKILL.md` | 不扫描 | 递归扫描 |
+| 扁平 `<name>.md` | 加载 | — |
+
+**修正**：原物化约定「`format == "SKILL.md"` → body 原样写入」被证伪——**两个底座都不会加载
+无 frontmatter 的 SKILL.md**。现统一为**保证 YAML frontmatter**：
+
+- `format: "SKILL.md"` 与 `"SKILL.md+frontmatter"` 语义等价（后者为显式写法，便于定义文件自解释）；
+  其它 format 仍未实证 → 跳过告警。
+- body 已带 frontmatter → 只补缺失的必填键（用户内容保留）；无 frontmatter → 前置
+  `name`（=skill id）+ `description`（退化 `name`→`id`）；YAML 标量做引号转义、换行折空格。
+- 同一 skill 多 source 指向同一目标文件（单 root 投影）→ 取**首个**已实证 format 并告警，
+  避免「写多次 / 比一次」不一致（重校幂等判定与写入内容同源）。
+
+**证据**：
+
+- 单测：`TestMaterializeSkillConvention`（路径/frontmatter 内容/幂等/删除）、
+  `TestMaterializeSkillDshFrontmatter`（合成、已有 frontmatter 补键且不重复、空 description 退化、
+  多 source 等价、重校幂等与变更重写）、`TestReconcileSkills`、`TestServiceReconcileSkills` 更新。
+- **跨实现端到端**：真实 `forge serve`（`FORGE_SKILLS_MATERIALIZE_DIR=/tmp/dsh-e2e/root2`，
+  两个 skill：dsh 声明 + opencode 声明）写出 2 个产物 → **同一产物目录**分别交给
+  真实 dsh provider 与真实 `opencode debug skill` 解析：两者都正确列出 `dsh-plan`
+  与 `oc-raw`（名称/描述一致），**零告警**。
+- `go vet` + `go test -race ./...` 全绿。
+
+**遗留**：单 root 投影下「同一 skill 同时服务两个 runtime」只取首个 format（当前两 format 等价，
+故不影响可用性；若未来出现真正互斥的 format 需按 runtime 分 root）；dsh 的 `.system` 子目录、
+`user-invocable`/`disable-model-invocation` 等可选键未做平台化映射（不在平台范围）。

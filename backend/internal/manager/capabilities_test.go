@@ -429,8 +429,8 @@ func TestServiceReconcileSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != "# demo body" {
-		t.Fatal("物化内容不符")
+	if string(b) != "---\nname: \"forge-demo\"\ndescription: \"Demo\"\n---\n# demo body" {
+		t.Fatalf("物化内容不符（应带 frontmatter）: %q", b)
 	}
 	// 幂等重跑：无写无删。
 	if w, r, err := svc.ReconcileSkills(root); err != nil || w != 0 || r != 0 {
