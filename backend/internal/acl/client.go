@@ -53,6 +53,17 @@ type Client struct {
 	closed    chan struct{}
 }
 
+// PidInfo 返回底层子进程标识（传输不支持时零值）。
+func (c *Client) PidInfo() PidInfo {
+	if c == nil || c.t == nil {
+		return PidInfo{}
+	}
+	if pr, ok := c.t.(PidReporter); ok {
+		return pr.PidInfo()
+	}
+	return PidInfo{}
+}
+
 // Dial 完成「拉起子进程 → initialize → 能力断言」：Transport.Start 后建立
 // ClientSideConnection 并完成 v1 握手。失败时负责回收 Transport。
 func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error) {

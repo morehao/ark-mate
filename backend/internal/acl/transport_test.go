@@ -61,3 +61,26 @@ func TestClassifyRequestError(t *testing.T) {
 		t.Fatalf("ctx 取消应归 connection: %v", ae)
 	}
 }
+
+// TestPidInfo 子进程标识外露（进程注册表 / 孤儿回收的登记来源）：
+// Start 后 PID 为正、PGID == PID（Setpgid 自建进程组）、Command 为启动命令；
+// 未 Start 时为零值（调用方据此跳过登记）。
+func TestPidInfo(t *testing.T) {
+	tp := NewStdioTransport("sh", []string{"-c", "sleep 30"}, nil)
+	if got := tp.PidInfo(); got.PID != 0 || got.PGID != 0 || got.Command != "" {
+		t.Fatalf("未 Start 应返回零值: %+v", got)
+	}
+	if err := tp.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	info := tp.PidInfo()
+	if info.PID <= 0 || info.Command != "sh" {
+		t.Fatalf("PID/Command 不符: %+v", info)
+	}
+	if info.PGID != info.PID {
+		t.Fatalf("Setpgid 下 PGID 应等于 PID: %+v", info)
+	}
+	if err := tp.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

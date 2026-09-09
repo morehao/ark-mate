@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/internal/infra/procreg"
 	"github.com/morehao/ark-forge/internal/runtime"
 )
 
@@ -77,6 +78,7 @@ type Orchestrator struct {
 
 	mu            sync.Mutex
 	conns         map[string]*runtimeConn // key = runtime ID；M0/M1 每 runtime 至多一条连接
+	procReg       *procreg.Registry       // runtime 子进程注册表（孤儿回收；nil = 禁用）
 	conversations map[string]*ActiveConversation
 	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
 	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此
@@ -114,6 +116,7 @@ type runtimeConn struct {
 	agentID string
 	spec    runtime.Spec
 	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
+	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -602,6 +605,71 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	return as, nil
 }
 
+// SetProcRegistry 注入进程注册表（serve 装配；nil = 不登记）。
+func (o *Orchestrator) SetProcRegistry(r *procreg.Registry) {
+	o.mu.Lock()
+	o.procReg = r
+	o.mu.Unlock()
+}
+
+// ProcRegistry 返回当前注册表（测试/诊断用）。
+func (o *Orchestrator) ProcRegistry() *procreg.Registry {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.procReg
+}
+
+// ReapOrphans 回收上一 daemon 实例遗留的孤儿 runtime 进程（启动时调用一次）。
+func (o *Orchestrator) ReapOrphans(grace time.Duration) (procreg.Report, error) {
+	o.mu.Lock()
+	reg := o.procReg
+	o.mu.Unlock()
+	if reg == nil {
+		return procreg.Report{Disabled: true}, nil
+	}
+	return reg.Reap(grace)
+}
+
+// registerProc 登记刚拉起的子进程（失败只告警，不影响会话可用性）。
+func (o *Orchestrator) registerProc(rc *runtimeConn) {
+	o.mu.Lock()
+	reg := o.procReg
+	o.mu.Unlock()
+	if reg == nil || rc == nil || rc.client == nil {
+		return
+	}
+	info := rc.client.PidInfo()
+	if info.PID <= 0 {
+		return
+	}
+	rc.pid = info.PID
+	if err := reg.Add(procreg.Entry{
+		PID: info.PID, PGID: info.PGID, Command: info.Command,
+		Runtime: rc.spec.ID, AgentID: rc.agentID,
+	}); err != nil {
+		o.logger.Warn("procreg: 登记子进程失败", "pid", info.PID, "err", err)
+		return
+	}
+	o.logger.Info("procreg: 登记 runtime 子进程",
+		"runtime", rc.spec.ID, "agent", rc.agentID, "pid", info.PID, "pgid", info.PGID)
+}
+
+// unregisterProc 摘除登记（正常回收路径）。
+func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
+	if rc == nil || rc.pid <= 0 {
+		return
+	}
+	o.mu.Lock()
+	reg := o.procReg
+	o.mu.Unlock()
+	if reg == nil {
+		return
+	}
+	if err := reg.Remove(rc.pid); err != nil {
+		o.logger.Warn("procreg: 摘除子进程登记失败", "pid", rc.pid, "err", err)
+	}
+}
+
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec) (*runtimeConn, error) {
 	o.mu.Lock()
@@ -678,6 +746,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
 	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, started: time.Now()}
+	o.registerProc(rc)
 	o.mu.Lock()
 	o.conns[spec.ID] = rc
 	o.mu.Unlock()
@@ -726,6 +795,7 @@ func (o *Orchestrator) watchConn(rc *runtimeConn) {
 }
 
 func (o *Orchestrator) dropConn(rc *runtimeConn) {
+	o.unregisterProc(rc)
 	o.mu.Lock()
 	ownerBefore := o.conns[rc.spec.ID] == rc
 	if ownerBefore {
@@ -1078,6 +1148,7 @@ func (o *Orchestrator) Close() {
 	for _, rc := range conns {
 		o.disconnectConversationAll(rc)
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
+		o.unregisterProc(rc)
 		if rc.client != nil {
 			_ = rc.client.Close()
 		}

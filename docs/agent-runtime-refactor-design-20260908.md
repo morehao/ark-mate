@@ -1247,3 +1247,44 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 **遗留**：默认收窄只是网络面收窄，**无鉴权**问题仍在（A6 单操作员 token）；容器/跨机部署需显式
 `FORGE_ADDR=0.0.0.0:10001`，已在文档标注。§19.8 中「默认绑所有网卡」的表述已被本切片取代（保留为
 历史记录）。
+
+#### 19.10 切片 A1：runtime 子进程注册表 + 启动孤儿回收（完成）
+
+**动机**（决策 v4③）：`acl.StdioTransport` 以 `Setpgid` 让子进程独立成组，正常关闭会杀整棵树；但
+daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）可能残留。此前无任何跨实例记账手段。
+
+**实现**：
+- 新增 `internal/infra/procreg`：JSON 注册表（`<dir(FORGE_DB)>/processes.json`，`FORGE_PROC_REGISTRY`
+  覆盖，`off/disable/none` 关闭；`FORGE_REAP_GRACE` 默认 2s）。条目含
+  `pid/pgid/command/runtime/agent_id/started_at/instance`，原子写（临时文件 + rename，0600），
+  损坏时备份为 `.corrupt` 并以空表继续（不阻塞启动）。
+- 回收策略（**宁可漏杀，不可误杀**）：只处理 `instance != 本实例` 的条目；进程不存在 → 只清账；
+  存在但当前 pgid ≠ 登记 pgid → 判定 PID 复用，跳过并留日志；一致 → 对**进程组** SIGTERM，
+  宽限期后仍存活则 SIGKILL，随后摘除条目。
+- 接线：`acl.StdioTransport.PidInfo()`（新增 `PidReporter` 可选接口）+ `acl.Client.PidInfo()` 暴露
+  子进程标识；`Orchestrator.SetProcRegistry/ReapOrphans`，`acquire` 拨号成功后登记、`dropConn`/
+  `Close` 摘除；`cmd/forge serve` 启动即 `ReapOrphans` 并记录日志。
+
+**实测中修掉的两个真问题**：
+1. **僵尸误判**：子进程被 SIGTERM 杀死后若父进程未 `wait`，`kill(pid, 0)` 仍返回成功 → 回收器
+   误判「仍存活」并重发 SIGKILL（`EPERM`）。修：`alive()` 先对本进程子进程做 `Wait4(WNOHANG)`
+   非阻塞收尸，收尸成功即视为已消失；非本进程子进程 `ECHILD` → 退化为 signal 0 探测。同时把
+   `ESRCH` 视为「已消失」，不再误报失败告警。
+2. **PID 复用风险**：仅按 pid 杀进程组可能命中复用后的无关进程；以「登记 pgid == 当前 pgid」为
+   判据拦截（单测 + 真进程双重验证）。
+
+**证据**：
+- 单测 `internal/infra/procreg`（5 例，含真实进程组回收、PID 复用跳过、僵尸收尸、损坏文件容错、
+  禁用态 no-op）+ `internal/acl.TestPidInfo`；`go vet` + `go test -race ./...` 全绿。
+- 真进程（`forge serve`，真实 opencode 底座）：`POST /agents/oc/start` → 注册表出现
+  `pid=84461 pgid=84461 command=opencode runtime=opencode agent=oc`，`stop` 后条目摘除。
+- 真进程（启动回收）：上一实例登记 + 独立进程组 + 忽略 SIGTERM 的替身进程组 → 启动日志
+  `procreg: 启动孤儿回收完成 reaped=1 cleaned=0 skipped=0`，进程消失（SIGTERM 超时后升级 SIGKILL），
+  注册表清空。
+- 真进程（误杀保护）：登记错误 pgid 的存活无关进程 → `skipped=1`，无关进程存活。
+- **诚实记录**：echo 与 opencode 子进程在 daemon 被 `kill -9` 后均随 stdin EOF 自行退出（实测），
+  即「stdio 传输下真孤儿少见」；注册表定位是兜底防线（runtime 忽略 EOF / 派生孙进程 / 挂死场景）。
+
+**遗留**：非 unix 平台无进程组信号（回收降级为不支持，已在代码注释与部署文档标注）；孙进程若已
+`setsid` 脱离进程组则不在回收范围（登记只覆盖 daemon 直接拉起的组）；注册表未做跨实例锁（同一
+数据目录并行跑两个 daemon 本就非支持用法）。

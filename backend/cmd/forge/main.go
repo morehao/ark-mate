@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-forge/internal/infra/config"
+	"github.com/morehao/ark-forge/internal/infra/procreg"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/runtime/echo"
@@ -127,6 +128,22 @@ func serve(args []string) {
 	}
 
 	orch := manager.NewOrchestrator(svc, reg)
+	// 进程注册表（M3 v4③）：登记本 daemon 拉起的 runtime 子进程；启动时回收上一实例遗留的
+	// 孤儿进程（daemon 被 SIGKILL/崩溃时子进程因独立进程组而存活）。
+	if p := cfg.ProcRegistryPath; p != "" {
+		reg2, prErr := procreg.Open(p)
+		if prErr != nil {
+			slog.Warn("serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
+		} else {
+			orch.SetProcRegistry(reg2)
+			if rep, rErr := orch.ReapOrphans(cfg.ReapGrace); rErr != nil {
+				slog.Warn("serve: 孤儿进程回收失败", "err", rErr)
+			} else if rep.Total() > 0 {
+				slog.Info("serve: 孤儿进程回收", "reaped", len(rep.Reaped),
+					"cleaned", len(rep.Cleaned), "skipped", len(rep.Skipped), "registry", p)
+			}
+		}
+	}
 	// Agent definitions（P2）：FORGE_AGENTS 目录下 <id>.json → 注册到 agents 表（服务端无页面时也热加载）。
 	svc.LoadAgentDefinitions(cfg.AgentDir)
 	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。

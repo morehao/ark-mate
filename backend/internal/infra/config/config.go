@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,12 @@ type Config struct {
 	IdleTimeout time.Duration
 	// ReapInterval 空闲回收扫描间隔（P2；FORGE_REAP_INTERVAL 覆盖，默认 5m）。
 	ReapInterval time.Duration
+	// ProcRegistryPath runtime 子进程注册表路径（M3 决策 v4③：daemon 崩溃/SIGKILL 后，
+	// 下次启动据此回收孤儿进程；FORGE_PROC_REGISTRY 覆盖，默认 <dir(DBPath)>/processes.json；
+	// 取值 off/disable/none = 关闭登记与回收）。
+	ProcRegistryPath string
+	// ReapGrace 孤儿回收的 SIGTERM → SIGKILL 宽限期（FORGE_REAP_GRACE 覆盖，默认 2s）。
+	ReapGrace time.Duration
 }
 
 // 默认超时（与 manager.DefaultPermissionTimeout/DefaultElicitationTimeout 对齐）。
@@ -56,6 +63,7 @@ const (
 	DefaultElicitationTimeout = 30 * time.Minute
 	DefaultIdleTimeout        = 5 * time.Minute
 	DefaultReapInterval       = 5 * time.Minute
+	DefaultReapGrace          = 2 * time.Second
 )
 
 // Default 返回默认配置。
@@ -66,6 +74,7 @@ func Default() Config {
 		ElicitationTimeout: DefaultElicitationTimeout,
 		IdleTimeout:        DefaultIdleTimeout,
 		ReapInterval:       DefaultReapInterval,
+		ReapGrace:          DefaultReapGrace,
 	}
 }
 
@@ -145,6 +154,21 @@ func Load() Config {
 	if v := os.Getenv("FORGE_ELICITATION_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.ElicitationTimeout = d
+		}
+	}
+	if v, ok := os.LookupEnv("FORGE_PROC_REGISTRY"); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "off", "disable", "disabled", "none":
+			c.ProcRegistryPath = ""
+		default:
+			c.ProcRegistryPath = v
+		}
+	} else if c.DBPath != "" {
+		c.ProcRegistryPath = filepath.Join(filepath.Dir(c.DBPath), "processes.json")
+	}
+	if v := os.Getenv("FORGE_REAP_GRACE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.ReapGrace = d
 		}
 	}
 	return c

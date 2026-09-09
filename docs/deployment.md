@@ -71,6 +71,8 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 | `FORGE_IDLE_TIMEOUT` | `5m` | 暖进程空闲回收（0 = 关闭） |
 | `FORGE_REAP_INTERVAL` | `5m` | 空闲回收扫描间隔 |
 | `FORGE_HANDOFF_MAX_CHARS` | `6000` | 跨 runtime / 无原生 resume 时的历史摘要预算（0 = 关闭） |
+| `FORGE_PROC_REGISTRY` | `<dir(FORGE_DB)>/processes.json` | runtime 子进程注册表（孤儿回收用）；`off`/`disable`/`none` = 关闭登记与回收 |
+| `FORGE_REAP_GRACE` | `2s` | 孤儿回收 SIGTERM → SIGKILL 的宽限期 |
 | `GIN_MODE` | `debug` | 设 `release` 关闭 gin debug 告警 |
 
 ### 2.4 底座前置条件
@@ -200,6 +202,8 @@ sudo systemctl restart ark-forge
 | 轮次一直转、无输出 | 底座进程未起（`opencode acp` / `dsh --profile acp` 不在 PATH）；设 `FORGE_TURN_TIMEOUT` 让看门狗兜底 |
 | 权限卡不出现 | agent 配了 `permission_policy: allow|deny` → 已自动决策（看 `session.permission_policy` 事件与日志） |
 | `GET /usage/summary` 40501 | 跑在 memory 模式（无 runs 读模型）→ `FORGE_STORE=sqlite` |
+| 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(FORGE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`FORGE_PROC_REGISTRY=off` 可关闭 |
+| 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
 | 启动报 `schema vN 高于本二进制支持的 vM` | 库被更新版本迁移过 → 恢复对应备份或升级二进制（拒绝启动是刻意保护） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `FORGE_DB` |
 
@@ -226,3 +230,9 @@ sudo systemctl restart ark-forge
   （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`FORGE_ADDR` 收在本机）。上线前请在
   目标机 `systemd-analyze verify` 并实测。
 - 容器镜像：**未执行**（`auth.docker.io` 不可达，见 §4 降级说明）。
+- 孤儿回收（A1）：真实 daemon 下 `POST /agents/:id/start`（opencode）→ 注册表出现条目
+  （`pid/pgid/command/runtime/agent/instance`）；`stop` 后条目摘除。启动回收用「上一实例登记 +
+  独立进程组 + 忽略 SIGTERM」的替身进程组验证：日志 `reaped=1`、进程消失（SIGTERM 超时后升级
+  SIGKILL）、注册表清空；PID 复用保护用「错误 pgid」条目验证：日志 `skipped=1`、无关进程存活。
+  另实测：echo/opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出（孤儿在此传输形态下
+  少见，注册表是兜底防线）。
