@@ -71,6 +71,11 @@ type Config struct {
 	// （<dir>/<skillID>/SKILL.md，opencode v1 自动扫描约定）。目标多为真实 opencode 用户目录，
 	// 须显式开启（默认不写用户机器配置）。
 	SkillMaterializeDir string
+	// SkillMaterializeDirs 按 runtime 分 root 的物化目标（C4 多 root 投影；
+	// FORGE_SKILLS_MATERIALIZE_DIRS=runtime=dir[,runtime=dir]）。与 SkillMaterializeDir 可并存：
+	// 单 root 先跑（全量），再按 runtime 各跑一次（只物化声明该 runtime 的 skill）。
+	// 用途：两个底座的原生 skill 位置不同（或 format 互斥）时各写自己的根目录。
+	SkillMaterializeDirs map[string]string
 	// IdleTimeout 空闲回收阈值：StartAgent 暖进程闲置超过该时长自动停进程（P2；
 	// FORGE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
 	IdleTimeout time.Duration
@@ -159,24 +164,25 @@ func Default() Config {
 
 // knownKeys 支持的配置键（规范名 → 环境变量名）。config.json / env 文件可用规范名或 FORGE_* 名。
 var knownKeys = map[string]string{
-	"addr":                   "FORGE_ADDR",
-	"transcripts":            "FORGE_TRANSCRIPTS",
-	"db":                     "FORGE_DB",
-	"store":                  "FORGE_STORE",
-	"agents":                 "FORGE_AGENTS",
-	"capabilities":           "FORGE_CAPABILITIES",
-	"skills_materialize_dir": "FORGE_SKILLS_MATERIALIZE_DIR",
-	"idle_timeout":           "FORGE_IDLE_TIMEOUT",
-	"reap_interval":          "FORGE_REAP_INTERVAL",
-	"turn_timeout":           "FORGE_TURN_TIMEOUT",
-	"handoff_max_chars":      "FORGE_HANDOFF_MAX_CHARS",
-	"permission_timeout":     "FORGE_PERMISSION_TIMEOUT",
-	"elicitation_timeout":    "FORGE_ELICITATION_TIMEOUT",
-	"proc_registry":          "FORGE_PROC_REGISTRY",
-	"reap_grace":             "FORGE_REAP_GRACE",
-	"token":                  "FORGE_TOKEN",
-	"mcp_auto_probe":         "FORGE_MCP_AUTO_PROBE",
-	"native_permission":      "FORGE_NATIVE_PERMISSION",
+	"addr":                    "FORGE_ADDR",
+	"transcripts":             "FORGE_TRANSCRIPTS",
+	"db":                      "FORGE_DB",
+	"store":                   "FORGE_STORE",
+	"agents":                  "FORGE_AGENTS",
+	"capabilities":            "FORGE_CAPABILITIES",
+	"skills_materialize_dir":  "FORGE_SKILLS_MATERIALIZE_DIR",
+	"skills_materialize_dirs": "FORGE_SKILLS_MATERIALIZE_DIRS",
+	"idle_timeout":            "FORGE_IDLE_TIMEOUT",
+	"reap_interval":           "FORGE_REAP_INTERVAL",
+	"turn_timeout":            "FORGE_TURN_TIMEOUT",
+	"handoff_max_chars":       "FORGE_HANDOFF_MAX_CHARS",
+	"permission_timeout":      "FORGE_PERMISSION_TIMEOUT",
+	"elicitation_timeout":     "FORGE_ELICITATION_TIMEOUT",
+	"proc_registry":           "FORGE_PROC_REGISTRY",
+	"reap_grace":              "FORGE_REAP_GRACE",
+	"token":                   "FORGE_TOKEN",
+	"mcp_auto_probe":          "FORGE_MCP_AUTO_PROBE",
+	"native_permission":       "FORGE_NATIVE_PERMISSION",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -418,6 +424,13 @@ func materialize(r *resolver) (Config, error) {
 	if v, ok := r.get("skills_materialize_dir"); ok {
 		c.SkillMaterializeDir = v
 	}
+	if v, ok := r.get("skills_materialize_dirs"); ok {
+		dirs, err := parseSkillMaterializeDirs(v)
+		if err != nil {
+			return bad("skills_materialize_dirs", err.Error())
+		}
+		c.SkillMaterializeDirs = dirs
+	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
 	}
@@ -563,4 +576,30 @@ func loadEnvFile(path string, r *resolver) error {
 		r.set(key, val, SourceEnvFile)
 	}
 	return nil
+}
+
+// parseSkillMaterializeDirs 解析 `runtime=dir[,runtime=dir]`（C4 多 root 投影）。
+// 规则：逗号分隔；每项必须含 `=` 且两侧非空；runtime 不可重复（后者覆盖会静默改语义，故报错）。
+func parseSkillMaterializeDirs(v string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		runtime, dir, ok := strings.Cut(item, "=")
+		runtime = strings.TrimSpace(runtime)
+		dir = strings.TrimSpace(dir)
+		if !ok || runtime == "" || dir == "" {
+			return nil, fmt.Errorf("需为 runtime=dir 列表（如 opencode=/tmp/oc,deepseekharness=/tmp/dsh），得到 %q", item)
+		}
+		if _, dup := out[runtime]; dup {
+			return nil, fmt.Errorf("runtime %q 重复声明", runtime)
+		}
+		out[runtime] = dir
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("至少一个 runtime=dir")
+	}
+	return out, nil
 }

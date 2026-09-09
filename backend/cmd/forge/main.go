@@ -60,24 +60,25 @@ func configCmd(args []string) {
 		doc := map[string]any{
 			"config_dir": cfg.ConfigDir,
 			"config": map[string]any{
-				"addr":                   cfg.Addr,
-				"transcripts":            cfg.TranscriptDir,
-				"db":                     cfg.DBPath,
-				"store":                  cfg.StoreMode,
-				"agents":                 cfg.AgentDir,
-				"capabilities":           cfg.CapabilityDir,
-				"skills_materialize_dir": cfg.SkillMaterializeDir,
-				"idle_timeout":           cfg.IdleTimeout.String(),
-				"reap_interval":          cfg.ReapInterval.String(),
-				"turn_timeout":           cfg.TurnTimeout.String(),
-				"handoff_max_chars":      cfg.HandoffMaxChars,
-				"permission_timeout":     cfg.PermissionTimeout.String(),
-				"elicitation_timeout":    cfg.ElicitationTimeout.String(),
-				"proc_registry":          cfg.ProcRegistryPath,
-				"reap_grace":             cfg.ReapGrace.String(),
-				"token":                  maskToken(cfg.Token),
-				"mcp_auto_probe":         cfg.McpAutoProbe,
-				"native_permission":      cfg.NativePermission,
+				"addr":                    cfg.Addr,
+				"transcripts":             cfg.TranscriptDir,
+				"db":                      cfg.DBPath,
+				"store":                   cfg.StoreMode,
+				"agents":                  cfg.AgentDir,
+				"capabilities":            cfg.CapabilityDir,
+				"skills_materialize_dir":  cfg.SkillMaterializeDir,
+				"skills_materialize_dirs": formatMaterializeDirs(cfg.SkillMaterializeDirs),
+				"idle_timeout":            cfg.IdleTimeout.String(),
+				"reap_interval":           cfg.ReapInterval.String(),
+				"turn_timeout":            cfg.TurnTimeout.String(),
+				"handoff_max_chars":       cfg.HandoffMaxChars,
+				"permission_timeout":      cfg.PermissionTimeout.String(),
+				"elicitation_timeout":     cfg.ElicitationTimeout.String(),
+				"proc_registry":           cfg.ProcRegistryPath,
+				"reap_grace":              cfg.ReapGrace.String(),
+				"token":                   maskToken(cfg.Token),
+				"mcp_auto_probe":          cfg.McpAutoProbe,
+				"native_permission":       cfg.NativePermission,
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
 			"sources":         sources,
@@ -104,6 +105,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "agents", cfg.AgentDir, src("agents"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dirs", emptyLabel(formatMaterializeDirs(cfg.SkillMaterializeDirs)), src("skills_materialize_dirs"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_interval", cfg.ReapInterval.String(), src("reap_interval"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
@@ -344,6 +346,26 @@ func serve(args []string) {
 			slog.Warn("serve: skill 物化重校失败", "dir", dir, "err", mErr)
 		} else if w > 0 || r > 0 {
 			slog.Info("serve: skill 物化重校完成", "dir", dir, "written", w, "removed", r)
+		}
+	}
+	// C4 多 root 投影：按 runtime 各写自己的根目录（只物化声明该 runtime 的 skill）。
+	// 排序遍历保证日志与执行顺序稳定（map 迭代无序）。
+	if len(cfg.SkillMaterializeDirs) > 0 {
+		runtimes := make([]string, 0, len(cfg.SkillMaterializeDirs))
+		for rt := range cfg.SkillMaterializeDirs {
+			runtimes = append(runtimes, rt)
+		}
+		sort.Strings(runtimes)
+		for _, rt := range runtimes {
+			dir := cfg.SkillMaterializeDirs[rt]
+			w, r, mErr := svc.ReconcileSkillsFor(dir, rt)
+			if mErr != nil {
+				slog.Warn("serve: skill 物化重校失败", "dir", dir, "runtime", rt, "err", mErr)
+				continue
+			}
+			if w > 0 || r > 0 {
+				slog.Info("serve: skill 物化重校完成", "dir", dir, "runtime", rt, "written", w, "removed", r)
+			}
 		}
 	}
 	if mode == "sqlite" {
@@ -662,4 +684,21 @@ func printEvent(evt eventbus.Event) {
 	case manager.BusRunCancelled:
 		fmt.Printf("\n⛔ run.cancelled\n")
 	}
+}
+
+// formatMaterializeDirs 把 runtime→dir 映射渲染为稳定的 `runtime=dir,…`（config 命令输出用）。
+func formatMaterializeDirs(dirs map[string]string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	runtimes := make([]string, 0, len(dirs))
+	for rt := range dirs {
+		runtimes = append(runtimes, rt)
+	}
+	sort.Strings(runtimes)
+	parts := make([]string, 0, len(runtimes))
+	for _, rt := range runtimes {
+		parts = append(parts, rt+"="+dirs[rt])
+	}
+	return strings.Join(parts, ",")
 }

@@ -329,3 +329,28 @@ func TestMcpAutoProbeMode(t *testing.T) {
 		t.Fatalf("非法值应报错并列出合法取值，got %v", err)
 	}
 }
+
+// TestSkillMaterializeDirs C4 多 root 物化配置解析（runtime=dir 列表）。
+func TestSkillMaterializeDirs(t *testing.T) {
+	hermetic(t)
+	t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", "opencode=/tmp/oc, deepseekharness=/tmp/dsh")
+	cfg := Load()
+	if len(cfg.SkillMaterializeDirs) != 2 || cfg.SkillMaterializeDirs["opencode"] != "/tmp/oc" ||
+		cfg.SkillMaterializeDirs["deepseekharness"] != "/tmp/dsh" {
+		t.Fatalf("解析不符: %+v", cfg.SkillMaterializeDirs)
+	}
+
+	// 非法形态 → 配置错误。
+	// 非法形态 → LoadResolved 报错（daemon 启动路径暴露配置错误）。
+	for _, bad := range []string{"opencode", "=dir", "opencode=", "opencode=/a,opencode=/b"} {
+		t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", bad)
+		if _, _, err := LoadResolved(""); err == nil {
+			t.Fatalf("非法配置 %q 应报错", bad)
+		}
+	}
+	// 未设置 → 空 map（不启用）。
+	t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", "")
+	if cfg := Load(); len(cfg.SkillMaterializeDirs) != 0 {
+		t.Fatalf("空值应不启用: %+v", cfg.SkillMaterializeDirs)
+	}
+}

@@ -1844,3 +1844,34 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 ② 跨会话决策与「未知 id」同码同文案（40001），排障细节只在服务端 WARN 日志；
 ③ `permission` 通道不受影响（其 scope 来自 wire 的 `sessionId`，本就权威）；
 ④ 未做「按 elicitation_id 反查归属会话」的对外查询接口（`Owner` 仅进程内诊断用）。
+
+#### 19.24 切片 C4：多 root skill 物化（按 runtime 分投影，完成）
+
+**动机**：§19.4 遗留——单 root 投影下「同一 skill 同时服务两个 runtime」只取首个已实证 format；
+两个底座的原生 skill 位置不同（opencode `skills` 源 / dsh `customSkillDirs`）时，一个目录只能靠
+运维各自配置指向同一处，且 format 一旦互斥就无法共用。C4 把投影层改为**按 runtime 分 root**。
+
+**实现**：
+1. `capability.MaterializeSkillFor(root, runtime, s)` / `ReconcileSkillsFor(root, runtime, skills)`：
+   内容只取 `sources[].runtime == runtime` 的那条源（format 也来自该源）；`runtime == ""` 保持
+   原语义（首个已实证 format、不过滤 runtime），`MaterializeSkill`/`ReconcileSkills` 变为其薄封装。
+2. 归属标记 `.forge-managed` 升级为两行（首行 skill id、次行 runtime），**删除联动按 runtime 收敛**：
+   共享 root 下每个 runtime 只删自己标记的目录，绝不删别的 runtime 的产物；幂等判定只看「标记存在 +
+   内容一致」（若把 runtime 计入幂等，两个 runtime 共享 root 会互相改写标记形成写-写乒乓）。
+3. 配置 `FORGE_SKILLS_MATERIALIZE_DIRS=runtime=dir[,runtime=dir]`（新键 `skills_materialize_dirs`）：
+   非法形态（缺 `=`、空 runtime/dir、重复 runtime）→ `forge serve` 启动即报错（退出码 2）；
+   与 `FORGE_SKILLS_MATERIALIZE_DIR` 可并存（先跑单 root 全量，再按 runtime 各跑一次）。
+4. `serve` 启动时按 runtime 名排序遍历（日志/执行顺序稳定）；`forge config` 增该键（JSON 与文本输出）。
+
+**证据**：
+- 单测：`capability.TestMaterializeSkillForPerRuntime`（双源 skill 各写自己的 root + 标记 runtime、
+  未声明该 runtime → 报错）、`TestReconcileSkillsForPerRuntime`（分 root 产物集合、幂等 0/0、
+  删除联动只动自己 root、共享 root 不误删）、`config.TestSkillMaterializeDirs`（解析/非法/空）；
+  `go vet` + `go test -race -count=1 ./...` 全绿。
+- 真进程 + **真实底座解析**：见 deployment.md（opencode v1.18.29 `debug skill` 与真实 dsh
+  `dsh-skill-filesystem` provider 各自只列出本 root 的 skill，dsh 零告警；删除联动与单 root 兼容路径实测）。
+
+**遗留/降级**：① 共享 root（多个 runtime 指向同一目录）下目录归属「首个物化它的 runtime」，
+该 runtime 不再声明时由它删除，别的 runtime 的重校不会代删——可能残留，推荐按 runtime 分 root；
+② 未做「按 agent/cwd 动态 root」（仍是启动时按配置物化）；③ 未做 skill 文件变更热重载
+（`serve` 启动重校 + 后续 REST 变更时重校，见既有实现）；④ dsh 的 `.system`/可选键仍未平台化映射。

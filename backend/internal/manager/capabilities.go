@@ -41,6 +41,15 @@ func (s *Service) ReconcileSkills(root string) (int, int, error) {
 	return capability.ReconcileSkills(root, s.caps.ListSkills())
 }
 
+// ReconcileSkillsFor 按 runtime 分 root 重校（C4 多 root 投影）：只物化声明了该 runtime 的 skill，
+// 删除联动也只动本 root 下该 runtime 的标记目录。runtime 为空 → 等价 ReconcileSkills。
+func (s *Service) ReconcileSkillsFor(root, runtime string) (int, int, error) {
+	if s.caps == nil || root == "" {
+		return 0, 0, nil
+	}
+	return capability.ReconcileSkillsFor(root, runtime, s.caps.ListSkills())
+}
+
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
 func (s *Service) RegisterTool(t capability.Tool) error {
 	return s.caps.RegisterTool(&t)

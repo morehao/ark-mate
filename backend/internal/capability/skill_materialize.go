@@ -113,7 +113,14 @@ func yamlScalar(v string) string {
 // root 由调用方决定（部署/运维策略；默认不写用户真实目录，见 §16.5 enable 决策）。
 // 物化同时写 forge 归属标记（ReconcileSkills 的删除联动依据）。返回物化文件绝对路径；
 // 多次调用幂等（覆盖写）。
+// runtime == "" 为「单 root 兼容路径」（取首个已实证 format，不分 runtime）。
 func MaterializeSkill(root string, s Skill) (string, error) {
+	return MaterializeSkillFor(root, "", s)
+}
+
+// MaterializeSkillFor 按 runtime 物化：内容取自该 skill 的 `sources[].runtime == runtime`
+// 那一条（C4 多 root 投影：每个 runtime 用自己的源与 format 物化到自己的根目录）。
+func MaterializeSkillFor(root, runtime string, s Skill) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("skill 物化: root 为空")
 	}
@@ -125,19 +132,25 @@ func MaterializeSkill(root string, s Skill) (string, error) {
 	}
 	var content, format string
 	var ok bool
-	content, format, ok = materializedContent(s)
+	content, format, ok = materializedContentFor(s, runtime)
 	if !ok {
-		return "", fmt.Errorf("skill 物化: skill %q 无可物化 source（无已实证 format 源）", s.ID)
-	}
-	// 同一 skill 的多个 source 指向同一目标文件（<root>/<id>/SKILL.md）：取首个已实证 format，
-	// 其余仅告警（避免歧义与「写多次/比一次」不一致）。
-	for _, src := range s.Sources {
-		if src.Format == format {
-			continue
+		if runtime == "" {
+			return "", fmt.Errorf("skill 物化: skill %q 无可物化 source（无已实证 format 源）", s.ID)
 		}
-		if _, renderable := renderSkillContent(s, src.Format); renderable {
-			slog.Warn("skill 物化: 同一目标文件存在多种 format，采用首个已实证 format",
-				"skill", s.ID, "used", format, "ignored", src.Format, "runtime", src.Runtime)
+		return "", fmt.Errorf("skill 物化: skill %q 无 runtime %q 的物化 source（无已实证 format 源）", s.ID, runtime)
+	}
+	// 单 root 兼容路径（runtime==""）下，同一 skill 的多个 source 指向同一目标文件
+	// （<root>/<id>/SKILL.md）：取首个已实证 format，其余仅告警（避免「写多次/比一次」不一致）。
+	// C4 多 root 路径下每个 root 只认自己 runtime 的源，不存在该歧义。
+	if runtime == "" {
+		for _, src := range s.Sources {
+			if src.Format == format {
+				continue
+			}
+			if _, renderable := renderSkillContent(s, src.Format); renderable {
+				slog.Warn("skill 物化: 同一目标文件存在多种 format，采用首个已实证 format",
+					"skill", s.ID, "used", format, "ignored", src.Format, "runtime", src.Runtime)
+			}
 		}
 	}
 	dir := filepath.Join(root, s.ID)
@@ -148,39 +161,73 @@ func MaterializeSkill(root string, s Skill) (string, error) {
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写 %s 失败: %w", p, err)
 	}
-	// 归属标记（删除联动依据）。
+	// 归属标记（删除联动依据）：首行 skill id，第二行 runtime（C4 多 root 下删除联动只动自己的目录）。
 	marker := filepath.Join(root, s.ID, forgeMarker)
-	if err := os.WriteFile(marker, []byte(s.ID+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(marker, []byte(markerContent(s.ID, runtime)), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写归属标记 %s 失败: %w", marker, err)
 	}
 	return p, nil
 }
 
+// markerContent 生成归属标记内容：首行 skill id，第二行 runtime（空 runtime = 单 root 兼容路径）。
+func markerContent(skillID, runtime string) string {
+	return skillID + "\n" + runtime + "\n"
+}
+
+// readMarker 解析归属标记（首行 id，第二行 runtime）；文件缺失/为空 → ok=false。
+func readMarker(path string) (skillID, runtime string, ok bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", false
+	}
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		return "", "", false
+	}
+	if len(lines) > 1 {
+		runtime = strings.TrimSpace(lines[1])
+	}
+	return strings.TrimSpace(lines[0]), runtime, true
+}
+
 // skillUpToDate 报告 <root>/<id> 是否已按当前内容物化且带归属标记（重校幂等判定）。
+// 只看「标记存在 + SKILL.md 内容一致」：标记里的 runtime 仅用于删除联动范围，
+// 不参与幂等判定——否则多个 runtime 共享同一 root 时会互相改写标记，形成写-写乒乓（非幂等）。
 func skillUpToDate(dir, content string) bool {
-	if _, err := os.Stat(filepath.Join(dir, forgeMarker)); err != nil {
+	if _, _, ok := readMarker(filepath.Join(dir, forgeMarker)); !ok {
 		return false
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 	return err == nil && string(b) == content
 }
 
-// ReconcileSkills 使 <root> 与当前注册表一致（§16.5 删除联动 + 启动重校）：
-//   - 为注册表里含 SKILL.md 源（已物化成功）的 skill 写缺失/更新（内容一致则跳过，幂等计数）；
-//   - 删除 root 下「带 .forge-managed 标记且不在注册表」的目录（平台 skill 移除的联动清理）；
-//   - 未带标记的目录（用户自有/他方内容）绝不动。
+// ReconcileSkills 单 root 兼容路径（runtime==""）：root 与全量注册表一致。
+func ReconcileSkills(root string, current []Skill) (written, removed int, err error) {
+	return ReconcileSkillsFor(root, "", current)
+}
+
+// ReconcileSkillsFor 使 <root> 与「声明了该 runtime 的 skill」一致（C4 多 root 投影；§16.5 删除联动 + 启动重校）：
+//   - 为注册表里「声明了该 runtime 且含已实证 format 源」的 skill 写缺失/更新（内容一致则跳过，幂等计数）；
+//     runtime=="" 时不做 runtime 过滤（单 root 兼容路径）；
+//   - 删除 root 下「带 .forge-managed 标记、标记 runtime 属于本次投影范围、且不在本次投影集合」的目录
+//     （平台 skill 移除/runtime 声明移除的联动清理）；标记 runtime 决定归属：共享 root 下
+//     「目录归属首个物化它的 runtime」，别的 runtime 的重校不会删它（推荐按 runtime 分 root）；
+//   - 未带标记的目录（用户自有/他方内容）绝不动；共享 root 下不会删除别的 runtime 的目录。
 //
 // 返回 (written, removed)。单条失败告警继续；root 空或不存在直接返回零值。
-func ReconcileSkills(root string, current []Skill) (written, removed int, err error) {
+func ReconcileSkillsFor(root, runtime string, current []Skill) (written, removed int, err error) {
 	if root == "" {
 		return 0, 0, nil
 	}
 	currentIDs := make(map[string]bool, len(current))
 	for _, sk := range current {
+		if _, _, ok := materializedContentFor(sk, runtime); !ok {
+			continue
+		}
 		currentIDs[sk.ID] = true
 	}
 	for _, sk := range current {
-		content, _, ok := materializedContent(sk)
+		content, _, ok := materializedContentFor(sk, runtime)
 		if !ok {
 			continue
 		}
@@ -188,8 +235,8 @@ func ReconcileSkills(root string, current []Skill) (written, removed int, err er
 		if skillUpToDate(dir, content) {
 			continue
 		}
-		if _, mErr := MaterializeSkill(root, sk); mErr != nil {
-			slog.Warn("skill 物化跳过", "skill", sk.ID, "err", mErr)
+		if _, mErr := MaterializeSkillFor(root, runtime, sk); mErr != nil {
+			slog.Warn("skill 物化跳过", "skill", sk.ID, "runtime", runtime, "err", mErr)
 			continue
 		}
 		written++
@@ -206,8 +253,13 @@ func ReconcileSkills(root string, current []Skill) (written, removed int, err er
 			continue
 		}
 		marker := filepath.Join(root, e.Name(), forgeMarker)
-		if _, mErr := os.Stat(marker); mErr != nil {
+		_, mRuntime, mOK := readMarker(marker)
+		if !mOK {
 			continue // 无归属标记：用户自有/他方目录，不动
+		}
+		// 共享 root：只删本次投影范围内的目录（旧标记无 runtime → 视为兼容路径，可删）。
+		if runtime != "" && mRuntime != "" && mRuntime != runtime {
+			continue
 		}
 		if dErr := os.RemoveAll(filepath.Join(root, e.Name())); dErr != nil {
 			slog.Warn("skill 物化: 删除联动失败", "dir", e.Name(), "err", dErr)
@@ -218,10 +270,20 @@ func ReconcileSkills(root string, current []Skill) (written, removed int, err er
 	return written, removed, nil
 }
 
-// materializedContent 返回该 skill 物化后的文件内容与所用 format（取首个已实证 format；
-// 与 MaterializeSkill 的写入内容一致，用于重校幂等判定）。
+// materializedContent 单 root 兼容路径（runtime==""）：取首个已实证 format。
 func materializedContent(s Skill) (content, format string, ok bool) {
+	return materializedContentFor(s, "")
+}
+
+// materializedContentFor 返回该 skill 物化后的文件内容与所用 format（与 MaterializeSkillFor 的写入内容
+// 一致，用于重校幂等判定）：
+//   - runtime == ""：取首个已实证 format（单 root 兼容路径，行为同 C4 之前）；
+//   - runtime != ""：只认 sources 里该 runtime 的源（多 root 投影：每个 runtime 用自己的 format）。
+func materializedContentFor(s Skill, runtime string) (content, format string, ok bool) {
 	for _, src := range s.Sources {
+		if runtime != "" && src.Runtime != runtime {
+			continue
+		}
 		if c, renderable := renderSkillContent(s, src.Format); renderable {
 			return c, src.Format, true
 		}
@@ -229,9 +291,15 @@ func materializedContent(s Skill) (content, format string, ok bool) {
 	return "", "", false
 }
 
-// hasMaterializableSource 报告 skill 是否含可物化 source（已实证 format）。
+// hasMaterializableSource 报告 skill 是否含可物化 source（已实证 format；单 root 路径）。
 func hasMaterializableSource(s Skill) bool {
 	_, _, ok := materializedContent(s)
+	return ok
+}
+
+// hasMaterializableSourceFor 报告 skill 是否声明了该 runtime 且含可物化 source。
+func hasMaterializableSourceFor(s Skill, runtime string) bool {
+	_, _, ok := materializedContentFor(s, runtime)
 	return ok
 }
 

@@ -91,7 +91,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
-`skills_materialize_dir` `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
+`skills_materialize_dir` `skills_materialize_dirs` `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace`；另可用 `FORGE_*` 原名、
 `-` 写成分隔符，以及少量别名（`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
 
@@ -407,3 +407,14 @@ sudo systemctl restart ark-forge
   未知会话 → `40401 未知会话 "…"`（先于 elicitation 校验）。WS 事件 `session.elicitation_request` 载荷实测
   `{"session_id":"3adc5250-…","conversation_id":"3adc5250-…","scope_source":"inferred_inflight","mode":"form"}`。
   同连接两会话并发在途时仍按取消处理并留 WARN（SDK 无 scope，不猜测）。
+- 多 root skill 物化（C4）：真进程（release 二进制 127.0.0.1:10021，
+  `FORGE_SKILLS_MATERIALIZE_DIRS=opencode=/tmp/c4/oc,deepseekharness=/tmp/c4/dsh`，三个 skill：
+  both/oc-only/dsh-only）→ 启动日志 `skill 物化重校完成 dir=/tmp/c4/dsh runtime=deepseekharness written=2` +
+  `dir=/tmp/c4/oc runtime=opencode written=2`；产物：`/tmp/c4/oc/{both,oc-only}`、
+  `/tmp/c4/dsh/{both,dsh-only}`（归属标记第二行分别为 `opencode`/`deepseekharness`）。
+  **真实底座解析**：`XDG_CONFIG_HOME` 隔离下 `opencode debug skill`（v1.18.29）列出
+  `both`(/tmp/c4/oc/both/SKILL.md)、`oc-only`(/tmp/c4/oc/oc-only/SKILL.md)；
+  真实 `@deepseek-ai/dsh-skill-filesystem` provider 解析 `/tmp/c4/dsh` → `both`、`dsh-only`，**零告警**。
+  删除联动：移除 `dsh-only.json` 重启 → `dir=/tmp/c4/dsh runtime=deepseekharness written=0 removed=1`，
+  oc root 不受影响。兼容路径：`FORGE_SKILLS_MATERIALIZE_DIR=/tmp/c4/shared` 单 root → 3 个 skill 全物化
+  （同一目标文件多 format 时按既有约定取首个并告警）。

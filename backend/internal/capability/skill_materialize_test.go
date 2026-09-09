@@ -3,6 +3,7 @@ package capability
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -197,5 +198,114 @@ func TestMaterializeSkillDshFrontmatter(t *testing.T) {
 	}
 	if b5, _ := os.ReadFile(filepath.Join(idemRoot, "plan", "SKILL.md")); !strings.HasSuffix(string(b5), "# plan v2") {
 		t.Fatalf("重校内容不符：\n%s", b5)
+	}
+}
+
+// TestMaterializeSkillForPerRuntime C4 多 root 投影：内容取自该 runtime 的源。
+func TestMaterializeSkillForPerRuntime(t *testing.T) {
+	ocRoot, dshRoot := t.TempDir(), t.TempDir()
+	sk := Skill{
+		ID: "both", Name: "双底座", Description: "两个 runtime 各有源", Body: "# both",
+		Sources: []SkillSource{
+			{Runtime: "opencode", Path: ocRoot, Format: FormatSkillMD},
+			{Runtime: "deepseekharness", Path: dshRoot, Format: FormatSkillMDFrontmatter},
+		},
+	}
+	if _, err := MaterializeSkillFor(ocRoot, "opencode", sk); err != nil {
+		t.Fatalf("oc 物化: %v", err)
+	}
+	if _, err := MaterializeSkillFor(dshRoot, "deepseekharness", sk); err != nil {
+		t.Fatalf("dsh 物化: %v", err)
+	}
+	// 两个 root 都写出（当前两 format 等价，内容相同），标记各自记录 runtime。
+	for _, tc := range []struct{ root, runtime string }{{ocRoot, "opencode"}, {dshRoot, "deepseekharness"}} {
+		b, err := os.ReadFile(filepath.Join(tc.root, "both", "SKILL.md"))
+		if err != nil || !strings.Contains(string(b), "name: \"both\"") {
+			t.Fatalf("%s 产物不符: %q err=%v", tc.runtime, b, err)
+		}
+		id, rt, ok := readMarker(filepath.Join(tc.root, "both", forgeMarker))
+		if !ok || id != "both" || rt != tc.runtime {
+			t.Fatalf("%s 标记不符: id=%q rt=%q ok=%v", tc.runtime, id, rt, ok)
+		}
+	}
+	// 未声明该 runtime 的 skill → 报错（不臆造跨 runtime 物化）。
+	only := Skill{ID: "oc-only", Body: "# oc", Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
+	if _, err := MaterializeSkillFor(dshRoot, "deepseekharness", only); err == nil {
+		t.Fatal("未声明 dsh 的 skill 不应物化到 dsh root")
+	}
+}
+
+// TestReconcileSkillsForPerRuntime C4：按 runtime 分 root 重校——只物化声明该 runtime 的 skill，
+// 删除联动只动本 root 本 runtime 的标记目录，共享 root 下不动别的 runtime 的目录。
+func TestReconcileSkillsForPerRuntime(t *testing.T) {
+	ocRoot, dshRoot := t.TempDir(), t.TempDir()
+	skills := []Skill{
+		{ID: "both", Name: "双", Description: "d", Body: "# both", Sources: []SkillSource{
+			{Runtime: "opencode", Format: FormatSkillMD},
+			{Runtime: "deepseekharness", Format: FormatSkillMDFrontmatter},
+		}},
+		{ID: "oc-only", Name: "oc", Description: "d", Body: "# oc",
+			Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}},
+		{ID: "dsh-only", Name: "dsh", Description: "d", Body: "# dsh",
+			Sources: []SkillSource{{Runtime: "deepseekharness", Format: FormatSkillMDFrontmatter}}},
+		{ID: "no-source", Name: "n", Description: "d", Body: "# n"},
+	}
+
+	// opencode root：both + oc-only。
+	if w, r, err := ReconcileSkillsFor(ocRoot, "opencode", skills); err != nil || w != 2 || r != 0 {
+		t.Fatalf("oc 首轮期望 2/0，got w=%d r=%d err=%v", w, r, err)
+	}
+	// dsh root：both + dsh-only。
+	if w, r, err := ReconcileSkillsFor(dshRoot, "deepseekharness", skills); err != nil || w != 2 || r != 0 {
+		t.Fatalf("dsh 首轮期望 2/0，got w=%d r=%d err=%v", w, r, err)
+	}
+	assertDirs := func(root string, want ...string) {
+		t.Helper()
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(entries))
+		for _, e := range entries {
+			got = append(got, e.Name())
+		}
+		sort.Strings(got)
+		sort.Strings(want)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s 目录不符: got=%v want=%v", root, got, want)
+		}
+	}
+	assertDirs(ocRoot, "both", "oc-only")
+	assertDirs(dshRoot, "both", "dsh-only")
+
+	// 幂等：再跑两轮 0/0。
+	for _, tc := range []struct{ root, runtime string }{{ocRoot, "opencode"}, {dshRoot, "deepseekharness"}} {
+		if w, r, err := ReconcileSkillsFor(tc.root, tc.runtime, skills); err != nil || w != 0 || r != 0 {
+			t.Fatalf("%s 幂等期望 0/0，got w=%d r=%d err=%v", tc.runtime, w, r, err)
+		}
+	}
+
+	// 移除 dsh-only 的声明 → dsh root 删除联动，oc root 不受影响。
+	reduced := []Skill{skills[0], skills[1], skills[3]}
+	if w, r, err := ReconcileSkillsFor(dshRoot, "deepseekharness", reduced); err != nil || w != 0 || r != 1 {
+		t.Fatalf("dsh 删除联动期望 0/1，got w=%d r=%d err=%v", w, r, err)
+	}
+	assertDirs(dshRoot, "both")
+	assertDirs(ocRoot, "both", "oc-only")
+
+	// 共享 root：两个 runtime 都投影到同一目录时，各自重校不删对方目录。
+	shared := t.TempDir()
+	if _, _, err := ReconcileSkillsFor(shared, "opencode", skills); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReconcileSkillsFor(shared, "deepseekharness", skills); err != nil {
+		t.Fatal(err)
+	}
+	assertDirs(shared, "both", "dsh-only", "oc-only")
+	if w, r, err := ReconcileSkillsFor(shared, "opencode", reduced); err != nil || w != 0 || r != 0 {
+		t.Fatalf("共享 root 下 oc 重校不应删 dsh 目录: w=%d r=%d err=%v", w, r, err)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "dsh-only")); err != nil {
+		t.Fatal("共享 root 下 dsh-only 不应被 oc 重校删除")
 	}
 }
