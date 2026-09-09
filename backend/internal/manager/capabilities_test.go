@@ -348,12 +348,13 @@ func TestProbeMcpServer(t *testing.T) {
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "sse1", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
+	// sse（B3 起已支持）指向不可达端点 → 50201 连接失败（不再是不支持 40501）。
 	if _, err := svc.ProbeMcpServer(context.Background(), "sse1"); err == nil {
-		t.Fatal("sse 应报错")
+		t.Fatal("sse 不可达应报错")
 	} else {
 		var ge gerror.Error
-		if !errors.As(err, &ge) || ge.Code != 40501 {
-			t.Fatalf("sse 应 40501，got %v", err)
+		if !errors.As(err, &ge) || ge.Code != 50201 {
+			t.Fatalf("sse 不可达应 50201，got %v", err)
 		}
 	}
 	// 失败状态落盘可读回。
@@ -520,12 +521,12 @@ func TestCallMcpTool(t *testing.T) {
 	if _, err := svc.CallMcpTool(context.Background(), "nope", "t", handler.McpToolCallReq{}); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
-	// sse → 40501（明确降级）。
-	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1"}); err != nil {
+	// sse（B3 起已支持）指向不可达端点 → 连接失败 50201（不再是不支持 40501）。
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CallMcpTool(context.Background(), "s", "t", handler.McpToolCallReq{}); restCode(err) != 40501 {
-		t.Fatalf("sse 应 40501，got %v", err)
+	if _, err := svc.CallMcpTool(context.Background(), "s", "t", handler.McpToolCallReq{}); restCode(err) != 50201 {
+		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 	// 非法 arguments → 40001（ClassRequest）。
 	if _, err := svc.CallMcpTool(context.Background(), "h", "read_file", handler.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
@@ -664,10 +665,10 @@ func TestMcpResourcesPrompts(t *testing.T) {
 	if _, err := svc.ListMcpResources(context.Background(), "nope"); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
-	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1"}); err != nil {
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ListMcpPrompts(context.Background(), "s"); restCode(err) != 40501 {
-		t.Fatalf("sse 应 40501，got %v", err)
+	if _, err := svc.ListMcpPrompts(context.Background(), "s"); restCode(err) != 50201 {
+		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 }

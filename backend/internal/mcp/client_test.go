@@ -255,11 +255,11 @@ func TestStdioRelativeCommand(t *testing.T) {
 	}
 }
 
-// TestSSEUnsupported sse 传输明确降级（不臆造实现）。
-func TestSSEUnsupported(t *testing.T) {
+// TestUnknownTransportUnsupported 未知传输仍明确降级（不臆造实现）。
+func TestUnknownTransportUnsupported(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := ListTools(ctx, Server{ID: "x", Transport: "sse", URL: "http://127.0.0.1:1/sse"})
+	_, err := ListTools(ctx, Server{ID: "x", Transport: "carrier-pigeon", URL: "http://127.0.0.1:1/sse"})
 	if CodeOf(err) != "mcp_transport_unsupported" {
 		t.Fatalf("期望 mcp_transport_unsupported，got %v (code=%q)", err, CodeOf(err))
 	}
@@ -454,9 +454,9 @@ func TestCallToolHTTP(t *testing.T) {
 	}
 }
 
-// TestCallToolSSEUnsupported sse 传输仍明确不支持（不臆造）。
-func TestCallToolSSEUnsupported(t *testing.T) {
-	_, err := CallTool(context.Background(), Server{ID: "s", Transport: "sse", URL: "http://127.0.0.1:1"}, "t", nil)
+// TestCallToolUnknownTransport 未知传输 → mcp_transport_unsupported（B3 起 sse 已支持）。
+func TestCallToolUnknownTransport(t *testing.T) {
+	_, err := CallTool(context.Background(), Server{ID: "s", Transport: "carrier-pigeon"}, "t", nil)
 	if CodeOf(err) != "mcp_transport_unsupported" {
 		t.Fatalf("期望 mcp_transport_unsupported，got %v", err)
 	}

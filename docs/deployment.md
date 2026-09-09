@@ -357,3 +357,10 @@ sudo systemctl restart ark-forge
   `templates_error="resources/templates/list 失败：JSON-RPC 错误：code=-32601 …"`。
   注：新增能力目录文件需重启 daemon（目录启动时加载，无热重载）。
   `pnpm smoke:e2e` 新增两条 B2 契约断言，全 PASS。
+
+- MCP sse 传输（B3）：python 写的 legacy SSE 服务端（`GET /sse` 发 `endpoint` 事件 + `message`
+  事件，`POST /messages` 收请求）→ `POST /mcps/py-sse/probe` `code=0`、`added=1`、
+  `server=py-sse/0.1.0`、`tools=[sse_echo]`（连续 3 次探测稳定）；`POST /mcps/py-sse/tools/sse_echo/call`
+  → `text='sse: {"msg": "你好 SSE"}'`（连续 3 次调用均成功）；未知工具 → `50201
+  [mcp_tools_call_failed] JSON-RPC 错误 code=-32602`；端点不可达 → `50201
+  [mcp_sse_connect_failed] sse GET 连接失败：connection refused`。

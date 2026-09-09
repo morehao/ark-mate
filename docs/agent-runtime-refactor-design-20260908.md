@@ -932,6 +932,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 - 传输：`stdio`（换行分隔 JSON-RPC 2.0，spawn 子进程 + `initialize` 握手 + `notifications/initialized`
   + `tools/list`）与 `http`/`streamable_http`（POST，响应兼容 JSON 与 SSE `data:` 两种；`Mcp-Session-Id`
   自动回带）；**`sse` 明确降级** → `mcp_transport_unsupported`（不臆造 legacy 双向通道）。
+  > 后续更新：`sse` 传输已在 §19.18（B3）实现，本节的历史结论不再代表现状。
 - 只覆盖探测所需子集：tools/list 支持 `nextCursor` 翻页（≤20 页防死循环）、忽略通知、应答服务端
   `ping`；不实现 tools/call、resources/prompts、sampling/roots、断线重连。
 - 稳定错误码：`mcp_transport_unsupported` / `mcp_command_invalid` / `mcp_url_invalid` /
@@ -960,7 +961,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 - `go build` + `go vet` + `go test -race ./...` 全绿。
 
 **遗留（有据，非本次）**：MCP 工具**执行**（tools/call）不在平台范围（平台只做目录化 + 注入）；
-`resources`/`prompts` 目录化未做；`sse` 传输未支持；探测为显式触发，未做定时/启动自动探测。
+`resources`/`prompts` 目录化未做；`sse` 传输未支持（见 §19.18 已实现）；探测为显式触发，未做定时/启动自动探测。
 
 #### 19.3 切片 G3：前端能力卡（完成）
 
@@ -1613,3 +1614,43 @@ MCP 行为）。
 ③ 不支持 `resources/subscribe`（变更通知）与 `prompts` 的 `completion/complete`；
 ④ 工具名/提示词名含 `/` 的 server 无法经路由调用（gin 路径参数限制）；
 ⑤ 能力目录文件无热重载（新增 server 需重启 daemon）。
+
+#### 19.18 切片 B3：MCP sse（legacy HTTP+SSE）传输（完成）
+
+**动机**：P2 起 `sse` 一直明确降级（`mcp_transport_unsupported` → 40501）。MCP 生态里仍有大量
+服务器只提供 legacy SSE 端点（2024-11-05 协议），平台侧因此完全看不到它们的工具。B3 补上该传输。
+
+**协议形态（与 streamable_http 的区别）**：legacy SSE 是**双向长连接**——
+① 客户端 `GET <url>`（`Accept: text/event-stream`）建立流；② 服务端先发 `event: endpoint`
++ `data: <uri>` 宣告**发消息端点**（可为相对地址）；③ 客户端把 JSON-RPC 请求 `POST` 到该端点
+（服务端回 202）；④ 响应/通知经第 ① 步的流以 `event: message` 回来。
+（streamable_http 的「SSE 响应」是单次 POST 的流式应答，两者不可混为一谈。）
+
+**设计**：
+1. 新增 `internal/mcp/sse.go`：`dialSSE` 建流并等 `endpoint`（受 ctx 约束；未到达 →
+   `mcp_timeout`；HTTP 4xx/非 `text/event-stream` → `mcp_sse_connect_failed`）；
+   读流 goroutine 解析 SSE 帧（`event:`/`data:`/多行 data/注释/CRLF），相对 endpoint 按 GET url 解析。
+2. 响应匹配沿用串行假设：`call` 从消息通道里取 id 匹配的响应，期间忽略通知；服务端反向请求
+   （ping）就地应答，其它方法回 `method_not_found`（与 stdio 传输同语义）。
+3. `close` 只关 GET 流（POST 无状态）；缓冲满时丢最旧消息以保证读流不阻塞。
+4. 传输分派 `dial()` 增加 `capability.TransportSSE` → `dialSSE`；**其余四层零改动**——
+   `tools/call`、`resources/*`、`prompts/*` 自动获得 sse 支持（它们只依赖 `transport` 接口）。
+5. 前端去掉「sse 不可探测/不可用」的禁用与文案（`capabilityView.probeable`、能力页按钮）。
+
+**证据**：
+- 单测 `internal/mcp/sse_test.go`：httptest 最小 SSE 服务端（GET 流 + POST 端点 + 相对 endpoint）
+  → `ListTools`/`CallTool`/`ListResources`/`ListPrompts` 全通过，并断言 POST 方法序列
+  `initialize,notifications/initialized,tools/list`；无 `endpoint` 事件 → `mcp_timeout`；
+  非 event-stream → `mcp_sse_connect_failed`；GET 404 → 含状态码的连接失败；缺 url → `mcp_url_invalid`。
+  另：原「sse 不支持」断言改为「未知传输不支持」（`carrier-pigeon`）。
+- 真进程：python 写的 legacy SSE MCP 服务端（127.0.0.1:10021）→ 探测 `code=0 added=1
+  server=py-sse/0.1.0 tools=[sse_echo]`（连续 3 次稳定）；`tools/call` 连续 3 次成功
+  （`text='sse: {"n": 1..3}'`）；未知工具 → `50201 [mcp_tools_call_failed]`；端点不可达 →
+  `50201 [mcp_sse_connect_failed]`。
+- `go vet ./...` + `go test -race -count=1 ./...` 全绿；前端 typecheck + build + `make all` 通过。
+
+**遗留/降级**：① 单客户端串行假设（不做并发多请求复用；响应按 id 匹配，通知丢弃）；
+② 服务端主动请求只应答 ping，其余回 `method_not_found`（不实现 sampling/roots 反向调用）；
+③ 无断线重连（一次会话内单流，断了即失败，由上层重新建连）；
+④ `endpoint` 事件到达前不接受请求（部分实现先 POST 后发 endpoint 的非常规行为不支持）；
+⑤ 与 B1/B2 相同：每次操作独立会话，无连接池。

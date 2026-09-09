@@ -14,7 +14,7 @@ export interface McpRow {
   toolCount: number
   lastProbeAt?: string
   lastProbeError?: string
-  /** 是否可触发 live 探测：sse 后端明确降级 → false（按钮禁用并说明原因）。 */
+  /** 是否可触发 live 探测（transport 为空/未知 → false；B3 起 sse 已支持）。 */
   probeable: boolean
   /** 连接端点展示（stdio=command+args；http/sse=url）。 */
   endpoint: string
@@ -42,8 +42,8 @@ export function mcpRows(caps: AgentCapabilities | null, servers: McpServer[]): M
       toolCount: srv?.tool_count ?? 0,
       lastProbeAt: srv?.last_probe_at,
       lastProbeError: srv?.last_probe_error,
-      // sse（legacy 双向通道）后端明确不支持探测；其余可探测。
-      probeable: transport !== 'sse' && transport !== '',
+      // B3 起 stdio/http/streamable_http/sse 均可探测；空/未知传输不可。
+      probeable: transport !== '',
       endpoint: srv ? (srv.command ? [srv.command, ...(srv.args ?? [])].join(' ') : srv.url ?? '') : '',
     })
   }

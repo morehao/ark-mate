@@ -17,7 +17,7 @@ import (
 //
 // streamable_http 规范：initialize 响应可能带 Mcp-Session-Id，后续请求须回带；服务端可
 // 以 application/json 直接应答，也可以 text/event-stream 流式应答（data: <json>）。
-// sse（legacy 双向通道）不在本实现范围（见 ListTools）。
+// 注意：这里的「SSE 响应」是单次 POST 的流式应答，与 legacy 双向通道（sse 传输，见 sse.go）不同。
 
 type httpTransport struct {
 	url     string

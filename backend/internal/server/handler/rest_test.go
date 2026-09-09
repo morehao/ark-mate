@@ -994,7 +994,7 @@ func TestAgentCapabilitiesRoute(t *testing.T) {
 }
 
 // TestProbeMcpServerRoute P2 §5.2 MCP live 探测路由：POST /mcps/:id/probe 返回探测结果；
-// 未知 server 透传 40401；传输不支持透传 40501。
+// 未知 server 透传 40401；未知传输透传 40501。
 func TestProbeMcpServerRoute(t *testing.T) {
 	svc := &stubSvc{
 		probeResp: &handler.McpProbeResp{
@@ -1024,9 +1024,9 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	if env, code := do(t, r, "POST", "/v1/forge/mcps/nope/probe", ""); code != 200 || env.Code != 40401 {
 		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
 	}
-	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP sse 传输暂不支持探测"}
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/sse1/probe", ""); code != 200 || env.Code != 40501 {
-		t.Fatalf("sse 应 40501，got http=%d code=%d", code, env.Code)
+	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP 未知传输（不臆造）"}
+	if env, code := do(t, r, "POST", "/v1/forge/mcps/weird1/probe", ""); code != 200 || env.Code != 40501 {
+		t.Fatalf("未知传输应 40501，got http=%d code=%d", code, env.Code)
 	}
 }
 
@@ -1310,7 +1310,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		path string
 	}{
 		{gerror.Error{Code: 40401, Msg: "未知 MCP server"}, 40401, "/v1/forge/mcps/nope/resources"},
-		{gerror.Error{Code: 40501, Msg: "sse 不支持"}, 40501, "/v1/forge/mcps/s/prompts"},
+		{gerror.Error{Code: 40501, Msg: "未知传输"}, 40501, "/v1/forge/mcps/s/prompts"},
 		{gerror.Error{Code: 50201, Msg: "[mcp_resource_read_failed] x"}, 50201, "/v1/forge/mcps/fs/resources"},
 	} {
 		svc.mcpLiveErr = tc.err

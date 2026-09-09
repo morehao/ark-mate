@@ -1,8 +1,8 @@
 // Package mcp 是最小 MCP（Model Context Protocol）客户端：只为「平台侧 live 探测 tools/list」服务。
 //
 // 范围（design doc §5.2/§5.3、§19.2）：
-//   - 传输：stdio（换行分隔 JSON-RPC 2.0）与 http/streamable_http（POST + JSON 或 SSE 响应）；
-//     sse（legacy HTTP+SSE 双向通道）首版明确不支持 → mcp_transport_unsupported，不臆造。
+//   - 传输：stdio（换行分隔 JSON-RPC 2.0）、http/streamable_http（POST + JSON 或 SSE 响应）、
+//     sse（legacy HTTP+SSE 双向通道，B3）。
 //   - 实现最小流程：initialize 握手（声明空 capabilities）→ notifications/initialized
 //     → tools/list（含 nextCursor 翻页）/ tools/call（B1）
 //     / resources/list + resources/templates/list + resources/read（B2）
@@ -202,7 +202,7 @@ func session(ctx context.Context, s Server, fn func(ctx context.Context, tr tran
 	return init, nil
 }
 
-// dial 按传输形态建连（sse 明确不支持，返回 mcp_transport_unsupported）。
+// dial 按传输形态建连；未知传输 → mcp_transport_unsupported（不臆造）。
 func dial(ctx context.Context, s Server) (transport, error) {
 	switch s.Transport {
 	case capability.TransportStdio:
@@ -210,8 +210,7 @@ func dial(ctx context.Context, s Server) (transport, error) {
 	case capability.TransportHTTP, capability.TransportStreamableHTTP:
 		return dialHTTP(s), nil
 	case capability.TransportSSE:
-		return nil, errf("mcp_transport_unsupported",
-			"MCP sse 传输暂不支持（首版仅 stdio/http/streamable_http）")
+		return dialSSE(ctx, s)
 	default:
 		return nil, errf("mcp_transport_unsupported", "未知 MCP 传输 %q", s.Transport)
 	}

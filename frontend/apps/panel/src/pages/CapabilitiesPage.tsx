@@ -211,7 +211,7 @@ export function CapabilitiesPage() {
   }
 
   const probeButton = (id: string, probeable: boolean): ReactNode => (
-    <Tooltip title={probeable ? '拉取该 server 的 tools/list 并写入 Tool 目录' : 'sse 传输暂不支持探测（后端明确降级）'}>
+    <Tooltip title={probeable ? '拉取该 server 的 tools/list 并写入 Tool 目录' : '该传输无法探测（缺少端点声明）'}>
       <Button
         size="small"
         icon={<ExperimentOutlined />}
@@ -302,15 +302,10 @@ export function CapabilitiesPage() {
     }
   }
 
-  // liveButton：MCP server 行的「资源/提示词」入口（sse 传输同样不可用，与探测一致）。
+  // liveButton：MCP server 行的「资源/提示词」入口（B3 起 sse 同样可用）。
   const liveButton = (m: McpRow): ReactNode => (
-    <Tooltip title={m.transport === 'sse' ? 'sse 传输暂不支持（后端明确降级）' : '实时拉取该 server 的 resources/prompts（不落盘）'}>
-      <Button
-        size="small"
-        icon={<FileTextOutlined />}
-        disabled={m.transport === 'sse'}
-        onClick={() => openLive(m, 'resources')}
-      >
+    <Tooltip title="实时拉取该 server 的 resources/prompts（不落盘）">
+      <Button size="small" icon={<FileTextOutlined />} onClick={() => openLive(m, 'resources')}>
         资源/提示词
       </Button>
     </Tooltip>
