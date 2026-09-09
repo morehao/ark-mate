@@ -26,6 +26,10 @@ NODE_VERSION_FILE  := $(FRONTEND_ROOT)/.nvmrc
 NODE_VERSION       := $(shell sed 's/^v//' $(NODE_VERSION_FILE) 2>/dev/null)
 NODE_VERSION_MAJOR := $(word 1,$(subst ., ,$(NODE_VERSION)))
 
+# 后端持久层默认 sqlite（创建 ~/.forge/forge.db，启用 runs/用量读模型）。
+# 想要轻量纯内存可临时覆盖：FORGE_STORE=memory make dev（环境变量优先于此处默认）。
+FORGE_STORE ?= sqlite
+
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
 define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
@@ -40,7 +44,7 @@ web:
 
 # 后端开发起服（forge 无默认子命令，需显式 serve）
 server:
-	cd backend && go run ./cmd/forge serve
+	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve
 
 # 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
 # /v1/forge/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
@@ -48,10 +52,10 @@ server:
 # 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
 dev:
 	$(require-node)
-	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:10001)"
+	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:10001, store=$(FORGE_STORE))"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && go run ./cmd/forge serve & \
+	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve & \
 	BACKEND_PID=$$!; \
 	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/forge/health ..."; \
 	HEALTHY=""; \

@@ -94,6 +94,13 @@ var schemaMigrations = []migration{
 			`ALTER TABLE conversations ADD COLUMN provider_session_id TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		version: 3,
+		name:    "runs.first_token_ms（单轮首令牌耗时，turn 收口由 materializeRun 填）",
+		statements: []string{
+			`ALTER TABLE runs ADD COLUMN first_token_ms INTEGER NOT NULL DEFAULT 0`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

@@ -109,31 +109,41 @@ type UsageQueryReq struct {
 
 // UsageBucketResp 一行用量聚合（group_by=agent → key=agent_id；=day → key=YYYY-MM-DD）。
 type UsageBucketResp struct {
-	Key           string  `json:"key"`
-	AgentID       string  `json:"agent_id,omitempty"`
-	Runs          int     `json:"runs"`
-	Completed     int     `json:"completed"`
-	Failed        int     `json:"failed"`
-	Cancelled     int     `json:"cancelled"`
-	Running       int     `json:"running"`
-	Conversations int     `json:"conversations"`
-	DurationMS    int64   `json:"duration_ms"`
-	ContextUsed   int64   `json:"context_used"`
-	ContextSize   int64   `json:"context_size"`
-	UsageReported int     `json:"usage_reported"`
-	CostAmount    float64 `json:"cost_amount"`
-	CostCurrency  string  `json:"cost_currency,omitempty"`
+	Key           string `json:"key"`
+	AgentID       string `json:"agent_id,omitempty"`
+	Runs          int    `json:"runs"`
+	Completed     int    `json:"completed"`
+	Failed        int    `json:"failed"`
+	Cancelled     int    `json:"cancelled"`
+	Running       int    `json:"running"`
+	Conversations int    `json:"conversations"`
+	DurationMS    int64  `json:"duration_ms"`
+	ContextUsed   int64  `json:"context_used"`
+	ContextSize   int64  `json:"context_size"`
+	// UsageReported 上报过上下文的会话数；CostReported 上报过费用的会话数（两者分开，不可互相替代）。
+	UsageReported int `json:"usage_reported"`
+	CostReported  int `json:"cost_reported"`
+	// CostAmount/CostCurrency：快照金额与币种；多币种时 amount=0、currency=MIXED、明细走 CostByCurrency。
+	CostAmount     float64            `json:"cost_amount"`
+	CostCurrency   string             `json:"cost_currency,omitempty"`
+	CostByCurrency map[string]float64 `json:"cost_by_currency,omitempty"`
 }
 
 // UsageSummaryResp 用量统计响应：总计 + 分组桶 + 生效条件回显。
 type UsageSummaryResp struct {
-	From    string            `json:"from,omitempty"`
-	To      string            `json:"to,omitempty"`
-	AgentID string            `json:"agent_id,omitempty"`
-	GroupBy string            `json:"group_by"`
-	Source  string            `json:"source"` // sqlite | memory（memory 模式无统计，返回 40501）
-	Totals  UsageBucketResp   `json:"totals"`
-	Buckets []UsageBucketResp `json:"buckets"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
+	GroupBy string `json:"group_by"`
+	Source  string `json:"source"` // sqlite | memory（memory 模式无统计，返回 40501）
+	// ContextSemantics/CostSemantics 口径：均为「区间末快照」，不是区间增量。
+	ContextSemantics string `json:"context_semantics"`
+	CostSemantics    string `json:"cost_semantics"`
+	// BucketsAdditive 桶之间能否相加：agent 分组可加（每会话唯一归属）；day 分组不可加
+	//（跨天会话的累计快照会在多个日期桶重复出现）。
+	BucketsAdditive bool              `json:"buckets_additive"`
+	Totals          UsageBucketResp   `json:"totals"`
+	Buckets         []UsageBucketResp `json:"buckets"`
 }
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
@@ -594,6 +604,19 @@ type RunResp struct {
 	LastSeq    int64  `json:"last_seq"`
 	StartedAt  string `json:"started_at"`
 	EndedAt    string `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
+	// FirstTokenMS 本轮从用户消息到首个 assistant 输出的耗时（ms；未记录/无输出为 0）。
+	FirstTokenMS int64 `json:"first_token_ms,omitempty"`
+	// Usage 该轮结束后的上下文/费用快照（解析 runs.usage_json；无上报 → nil）。
+	Usage *RunUsageResp `json:"usage,omitempty"`
+}
+
+// RunUsageResp 单轮用量快照，与 acl.UsageInfo 同构：used/size 为上下文窗口占用（快照，非增量），
+// cost 为会话累计费用（可选）。
+type RunUsageResp struct {
+	Used         int64   `json:"used"`
+	Size         int64   `json:"size"`
+	CostAmount   float64 `json:"cost_amount,omitempty"`
+	CostCurrency string  `json:"cost_currency,omitempty"`
 }
 
 // PermissionResp 挂起权限请求的对外表示。

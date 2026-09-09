@@ -20,10 +20,10 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO runs(id, conversation_id, user_text, status, error_code, stop_reason, usage_json,
-		                           first_seq, last_seq, started_at, ended_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                           first_seq, last_seq, first_token_ms, started_at, ended_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ConversationID, r.UserText, r.Status, r.ErrorCode, r.StopReason, r.UsageJSON,
-		r.FirstSeq, r.LastSeq, started, ended)
+		r.FirstSeq, r.LastSeq, r.FirstTokenMS, started, ended)
 	return err
 }
 
@@ -49,7 +49,7 @@ func (s *Store) FinishRun(ctx context.Context, id string, status, stopReason, er
 func (s *Store) ListRuns(ctx context.Context, conversationID string) ([]Run, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, conversation_id, user_text, status, error_code, stop_reason, usage_json,
-		       first_seq, last_seq, started_at, ended_at
+		       first_seq, last_seq, first_token_ms, started_at, ended_at
 		FROM runs WHERE conversation_id = ? ORDER BY started_at ASC, first_seq ASC`, conversationID)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (s *Store) ListRuns(ctx context.Context, conversationID string) ([]Run, err
 		var r Run
 		var started, ended string
 		if err := rows.Scan(&r.ID, &r.ConversationID, &r.UserText, &r.Status, &r.ErrorCode, &r.StopReason,
-			&r.UsageJSON, &r.FirstSeq, &r.LastSeq, &started, &ended); err != nil {
+			&r.UsageJSON, &r.FirstSeq, &r.LastSeq, &r.FirstTokenMS, &started, &ended); err != nil {
 			return nil, err
 		}
 		r.StartedAt = parseTS(started)

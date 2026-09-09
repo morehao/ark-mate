@@ -5,7 +5,7 @@ import { InfoCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icon
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
-import { conversationHistory } from '@ark/api'
+import { conversationHistory, conversationRuns } from '@ark/api'
 import { useForge } from '../store'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
@@ -14,6 +14,7 @@ import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
+import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
 import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
@@ -55,6 +56,8 @@ export function ChatPage() {
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
   // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
   const [loadingOlder, setLoadingOlder] = useState(false)
+  // 每轮用量（run.last_seq → 展示行）：会话切换或轮次终态后重拉 runs 读模型。
+  const [runsBySeq, setRunsBySeq] = useState<Map<number, { usageText: string; info: RunUsageInfo }>>(new Map())
 
   // URL → 激活（刷新/直达 /conversations/:id 续看；参数不变不重复 attach）
   useEffect(() => {
@@ -68,6 +71,43 @@ export function ChatPage() {
   const activeSum = activeId ? conversations.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
+
+  // 每轮用量：activeId 变化或轮次终态（streaming true→false）后重拉 runs；
+  // 轮进行中 run 未落库，跳过以省请求。构建 last_seq → 展示行（Δ 相对前一有上报的轮）。
+  useEffect(() => {
+    if (!activeId) {
+      setRunsBySeq(new Map())
+      return
+    }
+    if (streaming) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { runs } = await conversationRuns(activeId)
+        if (cancelled) return
+        const m = new Map<number, { usageText: string; info: RunUsageInfo }>()
+        const withData = runs
+          .filter((r) => toRunUsageInfo(r))
+          .sort((a, b) => a.first_seq - b.first_seq)
+        for (let i = 0; i < withData.length; i++) {
+          const r = withData[i]
+          const info = toRunUsageInfo(r)!
+          const prev = i > 0 ? withData[i - 1].usage : undefined
+          let usageText = fmtRunUsageLine(r.usage, prev)
+          if (usageText === '—') usageText = fmtRunDockLine(info) // 无上下文快照但有计时/成本 → 显示计时
+          if (!usageText) continue
+          m.set(r.last_seq, { usageText, info })
+        }
+        setRunsBySeq(m)
+      } catch {
+        // 单轮用量为增强信息，加载失败静默，不影响会话渲染。
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, streaming])
   // 挂起交互请求条数（权限确认 + 结构化提问的待决项；聊天头角标）
   const pendingPerms =
     activeId && view ? view.entries.filter((en) => (en.kind === 'permission' || en.kind === 'elicitation') && !en.resolved).length : 0
@@ -92,6 +132,12 @@ export function ChatPage() {
   // 视图可能是服务端快照的部分重放（该轮 user 气泡不在本地条目里），此时回退到历史事件取输入。
   const entries = view?.entries ?? []
   const lastEntry = entries[entries.length - 1]
+  // composer 常驻汇总行：取最近一轮（last_seq 最大）的真实用量（首令牌/总耗时/上下文/成本）。
+  const dockLine = (() => {
+    if (runsBySeq.size <= 0) return ''
+    const mostRecent = [...runsBySeq.entries()].sort((a, b) => b[0] - a[0])[0][1]
+    return fmtRunDockLine(mostRecent.info)
+  })()
   const hasErrTail = !!(!busy && lastEntry && lastEntry.kind === 'system' && lastEntry.tone === 'err')
   const retryLocalText = (() => {
     if (!hasErrTail) return null
@@ -508,7 +554,12 @@ export function ChatPage() {
                             boxShadow: flashEntryId === e.id ? `0 0 0 2px ${tokens.primary}` : 'none',
                           }}
                         >
-                          <EntryView e={e} onRetry={e === lastEntry ? retryLast : undefined} />
+                          <EntryView
+                            e={e}
+                            onRetry={e === lastEntry ? retryLast : undefined}
+                            usageText={e.seq != null ? runsBySeq.get(e.seq)?.usageText : undefined}
+                            runInfo={e.seq != null ? runsBySeq.get(e.seq)?.info : undefined}
+                          />
                         </div>
                       ))}
                       {streaming && (
@@ -531,20 +582,35 @@ export function ChatPage() {
                 </div>
               </div>
               {activeId && (
-                <Composer
-                  busy={busy}
-                  busyNote={
-                    streaming
-                      ? `turn 进行中 · ${agent ? agent.name : ''}`
-                      : serverBusy
-                        ? '会话在服务端仍处运行中 — 可点「停止」解除'
-                        : undefined
-                  }
-                  placeholder={
-                    busy ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`
-                  }
-                  onSend={onSend}
-                />
+                <>
+                  <Composer
+                    busy={busy}
+                    busyNote={
+                      streaming
+                        ? `turn 进行中 · ${agent ? agent.name : ''}`
+                        : serverBusy
+                          ? '会话在服务端仍处运行中 — 可点「停止」解除'
+                          : undefined
+                    }
+                    placeholder={
+                      busy ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`
+                    }
+                    onSend={onSend}
+                  />
+                  {dockLine && (
+                    <div
+                      style={{
+                        padding: '4px 20px 6px',
+                        fontSize: 11,
+                        fontFamily: tokens.fontMono,
+                        color: tokens.textPlaceholder,
+                        textAlign: 'right',
+                      }}
+                    >
+                      {dockLine}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}

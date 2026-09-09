@@ -68,6 +68,9 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	if res.Totals.CostAmount != 0.5 || res.Totals.CostCurrency != "USD" {
 		t.Fatalf("费用快照不符: %+v", res.Totals)
 	}
+	if res.Totals.CostReported != 1 {
+		t.Fatalf("费用上报会话数应单独统计（仅 c1）: %+v", res.Totals)
+	}
 	if len(res.Buckets) != 2 || res.Buckets[0].Key != "agent-a" || res.Buckets[1].Key != "agent-b" {
 		t.Fatalf("agent 分桶不符: %+v", res.Buckets)
 	}
@@ -124,7 +127,8 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	}
 }
 
-// TestUsageInfoReported 用量快照「无上报」判定（全零不计入上报会话）。
+// TestUsageInfoReported 用量快照「无上报」判定（全零不计入上报会话）；
+// 上下文与费用分开判定，供统计分别计数。
 func TestUsageInfoReported(t *testing.T) {
 	if (acl.UsageInfo{}).Reported() {
 		t.Fatal("全零不应视为上报")
@@ -132,5 +136,72 @@ func TestUsageInfoReported(t *testing.T) {
 	if !(acl.UsageInfo{Used: 1}).Reported() || !(acl.UsageInfo{Size: 1}).Reported() ||
 		!(acl.UsageInfo{CostAmount: 0.01}).Reported() {
 		t.Fatal("任一字段非零即视为上报")
+	}
+	// 字段级判定：只报上下文 / 只报费用各自成立，且互不冒充。
+	ctxOnly := acl.UsageInfo{Used: 250, Size: 1000}
+	if !ctxOnly.HasContext() || ctxOnly.HasCost() {
+		t.Fatalf("只报上下文应仅 HasContext: %+v", ctxOnly)
+	}
+	costOnly := acl.UsageInfo{CostAmount: 0.5, CostCurrency: "USD"}
+	if costOnly.HasContext() || !costOnly.HasCost() {
+		t.Fatalf("只报费用应仅 HasCost: %+v", costOnly)
+	}
+	// 压缩后 Used=0 但窗口大小已知 → 仍属有效上下文上报。
+	if !(acl.UsageInfo{Size: 128000}).HasContext() {
+		t.Fatal("Used=0、Size>0 应视为有效上下文上报")
+	}
+}
+
+// TestUsageSummaryFieldWiseSnapshotAndCurrency 字段级快照 + 多币种不混加：
+//   - 一次上报只带上下文时，不应抹掉该会话此前上报的费用（反之亦然）；
+//   - 空币种归一 USD；出现多种币种时金额置零、币种 MIXED、明细走 CostByCurrency。
+func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
+	s := openMem(t)
+	day := func(d, h int) time.Time {
+		return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC)
+	}
+	// c1：r1 带上下文 + USD 费用；r2 只带上下文（费用应保留 r1）。
+	seedRun(t, s, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(time.Second),
+		`{"used":100,"size":1000,"cost_amount":0.5,"cost_currency":"USD"}`)
+	seedRun(t, s, "r2", "c1", "agent-a", "completed", day(1, 11), day(1, 11).Add(time.Second),
+		`{"used":250,"size":1000}`)
+	// c2：只报 EUR 费用（无上下文）。
+	seedRun(t, s, "r3", "c2", "agent-a", "completed", day(1, 12), day(1, 12).Add(time.Second),
+		`{"cost_amount":0.2,"cost_currency":"EUR"}`)
+	// c3：带上下文 + 未给币种的费用（空币种 → USD）。
+	seedRun(t, s, "r4", "c3", "agent-a", "completed", day(1, 13), day(1, 13).Add(time.Second),
+		`{"used":30,"size":300,"cost_amount":0.1}`)
+
+	res, err := s.UsageSummary(ctxT(), UsageQuery{GroupBy: "agent"})
+	if err != nil {
+		t.Fatalf("UsageSummary: %v", err)
+	}
+	// 上下文：c1 取 r2（250/1000）、c3 取 30/300 → 280/1300，2 个会话上报。
+	if res.Totals.ContextUsed != 280 || res.Totals.ContextSize != 1300 || res.Totals.UsageReported != 2 {
+		t.Fatalf("上下文字段级快照不符: %+v", res.Totals)
+	}
+	// 费用：c1 的 USD 0.5 不被 r2 抹掉 + c3 的 0.1（归一 USD）+ c2 的 0.2 EUR → 多币种。
+	if res.Totals.CostReported != 3 {
+		t.Fatalf("费用上报会话数应为 3: %+v", res.Totals)
+	}
+	if res.Totals.CostCurrency != CostCurrencyMixed || res.Totals.CostAmount != 0 {
+		t.Fatalf("多币种应置零并标 MIXED: %+v", res.Totals)
+	}
+	if res.Totals.CostByCurrency["USD"] != 0.6 || res.Totals.CostByCurrency["EUR"] != 0.2 {
+		t.Fatalf("分币种明细不符: %+v", res.Totals.CostByCurrency)
+	}
+
+	// 单币种（含空币种归一）→ 正常求和。
+	s2 := openMem(t)
+	seedRun(t, s2, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(time.Second),
+		`{"used":10,"size":100,"cost_amount":0.5,"cost_currency":"USD"}`)
+	seedRun(t, s2, "r2", "c2", "agent-a", "completed", day(1, 11), day(1, 11).Add(time.Second),
+		`{"used":10,"size":100,"cost_amount":0.1}`)
+	res2, err := s2.UsageSummary(ctxT(), UsageQuery{GroupBy: "agent"})
+	if err != nil {
+		t.Fatalf("UsageSummary(single currency): %v", err)
+	}
+	if res2.Totals.CostCurrency != CostCurrencyDefault || res2.Totals.CostAmount != 0.6 || res2.Totals.CostByCurrency != nil {
+		t.Fatalf("单币种应求和且无明细: %+v", res2.Totals)
 	}
 }

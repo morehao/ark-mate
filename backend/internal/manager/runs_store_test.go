@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
@@ -54,6 +55,9 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	if r1.FirstSeq != u2.Seq || r1.LastSeq != errEnd.Seq {
 		t.Fatalf("run1 窗口不符: %+v (u2=%d err=%d)", r1, u2.Seq, errEnd.Seq)
 	}
+	if r1.FirstTokenMS != 0 {
+		t.Fatalf("run1 无 assistant 输出 first_token_ms 应为 0: %+v", r1)
+	}
 	if got, _ := st.RunLastSeq(ctx, "s-run"); got != errEnd.Seq {
 		t.Fatalf("RunLastSeq=%d want %d", got, errEnd.Seq)
 	}
@@ -71,5 +75,53 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	memSvc := NewService(reg, nil)
 	if empty, err := memSvc.ListRuns(ctx, "s-run"); err != nil || len(empty) != 0 {
 		t.Fatalf("内存模式 ListRuns 应为空: %+v err=%v", empty, err)
+	}
+}
+
+// TestRunUsageExposedInListRuns runs.usage_json 在 ListRuns 读面被解析为 RunResp.Usage：
+// 有上报 → 结构体；空串/无上报 → Usage 为 nil（omitempty）。
+func TestRunUsageExposedInListRuns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	ctx := context.Background()
+	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer st.Close()
+	svc := NewService(reg, eventbus.New())
+	svc.EnableStore(st)
+	svc.registerConversation(&ConversationRec{ID: "s-usage", AgentID: "agent-echo"})
+
+	now := time.Now().UTC()
+	seed := func(id, status, usageJSON string, firstTokenMS int64) {
+		t.Helper()
+		if err := st.CreateRun(ctx, store.Run{
+			ID: id, ConversationID: "s-usage", Status: status, UsageJSON: usageJSON,
+			FirstTokenMS: firstTokenMS,
+			StartedAt:    now.Add(-time.Minute), EndedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateRun(%s): %v", id, err)
+		}
+	}
+	seed("r-1", "completed", `{"used":135,"size":128000}`, 714)
+	seed("r-2", "failed", `{"used":150,"size":128000,"cost_amount":0.5,"cost_currency":"USD"}`, 0)
+	seed("r-3", "cancelled", ``, 0)
+
+	items, err := svc.ListRuns(ctx, "s-usage")
+	if err != nil || len(items) != 3 {
+		t.Fatalf("ListRuns: n=%d err=%v", len(items), err)
+	}
+	if items[0].Usage == nil || items[0].Usage.Used != 135 || items[0].Usage.Size != 128000 {
+		t.Fatalf("run1 usage 不符: %+v", items[0].Usage)
+	}
+	if items[0].FirstTokenMS != 714 {
+		t.Fatalf("run1 first_token_ms=%d want 714", items[0].FirstTokenMS)
+	}
+	if items[1].Usage == nil || items[1].Usage.CostAmount != 0.5 || items[1].Usage.CostCurrency != "USD" {
+		t.Fatalf("run2 usage 不符: %+v", items[1].Usage)
+	}
+	if items[2].Usage != nil {
+		t.Fatalf("run3 无上报应为 nil Usage: %+v", items[2].Usage)
 	}
 }

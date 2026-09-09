@@ -11,6 +11,31 @@ export interface ConversationSummary {
   updated_at: string
 }
 
+/** 单轮用量快照（解析 runs.usage_json；used/size 为上下文窗口占用，快照非增量）。 */
+export interface RunUsage {
+  used: number
+  size: number
+  cost_amount?: number
+  cost_currency?: string
+}
+
+/** 轮次明细（GET /conversations/:id/runs；runs 表读模型，内存模式为空数组）。 */
+export interface ConversationRun {
+  id: string
+  user_text: string
+  status: string // running | completed | failed | cancelled
+  error_code?: string
+  stop_reason?: string
+  first_seq: number
+  last_seq: number
+  started_at: string
+  ended_at?: string
+  /** 本轮从用户消息到首个 assistant 输出的耗时（ms；未记录/无输出为 0）。 */
+  first_token_ms?: number
+  /** 该轮结束后的用量快照（无上报则缺省）。 */
+  usage?: RunUsage
+}
+
 /** 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中；含归档）。 */
 export interface ConversationSearchHit extends ConversationSummary {
   snippet: string

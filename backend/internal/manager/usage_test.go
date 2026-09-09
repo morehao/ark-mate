@@ -61,6 +61,16 @@ func TestUsageSummaryService(t *testing.T) {
 	if resp.Totals.Conversations != 2 || resp.Totals.UsageReported != 1 {
 		t.Fatalf("会话/上报数不符: %+v", resp.Totals)
 	}
+	if resp.Totals.CostReported != 1 {
+		t.Fatalf("费用上报数应单独统计: %+v", resp.Totals)
+	}
+	// 口径回显：上下文/费用均为区间末快照；agent 分组桶可加。
+	if resp.ContextSemantics != "end_of_window_snapshot_sum" || resp.CostSemantics != "session_cumulative_end_of_window" {
+		t.Fatalf("口径字段不符: %+v", resp)
+	}
+	if !resp.BucketsAdditive {
+		t.Fatalf("agent 分组桶应可加: %+v", resp)
+	}
 	// 快照语义：u1 取最后一轮 250/1000，u2 无上报 → 总计 250/1000。
 	if resp.Totals.ContextUsed != 250 || resp.Totals.ContextSize != 1000 || resp.Totals.CostAmount != 0.5 {
 		t.Fatalf("用量快照不符: %+v", resp.Totals)
@@ -69,10 +79,13 @@ func TestUsageSummaryService(t *testing.T) {
 		t.Fatalf("agent 分桶不符: %+v", resp.Buckets)
 	}
 
-	// group_by=day：UTC 日期桶（今日 1 个桶）。
+	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
 	dayResp, err := svc.UsageSummary(ctx, handler.UsageQueryReq{GroupBy: "day"})
 	if err != nil || len(dayResp.Buckets) != 1 || len(dayResp.Buckets[0].Key) != 10 {
 		t.Fatalf("day 分桶不符: %+v err=%v", dayResp, err)
+	}
+	if dayResp.BucketsAdditive {
+		t.Fatalf("day 分组桶不可相加: %+v", dayResp)
 	}
 
 	// 日期形式时间参数：from/to 回显为 UTC RFC3339（date → 当日 00:00）。

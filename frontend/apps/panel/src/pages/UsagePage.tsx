@@ -5,11 +5,13 @@ import { PageContainer, tokens } from '@ark/ui'
 import { toErrorMessage, usageSummary } from '@ark/api'
 import type { Agent, UsageBucket, UsageSummary } from '@ark/types'
 import { useForge } from '../store'
-import { fmtContext, fmtCost, fmtDuration, successRate, usageRows, type UsageRow } from '../console/usageView'
+import { fmtContext, fmtCost, fmtDuration, reportedLabel, successRate, usageRows, type UsageRow } from '../console/usageView'
 
 // ——— 用量视图（M3 GET /usage/summary；sqlite 模式才有数据） ———
 // 维度：agent（默认，按轮次降序）/ day（按日期升序）；筛选：时间区间（半开）+ agent。
 // 诚实降级：内存模式（FORGE_STORE=memory）后端返回 40501，此处显示后端原文，不臆造数字。
+// 口径（后端回显 context_semantics/cost_semantics/buckets_additive）：上下文与成本都是
+// **区间末快照**（各会话取区间内最后一次上报后求和），不是区间增量；day 分组不可相加。
 
 /** 时间范围预设：近 7/30 天、自定义（起止日期）、全部。 */
 type RangeMode = '7d' | '30d' | 'custom' | 'all'
@@ -64,8 +66,12 @@ function BucketCells({ b }: { b: UsageBucket }) {
       <span style={{ color: b.cancelled > 0 ? tokens.warning : tokens.textPlaceholder }}>{b.cancelled}</span>
       <span style={{ color: rate == null ? tokens.textPlaceholder : tokens.text }}>{fmtPct(rate)}</span>
       <span style={{ fontFamily: tokens.fontMono }}>{fmtDuration(b.duration_ms)}</span>
-      <span style={{ fontFamily: tokens.fontMono }}>{fmtContext(b.context_used, b.context_size)}</span>
-      <span style={{ fontFamily: tokens.fontMono }}>{fmtCost(b.cost_amount, b.cost_currency)}</span>
+      <span style={{ fontFamily: tokens.fontMono }} title={`上下文为区间末快照 · ${reportedLabel(b.usage_reported, b.conversations)}`}>
+        {fmtContext(b.context_used, b.context_size)}
+      </span>
+      <span style={{ fontFamily: tokens.fontMono }} title={`会话累计费用快照 · ${reportedLabel(b.cost_reported, b.conversations)}`}>
+        {fmtCost(b.cost_amount, b.cost_currency, b.cost_by_currency)}
+      </span>
     </>
   )
 }
@@ -122,7 +128,7 @@ export function UsagePage() {
   return (
     <PageContainer
       title="用量"
-      description="按 agent / 日期聚合的轮次、时长、上下文与成本（数据来自 SQLite 读模型；内存模式无统计）。"
+      description="按 agent / 日期聚合的轮次、时长、上下文与成本（数据来自 SQLite 读模型；内存模式无统计）。上下文与成本为区间末快照，非区间增量。"
       extra={
         <Space>
           <Segmented
@@ -196,16 +202,20 @@ export function UsagePage() {
               valueStyle={{ fontSize: 20 }}
             />
             <Statistic title="总时长" value={fmtDuration(data.totals.duration_ms)} valueStyle={{ fontSize: 20 }} />
-            <Statistic
-              title="成本"
-              value={fmtCost(data.totals.cost_amount, data.totals.cost_currency)}
-              valueStyle={{ fontSize: 20 }}
-            />
-            <Statistic
-              title="上下文峰值"
-              value={fmtContext(data.totals.context_used, data.totals.context_size)}
-              valueStyle={{ fontSize: 20 }}
-            />
+            <Tooltip title="区间末各会话累计费用之和（快照，非区间增量）">
+              <Statistic
+                title="成本"
+                value={fmtCost(data.totals.cost_amount, data.totals.cost_currency, data.totals.cost_by_currency)}
+                valueStyle={{ fontSize: 20 }}
+              />
+            </Tooltip>
+            <Tooltip title="区间末各会话上下文占用之和（快照，非峰值、非区间增量）">
+              <Statistic
+                title="上下文占用（区间末）"
+                value={fmtContext(data.totals.context_used, data.totals.context_size)}
+                valueStyle={{ fontSize: 20 }}
+              />
+            </Tooltip>
             <Statistic title="会话数" value={data.totals.conversations} valueStyle={{ fontSize: 20 }} />
           </div>
 
@@ -240,19 +250,32 @@ export function UsagePage() {
                     </tr>
                   ))}
                   <tr style={{ background: tokens.bg }}>
-                    <td style={{ ...CELL, textAlign: 'left', padding: '8px 10px', fontWeight: 600 }}>合计</td>
+                    <td style={{ ...CELL, textAlign: 'left', padding: '8px 10px', fontWeight: 600 }}>
+                      {data.buckets_additive ? '合计' : '区间末'}
+                    </td>
                     <td colSpan={8} style={{ ...CELL, textAlign: 'left', padding: '8px 10px' }}>
                       <span style={{ display: 'inline-flex', gap: 14, flexWrap: 'wrap', fontFamily: tokens.fontMono, fontWeight: 600 }}>
                         <span>{data.totals.runs} 轮</span>
                         <span style={{ color: tokens.success }}>{data.totals.completed} 完成</span>
                         <span style={{ color: tokens.error }}>{data.totals.failed} 失败</span>
                         <span>{fmtDuration(data.totals.duration_ms)}</span>
-                        <span>{fmtCost(data.totals.cost_amount, data.totals.cost_currency)}</span>
+                        <span>{fmtCost(data.totals.cost_amount, data.totals.cost_currency, data.totals.cost_by_currency)}</span>
                       </span>
+                      {!data.buckets_additive && (
+                        <span style={{ marginLeft: 12, color: tokens.textSecondary, fontSize: 11.5 }}>
+                          上下文/成本为快照，不可与上方各行相加（跨天会话会重复计入）
+                        </span>
+                      )}
                     </td>
                   </tr>
                 </tbody>
               </table>
+              {!data.buckets_additive && (
+                <div style={{ padding: '10px 12px', color: tokens.textSecondary, fontSize: 11.5 }}>
+                  按日期分组时，每一行是「当日末各会话的累计快照」；同一会话跨天会在多天各出现一次，
+                  因此成本/上下文相加会重复。要看区间总量请切到「按 agent」。
+                </div>
+              )}
             </div>
           )}
         </>

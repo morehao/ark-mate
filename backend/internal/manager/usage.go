@@ -18,6 +18,14 @@ import (
 //   - 无底座上报（usage_json 为空）→ usage_reported=0，上下文/费用为零值，不估算；
 //   - 内存模式（无 store）无 runs 读模型 → 明确 40501 usage_stats_unsupported（不返回假零值）。
 
+// 口径常量（随响应回显，供前端如实标注，避免把快照当区间增量使用）。
+const (
+	// usageContextSemantics 上下文口径：区间末各会话占用之和（快照）。
+	usageContextSemantics = "end_of_window_snapshot_sum"
+	// usageCostSemantics 费用口径：区间末各会话累计费用之和（快照）。
+	usageCostSemantics = "session_cumulative_end_of_window"
+)
+
 // UsageSummary 聚合用量统计。
 func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*handler.UsageSummaryResp, error) {
 	if s.st == nil {
@@ -60,11 +68,16 @@ func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*h
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
 	out := &handler.UsageSummaryResp{
-		AgentID: q.AgentID,
-		GroupBy: groupBy,
-		Source:  "sqlite",
-		Totals:  toUsageBucketResp(res.Totals),
-		Buckets: make([]handler.UsageBucketResp, 0, len(res.Buckets)),
+		AgentID:          q.AgentID,
+		GroupBy:          groupBy,
+		Source:           "sqlite",
+		ContextSemantics: usageContextSemantics,
+		CostSemantics:    usageCostSemantics,
+		// agent 分组：每会话唯一归属一个 agent → 桶可加；day 分组：跨天会话的累计快照会在
+		// 多个日期桶重复出现 → 不可加（前端据此如实标注合计）。
+		BucketsAdditive: groupBy == "agent",
+		Totals:          toUsageBucketResp(res.Totals),
+		Buckets:         make([]handler.UsageBucketResp, 0, len(res.Buckets)),
 	}
 	if !from.IsZero() {
 		out.From = from.UTC().Format(time.RFC3339)
@@ -84,7 +97,8 @@ func toUsageBucketResp(b store.UsageBucket) handler.UsageBucketResp {
 		Key: b.Key, AgentID: b.AgentID, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
 		Cancelled: b.Cancelled, Running: b.Running, Conversations: b.Conversations,
 		DurationMS: b.DurationMS, ContextUsed: b.ContextUsed, ContextSize: b.ContextSize,
-		UsageReported: b.UsageReported, CostAmount: b.CostAmount, CostCurrency: b.CostCurrency,
+		UsageReported: b.UsageReported, CostReported: b.CostReported,
+		CostAmount: b.CostAmount, CostCurrency: b.CostCurrency, CostByCurrency: b.CostByCurrency,
 	}
 }
 
