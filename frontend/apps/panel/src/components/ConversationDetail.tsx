@@ -3,6 +3,7 @@ import { Button, Drawer, Input, Popconfirm, Spin } from 'antd'
 import {
   CheckOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   ReloadOutlined,
@@ -12,7 +13,8 @@ import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
 import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
-import { agentNameOf } from '../console/util'
+import { agentNameOf, shortId } from '../console/util'
+import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
 
 function fmtLocal(iso?: string): string {
@@ -263,7 +265,32 @@ export function ConversationDetailDrawer({
                   s.status
                 ),
               )}
-              {row('会话 ID', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{s.id}</span>)}
+              {row(
+                '会话 ID',
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontFamily: tokens.fontMono,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span title={s.id}>{shortId(s.id)}</span>
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="复制会话 ID"
+                    title="复制完整会话 ID"
+                    icon={<CopyOutlined style={{ fontSize: 11 }} />}
+                    onClick={() =>
+                      void copyText(s.id).then((copied) =>
+                        showToast(copied ? '已复制会话 ID' : '复制失败（浏览器未授权剪贴板）'),
+                      )
+                    }
+                  />
+                </span>,
+              )}
               {row('创建', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.created_at)}</span>)}
               {row('更新', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.updated_at)}</span>)}
               {row(

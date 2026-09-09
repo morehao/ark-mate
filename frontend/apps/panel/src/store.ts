@@ -142,6 +142,22 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
         lastSeq,
       }
     }
+    case Ev.SessionResumed: {
+      // P3 会话可移植：进程重启/跨 runtime 后会话按需恢复（reason=restart 原生会话续接 /
+      // handoff 历史摘要重灌）。以系统提示入流，避免用户误以为会话被「重新开始」。
+      const reason = String(e.payload?.reason ?? '')
+      const runtime = String(e.payload?.runtime ?? '')
+      const label =
+        reason === 'handoff' ? '会话已恢复（历史摘要重灌）' : '会话已恢复（原生会话续接）'
+      return {
+        ...v,
+        entries: push('system', undefined, {
+          tone: 'info',
+          text: runtime ? `${label} · ${runtime}` : label,
+        }),
+        lastSeq,
+      }
+    }
     case Ev.TurnEnded:
       return {
         ...v,

@@ -4,7 +4,7 @@
  *
  * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 forge serve :8099）。
  * 覆盖：
- *   1. REST 信封（health / agents / runtimes / sessions）——@ark/api 的 unwrap 语义前提；
+ *   1. REST 信封（health / agents / runtimes / conversations）——@ark/api 的 unwrap 语义前提；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached。
@@ -58,10 +58,10 @@ async function checkRest() {
   const agentList = agents.env.data
   if (!Array.isArray(agentList) || agentList.length === 0) return bad('GET /agents 载荷', '应为非空数组')
   const a0 = agentList[0]
-  for (const key of ['id', 'name', 'runtime', 'state']) {
+  for (const key of ['id', 'name', 'state']) {
     if (!(key in a0)) return bad('GET /agents 载荷', `Agent 缺字段 ${key}`)
   }
-  ok(`GET /agents → ${agentList.length} 个（字段 id/name/runtime/state 齐）`)
+  ok(`GET /agents → ${agentList.length} 个（字段 id/name/state 齐）`)
 
   const rts = await apiGet('/runtimes')
   if (rts.env.code !== 0) return bad('GET /runtimes 信封', JSON.stringify(rts.env))
@@ -73,25 +73,30 @@ async function checkRest() {
   }
   ok(`GET /runtimes → ${runtimeList.length} 个（字段 name/version 齐）`)
 
-  const sessions = await apiGet('/sessions')
-  if (sessions.env.code !== 0 || !Array.isArray(sessions.env.data)) return bad('GET /sessions', JSON.stringify(sessions.env))
-  ok('GET /sessions → 数组信封')
+  const convs = await apiGet('/conversations')
+  if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /conversations', JSON.stringify(convs.env))
+  // 对外 id 展示策略前提（P3 F4）：会话 id 为平台 uuid（36 位），不再泄露底座 id 形状（ses_* 等）。
+  const badId = convs.env.data.find(
+    (c) => typeof c?.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.id),
+  )
+  if (badId) return bad('会话 id 形状', `应平台 uuid，got ${JSON.stringify(badId.id)}`)
+  ok(`GET /conversations → 数组信封（id 全为平台 uuid；${convs.env.data.length} 条）`)
 }
 
 // ——— 2. REST 业务错误信封 ———
 
 async function checkBizError() {
   console.log('· REST 业务错误（HTTP 200 + 信封 code≠0，前端 HttpError 依据）')
-  const r = await fetch(API + '/sessions', {
+  const r = await fetch(API + '/conversations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ agent_id: 'agent-no-such', prompt: 'hi' }),
   })
   const env = await r.json()
   if (r.status === 200 && env.code === 40401 && typeof env.msg === 'string') {
-    ok(`POST /sessions 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
+    ok(`POST /conversations 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
   } else {
-    bad('POST /sessions 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
+    bad('POST /conversations 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
   }
 }
 
@@ -124,8 +129,11 @@ async function checkWs() {
   // attach（无 since_seq）→ snapshot 帧。
   ws.send(JSON.stringify({ action: 'attach', agg_id: 'e2e-nonexistent' }))
   const snap = await nextFrame('snapshot')
-  if (snap.type === 'snapshot' && snap.agg_id === 'e2e-nonexistent' && typeof snap.event_seq === 'number') {
-    ok(`attach → snapshot（agg=${snap.agg_id} seq=${snap.event_seq}）`)
+  // 契约：snapshot 必带 agg_id + state（终态视图，M0 空对象）；event_seq 为水位，omitempty
+  // （bus 尚未有事件时省略 → 视为水位 0）。
+  const seqOk = snap.event_seq === undefined || typeof snap.event_seq === 'number'
+  if (snap.type === 'snapshot' && snap.agg_id === 'e2e-nonexistent' && seqOk && typeof snap.state === 'object') {
+    ok(`attach → snapshot（agg=${snap.agg_id} 水位=${snap.event_seq ?? 0} state=${JSON.stringify(snap.state)}）`)
   } else {
     bad('attach → snapshot', JSON.stringify(snap))
   }

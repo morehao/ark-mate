@@ -848,6 +848,18 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
   opencode 会话（含暗号 青瓷-4711）kill-9 中断 → agent 定义切 deepseekharness → 重启同 uuid
   prompt → 迁移到 dsh + memo → dsh 正确复述暗号（历史确实跨底座携带）→ runtime_hint/
   provider_session_id 更新、completed。
+- **F4 前端依赖（2026-09-09，完成）**：①`session.resumed` 纳入事件契约
+  （packages/types/events.ts）+ store.applyEvent 渲染为系统提示（reason=restart「原生会话续接」/
+  handoff「历史摘要重灌」· runtime），用户不再误判会话被重开；②对外 id 展示策略：详情面板
+  会话 ID 只显示前 8 位（hover 全量 + 一键复制完整 id），titleFor 在 agent 缺失时回退短 id
+  而非 36 位 uuid；③agent picker 保持隐藏（StartPage 既有「新建固定用默认 Agent」不变）。
+  同切片修正前端冒烟脚本与当前 REST/WS 契约的漂移：`/sessions`→`/conversations`、Agent 字段
+  `runtime`→`state`、snapshot 帧 `event_seq` omitempty（水位 0 时省略，改判 state 对象）、新增
+  「会话 id 全为平台 uuid」断言。**验证**：pnpm typecheck + pnpm build 全绿；vite dev(:5173) +
+  forge serve(:8099, sqlite, echo agent) 下 `smoke:e2e` 全 PASS（含 id 形状断言）、
+  `e2e-live-turn.mjs alias-echo` 收到真实 turn.ended 全链路事件（seq 3→9）；用 vite lib 打包
+  真实 store.ts/console/util.ts 后在 Node 直接调用 applyEvent/titleFor/shortId（handoff/restart
+  文案、tone、seq 幂等、短 id、标题回退均 PASS）。
 - **F1 双 id 持久化（2026-09-08，完成）**：schema v2 `ALTER TABLE conversations ADD
   provider_session_id`；store/manager 全链路（Conversation/ConversationRec/upsert/restore）
   贯通该列；建会话改用平台 uuid（REST/eventbus/transcript/权限记忆全部以 uuid 会话 id 键控，
@@ -865,8 +877,8 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
 - **F3 handoff memo 兜底**：历史 entries → bounded memo 构建（token 预算参数）→
   PromptRequest.HandoffMemo 贯通 → 拒绝自动退回裸 prompt；跨 runtime 续聊语义（会话切
   runtime：新 runtime 无原会话 → memo 路径）DoD。
-- **F4（后续，非本期）前端依赖标注**：会话恢复态呈现（resumed/reconnecting）、对外 id
-  展示策略、agent picker 保持隐藏——后端完成后单独排期。
+- **F4 前端依赖（2026-09-09，完成，见上）**：会话恢复态呈现（session.resumed → 系统提示）、
+  对外 id 展示策略（短 id + 复制）、agent picker 保持隐藏。
 
 #### 18.5 验收与纪律
 

@@ -1,6 +1,9 @@
 // 域事件 type 常量（与 backend manager/events.go 一致）。
 export const Ev = {
   SessionCreated: 'session.created',
+  // 进程重启 / 跨 runtime 后会话按需恢复（P3 会话可移植）：payload.reason = restart（原生会话
+  // 续接）| handoff（历史摘要重灌）；payload.runtime = 实际承载 runtime。
+  SessionResumed: 'session.resumed',
   UserMessage: 'session.user_message',
   Message: 'session.message',
   Thought: 'session.thought',
