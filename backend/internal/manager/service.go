@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -233,7 +234,8 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
 		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-			IsDefault: a.IsDefault(), PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
+			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID),
+			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -1041,7 +1043,15 @@ func (s *Service) CancelTurn(ctx context.Context, id string) error {
 }
 
 // restErr 把领域错误（acl 分类）映射为对外可操作的业务错误码（gerror.Error）。
+// RestErr 导出 restErr（handler 出口统一映射；见 handler.Service.RestErr）。
+func (s *Service) RestErr(err error) error { return s.restErr(err) }
+
 func (s *Service) restErr(err error) error {
+	// 已映射（gerror.Error）→ 原样透传，避免二次映射成 50000。
+	var mapped gerror.Error
+	if errors.As(err, &mapped) {
+		return err
+	}
 	ae, ok := acl.As(err)
 	if !ok {
 		return gerror.Error{Code: 50000, Msg: err.Error()}

@@ -1155,3 +1155,65 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 **遗留**：前端尚无用量视图（REST 面与 smoke 断言已就绪）；逐轮 token/费用明细受 ACP 通道限制
 （底座只给上下文快照 + 可选累计费用）；`runs` 的 REST 明细未暴露 `usage_json`（统计 API 是唯一读面）；
 大规模数据下聚合在 Go 侧完成（区间过滤已下推 SQL），如需再优化可加物化日表。
+
+#### 19.8 切片 H1：文档一致性收口 + 部署文档（完成）
+
+**动机**：README 的「控制面接口摘要」与真实路由长期漂移（14 处历史 `/sessions/*` 路径，P0 起已
+改名为 `/conversations/*`；agent id 示例仍写 `agent-echo`/`agent-opencode`/`deepseek-harness-agent`，
+而内置播种已是 `dsh`/`opencode`）；M3 DoD 要求的部署文档（systemd/容器）在 `docs/` 下缺失。收口
+过程中暴露两个真实缺陷并修复。
+
+**1) README 契约对齐**：14 处 `/sessions/*` → `/conversations/*`；接口表从 11 行补到 29 行（覆盖
+agent CRUD/启停/能力目录、provider、conversation 详情/元数据/runs/搜索、权限与记忆、elicitation、
+skills/mcps/tools、`POST /mcps/:id/probe`、`/usage/summary`、`/health`、`/ws/events`）；修正
+「控制面 REST 默认拒绝权限」的过时语义（现为 `ask` → 挂起 → 用户决策/超时拒绝 + per-agent 策略）；
+修正默认监听面（裸跑 `forge serve` 实测 `*:8099`，即所有网卡且**无鉴权** → 文档改为显式提示收在
+本机）；补齐 CLI 子命令（`migrate`/`transcripts prune`/`acp-demo`）与仓库结构（mcp/capability/
+store/infra）。
+
+**2) 自动守卫 `TestReadmeRoutesMatchRouter`**：解析 README 反引号内全部 `/v1/forge` 路由，与
+`engine.Routes()`（34 条）逐条比对，并禁止历史 `/sessions` 路径复活。反向注入（把
+`/usage/summary` 改错）确认会红 → 守卫有效，非空断言（≥20 条）。
+
+**3) 缺陷修复 A：种子只读守卫失效**。`DeleteAgent`/`UpdateAgent` 仅按历史保留前缀 `agent-` 判定
+种子，而内置播种 id 早已改为 `dsh`/`opencode` → 真进程实测 `DELETE /agents/dsh` 与
+`DELETE /agents/opencode` **成功删除**，注册表清空（默认 agent 缺失，新建会话将失败）；`PATCH
+runtimes` 同样可改，与代码注释/README 声明的「种子只读」矛盾。修复：新增 `isBuiltinAgent`/
+`seedAgent`（内置播种 + 保留前缀），`DeleteAgent` 与「改 runtime」统一走该判定；`AgentResp` 新增
+权威 `seed` 字段（前端 `isSeed` 由 id 前缀猜测改为读 `a.seed`，`agent-` 前缀仅保留为新建校验）。
+
+**4) 缺陷修复 B：agent 端点错误信封漏码**。agent handler 把裸 `*acl.Error` 直接交
+`gincontext.Fail` → 真进程返回 `code=-1`、`msg="acl error: class=request_rejected
+code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/40401/40501/40901/50201）」契约
+不符。修复：`handler.Service` 增 `RestErr`（manager 导出 `restErr`，且对已映射 `gerror.Error`
+幂等透传），agent 端点统一经此出口。
+
+**5) 部署文档 `docs/deployment.md` + `Dockerfile`**：交付形态（`make all` 单二进制内嵌面板 /
+`make build` 无面板 / 分离部署 / 容器）、运行与**默认监听面安全边界**、数据目录与持久层开关、
+13 个 `FORGE_*` 环境变量全表（取自 `config.go`）、底座前置条件、systemd 单元 + 容器编排、健康检查、
+备份/升级/**回滚（旧二进制遇高版本 schema 会拒绝启动）**、排障表。
+
+**证据（真进程/真测试）**：
+- `make all` → `./forge`（40 MB，内嵌面板）；`GIN_MODE=release forge serve --addr
+  127.0.0.1:18140`（sqlite + 独立数据目录）→ health `{"code":0,"msg":"ok"}`；`GET /` 200
+  `text/html`（标题 `ark-forge · Agent 问答控制台`，`/assets/index-*.js` 可访问），无 gin debug 告警。
+- 按文档命令建 `echo` agent → 跑通一轮（REST 决策权限）→ 终态 `completed`；`/usage/summary`
+  `runs=1 completed=1 duration_ms=105 context_used=137 usage_reported=1 cost=0.00137 USD`。
+- 重启恢复：kill 后同库重启，`/conversations` 仍列出该会话（标题保留）。
+- 种子只读修复后：`DELETE /agents/dsh` → 40001 `seed_agent_readonly`；`PATCH runtimes` → 40001；
+  `PATCH name` 成功且 `seed:true`；`POST /agents/nope/start` → 40401（此前均为 `code=-1`）。
+- 裸跑 `forge serve` → `lsof` 实测 `*:8099`。
+- `go vet` + `go test -race ./...` 全绿（新增 `TestSeedAgentReadonly`、`TestAgentErrorEnvelopeMapping`、
+  `TestReadmeRoutesMatchRouter`；REST 断言 `seed` 字段）；前端 `pnpm typecheck` + `pnpm build` 通过。
+
+**降级（明确未执行，不臆造成果）**：
+- **systemd**：本机为 macOS，无 systemd → 单元文件仅做 INI 语法/关键指令校验（3 section、
+  6 条 `Environment=`、`ExecStart` 绝对路径、`FORGE_ADDR` 收在本机），未做语义执行；上线前需
+  目标机 `systemd-analyze verify` 并实测。
+- **容器镜像**：Docker 守护进程可用，但到 `auth.docker.io` 拉取基础镜像元数据持续 `i/o timeout`
+  （`docker build` 与 `buildx --check` 均失败）→ 镜像**未构建**；Dockerfile 三阶段与已验证的
+  `make all` 步骤一一对应，需在可访问镜像仓库的机器上构建自检。
+
+**遗留**：设计文档（`design-and-roadmap.md` 等）保留历史路径命名，已在 README 声明「以 README +
+`router.go` 为准」并由守卫测试覆盖；默认监听面为所有网卡且无鉴权（M3 可选②「单操作员 token」
+未实现，文档已显式告警，如需默认收窄到 `127.0.0.1` 属行为变更，待决策）。

@@ -135,6 +135,23 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	return nil
 }
 
+// isBuiltinAgent 是否为内置播种 agent（dsh/opencode；随 builtinAgents 单一事实源）。
+func isBuiltinAgent(id string) bool {
+	for _, b := range builtinAgents {
+		if b.id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// seedAgent 种子判定（对外只读）：内置播种 agent 或历史保留前缀 agent-。
+// 修复：内置播种 id 由 agent-<runtime> 改为 dsh/opencode 后，仅按前缀判定的守卫失效，
+// 导致种子可被 DELETE、runtime 可被 PATCH 改（README 与代码注释均声明只读）。
+func seedAgent(id string) bool {
+	return isBuiltinAgent(id) || strings.HasPrefix(id, reservedAgentPrefix)
+}
+
 // CreateAgent 注册新 agent（非种子）：校验可启动（runtime 已注册 → 静态能力冻结于 runtime 侧）并持久化。
 // 返回注册后的对外表示。
 func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*handler.AgentResp, error) {
@@ -168,6 +185,11 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
 	if patch.Runtimes != nil && len(*patch.Runtimes) > 0 {
+		if seedAgent(id) {
+			s.mu.Unlock()
+			return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
+				fmt.Sprintf("种子 agent %q 的 runtime 不可修改（可直接编辑 definitions 文件）", id), nil)
+		}
 		for _, r := range *patch.Runtimes {
 			if _, rok := s.reg.Get(r); !rok {
 				s.mu.Unlock()
@@ -200,8 +222,9 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 // DeleteAgent 删除用户 agent（种子不可删）。已存在会话仍可查看（历史保留），
 // 但其上新建 prompt 将报 agent_not_found。
 func (s *Service) DeleteAgent(_ context.Context, id string) error {
-	if strings.HasPrefix(id, reservedAgentPrefix) {
-		return acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除（可直接编辑 definitions）", nil)
+	if seedAgent(id) {
+		return acl.NewError(acl.ClassRequest, "seed_agent_readonly",
+			fmt.Sprintf("种子 agent %q 不可删除（可直接编辑 definitions）", id), nil)
 	}
 	s.mu.Lock()
 	_, ok := s.agents[id]
@@ -325,5 +348,6 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 		return nil
 	}
 	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-		IsDefault: a.IsDefault(), PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
+		IsDefault: a.IsDefault(), Seed: seedAgent(a.ID),
+		PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
 }

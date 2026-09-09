@@ -8,6 +8,8 @@ export interface Agent {
   state: AgentState
   /** 默认播种 Agent（前端预选 + 徽标）。 */
   is_default?: boolean
+  /** 种子 agent（内置播种/保留前缀）：只读（不可删、runtime 不可改）；由服务端权威判定。 */
+  seed?: boolean
 }
 
 export interface Provider {

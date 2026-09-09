@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/golib/gerror"
 )
@@ -83,6 +84,34 @@ type stubSvc struct {
 	usageResp  *handler.UsageSummaryResp // M3 GET /usage/summary 桩
 	usageQuery handler.UsageQueryReq     // 捕获查询参数
 	usageErr   error
+}
+
+// RestErr 桩：与 manager 一致——已映射错误透传，acl 错误按分类映射（测试只关心 acl→信封码）。
+func (s *stubSvc) RestErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ge gerror.Error
+	if errors.As(err, &ge) {
+		return err
+	}
+	var ae *acl.Error
+	if errors.As(err, &ae) {
+		code := 40001
+		switch ae.Class {
+		case acl.ClassUnsupported:
+			code = 40501
+		case acl.ClassLimit:
+			code = 40901
+		case acl.ClassService, acl.ClassConnection:
+			code = 50201
+		}
+		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
+			code = 40401
+		}
+		return gerror.Error{Code: code, Msg: ae.Details}
+	}
+	return gerror.Error{Code: 50000, Msg: err.Error()}
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -374,7 +403,7 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 // TestListEndpoints GET /agents /runtimes /conversations 返回 code=0 + 真实列表载荷。
 func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
-		agents: []handler.AgentResp{{ID: "agent-opencode", Name: "opencode-agent", State: "stopped"}},
+		agents: []handler.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
 		runtimes: []handler.RuntimeResp{
 			{Name: "opencode", ID: "opencode", Vers: "opencode acp"},
 			{Name: "deepseekharness", ID: "deepseekharness", Vers: "dsh --profile acp"},
@@ -388,8 +417,15 @@ func TestListEndpoints(t *testing.T) {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
 	var agents []handler.AgentResp
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 || agents[0].ID != "agent-opencode" {
+	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 || agents[0].ID != "dsh" {
 		t.Fatalf("agents data 不符: %s", env.Data)
+	}
+	// 种子只读标记必须落在 JSON 契约里（前端按 a.seed 判定，而非 id 前缀猜测）。
+	if !agents[0].Seed || !agents[0].IsDefault {
+		t.Fatalf("seed/is_default 未暴露: %+v", agents[0])
+	}
+	if !strings.Contains(string(env.Data), `"seed":true`) {
+		t.Fatalf("seed 字段名不符: %s", env.Data)
 	}
 
 	env, _ = do(t, r, "GET", "/v1/forge/runtimes", "")
@@ -884,5 +920,53 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP sse 传输暂不支持探测"}
 	if env, code := do(t, r, "POST", "/v1/forge/mcps/sse1/probe", ""); code != 200 || env.Code != 40501 {
 		t.Fatalf("sse 应 40501，got http=%d code=%d", code, env.Code)
+	}
+}
+
+// TestAgentErrorEnvelopeMapping agent 端点错误必须经信封映射（修复：此前裸 acl 错误漏成 code=-1，
+// 与 README「非 0 为业务错误（40001/40401/…）」契约不符）。
+func TestAgentErrorEnvelopeMapping(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		err    error
+		code   int
+	}{
+		{"delete_seed", "DELETE", "/v1/forge/agents/dsh", "",
+			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
+		{"delete_unknown", "DELETE", "/v1/forge/agents/nope", "",
+			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
+		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["echo"]}`,
+			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 runtime 只读", nil), 40001},
+		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["echo"]}`,
+			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
+		{"start_unknown", "POST", "/v1/forge/agents/nope/start", "",
+			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
+		{"stop_busy", "POST", "/v1/forge/agents/dsh/stop", "",
+			acl.NewError(acl.ClassLimit, "agent_busy", "有在途 turn", nil), 40901},
+		{"start_unavailable", "POST", "/v1/forge/agents/dsh/start", "",
+			acl.NewError(acl.ClassUnsupported, "runtime_unavailable", "命令不可执行", nil), 40501},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &stubSvc{agentErr: tc.err}
+			r := newRestEngine(svc)
+			env, http := do(t, r, tc.method, tc.path, tc.body)
+			if http != 200 || env.Code != tc.code {
+				t.Fatalf("期望 HTTP 200 code=%d，got http=%d code=%d msg=%q", tc.code, http, env.Code, env.Msg)
+			}
+			if env.Msg == "" || strings.HasPrefix(env.Msg, "acl error") {
+				t.Fatalf("msg 应为可读详情，got %q", env.Msg)
+			}
+		})
+	}
+	// 已映射错误不得被二次映射（restErr 幂等）。
+	svc := &stubSvc{agentErr: gerror.Error{Code: 40001, Msg: "已映射"}}
+	r := newRestEngine(svc)
+	env, _ := do(t, r, "DELETE", "/v1/forge/agents/nope", "")
+	if env.Code != 40001 || env.Msg != "已映射" {
+		t.Fatalf("已映射错误应透传: %+v", env)
 	}
 }

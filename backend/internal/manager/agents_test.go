@@ -207,3 +207,68 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 		t.Fatalf("策略未落盘: %s", b)
 	}
 }
+
+// TestSeedAgentReadonly 种子 agent 只读不变量（修复：内置播种 id 由 agent-<runtime> 改为
+// dsh/opencode 后，仅按前缀判定的守卫失效 → 种子可删、runtime 可改）。
+func TestSeedAgentReadonly(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "agents")
+	svc := agentTestSvc(t, dir)
+
+	// 列表暴露权威 seed 标记（前端不再按 id 前缀猜）。
+	list, err := svc.ListAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeds := map[string]bool{}
+	for _, a := range list {
+		seeds[a.ID] = a.Seed
+	}
+	if !seeds["dsh"] || !seeds["opencode"] {
+		t.Fatalf("内置播种应标记 seed: %+v", seeds)
+	}
+
+	// 内置种子不可删（此前会成功删除，导致默认 agent 缺失、新建会话失败）。
+	for _, id := range []string{"dsh", "opencode"} {
+		var ae *acl.Error
+		if err := svc.DeleteAgent(ctx, id); err == nil {
+			t.Fatalf("种子 %q 应不可删除", id)
+		} else if !errors.As(err, &ae) || ae.Code != "seed_agent_readonly" {
+			t.Fatalf("种子 %q 删除应 seed_agent_readonly，got %v", id, err)
+		}
+		if _, ok := svc.AgentByID(id); !ok {
+			t.Fatalf("种子 %q 应仍在注册表", id)
+		}
+	}
+	// 保留前缀（历史种子形态）同样只读。
+	if err := svc.DeleteAgent(ctx, "agent-legacy"); err == nil {
+		t.Fatal("agent- 前缀应不可删除")
+	}
+
+	// 种子 runtime 不可改；name/provider/策略可改。
+	rt := []string{"opencode"}
+	var ae *acl.Error
+	if _, err := svc.UpdateAgent(ctx, "dsh", handler.AgentUpdateReq{Runtimes: &rt}); err == nil {
+		t.Fatal("种子 runtime 应不可修改")
+	} else if !errors.As(err, &ae) || ae.Code != "seed_agent_readonly" {
+		t.Fatalf("改 runtime 应 seed_agent_readonly，got %v", err)
+	}
+	name := "dsh（默认）"
+	pol := &handler.PermissionPolicyResp{Default: "ask"}
+	u, err := svc.UpdateAgent(ctx, "dsh", handler.AgentUpdateReq{Name: &name, PermissionPolicy: pol})
+	if err != nil || u.Name != name || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "ask" || !u.Seed {
+		t.Fatalf("种子 name/策略应可改且 seed 仍为 true: %v %+v", err, u)
+	}
+
+	// 自定义 agent 仍可改 runtime / 删除。
+	if _, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+		t.Fatal(err)
+	}
+	rt2 := []string{"echo", "opencode"}
+	if _, err := svc.UpdateAgent(ctx, "alias-echo", handler.AgentUpdateReq{Runtimes: &rt2}); err != nil {
+		t.Fatalf("自定义 agent runtime 应可改: %v", err)
+	}
+	if err := svc.DeleteAgent(ctx, "alias-echo"); err != nil {
+		t.Fatalf("自定义 agent 应可删: %v", err)
+	}
+}

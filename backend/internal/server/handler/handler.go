@@ -73,6 +73,10 @@ type Service interface {
 
 	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
 	UsageSummary(ctx context.Context, q UsageQueryReq) (*UsageSummaryResp, error)
+
+	// RestErr 把领域错误（acl 分类）映射为 REST 信封错误码（40001/40401/40501/40901/50201…）；
+	// 已映射的 gerror.Error 原样透传。handler 必须经此出口，避免裸错误漏成 code=-1。
+	RestErr(err error) error
 }
 
 // UsageQueryReq 用量统计查询参数（GET /usage/summary）。
@@ -122,6 +126,9 @@ type AgentResp struct {
 	Provider  string `json:"provider,omitempty"`
 	State     string `json:"state"`
 	IsDefault bool   `json:"is_default"` // 默认播种 Agent（前端预选 + 徽标）
+	// Seed 内置播种/保留前缀 Agent：只读（不可删、runtime 不可改；name/provider/策略可改）。
+	// 由服务端权威判定（历史上前端按 id 前缀猜，与播种 id 改名后不一致）。
+	Seed bool `json:"seed"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 }

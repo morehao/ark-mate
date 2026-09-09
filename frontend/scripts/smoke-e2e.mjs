@@ -58,10 +58,13 @@ async function checkRest() {
   const agentList = agents.env.data
   if (!Array.isArray(agentList) || agentList.length === 0) return bad('GET /agents 载荷', '应为非空数组')
   const a0 = agentList[0]
-  for (const key of ['id', 'name', 'state']) {
+  for (const key of ['id', 'name', 'state', 'seed']) {
     if (!(key in a0)) return bad('GET /agents 载荷', `Agent 缺字段 ${key}`)
   }
-  ok(`GET /agents → ${agentList.length} 个（字段 id/name/state 齐）`)
+  // 种子只读标记（服务端权威字段；前端「种子」徽标与删除按钮据此判定）。
+  const seeds = agentList.filter((a) => a.seed === true)
+  if (seeds.length === 0) return bad('GET /agents 种子标记', '内置播种 agent 应带 seed:true')
+  ok(`GET /agents → ${agentList.length} 个（字段 id/name/state/seed 齐；种子 ${seeds.length} 个）`)
 
   const rts = await apiGet('/runtimes')
   if (rts.env.code !== 0) return bad('GET /runtimes 信封', JSON.stringify(rts.env))

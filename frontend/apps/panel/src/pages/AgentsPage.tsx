@@ -7,7 +7,10 @@ import type { Agent, Provider } from '@ark/types'
 import { useForge } from '../store'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
-const isSeed = (id: string): boolean => id.startsWith('agent-')
+/** 种子判定：服务端权威字段（内置播种 dsh/opencode + 历史保留前缀 agent-）。 */
+const isSeed = (a: Pick<Agent, 'seed'>): boolean => a.seed === true
+/** 新建 id 校验：`agent-` 为种子保留前缀（服务端同规则）。 */
+const hasReservedPrefix = (id: string): boolean => id.startsWith('agent-')
 
 interface AgentFormValues {
   id?: string
@@ -143,7 +146,7 @@ export function AgentsPage() {
       )}
       {agents.map((a, i) => {
         const st = agentStateMeta(a.state)
-        const seed = isSeed(a.id)
+        const seed = isSeed(a)
         return (
           <div
             key={a.id}
@@ -248,7 +251,7 @@ export function AgentsPage() {
                 { pattern: AGENT_ID_RE, message: '字母/数字开头，可含 _ -，最长 64' },
                 () => ({
                   validator: (_r, value: string) =>
-                    !value || !isSeed(value) ? Promise.resolve() : Promise.reject(new Error('agent- 为种子保留前缀')),
+                    !value || !hasReservedPrefix(value) ? Promise.resolve() : Promise.reject(new Error('agent- 为种子保留前缀')),
                 }),
               ]}
             >

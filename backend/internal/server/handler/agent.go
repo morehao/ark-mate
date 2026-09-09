@@ -31,7 +31,7 @@ func (h *AgentHandler) Create(c *gin.Context) {
 	}
 	resp, err := h.svc.CreateAgent(c.Request.Context(), req)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -46,7 +46,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 	}
 	resp, err := h.svc.UpdateAgent(c.Request.Context(), c.Param("id"), patch)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -55,7 +55,7 @@ func (h *AgentHandler) Update(c *gin.Context) {
 // Delete 删除自定义 agent（种子 agent 返回只读错误）。
 func (h *AgentHandler) Delete(c *gin.Context) {
 	if err := h.svc.DeleteAgent(c.Request.Context(), c.Param("id")); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"deleted": c.Param("id")})
@@ -64,7 +64,7 @@ func (h *AgentHandler) Delete(c *gin.Context) {
 // Start 启动 agent runtime 连接（校验可启动；已运行幂等）。
 func (h *AgentHandler) Start(c *gin.Context) {
 	if err := h.svc.StartAgent(c.Request.Context(), c.Param("id")); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "running"})
@@ -73,7 +73,7 @@ func (h *AgentHandler) Start(c *gin.Context) {
 // Stop 停止 agent runtime 进程（有在途 turn 时返回 agent_busy）。
 func (h *AgentHandler) Stop(c *gin.Context) {
 	if err := h.svc.StopAgent(c.Request.Context(), c.Param("id")); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "stopped"})

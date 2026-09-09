@@ -3,6 +3,9 @@ package router_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -141,4 +144,65 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 	if w.Code != 404 || !strings.Contains(w.Body.String(), "not found") {
 		t.Fatalf("未知 /v1 路径应 404 JSON: code=%d body=%s", w.Code, w.Body.String())
 	}
+}
+
+// TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」里出现的每条
+// `/v1/forge` 路由（表格与正文反引号内）都必须真实注册；反之，README 声明的路径不得是历史名
+// （P0 把 /sessions 改名为 /conversations 后曾长期漂移）。新增/改名路由若忘改文档即红。
+func TestReadmeRoutesMatchRouter(t *testing.T) {
+	engine := newEngine()
+	registered := map[string]string{} // "METHOD /path" → 路径
+	for _, r := range engine.Routes() {
+		if !strings.HasPrefix(r.Path, "/v1/forge") {
+			continue
+		}
+		registered[r.Method+" "+r.Path] = r.Path
+	}
+	if len(registered) == 0 {
+		t.Fatal("未取到任何 /v1/forge 路由（装配异常）")
+	}
+
+	readme, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("读 README: %v", err)
+	}
+	// 抓取反引号内的路径片段：`/xxx` 或以 ` ` 分隔的多路径（如 `/skills` · `/mcps`）。
+	re := regexp.MustCompile("`(/[A-Za-z0-9_\\-/:.]*)`")
+	seen := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(string(readme), -1) {
+		p := m[1]
+		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/conversations") &&
+			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
+			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
+			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
+			!strings.HasPrefix(p, "/health") && !strings.HasPrefix(p, "/ws/") {
+			continue
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if _, ok := registered["GET /v1/forge"+p]; ok {
+			continue
+		}
+		// 非 GET 的路由按方法前缀查（POST/PATCH/DELETE）。
+		found := false
+		for method := range registered {
+			if strings.HasSuffix(method, " "+"/v1/forge"+p) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("README 引用了未注册路由 %s（已注册：%d 条）", p, len(registered))
+		}
+	}
+	if len(seen) < 20 {
+		t.Fatalf("README 路由提取过少（%d），守卫失效", len(seen))
+	}
+	// 反向：/sessions 历史名不得再出现在 README 的路由语境里。
+	if strings.Contains(string(readme), "/sessions/") || strings.Contains(string(readme), "`/sessions`") {
+		t.Error("README 仍含历史路由 /sessions（应为 /conversations）")
+	}
+	t.Logf("README 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
 }
