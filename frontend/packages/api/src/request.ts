@@ -6,7 +6,7 @@ import { BizCode } from '@ark/types'
 /**
  * forge 控制面 HTTP 客户端。
  *
- * - baseURL '/v1'，dev 走 vite proxy（127.0.0.1:8099），release 内嵌同源；
+ * - baseURL '/v1'，dev 走 vite proxy（127.0.0.1:10001），release 内嵌同源；
  * - 后端统一信封 {code, requestID, msg, data}：code=0 时返回 data，
  *   否则抛出带 code 的 HttpError（业务错误仍为 HTTP 200，网络层错误 code=-1）。
  */

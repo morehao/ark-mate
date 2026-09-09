@@ -21,19 +21,21 @@
 
 ```bash
 # 最小启动（数据默认落 ~/.forge/）
-GIN_MODE=release ./forge serve --addr 127.0.0.1:8099
-curl -s http://127.0.0.1:8099/v1/forge/health     # {"code":0,"msg":"ok"}
+GIN_MODE=release ./forge serve --addr 127.0.0.1:10001
+curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 ```
 
-浏览器打开 <http://127.0.0.1:8099>（release 产物自带面板）。
+浏览器打开 <http://127.0.0.1:10001>（release 产物自带面板）。
 
 ### 2.1 监听地址与安全边界（重要）
 
-- `--addr` 缺省时读 `FORGE_ADDR`，其**默认值为 `:8099`（所有网卡）**——`forge serve` 裸跑会监听
-  `*:8099`（实测 `lsof -nP -iTCP -sTCP:LISTEN` 显示 `*:8099`）。控制面**无鉴权**，因此：
-  - 单机自用：显式 `--addr 127.0.0.1:8099` 或 `FORGE_ADDR=127.0.0.1:8099`；
-  - 需跨机访问：放在反向代理/内网后面，并用防火墙或安全组限制来源；**不要**直接暴露到公网
-    （M3 可选②「单操作员 token」尚未实现，见路线图）。
+- `--addr` 缺省时读 `FORGE_ADDR`，其**默认值为 `127.0.0.1:10001`（仅回环）**——`forge serve` 裸跑
+  只监听本机（实测 `lsof -nP -iTCP -sTCP:LISTEN` 显示 `127.0.0.1:10001`，非 `*:10001`）。控制面
+  **无鉴权**，因此：
+  - 单机自用：保持默认即可，无需额外参数；
+  - 需跨机访问：显式 `--addr 0.0.0.0:10001`（或 `FORGE_ADDR=0.0.0.0:10001`）并置于反向代理/内网
+    之后，用防火墙或安全组限制来源；**不要**直接暴露到公网（M3 可选②「单操作员 token」尚未实现，
+    见路线图）。容器场景需显式 `FORGE_ADDR=0.0.0.0:10001`（见 §4）。
 - 生产建议 `GIN_MODE=release`（否则每次启动打印 debug 模式告警）。
 - 会话 wire transcript（`~/.forge/transcripts/*.jsonl`）与 SQLite 库含**完整对话原文**，按敏感数据
   对待（文件权限、备份加密）。
@@ -56,7 +58,7 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `FORGE_ADDR` | `:8099` | 监听地址（见 §2.1） |
+| `FORGE_ADDR` | `:10001` | 监听地址（见 §2.1） |
 | `FORGE_STORE` | auto | `sqlite` / `memory` / 空 |
 | `FORGE_DB` | `~/.forge/forge.db` | SQLite 路径 |
 | `FORGE_TRANSCRIPTS` | `~/.forge/transcripts` | wire transcript 目录 |
@@ -79,7 +81,7 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
   权限/提问演示）。内置播种 agent 为 `dsh`（默认）与 `opencode`；`echo` 需自建 agent：
 
 ```bash
-curl -s http://127.0.0.1:8099/v1/forge/agents -H 'content-type: application/json' \
+curl -s http://127.0.0.1:10001/v1/forge/agents -H 'content-type: application/json' \
   -d '{"id":"echo","name":"Echo","runtimes":["echo"]}'
 ```
 
@@ -102,7 +104,7 @@ User=forge
 Group=forge
 WorkingDirectory=/opt/ark-forge
 Environment=GIN_MODE=release
-Environment=FORGE_ADDR=127.0.0.1:8099
+Environment=FORGE_ADDR=127.0.0.1:10001
 Environment=FORGE_DB=/var/lib/ark-forge/forge.db
 Environment=FORGE_TRANSCRIPTS=/var/lib/ark-forge/transcripts
 Environment=FORGE_AGENTS=/var/lib/ark-forge/agents
@@ -139,15 +141,15 @@ systemctl status ark-forge --no-pager
 
 ```bash
 docker build -t ark-forge:local .
-docker run -d --name ark-forge -p 127.0.0.1:8099:8099 \
+docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
   -v ark-forge-data:/data \
-  -e FORGE_ADDR=0.0.0.0:8099 \
+  -e FORGE_ADDR=0.0.0.0:10001 \
   -e FORGE_DB=/data/forge.db \
   -e FORGE_TRANSCRIPTS=/data/transcripts \
   -e FORGE_AGENTS=/data/agents \
   -e FORGE_CAPABILITIES=/data/capabilities \
   ark-forge:local
-curl -s http://127.0.0.1:8099/v1/forge/health
+curl -s http://127.0.0.1:10001/v1/forge/health
 ```
 
 容器内用 `echo` 底座即可自检（无需模型 key）；接 `opencode`/`dsh` 需在镜像或挂载中提供对应
@@ -216,7 +218,8 @@ sudo systemctl restart ark-forge
   `seed_agent_readonly`；`PATCH /agents/dsh {"name":…}` 成功且 `seed:true` 保持；`POST
   /agents/nope/start` = `code=40401`。（此前 agent 端点裸错误会漏成 `code=-1`，已修并加断言。）
 - 重启恢复：kill daemon 后以同一 `FORGE_DB` 重启，`GET /conversations` 仍列出该会话（标题保留）。
-- 裸跑 `forge serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` 实测 `*:8099`（印证 §2.1）。
+- 裸跑 `forge serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` 实测 `127.0.0.1:10001`
+  （仅回环；此前默认 `:8099` 会绑所有网卡，已按安全要求收窄）。
 - 自动守卫：`go test -race ./...` 全绿；`TestReadmeRoutesMatchRouter` 校验 README 引用的 28 条
   路由全部命中注册表（反向注入错误路径会红）。
 - systemd 单元：**未执行**（macOS 无 systemd）——仅 Python INI 解析校验语法与关键指令齐备

@@ -75,19 +75,20 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 ### 3. 启动并打开面板
 
 ```bash
-./forge serve --addr 127.0.0.1:8099
+./forge serve --addr 127.0.0.1:10001
 ```
 
-> **默认监听地址（安全相关）**：`forge serve` 不带 `--addr` 时读 `FORGE_ADDR`，其默认值为
-> `:8099`——即**所有网卡**（`lsof` 可见 `*:8099`）。控制面**当前无鉴权**，请显式指定
-> `--addr 127.0.0.1:8099`（或 `FORGE_ADDR=127.0.0.1:8099`）把监听面收在本机；确需对外暴露时
-> 见 `docs/deployment.md`「安全边界」。生产建议同时 `export GIN_MODE=release`（消除 debug 模式告警）。
+> **默认监听地址（安全相关）**：`forge serve` 不带 `--addr` 时读 `FORGE_ADDR`，默认
+> `127.0.0.1:10001`——**仅回环，不对外**（控制面无鉴权，故默认收窄；`lsof` 可见
+> `127.0.0.1:10001`）。确需跨机访问时显式改 `--addr 0.0.0.0:10001`（或 `FORGE_ADDR`）并自担风险，
+> 务必置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。生产建议同时
+> `export GIN_MODE=release`（消除 debug 模式告警）。
 
-浏览器打开 <http://127.0.0.1:8099>：
+浏览器打开 <http://127.0.0.1:10001>：
 
 1. 左侧「新建会话」选择 agent——内置播种 agent 为 `dsh`（默认）与 `opencode`；要跑**零依赖演示**
    （无需模型 key），先建一个指向 `echo` runtime 的 agent（面板「Agents」页新建，或
-   `curl -s localhost:8099/v1/forge/agents -H 'content-type: application/json' -d '{"id":"echo","name":"Echo","runtimes":["echo"]}'`），
+   `curl -s localhost:10001/v1/forge/agents -H 'content-type: application/json' -d '{"id":"echo","name":"Echo","runtimes":["echo"]}'`），
    再在「新建会话」里选它；
 2. 点击「创建并发送」→ 右侧即时流式渲染 assistant 消息/思考/工具卡；
 3. 回复期间可点「⏹ 取消」；结束后可在 composer 输入下一条（多轮同会话）；
@@ -110,7 +111,7 @@ make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist 
 ./forge demo --runtime echo --allow-all --prompt "跑个演示"
 
 # REST 触发 + WS 收流（可用任意 WS 客户端，如 wscat / 浏览器控制台）
-curl -s localhost:8099/v1/forge/conversations \
+curl -s localhost:10001/v1/forge/conversations \
   -H 'content-type: application/json' \
   -d '{"agent_id":"opencode","prompt":"请只回复两个字：明白"}'
 # → {"code":0,...,"data":{"id":"...","event_seq":7,...}}，随后 WS attach 该会话即可收增量
@@ -146,9 +147,9 @@ curl -s localhost:8099/v1/forge/conversations \
 make dev
 
 # 方式 B：分开两个终端（日志可分别看）
-# 终端 A：后端（默认 :8099）
+# 终端 A：后端（默认 :10001）
 make server            # = cd backend && go run ./cmd/forge serve
-# 终端 B：前端（vite dev :5173，/v1 代理到 127.0.0.1:8099，含 ws）
+# 终端 B：前端（vite dev :5173，/v1 代理到 127.0.0.1:10001，含 ws）
 cd frontend && pnpm dev
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 真会话端到端联调：REST 创建会话（真实 runtime 子进程）→ WS attach 续传 → 收流至终态。
- * 需要：vite dev（默认 :5173，/v1 代理 :8099）、真实 runtime + 模型额度。
+ * 需要：vite dev（默认 :5173，/v1 代理 127.0.0.1:10001）、真实 runtime + 模型额度。
  *
  * 用法：
  *   node scripts/e2e-live-turn.mjs <agent_id> "<prompt>"

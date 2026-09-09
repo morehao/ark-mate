@@ -2,14 +2,14 @@
 /**
  * 前后端联调「通路」冒烟（无需浏览器、无需新依赖，Node ≥ 22）。
  *
- * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 forge serve :8099）。
+ * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 forge serve 127.0.0.1:10001）。
  * 覆盖：
  *   1. REST 信封（health / agents / runtimes / conversations）——@ark/api 的 unwrap 语义前提；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached。
  *
- * 用法（先起 make dev，或后端 :8099 + 前端 vite dev :5173）：
+ * 用法（先起 make dev，或后端 127.0.0.1:10001 + 前端 vite dev :5173）：
  *   E2E_BASE=http://localhost:5173 node scripts/smoke-e2e.mjs
  *   pnpm smoke:e2e
  *

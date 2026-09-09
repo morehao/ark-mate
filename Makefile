@@ -9,7 +9,7 @@
 #   make all   —— 单二进制：前端产物拷入 backend/internal/web/dist 后，
 #                 以 -tags release 编译（启用 //go:embed），输出根目录 ./forge
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
-#   make dev   —— 前后端联调单命令：先起后端 go run（:8099），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
+#   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
 #   make server —— 仅后端开发起服（不起前端，面板经 vite dev proxy 联调）
 
 .PHONY: dev web server build vet test all clean
@@ -42,21 +42,21 @@ web:
 server:
 	cd backend && go run ./cmd/forge serve
 
-# 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:8099），轮询
+# 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
 # /v1/forge/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
 # 避免后端尚未 listen 时 vite ws 代理出现 ECONNREFUSED 的启动竞态。
 # 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
 dev:
 	$(require-node)
-	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:8099)"
+	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:10001)"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
 	cd backend && go run ./cmd/forge serve & \
 	BACKEND_PID=$$!; \
-	echo "==> 等待后端健康检查 http://127.0.0.1:8099/v1/forge/health ..."; \
+	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/forge/health ..."; \
 	HEALTHY=""; \
 	for i in $$(seq 1 300); do \
-	  if curl -sf http://127.0.0.1:8099/v1/forge/health >/dev/null 2>&1; then \
+	  if curl -sf http://127.0.0.1:10001/v1/forge/health >/dev/null 2>&1; then \
 	    HEALTHY=1; break; \
 	  fi; \
 	  if ! kill -0 $$BACKEND_PID 2>/dev/null; then \
@@ -69,7 +69,7 @@ dev:
 	  echo "==> 等待后端健康检查超时（约 90s），请查看上方后端输出"; \
 	  exit 1; \
 	fi; \
-	echo "==> 后端就绪，启动前端 pnpm dev (vite :5173 -> /v1 proxy :8099)"; \
+	echo "==> 后端就绪，启动前端 pnpm dev (vite :5173 -> /v1 proxy 127.0.0.1:10001)"; \
 	cd $(FRONTEND_ROOT) && pnpm dev & \
 	wait
 

@@ -34,12 +34,12 @@ func unset(t *testing.T, key string) {
 	})
 }
 
-// TestLoadDefaults 无环境变量时默认 :8099 + ~/.forge/transcripts。
+// TestLoadDefaults 无环境变量时默认 127.0.0.1:10001（仅回环，无鉴权面不收外网）+ ~/.forge/transcripts。
 func TestLoadDefaults(t *testing.T) {
 	unset(t, "FORGE_ADDR")
 	unset(t, "FORGE_TRANSCRIPTS")
 	c := Load()
-	if c.Addr != ":8099" {
+	if c.Addr != "127.0.0.1:10001" {
 		t.Fatalf("默认 Addr 不符: %q", c.Addr)
 	}
 	if c.TranscriptDir == "" {
@@ -65,7 +65,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 
 // TestDefault 默认值结构。
 func TestDefault(t *testing.T) {
-	if d := Default(); d.Addr != ":8099" || d.TranscriptDir != "" {
+	if d := Default(); d.Addr != "127.0.0.1:10001" || d.TranscriptDir != "" {
 		t.Fatalf("Default 不符: %+v", d)
 	}
 }

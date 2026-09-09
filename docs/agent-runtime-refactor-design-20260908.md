@@ -1217,3 +1217,33 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 **遗留**：设计文档（`design-and-roadmap.md` 等）保留历史路径命名，已在 README 声明「以 README +
 `router.go` 为准」并由守卫测试覆盖；默认监听面为所有网卡且无鉴权（M3 可选②「单操作员 token」
 未实现，文档已显式告警，如需默认收窄到 `127.0.0.1` 属行为变更，待决策）。
+
+#### 19.9 切片 H2：默认监听面收窄（127.0.0.1:10001）（完成）
+
+**动机**：§19.8 记录的真进程实测暴露——`forge serve` 不带 `--addr` 时默认 `:8099` 绑定**所有网卡**
+（`lsof` 显示 `*:8099`），而控制面**无鉴权**（M3 可选②单操作员 token 未实现），任何同网段主机均可
+读写全部会话与权限记忆。用户决策：**收窄 + 端口改为 10001**。
+
+**变更**：`config.Default()` 的 `Addr` 由 `:8099` → `127.0.0.1:10001`（仅回环）。全链一致更新：
+- 后端：`config.go` 默认值、`config_test.go` 两处断言与注释、`cmd/forge` usage 与 `--addr` 帮助、
+  `server.go`/`web/doc.go` 注释；
+- 前端：`apps/panel/vite.config.ts` dev 代理 target、`packages/api/src/request.ts` 注释、
+  `scripts/smoke-e2e.mjs`/`e2e-live-turn.mjs` 说明；
+- 构建与文档：`Makefile`（dev 健康检查 URL 与提示语）、`README.md`（10 处 + 安全段改写为
+  「默认仅回环，对外需显式 `0.0.0.0:10001` 并自担风险」）、`docs/deployment.md`（§2.1 安全边界、
+  systemd/容器示例、验证记录）、`Dockerfile`（容器内显式 `FORGE_ADDR=0.0.0.0:10001` + `EXPOSE 10001`
+  ——容器必须绑 0.0.0.0 才能被端口映射访问，故容器形态保留显式覆盖）。
+
+**证据（真进程）**：
+- 裸跑 `forge serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` = `TCP 127.0.0.1:10001 (LISTEN)`
+  （IPv4 回环，非 `*:10001`）；`curl 127.0.0.1:10001/v1/forge/health` = `{"code":0,"msg":"ok"}`。
+- 负向验证：本机 LAN 地址 `172.16.0.122:10001` 连接失败（`curl` code=000）→ 确认不再对外可达。
+- dev 链路：后端默认地址 + vite dev（:5173 代理到 127.0.0.1:10001）→ `smoke:e2e` 全 PASS（含 WS
+  升级/attach/ping/detach）；`e2e-live-turn`（echo + `permission_policy: allow`）收到终态
+  `turn.ended`。
+- `go vet` + `go test -race ./...` 全绿（含 `TestLoadDefaults` 新默认断言）；前端 `pnpm typecheck`
+  + `pnpm build` 通过。
+
+**遗留**：默认收窄只是网络面收窄，**无鉴权**问题仍在（A6 单操作员 token）；容器/跨机部署需显式
+`FORGE_ADDR=0.0.0.0:10001`，已在文档标注。§19.8 中「默认绑所有网卡」的表述已被本切片取代（保留为
+历史记录）。

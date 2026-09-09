@@ -29,7 +29,8 @@ import (
 const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
-  forge serve [--addr :8099]    启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
+  forge serve [--addr 127.0.0.1:10001]
+                                启动控制面（REST 会话动作 + WS /ws/events 实时通道 + 内嵌面板）
   forge demo [flags]            在指定 runtime 上跑一次真实 fresh 会话并打印事件（冒烟）
   forge migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
@@ -74,7 +75,7 @@ func main() {
 // REST 可触发会话（此前仅 forge demo 可跑真实链路）。
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`:8099`）")
+	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
 	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
 	_ = fs.Parse(args)
 

@@ -24,7 +24,7 @@ type Server struct {
 
 // Config 控制面服务配置。
 type Config struct {
-	Addr string // 监听地址，如 ":8099"
+	Addr string // 监听地址，如 "127.0.0.1:10001"
 }
 
 // New 构造控制面 Server。svc 为领域服务实现（manager 落地前可用 handler.NewMockService）。

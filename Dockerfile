@@ -1,8 +1,8 @@
 # ark-forge 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
 #
 # 构建：docker build -t ark-forge:local .
-# 运行：docker run -d --name ark-forge -p 127.0.0.1:8099:8099 -v ark-forge-data:/data \
-#         -e FORGE_ADDR=0.0.0.0:8099 -e FORGE_DB=/data/forge.db ark-forge:local
+# 运行：docker run -d --name ark-forge -p 127.0.0.1:10001:10001 -v ark-forge-data:/data \
+#         -e FORGE_ADDR=0.0.0.0:10001 -e FORGE_DB=/data/forge.db ark-forge:local
 # 说明：容器内默认仅 memory/echo 可自检；接 opencode/dsh 需自行提供可执行文件与配置。
 
 # —— 阶段 1：构建前端产物 ——
@@ -34,12 +34,12 @@ COPY --from=build /out/forge /usr/local/bin/forge
 USER forge
 WORKDIR /data
 ENV GIN_MODE=release \
-    FORGE_ADDR=0.0.0.0:8099 \
+    FORGE_ADDR=0.0.0.0:10001 \
     FORGE_DB=/data/forge.db \
     FORGE_TRANSCRIPTS=/data/transcripts \
     FORGE_AGENTS=/data/agents \
     FORGE_CAPABILITIES=/data/capabilities
-EXPOSE 8099
+EXPOSE 10001
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${FORGE_ADDR##*:}/v1/forge/health" || exit 1
