@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"fmt"
+
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -73,10 +75,130 @@ func (s *Service) ListTools() ([]handler.ToolResp, error) {
 	out := make([]handler.ToolResp, 0, len(items))
 	for _, t := range items {
 		out = append(out, handler.ToolResp{
-			Name: t.Name, Description: t.Description, Source: t.Source, Schema: t.Schema,
+			Name: t.Name, Description: t.Description, Source: t.Source,
+			McpServer: t.McpServer, Schema: t.Schema,
 		})
 	}
 	return out, nil
+}
+
+// supportedMcpTransports 返回 runtime 声明支持的 MCP 传输（未声明 → 仅 stdio，ACP 全 agent 必须支持）。
+// 未知 runtime → ok=false。
+func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
+	spec, ok := s.reg.Get(runtimeID)
+	if !ok {
+		return nil, false
+	}
+	if len(spec.McpTransports) == 0 {
+		return []string{capability.TransportStdio}, true
+	}
+	return spec.McpTransports, true
+}
+
+// AgentCapabilities 组装某 Agent 的统一能力目录（§8.1；可见性规则见 handler.AgentCapabilitiesResp）。
+// 只读聚合：不触发物化/注入/探测，全部依据注册表 + 候选 runtime 声明推导。未知 agent → agent_not_found。
+func (s *Service) AgentCapabilities(agentID string) (*handler.AgentCapabilitiesResp, error) {
+	a, ok := s.AgentByID(agentID)
+	if !ok {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
+			fmt.Sprintf("未知 agent %q", agentID), nil))
+	}
+	runtimes := append([]string(nil), a.Runtimes...)
+	inAgent := make(map[string]bool, len(runtimes))
+	for _, r := range runtimes {
+		inAgent[r] = true
+	}
+	notes := make([]string, 0, 2)
+	if len(runtimes) == 0 {
+		notes = append(notes, "该 agent 未声明候选 runtime，能力目录为空")
+	}
+	// agent 白名单语义：nil = 未声明（全启用）；非 nil = 命中制（空数组 = 禁用 MCP 注入）。
+	enabled := func(id string) bool {
+		if a.Mcps == nil {
+			return true
+		}
+		for _, x := range *a.Mcps {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	if a.Mcps != nil && len(*a.Mcps) == 0 {
+		notes = append(notes, "该 agent 声明 mcps: []（禁用 MCP 注入）")
+	}
+
+	// 候选 runtime → 支持的 MCP 传输（未知 runtime 记降级说明，不臆造能力）。
+	transports := make(map[string][]string, len(runtimes))
+	for _, r := range runtimes {
+		ts, known := s.supportedMcpTransports(r)
+		if !known {
+			notes = append(notes, fmt.Sprintf("候选 runtime %q 未注册（按声明过滤，不推导其能力）", r))
+			continue
+		}
+		transports[r] = ts
+	}
+
+	// MCP：注册表全量 + 每条的 enabled/runtimes（候选里支持该传输的子集，保持候选声明顺序）。
+	servers := s.caps.ListMcpServers()
+	mcpOut := make([]handler.AgentMcpServerResp, 0, len(servers))
+	carried := make(map[string]bool, len(servers)) // server id → 至少一个候选可承载
+	for _, m := range servers {
+		carriers := make([]string, 0, len(runtimes))
+		for _, r := range runtimes {
+			for _, t := range transports[r] {
+				if t == m.Transport {
+					carriers = append(carriers, r)
+					break
+				}
+			}
+		}
+		if len(carriers) > 0 {
+			carried[m.ID] = true
+		}
+		mcpOut = append(mcpOut, handler.AgentMcpServerResp{
+			ID: m.ID, Name: m.Name, Transport: m.Transport,
+			Enabled: enabled(m.ID), Runtimes: carriers,
+		})
+	}
+
+	// Skill：至少一个候选 runtime 有物化源；sources 裁剪到候选 runtime。
+	skills := s.caps.ListSkills()
+	skillOut := make([]handler.AgentSkillResp, 0, len(skills))
+	for _, sk := range skills {
+		src := make([]handler.SkillSourceResp, 0, len(sk.Sources))
+		for _, so := range sk.Sources {
+			if inAgent[so.Runtime] {
+				src = append(src, handler.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
+			}
+		}
+		if len(src) == 0 {
+			continue
+		}
+		skillOut = append(skillOut, handler.AgentSkillResp{
+			ID: sk.ID, Name: sk.Name, Description: sk.Description, Sources: src,
+		})
+	}
+
+	// Tool：builtin/observed 恒可见；mcp 条目须归属 server 对该 agent 启用且至少一个候选可承载。
+	tools := s.caps.ListTools()
+	toolOut := make([]handler.ToolResp, 0, len(tools))
+	for _, t := range tools {
+		if t.Source == capability.ToolSourceMCP && t.McpServer != "" {
+			if !enabled(t.McpServer) || !carried[t.McpServer] {
+				continue
+			}
+		}
+		toolOut = append(toolOut, handler.ToolResp{
+			Name: t.Name, Description: t.Description, Source: t.Source,
+			McpServer: t.McpServer, Schema: t.Schema,
+		})
+	}
+
+	return &handler.AgentCapabilitiesResp{
+		AgentID: a.ID, Name: a.Name, Runtimes: runtimes,
+		Skills: skillOut, McpServers: mcpOut, Tools: toolOut, Notes: notes,
+	}, nil
 }
 
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
@@ -84,13 +206,9 @@ func (s *Service) ListTools() ([]handler.ToolResp, error) {
 // 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
 // 未知 runtime → nil（维持现状不下发）。
 func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
-	spec, ok := s.reg.Get(runtimeID)
+	supported, ok := s.supportedMcpTransports(runtimeID)
 	if !ok {
 		return nil
-	}
-	supported := spec.McpTransports
-	if len(supported) == 0 {
-		supported = []string{capability.TransportStdio} // ACP 全 agent 必须支持 stdio
 	}
 	want := make(map[string]bool, len(supported))
 	for _, t := range supported {

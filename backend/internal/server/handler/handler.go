@@ -66,6 +66,8 @@ type Service interface {
 	ListMcpServers() ([]McpServerResp, error)
 	// ListTools 返回 Tool 目录（P1；静态/平台/观察条目）。
 	ListTools() ([]ToolResp, error)
+	// AgentCapabilities 返回某 Agent 的统一能力目录（P2 §8.1：按候选 runtime 聚合 skill/MCP/tool）。
+	AgentCapabilities(agentID string) (*AgentCapabilitiesResp, error)
 }
 
 // AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
@@ -154,8 +156,46 @@ type McpServerResp struct {
 type ToolResp struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	Source      string          `json:"source"`           // builtin | mcp | observed
-	Schema      json.RawMessage `json:"schema,omitempty"` // 参数 JSON Schema（原样保真）
+	Source      string          `json:"source"`                // builtin | mcp | observed
+	McpServer   string          `json:"mcp_server,omitempty"`  // source=mcp 时的归属 server id（按 agent 可见性过滤）
+	Schema      json.RawMessage `json:"schema,omitempty"`      // 参数 JSON Schema（原样保真）
+}
+
+// ——— P2 §8.1 统一能力目录（/agents/:id/capabilities） ———
+
+// AgentCapabilitiesResp 某 Agent 视角的统一能力目录：按该 Agent 的候选 runtime 聚合
+// 「可物化 / 可注入 / 可目录化」的能力面（管理面只读视图；runtimes 仅作可用性依据，
+// 不构成对外路由承诺）。可见性规则（§5.2/§5.4）：
+//   - skills：至少一个候选 runtime 有物化源（sources 已按候选 runtime 裁剪）；
+//   - mcp_servers：注册表全量 + 每条的 enabled（agent 白名单）与 runtimes（候选里支持该传输的）；
+//   - tools：builtin/observed 恒可见；mcp 条目须其归属 server 对该 agent 启用且至少一个候选可承载。
+type AgentCapabilitiesResp struct {
+	AgentID    string               `json:"agent_id"`
+	Name       string               `json:"name,omitempty"`
+	Runtimes   []string             `json:"runtimes"`
+	Skills     []AgentSkillResp     `json:"skills"`
+	McpServers []AgentMcpServerResp `json:"mcp_servers"`
+	Tools      []ToolResp           `json:"tools"`
+	Notes      []string             `json:"notes,omitempty"` // 裁剪/降级原因（空 = 无特殊情况）
+}
+
+// AgentSkillResp 某 Agent 可见的 skill（sources 只保留该 Agent 候选 runtime 的目标）。
+type AgentSkillResp struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Sources     []SkillSourceResp `json:"sources,omitempty"`
+}
+
+// AgentMcpServerResp 某 Agent 视角的 MCP server。
+// Enabled = agent 白名单语义（nil 未声明 → true；显式白名单 → 命中；空数组 → false）。
+// Runtimes = 该 Agent 候选中支持此传输的 runtime 子集（空 = 当前无可承载者，不会被注入）。
+type AgentMcpServerResp struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Transport string   `json:"transport"`
+	Enabled   bool     `json:"enabled"`
+	Runtimes  []string `json:"runtimes"`
 }
 
 // ConversationResp 会话的对外表示（P0 起不含 runtime）。

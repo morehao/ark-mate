@@ -66,6 +66,7 @@ type McpServer struct {
 type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	Source      string          `json:"source"`           // builtin | mcp | observed
-	Schema      json.RawMessage `json:"schema,omitempty"` // 参数 JSON Schema（原样保真）
+	Source      string          `json:"source"`                // builtin | mcp | observed
+	McpServer   string          `json:"mcp_server,omitempty"`  // source=mcp 时的归属 server id（agent 可见性过滤依据）
+	Schema      json.RawMessage `json:"schema,omitempty"`      // 参数 JSON Schema（原样保真）
 }

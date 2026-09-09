@@ -68,6 +68,10 @@ type stubSvc struct {
 	mcps   []handler.McpServerResp
 	tools  []handler.ToolResp
 	capErr error // 能力列表桩错误注入
+
+	agentCapResp *handler.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
+	agentCapErr  error
+	agentCapID   string
 }
 
 func (s *stubSvc) ListAgents() ([]handler.AgentResp, error) {
@@ -144,6 +148,16 @@ func (s *stubSvc) ListTools() ([]handler.ToolResp, error) {
 		return nil, s.capErr
 	}
 	return s.tools, nil
+}
+func (s *stubSvc) AgentCapabilities(id string) (*handler.AgentCapabilitiesResp, error) {
+	s.agentCapID = id
+	if s.agentCapErr != nil {
+		return nil, s.agentCapErr
+	}
+	if s.agentCapResp != nil {
+		return s.agentCapResp, nil
+	}
+	return &handler.AgentCapabilitiesResp{AgentID: id}, nil
 }
 func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	if s.listRuntimesErr != nil {
@@ -289,6 +303,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.PATCH("/providers/:id", h.Provider.Update)
 	g.GET("/skills", h.Capability.ListSkills)
 	g.GET("/mcps", h.Capability.ListMcpServers)
+	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	g.GET("/tools", h.Capability.ListTools)
 	return r
 }
@@ -676,5 +691,48 @@ func TestCapabilityRoutes(t *testing.T) {
 	var tools []handler.ToolResp
 	if err := json.Unmarshal(env.Data, &tools); err != nil || len(tools) != 1 || tools[0].Name != "web_search" {
 		t.Fatalf("tools data 不符: %s", env.Data)
+	}
+}
+
+// TestAgentCapabilitiesRoute P2 §8.1 统一能力目录路由：GET /agents/:id/capabilities 返回
+// 聚合视图（信封 data 对象）；未知 agent 透传 40401。
+func TestAgentCapabilitiesRoute(t *testing.T) {
+	svc := &stubSvc{
+		agentCapResp: &handler.AgentCapabilitiesResp{
+			AgentID:  "a1",
+			Runtimes: []string{"opencode"},
+			Skills:   []handler.AgentSkillResp{{ID: "plan", Name: "plan"}},
+			McpServers: []handler.AgentMcpServerResp{
+				{ID: "fs", Transport: "stdio", Enabled: true, Runtimes: []string{"opencode"}},
+			},
+			Tools: []handler.ToolResp{{Name: "web_search", Source: "builtin"}},
+			Notes: []string{"候选 runtime \"ghost\" 未注册（按声明过滤，不推导其能力）"},
+		},
+	}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "GET", "/v1/forge/agents/a1/capabilities", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET agent capabilities 失败 code=%d env=%d", code, env.Code)
+	}
+	var got handler.AgentCapabilitiesResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 反序列化失败: %v (%s)", err, env.Data)
+	}
+	if got.AgentID != "a1" || svc.agentCapID != "a1" {
+		t.Fatalf("agent id 不符: %+v stub=%q", got, svc.agentCapID)
+	}
+	if len(got.Skills) != 1 || len(got.McpServers) != 1 || !got.McpServers[0].Enabled || len(got.Tools) != 1 {
+		t.Fatalf("聚合视图不符: %+v", got)
+	}
+	if len(got.Notes) != 1 {
+		t.Fatalf("notes 不符: %+v", got.Notes)
+	}
+
+	// 未知 agent：Service 返回 40401 → 信封透传（HTTP 200 + code≠0）。
+	svc.agentCapErr = gerror.Error{Code: 40401, Msg: `未知 agent "nope"`}
+	env, code = do(t, r, "GET", "/v1/forge/agents/nope/capabilities", "")
+	if code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 agent 应 40401，got http=%d code=%d", code, env.Code)
 	}
 }

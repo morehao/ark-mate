@@ -40,3 +40,14 @@ func (h *CapabilityHandler) ListTools(c *gin.Context) {
 	}
 	gincontext.Success(c, items)
 }
+
+// AgentCapabilities 返回某 Agent 的统一能力目录（§8.1）：按候选 runtime 聚合 skill/MCP/tool
+// 的可见面。未知 agent → 40401（gincontext.Fail 透传 gerror 码）。
+func (h *CapabilityHandler) AgentCapabilities(c *gin.Context) {
+	resp, err := h.svc.AgentCapabilities(c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, err)
+		return
+	}
+	gincontext.Success(c, resp)
+}

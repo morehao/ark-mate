@@ -541,8 +541,9 @@ runtime 作为 hint），不保留 runtime 身份语义。
   新增单测覆盖目录加载、排序、非法条目、空表形态与 REST 列表。
 - 前端能力卡（§8.3）：`/capabilities` 管理页（Skills / MCP Servers / Tools 三组只读目录，
   TopBar「能力」入口 + types/api 接线），读取本批三个端点（2026-09-08 同批落地）。
-- **P1 剩余（未含，留后续）**：`/agents/:id/capabilities` 统一目录（§8.1）；
-  P2 消费侧接线（`mcpServers` → session/new 注入、skill 物化、MCP `tools/list` live 探测写 Tool 目录）。
+- **P1 剩余**：`/agents/:id/capabilities` 统一目录（§8.1）→ 已落地，见 §19.1；P2 消费侧接线
+  （`mcpServers` → session/new 注入已落地、skill 物化已落地、MCP `tools/list` live 探测写 Tool 目录
+  → 见 §19.2）。
 
 ## 15. P2 落地记录（切片 1：MCP 注入通道，2026-09-08）
 
@@ -885,3 +886,47 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
 每切片：go build + go vet + go test -race ./... 全绿、独立提交推送、echo 全链路回归冒烟；
 行为不回归、不臆造（开放项文档化）。阶段 DoD：kill -9 后恢复会话续聊（sqlite 模式，真进程
 opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
+
+### 19. P2 剩余能力面落地记录（2026-09-09）
+
+#### 19.1 切片 G1：`/agents/:id/capabilities` 统一能力目录（完成）
+
+**目标**：§8.1「新增：返回 skill/MCP/tool 统一目录」——按 Agent 视角聚合，而不是把三张表原样拼一起。
+
+**语义（可见性规则，代码即契约：`handler.AgentCapabilitiesResp` 注释）**：
+
+- `skills`：至少一个候选 runtime 有物化源才可见；`sources` 裁剪到候选 runtime（非候选底座的目标不下发）。
+- `mcp_servers`：注册表**全量** + 每条的 `enabled`（agent 白名单语义：`mcps` 缺省=nil→全启用、
+  显式列表=命中制、`[]`=禁用）与 `runtimes`（候选里声明支持该传输的子集，保持候选声明顺序；
+  空 = 无可承载者，不会被注入）。
+- `tools`：`builtin`/`observed` 恒可见；`source=mcp` 条目须其归属 server 对该 agent 启用且至少一个
+  候选可承载（无归属的 mcp 条目按兼容处理恒可见）。
+- `notes`：降级说明（未注册的候选 runtime、`mcps: []` 禁用、无候选 runtime），**不臆造能力**。
+- 未知 agent → `40401`（`gincontext.Fail` 透传 gerror 码）。
+
+**为什么这里出现 `runtimes`**：§8.1 的「Agent DTO 不含 runtime」约束的是**用户选底座**（路由是隐藏
+实现细节）；能力可用性必须按 runtime 声明推导（MCP 传输支持、skill 物化目标），故本管理面端点
+显式给出归属，并在 DTO 注释里声明「不构成对外路由承诺」。
+
+**同切片修复（真缺陷，非顺手改）**：`config.Load` 中 `FORGE_SKILLS_MATERIALIZE_DIR` 的 `else` 分支
+误把 `CapabilityDir` 覆盖为 `~/.forge/capabilities`，导致 **`FORGE_CAPABILITIES` 被吞**（能力目录
+永远落到 home 默认）——真进程实测端点返回空目录时暴露。修复为两项独立解析；新增
+`TestCapabilityDirIndependentOfSkillMaterialize` 回归。
+
+**证据**：
+
+- 单测：`TestAgentCapabilities`（skill 裁剪/无源不可见、MCP 全量 + enabled/runtimes、mcp 工具按
+  归属过滤、`mcps:[]` 禁用、未知 agent 40401）、`TestAgentCapabilitiesRoute`（REST 信封 + 40401 透传）。
+- 真进程（`:18121`，memory + caps 目录 fixtures）：`alias-echo`（runtimes=[echo]，mcps=[fs_demo]）
+  → skills 只留 echo 源、`sse_demo` enabled=false 且 `runtimes:[]`（echo 不支持 sse）、tools 只含
+  `fs_read`(mcp 归属 fs_demo)+`web_search`(builtin)；`mix`（opencode+deepseekharness，白名单缺省）
+  → 两个 MCP 均 enabled、`sse_demo` 仅 opencode 可承载；未知 agent → `code=40401`。
+  平级端点 `/skills` `/mcps` `/tools` 回归正常（1/2/2 条）。
+- `go build` + `go vet` + `go test -race ./...` 全绿。
+
+#### 19.2 切片 G2：MCP `tools/list` live 探测（排期）
+
+边界与已知约束：MCP 客户端自研（不引第三方 SDK，仓库依赖克制）；stdio 与 http/streamable_http
+先落地，**sse 明确降级**（legacy HTTP+SSE 双向通道，首版不实现，报 `mcp_transport_unsupported`，
+不臆造）；探测结果写 Tool 目录并带 `mcp_server` 归属；触发面 = REST 显式探测（serve 启动是否
+默认探测待定，默认关闭以保持行为不回归）。

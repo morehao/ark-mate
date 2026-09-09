@@ -102,13 +102,14 @@ func Load() Config {
 	}
 	if v := os.Getenv("FORGE_CAPABILITIES"); v != "" {
 		c.CapabilityDir = v
-	}
-	if v := os.Getenv("FORGE_SKILLS_MATERIALIZE_DIR"); v != "" {
-		c.SkillMaterializeDir = v
 	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
 		c.CapabilityDir = filepath.Join(home, ".forge", "capabilities")
 	} else {
 		c.CapabilityDir = ".forge/capabilities"
+	}
+	// FORGE_SKILLS_MATERIALIZE_DIR：skill 物化根目录（空 = 关闭物化，不写用户目录）。
+	if v := os.Getenv("FORGE_SKILLS_MATERIALIZE_DIR"); v != "" {
+		c.SkillMaterializeDir = v
 	}
 	// FORGE_IDLE_TIMEOUT / FORGE_REAP_INTERVAL：Go duration 文本（如 30s/2m/1h）；
 	// FORGE_IDLE_TIMEOUT 非法或 0 = 关闭回收；间隔非法回落默认 5m。
