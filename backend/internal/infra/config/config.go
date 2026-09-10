@@ -72,8 +72,10 @@ type Config struct {
 	WorkspaceDir string
 	// WorkspaceRoots 允许作为工作空间的根白名单（FORGE_WORKSPACE_ROOTS，逗号分隔绝对路径；
 	// 默认空 = 不限制，保持本机单操作员零配置）。非空时**显式 cwd 与目录浏览都收在根内**：
-	// 浏览不能越过根向上，代建根必须落在某个根之内（不自洽则启动失败，见 SetWorkspacePolicy）。
-	// 用途：容器化/对外提供服务时，目录浏览不再等价于"暴露整个 rootfs 结构"。
+	// 浏览不能越过根向上。用途：容器化/对外提供服务时，目录浏览不再等价于"暴露整个 rootfs 结构"。
+	//
+	// 这里只存**显式配置**的值：平台代建根（WorkspaceDir）由 manager 在运行期隐式并进生效名单，
+	// 因此"代建根不在白名单里"不再是配置错误（见 manager.SetWorkspacePolicy）。
 	WorkspaceRoots []string
 	// SkillMaterializeDir skill 物化目标根目录（§5.4/§16.5；FORGE_SKILLS_MATERIALIZE_DIR 覆盖，
 	// 默认空 = 关闭）。非空时 serve 启动装载能力后把 opencode SKILL.md 源 skill 物化到该目录
@@ -196,6 +198,16 @@ var knownKeys = map[string]string{
 	"native_permission":       "FORGE_NATIVE_PERMISSION",
 }
 
+// knownListKeys 允许在 config.json 里写成 JSON 数组的多值键。
+//
+// 为什么需要它：单值键写成数组是配置错误（不静默取第一项），而多值键的数组形式不是"语法糖"——
+// 逗号是这些键的分隔符，路径里真含逗号时逗号分隔写法**根本无法表达**，面板写回也依赖数组形式
+// 才能与读回自洽（见 SettingsStore.SaveWorkspaceRoots）。
+var knownListKeys = map[string]bool{
+	"workspace_roots":         true,
+	"skills_materialize_dirs": true,
+}
+
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
 func knownKeyList() string {
 	keys := make([]string, 0, len(knownKeys))
@@ -225,22 +237,40 @@ func normalizeKey(k string) string {
 }
 
 // resolver 收集各来源的键值（后写覆盖），并记录来源。
+// lists 单独存 JSON 数组形式的多值键（见 knownListKeys）：字符串形式的逗号分隔写法与它
+// 语义相同但表达力更弱，两者在 materialize 里汇到同一条解析路径。
 type resolver struct {
 	values map[string]string
+	lists  map[string][]string
 	src    map[string]Source
 }
 
 func newResolver() *resolver {
-	return &resolver{values: map[string]string{}, src: map[string]Source{}}
+	return &resolver{values: map[string]string{}, lists: map[string][]string{}, src: map[string]Source{}}
 }
 
+// set / setList 都做**形式互斥**：同一键后写的来源覆盖先写的，且两种形式（字符串 / 数组）
+// 不会同时留下——否则"config.json 写数组、进程 env 写逗号串"会变成哪个先被 materialize 读到
+// 就用哪个，优先级形同虚设。
 func (r *resolver) set(key, val string, src Source) {
+	delete(r.lists, key)
 	r.values[key] = val
+	r.src[key] = src
+}
+
+func (r *resolver) setList(key string, val []string, src Source) {
+	delete(r.values, key)
+	r.lists[key] = val
 	r.src[key] = src
 }
 
 func (r *resolver) get(key string) (string, bool) {
 	v, ok := r.values[key]
+	return v, ok
+}
+
+func (r *resolver) list(key string) ([]string, bool) {
+	v, ok := r.lists[key]
 	return v, ok
 }
 
@@ -446,6 +476,13 @@ func materialize(r *resolver) (Config, error) {
 		}
 		c.SkillMaterializeDirs = dirs
 	}
+	if list, ok := r.list("skills_materialize_dirs"); ok {
+		dirs, err := normalizeSkillMaterializeDirs(list)
+		if err != nil {
+			return bad("skills_materialize_dirs", err.Error())
+		}
+		c.SkillMaterializeDirs = dirs
+	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
 	}
@@ -507,10 +544,15 @@ func materialize(r *resolver) (Config, error) {
 	} else {
 		c.WorkspaceDir = filepath.Join(home, "workspaces")
 	}
-	// workspace_roots：白名单（逗号分隔绝对路径，空 = 不限制）。
-	// 只校验**形式**（非空 + 绝对）；「代建根必须落在白名单内」这条**跨键**约束在装配时判定
-	// （manager.SetWorkspacePolicy），因为比较必须解析符号链接真身，而那是 manager 的职责。
-	if v, ok := r.get("workspace_roots"); ok {
+	// workspace_roots：白名单（逗号分隔绝对路径或 JSON 数组，空 = 不限制）。
+	// 只校验**形式**（非空 + 绝对）；代建根的隐式并入是**运行期**行为（manager），配置层不参与。
+	if list, ok := r.list("workspace_roots"); ok {
+		roots, err := normalizeWorkspaceRoots(list)
+		if err != nil {
+			return bad("workspace_roots", err.Error())
+		}
+		c.WorkspaceRoots = roots
+	} else if v, ok := r.get("workspace_roots"); ok {
 		roots, err := parseWorkspaceRoots(v)
 		if err != nil {
 			return bad("workspace_roots", err.Error())
@@ -555,6 +597,18 @@ func loadConfigJSON(path string, r *resolver) error {
 		if _, ok := knownKeys[key]; !ok {
 			return fmt.Errorf("%s: 未知配置键 %q（支持: %s）", path, k, knownKeyList())
 		}
+		// 数组形式只对多值键开放：单值键写成数组是配置错误，静默取第一项会让运维以为生效了。
+		if arr, isArr := obj[k].([]any); isArr {
+			if !knownListKeys[key] {
+				return fmt.Errorf("%s: %s: 该键不支持数组值（只支持字符串/数字/布尔/null 标量）", path, k)
+			}
+			items, err := jsonStringList(arr)
+			if err != nil {
+				return fmt.Errorf("%s: %s: %w", path, k, err)
+			}
+			r.setList(key, items, SourceFile)
+			continue
+		}
 		val, err := jsonScalar(obj[k])
 		if err != nil {
 			return fmt.Errorf("%s: %s: %w", path, k, err)
@@ -578,6 +632,20 @@ func jsonScalar(v any) (string, error) {
 	default:
 		return "", fmt.Errorf("只支持字符串/数字/布尔/null 标量，得到 %T", v)
 	}
+}
+
+// jsonStringList 把 JSON 数组转为字符串列表（只接受字符串元素：把数字/布尔字符串化当路径用
+// 没有意义，与其静默产出怪值不如直接报错）。
+func jsonStringList(arr []any) ([]string, error) {
+	out := make([]string, 0, len(arr))
+	for i, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("第 %d 项需为字符串，得到 %T", i, item)
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // loadEnvFile 读取 <dir>/env（dotenv 风格：# 注释、空行、KEY=VALUE、可选成对引号；缺失 = 跳过）。
@@ -614,13 +682,18 @@ func loadEnvFile(path string, r *resolver) error {
 	return nil
 }
 
-// parseWorkspaceRoots 解析允许的工作区根白名单（逗号分隔绝对路径）。
+// parseWorkspaceRoots 解析允许的工作区根白名单（逗号分隔绝对路径；config.json 可写 JSON 数组）。
+func parseWorkspaceRoots(v string) ([]string, error) {
+	return normalizeWorkspaceRoots(strings.Split(v, ","))
+}
+
+// normalizeWorkspaceRoots 规范化白名单条目（两种书写形式汇到这一条路径）。
 // 规则：跳过空项；每项必须是绝对路径（相对路径无法作为边界，且后续比较基于真身）；
 // 去重（同一目录写两次只会让错误信息变长）。
-func parseWorkspaceRoots(v string) ([]string, error) {
-	out := make([]string, 0, 4)
+func normalizeWorkspaceRoots(items []string) ([]string, error) {
+	out := make([]string, 0, len(items))
 	seen := map[string]bool{}
-	for _, item := range strings.Split(v, ",") {
+	for _, item := range items {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
@@ -640,10 +713,15 @@ func parseWorkspaceRoots(v string) ([]string, error) {
 }
 
 // parseSkillMaterializeDirs 解析 `runtime=dir[,runtime=dir]`（C4 多 root 投影）。
-// 规则：逗号分隔；每项必须含 `=` 且两侧非空；runtime 不可重复（后者覆盖会静默改语义，故报错）。
 func parseSkillMaterializeDirs(v string) (map[string]string, error) {
+	return normalizeSkillMaterializeDirs(strings.Split(v, ","))
+}
+
+// normalizeSkillMaterializeDirs 规范化物化目标条目（C4 多 root 投影；config.json 可写数组）。
+// 规则：每项必须含 `=` 且两侧非空；runtime 不可重复（后者覆盖会静默改语义，故报错）。
+func normalizeSkillMaterializeDirs(items []string) (map[string]string, error) {
 	out := map[string]string{}
-	for _, item := range strings.Split(v, ",") {
+	for _, item := range items {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue

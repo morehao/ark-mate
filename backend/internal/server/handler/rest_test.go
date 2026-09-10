@@ -41,6 +41,11 @@ type stubSvc struct {
 	recentResp    []handler.WorkspaceRecentResp
 	recentErr     error
 
+	settingsResp   *handler.WorkspaceSettingsResp
+	settingsErr    error
+	settingsCalled bool     // UpdateWorkspaceSettings 是否被调用（"传了空名单"与"没调用"必须能区分）
+	settingsRoots  []string // 最近一次 UpdateWorkspaceSettings 收到的 roots
+
 	diagID   string
 	diagResp *handler.AgentDiagnosticsResp
 	diagErr  error
@@ -367,6 +372,22 @@ func (s *stubSvc) ListWorkspaceFiles(path string, includeHidden bool) (*handler.
 	return s.filesResp, nil
 }
 
+func (s *stubSvc) WorkspaceSettings() (*handler.WorkspaceSettingsResp, error) {
+	if s.settingsErr != nil {
+		return nil, s.settingsErr
+	}
+	return s.settingsResp, nil
+}
+
+func (s *stubSvc) UpdateWorkspaceSettings(roots []string) (*handler.WorkspaceSettingsResp, error) {
+	s.settingsCalled = true
+	s.settingsRoots = roots
+	if s.settingsErr != nil {
+		return nil, s.settingsErr
+	}
+	return s.settingsResp, nil
+}
+
 func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]handler.ConversationSearchHit, error) {
 	return nil, nil
 }
@@ -556,7 +577,63 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
 	g.GET("/search/messages", h.Search.Messages)
 	g.POST("/conversations/export", h.Export.Conversations)
+	g.GET("/settings/workspace", h.Workspace.Settings)
+	g.PUT("/settings/workspace", h.Workspace.UpdateSettings)
 	return r
+}
+
+// TestWorkspaceSettingsRoutes 设置面的 handler 职责：GET 透出快照、PUT 把 roots 原样交给
+// 领域层（语义判断全在 manager，handler 不做第二套）、body 非法回 40000、领域错误经 RestErr 映射。
+func TestWorkspaceSettingsRoutes(t *testing.T) {
+	snap := &handler.WorkspaceSettingsResp{
+		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.forge/workspaces"},
+		Restricted: true, ProvisionDir: "/home/u/.forge/workspaces", ProvisionIncluded: true,
+		Source: "config.json", Writable: true,
+	}
+	svc := &stubSvc{settingsResp: snap}
+	r := newRestEngine(svc)
+
+	env, _ := do(t, r, "GET", "/v1/forge/settings/workspace", "")
+	if env.Code != 0 {
+		t.Fatalf("GET 应成功: %+v", env)
+	}
+	var got handler.WorkspaceSettingsResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if len(got.Roots) != 2 || !got.ProvisionIncluded || !got.Writable {
+		t.Fatalf("快照应原样透出: %+v", got)
+	}
+
+	// PUT：roots 原样下发（含空数组 = 恢复不限制），响应回更新后的快照。
+	env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":["/srv/docs"]}`)
+	if env.Code != 0 {
+		t.Fatalf("PUT 应成功: %+v", env)
+	}
+	if !svc.settingsCalled || len(svc.settingsRoots) != 1 || svc.settingsRoots[0] != "/srv/docs" {
+		t.Fatalf("roots 应原样下发: %+v", svc.settingsRoots)
+	}
+	svc.settingsCalled = false
+	if _, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":[]}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
+		t.Fatalf("空数组应下发空名单（= 不限制）: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
+	}
+	// 字段缺省与空数组同义：都是"取消限制"（白名单只有"画边界/不画边界"两种状态）。
+	svc.settingsCalled = false
+	if _, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
+		t.Fatalf("缺省 roots 应下发空名单: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
+	}
+
+	// body 非法 → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
+	if env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{`); env.Code != 40000 {
+		t.Fatalf("非法 body 应 40000: %+v", env)
+	}
+
+	// 领域拒绝（锁定 / 只读 / 非法目录）经 RestErr 映射为业务码，且不吞掉语义码。
+	svc.settingsErr = gerror.Error{Code: 40001, Msg: "[settings_locked] 被 FORGE_WORKSPACE_ROOTS 锁定"}
+	env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":["/srv/docs"]}`)
+	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
+		t.Fatalf("领域错误应经 RestErr 透出: %+v", env)
+	}
 }
 
 func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int) {

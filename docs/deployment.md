@@ -51,7 +51,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录 |
 | skill 物化目标 | 空（关闭） | `FORGE_SKILLS_MATERIALIZE_DIR` | 非空才写（可能指向真实 opencode 用户目录，故默认关闭） |
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
-| 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径；非空时显式 `cwd` 与目录浏览都被收在根内 |
+| 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
 持久层开关：`FORGE_STORE=sqlite|memory|auto`（空 = auto：库文件已存在且非空 → sqlite，否则
 memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
@@ -75,12 +75,15 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
   1. 设 `FORGE_TOKEN`（平台默认只绑回环，对外必须先鉴权）；
   2. 配 `FORGE_WORKSPACE_ROOTS`（如 `/workspaces`、`/srv/repos`），把可浏览与可创建的范围收在
      挂载进来的工作区根上。白名单同时约束**显式 `cwd`** 与**目录浏览**（两者共用一条校验），
-     符号链接按真身判定，根内指向根外的链接不会被列出。
+     符号链接按真身判定，根内指向根外的链接不会被列出。**无需**把 `FORGE_WORKSPACE_DIR` 写进
+     白名单：平台代建根由平台自己隐式并入生效名单（`GET /workspaces/browse` 回的 `roots` 里能看到它）。
 - **资料库 = 工作区根的一级子目录**（`GET /workspaces/libraries`）：把 `FORGE_WORKSPACE_ROOTS`
   指向资料挂载点（如 `/srv/docs`），其下的每个一级子目录就自动成为面板里的一个"资料库"——
   **零新状态**（不存登记表，目录名即名字），用户选名字而不必面对绝对路径。两条附带规则：
-  平台自己的代建根（`workspace_dir`）会被排除（它按策略必然落在某个根内，否则会以"tmp"之名混进
-  资料库列表）；某个根暂时不可读（挂载掉了）只少显示一个，不让整页报错。
+  平台自己的代建根（`workspace_dir`）**及其下的一切**会被排除——代建根恒在生效名单内，
+  它下面又全是按会话 id 命名的沙箱目录（`ses_xxx`），两者都是平台实现细节而非"策展内容"
+  （所以只把代建根配成白名单时，资料库列表是空的：那一层本来就不是资料）；
+  某个根暂时不可读（挂载掉了）只少显示一个，不让整页报错。
   `GET /workspaces/files?path=` 提供"看资料"面（列文件 + 大小 + 修改时间），与只列目录的
   `browse`（选工作空间）分工：**files 的条目不可作为 `cwd`**（文件不是合法工作空间）。
 - **容器化部署的两个硬要求**：① `FORGE_WORKSPACE_DIR` 必须落在**可写挂载**上（默认
@@ -90,6 +93,27 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
   对 agent 正确的那个路径）。
 - **已知限制**：平台注册表 MCP 随 `session/new` 下发，其**相对路径参数仍以 agent 进程的 cwd
   解析**（serve 进程目录），而非会话工作空间。需要工作空间相对路径的 MCP 请写绝对路径。
+
+### 2.2.2 白名单的设置面（面板可改）与安全权衡
+
+`GET · PUT /settings/workspace` 让面板直接查看/改写工作区根白名单，不必再登机器改环境变量。
+
+- **写在哪**：`<配置目录>/config.json` 的 `workspace_roots` 键（默认 `~/.forge/config/config.json`）。
+  写回是 read-modify-write + 原子替换：文件里其它键原样保留，写的是 JSON 数组（含逗号的路径也能
+  原样往返），空名单 = 删掉该键（回到"不限制"）。**没有第二份 settings 文件**——白名单只应有一个事实源。
+- **写不进去的时候**（这正是以前最容易踩的坑：面板显示保存成功、重启后被覆盖）：
+  `config.json` 之上还有 env 文件、进程 `FORGE_*`、CLI flag 三层，任一层设过该键，写配置文件都无效。
+  所以接口**拒绝写**并回 `settings_locked`，同时 GET 回 `locked_by`（指出是哪个来源锁定：环境变量名 /
+  `<配置目录>/env` / 命令行参数），面板据此转只读。要交还控制权，就把该来源里的 `FORGE_WORKSPACE_ROOTS`
+  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（`acp-serve` / `demo`），不落盘。
+- **写入的校验比配置文件严**：面板设的每一条都要求「绝对路径 + 存在 + 是目录」（配置文件只校验绝对路径，
+  允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
+- **影响面**：只约束**新**的显式 `cwd` 与目录浏览；已建会话的 `cwd` 创建即定稿，平台不回头否决旧会话
+  （旧会话仍可续聊，只是不再作为「最近目录/资料库」候选被推荐，因为点了必被拒）。
+- **安全权衡（务必读）**：这条接口让面板可以放宽自己的边界，所以对能调到它的人来说，白名单是
+  "默认视图"而不是"边界"——**防护等级 = `FORGE_TOKEN`**。对外提供服务时：① 设 `FORGE_TOKEN`；
+  ② 若要真正锁死，就在**进程环境变量**里设 `FORGE_WORKSPACE_ROOTS`（接口随即变只读，
+  `forge config` 也会打印 `面板设置 只读（由该来源锁定）`）。
 
 ### 2.3 环境变量（全部来自 `backend/internal/infra/config/config.go`）
 
@@ -103,7 +127,7 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力数据面目录 |
 | `FORGE_SKILLS_MATERIALIZE_DIR` | 空 | skill 物化根（默认关闭） |
 | `FORGE_WORKSPACE_DIR` | `~/.forge/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
-| `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**代建根必须在白名单内**，否则 `forge serve` 启动即失败（配置自相矛盾 → fail closed，不静默产出越界会话） |
+| `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`FORGE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `FORGE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
 | `FORGE_PERMISSION_TIMEOUT` | `30m` | 挂起权限自动拒绝超时 |
 | `FORGE_ELICITATION_TIMEOUT` | `30m` | 挂起结构化提问自动取消超时 |
@@ -123,6 +147,10 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 ~/.forge/config/env           # dotenv 风格（KEY=VALUE；# 注释、空行、可选 export 前缀与成对引号）
 ```
 
+`config.json` 里多值键（`workspace_roots`、`skills_materialize_dirs`）可以写成 **JSON 数组**，
+也可以照旧写成逗号分隔字符串；单值键写数组会报错。数组不是语法糖：路径里含逗号时只有数组
+能表达，而面板保存白名单用的就是数组形式（见 §2.2.2）。
+
 同目录可选 `runtimes.json`（A5）：远程 runtime 声明数组
 `[{"id","name","transport":"ws|http","endpoint","headers"}]`，启动时注册进 runtime 注册表，
 agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形态非法都会让 `forge serve`
@@ -130,9 +158,14 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
-`skills_materialize_dir` `skills_materialize_dirs` `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
-`permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace`；另可用 `FORGE_*` 原名、
-`-` 写成分隔符，以及少量别名（`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+`workspace_dir` `workspace_roots` `skills_materialize_dir` `skills_materialize_dirs`
+`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
+`permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
+`native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
+（`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+
+`workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
+保留文件里其它键），所以手工编辑时留意别和面板同时改；被更高优先级来源锁定时面板只会拒绝写。
 
 **优先级**：内置默认值 < `config.json` < `env` < 进程环境变量 `FORGE_*` < CLI flag。所以
 「文件里写基线，环境变量做覆盖，flag 做临时调试」三段式可用。目录路径由 `FORGE_CONFIG_DIR`
@@ -303,8 +336,10 @@ compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/�
      ark-forge:local
    ```
 
-   `FORGE_WORKSPACE_ROOTS`/`FORGE_WORKSPACE_DIR` **必须成对给**：代建根不在白名单内时启动即失败
-   （§2.2.1 的 fail closed），把代建根放进白名单即可（上面用 `/workspaces/.forge-tmp`）。
+   `FORGE_WORKSPACE_ROOTS`/`FORGE_WORKSPACE_DIR` 一起给：白名单画的是**用户目录**的边界，
+   代建根（`/workspaces/.forge-tmp`）由平台自动并入生效名单，**不必**手写进去（§2.2.1）。
+   这两项都在进程 env 里给还有个副作用：面板「设置」页的白名单随之变只读（§2.2.2），
+   要在面板里维护白名单就别在 env 里设 `FORGE_WORKSPACE_ROOTS`。
    bind mount 的写权限按宿主 uid 判定，与容器内 10001 不一致时用 `--build-arg FORGE_UID=$(id -u)` 重建。
    对外暴露端口（反代 / 跨机 / 多人）**先设 `FORGE_TOKEN`**，否则等于把控制面与整个挂载视图开放出去（§2.1）。
 

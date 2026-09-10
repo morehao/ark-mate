@@ -102,6 +102,10 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*handler.Wor
 // 未配 roots 时返回空列表：资料库是"策展"能力，前提是先有人把边界画出来（否则只能靠浏览）。
 // 每个资料库带上该目录下的会话数与最近使用时间（与「最近目录」共用 workspaceUsage 一份口径），
 // 让"我在这儿聊过没"不必再点进去看。
+//
+// 平台代建根**及其下的一切**都不算资料库（见循环里的注释）：代建根本身恒在生效名单里，
+// 它下面又全是按会话 id 命名的沙箱目录，两者都是平台实现细节。反过来说，若运维只把
+// 代建根配成白名单，资料库列表就是空的——这是有意的：那一层从来不是"策展内容"。
 func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
 	roots := s.WorkspaceRoots()
 	usage := s.workspaceUsage(roots)
@@ -132,10 +136,12 @@ func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
 			if !withinRoots(real, roots) {
 				continue
 			}
-			// 平台自己的代建根要排除：roots 一旦配置，代建根按策略**必然**落在某个根内
-			// （否则 serve 启动就失败），于是它会作为一个"一级子目录"混进资料库列表——
-			// 用户看到的第一个资料库会叫 "tmp"：那是平台的实现细节，不是他的资料。
-			if provision != "" && real == provision {
+			// 平台自己的代建根与其**下**的一级子目录都要排除，且必须按真身判定：
+			//   - 代建根自身：它现在恒在生效名单里（隐式并入），会作为某个根的一级子目录出现，
+			//     用户看到的第一个资料库会叫 "tmp"——那是平台的实现细节，不是他的资料；
+			//   - 代建根之下：那是**按会话 id 命名的沙箱目录**（ses_xxx），代建根自己成为根之后
+			//     它的第一层子目录就会被扫到，若不排除，资料库列表里会冒出一串平台内部命名。
+			if provision != "" && withinRoots(real, []string{provision}) {
 				continue
 			}
 			if seen[child] {

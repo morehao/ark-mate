@@ -388,3 +388,133 @@ func TestWorkspaceRoots(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkspaceRootsArrayForm config.json 的**数组形式**：路径里含逗号时唯一能表达它的写法，
+// 也是面板写回用的形式（写回格式与读回格式必须自洽，见 SettingsStore.SaveWorkspaceRoots）。
+func TestWorkspaceRootsArrayForm(t *testing.T) {
+	dir := hermetic(t)
+	unset(t, "FORGE_WORKSPACE_ROOTS")
+	// 第二条路径含逗号：逗号分隔写法根本无法表达，只能数组。
+	body := `{"workspace_roots": ["/srv/ws", "/data/a,b", "/srv/ws"]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("写 config.json: %v", err)
+	}
+	cfg, src, err := LoadResolved(dir)
+	if err != nil {
+		t.Fatalf("数组形式应合法: %v", err)
+	}
+	if want := []string{"/srv/ws", "/data/a,b"}; len(cfg.WorkspaceRoots) != 2 ||
+		cfg.WorkspaceRoots[0] != want[0] || cfg.WorkspaceRoots[1] != want[1] {
+		t.Fatalf("数组解析不符（含逗号路径应保真 + 去重）: %+v", cfg.WorkspaceRoots)
+	}
+	if src["workspace_roots"] != SourceFile {
+		t.Fatalf("来源应为 config.json: %v", src["workspace_roots"])
+	}
+
+	// 进程 env（更高优先级）覆盖数组形式：两种**书写形式**不能各自为政。
+	tsetenv(t, "FORGE_WORKSPACE_ROOTS", "/env/root")
+	if cfg := Load(); len(cfg.WorkspaceRoots) != 1 || cfg.WorkspaceRoots[0] != "/env/root" {
+		t.Fatalf("env 应覆盖 config.json 的数组值: %+v", cfg.WorkspaceRoots)
+	}
+	unset(t, "FORGE_WORKSPACE_ROOTS")
+
+	// 单值键写成数组 = 配置错误（静默取第一项会让运维以为整份配置生效了）。
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"addr": ["a","b"]}`), 0o600); err != nil {
+		t.Fatalf("写 config.json: %v", err)
+	}
+	if _, _, err := LoadResolved(dir); err == nil || !strings.Contains(err.Error(), "不支持数组值") {
+		t.Fatalf("单值键写成数组应报错，got %v", err)
+	}
+	// 数组元素非字符串：不静默字符串化。
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"workspace_roots": [1]}`), 0o600); err != nil {
+		t.Fatalf("写 config.json: %v", err)
+	}
+	if _, _, err := LoadResolved(dir); err == nil || !strings.Contains(err.Error(), "需为字符串") {
+		t.Fatalf("数组元素类型错误应报错，got %v", err)
+	}
+}
+
+// TestSaveWorkspaceRootsRoundTrip 写回与读回自洽：面板保存的东西，重启后解析出**同一份**名单，
+// 且文件里其它键原样保留（read-modify-write 不是"覆盖整份配置"）。
+func TestSaveWorkspaceRootsRoundTrip(t *testing.T) {
+	dir := hermetic(t)
+	unset(t, "FORGE_WORKSPACE_ROOTS")
+	// 预置其它键（含 FORGE_* 形式的键：写回不得把它们改写成规范名或丢掉）。
+	seed := `{"addr":"127.0.0.1:20001","FORGE_IDLE_TIMEOUT":"90s"}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("写 config.json: %v", err)
+	}
+	st := NewSettingsStore(dir, SourceDefault)
+	// 含逗号的路径：数组形式是唯一能原样往返的写法（写回用 join(",") 就会劈成两条）。
+	roots := []string{"/srv/ws", "/data/a,b"}
+	if err := st.SaveWorkspaceRoots(roots); err != nil {
+		t.Fatalf("写回: %v", err)
+	}
+	cfg, src, err := LoadResolved(dir)
+	if err != nil {
+		t.Fatalf("写回后配置应仍合法: %v", err)
+	}
+	if len(cfg.WorkspaceRoots) != 2 || cfg.WorkspaceRoots[1] != "/data/a,b" {
+		t.Fatalf("写回-读回不自洽: %+v", cfg.WorkspaceRoots)
+	}
+	if cfg.Addr != "127.0.0.1:20001" || cfg.IdleTimeout.String() != "1m30s" {
+		t.Fatalf("其它键被写回破坏: addr=%q idle=%s", cfg.Addr, cfg.IdleTimeout)
+	}
+	if src["workspace_roots"] != SourceFile {
+		t.Fatalf("写回后来源应为 config.json: %v", src["workspace_roots"])
+	}
+	// 写回 = 面板可写状态：来源是文件，不锁。
+	if _, locked := st.Status(); locked != "" {
+		t.Fatalf("config.json 来源不应锁定: %q", locked)
+	}
+
+	// 空名单 = 恢复不限制：删键（而不是留一个空数组在文件里）。
+	if err := st.SaveWorkspaceRoots(nil); err != nil {
+		t.Fatalf("清空: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("读回: %v", err)
+	}
+	if strings.Contains(string(raw), "workspace_roots") {
+		t.Fatalf("空名单应删除该键: %s", raw)
+	}
+	if cfg := Load(); len(cfg.WorkspaceRoots) != 0 {
+		t.Fatalf("清空后应为不限制: %+v", cfg.WorkspaceRoots)
+	}
+	// 坏文件不"顺手修好"：替运维决定等于把问题藏起来（下次启动会直接失败）。
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatalf("写坏文件: %v", err)
+	}
+	if err := st.SaveWorkspaceRoots([]string{"/srv/ws"}); err == nil {
+		t.Fatal("坏文件应报错而不是覆盖")
+	}
+	// 无配置目录的进程（acp-serve/demo）不可写。
+	if err := NewSettingsStore("", SourceDefault).SaveWorkspaceRoots([]string{"/srv/ws"}); err == nil {
+		t.Fatal("无配置目录应拒绝写")
+	}
+}
+
+// TestSettingsStoreStatus 锁定来源必须指向运维**可直接去改的位置**（env 变量名 / env 文件路径），
+// 而不是抽象的 "env(process)"：面板据此转只读，报错要能直接指向下一步动作。
+func TestSettingsStoreStatus(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		src        Source
+		wantSrc    string
+		wantLocked string
+	}{
+		{"", "default", ""},
+		{SourceDefault, "default", ""},
+		{SourceFile, "config.json", ""},
+		{SourceEnv, "env(process)", "FORGE_WORKSPACE_ROOTS"},
+		{SourceEnvFile, "env", filepath.Join(dir, "env")},
+		{SourceFlag, "flag", "命令行参数"},
+	}
+	for _, tc := range cases {
+		src, locked := NewSettingsStore(dir, tc.src).Status()
+		if src != tc.wantSrc || locked != tc.wantLocked {
+			t.Fatalf("src=%q: got (%q,%q) want (%q,%q)", tc.src, src, locked, tc.wantSrc, tc.wantLocked)
+		}
+	}
+}

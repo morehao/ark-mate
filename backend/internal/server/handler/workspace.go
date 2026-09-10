@@ -83,3 +83,34 @@ func (h *WorkspaceHandler) Files(c *gin.Context) {
 	}
 	gincontext.Success(c, resp)
 }
+
+// Settings 返回工作区根白名单的设置快照（只读；面板「设置」页据此渲染可编辑列表）。
+//
+// 与 `/workspaces/browse` 返回的 roots 同源但**不同义**：browse 给的是生效名单（含平台代建根，
+// 供浏览面把根列成入口），这里额外区分"显式配置的"与"派生的"，否则面板无法表达"删掉这条"。
+func (h *WorkspaceHandler) Settings(c *gin.Context) {
+	resp, err := h.svc.WorkspaceSettings()
+	if err != nil {
+		gincontext.Fail(c, h.svc.RestErr(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// UpdateSettings 全量替换工作区根白名单（落盘 + 对新会话立即生效）。
+//
+// 三种拒绝要能分辨：`settings_locked`（被 env/flag 锁定 → 面板转只读）、`settings_readonly`
+// （本进程无配置目录）、`workspace_invalid`（某条不是绝对路径 / 不存在 / 不是目录）。
+func (h *WorkspaceHandler) UpdateSettings(c *gin.Context) {
+	var req WorkspaceSettingsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		return
+	}
+	resp, err := h.svc.UpdateWorkspaceSettings(req.Roots)
+	if err != nil {
+		gincontext.Fail(c, h.svc.RestErr(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}

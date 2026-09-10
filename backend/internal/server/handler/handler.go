@@ -51,6 +51,10 @@ type Service interface {
 	// ListWorkspaceFiles 列出某目录的**内容**（文件 + 子目录，只读；与 BrowseWorkspace 分工：
 	// 那个用于"选工作空间"，这个用于"看资料"）。
 	ListWorkspaceFiles(path string, includeHidden bool) (*WorkspaceFilesResp, error)
+	// WorkspaceSettings 返回工作区根白名单的设置快照（生效名单 + 显式配置名单 + 来源/锁定态）。
+	WorkspaceSettings() (*WorkspaceSettingsResp, error)
+	// UpdateWorkspaceSettings 全量替换工作区根白名单（落盘 + 热更新；被更高优先级来源锁定时拒绝）。
+	UpdateWorkspaceSettings(roots []string) (*WorkspaceSettingsResp, error)
 	// SearchConversations 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
 	SearchConversations(ctx context.Context, q string, limit int) ([]ConversationSearchHit, error)
 	// GetConversation 返回单会话详情（含元数据 + 挂起权限）。
@@ -588,6 +592,39 @@ type WorkspaceFileEntryResp struct {
 	Size int64 `json:"size"`
 	// ModifiedAt 最后修改时间（RFC3339，UTC）。
 	ModifiedAt string `json:"modified_at"`
+}
+
+// WorkspaceSettingsResp 工作区根白名单的设置快照（`GET /settings/workspace`）。
+//
+// 为什么要同时给 Configured 与 Roots：面板编辑的是**显式配置**那一份，而代建根是平台派生的
+// （恒在生效名单内、用户删不掉）。只给生效名单，面板就永远无法表达"删掉这一条"。
+type WorkspaceSettingsResp struct {
+	// Configured 显式配置的白名单（= 面板可编辑的那一份；不含隐式并入的代建根）。
+	Configured []string `json:"configured"`
+	// Roots **生效**白名单 = Configured ∪ {ProvisionDir}（空 = 不限制：可浏览任意可读目录）。
+	Roots []string `json:"roots,omitempty"`
+	// Restricted 是否处于受限模式（Configured 非空）。false = 未配白名单，目录浏览不受限。
+	Restricted bool `json:"restricted"`
+	// ProvisionDir 平台代建工作空间的根目录（空 = 代建关闭）。
+	ProvisionDir string `json:"provision_dir,omitempty"`
+	// ProvisionIncluded 代建根是否已隐式并入生效白名单（受限模式下恒 true；不受限时为 false——
+	// 那时"名单"根本不存在，谈不上包含）。
+	ProvisionIncluded bool `json:"provision_included"`
+	// Source 白名单的最终来源：default | config.json | env | env(process) | flag | unavailable。
+	Source string `json:"source"`
+	// LockedBy 非空 = 该键被更高优先级来源锁定（写入必被覆盖），面板应转只读并显示它。
+	LockedBy string `json:"locked_by,omitempty"`
+	// Writable 是否可经 `PUT /settings/workspace` 改写（LockedBy 为空且进程有持久化端口）。
+	Writable bool `json:"writable"`
+}
+
+// WorkspaceSettingsReq `PUT /settings/workspace` 的请求体（**全量替换**语义）。
+//
+// 字段缺省（`{}`）与显式 `{"roots": []}` 同义 = 恢复"不限制"：白名单只有"画边界"与"不画边界"
+// 两种状态，没有"部分更新"的合理含义（增删一条就是一份新名单，由前端给全量）。
+type WorkspaceSettingsReq struct {
+	// Roots 允许作为工作空间的根目录（绝对路径；须存在且是目录）。
+	Roots []string `json:"roots"`
 }
 
 // ConversationResp 会话的对外表示（P0 起不含 runtime）。

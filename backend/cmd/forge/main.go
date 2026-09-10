@@ -35,13 +35,16 @@ import (
 
 // mustConfig 解析配置（含 .forge/config 目录化）。配置文件非法时打印明确错误并退出 2
 // （配置错误必须在启动阶段暴露，而不是静默回落默认值）。
-func mustConfig() config.Config {
-	cfg, _, err := config.LoadResolved("")
+//
+// 连 Sources 一起返回：来源不只是排障信息，还是**权限事实**——被进程 env/flag 锁定的配置键，
+// 面板写入必然被覆盖，serve 据此把它转成"只读设置"（见 config.NewSettingsStore）。
+func mustConfig() (config.Config, config.Sources) {
+	cfg, sources, err := config.LoadResolved("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "配置错误: %v\n\n配置目录: %s（FORGE_CONFIG_DIR 可改）\n", err, config.ConfigDirFromEnv())
 		os.Exit(2)
 	}
-	return cfg
+	return cfg, sources
 }
 
 // configCmd 打印解析后的配置与每项来源（排障/上线核对用；不启动任何进程）。
@@ -108,8 +111,20 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
 	// 空 = 关闭代建（未指定 cwd 的建会话请求会报 workspace_required），故用 emptyLabel 明确显示。
 	fmt.Printf("  %-22s %-38s [%s]\n", "workspace_dir", emptyLabel(cfg.WorkspaceDir), src("workspace_dir"))
-	// 空 = 不限制（任何可读目录都能当工作空间）；非空 = 显式 cwd 与目录浏览都被收在根内。
+	// 空 = 不限制（任何可读目录都能当工作空间）；非空 = 显式 cwd 与目录浏览都被收在根内，
+	// 且 workspace_dir 会**隐式并入**生效名单（无需手写进这里）。
 	fmt.Printf("  %-22s %-38s [%s]\n", "workspace_roots", emptyLabel(strings.Join(cfg.WorkspaceRoots, ",")), src("workspace_roots"))
+	// 两行注记挂在同一键下面（空标签保持列对齐）：中文标签宽度不一，自己缩进排版必然对不齐。
+	//
+	// 为什么要显式打印"另含代建根"：运维只配了一个根，却会在浏览面的 roots 里看到第二个——
+	// 不解释就等于让人怀疑配置没生效（旧版本这里反而是启动失败，更容易被误读成配错）。
+	if len(cfg.WorkspaceRoots) > 0 && cfg.WorkspaceDir != "" {
+		fmt.Printf("  %-22s %-38s [隐含]\n", "", "↑ 生效名单另含平台代建根 "+cfg.WorkspaceDir)
+	}
+	// 被更高优先级来源锁定时，面板的设置面会**拒绝写**（只读）：排障时要能一眼看出原因。
+	if s, ok := sources["workspace_roots"]; ok && s != config.SourceFile && s != config.SourceDefault {
+		fmt.Printf("  %-22s %-38s [%s]\n", "", "↑ 面板设置只读（由该来源锁定）", string(s))
+	}
 	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dirs", emptyLabel(formatMaterializeDirs(cfg.SkillMaterializeDirs)), src("skills_materialize_dirs"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
@@ -259,7 +274,7 @@ func serve(args []string) {
 	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
 	_ = fs.Parse(args)
 
-	cfg := mustConfig()
+	cfg, sources := mustConfig()
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
@@ -324,12 +339,16 @@ func serve(args []string) {
 	}
 	// 工作空间策略：未指定 cwd 的建会话请求在 <workspace_dir>/<会话id>/ 下代建临时空间
 	// （空 = 关闭代建，此时未指定即报 workspace_required，不回落 serve 进程目录）；
-	// workspace_roots 非空时把显式 cwd 与目录浏览收在白名单内。
-	// 两者不自洽（代建根落在白名单外 → 平台自己会产出越界会话）在启动时直接失败：fail closed。
+	// workspace_roots 非空时把显式 cwd 与目录浏览收在白名单内，代建根**自动并入**生效名单
+	// （平台自己的目录本就该天然合法，不再要求运维成对配置）。
 	if err := svc.SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
-		fmt.Fprintf(os.Stderr, "serve: 工作空间配置不自洽: %v\n", err)
+		fmt.Fprintf(os.Stderr, "serve: 工作空间策略非法: %v\n", err)
 		os.Exit(2)
 	}
+	// 白名单的持久化端口：面板 PUT /settings/workspace 经它写回配置目录（config.json）。
+	// 传入该键的**最终来源**：来源高于配置文件（进程 env / env 文件 / flag）时端口会报"锁定"，
+	// 面板随之转只读——这比"面板显示保存成功、重启后被 env 覆盖"诚实。
+	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfg.ConfigDir, sources["workspace_roots"]))
 
 	orch := manager.NewOrchestrator(svc, reg)
 	// 进程注册表（M3 v4③）：登记本 daemon 拉起的 runtime 子进程；启动时回收上一实例遗留的
@@ -461,7 +480,7 @@ func demo(args []string) {
 
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	cfg := mustConfig()
+	cfg, _ := mustConfig()
 	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := manager.NewOrchestrator(svc, reg)
 	orch.SetAllowAll(*allowAll)
@@ -514,7 +533,7 @@ func migrate(args []string) {
 	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
 
-	cfg := mustConfig()
+	cfg, _ := mustConfig()
 	if *dbPath != "" {
 		cfg.DBPath = *dbPath
 	}
@@ -602,7 +621,7 @@ func transcriptsPrune(args []string) {
 	olderThan := fs.String("older-than", "", "删除修改时间早于此时长的 *.jsonl（必填；支持 30d / 168h / 72h30m 等）")
 	dir := fs.String("dir", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
 	_ = fs.Parse(args)
-	cfg := mustConfig()
+	cfg, _ := mustConfig()
 	if *dir != "" {
 		cfg.TranscriptDir = *dir
 	}

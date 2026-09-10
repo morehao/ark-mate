@@ -212,6 +212,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/workspaces/libraries` | **资料库**列表 = `FORGE_WORKSPACE_ROOTS` 下的一级子目录（`{name, path, root, last_used_at, conversations}`，按名排序）：**零新状态**（不存登记表，目录名即资料库名），未配白名单时为空数组。用途是资料/文档场景"选名字而不是选绝对路径" |
 | GET | `/workspaces/files` | 目录**内容**清单（`?path=<绝对目录>` 必填、`?hidden=true` 含隐藏项）：`{path, roots, entries:[{name, path, is_dir, size, modified_at}]}`（目录在前、文件在后）。与 `browse` 分工：**browse 用于选工作空间**（只列目录，条目可直接当 cwd），**files 用于看资料**（列文件，条目**不可**当 cwd）。边界与 browse 一致（越界拒绝、根外真身的符号链接不列） |
 | GET | `/workspaces/recent` | 最近使用的工作空间（`?limit=` 默认 10 上限 50）：**从既有会话派生**（`{path, name, last_used_at, conversations}`，按最近使用倒序、同目录聚合计数、排除平台代建的临时空间），不另存状态 |
+| GET · PUT | `/settings/workspace` | 工作区根白名单的**设置面**：GET 回 `{configured[], roots[], restricted, provision_dir, provision_included, source, locked_by?, writable}`——`configured` 是面板可编辑的显式名单，`roots` 是**生效**名单（= `configured` ∪ 平台代建根；代建根**无需**手写进配置，它由平台隐式并入）；PUT `{roots[]}` **全量替换**（`{"roots":[]}` 或字段缺省 = 恢复"不限制"），逐项要求绝对路径 / 存在 / 是目录，落盘 `<配置目录>/config.json` 并对**新**会话与浏览面即时生效（已建会话 cwd 不变）。被进程 `FORGE_*` / env 文件 / flag 改动过该键时回 `settings_locked`（写入必被覆盖 → 面板转只读），无配置目录的进程回 `settings_readonly` |
 | GET | `/conversations/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/conversations/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |

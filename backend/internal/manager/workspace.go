@@ -76,8 +76,8 @@ func ValidateWorkspace(spec string, allowedRoots []string) (string, error) {
 //	  serve 进程目录是"平台的目录"而非"用户的目录"，全局共享会让沙箱边界失效；
 //	  运维若要强制显式指定，把 workspace_dir 设为空即可）
 //
-// 代建路径不再逐次校验 allowedRoots：`SetWorkspacePolicy` 已在装配时确认
-// provisionDir 落在某个根之内（配置自相矛盾就直接启动失败），逐次重算只是重复劳动。
+// 代建路径不再逐次校验 allowedRoots：传进来的就是**生效**名单（`Service.WorkspaceRoots()`），
+// 而平台代建根已被隐式并入其中（见 effectiveWorkspaceRootsLocked）——逐次重算只是重复劳动。
 func ResolveWorkspace(spec, provisionDir string, allowedRoots []string, conversationID string) (WorkspaceResolution, error) {
 	if strings.TrimSpace(spec) != "" {
 		p, err := ValidateWorkspace(spec, allowedRoots)
