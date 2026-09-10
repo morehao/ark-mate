@@ -17,22 +17,50 @@ interface ModelSelectProps {
   style?: CSSProperties
   /** value=null 时关闭态展示的默认文案（如「跟随默认」）。 */
   defaultLabel?: string
+  /** 目录为空时的下拉说明（如登录引导，替代原「浏览全部」弹窗的空态提示）。 */
+  emptyNote?: ReactNode
 }
 
-/** 选项展示：名称 +（描述副文案）+（被运行时拒绝过的值标灰提示）。 */
+/** 下拉项展示：名称 +（描述副文案，第二行）+（被运行时拒绝过的值标灰提示）。
+ *  两行紧凑行（而不是名称与描述并排一行）——并排会把浮层撑到 550px+，相对 130px 的药丸太重。 */
 function optionLabel(v: ConfigOptionValue): ReactNode {
+  const dim = v.unavailable ? tokens.textPlaceholder : tokens.text
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-      <span style={{ color: v.unavailable ? tokens.textPlaceholder : tokens.text, whiteSpace: 'nowrap' }}>
-        {v.name || v.value}
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, maxWidth: 300 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <span
+          style={{
+            color: dim,
+            fontSize: 12.5,
+            lineHeight: 1.5,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {v.name || v.value}
+        </span>
+        {v.unavailable && (
+          <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>
+            不可用
+          </Tag>
+        )}
       </span>
-      {v.unavailable && (
-        <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>
-          不可用
-        </Tag>
-      )}
       {v.description && (
-        <span style={{ color: tokens.textPlaceholder, fontSize: 11, whiteSpace: 'nowrap' }}>{v.description}</span>
+        <span
+          title={v.description}
+          style={{
+            maxWidth: 300,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            color: tokens.textPlaceholder,
+            fontSize: 11,
+            lineHeight: 1.5,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {v.description}
+        </span>
       )}
     </span>
   )
@@ -44,7 +72,10 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
  *  - 全部候选来自运行时（agent 自报的 config option），平台不内置任何清单；
  *  - 按 agent 下发的分组（values[].group/group_name）分组展示，未分组则扁平；
  *  - value 是不透明串：只展示 name，绝不解析内部结构；
- *  - null = 跟随运行时默认；allowClear 可清回默认。
+ *  - null = 跟随运行时默认；allowClear 可清回默认；
+ *  - **关闭态只显示名称**：antd 把 option.label 原样渲染进选择器，若把描述塞进 label，
+ *    收起的选择器会宽达 500+px 成为不可压缩的 flex item，把所在行挤塌（见 StartPanel
+ *    底栏）。描述与「不可用」标记一律走 optionRender，只在下拉面板出现。
  * 交互态 CSS 收口 console.css.ts；颜色/圆角走 @ark/ui tokens，不硬编码。
  */
 export function ModelSelect({
@@ -57,6 +88,7 @@ export function ModelSelect({
   size = 'small',
   style,
   defaultLabel = '跟随默认',
+  emptyNote,
 }: ModelSelectProps) {
   // 分组键：agent 未下发分组时统一落到空串组（antd 的 options 平铺 + OptGroup 混用需分开处理）。
   const groups = new Map<string, { name: string; items: ConfigOptionValue[] }>()
@@ -68,9 +100,12 @@ export function ModelSelect({
   }
   const toOption = (v: ConfigOptionValue) => ({
     value: v.value,
-    label: optionLabel(v),
+    // 关闭态回落到这个 label：只放名称（放描述会让选择器带上几百像素的固有宽度）。
+    label: v.name || v.value,
     // 过滤用检索串（label 是 JSX，antd 不能直接 search）——只含展示字段，不含 value。
     search: `${v.name} ${v.description ?? ''}`.toLowerCase(),
+    // 下拉项要靠它还原完整展示（optionRender 拿到的只有这条 option 本身）。
+    model: v,
   })
   const grouped = [...groups.entries()].some(([k]) => k !== '')
   // 分组/扁平两种形态二选一（antd options 联合类型不接受混用）。
@@ -81,6 +116,7 @@ export function ModelSelect({
   return (
     <Select
       size={size}
+      variant="borderless"
       disabled={disabled}
       allowClear={allowClear}
       value={value ?? undefined}
@@ -89,6 +125,42 @@ export function ModelSelect({
       options={options}
       showSearch
       popupMatchSelectWidth={false}
+      // 关闭态是「药丸」而不是表单框：皮肤（hairline 边 / 全圆角 / hover / focus 环）收口在
+      // console.css.ts 的 .fg-model-pill（纯 token，无硬编码色值）；这里只覆盖内层排版。
+      classNames={{
+        root: 'fg-model-pill',
+        popup: { root: 'fg-model-pop', listItem: 'fg-model-pop-item' },
+      }}
+      styles={{
+        content: { fontFamily: tokens.fontMono, fontSize: 11.5, lineHeight: '16px', color: tokens.text },
+        placeholder: { color: tokens.textPlaceholder },
+        suffix: { color: tokens.textPlaceholder, fontSize: 10 },
+        popup: { root: { borderRadius: 12, padding: 4 } },
+      }}
+      // 下拉项：名称 + 描述（关闭态只有名称，完整信息在这里）。
+      optionRender={(opt) => {
+        const raw = (opt.data as { model?: ConfigOptionValue } | undefined)?.model
+        return raw ? optionLabel(raw) : opt.label
+      }}
+      // 空目录（运行时没给候选）时把说明放进下拉：原来的「浏览全部」弹窗承担这个提示。
+      notFoundContent={
+        values.length === 0 ? (
+          <div
+            style={{
+              maxWidth: 320,
+              padding: '4px 2px',
+              color: tokens.textPlaceholder,
+              fontSize: 12,
+              lineHeight: 1.7,
+              whiteSpace: 'normal',
+            }}
+          >
+            {emptyNote ?? '运行时未提供模型目录'}
+          </div>
+        ) : (
+          '无匹配模型'
+        )
+      }
       filterOption={(input, opt) =>
         String((opt as { search?: string } | undefined)?.search ?? '').includes(input.toLowerCase())
       }

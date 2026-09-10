@@ -111,6 +111,74 @@ export const consoleStyleSheet = `
     box-shadow: 0 0 0 3px ${tokens.primarySoft};
   }
 
+  /* 输入区底栏的按键提示（可点击切档）：单行 + 省略号 + 可裁剪。
+     窄容器里逐词换行会把底栏行高撑开，溢出的文字又被后绘制的模型选择器白底盖住，
+     看起来就是「文字重影」——所以这里显式禁止换行。 */
+  .fg-hint-kbd {
+    max-width: 100%;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fg-hint-kbd:hover { text-decoration: underline; }
+
+  /* 模型选择器关闭态：药丸（不落表单框感）——hairline 边 + 全圆角 + mono 小字，
+     与同一行的「在项目中工作」弱字、圆形发送钮同一语言；hover 抬边+软底，聚焦出靛蓝环。 */
+  .fg-model-pill {
+    width: auto;
+    min-width: 132px;
+    max-width: 240px;
+    height: 28px;
+    padding: 0 10px;
+    gap: 6px;
+    border: 1px solid ${tokens.border};
+    border-radius: 999px;
+    background: ${tokens.surface};
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, min-width 0.12s ease;
+  }
+  .fg-model-pill:hover {
+    border-color: ${tokens.borderStrong};
+    background: ${tokens.softFill};
+  }
+  /* 聚焦/展开：静息态贴合文案（不长出一片空白），一旦交互就展开到可读可搜的宽度。 */
+  .fg-model-pill:focus-within {
+    min-width: 216px;
+    border-color: ${tokens.primary};
+    box-shadow: 0 0 0 3px ${tokens.primarySoft};
+  }
+  /* 清除按钮（allowClear 时的 ⊗）：antd 默认是 25% 黑，统一到三级灰阶。 */
+  .fg-model-pill .ant-select-clear {
+    color: ${tokens.textPlaceholder};
+    font-size: 12px;
+  }
+  .fg-model-pill .ant-select-clear:hover { color: ${tokens.textSecondary}; }
+
+  /* 模型下拉浮层：浮层才可以有阴影（与 app.tsx toast 同一条投影），列表项圆角 + 选中软底。 */
+  .fg-model-pop {
+    border: 1px solid ${tokens.border};
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+  }
+  /* 双类选择器：压过 antd 生成的分组内边距/圆角（单类会被 antd 规则盖掉）。 */
+  .fg-model-pop .ant-select-item-option.fg-model-pop-item {
+    border-radius: 8px;
+    padding: 5px 10px 5px 12px;
+  }
+  /* 分组标题（运行时下发的 group_name）：mono 小字弱化，别和模型名抢视线。 */
+  .fg-model-pop .ant-select-item-group {
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+  }
+
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
   .fg-sess-item:hover .fg-sess-more,

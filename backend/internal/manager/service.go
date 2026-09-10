@@ -38,7 +38,9 @@ type AgentRec struct {
 	State            string
 }
 
-// defaultAgentID 默认播种 Agent 的 ID（用户选 Agent 而非 runtime）。
+// defaultAgentID 内置种子 Agent 的 ID：未显式切换「当前 Agent」时的回落值。
+// 「当前 Agent」（可切换、可落盘）见 default_agent.go —— 它不是这个常量，而是
+// Service.currentAgent 经回落链（显式选择 > 本常量 > id 升序首个）算出的。
 const defaultAgentID = "dsh"
 
 // builtinAgents 内置 Agent 播种表：每个内置 runtime 一个 Agent（dsh 为默认）。
@@ -121,8 +123,25 @@ func (s *Service) requiredMcpTransports(agent *AgentRec) []string {
 	return out
 }
 
-// IsDefault 报告该 Agent 是否为默认播种 Agent。
-func (a *AgentRec) IsDefault() bool { return a.ID == defaultAgentID }
+// currentDefaultLocked 计算生效的「当前 Agent」id（须持 s.mu）：
+// 显式选择（agent 仍存在）> 内置种子 defaultAgentID > id 升序首个；注册表为空 → 空串。
+func (s *Service) currentDefaultLocked() string {
+	if s.currentAgent != "" {
+		if _, ok := s.agents[s.currentAgent]; ok {
+			return s.currentAgent
+		}
+	}
+	if _, ok := s.agents[defaultAgentID]; ok {
+		return defaultAgentID
+	}
+	best := ""
+	for id := range s.agents {
+		if best == "" || id < best {
+			best = id
+		}
+	}
+	return best
+}
 
 // ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。
 // P0 起不再记录 runtime 身份；RuntimeHint 仅为最近/首选 runtime 的执行提示（非身份，用户不可见）。
@@ -156,8 +175,11 @@ type Service struct {
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
-	catalog   *catalogStore           // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
-	caps      *capability.Registry    // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
+	// currentAgent 「当前 Agent」的显式选择（P2 起可切换；空 = 未设置，走回落链）。
+	// 落盘 <AgentDir>/default.json（见 default_agent.go）；读写一律持 s.mu。
+	currentAgent string
+	catalog      *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
+	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 
 	mu            sync.Mutex
 	agents        map[string]*AgentRec
@@ -259,14 +281,15 @@ func (s *Service) closeTranscripts() {
 	s.tx = nil
 }
 
-// ListAgents 返回播种的全部 Agent。
+// ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，供面板预选与徽标）。
 func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cur := s.currentDefaultLocked()
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
 		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
+			IsDefault: a.ID == cur, Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -568,9 +591,11 @@ func toElicitationResp(p ElicitationItem) handler.ElicitationResp {
 	return resp
 }
 
-// defaultAgent 返回默认播种 Agent。
+// defaultAgent 返回「当前 Agent」（用户可切换；缺省回落内置种子 dsh，见 default_agent.go）。
 func (s *Service) defaultAgent() (*AgentRec, bool) {
-	a, ok := s.agents[defaultAgentID]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[s.currentDefaultLocked()]
 	return a, ok
 }
 
@@ -1011,16 +1036,16 @@ func (s *Service) publishSideEffects(conversationID, typ string, m map[string]an
 	}
 }
 
-// requireDefaultAgent 供 Orchestrator 取默认播种 Agent。
+// requireDefaultAgent 供 Orchestrator 取「当前 Agent」。
 func (s *Service) requireDefaultAgent() (*AgentRec, error) {
 	a, ok := s.defaultAgent()
 	if !ok {
-		return nil, fmt.Errorf("默认 Agent %q 未播种（注册表为空）", defaultAgentID)
+		return nil, fmt.Errorf("无可用 Agent（注册表为空）：请先播种或注册 agent（当前 Agent 可切换）")
 	}
 	return a, nil
 }
 
-// resolveConversationAgent 归一新建会话的 agent_id：空 → 默认播种 Agent（dsh）；非空 → 原样。
+// resolveConversationAgent 归一新建会话的 agent_id：空 → 「当前 Agent」；非空 → 原样。
 func (s *Service) resolveConversationAgent(agentID string) (string, error) {
 	if agentID != "" {
 		return agentID, nil

@@ -52,6 +52,17 @@ func (h *AgentHandler) Update(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// SetDefault 把该 agent 切换为「当前 Agent」（全局默认单例：新建会话、模型目录缺省都取它；
+// 幂等，选择由 manager 落盘以便重启保持）。
+func (h *AgentHandler) SetDefault(c *gin.Context) {
+	resp, err := h.svc.SetDefaultAgent(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, h.svc.RestErr(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
 // Delete 删除自定义 agent（种子 agent 返回只读错误）。
 func (h *AgentHandler) Delete(c *gin.Context) {
 	if err := h.svc.DeleteAgent(c.Request.Context(), c.Param("id")); err != nil {

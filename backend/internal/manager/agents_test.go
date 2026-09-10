@@ -65,12 +65,15 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 		t.Fatalf("name 未更新: %+v", a)
 	}
 
-	// 内置 Agent 已播种（用户选 Agent 而非 runtime；dsh 为默认）。
-	if a, ok := svc2.AgentByID("dsh"); !ok || !a.IsDefault() {
-		t.Fatalf("默认 agent dsh 应播种且为默认: %+v ok=%v", a, ok)
+	// 内置 Agent 已播种（用户选 Agent 而非 runtime；未切换前 dsh 为「当前 Agent」）。
+	if a, ok := svc2.AgentByID("dsh"); !ok || a == nil {
+		t.Fatalf("默认 agent dsh 应播种: %+v ok=%v", a, ok)
 	}
-	if a, ok := svc2.AgentByID("opencode"); !ok || a.IsDefault() {
-		t.Fatalf("内置 agent opencode 应播种且非默认: %+v ok=%v", a, ok)
+	if a, ok := svc2.AgentByID("opencode"); !ok || a == nil {
+		t.Fatalf("内置 agent opencode 应播种: %+v ok=%v", a, ok)
+	}
+	if got := svc2.DefaultAgentID(); got != "dsh" {
+		t.Fatalf("未切换前当前 Agent 应为 dsh: %s", got)
 	}
 
 	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。
@@ -93,6 +96,76 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "alias-echo.json")); !os.IsNotExist(err) {
 		t.Fatalf("定义文件未清理: %v", err)
+	}
+}
+
+// TestSetDefaultAgentSwitchAndPersist「当前 Agent」切换（Agents 页「设为当前」的服务端语义）：
+// is_default 跟随切换、选择落 <dir>/default.json、重启后仍生效、删除当前 agent 后回落内置种子。
+func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "agents")
+	svc := agentTestSvc(t, dir)
+
+	// 未切换：内置回落 dsh。
+	if got := svc.DefaultAgentID(); got != "dsh" {
+		t.Fatalf("缺省当前 Agent 应为 dsh: %s", got)
+	}
+	resp, err := svc.SetDefaultAgent(ctx, "opencode")
+	if err != nil || resp.ID != "opencode" || !resp.IsDefault {
+		t.Fatalf("SetDefaultAgent: %v %+v", err, resp)
+	}
+	// ListAgents 是权威面（面板按钮显隐与新建会话预选都读它）。
+	agents, err := svc.ListAgents()
+	if err != nil || len(agents) != 2 {
+		t.Fatalf("ListAgents: %v %+v", err, agents)
+	}
+	for _, a := range agents {
+		if want := a.ID == "opencode"; a.IsDefault != want {
+			t.Fatalf("is_default 未跟随切换: %+v", a)
+		}
+	}
+	// 幂等：重复切换同一 agent 不报错、状态不变。
+	if again, err := svc.SetDefaultAgent(ctx, "opencode"); err != nil || !again.IsDefault {
+		t.Fatalf("重复切换应幂等: %v %+v", err, again)
+	}
+
+	// 落盘：<dir>/default.json（目录级配置，不得被当作 agent 定义加载）。
+	b, err := os.ReadFile(filepath.Join(dir, "default.json"))
+	if err != nil {
+		t.Fatalf("default.json 未落盘: %v", err)
+	}
+	if !strings.Contains(string(b), `"default_agent": "opencode"`) {
+		t.Fatalf("default.json 内容不符: %s", b)
+	}
+	// 重启（新 Service + 同目录）→ 选择仍生效，且 agents 数不变（default.json 非定义）。
+	svc2 := agentTestSvc(t, dir)
+	if got := svc2.DefaultAgentID(); got != "opencode" {
+		t.Fatalf("重启后当前 Agent 应为 opencode: %s", got)
+	}
+	if list, _ := svc2.ListAgents(); len(list) != 2 {
+		t.Fatalf("default.json 被误当定义加载: %+v", list)
+	}
+
+	// 未知 agent → agent_not_found（REST 40401）。
+	if _, err := svc2.SetDefaultAgent(ctx, "nope"); err == nil {
+		t.Fatal("未知 agent 应报错")
+	}
+
+	// 删除「当前 Agent」→ 清除显式选择 + 回落内置种子（default.json 一并清理）。
+	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if _, err := svc2.SetDefaultAgent(ctx, "alias-echo"); err != nil {
+		t.Fatalf("切到自定义 agent: %v", err)
+	}
+	if err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
+		t.Fatalf("DeleteAgent: %v", err)
+	}
+	if got := svc2.DefaultAgentID(); got != "dsh" {
+		t.Fatalf("删除当前 Agent 后应回落 dsh: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "default.json")); !os.IsNotExist(err) {
+		t.Fatalf("default.json 应被清理: %v", err)
 	}
 }
 

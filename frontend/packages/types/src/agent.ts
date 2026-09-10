@@ -25,7 +25,11 @@ export interface Agent {
   /** provider 档案 id（P2 注入面）；空 = 默认。 */
   provider?: string
   state: AgentState
-  /** 默认播种 Agent（前端预选 + 徽标）。 */
+  /**
+   * 「当前 Agent」（**全局默认单例**）：新建会话与模型目录缺省都用它。
+   * 服务端权威计算（回落链：显式选择 > 内置种子 dsh > id 升序首个），在 Agents 页可切换
+   * （`POST /agents/:id/default`）。会话一经建立即绑定其 agent，切换不影响既有会话。
+   */
   is_default?: boolean
   /** 种子 agent（内置播种/保留前缀）：只读（不可删、runtime 不可改）；由服务端权威判定。 */
   seed?: boolean

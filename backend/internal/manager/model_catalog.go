@@ -137,8 +137,12 @@ func cloneOptions(in []acl.ConfigOption) []acl.ConfigOption {
 	return out
 }
 
-// DefaultAgentID 返回默认 agent（对外契约：面板未指定 agent 时用它）。
-func (s *Service) DefaultAgentID() string { return defaultAgentID }
+// DefaultAgentID 返回「当前 Agent」id（对外契约：面板未指定 agent 时用它；可切换，见 default_agent.go）。
+func (s *Service) DefaultAgentID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentDefaultLocked()
+}
 
 // ModelCatalog 返回该 agent 的运行时模型目录。
 //

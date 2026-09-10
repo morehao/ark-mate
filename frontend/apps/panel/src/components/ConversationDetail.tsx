@@ -289,7 +289,6 @@ export function ConversationDetailDrawer({
                     value={s.model ?? null}
                     allowClear
                     size="small"
-                    style={{ minWidth: 180 }}
                     defaultLabel="运行时默认"
                     onChange={(v) => {
                       if ((v ?? undefined) === s.model) return

@@ -50,6 +50,8 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	// P2 Agent 管理面：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除。
 	v1.POST("/agents", h.Agent.Create)
 	v1.PATCH("/agents/:id", h.Agent.Update)
+	// 切换「当前 Agent」（全局默认单例：新建会话/模型目录缺省取它；幂等，选择落 default.json）。
+	v1.POST("/agents/:id/default", h.Agent.SetDefault)
 	v1.DELETE("/agents/:id", h.Agent.Delete)
 	v1.POST("/agents/:id/start", h.Agent.Start)
 	v1.POST("/agents/:id/stop", h.Agent.Stop)

@@ -16,6 +16,8 @@ type Service interface {
 	CreateAgent(ctx context.Context, req AgentCreateReq) (*AgentResp, error)
 	// UpdateAgent 更新 agent 元数据（name/runtime/provider 子集）。
 	UpdateAgent(ctx context.Context, id string, patch AgentUpdateReq) (*AgentResp, error)
+	// SetDefaultAgent 切换「当前 Agent」（全局默认单例：新建会话与模型目录缺省取它；未知 agent 报错）。
+	SetDefaultAgent(ctx context.Context, id string) (*AgentResp, error)
 	// DeleteAgent 删除自定义 agent（种子不可删）。
 	DeleteAgent(ctx context.Context, id string) error
 	// StartAgent 启动 agent 对应 runtime 连接（校验可启动）。
@@ -157,7 +159,7 @@ type AgentResp struct {
 	Name      string `json:"name"`
 	Provider  string `json:"provider,omitempty"`
 	State     string `json:"state"`
-	IsDefault bool   `json:"is_default"` // 默认播种 Agent（前端预选 + 徽标）
+	IsDefault bool   `json:"is_default"` // 「当前 Agent」（全局默认单例；可切换，见 POST /agents/:id/default）
 	// Seed 内置播种/保留前缀 Agent：只读（不可删、runtime 不可改；name/provider/策略可改）。
 	// 由服务端权威判定（历史上前端按 id 前缀猜，与播种 id 改名后不一致）。
 	Seed bool `json:"seed"`

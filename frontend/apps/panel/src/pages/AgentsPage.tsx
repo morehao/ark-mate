@@ -1,8 +1,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AutoComplete, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
-import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  StopOutlined,
+  PlayCircleOutlined,
+  MedicineBoxOutlined,
+  SwapOutlined,
+} from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
-import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
+import {
+  agentDiagnostics,
+  createAgent,
+  deleteAgent,
+  listProviders,
+  patchAgent,
+  setDefaultAgent,
+  startAgent,
+  stopAgent,
+  upsertProvider,
+  toErrorMessage,
+} from '@ark/api'
 import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
 import { useForge } from '../store'
 import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
@@ -54,6 +72,8 @@ export function AgentsPage() {
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 切换「当前 Agent」的在途标记（与启停各自独立，避免互相盖住 loading）。
+  const [busyDefaultId, setBusyDefaultId] = useState<string | null>(null)
   const [agentModal, setAgentModal] = useState<{ mode: 'create' } | { mode: 'edit'; agent: Agent } | null>(null)
   const [providerModal, setProviderModal] = useState<{ id: string; existing: Provider | null } | null>(null)
   // A3 诊断抽屉：{ agentId, data | null（加载中）, err }
@@ -97,6 +117,17 @@ export function AgentsPage() {
       await guard(startAgent(a.id))
     }
     setBusyId(null)
+    afterMutate()
+  }
+
+  // 切换「当前 Agent」：全局默认单例（新建会话/模型目录缺省取它）；服务端落盘、重启保持。
+  const onSetDefault = async (a: Agent): Promise<void> => {
+    if (a.is_default) return
+    setBusyDefaultId(a.id)
+    const ok = await guard(setDefaultAgent(a.id))
+    setBusyDefaultId(null)
+    if (ok === undefined) return
+    showToast(`已切换当前 Agent：${ok.name || ok.id}（新建会话将使用它）`)
     afterMutate()
   }
 
@@ -192,7 +223,7 @@ export function AgentsPage() {
   return (
     <PageContainer
       title="Agents"
-      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新。下方 provider 档案供密钥注入（只写不读回）。"
+      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新 + 切换「当前 Agent」（新建会话与模型目录缺省都用它，选择落 definitions 目录 default.json）。下方 provider 档案供密钥注入（只写不读回）。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => { void refreshAgents(); void loadProviders() }}>
@@ -225,7 +256,13 @@ export function AgentsPage() {
           >
             <Dot color={st.color} size={7} />
             <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
-            {a.is_default && <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>默认</Tag>}
+            {a.is_default && (
+              <Tooltip title="当前 Agent：新建会话与模型目录缺省都用它">
+                <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                  当前
+                </Tag>
+              </Tooltip>
+            )}
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
             <Tooltip
               title={
@@ -269,6 +306,18 @@ export function AgentsPage() {
               >
                 {a.state === 'running' ? '停止' : '启动'}
               </Button>
+              {!a.is_default && (
+                <Tooltip title="切换为当前 Agent：新建会话与模型目录缺省都用它（可随时切回）">
+                  <Button
+                    size="small"
+                    loading={busyDefaultId === a.id}
+                    icon={<SwapOutlined />}
+                    onClick={() => void onSetDefault(a)}
+                  >
+                    设为当前
+                  </Button>
+                </Tooltip>
+              )}
               <Button size="small" icon={<MedicineBoxOutlined />} onClick={() => void openDiagnostics(a)}>
                 诊断
               </Button>

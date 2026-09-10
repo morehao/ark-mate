@@ -62,8 +62,9 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	}
 	loaded := 0
 	for _, p := range files {
-		if filepath.Base(p) == "providers.json" {
-			continue // provider 档案非同目录 agent 定义（见 loadProvidersFile）
+		base := filepath.Base(p)
+		if base == "providers.json" || base == defaultAgentFile {
+			continue // 目录级配置（provider 档案 / 当前 Agent 选择），非 agent 定义
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -86,6 +87,8 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	}
 	// provider 档案（同目录 providers.json）随 definitions 一并装载。
 	s.loadProvidersFile(dir)
+	// 「当前 Agent」的显式选择（同目录 default.json）在定义装载后解析（需先有 agent 才可校验）。
+	s.loadDefaultAgentFile(dir)
 	return loaded
 }
 
@@ -234,11 +237,20 @@ func (s *Service) DeleteAgent(_ context.Context, id string) error {
 	}
 	delete(s.agents, id)
 	dir := s.agentDir
+	// 被删的正是「当前 Agent」的显式选择 → 清除之（回落内置种子），避免 default.json 悬空。
+	wasDefault := s.currentAgent == id
+	if wasDefault {
+		s.currentAgent = ""
+	}
 	s.mu.Unlock()
 	if dir != "" {
 		if err := os.Remove(filepath.Join(dir, id+".json")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+	}
+	if wasDefault {
+		clearDefaultAgentFile(dir)
+		slog.Info("agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
 	}
 	return nil
 }
@@ -350,6 +362,6 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 		return nil
 	}
 	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-		IsDefault: a.IsDefault(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
+		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 		PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
 }

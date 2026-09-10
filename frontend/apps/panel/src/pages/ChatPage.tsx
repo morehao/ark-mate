@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
 import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
 import { conversationHistory, conversationRuns } from '@ark/api'
 import { useForge } from '../store'
+import { AgentBadge } from '../components/AgentBadge'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
@@ -317,7 +317,13 @@ export function ChatPage() {
               color: tokens.textSecondary,
             }}
           >
-            <Pill maxWidth={180}>{agent ? agent.name : agentNameOf(agents, activeSum?.agent_id)}</Pill>
+            {/* 会话与 Agent 一对一绑定：这里如实标出当前用的是哪个 Agent
+                （状态点 + 名称 + 默认标记，详情看 hover 浮层）。 */}
+            <AgentBadge
+              agent={agent}
+              agentId={activeSum?.agent_id}
+              fallbackName={agentNameOf(agents, activeSum?.agent_id)}
+            />
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>

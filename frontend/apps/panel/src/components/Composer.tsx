@@ -110,16 +110,6 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
               title="点击切换发送键：Enter 发送 / Enter 换行"
               onClick={() => setSendMode((m) => toggleSendKey(m))}
               className="fg-hint-kbd"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                padding: 0,
-                margin: 0,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                fontSize: 'inherit',
-                color: 'inherit',
-              }}
             >
               {sendKeyHint(sendMode)} ⇄
             </button>
