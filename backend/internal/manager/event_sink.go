@@ -1,0 +1,148 @@
+package manager
+
+import (
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
+)
+
+// eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
+func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
+	return func(ev acl.Event) {
+		if ev.SessionID == "" {
+			return
+		}
+		// P3 双 id：底层事件只携带原生 session id，host 侧解析为平台会话 uuid 再发布；
+		// 断连后迟到事件（映射已清）不再落入孤儿聚合，丢弃并留 debug。
+		cid := o.resolveProvider(ev.SessionID)
+		if cid == "" {
+			o.logger.Debug("event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
+			return
+		}
+		ev.SessionID = cid
+		typ := ""
+		var payload any
+		switch ev.Kind {
+		case acl.KindMessage:
+			typ = BusMessage
+			if d, ok := ev.Payload.(acl.MessageDelta); ok {
+				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				if d.MessageID != "" {
+					payload.(map[string]any)["msg_id"] = d.MessageID
+				}
+			}
+		case acl.KindThought:
+			typ = BusThought
+			if d, ok := ev.Payload.(acl.ThoughtDelta); ok {
+				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				if d.MessageID != "" {
+					payload.(map[string]any)["msg_id"] = d.MessageID
+				}
+			}
+		case acl.KindToolCall:
+			typ = BusToolCall
+			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
+				payload = toolPayload(ev.SessionID, agentID, d)
+			}
+		case acl.KindToolUpdate:
+			typ = BusToolUpdate
+			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
+				payload = toolPayload(ev.SessionID, agentID, d)
+			}
+		case acl.KindUserMessage:
+			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
+			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
+			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
+			o.logger.Debug("skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
+		case acl.KindUsage:
+			typ = BusUsage
+			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
+			p := map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
+			if d, ok := ev.Payload.(objusage.UsageInfo); ok {
+				p["used"], p["size"] = d.Used, d.Size
+				if d.CostAmount > 0 {
+					p["cost_amount"], p["cost_currency"] = d.CostAmount, d.CostCurrency
+				}
+				o.recordUsage(ev.SessionID, d)
+			}
+			payload = p
+		case acl.KindPermission:
+			typ = BusPermission
+			payload = ev.Payload
+		case acl.KindConfigOptions:
+			// 运行时主动推送全量配置项（dsh 在 provider 拓扑变化时推）：
+			// 刷新平台目录缓存并转发给前端，模型下拉与「当前模型」无需轮询即可保持一致。
+			if d, ok := ev.Payload.(acl.ConfigOptionsInfo); ok {
+				if d.SessionID != "" {
+					o.svc.catalog.put(agentID, runtimeID, d.Options)
+				}
+				typ = BusConfigOptions
+				payload = map[string]any{
+					"session_id": ev.SessionID,
+					"agent_id":   agentID,
+					"runtime":    runtimeID,
+					"options":    d.Options,
+				}
+			}
+		}
+		if typ != "" && payload != nil {
+			o.svc.publish(typ, ev.SessionID, payload)
+		}
+	}
+}
+
+// toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
+// （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
+func toolPayload(conversationID, agentID string, d acl.ToolCallInfo) map[string]any {
+	p := map[string]any{
+		"session_id": conversationID, "agent_id": agentID,
+		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
+	}
+	if d.Kind != "" {
+		p["kind"] = d.Kind
+	}
+	if d.Input != nil {
+		p["input"] = d.Input
+	}
+	if d.Output != nil {
+		p["output"] = d.Output
+	}
+	return p
+}
+
+// recordUsage 记录平台会话最近一次用量快照（同会话后到覆盖先到；空快照忽略）。
+func (o *Orchestrator) recordUsage(conversationID string, u objusage.UsageInfo) {
+	if conversationID == "" || !u.Reported() {
+		return
+	}
+	o.usageMu.Lock()
+	o.usage[conversationID] = u
+	o.usageMu.Unlock()
+}
+
+// LatestUsage 取会话最近一次用量快照（无上报 → false）。turn 收口落库用。
+func (o *Orchestrator) LatestUsage(conversationID string) (objusage.UsageInfo, bool) {
+	o.usageMu.Lock()
+	defer o.usageMu.Unlock()
+	u, ok := o.usage[conversationID]
+	return u, ok
+}
+
+// publishError 把错误按 acl 分类发布为 turn.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
+func (o *Orchestrator) publishError(conversationID string, err error, cli *acl.Client) {
+	ae := acl.Classify(err)
+	tail := ae.StderrTail
+	if len(tail) == 0 && cli != nil {
+		tail = acl.TailLines(cli.StderrTail(), maxDiagStderrLines)
+	}
+	o.svc.recordAgentError("", conversationID, ae, tail)
+	payload := map[string]any{
+		"session_id": conversationID,
+		"code":       ae.Code,
+		"class":      string(ae.Class),
+		"details":    ae.Details,
+	}
+	if len(tail) > 0 {
+		payload["stderr_tail"] = tail
+	}
+	o.svc.publish(BusTurnError, conversationID, payload)
+}
