@@ -96,11 +96,12 @@ func upsertConversationTx(ctx context.Context, tx *sql.Tx, sess Conversation) er
 		updated = nowRFC3339()
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO conversations(id, agent_id, cwd, title, pinned, archived, status, last_seq, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO conversations(id, agent_id, cwd, workspace_temporary, title, pinned, archived, status, last_seq, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			agent_id   = excluded.agent_id,
 			cwd        = excluded.cwd,
+			workspace_temporary = excluded.workspace_temporary,
 			title      = excluded.title,
 			pinned     = excluded.pinned,
 			archived   = excluded.archived,
@@ -108,7 +109,7 @@ func upsertConversationTx(ctx context.Context, tx *sql.Tx, sess Conversation) er
 			last_seq   = MAX(conversations.last_seq, excluded.last_seq),
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at`,
-		sess.ID, sess.AgentID, sess.Cwd, sess.Title,
+		sess.ID, sess.AgentID, sess.Cwd, boolInt(sess.WorkspaceTemporary), sess.Title,
 		boolInt(sess.Pinned), boolInt(sess.Archived), sess.Status, sess.LastSeq, created, updated)
 	if err != nil {
 		return fmt.Errorf("store: upsert conversation %q: %w", sess.ID, err)

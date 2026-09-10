@@ -3,6 +3,7 @@ package router_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,12 +20,18 @@ import (
 
 // newEngine 走真实装配路径：manager.Service + router.New（含 /v1/forge 分组与默认中间件）。
 func newEngine() *gin.Engine {
+	e, _ := newEngineWithService()
+	return e
+}
+
+// newEngineWithService 真实装配并把 Service 交出来：需要先设策略（如工作区根白名单）的用例用它。
+func newEngineWithService() (*gin.Engine, *manager.Service) {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	h := handler.New(svc, bus)
-	return router.New(h)
+	return router.New(h), svc
 }
 
 type respEnvelope struct {
@@ -214,7 +221,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 		p := m[1]
 		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/conversations") &&
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
-			!strings.HasPrefix(p, "/models") &&
+			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
 			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/health") &&
@@ -324,5 +331,175 @@ func TestAuthTokenDisabled(t *testing.T) {
 	eng.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("未配置令牌应放行: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWorkspaceRoutes 走真实装配（manager.Service）验证工作空间只读面：
+// browse 只列目录且路径与 cwd 同形态；recent 从会话派生（新库为空）。
+func TestWorkspaceRoutes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "proj"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "readme.md"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	e := newEngine()
+
+	env := get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(dir))
+	if env.Code != 0 {
+		t.Fatalf("browse 失败: %+v", env)
+	}
+	var browse handler.WorkspaceBrowseResp
+	if err := json.Unmarshal(env.Data, &browse); err != nil {
+		t.Fatalf("browse data 解析: %v", err)
+	}
+	if filepath.Base(browse.Path) != filepath.Base(dir) || len(browse.Entries) != 1 || browse.Entries[0].Name != "proj" {
+		t.Fatalf("browse 应只列目录: %+v", browse)
+	}
+	if browse.Entries[0].Path != filepath.Join(browse.Path, "proj") {
+		t.Fatalf("entry path 应为绝对路径: %+v", browse.Entries[0])
+	}
+
+	// 相对路径 → 信封非 0（工作空间校验与建会话同一套语义）。
+	if env := get(t, e, "/v1/forge/workspaces/browse?path=relative"); env.Code == 0 {
+		t.Fatalf("相对 path 应报错: %+v", env)
+	}
+
+	env = get(t, e, "/v1/forge/workspaces/recent")
+	if env.Code != 0 {
+		t.Fatalf("recent 失败: %+v", env)
+	}
+	var recent []handler.WorkspaceRecentResp
+	if err := json.Unmarshal(env.Data, &recent); err != nil {
+		t.Fatalf("recent data 解析: %v", err)
+	}
+	if len(recent) != 0 {
+		t.Fatalf("新库无会话 → recent 应为空: %+v", recent)
+	}
+
+	if env := get(t, e, "/v1/forge/workspaces/recent?limit=abc"); env.Code != 40000 {
+		t.Fatalf("非法 limit 应 40000: %+v", env)
+	}
+}
+
+// TestWorkspaceRoutesWithRoots 工作区根白名单（FORGE_WORKSPACE_ROOTS）在**真实装配**下的对外表现：
+// 越界回语义错误码（业务码 40001，而不是笼统的 code=1）、上级止步于根、roots 随响应回读。
+func TestWorkspaceRoutesWithRoots(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "ws")
+	sub := filepath.Join(root, "proj")
+	outside := filepath.Join(base, "elsewhere")
+	for _, d := range []string{sub, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	e, svc := newEngineWithService()
+	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+		t.Fatalf("SetWorkspacePolicy: %v", err)
+	}
+
+	// 缺省起点 = 首个工作区根；到根后不再给上级；roots 回读供面板解释边界。
+	env := get(t, e, "/v1/forge/workspaces/browse")
+	if env.Code != 0 {
+		t.Fatalf("browse 失败: %+v", env)
+	}
+	var browse handler.WorkspaceBrowseResp
+	if err := json.Unmarshal(env.Data, &browse); err != nil {
+		t.Fatalf("browse data 解析: %v", err)
+	}
+	if len(browse.Roots) != 1 || filepath.Base(browse.Path) != "ws" {
+		t.Fatalf("应从工作区根起步并回读 roots: %+v", browse)
+	}
+	if browse.Parent != "" {
+		t.Fatalf("到达工作区根后不应再给上级: %q", browse.Parent)
+	}
+
+	// 根内子目录：上级 = 根（允许回去）。
+	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(sub))
+	if env.Code != 0 {
+		t.Fatalf("根内浏览失败: %+v", env)
+	}
+	var subResp handler.WorkspaceBrowseResp
+	if err := json.Unmarshal(env.Data, &subResp); err != nil {
+		t.Fatalf("sub data 解析: %v", err)
+	}
+	if filepath.Base(subResp.Parent) != "ws" {
+		t.Fatalf("根内子目录的上级应为根: %+v", subResp)
+	}
+
+	// 越界：语义错误码 40001（RestErr 映射），且消息点明是哪个配置在限制。
+	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside))
+	if env.Code != 40001 {
+		t.Fatalf("越界浏览应 40001（不是笼统的 1）: %+v", env)
+	}
+	if !strings.Contains(env.Msg, "workspace_outside_roots") || !strings.Contains(env.Msg, "FORGE_WORKSPACE_ROOTS") {
+		t.Fatalf("越界错误应指明原因与配置键: %q", env.Msg)
+	}
+}
+
+// TestWorkspaceLibrariesAndFilesRoutes 资料库与"看资料"两个只读面在真实装配下的表现。
+func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "docs")
+	lib := filepath.Join(root, "合同归档")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lib, "a.pdf"), []byte("pdf"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	e, svc := newEngineWithService()
+
+	// 未配白名单 → 资料库为空数组（不是错误：策展能力需要先画边界）。
+	env := get(t, e, "/v1/forge/workspaces/libraries")
+	if env.Code != 0 {
+		t.Fatalf("libraries 失败: %+v", env)
+	}
+	var libs []handler.WorkspaceLibraryResp
+	if err := json.Unmarshal(env.Data, &libs); err != nil {
+		t.Fatalf("libraries data 解析: %v", err)
+	}
+	if len(libs) != 0 {
+		t.Fatalf("未配白名单应无资料库: %+v", libs)
+	}
+
+	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+		t.Fatalf("SetWorkspacePolicy: %v", err)
+	}
+	env = get(t, e, "/v1/forge/workspaces/libraries")
+	if env.Code != 0 {
+		t.Fatalf("libraries 失败: %+v", env)
+	}
+	if err := json.Unmarshal(env.Data, &libs); err != nil {
+		t.Fatalf("libraries data 解析: %v", err)
+	}
+	if len(libs) != 1 || libs[0].Name != "合同归档" || filepath.Base(libs[0].Root) != "docs" {
+		t.Fatalf("资料库应只有 合同归档（代建根 tmp 未创建、且即便创建也被排除）: %+v", libs)
+	}
+
+	// 目录内容：文件与目录都在，且带大小；文件条目**不可**当 cwd。
+	env = get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(lib))
+	if env.Code != 0 {
+		t.Fatalf("files 失败: %+v", env)
+	}
+	var files handler.WorkspaceFilesResp
+	if err := json.Unmarshal(env.Data, &files); err != nil {
+		t.Fatalf("files data 解析: %v", err)
+	}
+	if len(files.Entries) != 1 || files.Entries[0].IsDir || files.Entries[0].Size != 3 {
+		t.Fatalf("目录内容不符: %+v", files.Entries)
+	}
+	if env := get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(files.Entries[0].Path)); env.Code == 0 {
+		t.Fatalf("把文件当目录列内容应报错: %+v", env)
+	}
+	// 缺 path：调用方错误（不是回落到默认目录）。
+	if env := get(t, e, "/v1/forge/workspaces/files"); env.Code != 40001 {
+		t.Fatalf("缺 path 应 40001: %+v", env)
+	}
+	// 越界 → 与建会话同一个错。
+	if env := get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(base)); env.Code != 40001 {
+		t.Fatalf("越界应 40001: %+v", env)
 	}
 }

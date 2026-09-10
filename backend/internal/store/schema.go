@@ -109,6 +109,13 @@ var schemaMigrations = []migration{
 			`ALTER TABLE conversations ADD COLUMN model TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		version: 5,
+		name:    "conversations.workspace_temporary（工作空间是否平台代建：权威标志，不从路径形状反推）",
+		statements: []string{
+			`ALTER TABLE conversations ADD COLUMN workspace_temporary INTEGER NOT NULL DEFAULT 0`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

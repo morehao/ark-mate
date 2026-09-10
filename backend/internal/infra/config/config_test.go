@@ -354,3 +354,37 @@ func TestSkillMaterializeDirs(t *testing.T) {
 		t.Fatalf("空值应不启用: %+v", cfg.SkillMaterializeDirs)
 	}
 }
+
+// TestWorkspaceRoots 工作区根白名单（FORGE_WORKSPACE_ROOTS，A 的边界）解析与形态校验。
+func TestWorkspaceRoots(t *testing.T) {
+	hermetic(t)
+
+	// 逗号分隔 + 空白容忍 + 去重（同一目录写两次只会让错误信息变长）。
+	t.Setenv("FORGE_WORKSPACE_ROOTS", " /srv/ws , /data/work ,/srv/ws,")
+	cfg := Load()
+	want := []string{"/srv/ws", "/data/work"}
+	if len(cfg.WorkspaceRoots) != len(want) {
+		t.Fatalf("解析不符: %+v", cfg.WorkspaceRoots)
+	}
+	for i := range want {
+		if cfg.WorkspaceRoots[i] != want[i] {
+			t.Fatalf("第 %d 项不符: %+v", i, cfg.WorkspaceRoots)
+		}
+	}
+
+	// 相对路径不是边界（比较基于真身，必须能解析成绝对路径）→ 启动即报错。
+	for _, bad := range []string{"relative/root", "/srv/ws,relative"} {
+		t.Setenv("FORGE_WORKSPACE_ROOTS", bad)
+		if _, _, err := LoadResolved(""); err == nil {
+			t.Fatalf("非法配置 %q 应报错", bad)
+		}
+	}
+
+	// 未设置 / 显式空 = 不限制（空切片，与"未设置"同义）。
+	for _, v := range []string{"", "   "} {
+		t.Setenv("FORGE_WORKSPACE_ROOTS", v)
+		if cfg := Load(); len(cfg.WorkspaceRoots) != 0 {
+			t.Fatalf("空值应等于不限制: %+v", cfg.WorkspaceRoots)
+		}
+	}
+}

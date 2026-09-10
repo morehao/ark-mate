@@ -7,18 +7,19 @@ import (
 )
 
 // conversationColumns 全列查询（scanConversations 用）。
-const conversationColumns = `id, agent_id, cwd, provider, model, runtime_hint, provider_session_id, title, pinned, archived, status, last_seq, created_at, updated_at`
+const conversationColumns = `id, agent_id, cwd, workspace_temporary, provider, model, runtime_hint, provider_session_id, title, pinned, archived, status, last_seq, created_at, updated_at`
 
 func scanConversation(row interface{ Scan(...any) error }) (Conversation, error) {
 	var s Conversation
-	var pinned, archived int
+	var pinned, archived, workspaceTemporary int
 	var created, updated string
-	if err := row.Scan(&s.ID, &s.AgentID, &s.Cwd, &s.Provider, &s.Model, &s.RuntimeHint,
+	if err := row.Scan(&s.ID, &s.AgentID, &s.Cwd, &workspaceTemporary, &s.Provider, &s.Model, &s.RuntimeHint,
 		&s.ProviderSessionID, &s.Title, &pinned, &archived, &s.Status, &s.LastSeq, &created, &updated); err != nil {
 		return Conversation{}, err
 	}
 	s.Pinned = intBool(pinned)
 	s.Archived = intBool(archived)
+	s.WorkspaceTemporary = intBool(workspaceTemporary)
 	s.CreatedAt = parseTS(created)
 	s.UpdatedAt = parseTS(updated)
 	return s, nil
@@ -35,11 +36,12 @@ func (s *Store) UpsertConversation(ctx context.Context, sess Conversation) error
 		updated = nowRFC3339()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversations(id, agent_id, cwd, provider, model, runtime_hint, provider_session_id, title, pinned, archived, status, last_seq, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO conversations(id, agent_id, cwd, workspace_temporary, provider, model, runtime_hint, provider_session_id, title, pinned, archived, status, last_seq, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			agent_id     = excluded.agent_id,
 			cwd          = excluded.cwd,
+			workspace_temporary = excluded.workspace_temporary,
 			provider     = excluded.provider,
 			model        = excluded.model,
 			runtime_hint = excluded.runtime_hint,
@@ -51,7 +53,8 @@ func (s *Store) UpsertConversation(ctx context.Context, sess Conversation) error
 			last_seq     = MAX(conversations.last_seq, excluded.last_seq),
 			created_at   = excluded.created_at,
 			updated_at   = excluded.updated_at`,
-		sess.ID, sess.AgentID, sess.Cwd, sess.Provider, sess.Model, sess.RuntimeHint, sess.ProviderSessionID, sess.Title,
+		sess.ID, sess.AgentID, sess.Cwd, boolInt(sess.WorkspaceTemporary), sess.Provider, sess.Model, sess.RuntimeHint,
+		sess.ProviderSessionID, sess.Title,
 		boolInt(sess.Pinned), boolInt(sess.Archived), sess.Status, sess.LastSeq, created, updated)
 	return err
 }

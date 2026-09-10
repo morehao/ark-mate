@@ -66,6 +66,15 @@ type Config struct {
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
 	// FORGE_CAPABILITIES 覆盖，默认 ~/.forge/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
+	// WorkspaceDir 代建工作空间的根目录（FORGE_WORKSPACE_DIR 覆盖，默认 ~/.forge/workspaces）。
+	// 建会话未指定 cwd 时在 <dir>/<会话id>/ 下建临时工作空间。**空 = 关闭代建**：
+	// 此时未指定 cwd 直接报 workspace_required（绝不回落 serve 进程目录，见 manager.ResolveWorkspace）。
+	WorkspaceDir string
+	// WorkspaceRoots 允许作为工作空间的根白名单（FORGE_WORKSPACE_ROOTS，逗号分隔绝对路径；
+	// 默认空 = 不限制，保持本机单操作员零配置）。非空时**显式 cwd 与目录浏览都收在根内**：
+	// 浏览不能越过根向上，代建根必须落在某个根之内（不自洽则启动失败，见 SetWorkspacePolicy）。
+	// 用途：容器化/对外提供服务时，目录浏览不再等价于"暴露整个 rootfs 结构"。
+	WorkspaceRoots []string
 	// SkillMaterializeDir skill 物化目标根目录（§5.4/§16.5；FORGE_SKILLS_MATERIALIZE_DIR 覆盖，
 	// 默认空 = 关闭）。非空时 serve 启动装载能力后把 opencode SKILL.md 源 skill 物化到该目录
 	// （<dir>/<skillID>/SKILL.md，opencode v1 自动扫描约定）。目标多为真实 opencode 用户目录，
@@ -170,6 +179,8 @@ var knownKeys = map[string]string{
 	"store":                   "FORGE_STORE",
 	"agents":                  "FORGE_AGENTS",
 	"capabilities":            "FORGE_CAPABILITIES",
+	"workspace_dir":           "FORGE_WORKSPACE_DIR",
+	"workspace_roots":         "FORGE_WORKSPACE_ROOTS",
 	"skills_materialize_dir":  "FORGE_SKILLS_MATERIALIZE_DIR",
 	"skills_materialize_dirs": "FORGE_SKILLS_MATERIALIZE_DIRS",
 	"idle_timeout":            "FORGE_IDLE_TIMEOUT",
@@ -281,6 +292,10 @@ func LoadResolved(dir string) (Config, Sources, error) {
 	// FORGE_PROC_REGISTRY 特例：显式设置为空/off 也要覆盖文件配置（关闭登记）。
 	if v, ok := os.LookupEnv("FORGE_PROC_REGISTRY"); ok {
 		r.set("proc_registry", v, SourceEnv)
+	}
+	// FORGE_WORKSPACE_DIR 同理：显式设置为空/off 要能覆盖文件配置（关闭代建）。
+	if v, ok := os.LookupEnv("FORGE_WORKSPACE_DIR"); ok {
+		r.set("workspace_dir", v, SourceEnv)
 	}
 
 	c, err := materialize(r)
@@ -481,6 +496,27 @@ func materialize(r *resolver) (Config, error) {
 	} else {
 		c.CapabilityDir = filepath.Join(home, "capabilities")
 	}
+	// workspace_dir：显式设置优先（off/disable/none/空 = 关闭代建）；未设置时派生自数据目录。
+	if v, ok := r.get("workspace_dir"); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "off", "disable", "disabled", "none", "":
+			c.WorkspaceDir = ""
+		default:
+			c.WorkspaceDir = v
+		}
+	} else {
+		c.WorkspaceDir = filepath.Join(home, "workspaces")
+	}
+	// workspace_roots：白名单（逗号分隔绝对路径，空 = 不限制）。
+	// 只校验**形式**（非空 + 绝对）；「代建根必须落在白名单内」这条**跨键**约束在装配时判定
+	// （manager.SetWorkspacePolicy），因为比较必须解析符号链接真身，而那是 manager 的职责。
+	if v, ok := r.get("workspace_roots"); ok {
+		roots, err := parseWorkspaceRoots(v)
+		if err != nil {
+			return bad("workspace_roots", err.Error())
+		}
+		c.WorkspaceRoots = roots
+	}
 	// proc_registry：显式设置优先；off/disable/none = 关闭；未设置时派生自 DB 目录。
 	if v, ok := r.get("proc_registry"); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -576,6 +612,31 @@ func loadEnvFile(path string, r *resolver) error {
 		r.set(key, val, SourceEnvFile)
 	}
 	return nil
+}
+
+// parseWorkspaceRoots 解析允许的工作区根白名单（逗号分隔绝对路径）。
+// 规则：跳过空项；每项必须是绝对路径（相对路径无法作为边界，且后续比较基于真身）；
+// 去重（同一目录写两次只会让错误信息变长）。
+func parseWorkspaceRoots(v string) ([]string, error) {
+	out := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if !filepath.IsAbs(item) {
+			return nil, fmt.Errorf("需为绝对路径，得到 %q", item)
+		}
+		clean := filepath.Clean(item)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	// 全空（如显式设为空格）= 不限制：与"未设置"同义，不报错（便于用 env 临时放开）。
+	return out, nil
 }
 
 // parseSkillMaterializeDirs 解析 `runtime=dir[,runtime=dir]`（C4 多 root 投影）。

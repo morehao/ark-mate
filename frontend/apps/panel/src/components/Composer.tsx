@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button } from 'antd'
-import { ArrowUpOutlined } from '@ant-design/icons'
+import { Button, Tooltip } from 'antd'
+import { ArrowUpOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+
+/** 末级目录名（路径末段；根目录回落到原串，避免展示成空）。 */
+function workspaceName(path: string): string {
+  const p = path.replace(/[/\\]+$/, '')
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(i + 1) || p : p
+}
 
 interface Props {
   busy: boolean
@@ -10,10 +17,16 @@ interface Props {
   placeholder?: string
   onSend: (text: string) => void
   autoFocus?: boolean
+  /**
+   * 本会话的工作空间（只读展示）。工作空间创建时定稿、之后不可变——它是底座 ACP session
+   * 的 cwd，也是原生权限 `workspace-write` 的沙箱边界，所以这里没有"改目录"入口：
+   * 要换目录就新开一个会话。`temporary` 为服务端权威标志（平台代建）。
+   */
+  workspace?: { path: string; temporary: boolean }
 }
 
 /** 输入区（console.html .composer）：自动增高 textarea + 底部提示行（可切发送键档）+ 发送按钮。 */
-export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Props) {
+export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, workspace }: Props) {
   const [draft, setDraft] = useState('')
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
@@ -105,6 +118,35 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus }: Pro
             }}
           >
             {busy && busyNote && <span style={{ color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>{busyNote}</span>}
+            {/* 本会话在哪工作：只读（工作空间创建即定稿，要换目录就新开会话）。
+                形态对齐 goose 的 DirSwitcher：图标 + 目录名，完整路径走 tooltip；
+                平台分配的目录没有有意义的目录名（末级是会话 id），故直接用「平台分配的目录」
+                作标签——不去显示一串 uuid 冒充目录名。 */}
+            {workspace && (
+              <Tooltip
+                title={
+                  <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
+                    {workspace.path}
+                    {workspace.temporary && (
+                      <>
+                        <br />
+                        <span style={{ fontFamily: tokens.fontFamily, color: tokens.textPlaceholder }}>
+                          平台分配：会话创建时自动分配，创建后不可更改
+                        </span>
+                      </>
+                    )}
+                  </span>
+                }
+                placement="top"
+              >
+                <span className="fg-ws-pill" style={{ height: 22, flex: 'none', cursor: 'default' }}>
+                  <FolderOpenOutlined style={{ fontSize: 10, color: tokens.textPlaceholder }} />
+                  <span className="fg-ws-pill-name">
+                    {workspace.temporary ? '平台分配的目录' : workspaceName(workspace.path)}
+                  </span>
+                </span>
+              </Tooltip>
+            )}
             <button
               type="button"
               title="点击切换发送键：Enter 发送 / Enter 换行"

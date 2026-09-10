@@ -257,7 +257,7 @@ func TestServiceRESTValidation(t *testing.T) {
 // TestStartConversationUnknownAgent 未知 agent → agent_not_found（拨号前拦截，不发网络）。
 func TestStartConversationUnknownAgent(t *testing.T) {
 	_, orch, _ := newTestRig(t)
-	_, err := orch.StartConversation(context.Background(), "ghost-agent", "/tmp", runtime.ModelConfig{})
+	_, err := orch.StartConversation(context.Background(), "ghost-agent", StartOptions{Cwd: "/tmp"})
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "agent_not_found" {
 		t.Fatalf("期望 agent_not_found，got %v", err)
@@ -271,7 +271,7 @@ func TestStartConversationUnknownRuntime(t *testing.T) {
 	svc.mu.Lock()
 	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost", Runtimes: []string{"not-registered"}}
 	svc.mu.Unlock()
-	_, err := orch.StartConversation(context.Background(), "agent-ghost", "/tmp", runtime.ModelConfig{})
+	_, err := orch.StartConversation(context.Background(), "agent-ghost", StartOptions{Cwd: "/tmp"})
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)

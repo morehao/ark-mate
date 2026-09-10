@@ -40,6 +40,10 @@ import type {
   ExportResp,
   UsageQuery,
   UsageSummary,
+  WorkspaceBrowseResp,
+  WorkspaceFilesResp,
+  WorkspaceLibrary,
+  WorkspaceRecent,
 } from '@ark/types'
 
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
@@ -50,9 +54,48 @@ export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/forge/agen
 export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
   http.get<AgentDiagnostics>(`/forge/agents/${encodeURIComponent(id)}/diagnostics`)
 
-/** 列出未归档会话（`archived=true` 列出已归档）。 */
-export const listConversations = (archived = false): Promise<ConversationSummary[]> =>
-  http.get<ConversationSummary[]>(`/forge/conversations${archived ? '?archived=true' : ''}`)
+/** 列出未归档会话（`archived=true` 列出已归档；`cwd` 非空 = 只列工作空间精确等于该路径的会话）。 */
+export const listConversations = (archived = false, cwd?: string): Promise<ConversationSummary[]> => {
+  const s = new URLSearchParams()
+  if (archived) s.set('archived', 'true')
+  if (cwd) s.set('cwd', cwd)
+  const q = s.toString()
+  return http.get<ConversationSummary[]>(`/forge/conversations${q ? `?${q}` : ''}`)
+}
+
+/**
+ * 浏览某绝对路径下的子目录（Web 无原生目录选择器，故由服务端提供只读枚举）。
+ * `path` 缺省 = 服务进程家目录；只列目录，返回的 `entries[].path` 可直接作为建会话 cwd。
+ */
+export const browseWorkspaces = (path?: string, hidden = false): Promise<WorkspaceBrowseResp> => {
+  const s = new URLSearchParams()
+  if (path) s.set('path', path)
+  if (hidden) s.set('hidden', 'true')
+  const q = s.toString()
+  return http.get<WorkspaceBrowseResp>(`/forge/workspaces/browse${q ? `?${q}` : ''}`)
+}
+
+/**
+ * 资料库列表（工作区根下的一级子目录，服务端零新状态）。
+ * 未配 `FORGE_WORKSPACE_ROOTS` 时返回空数组。
+ */
+export const workspaceLibraries = (): Promise<WorkspaceLibrary[]> =>
+  http.get<WorkspaceLibrary[]>('/forge/workspaces/libraries')
+
+/**
+ * 列目录**内容**（文件 + 子目录，带大小/修改时间）——"看资料"面。
+ * 与 `browseWorkspaces` 分工：那个用于选工作空间（只列目录），这个用于看内容；
+ * 这里的 `entries[].path` **不可**作为建会话 cwd。
+ */
+export const workspaceFiles = (path: string, hidden = false): Promise<WorkspaceFilesResp> => {
+  const s = new URLSearchParams({ path })
+  if (hidden) s.set('hidden', 'true')
+  return http.get<WorkspaceFilesResp>(`/forge/workspaces/files?${s.toString()}`)
+}
+
+/** 最近使用的工作空间（服务端从既有会话派生；排除平台代建的临时空间）。 */
+export const recentWorkspaces = (limit = 10): Promise<WorkspaceRecent[]> =>
+  http.get<WorkspaceRecent[]>(`/forge/workspaces/recent?limit=${limit}`)
 
 /** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
 export const conversationSearch = (q: string, limit = 30): Promise<ConversationSearchHit[]> => {

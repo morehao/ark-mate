@@ -207,11 +207,15 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/runtimes` | 底座列表（ACP adapter 注册表） |
 | GET | `/providers` · PATCH `/providers/:id` | provider 档案列表 / 更新 `{type?, model?, key?}`（密钥只写不读回，仅 `has_key`） |
 | GET | `/models` | 运行时派生的模型目录（`?agent=<id>`，缺省默认 agent）：ACP 会话配置项直投影 `{source, options[{category,id,name,type,current_value,values[{value,name,group,…}]}], auth_guidance}`；`source`=`session\|resume\|cache\|none`，平台无内置清单 |
-| GET | `/conversations` | 会话列表（`?archived=true` 过滤归档） |
+| GET | `/conversations` | 会话列表（`?archived=true` 过滤归档；`?cwd=<绝对路径>` 只返回工作空间**精确等于**该路径的会话，用于「按工作空间查看/分组」）。每条会话回读 `cwd` 与 `workspace_temporary` |
+| GET | `/workspaces/browse` | 目录浏览（`?path=<绝对路径>`（缺省 = 首个工作区根，未配白名单时= 服务进程家目录）、`?hidden=true` 含隐藏目录）：**只列目录** → `{path, parent, home, roots, entries:[{name, path}]}`；`entries[].path` 与建会话 cwd 同形态（已符号链接规范化），可直接提交。配了 `FORGE_WORKSPACE_ROOTS` 时被收窄：越界 `path` → `workspace_outside_roots`，`parent` 到根为止（越不过去），根外的符号链接子项不列出，`home` 不在根内则不返回 |
+| GET | `/workspaces/libraries` | **资料库**列表 = `FORGE_WORKSPACE_ROOTS` 下的一级子目录（`{name, path, root, last_used_at, conversations}`，按名排序）：**零新状态**（不存登记表，目录名即资料库名），未配白名单时为空数组。用途是资料/文档场景"选名字而不是选绝对路径" |
+| GET | `/workspaces/files` | 目录**内容**清单（`?path=<绝对目录>` 必填、`?hidden=true` 含隐藏项）：`{path, roots, entries:[{name, path, is_dir, size, modified_at}]}`（目录在前、文件在后）。与 `browse` 分工：**browse 用于选工作空间**（只列目录，条目可直接当 cwd），**files 用于看资料**（列文件，条目**不可**当 cwd）。边界与 browse 一致（越界拒绝、根外真身的符号链接不列） |
+| GET | `/workspaces/recent` | 最近使用的工作空间（`?limit=` 默认 10 上限 50）：**从既有会话派生**（`{path, name, last_used_at, conversations}`，按最近使用倒序、同目录聚合计数、排除平台代建的临时空间），不另存状态 |
 | GET | `/conversations/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/conversations/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |
-| POST | `/conversations` | `{agent_id, prompt?, cwd?, runtime_hint?, model?}` → `{id, event_seq, …}`（带 prompt 则后台起首轮；`model` 为 `GET /models` 的 `options[category=model]` 里的**不透明 `value`**，原样回传、经 `session/set_config_option` 会话级应用，运行时拒绝即建会话失败） |
+| POST | `/conversations` | `{agent_id, prompt?, cwd?, runtime_hint?, model?}` → `{id, event_seq, cwd, workspace_temporary, …}`（带 prompt 则后台起首轮；`model` 为 `GET /models` 的 `options[category=model]` 里的**不透明 `value`**，原样回传、经 `session/set_config_option` 会话级应用，运行时拒绝即建会话失败）。**工作空间**：`cwd` 非空时校验「绝对 / 存在 / 是目录」并按符号链接规范化，且（若配了 `FORGE_WORKSPACE_ROOTS`）必须落在某个允许的工作区根之内，否则报 `workspace_outside_roots`；为空时平台在 `FORGE_WORKSPACE_DIR`（默认 `~/.forge/workspaces`）下按**会话 id** 代建 `<id>/` 并回 `workspace_temporary=true`；代建关闭（`workspace_dir` 为空）且未指定则报 `workspace_required`——**不回落 serve 进程目录**（那会让所有会话共用一个沙箱边界）。工作空间建成即不可变（它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的边界） |
 | GET | `/conversations/:id` | 会话详情（元数据 + 挂起权限 + 权限记忆） |
 | PATCH | `/conversations/:id` | 元数据更新 `{title?, pinned?, archived?, model?}`（`model` 会话级模型：opencode 仅创建时可选，dsh 会话内即时） |
 | GET | `/conversations/:id/history` | 事件回放（`?after=` 向后 / `?before=` 向前（加载更早，`before=0`=末尾一页）互斥 + `limit`，默认 200/上限 1000；sqlite 模式读 events 表可翻到会话第一条） |

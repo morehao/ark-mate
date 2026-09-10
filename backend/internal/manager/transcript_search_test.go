@@ -25,7 +25,7 @@ func TestSearchConversations(t *testing.T) {
 			ID: id, AgentID: agent, Status: ConversationStatusCompleted,
 			Title: title, Archived: archived, CreatedAt: at, UpdatedAt: at,
 		})
-		svc.beginTranscript(id, agent, runtimeID, "/tmp")
+		svc.beginTranscript(id, agent, runtimeID, "/tmp", false)
 	}
 	now := time.Now().UTC()
 	// sA：正文两处命中「银河」

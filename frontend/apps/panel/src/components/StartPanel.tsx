@@ -7,7 +7,9 @@ import { modelValues } from '@ark/types'
 import { useForge } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
+import { WorkspacePicker } from './WorkspacePicker'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+import { browseWorkspaces } from '@ark/api'
 
 // 新建会话时记住的「上次所选模型」。
 const LAST_MODEL_KEY = 'forge.panel.lastModel'
@@ -39,6 +41,13 @@ export function StartPanel() {
     const v = localStorage.getItem(LAST_MODEL_KEY)
     return v && v.trim() ? v : null
   })
+  // 工作空间：null = 不指定（平台在创建时按会话 id 代建一个独立目录）。
+  //
+  // 每次新建会话**都从未指定开始**，刻意不记住上一次的选择：工作空间是会话的沙箱边界，
+  // 复用上一次的目录等于让新会话继承上一个任务的上下文边界（新任务会读到、甚至改到上一个
+  // 任务的文件），且"我这次要处理哪里"本来就该每次明确一次。目录靠选择器的「资料库 / 最近」
+  // 一栏一次点击就能选回来，不存在"每次都要重新翻目录树"的负担。
+  const [workspace, setWorkspace] = useState<string | null>(null)
 
   // 新建固定用「当前 Agent」（后端 agent_id 缺省时取它；缺省回落内置种子 dsh），前端无需再传 agent。
   const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
@@ -72,14 +81,31 @@ export function StartPanel() {
     }
   }, [model, modelOptions])
 
+  // 已选工作空间若已不存在（目录被删/被移走），就地清掉：否则要等首轮发送才被服务端拒
+  // （40001），用户先看到的是一个失败气泡而不是一个可修的状态。
+  // 存在时顺带把值对齐成服务端形态（服务端做符号链接规范化），避免同一目录两种写法。
+  useEffect(() => {
+    if (!workspace) return
+    let alive = true
+    browseWorkspaces(workspace)
+      .then((resp) => {
+        if (!alive || resp.path === workspace) return
+        setWorkspace(resp.path)
+      })
+      .catch(() => {
+        if (!alive) return
+        setWorkspace(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [workspace])
+
   const send = async () => {
     if (!canSend) return
     setSending(true)
     try {
-      const id = await createAndRun(
-        draft.trim(),
-        model ? { modelID: model } : undefined,
-      )
+      const id = await createAndRun(draft.trim(), model ? { modelID: model } : undefined, workspace)
       if (model) localStorage.setItem(LAST_MODEL_KEY, model)
       if (id) navigate(`/conversations/${id}`)
     } finally {
@@ -195,24 +221,28 @@ export function StartPanel() {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'flex-start',
-                gap: 1,
+                gap: 3,
                 flex: '1 1 auto',
                 minWidth: 0,
                 overflow: 'hidden',
               }}
             >
-              <span
-                style={{
-                  maxWidth: '100%',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  fontFamily: tokens.fontMono,
-                  fontSize: 11.5,
-                  color: tokens.textSecondary,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                在项目中工作
+              {/* 「在项目中工作」= 会话工作空间（对应 goose 底栏的 DirSwitcher 位置）。
+                  它是这次会话的沙箱边界，所以未选时也不留白：药丸显示动作「选择目录」，
+                  hover 说明未指定时由平台分配，不让用户以为这个设置没生效。 */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%' }}>
+                <span
+                  style={{
+                    flex: 'none',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 11.5,
+                    color: tokens.textSecondary,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  在项目中工作
+                </span>
+                <WorkspacePicker value={workspace} onChange={setWorkspace} disabled={sending} />
               </span>
               <button
                 type="button"

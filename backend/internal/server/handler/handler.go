@@ -36,8 +36,21 @@ type Service interface {
 	ModelCatalog(ctx context.Context, agentID string) (*ModelCatalogResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
-	// ListConversations 返回会话概要（可按 archived 过滤）。
-	ListConversations(archived bool) ([]ConversationResp, error)
+	// ListConversations 返回会话概要（可按 archived 过滤；cwd 非空 = 只返回工作空间
+	// **精确等于**该路径的会话，用于「按工作空间查看/分组」。路径须为绝对路径）。
+	ListConversations(archived bool, cwd string) ([]ConversationResp, error)
+	// BrowseWorkspace 浏览某绝对路径下的**子目录**（只读；path 空 = 服务进程家目录）。
+	// Web 端无原生目录选择器，故由控制面提供枚举能力。
+	BrowseWorkspace(path string, includeHidden bool) (*WorkspaceBrowseResp, error)
+	// RecentWorkspaces 返回最近使用过的工作空间（**从既有会话派生**，不额外维护状态：
+	// 排除平台代建的临时空间，按最近使用倒序去重，供选择器"最近"一栏）。
+	RecentWorkspaces(limit int) ([]WorkspaceRecentResp, error)
+	// WorkspaceLibraries 返回资料库列表（工作区根下的一级子目录，零新状态：
+	// 目录名即资料库名，让资料/文档场景的用户不必面对绝对路径）。
+	WorkspaceLibraries() ([]WorkspaceLibraryResp, error)
+	// ListWorkspaceFiles 列出某目录的**内容**（文件 + 子目录，只读；与 BrowseWorkspace 分工：
+	// 那个用于"选工作空间"，这个用于"看资料"）。
+	ListWorkspaceFiles(path string, includeHidden bool) (*WorkspaceFilesResp, error)
 	// SearchConversations 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
 	SearchConversations(ctx context.Context, q string, limit int) ([]ConversationSearchHit, error)
 	// GetConversation 返回单会话详情（含元数据 + 挂起权限）。
@@ -510,18 +523,91 @@ type AgentMcpServerResp struct {
 	Runtimes  []string `json:"runtimes"`
 }
 
+// WorkspaceBrowseResp 目录浏览结果（只读）。
+// 只列目录：工作空间必须是目录（绝对 / 存在 / is_dir 三条件之一）。
+type WorkspaceBrowseResp struct {
+	// Path 规范化后的当前目录绝对路径（与建会话 cwd 同一形态：已做符号链接规范化）。
+	Path string `json:"path"`
+	// Parent 上级目录（到达文件系统根**或已配置的工作区根**时为空，前端据此禁用"上级"）。
+	Parent string `json:"parent,omitempty"`
+	// Home 服务进程家目录（前端"回到主目录"用；不可得或不在工作区根白名单内时为空）。
+	Home string `json:"home,omitempty"`
+	// Roots 生效的工作区根白名单（FORGE_WORKSPACE_ROOTS；空 = 不限制）。
+	// 透出给面板是为了让"为什么上不去了"有解释，也让它能把根直接列成入口。
+	Roots []string `json:"roots,omitempty"`
+	// Entries 子目录列表（按名称升序；默认隐藏 "." 开头的目录；
+	// 配了白名单时，真身落在根外的符号链接子项不会被列出——点了必被拒，不如不给）。
+	Entries []WorkspaceEntryResp `json:"entries"`
+}
+
+// WorkspaceEntryResp 浏览结果中的一个候选子目录。
+type WorkspaceEntryResp struct {
+	Name string `json:"name"` // 目录名（不含路径）
+	Path string `json:"path"` // 绝对路径（可直接作为建会话的 cwd）
+}
+
+// WorkspaceRecentResp 最近使用过的工作空间（从既有会话派生）。
+type WorkspaceRecentResp struct {
+	Path string `json:"path"`
+	Name string `json:"name"` // 末级目录名（展示用）
+	// LastUsedAt 最近一次使用时间（该工作空间下最新会话的 updated_at）。
+	LastUsedAt string `json:"last_used_at"`
+	// Conversations 该工作空间下的会话数（含归档；不含代建的临时空间自身）。
+	Conversations int `json:"conversations"`
+}
+
+// WorkspaceLibraryResp 资料库 = 工作区根下的一级子目录（给"选名字而不是选路径"用）。
+// 派生自 FORGE_WORKSPACE_ROOTS + 文件系统，不另存登记表：见 manager.WorkspaceLibraries。
+type WorkspaceLibraryResp struct {
+	Path string `json:"path"` // 绝对路径（可直接作为建会话的 cwd）
+	Name string `json:"name"` // 目录名即资料库名
+	Root string `json:"root"` // 它属于哪个工作区根
+	// LastUsedAt 该资料库下最新会话的 updated_at（从未用过则为空，不是 zero time）。
+	LastUsedAt string `json:"last_used_at,omitempty"`
+	// Conversations 该资料库下的会话数（含归档）。
+	Conversations int `json:"conversations"`
+}
+
+// WorkspaceFilesResp 目录内容清单（只读的"看资料"面，与浏览面分工见 manager.ListWorkspaceFiles）。
+type WorkspaceFilesResp struct {
+	// Path 规范化后的目录绝对路径。
+	Path string `json:"path"`
+	// Roots 生效的工作区根白名单（空 = 不限制）。
+	Roots []string `json:"roots,omitempty"`
+	// Entries 目录内容（目录在前、文件在后，各自按名升序）。
+	// 注意：文件条目的 Path **不可**作为建会话 cwd（工作空间必须是目录）。
+	Entries []WorkspaceFileEntryResp `json:"entries"`
+}
+
+// WorkspaceFileEntryResp 目录内容中的一项（文件或子目录）。
+type WorkspaceFileEntryResp struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+	// Size 字节数（符号链接取真身大小）。
+	Size int64 `json:"size"`
+	// ModifiedAt 最后修改时间（RFC3339，UTC）。
+	ModifiedAt string `json:"modified_at"`
+}
+
 // ConversationResp 会话的对外表示（P0 起不含 runtime）。
 type ConversationResp struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
-	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Pinned    bool   `json:"pinned"`
-	Archived  bool   `json:"archived"`
-	Provider  string `json:"provider,omitempty"` // provider 档案 id（会话级模型选择）
-	Model     string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID       string `json:"id"`
+	AgentID  string `json:"agent_id"`
+	Status   string `json:"status"`
+	Title    string `json:"title"`
+	Pinned   bool   `json:"pinned"`
+	Archived bool   `json:"archived"`
+	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
+	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
+	Cwd string `json:"cwd,omitempty"`
+	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
+	// **权威标志**：调用方据此判断"临时空间"，不得从路径形状反推（前缀可配置）。
+	WorkspaceTemporary bool   `json:"workspace_temporary"`
+	Provider           string `json:"provider,omitempty"` // provider 档案 id（会话级模型选择）
+	Model              string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 // ConversationSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
@@ -646,7 +732,10 @@ type ConversationPatch struct {
 type ConversationCreateReq struct {
 	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
-	Cwd     string `json:"cwd,omitempty"`
+	// Cwd 会话工作空间（绝对路径）。空 = 平台代建临时空间（见响应 workspace_temporary）；
+	// 非空时校验「绝对 / 存在 / 是目录」，通过后按符号链接规范化落库。
+	// 工作空间建成后不可变——它是底座 ACP session 的 cwd，也是原生权限 workspace-write 的边界。
+	Cwd string `json:"cwd,omitempty"`
 	// Model 运行时目录（GET /models 的 options[category=model].values[].value）里的**不透明取值**，
 	// 原样回传（空 = 跟随运行时默认）。
 	Model string `json:"model,omitempty"`
@@ -658,6 +747,10 @@ type ConversationCreateResp struct {
 	AgentID  string `json:"agent_id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
+	// Cwd / WorkspaceTemporary 定稿后的工作空间与其"是否平台代建"权威标志；
+	// 创建即回读，前端无需二次查询即可显示「在哪里工作」。
+	Cwd                string `json:"cwd,omitempty"`
+	WorkspaceTemporary bool   `json:"workspace_temporary"`
 }
 
 // ConversationPromptResp 追加 prompt 响应。
@@ -780,6 +873,7 @@ type ElicitationResolveReq struct {
 type Handler struct {
 	Agent        *AgentHandler
 	Conversation *ConversationHandler
+	Workspace    *WorkspaceHandler
 	Runtime      *RuntimeHandler
 	Provider     *ProviderHandler
 	Model        *ModelsHandler
@@ -798,6 +892,7 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 	return &Handler{
 		Agent:        &AgentHandler{svc: svc},
 		Conversation: &ConversationHandler{svc: svc},
+		Workspace:    &WorkspaceHandler{svc: svc},
 		Runtime:      &RuntimeHandler{svc: svc},
 		Provider:     &ProviderHandler{svc: svc},
 		Model:        &ModelsHandler{svc: svc},

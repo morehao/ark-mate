@@ -7,6 +7,17 @@ export interface ConversationSummary {
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
+  /**
+   * 会话工作空间（服务端规范化后的绝对路径；创建时定稿、之后不可变）。
+   * 它同时是底座 ACP session 的 cwd 与原生权限 `workspace-write` 的边界。
+   * 历史会话可能缺省（早于工作空间模型落库的行）。
+   */
+  cwd?: string
+  /**
+   * 该工作空间是否由平台代建（未指定 cwd 时在服务端 `workspace_dir` 下按会话 id 建）。
+   * **权威标志**：判定「临时空间」只读它，不要从路径形状/前缀反推（前缀可配置）。
+   */
+  workspace_temporary?: boolean
   /** provider 档案 id（会话级模型选择；空 = 跟随 agent）。 */
   provider?: string
   /** 会话级模型 id（空 = 底座默认）。 */
@@ -238,6 +249,12 @@ export interface CreateConversationReq {
   /** 空 = 后端默认播种 Agent（dsh）。 */
   agent_id?: string
   prompt: string
+  /**
+   * 会话工作空间（绝对路径）。空 = 平台代建临时空间（响应回 `workspace_temporary=true`；
+   * 面板里的用户可见文案称「平台分配的目录」——同一件事，避免 UI 出现"代建"这类内部术语）。
+   * 非空时服务端校验「绝对 / 存在 / 是目录」并按符号链接规范化——
+   * 建议直接提交 `WorkspaceBrowseResp.entries[].path` 或 `WorkspaceRecent.path` 的原文。
+   */
   cwd?: string
   /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
   model?: string
@@ -248,6 +265,10 @@ export interface CreateConversationResp {
   agent_id: string
   status: ConversationStatus
   event_seq: number // 已发布事件水位：WS attach 续传起点
+  /** 定稿后的工作空间（创建即回读，无需二次查询）。 */
+  cwd?: string
+  /** 该工作空间是否由平台代建（权威标志）。 */
+  workspace_temporary?: boolean
 }
 
 export interface PromptReq {

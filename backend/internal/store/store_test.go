@@ -348,3 +348,47 @@ func TestEventsBefore(t *testing.T) {
 		t.Fatalf("末尾页不符: len=%d more=%v %+v", len(tail), more3, tail)
 	}
 }
+
+// TestConversationWorkspaceRoundTrip 工作空间字段（cwd + workspace_temporary）落库往返。
+// 权限标志必须是**权威断言**：前端/离线回放不得从路径形状推断"临时空间"。
+func TestConversationWorkspaceRoundTrip(t *testing.T) {
+	s := openMem(t)
+	now := time.Now().UTC()
+	in := Conversation{
+		ID: "ws-1", AgentID: "agent-opencode",
+		Cwd: "/work/alpha", WorkspaceTemporary: true,
+		Status: "in_progress", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.UpsertConversation(ctxT(), in); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+	got, ok, err := s.GetConversation(ctxT(), "ws-1")
+	if err != nil || !ok {
+		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+	}
+	if got.Cwd != "/work/alpha" || !got.WorkspaceTemporary {
+		t.Fatalf("工作空间字段未往返: %+v", got)
+	}
+
+	// 覆盖写：显式指定（非临时）的新值必须能覆盖旧值（不是只写一次的"创建期标志"）。
+	in.WorkspaceTemporary = false
+	in.Cwd = "/work/beta"
+	if err := s.UpsertConversation(ctxT(), in); err != nil {
+		t.Fatalf("UpsertConversation(覆盖): %v", err)
+	}
+	got, _, _ = s.GetConversation(ctxT(), "ws-1")
+	if got.Cwd != "/work/beta" || got.WorkspaceTemporary {
+		t.Fatalf("覆盖写未生效: %+v", got)
+	}
+
+	// ListConversations 列表路径也带出该列（v5 迁移后的全列查询）。
+	list, err := s.ListConversations(ctxT(), nil)
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	for _, c := range list {
+		if c.ID == "ws-1" && (c.Cwd != "/work/beta" || c.WorkspaceTemporary) {
+			t.Fatalf("列表路径字段不符: %+v", c)
+		}
+	}
+}

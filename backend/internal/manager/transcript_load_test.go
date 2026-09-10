@@ -38,7 +38,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 
-	conversations, err := svc.ListConversations(false)
+	conversations, err := svc.ListConversations(false, "")
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 	})
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
-	conversations, _ := svc.ListConversations(false)
+	conversations, _ := svc.ListConversations(false, "")
 	if len(conversations) != 1 || conversations[0].Status != ConversationStatusInProgress {
 		t.Fatalf("无终态应为 in_progress: %+v", conversations)
 	}
@@ -90,8 +90,42 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 	svc.SetTranscriptDir(dir) // 二次调用：也应幂等（无重复注入/覆盖）
-	conversations, _ := svc.ListConversations(false)
+	conversations, _ := svc.ListConversations(false, "")
 	if len(conversations) != 1 {
 		t.Fatalf("重复回灌导致的会话数异常: %d", len(conversations))
+	}
+}
+
+// TestLoadTranscriptsWorkspace memory 模式以 transcript 为事实源：工作空间与其
+// 「是否平台代建」权威标志都从 header 回灌；旧文件缺该字段 → 非临时（历史会话语义正确）。
+func TestLoadTranscriptsWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	temporaryHeader := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_ws_temp","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.forge/workspaces/ses_ws_temp","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
+	legacyHeader := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_ws_legacy","agent_id":"agent-opencode","runtime":"opencode","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
+	writeTranscriptJSONL(t, dir, "ses_ws_temp.jsonl", []string{temporaryHeader})
+	writeTranscriptJSONL(t, dir, "ses_ws_legacy.jsonl", []string{legacyHeader})
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc.SetTranscriptDir(dir)
+
+	byID := map[string]handler.ConversationResp{}
+	conversations, err := svc.ListConversations(false, "")
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	for _, c := range conversations {
+		byID[c.ID] = c
+	}
+	if got := byID["ses_ws_temp"]; got.Cwd != "/home/u/.forge/workspaces/ses_ws_temp" || !got.WorkspaceTemporary {
+		t.Fatalf("代建标记/工作空间未回灌: %+v", got)
+	}
+	if got := byID["ses_ws_legacy"]; got.Cwd != "/work/alpha" || got.WorkspaceTemporary {
+		t.Fatalf("旧文件应视为非临时: %+v", got)
+	}
+
+	// 按工作空间过滤对回灌会话同样生效（recent/browse 面依赖此能力）。
+	only, _ := svc.ListConversations(false, "/work/alpha")
+	if len(only) != 1 || only[0].ID != "ses_ws_legacy" {
+		t.Fatalf("回灌会话按 cwd 过滤不符: %+v", only)
 	}
 }

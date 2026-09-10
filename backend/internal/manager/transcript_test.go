@@ -28,7 +28,7 @@ func TestTranscriptJSONL(t *testing.T) {
 	svc.SetTranscriptDir(dir)
 	defer svc.closeTranscripts()
 
-	svc.beginTranscript("s1", "agent-opencode", "opencode", "/tmp")
+	svc.beginTranscript("s1", "agent-opencode", "opencode", "/tmp", false)
 	svc.publish(BusUserMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a", "text": "hi"})
 	svc.publish(BusMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a", "text": "hello"})
 	svc.closeTranscripts()

@@ -81,12 +81,17 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // Conversation 是 conversations 表的一行（DB 权威元数据；字段对齐 manager.ConversationRec + transcript header）。
 type Conversation struct {
-	ID          string
-	AgentID     string
-	Cwd         string
-	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
-	Model       string // 会话级模型 id（空 = 底座默认）
-	RuntimeHint string // 最近/首选 runtime（执行提示，非身份，用户不可见）
+	ID      string
+	AgentID string
+	// Cwd 会话工作空间（canonical 绝对路径；= 底座 ACP session 的 cwd，
+	// 也是原生权限 workspace-write 的边界）。
+	Cwd string
+	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
+	// 权威标志：任何"临时空间"判定都必须读它，不得从路径形状反推。
+	WorkspaceTemporary bool
+	Provider           string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model              string // 会话级模型 id（空 = 底座默认）
+	RuntimeHint        string // 最近/首选 runtime（执行提示，非身份，用户不可见）
 	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid/echo id）。P3 双 id：
 	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
 	ProviderSessionID string
