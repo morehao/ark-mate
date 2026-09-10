@@ -158,6 +158,35 @@ func TestPortsAndDTOsMustNotImportTransport(t *testing.T) {
 	}
 }
 
+// TestControllersMustNotImportImplementations 锁定控制器的依赖面：
+// 控制器只允许依赖 internal/service/svc*（端口）与 internal/dto/dto*（数据），
+// 不得 import internal/manager（实现）或 internal/router（自己所属的装配层）。
+//
+// 这条边界是 P2/P3 重构的核心收益：控制器与实现两边的任一侧改动，
+// 只要端口不变就不会互相牵连，也让控制器可以脱离 manager 单测。
+func TestControllersMustNotImportImplementations(t *testing.T) {
+	root := backendRoot(t)
+	forbidden := []string{
+		modulePrefix + "internal/manager",
+		modulePrefix + "internal/router",
+		modulePrefix + "internal/server",
+		modulePrefix + "internal/app",
+	}
+	for _, dir := range subdirs(t, filepath.Join(root, "internal", "controller")) {
+		if !hasGoFiles(dir) {
+			continue
+		}
+		for _, imp := range importedByPackage(t, dir) {
+			for _, bad := range forbidden {
+				if imp == bad || strings.HasPrefix(imp, bad+"/") {
+					t.Errorf("控制器越界依赖：%s 不应 import %s（只允许依赖 service 端口与 dto）",
+						rel(root, dir), imp)
+				}
+			}
+		}
+	}
+}
+
 func rel(root, p string) string {
 	if r, err := filepath.Rel(root, p); err == nil {
 		return r

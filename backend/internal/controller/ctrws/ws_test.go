@@ -1,4 +1,4 @@
-package handler_test
+package ctrws_test
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/controller/ctrws"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
 // frame 是测试用 WS 帧（松散解析关键字段）。
@@ -32,7 +32,7 @@ type frame struct {
 func startWS(t *testing.T, bus *eventbus.Bus) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	h := handler.NewWSHandler(bus)
+	h := ctrws.NewWSCtr(bus)
 	eng := gin.New()
 	eng.GET("/ws/events", h.Handle)
 	srv := httptest.NewServer(eng)

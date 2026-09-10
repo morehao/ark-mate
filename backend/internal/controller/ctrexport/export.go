@@ -1,4 +1,8 @@
-package handler
+// Package ctrexport 承载会话导出控制器。
+//
+// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
+package ctrexport
 
 import (
 	"github.com/gin-gonic/gin"
@@ -9,15 +13,27 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// ExportCtr 会话导出控制器。
+type ExportCtr interface {
+	Conversations(c *gin.Context)
+}
+
+var _ ExportCtr = (*exportCtr)(nil)
+
 // ExportHandler 处理会话批量导出（M3 ②：JSON / 纯文本 / Markdown）。
-type ExportHandler struct {
+type exportCtr struct {
 	svc    svcexport.ExportSvc
 	mapper svcerr.Mapper
 }
 
+// NewExportCtr 构造 ExportCtr。
+func NewExportCtr(svc svcexport.ExportSvc, mapper svcerr.Mapper) ExportCtr {
+	return &exportCtr{svc: svc, mapper: mapper}
+}
+
 // Conversations 批量导出：POST /conversations/export
 // body {ids: [...], format?: "markdown"|"text"|"json"}（ids 上限 50）。
-func (h *ExportHandler) Conversations(c *gin.Context) {
+func (h *exportCtr) Conversations(c *gin.Context) {
 	var req dtoexport.ExportReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})

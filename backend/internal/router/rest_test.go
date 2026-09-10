@@ -1,4 +1,4 @@
-package handler_test
+package router_test
 
 import (
 	"context"
@@ -19,7 +19,8 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtosearch"
 	"github.com/morehao/ark-forge/internal/dto/dtousage"
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/router"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/golib/gerror"
 )
@@ -545,64 +546,25 @@ type envelope struct {
 }
 
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
-func stubDeps(svc *stubSvc) handler.Deps {
-	return handler.Deps{
+func stubDeps(svc *stubSvc) router.Ports {
+	return router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
 	}
 }
 
-// newRestEngine 挂载 handler 的 REST 路由（镜像 router 的路径形态，不经 golib 分组）。
-func newRestEngine(deps handler.Deps) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	h := handler.New(deps, nil)
-	r := gin.New()
-	g := r.Group("/v1/forge")
-	g.GET("/agents", h.Agent.List)
-	g.POST("/agents", h.Agent.Create)
-	g.PATCH("/agents/:id", h.Agent.Update)
-	g.DELETE("/agents/:id", h.Agent.Delete)
-	g.POST("/agents/:id/start", h.Agent.Start)
-	g.POST("/agents/:id/stop", h.Agent.Stop)
-	g.POST("/agents/:id/default", h.Agent.SetDefault)
-	g.GET("/conversations", h.Conversation.List)
-	g.POST("/conversations", h.Conversation.Create)
-	g.GET("/conversations/:id", h.Conversation.Get)
-	g.PATCH("/conversations/:id", h.Conversation.Update)
-	g.GET("/conversations/:id/history", h.Conversation.History)
-	g.POST("/conversations/:id/prompt", h.Conversation.Prompt)
-	g.POST("/conversations/:id/cancel", h.Conversation.Cancel)
-	g.GET("/conversations/:id/permissions", h.Conversation.Permissions)
-	g.POST("/conversations/:id/permission", h.Conversation.ResolvePermission)
-	g.GET("/conversations/:id/permissions/memories", h.Conversation.PermissionMemories)
-	g.POST("/conversations/:id/permissions/memories/revoke", h.Conversation.RevokeMemory)
-	g.GET("/conversations/:id/elicitations", h.Conversation.Elicitations)
-	g.POST("/conversations/:id/elicitation", h.Conversation.ResolveElicitation)
-	g.GET("/runtimes", h.Runtime.List)
-	g.GET("/providers", h.Provider.List)
-	g.PATCH("/providers/:id", h.Provider.Update)
-	g.GET("/skills", h.Capability.ListSkills)
-	g.GET("/mcps", h.Capability.ListMcpServers)
-	g.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
-	g.POST("/mcps/:id/probe", h.Capability.ProbeMcpServer)
-	g.POST("/mcps/:id/tools/:tool/call", h.Capability.CallMcpTool)
-	g.GET("/mcps/:id/resources", h.Capability.ListMcpResources)
-	g.POST("/mcps/:id/resources/read", h.Capability.ReadMcpResource)
-	g.GET("/mcps/:id/prompts", h.Capability.ListMcpPrompts)
-	g.POST("/mcps/:id/prompts/:name/get", h.Capability.GetMcpPrompt)
-	g.GET("/tools", h.Capability.ListTools)
-	g.GET("/usage/summary", h.Usage.Summary)
-	g.GET("/agents/:id/diagnostics", h.Agent.Diagnostics)
-	g.GET("/search/messages", h.Search.Messages)
-	g.POST("/conversations/export", h.Export.Conversations)
-	g.GET("/settings/workspace", h.Workspace.Settings)
-	g.PUT("/settings/workspace", h.Workspace.UpdateSettings)
-	return r
+// newRestEngine 走**真实路由装配**（router.New）：路径、鉴权与中间件形态都与线上一致。
+//
+// 历史版本在这里手工镜像了一份路由表（g.GET("/agents", ...) 逐条重敲），
+// 结果是路由一旦改名测试仍全绿——镜像表与真实表各说各话。现在直接构造真实引擎，
+// 路由表只有 router 包这一个事实源。
+func newRestEngine(deps router.Ports) *gin.Engine {
+	return router.New(deps, eventbus.New())
 }
 
-// TestWorkspaceSettingsRoutes 设置面的 handler 职责：GET 透出快照、PUT 把 roots 原样交给
+// TestWorkspaceSettingsCtrPassThrough 设置面的控制器职责：GET 透出快照、PUT 把 roots 原样交给
 // 领域层（语义判断全在 manager，handler 不做第二套）、body 非法回 40000、领域错误经 RestErr 映射。
-func TestWorkspaceSettingsRoutes(t *testing.T) {
+func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	snap := &dtoworkspace.WorkspaceSettingsResp{
 		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.forge/workspaces"},
 		Restricted: true, ProvisionDir: "/home/u/.forge/workspaces", ProvisionIncluded: true,

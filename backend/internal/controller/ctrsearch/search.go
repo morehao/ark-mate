@@ -1,4 +1,8 @@
-package handler
+// Package ctrsearch 承载跨会话消息检索控制器。
+//
+// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
+package ctrsearch
 
 import (
 	"strconv"
@@ -11,14 +15,26 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// SearchCtr 跨会话消息检索控制器。
+type SearchCtr interface {
+	Messages(c *gin.Context)
+}
+
+var _ SearchCtr = (*searchCtr)(nil)
+
 // SearchHandler 处理跨会话消息检索（M3 ②：全局消息搜索 + 锚点跳转）。
-type SearchHandler struct {
+type searchCtr struct {
 	svc    svcsearch.SearchSvc
 	mapper svcerr.Mapper
 }
 
+// NewSearchCtr 构造 SearchCtr。
+func NewSearchCtr(svc svcsearch.SearchSvc, mapper svcerr.Mapper) SearchCtr {
+	return &searchCtr{svc: svc, mapper: mapper}
+}
+
 // Messages 消息级检索：GET /search/messages?q=&limit=（q 必填；limit 默认 30、上限 200）。
-func (h *SearchHandler) Messages(c *gin.Context) {
+func (h *searchCtr) Messages(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
 		gincontext.Fail(c, gerror.Error{Code: 40001, Msg: "搜索关键词 q 不能为空 [invalid_search_query]"})

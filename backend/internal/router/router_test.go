@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -14,8 +15,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/server/handler"
-	"github.com/morehao/ark-forge/internal/server/router"
+	"github.com/morehao/ark-forge/internal/router"
 	"github.com/morehao/ark-forge/pkg/config"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -32,11 +32,11 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	h := handler.New(handler.Deps{
+	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
 	}, bus)
-	return router.New(h), svc
+	return engine, svc
 }
 
 type respEnvelope struct {
@@ -203,6 +203,32 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 // README 正文里的前端页面路由（如 `/settings`）会被一并抓成"未注册路由"，
 // 故控制面设置面这条用的是 `/settings/` 而不是 `/settings`。
 //
+// repoFile 定位仓库根下的文件：从当前测试文件所在目录逐级上溯，返回首个命中的相对路径。
+//
+// 不用固定层数的 "../../.."：包一旦挪位置（如 router 从 internal/server/router 上提），
+// 这类相对路径就会静默失准，表现为"文档守卫读不到 README"而不是断言失败。
+func repoFile(t *testing.T, name string) string {
+	t.Helper()
+	_, self, _, ok := goruntime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller 失败，无法定位仓库根")
+	}
+	dir := filepath.Dir(self)
+	for i := 0; i < 8; i++ {
+		cand := filepath.Join(dir, name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatalf("自 %s 上溯未找到 %s", filepath.Dir(self), name)
+	return ""
+}
+
 // TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」里出现的每条
 // `/v1/forge` 路由（表格与正文反引号内）都必须真实注册；反之，README 声明的路径不得是历史名
 // （P0 把 /sessions 改名为 /conversations 后曾长期漂移）。新增/改名路由若忘改文档即红。
@@ -219,7 +245,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 		t.Fatal("未取到任何 /v1/forge 路由（装配异常）")
 	}
 
-	readme, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "README.md"))
+	readme, err := os.ReadFile(repoFile(t, "README.md"))
 	if err != nil {
 		t.Fatalf("读 README: %v", err)
 	}
@@ -273,11 +299,11 @@ func newAuthEngine(token string) *gin.Engine {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	h := handler.New(handler.Deps{
+	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
-	}, bus)
-	return router.New(h, router.Options{Token: token})
+	}, bus, router.Options{Token: token})
+	return engine
 }
 
 // TestAuthToken 单操作员令牌：/health 免鉴权，其余 REST/WS 路由要求 Bearer 或 ?token=。

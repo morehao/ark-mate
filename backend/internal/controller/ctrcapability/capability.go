@@ -1,4 +1,8 @@
-package handler
+// Package ctrcapability 承载能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
+//
+// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
+package ctrcapability
 
 import (
 	"errors"
@@ -11,13 +15,34 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// CapabilityCtr 能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
+type CapabilityCtr interface {
+	ListSkills(c *gin.Context)
+	ListMcpServers(c *gin.Context)
+	ListTools(c *gin.Context)
+	AgentCapabilities(c *gin.Context)
+	CallMcpTool(c *gin.Context)
+	ListMcpResources(c *gin.Context)
+	ReadMcpResource(c *gin.Context)
+	ListMcpPrompts(c *gin.Context)
+	GetMcpPrompt(c *gin.Context)
+	ProbeMcpServer(c *gin.Context)
+}
+
+var _ CapabilityCtr = (*capabilityCtr)(nil)
+
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
-type CapabilityHandler struct {
+type capabilityCtr struct {
 	svc svccapability.CapabilitySvc
 }
 
+// NewCapabilityCtr 构造 CapabilityCtr。
+func NewCapabilityCtr(svc svccapability.CapabilitySvc) CapabilityCtr {
+	return &capabilityCtr{svc: svc}
+}
+
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
-func (h *CapabilityHandler) ListSkills(c *gin.Context) {
+func (h *capabilityCtr) ListSkills(c *gin.Context) {
 	items, err := h.svc.ListSkills()
 	if err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
@@ -27,7 +52,7 @@ func (h *CapabilityHandler) ListSkills(c *gin.Context) {
 }
 
 // ListMcpServers 列出 MCP 注册表（按 ID 排序；headers/凭证不读回）。
-func (h *CapabilityHandler) ListMcpServers(c *gin.Context) {
+func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
 	items, err := h.svc.ListMcpServers()
 	if err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
@@ -37,7 +62,7 @@ func (h *CapabilityHandler) ListMcpServers(c *gin.Context) {
 }
 
 // ListTools 列出 Tool 目录（按 name 排序）。
-func (h *CapabilityHandler) ListTools(c *gin.Context) {
+func (h *capabilityCtr) ListTools(c *gin.Context) {
 	items, err := h.svc.ListTools()
 	if err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
@@ -48,7 +73,7 @@ func (h *CapabilityHandler) ListTools(c *gin.Context) {
 
 // AgentCapabilities 返回某 Agent 的统一能力目录（§8.1）：按候选 runtime 聚合 skill/MCP/tool
 // 的可见面。未知 agent → 40401（gincontext.Fail 透传 gerror 码）。
-func (h *CapabilityHandler) AgentCapabilities(c *gin.Context) {
+func (h *capabilityCtr) AgentCapabilities(c *gin.Context) {
 	resp, err := h.svc.AgentCapabilities(c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, err)
@@ -60,7 +85,7 @@ func (h *CapabilityHandler) AgentCapabilities(c *gin.Context) {
 // ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
 // 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
 // CallMcpTool 调用 MCP server 的工具（B1：tools/call）。
-func (h *CapabilityHandler) CallMcpTool(c *gin.Context) {
+func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 	var req dtocapability.McpToolCallReq
 	// 空 body 合法（= 无参数调用）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -76,7 +101,7 @@ func (h *CapabilityHandler) CallMcpTool(c *gin.Context) {
 }
 
 // ListMcpResources 拉取 MCP server 的资源列表（B2：resources/list + resources/templates/list）。
-func (h *CapabilityHandler) ListMcpResources(c *gin.Context) {
+func (h *capabilityCtr) ListMcpResources(c *gin.Context) {
 	resp, err := h.svc.ListMcpResources(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, err)
@@ -86,7 +111,7 @@ func (h *CapabilityHandler) ListMcpResources(c *gin.Context) {
 }
 
 // ReadMcpResource 读取一个资源（B2：resources/read）。
-func (h *CapabilityHandler) ReadMcpResource(c *gin.Context) {
+func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 	var req dtocapability.McpResourceReadReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
@@ -101,7 +126,7 @@ func (h *CapabilityHandler) ReadMcpResource(c *gin.Context) {
 }
 
 // ListMcpPrompts 拉取 MCP server 的提示词模板（B2：prompts/list）。
-func (h *CapabilityHandler) ListMcpPrompts(c *gin.Context) {
+func (h *capabilityCtr) ListMcpPrompts(c *gin.Context) {
 	resp, err := h.svc.ListMcpPrompts(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, err)
@@ -111,7 +136,7 @@ func (h *CapabilityHandler) ListMcpPrompts(c *gin.Context) {
 }
 
 // GetMcpPrompt 取用一条提示词模板（B2：prompts/get）。
-func (h *CapabilityHandler) GetMcpPrompt(c *gin.Context) {
+func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 	var req dtocapability.McpPromptGetReq
 	// 空 body 合法（= 无参数）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -126,7 +151,7 @@ func (h *CapabilityHandler) GetMcpPrompt(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-func (h *CapabilityHandler) ProbeMcpServer(c *gin.Context) {
+func (h *capabilityCtr) ProbeMcpServer(c *gin.Context) {
 	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, err)

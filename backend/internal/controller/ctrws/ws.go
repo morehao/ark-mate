@@ -1,4 +1,8 @@
-package handler
+// Package ctrws 承载实时事件通道（WS）控制器。
+//
+// 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
+// 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
+package ctrws
 
 import (
 	"context"
@@ -12,20 +16,27 @@ import (
 	"github.com/morehao/ark-forge/internal/eventbus"
 )
 
-// WSHandler 是实时事件通道（WS）的协议薄适配层（M0 基本版，无鉴权）：
+// WSCtr 实时事件通道（WS）控制器。
+type WSCtr interface {
+	Handle(c *gin.Context)
+}
+
+var _ WSCtr = (*wsCtr)(nil)
+
+// wsCtr 是实时事件通道（WS）的协议薄适配层（M0 基本版，无鉴权）：
 // 订阅 eventbus → 按 attach 的聚合（conversation id）推送 event/snapshot 帧；
 // 客户端帧 action=attach/detach/ping；服务端帧 type=snapshot/event/detached/pong。
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
 // 契约见 docs/design-and-roadmap.md §4.5。
-type WSHandler struct {
+type wsCtr struct {
 	bus    *eventbus.Bus
 	logger *slog.Logger
 }
 
-// NewWSHandler 构造 WSHandler。
-func NewWSHandler(bus *eventbus.Bus) *WSHandler {
-	return &WSHandler{bus: bus, logger: slog.Default()}
+// NewWSCtr 构造 WSCtr。
+func NewWSCtr(bus *eventbus.Bus) WSCtr {
+	return &wsCtr{bus: bus, logger: slog.Default()}
 }
 
 const (
@@ -70,7 +81,7 @@ type connState struct {
 }
 
 // Handle 处理一次 WS 升级与生命周期。
-func (h *WSHandler) Handle(c *gin.Context) {
+func (h *wsCtr) Handle(c *gin.Context) {
 	// M0 内网直连无鉴权：放行任意 Origin；M3 起改 OriginPatterns + 子协议 token 校验。
 	ws, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -106,7 +117,7 @@ func (h *WSHandler) Handle(c *gin.Context) {
 // readLoop 读取客户端帧并执行 attach/detach/ping；出错即结束整条连接。
 // coder/websocket 会在 Read 内自动应答协议层 ping/pong/close 控制帧，
 // 此处只处理应用层 JSON 帧（二进制帧忽略）。
-func (h *WSHandler) readLoop(st *connState) {
+func (h *wsCtr) readLoop(st *connState) {
 	for {
 		typ, data, err := st.conn.Read(st.ctx)
 		if err != nil {
@@ -140,7 +151,7 @@ func (h *WSHandler) readLoop(st *connState) {
 //
 // 简化说明：attach 的重放与 live 分属两条入队路径，极端并发下事件可能交错；
 // M1 的 §4.5 冻结面（持锁原子决策 + 单写者重放）再收敛顺序。
-func (h *WSHandler) attach(st *connState, f wsClientFrame) {
+func (h *wsCtr) attach(st *connState, f wsClientFrame) {
 	if f.AggID == "" {
 		h.send(st, wsServerFrame{Type: "detached", Reason: "agg_id required"})
 		return
@@ -175,7 +186,7 @@ func (h *WSHandler) attach(st *connState, f wsClientFrame) {
 	}
 }
 
-func (h *WSHandler) detach(st *connState, aggID string) {
+func (h *wsCtr) detach(st *connState, aggID string) {
 	st.mu.Lock()
 	delete(st.attached, aggID)
 	st.mu.Unlock()
@@ -184,7 +195,7 @@ func (h *WSHandler) detach(st *connState, aggID string) {
 
 // livePump 把 bus live 增量按已 attach 聚合过滤后投递到写队列；
 // 慢订阅丢帧（bus gap 提示）→ 转 gap 帧，客户端据此立即重挂该聚合（按水位重放续传）。
-func (h *WSHandler) livePump(st *connState, live *eventbus.Subscription) {
+func (h *wsCtr) livePump(st *connState, live *eventbus.Subscription) {
 	for {
 		select {
 		case <-st.closed:
@@ -218,7 +229,7 @@ func (h *WSHandler) livePump(st *connState, live *eventbus.Subscription) {
 }
 
 // writeLoop 单写者：串行写队列帧（coder/websocket 不允许并发写）。
-func (h *WSHandler) writeLoop(st *connState) {
+func (h *wsCtr) writeLoop(st *connState) {
 	for {
 		select {
 		case <-st.closed:
@@ -244,7 +255,7 @@ func (h *WSHandler) writeLoop(st *connState) {
 // coder/websocket 的 Ping 与 readLoop 的 Read 并发执行（库要求如此）：它发出 ping，
 // 等待 Read 路径读到 pong 后返回；ctx 超时（wsPongWait）未收到 pong → 判定死连接收尾。
 // 客户端 {action:ping} 是应用层帧，由 readLoop 回 {type:pong}，与此处无关。
-func (h *WSHandler) pingLoop(st *connState) {
+func (h *wsCtr) pingLoop(st *connState) {
 	t := time.NewTicker(wsPingPeriod)
 	defer t.Stop()
 	for {
@@ -265,7 +276,7 @@ func (h *WSHandler) pingLoop(st *connState) {
 }
 
 // send 非阻塞入队（队列满视为消费者过慢，丢帧由 attach 续传/快照兜底）。
-func (h *WSHandler) send(st *connState, f wsServerFrame) {
+func (h *wsCtr) send(st *connState, f wsServerFrame) {
 	select {
 	case st.write <- f:
 	default:
@@ -274,7 +285,7 @@ func (h *WSHandler) send(st *connState, f wsServerFrame) {
 }
 
 // shutdown 幂等关闭连接内务：广播 closed（停循环）+ 取消连接 ctx（解除 Read/Write/Ping 阻塞）。
-func (h *WSHandler) shutdown(st *connState) {
+func (h *wsCtr) shutdown(st *connState) {
 	st.closeOnce.Do(func() {
 		close(st.closed)
 		st.cancel()
