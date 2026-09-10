@@ -4,7 +4,7 @@
 // # 产物来源
 //
 // dist/ 由仓库根 Makefile 的 `make web` 从 frontend/apps/panel 构建并拷贝而来
-// （`cp -r frontend/apps/panel/dist backend/internal/web/dist`），不入库。
+// （`cp -r frontend/apps/panel/dist backend/pkg/web/dist`），不入库。
 //
 // # 编译形态
 //

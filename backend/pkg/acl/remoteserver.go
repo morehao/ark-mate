@@ -25,7 +25,7 @@ import (
 //   - `forge acp-serve` 把内置 echo 底座暴露成远程端点（免模型 key 演示远程链路）；
 //   - 单测/端到端测试以真实 SDK agent 侧验证客户端传输适配器。
 //
-// HTTP 形态对齐 MCP Streamable HTTP 的既有约定（本项目 internal/mcp 同款）：
+// HTTP 形态对齐 MCP Streamable HTTP 的既有约定（本项目 pkg/mcp 同款）：
 //   - POST 一条客户端消息 → 200 + SSE 流（该请求期间的通知与 request_permission 都在流上），
 //     客户端→服务端的「响应/通知」按约定回 202 且不占响应流；
 //   - GET 长流承载「没有在途请求时」的服务端消息；

@@ -32,7 +32,7 @@ ARG GO_IMAGE=golang:1.26-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG GO_PROXY=https://proxy.golang.org,direct
-# 底座版本（默认 latest；dsh 需含 acp profile 模板，即 >= 0.1.2-rc.1，见 internal/runtime/adapters.go）
+# 底座版本（默认 latest；dsh 需含 acp profile 模板，即 >= 0.1.2-rc.1，见 pkg/runtime/adapters.go）
 ARG DSH_VERSION=latest
 ARG OPENCODE_VERSION=latest
 

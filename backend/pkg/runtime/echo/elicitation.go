@@ -9,7 +9,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
-// 结构化提问演示场景（ACP elicitation/*，与宿主 internal/acl 的 elicitation 通道配套）：
+// 结构化提问演示场景（ACP elicitation/*，与宿主 pkg/acl 的 elicitation 通道配套）：
 // 输入含特定关键词时，echo 在本轮 prompt 中途发起一次 elicitation/create 并向用户渲染一张
 // 表单（单选/多选/复合表单）或一个引导链接，阻塞等待用户提交/放弃后回显结果继续。
 // 零依赖：不调用任何真实模型/工具，纯 wire 演示「agent → 宿主提问卡 → 用户 → agent」闭环。

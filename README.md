@@ -71,7 +71,7 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 ### 2. 构建单二进制
 
 ```bash
-make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist → go build -tags release
+make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → go build -tags release
 ./forge           # 产物在仓库根
 ```
 
@@ -276,16 +276,29 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 
 ```
 backend/                单 Go module（github.com/morehao/ark-forge）
-  cmd/forge             CLI（serve / demo / acp-demo 子命令）
-  internal/acl          ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
-  internal/runtime/     运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
-  internal/manager      Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
-  internal/capability   Skill/MCP/Tool 能力数据面（定义装载 + skill 物化）
-  internal/mcp          自研最小 MCP 客户端（stdio / http / streamable_http / sse；探测 + 工具调用 + 资源/提示词）
-  internal/store        SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
-  internal/server/      REST handler / WS / eventbus / router
-  internal/infra/config 进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
-  internal/web/         release 内嵌前端产物宿主（go:embed dist）
+  cmd/forge             进程入口：只做子命令分发（→ internal/app/command）
+  pkg/                  可复用基础设施（不得 import internal/，由 archtest 守卫）
+    acl                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
+    runtime/            运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
+    mcp                 自研最小 MCP 客户端（stdio / http / streamable_http / sse）
+    capability          Skill/MCP/Tool 能力定义装载 + skill 物化
+    routing             路由引擎 FirstAvailable 切片
+    config              进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
+    procreg             进程注册表（孤儿 runtime 子进程回收）
+    web                 release 内嵌前端产物宿主（go:embed dist）
+    object/objusage     跨层共享值对象（会话用量快照）
+  internal/             应用专属逻辑
+    app                 装配 + 启停生命周期（Init/Run/Close）
+    app/command         CLI 子命令（serve / demo / migrate / transcripts / config / acp-*）
+    router              唯一路由装配点（按领域分 routes_*.go）
+    controller/ctr*     传输层控制器（接口 + 小写实现 + New 构造）
+    middleware          HTTP 中间件（单操作员 token 鉴权）
+    dto/dto*            请求/响应 DTO（按领域分包，双方共用）
+    service/svc*        领域端口（控制器依赖的窄接口，manager 实现）
+    manager             领域实现：Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
+    store               SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
+    eventbus            进程内事件总线（WS 订阅源）
+    archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/panel/           Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
   packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
@@ -300,7 +313,7 @@ docs/                   设计/路线图 + runtime 适配核实 + 部署运维
 
 > `docs/` 下的设计文档是**历史设计记录**（含当时的路径命名——会话路径早期叫 sessions、P0 起为
 > conversations）；对外契约以本
-> README 的「控制面接口摘要」与实际路由（`backend/internal/server/router/router.go`）为准，
+> README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
 > 二者由 `TestReadmeRoutesMatchRouter` 自动守卫。
 
 ## 协议 / License

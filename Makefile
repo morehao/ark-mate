@@ -2,7 +2,8 @@
 #
 # 仓库结构（前后端平级 monorepo）：
 #   backend/   —— 单 Go module：github.com/morehao/ark-forge（go.mod 在 backend/ 根）
-#                 internal/ 分层目录即包边界；层目录保留 seam，未来可按需抽独立 module/仓
+#                 pkg/ 可复用基础设施（不 import internal/）+ internal/ 应用分层；
+#                 分层边界由 backend/internal/archtest 守卫测试强制
 #   frontend/  —— 独立 pnpm workspace（apps/panel），产物可单独部署
 #
 # 交付形态：

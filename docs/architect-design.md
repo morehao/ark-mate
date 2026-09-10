@@ -60,7 +60,7 @@
 | 传输 | **stdio**（本地子进程） | 两 runtime 均原生 ACP server over stdio |
 | ACP Client 实现 | **引入现有库 `github.com/coder/acp-go-sdk`** | 纯 Go、覆盖 client/server 侧；`internal/acl` 封装它并抽象兜底（见 §9） |
 | Runtime 技术栈 | opencode（TS/Effect）、deepseek-harness（TS/Node） | 均为 Node 系；Go 后端**只拉其 ACP 子进程**，经 stdio 通信，**无语言/库耦合** |
-| 交付 | 单二进制（前端经 `go:embed` 嵌入）；前端产物亦可独立部署 | `make web` 将前端构建产物拷入 `backend/internal/web/dist`，`-tags release` 下经 `//go:embed` 打入 Go 二进制；独立部署则直接托管 `frontend/apps/panel/dist` |
+| 交付 | 单二进制（前端经 `go:embed` 嵌入）；前端产物亦可独立部署 | `make web` 将前端构建产物拷入 `backend/pkg/web/dist`，`-tags release` 下经 `//go:embed` 打入 Go 二进制；独立部署则直接托管 `frontend/apps/panel/dist` |
 
 ### 流式输出传输选型（控制面 → 面板）
 流式会话有两段链路，传输选型需分开说明，避免混淆：
@@ -153,6 +153,22 @@ graph TB
 
 ## 5. 目录结构（同仓：backend/ 单 Go module + frontend/ pnpm workspace）
 
+> **现状（2026-09 结构重构后）**：本节以下的目录树与 §6 的层描述是**设计期记录**（当时还规划过
+> `forge-cli`、`server/sse.go`、`server/handler/mock.go` 等，均未落地或用别的方式落地）。
+> 当前实际分层以 **README「仓库结构」与 `AGENTS.md`「布局与目录边界」为准**，要点：
+>
+> - **`pkg/` 与 `internal/` 二分**（对齐 ark-iam）：`acl` / `runtime` / `mcp` / `capability` /
+>   `routing` / `config` / `procreg` / `web` / `object/objusage` 已从 `internal/` 上提到 `pkg/`——
+>   这正是本节下文「演进」里触发 ①「某层要被本仓之外的项目 import」的**落地动作**，`internal/`
+>   的可见性边界不再需要为可复用层兜底，改由目录位置直接表达。
+> - 应用侧分层：`internal/app`（装配 + 生命周期）→ `internal/router`（唯一路由装配点）→
+>   `internal/controller/ctr<领域>`（传输层）→ `internal/service/svc<领域>`（领域端口）←
+>   `internal/manager`（领域实现）；`internal/dto/dto<领域>` 被两侧共用。
+> - 四条依赖边界（`pkg` 不依赖 `internal`、`dto`/`service` 不依赖传输与实现、`store`/`eventbus`
+>   不依赖应用层、`controller` 只依赖端口）由 `backend/internal/archtest` 的守卫测试强制，
+>   替代了本节末尾提到的 "用 golangci-lint depguard 在 CI 强制" 的备选方案。
+> - 单 module 决策**未变**（触发 ②/③ 仍未出现）。
+
 本项目采用**前后端平级 monorepo**（`backend/` 与 `frontend/` 同仓平级）：
 
 - **后端侧**：单 module `github.com/morehao/ark-forge`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
@@ -230,7 +246,7 @@ ark-forge/
 │   ├── package.json
 │   ├── apps/
 │   │   └── panel/         #   主面板（Vite + React + TS）
-│   │       ├── dist/      #   构建产物（唯一真源）：供独立部署；make web 拷入 backend/internal/web/dist
+│   │       ├── dist/      #   构建产物（唯一真源）：供独立部署；make web 拷入 backend/pkg/web/dist
 │   │       └── src/
 │   │           ├── pages/ #   Agents / Sessions / Runtimes
 │   │           └── api/
@@ -240,7 +256,7 @@ ark-forge/
 ### 前后端交付关系（embed + 独立部署双宿主）
 `frontend/apps/panel` 构建产物（`dist/`）是**唯一真源**，支持两种宿主：
 
-1. **单二进制（默认交付）**：`make web` 把 `dist/` 拷入 `backend/internal/web/dist`（该副本不入库），
+1. **单二进制（默认交付）**：`make web` 把 `dist/` 拷入 `backend/pkg/web/dist`（该副本不入库），
    `make all` 以 `-tags release` 编译，`web` 包经 `//go:embed dist` 把前端打入最终二进制，产出根目录 `./forge`。
 2. **前端独立部署/运行**：直接托管 `frontend/apps/panel/dist`（nginx 等任意静态宿主，配 SPA fallback）；
    开发期跑 `pnpm dev` + vite proxy（`/v1 → :8099`）联调。独立形态下前端 API base 可配置（`VITE_API_BASE`），
@@ -327,7 +343,7 @@ ark-forge/
 ## 8. 验证方式（实现后执行）
 
 - `make build` && `make vet` && `make test`：即 `cd backend && go build/vet/test ./...`（单 module，覆盖全部包）。
-- `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/internal/web/dist`。
+- `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/pkg/web/dist`。
 - `make server`：`go run ./cmd/forge` 拉起后端（开发联调，不起前端）。
 - `make all`：产出仓库根单二进制 `./forge`（`-tags release` 内嵌前端）；`./forge` 拉起后冒烟。
 - 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
