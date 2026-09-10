@@ -18,10 +18,15 @@ import (
 type stubConversation struct {
 	stop string
 	err  error
+	// options 会话配置项桩（nil = 运行时未提供任何选项）。
+	options []acl.ConfigOption
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
 	cancelOnCtx bool
 	cancelled   chan struct{}
 }
+
+// ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
+func (s *stubConversation) ConfigOptions() []acl.ConfigOption { return s.options }
 
 func (s *stubConversation) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {

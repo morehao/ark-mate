@@ -11,6 +11,7 @@ import {
 import { tokens } from '@ark/ui'
 import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
 import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
+import { modelValues } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
 import { ModelSelect } from './ModelSelect'
@@ -268,27 +269,31 @@ export function ConversationDetailDrawer({
             >
               {row('Agent', agentNameOf(agents, s.agent_id))}
               {(() => {
-                const convAgent = agents.find((a) => a.id === s.agent_id)
-                const runtime = convAgent?.runtimes?.[0]
-                const editable = runtime === 'deepseekharness' // 会话级：会话内经 set_config_option 即时
-                // opencode 仅创建时（拨号 env 进程级）；echo 无模型。
-                const showPicker = editable || runtime === 'opencode'
-                if (!showPicker) {
-                  return row('模型', runtime === 'echo' ? '无模型' : s.model || 'Agent 默认')
+                // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
+                // （不再按 runtime 名硬编码——opencode 同样支持会话级 set_config_option）。
+                const modelOptions = modelValues(modelCatalog ?? undefined)
+                if (modelOptions.length === 0) {
+                  // 运行时没给出目录（未启动/未登录）：只如实说明，不展示不透明取值串。
+                  return row('模型', s.model ? '已设置（当前无目录）' : '运行时默认')
                 }
+                // 会话上存的模型若不在当前目录（换过底座/档案），补一个只读项如实显示，
+                // 避免 antd 回落到原始不透明取值串。
+                const values =
+                  s.model && !modelOptions.some((v) => v.value === s.model)
+                    ? [{ value: s.model, name: '当前模型（不在目录中）' }, ...modelOptions]
+                    : modelOptions
                 return row(
                   '模型',
                   <ModelSelect
-                    models={modelCatalog}
+                    values={values}
                     value={s.model ?? null}
-                    disabled={!editable}
                     allowClear
                     size="small"
                     style={{ minWidth: 180 }}
-                    defaultLabel="Agent 默认"
-                    onChange={(id) => {
-                      if ((id ?? undefined) === s.model) return
-                      void updateConversationModel(s.id, id ?? undefined).then(() => void load())
+                    defaultLabel="运行时默认"
+                    onChange={(v) => {
+                      if ((v ?? undefined) === s.model) return
+                      void updateConversationModel(s.id, v ?? undefined).then(() => void load())
                     }}
                   />,
                 )

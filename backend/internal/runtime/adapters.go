@@ -1,27 +1,18 @@
 package runtime
 
 import (
-	"os"
-
 	"github.com/morehao/ark-forge/internal/runtime/deepseekharness"
 	"github.com/morehao/ark-forge/internal/runtime/echo"
 	"github.com/morehao/ark-forge/internal/runtime/opencode"
 )
 
-// passthroughEnv 把 daemon 环境中命名的变量透传给 runtime 子进程（叠加于 os.Environ）。
-// 典型：OPENCODE_MODEL——opencode ACP 忽略 ACP 客户端传入的模型选择（issue #13644），
-// 模型只能经启动环境注入；配合用户 opencode.json 的 "model":"{env:OPENCODE_MODEL}" 引用生效。
-func passthroughEnv(names ...string) []string {
-	var out []string
-	for _, n := range names {
-		if v := os.Getenv(n); v != "" {
-			out = append(out, n+"="+v)
-		}
-	}
-	return out
-}
-
 // opencodeSpec 汇入 opencode adapter 的启动/能力描述。
+//
+// 模型面（决策记录 D1，源码级结论）：opencode 的 ACP server **实现**会话级模型选择——
+// packages/opencode/src/acp/service.ts 处理 configId=="model"（parseSelectedModel → session.setModel），
+// 且其自带 live 测试断言 currentValue 随之变化（test/cli/acp/config-options.test.ts）。
+// 因此不再用 OPENCODE_MODEL 注入 env（那样会「一个模型一个进程」），改为走 ACP 会话配置项；
+// 其 ACP 目录本身就是「已配置凭证/显式声明的 provider」的模型集合。
 func opencodeSpec() Spec {
 	return Spec{
 		ID:      opencode.ID,
@@ -30,7 +21,6 @@ func opencodeSpec() Spec {
 		Launch: LaunchSpec{
 			Command: opencode.Command,
 			Args:    opencode.Args,
-			Env:     passthroughEnv("OPENCODE_MODEL"),
 		},
 		Caps: Capabilities{
 			SessionsPersistent:     opencode.Caps.SessionsPersistent,
@@ -41,12 +31,7 @@ func opencodeSpec() Spec {
 		Description:       "opencode（terminal AI）ACP 执行后端",
 		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
 		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
-		// 模型经启动 env 注入（opencode 忽略 ACP 客户端模型选择，issue #13644）：
-		// ModelConfigOptionID 空（无 ACP 会话配置项）、ModelEnvKey=OPENCODE_MODEL（进程级）。
-		ModelConfigOptionID: "",
-		EffortConfigOptionID: "",
-		ModelEnvKey:          "OPENCODE_MODEL",
-		Notes:                opencode.Notes,
+		Notes:             opencode.Notes,
 	}
 }
 
@@ -69,12 +54,10 @@ func deepseekharnessSpec() Spec {
 		Description:       "deepseek-harness ACP 执行后端",
 		McpTransports:     []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
 		ManagesOwnContext: true,                                 // §6.2：后端自管上下文/工具
-		// 模型走 ACP 会话配置项（session/set_config_option；会话级，可共享连接）：
-		// ModelConfigOptionID="model"、EffortConfigOptionID="reasoning_effort"、ModelEnvKey 空。
-		ModelConfigOptionID: "model",
-		EffortConfigOptionID: "reasoning_effort",
-		ModelEnvKey:          "",
-		Notes:                deepseekharness.Notes,
+		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
+		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
+		// 平台只按 category 消费，不在此声明任何 id/格式。
+		Notes: deepseekharness.Notes,
 	}
 }
 

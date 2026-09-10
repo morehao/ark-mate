@@ -105,41 +105,42 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 	}
 }
 
-// TestRouterModelCatalog 模型目录经真实 Service：无 provider 密钥（无 live）→ 快照降级，
-// 返回非空模型 + source=snapshot。缓存目录指到临时目录，避免污染宿主 ~/.forge。
+// TestRouterModelCatalog 模型目录经真实 Service（无执行面装配）：平台不再内置任何模型清单，
+// 目录只能来自运行时——本装配下无 Orchestrator/无连接 → 返回**空目录** + source=none + 说明，
+// 这是合法结果（面板据此显示「跟随 Agent 默认」并给出补救提示）。
 func TestRouterModelCatalog(t *testing.T) {
-	prev := os.Getenv("FORGE_MODEL_CACHE_DIR")
-	t.Cleanup(func() { _ = os.Setenv("FORGE_MODEL_CACHE_DIR", prev) })
-	if err := os.Setenv("FORGE_MODEL_CACHE_DIR", t.TempDir()); err != nil {
-		t.Fatalf("setenv: %v", err)
-	}
-
 	e := newEngine()
 	env := get(t, e, "/v1/forge/models")
 	if env.Code != 0 {
 		t.Fatalf("/models 信封不符: %+v", env)
 	}
 	var resp struct {
-		Source string               `json:"source"`
-		Models []map[string]any     `json:"models"`
+		Agent   string           `json:"agent"`
+		Runtime string           `json:"runtime"`
+		Source  string           `json:"source"`
+		Options []map[string]any `json:"options"`
+		Note    string           `json:"note"`
 	}
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("/models data 解析: %v", err)
 	}
-	if resp.Source != "snapshot" {
-		t.Fatalf("无密钥应回快照: %s", resp.Source)
+	if resp.Source != "none" {
+		t.Fatalf("无运行时来源应 source=none: %s", resp.Source)
 	}
-	if len(resp.Models) == 0 {
-		t.Fatalf("/models 应为非空目录: %s", env.Data)
+	if len(resp.Options) != 0 {
+		t.Fatalf("平台不得内置模型清单，选项应为空: %s", env.Data)
 	}
-	if _, ok := resp.Models[0]["provider"]; !ok {
-		t.Fatalf("模型条目缺 provider 字段: %v", resp.Models[0])
+	if resp.Note == "" {
+		t.Fatalf("空目录必须带说明: %s", env.Data)
+	}
+	if resp.Agent != "dsh" {
+		t.Fatalf("缺省应取默认 agent(dsh): %s", resp.Agent)
 	}
 
-	// 未知 provider 档案 → 40401（provider_not_found）。
-	env = get(t, e, "/v1/forge/providers/nope/models")
+	// 未知 agent → 40401（agent_not_found）。
+	env = get(t, e, "/v1/forge/models?agent=nope")
 	if env.Code != 40401 {
-		t.Fatalf("未知 provider 应 40401: %+v", env)
+		t.Fatalf("未知 agent 应 40401: %+v", env)
 	}
 }
 
@@ -162,7 +163,6 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"POST /v1/forge/conversations/:id/prompt",
 		"POST /v1/forge/conversations/:id/cancel",
 		"GET /v1/forge/providers",
-		"GET /v1/forge/providers/:id/models",
 		"GET /v1/forge/models",
 		"GET /v1/forge/skills",
 		"GET /v1/forge/mcps",

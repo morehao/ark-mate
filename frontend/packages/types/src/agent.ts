@@ -41,8 +41,6 @@ export interface Provider {
   model?: string
   /** 密钥只写不读回：仅表示是否已存有密钥。 */
   has_key: boolean
-  /** 该 provider 档案的可选模型目录（live 优先，兜底快照；表单目录兜底用）。 */
-  models?: import('./model').ModelOption[]
 }
 
 export interface ProviderPatch {

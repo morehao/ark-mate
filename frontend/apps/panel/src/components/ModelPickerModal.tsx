@@ -2,47 +2,42 @@ import { useMemo, useState } from 'react'
 import { Button, Input, Modal } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import type { ModelOption } from '@ark/types'
+import type { ConfigOptionValue } from '@ark/types'
 
 interface ModelPickerModalProps {
   open: boolean
   onClose: () => void
-  models: ModelOption[]
-  /** 选中模型 id（null = 跟随 agent 默认）。 */
+  /** 候选值：运行时目录 category=model 的 values（平台无内置清单）。 */
+  values: ConfigOptionValue[]
+  /** 选中值（null = 跟随运行时默认）。值是不透明串，原样回传。 */
   value: string | null
-  onSelect: (id: string | null) => void
+  onSelect: (value: string | null) => void
+  /** 空目录说明（运行时未提供目录时的补救提示，如登录引导）。 */
+  emptyHint?: string
 }
 
 /**
- * 模型全览弹窗（Phase D：等价 openwork 全览，但不引入 org/云端供应商权限层）。
- * 搜索 + provider 分组 + 推荐星标 + 清空回默认；选择后关闭（effort 二级由内联 Select 承担）。
+ * 模型全览弹窗：搜索 + 分组浏览（分组来自 agent 下发的 values[].group）+ 清空回默认。
+ * 候选完全来自运行时（ACP session config options），平台不内置清单、不排序、不推荐。
  * 交互态 CSS 收口 console.css.ts；颜色/圆角走 @ark/ui tokens。
  */
-export function ModelPickerModal({ open, onClose, models, value, onSelect }: ModelPickerModalProps) {
+export function ModelPickerModal({ open, onClose, values, value, onSelect, emptyHint }: ModelPickerModalProps) {
   const [q, setQ] = useState('')
 
   const grouped = useMemo(() => {
     const lower = q.trim().toLowerCase()
     const filtered = lower
-      ? models.filter((m) =>
-          `${m.title} ${m.id} ${m.description ?? ''} ${(m.behavior ?? []).join(' ')}`.toLowerCase().includes(lower),
-        )
-      : models
-    const by = new Map<string, ModelOption[]>()
-    for (const m of filtered) {
-      const k = m.provider || ''
-      const list = by.get(k) ?? []
-      list.push(m)
-      by.set(k, list)
+      ? values.filter((v) => `${v.name} ${v.description ?? ''}`.toLowerCase().includes(lower))
+      : values
+    const by = new Map<string, { name: string; items: ConfigOptionValue[] }>()
+    for (const v of filtered) {
+      const k = v.group ?? ''
+      const g = by.get(k) ?? { name: v.group_name ?? '', items: [] }
+      g.items.push(v)
+      by.set(k, g)
     }
-    return [...by.entries()].map(([provider, list]) => ({
-      provider,
-      list: [...list].sort((a, b) => {
-        if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
-        return (a.title || a.id).localeCompare(b.title || b.id)
-      }),
-    }))
-  }, [models, q])
+    return [...by.entries()].map(([key, g]) => ({ key, name: g.name, items: g.items }))
+  }, [values, q])
 
   return (
     <Modal open={open} onCancel={() => { setQ(''); onClose() }} title="选择模型" footer={null} width={520}>
@@ -50,27 +45,29 @@ export function ModelPickerModal({ open, onClose, models, value, onSelect }: Mod
         size="middle"
         allowClear
         prefix={<SearchOutlined style={{ color: tokens.textPlaceholder }} />}
-        placeholder="搜索模型（名称 / id / 描述）…"
+        placeholder="搜索模型（名称 / 描述）…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ marginBottom: 10 }}
       />
       <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {grouped.length === 0 && (
-          <div style={{ color: tokens.textPlaceholder, fontSize: 12, padding: '12px 4px' }}>无匹配模型（可回内联选择器手动输入）</div>
+          <div style={{ color: tokens.textPlaceholder, fontSize: 12, padding: '12px 4px' }}>
+            {values.length === 0 ? emptyHint ?? '运行时未提供模型目录' : '无匹配模型'}
+          </div>
         )}
-        {grouped.map(({ provider, list }) => (
-          <div key={provider} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {grouped.map(({ key, name, items }) => (
+          <div key={key || 'default'} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPlaceholder, padding: '2px 4px' }}>
-              {provider || '通用'}
+              {name || key || '全部'}
             </div>
-            {list.map((m) => {
-              const active = m.id === value
+            {items.map((v) => {
+              const active = v.value === value
               return (
                 <button
-                  key={m.id}
+                  key={v.value}
                   type="button"
-                  onClick={() => { onSelect(m.id); setQ(''); onClose() }}
+                  onClick={() => { onSelect(v.value); setQ(''); onClose() }}
                   style={{
                     textAlign: 'left',
                     display: 'flex',
@@ -89,13 +86,17 @@ export function ModelPickerModal({ open, onClose, models, value, onSelect }: Mod
                     fontFamily: 'inherit',
                   }}
                 >
-                  <span style={{ color: tokens.text, whiteSpace: 'nowrap' }}>
-                    {m.recommended ? '★ ' : ''}
-                    {m.title || m.id}
+                  <span style={{ color: v.unavailable ? tokens.textPlaceholder : tokens.text, whiteSpace: 'nowrap' }}>
+                    {v.name || v.value}
                   </span>
-                  {m.description && (
+                  {v.unavailable && (
+                    <span style={{ color: tokens.textPlaceholder, fontSize: 11, whiteSpace: 'nowrap' }}>
+                      不可用{v.unavailable_reason ? `：${v.unavailable_reason}` : ''}
+                    </span>
+                  )}
+                  {v.description && (
                     <span style={{ color: tokens.textPlaceholder, fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {m.description}
+                      {v.description}
                     </span>
                   )}
                 </button>

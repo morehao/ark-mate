@@ -63,14 +63,15 @@ spacing:
 ```
 AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 └─ <div .app 100dvh flex-col>
-   ├─ TopBar（52px 白底 hairline 底）：burger / logo(→/sessions) / 视图 chip / 管理入口 / WS 状态
+   ├─ TopBar（52px 白底 hairline 底）：burger / logo(→/conversations) / 视图 chip / 管理入口 / WS 状态
    ├─ reconnecting 横幅（WS 非 open 时）
    ├─ 路由区
-   │   ├─ /sessions[/:id]  ChatPage：
-   │   │   ├─ SessionRail（288px 白侧栏：新建会话 + 会话列表 + 底座 foot）
-   │   │   ├─ chat：ChatHead / Transcript（840px 居中）/ Composer
+   │   ├─ /conversations[/:id]  ChatPage：
+   │   │   ├─ ConversationRail（288px 白侧栏：新建会话 + 会话列表 + 底座 foot）
+   │   │   ├─ 无 id（未选中会话）→ StartPanel 新建面板（hero + 输入卡 + 示例指令）
+   │   │   ├─ 有 id → chat：ChatHead / Transcript（840px 居中）/ Composer
    │   │   └─ StatusBar（30px：WS + eventbus seq）
-   │   └─ /agents /runtimes /settings  管理次要页（PageContainer 白卡列表）
+   │   └─ /agents /capabilities /usage /settings  管理次要页（PageContainer 白卡列表）
    └─ toast（右上浮层，仅浮层可带阴影）
 ```
 
@@ -81,7 +82,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - **会话条目**：标题两行截断；meta 行 mono 10.5：agent 名胶囊 + 状态点/文案 + 右侧 `seq N`；选中态 = `selected-bg` 柔和底 + 左侧 2.5px 靛蓝竖条（CSS ::before）。
 - **消息条目**：role 标签 mono 10 大写弱字（user / assistant / assistant · thinking / assistant · tool）；用户气泡右对齐 `14px 14px 4px 14px`；工具卡 header `tool_call · <name>` mono + 状态行（ok 绿勾 / running 脉冲点 / failed 红）。
 - **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝 ring（3px `primary-soft`）；textarea 自动增高 ≤180px；底部 mono 提示 + 主色发送按钮（Enter 发送 / Shift+Enter 换行；流式期间显示「单飞 turn 门控」+ 忙碌态）。
-- **新建会话 Modal**：agent 选项卡（短标识角标 + mono 名 + runtime/状态）+ 首轮 prompt textarea；footer：`REST 创建会话 → WS attach 收流` 提示 + 取消/开始问答。
+- **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 内嵌输入卡（模型 pill / 浏览全部 / 主色圆形发送）+ 示例指令列表；固定用默认 Agent，不展示 agent 选项卡。
 - **管理页**：`PageContainer`（标题/描述/右上操作 + 白卡行列表），行间 hairline 分隔，ID 用 mono。
 
 ## 4. Do's and Don'ts

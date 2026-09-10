@@ -36,12 +36,3 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Models 返回某 provider 档案的可选模型目录（live 优先，兜底快照；密钥绝不读回）。
-func (h *ProviderHandler) Models(c *gin.Context) {
-	resp, err := h.svc.ListProviderModels(c.Request.Context(), c.Param("id"))
-	if err != nil {
-		gincontext.Fail(c, err)
-		return
-	}
-	gincontext.Success(c, resp)
-}

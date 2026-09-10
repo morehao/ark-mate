@@ -241,8 +241,6 @@ export interface CreateConversationReq {
   cwd?: string
   /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
   model?: string
-  /** effort/reasoning 档位（仅 dsh；空 = 默认）。 */
-  effort?: string
 }
 
 export interface CreateConversationResp {

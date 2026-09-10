@@ -231,15 +231,14 @@ export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/f
 export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
   http.patch<Provider>(`/forge/providers/${encodeURIComponent(id)}`, patch)
 
-// ——— 模型目录（三段式 live → 磁盘缓存 → go:embed 快照） ———
+// ——— 模型目录（运行时派生：ACP session config options） ———
 
-/** 模型目录：`?agent=<id>` 取该 agent 的 provider 类型；空 = 聚合全部受支持类型。 */
+/**
+ * 模型目录：`?agent=<id>` 指定 agent（缺省取后端默认 agent）。
+ * 选项全量来自运行时自报，`source` 标注取样来源（session|resume|cache|none）。
+ */
 export const listModels = (agentId?: string): Promise<ModelCatalogResp> =>
   http.get<ModelCatalogResp>(`/forge/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
-
-/** 某 provider 档案的可选模型目录（live 优先，兜底快照）。 */
-export const listProviderModels = (id: string): Promise<ModelCatalogResp> =>
-  http.get<ModelCatalogResp>(`/forge/providers/${encodeURIComponent(id)}/models`)
 
 // ——— M3 用量统计 ———
 

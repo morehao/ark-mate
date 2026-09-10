@@ -126,7 +126,7 @@ func TestEchoRuntimeExecutableProjection(t *testing.T) {
 		fn   func() error
 	}{
 		{"ApplyMode", func() error { return rt.ApplyMode(ctx, ModeAuto) }},
-		{"ApplyModel", func() error { return rt.ApplyModel(ctx, ModelConfig{Model: "any"}) }},
+		{"ApplyModel", func() error { _, err := rt.ApplyModel(ctx, ModelConfig{Model: "any"}); return err }},
 		{"Resume", func() error { return rt.Resume(ctx, "other-session") }},
 	} {
 		if err := tc.fn(); err == nil {
@@ -178,13 +178,13 @@ func TestThreeProjectionConstructors(t *testing.T) {
 		id     string
 		build  func(*acl.Session) Runtime
 		ownCtx bool
-		// applyUnsupported：模型走 env/provider 配置（ModelConfigOptionID 空 → echo/opencode）
-		// 时 ApplyModel 返回 unsupported；会话级配置（deepseekharness set_config_option）则否。
+		// applyUnsupported：该会话未广告 category=model 配置项 → 三投影一律 unsupported_model
+		// （模型面完全由运行时会话配置项决定，与投影身份无关）。
 		applyUnsupported bool
 	}{
 		{"echo", func(s *acl.Session) Runtime { return NewEchoRuntime(s) }, true, true},
 		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true, true},
-		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true, false},
+		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true, true},
 	} {
 		rt := tc.build(sess)
 		if rt.ID() != tc.id {
@@ -196,15 +196,18 @@ func TestThreeProjectionConstructors(t *testing.T) {
 		if rt.ProviderSessionID() != sess.ID() {
 			t.Fatalf("%s 投影 ProviderSessionID 不符", tc.id)
 		}
-		// 模型切换行为：echo/opencode 需 env/provider 配置路径（ModelConfigOptionID 空）
-		// → unsupported_* 错误；deepseekharness 走 set_config_option（若无该能力则非 unsupported 错误）。
-		err := rt.ApplyModel(ctx, ModelConfig{Model: "x"})
+		// 模型切换行为：三投影共用同一实现，按**会话自报的配置项**（category=model）判定。
+		// 该 echo 会话未广告任何配置项 → 一律 unsupported_model（不臆造 env/provider 回落路径）。
+		_, err := rt.ApplyModel(ctx, ModelConfig{Model: "x"})
 		unsupported := false
 		if ae, ok := acl.As(err); ok {
 			unsupported = strings.HasPrefix(ae.Code, "unsupported_")
 		}
 		if unsupported != tc.applyUnsupported {
 			t.Fatalf("%s ApplyModel unsupported 期望=%v 实际=%v (err=%v)", tc.id, tc.applyUnsupported, unsupported, err)
+		}
+		if !unsupported && len(rt.ConfigOptions()) == 0 {
+			t.Fatalf("%s 非 unsupported 却无配置项: %+v", tc.id, rt.ConfigOptions())
 		}
 	}
 }

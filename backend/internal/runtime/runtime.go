@@ -17,11 +17,18 @@ const (
 	ModeChat         Mode = "chat"
 )
 
-// ModelConfig 平台侧模型选择。Provider 为空 = 跟随 provider 档案/env 注入（§5.5 模型面）。
+// ModelConfig 平台侧模型选择（只含模型这一项）。
+//
+// 重要：Model 是**运行时的不透明值**，必须原样取自运行时广告的会话配置项（category=model）的
+// ConfigOptionValue.Value —— dsh 是 `JSON.stringify([provider, model])`，opencode 是
+// `provider/model`。平台不得拼接或解析该串，也不得自行编造候选：可用性以运行时
+// set_config_option 的成败为唯一判据。
+//
+// 平台**不提供**思考档位（thought_level）选择面：运行时若给出该选项，只作为运行时状态原样
+// 投影给前端，不参与平台侧下发（少一个「取值随模型变化」的耦合面）。
 type ModelConfig struct {
-	Provider string `json:"provider,omitempty"` // provider 档案 id（Phase B：拨号/应用用）
-	Model    string `json:"model,omitempty"`    // 模型 id；空 = 底座默认
-	Effort   string `json:"effort,omitempty"`   // effort/reasoning 档位（如 "low|medium|high"；空 = 不设置）
+	Provider string `json:"provider,omitempty"` // 平台 provider 档案 id（仅展示/留痕）
+	Model    string `json:"model,omitempty"`    // 不透明模型值；空 = 用运行时默认，不下发设置
 }
 
 // PromptRequest 一次 Prompt 的入参（§4.2 PromptRequest）。本版「会话即连接」：Text 为已接入
@@ -58,8 +65,11 @@ type Runtime interface {
 	Prompt(ctx context.Context, req PromptRequest) (string, error)
 	// ApplyMode 应用统一权限模式；runtime 无原生映射时返回不支持错误。
 	ApplyMode(ctx context.Context, mode Mode) error
-	// ApplyModel 切换模型；runtime 无模型概念/不可切换时返回不支持错误。
-	ApplyModel(ctx context.Context, m ModelConfig) error
+	// ApplyModel 切换模型，返回应用后的**全量**会话配置项状态。
+	// runtime 无模型配置项时返回不支持错误；值非法/不可用时返回运行时原始错误（不得吞）。
+	ApplyModel(ctx context.Context, m ModelConfig) ([]acl.ConfigOption, error)
+	// ConfigOptions 返回该会话当前的会话配置项（运行时自报：模型目录及其它选项，空 = 未提供）。
+	ConfigOptions() []acl.ConfigOption
 	// Resume 使 Runtime 回到指定会话（ProviderSessionID）；无持久会话的 runtime 返回不支持错误。
 	Resume(ctx context.Context, sessionID string) error
 }

@@ -57,24 +57,35 @@ func (r *sessionRuntime) ApplyMode(_ context.Context, _ Mode) error {
 		"runtime "+r.spec.ID+" 不支持 ApplyMode：ModeMapping 待实测（§6.2 开放项）")
 }
 
-// ApplyModel 切换模型。投影 Spec.ModelConfigOptionID 为空 = 模型走 env/provider 配置
-// （§5.5 模型面，无运行时切换原语），不支持；非空（dsh）则经 ACP session/set_config_option
-// 应用到本会话（会话级即时生效；opencode 模型为进程级 env，在此返回不支持，由拨号 env 承担）。
-func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) error {
-	if r.spec.ModelConfigOptionID == "" {
-		return unsupported("unsupported_model",
-			"runtime "+r.spec.ID+" 不支持 ApplyModel：模型经 env/provider 配置（ModelConfigOptionID 空）")
+// ConfigOptions 返回本会话的会话配置项（模型目录等，全部由运行时自报）。
+func (r *sessionRuntime) ConfigOptions() []acl.ConfigOption {
+	return r.sess.ConfigOptions()
+}
+
+// ApplyModel 切换模型，返回应用后的全量配置项状态。
+//
+// 实现原则（决策记录 D1/D2）：
+//   - **按 category 取值，不按 option id**：各家 id 不同（dsh 的模型项就叫 "model"，但平台不依赖
+//     这个巧合），只有 category（model）是协议统一的；
+//   - **值不透明**：m.Model 原样回传，绝不拼接前缀或拆解结构；
+//   - **运行时的 set 是唯一判据**：不做平台侧白名单预判（缓存可能滞后，预判会造成假阴性），
+//     非法/不可用一律由运行时拒绝并把原始错误上抛；
+//   - 运行时未广告模型配置项 → 不支持（平台不臆造进程级模型 env：子进程本就继承 daemon 环境，
+//     用户自有的底座配置（如 opencode.json）照常生效，平台不越权改写）。
+//
+// 思考档位（category=thought_level）不在平台侧下发：运行时若提供该选项，只随全量状态原样
+// 透出（展示/可观测），平台不代为选择。
+func (r *sessionRuntime) ApplyModel(ctx context.Context, m ModelConfig) ([]acl.ConfigOption, error) {
+	opts := r.sess.ConfigOptions()
+	mOpt, ok := acl.FindConfigOption(opts, acl.CategoryModel)
+	if !ok {
+		return opts, unsupported("unsupported_model",
+			"runtime "+r.spec.ID+" 未广告模型配置项（category=model），无法在会话内切换模型")
 	}
 	if m.Model == "" {
-		return nil // 空模型 = 底座默认，不设置
+		return opts, nil // 空值 = 用运行时默认，不下发设置
 	}
-	if err := r.sess.SetConfigOption(ctx, r.spec.ModelConfigOptionID, m.Model); err != nil {
-		return err
-	}
-	if r.spec.EffortConfigOptionID != "" && m.Effort != "" {
-		return r.sess.SetConfigOption(ctx, r.spec.EffortConfigOptionID, m.Effort)
-	}
-	return nil
+	return r.sess.SetConfigOption(ctx, mOpt.ID, m.Model)
 }
 
 // Resume 热切换会话。会话恢复的 ACP 承载为 acl.Client.ResumeSession（session/resume 支持随

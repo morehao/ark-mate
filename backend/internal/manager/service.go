@@ -132,7 +132,6 @@ type ConversationRec struct {
 	Cwd         string // 会话工作目录（绝对路径；仅 sqlite 持久化）
 	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
 	Model       string // 会话级模型 id（空 = 底座默认）
-	Effort      string // effort/reasoning 档位（空 = 不设置）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
@@ -157,6 +156,7 @@ type Service struct {
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
+	catalog   *catalogStore           // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps      *capability.Registry    // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 
 	mu            sync.Mutex
@@ -189,6 +189,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		conversations:   make(map[string]*ConversationRec),
 		ver:             make(map[string]int64),
 		providers:       make(map[string]*providerDef),
+		catalog:         newCatalogStore(),
 		caps:            capability.NewRegistry(),
 		mcpProbes:       make(map[string]mcpProbeStatus),
 		mcpProbeTimeout: defaultMCPProbeTimeout,
@@ -370,12 +371,25 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch handl
 	if patch.Archived != nil {
 		r.Archived = *patch.Archived
 	}
-	if patch.Model != nil {
-		r.Model = *patch.Model
-	}
 	r.UpdatedAt = time.Now().UTC()
-	resp := toConversationResp(r)
 	s.mu.Unlock()
+
+	// 会话内改模型：活会话经 session/set_config_option 立即生效（运行时是唯一判据）；
+	// 失败即上抛且**不落元数据**（避免「界面显示新模型、实际仍用旧的」的静默偏差）。
+	// 会话不活跃（未启动/已断连）→ 只更新元数据，下次恢复会话时生效。
+	if patch.Model != nil {
+		applied, err := s.orch.ApplyConversationModel(ctx, id, runtime.ModelConfig{Model: *patch.Model})
+		if err != nil {
+			return nil, s.restErr(err)
+		}
+		if !applied {
+			slog.Default().Debug("会话不在活跃集合，模型变更仅更新元数据", "conversation", id)
+		}
+		s.mu.Lock()
+		r.Model = *patch.Model
+		r.UpdatedAt = time.Now().UTC()
+		s.mu.Unlock()
+	}
 
 	if s.st != nil {
 		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, Model: patch.Model}
@@ -385,6 +399,9 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch handl
 			slog.Default().Warn("store: update conversation meta failed", "conversation", id, "err", err)
 		}
 	}
+	s.mu.Lock()
+	resp := toConversationResp(r)
+	s.mu.Unlock()
 	return &resp, nil
 }
 
@@ -1066,7 +1083,6 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 	}
 	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd, runtime.ModelConfig{
 		Model: req.Model,
-		Effort: req.Effort,
 	})
 	if err != nil {
 		return nil, s.restErr(err)

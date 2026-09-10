@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { AutoComplete, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
-import { agentDiagnostics, createAgent, deleteAgent, listProviders, listProviderModels, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
-import type { Agent, AgentDiagnostics, ModelOption, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
+import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
+import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
 import { useForge } from '../store'
 import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
 
@@ -56,8 +56,6 @@ export function AgentsPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [agentModal, setAgentModal] = useState<{ mode: 'create' } | { mode: 'edit'; agent: Agent } | null>(null)
   const [providerModal, setProviderModal] = useState<{ id: string; existing: Provider | null } | null>(null)
-  // Provider 档案表单「Model」候选目录：编辑已有档案时从 listProviderModels(id) 拉取（live 优先，兜底快照）。
-  const [providerModelOptions, setProviderModelOptions] = useState<ModelOption[]>([])
   // A3 诊断抽屉：{ agentId, data | null（加载中）, err }
   const [diag, setDiag] = useState<{ id: string; name: string; data: AgentDiagnostics | null; err: string | null } | null>(null)
   const [agentForm] = Form.useForm<AgentFormValues>()
@@ -76,26 +74,6 @@ export function AgentsPage() {
     void loadProviders()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // 编辑已有 Provider 时拉取其模型目录作为「Model」下拉候选；新建时未保存档案 → 仅保留手动输入。
-  useEffect(() => {
-    if (!providerModal?.existing) {
-      setProviderModelOptions([])
-      return
-    }
-    let alive = true
-    setProviderModelOptions([])
-    void listProviderModels(providerModal.id)
-      .then((r) => {
-        if (alive) setProviderModelOptions(r.models)
-      })
-      .catch(() => {
-        // live/快照均失败：留空，允许手动输入（不校验，避免死锁 §13.5）。
-      })
-    return () => {
-      alive = false
-    }
-  }, [providerModal])
 
   const afterMutate = (): void => {
     void refreshAgents()
@@ -547,15 +525,9 @@ export function AgentsPage() {
           <Form.Item name="type" label="Type（env 变量名映射：openai→OPENAI_API_KEY，未知取大写 type + _API_KEY）" rules={[{ required: true, message: '必填' }]}>
             <Input placeholder="openai / anthropic / deepseek …" autoComplete="off" />
           </Form.Item>
-          <Form.Item name="model" label="Model">
-            <AutoComplete
-              placeholder="从目录选，或手动输入（不校验）"
-              allowClear
-              options={providerModelOptions.map((m) => ({ value: m.id, label: m.title || m.id }))}
-              filterOption={(input, opt) =>
-                String((opt as { value?: string; label?: string } | undefined)?.value ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
+          {/* Model 仅作档案留痕（模型选择的权威来源是运行时会话配置项，平台不内置清单）。 */}
+          <Form.Item name="model" label="Model（档案留痕，可留空）">
+            <AutoComplete placeholder="如 gpt-5 / deepseek-chat" allowClear options={[]} />
           </Form.Item>
           <Form.Item name="key" label={providerModal?.existing?.has_key ? '密钥（已存；输入即覆盖）' : '密钥'}>
             <Input.Password placeholder="只写不读回；留空 = 不变更" autoComplete="new-password" />

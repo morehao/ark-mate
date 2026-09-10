@@ -5,15 +5,21 @@ import (
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// ModelsHandler 处理模型目录 REST（设计文档 §5：GET /models）。
+// ModelsHandler 处理模型目录 REST（GET /models?agent=<id>）。
 type ModelsHandler struct {
 	svc Service
 }
 
-// List 返回模型目录：?provider=<type> 或 ?agent=<id> 过滤；两者均空 = 聚合全部受支持类型。
-// 三段式降级（live→缓存→快照），响应带 source 标注数据来源。
+// List 返回某 agent 的运行时派生模型目录。
+//
+// 目录来源是运行时（ACP session config options），不是平台内置清单：
+// 无 agent 参数时取默认 agent（dsh），以便面板首屏直接可用。
 func (h *ModelsHandler) List(c *gin.Context) {
-	resp, err := h.svc.ListModels(c.Request.Context(), c.Query("provider"), c.Query("agent"))
+	agentID := c.Query("agent")
+	if agentID == "" {
+		agentID = h.svc.DefaultAgentID()
+	}
+	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
 	if err != nil {
 		gincontext.Fail(c, err)
 		return
