@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/server/handler"
@@ -31,7 +32,10 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	h := handler.New(svc, bus)
+	h := handler.New(handler.Deps{
+		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+	}, bus)
 	return router.New(h), svc
 }
 
@@ -269,7 +273,10 @@ func newAuthEngine(token string) *gin.Engine {
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	h := handler.New(svc, bus)
+	h := handler.New(handler.Deps{
+		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+	}, bus)
 	return router.New(h, router.Options{Token: token})
 }
 
@@ -356,7 +363,7 @@ func TestWorkspaceRoutes(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("browse 失败: %+v", env)
 	}
-	var browse handler.WorkspaceBrowseResp
+	var browse dtoworkspace.WorkspaceBrowseResp
 	if err := json.Unmarshal(env.Data, &browse); err != nil {
 		t.Fatalf("browse data 解析: %v", err)
 	}
@@ -376,7 +383,7 @@ func TestWorkspaceRoutes(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("recent 失败: %+v", env)
 	}
-	var recent []handler.WorkspaceRecentResp
+	var recent []dtoworkspace.WorkspaceRecentResp
 	if err := json.Unmarshal(env.Data, &recent); err != nil {
 		t.Fatalf("recent data 解析: %v", err)
 	}
@@ -411,7 +418,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("browse 失败: %+v", env)
 	}
-	var browse handler.WorkspaceBrowseResp
+	var browse dtoworkspace.WorkspaceBrowseResp
 	if err := json.Unmarshal(env.Data, &browse); err != nil {
 		t.Fatalf("browse data 解析: %v", err)
 	}
@@ -427,7 +434,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("根内浏览失败: %+v", env)
 	}
-	var subResp handler.WorkspaceBrowseResp
+	var subResp dtoworkspace.WorkspaceBrowseResp
 	if err := json.Unmarshal(env.Data, &subResp); err != nil {
 		t.Fatalf("sub data 解析: %v", err)
 	}
@@ -473,7 +480,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("settings GET 失败: %+v", env)
 	}
-	var st handler.WorkspaceSettingsResp
+	var st dtoworkspace.WorkspaceSettingsResp
 	if err := json.Unmarshal(env.Data, &st); err != nil {
 		t.Fatalf("settings data 解析: %v", err)
 	}
@@ -595,7 +602,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("libraries 失败: %+v", env)
 	}
-	var libs []handler.WorkspaceLibraryResp
+	var libs []dtoworkspace.WorkspaceLibraryResp
 	if err := json.Unmarshal(env.Data, &libs); err != nil {
 		t.Fatalf("libraries data 解析: %v", err)
 	}
@@ -622,7 +629,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if env.Code != 0 {
 		t.Fatalf("files 失败: %+v", env)
 	}
-	var files handler.WorkspaceFilesResp
+	var files dtoworkspace.WorkspaceFilesResp
 	if err := json.Unmarshal(env.Data, &files); err != nil {
 		t.Fatalf("files data 解析: %v", err)
 	}

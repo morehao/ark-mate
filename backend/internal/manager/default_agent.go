@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
 
@@ -97,7 +97,7 @@ func clearDefaultAgentFile(dir string) {
 
 // SetDefaultAgent 切换「当前 Agent」（全局默认：新建会话/模型目录缺省取它；幂等）。
 // 未知 agent 报 agent_not_found；选择落盘 <AgentDir>/default.json，重启后保持。
-func (s *Service) SetDefaultAgent(_ context.Context, id string) (*handler.AgentResp, error) {
+func (s *Service) SetDefaultAgent(_ context.Context, id string) (*dtoagent.AgentResp, error) {
 	s.mu.Lock()
 	if _, ok := s.agents[id]; !ok {
 		s.mu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 )
 
 // defaultDialTimeout Dial 未显式配置且调用方 ctx 无截止时间时的握手上限。
@@ -346,7 +347,7 @@ func normalizeUpdate(n acpsdk.SessionNotification) []Event {
 		})
 	case u.UsageUpdate != nil:
 		uu := u.UsageUpdate
-		info := UsageInfo{Used: int64(uu.Used), Size: int64(uu.Size)}
+		info := objusage.UsageInfo{Used: int64(uu.Used), Size: int64(uu.Size)}
 		if uu.Cost != nil {
 			info.CostAmount = uu.Cost.Amount
 			info.CostCurrency = uu.Cost.Currency

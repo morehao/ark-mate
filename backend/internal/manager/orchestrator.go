@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 	"github.com/morehao/ark-forge/pkg/procreg"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -105,7 +106,7 @@ type Orchestrator struct {
 	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：turn 收口时
 	// 随 runs.usage_json 落库；底座不上报时无条目）。
 	usageMu sync.Mutex
-	usage   map[string]acl.UsageInfo
+	usage   map[string]objusage.UsageInfo
 
 	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
@@ -176,7 +177,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		inflight:        newInFlightTracker(),
 		perm:            NewPermissionManager(DefaultPermissionTimeout),
 		elic:            NewElicitationManager(DefaultElicitationTimeout),
-		usage:           make(map[string]acl.UsageInfo),
+		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
 		logger:          slog.Default(),
 	}
@@ -1231,7 +1232,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
 			p := map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
-			if d, ok := ev.Payload.(acl.UsageInfo); ok {
+			if d, ok := ev.Payload.(objusage.UsageInfo); ok {
 				p["used"], p["size"] = d.Used, d.Size
 				if d.CostAmount > 0 {
 					p["cost_amount"], p["cost_currency"] = d.CostAmount, d.CostCurrency
@@ -1331,7 +1332,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 }
 
 // recordUsage 记录平台会话最近一次用量快照（同会话后到覆盖先到；空快照忽略）。
-func (o *Orchestrator) recordUsage(conversationID string, u acl.UsageInfo) {
+func (o *Orchestrator) recordUsage(conversationID string, u objusage.UsageInfo) {
 	if conversationID == "" || !u.Reported() {
 		return
 	}
@@ -1341,7 +1342,7 @@ func (o *Orchestrator) recordUsage(conversationID string, u acl.UsageInfo) {
 }
 
 // LatestUsage 取会话最近一次用量快照（无上报 → false）。turn 收口落库用。
-func (o *Orchestrator) LatestUsage(conversationID string) (acl.UsageInfo, bool) {
+func (o *Orchestrator) LatestUsage(conversationID string) (objusage.UsageInfo, bool) {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
 	u, ok := o.usage[conversationID]

@@ -2,12 +2,18 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/service/svcagent"
+	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
 // ModelsHandler 处理模型目录 REST（GET /models?agent=<id>）。
+//
+// 同时依赖两个端口：模型目录来自底座面（svcruntime），而"未指定 agent 时取哪个"
+// 属于 Agent 管理面的知识（svcagent.DefaultAgentID）——窄接口让这层依赖显式可见。
 type ModelsHandler struct {
-	svc Service
+	svc      svcruntime.RuntimeSvc
+	agentSvc svcagent.AgentSvc
 }
 
 // List 返回某 agent 的运行时派生模型目录。
@@ -17,7 +23,7 @@ type ModelsHandler struct {
 func (h *ModelsHandler) List(c *gin.Context) {
 	agentID := c.Query("agent")
 	if agentID == "" {
-		agentID = h.svc.DefaultAgentID()
+		agentID = h.agentSvc.DefaultAgentID()
 	}
 	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
 	if err != nil {

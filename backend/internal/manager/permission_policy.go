@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
 
@@ -180,15 +180,15 @@ func (o *Orchestrator) policyAction(conversationID string, req acl.PermissionReq
 }
 
 // toPermissionPolicyResp 内部策略 → 对外表示（nil → nil，缺省不出现字段）。
-func toPermissionPolicyResp(p *PermissionPolicy) *handler.PermissionPolicyResp {
+func toPermissionPolicyResp(p *PermissionPolicy) *dtoagent.PermissionPolicyResp {
 	if p == nil {
 		return nil
 	}
-	return &handler.PermissionPolicyResp{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
+	return &dtoagent.PermissionPolicyResp{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
 }
 
 // fromPermissionPolicyResp 对外表示 → 内部策略（nil → nil）。
-func fromPermissionPolicyResp(p *handler.PermissionPolicyResp) *PermissionPolicy {
+func fromPermissionPolicyResp(p *dtoagent.PermissionPolicyResp) *PermissionPolicy {
 	if p == nil {
 		return nil
 	}

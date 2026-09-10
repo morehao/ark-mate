@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
@@ -272,7 +272,7 @@ func TestConversationHistoryClamp(t *testing.T) {
 	svc.publish(BusMessage, "s1", map[string]any{"text": "one"})
 	svc.publish(BusMessage, "s1", map[string]any{"text": "two"})
 
-	p, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: -5, Limit: 0})
+	p, err := svc.ConversationHistory(context.Background(), "s1", dtoconversation.HistoryQuery{After: -5, Limit: 0})
 	if err != nil {
 		t.Fatalf("ConversationHistory: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestConversationHistoryClamp(t *testing.T) {
 func TestCreateConversationWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "agent-x", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "agent-x", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
@@ -444,7 +444,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				title := fmt.Sprintf("PATCH 标题 %d-%d", n, j)
-				_, _ = svc.UpdateConversation(context.Background(), id, handler.ConversationPatch{Title: &title})
+				_, _ = svc.UpdateConversation(context.Background(), id, dtoconversation.ConversationPatch{Title: &title})
 			}
 		}(i)
 	}

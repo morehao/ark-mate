@@ -13,11 +13,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/dto/dtoruntime"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 	"github.com/morehao/ark-forge/pkg/routing"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
@@ -403,13 +406,13 @@ func (s *Service) closeTranscripts() {
 }
 
 // ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，conversation_count 为删除影响面）。
-func (s *Service) ListAgents() ([]handler.AgentResp, error) {
+func (s *Service) ListAgents() ([]dtoagent.AgentResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur := s.currentDefaultLocked()
-	out := make([]handler.AgentResp, 0, len(s.agents))
+	out := make([]dtoagent.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
-		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
+		out = append(out, dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 			IsDefault: a.ID == cur, Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 			PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
 			ConversationCount: s.conversationCountLocked(a.ID)})
@@ -434,11 +437,11 @@ func (s *Service) conversationCountLocked(agentID string) int {
 }
 
 // ListRuntimes 返回注册表全部 runtime（含静态能力基线）。
-func (s *Service) ListRuntimes() ([]handler.RuntimeResp, error) {
+func (s *Service) ListRuntimes() ([]dtoruntime.RuntimeResp, error) {
 	specs := s.reg.List()
-	out := make([]handler.RuntimeResp, 0, len(specs))
+	out := make([]dtoruntime.RuntimeResp, 0, len(specs))
 	for _, sp := range specs {
-		out = append(out, handler.RuntimeResp{
+		out = append(out, dtoruntime.RuntimeResp{
 			Name: sp.ID,
 			ID:   sp.ID,
 			Vers: sp.Version,
@@ -449,8 +452,8 @@ func (s *Service) ListRuntimes() ([]handler.RuntimeResp, error) {
 }
 
 // capabilityKVs 把 runtime.Capabilities 展开为 key/value 列表（稳定序）。
-func capabilityKVs(c runtime.Capabilities) []handler.CapabilityKV {
-	return []handler.CapabilityKV{
+func capabilityKVs(c runtime.Capabilities) []dtoruntime.CapabilityKV {
+	return []dtoruntime.CapabilityKV{
 		{Key: "sessions_persistent", Value: c.SessionsPersistent},
 		{Key: "multi_session_concurrent", Value: c.MultiSessionConcurrent},
 		{Key: "images", Value: c.Images},
@@ -462,11 +465,11 @@ func capabilityKVs(c runtime.Capabilities) []handler.CapabilityKV {
 // cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，
 // 会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
 // 按创建时间倒序（置顶优先）。
-func (s *Service) ListConversations(archived bool, cwd string) ([]handler.ConversationResp, error) {
+func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversation.ConversationResp, error) {
 	cwd = normalizeWorkspaceFilter(cwd)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]handler.ConversationResp, 0, len(s.conversations))
+	out := make([]dtoconversation.ConversationResp, 0, len(s.conversations))
 	for _, r := range s.conversations {
 		if r.Archived != archived {
 			continue
@@ -485,9 +488,9 @@ func (s *Service) ListConversations(archived bool, cwd string) ([]handler.Conver
 	return out, nil
 }
 
-// toConversationResp 把 ConversationRec 折叠为 handler.ConversationResp。
-func toConversationResp(r *ConversationRec) handler.ConversationResp {
-	return handler.ConversationResp{
+// toConversationResp 把 ConversationRec 折叠为 dtoconversation.ConversationResp。
+func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
+	return dtoconversation.ConversationResp{
 		ID:                 r.ID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
@@ -504,26 +507,26 @@ func toConversationResp(r *ConversationRec) handler.ConversationResp {
 }
 
 // GetConversation 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
-func (s *Service) GetConversation(ctx context.Context, id string) (*handler.ConversationDetailResp, error) {
+func (s *Service) GetConversation(ctx context.Context, id string) (*dtoconversation.ConversationDetailResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
-	perms := make([]handler.PermissionResp, 0, len(pending))
+	perms := make([]dtoconversation.PermissionResp, 0, len(pending))
 	for _, p := range pending {
 		perms = append(perms, toPermissionResp(p))
 	}
-	mems := make([]handler.MemoryResp, 0)
+	mems := make([]dtoconversation.MemoryResp, 0)
 	for _, it := range s.PermissionMemories(id) {
-		mems = append(mems, handler.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
+		mems = append(mems, dtoconversation.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
 	}
-	detail := handler.ConversationDetailResp{ConversationResp: s.conversationResp(id), Pending: perms, Memories: mems}
+	detail := dtoconversation.ConversationDetailResp{ConversationResp: s.conversationResp(id), Pending: perms, Memories: mems}
 	return &detail, nil
 }
 
 // UpdateConversation 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
 // sqlite 模式下同步写库（conversations 为 DB 权威元数据镜像）。
-func (s *Service) UpdateConversation(ctx context.Context, id string, patch handler.ConversationPatch) (*handler.ConversationResp, error) {
+func (s *Service) UpdateConversation(ctx context.Context, id string, patch dtoconversation.ConversationPatch) (*dtoconversation.ConversationResp, error) {
 	s.mu.Lock()
 	r, ok := s.conversations[id]
 	if !ok {
@@ -574,18 +577,18 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch handl
 }
 
 // conversationResp 返回单个会话的轻量表示（须持锁调用）。
-func (s *Service) conversationResp(id string) handler.ConversationResp {
+func (s *Service) conversationResp(id string) dtoconversation.ConversationResp {
 	r := s.conversations[id]
 	return toConversationResp(r)
 }
 
 // ListPendingPermissions 列出某会话的挂起权限请求。
-func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]handler.PermissionResp, error) {
+func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]dtoconversation.PermissionResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
-	out := make([]handler.PermissionResp, 0, len(pending))
+	out := make([]dtoconversation.PermissionResp, 0, len(pending))
 	for _, p := range pending {
 		out = append(out, toPermissionResp(p))
 	}
@@ -595,7 +598,7 @@ func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]hand
 // ResolvePermission 按 call_id 决策（allow/reject × once/always），返回**实际投递给 agent 的回执**
 // （allowed/rejected/always/请求 option_id + ACP 形态 outcome/selected_option_id），
 // 供 REST 如实回执——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
-func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*handler.PermissionDecisionResp, error) {
+func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*dtoconversation.PermissionDecisionResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
@@ -606,7 +609,7 @@ func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID st
 	if !ok {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
 	}
-	return &handler.PermissionDecisionResp{
+	return &dtoconversation.PermissionDecisionResp{
 		CallID:           callID,
 		Allowed:          out.Allowed,
 		Rejected:         out.Rejected,
@@ -634,12 +637,12 @@ func (s *Service) PendingElicitations(id string) []ElicitationItem {
 }
 
 // ListPendingElicitations 列出某会话的挂起结构化提问。
-func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]handler.ElicitationResp, error) {
+func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]dtoconversation.ElicitationResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingElicitations(id)
-	out := make([]handler.ElicitationResp, 0, len(pending))
+	out := make([]dtoconversation.ElicitationResp, 0, len(pending))
 	for _, p := range pending {
 		out = append(out, toElicitationResp(p))
 	}
@@ -674,13 +677,13 @@ func (s *Service) PermissionMemories(id string) []MemoryItem {
 }
 
 // ListPermissionMemories 校验会话存在后透传会话级权限记忆（allow/reject 双侧）。
-func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]handler.MemoryResp, error) {
+func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]dtoconversation.MemoryResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
-	mems := make([]handler.MemoryResp, 0)
+	mems := make([]dtoconversation.MemoryResp, 0)
 	for _, it := range s.PermissionMemories(id) {
-		mems = append(mems, handler.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
+		mems = append(mems, dtoconversation.MemoryResp{Title: it.Title, Kind: it.Kind, Decision: it.Decision, Since: it.Since.UTC().Format(time.RFC3339)})
 	}
 	return mems, nil
 }
@@ -699,13 +702,13 @@ func (s *Service) RevokeMemory(ctx context.Context, id, title, kind string) erro
 	return nil
 }
 
-// toPermissionResp 把 manager.PermissionItem 折叠为 handler.PermissionResp。
-func toPermissionResp(p PermissionItem) handler.PermissionResp {
-	opts := make([]handler.PermissionOptionResp, 0, len(p.Options))
+// toPermissionResp 把 manager.PermissionItem 折叠为 dtoconversation.PermissionResp。
+func toPermissionResp(p PermissionItem) dtoconversation.PermissionResp {
+	opts := make([]dtoconversation.PermissionOptionResp, 0, len(p.Options))
 	for _, o := range p.Options {
-		opts = append(opts, handler.PermissionOptionResp{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
+		opts = append(opts, dtoconversation.PermissionOptionResp{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
 	}
-	return handler.PermissionResp{
+	return dtoconversation.PermissionResp{
 		CallID:    p.CallID,
 		SessionID: p.SessionID,
 		Title:     p.Title,
@@ -717,9 +720,9 @@ func toPermissionResp(p PermissionItem) handler.PermissionResp {
 	}
 }
 
-// toElicitationResp 把 manager.ElicitationItem 折叠为 handler.ElicitationResp。
-func toElicitationResp(p ElicitationItem) handler.ElicitationResp {
-	resp := handler.ElicitationResp{
+// toElicitationResp 把 manager.ElicitationItem 折叠为 dtoconversation.ElicitationResp。
+func toElicitationResp(p ElicitationItem) dtoconversation.ElicitationResp {
+	resp := dtoconversation.ElicitationResp{
 		ElicitationID:  p.ID,
 		SessionID:      p.SessionID,
 		ConversationID: p.ConversationID,
@@ -1033,17 +1036,17 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 
 // ListRuns 列出某会话的轮次明细（runs 表，started_at 升序；失败轮重试/统计用）。
 // 内存（无 store）模式下返回空列表（runs 是 sqlite 读模型）。
-func (s *Service) ListRuns(ctx context.Context, id string) ([]handler.RunResp, error) {
+func (s *Service) ListRuns(ctx context.Context, id string) ([]dtoconversation.RunResp, error) {
 	if s.st == nil {
-		return []handler.RunResp{}, nil
+		return []dtoconversation.RunResp{}, nil
 	}
 	rows, err := s.st.ListRuns(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]handler.RunResp, 0, len(rows))
+	out := make([]dtoconversation.RunResp, 0, len(rows))
 	for _, r := range rows {
-		resp := handler.RunResp{
+		resp := dtoconversation.RunResp{
 			ID: r.ID, UserText: r.UserText, Status: r.Status,
 			ErrorCode: r.ErrorCode, StopReason: r.StopReason,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
@@ -1053,9 +1056,9 @@ func (s *Service) ListRuns(ctx context.Context, id string) ([]handler.RunResp, e
 			resp.EndedAt = r.EndedAt.UTC().Format(time.RFC3339Nano)
 		}
 		if r.UsageJSON != "" {
-			var u acl.UsageInfo
+			var u objusage.UsageInfo
 			if err := json.Unmarshal([]byte(r.UsageJSON), &u); err == nil && u.Reported() {
-				resp.Usage = &handler.RunUsageResp{
+				resp.Usage = &dtoconversation.RunUsageResp{
 					Used: u.Used, Size: u.Size, CostAmount: u.CostAmount, CostCurrency: u.CostCurrency,
 				}
 			}
@@ -1250,7 +1253,7 @@ func deriveTitle(text string) string {
 //
 // 会话 id 在 session/new 之前定号：代建目录名以它为准，且目录必须先于 session/new 存在
 // （底座对 cwd 做存在性校验）。
-func (s *Service) CreateConversation(ctx context.Context, req handler.ConversationCreateReq) (*handler.ConversationCreateResp, error) {
+func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.ConversationCreateReq) (*dtoconversation.ConversationCreateResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
@@ -1283,7 +1286,7 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 		DiscardWorkspace(ws)
 		return nil, s.restErr(err)
 	}
-	resp := &handler.ConversationCreateResp{
+	resp := &dtoconversation.ConversationCreateResp{
 		ID: res.ConversationID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
 		Cwd: ws.Path, WorkspaceTemporary: ws.Temporary,
 	}
@@ -1301,7 +1304,7 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 // PromptConversation 向既有会话追加一轮 prompt（后台执行）。
 // turn 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
 // POST /conversations/:id/cancel 决定。
-func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*handler.ConversationPromptResp, error) {
+func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*dtoconversation.ConversationPromptResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
@@ -1312,7 +1315,7 @@ func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*h
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	return &handler.ConversationPromptResp{ID: id, Status: ConversationStatusInProgress, EventSeq: seq}, nil
+	return &dtoconversation.ConversationPromptResp{ID: id, Status: ConversationStatusInProgress, EventSeq: seq}, nil
 }
 
 // CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。
@@ -1369,7 +1372,7 @@ func (s *Service) restErr(err error) error {
 // 「加载更早」可一直翻到会话第一条；内存模式回放 eventbus（进程内）。
 // 语义：after（开区间，seq > after）与 before（开区间，seq < before，返回最近 limit 条并升序排列）
 // 互斥（handler 已拦，服务层再兜一次 → 40001）；has_more 沿当前方向；首尾 seq 一并回带。
-func (s *Service) ConversationHistory(ctx context.Context, id string, q handler.HistoryQuery) (*handler.ConversationHistoryResp, error) {
+func (s *Service) ConversationHistory(ctx context.Context, id string, q dtoconversation.HistoryQuery) (*dtoconversation.ConversationHistoryResp, error) {
 	if !s.hasConversation(id) {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
@@ -1441,7 +1444,7 @@ func (s *Service) ConversationHistory(ctx context.Context, id string, q handler.
 		events = mine
 	}
 
-	resp := &handler.ConversationHistoryResp{ID: id, Events: events, HasMore: hasMore}
+	resp := &dtoconversation.ConversationHistoryResp{ID: id, Events: events, HasMore: hasMore}
 	if len(events) > 0 {
 		resp.FirstSeq = events[0].Seq
 		resp.LastSeq = events[len(events)-1].Seq

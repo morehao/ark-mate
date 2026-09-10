@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtomodel"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -162,7 +162,7 @@ func (s *Service) DefaultAgentID() string {
 //  4. none    —— 都没有：空目录 + 说明（面板此时显示「跟随 Agent 默认」）。
 //
 // 目录为空是合法结果（运行时没配 provider/没登录），不做任何回落填充。
-func (s *Service) ModelCatalog(ctx context.Context, agentID string) (*handler.ModelCatalogResp, error) {
+func (s *Service) ModelCatalog(ctx context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	agent, ok := s.AgentByID(agentID)
 	if !ok {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
@@ -308,19 +308,19 @@ func (s *Service) newestResumableConversation(agentID string) *ConversationRec {
 
 // catalogResp 组装对外响应：选项投影 + 拒绝值标注 + 鉴权引导。
 func (s *Service) catalogResp(agentID, runtimeID, source string, opts []acl.ConfigOption,
-	fetchedAt time.Time, note string) *handler.ModelCatalogResp {
-	resp := &handler.ModelCatalogResp{
+	fetchedAt time.Time, note string) *dtomodel.ModelCatalogResp {
+	resp := &dtomodel.ModelCatalogResp{
 		Agent:   agentID,
 		Runtime: runtimeID,
 		Source:  source,
-		Options: make([]handler.ConfigOptionResp, 0, len(opts)),
+		Options: make([]dtomodel.ConfigOptionResp, 0, len(opts)),
 		Note:    note,
 	}
 	if !fetchedAt.IsZero() {
 		resp.FetchedAt = fetchedAt.UTC().Format(time.RFC3339)
 	}
 	for _, o := range opts {
-		item := handler.ConfigOptionResp{
+		item := dtomodel.ConfigOptionResp{
 			ID:           o.ID,
 			Name:         o.Name,
 			Description:  o.Description,
@@ -328,10 +328,10 @@ func (s *Service) catalogResp(agentID, runtimeID, source string, opts []acl.Conf
 			Type:         o.Type,
 			CurrentValue: o.CurrentValue,
 			Grouped:      o.Grouped,
-			Values:       make([]handler.ConfigOptionValueResp, 0, len(o.Values)),
+			Values:       make([]dtomodel.ConfigOptionValueResp, 0, len(o.Values)),
 		}
 		for _, v := range o.Values {
-			val := handler.ConfigOptionValueResp{
+			val := dtomodel.ConfigOptionValueResp{
 				Value:       v.Value,
 				Name:        v.Name,
 				Description: v.Description,
@@ -352,7 +352,7 @@ func (s *Service) catalogResp(agentID, runtimeID, source string, opts []acl.Conf
 }
 
 // authGuidanceFor 取该 agent 已连接 runtime 声明的鉴权方式（无连接 → 空）。
-func (s *Service) authGuidanceFor(agentID string) []handler.AuthGuidanceResp {
+func (s *Service) authGuidanceFor(agentID string) []dtomodel.AuthGuidanceResp {
 	if s.orch == nil {
 		return nil
 	}
@@ -364,9 +364,9 @@ func (s *Service) authGuidanceFor(agentID string) []handler.AuthGuidanceResp {
 	if len(caps.AuthGuidance) == 0 {
 		return nil
 	}
-	out := make([]handler.AuthGuidanceResp, 0, len(caps.AuthGuidance))
+	out := make([]dtomodel.AuthGuidanceResp, 0, len(caps.AuthGuidance))
 	for _, g := range caps.AuthGuidance {
-		out = append(out, handler.AuthGuidanceResp{
+		out = append(out, dtomodel.AuthGuidanceResp{
 			MethodID:    g.MethodID,
 			Name:        g.Name,
 			Description: g.Description,

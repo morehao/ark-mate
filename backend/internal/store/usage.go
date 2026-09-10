@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 )
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
@@ -74,7 +74,7 @@ type usageRow struct {
 	status         string
 	startedAt      time.Time
 	endedAt        time.Time
-	usage          acl.UsageInfo
+	usage          objusage.UsageInfo
 	// 字段级可用性：一次上报可能只带上下文或只带费用，聚合时按字段取「区间内最后一条」。
 	hasContext bool
 	hasCost    bool
@@ -156,7 +156,7 @@ func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error)
 		r.startedAt = parseTime(started)
 		r.endedAt = parseTime(ended)
 		if usageJSON != "" {
-			var u acl.UsageInfo
+			var u objusage.UsageInfo
 			if err := json.Unmarshal([]byte(usageJSON), &u); err == nil && u.Reported() {
 				r.usage = u
 				r.hasContext, r.hasCost = u.HasContext(), u.HasCost()
@@ -174,8 +174,8 @@ func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error)
 // **快照**而非区间增量——同一会话跨桶时会在每个桶各出现一次，因此 day 分桶的成本/上下文不可相加。
 func aggregateUsage(rows []usageRow) UsageBucket {
 	var b UsageBucket
-	lastCtx := make(map[string]acl.UsageInfo)
-	lastCost := make(map[string]acl.UsageInfo)
+	lastCtx := make(map[string]objusage.UsageInfo)
+	lastCost := make(map[string]objusage.UsageInfo)
 	ctxOrder := make([]string, 0, len(rows))
 	costOrder := make([]string, 0, len(rows))
 	for _, r := range rows {

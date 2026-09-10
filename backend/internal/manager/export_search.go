@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoexport"
+	"github.com/morehao/ark-forge/internal/dto/dtosearch"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
 
@@ -27,7 +28,7 @@ const (
 //
 // 数据面：sqlite 模式走 messages 读模型（角色不限）；memory 模式回扫 transcript 的用户消息与
 // agent 消息（逐行解析事件，取 seq 作锚点）。两者都返回 seq，前端可据锚点滚动定位。
-func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*handler.MessageSearchResp, error) {
+func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
@@ -38,7 +39,7 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*handl
 	if limit > 200 {
 		limit = 200
 	}
-	resp := &handler.MessageSearchResp{Query: q, Hits: []handler.MessageSearchHit{}}
+	resp := &dtosearch.MessageSearchResp{Query: q, Hits: []dtosearch.MessageSearchHit{}}
 
 	if s.st != nil {
 		resp.Source = "sqlite"
@@ -52,7 +53,7 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*handl
 			hits = hits[:limit]
 		}
 		for _, h := range hits {
-			resp.Hits = append(resp.Hits, handler.MessageSearchHit{
+			resp.Hits = append(resp.Hits, dtosearch.MessageSearchHit{
 				ConversationID: h.ConversationID,
 				Title:          h.ConversationTitle,
 				AgentID:        h.AgentID,
@@ -84,13 +85,13 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*handl
 
 	type hit struct {
 		at  time.Time
-		out handler.MessageSearchHit
+		out dtosearch.MessageSearchHit
 	}
 	var all []hit
 	qLower := strings.ToLower(q)
 	for _, r := range recs {
 		for _, th := range scanTranscriptMessages(s.tx.dir, r.ID, qLower) {
-			all = append(all, hit{at: r.UpdatedAt, out: handler.MessageSearchHit{
+			all = append(all, hit{at: r.UpdatedAt, out: dtosearch.MessageSearchHit{
 				ConversationID: r.ID,
 				Title:          r.Title,
 				AgentID:        r.AgentID,
@@ -187,7 +188,7 @@ func scanTranscriptMessages(dir, conversationID, qLower string) []transcriptMess
 
 // ExportConversations 批量导出会话（M3 ②）。事实源与前端渲染一致：事件序列（sqlite=events 表；
 // memory=eventbus/transcript 回放），因此两模式产物一致。未知/无事件会话进 skipped 明确列出。
-func (s *Service) ExportConversations(ctx context.Context, req handler.ExportReq) (*handler.ExportResp, error) {
+func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
 	format := strings.ToLower(strings.TrimSpace(req.Format))
 	if format == "" {
 		format = "markdown"
@@ -216,7 +217,7 @@ func (s *Service) ExportConversations(ctx context.Context, req handler.ExportReq
 			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", maxExportIDs, len(ids)), nil))
 	}
 
-	resp := &handler.ExportResp{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Format: format, Files: []handler.ExportFile{}}
+	resp := &dtoexport.ExportResp{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Format: format, Files: []dtoexport.ExportFile{}}
 	for _, id := range ids {
 		meta, ok := s.conversationMeta(id)
 		if !ok {
@@ -233,7 +234,7 @@ func (s *Service) ExportConversations(ctx context.Context, req handler.ExportReq
 			content = content[:maxExportBytesEach]
 			truncated = true
 		}
-		resp.Files = append(resp.Files, handler.ExportFile{
+		resp.Files = append(resp.Files, dtoexport.ExportFile{
 			ConversationID: id,
 			Title:          meta.title,
 			AgentID:        meta.agentID,

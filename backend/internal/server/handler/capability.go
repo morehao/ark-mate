@@ -5,13 +5,15 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/dto/dtocapability"
+	"github.com/morehao/ark-forge/internal/service/svccapability"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
 type CapabilityHandler struct {
-	svc Service
+	svc svccapability.CapabilitySvc
 }
 
 // ListSkills 列出 Skill 目录（平台唯一事实源；按 ID 排序）。
@@ -59,7 +61,7 @@ func (h *CapabilityHandler) AgentCapabilities(c *gin.Context) {
 // 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
 // CallMcpTool 调用 MCP server 的工具（B1：tools/call）。
 func (h *CapabilityHandler) CallMcpTool(c *gin.Context) {
-	var req McpToolCallReq
+	var req dtocapability.McpToolCallReq
 	// 空 body 合法（= 无参数调用）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
@@ -85,7 +87,7 @@ func (h *CapabilityHandler) ListMcpResources(c *gin.Context) {
 
 // ReadMcpResource 读取一个资源（B2：resources/read）。
 func (h *CapabilityHandler) ReadMcpResource(c *gin.Context) {
-	var req McpResourceReadReq
+	var req dtocapability.McpResourceReadReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -110,7 +112,7 @@ func (h *CapabilityHandler) ListMcpPrompts(c *gin.Context) {
 
 // GetMcpPrompt 取用一条提示词模板（B2：prompts/get）。
 func (h *CapabilityHandler) GetMcpPrompt(c *gin.Context) {
-	var req McpPromptGetReq
+	var req dtocapability.McpPromptGetReq
 	// 空 body 合法（= 无参数）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})

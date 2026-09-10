@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 )
 
 // collect 收集 normalizeUpdate 输出的事件（按 Kind+关键文本）。
@@ -126,7 +127,7 @@ func TestNormalizeUpdateToolKinds(t *testing.T) {
 			t.Fatalf("usage 归一不符: %+v", evs)
 		}
 		// M3：用量明细透传（used/size 必填；cost 可选）。
-		u, ok := evs[0].Payload.(UsageInfo)
+		u, ok := evs[0].Payload.(objusage.UsageInfo)
 		if !ok || u.Used != 1 || u.Size != 100 || u.Reported() != true {
 			t.Fatalf("usage 载荷不符: %+v ok=%v", evs[0].Payload, ok)
 		}
@@ -138,7 +139,7 @@ func TestNormalizeUpdateToolKinds(t *testing.T) {
 				Cost: &acpsdk.Cost{Amount: 0.42, Currency: "USD"}},
 		}}
 		evs := collect(n)
-		u, ok := evs[0].Payload.(UsageInfo)
+		u, ok := evs[0].Payload.(objusage.UsageInfo)
 		if !ok || u.CostAmount != 0.42 || u.CostCurrency != "USD" {
 			t.Fatalf("cost 未透传: %+v", evs[0].Payload)
 		}

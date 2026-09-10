@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -54,7 +54,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	}
 
 	// 事件已注入 bus：history 可按 agg 回放。
-	hist, err := svc.ConversationHistory(t.Context(), "ses_old1", handler.HistoryQuery{Limit: 100})
+	hist, err := svc.ConversationHistory(t.Context(), "ses_old1", dtoconversation.HistoryQuery{Limit: 100})
 	if err != nil {
 		t.Fatalf("ConversationHistory: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestLoadTranscriptsWorkspace(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 
-	byID := map[string]handler.ConversationResp{}
+	byID := map[string]dtoconversation.ConversationResp{}
 	conversations, err := svc.ListConversations(false, "")
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)

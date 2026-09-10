@@ -29,10 +29,10 @@ type Config struct {
 	Token string
 }
 
-// New 构造控制面 Server。svc 为领域服务实现（manager 落地前可用 handler.NewMockService）。
+// New 构造控制面 Server。deps 为各领域服务端口（实现方为 manager.Service）。
 // bus 承载归一化会话事件（架构文档 §2 范式），由实时通道（WS，M0 落地）订阅推送。
-func New(cfg Config, svc handler.Service, bus *eventbus.Bus) *Server {
-	h := handler.New(svc, bus)
+func New(cfg Config, deps handler.Deps, bus *eventbus.Bus) *Server {
+	h := handler.New(deps, bus)
 	engine := router.New(h, router.Options{Token: cfg.Token})
 
 	engine.ForwardedByClientIP = true

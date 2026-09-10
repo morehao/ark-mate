@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -37,7 +37,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1.markConversation("s-live", ConversationStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
-	if _, err := svc1.UpdateConversation(ctx, "s-live", handler.ConversationPatch{Pinned: &pinned, Title: &title}); err != nil {
+	if _, err := svc1.UpdateConversation(ctx, "s-live", dtoconversation.ConversationPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("UpdateConversation: %v", err)
 	}
 	if eMsg.Seq != eUser.Seq+1 {

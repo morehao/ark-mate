@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
@@ -142,7 +142,7 @@ func TestCancelTurn(t *testing.T) {
 // TestServiceRESTErrors 会话动作错误映射为对外错误码（不存在 agent/conversation → 40401）。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "nope", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "nope", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)

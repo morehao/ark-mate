@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -14,7 +14,7 @@ func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
 	t.Helper()
 	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
 	svc := NewService(reg, nil)
-	_, _ = svc.CreateAgent(context.Background(), handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}})
+	_, _ = svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}})
 	o := NewOrchestrator(svc, reg)
 	t.Cleanup(o.Close)
 	return o, svc

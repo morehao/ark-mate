@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/routing"
 	"github.com/morehao/ark-forge/pkg/runtime"
@@ -64,14 +64,14 @@ func (s *Service) agentLastError(agentID string) (agentLastErr, bool) {
 //
 // stderr_tail 来源优先级：live（当前连接子进程的实时尾巴）→ last_error（上次失败时采集的尾巴）
 // → 空（无连接且无失败记录）。stderr_source 标明来源，前端/排障不必猜。
-func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.AgentDiagnosticsResp, error) {
+func (s *Service) AgentDiagnostics(_ context.Context, id string) (*dtoagent.AgentDiagnosticsResp, error) {
 	agent, ok := s.AgentByID(id)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q（若它是已被删除的 agent：用同一个 id 重新注册即可让绑定它的会话复活）", id), nil)
 	}
 	runtimeID := agent.pickRuntime()
-	resp := &handler.AgentDiagnosticsResp{
+	resp := &dtoagent.AgentDiagnosticsResp{
 		AgentID:      id,
 		Name:         agent.Name,
 		State:        agent.State,
@@ -100,7 +100,7 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.Agent
 		}
 	}
 	if le, ok := s.agentLastError(id); ok {
-		resp.LastError = &handler.AgentLastErrorResp{
+		resp.LastError = &dtoagent.AgentLastErrorResp{
 			At:             le.At.Format(time.RFC3339),
 			ConversationID: le.ConversationID,
 			Code:           le.Code,

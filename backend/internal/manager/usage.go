@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtousage"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
@@ -27,7 +27,7 @@ const (
 )
 
 // UsageSummary 聚合用量统计。
-func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*handler.UsageSummaryResp, error) {
+func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
 	if s.st == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassUnsupported, "usage_stats_unsupported",
 			"[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）", nil))
@@ -67,7 +67,7 @@ func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*h
 		return nil, s.restErr(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
-	out := &handler.UsageSummaryResp{
+	out := &dtousage.UsageSummaryResp{
 		AgentID:          q.AgentID,
 		GroupBy:          groupBy,
 		Source:           "sqlite",
@@ -77,7 +77,7 @@ func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*h
 		// 多个日期桶重复出现 → 不可加（前端据此如实标注合计）。
 		BucketsAdditive: groupBy == "agent",
 		Totals:          toUsageBucketResp(res.Totals),
-		Buckets:         make([]handler.UsageBucketResp, 0, len(res.Buckets)),
+		Buckets:         make([]dtousage.UsageBucketResp, 0, len(res.Buckets)),
 	}
 	if !from.IsZero() {
 		out.From = from.UTC().Format(time.RFC3339)
@@ -92,8 +92,8 @@ func (s *Service) UsageSummary(ctx context.Context, q handler.UsageQueryReq) (*h
 }
 
 // toUsageBucketResp 读模型 → REST DTO。
-func toUsageBucketResp(b store.UsageBucket) handler.UsageBucketResp {
-	return handler.UsageBucketResp{
+func toUsageBucketResp(b store.UsageBucket) dtousage.UsageBucketResp {
+	return dtousage.UsageBucketResp{
 		Key: b.Key, AgentID: b.AgentID, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
 		Cancelled: b.Cancelled, Running: b.Running, Conversations: b.Conversations,
 		DurationMS: b.DurationMS, ContextUsed: b.ContextUsed, ContextSize: b.ContextSize,

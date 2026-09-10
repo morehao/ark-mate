@@ -7,13 +7,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/service/svcconversation"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
 // ConversationHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
 type ConversationHandler struct {
-	svc Service
+	svc svcconversation.ConversationSvc
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档；
@@ -66,7 +68,7 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 
 // Update 更新会话元数据（title/pinned/archived 子集）。
 func (h *ConversationHandler) Update(c *gin.Context) {
-	var req ConversationPatch
+	var req dtoconversation.ConversationPatch
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -101,7 +103,7 @@ func (h *ConversationHandler) PermissionMemories(c *gin.Context) {
 
 // RevokeMemory 撤销会话级权限记忆（body title+kind 均空 = 一键撤销全部）。
 func (h *ConversationHandler) RevokeMemory(c *gin.Context) {
-	var req MemoryRevokeReq
+	var req dtoconversation.MemoryRevokeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -115,7 +117,7 @@ func (h *ConversationHandler) RevokeMemory(c *gin.Context) {
 
 // ResolvePermission 对挂起权限请求做出决策（allow/reject × once/always）。
 func (h *ConversationHandler) ResolvePermission(c *gin.Context) {
-	var req PermissionResolveReq
+	var req dtoconversation.PermissionResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -140,7 +142,7 @@ func (h *ConversationHandler) Elicitations(c *gin.Context) {
 
 // ResolveElicitation 对挂起结构化提问做出决策（accept/decline/cancel；accept 可带 content）。
 func (h *ConversationHandler) ResolveElicitation(c *gin.Context) {
-	var req ElicitationResolveReq
+	var req dtoconversation.ElicitationResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -156,7 +158,7 @@ func (h *ConversationHandler) ResolveElicitation(c *gin.Context) {
 // 返回 conversation id 与 event_seq 水位：前端 WS attach 传 since_seq=event_seq 即可
 // 续传首轮增量事件（§4.5 attach/续传语义；EventSeq=0 表示 bus 未启用，attach since=0 走快照）。
 func (h *ConversationHandler) Create(c *gin.Context) {
-	var req ConversationCreateReq
+	var req dtoconversation.ConversationCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
@@ -201,7 +203,7 @@ func (h *ConversationHandler) Cancel(c *gin.Context) {
 // `limit`（默认 200，上限 1000）。事件按 seq 升序；翻页用末条 seq 作下页 after。
 func (h *ConversationHandler) History(c *gin.Context) {
 	id := c.Param("id")
-	q := HistoryQuery{Limit: 200}
+	q := dtoconversation.HistoryQuery{Limit: 200}
 	if v := c.Query("after"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {

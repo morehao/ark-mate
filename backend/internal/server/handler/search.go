@@ -5,13 +5,16 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/service/svcerr"
+	"github.com/morehao/ark-forge/internal/service/svcsearch"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
 // SearchHandler 处理跨会话消息检索（M3 ②：全局消息搜索 + 锚点跳转）。
 type SearchHandler struct {
-	svc Service
+	svc    svcsearch.SearchSvc
+	mapper svcerr.Mapper
 }
 
 // Messages 消息级检索：GET /search/messages?q=&limit=（q 必填；limit 默认 30、上限 200）。
@@ -32,7 +35,7 @@ func (h *SearchHandler) Messages(c *gin.Context) {
 	}
 	resp, err := h.svc.SearchMessages(c.Request.Context(), q, limit)
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)

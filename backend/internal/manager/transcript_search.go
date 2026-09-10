@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 )
 
 // SearchConversations 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。
 // 元数据命中计 1 次；正文命中逐条累计（片段取首条命中用户消息）。
 // 排序：updated_at 降序，截断 limit（调用方已校验 >0）。
 // 复杂度说明：本地工具态直接扫 transcript 文件（文件小、量级低）；不引入索引/DB（决策范围外）。
-func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([]handler.ConversationSearchHit, error) {
+func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([]dtoconversation.ConversationSearchHit, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, nil
@@ -78,11 +78,11 @@ func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([
 		out = out[:limit]
 	}
 
-	hits := make([]handler.ConversationSearchHit, 0, len(out))
+	hits := make([]dtoconversation.ConversationSearchHit, 0, len(out))
 	for _, c := range out {
 		r := c.rec
-		hits = append(hits, handler.ConversationSearchHit{
-			ConversationResp: handler.ConversationResp{
+		hits = append(hits, dtoconversation.ConversationSearchHit{
+			ConversationResp: dtoconversation.ConversationResp{
 				ID:        r.ID,
 				AgentID:   r.AgentID,
 				Status:    r.Status,

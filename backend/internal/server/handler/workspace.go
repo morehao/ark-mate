@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-forge/internal/service/svcerr"
+	"github.com/morehao/ark-forge/internal/service/svcworkspace"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
@@ -15,7 +18,8 @@ import (
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 manager.ValidateWorkspace 的三条件）。
 type WorkspaceHandler struct {
-	svc Service
+	svc    svcworkspace.WorkspaceSvc
+	mapper svcerr.Mapper
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
@@ -28,7 +32,7 @@ func (h *WorkspaceHandler) Browse(c *gin.Context) {
 	includeHidden := c.Query("hidden") == "true"
 	resp, err := h.svc.BrowseWorkspace(path, includeHidden)
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -50,7 +54,7 @@ func (h *WorkspaceHandler) Recent(c *gin.Context) {
 	}
 	list, err := h.svc.RecentWorkspaces(limit)
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, list)
@@ -63,7 +67,7 @@ func (h *WorkspaceHandler) Recent(c *gin.Context) {
 func (h *WorkspaceHandler) Libraries(c *gin.Context) {
 	list, err := h.svc.WorkspaceLibraries()
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, list)
@@ -78,7 +82,7 @@ func (h *WorkspaceHandler) Files(c *gin.Context) {
 	includeHidden := c.Query("hidden") == "true"
 	resp, err := h.svc.ListWorkspaceFiles(path, includeHidden)
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -91,7 +95,7 @@ func (h *WorkspaceHandler) Files(c *gin.Context) {
 func (h *WorkspaceHandler) Settings(c *gin.Context) {
 	resp, err := h.svc.WorkspaceSettings()
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -102,14 +106,14 @@ func (h *WorkspaceHandler) Settings(c *gin.Context) {
 // 三种拒绝要能分辨：`settings_locked`（被 env/flag 锁定 → 面板转只读）、`settings_readonly`
 // （本进程无配置目录）、`workspace_invalid`（某条不是绝对路径 / 不存在 / 不是目录）。
 func (h *WorkspaceHandler) UpdateSettings(c *gin.Context) {
-	var req WorkspaceSettingsReq
+	var req dtoworkspace.WorkspaceSettingsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
 		return
 	}
 	resp, err := h.svc.UpdateWorkspaceSettings(req.Roots)
 	if err != nil {
-		gincontext.Fail(c, h.svc.RestErr(err))
+		gincontext.Fail(c, h.mapper.RestErr(err))
 		return
 	}
 	gincontext.Success(c, resp)

@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/server"
+	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/config"
 	"github.com/morehao/ark-forge/pkg/procreg"
@@ -180,7 +181,13 @@ func serve(args []string) {
 	orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
 	defer orch.Close()
 
-	srv := server.New(server.Config{Addr: cfg.Addr, Token: cfg.Token}, svc, bus)
+	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
+	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
+	deps := handler.Deps{
+		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+	}
+	srv := server.New(server.Config{Addr: cfg.Addr, Token: cfg.Token}, deps, bus)
 	if cfg.Token != "" {
 		slog.Info("serve: 已启用单操作员令牌鉴权（除 /health 外全部 /v1/forge 路由要求 Bearer token）")
 	}

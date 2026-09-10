@@ -2,13 +2,14 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 	"github.com/morehao/golib/gerror"
 )
 
 // RuntimeHandler 处理 Runtime 相关 REST 请求。
 type RuntimeHandler struct {
-	svc Service
+	svc svcruntime.RuntimeSvc
 }
 
 // List 列出可用 Runtime。

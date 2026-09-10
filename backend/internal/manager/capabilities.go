@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/mcp"
@@ -56,15 +56,15 @@ func (s *Service) RegisterTool(t capability.Tool) error {
 }
 
 // ListSkills 返回 Skill 目录（按 ID 排序）。
-func (s *Service) ListSkills() ([]handler.SkillResp, error) {
+func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) {
 	items := s.caps.ListSkills()
-	out := make([]handler.SkillResp, 0, len(items))
+	out := make([]dtocapability.SkillResp, 0, len(items))
 	for _, sk := range items {
-		src := make([]handler.SkillSourceResp, 0, len(sk.Sources))
+		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
 		for _, so := range sk.Sources {
-			src = append(src, handler.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
+			src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
 		}
-		out = append(out, handler.SkillResp{
+		out = append(out, dtocapability.SkillResp{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body, Sources: src,
 		})
 	}
@@ -73,13 +73,13 @@ func (s *Service) ListSkills() ([]handler.SkillResp, error) {
 
 // ListMcpServers 返回 MCP 注册表（按 ID 排序）。headers/凭证只存内部供 P2 注入，不读回。
 // 附 live 探测状态（tool_count / last_probe_at / last_probe_error，P2 §5.2）。
-func (s *Service) ListMcpServers() ([]handler.McpServerResp, error) {
+func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 	items := s.caps.ListMcpServers()
 	counts := s.mcpToolCounts()
 	probes := s.mcpProbeSnapshot()
-	out := make([]handler.McpServerResp, 0, len(items))
+	out := make([]dtocapability.McpServerResp, 0, len(items))
 	for _, m := range items {
-		resp := handler.McpServerResp{
+		resp := dtocapability.McpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
 			ToolCount: counts[m.ID],
@@ -178,7 +178,7 @@ func mcpProbeClass(err error) acl.Class {
 // 建连（stdio/http/streamable_http；sse 明确不支持）→ initialize 握手 → tools/list（翻页）
 // → **整体替换**该 server 归属的 Tool 目录条目（tools/list 是权威快照）。
 // 成功/失败都会记录探测状态（GET /mcps 可读回 last_probe_*）。未知 server → 40401。
-func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpProbeResp, error) {
+func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability.McpProbeResp, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
@@ -209,7 +209,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpPr
 	added, removed, skipped := s.caps.ReplaceToolsForMcpServer(id, tools)
 	s.recordMcpProbe(id, nil)
 
-	out := &handler.McpProbeResp{
+	out := &dtocapability.McpProbeResp{
 		ID: id, Transport: server.Transport,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
 		ProbedAt: time.Now().UTC().Format(time.RFC3339),
@@ -217,7 +217,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpPr
 	}
 	for _, t := range s.caps.ListTools() {
 		if t.McpServer == id {
-			out.Tools = append(out.Tools, handler.ToolResp{
+			out.Tools = append(out.Tools, dtocapability.ToolResp{
 				Name: t.Name, Description: t.Description, Source: t.Source,
 				McpServer: t.McpServer, Schema: t.Schema,
 			})
@@ -236,7 +236,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*handler.McpPr
 //     JSON-RPC 错误返回）。
 //   - **工具级失败**（服务端 result.isError=true）不是平台错误：原样透传 is_error + content，
 //     信封 code=0（调用方据 is_error 判断）；只有传输/协议/超时才映射为信封错误码。
-func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req handler.McpToolCallReq) (*handler.McpToolCallResp, error) {
+func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
@@ -264,7 +264,7 @@ func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req handler.
 	}
 	slog.Default().Info("mcp 工具调用完成", "server", id, "tool", tool,
 		"is_error", res.IsError, "blocks", len(res.Content), "ms", time.Since(start).Milliseconds())
-	return &handler.McpToolCallResp{
+	return &dtocapability.McpToolCallResp{
 		ServerID: id, Tool: tool, IsError: res.IsError,
 		Content: res.Content, Text: res.TextOf(), StructuredContent: res.StructuredContent,
 		ServerName: res.ServerName, ServerVersion: res.ServerVersion,
@@ -300,7 +300,7 @@ func (s *Service) mcpLiveServer(id string) (capability.McpServer, error) {
 }
 
 // ListMcpResources 拉取某 MCP server 的资源列表（resources/list + resources/templates/list）。
-func (s *Service) ListMcpResources(ctx context.Context, id string) (*handler.McpResourcesResp, error) {
+func (s *Service) ListMcpResources(ctx context.Context, id string) (*dtocapability.McpResourcesResp, error) {
 	server, err := s.mcpLiveServer(id)
 	if err != nil {
 		return nil, err
@@ -311,19 +311,19 @@ func (s *Service) ListMcpResources(ctx context.Context, id string) (*handler.Mcp
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_resources_list_failed")
 	}
-	out := &handler.McpResourcesResp{
+	out := &dtocapability.McpResourcesResp{
 		ServerID: id, ServerName: res.ServerName, ServerVersion: res.ServerVersion,
 		TemplatesError: res.TemplatesError,
-		Resources:      make([]handler.McpResourceResp, 0, len(res.Resources)),
+		Resources:      make([]dtocapability.McpResourceResp, 0, len(res.Resources)),
 	}
 	for _, r := range res.Resources {
-		out.Resources = append(out.Resources, handler.McpResourceResp{
+		out.Resources = append(out.Resources, dtocapability.McpResourceResp{
 			URI: r.URI, Name: r.Name, Title: r.Title, Description: r.Description,
 			MimeType: r.MimeType, Size: r.Size,
 		})
 	}
 	for _, t := range res.Templates {
-		out.Templates = append(out.Templates, handler.McpResourceTemplateResp{
+		out.Templates = append(out.Templates, dtocapability.McpResourceTemplateResp{
 			URITemplate: t.URITemplate, Name: t.Name, Title: t.Title,
 			Description: t.Description, MimeType: t.MimeType,
 		})
@@ -332,7 +332,7 @@ func (s *Service) ListMcpResources(ctx context.Context, id string) (*handler.Mcp
 }
 
 // ReadMcpResource 读取一个资源（resources/read）。
-func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*handler.McpResourceReadResp, error) {
+func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*dtocapability.McpResourceReadResp, error) {
 	server, err := s.mcpLiveServer(id)
 	if err != nil {
 		return nil, err
@@ -343,15 +343,15 @@ func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*handler
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_resource_read_failed")
 	}
-	out := &handler.McpResourceReadResp{ServerID: id, URI: uri, Contents: make([]handler.McpResourceContent, 0, len(res.Contents))}
+	out := &dtocapability.McpResourceReadResp{ServerID: id, URI: uri, Contents: make([]dtocapability.McpResourceContent, 0, len(res.Contents))}
 	for _, c := range res.Contents {
-		out.Contents = append(out.Contents, handler.McpResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text, Blob: c.Blob})
+		out.Contents = append(out.Contents, dtocapability.McpResourceContent{URI: c.URI, MimeType: c.MimeType, Text: c.Text, Blob: c.Blob})
 	}
 	return out, nil
 }
 
 // ListMcpPrompts 拉取某 MCP server 的提示词模板（prompts/list）。
-func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*handler.McpPromptsResp, error) {
+func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*dtocapability.McpPromptsResp, error) {
 	server, err := s.mcpLiveServer(id)
 	if err != nil {
 		return nil, err
@@ -362,11 +362,11 @@ func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*handler.McpPr
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_prompts_list_failed")
 	}
-	out := &handler.McpPromptsResp{ServerID: id, Prompts: make([]handler.McpPromptResp, 0, len(prompts))}
+	out := &dtocapability.McpPromptsResp{ServerID: id, Prompts: make([]dtocapability.McpPromptResp, 0, len(prompts))}
 	for _, p := range prompts {
-		item := handler.McpPromptResp{Name: p.Name, Title: p.Title, Description: p.Description}
+		item := dtocapability.McpPromptResp{Name: p.Name, Title: p.Title, Description: p.Description}
 		for _, a := range p.Arguments {
-			item.Arguments = append(item.Arguments, handler.McpPromptArgumentResp{
+			item.Arguments = append(item.Arguments, dtocapability.McpPromptArgumentResp{
 				Name: a.Name, Title: a.Title, Description: a.Description, Required: a.Required,
 			})
 		}
@@ -376,7 +376,7 @@ func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*handler.McpPr
 }
 
 // GetMcpPrompt 取用一条提示词模板（prompts/get）。
-func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req handler.McpPromptGetReq) (*handler.McpPromptGetResp, error) {
+func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req dtocapability.McpPromptGetReq) (*dtocapability.McpPromptGetResp, error) {
 	server, err := s.mcpLiveServer(id)
 	if err != nil {
 		return nil, err
@@ -387,10 +387,10 @@ func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req handler
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_prompt_get_failed")
 	}
-	out := &handler.McpPromptGetResp{ServerID: id, Name: name, Description: res.Description,
-		Messages: make([]handler.McpPromptMessage, 0, len(res.Messages))}
+	out := &dtocapability.McpPromptGetResp{ServerID: id, Name: name, Description: res.Description,
+		Messages: make([]dtocapability.McpPromptMessage, 0, len(res.Messages))}
 	for _, m := range res.Messages {
-		out.Messages = append(out.Messages, handler.McpPromptMessage{Role: m.Role, Content: m.Content})
+		out.Messages = append(out.Messages, dtocapability.McpPromptMessage{Role: m.Role, Content: m.Content})
 	}
 	return out, nil
 }
@@ -447,11 +447,11 @@ func (s *Service) AutoProbeMcpServers(ctx context.Context) error {
 }
 
 // ListTools 返回 Tool 目录（按 name 排序）。
-func (s *Service) ListTools() ([]handler.ToolResp, error) {
+func (s *Service) ListTools() ([]dtocapability.ToolResp, error) {
 	items := s.caps.ListTools()
-	out := make([]handler.ToolResp, 0, len(items))
+	out := make([]dtocapability.ToolResp, 0, len(items))
 	for _, t := range items {
-		out = append(out, handler.ToolResp{
+		out = append(out, dtocapability.ToolResp{
 			Name: t.Name, Description: t.Description, Source: t.Source,
 			McpServer: t.McpServer, Schema: t.Schema,
 		})
@@ -472,9 +472,9 @@ func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
 	return spec.McpTransports, true
 }
 
-// AgentCapabilities 组装某 Agent 的统一能力目录（§8.1；可见性规则见 handler.AgentCapabilitiesResp）。
+// AgentCapabilities 组装某 Agent 的统一能力目录（§8.1；可见性规则见 dtocapability.AgentCapabilitiesResp）。
 // 只读聚合：不触发物化/注入/探测，全部依据注册表 + 候选 runtime 声明推导。未知 agent → agent_not_found。
-func (s *Service) AgentCapabilities(agentID string) (*handler.AgentCapabilitiesResp, error) {
+func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabilitiesResp, error) {
 	a, ok := s.AgentByID(agentID)
 	if !ok {
 		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
@@ -518,7 +518,7 @@ func (s *Service) AgentCapabilities(agentID string) (*handler.AgentCapabilitiesR
 
 	// MCP：注册表全量 + 每条的 enabled/runtimes（候选里支持该传输的子集，保持候选声明顺序）。
 	servers := s.caps.ListMcpServers()
-	mcpOut := make([]handler.AgentMcpServerResp, 0, len(servers))
+	mcpOut := make([]dtocapability.AgentMcpServerResp, 0, len(servers))
 	carried := make(map[string]bool, len(servers)) // server id → 至少一个候选可承载
 	for _, m := range servers {
 		carriers := make([]string, 0, len(runtimes))
@@ -533,7 +533,7 @@ func (s *Service) AgentCapabilities(agentID string) (*handler.AgentCapabilitiesR
 		if len(carriers) > 0 {
 			carried[m.ID] = true
 		}
-		mcpOut = append(mcpOut, handler.AgentMcpServerResp{
+		mcpOut = append(mcpOut, dtocapability.AgentMcpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Enabled: enabled(m.ID), Runtimes: carriers,
 		})
@@ -541,38 +541,38 @@ func (s *Service) AgentCapabilities(agentID string) (*handler.AgentCapabilitiesR
 
 	// Skill：至少一个候选 runtime 有物化源；sources 裁剪到候选 runtime。
 	skills := s.caps.ListSkills()
-	skillOut := make([]handler.AgentSkillResp, 0, len(skills))
+	skillOut := make([]dtocapability.AgentSkillResp, 0, len(skills))
 	for _, sk := range skills {
-		src := make([]handler.SkillSourceResp, 0, len(sk.Sources))
+		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
 		for _, so := range sk.Sources {
 			if inAgent[so.Runtime] {
-				src = append(src, handler.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
+				src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
 			}
 		}
 		if len(src) == 0 {
 			continue
 		}
-		skillOut = append(skillOut, handler.AgentSkillResp{
+		skillOut = append(skillOut, dtocapability.AgentSkillResp{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Sources: src,
 		})
 	}
 
 	// Tool：builtin/observed 恒可见；mcp 条目须归属 server 对该 agent 启用且至少一个候选可承载。
 	tools := s.caps.ListTools()
-	toolOut := make([]handler.ToolResp, 0, len(tools))
+	toolOut := make([]dtocapability.ToolResp, 0, len(tools))
 	for _, t := range tools {
 		if t.Source == capability.ToolSourceMCP && t.McpServer != "" {
 			if !enabled(t.McpServer) || !carried[t.McpServer] {
 				continue
 			}
 		}
-		toolOut = append(toolOut, handler.ToolResp{
+		toolOut = append(toolOut, dtocapability.ToolResp{
 			Name: t.Name, Description: t.Description, Source: t.Source,
 			McpServer: t.McpServer, Schema: t.Schema,
 		})
 	}
 
-	return &handler.AgentCapabilitiesResp{
+	return &dtocapability.AgentCapabilitiesResp{
 		AgentID: a.ID, Name: a.Name, Runtimes: runtimes,
 		Skills: skillOut, McpServers: mcpOut, Tools: toolOut, Notes: notes,
 	}, nil

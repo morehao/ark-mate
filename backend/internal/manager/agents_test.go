@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -37,7 +38,7 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	svc := agentTestSvc(t, dir)
 
 	// 注册自定义 agent（echo runtime 上的别名，不写代码新增 ACP agent）。
-	resp, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Name: "别名echo", Runtimes: []string{"echo"}, Provider: "openai:gpt-4o"})
+	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Name: "别名echo", Runtimes: []string{"echo"}, Provider: "openai:gpt-4o"})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 
 	// PATCH 热更新 name。
 	name := "别名echo-v2"
-	u, err := svc2.UpdateAgent(ctx, "alias-echo", handler.AgentUpdateReq{Name: &name})
+	u, err := svc2.UpdateAgent(ctx, "alias-echo", dtoagent.AgentUpdateReq{Name: &name})
 	if err != nil || u.Name != "别名echo-v2" {
 		t.Fatalf("UpdateAgent: %v %+v", err, u)
 	}
@@ -77,13 +78,13 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	}
 
 	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "agent-x", Runtimes: []string{"echo"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "agent-x", Runtimes: []string{"echo"}}); err == nil {
 		t.Fatal("保留前缀应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err == nil {
 		t.Fatal("重复 id 应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "ghost", Runtimes: []string{"no-such-runtime"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "ghost", Runtimes: []string{"no-such-runtime"}}); err == nil {
 		t.Fatal("未知 runtime 应拒绝")
 	}
 
@@ -152,7 +153,7 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	}
 
 	// 删除「当前 Agent」→ 清除显式选择 + 回落内置种子（default.json 一并清理）。
-	if _, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := svc2.SetDefaultAgent(ctx, "alias-echo"); err != nil {
@@ -192,7 +193,7 @@ func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 func TestAgentStartStopGuards(t *testing.T) {
 	ctx := context.Background()
 	svc := agentTestSvc(t, "")
-	if _, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.StartAgent(ctx, "alias-echo"); err == nil {
@@ -233,7 +234,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *handler.AgentResp
+	var found *dtoagent.AgentResp
 	for i := range list {
 		if list[i].ID == "pol-echo" {
 			found = &list[i]
@@ -244,23 +245,23 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	}
 
 	// PATCH 更新策略（并落盘）；B5 起含 native_mode（原生权限模式）。
-	pol := &handler.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}, NativeMode: "danger-full-access"}
-	u, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{PermissionPolicy: pol})
+	pol := &dtoagent.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}, NativeMode: "danger-full-access"}
+	u, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{PermissionPolicy: pol})
 	if err != nil || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "allow" ||
 		u.PermissionPolicy.NativeMode != "danger-full-access" {
 		t.Fatalf("PATCH 策略失败: %v %+v", err, u)
 	}
 	// PATCH 非法策略 → acl request 类 + 稳定 code（REST 层映射 40001），且内存不变。
-	bad := &handler.PermissionPolicyResp{Default: "sometimes"}
+	bad := &dtoagent.PermissionPolicyResp{Default: "sometimes"}
 	var ae *acl.Error
-	if _, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{PermissionPolicy: bad}); err == nil {
+	if _, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{PermissionPolicy: bad}); err == nil {
 		t.Fatal("非法策略应报错")
 	} else if !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" || ae.Class != acl.ClassRequest {
 		t.Fatalf("非法策略应为 request/invalid_permission_policy，got %v", err)
 	}
 	// B5：非法 native_mode 同样被拒（不静默生效）。
-	if _, err := svc.UpdateAgent(ctx, "pol-echo", handler.AgentUpdateReq{
-		PermissionPolicy: &handler.PermissionPolicyResp{NativeMode: "yolo"},
+	if _, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{
+		PermissionPolicy: &dtoagent.PermissionPolicyResp{NativeMode: "yolo"},
 	}); err == nil || !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" {
 		t.Fatalf("非法 native_mode 应报 invalid_permission_policy，got %v", err)
 	}
@@ -277,8 +278,8 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	}
 
 	// CreateAgent 带策略 → 落盘 + 可读回。
-	created, err := svc2.CreateAgent(ctx, handler.AgentCreateReq{ID: "new-pol", Runtimes: []string{"echo"},
-		PermissionPolicy: &handler.PermissionPolicyResp{Default: "deny"}})
+	created, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "new-pol", Runtimes: []string{"echo"},
+		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "deny"}})
 	if err != nil || created.PermissionPolicy == nil || created.PermissionPolicy.Default != "deny" {
 		t.Fatalf("CreateAgent 带策略失败: %v %+v", err, created)
 	}
@@ -328,24 +329,24 @@ func TestSeedAgentReadonly(t *testing.T) {
 	// 种子 runtime 不可改；name/provider/策略可改。
 	rt := []string{"opencode"}
 	var ae *acl.Error
-	if _, err := svc.UpdateAgent(ctx, "dsh", handler.AgentUpdateReq{Runtimes: &rt}); err == nil {
+	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: &rt}); err == nil {
 		t.Fatal("种子 runtime 应不可修改")
 	} else if !errors.As(err, &ae) || ae.Code != "seed_agent_readonly" {
 		t.Fatalf("改 runtime 应 seed_agent_readonly，got %v", err)
 	}
 	name := "dsh（默认）"
-	pol := &handler.PermissionPolicyResp{Default: "ask"}
-	u, err := svc.UpdateAgent(ctx, "dsh", handler.AgentUpdateReq{Name: &name, PermissionPolicy: pol})
+	pol := &dtoagent.PermissionPolicyResp{Default: "ask"}
+	u, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Name: &name, PermissionPolicy: pol})
 	if err != nil || u.Name != name || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "ask" || !u.Seed {
 		t.Fatalf("种子 name/策略应可改且 seed 仍为 true: %v %+v", err, u)
 	}
 
 	// 自定义 agent 仍可改 runtime / 删除。
-	if _, err := svc.CreateAgent(ctx, handler.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
 		t.Fatal(err)
 	}
 	rt2 := []string{"echo", "opencode"}
-	if _, err := svc.UpdateAgent(ctx, "alias-echo", handler.AgentUpdateReq{Runtimes: &rt2}); err != nil {
+	if _, err := svc.UpdateAgent(ctx, "alias-echo", dtoagent.AgentUpdateReq{Runtimes: &rt2}); err != nil {
 		t.Fatalf("自定义 agent runtime 应可改: %v", err)
 	}
 	if _, err := svc.DeleteAgent(ctx, "alias-echo"); err != nil {
@@ -453,7 +454,7 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 
 	// 档案存在但无 key → 仍拒绝，并指出本应注入的变量名（可操作）。
 	typ := "deepseek"
-	if _, err := svc.UpdateProvider(ctx, "gone", handler.ProviderPatchReq{Type: &typ}); err != nil {
+	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{Type: &typ}); err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
 	err = svc.StartAgent(ctx, "a-prov")
@@ -463,7 +464,7 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 
 	// 补齐 key → 凭据面放行（不再报 credential_missing）。
 	key := "sk-test"
-	if _, err := svc.UpdateProvider(ctx, "gone", handler.ProviderPatchReq{Key: &key}); err != nil {
+	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{Key: &key}); err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
 	a, _ := svc.AgentByID("a-prov")
