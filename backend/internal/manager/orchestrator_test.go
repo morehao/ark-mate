@@ -281,29 +281,35 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 	}
 }
 
-// TestEnsureConversationResumeGating P3 F2/F3 恢复门控（无子进程路径）：
-// 未知/终态会话 → conversation_not_found；可恢复会话但 agent 不存在 → agent_not_found
-// （无原生恢复时的 memo 兜底路径由 e2e 冒烟覆盖，单测不拨子进程）。
+// TestEnsureConversationResumeGating 按需重建的门控（ADR-4：执行可丢弃、会话平台拥有）：
+// 可续聊性只看会话是否存在 —— 上一轮终态（completed 等）不是作废判据；真正的不可用才报错
+// （未知会话 / agent 已删 / runtime 未注册）。这里不拨子进程：终态会话应一路走到 runtime 解析，
+// 以 runtime_not_found 收尾即证明它没有被状态门拦下。
 func TestEnsureConversationResumeGating(t *testing.T) {
-	svc, orch, _ := newTestRig(t)
+	svc, orch, _ := newTestRig(t) // 空 runtime 注册表
+	ctx := context.Background()
+	// agent 存在、但其 runtime 未注册（CreateAgent 会先校验 runtime，构造不出该状态 → 直接落注册表）。
+	svc.mu.Lock()
+	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", Runtimes: []string{"no-such-runtime"}, State: AgentStateStopped}
+	svc.mu.Unlock()
 	svc.registerConversation(&ConversationRec{
 		ID: "c-echo", AgentID: "no-such-agent", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
 	})
 	svc.registerConversation(&ConversationRec{
-		ID: "c-term", AgentID: "a", RuntimeHint: "echo", Status: ConversationStatusCompleted,
-		ProviderSessionID: "echo-x",
+		ID: "c-term", AgentID: "ghost", RuntimeHint: "no-such-runtime", Status: ConversationStatusCompleted,
+		ProviderSessionID: "x-1",
 	})
-	ctx := context.Background()
 
 	if _, err := orch.Prompt(ctx, "c-echo", "hi"); err == nil {
-		t.Fatal("可恢复但 agent 不存在应 agent_not_found")
+		t.Fatal("可续聊但 agent 不存在应 agent_not_found")
 	} else if ae, ok := acl.As(err); !ok || ae.Code != "agent_not_found" {
 		t.Fatalf("期望 agent_not_found，got %v", err)
 	}
+	// 终态会话（completed）不再按未找到处理：进入 runtime 解析 → 未注册 → runtime_not_found。
 	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
-		t.Fatal("终态会话应 conversation_not_found")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "conversation_not_found" {
-		t.Fatalf("期望 conversation_not_found，got %v", err)
+		t.Fatal("终态会话也应可续聊（应进到 runtime 解析）")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "runtime_not_found" {
+		t.Fatalf("期望 runtime_not_found（终态不再拦截），got %v", err)
 	}
 	if _, err := orch.Prompt(ctx, "no-such", "hi"); err == nil {
 		t.Fatal("未知会话应 conversation_not_found")

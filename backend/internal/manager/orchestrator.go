@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,8 +48,7 @@ type ActiveConversation struct {
 	mu      sync.Mutex
 	busy    bool
 	turn    *Turn
-	dead    bool // 连接已断开，本会话不可再用
-	dropPub bool // 断连错误事件已发布（幂等）
+	dead    bool // 连接已断开，本句柄作废（下次 prompt 经 ensureConversation 按需重建）
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string
@@ -59,9 +59,13 @@ type Turn struct {
 	done      chan struct{}
 	cancel    context.CancelFunc
 	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）
-	ctx       context.Context
-	stop      string
-	err       error
+	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机 / 显式停 agent），
+	// 区别于对端或子进程意外断开：主动拆除不是故障，收尾归 interrupted（无终态、可续聊重发），
+	// 不能当失败处理（见 disconnectConversation 的状态语义）。受 as.mu 保护。
+	intentional bool
+	ctx         context.Context
+	stop        string
+	err         error
 }
 
 // CreateResult 是 StartConversation 的结果。
@@ -122,6 +126,10 @@ type runtimeConn struct {
 	key     string
 	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
 	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
+	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
+	// 而非对端或子进程意外断开。拆除方在 Close 之前置位，dropConn 据此判定拆除原因；
+	// 主动拆除不得把会话写成失败态（见 disconnectConversation 的状态语义）。
+	intentional atomic.Bool
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
@@ -349,10 +357,20 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
 // 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 turn_in_progress。
-// 会话不在活跃集合：P3 F2 起按需恢复（持久层有可恢复记录 → ensureConversation 重建活会话）；
-// 无记录/终态 → conversation_not_found（对齐 P0 语义）。
+// 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → ensureConversation 走
+// native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 conversation_not_found。
 func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) (int64, error) {
 	as := o.conversation(conversationID)
+	if as != nil {
+		as.mu.Lock()
+		dead := as.dead
+		as.mu.Unlock()
+		if dead {
+			// 连接已断的死句柄（拆连后理应已被摘除；这里兜住拿到旧指针的竞态）：摘除并按需重建。
+			o.evictConversation(as)
+			as = nil
+		}
+	}
 	if as == nil {
 		var err error
 		as, err = o.ensureConversation(ctx, conversationID)
@@ -361,10 +379,6 @@ func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) 
 		}
 	}
 	as.mu.Lock()
-	if as.dead {
-		as.mu.Unlock()
-		return 0, acl.NewError(acl.ClassConnection, "connection_lost", "会话所属连接已断开", nil)
-	}
 	if as.busy {
 		as.mu.Unlock()
 		return 0, acl.NewError(acl.ClassLimit, "turn_in_progress", "该会话正有 turn 在执行，请等待结束", nil)
@@ -426,6 +440,8 @@ func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 	}
 
 	as.mu.Lock()
+	intentional := t.intentional
+	userCancel := t.cancelReq // 用户显式取消：即使正在停机收尾，取消仍是用户事实（优先于 interrupted）
 	cancelled := t.cancelReq || (err == nil && strings.EqualFold(stop, "cancelled"))
 	// agent 侧返回「取消类」错误（如 dsh 的 "Request cancelled"、SDK ctx 取消）也归一为 cancelled。
 	if !cancelled && err != nil && errLooksCancelled(err) {
@@ -440,6 +456,17 @@ func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 	t.err = err
 
 	switch {
+	case userCancel:
+		// 用户取消优先：与停机撞车时，取消是用户意图，不能改写成 interrupted。
+		o.svc.markConversation(as.ID, ConversationStatusCancelled)
+		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
+	case intentional:
+		// 主动拆除（daemon 停机 / 显式停 agent）打断的轮次：既不是用户取消也不是失败，
+		// 归 interrupted —— 无终态、可续聊重发（与崩溃恢复同义）。刻意不发 turn.error /
+		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
+		o.svc.markConversation(as.ID, ConversationStatusInterrupted)
+		o.logger.Info("turn 因连接主动拆除而中断（会话保留，可续聊重发）",
+			"conversation", as.ID, "agent", as.AgentID)
 	case cancelled:
 		o.svc.markConversation(as.ID, ConversationStatusCancelled)
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
@@ -561,13 +588,7 @@ func (o *Orchestrator) conversation(id string) *ActiveConversation {
 	return o.conversations[id]
 }
 
-// resumableStatus 报告会话状态是否允许按需恢复（P3 F2：in_progress / interrupted 可续聊；
-// 终态会话沿用旧语义不可恢复，按未找到处理）。
-func resumableStatus(status string) bool {
-	return status == ConversationStatusInProgress || status == ConversationStatusInterrupted
-}
-
-// ensureConversation 返回活跃会话；不在活跃集合但持久层有可恢复记录时按需重建。
+// ensureConversation 返回活跃会话；不在活跃集合但平台有记录时按需重建。
 // 恢复次序（P3 F2/F3，§5.6）：
 //  1. 原生 resume（首选）：acquire conn → 按能力 LoadSession（opencode load=true）或
 //     ResumeSession（dsh resume=true）恢复同一 provider session → reason=restart。
@@ -576,16 +597,20 @@ func resumableStatus(status string) bool {
 //     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
 //     并更新 rec 的 provider_session_id / runtime_hint（记忆与 sqlite 同步）。
 //
-// 终态/未知会话 → conversation_not_found（不改写旧语义）。memo 预算由 SetHandoffMaxChars 控制
-// （0 = 关闭 memo 兜底 → 原生不可用时回退明确错误）。
+// **可续聊性只看会话是否还存在**（ADR-4：执行可丢弃、会话平台拥有）：上一轮的终态
+// （completed / failed / cancelled）是轮次结果的事实，不是「会话作废」的判据——旧语义把终态会话
+// 按未找到处理，会让 daemon 每重启一次就作废全部历史会话（容器里 `docker restart` 即触发）。
+// 只有真正不可用的情形才报错：会话不存在（conversation_not_found）、agent 已删（agent_not_found）、
+// runtime 未注册（runtime_not_found）、原生与 memo 都不可用（resume_unavailable）。
+// memo 预算由 SetHandoffMaxChars 控制（0 = 关闭 memo 兜底 → 原生不可用时回退明确错误）。
 func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID string) (*ActiveConversation, error) {
 	if as := o.conversation(conversationID); as != nil {
 		return as, nil
 	}
 	rec := o.svc.conversationRec(conversationID)
-	if rec == nil || !resumableStatus(rec.Status) {
+	if rec == nil {
 		return nil, acl.NewError(acl.ClassRequest, "conversation_not_found",
-			fmt.Sprintf("未知或不可恢复会话 %q", conversationID), nil)
+			fmt.Sprintf("未知会话 %q", conversationID), nil)
 	}
 	agent, ok := o.svc.AgentByID(rec.AgentID)
 	if !ok {
@@ -1054,6 +1079,9 @@ func (o *Orchestrator) watchConn(rc *runtimeConn) {
 
 func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	o.unregisterProc(rc)
+	// 拆除原因由拆除方在关闭连接前置位（Close/stopAgent/reapIdleOnce = 主动；watchConn 观察到
+	// 对端结束 = 意外）。它决定会话状态怎么收尾——见 disconnectConversation。
+	intentional := rc.intentional.Load()
 	o.mu.Lock()
 	ownerBefore := o.conns[rc.key] == rc
 	if ownerBefore {
@@ -1071,18 +1099,33 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		o.unregisterConversationProvider(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
 	}
 	for _, as := range victims {
-		o.disconnectConversation(as)
+		o.disconnectConversation(as, intentional)
 	}
 	// 状态回落仅当仍是该 runtime 的当前连接（旧连接收尾不得覆盖新连接的 running——
 	// 空闲回收后立刻被 StartAgent/会话按需重拨的场景）。
 	if ownerBefore {
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 	}
+	if len(victims) > 0 {
+		o.logger.Info("连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
+			"runtime", rc.spec.ID, "agent", rc.agentID,
+			"cause", connCauseLabel(intentional), "conversations", len(victims))
+	}
 }
 
-// disconnectConversation 把某断连连接上的会话失活：进行中 turn 解除阻塞（runTurn 依 err 收尾），
-// 空闲会话直接标记 failed 并发布 connection_lost（幂等）。
-func (o *Orchestrator) disconnectConversation(as *ActiveConversation) {
+// disconnectConversation 把某断连连接上的会话句柄作废并摘出活跃集合。
+//
+// 本函数是「连接生命周期」写会话状态的**唯一入口**，因此必须区分拆除原因——把停机当成故障，
+// 会让上一轮已 completed 的会话在每次重启后被改写成 failed（并往历史里追加假的 turn.error）：
+//
+//   - 在途 turn：主动拆除（daemon 停机 / 显式停 agent）→ 收尾归 interrupted（无终态、可续聊
+//     重发，与崩溃恢复同义，不发错误事件）；意外断开 → 解除阻塞，由 runTurn 按错误收尾。
+//   - 空闲会话：**不改写状态**。上一轮的终态是轮次结果的事实，连接掉了并不改变它；意外断开
+//     只落 agent 级诊断（last_error + stderr 尾巴）与日志，不伪造会话失败。
+//
+// 会话记录本身（svc/conversations 与 store）不动：执行可丢弃、会话平台拥有（ADR-4），
+// 下次 prompt 经 ensureConversation 走 native resume / handoff memo 重建句柄。
+func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentional bool) {
 	as.mu.Lock()
 	if as.dead {
 		as.mu.Unlock()
@@ -1090,37 +1133,50 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation) {
 	}
 	as.dead = true
 	t := as.turn
-	idle := t == nil
+	if t != nil && intentional {
+		t.intentional = true // 主动拆除：收尾归 interrupted，不按失败/用户取消处理
+	}
 	as.mu.Unlock()
+	o.evictConversation(as)
+
+	// 连接没了，挂起的权限/提问永远等不到决策：随拆除一并收敛，不留「待确认」幽灵卡。
+	o.perm.CancelSession(as.ID)
+	o.elic.CancelSession(as.ID)
 
 	if t != nil {
 		t.cancel()
 		return
 	}
-	if idle {
-		as.mu.Lock()
-		pub := as.dropPub
-		as.dropPub = true
-		as.mu.Unlock()
-		if !pub {
-			o.svc.markConversation(as.ID, ConversationStatusFailed)
-			ae := acl.NewError(acl.ClassConnection, "connection_lost",
-				"agent 连接断开（会话失活；是否可 resume 依 runtime 能力）", nil)
-			var tail []string
-			if as.client != nil {
-				tail = acl.TailLines(as.client.StderrTail(), maxDiagStderrLines)
-			}
-			ae.StderrTail = tail
-			o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
-			payload := map[string]any{
-				"session_id": as.ID, "code": ae.Code, "class": string(ae.Class), "details": ae.Details,
-			}
-			if len(tail) > 0 {
-				payload["stderr_tail"] = tail
-			}
-			o.svc.publish(BusTurnError, as.ID, payload)
+	if !intentional {
+		ae := acl.NewError(acl.ClassConnection, "connection_lost",
+			"agent 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
+		var tail []string
+		if as.client != nil {
+			tail = acl.TailLines(as.client.StderrTail(), maxDiagStderrLines)
 		}
+		ae.StderrTail = tail
+		o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
+		o.logger.Warn("连接意外断开：空闲会话保持原状态（会话可续聊）",
+			"conversation", as.ID, "agent", as.AgentID, "runtime", as.Runtime)
 	}
+}
+
+// evictConversation 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
+// 只为让下一次 prompt 能重建：会话记录（平台侧）不受影响。
+func (o *Orchestrator) evictConversation(as *ActiveConversation) {
+	o.mu.Lock()
+	if o.conversations[as.ID] == as {
+		delete(o.conversations, as.ID)
+	}
+	o.mu.Unlock()
+}
+
+// connCauseLabel 连接拆除原因（日志/诊断用）。
+func connCauseLabel(intentional bool) string {
+	if intentional {
+		return "intentional" // 主动：daemon 停机 / 显式停 agent / 空闲回收
+	}
+	return "unexpected" // 意外：对端或子进程断开
 }
 
 // eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
@@ -1469,6 +1525,8 @@ func (o *Orchestrator) Close() {
 	o.conns = make(map[string]*runtimeConn)
 	o.mu.Unlock()
 	for _, rc := range conns {
+		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
+		rc.intentional.Store(true)
 		o.disconnectConversationAll(rc)
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 		o.unregisterProc(rc)
@@ -1480,6 +1538,7 @@ func (o *Orchestrator) Close() {
 }
 
 func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
+	intentional := rc.intentional.Load()
 	o.mu.Lock()
 	var victims []*ActiveConversation
 	for _, as := range o.conversations {
@@ -1489,7 +1548,13 @@ func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.disconnectConversation(as)
+		o.disconnectConversation(as, intentional)
+	}
+	if len(victims) > 0 {
+		// 可观测性：停机静默摘句柄最容易让人误判「重启把会话弄丢了」，日志里留一条事实——
+		// 作废的只是 runtime 执行句柄，会话与状态都在（重启后按需续聊）。
+		o.logger.Info("停机：会话句柄作废（会话与状态保留，重启后按需续聊）",
+			"runtime", rc.spec.ID, "cause", connCauseLabel(intentional), "conversations", len(victims))
 	}
 }
 
@@ -1521,7 +1586,8 @@ func (o *Orchestrator) reapIdleOnce(now time.Time, idle time.Duration) int {
 	}
 	o.mu.Unlock()
 	for _, rc := range victims {
-		o.dropConn(rc) // 原子摘除 + 状态回落（ownerBefore 保护新连接 running）
+		rc.intentional.Store(true) // 主动回收，不是连接故障
+		o.dropConn(rc)             // 原子摘除 + 状态回落（ownerBefore 保护新连接 running）
 		if rc.client != nil {
 			_ = rc.client.Close() // watchConn 收尾（dropConn 幂等）
 		}
@@ -1562,7 +1628,7 @@ func (o *Orchestrator) StartIdleReaper(interval, idle time.Duration) {
 
 // stopAgent 停止某 agent 对应 runtime 的进程（P2 启停）：
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
-// 空闲 → 关连接（watchConn/dropConn 清 conversations 与状态；下次会话自动按需重拨）。
+// 空闲 → 关连接（显式停机：会话句柄作废但状态如实保留；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
 	key := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), o.svc.providerEnvFor(agent.Provider))
 	o.mu.Lock()
@@ -1580,10 +1646,12 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 		return acl.NewError(acl.ClassRequest, "agent_busy",
 			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 turn，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
 	}
+	// 用户显式停 agent：先置原因再关（watchConn→dropConn 据此判定，不把会话写成失败态）。
+	rc.intentional.Store(true)
 	if err := rc.client.Close(); err != nil {
 		return err
 	}
-	// watchConn → dropConn 会清 conversations 并置 stopped；这里等它跑完再返回。
+	// watchConn → dropConn 会作废会话句柄并置 stopped；这里等它跑完再返回。
 	select {
 	case <-rc.client.Done():
 	case <-ctx.Done():

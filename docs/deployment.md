@@ -1,8 +1,8 @@
 # ark-forge 部署与运维
 
 > 面向单操作员（决策 v3③：无多用户/团队语义、无登录鉴权）。本文只写**可复核**的部署形态与
-> 参数；除明确标注**未执行**的两项（systemd 单元、容器镜像）外，命令均在本机实跑过（见文末
-> 「验证记录」）。设计背景见 `docs/design-and-roadmap.md`
+> 参数；除明确标注**未执行**的一项（systemd 单元）外，命令均在本机实跑过（容器镜像 §4 已实跑，
+> 见文末「验证记录」）。设计背景见 `docs/design-and-roadmap.md`
 > §M3 与 `docs/agent-runtime-refactor-design-20260908.md`。
 
 ## 1. 交付形态
@@ -12,7 +12,8 @@
 | 单二进制（推荐） | `make all` | 仓库根 `./forge` | 先 `pnpm build` → 拷入 `backend/internal/web/dist` → `go build -tags release`；前端面板经 `//go:embed` 内嵌，无外部静态文件依赖 |
 | 仅后端内核 | `make build` | 无独立产物 | 不带 `release` tag，`web` 包不参与编译（`MountWeb` 为空实现），面板不内嵌 |
 | 前后端分离 | `make dev` / 分开起 | `frontend/apps/panel/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
-| 容器 | `docker build -t ark-forge .` | 镜像 | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时 |
+| 容器 | `make image` / `docker build -t ark-forge .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
+
 
 前置：Go（见 `backend/go.mod`）、Node（`frontend/.nvmrc`）+ pnpm（`frontend/package.json` 的
 `packageManager`）。`make all` 会校验 Node 主版本与 `.nvmrc` 一致。
@@ -225,30 +226,107 @@ systemctl status ark-forge --no-pager
 
 ## 4. 容器
 
-`Dockerfile`（多阶段；仓库已含）：
+`Dockerfile` 是多阶段构建（Node 构建前端 → Go 内嵌编译 → 精简运行时），**两个最终 target**：
+
+| target | 内容 | 体积（本机实测） | 适用 |
+| --- | --- | --- | --- |
+| `forge`（默认） | 只含 `forge` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | 底座由宿主机挂载、派生镜像或 `acp-serve` 远端提供；容器内先用 `echo` 自检 |
+| `forge-runtimes` | 额外内置 `dsh`（npm `@deepseek-ai/dsh`）与 `opencode`（npm `opencode-ai` 平台二进制） | 671 MB | 想让容器开箱就能跑真实 agent |
 
 ```bash
+# 最小镜像
 docker build -t ark-forge:local .
-docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
-  -v ark-forge-data:/data \
-  -e FORGE_ADDR=0.0.0.0:10001 \
-  -e FORGE_DB=/data/forge.db \
-  -e FORGE_TRANSCRIPTS=/data/transcripts \
-  -e FORGE_AGENTS=/data/agents \
-  -e FORGE_CAPABILITIES=/data/capabilities \
-  ark-forge:local
-curl -s http://127.0.0.1:10001/v1/forge/health
+# 含底座（两个都装；只装一个把另一个置 false）
+docker build -t ark-forge:runtimes --target forge-runtimes \
+  --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
+# 等价的 make 封装
+make image                                             # 最小
+make image/runtimes WITH_DSH=true WITH_OPENCODE=true   # 含底座
+make image/run IMAGE_TAG=runtimes                      # 起容器
 ```
 
-容器内用 `echo` 底座即可自检（无需模型 key）；接 `opencode`/`dsh` 需在镜像或挂载中提供对应
-可执行文件与配置。镜像内 `HEALTHCHECK` 用 `curl` 打 `/v1/forge/health`（端口取自 `FORGE_ADDR`）。
+开关语义（刻意 fail closed，不静默降级）：
 
-> **降级说明（本环境未执行）**：本机 Docker 守护进程可用，但到 `auth.docker.io` 拉取基础镜像
-> 元数据持续 `i/o timeout`，因此**镜像构建未在本机跑通**（`docker build` 与 `buildx --check` 均因
-> 拉取 `node:24-bookworm`/`golang:1.26-bookworm`/`debian:bookworm-slim` 失败）。Dockerfile 的三个
-> 阶段与 `make all` 的步骤一一对应（Node 构建 → 拷 `apps/panel/dist` 到 `backend/internal/web/dist`
-> → `go build -tags release`），后者已在本文「验证记录」实跑通过；容器形态请在能访问镜像仓库的
-> 机器上按上述命令构建并自检。
+- `WITH_DSH` / `WITH_OPENCODE` 只认 `true|false`（`1|0` 亦可）；取值拼错 → **构建即失败**并列出合法取值。
+- 开关必须与 target 配套：`--build-arg WITH_DSH=true` 传给默认（最小）target → 构建失败并提示改用
+  `--target forge-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。两个开关同时关也失败。
+- 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
+  模板**（`>= 0.1.2-rc.1`，见 `internal/runtime/adapters.go` 的能力说明），`latest` 满足。
+- 镜像只装 forge 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
+  `FROM ark-forge:runtimes` + `USER root` + `apt-get install -y …`。
+
+### 4.1 运行
+
+```bash
+# 一条命令（仓库根 docker-compose.yml：具名卷 + 只绑回环 + /data 全集持久化）
+docker compose up -d --build
+# 或纯 docker run
+docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
+  -v ark-forge-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-forge:local
+curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
+```
+
+compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/镜像站）都有默认值，模板见仓库根
+`.env.example`：`cp .env.example .env` 后放开需要的行即可。
+
+镜像内的既定行为（都可用 `-e` / compose 覆盖）：
+
+| 项 | 值 | 原因 |
+| --- | --- | --- |
+| `FORGE_ADDR` | `0.0.0.0:10001` | 二进制默认只绑回环，容器里不改就 `-p` 不进来 |
+| `HOME`、`FORGE_CONFIG_DIR` | `/data`、`/data/config` | 库 / transcript / agents / capabilities / 配置 / 代建工作空间全在 `/data` 一个卷里（§2.2 的默认路径被显式改到卷上） |
+| `FORGE_STORE` | `sqlite` | 才有 runs 读模型与 `/usage/summary`（§2.2） |
+| `FORGE_WORKSPACE_DIR` | `/data/workspaces` | 代建工作空间必须落在可写挂载上，否则容器重建即丢（§2.2.1） |
+| PID 1 | `tini` | daemon 会派生 opencode/dsh，容器里需要 init 回收孤儿进程 |
+| 运行用户 | `forge`（uid/gid 10001，`--build-arg FORGE_UID/FORGE_GID` 可改） | 非 root；bind mount 的属主需与之一致 |
+| `HEALTHCHECK` | `curl` 打 `/v1/forge/health` | 端口从 `FORGE_ADDR` 现取；`/health` 免鉴权，配了 `FORGE_TOKEN` 也通（§2.3.2） |
+
+### 4.2 容器里的底座与工作空间（两个硬要求）
+
+1. **底座**：最小镜像里能自检的只有 `echo`（daemon 派生子命令 `forge acp-demo`，无需模型 key）。
+   要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH` 上）、自建派生镜像
+   （`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**下把本机可执行文件 bind mount 进最小镜像
+   （`-v /usr/local/bin/opencode:/usr/local/bin/opencode:ro`，agent 需要的配置/密钥也要一并进来）。
+   注意 macOS/Windows 上的可执行文件**不能**塞进 Linux 容器（平台/架构/glibc 都不匹配），这类机器请走前两条。
+   模型密钥经 `-e DEEPSEEK_API_KEY=…` 由 daemon 透传给 runtime 子进程；dsh 的 profile 根固定在
+   `DSH_HOME=/data/dsh`（落在卷上，重启不重装）。
+2. **工作空间**：能选的工作空间只能是**容器挂载视图内**的目录（§2.2.1）。宿主目录要当工作空间，
+   先 bind mount 进来，会话 `cwd` 用**容器内路径**（agent 也在同一容器里，这才是对 agent 正确的路径）：
+
+   ```bash
+   docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
+     -v ark-forge-data:/data \
+     -v "$PWD:/workspaces/repo" \
+     -e FORGE_ADDR=0.0.0.0:10001 \
+     -e FORGE_WORKSPACE_ROOTS=/workspaces \
+     -e FORGE_WORKSPACE_DIR=/workspaces/.forge-tmp \
+     ark-forge:local
+   ```
+
+   `FORGE_WORKSPACE_ROOTS`/`FORGE_WORKSPACE_DIR` **必须成对给**：代建根不在白名单内时启动即失败
+   （§2.2.1 的 fail closed），把代建根放进白名单即可（上面用 `/workspaces/.forge-tmp`）。
+   bind mount 的写权限按宿主 uid 判定，与容器内 10001 不一致时用 `--build-arg FORGE_UID=$(id -u)` 重建。
+   对外暴露端口（反代 / 跨机 / 多人）**先设 `FORGE_TOKEN`**，否则等于把控制面与整个挂载视图开放出去（§2.1）。
+
+### 4.3 受限网络（镜像站 / 代理 / npm 镜像）
+
+基础镜像与仓库地址都是 build-arg，默认走官方源（`node:24-bookworm` / `golang:1.26-bookworm` /
+`debian:bookworm-slim` / `proxy.golang.org` / `registry.npmjs.org`）；在拉不到 Docker Hub 或
+`proxy.golang.org` 的网络里整组覆盖即可：
+
+```bash
+make image \
+  NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
+  GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
+  RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
+  GO_PROXY=https://goproxy.cn,direct \
+  NPM_REGISTRY=https://registry.npmmirror.com
+```
+
+compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`
+/`DSH_VERSION`/`OPENCODE_VERSION`）。`GO_PROXY` 走 `goproxy.cn` 时不依赖 `sum.golang.org`
+（`GONOSUMDB`/`GOSUMDB` 无需改动，`go.sum` 校验仍在本地完成）。
+
 
 ## 5. 健康检查与可观测
 
@@ -275,8 +353,11 @@ sudo systemctl restart ark-forge
 # 拒绝启动（store.migrate: schema vN 高于本二进制支持的 vM）。跨版本回滚必须先恢复库备份。
 ```
 
-重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史（`interrupted` 状态表示重启
-前中断的轮次，可续聊重发）；transcript 模式（memory）启动时回读 JSONL 重建会话列表。
+重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
+被中断的轮次（无终态 → 可续聊重发），而**已完成的轮次保持 `completed`**——停机是运维动作，不是故障，
+不会改写会话状态（见 §8 连接拆除语义）。所有已存在的会话（不论上一轮终态）在重启后都可继续提问：
+`dsh`/`opencode` 走原生 resume，echo 等无原生恢复能力的底座走 handoff memo。transcript 模式（memory）
+启动时回读 JSONL 重建会话列表。
 
 ## 7. 排障
 
@@ -292,10 +373,20 @@ sudo systemctl restart ark-forge
 | 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
 | 启动报 `schema vN 高于本二进制支持的 vM` | 库被更新版本迁移过 → 恢复对应备份或升级二进制（拒绝启动是刻意保护） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `FORGE_DB` |
+| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；echo 走 handoff memo，dsh 走原生 `resume`） |
+| 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
+| 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
+| 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
+| 容器里 `-p` 映射了端口但面板打不开 | 容器内必须 `FORGE_ADDR=0.0.0.0:10001`（镜像已默认）；`FORGE_ADDR` 改了端口时 `-p` 与 HEALTHCHECK 一并跟（后者从该变量现取） |
+| 容器里建会话报 `workspace_outside_roots` | 工作空间只能是挂载视图内的路径：`-v 宿主机目录:容器内路径`，会话 `cwd` 用容器内路径；配了 `FORGE_WORKSPACE_ROOTS` 时 `FORGE_WORKSPACE_DIR` 也要落在白名单内（否则启动即失败） |
+| 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含 dsh/opencode → 用 `--target forge-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
+| `docker build` 卡在拉基础镜像 / `go mod download` 超时 | 受限网络用 §4.3 的 build-arg（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`）整组覆盖 |
+| 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target forge-runtimes`（或 `make image/runtimes`），不做静默忽略 |
 
 ## 8. 验证记录（本机实跑）
 
-环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用但到 `auth.docker.io` 的网络受限。
+环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
+基础镜像，见 §4.3）。
 
 - `make all` → 仓库根 `./forge`（40 MB，含内嵌前端）；`GIN_MODE=release ./forge serve --addr
   127.0.0.1:18140`（`FORGE_STORE=sqlite` + 独立数据目录）→ `GET /v1/forge/health` = `{"code":0,
@@ -315,7 +406,52 @@ sudo systemctl restart ark-forge
 - systemd 单元：**未执行**（macOS 无 systemd）——仅 Python INI 解析校验语法与关键指令齐备
   （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`FORGE_ADDR` 收在本机）。上线前请在
   目标机 `systemd-analyze verify` 并实测。
-- 容器镜像：**未执行**（`auth.docker.io` 不可达，见 §4 降级说明）。
+- 容器镜像（§4）：`registry-1.docker.io`/`auth.docker.io` 在本机持续超时，故基础镜像改用镜像站覆盖
+  （`docker.m.daocloud.io/library/{node:24-bookworm,golang:1.26-bookworm,debian:bookworm-slim}` +
+  `GO_PROXY=https://goproxy.cn,direct`），其余与默认路径一致：
+  - **最小镜像**：`docker build -t ark-forge:local .` 成功（141 MB）。容器 `-p 127.0.0.1:18001:10001
+    -v ark-forge-test-data:/data -e FORGE_ADDR=0.0.0.0:10001`：`GET /v1/forge/health` =
+    `{"code":0,"msg":"ok"}`；`GET /` = 200 `text/html` + `<title>ark-forge · Agent 问答控制台</title>`；
+    容器内 `id` = `uid=10001(forge) gid=10001(forge)`、`HOME=/data`、PID 1 为 `tini`；
+    `forge config` 全部来源 `env(process)`：`/data/forge.db`、`/data/transcripts`、`/data/agents`、
+    `/data/capabilities`、`/data/workspaces`、配置目录 `/data/config`、`proc_registry=/data/processes.json`。
+  - **容器内跑通一轮真实会话**（echo 底座，daemon 派生自己的 `forge acp-demo`）：`POST /agents`
+    （echo）→ `POST /conversations`（响应 `cwd=/data/workspaces/<会话id>`、`workspace_temporary=true`）
+    → 挂起权限 `POST /conversations/:id/permission`（`call_id` + `option_id=allow-all`，
+    `outcome=selected`）→ `status=completed`；`GET /usage/summary` = `source=sqlite runs=1 completed=1
+    duration_ms=13248 context_used=134 cost_amount=0.00134 USD`。卷内出现
+    `forge.db`、`agents/echo.json`、`processes.json`、`workspaces/<id>/`。
+  - **重启恢复**：`docker restart` 后同一卷 → `GET /conversations` 仍列出该会话、`GET /agents` 含
+    `dsh,echo,opencode`、`docker ps` 的 health 列由 `starting` 转 `healthy`（镜像内 HEALTHCHECK 生效）。
+  - **重启不损伤会话**（连接拆除语义修复后实测）：容器内 echo 会话跑完一轮（`completed`）→
+    `docker restart` → 会话仍为 `completed`、事件表无任何 `*error*` 事件；随后 `POST
+    /conversations/:id/prompt` = `code:0`（不再 `40401 未知或不可恢复会话`）→ 再次 `completed`，
+    新增 `session.resumed` 事件（echo 无原生 resume → handoff memo 兜底）。停机日志：
+    `停机：会话句柄作废（会话与状态保留，重启后按需续聊） runtime=echo cause=intentional
+    conversations=1`。
+  - **鉴权**：`-e FORGE_TOKEN=test-token-abc` → `/health` 200（免鉴权）；`/agents` 无令牌 = **401**、
+    错令牌 = **401**、正确 `Bearer` = 200。
+  - **开关守卫**：`docker build --build-arg WITH_DSH=true .`（默认最小 target）**构建失败**，报
+    「需要底座 target：请加 `--target forge-runtimes`」——刻意不静默忽略。
+  - **含底座镜像**：`--target forge-runtimes --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true`
+    构建成功（671 MB）。容器内 `node -v`=v24.21.0、`dsh --version`=0.1.5-rc.1、`opencode --version`=
+    1.18.30（均在 `PATH` 上，以 `forge` 用户可执行）；`POST /agents/dsh/start` → `GET
+    /agents/dsh/diagnostics` = `connected=true pid=15`，握手能力 `sessions_persistent=true resume=true
+    list=true`；`POST /agents/opencode/start` → `connected=true pid=35`；`DSH_HOME=/data/dsh` 落卷
+    （`/data` 下出现 `dsh/`、`.config/`、`.local/`）。**未跑真实模型轮次**：本机无 `DEEPSEEK_API_KEY`
+    / `OPENAI_API_KEY`。
+  - **compose 路径**：`docker compose up -d --build`（同一组镜像站变量）→ `docker compose ps` =
+    `127.0.0.1:18003->10001/tcp`、health OK、`docker compose down -v` 干净回收容器与卷。
+- 连接拆除语义（上述验证顺带复现并**已修复**）：daemon 收到 SIGTERM 关闭 runtime 连接时，曾走
+  `Orchestrator.disconnectConversation` 的「空闲会话 → 标 `failed`」分支，于是**上一轮已 `completed`
+  的会话在 `docker restart` / 重启 daemon 后变成 `failed`**（同机 `kill -TERM ./forge serve` 同样复现；
+  容器部署里 `docker restart` / `compose up -d` 是常规操作，影响面很大）。根因是「连接生命周期」与
+  「轮次结果」共用一条写状态的路径，把**主动停机**当成了**连接故障**。现按拆除原因分流：
+  主动拆除（daemon 停机 / `POST /agents/:id/stop` / 空闲回收）在途轮次归 `interrupted`（无终态、可续聊
+  重发），空闲会话**保持原状态**、不发 `turn.error`；只有对端/子进程意外断开才可能把在途轮次收成
+  失败，且空闲会话同样不被改写（只落 agent 诊断 `last_error.code=connection_lost`）。会话句柄在断连时
+  作废但**会话本身归平台所有**（ADR-4：执行可丢弃）→ 下一次 prompt 经 native resume / handoff memo
+  重建，因此重启后历史会话可继续提问。
 - 孤儿回收（A1）：真实 daemon 下 `POST /agents/:id/start`（opencode）→ 注册表出现条目
   （`pid/pgid/command/runtime/agent/instance`）；`stop` 后条目摘除。启动回收用「上一实例登记 +
   独立进程组 + 忽略 SIGTERM」的替身进程组验证：日志 `reaped=1`、进程消失（SIGTERM 超时后升级
