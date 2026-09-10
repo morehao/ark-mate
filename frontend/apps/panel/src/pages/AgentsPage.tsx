@@ -131,6 +131,21 @@ export function AgentsPage() {
     afterMutate()
   }
 
+  // 删除自定义 agent：回执带影响面（绑定会话数 / 作废的活跃会话数 / 是否当前 Agent），
+  // 如实转述给用户——归属不可变，被删 agent 的会话不会自动改绑，需要用户自己决定后续。
+  const onDelete = async (a: Agent): Promise<void> => {
+    const resp = await guard(deleteAgent(a.id))
+    if (resp === undefined) return
+    const parts = [`已删除 ${resp.deleted}`]
+    if (resp.affected_conversations > 0) {
+      parts.push(`${resp.affected_conversations} 条会话失去执行者（历史仍可读；用同一 id 重新注册可复活绑定）`)
+    }
+    if (resp.detached_conversations > 0) parts.push(`${resp.detached_conversations} 条活跃会话已作废`)
+    if (resp.was_default) parts.push('「当前 Agent」已回落内置默认')
+    showToast(parts.join('；'))
+    afterMutate()
+  }
+
   const openCreate = (): void => {
     agentForm.setFieldsValue({ runtimes: [] })
     setAgentModal({ mode: 'create' })
@@ -295,6 +310,11 @@ export function AgentsPage() {
               <span style={{ color: st.color }}>{st.label}</span>
               {seed && <span style={{ color: tokens.textPlaceholder }}>（种子）</span>}
             </span>
+            {(a.conversation_count ?? 0) > 0 && (
+              <Tooltip title="绑定该 agent 的会话数（含归档）：删除后历史仍可读，但无法继续提问">
+                <span style={{ color: tokens.textPlaceholder, fontSize: 12 }}>{a.conversation_count} 会话</span>
+              </Tooltip>
+            )}
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5, color: tokens.textSecondary }}>{a.id}</span>
               <Button
@@ -327,12 +347,21 @@ export function AgentsPage() {
               {!seed && (
                 <Popconfirm
                   title={`删除 ${a.name}？`}
-                  description="仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。"
+                  description={
+                    <div style={{ maxWidth: 320 }}>
+                      仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。
+                      {(a.conversation_count ?? 0) > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          有 {a.conversation_count} 条会话绑定它：删除后历史仍可读，但**无法继续提问**
+                          （用同一 id 重新注册可复活绑定）。
+                        </div>
+                      )}
+                      {a.is_default && <div style={{ marginTop: 4 }}>它当前是「当前 Agent」，删除后回落内置默认。</div>}
+                    </div>
+                  }
                   okText="删除"
                   okButtonProps={{ danger: true }}
-                  onConfirm={async () => {
-                    if ((await guard(deleteAgent(a.id))) !== undefined) afterMutate()
-                  }}
+                  onConfirm={() => void onDelete(a)}
                 >
                   <Button size="small" danger>
                     删除
@@ -416,6 +445,25 @@ export function AgentsPage() {
             {diag.data.command && (
               <div style={{ color: tokens.textSecondary }}>
                 启动命令：<code>{diag.data.command}</code>
+              </div>
+            )}
+            {diag.data.remediation && diag.data.remediation.length > 0 && (
+              <div
+                style={{
+                  border: `1px solid ${tokens.warningBorder}`,
+                  borderRadius: 10,
+                  padding: '8px 12px',
+                  background: tokens.warningBg,
+                }}
+              >
+                <div style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPlaceholder, marginBottom: 4 }}>
+                  建议处理步骤（按当前事实推导：命令不可执行 / 档案缺失 / 底座安装与登录）
+                </div>
+                <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+                  {diag.data.remediation.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
               </div>
             )}
             {diag.data.last_error && (

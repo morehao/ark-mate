@@ -46,7 +46,8 @@ type Spec struct {
 	// （ACP 面无 mode 参数），均无与平台四统一模式一一对应的原生词表 → 空 = 有据结论，
 	// 不臆造（见 design doc §15）；统一模式语义落平台 permission 面。
 	ModeMapping map[string][]string
-	// SetupSteps 首启引导步骤（§6.1 预留；本轮不消费）。
+	// SetupSteps 该底座未就绪时的可执行修复步骤（安装/登录等，来自 adapter 的既有知识）。
+	// 消费面：/agents/:id/diagnostics 的 remediation（诊断面据此给出「怎么修」而不是只有报错）。
 	SetupSteps []string
 	Notes      string // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）
 }

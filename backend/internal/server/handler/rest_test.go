@@ -179,12 +179,12 @@ func (s *stubSvc) SetDefaultAgent(_ context.Context, id string) (*handler.AgentR
 	s.agentAction = "default:" + id
 	return &handler.AgentResp{ID: id, State: "stopped", IsDefault: true}, nil
 }
-func (s *stubSvc) DeleteAgent(_ context.Context, id string) error {
+func (s *stubSvc) DeleteAgent(_ context.Context, id string) (*handler.AgentDeleteResp, error) {
 	if s.agentErr != nil {
-		return s.agentErr
+		return nil, s.agentErr
 	}
 	s.agentAction = "delete:" + id
-	return nil
+	return &handler.AgentDeleteResp{Deleted: id, AffectedConversations: 2, DetachedConversations: 1, WasDefault: true}, nil
 }
 func (s *stubSvc) StartAgent(_ context.Context, id string) error {
 	if s.agentErr != nil {
@@ -954,6 +954,12 @@ func TestAgentManagementRoutes(t *testing.T) {
 	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-echo", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-echo" {
 		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
+	var del handler.AgentDeleteResp
+	if err := json.Unmarshal(env.Data, &del); err != nil ||
+		del.Deleted != "alias-echo" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
+		t.Fatalf("delete 载荷不符: %s", env.Data)
 	}
 }
 

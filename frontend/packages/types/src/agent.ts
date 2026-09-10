@@ -37,6 +37,22 @@ export interface Agent {
   runtimes?: string[]
   /** 默认权限策略（只读面；未声明 = 全 ask）。 */
   permission_policy?: PermissionPolicy
+  /**
+   * 绑定该 agent 的会话数（删除影响面）：删除后这些会话历史仍可读，但**无法继续提问**
+   * （归属不可变：平台不自动改绑；用同一个 id 重新注册可复活绑定）。
+   */
+  conversation_count?: number
+}
+
+/** 删除 agent 的结果与影响面（`DELETE /agents/:id`）。 */
+export interface AgentDeleteResp {
+  deleted: string
+  /** 绑定该 agent 的会话总数（含归档）。 */
+  affected_conversations: number
+  /** 本次被摘除的活跃会话数（内存里仍连着的会话立即失效）。 */
+  detached_conversations: number
+  /** 被删的是否为「当前 Agent」（是则回落内置默认）。 */
+  was_default: boolean
 }
 
 export interface Provider {
@@ -78,5 +94,10 @@ export interface AgentDiagnostics {
   stderr_source: 'live' | 'last_error' | 'none' | string
   stderr_tail: string[]
   last_error?: AgentLastError
+  /**
+   * 可执行修复步骤（服务端按事实推导：runtime 未注册 / 启动命令不可执行 / provider 档案悬空或无
+   * 密钥 / 底座自报的鉴权方式 / 底座安装步骤）。健康快照不带该字段。
+   */
+  remediation?: string[]
   checked_at: string
 }

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,4 +148,29 @@ func (s *Service) providerEnvFor(providerID string) []string {
 		return nil
 	}
 	return []string{k + "=" + d.Key}
+}
+
+// CredentialProblem 校验 agent 绑定的 provider 档案当前是否可用；不可用即 credential_missing
+// 并带上可执行出路。
+//
+// 语义：agent.provider 为空 = 不注入密钥、用底座自身登录态（合法 → nil）；非空则必须指向一个
+// **存在且带 key** 的档案。悬空引用会让「本该注入的密钥静默缺失」，属配置错误——宁可显式失败，
+// 也不让会话在半配置状态下启动（设计取向：不把降级藏在静默里）。
+func (s *Service) CredentialProblem(agent *AgentRec) error {
+	if agent == nil || agent.Provider == "" {
+		return nil
+	}
+	s.mu.Lock()
+	d := s.providers[agent.Provider]
+	s.mu.Unlock()
+	ref := fmt.Sprintf("agent %q 绑定的 provider 档案 %q", agent.ID, agent.Provider)
+	if d == nil {
+		return acl.NewError(acl.ClassRequest, "credential_missing",
+			ref+" 不存在：在 Agents 页新建该档案，或清空该 agent 的 provider（改用它底座自身的登录态）", nil)
+	}
+	if d.Key == "" {
+		return acl.NewError(acl.ClassRequest, "credential_missing",
+			ref+" 没有密钥（本应注入 "+envKeyOf(d.Type)+"）：在 Agents 页补 key，或清空该 agent 的 provider", nil)
+	}
+	return nil
 }

@@ -328,6 +328,22 @@ export function ChatPage() {
               {activeId}
             </span>
           </div>
+          {/* 绑定 agent 已不存在（被删除/未注册）：如实说明，并给出出路（归属不可变 → 平台不会自动改绑）。 */}
+          {activeSum?.agent_id && agents.length > 0 && !agent && (
+            <div
+              style={{
+                marginTop: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11.5,
+                color: tokens.warning,
+              }}
+            >
+              <InfoCircleOutlined />
+              该会话的 Agent「{activeSum.agent_id}」已不存在（历史仍可读，无法继续提问）：用同一 id 在 Agents 页重新注册即可继续，或导出历史另开新会话。
+            </div>
+          )}
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
           <Dropdown menu={headMenu} trigger={['click']} placement="bottomRight">

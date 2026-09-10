@@ -87,12 +87,13 @@ export function ConversationDetailDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, conversationId])
 
-  // 会话级模型目录：非 echo 会话进入时拉取该 agent 的 provider 目录（opencode 锁定 / dsh 可改）。
+  // 会话级模型目录：**按会话绑定的 agent 取样**（不是「当前 Agent」）——会话与 Agent 一对一绑定，
+  // 模型候选只能来自该会话那个底座（dsh 会话级可改 / opencode 会话级 set_config_option），
+  // 取错 agent 会列出别的底座的模型（实测 dsh 与 opencode 目录完全不同），选下去必被运行时拒绝；
+  // 且目录的 agent 必须与会话一致，运行时推送的 session.config_options 才会被 store 认领刷新。
   const detailAgentId = detail?.agent_id
   useEffect(() => {
-    if (open && detailAgentId) {
-      void loadModelCatalog(agents.find((a) => a.id === detailAgentId)?.provider ? detailAgentId : undefined)
-    }
+    if (open && detailAgentId) void loadModelCatalog(detailAgentId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, detailAgentId])
 

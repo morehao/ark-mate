@@ -88,7 +88,7 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	}
 
 	// 删除自定义 + 定义文件清理。
-	if err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 	if _, ok := svc2.AgentByID("alias-echo"); ok {
@@ -158,7 +158,7 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	if _, err := svc2.SetDefaultAgent(ctx, "alias-echo"); err != nil {
 		t.Fatalf("切到自定义 agent: %v", err)
 	}
-	if err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 	if got := svc2.DefaultAgentID(); got != "dsh" {
@@ -311,7 +311,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 	// 内置种子不可删（此前会成功删除，导致默认 agent 缺失、新建会话失败）。
 	for _, id := range []string{"dsh", "opencode"} {
 		var ae *acl.Error
-		if err := svc.DeleteAgent(ctx, id); err == nil {
+		if _, err := svc.DeleteAgent(ctx, id); err == nil {
 			t.Fatalf("种子 %q 应不可删除", id)
 		} else if !errors.As(err, &ae) || ae.Code != "seed_agent_readonly" {
 			t.Fatalf("种子 %q 删除应 seed_agent_readonly，got %v", id, err)
@@ -321,7 +321,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 		}
 	}
 	// 保留前缀（历史种子形态）同样只读。
-	if err := svc.DeleteAgent(ctx, "agent-legacy"); err == nil {
+	if _, err := svc.DeleteAgent(ctx, "agent-legacy"); err == nil {
 		t.Fatal("agent- 前缀应不可删除")
 	}
 
@@ -348,7 +348,133 @@ func TestSeedAgentReadonly(t *testing.T) {
 	if _, err := svc.UpdateAgent(ctx, "alias-echo", handler.AgentUpdateReq{Runtimes: &rt2}); err != nil {
 		t.Fatalf("自定义 agent runtime 应可改: %v", err)
 	}
-	if err := svc.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc.DeleteAgent(ctx, "alias-echo"); err != nil {
 		t.Fatalf("自定义 agent 应可删: %v", err)
+	}
+}
+
+// TestDeleteAgentImpactDetachAndBusyRefusal 删除影响面（P2 删除面）：
+// 列表外露 conversation_count；删除回带影响面并**立刻摘除**该 agent 的活跃会话（后续 prompt 报
+// agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 turn 时整体拒绝且无副作用。
+func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
+	ctx := context.Background()
+	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	svc := NewService(reg, eventbus.New())
+	orch := NewOrchestrator(svc, reg)
+	t.Cleanup(orch.Close)
+	svc.attachOrchestrator(orch)
+
+	svc.agents["alias-echo"] = &AgentRec{ID: "alias-echo", Name: "别名 echo", Runtimes: []string{"echo"}}
+	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲", Runtimes: []string{"echo"}}
+	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "alias-echo", Status: ConversationStatusInProgress})
+	svc.registerConversation(&ConversationRec{ID: "c2", AgentID: "alias-echo", Status: ConversationStatusInProgress})
+	svc.registerConversation(&ConversationRec{ID: "c3", AgentID: "dsh", Status: ConversationStatusInProgress})
+
+	agents, err := svc.ListAgents()
+	if err != nil {
+		t.Fatalf("ListAgents: %v", err)
+	}
+	counts := map[string]int{}
+	for _, a := range agents {
+		counts[a.ID] = a.ConversationCount
+	}
+	if counts["alias-echo"] != 2 || counts["alias-idle"] != 0 {
+		t.Fatalf("conversation_count 不符（删除影响面）: %+v", counts)
+	}
+
+	// c1 是内存里仍活着的会话（连着底座）：删除必须立刻让它失效。
+	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "alias-echo", Runtime: "echo",
+		sess: &stubConversation{stop: "end_turn"}}
+	orch.byProvider["native-1"] = "c1"
+
+	resp, err := svc.DeleteAgent(ctx, "alias-echo")
+	if err != nil {
+		t.Fatalf("DeleteAgent: %v", err)
+	}
+	if resp.Deleted != "alias-echo" || resp.AffectedConversations != 2 || resp.DetachedConversations != 1 || resp.WasDefault {
+		t.Fatalf("影响面不符: %+v", resp)
+	}
+	if _, ok := orch.conversations["c1"]; ok {
+		t.Fatal("活跃会话应被摘除")
+	}
+	if _, ok := orch.byProvider["native-1"]; ok {
+		t.Fatal("原生→平台映射应一并清除")
+	}
+	if _, ok := svc.AgentByID("alias-echo"); ok {
+		t.Fatal("定义应已删除")
+	}
+	// 已摘除的会话继续提问 → agent_not_found，且给出「同 id 重新注册」的出路（历史仍可读）。
+	_, err = orch.Prompt(ctx, "c1", "hi")
+	var ae *acl.Error
+	if !errors.As(err, &ae) || ae.Code != "agent_not_found" {
+		t.Fatalf("摘除后应报 agent_not_found，got %v", err)
+	}
+	if !strings.Contains(ae.Details, "重新注册") {
+		t.Fatalf("错误文案应给出恢复出路: %s", ae.Details)
+	}
+
+	// 有在途 turn → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
+	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙", Runtimes: []string{"echo"}}
+	busy := &ActiveConversation{ID: "cb", AgentID: "alias-busy", Runtime: "echo", sess: &stubConversation{stop: "end_turn"}}
+	busy.busy = true
+	orch.conversations["cb"] = busy
+	if _, err := svc.DeleteAgent(ctx, "alias-busy"); err == nil {
+		t.Fatal("有在途 turn 应拒绝删除")
+	} else if !errors.As(err, &ae) || ae.Code != "agent_busy" {
+		t.Fatalf("应报 agent_busy，got %v", err)
+	}
+	if _, ok := svc.AgentByID("alias-busy"); !ok {
+		t.Fatal("拒绝时不得删除定义")
+	}
+	if _, ok := orch.conversations["cb"]; !ok {
+		t.Fatal("拒绝时不得摘除活跃会话")
+	}
+}
+
+// TestCredentialMissingBlocksConversationStart agent 绑定悬空/无 key 的 provider 档案时显式失败
+// （credential_missing + 出路），不静默以「无密钥」姿态起进程；补齐 key 后放行。
+func TestCredentialMissingBlocksConversationStart(t *testing.T) {
+	ctx := context.Background()
+	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	svc := NewService(reg, eventbus.New())
+	orch := NewOrchestrator(svc, reg)
+	t.Cleanup(orch.Close)
+	svc.attachOrchestrator(orch)
+
+	svc.agents["a-prov"] = &AgentRec{ID: "a-prov", Name: "P", Runtimes: []string{"echo"}, Provider: "gone"}
+	err := svc.StartAgent(ctx, "a-prov")
+	var ae *acl.Error
+	if !errors.As(err, &ae) || ae.Code != "credential_missing" {
+		t.Fatalf("悬空 provider 档案应报 credential_missing，got %v", err)
+	}
+	if !strings.Contains(ae.Details, "不存在") {
+		t.Fatalf("文案应指明档案不存在并给出路: %s", ae.Details)
+	}
+
+	// 档案存在但无 key → 仍拒绝，并指出本应注入的变量名（可操作）。
+	typ := "deepseek"
+	if _, err := svc.UpdateProvider(ctx, "gone", handler.ProviderPatchReq{Type: &typ}); err != nil {
+		t.Fatalf("UpdateProvider: %v", err)
+	}
+	err = svc.StartAgent(ctx, "a-prov")
+	if !errors.As(err, &ae) || ae.Code != "credential_missing" || !strings.Contains(ae.Details, "DEEPSEEK_API_KEY") {
+		t.Fatalf("无 key 档案应报 credential_missing 并指明注入变量，got %v", err)
+	}
+
+	// 补齐 key → 凭据面放行（不再报 credential_missing）。
+	key := "sk-test"
+	if _, err := svc.UpdateProvider(ctx, "gone", handler.ProviderPatchReq{Key: &key}); err != nil {
+		t.Fatalf("UpdateProvider: %v", err)
+	}
+	a, _ := svc.AgentByID("a-prov")
+	if err := svc.CredentialProblem(a); err != nil {
+		t.Fatalf("补齐 key 后不应再报凭据问题: %v", err)
+	}
+
+	// 未绑定档案（provider 为空）→ 合法：用底座自身登录态，不报错。
+	svc.agents["a-plain"] = &AgentRec{ID: "a-plain", Name: "Plain", Runtimes: []string{"echo"}}
+	p, _ := svc.AgentByID("a-plain")
+	if err := svc.CredentialProblem(p); err != nil {
+		t.Fatalf("未绑定档案不应报凭据问题: %v", err)
 	}
 }

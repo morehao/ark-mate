@@ -122,6 +122,15 @@ func (c *catalogStore) clearRejection(agentID, value string) {
 	}
 }
 
+// drop 清除某 agent 的目录缓存与全部拒绝标记（agent 被删除时调用：内存里不留悬挂条目，
+// 同 id 重建后从零取样而不是回显旧目录）。
+func (c *catalogStore) drop(agentID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, agentID)
+	delete(c.rejected, agentID)
+}
+
 // cloneOptions 深拷贝选项（含每个选项的值切片），避免缓存与调用方共享底层数组。
 func cloneOptions(in []acl.ConfigOption) []acl.ConfigOption {
 	if len(in) == 0 {

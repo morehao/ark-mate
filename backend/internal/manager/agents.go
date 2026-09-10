@@ -222,19 +222,38 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 	return s.agentRespLocked(id), nil
 }
 
-// DeleteAgent 删除用户 agent（种子不可删）。已存在会话仍可查看（历史保留），
-// 但其上新建 prompt 将报 agent_not_found。
-func (s *Service) DeleteAgent(_ context.Context, id string) error {
+// DeleteAgent 删除用户 agent（种子不可删）：返回影响面（绑定会话数 / 被摘除的活跃会话数 /
+// 是否「当前 Agent」）。
+//
+// 语义（归属不可变 + 删除立刻生效）：
+//   - 存量会话保留可读（历史仍在，归属不被改写、也不静默改绑到别的 agent——那会连带静默换掉
+//     权限面/MCP 白名单/原生上下文），但其上继续提问将报 agent_not_found（文案给出「同 id 重建 /
+//     导出历史」两条出路）；
+//   - 内存里仍活跃的会话在此刻被摘除，避免「删了还能跑、重启后才失效」的半死态；
+//   - 有在途 turn 时整体拒绝（agent_busy）：失败即无副作用，不删一半。
+func (s *Service) DeleteAgent(_ context.Context, id string) (*handler.AgentDeleteResp, error) {
 	if seedAgent(id) {
-		return acl.NewError(acl.ClassRequest, "seed_agent_readonly",
+		return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
 			fmt.Sprintf("种子 agent %q 不可删除（可直接编辑 definitions）", id), nil)
 	}
 	s.mu.Lock()
 	_, ok := s.agents[id]
 	if !ok {
 		s.mu.Unlock()
-		return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
+	affected := s.conversationCountLocked(id)
+	s.mu.Unlock()
+	// 先摘活跃会话（有在途 turn 则整体拒绝，此时定义未删、文件未动）。
+	detached := 0
+	if s.orch != nil {
+		n, err := s.orch.DetachAgent(id)
+		if err != nil {
+			return nil, err
+		}
+		detached = n
+	}
+	s.mu.Lock()
 	delete(s.agents, id)
 	dir := s.agentDir
 	// 被删的正是「当前 Agent」的显式选择 → 清除之（回落内置种子），避免 default.json 悬空。
@@ -243,16 +262,21 @@ func (s *Service) DeleteAgent(_ context.Context, id string) error {
 		s.currentAgent = ""
 	}
 	s.mu.Unlock()
+	s.catalog.drop(id)        // 模型目录缓存与拒绝标记一并清掉（同 id 重建后从零取样）
+	s.clearAgentLastError(id) // 最近失败快照清掉（同 id 重建后不回显旧错）
 	if dir != "" {
 		if err := os.Remove(filepath.Join(dir, id+".json")); err != nil && !os.IsNotExist(err) {
-			return err
+			return nil, err
 		}
 	}
 	if wasDefault {
 		clearDefaultAgentFile(dir)
 		slog.Info("agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
 	}
-	return nil
+	slog.Info("agent deleted", "agent", id, "affected_conversations", affected,
+		"detached_conversations", detached, "was_default", wasDefault)
+	return &handler.AgentDeleteResp{Deleted: id, AffectedConversations: affected,
+		DetachedConversations: detached, WasDefault: wasDefault}, nil
 }
 
 // StartAgent 启动 agent 对应 runtime 连接（校验可启动：真实 Dial 成功才置 running）。
@@ -363,5 +387,6 @@ func (s *Service) agentRespLocked(id string) *handler.AgentResp {
 	}
 	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-		PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)}
+		PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
+		ConversationCount: s.conversationCountLocked(a.ID)}
 }

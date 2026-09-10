@@ -2,6 +2,7 @@ import { http } from '../request'
 import type {
   Agent,
   AgentCapabilities,
+  AgentDeleteResp,
   AgentDiagnostics,
   PermissionPolicy,
   Provider,
@@ -211,9 +212,9 @@ export const patchAgent = (
 ): Promise<Agent> =>
   http.patch<Agent>(`/forge/agents/${encodeURIComponent(id)}`, patch)
 
-/** 删除自定义 agent（种子 agent-* 返回只读错误）。 */
-export const deleteAgent = (id: string): Promise<{ deleted: string }> =>
-  http.delete<{ deleted: string }>(`/forge/agents/${encodeURIComponent(id)}`)
+/** 删除自定义 agent（种子 agent-* 返回只读错误）：返回影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）。 */
+export const deleteAgent = (id: string): Promise<AgentDeleteResp> =>
+  http.delete<AgentDeleteResp>(`/forge/agents/${encodeURIComponent(id)}`)
 
 /**
  * 切换「当前 Agent」（全局默认单例：新建会话、模型目录缺省都取它；幂等）。

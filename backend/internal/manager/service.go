@@ -94,10 +94,12 @@ func (s *Service) ResolveRuntime(agent *AgentRec) (string, error) {
 	}
 	if len(av.NotInstalled) == 0 {
 		return "", acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("agent %q 候选 runtime 均未注册：%v", agent.ID, av.NotFound), nil)
+			fmt.Sprintf("agent %q 候选 runtime 均未注册：%v（检查底座是否已注册：`forge config --json` 看 runtimes 来源；"+
+				"修复步骤见 GET /v1/forge/agents/%s/diagnostics 的 remediation）", agent.ID, av.NotFound, agent.ID), nil)
 	}
 	return "", acl.NewError(acl.ClassRequest, "runtime_unavailable",
-		fmt.Sprintf("agent %q 候选 runtime 均不可用：未注册 %v；命令不可执行 %v", agent.ID, av.NotFound, av.NotInstalled), nil)
+		fmt.Sprintf("agent %q 候选 runtime 均不可用：未注册 %v；命令不可执行 %v（命令不可执行 = 已注册但 CLI 不在 PATH："+
+			"安装底座或改为绝对路径后重试）", agent.ID, av.NotFound, av.NotInstalled), nil)
 }
 
 // requiredMcpTransports 由 agent 显式 MCP 白名单推导「能力路由」所需的 transport 集合
@@ -281,7 +283,7 @@ func (s *Service) closeTranscripts() {
 	s.tx = nil
 }
 
-// ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，供面板预选与徽标）。
+// ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，conversation_count 为删除影响面）。
 func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,10 +292,26 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	for _, a := range s.agents {
 		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 			IsDefault: a.ID == cur, Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
+			PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
+			ConversationCount: s.conversationCountLocked(a.ID)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// conversationCountLocked 统计绑定该 agent 的会话数（调用方须持 s.mu）。
+// 用于 /agents 列表与删除影响面：归属不可变 → 删除时这些会话都会失去执行者。
+func (s *Service) conversationCountLocked(agentID string) int {
+	if agentID == "" {
+		return 0
+	}
+	n := 0
+	for _, rec := range s.conversations {
+		if rec != nil && rec.AgentID == agentID {
+			n++
+		}
+	}
+	return n
 }
 
 // ListRuntimes 返回注册表全部 runtime（含静态能力基线）。

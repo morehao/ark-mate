@@ -63,13 +63,15 @@ func (h *AgentHandler) SetDefault(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Delete 删除自定义 agent（种子 agent 返回只读错误）。
+// Delete 删除自定义 agent（种子 agent 返回只读错误）：返回影响面（绑定会话数 / 摘除的活跃会话数 /
+// 是否「当前 Agent」），供面板如实告知删除后果。
 func (h *AgentHandler) Delete(c *gin.Context) {
-	if err := h.svc.DeleteAgent(c.Request.Context(), c.Param("id")); err != nil {
+	resp, err := h.svc.DeleteAgent(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		gincontext.Fail(c, h.svc.RestErr(err))
 		return
 	}
-	gincontext.Success(c, gin.H{"deleted": c.Param("id")})
+	gincontext.Success(c, resp)
 }
 
 // Start 启动 agent runtime 连接（校验可启动；已运行幂等）。
