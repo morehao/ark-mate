@@ -130,6 +130,8 @@ type ConversationRec struct {
 	ID          string
 	AgentID     string
 	Cwd         string // 会话工作目录（绝对路径；仅 sqlite 持久化）
+	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model       string // 会话级模型 id（空 = 底座默认）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
@@ -154,6 +156,7 @@ type Service struct {
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
+	catalog   *catalogStore           // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps      *capability.Registry    // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 
 	mu            sync.Mutex
@@ -186,6 +189,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		conversations:   make(map[string]*ConversationRec),
 		ver:             make(map[string]int64),
 		providers:       make(map[string]*providerDef),
+		catalog:         newCatalogStore(),
 		caps:            capability.NewRegistry(),
 		mcpProbes:       make(map[string]mcpProbeStatus),
 		mcpProbeTimeout: defaultMCPProbeTimeout,
@@ -262,7 +266,7 @@ func (s *Service) ListAgents() ([]handler.AgentResp, error) {
 	out := make([]handler.AgentResp, 0, len(s.agents))
 	for _, a := range s.agents {
 		out = append(out, handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID),
+			IsDefault: a.IsDefault(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -324,6 +328,8 @@ func toConversationResp(r *ConversationRec) handler.ConversationResp {
 		Title:     r.Title,
 		Pinned:    r.Pinned,
 		Archived:  r.Archived,
+		Provider:  r.Provider,
+		Model:     r.Model,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -366,17 +372,36 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch handl
 		r.Archived = *patch.Archived
 	}
 	r.UpdatedAt = time.Now().UTC()
-	resp := toConversationResp(r)
 	s.mu.Unlock()
 
+	// 会话内改模型：活会话经 session/set_config_option 立即生效（运行时是唯一判据）；
+	// 失败即上抛且**不落元数据**（避免「界面显示新模型、实际仍用旧的」的静默偏差）。
+	// 会话不活跃（未启动/已断连）→ 只更新元数据，下次恢复会话时生效。
+	if patch.Model != nil {
+		applied, err := s.orch.ApplyConversationModel(ctx, id, runtime.ModelConfig{Model: *patch.Model})
+		if err != nil {
+			return nil, s.restErr(err)
+		}
+		if !applied {
+			slog.Default().Debug("会话不在活跃集合，模型变更仅更新元数据", "conversation", id)
+		}
+		s.mu.Lock()
+		r.Model = *patch.Model
+		r.UpdatedAt = time.Now().UTC()
+		s.mu.Unlock()
+	}
+
 	if s.st != nil {
-		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived}
+		meta := store.ConversationMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, Model: patch.Model}
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateConversationMeta(ctx2, id, meta); err != nil {
 			slog.Default().Warn("store: update conversation meta failed", "conversation", id, "err", err)
 		}
 	}
+	s.mu.Lock()
+	resp := toConversationResp(r)
+	s.mu.Unlock()
 	return &resp, nil
 }
 
@@ -592,7 +617,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &ConversationRec{
-			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, RuntimeHint: sess.RuntimeHint,
+			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, Provider: sess.Provider,
+			Model: sess.Model, RuntimeHint: sess.RuntimeHint,
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, CreatedAt: sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
@@ -654,6 +680,8 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		ID:                rec.ID,
 		AgentID:           rec.AgentID,
 		Cwd:               rec.Cwd,
+		Provider:          rec.Provider,
+		Model:             rec.Model,
 		RuntimeHint:       rec.RuntimeHint,
 		ProviderSessionID: rec.ProviderSessionID,
 		Title:             rec.Title,
@@ -1053,7 +1081,9 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd)
+	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd, runtime.ModelConfig{
+		Model: req.Model,
+	})
 	if err != nil {
 		return nil, s.restErr(err)
 	}
@@ -1117,7 +1147,7 @@ func (s *Service) restErr(err error) error {
 	switch ae.Class {
 	case acl.ClassRequest:
 		code = 40001
-		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
+		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" || ae.Code == "provider_not_found" {
 			code = 40401
 		}
 	case acl.ClassLimit:

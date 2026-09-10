@@ -1,39 +1,19 @@
 package runtime
 
 import (
-	"strings"
 	"testing"
 )
 
-// TestOpenCodeSpecModelEnvPassthrough opencode 子进程透传 daemon 的 OPENCODE_MODEL（且只透传它）。
-func TestOpenCodeSpecModelEnvPassthrough(t *testing.T) {
+// TestSpecsHaveNoModelEnv 三个投影都**不再**经启动 env 注入模型（决策记录 D1）：
+// 模型选择是 ACP 会话级语义（session/set_config_option，值是运行时目录里的不透明串），
+// 且 Spec 层不再声明任何模型相关字段（option id 各家不同，平台只认 protocol 的 category）。
+// 进程级模型配置归底座自身的配置文件/环境（子进程本就继承 daemon 环境，无需平台 passthrough）。
+func TestSpecsHaveNoModelEnv(t *testing.T) {
 	t.Setenv("OPENCODE_MODEL", "yygu-v2/deepseek-v4-flash")
 	t.Setenv("OPENCODE_OTHER", "should-not-pass")
-
-	spec := opencodeSpec()
-	var passed []string
-	for _, e := range spec.Launch.Env {
-		passed = append(passed, e)
-	}
-	if len(passed) != 1 || passed[0] != "OPENCODE_MODEL=yygu-v2/deepseek-v4-flash" {
-		t.Fatalf("期望仅透传 OPENCODE_MODEL，got %v", passed)
-	}
-
-	// 未设置时 Env 为空（不注入空变量）。
-	t.Setenv("OPENCODE_MODEL", "")
-	if s2 := opencodeSpec(); len(s2.Launch.Env) != 0 {
-		t.Fatalf("未设置 OPENCODE_MODEL 时 Env 应为空: %v", s2.Launch.Env)
-	}
-}
-
-// TestPassthroughEnv 只透传存在且非空的变量。
-func TestPassthroughEnv(t *testing.T) {
-	t.Setenv("FORGE_TEST_A", "1")
-	t.Setenv("FORGE_TEST_B", "")
-	t.Setenv("FORGE_TEST_C", "3")
-	out := passthroughEnv("FORGE_TEST_A", "FORGE_TEST_B", "FORGE_TEST_C", "FORGE_TEST_MISSING")
-	if len(out) != 2 || !strings.Contains(strings.Join(out, ","), "FORGE_TEST_A=1") ||
-		!strings.Contains(strings.Join(out, ","), "FORGE_TEST_C=3") {
-		t.Fatalf("passthroughEnv 过滤不符: %v", out)
+	for _, spec := range []Spec{opencodeSpec(), deepseekharnessSpec(), echoSpec()} {
+		if len(spec.Launch.Env) != 0 {
+			t.Fatalf("%s 不应注入启动 env: %v", spec.ID, spec.Launch.Env)
+		}
 	}
 }

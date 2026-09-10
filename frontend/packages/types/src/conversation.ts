@@ -7,6 +7,10 @@ export interface ConversationSummary {
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
+  /** provider 档案 id（会话级模型选择；空 = 跟随 agent）。 */
+  provider?: string
+  /** 会话级模型 id（空 = 底座默认）。 */
+  model?: string
   created_at: string // ISO 时间戳（UTC RFC3339）
   updated_at: string
 }
@@ -112,6 +116,8 @@ export interface ConversationPatch {
   title?: string
   pinned?: boolean
   archived?: boolean
+  /** 会话级模型（opencode 仅创建时可选；dsh 会话内即时生效）。 */
+  model?: string
 }
 
 // ——— 权限确认通道（ACP session/request_permission ↔ 用户决策） ———
@@ -233,6 +239,8 @@ export interface CreateConversationReq {
   agent_id?: string
   prompt: string
   cwd?: string
+  /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
+  model?: string
 }
 
 export interface CreateConversationResp {

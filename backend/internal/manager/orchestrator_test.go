@@ -18,10 +18,15 @@ import (
 type stubConversation struct {
 	stop string
 	err  error
+	// options 会话配置项桩（nil = 运行时未提供任何选项）。
+	options []acl.ConfigOption
 	// cancelOnCtx：ctx 被取消时返回 ctx.Err（模拟 agent 在取消后断开等待）
 	cancelOnCtx bool
 	cancelled   chan struct{}
 }
+
+// ConfigOptions 桩：默认无配置项（模型目录为空 → 目录来源走缓存/resume/空）。
+func (s *stubConversation) ConfigOptions() []acl.ConfigOption { return s.options }
 
 func (s *stubConversation) Prompt(ctx context.Context, _ string) (string, error) {
 	if s.cancelOnCtx {
@@ -339,5 +344,30 @@ func TestHandoffMemoBudget(t *testing.T) {
 	}
 	if got := svc.HandoffMemo("no-such", 6000); got != "" {
 		t.Fatalf("无事件会话应返回空: %q", got)
+	}
+}
+
+// TestConnKeyModelScoping 连接缓存键：provider 密钥 env 与进程级模型 env 都影响共享键
+//（B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
+func TestConnKeyModelScoping(t *testing.T) {
+	native := []string{"DSH_PERMISSION_MODE=default"}
+	keyE := []string{"OPENAI_API_KEY=sk-x"}
+	modelE := []string{"OPENCODE_MODEL=gpt-5"}
+
+	base := connKey("opencode", native)
+	if base == connKey("opencode", native, keyE) {
+		t.Fatalf("provider 密钥 env 应并入连接键（B5 修复）")
+	}
+	if connKey("opencode", native, keyE) != connKey("opencode", native, keyE) {
+		t.Fatalf("同 env 组应得同键")
+	}
+	if connKey("opencode", native, keyE) == connKey("opencode", native, keyE, modelE) {
+		t.Fatalf("opencode（进程级模型）模型 env 应并入连接键（改模型 = 换连接）")
+	}
+	if connKey("dsh", native, keyE) != connKey("dsh", native, keyE, nil) {
+		t.Fatalf("dsh（会话级模型）不应因不含模型 env 而改变键")
+	}
+	if connKey("echo") != "echo" {
+		t.Fatalf("无 env 应仅返回 runtimeID")
 	}
 }

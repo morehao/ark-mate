@@ -101,6 +101,14 @@ var schemaMigrations = []migration{
 			`ALTER TABLE runs ADD COLUMN first_token_ms INTEGER NOT NULL DEFAULT 0`,
 		},
 	},
+	{
+		version: 4,
+		name:    "conversations.provider/model（会话级模型选择）",
+		statements: []string{
+			`ALTER TABLE conversations ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE conversations ADD COLUMN model TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

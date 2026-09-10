@@ -83,6 +83,9 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	// P2 provider 注入面：密钥只写不读回。
 	v1.GET("/providers", h.Provider.List)
 	v1.PATCH("/providers/:id", h.Provider.Update)
+	// 模型目录：**运行时派生**（ACP session config options），`?agent=<id>` 指定 agent
+	// （缺省取默认 agent）。平台不内置模型清单；provider 档案只影响启动 env 注入。
+	v1.GET("/models", h.Model.List)
 	// P1 能力数据面：Skill/MCP/Tool 目录（platform 唯一事实源，REST 列出能力）。
 	v1.GET("/skills", h.Capability.ListSkills)
 	v1.GET("/mcps", h.Capability.ListMcpServers)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
-import { InfoCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons'
+import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
@@ -10,6 +10,7 @@ import { useForge } from '../store'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
+import { StartPanel } from '../components/StartPanel'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
@@ -63,7 +64,9 @@ export function ChatPage() {
   useEffect(() => {
     if (lastParamRef.current === paramId) return
     lastParamRef.current = paramId
+    // 无 id（/conversations）= 未选中会话 → 清空选中，问答区落回新建面板。
     if (paramId) activate(paramId)
+    else activate(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramId])
 
@@ -251,21 +254,27 @@ export function ChatPage() {
     void sendPrompt(text)
   }
 
-  // 软清空：归档当前会话（数据保留，可在「归档」视图恢复）→ 跳 /new 并预选同 Agent 开新会话。
+  // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /conversations。
+  const openNew = () => {
+    setDetailOpen(false)
+    activate(null)
+    if (paramId) navigate('/conversations')
+  }
+
+  // 软清空：归档当前会话（数据保留，可在「归档」视图恢复）→ 清空选中，问答区落回新建面板。
   const softClear = async () => {
-    if (!activeId || !activeSum?.agent_id) return
-    const agentId = activeSum.agent_id
+    if (!activeId) return
     try {
       await archiveConversation(activeId, true)
       showToast('当前会话已归档，可随时从「归档」恢复')
-      navigate(`/new?agent=${encodeURIComponent(agentId)}`)
+      openNew()
     } catch {
       /* archiveConversation 内部已 toast 错误 */
     }
   }
 
   const headMenu = {
-    items: [{ key: 'soft-clear', label: '归档并新建会话（同 Agent）', title: '保留数据到归档，另开同 Agent 新会话' }],
+    items: [{ key: 'soft-clear', label: '归档并新建会话', title: '保留数据到归档，问答区回到新建面板' }],
     onClick: (info: { key: string }) => {
       if (info.key === 'soft-clear') void softClear()
     },
@@ -385,47 +394,6 @@ export function ChatPage() {
     )
   }
 
-  const renderEmptyPick = () => (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        gap: 12,
-        padding: 24,
-        minHeight: 0,
-        background: tokens.bg,
-      }}
-    >
-      <div
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 14,
-          border: `1px solid ${tokens.border}`,
-          background: tokens.surface,
-          display: 'grid',
-          placeItems: 'center',
-          color: tokens.text,
-        }}
-      >
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-          <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z" />
-        </svg>
-      </div>
-      <div style={{ fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>开始问答</div>
-      <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
-        会话绑定唯一的 Agent。从左侧选择一个会话续看，或新建一个会话。
-      </p>
-      <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/new')} style={{ marginTop: 4 }}>
-        新建会话
-      </Button>
-    </div>
-  )
-
   const renderEmptyTranscript = () => {
     const a = agent
     const agentDesc = a ? `${a.name}` : activeId ?? '该会话'
@@ -469,7 +437,7 @@ export function ChatPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        <ConversationRail onCreate={() => navigate('/new')} />
+        <ConversationRail onCreate={openNew} />
         {drawerOpen && (
           <div
             className="fg-scrim-mobile"
@@ -480,7 +448,9 @@ export function ChatPage() {
 
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
           {!activeId ? (
-            renderEmptyPick()
+            // 未选中会话 = 新建会话面板（不再有独立的「开始问答」空态页）；
+            // 直达 /conversations/:id 的首帧（paramId 已就位、activate 未落地）留空，避免闪一下面板。
+            paramId ? null : <StartPanel />
           ) : (
             <>
               {renderChatHead()}

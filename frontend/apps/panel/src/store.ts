@@ -6,6 +6,7 @@ import {
   createConversation,
   listAgents,
   listConversations,
+  listModels,
   promptConversation,
   resolveElicitation,
   resolvePermission,
@@ -19,7 +20,10 @@ import type {
   BusEvent,
   ElicitationFormSchema,
   PermissionOption,
+  ConfigOption,
   ConversationSummary,
+  ModelCatalogResp,
+  ModelRef,
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
@@ -299,6 +303,8 @@ export interface ForgeState {
   tokenModalOpen: boolean
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
+  /** 模型目录（当前 agent 的运行时会话配置项投影；null = 未加载）。 */
+  modelCatalog: ModelCatalogResp | null
 }
 
 export interface PermissionDecision {
@@ -323,7 +329,11 @@ export interface ForgeActions {
   jumpToAnchor: (id: string, seq: number) => void
   /** 清除跳转锚点（ChatPage 定位完成后调用）。 */
   clearAnchor: () => void
-  createAndRun: (prompt: string) => Promise<string | undefined>
+  createAndRun: (prompt: string, model?: ModelRef) => Promise<string | undefined>
+  /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
+  loadModelCatalog: (agentId?: string) => Promise<void>
+  /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
+  updateConversationModel: (id: string, model?: string) => Promise<void>
   sendPrompt: (text: string) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
@@ -362,6 +372,7 @@ export const initialState: ForgeState = {
   token: getToken(),
   tokenModalOpen: false,
   historyStart: {},
+  modelCatalog: null,
 }
 
 /** C2：服务端「加载更早」每页条数。 */
@@ -470,7 +481,17 @@ export const useForge = create<ForgeStore>((set, get) => {
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
             // 首个事件即证明已就绪（配合 snapshot 与 hydration 超时兜底）
             if (view.hydrating) view.hydrating = false
-            return { ...s, views: { ...s.views, [f.agg_id]: view } }
+            // 运行时推送的配置项更新（全量语义）→ 就地刷新模型目录（同一 agent 才生效）：
+            // 模型下拉与「当前模型」无需轮询即可跟随运行时的真实状态。
+            let catalog = s.modelCatalog
+            if (f.event.type === Ev.ConfigOptions && catalog) {
+              const payload = f.event.payload ?? {}
+              const options = payload.options as ConfigOption[] | undefined
+              if (options && String(payload.agent_id ?? '') === catalog.agent) {
+                catalog = { ...catalog, source: 'session', options }
+              }
+            }
+            return { ...s, modelCatalog: catalog, views: { ...s.views, [f.agg_id]: view } }
           }
           default:
             return s
@@ -554,9 +575,9 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt) => {
+    createAndRun: async (prompt, model) => {
       try {
-        const resp = await createConversation({ prompt })
+        const resp = await createConversation({ prompt, model: model?.modelID })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
         set((s) => ({
@@ -578,6 +599,27 @@ export const useForge = create<ForgeStore>((set, get) => {
       } catch (err) {
         showToast(toErrorMessage(err))
         return undefined
+      }
+    },
+
+    loadModelCatalog: async (agentId) => {
+      try {
+        const resp = await listModels(agentId || undefined)
+        set({ modelCatalog: resp })
+      } catch (err) {
+        // 取不到目录 = 运行时没有可用来源（未启动/未登录）：保持空目录（面板显示空态 + 提示），
+        // 不阻塞建会话（不指定模型即跟随运行时默认）。
+        set({ modelCatalog: null })
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    updateConversationModel: async (id, model) => {
+      try {
+        await updateConversation(id, { model })
+        await get().refreshConversations()
+      } catch (err) {
+        showToast(toErrorMessage(err))
       }
     },
 

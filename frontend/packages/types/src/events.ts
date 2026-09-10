@@ -15,6 +15,9 @@ export const Ev = {
   PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
   ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消）
+  // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
+  // 拓扑变化时推）：payload = {session_id, agent_id, runtime, options: ConfigOption[]}。
+  ConfigOptions: 'session.config_options',
   // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   Runtime: 'session.runtime',
   TurnEnded: 'turn.ended',

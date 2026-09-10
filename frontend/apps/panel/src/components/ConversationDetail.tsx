@@ -11,8 +11,10 @@ import {
 import { tokens } from '@ark/ui'
 import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
 import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
+import { modelValues } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
+import { ModelSelect } from './ModelSelect'
 import { agentNameOf, shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
@@ -46,6 +48,9 @@ export function ConversationDetailDrawer({
   const togglePin = useForge((s) => s.togglePin)
   const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
+  const modelCatalog = useForge((s) => s.modelCatalog)
+  const loadModelCatalog = useForge((s) => s.loadModelCatalog)
+  const updateConversationModel = useForge((s) => s.updateConversationModel)
 
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [run, setRun] = useState<RunSummary | null>(null)
@@ -81,6 +86,15 @@ export function ConversationDetailDrawer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, conversationId])
+
+  // 会话级模型目录：非 echo 会话进入时拉取该 agent 的 provider 目录（opencode 锁定 / dsh 可改）。
+  const detailAgentId = detail?.agent_id
+  useEffect(() => {
+    if (open && detailAgentId) {
+      void loadModelCatalog(agents.find((a) => a.id === detailAgentId)?.provider ? detailAgentId : undefined)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, detailAgentId])
 
   const view = views[conversationId]
   const viewTitle = detail?.title
@@ -254,6 +268,36 @@ export function ConversationDetailDrawer({
               }}
             >
               {row('Agent', agentNameOf(agents, s.agent_id))}
+              {(() => {
+                // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
+                // （不再按 runtime 名硬编码——opencode 同样支持会话级 set_config_option）。
+                const modelOptions = modelValues(modelCatalog ?? undefined)
+                if (modelOptions.length === 0) {
+                  // 运行时没给出目录（未启动/未登录）：只如实说明，不展示不透明取值串。
+                  return row('模型', s.model ? '已设置（当前无目录）' : '运行时默认')
+                }
+                // 会话上存的模型若不在当前目录（换过底座/档案），补一个只读项如实显示，
+                // 避免 antd 回落到原始不透明取值串。
+                const values =
+                  s.model && !modelOptions.some((v) => v.value === s.model)
+                    ? [{ value: s.model, name: '当前模型（不在目录中）' }, ...modelOptions]
+                    : modelOptions
+                return row(
+                  '模型',
+                  <ModelSelect
+                    values={values}
+                    value={s.model ?? null}
+                    allowClear
+                    size="small"
+                    style={{ minWidth: 180 }}
+                    defaultLabel="运行时默认"
+                    onChange={(v) => {
+                      if ((v ?? undefined) === s.model) return
+                      void updateConversationModel(s.id, v ?? undefined).then(() => void load())
+                    }}
+                  />,
+                )
+              })()}
               {row(
                 '状态',
                 meta ? (

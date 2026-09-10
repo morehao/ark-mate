@@ -19,6 +19,7 @@ import type {
   McpResourceReadResult,
   McpPromptsResult,
   McpPromptGetResult,
+  ModelCatalogResp,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -229,6 +230,15 @@ export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/f
 /** upsert provider 档案；key 传空串清除密钥。 */
 export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
   http.patch<Provider>(`/forge/providers/${encodeURIComponent(id)}`, patch)
+
+// ——— 模型目录（运行时派生：ACP session config options） ———
+
+/**
+ * 模型目录：`?agent=<id>` 指定 agent（缺省取后端默认 agent）。
+ * 选项全量来自运行时自报，`source` 标注取样来源（session|resume|cache|none）。
+ */
+export const listModels = (agentId?: string): Promise<ModelCatalogResp> =>
+  http.get<ModelCatalogResp>(`/forge/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
 
 // ——— M3 用量统计 ———
 

@@ -105,6 +105,45 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 	}
 }
 
+// TestRouterModelCatalog 模型目录经真实 Service（无执行面装配）：平台不再内置任何模型清单，
+// 目录只能来自运行时——本装配下无 Orchestrator/无连接 → 返回**空目录** + source=none + 说明，
+// 这是合法结果（面板据此显示「跟随 Agent 默认」并给出补救提示）。
+func TestRouterModelCatalog(t *testing.T) {
+	e := newEngine()
+	env := get(t, e, "/v1/forge/models")
+	if env.Code != 0 {
+		t.Fatalf("/models 信封不符: %+v", env)
+	}
+	var resp struct {
+		Agent   string           `json:"agent"`
+		Runtime string           `json:"runtime"`
+		Source  string           `json:"source"`
+		Options []map[string]any `json:"options"`
+		Note    string           `json:"note"`
+	}
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("/models data 解析: %v", err)
+	}
+	if resp.Source != "none" {
+		t.Fatalf("无运行时来源应 source=none: %s", resp.Source)
+	}
+	if len(resp.Options) != 0 {
+		t.Fatalf("平台不得内置模型清单，选项应为空: %s", env.Data)
+	}
+	if resp.Note == "" {
+		t.Fatalf("空目录必须带说明: %s", env.Data)
+	}
+	if resp.Agent != "dsh" {
+		t.Fatalf("缺省应取默认 agent(dsh): %s", resp.Agent)
+	}
+
+	// 未知 agent → 40401（agent_not_found）。
+	env = get(t, e, "/v1/forge/models?agent=nope")
+	if env.Code != 40401 {
+		t.Fatalf("未知 agent 应 40401: %+v", env)
+	}
+}
+
 // TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/forge 前缀。
 func TestRouterRoutesRegistered(t *testing.T) {
 	e := newEngine()
@@ -124,6 +163,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"POST /v1/forge/conversations/:id/prompt",
 		"POST /v1/forge/conversations/:id/cancel",
 		"GET /v1/forge/providers",
+		"GET /v1/forge/models",
 		"GET /v1/forge/skills",
 		"GET /v1/forge/mcps",
 		"GET /v1/forge/tools",
@@ -173,6 +213,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 		p := m[1]
 		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/conversations") &&
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
+			!strings.HasPrefix(p, "/models") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
 			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/health") &&

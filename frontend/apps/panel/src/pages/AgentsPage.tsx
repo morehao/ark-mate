@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
+import { AutoComplete, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
 import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
@@ -525,8 +525,9 @@ export function AgentsPage() {
           <Form.Item name="type" label="Type（env 变量名映射：openai→OPENAI_API_KEY，未知取大写 type + _API_KEY）" rules={[{ required: true, message: '必填' }]}>
             <Input placeholder="openai / anthropic / deepseek …" autoComplete="off" />
           </Form.Item>
-          <Form.Item name="model" label="Model">
-            <Input placeholder="如 gpt-4o（仅展示元数据）" autoComplete="off" />
+          {/* Model 仅作档案留痕（模型选择的权威来源是运行时会话配置项，平台不内置清单）。 */}
+          <Form.Item name="model" label="Model（档案留痕，可留空）">
+            <AutoComplete placeholder="如 gpt-5 / deepseek-chat" allowClear options={[]} />
           </Form.Item>
           <Form.Item name="key" label={providerModal?.existing?.has_key ? '密钥（已存；输入即覆盖）' : '密钥'}>
             <Input.Password placeholder="只写不读回；留空 = 不变更" autoComplete="new-password" />

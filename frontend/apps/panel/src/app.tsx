@@ -6,7 +6,6 @@ import { consoleStyleSheet } from './console.css'
 import { TopBar } from './components/TopBar'
 import { useForge } from './store'
 import { ChatPage } from './pages/ChatPage'
-import { StartPage } from './pages/StartPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { CapabilitiesPage } from './pages/CapabilitiesPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -68,8 +67,9 @@ export function App() {
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Routes>
-          <Route path="/" element={<Navigate to="/new" replace />} />
-          <Route path="/new" element={<StartPage />} />
+          <Route path="/" element={<Navigate to="/conversations" replace />} />
+          {/* 新建会话不再是独立页面：/conversations 无 id 时问答区即新建面板 */}
+          <Route path="/new" element={<Navigate to="/conversations" replace />} />
           <Route path="/conversations" element={<ChatPage />} />
           <Route path="/conversations/:id" element={<ChatPage />} />
           <Route
@@ -104,7 +104,7 @@ export function App() {
               </Manage>
             }
           />
-          <Route path="*" element={<Navigate to="/new" replace />} />
+          <Route path="*" element={<Navigate to="/conversations" replace />} />
         </Routes>
       </div>
 

@@ -16,6 +16,9 @@ const (
 	KindUsage = "usage"
 	// KindPermission 权限请求（acl 决策后上抛供上层留痕）。
 	KindPermission = "permission"
+	// KindConfigOptions 会话配置项变更（ACP session/update: config_option_update）。
+	// 载荷为**全量**选项状态（协议保证非增量），上层据此刷新模型目录/当前值。
+	KindConfigOptions = "config_options"
 )
 
 // 工具调用状态（对齐 ACP ToolCallStatus 四态；空串 = 仅发起未带状态）。
@@ -89,4 +92,11 @@ type PermissionInfo struct {
 	Rejected  bool   `json:"rejected,omitempty"` // 显式拒绝（区别于取消/超时）
 	OptionID  string `json:"option_id,omitempty"`
 	Always    bool   `json:"always,omitempty"`
+}
+
+// ConfigOptionsInfo 会话配置项全量快照（config_option_update 推送载荷）。
+// 与 new/resume/set 响应回带的选项同源同构：上层用同一套逻辑刷新缓存。
+type ConfigOptionsInfo struct {
+	SessionID string         `json:"session_id"`
+	Options   []ConfigOption `json:"options"`
 }

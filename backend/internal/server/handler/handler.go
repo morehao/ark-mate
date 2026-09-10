@@ -26,6 +26,11 @@ type Service interface {
 	ListProviders() ([]ProviderResp, error)
 	// UpdateProvider upsert provider 档案（type/model/key 子集；key 空串 = 清除）。
 	UpdateProvider(ctx context.Context, id string, patch ProviderPatchReq) (*ProviderResp, error)
+	// DefaultAgentID 返回默认 agent（面板未显式指定 agent 时，用它取模型目录）。
+	DefaultAgentID() string
+	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
+	// 平台不内置任何模型清单：source=session|resume|cache|none 标注取样来源。
+	ModelCatalog(ctx context.Context, agentID string) (*ModelCatalogResp, error)
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]RuntimeResp, error)
 	// ListConversations 返回会话概要（可按 archived 过滤）。
@@ -156,6 +161,9 @@ type AgentResp struct {
 	// Seed 内置播种/保留前缀 Agent：只读（不可删、runtime 不可改；name/provider/策略可改）。
 	// 由服务端权威判定（历史上前端按 id 前缀猜，与播种 id 改名后不一致）。
 	Seed bool `json:"seed"`
+	// Runtimes 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探；0/1 个即确定）。
+	// 供前端判定模型作用域（opencode=进程级锁定 / dsh=会话级可改）；空 = 未知。
+	Runtimes []string `json:"runtimes,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 }
@@ -201,6 +209,65 @@ type ProviderPatchReq struct {
 	Type  *string `json:"type"`
 	Model *string `json:"model"`
 	Key   *string `json:"key"`
+}
+
+// ConfigOptionValueResp 一个可选值（运行时配置项候选项，如模型）。
+//
+// Value 是**不透明字符串**：必须原样回传给创建/PATCH 接口，前端不得解析其内部结构
+// （dsh 为 JSON.stringify([provider, model])，opencode 为 "provider/model"）。
+type ConfigOptionValueResp struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Group/GroupName 分组（agent 以分组形态下发时才有；opencode 为扁平列表时两字段为空）。
+	Group     string `json:"group,omitempty"`
+	GroupName string `json:"group_name,omitempty"`
+	// Unavailable 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅作提示，最终以运行时为准。
+	Unavailable       bool   `json:"unavailable,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+}
+
+// ConfigOptionResp 一个会话配置项（ACP session config option 的直投影）。
+// Category 取值：model / thought_level / mode / model_config（协议标准语义；前端按它渲染，
+// 不得按 option id 匹配——各家 id 不同）。
+type ConfigOptionResp struct {
+	ID           string                  `json:"id"`
+	Name         string                  `json:"name"`
+	Description  string                  `json:"description,omitempty"`
+	Category     string                  `json:"category,omitempty"`
+	Type         string                  `json:"type"`
+	CurrentValue string                  `json:"current_value"`
+	Grouped      bool                    `json:"grouped,omitempty"`
+	Values       []ConfigOptionValueResp `json:"values"`
+}
+
+// AuthGuidanceResp 运行时声明的鉴权方式（空目录时给用户一条确切的补救路径）。
+type AuthGuidanceResp struct {
+	MethodID    string   `json:"method_id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Terminal    bool     `json:"terminal,omitempty"`
+	Command     []string `json:"command,omitempty"`
+}
+
+// ModelCatalogResp 模型目录响应：**全部来自运行时自报**（ACP session config options），
+// 平台不内置任何模型清单。Source 标注取样来源：
+//   - session：直接读该 agent 的活跃会话；
+//   - resume：恢复该 agent 最近一条历史会话读取（读完即 close，不新建会话）；
+//   - cache：内存缓存（TTL 内）；
+//   - none：运行时没有可用来源（Options 为空，带 Note/鉴权引导）。
+type ModelCatalogResp struct {
+	Agent   string `json:"agent"`
+	Runtime string `json:"runtime"`
+	Source  string `json:"source"`
+	// FetchedAt 取样时间（RFC3339；source=cache 时为首次取样时间）。
+	FetchedAt string `json:"fetched_at,omitempty"`
+	// Options 运行时配置项全量投影（模型目录为主；运行时若还给出别的选项，也一并原样透出，仅作展示）。
+	Options []ConfigOptionResp `json:"options"`
+	// AuthGuidance 运行时声明的鉴权方式（如 opencode 的终端登录命令）。
+	AuthGuidance []AuthGuidanceResp `json:"auth_guidance,omitempty"`
+	// Note 空目录/降级说明（人类可读，可直接展示给用户）。
+	Note string `json:"note,omitempty"`
 }
 
 // RuntimeResp Runtime 的对外表示。
@@ -431,6 +498,8 @@ type ConversationResp struct {
 	Title     string `json:"title"`
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
+	Provider  string `json:"provider,omitempty"` // provider 档案 id（会话级模型选择）
+	Model     string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -547,6 +616,7 @@ type ConversationPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
+	Model    *string `json:"model"` // 会话级模型（opencode 仅创建时可选；dsh 会话内即时）
 }
 
 // ConversationCreateReq 新建会话请求体。
@@ -554,6 +624,9 @@ type ConversationCreateReq struct {
 	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
 	Cwd     string `json:"cwd,omitempty"`
+	// Model 运行时目录（GET /models 的 options[category=model].values[].value）里的**不透明取值**，
+	// 原样回传（空 = 跟随运行时默认）。
+	Model string `json:"model,omitempty"`
 }
 
 // ConversationCreateResp 新建会话响应（P0 起不含 runtime）。
@@ -686,6 +759,7 @@ type Handler struct {
 	Conversation *ConversationHandler
 	Runtime      *RuntimeHandler
 	Provider     *ProviderHandler
+	Model        *ModelsHandler
 	Capability   *CapabilityHandler
 	Usage        *UsageHandler
 	Search       *SearchHandler
@@ -703,6 +777,7 @@ func New(svc Service, bus *eventbus.Bus) *Handler {
 		Conversation: &ConversationHandler{svc: svc},
 		Runtime:      &RuntimeHandler{svc: svc},
 		Provider:     &ProviderHandler{svc: svc},
+		Model:        &ModelsHandler{svc: svc},
 		Capability:   &CapabilityHandler{svc: svc},
 		Usage:        &UsageHandler{svc: svc},
 		Search:       &SearchHandler{svc: svc},

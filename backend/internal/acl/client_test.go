@@ -90,6 +90,14 @@ type fakeAgent struct {
 	promptErr     error
 	promptUpdates []acpsdk.SessionUpdate // Prompt 时先推送的流式更新
 	stopReason    acpsdk.StopReason
+	// ——— 会话配置项（模型目录面）———
+	newCfgOpts    []acpsdk.SessionConfigOption // NewSession 响应携带
+	resumeCfgOpts []acpsdk.SessionConfigOption // ResumeSession 响应携带
+	setCfgOpts    []acpsdk.SessionConfigOption // SetSessionConfigOption 响应携带（全量）
+	setCfgErr     error                        // 非 nil = 模拟运行时拒绝
+	setCfgCalls   []acpsdk.SetSessionConfigOptionRequest
+	listResp      acpsdk.ListSessionsResponse
+	listErr       error
 	// promptHook 若设置，在推送流式更新前调用（用于在 Prompt 中途发起
 	// session/request_permission 等交互，验证权限确认通道不阻塞读循环）。
 	promptHook func(ctx context.Context, req acpsdk.PromptRequest)
@@ -129,15 +137,16 @@ func (f *fakeAgent) CloseSession(context.Context, acpsdk.CloseSessionRequest) (a
 func (f *fakeAgent) ListSessions(context.Context, acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
 	f.mu.Lock()
 	f.listCalls++
+	resp, err := f.listResp, f.listErr
 	f.mu.Unlock()
-	return acpsdk.ListSessionsResponse{}, nil
+	return resp, err
 }
 
 func (f *fakeAgent) NewSession(_ context.Context, req acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	f.mu.Lock()
 	f.newCalls = append(f.newCalls, req)
 	f.mu.Unlock()
-	return acpsdk.NewSessionResponse{SessionId: "sess-fake-1"}, nil
+	return acpsdk.NewSessionResponse{SessionId: "sess-fake-1", ConfigOptions: f.newCfgOpts}, nil
 }
 
 func (f *fakeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
@@ -171,16 +180,24 @@ func (f *fakeAgent) Prompt(ctx context.Context, req acpsdk.PromptRequest) (acpsd
 func (f *fakeAgent) ResumeSession(context.Context, acpsdk.ResumeSessionRequest) (acpsdk.ResumeSessionResponse, error) {
 	f.mu.Lock()
 	f.resumeCalls++
+	opts := f.resumeCfgOpts
 	f.mu.Unlock()
-	return acpsdk.ResumeSessionResponse{}, nil
+	return acpsdk.ResumeSessionResponse{ConfigOptions: opts}, nil
 }
 
 func (f *fakeAgent) SetSessionMode(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
 	return acpsdk.SetSessionModeResponse{}, nil
 }
 
-func (f *fakeAgent) SetSessionConfigOption(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
-	return acpsdk.SetSessionConfigOptionResponse{}, nil
+func (f *fakeAgent) SetSessionConfigOption(_ context.Context, req acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+	f.mu.Lock()
+	f.setCfgCalls = append(f.setCfgCalls, req)
+	opts, err := f.setCfgOpts, f.setCfgErr
+	f.mu.Unlock()
+	if err != nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, err
+	}
+	return acpsdk.SetSessionConfigOptionResponse{ConfigOptions: opts}, nil
 }
 
 func (f *fakeAgent) stats() (auth, cancel, closeCalls, resume, list int) {
@@ -444,7 +461,7 @@ func TestCapabilityGatedMethods(t *testing.T) {
 	} else if ae, ok := As(err); !ok || ae.Code != "resume_session_unsupported" {
 		t.Fatalf("resume 错误不符: %v", err)
 	}
-	if _, err := cl.ListSessions(context.Background()); err == nil {
+	if _, err := cl.ListSessions(context.Background(), ""); err == nil {
 		t.Fatal("list 未声明应报 unsupported")
 	} else if ae, ok := As(err); !ok || ae.Code != "list_sessions_unsupported" {
 		t.Fatalf("list 错误不符: %v", err)

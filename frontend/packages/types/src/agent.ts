@@ -29,6 +29,8 @@ export interface Agent {
   is_default?: boolean
   /** 种子 agent（内置播种/保留前缀）：只读（不可删、runtime 不可改）；由服务端权威判定。 */
   seed?: boolean
+  /** 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探）；用于判定模型作用域。 */
+  runtimes?: string[]
   /** 默认权限策略（只读面；未声明 = 全 ask）。 */
   permission_policy?: PermissionPolicy
 }

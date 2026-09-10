@@ -22,6 +22,10 @@ const (
 	BusUsage = "session.usage"
 	// BusPermission 权限决策留痕（acl 决策后上抛：payload = acl.PermissionInfo）。
 	BusPermission = "session.permission"
+	// BusConfigOptions 运行时主动推送的会话配置项全量更新（ACP session/config_option_update；
+	// 如 dsh 在 provider 拓扑变化时推）。payload = {session_id, agent_id, runtime, options}
+	// （options = acl.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
+	BusConfigOptions = "session.config_options"
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"

@@ -48,6 +48,9 @@ type Client struct {
 	caps Capabilities
 	opts ClientOptions
 	host *hostClient
+	// reg 本连接内活跃会话索引：config_option_update 只携带 sessionId，
+	// 靠它路由到对应会话并刷新配置项快照。
+	reg *sessionRegistry
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -70,7 +73,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	if err := t.Start(ctx); err != nil {
 		return nil, AttachStderr(err, t)
 	}
-	host := &hostClient{opts: opts}
+	host := &hostClient{opts: opts, reg: newSessionRegistry()}
 	conn := acpsdk.NewClientSideConnection(host, t.Stdin(), t.Stdout())
 	if opts.Logger != nil {
 		conn.SetLogger(opts.Logger)
@@ -101,6 +104,10 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			Form: &acpsdk.ElicitationFormCapabilities{},
 			Url:  &acpsdk.ElicitationUrlCapabilities{},
 		},
+		// terminal-auth（unstable，ACP 扩展位）：声明后 agent 可在 authMethods 上附带
+		// 可执行的终端登录命令（opencode 即 `opencode auth login`），用于「运行时没有可用
+		// 模型（没配凭证）」时给用户一条确切的补救路径。仅声明意图，不代跑命令。
+		Meta: map[string]any{"terminal-auth": true},
 	}
 	initResp, err := conn.Initialize(dctx, acpsdk.InitializeRequest{
 		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
@@ -167,6 +174,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		caps:   caps,
 		opts:   opts,
 		host:   host,
+		reg:    host.reg,
 		closed: make(chan struct{}),
 	}, nil
 }
@@ -204,11 +212,30 @@ func (c *Client) Close() error {
 // hostClient 实现 acp-go-sdk 的 acpsdk.Client：接收 agent 发来的请求/通知。
 type hostClient struct {
 	opts ClientOptions
+	// reg 与 Client 共用同一实例：通知里只有 sessionId，需要按 id 找到会话。
+	reg *sessionRegistry
 }
 
 var _ acpsdk.Client = (*hostClient)(nil)
 
 func (h *hostClient) SessionUpdate(ctx context.Context, n acpsdk.SessionNotification) error {
+	// config_option_update 携带**全量**配置项（协议保证），先落到会话快照，再作为事件上抛：
+	// 前者供「读目录/读当前值」直接取用，后者供上层刷新缓存与推送 UI。
+	if upd := n.Update.ConfigOptionUpdate; upd != nil {
+		opts := configOptionsFromSDK(upd.ConfigOptions)
+		if h.reg != nil {
+			if s := h.reg.get(string(n.SessionId)); s != nil {
+				s.setConfigOptions(opts)
+			}
+		}
+		if h.opts.OnEvent != nil {
+			h.opts.OnEvent(Event{
+				Kind:      KindConfigOptions,
+				SessionID: string(n.SessionId),
+				Payload:   ConfigOptionsInfo{SessionID: string(n.SessionId), Options: opts},
+			})
+		}
+	}
 	if h.opts.OnEvent == nil {
 		return nil
 	}
