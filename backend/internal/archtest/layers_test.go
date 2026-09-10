@@ -187,6 +187,72 @@ func TestControllersMustNotImportImplementations(t *testing.T) {
 	}
 }
 
+// TestPersistenceLayersMustNotImportAppLayers 锁定持久层内部的单向依赖。
+//
+// 三层的职责与允许的依赖方向（单向，不得回指）：
+//
+//	pkg/dbclient（句柄装配） ← internal/dao（单表数据访问） ← internal/store（跨表事务门面）
+//	                 ↑                    ↑
+//	          internal/model（实体与列约定，谁都依赖它，它不依赖任何一层）
+//
+// 具体边界：
+//   - internal/model 只描述"库长什么样"，不得 import dao/store/传输层——否则实体定义
+//     会被数据访问或业务语义污染，schema 契约也就不再中立；
+//   - internal/dao 不得 import store（会与 store→dao 形成环）与传输层；
+//   - internal/store 是门面，可以 import dao/model/dbclient，但不得反向 import manager/app/router。
+func TestPersistenceLayersMustNotImportAppLayers(t *testing.T) {
+	root := backendRoot(t)
+	transport := []string{
+		modulePrefix + "internal/controller",
+		modulePrefix + "internal/router",
+		modulePrefix + "internal/dto",
+		modulePrefix + "internal/service",
+	}
+	app := []string{
+		modulePrefix + "internal/manager",
+		modulePrefix + "internal/app",
+	}
+
+	cases := []struct {
+		name      string
+		dir       string
+		forbidden []string
+		reason    string
+	}{
+		{
+			name:      "model 不得依赖数据访问与业务层",
+			dir:       filepath.Join(root, "internal", "model"),
+			forbidden: append(append([]string{modulePrefix + "internal/store", modulePrefix + "internal/dao"}, app...), transport...),
+			reason:    "实体只描述库结构，必须保持中立",
+		},
+		{
+			name:      "dao 不得依赖 store 与上层",
+			dir:       filepath.Join(root, "internal", "dao"),
+			forbidden: append(append([]string{modulePrefix + "internal/store"}, app...), transport...),
+			reason:    "store 已依赖 dao，反向依赖即成环",
+		},
+		{
+			name:      "store 不得依赖传输层与实现层",
+			dir:       filepath.Join(root, "internal", "store"),
+			forbidden: append(append([]string{}, app...), transport...),
+			reason:    "持久层不得感知业务实现与传输形态",
+		},
+	}
+	for _, tc := range cases {
+		if !hasGoFiles(tc.dir) {
+			t.Errorf("持久层目录 %s 不存在或无 Go 文件", rel(root, tc.dir))
+			continue
+		}
+		for _, imp := range importedByPackage(t, tc.dir) {
+			for _, bad := range tc.forbidden {
+				if imp == bad || strings.HasPrefix(imp, bad+"/") {
+					t.Errorf("持久层越界依赖：%s 不应 import %s（%s）", rel(root, tc.dir), imp, tc.reason)
+				}
+			}
+		}
+	}
+}
+
 func rel(root, p string) string {
 	if r, err := filepath.Rel(root, p); err == nil {
 		return r

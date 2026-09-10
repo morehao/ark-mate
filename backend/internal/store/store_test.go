@@ -39,7 +39,7 @@ func TestSchemaMigrated(t *testing.T) {
 		t.Fatalf("schema 版本不符: v=%d err=%v", v, err)
 	}
 	// 幂等：再跑一次 migrate 不报错。
-	if err := s.migrate(ctxT()); err != nil {
+	if err := s.Migrate(ctxT()); err != nil {
 		t.Fatalf("re-migrate 应幂等: %v", err)
 	}
 }

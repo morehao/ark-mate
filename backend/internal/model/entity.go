@@ -1,0 +1,184 @@
+package model
+
+import "time"
+
+// 表名常量：DAO 与本包实体的唯一对照点（新增表在此登记）。
+const (
+	// TableMeta 计数 / 导入标记 / 任意键值。
+	TableMeta = "meta"
+	// TableConversation 会话权威元数据。
+	TableConversation = "conversations"
+	// TableEvent 事件事实源（唯一写入口见 store.AppendEvent）。
+	TableEvent = "events"
+	// TableRun 每轮 prompt 的物化行。
+	TableRun = "runs"
+	// TableMessage 消息物化投影（可从 events 重建）。
+	TableMessage = "messages"
+	// TableMemory 会话级权限记忆。
+	TableMemory = "permission_memories"
+	// TableMigration schema 版本记录（迁移内核自管）。
+	TableMigration = "schema_migrations"
+)
+
+// 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
+// 自动当成「插入/更新时取当前时间」，在 Create/Updates 时隐式覆盖调用方传入的值。
+// 本仓的时间全部由调用方显式赋值（含「零值落空串」语义），故一律显式关闭。
+//
+// Meta 是 meta 表的一行（任意键值；events_last_seq 与导入标记都落在这里）。
+type Meta struct {
+	Key   string `gorm:"column:key;primaryKey"`
+	Value string `gorm:"column:value;not null"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Meta) TableName() string { return TableMeta }
+
+// MetaList 是 Meta 切片类型（gormdao 泛型参数要求具名切片）。
+type MetaList []Meta
+
+// Conversation 是 conversations 表的一行（DB 权威元数据；字段对齐 manager.ConversationRec + transcript header）。
+type Conversation struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// AgentID 归属 agent。
+	AgentID string `gorm:"column:agent_id;not null"`
+	// Cwd 会话工作空间（canonical 绝对路径；= 底座 ACP session 的 cwd，
+	// 也是原生权限 workspace-write 的边界）。
+	Cwd string `gorm:"column:cwd;not null"`
+	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
+	// 权威标志：任何「临时空间」判定都必须读它，不得从路径形状反推。
+	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkforge_flag"`
+	// Provider provider 档案 id（会话级模型选择；空 = 跟随 agent）。
+	Provider string `gorm:"column:provider;not null"`
+	// Model 会话级模型 id（空 = 底座默认）。
+	Model string `gorm:"column:model;not null"`
+	// RuntimeHint 最近/首选 runtime（执行提示，非身份，用户不可见）。
+	RuntimeHint string `gorm:"column:runtime_hint;not null"`
+	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid/echo id）。P3 双 id：
+	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
+	ProviderSessionID string `gorm:"column:provider_session_id;not null"`
+	Title             string `gorm:"column:title;not null"`
+	Pinned            bool   `gorm:"column:pinned;serializer:arkforge_flag"`
+	Archived          bool   `gorm:"column:archived;serializer:arkforge_flag"`
+	// Status 会话状态。取值权威定义在 internal/manager/events.go（ConversationStatus*）。
+	Status string `gorm:"column:status;not null"`
+	// LastSeq 该会话已落库事件的最后 seq（events.seq 全局单调）。
+	LastSeq   int64     `gorm:"column:last_seq"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Conversation) TableName() string { return TableConversation }
+
+// ConversationList 是 Conversation 切片类型（gormdao 泛型参数要求具名切片）。
+type ConversationList []Conversation
+
+// ConversationMetaPatch 会话元数据子集更新（nil = 不更新；updated_at 恒刷新）。
+type ConversationMetaPatch struct {
+	Title    *string
+	Pinned   *bool
+	Archived *bool
+	Status   *string
+	Provider *string
+	Model    *string
+}
+
+// Empty 判断补丁是否为空（空补丁不产生 SQL）。
+func (p ConversationMetaPatch) Empty() bool {
+	return p.Title == nil && p.Pinned == nil && p.Archived == nil &&
+		p.Status == nil && p.Provider == nil && p.Model == nil
+}
+
+// Event 是 events 表的一行（facts 的唯一事实源）。
+type Event struct {
+	// Seq 全局单调序号（meta.events_last_seq 是唯一分配源，见 store 的分配事务）。
+	Seq            int64  `gorm:"column:seq;primaryKey"`
+	ConversationID string `gorm:"column:conversation_id;not null"`
+	// Type 事件类型。取值权威定义在 internal/manager/events.go。
+	Type string `gorm:"column:type;not null"`
+	// PayloadJSON 事件载荷（一律序列化为 JSON 文本，含结构体载荷）。
+	PayloadJSON string    `gorm:"column:payload_json;not null"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Event) TableName() string { return TableEvent }
+
+// EventList 是 Event 切片类型（gormdao 泛型参数要求具名切片）。
+type EventList []Event
+
+// Run 是 runs 表的一行（一轮 prompt 的物化行，turn 收口处写入）。
+type Run struct {
+	ID             string `gorm:"column:id;primaryKey"`
+	ConversationID string `gorm:"column:conversation_id;not null"`
+	UserText       string `gorm:"column:user_text;not null"`
+	// Status 轮次终态。取值权威定义在 internal/manager/events.go。
+	Status     string `gorm:"column:status;not null"`
+	ErrorCode  string `gorm:"column:error_code;not null"`
+	StopReason string `gorm:"column:stop_reason;not null"`
+	UsageJSON  string `gorm:"column:usage_json;not null"`
+	FirstSeq   int64  `gorm:"column:first_seq"`
+	LastSeq    int64  `gorm:"column:last_seq"`
+	// FirstTokenMS 本轮从用户消息到首个 assistant 输出（文本/思考/工具）的耗时（ms）；0 = 未记录。
+	FirstTokenMS int64     `gorm:"column:first_token_ms"`
+	StartedAt    time.Time `gorm:"column:started_at;not null;serializer:arkforge_rfc3339"`
+	// EndedAt 终态时间；未结束 → 零值（落库为空串）。
+	EndedAt time.Time `gorm:"column:ended_at;serializer:arkforge_rfc3339"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Run) TableName() string { return TableRun }
+
+// RunList 是 Run 切片类型（gormdao 泛型参数要求具名切片）。
+type RunList []Run
+
+// Message 是 messages 表的一行（消息物化：role/text + 交错时间线 + 工具最终态）。
+type Message struct {
+	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	ConversationID string `gorm:"column:conversation_id;not null"`
+	RunID          string `gorm:"column:run_id;not null"`
+	// Role 消息角色。取值见 RoleUser / RoleAssistant。
+	Role            string    `gorm:"column:role;not null"`
+	Text            string    `gorm:"column:text;not null"`
+	EventsJSON      string    `gorm:"column:events_json;not null"`
+	ToolDetailsJSON string    `gorm:"column:tool_details_json;not null"`
+	SeqLo           int64     `gorm:"column:seq_lo"`
+	SeqHi           int64     `gorm:"column:seq_hi"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Message) TableName() string { return TableMessage }
+
+// MessageList 是 Message 切片类型（gormdao 泛型参数要求具名切片）。
+type MessageList []Message
+
+// Memory 是 permission_memories 表的一行（会话级权限记忆，allow/reject 双侧对称）。
+type Memory struct {
+	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	ConversationID string `gorm:"column:conversation_id;not null"`
+	Title          string `gorm:"column:title;not null"`
+	Kind           string `gorm:"column:kind;not null"`
+	// Decision 决策方向。取值见 DecisionAllow / DecisionReject。
+	Decision  string    `gorm:"column:decision;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Memory) TableName() string { return TableMemory }
+
+// MemoryList 是 Memory 切片类型（gormdao 泛型参数要求具名切片）。
+type MemoryList []Memory
+
+// Migration 是 schema_migrations 表的一行（迁移内核自管的版本记录）。
+type Migration struct {
+	Version   int       `gorm:"column:version;primaryKey"`
+	Name      string    `gorm:"column:name;not null"`
+	AppliedAt time.Time `gorm:"column:applied_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Migration) TableName() string { return TableMigration }
+
+// MigrationList 是 Migration 切片类型（gormdao 泛型参数要求具名切片）。
+type MigrationList []Migration

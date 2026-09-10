@@ -286,6 +286,7 @@ backend/                单 Go module（github.com/morehao/ark-forge）
     config              进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
     procreg             进程注册表（孤儿 runtime 子进程回收）
     web                 release 内嵌前端产物宿主（go:embed dist）
+    dbclient             gorm 句柄装配 + 自注册纯 Go SQLite dialector（无 CGO）
     object/objusage     跨层共享值对象（会话用量快照）
   internal/             应用专属逻辑
     app                 装配 + 启停生命周期（Init/Run/Close）
@@ -296,7 +297,9 @@ backend/                单 Go module（github.com/morehao/ark-forge）
     dto/dto*            请求/响应 DTO（按领域分包，双方共用）
     service/svc*        领域端口（控制器依赖的窄接口，manager 实现）
     manager             领域实现：Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
-    store               SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
+    model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
+    dao                 单表数据访问（gormdao 泛型 Dao + 各领域 Cond）
+    store               持久层门面（句柄 + 跨表事务：序号分配、导入 staging、读模型 API）
     eventbus            进程内事件总线（WS 订阅源）
     archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
 frontend/               pnpm workspace（apps/* + packages/*）

@@ -2,10 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/morehao/ark-forge/internal/model"
+	"gorm.io/gorm"
 )
 
 // migration 是一次原子 schema 变更：其 statements 在单个事务内顺序执行。
@@ -17,6 +18,11 @@ type migration struct {
 
 // schemaMigrations 是版本-迁移表（有序；追加迁移 = 在尾部新增，绝不回改历史）。
 // v1 baseline：meta / conversations / events / runs / messages / permission_memories + 索引。
+//
+// 这里刻意不用 gorm 的 AutoMigrate：AutoMigrate 只做「往目标结构收敛」，
+// 表达不了本仓要求的三件事——严格有序的版本号、库版本高于二进制时**拒绝启动**、
+// 以及导入路径的 staging 回滚。列定义因此仍与 internal/model 的实体手工保持一致
+// （改列时两处必须同步，archtest 会守住实体表名）。
 var schemaMigrations = []migration{
 	{
 		version: 1,
@@ -123,43 +129,26 @@ func latestSchemaVersion() int {
 	return schemaMigrations[len(schemaMigrations)-1].version
 }
 
-// migrate 幂等应用未执行的迁移（自管 schema_migrations：单事务 DDL + 记录版本）。
+// Migrate 幂等应用未执行的迁移（自管 schema_migrations：单事务 DDL + 记录版本）。
 // 库版本高于本二进制（未知未来版本）→ 拒绝启动（对齐 zacp refuse-start）。
-func (s *Store) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+func (s *Store) Migrate(ctx context.Context) error {
+	if err := s.db.WithContext(ctx).Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableMigration + ` (
 		version    INTEGER PRIMARY KEY,
 		name       TEXT NOT NULL,
 		applied_at TEXT NOT NULL
-	)`); err != nil {
+	)`).Error; err != nil {
 		return fmt.Errorf("store: create schema_migrations: %w", err)
 	}
 
-	applied := map[int]bool{}
-	rows, err := s.db.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+	applied, maxVersion, err := s.migrations.AppliedVersions(ctx)
 	if err != nil {
 		return fmt.Errorf("store: read schema_migrations: %w", err)
-	}
-	var maxVersion int
-	for rows.Next() {
-		var v int
-		if err := rows.Scan(&v); err != nil {
-			rows.Close()
-			return fmt.Errorf("store: scan schema_migrations: %w", err)
-		}
-		applied[v] = true
-		if v > maxVersion {
-			maxVersion = v
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("store: iterate schema_migrations: %w", err)
 	}
 	if maxVersion > latestSchemaVersion() {
 		return fmt.Errorf("store: schema v%d 高于本二进制支持的 v%d（请升级二进制，拒绝启动）", maxVersion, latestSchemaVersion())
 	}
 
-	var pending []int
+	pending := make([]int, 0, len(schemaMigrations))
 	for _, m := range schemaMigrations {
 		if !applied[m.version] {
 			pending = append(pending, m.version)
@@ -178,35 +167,37 @@ func (s *Store) migrate(ctx context.Context) error {
 				break
 			}
 		}
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("store: begin migration v%d: %w", v, err)
+		if err := s.applyMigration(ctx, m); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// applyMigration 在单个事务内执行一次迁移的语句并记录版本。
+func (s *Store) applyMigration(ctx context.Context, m migration) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, stmt := range m.statements {
-			if _, err := tx.ExecContext(ctx, stmt); err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("store: apply migration v%d (%s): %w", v, m.name, err)
+			if err := tx.Exec(stmt).Error; err != nil {
+				return fmt.Errorf("store: apply migration v%d (%s): %w", m.version, m.name, err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)`,
-			v, m.name, nowRFC3339()); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("store: record migration v%d: %w", v, err)
+		if err := s.migrations.WithTx(tx).Record(ctx, m.version, m.name); err != nil {
+			return fmt.Errorf("store: record migration v%d: %w", m.version, err)
 		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("store: commit migration v%d: %w", v, err)
-		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("store: migrate v%d: %w", m.version, err)
 	}
 	return nil
 }
 
 // SchemaVersion 返回库当前 schema 版本（0 = 空库/未迁移）。
 func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
-	var v int
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	_, maxVersion, err := s.migrations.AppliedVersions(ctx)
+	if err != nil {
 		return 0, err
 	}
-	return v, nil
+	return maxVersion, nil
 }
