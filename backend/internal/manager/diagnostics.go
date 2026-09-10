@@ -3,9 +3,12 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/internal/routing"
+	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/handler"
 )
 
@@ -64,7 +67,8 @@ func (s *Service) agentLastError(agentID string) (agentLastErr, bool) {
 func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.AgentDiagnosticsResp, error) {
 	agent, ok := s.AgentByID(id)
 	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found",
+			fmt.Sprintf("未知 agent %q（若它是已被删除的 agent：用同一个 id 重新注册即可让绑定它的会话复活）", id), nil)
 	}
 	runtimeID := agent.pickRuntime()
 	resp := &handler.AgentDiagnosticsResp{
@@ -76,10 +80,13 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.Agent
 		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
 		StderrSource: "none",
 	}
+	var spec runtime.Spec
+	specOK := false
 	if s.reg != nil {
-		if spec, ok := s.reg.Get(runtimeID); ok {
-			resp.Command = spec.Launch.Command
-			resp.RuntimeName = spec.Name
+		if sp, ok := s.reg.Get(runtimeID); ok {
+			spec, specOK = sp, true
+			resp.Command = sp.Launch.Command
+			resp.RuntimeName = sp.Name
 		}
 	}
 	if s.orch != nil {
@@ -106,7 +113,91 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*handler.Agent
 			resp.StderrSource = "last_error"
 		}
 	}
+	resp.Remediation = s.remediationFor(agent, spec, specOK, resp.Connected, resp.StderrTail, resp.LastError != nil)
 	return resp, nil
+}
+
+// clearAgentLastError 清除某 agent 的最近失败快照（agent 被删除时调用：同 id 重建后不回显旧错）。
+func (s *Service) clearAgentLastError(agentID string) {
+	s.diagMu.Lock()
+	delete(s.lastErrs, agentID)
+	s.diagMu.Unlock()
+}
+
+// remediationFor 推导该 agent 当前的可执行修复步骤（诊断面给「怎么修」，而不是只有报错）。
+//
+// 事实来源（按序合并、去重）：
+//  1. runtime 未注册 / 已注册但启动命令不可执行（与路由用同一判定 routing.Installed）；
+//  2. provider 档案悬空或无密钥（CredentialProblem 原文，已含出路）；
+//  3. 已连接时底座自报的鉴权方式（caps.AuthGuidance，如「在终端执行 xxx 登录」）；
+//  4. 最近失败的 stderr 呈鉴权特征 → 指向 provider 档案/底座登录；
+//  5. 该 runtime 声明的 SetupSteps（安装/登录步骤）——仅在未连接或已有问题时并入，
+//     健康快照不掺安装说明。
+//
+// 供 /agents/:id/diagnostics 的 remediation 字段消费；不臆造命令：文本只来自上述事实来源。
+func (s *Service) remediationFor(agent *AgentRec, spec runtime.Spec, specOK, connected bool,
+	stderr []string, hasLastErr bool) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(step string) {
+		step = strings.TrimSpace(step)
+		if step == "" || seen[step] {
+			return
+		}
+		seen[step] = true
+		out = append(out, step)
+	}
+
+	if !specOK {
+		add(fmt.Sprintf("runtime %q 未注册：确认底座已注册（`forge config --json` 可查 runtimes 来源）或重新注册该 runtime",
+			agent.pickRuntime()))
+	} else if !routing.Installed(spec) {
+		add(fmt.Sprintf("runtime %q 的启动命令 %q 当前不可执行：安装该底座并确保它在 PATH 中（或把配置改成绝对路径）",
+			spec.ID, spec.Launch.Command))
+	}
+	if err := s.CredentialProblem(agent); err != nil {
+		if ae, ok := acl.As(err); ok && ae != nil {
+			add(ae.Details)
+		}
+	}
+	if connected {
+		for _, g := range s.authGuidanceFor(agent.ID) {
+			desc := g.Description
+			if desc == "" {
+				desc = g.Name
+			}
+			if len(g.Command) > 0 {
+				desc += fmt.Sprintf("（命令 %s）", strings.Join(g.Command, " "))
+			}
+			add("底座声明的鉴权方式：" + desc)
+		}
+	}
+	if hasLastErr && looksLikeAuthFailure(stderr) {
+		add("底座报告鉴权失败：给该 agent 绑定带 key 的 provider 档案，或先在底座内完成登录")
+	}
+	if specOK && len(spec.SetupSteps) > 0 && (!connected || hasLastErr || len(out) > 0) {
+		for _, step := range spec.SetupSteps {
+			add(step)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// looksLikeAuthFailure stderr 是否呈鉴权失败特征（保守匹配关键词，避免把普通报错误判成鉴权问题）。
+func looksLikeAuthFailure(lines []string) bool {
+	keywords := []string{"401", "403", "unauthorized", "authentication", "api key", "api_key", "invalid_api_key"}
+	for _, l := range lines {
+		t := strings.ToLower(l)
+		for _, k := range keywords {
+			if strings.Contains(t, k) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // LiveClient 返回某 runtime 当前连接（未断开时）；pid 为子进程号（0 = 未登记）。

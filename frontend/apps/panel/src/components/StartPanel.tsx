@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { modelValues } from '@ark/types'
 import { useForge } from '../store'
+import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
-import { ModelPickerModal } from './ModelPickerModal'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
 // 新建会话时记住的「上次所选模型」。
@@ -22,7 +22,8 @@ const EXAMPLES = [
 /**
  * 新建会话面板（hero + 内嵌输入卡 + 示例指令）。
  * 未选中会话时的问答区就是这个面板——不再有独立的「开始问答」空态页，
- * 也不再单独占一条路由（`/conversations` 无 id 即新建）。新建固定用默认 Agent。
+ * 也不再单独占一条路由（`/conversations` 无 id 即新建）。新建固定用「当前 Agent」
+ * （全局默认单例，可在 Agents 页切换——这里只如实标出身份 + 给出切换入口，不在此处做选择器）。
  */
 export function StartPanel() {
   const navigate = useNavigate()
@@ -38,9 +39,8 @@ export function StartPanel() {
     const v = localStorage.getItem(LAST_MODEL_KEY)
     return v && v.trim() ? v : null
   })
-  const [pickerOpen, setPickerOpen] = useState(false)
 
-  // 新建固定用默认 Agent（后端在 agent_id 缺省时落到 dsh），前端无需再传 agent。
+  // 新建固定用「当前 Agent」（后端 agent_id 缺省时取它；缺省回落内置种子 dsh），前端无需再传 agent。
   const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
   const hasAgent = agents.length > 0
   const empty = draft.trim().length === 0
@@ -54,7 +54,7 @@ export function StartPanel() {
     .map((g) => (g.terminal && g.command?.length ? `${g.name}：${g.command.join(' ')}` : g.name))
     .join(' ｜ ')
 
-  // 拉取当前默认 Agent 的模型目录（后端按 agent 从运行时会话/缓存/resume 取样）。
+  // 拉取「当前 Agent」的模型目录（后端按 agent 从运行时会话/缓存/resume 取样）。
   useEffect(() => {
     if (!defaultAgent) return
     void loadModelCatalog(defaultAgent.id)
@@ -107,8 +107,29 @@ export function StartPanel() {
           Hi，今天有什么安排？
         </h1>
 
-        {/* Agent 列表已隐去：新建固定用默认 Agent，不在此展示可选 agent/runtime。 */}
-        {agents.length === 0 && (
+        {/* Agent 列表已隐去：新建固定用「当前 Agent」，不在此展示可选 agent 选项卡。
+            但「现在用的是哪个 agent」必须如实标出（否则面板上完全看不出身份），
+            并给出切换入口——切换本身在 Agents 页（这里是新建流程，不做 agent 选择器）。 */}
+        {defaultAgent ? (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              marginTop: -8,
+            }}
+          >
+            <AgentBadge agent={defaultAgent} prefix="当前 Agent" />
+            <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
+              新建会话使用当前 Agent（会话与 Agent 一对一绑定）·
+            </span>
+            <Link to="/agents" style={{ fontSize: 11.5, color: tokens.primary, textDecoration: 'none' }}>
+              切换 Agent
+            </Link>
+          </div>
+        ) : (
           <div style={{ color: tokens.textPlaceholder, fontSize: 12.5 }}>暂无可用 Agent（服务不可达或未播种）</div>
         )}
 
@@ -167,16 +188,30 @@ export function StartPanel() {
           />
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            {/* 左栏必须可裁剪：窄容器下压到很窄时，nowrap 文案要省略号收起，
+                而不是溢出到右栏下面被选择器白底盖住（那会渲染成「文字重影」）。 */}
             <span
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'flex-start',
                 gap: 1,
+                flex: '1 1 auto',
                 minWidth: 0,
+                overflow: 'hidden',
               }}
             >
-              <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5, color: tokens.textSecondary, whiteSpace: 'nowrap' }}>
+              <span
+                style={{
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  fontFamily: tokens.fontMono,
+                  fontSize: 11.5,
+                  color: tokens.textSecondary,
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 在项目中工作
               </span>
               <button
@@ -184,41 +219,25 @@ export function StartPanel() {
                 title="点击切换发送键：Enter 发送 / Enter 换行"
                 onClick={() => setSendMode((m) => toggleSendKey(m))}
                 className="fg-hint-kbd"
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  padding: 0,
-                  margin: 0,
-                  cursor: 'pointer',
-                  fontFamily: tokens.fontMono,
-                  fontSize: 10.5,
-                  color: tokens.textPlaceholder,
-                }}
+                style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}
               >
                 {sendKeyHint(sendMode)} ⇄
               </button>
             </span>
 
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {/* 会话级模型选择器：值取自运行时会话配置项，创建时经 set_config_option 应用。 */}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              {/* 会话级模型选择器：关闭态只显示名称；候选、描述与空目录提示都在下拉里
+                  （下拉即「浏览全部」，不再单独开弹窗）。创建时经 set_config_option 应用。
+                  宽度由 .fg-model-pill 管（静息贴合文案、聚焦展开），这里不再固定 240px。 */}
               <ModelSelect
                 values={modelOptions}
                 value={model}
                 onChange={(v) => setModel(v)}
                 allowClear
                 size="small"
-                style={{ minWidth: 180 }}
                 placeholder={modelOptions.length === 0 ? '运行时无可用模型' : '模型 · 跟随默认'}
+                emptyNote={[catalogNote, authHint].filter(Boolean).join(' ｜ ') || '运行时未提供模型目录'}
               />
-
-              <Button
-                size="small"
-                type="text"
-                onClick={() => setPickerOpen(true)}
-                style={{ color: tokens.textSecondary }}
-              >
-                浏览全部
-              </Button>
 
               <Button
                 type="primary"
@@ -227,7 +246,7 @@ export function StartPanel() {
                 disabled={!canSend}
                 loading={sending}
                 onClick={() => void send()}
-                style={{ width: 38, height: 38, boxSizing: 'border-box' }}
+                style={{ width: 38, height: 38, boxSizing: 'border-box', flex: 'none' }}
               />
             </span>
           </div>
@@ -260,15 +279,6 @@ export function StartPanel() {
           ))}
         </div>
       </div>
-
-      <ModelPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        values={modelOptions}
-        value={model}
-        emptyHint={[catalogNote, authHint].filter(Boolean).join(' ｜ ') || '运行时未提供模型目录'}
-        onSelect={(v) => setModel(v)}
-      />
     </div>
   )
 }

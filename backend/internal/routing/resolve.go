@@ -24,6 +24,16 @@ func Installed(spec runtime.Spec) bool {
 		return strings.TrimSpace(spec.Launch.Endpoint) != ""
 	}
 	cmd := spec.Launch.Command
+	return CommandExecutable(cmd)
+}
+
+// CommandExecutable 报告某启动命令当前可执行：
+//   - 含路径分隔符 → 直接 stat（如 forge acp-demo 的自派生可执行文件、绝对路径）；
+//   - 否则按 PATH 查找（opencode/dsh 等须在 PATH 中的 CLI）。
+//
+// 与 Installed 同源；诊断面（/agents/:id/diagnostics 的 remediation）用它区分
+// 「runtime 未注册」与「已注册但启动命令不可执行」两种不同的修复动作。
+func CommandExecutable(cmd string) bool {
 	if cmd == "" {
 		return false
 	}

@@ -156,6 +156,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 	for _, want := range []string{
 		"GET /v1/forge/health",
 		"GET /v1/forge/agents",
+		"POST /v1/forge/agents/:id/default",
 		"GET /v1/forge/runtimes",
 		"GET /v1/forge/conversations",
 		"POST /v1/forge/conversations",

@@ -122,6 +122,15 @@ func (c *catalogStore) clearRejection(agentID, value string) {
 	}
 }
 
+// drop 清除某 agent 的目录缓存与全部拒绝标记（agent 被删除时调用：内存里不留悬挂条目，
+// 同 id 重建后从零取样而不是回显旧目录）。
+func (c *catalogStore) drop(agentID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, agentID)
+	delete(c.rejected, agentID)
+}
+
 // cloneOptions 深拷贝选项（含每个选项的值切片），避免缓存与调用方共享底层数组。
 func cloneOptions(in []acl.ConfigOption) []acl.ConfigOption {
 	if len(in) == 0 {
@@ -137,8 +146,12 @@ func cloneOptions(in []acl.ConfigOption) []acl.ConfigOption {
 	return out
 }
 
-// DefaultAgentID 返回默认 agent（对外契约：面板未指定 agent 时用它）。
-func (s *Service) DefaultAgentID() string { return defaultAgentID }
+// DefaultAgentID 返回「当前 Agent」id（对外契约：面板未指定 agent 时用它；可切换，见 default_agent.go）。
+func (s *Service) DefaultAgentID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentDefaultLocked()
+}
 
 // ModelCatalog 返回该 agent 的运行时模型目录。
 //

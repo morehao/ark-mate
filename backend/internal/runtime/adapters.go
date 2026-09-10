@@ -32,6 +32,11 @@ func opencodeSpec() Spec {
 		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
 		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
 		Notes:             opencode.Notes,
+		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 /agents/:id/diagnostics 外露为 remediation）。
+		SetupSteps: []string{
+			"安装 opencode CLI（ACP 子命令由它提供），确认 `opencode --version` 可执行且 opencode 在 PATH 中",
+			"在底座内完成 provider 登录，或给该 agent 绑定 provider 档案以注入密钥 env",
+		},
 	}
 }
 
@@ -58,6 +63,11 @@ func deepseekharnessSpec() Spec {
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。
 		Notes: deepseekharness.Notes,
+		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 remediation 外露）。
+		SetupSteps: []string{
+			"安装含 acp profile 模板的 dsh（npm @next 0.1.2-rc.1+；latest 0.1.1-rc.2 缺该模板），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
+			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
+		},
 	}
 }
 
@@ -80,5 +90,9 @@ func echoSpec() Spec {
 		McpTransports:     []string{"stdio"}, // 演示底座仅 stdio
 		ManagesOwnContext: true,              // §6.2：后端自管上下文/工具
 		Notes:             echo.Notes,
+		// SetupSteps 演示底座随 forge 内置：没有可安装步骤（便于自证「命令不可执行」类问题与它无关）。
+		SetupSteps: []string{
+			"echo 是进程内自包含演示底座（以当前 forge 可执行文件的 acp-demo 子命令启动），无需安装与密钥",
+		},
 	}
 }

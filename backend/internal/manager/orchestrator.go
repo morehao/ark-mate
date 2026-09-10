@@ -564,7 +564,12 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	}
 	agent, ok := o.svc.AgentByID(rec.AgentID)
 	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", rec.AgentID), nil)
+		// agent 已被删除/未注册（归属不可变：平台不自动改绑到别的 agent，也不静默换权限面），
+		// 但错误必须给出路——同一个 id 重新注册即可复活绑定（会话记的是 agent id），
+		// 或导出历史另开新会话。
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found",
+			fmt.Sprintf("会话 %q 绑定的 agent %q 已不存在：用同一个 id 重新注册该 agent 后可继续，或导出本会话历史另开新会话",
+				conversationID, rec.AgentID), nil)
 	}
 	// runtime 选择：会话原 runtime 未注册 / agent 现路由首选已迁移（跨 runtime 续聊，§18 F3）
 	// → 取 agent 现路由 runtime；否则沿用 rec.RuntimeHint。
@@ -745,6 +750,12 @@ func connKey(runtimeID string, envs ...[]string) string {
 
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
 func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec) (*runtimeConn, error) {
+	// 凭据面先校验（P2）：agent 绑定了 provider 档案而档案缺失/无 key 属配置错误 → 显式
+	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 acquire 内可一处
+	// 覆盖三条入口：新建会话、按需恢复、StartAgent 暖启动。
+	if err := o.svc.CredentialProblem(agent); err != nil {
+		return nil, err
+	}
 	// B5 原生权限映射：把 agent 的 permission_policy 投影为底座原生权限开关
 	// （dsh: DSH_PERMISSION_MODE；opencode: OPENCODE_CONFIG_CONTENT 的 permission 表）。
 	// 先算 env 再定缓存键——权限开关是进程级，配置不同的 agent 不能复用同一子进程。
@@ -861,6 +872,7 @@ func (o *Orchestrator) busyConversationForClient(client *acl.Client) string {
 //   - 运行时未广告模型项（echo / 未配置 provider 的 opencode）→ model_not_supported；
 //   - 运行时拒绝该取值（协议要求值必须来自广告列表）→ 原样上抛并记入「不可用」反馈；
 //   - 成功 → 用返回的全量状态刷新平台目录缓存。
+//
 // model.Model 为空 = 不下发设置（跟随运行时默认），永远成功。
 // 思考档位不在平台侧下发（见 runtime.ModelConfig 说明）。
 func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveConversation,
@@ -954,6 +966,59 @@ func (o *Orchestrator) unregisterConversationProvider(conversationID string) {
 			delete(o.byProvider, k)
 		}
 	}
+}
+
+// DetachAgent 摘除某 agent 的全部活跃会话（agent 被删除时由 Service.DeleteAgent 调用）。
+//
+// 语义（P2 删除面）：归属不可变——平台不改写会话的 agent_id，也不静默改绑到别的 agent；
+// 但删除必须**立刻**生效：把内存里仍活着的会话摘出登记，使后续 prompt 走
+// ensureConversation → agent_not_found（并带上「同 id 重建 / 导出历史」的出路），而不是让它在
+// 半死连接上一直跑到进程重启。
+//
+// 有在途 turn 时整体拒绝（agent_busy，先 cancel/等收尾）：不删到一半的轮次，此时不动任何登记。
+// 返回被摘除的会话数；底层 ACP 会话不在此关闭（连接可能被同 runtime 的其他 agent 复用，
+// 会话生命周期归底座自身与空闲回收）。
+func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
+	if agentID == "" {
+		return 0, nil
+	}
+	o.mu.Lock()
+	victims := make([]*ActiveConversation, 0, 4)
+	for _, as := range o.conversations {
+		if as.AgentID == agentID {
+			victims = append(victims, as)
+		}
+	}
+	o.mu.Unlock()
+	if len(victims) == 0 {
+		return 0, nil
+	}
+	// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
+	for _, as := range victims {
+		as.mu.Lock()
+		busy := as.busy || as.turn != nil
+		as.mu.Unlock()
+		if busy {
+			return 0, acl.NewError(acl.ClassRequest, "agent_busy",
+				fmt.Sprintf("agent %q 的会话 %q 有在途 turn，先取消/等待收尾再删除", agentID, as.ID), nil)
+		}
+	}
+	o.mu.Lock()
+	detached := 0
+	for _, as := range victims {
+		if o.conversations[as.ID] == as {
+			delete(o.conversations, as.ID)
+			detached++
+		}
+	}
+	o.mu.Unlock()
+	for _, as := range victims {
+		// 原生 → 平台映射一并清除：迟到事件不再路由回已摘除的会话。
+		o.unregisterConversationProvider(as.ID)
+	}
+	o.logger.Info("agent 已删除：活跃会话已摘除（后续 prompt 报 agent_not_found）",
+		"agent", agentID, "detached", detached)
+	return detached, nil
 }
 
 // watchConn 监听连接断开：清理注册、失活其上会话、标记 agent stopped。

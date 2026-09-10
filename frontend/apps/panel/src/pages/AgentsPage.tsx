@@ -1,8 +1,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AutoComplete, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
-import { PlusOutlined, ReloadOutlined, StopOutlined, PlayCircleOutlined, MedicineBoxOutlined } from '@ant-design/icons'
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  StopOutlined,
+  PlayCircleOutlined,
+  MedicineBoxOutlined,
+  SwapOutlined,
+} from '@ant-design/icons'
 import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
-import { agentDiagnostics, createAgent, deleteAgent, listProviders, patchAgent, startAgent, stopAgent, upsertProvider, toErrorMessage } from '@ark/api'
+import {
+  agentDiagnostics,
+  createAgent,
+  deleteAgent,
+  listProviders,
+  patchAgent,
+  setDefaultAgent,
+  startAgent,
+  stopAgent,
+  upsertProvider,
+  toErrorMessage,
+} from '@ark/api'
 import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
 import { useForge } from '../store'
 import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
@@ -54,6 +72,8 @@ export function AgentsPage() {
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 切换「当前 Agent」的在途标记（与启停各自独立，避免互相盖住 loading）。
+  const [busyDefaultId, setBusyDefaultId] = useState<string | null>(null)
   const [agentModal, setAgentModal] = useState<{ mode: 'create' } | { mode: 'edit'; agent: Agent } | null>(null)
   const [providerModal, setProviderModal] = useState<{ id: string; existing: Provider | null } | null>(null)
   // A3 诊断抽屉：{ agentId, data | null（加载中）, err }
@@ -97,6 +117,32 @@ export function AgentsPage() {
       await guard(startAgent(a.id))
     }
     setBusyId(null)
+    afterMutate()
+  }
+
+  // 切换「当前 Agent」：全局默认单例（新建会话/模型目录缺省取它）；服务端落盘、重启保持。
+  const onSetDefault = async (a: Agent): Promise<void> => {
+    if (a.is_default) return
+    setBusyDefaultId(a.id)
+    const ok = await guard(setDefaultAgent(a.id))
+    setBusyDefaultId(null)
+    if (ok === undefined) return
+    showToast(`已切换当前 Agent：${ok.name || ok.id}（新建会话将使用它）`)
+    afterMutate()
+  }
+
+  // 删除自定义 agent：回执带影响面（绑定会话数 / 作废的活跃会话数 / 是否当前 Agent），
+  // 如实转述给用户——归属不可变，被删 agent 的会话不会自动改绑，需要用户自己决定后续。
+  const onDelete = async (a: Agent): Promise<void> => {
+    const resp = await guard(deleteAgent(a.id))
+    if (resp === undefined) return
+    const parts = [`已删除 ${resp.deleted}`]
+    if (resp.affected_conversations > 0) {
+      parts.push(`${resp.affected_conversations} 条会话失去执行者（历史仍可读；用同一 id 重新注册可复活绑定）`)
+    }
+    if (resp.detached_conversations > 0) parts.push(`${resp.detached_conversations} 条活跃会话已作废`)
+    if (resp.was_default) parts.push('「当前 Agent」已回落内置默认')
+    showToast(parts.join('；'))
     afterMutate()
   }
 
@@ -192,7 +238,7 @@ export function AgentsPage() {
   return (
     <PageContainer
       title="Agents"
-      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新。下方 provider 档案供密钥注入（只写不读回）。"
+      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新 + 切换「当前 Agent」（新建会话与模型目录缺省都用它，选择落 definitions 目录 default.json）。下方 provider 档案供密钥注入（只写不读回）。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => { void refreshAgents(); void loadProviders() }}>
@@ -225,7 +271,13 @@ export function AgentsPage() {
           >
             <Dot color={st.color} size={7} />
             <b style={{ fontSize: 13.5, fontWeight: 600 }}>{a.name}</b>
-            {a.is_default && <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>默认</Tag>}
+            {a.is_default && (
+              <Tooltip title="当前 Agent：新建会话与模型目录缺省都用它">
+                <Tag color="blue" style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                  当前
+                </Tag>
+              </Tooltip>
+            )}
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
             <Tooltip
               title={
@@ -258,6 +310,11 @@ export function AgentsPage() {
               <span style={{ color: st.color }}>{st.label}</span>
               {seed && <span style={{ color: tokens.textPlaceholder }}>（种子）</span>}
             </span>
+            {(a.conversation_count ?? 0) > 0 && (
+              <Tooltip title="绑定该 agent 的会话数（含归档）：删除后历史仍可读，但无法继续提问">
+                <span style={{ color: tokens.textPlaceholder, fontSize: 12 }}>{a.conversation_count} 会话</span>
+              </Tooltip>
+            )}
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5, color: tokens.textSecondary }}>{a.id}</span>
               <Button
@@ -269,6 +326,18 @@ export function AgentsPage() {
               >
                 {a.state === 'running' ? '停止' : '启动'}
               </Button>
+              {!a.is_default && (
+                <Tooltip title="切换为当前 Agent：新建会话与模型目录缺省都用它（可随时切回）">
+                  <Button
+                    size="small"
+                    loading={busyDefaultId === a.id}
+                    icon={<SwapOutlined />}
+                    onClick={() => void onSetDefault(a)}
+                  >
+                    设为当前
+                  </Button>
+                </Tooltip>
+              )}
               <Button size="small" icon={<MedicineBoxOutlined />} onClick={() => void openDiagnostics(a)}>
                 诊断
               </Button>
@@ -278,12 +347,21 @@ export function AgentsPage() {
               {!seed && (
                 <Popconfirm
                   title={`删除 ${a.name}？`}
-                  description="仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。"
+                  description={
+                    <div style={{ maxWidth: 320 }}>
+                      仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。
+                      {(a.conversation_count ?? 0) > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          有 {a.conversation_count} 条会话绑定它：删除后历史仍可读，但**无法继续提问**
+                          （用同一 id 重新注册可复活绑定）。
+                        </div>
+                      )}
+                      {a.is_default && <div style={{ marginTop: 4 }}>它当前是「当前 Agent」，删除后回落内置默认。</div>}
+                    </div>
+                  }
                   okText="删除"
                   okButtonProps={{ danger: true }}
-                  onConfirm={async () => {
-                    if ((await guard(deleteAgent(a.id))) !== undefined) afterMutate()
-                  }}
+                  onConfirm={() => void onDelete(a)}
                 >
                   <Button size="small" danger>
                     删除
@@ -367,6 +445,25 @@ export function AgentsPage() {
             {diag.data.command && (
               <div style={{ color: tokens.textSecondary }}>
                 启动命令：<code>{diag.data.command}</code>
+              </div>
+            )}
+            {diag.data.remediation && diag.data.remediation.length > 0 && (
+              <div
+                style={{
+                  border: `1px solid ${tokens.warningBorder}`,
+                  borderRadius: 10,
+                  padding: '8px 12px',
+                  background: tokens.warningBg,
+                }}
+              >
+                <div style={{ fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textPlaceholder, marginBottom: 4 }}>
+                  建议处理步骤（按当前事实推导：命令不可执行 / 档案缺失 / 底座安装与登录）
+                </div>
+                <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+                  {diag.data.remediation.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
               </div>
             )}
             {diag.data.last_error && (

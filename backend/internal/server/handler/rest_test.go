@@ -172,12 +172,19 @@ func (s *stubSvc) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 	}
 	return &handler.AgentResp{ID: id, State: "stopped"}, nil
 }
-func (s *stubSvc) DeleteAgent(_ context.Context, id string) error {
+func (s *stubSvc) SetDefaultAgent(_ context.Context, id string) (*handler.AgentResp, error) {
 	if s.agentErr != nil {
-		return s.agentErr
+		return nil, s.agentErr
+	}
+	s.agentAction = "default:" + id
+	return &handler.AgentResp{ID: id, State: "stopped", IsDefault: true}, nil
+}
+func (s *stubSvc) DeleteAgent(_ context.Context, id string) (*handler.AgentDeleteResp, error) {
+	if s.agentErr != nil {
+		return nil, s.agentErr
 	}
 	s.agentAction = "delete:" + id
-	return nil
+	return &handler.AgentDeleteResp{Deleted: id, AffectedConversations: 2, DetachedConversations: 1, WasDefault: true}, nil
 }
 func (s *stubSvc) StartAgent(_ context.Context, id string) error {
 	if s.agentErr != nil {
@@ -470,6 +477,7 @@ func newRestEngine(svc handler.Service) *gin.Engine {
 	g.DELETE("/agents/:id", h.Agent.Delete)
 	g.POST("/agents/:id/start", h.Agent.Start)
 	g.POST("/agents/:id/stop", h.Agent.Stop)
+	g.POST("/agents/:id/default", h.Agent.SetDefault)
 	g.GET("/conversations", h.Conversation.List)
 	g.POST("/conversations", h.Conversation.Create)
 	g.GET("/conversations/:id", h.Conversation.Get)
@@ -934,9 +942,24 @@ func TestAgentManagementRoutes(t *testing.T) {
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
 	}
+	// 切换「当前 Agent」：路径参数透传到服务并回带 is_default 表示。
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/default", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-echo" {
+		t.Fatalf("set default 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+	var def handler.AgentResp
+	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-echo" || !def.IsDefault {
+		t.Fatalf("set default 载荷不符: %s", env.Data)
+	}
 	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-echo", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-echo" {
 		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
+	}
+	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
+	var del handler.AgentDeleteResp
+	if err := json.Unmarshal(env.Data, &del); err != nil ||
+		del.Deleted != "alias-echo" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
+		t.Fatalf("delete 载荷不符: %s", env.Data)
 	}
 }
 

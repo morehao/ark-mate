@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
 import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
-import { Pill } from '@ark/ui'
 import { Ev } from '@ark/types'
 import { conversationHistory, conversationRuns } from '@ark/api'
 import { useForge } from '../store'
+import { AgentBadge } from '../components/AgentBadge'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
@@ -317,11 +317,33 @@ export function ChatPage() {
               color: tokens.textSecondary,
             }}
           >
-            <Pill maxWidth={180}>{agent ? agent.name : agentNameOf(agents, activeSum?.agent_id)}</Pill>
+            {/* 会话与 Agent 一对一绑定：这里如实标出当前用的是哪个 Agent
+                （状态点 + 名称 + 默认标记，详情看 hover 浮层）。 */}
+            <AgentBadge
+              agent={agent}
+              agentId={activeSum?.agent_id}
+              fallbackName={agentNameOf(agents, activeSum?.agent_id)}
+            />
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>
           </div>
+          {/* 绑定 agent 已不存在（被删除/未注册）：如实说明，并给出出路（归属不可变 → 平台不会自动改绑）。 */}
+          {activeSum?.agent_id && agents.length > 0 && !agent && (
+            <div
+              style={{
+                marginTop: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11.5,
+                color: tokens.warning,
+              }}
+            >
+              <InfoCircleOutlined />
+              该会话的 Agent「{activeSum.agent_id}」已不存在（历史仍可读，无法继续提问）：用同一 id 在 Agents 页重新注册即可继续，或导出历史另开新会话。
+            </div>
+          )}
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flex: 'none' }}>
           <Dropdown menu={headMenu} trigger={['click']} placement="bottomRight">
