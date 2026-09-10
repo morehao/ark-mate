@@ -12,7 +12,7 @@ import (
 
 // cfgCat/cfgStr 测试小工具（构造 SDK 指针字段）。
 func cfgCat(c acpsdk.SessionConfigOptionCategory) *acpsdk.SessionConfigOptionCategory { return &c }
-func cfgStr(s string) *string                                                          { return &s }
+func cfgStr(s string) *string                                                         { return &s }
 
 // modelOptionGrouped 构造 dsh 形态：分组的下拉，值为不透明串（JSON.stringify([provider,model])）。
 func modelOptionGrouped(current string) acpsdk.SessionConfigOption {

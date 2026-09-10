@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/golib/gerror"
 )
 

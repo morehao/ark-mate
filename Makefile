@@ -6,7 +6,7 @@
 #   frontend/  —— 独立 pnpm workspace（apps/panel），产物可单独部署
 #
 # 交付形态：
-#   make all   —— 单二进制：前端产物拷入 backend/internal/web/dist 后，
+#   make all   —— 单二进制：前端产物拷入 backend/pkg/web/dist 后，
 #                 以 -tags release 编译（启用 //go:embed），输出根目录 ./forge
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
@@ -16,7 +16,7 @@
 .PHONY: dev web server build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
-WEB_DIST_DIR  := backend/internal/web/dist
+WEB_DIST_DIR  := backend/pkg/web/dist
 
 # —— 前端工具链（Node / pnpm）——
 # 唯一事实源在 frontend/ 内：Node 版本 = frontend/.nvmrc，pnpm 版本 = frontend/package.json 的
@@ -36,7 +36,7 @@ define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
 endef
 
-# 前端产物 → embed 宿主（backend/internal/web/dist，不入库）
+# 前端产物 → embed 宿主（backend/pkg/web/dist，不入库）
 web:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm build

@@ -35,4 +35,3 @@ func (h *ProviderHandler) Update(c *gin.Context) {
 	}
 	gincontext.Success(c, resp)
 }
-

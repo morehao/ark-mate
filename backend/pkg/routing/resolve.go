@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/runtime"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // Installed 报告 runtime 启动命令当前可执行：

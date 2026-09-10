@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。

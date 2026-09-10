@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
@@ -41,18 +41,18 @@ const (
 
 // UsageBucket 一行聚合结果（group_by=agent → Key=agent_id；=day → Key=YYYY-MM-DD，AgentID 空）。
 type UsageBucket struct {
-	Key           string  `json:"key"`
-	AgentID       string  `json:"agent_id,omitempty"`
-	Runs          int     `json:"runs"`
-	Completed     int     `json:"completed"`
-	Failed        int     `json:"failed"`
-	Cancelled     int     `json:"cancelled"`
-	Running       int     `json:"running"`
-	Conversations int     `json:"conversations"`
-	DurationMS    int64   `json:"duration_ms"`
-	ContextUsed   int64   `json:"context_used"`
-	ContextSize   int64   `json:"context_size"`
-	UsageReported int     `json:"usage_reported"`
+	Key           string `json:"key"`
+	AgentID       string `json:"agent_id,omitempty"`
+	Runs          int    `json:"runs"`
+	Completed     int    `json:"completed"`
+	Failed        int    `json:"failed"`
+	Cancelled     int    `json:"cancelled"`
+	Running       int    `json:"running"`
+	Conversations int    `json:"conversations"`
+	DurationMS    int64  `json:"duration_ms"`
+	ContextUsed   int64  `json:"context_used"`
+	ContextSize   int64  `json:"context_size"`
+	UsageReported int    `json:"usage_reported"`
 	// CostReported 上报过费用的会话数（与 UsageReported 分开：二者上报率不同）。
 	CostReported int     `json:"cost_reported"`
 	CostAmount   float64 `json:"cost_amount"`

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -354,7 +354,7 @@ func TestHandoffMemoBudget(t *testing.T) {
 }
 
 // TestConnKeyModelScoping 连接缓存键：provider 密钥 env 与进程级模型 env 都影响共享键
-//（B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
+// （B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
 func TestConnKeyModelScoping(t *testing.T) {
 	native := []string{"DSH_PERMISSION_MODE=default"}
 	keyE := []string{"OPENAI_API_KEY=sk-x"}

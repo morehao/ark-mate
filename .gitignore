@@ -13,7 +13,7 @@ backend/cmd/forge/forge
 go.work.sum
 
 # Go: 前端产物 embed 宿主副本（真源在 frontend/，make web 刷新）
-backend/internal/web/dist/
+backend/pkg/web/dist/
 
 # Node / Web (frontend monorepo)
 frontend/node_modules/

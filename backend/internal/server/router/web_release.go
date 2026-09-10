@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/web"
+	"github.com/morehao/ark-forge/pkg/web"
 )
 
 // MountWeb release 构建：把内嵌前端产物（web.Dist）以 SPA 方式挂到根路径。

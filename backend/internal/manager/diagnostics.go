@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/routing"
-	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/routing"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // maxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。

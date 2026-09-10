@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // Mode 平台统一权限模式（§5.5 词汇）。opencode/dsh 的原生 mode 映射见 §6.2 ModeMapping

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestSQLiteLivePersistenceAcrossRestart 验证 P1 live 接线核心不变量：

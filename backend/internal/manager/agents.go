@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— Agent Registry（P2）：definitions 目录 + 注册/编辑/删除/启停 ———

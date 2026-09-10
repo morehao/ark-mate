@@ -9,7 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 )
 
 // WSHandler 是实时事件通道（WS）的协议薄适配层（M0 基本版，无鉴权）：

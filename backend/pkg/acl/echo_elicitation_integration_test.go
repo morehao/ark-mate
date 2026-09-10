@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime/echo"
+	"github.com/morehao/ark-forge/pkg/runtime/echo"
 )
 
 // TestEchoAgentElicitationSingleAccept 端到端验证 elicitation 单选表单通道：

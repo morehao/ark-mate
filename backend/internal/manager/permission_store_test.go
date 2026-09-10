@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestPermissionMemoriesPersistAcrossRestart 验证 P1 权限记忆持久化不变量：

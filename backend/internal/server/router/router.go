@@ -35,9 +35,11 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20
 
-	groups := ginserver.NewRouterGroups(r, AppName, ginserver.VersionGroup{
+	// golib v1.32.14 起 versions 由可变参数改为切片，并默认挂载 ginmiddleware.Trace()
+	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）。
+	groups := ginserver.NewRouterGroups(r, AppName, []ginserver.VersionGroup{{
 		Version: ginserver.ApiVersionV1,
-	})
+	}})
 	v1 := groups.MustGetGroup(ginserver.ApiVersionV1)
 
 	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）；

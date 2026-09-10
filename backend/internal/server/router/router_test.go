@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/infra/config"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/server/router"
+	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // newEngine 走真实装配路径：manager.Service + router.New（含 /v1/forge 分组与默认中间件）。

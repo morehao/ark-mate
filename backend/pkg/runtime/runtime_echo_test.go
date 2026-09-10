@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	echort "github.com/morehao/ark-forge/internal/runtime/echo"
+	"github.com/morehao/ark-forge/pkg/acl"
+	echort "github.com/morehao/ark-forge/pkg/runtime/echo"
 )
 
 // inProcEchoTransport 把 echo.Serve（进程内演示底座）接到 acl.Transport 协议面

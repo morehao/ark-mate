@@ -1,9 +1,9 @@
 package runtime
 
 import (
-	"github.com/morehao/ark-forge/internal/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/internal/runtime/echo"
-	"github.com/morehao/ark-forge/internal/runtime/opencode"
+	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-forge/pkg/runtime/echo"
+	"github.com/morehao/ark-forge/pkg/runtime/opencode"
 )
 
 // opencodeSpec 汇入 opencode adapter 的启动/能力描述。

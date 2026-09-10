@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestMessagesMaterializedAtTurnEnd 验证 turn 收口 messages 物化：

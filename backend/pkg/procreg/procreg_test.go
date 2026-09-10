@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/infra/procreg"
+	"github.com/morehao/ark-forge/pkg/procreg"
 )
 
 // spawnGroup 拉起一个独立进程组的长驻子进程（模拟 runtime 子进程）。

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— Provider 注入面（P2）：档案只写不读回 + 启动 env 注入 ———

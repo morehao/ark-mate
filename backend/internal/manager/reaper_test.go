@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // testReapHarness 组装编排器 + 空 Service（注册 agent-echo 供状态断言）。

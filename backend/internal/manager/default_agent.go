@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— 当前 Agent（全局默认）切换：<AgentDir>/default.json ———

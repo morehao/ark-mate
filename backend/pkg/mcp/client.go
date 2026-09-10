@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/capability"
+	"github.com/morehao/ark-forge/pkg/capability"
 )
 
 const (

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestRunMaterializationAtTurnEnd 验证 P1 runs 物化不变量：

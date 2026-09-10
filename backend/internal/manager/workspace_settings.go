@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 工作空间白名单的**设置面**：把"哪些目录能被当作工作空间"从"只能改环境变量"变成"面板也能改"。

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— M3 首项：用量统计（GET /usage/summary） ———

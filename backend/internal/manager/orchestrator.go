@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/infra/procreg"
-	"github.com/morehao/ark-forge/internal/runtime"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/procreg"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
@@ -45,10 +45,10 @@ type ActiveConversation struct {
 	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
 	proj runtime.Runtime
 
-	mu      sync.Mutex
-	busy    bool
-	turn    *Turn
-	dead    bool // 连接已断开，本句柄作废（下次 prompt 经 ensureConversation 按需重建）
+	mu   sync.Mutex
+	busy bool
+	turn *Turn
+	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureConversation 按需重建）
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string

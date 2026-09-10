@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // Connect 依投影 Spec 拉起 ACP server 子进程（stdio）并完成 initialize 握手。

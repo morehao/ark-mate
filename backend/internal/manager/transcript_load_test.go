@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // writeTranscriptJSONL 直接落一个合法 transcript 文件（header + 事件行），用于回读测试。

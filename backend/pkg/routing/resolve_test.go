@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestFirstAvailable 首可用路由：候选顺序 + 未注册跳过 + 已注册但命令不可执行跳过；

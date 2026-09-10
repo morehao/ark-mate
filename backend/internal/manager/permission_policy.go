@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— per-agent 默认权限策略（M2 #7 / §4.5 权限位） ———

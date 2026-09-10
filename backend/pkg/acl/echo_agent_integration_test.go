@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime/echo"
+	"github.com/morehao/ark-forge/pkg/runtime/echo"
 )
 
 // TestEchoAgentPermissionRoundTrip 端到端验证 echo 演示底座（权限真实链路演示）：

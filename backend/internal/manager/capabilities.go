@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/capability"
-	"github.com/morehao/ark-forge/internal/mcp"
 	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/mcp"
 )
 
 // ——— 能力数据面（P1，design doc §4.4/§11 P1） ———

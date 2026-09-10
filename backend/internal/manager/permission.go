@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 权限确认通道配置（AionUi F-PERM-01：F5.1 一致性）。

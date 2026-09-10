@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // TestPermissionMemoryBothSides 会话级权限记忆（allow/reject 双侧对称）：
