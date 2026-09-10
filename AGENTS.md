@@ -13,6 +13,7 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 
 - `make dev` 前后端联调（go run serve → 等 :10001 health → vite :5173，Ctrl-C 一起收）；`make server` 仅后端；`make web` 只构建前端并刷新 embed 宿主；`make all` 出单二进制 `./forge`（先 web 再 `go build -tags release`）。
 - `make build/vet/test` = `cd backend && go build|vet|test ./...`。无独立 lint。
+- 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
 - 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（echo 底座在进程内驱动）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。
 
@@ -25,6 +26,7 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 
 - `TestReadmeRoutesMatchRouter`（`internal/server/router/router_test.go`）比对 README 反引号内 `/v1/forge` 路径与真实注册路由——**新增/改名路由必须同步 README 接口摘要**，否则测试红。README 里也不得再出现历史名 `/sessions`。
 - 域事件 type 权威定义在 `backend/internal/manager/events.go`。
+- **连接拆除语义（`manager`，改动前先读 `disconnectConversation` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落 agent 诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureConversation` 按 native resume / handoff memo 重建（ADR-4：执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
 - WS / REST 契约改动优先看 router.go 与 handler，测试多为走真实装配路径（`manager.NewService` + `router.New`）的进程内测试。
 
 ## 前端风格约束（frontend/DESIGN.md）

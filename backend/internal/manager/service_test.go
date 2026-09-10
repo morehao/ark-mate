@@ -139,47 +139,114 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 	}
 }
 
-// TestDisconnectIdleConversation 连接断开时空闲会话 → turn.error(connection_lost) + failed + agent stopped，
-// 且幂等（只发一次）。
+// TestDisconnectIdleConversation 连接**意外**断开 + 会话空闲：不改写上一轮的终态、不伪造
+// turn.error（轮次结果只由轮次写）；只落 agent 级诊断（连接确实断了）并作废句柄（可重建）。
 func TestDisconnectIdleConversation(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
 	as := &ActiveConversation{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
 	rc := &runtimeConn{agentID: "opencode", client: nil}                                // client 亦 nil → 相等匹配
 	orch.conversations["s1"] = as
-	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode", Status: ConversationStatusInProgress})
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode", Status: ConversationStatusCompleted})
+	before := bus.LastSeq()
 
 	orch.dropConn(rc)
 
-	sub := bus.Subscribe(0)
-	defer bus.Unsubscribe(sub)
-	var evs []eventbus.Event
-	timeout := afterShort()
-	for len(evs) < 1 {
-		select {
-		case e := <-sub.C:
-			evs = append(evs, e)
-		case <-timeout:
-			t.Fatalf("未收到 connection_lost 事件")
-		}
+	if got := svc.conversations["s1"].Status; got != ConversationStatusCompleted {
+		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got)
 	}
-	if evs[0].Type != BusTurnError {
-		t.Fatalf("应发布 turn.error，got %s", evs[0].Type)
-	}
-	payload, _ := evs[0].Payload.(map[string]any)
-	if payload["code"] != "connection_lost" || payload["class"] != "connection" {
-		t.Fatalf("错误分类不符: %+v", payload)
-	}
-	if svc.conversations["s1"].Status != ConversationStatusFailed {
-		t.Fatalf("会话应 failed: %s", svc.conversations["s1"].Status)
+	if bus.LastSeq() != before {
+		t.Fatalf("断连不应伪造会话事件（turn.error 等）: last=%d want %d", bus.LastSeq(), before)
 	}
 	if a, _ := svc.AgentByID("opencode"); a.State != AgentStateStopped {
 		t.Fatalf("agent 应 stopped: %s", a.State)
 	}
+	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
+	if _, ok := orch.conversations["s1"]; ok {
+		t.Fatal("断连后死句柄应摘出活跃集合")
+	}
+	if rec := svc.conversationRec("s1"); rec == nil {
+		t.Fatal("平台侧会话记录必须保留（会话归平台所有）")
+	}
+	// agent 诊断仍是连接事实的来源（键为会话绑定的 agent id）。
+	if le, ok := svc.agentLastError("agent-opencode"); !ok || le.Code != "connection_lost" || le.ConversationID != "s1" {
+		t.Fatalf("agent 诊断应记录 connection_lost: %+v", le)
+	}
 
-	// 二次 dropConn：as.dead=true → 幂等不重复发布。
+	// 二次 dropConn：句柄已 dead → 幂等。
 	orch.dropConn(rc)
-	if bus.LastSeq() != evs[0].Seq {
-		t.Fatalf("断连错误不应重复发布: last=%d want %d", bus.LastSeq(), evs[0].Seq)
+	if bus.LastSeq() != before {
+		t.Fatalf("重复断连不应发布事件: last=%d", bus.LastSeq())
+	}
+}
+
+// TestIntentionalTeardownKeepsIdleConversation 主动拆除（daemon 停机 / 显式停 agent）+ 空闲会话：
+// 停机不是故障 —— 状态如实保留、不发 connection_lost（容器 `docker restart` 的每次重启都会走这条）。
+func TestIntentionalTeardownKeepsIdleConversation(t *testing.T) {
+	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
+	as := &ActiveConversation{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"}
+	rc := &runtimeConn{agentID: "opencode", client: nil}
+	rc.intentional.Store(true)
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode", Status: ConversationStatusCompleted})
+	before := bus.LastSeq()
+
+	orch.dropConn(rc)
+
+	if got := svc.conversations["s1"].Status; got != ConversationStatusCompleted {
+		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got)
+	}
+	if bus.LastSeq() != before {
+		t.Fatalf("主动停机不得发布 connection_lost 等事件: last=%d want %d", bus.LastSeq(), before)
+	}
+	if _, ok := orch.conversations["s1"]; ok {
+		t.Fatal("停机后死句柄应摘出活跃集合（下次 prompt 重建）")
+	}
+}
+
+// TestIntentionalTeardownInterruptsInFlightTurn 主动拆除 + 在途 turn：归 interrupted（无终态、
+// 可续聊重发），既不算失败也不算用户取消 —— 不发布 turn.error / run.cancelled。
+func TestIntentionalTeardownInterruptsInFlightTurn(t *testing.T) {
+	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
+	as := &ActiveConversation{
+		ID: "s1", AgentID: "agent-opencode", Runtime: "opencode",
+		sess: &stubConversation{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
+	}
+	rc := &runtimeConn{agentID: "opencode", client: nil}
+	orch.conversations["s1"] = as
+	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
+
+	if _, err := orch.Prompt(context.Background(), "s1", "生成中"); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	before := bus.LastSeq()
+
+	rc.intentional.Store(true)
+	orch.dropConn(rc)
+	// 等 runTurn 收尾（t.cancel 解除阻塞 → 写 interrupted）：轮询平台记录，避免裸读 as.turn。
+	got := ""
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if rec := svc.conversationRec("s1"); rec != nil {
+			if got = rec.Status; got == ConversationStatusInterrupted {
+				break
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got != ConversationStatusInterrupted {
+		t.Fatalf("主动拆除打断的轮次应归 interrupted: %s", got)
+	}
+	// 停机期间只应新增 user_message（Prompt 时发布）；不得有 turn.error / run.cancelled。
+	sub := bus.Subscribe(before)
+	defer bus.Unsubscribe(sub)
+	select {
+	case e := <-sub.C:
+		t.Fatalf("主动拆除不应发布终态事件: %s", e.Type)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, ok := orch.conversations["s1"]; ok {
+		t.Fatal("停机后死句柄应摘出活跃集合")
 	}
 }
 

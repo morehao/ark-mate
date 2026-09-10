@@ -1,0 +1,43 @@
+# Docker 构建上下文瘦身（`docker build .` 会把整个仓库发给 daemon）。
+# 只保留镜像真正需要的东西：backend/（Go module）与 frontend/（workspace 源码 + lockfile）。
+# 不加这个文件时，本机上下文会带上 .cache/（数 GB）、.gocache/、./forge 与 node_modules。
+
+# —— 版本控制 / 编辑器 / OS ——
+.git
+.gitignore
+.github
+.DS_Store
+.idea
+.vscode
+
+# —— 本地构建缓存与产物（真源都不在镜像里）——
+.cache
+.gocache
+/forge
+**/*.test
+**/*.out
+go.work.sum
+
+# —— 前端依赖与产物（镜像内 pnpm install / pnpm build 自产）——
+frontend/node_modules
+frontend/**/node_modules
+frontend/**/dist
+frontend/**/.vite
+frontend/**/*.tsbuildinfo
+
+# —— 后端 embed 宿主（必须由镜像内的前端阶段重新生成，避免把宿主机旧产物嵌进去）——
+backend/internal/web/dist
+
+# —— 环境变量与密钥（绝不进镜像；容器里用 -e / compose 注入）——
+.env
+.env.*
+*.env
+!/.env.example
+
+# —— 文档与本机部署件（与构建无关，纯减体积）——
+AGENTS.md
+README.md
+docs
+LICENSE
+docker-compose.yml
+Dockerfile

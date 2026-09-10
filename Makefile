@@ -11,8 +11,9 @@
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
 #   make server —— 仅后端开发起服（不起前端，面板经 vite dev proxy 联调）
+#   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server build vet test all clean
+.PHONY: dev web server build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/internal/web/dist
@@ -93,3 +94,47 @@ all: web
 
 clean:
 	rm -rf $(FRONTEND_ROOT)/apps/panel/dist $(WEB_DIST_DIR) forge
+
+# —— 容器镜像（Dockerfile 多阶段：前端 → Go 内嵌编译 → 精简运行时）——
+#   make image                                    —— 最小镜像（只含 forge 本体 + echo 自检底座）
+#   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
+#                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
+#   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
+# 受限网络（镜像站 / Go 代理 / npm 镜像）直接覆盖下面的变量，例如：
+#   make image NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
+#              GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
+#              RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
+#              GO_PROXY=https://goproxy.cn,direct
+NODE_IMAGE       ?= node:24-bookworm
+GO_IMAGE         ?= golang:1.26-bookworm
+RUNTIME_IMAGE    ?= debian:bookworm-slim
+NPM_REGISTRY     ?= https://registry.npmjs.org
+GO_PROXY         ?= https://proxy.golang.org,direct
+DSH_VERSION      ?= latest
+OPENCODE_VERSION ?= latest
+IMAGE            ?= ark-forge
+IMAGE_TAG        ?= local
+FORGE_PORT       ?= 10001
+WITH_DSH         ?= false
+WITH_OPENCODE    ?= false
+
+IMAGE_ARGS := --build-arg NODE_IMAGE=$(NODE_IMAGE) --build-arg GO_IMAGE=$(GO_IMAGE) \
+              --build-arg RUNTIME_IMAGE=$(RUNTIME_IMAGE) --build-arg NPM_REGISTRY=$(NPM_REGISTRY) \
+              --build-arg GO_PROXY=$(GO_PROXY) --build-arg DSH_VERSION=$(DSH_VERSION) \
+              --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION)
+
+image:
+	docker build -t $(IMAGE):$(IMAGE_TAG) $(IMAGE_ARGS) .
+
+# 含底座镜像：target 与开关必须一起给（只给开关会被最小镜像的守卫拒绝）
+image/runtimes:
+	docker build -t $(IMAGE):$(IMAGE_TAG)-runtimes --target forge-runtimes $(IMAGE_ARGS) \
+	  --build-arg WITH_DSH=$(WITH_DSH) --build-arg WITH_OPENCODE=$(WITH_OPENCODE) .
+
+image/run:
+	docker run -d --name $(IMAGE)-$(IMAGE_TAG) \
+	  -p 127.0.0.1:$(FORGE_PORT):10001 \
+	  -v $(IMAGE)-$(IMAGE_TAG)-data:/data \
+	  -e FORGE_ADDR=0.0.0.0:10001 -e FORGE_STORE=sqlite \
+	  $(IMAGE):$(IMAGE_TAG)
+	@echo "==> 面板 http://127.0.0.1:$(FORGE_PORT)（健康检查见 docker ps 的 health 列）"
