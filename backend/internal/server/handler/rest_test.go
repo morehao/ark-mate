@@ -24,6 +24,22 @@ type stubSvc struct {
 	listAgentsErr        error
 	listRuntimesErr      error
 	listConversationsErr error
+	listCwd              string // 最近一次 ListConversations 的工作空间过滤参数
+	listArchivedOnly     bool   // 最近一次 ListConversations 的 archived 参数
+
+	browsePath    string // 最近一次 BrowseWorkspace 的 path 参数
+	browseHidden  bool   // 最近一次 BrowseWorkspace 的 hidden 参数
+	filesPath     string // 最近一次 ListWorkspaceFiles 的 path 参数
+	filesHidden   bool   // 最近一次 ListWorkspaceFiles 的 hidden 参数
+	librariesResp []handler.WorkspaceLibraryResp
+	librariesErr  error
+	filesResp     *handler.WorkspaceFilesResp
+	filesErr      error
+	browseResp    *handler.WorkspaceBrowseResp
+	browseErr     error
+	recentLimit   int // 最近一次 RecentWorkspaces 的 limit 参数
+	recentResp    []handler.WorkspaceRecentResp
+	recentErr     error
 
 	diagID   string
 	diagResp *handler.AgentDiagnosticsResp
@@ -313,12 +329,44 @@ func (s *stubSvc) ListRuntimes() ([]handler.RuntimeResp, error) {
 	}
 	return s.runtimes, nil
 }
-func (s *stubSvc) ListConversations(_ bool) ([]handler.ConversationResp, error) {
+func (s *stubSvc) ListConversations(archived bool, cwd string) ([]handler.ConversationResp, error) {
+	s.listArchivedOnly, s.listCwd = archived, cwd
 	if s.listConversationsErr != nil {
 		return nil, s.listConversationsErr
 	}
 	return s.conversations, nil
 }
+func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*handler.WorkspaceBrowseResp, error) {
+	s.browsePath, s.browseHidden = path, includeHidden
+	if s.browseErr != nil {
+		return nil, s.browseErr
+	}
+	return s.browseResp, nil
+}
+
+func (s *stubSvc) RecentWorkspaces(limit int) ([]handler.WorkspaceRecentResp, error) {
+	s.recentLimit = limit
+	if s.recentErr != nil {
+		return nil, s.recentErr
+	}
+	return s.recentResp, nil
+}
+
+func (s *stubSvc) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
+	if s.librariesErr != nil {
+		return nil, s.librariesErr
+	}
+	return s.librariesResp, nil
+}
+
+func (s *stubSvc) ListWorkspaceFiles(path string, includeHidden bool) (*handler.WorkspaceFilesResp, error) {
+	s.filesPath, s.filesHidden = path, includeHidden
+	if s.filesErr != nil {
+		return nil, s.filesErr
+	}
+	return s.filesResp, nil
+}
+
 func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]handler.ConversationSearchHit, error) {
 	return nil, nil
 }
@@ -572,6 +620,46 @@ func TestListEndpoints(t *testing.T) {
 	var sess []handler.ConversationResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
 		t.Fatalf("conversations data 不符: %s", env.Data)
+	}
+}
+
+// TestListConversationsWorkspaceQuery GET /conversations 的 `cwd` 过滤：
+// 绝对路径透传给 service（含 workspace_temporary 回读），相对路径属参数错误直接 40000。
+func TestListConversationsWorkspaceQuery(t *testing.T) {
+	svc := &stubSvc{conversations: []handler.ConversationResp{{
+		ID: "c-1", AgentID: "agent-opencode", Status: "completed",
+		Cwd: "/work/alpha", WorkspaceTemporary: true,
+	}}}
+	r := newRestEngine(svc)
+
+	env, code := do(t, r, "GET", "/v1/forge/conversations?cwd=/work/alpha", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d env=%+v", code, env)
+	}
+	if svc.listCwd != "/work/alpha" || svc.listArchivedOnly {
+		t.Fatalf("cwd 未透传: cwd=%q archived=%v", svc.listCwd, svc.listArchivedOnly)
+	}
+	var list []handler.ConversationResp
+	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 1 {
+		t.Fatalf("conversations data 不符: %s", env.Data)
+	}
+	if list[0].Cwd != "/work/alpha" || !list[0].WorkspaceTemporary {
+		t.Fatalf("工作空间字段未回读: %+v", list[0])
+	}
+
+	// 未指定 cwd → 不过滤（空串透传）。
+	svc.listCwd = "sentinel"
+	if _, code := do(t, r, "GET", "/v1/forge/conversations", ""); code != 200 {
+		t.Fatalf("无 cwd 应 200，got %d", code)
+	}
+	if svc.listCwd != "" {
+		t.Fatalf("无 cwd 时应透传空串，got %q", svc.listCwd)
+	}
+
+	// 相对路径 → 40000（在 handler 层拦截，不进入 service）。
+	env, _ = do(t, r, "GET", "/v1/forge/conversations?cwd=relative/dir", "")
+	if env.Code != 40000 {
+		t.Fatalf("相对 cwd 应 40000，got %+v", env)
 	}
 }
 

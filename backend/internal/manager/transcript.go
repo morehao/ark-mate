@@ -36,7 +36,10 @@ type wireTranscriptHeader struct {
 	AgentID   string `json:"agent_id"`
 	Runtime   string `json:"runtime"`
 	Cwd       string `json:"cwd,omitempty"`
-	CreatedAt string `json:"created_at"`
+	// WorkspaceTemporary 该工作空间是否由平台代建。**memory 模式以 transcript 为事实源**，
+	// 因此这个权威标志必须落 header；旧文件缺该字段 → 零值 false（历史会话视为非临时，语义正确）。
+	WorkspaceTemporary bool   `json:"workspace_temporary,omitempty"`
+	CreatedAt          string `json:"created_at"`
 }
 
 // wireTranscriptLine 事件原语行。
@@ -68,7 +71,7 @@ func newTranscriptRecorder(dir string) *transcriptRecorder {
 }
 
 // begin 为会话创建/打开 JSONL 并写 header（幂等：已开则忽略）。
-func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd string) {
+func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
 	if r == nil || r.dir == "" || conversationID == "" {
 		return
 	}
@@ -89,13 +92,14 @@ func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd strin
 		return
 	}
 	h := wireTranscriptHeader{
-		Schema:    wireTranscriptSchema,
-		Version:   1,
-		SessionID: conversationID,
-		AgentID:   agentID,
-		Runtime:   runtimeID,
-		Cwd:       cwd,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Schema:             wireTranscriptSchema,
+		Version:            1,
+		SessionID:          conversationID,
+		AgentID:            agentID,
+		Runtime:            runtimeID,
+		Cwd:                cwd,
+		WorkspaceTemporary: workspaceTemporary,
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	// 仅在文件为空（新会话）时写 header：重启后 resume 同一会话时 O_APPEND 打开的是已有文件，
 	// 不重写 header，保持「首行=header」不变式（loadTranscripts 依赖它）。

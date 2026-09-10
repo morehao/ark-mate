@@ -60,6 +60,13 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	// P2 §8.1 统一能力目录：某 Agent 可见的 skill/MCP/tool（按候选 runtime 聚合，只读）。
 	v1.GET("/agents/:id/capabilities", h.Capability.AgentCapabilities)
 	v1.GET("/conversations", h.Conversation.List)
+	// 工作空间只读面：Web 无原生目录选择器 → 控制面提供目录枚举与"最近使用"（从会话派生）。
+	// libraries = 根下的一级子目录（选名字）；browse = 选工作空间（只列目录）；
+	// files = 看资料内容（列文件，条目不可当 cwd）。
+	v1.GET("/workspaces/libraries", h.Workspace.Libraries)
+	v1.GET("/workspaces/browse", h.Workspace.Browse)
+	v1.GET("/workspaces/files", h.Workspace.Files)
+	v1.GET("/workspaces/recent", h.Workspace.Recent)
 	v1.GET("/conversations/search", h.Conversation.Search)
 	// M3 ②：跨会话消息级检索（锚点 = seq）与批量导出（markdown|text|json）。
 	v1.GET("/search/messages", h.Search.Messages)

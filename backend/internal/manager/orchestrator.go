@@ -133,6 +133,23 @@ type RunOptions struct {
 	ConfigPath string   // 自定义 adapter 的 {config} 占位替换（内置 runtime 无占位，预留扩展）
 }
 
+// StartOptions 一次 StartConversation 的入参。
+//
+// Cwd 为空时回落当前工作目录，**仅为 demo/RunOnce 路径保留**：会话创建路径
+// （Service.CreateConversation）必须先经 ResolveWorkspace 定出工作空间再传进来，
+// 绝不能让「平台站在哪」成为用户会话的沙箱边界（见 workspace.go）。
+type StartOptions struct {
+	// ConversationID 平台会话 uuid；空 = 由编排器生成。
+	// 该 id 在 session/new **之前**定号，代建工作空间的目录名以它为准。
+	ConversationID string
+	// Cwd 会话工作空间（规范化后的绝对路径）；空 = 用当前工作目录（demo 语义）。
+	Cwd string
+	// WorkspaceTemporary 该 cwd 是否由平台代建（随响应透出；前端不得从路径形状反推）。
+	WorkspaceTemporary bool
+	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
+	Model runtime.ModelConfig
+}
+
 // RunResult 一次 RunOnce（demo）的结果。
 type RunResult struct {
 	ConversationID string
@@ -257,7 +274,7 @@ func (o *Orchestrator) ApplyConversationModel(ctx context.Context, conversationI
 // StartConversation 在 agent 路由选定的 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
 // 并发布 conversation.created。不发起 prompt；Prompt 负责每轮。
 // 路由 = ResolveRuntime（§7 FirstAvailable：候选顺序 × 已注册 × 命令可执行）。
-func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd string, model runtime.ModelConfig) (*CreateResult, error) {
+func (o *Orchestrator) StartConversation(ctx context.Context, agentID string, opt StartOptions) (*CreateResult, error) {
 	agent, ok := o.svc.AgentByID(agentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
@@ -266,12 +283,12 @@ func (o *Orchestrator) StartConversation(ctx context.Context, agentID, cwd strin
 	if err != nil {
 		return nil, err
 	}
-	return o.startConversationOn(ctx, agent, runtimeID, cwd, model)
+	return o.startConversationOn(ctx, agent, runtimeID, opt)
 }
 
 // startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
 // RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
-func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID, cwd string, model runtime.ModelConfig) (*CreateResult, error) {
+func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID string, opt StartOptions) (*CreateResult, error) {
 	spec, ok := o.reg.Get(runtimeID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
@@ -281,8 +298,16 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil, err
 	}
+	cwd := opt.Cwd
 	if cwd == "" {
+		// demo/RunOnce 语义（会话创建路径已在 Service 侧定出工作空间，不会走到这里）。
 		cwd, _ = os.Getwd()
+	}
+	// 平台会话 id 在 session/new **之前**定号：代建工作空间的目录名以它为准
+	// （目录先于 session/new 存在，底座对 cwd 做存在性校验）。
+	convID := opt.ConversationID
+	if convID == "" {
+		convID = uuid.NewString()
 	}
 	// P2 MCP 注入：平台注册表 MCP 子集按 agent 白名单 + runtime 传输能力过滤后随 session/new 下发（§5.2/§5.3）。
 	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
@@ -295,7 +320,6 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台 uuid（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
-	convID := uuid.NewString()
 	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
 		proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
@@ -303,7 +327,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
 	//   - unsupported_*（echo 无模型、运行时未广告模型配置项）→ 忽略（无模型语义）；
 	//   - 成功 → 用返回的**全量**配置项刷新平台目录缓存（顺带清掉曾失败值的标记）。
-	if err := o.applyModelOnSession(ctx, as, agent.ID, spec, sess, model); err != nil {
+	if err := o.applyModelOnSession(ctx, as, agent.ID, spec, sess, opt.Model); err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
@@ -312,10 +336,11 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	o.byProvider[sess.ID()] = as.ID
 	o.mu.Unlock()
 
-	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd, Provider: agent.Provider,
-		Model: model.Model, RuntimeHint: spec.ID,
+	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
+		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
+		Model: opt.Model.Model, RuntimeHint: spec.ID,
 		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
-	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd) // wire transcript header（未启用时 no-op）
+	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
 	})
@@ -511,7 +536,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult,
 	if err != nil {
 		return nil, err
 	}
-	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, opt.Cwd, runtime.ModelConfig{})
+	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, StartOptions{Cwd: opt.Cwd})
 	if err != nil {
 		return nil, err
 	}

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/morehao/ark-forge/internal/acl"
 	"github.com/morehao/ark-forge/internal/capability"
 	"github.com/morehao/ark-forge/internal/routing"
@@ -148,12 +150,17 @@ func (s *Service) currentDefaultLocked() string {
 // ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。
 // P0 起不再记录 runtime 身份；RuntimeHint 仅为最近/首选 runtime 的执行提示（非身份，用户不可见）。
 type ConversationRec struct {
-	ID          string
-	AgentID     string
-	Cwd         string // 会话工作目录（绝对路径；仅 sqlite 持久化）
-	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
-	Model       string // 会话级模型 id（空 = 底座默认）
-	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
+	ID      string
+	AgentID string
+	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
+	// 原生权限 workspace-write 的边界（见 workspace.go）。
+	Cwd string
+	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspaceDir 下建）。
+	// 落库 + 写 transcript header：**权威标志**，前端与离线回放都不得从路径形状反推。
+	WorkspaceTemporary bool
+	Provider           string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model              string // 会话级模型 id（空 = 底座默认）
+	RuntimeHint        string // 最近/首选 runtime（执行提示，非身份）
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
@@ -177,6 +184,14 @@ type Service struct {
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
+	// workspaceDir 代建工作空间的根目录（未指定 cwd 时在 <root>/<会话id>/ 建）。
+	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
+	// 见 SetWorkspacePolicy / ResolveWorkspace。
+	workspaceDir string
+	// workspaceRoots 允许作为工作空间的根白名单（FORGE_WORKSPACE_ROOTS；空 = 不限制）。
+	// 非空时显式 cwd 与目录浏览都被收在内，浏览也不允许越过根向上。
+	// 见 SetWorkspacePolicy / withinRoots。
+	workspaceRoots []string
 	// currentAgent 「当前 Agent」的显式选择（P2 起可切换；空 = 未设置，走回落链）。
 	// 落盘 <AgentDir>/default.json（见 default_agent.go）；读写一律持 s.mu。
 	currentAgent string
@@ -266,12 +281,61 @@ func (s *Service) SetTranscriptDir(dir string) {
 	s.loadTranscripts()
 }
 
+// SetWorkspacePolicy 设置工作空间的整体策略：代建根目录 + 允许的工作区根白名单。
+//
+// dir 空 = 关闭代建：此时未指定 cwd 的建会话请求直接报 workspace_required，
+// **绝不回落 os.Getwd()**（serve 进程目录是"平台的目录"，全局共享会让沙箱边界失效）。
+// roots 空 = 不限制（本机单操作员的默认行为）。
+//
+// 两者一起设置而不是各设各的：它们有**一致性约束**——白名单生效时代建根必须落在白名单内，
+// 否则每个代建会话都会产出白名单外的工作空间（平台自己违反自己的策略）。这个矛盾在装配时
+// 直接报错（fail closed），比运行期静默产出越界会话好。分开设置则结果依赖调用顺序，容易漏。
+func (s *Service) SetWorkspacePolicy(dir string, roots []string) error {
+	dir = strings.TrimSpace(dir)
+	normalized := make([]string, 0, len(roots))
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if !filepath.IsAbs(r) {
+			return fmt.Errorf("工作区根需为绝对路径，得到 %q", r)
+		}
+		normalized = append(normalized, resolveRealPath(r))
+	}
+	if dir != "" && len(normalized) > 0 && !withinRoots(dir, normalized) {
+		// 报「解析后的代建根」而不是配置原文：否则 macOS 上会出现 /tmp/… 与 /private/tmp/…
+		// 并列，运维会以为自己配错了地方。
+		return fmt.Errorf("代建根 %s 不在工作区根白名单之内（%s）：请把它移到白名单内，或关闭代建（workspace_dir 置空）",
+			resolveRealPath(dir), strings.Join(normalized, ","))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceDir = dir
+	s.workspaceRoots = normalized
+	return nil
+}
+
+// WorkspaceDir 返回代建工作空间的根目录（空 = 代建关闭）。
+func (s *Service) WorkspaceDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceDir
+}
+
+// WorkspaceRoots 返回允许的工作区根白名单（空 = 不限制）。
+func (s *Service) WorkspaceRoots() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.workspaceRoots...)
+}
+
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
-func (s *Service) beginTranscript(conversationID, agentID, runtimeID, cwd string) {
+func (s *Service) beginTranscript(conversationID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
 	if s.tx == nil {
 		return
 	}
-	s.tx.begin(conversationID, agentID, runtimeID, cwd)
+	s.tx.begin(conversationID, agentID, runtimeID, cwd, workspaceTemporary)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
@@ -340,13 +404,19 @@ func capabilityKVs(c runtime.Capabilities) []handler.CapabilityKV {
 }
 
 // ListConversations 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
+// cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，
+// 会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
 // 按创建时间倒序（置顶优先）。
-func (s *Service) ListConversations(archived bool) ([]handler.ConversationResp, error) {
+func (s *Service) ListConversations(archived bool, cwd string) ([]handler.ConversationResp, error) {
+	cwd = normalizeWorkspaceFilter(cwd)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]handler.ConversationResp, 0, len(s.conversations))
 	for _, r := range s.conversations {
 		if r.Archived != archived {
+			continue
+		}
+		if cwd != "" && r.Cwd != cwd {
 			continue
 		}
 		out = append(out, toConversationResp(r))
@@ -363,16 +433,18 @@ func (s *Service) ListConversations(archived bool) ([]handler.ConversationResp, 
 // toConversationResp 把 ConversationRec 折叠为 handler.ConversationResp。
 func toConversationResp(r *ConversationRec) handler.ConversationResp {
 	return handler.ConversationResp{
-		ID:        r.ID,
-		AgentID:   r.AgentID,
-		Status:    r.Status,
-		Title:     r.Title,
-		Pinned:    r.Pinned,
-		Archived:  r.Archived,
-		Provider:  r.Provider,
-		Model:     r.Model,
-		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
+		ID:                 r.ID,
+		AgentID:            r.AgentID,
+		Status:             r.Status,
+		Title:              r.Title,
+		Pinned:             r.Pinned,
+		Archived:           r.Archived,
+		Provider:           r.Provider,
+		Model:              r.Model,
+		Cwd:                r.Cwd,
+		WorkspaceTemporary: r.WorkspaceTemporary,
+		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -660,7 +732,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &ConversationRec{
-			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd, Provider: sess.Provider,
+			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
+			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
 			Model: sess.Model, RuntimeHint: sess.RuntimeHint,
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
@@ -720,19 +793,20 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := s.st.UpsertConversation(ctx, store.Conversation{
-		ID:                rec.ID,
-		AgentID:           rec.AgentID,
-		Cwd:               rec.Cwd,
-		Provider:          rec.Provider,
-		Model:             rec.Model,
-		RuntimeHint:       rec.RuntimeHint,
-		ProviderSessionID: rec.ProviderSessionID,
-		Title:             rec.Title,
-		Pinned:            rec.Pinned,
-		Archived:          rec.Archived,
-		Status:            rec.Status,
-		CreatedAt:         rec.CreatedAt,
-		UpdatedAt:         rec.UpdatedAt,
+		ID:                 rec.ID,
+		AgentID:            rec.AgentID,
+		Cwd:                rec.Cwd,
+		WorkspaceTemporary: rec.WorkspaceTemporary,
+		Provider:           rec.Provider,
+		Model:              rec.Model,
+		RuntimeHint:        rec.RuntimeHint,
+		ProviderSessionID:  rec.ProviderSessionID,
+		Title:              rec.Title,
+		Pinned:             rec.Pinned,
+		Archived:           rec.Archived,
+		Status:             rec.Status,
+		CreatedAt:          rec.CreatedAt,
+		UpdatedAt:          rec.UpdatedAt,
 	})
 	if err != nil {
 		slog.Default().Warn("store: upsert conversation failed", "conversation", rec.ID, "err", err)
@@ -1113,6 +1187,14 @@ func deriveTitle(text string) string {
 // CreateConversation 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮
 // （后台执行，事件经 bus/WS 出流）。返回的 EventSeq 为「已发布事件」后的水位，
 // 前端 WS attach 传 since_seq=该值即可续传首轮增量。
+//
+// 工作空间（cwd）在此定稿并随响应回读：
+//   - req.Cwd 非空 → 校验（绝对/存在/是目录）+ 符号链接规范化 + 根白名单（workspaceRoots）；
+//   - req.Cwd 为空 → 平台在 workspaceDir 下按**会话 id**代建临时目录（WorkspaceTemporary=true）；
+//   - 代建关闭且未指定 → workspace_required（不回落 os.Getwd()）。
+//
+// 会话 id 在 session/new 之前定号：代建目录名以它为准，且目录必须先于 session/new 存在
+// （底座对 cwd 做存在性校验）。
 func (s *Service) CreateConversation(ctx context.Context, req handler.ConversationCreateReq) (*handler.ConversationCreateResp, error) {
 	if s.orch == nil {
 		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
@@ -1124,14 +1206,31 @@ func (s *Service) CreateConversation(ctx context.Context, req handler.Conversati
 	if err != nil {
 		return nil, s.restErr(err)
 	}
-	res, err := s.orch.StartConversation(runCtx, agentID, req.Cwd, runtime.ModelConfig{
-		Model: req.Model,
+	// 先确认 agent 存在，再解析工作空间：解析可能**建目录**（代建），
+	// 不该为一个本来就无效的请求留下文件系统副作用。
+	if _, ok := s.AgentByID(agentID); !ok {
+		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
+			fmt.Sprintf("未知 agent %q", agentID), nil))
+	}
+	convID := uuid.NewString()
+	ws, err := ResolveWorkspace(req.Cwd, s.WorkspaceDir(), s.WorkspaceRoots(), convID)
+	if err != nil {
+		return nil, s.restErr(err)
+	}
+	res, err := s.orch.StartConversation(runCtx, agentID, StartOptions{
+		ConversationID:     convID,
+		Cwd:                ws.Path,
+		WorkspaceTemporary: ws.Temporary,
+		Model:              runtime.ModelConfig{Model: req.Model},
 	})
 	if err != nil {
+		// 会话未能建立 → 清理刚代建的目录（非临时工作空间与用户目录一律不动）。
+		DiscardWorkspace(ws)
 		return nil, s.restErr(err)
 	}
 	resp := &handler.ConversationCreateResp{
 		ID: res.ConversationID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
+		Cwd: ws.Path, WorkspaceTemporary: ws.Temporary,
 	}
 	if req.Prompt != "" {
 		seq, err := s.orch.Prompt(runCtx, res.ConversationID, req.Prompt)

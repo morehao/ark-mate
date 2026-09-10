@@ -179,6 +179,136 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
   }
 
+  /* 工作空间药丸（goose DirSwitcher 的触发按钮形态）：图标 + 目录名，完整路径走 tooltip；
+     与同一行的模型药丸共享一套静息形态（hairline 边 + 全圆角 + 小字）。 */
+  .fg-ws-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 190px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid ${tokens.border};
+    border-radius: 999px;
+    background: ${tokens.surface};
+    cursor: pointer;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    color: ${tokens.text};
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .fg-ws-pill:hover:not(:disabled) {
+    border-color: ${tokens.borderStrong};
+    background: ${tokens.softFill};
+  }
+  .fg-ws-pill:disabled { cursor: default; opacity: 0.55; }
+  .fg-ws-pill-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 工作空间菜单：小节标题 / 分隔线 / 两行目录项（goose 的 DropdownMenuLabel + DirNameLabel）。 */
+  .fg-ws-pop { display: flex; flex-direction: column; }
+  .fg-ws-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px 2px;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-ws-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: ${tokens.border};
+  }
+  .fg-ws-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    color: ${tokens.text};
+    transition: background 0.12s ease;
+  }
+  .fg-ws-item:hover:not(:disabled) { background: ${tokens.softFill}; }
+  /* 当前目录行：信息展示不是动作（平台上没有"在文件管理器中打开"这类能力），
+     所以不给 hover 反馈，免得看着像能点。 */
+  .fg-ws-item-static { cursor: default; }
+  .fg-ws-item-static:hover { background: transparent; }
+  .fg-ws-item:disabled { cursor: default; opacity: 0.5; }
+  .fg-ws-item-icon { flex: none; font-size: 13px; color: ${tokens.textPlaceholder}; }
+  .fg-ws-item-label { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .fg-ws-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+  .fg-ws-item-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-ws-item-meta {
+    flex: none;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-ws-item-check { flex: none; color: ${tokens.text}; font-size: 12px; }
+
+  /* 浏览视图头：返回 / 上级 / 主目录 + 当前待选路径（尾段优先，长路径截前缀）。 */
+  .fg-ws-browse-head { display: flex; align-items: center; gap: 2px; }
+  .fg-ws-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    color: ${tokens.textSecondary};
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
+  .fg-ws-cur {
+    padding: 0 8px 2px;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textSecondary};
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl; /* 路径过长时保留尾段（"我在哪个目录"比"从哪来"重要） */
+    text-align: left;
+  }
+  .fg-ws-empty {
+    padding: 4px 8px;
+    font-size: 11.5px;
+    color: ${tokens.textPlaceholder};
+  }
+
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
   .fg-sess-item:hover .fg-sess-more,

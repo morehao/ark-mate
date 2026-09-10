@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,10 +16,16 @@ type ConversationHandler struct {
 	svc Service
 }
 
-// List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
+// List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档；
+// `cwd` 可选，非空时只返回工作空间精确等于该绝对路径的会话）。
 func (h *ConversationHandler) List(c *gin.Context) {
 	archived := c.Query("archived") == "true"
-	conversations, err := h.svc.ListConversations(archived)
+	cwd := strings.TrimSpace(c.Query("cwd"))
+	if cwd != "" && !filepath.IsAbs(cwd) {
+		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: cwd 需为绝对路径"})
+		return
+	}
+	conversations, err := h.svc.ListConversations(archived, cwd)
 	if err != nil {
 		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
 		return

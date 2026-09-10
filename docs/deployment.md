@@ -49,10 +49,46 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json` |
 | 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录 |
 | skill 物化目标 | 空（关闭） | `FORGE_SKILLS_MATERIALIZE_DIR` | 非空才写（可能指向真实 opencode 用户目录，故默认关闭） |
+| 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
+| 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径；非空时显式 `cwd` 与目录浏览都被收在根内 |
 
 持久层开关：`FORGE_STORE=sqlite|memory|auto`（空 = auto：库文件已存在且非空 → sqlite，否则
 memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
 `usage_stats_unsupported`（明确降级，不返回假零值）。
+
+### 2.2.1 工作空间（会话沙箱边界）的运维要点
+
+会话工作空间 = 该会话的 ACP `cwd`，**创建时定稿、之后不可变**（要换目录就新开会话）。
+
+- **默认行为**：`POST /conversations` 不带 `cwd` → 平台在 `FORGE_WORKSPACE_DIR` 下按会话 id
+  代建 `<id>/`，响应回 `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——
+  那会让所有会话共用一个沙箱边界（旧行为，已移除）。
+- **关闭代建**：`FORGE_WORKSPACE_DIR` 设为空 / `off` / `disable` / `none` → 不带 `cwd` 的建会话
+  请求报 `workspace_required`（40001）。适合"目录必须由调用方显式指定"的受控部署。
+- **代建目录不自动清理**：v1 只记录权威标志（`conversations.workspace_temporary`），不做
+  TTL/回收——清理留待显式的 prune 能力，避免误删用户内容。磁盘敏感场景请把
+  `FORGE_WORKSPACE_DIR` 指到受管卷，或关闭代建 + 由调用方指定目录。
+- **目录浏览面**：`GET /workspaces/browse` 是 Web 端替代原生目录选择器的必要能力（只列目录，
+  不列文件）。**未配 `FORGE_WORKSPACE_ROOTS` 时可枚举任意可读目录**——同机单操作员这样最省事，
+  但对外提供服务（反代/容器/多人）就等于开放整个文件系统的结构，务必做两件事：
+  1. 设 `FORGE_TOKEN`（平台默认只绑回环，对外必须先鉴权）；
+  2. 配 `FORGE_WORKSPACE_ROOTS`（如 `/workspaces`、`/srv/repos`），把可浏览与可创建的范围收在
+     挂载进来的工作区根上。白名单同时约束**显式 `cwd`** 与**目录浏览**（两者共用一条校验），
+     符号链接按真身判定，根内指向根外的链接不会被列出。
+- **资料库 = 工作区根的一级子目录**（`GET /workspaces/libraries`）：把 `FORGE_WORKSPACE_ROOTS`
+  指向资料挂载点（如 `/srv/docs`），其下的每个一级子目录就自动成为面板里的一个"资料库"——
+  **零新状态**（不存登记表，目录名即名字），用户选名字而不必面对绝对路径。两条附带规则：
+  平台自己的代建根（`workspace_dir`）会被排除（它按策略必然落在某个根内，否则会以"tmp"之名混进
+  资料库列表）；某个根暂时不可读（挂载掉了）只少显示一个，不让整页报错。
+  `GET /workspaces/files?path=` 提供"看资料"面（列文件 + 大小 + 修改时间），与只列目录的
+  `browse`（选工作空间）分工：**files 的条目不可作为 `cwd`**（文件不是合法工作空间）。
+- **容器化部署的两个硬要求**：① `FORGE_WORKSPACE_DIR` 必须落在**可写挂载**上（默认
+  `<数据目录>/workspaces`，即 `~/.forge/workspaces`；容器里若 `HOME` 不在卷上，代建目录会写进
+  可写层，容器重建即丢）；② 能选的工作空间只能是**容器挂载视图内**的目录——宿主机目录要当工作
+  空间，必须先 bind mount 进来，并以**容器内路径**作为 `cwd`（agent 也在同一容器内，故这才是
+  对 agent 正确的那个路径）。
+- **已知限制**：平台注册表 MCP 随 `session/new` 下发，其**相对路径参数仍以 agent 进程的 cwd
+  解析**（serve 进程目录），而非会话工作空间。需要工作空间相对路径的 MCP 请写绝对路径。
 
 ### 2.3 环境变量（全部来自 `backend/internal/infra/config/config.go`）
 
@@ -65,6 +101,8 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录 |
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力数据面目录 |
 | `FORGE_SKILLS_MATERIALIZE_DIR` | 空 | skill 物化根（默认关闭） |
+| `FORGE_WORKSPACE_DIR` | `~/.forge/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
+| `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**代建根必须在白名单内**，否则 `forge serve` 启动即失败（配置自相矛盾 → fail closed，不静默产出越界会话） |
 | `FORGE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
 | `FORGE_PERMISSION_TIMEOUT` | `30m` | 挂起权限自动拒绝超时 |
 | `FORGE_ELICITATION_TIMEOUT` | `30m` | 挂起结构化提问自动取消超时 |

@@ -124,7 +124,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	svc.registerConversation(&ConversationRec{ID: "t-1", AgentID: "a1", Title: "内存会话"})
-	svc.beginTranscript("t-1", "a1", "echo", "/tmp")
+	svc.beginTranscript("t-1", "a1", "echo", "/tmp", false)
 	defer svc.closeTranscripts()
 	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
 	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})

@@ -118,13 +118,17 @@ func loadTranscriptFile(path string) *transcriptFile {
 
 	return &transcriptFile{
 		conversation: &ConversationRec{
-			ID:          hdr.SessionID,
-			AgentID:     hdr.AgentID,
-			RuntimeHint: hdr.Runtime,
-			Status:      statusFromLastEventType(lastType),
-			Title:       firstUserText,
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
+			ID:      hdr.SessionID,
+			AgentID: hdr.AgentID,
+			// memory 模式以 transcript 为事实源：工作空间与其"是否代建"标志都从 header 回灌
+			// （旧文件缺 workspace_temporary → false，历史会话本就不是代建的）。
+			Cwd:                hdr.Cwd,
+			WorkspaceTemporary: hdr.WorkspaceTemporary,
+			RuntimeHint:        hdr.Runtime,
+			Status:             statusFromLastEventType(lastType),
+			Title:              firstUserText,
+			CreatedAt:          createdAt,
+			UpdatedAt:          updatedAt,
 		},
 		lines: lines,
 	}

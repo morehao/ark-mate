@@ -577,6 +577,11 @@ export function ChatPage() {
                 <>
                   <Composer
                     busy={busy}
+                    workspace={
+                      activeSum?.cwd
+                        ? { path: activeSum.cwd, temporary: !!activeSum.workspace_temporary }
+                        : undefined
+                    }
                     busyNote={
                       streaming
                         ? `turn 进行中 · ${agent ? agent.name : ''}`

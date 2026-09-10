@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Button, Drawer, Input, Popconfirm, Spin } from 'antd'
+import { Button, Drawer, Input, Popconfirm, Spin, Tag } from 'antd'
 import {
   CheckOutlined,
   CloseOutlined,
@@ -269,6 +269,44 @@ export function ConversationDetailDrawer({
               }}
             >
               {row('Agent', agentNameOf(agents, s.agent_id))}
+              {/* 工作空间（= 会话的 ACP cwd，也是原生权限 workspace-write 的沙箱边界）：
+                  创建后不可变，故这里只读展示。「平台分配」标记来自服务端权威标志
+                  workspace_temporary，不从路径形状猜。路径过长时中间省略，全文走 title。 */}
+              {row(
+                '在工作目录',
+                s.cwd ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minWidth: 0,
+                      maxWidth: '100%',
+                      fontFamily: tokens.fontMono,
+                      fontSize: 11.5,
+                    }}
+                  >
+                    <span
+                      title={s.cwd}
+                      style={{
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        direction: 'rtl', // 尾段（项目名）比前缀更重要
+                        textAlign: 'left',
+                      }}
+                    >
+                      {s.cwd}
+                    </span>
+                    {s.workspace_temporary && (
+                      <Tag style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>平台分配</Tag>
+                    )}
+                  </span>
+                ) : (
+                  '未记录（早于工作空间落库的会话）'
+                ),
+              )}
               {(() => {
                 // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
                 // （不再按 runtime 名硬编码——opencode 同样支持会话级 set_config_option）。

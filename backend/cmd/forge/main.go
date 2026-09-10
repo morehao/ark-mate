@@ -66,6 +66,8 @@ func configCmd(args []string) {
 				"store":                   cfg.StoreMode,
 				"agents":                  cfg.AgentDir,
 				"capabilities":            cfg.CapabilityDir,
+				"workspace_dir":           cfg.WorkspaceDir,
+				"workspace_roots":         strings.Join(cfg.WorkspaceRoots, ","),
 				"skills_materialize_dir":  cfg.SkillMaterializeDir,
 				"skills_materialize_dirs": formatMaterializeDirs(cfg.SkillMaterializeDirs),
 				"idle_timeout":            cfg.IdleTimeout.String(),
@@ -104,6 +106,10 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "store", storeModeLabel(cfg.StoreMode), src("store"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "agents", cfg.AgentDir, src("agents"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
+	// 空 = 关闭代建（未指定 cwd 的建会话请求会报 workspace_required），故用 emptyLabel 明确显示。
+	fmt.Printf("  %-22s %-38s [%s]\n", "workspace_dir", emptyLabel(cfg.WorkspaceDir), src("workspace_dir"))
+	// 空 = 不限制（任何可读目录都能当工作空间）；非空 = 显式 cwd 与目录浏览都被收在根内。
+	fmt.Printf("  %-22s %-38s [%s]\n", "workspace_roots", emptyLabel(strings.Join(cfg.WorkspaceRoots, ",")), src("workspace_roots"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dirs", emptyLabel(formatMaterializeDirs(cfg.SkillMaterializeDirs)), src("skills_materialize_dirs"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
@@ -314,6 +320,14 @@ func serve(args []string) {
 		svc.SetTranscriptDir(cfg.TranscriptDir) // 会话 wire transcript（M1 #5，~/.forge/transcripts 或 FORGE_TRANSCRIPTS）
 	default:
 		fmt.Fprintf(os.Stderr, "serve: 未知 FORGE_STORE=%q（sqlite|memory）\n", mode)
+		os.Exit(2)
+	}
+	// 工作空间策略：未指定 cwd 的建会话请求在 <workspace_dir>/<会话id>/ 下代建临时空间
+	// （空 = 关闭代建，此时未指定即报 workspace_required，不回落 serve 进程目录）；
+	// workspace_roots 非空时把显式 cwd 与目录浏览收在白名单内。
+	// 两者不自洽（代建根落在白名单外 → 平台自己会产出越界会话）在启动时直接失败：fail closed。
+	if err := svc.SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
+		fmt.Fprintf(os.Stderr, "serve: 工作空间配置不自洽: %v\n", err)
 		os.Exit(2)
 	}
 
