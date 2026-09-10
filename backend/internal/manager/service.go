@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -20,10 +19,10 @@ import (
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/object/objusage"
 	"github.com/morehao/ark-forge/pkg/routing"
 	"github.com/morehao/ark-forge/pkg/runtime"
-	"github.com/morehao/golib/gerror"
 )
 
 // AgentRec 是进程内 Agent 定义（P0：Agent 不再绑定单一 runtime，路由候选见 Runtimes）。
@@ -509,7 +508,7 @@ func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 // GetConversation 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。
 func (s *Service) GetConversation(ctx context.Context, id string) (*dtoconversation.ConversationDetailResp, error) {
 	if !s.hasConversation(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
 	perms := make([]dtoconversation.PermissionResp, 0, len(pending))
@@ -531,7 +530,7 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch dtoco
 	r, ok := s.conversations[id]
 	if !ok {
 		s.mu.Unlock()
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if patch.Title != nil {
 		r.Title = *patch.Title
@@ -551,7 +550,7 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch dtoco
 	if patch.Model != nil {
 		applied, err := s.orch.ApplyConversationModel(ctx, id, runtime.ModelConfig{Model: *patch.Model})
 		if err != nil {
-			return nil, s.restErr(err)
+			return nil, code.FromError(err)
 		}
 		if !applied {
 			slog.Default().Debug("会话不在活跃集合，模型变更仅更新元数据", "conversation", id)
@@ -585,7 +584,7 @@ func (s *Service) conversationResp(id string) dtoconversation.ConversationResp {
 // ListPendingPermissions 列出某会话的挂起权限请求。
 func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]dtoconversation.PermissionResp, error) {
 	if !s.hasConversation(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingPermissions(id)
 	out := make([]dtoconversation.PermissionResp, 0, len(pending))
@@ -600,14 +599,14 @@ func (s *Service) ListPendingPermissions(ctx context.Context, id string) ([]dtoc
 // 供 REST 如实回执——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
 func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*dtoconversation.PermissionDecisionResp, error) {
 	if s.orch == nil {
-		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	out, ok, err := s.orch.ResolvePermission(callID, optionID, always, allowed)
 	if err != nil {
-		return nil, s.restErr(err)
+		return nil, code.FromError(err)
 	}
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "permission_not_found", fmt.Sprintf("权限请求 %q 不存在或已过期", callID), nil))
 	}
 	return &dtoconversation.PermissionDecisionResp{
 		CallID:           callID,
@@ -639,7 +638,7 @@ func (s *Service) PendingElicitations(id string) []ElicitationItem {
 // ListPendingElicitations 列出某会话的挂起结构化提问。
 func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]dtoconversation.ElicitationResp, error) {
 	if !s.hasConversation(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	pending := s.PendingElicitations(id)
 	out := make([]dtoconversation.ElicitationResp, 0, len(pending))
@@ -653,17 +652,17 @@ func (s *Service) ListPendingElicitations(ctx context.Context, id string) ([]dto
 // C3 scope 归属：只有登记该提问的会话能决策；跨会话调用按「不存在」处理（40401，不泄露他会话挂起项）。
 func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error {
 	if !s.hasConversation(id) {
-		return s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if s.orch == nil {
-		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	ok, err := s.orch.ResolveElicitation(id, elicitationID, action, content)
 	if err != nil {
-		return s.restErr(err)
+		return code.FromError(err)
 	}
 	if !ok {
-		return s.restErr(acl.NewError(acl.ClassRequest, "elicitation_not_found", fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil))
+		return code.FromError(acl.NewError(acl.ClassRequest, "elicitation_not_found", fmt.Sprintf("结构化提问 %q 不存在或已过期", elicitationID), nil))
 	}
 	return nil
 }
@@ -679,7 +678,7 @@ func (s *Service) PermissionMemories(id string) []MemoryItem {
 // ListPermissionMemories 校验会话存在后透传会话级权限记忆（allow/reject 双侧）。
 func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]dtoconversation.MemoryResp, error) {
 	if !s.hasConversation(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	mems := make([]dtoconversation.MemoryResp, 0)
 	for _, it := range s.PermissionMemories(id) {
@@ -691,13 +690,13 @@ func (s *Service) ListPermissionMemories(ctx context.Context, id string) ([]dtoc
 // RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
 func (s *Service) RevokeMemory(ctx context.Context, id, title, kind string) error {
 	if !s.hasConversation(id) {
-		return s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if s.orch == nil {
-		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	if _, err := s.orch.RevokeMemory(id, title, kind); err != nil {
-		return s.restErr(err)
+		return code.FromError(err)
 	}
 	return nil
 }
@@ -1255,25 +1254,25 @@ func deriveTitle(text string) string {
 // （底座对 cwd 做存在性校验）。
 func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.ConversationCreateReq) (*dtoconversation.ConversationCreateResp, error) {
 	if s.orch == nil {
-		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	// 会话与 turn 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
 	//（turn 由 Orchestrator 持有，取消走 POST /conversations/:id/cancel）。
 	runCtx := context.WithoutCancel(ctx)
 	agentID, err := s.resolveConversationAgent(req.AgentID)
 	if err != nil {
-		return nil, s.restErr(err)
+		return nil, code.FromError(err)
 	}
 	// 先确认 agent 存在，再解析工作空间：解析可能**建目录**（代建），
 	// 不该为一个本来就无效的请求留下文件系统副作用。
 	if _, ok := s.AgentByID(agentID); !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q", agentID), nil))
 	}
 	convID := uuid.NewString()
 	ws, err := ResolveWorkspace(req.Cwd, s.WorkspaceDir(), s.WorkspaceRoots(), convID)
 	if err != nil {
-		return nil, s.restErr(err)
+		return nil, code.FromError(err)
 	}
 	res, err := s.orch.StartConversation(runCtx, agentID, StartOptions{
 		ConversationID:     convID,
@@ -1284,7 +1283,7 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	if err != nil {
 		// 会话未能建立 → 清理刚代建的目录（非临时工作空间与用户目录一律不动）。
 		DiscardWorkspace(ws)
-		return nil, s.restErr(err)
+		return nil, code.FromError(err)
 	}
 	resp := &dtoconversation.ConversationCreateResp{
 		ID: res.ConversationID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
@@ -1293,7 +1292,7 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	if req.Prompt != "" {
 		seq, err := s.orch.Prompt(runCtx, res.ConversationID, req.Prompt)
 		if err != nil {
-			return nil, s.restErr(err)
+			return nil, code.FromError(err)
 		}
 		resp.EventSeq = seq
 		resp.Status = ConversationStatusInProgress
@@ -1306,14 +1305,14 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 // POST /conversations/:id/cancel 决定。
 func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*dtoconversation.ConversationPromptResp, error) {
 	if s.orch == nil {
-		return nil, s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	if id == "" || prompt == "" {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "prompt_required", "conversation_id 与 prompt 必填", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "prompt_required", "conversation_id 与 prompt 必填", nil))
 	}
 	seq, err := s.orch.Prompt(context.WithoutCancel(ctx), id, prompt)
 	if err != nil {
-		return nil, s.restErr(err)
+		return nil, code.FromError(err)
 	}
 	return &dtoconversation.ConversationPromptResp{ID: id, Status: ConversationStatusInProgress, EventSeq: seq}, nil
 }
@@ -1321,49 +1320,12 @@ func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*d
 // CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。
 func (s *Service) CancelTurn(ctx context.Context, id string) error {
 	if s.orch == nil {
-		return s.restErr(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
+		return code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
 	if err := s.orch.CancelTurn(ctx, id); err != nil {
-		return s.restErr(err)
+		return code.FromError(err)
 	}
 	return nil
-}
-
-// restErr 把领域错误（acl 分类）映射为对外可操作的业务错误码（gerror.Error）。
-// RestErr 导出 restErr（handler 出口统一映射；见 handler.Service.RestErr）。
-func (s *Service) RestErr(err error) error { return s.restErr(err) }
-
-func (s *Service) restErr(err error) error {
-	// 已映射（gerror.Error）→ 原样透传，避免二次映射成 50000。
-	var mapped gerror.Error
-	if errors.As(err, &mapped) {
-		return err
-	}
-	ae, ok := acl.As(err)
-	if !ok {
-		return gerror.Error{Code: 50000, Msg: err.Error()}
-	}
-	code := 50001
-	switch ae.Class {
-	case acl.ClassRequest:
-		code = 40001
-		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" || ae.Code == "provider_not_found" {
-			code = 40401
-		}
-	case acl.ClassLimit:
-		code = 40901
-	case acl.ClassAccess:
-		code = 40101
-	case acl.ClassUnsupported:
-		code = 40501
-	case acl.ClassService, acl.ClassConnection:
-		code = 50201
-	}
-	msg := ae.Details
-	if msg == "" {
-		msg = ae.Code
-	}
-	return gerror.Error{Code: code, Msg: msg}
 }
 
 // ConversationHistory 返回会话事件历史（seq 升序，after 向后 / before 向前）。
@@ -1374,10 +1336,10 @@ func (s *Service) restErr(err error) error {
 // 互斥（handler 已拦，服务层再兜一次 → 40001）；has_more 沿当前方向；首尾 seq 一并回带。
 func (s *Service) ConversationHistory(ctx context.Context, id string, q dtoconversation.HistoryQuery) (*dtoconversation.ConversationHistoryResp, error) {
 	if !s.hasConversation(id) {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	if q.After > 0 && q.HasBefore {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "history_cursor_conflict",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "history_cursor_conflict",
 			"after 与 before 互斥（一个向后、一个向前）", nil))
 	}
 	if q.After < 0 {
@@ -1406,7 +1368,7 @@ func (s *Service) ConversationHistory(ctx context.Context, id string, q dtoconve
 			batch, hasMore, err = s.st.EventsAfter(ctx, id, q.After, int64(q.Limit))
 		}
 		if err != nil {
-			return nil, s.restErr(acl.NewError(acl.ClassService, "history_read_failed",
+			return nil, code.FromError(acl.NewError(acl.ClassService, "history_read_failed",
 				fmt.Sprintf("读取会话历史失败：%v", err), nil))
 		}
 		events = make([]eventbus.Event, 0, len(batch))

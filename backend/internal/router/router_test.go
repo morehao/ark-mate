@@ -34,7 +34,7 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus)
 	return engine, svc
 }
@@ -301,7 +301,7 @@ func newAuthEngine(token string) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Token: token})
 	return engine
 }

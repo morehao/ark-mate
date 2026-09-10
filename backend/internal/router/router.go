@@ -19,7 +19,6 @@ import (
 	"github.com/morehao/ark-forge/internal/service/svcagent"
 	"github.com/morehao/ark-forge/internal/service/svccapability"
 	"github.com/morehao/ark-forge/internal/service/svcconversation"
-	"github.com/morehao/ark-forge/internal/service/svcerr"
 	"github.com/morehao/ark-forge/internal/service/svcexport"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/ark-forge/internal/service/svcsearch"
@@ -44,8 +43,6 @@ type Ports struct {
 	Usage        svcusage.UsageSvc
 	Search       svcsearch.SearchSvc
 	Export       svcexport.ExportSvc
-	// ErrMapper 领域错误 → 传输层错误码（P5 收敛错误码后删除）。
-	ErrMapper svcerr.Mapper
 }
 
 // Options 控制面装配选项（A6：单操作员 token）。

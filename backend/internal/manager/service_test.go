@@ -30,43 +30,6 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	return svc, orch, bus
 }
 
-// TestRestErrMapping 领域错误（acl 分类）→ 对外业务码映射矩阵。
-func TestRestErrMapping(t *testing.T) {
-	svc, _, _ := newTestRig(t)
-	cases := []struct {
-		name string
-		in   error
-		want int
-	}{
-		{"agent_not_found", acl.NewError(acl.ClassRequest, "agent_not_found", "x", nil), 40401},
-		{"conversation_not_found", acl.NewError(acl.ClassRequest, "conversation_not_found", "x", nil), 40401},
-		{"runtime_not_found", acl.NewError(acl.ClassRequest, "runtime_not_found", "x", nil), 40401},
-		{"request_other", acl.NewError(acl.ClassRequest, "agent_required", "x", nil), 40001},
-		{"limit", acl.NewError(acl.ClassLimit, "turn_in_progress", "x", nil), 40901},
-		{"access", acl.NewError(acl.ClassAccess, "auth_required", "x", nil), 40101},
-		{"unsupported", acl.NewError(acl.ClassUnsupported, "resume_unsupported", "x", nil), 40501},
-		{"service", acl.NewError(acl.ClassService, "orchestrator_unavailable", "x", nil), 50201},
-		{"connection", acl.NewError(acl.ClassConnection, "connection_lost", "x", nil), 50201},
-		{"unknown_class", acl.NewError(acl.ClassUnknown, "weird", "x", nil), 50001},
-		{"plain_error", errors.New("boom"), 50000},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var ge gerror.Error
-			if !errors.As(svc.restErr(tc.in), &ge) || ge.Code != tc.want {
-				t.Fatalf("映射不符: %v → %d (want %d)", tc.in, ge.Code, tc.want)
-			}
-		})
-	}
-
-	// details 为空 → msg 回落为 code。
-	var ge gerror.Error
-	_ = errors.As(svc.restErr(acl.NewError(acl.ClassLimit, "busy", "", nil)), &ge)
-	if ge.Msg != "busy" {
-		t.Fatalf("空 details 应回落 code: %+v", ge)
-	}
-}
-
 // TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
 // P3 双 id：原生 session id 经 byProvider 解析后发布）。
 func TestEventSinkMapping(t *testing.T) {

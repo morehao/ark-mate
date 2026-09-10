@@ -14,8 +14,8 @@ import (
 // 保持与历史路由表一致的解析优先级。
 func registerConversation(v1 *gin.RouterGroup, ports Ports) {
 	ctr := ctrconversation.NewConversationCtr(ports.Conversation)
-	search := ctrsearch.NewSearchCtr(ports.Search, ports.ErrMapper)
-	export := ctrexport.NewExportCtr(ports.Export, ports.ErrMapper)
+	search := ctrsearch.NewSearchCtr(ports.Search)
+	export := ctrexport.NewExportCtr(ports.Export)
 
 	v1.GET("/conversations", ctr.List)
 	v1.GET("/conversations/search", ctr.Search)

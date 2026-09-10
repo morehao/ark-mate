@@ -9,7 +9,7 @@ import (
 // registerAgent Agent 管理面：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除，
 // 以及某 Agent 可见能力的聚合读口。
 func registerAgent(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctragent.NewAgentCtr(ports.Agent, ports.ErrMapper)
+	ctr := ctragent.NewAgentCtr(ports.Agent)
 	caps := ctrcapability.NewCapabilityCtr(ports.Capability)
 
 	v1.GET("/agents", ctr.List)

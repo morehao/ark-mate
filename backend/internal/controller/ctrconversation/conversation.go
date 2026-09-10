@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/service/svcconversation"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // ConversationCtr 会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
@@ -54,12 +54,12 @@ func (h *conversationCtr) List(c *gin.Context) {
 	archived := c.Query("archived") == "true"
 	cwd := strings.TrimSpace(c.Query("cwd"))
 	if cwd != "" && !filepath.IsAbs(cwd) {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: cwd 需为绝对路径"})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: cwd 需为绝对路径"))
 		return
 	}
 	conversations, err := h.svc.ListConversations(archived, cwd)
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, conversations)
@@ -69,7 +69,7 @@ func (h *conversationCtr) List(c *gin.Context) {
 func (h *conversationCtr) Search(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: q 必填"})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: q 必填"))
 		return
 	}
 	limit := 30
@@ -80,7 +80,7 @@ func (h *conversationCtr) Search(c *gin.Context) {
 	}
 	hits, err := h.svc.SearchConversations(c.Request.Context(), q, limit)
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, hits)
@@ -90,7 +90,7 @@ func (h *conversationCtr) Search(c *gin.Context) {
 func (h *conversationCtr) Get(c *gin.Context) {
 	resp, err := h.svc.GetConversation(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -100,12 +100,12 @@ func (h *conversationCtr) Get(c *gin.Context) {
 func (h *conversationCtr) Update(c *gin.Context) {
 	var req dtoconversation.ConversationPatch
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.UpdateConversation(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -115,7 +115,7 @@ func (h *conversationCtr) Update(c *gin.Context) {
 func (h *conversationCtr) Permissions(c *gin.Context) {
 	resp, err := h.svc.ListPendingPermissions(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -125,7 +125,7 @@ func (h *conversationCtr) Permissions(c *gin.Context) {
 func (h *conversationCtr) PermissionMemories(c *gin.Context) {
 	resp, err := h.svc.ListPermissionMemories(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -135,11 +135,11 @@ func (h *conversationCtr) PermissionMemories(c *gin.Context) {
 func (h *conversationCtr) RevokeMemory(c *gin.Context) {
 	var req dtoconversation.MemoryRevokeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	if err := h.svc.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"title": req.Title, "kind": req.Kind})
@@ -149,12 +149,12 @@ func (h *conversationCtr) RevokeMemory(c *gin.Context) {
 func (h *conversationCtr) ResolvePermission(c *gin.Context) {
 	var req dtoconversation.PermissionResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -164,7 +164,7 @@ func (h *conversationCtr) ResolvePermission(c *gin.Context) {
 func (h *conversationCtr) Elicitations(c *gin.Context) {
 	resp, err := h.svc.ListPendingElicitations(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -174,11 +174,11 @@ func (h *conversationCtr) Elicitations(c *gin.Context) {
 func (h *conversationCtr) ResolveElicitation(c *gin.Context) {
 	var req dtoconversation.ElicitationResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	if err := h.svc.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"elicitation_id": req.ElicitationID, "action": req.Action})
@@ -190,12 +190,12 @@ func (h *conversationCtr) ResolveElicitation(c *gin.Context) {
 func (h *conversationCtr) Create(c *gin.Context) {
 	var req dtoconversation.ConversationCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.CreateConversation(c.Request.Context(), req)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -208,12 +208,12 @@ func (h *conversationCtr) Prompt(c *gin.Context) {
 		Prompt string `json:"prompt" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.PromptConversation(c.Request.Context(), id, req.Prompt)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -223,7 +223,7 @@ func (h *conversationCtr) Prompt(c *gin.Context) {
 func (h *conversationCtr) Cancel(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.CancelTurn(c.Request.Context(), id); err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": id, "status": "cancelling"})
@@ -237,7 +237,7 @@ func (h *conversationCtr) History(c *gin.Context) {
 	if v := c.Query("after"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {
-			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "after 需为非负整数"})
+			gincontext.Fail(c, code.Error(code.InvalidParam, "after 需为非负整数"))
 			return
 		}
 		q.After = n
@@ -245,20 +245,20 @@ func (h *conversationCtr) History(c *gin.Context) {
 	if v := c.Query("before"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {
-			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "before 需为非负整数"})
+			gincontext.Fail(c, code.Error(code.InvalidParam, "before 需为非负整数"))
 			return
 		}
 		q.Before = n
 		q.HasBefore = true
 	}
 	if q.After > 0 && q.HasBefore {
-		gincontext.Fail(c, gerror.Error{Code: 40001, Msg: "after 与 before 互斥（一个向后、一个向前）"})
+		gincontext.Fail(c, code.Error(code.InvalidRequest, "after 与 before 互斥（一个向后、一个向前）"))
 		return
 	}
 	if v := c.Query("limit"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {
-			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "limit 需为非负整数"})
+			gincontext.Fail(c, code.Error(code.InvalidParam, "limit 需为非负整数"))
 			return
 		}
 		q.Limit = int(n)
@@ -271,7 +271,7 @@ func (h *conversationCtr) History(c *gin.Context) {
 	}
 	resp, err := h.svc.ConversationHistory(c.Request.Context(), id, q)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -282,7 +282,7 @@ func (h *conversationCtr) Runs(c *gin.Context) {
 	id := c.Param("id")
 	runs, err := h.svc.ListRuns(c.Request.Context(), id)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": id, "runs": runs})

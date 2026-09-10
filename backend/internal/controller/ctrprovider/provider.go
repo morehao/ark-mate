@@ -8,8 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // ProviderCtr provider 档案控制器（密钥只写不读回）。
@@ -34,7 +34,7 @@ func NewProviderCtr(svc svcruntime.RuntimeSvc) ProviderCtr {
 func (h *providerCtr) List(c *gin.Context) {
 	items, err := h.svc.ListProviders()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, items)
@@ -44,12 +44,12 @@ func (h *providerCtr) List(c *gin.Context) {
 func (h *providerCtr) Update(c *gin.Context) {
 	var patch dtoprovider.ProviderPatchReq
 	if err := c.ShouldBindJSON(&patch); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.UpdateProvider(c.Request.Context(), c.Param("id"), patch)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

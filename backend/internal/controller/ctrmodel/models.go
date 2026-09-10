@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/service/svcagent"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -42,7 +43,7 @@ func (h *modelCtr) List(c *gin.Context) {
 	}
 	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

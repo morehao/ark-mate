@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtousage"
 	"github.com/morehao/ark-forge/internal/service/svcusage"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -38,7 +39,7 @@ func (h *usageCtr) Summary(c *gin.Context) {
 	}
 	resp, err := h.svc.UsageSummary(c.Request.Context(), q)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

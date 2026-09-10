@@ -10,10 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/internal/service/svcerr"
 	"github.com/morehao/ark-forge/internal/service/svcworkspace"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // WorkspaceCtr 工作空间面控制器（目录枚举/最近使用/资料库/白名单设置）。
@@ -33,13 +32,12 @@ var _ WorkspaceCtr = (*workspaceCtr)(nil)
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 manager.ValidateWorkspace 的三条件）。
 type workspaceCtr struct {
-	svc    svcworkspace.WorkspaceSvc
-	mapper svcerr.Mapper
+	svc svcworkspace.WorkspaceSvc
 }
 
 // NewWorkspaceCtr 构造 WorkspaceCtr。
-func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, mapper svcerr.Mapper) WorkspaceCtr {
-	return &workspaceCtr{svc: svc, mapper: mapper}
+func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc) WorkspaceCtr {
+	return &workspaceCtr{svc: svc}
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
@@ -52,7 +50,7 @@ func (h *workspaceCtr) Browse(c *gin.Context) {
 	includeHidden := c.Query("hidden") == "true"
 	resp, err := h.svc.BrowseWorkspace(path, includeHidden)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -64,7 +62,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 	if v := strings.TrimSpace(c.Query("limit")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: limit 需为正整数"})
+			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: limit 需为正整数"))
 			return
 		}
 		if n > 50 {
@@ -74,7 +72,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 	}
 	list, err := h.svc.RecentWorkspaces(limit)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, list)
@@ -87,7 +85,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 func (h *workspaceCtr) Libraries(c *gin.Context) {
 	list, err := h.svc.WorkspaceLibraries()
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, list)
@@ -102,7 +100,7 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 	includeHidden := c.Query("hidden") == "true"
 	resp, err := h.svc.ListWorkspaceFiles(path, includeHidden)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -115,7 +113,7 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 func (h *workspaceCtr) Settings(c *gin.Context) {
 	resp, err := h.svc.WorkspaceSettings()
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -128,12 +126,12 @@ func (h *workspaceCtr) Settings(c *gin.Context) {
 func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 	var req dtoworkspace.WorkspaceSettingsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.UpdateWorkspaceSettings(req.Roots)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

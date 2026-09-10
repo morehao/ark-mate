@@ -7,8 +7,8 @@ package ctrruntime
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // RuntimeCtr 底座面控制器（可用 runtime 概要）。
@@ -32,7 +32,7 @@ func NewRuntimeCtr(svc svcruntime.RuntimeSvc) RuntimeCtr {
 func (h *runtimeCtr) List(c *gin.Context) {
 	runtimes, err := h.svc.ListRuntimes()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, runtimes)

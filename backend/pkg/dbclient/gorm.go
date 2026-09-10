@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/golib/dbaccess/dbgorm"
 	"github.com/morehao/golib/glog"
+
 	// glog 的日志实现按 LoggerType 注册：不 import 具体 driver 时 New 会直接报
 	// "unknown LoggerType"。本仓的日志出口是 log/slog，故用 slog driver 而非 zap。
 	_ "github.com/morehao/golib/glog/driver/slog"

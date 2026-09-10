@@ -22,6 +22,7 @@ import (
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/router"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -549,7 +550,7 @@ type envelope struct {
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc, ErrMapper: svc,
+		Capability: svc, Usage: svc, Search: svc, Export: svc,
 	}
 }
 
@@ -793,13 +794,20 @@ func TestUsageSummaryRoute(t *testing.T) {
 	}
 }
 
-// TestListFailure 列表失败 → code=1（handler 层兜底）。
+// TestListFailure 列表失败 → code=50000（兜底内部错误）。
+//
+// 历史形态是 code=1：那时控制器各处手写 gerror.Error{Code: 1, Msg: err.Error()}，
+// 与领域层的 50000 并存，同一个"未归类内部错误"有两个码。P5 收敛到
+// code.Internal(50000) 一个兜底码，且 msg 仍原样带出（不失诊断信息）。
 func TestListFailure(t *testing.T) {
 	svc := &stubSvc{listAgentsErr: errors.New("boom")}
 	r := newRestEngine(stubDeps(svc))
 	env, _ := do(t, r, "GET", "/v1/forge/agents", "")
-	if env.Code != 1 {
-		t.Fatalf("期望 code=1，got %+v", env)
+	if env.Code != code.Internal {
+		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
+	}
+	if env.Msg != "boom" {
+		t.Fatalf("兜底码仍须带出原始 msg，got %q", env.Msg)
 	}
 }
 

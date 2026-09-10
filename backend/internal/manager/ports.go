@@ -4,7 +4,6 @@ import (
 	"github.com/morehao/ark-forge/internal/service/svcagent"
 	"github.com/morehao/ark-forge/internal/service/svccapability"
 	"github.com/morehao/ark-forge/internal/service/svcconversation"
-	"github.com/morehao/ark-forge/internal/service/svcerr"
 	"github.com/morehao/ark-forge/internal/service/svcexport"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/ark-forge/internal/service/svcsearch"
@@ -28,5 +27,4 @@ var (
 	_ svcusage.UsageSvc               = (*Service)(nil)
 	_ svcsearch.SearchSvc             = (*Service)(nil)
 	_ svcexport.ExportSvc             = (*Service)(nil)
-	_ svcerr.Mapper                   = (*Service)(nil)
 )

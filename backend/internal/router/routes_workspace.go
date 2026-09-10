@@ -15,7 +15,7 @@ import (
 // 设置面：GET 看生效名单/显式名单/来源与锁定态，PUT 全量替换（即"受限 ↔ 不限制"的开关）。
 // 被 env/flag 锁定或本进程无配置目录时 PUT 被拒（面板转只读）。
 func registerWorkspace(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrworkspace.NewWorkspaceCtr(ports.Workspace, ports.ErrMapper)
+	ctr := ctrworkspace.NewWorkspaceCtr(ports.Workspace)
 
 	v1.GET("/workspaces/libraries", ctr.Libraries)
 	v1.GET("/workspaces/browse", ctr.Browse)

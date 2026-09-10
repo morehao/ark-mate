@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/internal/service/svccapability"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // CapabilityCtr 能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
@@ -45,7 +45,7 @@ func NewCapabilityCtr(svc svccapability.CapabilitySvc) CapabilityCtr {
 func (h *capabilityCtr) ListSkills(c *gin.Context) {
 	items, err := h.svc.ListSkills()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, items)
@@ -55,7 +55,7 @@ func (h *capabilityCtr) ListSkills(c *gin.Context) {
 func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
 	items, err := h.svc.ListMcpServers()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, items)
@@ -65,7 +65,7 @@ func (h *capabilityCtr) ListMcpServers(c *gin.Context) {
 func (h *capabilityCtr) ListTools(c *gin.Context) {
 	items, err := h.svc.ListTools()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, items)
@@ -76,7 +76,7 @@ func (h *capabilityCtr) ListTools(c *gin.Context) {
 func (h *capabilityCtr) AgentCapabilities(c *gin.Context) {
 	resp, err := h.svc.AgentCapabilities(c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -89,12 +89,12 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 	var req dtocapability.McpToolCallReq
 	// 空 body 合法（= 无参数调用）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.CallMcpTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -104,7 +104,7 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 func (h *capabilityCtr) ListMcpResources(c *gin.Context) {
 	resp, err := h.svc.ListMcpResources(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -114,12 +114,12 @@ func (h *capabilityCtr) ListMcpResources(c *gin.Context) {
 func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 	var req dtocapability.McpResourceReadReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.ReadMcpResource(c.Request.Context(), c.Param("id"), req.URI)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -129,7 +129,7 @@ func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 func (h *capabilityCtr) ListMcpPrompts(c *gin.Context) {
 	resp, err := h.svc.ListMcpPrompts(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -140,12 +140,12 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 	var req dtocapability.McpPromptGetReq
 	// 空 body 合法（= 无参数）；非空但非法才拒绝。
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.GetMcpPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -154,7 +154,7 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 func (h *capabilityCtr) ProbeMcpServer(c *gin.Context) {
 	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, err)
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

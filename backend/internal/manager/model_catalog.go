@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/dto/dtomodel"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -165,12 +166,12 @@ func (s *Service) DefaultAgentID() string {
 func (s *Service) ModelCatalog(ctx context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	agent, ok := s.AgentByID(agentID)
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			"[agent_not_found] 未知 agent "+agentID, nil))
 	}
 	spec, ok := s.reg.Get(agent.pickRuntime())
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "runtime_not_registered",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "runtime_not_registered",
 			"[runtime_not_registered] agent "+agentID+" 的 runtime 未注册", nil))
 	}
 

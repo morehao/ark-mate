@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/mcp"
 )
 
@@ -181,7 +182,7 @@ func mcpProbeClass(err error) acl.Class {
 func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability.McpProbeResp, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
 			fmt.Sprintf("未知 MCP server %q", id), nil))
 	}
 	pctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
@@ -195,7 +196,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 		s.recordMcpProbe(id, err)
 		// 信封 msg 带稳定 code（[mcp_timeout]/[mcp_spawn_failed]…）：信封 code 只有分类粒度，
 		// 排障需要精确原因（同 last_probe_error 可经 GET /mcps 读回）。
-		return nil, s.restErr(acl.NewError(mcpProbeClass(err), mcp.CodeOf(err),
+		return nil, code.FromError(acl.NewError(mcpProbeClass(err), mcp.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcp.CodeOf(err), err.Error()), nil))
 	}
 
@@ -239,7 +240,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
 			fmt.Sprintf("未知 MCP server %q", id), nil))
 	}
 	budget := defaultMcpCallTimeout
@@ -259,7 +260,7 @@ func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapab
 	}, tool, req.Arguments)
 	if err != nil {
 		// 稳定 code 进信封 msg（同探测）：信封 code 只有分类粒度，排障需要精确原因。
-		return nil, s.restErr(acl.NewError(mcpCallClass(err), mcp.CodeOf(err),
+		return nil, code.FromError(acl.NewError(mcpCallClass(err), mcp.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcp.CodeOf(err), err.Error()), nil))
 	}
 	slog.Default().Info("mcp 工具调用完成", "server", id, "tool", tool,
@@ -293,7 +294,7 @@ func mcpCallClass(err error) acl.Class {
 func (s *Service) mcpLiveServer(id string) (capability.McpServer, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
-		return capability.McpServer{}, s.restErr(acl.NewError(acl.ClassRequest, "mcp_not_found",
+		return capability.McpServer{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
 			fmt.Sprintf("未知 MCP server %q", id), nil))
 	}
 	return server, nil
@@ -405,11 +406,11 @@ func mcpServerOf(server capability.McpServer) mcp.Server {
 
 // mcpLiveErr 把 mcp 层错误映射为 REST 信封错误（稳定 code 进 msg，分类决定信封码）。
 func (s *Service) mcpLiveErr(err error, fallbackCode string) error {
-	code := mcp.CodeOf(err)
-	if code == "" {
-		code = fallbackCode
+	c := mcp.CodeOf(err)
+	if c == "" {
+		c = fallbackCode
 	}
-	return s.restErr(acl.NewError(mcpCallClass(err), code, fmt.Sprintf("[%s] %s", code, err.Error()), nil))
+	return code.FromError(acl.NewError(mcpCallClass(err), c, fmt.Sprintf("[%s] %s", c, err.Error()), nil))
 }
 
 // AutoProbeMcpServers 后台探测全部已注册 MCP server（B4：`mcp_auto_probe=startup`）。
@@ -477,7 +478,7 @@ func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
 func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabilitiesResp, error) {
 	a, ok := s.AgentByID(agentID)
 	if !ok {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "agent_not_found",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q", agentID), nil))
 	}
 	runtimes := append([]string(nil), a.Runtimes...)

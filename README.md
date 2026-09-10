@@ -239,6 +239,27 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/usage/summary` | 用量统计（`?from=&to=&agent_id=&group_by=agent|day`；区间半开、日期按 UTC；无 store → 40501） |
 | GET | `/ws/events` | 实时事件通道（见下） |
 
+### 业务错误码
+
+信封 `code` 字段的**唯一事实源是 `backend/pkg/code`**（本表由 `TestReadmeCodesMatchRegistry` 守卫，
+改码必须两处同步）。语义错误一律 HTTP 200 + `code != 0`，只有鉴权失败同时给 HTTP 401。
+
+| code | 含义 |
+| --- | --- |
+| `0` | 成功 |
+| `40000` | 参数错误（缺失/类型或取值不合法） |
+| `40001` | 请求语义非法（游标互斥、归属不符、状态机不允许） |
+| `40101` | 未授权（单操作员令牌缺失或无效；HTTP 401） |
+| `40401` | 资源不存在（会话/agent/runtime/provider/MCP server） |
+| `40501` | 当前形态明确不支持（典型：memory 模式下的 `/usage/summary`） |
+| `40901` | 与当前状态冲突或超出额度（在途轮次、上游超时） |
+| `50000` | 服务内部错误（**唯一兜底码**） |
+| `50001` | 上游执行失败（runtime / MCP server 报错） |
+| `50201` | 上游连接失败（进程拉不起、连接断开、不可达） |
+
+`50000` 是兜底码：任何未归类的 error 经 `code.FromError` 出口都会落成它。
+信封里**不会出现 `code: -1`**（那是不带业务码的裸错误落到 gincontext 默认分支的产物）。
+
 WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.config_options`（运行时会话配置项全量更新，如模型）、`turn.ended/error`、`run.cancelled` 等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。
 
 ## 开发

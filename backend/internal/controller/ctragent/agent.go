@@ -8,9 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/internal/service/svcagent"
-	"github.com/morehao/ark-forge/internal/service/svcerr"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
-	"github.com/morehao/golib/gerror"
 )
 
 // AgentCtr Agent 管理面控制器（注册/更新/启停/删除自定义 agent）。
@@ -29,20 +28,19 @@ var _ AgentCtr = (*agentCtr)(nil)
 
 // AgentHandler 处理 Agent 相关 REST 请求（P2：注册向导 + 启停/热更新 + definitions 持久化）。
 type agentCtr struct {
-	svc    svcagent.AgentSvc
-	mapper svcerr.Mapper
+	svc svcagent.AgentSvc
 }
 
 // NewAgentCtr 构造 AgentCtr。
-func NewAgentCtr(svc svcagent.AgentSvc, mapper svcerr.Mapper) AgentCtr {
-	return &agentCtr{svc: svc, mapper: mapper}
+func NewAgentCtr(svc svcagent.AgentSvc) AgentCtr {
+	return &agentCtr{svc: svc}
 }
 
 // List 列出全部 Agent。
 func (h *agentCtr) List(c *gin.Context) {
 	agents, err := h.svc.ListAgents()
 	if err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 1, Msg: err.Error()})
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, agents)
@@ -53,12 +51,12 @@ func (h *agentCtr) List(c *gin.Context) {
 func (h *agentCtr) Create(c *gin.Context) {
 	var req dtoagent.AgentCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.CreateAgent(c.Request.Context(), req)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -68,12 +66,12 @@ func (h *agentCtr) Create(c *gin.Context) {
 func (h *agentCtr) Update(c *gin.Context) {
 	var patch dtoagent.AgentUpdateReq
 	if err := c.ShouldBindJSON(&patch); err != nil {
-		gincontext.Fail(c, gerror.Error{Code: 40000, Msg: "参数错误: " + err.Error()})
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
 	resp, err := h.svc.UpdateAgent(c.Request.Context(), c.Param("id"), patch)
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -84,7 +82,7 @@ func (h *agentCtr) Update(c *gin.Context) {
 func (h *agentCtr) SetDefault(c *gin.Context) {
 	resp, err := h.svc.SetDefaultAgent(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -95,7 +93,7 @@ func (h *agentCtr) SetDefault(c *gin.Context) {
 func (h *agentCtr) Delete(c *gin.Context) {
 	resp, err := h.svc.DeleteAgent(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
@@ -104,7 +102,7 @@ func (h *agentCtr) Delete(c *gin.Context) {
 // Start 启动 agent runtime 连接（校验可启动；已运行幂等）。
 func (h *agentCtr) Start(c *gin.Context) {
 	if err := h.svc.StartAgent(c.Request.Context(), c.Param("id")); err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "running"})
@@ -113,7 +111,7 @@ func (h *agentCtr) Start(c *gin.Context) {
 // Stop 停止 agent runtime 进程（有在途 turn 时返回 agent_busy）。
 func (h *agentCtr) Stop(c *gin.Context) {
 	if err := h.svc.StopAgent(c.Request.Context(), c.Param("id")); err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "stopped"})
@@ -123,7 +121,7 @@ func (h *agentCtr) Stop(c *gin.Context) {
 func (h *agentCtr) Diagnostics(c *gin.Context) {
 	resp, err := h.svc.AgentDiagnostics(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		gincontext.Fail(c, h.mapper.RestErr(err))
+		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)

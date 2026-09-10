@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtosearch"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/code"
 )
 
 // 导出上限（超出显式标注 truncated，不静默截断）。
@@ -31,7 +32,7 @@ const (
 func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_search_query", "搜索关键词 q 不能为空 [invalid_search_query]", nil))
 	}
 	if limit <= 0 {
 		limit = 30
@@ -45,7 +46,7 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 		resp.Source = "sqlite"
 		hits, err := s.st.SearchMessages(context.Background(), q, limit+1)
 		if err != nil {
-			return nil, s.restErr(acl.NewError(acl.ClassService, "message_search_failed",
+			return nil, code.FromError(acl.NewError(acl.ClassService, "message_search_failed",
 				fmt.Sprintf("消息检索失败: %v [message_search_failed]", err), err))
 		}
 		if len(hits) > limit {
@@ -196,7 +197,7 @@ func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportR
 	switch format {
 	case "markdown", "text", "json":
 	default:
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "invalid_export_format",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_export_format",
 			fmt.Sprintf("不支持的导出格式 %q（markdown|text|json）[invalid_export_format]", req.Format), nil))
 	}
 	ids := make([]string, 0, len(req.IDs))
@@ -210,10 +211,10 @@ func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportR
 		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "invalid_export_ids", "ids 不能为空 [invalid_export_ids]", nil))
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_export_ids", "ids 不能为空 [invalid_export_ids]", nil))
 	}
 	if len(ids) > maxExportIDs {
-		return nil, s.restErr(acl.NewError(acl.ClassRequest, "export_too_many_ids",
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "export_too_many_ids",
 			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", maxExportIDs, len(ids)), nil))
 	}
 
