@@ -67,6 +67,10 @@ func New(h *handler.Handler, opts ...Options) *gin.Engine {
 	v1.GET("/workspaces/browse", h.Workspace.Browse)
 	v1.GET("/workspaces/files", h.Workspace.Files)
 	v1.GET("/workspaces/recent", h.Workspace.Recent)
+	// 工作空间白名单的**设置面**：GET 看生效名单/显式名单/来源与锁定态，PUT 全量替换
+	// （即"受限 ↔ 不限制"的开关）。被 env/flag 锁定或本进程无配置目录时 PUT 被拒（面板转只读）。
+	v1.GET("/settings/workspace", h.Workspace.Settings)
+	v1.PUT("/settings/workspace", h.Workspace.UpdateSettings)
 	v1.GET("/conversations/search", h.Conversation.Search)
 	// M3 ②：跨会话消息级检索（锚点 = seq）与批量导出（markdown|text|json）。
 	v1.GET("/search/messages", h.Search.Messages)

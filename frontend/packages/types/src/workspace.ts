@@ -88,3 +88,29 @@ export interface WorkspaceFilesResp {
   /** 目录在前、文件在后，各自按名升序。 */
   entries: WorkspaceFileEntry[]
 }
+
+/**
+ * `GET · PUT /settings/workspace` 的工作区根白名单快照。
+ *
+ * `configured` 与 `roots` 的区分是这份契约的核心：面板**编辑**的是 `configured`（显式配置），
+ * 而 `roots` 是**生效**名单（= configured ∪ 平台代建根）。代建根由平台自己并进来，
+ * 用户在面板里删不掉它——所以后端必须把两份都给出来，否则前端无法表达"删掉这一条"。
+ */
+export interface WorkspaceSettings {
+  /** 显式配置的白名单（面板可编辑的那一份）。 */
+  configured: string[]
+  /** 生效白名单（含隐式并入的代建根）；为空 = 不限制（可浏览任意可读目录）。 */
+  roots?: string[]
+  /** 是否处于受限模式（configured 非空）。false = 未画边界。 */
+  restricted: boolean
+  /** 平台代建工作空间的根目录（空 = 代建关闭）。 */
+  provision_dir?: string
+  /** 代建根是否已隐式并入生效名单。 */
+  provision_included: boolean
+  /** 白名单的最终来源：default | config.json | env | env(process) | flag | unavailable。 */
+  source: string
+  /** 非空 = 该键被更高优先级来源锁定（写入必被覆盖），面板应转只读并显示它。 */
+  locked_by?: string
+  /** 是否可经 `PUT /settings/workspace` 改写。 */
+  writable: boolean
+}

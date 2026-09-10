@@ -510,8 +510,11 @@ func TestResolveWorkspaceRoots(t *testing.T) {
 	discardTempWorkspace(t, res)
 }
 
-// TestSetWorkspacePolicyRejectsInconsistentProvisionDir 代建根落在白名单外 = 配置自相矛盾 → 装配即失败。
-func TestSetWorkspacePolicyRejectsInconsistentProvisionDir(t *testing.T) {
+// TestSetWorkspacePolicyMergesProvisionDir 代建根落在白名单外**不再是**配置错误：自动并入生效名单。
+//
+// 旧行为是 fail closed（serve 启动即失败），代价是"平台自己的目录"必须由运维手写进白名单才自洽——
+// 那是把平台的实现细节泄漏成运维负担。现在平台自己并进来，运维只需关心**用户的**目录边界。
+func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
 	outside := filepath.Join(base, "elsewhere")
@@ -522,26 +525,51 @@ func TestSetWorkspacePolicyRejectsInconsistentProvisionDir(t *testing.T) {
 	}
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 
-	err := svc.SetWorkspacePolicy(outside, []string{root})
-	if err == nil {
-		t.Fatalf("代建根在白名单外应报错（否则平台会产出越界会话）")
-	}
-	if !strings.Contains(err.Error(), "workspace_dir") {
-		t.Fatalf("错误应点明怎么修（移到白名单内或关闭代建）: %v", err)
-	}
-	// 相对路径的根不是边界 → 拒。
+	// 形式错误仍必须挡住：相对路径的根不是边界。
 	if err := svc.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
 		t.Fatalf("相对工作区根应被拒")
 	}
-	// 失败不应留下半配置状态（旧值继续生效，且不会带着矛盾配置跑）。
 	if svc.WorkspaceDir() != "" || len(svc.WorkspaceRoots()) != 0 {
 		t.Fatalf("失败的设置不应改动策略: dir=%q roots=%v", svc.WorkspaceDir(), svc.WorkspaceRoots())
 	}
-	// 自洽组合：通过。注意代建根刻意**不预先创建**——平台自己按需创建它，
-	// 装配校验不能因为"目录还没建"就判成越界（macOS 上 /var 与 /private/var 会踩这个坑）。
-	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{root})
-	if got := svc.WorkspaceRoots(); len(got) != 1 || got[0] != mustEval(t, root) {
-		t.Fatalf("根应存为规范化真身: %v", got)
+
+	// 代建根刻意**不预先创建**：平台自己按需创建它，判定不能因为"目录还没建"就误判
+	// （macOS 上 /var 与 /private/var 会踩这个坑）。
+	provision := filepath.Join(outside, "tmp")
+	mustWorkspacePolicy(t, svc, provision, []string{root})
+	got := svc.WorkspaceRoots()
+	if len(got) != 2 {
+		t.Fatalf("生效名单应为「配置的根 + 隐式并入的代建根」: %v", got)
+	}
+	if got[0] != mustEval(t, root) {
+		t.Fatalf("配置项应排在前（browse 的起步点取 roots[0]，不能被派生根顶掉）: %v", got)
+	}
+	if want := filepath.Join(mustEval(t, outside), "tmp"); got[1] != want {
+		t.Fatalf("代建根应按真身并入，want %q got %q", want, got[1])
+	}
+	// 并入的代建根必须真的放行：否则平台自己代建的会话会被自己的白名单拒掉。
+	res, err := ResolveWorkspace("", provision, got, "conv-z")
+	if err != nil {
+		t.Fatalf("代建: %v", err)
+	}
+	if !res.Temporary || !withinRoots(res.Path, got) {
+		t.Fatalf("代建结果应落在生效名单内: %+v roots=%v", res, got)
+	}
+	discardTempWorkspace(t, res)
+
+	// 代建根已经落在某个配置根内时不再重复追加（避免 roots 里出现冗余项）。
+	nested := NewService(runtime.NewRegistry(), eventbus.New())
+	mustWorkspacePolicy(t, nested, filepath.Join(root, "tmp"), []string{root})
+	if got := nested.WorkspaceRoots(); len(got) != 1 {
+		t.Fatalf("代建根已在配置根内时不应重复追加: %v", got)
+	}
+
+	// 未配置白名单 = 不限制：不能因为存在代建根就把"不限制"悄悄缩成"只允许代建目录"
+	// （那会让默认配置的用户突然选不了自己的项目目录）。
+	open := NewService(runtime.NewRegistry(), eventbus.New())
+	mustWorkspacePolicy(t, open, provision, nil)
+	if got := open.WorkspaceRoots(); len(got) != 0 {
+		t.Fatalf("未配置白名单应保持「不限制」: %v", got)
 	}
 }
 
@@ -699,6 +727,23 @@ func TestWorkspaceLibraries(t *testing.T) {
 	for _, l := range list {
 		if _, err := ValidateWorkspace(l.Path, svc.WorkspaceRoots()); err != nil {
 			t.Fatalf("资料库 path 不是可直接使用的 cwd: %q err=%v", l.Path, err)
+		}
+	}
+
+	// 代建根本身一旦（隐式）成为生效名单的一员，它**下面**的第一层子目录就是按会话 id 命名的
+	// 沙箱目录：它们同样不能进资料库列表——否则用户会看到一串 "ses_xxx" 被当成"资料库"。
+	if err := os.MkdirAll(filepath.Join(provision, "ses_ws_temp"), 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
+	mustWorkspacePolicy(t, svc2, provision, []string{mustEval(t, rootA)})
+	list2, err := svc2.WorkspaceLibraries()
+	if err != nil {
+		t.Fatalf("WorkspaceLibraries: %v", err)
+	}
+	for _, l := range list2 {
+		if l.Name == "tmp" || l.Name == "ses_ws_temp" {
+			t.Fatalf("代建根与其下的会话目录都不该是资料库: %+v", list2)
 		}
 	}
 }

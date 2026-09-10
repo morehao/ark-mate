@@ -44,6 +44,7 @@ import type {
   WorkspaceFilesResp,
   WorkspaceLibrary,
   WorkspaceRecent,
+  WorkspaceSettings,
 } from '@ark/types'
 
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
@@ -92,6 +93,22 @@ export const workspaceFiles = (path: string, hidden = false): Promise<WorkspaceF
   if (hidden) s.set('hidden', 'true')
   return http.get<WorkspaceFilesResp>(`/forge/workspaces/files?${s.toString()}`)
 }
+
+/**
+ * 工作区根白名单快照（`GET /settings/workspace`）。
+ *
+ * `configured` 是可编辑的显式名单，`roots` 是含平台代建根的**生效**名单；
+ * `writable=false`（被 env/flag 锁定或无配置目录）时面板必须转只读展示，不要给一个必然失败的保存按钮。
+ */
+export const getWorkspaceSettings = (): Promise<WorkspaceSettings> =>
+  http.get<WorkspaceSettings>('/forge/settings/workspace')
+
+/**
+ * **全量替换**工作区根白名单（`PUT /settings/workspace`）。
+ * 空数组 = 恢复"不限制"；服务端逐项要求绝对路径 / 存在 / 是目录，落盘后对新会话即时生效。
+ */
+export const updateWorkspaceSettings = (roots: string[]): Promise<WorkspaceSettings> =>
+  http.put<WorkspaceSettings>('/forge/settings/workspace', { roots })
 
 /** 最近使用的工作空间（服务端从既有会话派生；排除平台代建的临时空间）。 */
 export const recentWorkspaces = (limit = 10): Promise<WorkspaceRecent[]> =>

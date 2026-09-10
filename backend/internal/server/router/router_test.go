@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/infra/config"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/runtime"
 	"github.com/morehao/ark-forge/internal/server/eventbus"
@@ -194,6 +195,10 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 	}
 }
 
+// 说明：新增路由**族**时要把前缀加进下面这串过滤条件，否则守卫对它形同虚设；但前缀不能太宽——
+// README 正文里的前端页面路由（如 `/settings`）会被一并抓成"未注册路由"，
+// 故控制面设置面这条用的是 `/settings/` 而不是 `/settings`。
+//
 // TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」里出现的每条
 // `/v1/forge` 路由（表格与正文反引号内）都必须真实注册；反之，README 声明的路径不得是历史名
 // （P0 把 /sessions 改名为 /conversations 后曾长期漂移）。新增/改名路由若忘改文档即红。
@@ -224,7 +229,8 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
 			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
-			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/health") &&
+			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/settings/") &&
+			!strings.HasPrefix(p, "/health") &&
 			!strings.HasPrefix(p, "/ws/") {
 			continue
 		}
@@ -437,6 +443,138 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	if !strings.Contains(env.Msg, "workspace_outside_roots") || !strings.Contains(env.Msg, "FORGE_WORKSPACE_ROOTS") {
 		t.Fatalf("越界错误应指明原因与配置键: %q", env.Msg)
 	}
+}
+
+// TestWorkspaceSettingsRoutes 设置面在**真实装配**下的完整闭环：
+// PUT 落盘 config.json → 生效名单即时收窄（且代建根隐式并入）→ 重启后解析出同一份名单。
+func TestWorkspaceSettingsRoutes(t *testing.T) {
+	base := t.TempDir()
+	cfgDir := t.TempDir()
+	root := filepath.Join(base, "docs")
+	provision := filepath.Join(base, "tmp")
+	outside := filepath.Join(base, "elsewhere")
+	for _, d := range []string{root, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	// 预置其它键：写回是 read-modify-write，不得把运维的配置抹掉。
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(`{"addr":"127.0.0.1:20001"}`), 0o600); err != nil {
+		t.Fatalf("写 config.json: %v", err)
+	}
+	e, svc := newEngineWithService()
+	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+		t.Fatalf("SetWorkspacePolicy: %v", err)
+	}
+	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, ""))
+
+	// 起步：不限制（restricted=false），可写，来源 = 默认值。
+	env := get(t, e, "/v1/forge/settings/workspace")
+	if env.Code != 0 {
+		t.Fatalf("settings GET 失败: %+v", env)
+	}
+	var st handler.WorkspaceSettingsResp
+	if err := json.Unmarshal(env.Data, &st); err != nil {
+		t.Fatalf("settings data 解析: %v", err)
+	}
+	if st.Restricted || !st.Writable || st.Source != "default" || len(st.Roots) != 0 {
+		t.Fatalf("起步快照不符: %+v", st)
+	}
+
+	// 未画边界时任何可读目录都能浏览（默认的零配置体验不能被这次改造破坏）。
+	if env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside)); env.Code != 0 {
+		t.Fatalf("不限制时根外目录应可浏览: %+v", env)
+	}
+
+	// PUT 画边界：生效名单 = 配置的根 + 隐式并入的代建根（顺序：配置项在前）。
+	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":[`+jsonString(root)+`]}`)
+	if env.Code != 0 {
+		t.Fatalf("settings PUT 失败: %+v", env)
+	}
+	if err := json.Unmarshal(env.Data, &st); err != nil {
+		t.Fatalf("PUT data 解析: %v", err)
+	}
+	if !st.Restricted || !st.ProvisionIncluded || len(st.Configured) != 1 || len(st.Roots) != 2 {
+		t.Fatalf("更新后快照不符: %+v", st)
+	}
+	if st.Roots[0] != mustEvalPath(t, root) || filepath.Base(st.Roots[1]) != "tmp" {
+		t.Fatalf("生效名单应为「配置根 + 代建根」: %+v", st.Roots)
+	}
+
+	// 即时生效：根外被拒（语义码 + 配置键）、代建根本身放行（平台不产出越界会话）。
+	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside))
+	if env.Code != 40001 || !strings.Contains(env.Msg, "workspace_outside_roots") {
+		t.Fatalf("画边界后根外应 40001: %+v", env)
+	}
+	if _, err := manager.ResolveWorkspace("", provision, svc.WorkspaceRoots(), "conv-s"); err != nil {
+		t.Fatalf("代建应仍可用（代建根隐式并入）: %v", err)
+	}
+
+	// 落盘：非破坏性写（addr 保留）+ 数组形式（路径含逗号也能往返）。
+	raw, err := os.ReadFile(filepath.Join(cfgDir, "config.json"))
+	if err != nil {
+		t.Fatalf("读 config.json: %v", err)
+	}
+	if !strings.Contains(string(raw), `"addr": "127.0.0.1:20001"`) {
+		t.Fatalf("写回破坏了其它键: %s", raw)
+	}
+	cfg, _, err := config.LoadResolved(cfgDir)
+	if err != nil {
+		t.Fatalf("写回后配置应合法: %v", err)
+	}
+	if len(cfg.WorkspaceRoots) != 1 || cfg.WorkspaceRoots[0] != mustEvalPath(t, root) {
+		t.Fatalf("重启后应解析出同一份名单: %+v", cfg.WorkspaceRoots)
+	}
+
+	// 坏项：逐项校验，回 40001 且不落盘。
+	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":["relative"]}`)
+	if env.Code != 40001 {
+		t.Fatalf("非法根应 40001: %+v", env)
+	}
+
+	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
+	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
+	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":[]}`)
+	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
+		t.Fatalf("锁定时应 settings_locked: %+v", env)
+	}
+	env = get(t, e, "/v1/forge/settings/workspace")
+	if err := json.Unmarshal(env.Data, &st); err != nil {
+		t.Fatalf("锁定态解析: %v", err)
+	}
+	if st.Writable || st.LockedBy != "FORGE_WORKSPACE_ROOTS" {
+		t.Fatalf("锁定态应透出: %+v", st)
+	}
+}
+
+// put 发一个带 JSON body 的 PUT 请求并解析信封。
+func put(t *testing.T, e *gin.Engine, path, body string) *respEnvelope {
+	t.Helper()
+	req := httptest.NewRequest("PUT", path, strings.NewReader(body))
+	req.Header.Set("content-type", "application/json")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	var env respEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("path=%s 响应非 JSON: %v body=%s", path, err, w.Body.String())
+	}
+	return &env
+}
+
+// jsonString 把路径编成 JSON 字符串（测试里直接拼 body 时避免手写转义）。
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// mustEvalPath 取路径真身（服务端一律按真身比较，测试期望值必须同源）。
+func mustEvalPath(t *testing.T, p string) string {
+	t.Helper()
+	out, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", p, err)
+	}
+	return out
 }
 
 // TestWorkspaceLibrariesAndFilesRoutes 资料库与"看资料"两个只读面在真实装配下的表现。
