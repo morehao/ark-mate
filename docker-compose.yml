@@ -34,6 +34,9 @@ services:
       FORGE_STORE: sqlite
       # 空值 = 保持平台默认（无鉴权 / 工作区不限制）；对外部署务必把 FORGE_TOKEN 设上
       FORGE_TOKEN: ${FORGE_TOKEN:-}
+      # 模型密钥：daemon 原样透传给 runtime 子进程（dsh/opencode 从进程环境读）。
+      # 留空 = 容器内为空串（Node 侧 falsy，等同未设置）；也可改用面板「Provider 档案」注入（两者并存时以档案为准）。
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       FORGE_WORKSPACE_ROOTS: ${FORGE_WORKSPACE_ROOTS:-}
       FORGE_WORKSPACE_DIR: ${FORGE_WORKSPACE_DIR:-/data/workspaces}
       # 想把可选工作区收在挂载视图内（推荐对外部署）时，在 .env 里成对设置：
