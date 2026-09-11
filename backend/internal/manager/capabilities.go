@@ -2,9 +2,13 @@ package manager
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
+	"github.com/morehao/ark-forge/internal/vault"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/code"
@@ -16,6 +20,10 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	if s.caps == nil {
 		return 0
 	}
+	// 登记目录：§13.4 S4 的启停要写回 <dir>/skills/<id>.json（没有它就只能内存生效，报错给出路）。
+	s.mu.Lock()
+	s.capabilityDir = dir
+	s.mu.Unlock()
 	return s.caps.LoadDir(dir).Total()
 }
 
@@ -55,8 +63,15 @@ func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) {
 		for _, so := range sk.Sources {
 			src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
 		}
+		warns := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
+		for _, w := range sk.Warnings {
+			warns = append(warns, dtocapability.SkillWarningResp{
+				Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
+			})
+		}
 		out = append(out, dtocapability.SkillResp{
-			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body, Sources: src,
+			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body,
+			Sources: src, Enabled: sk.IsEnabled(), Warnings: warns,
 		})
 	}
 	return out, nil
@@ -73,7 +88,11 @@ func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 		resp := dtocapability.McpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
-			ToolCount: counts[m.ID],
+			EnvKeys:              capability.KeysOf(m.Env),
+			SecretEnvKeys:        capability.KeysOf(m.SecretEnv),
+			SecretHeaderKeys:     capability.KeysOf(m.SecretHeaders),
+			UnresolvedSecretKeys: s.unresolvedSecretKeys(m),
+			ToolCount:            counts[m.ID],
 		}
 		if st, ok := probes[m.ID]; ok {
 			if !st.At.IsZero() {
@@ -179,7 +198,8 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 		})
 	}
 
-	// Skill：至少一个候选 runtime 有物化源；sources 裁剪到候选 runtime。
+	// Skill：全量列出 + 每条给「启用/适用」两个正交判断（§13.4 S5）。
+	// sources 裁剪到候选 runtime（不适用时可能为空）——空 sources + reasons 就是「这个 agent 用不上」。
 	skills := s.caps.ListSkills()
 	skillOut := make([]dtocapability.AgentSkillResp, 0, len(skills))
 	for _, sk := range skills {
@@ -189,11 +209,10 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 				src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
 			}
 		}
-		if len(src) == 0 {
-			continue
-		}
+		act := SkillActivationFor(sk, runtimes, inAgent)
 		skillOut = append(skillOut, dtocapability.AgentSkillResp{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Sources: src,
+			Enabled: sk.IsEnabled(), Applicable: act.Applicable, Reasons: act.Reasons,
 		})
 	}
 
@@ -216,6 +235,110 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 		AgentID: a.ID, Name: a.Name, Runtimes: runtimes,
 		Skills: skillOut, McpServers: mcpOut, Tools: toolOut, Notes: notes,
 	}, nil
+}
+
+// unresolvedSecretKeys 列出"绑了引用但当前解析不出来"的密钥键（只读体检，不解密出值）。
+//
+// vault 引用用 `Store.Has`（只看密文文件在不在，不解密）——列表端点不该为了体检去解密，
+// 而且"密文在但解不开"（vault.key 换了）属于另一个更严重的问题，会在注入时报出来。
+func (s *Service) unresolvedSecretKeys(m capability.McpServer) []string {
+	var out []string
+	for _, k := range capability.KeysOf(m.SecretEnv) {
+		if !s.secretRefResolvable(m.SecretEnv[k]) {
+			out = append(out, k)
+		}
+	}
+	for _, k := range capability.KeysOf(m.SecretHeaders) {
+		if !s.secretRefResolvable(m.SecretHeaders[k]) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// secretRefResolvable 报告一条引用当前是否"看起来能解析"（词法已在校验期保证，这里只看存在性）。
+func (s *Service) secretRefResolvable(ref string) bool {
+	switch capability.SecretRefKind(ref) {
+	case "vault":
+		st, err := s.providerVault()
+		if err != nil || st == nil {
+			return false
+		}
+		return st.Has(ref)
+	case "env":
+		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
+		return os.Getenv(name) != ""
+	default:
+		return false
+	}
+}
+
+// resolveMcpSecrets 把 server 的明文绑定与密钥引用合成**最终注入值**：
+//
+//	Env（明文）+ SecretEnv（vault:/env: 引用解析后）→ 环境变量
+//	Headers（明文）+ SecretHeaders（解析后）        → header
+//
+// 任一引用解析失败 → 返回全部失败原因（调用方据此跳过注入 + 告警）。失败原因**只含键名与引用**，
+// 绝不含密钥值本身——日志不该成为泄漏面。
+func (s *Service) resolveMcpSecrets(m capability.McpServer) (env, headers map[string]string, problems []string) {
+	env = make(map[string]string, len(m.Env)+len(m.SecretEnv))
+	headers = make(map[string]string, len(m.Headers)+len(m.SecretHeaders))
+	for k, v := range m.Env {
+		env[k] = v
+	}
+	for k, v := range m.Headers {
+		headers[k] = v
+	}
+	apply := func(field string, bindings map[string]string, dst map[string]string) {
+		for _, k := range capability.KeysOf(bindings) {
+			ref := bindings[k]
+			val, err := s.resolveSecretRef(ref)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("%s[%q] 引用 %q 无法解析：%v", field, k, ref, err))
+				continue
+			}
+			dst[k] = val
+		}
+	}
+	apply("secret_env", m.SecretEnv, env)
+	apply("secret_headers", m.SecretHeaders, headers)
+	return env, headers, problems
+}
+
+// resolveSecretRef 解析一条密钥引用：
+//
+//	vault:<ns>/<name>  → vault 密文解密（AAD 带 kind=mcp_secret，与 provider 密钥不通用）
+//	env:<NAME>         → 进程环境变量（容器/CI 注入；盘上不留痕）
+//
+// vault 不可用（未配置 agentDir / 密钥丢失）不是"静默跳过"，而是明确失败——理由同 §5：
+// 让 MCP server 带着空密钥跑起来，问题会以"tools/list 返回 401"的面目出现在很远的地方。
+func (s *Service) resolveSecretRef(ref string) (string, error) {
+	if err := capability.ValidateSecretRef(ref); err != nil {
+		return "", err
+	}
+	switch capability.SecretRefKind(ref) {
+	case "vault":
+		st, err := s.providerVault()
+		if err != nil {
+			return "", fmt.Errorf("vault 不可用：%w", err)
+		}
+		if st == nil {
+			return "", fmt.Errorf("vault 不可用：本进程未配置能力/agent 目录（无 ~/.forge 可放密文）")
+		}
+		b, err := st.Get(ref, vault.KindMcpSecret)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "env":
+		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
+		if v := os.Getenv(name); v != "" {
+			return v, nil
+		}
+		return "", fmt.Errorf("环境变量 %s 未设置或为空", name)
+	default:
+		return "", fmt.Errorf("不支持的引用 %q", ref)
+	}
 }
 
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
@@ -251,9 +374,18 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 		if name == "" {
 			name = m.ID
 		}
+		// §13.3 M1/M6：密钥型绑定在这里**才**解析成明文（定义文件里只有引用）。
+		env, headers, problems := s.resolveMcpSecrets(m)
+		if len(problems) > 0 {
+			// 解析不了就不注入这个 server：半配置的 MCP server 会让 agent 侧报一堆看不懂的连不上，
+			// 而少一个工具是"看得见的降级"（日志里有原因、有引用、有出路）。**不静默**：逐条 WARN。
+			slog.Warn("mcp 注入跳过：密钥引用解析失败", "server", m.ID, "problems", problems)
+			continue
+		}
 		out = append(out, acl.McpServer{
 			Name: name, Transport: m.Transport,
-			Command: m.Command, Args: m.Args, URL: m.URL, Headers: m.Headers,
+			Command: m.Command, Args: m.Args, URL: m.URL,
+			Env: env, Headers: headers,
 		})
 	}
 	return out

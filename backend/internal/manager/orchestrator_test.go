@@ -315,6 +315,7 @@ func TestHandoffMemoBudget(t *testing.T) {
 	svc.publish(BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
 	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
 	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到B"})
+	svc.flushChunks() // ③ 合并缓冲落盘后再算 memo
 
 	memo := svc.HandoffMemo("cv1", 6000)
 	for _, want := range []string{"任务A", "任务B", "收到A补充A", "收到B"} {

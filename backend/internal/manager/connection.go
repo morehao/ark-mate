@@ -76,19 +76,25 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
 			return acl.ElicitationOutcome{Action: "accept"}
 		}
-		sid := o.busyConversationForClient(cli)
+		sid, source := o.resolveElicitationScope(cli, req)
 		if sid == "" {
-			// SDK 未建模 elicitation scope → 无法读顶层 conversationId；连接上无唯一在途 turn
-			// （空闲 / 会话外 request-scope / 多会话并发）时不做猜测，按取消回应。
-			o.logger.Warn("elicitation: 连接上无唯一在途 turn，无法归属会话，按取消处理")
+			// 既无 `_meta` scope 也无唯一在途 turn（空闲 / 会话外 request-scope / 多会话并发）→ 不猜。
+			// 仍按取消回应（不能把 agent 挂死），但置 ScopeAmbiguous 并留痕（agent 诊断 + 日志），
+			// 让「提问卡为什么没出现」可查，而不是无痕消失。
+			o.logger.Warn("elicitation: 无法归属会话（无 _meta scope 且连接上无唯一在途 turn），按取消处理",
+				"scope_source", source)
+			o.svc.noteScopeAmbiguous(agent.ID,
+				"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）")
 			return acl.ElicitationOutcome{Action: "cancel"}
 		}
-		req.SessionID = sid
-		// C3：SDK v0.13.5 未建模 elicitation scope → 归属只能推断，来源显式标注（REST/WS 可观测）。
-		if req.ScopeSource == "" {
-			req.ScopeSource = acl.ScopeInferred
-		}
+		req.SessionID, req.ScopeSource = sid, source
 		return o.requestElicitation(ctx, req)
+	}
+	// elicitation/complete（URL 模式收尾通知）：agent 告知提问已在 agent 侧完成 → 宿主按 ACP 侧
+	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 turn」校验（可判定时）；不可判定时不阻断
+	// ——该 id 由 agent 生成、不可猜，且 complete 只是收敛通知（重复/迟到都不该有副作用）。
+	completeElic := func(_ context.Context, elicitationID string) {
+		o.elic.CompleteByURLID(o.busyConversationForClient(cli), elicitationID)
 	}
 	// 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
 	// 请求返回即被杀（如 P2 StartAgent 暖启动后立刻断连）。WithoutCancel 后 Dial 自带的
@@ -96,10 +102,11 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座，语义与此前内联实现一致）。
 	dialCtx := context.WithoutCancel(ctx)
 	client, err := runtime.Connect(dialCtx, spec, args, env, acl.ClientOptions{
-		OnEvent:           o.eventSink(agent.ID, spec.ID),
-		Logger:            logger,
-		RequestPermission: reqPerm,
-		CreateElicitation: reqElic,
+		OnEvent:             o.eventSink(agent.ID, spec.ID),
+		Logger:              logger,
+		RequestPermission:   reqPerm,
+		CreateElicitation:   reqElic,
+		CompleteElicitation: completeElic,
 	})
 	if err != nil {
 		return nil, err

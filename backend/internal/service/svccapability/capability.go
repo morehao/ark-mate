@@ -15,6 +15,12 @@ type CapabilitySvc interface {
 	// ListSkills 返回 Skill 目录（P1 能力数据面）。
 	ListSkills() ([]dtocapability.SkillResp, error)
 
+	// SetSkillEnabled 启停一个 skill（§13.4 S4：写回定义文件 + 立刻重校物化；禁用 = overlay 可逆）。
+	SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error)
+
+	// SkillMaterialization 报告某 skill 在每处物化目标上的现状（§13.4 S2：审计/复现面，只读）。
+	SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error)
+
 	// ListMcpServers 返回 MCP 注册表（P1；headers/凭证不读回）。
 	ListMcpServers() ([]dtocapability.McpServerResp, error)
 

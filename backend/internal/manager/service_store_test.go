@@ -29,21 +29,24 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1.registerConversation(&ConversationRec{ID: "s-live", AgentID: "agent-echo"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
 	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
-	eMsg := svc1.publish(BusMessage, "s-live", map[string]any{"text": "答案是 2"})
+	// ③ 文本增量合并：publish 进缓冲并返回零值事件，号序在 flush 落库时才分配。
+	svc1.publish(BusMessage, "s-live", map[string]any{"text": "答案是 2"})
+	svc1.flushChunks()
+	eMsgSeq := eUser.Seq + 1
 	svc1.markConversation("s-live", ConversationStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
 	if _, err := svc1.UpdateConversation(ctx, "s-live", dtoconversation.ConversationPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("UpdateConversation: %v", err)
 	}
-	if eMsg.Seq != eUser.Seq+1 {
-		t.Fatalf("live seq 应连续: %d %d", eUser.Seq, eMsg.Seq)
+	if eMsgSeq != eUser.Seq+1 {
+		t.Fatalf("live seq 应连续: %d %d", eUser.Seq, eMsgSeq)
 	}
-	if got, _ := st1.LastSeq(ctx); got != eMsg.Seq {
-		t.Fatalf("DB LastSeq=%d want %d", got, eMsg.Seq)
+	if got, _ := st1.LastSeq(ctx); got != eMsgSeq {
+		t.Fatalf("DB LastSeq=%d want %d", got, eMsgSeq)
 	}
 	sess1, ok, _ := st1.GetConversation(ctx, "s-live")
-	if !ok || sess1.Status != ConversationStatusCompleted || sess1.LastSeq != eMsg.Seq || !sess1.Pinned {
+	if !ok || sess1.Status != ConversationStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
 		t.Fatalf("DB 会话元数据未同步: %+v ok=%v", sess1, ok)
 	}
 	_ = st1.Close() // 释放文件句柄，模拟进程退出
@@ -68,20 +71,22 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	}
 	// bus 按 DB 号序回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
 	replay := bus2.EventsAfter(eUser.Seq)
-	if len(replay) != 1 || replay[0].Seq != eMsg.Seq {
+	if len(replay) != 1 || replay[0].Seq != eMsgSeq {
 		t.Fatalf("重启后回放应带 DB 号序: %+v", replay)
 	}
-	// 新事件 seq 跨重启连续。
-	eNext := svc2.publish(BusMessage, "s-live", map[string]any{"text": "继续"})
-	if eNext.Seq != eMsg.Seq+1 {
-		t.Fatalf("跨重启 seq 应连续: got %d want %d", eNext.Seq, eMsg.Seq+1)
+	// 新事件 seq 跨重启连续（③ 合并：publish 进缓冲，flush 后才分配号序）。
+	svc2.publish(BusMessage, "s-live", map[string]any{"text": "继续"})
+	svc2.flushChunks()
+	eNextSeq := eMsgSeq + 1
+	if got, _ := st2.LastSeq(ctx); got != eNextSeq {
+		t.Fatalf("跨重启 seq 应连续: got %d want %d", got, eNextSeq)
 	}
 	evs, more, err := st2.EventsAfter(ctx, "s-live", 0, 10)
 	if err != nil || more || len(evs) != 3 {
 		t.Fatalf("DB 事件应 3 条: n=%d more=%v err=%v", len(evs), more, err)
 	}
-	if evs[2].Seq != eNext.Seq {
-		t.Fatalf("DB 第三条 seq=%d want %d", evs[2].Seq, eNext.Seq)
+	if evs[2].Seq != eNextSeq {
+		t.Fatalf("DB 第三条 seq=%d want %d", evs[2].Seq, eNextSeq)
 	}
 }
 
@@ -99,6 +104,7 @@ func TestSQLiteRestoreAcrossConversations(t *testing.T) {
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-b", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})
+	svc.flushChunks() // ③ 落盘后再关库（否则缓冲里的增量随进程消失）
 	_ = st.Close()
 
 	st2 := testutil.OpenStore(t, dbPath)
@@ -118,9 +124,11 @@ func TestSQLiteRestoreAcrossConversations(t *testing.T) {
 			t.Fatalf("注入非全局升序: %+v", replay)
 		}
 	}
-	// 新事件接续最大号。
-	eNext := svc2.publish(BusMessage, "s-a", map[string]any{"i": 3})
-	if eNext.Seq != replay[len(replay)-1].Seq+1 {
-		t.Fatalf("接续号错误: got %d want %d", eNext.Seq, replay[len(replay)-1].Seq+1)
+	// 新事件接续最大号（③ 合并：先 flush 再查库）。
+	svc2.publish(BusMessage, "s-a", map[string]any{"i": 3})
+	svc2.flushChunks()
+	wantSeq := replay[len(replay)-1].Seq + 1
+	if got, _ := st2.LastSeq(ctx); got != wantSeq {
+		t.Fatalf("接续号错误: got %d want %d", got, wantSeq)
 	}
 }

@@ -19,8 +19,10 @@ type McpServer struct {
 	Transport string // stdio | sse | http | streamable_http
 	Command   string // stdio 时
 	Args      []string
-	URL       string // http/sse 时（streamable_http 亦归 http 子对象）
-	Headers   map[string]string
+	// Env stdio 子进程环境变量（§13.3 M1：调用方已把密钥型绑定解析成明文；这里只负责下发）。
+	Env     map[string]string
+	URL     string // http/sse 时（streamable_http 亦归 http 子对象）
+	Headers map[string]string
 }
 
 // toAcpMcpServers 把注入列表转换为 ACP SDK 判别联合。空/无 → 空数组（echo 等 agent 校验
@@ -39,7 +41,7 @@ func toAcpMcpServers(list []McpServer) []acpsdk.McpServer {
 		case "stdio":
 			out = append(out, acpsdk.McpServer{
 				Stdio: &acpsdk.McpServerStdio{
-					Name: m.Name, Command: m.Command, Args: m.Args, Env: []acpsdk.EnvVariable{},
+					Name: m.Name, Command: m.Command, Args: m.Args, Env: toAcpEnv(m.Env),
 				},
 			})
 		case "sse":
@@ -57,6 +59,23 @@ func toAcpMcpServers(list []McpServer) []acpsdk.McpServer {
 		default:
 			// unknown transport：防御性丢弃
 		}
+	}
+	return out
+}
+
+// toAcpEnv map → []acpsdk.EnvVariable（排序保证确定性；nil → 空切片：ACP 要求数组而非 null）。
+func toAcpEnv(env map[string]string) []acpsdk.EnvVariable {
+	if len(env) == 0 {
+		return []acpsdk.EnvVariable{}
+	}
+	names := make([]string, 0, len(env))
+	for n := range env {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]acpsdk.EnvVariable, 0, len(names))
+	for _, n := range names {
+		out = append(out, acpsdk.EnvVariable{Name: n, Value: env[n]})
 	}
 	return out
 }

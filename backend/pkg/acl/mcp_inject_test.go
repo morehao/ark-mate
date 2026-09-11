@@ -8,7 +8,8 @@ import (
 // http/streamable_http 归一 http；headers 排序；unknown/缺名丢弃；nil → nil。
 func TestToAcpMcpServers(t *testing.T) {
 	list := []McpServer{
-		{Name: "fs", Transport: "stdio", Command: "npx", Args: []string{"-y", "@fs/mcp"}},
+		{Name: "fs", Transport: "stdio", Command: "npx", Args: []string{"-y", "@fs/mcp"},
+			Env: map[string]string{"Z_VAR": "2", "A_VAR": "1"}},
 		{Name: "evt", Transport: "sse", URL: "http://h/evt", Headers: map[string]string{"b": "2", "a": "1"}},
 		{Name: "web", Transport: "http", URL: "http://h/rpc"},
 		{Name: "web2", Transport: "streamable_http", URL: "http://h/rpc2"},
@@ -22,6 +23,11 @@ func TestToAcpMcpServers(t *testing.T) {
 
 	if s := out[0].Stdio; s == nil || s.Name != "fs" || s.Command != "npx" || len(s.Args) != 2 || s.Env == nil {
 		t.Fatalf("stdio 子对象不符: %+v", out[0])
+	}
+	// §13.3 M1：env 落到 ACP 的 EnvVariable 列表，且按键排序（wire 字节可复现）。
+	if s := out[0].Stdio; len(s.Env) != 2 || s.Env[0].Name != "A_VAR" || s.Env[0].Value != "1" ||
+		s.Env[1].Name != "Z_VAR" || s.Env[1].Value != "2" {
+		t.Fatalf("stdio env 应为有序 EnvVariable: %+v", s.Env)
 	}
 	if e := out[1].Sse; e == nil || e.Type != "sse" || e.Url != "http://h/evt" || len(e.Headers) != 2 ||
 		e.Headers[0].Name != "a" || e.Headers[0].Value != "1" || e.Headers[1].Name != "b" {
@@ -39,6 +45,17 @@ func TestToAcpMcpServers(t *testing.T) {
 	}
 	if h := toAcpMcpServers([]McpServer{}); h == nil || len(h) != 0 {
 		t.Fatalf("空列表应得空数组（agent 校验非 null），got %+v", h)
+	}
+}
+
+// TestToAcpEnv map → 有序 []EnvVariable；nil/空 → 空切片（ACP 要求数组而非 null）。
+func TestToAcpEnv(t *testing.T) {
+	if e := toAcpEnv(nil); e == nil || len(e) != 0 {
+		t.Fatalf("nil map 应得空切片，got %+v", e)
+	}
+	e := toAcpEnv(map[string]string{"Z": "1", "A": "2"})
+	if len(e) != 2 || e[0].Name != "A" || e[0].Value != "2" || e[1].Name != "Z" {
+		t.Fatalf("env 应按键排序: %+v", e)
 	}
 }
 

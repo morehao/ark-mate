@@ -159,7 +159,8 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 	m.mu.Lock()
 	m.pending[callID] = p
 	m.mu.Unlock()
-	m.logger.Info("permission: request registered", "conversation", conversationID, "call_id", callID, "title", req.ToolCall.Title)
+	m.logger.Info("permission: request registered", "conversation", conversationID, "call_id", callID,
+		"title", req.ToolCall.Title, "wire_request_id", req.RequestID)
 
 	if publish != nil {
 		publish(callID, req.ToolCall.Title, req.ToolCall, req.Options, p.timeout)
@@ -208,15 +209,17 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 }
 
 // ResolveAllow 允许（选中指定/第一个可选项）。带 always 标记会话级始终允许。
+// 按 call_id 直投、不做会话归属校验——REST 决策走 ResolveDecision（带归属校验）。
 func (m *PermissionManager) ResolveAllow(callID, optionID string, always bool) bool {
-	ok, _ := m.ResolveDecision(callID, acl.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision("", callID, acl.PermissionDecision{Allowed: true, OptionID: optionID, Always: always})
 	return ok
 }
 
 // ResolveReject 显式拒绝。optionID 为所选 deny 选项（ACP 层会 Selected 回执，agent 可区分拒绝与取消）；
 // always=true 时记录会话级「始终拒绝」记忆。
+// 按 call_id 直投、不做会话归属校验——REST 决策走 ResolveDecision（带归属校验）。
 func (m *PermissionManager) ResolveReject(callID, optionID string, always bool) bool {
-	ok, _ := m.ResolveDecision(callID, acl.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
+	ok, _ := m.ResolveDecision("", callID, acl.PermissionDecision{Rejected: true, OptionID: optionID, Always: always})
 	return ok
 }
 
@@ -231,7 +234,12 @@ type DecisionOutcome struct {
 // ResolveDecision 投递一次决策并返回**实际回执**（按该请求的 options 计算，与 ACP 层同一规则，
 // 见 acl.EffectivePermissionOutcome）：请求不存在/已过期时 found=false、回执为零值。
 // 这是 REST 回执的事实来源——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
-func (m *PermissionManager) ResolveDecision(callID string, d acl.PermissionDecision) (found bool, out DecisionOutcome) {
+//
+// conversationID 是决策发起方会话（C3 scope 归属，与 ElicitationManager.resolve 同一立场）：
+// 只有登记该请求的会话能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，既不投递也不删除
+// 挂起项，对外统一表现为「不存在」（found=false，不泄露他会话挂起项）。空串 = 跳过归属校验，
+// 仅供 ResolveAllow/ResolveReject 这类按 call_id 直投的内部入口使用。
+func (m *PermissionManager) ResolveDecision(conversationID, callID string, d acl.PermissionDecision) (found bool, out DecisionOutcome) {
 	if callID == "" {
 		return false, DecisionOutcome{}
 	}
@@ -239,6 +247,13 @@ func (m *PermissionManager) ResolveDecision(callID string, d acl.PermissionDecis
 	p, ok := m.pending[callID]
 	if !ok {
 		m.mu.Unlock()
+		return false, DecisionOutcome{}
+	}
+	if conversationID != "" && p.conversationID != conversationID {
+		owner := p.conversationID
+		m.mu.Unlock()
+		m.logger.Warn("permission: 决策会话与归属会话不符，拒绝（scope mismatch）",
+			"call_id", callID, "owner", owner, "caller", conversationID)
 		return false, DecisionOutcome{}
 	}
 	kind, oid := acl.EffectivePermissionOutcome(d, p.options)

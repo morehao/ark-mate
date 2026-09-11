@@ -18,16 +18,25 @@ const (
 	DefaultElicitationTimeout = 30 * time.Minute
 )
 
+// elicitationResolution 是投递给 RegisterAndWait 的一次终局：决策结果 + 终局原因。
+// 原因取值 user | timeout | cancel | complete，随 session.elicitation_resolved 如实上报，
+// 前端据此区分「用户点了接受」与「agent 告知 URL 流程已完成」。
+type elicitationResolution struct {
+	outcome acl.ElicitationOutcome
+	reason  string
+}
+
 // pendingElicitation 是一条挂起中的结构化提问：持有一个「待用户决策」的通道与超时。
 type pendingElicitation struct {
 	id             string // 稳定 id（决策回传锚点）
 	conversationID string // 归属会话（scope；C3：决策必须由该会话发起，见 resolve）
-	scopeSource    string // 归属来源：wire | inferred_inflight（SDK 未建模时的推断）
+	scopeSource    string // 归属来源：wire（`_meta`）| inferred_inflight（宿主推断）| ambiguous（不归属）
 	mode           string // form | url
 	message        string
 	schema         map[string]any // form 模式的 JSON Schema 对象（对外载荷）
 	url            string         // url 模式
-	ch             chan acl.ElicitationOutcome
+	urlID          string         // url 模式的 ACP elicitationId（elicitation/complete 的反查锚点）
+	ch             chan elicitationResolution
 	timeout        time.Time
 }
 
@@ -114,7 +123,7 @@ func (m *ElicitationManager) CancelConversation(conversationID string) {
 	for _, p := range victims {
 		// 直接向持有 channel 投递（此时条目已移出 map，不能走按 id 的 resolve）。
 		select {
-		case p.ch <- acl.ElicitationOutcome{Action: "cancel"}:
+		case p.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "cancel"}, reason: reasonCancel}:
 		default:
 		}
 	}
@@ -150,7 +159,8 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 		message:        req.Message,
 		schema:         schemaMap(req.Schema),
 		url:            req.URL,
-		ch:             make(chan acl.ElicitationOutcome, 1),
+		urlID:          req.URLID,
+		ch:             make(chan elicitationResolution, 1),
 		timeout:        time.Now().Add(m.timeout),
 	}
 	m.mu.Lock()
@@ -177,17 +187,18 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	defer timer.Stop()
 
 	var d acl.ElicitationOutcome
-	reason := "user"
+	reason := reasonUser
 	select {
-	case d = <-p.ch:
-		// 用户已决策
+	case r := <-p.ch:
+		// 已决策：结果与终局原因（user / complete）由投递方一并给出
+		d, reason = r.outcome, r.reason
 	case <-ctx.Done():
 		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
-		reason = "cancel"
+		reason = reasonCancel
 	case <-timer.C:
 		m.logger.Warn("elicitation: request timeout, auto-cancel", "conversation", conversationID, "id", id)
 		d = acl.ElicitationOutcome{Action: "cancel"}
-		reason = "timeout"
+		reason = reasonTimeout
 	}
 	m.mu.Lock()
 	delete(m.pending, id)
@@ -200,10 +211,10 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	return d
 }
 
-// resolve 按 id 投递一次决策，并校验**归属会话**（C3 scope 归属）：
+// resolve 按 id 投递一次终局（决策 + 终局原因），并校验**归属会话**（C3 scope 归属）：
 // 只有登记该提问的会话才能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，
 // 既不投递也不删除挂起项，调用方拿到 mismatch=true（对外统一表现为「不存在」）。
-func (m *ElicitationManager) resolve(conversationID, id string, d acl.ElicitationOutcome) (found, mismatch bool) {
+func (m *ElicitationManager) resolve(conversationID, id, reason string, d acl.ElicitationOutcome) (found, mismatch bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.pending[id]
@@ -216,7 +227,7 @@ func (m *ElicitationManager) resolve(conversationID, id string, d acl.Elicitatio
 		return true, true
 	}
 	select {
-	case p.ch <- d:
+	case p.ch <- elicitationResolution{outcome: d, reason: reason}:
 	default:
 	}
 	return true, false
@@ -224,17 +235,68 @@ func (m *ElicitationManager) resolve(conversationID, id string, d acl.Elicitatio
 
 // ResolveAccept 接受（可携带用户提交的 content）；conversationID 为决策发起方会话（scope 校验）。
 func (m *ElicitationManager) ResolveAccept(conversationID, id string, content map[string]any) (found, mismatch bool) {
-	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "accept", Content: content})
+	return m.resolve(conversationID, id, reasonUser, acl.ElicitationOutcome{Action: "accept", Content: content})
 }
 
 // ResolveDecline 用户拒绝提供信息。
 func (m *ElicitationManager) ResolveDecline(conversationID, id string) (found, mismatch bool) {
-	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "decline"})
+	return m.resolve(conversationID, id, reasonUser, acl.ElicitationOutcome{Action: "decline"})
 }
 
 // ResolveCancel 取消本次提问。
 func (m *ElicitationManager) ResolveCancel(conversationID, id string) (found, mismatch bool) {
-	return m.resolve(conversationID, id, acl.ElicitationOutcome{Action: "cancel"})
+	return m.resolve(conversationID, id, reasonUser, acl.ElicitationOutcome{Action: "cancel"})
+}
+
+// 终局原因常量（随 session.elicitation_resolved 上报，前端据此区分终局来源）。
+const (
+	// reasonUser 用户（或 REST/WS 决策方）给出的终局。
+	reasonUser = "user"
+	// reasonTimeout 无用户决策，挂起超时自动取消。
+	reasonTimeout = "timeout"
+	// reasonCancel 上下文取消（会话取消/连接拆除）。
+	reasonCancel = "cancel"
+	// reasonComplete agent 告知 URL 模式提问已在 agent 侧完成（elicitation/complete 通知）。
+	reasonComplete = "complete"
+)
+
+// CompleteByURLID 处理 agent 的 elicitation/complete 通知：URL 模式提问已在 agent 侧走完
+// （用户在浏览器里完成授权/登录），宿主据此收敛卡片。命中规则：mode=url 且 ACP 侧 elicitationId 相同
+// （该 id 由 agent 生成、全局唯一）；命中即以 accept（无 content）+ reason=complete 唤醒等待方，
+// 让 agent 的 elicitation/create 请求收敛而非挂到超时。找不到（已决/重放/非 URL 模式）返回 false，
+// 仅记日志——complete 是通知，重放与迟到都不该有副作用。
+// ownerConversation 非空时校验归属（同一连接的防护）；空串表示不校验。
+func (m *ElicitationManager) CompleteByURLID(ownerConversation, urlID string) bool {
+	if urlID == "" {
+		return false
+	}
+	m.mu.Lock()
+	var hit *pendingElicitation
+	for _, p := range m.pending {
+		if p.mode == "url" && p.urlID == urlID {
+			hit = p
+			break
+		}
+	}
+	if hit == nil {
+		m.mu.Unlock()
+		m.logger.Debug("elicitation: complete 未命中挂起项（已决/重放）", "url_id", urlID)
+		return false
+	}
+	if ownerConversation != "" && hit.conversationID != ownerConversation {
+		owner := hit.conversationID
+		m.mu.Unlock()
+		m.logger.Warn("elicitation: complete 与归属会话不符，拒绝（scope mismatch）",
+			"url_id", urlID, "owner", owner, "caller", ownerConversation)
+		return false
+	}
+	select {
+	case hit.ch <- elicitationResolution{outcome: acl.ElicitationOutcome{Action: "accept"}, reason: reasonComplete}:
+	default:
+	}
+	m.mu.Unlock()
+	m.logger.Info("elicitation: complete 收敛挂起项", "url_id", urlID, "conversation", hit.conversationID)
+	return true
 }
 
 // Owner 返回挂起提问的归属会话与来源（诊断/测试用）。

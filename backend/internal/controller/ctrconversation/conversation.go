@@ -32,6 +32,7 @@ type ConversationCtr interface {
 	Create(c *gin.Context)
 	Prompt(c *gin.Context)
 	Cancel(c *gin.Context)
+	DeleteQueuedInput(c *gin.Context)
 	History(c *gin.Context)
 	Runs(c *gin.Context)
 }
@@ -202,21 +203,31 @@ func (h *conversationCtr) Create(c *gin.Context) {
 }
 
 // Prompt 向既有会话追加一轮 prompt（后台执行，事件经 WS 出流）。
+// 会话正忙时按 body 的 delivery 决定：报错（缺省）/ 排队 / 取消当前轮后投递（§6）。
 func (h *conversationCtr) Prompt(c *gin.Context) {
 	id := c.Param("id")
-	var req struct {
-		Prompt string `json:"prompt" binding:"required"`
-	}
+	var req dtoconversation.PromptReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.PromptConversation(c.Request.Context(), id, req.Prompt)
+	resp, err := h.svc.PromptConversation(c.Request.Context(), id, req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
 	gincontext.Success(c, resp)
+}
+
+// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6；已投递/已作废不可撤，幂等）。
+func (h *conversationCtr) DeleteQueuedInput(c *gin.Context) {
+	id, inputID := c.Param("id"), c.Param("input_id")
+	ok, err := h.svc.DeleteQueuedInput(c.Request.Context(), id, inputID)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, gin.H{"id": id, "input_id": inputID, "deleted": ok})
 }
 
 // Cancel 取消进行中的 turn（幂等）。

@@ -122,6 +122,25 @@ var schemaMigrations = []migration{
 			`ALTER TABLE conversations ADD COLUMN workspace_temporary INTEGER NOT NULL DEFAULT 0`,
 		},
 	},
+	{
+		version: 6,
+		name:    "inputs（§6 busy input 队列：会话忙时的排队投递 + 审计台账）",
+		statements: []string{
+			`CREATE TABLE inputs (
+				id              TEXT PRIMARY KEY,
+				conversation_id TEXT NOT NULL REFERENCES conversations(id),
+				text            TEXT NOT NULL DEFAULT '',
+				delivery        TEXT NOT NULL DEFAULT 'after_turn',
+				target_turn_id  TEXT NOT NULL DEFAULT '',
+				generation      INTEGER NOT NULL DEFAULT 0,
+				status          TEXT NOT NULL DEFAULT 'queued',
+				created_at      TEXT NOT NULL,
+				claimed_at      TEXT NOT NULL DEFAULT ''
+			)`,
+			// 队列读取只按 (会话, 状态) 过滤 + 创建时间升序取队首。
+			`CREATE INDEX idx_inputs_queue ON inputs(conversation_id, status, created_at)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

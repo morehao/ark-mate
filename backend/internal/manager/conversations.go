@@ -212,18 +212,47 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 // PromptConversation 向既有会话追加一轮 prompt（后台执行）。
 // turn 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
 // POST /conversations/:id/cancel 决定。
-func (s *Service) PromptConversation(ctx context.Context, id, prompt string) (*dtoconversation.ConversationPromptResp, error) {
+func (s *Service) PromptConversation(ctx context.Context, id string, req dtoconversation.PromptReq) (*dtoconversation.ConversationPromptResp, error) {
 	if s.orch == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	if id == "" || prompt == "" {
+	if id == "" || req.Prompt == "" {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "prompt_required", "conversation_id 与 prompt 必填", nil))
 	}
-	seq, err := s.orch.Prompt(context.WithoutCancel(ctx), id, prompt)
+	// 投递模式先校验：非法值不该走完 acquire 才发现（§6；空 = reject = 历史行为）。
+	if _, err := NormalizeDelivery(req.Delivery); err != nil {
+		return nil, code.FromError(err)
+	}
+	out, err := s.orch.PromptWithDelivery(context.WithoutCancel(ctx), id, req.Prompt, req.Delivery)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
-	return &dtoconversation.ConversationPromptResp{ID: id, Status: ConversationStatusInProgress, EventSeq: seq}, nil
+	return &dtoconversation.ConversationPromptResp{
+		ID: id, Status: ConversationStatusInProgress, EventSeq: out.EventSeq,
+		Queued: out.Queued, InputID: out.InputID,
+	}, nil
+}
+
+// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）。撤下后发 session.input_cancelled——
+// 队列项的离队必须是一条可回放的事实（前端队列只认事件，不做本地推断）。
+func (s *Service) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error) {
+	if id == "" || inputID == "" {
+		return false, code.FromError(acl.NewError(acl.ClassRequest, "input_required", "conversation_id 与 input_id 必填", nil))
+	}
+	ok, err := s.deleteQueuedInput(ctx, id, inputID)
+	if err != nil {
+		return false, code.FromError(err)
+	}
+	if ok {
+		agentID := ""
+		if rec := s.conversationRec(id); rec != nil {
+			agentID = rec.AgentID
+		}
+		s.publish(BusInputCancelled, id, map[string]any{
+			"session_id": id, "agent_id": agentID, "input_id": inputID, "reason": ReasonUserCancel,
+		})
+	}
+	return ok, nil
 }
 
 // CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。

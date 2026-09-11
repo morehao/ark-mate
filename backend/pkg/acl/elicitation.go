@@ -16,13 +16,14 @@ import (
 //     （string+enum/oneOf=单选，array+items=多选，string/integer/number/boolean=对应输入）。
 //   - url：{message, mode:"url", url, elicitationId}。
 //
-// 会话归属（过渡实现，Rev2 决策，见 docs/agent-interactions-acp-v1-design-20260907.md）：
+// 会话归属（过渡实现，决策见 docs/agent-interactions-acp-v1-design-20260907.md）：
 // SDK v0.13.5 的 UnstableCreateElicitationForm/Url 未建模规范 scope 字段，顶层 sessionId/
-// requestId 在 SDK 解码时被丢弃，本层读不到。因此 ElicitationRequest.SessionID **不由本层
-// 填充**，由宿主（manager/orchestrator 按「连接上唯一在途 turn」推断）在调用钩子前注入，
-// 并把注入方式写进 ScopeSource（C3：归属来源显式化，REST/WS 载荷可观测）；
-// acl 层保持零假设（不复用 _meta，也不猜 wire）。真实 runtime 首现 elicitation 时再切标准
-// scope 解析（SDK 补丁预案见 §6 文档），宿主仅需改注入点为 scope 读取并置 ScopeWire。
+// requestId 在 SDK 解码时被丢弃，但**变体里的 `_meta` 会被完整保留**。因此归属分两段：
+//  1. 本层先读 `_meta`（sessionId/session_id/conversationId/conversation_id，
+//     见 scope.go）→ 命中即填 SessionID 并置 ScopeSource=wire（零 fork 可用的 wire 归属）；
+//  2. 未命中才由宿主（manager/orchestrator 按「连接上唯一在途 turn」）注入 SessionID 并置
+//     ScopeSource=inferred_inflight；连接上无唯一在途 turn 时置 ScopeAmbiguous（不再无痕取消）。
+// 规范顶层 scope 仍需补 SDK（触发式预案见文档 §3.2），届时本层的读取点无需再改。
 
 // ElicitationSchema 是表单字段的 JSON Schema 表示（属性为原始 schema 对象，
 // 本层不做逐字段校验，原样透传给 UI 渲染控件）。
@@ -39,11 +40,16 @@ const (
 	ScopeWire = "wire"
 	// ScopeInferred：scope 由宿主按「连接上唯一在途 turn」推断（SDK 未建模时的过渡实现）。
 	ScopeInferred = "inferred_inflight"
+	// ScopeAmbiguous：`_meta` 未给 scope 且连接上无唯一在途 turn（多会话并发在途 / 会话外
+	// request-scope）→ 无法归属。宿主仍按取消回应（不能把 agent 挂住），但归属来源标为它并留痕，
+	// 使「为什么这张提问卡没出现」在诊断里可查，而不是无痕消失。
+	ScopeAmbiguous = "ambiguous"
 )
 
 // ElicitationRequest 是 agent 发起的一次结构化提问请求（宿主需渲染并征询用户）。
 type ElicitationRequest struct {
-	// SessionID 会话归属：过渡期由宿主（orchestrator）按连接上下文注入，acl 层恒为空。
+	// SessionID 会话归属：acl 层先按 `_meta` 填（ScopeWire），未命中留空由宿主
+	// （orchestrator）按连接上下文注入（ScopeInferred）。
 	SessionID string
 	// ScopeSource 归属来源（wire | inferred_inflight）：由注入方填写，供 REST/WS 载荷与排障展示。
 	ScopeSource string
@@ -62,7 +68,8 @@ type ElicitationOutcome struct {
 }
 
 // elicitationRequestFromSDK 把 SDK 的 elicitation/create 折叠为内部 ElicitationRequest。
-// SessionID 不在本层填充（宿主注入，见包注释）；Form/Url 均缺失时返回 ok=false。
+// SessionID/ScopeSource 先按 `_meta` 填（wire），未命中留空由宿主注入（见包注释）；
+// Form/Url 均缺失时返回 ok=false。
 func elicitationRequestFromSDK(p acpsdk.UnstableCreateElicitationRequest) (ElicitationRequest, bool) {
 	switch {
 	case p.Form != nil:
@@ -70,6 +77,9 @@ func elicitationRequestFromSDK(p acpsdk.UnstableCreateElicitationRequest) (Elici
 		req := ElicitationRequest{
 			Mode:    "form",
 			Message: p.Form.Message,
+		}
+		if sid := sessionIDFromMeta(p.Form.Meta); sid != "" {
+			req.SessionID, req.ScopeSource = sid, ScopeWire
 		}
 		if len(s.Properties) > 0 || len(s.Required) > 0 || s.Title != nil || s.Description != nil {
 			req.Schema = &ElicitationSchema{
@@ -81,12 +91,16 @@ func elicitationRequestFromSDK(p acpsdk.UnstableCreateElicitationRequest) (Elici
 		}
 		return req, true
 	case p.Url != nil:
-		return ElicitationRequest{
+		req := ElicitationRequest{
 			Mode:    "url",
 			Message: p.Url.Message,
 			URL:     p.Url.Url,
 			URLID:   string(p.Url.ElicitationId),
-		}, true
+		}
+		if sid := sessionIDFromMeta(p.Url.Meta); sid != "" {
+			req.SessionID, req.ScopeSource = sid, ScopeWire
+		}
+		return req, true
 	}
 	return ElicitationRequest{}, false
 }
@@ -120,9 +134,14 @@ func (h *hostClient) UnstableCreateElicitation(ctx context.Context, p acpsdk.Uns
 	return elicitationResponseFromOutcome(h.opts.CreateElicitation(ctx, req)), nil
 }
 
-// UnstableCompleteElicitation 处理 agent 的 elicitation/complete 通知（URL 模式收尾告知）。
-// unstable wire 未带会话归属，宿主无可定位 UI 卡片，仅作协议容忍（返回 nil 即视为已处理）。
-func (h *hostClient) UnstableCompleteElicitation(context.Context, acpsdk.UnstableCompleteElicitationNotification) error {
+// UnstableCompleteElicitation 处理 agent 的 elicitation/complete 通知：URL 模式的提问已在 agent 侧
+// 走完（用户在浏览器里完成授权/登录），agent 以此告知宿主**可以收敛卡片**。
+// 通知只带 elicitationId（无会话归属），故宿主按 id 反查挂起项并收尾；注入的
+// CompleteElicitation 为空时仅作协议容忍（返回 nil 即视为已处理，行为与历史一致）。
+func (h *hostClient) UnstableCompleteElicitation(ctx context.Context, p acpsdk.UnstableCompleteElicitationNotification) error {
+	if h.opts.CompleteElicitation != nil {
+		h.opts.CompleteElicitation(ctx, string(p.ElicitationId))
+	}
 	return nil
 }
 

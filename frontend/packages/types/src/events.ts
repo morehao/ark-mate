@@ -18,7 +18,12 @@ export const Ev = {
   PermissionPolicy: 'session.permission_policy',
   PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
-  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消）
+  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消/agent 收尾 complete）
+  // §6 busy input 队列：会话正忙时用户输入入队 / 投递 / 撤下。队列视图只认这三条事件
+  // （queued 建项、delivered|cancelled 收敛），不做本地推断。
+  InputQueued: 'session.input_queued',
+  InputDelivered: 'session.input_delivered',
+  InputCancelled: 'session.input_cancelled',
   // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
   // 拓扑变化时推）：payload = {session_id, agent_id, runtime, options: ConfigOption[]}。
   ConfigOptions: 'session.config_options',

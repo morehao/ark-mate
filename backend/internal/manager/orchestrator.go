@@ -52,6 +52,9 @@ type ActiveConversation struct {
 
 // Turn 一轮 prompt 的运行状态。
 type Turn struct {
+	// id 本轮标识（平台侧生成）。用途：§6 排队输入的 target_turn_id 台账（「排在哪一轮后面」），
+	// 以及日志/事件里指认具体某轮——不做投递判据（那一轮必然先结束）。
+	id        string
 	done      chan struct{}
 	cancel    context.CancelFunc
 	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）

@@ -40,7 +40,18 @@ type Skill struct {
 	Description string        `json:"description,omitempty"`
 	Body        string        `json:"body,omitempty"`
 	Sources     []SkillSource `json:"sources,omitempty"`
+	// Enabled 启停开关（§13.4 S4）：nil = 未声明（默认启用）；显式 false = 禁用。
+	// 用指针是为了「未声明」与「显式关掉」在磁盘上可区分——写回文件时只动它一个键，
+	// 其余字段（含未知键）原样保留（见 manager.SetSkillEnabled）。
+	Enabled *bool `json:"enabled,omitempty"`
+	// Warnings 装载期正文扫描的非 critical 告警（§13.2 S1；critical 已在 RegisterSkill 拒载）。
+	// 派生字段：不落盘、不从 JSON 读（`json:"-"`）——磁盘上的定义是事实源，扫描结果每次装载重算，
+	// 免得「改了正文但告警还是旧的」。REST 读模型另行暴露（见 SkillResp.Warnings）。
+	Warnings []Warning `json:"-"`
 }
+
+// IsEnabled 报告 skill 当前是否启用（未声明 = 启用；禁用**只影响投放**，定义与正文照旧保留）。
+func (s Skill) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
 // SkillSource 描述一条 skill 在某个 runtime 原生位置的物化目标。
 type SkillSource struct {
@@ -50,15 +61,31 @@ type SkillSource struct {
 }
 
 // McpServer 是 MCP 注册表的一个条目（平台唯一事实源）。
-// Headers 可含访问凭证：只存内部供 P2 session/new 注入，REST 一律不读回（同 providers 立场）。
+//
+// §13.3 M1：**明文与密钥在类型上分开**。四个字典各司其职，"哪个是秘密"由字段名回答，
+// 不靠读值猜：
+//
+//	Env           明文环境变量（stdio 子进程注入；可展示、可 diff）
+//	SecretEnv     密钥型环境变量：**值只能是引用**（vault:… / env:…）
+//	Headers       明文 header（非密钥）
+//	SecretHeaders 密钥型 header：值只能是引用
+//
+// 引用在注入前一刻才解析成明文（internal/manager 调 vault），所以定义文件里永远没有密钥本体。
 type McpServer struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name,omitempty"`
-	Transport string            `json:"transport"`         // stdio | sse | http | streamable_http
-	Command   string            `json:"command,omitempty"` // stdio 时
-	Args      []string          `json:"args,omitempty"`
-	URL       string            `json:"url,omitempty"` // http/sse 时
-	Headers   map[string]string `json:"headers,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name,omitempty"`
+	Transport string   `json:"transport"`         // stdio | sse | http | streamable_http
+	Command   string   `json:"command,omitempty"` // stdio 时
+	Args      []string `json:"args,omitempty"`
+	URL       string   `json:"url,omitempty"` // http/sse 时
+	// Env 明文环境变量（stdio 注入）。
+	Env map[string]string `json:"env,omitempty"`
+	// SecretEnv 密钥型环境变量：值必须是 vault:<ns>/<name> 或 env:<NAME>。
+	SecretEnv map[string]string `json:"secret_env,omitempty"`
+	// Headers 明文 header（非密钥）。
+	Headers map[string]string `json:"headers,omitempty"`
+	// SecretHeaders 密钥型 header：值必须是 vault:<ns>/<name> 或 env:<NAME>。
+	SecretHeaders map[string]string `json:"secret_headers,omitempty"`
 }
 
 // Tool 是 Tool 目录的一个条目（读通：MCP tools/list + 静态/平台工具 + 观察兜底）。

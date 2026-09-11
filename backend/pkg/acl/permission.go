@@ -16,6 +16,11 @@ type PermissionOption struct {
 // PermissionRequest 是 agent 发起的一次权限请求（宿主需向用户征询并决策）。
 type PermissionRequest struct {
 	SessionID string
+	// RequestID 是 wire `_meta` 给出的请求归属键（requestId/request_id；无则空串）。
+	// 宿主的待决键是自生成的 call_id（genCallID），故它不参与决策寻址，只作**归属证据**：
+	// 排障时与 agent 侧日志对齐同一次 JSON-RPC 请求（会话外 request-scope 的请求没有 sessionId，
+	// 只有它能对上号）。容忍读取见 pkg/acl/scope.go。
+	RequestID string
 	ToolCall  ToolCallInfo // 工具调用详情（title/kind/input）
 	Options   []PermissionOption
 }
@@ -38,6 +43,7 @@ type PermissionDecision struct {
 func permissionRequestFromSDK(p acpsdk.RequestPermissionRequest) PermissionRequest {
 	req := PermissionRequest{
 		SessionID: string(p.SessionId),
+		RequestID: requestIDFromMeta(p.Meta),
 		ToolCall: ToolCallInfo{
 			ID:     string(p.ToolCall.ToolCallId),
 			Title:  firstNonEmptyPtr(p.ToolCall.Title),

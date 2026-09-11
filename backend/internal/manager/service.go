@@ -8,6 +8,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/vault"
 	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -51,6 +52,10 @@ type ConversationRec struct {
 	Provider           string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
 	Model              string // 会话级模型 id（空 = 底座默认）
 	RuntimeHint        string // 最近/首选 runtime（执行提示，非身份）
+	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
+	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
+	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
+	Generation int64
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
@@ -91,12 +96,18 @@ type Service struct {
 	currentAgent string
 	catalog      *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
+	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
+	capabilityDir string
+	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
+	skillTargets []SkillMaterializeTarget
 
 	mu            sync.Mutex
 	agents        map[string]*AgentRec
 	conversations map[string]*ConversationRec
-	ver           map[string]int64 // 每 agg(conversation) 的版本计数（域事件递增）
-	restoring     bool             // RestoreFromStore 进行中：registerConversation 跳过 DB 回写
+	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
+	inputs    map[string][]QueuedInput
+	ver       map[string]int64 // 每 agg(conversation) 的版本计数（域事件递增）
+	restoring bool             // RestoreFromStore 进行中：registerConversation 跳过 DB 回写
 
 	// MCP live 探测状态（P2 §5.2）：独立锁——探测可能耗时，不阻塞会话面。
 	mcpMu           sync.Mutex
@@ -106,6 +117,14 @@ type Service struct {
 	// A3 诊断：每 agent 最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
 	diagMu   sync.Mutex
 	lastErrs map[string]agentLastErr
+	// scopeNotes 每 agent 最近一条「归属歧义」留痕（elicitation 无法归属会话时写入）。
+	scopeNotes map[string]scopeNote
+	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
+	coalescer *chunkCoalescer
+	// vaultStore §5 provider 密钥加密落盘句柄（惰性创建 + 缓存；见 providers.go providerVault）。
+	vaultStore *vault.Store
+	vaultTried bool
+	vaultErr   error
 
 	// B5 原生权限映射开关（FORGE_NATIVE_PERMISSION=off 关闭；默认开启）。
 	nativePermMu      sync.Mutex
@@ -120,6 +139,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		bus:             bus,
 		agents:          make(map[string]*AgentRec),
 		conversations:   make(map[string]*ConversationRec),
+		inputs:          make(map[string][]QueuedInput),
 		ver:             make(map[string]int64),
 		providers:       make(map[string]*providerDef),
 		catalog:         newCatalogStore(),
@@ -127,9 +147,14 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		mcpProbes:       make(map[string]mcpProbeStatus),
 		mcpProbeTimeout: defaultMCPProbeTimeout,
 		lastErrs:        make(map[string]agentLastErr),
+		scopeNotes:      make(map[string]scopeNote),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
+	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
+	s.coalescer = newChunkCoalescer(func(typ, conversationID string, payload any) {
+		s.publishRaw(typ, conversationID, payload)
+	}, slog.Default())
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	for _, b := range builtinAgents {
 		if _, ok := reg.Get(b.runtime); !ok {
@@ -184,7 +209,9 @@ func (s *Service) beginTranscript(conversationID, agentID, runtimeID, cwd string
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
+// 先落掉合并器里的尾部文本增量，再关文件——否则长回复的最后一段会丢。
 func (s *Service) closeTranscripts() {
+	s.flushChunks()
 	if s.tx == nil {
 		return
 	}
@@ -210,6 +237,29 @@ func (s *Service) registerConversation(rec *ConversationRec) {
 	if !restoring {
 		s.persistConversation(rec)
 	}
+}
+
+// bumpGeneration 会话执行代际自增（执行上下文重建时调用；见 ConversationRec.Generation）。
+func (s *Service) bumpGeneration(id string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.conversations[id]
+	if !ok {
+		return 0
+	}
+	rec.Generation++
+	return rec.Generation
+}
+
+// conversationGeneration 读会话当前执行代际（会话不存在 → 0，此时任何排队项都不匹配 → 作废）。
+func (s *Service) conversationGeneration(id string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.conversations[id]
+	if !ok {
+		return 0
+	}
+	return rec.Generation
 }
 
 // conversationRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。

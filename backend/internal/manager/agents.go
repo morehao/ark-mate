@@ -30,11 +30,14 @@ var agentIDRE = regexp.MustCompile(agentIDPattern)
 
 // agentDefinitionFile 磁盘上的 agent 定义。
 type agentDefinitionFile struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Runtimes []string          `json:"runtimes"`           // 路由候选 runtime（P0 取首候选）
-	Provider string            `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
-	Env      map[string]string `json:"env,omitempty"`      // 预留：按 agent 附加 env（本轮不注入，仅持久化）
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Runtimes []string `json:"runtimes"`           // 路由候选 runtime（P0 取首候选）
+	Provider string   `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
+	// 这里曾有 `Env map[string]string`（"预留：按 agent 附加 env，本轮不注入，仅持久化"）。
+	// §5 复核后**删除**：它从未被读取/注入，唯一作用是诱使把密钥字面值停放在 agents/*.json 里
+	// （明文落盘）。将来真要支持「按 agent 附加 env」，值必须支持 `vault:<ns>/<name>` 引用，
+	// 而不是字面值——provider 档案已是这条路（见 providers.go）。
 	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。缺省 = 未声明（全启用按 runtime 传输
 	// 过滤）；`mcps: []` = 本 agent 禁用 MCP 注入。指针以区分「未声明」与「空白名单」。
 	Mcps *[]string `json:"mcps,omitempty"`

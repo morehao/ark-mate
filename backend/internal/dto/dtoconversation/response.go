@@ -60,7 +60,11 @@ type ConversationCreateResp struct {
 type ConversationPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
-	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
+	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
+	// Queued/InputID 仅 delivery=after_turn|interrupt_then_prompt 且会话正忙时出现：
+	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /conversations/:id/inputs/:input_id 撤下）。
+	Queued  bool   `json:"queued,omitempty"`
+	InputID string `json:"input_id,omitempty"`
 }
 
 // ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
@@ -137,7 +141,8 @@ type ElicitationResp struct {
 	SessionID     string `json:"session_id"`
 	// ConversationID 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起）。
 	ConversationID string `json:"conversation_id"`
-	// ScopeSource 归属来源：wire | inferred_inflight（SDK 未建模 scope 时由宿主按唯一在途 turn 推断）。
+	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）
+	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`
 	Message     string         `json:"message"`

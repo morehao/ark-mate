@@ -58,6 +58,8 @@ function permissionResolvedLabel(p: Record<string, unknown> | undefined): string
 function elicitationResolvedLabel(p: Record<string, unknown> | undefined): string {
   const reason = String(p?.reason ?? '')
   const action = String(p?.action ?? '')
+  // agent 告知 URL 模式提问已在 agent 侧完成（elicitation/complete）→ 不是「用户提交了内容」。
+  if (reason === 'complete') return '链接流程已完成'
   if (action === 'accept') return '已提交'
   if (action === 'decline') return '已拒绝'
   if (reason === 'timeout') return '超时自动取消'

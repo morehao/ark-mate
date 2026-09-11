@@ -8,14 +8,43 @@ import (
 
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/pkg/redact"
 )
 
-// publish 把域事件发布进 eventbus（agg = conversationID；每 agg 版本递增），
+// publish 是**事件的唯一出口**，分两段：
+//
+//  1. ③ 增量合并：文本增量（session.message/thought）进 chunkCoalescer 攒批，其余类型在此
+//     **先 flush 本会话缓冲再发布**——保证「文本先于终态/工具卡」的 seq 顺序不被越过；
+//  2. publishRaw：脱敏闸门 + 落 events 表（事务内取全局 seq）+ 镜像进 bus + transcript 旁路。
+//
+// 缓冲增量的真正发布走同一 publishRaw（由定时窗口/阈值/终端事件触发），故落库与推流路径唯一。
+// 合并不改变事件 type 与 payload 形状（仍带 session_id/agent_id/msg_id 与拼接后的 text），
+// 前端按 msg_id 追加同一条消息的渲染逻辑无需改动。
+func (s *Service) publish(typ, conversationID string, payload any) eventbus.Event {
+	if c := s.coalescer; c != nil {
+		if m, ok := payload.(map[string]any); ok && c.offers(typ) {
+			c.add(typ, conversationID, m)
+			return eventbus.Event{}
+		}
+		c.flush(conversationID)
+	}
+	return s.publishRaw(typ, conversationID, payload)
+}
+
+// flushChunks 落掉全部缓冲增量（停机/关闭 transcript 前调用，避免丢尾部文本）。
+func (s *Service) flushChunks() {
+	s.coalescer.flushAll()
+}
+
+// publishRaw 把域事件发布进 eventbus（agg = conversationID；每 agg 版本递增），
 // 并旁路追加到该会话的 wire transcript（未启用/非 map 载荷时跳过）。
 // sqlite 模式下（st != nil）：事件先经 store.AppendEvent 在事务内取全局 seq，
 // bus 以 PublishAt 镜像同一号序（跨重启连续）；DB 写失败时退化进程内取号并告警（不阻断会话）。
 // 未注入 bus 时静默丢弃（仅出现在纯列表/单测场景）。
-func (s *Service) publish(typ, conversationID string, payload any) eventbus.Event {
+func (s *Service) publishRaw(typ, conversationID string, payload any) eventbus.Event {
+	// 脱敏闸门（唯一入口）：事件在此之后才落 events 表 / 进 transcript / 推 WS / 物化 runs，
+	// 故一处过闸即覆盖全部下游（含历史回放读的是同一份已脱敏载荷）。
+	payload = redact.Payload(payload)
 	s.mu.Lock()
 	s.ver[conversationID]++
 	v := s.ver[conversationID]

@@ -83,6 +83,9 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			}
 		}
 	}
+	// §6：重启前排队未投递的输入一律作废——它们等的那一轮已随进程消失，自动重放等于替用户
+	// 按下发送（且上下文已断）。保留行仅作审计（见 inputqueue.go）。
+	s.staleQueuedInputsOnRestore(ctx)
 	slog.Default().Info("store restored", "conversations", conversations, "events", injected)
 	return conversations, injected, nil
 }

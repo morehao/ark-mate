@@ -14,6 +14,10 @@ func registerCapability(v1 *gin.RouterGroup, ports Ports) {
 	ctr := ctrcapability.NewCapabilityCtr(ports.Capability)
 
 	v1.GET("/skills", ctr.ListSkills)
+	// §13.4 S4：启停（overlay：写回定义文件的 enabled + 立刻重校物化，禁用即撤回已物化副本）。
+	v1.PATCH("/skills/:id", ctr.SetSkillEnabled)
+	// §13.4 S2：物化体检（只读）：期望摘要 vs 实测摘要 + status，回答"agent 实际读到的与注册表一致吗"。
+	v1.GET("/skills/:id/materialization", ctr.SkillMaterialization)
 	v1.GET("/mcps", ctr.ListMcpServers)
 	v1.GET("/tools", ctr.ListTools)
 	// P2 §5.2 MCP live 探测：tools/list → 写 Tool 目录。

@@ -57,10 +57,20 @@ func (r *Registry) LoadDir(dir string) LoadResult {
 }
 
 // RegisterSkill 注册/覆盖一条 skill（供平台种子、运行态或测试直接注入）。
+//
+// §13.2 S1 闸门：正文在**入表前**扫描，critical 直接拒载（返回错误 → 目录装载路径告警跳过）。
+// 落点选在这里而不是物化层，是因为注册表是唯一入口——绕过它的路径（种子/测试/未来 CRUD）
+// 都不该存在；物化层只负责把已经过闸的正文写到 runtime 目录。
+// 非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）供 REST 读模型暴露。
 func (r *Registry) RegisterSkill(s *Skill) error {
 	if s == nil || s.ID == "" || !nameRE.MatchString(s.ID) {
 		return fmt.Errorf("capability skill: id 非法（须字母数字开头，≤64 位）: %q", idOf(s))
 	}
+	warnings := VerifyContent(s.Body)
+	if HasCritical(warnings) {
+		return criticalErr(s.ID, warnings)
+	}
+	s.Warnings = warnings
 	r.mu.Lock()
 	r.skills[s.ID] = s
 	r.mu.Unlock()
@@ -80,10 +90,57 @@ func (r *Registry) RegisterMcpServer(m *McpServer) error {
 	if m.Transport == TransportStdio && !filepath.IsAbs(m.Command) {
 		return fmt.Errorf("capability mcp: stdio server %q 的 command 须为绝对路径（当前 %q）", m.ID, m.Command)
 	}
+	// §13.3 M1：明文与密钥分开校验。明文项不许空值（多半是写漏了），密钥项**只接受引用**
+	// ——把明文密钥写进定义文件等于等它落盘，这正是这条规则存在的理由。
+	if err := ValidatePlainBindings("env", m.Env); err != nil {
+		return fmt.Errorf("%w（server %q）", err, m.ID)
+	}
+	if err := ValidatePlainBindings("headers", m.Headers); err != nil {
+		return fmt.Errorf("%w（server %q）", err, m.ID)
+	}
+	if err := ValidateSecretBindings("secret_env", m.SecretEnv); err != nil {
+		return fmt.Errorf("%w（server %q）", err, m.ID)
+	}
+	if err := ValidateSecretBindings("secret_headers", m.SecretHeaders); err != nil {
+		return fmt.Errorf("%w（server %q）", err, m.ID)
+	}
+	warnCredentialShapedPlaintext(m)
+	// 同名键同时出现在明文与密钥字典里 → 注入时谁赢没有好答案，拒绝（而不是悄悄定优先级）。
+	for _, k := range KeysOf(m.SecretEnv) {
+		if _, dup := m.Env[k]; dup {
+			return fmt.Errorf("capability mcp: server %q 的 %q 同时在 env 与 secret_env 里（键不得重复）", m.ID, k)
+		}
+	}
+	for _, k := range KeysOf(m.SecretHeaders) {
+		if _, dup := m.Headers[k]; dup {
+			return fmt.Errorf("capability mcp: server %q 的 %q 同时在 headers 与 secret_headers 里（键不得重复）", m.ID, k)
+		}
+	}
 	r.mu.Lock()
 	r.mcps[m.ID] = m
 	r.mu.Unlock()
 	return nil
+}
+
+// credentialishHeaderRE 明文 header 里"看起来像凭据"的键名（Authorization / X-Api-Key / *-Token …）。
+var credentialishHeaderRE = regexp.MustCompile(`(?i)^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-token|.*[-_](token|secret|password|key))$`)
+
+// warnCredentialShapedPlaintext 明文 header 命中"像凭据的键名"时提醒改放 secret_headers。
+//
+// **只提醒不拒绝**：这一层认不出"值是不是真凭据"（猜错就把正常配置挡在门外），
+// 但键名是强信号——`Authorization` 里放明文 token 是最常见的走错门。自动识别密文形态
+// （`sk-…`/`Bearer …`）属 §7 的"凭据卫生"，与出站 SSRF 那批一起做。
+func warnCredentialShapedPlaintext(m *McpServer) {
+	for _, k := range KeysOf(m.Headers) {
+		if !credentialishHeaderRE.MatchString(k) {
+			continue
+		}
+		if _, inSecret := m.SecretHeaders[k]; inSecret {
+			continue
+		}
+		slog.Warn("capability mcp: 明文 header 的键名看起来像凭据，建议移到 secret_headers（值只接受 vault:/env: 引用）",
+			"server", m.ID, "header", k)
+	}
 }
 
 // RegisterTool 注册/覆盖一个工具（平台 builtin / 观察兜底 / P2 MCP live 条目共用入口）。
@@ -100,7 +157,43 @@ func (r *Registry) RegisterTool(t *Tool) error {
 	return nil
 }
 
-// ListSkills 返回按 ID 排序的 skill 副本。
+// SkillByID 按 id 取 skill（ok=false 表示未注册）。
+func (r *Registry) SkillByID(id string) (Skill, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.skills[id]
+	if !ok {
+		return Skill{}, false
+	}
+	return *s, true
+}
+
+// SetSkillEnabled 就地改写某 skill 的启停位（返回改写后的条目；ok=false = 未注册）。
+// 只动 Enabled 一个字段：正文/来源/告警原样保留——启停是 overlay，不是重新注册。
+func (r *Registry) SetSkillEnabled(id string, enabled bool) (Skill, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.skills[id]
+	if !ok {
+		return Skill{}, false
+	}
+	v := enabled
+	s.Enabled = &v
+	return *s, true
+}
+
+// SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证
+// = 该 runtime 物化不出来，要给用户一个人话原因，而不是让技能静默消失）。
+func SupportedFormat(format string) bool {
+	switch format {
+	case FormatSkillMD, FormatSkillMDFrontmatter:
+		return true
+	default:
+		return false
+	}
+}
+
+// ListSkills 返回按 ID 排序的 skill 副本（含被禁用的：启停视图要能看见并恢复它们）。
 func (r *Registry) ListSkills() []Skill {
 	r.mu.Lock()
 	defer r.mu.Unlock()

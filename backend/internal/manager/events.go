@@ -43,6 +43,17 @@ const (
 	// 唯一事实（不依赖前端时钟）。payload = {conversation_id, elicitation_id, action(accept|decline|cancel),
 	// reason(user|timeout|cancel)}。
 	BusElicitationResolved = "session.elicitation_resolved"
+	// BusInputQueued §6：会话正忙，用户输入已入队等待投递（delivery=after_turn|interrupt_then_prompt）。
+	// payload = {session_id, agent_id, input_id, text, delivery, target_turn_id, generation}。
+	// 前端据此在输入区上方渲染队列；收敛靠 input_delivered / input_cancelled。
+	BusInputQueued = "session.input_queued"
+	// BusInputDelivered §6：排队输入已作为新一轮投递出去（payload = {session_id, agent_id,
+	// input_id, delivery, reason(turn_finished)}）。其后紧跟该轮的 session.user_message。
+	BusInputDelivered = "session.input_delivered"
+	// BusInputCancelled §6：排队输入离队但**未被投递**（payload = {session_id, agent_id,
+	// input_id, delivery, reason(user_cancel|deliver_failed)}）。与 delivered 分开是刻意的：
+	// 「撤下」和「发出去了」是两件不同的事实，复用同一个 type 会让前端只能靠猜。
+	BusInputCancelled = "session.input_cancelled"
 	// BusRuntime 会话/runtime 连接态事件（phase/pending_confirmations/can_send；M2「会话态与
 	// runtime 态分离」起发布，M1 预留——payload 契约见设计文档 §4.5）。
 	BusRuntime = "session.runtime"

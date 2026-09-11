@@ -163,7 +163,7 @@ func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 			go func() { got <- m.RegisterAndWait(context.Background(), "s1", req, nil) }()
 			waitRegistered(t, m, "s1")
 			callID := pendingCallID(t, m, "s1")
-			found, out := m.ResolveDecision(callID, tc.d)
+			found, out := m.ResolveDecision("s1", callID, tc.d)
 			if !found {
 				t.Fatal("决策未命中 call_id")
 			}
@@ -175,7 +175,46 @@ func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 	}
 	// 未知 call_id：found=false + 零值回执（不猜测）。
 	m := NewPermissionManager(time.Second)
-	if found, out := m.ResolveDecision("no-such", acl.PermissionDecision{Allowed: true}); found || out.Kind != "" {
+	if found, out := m.ResolveDecision("s1", "no-such", acl.PermissionDecision{Allowed: true}); found || out.Kind != "" {
 		t.Fatalf("未知 call_id 应为 (false, 零值)，得到 (%v,%+v)", found, out)
+	}
+}
+
+// TestResolveDecisionRejectsCrossConversation verify C3 scope 归属：决策会话与挂起项归属不符时
+// 一律拒绝——found=false、既不投递也不删除挂起项，且随后由归属会话决策仍能正常命中
+// （这正是「陈旧标签页/串号请求」不能把别人的权限卡消掉的保证）。
+func TestResolveDecisionRejectsCrossConversation(t *testing.T) {
+	m := NewPermissionManager(5 * time.Second)
+	req := acl.PermissionRequest{
+		ToolCall: acl.ToolCallInfo{ID: "tc-scope", Title: "写文件", Kind: "write"},
+		Options:  []acl.PermissionOption{{OptionID: "allow_once", Name: "允许", Kind: permKindAllowOnce}},
+	}
+	exited := make(chan acl.PermissionDecision, 1)
+	go func() { exited <- m.RegisterAndWait(context.Background(), "owner", req, nil) }()
+	waitRegistered(t, m, "owner")
+	callID := pendingCallID(t, m, "owner")
+
+	// 跨会话决策：拒绝且挂起项原样保留。
+	found, out := m.ResolveDecision("intruder", callID, acl.PermissionDecision{Allowed: true, OptionID: "allow_once"})
+	if found || out.Kind != "" {
+		t.Fatalf("跨会话决策应被拒（false+零值），得到 (%v,%+v)", found, out)
+	}
+	if got := m.pendingCount("owner"); got != 1 {
+		t.Fatalf("跨会话决策不得删除挂起项，pending=%d", got)
+	}
+	select {
+	case d := <-exited:
+		t.Fatalf("跨会话决策不得投递，消费者被唤醒: %+v", d)
+	default:
+	}
+
+	// 归属会话决策：正常命中并唤醒消费者。
+	found, out = m.ResolveDecision("owner", callID, acl.PermissionDecision{Allowed: true, OptionID: "allow_once"})
+	if !found || out.Kind != acl.OutcomeSelected || out.OptionID != "allow_once" {
+		t.Fatalf("归属会话决策应命中 (selected,allow_once)，得到 (%v,%+v)", found, out)
+	}
+	d := <-exited
+	if !d.Allowed || d.OptionID != "allow_once" {
+		t.Fatalf("决策未按预期投递: %+v", d)
 	}
 }
