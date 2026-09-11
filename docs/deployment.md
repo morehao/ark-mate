@@ -53,8 +53,9 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
 | 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
-持久层开关：`FORGE_STORE=sqlite|memory|auto`（空 = auto：库文件已存在且非空 → sqlite，否则
-memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
+持久层开关：`FORGE_STORE=sqlite|memory|auto`（空或 `auto` = 按库文件定：已存在且非空 → sqlite，
+否则 memory）。**非法值启动即报错**并列出合法取值——不静默回落 auto，否则一个错字就可能悄悄
+切到另一种持久化模式。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
 `usage_stats_unsupported`（明确降级，不返回假零值）。
 
 ### 2.2.1 工作空间（会话沙箱边界）的运维要点
@@ -120,7 +121,7 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `FORGE_ADDR` | `:10001` | 监听地址（见 §2.1） |
-| `FORGE_STORE` | auto | `sqlite` / `memory` / 空 |
+| `FORGE_STORE` | auto | `auto` / `sqlite` / `memory`（空同 `auto`）；非法值报错 |
 | `FORGE_DB` | `~/.forge/forge.db` | SQLite 路径 |
 | `FORGE_TRANSCRIPTS` | `~/.forge/transcripts` | wire transcript 目录 |
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录 |

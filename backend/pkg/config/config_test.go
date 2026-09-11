@@ -330,6 +330,70 @@ func TestMcpAutoProbeMode(t *testing.T) {
 	}
 }
 
+// TestStoreMode 钉住持久层模式的取值语义。
+//
+// 重点是**非法值必须报错**：此前非法/空值都静默回落 auto，而 auto 会按"DB 文件在不在"
+// 解析成 sqlite 或 memory——一个错字可能把用户悄悄丢进相反的模式（sqlit 在无 DB 时进
+// memory，表现为"数据丢了"），且回落后的 `forge config` 输出与合法的 auto 逐字相同，
+// 用户拿不到任何"值被丢弃了"的信号。未设置（无偏好）仍必须宽松地走 auto。
+func TestStoreMode(t *testing.T) {
+	hermetic(t)
+	unset(t, "FORGE_STORE")
+
+	// 未设置 = 无偏好 = auto（空串），且不应报错。
+	c, _, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("未设置时不应报错: %v", err)
+	}
+	if c.StoreMode != "" {
+		t.Fatalf("未设置应为 auto（空串），got %q", c.StoreMode)
+	}
+
+	// 显式 auto 与未设置等价，但它是**合法取值**（文档一直这么写）。
+	tsetenv(t, "FORGE_STORE", StoreModeAuto)
+	c, srcs, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("显式 auto 不应报错: %v", err)
+	}
+	if c.StoreMode != "" {
+		t.Fatalf("显式 auto 应归一成空串，got %q", c.StoreMode)
+	}
+	if srcs["store"] == "" {
+		t.Fatal("应记录取值来源")
+	}
+
+	for _, tc := range []struct{ in, want string }{
+		{"sqlite", StoreModeSQLite},
+		{"memory", StoreModeMemory},
+		{"SQLITE", StoreModeSQLite},     // 大小写不敏感
+		{"  memory  ", StoreModeMemory}, // 前后空白容忍
+	} {
+		tsetenv(t, "FORGE_STORE", tc.in)
+		c, _, err := LoadResolved("")
+		if err != nil {
+			t.Fatalf("%q 不应报错: %v", tc.in, err)
+		}
+		if c.StoreMode != tc.want {
+			t.Errorf("%q 应解析为 %q，got %q", tc.in, tc.want, c.StoreMode)
+		}
+	}
+
+	// 非法值必须报错，且提示里要列出合法取值（用户照着改就行）。
+	// 非法值必须报错，且提示里要列出合法取值（用户照着改就行）。
+	// 注意 "auto "（带尾空格）**不算非法**：与同级枚举键一致地做了 TrimSpace，见上面的空白容忍用例。
+	for _, bad := range []string{"sqlit", "memry", "garbage", "postgres"} {
+		tsetenv(t, "FORGE_STORE", bad)
+		_, _, err := LoadResolved("")
+		if err == nil {
+			t.Errorf("%q 是非法取值，必须报错（此前会静默回落 auto）", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "auto|sqlite|memory") {
+			t.Errorf("%q 的报错应列出合法取值 auto|sqlite|memory，got %v", bad, err)
+		}
+	}
+}
+
 // TestSkillMaterializeDirs C4 多 root 物化配置解析（runtime=dir 列表）。
 func TestSkillMaterializeDirs(t *testing.T) {
 	hermetic(t)

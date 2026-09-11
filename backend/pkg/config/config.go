@@ -46,8 +46,9 @@ type Config struct {
 	TranscriptDir string
 	// DBPath SQLite 库文件路径（P1 落库：events/sessions/…；FORGE_DB 覆盖，默认 ~/.forge/forge.db）。
 	DBPath string
-	// StoreMode 持久层开关："sqlite" | "memory" | ""(auto：DB 文件已存在 → sqlite，否则 memory)。
-	// FORGE_STORE 覆盖。
+	// StoreMode 持久层开关："sqlite" | "memory" | ""。
+	// 空串表示 auto（DB 文件已存在 → sqlite，否则 memory）：未设置与显式 FORGE_STORE=auto
+	// 都落成它。非法取值在 materialize 里报错，不再静默回落。FORGE_STORE 覆盖。
 	StoreMode string
 	// HandoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；FORGE_HANDOFF_MAX_CHARS
 	// 覆盖，默认 6000；0 = 关闭 memo 兜底）。跨 runtime / 无原生 resume 时把历史压成摘要注入
@@ -133,6 +134,18 @@ const (
 
 // ValidMcpAutoProbeModes 合法取值（错误提示用）。
 var ValidMcpAutoProbeModes = []string{McpAutoProbeOff, McpAutoProbeStartup}
+
+// 持久层模式取值。StoreModeAuto 是**显式**的 auto：Config.StoreMode 里它落成空串
+// （空串同时表示"未设置"），真正的 auto 解析在 serve 装机时做——DB 文件已存在则 sqlite，
+// 否则 memory（见 internal/app/app.go）。
+const (
+	StoreModeAuto   = "auto"
+	StoreModeSQLite = "sqlite"
+	StoreModeMemory = "memory"
+)
+
+// ValidStoreModes 合法取值（错误提示用）。
+var ValidStoreModes = []string{StoreModeAuto, StoreModeSQLite, StoreModeMemory}
 
 // RemoteRuntime 是一条「远程 ACP 端点」runtime 声明（配置目录 runtimes.json 的数组元素）。
 type RemoteRuntime struct {
@@ -427,12 +440,26 @@ func materialize(r *resolver) (Config, error) {
 		c.Addr = v
 	}
 	if v, ok := r.get("store"); ok {
-		switch strings.ToLower(v) {
-		case "sqlite", "memory":
-			c.StoreMode = strings.ToLower(v)
-		default:
-			// 历史语义：非法/空值视为 auto（不报错，避免旧环境变量把 daemon 卡死）。
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case StoreModeAuto:
+			// 显式 auto：等价于未设（按 DB 文件是否已存在决定），但它是合法取值——
+			// 文档一直写 `FORGE_STORE=sqlite|memory|auto`，此前 auto 只靠 default 分支
+			// 巧合生效，不认它反而会打脸自己的文档。
 			c.StoreMode = ""
+		case "sqlite", "memory":
+			c.StoreMode = strings.ToLower(strings.TrimSpace(v))
+		default:
+			// 非法值**报错**，不再静默回落 auto。原注释声称"非法/空值视为 auto（避免旧环境
+			// 变量把 daemon 卡死）"，但：（a）查历史，FORGE_STORE 从引入那版起的取值集就是
+			// sqlite|memory|auto，**从未有过今天已非法的取值**，严格化不会淘汰任何曾经可用的
+			// 配置；（b）store 定的是**持久化语义**，回落 auto 会按"DB 文件在不在"解析成
+			// sqlite 或 memory——一个错字可能把用户悄悄丢进**相反**的模式（如 sqlit 在无 DB
+			// 时进 memory，表现为"数据丢了"；memry 在有 DB 时进 sqlite，以为不落盘却落盘）；
+			// （c）回落后的 `forge config` 输出与合法的 auto **逐字相同**，用户无从察觉值被丢弃。
+			// 空值/未设不报错（无偏好），故这里只拦非法取值；同级枚举键
+			// （native_permission / mcp_auto_probe）本来就是这么做的。
+			return bad("store", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidStoreModes, "|"), v))
 		}
 	}
 	if v, ok := r.get("handoff_max_chars"); ok {

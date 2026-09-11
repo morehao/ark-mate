@@ -111,13 +111,13 @@ func (a *App) Init(ctx context.Context) error {
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
 	mode := cfg.StoreMode
 	if mode == "" {
-		mode = "memory"
+		mode = config.StoreModeMemory
 		if fi, err := os.Stat(cfg.DBPath); err == nil && fi.Size() > 0 {
-			mode = "sqlite"
+			mode = config.StoreModeSQLite
 		}
 	}
 	switch mode {
-	case "sqlite":
+	case config.StoreModeSQLite:
 		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。
 		if dir := filepath.Dir(cfg.DBPath); dir != "" && dir != "." {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -140,11 +140,15 @@ func (a *App) Init(ctx context.Context) error {
 				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `forge migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
 			}
 		}
-	case "memory", "":
+	case config.StoreModeMemory, "":
 		// 会话 wire transcript（M1 #5，~/.forge/transcripts 或 FORGE_TRANSCRIPTS）。
 		a.svc.SetTranscriptDir(cfg.TranscriptDir)
 	default:
-		return usageErr("serve: 未知 FORGE_STORE=%q（sqlite|memory）", mode)
+		// 不可达：pkg/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串，
+		// 到这里只可能是配置层与装机层对取值集合的理解出现了 drift。保留为内部错误
+		// （不是 usageErr —— 这不是用户输入错，是代码不一致，别让用户去查自己的环境变量），
+		// 免得将来 drift 时静默走进某个默认分支。
+		return fatalErr("serve: 内部错误：持久层模式 %q 未被处理（配置层校验与装机层取值集合不一致）", mode)
 	}
 
 	// 工作空间策略：未指定 cwd 的建会话请求在 <workspace_dir>/<会话id>/ 下代建临时空间
@@ -181,7 +185,7 @@ func (a *App) Init(ctx context.Context) error {
 		return err
 	}
 
-	if mode == "sqlite" {
+	if mode == config.StoreModeSQLite {
 		// 启动恢复会话级权限记忆（permission_memories 表 → perm.mem，allow/reject 双侧）。
 		if err := a.orch.RestoreMemoriesFromStore(ctx); err != nil {
 			slog.Warn("serve: 恢复权限记忆失败", "err", err)
