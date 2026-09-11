@@ -30,6 +30,8 @@ import type {
   ResolvePermissionResp,
   RevokeMemoryReq,
   Skill,
+  SkillMaterializationResp,
+  SkillToggleResp,
   Tool,
   ConversationDetail,
   ConversationPatch,
@@ -210,6 +212,23 @@ export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/forge/skil
 export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/forge/mcps')
 
 export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/forge/tools')
+
+/**
+ * §13.4 S4：启停一个 skill（写回定义文件的 enabled 并立刻重校物化——启用写文件、禁用撤回副本）。
+ *
+ * 定义文件写成功即成功；物化失败在 `materialize_errors` 里回（不回滚定义，禁用本身是安全方向）。
+ */
+export const setSkillEnabled = (id: string, enabled: boolean): Promise<SkillToggleResp> =>
+  http.patch<SkillToggleResp>(`/forge/skills/${encodeURIComponent(id)}`, { enabled })
+
+/**
+ * §13.4 S2：skill 的物化审计（**只报不修**）。
+ *
+ * 每个物化目标给出状态与「期望摘要 vs 磁盘实测摘要」。修复不走这里：重校（再次启用/刷新）会
+ * 按平台版本覆盖，用户自有目录（user_owned）平台不碰。
+ */
+export const getSkillMaterialization = (id: string): Promise<SkillMaterializationResp> =>
+  http.get<SkillMaterializationResp>(`/forge/skills/${encodeURIComponent(id)}/materialization`)
 
 // ——— P2 §8.1/§5.2：Agent 统一能力目录 + MCP live 探测 ———
 

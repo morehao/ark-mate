@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Tabs, Tag, Tooltip } from 'antd'
-import { ExperimentOutlined, FileTextOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Switch, Tabs, Tag, Tooltip } from 'antd'
+import { ExperimentOutlined, FileSearchOutlined, FileTextOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark/ui'
 import {
   callMcpTool,
   getAgentCapabilities,
   getMcpPrompt,
+  getSkillMaterialization,
   listMcpPrompts,
   listMcpResources,
   listMcpServers,
@@ -13,10 +14,12 @@ import {
   listTools,
   probeMcpServer,
   readMcpResource,
+  setSkillEnabled,
   toErrorMessage,
 } from '@ark/api'
 import type {
   AgentCapabilities,
+  AgentSkill,
   McpPrompt,
   McpPromptsResult,
   McpPromptGetResult,
@@ -25,10 +28,22 @@ import type {
   McpServer,
   McpToolCallResult,
   Skill,
+  SkillMaterializationResp,
   Tool,
 } from '@ark/types'
 import { useForge } from '../store'
-import { fmtProbeAt, mcpRows, probeSummary, toolSourceLabel, type McpRow } from '../console/capabilityView'
+import {
+  fmtProbeAt,
+  materializationMeta,
+  materializationNeedsAttention,
+  materializationSummary,
+  mcpRows,
+  probeSummary,
+  skillActivationView,
+  skillWarningsView,
+  toolSourceLabel,
+  type McpRow,
+} from '../console/capabilityView'
 
 // ——— 能力目录页（§8.3 能力卡） ———
 // 上半：Agent 视角统一能力目录（GET /agents/:id/capabilities，§8.1）——按候选 runtime 裁剪/标注；
@@ -87,6 +102,42 @@ function Row({ children }: { children: ReactNode }) {
   )
 }
 
+/** 行内小标签统一样式（新增代码用；既有行内样式保持不动，避免无关联改动）。 */
+const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
+
+/**
+ * Agent 视角 skill 的投放标签（§13.4 S5：启用 ⟂ 适用，二者正交）。
+ *
+ * 「已禁用」是平台侧状态（可恢复），「不适用」是这个 Agent 用不上（原因给成人话，不做静默），
+ * 两者可能同时成立——所以是并列标签而不是二选一。
+ */
+function SkillActivationTags({ skill }: { skill: AgentSkill }) {
+  const a = skillActivationView(skill)
+  return (
+    <>
+      {!a.enabled && (
+        <Tooltip title="已在平台侧禁用（定义与正文保留，可随时恢复）">
+          <Tag color="default" style={smallTag}>
+            已禁用
+          </Tag>
+        </Tooltip>
+      )}
+      {!a.applicable && (
+        <Tooltip title={a.reasons.length > 0 ? a.reasons.join('；') : '该 Agent 的候选底座用不上这个 skill'}>
+          <Tag color="orange" style={smallTag}>
+            不适用
+          </Tag>
+        </Tooltip>
+      )}
+      {a.enabled && a.applicable && (
+        <Tag color="green" style={smallTag}>
+          可用
+        </Tag>
+      )}
+    </>
+  )
+}
+
 function Card({ children }: { children: ReactNode }) {
   return (
     <section style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, background: tokens.surface, overflow: 'hidden' }}>
@@ -107,6 +158,13 @@ export function CapabilitiesPage() {
   const [tools, setTools] = useState<Tool[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [probing, setProbing] = useState<string | null>(null)
+  // §13.4 S4 启停：按 skill id 记忙碌（同名行多个时只转当前那个）。
+  const [toggleBusy, setToggleBusy] = useState<string | null>(null)
+  // §13.4 S2 体检弹窗：目标 + 结果/错误（只报不修，故无「修复」按钮，只有再体检）。
+  const [matTarget, setMatTarget] = useState<{ id: string; name: string } | null>(null)
+  const [mat, setMat] = useState<SkillMaterializationResp | null>(null)
+  const [matBusy, setMatBusy] = useState(false)
+  const [matErr, setMatErr] = useState<string | null>(null)
   // B1 工具调用：目标（server+tool）+ 入参文本 + 结果/错误。
   const [callTarget, setCallTarget] = useState<{ server: string; tool: string } | null>(null)
   const [callArgs, setCallArgs] = useState('{}')
@@ -224,6 +282,46 @@ export function CapabilitiesPage() {
     </Tooltip>
   )
 
+  // doToggleSkill §13.4 S4：写回定义文件的 enabled 并立刻重校物化。
+  // 定义文件写成功即算成功；物化失败在 materialize_errors 里回（不回滚定义——禁用是安全方向）。
+  const doToggleSkill = async (s: Skill, next: boolean): Promise<void> => {
+    setToggleBusy(s.id)
+    try {
+      const res = await setSkillEnabled(s.id, next)
+      const errs = res.materialize_errors?.length ? `；重校失败：${res.materialize_errors.join('；')}` : ''
+      const action = res.next_action ? ` · ${res.next_action}` : ''
+      showToast(`${next ? '已启用' : '已禁用'} ${s.id}（写入 ${res.written} / 撤回 ${res.removed}）${errs}${action}`)
+      await Promise.all([loadSkills(), loadCaps(agentId)])
+    } catch (err) {
+      showToast(`切换 ${s.id} 失败：${toErrorMessage(err)}`)
+    } finally {
+      setToggleBusy(null)
+    }
+  }
+
+  // openMaterialization §13.4 S2：拉一次物化体检（只读，不改磁盘、不触发重校）。
+  const openMaterialization = async (id: string, name: string): Promise<void> => {
+    setMatTarget({ id, name })
+    setMat(null)
+    setMatErr(null)
+    setMatBusy(true)
+    try {
+      setMat(await getSkillMaterialization(id))
+    } catch (err) {
+      setMatErr(toErrorMessage(err))
+    } finally {
+      setMatBusy(false)
+    }
+  }
+
+  const materializationButton = (s: Skill): ReactNode => (
+    <Tooltip title="看每个物化目标的摘要一致性与归属（只报不修）">
+      <Button size="small" icon={<FileSearchOutlined />} onClick={() => void openMaterialization(s.id, s.name)}>
+        体检
+      </Button>
+    </Tooltip>
+  )
+
   // openCall 打开调用弹窗（默认参数取工具 schema 的 properties 骨架，纯便利、非校验）。
   const openCall = (server: string, tool: Tool): void => {
     setCallTarget({ server, tool: tool.name })
@@ -330,6 +428,30 @@ export function CapabilitiesPage() {
       </Tag>
     )
 
+  // secretTags §13.3 M6：只展示**键名**（值后端从不读回）；未就绪的引用单独标红——
+  // 「绑了但解析不了」以前只能在会话启动日志里撞见，现在列表就能看出来。
+  const secretTags = (m: McpRow): ReactNode =>
+    m.secretKeys.length === 0 && m.unresolvedSecretKeys.length === 0 ? null : (
+      <>
+        {m.secretKeys.length > 0 && (
+          <Tooltip title={`密钥型绑定（值只在注入时解析，界面不回）：${m.secretKeys.join('、')}`}>
+            <Tag color="geekblue" style={smallTag}>
+              密钥 {m.secretKeys.length}
+            </Tag>
+          </Tooltip>
+        )}
+        {m.unresolvedSecretKeys.length > 0 && (
+          <Tooltip
+            title={`引用已绑定但当前解析不了：${m.unresolvedSecretKeys.join('、')}。检查 vault 密文是否存在（或 vault.key 是否被换过）、env 变量是否设置——注入时解析不了这个 server 会被跳过。`}
+          >
+            <Tag color="red" style={smallTag}>
+              密钥未就绪 {m.unresolvedSecretKeys.length}
+            </Tag>
+          </Tooltip>
+        )}
+      </>
+    )
+
   return (
     <PageContainer
       title="能力"
@@ -402,6 +524,8 @@ export function CapabilitiesPage() {
                     <Row key={s.id}>
                       <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{s.name}</b>
                       <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{s.id}</Tag>
+                      {/* §13.4 S5：不适用也列出来并说明原因（不再静默过滤） */}
+                      <SkillActivationTags skill={s} />
                       <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
                       {s.sources?.map((src, i) => (
                         <Tooltip key={i} title={src.path}>
@@ -431,6 +555,7 @@ export function CapabilitiesPage() {
                       <Tag color={m.enabled ? 'green' : 'default'} style={{ marginInlineEnd: 0, fontSize: 10.5 }}>
                         {m.enabled ? '已启用' : '未启用'}
                       </Tag>
+                      {secretTags(m)}
                       {probeStatus(m)}
                       <span style={{ flex: 1, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                         {m.runtimes.length === 0 ? (
@@ -478,23 +603,52 @@ export function CapabilitiesPage() {
 
         {/* ——— 全局：Skills ——— */}
         <Card>
-          <SectionHeader title="Skills" hint="目录条目（body 为 SKILL.md 内容；物化到各 runtime 已接线）" count={skills.length} loading={busy === 'skills'} onRefresh={() => refresh('skills')} />
+          <SectionHeader
+            title="Skills"
+            hint="目录条目（平台唯一事实源）：启用即按 sources 投放、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动"
+            count={skills.length}
+            loading={busy === 'skills'}
+            onRefresh={() => refresh('skills')}
+          />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {skills.length === 0 ? (
               <SectionEmpty text="暂无 skill（~/.forge/capabilities/skills/*.json）" />
             ) : (
-              skills.map((s) => (
-                <Row key={s.id}>
-                  <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{s.name}</b>
-                  <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{s.id}</Tag>
-                  <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
-                  {s.sources?.map((src, i) => (
-                    <Tag key={i} style={{ fontSize: 10, marginInlineEnd: 0 }}>
-                      {src.runtime}·{src.format}
-                    </Tag>
-                  ))}
-                </Row>
-              ))
+              skills.map((s) => {
+                const warn = skillWarningsView(s.warnings)
+                const enabled = s.enabled ?? true
+                return (
+                  <Row key={s.id}>
+                    <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{s.name}</b>
+                    <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{s.id}</Tag>
+                    {/* §13.2 S1：装载期正文扫描的非 critical 告警（critical 已拒载，不会出现在这里） */}
+                    {warn && (
+                      <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{warn.hint}</span>}>
+                        <Tag color={warn.color} style={smallTag}>
+                          {warn.text}
+                        </Tag>
+                      </Tooltip>
+                    )}
+                    <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
+                    {s.sources?.map((src, i) => (
+                      <Tooltip key={i} title={src.path}>
+                        <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>
+                          {src.runtime}·{src.format}
+                        </Tag>
+                      </Tooltip>
+                    ))}
+                    {materializationButton(s)}
+                    <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按 sources 重新投放'}>
+                      <Switch
+                        size="small"
+                        checked={enabled}
+                        loading={toggleBusy === s.id}
+                        onChange={(next) => void doToggleSkill(s, next)}
+                      />
+                    </Tooltip>
+                  </Row>
+                )
+              })
             )}
           </div>
         </Card>
@@ -503,7 +657,7 @@ export function CapabilitiesPage() {
         <Card>
           <SectionHeader
             title="MCP Servers"
-            hint="注册表条目（headers/凭证后端不读回）；「探测」= live tools/list 写入 Tool 目录"
+            hint="注册表条目（§13.3 M1/M6：只回明文与密钥的**键名**，值与引用一律不读回）；「探测」= live tools/list 写入 Tool 目录"
             count={globalMcpRows.length}
             loading={busy === 'mcps'}
             onRefresh={() => refresh('mcps')}
@@ -518,6 +672,7 @@ export function CapabilitiesPage() {
                   <Tag color={TRANSPORT_COLOR[m.transport] ?? 'default'} style={{ marginInlineEnd: 0, fontSize: 11 }}>
                     {m.transport}
                   </Tag>
+                  {secretTags(m)}
                   {probeStatus(m)}
                   <span style={{ flex: 1 }}>
                     <span style={mono}>{m.endpoint}</span>
@@ -788,6 +943,98 @@ export function CapabilitiesPage() {
                   : ''}
               </pre>
             </div>
+          )}
+        </Modal>
+
+        {/* ——— §13.4 S2：skill 物化体检（只读；修复走启停/重校，不在这里动手） ——— */}
+        <Modal
+          title={matTarget ? `物化体检 · ${matTarget.name}` : '物化体检'}
+          open={matTarget !== null}
+          onCancel={() => setMatTarget(null)}
+          footer={null}
+          width={780}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ flex: 1, fontSize: 12.5, color: tokens.textSecondary }}>
+              {mat ? materializationSummary(mat) : matBusy ? '正在体检…' : ''}
+            </span>
+            {mat && (
+              <Tag color={mat.enabled ? 'green' : 'default'} style={smallTag}>
+                {mat.enabled ? '已启用' : '已禁用'}
+              </Tag>
+            )}
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={matBusy}
+              disabled={!matTarget}
+              onClick={() => matTarget && void openMaterialization(matTarget.id, matTarget.name)}
+            >
+              再体检
+            </Button>
+          </div>
+          {matErr ? (
+            <Alert type="error" showIcon message="体检失败" description={matErr} />
+          ) : !mat ? (
+            <div style={{ padding: 24, textAlign: 'center' }}>
+              <Spin />
+            </div>
+          ) : (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                style={{ fontSize: 12, marginBottom: 10 }}
+                message="体检只报不修"
+                description="修复不走这里：启用/禁用 skill 会立刻重校（按平台版本覆盖回正确内容）；用户自有目录（无归属标记）平台不覆盖，需要手工处理。"
+              />
+              {mat.states.length === 0 ? (
+                <SectionEmpty text={materializationSummary(mat)} />
+              ) : (
+                mat.states.map((st, i) => {
+                  const meta = materializationMeta(st.status)
+                  const attention = materializationNeedsAttention(st)
+                  return (
+                    <div
+                      key={`${st.root}-${st.runtime ?? ''}-${i}`}
+                      style={{
+                        border: `1px solid ${attention ? tokens.borderStrong : tokens.border}`,
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Tooltip title={meta.hint}>
+                          <Tag color={meta.color} style={smallTag}>
+                            {meta.label}
+                          </Tag>
+                        </Tooltip>
+                        <Tag style={smallTag}>{st.runtime || '单根'}</Tag>
+                        <span style={{ ...mono, flex: 1, fontSize: 11.5 }}>{st.dir}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: tokens.textSecondary, marginTop: 6 }}>{meta.hint}</div>
+                      {st.hash && (
+                        <div style={{ ...mono, fontSize: 11, color: tokens.textPlaceholder, marginTop: 4 }}>
+                          期望 {st.hash.slice(0, 16)}…
+                          {attention && st.actual_hash ? ` / 实测 ${st.actual_hash.slice(0, 16)}…` : ''}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: tokens.textPlaceholder, marginTop: 4 }}>
+                        {st.owners && st.owners.length > 0 ? `归属：${st.owners.join('、')}` : '归属：未登记'}
+                        {st.written_at ? ` · 写入 ${st.written_at}` : ''}
+                      </div>
+                      {st.detail && (
+                        <div style={{ fontSize: 11.5, color: tokens.textSecondary, marginTop: 4 }}>{st.detail}</div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+              {mat.notes && mat.notes.length > 0 && (
+                <Alert type="warning" showIcon style={{ fontSize: 12, marginTop: 8 }} message={mat.notes.join('；')} />
+              )}
+            </>
           )}
         </Modal>
       </div>

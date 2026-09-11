@@ -765,6 +765,33 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 `pkg/acl/mcp_inject_test.go`（env → ACP `EnvVariable` 有序下发，nil → 空数组）、
 `internal/manager/mcp_secret_test.go`（解析成功/失败、跨包词法一致、读模型不泄漏）。
 
+## 13.12 实施记录（2026-09-11 第五轮，面板接线）
+
+§13 的服务端能力此前只在 REST 上可用，面板看不见——这一轮把**已有**能力接到 UI（不新增端点，
+故 README 路由表不变）。改动集中在 `apps/panel/src/pages/CapabilitiesPage.tsx`、
+`apps/panel/src/console/capabilityView.ts`（纯函数视图模型）、`packages/api/src/resources/forge.ts`。
+
+- **S4 启停**：全局 Skills 行加 `Switch`（`PATCH /skills/:id`）。回执按事实拼一句话：
+  写回/撤回条数 + `materialize_errors`（有就带上）+ `next_action`；成功后重拉 `/skills` 与
+  agent 能力目录（否则行标与物化状态会自相矛盾）。
+- **S5 启用 ⟂ 适用**：Agent 视角 skill 行不再是"只有能用的才出现"——新增 `SkillActivationTags`，
+  「已禁用」「不适用」并列显示（两者可同时成立），不适用 hover 出 `reasons` 原文。
+- **S2 体检**：Skill 行加「体检」按钮 → 弹窗逐目标给状态、期望/实测摘要、归属与写入时间。
+  弹窗顶部明写**只报不修**（修复走启用/重校；`user_owned` 平台不碰），并给「再体检」；
+  未知 status 原样显示而不是当成"正常"（版本错配时看得见）。
+- **S1 告警**：Skill 行显示 `N 条告警` 标签，hover 逐条列 severity/pattern/message
+  （critical 已拒载、不会出现在列表里；这条只是把 warning 暴露出来，不是新增判定）。
+- **M6 密钥**：MCP 行（Agent 视角与全局两处）显示 `密钥 N` / `密钥未就绪 N` 两个标签，
+  hover 列**键名**与排查出路。`McpRow` 因此多三个字段（键名数组），值在任何界面都不经过前端。
+- **验证与其边界**：`pnpm typecheck`、`pnpm build:panel` 通过；新增的纯函数（`materializationSummary`
+  / `materializationMeta` / `materializationNeedsAttention` / `skillActivationView` /
+  `skillWarningsView` / `mcpRows` 的密钥字段）用 Node 直接 import TS 模块跑了 6 组断言
+  （`node --experimental-strip-types`，临时脚本不入库）。**没有做浏览器驱动验收**——所以
+  「渲染无运行时错误」这一条属于未验证项，靠类型检查与纯函数断言覆盖不到；真要它，得按
+  README 里既有的真实 Chrome DoD 流程补一次。
+- **仍未做**：§6 忙时输入队列的前端（投递模式选择器 + 队列列表 + 撤下）——类型与事件枚举早已同步，
+  是面板侧唯一还欠的一处。
+
 **顺带的既有测试改动（有意为之，非放宽）**：`TestAgentCapabilities` 原来断言无源技能"不可见"
 （`capabilities_test.go:174`），S5 起改为断言"列出但 `applicable=false` 且有原因"——
 这是本次的契约变更点，注释已写明。
