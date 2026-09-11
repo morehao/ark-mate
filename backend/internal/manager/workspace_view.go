@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。
@@ -29,7 +29,7 @@ import (
 //   - path 越界 → workspace_outside_roots（与建会话同一条校验、同一个错）；
 //   - Parent 只到根为止（到根时留空）——否则"上级"按钮就是白名单的绕过入口；
 //   - home 不在白名单内时干脆不返回（前端据此隐藏"主目录"按钮，而不是给一个必然报错的入口）。
-func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*handler.WorkspaceBrowseResp, error) {
+func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	roots := s.WorkspaceRoots()
 	home := ""
 	if h, err := os.UserHomeDir(); err == nil {
@@ -61,7 +61,7 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*handler.Wor
 		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
 			"目录不可读: "+dir, err)
 	}
-	out := make([]handler.WorkspaceEntryResp, 0, len(entries))
+	out := make([]dtoworkspace.WorkspaceEntryResp, 0, len(entries))
 	for _, e := range entries {
 		// 只列目录（含符号链接指向的目录：DirEntry.IsDir 为 false 时再 Stat 一次消歧）。
 		if !isDirEntry(e, filepath.Join(dir, e.Name())) {
@@ -76,11 +76,11 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*handler.Wor
 		if len(roots) > 0 && !withinRoots(resolveRealPath(child), roots) {
 			continue
 		}
-		out = append(out, handler.WorkspaceEntryResp{Name: e.Name(), Path: child})
+		out = append(out, dtoworkspace.WorkspaceEntryResp{Name: e.Name(), Path: child})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 
-	resp := &handler.WorkspaceBrowseResp{Path: dir, Entries: out, Roots: roots}
+	resp := &dtoworkspace.WorkspaceBrowseResp{Path: dir, Entries: out, Roots: roots}
 	if home != "" && withinRoots(home, roots) {
 		resp.Home = home
 	}
@@ -106,7 +106,7 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*handler.Wor
 // 平台代建根**及其下的一切**都不算资料库（见循环里的注释）：代建根本身恒在生效名单里，
 // 它下面又全是按会话 id 命名的沙箱目录，两者都是平台实现细节。反过来说，若运维只把
 // 代建根配成白名单，资料库列表就是空的——这是有意的：那一层从来不是"策展内容"。
-func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
+func (s *Service) WorkspaceLibraries() ([]dtoworkspace.WorkspaceLibraryResp, error) {
 	roots := s.WorkspaceRoots()
 	usage := s.workspaceUsage(roots)
 	provision := ""
@@ -114,7 +114,7 @@ func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
 		provision = resolveRealPath(d)
 	}
 
-	out := make([]handler.WorkspaceLibraryResp, 0, len(roots))
+	out := make([]dtoworkspace.WorkspaceLibraryResp, 0, len(roots))
 	seen := make(map[string]bool, len(roots))
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
@@ -148,7 +148,7 @@ func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
 				continue // 根的嵌套配置可能让同一个目录出现两次
 			}
 			seen[child] = true
-			item := handler.WorkspaceLibraryResp{Name: e.Name(), Path: child, Root: root}
+			item := dtoworkspace.WorkspaceLibraryResp{Name: e.Name(), Path: child, Root: root}
 			if u, ok := usage[child]; ok {
 				item.Conversations = u.count
 				item.LastUsedAt = u.latest
@@ -175,7 +175,7 @@ func (s *Service) WorkspaceLibraries() ([]handler.WorkspaceLibraryResp, error) {
 // 把两者合成一个接口会破坏上面那条"entries[].path 可直接提交"的契约，所以宁可多一个只读接口。
 //
 // 边界与浏览面完全一致（ValidateWorkspace + withinRoots）：越界目录拒绝、根外真身的符号链接不列。
-func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*handler.WorkspaceFilesResp, error) {
+func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error) {
 	roots := s.WorkspaceRoots()
 	if strings.TrimSpace(path) == "" {
 		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
@@ -189,7 +189,7 @@ func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*handler.
 	if err != nil {
 		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid", "目录不可读: "+dir, err)
 	}
-	out := make([]handler.WorkspaceFileEntryResp, 0, len(entries))
+	out := make([]dtoworkspace.WorkspaceFileEntryResp, 0, len(entries))
 	for _, e := range entries {
 		if !includeHidden && strings.HasPrefix(e.Name(), ".") {
 			continue
@@ -208,7 +208,7 @@ func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*handler.
 		if !isDir && !st.Mode().IsRegular() {
 			continue
 		}
-		out = append(out, handler.WorkspaceFileEntryResp{
+		out = append(out, dtoworkspace.WorkspaceFileEntryResp{
 			Name:       e.Name(),
 			Path:       child,
 			IsDir:      isDir,
@@ -223,7 +223,7 @@ func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*handler.
 		}
 		return out[i].Name < out[j].Name
 	})
-	return &handler.WorkspaceFilesResp{Path: dir, Roots: roots, Entries: out}, nil
+	return &dtoworkspace.WorkspaceFilesResp{Path: dir, Roots: roots, Entries: out}, nil
 }
 
 // isDirEntry 判断目录项是否为目录（符号链接再 Stat 一次消歧）。
@@ -277,16 +277,16 @@ func (s *Service) workspaceUsage(roots []string) map[string]*wsUsage {
 }
 
 // RecentWorkspaces 返回最近使用过的工作空间（从既有会话派生，按最近使用倒序）。排除口径见 workspaceUsage。
-func (s *Service) RecentWorkspaces(limit int) ([]handler.WorkspaceRecentResp, error) {
+func (s *Service) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	roots := s.WorkspaceRoots()
 	byPath := s.workspaceUsage(roots)
 
-	out := make([]handler.WorkspaceRecentResp, 0, len(byPath))
+	out := make([]dtoworkspace.WorkspaceRecentResp, 0, len(byPath))
 	for path, a := range byPath {
-		out = append(out, handler.WorkspaceRecentResp{
+		out = append(out, dtoworkspace.WorkspaceRecentResp{
 			Path:          path,
 			Name:          filepath.Base(path),
 			LastUsedAt:    a.latest,

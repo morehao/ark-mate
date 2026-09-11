@@ -9,7 +9,7 @@
 
 | 形态 | 命令 | 产物 | 说明 |
 | --- | --- | --- | --- |
-| 单二进制（推荐） | `make all` | 仓库根 `./forge` | 先 `pnpm build` → 拷入 `backend/internal/web/dist` → `go build -tags release`；前端面板经 `//go:embed` 内嵌，无外部静态文件依赖 |
+| 单二进制（推荐） | `make all` | 仓库根 `./forge` | 先 `pnpm build` → 拷入 `backend/pkg/web/dist` → `go build -tags release`；前端面板经 `//go:embed` 内嵌，无外部静态文件依赖 |
 | 仅后端内核 | `make build` | 无独立产物 | 不带 `release` tag，`web` 包不参与编译（`MountWeb` 为空实现），面板不内嵌 |
 | 前后端分离 | `make dev` / 分开起 | `frontend/apps/panel/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
 | 容器 | `make image` / `docker build -t ark-forge .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
@@ -53,8 +53,9 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
 | 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
-持久层开关：`FORGE_STORE=sqlite|memory|auto`（空 = auto：库文件已存在且非空 → sqlite，否则
-memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
+持久层开关：`FORGE_STORE=sqlite|memory|auto`（空或 `auto` = 按库文件定：已存在且非空 → sqlite，
+否则 memory）。**非法值启动即报错**并列出合法取值——不静默回落 auto，否则一个错字就可能悄悄
+切到另一种持久化模式。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40501
 `usage_stats_unsupported`（明确降级，不返回假零值）。
 
 ### 2.2.1 工作空间（会话沙箱边界）的运维要点
@@ -115,12 +116,12 @@ memory）。**memory 模式无 runs 读模型**：`GET /usage/summary` 返回 40
   ② 若要真正锁死，就在**进程环境变量**里设 `FORGE_WORKSPACE_ROOTS`（接口随即变只读，
   `forge config` 也会打印 `面板设置 只读（由该来源锁定）`）。
 
-### 2.3 环境变量（全部来自 `backend/internal/infra/config/config.go`）
+### 2.3 环境变量（全部来自 `backend/pkg/config/config.go`）
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `FORGE_ADDR` | `:10001` | 监听地址（见 §2.1） |
-| `FORGE_STORE` | auto | `sqlite` / `memory` / 空 |
+| `FORGE_STORE` | auto | `auto` / `sqlite` / `memory`（空同 `auto`）；非法值报错 |
 | `FORGE_DB` | `~/.forge/forge.db` | SQLite 路径 |
 | `FORGE_TRANSCRIPTS` | `~/.forge/transcripts` | wire transcript 目录 |
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录 |
@@ -284,7 +285,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
 - 开关必须与 target 配套：`--build-arg WITH_DSH=true` 传给默认（最小）target → 构建失败并提示改用
   `--target forge-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。两个开关同时关也失败。
 - 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
-  模板**（`>= 0.1.2-rc.1`，见 `internal/runtime/adapters.go` 的能力说明），`latest` 满足。
+  模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 forge 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-forge:runtimes` + `USER root` + `apt-get install -y …`。
 

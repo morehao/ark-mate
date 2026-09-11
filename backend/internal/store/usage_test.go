@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 )
 
 // seedRun 写入一条 run（含 agent 归属的会话与用量快照 JSON）。
@@ -130,24 +130,24 @@ func TestUsageSummaryAggregate(t *testing.T) {
 // TestUsageInfoReported 用量快照「无上报」判定（全零不计入上报会话）；
 // 上下文与费用分开判定，供统计分别计数。
 func TestUsageInfoReported(t *testing.T) {
-	if (acl.UsageInfo{}).Reported() {
+	if (objusage.UsageInfo{}).Reported() {
 		t.Fatal("全零不应视为上报")
 	}
-	if !(acl.UsageInfo{Used: 1}).Reported() || !(acl.UsageInfo{Size: 1}).Reported() ||
-		!(acl.UsageInfo{CostAmount: 0.01}).Reported() {
+	if !(objusage.UsageInfo{Used: 1}).Reported() || !(objusage.UsageInfo{Size: 1}).Reported() ||
+		!(objusage.UsageInfo{CostAmount: 0.01}).Reported() {
 		t.Fatal("任一字段非零即视为上报")
 	}
 	// 字段级判定：只报上下文 / 只报费用各自成立，且互不冒充。
-	ctxOnly := acl.UsageInfo{Used: 250, Size: 1000}
+	ctxOnly := objusage.UsageInfo{Used: 250, Size: 1000}
 	if !ctxOnly.HasContext() || ctxOnly.HasCost() {
 		t.Fatalf("只报上下文应仅 HasContext: %+v", ctxOnly)
 	}
-	costOnly := acl.UsageInfo{CostAmount: 0.5, CostCurrency: "USD"}
+	costOnly := objusage.UsageInfo{CostAmount: 0.5, CostCurrency: "USD"}
 	if costOnly.HasContext() || !costOnly.HasCost() {
 		t.Fatalf("只报费用应仅 HasCost: %+v", costOnly)
 	}
 	// 压缩后 Used=0 但窗口大小已知 → 仍属有效上下文上报。
-	if !(acl.UsageInfo{Size: 128000}).HasContext() {
+	if !(objusage.UsageInfo{Size: 128000}).HasContext() {
 		t.Fatal("Used=0、Size>0 应视为有效上下文上报")
 	}
 }

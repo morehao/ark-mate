@@ -2,24 +2,19 @@ package manager
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
 )
 
 // TestRestoreMarksInProgressAsInterrupted 重启恢复时残留 in_progress 会话收敛为 interrupted
 // （可操作态：列表可停止/重发），且不误伤已完成会话。
 func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 
 	// 第一次进程：登记一个中断中 + 一个已完成会话（写库）。

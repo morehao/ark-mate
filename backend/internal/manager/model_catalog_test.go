@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // ——— 运行时派生模型目录（manager 层）———
@@ -14,7 +15,7 @@ import (
 // catalogRig 组装带 echo runtime 的 svc+orch（不拨真实连接；会话由桩注入）。
 func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	orch := NewOrchestrator(svc, reg)

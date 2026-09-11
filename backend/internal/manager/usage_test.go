@@ -3,16 +3,15 @@ package manager
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/dto/dtousage"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -20,11 +19,8 @@ import (
 // store 启用时聚合 runs（计数/时长）+ 会话用量快照；参数校验与降级路径明确。
 func TestUsageSummaryService(t *testing.T) {
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(filepath.Join(t.TempDir(), "forge.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
@@ -35,20 +31,20 @@ func TestUsageSummaryService(t *testing.T) {
 	svc.agents["agent-echo"] = &AgentRec{ID: "agent-echo", Name: "Echo", Runtimes: []string{"echo"}}
 	svc.registerConversation(&ConversationRec{ID: "u1", AgentID: "agent-echo"})
 	svc.registerConversation(&ConversationRec{ID: "u2", AgentID: "agent-echo"})
-	orch.recordUsage("u1", acl.UsageInfo{Used: 100, Size: 1000})
+	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
 	svc.publish(BusMessage, "u1", map[string]any{"text": "答一"})
 	svc.publish(BusTurnEnded, "u1", map[string]any{"stop_reason": "end_turn"})
 
-	orch.recordUsage("u1", acl.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
+	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第二问"})
 	svc.publish(BusTurnEnded, "u1", map[string]any{"stop_reason": "end_turn"})
 
 	svc.publish(BusUserMessage, "u2", map[string]any{"text": "第三问"})
 	svc.publish(BusTurnError, "u2", map[string]any{"code": "agent_error", "class": "agent"})
 
-	resp, err := svc.UsageSummary(ctx, handler.UsageQueryReq{})
+	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -80,7 +76,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
-	dayResp, err := svc.UsageSummary(ctx, handler.UsageQueryReq{GroupBy: "day"})
+	dayResp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{GroupBy: "day"})
 	if err != nil || len(dayResp.Buckets) != 1 || len(dayResp.Buckets[0].Key) != 10 {
 		t.Fatalf("day 分桶不符: %+v err=%v", dayResp, err)
 	}
@@ -89,7 +85,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 日期形式时间参数：from/to 回显为 UTC RFC3339（date → 当日 00:00）。
-	r2, err := svc.UsageSummary(ctx, handler.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
+	r2, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil {
 		t.Fatalf("日期参数应合法: %v", err)
 	}
@@ -100,15 +96,15 @@ func TestUsageSummaryService(t *testing.T) {
 	// 参数校验：非法时间 / from ≥ to / 非法 group_by / 未知 agent（REST 面 code + msg 内稳定码）。
 	cases := []struct {
 		name  string
-		q     handler.UsageQueryReq
+		q     dtousage.UsageQueryReq
 		code  int
 		token string
 	}{
-		{"bad_from", handler.UsageQueryReq{From: "2026/09/09"}, 40001, "[invalid_usage_range]"},
-		{"bad_to", handler.UsageQueryReq{To: "yesterday"}, 40001, "[invalid_usage_range]"},
-		{"from_after_to", handler.UsageQueryReq{From: "2026-09-10T00:00:00Z", To: "2026-09-09T00:00:00Z"}, 40001, "[invalid_usage_range]"},
-		{"bad_group", handler.UsageQueryReq{GroupBy: "tool"}, 40001, "[invalid_usage_group_by]"},
-		{"unknown_agent", handler.UsageQueryReq{AgentID: "agent-nope"}, 40401, "[agent_not_found]"},
+		{"bad_from", dtousage.UsageQueryReq{From: "2026/09/09"}, 40001, "[invalid_usage_range]"},
+		{"bad_to", dtousage.UsageQueryReq{To: "yesterday"}, 40001, "[invalid_usage_range]"},
+		{"from_after_to", dtousage.UsageQueryReq{From: "2026-09-10T00:00:00Z", To: "2026-09-09T00:00:00Z"}, 40001, "[invalid_usage_range]"},
+		{"bad_group", dtousage.UsageQueryReq{GroupBy: "tool"}, 40001, "[invalid_usage_group_by]"},
+		{"unknown_agent", dtousage.UsageQueryReq{AgentID: "agent-nope"}, 40401, "[agent_not_found]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,14 +117,14 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 未知 agent（已注册）过滤到空结果（不报错）。
-	resp, err = svc.UsageSummary(ctx, handler.UsageQueryReq{AgentID: "agent-echo", From: "2000-01-01", To: "2000-01-02"})
+	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "agent-echo", From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
 
 	// 内存模式（无 store）→ 明确 unsupported（不返回假零值）。
 	svcMem := NewService(reg, eventbus.New())
-	_, err = svcMem.UsageSummary(ctx, handler.UsageQueryReq{})
+	_, err = svcMem.UsageSummary(ctx, dtousage.UsageQueryReq{})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40501 || !strings.Contains(ge.Msg, "[usage_stats_unsupported]") {
 		t.Fatalf("无 store 应 40501/usage_stats_unsupported，got %v", err)
@@ -145,7 +141,7 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	defer bus.Unsubscribe(sub)
 	sink := orch.eventSink("agent-echo", "echo")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",
-		Payload: acl.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
+		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 
 	select {
 	case e := <-sub.C:
@@ -166,11 +162,11 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	}
 
 	// 后到覆盖先到；全零快照忽略（不污染统计）。
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: acl.UsageInfo{Used: 80, Size: 200}})
+	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{Used: 80, Size: 200}})
 	if u, _ := orch.LatestUsage("c1"); u.Used != 80 {
 		t.Fatalf("后到应覆盖: %+v", u)
 	}
-	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: acl.UsageInfo{}})
+	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1", Payload: objusage.UsageInfo{}})
 	if u, _ := orch.LatestUsage("c1"); u.Used != 80 {
 		t.Fatalf("全零快照不应覆盖: %+v", u)
 	}

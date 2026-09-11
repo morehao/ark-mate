@@ -47,7 +47,7 @@ import type {
   WorkspaceSettings,
 } from '@ark/types'
 
-// ——— forge 控制面 REST（/v1/forge，见 backend/internal/server/handler） ———
+// ——— forge 控制面 REST（/v1/forge，见 backend/internal/router/routes_*.go） ———
 
 export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/forge/agents')
 

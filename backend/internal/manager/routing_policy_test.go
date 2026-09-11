@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/capability"
-	"github.com/morehao/ark-forge/internal/runtime"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestServiceResolveRuntimeCapabilityRouted capability_routed 策略：Agent 显式 MCP 白名单

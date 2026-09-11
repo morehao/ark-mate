@@ -10,29 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoexport"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
-
-// newSearchRig 建一个带 sqlite 持久层的服务（消息搜索/导出的 sqlite 数据面）。
-func newSearchRig(t *testing.T) (*Service, *store.Store) {
-	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(filepath.Join(t.TempDir(), "forge.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"echo"}}
-	return svc, st
-}
 
 // seedConversation 落一个会话 + 若干事件（含 messages 物化行）。
 func seedSearchConversation(t *testing.T, svc *Service, st *store.Store, id, title string, texts ...[2]string) {
@@ -117,7 +100,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// memory 模式（无 store）：回扫 transcript，source 明确标注 transcript。
 	dir := t.TempDir()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	svc.SetTranscriptDir(dir)
 	orch := NewOrchestrator(svc, reg)
@@ -156,7 +139,7 @@ func TestExportConversations(t *testing.T) {
 	svc.publish(BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
 
 	for _, format := range []string{"markdown", "text", "json"} {
-		resp, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: []string{"e-1"}, Format: format})
+		resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})
 		if err != nil {
 			t.Fatalf("ExportConversations(%s): %v", format, err)
 		}
@@ -195,26 +178,26 @@ func TestExportConversations(t *testing.T) {
 	}
 
 	// 批量：未知会话进 skipped（不静默丢弃），格式校验与上限校验明确报错。
-	resp, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
+	resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
 	if err != nil {
 		t.Fatalf("批量导出: %v", err)
 	}
 	if resp.Exported != 1 || len(resp.Skipped) != 1 || resp.Skipped[0] != "no-such" {
 		t.Fatalf("skipped 语义不符: %+v", resp)
 	}
-	if _, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
+	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
 		t.Fatal("非法格式应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "invalid_export_format") {
 		t.Fatalf("格式错误码不符: %v", err)
 	}
-	if _, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: []string{}}); err == nil {
+	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
 		t.Fatal("空 ids 应报错")
 	}
 	ids := make([]string, maxExportIDs+1)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("x-%d", i) // 互不相同：去重后仍超上限
 	}
-	if _, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: ids}); err == nil {
+	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: ids}); err == nil {
 		t.Fatal("超上限应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "export_too_many_ids") {
 		t.Fatalf("上限错误码不符: %v", err)
@@ -228,7 +211,7 @@ func TestExportMarkdownFileWritable(t *testing.T) {
 	// 标题含路径分隔符与控制字符 → 文件名应被净化。
 	seedSearchConversation(t, svc, st, "e-9", "a/b:c\n标题",
 		[2]string{"user", "内容"})
-	resp, err := svc.ExportConversations(ctx, handler.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
+	resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
 	if err != nil {
 		t.Fatal(err)
 	}

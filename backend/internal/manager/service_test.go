@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -28,43 +28,6 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return svc, orch, bus
-}
-
-// TestRestErrMapping 领域错误（acl 分类）→ 对外业务码映射矩阵。
-func TestRestErrMapping(t *testing.T) {
-	svc, _, _ := newTestRig(t)
-	cases := []struct {
-		name string
-		in   error
-		want int
-	}{
-		{"agent_not_found", acl.NewError(acl.ClassRequest, "agent_not_found", "x", nil), 40401},
-		{"conversation_not_found", acl.NewError(acl.ClassRequest, "conversation_not_found", "x", nil), 40401},
-		{"runtime_not_found", acl.NewError(acl.ClassRequest, "runtime_not_found", "x", nil), 40401},
-		{"request_other", acl.NewError(acl.ClassRequest, "agent_required", "x", nil), 40001},
-		{"limit", acl.NewError(acl.ClassLimit, "turn_in_progress", "x", nil), 40901},
-		{"access", acl.NewError(acl.ClassAccess, "auth_required", "x", nil), 40101},
-		{"unsupported", acl.NewError(acl.ClassUnsupported, "resume_unsupported", "x", nil), 40501},
-		{"service", acl.NewError(acl.ClassService, "orchestrator_unavailable", "x", nil), 50201},
-		{"connection", acl.NewError(acl.ClassConnection, "connection_lost", "x", nil), 50201},
-		{"unknown_class", acl.NewError(acl.ClassUnknown, "weird", "x", nil), 50001},
-		{"plain_error", errors.New("boom"), 50000},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var ge gerror.Error
-			if !errors.As(svc.restErr(tc.in), &ge) || ge.Code != tc.want {
-				t.Fatalf("映射不符: %v → %d (want %d)", tc.in, ge.Code, tc.want)
-			}
-		})
-	}
-
-	// details 为空 → msg 回落为 code。
-	var ge gerror.Error
-	_ = errors.As(svc.restErr(acl.NewError(acl.ClassLimit, "busy", "", nil)), &ge)
-	if ge.Msg != "busy" {
-		t.Fatalf("空 details 应回落 code: %+v", ge)
-	}
 }
 
 // TestEventSinkMapping acl 归一事件 → 域事件 type/payload（agg=平台会话 uuid；
@@ -272,7 +235,7 @@ func TestConversationHistoryClamp(t *testing.T) {
 	svc.publish(BusMessage, "s1", map[string]any{"text": "one"})
 	svc.publish(BusMessage, "s1", map[string]any{"text": "two"})
 
-	p, err := svc.ConversationHistory(context.Background(), "s1", handler.HistoryQuery{After: -5, Limit: 0})
+	p, err := svc.ConversationHistory(context.Background(), "s1", dtoconversation.HistoryQuery{After: -5, Limit: 0})
 	if err != nil {
 		t.Fatalf("ConversationHistory: %v", err)
 	}
@@ -288,7 +251,7 @@ func TestConversationHistoryClamp(t *testing.T) {
 func TestCreateConversationWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "agent-x", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "agent-x", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
@@ -444,7 +407,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				title := fmt.Sprintf("PATCH 标题 %d-%d", n, j)
-				_, _ = svc.UpdateConversation(context.Background(), id, handler.ConversationPatch{Title: &title})
+				_, _ = svc.UpdateConversation(context.Background(), id, dtoconversation.ConversationPatch{Title: &title})
 			}
 		}(i)
 	}

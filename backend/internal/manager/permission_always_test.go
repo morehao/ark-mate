@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // TestPermissionMemoryBothSides 会话级权限记忆（allow/reject 双侧对称）：
@@ -76,7 +76,7 @@ func TestPermissionMemoryBothSides(t *testing.T) {
 	}
 
 	// 整会话撤销（一键）清空。
-	pm.ForgetSession("s1")
+	pm.ForgetConversation("s1")
 	if got := len(pm.List("s1")); got != 0 {
 		t.Fatalf("ForgetConversation 后应为空，got %d", got)
 	}
@@ -98,7 +98,7 @@ func TestRegisterAndWaitRemembersAlways(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForSession("s1")
+		calls := pm.pendingForConversation("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break
@@ -133,7 +133,7 @@ func TestRegisterAndWaitRemembersReject(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForSession("s1")
+		calls := pm.pendingForConversation("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break
@@ -171,7 +171,7 @@ func TestResolveRejectOnce(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForSession("s1")
+		calls := pm.pendingForConversation("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break

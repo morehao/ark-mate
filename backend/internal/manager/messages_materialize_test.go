@@ -3,13 +3,12 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 )
 
 // TestMessagesMaterializedAtTurnEnd 验证 turn 收口 messages 物化：
@@ -17,13 +16,10 @@ import (
 // 换 msg_id 分段）；thought/tool 交错事件进 assistant 行时间线；工具最终态抽入 tool_details；
 // 同 run 重建幂等（重复收口不产生重复行）。
 func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
@@ -108,13 +104,10 @@ func queryMessages(ctx context.Context, st *store.Store, conversationID string) 
 // TestSearchConversationsPrefersMessagesTable sqlite 模式：SearchConversations 正文命中走 messages 表
 // （无 transcript 亦命中；片段为用户原文折叠预览）。
 func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)

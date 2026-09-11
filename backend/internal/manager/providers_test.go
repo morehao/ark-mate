@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 )
 
 // TestProviderRegistryWriteOnceReadNever 档案 upsert/持久化/重启装载 + 密钥只写不读回 +
@@ -19,7 +19,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	key := "sk-secret-abc"
 	typ := "openai"
 	model := "gpt-4o"
-	resp, err := svc.UpdateProvider(ctx, "default", handler.ProviderPatchReq{Type: &typ, Model: &model, Key: &key})
+	resp, err := svc.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{Type: &typ, Model: &model, Key: &key})
 	if err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
@@ -47,14 +47,14 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	typ2 := "custom"
 	_ = typ2
 	t2 := "deepseek"
-	_, _ = svc.UpdateProvider(ctx, "ds", handler.ProviderPatchReq{Type: &t2, Key: &key})
+	_, _ = svc.UpdateProvider(ctx, "ds", dtoprovider.ProviderPatchReq{Type: &t2, Key: &key})
 	if got := svc.providerEnvFor("ds"); len(got) != 1 || got[0] != "DEEPSEEK_API_KEY=sk-secret-abc" {
 		t.Fatalf("deepseek env: %+v", got)
 	}
 
 	// 清除：key 空串 → has_key=false、env nil。
 	clear := ""
-	_, _ = svc.UpdateProvider(ctx, "default", handler.ProviderPatchReq{Key: &clear})
+	_, _ = svc.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{Key: &clear})
 	if svc.providerEnvFor("default") != nil {
 		t.Fatal("清除后不应注入 env")
 	}

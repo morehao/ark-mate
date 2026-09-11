@@ -71,7 +71,7 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 ### 2. 构建单二进制
 
 ```bash
-make all          # = 前端 pnpm build → 拷贝到 backend/internal/web/dist → go build -tags release
+make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → go build -tags release
 ./forge           # 产物在仓库根
 ```
 
@@ -227,6 +227,8 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | POST | `/conversations/:id/permission` | 权限决策 `{call_id, allowed, option_id?, always?}`（拒绝也透传 option_id/always） |
 | GET | `/conversations/:id/permissions/memories` | 会话级权限记忆（始终允许+始终拒绝，`{title,kind,decision,since}`；旧 `/permissions/always` 为兼容别名） |
 | POST | `/conversations/:id/permissions/memories/revoke` | 撤销权限记忆 `{title, kind}`；两者均空 = 一键撤销全部（旧 `/permissions/always/revoke` 为兼容别名） |
+| GET | `/conversations/:id/permissions/always` | **兼容别名**，等价 `/conversations/:id/permissions/memories`（历史客户端/脚本在用，响应逐字段一致） |
+| POST | `/conversations/:id/permissions/always/revoke` | **兼容别名**，等价 `/conversations/:id/permissions/memories/revoke`（请求体与行为一致） |
 | GET | `/conversations/:id/elicitations` | 挂起结构化提问列表（表单 schema / URL） |
 | POST | `/conversations/:id/elicitation` | 结构化提问决策 `{elicitation_id, action, content?}` |
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`） |
@@ -238,6 +240,34 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | POST | `/mcps/:id/prompts/:name/get` | 取用 MCP 提示词（`prompts/get`；body `{arguments}`，值为字符串） |
 | GET | `/usage/summary` | 用量统计（`?from=&to=&agent_id=&group_by=agent|day`；区间半开、日期按 UTC；无 store → 40501） |
 | GET | `/ws/events` | 实时事件通道（见下） |
+
+### 业务错误码
+
+信封 `code` 字段的**唯一事实源是 `backend/pkg/code`**（本表由 `TestReadmeCodesMatchRegistry`、
+前端常量由 `TestFrontendBizCodesMatchRegistry` 守卫，改码必须三处同步）。语义错误一律 HTTP 200 +
+`code != 0`，只有鉴权失败同时给 HTTP 401。
+
+**HTTP 状态码的第三个取值**：请求**未命中任何路由**时回 HTTP 404 + `code=40401`（标准信封）。
+与上一条不冲突——「语义错误走 200」说的是路由命中了、领域层判定失败；未命中路由属于 HTTP 语义
+问题，代理与客户端靠状态码识别，不该伪装成"接口存在但拒绝了"。API 路径（`/v1/`）在两个构建形态
+下行为一致；非 API 路径在 release（内嵌前端）下回落 SPA `index.html`，非 release 下同样回信封
+404——没有内嵌前端就没有可回落的页面。
+
+| code | 含义 |
+| --- | --- |
+| `0` | 成功 |
+| `40000` | 参数错误（缺失/类型或取值不合法） |
+| `40001` | 请求语义非法（游标互斥、归属不符、状态机不允许） |
+| `40101` | 未授权（单操作员令牌缺失或无效；HTTP 401） |
+| `40401` | 资源不存在（会话/agent/runtime/provider/MCP server） |
+| `40501` | 当前形态明确不支持（典型：memory 模式下的 `/usage/summary`） |
+| `40901` | 与当前状态冲突或超出额度（在途轮次、上游超时） |
+| `50000` | 服务内部错误（**唯一兜底码**） |
+| `50001` | 上游执行失败（runtime / MCP server 报错） |
+| `50201` | 上游连接失败（进程拉不起、连接断开、不可达） |
+
+`50000` 是兜底码：任何未归类的 error 经 `code.FromError` 出口都会落成它。
+信封里**不会出现 `code: -1`**（那是不带业务码的裸错误落到 gincontext 默认分支的产物）。
 
 WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.config_options`（运行时会话配置项全量更新，如模型）、`turn.ended/error`、`run.cancelled` 等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。
 
@@ -276,16 +306,32 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 
 ```
 backend/                单 Go module（github.com/morehao/ark-forge）
-  cmd/forge             CLI（serve / demo / acp-demo 子命令）
-  internal/acl          ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
-  internal/runtime/     运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
-  internal/manager      Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
-  internal/capability   Skill/MCP/Tool 能力数据面（定义装载 + skill 物化）
-  internal/mcp          自研最小 MCP 客户端（stdio / http / streamable_http / sse；探测 + 工具调用 + 资源/提示词）
-  internal/store        SQLite 读模型（会话/事件/runs/messages/权限记忆/用量聚合）
-  internal/server/      REST handler / WS / eventbus / router
-  internal/infra/config 进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
-  internal/web/         release 内嵌前端产物宿主（go:embed dist）
+  cmd/forge             进程入口：只做子命令分发（→ internal/app/command）
+  pkg/                  可复用基础设施（不得 import internal/，由 archtest 守卫）
+    acl                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
+    runtime/            运行时注册表 + adapter（opencode/、deepseekharness/、echo/，纯数据）
+    mcp                 自研最小 MCP 客户端（stdio / http / streamable_http / sse）
+    capability          Skill/MCP/Tool 能力定义装载 + skill 物化
+    routing             路由引擎 FirstAvailable 切片
+    config              进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
+    procreg             进程注册表（孤儿 runtime 子进程回收）
+    web                 release 内嵌前端产物宿主（go:embed dist）
+    dbclient             gorm 句柄装配 + 自注册纯 Go SQLite dialector（无 CGO）
+    object/objusage     跨层共享值对象（会话用量快照）
+  internal/             应用专属逻辑
+    app                 装配 + 启停生命周期（Init/Run/Close）
+    app/command         CLI 子命令（serve / demo / migrate / transcripts / config / acp-*）
+    router              唯一路由装配点（按领域分 routes_*.go）
+    controller/ctr*     传输层控制器（接口 + 小写实现 + New 构造）
+    middleware          HTTP 中间件（单操作员 token 鉴权）
+    dto/dto*            请求/响应 DTO（按领域分包，双方共用）
+    service/svc*        领域端口（控制器依赖的窄接口，manager 实现）
+    manager             领域实现：Service + Orchestrator（会话编排、事件发布、权限策略、用量聚合）
+    model               持久层实体 + 列与取值约定（gorm 映射；时间 TEXT/布尔 INTEGER 由 serializer 保证）
+    dao                 单表数据访问（gormdao 泛型 Dao + 各领域 Cond）
+    store               持久层门面（句柄 + 跨表事务：序号分配、导入 staging、读模型 API）
+    eventbus            进程内事件总线（WS 订阅源）
+    archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/panel/           Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
   packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
@@ -300,7 +346,7 @@ docs/                   设计/路线图 + runtime 适配核实 + 部署运维
 
 > `docs/` 下的设计文档是**历史设计记录**（含当时的路径命名——会话路径早期叫 sessions、P0 起为
 > conversations）；对外契约以本
-> README 的「控制面接口摘要」与实际路由（`backend/internal/server/router/router.go`）为准，
+> README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
 > 二者由 `TestReadmeRoutesMatchRouter` 自动守卫。
 
 ## 协议 / License

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 工作空间白名单的**设置面**：把"哪些目录能被当作工作空间"从"只能改环境变量"变成"面板也能改"。
@@ -46,11 +46,11 @@ func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
 //
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
-func (s *Service) WorkspaceSettings() (*handler.WorkspaceSettingsResp, error) {
+func (s *Service) WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	store := s.workspaceRootsStore
-	resp := &handler.WorkspaceSettingsResp{
+	resp := &dtoworkspace.WorkspaceSettingsResp{
 		Configured:        append([]string{}, s.workspaceRoots...),
 		Roots:             s.effectiveWorkspaceRootsLocked(),
 		Restricted:        len(s.workspaceRoots) > 0,
@@ -77,7 +77,7 @@ const sourceUnavailable = "unavailable"
 // 与配置文件入口的严格度差异：这里要求每个根**存在且是目录**（配置文件只校验绝对路径）。
 // 理由是交互式设置的反馈必须在当下给（否则面板保存成功、下次进来看到的是错误页），
 // 而声明式配置允许"挂载还没到"这种编排顺序——两处的取舍不同是有意的。
-func (s *Service) UpdateWorkspaceSettings(roots []string) (*handler.WorkspaceSettingsResp, error) {
+func (s *Service) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error) {
 	s.mu.Lock()
 	store := s.workspaceRootsStore
 	s.mu.Unlock()

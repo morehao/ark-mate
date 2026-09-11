@@ -2,11 +2,12 @@
 #
 # 仓库结构（前后端平级 monorepo）：
 #   backend/   —— 单 Go module：github.com/morehao/ark-forge（go.mod 在 backend/ 根）
-#                 internal/ 分层目录即包边界；层目录保留 seam，未来可按需抽独立 module/仓
+#                 pkg/ 可复用基础设施（不 import internal/）+ internal/ 应用分层；
+#                 分层边界由 backend/internal/archtest 守卫测试强制
 #   frontend/  —— 独立 pnpm workspace（apps/panel），产物可单独部署
 #
 # 交付形态：
-#   make all   —— 单二进制：前端产物拷入 backend/internal/web/dist 后，
+#   make all   —— 单二进制：前端产物拷入 backend/pkg/web/dist 后，
 #                 以 -tags release 编译（启用 //go:embed），输出根目录 ./forge
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
@@ -16,7 +17,7 @@
 .PHONY: dev web server build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
-WEB_DIST_DIR  := backend/internal/web/dist
+WEB_DIST_DIR  := backend/pkg/web/dist
 
 # —— 前端工具链（Node / pnpm）——
 # 唯一事实源在 frontend/ 内：Node 版本 = frontend/.nvmrc，pnpm 版本 = frontend/package.json 的
@@ -36,7 +37,7 @@ define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
 endef
 
-# 前端产物 → embed 宿主（backend/internal/web/dist，不入库）
+# 前端产物 → embed 宿主（backend/pkg/web/dist，不入库）
 web:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm build
@@ -87,6 +88,12 @@ vet:
 
 test:
 	cd backend && go test ./...
+
+# release 形态的测试：MountWeb 等带 //go:build release 的代码只在这个 tag 下编译，
+# 默认 go test 完全覆盖不到（历史上 NoRoute 的非 API 行为就是这么长期没人验的）。
+# 依赖 web 目标：pkg/web/dist 必须有产物，否则 embed 编译失败。
+test/release: web
+	cd backend && go test -tags release ./...
 
 # 单二进制：先 web（构建 + 拷贝 + embed），再以 -tags release 编译，输出仓库根 ./forge
 all: web

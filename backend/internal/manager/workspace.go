@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 工作空间（workspace）= 会话的 ACP cwd：一个**规范化后的绝对路径**。
@@ -193,4 +193,104 @@ func DiscardWorkspace(res WorkspaceResolution) {
 		return
 	}
 	_ = os.Remove(res.Path) // 非空则不删：用户/agent 已写入内容时宁可留下，也不误删
+}
+
+// SetWorkspacePolicy 设置工作空间的整体策略：代建根目录 + 允许的工作区根白名单。
+//
+// dir 空 = 关闭代建：此时未指定 cwd 的建会话请求直接报 workspace_required，
+// **绝不回落 os.Getwd()**（serve 进程目录是"平台的目录"，全局共享会让沙箱边界失效）。
+// roots 空 = 不限制（本机单操作员的默认行为）。
+//
+// 两者一起设置而不是各设各的：白名单生效时代建根会**隐式并入**生效名单
+// （见 effectiveWorkspaceRootsLocked），于是"代建根不在白名单里"不再是配置错误——
+// 它是平台自己的目录，本来就该天然合法，不该要运维把它手写进 FORGE_WORKSPACE_ROOTS
+// （旧行为：不自洽则 serve 启动失败）。分开设置则结果依赖调用顺序，容易漏，故仍收在一个入口。
+func (s *Service) SetWorkspacePolicy(dir string, roots []string) error {
+	dir = strings.TrimSpace(dir)
+	normalized, err := normalizePolicyRoots(roots)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceDir = dir
+	s.workspaceRoots = normalized
+	return nil
+}
+
+// SetWorkspaceRoots 只更新白名单（面板 PUT /settings/workspace 的落地动作，见 workspace_settings.go）。
+//
+// 与 SetWorkspacePolicy 分工：那个是装配期整体策略（含代建根），这个是运行期改名单。
+// 已建会话不受影响（cwd 创建即定稿，平台不回头否决旧会话），新校验立即生效。
+func (s *Service) SetWorkspaceRoots(roots []string) error {
+	normalized, err := normalizePolicyRoots(roots)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceRoots = normalized
+	return nil
+}
+
+// normalizePolicyRoots 规范化策略层的白名单条目：只校验**形式**（绝对路径）并解析真身。
+//
+// 有意不要求目录存在：白名单是运维画的边界，而挂载可能晚于 serve 起来（容器编排里很常见），
+// 因"目录还没建出来"就拒绝启动等于把顺序耦合强加给运维。真正需要存在性的是使用路径
+// （建会话的显式 cwd 与目录浏览），那里报 workspace_invalid 才是用户能理解的位置。
+func normalizePolicyRoots(roots []string) ([]string, error) {
+	normalized := make([]string, 0, len(roots))
+	seen := map[string]bool{}
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if !filepath.IsAbs(r) {
+			return nil, fmt.Errorf("工作区根需为绝对路径，得到 %q", r)
+		}
+		real := resolveRealPath(r)
+		if seen[real] {
+			continue
+		}
+		seen[real] = true
+		normalized = append(normalized, real)
+	}
+	return normalized, nil
+}
+
+// WorkspaceDir 返回代建工作空间的根目录（空 = 代建关闭）。
+func (s *Service) WorkspaceDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceDir
+}
+
+// WorkspaceRoots 返回**生效**的工作区根白名单（空 = 不限制；含隐式并入的代建根）。
+func (s *Service) WorkspaceRoots() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.effectiveWorkspaceRootsLocked()
+}
+
+// effectiveWorkspaceRootsLocked 生效白名单 = 显式配置的根 ∪ 平台代建根（调用方须持 s.mu）。
+//
+// 代建根隐式入名单的理由：它是**平台自己的目录**（平台按会话 id 在里面建会话沙箱），
+// 要运维把它手写进配置才自洽，等于把平台的实现细节泄漏成运维负担。
+// 顺序有意保持"配置项在前、代建根在后"：browse 的起步点取 roots[0]，不能被派生根顶掉。
+//
+// 未配置（空）时返回 nil（= 不限制）：不能因为存在代建根就把"不限制"悄悄缩成
+// "只允许代建目录"——那会让默认配置下的用户突然选不了自己的项目目录。
+func (s *Service) effectiveWorkspaceRootsLocked() []string {
+	if len(s.workspaceRoots) == 0 {
+		return nil
+	}
+	out := append([]string(nil), s.workspaceRoots...)
+	if s.workspaceDir == "" {
+		return out
+	}
+	if real := resolveRealPath(s.workspaceDir); !withinRoots(real, out) {
+		out = append(out, real)
+	}
+	return out
 }

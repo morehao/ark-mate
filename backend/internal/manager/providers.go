@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— Provider 注入面（P2）：档案只写不读回 + 启动 env 注入 ———
@@ -93,15 +93,15 @@ func (s *Service) persistProvidersFile() error {
 }
 
 // ListProviders 列出 provider 档案概要（密钥只以 has_key 呈现，绝不读回）。
-func (s *Service) ListProviders() ([]handler.ProviderResp, error) {
+func (s *Service) ListProviders() ([]dtoprovider.ProviderResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]handler.ProviderResp, 0, len(s.providers))
+	out := make([]dtoprovider.ProviderResp, 0, len(s.providers))
 	for id, d := range s.providers {
 		if d == nil {
 			continue
 		}
-		out = append(out, handler.ProviderResp{
+		out = append(out, dtoprovider.ProviderResp{
 			ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != "",
 		})
 	}
@@ -109,7 +109,7 @@ func (s *Service) ListProviders() ([]handler.ProviderResp, error) {
 }
 
 // UpdateProvider upsert 档案：type/model 指针更新、key 非 nil 即覆盖/清除。
-func (s *Service) UpdateProvider(_ context.Context, id string, patch handler.ProviderPatchReq) (*handler.ProviderResp, error) {
+func (s *Service) UpdateProvider(_ context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
 	if id == "" {
 		return nil, acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
 	}
@@ -132,7 +132,7 @@ func (s *Service) UpdateProvider(_ context.Context, id string, patch handler.Pro
 	if err := s.persistProvidersFile(); err != nil {
 		return nil, err
 	}
-	return &handler.ProviderResp{ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != ""}, nil
+	return &dtoprovider.ProviderResp{ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != ""}, nil
 }
 
 // providerEnvFor 返回给某 provider 档案注入的 env（KEY=VALUE 列表；无 key/未知档案 → nil）。

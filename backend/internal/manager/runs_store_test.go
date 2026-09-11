@@ -2,13 +2,12 @@ package manager
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 )
 
 // TestRunMaterializationAtTurnEnd 验证 P1 runs 物化不变量：
@@ -17,13 +16,10 @@ import (
 //   - 轮次窗口从上一 run 的 last_seq 之后起算（多轮不串）；
 //   - 无 store 时 ListRuns 返回空（读模型仅 sqlite 模式存在）。
 func TestRunMaterializationAtTurnEnd(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
@@ -81,13 +77,10 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 // TestRunUsageExposedInListRuns runs.usage_json 在 ListRuns 读面被解析为 RunResp.Usage：
 // 有上报 → 结构体；空串/无上报 → Usage 为 nil（omitempty）。
 func TestRunUsageExposedInListRuns(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)

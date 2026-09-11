@@ -2,10 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
+
+	"github.com/morehao/ark-forge/internal/model"
+	"gorm.io/gorm"
 )
 
 // AppendEvent 追加一条事件（facts 唯一写入口的落库侧）：
@@ -17,208 +18,65 @@ func (s *Store) AppendEvent(ctx context.Context, conversationID, typ string, pay
 	if err != nil {
 		return 0, fmt.Errorf("store: marshal payload: %w", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	seq, err := allocSeqTx(ctx, tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO events(seq, conversation_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)`,
-		seq, conversationID, typ, string(b), nowRFC3339()); err != nil {
-		_ = tx.Rollback()
-		return 0, fmt.Errorf("store: insert event: %w", err)
-	}
-	if err := touchConversationLastSeqTx(ctx, tx, conversationID, seq); err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return seq, nil
+	return s.AppendEventJSON(ctx, conversationID, typ, string(b))
 }
 
 // AppendEventJSON 同 AppendEvent，但载荷已是 JSON 文本（迁移导入与高频写路径复用，免二次序列化）。
 func (s *Store) AppendEventJSON(ctx context.Context, conversationID, typ, payloadJSON string) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	var seq int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		seq, err = s.appendEventTx(ctx, tx, conversationID, typ, payloadJSON)
+		return err
+	})
 	if err != nil {
-		return 0, err
-	}
-	seq, err := allocSeqTx(ctx, tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO events(seq, conversation_id, type, payload_json, created_at) VALUES(?, ?, ?, ?, ?)`,
-		seq, conversationID, typ, payloadJSON, nowRFC3339()); err != nil {
-		_ = tx.Rollback()
-		return 0, fmt.Errorf("store: insert event: %w", err)
-	}
-	if err := touchConversationLastSeqTx(ctx, tx, conversationID, seq); err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return seq, nil
 }
 
-// allocSeqTx 在事务内分配下一个全局 seq（meta 计数行 +1，写回）。
-func allocSeqTx(ctx context.Context, tx *sql.Tx) (int64, error) {
-	var cur int64
-	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, metaKeySeq).Scan(&cur)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("store: read seq meta: %w", err)
-	}
-	cur++
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO meta(key, value) VALUES(?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		metaKeySeq, fmt.Sprintf("%d", cur)); err != nil {
-		return 0, fmt.Errorf("store: bump seq meta: %w", err)
-	}
-	return cur, nil
-}
-
-// touchConversationLastSeqTx 抬高会话水位（幂等：仅当传入 seq 更大时更新）。
-func touchConversationLastSeqTx(ctx context.Context, tx *sql.Tx, conversationID string, seq int64) error {
-	res, err := tx.ExecContext(ctx,
-		`UPDATE conversations SET last_seq = ?, updated_at = ?
-		 WHERE id = ? AND last_seq < ?`,
-		seq, nowRFC3339(), conversationID, seq)
+// appendEventTx 在**已有事务**内追加事件（序号分配 → 落库 → 抬会话水位），
+// 供单条追加与批量导入共用，保证两条路径的事务边界与水位语义完全一致。
+func (s *Store) appendEventTx(ctx context.Context, tx *gorm.DB, conversationID, typ, payloadJSON string) (int64, error) {
+	seq, err := s.meta.WithTx(tx).IncrSeq(ctx)
 	if err != nil {
-		return fmt.Errorf("store: touch conversation last_seq: %w", err)
+		return 0, err
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		// conversation 不存在（FK 已拦）或 last_seq 已更大 → 前者由 FK 报错兜底；这里不额外报错。
+	ev := &model.Event{
+		Seq:            seq,
+		ConversationID: conversationID,
+		Type:           typ,
+		PayloadJSON:    payloadJSON,
+		CreatedAt:      nonZeroTime(model.ParseTime(model.NowTS())),
 	}
-	return nil
+	if err := s.events.WithTx(tx).Insert(ctx, ev); err != nil {
+		return 0, fmt.Errorf("store: insert event: %w", err)
+	}
+	if err := s.conversations.WithTx(tx).TouchLastSeq(ctx, conversationID, seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
 }
 
 // EventsAfter 返回某会话 seq > after 的事件（升序，limit 上限；hasMore 表示仍有余量）。
 // 服务端事件回放（history 续传/断线补偿）从 events 表读，不再受内存环缓冲淘汰限制。
 func (s *Store) EventsAfter(ctx context.Context, conversationID string, after, limit int64) ([]Event, bool, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT seq, conversation_id, type, payload_json, created_at FROM events
-		 WHERE conversation_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
-		conversationID, after, limit+1)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
-	out := make([]Event, 0, limit)
-	for rows.Next() {
-		var e Event
-		var created string
-		if err := rows.Scan(&e.Seq, &e.ConversationID, &e.Type, &e.PayloadJSON, &created); err != nil {
-			return nil, false, err
-		}
-		e.CreatedAt = parseTS(created)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	hasMore := int64(len(out)) > limit
-	if hasMore {
-		out = out[:limit]
-	}
-	return out, hasMore, nil
+	return s.events.After(ctx, conversationID, after, limit)
 }
 
 // EventCount 统计某会话/全局事件行数（迁移校验用；conversationID 空 = 全库）。
 func (s *Store) EventCount(ctx context.Context, conversationID string) (int64, error) {
-	var n int64
-	if conversationID == "" {
-		err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&n)
-		return n, err
-	}
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE conversation_id = ?`, conversationID).Scan(&n)
-	return n, err
+	return s.events.Count(ctx, conversationID)
 }
 
 // EventsAllAfter 全表按 seq 升序游标分页（跨会话；重启恢复注入 bus 用，保证全局号序升序回放）。
 func (s *Store) EventsAllAfter(ctx context.Context, after, limit int64) ([]Event, bool, error) {
-	if limit <= 0 {
-		limit = 2000
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT seq, conversation_id, type, payload_json, created_at FROM events
-		 WHERE seq > ? ORDER BY seq ASC LIMIT ?`, after, limit+1)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
-	out := make([]Event, 0, limit)
-	for rows.Next() {
-		var e Event
-		var created string
-		if err := rows.Scan(&e.Seq, &e.ConversationID, &e.Type, &e.PayloadJSON, &created); err != nil {
-			return nil, false, err
-		}
-		e.CreatedAt = parseTS(created)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	hasMore := int64(len(out)) > limit
-	if hasMore {
-		out = out[:limit]
-	}
-	return out, hasMore, nil
+	return s.events.AllAfter(ctx, after, limit)
 }
 
 // EventsBefore 反向分页：返回 seq < before 的最近 limit 条事件（结果仍按 seq 升序）。
 // hasMore 表示窗口之外还有更早的事件（即返回的第一条不是该会话最早的一条）。
 // before<=0 时按「从最新往回」处理（等价于取末尾 limit 条）。
 func (s *Store) EventsBefore(ctx context.Context, conversationID string, before, limit int64) ([]Event, bool, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	// 先按 seq 降序取 limit+1 条（多取一条判断是否还有更早），再反转为升序返回。
-	query := `SELECT seq, conversation_id, type, payload_json, created_at FROM events
-		 WHERE conversation_id = ? ORDER BY seq DESC LIMIT ?`
-	args := []any{conversationID, limit + 1}
-	if before > 0 {
-		query = `SELECT seq, conversation_id, type, payload_json, created_at FROM events
-		 WHERE conversation_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`
-		args = []any{conversationID, before, limit + 1}
-	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
-	desc := make([]Event, 0, limit)
-	for rows.Next() {
-		var e Event
-		var created string
-		if err := rows.Scan(&e.Seq, &e.ConversationID, &e.Type, &e.PayloadJSON, &created); err != nil {
-			return nil, false, err
-		}
-		e.CreatedAt = parseTS(created)
-		desc = append(desc, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	hasMore := int64(len(desc)) > limit
-	if hasMore {
-		desc = desc[:limit]
-	}
-	out := make([]Event, 0, len(desc))
-	for i := len(desc) - 1; i >= 0; i-- {
-		out = append(out, desc[i])
-	}
-	return out, hasMore, nil
+	return s.events.Before(ctx, conversationID, before, limit)
 }

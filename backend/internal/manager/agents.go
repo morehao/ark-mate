@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // ——— Agent Registry（P2）：definitions 目录 + 注册/编辑/删除/启停 ———
@@ -157,7 +157,7 @@ func seedAgent(id string) bool {
 
 // CreateAgent 注册新 agent（非种子）：校验可启动（runtime 已注册 → 静态能力冻结于 runtime 侧）并持久化。
 // 返回注册后的对外表示。
-func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*handler.AgentResp, error) {
+func (s *Service) CreateAgent(_ context.Context, req dtoagent.AgentCreateReq) (*dtoagent.AgentResp, error) {
 	if strings.HasPrefix(req.ID, reservedAgentPrefix) {
 		return nil, acl.NewError(acl.ClassRequest, "reserved_agent_id", fmt.Sprintf("%q 为种子保留前缀，自定义 agent 请用其它 id", reservedAgentPrefix), nil)
 	}
@@ -180,7 +180,7 @@ func (s *Service) CreateAgent(_ context.Context, req handler.AgentCreateReq) (*h
 }
 
 // UpdateAgent 更新 agent 元数据（name/runtimes/provider 子集；provider 传空串 = 清除）。
-func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentUpdateReq) (*handler.AgentResp, error) {
+func (s *Service) UpdateAgent(_ context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
 	s.mu.Lock()
 	cur, ok := s.agents[id]
 	if !ok {
@@ -231,7 +231,7 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch handler.AgentU
 //     导出历史」两条出路）；
 //   - 内存里仍活跃的会话在此刻被摘除，避免「删了还能跑、重启后才失效」的半死态；
 //   - 有在途 turn 时整体拒绝（agent_busy）：失败即无副作用，不删一半。
-func (s *Service) DeleteAgent(_ context.Context, id string) (*handler.AgentDeleteResp, error) {
+func (s *Service) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDeleteResp, error) {
 	if seedAgent(id) {
 		return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
 			fmt.Sprintf("种子 agent %q 不可删除（可直接编辑 definitions）", id), nil)
@@ -275,7 +275,7 @@ func (s *Service) DeleteAgent(_ context.Context, id string) (*handler.AgentDelet
 	}
 	slog.Info("agent deleted", "agent", id, "affected_conversations", affected,
 		"detached_conversations", detached, "was_default", wasDefault)
-	return &handler.AgentDeleteResp{Deleted: id, AffectedConversations: affected,
+	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedConversations: affected,
 		DetachedConversations: detached, WasDefault: wasDefault}, nil
 }
 
@@ -378,14 +378,14 @@ func (s *Service) syncAgentDef(id string) error {
 }
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
-func (s *Service) agentRespLocked(id string) *handler.AgentResp {
+func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.agents[id]
 	if !ok {
 		return nil
 	}
-	return &handler.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
+	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 		PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
 		ConversationCount: s.conversationCountLocked(a.ID)}

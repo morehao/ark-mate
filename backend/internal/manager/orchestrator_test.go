@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -44,17 +43,6 @@ func (s *stubConversation) Prompt(ctx context.Context, _ string) (string, error)
 }
 
 func (s *stubConversation) Cancel(context.Context) error { return nil }
-
-// newTestRig 组装 svc+orch+bus（不拨真实连接）。
-func newTestRig(t *testing.T) (*Service, *Orchestrator, *eventbus.Bus) {
-	t.Helper()
-	reg := runtime.NewRegistry()
-	bus := eventbus.New()
-	svc := NewService(reg, bus)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
-	return svc, orch, bus
-}
 
 // feed 收集某聚合最多 want 个 bus 事件（超时 2s 防御）。
 func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
@@ -142,7 +130,7 @@ func TestCancelTurn(t *testing.T) {
 // TestServiceRESTErrors 会话动作错误映射为对外错误码（不存在 agent/conversation → 40401）。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "nope", Prompt: "hi"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "nope", Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
@@ -354,7 +342,7 @@ func TestHandoffMemoBudget(t *testing.T) {
 }
 
 // TestConnKeyModelScoping 连接缓存键：provider 密钥 env 与进程级模型 env 都影响共享键
-//（B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
+// （B5 修复 + Phase B 模型作用域）。会话级模型（dsh，模型经 set_config_option）不进键。
 func TestConnKeyModelScoping(t *testing.T) {
 	native := []string{"DSH_PERMISSION_MODE=default"}
 	keyE := []string{"OPENAI_API_KEY=sk-x"}

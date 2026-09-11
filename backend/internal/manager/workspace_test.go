@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -189,11 +191,11 @@ func discardTempWorkspace(t *testing.T, res WorkspaceResolution) {
 // workspaceTestSvc 播一个 echo runtime 上的 agent（不拨真实子进程：本轮只验证解析与校验顺序）。
 func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	if _, err := svc.CreateAgent(context.Background(), handler.AgentCreateReq{
+	if _, err := svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
 		ID: "ws-probe", Name: "工作空间测试", Runtimes: []string{"echo"},
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -207,14 +209,14 @@ func TestCreateConversationWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, t.TempDir(), nil)
 
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
 		AgentID: "ws-probe", Cwd: "relative/not-absolute",
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("相对路径应 40001（请求拒绝），got %d: %v", code, err)
 	}
 
-	_, err = svc.CreateConversation(context.Background(), handler.ConversationCreateReq{
+	_, err = svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
 		AgentID: "ws-probe", Cwd: filepath.Join(t.TempDir(), "nope"),
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -225,7 +227,7 @@ func TestCreateConversationWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	if werr := os.WriteFile(f, []byte("x"), 0o600); werr != nil {
 		t.Fatalf("write: %v", werr)
 	}
-	_, err = svc.CreateConversation(context.Background(), handler.ConversationCreateReq{
+	_, err = svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
 		AgentID: "ws-probe", Cwd: f,
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -239,7 +241,7 @@ func TestCreateConversationWorkspaceRequiredWhenDisabled(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, "", nil)
 
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "ws-probe"})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("代建关闭应 40001，got %d: %v", code, err)
 	}
@@ -253,7 +255,7 @@ func TestCreateConversationDiscardsTemporaryWorkspaceOnFailure(t *testing.T) {
 	mustWorkspacePolicy(t, svc, root, nil)
 
 	// echo spec 无启动命令 → acquire 失败；此时代建目录应已被回收。
-	_, err := svc.CreateConversation(context.Background(), handler.ConversationCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "ws-probe"})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
 	}

@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/capability"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
-	"github.com/morehao/ark-forge/internal/server/handler"
+	"github.com/morehao/ark-forge/internal/dto/dtocapability"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -179,7 +179,7 @@ func TestAgentCapabilities(t *testing.T) {
 	if len(got.McpServers) != 3 {
 		t.Fatalf("mcp_servers 应全量 3 条，got %+v", got.McpServers)
 	}
-	byID := map[string]handler.AgentMcpServerResp{}
+	byID := map[string]dtocapability.AgentMcpServerResp{}
 	for _, m := range got.McpServers {
 		byID[m.ID] = m
 	}
@@ -367,7 +367,7 @@ func TestProbeMcpServer(t *testing.T) {
 	}
 }
 
-func mustListTools(t *testing.T, svc *Service) []handler.ToolResp {
+func mustListTools(t *testing.T, svc *Service) []dtocapability.ToolResp {
 	t.Helper()
 	out, err := svc.ListTools()
 	if err != nil {
@@ -495,7 +495,7 @@ func TestCallMcpTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := svc.CallMcpTool(context.Background(), "h", "read_file", handler.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
+	got, err := svc.CallMcpTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
 	if err != nil {
 		t.Fatalf("CallMcpTool: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 工具级失败：不是平台错误。
-	gotErr, err := svc.CallMcpTool(context.Background(), "h", "boom", handler.McpToolCallReq{})
+	gotErr, err := svc.CallMcpTool(context.Background(), "h", "boom", dtocapability.McpToolCallReq{})
 	if err != nil {
 		t.Fatalf("工具级失败不应报错: %v", err)
 	}
@@ -519,22 +519,22 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 未知 server → 40401。
-	if _, err := svc.CallMcpTool(context.Background(), "nope", "t", handler.McpToolCallReq{}); restCode(err) != 40401 {
+	if _, err := svc.CallMcpTool(context.Background(), "nope", "t", dtocapability.McpToolCallReq{}); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
 	// sse（B3 起已支持）指向不可达端点 → 连接失败 50201（不再是不支持 40501）。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CallMcpTool(context.Background(), "s", "t", handler.McpToolCallReq{}); restCode(err) != 50201 {
+	if _, err := svc.CallMcpTool(context.Background(), "s", "t", dtocapability.McpToolCallReq{}); restCode(err) != 50201 {
 		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 	// 非法 arguments → 40001（ClassRequest）。
-	if _, err := svc.CallMcpTool(context.Background(), "h", "read_file", handler.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
+	if _, err := svc.CallMcpTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
 		t.Fatalf("非法 arguments 应 40001，got %v", err)
 	}
 	// 空工具名 → 40001。
-	if _, err := svc.CallMcpTool(context.Background(), "h", "", handler.McpToolCallReq{}); restCode(err) != 40001 {
+	if _, err := svc.CallMcpTool(context.Background(), "h", "", dtocapability.McpToolCallReq{}); restCode(err) != 40001 {
 		t.Fatalf("空工具名应 40001，got %v", err)
 	}
 }
@@ -565,7 +565,7 @@ func TestCallMcpToolTimeout(t *testing.T) {
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "slow", Name: "Slow", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.CallMcpTool(context.Background(), "slow", "t", handler.McpToolCallReq{TimeoutMS: 50})
+	_, err := svc.CallMcpTool(context.Background(), "slow", "t", dtocapability.McpToolCallReq{TimeoutMS: 50})
 	if restCode(err) != 40901 {
 		t.Fatalf("超时应 40901，got %v (code=%d)", err, restCode(err))
 	}
@@ -651,14 +651,14 @@ func TestMcpResourcesPrompts(t *testing.T) {
 		t.Fatalf("提示词列表不符: %+v", ps)
 	}
 
-	gp, err := svc.GetMcpPrompt(context.Background(), "h", "greet", handler.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
+	gp, err := svc.GetMcpPrompt(context.Background(), "h", "greet", dtocapability.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
 	if err != nil {
 		t.Fatalf("GetMcpPrompt: %v", err)
 	}
 	if gp.Description != "问候模板" || len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
 		t.Fatalf("提示词结果不符: %+v", gp)
 	}
-	if _, err := svc.GetMcpPrompt(context.Background(), "h", "", handler.McpPromptGetReq{}); restCode(err) != 40001 {
+	if _, err := svc.GetMcpPrompt(context.Background(), "h", "", dtocapability.McpPromptGetReq{}); restCode(err) != 40001 {
 		t.Fatalf("空提示词名应 40001，got %v", err)
 	}
 
@@ -724,7 +724,7 @@ func TestAutoProbeMcpServers(t *testing.T) {
 		t.Fatalf("Tool 目录应含两个自动探测结果: %v", names)
 	}
 	mcps, _ := svc.ListMcpServers()
-	byID := map[string]handler.McpServerResp{}
+	byID := map[string]dtocapability.McpServerResp{}
 	for _, m := range mcps {
 		byID[m.ID] = m
 	}

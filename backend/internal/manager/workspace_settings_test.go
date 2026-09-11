@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // fakeRootsStore 记录落盘调用并支持注入失败/锁定态。

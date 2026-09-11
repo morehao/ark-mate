@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/acl"
 )
 
 // 结构化提问通道（elicitation/*）配置。与权限通道同构：注册挂起 → 发事件 → 等待决策 → 回馈。
@@ -101,7 +101,7 @@ func schemaMap(s *acl.ElicitationSchema) map[string]any {
 }
 
 // CancelConversation 取消某会话的全部挂起提问（conversation/cancel 后按 Cancelled 回馈 agent）。
-func (m *ElicitationManager) CancelSession(conversationID string) {
+func (m *ElicitationManager) CancelConversation(conversationID string) {
 	m.mu.Lock()
 	var victims []*pendingElicitation
 	for _, p := range m.pending {
@@ -121,7 +121,7 @@ func (m *ElicitationManager) CancelSession(conversationID string) {
 }
 
 // pendingForConversation 列出某会话的全部挂起提问（按 id 稳定序）。
-func (m *ElicitationManager) pendingForSession(conversationID string) []*pendingElicitation {
+func (m *ElicitationManager) pendingForConversation(conversationID string) []*pendingElicitation {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*pendingElicitation

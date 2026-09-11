@@ -2,11 +2,10 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/acl"
+	"github.com/morehao/ark-forge/pkg/object/objusage"
 )
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
@@ -41,18 +40,18 @@ const (
 
 // UsageBucket 一行聚合结果（group_by=agent → Key=agent_id；=day → Key=YYYY-MM-DD，AgentID 空）。
 type UsageBucket struct {
-	Key           string  `json:"key"`
-	AgentID       string  `json:"agent_id,omitempty"`
-	Runs          int     `json:"runs"`
-	Completed     int     `json:"completed"`
-	Failed        int     `json:"failed"`
-	Cancelled     int     `json:"cancelled"`
-	Running       int     `json:"running"`
-	Conversations int     `json:"conversations"`
-	DurationMS    int64   `json:"duration_ms"`
-	ContextUsed   int64   `json:"context_used"`
-	ContextSize   int64   `json:"context_size"`
-	UsageReported int     `json:"usage_reported"`
+	Key           string `json:"key"`
+	AgentID       string `json:"agent_id,omitempty"`
+	Runs          int    `json:"runs"`
+	Completed     int    `json:"completed"`
+	Failed        int    `json:"failed"`
+	Cancelled     int    `json:"cancelled"`
+	Running       int    `json:"running"`
+	Conversations int    `json:"conversations"`
+	DurationMS    int64  `json:"duration_ms"`
+	ContextUsed   int64  `json:"context_used"`
+	ContextSize   int64  `json:"context_size"`
+	UsageReported int    `json:"usage_reported"`
 	// CostReported 上报过费用的会话数（与 UsageReported 分开：二者上报率不同）。
 	CostReported int     `json:"cost_reported"`
 	CostAmount   float64 `json:"cost_amount"`
@@ -74,7 +73,7 @@ type usageRow struct {
 	status         string
 	startedAt      time.Time
 	endedAt        time.Time
-	usage          acl.UsageInfo
+	usage          objusage.UsageInfo
 	// 字段级可用性：一次上报可能只带上下文或只带费用，聚合时按字段取「区间内最后一条」。
 	hasContext bool
 	hasCost    bool
@@ -121,50 +120,32 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 	return res, nil
 }
 
-// usageRows 读取区间内的 run 行（含 agent 归属与用量快照）。
+// usageRows 读取区间内的 run 行（含 agent 归属与用量快照），转成本包聚合用的行结构。
+//
+// 半开区间 [From, To) 的边界比较由 dao 负责（必须以落库布局格式化后再比，
+// 时间列是 RFC3339Nano 文本）。
 func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error) {
-	query := `SELECT r.conversation_id, c.agent_id, r.status, r.started_at, r.ended_at, r.usage_json
-		FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE 1 = 1`
-	var args []any
-	if !q.From.IsZero() {
-		query += ` AND r.started_at >= ?`
-		args = append(args, q.From.UTC().Format(time.RFC3339Nano))
-	}
-	if !q.To.IsZero() {
-		query += ` AND r.started_at < ?`
-		args = append(args, q.To.UTC().Format(time.RFC3339Nano))
-	}
-	if q.AgentID != "" {
-		query += ` AND c.agent_id = ?`
-		args = append(args, q.AgentID)
-	}
-	query += ` ORDER BY r.started_at ASC`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.runs.UsageRows(ctx, q.From, q.To, q.AgentID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []usageRow{}
-	for rows.Next() {
-		var (
-			convID, agentID, status, started, ended, usageJSON string
-		)
-		if err := rows.Scan(&convID, &agentID, &status, &started, &ended, &usageJSON); err != nil {
-			return nil, err
+	out := make([]usageRow, 0, len(rows))
+	for _, r := range rows {
+		row := usageRow{
+			conversationID: r.ConversationID,
+			agentID:        r.AgentID,
+			status:         r.Status,
+			startedAt:      r.StartedAt,
+			endedAt:        r.EndedAt,
 		}
-		r := usageRow{conversationID: convID, agentID: agentID, status: status}
-		r.startedAt = parseTime(started)
-		r.endedAt = parseTime(ended)
-		if usageJSON != "" {
-			var u acl.UsageInfo
-			if err := json.Unmarshal([]byte(usageJSON), &u); err == nil && u.Reported() {
-				r.usage = u
-				r.hasContext, r.hasCost = u.HasContext(), u.HasCost()
-			}
+		if r.Reported {
+			row.usage = r.Usage
+			// 字段级可用性：一次上报可能只带上下文或只带费用，聚合时按字段各取「区间内最后一条」。
+			row.hasContext, row.hasCost = r.Usage.HasContext(), r.Usage.HasCost()
 		}
-		out = append(out, r)
+		out = append(out, row)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // aggregateUsage 聚合一组 run 行：计数/时长全量累加；上下文/费用按会话取区间内**最后一次上报**
@@ -174,8 +155,8 @@ func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error)
 // **快照**而非区间增量——同一会话跨桶时会在每个桶各出现一次，因此 day 分桶的成本/上下文不可相加。
 func aggregateUsage(rows []usageRow) UsageBucket {
 	var b UsageBucket
-	lastCtx := make(map[string]acl.UsageInfo)
-	lastCost := make(map[string]acl.UsageInfo)
+	lastCtx := make(map[string]objusage.UsageInfo)
+	lastCost := make(map[string]objusage.UsageInfo)
 	ctxOrder := make([]string, 0, len(rows))
 	costOrder := make([]string, 0, len(rows))
 	for _, r := range rows {
@@ -245,16 +226,4 @@ func countDistinct(rows []usageRow) int {
 		seen[r.conversationID] = struct{}{}
 	}
 	return len(seen)
-}
-
-// parseTime 解析存储层时间（RFC3339Nano；失败 → 零值，聚合时按「无时长」处理）。
-func parseTime(v string) time.Time {
-	if v == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, v)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }

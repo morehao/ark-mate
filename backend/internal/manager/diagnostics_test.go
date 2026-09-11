@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/acl"
-	"github.com/morehao/ark-forge/internal/runtime"
-	"github.com/morehao/ark-forge/internal/server/eventbus"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // brokenRuntimeSpec 一个「起得来但握手必然失败」的 runtime：写 stderr 后立即退出。

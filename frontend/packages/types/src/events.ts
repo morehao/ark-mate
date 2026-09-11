@@ -12,6 +12,10 @@ export const Ev = {
   Usage: 'session.usage',
   Permission: 'session.permission',
   PermissionRequest: 'session.permission_request',
+  // per-agent 默认权限策略自动决策留痕（审计事件）：payload = 决策依据与结论。控制台目前
+  // 不渲染它（策略本身走 REST 展示），但它是真实发布的事件，枚举必须与后端 events.go 对齐——
+  // 此前漏了这一条，由 archtest 的 TestFrontendEventTypesMatchRegistry 抓出。
+  PermissionPolicy: 'session.permission_policy',
   PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
   ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消）
