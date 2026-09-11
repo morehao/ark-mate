@@ -304,8 +304,8 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentiona
 	o.evictConversation(as)
 
 	// 连接没了，挂起的权限/提问永远等不到决策：随拆除一并收敛，不留「待确认」幽灵卡。
-	o.perm.CancelSession(as.ID)
-	o.elic.CancelSession(as.ID)
+	o.perm.CancelConversation(as.ID)
+	o.elic.CancelConversation(as.ID)
 
 	if t != nil {
 		t.cancel()

@@ -85,7 +85,7 @@ func TestElicitationResolveUnknown(t *testing.T) {
 }
 
 // TestElicitationCancelConversation conversation/cancel 把挂起提问按取消回馈并清空挂起表。
-func TestElicitationCancelSession(t *testing.T) {
+func TestElicitationCancelConversation(t *testing.T) {
 	m := NewElicitationManager(30 * time.Second)
 	registered := make(chan string, 1)
 	done := make(chan acl.ElicitationOutcome, 1)
@@ -96,7 +96,7 @@ func TestElicitationCancelSession(t *testing.T) {
 		done <- out
 	}()
 	<-registered // 注册完成（发布事件）后再取消会话
-	m.CancelSession("s1")
+	m.CancelConversation("s1")
 	out := <-done
 	if out.Action != "cancel" {
 		t.Fatalf("取消会话后应按取消回馈: %+v", out)

@@ -132,7 +132,7 @@ func (m *PermissionManager) memPut(it MemoryItem) {
 
 // ForgetConversation 清除整会话的权限记忆（会话结束/重置/一键撤销）。
 // sqlite 模式下同步旁路删除（permission_memories 表整会话）。
-func (m *PermissionManager) ForgetSession(conversationID string) {
+func (m *PermissionManager) ForgetConversation(conversationID string) {
 	m.mu.Lock()
 	delete(m.mem, conversationID)
 	delAll := m.memDelAll

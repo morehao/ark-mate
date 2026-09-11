@@ -96,7 +96,7 @@ func genCallID() string {
 }
 
 // CancelConversation 取消某会话的全部挂起权限请求（conversation/cancel 后按 ACP 规范回 Cancelled）。
-func (m *PermissionManager) CancelSession(conversationID string) {
+func (m *PermissionManager) CancelConversation(conversationID string) {
 	m.mu.Lock()
 	var victims []*pendingPermission
 	for _, p := range m.pending {
@@ -129,7 +129,7 @@ func (m *PermissionManager) pendingCount(conversationID string) int {
 }
 
 // pendingForConversation 列出某会话的全部挂起权限（按 call_id 稳定序）。
-func (m *PermissionManager) pendingForSession(conversationID string) []*pendingPermission {
+func (m *PermissionManager) pendingForConversation(conversationID string) []*pendingPermission {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*pendingPermission

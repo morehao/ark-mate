@@ -57,7 +57,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
 func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionItem {
-	ps := o.perm.pendingForSession(conversationID)
+	ps := o.perm.pendingForConversation(conversationID)
 	out := make([]PermissionItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, PermissionItem{
@@ -116,7 +116,7 @@ func (o *Orchestrator) PermissionMemories(conversationID string) []MemoryItem {
 func (o *Orchestrator) RevokeMemory(conversationID, title, kind string) (bool, error) {
 	switch {
 	case title == "" && kind == "":
-		o.perm.ForgetSession(conversationID)
+		o.perm.ForgetConversation(conversationID)
 		return true, nil
 	case title == "" || kind == "":
 		return false, acl.NewError(acl.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
@@ -153,7 +153,7 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
 func (o *Orchestrator) PendingElicitations(conversationID string) []ElicitationItem {
-	ps := o.elic.pendingForSession(conversationID)
+	ps := o.elic.pendingForConversation(conversationID)
 	out := make([]ElicitationItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, ElicitationItem{

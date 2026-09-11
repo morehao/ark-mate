@@ -52,7 +52,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	if n, _ := st1.ListMemories(ctx, "s1"); len(n) != 1 {
 		t.Fatalf("Revoke 后 DB 应 1 条: %+v", n)
 	}
-	orch1.perm.ForgetSession("s1")
+	orch1.perm.ForgetConversation("s1")
 	if n, _ := st1.ListMemories(ctx, "s1"); len(n) != 0 {
 		t.Fatalf("ForgetConversation 后 DB 应为空: %+v", n)
 	}

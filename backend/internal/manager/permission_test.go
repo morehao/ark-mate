@@ -89,7 +89,7 @@ func TestPermissionReject(t *testing.T) {
 }
 
 // TestPermissionCancelConversation verify conversation/cancel 后全部挂起被取消（ACP 规范）。
-func TestPermissionCancelSession(t *testing.T) {
+func TestPermissionCancelConversation(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
 	for i := 0; i < 2; i++ {
 		req := acl.PermissionRequest{ToolCall: acl.ToolCallInfo{ID: "tc", Title: "op", Kind: "bash"}}
@@ -105,7 +105,7 @@ func TestPermissionCancelSession(t *testing.T) {
 	if m.pendingCount("s5") != 2 {
 		t.Fatalf("期望 2 条挂起，got %d", m.pendingCount("s5"))
 	}
-	m.CancelSession("s5")
+	m.CancelConversation("s5")
 	if m.pendingCount("s5") != 0 {
 		t.Fatalf("取消后应无挂起，got %d", m.pendingCount("s5"))
 	}
@@ -117,7 +117,7 @@ func waitRegistered(t *testing.T, m *PermissionManager, conversationID string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(m.pendingForSession(conversationID)) > 0 {
+		if len(m.pendingForConversation(conversationID)) > 0 {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -127,7 +127,7 @@ func waitRegistered(t *testing.T, m *PermissionManager, conversationID string) {
 
 func pendingCallID(t *testing.T, m *PermissionManager, conversationID string) string {
 	t.Helper()
-	ps := m.pendingForSession(conversationID)
+	ps := m.pendingForConversation(conversationID)
 	if len(ps) == 0 {
 		t.Fatal("无挂起请求")
 	}

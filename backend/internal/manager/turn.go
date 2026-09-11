@@ -187,9 +187,9 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) er
 		o.logger.Debug("conversation/cancel RPC 未在限期内响应，本地强制解除",
 			"conversation", conversationID, "timeout", agentCancelTimeout.String())
 	}
-	t.cancel()                           // 解除 SDK 阻塞
-	o.perm.CancelSession(conversationID) // conversation/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
-	o.elic.CancelSession(conversationID) // 挂起的结构化提问一并按取消回馈
+	t.cancel()                                // 解除 SDK 阻塞
+	o.perm.CancelConversation(conversationID) // conversation/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
+	o.elic.CancelConversation(conversationID) // 挂起的结构化提问一并按取消回馈
 	return nil
 }
 
