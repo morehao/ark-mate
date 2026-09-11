@@ -36,6 +36,19 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 - embed 仅随 `-tags release` 编译（`backend/pkg/web/web.go` 带 `//go:build release`）；默认构建不依赖前端产物。`backend/pkg/web/dist/` 不入库（由 `make web` 从 `apps/panel` 产物拷贝刷新）。
 - `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / acp-serve / acp-demo`。`forge demo` 需本机装 opencode/dsh（echo runtime 除外）。
 
+## session 与 conversation：两个名字，一个东西（外加一个同名不同物）
+
+平台聚合的概念从 P0 起叫 **conversation**，但**对外 wire 上它叫 `session`**——这是冻结的历史词汇，不是待修的笔误：
+
+- **wire 用 `session`**：事件 type 16/19 条是 `session.*`（`session.created`/`session.message`/`session.permission_resolved`…）、6 个 JSON 字段是 `session_id`、transcript 落盘 header 也是 `session_id`。前端 `@ark/types` 的 `events.ts` 与 `conversation.ts`、磁盘上既有的 transcript、`forge migrate` 全都依赖它。
+- **平台领域词用 `conversation`**：REST 资源路径 `/conversations/:id`、Go 类型 `Conversation`/`ActiveConversation`、`conversation_start.go`。
+- **`Session` 还另指一样东西**：**runtime 侧的 ACP 会话**。`ProviderSessionID`（原生底座会话 id）是它，`LoadSession`/`SessionCapabilities`/`SessionOptions`/`SessionInfo`/`NewSession`/`ResumeSession`/`SessionsPersistent`/`MultiSessionConcurrent` 也都是它——**这批不能改名**，改了就是把两个概念混成一个。注意 `sessions_persistent`/`multi_session_concurrent` 还是 health/diagnostics 的 wire key。
+
+**最容易踩的一处**：DTO / 前端里的 `SessionID` 指的是**平台会话 id**（= conversation id），而 `ProviderSessionID` 才是 runtime 的。两者在 `ConversationResp` 上并存（`service.go`）。
+
+**决策**：`session` 作为对外词汇**冻结**，与 ACP 自身协议一致（`NewSession`、`Acp-Session-Id` 响应头），改名是破坏性变更且零功能收益。只在**纯 Go 内部名**上保持「操作 `ActiveConversation` 的函数/文件就叫 conversation」（如 `applyModelOnConversation`、`conversation_start.go`）。
+事件契约的三条边由 `TestEventTypeContractFrozen`（常量 ↔ 冻结清单）与 `TestFrontendEventTypesMatchRegistry`（清单 ↔ 前端 `Ev`）共同钉住；错误码同理见下一节。
+
 ## 一致性守卫 / 测试约定
 
 - `TestReadmeRoutesMatchRouter`（`internal/router/router_test.go`）把 README 反引号内的 `/v1/forge` 路径与真实注册路由做**双向**比对：README 引用的路径必须注册（抓改名/删除），每条注册路由也必须在 README 出现（抓新增）。所以**改路由与改文档必须同一次提交**——新增端点不写文档同样红。因此没有豁免名单：**兼容别名也是端点，也要成行写进路由表**（`/permissions/always` 两个别名就是这么被补进文档的）。README 里也不得再出现历史名 `/sessions`。

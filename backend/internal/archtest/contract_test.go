@@ -1,7 +1,11 @@
 package archtest
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/morehao/ark-forge/internal/manager"
@@ -70,6 +74,57 @@ func TestEventTypeContractFrozen(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("第 %d 个事件 type 不一致：契约 %q，代码 %q", i, want[i], got[i])
+		}
+	}
+}
+
+// TestFrontendEventTypesMatchRegistry 钉住事件契约的**第三条边**：后端 events.go ↔ 前端 Ev。
+//
+// 上面 TestEventTypeContractFrozen 钉的是「真实常量 ↔ frozenEventTypes」，而它自己的注释
+// 就写着「前端 @ark/types 的 events.ts 按这些字面量做联合类型」——但**此前没有任何测试
+// 兜住前端那一份**：后端改一个事件名（或前端手滑打错一个字母），前端 Ev 会静默失配，
+// 直到某个 WS 帧在浏览器里没人认领才暴露。这与错误码的 BizCode 第三条边是同一个缺口
+// （见 pkg/code 的 TestFrontendBizCodesMatchRegistry），这里用同样办法补上：
+// **Go 读 TS 源码**，不引前端测试框架、不依赖 node 工具链。
+func TestFrontendEventTypesMatchRegistry(t *testing.T) {
+	path := filepath.Join(backendRoot(t), "..", "frontend", "packages", "types", "src", "events.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读前端事件常量 %s 失败: %v（前端目录结构变了？）", path, err)
+	}
+
+	// 只取 `export const Ev = {` … `} as const` 这一段：文件里还有 interface 定义，
+	// 全局扫引号会把别的字面量卷进来。
+	src := string(raw)
+	start := strings.Index(src, "export const Ev = {")
+	if start < 0 {
+		t.Fatalf("%s 里找不到 `export const Ev = {`（常量改名了？守卫已失效）", path)
+	}
+	end := strings.Index(src[start:], "} as const")
+	if end < 0 {
+		t.Fatalf("%s 里找不到 Ev 块的收尾 `} as const`（守卫已失效）", path)
+	}
+	block := src[start : start+end]
+
+	re := regexp.MustCompile(`(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*:\s*'([^']*)'\s*,?`)
+	got := map[string]string{} // 事件字面量 → 前端键名（报错时好定位）
+	for _, m := range re.FindAllStringSubmatch(block, -1) {
+		got[m[2]] = m[1]
+	}
+	if len(got) == 0 {
+		t.Fatalf("从 %s 的 Ev 块里没解析出任何 `Key: 'value'`（解析失效，守卫形同虚设）", path)
+	}
+
+	want := map[string]bool{}
+	for _, ev := range frozenEventTypes {
+		want[ev] = true
+		if _, ok := got[ev]; !ok {
+			t.Errorf("事件 type %q 在契约里、但前端 events.ts 的 Ev 缺失", ev)
+		}
+	}
+	for ev, key := range got {
+		if !want[ev] {
+			t.Errorf("前端 Ev.%s = %q，但后端 events.go / 事件契约里没有这个 type", key, ev)
 		}
 	}
 }

@@ -30,7 +30,7 @@ func (o *Orchestrator) ApplyConversationModel(ctx context.Context, conversationI
 	if !ok {
 		return false, nil
 	}
-	if err := o.applyModelOnSession(ctx, as, as.AgentID, spec, as.sess, model); err != nil {
+	if err := o.applyModelOnConversation(ctx, as, as.AgentID, spec, as.sess, model); err != nil {
 		return true, err
 	}
 	return true, nil
@@ -92,7 +92,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
 	//   - unsupported_*（echo 无模型、运行时未广告模型配置项）→ 忽略（无模型语义）；
 	//   - 成功 → 用返回的**全量**配置项刷新平台目录缓存（顺带清掉曾失败值的标记）。
-	if err := o.applyModelOnSession(ctx, as, agent.ID, spec, sess, opt.Model); err != nil {
+	if err := o.applyModelOnConversation(ctx, as, agent.ID, spec, sess, opt.Model); err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	return as, nil
 }
 
-// applyModelOnSession 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
+// applyModelOnConversation 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
 //
 // 语义（决策记录）：**用户显式指定的取值，运行时要么接受、要么报错**——绝不静默回落默认模型：
 //   - 运行时未广告模型项（echo / 未配置 provider 的 opencode）→ model_not_supported；
@@ -246,7 +246,7 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 //
 // model.Model 为空 = 不下发设置（跟随运行时默认），永远成功。
 // 思考档位不在平台侧下发（见 runtime.ModelConfig 说明）。
-func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveConversation,
+func (o *Orchestrator) applyModelOnConversation(ctx context.Context, as *ActiveConversation,
 	agentID string, spec runtime.Spec, sess acpSession, model runtime.ModelConfig) error {
 	if as.proj == nil { // 测试注入的假会话（无投影）：无模型语义
 		return nil
