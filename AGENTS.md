@@ -26,7 +26,7 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 ## 常用命令（仓库根）
 
 - `make dev` 前后端联调（go run serve → 等 :10001 health → vite :5173，Ctrl-C 一起收）；`make server` 仅后端；`make web` 只构建前端并刷新 embed 宿主；`make all` 出单二进制 `./forge`（先 web 再 `go build -tags release`）。
-- `make build/vet/test` = `cd backend && go build|vet|test ./...`。无独立 lint。
+- `make build/vet/test` = `cd backend && go build|vet|test ./...`。无独立 lint。另有 **`make test/release`**（`go test -tags release ./...`，依赖 `web` 目标先出前端产物）：**带 release tag 的代码只有这条能覆盖**，默认 `go test` 根本编译不到它们（历史上 `NoRoute` 的非 API 行为就是这么长期没人验的）。
 - 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
 - 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（echo 底座在进程内驱动）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。

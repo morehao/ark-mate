@@ -89,6 +89,12 @@ vet:
 test:
 	cd backend && go test ./...
 
+# release 形态的测试：MountWeb 等带 //go:build release 的代码只在这个 tag 下编译，
+# 默认 go test 完全覆盖不到（历史上 NoRoute 的非 API 行为就是这么长期没人验的）。
+# 依赖 web 目标：pkg/web/dist 必须有产物，否则 embed 编译失败。
+test/release: web
+	cd backend && go test -tags release ./...
+
 # 单二进制：先 web（构建 + 拷贝 + embed），再以 -tags release 编译，输出仓库根 ./forge
 all: web
 	cd backend && go build -tags release -o ../forge ./cmd/forge

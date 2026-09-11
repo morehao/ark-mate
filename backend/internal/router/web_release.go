@@ -12,7 +12,7 @@ import (
 )
 
 // MountWeb release 构建：把内嵌前端产物（web.Dist）以 SPA 方式挂到根路径。
-// 未命中静态资源的路由回退 index.html；/v1/* 未注册路径仍返回 JSON 404（不是 SPA）。
+// 未命中静态资源的路由回退 index.html；/v1/* 未注册路径仍回标准信封 404（不是 SPA）。
 func MountWeb(r *gin.Engine) {
 	sub, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
@@ -30,8 +30,8 @@ func MountWeb(r *gin.Engine) {
 
 	r.GET("/", indexResp)
 	r.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "not found"})
+		if isAPIPath(c.Request.URL.Path) {
+			writeNotFound(c)
 			return
 		}
 		p := strings.TrimPrefix(c.Request.URL.Path, "/")

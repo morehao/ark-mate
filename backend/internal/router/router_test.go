@@ -17,6 +17,7 @@ import (
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/config"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -189,14 +190,61 @@ func TestRouterRoutesRegistered(t *testing.T) {
 	}
 }
 
-// TestRouterUnknownAPINotSPA 未注册的 /v1/* 返回 JSON 404（非 SPA index）。
+// TestRouterUnknownAPINotSPA 未命中的 **API** 路径一律回标准信封 404。
+//
+// 这条测试此前是假的：断言只有 `w.Code == 404 && strings.Contains(body, "not found")`，
+// 而非 release 构建根本没注册 NoRoute，gin 默认的纯文本 "404 page not found" 恰好也含
+// "not found"——测试在开发态是**靠碰巧**通过的，从来没验证过信封。现在改为真正解析 JSON，
+// 逐项断言信封四要素与 code 取值。
+//
+// 只覆盖 API 路径：非 API 路径的期望值因构建形态而异（dev 回信封 404、release 回落 SPA
+// index.html），拆在 notfound_dev_test.go 与 notfound_release_test.go 里各自断言。
 func TestRouterUnknownAPINotSPA(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"未注册的 API 路径", "/v1/forge/nope"},
+		{"未注册的 API 深层路径", "/v1/forge/conversations/x/nope"},
+	}
 	e := newEngine()
-	req := httptest.NewRequest("GET", "/v1/forge/nope", nil)
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != 404 || !strings.Contains(w.Body.String(), "not found") {
-		t.Fatalf("未知 /v1 路径应 404 JSON: code=%d body=%s", w.Code, w.Body.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+
+			if w.Code != 404 {
+				t.Fatalf("应回 HTTP 404，得到 %d（body=%s）", w.Code, w.Body.String())
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+				t.Errorf("应是 JSON 而非纯文本/SPA，Content-Type=%q body=%s", ct, w.Body.String())
+			}
+			var env struct {
+				Code      int            `json:"code"`
+				RequestID string         `json:"requestID"`
+				Msg       string         `json:"msg"`
+				Data      map[string]any `json:"data"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+				t.Fatalf("响应体不是信封 JSON: %v（body=%s）", err, w.Body.String())
+			}
+			// code 必须取自 pkg/code 注册表：此前手写的 404 不在码表里，客户端无法判定。
+			if env.Code != code.NotFound {
+				t.Errorf("信封 code 应为 code.NotFound(%d)，得到 %d", code.NotFound, env.Code)
+			}
+			if env.Msg == "" {
+				t.Error("信封 msg 不应为空（客户端按 msg 展示）")
+			}
+			if env.Data == nil {
+				t.Error("信封缺 data 字段（形状应与 gincontext.Fail 一致）")
+			}
+			// requestID 允许为空（AccessLog 挂分组、NoRoute 挂引擎，分组中间件不执行），
+			// 但字段本身必须在——前端 Envelope<T> 按它取。
+			if !strings.Contains(w.Body.String(), `"requestID"`) {
+				t.Error("信封缺 requestID 字段")
+			}
+		})
 	}
 }
 

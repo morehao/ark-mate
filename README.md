@@ -243,8 +243,15 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 
 ### 业务错误码
 
-信封 `code` 字段的**唯一事实源是 `backend/pkg/code`**（本表由 `TestReadmeCodesMatchRegistry` 守卫，
-改码必须两处同步）。语义错误一律 HTTP 200 + `code != 0`，只有鉴权失败同时给 HTTP 401。
+信封 `code` 字段的**唯一事实源是 `backend/pkg/code`**（本表由 `TestReadmeCodesMatchRegistry`、
+前端常量由 `TestFrontendBizCodesMatchRegistry` 守卫，改码必须三处同步）。语义错误一律 HTTP 200 +
+`code != 0`，只有鉴权失败同时给 HTTP 401。
+
+**HTTP 状态码的第三个取值**：请求**未命中任何路由**时回 HTTP 404 + `code=40401`（标准信封）。
+与上一条不冲突——「语义错误走 200」说的是路由命中了、领域层判定失败；未命中路由属于 HTTP 语义
+问题，代理与客户端靠状态码识别，不该伪装成"接口存在但拒绝了"。API 路径（`/v1/`）在两个构建形态
+下行为一致；非 API 路径在 release（内嵌前端）下回落 SPA `index.html`，非 release 下同样回信封
+404——没有内嵌前端就没有可回落的页面。
 
 | code | 含义 |
 | --- | --- |
