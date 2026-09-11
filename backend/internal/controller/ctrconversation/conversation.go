@@ -32,6 +32,7 @@ type ConversationCtr interface {
 	Create(c *gin.Context)
 	Prompt(c *gin.Context)
 	Cancel(c *gin.Context)
+	QueuedInputs(c *gin.Context)
 	DeleteQueuedInput(c *gin.Context)
 	History(c *gin.Context)
 	Runs(c *gin.Context)
@@ -212,6 +213,16 @@ func (h *conversationCtr) Prompt(c *gin.Context) {
 		return
 	}
 	resp, err := h.svc.PromptConversation(c.Request.Context(), id, req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// QueuedInputs 列出待投递的排队输入（§6 当前态；前端冷挂载/刷新后重建队列视图）。
+func (h *conversationCtr) QueuedInputs(c *gin.Context) {
+	resp, err := h.svc.ListQueuedInputs(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

@@ -10,6 +10,7 @@ import { AgentBadge } from '../components/AgentBadge'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
+import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
@@ -17,6 +18,7 @@ import { anchorIndex } from '../console/searchView'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
 import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
+import type { DeliveryChoice } from '../console/queueView'
 
 /** 问答控制台主视图：会话侧栏 + 聊天（head / transcript / composer）+ 状态条。 */
 export function ChatPage() {
@@ -32,6 +34,7 @@ export function ChatPage() {
   const activate = useForge((s) => s.activate)
   const expireHydration = useForge((s) => s.expireHydration)
   const sendPrompt = useForge((s) => s.sendPrompt)
+  const cancelQueuedInput = useForge((s) => s.cancelQueuedInput)
   const cancel = useForge((s) => s.cancel)
   const archiveConversation = useForge((s) => s.archiveConversation)
   const showToast = useForge((s) => s.showToast)
@@ -57,6 +60,8 @@ export function ChatPage() {
   const [errFallback, setErrFallback] = useState<Record<string, string | undefined>>({})
   // C2：服务端「加载更早」在途标记（同一时刻只允许一次请求）。
   const [loadingOlder, setLoadingOlder] = useState(false)
+  // §6 撤下排队输入的在途标记（按钮转圈，避免连点）。
+  const [cancellingInput, setCancellingInput] = useState<string | null>(null)
   // 每轮用量（run.last_seq → 展示行）：会话切换或轮次终态后重拉 runs 读模型。
   const [runsBySeq, setRunsBySeq] = useState<Map<number, { usageText: string; info: RunUsageInfo }>>(new Map())
 
@@ -249,9 +254,9 @@ export function ChatPage() {
     setRevealed(0)
   }, [activeId])
 
-  const onSend = (text: string) => {
+  const onSend = (text: string, delivery?: DeliveryChoice) => {
     if (!activeId) return
-    void sendPrompt(text)
+    void sendPrompt(text, delivery)
   }
 
   // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /conversations。
@@ -575,6 +580,14 @@ export function ChatPage() {
               </div>
               {activeId && (
                 <>
+                  <QueuedInputs
+                    queue={view?.queue ?? []}
+                    cancelling={cancellingInput}
+                    onCancel={(inputId) => {
+                      setCancellingInput(inputId)
+                      void cancelQueuedInput(inputId).finally(() => setCancellingInput(null))
+                    }}
+                  />
                   <Composer
                     busy={busy}
                     workspace={

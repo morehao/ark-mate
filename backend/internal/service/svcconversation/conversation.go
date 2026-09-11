@@ -35,6 +35,8 @@ type ConversationSvc interface {
 	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
 	CancelTurn(ctx context.Context, id string) error
 
+	// ListQueuedInputs 列出某会话待投递的排队输入（§6；冷挂载/刷新后重建队列视图）。
+	ListQueuedInputs(ctx context.Context, id string) ([]dtoconversation.QueuedInputResp, error)
 	// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）；返回是否存在待投递项被撤下
 	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
 	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)

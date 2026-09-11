@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/code"
 )
 
 // ——— §6 busy input 队列（排队 / 插话） ———
@@ -51,6 +53,7 @@ const (
 	ReasonTurnFinished = "turn_finished"  // 队列项因上一轮结束而投递
 	ReasonUserCancel   = "user_cancel"    // 用户显式撤下
 	ReasonDeliverFail  = "deliver_failed" // 投递时启动新一轮失败（文本保留在台账行里，不静默丢弃）
+	ReasonStale        = "stale"          // 进程重启：等待的那一轮已随进程消失，统一作废
 )
 
 // NormalizeDelivery 归一并校验投递模式（空 = reject，即历史行为）。
@@ -131,6 +134,26 @@ func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedI
 	return append([]QueuedInput(nil), s.inputs[convID]...)
 }
 
+// ListQueuedInputs 列出某会话待投递的排队输入（§6 读模型，创建时间升序）。
+//
+// 与事件的分工：事件负责「过程」（何时入队/投递/撤下），本读模型负责「当前态」——
+// 前端冷挂载时 WS 只给 snapshot 不回放历史，没有这个入口队列就会在刷新后凭空消失。
+func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtoconversation.QueuedInputResp, error) {
+	if !s.hasConversation(id) {
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+	}
+	queue := s.listQueuedInputs(ctx, id)
+	out := make([]dtoconversation.QueuedInputResp, 0, len(queue))
+	for _, q := range queue {
+		out = append(out, dtoconversation.QueuedInputResp{
+			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
+			TargetTurnID: q.TargetTurnID, Generation: q.Generation,
+			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return out, nil
+}
+
 // claimNextInput 取队首**并原子标记为已投递**；false = 队列空（或全被认领）。
 // generation 不符的项就地作废并继续看下一条——作废是留痕，不是把队首卡死。
 func (s *Service) claimNextInput(ctx context.Context, convID string, generation int64) (*QueuedInput, bool) {
@@ -203,8 +226,20 @@ func (s *Service) deleteQueuedInput(ctx context.Context, convID, inputID string)
 
 // staleQueuedInputsOnRestore 启动恢复：把全库待投递输入置作废——等待的那一轮已随进程消失，
 // 自动重放等于替用户按下发送（且上下文已断）。保留行仅作审计。
+//
+// **作废也必须说话**：逐条发 `input_cancelled(reason=stale)`。此前只改台账行不发事件，于是事件流里
+// 那个队列项永远没有收敛事实——而前端队列只认事件（刷新/重连会重放历史），重启后刷新页面就能看到
+// 一条永远投不出去、也撤不掉的幻影队列项。「撤下与发出是两条不同的事实」这条纪律的另一半是：
+// 一条队项的结局**总得**是投递或撤下之一，没有第三种沉默。
+//
+// 先取快照再批量置作废：作废后行仍在（只是 status 变了），但那时已分不清哪些是本轮刚作废的。
 func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 	if s.st == nil {
+		return
+	}
+	pending, err := s.st.ListAllQueuedInputs(ctx)
+	if err != nil {
+		slog.Default().Warn("读取重启前的排队输入失败", "err", err)
 		return
 	}
 	n, err := s.st.StaleAllQueuedInputs(ctx)
@@ -212,8 +247,16 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 		slog.Default().Warn("作废重启前的排队输入失败", "err", err)
 		return
 	}
-	if n > 0 {
-		slog.Default().Warn("重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
+	if n == 0 {
+		return
+	}
+	slog.Default().Warn("重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
+	for _, r := range pending {
+		// agent_id 此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
+		s.publish(BusInputCancelled, r.ConversationID, map[string]any{
+			"session_id": r.ConversationID, "input_id": r.ID,
+			"delivery": r.Delivery, "reason": ReasonStale,
+		})
 	}
 }
 

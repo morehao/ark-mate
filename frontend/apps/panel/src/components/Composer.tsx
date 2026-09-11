@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Tooltip } from 'antd'
+import { Button, Select, Tooltip } from 'antd'
 import { ArrowUpOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
+import { DELIVERY_HINT, DELIVERY_LABEL, type DeliveryChoice } from '../console/queueView'
 
 /** 末级目录名（路径末段；根目录回落到原串，避免展示成空）。 */
 function workspaceName(path: string): string {
@@ -15,7 +16,8 @@ interface Props {
   busy: boolean
   busyNote?: string
   placeholder?: string
-  onSend: (text: string) => void
+  /** 空闲时的发送；忙时按所选投递模式发送（§6）。 */
+  onSend: (text: string, delivery?: DeliveryChoice) => void
   autoFocus?: boolean
   /**
    * 本会话的工作空间（只读展示）。工作空间创建时定稿、之后不可变——它是底座 ACP session
@@ -25,10 +27,17 @@ interface Props {
   workspace?: { path: string; temporary: boolean }
 }
 
-/** 输入区（console.html .composer）：自动增高 textarea + 底部提示行（可切发送键档）+ 发送按钮。 */
+/**
+ * 输入区（console.html .composer）：自动增高 textarea + 底部提示行（可切发送键档）+ 发送按钮。
+ *
+ * §6：会话忙时输入框**不再锁死**——底座跑着的那一轮不该让人干等。忙时多出一个投递模式选择
+ * （排队 / 打断并发送），选什么就发什么；空闲时该选择器不出现（没有「忙」可谈，服务端按普通轮处理）。
+ */
 export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, workspace }: Props) {
   const [draft, setDraft] = useState('')
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
+  // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
+  const [delivery, setDelivery] = useState<DeliveryChoice>('after_turn')
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const empty = draft.trim().length === 0
@@ -42,10 +51,10 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
   }, [draft])
 
   const send = () => {
-    if (busy || empty) return
+    if (empty) return
     const text = draft.trim()
     setDraft('')
-    onSend(text)
+    onSend(text, busy ? delivery : undefined)
     taRef.current?.focus()
   }
 
@@ -81,9 +90,10 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
           ref={taRef}
           rows={1}
           value={draft}
-          disabled={busy}
           autoFocus={autoFocus}
-          placeholder={placeholder ?? (busy ? 'agent 正在回复…' : '向当前 Agent 提问…')}
+          placeholder={
+            busy ? `agent 正在回复…（可${DELIVERY_LABEL[delivery]}：Enter 送入队列）` : placeholder ?? '向当前 Agent 提问…'
+          }
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -100,7 +110,6 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
             maxHeight: 180,
             padding: '2px 2px',
             outline: 'none',
-            opacity: busy ? 0.55 : 1,
           }}
         />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -155,16 +164,30 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
             >
               {sendKeyHint(sendMode)} ⇄
             </button>
-            {busy && <span>单飞 turn 门控</span>}
+            {busy && (
+              // 忙时投递模式：排队（等这轮完）或打断（先取消再发）。解释放在下拉项里，
+              // 不塞进按钮——按钮上只留动作本身。
+              <Select
+                size="small"
+                value={delivery}
+                onChange={(v) => setDelivery(v)}
+                style={{ minWidth: 118 }}
+                options={(['after_turn', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
+                  value: d,
+                  label: DELIVERY_LABEL[d],
+                  title: DELIVERY_HINT[d],
+                }))}
+              />
+            )}
           </span>
           <Button
             type="primary"
             icon={<ArrowUpOutlined style={{ fontSize: 13 }} />}
-            disabled={busy || empty}
+            disabled={empty}
             onClick={send}
             style={{ borderRadius: 9, fontWeight: 560 }}
           >
-            发送
+            {busy ? DELIVERY_LABEL[delivery] : '发送'}
           </Button>
         </div>
       </div>

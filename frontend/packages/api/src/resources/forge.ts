@@ -9,6 +9,8 @@ import type {
   ProviderPatch,
   BusEvent,
   CancelConversationResp,
+  CancelQueuedInputResp,
+  QueuedInputResp,
   CreateConversationReq,
   CreateConversationResp,
   ElicitationResp,
@@ -204,6 +206,26 @@ export const conversationHistory = (
   const s = q.toString()
   return http.get<ConversationHistoryPage>(`/forge/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
 }
+
+/**
+ * §6：列出某会话**待投递**的排队输入（当前态）。
+ *
+ * 与事件的分工：`session.input_queued` 等三条事件讲「过程」，本接口给「此刻还在队里」。
+ * 冷挂载（刷新/直达）时 WS 只发 snapshot 不回放历史，没有它队列会在刷新后凭空消失。
+ */
+export const listQueuedInputs = (conversationId: string): Promise<QueuedInputResp[]> =>
+  http.get<QueuedInputResp[]>(`/forge/conversations/${encodeURIComponent(conversationId)}/inputs`)
+
+/**
+ * §6：撤下一条**尚未投递**的排队输入。
+ *
+ * 已投递/已作废是台账行、撤不动（回 `deleted:false`，幂等不报错）；真正的收敛以
+ * `session.input_cancelled` 事件为准——这里返回的 `deleted` 只说明「确实从队列里拿掉了」。
+ */
+export const cancelQueuedInput = (conversationId: string, inputId: string): Promise<CancelQueuedInputResp> =>
+  http.delete<CancelQueuedInputResp>(
+    `/forge/conversations/${encodeURIComponent(conversationId)}/inputs/${encodeURIComponent(inputId)}`,
+  )
 
 // ——— P1 能力数据面（Skill/MCP/Tool 目录，REST 列出能力） ———
 

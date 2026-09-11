@@ -67,6 +67,22 @@ type ConversationPromptResp struct {
 	InputID string `json:"input_id,omitempty"`
 }
 
+// QueuedInputResp 一条待投递的排队输入（§6）。
+//
+// 与事件的关系：`session.input_queued` 是它**曾经入队**的事实，本读模型是它**此刻还在队里**
+// 的当前态（投递/撤下后即消失）。前端冷挂载（刷新/直达）时 WS 只发 snapshot 不回放历史，
+// 光靠事件会让队列在刷新后凭空消失，故需要这个「当前态」入口把队列查回来。
+type QueuedInputResp struct {
+	ID       string `json:"input_id"`
+	Text     string `json:"text"`
+	Delivery string `json:"delivery"` // after_turn | interrupt_then_prompt
+	// TargetTurnID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
+	TargetTurnID string `json:"target_turn_id,omitempty"`
+	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
+	Generation int64  `json:"generation,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
+}
+
 // ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
 type ConversationHistoryResp struct {
 	ID     string           `json:"id"`

@@ -67,9 +67,39 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 	if ok, err = st.DeleteQueuedInput(ctx, "c-other", "i3"); err != nil || ok {
 		t.Fatalf("跨会话删必须不命中: %v/%v", ok, err)
 	}
+	// ListAllQueuedInputs 跨会话取快照（启动恢复靠它逐条发收敛事件，故不按会话过滤）。
+	if err := st.CreateInput(ctx, Input{ID: "i4", ConversationID: "c1", Text: "会话一的待投递",
+		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
+		Status: model.InputStatusQueued, CreatedAt: base.Add(3 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	seedConversation(t, st, "c2")
+	if err := st.CreateInput(ctx, Input{ID: "i5", ConversationID: "c2", Text: "会话二的待投递",
+		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
+		Status: model.InputStatusQueued, CreatedAt: base.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := st.ListAllQueuedInputs(ctx)
+	if err != nil {
+		t.Fatalf("跨会话列待投递失败: %v", err)
+	}
+	// i1 已投递、i2 已删、i3 因跨会话删不命中仍在队、i4/i5 新入队 → 共 3 条，且两个会话都在。
+	wantIDs := []string{"i3", "i4", "i5"}
+	if len(all) != len(wantIDs) {
+		t.Fatalf("应剩 %d 条待投递（i1 已投递 / i2 已删 / i3 跨会话删不命中）: %+v", len(wantIDs), all)
+	}
+	for i, id := range wantIDs {
+		if all[i].ID != id {
+			t.Fatalf("第 %d 条应为 %s（创建时间升序）: %+v", i, id, all)
+		}
+	}
+	if all[2].ConversationID != "c2" {
+		t.Fatalf("跨会话快照应带 c2 的行: %+v", all[2])
+	}
+
 	// 启动作废：把剩余 queued 全置 stale（幂等，第二次 0 行）。
-	if n, err := st.StaleAllQueuedInputs(ctx); err != nil || n != 1 {
-		t.Fatalf("应作废 1 行: %d/%v", n, err)
+	if n, err := st.StaleAllQueuedInputs(ctx); err != nil || n != 3 {
+		t.Fatalf("应作废 3 行（i3+i4+i5，跨会话）: %d/%v", n, err)
 	}
 	if n, err := st.StaleAllQueuedInputs(ctx); err != nil || n != 0 {
 		t.Fatalf("再次作废应为 0 行（幂等）: %d/%v", n, err)

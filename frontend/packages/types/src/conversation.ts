@@ -290,6 +290,25 @@ export interface ConversationPromptResp {
   input_id?: string
 }
 
+/** §6 一条待投递的排队输入（GET /conversations/:id/inputs；当前态，投递/撤下后即消失）。 */
+export interface QueuedInputResp {
+  input_id: string
+  text: string
+  /** after_turn | interrupt_then_prompt */
+  delivery: string
+  target_turn_id?: string
+  generation?: number
+  created_at?: string
+}
+
+/** §6 撤下排队输入的响应（DELETE /conversations/:id/inputs/:input_id）。 */
+export interface CancelQueuedInputResp {
+  id: string
+  input_id: string
+  /** 真的撤下了；false = 该 id 已不在 queued（已投递/已作废/不存在）——幂等，不是错误。 */
+  deleted: boolean
+}
+
 export interface CancelConversationResp {
   id: string
   status: ConversationStatus

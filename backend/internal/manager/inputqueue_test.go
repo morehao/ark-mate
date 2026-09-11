@@ -437,7 +437,8 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
 	svc1.registerConversation(&ConversationRec{ID: "c1", AgentID: "a1", Generation: 1})
-	if _, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterTurn, "turn-x", 1); err != nil {
+	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterTurn, "turn-x", 1)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,6 +456,27 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0] != "stale" {
 		t.Fatalf("应留一条 stale 台账行: %v", rows)
+	}
+
+	// 作废必须发 input_cancelled(reason=stale)：前端队列只认事件，只改台账行会让重启后的
+	// 页面留下一条永远投不出、也撤不掉的幻影队列项。
+	evs, _, err := st.EventsAfter(context.Background(), "c1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range evs {
+		if e.Type != BusInputCancelled {
+			continue
+		}
+		p, _ := decodePayload(e.PayloadJSON).(map[string]any)
+		if p["input_id"] != queued.ID || p["reason"] != ReasonStale || p["delivery"] != DeliveryAfterTurn {
+			t.Fatalf("作废事件载荷不符: %+v", p)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("应在事件表里留下 input_cancelled（重放历史才能收敛队列），events=%d", len(evs))
 	}
 }
 

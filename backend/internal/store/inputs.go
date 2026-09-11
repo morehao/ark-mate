@@ -35,6 +35,11 @@ func (s *Store) ListQueuedInputs(ctx context.Context, conversationID string) ([]
 	return s.inputs.ListQueued(ctx, conversationID)
 }
 
+// ListAllQueuedInputs 列出全库待投递输入（跨会话，创建时间升序；启动恢复用）。
+func (s *Store) ListAllQueuedInputs(ctx context.Context) ([]Input, error) {
+	return s.inputs.ListAllQueued(ctx)
+}
+
 // HeadQueuedInput 取队首待投递输入（无 → (nil, nil)）。
 func (s *Store) HeadQueuedInput(ctx context.Context, conversationID string) (*Input, error) {
 	return s.inputs.Head(ctx, conversationID)

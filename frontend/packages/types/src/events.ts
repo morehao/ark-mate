@@ -50,6 +50,25 @@ import type { ElicitationFormSchema, PermissionOption } from './conversation'
 
 export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission' | 'elicitation'
 
+/**
+ * §6 busy input 队列的一条队项（派生视图，不是 wire 契约）。
+ *
+ * 由 `session.input_queued` 建项、`session.input_delivered` / `session.input_cancelled` 收敛——
+ * **只认事件、不做本地推断**：投递与撤下是两条不同的事实，前端不靠「POST 成功」或超时去猜。
+ * 刷新/重连靠历史回放重建（服务端重启作废队项时也会补发 cancelled，见 reason=stale）。
+ */
+export interface QueuedInput {
+  inputId: string
+  text: string
+  /** after_turn | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
+  delivery: string
+  /** 入队时正在执行的那一轮（审计用；服务端投递判据是 generation）。 */
+  targetTurnId?: string
+  /** 入队时会话执行代际：服务端投递前比对，不等即作废（旧队项绝不灌进重建后的上下文）。 */
+  generation?: number
+  seq?: number
+}
+
 export interface StreamEntry {
   kind: EntryKind
   id: string // 稳定 id（生成/合并时复用）

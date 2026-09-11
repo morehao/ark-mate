@@ -91,6 +91,8 @@ type stubSvc struct {
 	inputDeleted    bool
 	inputDeleteID   string
 	inputDeleteConv string
+	inputsListed    bool
+	inputsListConv  string
 	promptResp      *dtoconversation.ConversationPromptResp
 	promptErr       error
 
@@ -530,6 +532,13 @@ func (s *stubSvc) CreateConversation(_ context.Context, req dtoconversation.Conv
 	}
 	return &dtoconversation.ConversationCreateResp{ID: "s-new"}, nil
 }
+func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtoconversation.QueuedInputResp, error) {
+	s.inputsListed, s.inputsListConv = true, id
+	return []dtoconversation.QueuedInputResp{
+		{ID: "in-8", Text: "排队一", Delivery: "after_turn", TargetTurnID: "t1", Generation: 3},
+	}, nil
+}
+
 func (s *stubSvc) DeleteQueuedInput(_ context.Context, id, inputID string) (bool, error) {
 	s.inputDeleted, s.inputDeleteID, s.inputDeleteConv = true, inputID, id
 	return true, nil
@@ -928,6 +937,25 @@ func TestPromptAndCancel(t *testing.T) {
 	if env.Code != 0 || svc.promptDelivery != "after_turn" {
 		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
 	}
+	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
+	env, _ = do(t, r, "GET", "/v1/forge/conversations/s1/inputs", "")
+	if env.Code != 0 || !svc.inputsListed || svc.inputsListConv != "s1" {
+		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
+	}
+	var qdata []struct {
+		InputID      string `json:"input_id"`
+		Text         string `json:"text"`
+		Delivery     string `json:"delivery"`
+		TargetTurnID string `json:"target_turn_id"`
+		Generation   int64  `json:"generation"`
+	}
+	if err := json.Unmarshal(env.Data, &qdata); err != nil || len(qdata) != 1 {
+		t.Fatalf("排队列表 data 不符: %s", env.Data)
+	}
+	if qdata[0].InputID != "in-8" || qdata[0].Delivery != "after_turn" || qdata[0].Generation != 3 {
+		t.Fatalf("排队列表字段不符: %+v", qdata[0])
+	}
+
 	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。
 	env, _ = do(t, r, "DELETE", "/v1/forge/conversations/s1/inputs/in-9", "")
 	if env.Code != 0 || !svc.inputDeleted || svc.inputDeleteID != "in-9" {

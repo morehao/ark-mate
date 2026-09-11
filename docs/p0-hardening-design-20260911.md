@@ -402,8 +402,9 @@ compozy 对照：`internal/session/inputqueue/queue.go:144`（`DeliveryAfterTurn
 原文的位置（`runs.user_text`/`messages.text` 都是从已脱敏的事件载荷物化出来的）。这是「输入保真 vs 输出
 脱敏」的必然分界，不是漏了口子；若将来给队列加「加密存储」，与 §5 vault 同一套即可。
 
-**未做（记录）**：`GET /conversations/:id/inputs`（队列视图由事件回放构建——`session.input_queued`
-+ 两条收敛事件已足够，且事件本就是本平台的事实源）；队列长度上限（单操作员场景按输入量增长，
+**未做（记录，其中第一条在 §6.6 被推翻）**：`GET /conversations/:id/inputs`（当时的判断是
+「队列视图由事件回放构建——`session.input_queued` + 两条收敛事件已足够」，漏掉了**冷挂载不回放**，
+见 §6.6）；队列长度上限（单操作员场景按输入量增长，
 要上限得先定「满了怎么办」的策略）；`interrupt_then_prompt` 插队（当前严格 FIFO——否则连按三次
 插话会逆序执行）；前端输入区 UI（下一批；类型与事件枚举已同步，`make test` 的守卫不缺边）。
 
@@ -412,6 +413,53 @@ compozy 对照：`internal/session/inputqueue/queue.go:144`（`DeliveryAfterTurn
 已投递不可撤 / 非法 delivery 报错且不留行 + `reject` 保持报错 / 空闲不入队直接执行 / 重启作废 /
 memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 + 认领条件更新 + 已投递不可删 +
 跨会话不命中 + 批量作废幂等）。
+
+### 6.6 实施记录（2026-09-11，前端输入区 + 两处服务端补齐）
+
+前端这一轮把 §6 的队列摆到用户眼前，落地时发现服务端还差两块拼图——都是「只认事件」这条纪律
+自己逼出来的，不是顺手加的功能：
+
+1. **作废也必须说话**：此前 `staleQueuedInputsOnRestore` 只把 `inputs` 行置 `stale` 并打 WARN，
+   **不发事件**。于是事件流里那条队项永远没有结局。队列只认事件、刷新靠回放重建——重启后刷新
+   页面就会看到一条**永远投不出、也撤不掉的幻影队项**（`DELETE` 只认 `queued`，回 `deleted:false`）。
+   现在恢复时先取全库快照（新增 `store.ListAllQueuedInputs` + `dao.ListAllQueued`），再批量置作废，
+   最后**逐条补发** `session.input_cancelled(reason="stale")`。`ReasonStale` 与既有两个原因并列，
+   三处同步（`inputqueue.go` 常量 / README 原因取值 / 前端文案）。
+   「撤下与发出是两条不同的事实」的另一半是：**一条队项的结局总得是投递或撤下之一，没有第三种沉默**。
+2. **冷挂载不回放历史 → 需要当前态入口**：WS `snapshot` 是空对象且不发历史（面板只在带 `since_seq`
+   时才续传、否则重置视图），所以「刷新前已排队、还没发出」的输入在刷新后从界面上消失——用户会
+   以为它没了，而它其实还会在轮次收尾时发出去。§6.5 当时把 `GET /conversations/:id/inputs` 记为
+   「不做」，理由是事件足够，这个理由在冷挂载路径上不成立。故补：`GET /conversations/:id/inputs`
+   （读模型 `QueuedInputResp{input_id,text,delivery,target_turn_id,generation,created_at}`）+
+   面板在收到 `snapshot` 时拉一次当前态补齐队列。
+   **事件负责过程、读模型负责当前态**——两者不是冗余：前者能重放出「曾经排过什么」，后者回答
+   「此刻还在队里的是什么」。为了防止 HTTP 在途窗口把已经撤下的项复活，视图里带一个
+   `queueSeq`（只随队列事件前进）：拉取期间若有队列事件到达，就**以事件为准**、丢弃这次当前态。
+
+前端改动（`apps/panel`）：
+
+- `console/queueView.ts`（纯函数，便于 Node 侧断言）：`transitionQueue`（入队建项、同 id 幂等覆盖、
+  delivered/cancelled 出队并交出被移除项）、`queuedFromResp`（当前态 → 视图）、`deliveryLabel`/
+  `deliveryHint`/`cancelReasonLabel`/`cancelNotice`/`cancelTone`/`queueExcerpt`/`queueSummary`。
+- `store.ts`：`ConversationView.queue + queueSeq`；三条 `session.input_*` 事件进 `applyEvent`
+  （`input_cancelled` 额外落一条**系统提示**，带原因与出路——文本从此不会出现在正文里，
+  「我排的那句话去哪了」必须有答案）；`sendPrompt(text, delivery?)` 忙时不再直接 return
+  （排队/插话放行，且**不为入队置忙**——忙碌水位归那一轮的 turn 事件）；新增
+  `cancelQueuedInput`、`refreshQueue`（`snapshot` 帧触发）。
+- `components/Composer.tsx`：忙时 textarea **不再 disabled**，底部多一个投递模式 `Select`
+  （排队 / 打断并发送，默认排队——打断是有代价的动作），发送按钮文案随模式变。
+- `components/QueuedInputs.tsx`（新增）：composer 上方列出待投递项（文本摘要 + 投递模式 + 逐条撤下）。
+  **与原设计稿的偏差**：稿子写的是「输入区加投递模式 + 队列列表」放进会话详情抽屉；实施放在
+  composer 正上方——队列讲的是「这些话还没发出去」，离输入框最近才有用，抽屉是事后查看的地方。
+
+**测试**：`TestQueuedInputsStaledOnRestore` 增断言（`input_cancelled` 落在**事件表**里、载荷
+`input_id`/`reason=stale`/`delivery` 正确）；`TestInputQueueSchemaAndClaim` 增跨会话快照断言
+（`ListAllQueuedInputs` 不按会话过滤、创建时间升序）；`internal/router/rest_test.go` 增
+`GET /conversations/:id/inputs` 的接线与载荷形状断言；前端为纯函数 Node 断言（5 组：
+幂等入队 / 出队交出队项与 no-op / 文案与语气 / 摘要 / 当前态映射）+ `pnpm typecheck` + `pnpm build:panel`。
+**未做浏览器实测**（沿用 §13.12 的记录方式）：本轮验证只到类型检查、打包与纯函数断言，
+没有真机跑 `make dev` 点过界面；「刷新后队列还在」这条路径由 `refreshQueue` 的锚点逻辑与
+服务端读模型测试分别覆盖，端到端仍需人工过一遍。
 
 ---
 

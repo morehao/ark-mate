@@ -59,6 +59,15 @@ func (d *InputDao) ListQueued(ctx context.Context, conversationID string) (model
 	})
 }
 
+// ListAllQueued 列出**全库**待投递项（跨会话，创建时间升序）。
+// 只给启动恢复用：作废前先取快照，才能为每条发出 input_cancelled（见 manager.staleQueuedInputsOnRestore）。
+func (d *InputDao) ListAllQueued(ctx context.Context) (model.InputList, error) {
+	return d.GetListByCond(ctx, &InputCond{
+		BaseCond: &gormdao.BaseCond{OrderField: "created_at ASC, id ASC"},
+		Status:   model.InputStatusQueued,
+	})
+}
+
 // Head 取队首（创建时间最早的待投递项）；无 → (nil, nil)。
 func (d *InputDao) Head(ctx context.Context, conversationID string) (*model.Input, error) {
 	var in model.Input
