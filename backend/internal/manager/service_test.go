@@ -214,17 +214,30 @@ func TestIntentionalTeardownInterruptsInFlightTurn(t *testing.T) {
 }
 
 // TestPublishVersionAndBusNil 无 bus 时 publish 仍递增每 agg 版本、不 panic；事件 Seq=0。
+// 用**非合并类型**（工具卡）验证「每次 publish 一次版本递增」——文本增量走 ③ 合并，
+// 号序与版本在 flush 时才分配（下面单独断言这条语义）。
 func TestPublishVersionAndBusNil(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, nil) // bus = nil
-	_ = svc.publish(BusMessage, "s1", map[string]any{"text": "a"})
-	e2 := svc.publish(BusMessage, "s1", map[string]any{"text": "b"})
-	_ = svc.publish(BusMessage, "s2", map[string]any{"text": "c"})
-	if e2.Seq != 0 || e2.Version != 2 {
-		t.Fatalf("无 bus publish 不符: %+v", e2)
+	e1 := svc.publish(BusToolCall, "s1", map[string]any{"tool": "a"})
+	e2 := svc.publish(BusToolCall, "s1", map[string]any{"tool": "b"})
+	_ = svc.publish(BusToolCall, "s2", map[string]any{"tool": "c"})
+	if e1.Seq != 0 || e1.Version != 1 || e2.Seq != 0 || e2.Version != 2 {
+		t.Fatalf("无 bus publish 不符: %+v %+v", e1, e2)
 	}
 	if svc.ver["s1"] != 2 || svc.ver["s2"] != 1 {
 		t.Fatalf("版本计数不符: %v", svc.ver)
+	}
+	// ③ 合并：同形文本增量 publish 返回零值事件（未分配号序），flush 后才计入版本。
+	if zero := svc.publish(BusMessage, "s3", map[string]any{"text": "x"}); zero.Seq != 0 || zero.Version != 0 {
+		t.Fatalf("合并中的增量不应分配号序: %+v", zero)
+	}
+	if svc.ver["s3"] != 0 {
+		t.Fatalf("合并中不应递增版本: %v", svc.ver)
+	}
+	svc.flushChunks()
+	if svc.ver["s3"] != 1 {
+		t.Fatalf("flush 后应递增版本: %v", svc.ver)
 	}
 }
 
@@ -232,8 +245,10 @@ func TestPublishVersionAndBusNil(t *testing.T) {
 func TestConversationHistoryClamp(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "a"})
-	svc.publish(BusMessage, "s1", map[string]any{"text": "one"})
-	svc.publish(BusMessage, "s1", map[string]any{"text": "two"})
+	// 两条不同消息（msg_id 不同 → 形状不同 → 不合并），分页断言才成立。
+	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m1", "text": "one"})
+	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m2", "text": "two"})
+	svc.flushChunks()
 
 	p, err := svc.ConversationHistory(context.Background(), "s1", dtoconversation.HistoryQuery{After: -5, Limit: 0})
 	if err != nil {
@@ -256,7 +271,7 @@ func TestCreateConversationWithoutOrchestrator(t *testing.T) {
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
 	}
-	if _, err := svc.PromptConversation(context.Background(), "s1", "x"); err == nil {
+	if _, err := svc.PromptConversation(context.Background(), "s1", dtoconversation.PromptReq{Prompt: "x"}); err == nil {
 		t.Fatal("无 orch 应报错")
 	} else {
 		var ge2 gerror.Error
@@ -269,7 +284,7 @@ func TestCreateConversationWithoutOrchestrator(t *testing.T) {
 // TestPromptConversationUnknown 既有编排器下未知会话 → 40401。
 func TestPromptConversationUnknown(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.PromptConversation(context.Background(), "ghost", "hi")
+	_, err := svc.PromptConversation(context.Background(), "ghost", dtoconversation.PromptReq{Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
@@ -279,7 +294,7 @@ func TestPromptConversationUnknown(t *testing.T) {
 // TestServiceRESTValidation Prompt 必填校验（service 层，无 orch 前置）。
 func TestServiceRESTValidation(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	if _, err := svc.PromptConversation(context.Background(), "", ""); err == nil {
+	if _, err := svc.PromptConversation(context.Background(), "", dtoconversation.PromptReq{}); err == nil {
 		t.Fatal("空 id/prompt 应报错")
 	}
 }

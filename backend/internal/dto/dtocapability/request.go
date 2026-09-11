@@ -19,3 +19,9 @@ type McpResourceReadReq struct {
 type McpPromptGetReq struct {
 	Arguments map[string]string `json:"arguments,omitempty"`
 }
+
+// SkillToggleReq 启停一个 skill（§13.4 S4）。只认 enabled 一个开关：启停是 overlay，
+// 正文/来源都由定义文件承载（平台不在这里替用户改内容）。
+type SkillToggleReq struct {
+	Enabled bool `json:"enabled"`
+}

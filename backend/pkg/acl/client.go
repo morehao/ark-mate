@@ -33,6 +33,10 @@ type ClientOptions struct {
 	// nil 时一律按取消（cancelled）回应。实现应返回 ElicitationOutcome
 	// （accept/decline/cancel；accept 可带用户提交的 content）。
 	CreateElicitation func(ctx context.Context, req ElicitationRequest) ElicitationOutcome
+	// CompleteElicitation 处理 agent 的 elicitation/complete 通知（URL 模式提问已在 agent 侧完成），
+	// 宿主据此按 ACP 侧 elicitationId 收敛挂起项（通知无响应，回调不阻塞、不返回错误）。
+	// nil 时仅作协议容忍（协议历史行为不变）。
+	CompleteElicitation func(ctx context.Context, elicitationID string)
 	// DialTimeout 限制 initialize/authenticate 握手时长；0 → 调用方 ctx 有截止时间则沿用，
 	// 否则用 defaultDialTimeout。runtime 无响应（如等待交互登录）时拨号不会无限挂起。
 	DialTimeout time.Duration

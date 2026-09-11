@@ -109,3 +109,28 @@ func TestClassifyWrappedRequestError(t *testing.T) {
 		t.Fatalf("包装链内 RequestError 未识别: %v", ae)
 	}
 }
+
+// TestTailLinesRedactsSecrets stderr 尾巴的唯一出口即脱敏闸门：
+// 子进程把 key 打进 stderr（如底座启动日志回显 env）时，诊断/事件/错误三处消费者都拿到脱敏后的行。
+func TestTailLinesRedactsSecrets(t *testing.T) {
+	const secret = "sk-abcdefghijklmnop1234"
+	got := TailLines([]string{"OPENAI_API_KEY=" + secret, "listening on :8080", "Bearer abcdefghijklmnop"}, 5)
+	if len(got) != 3 {
+		t.Fatalf("行数不符: %v", got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, secret) || strings.Contains(l, "abcdefghijklmnop") {
+			t.Fatalf("stderr 尾巴未脱敏: %q", l)
+		}
+	}
+	if got[1] != "listening on :8080" {
+		t.Fatalf("正常行被改写: %q", got[1])
+	}
+	if got[2] != "Bearer ***" {
+		t.Fatalf("Bearer 应保留前缀: %q", got[2])
+	}
+	// 截断语义不变（只取最近 n 行）。
+	if tail := TailLines([]string{"a", "b", "c"}, 2); len(tail) != 2 || tail[1] != "c" {
+		t.Fatalf("截断语义被破坏: %v", tail)
+	}
+}

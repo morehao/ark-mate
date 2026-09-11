@@ -265,3 +265,35 @@ func repoRoot(t *testing.T) string {
 	t.Fatal("未能定位仓库根（未找到 README.md）")
 	return ""
 }
+
+// TestErrorRedactsSecrets 对外错误文案的唯一构造入口即脱敏闸门：
+// 上游原文里的凭证形状串（含 acl Details 一路）不得出现在信封 msg 里。
+func TestErrorRedactsSecrets(t *testing.T) {
+	const secret = "sk-abcdefghijklmnop1234"
+	// 1) 裸错误 → Internal + err.Error()，必须过闸
+	var ge gerror.Error
+	if err := code.FromError(errors.New("runtime 拒绝：api_key=" + secret)); !errors.As(err, &ge) {
+		t.Fatal("应映射为带码错误")
+	} else if strings.Contains(ge.Msg, secret) {
+		t.Fatalf("裸错误出口未脱敏: %q", ge.Msg)
+	}
+	// 2) acl 分类错误 → Details 过闸
+	err := code.FromError(acl.NewError(acl.ClassService, "boom", "启动失败 KEY="+secret, nil))
+	if !errors.As(err, &ge) {
+		t.Fatal("acl 错误应映射为带码错误")
+	}
+	if strings.Contains(ge.Msg, secret) {
+		t.Fatalf("acl 错误出口未脱敏: %q", ge.Msg)
+	}
+	// 3) 直接构造
+	if ge := code.Error(code.InvalidRequest, "token "+secret); strings.Contains(ge.Msg, secret) {
+		t.Fatalf("Error 构造未脱敏: %q", ge.Msg)
+	}
+	// 4) 已有码的错误原样透传（不改码），但文案同样过闸
+	src := code.Error(code.NotFound, "找不到 token "+secret)
+	out := code.FromError(src)
+	var got gerror.Error
+	if !errors.As(out, &got) || got.Code != code.NotFound || strings.Contains(got.Msg, secret) {
+		t.Fatalf("透传分支的码/脱敏不符: %+v", got)
+	}
+}

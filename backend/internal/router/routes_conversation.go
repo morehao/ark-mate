@@ -29,6 +29,9 @@ func registerConversation(v1 *gin.RouterGroup, ports Ports) {
 	v1.GET("/conversations/:id/runs", ctr.Runs)
 	v1.POST("/conversations/:id/prompt", ctr.Prompt)
 	v1.POST("/conversations/:id/cancel", ctr.Cancel)
+	// §6 busy input 队列：列出待投递项（冷挂载重建）+ 撤下一条（投递走 POST prompt 的 delivery）。
+	v1.GET("/conversations/:id/inputs", ctr.QueuedInputs)
+	v1.DELETE("/conversations/:id/inputs/:input_id", ctr.DeleteQueuedInput)
 	v1.GET("/conversations/:id/permissions", ctr.Permissions)
 	v1.POST("/conversations/:id/permission", ctr.ResolvePermission)
 	// 会话级权限记忆（allow/reject 双侧，P0 起对称语义）。

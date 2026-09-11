@@ -55,6 +55,116 @@ func TestElicitationResolveAccept(t *testing.T) {
 	}
 }
 
+// TestElicitationCompleteByURLID verify agent 的 elicitation/complete 收尾（URL 模式）：
+// 按 ACP 侧 elicitationId 命中挂起项 → 以 accept + reason=complete 收敛（不再挂到超时）；
+// 归属不符/未知 id/非 URL 模式/重放一律无副作用。
+func TestElicitationCompleteByURLID(t *testing.T) {
+	m := NewElicitationManager(5 * time.Second)
+	resolved := make(chan [2]string, 2)
+	m.SetOnResolved(func(_, _ string, reason string, d acl.ElicitationOutcome) {
+		resolved <- [2]string{d.Action, reason}
+	})
+
+	published := make(chan ElicitationItem, 1)
+	var out acl.ElicitationOutcome
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		out = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+			SessionID: "s1", Mode: "url", Message: "请打开链接", URL: "https://example.com",
+			URLID: "acp-el-1",
+		}, func(it ElicitationItem) { published <- it })
+	}()
+	<-published
+
+	if m.CompleteByURLID("other", "acp-el-1") {
+		t.Fatal("归属不符的 complete 应被拒")
+	}
+	if m.CompleteByURLID("s1", "no-such") {
+		t.Fatal("未知 elicitationId 应返回 false")
+	}
+	if !m.CompleteByURLID("s1", "acp-el-1") {
+		t.Fatal("命中 URL 模式挂起项应返回 true")
+	}
+	wg.Wait()
+	if out.Action != "accept" {
+		t.Fatalf("complete 应按 accept 收敛: %+v", out)
+	}
+	got := <-resolved
+	if got[0] != "accept" || got[1] != "complete" {
+		t.Fatalf("收敛事件应为 accept/complete: %+v", got)
+	}
+	if m.CompleteByURLID("s1", "acp-el-1") {
+		t.Fatal("重放的 complete 不应命中（已决）")
+	}
+
+	// form 模式即便带同名字段也不收敛（只认 URL 模式）。
+	publishedForm := make(chan ElicitationItem, 1)
+	var formOut acl.ElicitationOutcome
+	var fwg sync.WaitGroup
+	fwg.Add(1)
+	go func() {
+		defer fwg.Done()
+		formOut = m.RegisterAndWait(context.Background(), "s1", acl.ElicitationRequest{
+			SessionID: "s1", Mode: "form", Message: "请填表", URLID: "acp-el-2",
+		}, func(it ElicitationItem) { publishedForm <- it })
+	}()
+	formIt := <-publishedForm
+	if m.CompleteByURLID("s1", "acp-el-2") {
+		t.Fatal("form 模式不应被 complete 收敛")
+	}
+	m.ResolveCancel("s1", formIt.ID)
+	fwg.Wait()
+	if formOut.Action != "cancel" {
+		t.Fatalf("form 模式应仍由用户决策收敛: %+v", formOut)
+	}
+}
+
+// TestResolveElicitationScope C3 归属判定三分支：wire（`_meta`）优先 → inferred_inflight（唯一在途
+// turn）→ ambiguous（都没有，返回空 id 由调用方按取消回应并留痕）。cli=nil 时无在途 turn，
+// 正好覆盖后两个分支（wire 分支不碰 cli）。
+func TestResolveElicitationScope(t *testing.T) {
+	_, orch, _ := newTestRig(t)
+
+	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		SessionID: "wire-conv", ScopeSource: acl.ScopeWire,
+	}); sid != "wire-conv" || src != acl.ScopeWire {
+		t.Fatalf("wire 归属应直采: sid=%q src=%q", sid, src)
+	}
+	// ScopeSource=wire 但 SessionID 为空（脏数据）→ 不认，退到推断/歧义。
+	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		ScopeSource: acl.ScopeWire,
+	}); sid != "" || src != acl.ScopeAmbiguous {
+		t.Fatalf("空 wire 归属应落 ambiguous: sid=%q src=%q", sid, src)
+	}
+	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		Mode: "form", Message: "q",
+	}); sid != "" || src != acl.ScopeAmbiguous {
+		t.Fatalf("无 wire 且无在途 turn 应落 ambiguous: sid=%q src=%q", sid, src)
+	}
+}
+
+// TestAgentDiagnosticsShowsScopeAmbiguous verify 归属歧义不再无痕：留痕随 agent 诊断的
+// remediation 外露，给出事实 + 可执行动作（否则用户只觉得「提问卡没出现」）。
+func TestAgentDiagnosticsShowsScopeAmbiguous(t *testing.T) {
+	// newSearchRig 预置 agent a1（AgentDiagnostics 需要真实存在的 agent）。
+	svc, _ := newSearchRig(t)
+	svc.noteScopeAmbiguous("a1", "elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）")
+
+	resp, err := svc.AgentDiagnostics(context.Background(), "a1")
+	if err != nil {
+		t.Fatalf("AgentDiagnostics: %v", err)
+	}
+	joined := strings.Join(resp.Remediation, "\n")
+	if !strings.Contains(joined, "无法归属会话") {
+		t.Fatalf("归属歧义应出现在 remediation: %+v", resp.Remediation)
+	}
+	if !strings.Contains(joined, "_meta") {
+		t.Fatalf("remediation 应给出可执行动作（_meta 带 sessionId）: %+v", resp.Remediation)
+	}
+}
+
 // TestElicitationTimeoutAutoCancel 无用户决策 → 超时自动按取消处理。
 func TestElicitationTimeoutAutoCancel(t *testing.T) {
 	m := NewElicitationManager(40 * time.Millisecond)

@@ -60,7 +60,27 @@ type ConversationCreateResp struct {
 type ConversationPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
-	EventSeq int64  `json:"event_seq"` // user_message 事件后的水位
+	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
+	// Queued/InputID 仅 delivery=after_turn|interrupt_then_prompt 且会话正忙时出现：
+	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /conversations/:id/inputs/:input_id 撤下）。
+	Queued  bool   `json:"queued,omitempty"`
+	InputID string `json:"input_id,omitempty"`
+}
+
+// QueuedInputResp 一条待投递的排队输入（§6）。
+//
+// 与事件的关系：`session.input_queued` 是它**曾经入队**的事实，本读模型是它**此刻还在队里**
+// 的当前态（投递/撤下后即消失）。前端冷挂载（刷新/直达）时 WS 只发 snapshot 不回放历史，
+// 光靠事件会让队列在刷新后凭空消失，故需要这个「当前态」入口把队列查回来。
+type QueuedInputResp struct {
+	ID       string `json:"input_id"`
+	Text     string `json:"text"`
+	Delivery string `json:"delivery"` // after_turn | interrupt_then_prompt
+	// TargetTurnID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
+	TargetTurnID string `json:"target_turn_id,omitempty"`
+	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
+	Generation int64  `json:"generation,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
 }
 
 // ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
@@ -137,7 +157,8 @@ type ElicitationResp struct {
 	SessionID     string `json:"session_id"`
 	// ConversationID 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起）。
 	ConversationID string `json:"conversation_id"`
-	// ScopeSource 归属来源：wire | inferred_inflight（SDK 未建模 scope 时由宿主按唯一在途 turn 推断）。
+	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）
+	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`
 	Message     string         `json:"message"`

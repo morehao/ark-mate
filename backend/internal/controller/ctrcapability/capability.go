@@ -18,6 +18,8 @@ import (
 // CapabilityCtr 能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
 type CapabilityCtr interface {
 	ListSkills(c *gin.Context)
+	SetSkillEnabled(c *gin.Context)
+	SkillMaterialization(c *gin.Context)
 	ListMcpServers(c *gin.Context)
 	ListTools(c *gin.Context)
 	AgentCapabilities(c *gin.Context)
@@ -49,6 +51,34 @@ func (h *capabilityCtr) ListSkills(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, items)
+}
+
+// SetSkillEnabled 启停一个 skill（§13.4 S4）：`{enabled}` → 写回定义文件 + 立刻重校物化。
+// 禁用是 overlay（定义与正文保留，可逆），响应回带写回路径与物化计数。
+func (h *capabilityCtr) SetSkillEnabled(c *gin.Context) {
+	id := c.Param("id")
+	var req dtocapability.SkillToggleReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.SetSkillEnabled(c.Request.Context(), id, req.Enabled)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// SkillMaterialization 某 skill 的物化体检（§13.4 S2）：每处物化目标的期望摘要 vs 实测摘要、
+// 以及 status（in_sync/missing/tampered/stale/disabled/user_owned/not_applicable）。只读。
+func (h *capabilityCtr) SkillMaterialization(c *gin.Context) {
+	resp, err := h.svc.SkillMaterialization(c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
 }
 
 // ListMcpServers 列出 MCP 注册表（按 ID 排序；headers/凭证不读回）。

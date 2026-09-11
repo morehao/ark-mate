@@ -111,6 +111,8 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	defer svc.closeTranscripts()
 	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
 	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
+	// ③ 文本增量攒批：断言前手动落盘（生产由 25ms 窗口 / 终态事件 / 阈值触发）。
+	svc.flushChunks()
 
 	resp, err := svc.SearchMessages(context.Background(), "needle", 10)
 	if err != nil {

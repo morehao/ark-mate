@@ -8,6 +8,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/redact"
 	"github.com/morehao/ark-forge/pkg/routing"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -47,9 +48,38 @@ func (s *Service) recordAgentError(agentID, conversationID string, ae *acl.Error
 		ConversationID: conversationID,
 		Code:           ae.Code,
 		Class:          string(ae.Class),
-		Details:        ae.Details,
+		Details:        redact.String(ae.Details),
 		StderrTail:     acl.TailLines(tail, maxDiagStderrLines),
 	}
+}
+
+// scopeNote 是一条「归属歧义」留痕（时间 + 事实描述）。
+type scopeNote struct {
+	At     time.Time
+	Detail string
+}
+
+// noteScopeAmbiguous 记一条「归属歧义」留痕（elicitation 无法归属会话：wire `_meta` 未给 scope
+// 且连接上无唯一在途 turn）。按 agent 覆盖最近一条（重复事件不堆积），随 AgentDiagnostics 的
+// remediation 外露——这是「提问卡为什么没出现」的用户可见入口。
+func (s *Service) noteScopeAmbiguous(agentID, detail string) {
+	if agentID == "" {
+		return
+	}
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	if s.scopeNotes == nil {
+		s.scopeNotes = map[string]scopeNote{}
+	}
+	s.scopeNotes[agentID] = scopeNote{At: time.Now().UTC(), Detail: detail}
+}
+
+// scopeNote 读取某 agent 的归属歧义留痕。
+func (s *Service) scopeNote(agentID string) (scopeNote, bool) {
+	s.diagMu.Lock()
+	defer s.diagMu.Unlock()
+	n, ok := s.scopeNotes[agentID]
+	return n, ok
 }
 
 // agentLastError 读取某 agent 的最近失败快照。
@@ -114,6 +144,12 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*dtoagent.Agen
 		}
 	}
 	resp.Remediation = s.remediationFor(agent, spec, specOK, resp.Connected, resp.StderrTail, resp.LastError != nil)
+	// 归属歧义留痕（若有）：诊断里给事实 + 可执行动作，而不是让提问卡无痕消失。
+	if n, ok := s.scopeNote(id); ok {
+		resp.Remediation = append(resp.Remediation, fmt.Sprintf(
+			"%s（%s）。若该 runtime 会发 elicitation 且存在多会话并发在途：让底座在 elicitation 的 `_meta` 里带 sessionId（宿主零 fork 读取，见 pkg/acl/scope.go），或串行等待提问。",
+			n.Detail, n.At.Format(time.RFC3339)))
+	}
 	return resp, nil
 }
 

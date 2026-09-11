@@ -18,7 +18,12 @@ export const Ev = {
   PermissionPolicy: 'session.permission_policy',
   PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
-  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消）
+  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消/agent 收尾 complete）
+  // §6 busy input 队列：会话正忙时用户输入入队 / 投递 / 撤下。队列视图只认这三条事件
+  // （queued 建项、delivered|cancelled 收敛），不做本地推断。
+  InputQueued: 'session.input_queued',
+  InputDelivered: 'session.input_delivered',
+  InputCancelled: 'session.input_cancelled',
   // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
   // 拓扑变化时推）：payload = {session_id, agent_id, runtime, options: ConfigOption[]}。
   ConfigOptions: 'session.config_options',
@@ -44,6 +49,25 @@ export interface BusEvent {
 import type { ElicitationFormSchema, PermissionOption } from './conversation'
 
 export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission' | 'elicitation'
+
+/**
+ * §6 busy input 队列的一条队项（派生视图，不是 wire 契约）。
+ *
+ * 由 `session.input_queued` 建项、`session.input_delivered` / `session.input_cancelled` 收敛——
+ * **只认事件、不做本地推断**：投递与撤下是两条不同的事实，前端不靠「POST 成功」或超时去猜。
+ * 刷新/重连靠历史回放重建（服务端重启作废队项时也会补发 cancelled，见 reason=stale）。
+ */
+export interface QueuedInput {
+  inputId: string
+  text: string
+  /** after_turn | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
+  delivery: string
+  /** 入队时正在执行的那一轮（审计用；服务端投递判据是 generation）。 */
+  targetTurnId?: string
+  /** 入队时会话执行代际：服务端投递前比对，不等即作废（旧队项绝不灌进重建后的上下文）。 */
+  generation?: number
+  seq?: number
+}
 
 export interface StreamEntry {
   kind: EntryKind

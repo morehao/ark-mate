@@ -2,11 +2,13 @@ import { create } from 'zustand'
 import {
   HttpError,
   cancelConversation,
+  cancelQueuedInput as apiCancelQueuedInput,
   conversationHistory,
   createConversation,
   listAgents,
   listConversations,
   listModels,
+  listQueuedInputs,
   promptConversation,
   resolveElicitation,
   resolvePermission,
@@ -24,12 +26,21 @@ import type {
   ConversationSummary,
   ModelCatalogResp,
   ModelRef,
+  QueuedInput,
   StreamEntry,
   WsServerFrame,
 } from '@ark/types'
 import { BizCode, Ev } from '@ark/types'
 import { WsTransport } from './transport/ws'
 import { olderCursor, prependOlder } from './console/transcriptView'
+import {
+  cancelNotice,
+  cancelTone,
+  deliveryLabel,
+  queuedFromResp,
+  transitionQueue,
+  type DeliveryChoice,
+} from './console/queueView'
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
@@ -39,9 +50,24 @@ export interface ConversationView {
   lastSeq: number
   /** 冷挂载 hydration：activate 全量 attach（snapshot 到达）前为 true（P3 加载四态）。 */
   hydrating: boolean
+  /** §6 busy input 队列：事件的投影（input_queued 建项 / delivered|cancelled 出队）。 */
+  queue: QueuedInput[]
+  /**
+   * 本视图已应用的**队列事件**计数（不受普通消息事件推进）。
+   * 冷挂载要用 GET /inputs 查当前态补齐队列，而 HTTP 有在途窗口：若期间来了队列事件，
+   * 服务端读到的可能已是旧状态——用这个计数当锚点，动过就以事件为准，避免把已撤下的项复活。
+   */
+  queueSeq: number
 }
 
-const emptyView = (): ConversationView => ({ entries: [], streaming: false, lastSeq: 0, hydrating: false })
+const emptyView = (): ConversationView => ({
+  entries: [],
+  streaming: false,
+  lastSeq: 0,
+  hydrating: false,
+  queue: [],
+  queueSeq: 0,
+})
 
 /** 权限终局事件载荷 → 卡片决策摘要（reason/allowed/rejected/always 组合出可读文案）。 */
 function permissionResolvedLabel(p: Record<string, unknown> | undefined): string {
@@ -58,6 +84,8 @@ function permissionResolvedLabel(p: Record<string, unknown> | undefined): string
 function elicitationResolvedLabel(p: Record<string, unknown> | undefined): string {
   const reason = String(p?.reason ?? '')
   const action = String(p?.action ?? '')
+  // agent 告知 URL 模式提问已在 agent 侧完成（elicitation/complete）→ 不是「用户提交了内容」。
+  if (reason === 'complete') return '链接流程已完成'
   if (action === 'accept') return '已提交'
   if (action === 'decline') return '已拒绝'
   if (reason === 'timeout') return '超时自动取消'
@@ -273,6 +301,42 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
         lastSeq,
       }
     }
+    case Ev.InputQueued: {
+      // §6：会话正忙，输入已入队。队列只在事件里生长——POST 的 queued 回执只说明「这次入队了」，
+      // 队项的真相永远是 input_queued / input_delivered / input_cancelled 三件套。
+      return {
+        ...v,
+        queue: transitionQueue(v.queue, e).queue,
+        queueSeq: v.queueSeq + 1,
+        lastSeq,
+      }
+    }
+    case Ev.InputDelivered:
+      // 投递出去的文本紧接着会以 session.user_message 出现在正文里，队列行随之消失即可，
+      // 不再补系统提示（否则同一件事在流里说两遍）。
+      return {
+        ...v,
+        queue: transitionQueue(v.queue, e).queue,
+        queueSeq: v.queueSeq + 1,
+        lastSeq,
+      }
+    case Ev.InputCancelled: {
+      // 离队但没投出去（用户撤下 / 投递失败 / 重启作废）：文本从此不会出现在正文里，
+      // 所以必须在流里留一条带原因与出路的系统提示——「我排的那句话去哪了」得有答案。
+      // 队项文本只存在于队列投影里（事件载荷不带 text），故从被移除的队项取。
+      const tr = transitionQueue(v.queue, e)
+      const reason = e.payload?.reason == null ? '' : String(e.payload.reason)
+      return {
+        ...v,
+        queue: tr.queue,
+        queueSeq: v.queueSeq + 1,
+        entries: push('system', undefined, {
+          tone: cancelTone(reason),
+          text: cancelNotice(reason, tr.removed?.text),
+        }),
+        lastSeq,
+      }
+    }
     case Ev.Usage:
       return { ...v, lastSeq }
     default:
@@ -339,7 +403,12 @@ export interface ForgeActions {
   loadModelCatalog: (agentId?: string) => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
   updateConversationModel: (id: string, model?: string) => Promise<void>
-  sendPrompt: (text: string) => Promise<void>
+  /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
+  sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
+  /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
+  cancelQueuedInput: (inputId: string) => Promise<void>
+  /** §6：用服务端当前态补齐队列（冷挂载/HISTORY 未覆盖时用；`anchorQueueSeq` 见 ConversationView.queueSeq）。 */
+  refreshQueue: (id: string, anchorQueueSeq: number) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
   respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
@@ -468,16 +537,23 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     applyFrame: (f) => {
       let terminal = false
+      let seedQueue = ''
       set((s) => {
         switch (f.type) {
           case 'snapshot': {
             // snapshot = 服务端整包终态视图（冷挂载或「淘汰即快照回退」）：
             // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标。
+            // 重置会连带清掉队列投影，而 snapshot 不回放历史 → 立刻用 GET /inputs 把当前态查回来
+            // （否则刷新后「已排队但还没发出去的话」在界面上凭空消失）。
+            seedQueue = f.agg_id
             return {
               ...s,
               views: {
                 ...s.views,
-                [f.agg_id]: { entries: [], streaming: false, lastSeq: Math.max(f.event_seq, 0), hydrating: false },
+                [f.agg_id]: {
+                  ...emptyView(),
+                  lastSeq: Math.max(f.event_seq, 0),
+                },
               },
             }
           }
@@ -502,6 +578,8 @@ export const useForge = create<ForgeStore>((set, get) => {
             return s
         }
       })
+      // 冷挂载：用服务端当前态补齐队列（锚点取重置后的 queueSeq=0；期间若有队列事件到达则让位事件）。
+      if (seedQueue) void get().refreshQueue(seedQueue, 0)
       // 终态已到：会话列表 status 同步刷新（侧栏/服务端忙水位随之收敛）。
       if (terminal) void get().refreshConversations()
     },
@@ -594,10 +672,10 @@ export const useForge = create<ForgeStore>((set, get) => {
           views: {
             ...s.views,
             [resp.id]: {
+              ...emptyView(),
               entries: [{ kind: 'user', id: nextId(), text: prompt }],
               streaming: true,
               lastSeq: resp.event_seq,
-              hydrating: false,
             },
           },
         }))
@@ -633,27 +711,69 @@ export const useForge = create<ForgeStore>((set, get) => {
       }
     },
 
-    sendPrompt: async (text) => {
+    sendPrompt: async (text, delivery) => {
       const id = get().activeId
       if (!id) return
-      if (get().views[id]?.streaming) return // 已有一轮在跑，防重入（连点/并发）
+      // 忙时是否放行取决于投递模式（§6）：排队/插话是允许的，缺省/reject 仍然是「防重入拒绝」。
+      const busy = get().views[id]?.streaming ?? false
+      const queueing = delivery === 'after_turn' || delivery === 'interrupt_then_prompt'
+      if (busy && !queueing) return // 已有一轮在跑，防重入（连点/并发）
       try {
-        // 乐观置忙：在 POST 返回前就把 Composer 置为禁用，消除「请求在途仍可再发」的竞态窗口，
-        // 避免第二次 send 打到后端 turn_in_progress（决策 v5 前修复）。
-        set((s) => {
-          const view = s.views[id] ?? emptyView()
-          return { views: { ...s.views, [id]: { ...view, streaming: true } } }
-        })
+        if (!busy) {
+          // 乐观置忙：在 POST 返回前就把 Composer 置为禁用，消除「请求在途仍可再发」的竞态窗口，
+          // 避免第二次 send 打到后端 turn_in_progress（决策 v5 前修复）。
+          // 入队时**不置忙**：这一轮本来就还在跑，忙碌水位由 turn 事件收敛。
+          set((s) => {
+            const view = s.views[id] ?? emptyView()
+            return { views: { ...s.views, [id]: { ...view, streaming: true } } }
+          })
+        }
         ensureTransport().connect()
-        await promptConversation(id, { prompt: text })
+        const resp = await promptConversation(id, delivery ? { prompt: text, delivery } : { prompt: text })
+        if (resp.queued) {
+          // 队项由 input_queued 事件建项（不靠这里乐观插入）：事件才是队列的唯一事实。
+          showToast(`会话正忙，已入队（${deliveryLabel(delivery ?? '')}）——可随时撤下`)
+        }
       } catch (err) {
-        // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。
+        // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。入队失败时不要动 streaming：
+        // 那一轮的忙碌水位归它的 turn 事件管，这里改掉会让「停止」按钮凭空消失。
+        if (!busy) {
+          set((s) => {
+            const view = s.views[id]
+            if (!view) return {}
+            return { views: { ...s.views, [id]: { ...view, streaming: false } } }
+          })
+        }
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    cancelQueuedInput: async (inputId) => {
+      const id = get().activeId
+      if (!id) return
+      try {
+        const res = await apiCancelQueuedInput(id, inputId)
+        if (!res.deleted) {
+          // 已经不在了（已投递/已作废/被别的标签页撤下）：如实说，不假装成功。
+          showToast('该排队输入已不在队列里（可能已投递或已作废）')
+        }
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    refreshQueue: async (id, anchorQueueSeq) => {
+      try {
+        const items = await listQueuedInputs(id)
         set((s) => {
           const view = s.views[id]
-          if (!view) return {}
-          return { views: { ...s.views, [id]: { ...view, streaming: false } } }
+          // 期间有队列事件到达（一般意味着入队/投递/撤下刚刚发生）→ 以事件为准：
+          // 服务端那份当前态可能读得更早，覆盖回去会把已撤下的项复活成幻影。
+          if (!view || view.queueSeq !== anchorQueueSeq) return {}
+          return { views: { ...s.views, [id]: { ...view, queue: items.map(queuedFromResp) } } }
         })
-        showToast(toErrorMessage(err))
+      } catch {
+        // 补齐失败不打扰用户：实时事件仍会让队列长出来（队列是投影，不是必需状态）。
       }
     },
 

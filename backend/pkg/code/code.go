@@ -16,6 +16,8 @@ import (
 	"fmt"
 
 	"github.com/morehao/golib/gerror"
+
+	"github.com/morehao/ark-forge/pkg/redact"
 )
 
 // 成功码。gincontext 的成功分支同样落 0。
@@ -87,7 +89,9 @@ func Error(c int, msg string) gerror.Error {
 	if msg == "" {
 		msg = Message(c)
 	}
-	return gerror.Error{Code: c, Msg: msg}
+	// 脱敏闸门：对外文案可能夹带上游原文（如 runtime 报错里回显的 key）。
+	// 这是控制面所有对外错误的唯一构造入口（FromError 与 fromACL 都汇到这里）。
+	return gerror.Error{Code: c, Msg: redact.String(msg)}
 }
 
 // Errorf 是 Error 的格式化版本。

@@ -8,6 +8,15 @@ export interface SkillSource {
   format: string
 }
 
+/** 一条装载期正文扫描告警（§13.2 S1）。critical 的定义在装载时已被拒载，不会出现在列表里。 */
+export interface SkillWarning {
+  /** info | warning | critical */
+  severity: string
+  /** 稳定规则 id（如 ignore-previous-instructions / sensitive-path-reference）。 */
+  pattern: string
+  message: string
+}
+
 export interface Skill {
   id: string
   name: string
@@ -15,6 +24,52 @@ export interface Skill {
   /** SKILL.md 内容（P2 物化源；目录条目可空）。 */
   body?: string
   sources?: SkillSource[]
+  /** 放行了但该看一眼的告警。 */
+  warnings?: SkillWarning[]
+  /** 是否投放（§13.4 S4；未声明 enabled 的定义 = true）。禁用只影响投放，定义照旧保留。 */
+  enabled?: boolean
+}
+
+/** 一处物化目标的现状（§13.4 S2 审计面；GET /skills/:id/materialization）。 */
+export interface SkillMaterializationState {
+  root: string
+  runtime?: string
+  dir: string
+  /** in_sync | missing | tampered | stale | disabled | user_owned | not_applicable */
+  status: string
+  /** 期望摘要（注册表侧）。 */
+  hash?: string
+  /** 磁盘实测摘要。 */
+  actual_hash?: string
+  /** 产物 sidecar 记录的写入时间（RFC3339）。 */
+  written_at?: string
+  /** 归属标记里登记的 runtime 集合。 */
+  owners?: string[]
+  detail?: string
+}
+
+/** 一个 skill 的物化体检（只读）。 */
+export interface SkillMaterializationResp {
+  id: string
+  enabled: boolean
+  states: SkillMaterializationState[]
+  /** 无法逐个给状态时的说明（如本进程没登记任何物化目标）。 */
+  notes?: string[]
+}
+
+/** 启停一个 skill 的结果（PATCH /skills/:id）。 */
+export interface SkillToggleResp {
+  id: string
+  enabled: boolean
+  /** 写回的定义文件路径。 */
+  path?: string
+  /** 立刻重校物化的结果：启用写文件、禁用撤回副本。 */
+  written: number
+  removed: number
+  /** 重校失败原因（定义文件已改成功，故不回滚）。 */
+  materialize_errors?: string[]
+  /** 这一步之后该知道的事。 */
+  next_action?: string
 }
 
 export interface McpServer {
@@ -25,6 +80,14 @@ export interface McpServer {
   command?: string
   args?: string[]
   url?: string
+  /** 明文环境变量的键（§13.3 M1；值不回）。 */
+  env_keys?: string[]
+  /** 密钥型环境变量的键（**只有键名**，值/引用都不回）。 */
+  secret_env_keys?: string[]
+  /** 密钥型 header 的键（**只有键名**）。 */
+  secret_header_keys?: string[]
+  /** 已绑定但当前解析不了的密钥键（vault 缺密文 / env 未设）。 */
+  unresolved_secret_keys?: string[]
   /** —— P2 §5.2 live 探测状态（从未探测 → 0/空） —— */
   tool_count: number
   /** 最近一次探测时间（RFC3339）。 */
@@ -156,12 +219,19 @@ export interface McpPromptGetResult {
 
 // ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
 
-/** 某 Agent 可见的 skill（sources 已按该 Agent 候选 runtime 裁剪）。 */
+/** 某 Agent 视角的 skill（sources 已按该 Agent 候选 runtime 裁剪）。
+ *  §13.4 S5：不适用**不等于**不列出——启用与适用正交，两者都要能解释。 */
 export interface AgentSkill {
   id: string
   name: string
   description?: string
   sources?: SkillSource[]
+  /** 平台是否投放（false = 已被禁用，可恢复）。 */
+  enabled?: boolean
+  /** 该 agent 现在能不能真的用上（启用 ⟂ 适用）。 */
+  applicable?: boolean
+  /** 不适用的原因（人话；applicable=true 时为空）。 */
+  reasons?: string[]
 }
 
 /** 某 Agent 视角的 MCP server：enabled=白名单是否启用；runtimes=候选中可承载此传输的底座。 */

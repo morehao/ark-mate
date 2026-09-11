@@ -15,6 +15,7 @@ var notFoundCodes = map[string]bool{
 	"conversation_not_found": true,
 	"runtime_not_found":      true,
 	"mcp_not_found":          true,
+	"skill_not_found":        true,
 	"provider_not_found":     true,
 }
 

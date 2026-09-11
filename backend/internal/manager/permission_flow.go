@@ -76,12 +76,15 @@ func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionIte
 // （ACP 形态 selected/cancelled + 有效 option_id；规则见 acl.EffectivePermissionOutcome）。
 // 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
-func (o *Orchestrator) ResolvePermission(callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
+//
+// conversationID 为决策发起方会话（C3 scope 归属）：与挂起项归属不符时按「不存在」处理
+// （ok=false，不投递、不删除挂起项，不泄露他会话挂起项）——与 elicitation 决策同一立场。
+func (o *Orchestrator) ResolvePermission(conversationID, callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
 	if callID == "" {
 		return PermissionDecisionOutcome{}, false, acl.NewError(acl.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
 	d := acl.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
-	found, out := o.perm.ResolveDecision(callID, d)
+	found, out := o.perm.ResolveDecision(conversationID, callID, d)
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
 	}
@@ -122,6 +125,21 @@ func (o *Orchestrator) RevokeMemory(conversationID, title, kind string) (bool, e
 		return false, acl.NewError(acl.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
 	}
 	return o.perm.Revoke(conversationID, title, kind), nil
+}
+
+// resolveElicitationScope 判定一次 elicitation 的会话归属（C3），返回 (会话 id, 归属来源)：
+//   - wire：acl 层已从 `_meta` 读到会话（ScopeWire）→ 直接采用，不做推断；
+//   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 turn → 按它归属；
+//   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
+//     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
+func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.ElicitationRequest) (sessionID, scopeSource string) {
+	if req.ScopeSource == acl.ScopeWire && req.SessionID != "" {
+		return req.SessionID, acl.ScopeWire
+	}
+	if sid := o.busyConversationForClient(cli); sid != "" {
+		return sid, acl.ScopeInferred
+	}
+	return "", acl.ScopeAmbiguous
 }
 
 // requestElicitation 处理一次 ACP 结构化提问请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：

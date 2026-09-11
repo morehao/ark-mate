@@ -40,6 +40,8 @@ type (
 	Run = model.Run
 	// Message 消息物化投影行。
 	Message = model.Message
+	// Input 待投递的用户输入队列行（§6 busy input 队列）。
+	Input = model.Input
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
 	ConversationMetaPatch = model.ConversationMetaPatch
 )
@@ -59,6 +61,7 @@ type Store struct {
 	runs          *dao.RunDao
 	messages      *dao.MessageDao
 	memories      *dao.MemoryDao
+	inputs        *dao.InputDao
 	meta          *dao.MetaDao
 	migrations    *dao.MigrationDao
 }
@@ -91,6 +94,7 @@ func New(db *gorm.DB) *Store {
 		runs:          dao.NewRunDao(getDB),
 		messages:      dao.NewMessageDao(getDB),
 		memories:      dao.NewMemoryDao(getDB),
+		inputs:        dao.NewInputDao(getDB),
 		meta:          dao.NewMetaDao(getDB),
 		migrations:    dao.NewMigrationDao(getDB),
 	}

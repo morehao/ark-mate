@@ -239,6 +239,8 @@ func (a *App) loadDefinitions() error {
 		} else if w > 0 || r > 0 {
 			slog.Info("serve: skill 物化重校完成", "dir", dir, "written", w, "removed", r)
 		}
+		// 登记目标：§13.4 S4 启停后要立刻对同一组目标重校，不必等下次启动。
+		a.svc.SetSkillMaterializeTargets([]manager.SkillMaterializeTarget{{Root: dir}})
 	}
 	// C4 多 root 投影：按 runtime 各写自己的根目录（只物化声明该 runtime 的 skill）。
 	// 排序遍历保证日志与执行顺序稳定（map 迭代无序）。
@@ -248,6 +250,7 @@ func (a *App) loadDefinitions() error {
 			runtimes = append(runtimes, rt)
 		}
 		sort.Strings(runtimes)
+		targets := make([]manager.SkillMaterializeTarget, 0, len(runtimes))
 		for _, rt := range runtimes {
 			dir := cfg.SkillMaterializeDirs[rt]
 			w, r, mErr := a.svc.ReconcileSkillsFor(dir, rt)
@@ -258,7 +261,9 @@ func (a *App) loadDefinitions() error {
 			if w > 0 || r > 0 {
 				slog.Info("serve: skill 物化重校完成", "dir", dir, "runtime", rt, "written", w, "removed", r)
 			}
+			targets = append(targets, manager.SkillMaterializeTarget{Root: dir, Runtime: rt})
 		}
+		a.svc.SetSkillMaterializeTargets(targets)
 	}
 	return nil
 }

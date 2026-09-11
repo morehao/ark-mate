@@ -24,6 +24,11 @@ import (
 //
 // 记录在 Service.publish 统一汇口挂载（域事件 = prompt/update 原语），
 // 写入失败只告警不阻断会话（transcript 是尽力而为的旁路事实源）。
+//
+// 粒度（③ 流式增量合并后）：文本增量（session.message/thought）按 25ms / 4KB / 64 条
+// 攒批落行，**一行可能覆盖多个 delta**（同一条消息的 text 已拼接）；工具卡/权限卡/提问卡/
+// 用户消息/终态事件不受合并影响，仍是一条事件一行。故"每轮 prompt/update 原语"应读作
+// "每轮事件原语（文本增量已攒批）"，前端/导入侧按 msg_id 拼接的语义不变。
 
 // wireTranscriptSchema transcript 文件 schema 名。
 const wireTranscriptSchema = "ark-forge.wire-transcript.v1"

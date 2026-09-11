@@ -66,10 +66,12 @@ func TestConversationHistoryPaging(t *testing.T) {
 	svc := NewService(reg, bus)
 	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
 
+	// ③ 文本增量合并：不同 msg_id = 不同消息，5 条各自成事件（断言前 flush 落盘）。
 	for i := 0; i < 5; i++ {
-		svc.publish(BusMessage, "s1", map[string]any{"text": "msg"})
+		svc.publish(BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": "msg"})
 	}
 	svc.publish(BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
+	svc.flushChunks()
 
 	page1, err := svc.ConversationHistory(context.Background(), "s1", dtoconversation.HistoryQuery{Limit: 2})
 	if err != nil {
@@ -160,9 +162,10 @@ func TestConversationHistoryStoreBacked(t *testing.T) {
 	svc.EnableStore(st)
 	svc.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-opencode"})
 	for i := 0; i < 5; i++ {
-		svc.publish(BusMessage, "s1", map[string]any{"text": fmt.Sprintf("m%d", i)})
+		svc.publish(BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": fmt.Sprintf("m%d", i)})
 	}
 	svc.publish(BusMessage, "s2", map[string]any{"text": "other"})
+	svc.flushChunks()
 
 	// 向后分页（after）。
 	p1, err := svc.ConversationHistory(context.Background(), "s1", dtoconversation.HistoryQuery{Limit: 3})

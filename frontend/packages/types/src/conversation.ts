@@ -222,7 +222,7 @@ export interface ElicitationResp {
   session_id: string
   /** 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起，跨会话按「不存在」处理）。 */
   conversation_id: string
-  /** 归属来源：wire（wire 提供）| inferred_inflight（宿主按连接上唯一在途 turn 推断）。 */
+  /** 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）| ambiguous（两者都无，不归属）。 */
   scope_source: string
   mode: ElicitationMode
   message: string
@@ -271,14 +271,42 @@ export interface CreateConversationResp {
   workspace_temporary?: boolean
 }
 
+/** §6 投递模式：会话正忙时怎么办。空/reject = 报错（历史行为）；after_turn = 排队；
+ *  interrupt_then_prompt = 取消当前轮随后投递。 */
+export type DeliveryMode = 'reject' | 'after_turn' | 'interrupt_then_prompt'
+
 export interface PromptReq {
   prompt: string
+  delivery?: DeliveryMode
 }
 
 export interface ConversationPromptResp {
   id: string
   status: ConversationStatus
   event_seq: number
+  /** 本次输入已入队（delivery=after_turn|interrupt_then_prompt 且会话正忙）。 */
+  queued?: boolean
+  /** 入队项的 id（可用 DELETE /v1/forge/conversations/:id/inputs/:input_id 撤下）。 */
+  input_id?: string
+}
+
+/** §6 一条待投递的排队输入（GET /conversations/:id/inputs；当前态，投递/撤下后即消失）。 */
+export interface QueuedInputResp {
+  input_id: string
+  text: string
+  /** after_turn | interrupt_then_prompt */
+  delivery: string
+  target_turn_id?: string
+  generation?: number
+  created_at?: string
+}
+
+/** §6 撤下排队输入的响应（DELETE /conversations/:id/inputs/:input_id）。 */
+export interface CancelQueuedInputResp {
+  id: string
+  input_id: string
+  /** 真的撤下了；false = 该 id 已不在 queued（已投递/已作废/不存在）——幂等，不是错误。 */
+  deleted: boolean
 }
 
 export interface CancelConversationResp {

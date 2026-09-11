@@ -84,11 +84,17 @@ type stubSvc struct {
 	createResp   *dtoconversation.ConversationCreateResp
 	createErr    error
 
-	promptCalled bool
-	promptID     string
-	promptText   string
-	promptResp   *dtoconversation.ConversationPromptResp
-	promptErr    error
+	promptCalled    bool
+	promptID        string
+	promptText      string
+	promptDelivery  string
+	inputDeleted    bool
+	inputDeleteID   string
+	inputDeleteConv string
+	inputsListed    bool
+	inputsListConv  string
+	promptResp      *dtoconversation.ConversationPromptResp
+	promptErr       error
 
 	cancelCalled bool
 	cancelID     string
@@ -116,9 +122,14 @@ type stubSvc struct {
 	resolveElicErr      error
 
 	skills []dtocapability.SkillResp // P1 能力数据面桩
-	mcps   []dtocapability.McpServerResp
-	tools  []dtocapability.ToolResp
-	capErr error // 能力列表桩错误注入
+	// §13.4 S4 启停桩
+	matQueried         string
+	skillToggled       bool
+	skillToggleID      string
+	skillToggleEnabled bool
+	mcps               []dtocapability.McpServerResp
+	tools              []dtocapability.ToolResp
+	capErr             error // 能力列表桩错误注入
 
 	agentCapResp *dtocapability.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
 	agentCapErr  error
@@ -260,6 +271,28 @@ func (s *stubSvc) ListSkills() ([]dtocapability.SkillResp, error) {
 	}
 	return s.skills, nil
 }
+func (s *stubSvc) SetSkillEnabled(_ context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error) {
+	s.skillToggled, s.skillToggleID, s.skillToggleEnabled = true, id, enabled
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillToggleResp{ID: id, Enabled: enabled, NextAction: "已生效"}, nil
+}
+
+func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
+	s.matQueried = id
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillMaterializationResp{
+		ID: id, Enabled: true,
+		States: []dtocapability.SkillMaterializationState{
+			{Root: "/tmp/skills", Runtime: "opencode", Dir: "/tmp/skills/" + id,
+				Status: "in_sync", Hash: "abc", ActualHash: "abc"},
+		},
+	}, nil
+}
+
 func (s *stubSvc) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 	if s.capErr != nil {
 		return nil, s.capErr
@@ -499,10 +532,23 @@ func (s *stubSvc) CreateConversation(_ context.Context, req dtoconversation.Conv
 	}
 	return &dtoconversation.ConversationCreateResp{ID: "s-new"}, nil
 }
-func (s *stubSvc) PromptConversation(_ context.Context, id, prompt string) (*dtoconversation.ConversationPromptResp, error) {
+func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtoconversation.QueuedInputResp, error) {
+	s.inputsListed, s.inputsListConv = true, id
+	return []dtoconversation.QueuedInputResp{
+		{ID: "in-8", Text: "排队一", Delivery: "after_turn", TargetTurnID: "t1", Generation: 3},
+	}, nil
+}
+
+func (s *stubSvc) DeleteQueuedInput(_ context.Context, id, inputID string) (bool, error) {
+	s.inputDeleted, s.inputDeleteID, s.inputDeleteConv = true, inputID, id
+	return true, nil
+}
+
+func (s *stubSvc) PromptConversation(_ context.Context, id string, req dtoconversation.PromptReq) (*dtoconversation.ConversationPromptResp, error) {
 	s.promptCalled = true
 	s.promptID = id
-	s.promptText = prompt
+	s.promptText = req.Prompt
+	s.promptDelivery = req.Delivery
 	if s.promptErr != nil {
 		return nil, s.promptErr
 	}
@@ -886,6 +932,36 @@ func TestPromptAndCancel(t *testing.T) {
 		t.Fatalf("prompt data 不符: %s", env.Data)
 	}
 
+	// §6 投递模式透传到 service（delivery 不是路由层的事，路由只负责别把它吃掉）。
+	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
+	if env.Code != 0 || svc.promptDelivery != "after_turn" {
+		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
+	}
+	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
+	env, _ = do(t, r, "GET", "/v1/forge/conversations/s1/inputs", "")
+	if env.Code != 0 || !svc.inputsListed || svc.inputsListConv != "s1" {
+		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
+	}
+	var qdata []struct {
+		InputID      string `json:"input_id"`
+		Text         string `json:"text"`
+		Delivery     string `json:"delivery"`
+		TargetTurnID string `json:"target_turn_id"`
+		Generation   int64  `json:"generation"`
+	}
+	if err := json.Unmarshal(env.Data, &qdata); err != nil || len(qdata) != 1 {
+		t.Fatalf("排队列表 data 不符: %s", env.Data)
+	}
+	if qdata[0].InputID != "in-8" || qdata[0].Delivery != "after_turn" || qdata[0].Generation != 3 {
+		t.Fatalf("排队列表字段不符: %+v", qdata[0])
+	}
+
+	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。
+	env, _ = do(t, r, "DELETE", "/v1/forge/conversations/s1/inputs/in-9", "")
+	if env.Code != 0 || !svc.inputDeleted || svc.inputDeleteID != "in-9" {
+		t.Fatalf("撤下排队输入不符: env=%+v deleted=%v id=%q", env, svc.inputDeleted, svc.inputDeleteID)
+	}
+
 	// cancel。
 	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/cancel", "")
 	if env.Code != 0 || !svc.cancelCalled || svc.cancelID != "s1" {
@@ -1164,6 +1240,62 @@ func TestCapabilityRoutes(t *testing.T) {
 	var tools []dtocapability.ToolResp
 	if err := json.Unmarshal(env.Data, &tools); err != nil || len(tools) != 1 || tools[0].Name != "web_search" {
 		t.Fatalf("tools data 不符: %s", env.Data)
+	}
+}
+
+// TestSkillToggleRoute PATCH /skills/:id（§13.4 S4）：入参 {enabled} 透传到服务端口，
+// 响应回带写回路径与物化计数；非法 JSON → 40000（控制器绑定错误带码）。
+func TestSkillToggleRoute(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(stubDeps(svc))
+
+	env, code := do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":false}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("PATCH skill 失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
+	}
+	if !svc.skillToggled || svc.skillToggleID != "plan" || svc.skillToggleEnabled {
+		t.Fatalf("未透传到服务端口: %+v", svc)
+	}
+	var resp dtocapability.SkillToggleResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil || resp.ID != "plan" || resp.Enabled {
+		t.Fatalf("toggle data 不符: %s", env.Data)
+	}
+
+	// 启用方向也要通（同一个 handler，方向由入参决定）。
+	env, code = do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":true}`)
+	if code != 200 || env.Code != 0 || !svc.skillToggleEnabled {
+		t.Fatalf("PATCH enable 失败 code=%d env=%d", code, env.Code)
+	}
+
+	// 坏入参：控制器绑定失败 → 40000。
+	env, code = do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":`)
+	if code != 200 || env.Code != 40000 {
+		t.Fatalf("坏入参应 40000，code=%d env=%d", code, env.Code)
+	}
+}
+
+// TestSkillMaterializationRoute GET /skills/:id/materialization（§13.4 S2 审计面）：只读，
+// 透传 id 到服务端口，信封 data 带每处物化目标的状态与摘要。
+func TestSkillMaterializationRoute(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(stubDeps(svc))
+
+	env, code := do(t, r, "GET", "/v1/forge/skills/plan/materialization", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET materialization 失败 code=%d env=%d", code, env.Code)
+	}
+	if svc.matQueried != "plan" {
+		t.Fatalf("id 未透传: %q", svc.matQueried)
+	}
+	var resp dtocapability.SkillMaterializationResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析失败: %s", env.Data)
+	}
+	if resp.ID != "plan" || !resp.Enabled || len(resp.States) != 1 || resp.States[0].Status != "in_sync" {
+		t.Fatalf("materialization data 不符: %+v", resp)
+	}
+	if resp.States[0].Hash != resp.States[0].ActualHash {
+		t.Fatalf("in_sync 的期望/实测摘要应一致: %+v", resp.States[0])
 	}
 }
 

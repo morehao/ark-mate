@@ -230,6 +230,9 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	o.conversations[as.ID] = as
 	o.byProvider[sess.ID()] = as.ID
 	o.mu.Unlock()
+	// §6：执行上下文刚被重建（本次拿到了新的连接/会话）→ 会话执行代际自增。
+	// 排队输入比对的就是这个值：重建之后，为旧上下文排的队不再成立（见 inputqueue.go）。
+	o.svc.bumpGeneration(as.ID)
 	o.svc.markConversation(as.ID, ConversationStatusInProgress)
 	o.svc.publish(BusSessionResumed, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": as.AgentID, "runtime": spec.ID, "reason": reason,

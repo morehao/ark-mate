@@ -170,10 +170,21 @@ func TestAgentCapabilities(t *testing.T) {
 	if got.AgentID != "a1" || len(got.Runtimes) != 2 || got.Runtimes[0] != "opencode" {
 		t.Fatalf("agent/runtimes 不符: %+v", got)
 	}
-	// skill：plan 可见且 sources 裁到候选（仅 opencode）；no-src 无源不可见。
-	if len(got.Skills) != 1 || got.Skills[0].ID != "plan" || len(got.Skills[0].Sources) != 1 ||
-		got.Skills[0].Sources[0].Runtime != "opencode" {
-		t.Fatalf("skills 不符: %+v", got.Skills)
+	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出，plan 适用（sources 裁到候选
+	// 仅 opencode），no-src 不适用但带人话原因（技能凭空不见最难排查，改为显式解释）。
+	if len(got.Skills) != 2 {
+		t.Fatalf("skills 应全量列出（含不适用）: %+v", got.Skills)
+	}
+	skByID := map[string]dtocapability.AgentSkillResp{}
+	for _, sk := range got.Skills {
+		skByID[sk.ID] = sk
+	}
+	if plan := skByID["plan"]; !plan.Applicable || !plan.Enabled || len(plan.Sources) != 1 ||
+		plan.Sources[0].Runtime != "opencode" || len(plan.Reasons) != 0 {
+		t.Fatalf("plan 应启用且适用、sources 裁到候选: %+v", plan)
+	}
+	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Reasons) == 0 {
+		t.Fatalf("no-src 应不适用且有原因: %+v", noSrc)
 	}
 	// MCP：全量 3 条；白名单只启用 fs；carriers 只含能承载该传输的候选（ghost 未注册不计）。
 	if len(got.McpServers) != 3 {

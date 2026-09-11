@@ -7,6 +7,8 @@ import (
 	"os/exec"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+
+	"github.com/morehao/ark-forge/pkg/redact"
 )
 
 // Class 是可操作错误分类（对齐 codeg feedback.rs / AIR 词汇表，随 turn.error 上抛，前端据此渲染动作）。
@@ -67,7 +69,9 @@ func TailLines(lines []string, n int) []string {
 	}
 	out := make([]string, len(lines))
 	copy(out, lines)
-	return out
+	// 脱敏闸门：stderr 可能直接打印 key（如 `OPENAI_API_KEY=sk-…`），
+	// 这是 stderr 尾巴的唯一出口 → 在此一次性过闸，诊断/事件/错误文案三处消费者都被覆盖。
+	return redact.Lines(out)
 }
 
 // As 返回 err 链中的 *Error（含直接类型）。

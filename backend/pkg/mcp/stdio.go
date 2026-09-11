@@ -59,6 +59,7 @@ func dialStdio(ctx context.Context, s Server) (transport, error) {
 		return nil, errf("mcp_command_invalid", "stdio server %q 的 command 须为绝对路径（当前 %q）", s.ID, s.Command)
 	}
 	cmd := exec.CommandContext(ctx, s.Command, s.Args...)
+	setupProcAttr(cmd) // unix: 独立进程组，close 时连孙进程一起回收（npx → node → server）
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, errf("mcp_spawn_failed", "stdin 管道创建失败：%v", err)
@@ -82,9 +83,9 @@ func dialStdio(ctx context.Context, s Server) (transport, error) {
 
 func (t *stdioTransport) close() {
 	_ = t.stdin.Close()
-	if t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
-	}
+	// 杀**整棵进程树**（unix 下按进程组，见 proc_unix.go）。此前只 Process.Kill()，对
+	// `npx -y @modelcontextprotocol/server-*` 这类会自己 fork 的命令会留下孤儿孙进程。
+	_ = killProc(t.cmd)
 	_ = t.cmd.Wait()
 }
 

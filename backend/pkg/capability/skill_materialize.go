@@ -1,12 +1,14 @@
 package capability
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // forgeMarker 标记目录由本平台物化（删除联动只动带标记目录，绝不动用户自有/他方内容）。
@@ -131,6 +133,16 @@ func MaterializeSkillFor(root, runtime string, s Skill) (string, error) {
 	if s.Body == "" {
 		return "", fmt.Errorf("skill 物化: skill %q body 为空（无事可写）", s.ID)
 	}
+	// §13.4 S4：禁用 = 名字 overlay，只影响投放，不动定义。物化是投放的最后一米，到这里拒绝。
+	if !s.IsEnabled() {
+		return "", fmt.Errorf("skill 物化: skill %q 已禁用（enabled:false；改回 enabled:true 可恢复）", s.ID)
+	}
+	// §13.2 S1 的最后一道闸：注册表入口已经拦过 critical，这里再拦一次是因为本函数是**导出 API**
+	// ——调用方可以拿一个字面量 Skill 直接调它（绕过注册表）。物化是「把文本装进 agent」的最后一
+	// 米，宁可重复判断，不要在这里少一道。
+	if warns := VerifyContent(s.Body); HasCritical(warns) {
+		return "", criticalErr(s.ID, warns)
+	}
 	var content, format string
 	var ok bool
 	content, format, ok = materializedContentFor(s, runtime)
@@ -155,22 +167,117 @@ func MaterializeSkillFor(root, runtime string, s Skill) (string, error) {
 		}
 	}
 	dir := filepath.Join(root, s.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("skill 物化: 创建目录失败 %s: %w", dir, err)
-	}
-	p := filepath.Join(dir, "SKILL.md")
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("skill 物化: 写 %s 失败: %w", p, err)
+	// §13.4 S3：**拒覆盖非自有目录**。此前这里是裸 `MkdirAll` + `WriteFile`：目标目录若已存在
+	// 且不是平台物化的（用户自己建的、别的工具装的），平台会直接往里写文件——同名即覆盖别人的东西。
+	// 现在先判定归属：不存在 → 新建；存在且带 `.forge-managed` → 可替换；否则显式拒绝。
+	if err := ensureReplaceableDir(dir); err != nil {
+		return "", err
 	}
 	// 归属标记（删除联动依据）：首行 skill id，第二行**逗号分隔的 runtime 集合**（有序）。
 	// C6：同一目录可能被多个 runtime 投影（共享 root），集合记录全部投影方——某个 runtime 退出投影时
 	// 只从集合里摘除自己，集合空了才删除目录（避免「先投影方退出后目录永久残留」）。
-	marker := filepath.Join(root, s.ID, forgeMarker)
-	_, owners, _ := readMarker(marker)
-	if err := os.WriteFile(marker, []byte(markerContent(s.ID, addRuntime(owners, runtime))), 0o644); err != nil {
-		return "", fmt.Errorf("skill 物化: 写归属标记 %s 失败: %w", marker, err)
+	// 旧目录里的归属集合要先读出来合并（替换是"换内容"，不是"重置归属"）。
+	_, owners, _ := readMarker(filepath.Join(dir, forgeMarker))
+
+	// §13.4 S3：staging 目录 → 写全 → 自校验摘要 → 原子 rename 替换。
+	// 先写临时目录再整体换名的意义：**agent 永远看不到半成品**（没有一个时刻是"SKILL.md 只写了一半"），
+	// 且写失败/校验失败时旧产物原样还在（下次重校再试），不会留下一个空目录让 runtime 报错。
+	staging, err := os.MkdirTemp(root, ".forge-stage-*")
+	if err != nil {
+		return "", fmt.Errorf("skill 物化: 创建 staging 目录失败 %s: %w", root, err)
 	}
-	return p, nil
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+
+	payload := []payloadFile{{Path: "SKILL.md", Mode: 0o644, Content: []byte(content)}}
+	if err := os.WriteFile(filepath.Join(staging, "SKILL.md"), payload[0].Content, 0o644); err != nil {
+		return "", fmt.Errorf("skill 物化: 写 staging SKILL.md 失败: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, forgeMarker),
+		[]byte(markerContent(s.ID, addRuntime(owners, runtime))), 0o644); err != nil {
+		return "", fmt.Errorf("skill 物化: 写 staging 归属标记失败: %w", err)
+	}
+	prov := Provenance{
+		Version: provenanceVersion, SkillID: s.ID, Runtime: runtime, Format: format,
+		Hash: hashPayload(payload), Bytes: payloadBytes(content), WrittenAt: time.Now().UTC(),
+	}
+	if err := WriteProvenance(staging, prov); err != nil {
+		return "", err
+	}
+	// 自校验：刚写完的 staging 重算摘要必须等于记录的摘要（等于把"我以为我写了什么"变成可判定事实；
+	// 这一步还能顺带拦住"写入路径其实是个软链"这类意外）。
+	got, err := ComputeDirHash(staging)
+	if err != nil {
+		return "", err
+	}
+	if got != prov.Hash {
+		return "", &HashMismatchError{Expected: prov.Hash, Actual: got}
+	}
+
+	if err := replaceDir(staging, dir); err != nil {
+		return "", err
+	}
+	committed = true
+	return filepath.Join(dir, "SKILL.md"), nil
+}
+
+// ensureReplaceableDir 判定物化目标是否可写：
+//   - 不存在（或空路径）→ 可以；
+//   - 存在且是目录且带 `.forge-managed` 标记 → 平台自有，可以替换；
+//   - 存在但**不是**目录 / 没有归属标记 → 拒绝（别人的东西，平台不动；错误里给出去路）。
+func ensureReplaceableDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("skill 物化: 检查目标目录 %s 失败: %w", dir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("skill 物化: 目标 %s 是软链（拒绝对软链路径写入：链接目标可能在物化根之外）", dir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("skill 物化: 目标 %s 已存在且不是目录（平台不覆盖非自有内容）", dir)
+	}
+	if _, _, ok := readMarker(filepath.Join(dir, forgeMarker)); !ok {
+		return fmt.Errorf("skill 物化: 目标目录 %s 已存在但没有 %s 归属标记（疑似用户自有/他方安装的内容）——"+
+			"平台不覆盖它：改名或移走该目录，或换一个物化根", dir, forgeMarker)
+	}
+	return nil
+}
+
+// replaceDir 用 staging 原子替换 dir（旧目录先挪开，换名成功后再删；换名失败则原样放回）。
+//
+// 为什么不能直接 rename 到已存在的目录：POSIX rename 要求目标为空目录，非空即 ENOTEMPTY。
+// 所以顺序是「挪开旧的 → 换入新的 → 删旧的」；中间任何一步失败都把旧的挪回来，
+// 保证「要么是旧产物、要么是新产物」，不会两者都没有。单操作者本地平台，不加锁。
+func replaceDir(staging, dir string) error {
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		if err := os.Rename(staging, dir); err != nil {
+			return fmt.Errorf("skill 物化: 换入新产物失败 %s → %s: %w", staging, dir, err)
+		}
+		return nil
+	}
+	backup := dir + ".forge-old"
+	_ = os.RemoveAll(backup) // 上次中断留下的残留
+	if err := os.Rename(dir, backup); err != nil {
+		return fmt.Errorf("skill 物化: 挪开旧产物失败 %s: %w", dir, err)
+	}
+	if err := os.Rename(staging, dir); err != nil {
+		// 换入失败：把旧产物放回原位（尽力而为，失败则报出两处路径）。
+		if rErr := os.Rename(backup, dir); rErr != nil {
+			return fmt.Errorf("skill 物化: 换入失败 %s 且旧产物回滚失败（旧产物在 %s）: %w", dir, backup, errors.Join(err, rErr))
+		}
+		return fmt.Errorf("skill 物化: 换入新产物失败 %s: %w", dir, err)
+	}
+	if err := os.RemoveAll(backup); err != nil {
+		slog.Warn("skill 物化: 清理旧产物失败（不影响新产物）", "backup", backup, "err", err)
+	}
+	return nil
 }
 
 // markerContent 生成归属标记内容：首行 skill id，第二行逗号分隔的 runtime 集合（空 = 单 root 兼容路径）。
@@ -243,7 +350,11 @@ func readMarker(path string) (skillID string, owners []string, ok bool) {
 // runtime=="" 只校验「标记存在 + 内容一致」（单 root 兼容路径不登记归属方）；
 // runtime!="" 还要求归属集合含该 runtime——否则本次投影要补登记（共享 root 下各 runtime 各自登记一次，
 // 登记完成后即幂等，不会互相改写）。
-func skillUpToDate(dir, content, runtime string) bool {
+//
+// §13.4 S2 起还要求**摘要自洽**：sidecar 在且记的是同一个 skill、记录摘要 == 期望载荷摘要、
+// 磁盘实测摘要 == 记录摘要。只比 SKILL.md 内容是不够的——多塞一个文件、改权限、把 SKILL.md 换成软链，
+// 内容比对全都看不出来，而摘要全都看得出来。任一不符 → 判为"需要重校"，下一次重校即修复。
+func skillUpToDate(dir string, s Skill, runtime, content, format string) bool {
 	_, owners, ok := readMarker(filepath.Join(dir, forgeMarker))
 	if !ok {
 		return false
@@ -252,7 +363,26 @@ func skillUpToDate(dir, content, runtime string) bool {
 		return false
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
-	return err == nil && string(b) == content
+	if err != nil || string(b) != content {
+		return false
+	}
+	p, err := ReadProvenance(dir)
+	if err != nil {
+		return false // 无 sidecar（老版本产物）→ 重校升级一次
+	}
+	// SkillID 必须对得上（目录名 X 里躺着 Y 的摘要 = 真实的不一致）；Runtime/Format 只作审计
+	// 记录**不参与判定**——共享 root 下同一个目录会被多个 runtime 各投影一次，最后写入者是谁
+	// 无关紧要（归属集合由 `.forge-managed` 标记维护，内容一致性由摘要维护）。若把它们纳入判定，
+	// 共享 root 的两个 runtime 会互相把对方写的产物判成"过期"而反复重写（幂等性丢失）。
+	if p.SkillID != s.ID {
+		return false
+	}
+	expected := PayloadHash(content)
+	if p.Hash != expected {
+		return false
+	}
+	actual, err := ComputeDirHash(dir)
+	return err == nil && actual == expected
 }
 
 // ReconcileSkills 单 root 兼容路径（runtime==""）：root 与全量注册表一致。
@@ -273,20 +403,28 @@ func ReconcileSkillsFor(root, runtime string, current []Skill) (written, removed
 	if root == "" {
 		return 0, 0, nil
 	}
+	// 禁用的 skill 不进「本次投影集合」：既不会被写，已物化的副本还会在下面的删除联动里被摘掉
+	// （标记目录 + 不在集合 → 删）——「关掉一个技能」在 runtime 目录里是**撤回**，不是留个空壳。
 	currentIDs := make(map[string]bool, len(current))
 	for _, sk := range current {
+		if !sk.IsEnabled() {
+			continue
+		}
 		if _, _, ok := materializedContentFor(sk, runtime); !ok {
 			continue
 		}
 		currentIDs[sk.ID] = true
 	}
 	for _, sk := range current {
-		content, _, ok := materializedContentFor(sk, runtime)
+		if !sk.IsEnabled() {
+			continue
+		}
+		content, format, ok := materializedContentFor(sk, runtime)
 		if !ok {
 			continue
 		}
 		dir := filepath.Join(root, sk.ID)
-		if skillUpToDate(dir, content, runtime) {
+		if skillUpToDate(dir, sk, runtime, content, format) {
 			continue
 		}
 		if _, mErr := MaterializeSkillFor(root, runtime, sk); mErr != nil {
@@ -303,6 +441,20 @@ func ReconcileSkillsFor(root, runtime string, current []Skill) (written, removed
 		return written, 0, fmt.Errorf("skill 物化: 扫描 root 失败 %s: %w", root, rErr)
 	}
 	for _, e := range entries {
+		// 平台保留名：staging 临时目录与替换时的旧产物备份。崩溃/断电可能把它们留下，
+		// 这里做一次清扫（它们只在物化根里出现，且**只有平台会造这种名字**，见 replaceDir）。
+		// 不清扫的话：一个失败的替换会在 root 里永久躺一个 `.forge-old`（它没有归属标记，
+		// 删除联动认不出来，永远没人管）。
+		if isStagingName(e.Name()) {
+			if e.IsDir() {
+				if rmErr := os.RemoveAll(filepath.Join(root, e.Name())); rmErr != nil {
+					slog.Warn("skill 物化: 清理 staging 残留失败", "dir", e.Name(), "err", rmErr)
+				} else {
+					slog.Info("skill 物化: 清理 staging 残留", "dir", e.Name())
+				}
+			}
+			continue
+		}
 		if !e.IsDir() || currentIDs[e.Name()] {
 			continue
 		}
@@ -353,6 +505,24 @@ func materializedContentFor(s Skill, runtime string) (content, format string, ok
 		}
 	}
 	return "", "", false
+}
+
+// MaterializedContentFor 导出包装：报告该 skill 在该 runtime 下会物化成什么（ok=false = 物化不出来）。
+// 只做"应该写成什么"的计算，不碰磁盘——审计视图与重校判定共用同一份逻辑，避免两处漂移。
+func MaterializedContentFor(s Skill, runtime string) (content, format string, ok bool) {
+	return materializedContentFor(s, runtime)
+}
+
+// ManagedDir 报告目录是否由本平台物化（带归属标记）及登记的 runtime 集合。
+func ManagedDir(dir string) (owners []string, managed bool) {
+	_, owners, ok := readMarker(filepath.Join(dir, forgeMarker))
+	return owners, ok
+}
+
+// isStagingName 报告目录名是否为平台保留的临时名（staging 目录 / 旧产物备份）。
+// 这两个前缀是**平台保留名**：物化根里出现它们即视为平台自己的残留（可安全清扫）。
+func isStagingName(name string) bool {
+	return strings.HasPrefix(name, ".forge-stage-") || strings.HasSuffix(name, ".forge-old")
 }
 
 // hasMaterializableSource 报告 skill 是否含可物化 source（已实证 format；单 root 路径）。

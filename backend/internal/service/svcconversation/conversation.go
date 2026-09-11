@@ -28,11 +28,18 @@ type ConversationSvc interface {
 	// CreateConversation 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
 	CreateConversation(ctx context.Context, req dtoconversation.ConversationCreateReq) (*dtoconversation.ConversationCreateResp, error)
 
-	// PromptConversation 向既有会话追加一轮 prompt。
-	PromptConversation(ctx context.Context, id, prompt string) (*dtoconversation.ConversationPromptResp, error)
+	// PromptConversation 向既有会话追加一轮 prompt（delivery 见 PromptReq：忙时可直接执行 /
+	// 排队 / 取消当前轮后投递）。
+	PromptConversation(ctx context.Context, id string, req dtoconversation.PromptReq) (*dtoconversation.ConversationPromptResp, error)
 
 	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
 	CancelTurn(ctx context.Context, id string) error
+
+	// ListQueuedInputs 列出某会话待投递的排队输入（§6；冷挂载/刷新后重建队列视图）。
+	ListQueuedInputs(ctx context.Context, id string) ([]dtoconversation.QueuedInputResp, error)
+	// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）；返回是否存在待投递项被撤下
+	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
+	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
 
 	// ConversationHistory 返回会话的事件历史（sqlite 模式读 events 表，内存模式回放 eventbus；
 	// after（向后）/before（向前）互斥游标 + limit 分页）。
