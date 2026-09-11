@@ -227,6 +227,8 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | POST | `/conversations/:id/permission` | 权限决策 `{call_id, allowed, option_id?, always?}`（拒绝也透传 option_id/always） |
 | GET | `/conversations/:id/permissions/memories` | 会话级权限记忆（始终允许+始终拒绝，`{title,kind,decision,since}`；旧 `/permissions/always` 为兼容别名） |
 | POST | `/conversations/:id/permissions/memories/revoke` | 撤销权限记忆 `{title, kind}`；两者均空 = 一键撤销全部（旧 `/permissions/always/revoke` 为兼容别名） |
+| GET | `/conversations/:id/permissions/always` | **兼容别名**，等价 `/conversations/:id/permissions/memories`（历史客户端/脚本在用，响应逐字段一致） |
+| POST | `/conversations/:id/permissions/always/revoke` | **兼容别名**，等价 `/conversations/:id/permissions/memories/revoke`（请求体与行为一致） |
 | GET | `/conversations/:id/elicitations` | 挂起结构化提问列表（表单 schema / URL） |
 | POST | `/conversations/:id/elicitation` | 结构化提问决策 `{elicitation_id, action, content?}` |
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`） |

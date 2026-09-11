@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -229,9 +230,15 @@ func repoFile(t *testing.T, name string) string {
 	return ""
 }
 
-// TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」里出现的每条
-// `/v1/forge` 路由（表格与正文反引号内）都必须真实注册；反之，README 声明的路径不得是历史名
-// （P0 把 /sessions 改名为 /conversations 后曾长期漂移）。新增/改名路由若忘改文档即红。
+// TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」与真实路由表**双向**一致。
+//
+//   - README → router：README 里出现的每条 `/v1/forge` 路由（表格与正文反引号内）都必须真实注册。
+//     抓得住改名/删除（P0 把 /sessions 改名为 /conversations 后曾长期漂移），也连带锁住 README
+//     不再引用历史名。
+//   - router → README：每条注册的 `/v1/forge` 路由都必须在 README 出现。**这一向曾经缺失**，
+//     后果是新增端点可以不带文档静默进主干（只有改名才红）。
+//
+// 两个方向都指向同一条约定：README 的接口摘要是路由契约，改路由与改文档必须同一次提交。
 func TestReadmeRoutesMatchRouter(t *testing.T) {
 	engine := newEngine()
 	registered := map[string]string{} // "METHOD /path" → 路径
@@ -289,6 +296,22 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	// 反向：/sessions 历史名不得再出现在 README 的路由语境里。
 	if strings.Contains(string(readme), "/sessions/") || strings.Contains(string(readme), "`/sessions`") {
 		t.Error("README 仍含历史路由 /sessions（应为 /conversations）")
+	}
+	// 反向（router → README）：每条注册的 /v1/forge 路由都必须在 README 出现。
+	//
+	// 上面那条只保证 README 不撒谎，抓得到改名/删除（README 引用的路径没注册）；但抓不到
+	// **新增**——端点悄悄上线、README 只字未提，守卫照样绿。补上这一向才是双向契约。
+	// 兼容别名同样算端点（历史上 `/permissions/always` 两个别名正是靠这条才被写进文档）。
+	var undocumented []string
+	for key, path := range registered {
+		if !seen[strings.TrimPrefix(path, "/v1/forge")] {
+			undocumented = append(undocumented, key)
+		}
+	}
+	if len(undocumented) > 0 {
+		sort.Strings(undocumented)
+		t.Errorf("注册了未写进 README 的路由 %d 条——README「控制面接口摘要」是本项目的路由契约，新增端点必须同表补齐：\n  %s",
+			len(undocumented), strings.Join(undocumented, "\n  "))
 	}
 	t.Logf("README 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
 }
