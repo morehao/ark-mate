@@ -17,7 +17,7 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 
 ## 错误码（唯一事实源 `backend/pkg/code`）
 
-- 信封 `code` 是**对外契约**：README「业务错误码」表 + 前端 `packages/types/src/response.ts` 的 `BizCode` 都按它断言，`TestReadmeCodesMatchRegistry` 守卫 README 表与 `pkg/code` 一致。**改码必须两处同步**；新增码只加常量 + 默认文案 + README 行。
+- 信封 `code` 是**对外契约**，三处必须同步：`pkg/code`（事实源：常量 + 默认文案）、README「业务错误码」表（文档）、前端 `packages/types/src/response.ts` 的 `BizCode`（消费方）。三条边都由守卫钉住——`TestReadmeCodesMatchRegistry`（pkg/code ↔ README）、`TestFrontendBizCodesMatchRegistry`（pkg/code ↔ 前端，**用 Go 读 TS 源码**，不引前端测试框架，忘记同步前端同样红）。新增一个码 = 加常量 + 默认文案 + README 行 + 前端常量。
 - 编号沿用既有 5 位 HTTP 语义码（`40000/40001/40101/40401/40501/40901/50000/50001/50201`），**不按 ark-iam 的 6 位领域段重编**——它们已经是对外契约。ark-iam 借的是结构（`code.go` 注册表 + 按领域分文件），不是编号。
 - `50000` 是**唯一兜底码**：任何未归类 error 经 `code.FromError` 出口都落成它。历史上有 `1`（控制器手写）与 `50000`（领域层）两个泛化码，已统一为 `50000`。
 - **控制器错误出口一律带码**：`gincontext.Fail(c, code.FromError(err))` 或 `code.Error(code.X, …)`，不得透传裸 `err`——gincontext 对不带 `gerror.Error` 的错误填 `code: -1`，客户端拿不到可判定的码。由 `TestControllerErrorExitsCarryCode` 静态守卫。
@@ -38,7 +38,7 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 
 ## 一致性守卫 / 测试约定
 
-- `TestReadmeRoutesMatchRouter`（`internal/router/router_test.go`）比对 README 反引号内 `/v1/forge` 路径与真实注册路由——**新增/改名路由必须同步 README 接口摘要**，否则测试红。README 里也不得再出现历史名 `/sessions`。
+- `TestReadmeRoutesMatchRouter`（`internal/router/router_test.go`）把 README 反引号内的 `/v1/forge` 路径与真实注册路由做**双向**比对：README 引用的路径必须注册（抓改名/删除），每条注册路由也必须在 README 出现（抓新增）。所以**改路由与改文档必须同一次提交**——新增端点不写文档同样红。因此没有豁免名单：**兼容别名也是端点，也要成行写进路由表**（`/permissions/always` 两个别名就是这么被补进文档的）。README 里也不得再出现历史名 `/sessions`。
 - 域事件 type 权威定义在 `backend/internal/manager/events.go`。
 - **连接拆除语义（`manager`，改动前先读 `disconnectConversation` 注释）**：连接断开只是连接事实，绝不等于轮次失败。主动拆除（`Close` 停机 / `stopAgent` / 空闲回收）在途轮次归 `interrupted`（可续聊重发）、空闲会话状态**原样保留**；只有对端或子进程意外断开才可能把在途轮次收成失败，空闲会话同样不被改写（只落 agent 诊断 `connection_lost`）。拆除原因由 `runtimeConn.intentional` 承载（`watchConn` 观察到对端结束 = 意外），断连时句柄摘除但会话记录不动——下次 prompt 经 `ensureConversation` 按 native resume / handoff memo 重建（ADR-4：执行可丢弃、会话平台拥有），**可续聊性只看会话是否存在**，上一轮的终态不是作废判据。
 - WS / REST 契约改动优先看 `internal/router/routes_*.go` 与 `internal/controller/ctr*`，测试多为走真实装配路径
@@ -60,4 +60,4 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 - 持久层实现：gorm（`pkg/dbclient` 装配 + `internal/model` 实体 + `internal/dao` 访问）。**SQLite 用自注册的纯 Go dialector**（`glebarez/sqlite`）——不要 import golib 的 `dbgorm/driver/sqlite`，它底层是 CGO 的 mattn/go-sqlite3，与本仓 `CGO_ENABLED=0` 单二进制构建冲突；且 `dbgorm.matchDialector` 遍历注册表 map，两个都能匹配 `sqlite://` 的 factory 会让匹配结果不确定。
 - **落库格式是硬契约**（`internal/store/format_test.go` 锁定）：时间列一律 TEXT + RFC3339Nano(UTC)，布尔列一律 INTEGER 0/1。两者都由 `internal/model` 的 serializer 保证——实体照常写 `time.Time`/`bool`，但**裸 SQL 的入参不经过 serializer**，时间要先用 `model.FormatTime` 格式化、布尔要用 `model.FlagValue` 转换。schema 仍由 `internal/store` 的自管迁移内核创建（不用 gorm AutoMigrate：它表达不了有序版本、版本拒绝启动与导入 staging 回滚）。
 - 持久层 `FORGE_STORE=sqlite|memory|auto`：make dev/server 默认 sqlite（库 `~/.forge/forge.db`）；sqlite 才有 runs 读模型与 `/usage/summary`（memory → 40501）。memory 模式以 transcript（`~/.forge/transcripts`）为事实源，`forge migrate` 幂等导入 sqlite。
-- 配置优先级：默认值 < `~/.forge/config/config.json` < `~/.forge/config/env` < 进程 `FORGE_*` < CLI flag；非法键名/取值启动即报错。`forge config --json` 可查最终值与来源。
+- 配置优先级：默认值 < `~/.forge/config/config.json` < `~/.forge/config/env` < 进程 `FORGE_*` < CLI flag；非法键名与非法取值启动即报错（枚举型键如 `native_permission`/`mcp_auto_probe` 都按 `Valid*Modes` 校验并报错）。**唯一例外是 `FORGE_STORE`**：非法/空值静默回落 `auto`，不报错（`materialize` 里的注释记为有意的历史语义——避免旧环境变量把 daemon 卡死）。`forge config --json` 可查最终值与来源。

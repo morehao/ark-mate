@@ -170,6 +170,63 @@ func TestReadmeCodesMatchRegistry(t *testing.T) {
 	}
 }
 
+// TestFrontendBizCodesMatchRegistry 前端 BizCode 常量表必须与 pkg/code 双向一致。
+//
+// 第三个同步点：码同时写在 pkg/code（事实源）、README（文档）、前端 response.ts（消费方）。
+// 前两者由 TestReadmeCodesMatchRegistry 钉住，前端此前只靠人工——而人工同步正是漂移的
+// 温床（前端原先只有 Success/Unauthorized 两个，其余 7 个码只能靠魔数比较）。
+// 用 Go 读 TypeScript 源码是刻意的：不引入前端测试框架，却让"改码忘记同步前端"当场变红。
+func TestFrontendBizCodesMatchRegistry(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "frontend", "packages", "types", "src", "response.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读前端 response.ts: %v", err)
+	}
+	src := string(raw)
+
+	// 只取 `export const BizCode = { ... } as const` 这一块，避免把文件里别的数字一起抓进来。
+	start := strings.Index(src, "export const BizCode = {")
+	if start < 0 {
+		t.Fatal("前端 response.ts 里找不到 `export const BizCode = {`（重命名了？守卫需要同步）")
+	}
+	end := strings.Index(src[start:], "} as const")
+	if end < 0 {
+		t.Fatal("前端 BizCode 块缺少结尾 `} as const`")
+	}
+	block := src[start : start+end]
+
+	// 匹配 `Name: 12345`（允许行内注释）。名字只用于报错信息，比对以数值为准。
+	entry := regexp.MustCompile(`(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*:\s*(\d+)\s*,`)
+	fe := map[int]string{}
+	for _, m := range entry.FindAllStringSubmatch(block, -1) {
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			t.Fatalf("解析前端码 %q: %v", m[2], err)
+		}
+		if prev, dup := fe[n]; dup {
+			t.Errorf("前端 BizCode 里 %d 出现两次（%s 与 %s）", n, prev, m[1])
+		}
+		fe[n] = m[1]
+	}
+	if len(fe) == 0 {
+		t.Fatal("前端 BizCode 未解析到任何常量（格式变了？）")
+	}
+
+	reg := map[int]bool{}
+	for _, c := range code.Codes() {
+		reg[c] = true
+		if _, ok := fe[c]; !ok {
+			t.Errorf("码 %d（%s）在 pkg/code 已声明但前端 BizCode 缺失——前端只能拿魔数比较", c, code.Message(c))
+		}
+	}
+	for n, name := range fe {
+		if !reg[n] {
+			t.Errorf("前端 BizCode.%s = %d，但 pkg/code 里没有这个码", name, n)
+		}
+	}
+}
+
 // codeTableSection 截取 README「### 业务错误码」到下一个二级/三级标题之间的正文。
 func codeTableSection(t *testing.T, readme string) string {
 	t.Helper()
