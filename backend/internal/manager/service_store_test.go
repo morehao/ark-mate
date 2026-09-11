@@ -2,12 +2,11 @@ package manager
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -17,15 +16,12 @@ import (
 //  3. 重启恢复：新 Service + 新 bus 从 DB 载入会话并把事件原样注入（PublishAt），
 //     旧游标可续传；后续新事件 seq 跨重启连续（不重叠、不倒退）。
 func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 
 	// —— 进程一：sqlite 模式活会话 ——
-	st1, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open store: %v", err)
-	}
+	st1 := testutil.OpenStore(t, dbPath)
 	bus1 := eventbus.New()
 	svc1 := NewService(reg, bus1)
 	svc1.EnableStore(st1)
@@ -53,10 +49,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	_ = st1.Close() // 释放文件句柄，模拟进程退出
 
 	// —— 进程二：重启恢复 ——
-	st2, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("reopen store: %v", err)
-	}
+	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
 	bus2 := eventbus.New()
 	svc2 := NewService(reg, bus2)
@@ -95,12 +88,9 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 // TestSQLiteRestoreAcrossConversations 恢复注入跨会话也必须全局 seq 升序
 // （防止 PublishAt 遇小号回退取号导致乱序/丢事件）。
 func TestSQLiteRestoreAcrossConversations(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open store: %v", err)
-	}
+	st := testutil.OpenStore(t, dbPath)
 	svc := NewService(runtime.NewRegistry(), nil)
 	svc.EnableStore(st)
 	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListConversations 按 updated_at 降序可能先 s-a 后 s-b）。
@@ -111,10 +101,7 @@ func TestSQLiteRestoreAcrossConversations(t *testing.T) {
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})
 	_ = st.Close()
 
-	st2, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
 	bus2 := eventbus.New()
 	svc2 := NewService(runtime.NewRegistry(), bus2)

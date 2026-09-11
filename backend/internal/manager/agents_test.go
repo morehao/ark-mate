@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -359,7 +360,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 // agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 turn 时整体拒绝且无副作用。
 func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
@@ -436,7 +437,7 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 // （credential_missing + 出路），不静默以「无密钥」姿态起进程；补齐 key 后放行。
 func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

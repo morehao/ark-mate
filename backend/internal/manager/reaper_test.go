@@ -1,24 +1,11 @@
 package manager
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
-
-// testReapHarness 组装编排器 + 空 Service（注册 agent-echo 供状态断言）。
-func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
-	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	svc := NewService(reg, nil)
-	_, _ = svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}})
-	o := NewOrchestrator(svc, reg)
-	t.Cleanup(o.Close)
-	return o, svc
-}
 
 // TestReapIdleOnceBasic 空闲超阈值且无会话/无 busy → 回收并置 stopped。
 func TestReapIdleOnceBasic(t *testing.T) {

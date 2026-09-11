@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -44,17 +43,6 @@ func (s *stubConversation) Prompt(ctx context.Context, _ string) (string, error)
 }
 
 func (s *stubConversation) Cancel(context.Context) error { return nil }
-
-// newTestRig 组装 svc+orch+bus（不拨真实连接）。
-func newTestRig(t *testing.T) (*Service, *Orchestrator, *eventbus.Bus) {
-	t.Helper()
-	reg := runtime.NewRegistry()
-	bus := eventbus.New()
-	svc := NewService(reg, bus)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
-	return svc, orch, bus
-}
 
 // feed 收集某聚合最多 want 个 bus 事件（超时 2s 防御）。
 func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {

@@ -3,17 +3,15 @@ package manager
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtousage"
 	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/object/objusage"
-	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -21,11 +19,8 @@ import (
 // store 启用时聚合 runs（计数/时长）+ 会话用量快照；参数校验与降级路径明确。
 func TestUsageSummaryService(t *testing.T) {
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(filepath.Join(t.TempDir(), "forge.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	reg := testutil.EchoRegistry()
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)

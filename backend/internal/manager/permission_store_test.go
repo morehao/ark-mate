@@ -2,13 +2,11 @@ package manager
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // TestPermissionMemoriesPersistAcrossRestart 验证 P1 权限记忆持久化不变量：
@@ -17,15 +15,12 @@ import (
 //  3. 重启恢复：新 Orchestrator.RestoreMemoriesFromStore 从表装载，AutoDecision 双侧语义不丢
 //     （reject 记忆 → 直接 Rejected，allow 记忆 → 直接 Allowed），跨重启可追溯。
 func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "forge.db")
+	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 
 	// —— 进程一：sqlite 模式记录双侧记忆 ——
-	st1, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := NewService(reg, nil)
 	svc1.EnableStore(st1)
 	orch1 := NewOrchestrator(svc1, reg)
@@ -64,10 +59,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	_ = st1.Close()
 
 	// —— 进程二：重启恢复 ——
-	st2, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	st2 := testutil.OpenStore(t, dbPath)
 	defer st2.Close()
 	svc2 := NewService(reg, nil)
 	svc2.EnableStore(st2)

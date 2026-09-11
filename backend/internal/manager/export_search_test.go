@@ -13,26 +13,9 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoexport"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
-
-// newSearchRig 建一个带 sqlite 持久层的服务（消息搜索/导出的 sqlite 数据面）。
-func newSearchRig(t *testing.T) (*Service, *store.Store) {
-	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
-	st, err := store.Open(filepath.Join(t.TempDir(), "forge.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-	svc := NewService(reg, eventbus.New())
-	svc.EnableStore(st)
-	orch := NewOrchestrator(svc, reg)
-	t.Cleanup(orch.Close)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"echo"}}
-	return svc, st
-}
 
 // seedConversation 落一个会话 + 若干事件（含 messages 物化行）。
 func seedSearchConversation(t *testing.T, svc *Service, st *store.Store, id, title string, texts ...[2]string) {
@@ -117,7 +100,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// memory 模式（无 store）：回扫 transcript，source 明确标注 transcript。
 	dir := t.TempDir()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	svc.SetTranscriptDir(dir)
 	orch := NewOrchestrator(svc, reg)

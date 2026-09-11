@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -14,7 +15,7 @@ import (
 // catalogRig 组装带 echo runtime 的 svc+orch（不拨真实连接；会话由桩注入）。
 func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	orch := NewOrchestrator(svc, reg)

@@ -15,6 +15,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -146,10 +147,7 @@ func splitNonEmpty(s string) []string {
 // TestConversationHistoryStoreBacked sqlite 模式（C2）：历史读 events 表而非 eventbus——
 // 双向游标（after/before）、has_more 沿方向、首尾 seq、载荷解码、跨会话隔离。
 func TestConversationHistoryStoreBacked(t *testing.T) {
-	st, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
+	st := testutil.OpenStore(t, ":memory:")
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
 	if err := st.UpsertConversation(context.Background(), store.Conversation{

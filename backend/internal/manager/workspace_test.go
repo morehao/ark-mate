@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
@@ -190,7 +191,7 @@ func discardTempWorkspace(t *testing.T, res WorkspaceResolution) {
 // workspaceTestSvc 播一个 echo runtime 上的 agent（不拨真实子进程：本轮只验证解析与校验顺序）。
 func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "echo", Name: "Echo"})
+	reg := testutil.EchoRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
