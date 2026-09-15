@@ -63,7 +63,10 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	r.MaxMultipartMemory = 8 << 20
 
 	// golib v1.32.14 起 versions 由可变参数改为切片，并默认挂载 ginmiddleware.Trace()
-	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）。
+	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）；
+	// v1.32.16 起它默认挂载的 AccessLog 还会按字段名脱敏 query/body 内容
+	// （*token*/*secret*/*password*… → ***），这对本仓尤其有用：WS 因浏览器无法设
+	// 握手头而用 `?token=` 传令牌（见 controller/ctrws），脱敏后该值不再进访问日志。
 	groups := ginserver.NewRouterGroups(r, AppName, []ginserver.VersionGroup{{
 		Version: ginserver.ApiVersionV1,
 	}})

@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/golib/biz/gcontext"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -29,17 +28,17 @@ func isAPIPath(p string) bool { return strings.HasPrefix(p, apiPrefix) }
 //   - **响应体仍是标准信封**，且 code 取自 pkg/code 注册表。此前这里手写的是
 //     `{"code":404,"msg":"not found"}`：404 既不在注册表里、也不在任何对外码表里
 //     （契约里"资源不存在"是 40401），客户端拿不到可判定的取值；而且缺 requestID 与 data，
-//     是全部错误出口里唯一形状不完整的一处。用 gcontext.ResponseRender 构造，
-//     与 gincontext.Fail 的信封逐字段同构。
+//     是全部错误出口里唯一形状不完整的一处。
+//
+//     现在改用 `gincontext.FailWithStatus`（golib v1.32.16 起提供）：它把「按 HTTP 语义
+//     换状态码」与「构造信封」解耦，信封字段、msg 取值与 `code: -1` 兜底规则都由 golib
+//     单点给出。本仓不再自己拼 `gcontext.ResponseRender`——那样等于把信封约定复制一份，
+//     golib 改了我们不会跟着变，形成静默分歧。
 //
 //   - **requestID 如实留空**而不是现造一个：设置它的 ginmiddleware.AccessLog 挂在版本分组上
 //     （group.Use），而 NoRoute 挂在引擎上，分组中间件对未命中路由不会执行。既然没有对应的
 //     服务端访问日志可关联，编一个 id 只会误导排查。
 func writeNotFound(c *gin.Context) {
-	r := gcontext.NewResponseRender()
-	r.SetCode(code.NotFound)
-	r.SetRequestID(gincontext.GetRequestID(c))
-	r.SetMsg("接口不存在: " + c.Request.Method + " " + c.Request.URL.Path)
-	r.SetData(gin.H{})
-	c.JSON(http.StatusNotFound, r)
+	gincontext.FailWithStatus(c, http.StatusNotFound,
+		code.Errorf(code.NotFound, "接口不存在: %s %s", c.Request.Method, c.Request.URL.Path))
 }

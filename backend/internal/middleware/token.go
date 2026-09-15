@@ -35,11 +35,12 @@ func Token(token string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gincontext.DtoRender{
-			Code:      code.Unauthorized,
-			RequestID: gincontext.GetRequestID(c),
-			Msg:       "未授权：缺少或无效的访问令牌（Authorization: Bearer <FORGE_TOKEN> 或 ?token=）",
-			Data:      gin.H{},
-		})
+		// 401 需要一个非 200 的 HTTP 状态（客户端/代理不经解析信封即可识别未授权），
+		// 但信封本身仍由 golib 单点构造：Abort 负责中断后续 handler，FailWithStatus
+		// 负责「换状态码 + 拼信封」（v1.32.16 起提供）。此前手拼 gincontext.DtoRender
+		// 等于复制一份信封约定，golib 调整字段时本处不会跟着变。
+		c.Abort()
+		gincontext.FailWithStatus(c, http.StatusUnauthorized,
+			code.Error(code.Unauthorized, "未授权：缺少或无效的访问令牌（Authorization: Bearer <FORGE_TOKEN> 或 ?token=）"))
 	}
 }
