@@ -95,7 +95,8 @@ make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → g
 **单操作员令牌（A6）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的 `token`）后，除
 `/health` 外的**全部** `/v1/forge` 路由都要求 `Authorization: Bearer <token>`；WS 因浏览器无法
 设置握手头，接受 `?token=<token>`。面板顶栏「令牌」按钮可填写/清除（只存本浏览器 localStorage），
-收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码（`cf…3a（14 字符）`）。
+收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码（`cf…3a（14 字符）`），
+服务端访问日志里 `?token=` 的值被脱敏为 `***`（反代/网关自己的日志不含此保证）。
 未设置令牌 = 历史行为（不鉴权，仅建议回环使用）。
 
 浏览器打开 <http://127.0.0.1:10001>：

@@ -194,6 +194,10 @@ curl -H "Authorization: Bearer $FORGE_TOKEN" http://127.0.0.1:10001/v1/forge/age
 - WS `/v1/forge/ws/events`：浏览器无法为握手设置请求头，故接受 `?token=<token>`。
 - `/health` 保持免鉴权（容器编排/反代 liveness 探针）。
 - 恒定时间比较；令牌不出现在日志里，`forge config` 只打印掩码。
+  这里的「不出现在日志里」由 golib 的访问日志默认脱敏保证（`ginmiddleware.AccessLog`
+  自 golib v1.32.16 起按字段名脱敏 `*token*`/`*secret*`/`*password*` 等，`?token=` 落进
+  日志时值为 `***`）。**反代/网关自身的访问日志不在其内**，对外暴露时仍需在那一层
+  自行处理查询串。
 - 面板：顶栏「令牌」按钮填写（localStorage，仅本浏览器）；401 时自动弹出提示。
 - 这是**单操作员**令牌，不是多用户/RBAC：无用户、无角色、无审计区分。多人共用请置于
   带认证的反向代理之后（或等后续切片）。

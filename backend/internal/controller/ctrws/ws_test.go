@@ -3,6 +3,7 @@ package ctrws_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/controller/ctrws"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/golib/biz/gcontext"
+	"github.com/morehao/golib/biz/gmiddleware/ginmiddleware"
 )
 
 // frame 是测试用 WS 帧（松散解析关键字段）。
@@ -31,10 +34,23 @@ type frame struct {
 // startWS 起测试服务并拨号（coder/websocket），返回连接与上下文辅助。
 func startWS(t *testing.T, bus *eventbus.Bus) *websocket.Conn {
 	t.Helper()
+	return dialWS(t, newWSEngine(bus))
+}
+
+// newWSEngine 装配一个只挂 WS 处理器的引擎；mws 可选，但必须在这里传入——
+// gin 在注册路由时就冻结 handler 链，注册之后再 Use 不会作用于已注册路由。
+func newWSEngine(bus *eventbus.Bus, mws ...gin.HandlerFunc) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	h := ctrws.NewWSCtr(bus)
 	eng := gin.New()
+	eng.Use(mws...)
+	h := ctrws.NewWSCtr(bus)
 	eng.GET("/ws/events", h.Handle)
+	return eng
+}
+
+// dialWS 起 httptest 服务并完成一次 WS 握手，失败即 Fatal。
+func dialWS(t *testing.T, eng *gin.Engine) *websocket.Conn {
+	t.Helper()
 	srv := httptest.NewServer(eng)
 	t.Cleanup(srv.Close)
 
@@ -202,5 +218,39 @@ func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
 	}
 	if seqs[0] != 3 || seqs[1] != 4 {
 		t.Fatalf("水位后重放序号不符: %v", seqs)
+	}
+}
+
+// TestWSAcceptSurvivesAccessLogWriterWrap 守护「访问日志包装 ctx.Writer」与本包 WS 升级的相容性。
+//
+// golib v1.32.16 起默认挂载的 ginmiddleware.AccessLog 会用 ResponseCaptureWriter 包一层
+// ctx.Writer（用于有界采集响应体），而 WebSocket 握手依赖 `http.Hijacker`（coder/websocket
+// 直接对传入的 ResponseWriter 做类型断言）。包装类型只靠内嵌 gin.ResponseWriter 透出
+// Hijack —— 一旦这层关系变了（换实现、多包一层、改走 Unwrap），升级会直接失败，
+// 而 ctrws 自身单测不带中间件、router 侧又只断言「非升级请求 426」，两条都发现不了。
+// 因此这里显式挂上真实 AccessLog 跑一次 ping/pong，把回归钉在传输层。
+func TestWSAcceptSurvivesAccessLogWriterWrap(t *testing.T) {
+	bus := eventbus.New()
+	eng := newWSEngine(bus, ginmiddleware.AccessLog())
+
+	// 前提校验：先确认 AccessLog 真的在链上。否则「WS 能连上」可能只是因为中间件
+	// 压根没跑，这条测试就成了空转（AccessLog 会在入口 Set(KeyUrlFull)，据此判定）。
+	probeOK := false
+	eng.GET("/probe", func(c *gin.Context) {
+		_, probeOK = c.Get(gcontext.KeyUrlFull)
+		c.Status(http.StatusNoContent)
+	})
+	probe := httptest.NewRecorder()
+	eng.ServeHTTP(probe, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	if !probeOK {
+		t.Fatal("AccessLog 未生效：本测试的前提不成立，WS 断言等于空转")
+	}
+
+	conn := dialWS(t, eng)
+	wsWrite(t, conn, map[string]any{"action": "ping"})
+	var pong frame
+	wsRead(t, conn, &pong)
+	if pong.Type != "pong" {
+		t.Fatalf("被访问日志包装后 WS 仍应可用，期望 pong，got %+v", pong)
 	}
 }
