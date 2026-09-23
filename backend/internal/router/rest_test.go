@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/dto/dtoexport"
@@ -72,6 +73,15 @@ type stubSvc struct {
 	exportReq  dtoexport.ExportReq
 	exportResp *dtoexport.ExportResp
 	exportErr  error
+
+	// automation 面（M4-5）桩状态
+	automations    []dtoautomation.AutomationResp
+	autoErr        error
+	autoAction     string // 最近一次写面动作（create/update/delete/run）
+	autoID         string // 最近一次写面/取单条的 id
+	autoGot        string // 最近一次 GetAutomation/ListAutomationRuns 的 id
+	autoReq        dtoautomation.AutomationWriteReq
+	autoPreviewReq dtoautomation.AutomationPreviewReq
 
 	agentErr        error                                   // P2 管理面桩错误注入
 	resolvePermErr  *gerror.Error                           // 权限决策桩错误注入

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/automation"
 	"github.com/morehao/ark-forge/pkg/code"
@@ -41,25 +42,6 @@ type automationRec struct {
 	// loadErr 装载失败原因（**留在注册表里**而不是静默跳过：用户写了文件却在面板上看不见，
 	// 且不知道为什么，是最难排查的一类投诉）。
 	loadErr string
-}
-
-// AutomationView 列的对外视图（DTO 由 ctrautomation 映射；管理器不依赖传输层类型）。
-type AutomationView struct {
-	ID                  string              `json:"id"`
-	Name                string              `json:"name"`
-	Enabled             bool                `json:"enabled"`
-	State               string              `json:"state"`
-	Schedule            automation.Schedule `json:"schedule"`
-	Target              automation.Target   `json:"target"`
-	MaxRunDuration      string              `json:"max_run_duration,omitempty"`
-	NextDueAt           string              `json:"next_due_at,omitempty"`
-	LastFiredAt         string              `json:"last_fired_at,omitempty"`
-	LastConversationID  string              `json:"last_conversation_id,omitempty"`
-	LastStatus          string              `json:"last_status,omitempty"`
-	LastReason          string              `json:"last_reason,omitempty"`
-	ConsecutiveFailures int                 `json:"consecutive_failures,omitempty"`
-	SourceFile          string              `json:"source_file,omitempty"`
-	Error               string              `json:"error,omitempty"`
 }
 
 // automationDirFor 取自动化定义目录；未配置 → 显式报错（不静默"内存生效、盘上没留痕"）。
@@ -168,6 +150,23 @@ func (r *automationRec) applySchedule(now time.Time) {
 	r.nextDue = occ.At
 }
 
+// patchID 从 patch 的 `id` 值取字符串：写面（原文 JSON 对象）给的是 json.RawMessage，
+// 测试与调度器给的是 string。两种都认，且类型不符要能判出来。
+func patchID(v any) (string, bool) {
+	switch t := v.(type) {
+	case string:
+		return t, true
+	case json.RawMessage:
+		var s string
+		if err := json.Unmarshal(t, &s); err != nil {
+			return "", false
+		}
+		return s, true
+	default:
+		return "", false
+	}
+}
+
 // errText 把任意错误压成一句人话（装载告警、触发失败原因都要能直接显示在面板上）。
 //
 // 三层来源都要照顾：acl 带码错误（给 Details，那才是人话）、经 `code.FromError` 归一过的
@@ -224,74 +223,72 @@ func asACLError(err error, dst **acl.Error) bool {
 	return false
 }
 
-// CreateAutomation 新建定义（id 已存在 → 40901 automation_exists，**绝不覆盖**）。
+// writeAutomation 写面的**唯一入口**（新建与覆盖写都走这里；端口形态见 automation_rest.go）。
 //
-// `patch` 是**定义键的完整集合**（控制器从 DTO 拼好）。落盘前先按合并结果校验：
-// 校验不过 → 零字节落盘（与能力写面同一条纪律："被拒的定义零字节落盘"）。
-func (s *Service) CreateAutomation(id string, patch map[string]any) (AutomationView, error) {
-	return s.writeAutomation(id, patch, true)
-}
-
-// UpdateAutomation 覆盖写（只改 patch 里出现的键；未出现的键保留原值 —— C9 第 2 步）。
-func (s *Service) UpdateAutomation(id string, patch map[string]any) (AutomationView, error) {
-	return s.writeAutomation(id, patch, false)
-}
-
-func (s *Service) writeAutomation(id string, patch map[string]any, create bool) (AutomationView, error) {
+// `create=true`：id 已存在 → 40901 `automation_exists`，**绝不覆盖**。
+// `patch` 是"这次要改的键"（覆盖写只改出现过的键 —— C9 第 2 步）；落盘前先按**合并结果**校验，
+// 校验不过 → **零字节落盘**（与能力写面同一条纪律）。
+func (s *Service) writeAutomation(id string, patch map[string]any, create bool) (dtoautomation.AutomationResp, error) {
 	dir, err := s.automationDirFor("automation 的增删改")
 	if err != nil {
-		return AutomationView{}, err
+		return dtoautomation.AutomationResp{}, err
 	}
 	path, err := definitionPath(dir, "automation", id)
 	if err != nil {
-		return AutomationView{}, err
+		return dtoautomation.AutomationResp{}, err
 	}
 	_, statErr := os.Stat(path)
 	exists := statErr == nil
 	switch {
 	case create && exists:
-		return AutomationView{}, acl.NewError(acl.ClassLimit, "automation_exists",
+		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassLimit, "automation_exists",
 			fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", id), nil)
 	case !create && !exists:
-		return AutomationView{}, acl.NewError(acl.ClassRequest, "automation_not_found",
+		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassRequest, "automation_not_found",
 			fmt.Sprintf("automation %s 不存在（列表刷新一下；平台不会\"顺便新建\"）", id), nil)
 	}
 	// 平台独占键（认领游标/运行史）不得由用户写面写入：`last_fired_at` 就是"这次触发过没有"
 	// 的判据，能写它就能让同一次触发重放（重复跑有副作用的 prompt），或把它永久卡住不跑。
 	for k := range patch {
 		if automation.IsReservedKey(k) {
-			return AutomationView{}, acl.NewError(acl.ClassRequest, "invalid_param",
+			return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassRequest, "invalid_param",
 				fmt.Sprintf("键 %q 由平台写回（运行态），不可通过接口写入", k), nil)
 		}
 	}
 	// 定义文件里 `id` 是路径的事实：body 与路径不一致 → 参数错（而不是悄悄按路径改掉 body）。
-	if v, ok := patch["id"]; ok {
-		if s, _ := v.(string); s != "" && s != id {
-			return AutomationView{}, acl.NewError(acl.ClassRequest, "invalid_param",
+	// 写面给进来的 id 是 `json.RawMessage`（原文对象），测试与调度器给的是 string，两种都要认；
+	// 类型不符要报错，而不是当成"没传 id"（那会让 body 里的脏 id 悄悄落盘）。
+	if v, ok := patch["id"]; ok && v != nil {
+		s, okStr := patchID(v)
+		if !okStr {
+			return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassRequest, "invalid_param",
+				`字段 "id" 须为字符串`, nil)
+		}
+		if s != "" && s != id {
+			return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassRequest, "invalid_param",
 				fmt.Sprintf("路径 id %q 与 body id %q 不一致", id, s), nil)
 		}
-	} else {
-		patch["id"] = id
 	}
+	patch["id"] = id
 	// 合并后的**确切字节**先解成强类型再校验：PUT 的语义是"这几个键置成这些值"，
 	// 所以必须校验**合并结果**（而不是只校验 patch 里的键）。
 	draft, err := openDefinition(dir, "automation", id, patch)
 	if err != nil {
-		return AutomationView{}, err
+		return dtoautomation.AutomationResp{}, err
 	}
 	merged, err := draft.Merged()
 	if err != nil {
-		return AutomationView{}, acl.NewError(acl.ClassService, "definition_write_failed",
+		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
 	}
 	var def automation.Automation
 	if err := json.Unmarshal(merged, &def); err != nil {
-		return AutomationView{}, acl.NewError(acl.ClassRequest, "definition_invalid",
+		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassRequest, "definition_invalid",
 			fmt.Sprintf("automation %s 合并后不是合法定义：%v", id, err), err)
 	}
 	def.Schedule.Normalize()
 	if err := def.Validate(); err != nil {
-		return AutomationView{}, err
+		return dtoautomation.AutomationResp{}, err
 	}
 	// 规范化结果要**落进文件**：否则"文件里写的"与"调度实际用的"是两个值，
 	// 而 weekly 的 days_of_week 的去重升序正是靠这一步才看得见（C9 只改必要的键：
@@ -306,14 +303,14 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 				}
 				sch["days_of_week"] = days
 				if err := draft.df.Set("schedule", sch); err != nil {
-					return AutomationView{}, acl.NewError(acl.ClassService, "definition_write_failed",
+					return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 						fmt.Sprintf("写入 automation %s 的规范化 days_of_week 失败：%v", id, err), err)
 				}
 			}
 		}
 	}
 	if err := saveDefinition(draft); err != nil {
-		return AutomationView{}, err
+		return dtoautomation.AutomationResp{}, err
 	}
 	def.State = automation.NormalizeState(def.State)
 	rec := &automationRec{def: def}
@@ -327,8 +324,8 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 	return rec.view(), nil
 }
 
-// DeleteAutomation 删定义文件 + 摘内存条目；幂等（本来就不存在 → deleted:false）。
-func (s *Service) DeleteAutomation(id string) (bool, error) {
+// DeleteAutomationByID 删定义文件 + 摘内存条目；幂等（本来就不存在 → deleted:false）。
+func (s *Service) DeleteAutomationByID(id string) (bool, error) {
 	dir, err := s.automationDirFor("automation 的删除")
 	if err != nil {
 		return false, err
@@ -344,24 +341,24 @@ func (s *Service) DeleteAutomation(id string) (bool, error) {
 }
 
 // ListAutomations 列出注册表（含装载失败的那些，带 `error` 字段），按 id 排序。
-func (s *Service) ListAutomations() []AutomationView {
+func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]AutomationView, 0, len(s.automations))
+	out := make([]dtoautomation.AutomationResp, 0, len(s.automations))
 	for _, rec := range s.automations {
 		out = append(out, rec.view())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return out, nil
 }
 
 // AutomationByID 取一条（含装载失败的那些）。
-func (s *Service) AutomationByID(id string) (AutomationView, bool) {
+func (s *Service) AutomationByID(id string) (dtoautomation.AutomationResp, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.automations[id]
 	if !ok {
-		return AutomationView{}, false
+		return dtoautomation.AutomationResp{}, false
 	}
 	return rec.view(), true
 }
@@ -448,8 +445,8 @@ func (s *Service) automationHasActiveRun(rec automationRec) bool {
 }
 
 // view 把记录投影成对外视图（时间一律 RFC3339 UTC 文本，与其余接口同格式）。
-func (r *automationRec) view() AutomationView {
-	v := AutomationView{
+func (r *automationRec) view() dtoautomation.AutomationResp {
+	v := dtoautomation.AutomationResp{
 		ID:                  r.def.ID,
 		Name:                r.def.Name,
 		Enabled:             r.def.Enabled,
@@ -462,6 +459,7 @@ func (r *automationRec) view() AutomationView {
 		LastReason:          r.def.LastReason,
 		ConsecutiveFailures: r.def.ConsecutiveFailures,
 		Error:               r.loadErr,
+		RecentRuns:          r.def.RecentRuns,
 	}
 	if !r.nextDue.IsZero() {
 		v.NextDueAt = r.nextDue.UTC().Format(time.RFC3339)

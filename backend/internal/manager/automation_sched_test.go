@@ -348,7 +348,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	}
 	// 反过来：用户手工把状态改回 active（"我想再试一次"）→ 平台会**再告诉他一次**
 	// "那一刻已经过去"，而不是默默不动（once 的语义是闹钟，过了就是过了）。
-	r.svc.UpdateAutomation("mig", map[string]any{"state": automation.StateActive})
+	r.svc.writeAutomation("mig", map[string]any{"state": automation.StateActive}, false)
 	r.svc.automationStartupPass()
 	if got := r.file(t, "mig"); got["state"] != automation.StateInactive || len(mustRuns(t, got)) != 2 {
 		t.Fatalf("改回 active 后应再次收敛到 inactive 并留痕: %v", got)
@@ -361,7 +361,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	r.writeDaily(t, "daily", "") // 从未跑过 → next_due 在未来（或今天 09:00）
 	before, _ := r.svc.AutomationByID("daily")
 
-	out, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out, err := r.svc.runAutomationNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("手动触发: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 		t.Fatalf("应有 1 条 manual 留痕: %+v", runs)
 	}
 	// 会话还在跑 → 再来一次手动触发必须 overlap（手动不等于可以并发）
-	out2, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out2, err := r.svc.runAutomationNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("第二次手动触发: %v", err)
 	}
@@ -389,13 +389,13 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 		t.Fatalf("上一次会话还在跑时手动触发应 overlap，got %s", out2.status)
 	}
 	// 未注册 → 40401；被停用 → 40001
-	if _, err := r.svc.RunAutomationNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
+	if _, err := r.svc.runAutomationNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
 		t.Fatalf("未知 id 应 automation_not_found，got %v", err)
 	}
-	if _, err := r.svc.UpdateAutomation("daily", map[string]any{"enabled": false}); err != nil {
+	if _, err := r.svc.writeAutomation("daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
-	if _, err := r.svc.RunAutomationNow(context.Background(), "daily"); errCode(err) != "automation_disabled" {
+	if _, err := r.svc.runAutomationNow(context.Background(), "daily"); errCode(err) != "automation_disabled" {
 		t.Fatalf("停用后手动触发应 automation_disabled，got %v", err)
 	}
 }
@@ -452,7 +452,7 @@ func TestAutomationConcurrentTriggersOnlyRunOnce(t *testing.T) {
 	wg.Add(3)
 	go func() { defer wg.Done(); r.svc.automationTick(context.Background(), now) }()
 	go func() { defer wg.Done(); r.svc.automationTick(context.Background(), now) }()
-	go func() { defer wg.Done(); _, _ = r.svc.RunAutomationNow(context.Background(), "daily") }()
+	go func() { defer wg.Done(); _, _ = r.svc.runAutomationNow(context.Background(), "daily") }()
 	wg.Wait()
 
 	if n := len(r.conversationsOf(t, "daily")); n != 1 {
@@ -479,12 +479,12 @@ func TestAutomationReservedKeysRejected(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
 	for _, k := range []string{"last_fired_at", "last_conversation_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
-		if _, err := r.svc.UpdateAutomation("daily", map[string]any{k: "x"}); errCode(err) != "invalid_param" {
+		if _, err := r.svc.writeAutomation("daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
 			t.Fatalf("写 %s 应被拒（40000），got %v", k, err)
 		}
 	}
 	// 用户可写的（含 state）必须照旧可写
-	if _, err := r.svc.UpdateAutomation("daily", map[string]any{"state": automation.StateArchived}); err != nil {
+	if _, err := r.svc.writeAutomation("daily", map[string]any{"state": automation.StateArchived}, false); err != nil {
 		t.Fatalf("state 应可写: %v", err)
 	}
 	if got := r.file(t, "daily"); got["state"] != automation.StateArchived {
@@ -501,7 +501,7 @@ func TestAutomationRuntimeHint(t *testing.T) {
 	raw, _ := json.Marshal(got)
 	writeAutomationFile(t, filepath.Join(r.dir, "daily.json"), string(raw))
 	r.svc.LoadAutomationDefinitions(r.dir)
-	out, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out, err := r.svc.runAutomationNow(context.Background(), "daily")
 	if err != nil || out.status != automation.RunClaimed {
 		t.Fatalf("runtime_hint 命中候选应成功: %v %+v", err, out)
 	}
@@ -518,7 +518,7 @@ func TestAutomationRuntimeHint(t *testing.T) {
 	}
 	// 手动触发失败要**既报错又留痕**（把 skipped 当成功返回等于让面板显示一个绿色的失败）
 	// 注意用 numericCode：手动触发失败经 code.FromError 归一成信封错误，acl 码已被吸收进 40401。
-	if _, err := r.svc.RunAutomationNow(context.Background(), "bad"); numericCode(err) != 40401 ||
+	if _, err := r.svc.runAutomationNow(context.Background(), "bad"); numericCode(err) != 40401 ||
 		!strings.Contains(err.Error(), "runtime_hint") {
 		t.Fatalf("不在候选里的 runtime_hint 应报 40401，got %v（%d）", err, numericCode(err))
 	}
@@ -562,10 +562,10 @@ func TestAutomationReloadAfterRestart(t *testing.T) {
 func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
-	if _, err := r.svc.UpdateAutomation("daily", map[string]any{"max_run_duration": "80ms"}); err != nil {
+	if _, err := r.svc.writeAutomation("daily", map[string]any{"max_run_duration": "80ms"}, false); err != nil {
 		t.Fatalf("设置 max_run_duration: %v", err)
 	}
-	out, err := r.svc.RunAutomationNow(context.Background(), "daily")
+	out, err := r.svc.runAutomationNow(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("手动触发: %v", err)
 	}

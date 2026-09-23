@@ -220,7 +220,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
 	ports := router.Ports{
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
-		Capability: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
+		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
 	a.srv = newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Token: cfg.Token}))
 	if cfg.Token != "" {

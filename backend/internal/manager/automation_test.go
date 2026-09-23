@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/pkg/automation"
 	"github.com/morehao/ark-forge/pkg/runtime"
@@ -33,6 +34,16 @@ func writeAutomationFile(t *testing.T, path, body string) {
 	}
 }
 
+// mustListAutomations 列出注册表（端口签名带 error，测试里不关心 err）。
+func (s *Service) mustListAutomations(t *testing.T) []dtoautomation.AutomationResp {
+	t.Helper()
+	items, err := s.ListAutomations()
+	if err != nil {
+		t.Fatalf("ListAutomations: %v", err)
+	}
+	return items
+}
+
 // dailyPatch 一条 daily 定义的完整 patch（控制器从 DTO 拼出来的形态）。
 func dailyPatch(id, hour string) map[string]any {
 	return map[string]any{
@@ -52,7 +63,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	svc, dir := automationRig(t)
 	path := filepath.Join(dir, "daily.json")
 
-	v, err := svc.CreateAutomation("daily", dailyPatch("daily", "9"))
+	v, err := svc.writeAutomation("daily", dailyPatch("daily", "9"), true)
 	if err != nil {
 		t.Fatalf("新建: %v", err)
 	}
@@ -67,7 +78,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// id 已存在 → 40901，绝不覆盖（先改内容再试，确认原文件没被动）
-	if _, err := svc.CreateAutomation("daily", dailyPatch("daily", "10")); errCode(err) != "automation_exists" ||
+	if _, err := svc.writeAutomation("daily", dailyPatch("daily", "10"), true); errCode(err) != "automation_exists" ||
 		numericCode(err) != 40901 {
 		t.Fatalf("重复新建应 40901 automation_exists，got %v（code=%d）", err, numericCode(err))
 	}
@@ -76,7 +87,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 只改 name：schedule/target 原样保留（PUT 的"只改出现过的键"）
-	if _, err := svc.UpdateAutomation("daily", map[string]any{"name": "改名了"}); err != nil {
+	if _, err := svc.writeAutomation("daily", map[string]any{"name": "改名了"}, false); err != nil {
 		t.Fatalf("局部更新: %v", err)
 	}
 	got := readDef(t, path)
@@ -86,7 +97,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 不存在的 id → 40401（平台不会"顺便新建"）
-	if _, err := svc.UpdateAutomation("nope", map[string]any{"name": "x"}); errCode(err) != "automation_not_found" ||
+	if _, err := svc.writeAutomation("nope", map[string]any{"name": "x"}, false); errCode(err) != "automation_not_found" ||
 		numericCode(err) != 40401 {
 		t.Fatalf("更新不存在的应 40401 automation_not_found，got %v（code=%d）", err, numericCode(err))
 	}
@@ -95,10 +106,10 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 
 	// 删除幂等
-	if removed, err := svc.DeleteAutomation("daily"); err != nil || !removed {
+	if removed, err := svc.DeleteAutomationByID("daily"); err != nil || !removed {
 		t.Fatalf("删除: %v removed=%v", err, removed)
 	}
-	if removed, err := svc.DeleteAutomation("daily"); err != nil || removed {
+	if removed, err := svc.DeleteAutomationByID("daily"); err != nil || removed {
 		t.Fatalf("重复删除应 removed=false: %v %v", err, removed)
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
@@ -142,7 +153,7 @@ func TestAutomationValidationZeroBytes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := svc.CreateAutomation("bad", c.patch); errCode(err) != c.code {
+			if _, err := svc.writeAutomation("bad", c.patch, true); errCode(err) != c.code {
 				t.Fatalf("期望码 %s，got %v（%s）", c.code, err, errCode(err))
 			}
 			if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
@@ -154,7 +165,7 @@ func TestAutomationValidationZeroBytes(t *testing.T) {
 		})
 	}
 	// 非法 id（目录穿越）也要拒
-	if _, err := svc.CreateAutomation("../escape", dailyPatch("../escape", "9")); errCode(err) != "invalid_param" {
+	if _, err := svc.writeAutomation("../escape", dailyPatch("../escape", "9"), true); errCode(err) != "invalid_param" {
 		t.Fatalf("非法 id 应 40000 invalid_param，got %v", err)
 	}
 }
@@ -174,7 +185,7 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 		t.Fatalf("期望装载 1 条，got %d", n)
 	}
 	// 用户写面：只改 name
-	if _, err := svc.UpdateAutomation("daily", map[string]any{"name": "巡检（新）"}); err != nil {
+	if _, err := svc.writeAutomation("daily", map[string]any{"name": "巡检（新）"}, false); err != nil {
 		t.Fatalf("更新: %v", err)
 	}
 	// 运行态写回
@@ -201,14 +212,14 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 // TestAutomationPatchScheduleRecomputesNextDue 改 schedule → next_due 立刻重算（M4-3 验收项）。
 func TestAutomationPatchScheduleRecomputesNextDue(t *testing.T) {
 	svc, _ := automationRig(t)
-	if _, err := svc.CreateAutomation("daily", dailyPatch("daily", "9")); err != nil {
+	if _, err := svc.writeAutomation("daily", dailyPatch("daily", "9"), true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
 	before, _ := svc.AutomationByID("daily")
 	// 改到 10:00：无论"现在"在几点，next_due 都必须变（09:00 与 10:00 是同一 now 下的两个不同时刻）
-	if _, err := svc.UpdateAutomation("daily", map[string]any{
+	if _, err := svc.writeAutomation("daily", map[string]any{
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 10, "minute": 30},
-	}); err != nil {
+	}, false); err != nil {
 		t.Fatalf("改 schedule: %v", err)
 	}
 	after, _ := svc.AutomationByID("daily")
@@ -227,7 +238,7 @@ func TestAutomationPatchScheduleRecomputesNextDue(t *testing.T) {
 // 否则下个 tick 会拿同一个 occurrence 再来一次（重复触发）。
 func TestAutomationOverlayAdvancesNextDue(t *testing.T) {
 	svc, _ := automationRig(t)
-	if _, err := svc.CreateAutomation("daily", dailyPatch("daily", "9")); err != nil {
+	if _, err := svc.writeAutomation("daily", dailyPatch("daily", "9"), true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
 	first, _ := svc.AutomationByID("daily")
@@ -271,11 +282,11 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	if n := svc.LoadAutomationDefinitions(dir); n != 2 {
 		t.Fatalf("成功装载应为 2（ok/disabled），got %d", n)
 	}
-	items := svc.ListAutomations()
+	items := svc.mustListAutomations(t)
 	if len(items) != 4 {
 		t.Fatalf("列表应含坏定义共 4 条（可见才排查得了），got %d", len(items))
 	}
-	byID := map[string]AutomationView{}
+	byID := map[string]dtoautomation.AutomationResp{}
 	for _, v := range items {
 		byID[v.ID] = v
 	}
@@ -342,10 +353,10 @@ func TestAutomationDueSnapshot(t *testing.T) {
 // TestAutomationDirUnset 未配置目录 → 显式报错（不静默"内存生效、盘上没留痕"）。
 func TestAutomationDirUnset(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	if _, err := svc.CreateAutomation("x", dailyPatch("x", "9")); errCode(err) != "automation_dir_unset" {
+	if _, err := svc.writeAutomation("x", dailyPatch("x", "9"), true); errCode(err) != "automation_dir_unset" {
 		t.Fatalf("期望 automation_dir_unset，got %v", err)
 	}
-	if _, err := svc.DeleteAutomation("x"); errCode(err) != "automation_dir_unset" {
+	if _, err := svc.DeleteAutomationByID("x"); errCode(err) != "automation_dir_unset" {
 		t.Fatalf("删除同样要报 automation_dir_unset，got %v", err)
 	}
 }
@@ -353,14 +364,14 @@ func TestAutomationDirUnset(t *testing.T) {
 // TestAutomationCreateWritesNormalizedSchedule 规范化发生在落盘之前（weekly 的 days_of_week 去重升序）。
 func TestAutomationCreateWritesNormalizedSchedule(t *testing.T) {
 	svc, dir := automationRig(t)
-	if _, err := svc.CreateAutomation("w", map[string]any{
+	if _, err := svc.writeAutomation("w", map[string]any{
 		"id": "w", "enabled": true,
 		"schedule": map[string]any{
 			"kind": "weekly", "timezone": "UTC", "hour": 9, "minute": 0,
 			"days_of_week": []any{3, 1, 3, 0},
 		},
 		"target": map[string]any{"agent_id": "a1", "cwd": "/tmp", "prompt": "p"},
-	}); err != nil {
+	}, true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "w.json"))

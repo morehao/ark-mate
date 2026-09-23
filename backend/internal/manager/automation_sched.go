@@ -238,11 +238,11 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 	return res
 }
 
-// RunAutomationNow 手动触发一次（`POST /automations/:id/run`）。
+// runAutomationNow 手动触发一次（`POST /automations/:id/run` 的领域实现；端口形态在 automation_rest.go）。
 //
 // 走**同一个认领判据**（上一次还在跑 → overlap 跳过）：手动不等于可以并发跑两条会话。
 // 但**不推进认领游标**，所以手动试跑不会吃掉下一个排期。
-func (s *Service) RunAutomationNow(ctx context.Context, id string) (automationRunOutcome, error) {
+func (s *Service) runAutomationNow(ctx context.Context, id string) (automationRunOutcome, error) {
 	rec, ok := s.automationRecByID(id)
 	if !ok {
 		return automationRunOutcome{}, notFoundAutomation(id)
