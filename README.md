@@ -238,9 +238,15 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | POST | `/conversations/:id/permissions/always/revoke` | **兼容别名**，等价 `/conversations/:id/permissions/memories/revoke`（请求体与行为一致） |
 | GET | `/conversations/:id/elicitations` | 挂起结构化提问列表（表单 schema / URL） |
 | POST | `/conversations/:id/elicitation` | 结构化提问决策 `{elicitation_id, action, content?}` |
-| GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`；skill 含 `enabled` 与正文扫描 `warnings`） |
+| GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`、`enabled`/`scope`；skill 含 `enabled` 与正文扫描 `warnings`） |
+| POST | `/skills` | 新建 skill 定义（body = skill 定义，`id` 必填）：**先过注册闸门**（正文扫描、`runtimes` 去重）→ 通过才落盘（原子替换、未知键保留）→ 失败**回滚内存**；id 已存在 → 40901 `skill_exists`，闸门拒绝 → 40001 `definition_invalid` 且**零字节落盘** |
+| PUT | `/skills/:id` | 覆盖写 skill 定义：**只改 body 里出现过的键**（未出现的保留原值；`null` 删键、`""`/`[]` 清空），路径 id 与 body id 不一致 → 40000；落盘前比对 mtime，读写窗口内被外部改动 → 40901 `definition_changed`（**绝不 last-write-wins**） |
+| DELETE | `/skills/:id` | 删定义文件 + 撤回已物化的 `.forge-managed` 副本 + 摘内存条目；幂等（本来就不存在 → `deleted:false` 且 code=0，不报 404） |
 | PATCH | `/skills/:id` | `{enabled}` 启停一个 skill（§13.4 S4）：写回定义文件的 `enabled`（**只改这一个键、未知键原样保留**）+ 更新注册表 + 立刻重校投影；禁用 = overlay，已物化副本被**撤回**，随时可恢复 |
 | GET | `/skills/:id/materialization` | 物化体检（§13.4 S2，只读）：每处物化目标的期望摘要 `hash` vs 实测 `actual_hash` + `status`（`in_sync`/`missing`/`tampered`/`stale`/`disabled`/`user_owned`/`not_applicable`/`untested`/`not_configured`）+ `owners`（该落点上共同投放的 runtime 集合）；回答「agent 实际读到的与注册表一致吗」 |
+| POST | `/mcps` | 新建 MCP server 定义：闸门比 skill 多（transport 枚举、stdio **绝对路径**、`vault:`/`env:` 引用词法、明文与密钥键不重复），写面**一个都不新开也不放行**——定义怎么进注册表就走同一条路；id 已存在 → 40901 `mcp_exists` |
+| PUT | `/mcps/:id` | 覆盖写 MCP server 定义（键的出现与否有语义，同 skill 写面）；响应回带 `unresolved_secret_keys`（绑了引用但当前解析不出来的键，只给键名） |
+| DELETE | `/mcps/:id` | 删定义文件 + 摘内存条目 + **一并摘除归属该 server 的 `mcp` 来源工具**（留着等于让用户看见一个调不通的能力）；幂等 |
 | POST | `/mcps/:id/probe` | 对 MCP server 做一次 live `tools/list` 探测并写 Tool 目录（显式触发；stdio/http/streamable_http/sse 四种传输均支持） |
 | POST | `/mcps/:id/tools/:tool/call` | 调用 MCP 工具（`tools/call`；body `{arguments,timeout_ms}`；工具级失败 → `is_error=true` 且 code=0；超时 40901） |
 | GET | `/mcps/:id/resources` | 实时拉取 MCP 资源列表（`resources/list` + `resources/templates/list`；模板不支持 → `templates_error` 降级） |

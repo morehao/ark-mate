@@ -202,6 +202,49 @@ func (r *Registry) SetSkillEnabled(id string, enabled bool) (Skill, bool) {
 	return *s, true
 }
 
+// RemoveSkill 摘除一个 skill 条目（DELETE /skills/:id 与写盘回滚用）。ok=false = 本来就不在。
+//
+// 只摘内存条目：**文件由调用方删**（写面先落盘再改内存，回滚时顺序反过来）。
+// 分开的理由是两条路径的失败语义不同——"文件删了但内存还在"是幻影能力，
+// "内存删了但文件还在"会在下次装载时复活；调用方必须按自己的顺序显式处理。
+func (r *Registry) RemoveSkill(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.skills[id]; !ok {
+		return false
+	}
+	delete(r.skills, id)
+	return true
+}
+
+// RemoveMcpServer 摘除一个 MCP server 条目（ok=false = 本来就不在）。
+func (r *Registry) RemoveMcpServer(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.mcps[id]; !ok {
+		return false
+	}
+	delete(r.mcps, id)
+	return true
+}
+
+// RemoveToolsForMcpServer 摘除某 server 归属的 mcp 来源工具（返回摘除数）。
+//
+// 删定义时必须一起做：`/tools` 里留着已删 server 的工具，等于让用户看见一个调不通的能力
+// （`AgentCapabilities` 的可见性过滤只看 transport 是否被候选 runtime 承载，看不出 server 已没了）。
+func (r *Registry) RemoveToolsForMcpServer(serverID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for name, t := range r.tools {
+		if t.McpServer == serverID && t.Source == ToolSourceMCP {
+			delete(r.tools, name)
+			n++
+		}
+	}
+	return n
+}
+
 // SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证
 // = 该 runtime 物化不出来，要给用户一个人话原因，而不是让技能静默消失）。
 func SupportedFormat(format string) bool {

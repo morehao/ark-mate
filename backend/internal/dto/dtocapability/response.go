@@ -40,6 +40,10 @@ type McpServerResp struct {
 	Command   string   `json:"command,omitempty"`
 	Args      []string `json:"args,omitempty"`
 	URL       string   `json:"url,omitempty"`
+	// Scope 生效作用域（global|workspace；未声明 = global）。M1–M4 只读不消费。
+	Scope string `json:"scope,omitempty"`
+	// Enabled 是否注入（未声明 = true）。禁用只影响注入：定义、密钥引用、探测结果都保留。
+	Enabled bool `json:"enabled"`
 	// EnvKeys 明文环境变量的键（非密钥，可展示）。
 	EnvKeys []string `json:"env_keys,omitempty"`
 	// SecretEnvKeys 密钥型环境变量的键（**只有键名**）。
@@ -270,4 +274,62 @@ type AgentMcpServerResp struct {
 	Transport string   `json:"transport"`
 	Enabled   bool     `json:"enabled"`
 	Runtimes  []string `json:"runtimes"`
+}
+
+// ——— 写面结果（M2） ———
+
+// SkillWriteResp 新建/覆盖 skill 定义的结果（POST /skills、PUT /skills/:id）。
+type SkillWriteResp struct {
+	ID string `json:"id"`
+	// Path 落盘的定义文件（事实源）。
+	Path string `json:"path"`
+	// Created true = 本次新建了文件；false = 覆盖写既有文件。
+	Created bool `json:"created"`
+	// Written/Removed 写面之后立刻重校物化的结果（新增/改正文会写，禁用会撤回）。
+	Written int `json:"written"`
+	Removed int `json:"removed"`
+	// Warnings 正文扫描的非 critical 告警（critical 的定义在这里已经被拒了，不会返回）。
+	Warnings []SkillWarningResp `json:"warnings,omitempty"`
+	// MaterializeErrors 物化重校失败原因：**定义已经落盘成功，故不回滚**——失败原因如实回带，
+	// 让用户知道"定义生效了，但某个 runtime 的副本没写出去"。
+	MaterializeErrors []string `json:"materialize_errors,omitempty"`
+	// NextAction 这一步之后该知道的事。
+	NextAction string `json:"next_action,omitempty"`
+}
+
+// SkillDeleteResp 删除 skill 定义的结果（DELETE /skills/:id）。
+type SkillDeleteResp struct {
+	ID string `json:"id"`
+	// Deleted 是否真的删掉了文件。**不存在 → false 且无错**：DELETE 的语义是"让它不在"，
+	// 不是"证明它曾在"（幂等）。
+	Deleted bool `json:"deleted"`
+	// Path 被删的定义文件（Deleted=false 时仍回带，便于确认"本来就没有"）。
+	Path string `json:"path,omitempty"`
+	// Removed 撤回的已物化副本数（删定义必须一起撤回，否则底座还看得见它）。
+	Removed int `json:"removed"`
+	// MaterializeErrors 撤回失败原因（文件已删，不回滚）。
+	MaterializeErrors []string `json:"materialize_errors,omitempty"`
+	NextAction        string   `json:"next_action,omitempty"`
+}
+
+// McpWriteResp 新建/覆盖 MCP server 定义的结果（POST /mcps、PUT /mcps/:id）。
+type McpWriteResp struct {
+	ID      string `json:"id"`
+	Path    string `json:"path"`
+	Created bool   `json:"created"`
+	// UnresolvedSecretKeys 绑了密钥引用但当前解析不出来的键（只给键名）：
+	// 定义本身合法，但注入时这些键拿不到值——现在说比会话启动时才炸好。
+	UnresolvedSecretKeys []string `json:"unresolved_secret_keys,omitempty"`
+	NextAction           string   `json:"next_action,omitempty"`
+}
+
+// McpDeleteResp 删除 MCP server 定义的结果（DELETE /mcps/:id）。
+type McpDeleteResp struct {
+	ID      string `json:"id"`
+	Deleted bool   `json:"deleted"`
+	Path    string `json:"path,omitempty"`
+	// ToolsRemoved 一并摘除的、归属该 server 的 mcp 来源工具数。
+	// 必须一起摘：留着已删 server 的工具等于让用户看见一个调不通的能力。
+	ToolsRemoved int    `json:"tools_removed"`
+	NextAction   string `json:"next_action,omitempty"`
 }

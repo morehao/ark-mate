@@ -57,6 +57,7 @@ func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 		resp := dtocapability.McpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
+			Scope: m.EffectiveScope(), Enabled: m.IsEnabled(),
 			EnvKeys:              capability.KeysOf(m.Env),
 			SecretEnvKeys:        capability.KeysOf(m.SecretEnv),
 			SecretHeaderKeys:     capability.KeysOf(m.SecretHeaders),
@@ -341,6 +342,9 @@ func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string) []capabilit
 	servers := s.caps.ListMcpServers()
 	out := make([]capability.McpServer, 0, len(servers))
 	for _, m := range servers {
+		if !m.IsEnabled() {
+			continue // 禁用 = 不注入（overlay：定义/密钥引用/探测结果都保留，只停止注入）
+		}
 		if !want[m.Transport] {
 			continue
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -231,11 +232,11 @@ func TestRemoveDefinitionIdempotent(t *testing.T) {
 	if err := writeDefinition(dir, "mcp", "fs", map[string]any{"id": "fs"}); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := removeDefinition(dir, "mcp", "fs")
+	ok, err := removeDefinitionPermanently(dir, "mcp", "fs")
 	if err != nil || !ok {
 		t.Fatalf("首次删除应 true: ok=%v err=%v", ok, err)
 	}
-	ok, err = removeDefinition(dir, "mcp", "fs")
+	ok, err = removeDefinitionPermanently(dir, "mcp", "fs")
 	if err != nil || ok {
 		t.Fatalf("再次删除应 false 且无错: ok=%v err=%v", ok, err)
 	}
@@ -246,8 +247,8 @@ func TestRemoveDefinitionIdempotent(t *testing.T) {
 
 // TestCapabilityDirUnsetIsActionable 未配置能力目录 → `capability_dir_unset`（40001）且文案给出路。
 func TestCapabilityDirUnsetIsActionable(t *testing.T) {
-	s := &Service{} // 零值 Service：capabilityDir 为空
-	if _, err := s.capabilityDirFor(capSubSkills); err == nil {
+	svc := NewService(runtime.NewRegistry(), nil) // capabilityDir 为空
+	if _, err := svc.capabilityDirFor(capSubSkills); err == nil {
 		t.Fatal("未配置目录应报错")
 	} else if got := errCode(err); got != "capability_dir_unset" {
 		t.Fatalf("错误码应为 capability_dir_unset，got %q", got)

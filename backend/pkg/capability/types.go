@@ -122,6 +122,23 @@ type McpServer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// SecretHeaders 密钥型 header：值必须是 vault:<ns>/<name> 或 env:<NAME>。
 	SecretHeaders map[string]string `json:"secret_headers,omitempty"`
+	// Scope 作用域：global（默认）/ workspace。与 Skill.Scope 同一语义、同一限制：
+	// M1–M4 只落数据面，platform 侧不因它改注入路径（底座的 MCP 目录约定未实测前不猜）。
+	Scope string `json:"scope,omitempty"`
+	// Enabled 启停开关：nil = 未声明（默认启用）；显式 false = 禁用。
+	// 禁用 = **不注入**（定义、密钥引用、探测结果都保留），与 Skill 的 overlay 语义一致。
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// IsEnabled 报告 MCP server 当前是否启用（未声明 = 启用；禁用只影响注入，定义照旧保留）。
+func (m McpServer) IsEnabled() bool { return m.Enabled == nil || *m.Enabled }
+
+// EffectiveScope 生效作用域（未声明 = global；非法取值在装载期被拒）。
+func (m McpServer) EffectiveScope() string {
+	if m.Scope == "" {
+		return SkillScopeGlobal
+	}
+	return m.Scope
 }
 
 // Tool 是 Tool 目录的一个条目（读通：MCP tools/list + 静态/平台工具 + 观察兜底）。

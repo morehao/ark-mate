@@ -37,6 +37,11 @@ const (
 	capSubMcps   = "mcp"
 )
 
+// errCapabilityUnavailable 能力数据面未装配（服务端形态问题，不是用户的参数问题）。
+func errCapabilityUnavailable() error {
+	return acl.NewError(acl.ClassService, "capability_unavailable", "能力数据面未装配", nil)
+}
+
 // capabilityDirUnsetErr 未配置能力目录 → 显式报错而不是"内存生效、盘上没留痕"。
 //
 // 措辞给出路：这是部署配置问题，用户要的是"该设哪个键"，不是一个"写入失败"。
@@ -89,41 +94,55 @@ func definitionPath(dir, kind, id string) (string, error) {
 	return filepath.Join(dir, id+".json"), nil
 }
 
-// writeDefinition 把 patch 落进 `dir/<id>.json`（C9）。
+// definitionDraft 一份"已合并、未落盘"的能力定义（C9 的前两步做完，第三步由调用方决定）。
 //
-// patch 的键 = 要改的键；**值为 nil = 删除该键**。这不是"完整覆盖"语义——调用方（写面）负责
-// 把请求体翻译成 patch，未出现的键一律不动。
-func writeDefinition(dir, kind, id string, patch map[string]any) error {
-	if len(patch) == 0 {
-		return nil // 没有要改的键：不写盘（避免"什么都没改却换了 mtime"）
-	}
+// 拆成 open/save 两段是为了让写面能**先校验再落盘**：注册闸门（正文扫描 / transport 枚举 /
+// 密钥引用词法…）必须看到**合并后**的完整定义，而落盘只该发生在校验通过之后。
+// 两段仍由同一个句柄串起，所以 mtime 乐观锁覆盖的窗口包含校验全过程——比"读完立刻写"更严。
+type definitionDraft struct {
+	df   *capability.DefinitionFile
+	path string
+	// existed 打开时文件是否已存在（写面用它判 `*_exists`；也为"新建"分支给出路文案）。
+	existed bool
+}
+
+// Path 定义文件路径。
+func (d *definitionDraft) Path() string { return d.path }
+
+// Merged 返回合并后的**确切字节**（= 将被写入的内容），供调用方解出强类型视图做校验。
+// 与 `--dry-run`、实际落盘共用 `DefinitionFile.Marshal`，三者不可能不一致。
+func (d *definitionDraft) Merged() ([]byte, error) { return d.df.Marshal() }
+
+// openDefinition 读原文件（不存在 → 新建）→ 应用 patch（值 nil = 删键）→ 返回**未落盘**的草稿。
+func openDefinition(dir, kind, id string, patch map[string]any) (*definitionDraft, error) {
 	path, err := definitionPath(dir, kind, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return acl.NewError(acl.ClassService, "definition_write_failed",
+		return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("创建能力目录 %s 失败：%v", dir, err), err)
 	}
 	// 三种"读不了"要分开给路：文件不存在 → 新建；内容不是 JSON 对象 → **用户的文件坏了，
 	// 先修它**（40001，可操作）；其余（权限/IO）→ 服务端问题（50000）。混成一个码的话，
 	// 用户拿到的是"写入失败"，而真正该做的是去修那个文件。
 	df, err := capability.ReadDefinitionFile(path)
+	existed := err == nil
 	switch {
 	case err == nil:
 	case errors.Is(err, capability.ErrNotObject):
-		return acl.NewError(acl.ClassRequest, "definition_invalid",
+		return nil, acl.NewError(acl.ClassRequest, "definition_invalid",
 			fmt.Sprintf("能力定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", path, err), err)
 	case os.IsNotExist(err):
 		df, err = capability.NewDefinitionFile(path)
 		if err != nil {
-			return acl.NewError(acl.ClassService, "definition_write_failed",
+			return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 				fmt.Sprintf("准备新建能力定义 %s 失败：%v", path, err), err)
 		}
 		// 新建路径也要防"我以为是新建、其实文件已被别人建出来"：NewDefinitionFile 的
 		// mtime 是零值，Save 的乐观锁一比对就会判冲突（见 capability.NewDefinitionFile）。
 	default:
-		return acl.NewError(acl.ClassService, "definition_write_failed",
+		return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("读取能力定义 %s 失败：%v", path, err), err)
 	}
 	for _, k := range sortedPatchKeys(patch) {
@@ -132,17 +151,48 @@ func writeDefinition(dir, kind, id string, patch map[string]any) error {
 			continue
 		}
 		if err := df.Set(k, patch[k]); err != nil {
-			return acl.NewError(acl.ClassService, "definition_write_failed",
+			return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 				fmt.Sprintf("能力定义 %s 的键 %q 无法序列化：%v", path, k, err), err)
 		}
 	}
-	if !df.Dirty() {
-		return nil // 同值重复设置：不脏不写盘（幂等，见 DefinitionFile）
-	}
-	if err := df.Save(); err != nil {
-		return definitionSaveErr(path, err)
+	return &definitionDraft{df: df, path: path, existed: existed}, nil
+}
+
+// saveDefinition 落盘草稿（C9 的第四、五步：同目录 staging + 原子 rename + 权限沿用 + mtime 复核）。
+// 未改过任何键 → 不触碰文件（幂等）。
+func saveDefinition(d *definitionDraft) error {
+	if err := d.df.Save(); err != nil {
+		return definitionSaveErr(d.path, err)
 	}
 	return nil
+}
+
+// writeDefinition 打开 + 落盘（一步到位）。给不需要"先校验再写"的调用方（automation 运行态 overlay）。
+func writeDefinition(dir, kind, id string, patch map[string]any) error {
+	if len(patch) == 0 {
+		return nil // 没有要改的键：不写盘（避免"什么都没改却换了 mtime"）
+	}
+	d, err := openDefinition(dir, kind, id, patch)
+	if err != nil {
+		return err
+	}
+	return saveDefinition(d)
+}
+
+// removeDefinitionPermanently 删掉 `dir/<id>.json`；文件本来就不存在 → (false, nil)（幂等删除）。
+func removeDefinitionPermanently(dir, kind, id string) (bool, error) {
+	path, err := definitionPath(dir, kind, id)
+	if err != nil {
+		return false, err
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, acl.NewError(acl.ClassService, "definition_delete_failed",
+			fmt.Sprintf("删除能力定义 %s 失败：%v", path, err), err)
+	}
+	return true, nil
 }
 
 // definitionSaveErr 把落盘失败映射成对外语义：
@@ -160,22 +210,6 @@ func definitionSaveErr(path string, err error) error {
 	}
 	return acl.NewError(acl.ClassService, "definition_write_failed",
 		fmt.Sprintf("写入能力定义 %s 失败：%v", path, err), err)
-}
-
-// removeDefinition 删掉 `dir/<id>.json`；文件本来就不存在 → (false, nil)（幂等删除）。
-func removeDefinition(dir, kind, id string) (bool, error) {
-	path, err := definitionPath(dir, kind, id)
-	if err != nil {
-		return false, err
-	}
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, acl.NewError(acl.ClassService, "definition_delete_failed",
-			fmt.Sprintf("删除能力定义 %s 失败：%v", path, err), err)
-	}
-	return true, nil
 }
 
 // sortedPatchKeys patch 的键按字典序（落盘顺序稳定 → 同一请求产物逐字可复现，也方便单测比对）。

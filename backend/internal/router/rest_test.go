@@ -131,6 +131,14 @@ type stubSvc struct {
 	tools              []dtocapability.ToolResp
 	capErr             error // 能力列表桩错误注入
 
+	// M2 写面桩
+	skillWritten  string // create|update|delete
+	skillWriteID  string
+	skillWriteReq dtocapability.SkillWriteReq
+	mcpWritten    string
+	mcpWriteID    string
+	mcpWriteReq   dtocapability.McpWriteReq
+
 	agentCapResp *dtocapability.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
 	agentCapErr  error
 	agentCapID   string
@@ -277,6 +285,57 @@ func (s *stubSvc) SetSkillEnabled(_ context.Context, id string, enabled bool) (*
 		return nil, s.capErr
 	}
 	return &dtocapability.SkillToggleResp{ID: id, Enabled: enabled, NextAction: "已生效"}, nil
+}
+
+// M2 写面桩：只记录被调用与入参，返回固定结果（真实的落盘/闸门/回滚在 manager 的单测里验）。
+func (s *stubSvc) CreateSkill(_ context.Context, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+	s.skillWritten, s.skillWriteReq = "create", req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillWriteResp{ID: "s1", Path: "/tmp/skills/s1.json", Created: true, NextAction: "已新建"}, nil
+}
+
+func (s *stubSvc) UpdateSkill(_ context.Context, id string, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+	s.skillWritten, s.skillWriteID, s.skillWriteReq = "update", id, req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillWriteResp{ID: id, Path: "/tmp/skills/" + id + ".json", NextAction: "已覆盖写"}, nil
+}
+
+func (s *stubSvc) DeleteSkill(_ context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
+	s.skillWritten, s.skillWriteID = "delete", id
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillDeleteResp{ID: id, Deleted: true, Path: "/tmp/skills/" + id + ".json",
+		NextAction: "已删除"}, nil
+}
+
+func (s *stubSvc) CreateMcpServer(_ context.Context, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+	s.mcpWritten, s.mcpWriteReq = "create", req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpWriteResp{ID: "m1", Path: "/tmp/mcp/m1.json", Created: true, NextAction: "已新建"}, nil
+}
+
+func (s *stubSvc) UpdateMcpServer(_ context.Context, id string, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+	s.mcpWritten, s.mcpWriteID, s.mcpWriteReq = "update", id, req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpWriteResp{ID: id, Path: "/tmp/mcp/" + id + ".json", NextAction: "已覆盖写"}, nil
+}
+
+func (s *stubSvc) DeleteMcpServer(_ context.Context, id string) (*dtocapability.McpDeleteResp, error) {
+	s.mcpWritten, s.mcpWriteID = "delete", id
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpDeleteResp{ID: id, Deleted: true, Path: "/tmp/mcp/" + id + ".json",
+		ToolsRemoved: 2, NextAction: "已删除"}, nil
 }
 
 func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
