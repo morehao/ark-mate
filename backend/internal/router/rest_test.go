@@ -805,19 +805,19 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 // TestUsageSummaryRoute M3：GET /usage/summary 参数绑定/透传 + 信封形态 + 业务错误透传。
 func TestUsageSummaryRoute(t *testing.T) {
 	svc := &stubSvc{usageResp: &dtousage.UsageSummaryResp{
-		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-echo",
+		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-stub",
 		GroupBy: "day", Source: "sqlite",
 		Totals:  dtousage.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
 		Buckets: []dtousage.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-echo&group_by=day", "")
+	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-stub&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
 	if svc.usageQuery.From != "2026-09-01" || svc.usageQuery.To != "2026-09-09" ||
-		svc.usageQuery.AgentID != "agent-echo" || svc.usageQuery.GroupBy != "day" {
+		svc.usageQuery.AgentID != "agent-stub" || svc.usageQuery.GroupBy != "day" {
 		t.Fatalf("查询参数未透传: %+v", svc.usageQuery)
 	}
 	var resp dtousage.UsageSummaryResp
@@ -1155,39 +1155,39 @@ func TestAgentManagementRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-echo","name":"别名echo","runtimes":["echo"]}`)
+	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-stub","name":"别名stub","runtimes":["stub"]}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/start", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/start", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-stub" {
 		t.Fatalf("start 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/stop", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/stop", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-stub" {
 		t.Fatalf("stop 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-echo", `{"name":"别名echo v2"}`)
+	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-stub", `{"name":"别名stub v2"}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
 	}
 	// 切换「当前 Agent」：路径参数透传到服务并回带 is_default 表示。
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/default", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/default", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-stub" {
 		t.Fatalf("set default 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
 	var def dtoagent.AgentResp
-	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-echo" || !def.IsDefault {
+	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-stub" || !def.IsDefault {
 		t.Fatalf("set default 载荷不符: %s", env.Data)
 	}
-	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-echo", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-echo" {
+	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-stub", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-stub" {
 		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
 	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
 	var del dtoagent.AgentDeleteResp
 	if err := json.Unmarshal(env.Data, &del); err != nil ||
-		del.Deleted != "alias-echo" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
+		del.Deleted != "alias-stub" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
 		t.Fatalf("delete 载荷不符: %s", env.Data)
 	}
 }
@@ -1394,9 +1394,9 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
 		{"delete_unknown", "DELETE", "/v1/forge/agents/nope", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["echo"]}`,
+		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 runtime 只读", nil), 40001},
-		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["echo"]}`,
+		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
 		{"start_unknown", "POST", "/v1/forge/agents/nope/start", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
@@ -1500,7 +1500,7 @@ func TestExportRoute(t *testing.T) {
 // TestAgentDiagnosticsRoute GET /agents/:id/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
 func TestAgentDiagnosticsRoute(t *testing.T) {
 	svc := &stubSvc{diagResp: &dtoagent.AgentDiagnosticsResp{
-		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "echo", Command: "sh",
+		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "stub", Command: "sh",
 		Connected: false, StderrSource: "last_error", CheckedAt: "2026-09-09T00:00:00Z",
 		StderrTail: []string{"[warn] boom"},
 		LastError:  &dtoagent.AgentLastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},

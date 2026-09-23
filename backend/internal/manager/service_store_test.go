@@ -18,7 +18,7 @@ import (
 func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 
 	// —— 进程一：sqlite 模式活会话 ——
 	st1 := testutil.OpenStore(t, dbPath)
@@ -26,7 +26,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1 := NewService(reg, bus1)
 	svc1.EnableStore(st1)
 
-	svc1.registerConversation(&ConversationRec{ID: "s-live", AgentID: "agent-echo"})
+	svc1.registerConversation(&ConversationRec{ID: "s-live", AgentID: "agent-stub"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
 	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
 	// ③ 文本增量合并：publish 进缓冲并返回零值事件，号序在 flush 落库时才分配。

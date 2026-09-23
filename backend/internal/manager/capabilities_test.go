@@ -78,7 +78,7 @@ func TestRegisterToolAndSort(t *testing.T) {
 // agent.Mcps 白名单（nil = 全量；非 nil = 白名单；空 = 本 agent 禁用注入）。未知 runtime → 不下发。
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "echo", McpTransports: []string{"stdio"}},
+		runtime.Spec{ID: "stub", McpTransports: []string{"stdio"}},
 		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
 		runtime.Spec{ID: "plain"}, // 未声明 → 保守仅 stdio
 	)
@@ -98,7 +98,7 @@ func TestMcpServersFor(t *testing.T) {
 	onlyFS := &AgentRec{ID: "a1", Mcps: ptrOf([]string{"fs_stdio"})}
 	denyAll := &AgentRec{ID: "a2", Mcps: ptrOf([]string{})}
 
-	got := svc.McpServersFor(noBind, "echo")
+	got := svc.McpServersFor(noBind, "stub")
 	if len(got) != 1 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
 		t.Fatalf("echo 仅 stdio 应取 1 条，got %+v", got)
 	}
@@ -391,11 +391,11 @@ func mustListTools(t *testing.T, svc *Service) []dtocapability.ToolResp {
 // 声明白名单 → 指针携带；`[]` → 非 nil 空指针（禁用注入）。经 LoadAgentDefinitions 装载。
 func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
 	dir := t.TempDir()
-	writeCapFile(t, filepath.Join(dir, "a.json"), `{"id":"a","runtimes":["echo"],"mcps":["fs_stdio"]}`)
-	writeCapFile(t, filepath.Join(dir, "b.json"), `{"id":"b","runtimes":["echo"],"mcps":[]}`)
-	writeCapFile(t, filepath.Join(dir, "c.json"), `{"id":"c","runtimes":["echo"]}`)
+	writeCapFile(t, filepath.Join(dir, "a.json"), `{"id":"a","runtimes":["stub"],"mcps":["fs_stdio"]}`)
+	writeCapFile(t, filepath.Join(dir, "b.json"), `{"id":"b","runtimes":["stub"],"mcps":[]}`)
+	writeCapFile(t, filepath.Join(dir, "c.json"), `{"id":"c","runtimes":["stub"]}`)
 
-	svc := NewService(runtime.NewRegistry(runtime.Spec{ID: "echo"}), eventbus.New()) // 定义引用 echo runtime
+	svc := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), eventbus.New()) // 定义引用 echo runtime
 	if n := svc.LoadAgentDefinitions(dir); n != 3 {
 		t.Fatalf("期望装载 3 条，got %d", n)
 	}
@@ -492,7 +492,7 @@ func TestCallMcpTool(t *testing.T) {
 						{"type": "text", "text": "called " + msg.Params.Name},
 						{"type": "text", "text": "args " + string(msg.Params.Arguments)},
 					},
-					"structuredContent": map[string]any{"echo": true},
+					"structuredContent": map[string]any{"passthrough": true},
 				}
 			}
 		}
@@ -516,7 +516,7 @@ func TestCallMcpTool(t *testing.T) {
 	if got.Text != "called read_file\nargs {\"path\":\"/tmp/a\"}" {
 		t.Fatalf("文本块拼接不符: %q", got.Text)
 	}
-	if string(got.StructuredContent) != `{"echo":true}` || got.ServerName != "mgr-call" {
+	if string(got.StructuredContent) != `{"passthrough":true}` || got.ServerName != "mgr-call" {
 		t.Fatalf("structuredContent/serverName 不符: %+v", got)
 	}
 

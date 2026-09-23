@@ -59,14 +59,14 @@ func (s *gatedSession) prompts() []string {
 func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *ActiveConversation) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
-		c.echo, c.bus, c.store = true, true, withStore
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"echo"}}}
+		c.stub, c.bus, c.store = true, true, withStore
+		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"stub"}}}
 	})
 	g := sess.(*gatedSession)
-	as := &ActiveConversation{ID: "conv-1", AgentID: "a1", Runtime: "echo", sess: sess}
+	as := &ActiveConversation{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
 	r.Orch.conversations[as.ID] = as
 	r.Svc.registerConversation(&ConversationRec{
-		ID: as.ID, AgentID: "a1", RuntimeHint: "echo", Status: ConversationStatusInProgress, Generation: 1,
+		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: ConversationStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
 		// 放行所有阻塞中的轮次并等收尾，再摘句柄——否则清库时还有 runTurn 在写（噪声日志/竞态）。

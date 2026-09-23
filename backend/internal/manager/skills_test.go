@@ -205,7 +205,7 @@ func TestSkillActivationReasons(t *testing.T) {
 		{
 			name: "runtime-not-declared",
 			sk: capability.Skill{ID: "c", Sources: []capability.SkillSource{
-				{Runtime: "echo", Format: capability.FormatSkillMD}}},
+				{Runtime: "stub", Format: capability.FormatSkillMD}}},
 			reasonHas: "都没有在 sources 里声明",
 		},
 		{
@@ -258,7 +258,7 @@ func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
 		}
 	}
 	must(capability.Skill{ID: "ok", Sources: []capability.SkillSource{{Runtime: "opencode", Format: capability.FormatSkillMD}}})
-	must(capability.Skill{ID: "echo-only", Sources: []capability.SkillSource{{Runtime: "echo", Format: capability.FormatSkillMD}}})
+	must(capability.Skill{ID: "stub-only", Sources: []capability.SkillSource{{Runtime: "stub", Format: capability.FormatSkillMD}}})
 	must(capability.Skill{ID: "off", Enabled: boolPtr(false), Sources: []capability.SkillSource{{Runtime: "opencode", Format: capability.FormatSkillMD}}})
 
 	resp, err := svc.AgentCapabilities("ag-1")
@@ -269,7 +269,7 @@ func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
 	for _, s := range resp.Skills {
 		byID[s.ID] = true
 	}
-	for _, id := range []string{"ok", "echo-only", "off"} {
+	for _, id := range []string{"ok", "stub-only", "off"} {
 		if !byID[id] {
 			t.Fatalf("不适用/禁用技能也必须列出（否则「技能凭空不见」）: 缺 %s（%+v）", id, resp.Skills)
 		}
@@ -280,9 +280,9 @@ func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
 			if !s.Enabled || !s.Applicable || len(s.Reasons) != 0 {
 				t.Fatalf("ok 应启用且适用: %+v", s)
 			}
-		case "echo-only":
+		case "stub-only":
 			if !s.Enabled || s.Applicable || len(s.Reasons) == 0 {
-				t.Fatalf("echo-only 应启用但不适用 + 有原因: %+v", s)
+				t.Fatalf("stub-only 应启用但不适用 + 有原因: %+v", s)
 			}
 		case "off":
 			if s.Enabled || s.Applicable {
@@ -408,7 +408,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("无标记目录应为 user_owned: %+v", st)
 	}
 	// 7) 该 runtime 没有已实证 format 的 source → not_applicable。
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: other, Runtime: "echo"}})
+	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: other, Runtime: "stub"}})
 	if st = matStatus(t, svc, "demo", other); st.Status != "not_applicable" {
 		t.Fatalf("未声明该 runtime 应为 not_applicable: %+v", st)
 	}

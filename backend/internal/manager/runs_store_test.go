@@ -18,12 +18,12 @@ import (
 func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-run", AgentID: "agent-echo"})
+	svc.registerConversation(&ConversationRec{ID: "s-run", AgentID: "agent-stub"})
 
 	// 第一轮：成功。
 	u1 := svc.publish(BusUserMessage, "s-run", map[string]any{"text": "第一问"})
@@ -79,12 +79,12 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 func TestRunUsageExposedInListRuns(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-usage", AgentID: "agent-echo"})
+	svc.registerConversation(&ConversationRec{ID: "s-usage", AgentID: "agent-stub"})
 
 	now := time.Now().UTC()
 	seed := func(id, status, usageJSON string, firstTokenMS int64) {

@@ -351,7 +351,7 @@ func TestServiceResolveRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc, _, _ := rigWithRuntime(t,
-		runtime.Spec{ID: "echo", Launch: runtime.LaunchSpec{Command: exe}},
+		runtime.Spec{ID: "stub", Launch: runtime.LaunchSpec{Command: exe}},
 		runtime.Spec{ID: "ghost", Launch: runtime.LaunchSpec{Command: "ghost-cmd-zzz-not-exist"}},
 	)
 	seed := func(id string, runtimes ...string) {
@@ -367,8 +367,8 @@ func TestServiceResolveRuntime(t *testing.T) {
 		return ""
 	}
 
-	seed("a1", "ghost", "echo")
-	if id, err := svc.ResolveRuntime(svc.agents["a1"]); err != nil || id != "echo" {
+	seed("a1", "ghost", "stub")
+	if id, err := svc.ResolveRuntime(svc.agents["a1"]); err != nil || id != "stub" {
 		t.Fatalf("应回退取 echo，id=%q err=%v", id, err)
 	}
 	seed("a2", "ghost")

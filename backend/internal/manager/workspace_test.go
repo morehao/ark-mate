@@ -191,12 +191,12 @@ func discardTempWorkspace(t *testing.T, res WorkspaceResolution) {
 // workspaceTestSvc 播一个 echo runtime 上的 agent（不拨真实子进程：本轮只验证解析与校验顺序）。
 func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	if _, err := svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "ws-probe", Name: "工作空间测试", Runtimes: []string{"echo"},
+		ID: "ws-probe", Name: "工作空间测试", Runtimes: []string{"stub"},
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}

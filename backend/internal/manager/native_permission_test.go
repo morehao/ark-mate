@@ -103,7 +103,7 @@ func TestNativePermissionOpencode(t *testing.T) {
 
 // TestNativePermissionEcho B5：无原生开关的 runtime 不注入。
 func TestNativePermissionEcho(t *testing.T) {
-	env, desc := nativePermissionEnv("echo", &PermissionPolicy{Default: "deny"})
+	env, desc := nativePermissionEnv("stub", &PermissionPolicy{Default: "deny"})
 	if len(env) != 0 {
 		t.Fatalf("echo 应不注入，got %v", env)
 	}
@@ -177,8 +177,8 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	if connKey("deepseekharness", ro) != connKey("deepseekharness", ro) {
 		t.Fatal("相同配置应产生相同连接键（可共享暖进程）")
 	}
-	if connKey("echo", nil) != "echo" {
-		t.Fatalf("无原生配置时应退化为 runtime ID: %q", connKey("echo", nil))
+	if connKey("stub", nil) != "stub" {
+		t.Fatalf("无原生配置时应退化为 runtime ID: %q", connKey("stub", nil))
 	}
 	// 同一策略两次计算结果一致（env 顺序稳定）。
 	pol := &PermissionPolicy{Default: "deny"}

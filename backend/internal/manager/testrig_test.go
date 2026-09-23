@@ -28,7 +28,7 @@ import (
 
 // rigConfig 夹具的差异面（零值即"最裸的架子"：空注册表、无总线、无库、无 agent）。
 type rigConfig struct {
-	echo   bool        // 注册表装 echo runtime（false = 空注册表）
+	stub   bool        // 注册表装测试专用 stub runtime（false = 空注册表）
 	bus    bool        // 建事件总线（false = 传 nil，纯列表/纯状态用例不需要它）
 	store  bool        // 开临时 sqlite 库并 EnableStore
 	agents []*AgentRec // 直接注入的 agent 记录（绕过 CreateAgent 的门槛校验）
@@ -56,8 +56,8 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 	}
 
 	reg := runtime.NewRegistry()
-	if cfg.echo {
-		reg = testutil.EchoRegistry()
+	if cfg.stub {
+		reg = testutil.StubRegistry()
 	}
 	var bus *eventbus.Bus
 	if cfg.bus {
@@ -94,31 +94,31 @@ func newTestRig(t *testing.T) (*Service, *Orchestrator, *eventbus.Bus) {
 	return r.Svc, r.Orch, r.Bus
 }
 
-// testReapHarness 跑孤儿回收/空闲回收的架子：echo 注册表 + 一个名为 alias-echo 的 agent。
+// testReapHarness 跑孤儿回收/空闲回收的架子：stub 注册表 + 一个名为 alias-stub 的 agent。
 // 无事件总线（回收路径不上报事件，只落 agent 诊断）。
 //
 // CreateAgent 的失败此前被 `_, _ =` 吞掉：那样一旦创建因任何原因失败，回收测试会退化成
 // 在"没有 agent"的空架子上跑，还可能因为路径没变而照样绿。这里改为失败即终止。
 func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
 	t.Helper()
-	r := newRig(t, func(c *rigConfig) { c.echo = true })
+	r := newRig(t, func(c *rigConfig) { c.stub = true })
 	if _, err := r.Svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "alias-echo", Runtimes: []string{"echo"},
+		ID: "alias-stub", Runtimes: []string{"stub"},
 	}); err != nil {
-		t.Fatalf("reaper 架子创建 alias-echo 失败: %v", err)
+		t.Fatalf("reaper 架子创建 alias-stub 失败: %v", err)
 	}
 	return r.Orch, r.Svc
 }
 
-// newSearchRig 跑跨会话检索/导出的架子：echo 注册表 + 事件总线 + 临时 sqlite 库
+// newSearchRig 跑跨会话检索/导出的架子：stub 注册表 + 事件总线 + 临时 sqlite 库
 // + 预置 agent a1（直接注入 svc.agents，跳过 CreateAgent）。
 //
 // 总线与库都要：消息读模型的物化是「域事件 → store」这条链的产物，缺任一端都验不到真东西。
 func newSearchRig(t *testing.T) (*Service, *store.Store) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
-		c.echo, c.bus, c.store = true, true, true
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"echo"}}}
+		c.stub, c.bus, c.store = true, true, true
+		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"stub"}}}
 	})
 	return r.Svc, r.St
 }

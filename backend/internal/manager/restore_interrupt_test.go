@@ -13,15 +13,15 @@ import (
 func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, dbPath)
 	defer st.Close()
 
 	// 第一次进程：登记一个中断中 + 一个已完成会话（写库）。
 	s1 := NewService(reg, eventbus.New())
 	s1.EnableStore(st)
-	s1.registerConversation(&ConversationRec{ID: "s-int", AgentID: "agent-echo", Status: ConversationStatusInProgress})
-	s1.registerConversation(&ConversationRec{ID: "s-done", AgentID: "agent-echo", Status: ConversationStatusCompleted})
+	s1.registerConversation(&ConversationRec{ID: "s-int", AgentID: "agent-stub", Status: ConversationStatusInProgress})
+	s1.registerConversation(&ConversationRec{ID: "s-done", AgentID: "agent-stub", Status: ConversationStatusCompleted})
 
 	// 第二次进程（重启）：恢复后 in_progress → interrupted，completed 原样保留。
 	s2 := NewService(reg, eventbus.New())

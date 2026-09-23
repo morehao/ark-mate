@@ -281,14 +281,14 @@ func TestEnsureConversationResumeGating(t *testing.T) {
 	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", Runtimes: []string{"no-such-runtime"}, State: AgentStateStopped}
 	svc.mu.Unlock()
 	svc.registerConversation(&ConversationRec{
-		ID: "c-echo", AgentID: "no-such-agent", RuntimeHint: "echo", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
+		ID: "c-stub", AgentID: "no-such-agent", RuntimeHint: "stub", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
 	})
 	svc.registerConversation(&ConversationRec{
 		ID: "c-term", AgentID: "ghost", RuntimeHint: "no-such-runtime", Status: ConversationStatusCompleted,
 		ProviderSessionID: "x-1",
 	})
 
-	if _, err := orch.Prompt(ctx, "c-echo", "hi"); err == nil {
+	if _, err := orch.Prompt(ctx, "c-stub", "hi"); err == nil {
 		t.Fatal("可续聊但 agent 不存在应 agent_not_found")
 	} else if ae, ok := acl.As(err); !ok || ae.Code != "agent_not_found" {
 		t.Fatalf("期望 agent_not_found，got %v", err)
@@ -362,7 +362,7 @@ func TestConnKeyModelScoping(t *testing.T) {
 	if connKey("dsh", native, keyE) != connKey("dsh", native, keyE, nil) {
 		t.Fatalf("dsh（会话级模型）不应因不含模型 env 而改变键")
 	}
-	if connKey("echo") != "echo" {
+	if connKey("stub") != "stub" {
 		t.Fatalf("无 env 应仅返回 runtimeID")
 	}
 }

@@ -15,12 +15,12 @@ import (
 // catalogRig 组装带 echo runtime 的 svc+orch（不拨真实连接；会话由桩注入）。
 func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	t.Helper()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	svc.agents["agent-echo"] = &AgentRec{ID: "agent-echo", Name: "Echo", Runtimes: []string{"echo"}, State: AgentStateStopped}
+	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", Runtimes: []string{"stub"}, State: AgentStateStopped}
 	return svc, orch
 }
 
@@ -53,14 +53,14 @@ func TestModelCatalogLiveSession(t *testing.T) {
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
 	}}
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-echo", Runtime: "echo",
+	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
 		sess: &stubConversation{options: opts}}
 
-	resp, err := svc.ModelCatalog(context.Background(), "agent-echo")
+	resp, err := svc.ModelCatalog(context.Background(), "agent-stub")
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
-	if resp.Source != catalogFromSession || resp.Runtime != "echo" {
+	if resp.Source != catalogFromSession || resp.Runtime != "stub" {
 		t.Fatalf("来源标注不符: %+v", resp)
 	}
 	if len(resp.Options) != 1 || resp.Options[0].Category != "model" || !resp.Options[0].Grouped {
@@ -78,7 +78,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
 	delete(orch.conversations, "c1")
-	cached, err := svc.ModelCatalog(context.Background(), "agent-echo")
+	cached, err := svc.ModelCatalog(context.Background(), "agent-stub")
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
 	}
@@ -94,7 +94,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 // （**不新建探测会话**：此处若为拿到目录而 session/new，会留下无法删除的持久记录）。
 func TestModelCatalogNoSource(t *testing.T) {
 	svc, _ := catalogRig(t)
-	resp, err := svc.ModelCatalog(context.Background(), "agent-echo")
+	resp, err := svc.ModelCatalog(context.Background(), "agent-stub")
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -132,9 +132,9 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 		CurrentValue: "test/other",
 		Values:       []acl.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-echo", Runtime: "echo",
+	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
 		sess: &stubConversation{}, proj: proj}
-	svc.catalog.markRejected("agent-echo", "test/other", "旧失败")
+	svc.catalog.markRejected("agent-stub", "test/other", "旧失败")
 	applied, err := orch.ApplyConversationModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
 		t.Fatalf("应用应成功: applied=%v err=%v", applied, err)
@@ -142,11 +142,11 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 	if len(proj.applied) != 1 || proj.applied[0].Model != "test/other" {
 		t.Fatalf("下发值应原样透传: %+v", proj.applied)
 	}
-	if reason, bad := svc.catalog.rejection("agent-echo", "test/other"); bad {
+	if reason, bad := svc.catalog.rejection("agent-stub", "test/other"); bad {
 		t.Fatalf("成功后应清除不可用标记: %s", reason)
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
-	entry, ok := svc.catalog.get("agent-echo", defaultCatalogTTL)
+	entry, ok := svc.catalog.get("agent-stub", defaultCatalogTTL)
 	if !ok || acl.CurrentConfigValue(entry.options, acl.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
@@ -156,14 +156,14 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 	if _, err := orch.ApplyConversationModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
-	if _, bad := svc.catalog.rejection("agent-echo", "nope"); !bad {
+	if _, bad := svc.catalog.rejection("agent-stub", "nope"); !bad {
 		t.Fatal("拒绝的取值应记入不可用反馈")
 	}
 
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
 	unsupported := &fakeProjection{err: acl.NewError(acl.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
-	orch.conversations["c2"] = &ActiveConversation{ID: "c2", AgentID: "agent-echo", Runtime: "echo",
+	orch.conversations["c2"] = &ActiveConversation{ID: "c2", AgentID: "agent-stub", Runtime: "stub",
 		sess: &stubConversation{}, proj: unsupported}
 	_, err = orch.ApplyConversationModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
 	ae, ok := acl.As(err)
