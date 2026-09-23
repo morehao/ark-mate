@@ -62,9 +62,14 @@ func (d *ConversationDao) Upsert(ctx context.Context, c *model.Conversation) err
 			"pinned":              model.FlagValue(c.Pinned),
 			"archived":            model.FlagValue(c.Archived),
 			"status":              c.Status,
-			"last_seq":            gorm.Expr("MAX("+model.TableConversation+".last_seq, ?)", c.LastSeq),
-			"created_at":          model.FormatTimeOrNow(c.CreatedAt),
-			"updated_at":          model.FormatTimeOrNow(c.UpdatedAt),
+			"origin":              c.Origin,
+			"capability_json":     c.CapabilityJSON,
+			// **钉住的指纹**按传入值覆盖：迁移（M3-6）要把它改写成新代际，普通持久化传的是
+			// 记录里的同一个值（会话记录一旦建立就不再重新解析），故这里不会产生"悄悄漂移"。
+			"capability_fingerprint": c.CapabilityFingerprint,
+			"last_seq":               gorm.Expr("MAX("+model.TableConversation+".last_seq, ?)", c.LastSeq),
+			"created_at":             model.FormatTimeOrNow(c.CreatedAt),
+			"updated_at":             model.FormatTimeOrNow(c.UpdatedAt),
 		}),
 	}).Create(c).Error
 }

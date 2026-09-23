@@ -60,15 +60,21 @@ type ConversationRec struct {
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
 	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
-	// 恢复路径据此回到同一代际。落库列 `capability_fingerprint` 与显式能力选择一起在 M3 补齐
-	// （M1 只有本字段与代际键，值恒为空 → connKey 与代际机制之前逐字相同，见 connection.go）。
+	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
+	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。
 	Fingerprint string
-	Status      string
-	Title       string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned      bool   // 置顶（侧栏/管理面用）
-	Archived    bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
+	Origin string
+	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 回落 agent 白名单）。
+	// 与 Fingerprint 的分工：指纹回答"是不是同一套"（比较/回收用），明细回答"到底是哪几个"
+	// （回显、诊断、以及指纹算法变化后的一次性迁移判据）。
+	CapabilityJSON string
+	Status         string
+	Title          string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
+	Pinned         bool   // 置顶（侧栏/管理面用）
+	Archived       bool   // 归档（软删除；会话列表默认不展示）
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：

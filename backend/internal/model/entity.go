@@ -63,6 +63,16 @@ type Conversation struct {
 	Archived          bool   `gorm:"column:archived;serializer:arkforge_flag"`
 	// Status 会话状态。取值权威定义在 internal/manager/events.go（ConversationStatus*）。
 	Status string `gorm:"column:status;not null"`
+	// Origin 会话来源（M3；'' = 人工创建，'automation:<id>' = 该 automation 触发产生）。
+	// 单独成列而不是塞进 capability_json：会话列表要逐行渲染"这是不是自动跑出来的"，
+	// 而逐行解析 JSON 是 O(n) 的解析成本、也让 SQL 侧的过滤/索引无从下手。
+	Origin string `gorm:"column:origin;not null"`
+	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 回落 agent 白名单）。
+	CapabilityJSON string `gorm:"column:capability_json;not null"`
+	// CapabilityFingerprint 该会话**钉住的**能力指纹（代际）。单独成列是为了代际回收能按它
+	// 走索引查"还有哪些会话在用这个代际"；塞进 JSON 就得全表扫 + 逐行解析。
+	// '' = 未声明能力选择（与未引入代际时的行为逐字相同）。
+	CapabilityFingerprint string `gorm:"column:capability_fingerprint;not null"`
 	// LastSeq 该会话已落库事件的最后 seq（events.seq 全局单调）。
 	LastSeq   int64     `gorm:"column:last_seq"`
 	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`

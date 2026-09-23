@@ -51,7 +51,11 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			Model: sess.Model, RuntimeHint: sess.RuntimeHint,
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
-			Status: sess.Status, CreatedAt: sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
+			Status: sess.Status, Origin: sess.Origin, CapabilityJSON: sess.CapabilityJSON,
+			// **恢复会话钉住的指纹**：漏了这一段，重启后 rec.Fingerprint 就是空的 →
+			// 代际键退回"未声明"形态，会话悄悄换到默认能力集（正是 M3 要防的漂移）。
+			Fingerprint: sess.CapabilityFingerprint,
+			CreatedAt:   sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
 		s.registerConversation(rec) // restoring=true → 不重复回写 DB
 		conversations++
@@ -122,8 +126,13 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		Pinned:             rec.Pinned,
 		Archived:           rec.Archived,
 		Status:             rec.Status,
-		CreatedAt:          rec.CreatedAt,
-		UpdatedAt:          rec.UpdatedAt,
+		Origin:             rec.Origin,
+		CapabilityJSON:     rec.CapabilityJSON,
+		// **钉住的指纹**（代际）：普通持久化写的就是记录里的那个值（会话一旦建立就不再重新解析），
+		// 所以这里不会"每次落库都把指纹刷成当前值"；只有 M3-6 的轮次边界迁移会显式改写它。
+		CapabilityFingerprint: rec.Fingerprint,
+		CreatedAt:             rec.CreatedAt,
+		UpdatedAt:             rec.UpdatedAt,
 	})
 	if err != nil {
 		slog.Default().Warn("store: upsert conversation failed", "conversation", rec.ID, "err", err)

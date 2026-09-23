@@ -25,6 +25,9 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if err := s.UpsertConversation(ctx, Conversation{
 		ID: "c1", AgentID: "a1", Cwd: "/tmp/x", Status: "in_progress",
 		Pinned: true, Archived: false, WorkspaceTemporary: true,
+		// v7 三列（M3-1）：来源轴 + 钉住的能力明细与指纹。它们是**文本列**（不是布尔/时间），
+		// 但仍要在这里露一次脸：JSON 明细将来若被改成 BLOB/结构化列，落库形态一变就再也读不回来。
+		Origin: "automation:nightly", CapabilityJSON: `{"skills":["s1"]}`, CapabilityFingerprint: "fp-abc",
 		CreatedAt: at, UpdatedAt: at,
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
@@ -60,6 +63,9 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"conversations", "pinned", "integer", "1", true},
 		{"conversations", "archived", "integer", "0", true},
 		{"conversations", "workspace_temporary", "integer", "1", true},
+		{"conversations", "origin", "text", "automation:nightly", true},
+		{"conversations", "capability_json", "text", `{"skills":["s1"]}`, true},
+		{"conversations", "capability_fingerprint", "text", "fp-abc", true},
 		{"events", "created_at", "text", "", false},
 		{"runs", "started_at", "text", at.Format(model.LayoutTS), true},
 		{"runs", "ended_at", "text", "", true}, // 未结束 → 空串，而非零值时间
@@ -102,6 +108,9 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 	if !conv.Pinned || conv.Archived || !conv.WorkspaceTemporary {
 		t.Errorf("布尔列往返失真: pinned=%v archived=%v temp=%v", conv.Pinned, conv.Archived, conv.WorkspaceTemporary)
+	}
+	if conv.Origin != "automation:nightly" || conv.CapabilityJSON != `{"skills":["s1"]}` || conv.CapabilityFingerprint != "fp-abc" {
+		t.Errorf("v7 三列往返失真: origin=%q json=%q fp=%q", conv.Origin, conv.CapabilityJSON, conv.CapabilityFingerprint)
 	}
 
 	runs, err := s.ListRuns(ctx, "c1")
