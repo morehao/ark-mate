@@ -435,8 +435,15 @@ sudo systemctl restart ark-forge
 # 能力/自动化定义的目录布局没有变化：定义文件仍是唯一事实源，升级不重写它们
 # （skill 的 `sources[]` 与 automation 的 `schedule/target` 都由装载期读，缺键即缺省）。
 
-# 回滚：换回旧二进制重启——但若新版本已把库迁移到更高 schema 版本，旧二进制会
-# 拒绝启动（store.migrate: schema vN 高于本二进制支持的 vM）。跨版本回滚必须先恢复库备份。
+# 回滚：换回旧二进制重启。**但只要新版本已经把库迁移到更高 schema 版本，旧二进制会拒绝启动**
+# （store.migrate: schema vN 高于本二进制支持的 vM），此时唯一的回滚路径是"恢复库备份 + 换回旧二进制"。
+# 本仓当前最新 schema = **v7**（v7 = M3 的能力钉住三列两索引）。所以：
+#   · v6 二进制 → v7 库：停服 → `tar xzf <升级前的备份>` 覆盖 `FORGE_DB`（v7 列没了，能力选定随之丢失，
+#     这是备份点的状态，不是数据损坏）→ 换回 v6 二进制 → 起服
+#   · 跨过 v7 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
+#     升级重放 v7（能力列重新加一遍），而中间版本的任何数据改造都不会被撤销
+#   · 只想"临时退一版"而不动库：保持 v7 库、换回**仍然支持 v7** 的二进制（v7 之后的修复版本都属于这一类）
+# 备忘：`FORGE_DB` 默认 `~/.forge/forge.db`；备份命令见本节开头（vault.key 与 vault/ 必须一起备）。
 ```
 
 重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
