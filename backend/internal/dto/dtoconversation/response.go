@@ -20,6 +20,30 @@ type ConversationResp struct {
 	Model              string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+	// Capabilities 该会话**钉住的**能力选定 + 指纹（M3）。nil = 未声明 → 走 agent 白名单。
+	//
+	// 回显的意义：用户要能看见"这个会话当初钉的是哪一套"，而不是靠推断。
+	// 指纹是不透明摘要（算法保证密钥值不进指纹），透出去只是为了让"是不是同一套"可判。
+	Capabilities *ConversationCapabilitiesResp `json:"capabilities,omitempty"`
+}
+
+// ConversationCapabilitiesResp 会话能力选定的对外表示。
+//
+// **形态与落库的 `capability_json` 逐键一致**（回显就是"当初钉住的那一份"），因此三个状态
+// 各有明确表示，不需要额外的布尔标志：
+//
+//	整个对象缺失  未声明能力选择 → 走 agent 白名单 / 各自的 runtimes 声明
+//	某个 kind 缺键 该 kind 未声明 → 回落上一层（MCP 走 agent.Mcps）
+//	某个 kind 为 [] **明确一个都不要**（不是"全部"）
+//	某个 kind 非空  白名单
+//
+// 用 `omitempty` 让"未声明"表现为**键缺失**而不是 `null`：`null` 与缺失在语义上无法区分，
+// 而这里恰恰要靠这个区分说话。前端取值一律 `capabilities?.mcps`（缺 key = 未声明）。
+type ConversationCapabilitiesResp struct {
+	Skills *[]string `json:"skills,omitempty"`
+	Mcps   *[]string `json:"mcps,omitempty"`
+	// Fingerprint 钉住的代际指纹（空 = 未声明能力选择）。
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // ConversationSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。

@@ -58,6 +58,12 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
+	// 能力选定校验（M3-3）：**在建连之前**。位次很关键——它既要在已知 runtime 之后
+	// （可达性是 runtime 相关的），又要在任何副作用之前（不建会话/不拉进程/不写库）。
+	// 不可达就报错而非静默丢弃：静默丢弃等于让用户以为"选了就生效了"。
+	if err := o.svc.validateSelection(opt.Selection, spec.ID); err != nil {
+		return nil, err
+	}
 	// 能力指纹由**选定**现算（M3）：缺省路径 opt.Selection == nil → 空指纹 →
 	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
 	// 不存在"按 A 算指纹、按 B 注入"的可能。

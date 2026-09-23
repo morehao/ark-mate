@@ -34,6 +34,36 @@ type ConversationCreateReq struct {
 	// Model 运行时目录（GET /models 的 options[category=model].values[].value）里的**不透明取值**，
 	// 原样回传（空 = 跟随运行时默认）。
 	Model string `json:"model,omitempty"`
+	// Capabilities 会话级能力选定（M3）。**缺省 = 与引入本字段之前逐字节相同**：
+	// MCP 走 agent 白名单、skill 走各自的 runtimes 声明，且不产生能力指纹（不新起代际）。
+	// 显式传入时逐个校验 id 存在且对该 runtime 可达，不可达即报错并列出原因（不静默丢弃）。
+	Capabilities *CapabilitiesReq `json:"capabilities,omitempty"`
+}
+
+// SkillsPtr / McpsPtr 取字段（nil 安全的取值，供调用方少写一层判空）。
+func (c *CapabilitiesReq) SkillsPtr() *[]string {
+	if c == nil {
+		return nil
+	}
+	return c.Skills
+}
+
+// McpsPtr 见 SkillsPtr。
+func (c *CapabilitiesReq) McpsPtr() *[]string {
+	if c == nil {
+		return nil
+	}
+	return c.Mcps
+}
+
+// CapabilitiesReq 会话级能力选定（`capabilities: {skills?: [id], mcps?: [id]}`）。
+//
+// 两个字段都是**指针**，用来区分"没传这个 kind"（nil → 回落上一层）与"传了空数组"
+// （非 nil 空 → 这一类一个都不要）。gin 的绑定对 `[]string` 无法表达这个区分，
+// 所以这里必须用指针；`null` 与缺省同义（都反序列化成 nil）。
+type CapabilitiesReq struct {
+	Skills *[]string `json:"skills,omitempty"`
+	Mcps   *[]string `json:"mcps,omitempty"`
 }
 
 // HistoryQuery 会话历史分页参数（GET /conversations/:id/history）。

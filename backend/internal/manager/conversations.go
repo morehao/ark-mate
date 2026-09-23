@@ -47,6 +47,7 @@ func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversatio
 // toConversationResp 把 ConversationRec 折叠为 dtoconversation.ConversationResp。
 func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 	return dtoconversation.ConversationResp{
+		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
@@ -59,6 +60,47 @@ func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 		WorkspaceTemporary: r.WorkspaceTemporary,
 		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// capabilitySelectionFromReq 请求 DTO → 内部选定。
+//
+// `req == nil` **才**是"未声明"：`capabilities: {}` 是"声明了但什么都不限制"，
+// 两者在库里的落值不同（空串 vs `{}`），代际也不同（见 CapabilitySelection 的注释）。
+// 这里不做任何"聪明的归一"——把 `{}` 折叠成未声明会让 GET 回显与用户发的东西不一致。
+func capabilitySelectionFromReq(req *dtoconversation.CapabilitiesReq) *CapabilitySelection {
+	if req == nil {
+		return nil
+	}
+	return &CapabilitySelection{Skills: normalizeIDs(req.Skills), Mcps: normalizeIDs(req.Mcps)}
+}
+
+// toCapabilitiesResp 把会话钉住的选定折叠成对外形态（nil = 未声明 → 缺省路径）。
+//
+// 判据是**记录本身**（CapabilityJSON 空 = 未声明），不是"指纹是否为空"：
+// 两者今天同向（未声明 ⇔ 空指纹），但记录才是事实源，回显不该依赖一个派生量。
+func toCapabilitiesResp(r *ConversationRec) *dtoconversation.ConversationCapabilitiesResp {
+	if r == nil || strings.TrimSpace(r.CapabilityJSON) == "" {
+		return nil
+	}
+	sel := ParseCapabilitySelection(r.CapabilityJSON)
+	if sel == nil {
+		return nil
+	}
+	// 逐 kind 原样回显：**缺键 = 未声明该 kind**（回落上一层），`[]` = 明确一个都不要。
+	// 不做"未声明就补空数组"的归一——那会把两个语义相反的状态画成同一个样子，
+	// 用户看到 `skills: []` 会以为"这个会话没有技能"，实际是"投给它的全部技能"。
+	var skills, mcps *[]string
+	if sel.Skills != nil {
+		v := derefList(sel.Skills)
+		skills = &v
+	}
+	if sel.Mcps != nil {
+		v := derefList(sel.Mcps)
+		mcps = &v
+	}
+	return &dtoconversation.ConversationCapabilitiesResp{
+		Skills: skills, Mcps: mcps, Fingerprint: r.Fingerprint,
 	}
 }
 
@@ -183,11 +225,16 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	if err != nil {
 		return nil, code.FromError(err)
 	}
+	// 能力选定（M3）：`capabilities` 未传 → nil，与引入本字段之前逐字节相同。
+	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
+	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
+	selection := capabilitySelectionFromReq(req.Capabilities)
 	res, err := s.orch.StartConversation(runCtx, agentID, StartOptions{
 		ConversationID:     convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
 		Model:              runtime.ModelConfig{Model: req.Model},
+		Selection:          selection,
 	})
 	if err != nil {
 		// 会话未能建立 → 清理刚代建的目录（非临时工作空间与用户目录一律不动）。

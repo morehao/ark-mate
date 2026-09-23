@@ -106,31 +106,39 @@ func (s *Service) librarySkills() []dtolibrary.LibraryItem {
 func skillApplicability(sk capability.Skill, projections []SkillProjection) []dtolibrary.Applicability {
 	out := make([]dtolibrary.Applicability, 0, len(projections))
 	for _, p := range projections {
-		rt := p.Runtime
-		switch {
-		case !sk.IsEnabled():
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusDisabled,
-				Reason: "该 skill 已被禁用（enabled:false）：改回 enabled:true 即可恢复"})
-		case !sk.AppliesToRuntime(rt):
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusNotApplicable,
-				Reason: fmt.Sprintf("该 skill 的 runtimes 白名单没有 %q（要投给它就把 %q 加进 runtimes，或清空 runtimes 表示全部）", rt, rt)})
-		case p.Err != "":
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusNotConfigured,
-				Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 FORGE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)})
-		case !p.Projection.Tested:
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: true,
-				Status: dtolibrary.StatusUntested,
-				Reason: fmt.Sprintf("%s 的投影声明尚未经实测：会照常投放到 %s，但不担保底座开箱读到它", rt, p.Projection.Root)})
-		default:
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: true,
-				Status: dtolibrary.StatusProjected,
-				Reason: fmt.Sprintf("投放到 %s（%s）", p.Projection.Root, p.Projection.Layout)})
-		}
+		out = append(out, skillRuntimeVerdict(sk, p))
 	}
 	return out
+}
+
+// skillRuntimeVerdict 单个 (skill, 投影) 的可达性判定——**唯一实现**。
+//
+// Library 的逐 runtime 清单与建会话时的选定校验（M3-3）都走它。两处各写一遍必然漂移，
+// 而漂移的表现恰恰是最难自证的一种：「Library 说不可达、建会话却放行」（或反过来）。
+func skillRuntimeVerdict(sk capability.Skill, p SkillProjection) dtolibrary.Applicability {
+	rt := p.Runtime
+	switch {
+	case !sk.IsEnabled():
+		return dtolibrary.Applicability{Runtime: rt, OK: false,
+			Status: dtolibrary.StatusDisabled,
+			Reason: "该 skill 已被禁用（enabled:false）：改回 enabled:true 即可恢复"}
+	case !sk.AppliesToRuntime(rt):
+		return dtolibrary.Applicability{Runtime: rt, OK: false,
+			Status: dtolibrary.StatusNotApplicable,
+			Reason: fmt.Sprintf("该 skill 的 runtimes 白名单没有 %q（要投给它就把 %q 加进 runtimes，或清空 runtimes 表示全部）", rt, rt)}
+	case p.Err != "":
+		return dtolibrary.Applicability{Runtime: rt, OK: false,
+			Status: dtolibrary.StatusNotConfigured,
+			Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 FORGE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)}
+	case !p.Projection.Tested:
+		return dtolibrary.Applicability{Runtime: rt, OK: true,
+			Status: dtolibrary.StatusUntested,
+			Reason: fmt.Sprintf("%s 的投影声明尚未经实测：会照常投放到 %s，但不担保底座开箱读到它", rt, p.Projection.Root)}
+	default:
+		return dtolibrary.Applicability{Runtime: rt, OK: true,
+			Status: dtolibrary.StatusProjected,
+			Reason: fmt.Sprintf("投放到 %s（%s）", p.Projection.Root, p.Projection.Layout)}
+	}
 }
 
 // libraryMcps MCP 条目 + 逐 runtime 可达性（按 transport 承载）。
@@ -164,29 +172,34 @@ func (s *Service) libraryMcps() []dtolibrary.LibraryItem {
 func mcpApplicability(m capability.McpServer, runtimes []string, s *Service) []dtolibrary.Applicability {
 	out := make([]dtolibrary.Applicability, 0, len(runtimes))
 	for _, rt := range runtimes {
-		supported, _ := s.supportedMcpTransports(rt)
-		carried := false
-		for _, t := range supported {
-			if t == m.Transport {
-				carried = true
-				break
-			}
-		}
-		switch {
-		case !m.IsEnabled():
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"})
-		case !carried:
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusNotApplicable,
-				Reason: fmt.Sprintf("%s 不承载 %s 传输（它支持：%s）", rt, m.Transport, strings.Join(supported, "/"))})
-		default:
-			out = append(out, dtolibrary.Applicability{Runtime: rt, OK: true,
-				Status: dtolibrary.StatusProjected,
-				Reason: fmt.Sprintf("以 %s 传输注入（agent 的 mcps 白名单未声明时默认全量）", m.Transport)})
-		}
+		out = append(out, mcpRuntimeVerdict(m, rt, s))
 	}
 	return out
+}
+
+// mcpRuntimeVerdict 单个 (server, runtime) 的可达性判定——**唯一实现**（理由同 skillRuntimeVerdict）。
+func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary.Applicability {
+	supported, _ := s.supportedMcpTransports(rt)
+	carried := false
+	for _, t := range supported {
+		if t == m.Transport {
+			carried = true
+			break
+		}
+	}
+	switch {
+	case !m.IsEnabled():
+		return dtolibrary.Applicability{Runtime: rt, OK: false,
+			Status: dtolibrary.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"}
+	case !carried:
+		return dtolibrary.Applicability{Runtime: rt, OK: false,
+			Status: dtolibrary.StatusNotApplicable,
+			Reason: fmt.Sprintf("%s 不承载 %s 传输（它支持：%s）", rt, m.Transport, strings.Join(supported, "/"))}
+	default:
+		return dtolibrary.Applicability{Runtime: rt, OK: true,
+			Status: dtolibrary.StatusProjected,
+			Reason: fmt.Sprintf("以 %s 传输注入（会话的 mcps 选定与 agent 白名单都未声明时默认全量）", m.Transport)}
+	}
 }
 
 // libraryAgents agent 条目 + 逐候选 runtime 可达性。
