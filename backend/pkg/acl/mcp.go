@@ -39,9 +39,19 @@ func toAcpMcpServers(list []McpServer) []acpsdk.McpServer {
 		headers := toAcpHeaders(m.Headers)
 		switch m.Transport {
 		case "stdio":
+			// Args **恒为非 nil 切片**：SDK 结构体没有 omitempty，nil → `"args": null`，
+			// 而 opencode 的 zod 校验要求数组、收到 null 会直接拒掉整个 session/new
+			// （实测：不带 args 的 MCP 定义 → 会话建不起来，对外只剩一句无上下文的
+			// "Invalid params"，用户完全看不出是哪个字段的问题）。
+			// 与上面 McpServers 恒为数组、下面 env/headers 恒为空切片是同一条规矩：
+			// 传输中性的"没有"在这一层必须落成 wire 上的"空"，不能是 null。
+			args := m.Args
+			if args == nil {
+				args = []string{}
+			}
 			out = append(out, acpsdk.McpServer{
 				Stdio: &acpsdk.McpServerStdio{
-					Name: m.Name, Command: m.Command, Args: m.Args, Env: toAcpEnv(m.Env),
+					Name: m.Name, Command: m.Command, Args: args, Env: toAcpEnv(m.Env),
 				},
 			})
 		case "sse":
