@@ -49,6 +49,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | transcript | `~/.forge/transcripts/` | `FORGE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
 | Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`） |
 | 密钥库（vault） | `~/.forge/vault.key` + `~/.forge/vault/` | `FORGE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
+| 自动化定义 | `~/.forge/automations/<id>.json` | `FORGE_AUTOMATIONS` | 定时任务的定义 + 运行态同文件（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）。**备份它就是备份任务**（含运行史）；手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `forge capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
 | 投影根覆盖 | 空（用 runtime 声明的默认根） | `FORGE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `FORGE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
@@ -143,6 +144,31 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_PROC_REGISTRY` | `<dir(FORGE_DB)>/processes.json` | runtime 子进程注册表（孤儿回收用）；`off`/`disable`/`none` = 关闭登记与回收 |
 | `FORGE_REAP_GRACE` | `2s` | 孤儿回收 SIGTERM → SIGKILL 的宽限期 |
 | `GIN_MODE` | `debug` | 设 `release` 关闭 gin debug 告警 |
+
+### 2.3.0 时区与内嵌 tzdata（M4 起必读）
+
+定时任务（`schedule.timezone`）用 **IANA 时区名**（`Asia/Shanghai`），平台把它算成真实时刻。
+`forge` 二进制**内嵌了一份 IANA 时区库**（`cmd/forge` 里的 `import _ "time/tzdata"`，实测
+**+403 KB**），因此容器里**不需要** `/usr/share/zoneinfo`：
+
+```bash
+# 在只有二进制、零 zoneinfo 文件的 scratch 镜像里（实测）
+docker run --rm -p 127.0.0.1:10098:10001 --tmpfs /data \
+  -e FORGE_ADDR=0.0.0.0:10001 -e FORGE_STORE=memory forge-tzcheck serve
+curl -s -X POST http://127.0.0.1:10098/v1/forge/automations/preview \
+  -H 'content-type: application/json' \
+  -d '{"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},"count":1}'
+# → {"code":0,...,"at":"2026-09-24T01:00:00Z","wall":"2026-09-24 09:00 CST","timezone":"Asia/Shanghai"}
+```
+
+这条不是"锦上添花"：**去掉那个 import 的同一份二进制在同一镜像里报
+`40001 未知时区 Asia/Shanghai`**（对照实测）。失败形态是最难查的一类——任务不是不跑，而是在
+**错误的时间**跑（或直接拒绝执行定义），且宿主机上完全正常。所以：
+
+- 换用 `scratch` / `distroless` / 任何不带 tzdata 的基础镜像时**照常工作**，无需额外挂载；
+- 需要在时区库里加自定义规则（如临时改某地 DST）时才需要挂载/覆盖，内嵌库是**兜底**而非唯一来源
+  （Go 的查找顺序：`ZONEINFO` → 系统目录 → 内嵌）；
+- 二进制体积比不带时区库大约 400 KB，可接受（见 §1 的镜像体积）。
 
 ### 2.3.1 配置目录 `.forge/config`（A4）
 
@@ -400,9 +426,14 @@ sudo systemctl stop ark-forge
 tar czf ark-forge-$(date +%F).tgz -C /var/lib ark-forge
 sudo systemctl start ark-forge
 
-# 升级：替换二进制后重启（SQLite 迁移在启动时自动执行，幂等）
-sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge
+# 升级：三步——① 先干跑迁移看一眼 ② 换二进制（SQLite 迁移在启动时自动执行，幂等）
+#              ③ 若你有 skill 定义用了已退役的 sources[]，改一行 projection_dirs 后重校
+sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge.new
+./forge.new capability migrate --dry-run       # 只报告会改哪些定义文件，不落盘
+sudo mv /opt/ark-forge/forge.new /opt/ark-forge/forge
 sudo systemctl restart ark-forge
+# 能力/自动化定义的目录布局没有变化：定义文件仍是唯一事实源，升级不重写它们
+# （skill 的 `sources[]` 与 automation 的 `schedule/target` 都由装载期读，缺键即缺省）。
 
 # 回滚：换回旧二进制重启——但若新版本已把库迁移到更高 schema 版本，旧二进制会
 # 拒绝启动（store.migrate: schema vN 高于本二进制支持的 vM）。跨版本回滚必须先恢复库备份。
@@ -427,6 +458,9 @@ sudo systemctl restart ark-forge
 | 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(FORGE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`FORGE_PROC_REGISTRY=off` 可关闭 |
 | 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
 | 启动报 `schema vN 高于本二进制支持的 vM` | 库被更新版本迁移过 → 恢复对应备份或升级二进制（拒绝启动是刻意保护） |
+| 定时任务报 `未知时区 Asia/Shanghai` | 二进制没带内嵌 tzdata（`cmd/forge` 的 `import _ "time/tzdata"` 被删）或传了库外的自定义名 → 从官方构建取二进制；内嵌库缺失时容器里 `time.LoadLocation` 会失败，宿主机却可能正常 |
+| 定时任务在预期之外的时间跑 / 预览与预期不符 | 先对 `POST /automations/preview` 核对墙钟；DST 空档（不存在的本地时刻）会被**向后顺移**并在 `warnings` 里说明，回拨（重复时刻）取**第一次**。`schedule.timezone` 必须是 IANA 名，不能写 `CST`/`GMT+8` 这类别名 |
+| 定时任务重跑/卡住不跑 | `last_fired_at` 是认领游标（**平台写回，写面拒收**）；改它是手工干预手段：置空可让下一次 tick 重新认领该 occurrence，置成未来会让它一直不跑。别在调度运行中改定义文件——用 `PUT /automations/:id`（mtime 乐观锁会挡住并发改动） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `FORGE_DB` |
 | `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh/opencode 走原生 `resume`，其余走 handoff memo） |
 | 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
@@ -568,6 +602,21 @@ sudo systemctl restart ark-forge
   stderr_source=last_error`，尾巴含 `ws read: ... EOF`，`last_error.code=connection_lost`。
   能力探测（`/agents/:id/capabilities`）经远程传输正常返回。
 
+- 定时任务（M4，本机实跑）：`forge serve`（memory 模式、临时目录、`FORGE_TOKEN=smoke-token`）+
+  `E2E_BASE=http://127.0.0.1:10001 FORGE_SMOKE_TOKEN=smoke-token node frontend/scripts/smoke-e2e.mjs`
+  → 「定时任务面」一节全 PASS：`POST /automations/preview`（`Asia/Shanghai` 09:00 →
+  `2026-09-24T01:00:00Z` + 墙钟 `09:00 CST`，3 次严格升序）、非法 schedule → `40001`、
+  新建回执带 `next_due_at`、重复 id → `40901`、写 `last_fired_at` → `40001`（运行态键不可写）、
+  空运行史返回 `[]` 且 `limit=20`、手动触发打不存在的 agent → **报错且留痕**
+  （`runs[0].status=skipped` 带原因）、删除幂等（`deleted:true` → `deleted:false`）。
+  **这条冒烟抓到一个真实漂移**：空运行史原先是 `"runs": null`，与前端声明的数组类型不符。
+- 容器时区（M4-7，本机实跑）：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64` 构建后放进
+  `FROM scratch`（镜像里只有二进制，`docker save | tar -t | grep -c zoneinfo` = **0**）→
+  `preview` 与宿主机逐字一致（同上 `09:00 CST`）；**去掉 `import _ "time/tzdata"` 的同一份二进制
+  在同一镜像里报 `40001 未知时区 Asia/Shanghai`**——对照证明这个 import 是承重的，而不是装饰。
+  内嵌带来的体积增量实测 **+403 KB**（40,291,941 → 40,686,100 字节）。
+  注：默认最小镜像 `debian:bookworm-slim` 自带 `/usr/share/zoneinfo`，所以"默认镜像里能跑"并不能
+  证明这条；上面的验证特意用了零 zoneinfo 的镜像。
 - 单操作员令牌（A6）：`token: cfg-token-9f3a`（config.json）→ `forge config` 输出掩码
   `cf…3a（14 字符）`；`/health` 无令牌 200；`/agents` 无令牌/错令牌 → **HTTP 401 +
   `code=40101`**（信封含 requestID 与提示文案），正确 `Bearer` 与 `?token=` 均 200；
