@@ -108,8 +108,12 @@ func (s *Service) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsRe
 	if v.Error != "" {
 		return nil, invalidAutomationByID(id, v.Error)
 	}
+	// 空史也要是 `[]` 而不是 `null`：前端类型写的是数组，`null` 会让"没触发过"与
+	// "字段缺失"在客户端无从区分（这条是被 browser-free 冒烟脚本抓出来的真实漂移）。
+	runs := make([]automation.RunRecord, 0, len(v.RecentRuns))
+	runs = append(runs, v.RecentRuns...)
 	return &dtoautomation.AutomationRunsResp{
-		ID: id, Runs: append([]automation.RunRecord(nil), v.RecentRuns...), Limit: automation.RecentRunsMax,
+		ID: id, Runs: runs, Limit: automation.RecentRunsMax,
 	}, nil
 }
 

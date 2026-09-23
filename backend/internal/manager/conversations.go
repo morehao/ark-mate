@@ -58,6 +58,7 @@ func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 		Model:              r.Model,
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
+		Origin:             r.Origin,
 		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
 	}

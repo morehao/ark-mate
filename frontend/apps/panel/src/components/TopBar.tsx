@@ -10,6 +10,7 @@ const NAV = [
   { to: '/agents', label: 'Agents' },
   { to: '/capabilities', label: '能力' },
   { to: '/usage', label: '用量' },
+  { to: '/automations', label: '定时任务' },
   { to: '/settings', label: '设置' },
 ] as const
 

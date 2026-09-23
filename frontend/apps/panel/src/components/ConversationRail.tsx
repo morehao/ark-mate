@@ -14,6 +14,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark/ui'
 import { Dot, conversationStatusMeta } from '@ark/ui'
+import { automationIDFromOrigin, isAutomationOrigin } from '../console/automationView'
 import type { MenuProps } from 'antd'
 import type { ConversationSearchHit, ConversationSummary, MessageSearchHit, MessageSearchResp } from '@ark/types'
 import { conversationSearch, exportConversations, messageSearch, toErrorMessage } from '@ark/api'
@@ -515,6 +516,26 @@ export function ConversationRail({ onCreate }: Props) {
               <Dot color={meta.color} pulse={running} size={6} />
               <span style={{ color: running ? tokens.text : tokens.textSecondary }}>{meta.label}</span>
             </span>
+            {/* 来源标记：由定时任务触发的会话（`origin=automation:<id>`）——人工与会话流混在一起时，
+                "这条是谁开的"必须一眼可见，而不是靠时间去猜。 */}
+            {isAutomationOrigin(sm.origin) && (
+              <span
+                title={`由定时任务 ${automationIDFromOrigin(sm.origin)} 触发`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  border: `1px solid ${tokens.border}`,
+                  borderRadius: 999,
+                  padding: '1px 7px',
+                  color: tokens.primary,
+                  whiteSpace: 'nowrap',
+                  flex: 'none',
+                }}
+              >
+                ⏱ 定时
+              </span>
+            )}
             <span
               style={{ marginLeft: 'auto', flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
               title={sm.updated_at}

@@ -149,6 +149,25 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if convs[0].Origin != "automation:daily" {
 		t.Fatalf("origin 不符: %q", convs[0].Origin)
 	}
+	// 端口形态也要带上它：面板读的是 `GET /conversations` 的信封，不是内存记录。
+	// 这里断言"标记真的走完了到客户端的那一段路"，否则面板只能靠时间去猜哪条是自动跑的。
+	resp := toConversationResp(convs[0])
+	if resp.Origin != "automation:daily" {
+		t.Fatalf("ConversationResp 应回带 origin: %q", resp.Origin)
+	}
+	listed, err := r.svc.ListConversations(false, "")
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	marked := 0
+	for _, c := range listed {
+		if c.Origin == "automation:daily" {
+			marked++
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("会话列表里应恰好 1 条带 automation 标，got %d（%+v）", marked, listed)
+	}
 	got := r.file(t, "daily")
 	if got["last_status"] != automation.RunClaimed {
 		t.Fatalf("last_status 应为 claimed: %v", got["last_status"])

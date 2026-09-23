@@ -27,6 +27,11 @@ export interface ConversationSummary {
    * 各自的 runtimes 声明），不是"没有能力"。
    */
   capabilities?: ConversationCapabilities | null
+  /**
+   * 会话来源（平台判定，非用户输入）：缺省 = 人工创建，`automation:<id>` = 该定时任务触发。
+   * 面板据此给会话打标并可跳回任务页。
+   */
+  origin?: string
   created_at: string // ISO 时间戳（UTC RFC3339）
   updated_at: string
 }

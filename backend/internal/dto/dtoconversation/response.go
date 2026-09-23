@@ -20,6 +20,9 @@ type ConversationResp struct {
 	Model              string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+	// Origin 会话来源（平台判定，非用户输入）：空 = 人工创建，`automation:<id>` = 该定时任务触发。
+	// 回显的意义与 capabilities 同一条：用户要能看见"这条会话是谁开的"，而不是靠时间去猜。
+	Origin string `json:"origin,omitempty"`
 	// Capabilities 该会话**钉住的**能力选定 + 指纹（M3）。nil = 未声明 → 走 agent 白名单。
 	//
 	// 回显的意义：用户要能看见"这个会话当初钉的是哪一套"，而不是靠推断。

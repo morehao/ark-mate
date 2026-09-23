@@ -353,6 +353,117 @@ async function checkUsage() {
   ok('GET /usage/summary group_by=tool → HTTP 200 code=40001')
 }
 
+// ——— 5. 定时任务面（M4）：preview / 定义读写 / 运行史 / 手动触发 ———
+//
+// 覆盖面板真正依赖的**信封与字段形状**（页面渲染的是这份数据），以及两条易漂移的语义：
+//   ① preview 的墙钟与时区必须与请求一致（"我设的 9 点到底几点跑"）；
+//   ② 平台独占的运行态键不可写（`last_fired_at` 是认领判据，能写它就能让同一次触发重放）。
+// 手动触发**故意打一个不存在的 agent**：这条路径要同时证明"接口报错"与"运行史留痕"——
+// 触发失败不是静默的（这正是 M4 最容易被做漏的一条）。
+async function checkAutomations() {
+  console.log('· 定时任务面（M4）')
+  const id = `smoke-${Date.now()}`
+  const schedule = { kind: 'daily', timezone: 'Asia/Shanghai', hour: 9, minute: 0 }
+
+  // ① preview：不落盘、不建会话、也不要求定义存在
+  const pv = await apiPost('/automations/preview', { schedule, count: 3 })
+  if (pv.env.code !== 0) return bad('POST /automations/preview 信封', JSON.stringify(pv.env))
+  const occ = pv.env.data?.occurrences
+  if (!Array.isArray(occ) || occ.length !== 3) return bad('POST /automations/preview 载荷', JSON.stringify(pv.env.data))
+  for (const o of occ) {
+    if (!o.at || !o.wall || o.timezone !== 'Asia/Shanghai') return bad('preview 项字段', JSON.stringify(o))
+  }
+  // 上海 09:00 = UTC 01:00；墙钟应当是 09:00（DST 无关，但时区解释错了这里立刻红）
+  if (!occ[0].at.endsWith('T01:00:00Z') || !occ[0].wall.includes('09:00')) {
+    return bad('preview 时区解释', JSON.stringify(occ[0]))
+  }
+  ok(`POST /automations/preview → ${occ.length} 次，首次 ${occ[0].wall}（${occ[0].at}）`)
+
+  // preview 顺序必须是升序且严格递增（否则"接下来 3 次"是假的）
+  for (let i = 1; i < occ.length; i++) {
+    if (!(new Date(occ[i].at) > new Date(occ[i - 1].at))) return bad('preview 升序', JSON.stringify(occ))
+  }
+
+  // 非法 schedule（缺时区）→ 40001
+  const badPv = await apiPost('/automations/preview', { schedule: { kind: 'daily', hour: 9 } })
+  if (badPv.http !== 200 || badPv.env.code !== 40001) {
+    return bad('POST /automations/preview 非法 schedule', `HTTP ${badPv.http} code=${badPv.env.code}`)
+  }
+  ok('POST /automations/preview 非法 schedule → HTTP 200 code=40001')
+
+  // ② 新建 → 列表可见
+  const agents = await apiGet('/agents')
+  const agentID = agents.env.data?.[0]?.id
+  const created = await apiPost('/automations', {
+    id,
+    name: '冒烟任务',
+    enabled: true,
+    schedule,
+    target: { agent_id: agentID, cwd: process.cwd(), prompt: '冒烟：这条不该真的跑' },
+  })
+  if (created.env.code !== 0) return bad('POST /automations 新建', JSON.stringify(created.env))
+  if (created.env.data?.next_due_at === undefined) {
+    // next_due_at 是内存态现算；新建后应当立刻有值（否则面板"下次"一栏永远是空的）
+    return bad('POST /automations 回执 next_due_at', JSON.stringify(created.env.data))
+  }
+  ok(`POST /automations → ${id}，下次 ${created.env.data.next_due_at}`)
+
+  const dup = await apiPost('/automations', { id, name: '冒烟任务' })
+  if (dup.env.code !== 40901) return bad('POST /automations 重复 id', `code=${dup.env.code}`)
+  ok('POST /automations 重复 id → 40901 automation_exists（绝不覆盖）')
+
+  const list = await apiGet('/automations')
+  if (list.env.code !== 0 || !list.env.data.some((a) => a.id === id)) {
+    return bad('GET /automations 列表', JSON.stringify(list.env))
+  }
+  ok(`GET /automations → ${list.env.data.length} 条（含刚建的）`)
+
+  // ③ 写平台独占键 → 40001（能写 last_fired_at 就能让同一次触发重放）
+  const reserved = await apiPost(`/automations/${id}`, {}) // POST 不在路由表上，仅确认不会被误当成写面
+  const reservedPut = await fetch(`${API}/automations/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...AUTH },
+    body: JSON.stringify({ last_fired_at: '2030-01-01T00:00:00Z' }),
+  })
+  const reservedEnv = await reservedPut.json()
+  if (reservedEnv.code !== 40001) return bad('PUT /automations/:id 保留键', `code=${reservedEnv.code}`)
+  ok('PUT /automations/:id 写 last_fired_at → 40001（运行态键不可写）')
+  void reserved
+
+  // ④ 运行史：还没触发过 → 空史 + limit 回带
+  const runs0 = await apiGet(`/automations/${id}/runs`)
+  if (runs0.env.code !== 0 || !Array.isArray(runs0.env.data?.runs) || !runs0.env.data?.limit) {
+    return bad('GET /automations/:id/runs 空史', JSON.stringify(runs0.env))
+  }
+  ok(`GET /automations/${id}/runs → limit=${runs0.env.data.limit}（空史）`)
+
+  // ⑤ 手动触发（打一个不存在的 agent）→ 报错 + 留痕
+  await fetch(`${API}/automations/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...AUTH },
+    body: JSON.stringify({ target: { agent_id: 'no-such-agent', cwd: process.cwd(), prompt: 'x' } }),
+  })
+  const run = await apiPost(`/automations/${id}/run`, {})
+  if (run.env.code === 0) return bad('POST /automations/:id/run 失败路径', '打不存在的 agent 竟然成功了')
+  const runs1 = await apiGet(`/automations/${id}/runs`)
+  const last = runs1.env.data?.runs?.[0]
+  if (!last || last.status !== 'skipped' || !last.reason) {
+    return bad('POST /automations/:id/run 留痕', JSON.stringify(runs1.env.data))
+  }
+  ok(`POST /automations/${id}/run → code=${run.env.code}（报错且留痕：${last.status}）`)
+
+  // ⑥ 删除（幂等）
+  const del = await fetch(`${API}/automations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: AUTH })
+  const delEnv = await del.json()
+  if (delEnv.code !== 0 || delEnv.data?.deleted !== true) return bad('DELETE /automations/:id', JSON.stringify(delEnv))
+  const del2 = await fetch(`${API}/automations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: AUTH })
+  const del2Env = await del2.json()
+  if (del2Env.code !== 0 || del2Env.data?.deleted !== false) {
+    return bad('DELETE /automations/:id 幂等', JSON.stringify(del2Env))
+  }
+  ok('DELETE /automations/:id → deleted:true，重复删除 deleted:false（幂等）')
+}
+
 // ——— 主流程 ———
 
 async function main() {
@@ -361,6 +472,7 @@ async function main() {
     await checkRest()
     await checkBizError()
     await checkUsage()
+    await checkAutomations()
     await checkWs()
   } catch (err) {
     bad('未预期异常', err?.stack || String(err))
