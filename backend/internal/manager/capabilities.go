@@ -312,11 +312,17 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 	}
 }
 
-// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 注册表全量 → 该 runtime 的 McpTransports 过滤 → agent.Mcps 白名单（nil = 未声明 → 全量；
-// 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
-// 未知 runtime → nil（维持现状不下发）。
-func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
+// mcpSelectionFor 选出该 agent×runtime 的 MCP **候选定义**（未解析密钥）。
+//
+// 这是「哪些 server 属于这套能力」的**唯一**实现：注入面（McpServersFor）与代际指纹
+// （capabilityFingerprint）都从这里取。两处各写一遍的后果是"指纹里有的、注入时没有"（或反之）——
+// 前者让会话白换一次代际，后者更糟：指纹说这套能力包含某个 server，实际却没注入。
+//
+// 与注入面的差别只有一处、且是**有意**的：这里不解析密钥（能不能解析是环境事实，不该让指纹抖动）。
+func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string) []capability.McpServer {
+	if s.caps == nil {
+		return nil
+	}
 	supported, ok := s.supportedMcpTransports(runtimeID)
 	if !ok {
 		return nil
@@ -333,7 +339,7 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 		}
 	}
 	servers := s.caps.ListMcpServers()
-	out := make([]acl.McpServer, 0, len(servers))
+	out := make([]capability.McpServer, 0, len(servers))
 	for _, m := range servers {
 		if !want[m.Transport] {
 			continue
@@ -341,6 +347,19 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 		if allow != nil && !allow[m.ID] {
 			continue // agent 白名单未启用该 server（含空白名单 = 全部跳过）
 		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
+// 注册表全量 → 该 runtime 的 McpTransports 过滤 → agent.Mcps 白名单（nil = 未声明 → 全量；
+// 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
+// 未知 runtime → nil（维持现状不下发）。
+func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
+	servers := s.mcpSelectionFor(agent, runtimeID)
+	out := make([]acl.McpServer, 0, len(servers))
+	for _, m := range servers {
 		name := m.Name
 		if name == "" {
 			name = m.ID

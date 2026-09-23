@@ -295,7 +295,8 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
 	}
-	if _, err := s.orch.acquire(ctx, agent, spec); err != nil {
+	// 暖启动没有会话，因此没有能力选择 → 空指纹（缺省代际，与代际机制之前同键）。
+	if _, err := s.orch.acquire(ctx, agent, spec, ""); err != nil {
 		s.setAgentState(id, AgentStateStopped)
 		// A3：启动失败时记录诊断（含握手/起进程阶段的 stderr 尾巴），供 /diagnostics 外露。
 		s.recordAgentError(id, "", acl.Classify(err), acl.Classify(err).StderrTail)

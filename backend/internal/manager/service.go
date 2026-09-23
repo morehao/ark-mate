@@ -59,8 +59,12 @@ type ConversationRec struct {
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
-	Status            string
-	Title             string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
+	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
+	// 恢复路径据此回到同一代际。落库列 `capability_fingerprint` 与显式能力选择一起在 M3 补齐
+	// （M1 只有本字段与代际键，值恒为空 → connKey 与代际机制之前逐字相同，见 connection.go）。
+	Fingerprint string
+	Status      string
+	Title       string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
 	Pinned            bool   // 置顶（侧栏/管理面用）
 	Archived          bool   // 归档（软删除；会话列表默认不展示）
 	CreatedAt         time.Time

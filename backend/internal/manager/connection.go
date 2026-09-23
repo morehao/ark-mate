@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,9 +12,12 @@ import (
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
-// connKey 计算连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
+// connKey 计算**基础**连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
 // 同 runtime 且影响线程行为的 env 组合相同 → 共享暖进程；任一不同 → 各自独立进程。
 // 传入组约定：nativeEnv（原生权限开关）、keyEnv（provider 密钥）、modelEnv（仅进程级模型）。
+//
+// **这不是代际键**：代际键 = 本键 + 能力指纹，见 generationKey。保留本函数原样是因为
+// "配置相同则共享暖进程"这条既有规则要**逐字**保留（R11）。
 func connKey(runtimeID string, envs ...[]string) string {
 	var parts []string
 	for _, e := range envs {
@@ -27,8 +32,46 @@ func connKey(runtimeID string, envs ...[]string) string {
 	return runtimeID + "\x00" + strings.Join(parts, "\x00")
 }
 
+// generationKey 在基础连接键之上追加**代际维度**（能力指纹）：指纹相同 = 同一套能力 = 同一个
+// 代际 = 复用同一个暖进程；指纹不同 = 各起一个进程（能力集与投影根都是进程级的，混用等于把
+// A 会话的 skill 投给 B 会话）。
+//
+// **指纹为空 → 原样返回基础键**：这是 R11（缺省零回归）的落点——未声明能力选择的会话产生的键
+// 必须与代际机制之前**逐字相同**，同配置的两个会话才仍共享一个暖进程。
+//
+// 非空时用**带长度前缀**的形态而不是简单拼后缀：`connKey("r", envA)` 是
+// `connKey("r", envA, envB)` 的字符串前缀（env 组之间就是 `\x00` 分隔），拼后缀会让"某个基础键
+// 恰好是另一个基础键的前缀"与"代际后缀"互相串味。长度前缀让基础键自我定界。
+func generationKey(connKey, fingerprint string) string {
+	if fingerprint == "" {
+		return connKey
+	}
+	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint
+}
+
+// generationKeysFor 某**基础键**对应的全部代际缓存键（含基础键本身，可能为空）。
+//
+// 停机/停 agent 要关掉该 agent 的**所有**代际，而不是只关"当前算出来的那一个键"——代际是内容
+// 寻址的，同一 agent 的旧代际可能仍然活着。匹配用 `rc.baseKey`（连接自己记着它由哪个基础键
+// 派生），不做键字符串的切分：键怎么构造、怎么匹配只在一个地方说话。
+func (o *Orchestrator) generationKeysFor(base string) []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make([]string, 0, 2)
+	for k, rc := range o.conns {
+		if rc.baseKey == base {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out) // 遍历顺序稳定（关闭顺序与日志可复现）
+	return out
+}
+
 // acquire 取（或拨）一条 runtime 连接：活着复用，断开则作废重拨；并挂断连监听。
-func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec) (*runtimeConn, error) {
+//
+// fingerprint = 该会话钉住的能力指纹（M1 恒为空：显式能力选择是 M3 的面）。空值走的是
+// generationKey 的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
+func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec, fingerprint string) (*runtimeConn, error) {
 	// 凭据面先校验（P2）：agent 绑定了 provider 档案而档案缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 acquire 内可一处
 	// 覆盖三条入口：新建会话、按需恢复、StartAgent 暖启动。
@@ -44,7 +87,8 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	keyEnv := o.svc.providerEnvFor(agent.Provider)
 	// 模型不进 env/缓存键：模型选择是**会话级**语义（session/set_config_option），
 	// 同一连接可服务多个模型；进程级模型配置归底座自身的配置文件/环境（子进程继承 daemon 环境）。
-	key := connKey(spec.ID, nativeEnv, keyEnv)
+	baseKey := connKey(spec.ID, nativeEnv, keyEnv)
+	key := generationKey(baseKey, fingerprint)
 
 	o.mu.Lock()
 	rc := o.conns[key]
@@ -128,7 +172,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		"close", sc.Close != nil)
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
-	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, started: time.Now()}
+	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, baseKey: baseKey, started: time.Now()}
 	o.registerProc(rc)
 	o.mu.Lock()
 	o.conns[key] = rc
@@ -375,15 +419,27 @@ func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
 // 空闲 → 关连接（显式停机：会话句柄作废但状态如实保留；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
-	key := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), o.svc.providerEnvFor(agent.Provider))
+	base := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), o.svc.providerEnvFor(agent.Provider))
+	keys := o.generationKeysFor(base)
+	if len(keys) == 0 {
+		o.svc.setAgentState(agent.ID, AgentStateStopped)
+		return nil
+	}
+	// 该配置下**所有代际**都要关（代际是按能力指纹内容寻址的，同一 agent 的旧代际可能仍活着）；
+	// 任一代际上有在途 turn 就整体拒绝——显式停机不该把跑着的一轮打断，也不该"关一半留一半"。
 	o.mu.Lock()
-	rc := o.conns[key]
+	rcs := make([]*runtimeConn, 0, len(keys))
 	busy := 0
-	if rc != nil {
-		busy = o.inflight.Len(rc.client)
+	for _, k := range keys {
+		rc := o.conns[k]
+		if rc == nil {
+			continue
+		}
+		rcs = append(rcs, rc)
+		busy += o.inflight.Len(rc.client)
 	}
 	o.mu.Unlock()
-	if rc == nil {
+	if len(rcs) == 0 {
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil
 	}
@@ -391,16 +447,20 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 		return acl.NewError(acl.ClassRequest, "agent_busy",
 			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 turn，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
 	}
-	// 用户显式停 agent：先置原因再关（watchConn→dropConn 据此判定，不把会话写成失败态）。
-	rc.intentional.Store(true)
-	if err := rc.client.Close(); err != nil {
-		return err
+	for _, rc := range rcs {
+		// 用户显式停 agent：先置原因再关（watchConn→dropConn 据此判定，不把会话写成失败态）。
+		rc.intentional.Store(true)
+		if err := rc.client.Close(); err != nil {
+			return err
+		}
 	}
-	// watchConn → dropConn 会作废会话句柄并置 stopped；这里等它跑完再返回。
-	select {
-	case <-rc.client.Done():
-	case <-ctx.Done():
-		return ctx.Err()
+	// watchConn → dropConn 会作废会话句柄并置 stopped；这里等它们跑完再返回。
+	for _, rc := range rcs {
+		select {
+		case <-rc.client.Done():
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	o.svc.setAgentState(agent.ID, AgentStateStopped)
 	return nil

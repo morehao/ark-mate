@@ -34,6 +34,9 @@ type ActiveConversation struct {
 	ID      string
 	AgentID string
 	Runtime string
+	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
+	// （漏了它就会在重启后悄悄换一套能力集）。
+	Fingerprint string
 
 	client *acl.Client
 	sess   acpSession
@@ -120,9 +123,12 @@ type runtimeConn struct {
 	client  *acl.Client
 	agentID string
 	spec    runtime.Spec
-	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名）。同一 runtime 但原生权限配置不同的
-	// agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
-	key     string
+	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
+	// 配置不同的 agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
+	key string
+	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机/停 agent 用它一次性找到**该配置的
+	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
+	baseKey string
 	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
 	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
@@ -155,6 +161,10 @@ type StartOptions struct {
 	WorkspaceTemporary bool
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
+	// Fingerprint 该会话声明的能力选择解析成的**能力指纹**（代际键的维度之一）。
+	// **空 = 未声明能力选择**（缺省路径，代际键与代际机制之前逐字相同）。M1 恒为空：
+	// 显式能力选择（`POST /conversations` 的 `capabilities`）是 M3 的面。
+	Fingerprint string
 }
 
 // RunResult 一次 RunOnce（demo）的结果。

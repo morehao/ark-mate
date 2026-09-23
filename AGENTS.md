@@ -11,7 +11,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
   - **依赖方向单一**：
     - 应用侧：`cmd → app → router → controller → service(端口) ← manager(实现)`；`dto` 被两侧共用但自身不依赖应用层。
     - 持久侧：`dbclient → dao → store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
-  - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**三条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）。**共 9 条**——加守卫时记得同步这句话。
+  - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）。**共 10 条**——加守卫时记得同步这句话。
 - `frontend/`：pnpm workspace（`apps/panel` 控制台 + `packages/{ui,types,api,tsconfig}`）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 设计文档是**历史记录**（会话早期叫 sessions，P0 起为 conversations）；对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
 
@@ -34,7 +34,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 ## 构建形态
 
 - embed 仅随 `-tags release` 编译（`backend/pkg/web/web.go` 带 `//go:build release`）；默认构建不依赖前端产物。`backend/pkg/web/dist/` 不入库（由 `make web` 从 `apps/panel` 产物拷贝刷新）。
-- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config`。`forge demo` 需本机装 opencode/dsh（`echo` 演示底座及其 `acp-serve`/`acp-demo` 子命令已于 M0 删除）。
+- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / capability migrate`（最后一条把 skill 定义里的旧 `sources[]` 转成 `runtimes[]`，`--dir` / `--dry-run` 可选）。`forge demo` 需本机装 opencode/dsh（`echo` 演示底座及其 `acp-serve`/`acp-demo` 子命令已于 M0 删除）。
 
 ## session 与 conversation：两个名字，一个东西（外加一个同名不同物）
 

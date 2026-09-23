@@ -58,7 +58,8 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	// 该会话声明的能力选择解析成的指纹（M1 恒为空：显式能力选择是 M3 的面）。
+	rc, err := o.acquire(ctx, agent, spec, opt.Fingerprint)
 	if err != nil {
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil, err
@@ -85,8 +86,8 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台 uuid（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
-	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
-		proj: runtime.NewProjection(spec, sess)}
+	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: opt.Fingerprint,
+		client: rc.client, sess: sess, proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
@@ -103,7 +104,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
-		Model: opt.Model.Model, RuntimeHint: spec.ID,
+		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: opt.Fingerprint,
 		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
@@ -164,7 +165,8 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	// **恢复路径也要带上会话钉住的指纹**：漏改这一处的后果是"重启后能力集悄悄换了一套"。
+	rc, err := o.acquire(ctx, agent, spec, rec.Fingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +212,8 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 			o.svc.registerConversation(rec)
 		}
 	}
-	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
-		proj: runtime.NewProjection(spec, sess), memo: memo}
+	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: rec.Fingerprint,
+		client: rc.client, sess: sess, proj: runtime.NewProjection(spec, sess), memo: memo}
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），
 	// 只留痕 + 标灰，不让老会话因为一个失效取值而打不开。

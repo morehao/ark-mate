@@ -214,7 +214,8 @@ func (s *Service) ModelCatalog(ctx context.Context, agentID string) (*dtomodel.M
 //     仅在平台无记录时用，且优先带绝对 cwd 的条目；dsh 会主动排除仍在活跃的会话，
 //     所以不会抢用户终端里正在用的那条。
 func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spec runtime.Spec) ([]acl.ConfigOption, error) {
-	rc, err := s.orch.acquire(ctx, agent, spec)
+	// 目录探测不绑定任何会话，按缺省代际复用连接（不额外起进程）。
+	rc, err := s.orch.acquire(ctx, agent, spec, "")
 	if err != nil {
 		return nil, err
 	}

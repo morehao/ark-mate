@@ -17,6 +17,8 @@ package manager
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
@@ -82,6 +84,53 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 	t.Cleanup(orch.Close)
 
 	return &rig{Svc: svc, Orch: orch, Bus: bus, St: st}
+}
+
+// stubACPSpec 一个**真子进程**的最小 ACP responder（python3），只实现本包测试需要的两个方法：
+//
+//	initialize  → 协议版本 + 空能力声明
+//	session/new → 回一个稳定可预期的 sessionId
+//
+// 为什么不用 `testutil.StubRegistry()`：那个 spec 没有 Launch，一旦测试真的走到"拨号"就会以
+// `spawn_failed` 失败（它服务的是纯列表/状态类用例）。凡是需要**真连接**（连接池、暖进程复用、
+// 停机拆连接）的用例都要真子进程——而"连接池里到底有几条连接"恰恰只能在真拨号之后才有意义。
+//
+// 需要定制 stderr/握手行为的用例（如诊断的实时尾巴）自带脚本，不复用本函数。
+func stubACPSpec(t *testing.T) runtime.Spec {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "acp_stub.py")
+	code := `import json, sys
+n = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+    except Exception:
+        continue
+    method, mid = msg.get("method"), msg.get("id")
+    if mid is None:
+        continue  # 通知：没有 id，无需响应
+    if method == "initialize":
+        res = {"protocolVersion": 1, "agentCapabilities": {}}
+    elif method == "session/new":
+        n += 1
+        res = {"sessionId": "stub-session-%d" % n}
+    else:
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid,
+            "error": {"code": -32601, "message": "method not found: %s" % method}}) + "\n")
+        sys.stdout.flush()
+        continue
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid, "result": res}) + "\n")
+    sys.stdout.flush()
+`
+	if err := os.WriteFile(script, []byte(code), 0o600); err != nil {
+		t.Fatalf("写 ACP 桩脚本失败: %v", err)
+	}
+	return runtime.Spec{ID: "stub", Name: "Stub", Launch: runtime.LaunchSpec{Command: "python3", Args: []string{script}},
+		CapabilityScope: runtime.CapabilityScopeProcess}
 }
 
 // newTestRig 最裸的架子：空注册表 + 事件总线，无库、无 agent。

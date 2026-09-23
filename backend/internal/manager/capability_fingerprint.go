@@ -91,45 +91,8 @@ func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, decla
 		in.Runtimes[0] = runtimeFingerprintPart(sp)
 	}
 	in.Skills = s.projectedSkillParts(runtimeID)
-	in.Mcps = mcpFingerprintParts(s.mcpServersForFingerprint(agent, runtimeID))
+	in.Mcps = mcpFingerprintParts(s.mcpSelectionFor(agent, runtimeID))
 	return runtime.Fingerprint(in)
-}
-
-// mcpServersForFingerprint 该 agent 在该 runtime 上会被注入的 MCP **定义**（未解析密钥）。
-//
-// 过滤口径与 `McpServersFor` 一致（传输可承载 + agent 白名单），但**不在这里解析密钥**：
-// 密钥能不能解析是环境事实（vault 锁着 / env 没设），不该让指纹抖动——否则 vault 一开一关，
-// 同一套能力就会算出两个指纹、白起一个代际。
-func (s *Service) mcpServersForFingerprint(agent *AgentRec, runtimeID string) []capability.McpServer {
-	if s.caps == nil {
-		return nil
-	}
-	supported, ok := s.supportedMcpTransports(runtimeID)
-	if !ok {
-		return nil
-	}
-	want := make(map[string]bool, len(supported))
-	for _, tp := range supported {
-		want[tp] = true
-	}
-	var allow map[string]bool
-	if agent != nil && agent.Mcps != nil {
-		allow = make(map[string]bool, len(*agent.Mcps))
-		for _, id := range *agent.Mcps {
-			allow[id] = true
-		}
-	}
-	var out []capability.McpServer
-	for _, m := range s.caps.ListMcpServers() {
-		if !want[m.Transport] {
-			continue
-		}
-		if allow != nil && !allow[m.ID] {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
 }
 
 // regSpec 取已注册 runtime 的 Spec（ok=false = 未注册）。

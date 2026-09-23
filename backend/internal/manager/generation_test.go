@@ -1,0 +1,214 @@
+package manager
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/runtime"
+)
+
+// TestGenerationKeyZeroRegression R11：**指纹为空时键必须与今天逐字相同**。
+//
+// 这是代际机制唯一的零回归风险点：connKey 加一个维度后，未声明能力选择的会话产生的键若变了，
+// 同配置的两个会话就会各起一个进程（"配置相同共享暖进程"这条既有规则被静默破坏，代价是进程数
+// 与内存翻倍，而且没人会立刻发现）。
+func TestGenerationKeyZeroRegression(t *testing.T) {
+	base := connKey("opencode", []string{"A=1"}, []string{"B=2"})
+	if got := generationKey(base, ""); got != base {
+		t.Fatalf("空指纹必须原样返回基础键（R11）：\n%s\n%s", base, got)
+	}
+	// 非空指纹必须改键（否则两套不同的能力会共用一个进程）。
+	if got := generationKey(base, "abc123"); got == base {
+		t.Fatal("非空指纹必须产生不同的键")
+	}
+	// 同指纹稳定、不同指纹不同。
+	if generationKey(base, "abc123") != generationKey(base, "abc123") {
+		t.Fatal("同指纹应得同键")
+	}
+	if generationKey(base, "abc123") == generationKey(base, "def456") {
+		t.Fatal("不同指纹应得不同键")
+	}
+}
+
+// TestGenerationKeyNoPrefixAmbiguity 代际键不得与"另一个基础键"撞车。
+//
+// connKey 的组间分隔符就是 `\x00`，所以 `connKey("r", g1)` 是 `connKey("r", g1, g2)` 的字符串
+// 前缀。若代际后缀是裸拼接，`("r",g1) + gen:X` 就可能与另一个基础键/代际键重合——基础键里
+// 恰好出现 `gen:` 这种文本并非不可能（env 组是 `KEY=VALUE`，VALUE 由用户/provider 决定）。
+// 长度前缀让基础键自我定界，从结构上排除这类碰撞。
+func TestGenerationKeyNoPrefixAmbiguity(t *testing.T) {
+	short := connKey("r", []string{"A=1"})
+	long := connKey("r", []string{"A=1"}, []string{"gen:1"})
+
+	// 短键 + 指纹 vs 长键本身：必须不同（否则"给短键指定了能力"会被当成"长键的缺省代际"，
+	// 两套不同的能力共用一个进程）。
+	if generationKey(short, "zz") == long {
+		t.Fatalf("代际键与另一个基础键撞车：\nshort=%q\nlong =%q", generationKey(short, "zz"), long)
+	}
+	// 同指纹下两个不同基础键的键也必须不同。
+	if generationKey(short, "zz") == generationKey(long, "zz") {
+		t.Fatal("不同基础键的同指纹代际键不该相同")
+	}
+}
+
+// TestGenerationKeyFindsAllGenerations 停机/停 agent 必须能找到**该配置的全部代际**。
+func TestGenerationKeyFindsAllGenerations(t *testing.T) {
+	base := connKey("stub", nil)
+	o := &Orchestrator{conns: map[string]*runtimeConn{}}
+	// 一个缺省代际 + 两个能力代际 + 一个别的配置（不该被匹配到）。
+	o.conns[base] = &runtimeConn{key: base, baseKey: base}
+	for _, fp := range []string{"fp1", "fp2"} {
+		k := generationKey(base, fp)
+		o.conns[k] = &runtimeConn{key: k, baseKey: base}
+	}
+	otherBase := connKey("stub", []string{"DSH_PERMISSION_MODE=read-only"})
+	o.conns[otherBase] = &runtimeConn{key: otherBase, baseKey: otherBase}
+
+	got := o.generationKeysFor(base)
+	if len(got) != 3 {
+		t.Fatalf("应找到 3 个代际键（含基础键），got %d: %v", len(got), got)
+	}
+	for _, k := range got {
+		if k == otherBase {
+			t.Fatalf("不该匹配到别的配置的键: %v", got)
+		}
+	}
+}
+
+// ackRig 带**真子进程** stub runtime 的架子（拨号/连接池类用例专用，见 stubACPSpec）。
+func acpRig(t *testing.T) *rig {
+	t.Helper()
+	reg := runtime.NewRegistry(stubACPSpec(t))
+	svc := NewService(reg, eventbus.New())
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	orch := NewOrchestrator(svc, reg)
+	t.Cleanup(orch.Close)
+	return &rig{Svc: svc, Orch: orch}
+}
+
+// TestWarmProcessSharingWithoutCapabilitySelection R11 的行为面（不只是键面）：
+// 同一 runtime + 同权限 + 同 provider、**都不声明能力选择** → 两个会话共用同一个暖进程。
+func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
+	r := acpRig(t)
+	ctx := context.Background()
+	cwd := t.TempDir()
+	mk := func() string {
+		t.Helper()
+		resp, err := r.Svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+			AgentID: "a1", Cwd: cwd,
+		})
+		if err != nil {
+			t.Fatalf("CreateConversation: %v", err)
+		}
+		return resp.ID
+	}
+	first, second := mk(), mk()
+
+	if n := len(r.Orch.conns); n != 1 {
+		t.Fatalf("同配置的两个会话应共用 1 个暖进程，got %d", n)
+	}
+	c1 := r.Orch.conversation(first)
+	c2 := r.Orch.conversation(second)
+	if c1 == nil || c2 == nil {
+		t.Fatal("两个会话都应活跃")
+	}
+	if c1.client != c2.client {
+		t.Fatal("两个会话应挂在同一个连接上（缺省代际复用）")
+	}
+	if c1.Fingerprint != "" || c2.Fingerprint != "" {
+		t.Fatalf("未声明能力选择时应是空指纹: %q / %q", c1.Fingerprint, c2.Fingerprint)
+	}
+	// 会话记录也要如实记着"没有能力选择"（恢复路径据此回到同一代际）。
+	if rec := r.Svc.conversationRec(first); rec == nil || rec.Fingerprint != "" {
+		t.Fatalf("会话记录的能力指纹应为空: %+v", rec)
+	}
+}
+
+// TestGenerationPerFingerprint 不同能力指纹 → 不同进程（能力集是进程级的，混用等于把 A 会话的
+// skill 投给 B 会话）。M1 还没有产生非空指纹的入口，所以这里直接在编排器层验证键与池行为：
+// 两个指纹各拨一条连接，两条都必须各自独立存在。
+func TestGenerationPerFingerprint(t *testing.T) {
+	r := acpRig(t)
+	ctx := context.Background()
+	agent, _ := r.Svc.AgentByID("a1")
+	spec, ok := r.Orch.reg.Get("stub")
+	if !ok {
+		t.Fatal("stub runtime 未注册")
+	}
+	for _, fp := range []string{"", "fp-a", "fp-b"} {
+		if _, err := r.Orch.acquire(ctx, agent, spec, fp); err != nil {
+			t.Fatalf("acquire(fp=%q): %v", fp, err)
+		}
+	}
+	// 三个不同指纹 → 三条独立连接（含缺省代际）。
+	if n := len(r.Orch.conns); n != 3 {
+		t.Fatalf("三个不同指纹应各有一条连接，got %d", n)
+	}
+	// 重复取同一个指纹必须复用，不新增。
+	if _, err := r.Orch.acquire(ctx, agent, spec, "fp-a"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(r.Orch.conns); n != 3 {
+		t.Fatalf("同指纹应复用连接，got %d 条", n)
+	}
+	// 全部代际都在同一个基础键下（停机时一次性关掉）。
+	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(agent.Provider))
+	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
+		t.Fatalf("三代际应同属一个基础键: %d", n)
+	}
+	// 显式停 agent：三条连接全关（不是只关查表查到的第一个）。
+	if err := r.Svc.StopAgent(ctx, "a1"); err != nil {
+		t.Fatalf("StopAgent: %v", err)
+	}
+	if n := len(r.Orch.conns); n != 0 {
+		t.Fatalf("停 agent 应关掉全部代际，剩 %d 条", n)
+	}
+}
+
+// TestStopAgentBusyRejectsAcrossGenerations 任一代际上有在途 turn → 整体拒绝
+// （显式停机不该把跑着的一轮打断，也不该"关一半留一半"）。
+func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
+	r := acpRig(t)
+	ctx := context.Background()
+	agent, _ := r.Svc.AgentByID("a1")
+	spec, _ := r.Orch.reg.Get("stub")
+	idle, err := r.Orch.acquire(ctx, agent, spec, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := r.Orch.acquire(ctx, agent, spec, "fp-busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Orch.markBusy(busy.client, "cv-x") // 只有"忙"的那一代上有在途
+	defer r.Orch.unmarkBusy(busy.client, "cv-x")
+
+	err = r.Svc.StopAgent(ctx, "a1")
+	if err == nil {
+		t.Fatal("有在途 turn 时应拒绝停机")
+	}
+	if !strings.Contains(err.Error(), "在途") {
+		t.Fatalf("错误文案应说明原因: %v", err)
+	}
+	// 两条连接都必须还在（拒绝 = 什么都不做，不是"关掉空闲那条"）。
+	if n := len(r.Orch.conns); n != 2 {
+		t.Fatalf("拒绝停机时不该关掉任何一代，剩 %d 条", n)
+	}
+	_ = idle
+}
+
+// TestAdaptersDeclareProcessScope M1-2 的验收面落在 archtest（第 10 条守卫），这里补一条
+// 就近断言：两个内置 adapter 都声明 process 且未实测（P-2 未出结论前不放宽）。
+func TestAdaptersDeclareProcessScope(t *testing.T) {
+	for _, sp := range runtime.DefaultRegistry().List() {
+		if sp.CapabilityScope != runtime.CapabilityScopeProcess {
+			t.Fatalf("%s 应声明 process：%q", sp.ID, sp.CapabilityScope)
+		}
+		if sp.Tested {
+			t.Fatalf("%s 不应在 P-2 出结论前标记 Tested", sp.ID)
+		}
+	}
+}
