@@ -18,9 +18,15 @@ import (
 // CapabilityCtr 能力数据面控制器（Skill / MCP server / Tool 目录与 MCP live 交互）。
 type CapabilityCtr interface {
 	ListSkills(c *gin.Context)
+	CreateSkill(c *gin.Context)
+	UpdateSkill(c *gin.Context)
+	DeleteSkill(c *gin.Context)
 	SetSkillEnabled(c *gin.Context)
 	SkillMaterialization(c *gin.Context)
 	ListMcpServers(c *gin.Context)
+	CreateMcpServer(c *gin.Context)
+	UpdateMcpServer(c *gin.Context)
+	DeleteMcpServer(c *gin.Context)
 	ListTools(c *gin.Context)
 	AgentCapabilities(c *gin.Context)
 	CallMcpTool(c *gin.Context)
@@ -51,6 +57,89 @@ func (h *capabilityCtr) ListSkills(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, items)
+}
+
+// CreateSkill 新建一个 skill 定义（M2 写面）：body = skill 定义（`id` 必填）。
+// id 已存在 → `skill_exists`(40901)；正文扫描 critical → `definition_invalid`(40001) 且**零字节落盘**。
+func (h *capabilityCtr) CreateSkill(c *gin.Context) {
+	var req dtocapability.SkillWriteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateSkill(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// UpdateSkill 覆盖写一个 skill 定义：**只改 body 里出现的键**（未出现的保留原值），
+// `null` 删键、`""`/`[]` 清空；路径 id 与 body id 不一致 → 40000。
+func (h *capabilityCtr) UpdateSkill(c *gin.Context) {
+	var req dtocapability.SkillWriteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.UpdateSkill(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// DeleteSkill 删除一个 skill 定义并撤回已物化副本（幂等：不存在 → `deleted:false` 且 code=0）。
+func (h *capabilityCtr) DeleteSkill(c *gin.Context) {
+	resp, err := h.svc.DeleteSkill(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// CreateMcpServer 新建一个 MCP server 定义（M2 写面）：全部门禁与装载同一条路
+// （transport 枚举 / stdio 绝对路径 / 密钥引用词法 / 明文与密钥键不重复）。
+func (h *capabilityCtr) CreateMcpServer(c *gin.Context) {
+	var req dtocapability.McpWriteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateMcpServer(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// UpdateMcpServer 覆盖写一个 MCP server 定义（键的出现与否有语义，同 skill 写面）。
+func (h *capabilityCtr) UpdateMcpServer(c *gin.Context) {
+	var req dtocapability.McpWriteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.UpdateMcpServer(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// DeleteMcpServer 删除一个 MCP server 定义，并**一并摘除**归属它的工具条目。
+func (h *capabilityCtr) DeleteMcpServer(c *gin.Context) {
+	resp, err := h.svc.DeleteMcpServer(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
 }
 
 // SetSkillEnabled 启停一个 skill（§13.4 S4）：`{enabled}` → 写回定义文件 + 立刻重校物化。

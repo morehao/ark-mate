@@ -59,12 +59,22 @@ type ConversationRec struct {
 	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
-	Status            string
-	Title             string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned            bool   // 置顶（侧栏/管理面用）
-	Archived          bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
+	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
+	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。
+	Fingerprint string
+	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
+	Origin string
+	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 回落 agent 白名单）。
+	// 与 Fingerprint 的分工：指纹回答"是不是同一套"（比较/回收用），明细回答"到底是哪几个"
+	// （回显、诊断、以及指纹算法变化后的一次性迁移判据）。
+	CapabilityJSON string
+	Status         string
+	Title          string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
+	Pinned         bool   // 置顶（侧栏/管理面用）
+	Archived       bool   // 归档（软删除；会话列表默认不展示）
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
@@ -98,8 +108,23 @@ type Service struct {
 	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
 	capabilityDir string
+	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
+	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
+	automationDir string
+	automations   map[string]*automationRec
+	// automationStop 调度 goroutine 的停止函数（非 nil = 已启动；StartAutomationScheduler 幂等判据）。
+	automationStop context.CancelFunc
+	// automationDone 调度 goroutine 的退出信号（Stop 等它关闭再返回：停机后不该再有新触发起步）。
+	automationDone chan struct{}
+	// automationRunMu 把「认领判定 → 建会话 → 写回游标」串成临界区。
+	//
+	// 认领判定（`automation.Decide`）是纯函数，纯函数**不提供互斥**：tick 与
+	// `POST /automations/:id/run` 若同时看到"这个 occurrence 还没认领过"，两边都会建会话——
+	// 而 automation 的 prompt 常常有副作用（改代码、发通知），重复跑一次是不可接受的。
+	// 临界区里唯一的慢动作是建会话（子进程握手），而 automation 触发本身稀疏，串行化代价可忽略。
+	automationRunMu sync.Mutex
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
-	skillTargets []SkillMaterializeTarget
+	skillProjections []SkillProjection
 
 	mu            sync.Mutex
 	agents        map[string]*AgentRec

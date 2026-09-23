@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-// TestEchoRegistryIsEchoOnly 锁定 EchoRegistry 的**刻意收窄**：只装 echo。
+// TestStubRegistryIsStubOnly 锁定 StubRegistry 的**刻意收窄**：只装 stub。
 //
-// 如果哪天有人把它"顺手"改成 runtime.DefaultRegistry()（opencode + dsh + echo），
+// 如果哪天有人把它"顺手"改成 runtime.DefaultRegistry()（opencode + dsh），
 // 多数依赖它的用例仍会过——正是这种"改了也没红"的漂移最危险：测试从此在验证
 // 「内置清单恰好长这样」，内置清单增删一个底座，一堆与它无关的断言跟着变。
-func TestEchoRegistryIsEchoOnly(t *testing.T) {
-	reg := EchoRegistry()
+func TestStubRegistryIsStubOnly(t *testing.T) {
+	reg := StubRegistry()
 	specs := reg.List()
 	if len(specs) != 1 {
-		t.Fatalf("EchoRegistry 应只装 echo，实际装了 %d 个", len(specs))
+		t.Fatalf("StubRegistry 应只装 stub，实际装了 %d 个", len(specs))
 	}
-	if specs[0].ID != "echo" {
-		t.Errorf("唯一 spec 应是 echo，得到 %q", specs[0].ID)
+	if specs[0].ID != "stub" {
+		t.Errorf("唯一 spec 应是 stub，得到 %q", specs[0].ID)
 	}
 }
 

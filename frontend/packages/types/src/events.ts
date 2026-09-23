@@ -32,6 +32,9 @@ export const Ev = {
   TurnEnded: 'turn.ended',
   TurnError: 'turn.error',
   RunCancelled: 'run.cancelled',
+  // 一次 automation 触发的结果（含没产生会话的那些：duplicate/overlap/skipped）。
+  // payload = {automation_id, trigger, scheduled_for, status, reason?, conversation_id?}。
+  AutomationRun: 'automation.run',
 } as const
 
 export type EvType = (typeof Ev)[keyof typeof Ev]

@@ -13,12 +13,13 @@ func TestToAcpMcpServers(t *testing.T) {
 		{Name: "evt", Transport: "sse", URL: "http://h/evt", Headers: map[string]string{"b": "2", "a": "1"}},
 		{Name: "web", Transport: "http", URL: "http://h/rpc"},
 		{Name: "web2", Transport: "streamable_http", URL: "http://h/rpc2"},
+		{Name: "noargs", Transport: "stdio", Command: "npx"}, // 无 args：必须落成空数组而非 null
 		{Name: "drop", Transport: "weird"},
 		{Transport: "stdio"}, // 缺名 → 丢弃
 	}
 	out := toAcpMcpServers(list)
-	if len(out) != 4 {
-		t.Fatalf("期望 4 条有效注入（stdio/sse/http/streamable_http），got %d", len(out))
+	if len(out) != 5 {
+		t.Fatalf("期望 5 条有效注入（stdio×2/sse/http/streamable_http），got %d", len(out))
 	}
 
 	if s := out[0].Stdio; s == nil || s.Name != "fs" || s.Command != "npx" || len(s.Args) != 2 || s.Env == nil {
@@ -38,6 +39,11 @@ func TestToAcpMcpServers(t *testing.T) {
 	}
 	if out[3].Http == nil || out[3].Http.Url != "http://h/rpc2" {
 		t.Fatalf("streamable_http 应归一 http 子对象: %+v", out[3])
+	}
+	// 无 args 的 stdio：Args 必须是**空切片而非 nil**。nil 会被 SDK 序列化成 `"args": null`，
+	// opencode 的 zod 校验会因此拒掉整个 session/new（实测；对外只剩一句无上下文的 "Invalid params"）。
+	if s := out[4].Stdio; s == nil || s.Args == nil || len(s.Args) != 0 {
+		t.Fatalf("无 args 的 stdio 应落成空数组（非 nil）: %+v", out[4])
 	}
 
 	if h := toAcpMcpServers(nil); h == nil || len(h) != 0 {

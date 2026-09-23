@@ -51,6 +51,18 @@ func (o *Orchestrator) StartConversation(ctx context.Context, agentID string, op
 	return o.startConversationOn(ctx, agent, runtimeID, opt)
 }
 
+// StartConversationOn 在**显式指定**的 runtime 上建会话（automation 的 target.runtime_hint）。
+//
+// 与 StartConversation 的唯一区别是跳过路由解析；成员校验在调用方（CreateConversation）完成：
+// "这个 runtime 是不是该 agent 的候选"属于配置事实，放在持有 agent 定义的那一层判更合适。
+func (o *Orchestrator) StartConversationOn(ctx context.Context, agentID, runtimeID string, opt StartOptions) (*CreateResult, error) {
+	agent, ok := o.svc.AgentByID(agentID)
+	if !ok {
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
+	}
+	return o.startConversationOn(ctx, agent, runtimeID, opt)
+}
+
 // startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
 // RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
 func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID string, opt StartOptions) (*CreateResult, error) {
@@ -58,7 +70,17 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	// 能力选定校验（M3-3）：**在建连之前**。位次很关键——它既要在已知 runtime 之后
+	// （可达性是 runtime 相关的），又要在任何副作用之前（不建会话/不拉进程/不写库）。
+	// 不可达就报错而非静默丢弃：静默丢弃等于让用户以为"选了就生效了"。
+	if err := o.svc.validateSelection(opt.Selection, spec.ID); err != nil {
+		return nil, err
+	}
+	// 能力指纹由**选定**现算（M3）：缺省路径 opt.Selection == nil → 空指纹 →
+	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
+	// 不存在"按 A 算指纹、按 B 注入"的可能。
+	fingerprint := o.svc.capabilityFingerprint(agent, spec.ID, opt.Selection)
+	rc, err := o.acquire(ctx, agent, spec, fingerprint)
 	if err != nil {
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil, err
@@ -74,10 +96,12 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if convID == "" {
 		convID = uuid.NewString()
 	}
-	// P2 MCP 注入：平台注册表 MCP 子集按 agent 白名单 + runtime 传输能力过滤后随 session/new 下发（§5.2/§5.3）。
+	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > agent 白名单」+ runtime 传输能力过滤后
+	// 随 session/new 下发（§5.2/§5.3；会话级选定见 M3）。**必须传 opt.Selection**：
+	// 指纹就是按它算出来的，注入若用别的口径，会话拿到的东西会与代际台账不符。
 	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
 		Cwd:        cwd,
-		McpServers: o.svc.McpServersFor(agent, spec.ID),
+		McpServers: o.svc.McpServersFor(agent, spec.ID, opt.Selection),
 	})
 	if err != nil {
 		return nil, err
@@ -85,12 +109,12 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台 uuid（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
-	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
-		proj: runtime.NewProjection(spec, sess)}
+	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: fingerprint,
+		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
-	//   - unsupported_*（echo 无模型、运行时未广告模型配置项）→ 忽略（无模型语义）；
+	//   - unsupported_*（运行时未广告模型配置项）→ 忽略（无模型语义）；
 	//   - 成功 → 用返回的**全量**配置项刷新平台目录缓存（顺带清掉曾失败值的标记）。
 	if err := o.applyModelOnConversation(ctx, as, agent.ID, spec, sess, opt.Model); err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
@@ -103,8 +127,11 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
-		Model: opt.Model.Model, RuntimeHint: spec.ID,
-		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
+		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
+		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress,
+		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
+		// 要么注入集不对、要么代际挂错。
+		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
@@ -116,7 +143,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 // 恢复次序（P3 F2/F3，§5.6）：
 //  1. 原生 resume（首选）：acquire conn → 按能力 LoadSession（opencode load=true）或
 //     ResumeSession（dsh resume=true）恢复同一 provider session → reason=restart。
-//  2. handoff memo 兜底（原生不可用时）：无 load/resume 能力（echo）、无 provider session
+//  2. handoff memo 兜底（原生不可用时）：底座未声明 load/resume 能力、无 provider session
 //     （旧数据）、agent 现路由 runtime ≠ 会话原 runtime（跨 runtime 续聊）、或原生恢复失败 →
 //     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
 //     并更新 rec 的 provider_session_id / runtime_hint（记忆与 sqlite 同步）。
@@ -127,6 +154,10 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 // 只有真正不可用的情形才报错：会话不存在（conversation_not_found）、agent 已删（agent_not_found）、
 // runtime 未注册（runtime_not_found）、原生与 memo 都不可用（resume_unavailable）。
 // memo 预算由 SetHandoffMaxChars 控制（0 = 关闭 memo 兜底 → 原生不可用时回退明确错误）。
+//
+// **重开即迁移（M3-6）**：重建时按**当前定义**重算代际指纹，于是"改了 skill 正文/MCP 定义后
+// 会话在进程死掉重开"这一路径天然落在最新代际上；算不出或按新代际重开失败 → 回退钉住的旧代际
+// 继续跑（可用性优先，见 generation.go 的四条纪律）。
 func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID string) (*ActiveConversation, error) {
 	if as := o.conversation(conversationID); as != nil {
 		return as, nil
@@ -164,13 +195,58 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	rc, err := o.acquire(ctx, agent, spec)
+	// **恢复路径也要带上会话钉住的选定**：漏改这一处的后果是"重启后能力集悄悄换一套"。
+	// 与指纹的分工：指纹决定挂到哪个代际（连接复用），选定决定下发哪些 MCP。
+	sel := ParseCapabilitySelection(rec.CapabilityJSON)
+	// 目标代际：有声明就**按当前定义现算**——重开即迁移，落下就是最新代际（M3-6）。
+	// 缺省路径（sel == nil）现算结果恒为空 → 保持钉住的空指纹 → 与引入代际之前逐字一致（R11）。
+	pinned := rec.Fingerprint
+	want := o.svc.capabilityFingerprint(agent, spec.ID, sel)
+	if want == "" {
+		want = pinned
+	}
+	as, reason, err := o.connectConversation(ctx, rec, agent, spec, cwd, sel, want)
+	if err != nil && want != pinned {
+		// ④ 迁移失败 → 回退钉住的旧代际继续跑（可用性优先）。**不**把会话变成不可用：
+		// "能力没换过来"是诊断层面的事实，不是这一轮发不出去的理由。
+		failed := err
+		as, reason, err = o.connectConversation(ctx, rec, agent, spec, cwd, sel, pinned)
+		if err == nil {
+			o.noteGenerationFallback(rec.AgentID, conversationID, spec.ID, pinned, want, failed)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID)}
+	// 事件语义：重开时**真的换了代际** → reason=generation（前端据此提示"能力已更新"，
+	// 与"进程重启后原生续接"区分开）；否则沿用 restart/handoff。
+	if want != pinned && as.Fingerprint == want {
+		reason = "generation"
+	}
+	o.attachConversation(as, reason)
+	return as, nil
+}
+
+// connectConversation 在 `fingerprint` 指定的代际上重开一条会话（原生 resume 优先、handoff memo
+// 兜底），并把「实际挂上的代际」写回会话记录。**不碰活跃集合**（装配由 attachConversation 做）——
+// 于是"进程死后重建"与"轮次边界迁移"两条路径共用同一段开会话逻辑，不会各自漂移。
+//
+// 记录用**副本**更新后整体写回（`registerConversation` 会同时持久化）：中途失败时调用方手里的
+// rec 保持原样，回退旧代际那一次才不会被半成品污染。
+func (o *Orchestrator) connectConversation(ctx context.Context, recIn *ConversationRec, agent *AgentRec,
+	spec runtime.Spec, cwd string, sel *CapabilitySelection, fingerprint string) (*ActiveConversation, string, error) {
+	rec := *recIn
+	// **恢复路径也要带上会话钉住的指纹**：漏改这一处的后果是"重启后能力集悄悄换了一套"。
+	rc, err := o.acquire(ctx, agent, spec, fingerprint)
+	if err != nil {
+		return nil, "", err
+	}
+	// **恢复路径必须用会话钉住的选定**（不是 agent 当前声明、更不是全量）：它从
+	// `conversations.capability_json` 读回。漏了这一步的后果是会话重启后注入集悄悄换一套，
+	// 而且没有任何报错——用户只会发现"昨天能用的 MCP 今天不见了"。
+	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID, sel)}
 	caps := rc.client.Capabilities()
-	sameRuntime := target == rec.RuntimeHint && rec.RuntimeHint != ""
+	sameRuntime := spec.ID == rec.RuntimeHint && rec.RuntimeHint != ""
 	nativeID := rec.ProviderSessionID
 	resumeOK := sameRuntime && nativeID != "" &&
 		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
@@ -186,35 +262,46 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 			sess, err = rc.client.ResumeSession(ctx, nativeID, opts)
 		}
 		if err != nil {
-			o.logger.Warn("原生恢复失败，转 handoff memo 兜底", "conversation", conversationID,
+			o.logger.Warn("原生恢复失败，转 handoff memo 兜底", "conversation", rec.ID,
 				"runtime", spec.ID, "provider_session", nativeID, "err", err)
 			resumeOK = false
 		}
 	}
 	if !resumeOK {
 		if o.handoffMaxChars <= 0 {
-			return nil, acl.NewError(acl.ClassRequest, "resume_unavailable",
+			return nil, "", acl.NewError(acl.ClassRequest, "resume_unavailable",
 				fmt.Sprintf("会话 %q 无法原生恢复（runtime %q 无 load/resume 或 provider 会话无效），且 memo 兜底关闭",
-					conversationID, spec.ID), nil)
+					rec.ID, spec.ID), nil)
 		}
 		sess, err = rc.client.NewSession(ctx, opts)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		memo = o.svc.HandoffMemo(conversationID, o.handoffMaxChars)
+		memo = o.svc.HandoffMemo(rec.ID, o.handoffMaxChars)
 		reason = "handoff"
 		// 迁移登记：fresh session 顶替原 provider id；跨 runtime 时同步 runtime_hint。
-		if nativeID != sess.ID() || target != rec.RuntimeHint {
+		if nativeID != sess.ID() || spec.ID != rec.RuntimeHint {
 			rec.ProviderSessionID = sess.ID()
 			rec.RuntimeHint = spec.ID
-			o.svc.registerConversation(rec)
 		}
 	}
-	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, client: rc.client, sess: sess,
+	// 代际落账：**实际挂上的**指纹写回记录（迁移后这里就是新值；回退时是旧值）。
+	if rec.Fingerprint != fingerprint {
+		rec.Fingerprint = fingerprint
+	}
+	o.svc.registerConversation(&rec)
+	as := &ActiveConversation{ID: rec.ID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: fingerprint,
+		client: rc.client, sess: sess, providerID: sess.ID(),
 		proj: runtime.NewProjection(spec, sess), memo: memo}
 	// 会话级模型在恢复后重新断言一次（平台记录是权威意图；原生恢复未必带回该状态）：
 	// **best-effort** —— 恢复不是用户在选模型，运行时若已不再提供该值（换了 provider/档案），
 	// 只留痕 + 标灰，不让老会话因为一个失效取值而打不开。
+	//
+	// `proj == nil` = 该 runtime 没有会话级投影（`NewProjection` 按 runtime id 派生；测试桩
+	// 就是这一类），此时没有模型语义可言——**必须显式跳过**，否则对 nil 接口调方法直接 panic。
+	if as.proj == nil {
+		return as, reason, nil
+	}
 	if rec.Model != "" {
 		if _, err := as.proj.ApplyModel(ctx, runtime.ModelConfig{Model: rec.Model}); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
@@ -226,24 +313,55 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	} else if len(as.proj.ConfigOptions()) > 0 {
 		o.svc.catalog.put(agent.ID, spec.ID, as.proj.ConfigOptions())
 	}
+	return as, reason, nil
+}
+
+// attachConversation 把句柄装进活跃集合（替换同 id 的旧句柄），发布 session.resumed。
+//
+// 被替换的旧句柄：**只作废它自己**（摘 provider 映射 + best-effort 关掉那条原生会话），
+// 绝不动它所在的连接——旧代际的暖进程可能还在服务别的会话，代际回收是 M3-7 的事。
+// 关掉旧原生会话是为了让底座尽快释放它那份资源（会话级，不是进程级）。
+func (o *Orchestrator) attachConversation(as *ActiveConversation, reason string) {
 	o.mu.Lock()
+	old := o.conversations[as.ID]
 	o.conversations[as.ID] = as
-	o.byProvider[sess.ID()] = as.ID
+	o.byProvider[as.providerID] = as.ID
+	if old != nil && old != as && old.providerID != as.providerID {
+		if o.byProvider[old.providerID] == old.ID {
+			delete(o.byProvider, old.providerID)
+		}
+	}
 	o.mu.Unlock()
+	if old != nil && old != as {
+		old.mu.Lock()
+		old.dead = true // 旧句柄作废：拿到它旧指针的路径会走重建（而不是用一个已被顶替的会话）
+		old.mu.Unlock()
+		if c, ok := old.sess.(*acl.Session); ok && c != nil {
+			// 关会话是收尾动作：用**脱离请求**的 ctx（本轮 ctx 可能已取消）并带上限等待，
+			// 免得底座吞掉 session/close 时把这一轮拖住。
+			cctx, cancel := context.WithTimeout(context.Background(), agentCancelTimeout)
+			_ = c.Close(cctx)
+			cancel()
+		}
+	}
 	// §6：执行上下文刚被重建（本次拿到了新的连接/会话）→ 会话执行代际自增。
 	// 排队输入比对的就是这个值：重建之后，为旧上下文排的队不再成立（见 inputqueue.go）。
 	o.svc.bumpGeneration(as.ID)
 	o.svc.markConversation(as.ID, ConversationStatusInProgress)
-	o.svc.publish(BusSessionResumed, as.ID, map[string]any{
-		"session_id": as.ID, "agent_id": as.AgentID, "runtime": spec.ID, "reason": reason,
-	})
-	return as, nil
+	payload := map[string]any{
+		"session_id": as.ID, "agent_id": as.AgentID, "runtime": as.Runtime, "reason": reason,
+	}
+	if reason == "generation" {
+		// 迁移事件：把**换到了哪一代**带上（审计要把"第 N 轮到第 M 轮用的哪套能力"串起来）。
+		payload["capability_fingerprint"] = as.Fingerprint
+	}
+	o.svc.publish(BusSessionResumed, as.ID, payload)
 }
 
 // applyModelOnConversation 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
 //
 // 语义（决策记录）：**用户显式指定的取值，运行时要么接受、要么报错**——绝不静默回落默认模型：
-//   - 运行时未广告模型项（echo / 未配置 provider 的 opencode）→ model_not_supported；
+//   - 运行时未广告模型项（未配置 provider 的 opencode 等）→ model_not_supported；
 //   - 运行时拒绝该取值（协议要求值必须来自广告列表）→ 原样上抛并记入「不可用」反馈；
 //   - 成功 → 用返回的全量状态刷新平台目录缓存。
 //

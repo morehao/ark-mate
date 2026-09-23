@@ -3,6 +3,7 @@ package capability
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func TestRegistryLoadDirAndList(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "skills", "b-skill.json"), `{"id":"b-skill","name":"B","description":"bb"}`)
 	writeFile(t, filepath.Join(dir, "skills", "a-skill.json"),
-		`{"id":"a-skill","name":"A","body":"# A","sources":[{"runtime":"opencode","path":"x","format":"SKILL.md"}]}`)
+		`{"id":"a-skill","name":"A","body":"# A","runtimes":["opencode"],"scope":"workspace"}`)
 	writeFile(t, filepath.Join(dir, "skills", "bad.json"), `not-json{`)
 	writeFile(t, filepath.Join(dir, "mcp", "m2.json"), `{"id":"m2","transport":"stdio","command":"/usr/local/bin/npx","args":["-y","pkg"]}`)
 	writeFile(t, filepath.Join(dir, "mcp", "m1.json"), `{"id":"m1","name":"Files","transport":"sse","url":"http://localhost:9999"}`)
@@ -38,8 +39,12 @@ func TestRegistryLoadDirAndList(t *testing.T) {
 	if len(skills) != 2 || skills[0].ID != "a-skill" || skills[1].ID != "b-skill" {
 		t.Fatalf("skills 排序/内容不符: %+v", skills)
 	}
-	if len(skills[0].Sources) != 1 || skills[0].Sources[0].Runtime != "opencode" {
-		t.Fatalf("sources 解析不符: %+v", skills[0].Sources)
+	// M1 起条目侧只声明「给谁用」（runtimes）与作用域；「放哪、什么格式」在 runtime 投影声明里。
+	if len(skills[0].Runtimes) != 1 || skills[0].Runtimes[0] != "opencode" || skills[0].EffectiveScope() != SkillScopeWorkspace {
+		t.Fatalf("runtimes/scope 解析不符: %+v scope=%q", skills[0].Runtimes, skills[0].EffectiveScope())
+	}
+	if skills[1].EffectiveScope() != SkillScopeGlobal {
+		t.Fatalf("未声明 scope 应为 global，got %q", skills[1].EffectiveScope())
 	}
 
 	mcps := r.ListMcpServers()
@@ -87,5 +92,85 @@ func TestRegistryValidation(t *testing.T) {
 	}
 	if err := r.RegisterMcpServer(&McpServer{ID: "fs", Transport: "stdio", Command: "/usr/local/bin/npx"}); err != nil {
 		t.Fatalf("绝对路径 stdio mcp 应通过: %v", err)
+	}
+}
+
+// TestRegisterSkillRuntimesAndScope 条目侧只声明「给谁用」（runtimes）与作用域（scope）；
+// 两者都在**入表前**校验：写错的取值会让投放判据失准，不能静默放过。
+func TestRegisterSkillRuntimesAndScope(t *testing.T) {
+	r := NewRegistry()
+	// 合法：去空白 + 生效作用域默认 global。
+	if err := r.RegisterSkill(&Skill{ID: "ok", Runtimes: []string{" opencode ", "deepseekharness"}}); err != nil {
+		t.Fatalf("合法 runtimes 应通过: %v", err)
+	}
+	sk, _ := r.SkillByID("ok")
+	if len(sk.Runtimes) != 2 || sk.Runtimes[0] != "opencode" || sk.EffectiveScope() != SkillScopeGlobal {
+		t.Fatalf("runtimes 未规整或 scope 默认不符: %+v scope=%q", sk.Runtimes, sk.EffectiveScope())
+	}
+	// 空 = 全部（升级安全网：旧定义没有该字段，若空表示"谁都不用"，升级会集体撤回所有技能）。
+	all := Skill{ID: "all"}
+	if !all.AppliesToRuntime("anything") {
+		t.Fatal("runtimes 空应表示全部 runtime")
+	}
+	// 声明了白名单就不再是全部。
+	sk2 := Skill{Runtimes: []string{"opencode"}}
+	if !sk2.AppliesToRuntime("opencode") || sk2.AppliesToRuntime("dsh") {
+		t.Fatal("白名单语义不符")
+	}
+
+	for _, bad := range []struct {
+		name string
+		sk   Skill
+	}{
+		{"scope 非法", Skill{ID: "x1", Scope: "project"}},
+		{"runtimes 含空项", Skill{ID: "x2", Runtimes: []string{"opencode", " "}}},
+		{"runtimes 重复", Skill{ID: "x3", Runtimes: []string{"opencode", "opencode"}}},
+	} {
+		if err := r.RegisterSkill(&bad.sk); err == nil {
+			t.Fatalf("%s 应被拒", bad.name)
+		}
+	}
+	if err := r.RegisterSkill(&Skill{ID: "ws", Scope: SkillScopeWorkspace}); err != nil {
+		t.Fatalf("workspace scope 应合法（M1 只落语义不消费）: %v", err)
+	}
+}
+
+// TestLoadLegacySourcesWarns 旧 `sources` 键被忽略这件事**必须可见**。
+//
+// `encoding/json` 丢未知键是静默的，而这里丢掉的后果是投放面被放宽（「只给 opencode」变成
+// 「给所有 runtime」）。装载期为这类文件挂一条 info 告警，把人引到 `forge capability migrate`。
+func TestLoadLegacySourcesWarns(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "legacy.json"),
+		`{"id":"legacy","name":"L","body":"# l","sources":[{"runtime":"opencode","path":"x","format":"SKILL.md"}]}`)
+	writeFile(t, filepath.Join(dir, "skills", "fresh.json"),
+		`{"id":"fresh","name":"F","body":"# f","runtimes":["opencode"]}`)
+
+	r := NewRegistry()
+	if res := r.LoadDir(dir); res.Skills != 2 {
+		t.Fatalf("应装载 2 条: %+v", res)
+	}
+	legacy, _ := r.SkillByID("legacy")
+	if len(legacy.Runtimes) != 0 {
+		t.Fatalf("旧 sources 不该被解析成 runtimes: %+v", legacy.Runtimes)
+	}
+	var found *Warning
+	for i := range legacy.Warnings {
+		if legacy.Warnings[i].Pattern == "legacy_sources_key" {
+			found = &legacy.Warnings[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("含 sources 的定义应挂 legacy_sources_key 告警: %+v", legacy.Warnings)
+	}
+	if !strings.Contains(found.Message, "forge capability migrate") {
+		t.Fatalf("告警要给出出路: %q", found.Message)
+	}
+	// 没有旧键的定义不该被挂告警（避免噪声把真告警淹掉）。
+	fresh, _ := r.SkillByID("fresh")
+	for _, w := range fresh.Warnings {
+		if w.Pattern == "legacy_sources_key" {
+			t.Fatalf("新式定义不该有 legacy 告警: %+v", fresh.Warnings)
+		}
 	}
 }

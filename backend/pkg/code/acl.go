@@ -17,6 +17,7 @@ var notFoundCodes = map[string]bool{
 	"mcp_not_found":          true,
 	"skill_not_found":        true,
 	"provider_not_found":     true,
+	"automation_not_found":   true,
 }
 
 // fromACL 把 acl 层错误按其 Class 映射为业务码。

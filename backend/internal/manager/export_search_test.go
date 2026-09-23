@@ -100,14 +100,14 @@ func TestSearchMessagesSQLite(t *testing.T) {
 func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	// memory 模式（无 store）：回扫 transcript，source 明确标注 transcript。
 	dir := t.TempDir()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	svc := NewService(reg, eventbus.New())
 	svc.SetTranscriptDir(dir)
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
 	svc.registerConversation(&ConversationRec{ID: "t-1", AgentID: "a1", Title: "内存会话"})
-	svc.beginTranscript("t-1", "a1", "echo", "/tmp", false)
+	svc.beginTranscript("t-1", "a1", "stub", "/tmp", false)
 	defer svc.closeTranscripts()
 	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
 	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})

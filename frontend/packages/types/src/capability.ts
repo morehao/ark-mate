@@ -2,12 +2,6 @@
 // backend/internal/dto/dtocapability 的 SkillResp/McpServerResp/ToolResp）。
 // MCP headers/凭证后端不读回，故此处无 headers 字段。
 
-export interface SkillSource {
-  runtime: string
-  path: string
-  format: string
-}
-
 /** 一条装载期正文扫描告警（§13.2 S1）。critical 的定义在装载时已被拒载，不会出现在列表里。 */
 export interface SkillWarning {
   /** info | warning | critical */
@@ -23,7 +17,15 @@ export interface Skill {
   description?: string
   /** SKILL.md 内容（P2 物化源；目录条目可空）。 */
   body?: string
-  sources?: SkillSource[]
+  /**
+   * 投放对象（§13.4；M1 起取代 sources）。
+   *
+   * **空数组 = 全部 runtime**（升级安全网：旧定义没有该字段）。落点与格式由 runtime 的投影
+   * 声明决定（不再由每个条目各写一遍 path/format）。
+   */
+  runtimes?: string[]
+  /** global | workspace。M1 只声明不消费（workspace 落点待实测），非法取值装载期即拒。 */
+  scope?: string
   /** 放行了但该看一眼的告警。 */
   warnings?: SkillWarning[]
   /** 是否投放（§13.4 S4；未声明 enabled 的定义 = true）。禁用只影响投放，定义照旧保留。 */
@@ -35,7 +37,12 @@ export interface SkillMaterializationState {
   root: string
   runtime?: string
   dir: string
-  /** in_sync | missing | tampered | stale | disabled | user_owned | not_applicable */
+  /**
+   * in_sync | missing | tampered | stale | disabled | user_owned | not_applicable | untested | not_configured
+   *
+   * untested = 有投影、根也解得开，但该形态未端到端实测过（产物照常写，如实标注）；
+   * not_configured = 投影根解析失败（占位符变量没设 / 落点非法），detail 里带原因。
+   */
   status: string
   /** 期望摘要（注册表侧）。 */
   hash?: string
@@ -43,7 +50,7 @@ export interface SkillMaterializationState {
   actual_hash?: string
   /** 产物 sidecar 记录的写入时间（RFC3339）。 */
   written_at?: string
-  /** 归属标记里登记的 runtime 集合。 */
+  /** 归属标记里登记的**投影方**集合（共享 root 下各投影方各登记一次）。 */
   owners?: string[]
   detail?: string
 }
@@ -80,6 +87,8 @@ export interface McpServer {
   command?: string
   args?: string[]
   url?: string
+  /** 定义级投放开关（`/mcps` 回，未声明 = true）：关掉则任何 agent 都拿不到。 */
+  enabled?: boolean
   /** 明文环境变量的键（§13.3 M1；值不回）。 */
   env_keys?: string[]
   /** 密钥型环境变量的键（**只有键名**，值/引用都不回）。 */
@@ -219,13 +228,14 @@ export interface McpPromptGetResult {
 
 // ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
 
-/** 某 Agent 视角的 skill（sources 已按该 Agent 候选 runtime 裁剪）。
+/** 某 Agent 视角的 skill（runtimes 已裁到「候选 ∩ 技能声明 ∩ 本进程已解析投影」）。
  *  §13.4 S5：不适用**不等于**不列出——启用与适用正交，两者都要能解释。 */
 export interface AgentSkill {
   id: string
   name: string
   description?: string
-  sources?: SkillSource[]
+  /** 该 Agent 的候选中真的会投放到的 runtime（空 = 这个 agent 用不上，reasons 里有为什么）。 */
+  runtimes?: string[]
   /** 平台是否投放（false = 已被禁用，可恢复）。 */
   enabled?: boolean
   /** 该 agent 现在能不能真的用上（启用 ⟂ 适用）。 */
@@ -267,4 +277,98 @@ export interface McpProbeResult {
   skipped: number
   tool_count: number
   tools: Tool[]
+}
+
+// ——— M2 定义写面（POST/PUT/DELETE /skills|/mcps）与 Library 统一读模型（GET /library） ———
+
+/**
+ * 定义写面的请求体：**原文 JSON 对象**（`Record<string, unknown>`）。
+ *
+ * 刻意不是结构体：`PUT` 的语义是「只改请求体里**出现过的**键」——未出现的保留原值、`null` 删键、
+ * `""`/`[]` 显式清空。带可选字段的 TS 接口分不清「没传 name」与「传了 name: ''」，
+ * 也表达不了 `null`；而键的出现与否在这里是语义，不是编码细节。
+ */
+export type CapabilityWriteBody = Record<string, unknown>
+
+/** 新建/覆盖写一个 skill 的结果。 */
+export interface SkillWriteResp {
+  id: string
+  /** 事实源文件路径。 */
+  path?: string
+  /** true = 新建了文件（覆盖写时为 false）。 */
+  created: boolean
+  /** 重校物化时写入的落点数。 */
+  written: number
+  /** 重校物化时撤回的落点数（禁用/收窄 runtimes 时）。 */
+  removed: number
+  /** 装载期正文扫描告警（放行了但该看一眼）。 */
+  warnings?: SkillWarning[]
+  /** 重校失败原因（**不回滚定义**：定义已改成功，物化下次自愈）。 */
+  materialize_errors?: string[]
+  next_action?: string
+}
+
+/** 删除一个 skill 的结果（幂等：本来就不存在 → `deleted:false` 且 code=0）。 */
+export interface SkillDeleteResp {
+  id: string
+  deleted: boolean
+  path?: string
+  /** 撤回的已物化副本数。 */
+  removed: number
+  materialize_errors?: string[]
+  next_action?: string
+}
+
+/** 新建/覆盖写一个 MCP server 的结果。 */
+export interface McpWriteResp {
+  id: string
+  path?: string
+  created: boolean
+  /** 绑了引用但当前解析不出值的密钥键（**只有键名**，值/引用不回）。 */
+  unresolved_secret_keys?: string[]
+  next_action?: string
+}
+
+/** 删除一个 MCP server 的结果（幂等）。 */
+export interface McpDeleteResp {
+  id: string
+  deleted: boolean
+  path?: string
+  /** 一并摘除的归属该 server 的 mcp 工具条目数。 */
+  tools_removed: number
+  next_action?: string
+}
+
+/**
+ * 一条能力在**某一个** runtime 上的可达性（Library 读模型）。
+ *
+ * `status` 五值各自对应一条不同的用户动作：
+ * `projected`（可直接选）/ `untested`（会投放但该 runtime 的投影声明尚未实测）/
+ * `not_configured`（声明了但本进程没解析出落点）/ `not_applicable`（底座不承载/未注册/白名单没它）/
+ * `disabled`（被显式关掉）。`reason` 是给人看的一句话，可直接显示。
+ */
+export interface LibraryApplicability {
+  runtime: string
+  ok: boolean
+  status: string
+  reason?: string
+}
+
+/** Library 统一能力条目（GET /library；skill | mcp | agent | tool）。 */
+export interface LibraryItem {
+  id: string
+  /** skill | mcp | agent | tool */
+  kind: string
+  name: string
+  description?: string
+  /** local（本机定义文件）/ imported（随平台来或运行时探测出的）。 */
+  origin: string
+  /** global | workspace。 */
+  scope: string
+  enabled: boolean
+  /** 事实源文件（代码注入/运行时探测的条目为空）。 */
+  source_file?: string
+  /** 逐候选 runtime 的可达性——**刻意不给「整体可用吗」的合并结论**。 */
+  applicability: LibraryApplicability[]
+  warnings?: string[]
 }

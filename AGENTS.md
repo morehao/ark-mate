@@ -1,17 +1,17 @@
 # AGENTS.md — ark-forge
 
-ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平台。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
+ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 
 ## 布局与目录边界
 
 - `backend/`：唯一 Go module（`github.com/morehao/ark-forge`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`pkg/` 与 `internal/` 的分界**（对齐 ark-iam）：可复用基础设施进 `pkg/`，应用专属逻辑留 `internal/`。`pkg/` 内部**不得 import `internal/`**（由 `internal/archtest` 守卫）。
-    - `pkg/`：`code`（对外业务错误码唯一事实源：常量 + 注册表 + `FromError` 归一）、`acl`（ACP 客户端）、`runtime/{opencode,deepseekharness,echo}`（adapter + 注册表）、`mcp`（自研 MCP 客户端）、`capability`、`routing`、`config`（进程配置）、`procreg`（进程注册表）、`web`（release 内嵌前端宿主）、`dbclient`（gorm 句柄装配 + 自注册纯 Go SQLite dialector）、`object/objusage`（跨层共享值对象）。
+    - `pkg/`：`code`（对外业务错误码唯一事实源：常量 + 注册表 + `FromError` 归一）、`acl`（ACP 客户端）、`runtime/{opencode,deepseekharness}`（adapter + 注册表，另有 `runtime` 根包的 Spec/投影/指纹）、`mcp`（自研 MCP 客户端）、`capability`、`routing`、`config`（进程配置）、`procreg`（进程注册表）、`web`（release 内嵌前端宿主）、`dbclient`（gorm 句柄装配 + 自注册纯 Go SQLite dialector）、`object/objusage`（跨层共享值对象）。
     - `internal/`：`app`（装配 + 启停生命周期）、`app/command`（CLI 子命令）、`router`（唯一路由装配点，按领域分 `routes_*.go`）、`controller/ctr<领域>`（传输层控制器）、`middleware`、`dto/dto<领域>`（请求/响应 DTO）、`service/svc<领域>`（领域端口）、`manager`（领域实现：Service / Orchestrator / 事件 / 权限；**按领域分文件，不设 god file**——`service.go`/`orchestrator.go` 只留类型、构造与装配，会话动作在 `conversations.go`、轮次在 `turn.go`、连接在 `connection.go`、进程回收在 `orphan_reap.go`、事件出口在 `event_sink.go`、权限/提问在 `interaction.go`/`permission_flow.go`）、`model`（持久层实体 + 列/取值约定）、`dao`（单表数据访问，基于 golib gormdao）、`store`（持久层门面：句柄 + 跨表事务 + 读模型 API）、`eventbus`、`testutil`（跨包复用的测试夹具；**不得 import `manager`**——manager 的测试是内部测试包，反向依赖会形成 `import cycle not allowed in test`，manager 专属组合留在其 `testrig_test.go`，由 `archtest` 守卫）、`archtest`（架构守卫测试）。
   - **依赖方向单一**：
     - 应用侧：`cmd → app → router → controller → service(端口) ← manager(实现)`；`dto` 被两侧共用但自身不依赖应用层。
     - 持久侧：`dbclient → dao → store`，`model` 被三者依赖且自身不依赖任何一层；`dao` 不得 import `store`（会成环），`model` 不得 import `dao`/`store`。
-  - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**三条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）。**共 9 条**——加守卫时记得同步这句话。
+  - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）。**共 10 条**——加守卫时记得同步这句话。
 - `frontend/`：pnpm workspace（`apps/panel` 控制台 + `packages/{ui,types,api,tsconfig}`）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 设计文档是**历史记录**（会话早期叫 sessions，P0 起为 conversations）；对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
 
@@ -28,13 +28,13 @@ ACP 兼容 runtime（opencode / deepseekharness / echo）的统一控制面平�
 - `make dev` 前后端联调（go run serve → 等 :10001 health → vite :5173，Ctrl-C 一起收）；`make server` 仅后端；`make web` 只构建前端并刷新 embed 宿主；`make all` 出单二进制 `./forge`（先 web 再 `go build -tags release`）。
 - `make build/vet/test` = `cd backend && go build|vet|test ./...`。无独立 lint。另有 **`make test/release`**（`go test -tags release ./...`，依赖 `web` 目标先出前端产物）：**带 release tag 的代码只有这条能覆盖**，默认 `go test` 根本编译不到它们（历史上 `NoRoute` 的非 API 行为就是这么长期没人验的）。
 - 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
-- 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（echo 底座在进程内驱动）。
+- 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（夹具用 `testutil.StubRegistry()` 提供的 stub runtime 注册表，需要真 ACP 语义的用例用自建最小 responder，见 `pkg/runtime/acp_testserver_test.go` / `pkg/acl/elicitation_e2e_test.go`）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。
 
 ## 构建形态
 
 - embed 仅随 `-tags release` 编译（`backend/pkg/web/web.go` 带 `//go:build release`）；默认构建不依赖前端产物。`backend/pkg/web/dist/` 不入库（由 `make web` 从 `apps/panel` 产物拷贝刷新）。
-- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / acp-serve / acp-demo`。`forge demo` 需本机装 opencode/dsh（echo runtime 除外）。
+- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / capability migrate`（最后一条把 skill 定义里的旧 `sources[]` 转成 `runtimes[]`，`--dir` / `--dry-run` 可选）。`forge demo` 需本机装 opencode/dsh（`echo` 演示底座及其 `acp-serve`/`acp-demo` 子命令已于 M0 删除）。
 
 ## session 与 conversation：两个名字，一个东西（外加一个同名不同物）
 

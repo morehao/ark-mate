@@ -49,8 +49,9 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | transcript | `~/.forge/transcripts/` | `FORGE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
 | Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`） |
 | 密钥库（vault） | `~/.forge/vault.key` + `~/.forge/vault/` | `FORGE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
-| 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 sources 保留，只停止投放；`PATCH /skills/:id` 写回此键）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
-| skill 物化目标 | 空（关闭） | `FORGE_SKILLS_MATERIALIZE_DIR` | 非空才写（可能指向真实 opencode 用户目录，故默认关闭） |
+| 自动化定义 | `~/.forge/automations/<id>.json` | `FORGE_AUTOMATIONS` | 定时任务的定义 + 运行态同文件（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）。**备份它就是备份任务**（含运行史）；手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
+| 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `forge capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
+| 投影根覆盖 | 空（用 runtime 声明的默认根） | `FORGE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `FORGE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
 | 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
@@ -107,7 +108,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
   `config.json` 之上还有 env 文件、进程 `FORGE_*`、CLI flag 三层，任一层设过该键，写配置文件都无效。
   所以接口**拒绝写**并回 `settings_locked`，同时 GET 回 `locked_by`（指出是哪个来源锁定：环境变量名 /
   `<配置目录>/env` / 命令行参数），面板据此转只读。要交还控制权，就把该来源里的 `FORGE_WORKSPACE_ROOTS`
-  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（`acp-serve` / `demo`），不落盘。
+  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（如 `demo` 冒烟进程），不落盘。
 - **写入的校验比配置文件严**：面板设的每一条都要求「绝对路径 + 存在 + 是目录」（配置文件只校验绝对路径，
   允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
 - **影响面**：只约束**新**的显式 `cwd` 与目录浏览；已建会话的 `cwd` 创建即定稿，平台不回头否决旧会话
@@ -128,7 +129,9 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录（vault 的 home 取它的父目录：`~/.forge`） |
 | `FORGE_VAULT_KEY` | 空 | 主密钥覆盖（32 字节 base64/hex）；**非空时不读不建 `vault.key`**（容器/CI 用）；密钥丢失 = 已有密文不可恢复 |
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力数据面目录 |
-| `FORGE_SKILLS_MATERIALIZE_DIR` | 空 | skill 物化根（默认关闭） |
+| `FORGE_AUTOMATIONS` | `~/.forge/automations` | 自动化定义目录（`<id>.json`；定义与运行态 overlay 同文件，手工可读） |
+| `FORGE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
+| `FORGE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`deepseekharness:skill`；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `FORGE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `FORGE_WORKSPACE_DIR` | `~/.forge/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`FORGE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `FORGE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
@@ -137,9 +140,35 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_IDLE_TIMEOUT` | `5m` | 暖进程空闲回收（0 = 关闭） |
 | `FORGE_REAP_INTERVAL` | `5m` | 空闲回收扫描间隔 |
 | `FORGE_HANDOFF_MAX_CHARS` | `6000` | 跨 runtime / 无原生 resume 时的历史摘要预算（0 = 关闭） |
+| `FORGE_GENERATION_LIMIT` | `4` | 同一配置（runtime + 原生权限 + provider）下允许并存的**能力代际**上限（0 = 不限制）。代际按能力指纹内容寻址、指纹不同即各起一个进程（能力集是进程级的）；达上限时先淘汰「无会话引用且空闲」的代际，仍超限则**带码拒绝**新建（`40901 generation_limit_reached`），绝不静默复用错误的能力集 |
 | `FORGE_PROC_REGISTRY` | `<dir(FORGE_DB)>/processes.json` | runtime 子进程注册表（孤儿回收用）；`off`/`disable`/`none` = 关闭登记与回收 |
 | `FORGE_REAP_GRACE` | `2s` | 孤儿回收 SIGTERM → SIGKILL 的宽限期 |
 | `GIN_MODE` | `debug` | 设 `release` 关闭 gin debug 告警 |
+
+### 2.3.0 时区与内嵌 tzdata（M4 起必读）
+
+定时任务（`schedule.timezone`）用 **IANA 时区名**（`Asia/Shanghai`），平台把它算成真实时刻。
+`forge` 二进制**内嵌了一份 IANA 时区库**（`cmd/forge` 里的 `import _ "time/tzdata"`，实测
+**+403 KB**），因此容器里**不需要** `/usr/share/zoneinfo`：
+
+```bash
+# 在只有二进制、零 zoneinfo 文件的 scratch 镜像里（实测）
+docker run --rm -p 127.0.0.1:10098:10001 --tmpfs /data \
+  -e FORGE_ADDR=0.0.0.0:10001 -e FORGE_STORE=memory forge-tzcheck serve
+curl -s -X POST http://127.0.0.1:10098/v1/forge/automations/preview \
+  -H 'content-type: application/json' \
+  -d '{"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},"count":1}'
+# → {"code":0,...,"at":"2026-09-24T01:00:00Z","wall":"2026-09-24 09:00 CST","timezone":"Asia/Shanghai"}
+```
+
+这条不是"锦上添花"：**去掉那个 import 的同一份二进制在同一镜像里报
+`40001 未知时区 Asia/Shanghai`**（对照实测）。失败形态是最难查的一类——任务不是不跑，而是在
+**错误的时间**跑（或直接拒绝执行定义），且宿主机上完全正常。所以：
+
+- 换用 `scratch` / `distroless` / 任何不带 tzdata 的基础镜像时**照常工作**，无需额外挂载；
+- 需要在时区库里加自定义规则（如临时改某地 DST）时才需要挂载/覆盖，内嵌库是**兜底**而非唯一来源
+  （Go 的查找顺序：`ZONEINFO` → 系统目录 → 内嵌）；
+- 二进制体积比不带时区库大约 400 KB，可接受（见 §1 的镜像体积）。
 
 ### 2.3.1 配置目录 `.forge/config`（A4）
 
@@ -150,7 +179,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 ~/.forge/config/env           # dotenv 风格（KEY=VALUE；# 注释、空行、可选 export 前缀与成对引号）
 ```
 
-`config.json` 里多值键（`workspace_roots`、`skills_materialize_dirs`）可以写成 **JSON 数组**，
+`config.json` 里多值键（`workspace_roots`、`projection_dirs`）可以写成 **JSON 数组**，
 也可以照旧写成逗号分隔字符串；单值键写数组会报错。数组不是语法糖：路径里含逗号时只有数组
 能表达，而面板保存白名单用的就是数组形式（见 §2.2.2）。
 
@@ -161,11 +190,16 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
-`workspace_dir` `workspace_roots` `skills_materialize_dir` `skills_materialize_dirs`
-`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
+`automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
+`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+
+已改名的键仍会让启动失败（"非法键名即报错"这条规则不软化），但报错会**认出它**并给出新键与
+等价写法：`skills_materialize_dir` / `skills_materialize_dirs` → `projection_dirs`
+（`skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`）。升级动作就是改
+这一行——不做静默等价，否则用户会以为已经改完。
 
 `workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
 保留文件里其它键），所以手工编辑时留意别和面板同时改；被更高优先级来源锁定时面板只会拒绝写。
@@ -206,13 +240,14 @@ curl -H "Authorization: Bearer $FORGE_TOKEN" http://127.0.0.1:10001/v1/forge/age
 
 - `opencode`：需本机可执行 `opencode acp`。
 - `deepseekharness`（dsh）：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
-- `echo`：daemon 自派生 `forge acp-demo` 子进程，**无需任何外部依赖与模型 key**（用于冒烟与
-  权限/提问演示）。内置播种 agent 为 `dsh`（默认）与 `opencode`；`echo` 需自建 agent：
 
-```bash
-curl -s http://127.0.0.1:10001/v1/forge/agents -H 'content-type: application/json' \
-  -d '{"id":"echo","name":"Echo","runtimes":["echo"]}'
-```
+内置播种 agent 为 `dsh`（默认）与 `opencode`——**两个都要求本机装有对应底座并完成 provider 登录**。
+
+> **`echo` 演示底座已删除（M0）**：此前 daemon 会自派生 `forge acp-demo` 子进程充当免安装、免模型
+> key 的 ACP 对端（用于冒烟与权限/提问演示），`forge acp-serve` 还能把它暴露成远程端点。这两条
+> 路径已随 echo **彻底移除**，内置 runtime 收敛为 `opencode` / `deepseekharness`。远程传输**功能**
+> 不受影响（`.forge/config/runtimes.json` 声明远程端点照常工作），失去的只是开箱演示；覆盖缺口
+> 台账见仓库 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`。
 
 > 种子 agent（内置 `dsh`/`opencode` 与保留前缀 `agent-`）**只读**：不可删、runtime 不可改
 > （报 40001 `seed_agent_readonly`）；name/provider/`permission_policy` 可改。
@@ -270,7 +305,7 @@ systemctl status ark-forge --no-pager
 
 | target | 内容 | 体积（本机实测） | 适用 |
 | --- | --- | --- | --- |
-| `forge`（默认） | 只含 `forge` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | 底座由宿主机挂载、派生镜像或 `acp-serve` 远端提供；容器内先用 `echo` 自检 |
+| `forge`（默认） | 只含 `forge` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | **不含任何底座**：底座由宿主机挂载、派生镜像或远程 runtime 端点提供；容器内**无法自检**（自检须挂真实底座，见 §4.2） |
 | `forge-runtimes` | 额外内置 `dsh`（npm `@deepseek-ai/dsh`）与 `opencode`（npm `opencode-ai` 平台二进制） | 671 MB | 想让容器开箱就能跑真实 agent |
 
 ```bash
@@ -323,9 +358,10 @@ compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/�
 
 ### 4.2 容器里的底座与工作空间（两个硬要求）
 
-1. **底座**：最小镜像里能自检的只有 `echo`（daemon 派生子命令 `forge acp-demo`，无需模型 key）。
-   要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH` 上）、自建派生镜像
-   （`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**下把本机可执行文件 bind mount 进最小镜像
+1. **底座**：最小镜像**不含任何底座**，因此容器内**没有免 key 自检手段**（此前靠内置 `echo` 自检，
+   它已随 M0 删除）。要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH`
+   上，容器内自检即在此形态下做）、自建派生镜像（`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**
+   下把本机可执行文件 bind mount 进最小镜像
    （`-v /usr/local/bin/opencode:/usr/local/bin/opencode:ro`，agent 需要的配置/密钥也要一并进来）。
    注意 macOS/Windows 上的可执行文件**不能**塞进 Linux 容器（平台/架构/glibc 都不匹配），这类机器请走前两条。
    模型密钥经 `-e DEEPSEEK_API_KEY=…` 由 daemon 透传给 runtime 子进程；dsh 的 profile 根固定在
@@ -390,18 +426,30 @@ sudo systemctl stop ark-forge
 tar czf ark-forge-$(date +%F).tgz -C /var/lib ark-forge
 sudo systemctl start ark-forge
 
-# 升级：替换二进制后重启（SQLite 迁移在启动时自动执行，幂等）
-sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge
+# 升级：三步——① 先干跑迁移看一眼 ② 换二进制（SQLite 迁移在启动时自动执行，幂等）
+#              ③ 若你有 skill 定义用了已退役的 sources[]，改一行 projection_dirs 后重校
+sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge.new
+./forge.new capability migrate --dry-run       # 只报告会改哪些定义文件，不落盘
+sudo mv /opt/ark-forge/forge.new /opt/ark-forge/forge
 sudo systemctl restart ark-forge
+# 能力/自动化定义的目录布局没有变化：定义文件仍是唯一事实源，升级不重写它们
+# （skill 的 `sources[]` 与 automation 的 `schedule/target` 都由装载期读，缺键即缺省）。
 
-# 回滚：换回旧二进制重启——但若新版本已把库迁移到更高 schema 版本，旧二进制会
-# 拒绝启动（store.migrate: schema vN 高于本二进制支持的 vM）。跨版本回滚必须先恢复库备份。
+# 回滚：换回旧二进制重启。**但只要新版本已经把库迁移到更高 schema 版本，旧二进制会拒绝启动**
+# （store.migrate: schema vN 高于本二进制支持的 vM），此时唯一的回滚路径是"恢复库备份 + 换回旧二进制"。
+# 本仓当前最新 schema = **v7**（v7 = M3 的能力钉住三列两索引）。所以：
+#   · v6 二进制 → v7 库：停服 → `tar xzf <升级前的备份>` 覆盖 `FORGE_DB`（v7 列没了，能力选定随之丢失，
+#     这是备份点的状态，不是数据损坏）→ 换回 v6 二进制 → 起服
+#   · 跨过 v7 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
+#     升级重放 v7（能力列重新加一遍），而中间版本的任何数据改造都不会被撤销
+#   · 只想"临时退一版"而不动库：保持 v7 库、换回**仍然支持 v7** 的二进制（v7 之后的修复版本都属于这一类）
+# 备忘：`FORGE_DB` 默认 `~/.forge/forge.db`；备份命令见本节开头（vault.key 与 vault/ 必须一起备）。
 ```
 
 重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
 被中断的轮次（无终态 → 可续聊重发），而**已完成的轮次保持 `completed`**——停机是运维动作，不是故障，
 不会改写会话状态（见 §8 连接拆除语义）。所有已存在的会话（不论上一轮终态）在重启后都可继续提问：
-`dsh`/`opencode` 走原生 resume，echo 等无原生恢复能力的底座走 handoff memo。transcript 模式（memory）
+`dsh`/`opencode` 走原生 resume，未声明原生恢复能力的底座走 handoff memo。transcript 模式（memory）
 启动时回读 JSONL 重建会话列表。
 
 ## 7. 排障
@@ -417,8 +465,11 @@ sudo systemctl restart ark-forge
 | 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(FORGE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`FORGE_PROC_REGISTRY=off` 可关闭 |
 | 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
 | 启动报 `schema vN 高于本二进制支持的 vM` | 库被更新版本迁移过 → 恢复对应备份或升级二进制（拒绝启动是刻意保护） |
+| 定时任务报 `未知时区 Asia/Shanghai` | 二进制没带内嵌 tzdata（`cmd/forge` 的 `import _ "time/tzdata"` 被删）或传了库外的自定义名 → 从官方构建取二进制；内嵌库缺失时容器里 `time.LoadLocation` 会失败，宿主机却可能正常 |
+| 定时任务在预期之外的时间跑 / 预览与预期不符 | 先对 `POST /automations/preview` 核对墙钟；DST 空档（不存在的本地时刻）会被**向后顺移**并在 `warnings` 里说明，回拨（重复时刻）取**第一次**。`schedule.timezone` 必须是 IANA 名，不能写 `CST`/`GMT+8` 这类别名 |
+| 定时任务重跑/卡住不跑 | `last_fired_at` 是认领游标（**平台写回，写面拒收**）；改它是手工干预手段：置空可让下一次 tick 重新认领该 occurrence，置成未来会让它一直不跑。别在调度运行中改定义文件——用 `PUT /automations/:id`（mtime 乐观锁会挡住并发改动） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `FORGE_DB` |
-| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；echo 走 handoff memo，dsh 走原生 `resume`） |
+| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh/opencode 走原生 `resume`，其余走 handoff memo） |
 | 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
 | 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
 | 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
@@ -429,6 +480,18 @@ sudo systemctl restart ark-forge
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target forge-runtimes`（或 `make image/runtimes`），不做静默忽略 |
 
 ## 8. 验证记录（本机实跑）
+
+> **历史记录说明（M0 后阅读）**：本节是各里程碑**当时**在本机实跑的原始记录，其中不少用例以
+> `echo` 演示底座为对端（`forge acp-demo` / `forge acp-serve`）。`echo` 已随 M0 彻底删除，
+> **这些记录不再可原样复现**，保留在此仅作历史证据（与 `docs/` 下历史设计文档同一口径）。
+> 仍可复现的部分（`make all`、种子只读、重启恢复、检索导出、MCP 调用等）不受影响，只是把
+> `echo` agent 换成 `dsh`/`opencode` 或任意自定义 agent 即可。当前契约以 README 与源码为准。
+>
+> **配置键也已变（M1 后阅读）**：下面 C4/C6 两条例子里用的
+> `FORGE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `FORGE_PROJECTION_DIRS` 取代（旧键现在会让启动
+> 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
+> 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
+> 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/manager/skills_test.go` 覆盖。
 
 环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
 基础镜像，见 §4.3）。
@@ -546,6 +609,30 @@ sudo systemctl restart ark-forge
   stderr_source=last_error`，尾巴含 `ws read: ... EOF`，`last_error.code=connection_lost`。
   能力探测（`/agents/:id/capabilities`）经远程传输正常返回。
 
+- 定时任务（M4，本机实跑）：`forge serve`（memory 模式、临时目录、`FORGE_TOKEN=smoke-token`）+
+  `E2E_BASE=http://127.0.0.1:10001 FORGE_SMOKE_TOKEN=smoke-token node frontend/scripts/smoke-e2e.mjs`
+  → 「定时任务面」一节全 PASS：`POST /automations/preview`（`Asia/Shanghai` 09:00 →
+  `2026-09-24T01:00:00Z` + 墙钟 `09:00 CST`，3 次严格升序）、非法 schedule → `40001`、
+  新建回执带 `next_due_at`、重复 id → `40901`、写 `last_fired_at` → `40001`（运行态键不可写）、
+  空运行史返回 `[]` 且 `limit=20`、手动触发打不存在的 agent → **报错且留痕**
+  （`runs[0].status=skipped` 带原因）、删除幂等（`deleted:true` → `deleted:false`）。
+  **这条冒烟抓到一个真实漂移**：空运行史原先是 `"runs": null`，与前端声明的数组类型不符。
+- 容器时区（M4-7，本机实跑）：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64` 构建后放进
+  `FROM scratch`（镜像里只有二进制，`docker save | tar -t | grep -c zoneinfo` = **0**）→
+  `preview` 与宿主机逐字一致（同上 `09:00 CST`）；**去掉 `import _ "time/tzdata"` 的同一份二进制
+  在同一镜像里报 `40001 未知时区 Asia/Shanghai`**——对照证明这个 import 是承重的，而不是装饰。
+  内嵌带来的体积增量实测 **+403 KB**（40,291,941 → 40,686,100 字节）。
+  注：默认最小镜像 `debian:bookworm-slim` 自带 `/usr/share/zoneinfo`，所以"默认镜像里能跑"并不能
+  证明这条；上面的验证特意用了零 zoneinfo 的镜像。
+- 最小镜像本体（M4-7 补跑）：`GO_PROXY=https://goproxy.cn,direct make image` 成功产出
+  `ark-forge:local`（**142 MB**）；`docker run --tmpfs /data -e FORGE_STORE=memory
+  -e FORGE_TOKEN=... -p 127.0.0.1:10077:10001 ark-forge:local` 起得来且
+  `GET /v1/forge/health` → **200 `{"code":0,"msg":"ok"}`**。
+  **默认 `GO_PROXY` 是 `proxy.golang.org`，在拉不到它的网络里会卡在 Go 构建阶段**——按 §4
+  整组覆盖镜像源即可（本机就是走 `goproxy.cn` 才构建成功的）。
+  **这条只能证明"daemon 起得来 + health 通"**：最小镜像不含任何底座，容器内**跑不通一轮对话**
+  （`echo` 演示底座已于 M0 删除，容器里没有免 key 自检手段）；要验内置底座用
+  `make image/runtimes` + 容器内真实一轮。
 - 单操作员令牌（A6）：`token: cfg-token-9f3a`（config.json）→ `forge config` 输出掩码
   `cf…3a（14 字符）`；`/health` 无令牌 200；`/agents` 无令牌/错令牌 → **HTTP 401 +
   `code=40101`**（信封含 requestID 与提示文案），正确 `Bearer` 与 `?token=` 均 200；

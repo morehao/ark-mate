@@ -17,9 +17,11 @@ import (
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/middleware"
 	"github.com/morehao/ark-forge/internal/service/svcagent"
+	"github.com/morehao/ark-forge/internal/service/svcautomation"
 	"github.com/morehao/ark-forge/internal/service/svccapability"
 	"github.com/morehao/ark-forge/internal/service/svcconversation"
 	"github.com/morehao/ark-forge/internal/service/svcexport"
+	"github.com/morehao/ark-forge/internal/service/svclibrary"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/ark-forge/internal/service/svcsearch"
 	"github.com/morehao/ark-forge/internal/service/svcusage"
@@ -40,6 +42,8 @@ type Ports struct {
 	Workspace    svcworkspace.WorkspaceSvc
 	Runtime      svcruntime.RuntimeSvc
 	Capability   svccapability.CapabilitySvc
+	Automation   svcautomation.AutomationSvc
+	Library      svclibrary.LibrarySvc
 	Usage        svcusage.UsageSvc
 	Search       svcsearch.SearchSvc
 	Export       svcexport.ExportSvc
@@ -84,6 +88,8 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	registerConversation(v1, ports)
 	registerRuntime(v1, ports)
 	registerCapability(v1, ports)
+	registerAutomation(v1, ports)
+	registerLibrary(v1, ports)
 	registerObservability(v1, ports, bus)
 
 	MountWeb(r)

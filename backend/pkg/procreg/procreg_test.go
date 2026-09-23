@@ -49,7 +49,7 @@ func TestRegistryPersistAndOrphans(t *testing.T) {
 	if reg.Instance() == "" {
 		t.Fatal("实例 id 应为非空")
 	}
-	if err := reg.Add(procreg.Entry{PID: 4242, PGID: 4242, Command: "forge", Runtime: "echo", AgentID: "a1"}); err != nil {
+	if err := reg.Add(procreg.Entry{PID: 4242, PGID: 4242, Command: "forge", Runtime: "stub", AgentID: "a1"}); err != nil {
 		t.Fatal(err)
 	}
 	// 落盘形状：version + entries。
@@ -110,7 +110,7 @@ func TestReapKillsOrphanGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.Add(procreg.Entry{PID: pid, PGID: pgid, Command: "sh", Runtime: "echo", AgentID: "a1"}); err != nil {
+	if err := old.Add(procreg.Entry{PID: pid, PGID: pgid, Command: "sh", Runtime: "stub", AgentID: "a1"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -12,13 +12,17 @@ func TestDefaultRegistry(t *testing.T) {
 	reg := DefaultRegistry()
 	items := reg.ListItems()
 
-	// opencode / deepseekharness / echo 演示。
-	if len(items) != 3 {
-		t.Fatalf("期望 3 个 runtime，got %d: %+v", len(items), items)
+	// 内置 runtime 收敛为两个：opencode / deepseekharness（echo 演示底座已于 M0 删除）。
+	if len(items) != 2 {
+		t.Fatalf("期望 2 个 runtime，got %d: %+v", len(items), items)
 	}
-	// List/ListItems 按 ID 排序：deepseekharness < echo < opencode。
-	if items[0].ID != "deepseekharness" || items[1].ID != "echo" || items[2].ID != "opencode" {
+	// List/ListItems 按 ID 排序：deepseekharness < opencode。
+	if items[0].ID != "deepseekharness" || items[1].ID != "opencode" {
 		t.Fatalf("排序不符: %+v", items)
+	}
+	// echo 必须彻底消失：既不在清单里，也不能靠别名复活。
+	if _, ok := reg.Get("echo"); ok {
+		t.Fatal("echo 演示底座已删除，不应仍在注册表里")
 	}
 
 	oc, ok := reg.Get("opencode")
@@ -61,19 +65,6 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatalf("harness Notes 应说明启动形态: %s", dh.Notes)
 	}
 
-	ec, ok := reg.Get("echo")
-	if !ok {
-		t.Fatal("echo 未注册")
-	}
-	if !strings.HasSuffix(ec.Version, "echo acp-demo") && !strings.Contains(ec.Version, "echo acp-demo") {
-		t.Fatalf("echo version 不符: %+v", ec)
-	}
-	if !reflect.DeepEqual(ec.Launch.Args, []string{"acp-demo"}) || ec.Launch.Command == "" {
-		t.Fatalf("echo launch 不符（应自派生 forge acp-demo）: %+v", ec.Launch)
-	}
-	if !strings.Contains(ec.Notes, "request_permission") && !strings.Contains(ec.Notes, "权限确认") {
-		t.Fatalf("echo Notes 应说明权限演示用途: %s", ec.Notes)
-	}
 }
 
 // TestRegistryCRUD 注册表 Get/Register（覆盖）/Require/List 语义。

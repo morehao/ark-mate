@@ -22,7 +22,7 @@ func agentTestSvc(t *testing.T, agentDir string) *Service {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"},
 		runtime.Spec{ID: "opencode", Name: "opencode"},
-		runtime.Spec{ID: "echo", Name: "Echo"},
+		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
 	svc := NewService(reg, eventbus.New())
 	if agentDir != "" {
@@ -39,31 +39,31 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	svc := agentTestSvc(t, dir)
 
 	// 注册自定义 agent（echo runtime 上的别名，不写代码新增 ACP agent）。
-	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Name: "别名echo", Runtimes: []string{"echo"}, Provider: "openai:gpt-4o"})
+	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Name: "别名stub", Runtimes: []string{"stub"}, Provider: "openai:gpt-4o"})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if resp.ID != "alias-echo" || resp.Provider != "openai:gpt-4o" {
+	if resp.ID != "alias-stub" || resp.Provider != "openai:gpt-4o" {
 		t.Fatalf("resp 不符: %+v", resp)
 	}
 	// 定义文件已落盘。
-	if _, err := os.Stat(filepath.Join(dir, "alias-echo.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "alias-stub.json")); err != nil {
 		t.Fatalf("definitions 未落盘: %v", err)
 	}
 
 	// 重启（新 Service + 同一目录）→ definitions 加载。
 	svc2 := agentTestSvc(t, dir)
-	if a, ok := svc2.AgentByID("alias-echo"); !ok || len(a.Runtimes) != 1 || a.Runtimes[0] != "echo" || a.Provider != "openai:gpt-4o" {
+	if a, ok := svc2.AgentByID("alias-stub"); !ok || len(a.Runtimes) != 1 || a.Runtimes[0] != "stub" || a.Provider != "openai:gpt-4o" {
 		t.Fatalf("重启后未加载 definition: %+v ok=%v", a, ok)
 	}
 
 	// PATCH 热更新 name。
-	name := "别名echo-v2"
-	u, err := svc2.UpdateAgent(ctx, "alias-echo", dtoagent.AgentUpdateReq{Name: &name})
-	if err != nil || u.Name != "别名echo-v2" {
+	name := "别名stub-v2"
+	u, err := svc2.UpdateAgent(ctx, "alias-stub", dtoagent.AgentUpdateReq{Name: &name})
+	if err != nil || u.Name != "别名stub-v2" {
 		t.Fatalf("UpdateAgent: %v %+v", err, u)
 	}
-	if a, _ := svc2.AgentByID("alias-echo"); a.Name != "别名echo-v2" {
+	if a, _ := svc2.AgentByID("alias-stub"); a.Name != "别名stub-v2" {
 		t.Fatalf("name 未更新: %+v", a)
 	}
 
@@ -79,10 +79,10 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	}
 
 	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "agent-x", Runtimes: []string{"echo"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "agent-x", Runtimes: []string{"stub"}}); err == nil {
 		t.Fatal("保留前缀应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err == nil {
 		t.Fatal("重复 id 应拒绝")
 	}
 	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "ghost", Runtimes: []string{"no-such-runtime"}}); err == nil {
@@ -90,13 +90,13 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	}
 
 	// 删除自定义 + 定义文件清理。
-	if _, err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc2.DeleteAgent(ctx, "alias-stub"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
-	if _, ok := svc2.AgentByID("alias-echo"); ok {
+	if _, ok := svc2.AgentByID("alias-stub"); ok {
 		t.Fatal("删除后仍存在")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "alias-echo.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "alias-stub.json")); !os.IsNotExist(err) {
 		t.Fatalf("定义文件未清理: %v", err)
 	}
 }
@@ -154,13 +154,13 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	}
 
 	// 删除「当前 Agent」→ 清除显式选择 + 回落内置种子（default.json 一并清理）。
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if _, err := svc2.SetDefaultAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc2.SetDefaultAgent(ctx, "alias-stub"); err != nil {
 		t.Fatalf("切到自定义 agent: %v", err)
 	}
-	if _, err := svc2.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc2.DeleteAgent(ctx, "alias-stub"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 	if got := svc2.DefaultAgentID(); got != "dsh" {
@@ -175,11 +175,11 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agents")
 	_ = os.MkdirAll(dir, 0o755)
-	_ = os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"id":"good-echo","name":"好","runtimes":["echo"]}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"id":"good-stub","name":"好","runtimes":["stub"]}`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`{not json`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "noruntime.json"), []byte(`{"id":"x1","runtimes":["nope"]}`), 0o644)
 	svc := agentTestSvc(t, dir)
-	if _, ok := svc.AgentByID("good-echo"); !ok {
+	if _, ok := svc.AgentByID("good-stub"); !ok {
 		t.Fatal("good 应加载")
 	}
 	if _, ok := svc.AgentByID("x1"); ok {
@@ -194,13 +194,13 @@ func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 func TestAgentStartStopGuards(t *testing.T) {
 	ctx := context.Background()
 	svc := agentTestSvc(t, "")
-	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.StartAgent(ctx, "alias-echo"); err == nil {
+	if err := svc.StartAgent(ctx, "alias-stub"); err == nil {
 		t.Fatal("无编排器应拒绝 StartAgent")
 	}
-	if err := svc.StopAgent(ctx, "alias-echo"); err == nil {
+	if err := svc.StopAgent(ctx, "alias-stub"); err == nil {
 		t.Fatal("无编排器应拒绝 StopAgent")
 	}
 	if err := svc.StartAgent(ctx, "nope"); err == nil {
@@ -215,13 +215,13 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agents")
 	_ = os.MkdirAll(dir, 0o755)
 	// 定义文件带策略 + 一个非法策略（应跳过）。
-	_ = os.WriteFile(filepath.Join(dir, "pol-echo.json"),
-		[]byte(`{"id":"pol-echo","name":"策略echo","runtimes":["echo"],"permission_policy":{"default":"deny","tools":{"bash":"allow"}}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "pol-stub.json"),
+		[]byte(`{"id":"pol-stub","name":"策略stub","runtimes":["stub"],"permission_policy":{"default":"deny","tools":{"bash":"allow"}}}`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "bad-pol.json"),
-		[]byte(`{"id":"bad-pol","runtimes":["echo"],"permission_policy":{"tools":{"bash":"yes"}}}`), 0o644)
+		[]byte(`{"id":"bad-pol","runtimes":["stub"],"permission_policy":{"tools":{"bash":"yes"}}}`), 0o644)
 	svc := agentTestSvc(t, dir)
 
-	a, ok := svc.AgentByID("pol-echo")
+	a, ok := svc.AgentByID("pol-stub")
 	if !ok || a.PermissionPolicy == nil || a.PermissionPolicy.Default != "deny" ||
 		a.PermissionPolicy.Decide("bash", "execute") != PermissionAllow {
 		t.Fatalf("策略定义未加载: %+v ok=%v", a, ok)
@@ -237,7 +237,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	}
 	var found *dtoagent.AgentResp
 	for i := range list {
-		if list[i].ID == "pol-echo" {
+		if list[i].ID == "pol-stub" {
 			found = &list[i]
 		}
 	}
@@ -247,7 +247,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 
 	// PATCH 更新策略（并落盘）；B5 起含 native_mode（原生权限模式）。
 	pol := &dtoagent.PermissionPolicyResp{Default: "allow", Tools: map[string]string{"write": "deny"}, NativeMode: "danger-full-access"}
-	u, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{PermissionPolicy: pol})
+	u, err := svc.UpdateAgent(ctx, "pol-stub", dtoagent.AgentUpdateReq{PermissionPolicy: pol})
 	if err != nil || u.PermissionPolicy == nil || u.PermissionPolicy.Default != "allow" ||
 		u.PermissionPolicy.NativeMode != "danger-full-access" {
 		t.Fatalf("PATCH 策略失败: %v %+v", err, u)
@@ -255,31 +255,31 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	// PATCH 非法策略 → acl request 类 + 稳定 code（REST 层映射 40001），且内存不变。
 	bad := &dtoagent.PermissionPolicyResp{Default: "sometimes"}
 	var ae *acl.Error
-	if _, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{PermissionPolicy: bad}); err == nil {
+	if _, err := svc.UpdateAgent(ctx, "pol-stub", dtoagent.AgentUpdateReq{PermissionPolicy: bad}); err == nil {
 		t.Fatal("非法策略应报错")
 	} else if !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" || ae.Class != acl.ClassRequest {
 		t.Fatalf("非法策略应为 request/invalid_permission_policy，got %v", err)
 	}
 	// B5：非法 native_mode 同样被拒（不静默生效）。
-	if _, err := svc.UpdateAgent(ctx, "pol-echo", dtoagent.AgentUpdateReq{
+	if _, err := svc.UpdateAgent(ctx, "pol-stub", dtoagent.AgentUpdateReq{
 		PermissionPolicy: &dtoagent.PermissionPolicyResp{NativeMode: "yolo"},
 	}); err == nil || !errors.As(err, &ae) || ae.Code != "invalid_permission_policy" {
 		t.Fatalf("非法 native_mode 应报 invalid_permission_policy，got %v", err)
 	}
-	if a, _ := svc.AgentByID("pol-echo"); a.PermissionPolicy.Default != "allow" {
+	if a, _ := svc.AgentByID("pol-stub"); a.PermissionPolicy.Default != "allow" {
 		t.Fatalf("非法 PATCH 不应改动内存策略: %+v", a.PermissionPolicy)
 	}
 
 	// 重启加载：策略随定义文件恢复。
 	svc2 := agentTestSvc(t, dir)
-	a2, ok := svc2.AgentByID("pol-echo")
+	a2, ok := svc2.AgentByID("pol-stub")
 	if !ok || a2.PermissionPolicy == nil || a2.PermissionPolicy.Default != "allow" ||
 		a2.PermissionPolicy.Tools["write"] != "deny" || a2.PermissionPolicy.NativeMode != "danger-full-access" {
 		t.Fatalf("重启后策略未恢复: %+v ok=%v", a2, ok)
 	}
 
 	// CreateAgent 带策略 → 落盘 + 可读回。
-	created, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "new-pol", Runtimes: []string{"echo"},
+	created, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "new-pol", Runtimes: []string{"stub"},
 		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "deny"}})
 	if err != nil || created.PermissionPolicy == nil || created.PermissionPolicy.Default != "deny" {
 		t.Fatalf("CreateAgent 带策略失败: %v %+v", err, created)
@@ -343,14 +343,14 @@ func TestSeedAgentReadonly(t *testing.T) {
 	}
 
 	// 自定义 agent 仍可改 runtime / 删除。
-	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-echo", Runtimes: []string{"echo"}}); err != nil {
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
 		t.Fatal(err)
 	}
-	rt2 := []string{"echo", "opencode"}
-	if _, err := svc.UpdateAgent(ctx, "alias-echo", dtoagent.AgentUpdateReq{Runtimes: &rt2}); err != nil {
+	rt2 := []string{"stub", "opencode"}
+	if _, err := svc.UpdateAgent(ctx, "alias-stub", dtoagent.AgentUpdateReq{Runtimes: &rt2}); err != nil {
 		t.Fatalf("自定义 agent runtime 应可改: %v", err)
 	}
-	if _, err := svc.DeleteAgent(ctx, "alias-echo"); err != nil {
+	if _, err := svc.DeleteAgent(ctx, "alias-stub"); err != nil {
 		t.Fatalf("自定义 agent 应可删: %v", err)
 	}
 }
@@ -360,16 +360,16 @@ func TestSeedAgentReadonly(t *testing.T) {
 // agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 turn 时整体拒绝且无副作用。
 func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	svc.attachOrchestrator(orch)
 
-	svc.agents["alias-echo"] = &AgentRec{ID: "alias-echo", Name: "别名 echo", Runtimes: []string{"echo"}}
-	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲", Runtimes: []string{"echo"}}
-	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "alias-echo", Status: ConversationStatusInProgress})
-	svc.registerConversation(&ConversationRec{ID: "c2", AgentID: "alias-echo", Status: ConversationStatusInProgress})
+	svc.agents["alias-stub"] = &AgentRec{ID: "alias-stub", Name: "别名 echo", Runtimes: []string{"stub"}}
+	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲", Runtimes: []string{"stub"}}
+	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "alias-stub", Status: ConversationStatusInProgress})
+	svc.registerConversation(&ConversationRec{ID: "c2", AgentID: "alias-stub", Status: ConversationStatusInProgress})
 	svc.registerConversation(&ConversationRec{ID: "c3", AgentID: "dsh", Status: ConversationStatusInProgress})
 
 	agents, err := svc.ListAgents()
@@ -380,20 +380,20 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	for _, a := range agents {
 		counts[a.ID] = a.ConversationCount
 	}
-	if counts["alias-echo"] != 2 || counts["alias-idle"] != 0 {
+	if counts["alias-stub"] != 2 || counts["alias-idle"] != 0 {
 		t.Fatalf("conversation_count 不符（删除影响面）: %+v", counts)
 	}
 
 	// c1 是内存里仍活着的会话（连着底座）：删除必须立刻让它失效。
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "alias-echo", Runtime: "echo",
+	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "alias-stub", Runtime: "stub",
 		sess: &stubConversation{stop: "end_turn"}}
 	orch.byProvider["native-1"] = "c1"
 
-	resp, err := svc.DeleteAgent(ctx, "alias-echo")
+	resp, err := svc.DeleteAgent(ctx, "alias-stub")
 	if err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
-	if resp.Deleted != "alias-echo" || resp.AffectedConversations != 2 || resp.DetachedConversations != 1 || resp.WasDefault {
+	if resp.Deleted != "alias-stub" || resp.AffectedConversations != 2 || resp.DetachedConversations != 1 || resp.WasDefault {
 		t.Fatalf("影响面不符: %+v", resp)
 	}
 	if _, ok := orch.conversations["c1"]; ok {
@@ -402,7 +402,7 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	if _, ok := orch.byProvider["native-1"]; ok {
 		t.Fatal("原生→平台映射应一并清除")
 	}
-	if _, ok := svc.AgentByID("alias-echo"); ok {
+	if _, ok := svc.AgentByID("alias-stub"); ok {
 		t.Fatal("定义应已删除")
 	}
 	// 已摘除的会话继续提问 → agent_not_found，且给出「同 id 重新注册」的出路（历史仍可读）。
@@ -416,8 +416,8 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	}
 
 	// 有在途 turn → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
-	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙", Runtimes: []string{"echo"}}
-	busy := &ActiveConversation{ID: "cb", AgentID: "alias-busy", Runtime: "echo", sess: &stubConversation{stop: "end_turn"}}
+	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙", Runtimes: []string{"stub"}}
+	busy := &ActiveConversation{ID: "cb", AgentID: "alias-busy", Runtime: "stub", sess: &stubConversation{stop: "end_turn"}}
 	busy.busy = true
 	orch.conversations["cb"] = busy
 	if _, err := svc.DeleteAgent(ctx, "alias-busy"); err == nil {
@@ -437,13 +437,13 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 // （credential_missing + 出路），不静默以「无密钥」姿态起进程；补齐 key 后放行。
 func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	svc.attachOrchestrator(orch)
 
-	svc.agents["a-prov"] = &AgentRec{ID: "a-prov", Name: "P", Runtimes: []string{"echo"}, Provider: "gone"}
+	svc.agents["a-prov"] = &AgentRec{ID: "a-prov", Name: "P", Runtimes: []string{"stub"}, Provider: "gone"}
 	err := svc.StartAgent(ctx, "a-prov")
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "credential_missing" {
@@ -474,7 +474,7 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	}
 
 	// 未绑定档案（provider 为空）→ 合法：用底座自身登录态，不报错。
-	svc.agents["a-plain"] = &AgentRec{ID: "a-plain", Name: "Plain", Runtimes: []string{"echo"}}
+	svc.agents["a-plain"] = &AgentRec{ID: "a-plain", Name: "Plain", Runtimes: []string{"stub"}}
 	p, _ := svc.AgentByID("a-plain")
 	if err := svc.CredentialProblem(p); err != nil {
 		t.Fatalf("未绑定档案不应报凭据问题: %v", err)

@@ -22,7 +22,7 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
 	svc.registerConversation(&ConversationRec{ID: "conv-redact", AgentID: "a1"})
-	svc.tx.begin("conv-redact", "a1", "echo", "/tmp", false)
+	svc.tx.begin("conv-redact", "a1", "stub", "/tmp", false)
 	defer svc.tx.closeAll()
 
 	payload := map[string]any{

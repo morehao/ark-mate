@@ -5,6 +5,7 @@ import (
 	"github.com/morehao/ark-forge/internal/service/svccapability"
 	"github.com/morehao/ark-forge/internal/service/svcconversation"
 	"github.com/morehao/ark-forge/internal/service/svcexport"
+	"github.com/morehao/ark-forge/internal/service/svclibrary"
 	"github.com/morehao/ark-forge/internal/service/svcruntime"
 	"github.com/morehao/ark-forge/internal/service/svcsearch"
 	"github.com/morehao/ark-forge/internal/service/svcusage"
@@ -24,6 +25,7 @@ var (
 	_ svcworkspace.WorkspaceSvc       = (*Service)(nil)
 	_ svcruntime.RuntimeSvc           = (*Service)(nil)
 	_ svccapability.CapabilitySvc     = (*Service)(nil)
+	_ svclibrary.LibrarySvc           = (*Service)(nil)
 	_ svcusage.UsageSvc               = (*Service)(nil)
 	_ svcsearch.SearchSvc             = (*Service)(nil)
 	_ svcexport.ExportSvc             = (*Service)(nil)

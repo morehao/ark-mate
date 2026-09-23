@@ -19,7 +19,7 @@ import (
 // store 启用时聚合 runs（计数/时长）+ 会话用量快照；参数校验与降级路径明确。
 func TestUsageSummaryService(t *testing.T) {
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
@@ -28,9 +28,9 @@ func TestUsageSummaryService(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。
-	svc.agents["agent-echo"] = &AgentRec{ID: "agent-echo", Name: "Echo", Runtimes: []string{"echo"}}
-	svc.registerConversation(&ConversationRec{ID: "u1", AgentID: "agent-echo"})
-	svc.registerConversation(&ConversationRec{ID: "u2", AgentID: "agent-echo"})
+	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", Runtimes: []string{"stub"}}
+	svc.registerConversation(&ConversationRec{ID: "u1", AgentID: "agent-stub"})
+	svc.registerConversation(&ConversationRec{ID: "u2", AgentID: "agent-stub"})
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
@@ -71,7 +71,7 @@ func TestUsageSummaryService(t *testing.T) {
 	if resp.Totals.ContextUsed != 250 || resp.Totals.ContextSize != 1000 || resp.Totals.CostAmount != 0.5 {
 		t.Fatalf("用量快照不符: %+v", resp.Totals)
 	}
-	if len(resp.Buckets) != 1 || resp.Buckets[0].Key != "agent-echo" {
+	if len(resp.Buckets) != 1 || resp.Buckets[0].Key != "agent-stub" {
 		t.Fatalf("agent 分桶不符: %+v", resp.Buckets)
 	}
 
@@ -117,7 +117,7 @@ func TestUsageSummaryService(t *testing.T) {
 	}
 
 	// 未知 agent（已注册）过滤到空结果（不报错）。
-	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "agent-echo", From: "2000-01-01", To: "2000-01-02"})
+	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "agent-stub", From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
@@ -134,12 +134,12 @@ func TestUsageSummaryService(t *testing.T) {
 // TestOrchestratorUsageEvent 用量事件载荷与最近快照记录（底座上报 → 域事件 → 落库取值）。
 func TestOrchestratorUsageEvent(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "agent-echo"})
+	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "agent-stub"})
 	orch.byProvider["native-1"] = "c1"
 
 	sub := bus.Subscribe(0)
 	defer bus.Unsubscribe(sub)
-	sink := orch.eventSink("agent-echo", "echo")
+	sink := orch.eventSink("agent-stub", "stub")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",
 		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 
@@ -149,7 +149,7 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 			t.Fatalf("期望 %s/c1，got %s/%s", BusUsage, e.Type, e.AggregID)
 		}
 		p, _ := e.Payload.(map[string]any)
-		if p["session_id"] != "c1" || p["agent_id"] != "agent-echo" ||
+		if p["session_id"] != "c1" || p["agent_id"] != "agent-stub" ||
 			p["used"] != int64(42) || p["size"] != int64(200) ||
 			p["cost_amount"] != 0.25 || p["cost_currency"] != "USD" {
 			t.Fatalf("用量载荷不符: %+v", p)

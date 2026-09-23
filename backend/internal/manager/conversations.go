@@ -47,6 +47,7 @@ func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversatio
 // toConversationResp 把 ConversationRec 折叠为 dtoconversation.ConversationResp。
 func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 	return dtoconversation.ConversationResp{
+		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
@@ -57,8 +58,50 @@ func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 		Model:              r.Model,
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
+		Origin:             r.Origin,
 		CreatedAt:          r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:          r.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// capabilitySelectionFromReq 请求 DTO → 内部选定。
+//
+// `req == nil` **才**是"未声明"：`capabilities: {}` 是"声明了但什么都不限制"，
+// 两者在库里的落值不同（空串 vs `{}`），代际也不同（见 CapabilitySelection 的注释）。
+// 这里不做任何"聪明的归一"——把 `{}` 折叠成未声明会让 GET 回显与用户发的东西不一致。
+func capabilitySelectionFromReq(req *dtoconversation.CapabilitiesReq) *CapabilitySelection {
+	if req == nil {
+		return nil
+	}
+	return &CapabilitySelection{Skills: normalizeIDs(req.Skills), Mcps: normalizeIDs(req.Mcps)}
+}
+
+// toCapabilitiesResp 把会话钉住的选定折叠成对外形态（nil = 未声明 → 缺省路径）。
+//
+// 判据是**记录本身**（CapabilityJSON 空 = 未声明），不是"指纹是否为空"：
+// 两者今天同向（未声明 ⇔ 空指纹），但记录才是事实源，回显不该依赖一个派生量。
+func toCapabilitiesResp(r *ConversationRec) *dtoconversation.ConversationCapabilitiesResp {
+	if r == nil || strings.TrimSpace(r.CapabilityJSON) == "" {
+		return nil
+	}
+	sel := ParseCapabilitySelection(r.CapabilityJSON)
+	if sel == nil {
+		return nil
+	}
+	// 逐 kind 原样回显：**缺键 = 未声明该 kind**（回落上一层），`[]` = 明确一个都不要。
+	// 不做"未声明就补空数组"的归一——那会把两个语义相反的状态画成同一个样子，
+	// 用户看到 `skills: []` 会以为"这个会话没有技能"，实际是"投给它的全部技能"。
+	var skills, mcps *[]string
+	if sel.Skills != nil {
+		v := derefList(sel.Skills)
+		skills = &v
+	}
+	if sel.Mcps != nil {
+		v := derefList(sel.Mcps)
+		mcps = &v
+	}
+	return &dtoconversation.ConversationCapabilitiesResp{
+		Skills: skills, Mcps: mcps, Fingerprint: r.Fingerprint,
 	}
 }
 
@@ -183,11 +226,24 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	if err != nil {
 		return nil, code.FromError(err)
 	}
-	res, err := s.orch.StartConversation(runCtx, agentID, StartOptions{
+	// 能力选定（M3）：`capabilities` 未传 → nil，与引入本字段之前逐字节相同。
+	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
+	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
+	selection := capabilitySelectionFromReq(req.Capabilities)
+	// runtime_hint（automation 的 target.runtime_hint）：必须在该 agent 声明的候选里。
+	// 成员校验放在这里而不是编排器：它是**配置事实**（agent 定义），且必须在建连之前判
+	// （校验不过一个副作用都不留：刚代建的工作空间也要撤掉）。
+	if err := s.assertRuntimeHint(agentID, req.RuntimeHint); err != nil {
+		DiscardWorkspace(ws)
+		return nil, code.FromError(err)
+	}
+	res, err := s.startConversation(runCtx, agentID, req.RuntimeHint, StartOptions{
 		ConversationID:     convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
 		Model:              runtime.ModelConfig{Model: req.Model},
+		Selection:          selection,
+		Origin:             req.Origin,
 	})
 	if err != nil {
 		// 会话未能建立 → 清理刚代建的目录（非临时工作空间与用户目录一律不动）。
@@ -207,6 +263,41 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 		resp.Status = ConversationStatusInProgress
 	}
 	return resp, nil
+}
+
+// assertRuntimeHint 校验显式指定的 runtime 是该 agent 的候选之一（空 = 未指定，直接通过）。
+func (s *Service) assertRuntimeHint(agentID, runtimeID string) error {
+	if runtimeID == "" {
+		return nil
+	}
+	agent, _ := s.AgentByID(agentID)
+	if agent != nil {
+		for _, r := range agent.Runtimes {
+			if r == runtimeID {
+				return nil
+			}
+		}
+	}
+	return acl.NewError(acl.ClassRequest, "runtime_not_found",
+		fmt.Sprintf("runtime_hint %q 不在 agent %q 的候选 runtime %v 里（不静默回落路由）",
+			runtimeID, agentID, agentRuntimes(agent)), nil)
+}
+
+// startConversation 建会话：runtimeID 空 = 走 agent 的 routing_policy；非空 = 显式指定
+// （成员校验已由 assertRuntimeHint 完成）。
+func (s *Service) startConversation(ctx context.Context, agentID, runtimeID string, opt StartOptions) (*CreateResult, error) {
+	if runtimeID == "" {
+		return s.orch.StartConversation(ctx, agentID, opt)
+	}
+	return s.orch.StartConversationOn(ctx, agentID, runtimeID, opt)
+}
+
+// agentRuntimes 取 agent 声明的 runtime 候选（nil agent 安全，供错误消息用）。
+func agentRuntimes(a *AgentRec) []string {
+	if a == nil {
+		return nil
+	}
+	return append([]string(nil), a.Runtimes...)
 }
 
 // PromptConversation 向既有会话追加一轮 prompt（后台执行）。

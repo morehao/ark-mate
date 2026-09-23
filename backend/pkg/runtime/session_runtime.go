@@ -10,7 +10,7 @@ import (
 // ID/ManagesOwnContext/… 均取自该 runtime 的投影 Spec（§6.1/§6.2），Prompt/Capabilities/
 // ProviderSessionID 透传底层 acl.Session。
 //
-// echo / opencode / deepseekharness 三投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
+// opencode / deepseekharness 两投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
 // ApplyMode/ApplyModel/Resume 需底座侧原生支持或映射实测，当前统一显式返回 unsupported_*
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
@@ -95,20 +95,14 @@ func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 		"runtime "+r.spec.ID+" 不支持投影内 Resume：恢复走 acl.Client.ResumeSession，需重建投影")
 }
 
-// ——— 三投影公开形态（§6.2） ———
+// ——— 两投影公开形态（§6.2） ———
 
-// EchoRuntime / OpencodeRuntime / DeepseekHarnessRuntime 为三个投影的命名别名（均指
+// OpencodeRuntime / DeepseekHarnessRuntime 为两个投影的命名别名（均指
 // sessionRuntime），New*Runtime 各以对应 Spec 实例化。
 type (
-	EchoRuntime            = sessionRuntime
 	OpencodeRuntime        = sessionRuntime
 	DeepseekHarnessRuntime = sessionRuntime
 )
-
-// NewEchoRuntime 包装已建立的 echo 会话（无模型演示底座，§6.2）。
-func NewEchoRuntime(sess *acl.Session) *EchoRuntime {
-	return newSessionRuntime(echoSpec(), sess)
-}
 
 // NewOpencodeRuntime 包装已建立的 opencode 会话（后端自管上下文，§6.2）。
 func NewOpencodeRuntime(sess *acl.Session) *OpencodeRuntime {
@@ -125,8 +119,6 @@ func NewDeepseekHarnessRuntime(sess *acl.Session) *DeepseekHarnessRuntime {
 // sess 为 nil 时已知投影仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
 func NewProjection(spec Spec, sess *acl.Session) Runtime {
 	switch spec.ID {
-	case "echo":
-		return NewEchoRuntime(sess)
 	case "opencode":
 		return NewOpencodeRuntime(sess)
 	case "deepseekharness":

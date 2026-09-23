@@ -3,12 +3,19 @@ import type {
   Agent,
   AgentCapabilities,
   AgentDeleteResp,
+  Automation,
+  AutomationDeleteResp,
+  AutomationPreviewResp,
+  AutomationRunsResp,
+  AutomationRunResp,
+  AutomationWriteBody,
   AgentDiagnostics,
   PermissionPolicy,
   Provider,
   ProviderPatch,
   BusEvent,
   CancelConversationResp,
+  CapabilityWriteBody,
   CancelQueuedInputResp,
   QueuedInputResp,
   CreateConversationReq,
@@ -22,6 +29,8 @@ import type {
   McpResourceReadResult,
   McpPromptsResult,
   McpPromptGetResult,
+  McpWriteResp,
+  McpDeleteResp,
   ModelCatalogResp,
   PermissionResp,
   PromptReq,
@@ -34,6 +43,8 @@ import type {
   Skill,
   SkillMaterializationResp,
   SkillToggleResp,
+  SkillWriteResp,
+  SkillDeleteResp,
   Tool,
   ConversationDetail,
   ConversationPatch,
@@ -54,6 +65,49 @@ import type {
 // ——— forge 控制面 REST（/v1/forge，见 backend/internal/router/routes_*.go） ———
 
 export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/forge/agents')
+
+// ——— automation（定时任务，M4）：定义的事实源是文件，接口是编辑器与观察窗 ———
+
+/** 列出全部 automation（**含装载失败的那些**：坏定义带 `error` 出现在列表里，不静默消失）。 */
+export const listAutomations = (): Promise<Automation[]> => http.get<Automation[]>('/forge/automations')
+
+/** 取一条（不存在 → 40401）。 */
+export const getAutomation = (id: string): Promise<Automation> =>
+  http.get<Automation>(`/forge/automations/${encodeURIComponent(id)}`)
+
+/** 新建定义（`id` 必填 = 文件名；已存在 → 40901，绝不覆盖）。 */
+export const createAutomation = (body: AutomationWriteBody): Promise<Automation> =>
+  http.post<Automation>('/forge/automations', body)
+
+/** 覆盖写：**只改 body 里出现过的键**（未出现的保留原值，`null` 删键）。 */
+export const updateAutomation = (id: string, body: AutomationWriteBody): Promise<Automation> =>
+  http.put<Automation>(`/forge/automations/${encodeURIComponent(id)}`, body)
+
+/** 删除（幂等：本来就不存在 → `deleted:false` 且不报错）。 */
+export const deleteAutomation = (id: string): Promise<AutomationDeleteResp> =>
+  http.delete<AutomationDeleteResp>(`/forge/automations/${encodeURIComponent(id)}`)
+
+/**
+ * 预览未来若干次到期时刻（**不落盘、不建会话**，也不要求定义已存在）。
+ * 面板里还没保存的 schedule 也能先看到"到底什么时候跑"。
+ */
+export const previewAutomation = (body: {
+  /** 原文对象（`null` = 删键）：面板把"还没保存的表单"直接发过来，服务端按同一套规则解出。 */
+  schedule: Record<string, unknown>
+  count?: number
+  from?: string
+}): Promise<AutomationPreviewResp> => http.post<AutomationPreviewResp>('/forge/automations/preview', body)
+
+/** 运行史（最新 20 条，含 `overlap`/`duplicate`/`skipped`）。 */
+export const listAutomationRuns = (id: string): Promise<AutomationRunsResp> =>
+  http.get<AutomationRunsResp>(`/forge/automations/${encodeURIComponent(id)}/runs`)
+
+/**
+ * 手动触发一次（走同一认领判据：上一次还在跑 → `overlap`；**不推进认领游标**，
+ * 手动试跑不该静默吃掉当晚的排期）。失败会同时抛错并已留痕。
+ */
+export const runAutomationNow = (id: string): Promise<AutomationRunResp> =>
+  http.post<AutomationRunResp>(`/forge/automations/${encodeURIComponent(id)}/run`)
 
 /** agent 诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。 */
 export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
@@ -251,6 +305,40 @@ export const setSkillEnabled = (id: string, enabled: boolean): Promise<SkillTogg
  */
 export const getSkillMaterialization = (id: string): Promise<SkillMaterializationResp> =>
   http.get<SkillMaterializationResp>(`/forge/skills/${encodeURIComponent(id)}/materialization`)
+
+/**
+ * M2 写面：新建一个 skill 定义（body = skill 定义原文，`id` 必填）。
+ *
+ * **闸门在写盘之前**：正文扫描（critical 直接拒）与定义校验不过 → 40001 `definition_invalid`
+ * 且**零字节落盘**；id 已存在 → 40901 `skill_exists`。
+ */
+export const createSkill = (body: CapabilityWriteBody): Promise<SkillWriteResp> =>
+  http.post<SkillWriteResp>('/forge/skills', body)
+
+/**
+ * M2 写面：覆盖写一个 skill 定义——**只改请求体里出现过的键**。
+ *
+ * 未出现的键保留原值（含用户手写的未知键）、`null` 删键、`""`/`[]` 显式清空。目标不存在 →
+ * 40401 `skill_not_found`（**不会顺便新建**）；读写窗口内被外部改动 → 40901 `definition_changed`。
+ */
+export const updateSkill = (id: string, body: CapabilityWriteBody): Promise<SkillWriteResp> =>
+  http.put<SkillWriteResp>(`/forge/skills/${encodeURIComponent(id)}`, body)
+
+/** M2 写面：删定义文件 + 撤回已物化副本（幂等：不存在 → `deleted:false` 且不报错）。 */
+export const deleteSkill = (id: string): Promise<SkillDeleteResp> =>
+  http.delete<SkillDeleteResp>(`/forge/skills/${encodeURIComponent(id)}`)
+
+/** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
+export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>
+  http.post<McpWriteResp>('/forge/mcps', body)
+
+/** M2 写面：覆盖写一个 MCP server 定义（键的出现与否有语义，同 skill）。 */
+export const updateMcpServer = (id: string, body: CapabilityWriteBody): Promise<McpWriteResp> =>
+  http.put<McpWriteResp>(`/forge/mcps/${encodeURIComponent(id)}`, body)
+
+/** M2 写面：删 MCP server 定义 + 摘除归属它的工具条目（幂等）。 */
+export const deleteMcpServer = (id: string): Promise<McpDeleteResp> =>
+  http.delete<McpDeleteResp>(`/forge/mcps/${encodeURIComponent(id)}`)
 
 // ——— P2 §8.1/§5.2：Agent 统一能力目录 + MCP live 探测 ———
 

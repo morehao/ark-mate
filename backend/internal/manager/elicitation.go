@@ -129,6 +129,19 @@ func (m *ElicitationManager) CancelConversation(conversationID string) {
 	}
 }
 
+// pendingCount 返回某会话的挂起提问数（代际迁移的忙碌探针用；与权限侧同名同义）。
+func (m *ElicitationManager) pendingCount(conversationID string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, p := range m.pending {
+		if p.conversationID == conversationID {
+			n++
+		}
+	}
+	return n
+}
+
 // pendingForConversation 列出某会话的全部挂起提问（按 id 稳定序）。
 func (m *ElicitationManager) pendingForConversation(conversationID string) []*pendingElicitation {
 	m.mu.Lock()

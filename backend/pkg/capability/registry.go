@@ -66,6 +66,26 @@ func (r *Registry) RegisterSkill(s *Skill) error {
 	if s == nil || s.ID == "" || !nameRE.MatchString(s.ID) {
 		return fmt.Errorf("capability skill: id 非法（须字母数字开头，≤64 位）: %q", idOf(s))
 	}
+	// Scope：只认 global|workspace。未知取值报错而不是静默当 global——静默会把「我明明写了
+	// workspace 想让它跟着项目走」变成「悄悄写进了全局目录」。
+	if s.Scope != "" && !ValidSkillScopes[s.Scope] {
+		return fmt.Errorf("capability skill %q: scope %q 非法（合法：global|workspace）", s.ID, s.Scope)
+	}
+	// Runtimes：去空白、去重，并拒绝重复声明（"我列了两次 opencode"通常意味着想表达别的）。
+	seen := make(map[string]bool, len(s.Runtimes))
+	cleaned := make([]string, 0, len(s.Runtimes))
+	for _, r := range s.Runtimes {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			return fmt.Errorf("capability skill %q: runtimes 里有空项", s.ID)
+		}
+		if seen[r] {
+			return fmt.Errorf("capability skill %q: runtimes 里 %q 重复", s.ID, r)
+		}
+		seen[r] = true
+		cleaned = append(cleaned, r)
+	}
+	s.Runtimes = cleaned
 	warnings := VerifyContent(s.Body)
 	if HasCritical(warnings) {
 		return criticalErr(s.ID, warnings)
@@ -182,6 +202,49 @@ func (r *Registry) SetSkillEnabled(id string, enabled bool) (Skill, bool) {
 	return *s, true
 }
 
+// RemoveSkill 摘除一个 skill 条目（DELETE /skills/:id 与写盘回滚用）。ok=false = 本来就不在。
+//
+// 只摘内存条目：**文件由调用方删**（写面先落盘再改内存，回滚时顺序反过来）。
+// 分开的理由是两条路径的失败语义不同——"文件删了但内存还在"是幻影能力，
+// "内存删了但文件还在"会在下次装载时复活；调用方必须按自己的顺序显式处理。
+func (r *Registry) RemoveSkill(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.skills[id]; !ok {
+		return false
+	}
+	delete(r.skills, id)
+	return true
+}
+
+// RemoveMcpServer 摘除一个 MCP server 条目（ok=false = 本来就不在）。
+func (r *Registry) RemoveMcpServer(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.mcps[id]; !ok {
+		return false
+	}
+	delete(r.mcps, id)
+	return true
+}
+
+// RemoveToolsForMcpServer 摘除某 server 归属的 mcp 来源工具（返回摘除数）。
+//
+// 删定义时必须一起做：`/tools` 里留着已删 server 的工具，等于让用户看见一个调不通的能力
+// （`AgentCapabilities` 的可见性过滤只看 transport 是否被候选 runtime 承载，看不出 server 已没了）。
+func (r *Registry) RemoveToolsForMcpServer(serverID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for name, t := range r.tools {
+		if t.McpServer == serverID && t.Source == ToolSourceMCP {
+			delete(r.tools, name)
+			n++
+		}
+	}
+	return n
+}
+
 // SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证
 // = 该 runtime 物化不出来，要给用户一个人话原因，而不是让技能静默消失）。
 func SupportedFormat(format string) bool {
@@ -284,7 +347,7 @@ func nameOf(t *Tool) string {
 }
 
 func (r *Registry) loadSkillsDir(dir string) int {
-	return scanDir(dir, "skill", func(b []byte, key string) error {
+	return scanDir(dir, "skill", func(b []byte, key, path string) error {
 		var d Skill
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -292,12 +355,46 @@ func (r *Registry) loadSkillsDir(dir string) int {
 		if d.ID == "" {
 			d.ID = key
 		}
-		return r.RegisterSkill(&d)
+		d.SourceFile = path // 事实源文件（Library 的 origin/source_file 依据）
+		if err := r.RegisterSkill(&d); err != nil {
+			return err
+		}
+		// 旧键 `sources` 已被忽略（M1 起条目侧只声明 runtimes），而 encoding/json 丢未知键
+		// 是**静默**的：后果是技能从「只给 opencode」悄悄变成「给所有 runtime」——投放面被放宽，
+		// 用户看不到任何迹象。所以装载时显式挂一条告警，把人引到 `forge capability migrate`。
+		if hasLegacySourcesKey(b) {
+			r.appendSkillWarning(d.ID, Warning{
+				Severity: SeverityInfo,
+				Pattern:  "legacy_sources_key",
+				Message: "该定义仍含已退役的 `sources` 字段（已被忽略）：技能会投放到**所有**支持 skill 投影的 runtime，" +
+					"而不是原来声明的那些。运行 `forge capability migrate` 把它转成 runtimes（值 = 原 sources 的 runtime 去重升序）",
+			})
+		}
+		return nil
 	})
 }
 
+// hasLegacySourcesKey 探测定义原文里是否还有 `sources` 键（只为给出一条告警，不参与解析）。
+func hasLegacySourcesKey(b []byte) bool {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return false
+	}
+	_, ok := probe["sources"]
+	return ok
+}
+
+// appendSkillWarning 给已注册的 skill 追加一条告警（派生信息，不改定义文件）。
+func (r *Registry) appendSkillWarning(id string, w Warning) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.skills[id]; ok {
+		s.Warnings = append(s.Warnings, w)
+	}
+}
+
 func (r *Registry) loadMcpsDir(dir string) int {
-	return scanDir(dir, "mcp", func(b []byte, key string) error {
+	return scanDir(dir, "mcp", func(b []byte, key, path string) error {
 		var d McpServer
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -305,12 +402,13 @@ func (r *Registry) loadMcpsDir(dir string) int {
 		if d.ID == "" {
 			d.ID = key
 		}
+		d.SourceFile = path
 		return r.RegisterMcpServer(&d)
 	})
 }
 
 func (r *Registry) loadToolsDir(dir string) int {
-	return scanDir(dir, "tool", func(b []byte, key string) error {
+	return scanDir(dir, "tool", func(b []byte, key, path string) error {
 		var d Tool
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -318,12 +416,13 @@ func (r *Registry) loadToolsDir(dir string) int {
 		if d.Name == "" {
 			d.Name = key
 		}
+		d.SourceFile = path
 		return r.RegisterTool(&d)
 	})
 }
 
 // scanDir 扫描 dir 下 *.json，逐文件解码后交给 apply（键回退 = 文件名去 .json）。
-func scanDir(dir, kind string, apply func(b []byte, key string) error) int {
+func scanDir(dir, kind string, apply func(b []byte, key, path string) error) int {
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		slog.Warn("capability: 扫描目录失败", "kind", kind, "dir", dir, "err", err)
@@ -337,7 +436,7 @@ func scanDir(dir, kind string, apply func(b []byte, key string) error) int {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		if err := apply(b, base); err != nil {
+		if err := apply(b, base, p); err != nil {
 			slog.Warn("capability: 定义未采纳", "kind", kind, "file", p, "err", err)
 			continue
 		}

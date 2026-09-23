@@ -27,28 +27,6 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	return s.caps.LoadDir(dir).Total()
 }
 
-// ReconcileSkills 把能力数据面里已实证 format 的 skill 与目标根目录做重校
-// （§5.4/§16.5：物化缺失/更新 + 删除联动——只删带 forge 归属标记且已不在注册表的目录，
-// 用户自有目录绝不动）。支持两种已实证 format：`SKILL.md`（opencode 原样）与
-// `SKILL.md+frontmatter`（dsh 需 YAML frontmatter）。返回 (written, removed)。
-// serve 启动装载能力后、FORGE_SKILLS_MATERIALIZE_DIR 非空时调用。
-// 物化默认不写用户目录——由调用方显式 enable。
-func (s *Service) ReconcileSkills(root string) (int, int, error) {
-	if s.caps == nil || root == "" {
-		return 0, 0, nil
-	}
-	return capability.ReconcileSkills(root, s.caps.ListSkills())
-}
-
-// ReconcileSkillsFor 按 runtime 分 root 重校（C4 多 root 投影）：只物化声明了该 runtime 的 skill，
-// 删除联动也只动本 root 下该 runtime 的标记目录。runtime 为空 → 等价 ReconcileSkills。
-func (s *Service) ReconcileSkillsFor(root, runtime string) (int, int, error) {
-	if s.caps == nil || root == "" {
-		return 0, 0, nil
-	}
-	return capability.ReconcileSkillsFor(root, runtime, s.caps.ListSkills())
-}
-
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
 func (s *Service) RegisterTool(t capability.Tool) error {
 	return s.caps.RegisterTool(&t)
@@ -59,19 +37,10 @@ func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) {
 	items := s.caps.ListSkills()
 	out := make([]dtocapability.SkillResp, 0, len(items))
 	for _, sk := range items {
-		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
-		for _, so := range sk.Sources {
-			src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
-		}
-		warns := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
-		for _, w := range sk.Warnings {
-			warns = append(warns, dtocapability.SkillWarningResp{
-				Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
-			})
-		}
 		out = append(out, dtocapability.SkillResp{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body,
-			Sources: src, Enabled: sk.IsEnabled(), Warnings: warns,
+			Runtimes: append([]string(nil), sk.Runtimes...), Scope: sk.EffectiveScope(),
+			Enabled: sk.IsEnabled(), Warnings: skillWarnings(sk),
 		})
 	}
 	return out, nil
@@ -88,6 +57,7 @@ func (s *Service) ListMcpServers() ([]dtocapability.McpServerResp, error) {
 		resp := dtocapability.McpServerResp{
 			ID: m.ID, Name: m.Name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
+			Scope: m.EffectiveScope(), Enabled: m.IsEnabled(),
 			EnvKeys:              capability.KeysOf(m.Env),
 			SecretEnvKeys:        capability.KeysOf(m.SecretEnv),
 			SecretHeaderKeys:     capability.KeysOf(m.SecretHeaders),
@@ -199,19 +169,21 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 	}
 
 	// Skill：全量列出 + 每条给「启用/适用」两个正交判断（§13.4 S5）。
-	// sources 裁剪到候选 runtime（不适用时可能为空）——空 sources + reasons 就是「这个 agent 用不上」。
+	// carrierRuntimes 是**本 agent 视角下的实际投放目标**（候选 ∩ 技能声明 ∩ 已解析投影），
+	// 空 + reasons 就是「这个 agent 用不上」。
+	projected := s.projectedRuntimeSet()
 	skills := s.caps.ListSkills()
 	skillOut := make([]dtocapability.AgentSkillResp, 0, len(skills))
 	for _, sk := range skills {
-		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
-		for _, so := range sk.Sources {
-			if inAgent[so.Runtime] {
-				src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
+		carriers := make([]string, 0, len(runtimes))
+		for _, rt := range runtimes {
+			if inAgent[rt] && sk.AppliesToRuntime(rt) && projected[rt] {
+				carriers = append(carriers, rt)
 			}
 		}
-		act := SkillActivationFor(sk, runtimes, inAgent)
+		act := SkillActivationFor(sk, runtimes, inAgent, projected)
 		skillOut = append(skillOut, dtocapability.AgentSkillResp{
-			ID: sk.ID, Name: sk.Name, Description: sk.Description, Sources: src,
+			ID: sk.ID, Name: sk.Name, Description: sk.Description, Runtimes: carriers,
 			Enabled: sk.IsEnabled(), Applicable: act.Applicable, Reasons: act.Reasons,
 		})
 	}
@@ -341,11 +313,22 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 	}
 }
 
-// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 注册表全量 → 该 runtime 的 McpTransports 过滤 → agent.Mcps 白名单（nil = 未声明 → 全量；
-// 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
-// 未知 runtime → nil（维持现状不下发）。
-func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
+// mcpSelectionFor 选出该 agent×runtime 的 MCP **候选定义**（未解析密钥）。
+//
+// 这是「哪些 server 属于这套能力」的**唯一**实现：注入面（McpServersFor）与代际指纹
+// （capabilityFingerprint）都从这里取。两处各写一遍的后果是"指纹里有的、注入时没有"（或反之）——
+// 后者更糟：指纹说这套能力包含某个 server，实际却没注入。
+//
+// 与注入面的差别只有一处、且是**有意**的：这里不解析密钥（能不能解析是环境事实，不该让指纹抖动）。
+//
+// **白名单优先级（M3）**：会话声明了 `capabilities.mcps` → 以它为准（M3-2 的落点）；
+// 会话没声明该 kind → 回落 `agent.Mcps`；两者都未声明 → 全量按 transport 过滤（今天的行为）。
+// 会话级的选定**覆盖**而不是求交：agent 声明是"这个 agent 默认能碰什么"，会话声明是用户此刻
+// 的显式选择，求交会让"agent 白名单里没有的 server"永远选不上，用户看不到任何解释。
+func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []capability.McpServer {
+	if s.caps == nil {
+		return nil
+	}
 	supported, ok := s.supportedMcpTransports(runtimeID)
 	if !ok {
 		return nil
@@ -354,22 +337,48 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 	for _, t := range supported {
 		want[t] = true
 	}
+	allowIDs := (*[]string)(nil)
+	if sel != nil && sel.Mcps != nil {
+		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
+	} else if agent != nil {
+		allowIDs = agent.Mcps
+	}
 	var allow map[string]bool
-	if agent != nil && agent.Mcps != nil {
-		allow = make(map[string]bool, len(*agent.Mcps))
-		for _, id := range *agent.Mcps {
+	if allowIDs != nil {
+		allow = make(map[string]bool, len(*allowIDs))
+		for _, id := range *allowIDs {
 			allow[id] = true
 		}
 	}
 	servers := s.caps.ListMcpServers()
-	out := make([]acl.McpServer, 0, len(servers))
+	out := make([]capability.McpServer, 0, len(servers))
 	for _, m := range servers {
+		if !m.IsEnabled() {
+			continue // 禁用 = 不注入（overlay：定义/密钥引用/探测结果都保留，只停止注入）
+		}
 		if !want[m.Transport] {
 			continue
 		}
 		if allow != nil && !allow[m.ID] {
 			continue // agent 白名单未启用该 server（含空白名单 = 全部跳过）
 		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
+// 注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单（会话选定 > agent.Mcps；
+// 两者都未声明 = 全量；空数组 = 一个都不要）。headers/凭证一并携带（走 ACP wire）。
+// 未知 runtime → nil（维持现状不下发）。
+//
+// `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
+// `conversations.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
+// 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
+func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
+	servers := s.mcpSelectionFor(agent, runtimeID, sel)
+	out := make([]acl.McpServer, 0, len(servers))
+	for _, m := range servers {
 		name := m.Name
 		if name == "" {
 			name = m.ID
@@ -386,6 +395,29 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 			Name: name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
 			Env: env, Headers: headers,
+		})
+	}
+	return out
+}
+
+// projectedRuntimeSet 本进程已解析出 skill 投影的 runtime 集合（激活判定与投放集共用）。
+func (s *Service) projectedRuntimeSet() map[string]bool {
+	ps := s.skillProjectionsSnapshot()
+	out := make(map[string]bool, len(ps))
+	for _, p := range ps {
+		if p.Err == "" {
+			out[p.Runtime] = true
+		}
+	}
+	return out
+}
+
+// skillWarnings 把注册表的装载期告警转成 REST 读模型（两处共用一个转换，免漂移）。
+func skillWarnings(sk capability.Skill) []dtocapability.SkillWarningResp {
+	out := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
+	for _, w := range sk.Warnings {
+		out = append(out, dtocapability.SkillWarningResp{
+			Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
 		})
 	}
 	return out

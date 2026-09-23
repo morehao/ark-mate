@@ -2,56 +2,42 @@ package runtime
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	acpsdk "github.com/coder/acp-go-sdk"
+
 	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime/echo"
 )
 
-// newEchoRemote 起一个真实 ACP server（内置 echo 底座）挂在远程端点上：
-// ws 形态走 acl.ServeWSSession，http 形态走 acl.NewRemoteHandler（均为生产服务端半场）。
-func newEchoRemote(t *testing.T, transport string) string {
+// newTestRemote 起一个真实 ACP server（自建最小 responder，见 acp_testserver_test.go）挂在
+// 远程端点上：ws 形态走 acl.ServeWSSession，http 形态走 acl.NewRemoteHandler（均为生产服务端半场）。
+func newTestRemote(t *testing.T, transport string) string {
 	t.Helper()
-	opts := acl.RemoteServerOptions{Serve: func(in io.Writer, out io.Reader) { echo.Serve(in, out) }, SessionIDPrefix: "echo"}
-	mux := http.NewServeMux()
+	r := newTestACPResponder()
+	r.updates = []acpsdk.SessionUpdate{acpsdk.UpdateAgentMessageText("remote-hello")}
+	r.promptHook = func(ctx context.Context, r *testACPResponder, req acpsdk.PromptRequest) {
+		r.permResult <- r.requestPermission(ctx, req.SessionId)
+	}
 	switch transport {
 	case "ws":
-		mux.HandleFunc("/acp", func(w http.ResponseWriter, r *http.Request) {
-			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
-			if err != nil {
-				return
-			}
-			defer conn.CloseNow()
-			ctx, cancel := context.WithCancel(r.Context())
-			defer cancel()
-			_ = acl.ServeWSSession(ctx, conn, opts)
-		})
+		return serveResponderWS(t, r)
 	case "http":
-		mux.Handle("/acp", acl.NewRemoteHandler(opts))
+		return serveResponderHTTP(t, r)
 	default:
 		t.Fatalf("未知传输 %q", transport)
+		return ""
 	}
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	if transport == "ws" {
-		return "ws" + strings.TrimPrefix(srv.URL, "http") + "/acp"
-	}
-	return srv.URL + "/acp"
 }
 
 // TestConnectRemoteTransport runtime.Connect 按 LaunchSpec.Transport 走远程传输（A5）：
-// 真实 echo ACP server 在远端，Connect 完成 initialize 并跑通一轮会话（含权限交互）。
+// 真实 ACP server 在远端，Connect 完成 initialize 并跑通一轮会话（含权限交互）。
+// 对端由自建最小 responder 提供（echo 已删）；ws/http 两形态都覆盖，保住远程传输路径。
 func TestConnectRemoteTransport(t *testing.T) {
 	for _, transport := range []string{"ws", "http"} {
 		t.Run(transport, func(t *testing.T) {
-			endpoint := newEchoRemote(t, transport)
-			spec := RemoteSpec("remote-echo", "Remote Echo", transport, endpoint, nil)
+			endpoint := newTestRemote(t, transport)
+			spec := RemoteSpec("remote-rt", "Remote RT", transport, endpoint, nil)
 			if spec.Launch.Transport != transport || spec.Launch.Endpoint != endpoint {
 				t.Fatalf("RemoteSpec 未落到 Launch: %+v", spec.Launch)
 			}
@@ -82,7 +68,7 @@ func TestConnectRemoteTransport(t *testing.T) {
 			if stop != "end_turn" {
 				t.Fatalf("stop reason 不符: %q", stop)
 			}
-			// echo 底座每轮必发一次权限请求 + 回显消息。
+			// responder 每轮必发一次权限请求 + 一条消息更新。
 			var gotPermission, gotMessage bool
 			deadline := time.After(5 * time.Second)
 		loop:

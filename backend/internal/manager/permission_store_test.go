@@ -17,14 +17,14 @@ import (
 func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
-	reg := testutil.EchoRegistry()
+	reg := testutil.StubRegistry()
 
 	// —— 进程一：sqlite 模式记录双侧记忆 ——
 	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := NewService(reg, nil)
 	svc1.EnableStore(st1)
 	orch1 := NewOrchestrator(svc1, reg)
-	svc1.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-echo"})
+	svc1.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-stub"})
 
 	toolRun := acl.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
 	orch1.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")
@@ -64,8 +64,8 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc2 := NewService(reg, nil)
 	svc2.EnableStore(st2)
 	orch2 := NewOrchestrator(svc2, reg)
-	svc2.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-echo"})
-	svc2.registerConversation(&ConversationRec{ID: "s2", AgentID: "agent-echo"})
+	svc2.registerConversation(&ConversationRec{ID: "s1", AgentID: "agent-stub"})
+	svc2.registerConversation(&ConversationRec{ID: "s2", AgentID: "agent-stub"})
 
 	// 恢复前先记录（模拟重启前的历史记忆），恢复后二者叠加。
 	orch2.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")

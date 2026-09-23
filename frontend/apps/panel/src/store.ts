@@ -184,8 +184,14 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
       // handoff 历史摘要重灌）。以系统提示入流，避免用户误以为会话被「重新开始」。
       const reason = String(e.payload?.reason ?? '')
       const runtime = String(e.payload?.runtime ?? '')
+      // generation（M3-6）：会话在轮次边界迁到了新的能力代际（定义被改过）。
+      // 与"进程重启后原生续接"必须分开说——用户改完定义最关心的正是"到底生效了没有"。
       const label =
-        reason === 'handoff' ? '会话已恢复（历史摘要重灌）' : '会话已恢复（原生会话续接）'
+        reason === 'handoff'
+          ? '会话已恢复（历史摘要重灌）'
+          : reason === 'generation'
+            ? '会话已用上新的能力（下一轮生效）'
+            : '会话已恢复（原生会话续接）'
       return {
         ...v,
         entries: push('system', undefined, {
@@ -398,7 +404,12 @@ export interface ForgeActions {
    * `workspace` = 会话工作空间绝对路径（服务端规范化后的原文）；null/省略 = 由平台代建临时空间。
    * 工作空间创建时定稿、之后不可变（它是底座 ACP session 的 cwd 与 workspace-write 的边界）。
    */
-  createAndRun: (prompt: string, model?: ModelRef, workspace?: string | null) => Promise<string | undefined>
+  createAndRun: (
+    prompt: string,
+    model?: ModelRef,
+    workspace?: string | null,
+    capabilities?: { skills?: string[]; mcps?: string[] },
+  ) => Promise<string | undefined>
   /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: (agentId?: string) => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
@@ -658,13 +669,17 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt, model, workspace) => {
+    createAndRun: async (prompt, model, workspace, capabilities) => {
       try {
         const resp = await createConversation({
           prompt,
           model: model?.modelID,
           // 不外发空串：cwd 缺省才是「平台代建临时空间」语义（后端把空/缺省当作未指定）。
           cwd: workspace ?? undefined,
+          // 能力选定：调用方（输入卡）已在"两个 kind 都没限制"时不传，这里不再判一次
+          // ——缺省路径必须与 M3 之前逐字节相同，判据只留一处。传了就钉住代际；
+          // 不可达的 id 由服务端拒（40001，msg 里逐条给原因）。
+          capabilities,
         })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。

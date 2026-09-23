@@ -36,7 +36,7 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus)
 	return engine, svc
 }
@@ -75,7 +75,7 @@ func TestRouterMountHealth(t *testing.T) {
 }
 
 // TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）、
-// runtimes 3 个（opencode / deepseekharness / echo 演示）。
+// runtimes 2 个（opencode / deepseekharness；echo 演示底座已于 M0 删除）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
@@ -93,7 +93,7 @@ func TestRouterListRealService(t *testing.T) {
 
 	env = get(t, e, "/v1/forge/runtimes")
 	var rts []map[string]any
-	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 3 {
+	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
@@ -313,7 +313,9 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
 			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
-			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
+			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/library") &&
+			!strings.HasPrefix(p, "/automations") &&
+			!strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/settings/") &&
 			!strings.HasPrefix(p, "/health") &&
 			!strings.HasPrefix(p, "/ws/") {
@@ -372,7 +374,7 @@ func newAuthEngine(token string) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Token: token})
 	return engine
 }

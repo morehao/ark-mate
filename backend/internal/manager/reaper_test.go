@@ -12,7 +12,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	o.mu.Lock()
-	o.conns["echo"] = &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
+	o.conns["stub"] = &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
 	o.mu.Unlock()
 
 	n := o.reapIdleOnce(now, 5*time.Minute)
@@ -20,12 +20,12 @@ func TestReapIdleOnceBasic(t *testing.T) {
 		t.Fatalf("应回收 1 个，实际 %d", n)
 	}
 	o.mu.Lock()
-	_, ok := o.conns["echo"]
+	_, ok := o.conns["stub"]
 	o.mu.Unlock()
 	if ok {
 		t.Fatal("连接应已摘除")
 	}
-	rec, _ := svc.AgentByID("alias-echo")
+	rec, _ := svc.AgentByID("alias-stub")
 	if rec.State != AgentStateStopped {
 		t.Fatalf("回收后状态应 stopped: %s", rec.State)
 	}
@@ -36,16 +36,16 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	old := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
+		return &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
 	}
 	fresh := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-time.Minute)}
+		return &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-time.Minute)}
 	}
 	busy := old()
 	withConversation := old()
 	// 四种连接分四个 runtime 槽（避免互相干扰）。
 	o.mu.Lock()
-	o.conns["echo"] = fresh()
+	o.conns["stub"] = fresh()
 	o.conns["opencode"] = busy
 	o.inflight.Mark(busy.client, "s1")
 	o.conns["deepseekharness"] = withConversation
@@ -56,7 +56,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 		t.Fatalf("四种情形都不应回收，实际 %d", n)
 	}
 	o.mu.Lock()
-	_, a := o.conns["echo"]
+	_, a := o.conns["stub"]
 	_, b := o.conns["opencode"]
 	_, c := o.conns["deepseekharness"]
 	o.mu.Unlock()
@@ -71,15 +71,15 @@ func TestReapIdleOnceSkips(t *testing.T) {
 func TestReapThenReacquireState(t *testing.T) {
 	o, _ := testReapHarness(t)
 	now := time.Now()
-	old := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now.Add(-10 * time.Minute)}
-	newer := &runtimeConn{agentID: "alias-echo", spec: runtime.Spec{ID: "echo"}, key: "echo", started: now}
+	old := &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
+	newer := &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now}
 	o.mu.Lock()
-	o.conns["echo"] = newer
+	o.conns["stub"] = newer
 	o.mu.Unlock()
-	o.svc.setAgentState("alias-echo", AgentStateRunning)
+	o.svc.setAgentState("alias-stub", AgentStateRunning)
 	// 旧连接收尾 dropConn：ownerBefore=false → 状态不回落（仍 running）。
 	o.dropConn(old)
-	rec, _ := o.svc.AgentByID("alias-echo")
+	rec, _ := o.svc.AgentByID("alias-stub")
 	if rec.State == AgentStateStopped {
 		t.Fatal("旧连接收尾不应把新连接 running 置 stopped")
 	}

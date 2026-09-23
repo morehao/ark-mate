@@ -20,6 +20,9 @@ const agentCancelTimeout = 3 * time.Second
 // DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env FORGE_HANDOFF_MAX_CHARS 覆盖）。
 const DefaultHandoffMaxChars = 6000
 
+// DefaultGenerationLimit 同一配置下的能力代际上限默认值（风险表第 12 行；env FORGE_GENERATION_LIMIT）。
+const DefaultGenerationLimit = 4
+
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
 type acpSession interface {
 	Prompt(ctx context.Context, text string) (string, error)
@@ -34,9 +37,15 @@ type ActiveConversation struct {
 	ID      string
 	AgentID string
 	Runtime string
+	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
+	// （漏了它就会在重启后悄悄换一套能力集）。
+	Fingerprint string
 
 	client *acl.Client
 	sess   acpSession
+	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
+	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`acpSession` 上没有 ID()）。
+	providerID string
 	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
 	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
 	proj runtime.Runtime
@@ -94,6 +103,8 @@ type Orchestrator struct {
 	// inflight 记录每连接上正在执行 turn 的会话（inFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
 	inflight *inFlightTracker
+	// migMu 串行化代际迁移（M3-6）：罕见操作，一把全局锁足够；不设它会两个并发轮次各迁一次。
+	migMu    sync.Mutex
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
 	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
@@ -113,6 +124,10 @@ type Orchestrator struct {
 	// FORGE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
 
+	// generationLimit 同一基础键（runtime + 原生权限 + provider）下允许并存的代际上限
+	// （见 SetGenerationLimit / FORGE_GENERATION_LIMIT）。0 = 不限制。
+	generationLimit int
+
 	logger *slog.Logger
 }
 
@@ -120,9 +135,12 @@ type runtimeConn struct {
 	client  *acl.Client
 	agentID string
 	spec    runtime.Spec
-	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名）。同一 runtime 但原生权限配置不同的
-	// agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
-	key     string
+	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
+	// 配置不同的 agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
+	key string
+	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机/停 agent 用它一次性找到**该配置的
+	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
+	baseKey string
 	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
 	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
@@ -133,7 +151,7 @@ type runtimeConn struct {
 
 // RunOptions 一次 RunOnce（demo）的入参。
 type RunOptions struct {
-	RuntimeID  string // opencode / deepseekharness / echo
+	RuntimeID  string // opencode / deepseekharness
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录
 	Env        []string // 附加环境
@@ -155,6 +173,15 @@ type StartOptions struct {
 	WorkspaceTemporary bool
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
+	// Origin 会话来源（平台判定，非用户输入）：'' = 人工，'automation:<id>' = 该 automation 触发。
+	// 只用它给会话列表打标与做"某 automation 历次生效运行"的快速路径；不参与任何鉴权判断。
+	Origin string
+	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 回落 agent 声明）。
+	//
+	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startConversationOn 里由本字段
+	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
+	// 而那种分裂不会报错——只会让会话拿到与代际台账不符的能力集，且只在重启后显现。
+	Selection *CapabilitySelection
 }
 
 // RunResult 一次 RunOnce（demo）的结果。
@@ -177,6 +204,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:            NewElicitationManager(DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
+		generationLimit: DefaultGenerationLimit,
 		logger:          slog.Default(),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
@@ -246,6 +274,26 @@ func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureConversation。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
+
+// SetGenerationLimit 设置同一配置下的能力代际上限（0 = 不限制）。见 admitGeneration。
+//
+// 是**软上限**：达到上限时先显式淘汰「无会话引用且空闲」的代际，只有全都还在用时才拒绝新建。
+// 拒绝而不是复用：复用错的能力集是安全 bug（底座会给 A 会话的能力投给 B），宁可报错。
+func (o *Orchestrator) SetGenerationLimit(n int) {
+	if n < 0 {
+		n = 0
+	}
+	o.mu.Lock()
+	o.generationLimit = n
+	o.mu.Unlock()
+}
+
+// GenerationLimit 当前上限（0 = 不限制；诊断/测试用）。
+func (o *Orchestrator) GenerationLimit() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.generationLimit
+}
 
 // SetLogger 设置编排日志。
 func (o *Orchestrator) SetLogger(l *slog.Logger) {

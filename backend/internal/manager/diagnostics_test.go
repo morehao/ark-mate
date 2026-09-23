@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/pkg/acl"
@@ -104,12 +105,13 @@ func TestAgentDiagnosticsLiveTail(t *testing.T) {
 	if !diag.Connected || diag.PID <= 0 || diag.State != AgentStateRunning {
 		t.Fatalf("连接态不符: %+v", diag)
 	}
-	if diag.StderrSource != "live" || len(diag.StderrTail) == 0 {
-		t.Fatalf("应外露 live 尾巴: %+v", diag)
+	if diag.StderrSource != "live" {
+		t.Fatalf("已连接的 runtime 应报 live 尾巴: %+v", diag)
 	}
-	if !strings.Contains(strings.Join(diag.StderrTail, "\n"), "live-tail line") {
-		t.Fatalf("尾巴内容不符: %v", diag.StderrTail)
-	}
+	// live 尾巴是**流**，不是终态快照：子进程写 stderr 与主线程读它有真实竞态，握手完成
+	// 不代表那一行已被读走（夹具脚本先写 stderr 再握手，但两个方向各自排队）。
+	// 这里给一个有界等待而不是放松断言——断言仍然是"那一行必须出现"。
+	waitForLiveTail(t, svc, "a-stub", "live-tail line")
 	if diag.LastError != nil {
 		t.Fatalf("成功启动不应有 last_error: %+v", diag.LastError)
 	}
@@ -220,5 +222,26 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 	}
 	if !diag3.Connected || len(diag3.Remediation) != 0 {
 		t.Fatalf("健康快照不应带 remediation: %+v", diag3)
+	}
+}
+
+// waitForLiveTail 轮询等 live stderr 尾巴出现某行（最多 2s）。
+// 不用固定 sleep：竞态是"早晚会到"，有界轮询既不掩盖真失败也不靠猜时长。
+func waitForLiveTail(t *testing.T, svc *Service, agentID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var last []string
+	for {
+		diag, err := svc.AgentDiagnostics(context.Background(), agentID)
+		if err == nil {
+			last = diag.StderrTail
+			if strings.Contains(strings.Join(diag.StderrTail, "\n"), want) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live 尾巴里始终没有 %q（最后拿到 %v）", want, last)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

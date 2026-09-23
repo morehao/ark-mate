@@ -141,6 +141,25 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_inputs_queue ON inputs(conversation_id, status, created_at)`,
 		},
 	},
+	{
+		version: 7,
+		name:    "conversations.origin/capability_json/capability_fingerprint（M3 代际绑定：来源轴 + 钉住的能力明细与指纹）",
+		statements: []string{
+			// '' = 人工创建；'automation:<id>' = 某条 automation 触发产生（M4 用）。
+			// 会话列表逐行渲染"这条是不是自动跑出来的"不能靠回放事件（O(1) 要求），故单列一列。
+			`ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
+			// 创建时解析出的能力明细（选定集，JSON；'' = 未声明 → 回落 agent 白名单）。
+			`ALTER TABLE conversations ADD COLUMN capability_json TEXT NOT NULL DEFAULT ''`,
+			// **钉住的代际**：会话恢复/续聊要回到同一套能力。指纹单独成列是因为代际回收
+			// （M3-7）要按它查"还有哪些会话在用这个代际"（O(log n)，走索引）；塞进 JSON 就得
+			// 全表扫 + 逐行解析（O(n)）。'' = 未声明能力选择（与今天行为一致）。
+			`ALTER TABLE conversations ADD COLUMN capability_fingerprint TEXT NOT NULL DEFAULT ''`,
+			// "某 automation 最近 N 次**产生了会话**的运行"：WHERE origin = ? ORDER BY updated_at DESC。
+			`CREATE INDEX idx_conversations_origin ON conversations(origin, updated_at)`,
+			// 代际回收：WHERE capability_fingerprint = ?（含空指纹，空值也走索引）。
+			`CREATE INDEX idx_conversations_fingerprint ON conversations(capability_fingerprint)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

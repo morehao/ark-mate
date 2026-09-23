@@ -64,7 +64,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 
 	// 注入：引用解析成明文，且明文/密钥两路合并到同一字典。
-	got := svc.McpServersFor(&AgentRec{ID: "a"}, "echo")
+	got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil)
 	if len(got) != 1 || got[0].Name != "fs" {
 		t.Fatalf("解析失败的 server 不该注入，应只剩 fs: %+v", got)
 	}
@@ -139,7 +139,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.McpServersFor(&AgentRec{ID: "a"}, "echo"); len(got) != 0 {
+	if got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil); len(got) != 0 {
 		t.Fatalf("env 未设时不该注入: %+v", got)
 	}
 	if keys := svc.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:FORGE_TEST_UNSET_VAR"}}); len(keys) != 1 {
@@ -147,7 +147,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	}
 
 	// 2) vault 不可用（agentDir 为空 = 没有 ~/.forge）：明确指出"无 vault"，而不是当成"密钥为空"。
-	noVault := NewService(runtime.NewRegistry(runtime.Spec{ID: "echo"}), nil)
+	noVault := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
 	if err := noVault.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "s2", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": "vault:mcp/x"},

@@ -8,7 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.6.0
-	github.com/morehao/golib v1.32.16
+	github.com/morehao/golib v1.32.20
 	gorm.io/gorm v1.31.1
 )
 

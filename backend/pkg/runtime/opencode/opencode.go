@@ -34,5 +34,12 @@ var Caps = DeclaredCapabilities{
 	EmbeddedContext:        true,
 }
 
+// SkillFormat 该 runtime 消费的 skill 内容格式（投影 Projection.Format 的取值）。
+//
+// 取值与 pkg/capability.FormatSkillMDFrontmatter 逐字相同，但**不 import capability**：
+// runtime 侧只声明「我要什么形态」，合成由 capability 做（P-1：runtime 不依赖 capability）。
+// 两边对不上时由 internal/manager 的编排层报错，而不是靠类型系统假装对得上。
+const SkillFormat = "SKILL.md+frontmatter"
+
 // Notes 约束说明（给 README/文档位，暂不外露 REST）。
 const Notes = "会话能力完整；依赖本机 opencode（含 ACP 子命令）安装"

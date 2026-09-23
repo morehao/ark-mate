@@ -27,27 +27,29 @@ func configCmd(args []string) {
 		doc := map[string]any{
 			"config_dir": cfg.ConfigDir,
 			"config": map[string]any{
-				"addr":                    cfg.Addr,
-				"transcripts":             cfg.TranscriptDir,
-				"db":                      cfg.DBPath,
-				"store":                   cfg.StoreMode,
-				"agents":                  cfg.AgentDir,
-				"capabilities":            cfg.CapabilityDir,
-				"workspace_dir":           cfg.WorkspaceDir,
-				"workspace_roots":         strings.Join(cfg.WorkspaceRoots, ","),
-				"skills_materialize_dir":  cfg.SkillMaterializeDir,
-				"skills_materialize_dirs": formatMaterializeDirs(cfg.SkillMaterializeDirs),
-				"idle_timeout":            cfg.IdleTimeout.String(),
-				"reap_interval":           cfg.ReapInterval.String(),
-				"turn_timeout":            cfg.TurnTimeout.String(),
-				"handoff_max_chars":       cfg.HandoffMaxChars,
-				"permission_timeout":      cfg.PermissionTimeout.String(),
-				"elicitation_timeout":     cfg.ElicitationTimeout.String(),
-				"proc_registry":           cfg.ProcRegistryPath,
-				"reap_grace":              cfg.ReapGrace.String(),
-				"token":                   maskToken(cfg.Token),
-				"mcp_auto_probe":          cfg.McpAutoProbe,
-				"native_permission":       cfg.NativePermission,
+				"addr":                cfg.Addr,
+				"transcripts":         cfg.TranscriptDir,
+				"db":                  cfg.DBPath,
+				"store":               cfg.StoreMode,
+				"agents":              cfg.AgentDir,
+				"capabilities":        cfg.CapabilityDir,
+				"workspace_dir":       cfg.WorkspaceDir,
+				"workspace_roots":     strings.Join(cfg.WorkspaceRoots, ","),
+				"projection_dirs":     formatProjectionDirs(cfg.ProjectionDirs),
+				"idle_timeout":        cfg.IdleTimeout.String(),
+				"reap_interval":       cfg.ReapInterval.String(),
+				"turn_timeout":        cfg.TurnTimeout.String(),
+				"handoff_max_chars":   cfg.HandoffMaxChars,
+				"generation_limit":    cfg.GenerationLimit,
+				"automations":         cfg.AutomationDir,
+				"automation_tick":     cfg.AutomationTick.String(),
+				"permission_timeout":  cfg.PermissionTimeout.String(),
+				"elicitation_timeout": cfg.ElicitationTimeout.String(),
+				"proc_registry":       cfg.ProcRegistryPath,
+				"reap_grace":          cfg.ReapGrace.String(),
+				"token":               maskToken(cfg.Token),
+				"mcp_auto_probe":      cfg.McpAutoProbe,
+				"native_permission":   cfg.NativePermission,
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
 			"sources":         sources,
@@ -89,12 +91,14 @@ func configCmd(args []string) {
 	if s, ok := sources["workspace_roots"]; ok && s != config.SourceFile && s != config.SourceDefault {
 		fmt.Printf("  %-22s %-38s [%s]\n", "", "↑ 面板设置只读（由该来源锁定）", string(s))
 	}
-	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dir", emptyLabel(cfg.SkillMaterializeDir), src("skills_materialize_dir"))
-	fmt.Printf("  %-22s %-38s [%s]\n", "skills_materialize_dirs", emptyLabel(formatMaterializeDirs(cfg.SkillMaterializeDirs)), src("skills_materialize_dirs"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "projection_dirs", emptyLabel(formatProjectionDirs(cfg.ProjectionDirs)), src("projection_dirs"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_interval", cfg.ReapInterval.String(), src("reap_interval"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
 	fmt.Printf("  %-22s %-38d [%s]\n", "handoff_max_chars", cfg.HandoffMaxChars, src("handoff_max_chars"))
+	fmt.Printf("  %-22s %-38d [%s]\n", "generation_limit", cfg.GenerationLimit, src("generation_limit"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "automations", cfg.AutomationDir, src("automations"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "automation_tick", cfg.AutomationTick.String(), src("automation_tick"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "permission_timeout", cfg.PermissionTimeout.String(), src("permission_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
@@ -135,19 +139,20 @@ func emptyLabel(v string) string {
 	return v
 }
 
-// formatMaterializeDirs 把 runtime→dir 映射渲染为稳定的 `runtime=dir,…`（config 命令输出用）。
-func formatMaterializeDirs(dirs map[string]string) string {
+// formatProjectionDirs 把 `<runtime>:<kind>` → dir 映射渲染为稳定的 `runtime:kind=dir,…`。
+// 键要排序（map 迭代无序，否则同一份配置每次打印的顺序都不同，diff 与排障都难用）。
+func formatProjectionDirs(dirs map[string]string) string {
 	if len(dirs) == 0 {
 		return ""
 	}
-	runtimes := make([]string, 0, len(dirs))
-	for rt := range dirs {
-		runtimes = append(runtimes, rt)
+	keys := make([]string, 0, len(dirs))
+	for k := range dirs {
+		keys = append(keys, k)
 	}
-	sort.Strings(runtimes)
-	parts := make([]string, 0, len(runtimes))
-	for _, rt := range runtimes {
-		parts = append(parts, rt+"="+dirs[rt])
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+dirs[k])
 	}
 	return strings.Join(parts, ",")
 }

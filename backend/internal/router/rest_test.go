@@ -10,9 +10,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/dto/dtoexport"
+	"github.com/morehao/ark-forge/internal/dto/dtolibrary"
 	"github.com/morehao/ark-forge/internal/dto/dtomodel"
 	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 	"github.com/morehao/ark-forge/internal/dto/dtoruntime"
@@ -21,6 +23,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-forge/internal/service/svclibrary"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/gerror"
@@ -70,6 +73,15 @@ type stubSvc struct {
 	exportReq  dtoexport.ExportReq
 	exportResp *dtoexport.ExportResp
 	exportErr  error
+
+	// automation 面（M4-5）桩状态
+	automations    []dtoautomation.AutomationResp
+	autoErr        error
+	autoAction     string // 最近一次写面动作（create/update/delete/run）
+	autoID         string // 最近一次写面/取单条的 id
+	autoGot        string // 最近一次 GetAutomation/ListAutomationRuns 的 id
+	autoReq        dtoautomation.AutomationWriteReq
+	autoPreviewReq dtoautomation.AutomationPreviewReq
 
 	agentErr        error                                   // P2 管理面桩错误注入
 	resolvePermErr  *gerror.Error                           // 权限决策桩错误注入
@@ -130,6 +142,17 @@ type stubSvc struct {
 	mcps               []dtocapability.McpServerResp
 	tools              []dtocapability.ToolResp
 	capErr             error // 能力列表桩错误注入
+
+	// M2 写面桩
+	skillWritten  string // create|update|delete
+	skillWriteID  string
+	skillWriteReq dtocapability.SkillWriteReq
+	mcpWritten    string
+	mcpWriteID    string
+	mcpWriteReq   dtocapability.McpWriteReq
+
+	// M2-4 Library 桩
+	libraryQueried svclibrary.Query
 
 	agentCapResp *dtocapability.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
 	agentCapErr  error
@@ -277,6 +300,57 @@ func (s *stubSvc) SetSkillEnabled(_ context.Context, id string, enabled bool) (*
 		return nil, s.capErr
 	}
 	return &dtocapability.SkillToggleResp{ID: id, Enabled: enabled, NextAction: "已生效"}, nil
+}
+
+// M2 写面桩：只记录被调用与入参，返回固定结果（真实的落盘/闸门/回滚在 manager 的单测里验）。
+func (s *stubSvc) CreateSkill(_ context.Context, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+	s.skillWritten, s.skillWriteReq = "create", req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillWriteResp{ID: "s1", Path: "/tmp/skills/s1.json", Created: true, NextAction: "已新建"}, nil
+}
+
+func (s *stubSvc) UpdateSkill(_ context.Context, id string, req dtocapability.SkillWriteReq) (*dtocapability.SkillWriteResp, error) {
+	s.skillWritten, s.skillWriteID, s.skillWriteReq = "update", id, req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillWriteResp{ID: id, Path: "/tmp/skills/" + id + ".json", NextAction: "已覆盖写"}, nil
+}
+
+func (s *stubSvc) DeleteSkill(_ context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
+	s.skillWritten, s.skillWriteID = "delete", id
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.SkillDeleteResp{ID: id, Deleted: true, Path: "/tmp/skills/" + id + ".json",
+		NextAction: "已删除"}, nil
+}
+
+func (s *stubSvc) CreateMcpServer(_ context.Context, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+	s.mcpWritten, s.mcpWriteReq = "create", req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpWriteResp{ID: "m1", Path: "/tmp/mcp/m1.json", Created: true, NextAction: "已新建"}, nil
+}
+
+func (s *stubSvc) UpdateMcpServer(_ context.Context, id string, req dtocapability.McpWriteReq) (*dtocapability.McpWriteResp, error) {
+	s.mcpWritten, s.mcpWriteID, s.mcpWriteReq = "update", id, req
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpWriteResp{ID: id, Path: "/tmp/mcp/" + id + ".json", NextAction: "已覆盖写"}, nil
+}
+
+func (s *stubSvc) DeleteMcpServer(_ context.Context, id string) (*dtocapability.McpDeleteResp, error) {
+	s.mcpWritten, s.mcpWriteID = "delete", id
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return &dtocapability.McpDeleteResp{ID: id, Deleted: true, Path: "/tmp/mcp/" + id + ".json",
+		ToolsRemoved: 2, NextAction: "已删除"}, nil
 }
 
 func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
@@ -596,7 +670,7 @@ type envelope struct {
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}
 }
 
@@ -805,19 +879,19 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 // TestUsageSummaryRoute M3：GET /usage/summary 参数绑定/透传 + 信封形态 + 业务错误透传。
 func TestUsageSummaryRoute(t *testing.T) {
 	svc := &stubSvc{usageResp: &dtousage.UsageSummaryResp{
-		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-echo",
+		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-stub",
 		GroupBy: "day", Source: "sqlite",
 		Totals:  dtousage.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
 		Buckets: []dtousage.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-echo&group_by=day", "")
+	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-stub&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
 	if svc.usageQuery.From != "2026-09-01" || svc.usageQuery.To != "2026-09-09" ||
-		svc.usageQuery.AgentID != "agent-echo" || svc.usageQuery.GroupBy != "day" {
+		svc.usageQuery.AgentID != "agent-stub" || svc.usageQuery.GroupBy != "day" {
 		t.Fatalf("查询参数未透传: %+v", svc.usageQuery)
 	}
 	var resp dtousage.UsageSummaryResp
@@ -1155,39 +1229,39 @@ func TestAgentManagementRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-echo","name":"别名echo","runtimes":["echo"]}`)
+	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-stub","name":"别名stub","runtimes":["stub"]}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/start", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/start", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-stub" {
 		t.Fatalf("start 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/stop", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/stop", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-stub" {
 		t.Fatalf("stop 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-echo", `{"name":"别名echo v2"}`)
+	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-stub", `{"name":"别名stub v2"}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
 	}
 	// 切换「当前 Agent」：路径参数透传到服务并回带 is_default 表示。
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-echo/default", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-echo" {
+	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/default", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-stub" {
 		t.Fatalf("set default 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
 	var def dtoagent.AgentResp
-	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-echo" || !def.IsDefault {
+	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-stub" || !def.IsDefault {
 		t.Fatalf("set default 载荷不符: %s", env.Data)
 	}
-	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-echo", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-echo" {
+	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-stub", "")
+	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-stub" {
 		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
 	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
 	var del dtoagent.AgentDeleteResp
 	if err := json.Unmarshal(env.Data, &del); err != nil ||
-		del.Deleted != "alias-echo" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
+		del.Deleted != "alias-stub" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
 		t.Fatalf("delete 载荷不符: %s", env.Data)
 	}
 }
@@ -1394,9 +1468,9 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
 		{"delete_unknown", "DELETE", "/v1/forge/agents/nope", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["echo"]}`,
+		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 runtime 只读", nil), 40001},
-		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["echo"]}`,
+		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
 		{"start_unknown", "POST", "/v1/forge/agents/nope/start", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
@@ -1500,7 +1574,7 @@ func TestExportRoute(t *testing.T) {
 // TestAgentDiagnosticsRoute GET /agents/:id/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
 func TestAgentDiagnosticsRoute(t *testing.T) {
 	svc := &stubSvc{diagResp: &dtoagent.AgentDiagnosticsResp{
-		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "echo", Command: "sh",
+		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "stub", Command: "sh",
 		Connected: false, StderrSource: "last_error", CheckedAt: "2026-09-09T00:00:00Z",
 		StderrTail: []string{"[warn] boom"},
 		LastError:  &dtoagent.AgentLastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
@@ -1701,5 +1775,51 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 	}
 	if resp.Allowed || !resp.Rejected || resp.OptionID != "reject_once" {
 		t.Fatalf("拒绝回执字段不符: %+v", resp)
+	}
+}
+
+// stubLibrary 让 stubSvc 满足 Library 端口（Library 读模型在 manager 侧有真装配测试）。
+func (s *stubSvc) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, error) {
+	s.libraryQueried = q
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return []dtolibrary.LibraryItem{{
+		ID: "demo", Kind: dtolibrary.KindSkill, Name: "演示", Origin: dtolibrary.OriginLocal,
+		Scope: "global", Enabled: true, SourceFile: "/tmp/skills/demo.json",
+		Applicability: []dtolibrary.Applicability{
+			{Runtime: "opencode", OK: true, Status: dtolibrary.StatusProjected, Reason: "投放到 /tmp/skills"},
+		},
+	}}, nil
+}
+
+// TestLibraryRouteShape GET /library：过滤参数透传领域层 + 逐 runtime 可达性原样透出 + 领域错误映射。
+func TestLibraryRouteShape(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(stubDeps(svc))
+
+	env, httpCode := do(t, r, "GET", "/v1/forge/library?kind=skill&q=dem", "")
+	if httpCode != 200 || env.Code != 0 {
+		t.Fatalf("GET /library 应成功: http=%d env=%+v", httpCode, env)
+	}
+	if svc.libraryQueried.Kind != "skill" || svc.libraryQueried.Q != "dem" {
+		t.Fatalf("过滤参数应透传到领域层: %+v", svc.libraryQueried)
+	}
+	var items []dtolibrary.LibraryItem
+	if err := json.Unmarshal(env.Data, &items); err != nil {
+		t.Fatalf("data 应是 LibraryItem 数组: %v（%s）", err, env.Data)
+	}
+	if len(items) != 1 || len(items[0].Applicability) != 1 || !items[0].Applicability[0].OK {
+		t.Fatalf("逐 runtime 可达性应原样透出: %+v", items)
+	}
+	if items[0].Origin != dtolibrary.OriginLocal || items[0].SourceFile == "" {
+		t.Fatalf("origin/source_file 应透出: %+v", items[0])
+	}
+
+	// 未知 kind 的**校验在领域层**（控制器只透传 query），这里验证领域错误经信封落成 40000。
+	svc.capErr = code.Error(code.InvalidParam, "未知 kind \"command\"")
+	env, httpCode = do(t, r, "GET", "/v1/forge/library?kind=command", "")
+	if httpCode != 200 || env.Code != code.InvalidParam {
+		t.Fatalf("领域层拒绝应落成 40000: http=%d env=%+v", httpCode, env)
 	}
 }

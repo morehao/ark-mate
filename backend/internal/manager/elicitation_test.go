@@ -216,19 +216,6 @@ func TestElicitationCancelConversation(t *testing.T) {
 	}
 }
 
-// pendingCount 供单测断言挂起表收敛。
-func (m *ElicitationManager) pendingCount(conversationID string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	n := 0
-	for _, p := range m.pending {
-		if p.conversationID == conversationID {
-			n++
-		}
-	}
-	return n
-}
-
 // TestElicitationScopeMismatch C3 scope 归属：只有登记该提问的会话能决策；
 // 跨会话决策不投递、不删除挂起项（found=true 但 mismatch=true，对外按「不存在」处理）。
 func TestElicitationScopeMismatch(t *testing.T) {

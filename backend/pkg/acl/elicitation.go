@@ -11,7 +11,7 @@ import (
 // Schema 驱动）或引导打开一个 URL，并**阻塞等待**用户提交/放弃（accept/decline/cancel）。
 // 宿主未实现该能力时 SDK 回 method_not_found，agent 侧把返回值当普通错误处理即可。
 //
-// wire 形态（SDK v0.13.5，与 echo agent 同版本收发可自洽）：
+// wire 形态（SDK v0.13.5，两端同版本收发可自洽）：
 //   - form：{message, mode:"form", requestedSchema:{...}}；各字段为 JSON Schema 属性对象
 //     （string+enum/oneOf=单选，array+items=多选，string/integer/number/boolean=对应输入）。
 //   - url：{message, mode:"url", url, elicitationId}。

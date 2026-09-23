@@ -14,7 +14,7 @@ import (
 )
 
 // Installed 报告 runtime 启动命令当前可执行：
-//   - 含路径分隔符 → 直接 stat（如 forge acp-demo 的自派生可执行文件、绝对路径）；
+//   - 含路径分隔符 → 直接 stat（如远程/自带底座的绝对路径）；
 //   - 否则按 PATH 查找（opencode/dsh 等须在 PATH 中的 CLI）。
 func Installed(spec runtime.Spec) bool {
 	// 远程 runtime（A5）：没有本地启动命令，可达性由拨号阶段判定（配置加载时已校验
@@ -28,7 +28,7 @@ func Installed(spec runtime.Spec) bool {
 }
 
 // CommandExecutable 报告某启动命令当前可执行：
-//   - 含路径分隔符 → 直接 stat（如 forge acp-demo 的自派生可执行文件、绝对路径）；
+//   - 含路径分隔符 → 直接 stat（如远程/自带底座的绝对路径）；
 //   - 否则按 PATH 查找（opencode/dsh 等须在 PATH 中的 CLI）。
 //
 // 与 Installed 同源；诊断面（/agents/:id/diagnostics 的 remediation）用它区分

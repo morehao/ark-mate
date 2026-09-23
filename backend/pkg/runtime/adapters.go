@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/echo"
 	"github.com/morehao/ark-forge/pkg/runtime/opencode"
 )
 
@@ -37,6 +36,40 @@ func opencodeSpec() Spec {
 			"安装 opencode CLI（ACP 子命令由它提供），确认 `opencode --version` 可执行且 opencode 在 PATH 中",
 			"在底座内完成 provider 登录，或给该 agent 绑定 provider 档案以注入密钥 env",
 		},
+		Projections: []Projection{opencodeSkillProjection()},
+		// 未实测：P-2 探针尚无结论 → 保守 process（EffectiveCapabilityScope 也会强制回落）。
+		CapabilityScope: CapabilityScopeProcess,
+		Tested:          false,
+		TestedOnVersion: "",
+	}
+}
+
+// opencodeSkillProjection opencode 的 skill 投影（原生形态见下）。
+//
+// 根的选择：opencode v1.18.32 的 skill 发现（二进制内 `SkillDiscovery`）扫的全局根是
+// `~/.claude` 与 `~/.agents` 下的 `skills/**/SKILL.md`（`GA="skills/**/SKILL.md"`），
+// **递归**。这里取 `~/.agents/skills`（跨工具约定，dsh 同款），不用 `~/.config/opencode/skills`
+// ——后者是 openwork 自己的约定，opencode 本体不扫它。
+//
+// 不用 `${XDG_CONFIG_HOME}` 的理由：opencode 的 skill 面与 XDG_CONFIG_HOME 无关，且该变量在
+// macOS 上普遍未设置，用它当默认根只会让默认形态在半个平台上直接报错。
+//
+// Tested=false 的理由（**刻意不虚报**）：`<root>/<id>/SKILL.md` + 强制 frontmatter 这个**形态**
+// 于 2026-09-09 用真实实现验证过（`opencode debug skill`，隔离 XDG_CONFIG_HOME，见
+// pkg/capability/skill_materialize.go 顶部实测记录），但「平台默认根下写进去、底座开箱即读到」
+// 这条**端到端**链尚未实测（那次的隔离 XDG_CONFIG_HOME 等价于显式配置 skills.paths）。
+// P-2 探针会一并测它，届时置 true 并把版本写进 Note。
+func opencodeSkillProjection() Projection {
+	return Projection{
+		Kind:   ProjectionSkill,
+		Scope:  ScopeGlobal,
+		Root:   "${HOME}/.agents/skills",
+		Layout: LayoutIDToken + "/SKILL.md",
+		Format: opencode.SkillFormat,
+		Tested: false,
+		Note: "opencode v1.18.32 源码级确认全局扫描 `~/.agents/skills/**/SKILL.md`（递归，故扁平落点也在扫描范围内）；" +
+			"内容形态（SKILL.md + 强制 YAML frontmatter）于 2026-09-09 用 opencode v1.18.29 的 `opencode debug skill` 实测通过，" +
+			"但「默认根开箱即读」这条端到端链待 P-2 探针确认",
 	}
 }
 
@@ -68,31 +101,37 @@ func deepseekharnessSpec() Spec {
 			"安装含 acp profile 模板的 dsh（npm @next 0.1.2-rc.1+；latest 0.1.1-rc.2 缺该模板），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
 			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
 		},
+		Projections: []Projection{deepseekharnessSkillProjection()},
+		// 未实测：P-2 探针尚无结论 → 保守 process。
+		CapabilityScope: CapabilityScopeProcess,
+		Tested:          false,
+		TestedOnVersion: "",
 	}
 }
 
-// echoSpec 汇入 echo 演示底座的启动/能力描述。它自派生：以当前可执行文件（forge）的
-// acp-demo 子命令作为 ACP server，与 opencode/dsh 同构走 stdio；无需外部安装/模型 key。
-func echoSpec() Spec {
-	cmd := "forge" // 兜底；正常取 os.Executable()
-	if exe, err := echo.Command(); err == nil && exe != "" {
-		cmd = exe
-	}
-	return Spec{
-		ID:      echo.ID,
-		Name:    echo.Name,
-		Version: echo.Version,
-		Launch: LaunchSpec{
-			Command: cmd,
-			Args:    echo.Args,
-		},
-		Description:       "echo 本地自包含 ACP 演示底座（权限/elicitation 演示，免模型 key）",
-		McpTransports:     []string{"stdio"}, // 演示底座仅 stdio
-		ManagesOwnContext: true,              // §6.2：后端自管上下文/工具
-		Notes:             echo.Notes,
-		// SetupSteps 演示底座随 forge 内置：没有可安装步骤（便于自证「命令不可执行」类问题与它无关）。
-		SetupSteps: []string{
-			"echo 是进程内自包含演示底座（以当前 forge 可执行文件的 acp-demo 子命令启动），无需安装与密钥",
-		},
+// deepseekharnessSkillProjection dsh 的 skill 投影（原生形态见下）。
+//
+// 根的选择：dsh 的 `dsh-skill-filesystem` provider 声明的 user 级根有两个——
+// `$DSH_HOME/skills`（"user-dsh"）与 `~/.agents/skills`（"user-agents"）。
+// 这里取 `~/.agents/skills`：它与 `$DSH_HOME` 解耦，容器里把 DSH_HOME 改到 `/data/dsh` 时
+// 投影根不会跟着漂移（否则默认根在容器形态下必然写错地方）。
+//
+// **落点必须扁平**：`isPotentialSkillPath` 只认根下 1~2 段——`<root>/<name>.md`（扁平文件）
+// 或 `<root>/<name>/SKILL.md`（目录包）；更深的 `**/SKILL.md` **不扫**（与 opencode 相反）。
+// 故 Layout 只能是 `<id>/SKILL.md`，且内容必须自带 YAML frontmatter（缺 name/description 整条丢弃）。
+//
+// Tested=false 的理由同 opencode：形态 2026-09-09 用 `dsh-skill-filesystem` 真实 provider 实测过
+// （无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫），但默认根端到端待 P-2。
+func deepseekharnessSkillProjection() Projection {
+	return Projection{
+		Kind:   ProjectionSkill,
+		Scope:  ScopeGlobal,
+		Root:   "${HOME}/.agents/skills",
+		Layout: LayoutIDToken + "/SKILL.md",
+		Format: deepseekharness.SkillFormat,
+		Tested: false,
+		Note: "dsh-skill-filesystem 源码确认 user 级根为 `$DSH_HOME/skills` 与 `~/.agents/skills`，取后者以与 DSH_HOME 解耦；" +
+			"**只扫根下一层**（`<n>.md` 或 `<n>/SKILL.md`），故落点必须扁平；内容形态（frontmatter 必填 name+description）" +
+			"于 2026-09-09 用真实 provider 实测通过，默认根端到端待 P-2 探针确认",
 	}
 }

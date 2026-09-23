@@ -210,6 +210,69 @@ export const consoleStyleSheet = `
   }
 
   /* 工作空间菜单：小节标题 / 分隔线 / 两行目录项（goose 的 DropdownMenuLabel + DirNameLabel）。 */
+  /* 会话能力选择器（新建会话时勾选技能/MCP 子集；壳沿用工作空间弹层的语言）。 */
+  .fg-cap-pop { display: flex; flex-direction: column; width: 380px; max-height: 460px; overflow-y: auto; }
+  .fg-cap-loading {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 8px; font-size: 12px; color: ${tokens.textSecondary};
+  }
+  .fg-cap-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  /* 跟随默认 / 自定义：两态必须一眼看出当前在哪一态（它决定请求体里那个键在不在）。 */
+  .fg-cap-mode { display: inline-flex; gap: 2px; padding: 0 6px 2px; }
+  .fg-cap-mode-btn {
+    padding: 2px 8px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textSecondary};
+  }
+  .fg-cap-mode-btn:hover { color: ${tokens.text}; }
+  .fg-cap-mode-btn.fg-on {
+    border-color: ${tokens.border};
+    background: ${tokens.softFill};
+    color: ${tokens.text};
+  }
+  .fg-cap-note {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 2px 8px 4px;
+    font-size: 11px; line-height: 1.5; color: ${tokens.textPlaceholder};
+  }
+  .fg-cap-mini {
+    border: none; background: transparent; cursor: pointer; padding: 0 4px;
+    font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.primary};
+  }
+  .fg-cap-mini:hover { text-decoration: underline; }
+  .fg-cap-list { display: flex; flex-direction: column; max-height: 190px; overflow-y: auto; }
+  .fg-cap-opt {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 4px 8px; border-radius: 8px; transition: background 0.12s ease;
+  }
+  .fg-cap-opt:hover { background: ${tokens.softFill}; }
+  /* 不可选（服务端也会拒）：明确压暗，原因在右侧标签的 tooltip 里逐条给出。 */
+  .fg-cap-opt.fg-off { opacity: 0.6; }
+  .fg-cap-opt.fg-off:hover { background: transparent; }
+  .fg-cap-opt .ant-checkbox-wrapper { min-width: 0; display: flex; align-items: center; }
+  .fg-cap-opt-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12.5px; color: ${tokens.text};
+  }
+  .fg-cap-opt-id {
+    margin-left: 6px; font-family: ${tokens.fontMono}; font-size: 10.5px; color: ${tokens.textPlaceholder};
+  }
+  .fg-cap-opt-why {
+    flex: none; cursor: help;
+    font-family: ${tokens.fontMono}; font-size: 10px; color: ${tokens.textPlaceholder};
+    border-bottom: 1px dotted ${tokens.borderStrong};
+  }
+  /* 已限制（自定义）的能力药丸：与"跟随默认"必须看得出区别。 */
+  .fg-ws-pill.fg-cap-on {
+    border-color: ${tokens.primary};
+    color: ${tokens.primary};
+  }
+
   .fg-ws-pop { display: flex; flex-direction: column; }
   .fg-ws-label {
     display: flex;

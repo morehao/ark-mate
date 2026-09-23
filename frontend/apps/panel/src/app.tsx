@@ -7,6 +7,7 @@ import { TopBar } from './components/TopBar'
 import { useForge } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { AgentsPage } from './pages/AgentsPage'
+import { AutomationsPage } from './pages/AutomationsPage'
 import { CapabilitiesPage } from './pages/CapabilitiesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UsagePage } from './pages/UsagePage'
@@ -85,6 +86,14 @@ export function App() {
             element={
               <Manage>
                 <CapabilitiesPage />
+              </Manage>
+            }
+          />
+          <Route
+            path="/automations"
+            element={
+              <Manage>
+                <AutomationsPage />
               </Manage>
             }
           />
