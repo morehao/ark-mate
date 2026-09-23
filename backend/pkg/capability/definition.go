@@ -3,6 +3,7 @@ package capability
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,12 @@ import (
 // 空白也会被重新缩进。语义（含未知键）严格保留，排版会规范化，这条写在测试里。
 const definitionIndent = "  "
 
+// ErrNotObject 文件内容不是 JSON 对象（数组/标量/语法错误）。
+//
+// 单独成哨兵错误是为了让上层**按语义**分流：这是"用户文件坏了，先修它"（40001），
+// 与"服务端读不了"（权限/IO，50000）是两种不同的出路。用字符串匹配错误信息来分流是脆的。
+var ErrNotObject = errors.New("不是 JSON 对象")
+
 // DefinitionFile 一个能力定义 JSON 文件的读写句柄（C9 的落点）。
 type DefinitionFile struct {
 	path string
@@ -40,6 +47,10 @@ type DefinitionFile struct {
 	mtime time.Time
 	size  int64
 	mode  os.FileMode
+	// existed 读取时文件是否存在。**新建路径必须记下这件事**：文件"不存在"与"存在但零字节"
+	// 是两种不同的期望，不区分的话新建时的 checkUnchanged 会把"文件还不存在"当成"被别人删了"，
+	// 从而永远写不出第一个文件（而错误信息看起来像并发冲突，极难定位）。
+	existed bool
 
 	// dirty 记录本次是否真的改过键；未改过时 Save 直接跳过（避免无意义的 mtime 变动）。
 	dirty bool
@@ -57,12 +68,15 @@ func ReadDefinitionFile(path string) (*DefinitionFile, error) {
 	}
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("%s 不是合法 JSON 对象：%w", path, err)
+		return nil, fmt.Errorf("%s 不是合法 JSON 对象：%w（%w）", path, err, ErrNotObject)
 	}
 	if doc == nil {
-		doc = map[string]json.RawMessage{}
+		// 合法 JSON 但不是对象（数组/字符串/数字）：当成"不是定义文件"而不是空对象——
+		// 静默当空对象会让写面把它整个覆盖掉，而它很可能正是用户想留着的别的东西。
+		return nil, fmt.Errorf("%s 的内容不是 JSON 对象，无法作为能力定义读写：%w", path, ErrNotObject)
 	}
-	return &DefinitionFile{path: path, doc: doc, mtime: fi.ModTime(), size: fi.Size(), mode: fi.Mode().Perm()}, nil
+	return &DefinitionFile{path: path, doc: doc, mtime: fi.ModTime(), size: fi.Size(),
+		mode: fi.Mode().Perm(), existed: true}, nil
 }
 
 // Path 定义文件路径。
@@ -199,8 +213,35 @@ func (f *DefinitionFile) Save() error {
 	if fi, err := os.Stat(f.path); err == nil {
 		f.mtime, f.size = fi.ModTime(), fi.Size()
 	}
+	f.existed = true
 	f.dirty = false
 	return nil
+}
+
+// NewDefinitionFile 造一个**空**定义句柄（目标文件尚不存在的新建路径）。
+//
+// 它对"文件已存在"是安全的：Save 的乐观锁会把 mtime=零值 与实际 mtime 一比即不相等，
+// 从而拒绝覆盖——这正是我们要的（新建路径发现文件已被别人建出来，应当报冲突而不是合并）。
+// 所以调用方若在"文件不存在"与"新建"之间看到错误，不该自己 stat 一把再决定，直接用本函数。
+func NewDefinitionFile(path string) (*DefinitionFile, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("定义文件路径须为绝对路径：%s", path)
+	}
+	return &DefinitionFile{path: path, doc: map[string]json.RawMessage{}, mode: 0o644, existed: false}, nil
+}
+
+// ConflictError 定义文件在"读→写"窗口内被外部改动（乐观锁拒绝）。
+//
+// 单独成类型是为了让上层能**按语义**分流：冲突是"请重试"（40901 / definition_changed），
+// 而 IO 失败是"服务端出错了"（50000）。用字符串匹配错误信息来分流是脆的——文案一改分流就错。
+type ConflictError struct{ Msg string }
+
+func (e *ConflictError) Error() string { return e.Msg }
+
+// IsConflict 报告 err 是否是乐观锁冲突（errors.As 语义，可穿透包装）。
+func IsConflict(err error) bool {
+	var ce *ConflictError
+	return errors.As(err, &ce)
 }
 
 // checkUnchanged 复核文件自我读取以来没被别人改过（mtime+size 双判：单看 mtime 在同秒内
@@ -208,13 +249,22 @@ func (f *DefinitionFile) Save() error {
 func (f *DefinitionFile) checkUnchanged() error {
 	fi, err := os.Stat(f.path)
 	if err != nil {
+		if !f.existed && os.IsNotExist(err) {
+			return nil // 新建路径：文件本就不该在（仍不在 = 期望成立）
+		}
 		return fmt.Errorf("定义文件 %s 已不可读（可能被移走/删除）：%w", f.path, err)
 	}
+	if !f.existed {
+		// 我以为是新建，但文件已经存在（另一个进程/另一次请求刚建出来）：冲突，不覆盖。
+		return &ConflictError{Msg: fmt.Sprintf(
+			"定义文件 %s 在本次新建期间已存在（mtime=%s size=%d）：为避免覆盖别人的写入，本次新建已放弃",
+			f.path, fi.ModTime().UTC().Format(time.RFC3339Nano), fi.Size())}
+	}
 	if fi.ModTime() != f.mtime || fi.Size() != f.size {
-		return fmt.Errorf("定义文件 %s 在本次操作期间被外部改动（读取时 mtime=%s size=%d，现在 mtime=%s size=%d）："+
+		return &ConflictError{Msg: fmt.Sprintf("定义文件 %s 在本次操作期间被外部改动（读取时 mtime=%s size=%d，现在 mtime=%s size=%d）："+
 			"为避免覆盖你的手改，本次写入已放弃，请重试",
 			f.path, f.mtime.UTC().Format(time.RFC3339Nano), f.size,
-			fi.ModTime().UTC().Format(time.RFC3339Nano), fi.Size())
+			fi.ModTime().UTC().Format(time.RFC3339Nano), fi.Size())}
 	}
 	return nil
 }

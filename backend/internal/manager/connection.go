@@ -264,7 +264,7 @@ func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
 		busy := as.busy || as.turn != nil
 		as.mu.Unlock()
 		if busy {
-			return 0, acl.NewError(acl.ClassRequest, "agent_busy",
+			return 0, acl.NewError(acl.ClassLimit, "agent_busy",
 				fmt.Sprintf("agent %q 的会话 %q 有在途 turn，先取消/等待收尾再删除", agentID, as.ID), nil)
 		}
 	}
@@ -444,7 +444,7 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 		return nil
 	}
 	if busy > 0 {
-		return acl.NewError(acl.ClassRequest, "agent_busy",
+		return acl.NewError(acl.ClassLimit, "agent_busy",
 			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 turn，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
 	}
 	for _, rc := range rcs {
