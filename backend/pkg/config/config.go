@@ -56,6 +56,11 @@ type Config struct {
 	// 覆盖，默认 6000；0 = 关闭 memo 兜底）。跨 runtime / 无原生 resume 时把历史压成摘要注入
 	// 首条 prompt。
 	HandoffMaxChars int
+	// GenerationLimit 同一配置（runtime + 原生权限 + provider）下允许并存的**能力代际**上限
+	// （§13.4/风险表第 12 行；FORGE_GENERATION_LIMIT 覆盖，默认 4；**0 = 不限制**）。
+	// 代际按能力指纹内容寻址，指纹不同 = 能力集不同 = 各自一个进程；上限是"猜粗了只是多花内存"
+	// 这一侧的护栏：超限**带码拒绝新建**，绝不静默复用错的能力集（那才是安全 bug）。
+	GenerationLimit int
 	// TurnTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
 	// 只记自己日志不上报）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
 	TurnTimeout time.Duration
@@ -171,6 +176,8 @@ const (
 	DefaultReapInterval       = 5 * time.Minute
 	DefaultReapGrace          = 2 * time.Second
 	DefaultHandoffMaxChars    = 6000
+	// DefaultGenerationLimit 同一配置下的能力代际上限（风险表第 12 行：5 套能力 ≈ 0.5–1.5GB）。
+	DefaultGenerationLimit = 4
 )
 
 // Default 返回默认配置（不含依赖家目录的派生路径，派生值在解析阶段补齐）。
@@ -183,6 +190,7 @@ func Default() Config {
 		ReapInterval:       DefaultReapInterval,
 		ReapGrace:          DefaultReapGrace,
 		HandoffMaxChars:    DefaultHandoffMaxChars,
+		GenerationLimit:    DefaultGenerationLimit,
 		McpAutoProbe:       McpAutoProbeOff,
 		NativePermission:   NativePermissionAuto,
 	}
@@ -203,6 +211,7 @@ var knownKeys = map[string]string{
 	"reap_interval":       "FORGE_REAP_INTERVAL",
 	"turn_timeout":        "FORGE_TURN_TIMEOUT",
 	"handoff_max_chars":   "FORGE_HANDOFF_MAX_CHARS",
+	"generation_limit":    "FORGE_GENERATION_LIMIT",
 	"permission_timeout":  "FORGE_PERMISSION_TIMEOUT",
 	"elicitation_timeout": "FORGE_ELICITATION_TIMEOUT",
 	"proc_registry":       "FORGE_PROC_REGISTRY",
@@ -509,6 +518,15 @@ func materialize(r *resolver) (Config, error) {
 			return bad("handoff_max_chars", fmt.Sprintf("需为非负整数，得到 %q", v))
 		}
 		c.HandoffMaxChars = n
+	}
+	if v, ok := r.get("generation_limit"); ok {
+		// 负数无意义（"允许 -1 个代际"），报错而不是夹到 0：0 有明确含义（不限制），
+		// 把非法值悄悄变成"不限制"正好是护栏失效的方向。
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return bad("generation_limit", fmt.Sprintf("需为非负整数（0 = 不限制），得到 %q", v))
+		}
+		c.GenerationLimit = n
 	}
 	for _, item := range []struct {
 		key string

@@ -112,7 +112,8 @@ func TestConfigDirFilePriority(t *testing.T) {
   "addr": "127.0.0.1:20001",
   "db": "/tmp/from-config/db.sqlite",
   "FORGE_IDLE_TIMEOUT": "90s",
-  "handoff_max_chars": 1234
+  "handoff_max_chars": 1234,
+  "generation_limit": 7
 }`), 0o600); err != nil {
 		t.Fatalf("写 config.json: %v", err)
 	}
@@ -143,6 +144,9 @@ agents = /tmp/from-envfile/agents
 	}
 	if c.HandoffMaxChars != 1234 {
 		t.Fatalf("数字标量应被接受: %d", c.HandoffMaxChars)
+	}
+	if c.GenerationLimit != 7 {
+		t.Fatalf("generation_limit 应被读入: %d", c.GenerationLimit)
 	}
 	if c.ReapGrace.String() != "7s" || src["reap_grace"] != SourceEnvFile {
 		t.Fatalf("export 前缀/别名键未生效: %v %v", c.ReapGrace, src["reap_grace"])
@@ -199,6 +203,8 @@ func TestConfigDirErrors(t *testing.T) {
 		{"非标量", "config.json", `{"addr":{"a":1}}`, "标量"},
 		{"非法 duration", "config.json", `{"idle_timeout":"5 minutes"}`, "duration"},
 		{"非法整数", "config.json", `{"handoff_max_chars":"abc"}`, "非负整数"},
+		{"非法整数(代际上限)", "config.json", `{"generation_limit":"abc"}`, "非负整数"},
+		{"负数(代际上限)", "config.json", `{"generation_limit":-1}`, "非负整数"},
 		{"未知键(env)", "env", "FORGE_NOPE=1\n", "未知配置键"},
 		{"缺等号(env)", "env", "FORGE_ADDR\n", "KEY=VALUE"},
 	}

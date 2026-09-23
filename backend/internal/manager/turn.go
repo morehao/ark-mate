@@ -76,7 +76,11 @@ func (o *Orchestrator) acquireConversation(ctx context.Context, conversationID s
 			return nil, err
 		}
 	}
-	return as, nil
+	// M3-6/M3-7：把"这一轮该用哪个代际"的裁决放在**每一个轮次边界**上（本函数就是那个边界；
+	// Prompt 与排队投递都经它）。迁移失败分两种（见 generation.go 文件头的不对称规则）：
+	// 纯能力定义变化 → 回退旧代际继续跑（纪律④，不返回错误）；缩权面（权限/provider）变化
+	// → 带码拒绝这一轮，绝不用已被收回的权限面继续跑。
+	return o.maybeMigrateGeneration(ctx, as)
 }
 
 // PromptWithDelivery 带投递模式的 Prompt（§6 busy input 队列）。

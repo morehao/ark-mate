@@ -137,6 +137,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_IDLE_TIMEOUT` | `5m` | 暖进程空闲回收（0 = 关闭） |
 | `FORGE_REAP_INTERVAL` | `5m` | 空闲回收扫描间隔 |
 | `FORGE_HANDOFF_MAX_CHARS` | `6000` | 跨 runtime / 无原生 resume 时的历史摘要预算（0 = 关闭） |
+| `FORGE_GENERATION_LIMIT` | `4` | 同一配置（runtime + 原生权限 + provider）下允许并存的**能力代际**上限（0 = 不限制）。代际按能力指纹内容寻址、指纹不同即各起一个进程（能力集是进程级的）；达上限时先淘汰「无会话引用且空闲」的代际，仍超限则**带码拒绝**新建（`40901 generation_limit_reached`），绝不静默复用错误的能力集 |
 | `FORGE_PROC_REGISTRY` | `<dir(FORGE_DB)>/processes.json` | runtime 子进程注册表（孤儿回收用）；`off`/`disable`/`none` = 关闭登记与回收 |
 | `FORGE_REAP_GRACE` | `2s` | 孤儿回收 SIGTERM → SIGKILL 的宽限期 |
 | `GIN_MODE` | `debug` | 设 `release` 关闭 gin debug 告警 |
@@ -162,7 +163,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
 `workspace_dir` `workspace_roots` `projection_dirs`
-`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
+`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`agent_dir`/`capability_dir`）。

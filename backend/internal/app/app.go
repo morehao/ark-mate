@@ -201,6 +201,8 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	// handoff memo 字符预算（P3 F3；FORGE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
 	a.orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
+	// 能力代际上限（M3-7；FORGE_GENERATION_LIMIT，0 = 不限制）。
+	a.orch.SetGenerationLimit(cfg.GenerationLimit)
 	// 权限/elicitation 挂起超时（默认 30min；FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT 覆盖）。
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)

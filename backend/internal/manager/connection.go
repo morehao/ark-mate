@@ -49,6 +49,222 @@ func generationKey(connKey, fingerprint string) string {
 	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint
 }
 
+// baseKeyFor 该 agent 在当前配置下的**基础**连接键（runtime + 原生权限 env + provider env）。
+//
+// 单独成函数是因为它有第二个消费者：代际迁移要判断"这一轮的进程级能力面变了没有"
+// （权限被收回 = 基础键变），而"变没变"的判据只允许有一个实现——两处各算一遍，
+// 迟早会漂移成"迁移判据说没变、acquire 却换了进程"。
+func (o *Orchestrator) baseKeyFor(agent *AgentRec, spec runtime.Spec) string {
+	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
+	keyEnv := o.svc.providerEnvFor(agent.Provider)
+	return connKey(spec.ID, nativeEnv, keyEnv)
+}
+
+// dedupeStrings 保序去重（小切片，线性扫足够）。
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, v := range in {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// generationKeysHoldingAgent 那些**装着该 agent 会话**、且没有别的 agent 会话的代际键。
+//
+// 存在的理由：代际键里含进程级能力面（原生权限 / provider），所以"agent 的会话"与
+// "agent 当前配置的代际键"会随配置漂移而分家——`stopAgent` 只按当前键扫会漏掉旧键下的代际。
+// 判据只看**会话归属**（句柄上的 AgentID），与配置无关，因此不受漂移影响。
+// 与别的 agent 共用的代际不返回（停一个 agent 不该关掉另一个 agent 正在用的进程）。
+func (o *Orchestrator) generationKeysHoldingAgent(agentID string) []string {
+	if agentID == "" {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, rc := range o.conns {
+		mine, theirs := false, false
+		for _, as := range o.conversations {
+			if as.client != rc.client {
+				continue
+			}
+			if as.AgentID == agentID {
+				mine = true
+			} else {
+				theirs = true
+			}
+		}
+		if mine && !theirs && !seen[rc.key] {
+			seen[rc.key] = true
+			out = append(out, rc.key)
+		}
+	}
+	return out
+}
+
+// generationKeysWarmOwnedBy 该 agent 创建、且**没有任何会话引用**的代际键（暖进程池）。
+//
+// 归属用 `runtimeConn.agentID`（创建者）：无人引用的进程没有别的归属线索，创建者是唯一可用的
+// 那份事实。安全性来自"无人引用"这个前置条件——只要还有任何会话挂在上面（哪怕是别的 agent 的），
+// 这条代际就不在返回集里，停 agent 不会把别人正在用的进程关掉。
+func (o *Orchestrator) generationKeysWarmOwnedBy(agentID string) []string {
+	if agentID == "" {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var out []string
+	for _, rc := range o.conns {
+		if rc.agentID != agentID {
+			continue
+		}
+		referenced := false
+		for _, as := range o.conversations {
+			if as.client == rc.client {
+				referenced = true
+				break
+			}
+		}
+		if !referenced {
+			out = append(out, rc.key)
+		}
+	}
+	return out
+}
+
+// connOfClient 反查某客户端所属的连接（无 → nil）。连接数是代际上限量级（个位数），线性扫足够；
+// 代际迁移要拿它读"这条句柄此刻挂在哪个代际键上"（那是判"要不要迁"的唯一权威来源）。
+func (o *Orchestrator) connOfClient(client *acl.Client) *runtimeConn {
+	if client == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, rc := range o.conns {
+		if rc.client == client {
+			return rc
+		}
+	}
+	return nil
+}
+
+// admitGeneration 代际上限准入：在**拨号之前**判定"能不能再起一个代际"。
+//
+// 语义（风险表第 12 行）：上限是"猜粗了只是多花内存"这一侧的护栏，所以达到上限时**两步走**——
+//  1. 先显式淘汰「无在途 turn 且无任何会话引用」的代际（= 计划里的"显式淘汰空闲代际"，
+//     不等空闲阈值：那些进程此刻已经没有任何人在用，收掉它们不损失任何东西）；
+//  2. 淘汰后仍达上限 → **带码拒绝**（40901 `generation_limit_reached`），并在文案里给出出路
+//     （复用现有能力集 / 等空闲代际回收 / 调大 FORGE_GENERATION_LIMIT）。
+//
+// 绝不"找个差不多的代际塞进去"：能力集是进程级的，塞错了底座会给错的那一套且**不报错**
+// ——那正是本仓 archtest 第 10 条守卫要防的事（猜细了是安全 bug）。
+//
+// 上限按**基础键**分组（同一 runtime + 同权限 + 同 provider 的进程池）：不同权重的进程池
+// 本来就互不共享，拿一个全局数字去卡它们只会让"合法的多 agent"互相挤掉。
+func (o *Orchestrator) admitGeneration(baseKey string) error {
+	o.mu.Lock()
+	limit := o.generationLimit
+	o.mu.Unlock()
+	if limit <= 0 {
+		return nil // 0 = 不限制（显式关掉护栏）
+	}
+	if n := len(o.generationKeysFor(baseKey)); n < limit {
+		return nil
+	}
+	// 达到上限：先淘汰该基础键下无人引用的代际，再复查。
+	if n := o.reclaimUnreferenced(baseKey); n > 0 {
+		o.logger.Info("代际上限：淘汰空闲代际", "base", baseKey, "reclaimed", n, "limit", limit)
+	}
+	keys := o.generationKeysFor(baseKey)
+	if len(keys) < limit {
+		return nil
+	}
+	return acl.NewError(acl.ClassLimit, "generation_limit_reached",
+		fmt.Sprintf("该配置下的能力代际已达上限 %d（%s）：请复用现有能力集（用同一套技能/MCP 组合）、或等空闲代际被回收后重试；确需更多并发能力集时调大 FORGE_GENERATION_LIMIT",
+			limit, strings.Join(shortGenerationKeys(keys), ", ")), nil)
+}
+
+// shortGenerationKeys 把代际键压成"指纹前 8 位"的可读形态（拒绝文案与日志用；键本身太长）。
+func shortGenerationKeys(keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if i := strings.LastIndex(k, ":"); i >= 0 && i+1 < len(k) {
+			k = k[i+1:]
+		}
+		if k == "" {
+			k = "缺省"
+		} else if len(k) > 8 {
+			k = k[:8]
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+// reclaimUnreferenced 回收该基础键下「无在途 turn 且无任何会话引用」的代际（`onlyBase` 空 = 全部），
+// **不等空闲阈值**——判据是"此刻没有任何人在用"，不是"闲了多久"。用于代际上限准入时腾位置。
+//
+// 与 reapIdleOnce 的分工：那个是**周期性**的暖进程回收（判据含 idle 阈值，服务于"StartAgent
+// 常驻但没人用"）；本函数是**事件驱动**的立即回收（正是计划里的"显式淘汰空闲代际"）。
+// 回收动作都走 dropConn + client.Close，不另写回收器。返回回收数量。
+func (o *Orchestrator) reclaimUnreferenced(onlyBase string) int {
+	return o.reclaimConns(func(rc *runtimeConn) bool {
+		return onlyBase == "" || rc.baseKey == onlyBase
+	})
+}
+
+// reclaimGeneration 回收**指定的那一条**代际（若它已无人引用且空闲）。迁移离开旧代际后调用：
+// 只动"自己刚离开的那一代"，不波及该基础键下别的无人引用进程（比如 StartAgent 的暖进程）。
+// 返回是否真的回收了。
+func (o *Orchestrator) reclaimGeneration(target *runtimeConn) bool {
+	if target == nil {
+		return false
+	}
+	return o.reclaimConns(func(rc *runtimeConn) bool { return rc == target }) > 0
+}
+
+// reclaimConns 回收满足 pick 且「无在途 turn + 无任何会话引用」的连接。
+func (o *Orchestrator) reclaimConns(pick func(*runtimeConn) bool) int {
+	o.mu.Lock()
+	var victims []*runtimeConn
+	for _, rc := range o.conns {
+		if !pick(rc) {
+			continue
+		}
+		if o.inflight.Len(rc.client) > 0 {
+			// 有在途 turn：绝不打断。（挂起权限/提问不必另判：它们只在某一轮的执行期间存在，
+			// 而那一轮的角色就是"在途 turn"——`RegisterAndWait` 由该轮的 RPC 派发调用。）
+			continue
+		}
+		hasConversation := false
+		for _, as := range o.conversations {
+			if as.client == rc.client {
+				hasConversation = true
+				break
+			}
+		}
+		if hasConversation {
+			continue // 仍有会话引用（含已完成态），不回收
+		}
+		victims = append(victims, rc)
+	}
+	o.mu.Unlock()
+	for _, rc := range victims {
+		rc.intentional.Store(true) // 主动回收，不是连接故障
+		o.dropConn(rc)
+		if rc.client != nil {
+			_ = rc.client.Close() // watchConn 收尾（dropConn 幂等）
+		}
+	}
+	return len(victims)
+}
+
 // generationKeysFor 某**基础键**对应的全部代际缓存键（含基础键本身，可能为空）。
 //
 // 停机/停 agent 要关掉该 agent 的**所有**代际，而不是只关"当前算出来的那一个键"——代际是内容
@@ -78,16 +294,10 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	if err := o.svc.CredentialProblem(agent); err != nil {
 		return nil, err
 	}
-	// B5 原生权限映射：把 agent 的 permission_policy 投影为底座原生权限开关
-	// （dsh: DSH_PERMISSION_MODE；opencode: OPENCODE_CONFIG_CONTENT 的 permission 表）。
-	// 先算 env 再定缓存键——权限开关是进程级，配置不同的 agent 不能复用同一子进程。
-	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	// provider 注入面（P2）：provider 档案密钥 env。并入缓存键，修复「同 runtime+权限、
-	// 不同 provider 共享子进程」的潜在串键（B5 修复）。
-	keyEnv := o.svc.providerEnvFor(agent.Provider)
-	// 模型不进 env/缓存键：模型选择是**会话级**语义（session/set_config_option），
-	// 同一连接可服务多个模型；进程级模型配置归底座自身的配置文件/环境（子进程继承 daemon 环境）。
-	baseKey := connKey(spec.ID, nativeEnv, keyEnv)
+	// 基础键（进程级能力面：原生权限开关 + provider 注入面）——先算 env 再定缓存键：
+	// 权限开关是进程级，配置不同的 agent 不能复用同一子进程。模型不进 env/缓存键：
+	// 模型选择是**会话级**语义（session/set_config_option），同一连接可服务多个模型。
+	baseKey := o.baseKeyFor(agent, spec)
 	key := generationKey(baseKey, fingerprint)
 
 	o.mu.Lock()
@@ -101,6 +311,12 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			return rc, nil
 		}
 	}
+	// 代际上限准入（M3-7）：**新建之前**判定。超限就带码拒绝，绝不"复用一个差不多"的能力集。
+	if err := o.admitGeneration(baseKey); err != nil {
+		return nil, err
+	}
+	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
+	keyEnv := o.svc.providerEnvFor(agent.Provider)
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
 	var env []string
@@ -419,9 +635,23 @@ func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
 // 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
 // 空闲 → 关连接（显式停机：会话句柄作废但状态如实保留；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
-	base := connKey(spec.ID, o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), o.svc.providerEnvFor(agent.Provider))
+	base := o.baseKeyFor(agent, spec)
 	keys := o.generationKeysFor(base)
+	// 基础键漂移（权限被收窄过 / provider 档案换过）时，旧基础键下的代际不在 `keys` 里，
+	// 但它们装的仍是**这个 agent 的会话**——只按"当前配置"扫会漏掉它们，表现是
+	// "agent 已停，旧权限面的进程还活着，直到空闲回收才走"（代际机制引入后新出现的一类漏）。
+	// 补扫规则刻意保守：只收「这条代际上没有别的 agent 的会话」的那些，
+	// 绝不因为停 A 而关掉 A、B 共用的暖进程（那是 B 正在用的东西）。
+	keys = append(keys, o.generationKeysHoldingAgent(agent.ID)...)
+	// 还有第三类：本 agent 创建、当前**无人引用**的代际（StartAgent 暖进程）。基础键漂移后
+	// 它们落在旧键下，前两类都扫不到（没有会话可归属）——不补这一扫，表现是"agent 已停，
+	// 旧权限面的暖进程还在跑到空闲回收"。判据（创建者 + 无人引用）保守：有会话挂着的都不动。
+	keys = append(keys, o.generationKeysWarmOwnedBy(agent.ID)...)
+	keys = dedupeStrings(keys) // 三个来源可能重叠；重复项会让下面同一连接被关两次
 	if len(keys) == 0 {
+		// 没有可关的代际 ≠ 没有事要做：本 agent 的会话可能正挂在**与别的 agent 共用**的代际上
+		// （同 runtime + 同权限 + 同 provider），那些进程要留给别人，但"停"对本 agent 的句柄同样生效。
+		o.evictAgentHandles(agent.ID, nil)
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil
 	}
@@ -462,6 +692,36 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 			return ctx.Err()
 		}
 	}
+	// 共用代际上的本 agent 句柄：那些进程没关（留给别的 agent），但句柄不能继续挂在上面——
+	// 否则"停 agent"对它们形同没停（下一次 prompt 会以为会话还活着，继续用旧权限面的进程）。
+	o.evictAgentHandles(agent.ID, rcs)
 	o.svc.setAgentState(agent.ID, AgentStateStopped)
 	return nil
+}
+
+// evictAgentHandles 作废该 agent 在**未关闭**连接上的会话句柄（`closing` 里的连接由 dropConn 收尾，
+// 这里跳过以免重复处理）。刻意不关进程、不删会话记录：会话可续聊（下次 prompt 重建），
+// 共用该进程的别的 agent 不受影响。
+func (o *Orchestrator) evictAgentHandles(agentID string, closing []*runtimeConn) {
+	if agentID == "" {
+		return
+	}
+	skip := make(map[*acl.Client]bool, len(closing))
+	for _, rc := range closing {
+		if rc.client != nil {
+			skip[rc.client] = true
+		}
+	}
+	o.mu.Lock()
+	var victims []*ActiveConversation
+	for _, as := range o.conversations {
+		if as.AgentID != agentID || skip[as.client] {
+			continue
+		}
+		victims = append(victims, as)
+	}
+	o.mu.Unlock()
+	for _, as := range victims {
+		o.disconnectConversation(as, true) // 主动停机：句柄作废，会话与状态保留
+	}
 }

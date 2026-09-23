@@ -20,6 +20,9 @@ const agentCancelTimeout = 3 * time.Second
 // DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env FORGE_HANDOFF_MAX_CHARS 覆盖）。
 const DefaultHandoffMaxChars = 6000
 
+// DefaultGenerationLimit 同一配置下的能力代际上限默认值（风险表第 12 行；env FORGE_GENERATION_LIMIT）。
+const DefaultGenerationLimit = 4
+
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
 type acpSession interface {
 	Prompt(ctx context.Context, text string) (string, error)
@@ -121,6 +124,10 @@ type Orchestrator struct {
 	// FORGE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
 
+	// generationLimit 同一基础键（runtime + 原生权限 + provider）下允许并存的代际上限
+	// （见 SetGenerationLimit / FORGE_GENERATION_LIMIT）。0 = 不限制。
+	generationLimit int
+
 	logger *slog.Logger
 }
 
@@ -194,6 +201,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		elic:            NewElicitationManager(DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
+		generationLimit: DefaultGenerationLimit,
 		logger:          slog.Default(),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
@@ -263,6 +271,26 @@ func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureConversation。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
+
+// SetGenerationLimit 设置同一配置下的能力代际上限（0 = 不限制）。见 admitGeneration。
+//
+// 是**软上限**：达到上限时先显式淘汰「无会话引用且空闲」的代际，只有全都还在用时才拒绝新建。
+// 拒绝而不是复用：复用错的能力集是安全 bug（底座会给 A 会话的能力投给 B），宁可报错。
+func (o *Orchestrator) SetGenerationLimit(n int) {
+	if n < 0 {
+		n = 0
+	}
+	o.mu.Lock()
+	o.generationLimit = n
+	o.mu.Unlock()
+}
+
+// GenerationLimit 当前上限（0 = 不限制；诊断/测试用）。
+func (o *Orchestrator) GenerationLimit() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.generationLimit
+}
 
 // SetLogger 设置编排日志。
 func (o *Orchestrator) SetLogger(l *slog.Logger) {
