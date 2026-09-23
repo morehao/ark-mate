@@ -348,7 +348,7 @@ make vet / test   # go vet / go test ./...
 容器：
 
 ```bash
-make image                                    # 最小镜像：只含 forge 本体（不含任何底座，容器内不自检）
+make image                                    # 最小镜像：只含 forge 本体（不含底座；容器能起、health 通，但无免 key 自检）
 make image/runtimes WITH_DSH=true WITH_OPENCODE=true   # 额外内置 dsh / opencode（可分别开关）
 make image/run                                # 起容器（具名卷 /data，端口只绑回环）
 docker compose up -d --build                  # 等价的 compose 路径（变量见 .env.example）

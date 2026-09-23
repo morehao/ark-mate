@@ -624,6 +624,15 @@ sudo systemctl restart ark-forge
   内嵌带来的体积增量实测 **+403 KB**（40,291,941 → 40,686,100 字节）。
   注：默认最小镜像 `debian:bookworm-slim` 自带 `/usr/share/zoneinfo`，所以"默认镜像里能跑"并不能
   证明这条；上面的验证特意用了零 zoneinfo 的镜像。
+- 最小镜像本体（M4-7 补跑）：`GO_PROXY=https://goproxy.cn,direct make image` 成功产出
+  `ark-forge:local`（**142 MB**）；`docker run --tmpfs /data -e FORGE_STORE=memory
+  -e FORGE_TOKEN=... -p 127.0.0.1:10077:10001 ark-forge:local` 起得来且
+  `GET /v1/forge/health` → **200 `{"code":0,"msg":"ok"}`**。
+  **默认 `GO_PROXY` 是 `proxy.golang.org`，在拉不到它的网络里会卡在 Go 构建阶段**——按 §4
+  整组覆盖镜像源即可（本机就是走 `goproxy.cn` 才构建成功的）。
+  **这条只能证明"daemon 起得来 + health 通"**：最小镜像不含任何底座，容器内**跑不通一轮对话**
+  （`echo` 演示底座已于 M0 删除，容器里没有免 key 自检手段）；要验内置底座用
+  `make image/runtimes` + 容器内真实一轮。
 - 单操作员令牌（A6）：`token: cfg-token-9f3a`（config.json）→ `forge config` 输出掩码
   `cf…3a（14 字符）`；`/health` 无令牌 200；`/agents` 无令牌/错令牌 → **HTTP 401 +
   `code=40101`**（信封含 requestID 与提示文案），正确 `Bearer` 与 `?token=` 均 200；
