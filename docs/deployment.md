@@ -128,6 +128,8 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录（vault 的 home 取它的父目录：`~/.forge`） |
 | `FORGE_VAULT_KEY` | 空 | 主密钥覆盖（32 字节 base64/hex）；**非空时不读不建 `vault.key`**（容器/CI 用）；密钥丢失 = 已有密文不可恢复 |
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力数据面目录 |
+| `FORGE_AUTOMATIONS` | `~/.forge/automations` | 自动化定义目录（`<id>.json`；定义与运行态 overlay 同文件，手工可读） |
+| `FORGE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
 | `FORGE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`deepseekharness:skill`；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `FORGE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `FORGE_WORKSPACE_DIR` | `~/.forge/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`FORGE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
@@ -162,7 +164,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
-`workspace_dir` `workspace_roots` `projection_dirs`
+`automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
 `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名

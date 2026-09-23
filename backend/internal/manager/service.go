@@ -108,6 +108,10 @@ type Service struct {
 	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
 	capabilityDir string
+	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
+	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
+	automationDir string
+	automations   map[string]*automationRec
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
 	skillProjections []SkillProjection
 

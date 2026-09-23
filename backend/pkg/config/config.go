@@ -74,6 +74,13 @@ type Config struct {
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
 	// FORGE_CAPABILITIES 覆盖，默认 ~/.forge/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
+	// AutomationDir 自动化定义目录（M4：<id>.json → Automation 注册表；FORGE_AUTOMATIONS 覆盖，
+	// 默认 ~/.forge/automations；空 = 不启用文件数据面，写面显式报 automation_dir_unset）。
+	AutomationDir string
+	// AutomationTick 调度循环的 tick 间隔（FORGE_AUTOMATION_TICK 覆盖，默认 30s；**0 = 关闭调度**）。
+	// 0 关闭而不是"最快跑"：调度会真的建会话、跑 agent，停机维护时需要一个明确的关闭开关，
+	// 而不是靠把间隔调到很大来近似。
+	AutomationTick time.Duration
 	// WorkspaceDir 代建工作空间的根目录（FORGE_WORKSPACE_DIR 覆盖，默认 ~/.forge/workspaces）。
 	// 建会话未指定 cwd 时在 <dir>/<会话id>/ 下建临时工作空间。**空 = 关闭代建**：
 	// 此时未指定 cwd 直接报 workspace_required（绝不回落 serve 进程目录，见 manager.ResolveWorkspace）。
@@ -178,6 +185,8 @@ const (
 	DefaultHandoffMaxChars    = 6000
 	// DefaultGenerationLimit 同一配置下的能力代际上限（风险表第 12 行：5 套能力 ≈ 0.5–1.5GB）。
 	DefaultGenerationLimit = 4
+	// DefaultAutomationTick 调度 tick 间隔（设计：100 条 automation 一次时区换算 ≪ 1ms，无 IO）。
+	DefaultAutomationTick = 30 * time.Second
 )
 
 // Default 返回默认配置（不含依赖家目录的派生路径，派生值在解析阶段补齐）。
@@ -191,6 +200,7 @@ func Default() Config {
 		ReapGrace:          DefaultReapGrace,
 		HandoffMaxChars:    DefaultHandoffMaxChars,
 		GenerationLimit:    DefaultGenerationLimit,
+		AutomationTick:     DefaultAutomationTick,
 		McpAutoProbe:       McpAutoProbeOff,
 		NativePermission:   NativePermissionAuto,
 	}
@@ -204,6 +214,8 @@ var knownKeys = map[string]string{
 	"store":               "FORGE_STORE",
 	"agents":              "FORGE_AGENTS",
 	"capabilities":        "FORGE_CAPABILITIES",
+	"automations":         "FORGE_AUTOMATIONS",
+	"automation_tick":     "FORGE_AUTOMATION_TICK",
 	"workspace_dir":       "FORGE_WORKSPACE_DIR",
 	"workspace_roots":     "FORGE_WORKSPACE_ROOTS",
 	"projection_dirs":     "FORGE_PROJECTION_DIRS",
@@ -538,6 +550,7 @@ func materialize(r *resolver) (Config, error) {
 		{"permission_timeout", &c.PermissionTimeout},
 		{"elicitation_timeout", &c.ElicitationTimeout},
 		{"reap_grace", &c.ReapGrace},
+		{"automation_tick", &c.AutomationTick},
 	} {
 		v, ok := r.get(item.key)
 		if !ok {
@@ -615,6 +628,11 @@ func materialize(r *resolver) (Config, error) {
 		c.CapabilityDir = v
 	} else {
 		c.CapabilityDir = filepath.Join(home, "capabilities")
+	}
+	if v, ok := r.get("automations"); ok {
+		c.AutomationDir = v
+	} else {
+		c.AutomationDir = filepath.Join(home, "automations")
 	}
 	// workspace_dir：显式设置优先（off/disable/none/空 = 关闭代建）；未设置时派生自数据目录。
 	if v, ok := r.get("workspace_dir"); ok {

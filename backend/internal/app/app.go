@@ -237,6 +237,7 @@ func (a *App) loadDefinitions() error {
 	a.svc.LoadAgentDefinitions(cfg.AgentDir)
 	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
 	a.svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
+	a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
 	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
 	// 目标根与形态来自 **runtime 的投影声明**；FORGE_PROJECTION_DIRS 只在需要覆盖根时才出现。
 	a.reconcileSkillProjections()

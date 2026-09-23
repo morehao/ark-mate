@@ -41,6 +41,8 @@ func configCmd(args []string) {
 				"turn_timeout":        cfg.TurnTimeout.String(),
 				"handoff_max_chars":   cfg.HandoffMaxChars,
 				"generation_limit":    cfg.GenerationLimit,
+				"automations":         cfg.AutomationDir,
+				"automation_tick":     cfg.AutomationTick.String(),
 				"permission_timeout":  cfg.PermissionTimeout.String(),
 				"elicitation_timeout": cfg.ElicitationTimeout.String(),
 				"proc_registry":       cfg.ProcRegistryPath,
@@ -95,6 +97,8 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
 	fmt.Printf("  %-22s %-38d [%s]\n", "handoff_max_chars", cfg.HandoffMaxChars, src("handoff_max_chars"))
 	fmt.Printf("  %-22s %-38d [%s]\n", "generation_limit", cfg.GenerationLimit, src("generation_limit"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "automations", cfg.AutomationDir, src("automations"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "automation_tick", cfg.AutomationTick.String(), src("automation_tick"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "permission_timeout", cfg.PermissionTimeout.String(), src("permission_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
