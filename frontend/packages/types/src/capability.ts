@@ -2,12 +2,6 @@
 // backend/internal/dto/dtocapability 的 SkillResp/McpServerResp/ToolResp）。
 // MCP headers/凭证后端不读回，故此处无 headers 字段。
 
-export interface SkillSource {
-  runtime: string
-  path: string
-  format: string
-}
-
 /** 一条装载期正文扫描告警（§13.2 S1）。critical 的定义在装载时已被拒载，不会出现在列表里。 */
 export interface SkillWarning {
   /** info | warning | critical */
@@ -23,7 +17,15 @@ export interface Skill {
   description?: string
   /** SKILL.md 内容（P2 物化源；目录条目可空）。 */
   body?: string
-  sources?: SkillSource[]
+  /**
+   * 投放对象（§13.4；M1 起取代 sources）。
+   *
+   * **空数组 = 全部 runtime**（升级安全网：旧定义没有该字段）。落点与格式由 runtime 的投影
+   * 声明决定（不再由每个条目各写一遍 path/format）。
+   */
+  runtimes?: string[]
+  /** global | workspace。M1 只声明不消费（workspace 落点待实测），非法取值装载期即拒。 */
+  scope?: string
   /** 放行了但该看一眼的告警。 */
   warnings?: SkillWarning[]
   /** 是否投放（§13.4 S4；未声明 enabled 的定义 = true）。禁用只影响投放，定义照旧保留。 */
@@ -35,7 +37,12 @@ export interface SkillMaterializationState {
   root: string
   runtime?: string
   dir: string
-  /** in_sync | missing | tampered | stale | disabled | user_owned | not_applicable */
+  /**
+   * in_sync | missing | tampered | stale | disabled | user_owned | not_applicable | untested | not_configured
+   *
+   * untested = 有投影、根也解得开，但该形态未端到端实测过（产物照常写，如实标注）；
+   * not_configured = 投影根解析失败（占位符变量没设 / 落点非法），detail 里带原因。
+   */
   status: string
   /** 期望摘要（注册表侧）。 */
   hash?: string
@@ -43,7 +50,7 @@ export interface SkillMaterializationState {
   actual_hash?: string
   /** 产物 sidecar 记录的写入时间（RFC3339）。 */
   written_at?: string
-  /** 归属标记里登记的 runtime 集合。 */
+  /** 归属标记里登记的**投影方**集合（共享 root 下各投影方各登记一次）。 */
   owners?: string[]
   detail?: string
 }
@@ -219,13 +226,14 @@ export interface McpPromptGetResult {
 
 // ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
 
-/** 某 Agent 视角的 skill（sources 已按该 Agent 候选 runtime 裁剪）。
+/** 某 Agent 视角的 skill（runtimes 已裁到「候选 ∩ 技能声明 ∩ 本进程已解析投影」）。
  *  §13.4 S5：不适用**不等于**不列出——启用与适用正交，两者都要能解释。 */
 export interface AgentSkill {
   id: string
   name: string
   description?: string
-  sources?: SkillSource[]
+  /** 该 Agent 的候选中真的会投放到的 runtime（空 = 这个 agent 用不上，reasons 里有为什么）。 */
+  runtimes?: string[]
   /** 平台是否投放（false = 已被禁用，可恢复）。 */
   enabled?: boolean
   /** 该 agent 现在能不能真的用上（启用 ⟂ 适用）。 */

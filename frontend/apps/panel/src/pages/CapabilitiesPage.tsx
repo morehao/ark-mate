@@ -40,6 +40,7 @@ import {
   mcpRows,
   probeSummary,
   skillActivationView,
+  skillRuntimesView,
   skillWarningsView,
   toolSourceLabel,
   type McpRow,
@@ -133,6 +134,34 @@ function SkillActivationTags({ skill }: { skill: AgentSkill }) {
         <Tag color="green" style={smallTag}>
           可用
         </Tag>
+      )}
+    </>
+  )
+}
+
+/**
+ * 投放对象标签（M1：取代旧的 `runtime·format` 标签）。
+ *
+ * 空 runtimes 显示为「全部 runtime」而不是什么都不显示：后者会被读成"这个技能没有投放对象"，
+ * 而真实语义正好相反（空 = 全部，是升级安全默认）。
+ */
+function SkillRuntimeTags({ runtimes, scope }: { runtimes?: string[]; scope?: string }) {
+  const v = skillRuntimesView(runtimes, scope)
+  return (
+    <>
+      {v.labels.map((label, i) => (
+        <Tooltip key={i} title={v.emptyHint}>
+          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }} color={runtimes && runtimes.length > 0 ? undefined : 'default'}>
+            {label}
+          </Tag>
+        </Tooltip>
+      ))}
+      {v.scopeTag && (
+        <Tooltip title={v.scopeTag.hint}>
+          <Tag color="blue" style={{ fontSize: 10, marginInlineEnd: 0 }}>
+            {v.scopeTag.text}
+          </Tag>
+        </Tooltip>
       )}
     </>
   )
@@ -518,7 +547,7 @@ export function CapabilitiesPage() {
                   Skills <Tag style={{ fontSize: 10.5 }}>{caps.skills.length}</Tag>
                 </div>
                 {caps.skills.length === 0 ? (
-                  <SectionEmpty text="该 Agent 无可见 skill（无匹配候选底座的物化源）" />
+                  <SectionEmpty text="该 Agent 无可见 skill（没有候选底座用得上它们，或本进程没解析出 skill 投影）" />
                 ) : (
                   caps.skills.map((s) => (
                     <Row key={s.id}>
@@ -527,13 +556,7 @@ export function CapabilitiesPage() {
                       {/* §13.4 S5：不适用也列出来并说明原因（不再静默过滤） */}
                       <SkillActivationTags skill={s} />
                       <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
-                      {s.sources?.map((src, i) => (
-                        <Tooltip key={i} title={src.path}>
-                          <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>
-                            {src.runtime}·{src.format}
-                          </Tag>
-                        </Tooltip>
-                      ))}
+                      <SkillRuntimeTags runtimes={s.runtimes} />
                     </Row>
                   ))
                 )}
@@ -605,7 +628,7 @@ export function CapabilitiesPage() {
         <Card>
           <SectionHeader
             title="Skills"
-            hint="目录条目（平台唯一事实源）：启用即按 sources 投放、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动"
+            hint="目录条目（平台唯一事实源）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影"
             count={skills.length}
             loading={busy === 'skills'}
             onRefresh={() => refresh('skills')}
@@ -630,15 +653,9 @@ export function CapabilitiesPage() {
                       </Tooltip>
                     )}
                     <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
-                    {s.sources?.map((src, i) => (
-                      <Tooltip key={i} title={src.path}>
-                        <Tag style={{ fontSize: 10, marginInlineEnd: 0 }}>
-                          {src.runtime}·{src.format}
-                        </Tag>
-                      </Tooltip>
-                    ))}
+                    <SkillRuntimeTags runtimes={s.runtimes} scope={s.scope} />
                     {materializationButton(s)}
-                    <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按 sources 重新投放'}>
+                    <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按其 runtimes 重新投放'}>
                       <Switch
                         size="small"
                         checked={enabled}
