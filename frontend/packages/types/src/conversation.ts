@@ -22,8 +22,29 @@ export interface ConversationSummary {
   provider?: string
   /** 会话级模型 id（空 = 底座默认）。 */
   model?: string
+  /**
+   * 钉住的能力选定（M3）。**整个字段缺失 = 未声明能力选择**（走 agent 白名单 /
+   * 各自的 runtimes 声明），不是"没有能力"。
+   */
+  capabilities?: ConversationCapabilities | null
   created_at: string // ISO 时间戳（UTC RFC3339）
   updated_at: string
+}
+
+/**
+ * 会话的能力选定快照（与落库的 `capability_json` 逐键一致）。
+ *
+ * 每个 kind 三态，**缺键与空数组语义相反**，不要用 `?? []` 抹平：
+ *  - 整个对象缺失 → 未声明能力选择（回落 agent 白名单）
+ *  - 某 kind 缺键   → 该 kind 未声明（回落上一层）
+ *  - 某 kind `[]`   → **明确一个都不要**
+ *  - 某 kind 非空   → 白名单
+ */
+export interface ConversationCapabilities {
+  skills?: string[]
+  mcps?: string[]
+  /** 钉住的代际指纹（解析后的能力集的摘要；同指纹 = 同一个进程代际）。 */
+  fingerprint?: string
 }
 
 /** 单轮用量快照（解析 runs.usage_json；used/size 为上下文窗口占用，快照非增量）。 */
@@ -258,6 +279,12 @@ export interface CreateConversationReq {
   cwd?: string
   /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
   model?: string
+  /**
+   * 能力选定（M3）：只传**用户真的限制了的** kind。缺键 = 该 kind 不限制；
+   * `[]` = 一个都不要；非空 = 白名单。服务端据此算代际指纹并把选定钉进会话。
+   * 不可达的 id 会被拒（40001 `capability_not_applicable`，msg 里逐条给原因）。
+   */
+  capabilities?: { skills?: string[]; mcps?: string[] }
 }
 
 export interface CreateConversationResp {

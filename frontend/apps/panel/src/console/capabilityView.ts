@@ -18,6 +18,11 @@ export interface McpRow {
   transport: string
   /** agent 白名单是否启用（无 agent 视图时恒 true）。 */
   enabled: boolean
+  /**
+   * **定义级**投放开关（`<dir>/mcp/<id>.json` 的 `enabled`；未声明 = true）。
+   * 与 `enabled`（agent 白名单）是两件事：定义级关掉 = 谁都拿不到，白名单只是"这个 agent 拿不拿"。
+   */
+  defEnabled: boolean
   /** 候选中可承载此传输的 runtime（无 agent 视图时为 []）。 */
   runtimes: string[]
   toolCount: number
@@ -51,6 +56,7 @@ export function mcpRows(caps: AgentCapabilities | null, servers: McpServer[]): M
       name: agentView?.name || srv?.name || id,
       transport,
       enabled: agentView ? agentView.enabled : true,
+      defEnabled: srv?.enabled ?? true,
       runtimes: agentView?.runtimes ?? [],
       toolCount: srv?.tool_count ?? 0,
       lastProbeAt: srv?.last_probe_at,
@@ -276,5 +282,127 @@ export function writeErrorText(err: unknown): string {
       return `${msg}（id 已被占用或被外部改动：换个 id，或刷新后重试——平台不会覆盖别人的改动）`
     default:
       return msg
+  }
+}
+
+// ——— M3 会话能力选定（创建时勾选；纯函数） ———
+
+/**
+ * 会话能力选定（UI 三态，与 wire 的 `capabilities` 一一对应）。
+ *
+ * `null` 与 `[]` **语义相反**，不要用 `?? []` 抹平：
+ *  - `null` = 该 kind 未声明 → 回落 agent 白名单（技能另按其 runtimes 声明）
+ *  - `[]`   = 明确一个都不要
+ *  - 非空   = 白名单
+ */
+export interface CapabilityChoice {
+  skills: string[] | null
+  mcps: string[] | null
+}
+
+/** 未声明（跟随默认）的选定。 */
+export const FOLLOW_DEFAULT: CapabilityChoice = { skills: null, mcps: null }
+
+/** 选定 → 请求体片段；两个 kind 都未声明时返回 undefined（键都不出现）。 */
+export function selectionPayload(choice: CapabilityChoice): { skills?: string[]; mcps?: string[] } | undefined {
+  const out: { skills?: string[]; mcps?: string[] } = {}
+  if (choice.skills !== null) out.skills = choice.skills
+  if (choice.mcps !== null) out.mcps = choice.mcps
+  return out.skills === undefined && out.mcps === undefined ? undefined : out
+}
+
+/** 选定是否已限制任何 kind（未限制 = 缺省路径，请求体里一个键都不加）。 */
+export function selectionIsDefault(choice: CapabilityChoice): boolean {
+  return choice.skills === null && choice.mcps === null
+}
+
+/** 选定 → 药丸文案（短）。 */
+export function selectionPillText(choice: CapabilityChoice): string {
+  if (selectionIsDefault(choice)) return '能力 · 跟随默认'
+  const parts: string[] = []
+  if (choice.skills !== null) {
+    parts.push(choice.skills.length === 0 ? '技能：无' : `技能 ${choice.skills.length}`)
+  }
+  if (choice.mcps !== null) {
+    parts.push(choice.mcps.length === 0 ? 'MCP：无' : `MCP ${choice.mcps.length}`)
+  }
+  return parts.join(' · ')
+}
+
+/** 选定 → 悬停说明（把"这一个会话会被投什么"讲清楚，含没限制的那一半）。 */
+export function selectionHint(choice: CapabilityChoice): string {
+  const lines: string[] = []
+  lines.push(
+    choice.skills === null
+      ? '技能：不加限制（按当前 Agent 的声明投放）'
+      : choice.skills.length === 0
+        ? '技能：一个都不要'
+        : `技能：只用这 ${choice.skills.length} 个`,
+  )
+  lines.push(
+    choice.mcps === null
+      ? 'MCP：不加限制（按当前 Agent 的白名单）'
+      : choice.mcps.length === 0
+        ? 'MCP：一个都不要'
+        : `MCP：只注入这 ${choice.mcps.length} 个`,
+  )
+  lines.push('能力集按进程绑定：不同选定 = 不同代际（各自一个进程），创建后按下一轮边界生效。')
+  return lines.join('\n')
+}
+
+/**
+ * 一个技能项在选定列表里的状态：能不能勾、勾不了为什么。
+ *
+ * 判据与**服务端校验同源**（都取 agent 视角的适用性）：这里挡下来的项服务端也会拒，
+ * 前端先挡只是省一次往返 + 把原因就地写清。所以它**不是**安全边界，只是同一事实的提前呈现。
+ */
+export function skillOptionView(item: Pick<AgentSkill, 'applicable' | 'reasons'>): {
+  selectable: boolean
+  note: string
+} {
+  if (item.applicable !== true) {
+    // 不适用的原因可能有多条（被禁用 / runtimes 没放行 / 没有投影落点），逐条带出。
+    const why = (item.reasons ?? []).filter(Boolean).join('；')
+    return { selectable: false, note: why || '当前 Agent 用不上这个技能' }
+  }
+  return { selectable: true, note: '' }
+}
+
+/**
+ * 一个 MCP 项在选定列表里的状态。三层判据缺一不可（都取自 agent 视角的行模型）：
+ * 定义级开关（谁都拿不到）→ 传输可承载（底座能不能注入）→ agent 白名单（可被会话覆盖）。
+ */
+export function mcpOptionView(row: Pick<McpRow, 'enabled' | 'defEnabled' | 'runtimes'>): {
+  selectable: boolean
+  note: string
+} {
+  if (!row.defEnabled) {
+    return { selectable: false, note: '这个 MCP 已被禁用（enabled:false）：在能力页改回 true 即可恢复' }
+  }
+  if (row.runtimes.length === 0) {
+    return { selectable: false, note: '当前 Agent 的候选底座都不承载它的传输方式' }
+  }
+  if (!row.enabled) {
+    // 允许勾（服务端放行：会话选定覆盖 agent 白名单），但必须说清这是"越权"行为。
+    return { selectable: true, note: '不在该 Agent 的白名单里：选中它只在本会话内覆盖白名单（不影响别的会话）' }
+  }
+  return { selectable: true, note: '' }
+}
+
+/**
+ * 已建会话钉住的能力选定 → 详情展示（`null` = 该会话没有能力选定，走的是缺省路径）。
+ *
+ * 展示的是**回显快照**而不是"现在能用什么"：定义文件改了以后，这个会话仍跑在钉住的那一代上，
+ * 两者的差别恰恰是用户需要看见的（也是 M3-6 迁移的对象）。
+ */
+export function pinnedCapabilitiesView(
+  caps?: { skills?: string[]; mcps?: string[]; fingerprint?: string } | null,
+): { text: string; hint: string; fingerprint: string } | null {
+  if (!caps) return null
+  const fmt = (list?: string[]) => (list === undefined ? '跟随默认' : list.length === 0 ? '无' : list.join('、'))
+  return {
+    text: `技能：${fmt(caps.skills)} ｜ MCP：${fmt(caps.mcps)}`,
+    hint: '该会话创建时钉住的能力选定：定义文件之后被改动也不会影响它（改动在下一次轮次边界按新代际生效）。',
+    fingerprint: caps.fingerprint ?? '',
   }
 }

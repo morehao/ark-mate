@@ -8,6 +8,8 @@ import { useForge } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker } from './WorkspacePicker'
+import { CapabilityPicker } from './CapabilityPicker'
+import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 import { browseWorkspaces } from '@ark/api'
 
@@ -48,6 +50,13 @@ export function StartPanel() {
   // 任务的文件），且"我这次要处理哪里"本来就该每次明确一次。目录靠选择器的「资料库 / 最近」
   // 一栏一次点击就能选回来，不存在"每次都要重新翻目录树"的负担。
   const [workspace, setWorkspace] = useState<string | null>(null)
+
+  // 能力选定（M3）：缺省 = 两个 kind 都不限制（请求体里不加 capabilities 键，逐字节等同旧行为）。
+  //
+  // 与工作空间相反，这个选择**保留上一次的**：它不是沙箱边界，而更像"这次任务的工具箱"——
+  // 连着做同一类任务时每次重选一遍是纯负担；且它不影响新任务能读到/改到哪些文件，
+  // 复用不会造成"静默继承上一个任务的边界"那类问题。不想要了就点回「跟随默认」。
+  const [capabilities, setCapabilities] = useState<CapabilityChoice>(FOLLOW_DEFAULT)
 
   // 新建固定用「当前 Agent」（后端 agent_id 缺省时取它；缺省回落内置种子 dsh），前端无需再传 agent。
   const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
@@ -105,7 +114,14 @@ export function StartPanel() {
     if (!canSend) return
     setSending(true)
     try {
-      const id = await createAndRun(draft.trim(), model ? { modelID: model } : undefined, workspace)
+      const id = await createAndRun(
+        draft.trim(),
+        model ? { modelID: model } : undefined,
+        workspace,
+        // UI 三态（null = 未限制）→ wire 形态（键缺失 = 未限制）：两个 kind 都没限制时返回
+        // undefined，请求体里连 capabilities 键都不出现。转换只此一处，别的层不再判。
+        selectionPayload(capabilities),
+      )
       if (model) localStorage.setItem(LAST_MODEL_KEY, model)
       if (id) navigate(`/conversations/${id}`)
     } finally {
@@ -243,6 +259,27 @@ export function StartPanel() {
                   在项目中工作
                 </span>
                 <WorkspacePicker value={workspace} onChange={setWorkspace} disabled={sending} />
+              </span>
+              {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。默认不限制，限了才占位显示明细：
+                  与工作空间那栏同样的理由——不留白，但也不给未设置的状态编一个假值。 */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%' }}>
+                <span
+                  style={{
+                    flex: 'none',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 11.5,
+                    color: tokens.textSecondary,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  可用的能力
+                </span>
+                <CapabilityPicker
+                  agentId={defaultAgent?.id}
+                  value={capabilities}
+                  onChange={setCapabilities}
+                  disabled={sending}
+                />
               </span>
               <button
                 type="button"

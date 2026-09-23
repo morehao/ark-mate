@@ -87,6 +87,8 @@ export interface McpServer {
   command?: string
   args?: string[]
   url?: string
+  /** 定义级投放开关（`/mcps` 回，未声明 = true）：关掉则任何 agent 都拿不到。 */
+  enabled?: boolean
   /** 明文环境变量的键（§13.3 M1；值不回）。 */
   env_keys?: string[]
   /** 密钥型环境变量的键（**只有键名**，值/引用都不回）。 */

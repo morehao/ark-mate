@@ -14,6 +14,7 @@ import type { PermissionMemory, PermissionOptionKind, PermissionResp, Conversati
 import { modelValues } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
 import { useForge } from '../store'
+import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
 import { agentNameOf, shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
@@ -375,6 +376,33 @@ export function ConversationDetailDrawer({
               )}
               {row('创建', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.created_at)}</span>)}
               {row('更新', <span style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}>{fmtLocal(s.updated_at)}</span>)}
+              {(() => {
+                // 钉住的能力选定（M3）：展示的是**创建时钉住的快照**，不是"现在能用什么"——
+                // 定义文件改了以后这个会话仍跑在原来那一代上，这个差别正是用户需要看见的。
+                const pinned = pinnedCapabilitiesView(s.capabilities)
+                if (!pinned) {
+                  return row(
+                    '能力',
+                    <span style={{ color: tokens.textPlaceholder }} title="未声明会话级能力选定：按当前 Agent 的声明投放">
+                      跟随默认
+                    </span>,
+                  )
+                }
+                return row(
+                  '能力',
+                  <span style={{ fontSize: 11.5 }} title={pinned.hint}>
+                    {pinned.text}
+                    {pinned.fingerprint && (
+                      <span
+                        style={{ marginLeft: 6, fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}
+                        title={`代际指纹 ${pinned.fingerprint}`}
+                      >
+                        #{pinned.fingerprint.slice(0, 8)}
+                      </span>
+                    )}
+                  </span>,
+                )
+              })()}
               {row(
                 '标记',
                 <span style={{ display: 'inline-flex', gap: 5 }}>
