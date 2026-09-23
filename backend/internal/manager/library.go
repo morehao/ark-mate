@@ -49,6 +49,12 @@ func (s *Service) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, err
 		if needle != "" && !libraryMatch(it, needle) {
 			continue
 		}
+		// `applicability` 必须是**空数组**而不是 `null`：它是「逐候选 runtime 的清单」，
+		// 没有候选时 `[]` 才是诚实的形状（`null` 让消费方把「没有候选」当成「字段缺失」，
+		// 前端 map 上去直接炸）。松散的 nil 切片在 JSON 里就是 `null`，所以这里统一收口。
+		if it.Applicability == nil {
+			it.Applicability = []dtolibrary.Applicability{}
+		}
 		out = append(out, it)
 	}
 	sort.Slice(out, func(i, j int) bool {

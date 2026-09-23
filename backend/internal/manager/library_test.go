@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -257,6 +258,14 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	}
 	if len(items[0].Applicability) != 0 {
 		t.Fatalf("悬空归属不该声称任何 runtime 可达：%+v", items[0].Applicability)
+	}
+	// 空候选必须序列化成 `[]` 而不是 `null`：前端对它 map，`null` 会让面板整页炸。
+	raw, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"applicability":[]`) {
+		t.Fatalf("空候选的 applicability 必须是 []：%s", raw)
 	}
 }
 
