@@ -167,7 +167,7 @@ export function SettingsPage() {
             type="info"
             showIcon
             message="当前进程不可持久化设置"
-            description="该进程没有配置目录（如 acp-serve / demo）：白名单只能由 FORGE_WORKSPACE_ROOTS 或配置文件设置。"
+            description="该进程没有配置目录（如 demo 冒烟进程）：白名单只能由 FORGE_WORKSPACE_ROOTS 或配置文件设置。"
           />
         )}
 

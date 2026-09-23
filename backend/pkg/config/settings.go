@@ -16,7 +16,7 @@ import (
 // 高优先级来源存在时写 config.json 必然被覆盖。所以这里不隐藏优先级，而是把它报出来（Status），
 // 由上层拒绝写并让面板转只读。
 type SettingsStore struct {
-	// dir 配置目录（空 = 不可写：没有配置目录的进程，如 acp-serve/demo，不该落盘）。
+	// dir 配置目录（空 = 不可写：没有配置目录的进程，如 demo 冒烟，不该落盘）。
 	dir string
 	// src workspace_roots 键的最终来源（来自 LoadResolved 的 Sources；空 = 任何来源都没设过）。
 	src Source

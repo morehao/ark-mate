@@ -25,7 +25,7 @@ type McpServer struct {
 	Headers map[string]string
 }
 
-// toAcpMcpServers 把注入列表转换为 ACP SDK 判别联合。空/无 → 空数组（echo 等 agent 校验
+// toAcpMcpServers 把注入列表转换为 ACP SDK 判别联合。空/无 → 空数组（部分底座校验
 // mcpServers 必须为数组而非 null；与改造前 `[]acpsdk.McpServer{}` 语义一致）。
 func toAcpMcpServers(list []McpServer) []acpsdk.McpServer {
 	if len(list) == 0 {

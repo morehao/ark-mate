@@ -17,7 +17,7 @@ import (
 const defaultAgentID = "dsh"
 
 // builtinAgents 内置 Agent 播种表：每个内置 runtime 一个 Agent（dsh 为默认）。
-// echo 演示底座不播种（仅供自定义 agent / 权限演示用）。
+// 内置 runtime 不预置 agent（agent 定义由用户/内置 definitions 显式给出）。
 var builtinAgents = []struct {
 	id      string
 	name    string

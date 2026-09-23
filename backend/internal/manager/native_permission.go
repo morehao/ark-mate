@@ -29,7 +29,7 @@ import (
 //     此时注入只会覆盖操作员在环境/全局配置里设的默认值，收益为零；
 //   - `native_mode: off`。
 //
-// echo 无原生权限机制 → 不注入（说明中写明降级原因）。
+// 底座无原生权限机制（adapter 未声明原生权限 env）→ 不注入（说明中写明降级原因）。
 
 // 原生权限模式取值（PermissionPolicy.NativeMode）。
 const (

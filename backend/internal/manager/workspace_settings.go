@@ -35,7 +35,7 @@ type WorkspaceRootsStore interface {
 }
 
 // SetWorkspaceSettingsStore 注入白名单持久化端口。nil = 只读（GET 可用，PUT 报 settings_readonly）：
-// 没有配置目录的进程（acp-serve/acp-demo/demo）不该往磁盘上写设置。
+// 没有配置目录的进程（如 demo 冒烟）不该往磁盘上写设置。
 func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

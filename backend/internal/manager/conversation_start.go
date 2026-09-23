@@ -90,7 +90,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
-	//   - unsupported_*（echo 无模型、运行时未广告模型配置项）→ 忽略（无模型语义）；
+	//   - unsupported_*（运行时未广告模型配置项）→ 忽略（无模型语义）；
 	//   - 成功 → 用返回的**全量**配置项刷新平台目录缓存（顺带清掉曾失败值的标记）。
 	if err := o.applyModelOnConversation(ctx, as, agent.ID, spec, sess, opt.Model); err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
@@ -116,7 +116,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 // 恢复次序（P3 F2/F3，§5.6）：
 //  1. 原生 resume（首选）：acquire conn → 按能力 LoadSession（opencode load=true）或
 //     ResumeSession（dsh resume=true）恢复同一 provider session → reason=restart。
-//  2. handoff memo 兜底（原生不可用时）：无 load/resume 能力（echo）、无 provider session
+//  2. handoff memo 兜底（原生不可用时）：底座未声明 load/resume 能力、无 provider session
 //     （旧数据）、agent 现路由 runtime ≠ 会话原 runtime（跨 runtime 续聊）、或原生恢复失败 →
 //     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
 //     并更新 rec 的 provider_session_id / runtime_hint（记忆与 sqlite 同步）。
@@ -243,7 +243,7 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 // applyModelOnConversation 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
 //
 // 语义（决策记录）：**用户显式指定的取值，运行时要么接受、要么报错**——绝不静默回落默认模型：
-//   - 运行时未广告模型项（echo / 未配置 provider 的 opencode）→ model_not_supported；
+//   - 运行时未广告模型项（未配置 provider 的 opencode 等）→ model_not_supported；
 //   - 运行时拒绝该取值（协议要求值必须来自广告列表）→ 原样上抛并记入「不可用」反馈；
 //   - 成功 → 用返回的全量状态刷新平台目录缓存。
 //

@@ -107,7 +107,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
   `config.json` 之上还有 env 文件、进程 `FORGE_*`、CLI flag 三层，任一层设过该键，写配置文件都无效。
   所以接口**拒绝写**并回 `settings_locked`，同时 GET 回 `locked_by`（指出是哪个来源锁定：环境变量名 /
   `<配置目录>/env` / 命令行参数），面板据此转只读。要交还控制权，就把该来源里的 `FORGE_WORKSPACE_ROOTS`
-  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（`acp-serve` / `demo`），不落盘。
+  去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（如 `demo` 冒烟进程），不落盘。
 - **写入的校验比配置文件严**：面板设的每一条都要求「绝对路径 + 存在 + 是目录」（配置文件只校验绝对路径，
   允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
 - **影响面**：只约束**新**的显式 `cwd` 与目录浏览；已建会话的 `cwd` 创建即定稿，平台不回头否决旧会话
@@ -206,13 +206,14 @@ curl -H "Authorization: Bearer $FORGE_TOKEN" http://127.0.0.1:10001/v1/forge/age
 
 - `opencode`：需本机可执行 `opencode acp`。
 - `deepseekharness`（dsh）：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
-- `echo`：daemon 自派生 `forge acp-demo` 子进程，**无需任何外部依赖与模型 key**（用于冒烟与
-  权限/提问演示）。内置播种 agent 为 `dsh`（默认）与 `opencode`；`echo` 需自建 agent：
 
-```bash
-curl -s http://127.0.0.1:10001/v1/forge/agents -H 'content-type: application/json' \
-  -d '{"id":"echo","name":"Echo","runtimes":["echo"]}'
-```
+内置播种 agent 为 `dsh`（默认）与 `opencode`——**两个都要求本机装有对应底座并完成 provider 登录**。
+
+> **`echo` 演示底座已删除（M0）**：此前 daemon 会自派生 `forge acp-demo` 子进程充当免安装、免模型
+> key 的 ACP 对端（用于冒烟与权限/提问演示），`forge acp-serve` 还能把它暴露成远程端点。这两条
+> 路径已随 echo **彻底移除**，内置 runtime 收敛为 `opencode` / `deepseekharness`。远程传输**功能**
+> 不受影响（`.forge/config/runtimes.json` 声明远程端点照常工作），失去的只是开箱演示；覆盖缺口
+> 台账见仓库 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`。
 
 > 种子 agent（内置 `dsh`/`opencode` 与保留前缀 `agent-`）**只读**：不可删、runtime 不可改
 > （报 40001 `seed_agent_readonly`）；name/provider/`permission_policy` 可改。
@@ -270,7 +271,7 @@ systemctl status ark-forge --no-pager
 
 | target | 内容 | 体积（本机实测） | 适用 |
 | --- | --- | --- | --- |
-| `forge`（默认） | 只含 `forge` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | 底座由宿主机挂载、派生镜像或 `acp-serve` 远端提供；容器内先用 `echo` 自检 |
+| `forge`（默认） | 只含 `forge` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | **不含任何底座**：底座由宿主机挂载、派生镜像或远程 runtime 端点提供；容器内**无法自检**（自检须挂真实底座，见 §4.2） |
 | `forge-runtimes` | 额外内置 `dsh`（npm `@deepseek-ai/dsh`）与 `opencode`（npm `opencode-ai` 平台二进制） | 671 MB | 想让容器开箱就能跑真实 agent |
 
 ```bash
@@ -323,9 +324,10 @@ compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/�
 
 ### 4.2 容器里的底座与工作空间（两个硬要求）
 
-1. **底座**：最小镜像里能自检的只有 `echo`（daemon 派生子命令 `forge acp-demo`，无需模型 key）。
-   要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH` 上）、自建派生镜像
-   （`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**下把本机可执行文件 bind mount 进最小镜像
+1. **底座**：最小镜像**不含任何底座**，因此容器内**没有免 key 自检手段**（此前靠内置 `echo` 自检，
+   它已随 M0 删除）。要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH`
+   上，容器内自检即在此形态下做）、自建派生镜像（`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**
+   下把本机可执行文件 bind mount 进最小镜像
    （`-v /usr/local/bin/opencode:/usr/local/bin/opencode:ro`，agent 需要的配置/密钥也要一并进来）。
    注意 macOS/Windows 上的可执行文件**不能**塞进 Linux 容器（平台/架构/glibc 都不匹配），这类机器请走前两条。
    模型密钥经 `-e DEEPSEEK_API_KEY=…` 由 daemon 透传给 runtime 子进程；dsh 的 profile 根固定在
@@ -401,7 +403,7 @@ sudo systemctl restart ark-forge
 重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
 被中断的轮次（无终态 → 可续聊重发），而**已完成的轮次保持 `completed`**——停机是运维动作，不是故障，
 不会改写会话状态（见 §8 连接拆除语义）。所有已存在的会话（不论上一轮终态）在重启后都可继续提问：
-`dsh`/`opencode` 走原生 resume，echo 等无原生恢复能力的底座走 handoff memo。transcript 模式（memory）
+`dsh`/`opencode` 走原生 resume，未声明原生恢复能力的底座走 handoff memo。transcript 模式（memory）
 启动时回读 JSONL 重建会话列表。
 
 ## 7. 排障
@@ -418,7 +420,7 @@ sudo systemctl restart ark-forge
 | 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
 | 启动报 `schema vN 高于本二进制支持的 vM` | 库被更新版本迁移过 → 恢复对应备份或升级二进制（拒绝启动是刻意保护） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `FORGE_DB` |
-| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；echo 走 handoff memo，dsh 走原生 `resume`） |
+| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh/opencode 走原生 `resume`，其余走 handoff memo） |
 | 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
 | 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
 | 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
@@ -429,6 +431,12 @@ sudo systemctl restart ark-forge
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target forge-runtimes`（或 `make image/runtimes`），不做静默忽略 |
 
 ## 8. 验证记录（本机实跑）
+
+> **历史记录说明（M0 后阅读）**：本节是各里程碑**当时**在本机实跑的原始记录，其中不少用例以
+> `echo` 演示底座为对端（`forge acp-demo` / `forge acp-serve`）。`echo` 已随 M0 彻底删除，
+> **这些记录不再可原样复现**，保留在此仅作历史证据（与 `docs/` 下历史设计文档同一口径）。
+> 仍可复现的部分（`make all`、种子只读、重启恢复、检索导出、MCP 调用等）不受影响，只是把
+> `echo` agent 换成 `dsh`/`opencode` 或任意自定义 agent 即可。当前契约以 README 与源码为准。
 
 环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
 基础镜像，见 §4.3）。
