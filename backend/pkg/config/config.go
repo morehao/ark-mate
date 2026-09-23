@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // Source 标识某个配置键的最终来源（`forge config` 展示 + 排障用）。
@@ -78,16 +80,16 @@ type Config struct {
 	// 这里只存**显式配置**的值：平台代建根（WorkspaceDir）由 manager 在运行期隐式并进生效名单，
 	// 因此"代建根不在白名单里"不再是配置错误（见 manager.SetWorkspacePolicy）。
 	WorkspaceRoots []string
-	// SkillMaterializeDir skill 物化目标根目录（§5.4/§16.5；FORGE_SKILLS_MATERIALIZE_DIR 覆盖，
-	// 默认空 = 关闭）。非空时 serve 启动装载能力后把 opencode SKILL.md 源 skill 物化到该目录
-	// （<dir>/<skillID>/SKILL.md，opencode v1 自动扫描约定）。目标多为真实 opencode 用户目录，
-	// 须显式开启（默认不写用户机器配置）。
-	SkillMaterializeDir string
-	// SkillMaterializeDirs 按 runtime 分 root 的物化目标（C4 多 root 投影；
-	// FORGE_SKILLS_MATERIALIZE_DIRS=runtime=dir[,runtime=dir]）。与 SkillMaterializeDir 可并存：
-	// 单 root 先跑（全量），再按 runtime 各跑一次（只物化声明该 runtime 的 skill）。
-	// 用途：两个底座的原生 skill 位置不同（或 format 互斥）时各写自己的根目录。
-	SkillMaterializeDirs map[string]string
+	// ProjectionDirs 投影根的部署级覆盖（`FORGE_PROJECTION_DIRS=runtime:kind=dir[,...]`，
+	// config.json 可写 JSON 数组）。键是 `<runtime>:<kind>`，值是**绝对目录**。
+	//
+	// 它在投影解析链里优先级最高（见 pkg/runtime.Resolve）：覆盖只替换 Root，投影**形态**
+	// （Layout/Format）仍由 adapter 声明——所以这里解决的是「默认根不适用本机」，
+	// 不是「换个摆放方式」。默认空 = 全用 adapter 声明的原生根。
+	//
+	// 取代了旧的 skills_materialize_dir / skills_materialize_dirs：sparse 单 root 与
+	// 「for 不 for runtime」这两套说法都被投影声明吸收，配置面只留一个键。
+	ProjectionDirs map[string]string
 	// IdleTimeout 空闲回收阈值：StartAgent 暖进程闲置超过该时长自动停进程（P2；
 	// FORGE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
 	IdleTimeout time.Duration
@@ -196,8 +198,7 @@ var knownKeys = map[string]string{
 	"capabilities":            "FORGE_CAPABILITIES",
 	"workspace_dir":           "FORGE_WORKSPACE_DIR",
 	"workspace_roots":         "FORGE_WORKSPACE_ROOTS",
-	"skills_materialize_dir":  "FORGE_SKILLS_MATERIALIZE_DIR",
-	"skills_materialize_dirs": "FORGE_SKILLS_MATERIALIZE_DIRS",
+	"projection_dirs":         "FORGE_PROJECTION_DIRS",
 	"idle_timeout":            "FORGE_IDLE_TIMEOUT",
 	"reap_interval":           "FORGE_REAP_INTERVAL",
 	"turn_timeout":            "FORGE_TURN_TIMEOUT",
@@ -217,8 +218,41 @@ var knownKeys = map[string]string{
 // 逗号是这些键的分隔符，路径里真含逗号时逗号分隔写法**根本无法表达**，面板写回也依赖数组形式
 // 才能与读回自洽（见 SettingsStore.SaveWorkspaceRoots）。
 var knownListKeys = map[string]bool{
-	"workspace_roots":         true,
-	"skills_materialize_dirs": true,
+	"workspace_roots": true,
+	"projection_dirs": true,
+}
+
+// renamedKeys 已改名/已移除的配置键 → 可操作的改法。
+//
+// 处置是**只识别、不兼容**（ADR-11 不留别名）：仍然报错——「非法键名启动即报错」这条规则不软化
+// ——但把键认出来，给出新键名与等价写法。这样存量 `~/.forge/config/config.json` 里的旧键
+// 不会变成一个「看不懂的未知键」，用户拿到的是出路而不是死胡同；配置面也不会多出一个语义重复的别名。
+//
+// 为什么必须单独一层：直接删键的话，旧键会掉进「未知配置键」的通用报错里，用户只能靠自己猜
+// 新名字；而静默忽略更糟——物化会悄悄不发生，表现为「技能怎么不生效了」。
+var renamedKeys = map[string]string{
+	"skills_materialize_dir": "已改名为 FORGE_PROJECTION_DIRS。投影形态（放哪、什么格式）现在由 runtime 声明，" +
+		"配置只能**覆盖根**，且必须指名是哪个 runtime 的哪类投影：`projection_dirs=opencode:skill=/x`" +
+		"（原 `skills_materialize_dir=/x` 那种「不分 runtime」的兼容路径已不存在——因为两个底座的落点与格式本就不同）",
+	"skills_materialize_dirs": "已改名为 FORGE_PROJECTION_DIRS，等价写法 `projection_dirs=opencode:skill=/x`" +
+		"（原 `skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`；键多了 `:kind` 一段，" +
+		"目前 kind 只有 skill）",
+}
+
+// checkRenamedKey 在「未知键报错」之前拦一层，把已改名/已移除的键翻译成可操作的文案。
+// 返回非空字符串 = 该键已被识别为旧键，调用方应直接以此为错误信息。
+func checkRenamedKey(key string) string {
+	if hint, ok := renamedKeys[key]; ok {
+		return hint
+	}
+	return ""
+}
+
+// renamedEnvNames 旧键对应的进程环境变量名（进程环境只按 knownKeys 读取，
+// 所以旧变量名不会被读到——必须显式检查，否则"设了旧变量但没生效"是静默的）。
+var renamedEnvNames = map[string]string{
+	"FORGE_SKILLS_MATERIALIZE_DIR":  "skills_materialize_dir",
+	"FORGE_SKILLS_MATERIALIZE_DIRS": "skills_materialize_dirs",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -330,6 +364,13 @@ func LoadResolved(dir string) (Config, Sources, error) {
 	for key, envName := range knownKeys {
 		if v := os.Getenv(envName); v != "" {
 			r.set(key, v, SourceEnv)
+		}
+	}
+	// 已改名的旧环境变量：进程环境只按 knownKeys 读，故旧名必须显式检查——
+	// 否则「设了 FORGE_SKILLS_MATERIALIZE_DIR 但物化没发生」是完全静默的。
+	for envName, key := range renamedEnvNames {
+		if _, set := os.LookupEnv(envName); set {
+			return Default(), nil, fmt.Errorf("环境变量 %s %s", envName, renamedKeys[key])
 		}
 	}
 	// FORGE_PROC_REGISTRY 特例：显式设置为空/off 也要覆盖文件配置（关闭登记）。
@@ -493,22 +534,19 @@ func materialize(r *resolver) (Config, error) {
 		}
 		*item.dst = d
 	}
-	if v, ok := r.get("skills_materialize_dir"); ok {
-		c.SkillMaterializeDir = v
-	}
-	if v, ok := r.get("skills_materialize_dirs"); ok {
-		dirs, err := parseSkillMaterializeDirs(v)
+	if v, ok := r.get("projection_dirs"); ok {
+		dirs, err := parseProjectionDirs(v)
 		if err != nil {
-			return bad("skills_materialize_dirs", err.Error())
+			return bad("projection_dirs", err.Error())
 		}
-		c.SkillMaterializeDirs = dirs
+		c.ProjectionDirs = dirs
 	}
-	if list, ok := r.list("skills_materialize_dirs"); ok {
-		dirs, err := normalizeSkillMaterializeDirs(list)
+	if list, ok := r.list("projection_dirs"); ok {
+		dirs, err := normalizeProjectionDirs(list)
 		if err != nil {
-			return bad("skills_materialize_dirs", err.Error())
+			return bad("projection_dirs", err.Error())
 		}
-		c.SkillMaterializeDirs = dirs
+		c.ProjectionDirs = dirs
 	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
@@ -621,6 +659,9 @@ func loadConfigJSON(path string, r *resolver) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		key := normalizeKey(k)
+		if hint := checkRenamedKey(key); hint != "" {
+			return fmt.Errorf("%s: 配置键 %q %s", path, k, hint)
+		}
 		if _, ok := knownKeys[key]; !ok {
 			return fmt.Errorf("%s: 未知配置键 %q（支持: %s）", path, k, knownKeyList())
 		}
@@ -701,6 +742,9 @@ func loadEnvFile(path string, r *resolver) error {
 			val = val[1 : len(val)-1]
 		}
 		key := normalizeKey(rawKey)
+		if hint := checkRenamedKey(key); hint != "" {
+			return fmt.Errorf("%s:%d: 配置键 %q %s", path, i+1, rawKey, hint)
+		}
 		if _, ok := knownKeys[key]; !ok {
 			return fmt.Errorf("%s:%d: 未知配置键 %q（支持: %s）", path, i+1, rawKey, knownKeyList())
 		}
@@ -739,33 +783,70 @@ func normalizeWorkspaceRoots(items []string) ([]string, error) {
 	return out, nil
 }
 
-// parseSkillMaterializeDirs 解析 `runtime=dir[,runtime=dir]`（C4 多 root 投影）。
-func parseSkillMaterializeDirs(v string) (map[string]string, error) {
-	return normalizeSkillMaterializeDirs(strings.Split(v, ","))
+// parseProjectionDirs 解析 `runtime:kind=dir[,runtime:kind=dir]`（FORGE_PROJECTION_DIRS）。
+func parseProjectionDirs(v string) (map[string]string, error) {
+	return normalizeProjectionDirs(strings.Split(v, ","))
 }
 
-// normalizeSkillMaterializeDirs 规范化物化目标条目（C4 多 root 投影；config.json 可写数组）。
-// 规则：每项必须含 `=` 且两侧非空；runtime 不可重复（后者覆盖会静默改语义，故报错）。
-func normalizeSkillMaterializeDirs(items []string) (map[string]string, error) {
+// normalizeProjectionDirs 规范化投影覆盖条目（config.json 可写 JSON 数组，逗号是列表分隔符）。
+//
+// 规则（每条都对应一种「看起来生效了其实没有」的形态，故一律报错不静默）：
+//   - 键必须是 `<runtime>:<kind>`，kind 属于 runtime.ValidProjectionKinds（写错 kind 会让覆盖
+//     永远匹配不上，而用户只会看到"我设了根、物化还是写到老地方"）；
+//   - 值必须是非空**绝对**目录（相对目录是相对谁？没有答案 → 拒绝）；
+//   - 同一个 `<runtime>:<kind>` 不可重复声明（后者覆盖前者会静默改语义）。
+//
+// 分隔细节：键与值按**第一个** `=` 切开（这样目录里含 `=` 也能表达），而目录里含 `,` 请用
+// config.json 的数组形式（逗号是这个键的列表分隔符，逗号串写法无法表达含逗号的路径）。
+func normalizeProjectionDirs(items []string) (map[string]string, error) {
 	out := map[string]string{}
-	for _, item := range items {
-		item = strings.TrimSpace(item)
+	seen := map[string]string{}
+	for _, raw := range items {
+		item := strings.TrimSpace(raw)
 		if item == "" {
 			continue
 		}
-		runtime, dir, ok := strings.Cut(item, "=")
-		runtime = strings.TrimSpace(runtime)
+		key, dir, hasEq := strings.Cut(item, "=")
+		key = strings.TrimSpace(key)
 		dir = strings.TrimSpace(dir)
-		if !ok || runtime == "" || dir == "" {
-			return nil, fmt.Errorf("需为 runtime=dir 列表（如 opencode=/tmp/oc,deepseekharness=/tmp/dsh），得到 %q", item)
+		if !hasEq {
+			return nil, fmt.Errorf("需为 `<runtime>:<kind>=<绝对目录>` 列表（如 opencode:skill=/tmp/oc），得到 %q", item)
 		}
-		if _, dup := out[runtime]; dup {
-			return nil, fmt.Errorf("runtime %q 重复声明", runtime)
+		runtimeID, kind, hasColon := strings.Cut(key, ":")
+		runtimeID = strings.TrimSpace(runtimeID)
+		kind = strings.TrimSpace(kind)
+		if !hasColon || runtimeID == "" || kind == "" {
+			return nil, fmt.Errorf("条目 %q 的键需为 `<runtime>:<kind>`（如 opencode:skill），得到 %q", item, key)
 		}
-		out[runtime] = dir
+		if !runtime.ValidProjectionKinds[runtime.ProjectionKind(kind)] {
+			return nil, fmt.Errorf("条目 %q 的 kind %q 不是可投影的能力种类（合法：%s）",
+				item, kind, projectionKindList())
+		}
+		if dir == "" {
+			return nil, fmt.Errorf("条目 %q 的目录为空（要恢复成 adapter 声明的默认根，请删掉这一项）", item)
+		}
+		if !filepath.IsAbs(dir) {
+			return nil, fmt.Errorf("条目 %q 的目录必须是绝对路径，得到 %q", item, dir)
+		}
+		canonical := runtimeID + ":" + string(runtime.ProjectionKind(kind))
+		if prev, dup := seen[canonical]; dup {
+			return nil, fmt.Errorf("条目 %q 与 %q 重复声明了同一个投影 %q", item, prev, canonical)
+		}
+		seen[canonical] = item
+		out[canonical] = filepath.Clean(dir)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("至少一个 runtime=dir")
+		return nil, fmt.Errorf("至少一项 `<runtime>:<kind>=<绝对目录>`")
 	}
 	return out, nil
+}
+
+// projectionKindList 可投影种类的稳定列表（错误文案用）。
+func projectionKindList() string {
+	kinds := make([]string, 0, len(runtime.ValidProjectionKinds))
+	for k := range runtime.ValidProjectionKinds {
+		kinds = append(kinds, string(k))
+	}
+	sort.Strings(kinds)
+	return strings.Join(kinds, "|")
 }

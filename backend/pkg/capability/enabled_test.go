@@ -27,9 +27,8 @@ func TestSkillIsEnabledDefault(t *testing.T) {
 // TestMaterializeDisabledSkillRejected 禁用 = 不投放：物化层直接拒绝（最后一米）。
 func TestMaterializeDisabledSkillRejected(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "off", Body: "# off", Enabled: disabled(),
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	_, err := MaterializeSkill(root, sk)
+	sk := Skill{ID: "off", Body: "# off", Enabled: disabled(),}
+	_, err := MaterializeSkill(ocSpec(root), sk)
 	if err == nil || !strings.Contains(err.Error(), "已禁用") {
 		t.Fatalf("禁用 skill 应拒物化: %v", err)
 	}
@@ -41,10 +40,9 @@ func TestMaterializeDisabledSkillRejected(t *testing.T) {
 // TestReconcileWithdrawsDisabledSkill 禁用是 overlay：定义留着，但已物化的副本在重校时被**撤回**。
 func TestReconcileWithdrawsDisabledSkill(t *testing.T) {
 	root := t.TempDir()
-	on := Skill{ID: "demo", Name: "Demo", Body: "# demo",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
+	on := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
 
-	written, removed, err := ReconcileSkills(root, []Skill{on})
+	written, removed, err := ReconcileSkills(ocSpec(root), []Skill{on})
 	if err != nil || written != 1 || removed != 0 {
 		t.Fatalf("首次物化不符: w=%d r=%d err=%v", written, removed, err)
 	}
@@ -59,7 +57,7 @@ func TestReconcileWithdrawsDisabledSkill(t *testing.T) {
 	// 关掉它 → 重校应摘掉目录（且不动定义本身——定义在别处，这里只验物化侧）。
 	off := on
 	off.Enabled = disabled()
-	written, removed, err = ReconcileSkills(root, []Skill{off})
+	written, removed, err = ReconcileSkills(ocSpec(root), []Skill{off})
 	if err != nil || written != 0 || removed != 1 {
 		t.Fatalf("禁用后重校应撤回 1 个: w=%d r=%d err=%v", written, removed, err)
 	}
@@ -68,7 +66,7 @@ func TestReconcileWithdrawsDisabledSkill(t *testing.T) {
 	}
 
 	// 再启用 → 重新写出（可逆）。
-	written, removed, err = ReconcileSkills(root, []Skill{on})
+	written, removed, err = ReconcileSkills(ocSpec(root), []Skill{on})
 	if err != nil || written != 1 || removed != 0 {
 		t.Fatalf("重新启用应再物化: w=%d r=%d err=%v", written, removed, err)
 	}
@@ -85,9 +83,8 @@ func TestReconcileKeepsUserOwnedDirWhenDisabled(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(userDir, "SKILL.md"), []byte("用户自己写的"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	off := Skill{ID: "demo", Body: "# demo", Enabled: disabled(),
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, removed, err := ReconcileSkills(root, []Skill{off}); err != nil || removed != 0 {
+	off := Skill{ID: "demo", Body: "# demo", Enabled: disabled(),}
+	if _, removed, err := ReconcileSkills(ocSpec(root), []Skill{off}); err != nil || removed != 0 {
 		t.Fatalf("无归属标记的目录不该删: r=%d err=%v", removed, err)
 	}
 	if b, err := os.ReadFile(filepath.Join(userDir, "SKILL.md")); err != nil || string(b) != "用户自己写的" {
@@ -127,12 +124,19 @@ func TestSupportedFormat(t *testing.T) {
 		if !SupportedFormat(f) {
 			t.Fatalf("%q 应已实证", f)
 		}
-		if _, _, ok := materializedContentFor(Skill{ID: "x", Body: "b",
-			Sources: []SkillSource{{Runtime: "opencode", Format: f}}}, "opencode"); !ok {
-			t.Fatalf("%q：SupportedFormat 说可用，物化却不认", f)
+		if _, ok := MaterializedContent(Skill{ID: "x", Body: "b"}, f); !ok {
+			t.Fatalf("%q：SupportedFormat 说可用，合成却不认", f)
+		}
+	}
+	for _, f := range VettedFormats() {
+		if !SupportedFormat(f) {
+			t.Fatalf("%q 在 VettedFormats 里但 SupportedFormat 不认（两处漂移）", f)
 		}
 	}
 	if SupportedFormat("agents/skills") {
 		t.Fatal("未实证 format 不该报 supported")
+	}
+	if _, ok := MaterializedContent(Skill{ID: "x", Body: "b"}, "agents/skills"); ok {
+		t.Fatal("未实证 format 不该合成出内容")
 	}
 }

@@ -99,7 +99,7 @@ type Service struct {
 	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
 	capabilityDir string
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
-	skillTargets []SkillMaterializeTarget
+	skillProjections []SkillProjection
 
 	mu            sync.Mutex
 	agents        map[string]*AgentRec

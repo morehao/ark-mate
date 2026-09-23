@@ -127,6 +127,8 @@ func TestAgentCapabilities(t *testing.T) {
 		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
 	)
 	svc := NewService(reg, eventbus.New())
+	// 本进程解析出 opencode 的 skill 投影（ghost 未注册 → 不可能有投影）。
+	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "opencode")})
 	svc.agents["a1"] = &AgentRec{
 		ID: "a1", Name: "A1", Runtimes: []string{"opencode", "ghost"},
 		Mcps: ptrOf([]string{"fs"}), State: AgentStateStopped,
@@ -137,11 +139,9 @@ func TestAgentCapabilities(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustSkill(capability.Skill{ID: "plan", Name: "plan", Sources: []capability.SkillSource{
-		{Runtime: "opencode", Path: "p1", Format: "SKILL.md"},
-		{Runtime: "deepseekharness", Path: "p2", Format: "SKILL.md"}, // 非候选 → 裁剪
-	}})
-	mustSkill(capability.Skill{ID: "no-src", Name: "no-src"}) // 无物化源 → 不可见
+	mustSkill(capability.Skill{ID: "plan", Name: "plan"}) // 未声明 runtimes = 全部
+	// 声明只给 ghost 用：ghost 是候选但没登记投影 → 不适用（但**必须列出**，不能静默消失）。
+	mustSkill(capability.Skill{ID: "no-src", Name: "no-src", Runtimes: []string{"ghost"}})
 	mustMcp := func(id, transport string) {
 		t.Helper()
 		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: id, Name: id, Transport: transport, Command: "/usr/local/bin/npx"}); err != nil {
@@ -170,8 +170,8 @@ func TestAgentCapabilities(t *testing.T) {
 	if got.AgentID != "a1" || len(got.Runtimes) != 2 || got.Runtimes[0] != "opencode" {
 		t.Fatalf("agent/runtimes 不符: %+v", got)
 	}
-	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出，plan 适用（sources 裁到候选
-	// 仅 opencode），no-src 不适用但带人话原因（技能凭空不见最难排查，改为显式解释）。
+	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出；适用性取决于
+	// 「候选 runtime ∩ 技能声明的 runtimes ∩ 已解析投影」，不适用时带人话原因。
 	if len(got.Skills) != 2 {
 		t.Fatalf("skills 应全量列出（含不适用）: %+v", got.Skills)
 	}
@@ -179,12 +179,12 @@ func TestAgentCapabilities(t *testing.T) {
 	for _, sk := range got.Skills {
 		skByID[sk.ID] = sk
 	}
-	if plan := skByID["plan"]; !plan.Applicable || !plan.Enabled || len(plan.Sources) != 1 ||
-		plan.Sources[0].Runtime != "opencode" || len(plan.Reasons) != 0 {
-		t.Fatalf("plan 应启用且适用、sources 裁到候选: %+v", plan)
+	if plan := skByID["plan"]; !plan.Applicable || !plan.Enabled ||
+		len(plan.Runtimes) != 1 || plan.Runtimes[0] != "opencode" || len(plan.Reasons) != 0 {
+		t.Fatalf("plan 应启用且适用、runtimes 裁到候选∩投影: %+v", plan)
 	}
-	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Reasons) == 0 {
-		t.Fatalf("no-src 应不适用且有原因: %+v", noSrc)
+	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Runtimes) != 0 || len(noSrc.Reasons) == 0 {
+		t.Fatalf("no-src 应不适用（runtimes 空）+ 有原因: %+v", noSrc)
 	}
 	// MCP：全量 3 条；白名单只启用 fs；carriers 只含能承载该传输的候选（ghost 未注册不计）。
 	if len(got.McpServers) != 3 {
@@ -413,25 +413,22 @@ func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
 	}
 }
 
-// TestServiceReconcileSkills 启用物化重校：Service.ReconcileSkills 把 opencode SKILL.md 源
-// skill 写为 <root>/<id>/SKILL.md 并计数；无源 skill 跳过；幂等重跑 0 写。
+// TestServiceReconcileSkills 启用物化重校：按投影形态写为 <root>/<id>/SKILL.md 并计数；
+// runtimes 不含本投影方的 skill 跳过；幂等重跑 0 写。
 func TestServiceReconcileSkills(t *testing.T) {
 	svc, _, _ := rigWithRuntime(t)
 	if err := svc.caps.RegisterSkill(&capability.Skill{
 		ID: "forge-demo", Name: "Demo", Body: "# demo body",
-		Sources: []capability.SkillSource{
-			{Runtime: "opencode", Path: "/unused", Format: "SKILL.md"}, // root 覆盖 Path
-		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.caps.RegisterSkill(&capability.Skill{
-		ID: "plain", Name: "P", Body: "# p", // 无 source → 跳过
+		ID: "plain", Name: "P", Body: "# p", Runtimes: []string{"deepseekharness"}, // 不投放给 opencode → 跳过
 	}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	w, r, err := svc.ReconcileSkills(root)
+	w, r, err := svc.ReconcileSkillProjection(skillProj(root, "opencode"))
 	if err != nil {
 		t.Fatalf("ReconcileSkills: %v", err)
 	}
@@ -447,7 +444,7 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatalf("物化内容不符（应带 frontmatter）: %q", b)
 	}
 	// 幂等重跑：无写无删。
-	if w, r, err := svc.ReconcileSkills(root); err != nil || w != 0 || r != 0 {
+	if w, r, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil || w != 0 || r != 0 {
 		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
 	}
 }

@@ -66,6 +66,26 @@ func (r *Registry) RegisterSkill(s *Skill) error {
 	if s == nil || s.ID == "" || !nameRE.MatchString(s.ID) {
 		return fmt.Errorf("capability skill: id 非法（须字母数字开头，≤64 位）: %q", idOf(s))
 	}
+	// Scope：只认 global|workspace。未知取值报错而不是静默当 global——静默会把「我明明写了
+	// workspace 想让它跟着项目走」变成「悄悄写进了全局目录」。
+	if s.Scope != "" && !ValidSkillScopes[s.Scope] {
+		return fmt.Errorf("capability skill %q: scope %q 非法（合法：global|workspace）", s.ID, s.Scope)
+	}
+	// Runtimes：去空白、去重，并拒绝重复声明（"我列了两次 opencode"通常意味着想表达别的）。
+	seen := make(map[string]bool, len(s.Runtimes))
+	cleaned := make([]string, 0, len(s.Runtimes))
+	for _, r := range s.Runtimes {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			return fmt.Errorf("capability skill %q: runtimes 里有空项", s.ID)
+		}
+		if seen[r] {
+			return fmt.Errorf("capability skill %q: runtimes 里 %q 重复", s.ID, r)
+		}
+		seen[r] = true
+		cleaned = append(cleaned, r)
+	}
+	s.Runtimes = cleaned
 	warnings := VerifyContent(s.Body)
 	if HasCritical(warnings) {
 		return criticalErr(s.ID, warnings)

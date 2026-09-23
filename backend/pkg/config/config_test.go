@@ -73,25 +73,25 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-// TestCapabilityDirIndependentOfSkillMaterialize 回归：FORGE_CAPABILITIES 必须生效，
-// 且不受 FORGE_SKILLS_MATERIALIZE_DIR 是否设置影响（曾因 else 分支误覆盖 CapabilityDir
+// TestCapabilityDirIndependentOfProjectionDirs 回归：FORGE_CAPABILITIES 必须生效，
+// 且不受 FORGE_PROJECTION_DIRS 是否设置影响（曾因 else 分支误覆盖 CapabilityDir
 // 导致能力目录被吞、永远落到 ~/.forge/capabilities）。
-func TestCapabilityDirIndependentOfSkillMaterialize(t *testing.T) {
+func TestCapabilityDirIndependentOfProjectionDirs(t *testing.T) {
 	hermetic(t)
-	unset(t, "FORGE_SKILLS_MATERIALIZE_DIR")
+	unset(t, "FORGE_PROJECTION_DIRS")
 	tsetenv(t, "FORGE_CAPABILITIES", "/tmp/forge-caps")
 	c := Load()
 	if c.CapabilityDir != "/tmp/forge-caps" {
 		t.Fatalf("FORGE_CAPABILITIES 未生效: %q", c.CapabilityDir)
 	}
-	if c.SkillMaterializeDir != "" {
-		t.Fatalf("未设置物化目录时应为空（默认不写用户目录），got %q", c.SkillMaterializeDir)
+	if len(c.ProjectionDirs) != 0 {
+		t.Fatalf("未设置投影覆盖时应为空（默认全用 adapter 声明的原生根），got %+v", c.ProjectionDirs)
 	}
 
-	tsetenv(t, "FORGE_SKILLS_MATERIALIZE_DIR", "/tmp/forge-skills")
+	tsetenv(t, "FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/forge-skills")
 	c = Load()
-	if c.CapabilityDir != "/tmp/forge-caps" || c.SkillMaterializeDir != "/tmp/forge-skills" {
-		t.Fatalf("两项应互不影响: caps=%q skills=%q", c.CapabilityDir, c.SkillMaterializeDir)
+	if c.CapabilityDir != "/tmp/forge-caps" || c.ProjectionDirs["opencode:skill"] != "/tmp/forge-skills" {
+		t.Fatalf("两项应互不影响: caps=%q projection=%q", c.CapabilityDir, c.ProjectionDirs)
 	}
 }
 
@@ -394,28 +394,81 @@ func TestStoreMode(t *testing.T) {
 	}
 }
 
-// TestSkillMaterializeDirs C4 多 root 物化配置解析（runtime=dir 列表）。
-func TestSkillMaterializeDirs(t *testing.T) {
+// TestProjectionDirs 投影根覆盖配置解析（`runtime:kind=dir` 列表）。
+func TestProjectionDirs(t *testing.T) {
 	hermetic(t)
-	t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", "opencode=/tmp/oc, deepseekharness=/tmp/dsh")
+	t.Setenv("FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/oc, deepseekharness:skill=/tmp/dsh")
 	cfg := Load()
-	if len(cfg.SkillMaterializeDirs) != 2 || cfg.SkillMaterializeDirs["opencode"] != "/tmp/oc" ||
-		cfg.SkillMaterializeDirs["deepseekharness"] != "/tmp/dsh" {
-		t.Fatalf("解析不符: %+v", cfg.SkillMaterializeDirs)
+	if len(cfg.ProjectionDirs) != 2 || cfg.ProjectionDirs["opencode:skill"] != "/tmp/oc" ||
+		cfg.ProjectionDirs["deepseekharness:skill"] != "/tmp/dsh" {
+		t.Fatalf("解析不符: %+v", cfg.ProjectionDirs)
 	}
-
-	// 非法形态 → 配置错误。
-	// 非法形态 → LoadResolved 报错（daemon 启动路径暴露配置错误）。
-	for _, bad := range []string{"opencode", "=dir", "opencode=", "opencode=/a,opencode=/b"} {
-		t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", bad)
+	// 目录里的 `=` 只按**第一个** `=` 切分（路径含 `=` 也能表达）。
+	t.Setenv("FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/a=b")
+	if cfg := Load(); cfg.ProjectionDirs["opencode:skill"] != "/tmp/a=b" {
+		t.Fatalf("含 `=` 的路径应保留: %+v", cfg.ProjectionDirs)
+	}
+	// 相对路径会被 Clean，但仍是相对 → 必须报错（相对谁？没有答案）。
+	for _, bad := range []string{
+		"opencode",                    // 缺 `=`
+		"opencode=/tmp/oc",            // 缺 `:kind`
+		":skill=/tmp/oc",              // 缺 runtime
+		"opencode:=/tmp/oc",           // 缺 kind
+		"opencode:bogus=/tmp/oc",      // kind 不在合法集（写错就让覆盖永远匹配不上）
+		"opencode:skill=",             // 目录为空
+		"opencode:skill=relative/dir", // 非绝对路径
+		"opencode:skill=/a,opencode:skill=/b", // 重复声明同一个投影
+	} {
+		// 注意：显式设为**空串**不算错误——进程环境只对"非空"生效（历史语义，全键一致），
+		// 空 = 未设置 = 全用 adapter 的原生根，见下面的断言。
+		t.Setenv("FORGE_PROJECTION_DIRS", bad)
 		if _, _, err := LoadResolved(""); err == nil {
 			t.Fatalf("非法配置 %q 应报错", bad)
 		}
 	}
-	// 未设置 → 空 map（不启用）。
-	t.Setenv("FORGE_SKILLS_MATERIALIZE_DIRS", "")
-	if cfg := Load(); len(cfg.SkillMaterializeDirs) != 0 {
-		t.Fatalf("空值应不启用: %+v", cfg.SkillMaterializeDirs)
+	// 未设置 → 空 map（全用 adapter 声明的原生根）。
+	t.Setenv("FORGE_PROJECTION_DIRS", "")
+	if cfg := Load(); len(cfg.ProjectionDirs) != 0 {
+		t.Fatalf("空值应不启用: %+v", cfg.ProjectionDirs)
+	}
+}
+
+// TestRenamedKeysRejectedWithHint 旧键不兼容但**必须被认出来**：报错文案要给出新键名与等价写法。
+//
+// 直接删键的话旧键会掉进通用的「未知配置键」里，用户只能靠自己猜新名字；而静默忽略更糟——
+// 物化会悄悄不发生，表现为「技能怎么不生效了」。所以这里断言的正是"文案里有没有出路"。
+func TestRenamedKeysRejectedWithHint(t *testing.T) {
+	hermetic(t)
+	for _, old := range []struct{ key, env, wantHint string }{
+		{"skills_materialize_dir", "FORGE_SKILLS_MATERIALIZE_DIR", "FORGE_PROJECTION_DIRS"},
+		{"skills_materialize_dirs", "FORGE_SKILLS_MATERIALIZE_DIRS", "FORGE_PROJECTION_DIRS"},
+	} {
+		// 进程环境变量：只按 knownKeys 读取，故旧变量名必须显式检查（否则设了也不生效且无声）。
+		t.Setenv(old.env, "/tmp/whatever")
+		_, _, err := LoadResolved("")
+		if err == nil || !strings.Contains(err.Error(), old.env) || !strings.Contains(err.Error(), old.wantHint) {
+			t.Fatalf("旧环境变量 %s 应报可操作的错，got %v", old.env, err)
+		}
+		os.Unsetenv(old.env)
+		unset(t, old.env)
+		// config.json 里的旧键同样被认出来。
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"`+old.key+`":"/tmp/x"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := LoadResolved(dir); err == nil ||
+			!strings.Contains(err.Error(), old.key) || !strings.Contains(err.Error(), old.wantHint) {
+			t.Fatalf("config.json 旧键 %s 应报可操作的错，got %v", old.key, err)
+		}
+		// env 文件里的旧键同理。
+		dir2 := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir2, "env"), []byte(old.env+"=/tmp/x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := LoadResolved(dir2); err == nil ||
+			!strings.Contains(err.Error(), old.key) || !strings.Contains(err.Error(), old.wantHint) {
+			t.Fatalf("env 文件旧键 %s 应报可操作的错，got %v", old.key, err)
+		}
 	}
 }
 

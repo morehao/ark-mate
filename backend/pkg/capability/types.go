@@ -33,13 +33,23 @@ var ValidToolSources = map[string]bool{
 }
 
 // Skill 是 Skill 目录的一个条目（平台唯一事实源）。
-// Body 为 SKILL.md 内容；Sources 描述各 runtime 的物化目标（P2 物化层消费）。
+//
+// Body 为 SKILL.md 内容；**Runtimes 只表达「给谁用」，不表达「放哪、什么格式」**——后者是
+// runtime 的投影声明（见 `pkg/runtime.Projection`）。这也是删掉旧 `Sources` 的原因：
+// 条目侧写 path/format 等于让用户为每个底座抄一遍它自己的目录约定，而且两处声明同一件事
+// 必然要引入优先级规则。
 type Skill struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	Body        string        `json:"body,omitempty"`
-	Sources     []SkillSource `json:"sources,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Body        string   `json:"body,omitempty"`
+	// Runtimes 适用 runtime 白名单（如 ["opencode","deepseekharness"]）；
+	// **空 = 全部**支持 skill 投影的 runtime（未声明即不限制）。
+	Runtimes []string `json:"runtimes,omitempty"`
+	// Scope 作用域：global（默认，写到 runtime 全局目录）/ workspace（写到会话 cwd）。
+	// **M1 只落数据面语义，不消费**：workspace 的落点取决于底座原生约定是否会把平台产物混进
+	// 用户 git 仓库（假设 B），在实测有结论前不猜路径；声明 workspace 的定义当前按 global 处理。
+	Scope string `json:"scope,omitempty"`
 	// Enabled 启停开关（§13.4 S4）：nil = 未声明（默认启用）；显式 false = 禁用。
 	// 用指针是为了「未声明」与「显式关掉」在磁盘上可区分——写回文件时只动它一个键，
 	// 其余字段（含未知键）原样保留（见 manager.SetSkillEnabled）。
@@ -53,11 +63,37 @@ type Skill struct {
 // IsEnabled 报告 skill 当前是否启用（未声明 = 启用；禁用**只影响投放**，定义与正文照旧保留）。
 func (s Skill) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
 
-// SkillSource 描述一条 skill 在某个 runtime 原生位置的物化目标。
-type SkillSource struct {
-	Runtime string `json:"runtime"` // opencode | deepseekharness | ...
-	Path    string `json:"path"`    // 该 runtime 的物化路径
-	Format  string `json:"format"`  // 该 runtime 的 skill 格式（如 "SKILL.md" / "agents/skills"）
+// 合法 scope 集合（Skill.Scope）。
+const (
+	SkillScopeGlobal    = "global"
+	SkillScopeWorkspace = "workspace"
+)
+
+// ValidSkillScopes 合法作用域集合（装载期校验用；未知取值告警跳过，不静默当 global）。
+var ValidSkillScopes = map[string]bool{SkillScopeGlobal: true, SkillScopeWorkspace: true}
+
+// EffectiveScope 生效作用域（未声明 = global；非法取值在装载期已被拒，到这里只剩合法值）。
+func (s Skill) EffectiveScope() string {
+	if s.Scope == "" {
+		return SkillScopeGlobal
+	}
+	return s.Scope
+}
+
+// AppliesToRuntime 报告该 skill 是否投放到某 runtime（Runtimes 空 = 全部）。
+//
+// 「空 = 全部」是刻意的默认：存量定义迁移前没有 runtimes 字段，若空表示"谁都不用"，
+// 升级那一刻所有技能会集体从底座目录里被撤回——最坏的一种静默破坏。
+func (s Skill) AppliesToRuntime(runtime string) bool {
+	if len(s.Runtimes) == 0 {
+		return true
+	}
+	for _, r := range s.Runtimes {
+		if r == runtime {
+			return true
+		}
+	}
+	return false
 }
 
 // McpServer 是 MCP 注册表的一个条目（平台唯一事实源）。

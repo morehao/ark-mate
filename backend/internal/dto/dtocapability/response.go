@@ -4,11 +4,15 @@ import "encoding/json"
 
 // SkillResp Skill 目录条目。
 type SkillResp struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Body        string            `json:"body,omitempty"` // SKILL.md 内容（P2 物化源）
-	Sources     []SkillSourceResp `json:"sources,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Body        string `json:"body,omitempty"` // SKILL.md 内容（投影源）
+	// Runtimes 适用 runtime 白名单；**空 = 全部**（未声明即不限制）。
+	// 「放哪、什么格式」不在这里——那是 runtime 的投影声明（旧 sources 字段已退役）。
+	Runtimes []string `json:"runtimes,omitempty"`
+	// Scope 生效作用域（global|workspace；未声明 = global）。M1 只读不消费。
+	Scope string `json:"scope,omitempty"`
 	// Enabled 是否投放（§13.4 S4；未声明 enabled 的定义 = true）。禁用只影响投放，定义照旧保留。
 	Enabled bool `json:"enabled"`
 	// Warnings 装载期正文扫描的非 critical 告警（§13.2 S1）。**critical 的定义根本不会出现在这里**
@@ -22,13 +26,6 @@ type SkillWarningResp struct {
 	Severity string `json:"severity"`
 	Pattern  string `json:"pattern"`
 	Message  string `json:"message"`
-}
-
-// SkillSourceResp 一条 skill 在某 runtime 的物化目标。
-type SkillSourceResp struct {
-	Runtime string `json:"runtime"`
-	Path    string `json:"path"`
-	Format  string `json:"format"`
 }
 
 // McpServerResp MCP 注册表条目。§13.3 M1/M6：**明文与密钥分开读回**——
@@ -174,9 +171,9 @@ type ToolResp struct {
 }
 
 // AgentCapabilitiesResp 某 Agent 视角的统一能力目录：按该 Agent 的候选 runtime 聚合
-// 「可物化 / 可注入 / 可目录化」的能力面（管理面只读视图；runtimes 仅作可用性依据，
+// 「可投影 / 可注入 / 可目录化」的能力面（管理面只读视图；runtimes 仅作可用性依据，
 // 不构成对外路由承诺）。可见性规则（§5.2/§5.4）：
-//   - skills：至少一个候选 runtime 有物化源（sources 已按候选 runtime 裁剪）；
+//   - skills：全量列出，每条给 runtimes（实际投放目标，已裁剪到候选）+ applicable/reasons；
 //   - mcp_servers：注册表全量 + 每条的 enabled（agent 白名单）与 runtimes（候选里支持该传输的）；
 //   - tools：builtin/observed 恒可见；mcp 条目须其归属 server 对该 agent 启用且至少一个候选可承载。
 type AgentCapabilitiesResp struct {
@@ -194,13 +191,15 @@ type AgentCapabilitiesResp struct {
 // §13.4 S5：**不适用不等于不列出**——启停（Enabled）与适用（Applicable）正交，两者都要能解释。
 // 不适用时 `reasons` 给「为什么 + 怎么改」，而不是让条目静默消失（技能"凭空不见"最难排查）。
 type AgentSkillResp struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Sources     []SkillSourceResp `json:"sources,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Runtimes 本 agent 视角下的**实际投放目标** = 候选 runtime ∩ 技能声明的白名单 ∩ 本进程
+	// 已解析出投影的 runtime（空 = 这个 agent 用不上，配合 reasons 解释）。旧 sources 已退役。
+	Runtimes []string `json:"runtimes,omitempty"`
 	// Enabled 平台是否投放（false = 已被禁用，可恢复）。
 	Enabled bool `json:"enabled"`
-	// Applicable 该 agent 现在能不能真的用上（候选 runtime 里有没有可物化的 source 且未被禁用）。
+	// Applicable 该 agent 现在能不能真的用上（Runtimes 非空且未被禁用）。
 	Applicable bool `json:"applicable"`
 	// Reasons 不适用的原因（人话；Applicable=true 时为空）。
 	Reasons []string `json:"reasons,omitempty"`
@@ -227,7 +226,9 @@ type SkillMaterializationResp struct {
 //	stale          产物是老版本写的 / 技能已禁用但副本还在 → 下一次重校会改写或撤回
 //	disabled       技能已禁用且没有产物（期望状态，不是问题）
 //	user_owned     目录存在但不带平台归属标记（用户自有/他方安装，平台不碰）
-//	not_applicable 该 runtime 没有已实证 format 的 source（物化不出来）
+//	not_applicable 该 runtime 投影不出来（技能的 runtimes 白名单不含它，或它的 format 未实证）
+//	untested       投影形态尚未经真实底座端到端实测（声明了、根也解得开，但没验证过底座真会读）
+//	not_configured 该 runtime 没有解析出投影根（未声明投影 / 占位符变量未设置）
 type SkillMaterializationState struct {
 	Root    string `json:"root"`
 	Runtime string `json:"runtime,omitempty"`
@@ -239,7 +240,7 @@ type SkillMaterializationState struct {
 	ActualHash string `json:"actual_hash,omitempty"`
 	// WrittenAt 产物 sidecar 记录的写入时间（RFC3339；无 sidecar 则空）。
 	WrittenAt string `json:"written_at,omitempty"`
-	// Owners 归属标记里登记的 runtime 集合（共享 root 下可能有多个）。
+	// Owners 归属标记里登记的投影方集合（共享 root 下可能有多个）。
 	Owners []string `json:"owners,omitempty"`
 	// Detail 人话说明（status 不够用时才给）。
 	Detail string `json:"detail,omitempty"`

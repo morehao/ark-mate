@@ -27,28 +27,6 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	return s.caps.LoadDir(dir).Total()
 }
 
-// ReconcileSkills 把能力数据面里已实证 format 的 skill 与目标根目录做重校
-// （§5.4/§16.5：物化缺失/更新 + 删除联动——只删带 forge 归属标记且已不在注册表的目录，
-// 用户自有目录绝不动）。支持两种已实证 format：`SKILL.md`（opencode 原样）与
-// `SKILL.md+frontmatter`（dsh 需 YAML frontmatter）。返回 (written, removed)。
-// serve 启动装载能力后、FORGE_SKILLS_MATERIALIZE_DIR 非空时调用。
-// 物化默认不写用户目录——由调用方显式 enable。
-func (s *Service) ReconcileSkills(root string) (int, int, error) {
-	if s.caps == nil || root == "" {
-		return 0, 0, nil
-	}
-	return capability.ReconcileSkills(root, s.caps.ListSkills())
-}
-
-// ReconcileSkillsFor 按 runtime 分 root 重校（C4 多 root 投影）：只物化声明了该 runtime 的 skill，
-// 删除联动也只动本 root 下该 runtime 的标记目录。runtime 为空 → 等价 ReconcileSkills。
-func (s *Service) ReconcileSkillsFor(root, runtime string) (int, int, error) {
-	if s.caps == nil || root == "" {
-		return 0, 0, nil
-	}
-	return capability.ReconcileSkillsFor(root, runtime, s.caps.ListSkills())
-}
-
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
 func (s *Service) RegisterTool(t capability.Tool) error {
 	return s.caps.RegisterTool(&t)
@@ -59,19 +37,10 @@ func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) {
 	items := s.caps.ListSkills()
 	out := make([]dtocapability.SkillResp, 0, len(items))
 	for _, sk := range items {
-		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
-		for _, so := range sk.Sources {
-			src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
-		}
-		warns := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
-		for _, w := range sk.Warnings {
-			warns = append(warns, dtocapability.SkillWarningResp{
-				Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
-			})
-		}
 		out = append(out, dtocapability.SkillResp{
 			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body,
-			Sources: src, Enabled: sk.IsEnabled(), Warnings: warns,
+			Runtimes: append([]string(nil), sk.Runtimes...), Scope: sk.EffectiveScope(),
+			Enabled: sk.IsEnabled(), Warnings: skillWarnings(sk),
 		})
 	}
 	return out, nil
@@ -199,19 +168,21 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 	}
 
 	// Skill：全量列出 + 每条给「启用/适用」两个正交判断（§13.4 S5）。
-	// sources 裁剪到候选 runtime（不适用时可能为空）——空 sources + reasons 就是「这个 agent 用不上」。
+	// carrierRuntimes 是**本 agent 视角下的实际投放目标**（候选 ∩ 技能声明 ∩ 已解析投影），
+	// 空 + reasons 就是「这个 agent 用不上」。
+	projected := s.projectedRuntimeSet()
 	skills := s.caps.ListSkills()
 	skillOut := make([]dtocapability.AgentSkillResp, 0, len(skills))
 	for _, sk := range skills {
-		src := make([]dtocapability.SkillSourceResp, 0, len(sk.Sources))
-		for _, so := range sk.Sources {
-			if inAgent[so.Runtime] {
-				src = append(src, dtocapability.SkillSourceResp{Runtime: so.Runtime, Path: so.Path, Format: so.Format})
+		carriers := make([]string, 0, len(runtimes))
+		for _, rt := range runtimes {
+			if inAgent[rt] && sk.AppliesToRuntime(rt) && projected[rt] {
+				carriers = append(carriers, rt)
 			}
 		}
-		act := SkillActivationFor(sk, runtimes, inAgent)
+		act := SkillActivationFor(sk, runtimes, inAgent, projected)
 		skillOut = append(skillOut, dtocapability.AgentSkillResp{
-			ID: sk.ID, Name: sk.Name, Description: sk.Description, Sources: src,
+			ID: sk.ID, Name: sk.Name, Description: sk.Description, Runtimes: carriers,
 			Enabled: sk.IsEnabled(), Applicable: act.Applicable, Reasons: act.Reasons,
 		})
 	}
@@ -386,6 +357,29 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServ
 			Name: name, Transport: m.Transport,
 			Command: m.Command, Args: m.Args, URL: m.URL,
 			Env: env, Headers: headers,
+		})
+	}
+	return out
+}
+
+// projectedRuntimeSet 本进程已解析出 skill 投影的 runtime 集合（激活判定与投放集共用）。
+func (s *Service) projectedRuntimeSet() map[string]bool {
+	ps := s.skillProjectionsSnapshot()
+	out := make(map[string]bool, len(ps))
+	for _, p := range ps {
+		if p.Err == "" {
+			out[p.Runtime] = true
+		}
+	}
+	return out
+}
+
+// skillWarnings 把注册表的装载期告警转成 REST 读模型（两处共用一个转换，免漂移）。
+func skillWarnings(sk capability.Skill) []dtocapability.SkillWarningResp {
+	out := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
+	for _, w := range sk.Warnings {
+		out = append(out, dtocapability.SkillWarningResp{
+			Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
 		})
 	}
 	return out

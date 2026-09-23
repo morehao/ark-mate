@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
 // ——— §13.4 S4/S5：技能启停（overlay）与激活（正交） ———
@@ -29,25 +31,61 @@ import (
 // 落盘 = 编辑用户文件（M10 纪律）：读原文件为 map → 只改 `enabled` 一个键 → 原子写回。
 // **未知键原样保留**——用户在自己文件里加的字段不该被平台抹掉。
 
-// SkillMaterializeTarget 一处 skill 物化目标（root + runtime；runtime 空 = 单 root 兼容路径）。
-// serve 启动重校时由 app 登记，启停后可立刻对同一组目标重校，不必等下次启动。
-type SkillMaterializeTarget struct {
-	Root    string
-	Runtime string
+// SkillProjection 一处**已解析**的 skill 投影目标：runtime + 其有效投影形态。
+//
+// 为什么是「已解析」而不是原始声明：解析（覆盖链 + 占位符展开 + 校验）只在启动时做一次，
+// 结果登记在这里供启停/重校/审计三处复用——三处各自再解析一遍必然出现"某处不展开占位符"
+// 这类漂移。解析归 app（编排层），本结构只是结果。
+type SkillProjection struct {
+	Runtime    string
+	Projection runtime.Projection
+	// Err 解析该投影时的失败原因（非空 = 这个 runtime 声明了投影但根解不开：占位符变量未设置、
+	// 落点模板非法…）。**仍然登记**它，是为了让审计视图能报"没配置"而不是让这个 runtime
+	// 从列表里彻底消失——「我明明声明了，怎么哪儿都看不到」是最难排查的一种沉默。
+	// 解析失败的投影不参与重校（Err 非空时 ReconcileSkillProjection 直接返回）。
+	Err string
 }
 
-// SetSkillMaterializeTargets 登记物化目标（幂等覆盖；由 app 在启动重校时调用）。
-func (s *Service) SetSkillMaterializeTargets(targets []SkillMaterializeTarget) {
+// Capability 把已解析的投影翻译成物化层要的平凡形态（P-1：capability 不 import runtime）。
+func (p SkillProjection) MaterializeSpec() capability.MaterializeSpec {
+	return capability.MaterializeSpec{
+		Root:   p.Projection.Root,
+		Layout: p.Projection.Layout,
+		Format: p.Projection.Format,
+		Owner:  p.Runtime,
+	}
+}
+
+// SetSkillProjections 登记物化目标（幂等覆盖；由 app 在启动解析后调用）。
+func (s *Service) SetSkillProjections(ps []SkillProjection) {
 	s.mu.Lock()
-	s.skillTargets = append([]SkillMaterializeTarget(nil), targets...)
+	s.skillProjections = append([]SkillProjection(nil), ps...)
 	s.mu.Unlock()
 }
 
-// skillTargetsSnapshot 取物化目标的副本。
-func (s *Service) skillTargetsSnapshot() []SkillMaterializeTarget {
+// skillProjectionsSnapshot 取投影目标的副本。
+func (s *Service) skillProjectionsSnapshot() []SkillProjection {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]SkillMaterializeTarget(nil), s.skillTargets...)
+	return append([]SkillProjection(nil), s.skillProjections...)
+}
+
+// skillProjectionFor 取某 runtime 的已解析投影（ok=false = 本进程没登记它）。
+func (s *Service) skillProjectionFor(runtimeID string) (SkillProjection, bool) {
+	for _, p := range s.skillProjectionsSnapshot() {
+		if p.Runtime == runtimeID {
+			return p, true
+		}
+	}
+	return SkillProjection{}, false
+}
+
+// ReconcileSkillProjection 按一处已解析投影重校物化（启动时与启停后调用，见 SetSkillEnabled）。
+func (s *Service) ReconcileSkillProjection(p SkillProjection) (int, int, error) {
+	if s.caps == nil || p.Err != "" {
+		return 0, 0, nil
+	}
+	return capability.ReconcileSkills(p.MaterializeSpec(), s.caps.ListSkills())
 }
 
 // capabilityDirSnapshot 能力数据面目录（启停写回定义文件用）。
@@ -86,13 +124,13 @@ func (s *Service) SetSkillEnabled(ctx context.Context, id string, enabled bool) 
 	}
 	// 立刻重校：禁用要**撤回**已物化的副本（否则 agent 下次拉起还看得见它），
 	// 启用要把它写进去。重校按登记的目标逐个做，单个失败只记原因不中断。
-	for _, tgt := range s.skillTargetsSnapshot() {
-		w, r, mErr := s.ReconcileSkillsFor(tgt.Root, tgt.Runtime)
+	for _, p := range s.skillProjectionsSnapshot() {
+		w, r, mErr := s.ReconcileSkillProjection(p)
 		resp.Written += w
 		resp.Removed += r
 		if mErr != nil {
 			resp.MaterializeErrors = append(resp.MaterializeErrors,
-				fmt.Sprintf("物化重校失败（root=%s runtime=%s）：%v", tgt.Root, tgt.Runtime, mErr))
+				fmt.Sprintf("物化重校失败（root=%s runtime=%s）：%v", p.Projection.Root, p.Runtime, mErr))
 		}
 	}
 	if enabled {
@@ -158,56 +196,67 @@ type SkillActivation struct {
 	Reasons    []string
 }
 
-// SkillActivationFor 计算某 skill 在某 agent 候選 runtime 下的适用性，并给出**人话原因**。
+// SkillActivationFor 计算某 skill 在某 agent 候选 runtime 下的适用性，并给出**人话原因**。
 //
 // 与「可见性过滤」的区别：过滤会让人看不见（"技能怎么没了？"），这里给出
 // 「不适用 + 为什么 + 怎么改」——不适用不是错误，是环境事实。
-// 判定分层（保持声明顺序，取第一条命中的原因即可解释；多条并列时全部列出）：
+//
+// 判定分层（按声明顺序取原因，多条并列时全部列出）：
 //
 //  1. 已禁用（enabled:false）——平台不投放；
-//  2. 候选 runtime 一个都没在 sources 里声明；
-//  3. 声明了但 format 未实证（物化不出来）。
-func SkillActivationFor(sk capability.Skill, runtimes []string, inAgent map[string]bool) SkillActivation {
+//  2. 候选 runtime 里没有「该技能声明要给它 + 它在本进程登记了投影」的交集；
+//     这一条要分清三种子情况（用户的改法完全不同）：技能没声明任何 runtimes 白名单但候选
+//     runtime 一个都没投影（→ 去配 FORGE_PROJECTION_DIRS / 换 runtime）、技能声明的白名单
+//     与候选不相交（→ 改技能的 runtimes）、候选 runtime 未注册（→ 注册它）。
+//
+// `projections` 是**已解析**投影的 runtime 集合（键 = runtime id）。
+func SkillActivationFor(sk capability.Skill, runtimes []string, inAgent map[string]bool,
+	projections map[string]bool) SkillActivation {
 	var reasons []string
 	if !sk.IsEnabled() {
 		reasons = append(reasons, "技能已被禁用（enabled:false）：改回 enabled:true 即可恢复（定义与正文一直保留）")
 	}
-	declared := make([]string, 0, len(sk.Sources))
-	for _, src := range sk.Sources {
-		declared = append(declared, src.Runtime)
-	}
+	// 该技能的声明白名单（空 = 全部）。
+	declared := append([]string(nil), sk.Runtimes...)
 	sort.Strings(declared)
-	if len(declared) == 0 {
-		reasons = append(reasons, "技能未声明任何物化 source（sources 为空），没有 runtime 能装载它")
-	} else {
-		var matched, unproven []string
-		for _, src := range sk.Sources {
-			if !inAgent[src.Runtime] {
-				continue
-			}
-			if capability.SupportedFormat(src.Format) {
-				matched = append(matched, src.Runtime)
-			} else {
-				unproven = append(unproven, fmt.Sprintf("%s(format=%s)", src.Runtime, src.Format))
-			}
+	var carried, noProjection, notDeclared []string
+	for _, rt := range runtimes {
+		if !inAgent[rt] {
+			continue
 		}
-		if len(matched) == 0 {
-			if len(unproven) > 0 {
-				reasons = append(reasons, fmt.Sprintf(
-					"候选 runtime 声明了 source 但 format 未经实证，无法物化：%v（已实证：%s）",
-					unproven, declaredFormats()))
-			} else {
-				reasons = append(reasons, fmt.Sprintf(
-					"候选 runtime %v 都没有在 sources 里声明（声明的是：%v）——要给某个 runtime 用，就在该技能的 sources 里加一条",
-					runtimes, declared))
-			}
+		if !sk.AppliesToRuntime(rt) {
+			notDeclared = append(notDeclared, rt)
+			continue
+		}
+		if !projections[rt] {
+			noProjection = append(noProjection, rt)
+			continue
+		}
+		carried = append(carried, rt)
+	}
+	if len(carried) == 0 {
+		switch {
+		case len(noProjection) > 0 && len(notDeclared) == 0:
+			reasons = append(reasons, fmt.Sprintf(
+				"候选 runtime %v 没有可用的 skill 投影登记（本进程没解析出它们的投影根）："+
+					"用 FORGE_PROJECTION_DIRS 指定，或确认该 runtime 确实声明了 skill 投影", noProjection))
+		case len(notDeclared) > 0 && len(noProjection) == 0:
+			reasons = append(reasons, fmt.Sprintf(
+				"技能声明只给 %v 用，与该 agent 的候选 runtime %v 不相交——要投放就把它加进技能的 runtimes",
+				declared, runtimes))
+		case len(noProjection) > 0:
+			reasons = append(reasons, fmt.Sprintf(
+				"候选 runtime 里 %v 未被本技能声明（技能声明的是 %v），%v 又没有可用的 skill 投影登记",
+				notDeclared, declared, noProjection))
+		default:
+			reasons = append(reasons, "该 agent 没有可用 skill 投影的候选 runtime（未注册 / 未声明 / 未解析出投影根）")
 		}
 	}
 	return SkillActivation{Applicable: len(reasons) == 0, Reasons: reasons}
 }
 
 // declaredFormats 已实证的物化 format 列表（错误文案用）。
-func declaredFormats() string { return "SKILL.md / SKILL.md+frontmatter" }
+func declaredFormats() string { return strings.Join(capability.VettedFormats(), " / ") }
 
 // ——— §13.4 S2：物化体检（审计 / 复现面） ———
 
@@ -226,17 +275,17 @@ func (s *Service) SkillMaterialization(id string) (*dtocapability.SkillMateriali
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "skill_not_found", fmt.Sprintf("未知 skill %q", id), nil))
 	}
 	resp := &dtocapability.SkillMaterializationResp{ID: sk.ID, Enabled: sk.IsEnabled()}
-	targets := s.skillTargetsSnapshot()
-	if len(targets) == 0 {
+	projections := s.skillProjectionsSnapshot()
+	if len(projections) == 0 {
 		resp.States = []dtocapability.SkillMaterializationState{}
 		resp.Notes = append(resp.Notes,
-			"本进程没有登记任何物化目标（FORGE_SKILLS_MATERIALIZE_DIR / FORGE_SKILLS_MATERIALIZE_DIRS 未开）："+
-				"技能只存在于注册表，未投影到任何 runtime 目录")
+			"本进程没有解析出任何 skill 投影目标：所有已注册 runtime 都没声明 skill 投影，"+
+				"或它们的投影根无法解析（占位符变量未设置）——技能只存在于注册表，未投影到任何 runtime 目录")
 		return resp, nil
 	}
-	states := make([]dtocapability.SkillMaterializationState, 0, len(targets))
-	for _, tgt := range targets {
-		states = append(states, skillMaterializationState(sk, tgt))
+	states := make([]dtocapability.SkillMaterializationState, 0, len(projections))
+	for _, p := range projections {
+		states = append(states, skillMaterializationState(sk, p))
 	}
 	sort.SliceStable(states, func(i, j int) bool {
 		if states[i].Root != states[j].Root {
@@ -249,10 +298,28 @@ func (s *Service) SkillMaterialization(id string) (*dtocapability.SkillMateriali
 }
 
 // skillMaterializationState 判定单个物化目标的现状（判定顺序即优先级，见 DTO 的 status 说明）。
-func skillMaterializationState(sk capability.Skill, tgt SkillMaterializeTarget) dtocapability.SkillMaterializationState {
-	dir := filepath.Join(tgt.Root, sk.ID)
-	st := dtocapability.SkillMaterializationState{Root: tgt.Root, Runtime: tgt.Runtime, Dir: dir}
-	content, _, materializable := capability.MaterializedContentFor(sk, tgt.Runtime)
+//
+// `dir`/`hash` 都由**投影形态**算出来（不再假设 `<root>/<id>`）：落点模板换了，审计视图跟着换，
+// 两处不会漂移。
+func skillMaterializationState(sk capability.Skill, p SkillProjection) dtocapability.SkillMaterializationState {
+	spec := p.MaterializeSpec()
+	st := dtocapability.SkillMaterializationState{Root: p.Projection.Root, Runtime: p.Runtime}
+	if p.Err != "" {
+		// 声明了投影但根解不开：如实报 not_configured，并把人话原因带上（这是**配置**问题，
+		// 不是技能问题——所以不去检查磁盘上有没有产物）。
+		st.Status = "not_configured"
+		st.Detail = fmt.Sprintf("该 runtime 声明了 skill 投影但无法解析出根：%s", p.Err)
+		return st
+	}
+	dir, dirErr := spec.DirFor(sk.ID)
+	if dirErr != nil {
+		st.Status = "not_applicable"
+		st.Detail = fmt.Sprintf("该 runtime 的投影落点无法实例化：%v", dirErr)
+		return st
+	}
+	st.Dir = dir
+	content, materializable := capability.MaterializedContent(sk, spec.Format)
+	materializable = materializable && sk.AppliesToRuntime(p.Runtime)
 	if materializable {
 		st.Hash = capability.PayloadHash(content)
 	}
@@ -276,7 +343,19 @@ func skillMaterializationState(sk capability.Skill, tgt SkillMaterializeTarget) 
 		}
 	case !materializable:
 		st.Status = "not_applicable"
-		st.Detail = "该 runtime 没有已实证 format 的 source：物化不出来（补 sources 或改用已实证 format）"
+		if !sk.AppliesToRuntime(p.Runtime) {
+			st.Detail = fmt.Sprintf("该技能的 runtimes 白名单（%v）不含 %s：不投放到这个 runtime（要投放就把它加进 runtimes）",
+				sk.Runtimes, p.Runtime)
+		} else {
+			st.Detail = fmt.Sprintf("该 runtime 的投影声明了未经实证的 format %q：物化不出来（已实证：%s）",
+				spec.Format, declaredFormats())
+		}
+	case !exists && !p.Projection.Tested:
+		// 声明了投影、根也解析得出，但**形态没经真实底座端到端实测**：如实报 untested，
+		// 不假装 projected（design doc：未实测 → 报 untested，不臆造）。
+		st.Status = "untested"
+		st.Detail = "投影形态尚未经真实底座端到端实测（产物本应在这里）：" +
+			p.Projection.UnverifiedReason()
 	case !exists:
 		st.Status = "missing"
 		st.Detail = "该物化但没有产物：下一次重校会写出"

@@ -150,9 +150,8 @@ func TestComputeDirHashSymlinks(t *testing.T) {
 // TestVerifyDirDetectsTamper 摘要是"可判定事实"：改内容/加文件/改权限都能看出来。
 func TestVerifyDirDetectsTamper(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, err := MaterializeSkill(root, sk); err != nil {
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(root, "demo")
@@ -191,7 +190,7 @@ func TestVerifyDirDetectsTamper(t *testing.T) {
 	}
 	for _, c := range cases {
 		// 每个用例都在干净产物上做一次（重新物化覆盖）。
-		if _, err := MaterializeSkill(root, sk); err != nil {
+		if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 			t.Fatal(err)
 		}
 		c.mutate(t)
@@ -212,8 +211,8 @@ func TestMaterializeRefusesNonOwnedDir(t *testing.T) {
 	userFile := filepath.Join(root, "demo", "SKILL.md")
 	mkdir(t, filepath.Join(root, "demo"), map[string]string{"SKILL.md": "用户自己写的"})
 
-	sk := Skill{ID: "demo", Body: "# 平台的", Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	_, err := MaterializeSkill(root, sk)
+	sk := Skill{ID: "demo", Body: "# 平台的",}
+	_, err := MaterializeSkill(ocSpec(root), sk)
 	if err == nil || !strings.Contains(err.Error(), "归属标记") {
 		t.Fatalf("非自有目录应拒绝覆盖: %v", err)
 	}
@@ -231,8 +230,8 @@ func TestMaterializeRefusesSymlinkDir(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(root, "demo")); err != nil {
 		t.Skipf("该平台不支持软链: %v", err)
 	}
-	sk := Skill{ID: "demo", Body: "# x", Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, err := MaterializeSkill(root, sk); err == nil || !strings.Contains(err.Error(), "软链") {
+	sk := Skill{ID: "demo", Body: "# x",}
+	if _, err := MaterializeSkill(ocSpec(root), sk); err == nil || !strings.Contains(err.Error(), "软链") {
 		t.Fatalf("软链目标应拒绝: %v", err)
 	}
 	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
@@ -243,9 +242,8 @@ func TestMaterializeRefusesSymlinkDir(t *testing.T) {
 // TestMaterializeReplacesAtomically 替换后：只有新内容、无 staging/backup 残留、摘要自洽。
 func TestMaterializeReplacesAtomically(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# v1",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, err := MaterializeSkill(root, sk); err != nil {
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# v1",}
+	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
 	first, err := ReadProvenance(filepath.Join(root, "demo"))
@@ -254,7 +252,7 @@ func TestMaterializeReplacesAtomically(t *testing.T) {
 	}
 
 	sk.Body = "# v2"
-	if _, err := MaterializeSkill(root, sk); err != nil {
+	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "demo", "SKILL.md"))
@@ -295,13 +293,12 @@ func assertNoLeftovers(t *testing.T, root string) {
 // TestReconcileRepairsTamperedArtifact 审计闭环：产物被改 → 重校发现并修复（摘要先判"过期"）。
 func TestReconcileRepairsTamperedArtifact(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, _, err := ReconcileSkills(root, []Skill{sk}); err != nil {
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {
 		t.Fatal(err)
 	}
 	// 幂等：内容/摘要都没变 → 0 写。
-	if w, r, err := ReconcileSkills(root, []Skill{sk}); err != nil || w != 0 || r != 0 {
+	if w, r, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil || w != 0 || r != 0 {
 		t.Fatalf("幂等重校应 0/0: w=%d r=%d err=%v", w, r, err)
 	}
 	// 篡改：往 SKILL.md 追加一行（内容比对与摘要都能看出，但这里验的是重校会**修**）。
@@ -318,7 +315,7 @@ func TestReconcileRepairsTamperedArtifact(t *testing.T) {
 		t.Fatal("篡改后摘要应报不一致")
 	}
 
-	w, r, err := ReconcileSkills(root, []Skill{sk})
+	w, r, err := ReconcileSkills(ocSpec(root), []Skill{sk})
 	if err != nil || w != 1 || r != 0 {
 		t.Fatalf("重校应修复 1 个: w=%d r=%d err=%v", w, r, err)
 	}
@@ -335,9 +332,8 @@ func TestReconcileRepairsTamperedArtifact(t *testing.T) {
 // TestReconcileUpgradesLegacyArtifact 老产物（无摘要 sidecar）在第一次重校时被升级，之后幂等。
 func TestReconcileUpgradesLegacyArtifact(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, err := MaterializeSkill(root, sk); err != nil {
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
 	// 模拟旧版本产物：删掉 sidecar，只留 SKILL.md + 归属标记（内容与期望一致）。
@@ -345,14 +341,14 @@ func TestReconcileUpgradesLegacyArtifact(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, ProvenanceFileName)); err != nil {
 		t.Fatal(err)
 	}
-	w, r, err := ReconcileSkills(root, []Skill{sk})
+	w, r, err := ReconcileSkills(ocSpec(root), []Skill{sk})
 	if err != nil || w != 1 || r != 0 {
 		t.Fatalf("无摘要的老产物应升级一次: w=%d r=%d err=%v", w, r, err)
 	}
 	if _, err := VerifyDir(dir); err != nil {
 		t.Fatalf("升级后应有自洽摘要: %v", err)
 	}
-	if w, r, err := ReconcileSkills(root, []Skill{sk}); err != nil || w != 0 || r != 0 {
+	if w, r, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil || w != 0 || r != 0 {
 		t.Fatalf("升级后应幂等: w=%d r=%d err=%v", w, r, err)
 	}
 }
@@ -361,9 +357,8 @@ func TestReconcileUpgradesLegacyArtifact(t *testing.T) {
 // 且清扫**不动**别的目录——否则一个失败的替换会在物化根里永久躺一个没人认领的目录。
 func TestReconcileCleansStagingLeftovers(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",
-		Sources: []SkillSource{{Runtime: "opencode", Format: FormatSkillMD}}}
-	if _, _, err := ReconcileSkills(root, []Skill{sk}); err != nil {
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {
 		t.Fatal(err)
 	}
 	// 模拟中断残留 + 一个用户自有目录（名字不撞保留名）。
@@ -371,7 +366,7 @@ func TestReconcileCleansStagingLeftovers(t *testing.T) {
 	mkdir(t, filepath.Join(root, "demo.forge-old"), map[string]string{"SKILL.md": "旧产物"})
 	mkdir(t, filepath.Join(root, "user-own"), map[string]string{"note.txt": "用户的东西"})
 
-	if _, _, err := ReconcileSkills(root, []Skill{sk}); err != nil {
+	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {
 		t.Fatal(err)
 	}
 	assertNoLeftovers(t, root)

@@ -32,8 +32,18 @@ func skillRig(t *testing.T) (svc *Service, dir, root string) {
 		t.Fatalf("空目录应装载 0 条: %d", n)
 	}
 	_ = bus
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: root}})
+	svc.SetSkillProjections([]SkillProjection{skillProj(root, "opencode")})
 	return svc, dir, root
+}
+
+// skillProj 构造一处**已解析**的 skill 投影（落点 `<id>/SKILL.md`，两个 adapter 当前的原生约定）。
+// Tested=true：这些测试要验的是"物化与审计"这条链，不是"投影形态是否实测过"
+// （untested/not_configured 两个状态另有专门用例）。
+func skillProj(root, runtimeID string) SkillProjection {
+	return SkillProjection{Runtime: runtimeID, Projection: runtime.Projection{
+		Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: root,
+		Layout: runtime.LayoutIDToken + "/SKILL.md", Format: capability.FormatSkillMD, Tested: true,
+	}}
 }
 
 // writeSkill 写一个定义文件（raw 为准，便于验证未知键保留）。
@@ -52,13 +62,12 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
   "name": "Demo",
   "description": "演示",
   "body": "# demo",
-  "sources": [{"runtime": "opencode", "format": "SKILL.md"}],
   "x-user-note": {"keep": ["me", 1]}
 }`)
 	if n := svc.LoadCapabilityDefinitions(dir); n != 1 {
 		t.Fatalf("应装载 1 条: %d", n)
 	}
-	if w, _, err := svc.ReconcileSkills(root); err != nil || w != 1 {
+	if w, _, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil || w != 1 {
 		t.Fatalf("预置物化失败: w=%d err=%v", w, err)
 	}
 	materialized := filepath.Join(root, "demo", "SKILL.md")
@@ -184,6 +193,8 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 // TestSkillActivationReasons 激活判定（§13.4 S5）：适用与否都与「启用」正交，且每条都有原因。
 func TestSkillActivationReasons(t *testing.T) {
 	inAgent := map[string]bool{"opencode": true}
+	// 本进程登记了 opencode 的投影；stub 没登记（用户没配 / 该 runtime 不承载 skill）。
+	projected := map[string]bool{"opencode": true}
 	cases := []struct {
 		name       string
 		sk         capability.Skill
@@ -191,37 +202,38 @@ func TestSkillActivationReasons(t *testing.T) {
 		reasonHas  string
 	}{
 		{
-			name: "applicable",
-			sk: capability.Skill{ID: "a", Sources: []capability.SkillSource{
-				{Runtime: "opencode", Format: capability.FormatSkillMD}}},
+			name:       "applicable（未声明 runtimes = 全部）",
+			sk:         capability.Skill{ID: "a"},
 			applicable: true,
 		},
 		{
-			name: "disabled-but-would-apply",
-			sk: capability.Skill{ID: "b", Enabled: boolPtr(false), Sources: []capability.SkillSource{
-				{Runtime: "opencode", Format: capability.FormatSkillMD}}},
+			name:       "applicable（显式声明 opencode）",
+			sk:         capability.Skill{ID: "a2", Runtimes: []string{"opencode"}},
+			applicable: true,
+		},
+		{
+			name:      "disabled-but-would-apply",
+			sk:        capability.Skill{ID: "b", Enabled: boolPtr(false)},
 			reasonHas: "已被禁用",
 		},
 		{
-			name: "runtime-not-declared",
-			sk: capability.Skill{ID: "c", Sources: []capability.SkillSource{
-				{Runtime: "stub", Format: capability.FormatSkillMD}}},
-			reasonHas: "都没有在 sources 里声明",
+			name:      "只声明 stub，与候选不相交",
+			sk:        capability.Skill{ID: "c", Runtimes: []string{"stub"}},
+			reasonHas: "不相交",
 		},
 		{
-			name:      "no-source",
-			sk:        capability.Skill{ID: "d"},
-			reasonHas: "未声明任何物化 source",
+			name:      "候选 runtime 没有登记投影",
+			sk:        capability.Skill{ID: "d", Runtimes: []string{"ghost"}},
+			reasonHas: "不相交",
 		},
 		{
-			name: "format-unproven",
-			sk: capability.Skill{ID: "e", Sources: []capability.SkillSource{
-				{Runtime: "opencode", Format: "agents/skills"}}},
-			reasonHas: "format 未经实证",
+			name:      "候选未被本技能声明",
+			sk:        capability.Skill{ID: "e", Runtimes: []string{"deepseekharness"}},
+			reasonHas: "不相交",
 		},
 	}
 	for _, c := range cases {
-		act := SkillActivationFor(c.sk, []string{"opencode"}, inAgent)
+		act := SkillActivationFor(c.sk, []string{"opencode"}, inAgent, projected)
 		if act.Applicable != c.applicable {
 			t.Fatalf("%s: applicable=%v want %v（reasons=%v）", c.name, act.Applicable, c.applicable, act.Reasons)
 		}
@@ -239,8 +251,13 @@ func TestSkillActivationReasons(t *testing.T) {
 			t.Fatalf("%s: 原因不含 %q: %s", c.name, c.reasonHas, joined)
 		}
 	}
+	// 「声明了但本进程没解析出投影」要给**改法**（去配 FORGE_PROJECTION_DIRS），而不是只说不可用。
+	act := SkillActivationFor(capability.Skill{ID: "f"}, []string{"opencode"}, inAgent, map[string]bool{})
+	if act.Applicable || !strings.Contains(strings.Join(act.Reasons, " | "), "FORGE_PROJECTION_DIRS") {
+		t.Fatalf("未登记投影应给出配置出路: applicable=%v reasons=%v", act.Applicable, act.Reasons)
+	}
 	// 禁用的 skill 命中原因里要给出恢复动作（不然用户只看到「不可用」）。
-	act := SkillActivationFor(capability.Skill{ID: "f", Enabled: boolPtr(false)}, []string{"opencode"}, inAgent)
+	act = SkillActivationFor(capability.Skill{ID: "g", Enabled: boolPtr(false)}, []string{"opencode"}, inAgent, projected)
 	if !strings.Contains(strings.Join(act.Reasons, " | "), "enabled:true") {
 		t.Fatalf("禁用原因应给出恢复动作: %v", act.Reasons)
 	}
@@ -257,9 +274,11 @@ func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(capability.Skill{ID: "ok", Sources: []capability.SkillSource{{Runtime: "opencode", Format: capability.FormatSkillMD}}})
-	must(capability.Skill{ID: "stub-only", Sources: []capability.SkillSource{{Runtime: "stub", Format: capability.FormatSkillMD}}})
-	must(capability.Skill{ID: "off", Enabled: boolPtr(false), Sources: []capability.SkillSource{{Runtime: "opencode", Format: capability.FormatSkillMD}}})
+	// 本进程只解析出 opencode 的投影（stub 没登记）→ stub-only 不适用。
+	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "opencode")})
+	must(capability.Skill{ID: "ok", Runtimes: []string{"opencode"}})
+	must(capability.Skill{ID: "stub-only", Runtimes: []string{"stub"}})
+	must(capability.Skill{ID: "off", Enabled: boolPtr(false), Runtimes: []string{"opencode"}})
 
 	resp, err := svc.AgentCapabilities("ag-1")
 	if err != nil {
@@ -305,7 +324,7 @@ func TestSetSkillEnabledReconcileFailureIsReported(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: bad}})
+	svc.SetSkillProjections([]SkillProjection{skillProj(bad, "opencode")})
 	resp, err := svc.SetSkillEnabled(context.Background(), "demo", false)
 	if err != nil {
 		t.Fatalf("重校失败不该让启停整体失败: %v", err)
@@ -353,10 +372,10 @@ func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillM
 func TestSkillMaterializationStatuses(t *testing.T) {
 	svc, dir, root := skillRig(t)
 	writeSkill(t, dir, "demo", `{"id":"demo","name":"Demo","body":"# demo",
-		"sources":[{"runtime":"opencode","format":"SKILL.md"}]}`)
+		"runtimes":["opencode"]}`)
 	svc.LoadCapabilityDefinitions(dir)
 	// 用「按 runtime 分 root」的多 root 路径（单 root 兼容路径不登记归属方，见 addRuntime）。
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: root, Runtime: "opencode"}})
+	svc.SetSkillProjections([]SkillProjection{skillProj(root, "opencode")})
 	sk, _ := svc.caps.SkillByID("demo")
 
 	// 1) 还没物化 → missing。
@@ -364,7 +383,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("未物化应为 missing 且给出期望摘要: %+v", st)
 	}
 	// 2) 物化后 → in_sync（期望摘要 == 实测摘要）。
-	if w, _, err := svc.ReconcileSkillsFor(root, "opencode"); err != nil || w != 1 {
+	if w, _, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil || w != 1 {
 		t.Fatalf("物化失败: w=%d err=%v", w, err)
 	}
 	st := matStatus(t, svc, "demo", root)
@@ -385,7 +404,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("篡改后应为 tampered: %+v", st)
 	}
 	// 4) 重校修复 → 回到 in_sync。
-	if _, _, err := svc.ReconcileSkillsFor(root, "opencode"); err != nil {
+	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil {
 		t.Fatal(err)
 	}
 	if st = matStatus(t, svc, "demo", root); st.Status != "in_sync" {
@@ -403,18 +422,18 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(other, "demo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: other}})
+	svc.SetSkillProjections([]SkillProjection{skillProj(other, "opencode")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "user_owned" {
 		t.Fatalf("无标记目录应为 user_owned: %+v", st)
 	}
 	// 7) 该 runtime 没有已实证 format 的 source → not_applicable。
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: other, Runtime: "stub"}})
+	svc.SetSkillProjections([]SkillProjection{skillProj(other, "stub")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "not_applicable" {
 		t.Fatalf("未声明该 runtime 应为 not_applicable: %+v", st)
 	}
 	// 8) 禁用：副本还在 → stale；重校撤回后 → disabled。
-	svc.SetSkillMaterializeTargets([]SkillMaterializeTarget{{Root: root, Runtime: "opencode"}})
-	if _, _, err := svc.ReconcileSkillsFor(root, "opencode"); err != nil {
+	svc.SetSkillProjections([]SkillProjection{skillProj(root, "opencode")})
+	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.SetSkillEnabled(context.Background(), "demo", false); err != nil {
@@ -425,13 +444,49 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("禁用且已撤回应为 disabled: %+v", st)
 	}
 	// 手动放回一个受管副本 → stale（禁用但副本还在）。
-	if _, err := capability.MaterializeSkill(root, sk); err != nil {
+	if _, err := capability.MaterializeSkill(skillProj(root, "opencode").MaterializeSpec(), sk); err != nil {
 		t.Fatal(err) // sk.Enabled 仍是 nil（副本来自注册表快照）→ 可物化
 	}
 	if st = matStatus(t, svc, "demo", root); st.Status != "stale" || !strings.Contains(st.Detail, "禁用") {
 		t.Fatalf("禁用但副本在应为 stale: %+v", st)
 	}
-	// 9) 没有登记物化目标 → notes（而不是空数组装没事）。
+	// 先把 demo 改回启用（上面第 8 步把它禁用了，禁用分支优先级更高，会盖住下面要验的状态）。
+	if _, err := svc.SetSkillEnabled(context.Background(), "demo", true); err != nil {
+		t.Fatal(err)
+	}
+	// 9) 投影形态未经端到端实测 → untested（而不是假装 projected）：声明了、根也解得开，
+	// 但底座是否真读得到没验证过——必须能看出来。
+	untestedRoot := t.TempDir()
+	up := skillProj(untestedRoot, "opencode")
+	up.Projection.Tested = false
+	up.Projection.Note = "只验过内容形态，未验过默认根"
+	svc.SetSkillProjections([]SkillProjection{up})
+	if st = matStatus(t, svc, "demo", untestedRoot); st.Status != "untested" ||
+		!strings.Contains(st.Detail, "未验过默认根") {
+		t.Fatalf("未实测投影应为 untested 且带上实测备注: %+v", st)
+	}
+	// 10) 投影根解析失败（占位符变量没设 / 落点非法）→ not_configured，且原因可见。
+	badProj := SkillProjection{Runtime: "opencode", Err: "环境变量 HOME 未设置"}
+	svc.SetSkillProjections([]SkillProjection{badProj})
+	if st = matStatus(t, svc, "demo", ""); st.Status != "not_configured" ||
+		!strings.Contains(st.Detail, "HOME 未设置") {
+		t.Fatalf("解析失败的投影应为 not_configured 且给出原因: %+v", st)
+	}
+	// 11) 解析失败的投影不参与重校（Err 非空直接短路，不当成"没有任何技能"而清空目录）。
+	keepRoot := t.TempDir()
+	svc.SetSkillProjections([]SkillProjection{skillProj(keepRoot, "opencode")})
+	if _, _, err := svc.ReconcileSkillProjection(skillProj(keepRoot, "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSkillProjections([]SkillProjection{badProj})
+	if w, r, err := svc.ReconcileSkillProjection(badProj); err != nil || w != 0 || r != 0 {
+		t.Fatalf("解析失败的投影应短路重校（不写不删）: w=%d r=%d err=%v", w, r, err)
+	}
+	if _, err := os.Stat(filepath.Join(keepRoot, "demo", "SKILL.md")); err != nil {
+		t.Fatalf("解析失败的投影不该清掉别的投影写好的产物: %v", err)
+	}
+
+	// 12) 没有登记物化目标 → notes（而不是空数组装没事）。
 	empty, _, _ := rigWithRuntime(t)
 	if err := empty.caps.RegisterSkill(&capability.Skill{ID: "x", Body: "# x"}); err != nil {
 		t.Fatal(err)

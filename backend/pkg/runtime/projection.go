@@ -117,6 +117,14 @@ func (s Spec) ProjectionFor(kind ProjectionKind) (Projection, bool) {
 	return Projection{}, false
 }
 
+// UnverifiedReason 未实测时给用户看的一句话（Note 为空时兜底，保证界面不出现空原因）。
+func (p Projection) UnverifiedReason() string {
+	if p.Note != "" {
+		return p.Note
+	}
+	return "该 runtime 的投影声明未附实测记录"
+}
+
 // ProjectionRootEnv 是 Resolve 展开占位符时的查环境函数（测试注入用；nil = os.LookupEnv）。
 type ProjectionRootEnv func(name string) (string, bool)
 
@@ -227,10 +235,15 @@ func ExpandProjectionRoot(root string, env ProjectionRootEnv) (string, error) {
 	return filepath.Clean(out), nil
 }
 
-// ValidateProjectionLayout 校验落点模板：相对、非空、不含 `..`、必须含 `<id>`。
+// ValidateProjectionLayout 校验落点模板：相对、非空、不含 `..`、必须含 `<id>`，
+// 且 **`<id>` 必须落在目录段上**（即落点至少两层，父目录里含 `<id>`）。
 //
 // 为什么强制含 `<id>`：不含的话所有 skill 会写到**同一个文件**，后写的静默盖掉先写的——
 // 这是「一条配置看起来生效了、其实只剩一个技能」的错误形态，必须在声明期就拦住。
+//
+// 为什么要求独占目录：`.forge-managed` 归属标记与摘要 sidecar 都要有地方落，而它们只能落在
+// 平台可控的**目录**里。`<id>.md` 这种平铺模板看似更贴合某些底座（dsh 也扫 `<name>.md`），
+// 但它让"这个文件是不是平台写的"无从判定，删除联动也就只能靠猜——所以不收。
 func ValidateProjectionLayout(layout string) error {
 	if strings.TrimSpace(layout) == "" {
 		return fmt.Errorf("落点为空")
@@ -245,6 +258,11 @@ func ValidateProjectionLayout(layout string) error {
 		if seg == ".." {
 			return fmt.Errorf("落点不得含 `..`（会逃出投影根）")
 		}
+	}
+	// 父目录必须含 <id>：它保证每个能力独占一个目录（归属标记与摘要 sidecar 的落点）。
+	if dir := filepath.ToSlash(filepath.Dir(filepath.ToSlash(layout))); dir == "." || !strings.Contains(dir, LayoutIDToken) {
+		return fmt.Errorf("落点必须在含 %s 的**目录**里（如 %s/SKILL.md）：归属标记与摘要 sidecar 需要落在这个目录，平铺成单个文件时它们无处可放",
+			LayoutIDToken, LayoutIDToken)
 	}
 	return nil
 }

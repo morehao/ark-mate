@@ -63,6 +63,10 @@ type App struct {
 	bus  *eventbus.Bus
 	svc  *manager.Service
 	orch *manager.Orchestrator
+	// reg 是本次装配的 runtime 注册表（内置 + runtimes.json 的远程端点）。
+	// 留着它是为了在装载定义时能枚举「有哪些 runtime」——skill 投影目标是从**声明**推出来的，
+	// 不是从配置里读出来的（配置只是覆盖）。
+	reg *runtime.Registry
 	// st 仅在 sqlite 模式非空；memory 模式下事实源是 transcript 文件。
 	st  *store.Store
 	srv *httpServer
@@ -106,6 +110,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.bus = eventbus.New()
 	a.svc = manager.NewService(reg, a.bus)
+	a.reg = reg
 
 	// 持久层装配（P1）：FORGE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
@@ -230,42 +235,67 @@ func (a *App) loadDefinitions() error {
 	a.svc.LoadAgentDefinitions(cfg.AgentDir)
 	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
 	a.svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
-	// skill 物化（§16.5 切片 D）：FORGE_SKILLS_MATERIALIZE_DIR 显式开启时，把 opencode
-	// SKILL.md 源 skill 与目标目录重校（物化缺失/更新 + 删除联动，只删 forge 标记目录）；
-	// 默认关闭（不写用户目录）。
-	if dir := cfg.SkillMaterializeDir; dir != "" {
-		if w, r, mErr := a.svc.ReconcileSkills(dir); mErr != nil {
-			slog.Warn("serve: skill 物化重校失败", "dir", dir, "err", mErr)
-		} else if w > 0 || r > 0 {
-			slog.Info("serve: skill 物化重校完成", "dir", dir, "written", w, "removed", r)
-		}
-		// 登记目标：§13.4 S4 启停后要立刻对同一组目标重校，不必等下次启动。
-		a.svc.SetSkillMaterializeTargets([]manager.SkillMaterializeTarget{{Root: dir}})
-	}
-	// C4 多 root 投影：按 runtime 各写自己的根目录（只物化声明该 runtime 的 skill）。
-	// 排序遍历保证日志与执行顺序稳定（map 迭代无序）。
-	if len(cfg.SkillMaterializeDirs) > 0 {
-		runtimes := make([]string, 0, len(cfg.SkillMaterializeDirs))
-		for rt := range cfg.SkillMaterializeDirs {
-			runtimes = append(runtimes, rt)
-		}
-		sort.Strings(runtimes)
-		targets := make([]manager.SkillMaterializeTarget, 0, len(runtimes))
-		for _, rt := range runtimes {
-			dir := cfg.SkillMaterializeDirs[rt]
-			w, r, mErr := a.svc.ReconcileSkillsFor(dir, rt)
-			if mErr != nil {
-				slog.Warn("serve: skill 物化重校失败", "dir", dir, "runtime", rt, "err", mErr)
-				continue
-			}
-			if w > 0 || r > 0 {
-				slog.Info("serve: skill 物化重校完成", "dir", dir, "runtime", rt, "written", w, "removed", r)
-			}
-			targets = append(targets, manager.SkillMaterializeTarget{Root: dir, Runtime: rt})
-		}
-		a.svc.SetSkillMaterializeTargets(targets)
-	}
+	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
+	// 目标根与形态来自 **runtime 的投影声明**；FORGE_PROJECTION_DIRS 只在需要覆盖根时才出现。
+	a.reconcileSkillProjections()
 	return nil
+}
+
+// reconcileSkillProjections 枚举已注册 runtime，逐个解析 skill 投影并重校物化。
+//
+// 三件事的顺序是刻意的：
+//  1. 先**全解析一遍**（含失败项），无论成败都登记进 manager——登记是审计视图的前提，
+//     解析失败的 runtime 必须以 not_configured 的形式可见，而不是从列表里消失；
+//  2. 再对解析成功的逐个重校（解析失败的重校直接短路）；
+//  3. 最后把**没人认领的覆盖项**告警出来——FORGE_PROJECTION_DIRS 里写了个没注册过的 runtime
+//     id 时，配置看着生效了、实际一次都没用过；这属于必须说出来的静默失效。
+func (a *App) reconcileSkillProjections() {
+	specs := a.reg.List()
+	sort.Slice(specs, func(i, j int) bool { return specs[i].ID < specs[j].ID })
+	projections := make([]manager.SkillProjection, 0, len(specs))
+	claimed := make(map[string]bool, len(specs))
+	for _, sp := range specs {
+		claimed[sp.ID+":"+string(runtime.ProjectionSkill)] = true
+		p, ok, err := runtime.Resolve(sp, runtime.ProjectionSkill, a.cfg.ProjectionDirs, nil)
+		switch {
+		case err != nil:
+			slog.Warn("serve: skill 投影解析失败（该 runtime 不会收到任何技能）", "runtime", sp.ID, "err", err)
+			projections = append(projections, manager.SkillProjection{Runtime: sp.ID, Err: err.Error()})
+			continue
+		case !ok:
+			// 该 runtime 没声明 skill 投影（远程端点即此）：不是错误，什么都不做。
+			continue
+		}
+		proj := manager.SkillProjection{Runtime: sp.ID, Projection: p}
+		w, r, mErr := a.svc.ReconcileSkillProjection(proj)
+		if mErr != nil {
+			slog.Warn("serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)
+		} else if w > 0 || r > 0 {
+			slog.Info("serve: skill 物化重校完成", "runtime", sp.ID, "root", p.Root, "written", w, "removed", r)
+		}
+		if !p.Tested {
+			slog.Info("serve: skill 投影形态尚未端到端实测（产物会写，但底座是否读得到未验证）",
+				"runtime", sp.ID, "root", p.Root, "note", p.UnverifiedReason())
+		}
+		projections = append(projections, proj)
+	}
+	a.svc.SetSkillProjections(projections)
+	for _, key := range sortedKeys(a.cfg.ProjectionDirs) {
+		if !claimed[key] {
+			slog.Warn("serve: FORGE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
+				"key", key, "dir", a.cfg.ProjectionDirs[key])
+		}
+	}
+}
+
+// sortedKeys map 键的稳定顺序（日志与执行顺序可复现）。
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Run 启动 HTTP 服务并阻塞至 ctx 结束（信号或调用方取消），随后优雅停机。
