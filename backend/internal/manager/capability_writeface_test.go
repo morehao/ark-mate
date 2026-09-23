@@ -338,13 +338,13 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := &AgentRec{ID: "a1", Runtimes: []string{"opencode"}}
-	if got := svc.McpServersFor(agent, "opencode"); len(got) != 1 {
+	if got := svc.McpServersFor(agent, "opencode", nil); len(got) != 1 {
 		t.Fatalf("默认应注入，got %+v", got)
 	}
 	if _, err := svc.UpdateMcpServer(ctx, "fs", writeMcpReq(t, `{"enabled":false}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.McpServersFor(agent, "opencode"); len(got) != 0 {
+	if got := svc.McpServersFor(agent, "opencode", nil); len(got) != 0 {
 		t.Fatalf("禁用后不该注入，got %+v", got)
 	}
 	if _, ok := svc.caps.GetMcpServer("fs"); !ok {

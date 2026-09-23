@@ -58,8 +58,11 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
-	// 该会话声明的能力选择解析成的指纹（M1 恒为空：显式能力选择是 M3 的面）。
-	rc, err := o.acquire(ctx, agent, spec, opt.Fingerprint)
+	// 能力指纹由**选定**现算（M3）：缺省路径 opt.Selection == nil → 空指纹 →
+	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
+	// 不存在"按 A 算指纹、按 B 注入"的可能。
+	fingerprint := o.svc.capabilityFingerprint(agent, spec.ID, opt.Selection)
+	rc, err := o.acquire(ctx, agent, spec, fingerprint)
 	if err != nil {
 		o.svc.setAgentState(agent.ID, AgentStateStopped)
 		return nil, err
@@ -75,10 +78,12 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	if convID == "" {
 		convID = uuid.NewString()
 	}
-	// P2 MCP 注入：平台注册表 MCP 子集按 agent 白名单 + runtime 传输能力过滤后随 session/new 下发（§5.2/§5.3）。
+	// P2 MCP 注入：平台注册表 MCP 子集按「会话选定 > agent 白名单」+ runtime 传输能力过滤后
+	// 随 session/new 下发（§5.2/§5.3；会话级选定见 M3）。**必须传 opt.Selection**：
+	// 指纹就是按它算出来的，注入若用别的口径，会话拿到的东西会与代际台账不符。
 	sess, err := rc.client.NewSession(ctx, acl.SessionOptions{
 		Cwd:        cwd,
-		McpServers: o.svc.McpServersFor(agent, spec.ID),
+		McpServers: o.svc.McpServersFor(agent, spec.ID, opt.Selection),
 	})
 	if err != nil {
 		return nil, err
@@ -86,7 +91,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台 uuid（隐藏底座 id 形状、
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
-	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: opt.Fingerprint,
+	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: fingerprint,
 		client: rc.client, sess: sess, proj: runtime.NewProjection(spec, sess)}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
@@ -104,8 +109,11 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
-		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: opt.Fingerprint,
-		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress})
+		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint,
+		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress,
+		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
+		// 要么注入集不对、要么代际挂错。
+		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
 	o.svc.beginTranscript(as.ID, agent.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
 	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": agent.ID, "runtime": spec.ID,
@@ -170,7 +178,12 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 	if err != nil {
 		return nil, err
 	}
-	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID)}
+	// **恢复路径必须用会话钉住的选定**（不是 agent 当前声明、更不是全量）：它从
+	// `conversations.capability_json` 读回。漏了这一步的后果是会话重启后注入集悄悄换一套，
+	// 而且没有任何报错——用户只会发现"昨天能用的 MCP 今天不见了"。
+	// 与 rec.Fingerprint 的分工：指纹决定挂到哪个代际（连接复用），选定决定下发哪些 MCP。
+	sel := ParseCapabilitySelection(rec.CapabilityJSON)
+	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID, sel)}
 	caps := rc.client.Capabilities()
 	sameRuntime := target == rec.RuntimeHint && rec.RuntimeHint != ""
 	nativeID := rec.ProviderSessionID

@@ -64,7 +64,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 
 	// 注入：引用解析成明文，且明文/密钥两路合并到同一字典。
-	got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub")
+	got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil)
 	if len(got) != 1 || got[0].Name != "fs" {
 		t.Fatalf("解析失败的 server 不该注入，应只剩 fs: %+v", got)
 	}
@@ -139,7 +139,7 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub"); len(got) != 0 {
+	if got := svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil); len(got) != 0 {
 		t.Fatalf("env 未设时不该注入: %+v", got)
 	}
 	if keys := svc.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:FORGE_TEST_UNSET_VAR"}}); len(keys) != 1 {

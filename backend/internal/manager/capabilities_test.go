@@ -98,24 +98,24 @@ func TestMcpServersFor(t *testing.T) {
 	onlyFS := &AgentRec{ID: "a1", Mcps: ptrOf([]string{"fs_stdio"})}
 	denyAll := &AgentRec{ID: "a2", Mcps: ptrOf([]string{})}
 
-	got := svc.McpServersFor(noBind, "stub")
+	got := svc.McpServersFor(noBind, "stub", nil)
 	if len(got) != 1 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
 		t.Fatalf("echo 仅 stdio 应取 1 条，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "opencode"); len(got) != 3 {
+	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 3 {
 		t.Fatalf("opencode 未声明白名单应取 3 条，got %+v", got)
 	}
-	if got := svc.McpServersFor(onlyFS, "opencode"); len(got) != 1 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor(onlyFS, "opencode", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("白名单 fs_stdio 应取 1 条，got %+v", got)
 	}
-	if got := svc.McpServersFor(denyAll, "opencode"); len(got) != 0 {
+	if got := svc.McpServersFor(denyAll, "opencode", nil); len(got) != 0 {
 		t.Fatalf("空白名单应禁用注入，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "ghost"); len(got) != 0 {
+	if got := svc.McpServersFor(noBind, "ghost", nil); len(got) != 0 {
 		t.Fatalf("未知 runtime 应不下发，got %+v", got)
 	}
 	// Spec.McpTransports 为空 → 保守仅 stdio（ACP 全 agent 必须支持）。
-	if got := svc.McpServersFor(noBind, "plain"); len(got) != 1 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("未声明传输的 runtime 应保守取 stdio，got %+v", got)
 	}
 }

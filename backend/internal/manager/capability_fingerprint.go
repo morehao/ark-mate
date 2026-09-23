@@ -25,7 +25,11 @@ import (
 //
 // 门槛与物化完全一致：启用 + 声明投给该 runtime + 本进程解析出了该 runtime 的 skill 投影。
 // 若该 runtime 根本没有 skill 投影（远程端点那样），技能不影响它，返回空。
-func (s *Service) projectedSkillParts(runtimeID string) []runtime.SkillPart {
+//
+// **会话选定（M3）**：`sel.Skills` 非 nil 时只取白名单里的（覆盖 skill 自己的 runtimes 声明，
+// 理由同 MCP：会话声明是用户的显式选择，求交会让白名单外的技能永远选不上且无法解释）。
+// 注意这里只影响**指纹**（→ 代际/技能投放面）；物化落点仍是进程级的（M3 的既定边界）。
+func (s *Service) projectedSkillParts(runtimeID string, sel *CapabilitySelection) []runtime.SkillPart {
 	if s.caps == nil {
 		return nil
 	}
@@ -33,9 +37,19 @@ func (s *Service) projectedSkillParts(runtimeID string) []runtime.SkillPart {
 	if !ok || p.Err != "" {
 		return nil
 	}
+	var allow map[string]bool
+	if sel != nil && sel.Skills != nil {
+		allow = make(map[string]bool, len(*sel.Skills))
+		for _, id := range *sel.Skills {
+			allow[id] = true
+		}
+	}
 	var out []runtime.SkillPart
 	for _, sk := range s.caps.ListSkills() {
 		if !sk.IsEnabled() || !sk.AppliesToRuntime(runtimeID) {
+			continue
+		}
+		if allow != nil && !allow[sk.ID] {
 			continue
 		}
 		out = append(out, runtime.SkillPart{ID: sk.ID, BodyDigest: capability.PayloadHash(sk.Body)})
@@ -77,21 +91,21 @@ func runtimeFingerprintPart(sp runtime.Spec) runtime.RuntimePart {
 	}
 }
 
-// capabilityFingerprint 某 runtime 上「按 agent 声明解析出的整套能力」的指纹。
+// capabilityFingerprint 某 runtime 上「按会话选定 + agent 声明解析出的整套能力」的指纹。
 //
-// **M1 只被测试与 M3 的显式能力选择调用**：缺省路径（会话没有声明能力选择）必须传
-// `declared=false` 拿到空指纹，从而让 `connKey` 与今天逐字相同（R11 缺省零回归）。
-// 这里刻意不提供"总是算一套"的入口——那正是会让默认路径悄悄换键的写法。
-func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, declared bool) string {
-	if !declared {
+// **缺省路径（会话没有声明能力选择）必须拿到空指纹**：`sel == nil` 时直接返回 "",
+// 从而让 `connKey` 与引入代际之前逐字相同（R11 缺省零回归）。这里刻意不提供
+// "总是算一套"的入口——那正是会让默认路径悄悄换键的写法。
+func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, sel *CapabilitySelection) string {
+	if sel == nil {
 		return ""
 	}
 	in := runtime.FingerprintInput{Runtimes: []runtime.RuntimePart{{ID: runtimeID}}}
 	if sp, ok := s.regSpec(runtimeID); ok {
 		in.Runtimes[0] = runtimeFingerprintPart(sp)
 	}
-	in.Skills = s.projectedSkillParts(runtimeID)
-	in.Mcps = mcpFingerprintParts(s.mcpSelectionFor(agent, runtimeID))
+	in.Skills = s.projectedSkillParts(runtimeID, sel)
+	in.Mcps = mcpFingerprintParts(s.mcpSelectionFor(agent, runtimeID, sel))
 	return runtime.Fingerprint(in)
 }
 

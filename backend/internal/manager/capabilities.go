@@ -317,10 +317,15 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 //
 // 这是「哪些 server 属于这套能力」的**唯一**实现：注入面（McpServersFor）与代际指纹
 // （capabilityFingerprint）都从这里取。两处各写一遍的后果是"指纹里有的、注入时没有"（或反之）——
-// 前者让会话白换一次代际，后者更糟：指纹说这套能力包含某个 server，实际却没注入。
+// 后者更糟：指纹说这套能力包含某个 server，实际却没注入。
 //
 // 与注入面的差别只有一处、且是**有意**的：这里不解析密钥（能不能解析是环境事实，不该让指纹抖动）。
-func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string) []capability.McpServer {
+//
+// **白名单优先级（M3）**：会话声明了 `capabilities.mcps` → 以它为准（M3-2 的落点）；
+// 会话没声明该 kind → 回落 `agent.Mcps`；两者都未声明 → 全量按 transport 过滤（今天的行为）。
+// 会话级的选定**覆盖**而不是求交：agent 声明是"这个 agent 默认能碰什么"，会话声明是用户此刻
+// 的显式选择，求交会让"agent 白名单里没有的 server"永远选不上，用户看不到任何解释。
+func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []capability.McpServer {
 	if s.caps == nil {
 		return nil
 	}
@@ -332,10 +337,16 @@ func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string) []capabilit
 	for _, t := range supported {
 		want[t] = true
 	}
+	allowIDs := (*[]string)(nil)
+	if sel != nil && sel.Mcps != nil {
+		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
+	} else if agent != nil {
+		allowIDs = agent.Mcps
+	}
 	var allow map[string]bool
-	if agent != nil && agent.Mcps != nil {
-		allow = make(map[string]bool, len(*agent.Mcps))
-		for _, id := range *agent.Mcps {
+	if allowIDs != nil {
+		allow = make(map[string]bool, len(*allowIDs))
+		for _, id := range *allowIDs {
 			allow[id] = true
 		}
 	}
@@ -357,11 +368,15 @@ func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string) []capabilit
 }
 
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 注册表全量 → 该 runtime 的 McpTransports 过滤 → agent.Mcps 白名单（nil = 未声明 → 全量；
-// 非 nil = 白名单；空数组 = 本 agent 禁用 MCP 注入）。headers/凭证一并携带（走 ACP wire）。
+// 注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单（会话选定 > agent.Mcps；
+// 两者都未声明 = 全量；空数组 = 一个都不要）。headers/凭证一并携带（走 ACP wire）。
 // 未知 runtime → nil（维持现状不下发）。
-func (s *Service) McpServersFor(agent *AgentRec, runtimeID string) []acl.McpServer {
-	servers := s.mcpSelectionFor(agent, runtimeID)
+//
+// `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
+// `conversations.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
+// 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
+func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
+	servers := s.mcpSelectionFor(agent, runtimeID, sel)
 	out := make([]acl.McpServer, 0, len(servers))
 	for _, m := range servers {
 		name := m.Name

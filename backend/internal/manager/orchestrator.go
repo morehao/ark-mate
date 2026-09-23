@@ -161,10 +161,12 @@ type StartOptions struct {
 	WorkspaceTemporary bool
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
-	// Fingerprint 该会话声明的能力选择解析成的**能力指纹**（代际键的维度之一）。
-	// **空 = 未声明能力选择**（缺省路径，代际键与代际机制之前逐字相同）。M1 恒为空：
-	// 显式能力选择（`POST /conversations` 的 `capabilities`）是 M3 的面。
-	Fingerprint string
+	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 回落 agent 声明）。
+	//
+	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startConversationOn 里由本字段
+	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
+	// 而那种分裂不会报错——只会让会话拿到与代际台账不符的能力集，且只在重启后显现。
+	Selection *CapabilitySelection
 }
 
 // RunResult 一次 RunOnce（demo）的结果。
