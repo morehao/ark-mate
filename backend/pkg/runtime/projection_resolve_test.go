@@ -92,10 +92,10 @@ func TestResolveProjectionChain(t *testing.T) {
 			wantErr:   "",
 		},
 		{
-			name:     "链3 声明的 Root 为空 → 关闭（声明式不投影）",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
-			wantOK:   false,
-			wantErr:  "",
+			name:    "链3 声明的 Root 为空 → 关闭（声明式不投影）",
+			spec:    skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			wantOK:  false,
+			wantErr: "",
 		},
 		{
 			name:     "非法：占位符变量未设置",

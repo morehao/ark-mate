@@ -150,7 +150,7 @@ func TestComputeDirHashSymlinks(t *testing.T) {
 // TestVerifyDirDetectsTamper 摘要是"可判定事实"：改内容/加文件/改权限都能看出来。
 func TestVerifyDirDetectsTamper(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo"}
 	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestMaterializeRefusesNonOwnedDir(t *testing.T) {
 	userFile := filepath.Join(root, "demo", "SKILL.md")
 	mkdir(t, filepath.Join(root, "demo"), map[string]string{"SKILL.md": "用户自己写的"})
 
-	sk := Skill{ID: "demo", Body: "# 平台的",}
+	sk := Skill{ID: "demo", Body: "# 平台的"}
 	_, err := MaterializeSkill(ocSpec(root), sk)
 	if err == nil || !strings.Contains(err.Error(), "归属标记") {
 		t.Fatalf("非自有目录应拒绝覆盖: %v", err)
@@ -230,7 +230,7 @@ func TestMaterializeRefusesSymlinkDir(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(root, "demo")); err != nil {
 		t.Skipf("该平台不支持软链: %v", err)
 	}
-	sk := Skill{ID: "demo", Body: "# x",}
+	sk := Skill{ID: "demo", Body: "# x"}
 	if _, err := MaterializeSkill(ocSpec(root), sk); err == nil || !strings.Contains(err.Error(), "软链") {
 		t.Fatalf("软链目标应拒绝: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestMaterializeRefusesSymlinkDir(t *testing.T) {
 // TestMaterializeReplacesAtomically 替换后：只有新内容、无 staging/backup 残留、摘要自洽。
 func TestMaterializeReplacesAtomically(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# v1",}
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# v1"}
 	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func assertNoLeftovers(t *testing.T, root string) {
 // TestReconcileRepairsTamperedArtifact 审计闭环：产物被改 → 重校发现并修复（摘要先判"过期"）。
 func TestReconcileRepairsTamperedArtifact(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo"}
 	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestReconcileRepairsTamperedArtifact(t *testing.T) {
 // TestReconcileUpgradesLegacyArtifact 老产物（无摘要 sidecar）在第一次重校时被升级，之后幂等。
 func TestReconcileUpgradesLegacyArtifact(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo"}
 	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestReconcileUpgradesLegacyArtifact(t *testing.T) {
 // 且清扫**不动**别的目录——否则一个失败的替换会在物化根里永久躺一个没人认领的目录。
 func TestReconcileCleansStagingLeftovers(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	sk := Skill{ID: "demo", Name: "Demo", Body: "# demo"}
 	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {
 		t.Fatal(err)
 	}

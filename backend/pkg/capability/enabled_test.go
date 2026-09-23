@@ -27,7 +27,7 @@ func TestSkillIsEnabledDefault(t *testing.T) {
 // TestMaterializeDisabledSkillRejected 禁用 = 不投放：物化层直接拒绝（最后一米）。
 func TestMaterializeDisabledSkillRejected(t *testing.T) {
 	root := t.TempDir()
-	sk := Skill{ID: "off", Body: "# off", Enabled: disabled(),}
+	sk := Skill{ID: "off", Body: "# off", Enabled: disabled()}
 	_, err := MaterializeSkill(ocSpec(root), sk)
 	if err == nil || !strings.Contains(err.Error(), "已禁用") {
 		t.Fatalf("禁用 skill 应拒物化: %v", err)
@@ -40,7 +40,7 @@ func TestMaterializeDisabledSkillRejected(t *testing.T) {
 // TestReconcileWithdrawsDisabledSkill 禁用是 overlay：定义留着，但已物化的副本在重校时被**撤回**。
 func TestReconcileWithdrawsDisabledSkill(t *testing.T) {
 	root := t.TempDir()
-	on := Skill{ID: "demo", Name: "Demo", Body: "# demo",}
+	on := Skill{ID: "demo", Name: "Demo", Body: "# demo"}
 
 	written, removed, err := ReconcileSkills(ocSpec(root), []Skill{on})
 	if err != nil || written != 1 || removed != 0 {
@@ -83,7 +83,7 @@ func TestReconcileKeepsUserOwnedDirWhenDisabled(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(userDir, "SKILL.md"), []byte("用户自己写的"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	off := Skill{ID: "demo", Body: "# demo", Enabled: disabled(),}
+	off := Skill{ID: "demo", Body: "# demo", Enabled: disabled()}
 	if _, removed, err := ReconcileSkills(ocSpec(root), []Skill{off}); err != nil || removed != 0 {
 		t.Fatalf("无归属标记的目录不该删: r=%d err=%v", removed, err)
 	}

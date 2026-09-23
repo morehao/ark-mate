@@ -65,10 +65,10 @@ type ConversationRec struct {
 	Fingerprint string
 	Status      string
 	Title       string // 会话标题（首条用户消息截断生成；可被 PATCH 覆盖）
-	Pinned            bool   // 置顶（侧栏/管理面用）
-	Archived          bool   // 归档（软删除；会话列表默认不展示）
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	Pinned      bool   // 置顶（侧栏/管理面用）
+	Archived    bool   // 归档（软删除；会话列表默认不展示）
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：

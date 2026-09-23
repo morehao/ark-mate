@@ -410,13 +410,13 @@ func TestProjectionDirs(t *testing.T) {
 	}
 	// 相对路径会被 Clean，但仍是相对 → 必须报错（相对谁？没有答案）。
 	for _, bad := range []string{
-		"opencode",                    // 缺 `=`
-		"opencode=/tmp/oc",            // 缺 `:kind`
-		":skill=/tmp/oc",              // 缺 runtime
-		"opencode:=/tmp/oc",           // 缺 kind
-		"opencode:bogus=/tmp/oc",      // kind 不在合法集（写错就让覆盖永远匹配不上）
-		"opencode:skill=",             // 目录为空
-		"opencode:skill=relative/dir", // 非绝对路径
+		"opencode",                            // 缺 `=`
+		"opencode=/tmp/oc",                    // 缺 `:kind`
+		":skill=/tmp/oc",                      // 缺 runtime
+		"opencode:=/tmp/oc",                   // 缺 kind
+		"opencode:bogus=/tmp/oc",              // kind 不在合法集（写错就让覆盖永远匹配不上）
+		"opencode:skill=",                     // 目录为空
+		"opencode:skill=relative/dir",         // 非绝对路径
 		"opencode:skill=/a,opencode:skill=/b", // 重复声明同一个投影
 	} {
 		// 注意：显式设为**空串**不算错误——进程环境只对"非空"生效（历史语义，全键一致），

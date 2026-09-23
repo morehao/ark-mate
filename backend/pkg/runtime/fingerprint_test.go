@@ -82,7 +82,9 @@ func TestCapabilityFingerprintSensitive(t *testing.T) {
 		{"MCP transport 变", func(in *FingerprintInput) { in.Mcps[0].Transport = "sse" }},
 		{"MCP command 变", func(in *FingerprintInput) { in.Mcps[0].Command = "/usr/bin/other" }},
 		{"MCP args 变", func(in *FingerprintInput) { in.Mcps[0].Args = []string{"-y", "pkg"} }},
-		{"MCP args 顺序变", func(in *FingerprintInput) { in.Mcps[0].Args[0], in.Mcps[0].Args[1] = in.Mcps[0].Args[1], in.Mcps[0].Args[0] }},
+		{"MCP args 顺序变", func(in *FingerprintInput) {
+			in.Mcps[0].Args[0], in.Mcps[0].Args[1] = in.Mcps[0].Args[1], in.Mcps[0].Args[0]
+		}},
 		{"MCP url 变", func(in *FingerprintInput) { in.Mcps[1].URL = "https://other.invalid/mcp" }},
 		{"MCP env 键名变", func(in *FingerprintInput) { in.Mcps[0].EnvKeys = []string{"TOKEN", "DEBUG"} }},
 		{"MCP 密钥引用名变", func(in *FingerprintInput) { in.Mcps[0].SecretRefs = []string{"vault:ns/other"} }},

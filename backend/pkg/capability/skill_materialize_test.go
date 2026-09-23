@@ -16,8 +16,10 @@ func testSpec(root, owner, format string) MaterializeSpec {
 }
 
 // ocSpec / dshSpec 两个底座的形态（当前 Format 语义等价，落点相同）。
-func ocSpec(root string) MaterializeSpec  { return testSpec(root, "opencode", FormatSkillMD) }
-func dshSpec(root string) MaterializeSpec { return testSpec(root, "deepseekharness", FormatSkillMDFrontmatter) }
+func ocSpec(root string) MaterializeSpec { return testSpec(root, "opencode", FormatSkillMD) }
+func dshSpec(root string) MaterializeSpec {
+	return testSpec(root, "deepseekharness", FormatSkillMDFrontmatter)
+}
 
 // TestMaterializeSkillConvention 物化约定（2026-09-09 双底座实测修正）：
 // `<root>/<id>/SKILL.md` + **保证 YAML frontmatter**（opencode 丢弃无 frontmatter 的

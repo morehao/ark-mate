@@ -39,10 +39,10 @@ var ValidToolSources = map[string]bool{
 // 条目侧写 path/format 等于让用户为每个底座抄一遍它自己的目录约定，而且两处声明同一件事
 // 必然要引入优先级规则。
 type Skill struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Body        string   `json:"body,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Body        string `json:"body,omitempty"`
 	// Runtimes 适用 runtime 白名单（如 ["opencode","deepseekharness"]）；
 	// **空 = 全部**支持 skill 投影的 runtime（未声明即不限制）。
 	Runtimes []string `json:"runtimes,omitempty"`
