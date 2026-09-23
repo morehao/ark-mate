@@ -96,6 +96,7 @@ func (s *Service) writeMcp(ctx context.Context, pathID string, req dtocapability
 	if m.ID == "" {
 		m.ID = id
 	}
+	m.SourceFile = draft.Path()
 
 	prev, hadPrev := s.caps.GetMcpServer(id)
 	if err := s.caps.RegisterMcpServer(&m); err != nil {

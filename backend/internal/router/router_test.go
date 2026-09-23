@@ -36,7 +36,7 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus)
 	return engine, svc
 }
@@ -313,7 +313,8 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
 			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
-			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/usage") &&
+			!strings.HasPrefix(p, "/tools") && !strings.HasPrefix(p, "/library") &&
+			!strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/settings/") &&
 			!strings.HasPrefix(p, "/health") &&
 			!strings.HasPrefix(p, "/ws/") {
@@ -372,7 +373,7 @@ func newAuthEngine(token string) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Token: token})
 	return engine
 }

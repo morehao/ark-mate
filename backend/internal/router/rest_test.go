@@ -13,6 +13,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/dto/dtoexport"
+	"github.com/morehao/ark-forge/internal/dto/dtolibrary"
 	"github.com/morehao/ark-forge/internal/dto/dtomodel"
 	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
 	"github.com/morehao/ark-forge/internal/dto/dtoruntime"
@@ -21,6 +22,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-forge/internal/service/svclibrary"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/golib/gerror"
@@ -138,6 +140,9 @@ type stubSvc struct {
 	mcpWritten    string
 	mcpWriteID    string
 	mcpWriteReq   dtocapability.McpWriteReq
+
+	// M2-4 Library 桩
+	libraryQueried svclibrary.Query
 
 	agentCapResp *dtocapability.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
 	agentCapErr  error
@@ -655,7 +660,7 @@ type envelope struct {
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Usage: svc, Search: svc, Export: svc,
+		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}
 }
 
@@ -1760,5 +1765,51 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 	}
 	if resp.Allowed || !resp.Rejected || resp.OptionID != "reject_once" {
 		t.Fatalf("拒绝回执字段不符: %+v", resp)
+	}
+}
+
+// stubLibrary 让 stubSvc 满足 Library 端口（Library 读模型在 manager 侧有真装配测试）。
+func (s *stubSvc) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, error) {
+	s.libraryQueried = q
+	if s.capErr != nil {
+		return nil, s.capErr
+	}
+	return []dtolibrary.LibraryItem{{
+		ID: "demo", Kind: dtolibrary.KindSkill, Name: "演示", Origin: dtolibrary.OriginLocal,
+		Scope: "global", Enabled: true, SourceFile: "/tmp/skills/demo.json",
+		Applicability: []dtolibrary.Applicability{
+			{Runtime: "opencode", OK: true, Status: dtolibrary.StatusProjected, Reason: "投放到 /tmp/skills"},
+		},
+	}}, nil
+}
+
+// TestLibraryRouteShape GET /library：过滤参数透传领域层 + 逐 runtime 可达性原样透出 + 领域错误映射。
+func TestLibraryRouteShape(t *testing.T) {
+	svc := &stubSvc{}
+	r := newRestEngine(stubDeps(svc))
+
+	env, httpCode := do(t, r, "GET", "/v1/forge/library?kind=skill&q=dem", "")
+	if httpCode != 200 || env.Code != 0 {
+		t.Fatalf("GET /library 应成功: http=%d env=%+v", httpCode, env)
+	}
+	if svc.libraryQueried.Kind != "skill" || svc.libraryQueried.Q != "dem" {
+		t.Fatalf("过滤参数应透传到领域层: %+v", svc.libraryQueried)
+	}
+	var items []dtolibrary.LibraryItem
+	if err := json.Unmarshal(env.Data, &items); err != nil {
+		t.Fatalf("data 应是 LibraryItem 数组: %v（%s）", err, env.Data)
+	}
+	if len(items) != 1 || len(items[0].Applicability) != 1 || !items[0].Applicability[0].OK {
+		t.Fatalf("逐 runtime 可达性应原样透出: %+v", items)
+	}
+	if items[0].Origin != dtolibrary.OriginLocal || items[0].SourceFile == "" {
+		t.Fatalf("origin/source_file 应透出: %+v", items[0])
+	}
+
+	// 未知 kind 的**校验在领域层**（控制器只透传 query），这里验证领域错误经信封落成 40000。
+	svc.capErr = code.Error(code.InvalidParam, "未知 kind \"command\"")
+	env, httpCode = do(t, r, "GET", "/v1/forge/library?kind=command", "")
+	if httpCode != 200 || env.Code != code.InvalidParam {
+		t.Fatalf("领域层拒绝应落成 40000: http=%d env=%+v", httpCode, env)
 	}
 }

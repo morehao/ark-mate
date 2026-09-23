@@ -347,7 +347,7 @@ func nameOf(t *Tool) string {
 }
 
 func (r *Registry) loadSkillsDir(dir string) int {
-	return scanDir(dir, "skill", func(b []byte, key string) error {
+	return scanDir(dir, "skill", func(b []byte, key, path string) error {
 		var d Skill
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -355,6 +355,7 @@ func (r *Registry) loadSkillsDir(dir string) int {
 		if d.ID == "" {
 			d.ID = key
 		}
+		d.SourceFile = path // 事实源文件（Library 的 origin/source_file 依据）
 		if err := r.RegisterSkill(&d); err != nil {
 			return err
 		}
@@ -393,7 +394,7 @@ func (r *Registry) appendSkillWarning(id string, w Warning) {
 }
 
 func (r *Registry) loadMcpsDir(dir string) int {
-	return scanDir(dir, "mcp", func(b []byte, key string) error {
+	return scanDir(dir, "mcp", func(b []byte, key, path string) error {
 		var d McpServer
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -401,12 +402,13 @@ func (r *Registry) loadMcpsDir(dir string) int {
 		if d.ID == "" {
 			d.ID = key
 		}
+		d.SourceFile = path
 		return r.RegisterMcpServer(&d)
 	})
 }
 
 func (r *Registry) loadToolsDir(dir string) int {
-	return scanDir(dir, "tool", func(b []byte, key string) error {
+	return scanDir(dir, "tool", func(b []byte, key, path string) error {
 		var d Tool
 		if err := json.Unmarshal(b, &d); err != nil {
 			return err
@@ -414,12 +416,13 @@ func (r *Registry) loadToolsDir(dir string) int {
 		if d.Name == "" {
 			d.Name = key
 		}
+		d.SourceFile = path
 		return r.RegisterTool(&d)
 	})
 }
 
 // scanDir 扫描 dir 下 *.json，逐文件解码后交给 apply（键回退 = 文件名去 .json）。
-func scanDir(dir, kind string, apply func(b []byte, key string) error) int {
+func scanDir(dir, kind string, apply func(b []byte, key, path string) error) int {
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		slog.Warn("capability: 扫描目录失败", "kind", kind, "dir", dir, "err", err)
@@ -433,7 +436,7 @@ func scanDir(dir, kind string, apply func(b []byte, key string) error) int {
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		if err := apply(b, base); err != nil {
+		if err := apply(b, base, p); err != nil {
 			slog.Warn("capability: 定义未采纳", "kind", kind, "file", p, "err", err)
 			continue
 		}

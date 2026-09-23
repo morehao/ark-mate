@@ -238,6 +238,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | POST | `/conversations/:id/permissions/always/revoke` | **兼容别名**，等价 `/conversations/:id/permissions/memories/revoke`（请求体与行为一致） |
 | GET | `/conversations/:id/elicitations` | 挂起结构化提问列表（表单 schema / URL） |
 | POST | `/conversations/:id/elicitation` | 结构化提问决策 `{elicitation_id, action, content?}` |
+| GET | `/library` | **统一能力清单（M2）**：skill/mcp/agent/tool 四类同构（`kind`/`name`/`description`/`origin`/`scope`/`enabled`/`source_file`），`?kind=` 过滤、`?q=` 对 id/name/description 做大小写不敏感子串（未知 `kind` → 40000）。每条回带**逐 runtime 的 `applicability[]`**（`projected`/`untested`/`not_configured`/`not_applicable`/`disabled` + 人话 `reason`）——**刻不给"整体可用吗"的合并结论**：对 opencode 可用、对 dsh 不可用是有用信息，压成一个 bool 就没了。只读派生视图，**不拥有任何数据** |
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`、`enabled`/`scope`；skill 含 `enabled` 与正文扫描 `warnings`） |
 | POST | `/skills` | 新建 skill 定义（body = skill 定义，`id` 必填）：**先过注册闸门**（正文扫描、`runtimes` 去重）→ 通过才落盘（原子替换、未知键保留）→ 失败**回滚内存**；id 已存在 → 40901 `skill_exists`，闸门拒绝 → 40001 `definition_invalid` 且**零字节落盘** |
 | PUT | `/skills/:id` | 覆盖写 skill 定义：**只改 body 里出现过的键**（未出现的保留原值；`null` 删键、`""`/`[]` 清空），路径 id 与 body id 不一致 → 40000；落盘前比对 mtime，读写窗口内被外部改动 → 40901 `definition_changed`（**绝不 last-write-wins**） |

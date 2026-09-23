@@ -181,6 +181,7 @@ func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapabili
 	if sk.ID == "" {
 		sk.ID = id
 	}
+	sk.SourceFile = draft.Path() // 事实源文件（Library 的 origin/source_file 依据）
 
 	prev, hadPrev := s.caps.SkillByID(id)
 	if err := s.caps.RegisterSkill(&sk); err != nil {

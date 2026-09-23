@@ -58,6 +58,12 @@ type Skill struct {
 	// 派生字段：不落盘、不从 JSON 读（`json:"-"`）——磁盘上的定义是事实源，扫描结果每次装载重算，
 	// 免得「改了正文但告警还是旧的」。REST 读模型另行暴露（见 SkillResp.Warnings）。
 	Warnings []Warning `json:"-"`
+	// SourceFile 事实源文件（装载时记下；代码注入的条目为空）。
+	//
+	// 派生字段（`json:"-"`）：**事实源是文件，文件路径不是文件内容**——写回文件时带上它反而是
+	// 把运行环境的路径固化进定义。它的用途只有一个且很实在：Library 要如实回答"这条是从哪来的、
+	// 你改哪个文件"（origin/source_file）。
+	SourceFile string `json:"-"`
 }
 
 // IsEnabled 报告 skill 当前是否启用（未声明 = 启用；禁用**只影响投放**，定义与正文照旧保留）。
@@ -128,6 +134,8 @@ type McpServer struct {
 	// Enabled 启停开关：nil = 未声明（默认启用）；显式 false = 禁用。
 	// 禁用 = **不注入**（定义、密钥引用、探测结果都保留），与 Skill 的 overlay 语义一致。
 	Enabled *bool `json:"enabled,omitempty"`
+	// SourceFile 事实源文件（装载时记下；代码注入的条目为空）。派生字段，见 Skill.SourceFile。
+	SourceFile string `json:"-"`
 }
 
 // IsEnabled 报告 MCP server 当前是否启用（未声明 = 启用；禁用只影响注入，定义照旧保留）。
@@ -149,4 +157,8 @@ type Tool struct {
 	Source      string          `json:"source"`               // builtin | mcp | observed
 	McpServer   string          `json:"mcp_server,omitempty"` // source=mcp 时的归属 server id（agent 可见性过滤依据）
 	Schema      json.RawMessage `json:"schema,omitempty"`     // 参数 JSON Schema（原样保真）
+	// SourceFile 事实源文件（装载时记下；builtin/observed/live 探测的条目为空）。
+	// 派生字段（`json:"-"`）：`<CapabilityDir>/tools/*.json` 与 live 探测写入同住一张表，
+	// 只有这个字段能区分"用户写的条目"与"探测出来的条目"。
+	SourceFile string `json:"-"`
 }
