@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 // Transport 抽象「一个 ACP server 进程」的接入面：Start 拉起并接好 stdio，
@@ -46,15 +47,20 @@ type StdioTransport struct {
 	tail    []string
 	logger  *slog.Logger
 	started bool
+	// stderrDone 在 drainStderr 因 stderr 管道 EOF 退出时关闭。
+	// 存在的理由：drainStderr 是独立 goroutine，而子进程"写一行就退出"时，调用方可能
+	// 早于它完成就快照 tail（实测偶发拿到 0 行，见 AttachStderr 的等待）。nil = 未启动。
+	stderrDone chan struct{}
 }
 
 // NewStdioTransport 构造 StdioTransport。env 为附加环境变量（KEY=VALUE 形式）。
 func NewStdioTransport(command string, args, env []string) *StdioTransport {
 	return &StdioTransport{
-		command: command,
-		args:    args,
-		env:     env,
-		logger:  slog.Default(),
+		command:    command,
+		args:       args,
+		env:        env,
+		logger:     slog.Default(),
+		stderrDone: make(chan struct{}),
 	}
 }
 
@@ -142,6 +148,7 @@ func (t *StdioTransport) start(ctx context.Context) error {
 }
 
 func (t *StdioTransport) drainStderr() {
+	defer close(t.stderrDone) // 先在 defer 里注册，保证任何退出路径都唤醒等待者
 	sc := bufio.NewScanner(t.stderr)
 	sc.Buffer(make([]byte, 64*1024), 64*1024)
 	for sc.Scan() {
@@ -155,6 +162,26 @@ func (t *StdioTransport) drainStderr() {
 		}
 		t.mu.Unlock()
 		t.logger.Info("runtime stderr", "cmd", t.command, "line", line)
+	}
+}
+
+// WaitStderr 等待 stderr 抽干（stderr 管道 EOF 即返回），最多等 timeout。
+//
+// 为什么需要它：`drainStderr` 是独立 goroutine。子进程"往 stderr 写一行就退出"这种最常见的
+// 启动失败形态下，调用方（Dial 握手失败 → AttachStderr）完全可能**早于**读取 goroutine 把该行
+// 追加进环形缓冲就快照，于是诊断尾巴偶发为空——本仓 `TestDialErrorCarriesStderrTail` /
+// `TestAgentDiagnosticsStartFailure` 都因此出现过 flake（冷缓存全量跑时命中率明显升高）。
+// 这里等待的是 **EOF** 而不是固定时长：管道关掉（进程退出）即立刻返回，故不给失败路径加
+// 可感知延迟；只有进程还活着（stderr 仍开着）时才吃到 timeout 上限。
+//
+// 未启动（start 从未成功）时没有 goroutine 可等，直接返回。
+func (t *StdioTransport) WaitStderr(timeout time.Duration) {
+	if t.stderrDone == nil {
+		return
+	}
+	select {
+	case <-t.stderrDone:
+	case <-time.After(timeout):
 	}
 }
 

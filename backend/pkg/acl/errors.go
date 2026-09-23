@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
@@ -49,11 +50,25 @@ func NewError(class Class, code, details string, cause error) *Error {
 	return &Error{Class: class, Code: code, Details: details, Err: cause}
 }
 
+// stderrDrainWait 是 AttachStderr 快照前等待 stderr 抽干的上限。
+// 命中的是"进程退出 → 管道 EOF → 读取 goroutine 收尾"这条快路径，通常立即返回；
+// 只有进程仍活着时才真等满这个上限（见 StdioTransport.WaitStderr）。
+const stderrDrainWait = 500 * time.Millisecond
+
+// stderrWaiter 由能在快照前告知"stderr 已抽干"的传输实现（当前是 StdioTransport）。
+type stderrWaiter interface{ WaitStderr(time.Duration) }
+
 // AttachStderr 把传输层的 stderr 诊断尾巴挂到错误上（已有尾巴则不覆盖；最多保留 tailCap 行）。
+//
+// 挂之前先等 stderr 抽干（见 StdioTransport.WaitStderr）：不等待的话，"子进程写一行就退出"
+// 这类最常见的启动失败会偶发挂上空尾巴——诊断面报"没有 stderr"其实是抢跑读到的。
 func AttachStderr(err error, t Transport) error {
 	ae, ok := As(err)
 	if !ok || ae == nil || t == nil || len(ae.StderrTail) > 0 {
 		return err
+	}
+	if w, ok := t.(stderrWaiter); ok {
+		w.WaitStderr(stderrDrainWait)
 	}
 	ae.StderrTail = TailLines(t.StderrTail(), stderrTailCap)
 	return err
