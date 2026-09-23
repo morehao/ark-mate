@@ -184,8 +184,14 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
       // handoff 历史摘要重灌）。以系统提示入流，避免用户误以为会话被「重新开始」。
       const reason = String(e.payload?.reason ?? '')
       const runtime = String(e.payload?.runtime ?? '')
+      // generation（M3-6）：会话在轮次边界迁到了新的能力代际（定义被改过）。
+      // 与"进程重启后原生续接"必须分开说——用户改完定义最关心的正是"到底生效了没有"。
       const label =
-        reason === 'handoff' ? '会话已恢复（历史摘要重灌）' : '会话已恢复（原生会话续接）'
+        reason === 'handoff'
+          ? '会话已恢复（历史摘要重灌）'
+          : reason === 'generation'
+            ? '会话已用上新的能力（下一轮生效）'
+            : '会话已恢复（原生会话续接）'
       return {
         ...v,
         entries: push('system', undefined, {

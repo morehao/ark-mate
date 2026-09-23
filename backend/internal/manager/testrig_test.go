@@ -100,8 +100,12 @@ func stubACPSpec(t *testing.T) runtime.Spec {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "acp_stub.py")
-	code := `import json, sys
+	code := `import json, os, sys
 n = 0
+# STUB_ACP_LOG（可选）：把每次 session/new 收到的参数按行追加成 JSONL。
+# 断言"底座到底收到了哪套 MCP/能力"只能看这里——管理侧算得再对，下发的若是旧集合，
+# 用户拿到的就是旧能力（M3 要消灭的正是这类静默失败）。
+logpath = os.environ.get("STUB_ACP_LOG")
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -117,6 +121,12 @@ for line in sys.stdin:
         res = {"protocolVersion": 1, "agentCapabilities": {}}
     elif method == "session/new":
         n += 1
+        if logpath:
+            try:
+                with open(logpath, "a") as fh:
+                    fh.write(json.dumps(msg.get("params") or {}) + "\n")
+            except Exception:
+                pass
         res = {"sessionId": "stub-session-%d" % n}
     else:
         sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": mid,

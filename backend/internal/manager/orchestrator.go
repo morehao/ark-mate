@@ -40,6 +40,9 @@ type ActiveConversation struct {
 
 	client *acl.Client
 	sess   acpSession
+	// providerID 底座侧的原生会话 id（`sess.ID()`）。存一份是因为换句柄（代际迁移）时要拿旧值
+	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`acpSession` 上没有 ID()）。
+	providerID string
 	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
 	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
 	proj runtime.Runtime
@@ -97,6 +100,8 @@ type Orchestrator struct {
 	// inflight 记录每连接上正在执行 turn 的会话（inFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
 	inflight *inFlightTracker
+	// migMu 串行化代际迁移（M3-6）：罕见操作，一把全局锁足够；不设它会两个并发轮次各迁一次。
+	migMu    sync.Mutex
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
 	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
