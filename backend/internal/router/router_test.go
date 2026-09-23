@@ -75,7 +75,7 @@ func TestRouterMountHealth(t *testing.T) {
 }
 
 // TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）、
-// runtimes 3 个（opencode / deepseekharness / echo 演示）。
+// runtimes 2 个（opencode / deepseekharness；echo 演示底座已于 M0 删除）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
@@ -93,7 +93,7 @@ func TestRouterListRealService(t *testing.T) {
 
 	env = get(t, e, "/v1/forge/runtimes")
 	var rts []map[string]any
-	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 3 {
+	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
