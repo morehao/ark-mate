@@ -16,7 +16,7 @@ import (
 // demo 在指定 runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。
 func demo(args []string) {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
-	runtimeID := fs.String("runtime", "", "runtime id（opencode / deepseekharness / echo）")
+	runtimeID := fs.String("runtime", "", "runtime id（opencode / deepseekharness）")
 	prompt := fs.String("prompt", "你好，请用一句话介绍你自己。", "发送给 agent 的 prompt")
 	cwd := fs.String("cwd", "", "会话工作目录（默认当前目录）")
 	configPath := fs.String("config", "", "自定义 adapter 的 {config} 占位替换（当前内置 runtime 均无占位，预留扩展）")
@@ -25,7 +25,7 @@ func demo(args []string) {
 	_ = fs.Parse(args)
 
 	if *runtimeID == "" {
-		fmt.Fprintln(os.Stderr, "demo: --runtime 必填（opencode / deepseekharness / echo）")
+		fmt.Fprintln(os.Stderr, "demo: --runtime 必填（opencode / deepseekharness）")
 		os.Exit(2)
 	}
 	// 冒烟输出含 runtime stderr（登录提示/诊断），提到 Debug 便于排查。
@@ -33,7 +33,7 @@ func demo(args []string) {
 
 	reg := runtime.DefaultRegistry()
 	if _, err := reg.Require(*runtimeID); err != nil {
-		fmt.Fprintf(os.Stderr, "demo: %v（可用：opencode / deepseekharness / echo）\n", err)
+		fmt.Fprintf(os.Stderr, "demo: %v（可用：opencode / deepseekharness）\n", err)
 		os.Exit(2)
 	}
 
