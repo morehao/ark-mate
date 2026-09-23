@@ -312,8 +312,41 @@ func (r *Registry) loadSkillsDir(dir string) int {
 		if d.ID == "" {
 			d.ID = key
 		}
-		return r.RegisterSkill(&d)
+		if err := r.RegisterSkill(&d); err != nil {
+			return err
+		}
+		// 旧键 `sources` 已被忽略（M1 起条目侧只声明 runtimes），而 encoding/json 丢未知键
+		// 是**静默**的：后果是技能从「只给 opencode」悄悄变成「给所有 runtime」——投放面被放宽，
+		// 用户看不到任何迹象。所以装载时显式挂一条告警，把人引到 `forge capability migrate`。
+		if hasLegacySourcesKey(b) {
+			r.appendSkillWarning(d.ID, Warning{
+				Severity: SeverityInfo,
+				Pattern:  "legacy_sources_key",
+				Message: "该定义仍含已退役的 `sources` 字段（已被忽略）：技能会投放到**所有**支持 skill 投影的 runtime，" +
+					"而不是原来声明的那些。运行 `forge capability migrate` 把它转成 runtimes（值 = 原 sources 的 runtime 去重升序）",
+			})
+		}
+		return nil
 	})
+}
+
+// hasLegacySourcesKey 探测定义原文里是否还有 `sources` 键（只为给出一条告警，不参与解析）。
+func hasLegacySourcesKey(b []byte) bool {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return false
+	}
+	_, ok := probe["sources"]
+	return ok
+}
+
+// appendSkillWarning 给已注册的 skill 追加一条告警（派生信息，不改定义文件）。
+func (r *Registry) appendSkillWarning(id string, w Warning) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.skills[id]; ok {
+		s.Warnings = append(s.Warnings, w)
+	}
 }
 
 func (r *Registry) loadMcpsDir(dir string) int {

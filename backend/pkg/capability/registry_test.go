@@ -3,6 +3,7 @@ package capability
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +132,45 @@ func TestRegisterSkillRuntimesAndScope(t *testing.T) {
 	}
 	if err := r.RegisterSkill(&Skill{ID: "ws", Scope: SkillScopeWorkspace}); err != nil {
 		t.Fatalf("workspace scope 应合法（M1 只落语义不消费）: %v", err)
+	}
+}
+
+// TestLoadLegacySourcesWarns 旧 `sources` 键被忽略这件事**必须可见**。
+//
+// `encoding/json` 丢未知键是静默的，而这里丢掉的后果是投放面被放宽（「只给 opencode」变成
+// 「给所有 runtime」）。装载期为这类文件挂一条 info 告警，把人引到 `forge capability migrate`。
+func TestLoadLegacySourcesWarns(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "skills", "legacy.json"),
+		`{"id":"legacy","name":"L","body":"# l","sources":[{"runtime":"opencode","path":"x","format":"SKILL.md"}]}`)
+	writeFile(t, filepath.Join(dir, "skills", "fresh.json"),
+		`{"id":"fresh","name":"F","body":"# f","runtimes":["opencode"]}`)
+
+	r := NewRegistry()
+	if res := r.LoadDir(dir); res.Skills != 2 {
+		t.Fatalf("应装载 2 条: %+v", res)
+	}
+	legacy, _ := r.SkillByID("legacy")
+	if len(legacy.Runtimes) != 0 {
+		t.Fatalf("旧 sources 不该被解析成 runtimes: %+v", legacy.Runtimes)
+	}
+	var found *Warning
+	for i := range legacy.Warnings {
+		if legacy.Warnings[i].Pattern == "legacy_sources_key" {
+			found = &legacy.Warnings[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("含 sources 的定义应挂 legacy_sources_key 告警: %+v", legacy.Warnings)
+	}
+	if !strings.Contains(found.Message, "forge capability migrate") {
+		t.Fatalf("告警要给出出路: %q", found.Message)
+	}
+	// 没有旧键的定义不该被挂告警（避免噪声把真告警淹掉）。
+	fresh, _ := r.SkillByID("fresh")
+	for _, w := range fresh.Warnings {
+		if w.Pattern == "legacy_sources_key" {
+			t.Fatalf("新式定义不该有 legacy 告警: %+v", fresh.Warnings)
+		}
 	}
 }

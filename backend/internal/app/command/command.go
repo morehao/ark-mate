@@ -30,8 +30,10 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge migrate [flags]         transcript → SQLite 迁移（P1：幂等 + 事务整体回滚 + 数量校验）
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
   forge config [--json]         打印解析后的配置与每项来源（配置目录 .forge/config 目录化）
+  forge capability migrate      skill 定义迁移（旧 sources[] → runtimes[]；--dry-run 可预览）
 
 子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
+            forge capability migrate -h
 `
 
 // Run 分发 forge 子命令，返回进程退出码（无默认子命令）。
@@ -55,6 +57,8 @@ func Run(args []string) int {
 		transcriptsPrune(args[2:])
 	case "config":
 		configCmd(args[1:])
+	case "capability":
+		capabilityCmd(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usageText)
 		return 0

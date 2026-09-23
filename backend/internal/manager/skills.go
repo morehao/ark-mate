@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,7 +141,11 @@ func (s *Service) SetSkillEnabled(ctx context.Context, id string, enabled bool) 
 }
 
 // writeSkillEnabled 把 `enabled` 写进定义文件并返回文件路径。
-// 读原文件为 map（保留未知键）→ 只改一个键 → 临时文件 + rename 原子替换。
+//
+// 落盘纪律（未知键保留 / mtime 乐观锁 / 同目录 staging + 原子 rename / 保留权限）全部委派给
+// `capability.DefinitionFile`——那是 C9 的**唯一实现处**。此前这里是手写的一份（读 map → 改一个键
+// → 同目录 tmp + rename），缺 mtime 乐观锁与权限保留；写面（M2）也会复用同一个句柄，所以
+// 在这里收敛成一份而不是各写各的。
 func (s *Service) writeSkillEnabled(id string, enabled bool) (string, error) {
 	dir := s.capabilityDirSnapshot()
 	if dir == "" {
@@ -150,42 +153,21 @@ func (s *Service) writeSkillEnabled(id string, enabled bool) (string, error) {
 			fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（FORGE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 	}
 	path := filepath.Join(dir, "skills", id+".json")
-	raw, err := os.ReadFile(path)
+	f, err := capability.ReadDefinitionFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
 				fmt.Sprintf("skill %q 没有定义文件 %s（代码注入/内存注册的技能无处写回）：请在能力目录里建成文件后再启停", id, path), nil)
 		}
-		return "", acl.NewError(acl.ClassService, "skill_write_failed",
+		return "", acl.NewError(acl.ClassRequest, "skill_invalid",
 			fmt.Sprintf("读取 skill 定义失败 %s：%v", path, err), nil)
 	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return "", acl.NewError(acl.ClassRequest, "skill_invalid",
-			fmt.Sprintf("skill 定义 %s 不是合法 JSON 对象：%v（先修好文件再启停）", path, err), nil)
-	}
-	if doc == nil {
-		doc = map[string]json.RawMessage{}
-	}
-	flag, err := json.Marshal(enabled)
-	if err != nil {
+	if err := f.Set("enabled", enabled); err != nil {
 		return "", code.FromError(err)
 	}
-	doc["enabled"] = flag
-	out, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return "", code.FromError(err)
-	}
-	out = append(out, '\n')
-	tmp := filepath.Join(dir, "skills", "."+id+".json.tmp")
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+	if err := f.Save(); err != nil {
 		return "", acl.NewError(acl.ClassService, "skill_write_failed",
-			fmt.Sprintf("写入 skill 定义失败 %s：%v", tmp, err), nil)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", acl.NewError(acl.ClassService, "skill_write_failed",
-			fmt.Sprintf("替换 skill 定义失败 %s：%v", path, err), nil)
+			fmt.Sprintf("写入 skill 定义失败 %s：%v", path, err), nil)
 	}
 	return path, nil
 }
