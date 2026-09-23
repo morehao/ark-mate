@@ -50,6 +50,16 @@ type Spec struct {
 	// 消费面：/agents/:id/diagnostics 的 remediation（诊断面据此给出「怎么修」而不是只有报错）。
 	SetupSteps []string
 	Notes      string // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）
+	// Projections 该 runtime 承载各类能力的**原生形态**声明（投影契约，见 projection.go）。
+	// 空 = 该 runtime 不承载任何平台可投影的能力（远程端点即如此 → not_applicable）。
+	Projections []Projection
+	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
+	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
+	CapabilityScope string
+	// Tested 该 CapabilityScope 是否经真实底座实测（false → 回落到最保守的 process 语义）。
+	Tested bool
+	// TestedOnVersion 实测时的底座版本；版本一变 Tested 失效（绑定范围可能随底座版本变）。
+	TestedOnVersion string
 }
 
 // ListItem 是 /runtimes 列表项的对外表示（由控制面 handler 消费）。

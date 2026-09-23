@@ -40,6 +40,9 @@ var Caps = DeclaredCapabilities{
 	EmbeddedContext:        false,
 }
 
+// SkillFormat 该 runtime 消费的 skill 内容格式（投影 Projection.Format 的取值；语义同 opencode.SkillFormat）。
+const SkillFormat = "SKILL.md+frontmatter"
+
 // Notes 约束说明（给 README/文档位，暂不外露 REST）。
 //  1. 无鉴权：authenticate 立即成功（authMethods 为空）。
 //  2. 会话持久化：session/new 即持久；disconnect/close 走同一 quiescent teardown，
