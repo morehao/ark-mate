@@ -49,8 +49,8 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | transcript | `~/.forge/transcripts/` | `FORGE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
 | Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`） |
 | 密钥库（vault） | `~/.forge/vault.key` + `~/.forge/vault/` | `FORGE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
-| 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 sources 保留，只停止投放；`PATCH /skills/:id` 写回此键）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
-| skill 物化目标 | 空（关闭） | `FORGE_SKILLS_MATERIALIZE_DIR` | 非空才写（可能指向真实 opencode 用户目录，故默认关闭） |
+| 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `forge capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
+| 投影根覆盖 | 空（用 runtime 声明的默认根） | `FORGE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `FORGE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 代建工作空间 | `~/.forge/workspaces/` | `FORGE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
 | 工作区根白名单 | 空（不限制） | `FORGE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
@@ -128,7 +128,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录（vault 的 home 取它的父目录：`~/.forge`） |
 | `FORGE_VAULT_KEY` | 空 | 主密钥覆盖（32 字节 base64/hex）；**非空时不读不建 `vault.key`**（容器/CI 用）；密钥丢失 = 已有密文不可恢复 |
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力数据面目录 |
-| `FORGE_SKILLS_MATERIALIZE_DIR` | 空 | skill 物化根（默认关闭） |
+| `FORGE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`deepseekharness:skill`；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `FORGE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `FORGE_WORKSPACE_DIR` | `~/.forge/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `FORGE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`FORGE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `FORGE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
@@ -150,7 +150,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 ~/.forge/config/env           # dotenv 风格（KEY=VALUE；# 注释、空行、可选 export 前缀与成对引号）
 ```
 
-`config.json` 里多值键（`workspace_roots`、`skills_materialize_dirs`）可以写成 **JSON 数组**，
+`config.json` 里多值键（`workspace_roots`、`projection_dirs`）可以写成 **JSON 数组**，
 也可以照旧写成逗号分隔字符串；单值键写数组会报错。数组不是语法糖：路径里含逗号时只有数组
 能表达，而面板保存白名单用的就是数组形式（见 §2.2.2）。
 
@@ -161,11 +161,16 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
-`workspace_dir` `workspace_roots` `skills_materialize_dir` `skills_materialize_dirs`
+`workspace_dir` `workspace_roots` `projection_dirs`
 `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+
+已改名的键仍会让启动失败（"非法键名即报错"这条规则不软化），但报错会**认出它**并给出新键与
+等价写法：`skills_materialize_dir` / `skills_materialize_dirs` → `projection_dirs`
+（`skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`）。升级动作就是改
+这一行——不做静默等价，否则用户会以为已经改完。
 
 `workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
 保留文件里其它键），所以手工编辑时留意别和面板同时改；被更高优先级来源锁定时面板只会拒绝写。
@@ -437,6 +442,12 @@ sudo systemctl restart ark-forge
 > **这些记录不再可原样复现**，保留在此仅作历史证据（与 `docs/` 下历史设计文档同一口径）。
 > 仍可复现的部分（`make all`、种子只读、重启恢复、检索导出、MCP 调用等）不受影响，只是把
 > `echo` agent 换成 `dsh`/`opencode` 或任意自定义 agent 即可。当前契约以 README 与源码为准。
+>
+> **配置键也已变（M1 后阅读）**：下面 C4/C6 两条例子里用的
+> `FORGE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `FORGE_PROJECTION_DIRS` 取代（旧键现在会让启动
+> 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
+> 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
+> 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/manager/skills_test.go` 覆盖。
 
 环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
 基础镜像，见 §4.3）。
