@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, Empty, Input, Modal, Select, Space, Spin, Switch, Tabs, Tag, Tooltip } from 'antd'
+import { Alert, Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Tabs, Tag, Tooltip } from 'antd'
 import { ExperimentOutlined, FileSearchOutlined, FileTextOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark/ui'
 import {
   callMcpTool,
+  createMcpServer,
+  createSkill,
+  deleteMcpServer,
+  deleteSkill,
   getAgentCapabilities,
   getMcpPrompt,
   getSkillMaterialization,
   listMcpPrompts,
+  listLibrary,
   listMcpResources,
   listMcpServers,
   listSkills,
@@ -16,10 +21,14 @@ import {
   readMcpResource,
   setSkillEnabled,
   toErrorMessage,
+  updateMcpServer,
+  updateSkill,
 } from '@ark/api'
 import type {
   AgentCapabilities,
   AgentSkill,
+  CapabilityWriteBody,
+  LibraryItem,
   McpPrompt,
   McpPromptsResult,
   McpPromptGetResult,
@@ -34,6 +43,10 @@ import type {
 import { useForge } from '../store'
 import {
   fmtProbeAt,
+  libraryKindColor,
+  libraryKindLabel,
+  libraryOriginView,
+  libraryStatusView,
   materializationMeta,
   materializationNeedsAttention,
   materializationSummary,
@@ -43,6 +56,7 @@ import {
   skillRuntimesView,
   skillWarningsView,
   toolSourceLabel,
+  writeErrorText,
   type McpRow,
 } from '../console/capabilityView'
 
@@ -185,6 +199,15 @@ export function CapabilitiesPage() {
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcps, setMcps] = useState<McpServer[]>([])
   const [tools, setTools] = useState<Tool[]>([])
+  // M2-4 Library（统一读模型）：kind/q 由后端过滤（未知 kind 会报 40000，面板侧不预判）。
+  const [library, setLibrary] = useState<LibraryItem[]>([])
+  const [libKind, setLibKind] = useState<string>('')
+  const [libQ, setLibQ] = useState<string>('')
+  // M2-2/M2-3 定义写面：一个编辑器模态同时服务 skill 与 MCP（都是原文 JSON 对象）。
+  const [edit, setEdit] = useState<{ kind: 'skill' | 'mcp'; id: string; text: string; created: boolean } | null>(null)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editErr, setEditErr] = useState<string | null>(null)
+  const [delBusy, setDelBusy] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [probing, setProbing] = useState<string | null>(null)
   // §13.4 S4 启停：按 skill id 记忙碌（同名行多个时只转当前那个）。
@@ -231,6 +254,13 @@ export function CapabilitiesPage() {
       showToast(toErrorMessage(err))
     }
   }
+  const loadLibrary = async (kind = libKind, q = libQ): Promise<void> => {
+    try {
+      setLibrary(await listLibrary({ kind: kind || undefined, q: q || undefined }))
+    } catch (err) {
+      showToast(writeErrorText(err))
+    }
+  }
   const loadTools = async (): Promise<void> => {
     try {
       setTools(await listTools())
@@ -256,7 +286,7 @@ export function CapabilitiesPage() {
   }, [])
 
   const loadAll = useCallback(async (): Promise<void> => {
-    await Promise.all([loadSkills(), loadMcps(), loadTools(), loadCaps(agentId)])
+    await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary(), loadCaps(agentId)])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId])
 
@@ -265,7 +295,7 @@ export function CapabilitiesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId])
 
-  const refresh = (key: 'skills' | 'mcps' | 'tools' | 'caps'): void => {
+  const refresh = (key: 'skills' | 'mcps' | 'tools' | 'caps' | 'library'): void => {
     setBusy(key)
     const p =
       key === 'skills'
@@ -274,7 +304,9 @@ export function CapabilitiesPage() {
           ? loadMcps()
           : key === 'tools'
             ? loadTools()
-            : loadCaps(agentId)
+            : key === 'library'
+              ? loadLibrary()
+              : loadCaps(agentId)
     void p.finally(() => setBusy((cur) => (cur === key ? null : cur)))
   }
 
@@ -310,6 +342,140 @@ export function CapabilitiesPage() {
       </Button>
     </Tooltip>
   )
+
+  // ——— M2 定义写面（POST/PUT/DELETE /skills|/mcps） ———
+  //
+  // 编辑器收的是**原文 JSON 对象**而不是结构化表单：`PUT` 的语义是「只改出现过的键」，而表单
+  // 分不清「没填」与「填了空串」、也表达不了 `null` 删键。给用户一个能表达全部语义的输入框，
+  // 比给一组看起来很友好、但改不了未知键的表单诚实。
+
+  /** 新建模板：只放最小可用字段（其余键由用户按需补；`id` 必填）。 */
+  const newTemplate = (kind: 'skill' | 'mcp'): CapabilityWriteBody =>
+    kind === 'skill'
+      ? { id: '', name: '', description: '', body: '# 技能名\n\n说明与用法。', runtimes: [] }
+      : { id: '', name: '', transport: 'stdio', command: '/usr/local/bin/npx', args: [] }
+
+  const openCreate = (kind: 'skill' | 'mcp'): void => {
+    setEditErr(null)
+    setEdit({ kind, id: '', text: JSON.stringify(newTemplate(kind), null, 2), created: true })
+  }
+
+  /** 编辑预填：来自**读模型**（skill 的已知键齐全；MCP 的 env/密钥引用后端从不回读，故不预填）。 */
+  const openEditSkill = (sk: Skill): void => {
+    setEditErr(null)
+    setEdit({
+      kind: 'skill',
+      id: sk.id,
+      created: false,
+      text: JSON.stringify(
+        {
+          id: sk.id,
+          name: sk.name,
+          description: sk.description ?? '',
+          body: sk.body ?? '',
+          runtimes: sk.runtimes ?? [],
+          scope: sk.scope ?? 'global',
+          enabled: sk.enabled ?? true,
+        },
+        null,
+        2,
+      ),
+    })
+  }
+
+  const openEditMcp = (m: McpServer): void => {
+    setEditErr(null)
+    const base: CapabilityWriteBody = {
+      id: m.id,
+      name: m.name ?? '',
+      transport: m.transport,
+    }
+    if (m.transport === 'stdio') {
+      base.command = m.command ?? ''
+      base.args = m.args ?? []
+    } else {
+      base.url = m.url ?? ''
+    }
+    setEdit({ kind: 'mcp', id: m.id, created: false, text: JSON.stringify(base, null, 2) })
+  }
+
+  /**
+   * 解析编辑器文本 → 请求体。
+   *
+   * 必须是 JSON **对象**（数组/标量在语义上没有意义，前端先拦一次，报错文案与后端一致）；
+   * 覆盖写时**去掉 id**：路径上已经是那个 id，body 里再带一份只会制造「两处 id 不一致」的
+   * 40000——面板不该凭空造出这个错误。
+   */
+  const parseEditBody = (): CapabilityWriteBody | null => {
+    if (!edit) return null
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(edit.text)
+    } catch (err) {
+      setEditErr(`不是合法 JSON：${err instanceof Error ? err.message : String(err)}`)
+      return null
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      setEditErr('定义必须是 JSON 对象（形如 {"id": "…"}）')
+      return null
+    }
+    const body = { ...(parsed as CapabilityWriteBody) }
+    if (!edit.created) delete body.id
+    return body
+  }
+
+  const submitEdit = async (): Promise<void> => {
+    if (!edit) return
+    const body = parseEditBody()
+    if (!body) return
+    setEditBusy(true)
+    setEditErr(null)
+    try {
+      if (edit.kind === 'skill') {
+        const res = edit.created ? await createSkill(body) : await updateSkill(edit.id, body)
+        const errs = res.materialize_errors?.length ? `；物化重校失败：${res.materialize_errors.join('；')}` : ''
+        const warn = res.warnings?.length ? `（${res.warnings.length} 条告警）` : ''
+        showToast(
+          `${res.created ? '已新建' : '已覆盖写'} skill ${res.id}${warn}（投放 ${res.written} / 撤回 ${res.removed}）${errs}`,
+        )
+      } else {
+        const res = edit.created ? await createMcpServer(body) : await updateMcpServer(edit.id, body)
+        const unresolved = res.unresolved_secret_keys?.length
+          ? `；密钥引用当前解析不出：${res.unresolved_secret_keys.join('、')}`
+          : ''
+        showToast(`${res.created ? '已新建' : '已覆盖写'} MCP server ${res.id}${unresolved}`)
+      }
+      setEdit(null)
+      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary(), loadCaps(agentId)])
+    } catch (err) {
+      // 错误留在模态里（不关窗）：用户刚写的内容还在，改一处就能重试。
+      setEditErr(writeErrorText(err))
+    } finally {
+      setEditBusy(false)
+    }
+  }
+
+  const doDelete = async (kind: 'skill' | 'mcp', id: string): Promise<void> => {
+    setDelBusy(id)
+    try {
+      if (kind === 'skill') {
+        const res = await deleteSkill(id)
+        showToast(res.deleted ? `已删除 skill ${id}（撤回副本 ${res.removed}）` : `skill ${id} 本就不存在（已同步列表）`)
+      } else {
+        const res = await deleteMcpServer(id)
+        showToast(
+          res.deleted
+            ? `已删除 MCP server ${id}（一并摘除 ${res.tools_removed} 条归属工具）`
+            : `MCP server ${id} 本就不存在（已同步列表）`,
+        )
+      }
+      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary(), loadCaps(agentId)])
+    } catch (err) {
+      showToast(`删除 ${id} 失败：${writeErrorText(err)}`)
+    } finally {
+      setDelBusy(null)
+    }
+  }
 
   // doToggleSkill §13.4 S4：写回定义文件的 enabled 并立刻重校物化。
   // 定义文件写成功即算成功；物化失败在 materialize_errors 里回（不回滚定义——禁用是安全方向）。
@@ -481,6 +647,104 @@ export function CapabilitiesPage() {
       </>
     )
 
+  // ——— Library 卡片（M2-4） ———
+  //
+  // 这是「这台机器上现在有什么能力」的**唯一视图**（四类同构）。此处刻意**不**给「整体可用吗」
+  // 的合并结论：逐 runtime 报可达性 + 人话原因，用户自己决定。展示顺序按 kind 分组，
+  // 因为同一个 kind 内的条目才互相可比。
+  const libraryRow = (it: LibraryItem): ReactNode => {
+    const origin = libraryOriginView(it.origin)
+    return (
+      <Row key={`${it.kind}:${it.id}`}>
+        <Tag color={libraryKindColor(it.kind)} style={{ ...smallTag, minWidth: 46, textAlign: 'center' }}>
+          {libraryKindLabel(it.kind)}
+        </Tag>
+        <b style={{ fontSize: 13, fontWeight: 600, minWidth: 110 }}>{it.name}</b>
+        <span style={{ ...mono, fontSize: 11.5, color: tokens.textSecondary }}>{it.id}</span>
+        <Tooltip title={origin.hint}>
+          <Tag color={origin.color} style={smallTag}>
+            {origin.text}
+          </Tag>
+        </Tooltip>
+        {it.scope === 'workspace' && (
+          <Tooltip title="作用域 workspace：只投放到工作区内的落点（待实测的形态会标「未实测」）">
+            <Tag color="purple" style={smallTag}>
+              workspace
+            </Tag>
+          </Tooltip>
+        )}
+        {!it.enabled && (
+          <Tooltip title="已禁用（定义与引用都保留，可随时恢复）">
+            <Tag color="red" style={smallTag}>
+              已禁用
+            </Tag>
+          </Tooltip>
+        )}
+        {it.warnings && it.warnings.length > 0 && (
+          <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{it.warnings.join('\n')}</span>}>
+            <Tag color="orange" style={smallTag}>
+              提醒 {it.warnings.length}
+            </Tag>
+          </Tooltip>
+        )}
+        <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>
+          {it.description}
+          {it.source_file && <span style={{ ...mono, fontSize: 11, color: tokens.textPlaceholder }}> · {it.source_file}</span>}
+        </span>
+        {it.applicability.length === 0 ? (
+          <Tooltip title="没有任何候选 runtime（如归属 server 已消失的工具）">
+            <Tag style={{ ...smallTag, color: tokens.textPlaceholder }}>无候选底座</Tag>
+          </Tooltip>
+        ) : (
+          it.applicability.map((a) => {
+            const v = libraryStatusView(a.status)
+            return (
+              <Tooltip
+                key={a.runtime}
+                title={
+                  <span style={{ whiteSpace: 'pre-line' }}>
+                    {a.runtime} · {v.text}
+                    {a.reason ? `\n${a.reason}` : ''}
+                  </span>
+                }
+              >
+                <Tag color={v.color} style={smallTag}>
+                  {a.runtime}:{v.text}
+                </Tag>
+              </Tooltip>
+            )
+          })
+        )}
+      </Row>
+    )
+  }
+
+  const writeButtons = (kind: 'skill' | 'mcp', id: string, name: string, onEdit: () => void): ReactNode => (
+    <>
+      <Tooltip title={`编辑 ${name} 的定义（只改你写进去的键，其余原样保留）`}>
+        <Button size="small" onClick={onEdit}>
+          编辑
+        </Button>
+      </Tooltip>
+      <Popconfirm
+        title={`删除 ${name}？`}
+        description={
+          kind === 'skill'
+            ? '定义文件会被删除，已投放的副本会被撤回。此操作不可撤销（正文可先复制走）。'
+            : '定义文件会被删除，归属它的工具条目会一并摘除。此操作不可撤销。'
+        }
+        okText="删除"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        onConfirm={() => void doDelete(kind, id)}
+      >
+        <Button size="small" danger loading={delBusy === id}>
+          删除
+        </Button>
+      </Popconfirm>
+    </>
+  )
+
   return (
     <PageContainer
       title="能力"
@@ -494,6 +758,54 @@ export function CapabilitiesPage() {
       }
     >
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* ——— M2-4 Library：四类同构的统一能力清单（只读聚合） ——— */}
+        <Card>
+          <SectionHeader
+            title="能力清单（Library）"
+            hint="skill / MCP / Agent / 工具四类同构的只读聚合视图；每条给**逐 runtime 的可达性**（不做「整体可用吗」的合并结论——对 A 可用、对 B 不可用是有用信息）"
+            count={library.length}
+            loading={busy === 'library'}
+            onRefresh={() => refresh('library')}
+            extra={
+              <Space size={6}>
+                <Input
+                  size="small"
+                  allowClear
+                  style={{ width: 160 }}
+                  placeholder="搜索 id / 名称 / 描述"
+                  value={libQ}
+                  onChange={(e) => setLibQ(e.target.value)}
+                  onPressEnter={() => void loadLibrary()}
+                />
+                <Select
+                  size="small"
+                  style={{ minWidth: 120 }}
+                  value={libKind || 'all'}
+                  onChange={(v) => {
+                    const kind = v === 'all' ? '' : v
+                    setLibKind(kind)
+                    void loadLibrary(kind, libQ)
+                  }}
+                  options={[
+                    { value: 'all', label: '全部类型' },
+                    { value: 'skill', label: '技能' },
+                    { value: 'mcp', label: 'MCP' },
+                    { value: 'agent', label: 'Agent' },
+                    { value: 'tool', label: '工具' },
+                  ]}
+                />
+              </Space>
+            }
+          />
+          <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+            {library.length === 0 ? (
+              <SectionEmpty text="没有匹配的能力（能力定义在 ~/.forge/capabilities/{skills,mcp,tools}）" />
+            ) : (
+              library.map(libraryRow)
+            )}
+          </div>
+        </Card>
+
         {/* ——— Agent 视角统一能力目录（§8.1） ——— */}
         <Card>
           <SectionHeader
@@ -628,10 +940,15 @@ export function CapabilitiesPage() {
         <Card>
           <SectionHeader
             title="Skills"
-            hint="目录条目（平台唯一事实源）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影"
+            hint="目录条目（平台唯一事实源，`~/.forge/capabilities/skills/*.json`）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影。新建/编辑走同一条闸门：正文扫描不过 → 40001 且**零字节落盘**"
             count={skills.length}
             loading={busy === 'skills'}
             onRefresh={() => refresh('skills')}
+            extra={
+              <Button size="small" onClick={() => openCreate('skill')}>
+                新建 skill
+              </Button>
+            }
           />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {skills.length === 0 ? (
@@ -654,6 +971,7 @@ export function CapabilitiesPage() {
                     )}
                     <span style={{ flex: 1, fontSize: 12, color: tokens.textSecondary }}>{s.description}</span>
                     <SkillRuntimeTags runtimes={s.runtimes} scope={s.scope} />
+                    {writeButtons('skill', s.id, s.name || s.id, () => openEditSkill(s))}
                     {materializationButton(s)}
                     <Tooltip title={enabled ? '禁用：撤回已投放副本（定义与正文保留，可恢复）' : '启用：按其 runtimes 重新投放'}>
                       <Switch
@@ -674,10 +992,15 @@ export function CapabilitiesPage() {
         <Card>
           <SectionHeader
             title="MCP Servers"
-            hint="注册表条目（§13.3 M1/M6：只回明文与密钥的**键名**，值与引用一律不读回）；「探测」= live tools/list 写入 Tool 目录"
+            hint="注册表条目（§13.3 M1/M6：只回明文与密钥的**键名**，值与引用一律不读回）；「探测」= live tools/list 写入 Tool 目录；删除会**一并摘除归属它的工具条目**（留着等于让你看见一个调不通的能力）"
             count={globalMcpRows.length}
             loading={busy === 'mcps'}
             onRefresh={() => refresh('mcps')}
+            extra={
+              <Button size="small" onClick={() => openCreate('mcp')}>
+                新建 MCP server
+              </Button>
+            }
           />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {globalMcpRows.length === 0 ? (
@@ -694,6 +1017,10 @@ export function CapabilitiesPage() {
                   <span style={{ flex: 1 }}>
                     <span style={mono}>{m.endpoint}</span>
                   </span>
+                  {writeButtons('mcp', m.id, m.name, () => {
+                    const full = mcps.find((x) => x.id === m.id)
+                    if (full) openEditMcp(full)
+                  })}
                   {probeButton(m.id, m.probeable)}
                   {liveButton(m)}
                 </Row>
@@ -738,6 +1065,55 @@ export function CapabilitiesPage() {
             )}
           </div>
         </Card>
+
+        {/* ——— M2 定义编辑器（skill / MCP 共用；收原文 JSON 对象） ——— */}
+        <Modal
+          title={
+            edit
+              ? `${edit.created ? '新建' : '编辑'} ${edit.kind === 'skill' ? 'skill' : 'MCP server'}${edit.id ? ` · ${edit.id}` : ''}`
+              : ''
+          }
+          open={edit !== null}
+          onCancel={() => setEdit(null)}
+          onOk={() => void submitEdit()}
+          okText={edit?.created ? '新建' : '保存'}
+          confirmLoading={editBusy}
+          cancelText="取消"
+          width={720}
+          destroyOnClose
+        >
+          <div style={{ fontSize: 12, color: tokens.textSecondary, lineHeight: 1.8, marginBottom: 8 }}>
+            {edit?.created ? (
+              <>
+                请求体就是**定义原文**（JSON 对象，<code>id</code> 必填，只能是小写字母/数字/-/_ 且 ≤64 字符）。
+                <br />
+              </>
+            ) : (
+              <>
+                **只改这个框里出现过的键**：没写的键原样保留（含你自己加的字段）、写 <code>null</code> 删键、
+                写 <code>""</code>/<code>[]</code> 清空。
+                <br />
+              </>
+            )}
+            {edit?.kind === 'mcp' && !edit.created && (
+              <>
+                MCP 的明文 env 与密钥引用**后端从不读回**（界面只知道键名），所以这里不预填——
+                不动它们就别写，写了就会覆盖。密钥引用写成 <code>vault:路径</code> 或 <code>env:变量名</code>。
+                <br />
+              </>
+            )}
+            保存前先过闸门：正文扫描（critical 直接拒）、transport/路径/引用词法校验；
+            <b>被拒的定义不会落盘</b>（也不会进注册表）。
+          </div>
+          <Input.TextArea
+            value={edit?.text ?? ''}
+            onChange={(e) => setEdit((cur) => (cur ? { ...cur, text: e.target.value } : cur))}
+            autoSize={{ minRows: 12, maxRows: 22 }}
+            spellCheck={false}
+            style={{ fontFamily: tokens.fontMono, fontSize: 12.5 }}
+          />
+          {editErr && <Alert type="error" showIcon style={{ marginTop: 8 }} message="保存失败" description={editErr} />}
+        </Modal>
 
         {/* ——— B2：MCP 资源 / 提示词（live 拉取） ——— */}
         <Modal

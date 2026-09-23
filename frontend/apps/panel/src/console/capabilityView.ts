@@ -193,3 +193,88 @@ export function fmtProbeAt(iso?: string): string {
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
+
+// ——— M2 Library 视图模型（只读聚合；纯函数） ———
+
+/** Library 条目的类型标签文案（M5 之前不含 command）。 */
+export function libraryKindLabel(kind: string): string {
+  switch (kind) {
+    case 'skill':
+      return '技能'
+    case 'mcp':
+      return 'MCP'
+    case 'agent':
+      return 'Agent'
+    case 'tool':
+      return '工具'
+    default:
+      return kind
+  }
+}
+
+/** Library 条目的类型标签色（与能力页其它标签同一语言：skill 中性、MCP 绿、agent 蓝、工具金）。 */
+export function libraryKindColor(kind: string): string {
+  switch (kind) {
+    case 'mcp':
+      return 'green'
+    case 'agent':
+      return 'blue'
+    case 'tool':
+      return 'gold'
+    default:
+      return 'default'
+  }
+}
+
+/** 逐 runtime 可达性标签（颜色 + 短文案 + tooltip 里那句人话原因）。 */
+export function libraryStatusView(status: string): { color: string; text: string } {
+  switch (status) {
+    case 'projected':
+      return { color: 'green', text: '可用' }
+    case 'untested':
+      return { color: 'gold', text: '未实测' }
+    case 'not_configured':
+      return { color: 'orange', text: '未配置' }
+    case 'not_applicable':
+      return { color: 'default', text: '不适用' }
+    case 'disabled':
+      return { color: 'red', text: '已禁用' }
+    default:
+      return { color: 'default', text: status }
+  }
+}
+
+/** origin 标签（local = 本机定义文件可改；imported = 随平台来或探测出的，没有事实源文件可改）。 */
+export function libraryOriginView(origin: string): { color: string; text: string; hint: string } {
+  if (origin === 'local') {
+    return { color: 'cyan', text: '本机', hint: '来自本机定义文件（source_file），可在本页增删改' }
+  }
+  return {
+    color: 'default',
+    text: '内置',
+    hint: '随平台来的或运行时探测出来的（种子 Agent / builtin·observed 工具 / MCP 探测出的工具）：没有事实源文件可改',
+  }
+}
+
+/**
+ * 写面错误 → 用户可读文案（在**后端那句已经说清问题的话**后面补一步动作）。
+ *
+ * 刻意不在前端重写后端文案：后端文案带着具体是哪一项不合法（"stdio 必须给绝对路径"…），
+ * 前端再翻译一遍只会丢掉细节。这里只补「接下来做什么」，并且只在能确定下一步时补。
+ */
+export function writeErrorText(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  const code = (err as { code?: number }).code
+  switch (code) {
+    case 40000:
+      return `${msg}（检查字段名与取值：id 只能是小写字母/数字/-/_ 且 ≤64 字符）`
+    case 40001:
+      return `${msg}（按提示修正定义内容后重试：被拒的定义**不会**落盘）`
+    case 40401:
+      return `${msg}（这条定义可能已被外部删除：刷新列表后重试）`
+    case 40901:
+      return `${msg}（id 已被占用或被外部改动：换个 id，或刷新后重试——平台不会覆盖别人的改动）`
+    default:
+      return msg
+  }
+}

@@ -276,3 +276,97 @@ export interface McpProbeResult {
   tool_count: number
   tools: Tool[]
 }
+
+// ——— M2 定义写面（POST/PUT/DELETE /skills|/mcps）与 Library 统一读模型（GET /library） ———
+
+/**
+ * 定义写面的请求体：**原文 JSON 对象**（`Record<string, unknown>`）。
+ *
+ * 刻意不是结构体：`PUT` 的语义是「只改请求体里**出现过的**键」——未出现的保留原值、`null` 删键、
+ * `""`/`[]` 显式清空。带可选字段的 TS 接口分不清「没传 name」与「传了 name: ''」，
+ * 也表达不了 `null`；而键的出现与否在这里是语义，不是编码细节。
+ */
+export type CapabilityWriteBody = Record<string, unknown>
+
+/** 新建/覆盖写一个 skill 的结果。 */
+export interface SkillWriteResp {
+  id: string
+  /** 事实源文件路径。 */
+  path?: string
+  /** true = 新建了文件（覆盖写时为 false）。 */
+  created: boolean
+  /** 重校物化时写入的落点数。 */
+  written: number
+  /** 重校物化时撤回的落点数（禁用/收窄 runtimes 时）。 */
+  removed: number
+  /** 装载期正文扫描告警（放行了但该看一眼）。 */
+  warnings?: SkillWarning[]
+  /** 重校失败原因（**不回滚定义**：定义已改成功，物化下次自愈）。 */
+  materialize_errors?: string[]
+  next_action?: string
+}
+
+/** 删除一个 skill 的结果（幂等：本来就不存在 → `deleted:false` 且 code=0）。 */
+export interface SkillDeleteResp {
+  id: string
+  deleted: boolean
+  path?: string
+  /** 撤回的已物化副本数。 */
+  removed: number
+  materialize_errors?: string[]
+  next_action?: string
+}
+
+/** 新建/覆盖写一个 MCP server 的结果。 */
+export interface McpWriteResp {
+  id: string
+  path?: string
+  created: boolean
+  /** 绑了引用但当前解析不出值的密钥键（**只有键名**，值/引用不回）。 */
+  unresolved_secret_keys?: string[]
+  next_action?: string
+}
+
+/** 删除一个 MCP server 的结果（幂等）。 */
+export interface McpDeleteResp {
+  id: string
+  deleted: boolean
+  path?: string
+  /** 一并摘除的归属该 server 的 mcp 工具条目数。 */
+  tools_removed: number
+  next_action?: string
+}
+
+/**
+ * 一条能力在**某一个** runtime 上的可达性（Library 读模型）。
+ *
+ * `status` 五值各自对应一条不同的用户动作：
+ * `projected`（可直接选）/ `untested`（会投放但该 runtime 的投影声明尚未实测）/
+ * `not_configured`（声明了但本进程没解析出落点）/ `not_applicable`（底座不承载/未注册/白名单没它）/
+ * `disabled`（被显式关掉）。`reason` 是给人看的一句话，可直接显示。
+ */
+export interface LibraryApplicability {
+  runtime: string
+  ok: boolean
+  status: string
+  reason?: string
+}
+
+/** Library 统一能力条目（GET /library；skill | mcp | agent | tool）。 */
+export interface LibraryItem {
+  id: string
+  /** skill | mcp | agent | tool */
+  kind: string
+  name: string
+  description?: string
+  /** local（本机定义文件）/ imported（随平台来或运行时探测出的）。 */
+  origin: string
+  /** global | workspace。 */
+  scope: string
+  enabled: boolean
+  /** 事实源文件（代码注入/运行时探测的条目为空）。 */
+  source_file?: string
+  /** 逐候选 runtime 的可达性——**刻意不给「整体可用吗」的合并结论**。 */
+  applicability: LibraryApplicability[]
+  warnings?: string[]
+}
