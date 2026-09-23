@@ -64,6 +64,16 @@ const (
 	BusTurnError = "turn.error"
 	// BusRunCancelled 一轮 prompt 被取消。
 	BusRunCancelled = "run.cancelled"
+
+	// BusAutomationRun 一次 automation 触发的结果（ADR-12：**一个** type 承载全部结果，
+	// 含没产生会话的那些）。payload = {automation_id, trigger(scheduled|recovery|manual),
+	// scheduled_for, status(claimed|duplicate|overlap|failed|completed|skipped), reason?, conversation_id?}。
+	//
+	// 为什么不新建 `automation_runs` 表：events 表已具备持久化、按 agg_id 索引、since_seq 回放、
+	// WS 推送、transcript 归档的全套能力——新表是把同一套再实现一遍还要多一份保留期策略。
+	// 而 `conversations.origin` 列解决的是**反方向**查询（会话→是否自动化产物，逐行渲染不能
+	// 靠回放），故两者并存、互不可替代。
+	BusAutomationRun = "automation.run"
 )
 
 // 会话状态（进程内存储的展示值）。

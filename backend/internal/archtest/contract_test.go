@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-forge/internal/manager"
 )
 
 // frozenEventTypes 是控制面**对外契约**的事件 type 全集（`/v1/forge/ws/events` 帧的
@@ -42,33 +40,30 @@ var frozenEventTypes = []string{
 	"turn.ended",
 	"turn.error",
 	"run.cancelled",
+	"automation.run",
 }
 
 // TestEventTypeContractFrozen 冻结域事件 type 字面量。
 func TestEventTypeContractFrozen(t *testing.T) {
-	got := []string{
-		manager.BusSessionCreated,
-		manager.BusSessionResumed,
-		manager.BusUserMessage,
-		manager.BusMessage,
-		manager.BusThought,
-		manager.BusToolCall,
-		manager.BusToolUpdate,
-		manager.BusUsage,
-		manager.BusPermission,
-		manager.BusConfigOptions,
-		manager.BusPermissionRequest,
-		manager.BusPermissionPolicy,
-		manager.BusPermissionResolved,
-		manager.BusElicitationRequest,
-		manager.BusElicitationResolved,
-		manager.BusInputQueued,
-		manager.BusInputDelivered,
-		manager.BusInputCancelled,
-		manager.BusRuntime,
-		manager.BusTurnEnded,
-		manager.BusTurnError,
-		manager.BusRunCancelled,
+	// 从 events.go **源码**里扫出全部 `Bus* = "..."`，而不是在守卫里再手抄一份清单：
+	// 手抄那份有个洞——新增常量时若忘了往守卫里加一行，守卫照样绿（它根本没看见新常量），
+	// 而"新增事件 type 忘了同步契约"正是这个守卫存在的唯一理由。
+	raw, err := os.ReadFile(filepath.Join(backendRoot(t), "internal", "manager", "events.go"))
+	if err != nil {
+		t.Fatalf("读 events.go 失败: %v", err)
+	}
+	re := regexp.MustCompile(`(?m)^\s*(Bus[A-Za-z0-9_]*)\s*=\s*"([^"]+)"`)
+	got := make([]string, 0, len(frozenEventTypes))
+	seen := map[string]string{}
+	for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+		if prev, dup := seen[m[2]]; dup {
+			t.Fatalf("事件 type %q 被两个常量重复声明（%s 与 %s）", m[2], prev, m[1])
+		}
+		seen[m[2]] = m[1]
+		got = append(got, m[2])
+	}
+	if len(got) == 0 {
+		t.Fatal("从 events.go 没扫到任何 `Bus* = \"...\"`（正则失效，守卫形同虚设）")
 	}
 	sort.Strings(got)
 	want := append([]string(nil), frozenEventTypes...)
