@@ -12,6 +12,8 @@ import (
 
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/automation"
+	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/golib/gerror"
 )
 
 // ——— Automation 定义注册表（M4-3）———
@@ -140,7 +142,7 @@ func loadAutomationFile(path, id string, now time.Time) *automationRec {
 	}
 	def.Schedule.Normalize()
 	if err := def.Validate(); err != nil {
-		rec.loadErr = validationMessage(err)
+		rec.loadErr = errText(err)
 		return rec
 	}
 	rec.def = def
@@ -159,23 +161,51 @@ func (r *automationRec) applySchedule(now time.Time) {
 	}
 	action, occ, err := r.def.Schedule.Startup(r.def.LastFiredAt, now)
 	if err != nil {
-		r.loadErr = validationMessage(err)
+		r.loadErr = errText(err)
 		return
 	}
 	r.startup = action
 	r.nextDue = occ.At
 }
 
-// validationMessage 把带码错误压成一句人话（装载告警要能直接显示在列表里）。
-func validationMessage(err error) string {
+// errText 把任意错误压成一句人话（装载告警、触发失败原因都要能直接显示在面板上）。
+//
+// 三层来源都要照顾：acl 带码错误（给 Details，那才是人话）、经 `code.FromError` 归一过的
+// gerror（给 Msg），其余给 Error()。
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
 	var ae *acl.Error
-	if ok := asACLError(err, &ae); ok {
+	if asACLError(err, &ae) {
 		if ae.Details != "" {
 			return ae.Details
 		}
 		return ae.Code
 	}
+	if gerr, ok := code.FromError(err).(gerror.Error); ok && gerr.Msg != "" {
+		return gerr.Msg
+	}
 	return err.Error()
+}
+
+// notFoundAutomation / invalidAutomation / automationDisabled 运行面（手动触发）的三类拒绝。
+func notFoundAutomation(id string) error {
+	return acl.NewError(acl.ClassRequest, "automation_not_found",
+		fmt.Sprintf("未知 automation %q（列表刷新一下）", id), nil)
+}
+
+// invalidAutomation 定义本身不可执行（装载期就发现了）→ 报出装载期记下的原因，而不是"未知错误"。
+func invalidAutomation(rec automationRec) error {
+	return acl.NewError(acl.ClassRequest, "definition_invalid",
+		fmt.Sprintf("automation %s 的定义不可执行：%s", rec.def.ID, rec.loadErr), nil)
+}
+
+// automationDisabled 用户把它关了（enabled=false）→ 手动触发也拒绝：
+// 手动跑一次会绕过用户自己设的开关，而"关了还跑"是最难解释的一种行为。
+func automationDisabled(id string) error {
+	return acl.NewError(acl.ClassRequest, "automation_disabled",
+		fmt.Sprintf("automation %s 已停用（enabled=false）：先启用再手动触发", id), nil)
 }
 
 // asACLError 是 errors.As 的小包装（避免本文件为了一个断言再引 errors 的命名冲突）。
@@ -225,6 +255,14 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 	case !create && !exists:
 		return AutomationView{}, acl.NewError(acl.ClassRequest, "automation_not_found",
 			fmt.Sprintf("automation %s 不存在（列表刷新一下；平台不会\"顺便新建\"）", id), nil)
+	}
+	// 平台独占键（认领游标/运行史）不得由用户写面写入：`last_fired_at` 就是"这次触发过没有"
+	// 的判据，能写它就能让同一次触发重放（重复跑有副作用的 prompt），或把它永久卡住不跑。
+	for k := range patch {
+		if automation.IsReservedKey(k) {
+			return AutomationView{}, acl.NewError(acl.ClassRequest, "invalid_param",
+				fmt.Sprintf("键 %q 由平台写回（运行态），不可通过接口写入", k), nil)
+		}
 	}
 	// 定义文件里 `id` 是路径的事实：body 与路径不一致 → 参数错（而不是悄悄按路径改掉 body）。
 	if v, ok := patch["id"]; ok {
@@ -340,58 +378,23 @@ func (s *Service) saveAutomationOverlay(id string, overlay map[string]any) error
 	if err := writeDefinition(dir, "automation", id, overlay); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	rec := s.automations[id]
-	s.mu.Unlock()
-	if rec == nil {
+	// 写回后**重新装载这一条**，而不是在内存里逐键 merge。
+	//
+	// 逐键 merge 看着更省一次读盘，实际是个"忘了某个键"的陷阱：`recent_runs` 就那么漏过一次
+	// ——overlay 写盘时用内存里的旧环形缓冲覆盖文件，把刚追加的那条认领记录整段抹掉
+	// （文件里只剩最新一条）。重新装载让"内存 = 文件"成为定义，未知键/环形缓冲/时间格式
+	// 全走同一条解析路径，不可能各写一半。
+	rec := loadAutomationFile(filepath.Join(dir, id+".json"), id, time.Now())
+	if rec.loadErr != "" {
+		// 我们刚写成功却读不回来 → 只能是并发手改（或磁盘异常）：保留旧内存态并告警，
+		// 绝不用一条"读坏了的记录"覆盖调度态。
+		slog.Warn("automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
 		return nil
 	}
-	// 内存态就地更新（值来自刚写入的 overlay；未知键本来就不在内存结构里）。
-	updated := *rec
-	mergeOverlayIntoRec(&updated, overlay)
-	updated.applySchedule(time.Now())
 	s.mu.Lock()
-	s.automations[id] = &updated
+	s.automations[id] = rec
 	s.mu.Unlock()
 	return nil
-}
-
-// mergeOverlayIntoRec 把 overlay 应用到内存记录（避免为几个字段再读一次文件）。
-// 这里只认平台自己写的键；`state` 走状态机归一（未知状态名按 active，不是报错）。
-func mergeOverlayIntoRec(rec *automationRec, overlay map[string]any) {
-	for k, v := range overlay {
-		switch k {
-		case "state":
-			if s, ok := v.(string); ok {
-				rec.def.State = automation.NormalizeState(s)
-			}
-		case "last_fired_at":
-			switch t := v.(type) {
-			case string:
-				if parsed, err := time.Parse(time.RFC3339Nano, t); err == nil {
-					rec.def.LastFiredAt = &parsed
-				}
-			case time.Time:
-				rec.def.LastFiredAt = &t
-			case nil:
-				rec.def.LastFiredAt = nil
-			}
-		case "last_conversation_id":
-			rec.def.LastConversationID, _ = v.(string)
-		case "last_status":
-			rec.def.LastStatus, _ = v.(string)
-		case "last_reason":
-			rec.def.LastReason, _ = v.(string)
-		case "consecutive_failures":
-			if n, ok := v.(int); ok {
-				rec.def.ConsecutiveFailures = n
-			}
-		case "enabled":
-			if b, ok := v.(bool); ok {
-				rec.def.Enabled = b
-			}
-		}
-	}
 }
 
 // automationDueSnapshot 取"到期待处理"的快照（调度器每 tick 调用）。
@@ -439,22 +442,9 @@ func (s *Service) automationRecByID(id string) (automationRec, bool) {
 // 判据用"最近一次触发产生的会话仍在 in_progress"：会话自身状态就是最权威的运行态
 // （ADR-4：不建第二套 run 状态机）。
 func (s *Service) automationHasActiveRun(rec automationRec) bool {
-	id := rec.def.LastConversationID
-	if id == "" {
-		return false
-	}
-	s.mu.Lock()
-	conv, ok := s.conversations[id]
-	s.mu.Unlock()
-	if !ok {
-		return false
-	}
-	switch conv.Status {
-	case ConversationStatusCompleted, ConversationStatusFailed,
-		ConversationStatusCancelled, ConversationStatusInterrupted:
-		return false
-	}
-	return true
+	// 判据只有一条：**会话状态是不是 in_progress**（不另写一份终态清单——两份清单必然漂移，
+	// 而漂移的后果是"卡住的会话"被当成已结束，于是同一 occurrence 反复重跑）。
+	return s.conversationRunning(rec.def.LastConversationID)
 }
 
 // view 把记录投影成对外视图（时间一律 RFC3339 UTC 文本，与其余接口同格式）。

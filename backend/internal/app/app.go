@@ -213,6 +213,8 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（FORGE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
+	// M4-4 调度循环：`FORGE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
+	a.svc.StartAutomationScheduler(cfg.AutomationTick)
 
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
@@ -332,6 +334,9 @@ func (a *App) Run(ctx context.Context) error {
 // Close 释放装配的资源。顺序与改造前 defer 的 LIFO 一致：先关编排器（回收子进程），再关持久层。
 func (a *App) Close() {
 	a.closeOnce.Do(func() {
+		if a.svc != nil {
+			a.svc.StopAutomationScheduler()
+		}
 		if a.orch != nil {
 			a.orch.Close()
 		}

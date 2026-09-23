@@ -112,6 +112,17 @@ type Service struct {
 	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
 	automationDir string
 	automations   map[string]*automationRec
+	// automationStop 调度 goroutine 的停止函数（非 nil = 已启动；StartAutomationScheduler 幂等判据）。
+	automationStop context.CancelFunc
+	// automationDone 调度 goroutine 的退出信号（Stop 等它关闭再返回：停机后不该再有新触发起步）。
+	automationDone chan struct{}
+	// automationRunMu 把「认领判定 → 建会话 → 写回游标」串成临界区。
+	//
+	// 认领判定（`automation.Decide`）是纯函数，纯函数**不提供互斥**：tick 与
+	// `POST /automations/:id/run` 若同时看到"这个 occurrence 还没认领过"，两边都会建会话——
+	// 而 automation 的 prompt 常常有副作用（改代码、发通知），重复跑一次是不可接受的。
+	// 临界区里唯一的慢动作是建会话（子进程握手），而 automation 触发本身稀疏，串行化代价可忽略。
+	automationRunMu sync.Mutex
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
 	skillProjections []SkillProjection
 

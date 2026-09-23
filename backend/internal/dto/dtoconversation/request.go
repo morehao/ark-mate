@@ -38,6 +38,14 @@ type ConversationCreateReq struct {
 	// MCP 走 agent 白名单、skill 走各自的 runtimes 声明，且不产生能力指纹（不新起代际）。
 	// 显式传入时逐个校验 id 存在且对该 runtime 可达，不可达即报错并列出原因（不静默丢弃）。
 	Capabilities *CapabilitiesReq `json:"capabilities,omitempty"`
+	// Origin 会话来源，**内部字段**（`json:"-"`，不从 wire 读）：'' = 人工，'automation:<id>' = 该
+	// automation 触发。不让客户端自称自动化产物——它会给会话列表打标、也是
+	// `GET /automations/:id/runs` 的快速路径，能自称就意味着能伪造别人的运行史。
+	Origin string `json:"-"`
+	// RuntimeHint 指定 runtime（**内部字段**，`json:"-"`）：空 = 走 agent 的 routing_policy；
+	// 非空时必须是该 agent 声明的候选之一，否则报 `runtime_not_found`（绝不静默回落路由——
+	// "用户以为指定了、实际没指定"是最坏形态）。目前只有 automation 触发会设置它。
+	RuntimeHint string `json:"-"`
 }
 
 // SkillsPtr / McpsPtr 取字段（nil 安全的取值，供调用方少写一层判空）。

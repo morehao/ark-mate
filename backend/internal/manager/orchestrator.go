@@ -173,6 +173,9 @@ type StartOptions struct {
 	WorkspaceTemporary bool
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
+	// Origin 会话来源（平台判定，非用户输入）：'' = 人工，'automation:<id>' = 该 automation 触发。
+	// 只用它给会话列表打标与做"某 automation 历次生效运行"的快速路径；不参与任何鉴权判断。
+	Origin string
 	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 回落 agent 声明）。
 	//
 	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startConversationOn 里由本字段

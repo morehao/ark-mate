@@ -51,6 +51,18 @@ func (o *Orchestrator) StartConversation(ctx context.Context, agentID string, op
 	return o.startConversationOn(ctx, agent, runtimeID, opt)
 }
 
+// StartConversationOn 在**显式指定**的 runtime 上建会话（automation 的 target.runtime_hint）。
+//
+// 与 StartConversation 的唯一区别是跳过路由解析；成员校验在调用方（CreateConversation）完成：
+// "这个 runtime 是不是该 agent 的候选"属于配置事实，放在持有 agent 定义的那一层判更合适。
+func (o *Orchestrator) StartConversationOn(ctx context.Context, agentID, runtimeID string, opt StartOptions) (*CreateResult, error) {
+	agent, ok := o.svc.AgentByID(agentID)
+	if !ok {
+		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
+	}
+	return o.startConversationOn(ctx, agent, runtimeID, opt)
+}
+
 // startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
 // RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
 func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID string, opt StartOptions) (*CreateResult, error) {
@@ -115,7 +127,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 
 	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
-		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint,
+		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
 		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。

@@ -160,9 +160,10 @@ func (s Schedule) firstMatching(t time.Time, loc *time.Location, pred func(time.
 // dayCandidates 某本地日期的候选时刻（daily 恒一个；weekly 命中 daysOfWeek 才有一个）。
 //
 // DST 的两个方向都在这里落地：
-//   - **空档**（春季前移：本地 02:30 不存在）：`time.Date` 把它规范化为之后的有效时刻
-//     （02:30 → 03:30），语义等价于 openwork 的前移分支；这与墙钟不符时产 warning，
-//     不静默。Go 标准库因此省掉了它那段 18 小时搜索窗口。
+//   - **空档**（春季前移：本地 02:30 不存在）：Go 的 `time.Date` 对"不存在的本地时刻"**没有**
+//     前移保证——实测 America/New_York 2026-03-08 02:30 得到 06:30Z（= 01:30 EST，比意图**早**
+//     一小时）。故这里用 `shiftPastWall` 自己向后找第一个真正越过该墙钟的时刻（→ 03:00 EDT），
+//     并产 warning，不静默。
 //   - **回拨**（秋季重复：本地 01:30 出现两次）：`time.Date` 返回**第一次**（夏令时那一次）。
 //     行为写进注释与测试，不留给读代码的人猜。
 func (s Schedule) dayCandidates(day time.Time, loc *time.Location) []Occurrence {

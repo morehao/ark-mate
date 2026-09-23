@@ -432,6 +432,21 @@ func TestStateMachine(t *testing.T) {
 	}
 }
 
+// TestReservedKeys 平台独占键：用户写面不得写（`last_fired_at` 就是认领判据，能写它就能重放）。
+func TestReservedKeys(t *testing.T) {
+	for _, k := range []string{"last_fired_at", "last_conversation_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
+		if !IsReservedKey(k) {
+			t.Errorf("%s 应是平台独占键", k)
+		}
+	}
+	// 用户可写的那几个不能被误伤（含 state：停用/归档/从 needs_attention 恢复都是用户操作）
+	for _, k := range []string{"id", "name", "enabled", "schedule", "target", "max_run_duration", "state"} {
+		if IsReservedKey(k) {
+			t.Errorf("%s 不是平台独占键（用户必须能写）", k)
+		}
+	}
+}
+
 // TestAutomationValidate 定义级校验：跑不了的定义在装载期就该被拒（而不是每 tick 报一次）。
 func TestAutomationValidate(t *testing.T) {
 	base := func() *Automation {
@@ -451,6 +466,8 @@ func TestAutomationValidate(t *testing.T) {
 		{"缺 id", func(a *Automation) { a.ID = "" }},
 		{"缺 agent_id", func(a *Automation) { a.Target.AgentID = "" }},
 		{"缺 prompt", func(a *Automation) { a.Target.Prompt = "" }},
+		{"缺 cwd", func(a *Automation) { a.Target.Cwd = "" }},
+		{"cwd 非绝对路径", func(a *Automation) { a.Target.Cwd = "ws/相对" }},
 		{"调度非法", func(a *Automation) { a.Schedule = daily("Mars/Olympus", 9, 0) }},
 		{"duration 非法", func(a *Automation) { a.MaxRunDuration = "半小时" }},
 		{"duration 负数", func(a *Automation) { a.MaxRunDuration = "-5m" }},

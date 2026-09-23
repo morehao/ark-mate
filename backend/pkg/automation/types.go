@@ -9,6 +9,7 @@
 package automation
 
 import (
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -71,12 +72,42 @@ type Automation struct {
 	MaxRunDuration string `json:"max_run_duration,omitempty"`
 
 	// —— 运行态 overlay（平台写回；未知键一并保留）——
-	State               string     `json:"state,omitempty"` // active | inactive | needs_attention | archived
+	State string `json:"state,omitempty"` // active | inactive | needs_attention | archived
+	// LastFiredAt 最近一次**认领**的 occurrence，不论结果（ADR-10 的推进点，也是
+	// "这个 occurrence 是否已经触发过"的唯一判据）。名字沿用"fired"而不是"claimed"：
+	// 定义文件里对用户而言它读作"上次是什么时候跑的"，而 skipped/overlap 也是"跑过一趟"。
 	LastFiredAt         *time.Time `json:"last_fired_at,omitempty"`
 	LastConversationID  string     `json:"last_conversation_id,omitempty"`
 	LastStatus          string     `json:"last_status,omitempty"` // completed | failed | interrupted | skipped
 	LastReason          string     `json:"last_reason,omitempty"` // 最近一次没跑成/失败的原因（人话）
 	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
+	// RecentRuns 最近若干次触发的留痕（最新在前，最多 RecentRunsMax 条）。
+	//
+	// 与 `Last*` 有意的冗余：`Last*` 是"一眼看最近一次"的字段（面板列表直接用），
+	// `RecentRuns` 是"最近这些次分别怎么了"（`GET /automations/:id/runs`）。
+	// 两者由**同一个写入函数**一起生成，不存在各写一半的可能。
+	RecentRuns []RunRecord `json:"recent_runs,omitempty"`
+}
+
+// ReservedKeys 平台独占的运行态键：用户写面（PUT/PATCH）**不得**写它们。
+//
+// 不设这条闸门的后果不是"数据难看"，而是**认领机制可被绕过**：`last_fired_at` 就是
+// "这个 occurrence 已经触发过"的判据，客户端能写它就能让同一次触发再来一遍（重复跑有副作用的
+// prompt），或者反过来把一条 automation 永久卡住不跑。`state` 不在此列——启用/停用/归档
+// 本来就是用户操作（`needs_attention` 由平台写，用户可把它改回 `active` 表示"我修好了"）。
+var ReservedKeys = []string{
+	"last_fired_at", "last_conversation_id", "last_status", "last_reason",
+	"consecutive_failures", "recent_runs",
+}
+
+// IsReservedKey 见 ReservedKeys。
+func IsReservedKey(k string) bool {
+	for _, r := range ReservedKeys {
+		if r == k {
+			return true
+		}
+	}
+	return false
 }
 
 // MaxRunDurationLimit 单轮外层超时的上限（对齐 openwork 的运行时上限）。
@@ -96,6 +127,17 @@ func (a *Automation) Validate() error {
 	}
 	if a.Target.Prompt == "" {
 		return acl.NewError(acl.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)
+	}
+	// cwd 必须**在创建时就写死**（ADR-6）。留空就等于"每次触发都按当时的活跃工作空间解析"——
+	// 那正是 openwork 吃过的亏（切换活跃工作空间会静默改掉所有 automation 的目标），
+	// 而且自动化往往是"半夜跑、改了不该改的东西"，事后极难归因。
+	if a.Target.Cwd == "" {
+		return acl.NewError(acl.ClassRequest, "invalid_param",
+			"automation 缺少 target.cwd：工作空间必须在创建时钉死（触发时不再解析活跃工作空间）", nil)
+	}
+	if !filepath.IsAbs(a.Target.Cwd) {
+		return acl.NewError(acl.ClassRequest, "invalid_param",
+			"automation 的 target.cwd 必须是绝对路径，得到 "+a.Target.Cwd, nil)
 	}
 	if _, err := a.RunDuration(); err != nil {
 		return err
