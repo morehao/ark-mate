@@ -285,6 +285,18 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 `50000` 是兜底码：任何未归类的 error 经 `code.FromError` 出口都会落成它。
 信封里**不会出现 `code: -1`**（那是不带业务码的裸错误落到 gincontext 默认分支的产物）。
 
+**能力定义写面（`POST/PUT/DELETE /skills|/mcps`）按「用户的下一步动作」分派同一个码**——同一个 `40001`
+在写面里可能对应三种完全不同的处置，所以 `msg` 会写明是哪一种（`msg` 是给人看的一句话，
+**机器判据只有 `code`**；括注里的是服务端内部分类名，不出现在信封的独立字段里）：
+
+| 情形 | code | msg 里的分类名 | 用户该做什么 |
+| --- | --- | --- | --- |
+| id 缺失/非法、路径 id 与 body id 不一致 | `40000` | `invalid_param` | 改参数 |
+| 定义被闸门拒绝（正文 critical / transport 非法 / stdio 非绝对路径 / 引用词法…） | `40001` | `definition_invalid` | 改定义内容重试；**被拒的定义零字节落盘** |
+| 目标不存在（`PUT` 到不存在的 id） | `40401` | `skill_not_found` · `mcp_not_found` | 刷新列表（**平台不会"顺便新建"**，打错 id 不会静默建出空定义） |
+| id 已被占用 / 读写窗口内被外部改动 | `40901` | `*_exists` · `definition_changed` | 换 id 或刷新后重试（**平台绝不 last-write-wins**） |
+| 未配置能力目录 | `40001` | `capability_dir_unset` | 设 `FORGE_CAPABILITIES`；不静默"内存生效" |
+
 WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`turn.ended/error`、`run.cancelled` 等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
 
 ## 开发
