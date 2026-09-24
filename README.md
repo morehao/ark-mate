@@ -346,6 +346,16 @@ make vet / test   # go vet / go test ./...
 # 前端：cd frontend && pnpm typecheck / pnpm build
 ```
 
+验收驱动（都要先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
+
+```bash
+cd frontend
+pnpm smoke:e2e            # REST/WS 冒烟（不需要真实底座）
+pnpm smoke:e2e:live dsh   # 真一轮对话（需要装好底座与凭据）
+pnpm ui:accept            # 真 Chrome 界面验收：能力勾选面板 / `/` 命令补全 / 自动化页
+                          # 可只跑一条：pnpm ui:accept cmd（cap | cmd | auto）
+```
+
 容器：
 
 ```bash

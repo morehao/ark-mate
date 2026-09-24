@@ -185,14 +185,20 @@ export const consoleStyleSheet = `
   .fg-cmd-pop {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    max-height: 232px;
-    overflow-y: auto;
     padding: 4px;
     border: 1px solid ${tokens.border};
     border-radius: 10px;
     background: ${tokens.surface};
     box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+  }
+  /* 只有候选列表滚动，页脚（"命令由底座提供，平台只做回显"）常驻可见——
+     候选多时（opencode 实测 23 条）它是用户判断"这些命令从哪来"的唯一线索。 */
+  .fg-cmd-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 212px;
+    overflow-y: auto;
   }
   .fg-cmd-item {
     display: flex;

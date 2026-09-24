@@ -147,26 +147,29 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
         {hintOpen && (
           // 候选列表（贴输入框上方，走文档流：弹层出现时输入框整体上移，不盖住正在打的字）。
           // mousedown 而不是 click：click 要等 mouseup，而 textarea 会先因失焦收起弹层。
+          // 页脚放在**滚动区之外**：候选多时（opencode 实测通告 23 条）说明文字不该被滚没。
           <div className="fg-cmd-pop" role="listbox" aria-label="底座提供的命令">
-            {hints.map((c, i) => (
-              <button
-                key={c.name}
-                type="button"
-                role="option"
-                aria-selected={i === hintAt}
-                className={i === hintAt ? 'fg-cmd-item fg-on' : 'fg-cmd-item'}
-                title={c.description || undefined}
-                onMouseEnter={() => setHintIndex(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  acceptHint(c)
-                }}
-              >
-                <span className="fg-cmd-name">/{c.name}</span>
-                {c.hint && <span className="fg-cmd-hint">{c.hint}</span>}
-                {c.description && <span className="fg-cmd-desc">{c.description}</span>}
-              </button>
-            ))}
+            <div className="fg-cmd-list">
+              {hints.map((c, i) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  role="option"
+                  aria-selected={i === hintAt}
+                  className={i === hintAt ? 'fg-cmd-item fg-on' : 'fg-cmd-item'}
+                  title={c.description || undefined}
+                  onMouseEnter={() => setHintIndex(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    acceptHint(c)
+                  }}
+                >
+                  <span className="fg-cmd-name">/{c.name}</span>
+                  {c.hint && <span className="fg-cmd-hint">{c.hint}</span>}
+                  {c.description && <span className="fg-cmd-desc">{c.description}</span>}
+                </button>
+              ))}
+            </div>
             <div className="fg-cmd-foot">↑↓ 选择 · Enter 填入 · Esc 关闭 —— 命令由底座提供，平台只做回显</div>
           </div>
         )}

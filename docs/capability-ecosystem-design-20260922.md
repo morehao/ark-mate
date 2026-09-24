@@ -862,7 +862,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 ### 实施记录与偏离（2026-09-23 收口）
 
-**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
+**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）；**T-4 面板界面验收于 2026-09-24 以真 Chrome 补做完毕**（M3-4 / M4-6 / M5′ 共 51 条断言全绿）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
 
 **实施偏离（原案 → 实际 → 为什么）**
 
@@ -894,6 +894,10 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 - **M3**：代际迁移四条纪律（轮次内不变 / 下一轮生效 / 忙则顺延 / 失败回退）+ 缩权立刻生效 + `FORGE_GENERATION_LIMIT` 拒绝策略，全部有单测与真底座观察。
 - **M4**：容器内嵌 tzdata（实测 **+403 KB**，scratch 对照证明 import 承重）；`POST /automations/preview` 把"时区 + DST + weekly"变成可见事实；`conversations.origin = automation:<id>` 作为来源的权威判据。
 - **M5′（2026-09-24 追加）**：`pkg/acl` 归一化 `available_commands_update` → `session.commands` 域事件（全量、保序、空列表照样发布），manager 转发为域事件，面板输入框 `/` 补全。**契约面四处同步**（`events.go` / archtest 冻结快照 / 前端 `Ev` / README）并**实跑验证过守卫有牙齿**：临时抽掉前端 `Ev.Commands` 后 `TestFrontendEventTypesMatchRegistry` 报 `事件 type "session.commands" 在契约里、但前端 events.ts 的 Ev 缺失`，补回即绿。**未新增路由、未新增表、未改 schema**。
+- **T-4 面板界面验收（2026-09-24 补做）**：驱动方式为零依赖的真 Chrome CDP（Node 24 自带全局 `WebSocket`，不引 playwright/puppeteer；脚本不自己起服务——验的就是人正在看的 `:5173`/`:10001`）。M3-4 21 条 + M5′ 12 条 + M4-6 26 条全绿，含 API/DOM 双向交叉验证。**真机推翻两处实现假设、修掉一个既有缺陷**：
+  1. `AutomationsPage.onPreview` 对 `form.validateFields()` 的失败走 `String(err)`，而 antd reject 的是 `{errorFields}` 普通对象 → 界面上一句 `[object Object]`，恰好把"预览就是为了先把话说清楚"反过来。修法 `describeFormError()`：校验失败列字段与人话原因，领域拒绝照常走 `toErrorMessage`（实测修后输出 `表单还没填完：工作空间（需要一个绝对路径的工作空间）、Prompt（任务内容不为空）`）。
+  2. 斜杠补全原按"命令名里不含 `/`"截断上下文，但 opencode **实测**就把命名空间写进名字（`git/branch`/`git/commit-push`/`git/pr-merge`）→ 手打 `/git/` 时弹层当场消失。修法：上下文边界只认空白。
+  3. 候选多时（实测 **23 条**）`.fg-cmd-pop` 整体滚动，把"命令由底座提供，平台只做回显"这句页脚滚出可视区——而它是用户判断命令来源的唯一线索。修法：滚动区收窄到列表，页脚常驻。
 
 ---
 
@@ -922,7 +926,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 **本轮已知缺口（2026-09-23 收口时如实登记）**
 
 1. **假设 A 的 E1–E6 探针未跑**：绑定粒度与**跨代际 resume 质量**仍无实测数据。投影根是 per-runtime 的、跨代际共享，因此"切代之后模型还记不记得前文"这件事对真实底座**未取证**。不阻塞任何功能（见上文假设 A 与 ADR-14）。
-2. **面板界面验收未在浏览器里执行**：M3-4（输入卡能力选择器）与 M4-6（自动化页）的 DoD 只有 `pnpm typecheck`/`build` + 真服务 REST 冒烟 + Go 侧端到端用例作为证据，**不是"看过界面"**。页面本身在前端无测试框架的既有状况下只有编译期覆盖。
+2. ~~**面板界面验收未在浏览器里执行**~~ —— **已于 2026-09-24 闭环**：M3-4 / M4-6 / M5′ 三条线以**真 Chrome + 真服务**跑完（`frontend/scripts/panel-ui-acceptance.mjs`，51 条断言全绿），过程中抓到并修掉 3 个真实缺陷（见下文 M5′ 与 T-4 实测记录）。证据：`.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md` + 22 张截图。
 3. **`make image/runtimes` 未用当前代码重建**：最小镜像**已**实跑成功并做过容器自检（`ark-forge:local` 142 MB；容器起得来、`/v1/forge/health` → 200，记录见 `docs/deployment.md` §8），但内置底座的 `--target forge-runtimes` 两种开关组合仍是旧镜像，故**容器内跑不通一轮真实对话**（M0 删 echo 后最小镜像内已无免 key 自检手段）。
 
 ---
