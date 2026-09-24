@@ -862,7 +862,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 ### 实施记录与偏离（2026-09-23 收口）
 
-**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）；**T-4 面板界面验收于 2026-09-24 以真 Chrome 补做完毕**（M3-4 / M4-6 / M5′ 共 51 条断言全绿）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
+**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）；**T-4 面板界面验收于 2026-09-24 以真 Chrome 补做完毕**（M3-4 / M4-6 / M5′ 共 51 条断言全绿）；**同日内置底座镜像 `ark-forge:runtimes` 用当轮代码重建，并在容器内跑通一轮真实会话**（T-5 收口）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
 
 **实施偏离（原案 → 实际 → 为什么）**
 
@@ -898,6 +898,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
   1. `AutomationsPage.onPreview` 对 `form.validateFields()` 的失败走 `String(err)`，而 antd reject 的是 `{errorFields}` 普通对象 → 界面上一句 `[object Object]`，恰好把"预览就是为了先把话说清楚"反过来。修法 `describeFormError()`：校验失败列字段与人话原因，领域拒绝照常走 `toErrorMessage`（实测修后输出 `表单还没填完：工作空间（需要一个绝对路径的工作空间）、Prompt（任务内容不为空）`）。
   2. 斜杠补全原按"命令名里不含 `/`"截断上下文，但 opencode **实测**就把命名空间写进名字（`git/branch`/`git/commit-push`/`git/pr-merge`）→ 手打 `/git/` 时弹层当场消失。修法：上下文边界只认空白。
   3. 候选多时（实测 **23 条**）`.fg-cmd-pop` 整体滚动，把"命令由底座提供，平台只做回显"这句页脚滚出可视区——而它是用户判断命令来源的唯一线索。修法：滚动区收窄到列表，页脚常驻。
+- **T-5 内置底座镜像重建 + 容器内真实一轮（2026-09-24 补做）**：`make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（版本钉在 `dsh 0.1.5-rc.3` / `opencode 1.18.32`）→ `ark-forge:runtimes` **673 MB**；只装 opencode 的一版 **450 MB**（容器内 `dsh` 确实不存在），两个开关各自生效。镜像内 `node v24.21.0` / `dsh 0.1.5-rc.3` / `opencode 1.18.32`，`GET /` 命中的资产里含 M5′ 的 `fg-cmd-pop`（证明是当前代码而非旧产物；注意 `sh -lc` 会重置 `PATH`，容器内校验要用 `sh -c`）。**容器内真实会话**：`POST /agents/opencode/start`（`connected=true`）→ 建会话 → `POST /conversations/:id/prompt` → `status=completed`、`GET /usage/summary` = `runs=1 completed=1`；该会话 `history` 里出现 **`session.commands`**（容器内 3 条），即 M5′ 在打包产物里同样成立。**顺带修掉 Makefile 与文档的 tag 不一致**：`image/runtimes` 原固定产出 `$(IMAGE_TAG)-runtimes`（默认 `ark-forge:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是 `ark-forge:runtimes`——开箱即用不了；现由独立变量 `RUNTIMES_TAG`（默认 `runtimes`）决定，并把「容器里怎么给底座凭据」（`docker cp` + `chown`；bind mount 因宿主 `600` 权限读不到）写进 `docs/deployment.md` §4。**残留**：dsh 侧只验到「起得来 + 握手通」（其 provider 凭据是环境变量 `apiKeyEnv`，本机未导出），故真实轮次由 opencode 承担。
 
 ---
 
@@ -927,7 +928,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 1. **假设 A 的 E1–E6 探针未跑**：绑定粒度与**跨代际 resume 质量**仍无实测数据。投影根是 per-runtime 的、跨代际共享，因此"切代之后模型还记不记得前文"这件事对真实底座**未取证**。不阻塞任何功能（见上文假设 A 与 ADR-14）。
 2. ~~**面板界面验收未在浏览器里执行**~~ —— **已于 2026-09-24 闭环**：M3-4 / M4-6 / M5′ 三条线以**真 Chrome + 真服务**跑完（`frontend/scripts/panel-ui-acceptance.mjs`，51 条断言全绿），过程中抓到并修掉 3 个真实缺陷（见下文 M5′ 与 T-4 实测记录）。证据：`.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md` + 22 张截图。
-3. **`make image/runtimes` 未用当前代码重建**：最小镜像**已**实跑成功并做过容器自检（`ark-forge:local` 142 MB；容器起得来、`/v1/forge/health` → 200，记录见 `docs/deployment.md` §8），但内置底座的 `--target forge-runtimes` 两种开关组合仍是旧镜像，故**容器内跑不通一轮真实对话**（M0 删 echo 后最小镜像内已无免 key 自检手段）。
+3. ~~**`make image/runtimes` 未用当前代码重建**~~ —— **已于 2026-09-24 闭环**：用当轮代码重建 `ark-forge:runtimes`（673 MB，dsh 0.1.5-rc.3 / opencode 1.18.32 / node v24.21.0，内嵌前端含 M5′ 的 `fg-cmd-pop`），并**在容器内跑通一轮真实会话**（opencode → `status=completed`、`usage runs=1 completed=1`；同一条会话的 `history` 里出现 `session.commands`，证明 M5′ 在打包产物里同样成立）。顺带修掉 Makefile 与文档的 tag 不一致（`make image/runtimes` 原来产出 `ark-forge:local-runtimes`，而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找 `ark-forge:runtimes`，开箱即用不了）。**残留**：dsh 侧仍无真实轮次（其 provider 凭据走环境变量 `apiKeyEnv`，本机未导出），记录见 `docs/deployment.md` §4/§8。
 
 ---
 

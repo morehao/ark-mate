@@ -106,6 +106,7 @@ clean:
 #   make image                                    —— 最小镜像（只含 forge 本体 + echo 自检底座）
 #   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
 #                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
+#                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-forge:runtimes）
 #   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
 # 受限网络（镜像站 / Go 代理 / npm 镜像）直接覆盖下面的变量，例如：
 #   make image NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
@@ -121,6 +122,10 @@ DSH_VERSION      ?= latest
 OPENCODE_VERSION ?= latest
 IMAGE            ?= ark-forge
 IMAGE_TAG        ?= local
+# 含底座镜像的 tag 单独一个变量：`make image/runtimes` 与 `make image/run IMAGE_TAG=runtimes`
+# 是文档里成对写的两条命令，若在这里复用 IMAGE_TAG，默认会产出 `ark-forge:local-runtimes`
+# 而 run/文档找的是 `ark-forge:runtimes`——开箱即用不了（实测踩到）。
+RUNTIMES_TAG     ?= runtimes
 FORGE_PORT       ?= 10001
 WITH_DSH         ?= false
 WITH_OPENCODE    ?= false
@@ -135,7 +140,7 @@ image:
 
 # 含底座镜像：target 与开关必须一起给（只给开关会被最小镜像的守卫拒绝）
 image/runtimes:
-	docker build -t $(IMAGE):$(IMAGE_TAG)-runtimes --target forge-runtimes $(IMAGE_ARGS) \
+	docker build -t $(IMAGE):$(RUNTIMES_TAG) --target forge-runtimes $(IMAGE_ARGS) \
 	  --build-arg WITH_DSH=$(WITH_DSH) --build-arg WITH_OPENCODE=$(WITH_OPENCODE) .
 
 image/run:
