@@ -606,6 +606,9 @@ export function ChatPage() {
                       busy ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`
                     }
                     onSend={onSend}
+                    // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面
+                    // （dsh 的 ACP 面不含命令）。输入框里打 `/` 时据此给候选，平台不声明这些命令。
+                    commands={view?.commands}
                   />
                   {dockLine && (
                     <div

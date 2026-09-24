@@ -27,6 +27,15 @@ const (
 	// 如 dsh 在 provider 拓扑变化时推）。payload = {session_id, agent_id, runtime, options}
 	// （options = acl.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
 	BusConfigOptions = "session.config_options"
+	// BusCommands 会话可用命令**全量**列表（ACP session/available_commands_update；
+	// 如 opencode 会通告它的斜杠命令，dsh 的 ACP 面不含命令故永不产生本事件）。
+	// payload = {session_id, agent_id, runtime, commands}
+	// （commands = acl.CommandInfo 切片 {name, description?, hint?}，顺序由底座给出、平台不重排）。
+	//
+	// 语义边界（ADR-17）：这是**发现面**，不是声明面——命令由底座自报、执行只是把它当
+	// 普通提示词发出去（ACP 没有独立的执行方法），平台既不拥有这些命令也不做投影/写面。
+	// 空列表也会发布（"通告了当前没有命令"要让前端清空既有候选，不能当成"没发生"）。
+	BusCommands = "session.commands"
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"

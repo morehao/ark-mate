@@ -70,7 +70,7 @@ ark-forge 是**单操作员的 ACP 多 runtime 控制面**：一个 Go 单二进
 - *假设 A（已并入 ADR-14，且不再是阻塞项）*：runtime 允许**比进程更细**地收窄能力面（`session` 或 `directory`）。**本方案不依赖它**——能力集按进程绑定，会话级子集总能通过"不同指纹 → 不同代际"表达，故假设不成立只是**多花内存**，不影响功能是否存在；成立则是省内存的优化。**若连"按 cwd 分进程"都无法让两套能力集并存**（实测罕见）：按 cwd 进一步分进程，代价仍是内存。验证方法见「回归与验证范围 · 能力绑定范围的验证方法」。
   **【实施结论 2026-09-23】未实测**：E1–E6 探针本轮未执行，两个 adapter 如实保持 `CapabilityScope=process` + `Tested=false`（第 10 条 archtest 守卫在守）。影响面仅限"多套能力集能否共享一个进程"这一省内存优化与"跨代际 resume 质量"的记录，**不影响任何功能的可用性**——代际绑定（ADR-13/ADR-14）不赌这个假设。补测仍为开放项，登记在开发计划的待办清单 T-1。
 - *假设 B*：opencode 与 dsh 的原生 command / subagent 定义目录约定在 2026-09 仍有效。**这条假设只 gate M5**（评审已把 command 延后），因此它不阻塞 M1–M4 的任何验收项。**若不成立**：M5 里 command 只做平台数据层（Library 可见、不可物化），投影状态报 `not_applicable`，或直接不做。
-  **【实施结论 2026-09-23·分底座实测 + 实测否决】**：opencode 1.18.32 **成立**（读项目 `.opencode/command/*.md` 与 `$XDG_CONFIG_HOME/opencode/command/*.md`，并把命令经 `available_commands_update` 通告出来）；dsh 0.1.5-rc.2 **不成立**（命令由插件 `ctx.commands.register()` 进程内注册、无目录扫描，`dsh-acp` 的不支持清单明列"命令"，实测 6s 内 0 条通告）。**即便如此也不做**——**M5-0 = No-Go**，四条理由：① 落点不在平台拥有的根上（opencode 只认**用户工作空间**的项目目录或**底座自己的配置树**；`~/.agents/commands` 实测不被读取，即命令**没有** skill 那样的中立根）；② 同类场景已有中立根落点（实测 opencode 会把 `~/.agents/skills` 里的 skill **以命令形式**通告，平台既有的 skill 投影已间接产出"运行时可用的命令"，再叠一层是重复建设 + 两套语义）；③ 它是**单底座**特性（dsh 是 ACP 面明确不做，非"暂未实现"），不值得为它新增 Library kind；④ 真正的缺口不是"声明/投影"而是"**发现**"——ACP 规范里命令只有通告、执行就是把命令行当 `session/prompt` 文本发出，所以用户今天已能直接输入 `/review` 生效，平台缺的只是接收通告（`pkg/acl` 当前忽略它）。取证见 `.dsh/docs/notes/2026-09-23-command-surface-probe.md`；留档的两个可选后续（M5′ 发现面、MCP prompts 作为中立命令面）未排期，见待办 T-2/T-3。
+  **【实施结论 2026-09-23·分底座实测 + 实测否决】**：opencode 1.18.32 **成立**（读项目 `.opencode/command/*.md` 与 `$XDG_CONFIG_HOME/opencode/command/*.md`，并把命令经 `available_commands_update` 通告出来）；dsh 0.1.5-rc.2 **不成立**（命令由插件 `ctx.commands.register()` 进程内注册、无目录扫描，`dsh-acp` 的不支持清单明列"命令"，实测 6s 内 0 条通告）。**即便如此也不做**——**M5-0 = No-Go**，四条理由：① 落点不在平台拥有的根上（opencode 只认**用户工作空间**的项目目录或**底座自己的配置树**；`~/.agents/commands` 实测不被读取，即命令**没有** skill 那样的中立根）；② 同类场景已有中立根落点（实测 opencode 会把 `~/.agents/skills` 里的 skill **以命令形式**通告，平台既有的 skill 投影已间接产出"运行时可用的命令"，再叠一层是重复建设 + 两套语义）；③ 它是**单底座**特性（dsh 是 ACP 面明确不做，非"暂未实现"），不值得为它新增 Library kind；④ 真正的缺口不是"声明/投影"而是"**发现**"——ACP 规范里命令只有通告、执行就是把命令行当 `session/prompt` 文本发出，所以用户今天已能直接输入 `/review` 生效，平台缺的只是接收通告（`pkg/acl` 当时忽略它）。取证见 `.dsh/docs/notes/2026-09-23-command-surface-probe.md`；留档的两个可选后续里，**M5′ 发现面已于 2026-09-24 实施**（`pkg/acl` 归一化 + `session.commands` 事件 + 面板 `/` 补全，零投影零写入，ADR-17），**MCP prompts 作为中立命令面仍未排期**（待办 T-3）。
 
 ### 验收标准
 
@@ -721,6 +721,7 @@ var notFoundCodes = map[string]bool{
 | `conversations` 表 | 全部会话读路径 | 新增 3 列 + 2 索引（v7：`origin`、`capability_json`、`capability_fingerprint`） | 纯增列，旧数据默认 `''`；旧二进制读新库不受影响（它只是看不到这几列）；新二进制读旧库走迁移补齐。空指纹 = 未声明 → 回落 agent 白名单（与今天一致） |
 | 既有暖进程缓存 `conns`（`orchestrator.go:85`） | 全部会话建立/复用路径 | **连接键新增一维能力指纹**（`connKey` + 指纹）；`Spec` 新增 `CapabilityScope`（默认 `process`） | 指纹为空/未声明时键与今天逐字相同 → 缺省零回归；同配置共享暖进程的规则原样成为代际复用规则 |
 | 域事件契约（22 个 type） | `internal/manager/events.go`、`internal/archtest/contract_test.go` 的 `frozenEventTypes`、前端 `Ev`、README §WS 帧契约 | **新增 1 个 type** `automation.run`（22 → 23） | 四处必须同一次提交改齐；前三条各有守卫（`TestEventTypeContractFrozen` / `TestFrontendEventTypesMatchRegistry`），README 那句靠约定 |
+| 域事件契约（**后续追加**） | 同上 | **再新增 1 个 type** `session.commands`（23 → 24），承载 ACP `available_commands_update` 的**全量**命令列表 | 同一条纪律：四处同一次提交改齐。它**不落新表、不新增 REST 读端点**——会话级实时状态的冷读走事件重放（冷挂载 `since_seq=0` 全量回放），而 acl 会话快照只在会话活跃期存在，拿它做读端点对非活跃会话必然返回空。理由与裁决见 ADR-17 |
 | README 路由表 | `TestReadmeRoutesMatchRouter` | M1–M4 共新增 18 条路由（Library/写面 10 + automation 8） | **必须同一次提交**同步 README 表格（否则守卫红） |
 | 前端 `console.css.ts` 唯一交互样式收口 | 新页面 | 输入卡 `+` 面板需要在既有收口内实现 | 不新增 css 文件（`AGENTS.md` 前端约束） |
 
@@ -845,11 +846,12 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 | **M3 代际绑定与轮次边界迁移** | `capability_json` + `capability_fingerprint` 两列 + `McpServersFor` 分支 + 两处调用点 + 轮次边界迁移（含忙则顺延/失败回退）+ 输入卡 `+` 面板 | 建会话时可勾选能力；既有会话在下一轮吃到变更（**不再依赖假设 A**） | 6–7 人日 |
 | **M4 Automations** | `pkg/automation`（schedule/preview/claim）+ `conversations.origin` 列 + `automation.run` 事件（四处同步）+ 调度循环 + REST + 面板页 | 定时任务可用、可手动触发、运行史可查（含没跑成的那些） | 7–9 人日 |
 | **M5 斜杠命令**（拍板延后至此） | 先做假设 B 的实测；成立则 `pkg/command` + 写面 + 投影 + Library `kind` 加 `command`；不成立则只留平台数据层或直接不做 | command 面（取决于实测结论） | 2–4 人日（可取消） |
-| **M5-0 实测否决（2026-09-23）** | 假设 B 分底座取证（opencode 成立 / dsh 不成立）→ 拍板 **No-Go**：M5-1…M5-5 **不执行** | 无（只留结论与两个未排期的可选后续 M5′ / MCP prompts，见待办 T-2/T-3） | 0.5 人日（已用） |
+| **M5-0 实测否决（2026-09-23）** | 假设 B 分底座取证（opencode 成立 / dsh 不成立）→ 拍板 **No-Go**：M5-1…M5-5 **不执行** | 无（M5 只留结论；两个可选后续里 **M5′ 发现面已于 2026-09-24 实施**，见下） | 0.5 人日（已用） |
 | **M6 收口** | README 路由表与事件列举、部署说明（升级动作、tzdata）、`make test/release` 全绿 | 可发布 | 1–2 人日 |
 
 **合计 26–35 人日**（单人全程）。假设：一名熟悉本仓的 Go 开发者全职；前端复用既有 `packages/ui` 组件无需新设计；不含真实底座联调被外部 CLI 版本变动阻塞的时间。**M5 是唯一的可选项**——它是否做、做多少，取决于假设 B 的实测结论；不做则合计 24–31 人日。
 **【实施结果 2026-09-23】**：M0–M4 + M6 全部完成（**M5 按 M5-0 的实测否决不执行**），实际交付 = 计划里"不做 M5"的 24–31 人日区间。M5 只花了 0.5 人日的取证。逐里程碑的提交与偏离见下节「实施记录与偏离」。
+**【追加实施 2026-09-24·M5′ 命令发现面】**：M5-0 否决的是"命令的**声明/投影/写面**"，而它当时留下的第 4 条理由同时指出真正的缺口是"**发现**"（平台忽略 `available_commands_update`，用户看不见底座提供了什么）。本轮补的正是这一块，且**只补这一块**：`pkg/acl` 归一化 + 上抛 `session.commands` 全量域事件，面板在输入框里打 `/` 时给候选。零投影、零写入、零新路由——裁决与理由见 **ADR-17**。
 
 **与上一版的差异（拍板与代际方案带来的变更）**：`sources` → `runtimes` 的破坏性调整给 M1 加了 1 人日；**代际方案给 M1 加 1 人日、给 M3 加 2 人日**（指纹计算 + 连接键扩展 + 轮次边界迁移与回退——原案的「会话快照不可变」不需要迁移机制，代际需要）；`automation.run` 事件给 M4 加了 1 人日；command 从 M2 移出单列 M5。**净增 4 人日**，换到的是：能力不可变由结构保证、既有会话在下一轮生效、且不再依赖假设 A。
 
@@ -860,7 +862,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 ### 实施记录与偏离（2026-09-23 收口）
 
-**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
+**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
 
 **实施偏离（原案 → 实际 → 为什么）**
 
@@ -883,6 +885,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 | 15 | 缩权/扩权对称处理 | **不对称**：基础键（原生权限 / provider）变化时迁移失败**不许回退**（旧代际 = 已被收回的权限面，宁可这一轮带码拒发 `40901`）；纯内容变化失败仍回退 | 缩权是安全方向，"用被收回的权限面继续跑"比"这一轮发不出去"更糟（ADR-13） |
 | 16 | 代际上限是一个全局数 | 按**基础键分组**，不设全局数；达上限时先淘汰该基础键下无人引用且空闲的代际，仍超限才拒绝（只挡新建、不挡复用） | 不同权重的进程池本就互不共享，一个全局数字只会让合法的多 agent 互相挤掉 |
 | 17 | `GET /skills/:id/materialization` 之外的派生信息来源未定 | `capability.Skill/McpServer/Tool` 加 `SourceFile string \`json:"-"\``（装载时记下、写面写回时也记下） | Library 要如实回答"这条从哪来、你改哪个文件"，而注册表此前不记录装载来源。它是**派生字段**：事实源是文件内容，文件路径不该被写进定义（等于把运行环境的路径固化进去），故 origin 判据只有一条且可验证：有没有事实源文件 |
+| 18 | M5′ 发现面照 `config_option_update` 的形态做（**落会话快照 + 上抛事件**），并按 permissions/elicitations 的先例配一个 `GET /conversations/:id/commands` 读端点 | **只上抛事件**：`acl.Session` **不存**命令快照，也不加路由 | 依据是本轮对既有链路的实测复核：会话级实时状态的冷读**本来就靠 WS 全量重放**（冷挂载 `since_seq=0`），而 permissions/elicitations 的那两个 REST 读端点**面板里根本没被使用**（它们读的是 manager 进程内 pending map，与 acl 快照不是一回事）。命令只有 acl 会话快照，**空闲/断连后句柄即摘除** → 读端点对非活跃会话必然返回空，比事件重放更差。加它等于新增一个必然返回错的接口（ADR-17） |
 
 **实测记录（M0–M4，供对照）**
 
@@ -890,6 +893,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 - **M1**：投影形态两底座实测（opencode 宽松扫描 / dsh 要求 frontmatter 且不递归）；`sources[] → runtimes[]` 的行为变化——原本因"没写 `sources`"而静默不生效的 skill 会开始物化，这是**修正**而非回归，已在部署说明点名并给出"先跑 `forge capability migrate --dry-run`"的动作。
 - **M3**：代际迁移四条纪律（轮次内不变 / 下一轮生效 / 忙则顺延 / 失败回退）+ 缩权立刻生效 + `FORGE_GENERATION_LIMIT` 拒绝策略，全部有单测与真底座观察。
 - **M4**：容器内嵌 tzdata（实测 **+403 KB**，scratch 对照证明 import 承重）；`POST /automations/preview` 把"时区 + DST + weekly"变成可见事实；`conversations.origin = automation:<id>` 作为来源的权威判据。
+- **M5′（2026-09-24 追加）**：`pkg/acl` 归一化 `available_commands_update` → `session.commands` 域事件（全量、保序、空列表照样发布），manager 转发为域事件，面板输入框 `/` 补全。**契约面四处同步**（`events.go` / archtest 冻结快照 / 前端 `Ev` / README）并**实跑验证过守卫有牙齿**：临时抽掉前端 `Ev.Commands` 后 `TestFrontendEventTypesMatchRegistry` 报 `事件 type "session.commands" 在契约里、但前端 events.ts 的 Ev 缺失`，补回即绿。**未新增路由、未新增表、未改 schema**。
 
 ---
 
@@ -1122,6 +1126,7 @@ make build && make vet && make test && make test/release
 | ADR-14 | runtime 的**能力绑定范围**（`session` / `directory` / `process`）是 adapter 的**声明属性**，**默认取最粗的 `process`**；只有实测通过才能声明更细，且必须带 `Tested` / `TestedOnVersion` | 假定能按会话收窄（假设 A）/ 直接照搬 openwork 的"目录绑定" | **代价不对称**：猜细了是**安全 bug**——两套不同能力集被悄悄合并到一个进程，底座会给错的那一套且**不报错**；猜粗了只是多花内存。另外 openwork 的"目录绑定"证据（`engine-reload-defer.ts:9-11`）测的是 **OpenCode 的 HTTP/v2 层**，而本平台走 **ACP**，不同接口层不可搬运。验证方法见「回归与验证范围 · 能力绑定范围的验证方法」；archtest 新增守卫：未实测者不得声明比 `process` 更细。**追加实测状态（2026-09-23）**：本轮**未**执行 E1–E6，两个 adapter 保持 `CapabilityScope=process` + `Tested=false`，`TestCapabilityScopeDeclaration` 仍绿。假设 A 的补测仍是开放项（不影响功能，只影响省内存与 resume 质量记录） |
 | ADR-15 | 自动化运行史放**定义文件**，不放 events 表 | 落 events 表（原案："运行史以事件为主"） | `recent_runs`（定义文件内环形留痕，上限 20、新在前）是**持久事实**；`automation.run` 事件是**实时通道**（bus-only，聚合键 `automation:<id>`）。理由：`events` 表对 `conversations(id)` 有 `NOT NULL` 外键且 `foreign_keys(1)`，而"没跑成"的触发（duplicate/overlap/失败）**没有会话**。后果：`GET /automations/:id/runs` 读文件（备份定义文件即备份运行史）；事件不落库 → 重放窗口内看不到历史触发（**有意**：历史在文件里，事件只做实时推送）。代价：20 条上限 + 运行史与事件两条读取路径（已在 README 写明分工，避免"以谁为主"的漂移） |
 | ADR-16 | **手动触发不推进认领游标** | 手动触发也推进 `last_fired_at` | `last_fired_at` 只由 `scheduled`/`recovery` 推进；`POST /:id/run`（`trigger=manual`）走同一认领判据但**从不**推进游标。理由：游标的语义是"这个 occurrence 被认领过没有"，手动试跑若推进它就会**静默吃掉当晚的排期**。后果：手工干预手段 = 在写面之外直接改文件（置空 → 下次 tick 重新认领；置未来 → 一直不跑）；写面**拒收**这些运行态键（40001），README 与 `docs/deployment.md` 排障表都点名了这条 |
+| ADR-17 | **命令发现面（M5′）只做"接收通告 + 回显"，不做投影、不做写面、不加 REST 读端点**：`pkg/acl` 把 ACP `available_commands_update` 归一化为 `session.commands` 域事件（全量列表），前端据此做输入补全 | ① 照 M5 原案做 `pkg/command` 注册表 + 投影 + 写面（已由 M5-0 实测否决策）；② 在 M5′ 里顺带加 `GET /conversations/:id/commands` 读端点（照 permissions/elicitations 的先例） | **这是 M5-0 No-Go 之后的"只补真正的缺口"决定**。命令在 ACP 规范里**只有通告、没有执行方法**（执行 = 把命令行当 `session/prompt` 文本发出），所以平台缺的只是"看见底座提供了什么"。**为什么不做投影/写面**：落点不在平台拥有的根上（opencode 只认用户工作空间的项目目录或它自己的配置树），且平台既有的 skill 投影已经让 opencode 把 skill 以命令形式通告——再叠一层是重复建设（M5-0 四条理由）。**为什么不做 REST 读端点**（与 permissions/elicitations 的先例不同）：那两类的读端点读的是 **manager 进程内的 pending map**，而命令只有 acl 的**会话快照**——会话空闲或断连后句柄即摘除，读端点对任何非活跃会话必然返回空，**比事件重放更差**；而 events 表会持久化并按 `since_seq` 冷挂载全量回放，前端本来就能重建这份状态。故唯一正确的落点是事件，加读端点等于新增一个必然返回错的接口。**底座差异如实保留**：dsh 的 ACP 面明确不含命令（不发通告），因此它对这一特性**永远为空**——那是底座事实，UI 文案要说"该底座不提供命令发现"，不得暗示"你还没配命令" |
 
 ### 评审检查清单
 

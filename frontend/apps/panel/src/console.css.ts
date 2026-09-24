@@ -179,6 +179,65 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
   }
 
+  /* 斜杠命令候选弹层（ADR-17 命令发现面）：贴在输入框上方，形态对齐模型下拉的浮层
+     （hairline 边 + 同一档阴影），但它是 composer 内的普通文档流，不用绝对定位——
+     弹层出现时输入框整体上移，比盖住正文更不容易看错当前在打什么。 */
+  .fg-cmd-pop {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 232px;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid ${tokens.border};
+    border-radius: 10px;
+    background: ${tokens.surface};
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+  }
+  .fg-cmd-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: ${tokens.text};
+  }
+  /* 键盘高亮与鼠标悬停共用一个态：两边都能看出"Enter 会填入哪一条"。 */
+  .fg-cmd-item.fg-on { background: ${tokens.softFill}; }
+  .fg-cmd-name {
+    flex: none;
+    font-family: ${tokens.fontMono};
+    font-size: 12.5px;
+    color: ${tokens.text};
+  }
+  .fg-cmd-hint {
+    flex: none;
+    font-family: ${tokens.fontMono};
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-cmd-desc {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+    color: ${tokens.textSecondary};
+  }
+  /* 页脚：把"命令由底座提供、平台只回显"写在用户看得见的地方——
+     免得在 dsh 上（它不通告命令）把"没有候选"误读成"平台没做这个功能"。 */
+  .fg-cmd-foot {
+    padding: 3px 8px 1px;
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+  }
+
   /* 工作空间药丸（goose DirSwitcher 的触发按钮形态）：图标 + 目录名，完整路径走 tooltip；
      与同一行的模型药丸共享一套静息形态（hairline 边 + 全圆角 + 小字）。 */
   .fg-ws-pill {

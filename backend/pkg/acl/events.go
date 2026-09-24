@@ -19,6 +19,10 @@ const (
 	// KindConfigOptions 会话配置项变更（ACP session/update: config_option_update）。
 	// 载荷为**全量**选项状态（协议保证非增量），上层据此刷新模型目录/当前值。
 	KindConfigOptions = "config_options"
+	// KindCommands 会话可用命令变更（ACP session/update: available_commands_update）。
+	// 载荷为**全量**命令列表（协议保证非增量），上层据此刷新会话级命令目录。
+	// 注意：只有"会通告命令"的底座会产生本事件（dsh 不发，故它永远为空——那是底座事实，不是平台缺口）。
+	KindCommands = "commands"
 )
 
 // 工具调用状态（对齐 ACP ToolCallStatus 四态；空串 = 仅发起未带状态）。
@@ -76,4 +80,10 @@ type PermissionInfo struct {
 type ConfigOptionsInfo struct {
 	SessionID string         `json:"session_id"`
 	Options   []ConfigOption `json:"options"`
+}
+
+// CommandsInfo 会话可用命令全量快照（available_commands_update 推送载荷）。
+type CommandsInfo struct {
+	SessionID string        `json:"session_id"`
+	Commands  []CommandInfo `json:"commands"`
 }

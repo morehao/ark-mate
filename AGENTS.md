@@ -40,7 +40,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 
 平台聚合的概念从 P0 起叫 **conversation**，但**对外 wire 上它叫 `session`**——这是冻结的历史词汇，不是待修的笔误：
 
-- **wire 用 `session`**：事件 type 16/19 条是 `session.*`（`session.created`/`session.message`/`session.permission_resolved`…）、6 个 JSON 字段是 `session_id`、transcript 落盘 header 也是 `session_id`。前端 `@ark/types` 的 `events.ts` 与 `conversation.ts`、磁盘上既有的 transcript、`forge migrate` 全都依赖它。
+- **wire 用 `session`**：事件 type 20/24 条是 `session.*`（`session.created`/`session.message`/`session.permission_resolved`…；计数随事件新增而变，以 `internal/manager/events.go` 为准）、6 个 JSON 字段是 `session_id`、transcript 落盘 header 也是 `session_id`。前端 `@ark/types` 的 `events.ts` 与 `conversation.ts`、磁盘上既有的 transcript、`forge migrate` 全都依赖它。
 - **平台领域词用 `conversation`**：REST 资源路径 `/conversations/:id`、Go 类型 `Conversation`/`ActiveConversation`、`conversation_start.go`。
 - **`Session` 还另指一样东西**：**runtime 侧的 ACP 会话**。`ProviderSessionID`（原生底座会话 id）是它，`LoadSession`/`SessionCapabilities`/`SessionOptions`/`SessionInfo`/`NewSession`/`ResumeSession`/`SessionsPersistent`/`MultiSessionConcurrent` 也都是它——**这批不能改名**，改了就是把两个概念混成一个。注意 `sessions_persistent`/`multi_session_concurrent` 还是 health/diagnostics 的 wire key。
 

@@ -12,6 +12,10 @@ import (
 //
 // 会话还持有该会话的**配置项快照**（session config options）：模型及其它选项
 // 全部由运行时自报，acl 只做归一化与保序更新，不做任何语义猜测。
+//
+// **不持有命令快照**（available commands）：与配置项不同，命令没有"读当前值"的消费方——
+// 平台上的会话重开靠事件重放，而快照只在会话活跃期间存在（空闲/断连后句柄即摘除），
+// 拿它做读端点对非活跃会话必然返回空，比事件重放更差。故命令只归一化 + 上抛（见 client.go）。
 type Session struct {
 	client *Client
 	id     acpsdk.SessionId
