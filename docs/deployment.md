@@ -561,8 +561,8 @@ sudo systemctl restart ark-forge
     1.18.30（均在 `PATH` 上，以 `forge` 用户可执行）；`POST /agents/dsh/start` → `GET
     /agents/dsh/diagnostics` = `connected=true pid=15`，握手能力 `sessions_persistent=true resume=true
     list=true`；`POST /agents/opencode/start` → `connected=true pid=35`；`DSH_HOME=/data/dsh` 落卷
-    （`/data` 下出现 `dsh/`、`.config/`、`.local/`）。**未跑真实模型轮次**：本机无 `DEEPSEEK_API_KEY`
-    / `OPENAI_API_KEY`。
+    （`/data` 下出现 `dsh/`、`.config/`、`.local/`）。**当时未跑真实模型轮次**：本机无
+    `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`（**2026-09-24 已补上，见下面 T-5 那条**）。
   - **compose 路径**：`docker compose up -d --build`（同一组镜像站变量）→ `docker compose ps` =
     `127.0.0.1:18003->10001/tcp`、health OK、`docker compose down -v` 干净回收容器与卷。
 - **含底座镜像用当前代码重建 + 容器内跑通一轮真实会话（2026-09-24 补做，T-5 收口）**：
