@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 面板界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全）——**真 Chrome + 真服务**。
+ * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全）——**真 Chrome + 真服务**。
  *
  * 为什么这里才出现浏览器驱动代码：本仓前端零测试依赖（无 vitest/jest/playwright/puppeteer），
  * 既有 `smoke-e2e.mjs` / `e2e-live-turn.mjs` 只走 REST/WS。而 M3-4 与 M4-6 的 DoD 是**手工界面
@@ -8,8 +8,8 @@
  * 于是用 Node 24 自带的全局 WebSocket 直连 CDP——**不引入任何新依赖**。
  *
  * 用法：
- *   node scripts/panel-ui-acceptance.mjs              # 全部场景
- *   node scripts/panel-ui-acceptance.mjs cap auto cmd # 只跑指定场景
+ *   node scripts/web-ui-acceptance.mjs              # 全部场景
+ *   node scripts/web-ui-acceptance.mjs cap auto cmd # 只跑指定场景
  *   KEEP_CHROME=1 ...                                 # 保留 Chrome 便于人工接管
  *
  * 前置：后端（:10001）+ vite（:5173）已起（`make dev`）。脚本**不启动服务**——
@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 // 仓库根按脚本位置定位：`pnpm ui:accept` 的 cwd 是 frontend/，用相对路径会把截图写进 frontend/.dsh/
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
-const PANEL_URL = process.env.PANEL_URL ?? 'http://localhost:5173'
+const WEB_URL = process.env.WEB_URL ?? 'http://localhost:5173'
 const FORGE_URL = process.env.FORGE_URL ?? 'http://127.0.0.1:10001'
 const CHROME = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const SHOT_DIR = process.env.SHOT_DIR ?? join(REPO_ROOT, '.dsh/docs/notes/2026-09-24-panel-ui-acceptance')
@@ -335,7 +335,7 @@ async function setDefaultAgent(id) {
 // ————————————————————————————————————————————————————————————————
 async function scenarioCapability(browser) {
   section('M3-4 能力勾选面板（勾选 skill 子集 → 建会话 → 回显选定与指纹）')
-  const page = await openPage(browser, `${PANEL_URL}/agents`)
+  const page = await openPage(browser, `${WEB_URL}/agents`)
   await page.waitFor(textExpr('设为当前'), { label: 'Agents 页渲染' })
   await page.shot('01-agents')
   // 切默认 agent 到 opencode（清单里有"仅 opencode 适用"与"仅 dsh 适用"两条，才能验不可达解释）
@@ -350,7 +350,7 @@ async function scenarioCapability(browser) {
   check('默认 agent 已切到 opencode（界面操作生效）', opencodeDefault, `agents=${(def.json.data ?? []).map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
 
   // 回新建页，打开「可用的能力」
-  await page.goto(`${PANEL_URL}/`, { waitText: '可用的能力' })
+  await page.goto(`${WEB_URL}/`, { waitText: '可用的能力' })
   await page.waitFor(textExpr('opencode'), { label: '新建卡显示当前 Agent=opencode' })
   await page.shot('02-start-with-opencode')
   const pill = byText('button', '能力 ·')
@@ -460,7 +460,7 @@ async function scenarioCapability(browser) {
 // ————————————————————————————————————————————————————————————————
 async function scenarioAutomation(browser) {
   section('M4-6 自动化页（建 daily → preview → 手动运行 → 运行史 + origin 标）')
-  const page = await openPage(browser, `${PANEL_URL}/automations`)
+  const page = await openPage(browser, `${WEB_URL}/automations`)
   await page.waitFor(textExpr('新建任务'), { label: '自动化页渲染' })
   await page.shot('10-automations-empty')
   const empty = await page.text()
@@ -576,7 +576,7 @@ async function scenarioAutomation(browser) {
 
   // 手动 run（DoD：手动 run → 会话出现在列表且带标）
   // 注意手动运行**会跳到那条会话**（AutomationsPage.onRun 里 navigate），所以先看运行史再看运行。
-  await page.goto(`${PANEL_URL}/automations`, { waitText: AUTO_ID })
+  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_ID })
   const runBtn = byText('button', '立即运行')
   check('列表行有「立即运行」', !!(await page.evaluate(`return !!(${runBtn})`)), '')
   await clickJS(page, runBtn)
@@ -595,7 +595,7 @@ async function scenarioAutomation(browser) {
   check('会话 origin 落在 automation:ui-verify-daily', (convDetail.json.data?.origin ?? '') === `automation:${AUTO_ID}`, `origin=${convDetail.json.data?.origin}`)
 
   // 运行史（跑之后）：有记录、标明是手动触发
-  await page.goto(`${PANEL_URL}/automations`, { waitText: AUTO_ID })
+  await page.goto(`${WEB_URL}/automations`, { waitText: AUTO_ID })
   await clickJS(page, byText('button', '运行史'))
   await page.waitFor(textExpr('的运行史'), { label: '运行史抽屉打开（跑之后）' })
   await sleep(1500)
@@ -627,7 +627,7 @@ async function scenarioCommands(browser) {
     return {}
   }
   console.log(`  → 用会话 ${oc.id}（${oc.mode === 'created' ? '本轮新建' : '历史已通告'}）`)
-  const page = await openPage(browser, `${PANEL_URL}/conversations/${oc.id}`)
+  const page = await openPage(browser, `${WEB_URL}/conversations/${oc.id}`)
   await page.waitFor(`return !!document.querySelector('textarea')`, { label: '会话输入框就绪' })
   await sleep(2500) // 等 WS 全量回放把 session.commands 送进来
   await page.shot('20-conversation-opencode')
@@ -718,8 +718,8 @@ async function main() {
   const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
   const health = await api('GET', '/health')
   check('后端 health 可达', health.json.code === 0, `${FORGE_URL} → ${JSON.stringify(health.json)}`)
-  const panel = await fetch(PANEL_URL).then((r) => r.status)
-  check('面板可达（vite）', panel === 200, `${PANEL_URL} → HTTP ${panel}`)
+  const webRoot = await fetch(WEB_URL).then((r) => r.status)
+  check('前端入口可达（vite）', webRoot === 200, `${WEB_URL} → HTTP ${webRoot}`)
 
   await seedSkills()
   check('验收用 skill 已就绪（M2 写面）', true, Object.values(SKILLS).join(', '))

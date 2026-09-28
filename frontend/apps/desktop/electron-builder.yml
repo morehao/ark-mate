@@ -1,0 +1,12 @@
+# 桌面产品打包配置 —— M0-5 只落骨架，M4-1 填实（extraResources / asar / 平台 target / 签名挂钩）。
+#
+# 现在写下的是**不会变的那部分**：产物位置与应用标识。
+appId: com.arkforge.desktop
+productName: ark-forge
+directories:
+  output: release
+  buildResources: build
+# 只带壳自己的两个目录；assets 与运行时载荷在 M4-1 走 extraResources（它们不进 asar）。
+files:
+  - dist/**
+  - renderer/**

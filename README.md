@@ -409,7 +409,7 @@ backend/                单 Go module（github.com/morehao/ark-forge）
     eventbus            进程内事件总线（WS 订阅源）
     archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
 frontend/               pnpm workspace（apps/* + packages/*）
-  apps/panel/           Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
+  apps/web/             Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
   packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
   packages/types        @ark/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
   packages/api          @ark/api（axios 客户端 + /v1/forge resources）

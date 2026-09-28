@@ -4,17 +4,18 @@
 #   backend/   —— 单 Go module：github.com/morehao/ark-forge（go.mod 在 backend/ 根）
 #                 pkg/ 可复用基础设施（不 import internal/）+ internal/ 应用分层；
 #                 分层边界由 backend/internal/archtest 守卫测试强制
-#   frontend/  —— 独立 pnpm workspace（apps/panel），产物可单独部署
+#   frontend/  —— 独立 pnpm workspace（apps/web），产物可单独部署
 #
 # 交付形态：
 #   make all   —— 单二进制：前端产物拷入 backend/pkg/web/dist 后，
 #                 以 -tags release 编译（启用 //go:embed），输出根目录 ./forge
 #   make web   —— 仅构建前端并刷新 embed 宿主目录
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
-#   make server —— 仅后端开发起服（不起前端，面板经 vite dev proxy 联调）
+#   make server —— 仅后端开发起服（不起前端，前端经 vite dev proxy 联调）
+#   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server build vet test all clean image image/runtimes image/run
+.PHONY: dev web server desktop/dev build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -42,7 +43,14 @@ web:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm build
 	rm -rf $(WEB_DIST_DIR)
-	cp -r $(FRONTEND_ROOT)/apps/panel/dist $(WEB_DIST_DIR)
+	cp -r $(FRONTEND_ROOT)/apps/web/dist $(WEB_DIST_DIR)
+
+# 桌面壳开发起服：构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
+# M0-5 只开一个壳静态页窗口；M1 起壳会 spawn forge-core 并把窗口切到 forge-app://app/。
+# 与 make dev 的区别：那条起的是浏览器入口（vite :5173 + 后端 :10001），这条起的是桌面入口。
+desktop/dev:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm -F @ark/desktop dev
 
 # 后端开发起服（forge 无默认子命令，需显式 serve）
 server:
@@ -100,7 +108,7 @@ all: web
 	cd backend && go build -tags release -o ../forge ./cmd/forge
 
 clean:
-	rm -rf $(FRONTEND_ROOT)/apps/panel/dist $(WEB_DIST_DIR) forge
+	rm -rf $(FRONTEND_ROOT)/apps/web/dist $(WEB_DIST_DIR) forge
 
 # —— 容器镜像（Dockerfile 多阶段：前端 → Go 内嵌编译 → 精简运行时）——
 #   make image                                    —— 最小镜像（只含 forge 本体 + echo 自检底座）

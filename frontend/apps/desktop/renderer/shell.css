@@ -1,0 +1,64 @@
+/*
+ * 壳静态页（renderer/*.html）的共用版式样式 —— 手写件，与生成物 renderer/shell-tokens.css 分工：
+ *   - shell-tokens.css：**生成物**（`scripts/gen-shell-css.mjs` 从 packages/ui 的 tokens 生成），色值唯一来源；
+ *   - 本文件：版式与结构（居中、卡片、排版层级），**只允许引用 var(--fg-*)**，不得出现任何字面色值。
+ *
+ * 为什么不让页面写内联 <style>：壳页的 CSP 是 `style-src 'self'`（不放 unsafe-inline），
+ * 内联样式会被直接拒绝——实测首版就是这样"变量进了、版式没进"，页面退化成左上角一行裸文本。
+ * 四个壳页（welcome / update-dialog / mandatory-update / boot-failed）共用这一份，避免各写一遍。
+ */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fg-bg);
+  color: var(--fg-text);
+  font-family: var(--fg-font-family);
+}
+
+.shell-card {
+  max-width: 34rem;
+  padding: 2.5rem 2.75rem;
+  background: var(--fg-surface);
+  border: 1px solid var(--fg-border);
+  border-radius: var(--fg-radius-lg);
+}
+
+.shell-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.shell-dot {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--fg-primary);
+}
+
+.shell-text {
+  margin: 0.375rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--fg-text-secondary);
+}
+
+.shell-code {
+  padding: 0.125rem 0.375rem;
+  background: var(--fg-soft-fill);
+  border-radius: var(--fg-radius-sm);
+  color: var(--fg-text);
+  font-family: var(--fg-font-mono);
+  font-size: 0.8125rem;
+}

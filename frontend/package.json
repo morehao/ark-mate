@@ -7,14 +7,12 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "pnpm --filter @ark/panel dev",
-    "dev:panel": "pnpm --filter @ark/panel dev",
+    "dev": "pnpm --filter @ark/web dev",
     "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
-    "build:panel": "pnpm --filter @ark/panel build",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
-    "typecheck:panel": "pnpm --filter @ark/panel typecheck",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",
-    "ui:accept": "node scripts/panel-ui-acceptance.mjs"
+    "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
+    "ui:accept": "node scripts/web-ui-acceptance.mjs"
   }
 }
