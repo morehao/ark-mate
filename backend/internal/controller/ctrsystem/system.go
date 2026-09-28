@@ -57,18 +57,21 @@ type SystemCtr interface {
 var _ SystemCtr = (*systemCtr)(nil)
 
 type systemCtr struct {
-	meta MetaSource
+	meta func() MetaSource
 }
 
 // NewSystemCtr 构造系统面控制器。`meta` 由装配层凑齐（版本、数据目录、载荷、资产，
 // 见 meta.go 的"谁填什么"表）。
-func NewSystemCtr(meta MetaSource) SystemCtr {
+//
+// 参数是**函数**而不是值：`/meta` 里的资产字段（尤其 build id）要反映"核心此刻服务的那份资产"，
+// 而不是进程启动瞬间的快照——版本闸门据此发现"dist 被换过"（M2-4）。
+func NewSystemCtr(meta func() MetaSource) SystemCtr {
 	return &systemCtr{meta: meta}
 }
 
 // GetMeta 诊断面：这份部署的版本、资产来源与数据目录。
 func (h *systemCtr) GetMeta(c *gin.Context) {
-	gincontext.Success(c, h.meta.Snapshot())
+	gincontext.Success(c, h.meta().Snapshot())
 }
 
 // GetCapabilities 声明面：两个入口**同构**（id 集合与顺序完全一致），只有 available 随入口不同。

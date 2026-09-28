@@ -104,3 +104,4 @@ export type Capabilities = {
 
 export * from './carrier.ts'
 export * from './attach.ts'
+export * from './gate.ts'

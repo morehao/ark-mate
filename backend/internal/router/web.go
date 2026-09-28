@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -23,6 +24,18 @@ import (
 // 于是默认构建只能到一个"能调 API 但打不开界面"的服务，桌面核又被迫带 release tag（与
 // "桌面核不内嵌资产"冲突）。现在来源是**运行时解出来的**（显式目录 > 内嵌 > 拒绝启动），
 // 构建形态只决定"内嵌那一份在不在"。
+
+// 前端构建期写进产物的构建 id 文件（M2-4）与读不到时的口径。
+//
+// 这三个常量与前端契约（`@ark/desktop-contract` 的 `UNKNOWN_BUILD_ID`）是**同一条契约的两侧**，
+// 由 archtest 守卫逐字比对（`TestBuildIDUnknownMatchesContract`）——两边各写一个 'unknown'
+// 但拼写不同的话，闸门会从"无法校验"变成"不一致"，把用户挡在整屏状态页外面。
+const (
+	// BuildIDFileName 前端构建写出的文件名（`apps/web/vite.config.ts` 的 writeBundle）。
+	BuildIDFileName = "build-id.txt"
+	// BuildIDUnknown 读不到构建 id 时的口径（前端契约里的同名字面量）。
+	BuildIDUnknown = "unknown"
+)
 
 // AssetSource 资产来源（同时是 `/meta` 的 webSource 取值，设计 §6.7）。
 type AssetSource string
@@ -117,7 +130,47 @@ func withDigests(info AssetInfo) (AssetInfo, error) {
 	}
 	info.Digests = digests
 	info.Digest = compositeDigest(digests)
+	info.BuildID = readBuildID(info.FS)
 	return info, nil
+}
+
+// CurrentBuildID 现场读一次这份资产里的构建 id（`/meta` 用）。
+//
+// 为什么不直接用解析期那个快照：这个字段的**职责就是发现"资产被换了"**（版本闸门的全部意义）。
+// 把它缓存成启动瞬间的值，等于把判据变成"启动那一刻两边一样吗"——部署者换掉 dist 之后
+// 页面会立刻发现（页面 bundle 是新的），而核心还在报旧值，表现成"永远无法复现的一次报错"。
+// 摘要（Digest）仍是解析期算的：重算整棵树的代价大，而"换文件"这一场景由本字段兜住。
+func (a AssetInfo) CurrentBuildID() string {
+	if !a.Has() {
+		return ""
+	}
+	b, err := fs.ReadFile(a.FS, BuildIDFileName)
+	if err != nil {
+		return a.BuildID // 文件被删了：退回启动时的快照，不让 /meta 忽然没有这个字段
+	}
+	if id := strings.TrimSpace(string(b)); id != "" {
+		return id
+	}
+	return a.BuildID
+}
+
+// readBuildID 从**这份**资产里读构建 id（解析期，兼作启动告警；M2-4，设计 §6.7）。
+//
+// 读不到不是错误：手工放的 dist、旧构建、第三方部署都可能没有这个文件。这时报 `unknown`
+// 并记一条警告——版本闸门据此判"无法校验"（放行），而不是判"不一致"（拦下）。
+// 这也正是闸门能抓混搭的原理：页面里的常量来自编译期，这个值来自**核心此刻实际服务的那份目录**。
+func readBuildID(fsys fs.FS) string {
+	b, err := fs.ReadFile(fsys, BuildIDFileName)
+	if err != nil {
+		slog.Warn("资产里没有 build-id.txt，前端与核心的版本一致性将无法校验（M2-4）"+
+			"：若是自己拼的 dist，请由前端构建产出该文件", "file", BuildIDFileName, "err", err)
+		return BuildIDUnknown
+	}
+	if id := strings.TrimSpace(string(b)); id != "" {
+		return id
+	}
+	slog.Warn("build-id.txt 是空的，按 unknown 处理", "file", BuildIDFileName)
+	return BuildIDUnknown
 }
 
 // compositeDigest 逐文件摘要的确定性合成（C9 的"可复现"要求）：

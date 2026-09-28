@@ -14,7 +14,8 @@ import (
 func newEngine(meta ctrsystem.MetaSource) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	eng := gin.New()
-	ctr := ctrsystem.NewSystemCtr(meta)
+	// 控制器吃的是 provider（每次都渲染当前状态）；测试里固定返回同一份值。
+	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource { return meta })
 	eng.GET("/meta", ctr.GetMeta)
 	eng.GET("/capabilities", ctr.GetCapabilities)
 	return eng

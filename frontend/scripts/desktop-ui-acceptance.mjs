@@ -26,7 +26,7 @@
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -139,6 +139,16 @@ async function connectCDP(port) {
   return { send, evalJs, events, close: () => ws.close() }
 }
 
+/** 轮询一个页面断言直到为真（首屏类断言别用固定 sleep：版本闸门会让首次挂载多一个来回）。 */
+async function waitFor(cdp, expr, timeoutMs = 8000, stepMs = 300) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < timeoutMs) {
+    if (await cdp.evalJs(expr)) return true
+    await sleep(stepMs)
+  }
+  return false
+}
+
 // ——— 起壳 ———
 async function launchShell() {
   const port = 9400 + Math.floor(Math.random() * 100)
@@ -173,9 +183,17 @@ function scenarioGuard() {
   // 否则测的是旧二进制（M1-6 首跑就踩到过：旧核心不认新 flag，直接退出码 2）。
   try {
     execFileSync('make', ['core/desktop'], { cwd: REPO, stdio: 'ignore' })
-    check('forge-core 已按当前代码重建', true)
+    check('forge-core 与运行时的 web/ 已按当前代码重建', true)
   } catch (e) {
-    check('forge-core 已按当前代码重建', false, String(e).slice(0, 120))
+    check('forge-core 与运行时的 web/ 已按当前代码重建', false, String(e).slice(0, 120))
+  }
+  // 壳的 TS 也要现构建：`electron .` 跑的是 dist/main.cjs，改完 src 不重建就会跑到旧代码上
+  // （第一次跑 gate 场景就踩到：src 里引用了新符号、bundle 还是旧的 → 核心启动 ReferenceError）。
+  try {
+    execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: DESKTOP, stdio: 'ignore' })
+    check('壳的主进程/preload 产物已重建', true)
+  } catch (e) {
+    check('壳的主进程/preload 产物已重建', false, String(e).slice(0, 120))
   }
 }
 
@@ -185,7 +203,7 @@ async function scenarioShell(cdp) {
   const origin = await cdp.evalJs('return location.origin')
   check('窗口 origin = forge-app://app', origin === 'forge-app://app', origin)
 
-  const rendered = await cdp.evalJs(`return !!document.querySelector('#root') && document.body.innerHTML.length > 500`)
+  const rendered = await waitFor(cdp, `return !!document.querySelector('#root') && (document.querySelector('#root').innerText ?? '').length > 0`)
   check('前端产物由壳服务并渲染（#root 有内容）', rendered)
 
   const health = await cdp.evalJs(`const r = await fetch('/v1/forge/health'); return { s: r.status, b: (await r.text()).slice(0, 40) }`)
@@ -376,6 +394,51 @@ async function scenarioStream(cdp) {
   check('界面显示 WS 已连接', uiState === true)
 }
 
+/** gate（M2-4 的 V8 + M2-6 的桌面 --web-dir）：版本闸门与"只有一份资产"。 */
+async function scenarioGate(cdp) {
+  section('M2-4/M2-6 版本闸门与运行时资产（V8 / V5 桌面侧）')
+  const webOut = join(DESKTOP, 'resources', 'web') // 壳与核心读的同一份（make core/desktop 刷新）
+  const idFile = join(webOut, 'build-id.txt')
+
+  // ① 核心确实拿到了 --web-dir（M2-6）：/meta 应报 dir + 绝对路径 + 与文件一致的 build id
+  const meta = await cdp.evalJs(`const r = await fetch('/v1/forge/meta'); const j = await r.json(); return j.data`)
+  check('核心以 dir 来源服务资产（--web-dir 生效）', meta.webSource === 'dir', `webSource=${meta.webSource}`)
+  check('webPath 指向运行时树里那一份', typeof meta.webPath === 'string' && meta.webPath.endsWith(join('resources', 'web')), String(meta.webPath))
+  const fileId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
+  check('webBuildId 与产物里的 build-id.txt 一致', !!fileId && meta.webBuildId === fileId, `meta=${meta.webBuildId} file=${fileId}`)
+  check('coreVersion/apiContract 在位', !!meta.coreVersion && meta.apiContract === 'v1', `${meta.coreVersion}/${meta.apiContract}`)
+
+  // ② 一致 → 正常进界面（没有整屏状态页）
+  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await sleep(2500)
+  const normal = await cdp.evalJs(`return { gate: !!document.querySelector('[data-forge-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
+  check('一致时正常进界面（无状态页）', normal.gate === false && normal.text > 0, JSON.stringify(normal))
+
+  // ③ 造不一致：只改 build-id.txt，不重编译前端（V8 的手法）
+  try {
+    writeFileSync(idFile, 'tampered-build-id\n', 'utf8')
+    await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+    await sleep(2500)
+    const bad = await cdp.evalJs(`
+      const w = document.querySelector('[data-forge-version-gate]')
+      return { gate: !!w, text: w?.innerText ?? '', btn: !!document.getElementById('forge-version-gate-reload'), app: (document.querySelector('#root')?.innerText ?? '').length }
+    `)
+    check('改 build-id.txt 后出现整屏状态页', bad.gate === true, bad.gate ? '' : `页面文本长度=${bad.app}`)
+    check('状态页写明"版本不一致"与两侧取值', /版本不一致/.test(bad.text) && bad.text.includes('tampered-build-id'), bad.text.slice(0, 120).replace(/\n/g, ' | '))
+    check('状态页带刷新按钮', bad.btn === true)
+    check('状态页取代了应用界面（不是白屏也不是零星报错）', bad.app > 0 && /刷新/.test(bad.text))
+  } finally {
+    // 无论上面怎么结束都要还原，否则后续场景（与人工复核）会一直看到状态页
+    writeFileSync(idFile, `${fileId}\n`, 'utf8')
+  }
+
+  // ④ 恢复 → 正常进界面
+  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await sleep(2500)
+  const restored = await cdp.evalJs(`return { gate: !!document.querySelector('[data-forge-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
+  check('恢复一致后正常进入', restored.gate === false && restored.text > 0, JSON.stringify(restored))
+}
+
 /** exit（M1-10，V13）：退出顺序、孤儿、令牌不进 env。 */
 async function scenarioExit(shell) {
   section('M1-10 退出与孤儿（V13）')
@@ -439,7 +502,8 @@ async function scenarioDirectParentGone() {
     const fs = require('node:fs')
     const errFd = fs.openSync(${JSON.stringify(errFile)}, 'w')
     const outFd = fs.openSync(${JSON.stringify(outFile)}, 'w')
-    const p = spawn(${JSON.stringify(core)}, ['serve','--addr','127.0.0.1:0','--ready-stdout','--exit-with-parent'], { stdio: ['ignore', outFd, errFd] })
+    // 必须给 --web-dir：桌面核是默认 tag 构建（不内嵌资产），M2-1 的失败语义会让它拒绝启动（退出码 3）。
+    const p = spawn(${JSON.stringify(core)}, ['serve','--addr','127.0.0.1:0','--ready-stdout','--exit-with-parent','--web-dir',${JSON.stringify(join(DESKTOP, 'resources', 'web'))}], { stdio: ['ignore', outFd, errFd] })
     console.log(p.pid)
     setTimeout(() => {}, 120000)
   `
@@ -477,14 +541,18 @@ async function scenarioDirectParentGone() {
 
 // ————————————————————————————————— 主流程 —————————————————————————————————
 
-const SCENARIOS = ['guard', 'shell', 'contract', 'hardening', 'credentials', 'stream', 'exit', 'direct']
+// 可选场景（guard 不在其中：它是每次运行的前置步骤，见 main()）。
+const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'exit', 'direct']
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const want = argv.length ? argv : SCENARIOS
 
 async function main() {
   const t0 = Date.now()
   console.log('桌面入口验收（真 Electron + 真核心）')
-  if (want.includes('guard')) scenarioGuard()
+  // guard **总是**跑（不是可选场景）：它既做前置检查，也负责把 forge-core 与壳产物按当前代码重建。
+  // 首版把它做成"只在显式选 guard 时跑"，于是单跑某个场景时用的是上一次的旧二进制——
+  // 实测表现为"改了核心代码，场景却看不到改动"（查了半天才发现跑的是 13:23 的产物）。
+  scenarioGuard()
   if (results.some((r) => !r.ok)) {
     console.log('\n前置不通过，终止（先解决上面的问题）')
     process.exit(1)
@@ -492,11 +560,14 @@ async function main() {
 
   let shell = null
   let cdp = null
-  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'exit'].includes(s))
+  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'exit'].includes(s))
   if (needsShell) {
     shell = await launchShell()
     if (!shell.corePid) {
       check('壳与核心起来了', false, `壳日志尾部：\n${shell.logText().split('\n').slice(-6).join('\n')}`)
+      // 早退路径也要收尾：否则壳留在那儿，下次跑的前置守卫会说"已有实例在运行"
+      // （首版就是这里漏了，第二次跑被单实例锁挡住）。
+      killShellTree()
       process.exit(1)
     }
     check('壳与核心起来了', true, `shell=${shell.shellPid} core=${shell.corePid}`)
@@ -509,6 +580,7 @@ async function main() {
     if (want.includes('hardening')) await scenarioHardening(cdp)
     if (want.includes('credentials')) await scenarioCredentials(cdp)
     if (want.includes('stream')) await scenarioStream(cdp)
+    if (want.includes('gate')) await scenarioGate(cdp)
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {
     cdp?.close()

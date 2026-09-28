@@ -40,6 +40,29 @@ func cspPolicyInContract(t *testing.T) string {
 	return m[1]
 }
 
+// TestBuildIDUnknownMatchesContract `unknown` 这个口径在核心与前端契约里必须逐字一致（M2-4）。
+//
+// 为什么值得一条守卫：版本闸门的判定是"两侧都是已知值才比"。如果核心报 `unknown`、
+// 前端认的是 `Unknown`/`n/a`，闸门就会把"校验不了"当成"不一致"，把用户挡在整屏状态页外面——
+// 一个拼写错误变成一次"应用打不开"。
+func TestBuildIDUnknownMatchesContract(t *testing.T) {
+	if router.BuildIDUnknown != "unknown" {
+		t.Fatalf("核心口径变了：BuildIDUnknown=%q", router.BuildIDUnknown)
+	}
+	path := filepath.Join(frontendRoot(t), "packages", "desktop-contract", "src", "gate.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v（版本闸门的契约被改名/移动了？）", path, err)
+	}
+	src := string(raw)
+	if !strings.Contains(src, "UNKNOWN_BUILD_ID = 'unknown'") && !strings.Contains(src, `UNKNOWN_BUILD_ID = "unknown"`) {
+		t.Fatalf("前端契约的 UNKNOWN_BUILD_ID 不再等于 'unknown'：闸门会把\"校验不了\"误判成\"不一致\"")
+	}
+	if !strings.Contains(src, "export function versionGate(") {
+		t.Fatal("前端契约缺少 versionGate 纯判定函数（M2-4）")
+	}
+}
+
 // TestRendererHardeningBaseline 渲染进程加固基线（M1-5）：
 //   - CSP 双源逐字一致（前端契约 ↔ 核心响应头常量）；
 //   - webPreferences 的四项取值正确，且**不存在** enableRemoteModule（Electron 44 已移除该选项，
