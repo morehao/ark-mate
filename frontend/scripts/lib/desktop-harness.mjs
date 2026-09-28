@@ -8,6 +8,7 @@
  * 零依赖：CDP 用 Node 24 自带的全局 WebSocket。
  */
 import { execFileSync, spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -29,6 +30,14 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  */
 export const SHELL_RE = /electron@44\.4\.5.*MacOS\/Electron \./
 export const CORE_RE = /resources\/forge-core serve/
+
+/**
+ * 从 **apps/desktop** 出发解析裸模块（Electron 二进制路径等）。
+ *
+ * 不能用本文件自己的 `import.meta.url`：本文件在 `frontend/scripts/`，而 `electron` 是
+ * `apps/desktop` 的依赖，pnpm 的隔离布局下 `frontend/node_modules/electron` 并不存在。
+ */
+const require = createRequire(join(DESKTOP, 'package.json'))
 
 /** 跑一条命令并把 stdout 作为字符串返回（失败返回空串，供断言"读不到"分支使用）。 */
 export const sh = (cmd, args, opts = {}) => {
@@ -225,13 +234,22 @@ export function rebuildAll() {
   return out
 }
 
-/** 起一个真壳（真 Electron + 真核心），等核心就绪行，返回句柄。 */
-export async function launchShell({ remoteDebugPort } = {}) {
+/**
+ * 起一个真壳（真 Electron + 真核心），等核心就绪行，返回句柄。
+ *
+ * 两个刻意的选择：
+ *   - 直接 spawn **Electron 二进制本体**（`require('electron')` 给的路径），不走 `node_modules/.bin/electron`
+ *     那个 shim——shim 是 `#!/usr/bin/env node` 的脚本，PATH 上没有 node 时它自己就起不来，
+ *     而 M3-2 的验收恰恰要在"机器上没有 node"的前提下起壳（设计 §6.6）。
+ *   - `env` 可整体覆盖：调用方给什么就是什么（验收用它构造 `PATH=/usr/bin:/bin` 的干净起点）。
+ */
+export async function launchShell({ remoteDebugPort, env } = {}) {
   const port = remoteDebugPort ?? 9400 + Math.floor(Math.random() * 200)
   const log = []
-  const child = spawn(join(DESKTOP, 'node_modules/.bin/electron'), ['.', `--remote-debugging-port=${port}`], {
+  const electron = require('electron')
+  const child = spawn(electron, ['.', `--remote-debugging-port=${port}`], {
     cwd: DESKTOP,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+    env: env ?? { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })

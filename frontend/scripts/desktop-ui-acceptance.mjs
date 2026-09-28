@@ -25,8 +25,8 @@
  * 前置：`make core/desktop`（脚本会自己跑）与 `pnpm -C frontend build`（apps/web/dist 必须已存在）。
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
-import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // 共用底座（M2-5 抽出）：进程定位/清场、起壳、最小 CDP、按当前代码重建。
@@ -63,6 +63,12 @@ const section = (t) => console.log(`\n=== ${t} ===`)
 // 无论怎么退出（含异常）都不留壳与核心
 installCleanupHooks()
 // ————————————————————————————————— 场景 —————————————————————————————————
+
+/**
+ * 桌面壳的最小启动环境（M3-2 的 V10 ①）：PATH 上只有系统目录，没有 node / npx / pnpm。
+ * HOME 保留（Chromium 的 userData 目录要落盘）；它不属于"Node 从哪来"这条链。
+ */
+const MINIMAL_ENV = { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' }
 
 /** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.forge 会让断言读到别人的内存态）。 */
 function scenarioGuard() {
@@ -420,7 +426,97 @@ async function scenarioDirectParentGone() {
 // ————————————————————————————————— 主流程 —————————————————————————————————
 
 // 可选场景（guard 不在其中：它是每次运行的前置步骤，见 main()）。
-const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'exit', 'direct']
+/**
+ * 从 `ps -E` 的输出里取一个环境变量的值（M3-2 用它读**核心进程实际拿到的**环境）。
+ *
+ * 为什么要读真进程的环境、而不是断言我们的构造函数：构造函数对了、spawn 时忘了传，
+ * 一样是错的——只有读真进程才闭环（这也正是 V10 ② "在子进程内断言"的落点）。
+ */
+function envValue(text, key) {
+  const m = text.match(new RegExp(`(?:^|\\s)${key}=([^\\s]*)`))
+  return m ? m[1] : undefined
+}
+
+/** 载荷里某个文件（`resources/payloads/<name>/<version>/...`）——版本目录取排序后的最后一个。 */
+function payloadFile(name, ...rest) {
+  const root = join(DESKTOP, 'resources', 'payloads', name)
+  if (!existsSync(root)) return undefined
+  const versions = readdirSync(root).filter((v) => !v.startsWith('.')).sort()
+  const latest = versions[versions.length - 1]
+  return latest ? join(root, latest, ...rest) : undefined
+}
+
+/**
+ * M3-2：Electron 作为 Node 的执行通道（设计 §6.6 / §5.3）。
+ *
+ * 三条断言的分工：
+ *   ① 核心**进程实际拿到**的环境是设计 §6.6 的那份——核心 spawn runtime 时原样继承它，
+ *      所以这份环境就是"runtime 看到的 PATH"（本仓 runtime 的父进程是核心，不是壳，见 node-runtime.ts 顶注）；
+ *   ② 私有 bin 的 `node` / `npx` 真的是 Electron 的 Node（`process.versions.electron` 在场、ABI 对得上），
+ *      且 `npx` 能跑起载荷里的 npm JS——"机器上没有 node"与"npx 能用"同时成立；
+ *   ③ 缺注入时启动器**大声失败**（127），不静默回落到机器上的同名命令（设计 §6.5 的纪律）。
+ *
+ * 这个场景跑在一个"PATH 上只有 /usr/bin:/bin"的壳里（见 main 里的 MINIMAL_ENV）——那正是
+ * V10 ① 的前提：机器上没有 node。
+ */
+async function scenarioNodeChannel(shell) {
+  section('M3-2：Electron 作为 Node 的执行通道（设计 §6.6）')
+
+  const binDir = join(DESKTOP, 'resources', 'runtime', 'bin')
+  const launchers = ['node', 'npx', 'dsh', 'opencode']
+  const missing = launchers.filter((l) => !existsSync(join(binDir, l)) || !existsSync(join(binDir, `${l}.cmd`)))
+  check('私有 bin 启动器已生成（POSIX 与 .cmd 各一份）', missing.length === 0, missing.length ? `缺：${missing.join('/')}` : binDir)
+
+  // ① 核心进程实际拿到的环境
+  const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
+  const path = envValue(psEnv, 'PATH')
+  const electron = envValue(psEnv, 'FORGE_NODE_EXECUTABLE')
+  check('核心 PATH 首段是私有 bin', (path ?? '').startsWith(`${binDir}:`), path)
+  check('调用方 PATH 完整保留在尾部（不吞用户环境）', path === `${binDir}:/usr/bin:/bin`, path)
+  check('FORGE_NODE_EXECUTABLE 指向 Electron 本体', /Electron\.app\/Contents\/MacOS\/Electron$/.test(electron ?? ''), electron)
+  check('ELECTRON_RUN_AS_NODE=1（Node 模式随进程链继承）', envValue(psEnv, 'ELECTRON_RUN_AS_NODE') === '1')
+
+  // ② 私有 bin 的 node/npx 就是 Electron 的 Node
+  const childEnv = { PATH: `${binDir}:/usr/bin:/bin`, FORGE_NODE_EXECUTABLE: electron ?? '' }
+  const nodeProbe = spawnSync(join(binDir, 'node'), ['-p', 'JSON.stringify({e:process.versions.electron,n:process.versions.node,a:process.versions.modules})'], {
+    encoding: 'utf8',
+    env: childEnv,
+  })
+  let versions = {}
+  try {
+    versions = JSON.parse(nodeProbe.stdout)
+  } catch {
+    versions = {}
+  }
+  check('私有 node 是 Electron 的 Node（不是机器上的 node）', versions.e === '44.4.5', `electron=${versions.e ?? '(无)'} node=${versions.n ?? '?'} abi=${versions.a ?? '?'}`)
+  check('Node ABI 与载荷清单一致（M3-1 的 payload.json 写的就是它）', versions.a === '149', `abi=${versions.a ?? '?'}`)
+
+  const npxEntry = payloadFile('dsh', 'node_modules', 'npm', 'bin', 'npx-cli.js')
+  if (!npxEntry) {
+    check('载荷里 npm 的 npx-cli.js 在场（`make desktop/payloads`）', false, '载荷缺失——先跑 make desktop/payloads')
+  } else {
+    const npxProbe = spawnSync(join(binDir, 'npx'), ['--version'], {
+      encoding: 'utf8',
+      env: { ...childEnv, FORGE_NPX_ENTRY: npxEntry },
+    })
+    check('私有 npx 跑起载荷里的 npm JS（Electron 的 Node 上）', /^\d+\.\d+\.\d+/.test((npxProbe.stdout ?? '').trim()), (npxProbe.stdout ?? '').trim() || (npxProbe.stderr ?? '').trim().slice(0, 80))
+  }
+
+  // 载荷里的 dsh 经同一条通道可执行（M3-8 的 V9 会在这里继续往下走真实会话）
+  const dshEntry = payloadFile('dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  if (!dshEntry) {
+    check('载荷里 dsh 的 bin.js 在场（`make desktop/payloads`）', false, '载荷缺失——先跑 make desktop/payloads')
+  } else {
+    const dshProbe = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { ...childEnv, FORGE_DSH_ENTRY: dshEntry } })
+    check('私有 dsh 启动器跑起随包载荷', (dshProbe.stdout ?? '').trim() === '0.1.7-rc.2', (dshProbe.stdout ?? '').trim() || (dshProbe.stderr ?? '').trim().slice(0, 80))
+  }
+
+  // ③ 缺注入 → 大声失败，不静默回落
+  const bare = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { PATH: `${binDir}:/usr/bin:/bin` } })
+  check('缺注入时启动器以 127 失败（不静默回落机器上的同名命令）', bare.status === 127, `status=${bare.status}`)
+}
+
+const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'exit', 'direct']
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const want = argv.length ? argv : SCENARIOS
 
@@ -438,9 +534,12 @@ async function main() {
 
   let shell = null
   let cdp = null
-  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'exit'].includes(s))
+  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'exit'].includes(s))
   if (needsShell) {
-    shell = await launchShell()
+    // V10 ① 的前提：**机器上没有 node**。壳只在 `PATH=/usr/bin:/bin` 下启动，
+    // 因此核心与其子进程拿到的东西只可能来自壳自己注入的那份（设计 §6.6）。
+    // 保留 HOME 是 Chromium 自己的要求（userData 要落盘），与"我们的运行时怎么找到 Node"无关。
+    shell = await launchShell({ env: MINIMAL_ENV })
     if (!shell.corePid) {
       check('壳与核心起来了', false, `壳日志尾部：\n${shell.logText().split('\n').slice(-6).join('\n')}`)
       // 早退路径也要收尾：否则壳留在那儿，下次跑的前置守卫会说"已有实例在运行"
@@ -459,6 +558,7 @@ async function main() {
     if (want.includes('credentials')) await scenarioCredentials(cdp)
     if (want.includes('stream')) await scenarioStream(cdp)
     if (want.includes('gate')) await scenarioGate(cdp)
+    if (want.includes('nodechannel')) await scenarioNodeChannel(shell)
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {
     cdp?.close()

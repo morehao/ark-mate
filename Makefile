@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -61,7 +61,7 @@ web:
 # **故意不带 `-tags release`**：桌面核不内嵌前端资产——资产由壳服务，核心按 `--web-dir`
 # 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份 apps/web/dist，核心不再内嵌一份副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
-core/desktop: web
+core/desktop: web desktop/runtime-bin
 	cd backend && CGO_ENABLED=0 go build -o ../$(CORE_DESKTOP_OUT) ./cmd/forge
 	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
 	@# 只有一份 dist 是设计 §6.1 的红线——核心故意不带 -tags release（不内嵌），
@@ -69,6 +69,13 @@ core/desktop: web
 	rm -rf $(DESKTOP_WEB_OUT)
 	mkdir -p $(DESKTOP_WEB_OUT)
 	cp -R $(FRONTEND_ROOT)/apps/web/dist/. $(DESKTOP_WEB_OUT)/
+
+# 私有 bin 启动器（M3-2）：生成 resources/runtime/bin/{node,npx,dsh,opencode}（各含 POSIX 与 .cmd 两版）。
+# 幂等、瞬时（内容逐字节确定，写完即静默），所以挂在 core/desktop 上——桌面态一旦缺它，
+# 子进程 PATH 首段就是一条不存在的路径，症状会退化成"运行时莫名起不来"。
+desktop/runtime-bin:
+	$(require-node)
+	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/gen-runtime-bin.mjs
 
 # 运行时载荷装配（M3-1）：把 dsh 的生产依赖闭包与 opencode 的平台化二进制装到
 # apps/desktop/resources/payloads/（本仓 .gitignore 的生成物面）。
@@ -90,7 +97,9 @@ desktop/dev: core/desktop
 
 # 桌面入口界面/契约验收（真 Electron + 真核心，脚本自己起壳、自造自清；**不进 CI**）：
 # 与 `pnpm ui:accept`（浏览器入口，需先 make dev）互为两靶；覆盖 M1 的 scheme/契约/加固/凭据/事件流/退出六组。
-desktop/accept: core/desktop
+# 依赖 `desktop/payloads`：M3-2 起验收会断言"私有 bin 跑起随包载荷"（nodechannel 场景），
+# 载荷不在场这条只能是红的——与其让人猜，不如让依赖显式化（冷缓存下这一步要联网，见该目标注释）。
+desktop/accept: core/desktop desktop/payloads
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 

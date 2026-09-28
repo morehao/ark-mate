@@ -11,6 +11,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
+import { coreEnvironment } from './node-runtime'
 import { webDir } from './paths'
 
 /** 就绪行的行首前缀（与核心侧 `app.ReadyPrefix` 同值）。 */
@@ -71,6 +72,10 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
       // 独立进程组（POSIX）：退出时对**整组**发信号，核心手里的 runtime 子进程一并收掉。
       // 它同时意味着"壳崩了核心不会自动收到信号"——那由核心自己的 --exit-with-parent 兜底。
       detached: true,
+      // 设计 §6.6 的那份环境（M3-2）：**继承调用方** + Node 模式 + 私有 bin 前置 + 载荷入口注入。
+      // 核心 spawn runtime 时原样继承它——这就是"runtime 跑在 Electron 的 Node 上"的全部机关
+      // （本仓的 runtime 父进程是核心，不是壳，见 node-runtime.ts 顶注）。
+      env: coreEnvironment(),
     },
   ) as ChildProcessWithoutNullStreams
 

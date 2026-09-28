@@ -41,6 +41,31 @@ export function webDir(): string {
 }
 
 /**
+ * 私有 bin 目录（`resources/runtime/bin`，M3-2）：里面是**生成物**启动器
+ * （`node` / `npx` / `dsh` / `opencode`，Windows 另有 `.cmd`），由 `scripts/gen-runtime-bin.mjs` 产出。
+ *
+ * 它只做一件事：被壳前置到子进程 `PATH` 的最前面（设计 §6.6），让核心与其子进程（MCP server、
+ * 用户脚本、我们的载荷）在"机器上没有 node"时也能拿到 Electron 的 Node 与随包载荷。
+ * **不改用户环境**——只影响我们 spawn 出去的那条进程链。
+ */
+export function runtimeBinDir(): string {
+  if (!app.isPackaged) return resolve(app.getAppPath(), 'resources', 'runtime', 'bin')
+  return join(process.resourcesPath, 'runtime', 'bin')
+}
+
+/**
+ * 随包运行时载荷根（`resources/payloads/<name>/<version>/`，M3-1 装配、M3-4 解析）。
+ *
+ * 解析链（显式配置 → 随包载荷 → PATH）与"命中哪一级"的回报都在 M3-4 落地；这里只给根路径，
+ * 与 `webDir()`/`coreExecutable()` 同款：未打包看仓库、打包看 `process.resourcesPath`，
+ * **不做多级回落搜索**（路径算错要明确失败，而不是悄悄用别处的资产）。
+ */
+export function payloadsDir(): string {
+  if (!app.isPackaged) return resolve(app.getAppPath(), 'resources', 'payloads')
+  return join(process.resourcesPath, 'payloads')
+}
+
+/**
  * 桌面核心二进制（`forge-core`：**不带**内嵌资产，前端资产由壳以 `--web-dir` 指过来）。
  *
  * 未打包态按 `FORGE_DESKTOP_CORE` → `resources/forge-core`（`make core/desktop` 的产物）找；
