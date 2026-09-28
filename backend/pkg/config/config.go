@@ -117,8 +117,10 @@ type Config struct {
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
 	RemoteRuntimes []RemoteRuntime
-	// Token 单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
-	// 非空时除 /health 外的所有 /v1/forge 路由都要求 Bearer token（WS 可用 ?token=）。
+	// Token 独立态单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
+	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
+	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
+	// 桌面态不使用它：那两个面互斥的凭据由壳经 --auth-stdin 下发。
 	Token string
 	// NativePermission 原生权限映射开关（B5；FORGE_NATIVE_PERMISSION 覆盖，默认 auto）：
 	//   auto = 把 agent 的 permission_policy 投影到底座原生权限开关；

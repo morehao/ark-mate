@@ -94,12 +94,18 @@ make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → g
 > `--addr 0.0.0.0:10001`，并置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。
 > 生产建议同时 `export GIN_MODE=release`（消除 debug 模式告警）。
 
-**单操作员令牌（A6）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的 `token`）后，除
-`/health` 外的**全部** `/v1/forge` 路由都要求 `Authorization: Bearer <token>`；WS 因浏览器无法
-设置握手头，接受 `?token=<token>`。面板顶栏「令牌」按钮可填写/清除（只存本浏览器 localStorage），
-收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码（`cf…3a（14 字符）`），
-服务端访问日志里 `?token=` 的值被脱敏为 `***`（反代/网关自己的日志不含此保证）。
-未设置令牌 = 历史行为（不鉴权，仅建议回环使用）。
+**凭据（A6 单操作员令牌 → M1-1 分面凭据）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的
+`token`）后，除 `/health` 外的**全部** REST 路由都要求 `Authorization: Bearer <token>`。
+**`?token=` 查询参数已删除**（令牌进 URL 会同时进浏览器历史、反代/网关日志与 Referer）：事件流
+那条通道改走**带内首帧 `attach`**——连接建立后必须在 5s 内发出 `{action:"attach", token:"…"}`
+（未按时送达或凭据不符 → 服务端以 1008 关闭）。前端顶栏「令牌」按钮可填写/清除（只存本浏览器
+localStorage），收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码
+（`cf…3a（14 字符）`）。未设置凭据 = 历史行为（不鉴权，仅建议回环使用）。
+
+> **桌面态是两个凭据**（设计 §7.2）：壳 spawn 核心时用 `--auth-stdin` 经 stdin 首行下发
+> `{"restToken":"…","streamToken":"…"}`（各 32 字节随机 base64url；**不进 argv/env/文件/URL**）。
+> 两个面**互斥**：`restToken` 只用于壳的反代（从不进渲染进程），`streamToken` 只在事件流首帧被接受。
+> 独立态的 `FORGE_TOKEN` 则是同一条令牌同时具备两个面——语义与旧版逐字相同。
 
 浏览器打开 <http://127.0.0.1:10001>：
 
@@ -334,7 +340,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | 能力代际数达上限（`FORGE_GENERATION_LIMIT`，默认 4） | `40901` | `generation_limit_reached` | 复用现有能力集（同一套技能/MCP 组合）、等空闲代际被回收、或调大上限。**平台绝不静默复用一个错误的能力集** |
 | 权限面已收窄（原生权限/provider 变化）而新代际建不起来 | `40901` | `generation_switch_required` | 稍后重试（先修配置）；**这一轮不会用已经收回的权限面继续跑**——宁可拒发 |
 
-WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`session.commands`（底座自报的会话可用斜杠命令**全量**列表——**发现面，不是平台声明的能力**：只有 opencode 会通告，dsh 的 ACP 面不含命令故永不产生该事件；空数组表示"通告了当前没有命令"，执行只是把命令行当普通提示词发出去，平台不投影也不写面）、`turn.ended/error`、`run.cancelled`、`automation.run`（一次 automation 触发的结果，含没产生会话的 duplicate/overlap/skipped——**持久运行史在定义文件的 `recent_runs`，这条事件只走实时通道**）等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
+WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；**每次连接的第一条帧必须是通道级 `attach`**（`{action:"attach", token:"…"}`，无 `agg_id`）——它交付 stream 面凭据，服务端 5s 内未收到即关闭（1008），令牌因此不进 URL；其后的 `attach` 才带 `agg_id` 与 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`session.commands`（底座自报的会话可用斜杠命令**全量**列表——**发现面，不是平台声明的能力**：只有 opencode 会通告，dsh 的 ACP 面不含命令故永不产生该事件；空数组表示"通告了当前没有命令"，执行只是把命令行当普通提示词发出去，平台不投影也不写面）、`turn.ended/error`、`run.cancelled`、`automation.run`（一次 automation 触发的结果，含没产生会话的 duplicate/overlap/skipped——**持久运行史在定义文件的 `recent_runs`，这条事件只走实时通道**）等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
 
 ## 开发
 
@@ -410,6 +416,8 @@ backend/                单 Go module（github.com/morehao/ark-forge）
     archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
+  apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）
+  packages/desktop-contract  @ark/desktop-contract（载体契约唯一真源：常量 + 类型 + 纯函数判定；零 Electron 引用）
   packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
   packages/types        @ark/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
   packages/api          @ark/api（axios 客户端 + /v1/forge resources）

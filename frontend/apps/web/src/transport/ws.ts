@@ -1,3 +1,4 @@
+import { buildAttachFrame } from '@ark/desktop-contract'
 import type { WsClientFrame, WsServerFrame } from '@ark/types'
 import { getToken } from '@ark/api'
 
@@ -81,9 +82,10 @@ export class WsTransport {
   private open(): void {
     if (this.closedByUser) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    // A6：后端启用单操作员令牌时，浏览器无法为 WS 握手设置请求头 → 用查询参数传递。
-    const token = getToken()
-    const url = `${proto}://${location.host}/v1/forge/ws/events${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    // M1-1：令牌**不进 URL**（URL 会同时进浏览器历史、反代/网关日志与 Referer），
+    // 改走带内首帧 attach——连接建立后的第一条帧就是它，服务端 5s 内未收到即关闭（1008）。
+    // 帧形状的唯一真源是 @ark/desktop-contract 的 buildAttachFrame（桌面态还会带上 streamToken）。
+    const url = `${proto}://${location.host}/v1/forge/ws/events`
     this.onState('connecting')
     let ws: WebSocket
     try {
@@ -99,6 +101,8 @@ export class WsTransport {
       this.lastActivity = Date.now()
       this.startPing()
       this.startStallWatch()
+      // 首帧：通道级 attach（携带凭据，无 agg_id）。必须最先发，且每次重连都要重发。
+      this.rawSend(buildAttachFrame(getToken() || null))
       // 重连 resync 裁决：按各 agg 已确认水位重新 attach（服务端 EventsAfter 开区间 →
       // 权威收尾，仅补缺不重复）；水位为 0 的 agg 全量回放（冷挂载/起点已被淘汰）。
       for (const [aggId, since] of this.att) {

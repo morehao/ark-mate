@@ -10,12 +10,14 @@
  * 判定：收到终态帧（turn.ended / turn.error / run.cancelled）即 PASS；
  * 若在超时前未收尾则 POST /cancel 并继续等终态。退出码 0=通路可用。
  */
+import { buildAttachFrame } from '@ark/desktop-contract'
+
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/forge'
-// A6：后端启用 FORGE_TOKEN 时用 FORGE_SMOKE_TOKEN 传入（REST 头 + WS ?token=）。
+// 后端启用凭据时用 FORGE_SMOKE_TOKEN 传入：REST 走 Authorization 头，
+// WS 走带内首帧 attach（M1-1 起令牌不进 URL）。
 const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
 const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
-const WS_QS = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''
 
 const [, , AGENT_ID = '', PROMPT = ''] = process.argv
 if (!AGENT_ID || !PROMPT) {
@@ -46,12 +48,14 @@ async function main() {
   console.log(`  ✔ 会话 ${id} status=${status} 水位 event_seq=${event_seq}`)
 
   // 2) WS attach（since_seq = 创建返回水位 → 只收首轮增量）
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events' + WS_QS
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
   const ws = new WebSocket(wsUrl)
   await new Promise((resolve, reject) => {
     ws.onopen = resolve
     ws.onerror = () => reject(new Error('WS 升级失败'))
   })
+  // 首帧：通道级 attach（凭据）；随后才是订阅帧。
+  ws.send(JSON.stringify(buildAttachFrame(TOKEN || null)))
   console.log('· WS 已连接，attach …')
   ws.send(JSON.stringify({ action: 'attach', agg_id: id, since_seq: event_seq }))
 

@@ -11,9 +11,8 @@
 package router
 
 import (
-	"strings"
-
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/middleware"
 	"github.com/morehao/ark-forge/internal/service/svcagent"
@@ -49,48 +48,58 @@ type Ports struct {
 	Export       svcexport.ExportSvc
 }
 
-// Options 控制面装配选项（A6：单操作员 token）。
+// Options 控制面装配选项（M1-1：凭据表）。
 type Options struct {
-	// Token 非空时，除 /health 外的所有 /v1/forge 路由都要求 Bearer token：
-	// REST 用 `Authorization: Bearer <token>`；WS 因浏览器无法设握手头，额外接受 `?token=<token>`。
-	// 空 = 不鉴权（默认，仅绑定回环地址时的历史行为）。
-	Token string
+	// Credentials 凭据表（见 internal/credential）。
+	//
+	// 空表 = 不鉴权（默认，仅绑定回环地址时的历史行为）。非空时：
+	//   - 除 /health 外的 REST 路由要求具备 **rest 面**的凭据（`Authorization: Bearer <token>`，
+	//     不接受 `?token=`）；
+	//   - `/ws/events` **不挂** REST 凭据中间件——事件流的鉴权是**带内**的：
+	//     连接建立后须在 5s 内发首帧 `attach` 并携带**stream 面**凭据（见 controller/ctrws）。
+	//
+	// 桌面态两个面互斥（restToken / streamToken），独立态是同一条令牌同时带两个面。
+	Credentials *credential.Set
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
 //
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
-// 实时通道契约见 docs/design-and-roadmap.md §4.5；A6 起可选单操作员 token 鉴权。
+// 实时通道契约见 docs/design-and-roadmap.md §4.5。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
+	var creds *credential.Set
+	if len(opts) > 0 {
+		creds = opts[0].Credentials
+	}
+
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20
 
 	// golib v1.32.14 起 versions 由可变参数改为切片，并默认挂载 ginmiddleware.Trace()
-	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）；
-	// v1.32.16 起它默认挂载的 AccessLog 还会按字段名脱敏 query/body 内容
-	// （*token*/*secret*/*password*… → ***），这对本仓尤其有用：WS 因浏览器无法设
-	// 握手头而用 `?token=` 传令牌（见 controller/ctrws），脱敏后该值不再进访问日志。
+	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）。
 	groups := ginserver.NewRouterGroups(r, AppName, []ginserver.VersionGroup{{
 		Version: ginserver.ApiVersionV1,
 	}})
 	v1 := groups.MustGetGroup(ginserver.ApiVersionV1)
 
-	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）；
-	// 之后的全部路由挂鉴权中间件（含 WS）。
+	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）。
 	v1.GET("/health", health)
-	if len(opts) > 0 && strings.TrimSpace(opts[0].Token) != "" {
-		v1.Use(middleware.Token(opts[0].Token))
-	}
+	// 实时事件流：鉴权在**带内**（首帧 attach 带 stream 面凭据），因此不挂 REST 凭据中间件。
+	registerStream(v1, bus, creds)
 
-	registerAgent(v1, ports)
-	registerWorkspace(v1, ports)
-	registerConversation(v1, ports)
-	registerRuntime(v1, ports)
-	registerCapability(v1, ports)
-	registerAutomation(v1, ports)
-	registerLibrary(v1, ports)
-	registerObservability(v1, ports, bus)
+	// 其余全部 REST 路由统一要求 rest 面凭据（空表时中间件是放行 no-op）。
+	rest := v1.Group("")
+	rest.Use(middleware.Credential(creds, credential.ScopeREST))
+
+	registerAgent(rest, ports)
+	registerWorkspace(rest, ports)
+	registerConversation(rest, ports)
+	registerRuntime(rest, ports)
+	registerCapability(rest, ports)
+	registerAutomation(rest, ports)
+	registerLibrary(rest, ports)
+	registerUsage(rest, ports)
 
 	MountWeb(r)
 	return r

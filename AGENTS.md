@@ -71,7 +71,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 
 ## 运行配置要点
 
-- 默认仅回环 `127.0.0.1:10001`，无鉴权（对外需先设 `FORGE_TOKEN`，WS 经 `?token=` 传）。部署见 `docs/deployment.md`。
+- 默认仅回环 `127.0.0.1:10001`，无鉴权（对外需先设 `FORGE_TOKEN`；REST 走 `Authorization: Bearer`，事件流的令牌走**带内首帧 attach**——`?token=` 已于 M1-1 删除）。桌面态是两个互斥凭据（`restToken` 只给壳反代 / `streamToken` 只被事件流接受），由壳经 `--auth-stdin` 从 stdin 首行下发，不进 argv/env/文件/URL。部署见 `docs/deployment.md`。
 - 持久层实现：gorm（`pkg/dbclient` 装配 + `internal/model` 实体 + `internal/dao` 访问）。**SQLite 用自注册的纯 Go dialector**（`glebarez/sqlite`）——不要 import golib 的 `dbgorm/driver/sqlite`，它底层是 CGO 的 mattn/go-sqlite3，与本仓 `CGO_ENABLED=0` 单二进制构建冲突；且 `dbgorm.matchDialector` 遍历注册表 map，两个都能匹配 `sqlite://` 的 factory 会让匹配结果不确定。
 - **落库格式是硬契约**（`internal/store/format_test.go` 锁定）：时间列一律 TEXT + RFC3339Nano(UTC)，布尔列一律 INTEGER 0/1。两者都由 `internal/model` 的 serializer 保证——实体照常写 `time.Time`/`bool`，但**裸 SQL 的入参不经过 serializer**，时间要先用 `model.FormatTime` 格式化、布尔要用 `model.FlagValue` 转换。schema 仍由 `internal/store` 的自管迁移内核创建（不用 gorm AutoMigrate：它表达不了有序版本、版本拒绝启动与导入 staging 回滚）。
 - 持久层 `FORGE_STORE=sqlite|memory|auto`：make dev/server 默认 sqlite（库 `~/.forge/forge.db`）；sqlite 才有 runs 读模型与 `/usage/summary`（memory → 40501）。memory 模式以 transcript（`~/.forge/transcripts`）为事实源，`forge migrate` 幂等导入 sqlite。

@@ -634,7 +634,7 @@ export const useForge = create<ForgeStore>((set, get) => {
       const v = token.trim()
       persistToken(v)
       set({ token: v, tokenModalOpen: false })
-      // 令牌变化必须重连 WS（握手时经 ?token= 传递）并重新拉取数据。
+      // 令牌变化必须重连 WS（凭据走带内首帧 attach，重连才会带上新值）并重新拉取数据。
       transportRef?.close()
       ensureTransport().connect()
       void get().refreshAgents()

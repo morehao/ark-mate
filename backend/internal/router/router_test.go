@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
@@ -366,8 +367,8 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	t.Logf("README 路由 %d 条全部命中注册表（注册 %d 条）", len(seen), len(registered))
 }
 
-// newAuthEngine 装配带单操作员令牌的引擎（A6）。
-func newAuthEngine(token string) *gin.Engine {
+// newAuthEngine 装配带凭据表的引擎（M1-1）。
+func newAuthEngine(creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
@@ -375,14 +376,27 @@ func newAuthEngine(token string) *gin.Engine {
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
-	}, bus, router.Options{Token: token})
+	}, bus, router.Options{Credentials: creds})
 	return engine
 }
 
-// TestAuthToken 单操作员令牌：/health 免鉴权，其余 REST/WS 路由要求 Bearer 或 ?token=。
+// standaloneCreds 独立态凭据：单一令牌同时具备 rest 与 stream 两个面
+// （= FORGE_TOKEN 折叠成的形态，见 internal/app 的 credentials()）。
+func standaloneCreds(token string) *credential.Set {
+	if token == "" {
+		return nil
+	}
+	return credential.MustNew(credential.Pair{Token: token, Scopes: credential.ScopeREST | credential.ScopeStream})
+}
+
+// TestAuthToken 独立态单令牌：/health 免鉴权；其余 REST 路由要求 Bearer。
+//
+// **M1-1 的破坏性变更点**：`?token=` 已删除（令牌进 URL 会同时进浏览器历史、反代日志与
+// Referer），因此"查询参数带正确令牌"从放行变成 401——这一行就是那条变更的回归点。
+// 事件流的鉴权也搬到了带内（首帧 attach），所以 WS 路由本身不再由 REST 中间件把守。
 func TestAuthToken(t *testing.T) {
 	const token = "s3cret-token"
-	eng := newAuthEngine(token)
+	eng := newAuthEngine(standaloneCreds(token))
 
 	type probe struct {
 		name       string
@@ -399,13 +413,11 @@ func TestAuthToken(t *testing.T) {
 		{"非 Bearer 方案", "GET", "/v1/forge/agents", "Basic s3cret-token", 401, 40101},
 		{"正确 Bearer", "GET", "/v1/forge/agents", "Bearer " + token, 200, 0},
 		{"方案大小写不敏感", "GET", "/v1/forge/agents", "bearer " + token, 200, 0},
-		{"查询参数（WS/EventSource 兼容）", "GET", "/v1/forge/agents?token=" + token, "", 200, 0},
-		{"查询参数错值", "GET", "/v1/forge/agents?token=nope", "", 401, 40101},
+		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/forge/agents?token=" + token, "", 401, 40101},
 		{"POST 也受保护", "POST", "/v1/forge/conversations/export", "", 401, 40101},
-		{"WS 无令牌被拦", "GET", "/v1/forge/ws/events", "", 401, 40101},
-		// 放行后进入 WS 升级逻辑：非升级请求被升级库拒绝（426 Upgrade Required），
-		// 关键是「不再是 401」。
-		{"WS 带查询令牌放行（进入升级逻辑）", "GET", "/v1/forge/ws/events?token=" + token, "", 426, 0},
+		// WS 路由不挂 REST 凭据中间件（鉴权在带内首帧 attach）：非升级请求直接进入升级逻辑，
+		// 被升级库拒绝为 426 Upgrade Required。关键是「不再是 401」。
+		{"WS 不受 REST 中间件把守（鉴权在带内）", "GET", "/v1/forge/ws/events", "", 426, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -435,14 +447,86 @@ func TestAuthToken(t *testing.T) {
 	}
 }
 
-// TestAuthTokenDisabled 未配置令牌 = 历史行为（不鉴权）。
+// TestCredentialsScopeSeparation 桌面态双凭据：两个面**互斥**（V15 的 REST 侧判据）。
+//
+// streamToken 打不到 REST 是这条分层的全部意义——事件流通道即使令牌被页面持有，
+// 也拿不到任何写能力。反例（streamToken → REST 放行）会让 V15 失去意义，因此必须钉住。
+func TestCredentialsScopeSeparation(t *testing.T) {
+	const rest = "rest-token-2f9c"
+	const stream = "stream-token-71ab"
+	eng := newAuthEngine(credential.MustNew(
+		credential.Pair{Token: rest, Scopes: credential.ScopeREST},
+		credential.Pair{Token: stream, Scopes: credential.ScopeStream},
+	))
+
+	cases := []struct {
+		name   string
+		path   string
+		header string
+		want   int
+	}{
+		{"restToken → REST 放行", "/v1/forge/agents", "Bearer " + rest, 200},
+		{"streamToken → REST 被拒（V15）", "/v1/forge/agents", "Bearer " + stream, 401},
+		{"无令牌 → REST 被拒", "/v1/forge/agents", "", 401},
+		{"restToken 也不能走查询参数", "/v1/forge/agents?token=" + rest, "", 401},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			w := httptest.NewRecorder()
+			eng.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("HTTP 状态不符: got %d want %d（body=%s）", w.Code, tc.want, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestCredentialCoversAllRestRoutes 除 /health 与 /ws/events 外，**每一条**注册路由都必须
+// 落在 rest 面凭据中间件之后。
+//
+// 为什么要有这条：中间件是挂在 `v1.Group("")` 上的，新写 routes_*.go 的人若把路由注册到
+// `v1` 而不是 rest 组（或将来有人重构分组），那条端点会**静默变成免鉴权**——斜杠前面少一层
+// 就差一个 401，普通用例根本发现不了。这里直接枚举真实注册表逐条打一遍。
+func TestCredentialCoversAllRestRoutes(t *testing.T) {
+	eng := newAuthEngine(credential.MustNew(
+		credential.Pair{Token: "rest-token-2f9c", Scopes: credential.ScopeREST},
+	))
+	exempt := map[string]bool{
+		"/v1/forge/health":    true, // liveness 探针免鉴权（容器编排不带令牌）
+		"/v1/forge/ws/events": true, // 鉴权在带内首帧 attach
+	}
+	checked := 0
+	for _, ri := range eng.Routes() {
+		if !strings.HasPrefix(ri.Path, "/v1/forge") || exempt[ri.Path] {
+			continue
+		}
+		checked++
+		// 无 Authorization → 中间件必须先于 handler 拦下（不依赖任何领域端口就绪）。
+		req := httptest.NewRequest(ri.Method, ri.Path, nil)
+		w := httptest.NewRecorder()
+		eng.ServeHTTP(w, req)
+		if w.Code != 401 {
+			t.Errorf("%s %s 未受 rest 面凭据保护（HTTP %d）——它注册到 rest 组之外了？",
+				ri.Method, ri.Path, w.Code)
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("只检查到 %d 条 REST 路由，明显少于实际注册数——过滤条件写错了，守卫形同虚设", checked)
+	}
+}
+
+// TestAuthTokenDisabled 未配置凭据 = 历史行为（不鉴权）。
 func TestAuthTokenDisabled(t *testing.T) {
-	eng := newAuthEngine("")
+	eng := newAuthEngine(nil)
 	req := httptest.NewRequest("GET", "/v1/forge/agents", nil)
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)
 	if w.Code != 200 {
-		t.Fatalf("未配置令牌应放行: %d %s", w.Code, w.Body.String())
+		t.Fatalf("未配置凭据应放行: %d %s", w.Code, w.Body.String())
 	}
 }
 

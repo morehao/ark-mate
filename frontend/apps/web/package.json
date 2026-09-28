@@ -19,6 +19,7 @@
   "devDependencies": {
     "@ant-design/icons": "^6.3.4",
     "@ark/api": "workspace:*",
+    "@ark/desktop-contract": "workspace:*",
     "@ark/tsconfig": "workspace:*",
     "@ark/types": "workspace:*",
     "@ark/ui": "workspace:*",

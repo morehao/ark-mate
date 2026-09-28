@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/router"
@@ -71,12 +72,28 @@ type App struct {
 	st  *store.Store
 	srv *httpServer
 
+	// creds 凭据表（M1-1）：桌面态由命令层经 --auth-stdin 注入；独立态由 FORGE_TOKEN 折叠而来。
+	// **不进 config.Config**——配置面会被 `forge config --json` 打印出来，令牌不该出现在那里。
+	creds *credential.Set
+
 	closeOnce sync.Once
 }
 
-// New 构造 App（只记录配置，不做任何 IO）。
-func New(cfg config.Config, sources config.Sources) *App {
-	return &App{cfg: cfg, sources: sources}
+// Option 装配可选项（M1-1）。
+type Option func(*App)
+
+// WithCredentials 注入凭据表（桌面态双凭据；独立态通常不传，走 FORGE_TOKEN 折叠）。
+func WithCredentials(creds *credential.Set) Option {
+	return func(a *App) { a.creds = creds }
+}
+
+// New 构造 App（只记录配置与可选项，不做任何 IO）。
+func New(cfg config.Config, sources config.Sources, opts ...Option) *App {
+	a := &App{cfg: cfg, sources: sources}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // Service 返回领域服务实现（供命令层做迁移等直连操作，如 forge demo）。
@@ -222,9 +239,35 @@ func (a *App) Init(ctx context.Context) error {
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
-	a.srv = newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Token: cfg.Token}))
-	if cfg.Token != "" {
-		slog.Info("serve: 已启用单操作员令牌鉴权（除 /health 外全部 /v1/forge 路由要求 Bearer token）")
+	a.srv = newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Credentials: a.credentials()}))
+	if creds := a.credentials(); creds.Required() {
+		slog.Info("serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
+			"entries", creds.Count(), "ws_attach_deadline", credential.StreamAttachDeadline)
+	}
+	return nil
+}
+
+// credentials 解析本次进程的凭据表（M1-1）。
+//
+// 两个来源，优先级明确：
+//  1. **命令层注入**（桌面态 `--auth-stdin` 的双凭据）：显式来源，最高优先级；
+//  2. **FORGE_TOKEN**（独立态历史行为）：折叠成一条同时具备 rest 与 stream 两个面的凭据，
+//     因此"同一个令牌既能调 REST 也能订阅事件流"的既有语义逐字保留。
+//
+// 两者同时存在时以注入为准并告警：桌面态的核心由壳 spawn，用户 shell 里残留的
+// FORGE_TOKEN 不该改变桌面态的凭据分层（它只该管独立态）。
+func (a *App) credentials() *credential.Set {
+	if a.creds.Required() {
+		if a.cfg.Token != "" {
+			slog.Warn("serve: --auth-stdin 与 FORGE_TOKEN 同时存在，以 --auth-stdin 的双凭据为准（FORGE_TOKEN 被忽略）")
+		}
+		return a.creds
+	}
+	if a.cfg.Token != "" {
+		return credential.MustNew(credential.Pair{
+			Token:  a.cfg.Token,
+			Scopes: credential.ScopeREST | credential.ScopeStream,
+		})
 	}
 	return nil
 }
