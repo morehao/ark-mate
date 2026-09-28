@@ -1,0 +1,8 @@
+# 同 runtime/dsh：独立工作区根 + 精确版本 pin（见该目录注释）。
+# opencode 只取**平台化二进制**（不带 opencode-ai 那层 JS 包装：它在 postinstall 里再把同一份
+# 二进制复制一遍，实测 138MB × 2 —— 载荷里只留一份）。
+packages: []
+# pnpm 的"最小发布年龄"闸门默认会拦住刚发布的版本；我们是**有意**钉死这个确切版本
+# （平台化二进制必须版本一致），所以显式豁免它——这行是 pnpm 自动补的，留着以便复现。
+minimumReleaseAgeExclude:
+  - opencode-darwin-arm64@1.18.33

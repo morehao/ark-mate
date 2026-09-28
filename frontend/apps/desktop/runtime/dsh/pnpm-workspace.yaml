@@ -1,0 +1,31 @@
+# 这份 runtime 载荷自成一个"工作区根"（`packages: []`）：
+#   ① 不被上层的 frontend 工作区吞掉（否则每个开发者装一次前端就要付一份载荷的体积）；
+#   ② allowBuilds 留在这里，与本仓"默认拒绝依赖构建脚本"的纪律同形（frontend/pnpm-workspace.yaml 同款）。
+#
+# 版本纪律：`dependencies` 只写**精确版本**（不带 ^/~），实际解析结果由本目录的 pnpm-lock.yaml 钉死；
+# prepare-runtime.mjs 会复核"装出来的版本 === 精确 pin"，对不上直接失败（供应链纪律，见计划 §7/M3-1）。
+packages: []
+
+# 提升式布局（hoisted）：载荷要的是一棵**自包含的真文件树**。
+# 隔离式布局下真实内容只存在于 `.pnpm/`，顶层全是指向它的符号链接——拷进载荷就成了
+# 一串指向 `~/.pnpm-store` 的死链（用户机器上必然起不来）；而把 `.pnpm` 一起带上，
+# 同一份闭包要存两遍。提升 + 去引用（prepare-runtime 里做）得到的是"每个包一份真目录"。
+nodeLinker: hoisted
+
+allowBuilds:
+  # 下面这些在探针安装里被 pnpm 默认拦下（ERR_PNPM_IGNORED_BUILDS），逐个表态：
+  # dsh 的子进程助手、koffi 的 FFI、node-pty 的原生终端——都是 runtime 真会加载的原生件，必须放行。
+  "@deepseek-ai/dsh-subprocess-local": true
+  koffi: true
+  node-pty: true
+  # protobufjs/genai 的 postinstall 是常量级脚本（探针里输出 no-op）；放行以免"装好了但缺一步"。
+  "@google/genai": true
+  protobufjs: true
+
+# 只装**目标平台**的原生包（opencode/ripgrep/libreoffice/sherpa 这些都有多平台副本，
+# 全平台一起装会让载荷凭空多出几百 MB）。真正的目标平台由 prepare-runtime.mjs 在命令行上覆盖。
+supportedArchitectures:
+  os:
+    - darwin
+  cpu:
+    - arm64

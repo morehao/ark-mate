@@ -1,0 +1,24 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      opencode-darwin-arm64:
+        specifier: 1.18.33
+        version: 1.18.33
+
+packages:
+
+  opencode-darwin-arm64@1.18.33:
+    resolution: {integrity: sha512-rZm4Phz7eu/kVz2lynergU/LzKS/L0ofErB2fRXfaoAH528b3EnVcISZ/13dwk78FPxVhop7hWXshowT88C8Yw==}
+    cpu: [arm64]
+    os: [darwin]
+
+snapshots:
+
+  opencode-darwin-arm64@1.18.33: {}

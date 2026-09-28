@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -69,6 +69,17 @@ core/desktop: web
 	rm -rf $(DESKTOP_WEB_OUT)
 	mkdir -p $(DESKTOP_WEB_OUT)
 	cp -R $(FRONTEND_ROOT)/apps/web/dist/. $(DESKTOP_WEB_OUT)/
+
+# 运行时载荷装配（M3-1）：把 dsh 的生产依赖闭包与 opencode 的平台化二进制装到
+# apps/desktop/resources/payloads/（本仓 .gitignore 的生成物面）。
+#
+# **故意不进 `core/desktop`**：载荷是几百 MB 的磁盘 + 冷缓存下要联网，而日常开发
+# （make dev / desktop/accept）根本用不到它——只有真正打包（M4）才需要。
+# 目标平台默认跟宿主，交叉装配用 PLATFORM=/ARCH= 覆盖（平台化二进制按这两个值选）。
+desktop/payloads:
+	$(require-node)
+	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/prepare-runtime.mjs \
+		$(if $(PLATFORM),--platform $(PLATFORM),) $(if $(ARCH),--arch $(ARCH),)
 
 # 桌面壳开发起服：先出 forge-core，再构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
 # 窗口进 `forge-app://app/`（前端产物来自 apps/web/dist），REST 由壳反代核心。
