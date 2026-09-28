@@ -15,10 +15,12 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server desktop/dev build vet test all clean image image/runtimes image/run
+.PHONY: dev web server desktop/dev core/desktop build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
+# 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
+CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/forge-core
 
 # —— 前端工具链（Node / pnpm）——
 # 唯一事实源在 frontend/ 内：Node 版本 = frontend/.nvmrc，pnpm 版本 = frontend/package.json 的
@@ -45,10 +47,18 @@ web:
 	rm -rf $(WEB_DIST_DIR)
 	cp -r $(FRONTEND_ROOT)/apps/web/dist $(WEB_DIST_DIR)
 
-# 桌面壳开发起服：构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
-# M0-5 只开一个壳静态页窗口；M1 起壳会 spawn forge-core 并把窗口切到 forge-app://app/。
+# 桌面随包核心 `forge-core`：壳 spawn 它（`:0` + 双凭据经 stdin + 就绪行回写）。
+#
+# **故意不带 `-tags release`**：桌面核不内嵌前端资产——资产由壳服务，核心按 `--web-dir`
+# 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份 apps/web/dist，核心不再内嵌一份副本）。
+# 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
+core/desktop:
+	cd backend && CGO_ENABLED=0 go build -o ../$(CORE_DESKTOP_OUT) ./cmd/forge
+
+# 桌面壳开发起服：先出 forge-core，再构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
+# 窗口进 `forge-app://app/`（前端产物来自 apps/web/dist），REST 由壳反代核心。
 # 与 make dev 的区别：那条起的是浏览器入口（vite :5173 + 后端 :10001），这条起的是桌面入口。
-desktop/dev:
+desktop/dev: core/desktop
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm -F @ark/desktop dev
 

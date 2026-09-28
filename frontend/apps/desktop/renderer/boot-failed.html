@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      恢复页：核心起不来（或就绪行超时）时窗口显示的就是它——**明确状态页，不是白屏**。
+      与 welcome.html 同为壳静态页：不引 antd、无脚本、样式只消费 shell-tokens.css 的变量。
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:" />
+    <title>ark-forge · 启动失败</title>
+    <link rel="stylesheet" href="shell-tokens.css" />
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body>
+    <div class="shell-card">
+      <h1 class="shell-title"><span class="shell-dot"></span>核心没能启动</h1>
+      <p class="shell-text">
+        桌面壳已经起来了，但它 spawn 的 <code class="shell-code">forge-core</code> 没有在 10 秒内回写就绪行，
+        或 health 复核失败。窗口不该是一片空白，所以给你这一页。
+      </p>
+      <p class="shell-text">
+        常见原因：核心二进制缺失（开发态先跑 <code class="shell-code">make core/desktop</code>）、
+        端口被占、或核心启动即报错退出。
+      </p>
+      <p class="shell-text">
+        壳的 stdout / stderr 里有完整原因（含核心自己的日志尾部）；确认后重启应用即可。
+      </p>
+    </div>
+  </body>
+</html>

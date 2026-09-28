@@ -1,23 +1,38 @@
 /**
- * 桌面壳主进程 —— **M0-5 最小版**：单实例锁 + 开一个窗口，窗口内容就是 `renderer/welcome.html`。
+ * 桌面壳主进程（M1-3：自定义 scheme + 反代 + 核心 spawn）。
  *
- * 后面各里程碑在它之上长，但形态已定：
- *   - M1-3：`registerSchemesAsPrivileged` + `protocol.handle` 三路分发（app 静态 / 反代核心 / shell 页），
- *     窗口改 `loadURL('forge-app://app/')`；
- *   - M1-4/M1-5：preload 暴露 `__FORGE_DESKTOP__`（origin 守卫）+ 渲染进程加固基线（CSP/导航/权限）；
- *   - M1-6：托盘、第二次启动聚焦、退出语义（SIGTERM → 宽限 → 进程组 SIGKILL）；
- *   - M2-6/M3：spawn 随包的 `forge-core`（`--web-dir` 指向包内 dist、双凭据经 stdin、`:0` + ready 回写）。
+ * 启动链（设计 §7.1）：
+ *   单实例锁 claim → 注册并锁定 `forge-app://` scheme → spawn 核心（`:0` + 双凭据经 stdin
+ *   + `--ready-stdout`）→ 读就绪行拿地址 → health 复核 → 开窗口 `loadURL('forge-app://app/')`
+ *   → 壳服务 index/assets、反代 `/v1/*`（注入 restToken）、页面自连回环收事件流。
  *
- * 单实例锁锁的是**核心**（M1-6 起转发深链接），不是窗口数——窗口数将来可以按工作区开多个。
+ * 令牌分层（设计 §7.2）：`restToken` 只在**主进程**（本文件 + scheme 反代）出现；
+ * `streamToken` 经 M1-8 的 `boot()` 下发给页面。两者都不进 argv/env/文件/URL。
+ *
+ * 后续里程碑在此之上长：M1-4/M1-5 preload 暴露与渲染进程加固（CSP/导航/权限）、
+ * M1-6 托盘与退出语义、M2-6 把 `--web-dir` 指给核心、M3 随包载荷与私有 node。
  */
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { join } from 'node:path'
 
-/** 壳自己的日志前缀：与 core 的 stdout 混在一起时（M1-2 的 `FORGE_READY` 扫描）好区分。 */
+import { APP_ORIGIN, SHELL_ORIGIN } from '@ark/desktop-contract'
+import { startCore, stopCore, type CoreHandle } from './core'
+import { coreExecutable, rendererDir, webDir } from './paths'
+import { installSchemeHandler, registerSchemePrivileges, shellPageUrl } from './scheme'
+
+/** 壳日志前缀：与核心/子进程的 stdout 混在一起时好区分。 */
 const LOG_PREFIX = '[shell]'
 
-function createWindow(): BrowserWindow {
-  const win = new BrowserWindow({
+const log = (...parts: unknown[]): void => console.log(LOG_PREFIX, ...parts)
+
+// scheme 特权必须在 app.ready 之前注册（Electron 硬要求），因此放在模块顶层。
+registerSchemePrivileges()
+
+let core: CoreHandle | null = null
+let win: BrowserWindow | null = null
+
+function createWindow(url: string): BrowserWindow {
+  const w = new BrowserWindow({
     width: 1280,
     height: 840,
     show: false,
@@ -32,39 +47,82 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  // M0-5 还没有自定义 scheme：直接加载壳静态页，验证 renderer/ 与生成出来的 tokens css 接线正确。
-  void win.loadFile(join(app.getAppPath(), 'renderer', 'welcome.html'))
-  win.once('ready-to-show', () => {
-    win.show()
-    console.log(`${LOG_PREFIX} window ready-to-show (M0-5 骨架) visible=${win.isVisible()}`)
+  void w.loadURL(url)
+  w.once('ready-to-show', () => {
+    w.show()
+    log(`window ready-to-show url=${url} visible=${w.isVisible()}`)
   })
-  // 这两条诊断从第一版就留：M1 起窗口加载的是 forge-app://app/（核心托管），
-  // 静态资源 404 / 渲染进程被杀都会先在这里留下可读的一行，不然只剩"白屏"。
-  win.webContents.on('did-fail-load', (_e, code, desc, url) =>
-    console.log(`${LOG_PREFIX} did-fail-load code=${code} desc=${desc} url=${url}`),
+  w.webContents.on('did-fail-load', (_e, code, desc, failedUrl) =>
+    log(`did-fail-load code=${code} desc=${desc} url=${failedUrl}`),
   )
-  win.webContents.on('render-process-gone', (_e, details) =>
-    console.log(`${LOG_PREFIX} render-process-gone reason=${details.reason} exitCode=${details.exitCode}`),
+  w.webContents.on('render-process-gone', (_e, details) =>
+    log(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`),
   )
-  win.on('closed', () => console.log(`${LOG_PREFIX} window closed`))
-  return win
+  w.on('closed', () => {
+    log('window closed')
+    if (win === w) win = null
+  })
+  return w
 }
 
 // 单实例：第二次启动直接退出（M1-6 会改为聚焦已有窗口 + 转发深链接参数）。
 if (!app.requestSingleInstanceLock()) {
-  console.log(`${LOG_PREFIX} 已有实例在运行，退出本次启动`)
+  log('已有实例在运行，退出本次启动')
   app.quit()
 } else {
-  app.on('second-instance', () => console.log(`${LOG_PREFIX} second-instance（M1-6 处理聚焦与深链接）`))
-  app.whenReady().then(() => {
-    console.log(`${LOG_PREFIX} app ready, electron=${process.versions.electron} node=${process.versions.node} abi=${process.versions.modules}`)
-    createWindow()
+  app.on('second-instance', () => log('second-instance（M1-6 处理聚焦与深链接）'))
+
+  // 深链接 scheme（`forge://…`）。未打包态按 Electron 文档显式给 execPath + 入口，
+  // 否则注册到的是 electron 的默认二进制而不是本应用。消费在 M1-6（单实例转发）。
+  if (!app.isPackaged) {
+    app.setAsDefaultProtocolClient('forge', process.execPath, [app.getAppPath()])
+  } else {
+    app.setAsDefaultProtocolClient('forge')
+  }
+
+  app.whenReady().then(async () => {
+    log(`app ready, electron=${process.versions.electron} node=${process.versions.node} abi=${process.versions.modules}`)
+
+    // scheme 处理器先装：核心即使起不来，恢复页也得有人服务。
+    installSchemeHandler({ webDir: webDir(), rendererDir: rendererDir(), core: () => core })
+
+    let bootError: string | null = null
+    try {
+      core = await startCore({ exe: coreExecutable(), onLog: (l) => console.log(l) })
+      log(`core ready addr=${core.addr}`)
+    } catch (e) {
+      bootError = String(e)
+      log(`核心启动失败：${bootError}`)
+    }
+
+    if (bootError) {
+      // 恢复页：明确的状态页，而不是白窗口（设计 §7.1 的"再超时 → 恢复页"）。
+      win = createWindow(shellPageUrl('boot-failed.html', SHELL_ORIGIN))
+    } else {
+      win = createWindow(`${APP_ORIGIN}/`)
+    }
+
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (BrowserWindow.getAllWindows().length === 0) {
+        win = createWindow(bootError ? shellPageUrl('boot-failed.html', SHELL_ORIGIN) : `${APP_ORIGIN}/`)
+      }
     })
   })
+
   app.on('window-all-closed', () => {
     // macOS 习惯是关窗不退进程；M1-6 会改成"默认隐藏到托盘 + 首次持久化确认"。
     if (process.platform !== 'darwin') app.quit()
   })
+
+  app.on('before-quit', () => {
+    // M1-6 会补"等核心退出（宽限 3s）→ 对进程组 SIGKILL"；本轮先发 SIGTERM。
+    stopCore(core)
+    core = null
+  })
 }
+
+// 兜底：未捕获异常也要留痕（壳的日志是桌面态排障的唯一入口，M4 的 forge doctor 会读它）。
+process.on('uncaughtException', (err) => {
+  log(`uncaughtException: ${err?.stack ?? String(err)}`)
+  dialog.showErrorBox('ark-forge 桌面壳异常', String(err?.stack ?? err))
+})
