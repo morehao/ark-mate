@@ -29,6 +29,9 @@ func serve(args []string) {
 	authStdin := fs.Bool("auth-stdin", false,
 		"从 stdin 首行读取桌面态双凭据（JSON {\"restToken\":\"…\",\"streamToken\":\"…\"}，各 32 字节随机 base64url）；"+
 			"令牌因此不进 argv/env/文件/URL。解析失败或两者之一为空 → 退出码 2")
+	readyStdout := fs.Bool("ready-stdout", false,
+		"监听成功后往 stdout 打一行 `FORGE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
+			"桌面壳据此立刻拿到地址，不传则壳退回 health 轮询")
 	_ = fs.Parse(args)
 
 	cfg, sources := mustConfig()
@@ -40,6 +43,9 @@ func serve(args []string) {
 	}
 
 	opts := []app.Option{}
+	if *readyStdout {
+		opts = append(opts, app.WithReadyStdout(true))
+	}
 	if *authStdin {
 		creds, err := readCredentialStdin(os.Stdin)
 		if err != nil {

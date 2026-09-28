@@ -76,15 +76,23 @@ type App struct {
 	// **不进 config.Config**——配置面会被 `forge config --json` 打印出来，令牌不该出现在那里。
 	creds *credential.Set
 
+	// readyStdout 是否在监听成功后往 stdout 打一行 `FORGE_READY {...}`（M1-2，桌面壳据此拿地址）。
+	readyStdout bool
+
 	closeOnce sync.Once
 }
 
-// Option 装配可选项（M1-1）。
+// Option 装配可选项（M1-1/M1-2）。
 type Option func(*App)
 
 // WithCredentials 注入凭据表（桌面态双凭据；独立态通常不传，走 FORGE_TOKEN 折叠）。
 func WithCredentials(creds *credential.Set) Option {
 	return func(a *App) { a.creds = creds }
+}
+
+// WithReadyStdout 开启就绪行回写（桌面壳 spawn 核心时传 `--ready-stdout`）。
+func WithReadyStdout(on bool) Option {
+	return func(a *App) { a.readyStdout = on }
 }
 
 // New 构造 App（只记录配置与可选项，不做任何 IO）。
@@ -239,7 +247,12 @@ func (a *App) Init(ctx context.Context) error {
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
-	a.srv = newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Credentials: a.credentials()}))
+	srv, err := newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Credentials: a.credentials()}))
+	if err != nil {
+		// 端口被占 / 无权限在装配期就报出来（此前是 ListenAndServe 里的运行期错误）。
+		return usageErr("serve: %v", err)
+	}
+	a.srv = srv
 	if creds := a.credentials(); creds.Required() {
 		slog.Info("serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
 			"entries", creds.Count(), "ws_attach_deadline", credential.StreamAttachDeadline)
@@ -366,6 +379,16 @@ func (a *App) Run(ctx context.Context) error {
 			slog.Info("serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
 			_ = a.svc.AutoProbeMcpServers(ctx)
 		}()
+	}
+
+	// 就绪行（M1-2）：监听器在 Init 期就绑好了，这里打的是**实际**地址（`:0` 时是内核分配的端口）。
+	// 只走 stdout 一行、不含任何令牌；壳按行首 `FORGE_READY ` 匹配，拿不到就退回 health 轮询。
+	if a.readyStdout {
+		if line, err := ReadyLine(a.srv.Addr()); err != nil {
+			slog.Warn("serve: 组装就绪行失败，壳将退回 health 轮询", "err", err)
+		} else {
+			fmt.Println(line)
+		}
 	}
 
 	if err := a.srv.Start(); err != nil {
