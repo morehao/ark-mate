@@ -62,27 +62,76 @@ export function killShellTree() {
 }
 
 /**
+ * 列出一组进程的**全部后代**（按 ppid 做 BFS）。
+ *
+ * 用途：收场时要精确清掉"我们起的核心手里的 runtime 子进程"，而不是 `pkill -f dsh`——
+ * 后者会把用户自己开的 dsh 会话一起杀掉（那是别人的进程，不是我们的残留）。
+ */
+function descendantsOf(rootPids) {
+  const rows = psAll()
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/))
+    .filter((a) => a.length >= 2 && /^\d+$/.test(a[0]) && /^\d+$/.test(a[1]))
+    .map((a) => [Number(a[0]), Number(a[1])])
+  const children = new Map()
+  for (const [pid, ppid] of rows) {
+    if (!children.has(ppid)) children.set(ppid, [])
+    children.get(ppid).push(pid)
+  }
+  const out = new Set()
+  const queue = [...rootPids]
+  while (queue.length) {
+    for (const child of children.get(queue.shift()) ?? []) {
+      if (!out.has(child)) {
+        out.add(child)
+        queue.push(child)
+      }
+    }
+  }
+  return out
+}
+
+/**
  * 优雅收场（默认路径）：**先杀壳，让核心自己收尾**。
  *
  * 为什么不能一律 SIGKILL：核心的 `--exit-with-parent` 会走优雅停机（关闭编排器 → 收掉 runtime
- * 子进程）。直接强杀核心会把 dsh/opencode 的 ACP 进程变成孤儿（ppid=1）——实测一次验收就漏了
- * 6 个，而它们**不会被后续断言发现**（父进程已消失，ps 里只剩一个 ppid=1 的 node）。
+ * 子进程）。直接强杀核心会把 dsh/opencode 的 ACP 进程变成孤儿（ppid=1）——实测一轮验收漏过 6 个，
+ * 而断言看不到它们（父进程已消失）。
  *
- * 顺序：SIGKILL 壳 → 轮询等核心自行消失（预算 graceMs）→ 仍活着的核心才强杀。
+ * 三层保障（缺一层就会漏进程）：
+ *   1. 先给宽限（默认 6s）让核心自己停机——正常路径下这一步就干净了；
+ *   2. 超时仍活着的核心才强杀；
+ *   3. **再兜一层**：把"起手时记录下来的核心后代"里仍活着的收掉——它们只可能来自我们起的核心
+ *      （不用 `pkill -f dsh`：那会误杀用户自己的 dsh 会话）。
  */
-export async function stopShellTree({ graceMs = 3000 } = {}) {
+export async function stopShellTree({ graceMs = 6000 } = {}) {
+  const cores = pidsMatching(CORE_RE)
+  const offspring = descendantsOf(cores)
   for (const pid of pidsMatching(SHELL_RE)) {
     try {
       process.kill(pid, 'SIGKILL')
     } catch {}
   }
   const t0 = Date.now()
+  let graceful = true
   while (Date.now() - t0 < graceMs) {
-    if (pidsMatching(CORE_RE).length === 0) return { graceful: true, ms: Date.now() - t0 }
+    if (pidsMatching(CORE_RE).length === 0) break
     await sleep(100)
   }
-  killShellTree()
-  return { graceful: false, ms: Date.now() - t0 }
+  if (pidsMatching(CORE_RE).length !== 0) {
+    graceful = false
+    killShellTree()
+  }
+  // 兜底：只清我们记录下来的后代
+  let reaped = 0
+  for (const pid of offspring) {
+    try {
+      process.kill(pid, 0) // 还活着才杀
+      process.kill(pid, 'SIGKILL')
+      reaped++
+    } catch {}
+  }
+  return { graceful, ms: Date.now() - t0, reaped }
 }
 
 /** 把清理挂到进程级钩子上：无论怎么退出（含异常）都不留壳与核心。 */
