@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server desktop/dev core/desktop build vet test all clean image image/runtimes image/run
+.PHONY: dev web server desktop/dev desktop/accept core/desktop verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -61,6 +61,21 @@ core/desktop:
 desktop/dev: core/desktop
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm -F @ark/desktop dev
+
+# 桌面入口界面/契约验收（真 Electron + 真核心，脚本自己起壳、自造自清；**不进 CI**）：
+# 与 `pnpm ui:accept`（浏览器入口，需先 make dev）互为两靶；覆盖 M1 的 scheme/契约/加固/凭据/事件流/退出六组。
+desktop/accept: core/desktop
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
+
+# 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
+# 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。
+verify/desktop-dod:
+	$(require-node)
+	cd backend && go test ./internal/archtest/ -count=1
+	cd $(FRONTEND_ROOT) && pnpm typecheck
+	cd $(FRONTEND_ROOT) && pnpm test:contract
+	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 
 # 后端开发起服（forge 无默认子命令，需显式 serve）
 server:

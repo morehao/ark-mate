@@ -13,7 +13,8 @@
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",
     "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
-    "ui:accept": "node scripts/web-ui-acceptance.mjs"
+    "ui:accept": "node scripts/web-ui-acceptance.mjs",
+    "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs"
   },
   "devDependencies": {
     "@ark/desktop-contract": "workspace:*"
