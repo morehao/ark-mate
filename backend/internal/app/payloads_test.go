@@ -74,7 +74,11 @@ func getMetaPayloadsRaw(t *testing.T, a *App) string {
 		t.Fatal("Engine() 为空：Init 没有装配起 HTTP 引擎")
 	}
 	w := httptest.NewRecorder()
-	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/forge/meta", nil))
+	req := httptest.NewRequest(http.MethodGet, "/v1/forge/meta", nil)
+	// M3-5 起 `/v1/forge` 组有 Host 白名单：请求的 Host 必须是**实际监听地址**
+	// （httptest 默认填 example.com，那在真实装配下就是 421——这正是白名单该做的事）。
+	req.Host = a.srv.Addr()
+	eng.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /v1/forge/meta HTTP %d：%s", w.Code, w.Body.String())
 	}

@@ -44,6 +44,11 @@ NODE_VERSION_MAJOR := $(word 1,$(subst ., ,$(NODE_VERSION)))
 # 想要轻量纯内存可临时覆盖：FORGE_STORE=memory make dev（环境变量优先于此处默认）。
 FORGE_STORE ?= sqlite
 
+# 开发态跨源白名单（M3-5 的 Origin 矩阵）：vite :5173 与核心 :10001 **不同源**，浏览器会带上
+# `Origin: http://localhost:5173`，而默认矩阵只放行"核心自己的 origin"（以及 forge-app://app 与无 Origin）。
+# 所以这里显式登记；默认矩阵里没有它——验收 V16 正是要证明别的本地源（127.0.0.1:9999）仍被拒。
+DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
+
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
 define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
@@ -142,7 +147,7 @@ dev:
 	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:10001, store=$(FORGE_STORE))"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve --web-dir $(WEB_DIR) & \
+	cd backend && FORGE_STORE=$(FORGE_STORE) FORGE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run ./cmd/forge serve --web-dir $(WEB_DIR) & \
 	BACKEND_PID=$$!; \
 	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/forge/health ..."; \
 	HEALTHY=""; \

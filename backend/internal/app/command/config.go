@@ -52,6 +52,7 @@ func configCmd(args []string) {
 				"proc_registry":       cfg.ProcRegistryPath,
 				"reap_grace":          cfg.ReapGrace.String(),
 				"token":               maskToken(cfg.Token),
+				"allowed_origins":     strings.Join(cfg.AllowedOrigins, ","),
 				"mcp_auto_probe":      cfg.McpAutoProbe,
 				"native_permission":   cfg.NativePermission,
 			},
@@ -115,6 +116,9 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
+	// 空 = 只用内置 Origin 矩阵（无 Origin / forge-app://app / 自身监听端口的同源）。
+	// 非空 = 跨源开发或自建反代的显式登记（M3-5），且只在回环监听时生效（见 pkg/config 的注释）。
+	fmt.Printf("  %-22s %-38s [%s]\n", "allowed_origins", emptyLabel(strings.Join(cfg.AllowedOrigins, ",")), src("allowed_origins"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "native_permission", emptyLabel(cfg.NativePermission), src("native_permission"))
 	if len(cfg.RemoteRuntimes) == 0 {

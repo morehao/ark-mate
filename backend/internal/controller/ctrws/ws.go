@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
 // WSCtr 实时事件通道（WS）控制器。
@@ -36,6 +38,18 @@ type Options struct {
 	Credentials *credential.Set
 	// AttachDeadline 首帧 attach 截止时限；0 取 defaultAttachDeadline（仅测试会改小）。
 	AttachDeadline time.Duration
+	// OriginCheck 握手来源判定（M3-5）：由装配层注入的**同一个**策略
+	// （middleware.OriginPolicy.CheckFunc），与 REST 中间件共用同一份 Host + Origin 判定。
+	//
+	// 在 websocket.Accept **之前**调用：返回非 nil error 即拒绝握手（不升级连接），
+	// 按 status 回统一响应信封（错误已带业务码）。nil = 不判定（历史行为 / 策略未启用）。
+	//
+	// 为什么不挂到 AcceptOptions 上：本项目用的 coder/websocket v1.8.15 的 AcceptOptions
+	// **没有 CheckOrigin 字段**（只有 InsecureSkipVerify 与 OriginPatterns），而库自带的
+	// authenticateOrigin 把「Origin 的 host == 请求 Host」当同源放行——`Host: evil.com` +
+	// `Origin: http://evil.com` 这种 DNS rebinding 形状会从它手里过。所以判定必须由本层在
+	// 升级前完成；Accept 那边继续 InsecureSkipVerify（那是"库的判定不参与"，不是"不判定"）。
+	OriginCheck func(r *http.Request) (status int, err error)
 }
 
 // wsCtr 是实时事件通道（WS）的协议薄适配层：
@@ -54,6 +68,8 @@ type wsCtr struct {
 	creds  *credential.Set
 	// attachDeadline 首帧 attach 截止（见 Options.AttachDeadline）。
 	attachDeadline time.Duration
+	// originCheck 握手来源判定（M3-5；见 Options.OriginCheck）。nil = 不判定。
+	originCheck func(r *http.Request) (status int, err error)
 }
 
 // NewWSCtr 构造 WSCtr。
@@ -61,6 +77,7 @@ func NewWSCtr(bus *eventbus.Bus, opts ...Options) WSCtr {
 	c := &wsCtr{bus: bus, logger: slog.Default(), attachDeadline: defaultAttachDeadline}
 	if len(opts) > 0 {
 		c.creds = opts[0].Credentials
+		c.originCheck = opts[0].OriginCheck
 		if opts[0].AttachDeadline > 0 {
 			c.attachDeadline = opts[0].AttachDeadline
 		}
@@ -131,7 +148,17 @@ func (st *connState) completeHandshake() { st.handshakeOnce.Do(func() { close(st
 
 // Handle 处理一次 WS 升级与生命周期。
 func (h *wsCtr) Handle(c *gin.Context) {
-	// 内网直连的 Origin 策略在 M3-5 落地（Origin 矩阵 + Host 白名单）；M1-1 只管凭据分层。
+	// 来源判定先于升级（M3-5）：错误的 Host 或来源在**握手**这一层就被拒，而不是先把连接
+	// 建起来再关（后者已经把订阅位与连接资源给出去了）。判定与 REST 共用同一个策略对象。
+	if h.originCheck != nil {
+		if status, err := h.originCheck(c.Request); err != nil {
+			c.Abort()
+			gincontext.FailWithStatus(c, status, err)
+			return
+		}
+	}
+	// InsecureSkipVerify 的取舍见 Options.OriginCheck：库自带的 origin 校验比本层的矩阵**更松**
+	// （同 Host 即放行），不能作为闸门；真正的闸门是上面那次 Decide。
 	ws, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})

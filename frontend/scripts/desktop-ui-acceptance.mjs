@@ -26,6 +26,7 @@
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
 import { spawn, spawnSync } from 'node:child_process'
+import http from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -689,6 +690,111 @@ async function scenarioPayload(cdp, shell) {
   rmSync(tmpRoot, { recursive: true, force: true })
 }
 
+/**
+ * M3-5（设计 §7.2 / §9.1，V16）：Origin 矩阵 + Host 白名单。
+ *
+ * 做法说明（值得写下来）：V16 的原文是"从另一个 origin 的**页面**发请求"。这里落到**请求级**——
+ * 直接用 `node:http` 带上该 origin 的 `Origin` 头打核心。两者是同一件事：浏览器不会让跨源页面
+ * 悄悄改掉 Origin 头，因此"页面被拒"与"带这个 Origin 的请求被拒"是同一判定的两种观察方式，
+ * 而后者不需要另起一个本地站点与 CORS 预检噪声，还能顺带把 Host 头构造得更刁钻
+ * （`Host: evil.com` 这种浏览器根本发不出来的组合，恰恰是 DNS rebinding 的形状）。
+ */
+function coreAddrOf(shell) {
+  const m = /\[core\] ready (127\.0\.0\.1:\d+)/.exec(shell.logText())
+  return m ? m[1] : ''
+}
+
+/** 发一个可控到头的 HTTP 请求（`node:http` 允许自定义 Host；undici 的 fetch 不允许，故不用它）。 */
+function rawRequest(addr, path, headers) {
+  return new Promise((resolve) => {
+    const [host, port] = addr.split(':')
+    const req = http.request({ host, port: Number(port), path, method: 'GET', headers }, (res) => {
+      let body = ''
+      res.on('data', (d) => (body += d))
+      res.on('end', () => resolve({ status: res.statusCode, body }))
+    })
+    req.on('error', (e) => resolve({ status: 0, body: String(e) }))
+    req.end()
+  })
+}
+
+async function scenarioOrigin(shell) {
+  section('M3-5：Origin 矩阵与 Host 白名单（设计 §7.2 / §9.1，V16）')
+
+  const addr = coreAddrOf(shell)
+  check('拿到核心实际监听地址（端口是内核分配的，白名单必须按它判）', !!addr, addr || shell.logText().slice(-200))
+  if (!addr) return
+  const port = addr.slice(addr.indexOf(':') + 1)
+  const path = '/v1/forge/health'
+
+  // ① 放行面：无 Origin（壳内反代/curl）、forge-app://app（桌面直连）、核心自己的同源（浏览器入口）
+  for (const [label, headers] of [
+    ['无 Origin（壳内反代 / curl）', { Host: addr }],
+    ['Origin: forge-app://app（桌面直连）', { Host: addr, Origin: 'forge-app://app' }],
+    [`Origin: http://127.0.0.1:${port}（浏览器入口同源）`, { Host: addr, Origin: `http://127.0.0.1:${port}` }],
+    [`Origin: http://localhost:${port}`, { Host: addr, Origin: `http://localhost:${port}` }],
+  ]) {
+    const r = await rawRequest(addr, path, headers)
+    check(`放行：${label}`, r.status === 200, `status=${r.status}`)
+  }
+
+  // ② 拒绝面：别的本地源、远端源、伪造 scheme、null
+  for (const [label, headers] of [
+    ['别的本地源 http://127.0.0.1:9999', { Host: addr, Origin: 'http://127.0.0.1:9999' }],
+    ['别的本地源 http://localhost:9999', { Host: addr, Origin: 'http://localhost:9999' }],
+    ['远端源 https://evil.example', { Host: addr, Origin: 'https://evil.example' }],
+    ['伪造 scheme forge-app://other', { Host: addr, Origin: 'forge-app://other' }],
+    ['Origin: null（沙箱 iframe / 重定向）', { Host: addr, Origin: 'null' }],
+  ]) {
+    const r = await rawRequest(addr, path, headers)
+    check(`拒绝：${label}`, r.status === 403, `status=${r.status}`)
+  }
+
+  // ③ Host 白名单（DNS rebinding 的形状）：来源合法但 Host 不是回环名 → 421
+  for (const [label, host] of [
+    ['Host: evil.example', 'evil.example'],
+    ['Host: 127.0.0.1:其它端口', '127.0.0.1:1'],
+    ['Host: 127.0.0.1.evil.example', `127.0.0.1.evil.example:${port}`],
+  ]) {
+    const r = await rawRequest(addr, path, { Host: host, Origin: 'forge-app://app' })
+    check(`拒绝：${label} → 421`, r.status === 421, `status=${r.status}`)
+  }
+
+  // ④ WS 握手过同一套判定：坏 Origin / 坏 Host 都拿不到 101
+  const wsHandshake = (headers) =>
+    new Promise((resolve) => {
+      const [host, p] = addr.split(':')
+      const req = http.request({
+        host,
+        port: Number(p),
+        path: '/v1/forge/ws/events',
+        method: 'GET',
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          ...headers,
+        },
+      })
+      req.on('upgrade', (res, socket) => {
+        socket.destroy()
+        resolve({ status: res.statusCode })
+      })
+      req.on('response', (res) => {
+        res.resume()
+        resolve({ status: res.statusCode })
+      })
+      req.on('error', (e) => resolve({ status: 0, err: String(e) }))
+      req.end()
+    })
+
+  const badOrigin = await wsHandshake({ Host: addr, Origin: 'http://127.0.0.1:9999' })
+  check('WS：别的本地源的握手被拒（无 101）', badOrigin.status === 403, `status=${badOrigin.status}`)
+  const badHost = await wsHandshake({ Host: 'evil.example', Origin: 'forge-app://app' })
+  check('WS：伪造 Host 的握手被拒', badHost.status === 421, `status=${badHost.status}`)
+}
+
 async function scenarioIsolation(shell) {
   section('M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）')
 
@@ -741,7 +847,7 @@ async function scenarioIsolation(shell) {
   }
 }
 
-const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'isolation', 'exit', 'direct']
+const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'origin', 'isolation', 'exit', 'direct']
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const want = argv.length ? argv : SCENARIOS
 
@@ -763,7 +869,7 @@ async function main() {
 
   let shell = null
   let cdp = null
-  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'isolation', 'exit'].includes(s))
+  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'origin', 'isolation', 'exit'].includes(s))
   // V10 ③ 的前置：调用方 PATH 上先放好会写标记文件的假底座（必须在起壳前）。
   if (needsShell) setupFakeRuntimes()
   if (needsShell) {
@@ -791,6 +897,7 @@ async function main() {
     if (want.includes('gate')) await scenarioGate(cdp)
     if (want.includes('nodechannel')) await scenarioNodeChannel(shell)
     if (want.includes('payload')) await scenarioPayload(cdp, shell)
+    if (want.includes('origin')) await scenarioOrigin(shell)
     if (want.includes('isolation')) await scenarioIsolation(shell)
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {

@@ -69,6 +69,14 @@ type Options struct {
 
 	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
 	Web AssetInfo
+
+	// Origin 回环监听面的 Host 白名单 + Origin 矩阵（M3-5，internal/middleware）。
+	//
+	// nil / 未启用 = 不判定（测试路径与**非回环监听**：设计 §9.4 明确 Host/Origin 白名单属于
+	// "对外产品化缺的四件事"之一，本期只在回环监听面生效，由装配层打 WARN 说清）。
+	// 非 nil 时它同时供给两处，且**必须是同一个对象**：v1 组的 REST/`/health` 中间件，
+	// 与 WS 控制器的握手判定（见 registerStream）。
+	Origin *middleware.OriginPolicy
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
@@ -76,7 +84,8 @@ type Options struct {
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
 // 实时通道契约见 docs/design-and-roadmap.md §4.5。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
-	creds := opts0(opts).Credentials
+	o := opts0(opts)
+	creds := o.Credentials
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -89,10 +98,29 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	}})
 	v1 := groups.MustGetGroup(ginserver.ApiVersionV1)
 
+	// Host 白名单 + Origin 矩阵（M3-5）挂在 **v1 整组**上：REST 与 `/health` 都属于"有人拿浏览器/
+	// 脚本打进来的 API 面"，一律先过这道判定（含 /health：DNS rebinding 只要能碰到任意一条路径，
+	// 就说明 Host 白名单没生效）。必须在注册路由**之前** Use——gin 在注册时就冻结 handler 链
+	// （见 internal/controller/ctrws/ws_test.go 的同款注记）。
+	//
+	// **WS 单独处置**：事件流那一组来源判定在控制器里做（Accept 之前，见 ctrws.Options.OriginCheck），
+	// 所以它的组要在 Use 之前取——gin 的 Group() 会复制当时的 handler 链。
+	// 为什么不让中间件也盖住 WS：事件流的凭据本来就走**带内首帧**、不挂 REST 凭据中间件
+	// （浏览器无法为 WS 握手设请求头），来源判定同理归控制器——两处都挂会让 WS 的那份判定变成
+	// 永不执行的摆设，且"哪一层真正拦住了 WS"变得含糊。两处共用**同一个** OriginPolicy 对象
+	// （Decide 是唯一实现），所以哪一种挂法都不会分叉。
+	//
+	// 不在组里的是静态资产与 SPA 回落（`/`、`/assets/*`、前端深链）：页面导航与子资源加载
+	// 不带 Origin，把 Host 白名单压到它们头上会让"打开面板"这件事本身变成 421——真正的攻击面
+	// 是 API，页面本身没有任何凭据可偷（设计 §7.2 的凭据分层）。
+	wsGroup := v1.Group("")
+	v1.Use(middleware.Origin(o.Origin))
+
 	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）。
 	v1.GET("/health", health)
 	// 实时事件流：鉴权在**带内**（首帧 attach 带 stream 面凭据），因此不挂 REST 凭据中间件。
-	registerStream(v1, bus, creds)
+	// 来源判定走**同一个** OriginPolicy（WS 也要看 Host），见 ctrws.Options.OriginCheck。
+	registerStream(wsGroup, bus, creds, o.Origin)
 
 	// 其余全部 REST 路由统一要求 rest 面凭据（空表时中间件是放行 no-op）。
 	rest := v1.Group("")
@@ -106,7 +134,6 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	registerAutomation(rest, ports)
 	registerLibrary(rest, ports)
 	registerUsage(rest, ports)
-	o := opts0(opts)
 	meta := o.Meta
 	if meta == nil {
 		meta = defaultMeta

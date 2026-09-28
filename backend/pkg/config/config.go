@@ -136,6 +136,21 @@ type Config struct {
 	// 空 = 用构建期内置资产；**非空即校验**（绝对路径 / 存在 / 目录 / 含 index.html），
 	// 不合法就拒绝启动——显式配置配错时静默回落到内嵌旧资产，是"用户看到旧界面还以为没生效"的根源。
 	WebDir string
+	// AllowedOrigins 额外允许的请求来源（M3-5；FORGE_ALLOWED_ORIGINS，逗号分隔，config.json 可写 JSON 数组；
+	// 默认空 = 只用内置 Origin 矩阵）。
+	//
+	// **这是给跨源开发/自建反代用的显式登记口，不是默认放开**：内置矩阵只放行「无 Origin」的壳内反代
+	// /同源导航、`forge-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
+	// internal/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
+	// 与自建反代（页面 origin ≠ 核心监听 origin）都落在矩阵之外，必须在这里指名登记。
+	//
+	// 取值必须是**纯 origin**（`scheme://host[:port]`，无路径/查询/片段，可带一个尾斜杠）；
+	// 统一小写后比较，顺序无关（解析后排序去重）。非法取值启动即报错。
+	//
+	// 只在**回环监听**时生效：`--addr 0.0.0.0` 等非回环监听下 Host/Origin 白名单整体不启用
+	// （设计 §9.4 明确 Host/Origin 白名单属于"对外产品化缺的四件事"之一，本期范围外），
+	// 此时本键也不参与判定——启动日志会打一条 WARN 说清楚。
+	AllowedOrigins []string
 	// Token 独立态单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
 	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
 	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
@@ -250,6 +265,7 @@ var knownKeys = map[string]string{
 	"proc_registry":       "FORGE_PROC_REGISTRY",
 	"reap_grace":          "FORGE_REAP_GRACE",
 	"token":               "FORGE_TOKEN",
+	"allowed_origins":     "FORGE_ALLOWED_ORIGINS",
 	"web_dir":             "FORGE_WEB_DIR",
 	"mcp_auto_probe":      "FORGE_MCP_AUTO_PROBE",
 	"native_permission":   "FORGE_NATIVE_PERMISSION",
@@ -263,6 +279,7 @@ var knownKeys = map[string]string{
 var knownListKeys = map[string]bool{
 	"workspace_roots": true,
 	"projection_dirs": true,
+	"allowed_origins": true,
 }
 
 // renamedKeys 已改名/已移除的配置键 → 可操作的改法。
@@ -624,6 +641,20 @@ func materialize(r *resolver) (Config, error) {
 	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
+	}
+	// allowed_origins：额外允许的来源白名单（M3-5；逗号分隔或 JSON 数组，两种形式汇到同一条解析路径）。
+	if list, ok := r.list("allowed_origins"); ok {
+		origins, err := normalizeAllowedOrigins(list)
+		if err != nil {
+			return bad("allowed_origins", err.Error())
+		}
+		c.AllowedOrigins = origins
+	} else if v, ok := r.get("allowed_origins"); ok {
+		origins, err := parseAllowedOrigins(v)
+		if err != nil {
+			return bad("allowed_origins", err.Error())
+		}
+		c.AllowedOrigins = origins
 	}
 	if v, ok := r.get("native_permission"); ok {
 		mode := strings.ToLower(strings.TrimSpace(v))

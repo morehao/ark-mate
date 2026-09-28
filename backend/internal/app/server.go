@@ -28,15 +28,34 @@ type httpServer struct {
 	srv *http.Server
 }
 
-// newHTTPServer 用已装配好的引擎构造 HTTP 服务，并立即绑定监听地址。
+// listen 绑定监听地址。
 //
-// 默认值取向：只给读头超时（慢客户端攻击面），不设读写整体超时——
-// WS 是长连接，写超时会掐断实时事件流；TLS 最低 1.2。
-func newHTTPServer(addr string, engine *gin.Engine) (*httpServer, error) {
+// 独立成函数（M3-5）：Host 白名单要把 Host 的端口与**实际监听端口**比对，而桌面态的端口是
+// `127.0.0.1:0` 下内核分配的随机值——只有绑定之后才知道。所以装机顺序是
+// 「解析资产 → 绑定 → 用 ln.Addr() 构造来源策略 → 装配路由 → 起服务」，
+// 端口既不是猜的（配置里写的是 0），也不是跳过的（策略拿不到端口就等于没有同源判据）。
+func listen(addr string) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("监听 %s 失败: %w", addr, err)
 	}
+	return ln, nil
+}
+
+// newHTTPServer 绑定监听地址并构造 HTTP 服务（参数是配置里的地址）。
+func newHTTPServer(addr string, engine *gin.Engine) (*httpServer, error) {
+	ln, err := listen(addr)
+	if err != nil {
+		return nil, err
+	}
+	return newHTTPServerOn(ln, engine), nil
+}
+
+// newHTTPServerOn 用**已绑定**的监听器构造 HTTP 服务（地址与端口已定，不可再改）。
+//
+// 默认值取向：只给读头超时（慢客户端攻击面），不设读写整体超时——
+// WS 是长连接，写超时会掐断实时事件流；TLS 最低 1.2。
+func newHTTPServerOn(ln net.Listener, engine *gin.Engine) *httpServer {
 	engine.ForwardedByClientIP = true
 	srv := &http.Server{
 		Handler:           engine,
@@ -48,7 +67,7 @@ func newHTTPServer(addr string, engine *gin.Engine) (*httpServer, error) {
 	srv.BaseContext = func(net.Listener) context.Context {
 		return context.Background()
 	}
-	return &httpServer{ln: ln, srv: srv}, nil
+	return &httpServer{ln: ln, srv: srv}
 }
 
 // Engine 返回底层 gin.Engine（供测试/扩展挂载路由）。

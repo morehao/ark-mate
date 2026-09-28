@@ -94,6 +94,17 @@ make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → g
 > `--addr 0.0.0.0:10001`，并置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。
 > 生产建议同时 `export GIN_MODE=release`（消除 debug 模式告警）。
 
+> **回环面的 Host 白名单 + Origin 矩阵（M3-5）**：核心在**回环监听**时启用这套判定（设计 §7.2 / §9.1）
+> ——`Host` 的主机部分必须是 `127.0.0.1` / `[::1]` / `localhost`，且端口等于**实际监听端口**
+> （不匹配 → `421`）；`Origin` 只放行「无 Origin」（壳内反代 / curl / 页面导航）、`forge-app://app`
+> （桌面态事件流直连）与自身监听端口上的 http 同源（其余 → `403`，含 `Origin: null`）。
+> **跨源开发与自建反代需显式登记**：`FORGE_ALLOWED_ORIGINS=http://localhost:5173,https://forge.example.com`
+> （逗号分隔，`config.json` 可写 JSON 数组；取值必须是纯 origin `scheme://host[:port]`，带路径/查询
+> 或未知 scheme 启动即报错）。这是**显式登记口，不是默认放开**——`make dev` 的 vite :5173 → 核心
+> :10001 正是靠它。绑非回环地址（如 `--addr 0.0.0.0:10001`）时这套判定**不启用**（设计 §9.4：
+> 对外产品化所需的 Host/Origin 白名单与令牌强制、TLS 终止、多操作员审计同属未完成项），
+> 启动日志会打一条 WARN 说明。
+
 **凭据（A6 单操作员令牌 → M1-1 分面凭据）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的
 `token`）后，除 `/health` 外的**全部** REST 路由都要求 `Authorization: Bearer <token>`。
 **`?token=` 查询参数已删除**（令牌进 URL 会同时进浏览器历史、反代/网关日志与 Referer）：事件流

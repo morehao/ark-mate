@@ -27,6 +27,7 @@ import (
 	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
+	"github.com/morehao/ark-forge/internal/middleware"
 	"github.com/morehao/ark-forge/internal/router"
 	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/internal/version"
@@ -296,16 +297,34 @@ func (a *App) Init(ctx context.Context) error {
 		slog.Info("serve: 前端资产已就绪", "source", where)
 	}
 
-	srv, err := newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{
+	// M3-5：先绑定监听器，再用**实际监听地址**构造 Host 白名单 + Origin 矩阵，最后装配路由。
+	// 顺序是被判据逼出来的：策略里"同源"的定义就是本进程的监听端口，而桌面态（`127.0.0.1:0`）
+	// 的端口由内核分配，只有 net.Listen 之后才存在——配置里的 `:0` 不是判据，
+	// 拿它或默认 10001 去比对都是在猜端口。资产解析仍在这之前（装错资产不该先占住端口）。
+	ln, err := listen(cfg.Addr)
+	if err != nil {
+		return usageErr("serve: %v", err)
+	}
+	originPolicy := middleware.NewOriginPolicy(ln.Addr().String(), cfg.AllowedOrigins)
+	if originPolicy.Enabled() {
+		slog.Info("serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
+			"listen", ln.Addr().String(), "port", originPolicy.Port(), "allowed_origins", len(cfg.AllowedOrigins))
+	} else {
+		// 非回环监听的**明确放弃**，不是漏了：设计 §9.4 把 Host/Origin 白名单与
+		// "令牌强制 / TLS 终止 / 多操作员审计"并列为对外产品化缺的四件事之一，本期范围外；
+		// `--addr` 的 flag 说明也写明对外暴露自担风险。这里必须打 WARN —— 用户以为自己在
+		// 对外服务却没有任何 Host/Origin 防护，是那种"不说不出来就永远不知道"的形态。
+		slog.Warn("serve: 监听地址不是回环白名单主机（127.0.0.1/::1/localhost），Host 白名单 + Origin 矩阵**未启用**；"+
+			"设计 §9.4 明确对外产品化所需的 Host/Origin 白名单不在本期范围，请自行用反向代理/防火墙收口",
+			"listen", ln.Addr().String(), "allowed_origins", len(cfg.AllowedOrigins))
+	}
+
+	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
 		Meta:        a.metaInfo,
 		Web:         assets,
+		Origin:      originPolicy,
 	}))
-	if err != nil {
-		// 端口被占 / 无权限在装配期就报出来（此前是 ListenAndServe 里的运行期错误）。
-		return usageErr("serve: %v", err)
-	}
-	a.srv = srv
 	if creds := a.credentials(); creds.Required() {
 		slog.Info("serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
 			"entries", creds.Count(), "ws_attach_deadline", credential.StreamAttachDeadline)
