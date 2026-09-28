@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 880" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" />
+    </marker>
+  </defs>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --fg: #172033;
+      --muted: #5b6475;
+      --line: #64748b;
+      --neutral: #e2e8f0;
+      --input: #bfdbfe;
+      --process: #c7d2fe;
+      --storage: #99f6e4;
+      --external: #fde68a;
+      --risk: #fecaca;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --fg: #e5e7eb;
+        --muted: #a3adbd;
+        --line: #94a3b8;
+        --neutral: #334155;
+        --input: #1d4ed8;
+        --process: #4338ca;
+        --storage: #0f766e;
+        --external: #92400e;
+        --risk: #991b1b;
+      }
+    }
+    svg { background: var(--bg); }
+    .title { font-size: 22px; font-weight: 650; fill: var(--fg); }
+    .subtitle { font-size: 13px; fill: var(--muted); }
+    .zone-header { font-size: 13.5px; font-weight: 650; fill: var(--fg); }
+    .label { font-size: 14px; font-weight: 600; fill: var(--fg); }
+    .small { font-size: 11.5px; fill: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .node { stroke: var(--line); stroke-width: 1; }
+    .neutral { fill: var(--neutral); }
+    .input { fill: var(--input); }
+    .process { fill: var(--process); }
+    .storage { fill: var(--storage); }
+    .external { fill: var(--external); }
+    .risk { fill: var(--risk); }
+    .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+    .edge-arrow { marker-end: url(#arrow); }
+    .zone { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 6 5; opacity: 0.8; }
+    .bus { stroke: var(--line); stroke-width: 1.5; opacity: 0.7; fill: none; }
+  </style>
+
+  <rect x="0" y="0" width="1400" height="880" fill="var(--bg)" />
+
+  <!-- 共享输入 -->
+  <rect class="node input" x="64" y="120" width="400" height="92" rx="10" />
+  <text class="label mono" x="88" y="156">frontend/packages/*</text>
+  <text class="small" x="88" y="178">能力层：ui · types · api（两端共享）</text>
+  <text class="small" x="88" y="196">不得 import 任何 apps/*</text>
+
+  <rect class="node input" x="496" y="120" width="400" height="92" rx="10" />
+  <text class="label" x="520" y="156">backend/（单一 Go module）</text>
+  <text class="small" x="520" y="178">核心：回环 REST + WS · 资产层宿主（前端由它服务）</text>
+  <text class="small" x="520" y="196">不依赖 frontend/；桌面专属代码不入此包</text>
+
+  <rect class="node input" x="928" y="120" width="400" height="92" rx="10" />
+  <text class="label mono" x="952" y="156">frontend/apps/web</text>
+  <text class="small" x="952" y="178">前端产品：浏览器与桌面窗口共用同一份产物</text>
+  <text class="small" x="952" y="196">不得 import Electron / Node 内置模块</text>
+
+  <!-- 共享输入总线 -->
+  <path class="bus" d="M 264 212 L 264 240 L 1300 240 L 1300 240" />
+  <path class="bus" d="M 696 212 L 696 240" />
+  <path class="bus" d="M 1128 212 L 1128 240" />
+  <path class="edge edge-arrow" d="M 356 240 L 356 302" />
+  <path class="edge edge-arrow" d="M 1040 240 L 1040 302" />
+
+  <!-- 两个流水线区 -->
+  <rect class="zone" x="32" y="268" width="648" height="392" rx="12" />
+  <rect class="zone" x="712" y="268" width="656" height="392" rx="12" />
+  <text class="zone-header" x="52" y="292">web 流水线 · 部署者替换二进制 / 镜像</text>
+  <text class="zone-header" x="732" y="292">desktop 流水线 · 随安装包更新</text>
+
+  <path class="edge edge-arrow" d="M 356 374 L 356 384" />
+  <path class="edge edge-arrow" d="M 356 454 L 356 464" />
+  <path class="edge edge-arrow" d="M 356 534 L 356 544" />
+  <path class="edge edge-arrow" d="M 1040 374 L 1040 384" />
+  <path class="edge edge-arrow" d="M 1040 454 L 1040 464" />
+  <path class="edge edge-arrow" d="M 1040 534 L 1040 544" />
+
+  <rect class="node process" x="56" y="310" width="600" height="64" rx="10" />
+  <text class="label" x="80" y="338">make web</text>
+  <text class="small" x="80" y="358">构建 apps/web 产物 → 核心侧资产目录（不入库）</text>
+
+  <rect class="node process" x="56" y="390" width="600" height="64" rx="10" />
+  <text class="label" x="80" y="418">资产装配 + 构建核心</text>
+  <text class="small" x="80" y="438">默认 go:embed dist；部署 / 开发可用 --web-dir 覆盖</text>
+
+  <rect class="node neutral" x="56" y="470" width="600" height="64" rx="10" />
+  <text class="label" x="80" y="498">产物：./forge 单二进制</text>
+  <text class="small" x="80" y="518">默认内嵌前端资产；distroless 可跑；用户机器无需 Go / Node</text>
+
+  <rect class="node external" x="56" y="550" width="600" height="64" rx="10" />
+  <text class="label" x="80" y="578">make image → 容器镜像</text>
+  <text class="small" x="80" y="598">自托管 / 内网共享（同一份产物，另一种宿主）</text>
+
+  <rect class="node process" x="736" y="310" width="608" height="64" rx="10" />
+  <text class="label" x="760" y="338">make desktop</text>
+  <text class="small" x="760" y="358">apps/desktop 装配（壳 + 发布脚本）；消费 apps/web 的产物</text>
+
+  <rect class="node process" x="736" y="390" width="608" height="64" rx="10" />
+  <text class="label mono" x="760" y="418">release.json + 载荷装配</text>
+  <text class="small" x="760" y="438">app / core / 前端 build id / 载荷 name-version-digest：唯一发布契约</text>
+
+  <rect class="node process" x="736" y="470" width="608" height="64" rx="10" />
+  <text class="label" x="760" y="498">打包 · 签名 · 公证</text>
+  <text class="small" x="760" y="518">apps/desktop/scripts/*：dmg（公证）/ NSIS（per-user 免 UAC）</text>
+
+  <rect class="node neutral" x="736" y="550" width="608" height="64" rx="10" />
+  <text class="label" x="760" y="578">产物：macOS dmg / Windows 安装包</text>
+  <text class="small" x="760" y="598">Electron 壳 + 随包运行时载荷（Node 由 Electron 提供）</text>
+
+  <!-- 共享不变量 -->
+  <rect class="node storage" x="48" y="676" width="1304" height="76" rx="10" />
+  <text class="label" x="72" y="706">共享不变量（"分开"的边界在此止步）</text>
+  <text class="small" x="72" y="730">同一份前端产物 apps/web/dist · 同一套 /v1/forge REST/WS 契约 · 同一份数据目录 FORGE_HOME · 同一套 DoD 脚本打两个靶子</text>
+
+  <!-- 边界规则 -->
+  <rect class="node risk" x="48" y="768" width="1304" height="76" rx="10" />
+  <text class="label" x="72" y="798">依赖边界（由守卫测试固化，越界即 CI 失败）</text>
+  <text class="small" x="72" y="822">apps/web 不引 Electron/Node · apps/desktop 不引 apps/web 源码 · packages/* 不引 apps/* · backend 不依赖 frontend · 桌面专属代码不进 backend/ 与 apps/web</text>
+
+  <!-- 标题 -->
+  <text class="title" x="40" y="52">ark-forge monorepo：桌面端与 web 端的装配与构建 DAG</text>
+  <text class="subtitle" x="40" y="80">两个并列产品（apps/web · apps/desktop）共享能力层与 Go 核心；分开的是代码位置、构建流水线、交付物与发布节奏（参照 deepseek-harness 的 apps/* 与 packages/* 分层）</text>
+</svg>

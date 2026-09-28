@@ -1,0 +1,643 @@
+# ark-forge 桌面端架构设计
+
+| 项 | 值 |
+| --- | --- |
+| 文档类型 | 技术方案（设计文档），不含实现 |
+| 场景 | 增量改造（既有控制面新增桌面交付形态 + 运行时解析面改动）；桌面壳为新建 |
+| 篇幅档位 | 完整档（裁剪：无多租户、容灾、成本核算章节） |
+| 专题 | 架构设计 · 安全 · 性能与容量 |
+| 设计基线 | `ark-forge` HEAD `0c4768e`；参考实现 `deepseek-harness` `0.1.7-rc.2`；Electron 44 / Node 24.18.1（实测） |
+| 形态 | **一份 Go 核心**（回环 REST + WS + 资产层）**＋ 一个 Electron 壳 ＋ 一份随包资产与运行时载荷**。用户机器不需要 Go / Node / pnpm / Python，也不需要预装 dsh 或 opencode |
+
+---
+
+## 1. 目标与非目标
+
+### 1.1 三条硬需求与验收判据
+
+| # | 需求 | 可验证判据 | 验收环境 |
+| --- | --- | --- | --- |
+| R1 | web 端与桌面端功能完全一致 | 同一份前端产物、同一套 `/v1/forge` REST + WS、同一份数据目录；**同一个 DoD 脚本**在两种入口下全绿；且不存在"桌面能、浏览器不能"的流程（§10.2） | 双端各跑一次 + 单向断言 |
+| R2 | 桌面安装不依赖用户本机的 node / pnpm / go | 干净虚拟机（`PATH` 中无 `go`/`node`/`npx`/`pnpm`，且**未安装 dsh / opencode**）：安装 → 首启 → 新建会话 → 权限卡 → 提问卡 → 退出 → 重启续聊，全流程无"环境缺失"类错误 | macOS 干净用户 + Windows 干净用户 |
+| R3 | 不存在远端 server | 首启到可用只发生两类出站：① 用户自配的模型 API；② 用户显式触发的 MCP 包拉取。无遥测、无崩溃上报、无默认更新检查 | 抓包 + 连接清单 |
+
+R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**两个入口加载同一份产物、共用同一套契约**（§3）。
+
+### 1.2 非目标
+
+| 非目标 | 原因 |
+| --- | --- |
+| 跨机 / 局域网访问 | 与 R3 冲突；对外监听需先补 TLS、鉴权模型、多操作员归属与审计（§9.4） |
+| 多用户 / 多操作员 | 产品定位即"单机单操作员" |
+| Linux 桌面发行 | 本期只做 macOS + Windows；Linux 走容器与源码 |
+| 发现或复用用户本机已有的 dsh / opencode / node | 运行时随包交付；桌面端不探测 `PATH`、不引导用户自行安装（§6.4） |
+| 桌面端独占功能 | 与 R1 冲突：桌面只允许"多给"，不允许"少给"（§10） |
+| 重造 runtime 能力（skills / MCP / 推理） | 能力复用底层 runtime，平台只做数据与控制面 |
+| 从网络获取 UI 资产 | 与 R3 冲突；资产来源只允许本地（§6.1） |
+
+---
+
+## 2. 工程结构
+
+### 2.1 两个并列产品：`apps/web` 与 `apps/desktop`
+
+工程分三层，依赖单向向下：
+
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| 能力层 | `frontend/packages/{ui,types,api,tsconfig}` | 组件库、类型、API 客户端、构建配置；被产品层消费 |
+| 产品层 | `frontend/apps/web`、`frontend/apps/desktop` | **两个并列产品**：各自独立构建、独立交付、各自专属能力 |
+| 核心层 | `backend/`（单 Go module）+ `cmd/forge` | 回环 REST/WS + 资产层 + 运行时编排；不属于 pnpm workspace |
+
+**两个产品的关系**：
+
+- `apps/web` = **Web 前端产品**：Vite SPA，产物 `apps/web/dist`；对外只暴露产物（`exports: { "./dist/*": "./dist/*" }`），不暴露源码。
+- `apps/desktop` = **桌面产品**：Electron 壳 + 资产与载荷装配 + 打包 / 签名 / 更新；**依赖 `apps/web` 的产物**，不 import 其源码。
+- **交付物不同**：web 产品随 `forge` 二进制 / 镜像交付（浏览器入口由核心托管前端资产）；桌面产品随 dmg / 安装包交付。
+- **专属能力不同**：桌面产品有托盘、更新、原生对话框；web 产品没有，且不得依赖它们（§10.1）。
+- **共享不变量**：同一份 `apps/web/dist`（R1 的实现方式）、同一套 `/v1/forge` 契约、同一份数据目录、同一套 DoD 脚本。
+
+每个产品自带 `dev` / `build` / `typecheck` 脚本，根 workspace 只做聚合与 `ui:accept`；两个产品的构建缓存按 target 分开，避免把开发态产物喂给桌面包。
+
+**产物包纪律**（照参照实现的做法固化）：`apps/web` 对外是**产物包而非应用**——`dependencies` 为空（依赖在构建期全部打进 `dist`）、`exports` 只开 `./dist/*` 与 `./package.json`、`files` 只发 `dist` 并**排除 sourcemap 与开发面**；它必须是非 private 包，随桌面运行时闭包一起发布，桌面壳与核心都从**运行时依赖树里的同一份**读（§6.2）。守卫测试因此直接断言 `exports` 与 `files`，而不只是扫描 import。
+
+**为什么"并列"却仍共享一份前端产物**：deepseek-harness 的 `apps/web`（`@deepseek-ai/dsh-web-frontend`）构建出的 `dist`，正是它桌面窗口渲染的那份 UI——桌面壳在 `dsh-app://app/` 路由下，从包内 `node_modules/@deepseek-ai/dsh-web-frontend/dist` 直接读静态资产，其余请求反代给本地 Host，事件流按壳在 boot 时下发的 `streamBaseUrl` 直连回环。即：**并列的是产品与流水线，共享的是 UI 产物。**
+
+| deepseek-harness | ark-forge | 说明 |
+| --- | --- | --- |
+| `apps/web`（`dsh-web-frontend`，Vite，`exports: ./dist/*`） | `apps/web`（Vite SPA，`exports: ./dist/*`） | 前端产品：产物被两个入口消费 |
+| `apps/desktop`（`dsh-desktop`：壳 + 打包 + 更新 + 安装器脚本） | `apps/desktop` | 桌面产品：依赖前端产品的 `dist` |
+| `apps/desktop-host` | `backend/`（Go 核心，含资产层与运行时编排） | 被壳 spawn 的宿主；ark-forge 里它就是 `forge` 二进制本身，不在 pnpm workspace 内 |
+| `apps/cli`（owns the `dsh` bin） | `backend/cmd/forge` | 命令行入口 |
+| `packages/*/*`（含 `client/ui-*` 组件层） | `packages/{ui,types,api,tsconfig}` | 能力层 |
+| `packages/bundle/web-app`：组装可运行的 web 产品（起 webServer + 打开浏览器） | 浏览器入口由核心托管前端资产（`forge web`） | 组装层在 ark-forge 落在 Go 侧 |
+| `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配、`release.json` 生成、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
+| `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` | 一个发布号标识整套；同时是 §6.7 版本闸门的落点 |
+| pnpm 供应链纪律：`allowBuilds` 默认拒绝、`patchedDependencies`、`minimumReleaseAge`、随包第三方按平台钉死确切版本 | 沿用，并**扩展到随包 runtime**：Electron、`dsh`、`opencode` 的确切版本与平台矩阵写入 `release.json` 与合规清单（§11） | 随包第三方二进制必然出现在用户机器上，版本必须可复现、可审计 |
+
+**依赖边界（守卫测试固化，越界即 CI 失败）**：
+
+1. `apps/web` 不得 import 任何 Electron 模块或 Node 内置模块；
+2. `apps/desktop` 不得 import `apps/web` 的源码，只允许消费其 `dist` 产物；
+3. `packages/*` 不得 import 任何 `apps/*`；
+4. `backend/` 不依赖 `frontend/`（Go module 边界已保证；`backend/internal/archtest` 已有分层守卫，前端补等价的一层）。
+
+这四条把"两端功能完全一致"从**纪律**变成**结构**：前端产品在类型与依赖层面就够不到 Electron API，只能走宿主能力面（§10.1）。这比任何验收脚本都更早生效。
+
+**构建 DAG**：
+
+```text
+packages/*  ──>  apps/web  ──>  apps/web/dist
+                                 ├──> backend 资产装配 + 构建 ──> forge 二进制 / 镜像   （产品一：web）
+                                 └──> apps/desktop 资产装配 ──┐
+backend/（Go 核心：forge-core）────────────────────────────────┴──> dmg / 安装包         （产品二：desktop）
+apps/desktop（Electron 壳 + 打包 / 签名 / 更新）
+```
+
+> 构建 DAG 矢量图（可独立打开：[monorepo-build-dag-20260928.svg](assets/monorepo-build-dag-20260928.svg)）：
+
+![monorepo 构建 DAG](assets/monorepo-build-dag-20260928.svg)
+
+**Makefile 入口（保持单一入口，不引入第二套构建心智）**：
+
+| 目标 | 产物 | 依赖 |
+| --- | --- | --- |
+| `make web` | `apps/web/dist` + 核心侧资产目录 | — |
+| `make all` | `./forge`（默认内嵌前端资产） | `web` |
+| `make image` | 容器镜像 | `web` |
+| `make desktop` | macOS dmg / Windows 安装包 | `web` + `forge` + 资产与载荷装配 |
+
+**"并列"的准确含义**：
+
+| 并列（各自独立，不允许互相渗透） | 共享（不允许分裂） |
+| --- | --- |
+| 代码位置（两个 app 包）· 构建流水线 · 交付物（安装包 vs 二进制 / 镜像）· 发布节奏 · 专属能力（托盘、更新、原生对话框） | 前端产物（同一份 `apps/web/dist`）· `/v1/forge` REST + WS 契约 · 数据目录 · DoD 脚本（同一套打两个靶子） |
+
+> **层次组织**：产品层放在 `frontend/apps/*`，与 `packages/*` 同一个 pnpm workspace，工具链（`.nvmrc` / `packageManager`）统一。若要将仓库按"产品"而非"语言"划分（`apps/*` + `packages/*` 提到顶层、`backend/` 并入 `apps/`），在引入第三个产品（例如独立部署的服务端装配）时再评估。
+> **不做**：桌面产品不新增 Go module，壳也不 import Go 代码；共享走 API 与 `release.json`，避免把 monorepo 边界搅浑。
+
+### 2.2 影响面与唯一的行为变更
+
+设计虽为"新增桌面形态"，但落到既有系统上只有**一条行为变更**需要兼容性论证：**运行时可执行文件的解析策略**。
+
+| 面 | 改动 | 兼容性要求 |
+| --- | --- | --- |
+| 资产来源 | 两种机制：构建期内置 + `--web-dir` 显式目录（桌面形态由壳指向包内 dist） | 独立二进制默认行为不变；实际路径与 build id 可观测（§6.1） |
+| 运行时解析 | 新增"随包载荷"为一等来源；桌面态只认载荷 + 显式覆盖 | CLI / Docker / 开发态行为不变（仍走 `PATH`，§6.5） |
+| 配置 | 新增：资产来源与路径、载荷名称解析、桌面握手开关、宿主能力面 | 全部有默认值；未设即现状行为 |
+| MCP stdio | 支持把 `npx` 指向随包转发启动器（绝对路径） | MCP 契约（要求绝对路径）不变 |
+| 构建流水线 | 建立 `apps/web` / `apps/desktop` 两个产品包与 `make desktop`；资产装配与 engines 断言进 CI | `make all` / `make image` 保持可用 |
+| 前端 | 桌面能力经宿主能力面暴露（声明面 + 执行面，§7.3），不嗅探 UA | web 端行为不变 |
+| 数据目录 | 一份共享路径，不按入口分裂（§8.4） | 既有用户的 `vault.key` / `forge.db` / transcripts 位置不变 |
+
+---
+
+## 3. 总体形态：一份核心，多入口
+
+```mermaid
+graph TB
+  subgraph Core["forge 核心（单一 Go 二进制）"]
+    HTTP["回环 HTTP<br>REST /v1/forge"]
+    WS["WS /v1/forge/ws/events"]
+    ASSET["资产层<br>解析 → 校验 → 服务 → 闸门"]
+    ORCH["编排器 + 事件 + 持久层"]
+    HTTP --> ORCH
+    WS --> ORCH
+    ASSET --> HTTP
+  end
+  subgraph Entries["两个入口 · 同一份前端产物 apps/web/dist"]
+    B["浏览器入口<br>回环 origin：核心服务静态 + REST + WS"]
+    SH["桌面壳主进程<br>forge-app://app：服务静态 + 反代 REST"]
+    D["桌面窗口<br>forge-app://app + 事件流直连回环"]
+  end
+  subgraph Runtimes["ACP runtime 子进程（随包交付）"]
+    DSH["dsh ACP server"]
+    OC["opencode ACP server"]
+    MCP["MCP stdio server"]
+  end
+  B --> HTTP
+  B --> WS
+  SH --> D
+  SH --> HTTP
+  D --> WS
+  ORCH --> DSH
+  ORCH --> OC
+  ORCH --> MCP
+```
+
+**形态**：只有一个 `forge serve`；浏览器与桌面窗口是它的两个前端入口，加载**同一份 `apps/web/dist`**，但 origin 与通道不同：
+
+| | 浏览器入口（`forge web`） | 桌面入口（Electron 壳） |
+| --- | --- | --- |
+| origin | `http://127.0.0.1:<port>` | `forge-app://app` |
+| 静态资产 | 核心资产层（§6.1） | 壳服务 `index` 与 `/assets/*`（运行时树里那一份 dist）；核心以同一目录为 `--web-dir` |
+| REST | 页面直连核心，`Authorization: Bearer` | 壳反代（页面同源）；REST 凭据只存在于主进程 |
+| 事件流 | 页面直连 `ws://127.0.0.1:<port>` | 同左：壳在 boot 时下发基址与通道级凭据 |
+| 数据与事件语义 | 同一份 `FORGE_HOME`、同一套 `/v1/forge` 契约与事件类型 | 同左 |
+
+- **为什么桌面入口不复用回环 origin**：① origin 与随机端口解耦——`forge-app://app` 恒定，磁盘缓存与页面存储跨启动稳定复用；② REST 凭据不进渲染进程，只剩事件流一条通道需要凭据；③ 页面脚本无法自行构造对核心 REST 面的带凭据请求。
+- **为什么事件流仍然直连回环**：`protocol.handle` 不承载 WebSocket upgrade，属机制限制而非取舍（§7.2）。
+- **为什么这样比两套实现好**：R1 从"需要持续维护的一致性"变为"结构上不可能不一致"；现有 CDP 验收脚本天然复用；两端共享同一份数据与事件语义。
+- **代价**：桌面端额外承担壳、资产与载荷装配、签名、更新；业务逻辑只能经 HTTP/WS，多一层进程边界；静态资产存在核心侧与壳侧两条服务路径，必须由 CI 断言锁住行为一致（§6.2）。
+- **什么情况下不该选**：产品要的是"Electron 原生 UI 而非 Web UI"，或要求核心逻辑跑在渲染进程内、做无端口纯本地应用。
+
+**一个核心、N 个窗口**：单实例锁锁的是**核心**，窗口数不受限，将来可"一个工作区一个窗口"全部指向同一核心。启动顺序（起核心 → 等就绪 → 开入口）封装为**唯一一份启动器逻辑**，桌面壳与 `forge web` 共用，避免两套就绪判定。
+
+---
+
+## 4. 桌面壳：Electron
+
+| 维度 | **Electron** | Wails v3 | Tauri v2 |
+| --- | --- | --- | --- |
+| 渲染引擎 | 自带 Chromium，版本固定 | 系统 WebView | 系统 WebView |
+| 与 web 端渲染一致性 | **完全一致** | 随 OS/版本漂移 | 随 OS/版本漂移 |
+| 自动化验收靶子 | **现有 Chrome + CDP 脚本直接复用** | macOS 端需重做（WKWebView 无 CDP） | 同左 |
+| 附加体积（macOS，估算） | 90–120 MB | 15–30 MB + 系统 WebView | 10–25 MB + 系统 WebView |
+| 自带 Node | **有（24.18.1，实测）** | 无 | 无 |
+| 系统前置依赖 | 无 | 长尾需 WebView2 bootstrapper | 同左 |
+| 原生能力扩展（托盘/深链/多窗口/更新/公证） | 生态最成熟 | 一般 | 成熟（Rust 侧） |
+
+**选择理由**：
+
+1. **统一渲染**：两端同一个 Chromium 版本，antd 6 + React 19 的差异不会变成"桌面专属 bug"。
+2. **单一验收靶子**：真 Chrome + CDP 的 `ui:accept` 可直接打到 Electron 窗口（开 remote debugging port），"功能完全一致"有唯一的机器判据。
+3. **扩展成本最低**：托盘、协议处理、多窗口、原生菜单、自动更新、公证工具链在同一生态内。
+
+关于系统 WebView 的事实口径：WebView2 Evergreen 在**所有 Windows 11** 上预装，微软也已推送到符合条件的 Windows 10 设备（[Microsoft Learn](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/evergreen-vs-fixed-version)），残留长尾（LTSC / 未纳管老镜像 / Server）需要 bootstrapper（[Tauri Windows Installer](https://v2.tauri.app/distribute/windows-installer/)）。因此 WebView 方案的差异**不在"零依赖"**，而在渲染统一与验收靶子——这正是 R1 最在意的一环。
+
+- **代价**：附加 90–120 MB；Electron 主版本成为发布兼容性义务（含其 Node 版本，§5）。
+- **什么情况下不该选**：
+  - 不接受体积与 JS 构建链，且能接受 macOS 端另做一套 UI 验收 → Wails v3。注意 Wails 也可以加载同一个回环 URL（不必用其 bindings），它损失的不是功能一致性，而是渲染统一与统一靶子。
+  - 只要求"零附加体积"、能接受窗口就是系统浏览器（`forge web` + 托盘 + 开机自启）→ **瘦启动器形态**：三条需求都轻松满足，代价是失去桌面应用感（图标、独立窗口、深链、原生对话框）。
+
+---
+
+## 5. 运行时执行环境：Node 由 Electron 提供
+
+### 5.1 事实与口径
+
+| 事实 | 值 | 来源 |
+| --- | --- | --- |
+| Electron 自带 Node | **24.18.1**（V8 15.2.124.13-electron.0，ABI 149） | 实测 `ELECTRON_RUN_AS_NODE=1 <Electron 可执行文件> -e 'process.versions'`（2026-09-28，Electron 44.0.0） |
+| dsh 要求的 Node | `^22.19.0 \|\| >=24.0.0` | 源码 `package.json` 的 `engines`（0.1.7-rc.2） |
+| 结论 | **满足**，且由发布期断言持续保证（§5.3） | — |
+
+### 5.2 机制
+
+| 环节 | 做法 |
+| --- | --- |
+| 直接子进程（ACP runtime） | 解析结果 = `[Electron 可执行文件, --expose-internals, <runtime 入口 JS>]`，并在该子进程 env 注入 `ELECTRON_RUN_AS_NODE=1`。`utilityProcess` 是 Electron 侧等价且官方推荐的路径（[utilityProcess](https://electronjs.org/docs/latest/api/utility-process)、[process-model](https://github.com/electron/electron/blob/main/docs/tutorial/process-model.md)） |
+| 孙子进程（runtime 自己再 spawn） | 私有 bin 目录放转发启动器（`node` / `npx`，Windows 下 `.cmd`），把该目录**前置**到这些子进程的 `PATH`（保留其尾部，§6.6），并注入 `FORGE_NODE_EXECUTABLE` 指向 Electron 自身可执行文件；不注入 agent 常规 shell |
+| MCP stdio | 契约要求绝对路径，指向私有 bin 的 `npx`；`npm`/`npx` 是 JS，跟随 Electron 的 Node 执行，体积仅十几 MB |
+
+### 5.3 发布期断言
+
+把 `dsh` 的 `engines.node` 与 Electron 自带 Node 版本**在打包时比对**，不满足即构建失败；Node 版本与 ABI 同时写入资产/载荷清单，供 `forge doctor` 复核。**Electron 主版本升级必须重跑这条断言**——这是"共用同一个 Node"唯一的系统性安全网。
+
+### 5.4 回退形态
+
+满足任一条即改用**独立 Node 载荷**（资产与载荷的配置面不变，只换装配）：
+
+1. `dsh` 或 `opencode` 在 Electron 的 Node 下启动失败，或原生 addon（Node-API）加载失败；
+2. 某 runtime 明确检查并拒绝非官方 Node（例如读 `process.versions.electron`）；
+3. `--expose-internals` 类内部符号依赖在 Electron 升级后断裂且无替代。
+
+**代价**：约 +90–110 MB，并多一个需要签名与公证的原生可执行文件。三条各自写成一个 smoke 用例，作为桌面构建的门禁。
+
+---
+
+## 6. 资产与运行时载荷交付
+
+### 6.1 前端资产：两种来源机制
+
+前端资产（`apps/web/dist`）只有两种进入方式，其余场景都由它们组合出来：
+
+| 机制 | 何时用 | 行为 |
+| --- | --- | --- |
+| 构建期内置（嵌入二进制） | 单文件分发：独立 `forge` 二进制、镜像里的自带形态 | 编译期把 `dist` 打进二进制，随二进制一起签名与校验；启动即用 |
+| 运行期目录覆盖（`--web-dir` / `FORGE_WEB_DIR`，绝对路径） | 桌面形态（壳把它指向包内那一份 dist）、开发（vite 产物目录）、部署者热修与白标 | 启动时校验目录存在且含 `index.html`；实际路径、build id、digest 写入启动日志与 `/meta` |
+
+**规则**：
+
+- 两种机制**不叠加**：给了 `--web-dir` 就用它，否则用内置。给了一个无效目录就**拒绝启动**，不静默回落到内置——"配错却照常跑起来"会让人看到旧界面却以为新版本已生效。
+- **不做隐式搜索**：没有"可执行文件同目录 → `../share/ark-forge/`"这类多级回落，来源永远只有这两个，实际来源永远写在启动日志与 `/meta` 里。
+- **显式覆盖只出现在"未打包"与"打包层"**：打包形态下 `--web-dir` 由壳按安装布局写死（参照实现的两个路径覆盖环境变量只在 `!app.isPackaged` 分支被读取，打包态是固定布局），核心既不推测也不搜索——来源永远是别人告诉它的。
+- 完整性分两种语义：**内置资产**由构建期清单 + 二进制签名保证（打包期复算、CI 门禁）；**显式目录**在启动时计算并回报 build id 与逐文件 digest，但不与签名清单比对——它表示"操作者显式选择了这个来源"。
+- 资产只允许来自本地（R3）。不实现远端拉取与运行期下载。
+- 桌面窗口的静态资产由壳服务（§6.2）；桌面形态的核心**不内嵌**资产，而是被 spawn 时收到指向同一份 dist 的 `--web-dir`，因此浏览器入口与桌面窗口读的是同一目录、同一 build id。
+
+### 6.2 静态资产服务路径：核心侧与壳侧
+
+**核心侧**（浏览器入口、Docker、CLI）：内置资产（`embed.FS`）与显式目录（`os.DirFS`）都归一成**同一个 `fs.FS` + 一套逻辑**——参照实现把 dist 服务交给组装层（其宿主 webserver 明确"不服务文件"），ark-forge 没有插件组装层、核心本身就是那一层：
+
+| 关注点 | 一次定义，处处生效 |
+| --- | --- |
+| SPA 回退 | 非 API 路径未命中 → `index.html`；`/v1/*` 未注册路径 → 标准信封 404（语义不变） |
+| 缓存语义 | `index.html` → `no-store`；带内容 hash 的 `assets/*` → `immutable, max-age=31536000` |
+| 完整性 | 资产清单（逐文件 sha256 或包级 sha256），启动时校验；缺失/不符 → 明确报错 |
+| 版本闸门 | §6.7 |
+| 可观测 | `/meta` 回报来源、`buildid`、`digest` |
+
+**壳侧**（桌面窗口）：壳只服务五个路径——`/`、`/index.html`、`/assets/*`、`/favicon.svg`、`/manifest.webmanifest`——从运行时依赖树里的那一份 `apps/web/dist` 读（`release.json` 记录其 build id 与 digest，两侧断言同一值）；其余请求（含 SPA 回退与全部 `/v1/*`）交给核心。壳与核心读**同一个目录**，因此不存在两份资产，也不存在"index 引用到别处 assets"的错配。
+
+| 一致性断言（进 CI） | 内容 |
+| --- | --- |
+| 路径集合 | 壳服务的路径集合是核心侧静态规则的子集，且壳侧不含回退逻辑 |
+| 响应头 | 同一路径在两侧的 `Content-Type`、`Cache-Control` 逐字一致 |
+| 回退归属 | 非资产路径在桌面窗口下也必须最终由核心的回退产出 `index.html` |
+| build id | 两侧读到的 `build id` 相同（同一目录），且与核心期望值一致（§6.7） |
+
+**路径解析**：核心只接受**绝对路径**——壳与包装脚本负责在边界处做一次 `realpath`（Homebrew/Cellar 符号链接、macOS bundle 内的 `Contents/Resources/`、Windows 安装目录、容器工作目录的差异都在那里归一），核心启动时用 `EvalSymlinks` 复核、要求目录内存在 `index.html`，并把**实际采用的绝对路径**写进启动日志与 `/meta`。没有隐式搜索、没有多级回落，因此"页面 404 但服务正常"这种半启动状态在结构上不成立。
+
+### 6.3 运行时载荷：随包只读
+
+```mermaid
+graph TB
+  subgraph Bundle["应用包（只读，随包签名 + 公证）"]
+    CoreBin["forge-core<br>Go 静态二进制"]
+    Assets["前端资产<br>内置 / 显式目录"]
+    Payload["runtime payload<br>dsh 生产依赖树 · opencode · npm/npx JS"]
+    Manifest["资产与载荷清单<br>name / version / digest / Node ABI"]
+  end
+  subgraph Home["FORGE_HOME 可写（默认 ~/.forge）"]
+    DB["forge.db + transcripts"]
+    Vault["vault.key + vault/"]
+    State["logs · npm cache · runtime profiles"]
+  end
+  Core["forge serve 进程"]
+  Bundle --> Core
+  Core --> DB
+  Core --> Vault
+  Core --> State
+```
+
+- **只读面**：核心二进制、前端资产、运行时载荷、清单——全部在应用包内，直接使用，不做首启物化。
+- **可写面**：只有 `FORGE_HOME` 下的状态目录。不往系统目录写任何东西，不持久改用户环境（私有 `bin` 只前置到子进程的临时 `PATH`，§6.6），不碰用户既有的 dsh / opencode 配置。
+- **完整性**：打包期逐文件生成清单 + CI 复算；启动期只做必要读取，全量复算由 `forge doctor --verify-payload` 承担。
+- **命名空间**：`payloads/<name>/<version>/`（随包）+ `FORGE_RUNTIME_<NAME>` 覆盖。当前两份：`dsh`、`opencode`；`npx` 走 Electron 的 Node + 私有 bin，不单独占一份载荷。将来加 `python`（部分 MCP server 需要）只需新增一份载荷 + 一个名字，配置面不动。
+- **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
+
+### 6.4 与用户本机环境的隔离
+
+桌面形态**不探测、不提示、不复用**用户本机的 dsh / opencode / node：只运行随包版本。理由是"用户本机恰好有一个旧版 runtime"会同时带来版本漂移与"桌面和 CLI 行为不一致"两类问题。
+
+各 runtime 的 home / config 变量重定向到 `FORGE_HOME` 下的专属子目录，避免与用户自己安装的 dsh / opencode 串味。具体变量名按各自文档逐个核对后写入注入表（§15 Q2）。
+
+### 6.5 运行时解析策略
+
+| 优先级 | 来源 |
+| --- | --- |
+| 1 | 显式配置覆盖（`runtimes.json` 的 `Command` / MCP 的 `command`；仅高级用户显式设置） |
+| 2 | **随包载荷**（只有打包分发才存在） |
+| 3 | `PATH`（没有随包载荷时） |
+
+三个形态走的是**同一条链**，差别只在"随包载荷是否存在"：桌面分发一定存在，于是永远落不到 `PATH`——这正是 R2 要的；CLI / Docker / 开发态通常不存在，于是落到 `PATH`。这不是对既有用户的兼容让步，而是同一套语义在不同分发形态下的自然结果。命中哪一级必须写进启动日志与 `/meta`。
+
+**但这里有两件事不能混为一谈**（混了会让桌面态下大部分 MCP server 起不来）：
+
+| | 规则 | 参照依据 |
+| --- | --- | --- |
+| **我们自己的载荷解析**（`dsh` / `opencode` / Node） | 只从随包载荷解析；**不做 `which` 式探测**；缺失即打包期或启动期错误（§6.3、§6.4）。因此链上的第 3 级对我们的载荷在打包形态下不可达 | 参照实现里没有任何 `command -v` / `which` 探测，打包态路径是一次 `isPackaged` 二分之后的固定布局 |
+| **子进程环境里的 `PATH`** | 私有 `bin` **前置**，其后保留调用方的 `PATH`（§6.6） | 参照实现显式保留调用方环境（注释写明"为插件执行保留"），只在前面插入私有 `bin`：`PATH = bin + 分隔符 + 原 PATH` |
+
+用户显式配置的 MCP `command` 允许是 `PATH` 上的名字——那是用户的意图，不是我们的回落。
+
+### 6.6 子进程环境注入
+
+环境以**调用方环境为基线整体继承**，再覆盖必须覆盖的项。整份白名单化（只给必需变量）会让 MCP server 与用户自己的工具链（`git` / `python` / `uv` / 代理与 `SSH_AUTH_SOCK`）找不到或连不上；参照实现同样选择"保留调用方环境，只为插件执行叠加变量"，这里跟随它：
+
+| 变量 | 值 | 注入给谁 |
+| --- | --- | --- |
+| （继承） | 调用方环境原样保留 | 全部子进程 |
+| `ELECTRON_RUN_AS_NODE` | `1` | 由 Electron 的 Node 承担执行的那些 runtime / MCP 子进程 |
+| `PATH` | 私有 bin **前置** + 继承值（`私有bin + 分隔符 + 原 PATH`） | runtime / MCP 子进程（不注入 agent 常规 shell，不改用户环境） |
+| `FORGE_NODE_EXECUTABLE` | Electron 自身可执行文件的绝对路径 | 私有 `node` / `npx` 启动器，使转发到同一个 Node（对应参照实现的 `DSH_DESKTOP_NODE_EXECUTABLE`） |
+| `FORGE_HOME` | 桌面数据目录 | 核心 |
+| 各 runtime 的 home / config 变量 | `FORGE_HOME` 下的专属子目录 | 对应 runtime 子进程（隔离既有配置，但不影响其工具链可见性） |
+| `npm_config_cache` / `npm_config_prefix` | `FORGE_HOME` 下 | runtime / MCP 子进程 |
+
+不覆盖：用户原有的 `PATH` 尾部、代理与凭据类变量、语言运行时变量。隔离的目标是**我们自己的 runtime 配置**（home / cache / prefix），不是用户的开发环境。
+
+### 6.7 UI/API 版本闸门
+
+只要前端资产可被替换，就会出现"前端与核心不同步"的组合。闸门成本极低，作为常设机制：
+
+| 环节 | 内容 |
+| --- | --- |
+| 前端产物 | 构建时写入 `build id`（产物内常量或 `index.html` 的 meta） |
+| 核心 | 启动时读自己的期望值，并在 `/health` 或 `/meta` 回报 `coreVersion` / `webBuildId` / `apiContract` |
+| 前端 | 启动时比对自身 `build id` 与核心回报值；不一致 → 显示明确状态（"前端与核心版本不一致，请刷新或重新安装"），而不是白屏或零散接口错误 |
+| 打包期 | `release.json` 记录三者并做一致性断言，缺一即构建失败 |
+
+---
+
+## 7. 启动链与握手
+
+### 7.1 启动链
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant E as Electron 主进程
+    participant C as forge 核心子进程
+    participant W as 渲染进程
+    U->>E: 双击应用
+    E->>E: 单实例锁 claim（锁核心，不锁窗口数）
+    E->>E: 注册并锁定 forge-app:// scheme（standard / secure / fetch / stream / codeCache）
+    E->>C: spawn 核心（127.0.0.1:0 + --web-dir 指向包内 dist），两个凭据经 stdin
+    C->>C: 校验 --web-dir 并计算 build id / digest，监听端口并回写实际地址
+    E->>C: 轮询 /v1/forge/health 直到就绪
+    E->>W: loadURL forge-app://app/，preload 暴露 __FORGE_DESKTOP__（origin 守卫）
+    W->>E: 请求 index 与 assets
+    E->>W: 壳从包内 apps/web/dist 直接返回（assets 为 immutable）
+    W->>E: REST 请求（页面同源）
+    E->>C: 壳反代并附带 restToken
+    E->>W: boot() 下发 streamBaseUrl 与 streamToken
+    W->>C: 直连回环 WS（Origin: forge-app://app，带 streamToken）
+    C-->>W: 事件流
+```
+
+链路上没有任何"安装"动作：无 registry 请求、无编译、不写系统目录、不改用户 `PATH`。R2 就照这条链逐步核对。
+
+> 启动链与信任域矢量图（左：启动链；右：信任域与边关系。可独立打开：[desktop-architecture-startup-20260928.svg](assets/desktop-architecture-startup-20260928.svg)）：
+
+![启动链与信任域](assets/desktop-architecture-startup-20260928.svg)
+
+### 7.2 端口与凭据
+
+| 议题 | 决策 | 理由 / 代价 |
+| --- | --- | --- |
+| 端口 | 桌面态 `127.0.0.1:0`（内核分配）+ 核心回写实际地址；CLI 保持 `10001` | 随机端口只影响回环内部：桌面窗口的 origin 是 `forge-app://app`，与端口无关，磁盘缓存与页面存储跨启动稳定。代价：URL 不可预测，必须以握手为准 |
+| 凭据分层 | 核心在握手时经 stdin 下发两个凭据：`restToken`（只由壳持有，仅用于反代）与 `streamToken`（只在 `/v1/forge/ws/events` 被接受） | REST 凭据不进渲染进程；事件流面对数据的权限本就只有订阅（`attach` / `detach`），拿不到改数据的能力（§9.1） |
+| 令牌传递 | 32 字节随机，只经 **stdin**（不进 argv / env / 文件）；桌面态强制启用 | argv 会被 `ps` 看到、env 会被子进程继承，两者都会把令牌泄露给 runtime 子进程 |
+| 注入页面 | preload 只暴露一个命名空间 `__FORGE_DESKTOP__`（origin 守卫），其 `boot()` 下发 `streamBaseUrl` 与 `streamToken`，不下发 `restToken`（§7.3） | 令牌不进 URL、不进历史记录；REST 走同源反代，不需要页面持有凭据 |
+| Origin 矩阵 | 核心只接受 `Origin: forge-app://app`（事件流）与无 `Origin` 的壳内反代请求，其余一律拒绝 | 恶意网页用自己的 origin 打不到核心；DNS rebinding 也拿不到壳的反代路径 |
+| 免鉴权面 | 仅 `/health` | 现成就绪探针 |
+
+**事件流为何直连回环**：`protocol.handle` 不承载 WebSocket upgrade，服务端的升级请求无法经壳转发——参照实现（`deepseek-harness`）同样如此：它的流客户端是 `new WebSocket(...)`、服务端用 `http.Server` 的 upgrade 事件接管，因此壳在 boot 时把 `streamBaseUrl` 直接下发为回环地址。要让事件流经壳同源转发，只能把通道换成 SSE / fetch-stream，那要重做重连、心跳、背压与订阅控制帧，并把浏览器入口也拖成两套通道；而页面持有 `streamToken` 的残余风险已由"通道级凭据 + CSP 无外域"收口（§9.1、§9.2），换传输的收益不足以支撑这个代价。
+
+### 7.3 载体契约：声明面与执行面
+
+两个入口共用一份产物，所以"桌面多出来的东西"只能经**契约**进入，不能靠产物分叉。契约分两半：
+
+| 半 | 机制 | 覆盖 |
+| --- | --- | --- |
+| 声明面 | `GET /v1/forge/capabilities`（免鉴权面之外的常规端点，浏览器入口同样可调） | "这个部署有哪些能力"：两端返回同一份结构，浏览器入口如实回报"无托盘 / 无原生对话框" |
+| 执行面 | 壳经 preload 暴露**唯一一个**命名空间 `__FORGE_DESKTOP__` | 只能在渲染进程内完成的操作：原生目录选择、拖入文件的真实路径、`openPath` / `openExternal`、窗口与主题控制 |
+
+**规范**：
+
+- `__FORGE_DESKTOP__` 的形状由**一份共享 TS 模块**声明，preload 与前端共用同一份类型与同一个运行期守卫——参照实现把"外壳共享给前端的模块清单"收敛成 `platform.ts` 单一真源，并用 `satisfies` 在编译期钉死两张表不许漂移；我们的对应物就是这份契约模块，防止 preload 写入的字段与前端读取的字段各说各话。
+- preload 只在 `forge-app://app` + 主框架上暴露它（`location.protocol`、`hostname`、`process.isMainFrame` 三重判定）；其它 origin 一律不暴露。
+- 前端用**存在性探测**降级（`__FORGE_DESKTOP__ === undefined` → 浏览器路径），禁止 UA 嗅探、禁止读 `window.electron`、禁止编译期分支（§10.1）。
+- `boot()` 返回 `{ streamBaseUrl, streamToken }`（§7.2）：页面先 `await boot()`，再建事件流。参照实现需要一张 index 注入表加一个 boot 门，是因为它把**脚本**注入文档、必须按行序执行；我们的产物是封闭静态包（无运行期插件装载），因此**不需要注入表、也不需要 boot 门**——这一处是刻意不照搬。
+- 若将来要支持第三方 UI 扩展（运行期装载插件包），扩展点是这张注入面与 `capabilities` 的配合，而不是新增一个产物。
+
+### 7.4 退出语义
+
+| 层 | 动作 |
+| --- | --- |
+| 关窗 | 默认隐藏到托盘（首次给一次持久化确认） |
+| 退出 | 向核心询问活跃任务（**2 s 上限**，超时按"有任务"保守处理），有则二次确认 |
+| 收尾 | SIGTERM → 停 HTTP → 关编排器（在途轮次归 `interrupted`，可续聊重发）→ 清理子进程；壳在宽限后对残留进程组 SIGKILL |
+
+---
+
+## 8. 打包、签名、安装与更新
+
+### 8.1 安装器
+
+| 平台 | 形态 | 要点 |
+| --- | --- | --- |
+| Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-forge`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
+| macOS | dmg + 拖入 Applications，无需管理员 | hardened runtime + 公证；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍 |
+| 签名 | macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
+
+### 8.2 更新
+
+| 通道 | 形态 |
+| --- | --- |
+| 主路径 | **手动下载新安装包**（应用内"检查更新"打开下载页） |
+| 可选增强 | 自建更新 feed（对象存储 / 内网），带退避与抖动；取不到策略时保留上次决策 |
+| 强制更新 | 仅在部署者自建 feed 时可启用 |
+
+**默认不发起任何更新检查**（R3），因此不存在"官方更新服务器"。同时**无遥测、无崩溃上报**——否则 §1.1 的出站判据自相矛盾。诊断改为本地日志 + 导出诊断包（桌面对话框保存位置；浏览器端等价物为下载）。
+
+### 8.3 体积预算（估算，待实测）
+
+| 组件 | macOS arm64，安装后未压缩 |
+| --- | --- |
+| Electron 运行时 | 90–120 MB |
+| `forge-core`（独立二进制形态含内嵌资产；桌面形态不含，少约 1.3 MB） | 15–30 MB |
+| dsh 生产依赖树 | 40–120 MB |
+| npm/npx JS + 转发启动器 | 10–20 MB |
+| opencode 二进制 | 40–100 MB |
+| **合计** | **200–370 MB** |
+
+体积主要来自随包运行时；前端资产（约 1.3 MB）在总量中可忽略。缓解手段：只带目标平台产物、不做全平台矩阵；安装器用同卷 rename，不做额外压缩；增量更新依赖 electron-updater 的块级差分（blockmap）——UI 改一行只重下变化的块，而且资产在运行时树里只有一份、桌面核心不内嵌副本（§6.1）。
+
+### 8.4 数据目录
+
+保留**一份共享路径**（默认 `~/.forge`，`FORGE_HOME` 可覆盖），三端（CLI / 浏览器 / 桌面）共用。理由：R1 的前提是同一份数据——按入口分裂会出现"桌面打开后会话不见了"；点目录也是开发者工具的既有惯例（`~/.docker`、`~/.kube`、`~/.ollama`）。代价是与 macOS/Windows 应用数据惯例不一致（备份与清理工具不识别）。缓解：桌面端提供"打开数据目录"与**显式迁移**（复制 + 校验 + 保留原目录，绝不静默移动）。
+
+---
+
+## 9. 安全
+
+### 9.1 回环监听面
+
+| 威胁 | 对策 |
+| --- | --- |
+| 恶意网页对回环发跨站请求（DNS rebinding / CSRF） | 只绑 `127.0.0.1`；`Host` 白名单；**Origin 矩阵**（§7.2：只放行 `forge-app://app` 与壳内无 Origin 反代）；令牌强制；不依赖 CORS |
+| 本机其它用户 / 进程调用 API | 两个凭据都只在内存中、每次启动随机；`streamToken` 只能订阅事件，改数据需要 `restToken`，而后者从不离开主进程 |
+| 令牌泄露给子进程 | 只经 stdin 传入；`restToken` / `streamToken` 从不写进任何子进程环境（其余环境按 §6.6 继承） |
+| 渲染进程被 XSS | REST 侧无凭据可偷；`streamToken` 即使被偷也只能读事件；CSP 无外域白名单（§9.2）使外泄没有目标 |
+| 资产或载荷被篡改 | 随包签名 + 公证；打包期清单 + CI 复算；`forge doctor` 可复核。显式目录来源在启动时计算并回报 digest，但不与签名清单比对——它是操作者显式选择的受信来源（§6.1） |
+
+### 9.2 渲染进程加固基线
+
+| 项 | 值 |
+| --- | --- |
+| `contextIsolation` / `sandbox` / `nodeIntegration` | `true` / `true` / `false` |
+| `webviewTag` / `remote` | 禁用 |
+| CSP | 由核心以响应头下发：`default-src 'self'`、`connect-src 'self' ws://127.0.0.1:*`、`img-src 'self' data:`、禁 `unsafe-eval`；**不列任何外域**（前端产物不得依赖 eval） |
+| 导航 | `will-navigate` 与 `setWindowOpenHandler` 只允许 `forge-app://app/`，其余拦截或交给系统浏览器 |
+| 权限 | `setPermissionRequestHandler` 默认全拒，按需显式开放 |
+| 自定义 scheme | `registerSchemesAsPrivileged`（必须在 `app.ready` 之前）：`standard`、`secure`、`supportFetchAPI`、`corsEnabled`、`stream`、`codeCache` |
+| IPC 与 origin 校验 | 所有 IPC handler 先校验 `event.senderFrame.url.startsWith('forge-app://app/')` |
+| 令牌不落渲染进程 | REST 凭据只存在于主进程（§7.2）；渲染进程仅持有通道级 `streamToken`，且 WS 面只有订阅能力 |
+
+### 9.3 子进程环境
+
+见 §6.6。环境按调用方基线整体继承，私有 `bin` 只**前置**到子进程的临时 `PATH`：
+
+- **我们自己的凭据不进环境**：`restToken` / `streamToken` 只经 stdin 传给核心，从不写进任何子进程环境（§7.2）。
+- **用户环境原样继承是有意的**：agent 的工具执行与 MCP server 本来就是用户开发环境的一部分——剥掉 `PATH` 尾部或凭据类变量会让 `git` / `python` / `uvx` 以及需要 `GITHUB_TOKEN` 的 MCP server 大面积失效。代价是用户 shell 里的凭据对"用户自己配置的 runtime 与 MCP server"可见，与在终端里直接运行它们同级；这些进程都是用户显式安装或配置的，且产品本身不产生任何出站（R3）。
+- 隔离落在**配置面**而不是环境面：各 runtime 的 home / cache / prefix 全部重定向到 `FORGE_HOME`，因此用户既有的 dsh / opencode 配置不会被读取或改写（§6.4）。
+
+### 9.4 "能监听"不等于"可对外"
+
+`--addr 0.0.0.0` 可以设置，但产品化对外缺四件事，缺一不可：① 令牌强制（不可为空）+ 首次启动生成并展示；② TLS 终止（自带或要求反代 + `Secure` / `wss`）；③ Host/Origin 白名单与 CSRF 防护；④ 多操作员归属与审计。四者均不在本期范围。
+
+---
+
+## 10. 一致性的边界
+
+### 10.1 桌面只能"多给"
+
+| 能力 | 桌面 | web 等价路径 |
+| --- | --- | --- |
+| 原生目录选择器 | Electron dialog（IPC 只对主窗口主框架开放） | 服务端目录浏览 API |
+| 托盘 / 通知 | 有 | 无（不影响功能可用性） |
+| 打开文件 / 文件夹 | `shell.openPath` | 显示路径 + 复制 |
+| 导出诊断包 | 原生保存对话框 | 浏览器下载 |
+| 深链接 | `forge://…` + 单实例转发 | URL 直达 |
+| 更新 | 手动下载 / 自建 feed | 部署者更新二进制 |
+
+宿主能力分两半（§7.3）：**声明面**经 `GET /v1/forge/capabilities` 返回（两端同一份结构，浏览器入口如实回报"无"）；**执行面**只在桌面入口经 preload 的 `__FORGE_DESKTOP__` 暴露（origin 守卫 + 存在性探测）。**前端不得嗅探 UA、不得读 `window.electron`、不得做编译期分支**。
+
+### 10.2 可证伪的一致性
+
+DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌面独有能力，浏览器端必须能用服务端路径走完同一业务流程并断言结果等价。任何只能靠原生对话框完成的流程 = 一致性失败。
+
+---
+
+## 11. 随包再分发的合规门禁
+
+| 组件 | 许可证 | 义务 |
+| --- | --- | --- |
+| dsh（`@deepseek-ai/dsh` 0.1.7-rc.2） | MIT（源码仓库根 `LICENSE`） | 保留版权与许可声明 |
+| opencode | MIT（[LICENSE](https://github.com/anomalyco/opencode/blob/dev/LICENSE)） | 同上 |
+| Node / Electron | MIT | 同上 |
+
+门禁动作：① 随包 `THIRD-PARTY-NOTICES`（各组件版本与来源 URL）；② 生成 SBOM 并在打包期校验资产与载荷版本和清单一致；③ 记录所捆绑 runtime 的确切版本，避免不可复现；④ 划清边界：opencode 的**托管服务**另有服务条款（[ToS](https://opencode.ai/legal/terms-of-service)），本期只捆绑其 CLI 二进制，不引入其托管服务的默认依赖。
+
+---
+
+## 12. 验收与回归
+
+| # | 验收项 | 怎么验 | 阈值 |
+| --- | --- | --- | --- |
+| V1 | 零依赖首启（R2） | 干净 macOS/Windows 虚拟机（无 go/node/pnpm，且未装 dsh/opencode）走完整流程 | 无环境类错误；无 registry 请求 |
+| V2 | 双端一致（R1） | 同一份 CDP 脚本打 web 与 Electron 窗口 | 全绿且断言数一致 |
+| V3 | 单向一致性 | 逐个桌面独有能力，在浏览器端用服务端路径跑完 | 无"仅桌面可完成"的流程 |
+| V4 | 无远端 server（R3） | 抓包 + 连接清单 | 除模型 API 与用户触发的 MCP 拉取外无出站；无遥测 / 崩溃上报；默认无更新检查 |
+| V5 | 资产来源 | 两种机制各起一次（内置 / `--web-dir` 显式目录） | 行为一致（缓存头、SPA 回退、build id）；`/meta` 回报的实际路径与来源相符 |
+| V6 | 资产失效语义 | `--web-dir` 指向不存在的目录，或目录内缺 `index.html` | **拒绝启动**并给出明确错误，不静默回落到内置资产 |
+| V7 | 缓存语义 | 检查 `index.html` 与 `assets/*` 的响应头 | `no-store` / `immutable` 分别命中 |
+| V8 | 版本闸门 | 人为构造前端与核心 build id 不一致 | 显示明确状态页，非白屏 |
+| V9 | Electron 作为 Node | 三条回退触发条件各一个 smoke 用例 | 全过则不启用独立 Node 载荷 |
+| V10 | 载荷解析与环境 | ① 清空 `PATH` 起桌面态，`dsh` / `opencode` 仍能起来且日志显示命中"随包载荷"；② 在子进程内断言 `PATH` 首段是私有 bin、其后仍含调用方 `PATH`；③ 在本机放一个假的 `dsh`（放在 `PATH` 上），断言全程没有被探测或执行 | 三级判据同时成立：载荷不回落 `PATH`、用户工具链仍可见、本机已有安装不被探测 |
+| V11 | 工程边界 | 守卫测试：`apps/web` 不引 Electron/Node、`apps/desktop` 不引 `apps/web` 源码、`packages/*` 不引 `apps/*` | 越界即 CI 失败 |
+| V12 | 安装 | Windows 安装不弹 UAC；长路径可用；安装失败可回滚 | 无提权提示；失败无半损坏 |
+| V13 | 退出 | 有在途轮次退出 → 二次确认；强杀壳 → 无孤儿进程；runtime env 中无令牌 | 无孤儿；轮次为 `interrupted` |
+| V14 | 合规 | 安装包内 `THIRD-PARTY-NOTICES` + SBOM 与 `release.json` 一致 | 组件版本与清单一致 |
+| V15 | 凭据分层 | 在渲染进程内全局搜索 `restToken`；再用 `streamToken` 调 REST、连 WS | 搜不到；REST 被拒 401；WS 正常建立 |
+| V16 | Origin 矩阵 | 从另一个 origin（本地起的 `http://127.0.0.1:其它端口`）请求核心的 REST 与 WS | 全部被拒；壳内存路径不可从外部构造 |
+| V17 | 壳侧与核心侧资产一致 | 同一路径分别经壳与核心各取一次（`Content-Type` / `Cache-Control` / 内容）；再从非资产深链刷新 | 逐字一致；深链由核心回退产出 `index.html` |
+| V18 | 载体契约 | 两个入口各查一次 `/v1/forge/capabilities`；桌面窗口内断言 `__FORGE_DESKTOP__` 的形状；origin 守卫测两层——preload 单元测试（mock `location` 与 `contextBridge`，负例是 origin 表 `forge-app://shell/*`、`forge-app://other/*`、`https://…`、`http://…` 加 `isMainFrame === false`） | 声明面两端同构；执行面只在 `forge-app://app` 主框架可见；"判定"与"是否调用暴露"两层都有覆盖，字段与共享契约模块一致 |
+
+**回归范围**：`make all`、`make image`、`make test`、`pnpm ui:accept`、依赖边界守卫，以及 §2.2 那一条行为变更（运行时解析策略）。
+
+---
+
+## 13. 落地路径
+
+| 里程碑 | 交付 | 出口判据 |
+| --- | --- | --- |
+| M1 壳与握手 | 建立 `apps/web` 与 `apps/desktop` 两个并列产品包（骨架 + 依赖边界守卫）＋ Electron 最小壳：单实例锁、注册 `forge-app://`、spawn 核心、`:0` + stdin 双凭据、health 轮询、壳服务 index/assets、boot 下发流基址与 `streamToken`、退出语义、渲染进程加固基线 | V11、V13、V15、V9 第一轮 |
+| M2 资产层 | 两种资产来源（构建期内置 + `--web-dir`）与失败语义、核心侧与壳侧两条服务路径与一致性断言、缓存语义、完整性校验、`/meta` 可观测、版本闸门 | V5–V8、V17 |
+| M3 包内执行 | 资产与载荷随包只读运行；Electron 作为 Node 执行 dsh / opencode；`npx` 转发启动器；Origin 矩阵；确认是否需要 §6.3 的物化回退 | V9、V16；`PATH` 中无 node 也能起 runtime |
+| M4 安装与签名 | `apps/desktop/scripts/` 的打包 / 签名 / 安装器流水线与 `release.json`、per-user 安装器、公证、合规门禁 | V1、V12、V14 |
+| M5 一致性收口 | 宿主能力面、`forge web` 共用启动器、双端与单向一致性矩阵脚本化 | V2、V3 |
+
+顺序要点：**M3 必须在 M4 之前**——签名会锁死资产与载荷形态（包内执行 vs 物化），先签名再改形态，代价翻倍。
+
+---
+
+## 14. 风险与应对
+
+| 风险 | 触发条件 | 动作 |
+| --- | --- | --- |
+| Electron 的 Node 不满足 runtime | engines 断言失败或 smoke 失败 | 启用独立 Node 载荷（§5.4），配置面不变 |
+| Electron 升级破坏 runtime | 升级后 smoke 红 | engines / ABI 断言进 CI，升级前必须跑 V9 |
+| 包内执行被平台拒绝 | 公证 / hardened runtime 报错，或 runtime 需写自身目录 | 该载荷退回物化（§6.3 回退条件），只对受影响载荷启用 |
+| 资产来源静默降级 | 用户看到旧版本界面 | 显式指定失败即拒绝启动 + `/meta` 回报来源；V6 覆盖 |
+| 显式目录写错 | 壳 / 包装脚本在 Homebrew、bundle、容器下算出错误路径 | 边界处一次 `realpath`；核心只接受绝对路径、复核 `index.html`、打印实际路径；不存在即拒绝启动（不做隐式搜索） |
+| 体积超预期 | 安装包 > 400 MB | 裁平台矩阵；核实 dsh 闭包是否带入 dev 依赖；最后才考虑按需下载 opencode（会破坏离线首启，需拍板） |
+| 安装被 AV / SmartScreen 拦 | 用户报告安装失败或警告 | 签名（EV / Azure Trusted Signing）+ per-user 目录 + 原子安装 |
+| 桌面能力渗入共享组件 | 出现"仅桌面"流程 | V3 单向断言纳入 DoD；能力经能力面暴露 |
+| 合规遗漏 | 发布包缺 NOTICES / SBOM | 门禁进发布流程（§11）；V14 |
+
+---
+
+## 15. 开放问题
+
+| # | 问题 | 默认倾向 |
+| --- | --- | --- |
+| Q1 | `CGO_ENABLED=0` 是否全绿（纯 Go SQLite 的实际构建与运行）？ | 倾向成立，须实测；不成立则桌面按平台分发带 cgo 二进制的对应运行时库 |
+| Q2 | 各 runtime 实际读取哪些 home / config 变量（用于隔离用户既有配置）？ | 按各自文档逐个核对后写入 §6.6 注入表 |
+| Q3 | `streamToken` 的生命周期：随核心退出失效，还是短 TTL + 续期？ | 随核心进程生命周期（退出即失效、无续期面）；TTL 只在需要"页面凭据可轮换"时引入 |
+| Q4 | win-arm64 是否在发布范围内？ | 本期不做，列为后续 |
+| Q5 | 是否承诺 Python / uv（部分 MCP server 需要）？ | 不承诺；需要时按第二份载荷加入（§6.3 已留位） |
+| Q6 | 块级差分更新（electron-updater blockmap）在"只改一行 UI"时是否真的只重下变化的块？ | 默认依赖 blockmap，M4 实测；若实测退化成整包重下，再把前端资产挪成独立 sidecar 目录（`--web-dir` 已支持，改动只在打包脚本） |
+
+---
+
+## 16. 评审检查清单
+
+- [ ] §1.1 的三条需求是否都被翻译成可执行、可判定的验收项？验收表里有没有"看起来对但没人能验"的条目？
+- [ ] §2.1 的四条依赖边界是否实现为守卫测试？桌面专属代码是否确实没有落进 `backend/` 与 `apps/web`？
+- [ ] §4 是否接受"体积 +90–120 MB 换渲染统一与单一验收靶子"？若不接受，是否明确转向 Wails v3 或瘦启动器形态？
+- [ ] §5.3 的 engines / ABI 打包期断言是否会被实现（共用 Electron Node 的唯一安全网）？
+- [ ] §6.1 只有"内置"与"显式目录"两种来源、且显式目录无效即拒绝启动，是否被接受（代价：部署者配错时启动失败，而不是静默用旧资产或旧界面）？
+- [ ] §6.2 的缓存语义、两侧一致性断言与"只接受绝对路径、不做隐式搜索"是否有明确实现归属？
+- [ ] §6.3 的"包内只读不物化"是否接受，并接受其回退条件（运行时自写目录 / 平台拒绝）在 M3 用实测定论？
+- [ ] §6.7 版本闸门是否成为常设机制，`release.json` 是否成为唯一发布契约？
+- [ ] §8.1 Windows per-user 免 UAC + 原子安装 + 长路径是否都进 M4？
+- [ ] §8.2 默认无更新检查、无遥测、无崩溃上报是否与 §1.1 的出站判据一致？
+- [ ] §9.2 渲染进程加固基线的六项是否有明确实现归属？
+- [ ] §10.2 的单向一致性断言是否进 DoD？
+- [ ] §11 合规门禁（NOTICES + SBOM）是否进发布流程？
+- [ ] §2.1 的产物包纪律（`exports` / `files` / 零运行期依赖）是否进了守卫测试？§7.3 的载体契约（声明面 + 执行面）是否进了验收（V18）？
+- [ ] §15 的开放问题是否都有默认倾向，且每条都有明确的关闭时点？

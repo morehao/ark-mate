@@ -14,6 +14,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
   - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）。**共 10 条**——加守卫时记得同步这句话。
 - `frontend/`：pnpm workspace（`apps/panel` 控制台 + `packages/{ui,types,api,tsconfig}`）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 设计文档是**历史记录**（会话早期叫 sessions，P0 起为 conversations）；对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
+- `docs/assets/`：文档的**静态资源唯一收口**（图片/矢量图/后续其他静态文件），不散落在 `docs/` 根下；文档内用相对路径引用（`![alt](assets/xxx.svg)`）。
 
 ## 错误码（唯一事实源 `backend/pkg/code`）
 
