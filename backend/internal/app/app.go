@@ -321,7 +321,7 @@ func (a *App) credentials() *credential.Set {
 //
 // 资产相关字段（webPath / webDigest / webBuildId）留空/为 null：那些要等资产层（M2-1）与
 // 版本闸门（M2-4）才有真值——诊断面宁可空着，也不要编一个看起来正常的来源。
-func (a *App) metaInfo() ctrsystem.MetaInfo {
+func (a *App) metaInfo() ctrsystem.MetaSource {
 	cfg := a.cfg
 	home := ""
 	if cfg.ConfigDir != "" {
@@ -330,10 +330,9 @@ func (a *App) metaInfo() ctrsystem.MetaInfo {
 		// 那时这里改成读该键即可，字段本身不变。
 		home = filepath.Dir(cfg.ConfigDir)
 	}
-	return ctrsystem.MetaInfo{
+	return ctrsystem.MetaSource{
 		CoreVersion: version.Version,
 		APIContract: version.APIContract,
-		WebBuildID:  "",
 		Home:        home,
 		Payloads:    []ctrsystem.PayloadInfo{}, // M3-1 起填随包载荷
 	}

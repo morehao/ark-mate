@@ -25,31 +25,6 @@ const CarrierHeader = "X-Forge-Carrier"
 // CarrierDesktop 桌面载体的标识值。
 const CarrierDesktop = "desktop"
 
-// PayloadInfo 随包运行时载荷的一条（M3-1 起填；M1-7 阶段是空数组）。
-type PayloadInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Digest  string `json:"digest"`
-	// Source 命中级别：bundled（随包）| runtime-env（显式覆盖）| path（PATH 上找到）。
-	Source string `json:"source"`
-}
-
-// MetaInfo `/v1/forge/meta` 的响应（设计 §6.7；字段契约见计划 §5 M1-7）。
-//
-// 资产相关字段的取值节奏：M1-7 只保证 `coreVersion` / `apiContract` / `home` 是真的；
-// `webSource` 在 release 构建（内嵌资产）里报 `builtin`，默认构建里**留空**（那时核心根本不服务
-// 前端资产，报一个枚举值是撒谎）；`webPath` / `webDigest` / `webBuildId` 由 M2-3/M2-4 接真值。
-type MetaInfo struct {
-	CoreVersion string        `json:"coreVersion"`
-	WebBuildID  string        `json:"webBuildId"`
-	APIContract string        `json:"apiContract"`
-	WebSource   string        `json:"webSource,omitempty"` // builtin | dir（未接资产层时为空）
-	WebPath     *string       `json:"webPath"`             // dir 来源的绝对路径；其余为 null
-	WebDigest   *string       `json:"webDigest"`           // 逐文件 sha256 合成；未接时 null
-	Home        string        `json:"home"`
-	Payloads    []PayloadInfo `json:"payloads"`
-}
-
 // Entries 这份部署对外提供哪些入口。
 type Entries struct {
 	Browser bool `json:"browser"`
@@ -82,26 +57,18 @@ type SystemCtr interface {
 var _ SystemCtr = (*systemCtr)(nil)
 
 type systemCtr struct {
-	meta func() MetaInfo
+	meta MetaSource
 }
 
-// NewSystemCtr 构造系统面控制器。`meta` 由装配层提供（版本、数据目录、载荷……），
-// 资产相关字段由路由层按构建形态补全。
-func NewSystemCtr(meta func() MetaInfo) SystemCtr {
-	if meta == nil {
-		meta = func() MetaInfo { return MetaInfo{Payloads: []PayloadInfo{}} }
-	}
+// NewSystemCtr 构造系统面控制器。`meta` 由装配层凑齐（版本、数据目录、载荷、资产，
+// 见 meta.go 的"谁填什么"表）。
+func NewSystemCtr(meta MetaSource) SystemCtr {
 	return &systemCtr{meta: meta}
 }
 
 // GetMeta 诊断面：这份部署的版本、资产来源与数据目录。
 func (h *systemCtr) GetMeta(c *gin.Context) {
-	m := h.meta()
-	if m.Payloads == nil {
-		// 空数组而不是 null：客户端统一按数组处理（少了这一步，前端要为两种情况写分支）。
-		m.Payloads = []PayloadInfo{}
-	}
-	gincontext.Success(c, m)
+	gincontext.Success(c, h.meta.Snapshot())
 }
 
 // GetCapabilities 声明面：两个入口**同构**（id 集合与顺序完全一致），只有 available 随入口不同。

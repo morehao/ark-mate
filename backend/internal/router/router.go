@@ -63,8 +63,9 @@ type Options struct {
 	Credentials *credential.Set
 
 	// Meta 系统面（`/v1/forge/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
-	// 资产来源字段由路由层按**已解析的资产**补全（M2-1 起不再看构建 tag）。nil = 用默认值。
-	Meta func() ctrsystem.MetaInfo
+	// 资产相关字段由路由层按**已解析的资产**补全（M2-1 起不看构建 tag，M2-3 接真值）。
+	// nil = 用默认值（版本 + 空载荷）。
+	Meta func() ctrsystem.MetaSource
 
 	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
 	Web AssetInfo

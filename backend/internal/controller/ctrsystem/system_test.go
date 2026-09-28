@@ -11,7 +11,7 @@ import (
 )
 
 // newEngine 挂上系统面控制器（最小引擎：本包只关心传输形状）。
-func newEngine(meta func() ctrsystem.MetaInfo) *gin.Engine {
+func newEngine(meta ctrsystem.MetaSource) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	eng := gin.New()
 	ctr := ctrsystem.NewSystemCtr(meta)
@@ -47,9 +47,7 @@ func get(t *testing.T, eng *gin.Engine, path string, headers map[string]string) 
 
 // TestMetaShape /meta 的字段契约（设计 §6.7 / 计划 §5 M1-7）。
 func TestMetaShape(t *testing.T) {
-	eng := newEngine(func() ctrsystem.MetaInfo {
-		return ctrsystem.MetaInfo{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/forge-home"}
-	})
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/forge-home"})
 	d := get(t, eng, "/meta", nil)
 
 	for _, k := range []string{"coreVersion", "webBuildId", "apiContract", "home", "payloads"} {
@@ -88,7 +86,7 @@ func TestMetaShape(t *testing.T) {
 //
 // 这是 V3/V18 的落点：声明面是两端的机器判据，因此"顺序"也在契约里（前端可以按下标渲染）。
 func TestCapabilitiesPerEntry(t *testing.T) {
-	eng := newEngine(nil)
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"})
 	browser := get(t, eng, "/capabilities", nil)
 	desktop := get(t, eng, "/capabilities", map[string]string{"X-Forge-Carrier": "desktop"})
 
@@ -155,7 +153,7 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 
 // TestCarrierHeaderCaseInsensitive 入口标识大小写不敏感（HTTP 头值的大小写不该决定能力面）。
 func TestCarrierHeaderCaseInsensitive(t *testing.T) {
-	eng := newEngine(nil)
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"})
 	d := get(t, eng, "/capabilities", map[string]string{"X-Forge-Carrier": "Desktop"})
 	entries, _ := d["entries"].(map[string]any)
 	if entries["desktop"] != true {
