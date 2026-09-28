@@ -30,15 +30,20 @@ func newEngine() *gin.Engine {
 }
 
 // newEngineWithService 真实装配并把 Service 交出来：需要先设策略（如工作区根白名单）的用例用它。
+//
+// 资产按**生产同一条路径**解析（M2-1）：release 构建内嵌 → 有资产（非 API 未知路径回落 SPA）；
+// 默认构建 → 没有（回落信封 404）。忽略解析错误是刻意的——"没有资产"对只测 API 的用例是合法状态，
+// 而生产入口（serve）走的是 app.Init，那里会按退出码 3 拒绝启动。
 func newEngineWithService() (*gin.Engine, *manager.Service) {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
+	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
-	}, bus)
+	}, bus, router.Options{Web: assets})
 	return engine, svc
 }
 

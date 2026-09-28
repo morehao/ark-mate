@@ -33,6 +33,9 @@ func serve(args []string) {
 	readyStdout := fs.Bool("ready-stdout", false,
 		"监听成功后往 stdout 打一行 `FORGE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
 			"桌面壳据此立刻拿到地址，不传则壳退回 health 轮询")
+	webDir := fs.String("web-dir", "",
+		"前端资产目录（绝对路径，须含 index.html；同 FORGE_WEB_DIR）。不传则用构建期内置资产；"+
+			"两者都没有 → 拒绝启动（退出码 3）。显式给了目录就**只**用它，不回落内嵌")
 	exitWithParent := fs.Bool("exit-with-parent", false,
 		"父进程消失即自动退出（POSIX：父进程死后被 reparent，`Getppid` 随之变化）；"+
 			"桌面壳用 `kill -9` 强杀时靠它避免留下孤儿核心与 runtime 子进程。Windows 无 reparent 语义，那里要等 Job Object（M4-3）")
@@ -44,6 +47,10 @@ func serve(args []string) {
 	}
 	if *turnTimeout > 0 {
 		cfg.TurnTimeout = *turnTimeout
+	}
+	// CLI flag 优先级最高（与 --addr 同一条规则：默认 < config.json < env < FORGE_* < flag）。
+	if *webDir != "" {
+		cfg.WebDir = *webDir
 	}
 
 	opts := []app.Option{}

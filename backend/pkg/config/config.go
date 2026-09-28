@@ -117,6 +117,10 @@ type Config struct {
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
 	RemoteRuntimes []RemoteRuntime
+	// WebDir 前端资产目录（M2-1；FORGE_WEB_DIR 覆盖，默认空）。
+	// 空 = 用构建期内置资产；**非空即校验**（绝对路径 / 存在 / 目录 / 含 index.html），
+	// 不合法就拒绝启动——显式配置配错时静默回落到内嵌旧资产，是"用户看到旧界面还以为没生效"的根源。
+	WebDir string
 	// Token 独立态单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
 	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
 	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
@@ -231,6 +235,7 @@ var knownKeys = map[string]string{
 	"proc_registry":       "FORGE_PROC_REGISTRY",
 	"reap_grace":          "FORGE_REAP_GRACE",
 	"token":               "FORGE_TOKEN",
+	"web_dir":             "FORGE_WEB_DIR",
 	"mcp_auto_probe":      "FORGE_MCP_AUTO_PROBE",
 	"native_permission":   "FORGE_NATIVE_PERMISSION",
 }
@@ -580,6 +585,9 @@ func materialize(r *resolver) (Config, error) {
 			return bad("projection_dirs", err.Error())
 		}
 		c.ProjectionDirs = dirs
+	}
+	if v, ok := r.get("web_dir"); ok {
+		c.WebDir = strings.TrimSpace(v)
 	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)

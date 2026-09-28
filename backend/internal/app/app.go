@@ -47,6 +47,14 @@ type ExitError struct {
 func (e *ExitError) Error() string { return e.Err.Error() }
 func (e *ExitError) Unwrap() error { return e.Err }
 
+// assetErr 资产错误（退出码 3，M2-1）：前端资产缺失/不可用。
+//
+// 为什么单给一个码：它与"配置写错"（2）和"运行期故障"（1）都不同——**部署形态装错了**。
+// 桌面壳据此区分"壳的 --web-dir 指错了"与"核心自己崩了"，也给运维一条可判定的信号。
+func assetErr(format string, args ...any) *ExitError {
+	return &ExitError{Code: 3, Err: fmt.Errorf(format, args...)}
+}
+
 // usageErr 用法/配置错误（退出码 2）。
 func usageErr(format string, args ...any) *ExitError {
 	return &ExitError{Code: 2, Err: fmt.Errorf(format, args...)}
@@ -80,6 +88,9 @@ type App struct {
 
 	// readyStdout 是否在监听成功后往 stdout 打一行 `FORGE_READY {...}`（M1-2，桌面壳据此拿地址）。
 	readyStdout bool
+
+	// assets 本次装配解析出的前端资产（M2-1；供 /meta 与诊断使用）。
+	assets router.AssetInfo
 
 	closeOnce sync.Once
 }
@@ -249,9 +260,25 @@ func (a *App) Init(ctx context.Context) error {
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
+	// 资产层（M2-1）：显式目录优先、内嵌兜底、两者都没有即**拒绝启动**（退出码 3）。
+	// 放在监听之前：装错资产时不该先占住端口再报错。
+	assets, err := router.ResolveAssets(cfg.WebDir)
+	if err != nil {
+		return assetErr("serve: %v", err)
+	}
+	a.assets = assets
+	if assets.Has() {
+		where := string(assets.Source)
+		if assets.Source == router.AssetSourceDir {
+			where += " " + assets.Path
+		}
+		slog.Info("serve: 前端资产已就绪", "source", where)
+	}
+
 	srv, err := newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
 		Meta:        a.metaInfo,
+		Web:         assets,
 	}))
 	if err != nil {
 		// 端口被占 / 无权限在装配期就报出来（此前是 ListenAndServe 里的运行期错误）。

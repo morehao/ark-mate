@@ -63,8 +63,11 @@ type Options struct {
 	Credentials *credential.Set
 
 	// Meta 系统面（`/v1/forge/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
-	// 资产来源字段由路由层按构建形态补全。nil = 用默认值（版本 + 空载荷）。
+	// 资产来源字段由路由层按**已解析的资产**补全（M2-1 起不再看构建 tag）。nil = 用默认值。
 	Meta func() ctrsystem.MetaInfo
+
+	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
+	Web AssetInfo
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
@@ -102,13 +105,14 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	registerAutomation(rest, ports)
 	registerLibrary(rest, ports)
 	registerUsage(rest, ports)
-	meta := opts0(opts).Meta
+	o := opts0(opts)
+	meta := o.Meta
 	if meta == nil {
 		meta = defaultMeta
 	}
-	registerSystem(rest, meta)
+	registerSystem(rest, meta, o.Web)
 
-	MountWeb(r)
+	MountWeb(r, o.Web)
 	return r
 }
 

@@ -1,20 +1,18 @@
-// Package web 是前端构建产物的 go:embed 宿主（release 构建用），承载
-// backend 单二进制内嵌前端静态资源的能力。
+// Package web 是前端构建产物的宿主：**两种来源，一套行为**（设计 §6.1）。
 //
-// # 产物来源
+// 来源（只有一个机制能命中，不搜索、不回落）：
+//   - **构建期内置**：`-tags release` 时 `//go:embed dist`（见 web_embed_release.go）；
+//   - **显式目录**：`--web-dir` / `FORGE_WEB_DIR` 指向一份已构建的 `apps/web/dist`
+//     （桌面形态由壳指过来，独立部署也可指向 nginx 那份）。
 //
-// dist/ 由仓库根 Makefile 的 `make web` 从 frontend/apps/web 构建并拷贝而来
-// （`cp -r frontend/apps/web/dist backend/pkg/web/dist`），不入库。
+// 两者的**差别只在来源**：缓存语义、SPA 回退、`/v1/*` 的信封 404 全由 internal/router 的
+// 资产层统一实现（M2-2 的一致性断言就是钉这一条）。本包只回答"有没有、在哪"。
 //
-// # 编译形态
+// 谁在什么形态下用什么：
 //
-// web.go 内嵌声明仅随 `-tags release`（即 `make all` 单二进制交付）编译；
-// 默认构建不带该 tag，后端可独立起服、不依赖前端产物是否存在。
-//
-// # 前端的三种运行形态
-//
-//   - dev 联调：前端跑 vite dev server（proxy /v1 -> 127.0.0.1:10001），后端只管 API；
-//   - 独立部署：直接托管 frontend/apps/web/dist 到任意静态宿主（nginx 等），
-//     前端经可配置 API base（VITE_API_BASE）指向后端，后端按需开 CORS；
-//   - 单二进制：make all 先拷贝 dist 再以 -tags release 编译，本包 embed 进产物。
+//	独立二进制（make all）  → 内嵌（无需 --web-dir）
+//	容器镜像（Dockerfile）  → 内嵌（构建期 -tags release）
+//	桌面核（make core/desktop）→ --web-dir（壳传包内那一份，核不内嵌）
+//	开发联调（make dev）    → --web-dir frontend/apps/web/dist（默认 tag 没有内嵌）
+//	什么都不给             → 拒绝启动（退出码 3），见 internal/router.ResolveAssets
 package web

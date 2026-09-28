@@ -15,12 +15,18 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server desktop/dev desktop/accept core/desktop verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept core/desktop verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
 CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/forge-core
+
+# 前端产物目录（`--web-dir` 指向它）。
+# 为什么 dev 也要显式给：默认 tag 的核心**没有**内嵌资产，M2-1 的失败语义会让它拒绝启动
+# （退出码 3）——那是为"独立二进制装错形态"设计的，dev 的正确做法就是明说自己用哪份资产。
+# 目录不存在就先构建一次；vite dev 用的是内存产物，与这份 dist 互不影响。
+WEB_DIR := $(CURDIR)/$(FRONTEND_ROOT)/apps/web/dist
 
 # —— 前端工具链（Node / pnpm）——
 # 唯一事实源在 frontend/ 内：Node 版本 = frontend/.nvmrc，pnpm 版本 = frontend/package.json 的
@@ -77,9 +83,16 @@ verify/desktop-dod:
 	cd $(FRONTEND_ROOT) && pnpm test:contract
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 
+# dev 用的资产就绪（不存在则构建一次）
+$(WEB_DIR)/index.html:
+	@echo "==> 前端产物不存在，先构建一次（后端 dev 需要 --web-dir 指向它）"
+	cd $(FRONTEND_ROOT) && pnpm build
+
+web-assets: $(WEB_DIR)/index.html
+
 # 后端开发起服（forge 无默认子命令，需显式 serve）
-server:
-	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve
+server: web-assets
+	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve --web-dir $(WEB_DIR)
 
 # 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
 # /v1/forge/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
@@ -90,7 +103,7 @@ dev:
 	@echo "==> 后端  go run ./cmd/forge serve  (默认 127.0.0.1:10001, store=$(FORGE_STORE))"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve & \
+	cd backend && FORGE_STORE=$(FORGE_STORE) go run ./cmd/forge serve --web-dir $(WEB_DIR) & \
 	BACKEND_PID=$$!; \
 	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/forge/health ..."; \
 	HEALTHY=""; \
