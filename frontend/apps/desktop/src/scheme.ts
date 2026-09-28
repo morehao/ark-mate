@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { FORGE_SCHEME } from '@ark/desktop-contract'
+import { FORGE_SCHEME, CSP_POLICY } from '@ark/desktop-contract'
 import type { CoreHandle } from './core'
 
 /** 壳服务的静态路径集合（核心侧静态规则的**子集**，M2-5 断言两者响应头逐字一致）。 */
@@ -69,12 +69,15 @@ export function installSchemeHandler(deps: SchemeDeps): void {
     try {
       if (url.hostname === 'shell') {
         const page = url.pathname === '/' || url.pathname === '' ? '/welcome.html' : url.pathname
+        // 壳页不加契约 CSP：它们自带更严的 meta CSP（无脚本、样式仅同目录）。
         return await serveFile(deps.rendererDir, page)
       }
       if (url.hostname === 'app') {
         if (isAppStaticPath(url.pathname)) {
           const p = url.pathname === '/' ? '/index.html' : url.pathname
-          return await serveFile(deps.webDir, p)
+          // app 文档与脚本都下发契约里的 CSP（M1-5）：与核心服务浏览器入口时**同一个头**，
+          // 由 archtest 守卫断言两处字符串逐字相同。
+          return await serveFile(deps.webDir, p, { csp: true })
         }
         return await proxyToCore(request, deps.core())
       }
@@ -93,8 +96,11 @@ export function isAppStaticPath(pathname: string): boolean {
 /**
  * 静态文件响应 + 缓存语义（设计 §6.2，与核心侧同一条规则）：
  * `index.html` → `no-store`；带内容 hash 的 `assets/*` → `immutable` 一年；其余 → 可重验证。
+ *
+ * `csp` 为真时额外下发契约里的 CSP（app 文档与脚本；壳自己的静态页有自己的 meta CSP，
+ * 那份比契约更严，不需要也不该被覆盖）。
  */
-async function serveFile(root: string, pathname: string): Promise<Response> {
+async function serveFile(root: string, pathname: string, opts: { csp?: boolean } = {}): Promise<Response> {
   let rel: string
   try {
     rel = decodeURIComponent(pathname).replace(/^\/+/, '')
@@ -112,6 +118,7 @@ async function serveFile(root: string, pathname: string): Promise<Response> {
   const res = await net.fetch(pathToFileURL(full).toString())
   const headers = new Headers(res.headers)
   headers.set('cache-control', cacheControlFor(pathname))
+  if (opts.csp) headers.set('content-security-policy', CSP_POLICY)
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }
 

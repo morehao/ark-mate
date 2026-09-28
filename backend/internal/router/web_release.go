@@ -24,6 +24,9 @@ func MountWeb(r *gin.Engine) {
 		panic("web dist 缺少 index.html")
 	}
 	indexResp := func(c *gin.Context) {
+		// 浏览器入口的文档也下发 CSP（与桌面壳同一个头，M1-5）：前端产物不得依赖 eval，
+		// 也不允许任何外域连接——这条与"R3 零出站"是同一条纪律的两面。
+		setDocumentCSP(c)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", index)
 	}
 	hfs := http.FS(sub)
@@ -40,6 +43,7 @@ func MountWeb(r *gin.Engine) {
 			return
 		}
 		if _, err := fs.Stat(sub, p); err == nil && p != "" && !strings.HasSuffix(p, "/") {
+			setDocumentCSP(c)
 			c.FileFromFS(p, hfs)
 			return
 		}

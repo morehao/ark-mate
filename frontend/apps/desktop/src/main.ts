@@ -12,7 +12,7 @@
  * 后续里程碑在此之上长：M1-4/M1-5 preload 暴露与渲染进程加固（CSP/导航/权限）、
  * M1-6 托盘与退出语义、M2-6 把 `--web-dir` 指给核心、M3 随包载荷与私有 node。
  */
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
 
 import { APP_ORIGIN, SHELL_ORIGIN } from '@ark/desktop-contract'
@@ -39,7 +39,9 @@ function createWindow(url: string): BrowserWindow {
     show: false,
     backgroundColor: '#f7f8fa',
     webPreferences: {
-      // 加固基线（设计 §9.2）从第一版就位，M1-5 再补 CSP / 导航 / 权限三处。
+      // 加固基线（设计 §9.2）六项：这四项在这里；CSP 在 scheme.ts（两处下发同一策略）、
+      // 导航与权限在 hardenWindow()、IPC origin 校验在 ipc.ts。少任何一项都有
+      // archtest 的 TestRendererHardeningBaseline 与 CDP 验收盯着。
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -49,6 +51,7 @@ function createWindow(url: string): BrowserWindow {
   })
 
   void w.loadURL(url)
+  hardenWindow(w)
   w.once('ready-to-show', () => {
     w.show()
     log(`window ready-to-show url=${url} visible=${w.isVisible()}`)
@@ -64,6 +67,51 @@ function createWindow(url: string): BrowserWindow {
     if (win === w) win = null
   })
   return w
+}
+
+/**
+ * 渲染进程加固的"窗口侧"三项（M1-5，设计 §9.2）：
+ *
+ *   1. **导航**：只放行自己的 app origin；`http(s)` 交给系统浏览器；其余（`file:`、`javascript:`、
+ *      `forge://`、任何第三方 origin）一律 `preventDefault` 拦下——桌面窗口不该变成浏览器；
+ *   2. **新窗口**：`setWindowOpenHandler` 一律 `deny`；要开外部链接就走系统浏览器。
+ *      将来的多窗口是**我们自己的入口**（按工作区开窗），不是页面 `window.open` 出来的；
+ *   3. **权限**：默认**全拒**（当前不需要任何权限）。request 与 check 两个 handler 都装——
+ *      只装 request 会让同步检查那条路径漏过去。
+ */
+function hardenWindow(w: BrowserWindow): void {
+  const appPrefix = `${APP_ORIGIN}/`
+
+  w.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith(appPrefix)) return
+    e.preventDefault()
+    if (/^https?:\/\//i.test(url)) {
+      log(`will-navigate 外部链接交给系统浏览器：${url}`)
+      void shell.openExternal(url)
+      return
+    }
+    log(`will-navigate 已拦截：${url}`)
+  })
+
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      log(`window.open 外部链接交给系统浏览器：${url}`)
+      void shell.openExternal(url)
+    } else {
+      log(`window.open 已拦截：${url}`)
+    }
+    return { action: 'deny' }
+  })
+
+  const ses = w.webContents.session
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    log(`权限请求被拒：${permission}`)
+    callback(false)
+  })
+  ses.setPermissionCheckHandler((_wc, permission) => {
+    log(`权限同步检查被拒：${permission}`)
+    return false
+  })
 }
 
 // 单实例：第二次启动直接退出（M1-6 会改为聚焦已有窗口 + 转发深链接参数）。
