@@ -89,6 +89,11 @@ type App struct {
 	// readyStdout 是否在监听成功后往 stdout 打一行 `FORGE_READY {...}`（M1-2，桌面壳据此拿地址）。
 	readyStdout bool
 
+	// payloads 桌面态已解析的随包运行时载荷清单（M3-4）：**唯一真源是壳**（只有它做了
+	// 显式配置 → 随包 → PATH 的三级解析，设计 §6.5），壳经 `--payloads` 交给核心，
+	// 核心只把它透出到 `/meta` 的诊断面。非桌面态为 nil → `/meta` 照发空数组。
+	payloads []ctrsystem.PayloadInfo
+
 	// assets 本次装配解析出的前端资产（M2-1；供 /meta 与诊断使用）。
 	assets router.AssetInfo
 
@@ -106,6 +111,14 @@ func WithCredentials(creds *credential.Set) Option {
 // WithReadyStdout 开启就绪行回写（桌面壳 spawn 核心时传 `--ready-stdout`）。
 func WithReadyStdout(on bool) Option {
 	return func(a *App) { a.readyStdout = on }
+}
+
+// WithPayloads 注入桌面壳**已解析**的随包载荷清单（M3-4；壳经 `--payloads` 交来）。
+//
+// 只收结构化值：JSON 解析与校验在命令层（照 WithCredentials 的分层），
+// 本包因此既不需要认识 wire 形状，也不会因为"某一层少校验一条"而透出假来源。
+func WithPayloads(payloads []ctrsystem.PayloadInfo) Option {
+	return func(a *App) { a.payloads = payloads }
 }
 
 // New 构造 App（只记录配置与可选项，不做任何 IO）。
@@ -327,17 +340,23 @@ func (a *App) credentials() *credential.Set {
 
 // metaInfo 组装 `/v1/forge/meta` 的诊断值（M1-7）。
 //
-// 资产相关字段（webPath / webDigest / webBuildId）留空/为 null：那些要等资产层（M2-1）与
-// 版本闸门（M2-4）才有真值——诊断面宁可空着，也不要编一个看起来正常的来源。
+// 资产相关字段（webPath / webDigest / webBuildId）由 router 从本次装配解析出的资产补，
+// 载荷清单（M3-4）来自壳经 `--payloads` 交来的已解析结果——核心不自己解析载荷，
+// 因为在桌面安装里**只有壳**做了显式配置 → 随包 → PATH 的三级解析（设计 §6.5）。
 func (a *App) metaInfo() ctrsystem.MetaSource {
 	// 数据目录直接用**已解析的键**（M3-3 起 FORGE_HOME 是独立键，默认 ~/.forge）。
 	// 不再从配置目录用 filepath.Dir 反推：FORGE_CONFIG_DIR 可以让配置目录与数据目录分家
 	// （测试、容器挂载都用得到），反推会报出一个用户根本没在用的目录。
+	payloads := a.payloads
+	if payloads == nil {
+		// 非桌面态：恒为空数组而不是 nil，让直接读 metaInfo() 的调用方与 HTTP 形状一致。
+		payloads = []ctrsystem.PayloadInfo{}
+	}
 	return ctrsystem.MetaSource{
 		CoreVersion: version.Version,
 		APIContract: version.APIContract,
 		Home:        a.cfg.HomeDir,
-		Payloads:    []ctrsystem.PayloadInfo{}, // M3-1 起填随包载荷
+		Payloads:    payloads,
 	}
 }
 

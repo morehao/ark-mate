@@ -12,7 +12,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { coreEnvironment } from './env'
-import { webDir } from './paths'
+import { payloadEnvironmentExtras, payloadInfoList, resolveRuntimePayloads } from './payload'
+import { payloadsDir, webDir } from './paths'
 
 /** 就绪行的行首前缀（与核心侧 `app.ReadyPrefix` 同值）。 */
 export const READY_PREFIX = 'FORGE_READY '
@@ -52,6 +53,11 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
   const restToken = newToken()
   const streamToken = newToken()
 
+  // 解析随包载荷（M3-4，设计 §6.5）。**在 spawn 之前**：缺载荷时宁可走 boot-failed 恢复页，
+  // 也不让核心起来后在第一次会话里才报"runtime 起不来"——那时用户已经等了一轮。
+  // 依赖显式注入：载荷根来自 `paths`（那是唯一知道"随包资源在哪"的地方），环境取本进程环境。
+  const payloads = resolveRuntimePayloads({ payloadsRoot: payloadsDir(), env: process.env })
+
   const child = spawn(
     opts.exe,
     // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写 + 父进程消失自退（M1-6）。
@@ -66,6 +72,10 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
       // 两边读**同一份**是硬约束——页面里的 build id 与核心读到的 build-id.txt 必须同源，
       // 否则版本闸门（M2-4）会把"两份资产"误判成"版本不一致"。
       '--web-dir', webDir(),
+      // 载荷清单（M3-4）：核心不解析载荷（那是壳的事），它只把这份**已解析**的结果透出到 `/meta`，
+      // 让诊断面能看到"这次用的是哪一份、来自哪一级"。载荷信息不是凭据，故可进 argv
+      // （与令牌相反：令牌只走 stdin 首行，见文件顶注）。
+      '--payloads', JSON.stringify(payloadInfoList(payloads)),
     ],
     {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -75,7 +85,7 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
       // 设计 §6.6 的那份环境（M3-2）：**继承调用方** + Node 模式 + 私有 bin 前置 + 载荷入口注入。
       // 核心 spawn runtime 时原样继承它——这就是"runtime 跑在 Electron 的 Node 上"的全部机关
       // （本仓的 runtime 父进程是核心，不是壳，见 node-runtime.ts 顶注）。
-      env: coreEnvironment(),
+      env: coreEnvironment({ extras: payloadEnvironmentExtras(payloads) }),
     },
   ) as ChildProcessWithoutNullStreams
 

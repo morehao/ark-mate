@@ -10,18 +10,23 @@ package ctrsystem
 //	webDigest       资产层（逐文件 sha256 的确定性合成；两种来源同值）
 //	webBuildId      前端产物里的构建 id（M2-4）
 //	home            数据目录（默认 ~/.forge）
-//	payloads        随包运行时载荷（M3-1 起有值；现在恒为空数组）
+//	payloads        随包运行时载荷（M3-4 起由壳经 --payloads 交来的已解析清单；非桌面态为空数组）
 //
 // 为什么把"来源"做成一个结构体而不是继续用一堆闭包参数：这份响应是**版本闸门与诊断**的
 // 唯一入口（设计 §6.7 / V5/V6），字段来源散在各层会让"某字段为什么是空的"无从追查；
 // 集中在一处后，`Snapshot()` 就是这段契约的可读实现。
 
-// PayloadInfo 随包运行时载荷的一条（M3-1 起填；当前恒为空）。
+// PayloadInfo 随包运行时载荷的一条（M3-4 起填）。
+//
+// 值来自**壳的**三级解析结果（设计 §6.5：显式配置 → 随包 → PATH）：只有壳做了那次解析，
+// 核心自己不探测本机安装，只把壳交来的清单原样透出。壳的清单里还有 `entry`（包内入口路径），
+// 那是壳的内部布局，**刻意不进本结构**——`/meta` 的契约只回答"命中了哪一份、来自哪一级"。
 type PayloadInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Digest  string `json:"digest"`
 	// Source 命中级别：bundled（随包）| runtime-env（显式覆盖）| path（PATH 上找到）。
+	// 取值由壳给出并在启动期被核心校验（非法值直接拒绝启动），因为"来源"是诊断面最会骗人的字段。
 	Source string `json:"source"`
 }
 

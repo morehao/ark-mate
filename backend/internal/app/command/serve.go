@@ -39,6 +39,12 @@ func serve(args []string) {
 	exitWithParent := fs.Bool("exit-with-parent", false,
 		"父进程消失即自动退出（POSIX：父进程死后被 reparent，`Getppid` 随之变化）；"+
 			"桌面壳用 `kill -9` 强杀时靠它避免留下孤儿核心与 runtime 子进程。Windows 无 reparent 语义，那里要等 Job Object（M4-3）")
+	payloads := fs.String("payloads", "",
+		"桌面壳交来的**已解析**随包载荷清单（JSON 数组，形如 "+
+			`[{"name":"dsh","version":"0.1.7-rc.2","digest":"sha256:<hex>","entry":"/abs/lib/bin.js","source":"bundled"}]`+
+			"）；name/version/digest/source 有意义，其中 source 只接受 bundled|runtime-env|path，entry 被忽略（/meta 无此字段）。"+
+			"清单真源是壳（三级解析只有它做），核心只把它透出到 /meta 的诊断面；不传 = 非桌面态，payloads 为空数组。"+
+			"语法错误/缺 name/source 非法/name 重复/超 16 条 → 退出码 2")
 	_ = fs.Parse(args)
 
 	cfg, sources := mustConfig()
@@ -56,6 +62,16 @@ func serve(args []string) {
 	opts := []app.Option{}
 	if *readyStdout {
 		opts = append(opts, app.WithReadyStdout(true))
+	}
+	// 载荷清单（M3-4）：解析在命令层（app 只收结构化值，与 --auth-stdin 同一分层），
+	// 校验失败按"用法/配置错误"处理（退出码 2，与 --web-dir 指错目录同一档——
+	// 都是"调用方把参数给错了"，而不是核心自己崩了）。
+	if *payloads != "" {
+		ps, err := parsePayloads(*payloads)
+		if err != nil {
+			exitWith(&app.ExitError{Code: 2, Err: err})
+		}
+		opts = append(opts, app.WithPayloads(ps))
 	}
 	if *authStdin {
 		creds, err := readCredentialStdin(os.Stdin)

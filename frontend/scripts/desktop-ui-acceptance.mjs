@@ -26,9 +26,9 @@
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { homedir } from 'node:os'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 // 共用底座（M2-5 抽出）：进程定位/清场、起壳、最小 CDP、按当前代码重建。
 // 为什么抽出去：`asset-parity.mjs` 也要"起真壳 + 连 CDP + 一定收干净"，复制两份的典型后果是
@@ -75,6 +75,31 @@ installCleanupHooks()
  * HOME 保留（Chromium 的 userData 目录要落盘）；它不属于"Node 从哪来"这条链。
  */
 const MINIMAL_ENV = { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' }
+
+/**
+ * 调用方 PATH 里的**假底座**（M3-4 / V10 ③）：dsh / opencode / node 各一个，被调到就把自己的名字
+ * 追加到标记文件并打印 `FAKE-<NAME>-CALLED`。
+ *
+ * 为什么要做成"会写标记文件"而不是只看日志：日志里没有 `FAKE-DSH-CALLED` 可能只是因为那段日志没被我们读到；
+ * 标记文件不存在才是"真的没被调到"的硬证据（M3-8 会再用真会话复验一遍）。
+ */
+let FAKE_BIN = ''
+let FAKE_MARKER = ''
+
+function setupFakeRuntimes() {
+  FAKE_BIN = mkdtempSync(join(tmpdir(), 'forge-fake-bin-'))
+  FAKE_MARKER = join(FAKE_BIN, 'called')
+  for (const name of ['dsh', 'opencode', 'node', 'npx']) {
+    const file = join(FAKE_BIN, name)
+    writeFileSync(
+      file,
+      `#!/bin/sh\necho "${name}" >> "${FAKE_MARKER}"\necho "FAKE-${name.toUpperCase()}-CALLED"\nexit 0\n`,
+      { mode: 0o755 },
+    )
+  }
+  // 假 bin 放在**最前面**：链上任何"探测本机"的写法都会先撞上它。
+  MINIMAL_ENV.PATH = `${FAKE_BIN}:/usr/bin:/bin`
+}
 
 /** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.forge 会让断言读到别人的内存态）。 */
 function scenarioGuard() {
@@ -478,7 +503,9 @@ async function scenarioNodeChannel(shell) {
   const path = envValue(psEnv, 'PATH')
   const electron = envValue(psEnv, 'FORGE_NODE_EXECUTABLE')
   check('核心 PATH 首段是私有 bin', (path ?? '').startsWith(`${binDir}:`), path)
-  check('调用方 PATH 完整保留在尾部（不吞用户环境）', path === `${binDir}:/usr/bin:/bin`, path)
+  // 调用方 PATH 原样落在私有 bin 之后。**不硬编码 `/usr/bin:/bin`**：M3-4 起验收会把假底座目录
+  // 前置到调用方 PATH（V10 ③），断言要跟着真实调用方 PATH 走，否则测的是"我记住的那个常量"。
+  check('调用方 PATH 完整保留在尾部（不吞用户环境）', path === `${binDir}:${MINIMAL_ENV.PATH}`, path)
   check('FORGE_NODE_EXECUTABLE 指向 Electron 本体', /Electron\.app\/Contents\/MacOS\/Electron$/.test(electron ?? ''), electron)
   check('ELECTRON_RUN_AS_NODE=1（Node 模式随进程链继承）', envValue(psEnv, 'ELECTRON_RUN_AS_NODE') === '1')
 
@@ -566,6 +593,102 @@ function dirFingerprint(dir) {
  *
  * ③ 的分量随里程碑增加：M3-8 真起 dsh/opencode 之后，这条才真正承压（现在核心还不拉 runtime）。
  */
+/**
+ * M3-4（设计 §6.5）：载荷解析链与"不探测本机"。
+ *
+ * 三层证据：① 壳把**已解析**的清单交给核心（`/meta` 的 `payloads[]` 命中级别）；② 注入给子进程的三个
+ * 载荷入口确实指向随包载荷；③ 调用方 PATH 里的**假 dsh/opencode/node** 一次都没被调到，
+ * 而且解析链在"没有随包载荷"时是**报错**而不是回落到 PATH。
+ */
+async function scenarioPayload(cdp, shell) {
+  section('M3-4：载荷解析链与不探测本机（设计 §6.5）')
+
+  // ① 壳 → 核心：`/meta` 的 payloads[]（壳经 `--payloads` 交过去的已解析结果）
+  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await sleep(200)
+  const meta = await cdp.evalJs(
+    `const r = await fetch('/v1/forge/meta'); const j = await r.json(); return j.data`,
+  )
+  const list = Array.isArray(meta?.payloads) ? meta.payloads : []
+  const dsh = list.find((p) => p.name === 'dsh')
+  const opencode = list.find((p) => p.name === 'opencode')
+  check('核心拿到了载荷清单（壳经 --payloads 交付）', list.length >= 2, JSON.stringify(list))
+  check('dsh 命中随包载荷（source=bundled）', dsh?.source === 'bundled', JSON.stringify(dsh))
+  check('opencode 命中随包载荷（source=bundled）', opencode?.source === 'bundled', JSON.stringify(opencode))
+  check(
+    '载荷版本与摘要来自清单（不是空架子）',
+    !!dsh && /^[0-9]/.test(dsh.version) && String(dsh.digest).startsWith('sha256:'),
+    JSON.stringify(dsh),
+  )
+
+  // ② 注入给核心（再传给 runtime/MCP）的三个载荷入口：都在随包载荷里，且文件真的在
+  const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
+  const payloadsRoot = join(DESKTOP, 'resources', 'payloads')
+  for (const [key, expect] of [
+    ['FORGE_DSH_ENTRY', join('dsh')],
+    ['FORGE_OPENCODE_BIN', join('opencode')],
+    ['FORGE_NPX_ENTRY', join('dsh')],
+  ]) {
+    const value = envValue(psEnv, key)
+    check(
+      `${key} 指向随包载荷`,
+      !!value && value.startsWith(`${payloadsRoot}/`) && existsSync(value) && value.includes(`/${expect}/`),
+      value || '(未注入)',
+    )
+  }
+
+  // ③ 假底座一次都没被调到：先用私有 dsh 跑一次（走的是我们载荷，不可能是 PATH 上的假货），
+  //    再看标记文件在不在。
+  const binDir = join(DESKTOP, 'resources', 'runtime', 'bin')
+  const probe = spawnSync(join(binDir, 'dsh'), ['--version'], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: {
+      PATH: `${binDir}${process.env.PATH ? `:${process.env.PATH}` : ''}`,
+      FORGE_NODE_EXECUTABLE: envValue(psEnv, 'FORGE_NODE_EXECUTABLE') ?? '',
+      FORGE_HOME: envValue(psEnv, 'FORGE_HOME') ?? '',
+      FORGE_DSH_ENTRY: envValue(psEnv, 'FORGE_DSH_ENTRY') ?? '',
+    },
+  })
+  const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.trim()
+  check('私有 dsh 跑的是随包载荷（版本来自清单）', !!dsh && out.includes(dsh.version), out.split('\n')[0] ?? '')
+  check('输出里没有假底座的标记', !out.includes('FAKE-'), out.slice(0, 80))
+  check('假 dsh/opencode/node 一次都没被调到（标记文件不存在）', !existsSync(FAKE_MARKER), FAKE_MARKER)
+
+  // ④ 解析链本身：三级行为逐条钉住（注入依赖 → 不动机器状态）
+  const { resolvePayload } = await import(new URL(`../apps/desktop/src/payload.ts`, import.meta.url).href)
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'forge-payload-probe-'))
+  const fakeForeign = join(tmpRoot, 'foreign-dsh')
+  writeFileSync(fakeForeign, '#!/bin/sh\necho foreign\n', { mode: 0o755 })
+
+  const explicit = resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { FORGE_RUNTIME_DSH: fakeForeign } })
+  check('显式配置命中 → source=runtime-env（用户指名的优先）', explicit.source === 'runtime-env' && explicit.entry === fakeForeign, `${explicit.source}:${explicit.entry}`)
+  check('显式配置下摘要记为 unknown（不是我们发的，没有可核对的清单）', explicit.digest === 'unknown', explicit.digest)
+
+  let missingErr = ''
+  try {
+    resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: {} })
+  } catch (e) {
+    missingErr = String(e)
+  }
+  check('没有随包载荷时**报错**而不是回落 PATH', !!missingErr, missingErr.split('\n')[0] ?? '')
+  check('错误信息告诉用户怎么装（make desktop/payloads）', missingErr.includes('make desktop/payloads'), missingErr.split('\n').slice(-1)[0] ?? '')
+
+  let badExplicitErr = ''
+  try {
+    resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { FORGE_RUNTIME_DSH: join(tmpRoot, 'nope') } })
+  } catch (e) {
+    badExplicitErr = String(e)
+  }
+  check('显式配置指错路径也报错（不静默回落随包）', badExplicitErr.includes('不存在'), badExplicitErr.split('\n')[0] ?? '')
+
+  // 真载荷根下按清单解析：版本/摘要/入口三者自洽
+  const real = resolvePayload('dsh', undefined, { payloadsRoot, env: {} })
+  check('随包命中附带清单里的版本与摘要', real.source === 'bundled' && real.version === dsh?.version && real.digest === dsh?.digest, `${real.version}/${real.digest}`)
+  check('随包命中的入口是载荷内的 bin.js', real.entry.startsWith(payloadsRoot) && real.entry.endsWith(join('lib', 'bin.js')) && existsSync(real.entry), real.entry)
+  rmSync(tmpRoot, { recursive: true, force: true })
+}
+
 async function scenarioIsolation(shell) {
   section('M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）')
 
@@ -618,7 +741,7 @@ async function scenarioIsolation(shell) {
   }
 }
 
-const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'isolation', 'exit', 'direct']
+const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'isolation', 'exit', 'direct']
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const want = argv.length ? argv : SCENARIOS
 
@@ -640,7 +763,9 @@ async function main() {
 
   let shell = null
   let cdp = null
-  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'isolation', 'exit'].includes(s))
+  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'payload', 'isolation', 'exit'].includes(s))
+  // V10 ③ 的前置：调用方 PATH 上先放好会写标记文件的假底座（必须在起壳前）。
+  if (needsShell) setupFakeRuntimes()
   if (needsShell) {
     // V10 ① 的前提：**机器上没有 node**。壳只在 `PATH=/usr/bin:/bin` 下启动，
     // 因此核心与其子进程拿到的东西只可能来自壳自己注入的那份（设计 §6.6）。
@@ -665,11 +790,13 @@ async function main() {
     if (want.includes('stream')) await scenarioStream(cdp)
     if (want.includes('gate')) await scenarioGate(cdp)
     if (want.includes('nodechannel')) await scenarioNodeChannel(shell)
+    if (want.includes('payload')) await scenarioPayload(cdp, shell)
     if (want.includes('isolation')) await scenarioIsolation(shell)
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {
     cdp?.close()
     if (shell && process.env.KEEP_SHELL !== '1') await stopShellTree()
+    if (FAKE_BIN) rmSync(FAKE_BIN, { recursive: true, force: true })
   }
 
   if (want.includes('direct')) await scenarioDirectParentGone()

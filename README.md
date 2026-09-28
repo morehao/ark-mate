@@ -215,7 +215,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |
-| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webSource?, webPath, webDigest, home, payloads[]}`。`webSource` 只在核心真的内嵌了前端资产时报 `builtin`（release 构建），默认构建**省略该字段**；`webPath`/`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串。令牌不进这里（M1-1 起令牌只经 stdin） |
+| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webSource?, webPath, webDigest, home, payloads[]}`。`webSource` 只在核心真的内嵌了前端资产时报 `builtin`（release 构建），默认构建**省略该字段**；`webPath`/`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串。`payloads[]` 是桌面壳经 `--payloads` 交来的**已解析**随包载荷清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）——清单真源是壳（只有它做三级解析，M3-4），非桌面态为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
 | GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Forge-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力） |
 | GET | `/agents` | Agent 列表（含 `permission_policy` 只读面，含 `native_mode`；`is_default` 标出「当前 Agent」；`conversation_count` = 绑定它的会话数，即删除影响面） |
 | POST | `/agents` | 注册 Agent `{id, name?, runtimes[], provider?, permission_policy?}`（落 definitions 文件） |

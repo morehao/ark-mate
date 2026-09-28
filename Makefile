@@ -91,7 +91,9 @@ desktop/payloads:
 # 桌面壳开发起服：先出 forge-core，再构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
 # 窗口进 `forge-app://app/`（前端产物来自 apps/web/dist），REST 由壳反代核心。
 # 与 make dev 的区别：那条起的是浏览器入口（vite :5173 + 后端 :10001），这条起的是桌面入口。
-desktop/dev: core/desktop
+# 依赖 `desktop/payloads`：M3-4 起壳在**启动期**解析随包载荷，缺了就拒绝启动（不回落 PATH，设计 §6.5），
+# 所以开发态也必须先装配载荷——否则 `make desktop/dev` 会以 boot-failed 页告终，而不是悄悄用机器上那份。
+desktop/dev: core/desktop desktop/payloads
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm -F @ark/desktop dev
 
