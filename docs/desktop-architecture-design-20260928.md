@@ -242,7 +242,7 @@ graph TB
 2. 某 runtime 明确检查并拒绝非官方 Node（例如读 `process.versions.electron`）；
 3. `--expose-internals` 类内部符号依赖在 Electron 升级后断裂且无替代。
 
-**代价**：约 +90–110 MB，并多一个需要签名与公证的原生可执行文件。三条各自写成一个 smoke 用例，作为桌面构建的门禁。
+**代价**：约 +90–110 MB，并多一个需要单独签名的原生可执行文件（不公证，见 §8 决策）。三条各自写成一个 smoke 用例，作为桌面构建的门禁。
 
 ---
 
@@ -293,7 +293,7 @@ graph TB
 
 ```mermaid
 graph TB
-  subgraph Bundle["应用包（只读，随包签名 + 公证）"]
+  subgraph Bundle["应用包（只读，随包 ad-hoc 签名）"]
     CoreBin["forge-core<br>Go 静态二进制"]
     Assets["前端资产<br>内置 / 显式目录"]
     Payload["runtime payload<br>dsh 生产依赖树 · opencode · npm/npx JS"]
@@ -322,7 +322,10 @@ graph TB
     `initialize` + `session/new`；`dsh` 起进程并在 Electron 的 Node 上跑到 boot 阶段）后，两者载荷目录的
     指纹（文件数 / 总字节 / 元数据摘要 / 目录 mtime）**逐字零变化**（见计划 §12.26；跑的是
     `desktop-runtime-smoke.mjs`）。注意措辞：`dsh` 那天**没走完握手**，原因见下面的第四条约束；
-  - ② **签名 / 公证 / hardened runtime 是否允许包内执行** —— **未验**（需要 Apple 证书与真出包，属 M4；见计划 §13 的 T1）；
+  - ② **签名 / 公证 / hardened runtime 是否允许包内执行** —— **拆成两半**（2026-09-28 决策，计划 §12.27）：
+    **hardened runtime 这一半由 M4-2a 用 ad-hoc 签名验证**（`codesign --options runtime -s -` 不要求证书，
+    是同一套运行时约束）；**公证那一半不做**（不上架、不付费），因此"异地机器 + staple"这条验收被撤销，
+    替换为"`tar.gz` 解到干净目录后首启无阻断"；
   - ③ **Windows SmartScreen / AV 是否拦** —— **未验**（需要 Windows 测试机与出包，属 M4；见 T2）。
 
 - **第四条约束（2026-09-28 M3-8 实测新增，与上面三条并列，必须一起看）**：**载荷里的原生插件能不能在
@@ -497,8 +500,8 @@ sequenceDiagram
 | 平台 | 形态 | 要点 |
 | --- | --- | --- |
 | Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-forge`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
-| macOS | dmg + 拖入 Applications，无需管理员 | hardened runtime + 公证；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍 |
-| 签名 | macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
+| macOS | **`tar.gz` 解压到 `~/Applications`（非浏览器渠道分发，不带 quarantine）；dmg 只作本地自测**（2026-09-28 决策：不公证、不签 Developer ID，见计划 §12.27） | hardened runtime 用 **ad-hoc 签名**开启并验证（`codesign --options runtime -s -`，不要求证书）；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层；完全未签名的对象在 arm64 上会被 `SIGKILL`）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍 |
+| 签名 | ~~macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing~~ **决策更新（2026-09-28，见计划 §12.27）**：不上架、不付费 → **不做公证、不签 Developer ID**；改为 **ad-hoc 签名 + 内网 `tar.gz` 非浏览器渠道分发**（quarantine / Mark-of-the-Web 由下载器写入，`curl` 不写 → 不触发 Gatekeeper / SmartScreen）。代价：没有来源可信性，且 macOS 自动更新不可行（Squirrel.Mac 要求签名满足既有 designated requirement）→ 手动换包。将来要正规化时，改动点是计划 M4-2b 与 `release.json` 的 `signing`/`notarized`/`channel` 三个字段 | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
 
 ### 8.2 更新
 
@@ -539,7 +542,7 @@ sequenceDiagram
 | 本机其它用户 / 进程调用 API | 两个凭据都只在内存中、每次启动随机；`streamToken` 只能订阅事件，改数据需要 `restToken`，而后者从不离开主进程 |
 | 令牌泄露给子进程 | 只经 stdin 传入；`restToken` / `streamToken` 从不写进任何子进程环境（其余环境按 §6.6 继承） |
 | 渲染进程被 XSS | REST 侧无凭据可偷；`streamToken` 即使被偷也只能读事件；CSP 无外域白名单（§9.2）使外泄没有目标 |
-| 资产或载荷被篡改 | 随包签名 + 公证；打包期清单 + CI 复算；`forge doctor` 可复核。显式目录来源在启动时计算并回报 digest，但不与签名清单比对——它是操作者显式选择的受信来源（§6.1） |
+| 资产或载荷被篡改 | 随包 ad-hoc 签名（只证明未损坏、**不证明来源**，见 §8 决策）+ 打包期清单 + CI 复算；`forge doctor` 可复核。显式目录来源在启动时计算并回报 digest，但不与签名清单比对——它是操作者显式选择的受信来源（§6.1） |
 
 ### 9.2 渲染进程加固基线
 
