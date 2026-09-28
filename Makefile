@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop verify/asset-parity verify/engines verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop desktop/dist verify/asset-parity verify/engines verify/release-json verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -24,6 +24,25 @@ CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/forge-core
 
 # 桌面包里那一份前端产物的落点（M2-6；壳与核心读同一份，M4-1 把它固定进 extraResources）。
 DESKTOP_WEB_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/web
+
+# —— 桌面发布号（M4-1）——
+# 版本的唯一事实源是 apps/desktop/package.json（npm 语义的应用版本）；核心的版本由 make 注入
+# （internal/version 的注释写明"发布构建由 Makefile 注入"）。两者**必须相等**——发布号标识整套，
+# build-release-json.mjs 会断言这一点，对不上就拒绝出包。
+DESKTOP_VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' $(FRONTEND_ROOT)/apps/desktop/package.json | head -1)
+# 开发态（core/desktop）不注入 → 核心报 `dev`（internal/version 的口径）；只有 desktop/dist 注入。
+CORE_VERSION ?=
+CORE_LDFLAGS  = $(if $(CORE_VERSION),-ldflags "-X github.com/morehao/ark-forge/internal/version.Version=$(CORE_VERSION)",)
+
+# 打包期下载缓存落仓库内（.cache/ 已 gitignore）：本机沙箱与 CI 都不该往 ~/Library/Caches 写。
+# 只认 ELECTRON_BUILDER_CACHE——它是 electron-builder 26 的**唯一**缓存根（Electron 发行包解到
+# <cache>/<release>/、app-builder 等工具解到 <cache>/downloads/），历史上的 ELECTRON_CACHE 那一支
+# 在本版本里已经不看了。缓存住之后重复打包不再重新下载 Electron（约 110 MB）。
+ELECTRON_BUILDER_CACHE ?= $(CURDIR)/.cache/electron-builder
+# 受限网络（或企业内网镜像）可覆盖 Electron 发行包来源，与容器那节的 GO_PROXY/NPM_REGISTRY 同一套路：
+#   ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ make desktop/dist
+# 默认空 = 用 electron-builder 的官方源；**缓存命中后不再联网**（第一次约 110 MB）。
+ELECTRON_MIRROR ?=
 
 # 前端产物目录（`--web-dir` 指向它）。
 # 为什么 dev 也要显式给：默认 tag 的核心**没有**内嵌资产，M2-1 的失败语义会让它拒绝启动
@@ -67,7 +86,7 @@ web:
 # 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份 apps/web/dist，核心不再内嵌一份副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
 core/desktop: web desktop/runtime-bin
-	cd backend && CGO_ENABLED=0 go build -o ../$(CORE_DESKTOP_OUT) ./cmd/forge
+	cd backend && CGO_ENABLED=0 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/forge
 	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
 	@# 只有一份 dist 是设计 §6.1 的红线——核心故意不带 -tags release（不内嵌），
 	@# 否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。
@@ -110,6 +129,29 @@ desktop/accept: core/desktop desktop/payloads
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 
+# 桌面打包（M4-1）：prepare-runtime → core/desktop（带版本注入）→ release.json → electron-builder → 逐项复核。
+#
+# 顺序不能换：release.json 必须在 electron-builder **之前**生成（它经 extraResources 进包，"包内那份"
+# 的唯一来源就是它），而它的每个值都取自已经产出的资产 / 载荷 / 核心二进制（见 build-release-json 的纪律 2）。
+# CORE_VERSION 是 target-specific 变量（对 core/desktop 生效）：出包的核心必须带发布号，
+# 否则 build-release-json 会以"核心报 dev"直接失败。
+#
+# 交付物两种（§12.27）：release/ark-forge-<ver>-macos-<arch>.tar.gz 是**分发**形态（非浏览器渠道，
+# 不带 quarantine）；同目录的 .dmg 只作本地自测。签名是 ad-hoc（无证书，identity: "-"）；
+# 加固运行时与公证分别是 M4-2a / M4-2b 的范围。
+# 当前只出 macOS（`--mac`）：Windows 的 NSIS 分支在 M4-3 接（那时这条 recipe 再按平台分叉）。
+desktop/dist: CORE_VERSION = $(DESKTOP_VERSION)
+desktop/dist: core/desktop desktop/payloads
+	$(require-node)
+	@echo "==> release.json（appVersion=$(DESKTOP_VERSION)）"
+	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/build-release-json.mjs
+	@echo "==> electron-builder --mac（缓存 $(ELECTRON_BUILDER_CACHE)$(if $(ELECTRON_MIRROR)，镜像 $(ELECTRON_MIRROR),)）"
+	cd $(FRONTEND_ROOT)/apps/desktop && ELECTRON_BUILDER_CACHE=$(ELECTRON_BUILDER_CACHE) $(if $(ELECTRON_MIRROR),ELECTRON_MIRROR=$(ELECTRON_MIRROR),) pnpm exec electron-builder --mac
+	@echo "==> 逐项复核 release.json 与产物（含 tar.gz 解包后的首启）"
+	@# 直接调 node（不经 pnpm 转发参数）：`pnpm run x -- --flag` 会把 `--` 原样交给脚本，
+	@# 而 node 的 parseArgs 视开头的 `--` 为"选项结束"——旗标随即变成位置参数并抛错（实测踩到）。
+	cd $(FRONTEND_ROOT) && node apps/desktop/scripts/verify-release-json.mjs --require-artifacts --launch
+
 # 资产一致性（M2-5 / V17）：同一个请求经壳（forge-app://）与核心（回环直连）各取一次，
 # 逐项比较 status / Content-Type / Cache-Control / 响应体 sha256。桌面态的两条服务路径由
 # 不同代码实现（TS vs Go），只有这条能锁住"行为一致"。
@@ -125,6 +167,18 @@ verify/asset-parity:
 verify/engines:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm verify:engines
+
+# release.json 逐项复核（M4-1）：值一律**复算**，不问脚本自己报了什么——
+#   字段集与键序（唯一发布契约的形状）→ coreVersion/apiContract 重问核心二进制 → webBuildId 重读
+#   `resources/web/build-id.txt` → webDigest 重算整棵资产树并与核心经 `/meta` 回报的值对照
+#   （Go 与 JS 两套实现必须给出同一个值 = 版本闸门的前提）→ electron/node/nodeAbi 重跑 M3-7 的断言
+#   → 载荷 name/version/digest 重读 payload.json。
+# 需要核心与资产已在场（`make core/desktop`）；不打包也能跑，不需要载荷。
+# `--require-artifacts --launch`（desktop/dist 收尾自动跑）：再加"包内那份 release.json 与源文件
+# 逐字节相同""tar.gz 解到干净目录后布局完整、且壳能起来"。
+verify/release-json:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm verify:release-json
 
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。

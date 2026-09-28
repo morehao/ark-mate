@@ -1,12 +1,71 @@
-# 桌面产品打包配置 —— M0-5 只落骨架，M4-1 填实（extraResources / asar / 平台 target / 签名挂钩）。
+# 桌面产品打包配置（M4-1 填实；签名与加固运行时是 M4-2a、Windows 安装器是 M4-3）。
 #
-# 现在写下的是**不会变的那部分**：产物位置与应用标识。
+# ## 包内布局是**契约**，不是随手写的
+#
+# 壳按两类根解析路径（`src/paths.ts`，设计 §6.1 最后一条：路径算错必须明确失败，不做多级回落搜索）：
+#   - `app.getAppPath()`（= asar 内）：`dist/`（主进程 + preload）、`renderer/`（壳静态页）；
+#   - `process.resourcesPath`（= asar 外）：`forge-core`、`web/`、`payloads/`、`runtime/bin/`、`release.json`。
+# 所以 `files` **只**带壳自己的两个目录，`resources/**` 一律走 `extraResources`——把几百 MB 的
+# 载荷塞进 asar 不但体积翻倍，还会让 `payloads/` 不再是"随包只读的一份文件树"（设计 §6.3）。
+#
+# ## 为什么用 beforeBuild 钩子声明"node_modules 我们自己管"
+#
+# 本应用没有生产依赖（`dependencies` 为空，由 archtest 守卫）；原生的 `.node` 都在**载荷**里，
+# 装配时就按目标平台的 ABI 选好了（M3-1/M3-7）。所以既不需要依赖安装/重建（那会触发 node-gyp），
+# 也不需要 electron-builder 的 node module collector（它起步就是 `pnpm list --prod --json`，
+# 把包管理器的 store 状态拖进打包路径；受限环境里打不开那个 SQLite 索引就整包失败）。
+# 钩子返回 false 同时关掉这两件事，理由与代价写在 `scripts/electron-builder-before-build.cjs`。
 appId: com.arkforge.desktop
 productName: ark-forge
 directories:
   output: release
   buildResources: build
-# 只带壳自己的两个目录；assets 与运行时载荷在 M4-1 走 extraResources（它们不进 asar）。
+asar: true
+beforeBuild: './scripts/electron-builder-before-build.cjs'
+# 只带壳自己的产物；`resources/` 与 `release/` 是打包期装配的输入/输出，不能进 asar。
 files:
   - dist/**
   - renderer/**
+  - package.json
+  - '!resources/**'
+  - '!release/**'
+  - '!scripts/**'
+  - '!runtime/**'
+  - '!build/**'
+  - '!**/*.map'
+# 随包运行时树：这些**必须**是 asar 外的真文件（核心要被 spawn、载荷要被 Node 解析、
+# 私有 bin 要被前置进子进程 PATH），路径与 src/paths.ts 的打包态分支逐一对应。
+extraResources:
+  - from: resources/forge-core
+    to: forge-core
+  - from: resources/web
+    to: web
+  - from: resources/payloads
+    to: payloads
+  - from: resources/runtime/bin
+    to: runtime/bin
+  # 唯一发布契约随包（M4-5 的 `forge doctor` 与合规门禁读它；verify 会断言它与源文件逐字节相同）。
+  - from: release.json
+    to: release.json
+mac:
+  target:
+    - dmg
+    - tar.gz
+  category: public.app-category.developer-tools
+  # 产物名里带上平台：一份 release 目录里 mac 与 win 的产物要能共存、能一眼分辨。
+  artifactName: ${productName}-${version}-macos-${arch}.${ext}
+  # 无证书形态（§12.27）：显式 ad-hoc 签名（`codesign -s -`），不再依赖"机器上恰好有证书"。
+  # 为什么不是 `identity: null`：那会**完全跳过**签名，而未签名的对象在 arm64 上会被内核
+  # 直接 SIGKILL——"解包后首启无阻断"这条验收当场不成立。ad-hoc 只证明"包没被损坏"，
+  # 不证明来源（代价已写在 §12.27）。
+  identity: '-'
+  # 加固运行时（entitlements + `--options runtime`）是 M4-2a 的范围：那里要把 payloads 里每个
+  # Mach-O 逐个重签，并保证 ad-hoc + hardened runtime 下不触发 library validation 拒启。
+  # 本任务先关掉它，把"打包骨架能出包、包能起来"与"加固"分成两步验证。
+  hardenedRuntime: false
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-windows-${arch}.${ext}
+  # per-user 免 UAC 安装（设计 §8.1）：M4-3 在 nsis 段补原子安装（staging + 同卷 rename + 回滚）、
+  # 长路径处理，以及 GitHub Actions windows-latest 上的 装→启→卸 冒烟。本任务只把 target 定下来。

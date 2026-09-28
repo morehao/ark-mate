@@ -397,7 +397,9 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 `forge migrate`（transcript → SQLite 幂等导入）、`forge transcripts prune --older-than <dur>`
 （显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
 `forge capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
-能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过）。
+能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过）、
+`forge --version [--json]`（核心版本与 API 契约版本；`--json` 供打包期读取，是桌面发布契约
+`release.json` 的 `coreVersion` / `apiContract` 唯一取法）。
 （历史上的 `forge acp-serve` / `forge acp-demo` 已随 echo 演示底座删除。）
 
 部署形态（单二进制 / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。

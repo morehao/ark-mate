@@ -36,7 +36,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 ## 构建形态
 
 - embed 仅随 `-tags release` 编译（`backend/pkg/web/web.go` 带 `//go:build release`）；默认构建不依赖前端产物。`backend/pkg/web/dist/` 不入库（由 `make web` 从 `apps/web` 产物拷贝刷新）。
-- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / capability migrate`（最后一条把 skill 定义里的旧 `sources[]` 转成 `runtimes[]`，`--dir` / `--dry-run` 可选）。`forge demo` 需本机装 opencode/dsh（`echo` 演示底座及其 `acp-serve`/`acp-demo` 子命令已于 M0 删除）。
+- `forge` CLI 无默认子命令：`serve / demo / migrate / transcripts prune / config / capability migrate`（最后一条把 skill 定义里的旧 `sources[]` 转成 `runtimes[]`，`--dir` / `--dry-run` 可选），另有 `forge --version [--json]`（核心版本 + API 契约代数；桌面打包期 `release.json` 的 `coreVersion`/`apiContract` **唯一取法**，见计划 M4-1）。`forge demo` 需本机装 opencode/dsh（`echo` 演示底座及其 `acp-serve`/`acp-demo` 子命令已于 M0 删除）。
 
 ## session 与 conversation：两个名字，一个东西（外加一个同名不同物）
 

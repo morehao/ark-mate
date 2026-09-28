@@ -71,8 +71,8 @@ R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**
 | `apps/cli`（owns the `dsh` bin） | `backend/cmd/forge` | 命令行入口 |
 | `packages/*/*`（含 `client/ui-*` 组件层） | `packages/{ui,types,api,tsconfig}` | 能力层 |
 | `packages/bundle/web-app`：组装可运行的 web 产品（起 webServer + 打开浏览器） | 浏览器入口由核心托管前端资产（`forge web`） | 组装层在 ark-forge 落在 Go 侧 |
-| `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配、`release.json` 生成、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
-| `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` | 一个发布号标识整套；同时是 §6.7 版本闸门的落点 |
+| `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配（`prepare-runtime`）、`release.json` 生成与逐项复核（`build-release-json` / `verify-release-json`）、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
+| `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` + 交付事实（`signing` / `notarized` / `channel` / `macUpdate`，见计划 §12.27） | 一个发布号标识整套（`coreVersion` 必须等于 `appVersion`，由脚本断言）；同时是 §6.7 版本闸门的落点 |
 | pnpm 供应链纪律：`allowBuilds` 默认拒绝、`patchedDependencies`、`minimumReleaseAge`、随包第三方按平台钉死确切版本 | 沿用，并**扩展到随包 runtime**：Electron、`dsh`、`opencode` 的确切版本与平台矩阵写入 `release.json` 与合规清单（§11） | 随包第三方二进制必然出现在用户机器上，版本必须可复现、可审计 |
 
 **依赖边界（守卫测试固化，越界即 CI 失败）**：
@@ -417,7 +417,7 @@ graph TB
 | 前端产物 | 构建时写入 `build id`（产物内常量或 `index.html` 的 meta） |
 | 核心 | 启动时读自己的期望值，并在 `/health` 或 `/meta` 回报 `coreVersion` / `webBuildId` / `apiContract` |
 | 前端 | 启动时比对自身 `build id` 与核心回报值；不一致 → 显示明确状态（"前端与核心版本不一致，请刷新或重新安装"），而不是白屏或零散接口错误 |
-| 打包期 | `release.json` 记录三者并做一致性断言，缺一即构建失败 |
+| 打包期 | `release.json` 记录三者并做一致性断言，缺一即构建失败。取值方式（M4-1）：`coreVersion` / `apiContract` 由 **`forge-core --version --json`** 交出（核心的版本出口，唯一取法——ldflags 注入是构建期生效的，只有问二进制才知道它带了哪个值）；`webBuildId` / `webDigest` 由打包脚本**复算** `resources/web`（摘要算法与核心侧的 `router.compositeDigest` 同源，两者逐字一致由 `make verify/release-json` 拿核心 `/meta` 的回报值对照） |
 
 ---
 

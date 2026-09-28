@@ -1,9 +1,11 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/morehao/ark-forge/internal/version"
 	"github.com/morehao/ark-forge/pkg/config"
 )
 
@@ -31,10 +33,38 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge transcripts prune       transcript 目录显式清理（--older-than；ADR-5：不设自动删除）
   forge config [--json]         打印解析后的配置与每项来源（配置目录 .forge/config 目录化）
   forge capability migrate      skill 定义迁移（旧 sources[] → runtimes[]；--dry-run 可预览）
+  forge --version [--json]      打印核心版本与 API 契约版本（--json 供机器读）
 
 子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
             forge capability migrate -h
 `
+
+// versionInfo `forge --version --json` 的输出形状（M4-1）。
+//
+// 键序即结构体字段序（确定性纪律 C9）：打包期 `build-release-json.mjs` 读它填 release.json 的
+// `coreVersion` / `apiContract`——**唯一取法**就是这里，不允许脚本另抄一份版本号或猜契约代数。
+type versionInfo struct {
+	Version     string `json:"version"`
+	APIContract string `json:"apiContract"`
+}
+
+// versionOutput 版本信息的一行输出（纯函数：单测直接断言字节，不重定向 stdout）。
+//
+// 非 JSON 形态只有版本号一行（人用、脚本 `$(forge --version)` 取值都最省事）；
+// JSON 形态带上 `apiContract`——它是"契约本身是哪一代"，与核心版本号解耦（见 internal/version）。
+func versionOutput(asJSON bool) string {
+	if !asJSON {
+		return version.Version + "\n"
+	}
+	// json.Marshal 对结构体按字段序输出，且会正确转义；不手拼字符串。
+	b, err := json.Marshal(versionInfo{Version: version.Version, APIContract: version.APIContract})
+	if err != nil {
+		// 两个 string 字段的 Marshal 不可能失败；真失败了也不能回一份半截 JSON。
+		fmt.Fprintf(os.Stderr, "版本信息序列化失败: %v\n", err)
+		os.Exit(2)
+	}
+	return string(b) + "\n"
+}
 
 // Run 分发 forge 子命令，返回进程退出码（无默认子命令）。
 func Run(args []string) int {
@@ -43,6 +73,20 @@ func Run(args []string) int {
 		return 1
 	}
 	switch args[0] {
+	case "--version", "-version", "-v":
+		// 打包期消费点（M4-1）：`forge --version` 是 release.json 的 coreVersion 唯一取法。
+		// 多余参数一律报错而不是忽略——"forge --version --json --x" 静默成功会让脚本以为
+		// 自己拿到了 JSON。
+		asJSON := false
+		switch {
+		case len(args) == 1:
+		case len(args) == 2 && args[1] == "--json":
+			asJSON = true
+		default:
+			fmt.Fprintln(os.Stderr, "用法：forge --version [--json]")
+			os.Exit(2)
+		}
+		fmt.Print(versionOutput(asJSON))
 	case "serve":
 		serve(args[1:])
 	case "demo":

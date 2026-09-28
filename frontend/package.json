@@ -17,7 +17,8 @@
     "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs",
     "smoke:desktop": "node scripts/desktop-runtime-smoke.mjs",
     "asset-parity": "node scripts/asset-parity.mjs",
-    "verify:engines": "node apps/desktop/scripts/assert-engines.mjs"
+    "verify:engines": "node apps/desktop/scripts/assert-engines.mjs",
+    "verify:release-json": "node apps/desktop/scripts/verify-release-json.mjs"
   },
   "devDependencies": {
     "@ark/desktop-contract": "workspace:*"
