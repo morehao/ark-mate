@@ -49,6 +49,10 @@ const LAUNCHERS = [
     targetVar: 'FORGE_DSH_ENTRY',
     targetLabel: '随包载荷里 dsh 的 bin.js（壳按 payload 解析结果注入）',
     nodeMode: true,
+    // dsh 自己的数据面（设计 §6.6.1）：**必须在启动器里兜底**，因为 dsh 连 `--version` 都会写自己的 home
+    // （实测：不隔离时它往用户的 `~/.dsh` 里写了日志）。核心拉 ACP runtime 时会显式注入同名变量，
+    // 那时这里的 `${VAR:=…}` 不会覆盖显式值——两条路径得到同一份 home，只是来源不同。
+    isolation: { DSH_HOME: 'runtime/dsh', DSH_AGENTS_HOME: 'runtime/dsh/agents' },
   },
   {
     name: 'opencode',
@@ -57,13 +61,34 @@ const LAUNCHERS = [
     // 原生二进制，不需要 Electron 的 Node 模式。
     nodeMode: false,
     passthroughOnly: true,
+    // opencode 侧只兜底它**专属**的两个变量：`XDG_*` 是通用变量，全局改会连累用户其它工具，
+    // 那三个只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
+    isolation: {
+      OPENCODE_CONFIG_DIR: 'runtime/opencode/config/opencode',
+      OPENCODE_DB: 'runtime/opencode/data/opencode.db',
+    },
   },
 ]
 
 /** 启动器运行前必须由壳注入的变量：Node 模式两个（转发目标 + Node），原生二进制一个。 */
 function requiredVars(launcher) {
-  const vars = [...(launcher.nodeMode ? ['FORGE_NODE_EXECUTABLE'] : []), launcher.targetVar]
+  const vars = [
+    ...(launcher.nodeMode ? ['FORGE_NODE_EXECUTABLE'] : []),
+    ...(launcher.isolation ? ['FORGE_HOME'] : []),
+    launcher.targetVar,
+  ]
   return vars.filter((v, i, all) => all.indexOf(v) === i)
+}
+
+/** 兜底导出隔离变量（只在未设置时赋值，绝不覆盖核心/壳显式注入的值）。 */
+function isolationLines(launcher, style) {
+  const entries = Object.entries(launcher.isolation ?? {})
+  if (!entries.length) return []
+  return entries.map(([key, sub]) =>
+    style === 'posix'
+      ? `: "\${${key}:=$FORGE_HOME/${sub}}" ; export ${key}`
+      : `if not defined ${key} set "${key}=%FORGE_HOME%/${sub.replace(/\//g, '\\')}"`,
+  )
 }
 
 function posixScript(launcher) {
@@ -83,6 +108,7 @@ function posixScript(launcher) {
       '  exit 127',
       'fi',
     ]),
+    ...isolationLines(launcher, 'posix'),
     exec,
     '',
   ].join('\n')

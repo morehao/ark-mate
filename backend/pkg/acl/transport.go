@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -111,7 +112,12 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 func (t *StdioTransport) start(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, t.command, t.args...)
 	cmd.Dir = t.dir
-	cmd.Env = append(os.Environ(), t.env...)
+	// 环境合并**必须去重**（M3-3 实测发现的坑）：直接 `append(os.Environ(), t.env...)` 会留下同名两条，
+	// 而"谁生效"取决于读法——POSIX `getenv` 取**第一条**（用户环境赢），Node 的 `process.env` 取**最后一条**
+	// （我们的值赢）。同一份进程环境在 Go 子进程与 JS 子进程里语义相反，隔离（设计 §6.6）就守不住了：
+	// 用户在 shell 里导出的 `XDG_CONFIG_HOME` 会悄悄盖掉我们给 opencode 的隔离值。
+	// 这里统一成"显式传入的 t.env 赢、且每个键只出现一次"。
+	cmd.Env = mergeEnv(os.Environ(), t.env)
 	setupProcAttr(cmd) // unix: 新进程组，Close 时杀整棵进程树
 
 	stdin, err := cmd.StdinPipe()
@@ -228,4 +234,30 @@ func (t *StdioTransport) Close() error {
 		}
 	})
 	return t.closeErr
+}
+
+// mergeEnv 合并两层环境（后者优先），结果每个键只出现一次，顺序为"首次出现的位置"。
+//
+// 为什么不是 map：环境数组的顺序会出现在诊断面（`ps -E` 的原始输出）与子进程行为里，
+// 稳定顺序让"同一份配置两次启动"可逐字比对。键名按 POSIX 语义**区分大小写**，
+// 但 Windows 环境变量不区分——所以比较时用 `strings.EqualFold` 兜底（在 macOS/Linux 上等价于精确比较）。
+func mergeEnv(base, override []string) []string {
+	out := make([]string, 0, len(base)+len(override))
+	index := make(map[string]int, len(base)+len(override))
+	set := func(kv string) {
+		key, _, _ := strings.Cut(kv, "=")
+		if pos, ok := index[strings.ToLower(key)]; ok {
+			out[pos] = kv // 覆盖同键的值，位置保持不变
+			return
+		}
+		index[strings.ToLower(key)] = len(out)
+		out = append(out, kv)
+	}
+	for _, kv := range base {
+		set(kv)
+	}
+	for _, kv := range override {
+		set(kv)
+	}
+	return out
 }

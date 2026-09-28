@@ -353,10 +353,38 @@ graph TB
 | `PATH` | 私有 bin **前置** + 继承值（`私有bin + 分隔符 + 原 PATH`） | runtime / MCP 子进程（不注入 agent 常规 shell，不改用户环境） |
 | `FORGE_NODE_EXECUTABLE` | Electron 自身可执行文件的绝对路径 | 私有 `node` / `npx` 启动器，使转发到同一个 Node（对应参照实现的 `DSH_DESKTOP_NODE_EXECUTABLE`） |
 | `FORGE_HOME` | 桌面数据目录 | 核心 |
-| 各 runtime 的 home / config 变量 | `FORGE_HOME` 下的专属子目录 | 对应 runtime 子进程（隔离既有配置，但不影响其工具链可见性） |
-| `npm_config_cache` / `npm_config_prefix` | `FORGE_HOME` 下 | runtime / MCP 子进程 |
+| 各 runtime 的 home / config 变量（下表逐个列出） | `FORGE_HOME` 下的专属子目录 | 对应 runtime 子进程（隔离既有配置，但不影响其工具链可见性） |
+| `npm_config_cache` / `npm_config_prefix` | `FORGE_HOME` 下（`npm/cache`、`npm/global`） | runtime / MCP 子进程 |
 
 不覆盖：用户原有的 `PATH` 尾部、代理与凭据类变量、语言运行时变量。隔离的目标是**我们自己的 runtime 配置**（home / cache / prefix），不是用户的开发环境。
+
+#### 6.6.1 各 runtime 实际读取的变量（Q2 的核对结果，2026-09-28）
+
+计划 §15 Q2 要求"逐个查 dsh、opencode 实际读取的 home / config 变量名"。核对方式不是查文档而是**查载荷本身**
+（我们随包发的就是这些字节）：dsh 的 JS 闭包直接读源码，opencode 是单文件原生二进制、用 `strings` 提取
+（`strings payloads/opencode/<v>/bin/opencode | grep -oE '\b(XDG_[A-Z_]+|OPENCODE_[A-Z_]+|HOME)\b' | sort | uniq -c`）。
+
+| runtime | 变量 | 我们注入的值 | 依据（载荷内的证据） |
+| --- | --- | --- | --- |
+| dsh | `DSH_HOME` | `<FORGE_HOME>/runtime/dsh` | `@deepseek-ai/dsh-home-paths/lib/index.js`：`const DSH_HOME_ENV = "DSH_HOME"`，默认 `join(homedir(), ".dsh")` |
+| dsh | `DSH_AGENTS_HOME` | `<FORGE_HOME>/runtime/dsh/agents` | 同文件：`DSH_AGENTS_HOME ?? join(homedir(), …)`——**默认不跟着 `DSH_HOME` 走**，只给 `DSH_HOME` 会漏掉 agents 面，所以两个都注入 |
+| opencode | `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` | `<FORGE_HOME>/runtime/opencode/{config,data,cache}` | 二进制内的变量名（opencode 的配置/数据面走 XDG 约定） |
+| opencode | `OPENCODE_CONFIG_DIR` | `<FORGE_HOME>/runtime/opencode/config/opencode` | 同上；opencode 自己的配置目录覆盖点 |
+| opencode | `OPENCODE_DB` | `<FORGE_HOME>/runtime/opencode/data/opencode.db` | 同上；其会话库落在数据目录内 |
+| 两者 | `npm_config_cache` / `npm_config_prefix` | `<FORGE_HOME>/npm/{cache,global}` | 我们自己的 npm/js 生态（MCP server 用 `npx` 拉起时不该污染 `~/.npm`） |
+
+**隔离的代价（明写出来，免得被当成遗漏）**：桌面态下 dsh/opencode 读不到用户在终端里给它们配好的东西
+（`~/.dsh` 的 profile、`~/.config/opencode` 的 provider 凭证）。这是**有意**的：桌面态的凭证来源是平台自身
+（provider 档案 / 平台配置的 dsh profile），否则"终端里登录过"就成了桌面态能否工作的隐藏前提。
+代价的真实后果只有一个——用户在终端里配好的 runtime 配置不会自动出现在桌面态，需要在平台里配一次；
+反向也成立：桌面态不会把平台配置写回用户的 runtime 目录（这正是隔离要保证的）。
+
+三条纪律：
+1. **只注入"我们发的那份 runtime"需要的变量**，不整份重写 `HOME`——用户工具链（git / uv / 代理 / `SSH_AUTH_SOCK`）仍按用户环境工作（§6.4 的"隔离在配置面而不是环境面"）。
+2. 变量名是**实测值**，不是猜的：上表的每一项都能在载荷里指到出处；将来 dsh / opencode 换名，
+   做法是重新核对并更新本表，而不是"多注几个以防万一"（多注的变量不会报错，只会静默失效）。
+3. 注入点：变量随 `LaunchSpec.Env` 进对应 runtime 子进程（Go 侧 `pkg/runtime.IsolationEnv`），
+   不污染壳给核心的那份环境——`FORGE_HOME` 本身是全局的，各 runtime 的**子目录**是局部的。
 
 ### 6.7 UI/API 版本闸门
 
@@ -616,7 +644,7 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 | # | 问题 | 默认倾向 |
 | --- | --- | --- |
 | Q1 | `CGO_ENABLED=0` 是否全绿（纯 Go SQLite 的实际构建与运行）？ | 倾向成立，须实测；不成立则桌面按平台分发带 cgo 二进制的对应运行时库 |
-| Q2 | 各 runtime 实际读取哪些 home / config 变量（用于隔离用户既有配置）？ | 按各自文档逐个核对后写入 §6.6 注入表 |
+| Q2 | 各 runtime 实际读取哪些 home / config 变量（用于隔离用户既有配置）？ | **已关闭（2026-09-28，查载荷本身而非文档）**：dsh = `DSH_HOME` + `DSH_AGENTS_HOME`（后者默认不跟随前者，必须同时给）；opencode = `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME`/`OPENCODE_CONFIG_DIR`/`OPENCODE_DB`；两者共用 npm 面 `npm_config_cache`/`npm_config_prefix`。逐项与出处见 §6.6.1 |
 | Q3 | `streamToken` 的生命周期：随核心退出失效，还是短 TTL + 续期？ | 随核心进程生命周期（退出即失效、无续期面）；TTL 只在需要"页面凭据可轮换"时引入 |
 | Q4 | win-arm64 是否在发布范围内？ | 本期不做，列为后续 |
 | Q5 | 是否承诺 Python / uv（部分 MCP server 需要）？ | 不承诺；需要时按第二份载荷加入（§6.3 已留位） |

@@ -11,7 +11,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
-import { coreEnvironment } from './node-runtime'
+import { coreEnvironment } from './env'
 import { webDir } from './paths'
 
 /** 就绪行的行首前缀（与核心侧 `app.ReadyPrefix` 同值）。 */

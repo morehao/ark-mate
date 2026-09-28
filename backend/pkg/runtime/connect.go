@@ -28,8 +28,13 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 	var t acl.Transport
 	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
 	case "", "stdio":
-		all := append([]string(nil), spec.Launch.Env...)
-		all = append(all, env...)
+		// 合并顺序＝优先级：`spec.Launch.Env` 是**平台对该 runtime 的声明**（含设计 §6.6 的配置隔离，
+		// M3-3），调用方附加项（provider 密钥 / 端点）是**每次连接**的增量。`mergeEnv` 的语义正是
+		// "base 已有的键不被 add 覆盖"，所以平台声明赢——否则一个 provider 档案里顺手写的
+		// `XDG_CONFIG_HOME` 就能把隔离改掉，而这类覆盖不会有任何提示。
+		// 去重还有一个更硬的理由：同名两条在 POSIX `getenv`（取第一条）与 Node `process.env`（取最后一条）
+		// 下语义相反，留着就是"同一个环境在两种子进程里行为不同"。
+		all := connectEnv(spec, env)
 		st := acl.NewStdioTransport(spec.Launch.Command, args, all)
 		st.SetLogger(logger)
 		t = st
@@ -93,4 +98,12 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// connectEnv 交给 acl 的最终附加环境：**平台声明（spec.Launch.Env）优先于调用方增量**。
+//
+// 单独提出来是为了能直接单测这条优先级——它是"配置隔离不会被 provider 档案悄悄改掉"（M3-3）
+// 的唯一保证点，而 `Connect` 本身要拉真进程、没法在单测里断言 cmd.Env。
+func connectEnv(spec Spec, env []string) []string {
+	return mergeEnv(spec.Launch.Env, env)
 }

@@ -20,6 +20,13 @@ type memoryEntry struct {
 	decision string // memDecisionAllow | memDecisionReject
 	optionID string // 用户当初选择的选项（auto-decision 时尽量沿用）
 	since    time.Time
+	// seq 写入序号：`List` 的排序键是 (since, seq)。
+	//
+	// 为什么需要它：`time.Now()` 的分辨率在平台/负载下可能让两次 Remember 拿到**同一个**时间戳，
+	// 此时只按 since 排序就退化成 map 迭代顺序（`sort.Slice` 不稳定）——表现为"权限记忆列表偶尔换序"，
+	// 而 `TestPermissionMemoryBothSides` 正是断言首条的（实测在 `go test ./...` 并行负载下偶发失败）。
+	// 语义上这条也更正确：同一时刻的授予，按用户点的先后。
+	seq uint64
 }
 
 // MemoryItem 是一条会话级权限记忆的对外表示（REST/详情载荷；decision 区分始终允许/始终拒绝）。
@@ -94,10 +101,12 @@ func (m *PermissionManager) Remember(conversationID string, t acl.ToolCallInfo, 
 	k := alwaysKey(t)
 	prev, ok := set[k]
 	since := time.Now().UTC()
+	seq := m.nextSeq()
 	if ok && prev.decision == decision {
 		since = prev.since // 同侧重复授权不刷新授予时间
+		seq = prev.seq     // 也不改变它在列表里的相对位置
 	}
-	set[k] = memoryEntry{title: t.Title, kind: t.Kind, decision: decision, optionID: optionID, since: since}
+	set[k] = memoryEntry{title: t.Title, kind: t.Kind, decision: decision, optionID: optionID, since: since, seq: seq}
 	add := m.memAdd
 	m.mu.Unlock()
 	if add != nil {
@@ -127,7 +136,7 @@ func (m *PermissionManager) memPut(it MemoryItem) {
 	if since.IsZero() {
 		since = time.Now().UTC()
 	}
-	set[k] = memoryEntry{title: it.Title, kind: it.Kind, decision: it.Decision, since: since}
+	set[k] = memoryEntry{title: it.Title, kind: it.Kind, decision: it.Decision, since: since, seq: m.nextSeq()}
 }
 
 // ForgetConversation 清除整会话的权限记忆（会话结束/重置/一键撤销）。
@@ -168,15 +177,39 @@ func (m *PermissionManager) Revoke(conversationID, title, kind string) bool {
 	return true
 }
 
-// List 列出某会话的全部权限记忆（按授予时间升序；decision 区分 allow/reject）。
+// nextSeq 取下一个写入序号（调用方必须已持锁）。
+func (m *PermissionManager) nextSeq() uint64 {
+	m.seq++
+	return m.seq
+}
+
+// List 列出某会话的全部权限记忆（按授予时间升序，同一时刻按写入先后；decision 区分 allow/reject）。
 func (m *PermissionManager) List(conversationID string) []MemoryItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	set := m.mem[conversationID]
-	out := make([]MemoryItem, 0, len(set))
-	for _, e := range set {
-		out = append(out, MemoryItem{Title: e.title, Kind: e.kind, Decision: e.decision, Since: e.since})
+	// 排序键里带 seq（内部字段），所以先按"带序号的内部行"排，再投影成对外的 MemoryItem——
+	// seq 是实现细节，不进 REST 载荷。
+	type row struct {
+		item MemoryItem
+		seq  uint64
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Since.Before(out[j].Since) })
+	rows := make([]row, 0, len(set))
+	for _, e := range set {
+		rows = append(rows, row{
+			item: MemoryItem{Title: e.title, Kind: e.kind, Decision: e.decision, Since: e.since},
+			seq:  e.seq,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].item.Since.Equal(rows[j].item.Since) {
+			return rows[i].item.Since.Before(rows[j].item.Since)
+		}
+		return rows[i].seq < rows[j].seq // 时刻相同 → 按写入先后（见 memoryEntry.seq）
+	})
+	out := make([]MemoryItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.item)
+	}
 	return out
 }

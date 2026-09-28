@@ -194,3 +194,27 @@ func TestResolveRejectOnce(t *testing.T) {
 		t.Fatal("拒绝一次后不应命中记忆")
 	}
 }
+
+// TestPermissionMemoryListOrderIsDeterministic 同一授予时刻的记忆，顺序按写入先后（不是 map 迭代序）。
+//
+// 为什么值得单测：这条曾经是**偶发失败**的来源——`List` 只按 since 排序，而 `time.Now()` 的分辨率
+// 在并行负载下会让两条记忆拿到同一时间戳，此时 `sort.Slice`（不稳定）退化成 map 顺序，
+// 断言首条的用例（本文件的 BothSides）就会随机换序。这里用显式 since 复现"同一时刻"这个边界。
+func TestPermissionMemoryListOrderIsDeterministic(t *testing.T) {
+	pm := NewPermissionManager(DefaultPermissionTimeout)
+	same := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	pm.LoadMemories([]MemoryItem{
+		{conversationID: "s1", Title: "先写的", Kind: "execute", Decision: memDecisionAllow, Since: same},
+		{conversationID: "s1", Title: "后写的", Kind: "write", Decision: memDecisionReject, Since: same},
+	})
+
+	for i := 0; i < 50; i++ { // 重复取：顺序一旦依赖 map 迭代，这里会随机失败
+		list := pm.List("s1")
+		if len(list) != 2 {
+			t.Fatalf("期望 2 条，got %d", len(list))
+		}
+		if list[0].Title != "先写的" || list[1].Title != "后写的" {
+			t.Fatalf("同一时刻应按写入先后，得到 %q, %q", list[0].Title, list[1].Title)
+		}
+	}
+}

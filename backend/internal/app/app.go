@@ -146,6 +146,14 @@ func (a *App) Init(ctx context.Context) error {
 		slog.Info("serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
 	}
 
+	// runtime 子进程的配置隔离（M3-3；设计 §6.6）：把各底座的 home / cache / npm prefix 重定向到
+	// 数据目录下的专属子目录，避免平台拉起的底座去读写用户自己装的那份配置（也避免被它改写）。
+	// 只作用于**本地子进程** runtime（远程端点不拉进程，Launch.Env 不会被读），已有键不覆盖——
+	// 适配器或 provider 档案显式给的取值优先（见 runtime.Registry.ApplyIsolationEnv）。
+	if ids := reg.ApplyIsolationEnv(cfg.HomeDir); len(ids) > 0 {
+		slog.Info("serve: 已注入 runtime 配置隔离环境", "home", cfg.HomeDir, "runtimes", ids)
+	}
+
 	a.bus = eventbus.New()
 	a.svc = manager.NewService(reg, a.bus)
 	a.reg = reg
@@ -322,18 +330,13 @@ func (a *App) credentials() *credential.Set {
 // 资产相关字段（webPath / webDigest / webBuildId）留空/为 null：那些要等资产层（M2-1）与
 // 版本闸门（M2-4）才有真值——诊断面宁可空着，也不要编一个看起来正常的来源。
 func (a *App) metaInfo() ctrsystem.MetaSource {
-	cfg := a.cfg
-	home := ""
-	if cfg.ConfigDir != "" {
-		// 数据目录：默认即 ~/.forge（配置目录的父目录）。目前还没有独立的 FORGE_HOME 键
-		// （计划 §0.3 列了它，M3-3 会正式引入并重定向各 runtime 的 home/cache/prefix）；
-		// 那时这里改成读该键即可，字段本身不变。
-		home = filepath.Dir(cfg.ConfigDir)
-	}
+	// 数据目录直接用**已解析的键**（M3-3 起 FORGE_HOME 是独立键，默认 ~/.forge）。
+	// 不再从配置目录用 filepath.Dir 反推：FORGE_CONFIG_DIR 可以让配置目录与数据目录分家
+	// （测试、容器挂载都用得到），反推会报出一个用户根本没在用的目录。
 	return ctrsystem.MetaSource{
 		CoreVersion: version.Version,
 		APIContract: version.APIContract,
-		Home:        home,
+		Home:        a.cfg.HomeDir,
 		Payloads:    []ctrsystem.PayloadInfo{}, // M3-1 起填随包载荷
 	}
 }

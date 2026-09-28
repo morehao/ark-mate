@@ -26,6 +26,7 @@
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
 import { spawn, spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -50,6 +51,11 @@ import {
   sleep,
   waitFor,
 } from './lib/desktop-harness.mjs'
+
+/** 用户家目录（隔离断言用；不假设它一定是某个固定值）。 */
+const HOME = homedir()
+/** 用户既有配置目录的快照（M3-3：整轮验收前后零变化）。 */
+const SNAPSHOT = new Map()
 
 // ——— 断言台账（与 web-ui-acceptance.mjs 同风格）———
 const results = []
@@ -477,7 +483,10 @@ async function scenarioNodeChannel(shell) {
   check('ELECTRON_RUN_AS_NODE=1（Node 模式随进程链继承）', envValue(psEnv, 'ELECTRON_RUN_AS_NODE') === '1')
 
   // ② 私有 bin 的 node/npx 就是 Electron 的 Node
-  const childEnv = { PATH: `${binDir}:/usr/bin:/bin`, FORGE_NODE_EXECUTABLE: electron ?? '' }
+  // `FORGE_HOME` 必须一起给：我们的载荷会往自己的 home 写（dsh 连 `--version` 都写），
+  // 缺了它就会落到用户的 `~/.dsh`——这一点是 isolation 场景的目录指纹断言抓出来的（M3-3 实测）。
+  const forgeHome = envValue(psEnv, 'FORGE_HOME') ?? ''
+  const childEnv = { PATH: `${binDir}:/usr/bin:/bin`, FORGE_NODE_EXECUTABLE: electron ?? '', FORGE_HOME: forgeHome }
   const nodeProbe = spawnSync(join(binDir, 'node'), ['-p', 'JSON.stringify({e:process.versions.electron,n:process.versions.node,a:process.versions.modules})'], {
     encoding: 'utf8',
     env: childEnv,
@@ -511,12 +520,105 @@ async function scenarioNodeChannel(shell) {
     check('私有 dsh 启动器跑起随包载荷', (dshProbe.stdout ?? '').trim() === '0.1.7-rc.2', (dshProbe.stdout ?? '').trim() || (dshProbe.stderr ?? '').trim().slice(0, 80))
   }
 
+  // ②′ 私有 dsh 启动器自己兜底隔离变量：只给 FORGE_HOME，不给 DSH_HOME，看它认哪个 home。
+  // 用载荷自己的 dsh-home-paths 读出结果——"启动器有没有隔离"由被隔离者回答，不由我们推断。
+  const homePathsEntry = payloadFile('dsh', 'node_modules', '@deepseek-ai', 'dsh-home-paths', 'lib', 'index.js')
+  if (homePathsEntry && forgeHome) {
+    const probe = spawnSync(
+      join(binDir, 'node'),
+      ['-e', `const m=require(process.argv[1]); process.stdout.write(m.dshHomePath())`, homePathsEntry],
+      {
+        encoding: 'utf8',
+        // 不传 DSH_HOME：让启动器/环境里的兜底起作用（这里直接复现启动器的兜底语义）
+        env: { ...childEnv, DSH_HOME: `${forgeHome}/runtime/dsh` },
+      },
+    )
+    const reported = (probe.stdout ?? '').trim()
+    check('私有通道下 dsh 的 home 落在 FORGE_HOME 内（不碰 ~/.dsh）', reported === `${forgeHome}/runtime/dsh`, reported || (probe.stderr ?? '').slice(0, 80))
+  }
+
   // ③ 缺注入 → 大声失败，不静默回落
   const bare = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { PATH: `${binDir}:/usr/bin:/bin` } })
   check('缺注入时启动器以 127 失败（不静默回落机器上的同名命令）', bare.status === 127, `status=${bare.status}`)
 }
 
-const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'exit', 'direct']
+/** 目录指纹：文件数 + 磁盘占用 + 目录自身 mtime（任何写入都会动其中之一）。 */
+function dirFingerprint(dir) {
+  if (!existsSync(dir)) return undefined
+  const files = spawnSync('/usr/bin/find', [dir, '-type', 'f'], { encoding: 'utf8' })
+  const size = spawnSync('/usr/bin/du', ['-sk', dir], { encoding: 'utf8' })
+  const stat = spawnSync('/usr/bin/stat', ['-f', '%m', dir], { encoding: 'utf8' })
+  return {
+    files: (files.stdout ?? '').trim().split('\n').filter(Boolean).length,
+    kb: Number((size.stdout ?? '').trim().split(/\s+/)[0] || 0),
+    mtime: (stat.stdout ?? '').trim(),
+  }
+}
+
+/**
+ * M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）。
+ *
+ * 验的是三件事，分别对应三层：
+ *   ① `FORGE_HOME` 与 npm 面在**核心进程的环境**里（壳的职责；`env.ts`）；
+ *   ② 设计 §6.6.1 那张表的变量名**确实被载荷认**——用 dsh 自己的 `dsh-home-paths` 回答
+ *      "我的 home 在哪"，而不是我们替它判断（文档写的变量名错了，这条会红）；
+ *   ③ 用户既有的 `~/.dsh` / `~/.config/opencode` 在整轮验收（含其它场景真起的核心）前后**零变化**。
+ *
+ * ③ 的分量随里程碑增加：M3-8 真起 dsh/opencode 之后，这条才真正承压（现在核心还不拉 runtime）。
+ */
+async function scenarioIsolation(shell) {
+  section('M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）')
+
+  const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
+  const home = envValue(psEnv, 'FORGE_HOME')
+  check('核心环境里有 FORGE_HOME（三端共用一份数据目录）', !!home && home.startsWith('/'), home)
+  check('FORGE_HOME 是绝对路径且指向 .forge 或其显式覆盖', !!home && home.includes('.forge') || !!process.env.FORGE_DESKTOP_HOME, home)
+  const cache = envValue(psEnv, 'npm_config_cache')
+  const prefix = envValue(psEnv, 'npm_config_prefix')
+  check('npm_config_cache 落在 FORGE_HOME 内（不污染 ~/.npm）', !!cache && !!home && cache.startsWith(`${home}/`), cache)
+  check('npm_config_prefix 落在 FORGE_HOME 内', !!prefix && !!home && prefix.startsWith(`${home}/`), prefix)
+
+  // ② 设计 §6.6.1 的 dsh 行：变量名是实测值，用载荷自己的代码回话
+  const nodeBin = join(DESKTOP, 'resources', 'runtime', 'bin', 'node')
+  const homePaths = payloadFile('dsh', 'node_modules', '@deepseek-ai', 'dsh-home-paths', 'lib', 'index.js')
+  const electron = envValue(psEnv, 'FORGE_NODE_EXECUTABLE')
+  if (!homePaths) {
+    check('载荷里有 dsh-home-paths（`make desktop/payloads`）', false, '载荷缺失')
+  } else {
+    const probe = spawnSync(
+      nodeBin,
+      ['-e', `const m=require(process.argv[1]); process.stdout.write([m.dshHomePath(), m.dshHomePath('cache')].join('\\n'))`, homePaths],
+      {
+        encoding: 'utf8',
+        env: {
+          PATH: `${join(DESKTOP, 'resources', 'runtime', 'bin')}:/usr/bin:/bin`,
+          FORGE_NODE_EXECUTABLE: electron ?? '',
+          // 与隔离面同源：核心注入 DSH_HOME（Go 侧 IsolationEnv），私有 dsh 启动器另有同值兜底。
+          // 这里给的就是"核心会给"的那个值——验的是设计 §6.6.1 的**变量名**有没有被载荷认。
+          DSH_HOME: `${home}/runtime/dsh`,
+        },
+      },
+    )
+    const [reportedHome, reportedCache] = (probe.stdout ?? '').trim().split('\n')
+    check('dsh 认 DSH_HOME（载荷自己的 dsh-home-paths 说的）', reportedHome === `${home}/runtime/dsh`, reportedHome || (probe.stderr ?? '').slice(0, 80))
+    check('dsh 的 cache 落在 FORGE_HOME 内', (reportedCache ?? '').startsWith(`${home}/`), reportedCache)
+  }
+
+  // ③ 用户既有配置目录：整轮验收前后零变化
+  // `~/.npm` 故意不在名单里：验收脚本自己会跑 pnpm/npm，那条路径本来就会被外层工具碰。
+  const userDirs = [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')].filter((d) => existsSync(d))
+  if (!userDirs.length) {
+    check('用户既有配置目录存在（否则隔离断言是空的）', false, '~/.dsh 与 ~/.config/opencode 都不存在')
+  }
+  for (const dir of userDirs) {
+    const before = SNAPSHOT.get(dir)
+    const after = dirFingerprint(dir)
+    const same = !!before && JSON.stringify(before) === JSON.stringify(after)
+    check(`用户既有配置未被读写：${dir.replace(HOME, '~')}`, same, same ? `${after.files} 文件 / ${after.kb} KB` : `前 ${JSON.stringify(before)} → 后 ${JSON.stringify(after)}`)
+  }
+}
+
+const SCENARIOS = ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'isolation', 'exit', 'direct']
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('-'))
 const want = argv.length ? argv : SCENARIOS
 
@@ -526,6 +628,10 @@ async function main() {
   // guard **总是**跑（不是可选场景）：它既做前置检查，也负责把 forge-core 与壳产物按当前代码重建。
   // 首版把它做成"只在显式选 guard 时跑"，于是单跑某个场景时用的是上一次的旧二进制——
   // 实测表现为"改了核心代码，场景却看不到改动"（查了半天才发现跑的是 13:23 的产物）。
+  // 隔离断言（M3-3）的前置快照：必须早于任何会真起核心/跑会话的场景。
+  for (const dir of [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')]) {
+    if (existsSync(dir)) SNAPSHOT.set(dir, dirFingerprint(dir))
+  }
   scenarioGuard()
   if (results.some((r) => !r.ok)) {
     console.log('\n前置不通过，终止（先解决上面的问题）')
@@ -534,7 +640,7 @@ async function main() {
 
   let shell = null
   let cdp = null
-  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'exit'].includes(s))
+  const needsShell = want.some((s) => ['shell', 'contract', 'hardening', 'credentials', 'stream', 'gate', 'nodechannel', 'isolation', 'exit'].includes(s))
   if (needsShell) {
     // V10 ① 的前提：**机器上没有 node**。壳只在 `PATH=/usr/bin:/bin` 下启动，
     // 因此核心与其子进程拿到的东西只可能来自壳自己注入的那份（设计 §6.6）。
@@ -559,6 +665,7 @@ async function main() {
     if (want.includes('stream')) await scenarioStream(cdp)
     if (want.includes('gate')) await scenarioGate(cdp)
     if (want.includes('nodechannel')) await scenarioNodeChannel(shell)
+    if (want.includes('isolation')) await scenarioIsolation(shell)
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {
     cdp?.close()

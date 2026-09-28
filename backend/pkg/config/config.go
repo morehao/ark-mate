@@ -7,7 +7,9 @@
 //  4. 进程环境变量 `FORGE_*`（历史行为，始终最高）
 //  5. CLI flag（由 cmd 层在 Load 之后覆盖）
 //
-// 配置目录取自 `FORGE_CONFIG_DIR`，默认 `<默认数据目录>/config`（即 `~/.forge/config`）。
+// 数据目录取自 `FORGE_HOME`，默认 `~/.forge`；配置目录取自 `FORGE_CONFIG_DIR`，默认
+// `<数据目录>/config`（即 `~/.forge/config`）。这两个是**启动引导键**：只认进程环境变量，
+// 必须在读配置文件之前就有确定值（理由见 Config.HomeDir）。
 // 目录不存在 = 完全维持历史行为（向后兼容）；文件存在但键名/取值非法 = 启动即报错（不静默忽略）。
 package config
 
@@ -113,6 +115,19 @@ type Config struct {
 	ProcRegistryPath string
 	// ReapGrace 孤儿回收的 SIGTERM → SIGKILL 宽限期（FORGE_REAP_GRACE 覆盖，默认 2s）。
 	ReapGrace time.Duration
+	// HomeDir 数据目录（M3-3；FORGE_HOME 覆盖，默认 ~/.forge，家目录不可得时回落相对 `.forge`）。
+	//
+	// 为什么要有独立的键：CLI / 浏览器 / 桌面三个入口**共用一份数据目录**（设计 §481）——
+	// 按入口分裂就会出现"桌面打开后会话不见了"。这里存的是**已解析**的值：transcripts / db /
+	// agents / … 的默认位置都由它派生，各 runtime 子进程的配置隔离也以它为根（pkg/runtime.IsolationEnv）。
+	//
+	// 为什么它只吃**进程环境变量**、不进 config.json / env 文件的键值链（与 FORGE_CONFIG_DIR 同级）：
+	// 数据目录决定配置目录的默认位置（`<数据目录>/config`），而配置文件又在配置目录里——让文件里的值
+	// 参与决定"文件从哪读"是循环。它必须与 ConfigDirFromEnv() 用同一个事实源，否则会出现
+	// "配置从 A 读、数据落 B"的分裂（那正是本键要消灭的形态）。
+	//
+	// 显式给的值必须是绝对路径（相对路径随进程 CWD 漂移，见 materialize）；未设置时的兜底不受此约束。
+	HomeDir string
 	// ConfigDir 本次加载使用的配置目录（`forge config` 展示用；空 = 未解析）。
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
@@ -357,12 +372,30 @@ func (r *resolver) sources() Sources {
 	return out
 }
 
-// ConfigDirFromEnv 解析配置目录：FORGE_CONFIG_DIR 优先，否则 <默认数据目录>/config。
+// ConfigDirFromEnv 解析配置目录：FORGE_CONFIG_DIR 优先，否则 <数据目录>/config。
+//
+// "数据目录"由 HomeDirFromEnv() 给出，所以 FORGE_HOME 一变，配置目录的默认位置跟着变——
+// 这条关系必须保持：从配置目录反推数据目录（旧 metaInfo 的 filepath.Dir 做法）会让
+// 「FORGE_CONFIG_DIR 与 FORGE_HOME 分家」的进程读到错误的数据目录。
 func ConfigDirFromEnv() string {
 	if v := strings.TrimSpace(os.Getenv("FORGE_CONFIG_DIR")); v != "" {
 		return v
 	}
-	return filepath.Join(defaultForgeHome(), "config")
+	return filepath.Join(HomeDirFromEnv(), "config")
+}
+
+// HomeDirFromEnv 解析数据目录：FORGE_HOME 优先，否则 ~/.forge。
+//
+// trim 后为空 = 未设置（与 FORGE_CONFIG_DIR 等键的语义一致：空串不是"数据目录是空路径"，
+// 否则派生路径会拼成 "/transcripts" 这种根目录下的怪地方）。
+// 家目录不可得时保留既有兜底（相对 `.forge`）：宁可落到 CWD 下，也不要拼出根目录路径。
+//
+// 只认进程环境变量的理由见 Config.HomeDir。
+func HomeDirFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("FORGE_HOME")); v != "" {
+		return v
+	}
+	return defaultForgeHome()
 }
 
 // defaultForgeHome 默认数据目录（~/.forge；家目录不可得时回落到相对路径）。
@@ -617,8 +650,22 @@ func materialize(r *resolver) (Config, error) {
 		}
 	}
 
-	// 依赖家目录的派生默认值（未被任何来源显式设置时）。
-	home := defaultForgeHome()
+	// 数据目录（M3-3）：FORGE_HOME 优先，默认 ~/.forge。
+	//
+	// 显式给的 FORGE_HOME 必须是绝对路径：相对路径按**进程 CWD** 解析，而 CLI（用户 shell 的 CWD）与
+	// 桌面（壳的 CWD，通常是 `/`）的 CWD 不同——同一个环境变量会静默打开两份数据目录，正是设计 §481
+	// 要消灭的"桌面打开后会话不见了"。未设置时的兜底（家目录不可得 → 相对 `.forge`）不是用户给的路径，
+	// 不适用这条约束（见 HomeDirFromEnv）。
+	if v, ok := os.LookupEnv("FORGE_HOME"); ok {
+		if t := strings.TrimSpace(v); t != "" && !filepath.IsAbs(t) {
+			return bad("FORGE_HOME", fmt.Sprintf(
+				"需为绝对路径（相对路径随进程 CWD 漂移，三端可能打开不同数据目录；家目录请写全路径），得到 %q", v))
+		}
+	}
+	home := HomeDirFromEnv()
+	c.HomeDir = home
+
+	// 依赖数据目录的派生默认值（未被任何来源显式设置时）。
 	if v, ok := r.get("transcripts"); ok {
 		c.TranscriptDir = v
 	} else {

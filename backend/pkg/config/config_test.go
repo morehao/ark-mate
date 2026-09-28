@@ -66,6 +66,97 @@ func TestLoadEnvOverrides(t *testing.T) {
 	}
 }
 
+// TestHomeDirFromEnv 数据目录认 FORGE_HOME（M3-3）：未设 → ~/.forge；设了 → 用设的值；
+// 空白字符串 = 当未设。
+//
+// 同时钉住它与 ConfigDirFromEnv 的关系（FORGE_HOME 变了，配置目录的默认位置跟着变）与派生路径的根：
+// 数据目录换了而 transcripts/db 没跟着换 = 只搬了一半，等于数据分裂。
+func TestHomeDirFromEnv(t *testing.T) {
+	unset(t, "FORGE_HOME")
+	unset(t, "FORGE_CONFIG_DIR")
+
+	// 未设：回落 ~/.forge（家目录不可得时回落相对 ".forge"，保持既有兜底）。
+	def := HomeDirFromEnv()
+	if want := wantDefaultHome(); def != want {
+		t.Fatalf("未设 FORGE_HOME 应回落 %q，got %q", want, def)
+	}
+	if filepath.Base(def) != ".forge" {
+		t.Fatalf("默认数据目录应叫 .forge: %q", def)
+	}
+	if got := ConfigDirFromEnv(); got != filepath.Join(def, "config") {
+		t.Fatalf("配置目录应派生自数据目录: got %q", got)
+	}
+
+	// 设了：用设的值，且配置目录的默认位置跟着变。
+	home := t.TempDir()
+	tsetenv(t, "FORGE_HOME", home)
+	if got := HomeDirFromEnv(); got != home {
+		t.Fatalf("FORGE_HOME 未生效: got %q want %q", got, home)
+	}
+	if got := ConfigDirFromEnv(); got != filepath.Join(home, "config") {
+		t.Fatalf("FORGE_HOME 变了配置目录应跟着变: got %q", got)
+	}
+	// 全链路（不只是那两个纯函数）：解析出的数据目录与各派生默认值都以它为根。
+	cfg, _, err := LoadResolved("")
+	if err != nil {
+		t.Fatalf("LoadResolved: %v", err)
+	}
+	if cfg.HomeDir != home {
+		t.Fatalf("Config.HomeDir 不符: got %q want %q", cfg.HomeDir, home)
+	}
+	if cfg.ConfigDir != filepath.Join(home, "config") || cfg.DBPath != filepath.Join(home, "forge.db") ||
+		cfg.TranscriptDir != filepath.Join(home, "transcripts") {
+		t.Fatalf("派生路径未跟着数据目录走: config=%q db=%q tx=%q", cfg.ConfigDir, cfg.DBPath, cfg.TranscriptDir)
+	}
+
+	// FORGE_CONFIG_DIR 仍优先：配置目录可以与数据目录分家，此时数据目录只从 FORGE_HOME 来。
+	cfgDir := t.TempDir()
+	tsetenv(t, "FORGE_CONFIG_DIR", cfgDir)
+	if got := ConfigDirFromEnv(); got != cfgDir {
+		t.Fatalf("FORGE_CONFIG_DIR 应优先: got %q", got)
+	}
+	if c, _, err := LoadResolved(""); err != nil || c.ConfigDir != cfgDir || c.HomeDir != home {
+		t.Fatalf("分家时应各归各: err=%v cfgDir=%q home=%q", err, c.ConfigDir, c.HomeDir)
+	}
+	unset(t, "FORGE_CONFIG_DIR")
+
+	// 空白字符串 = 未设（不产生"数据目录是空白"这种半截值）。
+	for _, blank := range []string{"", "   ", "\t"} {
+		tsetenv(t, "FORGE_HOME", blank)
+		if got := HomeDirFromEnv(); got != wantDefaultHome() {
+			t.Fatalf("FORGE_HOME=%q 应视为未设: got %q", blank, got)
+		}
+	}
+}
+
+// TestForgeHomeMustBeAbsolute 显式给的 FORGE_HOME 是相对路径 → 启动即报错。
+//
+// 为什么它算"非法取值"而不是宽容接受：相对路径按**进程 CWD** 解析，CLI（用户 shell 的 CWD）与桌面
+// （壳的 CWD）会静默打开两份数据目录——正是设计 §481 要消灭的"桌面打开后会话不见了"。
+// 未设置时的兜底（家目录不可得 → 相对 ".forge"）不受这条约束：那不是用户给的路径。
+func TestForgeHomeMustBeAbsolute(t *testing.T) {
+	hermetic(t)
+	tsetenv(t, "FORGE_HOME", "relative/forge-home")
+	if _, _, err := LoadResolved(""); err == nil || !strings.Contains(err.Error(), "绝对路径") {
+		t.Fatalf("相对 FORGE_HOME 应报错，got %v", err)
+	}
+	for _, ok := range []string{"", "   ", t.TempDir()} {
+		tsetenv(t, "FORGE_HOME", ok)
+		if _, _, err := LoadResolved(""); err != nil {
+			t.Fatalf("FORGE_HOME=%q 不应报错: %v", ok, err)
+		}
+	}
+}
+
+// wantDefaultHome 未设 FORGE_HOME 时的期望数据目录：与生产代码同一套兜底
+// （家目录不可得时回落相对 ".forge"），避免拿不到家目录的环境出现假红。
+func wantDefaultHome() string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return filepath.Join(h, ".forge")
+	}
+	return ".forge"
+}
+
 // TestDefault 默认值结构。
 func TestDefault(t *testing.T) {
 	if d := Default(); d.Addr != "127.0.0.1:10001" || d.TranscriptDir != "" {

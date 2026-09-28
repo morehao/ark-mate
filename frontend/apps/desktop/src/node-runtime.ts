@@ -7,7 +7,7 @@
  * Go 核心 spawn**（`acl.NewStdioTransport` → `exec.Command(Launch.Command, …)`），核心才是 runtime 的父进程。
  * 于是"让 runtime 跑在 Electron 的 Node 上"这件事，落点不是"壳 spawn runtime"，而是：
  *
- *   1. 壳 spawn 核心时，把设计 §6.6 的环境交给它（本模块 `coreEnvironment()`）；
+ *   1. 壳 spawn 核心时，把设计 §6.6 的环境交给它（`env.ts` 的 `coreEnvironment()`）；
  *   2. 核心 spawn runtime 时**原样继承**那份环境（Go 侧 `os.Environ()` 的语义），
  *      `PATH` 首段因此是私有 bin、`FORGE_NODE_EXECUTABLE` 因此在场；
  *   3. 私有 bin 里的 `dsh` / `opencode` 启动器把"名字"翻译成"随包载荷 + Electron 的 Node"。
@@ -19,10 +19,10 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { delimiter } from 'node:path'
 
-import { NODE_ENV_VARS, desktopNodeEnvironment } from '@ark/desktop-contract'
+import { NODE_ENV_VARS } from '@ark/desktop-contract'
 
+import { coreEnvironment } from './env'
 import { runtimeBinDir } from './paths'
 
 /**
@@ -37,24 +37,6 @@ export function resolveRuntimeBinDir(): string {
     )
   }
   return dir
-}
-
-/**
- * 起核心用的环境：切 Node 模式 + 私有 bin 前置 + 注入回环地址/资产目录等（设计 §6.6）。
- *
- * `extras` 用来叠加本仓自己的路径变量（载荷入口等，M3-4 填）——**不覆盖** §6.6 的四项。
- */
-export function coreEnvironment(extras: Record<string, string | undefined> = {}): Record<string, string> {
-  const env = desktopNodeEnvironment({
-    executable: process.execPath,
-    binDir: resolveRuntimeBinDir(),
-    base: process.env,
-    delimiter,
-  })
-  for (const [key, value] of Object.entries(extras)) {
-    if (typeof value === 'string' && value !== '') env[key] = value
-  }
-  return env
 }
 
 /**

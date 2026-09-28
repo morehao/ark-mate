@@ -26,6 +26,10 @@ func configCmd(args []string) {
 	if *asJSON {
 		doc := map[string]any{
 			"config_dir": cfg.ConfigDir,
+			// 数据目录（M3-3）：与 config_dir 一样是**启动引导键**，来自进程 env 或默认值，
+			// 因此不出现在下面 config 的来源表里；单独与 config_dir 并列，排障时第一眼就能核对
+			// "这套配置到底读写哪份数据"。
+			"home": cfg.HomeDir,
 			"config": map[string]any{
 				"addr":                cfg.Addr,
 				"transcripts":         cfg.TranscriptDir,
@@ -69,6 +73,13 @@ func configCmd(args []string) {
 		return string(config.SourceDefault)
 	}
 	fmt.Printf("配置目录: %s\n", cfg.ConfigDir)
+	// 数据目录（M3-3）：只吃进程环境变量（FORGE_HOME），所以来源只有 env(process) 与 default 两种；
+	// 它不出现在 sources 里（那不是配置文件里的键），这里显式说明，免得被当成"来源丢了"。
+	homeSrc := string(config.SourceDefault)
+	if strings.TrimSpace(os.Getenv("FORGE_HOME")) != "" {
+		homeSrc = string(config.SourceEnv)
+	}
+	fmt.Printf("数据目录: %s [%s]\n", cfg.HomeDir, homeSrc)
 	fmt.Printf("  %-22s %-38s [%s]\n", "addr", cfg.Addr, src("addr"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "transcripts", cfg.TranscriptDir, src("transcripts"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "db", cfg.DBPath, src("db"))
