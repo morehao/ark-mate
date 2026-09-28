@@ -212,8 +212,17 @@ async function scenarioShell(cdp) {
   await sleep(700)
   const shellPage = await cdp.evalJs(`return { origin: location.origin, h1: document.querySelector('h1')?.innerText ?? null, bg: getComputedStyle(document.body).backgroundColor }`)
   check('forge-app://shell/welcome.html 可打开且样式来自 tokens', shellPage.origin === 'forge-app://shell' && !!shellPage.h1 && shellPage.bg === 'rgb(247, 248, 250)', JSON.stringify(shellPage))
+
+  // origin 恒定带来的收益（设计 §3）：刷新后 localStorage 仍在——这是"桌面入口不复用回环 origin"
+  // 的直接兑现，也是 Gate M1 的手工确认项，既然能脚本化就别留给人工。
   await cdp.send('Page.navigate', { url: 'forge-app://app/' })
   await sleep(1500)
+  await cdp.evalJs(`localStorage.setItem('gate-m1-probe', 'kept-across-reload'); return true`)
+  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await sleep(2000)
+  const kept = await cdp.evalJs(`return localStorage.getItem('gate-m1-probe')`)
+  check('原点恒定：刷新后 localStorage 仍在', kept === 'kept-across-reload', String(kept))
+  await cdp.evalJs(`localStorage.removeItem('gate-m1-probe'); return true`)
 }
 
 /** contract（M1-4）：注入面形状 + 非载体 origin 负例。 */
