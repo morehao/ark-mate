@@ -22,6 +22,11 @@ directories:
   buildResources: build
 asar: true
 beforeBuild: './scripts/electron-builder-before-build.cjs'
+# 逐对象复核/补签（M4-2a）：osx-sign 已经逐对象签过，这个钩子找漏网的（未签 / 缺 runtime 标记）
+# 并按需重封外层封条。为什么不能在 afterSign 里无脑重签：外层 CodeResources 封条会被改坏——见钩子注释。
+# 注意 `afterSign` 是**根级**选项（不是 mac 段下的）——放错位置 electron-builder 会以
+# "configuration.mac should be one of these: null" 报出来（实测踩到，Schema 的报错不含键名）。
+afterSign: './scripts/after-sign.cjs'
 # 只带壳自己的产物；`resources/` 与 `release/` 是打包期装配的输入/输出，不能进 asar。
 files:
   - dist/**
@@ -59,10 +64,16 @@ mac:
   # 直接 SIGKILL——"解包后首启无阻断"这条验收当场不成立。ad-hoc 只证明"包没被损坏"，
   # 不证明来源（代价已写在 §12.27）。
   identity: '-'
-  # 加固运行时（entitlements + `--options runtime`）是 M4-2a 的范围：那里要把 payloads 里每个
-  # Mach-O 逐个重签，并保证 ad-hoc + hardened runtime 下不触发 library validation 拒启。
-  # 本任务先关掉它，把"打包骨架能出包、包能起来"与"加固"分成两步验证。
-  hardenedRuntime: false
+  # —— hardened runtime（M4-2a）——
+  # 打开 `--options runtime`：这是"签名能不能被平台接受"这一半的判据（设计 §6.3 回退条件 ②）。
+  # 两条 entitlement 的最小集与逐条理由写在 build/entitlements.mac.plist 的注释里；
+  # 刻意**没有**加 `allow-unsigned-executable-memory`（能不加就不加，需要时按证据补）。
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # 公证是 M4-2b（本期不做，只留 MAC_NOTARIZE 开关）。显式 false 免得 electron-builder 去
+  # 猜 notarize 配置：日志里那句 `skipped macOS notarization` 就是这条的结果，是预期而非失败。
+  notarize: false
 win:
   target:
     - nsis

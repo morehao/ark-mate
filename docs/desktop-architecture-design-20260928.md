@@ -325,7 +325,12 @@ graph TB
   - ② **签名 / 公证 / hardened runtime 是否允许包内执行** —— **拆成两半**（2026-09-28 决策，计划 §12.27）：
     **hardened runtime 这一半由 M4-2a 用 ad-hoc 签名验证**（`codesign --options runtime -s -` 不要求证书，
     是同一套运行时约束）；**公证那一半不做**（不上架、不付费），因此"异地机器 + staple"这条验收被撤销，
-    替换为"`tar.gz` 解到干净目录后首启无阻断"；
+    替换为"`tar.gz` 解到干净目录后首启无阻断"。
+    **结论（2026-09-28，M4-2a，计划 §12.29）**：**hardened runtime 半边已验绿**——打出来的包
+    （ad-hoc + `--options runtime` + entitlements 最小集）里，壳、核心与两份载荷全部能执行：
+    `FORGE_SMOKE_APP=<app> pnpm smoke:desktop` 40/40（dsh 与 opencode 的 `initialize` + `session/new`
+    都在包内那份 Electron 的 Node 上走完，且载荷目录指纹零变化）。公证半边**本期不做**（`spctl` 如实记录为
+    `rejected`，是 ad-hoc 的预期结论）；
   - ③ **Windows SmartScreen / AV 是否拦** —— **未验**（需要 Windows 测试机与出包，属 M4；见 T2）。
 
 - **第四条约束（2026-09-28 M3-8 实测新增，与上面三条并列，必须一起看）**：**载荷里的原生插件能不能在
@@ -500,7 +505,7 @@ sequenceDiagram
 | 平台 | 形态 | 要点 |
 | --- | --- | --- |
 | Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-forge`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
-| macOS | **`tar.gz` 解压到 `~/Applications`（非浏览器渠道分发，不带 quarantine）；dmg 只作本地自测**（2026-09-28 决策：不公证、不签 Developer ID，见计划 §12.27） | hardened runtime 用 **ad-hoc 签名**开启并验证（`codesign --options runtime -s -`，不要求证书）；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层；完全未签名的对象在 arm64 上会被 `SIGKILL`）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍 |
+| macOS | **`tar.gz` 解压到 `~/Applications`（非浏览器渠道分发，不带 quarantine）；dmg 只作本地自测**（2026-09-28 决策：不公证、不签 Developer ID，见计划 §12.27） | hardened runtime 用 **ad-hoc 签名**开启并验证（`codesign --options runtime -s -`，不要求证书）；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层；完全未签名的对象在 arm64 上会被 `SIGKILL`）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍。**落地形态（M4-2a，见计划 §12.29）**：`hardenedRuntime: true` + `build/entitlements.mac.plist`（`allow-jit` 与 `disable-library-validation` 两条最小集）+ `build/entitlements.mac.inherit.plist`（子进程/嵌套对象）+ `afterSign: scripts/after-sign.cjs`（**补齐与复核**：osx-sign 已逐对象签；钩子只补漏网的，并在补签后重封外层封条——在 afterSign 里无脑重签会改坏 `CodeResources` 封条）；`make verify/signature` 逐对象断言"有签名 + 带 runtime 标记 + identity 与 `release.json` 一致" |
 | 签名 | ~~macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing~~ **决策更新（2026-09-28，见计划 §12.27）**：不上架、不付费 → **不做公证、不签 Developer ID**；改为 **ad-hoc 签名 + 内网 `tar.gz` 非浏览器渠道分发**（quarantine / Mark-of-the-Web 由下载器写入，`curl` 不写 → 不触发 Gatekeeper / SmartScreen）。代价：没有来源可信性，且 macOS 自动更新不可行（Squirrel.Mac 要求签名满足既有 designated requirement）→ 手动换包。将来要正规化时，改动点是计划 M4-2b 与 `release.json` 的 `signing`/`notarized`/`channel` 三个字段 | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
 
 ### 8.2 更新

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  子进程 / 嵌套可执行对象（Helpers、以及包内 payloads 的原生件）的权限声明（M4-2a）。
+
+  与 `entitlements.mac.plist` 的差别：**内容暂时相同**（同样只开 JIT 与关库校验），但**分文件是刻意的**：
+
+  - codesign 的 entitlements 参数是**逐个对象**生效的，父进程的权限不会传给子进程。Electron 的
+    Helper（Renderer / GPU / Plugin）与"被壳当 Node 用"的那条通道（`ELECTRON_RUN_AS_NODE`）各自是
+    独立进程，必须各自带上需要的权限；dsh 闭包里的 `.node` 插件在被加载时也会按**自己**的
+    hardened runtime 状态做库校验。
+  - 将来接 Developer ID 时，两边的改动方向不同（主应用可能要 App Sandbox/其它权限，子进程通常
+    只需要 JIT 与库校验），分成两个文件才不会被迫一起改。
+
+  本轮两条都与主 plist 一致，且同样**没有** `allow-unsigned-executable-memory`（见主 plist 的注释）。
+
+  写这份注释时的实测教训：**XML 注释里不能出现连续两个连字符**。AMFI 解析 entitlements 时
+  会直接报 `Failed to parse entitlements: AMFIUnserializeXML: syntax error near line N`，而报错行号
+  指的就是注释里那一行——与权限内容毫无关系。所以下面的文字里凡是命令行参数都写成"参数名"而不是原文。
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

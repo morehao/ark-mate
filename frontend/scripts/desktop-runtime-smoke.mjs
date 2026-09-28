@@ -18,7 +18,7 @@
  * | # | 触发条件 | 本脚本 |
  * | --- | --- | --- |
  * | ① | 某 runtime 需要**写自己所在目录**（包内只读 → 不行就物化） | **验到**：跑前/跑后对载荷目录取指纹，断言零变化（`fingerprint` 场景） |
- * | ② | 平台签名 / 公证 / hardened runtime 不允许包内执行 | **不判**：需要真出包 + Apple 证书，属 M4（见计划 §M3-6/§M3-8 与设计 §6.3） |
+ * | ② | 平台签名 / 公证 / hardened runtime 不允许包内执行 | **源码态不判**；**打包态判到 hardened runtime 这半边**（`FORGE_SMOKE_APP=…`，M4-2a）；公证那半边本期不做（§12.27） |
  * | ③ | Windows SmartScreen / AV 拦 | **不判**：需要 Windows 测试机与出包，属 M4 |
  *
  * ②③ 的状态每次运行都会**显式打印一行**：免得读日志的人把"全绿"当成"三条件已验完"。
@@ -67,6 +67,9 @@
  *
  *   node scripts/desktop-runtime-smoke.mjs            # 全部场景（默认档：不联网、不跑模型）
  *   node scripts/desktop-runtime-smoke.mjs dsh        # 只跑指定场景
+ *   FORGE_SMOKE_APP=/abs/ark-forge.app node scripts/desktop-runtime-smoke.mjs
+ *                                                     # **打包态**（M4-2a）：起 .app 里的壳与核心，
+ *                                                     # 判"签名 + hardened runtime 之后包内载荷仍能执行"（条件 ② 的 hardened runtime 半边）
  *   node scripts/desktop-runtime-smoke.mjs --help     # 本说明
  *   FORGE_SMOKE_ALT_NODE=/abs/Electron node scripts/desktop-runtime-smoke.mjs dsh-alt-node
  *                                                     # 候选修复验证（换 Node 再起 dsh）
@@ -86,6 +89,7 @@
  *   FORGE_SMOKE_DSH_API_KEY      LIVE 档 dsh 的凭据（透传成子进程的 DEEPSEEK_API_KEY）
  *   FORGE_SMOKE_OPENCODE_API_KEY LIVE 档 opencode 的凭据（透传成子进程的 OPENCODE_API_KEY）
  *   FORGE_SMOKE_ALT_NODE         `dsh-alt-node` 用的候选 Node/Electron 可执行文件绝对路径
+ *   FORGE_SMOKE_APP              打包态：`.app` 的绝对路径（起包内的壳与核心；缺省的源码态不判条件 ②）
  *
  * **不进 CI**：要真 Electron + 真核心 + 随包载荷（`make desktop/payloads`）。
  * 零新依赖：ACP 客户端就是 NDJSON over stdio（协议帧形状对齐
@@ -95,7 +99,7 @@ import { createHash } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /**
  * 读出仓库**声明**的 Electron 版本（`apps/desktop/package.json` 的 devDependencies）。
@@ -120,22 +124,43 @@ import {
   SHELL_RE,
   coreAddrOf,
   installCleanupHooks,
+  launchPackagedShell,
   launchShell,
+  packagedProcessRes,
   parseProcessEnv,
   pidsMatching,
   psAll,
   rebuildAll,
   sh,
   sleep,
+  stopPackagedShell,
   stopShellTree,
 } from './lib/desktop-harness.mjs'
 
 /** 用户家目录（起壳的最小环境要保留它：Chromium 的 userData 要落盘）。 */
 const HOME = homedir()
+/**
+ * 打包态（M4-2a）：`FORGE_SMOKE_APP=/abs/path/ark-forge.app` → 起来的是**打出来的包**里的壳与核心。
+ *
+ * 这是设计 §6.3 回退条件 ② 的唯一判据形态：源码态的壳没有签名、也没有 hardened runtime，
+ * 只有真包（ad-hoc 签名 + `--options runtime`）才能回答"平台允不允许执行包内载荷"。
+ */
+const PACKAGED_APP = process.env.FORGE_SMOKE_APP ? resolve(process.env.FORGE_SMOKE_APP) : null
+if (PACKAGED_APP && !existsSync(join(PACKAGED_APP, 'Contents', 'Resources', 'forge-core'))) {
+  console.error(`FORGE_SMOKE_APP 指向的不是一个打包好的 .app：${PACKAGED_APP}`)
+  process.exit(1)
+}
+
+/** 运行时树的根：未打包 = 仓库 `apps/desktop/resources`；已打包 = `.app/Contents/Resources`。 */
+const RESOURCES_ROOT = PACKAGED_APP ? join(PACKAGED_APP, 'Contents', 'Resources') : join(DESKTOP, 'resources')
 /** 私有 bin 目录（启动器是生成物：`apps/desktop/scripts/gen-runtime-bin.mjs`）。 */
-const BIN_DIR = join(DESKTOP, 'resources', 'runtime', 'bin')
+const BIN_DIR = join(RESOURCES_ROOT, 'runtime', 'bin')
 /** 随包载荷根（`payloads/<name>/<version>/…`）。 */
-const PAYLOAD_ROOT = join(DESKTOP, 'resources', 'payloads')
+const PAYLOAD_ROOT = join(RESOURCES_ROOT, 'payloads')
+/** 两种形态各自的壳/核心进程匹配（残留与前置检查都按它判）。 */
+const PROC_RES = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP) : { shell: SHELL_RE, core: CORE_RE }
+/** 展示用：把绝对路径缩成可读（打包态缩 `.app` 之前那一段）。 */
+const ELIDE_FROM = PACKAGED_APP ?? DESKTOP
 
 /** 两份随包载荷。runtime id 与 `backend/pkg/runtime/{deepseekharness,opencode}` 的 ID 一致。 */
 const RUNTIMES = {
@@ -448,28 +473,47 @@ async function waitForExecArgv(pid, entry, timeoutMs = 4000) {
 
 /** guard：起壳前的前置（单实例、重建、载荷与启动器在位）。 */
 function scenarioGuard() {
-  section('前置：环境干净 + 载荷/启动器在位（计划 §M3-8 的前提）')
-  const others = pidsMatching(new RegExp(`${CORE_RE.source}|${SHELL_RE.source}`))
+  section(
+    PACKAGED_APP
+      ? '前置：环境干净 + 包内运行时树在位（M4-2a：加固运行时下包内执行）'
+      : '前置：环境干净 + 载荷/启动器在位（计划 §M3-8 的前提）',
+  )
+  const others = pidsMatching(new RegExp(`${PROC_RES.core.source}|${PROC_RES.shell.source}`))
   check(
     '没有别的桌面壳/核心在跑',
     others.length === 0,
     others.length ? `pid=${others.join(',')}（两个核心共用 ~/.forge/forge.db，请先关掉）` : '',
   )
-  check(
-    'apps/web/dist 已构建（壳要服务它）',
-    existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')),
-    existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')) ? '' : '缺则先 `cd frontend && pnpm build`',
-  )
-  // 每次起壳前按当前代码重建 forge-core（顺带刷新 resources/web）与壳的产物：
-  // 跑在旧产物上是这一路验收最贵的坑（`desktop-ui-acceptance.mjs` 的 guard 注释里记着实测）。
-  for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
+  if (PACKAGED_APP) {
+    // 打包态**故意不重建**：起的就是盘上那个包，重建等于把"判的是这个包"这件事悄悄换掉。
+    for (const [rel, why] of [
+      ['forge-core', '壳要 spawn 它'],
+      ['web/index.html', '壳与核心共用这一份资产'],
+      ['release.json', '唯一发布契约随包'],
+    ]) {
+      check(`包内 ${rel} 在位（${why}）`, existsSync(join(RESOURCES_ROOT, rel)), PACKAGED_APP)
+    }
+  } else {
+    check(
+      'apps/web/dist 已构建（壳要服务它）',
+      existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')),
+      existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')) ? '' : '缺则先 `cd frontend && pnpm build`',
+    )
+    // 每次起壳前按当前代码重建 forge-core（顺带刷新 resources/web）与壳的产物：
+    // 跑在旧产物上是这一路验收最贵的坑（`desktop-ui-acceptance.mjs` 的 guard 注释里记着实测）。
+    for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
+  }
 
   for (const name of ['dsh', 'opencode']) {
     const payload = readPayload(name)
     check(
       `载荷 ${name} 在位（payloads/*/*/payload.json）`,
       !!payload && existsSync(payload.entry),
-      payload ? `${payload.version} / entry=${payload.entry.replace(DESKTOP, '…')} / ${payload.manifest.files} 文件` : '缺——先 `make desktop/payloads`',
+      payload
+        ? `${payload.version} / entry=${payload.entry.replace(ELIDE_FROM, '…')} / ${payload.manifest.files} 文件`
+        : PACKAGED_APP
+          ? `包内没有这份载荷：${PAYLOAD_ROOT}`
+          : '缺——先 `make desktop/payloads`',
     )
   }
 
@@ -498,7 +542,7 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
     check(`${runtimeId} 载荷入口在位`, false, '缺——先 `make desktop/payloads`')
     return
   }
-  check(`${runtimeId} 载荷入口在位`, true, `${payload.version} → ${payload.entry.replace(DESKTOP, '…')}`)
+  check(`${runtimeId} 载荷入口在位`, true, `${payload.version} → ${payload.entry.replace(ELIDE_FROM, '…')}`)
 
   const env = runtimeEnvOf(coreEnv, runtimeId)
   // 工作区给临时目录：session/new 要求绝对 cwd，且**不能污染仓库**（opencode 会在 cwd 下落状态）。
@@ -702,7 +746,7 @@ function scenarioFingerprint(before) {
     // （正是"输出被 maxBuffer 截断 → 前后都读成 0 文件 → 假绿"这个坑教出来的）。
     const same = !b?.error && !a?.error && JSON.stringify(b) === JSON.stringify(a)
     check(
-      `载荷 ${name} 目录指纹零变化（${dir.replace(DESKTOP, '…')}）`,
+      `载荷 ${name} 目录指纹零变化（${dir.replace(ELIDE_FROM, '…')}）`,
       same,
       same ? fingerprintText(a) : `前 ${fingerprintText(b)} → 后 ${fingerprintText(a)}`,
     )
@@ -820,13 +864,27 @@ async function scenarioDshUnderLocalNode(coreEnv) {
   spawnedRuntimePids.delete(srv.pid)
 }
 
-/** 触发条件 ②③：显式打印"不判"（免得读日志的人把全绿当成三条件已验完）。 */
+/**
+ * 触发条件 ②③ 的口径：**显式打印**当前这一轮到底判了什么（免得把"全绿"当成三条件已验完）。
+ *
+ * M4-2a 起 ② 拆成两半（计划 §12.27）：hardened runtime 这一半在**打包态**（`FORGE_SMOKE_APP=…`）
+ * 被本脚本判到（起的就是签名 + `--options runtime` 的那个包）；公证那一半**本期不做**（不付费、不上架）。
+ * ③ 仍需要 Windows 出包。
+ */
 function printUnverifiableConditions() {
-  section('触发条件 ②③：本脚本不判')
-  console.log(
-    '  ⚠ ②③ 需要 M4 的签名/公证/Windows 出包，本脚本不判（见计划 §M3-6/§M3-8、设计 §6.3）：',
-  )
-  console.log('     ② 平台签名 / 公证 / hardened runtime 是否允许包内执行该二进制 —— 需要真出包 + Apple 证书；')
+  if (PACKAGED_APP) {
+    section('触发条件 ②：本脚本**判到了** hardened runtime 这一半（打包态运行）')
+    console.log('  ✅ ②（hardened runtime 半边）：起的是包内那份 ad-hoc 签名 + `--options runtime` 的壳与核心，')
+    console.log('     下面每个 runtime 的握手都是"签名后的包内二进制真的被执行了"的直接证据（make verify/signature 判签名形态）。')
+    console.log('  ⚠ ②（公证半边）**本期不做**（不上架、不付费，§12.27）：异地机器 + staple 的验收已撤销，')
+    console.log('     替换为"tar.gz 解到干净目录后首启无阻断"（make desktop/dist 收尾的 verify-release-json --launch）。')
+    console.log('  ⚠ ③ Windows SmartScreen / AV 是否拦 —— 需要 Windows 测试机与出包（M4-3）。')
+    console.log('     ⇒ 因此"全绿"= ① 已验 + ② 的 hardened runtime 半边已验；不等于 §6.3 三条件全验完。')
+    return
+  }
+  section('触发条件 ②③：本脚本（源码态）不判')
+  console.log('  ⚠ ②③ 需要 M4 的签名/公证/Windows 出包，源码态跑的本脚本判不了（见计划 §M3-6/§M3-8、设计 §6.3）：')
+  console.log('     ② 平台签名 / hardened runtime 是否允许包内执行该二进制 —— 用 `FORGE_SMOKE_APP=<app> pnpm smoke:desktop`（M4-2a）；')
   console.log('     ③ Windows SmartScreen / AV 是否拦 —— 需要 Windows 测试机与出包。')
   console.log('     ⇒ 因此"全绿"只等于**触发条件 ①** 已验完，不等于 §6.3 的三条件已验完。')
 }
@@ -861,13 +919,13 @@ function printLiveGate() {
 async function scenarioResidue() {
   section('收尾：无残留（本仓的壳/核心/载荷进程）')
   await sleep(300)
-  check('无 forge-core 残留', pidsMatching(CORE_RE).length === 0)
-  check('无桌面壳残留', pidsMatching(SHELL_RE).length === 0)
+  check('无 forge-core 残留', pidsMatching(PROC_RES.core).length === 0)
+  check('无桌面壳残留', pidsMatching(PROC_RES.shell).length === 0)
   // 只认"命令行里带我们载荷目录"的进程：用户自己开的 `dsh web` / 全局 `opencode` 不在此列
   // （这正是不能用 `pkill -f dsh` 的原因——那会误杀别人的会话）。
   const ours = psAll()
     .split('\n')
-    .filter((l) => l.includes(join(DESKTOP, 'resources', 'payloads')) && !l.includes('grep'))
+    .filter((l) => l.includes(PAYLOAD_ROOT) && !l.includes('grep'))
   check('无本仓载荷进程残留', ours.length === 0, ours.slice(0, 2).map((l) => l.slice(0, 120)).join(' | '))
   // 我们显式记过 pid 的那几个也必须都没了（双保险：argv 读不到时也能判）。
   const alive = [...spawnedRuntimePids].filter((pid) => {
@@ -947,10 +1005,15 @@ async function main() {
     if (!DIAGNOSTIC_ONLY) {
       // V10 ① 的前提：**机器上没有 node**。壳只在 `PATH=/usr/bin:/bin` 下启动，因此核心及其子进程
       // 拿到的 Node 只可能来自壳自己注入的那份（设计 §6.6）。HOME 保留是 Chromium 自己的要求。
-      shell = await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
+      shell = PACKAGED_APP
+        ? await launchPackagedShell({
+            appPath: PACKAGED_APP,
+            env: { PATH: '/usr/bin:/bin', HOME, FORGE_DESKTOP_HOME: makeTemp('forge-smoke-home-') },
+          })
+        : await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
       if (!shell.corePid) {
         check('壳与核心起来了', false, `壳日志尾部：\n${shell.logText().split('\n').slice(-6).join('\n')}`)
-        await stopShellTree()
+        await (PACKAGED_APP ? stopPackagedShell(shell) : stopShellTree())
         process.exit(1)
       }
       check('壳与核心起来了', true, `shell=${shell.shellPid} core=${shell.corePid}`)
@@ -971,8 +1034,10 @@ async function main() {
       }
       check('核心 PATH 首段是私有 bin', String(coreEnv.PATH ?? '').startsWith(`${BIN_DIR}:`), String(coreEnv.PATH ?? '').replace(DESKTOP, '…'))
       check(
-        'FORGE_NODE_EXECUTABLE 指向 Electron 本体',
-        /Electron\.app\/Contents\/MacOS\/Electron$/.test(coreEnv.FORGE_NODE_EXECUTABLE ?? ''),
+        PACKAGED_APP ? 'FORGE_NODE_EXECUTABLE 指向包内那份壳可执行文件' : 'FORGE_NODE_EXECUTABLE 指向 Electron 本体',
+        PACKAGED_APP
+          ? String(coreEnv.FORGE_NODE_EXECUTABLE ?? '').startsWith(join(PACKAGED_APP, 'Contents', 'MacOS'))
+          : /Electron\.app\/Contents\/MacOS\/Electron$/.test(coreEnv.FORGE_NODE_EXECUTABLE ?? ''),
         coreEnv.FORGE_NODE_EXECUTABLE ?? '(未注入)',
       )
       check('FORGE_HOME 是绝对路径（可写面只有它）', String(coreEnv.FORGE_HOME ?? '').startsWith('/'), coreEnv.FORGE_HOME ?? '(未注入)')
@@ -996,7 +1061,12 @@ async function main() {
       if (selected.includes('fingerprint')) scenarioFingerprint(before)
     } else {
       // 只跑诊断时也起一次壳：诊断要的"核心那份环境"只能从真核心里读（否则就成了"我记住的常量"）。
-      shell = await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
+      shell = PACKAGED_APP
+        ? await launchPackagedShell({
+            appPath: PACKAGED_APP,
+            env: { PATH: '/usr/bin:/bin', HOME, FORGE_DESKTOP_HOME: makeTemp('forge-smoke-home-') },
+          })
+        : await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
       check('壳与核心起来了（诊断需要读核心的真实环境）', !!shell.corePid, `core=${shell.corePid}`)
       coreEnv = parseProcessEnv(sh('ps', ['-E', '-p', String(shell.corePid)]))
     }
@@ -1009,7 +1079,7 @@ async function main() {
   } finally {
     // 一定收干净（异常路径也走这里）：这个仓库被"上次跑剩的壳挡住下次运行"坑过。
     if (shell && process.env.KEEP_SHELL !== '1') {
-      const stats = await stopShellTree()
+      const stats = PACKAGED_APP ? await stopPackagedShell(shell) : await stopShellTree()
       note(`stopShellTree：graceful=${stats.graceful} ${stats.ms}ms reaped=${stats.reaped}`)
     } else if (shell) {
       note('KEEP_SHELL=1：壳保留（人工接管；下次跑会被 guard 挡下）')

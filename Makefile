@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop desktop/dist verify/asset-parity verify/engines verify/release-json verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop desktop/dist verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -147,10 +147,16 @@ desktop/dist: core/desktop desktop/payloads
 	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/build-release-json.mjs
 	@echo "==> electron-builder --mac（缓存 $(ELECTRON_BUILDER_CACHE)$(if $(ELECTRON_MIRROR)，镜像 $(ELECTRON_MIRROR),)）"
 	cd $(FRONTEND_ROOT)/apps/desktop && ELECTRON_BUILDER_CACHE=$(ELECTRON_BUILDER_CACHE) $(if $(ELECTRON_MIRROR),ELECTRON_MIRROR=$(ELECTRON_MIRROR),) pnpm exec electron-builder --mac
+	@echo "==> 签名事实逐对象复核（M4-2a；hardened runtime 形态的判据）"
+	cd $(FRONTEND_ROOT) && pnpm verify:signature
 	@echo "==> 逐项复核 release.json 与产物（含 tar.gz 解包后的首启）"
 	@# 直接调 node（不经 pnpm 转发参数）：`pnpm run x -- --flag` 会把 `--` 原样交给脚本，
 	@# 而 node 的 parseArgs 视开头的 `--` 为"选项结束"——旗标随即变成位置参数并抛错（实测踩到）。
 	cd $(FRONTEND_ROOT) && node apps/desktop/scripts/verify-release-json.mjs --require-artifacts --launch
+	@# 最后一条：**包内载荷真起一次**（M4-2a 的 ②）：判的是签名 + hardened runtime 之后包里的
+	@# dsh / opencode 还能不能被核心拉着走完 ACP 握手。它是"verify-release-json --launch"的加强版
+	@# （那条只到"界面渲染出来 + 核心可达"）。
+	cd $(FRONTEND_ROOT) && pnpm smoke:desktop:packaged
 
 # 资产一致性（M2-5 / V17）：同一个请求经壳（forge-app://）与核心（回环直连）各取一次，
 # 逐项比较 status / Content-Type / Cache-Control / 响应体 sha256。桌面态的两条服务路径由
@@ -179,6 +185,24 @@ verify/engines:
 verify/release-json:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm verify:release-json
+
+# 签名事实逐对象复核（M4-2a）：`codesign --verify --deep --strict`（封条完整）+ 包里每个 Mach-O
+# 都有签名且带 `--options runtime` + identity 与 release.json 声明一致 + entitlements 真的签进去了。
+# `spctl -a -vvv -t exec` 的结论如实打印但**不判失败**（ad-hoc 必然被 Gatekeeper 拒，这是 §12.27 的预期）。
+# 默认判 `release/mac-arm64/ark-forge.app`；也可 `--from-tarball` 判解包后的那一份（分发形态）。
+verify/signature:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm verify:signature
+
+# 加固运行时下的**包内执行**（M4-2a）：设计 §6.3 回退条件 ② 的判据。
+# 与 `pnpm smoke:desktop` 的唯一区别：壳从**打出来的包**里起（`.app/Contents/MacOS/ark-forge`，
+# ad-hoc 签名 + `--options runtime`），核心与其下的 dsh / opencode 也全部来自包内。
+# 需要先有包（`make desktop/dist`）；签名形态本身由 `verify/signature` 判，这条判"能不能跑"。
+verify/hardened-runtime:
+	$(require-node)
+	@test -d $(FRONTEND_ROOT)/apps/desktop/release/mac-arm64/ark-forge.app || (echo "==> 没有打好的包：先跑 make desktop/dist"; exit 1)
+	cd $(FRONTEND_ROOT) && pnpm verify:signature
+	cd $(FRONTEND_ROOT) && pnpm smoke:desktop:packaged
 
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。

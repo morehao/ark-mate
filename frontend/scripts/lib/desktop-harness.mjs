@@ -8,7 +8,9 @@
  * 零依赖：CDP 用 Node 24 自带的全局 WebSocket。
  */
 import { execFileSync, spawn } from 'node:child_process'
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -309,4 +311,111 @@ export async function launchShell({ remoteDebugPort, env } = {}) {
     corePid: pidsMatching(CORE_RE)[0],
     close: killShellTree,
   }
+}
+
+// ————————————————— 打包态（.app）的壳：M4-2a 的"加固运行时下包内执行"用 —————————————————
+//
+// 与 `launchShell` 的唯一区别是"壳从哪来"：那边是仓库源码（`electron .`），这里是**打出来的包**
+// （`<app>/Contents/MacOS/<productName>`）。为什么要专门有一条：设计 §6.3 的回退条件 ② 问的不是
+// "源码态能不能跑"，而是"**签名 + hardened runtime 之后的包**能不能跑包内的载荷"——只有真起包里
+// 那份可执行文件才能回答。
+
+/** 打包态壳/核心的进程匹配（核心路径在 `.app/Contents/Resources/forge-core`）。 */
+export function packagedProcessRes(appPath) {
+  const macos = join(appPath, 'Contents', 'MacOS')
+  const core = join(appPath, 'Contents', 'Resources', 'forge-core')
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return { shell: new RegExp(`${esc(macos)}/`), core: new RegExp(`${esc(core)} serve`) }
+}
+
+/** 打包态壳的主可执行文件（`Contents/MacOS/<productName>`；按"可执行"挑，不猜名字）。 */
+export function packagedExecutable(appPath) {
+  const dir = join(appPath, 'Contents', 'MacOS')
+  const found = readdirSync(dir)
+    .map((n) => join(dir, n))
+    .find((abs) => {
+      try {
+        return statSync(abs).isFile() && (statSync(abs).mode & 0o111) !== 0
+      } catch {
+        return false
+      }
+    })
+  if (!found) throw new Error(`${dir} 里没有可执行文件`)
+  return found
+}
+
+/**
+ * 起一个**打包态**的壳（真 .app，hardened runtime 已生效）。
+ *
+ * `--user-data-dir` 指到临时目录：打包态与开发态共用同一个 appId，单实例锁按 userData 判，
+ * 不隔离就会因为"开发态壳在跑"直接退出（症状是"壳起来了但没有 core ready"，极难查）。
+ */
+export async function launchPackagedShell({ appPath, remoteDebugPort, env, userDataDir } = {}) {
+  const port = remoteDebugPort ?? 9600 + Math.floor(Math.random() * 200)
+  const userData = userDataDir ?? mkdtempSync(join(tmpdir(), 'forge-packaged-userdata-'))
+  const exe = packagedExecutable(appPath)
+  const log = []
+  const child = spawn(exe, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {
+    env: env ?? { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  })
+  child.stdout.on('data', (d) => log.push(String(d)))
+  child.stderr.on('data', (d) => log.push(String(d)))
+  const logText = () => log.join('')
+  for (let i = 0; i < 120; i++) {
+    if (logText().includes('core ready')) break
+    await sleep(250)
+  }
+  const res = packagedProcessRes(appPath)
+  return {
+    child,
+    port,
+    logText,
+    userData,
+    appPath,
+    shellPid: child.pid,
+    corePid: pidsMatching(res.core)[0],
+  }
+}
+
+/**
+ * 收掉打包态的壳：先 SIGKILL 壳（核心的 `--exit-with-parent` 会带它一起走），
+ * 等核心消失，最后兜底把壳的整棵后代树收掉。
+ */
+export async function stopPackagedShell(shell, { graceMs = 6000 } = {}) {
+  const res = packagedProcessRes(shell.appPath)
+  const cores = pidsMatching(res.core)
+  const offspring = descendantsOf(cores)
+  try {
+    process.kill(-shell.child.pid, 'SIGKILL')
+  } catch {
+    try {
+      shell.child.kill('SIGKILL')
+    } catch {}
+  }
+  const t0 = Date.now()
+  let graceful = true
+  while (Date.now() - t0 < graceMs) {
+    if (pidsMatching(res.core).length === 0) break
+    await sleep(100)
+  }
+  if (pidsMatching(res.core).length !== 0) {
+    graceful = false
+    for (const pid of pidsMatching(res.core)) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {}
+    }
+  }
+  let reaped = 0
+  for (const pid of offspring) {
+    try {
+      process.kill(pid, 0)
+      process.kill(pid, 'SIGKILL')
+      reaped++
+    } catch {}
+  }
+  rmSync(shell.userData, { recursive: true, force: true })
+  return { graceful, ms: Date.now() - t0, reaped }
 }

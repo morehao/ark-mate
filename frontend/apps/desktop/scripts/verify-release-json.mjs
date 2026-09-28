@@ -380,6 +380,7 @@ async function launchPackagedApp(appPath, release) {
         const body = await r.json()
         return {
           status: r.status,
+          href: location.href,
           coreVersion: body?.data?.coreVersion,
           webBuildId: body?.data?.webBuildId,
           webDigest: body?.data?.webDigest,
@@ -389,16 +390,27 @@ async function launchPackagedApp(appPath, release) {
           text: (document.body?.innerText ?? '').slice(0, 120),
         }
       })()`
+    // 求值**允许瞬时失败**：CDP 的 page target 在文档刚创建时就出现，此时 `location.href` 可能还没落成
+    // `forge-app://app/`，相对路径 fetch 会抛 "Failed to parse URL from /v1/forge/meta"（实测在加固
+    // 运行时下更容易撞到：包起来比源码态慢一拍）。一次求值失败不等于首启失败——重试到超时，
+    // 并把最后一次错误带进详情，免得"重试掩盖了真实错误"。
     let facts = null
+    let lastError = null
     for (let i = 0; i < 40; i++) {
-      facts = await cdpEval(port, 'forge-app://app', expression)
-      if ((facts?.rootChildren ?? 0) > 0) break
+      try {
+        facts = await cdpEval(port, 'forge-app://app', expression)
+        lastError = null
+        if ((facts?.rootChildren ?? 0) > 0) break
+      } catch (e) {
+        lastError = e
+      }
       await sleep(500)
     }
     check(
       '解包首启：壳进到应用页（forge-app://app）且界面已渲染',
       (facts?.rootChildren ?? 0) > 0,
-      `#root 子节点 ${facts?.rootChildren}（readyState=${facts?.readyState}${facts?.text ? `，页面文字「${facts.text.replace(/\s+/g, ' ').trim()}」` : ''}）`,
+      `#root 子节点 ${facts?.rootChildren}（href=${facts?.href} readyState=${facts?.readyState}${facts?.text ? `，页面文字「${facts.text.replace(/\s+/g, ' ').trim()}」` : ''}）` +
+        (lastError ? `；最后一次求值失败：${lastError.message.split('\n')[0]}` : ''),
     )
     check('解包首启：核心经壳可达且版本与契约一致', facts?.coreVersion === release.coreVersion, `coreVersion=${facts?.coreVersion}`)
     check(
