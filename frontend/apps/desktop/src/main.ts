@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import { APP_ORIGIN, SHELL_ORIGIN } from '@ark/desktop-contract'
 import { startCore, stopCore, type CoreHandle } from './core'
+import { installIpcHandlers } from './ipc'
 import { coreExecutable, rendererDir, webDir } from './paths'
 import { installSchemeHandler, registerSchemePrivileges, shellPageUrl } from './scheme'
 
@@ -85,6 +86,15 @@ if (!app.requestSingleInstanceLock()) {
 
     // scheme 处理器先装：核心即使起不来，恢复页也得有人服务。
     installSchemeHandler({ webDir: webDir(), rendererDir: rendererDir(), core: () => core })
+
+    // IPC handlers：preload 暴露面的另一端（M1-4）。必须在开窗口之前装好——
+    // 窗口一加载就可能调 boot()。
+    installIpcHandlers({
+      streamEndpoint: () =>
+        core ? { streamBaseUrl: `ws://${core.addr}`, streamToken: core.streamToken } : null,
+      coreBaseUrl: () => (core ? `http://${core.addr}` : null),
+      window: () => win,
+    })
 
     let bootError: string | null = null
     try {
