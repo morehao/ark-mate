@@ -11,6 +11,9 @@ import (
 	"github.com/morehao/ark-forge/pkg/web"
 )
 
+// currentWebSource 资产来源（/meta 的诊断字段）：release 构建内嵌了前端产物。
+func currentWebSource() string { return "builtin" }
+
 // MountWeb release 构建：把内嵌前端产物（web.Dist）以 SPA 方式挂到根路径。
 // 未命中静态资源的路由回退 index.html；/v1/* 未注册路径仍回标准信封 404（不是 SPA）。
 func MountWeb(r *gin.Engine) {

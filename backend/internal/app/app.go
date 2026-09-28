@@ -23,11 +23,13 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
 	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/manager"
 	"github.com/morehao/ark-forge/internal/router"
 	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-forge/internal/version"
 	"github.com/morehao/ark-forge/pkg/config"
 	"github.com/morehao/ark-forge/pkg/procreg"
 	"github.com/morehao/ark-forge/pkg/runtime"
@@ -247,7 +249,10 @@ func (a *App) Init(ctx context.Context) error {
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
-	srv, err := newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{Credentials: a.credentials()}))
+	srv, err := newHTTPServer(cfg.Addr, router.New(ports, a.bus, router.Options{
+		Credentials: a.credentials(),
+		Meta:        a.metaInfo,
+	}))
 	if err != nil {
 		// 端口被占 / 无权限在装配期就报出来（此前是 ListenAndServe 里的运行期错误）。
 		return usageErr("serve: %v", err)
@@ -283,6 +288,28 @@ func (a *App) credentials() *credential.Set {
 		})
 	}
 	return nil
+}
+
+// metaInfo 组装 `/v1/forge/meta` 的诊断值（M1-7）。
+//
+// 资产相关字段（webPath / webDigest / webBuildId）留空/为 null：那些要等资产层（M2-1）与
+// 版本闸门（M2-4）才有真值——诊断面宁可空着，也不要编一个看起来正常的来源。
+func (a *App) metaInfo() ctrsystem.MetaInfo {
+	cfg := a.cfg
+	home := ""
+	if cfg.ConfigDir != "" {
+		// 数据目录：默认即 ~/.forge（配置目录的父目录）。目前还没有独立的 FORGE_HOME 键
+		// （计划 §0.3 列了它，M3-3 会正式引入并重定向各 runtime 的 home/cache/prefix）；
+		// 那时这里改成读该键即可，字段本身不变。
+		home = filepath.Dir(cfg.ConfigDir)
+	}
+	return ctrsystem.MetaInfo{
+		CoreVersion: version.Version,
+		APIContract: version.APIContract,
+		WebBuildID:  "",
+		Home:        home,
+		Payloads:    []ctrsystem.PayloadInfo{}, // M3-1 起填随包载荷
+	}
 }
 
 // loadDefinitions 装载 Agent / 能力定义并重校 skill 物化。

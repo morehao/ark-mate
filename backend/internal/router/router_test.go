@@ -319,6 +319,8 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			!strings.HasPrefix(p, "/usage") &&
 			!strings.HasPrefix(p, "/search") && !strings.HasPrefix(p, "/settings/") &&
 			!strings.HasPrefix(p, "/health") &&
+			!strings.HasPrefix(p, "/meta") &&
+			!strings.HasPrefix(p, "/capabilities") &&
 			!strings.HasPrefix(p, "/ws/") {
 			continue
 		}

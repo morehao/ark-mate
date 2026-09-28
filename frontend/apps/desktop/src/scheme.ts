@@ -143,6 +143,10 @@ async function proxyToCore(request: Request, core: CoreHandle | null): Promise<R
   stripHopByHop(headers)
   // 凭据只在这里出现一次：覆盖（而不是追加）任何客户端带来的 Authorization。
   headers.set('authorization', `Bearer ${core.restToken}`)
+  // 入口标识（M1-7）：核心据此回答"这次请求走的是桌面窗口还是浏览器"
+  // （`/capabilities` 的 available 与 `entries.desktop` 都看它）。壳是桌面态唯一持有
+  // restToken 的组件，因此这个头是可信的入口声明；浏览器入口的请求不经过这里，自然没有它。
+  headers.set('x-forge-carrier', 'desktop')
 
   const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers }
   if (request.method !== 'GET' && request.method !== 'HEAD') {

@@ -12,6 +12,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
 	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/middleware"
@@ -60,6 +61,10 @@ type Options struct {
 	//
 	// 桌面态两个面互斥（restToken / streamToken），独立态是同一条令牌同时带两个面。
 	Credentials *credential.Set
+
+	// Meta 系统面（`/v1/forge/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
+	// 资产来源字段由路由层按构建形态补全。nil = 用默认值（版本 + 空载荷）。
+	Meta func() ctrsystem.MetaInfo
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
@@ -67,10 +72,7 @@ type Options struct {
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
 // 实时通道契约见 docs/design-and-roadmap.md §4.5。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
-	var creds *credential.Set
-	if len(opts) > 0 {
-		creds = opts[0].Credentials
-	}
+	creds := opts0(opts).Credentials
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -100,9 +102,22 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	registerAutomation(rest, ports)
 	registerLibrary(rest, ports)
 	registerUsage(rest, ports)
+	meta := opts0(opts).Meta
+	if meta == nil {
+		meta = defaultMeta
+	}
+	registerSystem(rest, meta)
 
 	MountWeb(r)
 	return r
+}
+
+// opts0 取可变选项的第一项（未传时返回零值）——本包历史上用可变参数是为了"加字段不改调用点"。
+func opts0(opts []Options) Options {
+	if len(opts) == 0 {
+		return Options{}
+	}
+	return opts[0]
 }
 
 // health 健康检查（唯一免鉴权端点：不依赖任何领域端口）。
