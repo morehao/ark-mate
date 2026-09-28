@@ -241,7 +241,16 @@ func TestDesktopMustNotImportWebSource(t *testing.T) {
 var webForbiddenImport = regexp.MustCompile(importPrefix + `['"](electron|node:[^'"]+|@ark/desktop)['"]`)
 
 // windowElectron 匹配"嗅探 Electron"的历史写法（设计 §10.1 明令禁止：不得读 window.electron）。
+//
+// 这是本文件里**唯一**的裸词模式（其余三条都只匹配引入语句），因此要给注释留出豁免：
+// 设计文档原文里就写着这个词，注释引用它不该红——豁免由 commentLine 提供，代码里真写了照样红。
 var windowElectron = regexp.MustCompile(`window\s*\.\s*electron`)
+
+// commentLine 报告该行看着像注释（`//` 行、`/*` 起始行、块注释的续行 `*`）。
+func commentLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*")
+}
 
 // TestWebUiMustNotReachDesktopApis 断言 `frontend/apps/web/src/**` 够不到桌面能力：
 // 不引 `electron`、不引 `node:*` 内置模块、不引 `@ark/desktop`、不嗅探 `window.electron`。
@@ -253,7 +262,7 @@ func TestWebUiMustNotReachDesktopApis(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
 	files := listFrontendSources(t, filepath.Join(frontendRoot(t), "apps", "web", "src"))
 	vs := scanSources(t, repoRoot, files, webForbiddenImport, nil)
-	vs = append(vs, scanSources(t, repoRoot, files, windowElectron, nil)...)
+	vs = append(vs, scanSources(t, repoRoot, files, windowElectron, commentLine)...)
 	reportViolations(t, "apps/web 出现桌面/Node 专属引用（共享 UI 只能走宿主能力面）", vs)
 }
 

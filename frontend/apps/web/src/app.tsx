@@ -27,6 +27,7 @@ export function App() {
   }, [])
 
   const wsState = useForge((s) => s.wsState)
+  const carrierError = useForge((s) => s.carrierError)
   const toast = useForge((s) => s.toast)
 
   return (
@@ -43,8 +44,27 @@ export function App() {
       <style>{consoleStyleSheet}</style>
       <TopBar />
 
+      {/* 载体接入失败（M1-8）：比"一直重连中"更明确——这时连的是错误的地址，重连没有意义 */}
+      {carrierError && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 16px',
+            fontSize: 12,
+            background: tokens.warningBg,
+            color: tokens.error,
+            borderBottom: `1px solid ${tokens.warningBorder}`,
+            flex: 'none',
+          }}
+        >
+          {carrierError}（请重启应用；若长期存在，请把这条信息连同壳日志一起反馈）
+        </div>
+      )}
+
       {/* reconnecting 提示条：非 open 时可见（首连前的 idle 除外） */}
-      {wsState !== 'idle' && wsState !== 'open' && (
+      {!carrierError && wsState !== 'idle' && wsState !== 'open' && (
         <div
           style={{
             display: 'flex',

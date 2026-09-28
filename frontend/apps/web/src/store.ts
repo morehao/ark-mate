@@ -32,6 +32,7 @@ import type {
   WsServerFrame,
 } from '@ark/types'
 import { BizCode, Ev } from '@ark/types'
+import { resolveStreamConfig, type StreamConfig } from './carrier'
 import { WsTransport } from './transport/ws'
 import { olderCursor, prependOlder } from './console/transcriptView'
 import {
@@ -378,6 +379,8 @@ export interface ForgeState {
   views: Record<string, ConversationView>
   activeId: string | null
   wsState: WsState
+  /** 载体接入失败的原因（M1-8：桌面态 boot() 失败等）——有值就显示明确状态，不静默重连。 */
+  carrierError: string | null
   toast: Toast | null
   drawerOpen: boolean
   /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
@@ -468,6 +471,7 @@ export const initialState: ForgeState = {
   activeId: null,
   anchorSeq: null,
   wsState: 'idle',
+  carrierError: null,
   toast: null,
   drawerOpen: false,
   railMode: 'active',
@@ -635,8 +639,12 @@ export const useForge = create<ForgeStore>((set, get) => {
       persistToken(v)
       set({ token: v, tokenModalOpen: false })
       // 令牌变化必须重连 WS（凭据走带内首帧 attach，重连才会带上新值）并重新拉取数据。
-      transportRef?.close()
-      ensureTransport().connect()
+      // 浏览器态的通道凭据就是它，因此要重解析一次载体配置再连。
+      const t = ensureTransport()
+      void resolveStreamConfig().then((cfg) => {
+        t.configure(cfg)
+        t.connect()
+      })
       void get().refreshAgents()
       void get().refreshConversations()
       get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
@@ -644,10 +652,25 @@ export const useForge = create<ForgeStore>((set, get) => {
     setTokenModal: (open) => set({ tokenModalOpen: open }),
 
     boot: () => {
-      // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
-      ensureTransport().connect()
-      void get().refreshAgents()
-      void get().refreshConversations()
+      // 载体接入（M1-8）：先问清"事件流打哪儿、通道凭据是什么"，再建常驻连接。
+      // 桌面窗口的 origin 是 forge-app://app，基址只可能来自壳的 boot()——所以这一步不能省。
+      void (async () => {
+        let cfg: StreamConfig
+        try {
+          cfg = await resolveStreamConfig()
+        } catch (e) {
+          // 明确状态，不静默重连：拿不到基址时连一条错误的地址只会刷屏重连。
+          set({ carrierError: `事件流配置解析失败：${e instanceof Error ? e.message : String(e)}` })
+          return
+        }
+        set({ carrierError: null })
+        const t = ensureTransport()
+        t.configure(cfg)
+        // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
+        t.connect()
+        void get().refreshAgents()
+        void get().refreshConversations()
+      })()
     },
 
     activate: (id, sinceSeq) => {
