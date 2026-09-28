@@ -102,6 +102,35 @@ export type Capabilities = {
   capabilities: CapabilityEntry[]
 }
 
+/**
+ * 壳服务静态资产时的 Content-Type 映射（M2-5 的唯一真源）。
+ *
+ * 为什么要有这张表而不是"把文件交给 Chromium 的 MIME 嗅探"：Chromium 认不出 `.webmanifest`
+ * （退回 `text/plain`），而核心侧用 Go 的 mime 表 + 显式覆盖给出 `application/manifest+json`——
+ * 同一个文件从两条服务路径拿到的头不一样，asset-parity 会红（实测抓到过）。
+ *
+ * 核心侧有一份**等价**的 Go 映射（`internal/router` 的 `mimeOverrides`），由
+ * `TestAssetContentTypesMatchContract` 守卫逐字比对——两边各写一份、靠守卫锁住，
+ * 是本仓"两处下发同一策略"的既有做法（CSP 就是这么管的）。
+ */
+export const ASSET_CONTENT_TYPES: Record<string, string> = {
+  '.webmanifest': 'application/manifest+json',
+  '.svg': 'image/svg+xml',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.html': 'text/html; charset=utf-8',
+  '.json': 'application/json',
+  '.map': 'application/json',
+}
+
+/** 按扩展名取 Content-Type（命中映射即用，否则交给宿主嗅探/兜底）。 */
+export function assetContentType(pathname: string): string | null {
+  const dot = pathname.lastIndexOf('.')
+  if (dot < 0) return null
+  return ASSET_CONTENT_TYPES[pathname.slice(dot).toLowerCase()] ?? null
+}
+
 export * from './carrier.ts'
 export * from './attach.ts'
 export * from './gate.ts'

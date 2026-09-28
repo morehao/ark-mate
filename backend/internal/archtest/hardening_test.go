@@ -40,6 +40,42 @@ func cspPolicyInContract(t *testing.T) string {
 	return m[1]
 }
 
+// TestAssetContentTypesMatchContract 静态资产的 Content-Type 映射两侧逐字一致（M2-5）。
+//
+// 同一个文件经壳（`net.fetch(file://)` + 映射表）与核心（Go mime 表 + 映射表）两条路径下发；
+// 表不一致的表现是"图标在桌面窗口里正常、在浏览器入口里坏掉"这类只在一侧出现的怪现象——
+// 而 asset-parity 只能在运行时抓到**已经出现**的分歧，静态守卫能在加扩展名的那一刻就红。
+func TestAssetContentTypesMatchContract(t *testing.T) {
+	path := filepath.Join(frontendRoot(t), "packages", "desktop-contract", "src", "index.ts")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v", path, err)
+	}
+	src := string(raw)
+	block := src[strings.Index(src, "ASSET_CONTENT_TYPES"):]
+	block = block[:strings.Index(block, "}")]
+	re := regexp.MustCompile(`'([^']+)':\s*'([^']+)'`)
+	fromContract := map[string]string{}
+	for _, m := range re.FindAllStringSubmatch(block, -1) {
+		fromContract[m[1]] = m[2]
+	}
+	if len(fromContract) == 0 {
+		t.Fatal("契约里的 ASSET_CONTENT_TYPES 解析为空（结构变了？守卫已失效）")
+	}
+	for ext, ct := range fromContract {
+		if got, ok := router.MimeOverrides[ext]; !ok {
+			t.Errorf("核心缺 %s 的映射（前端契约有 %q）", ext, ct)
+		} else if got != ct {
+			t.Errorf("%s 的映射不一致：前端 %q / 核心 %q", ext, ct, got)
+		}
+	}
+	for ext, ct := range router.MimeOverrides {
+		if _, ok := fromContract[ext]; !ok {
+			t.Errorf("核心多出 %s 的映射（%q）：前端契约里没有，两条路径会分歧", ext, ct)
+		}
+	}
+}
+
 // TestBuildIDUnknownMatchesContract `unknown` 这个口径在核心与前端契约里必须逐字一致（M2-4）。
 //
 // 为什么值得一条守卫：版本闸门的判定是"两侧都是已知值才比"。如果核心报 `unknown`、

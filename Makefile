@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept core/desktop verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -83,6 +83,13 @@ desktop/accept: core/desktop
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 
+# 资产一致性（M2-5 / V17）：同一个请求经壳（forge-app://）与核心（回环直连）各取一次，
+# 逐项比较 status / Content-Type / Cache-Control / 响应体 sha256。桌面态的两条服务路径由
+# 不同代码实现（TS vs Go），只有这条能锁住"行为一致"。
+verify/asset-parity:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm asset-parity
+
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。
 verify/desktop-dod:
@@ -90,6 +97,7 @@ verify/desktop-dod:
 	cd backend && go test ./internal/archtest/ -count=1
 	cd $(FRONTEND_ROOT) && pnpm typecheck
 	cd $(FRONTEND_ROOT) && pnpm test:contract
+	cd $(FRONTEND_ROOT) && pnpm asset-parity
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 
 # dev 用的资产就绪（不存在则构建一次）

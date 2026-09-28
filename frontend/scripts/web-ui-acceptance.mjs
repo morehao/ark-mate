@@ -271,6 +271,31 @@ const textExpr = (t) => `return (document.body.innerText||"").includes(${JSON.st
 const q = (css) => `document.querySelector(${JSON.stringify(css)})`
 
 // ——— REST 辅助（交叉验证：界面看到的在 API 上也成立）———
+/**
+ * 轮询一个会话直到离开 running/pending（返回终态；超时返回 'timeout'）。
+ *
+ * 为什么要它：自动化触发的会话，其来源标只在列表被刷新后才出现，而列表刷新由
+ * "终态事件 → refreshConversations" 驱动——固定 sleep 等于把断言押在模型速度上。
+ */
+async function waitConversationTerminal(id, timeoutMs = 90000) {
+  // 终态闭集取自前端契约的 `ConversationStatus`（`in_progress` = 有轮次在跑，**不是**终态）。
+  const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'interrupted'])
+  const t0 = Date.now()
+  let last = 'unknown'
+  while (Date.now() - t0 < timeoutMs) {
+    try {
+      // api() 返回的是 { status, json }（信封在 json 里）
+      const r = await api('GET', `/conversations/${id}`)
+      last = r?.json?.data?.status ?? last
+      if (TERMINAL.has(last)) return last
+    } catch {
+      // 暂时读不到（刚创建）：继续等
+    }
+    await sleep(1000)
+  }
+  return `timeout(${last})`
+}
+
 async function api(method, path, body) {
   const res = await fetch(`${FORGE_URL}${path.startsWith('/v1') ? path : `/v1/forge${path}`}`, {
     method,
@@ -580,15 +605,26 @@ async function scenarioAutomation(browser) {
   const runBtn = byText('button', '立即运行')
   check('列表行有「立即运行」', !!(await page.evaluate(`return !!(${runBtn})`)), '')
   await clickJS(page, runBtn)
-  await page.waitFor(`return location.pathname.startsWith('/conversations/')`, { label: '手动运行后跳到会话', timeout: 40000 })
+  await page.waitFor(`return location.pathname.startsWith('/conversations/')`, { label: '手动运行后跳到会话', timeout: 90000 })
   const autoConv = await page.evaluate('return location.pathname.split("/").pop()')
   createdConversations.push(autoConv)
-  await sleep(2500)
+  // 等这一轮**真正结束**再断言来源标：侧栏的 `origin` 标由"终态 → refreshConversations"带出
+  // （列表是轮询刷新的，而事件流里没有 origin），固定 sleep 会在模型慢时假红——
+  // 实测同一次运行：断言时无标，+5s 后 status=completed 且标出现。
+  const st = await waitConversationTerminal(autoConv, 120000)
+  check('自动化触发的会话跑到终态（等标的前提）', st !== 'timeout', `status=${st}`)
   await page.shot('16-automation-conversation')
 
   // 会话带标：侧栏/会话页上有 `title="由定时任务 <id> 触发"`
   const originTag = `[...document.querySelectorAll('[title]')].find(e => (e.getAttribute('title')||'').includes('由定时任务') && (e.getAttribute('title')||'').includes(${JSON.stringify(AUTO_ID)}))`
-  check('会话带自动化来源标（由定时任务 … 触发）', !!(await page.evaluate(`return !!(${originTag})`)), await page.evaluate(`return (${originTag}||{}).getAttribute ? (${originTag}).getAttribute('title') : '无'`))
+  let gotTag = false
+  try {
+    await page.waitFor(`return !!(${originTag})`, { label: '自动化来源标出现', timeout: 30000 })
+    gotTag = true
+  } catch {
+    gotTag = false
+  }
+  check('会话带自动化来源标（由定时任务 … 触发）', gotTag, await page.evaluate(`return (${originTag}||{}).getAttribute ? (${originTag}).getAttribute('title') : '无'`))
 
   // API 交叉验证：这条会话的 origin 就是 automation:<id>
   const convDetail = await api('GET', `/conversations/${autoConv}`)

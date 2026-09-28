@@ -15,11 +15,11 @@
  * 渲染进程直连回环（设计 §7.2）——壳在 boot 时把 `streamBaseUrl` 交给页面（M1-8）。
  */
 import { net, protocol } from 'electron'
-import { existsSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { FORGE_SCHEME, CSP_POLICY } from '@ark/desktop-contract'
+import { FORGE_SCHEME, CSP_POLICY, assetContentType } from '@ark/desktop-contract'
 import type { CoreHandle } from './core'
 
 /** 壳服务的静态路径集合（核心侧静态规则的**子集**，M2-5 断言两者响应头逐字一致）。 */
@@ -112,12 +112,24 @@ async function serveFile(root: string, pathname: string, opts: { csp?: boolean }
   if (full !== root && !full.startsWith(root + sep)) {
     return textResponse(403, '路径越界')
   }
-  if (!existsSync(full)) {
+  // 只服务**文件**：`/assets/` 这种前缀命中但不是文件的请求，`net.fetch(file://dir)` 会炸成 500，
+  // 而它语义上就是"壳没有这个文件"（回退归核心，不由壳编页面）。
+  let isFile = false
+  try {
+    isFile = statSync(full).isFile()
+  } catch {
+    isFile = false
+  }
+  if (!isFile) {
     return textResponse(404, `壳没有这个文件：${pathname}`)
   }
   const res = await net.fetch(pathToFileURL(full).toString())
   const headers = new Headers(res.headers)
   headers.set('cache-control', cacheControlFor(pathname))
+  // 显式 Content-Type：Chromium 的嗅探认不出 .webmanifest（会给 text/plain），
+  // 而核心侧按同一张映射表给 application/manifest+json —— 两侧头必须一致（M2-5）。
+  const ct = assetContentType(pathname)
+  if (ct) headers.set('content-type', ct)
   if (opts.csp) headers.set('content-security-policy', CSP_POLICY)
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }

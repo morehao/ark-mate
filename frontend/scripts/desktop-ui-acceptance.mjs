@@ -25,30 +25,31 @@
  * 前置：`make core/desktop`（脚本会自己跑）与 `pnpm -C frontend build`（apps/web/dist 必须已存在）。
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
-// 路径按脚本位置定位（`pnpm desk:accept` 的 cwd 是 frontend/，用相对路径会把临时文件写错地方）
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url)) // frontend/scripts
-const FRONTEND = join(SCRIPT_DIR, '..') // frontend
-const REPO = join(FRONTEND, '..') // 仓库根
-const DESKTOP = join(FRONTEND, 'apps', 'desktop') // frontend/apps/desktop
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-// 进程匹配式：Electron 会派生 Helper 子进程，它们的命令行同样含 `electron@<ver>...MacOS/`，
-// 因此壳只认**主进程**形态（`Electron .`，末尾那个点是要启动的应用目录）。
-const SHELL_RE = /electron@44\.4\.5.*MacOS\/Electron \./
-const CORE_RE = /resources\/forge-core serve/
-
-const sh = (cmd, args, opts = {}) => {
-  try {
-    return execFileSync(cmd, args, { encoding: 'utf8', ...opts })
-  } catch {
-    return ''
-  }
-}
+// 共用底座（M2-5 抽出）：进程定位/清场、起壳、最小 CDP、按当前代码重建。
+// 为什么抽出去：`asset-parity.mjs` 也要"起真壳 + 连 CDP + 一定收干净"，复制两份的典型后果是
+// 其中一份漏了清理（实测踩过：下一次运行被单实例锁挡住、或断言读到上一次的进程）。
+import {
+  CORE_RE,
+  DESKTOP,
+  FRONTEND,
+  REPO,
+  SHELL_RE,
+  connectCDP,
+  installCleanupHooks,
+  killShellTree,
+  stopShellTree,
+  launchShell,
+  pidsMatching,
+  psAll,
+  rebuildAll,
+  sh,
+  sleep,
+  waitFor,
+} from './lib/desktop-harness.mjs'
 
 // ——— 断言台账（与 web-ui-acceptance.mjs 同风格）———
 const results = []
@@ -59,118 +60,8 @@ function check(name, ok, detail = '') {
 }
 const section = (t) => console.log(`\n=== ${t} ===`)
 
-// ——— 进程探针 ———
-const psAll = () => sh('ps', ['-Ao', 'pid,ppid,command'])
-const pidsMatching = (re) =>
-  psAll()
-    .split('\n')
-    .filter((l) => re.test(l) && !l.includes('grep'))
-    .map((l) => Number(l.trim().split(/\s+/)[0]))
-
-// ——— 收尾：脚本无论怎么退出（含异常）都不能留下壳与核心 ———
-//
-// 首版踩过：CDP 回调里抛异常把进程直接打挂，`finally` 没跑到，于是下一次跑的前置守卫
-// 报"还有壳/核心在跑"。这里把清理挂到进程级钩子上，兜住所有退出路径。
-function killShellTree() {
-  for (const re of [SHELL_RE, CORE_RE]) {
-    for (const pid of pidsMatching(re)) {
-      try {
-        process.kill(pid, 'SIGKILL')
-      } catch {}
-    }
-  }
-}
-process.on('uncaughtException', (e) => {
-  console.error(`未捕获异常：${e?.stack ?? e}`)
-  killShellTree()
-  process.exit(1)
-})
-process.on('unhandledRejection', (e) => {
-  console.error(`未处理的 rejection：${e?.stack ?? e}`)
-  killShellTree()
-  process.exit(1)
-})
-process.on('SIGINT', () => {
-  killShellTree()
-  process.exit(130)
-})
-
-// ——— 最小 CDP 客户端 ———
-async function connectCDP(port) {
-  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
-  const page = list.find((t) => t.type === 'page' && t.url.startsWith('forge-app://'))
-  if (!page) throw new Error(`没有 forge-app:// 的 page target：${JSON.stringify(list.map((t) => t.url))}`)
-  const ws = new WebSocket(page.webSocketDebuggerUrl)
-  let id = 0
-  const pending = new Map()
-  const events = []
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data)
-    if (m.id != null && pending.has(m.id)) {
-      const { res } = pending.get(m.id)
-      pending.delete(m.id)
-      res(m)
-      return
-    }
-    events.push(m)
-  }
-  await new Promise((res, rej) => {
-    ws.onopen = res
-    ws.onerror = () => rej(new Error('CDP 连接失败'))
-  })
-  const send = (method, params = {}) =>
-    new Promise((res, rej) => {
-      const mid = ++id
-      pending.set(mid, { res }) // 统一存对象：onmessage 里按 { res } 取（首版存的是函数本身，取值炸了）
-      ws.send(JSON.stringify({ id: mid, method, params }))
-      setTimeout(() => pending.has(mid) && (pending.delete(mid), rej(new Error(`CDP 超时: ${method}`))), 25000)
-    })
-  const evalJs = async (body) => {
-    const m = await send('Runtime.evaluate', {
-      expression: `(async () => { ${body} })()`,
-      awaitPromise: true,
-      returnByValue: true,
-    })
-    if (m.result?.exceptionDetails) {
-      throw new Error(`页面内异常：${m.result.exceptionDetails.exception?.description ?? m.result.exceptionDetails.text}`)
-    }
-    return m.result.result.value
-  }
-  return { send, evalJs, events, close: () => ws.close() }
-}
-
-/** 轮询一个页面断言直到为真（首屏类断言别用固定 sleep：版本闸门会让首次挂载多一个来回）。 */
-async function waitFor(cdp, expr, timeoutMs = 8000, stepMs = 300) {
-  const t0 = Date.now()
-  while (Date.now() - t0 < timeoutMs) {
-    if (await cdp.evalJs(expr)) return true
-    await sleep(stepMs)
-  }
-  return false
-}
-
-// ——— 起壳 ———
-async function launchShell() {
-  const port = 9400 + Math.floor(Math.random() * 100)
-  const log = []
-  const child = spawn(join(DESKTOP, 'node_modules/.bin/electron'), ['.', `--remote-debugging-port=${port}`], {
-    cwd: DESKTOP,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,
-  })
-  child.stdout.on('data', (d) => log.push(String(d)))
-  child.stderr.on('data', (d) => log.push(String(d)))
-  const logText = () => log.join('')
-  for (let i = 0; i < 100; i++) {
-    if (logText().includes('core ready')) break
-    await sleep(250)
-  }
-  const shellPid = pidsMatching(SHELL_RE)[0]
-  const corePid = pidsMatching(CORE_RE)[0]
-  return { child, port, logText, shellPid, corePid }
-}
-
+// 无论怎么退出（含异常）都不留壳与核心
+installCleanupHooks()
 // ————————————————————————————————— 场景 —————————————————————————————————
 
 /** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.forge 会让断言读到别人的内存态）。 */
@@ -179,22 +70,9 @@ function scenarioGuard() {
   const others = pidsMatching(new RegExp(`${CORE_RE.source}|${SHELL_RE.source}`))
   check('没有别的桌面壳/核心在跑', others.length === 0, others.length ? `pid=${others.join(',')}（请先关掉；本机 make dev 只跑浏览器入口，不冲突）` : '')
   check('apps/web/dist 已构建（壳要服务它）', existsSync(join(FRONTEND, 'apps', 'web', 'dist', 'index.html')), '缺则先 `cd frontend && pnpm build`')
-  // 核心二进制每次重建：壳传的 flag（--exit-with-parent 等）必须与当前代码一致，
-  // 否则测的是旧二进制（M1-6 首跑就踩到过：旧核心不认新 flag，直接退出码 2）。
-  try {
-    execFileSync('make', ['core/desktop'], { cwd: REPO, stdio: 'ignore' })
-    check('forge-core 与运行时的 web/ 已按当前代码重建', true)
-  } catch (e) {
-    check('forge-core 与运行时的 web/ 已按当前代码重建', false, String(e).slice(0, 120))
-  }
-  // 壳的 TS 也要现构建：`electron .` 跑的是 dist/main.cjs，改完 src 不重建就会跑到旧代码上
-  // （第一次跑 gate 场景就踩到：src 里引用了新符号、bundle 还是旧的 → 核心启动 ReferenceError）。
-  try {
-    execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: DESKTOP, stdio: 'ignore' })
-    check('壳的主进程/preload 产物已重建', true)
-  } catch (e) {
-    check('壳的主进程/preload 产物已重建', false, String(e).slice(0, 120))
-  }
+  // 每次起壳前把 forge-core（顺带刷新 resources/web）与壳的 dist/*.cjs 按当前代码重建：
+  // 跑在旧产物上是这一路验收最贵的坑（新旧各踩过一次）。
+  for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
 }
 
 /** shell（M1-3）：origin、反代、静态资产、深链归属、壳静态页。 */
@@ -567,7 +445,7 @@ async function main() {
       check('壳与核心起来了', false, `壳日志尾部：\n${shell.logText().split('\n').slice(-6).join('\n')}`)
       // 早退路径也要收尾：否则壳留在那儿，下次跑的前置守卫会说"已有实例在运行"
       // （首版就是这里漏了，第二次跑被单实例锁挡住）。
-      killShellTree()
+      await stopShellTree()
       process.exit(1)
     }
     check('壳与核心起来了', true, `shell=${shell.shellPid} core=${shell.corePid}`)
@@ -584,7 +462,7 @@ async function main() {
     if (want.includes('exit')) await scenarioExit(shell)
   } finally {
     cdp?.close()
-    if (shell && process.env.KEEP_SHELL !== '1') killShellTree()
+    if (shell && process.env.KEEP_SHELL !== '1') await stopShellTree()
   }
 
   if (want.includes('direct')) await scenarioDirectParentGone()

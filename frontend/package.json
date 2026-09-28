@@ -14,7 +14,8 @@
     "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",
     "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
     "ui:accept": "node scripts/web-ui-acceptance.mjs",
-    "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs"
+    "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs",
+    "asset-parity": "node scripts/asset-parity.mjs"
   },
   "devDependencies": {
     "@ark/desktop-contract": "workspace:*"

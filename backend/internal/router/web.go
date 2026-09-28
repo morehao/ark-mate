@@ -264,11 +264,36 @@ func serveStaticFile(c *gin.Context, assets AssetInfo, rel string) {
 		c.Status(http.StatusNotModified)
 		return
 	}
-	ctype := mime.TypeByExtension(path.Ext(rel))
-	if ctype == "" {
-		ctype = "application/octet-stream"
+	c.Data(http.StatusOK, contentTypeFor(rel), data)
+}
+
+// contentTypeFor 静态响应的 Content-Type。
+//
+// Go 的 mime 表按系统与版本而异（`.webmanifest` 在 darwin 上返回空串），而壳侧用
+// `net.fetch(file://…)` 走的是 Chromium 的映射（`application/manifest+json`）——
+// 两侧不一致会被 asset-parity（M2-5）抓到。这里把**产物里真实出现**的扩展显式钉死，
+// 其余仍交给 mime 表 + octet-stream 兜底。
+// 导出给 archtest 与前端契约逐字比对（TestAssetContentTypesMatchContract）。
+var MimeOverrides = map[string]string{
+	".webmanifest": "application/manifest+json",
+	".svg":         "image/svg+xml",
+	".js":          "text/javascript",
+	".mjs":         "text/javascript",
+	".css":         "text/css",
+	".html":        "text/html; charset=utf-8",
+	".json":        "application/json",
+	".map":         "application/json",
+}
+
+func contentTypeFor(rel string) string {
+	ext := strings.ToLower(path.Ext(rel))
+	if ct, ok := MimeOverrides[ext]; ok {
+		return ct
 	}
-	c.Data(http.StatusOK, ctype, data)
+	if ct := mime.TypeByExtension(ext); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
 }
 
 // etagFor 取该文件的内容 ETag（解析期已算过；没有摘要时按需现算，保证行为不变）。
