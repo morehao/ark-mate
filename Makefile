@@ -22,6 +22,9 @@ WEB_DIST_DIR  := backend/pkg/web/dist
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
 CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/forge-core
 
+# 桌面包里那一份前端产物的落点（M2-6；壳与核心读同一份，M4-1 把它固定进 extraResources）。
+DESKTOP_WEB_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/web
+
 # 前端产物目录（`--web-dir` 指向它）。
 # 为什么 dev 也要显式给：默认 tag 的核心**没有**内嵌资产，M2-1 的失败语义会让它拒绝启动
 # （退出码 3）——那是为"独立二进制装错形态"设计的，dev 的正确做法就是明说自己用哪份资产。
@@ -58,8 +61,14 @@ web:
 # **故意不带 `-tags release`**：桌面核不内嵌前端资产——资产由壳服务，核心按 `--web-dir`
 # 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份 apps/web/dist，核心不再内嵌一份副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
-core/desktop:
+core/desktop: web
 	cd backend && CGO_ENABLED=0 go build -o ../$(CORE_DESKTOP_OUT) ./cmd/forge
+	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
+	@# 只有一份 dist 是设计 §6.1 的红线——核心故意不带 -tags release（不内嵌），
+	@# 否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。
+	rm -rf $(DESKTOP_WEB_OUT)
+	mkdir -p $(DESKTOP_WEB_OUT)
+	cp -R $(FRONTEND_ROOT)/apps/web/dist/. $(DESKTOP_WEB_OUT)/
 
 # 桌面壳开发起服：先出 forge-core，再构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
 # 窗口进 `forge-app://app/`（前端产物来自 apps/web/dist），REST 由壳反代核心。

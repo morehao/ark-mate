@@ -11,6 +11,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
+import { webDir } from './paths'
 
 /** 就绪行的行首前缀（与核心侧 `app.ReadyPrefix` 同值）。 */
 export const READY_PREFIX = 'FORGE_READY '
@@ -54,7 +55,17 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
     opts.exe,
     // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写 + 父进程消失自退（M1-6）。
     // **不带** `-tags release` 的内嵌资产（资产由壳服务，核心只在需要时按 `--web-dir` 读同一份，M2-6 接线）。
-    ['serve', '--addr', '127.0.0.1:0', '--auth-stdin', '--ready-stdout', '--exit-with-parent'],
+    [
+      'serve',
+      '--addr', '127.0.0.1:0',
+      '--auth-stdin',
+      '--ready-stdout',
+      '--exit-with-parent',
+      // 资产目录：核心不内嵌，壳把自己服务的那一份显式指过去（M2-6）。
+      // 两边读**同一份**是硬约束——页面里的 build id 与核心读到的 build-id.txt 必须同源，
+      // 否则版本闸门（M2-4）会把"两份资产"误判成"版本不一致"。
+      '--web-dir', webDir(),
+    ],
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       // 独立进程组（POSIX）：退出时对**整组**发信号，核心手里的 runtime 子进程一并收掉。

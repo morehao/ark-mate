@@ -22,16 +22,20 @@ export function rendererDir(): string {
 }
 
 /**
- * 前端产物目录（壳按路径读它来服务 `/`、`/index.html`、`/assets/*`）。
+ * 前端产物目录：壳服务 `/`、`/index.html`、`/assets/*` 时读它，**核心也用 `--web-dir` 读同一份**。
  *
- * 未打包态默认指向工作区里的 `frontend/apps/web/dist`（相对本包的 `../web/dist`），
+ * 两份资产是设计 §6.1 的红线：核心不内嵌（桌面骨架不带 `-tags release`），壳也不在运行时树里
+ * 另放一份——否则"页面里的 build id"与"核心实际读到的 build_id"就来自两处，版本闸门（M2-4）
+ * 也就失去了意义。
+ *
+ * 未打包态默认指向运行时树里的 `resources/web`（`make core/desktop` 从 apps/web/dist 刷新），
  * 可用 `FORGE_DESKTOP_WEB_DIR` 覆盖（只给开发用；打包态不读任何环境变量）。
  */
 export function webDir(): string {
   if (!app.isPackaged) {
     const override = process.env.FORGE_DESKTOP_WEB_DIR
     if (override) return resolve(override)
-    return resolve(app.getAppPath(), '..', 'web', 'dist')
+    return resolve(app.getAppPath(), 'resources', 'web')
   }
   return join(process.resourcesPath, 'web')
 }
