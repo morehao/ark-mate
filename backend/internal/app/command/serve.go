@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,6 +33,9 @@ func serve(args []string) {
 	readyStdout := fs.Bool("ready-stdout", false,
 		"监听成功后往 stdout 打一行 `FORGE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
 			"桌面壳据此立刻拿到地址，不传则壳退回 health 轮询")
+	exitWithParent := fs.Bool("exit-with-parent", false,
+		"父进程消失即自动退出（POSIX：父进程死后被 reparent，`Getppid` 随之变化）；"+
+			"桌面壳用 `kill -9` 强杀时靠它避免留下孤儿核心与 runtime 子进程。Windows 无 reparent 语义，那里要等 Job Object（M4-3）")
 	_ = fs.Parse(args)
 
 	cfg, sources := mustConfig()
@@ -57,6 +61,18 @@ func serve(args []string) {
 	// 优雅退出：SIGINT/SIGTERM → 停 HTTP → 关编排器（回收 runtime 子进程）。
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// 父进程自保（M1-6）：桌面壳被强杀时不会发 SIGTERM，核心必须自己发现"爹没了"并退出，
+	// 否则它和它手里的 runtime 子进程会一起变孤儿。取消 ctx 走的是与 SIGTERM 同一条优雅停机路径。
+	if *exitWithParent {
+		// 壳一死，核心的 stdout/stderr 就没读者了——不忽略 SIGPIPE 的话，停机过程中的
+		// 第一条日志就会把进程当场打死，优雅停机形同虚设（见 ignoreSIGPIPE 的注释）。
+		ignoreSIGPIPE()
+		go watchParentExit(ctx, os.Getppid, parentPollInterval, func() {
+			slog.Warn("serve: 父进程已消失（壳被强杀？），开始优雅停机")
+			cancel()
+		})
+	}
 
 	a := app.New(cfg, sources, opts...)
 	if err := a.Init(ctx); err != nil {

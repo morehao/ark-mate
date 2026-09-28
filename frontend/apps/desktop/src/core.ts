@@ -52,10 +52,15 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
 
   const child = spawn(
     opts.exe,
-    // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写。**不带** `-tags release`
-    // 的内嵌资产（资产由壳服务，核心只在需要时按 `--web-dir` 读同一份，M2-6 接线）。
-    ['serve', '--addr', '127.0.0.1:0', '--auth-stdin', '--ready-stdout'],
-    { stdio: ['pipe', 'pipe', 'pipe'] },
+    // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写 + 父进程消失自退（M1-6）。
+    // **不带** `-tags release` 的内嵌资产（资产由壳服务，核心只在需要时按 `--web-dir` 读同一份，M2-6 接线）。
+    ['serve', '--addr', '127.0.0.1:0', '--auth-stdin', '--ready-stdout', '--exit-with-parent'],
+    {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // 独立进程组（POSIX）：退出时对**整组**发信号，核心手里的 runtime 子进程一并收掉。
+      // 它同时意味着"壳崩了核心不会自动收到信号"——那由核心自己的 --exit-with-parent 兜底。
+      detached: true,
+    },
   ) as ChildProcessWithoutNullStreams
 
   const log = opts.onLog ?? (() => {})
@@ -136,12 +141,82 @@ async function waitHealthy(addr: string, log: (l: string) => void): Promise<void
   throw new Error(`核心 health 复核失败（${HEALTH_TIMEOUT_MS / 1000}s 内未就绪）：${lastErr}`)
 }
 
-/** 请求核心退出（M1-6 会补"等核心退出 → 宽限 → 进程组 SIGKILL"的完整语义）。 */
-export function stopCore(handle: CoreHandle | null): void {
-  if (!handle) return
+/** 向**整个进程组**发信号（POSIX：detached 子进程的 pgid == pid，负号即整组）。 */
+function signalGroup(pid: number, sig: NodeJS.Signals): void {
   try {
-    handle.child.kill('SIGTERM')
+    process.kill(-pid, sig)
   } catch {
-    /* 已退出 */
+    // 组信号在个别平台/时机可能不可用，退化为只发直接子进程（不静默失败）。
+    try {
+      process.kill(pid, sig)
+    } catch {
+      /* 已退出 */
+    }
+  }
+}
+
+/**
+ * 优雅停机（M1-6）：`SIGTERM` → 等核心退出（宽限 `graceMs`，默认 3s）→ 对**进程组** `SIGKILL`。
+ *
+ * 为什么必须补 SIGKILL：核心自己会优雅回收 runtime 子进程，但它可能卡住（底座无响应、
+ * 权限确认悬着）。宽限期一到就整组杀掉——桌面用户点了"退出"，应用就必须真的退出。
+ */
+export async function stopCoreGracefully(
+  handle: CoreHandle | null,
+  opts: { graceMs?: number; log?: (msg: string) => void } = {},
+): Promise<void> {
+  if (!handle) return
+  const pid = handle.child.pid
+  if (!pid) return
+  const grace = opts.graceMs ?? 3000
+  const log = opts.log ?? (() => {})
+
+  if (handle.child.exitCode !== null || handle.child.signalCode !== null) return
+
+  const exited = new Promise<'exited'>((resolve) => handle.child.once('exit', () => resolve('exited')))
+  signalGroup(pid, 'SIGTERM')
+  log(`已向核心进程组发 SIGTERM（pid=${pid}），宽限 ${grace}ms`)
+
+  const winner = await Promise.race([
+    exited,
+    new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), grace)),
+  ])
+  if (winner === 'timeout') {
+    log(`核心 ${grace}ms 内未退出，对进程组 SIGKILL`)
+    signalGroup(pid, 'SIGKILL')
+  } else {
+    log('核心已退出')
+  }
+}
+
+/**
+ * 向核心询问"有没有在途轮次"（M1-6 退出前二次确认的依据）。
+ *
+ * 用既有读模型：`GET /v1/forge/conversations` 的 `status=running` 即"这一轮还没收尾"。
+ * **不新增端点**——这个判断是"退出前问一句"，不值得为它改对外路由表。
+ *
+ * 超时/出错时返回 `known:false`：调用方按**有任务**保守处理（设计 §7.4），
+ * 因为"以为没在跑"地退出会真的打断一轮对话。
+ */
+export async function probeRunningTurns(
+  handle: CoreHandle | null,
+  timeoutMs = 2000,
+): Promise<{ known: boolean; running: number }> {
+  if (!handle) return { known: true, running: 0 }
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), timeoutMs)
+  try {
+    const r = await fetch(`http://${handle.addr}/v1/forge/conversations?limit=200`, {
+      headers: { authorization: `Bearer ${handle.restToken}` },
+      signal: ctl.signal,
+    })
+    if (!r.ok) return { known: false, running: -1 }
+    const j = (await r.json()) as { code?: number; data?: Array<{ status?: string }> }
+    if (j.code !== 0 || !Array.isArray(j.data)) return { known: false, running: -1 }
+    return { known: true, running: j.data.filter((c) => c.status === 'running').length }
+  } catch {
+    return { known: false, running: -1 }
+  } finally {
+    clearTimeout(timer)
   }
 }
