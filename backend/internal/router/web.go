@@ -1,11 +1,16 @@
 package router
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +43,11 @@ type AssetInfo struct {
 	FS fs.FS
 	// BuildID 前端构建 id（M2-4 填；从 build-id.txt 读）。
 	BuildID string
-	// Digest 逐文件 sha256 的确定性合成（M2-3 填）。
+	// Digests 逐文件 sha256（rel path → hex），解析期算一次。
+	// 两个用途：静态响应的**内容 ETag**（内嵌资产没有 mtime，只有内容摘要可靠），
+	// 以及 /meta 的 webDigest 合成（M2-3）。
+	Digests map[string]string
+	// Digest 逐文件摘要的确定性合成（`sha256:<hex>`；排序后按 `rel\0hex\n` 拼接再哈希）。
 	Digest string
 }
 
@@ -62,7 +71,7 @@ func ResolveAssets(webDir string) (AssetInfo, error) {
 					"  独立二进制：用 `-tags release` 构建（资产进二进制）\n" +
 					"  桌面形态：由壳传 --web-dir 指向包内那一份 dist")
 		}
-		return AssetInfo{Source: AssetSourceBuiltin, FS: sub}, nil
+		return withDigests(AssetInfo{Source: AssetSourceBuiltin, FS: sub})
 	}
 
 	if !filepath.IsAbs(dir) {
@@ -80,7 +89,54 @@ func ResolveAssets(webDir string) (AssetInfo, error) {
 	if _, err := os.Stat(index); err != nil {
 		return AssetInfo{}, fmt.Errorf("--web-dir 目录里没有 index.html：%s（%v）", index, err)
 	}
-	return AssetInfo{Source: AssetSourceDir, Path: abs, FS: os.DirFS(abs)}, nil
+	return withDigests(AssetInfo{Source: AssetSourceDir, Path: abs, FS: os.DirFS(abs)})
+}
+
+// withDigests 解析期算一遍逐文件 sha256 与合成摘要。
+//
+// 为什么在解析期而不是每次请求：内嵌资产没有 mtime，**内容摘要**是唯一可靠的条件请求依据；
+// 而逐请求哈希 1.3MB 的 chunk 纯属浪费（单操作员回环服务也不该这么花）。
+// 走查失败（理论上不会：ResolveAssets 已校验 index.html）时返回 Info 但不带摘要——
+// 让"没有 ETag"退化成普通的可缓存响应，而不是让服务起不来。
+func withDigests(info AssetInfo) (AssetInfo, error) {
+	digests := map[string]string{}
+	err := fs.WalkDir(info.FS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, rerr := fs.ReadFile(info.FS, path)
+		if rerr != nil {
+			return rerr
+		}
+		sum := sha256.Sum256(b)
+		digests[path] = hex.EncodeToString(sum[:])
+		return nil
+	})
+	if err != nil {
+		return info, nil
+	}
+	info.Digests = digests
+	info.Digest = compositeDigest(digests)
+	return info, nil
+}
+
+// compositeDigest 逐文件摘要的确定性合成（C9 的"可复现"要求）：
+// 按路径排序，逐行 `rel\0hex\n` 拼接后再 sha256。不含时间戳、不含绝对路径，
+// 因此同一份产物在内嵌与目录两种来源下**得到同一个值**（M2-5 的一致性断言就比它）。
+func compositeDigest(digests map[string]string) string {
+	if len(digests) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(digests))
+	for p := range digests {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	h := sha256.New()
+	for _, p := range paths {
+		fmt.Fprintf(h, "%s\x00%s\n", p, digests[p])
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // MountWeb 把已解析的资产挂到引擎上（设计 §6.2）。
@@ -112,8 +168,6 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 		c.Status(http.StatusOK)
 		_, _ = c.Writer.Write(index)
 	}
-	hfs := http.FS(assets.FS)
-
 	r.GET("/", indexResp)
 	r.NoRoute(func(c *gin.Context) {
 		if isAPIPath(c.Request.URL.Path) {
@@ -127,15 +181,69 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 		}
 		if p != "" && !strings.HasSuffix(p, "/") {
 			if fi, err := fs.Stat(assets.FS, p); err == nil && !fi.IsDir() {
-				setDocumentCSP(c)
-				c.Header("Cache-Control", cacheControlFor("/"+p))
-				c.FileFromFS(p, hfs)
+				serveStaticFile(c, assets, p)
 				return
 			}
 		}
 		// SPA 深链：前端路由（/settings、/conversations/<id>…）由页面自己解析。
 		indexResp(c)
 	})
+}
+
+// serveStaticFile 服务一个**存在的**静态文件：内容 ETag + 条件请求 304 + 三档缓存头。
+//
+// 为什么不用 `c.FileFromFS`：它背后是 http.ServeContent，条件请求只认 mtime——
+// 而内嵌资产的 mtime 是零值（两个来源还会给出不同的 Last-Modified，正是设计 §6.2 要避免的
+// "两侧行为不一致"）。改用**内容摘要**做 ETag：内嵌与目录两种来源给出同一个值，
+// 且强校验（内容变了 ETag 必变）。
+//
+// 不设 Last-Modified：零值/来源相关的 mtime 只会误导缓存；有强 ETag 就够了。
+func serveStaticFile(c *gin.Context, assets AssetInfo, rel string) {
+	data, err := fs.ReadFile(assets.FS, rel)
+	if err != nil {
+		writeNotFound(c)
+		return
+	}
+	etag := assets.etagFor(rel, data)
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", cacheControlFor("/"+rel))
+	if ifNoneMatch(c.GetHeader("If-None-Match"), etag) {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	ctype := mime.TypeByExtension(path.Ext(rel))
+	if ctype == "" {
+		ctype = "application/octet-stream"
+	}
+	c.Data(http.StatusOK, ctype, data)
+}
+
+// etagFor 取该文件的内容 ETag（解析期已算过；没有摘要时按需现算，保证行为不变）。
+func (a AssetInfo) etagFor(rel string, data []byte) string {
+	sum, ok := a.Digests[rel]
+	if !ok {
+		s := sha256.Sum256(data)
+		sum = hex.EncodeToString(s[:])
+	}
+	return `"` + sum + `"`
+}
+
+// ifNoneMatch 判定 If-None-Match 是否命中该 ETag（支持 `*` 与逗号分隔的多值、弱比较前缀 W/）。
+func ifNoneMatch(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	if strings.TrimSpace(header) == "*" {
+		return true
+	}
+	for _, part := range strings.Split(header, ",") {
+		v := strings.TrimSpace(part)
+		v = strings.TrimPrefix(v, "W/")
+		if v == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // cacheControlFor 缓存语义（设计 §6.2；M2-2 统一两侧）：
