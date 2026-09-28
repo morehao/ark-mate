@@ -241,6 +241,16 @@ func (h *hostClient) SessionUpdate(ctx context.Context, n acpsdk.SessionNotifica
 			})
 		}
 	}
+	// available_commands_update 携带**全量**命令列表，只做归一化 + 上抛（不落会话快照：
+	// 命令没有"读当前值"的消费方，理由见 Session 的注释）。空列表同样上抛——
+	// "底座通告了当前没有命令"是一条需要让前端清空既有候选的事实，不是"没发生"。
+	if upd := n.Update.AvailableCommandsUpdate; upd != nil && h.opts.OnEvent != nil {
+		h.opts.OnEvent(Event{
+			Kind:      KindCommands,
+			SessionID: string(n.SessionId),
+			Payload:   CommandsInfo{SessionID: string(n.SessionId), Commands: commandsFromSDK(upd.AvailableCommands)},
+		})
+	}
 	if h.opts.OnEvent == nil {
 		return nil
 	}

@@ -329,6 +329,21 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 forge 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-forge:runtimes` + `USER root` + `apt-get install -y …`。
+- **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(forge)`、`HOME=/data` 运行，
+  凭据要落在 `/data` 下且对 `forge` 可读。**注意 bind mount 通常不行**——宿主机上
+  `~/.local/share/opencode/auth.json` 是 `600` 且属主为宿主用户，容器里的 `forge` 读不到（实测踩到）；
+  用 `docker cp` + `chown` 才稳，也可自行用 secret / 初始化脚本实现等价效果：
+
+  ```bash
+  docker exec -u root <容器> mkdir -p /data/.config/opencode /data/.local/share/opencode
+  docker cp ~/.config/opencode/opencode.json <容器>:/data/.config/opencode/opencode.json
+  docker cp ~/.local/share/opencode/auth.json <容器>:/data/.local/share/opencode/auth.json
+  docker exec -u root <容器> sh -c 'chown -R forge:forge /data/.config /data/.local && chmod 600 /data/.config/opencode/opencode.json /data/.local/share/opencode/auth.json'
+  ```
+
+  dsh 侧的 provider 凭据走**环境变量**（`~/.dsh/settings.yaml` 里 `apiKeyEnv: YYUG_API_KEY` 之类），
+  即容器启动时 `-e` 传入。没有对应变量时 dsh 仍能起来并完成 ACP 握手，但第一轮请求会失败——
+  这是如实语义，不是平台静默降级（实测见 §8）。
 
 ### 4.1 运行
 
@@ -546,10 +561,32 @@ sudo systemctl restart ark-forge
     1.18.30（均在 `PATH` 上，以 `forge` 用户可执行）；`POST /agents/dsh/start` → `GET
     /agents/dsh/diagnostics` = `connected=true pid=15`，握手能力 `sessions_persistent=true resume=true
     list=true`；`POST /agents/opencode/start` → `connected=true pid=35`；`DSH_HOME=/data/dsh` 落卷
-    （`/data` 下出现 `dsh/`、`.config/`、`.local/`）。**未跑真实模型轮次**：本机无 `DEEPSEEK_API_KEY`
-    / `OPENAI_API_KEY`。
+    （`/data` 下出现 `dsh/`、`.config/`、`.local/`）。**当时未跑真实模型轮次**：本机无
+    `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`（**2026-09-24 已补上，见下面 T-5 那条**）。
   - **compose 路径**：`docker compose up -d --build`（同一组镜像站变量）→ `docker compose ps` =
     `127.0.0.1:18003->10001/tcp`、health OK、`docker compose down -v` 干净回收容器与卷。
+- **含底座镜像用当前代码重建 + 容器内跑通一轮真实会话（2026-09-24 补做，T-5 收口）**：
+  - 构建：`GO_PROXY="https://goproxy.cn,direct" DSH_VERSION=0.1.5-rc.3 OPENCODE_VERSION=1.18.32
+    make image/runtimes WITH_DSH=true WITH_OPENCODE=true` → `ark-forge:runtimes`（**673 MB**，
+    d1c6252c）。顺带修掉 Makefile 与文档不一致：该目标原来固定产出 `$(IMAGE_TAG)-runtimes`
+    （默认 `ark-forge:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是
+    `ark-forge:runtimes`——**开箱即用不了**；现由独立的 `RUNTIMES_TAG`（默认 `runtimes`）决定。
+  - 开关组合：只有 opencode 的一版也构建成功（`RUNTIMES_TAG=runtimes-oc`，**450 MB**，
+    容器内 `opencode --version`=1.18.32、`dsh` 不存在），证明按 runtime 的开关确实各自生效。
+  - 镜像内版本：`node -v`=v24.21.0、`dsh --version`=**0.1.5-rc.3**、`opencode --version`=**1.18.32**
+    （注意 `sh -lc` 会重置 `PATH`，校验请用 `sh -c`；daemon 不走 login shell，不受影响）。
+  - 内嵌前端是当前代码：`GET /` 命中 `/assets/index-CW2VHftr.js`，其中含 `fg-cmd-pop`（M5′ 命令补全）。
+  - **真实一轮**（`make image/run IMAGE_TAG=runtimes FORGE_PORT=18011` + §4 的凭据投递步骤）：
+    `POST /agents/opencode/start` → `connected=true pid=87`；`POST /conversations`
+    （`cwd=/data/workspaces`）→ `POST /conversations/:id/prompt`（字段名是 **`prompt`**，不是 `text`）
+    → `status=completed`、`title` 落定、`history` 里 `session.message` 正文为 `ok`、
+    `GET /usage/summary` = `source=sqlite runs=1 completed=1`。
+  - **M5′ 在打包镜像里同样成立**：同一条会话的 `history` 里出现 `session.commands`
+    （容器内 3 条：`customize-opencode`/`init`/`review`——比宿主机少，因为镜像里没有
+    `~/.agents/skills`，这是如实差异）。`docker ps` 的 health 列由 `starting` 转 `healthy`。
+  - dsh 侧：`POST /agents/dsh/start` → `connected=true pid=160`（能起、能握手）；**仍无真实轮次**——
+    dsh 的 provider 凭据走环境变量（`apiKeyEnv: YYUG_API_KEY`），本机未导出该变量。故本轮"容器内跑通
+    一轮真实对话"由 opencode 达成。
 - 连接拆除语义（上述验证顺带复现并**已修复**）：daemon 收到 SIGTERM 关闭 runtime 连接时，曾走
   `Orchestrator.disconnectConversation` 的「空闲会话 → 标 `failed`」分支，于是**上一轮已 `completed`
   的会话在 `docker restart` / 重启 daemon 后变成 `failed`**（同机 `kill -TERM ./forge serve` 同样复现；

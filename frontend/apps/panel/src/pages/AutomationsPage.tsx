@@ -172,10 +172,12 @@ export function AutomationsPage() {
       const resp = await previewAutomation(body)
       setPreview({ items: resp.occurrences ?? [], warnings: resp.warnings ?? [] })
     } catch (err) {
-      // 校验失败与领域拒绝都在这里显形：预览的整个意义就是"先把话说清楚"
-      const msg = err instanceof Error ? toErrorMessage(err) : String(err)
+      // 校验失败与领域拒绝都在这里显形：预览的整个意义就是"先把话说清楚"。
+      // 注意 antd 的 `validateFields()` 失败时 reject 的**不是 Error**，而是 `{ errorFields, ... }`
+      // 这种普通对象——对它走 `String(err)` 界面上就只剩一句 `[object Object]`（真机验收截图抓到）。
+      // 所以"表单没填完"这一类单独说清楚，其余才回落 toErrorMessage。
       setPreview(null)
-      setPreviewErr(msg)
+      setPreviewErr(describeFormError(err))
     }
   }
 
@@ -578,4 +580,46 @@ function CwdPicker({
 
 function isNeedsAttention(a: Automation): boolean {
   return a.state === 'needs_attention' || (a.consecutive_failures ?? 0) > 0
+}
+
+/** Form.Item 字段名 → 界面标签：出错时只说人话，别把字段名直接甩给用户。 */
+const FIELD_LABEL: Record<string, string> = {
+  id: 'ID',
+  name: '名称',
+  kind: '调度',
+  timezone: '时区',
+  once_at: '触发时刻',
+  hour: '时',
+  minute: '分',
+  days_of_week: '每周的哪几天',
+  agent_id: 'Agent',
+  runtime_hint: 'Runtime',
+  cwd: '工作空间',
+  model: '模型',
+  prompt: 'Prompt',
+  max_run_duration: '单轮上限',
+}
+
+/**
+ * 把预览失败翻译成一句人话。
+ *
+ * 关键一条：antd 表单校验失败时 `validateFields()` reject 的**不是 Error**，而是
+ * `{ errorFields: [{ name: ['cwd'], errors: [...] }] }` 这样的普通对象——老代码对它走
+ * `String(err)`，界面上就只剩 `[object Object]`（真机验收截图抓到，恰好把"预览就是为了
+ * 先把话说清楚"反过来）。所以校验失败单独列字段与原因，领域拒绝（HTTP 信封带 message）
+ * 照常走 toErrorMessage，其余兜底成 JSON 而不是 `[object Object]`。
+ */
+function describeFormError(err: unknown): string {
+  const fields = (err as { errorFields?: { name?: (string | number)[]; errors?: string[] }[] } | null)?.errorFields
+  if (Array.isArray(fields) && fields.length > 0) {
+    const parts = fields.map((f) => {
+      const key = String(f.name?.[f.name.length - 1] ?? '')
+      const label = FIELD_LABEL[key] ?? key
+      const why = f.errors?.[0]
+      return why ? `${label}（${why}）` : label
+    })
+    return `表单还没填完：${parts.join('、')}`
+  }
+  if (typeof err === 'object' && err !== null) return JSON.stringify(err)
+  return String(err)
 }

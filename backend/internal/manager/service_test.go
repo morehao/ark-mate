@@ -102,6 +102,73 @@ func TestEventSinkWrongPayloadType(t *testing.T) {
 	}
 }
 
+// TestEventSinkCommands 命令发现面（ADR-17）：acl 的 available_commands_update →
+// `session.commands` 域事件，agg = 平台会话 uuid，载荷带全量命令且**保序**（平台不重排）。
+// 另钉住两条容易做错的语义：空列表**照样发布**（"通告了当前没有命令"要让前端清空候选），
+// 载荷类型不匹配则被跳过。
+func TestEventSinkCommands(t *testing.T) {
+	_, orch, bus := newTestRig(t)
+	orch.mu.Lock()
+	orch.byProvider["s1"] = "conv-1"
+	orch.mu.Unlock()
+	sink := orch.eventSink("agent-opencode", "opencode")
+	sub := bus.Subscribe(0)
+	defer bus.Unsubscribe(sub)
+
+	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: acl.CommandsInfo{
+		SessionID: "s1",
+		Commands: []acl.CommandInfo{
+			{Name: "review", Description: "审查改动", Hint: "文件路径"},
+			{Name: "init"},
+		},
+	}})
+
+	var ev eventbus.Event
+	select {
+	case ev = <-sub.C:
+	case <-afterShort():
+		t.Fatal("未收到 session.commands 事件")
+	}
+	if ev.Type != BusCommands {
+		t.Fatalf("事件 type 不符: %s", ev.Type)
+	}
+	if ev.AggregID != "conv-1" {
+		t.Fatalf("agg 应为平台会话 uuid: %+v", ev)
+	}
+	p, _ := ev.Payload.(map[string]any)
+	if p["session_id"] != "conv-1" || p["agent_id"] != "agent-opencode" || p["runtime"] != "opencode" {
+		t.Fatalf("载荷基础字段不符: %+v", p)
+	}
+	cmds, ok := p["commands"].([]acl.CommandInfo)
+	if !ok {
+		t.Fatalf("commands 类型不符: %#v", p["commands"])
+	}
+	if len(cmds) != 2 || cmds[0].Name != "review" || cmds[0].Hint != "文件路径" || cmds[1].Name != "init" {
+		t.Fatalf("命令应全量且保序: %+v", cmds)
+	}
+
+	// 空列表也要发布：它不是"没发生"，而是"底座通告了当前没有命令"。
+	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: acl.CommandsInfo{
+		SessionID: "s1", Commands: []acl.CommandInfo{},
+	}})
+	select {
+	case ev = <-sub.C:
+	case <-afterShort():
+		t.Fatal("空列表通告也必须发布（否则前端会一直显示陈旧候选）")
+	}
+	p, _ = ev.Payload.(map[string]any)
+	if cmds, ok := p["commands"].([]acl.CommandInfo); !ok || len(cmds) != 0 {
+		t.Fatalf("空列表载荷不符: %#v", p["commands"])
+	}
+
+	// 载荷类型不匹配：跳过而不是发布一个半成品。
+	before := bus.LastSeq()
+	sink(acl.Event{SessionID: "s1", Kind: acl.KindCommands, Payload: "not commands"})
+	if bus.LastSeq() != before {
+		t.Fatalf("类型不匹配不应发布: last=%d", bus.LastSeq())
+	}
+}
+
 // TestDisconnectIdleConversation 连接**意外**断开 + 会话空闲：不改写上一轮的终态、不伪造
 // turn.error（轮次结果只由轮次写）；只落 agent 级诊断（连接确实断了）并作废句柄（可重建）。
 func TestDisconnectIdleConversation(t *testing.T) {

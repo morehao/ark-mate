@@ -20,6 +20,7 @@ import {
 import type {
   Agent,
   BusEvent,
+  CommandInfo,
   ElicitationFormSchema,
   PermissionOption,
   ConfigOption,
@@ -58,6 +59,15 @@ export interface ConversationView {
    * 服务端读到的可能已是旧状态——用这个计数当锚点，动过就以事件为准，避免把已撤下的项复活。
    */
   queueSeq: number
+  /**
+   * 底座自报的可用斜杠命令（`session.commands` 全量事件的投影；ADR-17 命令发现面）。
+   *
+   * `undefined` = 本会话**从未**收到过通告（dsh 的 ACP 面不含命令，永远如此）——
+   * 面板据此不显示候选，且**不得**说成"你还没配命令"；
+   * `[]` = 底座通告了"当前没有命令"（同样是事实，要清掉既有候选）。
+   * 会话重开时由事件全量回放重建，故没有 REST 读端点。
+   */
+  commands?: CommandInfo[]
 }
 
 const emptyView = (): ConversationView => ({
@@ -342,6 +352,13 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
         }),
         lastSeq,
       }
+    }
+    case Ev.Commands: {
+      // 全量语义（协议保证非增量）：直接替换，空数组也替换——否则"底座通告现在没有命令"之后
+      // 面板会一直显示陈旧候选。载荷形状不符（非数组）时不猜、保留原值，只推进水位。
+      const list = e.payload?.commands
+      if (!Array.isArray(list)) return { ...v, lastSeq }
+      return { ...v, commands: list as CommandInfo[], lastSeq }
     }
     case Ev.Usage:
       return { ...v, lastSeq }

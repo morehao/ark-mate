@@ -30,6 +30,7 @@
 - **P2 页面（Agents 管理页）**：原只读列表升级为管理面——注册向导（ID/名称/Runtime/Provider 档案，`agent-` 保留前缀与格式校验）、**「设为当前」切换当前 Agent**（`is_default` 行标出当前，切换后新建会话面板的 Agent 徽标即时跟随；当前行不再显示该按钮）、启动/停止按钮、编辑（热更新 name/provider；种子 runtime 只读）、删除（仅自定义，Popconfirm 里如实列出影响面：多少条会话将失去执行者、是否当前 Agent；删除回执再报实际摘除数）；下方 Provider 档案区（新建/编辑：type/model/密钥输入，`has_key` 标签只写不读回、留空不变更）；诊断弹窗把 `remediation` 作为「建议处理步骤」列出（怎么装底座、怎么补密钥）。Settings 页文案同步指向该页。
 - **P2 provider 注入面**：`GET /providers` + `PATCH /providers/:id`（档案 upsert；密钥**只写不读回**——GET 只给 `has_key`；`key` 空串=清除）；agent 引用 provider 档案时启动拨号注入 `<TYPE>_API_KEY`（type 未知取大写 type + `_API_KEY`），档案落 `<AgentDir>/providers.json`。**密钥加密落盘（§5 vault）**：文件里只留引用 `key_ref: "vault:providers/<id>"`，密文落 `~/.forge/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 `{kind, ref}`——密文挪到别的引用/kind 上必然解不开），明文只在内存与子进程 env；主密钥 `~/.forge/vault.key`（0600，拒符号链接与过宽权限；可用 `FORGE_VAULT_KEY` 覆盖）**必须纳入备份**，丢了密文不可恢复；旧版明文档案在启动时幂等迁移（加密写回 + 清明文），密文解不开时报 `credential_missing` 并带出「确认 vault.key 未丢失/未被更换」的出路。
 - **模型目录（运行时派生，无内置清单）**：`GET /models`（`?agent=<id>`，缺省取默认 agent）返回**由运行时自报**的会话配置项（ACP session config options）——模型目录（`category=model`）为主，运行时给出的其它选项（如 `mode`/`thought_level`）一并原样透出但只作展示，平台**不提供思考档位选择面**（少一个「取值随模型变化」的耦合点），也**不内置任何模型清单**（原 `internal/modelcatalog` 的 `go:embed` 快照 + 上游 live + 24h 磁盘缓存三段式已整体删除；provider 档案维度的模型目录路由（`GET /models` 外的旧路径）也已下线——provider 档案只承担密钥/启动 env 注入）。取样来源由响应 `source` 标注：`session`（直接读该 agent 的活跃会话）→ `cache`（内存 TTL 5min）→ `resume`（恢复该 agent 最近一条历史会话读取，读完即 `session/close`）→ `none`（空目录 + `note` + 运行时声明的鉴权引导 `auth_guidance`，面板据此提示登录）。**绝不新建探测会话**：dsh 的 `session/new` 经 `persistence.ensureMaterialized` 落持久记录、opencode 同样落库，而两家都不广告 `session/delete`，探测会留下永久垃圾。取值一律是**不透明字符串**（dsh 为 `JSON.stringify([provider, model])`、opencode 为 `provider/model`），前端只按 `category` 渲染并原样回传，绝不解析或拼接；可用性以运行时 `session/set_config_option` 的成败为唯一判据（平台不做白名单预判，设置失败即建会话失败、绝不静默回落默认模型），被运行时拒绝过的取值在目录里带 `unavailable`/`unavailable_reason` 标注。dsh 在 provider 拓扑变化时主动推送 `session/config_option_update`，平台据此刷新缓存并向 WS 转发 `session.config_options` 事件，模型下拉与「当前模型」无需轮询保持一致。
+- **命令发现面（不做投影/写面）**：底座经 ACP `available_commands_update` 自报的斜杠命令由平台**原样接收并回显**——WS 转发 `session.commands`（全量列表 `{name, description?, hint?}`，顺序由底座给出），面板在会话输入框里输入 `/` 时按该列表给候选提示。**平台不拥有这些命令**：ACP 规范里命令只有通告、没有独立执行方法，执行就是把命令行当普通提示词发出去（平台本来就支持），所以没有投影、没有写面、也没有 REST 读端点（会话重开靠事件重放，见 ADR-17）。**逐底座如实**：opencode 会通告（且会把 `~/.agents/skills` 里的 skill 也以命令形式通告），**dsh 不通告**（命令是插件进程内注册，ACP 面明确不含）——面板对不提供发现面的底座不显示候选，且**不会说成"你还没配命令"**。
 - **进程注册表 + 孤儿回收（M3 v4③）**：daemon 把拉起的 runtime 子进程（pid/pgid/命令/runtime/agent/实例 id）登记到 `<数据目录>/processes.json`（`FORGE_PROC_REGISTRY` 覆盖，`off` 关闭），正常停止/断连时摘除；启动时回收**上一实例遗留**的孤儿进程（SIGTERM → 宽限期 → SIGKILL 整个进程组），并以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。实测：opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出，故孤儿多出现在「runtime 忽略 EOF / 派生孙进程」场景，注册表为兜底防线。
 - **P2 空闲回收 + 按需拉起**：reapLoop（`FORGE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `FORGE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
 - **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写；**文本增量按 ③ 合并后落行**——`session.message`/`thought` 攒批 25ms / 4KB / 64 条，故一行可能覆盖多个 delta、长回复不再产生几百行，而工具卡/权限卡/提问卡/用户消息/终态仍一条一行）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`；P1 起提供 `forge migrate` 把既有 transcript 幂等导入 SQLite、`forge transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
@@ -333,7 +334,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | 能力代际数达上限（`FORGE_GENERATION_LIMIT`，默认 4） | `40901` | `generation_limit_reached` | 复用现有能力集（同一套技能/MCP 组合）、等空闲代际被回收、或调大上限。**平台绝不静默复用一个错误的能力集** |
 | 权限面已收窄（原生权限/provider 变化）而新代际建不起来 | `40901` | `generation_switch_required` | 稍后重试（先修配置）；**这一轮不会用已经收回的权限面继续跑**——宁可拒发 |
 
-WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`turn.ended/error`、`run.cancelled`、`automation.run`（一次 automation 触发的结果，含没产生会话的 duplicate/overlap/skipped——**持久运行史在定义文件的 `recent_runs`，这条事件只走实时通道**）等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
+WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；attach 带 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`session.commands`（底座自报的会话可用斜杠命令**全量**列表——**发现面，不是平台声明的能力**：只有 opencode 会通告，dsh 的 ACP 面不含命令故永不产生该事件；空数组表示"通告了当前没有命令"，执行只是把命令行当普通提示词发出去，平台不投影也不写面）、`turn.ended/error`、`run.cancelled`、`automation.run`（一次 automation 触发的结果，含没产生会话的 duplicate/overlap/skipped——**持久运行史在定义文件的 `recent_runs`，这条事件只走实时通道**）等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
 
 ## 开发
 
@@ -343,6 +344,16 @@ make web      # 仅构建前端并刷新 embed 宿主目录
 make build    # 不带 release 的内核编译（无需前端产物）
 make vet / test   # go vet / go test ./...
 # 前端：cd frontend && pnpm typecheck / pnpm build
+```
+
+验收驱动（都要先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
+
+```bash
+cd frontend
+pnpm smoke:e2e            # REST/WS 冒烟（不需要真实底座）
+pnpm smoke:e2e:live dsh   # 真一轮对话（需要装好底座与凭据）
+pnpm ui:accept            # 真 Chrome 界面验收：能力勾选面板 / `/` 命令补全 / 自动化页
+                          # 可只跑一条：pnpm ui:accept cmd（cap | cmd | auto）
 ```
 
 容器：

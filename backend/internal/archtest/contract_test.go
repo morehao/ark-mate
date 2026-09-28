@@ -28,6 +28,7 @@ var frozenEventTypes = []string{
 	"session.usage",
 	"session.permission",
 	"session.config_options",
+	"session.commands",
 	"session.permission_request",
 	"session.permission_policy",
 	"session.permission_resolved",

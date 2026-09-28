@@ -14,6 +14,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
   - 以上六条边界都由 `internal/archtest` 的守卫测试强制（`go test ./internal/archtest/`）；同目录还另有**四条**契约/出口守卫：事件 type 冻结快照（`TestEventTypeContractFrozen`）、前端事件同步边（`TestFrontendEventTypesMatchRegistry`）、控制器错误出口带码（`TestControllerErrorExitsCarryCode`）、**能力绑定粒度不得超出已实测范围**（`TestCapabilityScopeDeclaration`：未 `Tested` 的 runtime 不得声明比 `process` 更细的 `CapabilityScope`，否则平台可能把 A 会话的能力投给 B 会话）。**共 10 条**——加守卫时记得同步这句话。
 - `frontend/`：pnpm workspace（`apps/panel` 控制台 + `packages/{ui,types,api,tsconfig}`）。Node 看 `frontend/.nvmrc`（24.x，团队用 fnm）、pnpm 看 `frontend/package.json` 的 `packageManager`；`engines` + Makefile 守卫 node 主版本不符即失败。
 - `docs/` 设计文档是**历史记录**（会话早期叫 sessions，P0 起为 conversations）；对外契约以 README「控制面接口摘要」与 `backend/internal/router/router.go` 为准。
+- `docs/assets/`：文档的**静态资源唯一收口**（图片/矢量图/后续其他静态文件），不散落在 `docs/` 根下；文档内用相对路径引用（`![alt](assets/xxx.svg)`）。
 
 ## 错误码（唯一事实源 `backend/pkg/code`）
 
@@ -30,6 +31,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 - 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
 - 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（夹具用 `testutil.StubRegistry()` 提供的 stub runtime 注册表，需要真 ACP 语义的用例用自建最小 responder，见 `pkg/runtime/acp_testserver_test.go` / `pkg/acl/elicitation_e2e_test.go`）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。
+- 界面验收（前端无测试框架，这是"看过界面"的唯一路径）：`cd frontend && pnpm ui:accept [cap|cmd|auto]`——真 Chrome（CDP，零新依赖）+ 真服务，脚本自造自清夹具（验收用 skill / 自动化 / 会话），如实录见 `.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md`。**不进 CI**（要真浏览器 + 真底座 + 会真跑模型）。
 
 ## 构建形态
 
@@ -40,7 +42,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 
 平台聚合的概念从 P0 起叫 **conversation**，但**对外 wire 上它叫 `session`**——这是冻结的历史词汇，不是待修的笔误：
 
-- **wire 用 `session`**：事件 type 16/19 条是 `session.*`（`session.created`/`session.message`/`session.permission_resolved`…）、6 个 JSON 字段是 `session_id`、transcript 落盘 header 也是 `session_id`。前端 `@ark/types` 的 `events.ts` 与 `conversation.ts`、磁盘上既有的 transcript、`forge migrate` 全都依赖它。
+- **wire 用 `session`**：事件 type 20/24 条是 `session.*`（`session.created`/`session.message`/`session.permission_resolved`…；计数随事件新增而变，以 `internal/manager/events.go` 为准）、6 个 JSON 字段是 `session_id`、transcript 落盘 header 也是 `session_id`。前端 `@ark/types` 的 `events.ts` 与 `conversation.ts`、磁盘上既有的 transcript、`forge migrate` 全都依赖它。
 - **平台领域词用 `conversation`**：REST 资源路径 `/conversations/:id`、Go 类型 `Conversation`/`ActiveConversation`、`conversation_start.go`。
 - **`Session` 还另指一样东西**：**runtime 侧的 ACP 会话**。`ProviderSessionID`（原生底座会话 id）是它，`LoadSession`/`SessionCapabilities`/`SessionOptions`/`SessionInfo`/`NewSession`/`ResumeSession`/`SessionsPersistent`/`MultiSessionConcurrent` 也都是它——**这批不能改名**，改了就是把两个概念混成一个。注意 `sessions_persistent`/`multi_session_concurrent` 还是 health/diagnostics 的 wire key。
 
