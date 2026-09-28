@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop verify/asset-parity verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop verify/asset-parity verify/engines verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -117,6 +117,15 @@ verify/asset-parity:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm asset-parity
 
+# engines / ABI 打包期断言（M3-7）：桌面态的载荷 JS 跑在 **Electron 自带的 Node** 上
+# （`ELECTRON_RUN_AS_NODE=1`，见 M3-2 的私有 bin），所以要按 semver 比对载荷声明的
+# `engines.node` 与 Electron 的真实 Node 版本，并断言 `payload.json` 的 nodeAbi 与实际 ABI
+# 一致（不一致 = 原生 .node 到运行期才炸）。**Electron 主版本升级必须重跑这条。**
+# 需要载荷已在场（`make desktop/payloads`）；不需要起壳、不碰 ~/.forge。
+verify/engines:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm verify:engines
+
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。
 verify/desktop-dod:
@@ -125,7 +134,12 @@ verify/desktop-dod:
 	cd $(FRONTEND_ROOT) && pnpm typecheck
 	cd $(FRONTEND_ROOT) && pnpm test:contract
 	cd $(FRONTEND_ROOT) && pnpm asset-parity
+	cd $(FRONTEND_ROOT) && pnpm verify:engines
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
+	# V9（M3-8）：桌面态真起两份载荷（私有 bin + Electron 的 Node + 隔离环境）+ 一条"载荷目录零变化"
+	# 的指纹断言。它**不联网、不跑模型**，所以要真模型会话的那一档（RUNTIME_SMOKE_LIVE=1）不在这里。
+	# 三条回退条件里 ②③ 要 M4 的签名/公证/Windows 出包，脚本每次都显式打印"本脚本不判"。
+	cd $(FRONTEND_ROOT) && pnpm smoke:desktop
 
 # dev 用的资产就绪（不存在则构建一次）
 $(WEB_DIR)/index.html:

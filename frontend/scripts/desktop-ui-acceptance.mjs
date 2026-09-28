@@ -525,7 +525,15 @@ async function scenarioNodeChannel(shell) {
   } catch {
     versions = {}
   }
-  check('私有 node 是 Electron 的 Node（不是机器上的 node）', versions.e === '44.4.5', `electron=${versions.e ?? '(无)'} node=${versions.n ?? '?'} abi=${versions.a ?? '?'}`)
+  // **不写死 Electron 版本**：M3-8 把 pin 从 44.4.5 调回 44.0.0（dsh 的原生插件做 V8 精确指纹匹配），
+  // 写死会让这条断言变成假红。有意义的判据是两条：版本 == 仓库声明；ABI == 载荷清单记的那个
+  // （载荷里的原生模块就是按它编译的，ABI 对不上会运行期才炸）。
+  const declaredElectron = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8'))?.devDependencies?.electron ?? ''
+  const dshManifest = payloadFile('dsh', 'payload.json')
+  const declaredAbi = dshManifest ? JSON.parse(readFileSync(dshManifest, 'utf8'))?.nodeAbi ?? '' : ''
+  const detail = `electron=${versions.e ?? '(无)'} node=${versions.n ?? '?'} abi=${versions.a ?? '?'}（声明 ${declaredElectron}${declaredAbi ? ` / 载荷 ABI ${declaredAbi}` : ''}）`
+  check('私有 node 是 Electron 的 Node（版本 == 仓库声明）', !!versions.e && versions.e === declaredElectron, detail)
+  check('私有 node 的 ABI 与载荷清单一致（原生模块按它编译）', !!versions.a && versions.a === declaredAbi, detail)
   check('Node ABI 与载荷清单一致（M3-1 的 payload.json 写的就是它）', versions.a === '149', `abi=${versions.a ?? '?'}`)
 
   const npxEntry = payloadFile('dsh', 'node_modules', 'npm', 'bin', 'npx-cli.js')

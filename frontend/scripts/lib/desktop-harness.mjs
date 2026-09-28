@@ -28,7 +28,10 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
  * Electron 会派生一堆 Helper 子进程，它们的命令行同样含 `electron@<ver>...MacOS/`，
  * 用宽匹配会把它们当成"还有壳在跑"（而它们会随主进程一起消失）。
  */
-export const SHELL_RE = /electron@44\.4\.5.*MacOS\/Electron \./
+// **不写死 Electron 版本**：M3-8 把 pin 从 44.4.5 调回 44.0.0（dsh 的原生插件做 V8 精确指纹匹配），
+// 写死版本会让"残留壳检测"当场静默失效——表现为下一次运行被单实例锁挡住，
+// 而日志里只有一句"已有实例在运行"（实测踩过）。
+export const SHELL_RE = /electron@\d+\.\d+\.\d+.*MacOS\/Electron \./
 export const CORE_RE = /resources\/forge-core serve/
 
 /**
@@ -50,6 +53,44 @@ export const sh = (cmd, args, opts = {}) => {
 
 /** 全量进程列表（pid/ppid/command）。 */
 export const psAll = () => sh('ps', ['-Ao', 'pid,ppid,command'])
+
+/**
+ * 从 `ps -E` 的输出里取一个环境变量的值。
+ *
+ * 为什么读真进程的环境、而不是断言我们的构造函数：构造函数对了、spawn 时忘了传，一样是错的——
+ * 只有读真进程才闭环（V10 ② "在子进程内断言"的落点）。macOS 权限不足时 `ps -E` 会返回空串，
+ * 调用方要按"读不到"分支处理，不能把空串当成"变量没注入"。
+ */
+export function envValue(text, key) {
+  const m = text.match(new RegExp(`(?:^|\\s)${key}=([^\\s]*)`))
+  return m ? m[1] : undefined
+}
+
+/**
+ * 把 `ps -E -p <pid>` 的输出解析成环境变量表（键 → 值）。
+ *
+ * 口径与 {@link envValue} 一致：按空白切分、`KEY=VALUE`；`VALUE` 不能含空白（真实环境里这几个
+ * 变量都是路径/枚举，含空白的环境变量本就不在名单上）。读不到（权限/进程已退）返回空对象——
+ * 因此调用方要用 `Object.keys(env).length` 判"读不到"，不要用某个键是否存在来判。
+ */
+export function parseProcessEnv(text) {
+  const out = {}
+  if (!text) return out
+  const re = /(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=([^\s]*)/g
+  let m
+  while ((m = re.exec(text)) !== null) out[m[1]] = m[2]
+  return out
+}
+
+/**
+ * 从壳日志里取核心**实际监听**地址（`[core] ready 127.0.0.1:<port>`）。
+ *
+ * 端口是内核分配的随机值，所以调用方不能硬编码：Host 白名单、Origin 矩阵、直连断言都要按它判。
+ */
+export function coreAddrOf(shell) {
+  const m = /\[core\] ready (127\.0\.0\.1:\d+)/.exec(shell.logText())
+  return m ? m[1] : ''
+}
 
 /** 按正则找出匹配的 pid 列表（自动排除 grep 自身）。 */
 export function pidsMatching(re) {

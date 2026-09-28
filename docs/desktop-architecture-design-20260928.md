@@ -219,7 +219,7 @@ graph TB
 | 事实 | 值 | 来源 |
 | --- | --- | --- |
 | Electron 自带 Node | **24.18.1**（V8 15.2.124.13-electron.0，ABI 149） | 实测 `ELECTRON_RUN_AS_NODE=1 <Electron 可执行文件> -e 'process.versions'`（2026-09-28，Electron 44.0.0） |
-| dsh 要求的 Node | `^22.19.0 \|\| >=24.0.0` | 源码 `package.json` 的 `engines`（0.1.7-rc.2） |
+| dsh 要求的 Node | `^22.19.0 \|\| >=24.0.0` | 源码 `package.json` 的 `engines`（0.1.7-rc.2）。**实测订正（2026-09-28，M3-7）**：发布到 npm 的包里**没有保留 `engines`**（闭包内 85 个包有 engines，`@deepseek-ai/*` 一个都没有），因此随包载荷里没有可判定的声明——M3-7 的 engines 判定对 dsh 目前**退化**为「ABI + Electron 版本」两项（那两项有牙齿），并逐份打印「无声明 + 看过哪些文件」。这条值仍是我们对该 runtime 的**要求**；要让判定真正成立，应由装配期把它写进 `payload.json`（见计划 §13 的 T11） |
 | 结论 | **满足**，且由发布期断言持续保证（§5.3） | — |
 
 ### 5.2 机制
@@ -315,7 +315,26 @@ graph TB
 - **可写面**：只有 `FORGE_HOME` 下的状态目录。不往系统目录写任何东西，不持久改用户环境（私有 `bin` 只前置到子进程的临时 `PATH`，§6.6），不碰用户既有的 dsh / opencode 配置。
 - **完整性**：打包期逐文件生成清单 + CI 复算；启动期只做必要读取，全量复算由 `forge doctor --verify-payload` 承担。
 - **命名空间**：`payloads/<name>/<version>/`（随包）+ `FORGE_RUNTIME_<NAME>` 覆盖。当前两份：`dsh`、`opencode`；`npx` 走 Electron 的 Node + 私有 bin，不单独占一份载荷。将来加 `python`（部分 MCP server 需要）只需新增一份载荷 + 一个名字，配置面不动。
-- **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
+- **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，
+  则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
+- **形态结论（2026-09-28，M3-6）**：**当前不需要物化**，随包只读执行。三条回退条件的取证状态：
+  - ① **runtime 是否会写自身所在目录** —— 已验：桌面态经私有 bin 真起了两份载荷（`opencode` 完成
+    `initialize` + `session/new`；`dsh` 起进程并在 Electron 的 Node 上跑到 boot 阶段）后，两者载荷目录的
+    指纹（文件数 / 总字节 / 元数据摘要 / 目录 mtime）**逐字零变化**（见计划 §12.26；跑的是
+    `desktop-runtime-smoke.mjs`）。注意措辞：`dsh` 那天**没走完握手**，原因见下面的第四条约束；
+  - ② **签名 / 公证 / hardened runtime 是否允许包内执行** —— **未验**（需要 Apple 证书与真出包，属 M4；见计划 §13 的 T1）；
+  - ③ **Windows SmartScreen / AV 是否拦** —— **未验**（需要 Windows 测试机与出包，属 M4；见 T2）。
+
+- **第四条约束（2026-09-28 M3-8 实测新增，与上面三条并列，必须一起看）**：**载荷里的原生插件能不能在
+  壳随包的那份 Node 上 boot**。dsh 的传递依赖 `node-addon-require-builtin@0.1.6` 对 Electron 做
+  **V8 精确指纹**匹配（不是 ABI 匹配——ABI 两边都是 149，照样被拒），它的支持表只列了
+  `43.0.0 / 44.0.0 / 45.0.0-alpha.6`；本仓先前 pin 的 `44.4.5`（V8 15.2.124.28）不在表里，症状是
+  `dsh: fatal uncaught exception: … unsupported Electron runtime fingerprint`（进程起得来、握手发不出去）。
+  **处置：Electron 回到设计 §5.1 记的 `44.0.0`**（V8 15.2.124.13，ABI 同为 149），dsh 握手实测转绿。
+  教训要留住：**ABI 一致不等于能跑**——原生插件的 prebuilt 表可能还认 V8/Electron 版本；
+  M3-7 的 engines 断言目前只比 engines 声明 + ABI，抓不到这一层（见计划 §13 的 T11）。
+  因此这条结论是**有条件的**：②③ 一旦在 M4 被拒，按本节回退条件物化，且只对命中的那份载荷启用
+  （`--web-dir` 与 `FORGE_RUNTIME_<NAME>` 这两条既有通路已能承载，不需要新机制）。
 
 ### 6.4 与用户本机环境的隔离
 

@@ -14,7 +14,7 @@
     "@ark/desktop-contract": "workspace:*",
     "@ark/tsconfig": "workspace:*",
     "@types/node": "^24.10.1",
-    "electron": "44.4.5",
+    "electron": "44.0.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "pnpm": "11.24.0",
