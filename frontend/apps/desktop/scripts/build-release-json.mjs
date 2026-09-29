@@ -78,20 +78,47 @@ function runJson(script, args) {
 /**
  * 交付事实（§12.27 的决策，不是"环境探测"）：无证书 → ad-hoc 签名 + 内网 tar.gz + 手动更新。
  */
+/**
+ * 交付事实：**ad-hoc 签名 + 内网 tar.gz + 手动换包**，这是本项目的**长期口径**，不是"还没做"。
+ *
+ * 决策链：计划 §12.27（不上架、不购买 Apple Developer / Windows 代码签名证书 → 不公证、不签
+ * Developer ID）→ 2026-09-28 项目方复核确认"没有证书、也不需要上架应用市场"→ **M4-2b 不执行**。
+ * 因此这里不是"等证书到位就改"的占位，而是**把口径钉死**：任何一个公证/签名凭据出现在环境里，
+ * 都说明有人正走在另一条路上，而那条路没有被实现——此时代码选择**直接失败**，而不是产出一个
+ * release.json 与包里实际签名状态不符的包（那是最坏的一种撒谎：包是 Developer ID 签的，契约里写 adhoc，
+ * 之后任何基于这四个字段的判断都会错）。
+ *
+ * 真要重新开这条路（换主意了）：改本函数 + `release.json` 的四个字段 + `mac.identity`/`mac.notarize`，
+ * 并按计划 §13 的"契约变更先改设计文档"走一遍。绝不静默地半开。
+ */
 function deliveryFacts() {
-  // 有人给了证书类凭据时**明确失败**，而不是"照出包但 release.json 里写着 adhoc"——那是最坏的一种撒谎：
-  // 包是 Developer ID 签的，契约里写 adhoc，未来任何基于这三个字段的判断都会错。
-  const certish = ['CSC_LINK', 'CSC_NAME', 'CSC_IDENTITY', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']
+  const certish = [
+    'CSC_LINK',
+    'CSC_NAME',
+    'CSC_IDENTITY',
+    'CSC_KEY_PASSWORD',
+    'APPLE_ID',
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'APPLE_TEAM_ID',
+    'APPLE_API_KEY',
+    'APPLE_API_KEY_ID',
+    'APPLE_API_ISSUER',
+    'APPLE_KEYCHAIN_PROFILE',
+  ]
   const present = certish.filter((key) => (process.env[key] ?? '') !== '')
   if (present.length > 0) {
     fail(
-      `检测到证书/公证类环境变量：${present.join('、')}`,
-      'M4-1 只支持"无证书 + ad-hoc 签名 + 内网 tar.gz"形态（计划 §12.27）；证书路径见 M4-2a/2b，',
-      '要接证书必须先改本脚本与 release.json 的 signing/notarized/channel/macUpdate 四字段（契约变更先改设计文档）',
+      `检测到签名/公证类凭据：${present.join('、')}——本项目**不做证书**（计划 §12.27；M4-2b 不执行）`,
+      '打包形态固化在"ad-hoc 签名 + 内网 tar.gz + 手动换包"，release.json 的 signing/notarized/channel/macUpdate',
+      '四个字段是这句话的机器可读形式。要用证书 = 改本脚本 + electron-builder.yml 的 mac 段 + 那四个字段，',
+      '并按"契约变更先改设计文档"走一遍；在那之前请先把这些变量 unset（它们对本次打包没有任何作用）。',
     )
   }
   if (['1', 'true', 'yes'].includes(String(process.env.MAC_NOTARIZE ?? '').toLowerCase())) {
-    fail('MAC_NOTARIZE 已设置，但公证是 M4-2b 的范围，本阶段没有实现——不假装已公证，直接失败')
+    fail(
+      'MAC_NOTARIZE 已设置，但本项目不公证（计划 §12.27；M4-2b 不执行）——不假装已公证，直接失败',
+      'electron-builder.yml 里 `mac.notarize: false` 是长期口径，不是待办',
+    )
   }
   return { signing: 'adhoc', notarized: false, channel: 'tarball', macUpdate: 'manual' }
 }

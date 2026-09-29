@@ -71,8 +71,10 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
-  # 公证是 M4-2b（本期不做，只留 MAC_NOTARIZE 开关）。显式 false 免得 electron-builder 去
-  # 猜 notarize 配置：日志里那句 `skipped macOS notarization` 就是这条的结果，是预期而非失败。
+  # 公证：**不做，且是长期口径**（计划 §12.27：不上架、不购买 Apple Developer 证书；
+  # 2026-09-28 项目方确认"没有证书、也不需要上架应用市场" → M4-2b 不执行）。
+  # 显式 false 而不是留给 electron-builder 去猜：日志里那句 `skipped macOS notarization`
+  # 就是这条的结果，是预期而非失败。设了 MAC_NOTARIZE 或任何证书类凭据，build-release-json 会直接失败。
   notarize: false
 win:
   target:

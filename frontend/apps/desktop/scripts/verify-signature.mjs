@@ -214,8 +214,15 @@ function main() {
     if (declared === 'adhoc') {
       check('没有 Developer ID 签名（声明 adhoc）', devId.length === 0, devId.slice(0, 2).map((f) => `${f.abs.slice(appPath.length + 1)} team=${f.team}`).join('、'))
       check('全部对象都是 ad-hoc（无 Team ID）', facts.every((f) => f.adhoc), facts.filter((f) => !f.adhoc).slice(0, 2).map((f) => f.abs.slice(appPath.length + 1)).join('、'))
-    } else if (declared) {
-      note(`声明 signing=${declared}：本轮只断言"有签名 + hardened runtime"，Developer ID 的 Team ID 断言在接证书时补（M4-2b）`)
+    } else {
+      // **fail-closed**：本项目不做证书（计划 §12.27，2026-09-28 项目方确认无证书、不上架 → M4-2b 不执行），
+      // 所以 `signing` 只可能是 adhoc。出现别的声明 = 有人改了契约（那要先改设计文档），这里当场红，
+      // 而不是"打印一句 note 然后放行"——放行等于把判据悄悄降级成"只要包有签名就算过"。
+      check(
+        'release.json 的 signing 必须是 adhoc（本项目不接证书，§12.27）',
+        declared === 'adhoc',
+        declared ? `声明是 ${declared}` : 'release.json 里没有 signing 字段',
+      )
     }
 
     // ③ entitlements：写在 plist 里 ≠ 签进去了。
@@ -236,13 +243,16 @@ function main() {
       keys.filter((k) => k.includes('executable-memory')).join('、'),
     )
 
-    // ④ Gatekeeper：如实记录，不判失败（ad-hoc 必然被拒，§12.27）。
-    section('④ Gatekeeper 结论（如实记录，不作为失败判据）')
+    // ④ Gatekeeper：如实记录，不判失败。**ad-hoc 必然被拒，而且这是长期状态**（§12.27：不上架、
+    // 不买证书 → 不走 Gatekeeper 那条路，只走"非浏览器渠道的内网 tar.gz"），所以这条永远会是
+    // rejected —— 它是"我们没依赖 Gatekeeper"的证据，不是待修的问题。
+    section('④ Gatekeeper 结论（如实记录，不作为失败判据；ad-hoc 下预期恒为 rejected）')
     const spctl = run('spctl', ['-a', '-vvv', '-t', 'exec', appPath])
     const verdict = `${spctl.stdout}${spctl.stderr}`.trim().split('\n')[0] || `(退出码 ${spctl.status})`
     note(`spctl -a -vvv -t exec → ${verdict}`)
-    note('预期：ad-hoc 签名会被 Gatekeeper 拒（assess 需要 Developer ID + 公证）。本项目的分发渠道是')
-    note('内网 tar.gz（不带 quarantine，§12.27），所以这条不影响交付；接证书后它会自然转绿。')
+    note('预期且**长期**如此：ad-hoc 签名会被 Gatekeeper 拒（assess 需要 Developer ID + 公证）。')
+    note('本项目不上架、不买证书（§12.27；M4-2b 不执行），分发走"非浏览器渠道的内网 tar.gz"（不带 quarantine），')
+    note('所以 Gatekeeper 这条路本来就不在链路上——这条 rejected 是预期事实，不是待修的问题。')
 
     if (values.json) {
       console.log(
