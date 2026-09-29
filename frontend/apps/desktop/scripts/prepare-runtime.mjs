@@ -5,7 +5,8 @@
  * 产出：`apps/desktop/resources/payloads/<name>/<version>/`
  *   - `dsh/<version>/`      dsh 的**生产依赖闭包**（含 npm/npx 等 JS 部分，见设计 §6.3）
  *   - `opencode/<version>/` 平台化二进制
- * 每份载荷旁 `payload.json`：`{name, version, platform, arch, nodeAbi, entry, digest, files, bytes, fileList}`。
+ * 每份载荷旁 `payload.json`：`{name, version, platform, arch, nodeAbi, entry, digest, files, bytes, fileList, fileListBase}`。
+ *   `fileListBase` 说明 fileList 的相对路径相对于载荷根下的哪一层（M4-5 起写入；`""` = 载荷根本身）。
  *
  * ## 三条硬纪律
  *
@@ -20,7 +21,11 @@
  *
  * 用法：
  *   node scripts/prepare-runtime.mjs [--platform darwin|win32|linux] [--arch arm64|x64]
- *                                    [--payload dsh|opencode] [--skip-install] [--offline]
+ *                                    [--payload dsh|opencode] [--skip-install] [--offline] [--abi <n>]
+ *
+ *   `--skip-install --abi <n>` 是**离线重放**：不碰 pnpm store，只从 `runtime/<name>/node_modules`
+ *   已装好的树重新产出清单（用于复算/核对，或改了清单字段后重建）。重放**必须**显式给 --abi，
+ *   否则会写进本机 Node 的 ABI（与 Electron 的不一样，会被交叉校验抓出来）。
  *
  * 环境变量（都可选）：`FORGE_PAYLOAD_REGISTRY`（CI 镜像源）、`FORGE_PAYLOAD_STORE_DIR`（pnpm store）。
  */
@@ -189,6 +194,15 @@ function assemble(payload, target, { skipInstall, offline, abi }) {
       files: result.files,
       bytes: result.bytes,
       fileList: result.fileList,
+      // fileList 里的相对路径**相对于哪一层**（= 复制源根在载荷里的落点）。
+      //
+      // 为什么必须记下来（M4-5 补）：fileList 是 `copyTreeFiltered` 按**复制源根**记的，而
+      // 两份载荷的落点形态不同——dsh 的闭包在 `node_modules/` 下（源根 = 那份 node_modules），
+      // opencode 的包内容直接铺在载荷根（源根 = 包目录）。于是同一个 fileList 在两份载荷里
+      // 指向的层级不一样，而此前清单里**没有任何字段**说明这件事：消费方（`forge doctor
+      // --verify-payload` 是第一个）只能靠猜。路径算错必须明确失败，不能靠回落搜索
+      // （src/paths.ts 的同一纪律）——所以把这个事实写进清单。
+      fileListBase: payload.destSubdir,
     }
     writeManifestAtomic(staging, manifest)
     const finalDir = join(PAYLOAD_OUT, payload.name, version)
@@ -209,14 +223,20 @@ function main() {
       payload: { type: 'string' },
       'skip-install': { type: 'boolean', default: false },
       offline: { type: 'boolean', default: false },
+      abi: { type: 'string' },
     },
   })
   const target = { platform: values.platform, arch: values.arch }
   const selected = values.payload ? PAYLOADS.filter((p) => p.name === values.payload) : PAYLOADS
   if (selected.length === 0) fail(`--payload 只能是 ${PAYLOADS.map((p) => p.name).join(' / ')}`)
 
-  // 只在真装配时读 ABI：--skip-install 的重放（验收里用来复算摘要）不该依赖 Electron 在不在。
-  const abi = values['skip-install'] ? (process.versions.modules ?? 'unknown') : electronNodeAbi()
+  // ABI 的来源：真装配问 Electron（唯一事实源，见 electronNodeAbi）；`--skip-install` 的重放
+  // （用来从**已装好的树**重新产出清单，不联网）默认退回本进程的 ABI——但那是**错的**：
+  // Electron 44 的 Node ABI 与本机 Node 的 ABI 不同，清单会被 doctor / release.json 的交叉
+  // 校验当场抓出来。所以重放时应当显式给 `--abi <Electron 的 process.versions.modules>`；
+  // 给了 --abi 就不再问 Electron（受限环境/CI 里那一步可以省掉）。
+  if (values.abi && !/^\d+$/.test(values.abi)) fail(`--abi 必须是数字（Electron 的 process.versions.modules），得到 ${values.abi}`)
+  const abi = values.abi ?? (values['skip-install'] ? (process.versions.modules ?? 'unknown') : electronNodeAbi())
 
   const assembled = []
   for (const payload of selected) {

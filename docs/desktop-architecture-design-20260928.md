@@ -314,6 +314,11 @@ graph TB
 - **只读面**：核心二进制、前端资产、运行时载荷、清单——全部在应用包内，直接使用，不做首启物化。
 - **可写面**：只有 `FORGE_HOME` 下的状态目录。不往系统目录写任何东西，不持久改用户环境（私有 `bin` 只前置到子进程的临时 `PATH`，§6.6），不碰用户既有的 dsh / opencode 配置。
 - **完整性**：打包期逐文件生成清单 + CI 复算；启动期只做必要读取，全量复算由 `forge doctor --verify-payload` 承担。
+  **清单必须自描述**（M4-5 修正）：`fileList` 的相对路径基准由 `payload.json` 的 `fileListBase` 给出——
+  两份载荷的落点形态本就不同（dsh 的闭包在 `node_modules/` 下、opencode 直接铺在载荷根），此前清单里
+  没有任何字段说明这件事，任何"从清单复算载荷树"的消费方都只能靠猜。补齐这个字段正是
+  `forge doctor --verify-payload`（15k+ 个文件逐个 sha256 + 合成摘要）能成立的前提（计划 §12.31）。
+  收尾核对：`make verify/compliance`（NOTICES + CycloneDX SBOM 与 `release.json` 逐项一致，设计 §11.1）。
 - **命名空间**：`payloads/<name>/<version>/`（随包）+ `FORGE_RUNTIME_<NAME>` 覆盖。当前两份：`dsh`、`opencode`；`npx` 走 Electron 的 Node + 私有 bin，不单独占一份载荷。将来加 `python`（部分 MCP server 需要）只需新增一份载荷 + 一个名字，配置面不动。
 - **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，
   则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
@@ -516,7 +521,7 @@ sequenceDiagram
 | 可选增强 | 自建更新 feed（对象存储 / 内网），带退避与抖动；取不到策略时保留上次决策 |
 | 强制更新 | 仅在部署者自建 feed 时可启用 |
 
-**默认不发起任何更新检查**（R3），因此不存在"官方更新服务器"。同时**无遥测、无崩溃上报**——否则 §1.1 的出站判据自相矛盾。诊断改为本地日志 + 导出诊断包（桌面对话框保存位置；浏览器端等价物为下载）。
+**默认不发起任何更新检查**（R3），因此不存在"官方更新服务器"。同时**无遥测、无崩溃上报**——否则 §1.1 的出站判据自相矛盾。诊断改为本地日志 + 导出诊断包（桌面对话框保存位置；浏览器端等价物为下载）；诊断包里那段**机器可读**的内容由 `forge doctor --json` 产出（M4-5：资产来源与摘要、载荷清单与入口、ABI 与契约的一致性、数据目录可写性、端口占用；`--verify-payload` 再带上全量复算结论），脱敏口径见 §9.3。
 
 ### 8.3 体积预算（估算，待实测）
 
@@ -606,6 +611,20 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 | Node / Electron | MIT | 同上 |
 
 门禁动作：① 随包 `THIRD-PARTY-NOTICES`（各组件版本与来源 URL）；② 生成 SBOM 并在打包期校验资产与载荷版本和清单一致；③ 记录所捆绑 runtime 的确切版本，避免不可复现；④ 划清边界：opencode 的**托管服务**另有服务条款（[ToS](https://opencode.ai/legal/terms-of-service)），本期只捆绑其 CLI 二进制，不引入其托管服务的默认依赖。
+
+### 11.1 实现（M4-5，2026-09-29；计划 §12.31）
+
+| 项 | 落地形态 |
+| --- | --- |
+| 生成物 | `resources/compliance/THIRD-PARTY-NOTICES.txt` + `resources/compliance/sbom.cdx.json`（CycloneDX 1.5）；两者都是**生成物**（字段序固定、无时间戳/序列号、原子写），不手改 |
+| 生成 | `apps/desktop/scripts/gen-compliance.mjs`（`make desktop/compliance`；`make desktop/dist` 在 electron-builder **之前**自动跑） |
+| 随包 | `electron-builder.yml` 的 `extraResources` → `<Resources>/compliance/` |
+| 门禁 | `make verify/compliance`（`verify-compliance.mjs`：① 逐字节复算 ② 组件与 `release.json`/载荷清单/锁文件交叉校验 ③ SBOM 形状 ④ `--require-artifacts` 判**包内**那份）；`desktop/dist` 收尾跑 ④，`verify/desktop-dod` 跑 ①②③ |
+| 组件集合 | 随包载荷树里**实际存在**的每个 npm 包（按 `node_modules` 布局判定；`payloads/<name>/<version>` 下的 skill 模板等非依赖 `package.json` 不算），加 Electron / Node 与本应用自身 —— 本批 653 个 |
+| 版本事实 | 组件版本必须同时出现在 `release.json`、载荷清单（`payload.json`）与 `pnpm-lock.yaml`；例外只有一类：包自己声明 `bundleDependencies` 时随它发布的依赖（npm 是唯一一个，本批 138 个），锁文件不建模它们，故单独标注且不参与 pin 校验 |
+| 载荷 ↔ 包名 | `PAYLOAD_PACKAGES` 显式声明（`dsh` → `@deepseek-ai/dsh`、`opencode` → `opencode-darwin-arm64`）；生成期硬校验"树里确有此名此版本"，对不上即失败——载荷短名不是 npm 包名，许可证义务挂在真名上 |
+| 许可证文本 | 取自各包自己的 `package.json`（`license` / `licenses` 两种形态），**原样保留**、不做 SPDX 纠正；上游漏写字段的包必须在 `LICENSE_FALLBACKS` 显式登记，否则生成期失败（不静默记 unknown） |
+| 诊断 | `forge doctor`（设计 §6.3 的完整性一行）：`--verify-payload` 全量复算载荷树；打包态拿 `<Resources>/release.json` 逐项比对核心版本/契约代数/资产指纹/载荷清单 |
 
 ---
 

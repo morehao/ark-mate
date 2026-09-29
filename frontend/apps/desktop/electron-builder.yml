@@ -52,6 +52,11 @@ extraResources:
   # 唯一发布契约随包（M4-5 的 `forge doctor` 与合规门禁读它；verify 会断言它与源文件逐字节相同）。
   - from: release.json
     to: release.json
+  # 随包再分发的合规文件（M4-5，设计 §11）：THIRD-PARTY-NOTICES + CycloneDX SBOM。
+  # 由 `scripts/gen-compliance.mjs` 从 release.json + 载荷清单 + 载荷树生成（生成物，不手改）；
+  # 判据是 `verify-compliance.mjs --require-artifacts`：包内这份与源文件逐字节相同、且与契约一致（V14）。
+  - from: resources/compliance
+    to: compliance
 mac:
   target:
     - dmg

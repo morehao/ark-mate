@@ -18,6 +18,8 @@
     "smoke:desktop": "node scripts/desktop-runtime-smoke.mjs",
     "asset-parity": "node scripts/asset-parity.mjs",
     "verify:engines": "node apps/desktop/scripts/assert-engines.mjs",
+    "gen:compliance": "node apps/desktop/scripts/gen-compliance.mjs",
+    "verify:compliance": "node apps/desktop/scripts/verify-compliance.mjs",
     "verify:release-json": "node apps/desktop/scripts/verify-release-json.mjs",
     "verify:signature": "node apps/desktop/scripts/verify-signature.mjs",
     "smoke:desktop:packaged": "FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-runtime-smoke.mjs"

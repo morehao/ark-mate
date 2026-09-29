@@ -398,6 +398,11 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 （显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
 `forge capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
 能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过）、
+`forge doctor`（**只读体检**：前端资产来源与逐文件摘要、随包载荷清单与入口存在性、载荷
+`nodeAbi` 与 `release.json` 的一致性、数据目录可写性、监听端口占用；`--verify-payload` 对载荷树做
+**全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数），`--json` 供诊断包/CI 消费。
+打包态还会拿 `<Resources>/release.json` 逐项比对 coreVersion / 契约代数 / webBuildId / webDigest /
+载荷清单——不符退出码 1；"无法校验"（非打包态没有契约、端口已被自己占用）只记警告，不判失败）、
 `forge --version [--json]`（核心版本与 API 契约版本；`--json` 供打包期读取，是桌面发布契约
 `release.json` 的 `coreVersion` / `apiContract` 唯一取法）。
 （历史上的 `forge acp-serve` / `forge acp-demo` 已随 echo 演示底座删除。）

@@ -129,7 +129,7 @@ func withDigests(info AssetInfo) (AssetInfo, error) {
 		return info, nil
 	}
 	info.Digests = digests
-	info.Digest = compositeDigest(digests)
+	info.Digest = CompositeDigest(digests)
 	info.BuildID = readBuildID(info.FS)
 	return info, nil
 }
@@ -173,10 +173,15 @@ func readBuildID(fsys fs.FS) string {
 	return BuildIDUnknown
 }
 
-// compositeDigest 逐文件摘要的确定性合成（C9 的"可复现"要求）：
+// CompositeDigest 逐文件摘要的确定性合成（C9 的"可复现"要求）：
 // 按路径排序，逐行 `rel\0hex\n` 拼接后再 sha256。不含时间戳、不含绝对路径，
 // 因此同一份产物在内嵌与目录两种来源下**得到同一个值**（M2-5 的一致性断言就比它）。
-func compositeDigest(digests map[string]string) string {
+//
+// 导出（M4-5）是因为它不再只服务资产：`forge doctor --verify-payload` 要用**同一个**函数
+// 复算随包载荷树的合成摘要。载荷清单是 JS 侧（`lib/payload.mjs` 的 `compositeDigest`）算的，
+// 三处（Go 资产 / Go 载荷 / JS 载荷）必须是同一套算法——不一致的典型后果是"门禁永远红"
+// 或更坏"永远绿"（两边各自算了个自洽的错值）。
+func CompositeDigest(digests map[string]string) string {
 	if len(digests) == 0 {
 		return ""
 	}

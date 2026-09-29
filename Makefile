@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin core/desktop desktop/dist verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -112,6 +112,14 @@ desktop/payloads:
 	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/prepare-runtime.mjs \
 		$(if $(PLATFORM),--platform $(PLATFORM),) $(if $(ARCH),--arch $(ARCH),)
 
+# 合规生成物（M4-5，设计 §11）：`resources/compliance/{THIRD-PARTY-NOTICES.txt,sbom.cdx.json}`。
+# 从 release.json + 载荷清单（payload.json）+ 随包依赖树 + 锁文件生成；两个文件都是**生成物**
+# （C9：字段序固定、无时间戳、原子写），**不手改**——`make verify/compliance` 会逐字节复算。
+# 需要载荷已在场（`make desktop/payloads`）与 release.json（`make desktop/dist` 会先生成它）。
+desktop/compliance:
+	$(require-node)
+	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/gen-compliance.mjs
+
 # 桌面壳开发起服：先出 forge-core，再构建主进程 / preload（esbuild → dist/*.cjs）后起 Electron。
 # 窗口进 `forge-app://app/`（前端产物来自 apps/web/dist），REST 由壳反代核心。
 # 与 make dev 的区别：那条起的是浏览器入口（vite :5173 + 后端 :10001），这条起的是桌面入口。
@@ -145,6 +153,10 @@ desktop/dist: core/desktop desktop/payloads
 	$(require-node)
 	@echo "==> release.json（appVersion=$(DESKTOP_VERSION)）"
 	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/build-release-json.mjs
+	@echo "==> 合规生成物（M4-5：THIRD-PARTY-NOTICES + CycloneDX SBOM）"
+	@# 必须在 electron-builder **之前**：它们经 extraResources 进包（`<Resources>/compliance/`），
+	@# 而"包内那份"的唯一来源就是这里产出的文件。
+	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/gen-compliance.mjs
 	@echo "==> electron-builder --mac（缓存 $(ELECTRON_BUILDER_CACHE)$(if $(ELECTRON_MIRROR)，镜像 $(ELECTRON_MIRROR),)）"
 	cd $(FRONTEND_ROOT)/apps/desktop && ELECTRON_BUILDER_CACHE=$(ELECTRON_BUILDER_CACHE) $(if $(ELECTRON_MIRROR),ELECTRON_MIRROR=$(ELECTRON_MIRROR),) pnpm exec electron-builder --mac
 	@echo "==> 签名事实逐对象复核（M4-2a；hardened runtime 形态的判据）"
@@ -153,6 +165,8 @@ desktop/dist: core/desktop desktop/payloads
 	@# 直接调 node（不经 pnpm 转发参数）：`pnpm run x -- --flag` 会把 `--` 原样交给脚本，
 	@# 而 node 的 parseArgs 视开头的 `--` 为"选项结束"——旗标随即变成位置参数并抛错（实测踩到）。
 	cd $(FRONTEND_ROOT) && node apps/desktop/scripts/verify-release-json.mjs --require-artifacts --launch
+	@echo "==> 包内合规文件复核（M4-5 / V14：包内 NOTICES 与 SBOM 与源文件逐字节相同）"
+	cd $(FRONTEND_ROOT) && node apps/desktop/scripts/verify-compliance.mjs --require-artifacts
 	@# 最后一条：**包内载荷真起一次**（M4-2a 的 ②）：判的是签名 + hardened runtime 之后包里的
 	@# dsh / opencode 还能不能被核心拉着走完 ACP 握手。它是"verify-release-json --launch"的加强版
 	@# （那条只到"界面渲染出来 + 核心可达"）。
@@ -173,6 +187,14 @@ verify/asset-parity:
 verify/engines:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm verify:engines
+
+# 合规门禁（M4-5 / V14）：判 `resources/compliance/` 的两份生成物与 release.json + 载荷清单
+# + 锁文件逐项一致——① 逐字节复算（抓手改与"改了输入没重生成"）② 组件版本交叉校验
+# ③ SBOM 形状（CycloneDX）④ 包内那份（`--require-artifacts`，只在 desktop/dist 里跑）。
+# 需要生成物已在场（`make desktop/compliance` 或 `make desktop/dist`）与载荷树。
+verify/compliance:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm verify:compliance
 
 # release.json 逐项复核（M4-1）：值一律**复算**，不问脚本自己报了什么——
 #   字段集与键序（唯一发布契约的形状）→ coreVersion/apiContract 重问核心二进制 → webBuildId 重读
@@ -213,6 +235,9 @@ verify/desktop-dod:
 	cd $(FRONTEND_ROOT) && pnpm test:contract
 	cd $(FRONTEND_ROOT) && pnpm asset-parity
 	cd $(FRONTEND_ROOT) && pnpm verify:engines
+	# V14（M4-5）：随包 NOTICES 与 SBOM 与 release.json 逐项一致（生成物逐字节复算 + 交叉校验）。
+	# 这里的 `--require-artifacts`（包内那份）需要先出包，属 `make desktop/dist` 的收尾；DoD 跑源码侧。
+	cd $(FRONTEND_ROOT) && pnpm verify:compliance
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
 	# V9（M3-8）：桌面态真起两份载荷（私有 bin + Electron 的 Node + 隔离环境）+ 一条"载荷目录零变化"
 	# 的指纹断言。它**不联网、不跑模型**，所以要真模型会话的那一档（RUNTIME_SMOKE_LIVE=1）不在这里。
