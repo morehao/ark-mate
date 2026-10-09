@@ -406,8 +406,10 @@ function runtimeEnvOf(coreEnv, runtimeId) {
   }
   if (runtimeId === 'dsh') {
     isolation.DSH_HOME = join(home, 'runtime', 'dsh')
-    // DSH_AGENTS_HOME 默认**不跟着** DSH_HOME 走，只给一个会漏掉 agents 面（isolation.go 的注释）。
-    isolation.DSH_AGENTS_HOME = join(home, 'runtime', 'dsh', 'agents')
+    // 刻意**不**给 DSH_AGENTS_HOME：它是**用户全局**的 skill/agents 面（平台投影根 = `${HOME}/.agents/skills`），
+    // 而 dsh 按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析它——注入了就把 dsh 的读根
+    // 从平台写根上撬走、skill 静默不投放（2026-10-09 桌面态验收实测）。核心侧（isolation.go）与
+    // 桌面私有启动器（apps/desktop/scripts/gen-runtime-bin.mjs）同批修掉。
   } else {
     isolation.XDG_CONFIG_HOME = join(home, 'runtime', 'opencode', 'config')
     isolation.XDG_DATA_HOME = join(home, 'runtime', 'opencode', 'data')

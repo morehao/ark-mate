@@ -49,10 +49,18 @@ const LAUNCHERS = [
     targetVar: 'FORGE_DSH_ENTRY',
     targetLabel: '随包载荷里 dsh 的 bin.js（壳按 payload 解析结果注入）',
     nodeMode: true,
-    // dsh 自己的数据面（设计 §6.6.1）：**必须在启动器里兜底**，因为 dsh 连 `--version` 都会写自己的 home
+    // dsh 自己的**数据面**（设计 §6.6.1）：**必须在启动器里兜底**，因为 dsh 连 `--version` 都会写自己的 home
     // （实测：不隔离时它往用户的 `~/.dsh` 里写了日志）。核心拉 ACP runtime 时会显式注入同名变量，
     // 那时这里的 `${VAR:=…}` 不会覆盖显式值——两条路径得到同一份 home，只是来源不同。
-    isolation: { DSH_HOME: 'runtime/dsh', DSH_AGENTS_HOME: 'runtime/dsh/agents' },
+    //
+    // **刻意不兜底 `DSH_AGENTS_HOME`**：它不是 dsh 的私有数据面，而是**用户全局的 skill/agents 面**
+    // ——平台把 skill 投射到 `${HOME}/.agents/skills`（Go 侧 adapter 的投影声明），而 dsh 按
+    // `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析该根。这里一兜底，桌面态 dsh 的读根
+    // 就与平台写根分叉、skill **静默不投放**（2026-10-09 桌面态验收实测：平台物化的 `probe-desktop`
+    // 不在 dsh 会话的 `<available_skills>` 里，而子进程环境里正是这个变量）。Go 侧
+    // `pkg/runtime/isolation.go` 曾犯同一个错、同批修掉；两侧由 archtest 的
+    // `TestDesktopLauncherIsolationMatchesCore` 钉住"启动器隔离表 ⊆ 核心隔离表"。
+    isolation: { DSH_HOME: 'runtime/dsh' },
   },
   {
     name: 'opencode',
