@@ -4,11 +4,45 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
+
+// connCount 读连接池条数（**持锁**读）。
+//
+// 为什么要一个访问器而不是直接 `len(o.conns)`：拆除是异步的（见 waitConnCount），
+// 断言前后随时可能有 goroutine 在改这张表——裸读在 `-race` 下就是数据竞争，而本轮把
+// 断言从"看一眼"改成了"等到满足"，窗口比原来大得多，必须持锁。
+func connCount(o *Orchestrator) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.conns)
+}
+
+// waitConnCount 等连接池到达期望条数（上限 2s），超时才判失败。
+//
+// 为什么要等（T12 的根因，2026-09-29）：`dropConn` 由 `watchConn` 在 `client.Done()` 之后
+// **异步**执行，而 `stopAgent` 等的正是同一个 Done——两者被同一件事唤醒，谁先跑完没有保证。
+// 生产路径**刻意**容忍这个窗口：`dropConn` 用 `ownerBefore`（`o.conns[key] == rc`）判定所有权，
+// 所以旧连接的晚收尾不会删掉/覆盖新连接；`acquire` 也先用非阻塞 `<-client.Done()` 验活，
+// 撞上"已断开但还没摘表"的条目会落到重拨。因此"停 agent 返回时表已空"**不是** API 保证，
+// 断言它就会在整包负载下随机红（历史记录见计划 §13 T12）。
+func waitConnCount(t *testing.T, r *rig, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if n := connCount(r.Orch); n == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等连接池变成 %d 条超时，当前 %d 条", want, connCount(r.Orch))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
 // TestGenerationKeyZeroRegression R11：**指纹为空时键必须与今天逐字相同**。
 //
@@ -107,7 +141,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	}
 	first, second := mk(), mk()
 
-	if n := len(r.Orch.conns); n != 1 {
+	if n := connCount(r.Orch); n != 1 {
 		t.Fatalf("同配置的两个会话应共用 1 个暖进程，got %d", n)
 	}
 	c1 := r.Orch.conversation(first)
@@ -144,14 +178,14 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		}
 	}
 	// 三个不同指纹 → 三条独立连接（含缺省代际）。
-	if n := len(r.Orch.conns); n != 3 {
+	if n := connCount(r.Orch); n != 3 {
 		t.Fatalf("三个不同指纹应各有一条连接，got %d", n)
 	}
 	// 重复取同一个指纹必须复用，不新增。
 	if _, err := r.Orch.acquire(ctx, agent, spec, "fp-a"); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(r.Orch.conns); n != 3 {
+	if n := connCount(r.Orch); n != 3 {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
 	// 全部代际都在同一个基础键下（停机时一次性关掉）。
@@ -163,9 +197,9 @@ func TestGenerationPerFingerprint(t *testing.T) {
 	if err := r.Svc.StopAgent(ctx, "a1"); err != nil {
 		t.Fatalf("StopAgent: %v", err)
 	}
-	if n := len(r.Orch.conns); n != 0 {
-		t.Fatalf("停 agent 应关掉全部代际，剩 %d 条", n)
-	}
+	// 等**最终**一致：连接已被关掉（Close + Done）是同步保证的；表里那条登记由
+	// watchConn→dropConn 异步摘除（见 waitConnCount 的注释）。
+	waitConnCount(t, r, 0)
 }
 
 // TestStopAgentBusyRejectsAcrossGenerations 任一代际上有在途 turn → 整体拒绝
@@ -194,7 +228,7 @@ func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
 		t.Fatalf("错误文案应说明原因: %v", err)
 	}
 	// 两条连接都必须还在（拒绝 = 什么都不做，不是"关掉空闲那条"）。
-	if n := len(r.Orch.conns); n != 2 {
+	if n := connCount(r.Orch); n != 2 {
 		t.Fatalf("拒绝停机时不该关掉任何一代，剩 %d 条", n)
 	}
 	_ = idle

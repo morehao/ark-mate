@@ -66,7 +66,7 @@ COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod go mod download
 COPY backend ./
 # 前端产物只从 web 阶段取（.dockerignore 已排除宿主机的 backend/pkg/web/dist，防串味）
-COPY --from=web /src/frontend/apps/panel/dist ./pkg/web/dist
+COPY --from=web /src/frontend/apps/web/dist ./pkg/web/dist
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod \
     --mount=type=cache,target=/root/.cache/go-build,id=gobuild \
     go build -tags release -trimpath -ldflags "-s -w" -o /out/forge ./cmd/forge

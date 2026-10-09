@@ -7,6 +7,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/internal/dto/dtoruntime"
 	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/routing"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
@@ -81,11 +82,18 @@ func (s *Service) requiredMcpTransports(agent *AgentRec) []string {
 	}
 	var out []string
 	seen := make(map[string]bool)
+	gateway := s.McpGatewayEnabled()
 	for _, m := range s.caps.ListMcpServers() {
-		if want[m.ID] && !seen[m.Transport] {
-			seen[m.Transport] = true
-			out = append(out, m.Transport)
+		if !want[m.ID] || seen[m.Transport] {
+			continue
 		}
+		// M7-3：网关在环时，远程传输不再构成**路由**硬约束——它对每个 runtime 都可达（平台代连），
+		// 再拿它去排除候选 runtime 会把"本来能跑"的底座判成 CapabilityMismatch。
+		if gateway && capability.IsRemoteTransport(m.Transport) {
+			continue
+		}
+		seen[m.Transport] = true
+		out = append(out, m.Transport)
 	}
 	return out
 }

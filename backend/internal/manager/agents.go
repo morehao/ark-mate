@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/model"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
 
@@ -51,6 +52,10 @@ type agentDefinitionFile struct {
 
 // LoadAgentDefinitions 加载 definitions 目录并合并到 agents 表（启动时调用；
 // dir 为空 = 不使用 definitions）。返回加载数量；坏文件/未知 runtime 跳过并告警。
+//
+// **memory 模式（以及无持久层时的全部场景）走这条**；sqlite 模式走
+// `LoadAgentDefinitionsFromStore`——两条路的差别只有"定义从哪读"，合并语义（种子铺底 +
+// 非零字段覆盖）与 `seedAgent` 只读判定完全共用。
 func (s *Service) LoadAgentDefinitions(dir string) int {
 	s.mu.Lock()
 	s.agentDir = dir
@@ -66,7 +71,7 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	loaded := 0
 	for _, p := range files {
 		base := filepath.Base(p)
-		if base == "providers.json" || base == defaultAgentFile {
+		if base == providersFileName || base == defaultAgentFile {
 			continue // 目录级配置（provider 档案 / 当前 Agent 选择），非 agent 定义
 		}
 		b, err := os.ReadFile(p)
@@ -95,6 +100,106 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	return loaded
 }
 
+// LoadAgentDefinitionsFromStore 从持久层装载 agent 定义（sqlite 模式；M6-6）。
+//
+// 与 `LoadAgentDefinitions` 的三点差异，各自有理由：
+//
+//  1. **整体替换式**：先把内存里的非种子 agent 清掉，再逐行铺上——库里删掉的行不能以幽灵
+//     agent 留在内存里（与能力面 `LoadCapabilityDefinitionsFromStore` 同源）。种子（dsh/opencode）
+//     不落行，故这里是"清掉非种子 + 补齐种子"而不是清空整表；
+//  2. **行里的 body 是 typed marshal**：解析成 `agentDefinitionFile` 后按 `applyDefinition(silent)`
+//     合并，**非零字段才覆盖**——这正是"整行 update 会把种子字段抹空"那条坑的护栏（计划 §7 P-7）；
+//  3. `dir` 仍然要设：`providers.json` 与 vault 锚点（`<AgentDir>` 的父目录）都还在文件侧
+//     （计划 §7 P-9，目录不能被砍掉）。
+func (s *Service) LoadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
+	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelInfo)
+}
+
+// ReloadAgentDefinitionsFromStore 重新装载 agent 定义（**网关每次取数前**调用；M7-2）。
+//
+// 与 `LoadAgentDefinitionsFromStore` 是同一份实现，只有汇总行的日志档位不同（理由同
+// `ReloadCapabilityDefinitions`：网关是个长命进程，每次 tools/list/call 都会重装）。
+func (s *Service) ReloadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
+	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelDebug)
+}
+
+// loadAgentDefinitionsFromStore 装载内核（公开入口与网关共用；level 只作用于汇总行）。
+func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string, level slog.Level) int {
+	// 库读在锁外（别把一次 DB 读塞进临界区），但**清空 + 补齐种子 + 逐行铺上**必须在同一个
+	// 临界区里完成：拆成两段就会留出"非种子 agent 全没了、行还没铺上"的窗口，读者（网关每次
+	// 调用前都重装、核心侧并发请求）会看到"agent 不存在"——而库里的行一个字都没改。
+	// M7-5 的并发用例就是这么撞上的。
+	var rows model.AgentDefinitionList
+	if s.st != nil {
+		r, err := s.st.ListAgentDefinitions(ctx)
+		if err != nil {
+			s.defWarnOnce("agents:store", "agents: 从持久层读定义失败", "err", err)
+			s.mu.Lock()
+			s.agentDir = dir
+			s.mu.Unlock()
+			return 0
+		}
+		rows = r
+	}
+
+	s.mu.Lock()
+	s.agentDir = dir
+	for id := range s.agents {
+		if !seedAgent(id) {
+			delete(s.agents, id)
+		}
+	}
+	s.seedBuiltinAgents() // 持锁调用（见函数注释：调用方持锁或处于构造期）
+	loaded := 0
+	for _, row := range rows {
+		var d agentDefinitionFile
+		if err := json.Unmarshal([]byte(row.Body), &d); err != nil {
+			s.defWarnOnce("agents:json:"+row.ID, "agents: 定义行 JSON 非法，已跳过", "agent", row.ID, "err", err)
+			continue
+		}
+		if d.ID != "" && d.ID != row.ID {
+			// 行键是权威（它才是主键）；正文里的 id 只可能是历史遗留，静默采用会让
+			// "删了 a 却仍在用 b"这种漂移无法察觉。
+			s.defWarnOnce("agents:id:"+row.ID, "agents: 定义行 id 与正文 id 不一致，以行键为准", "row", row.ID, "body", d.ID)
+		}
+		d.ID = row.ID
+		if err := s.applyDefinitionLocked(d, true); err != nil {
+			s.defWarnOnce("agents:rej:"+row.ID, "agents: 定义行未采纳", "agent", row.ID, "err", err)
+			continue
+		}
+		loaded++
+	}
+	s.mu.Unlock()
+
+	if loaded > 0 {
+		slog.Log(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
+	}
+	// provider 档案与「当前 Agent」仍在文件/独立键上：前者是目录级配置（providers.json），
+	// 后者落 meta（计划 §7 P-8）。
+	s.loadProvidersFile(dir)
+	s.loadDefaultAgentFromStore(ctx)
+	return loaded
+}
+
+// seedBuiltinAgents 播种内置 Agent（dsh / opencode；仅当对应 runtime 已注册）。
+// 幂等：调用方持锁或处于构造期。
+func (s *Service) seedBuiltinAgents() {
+	for _, b := range builtinAgents {
+		if _, ok := s.reg.Get(b.runtime); !ok {
+			continue
+		}
+		if _, exists := s.agents[b.id]; exists {
+			continue
+		}
+		s.agents[b.id] = &AgentRec{
+			ID:       b.id,
+			Name:     b.name,
+			Runtimes: []string{b.runtime},
+			State:    AgentStateStopped,
+		}
+	}
+}
+
 // applyDefinition 合并一条定义进 agents 表（启动静默 / 运行期需鉴权由调用方保证）。
 func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	if !agentIDRE.MatchString(d.ID) {
@@ -110,6 +215,12 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.applyDefinitionLocked(d, silent)
+}
+
+// applyDefinitionLocked applyDefinition 的持锁版本（调用方持 s.mu）：整体替换式装载要在**同一个
+// 临界区**里清空 + 铺行，中途放开锁就会露出"agent 不存在"的窗口（见 loadAgentDefinitionsFromStore）。
+func (s *Service) applyDefinitionLocked(d agentDefinitionFile, silent bool) error {
 	if cur, exists := s.agents[d.ID]; exists {
 		if !silent {
 			return acl.NewError(acl.ClassRequest, "agent_exists", fmt.Sprintf("agent %q 已存在", d.ID), nil)
@@ -160,7 +271,7 @@ func seedAgent(id string) bool {
 
 // CreateAgent 注册新 agent（非种子）：校验可启动（runtime 已注册 → 静态能力冻结于 runtime 侧）并持久化。
 // 返回注册后的对外表示。
-func (s *Service) CreateAgent(_ context.Context, req dtoagent.AgentCreateReq) (*dtoagent.AgentResp, error) {
+func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) (*dtoagent.AgentResp, error) {
 	if strings.HasPrefix(req.ID, reservedAgentPrefix) {
 		return nil, acl.NewError(acl.ClassRequest, "reserved_agent_id", fmt.Sprintf("%q 为种子保留前缀，自定义 agent 请用其它 id", reservedAgentPrefix), nil)
 	}
@@ -168,11 +279,16 @@ func (s *Service) CreateAgent(_ context.Context, req dtoagent.AgentCreateReq) (*
 		req.Name = req.ID
 	}
 	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider,
-		PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
+		Mcps: req.Mcps, PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
 	if err := s.applyDefinition(d, false); err != nil {
 		return nil, err
 	}
-	if err := s.persistAgentDef(d); err != nil {
+	// 新建也要先过**定义文件里的完整字段**（Name 已回填），否则 DB 里会留下一行 name 为空的定义
+	// ——它不出错，只是面板上显示成 id，属于"看不见的降级"。
+	if d.Name == "" {
+		d.Name = req.ID
+	}
+	if err := s.createAgentDefinition(ctx, d); err != nil {
 		// 回滚内存登记
 		s.mu.Lock()
 		delete(s.agents, req.ID)
@@ -183,13 +299,21 @@ func (s *Service) CreateAgent(_ context.Context, req dtoagent.AgentCreateReq) (*
 }
 
 // UpdateAgent 更新 agent 元数据（name/runtimes/provider 子集；provider 传空串 = 清除）。
-func (s *Service) UpdateAgent(_ context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
+// 顺序是"先校验 → 再提交载体 → 最后改内存"：载体提交失败时内存一个字段都不动
+// （M6 之前是"先改内存再写文件"，写失败会留下"内存里有、盘上没有"的半死态）。
+func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
 	s.mu.Lock()
 	cur, ok := s.agents[id]
 	if !ok {
 		s.mu.Unlock()
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
+	// 目标定义（纯计算；cur 只读，失败路径不留痕）。
+	next := agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider,
+		Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy, PermissionPolicy: cur.PermissionPolicy}
+	// 通知判据要在**改内存之前**取值：`next` 由 `cur` 派生，下面会把新值写回同一个对象，
+	// 改完再比就是拿新值跟新值比（通知永远不发）。
+	beforeMcps := cur.Mcps
 	if patch.Runtimes != nil && len(*patch.Runtimes) > 0 {
 		if seedAgent(id) {
 			s.mu.Unlock()
@@ -202,13 +326,13 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch dtoagent.Agent
 				return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
 			}
 		}
-		cur.Runtimes = *patch.Runtimes
+		next.Runtimes = *patch.Runtimes
 	}
 	if patch.Name != nil {
-		cur.Name = *patch.Name
+		next.Name = *patch.Name
 	}
 	if patch.Provider != nil {
-		cur.Provider = *patch.Provider
+		next.Provider = *patch.Provider
 	}
 	if patch.PermissionPolicy != nil {
 		pol := fromPermissionPolicyResp(patch.PermissionPolicy)
@@ -216,11 +340,39 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch dtoagent.Agent
 			s.mu.Unlock()
 			return nil, acl.NewError(acl.ClassRequest, "invalid_permission_policy", err.Error(), nil)
 		}
-		cur.PermissionPolicy = pol
+		next.PermissionPolicy = pol
+	}
+	// MCP 白名单三态（缺键不改 / null 清空 / [] 禁用全部 / 数组白名单）：解析失败是**请求形态**
+	// 问题（40000），此刻内存与载体都还没动。
+	mcps, mcpsPresent, err := decodeAgentMcpsPatch(patch.Mcps)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if mcpsPresent {
+		next.Mcps = mcps
 	}
 	s.mu.Unlock()
-	if err := s.syncAgentDef(id); err != nil {
+
+	if err := s.updateAgentDefinition(ctx, next); err != nil {
 		return nil, err
+	}
+
+	s.mu.Lock()
+	if after, ok := s.agents[id]; ok {
+		after.Name = next.Name
+		after.Runtimes = next.Runtimes
+		after.Provider = next.Provider
+		after.Mcps = next.Mcps
+		if next.PermissionPolicy != nil {
+			after.PermissionPolicy = next.PermissionPolicy
+		}
+	}
+	s.mu.Unlock()
+	// M6-8 / P-13：白名单真的变了才发通知——空闲会话的句柄作废，下一轮按当前定义重建；
+	// 有在途轮次或未决权限/提问的顺延。载体已经提交成功，通知失败不改写响应（只落日志）。
+	if agentMcpsChanged(beforeMcps, next.Mcps) {
+		s.notifyAgentCapabilityChange(id, capabilityFaceFieldMcps)
 	}
 	return s.agentRespLocked(id), nil
 }
@@ -234,7 +386,7 @@ func (s *Service) UpdateAgent(_ context.Context, id string, patch dtoagent.Agent
 //     导出历史」两条出路）；
 //   - 内存里仍活跃的会话在此刻被摘除，避免「删了还能跑、重启后才失效」的半死态；
 //   - 有在途 turn 时整体拒绝（agent_busy）：失败即无副作用，不删一半。
-func (s *Service) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDeleteResp, error) {
+func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDeleteResp, error) {
 	if seedAgent(id) {
 		return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
 			fmt.Sprintf("种子 agent %q 不可删除（可直接编辑 definitions）", id), nil)
@@ -256,10 +408,13 @@ func (s *Service) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDele
 		}
 		detached = n
 	}
+	// 先删**载体**（CAS 失败 = 有人在这中间改过 → 报错，此时内存与显式选择都不动）。
+	if _, err := s.removeAgentDefinition(ctx, id); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	delete(s.agents, id)
-	dir := s.agentDir
-	// 被删的正是「当前 Agent」的显式选择 → 清除之（回落内置种子），避免 default.json 悬空。
+	// 被删的正是「当前 Agent」的显式选择 → 清除之（回落内置种子），避免选择悬空。
 	wasDefault := s.currentAgent == id
 	if wasDefault {
 		s.currentAgent = ""
@@ -267,13 +422,8 @@ func (s *Service) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDele
 	s.mu.Unlock()
 	s.catalog.drop(id)        // 模型目录缓存与拒绝标记一并清掉（同 id 重建后从零取样）
 	s.clearAgentLastError(id) // 最近失败快照清掉（同 id 重建后不回显旧错）
-	if dir != "" {
-		if err := os.Remove(filepath.Join(dir, id+".json")); err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
 	if wasDefault {
-		clearDefaultAgentFile(dir)
+		s.clearDefaultAgent(ctx)
 		slog.Info("agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
 	}
 	slog.Info("agent deleted", "agent", id, "affected_conversations", affected,
@@ -324,63 +474,6 @@ func (s *Service) StopAgent(ctx context.Context, id string) error {
 	return s.orch.stopAgent(ctx, agent, spec)
 }
 
-// persistAgentDef 原子写定义文件（先 tmp 后 rename）。
-func (s *Service) persistAgentDef(d agentDefinitionFile) error {
-	s.mu.Lock()
-	dir := s.agentDir
-	s.mu.Unlock()
-	if dir == "" {
-		return nil // 未启用 definitions 目录 → 仅内存（demo/测试）
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if len(d.Runtimes) == 0 {
-		if a, ok := s.AgentByID(d.ID); ok {
-			d.Runtimes = a.Runtimes
-		}
-	}
-	if d.Name == "" {
-		if a, ok := s.AgentByID(d.ID); ok {
-			d.Name = a.Name
-		}
-	}
-	if a, ok := s.AgentByID(d.ID); ok && d.Provider == "" {
-		d.Provider = a.Provider
-	}
-	b, err := json.MarshalIndent(d, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(dir, "."+d.ID+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, d.ID+".json"))
-}
-
-// syncAgentDef 更新现有定义文件（存在则写；不存在则跳过——种子无文件场景）。
-func (s *Service) syncAgentDef(id string) error {
-	s.mu.Lock()
-	dir := s.agentDir
-	s.mu.Unlock()
-	if dir == "" {
-		return nil
-	}
-	if _, err := os.Stat(filepath.Join(dir, id+".json")); err != nil {
-		return nil // 无既有文件：种子元数据变更不落 definitions（默认配置即种子）
-	}
-	s.mu.Lock()
-	cur, ok := s.agents[id]
-	s.mu.Unlock()
-	if !ok {
-		return nil
-	}
-	return s.persistAgentDef(agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes,
-		Provider: cur.Provider, Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy,
-		PermissionPolicy: cur.PermissionPolicy})
-}
-
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
 func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	s.mu.Lock()
@@ -391,6 +484,6 @@ func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	}
 	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-		PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
+		Mcps: a.Mcps, PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
 		ConversationCount: s.conversationCountLocked(a.ID)}
 }

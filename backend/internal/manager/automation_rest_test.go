@@ -219,7 +219,7 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 		t.Fatalf("并发手动触发应 overlap: %+v %v", out2, err)
 	}
 	// 停用后拒绝
-	if _, err := r.svc.writeAutomation("daily", map[string]any{"enabled": false}, false); err != nil {
+	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
 	if _, err := r.svc.RunAutomationNow(context.Background(), "daily"); numericCode(err) != 40001 {

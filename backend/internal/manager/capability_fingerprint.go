@@ -57,12 +57,19 @@ func (s *Service) projectedSkillParts(runtimeID string, sel *CapabilitySelection
 	return out
 }
 
-// mcpFingerprintParts 把 MCP 定义转成指纹片段（**只取键名与引用名**）。
+// mcpFingerprintParts 把**注入计划**转成指纹片段（**只取键名与引用名**）。
 //
-// 输入一律是**定义**（`capability.McpServer` 的 `SecretEnv`/`SecretHeaders` 按类型只能是引用），
-// 不是解析后的注入值——这一点由类型保证，不靠调用方记得剔除。
-func mcpFingerprintParts(servers []capability.McpServer) []runtime.McpPart {
-	out := make([]runtime.McpPart, 0, len(servers))
+// M7-3 的关键改动：输入从"定义集合"改成"注入计划"（`mcpInjectionPlan`）。两者的差别就是网关的
+// 头号收益——远程 server 在计划里被折叠成**一条常量条目**，于是"加一个远程 server"不再改变指纹、
+// 也就不换代际；而"加一个 stdio server"照旧改变指纹（行为不变）。
+//
+// 为什么不直接对 `McpServersFor` 的产出取指纹（计划的原话是"对注入条目取指纹"）：那是
+// **解析后的明文**，会让密钥值进指纹（§13.4 边界①，指纹会进日志/事件/DB 列）。
+// 计划这个值对象保住了同一件事——"指纹覆盖真正会被注入的东西"——同时把明文留在解析那一刻。
+// 网关条目本身只有 scope（`Command` + `Args` + 稳定 name），天生无密钥，故可以整体入指纹。
+func mcpFingerprintParts(plan mcpInjectionPlan) []runtime.McpPart {
+	servers := plan.Direct
+	out := make([]runtime.McpPart, 0, len(servers)+1)
 	for _, m := range servers {
 		refs := make([]string, 0, len(m.SecretEnv)+len(m.SecretHeaders))
 		for _, k := range capability.KeysOf(m.SecretEnv) {
@@ -77,6 +84,15 @@ func mcpFingerprintParts(servers []capability.McpServer) []runtime.McpPart {
 			// 明文的**键名**入指纹（`env` 的值不入：值可能带凭据，且换值不该换进程）。
 			EnvKeys:    capability.KeysOf(m.Env),
 			SecretRefs: refs,
+		})
+	}
+	if gw := plan.Gateway; gw != nil {
+		// 网关条目：`Command` 是平台自身路径（变了确实该换代际——那条注入命令真的变了），
+		// `Args` 里只有 scope 与会话钉住的白名单，**没有任何远程定义**。
+		out = append(out, runtime.McpPart{
+			ID: gw.Name, Transport: gw.Transport,
+			Command: gw.Command, Args: append([]string(nil), gw.Args...),
+			EnvKeys: capability.KeysOf(gw.Env),
 		})
 	}
 	return out
@@ -105,7 +121,8 @@ func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, sel *
 		in.Runtimes[0] = runtimeFingerprintPart(sp)
 	}
 	in.Skills = s.projectedSkillParts(runtimeID, sel)
-	in.Mcps = mcpFingerprintParts(s.mcpSelectionFor(agent, runtimeID, sel))
+	// 计划是**唯一**的注入真相：指纹拿它、注入也拿它（两处各算一遍必然漂移，见 planMcpInjection）。
+	in.Mcps = mcpFingerprintParts(s.planMcpInjection(agent, runtimeID, sel))
 	return runtime.Fingerprint(in)
 }
 

@@ -17,6 +17,10 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// 本文件里的启停/物化用例跑在 **memory 载体**上（定义文件 + 物化目标目录）；DB 载体的启停
+// 语义在 `capability_writeface_test.go` 的 `TestSetSkillEnabledIsOverlayOnBothCarriers`
+// 与 `capability_write_store_test.go`（revision 抬升 + 只改一个键）。
+//
 // skillRig 造一个带能力目录与物化目标的 Service：<dir>/skills/<id>.json 为定义文件，
 // <root> 为物化目标（已登记，启停后应立刻重校）。
 func skillRig(t *testing.T) (svc *Service, dir, root string) {

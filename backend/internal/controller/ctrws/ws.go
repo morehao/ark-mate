@@ -8,12 +8,15 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
 // WSCtr 实时事件通道（WS）控制器。
@@ -23,20 +26,63 @@ type WSCtr interface {
 
 var _ WSCtr = (*wsCtr)(nil)
 
-// wsCtr 是实时事件通道（WS）的协议薄适配层（M0 基本版，无鉴权）：
+// defaultAttachDeadline 首帧 attach 的截止时限（真源在 credential.StreamAttachDeadline，
+// 与前端 @ark/desktop-contract 的 STREAM_ATTACH_DEADLINE_MS 同值）。
+const defaultAttachDeadline = credential.StreamAttachDeadline
+
+// Options WS 控制器装配选项（M1-1）。
+type Options struct {
+	// Credentials 凭据表。非空（Required）时，连接必须在 AttachDeadline 内发出首帧
+	// `attach` 并携带具备 **stream 面**的凭据；否则服务端主动关闭（1008）。
+	// 空表 = 不鉴权（历史默认行为）。
+	Credentials *credential.Set
+	// AttachDeadline 首帧 attach 截止时限；0 取 defaultAttachDeadline（仅测试会改小）。
+	AttachDeadline time.Duration
+	// OriginCheck 握手来源判定（M3-5）：由装配层注入的**同一个**策略
+	// （middleware.OriginPolicy.CheckFunc），与 REST 中间件共用同一份 Host + Origin 判定。
+	//
+	// 在 websocket.Accept **之前**调用：返回非 nil error 即拒绝握手（不升级连接），
+	// 按 status 回统一响应信封（错误已带业务码）。nil = 不判定（历史行为 / 策略未启用）。
+	//
+	// 为什么不挂到 AcceptOptions 上：本项目用的 coder/websocket v1.8.15 的 AcceptOptions
+	// **没有 CheckOrigin 字段**（只有 InsecureSkipVerify 与 OriginPatterns），而库自带的
+	// authenticateOrigin 把「Origin 的 host == 请求 Host」当同源放行——`Host: evil.com` +
+	// `Origin: http://evil.com` 这种 DNS rebinding 形状会从它手里过。所以判定必须由本层在
+	// 升级前完成；Accept 那边继续 InsecureSkipVerify（那是"库的判定不参与"，不是"不判定"）。
+	OriginCheck func(r *http.Request) (status int, err error)
+}
+
+// wsCtr 是实时事件通道（WS）的协议薄适配层：
 // 订阅 eventbus → 按 attach 的聚合（conversation id）推送 event/snapshot 帧；
 // 客户端帧 action=attach/detach/ping；服务端帧 type=snapshot/event/detached/pong。
+//
+// 凭据模型（M1-1）：**握手不带凭据、连接后带内交付**——这是"令牌不进 URL"的代价与解法。
+// 因此必须有首帧 attach 时限，否则未鉴权的连接会一直占着订阅位。
+//
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
 // 契约见 docs/design-and-roadmap.md §4.5。
 type wsCtr struct {
 	bus    *eventbus.Bus
 	logger *slog.Logger
+	creds  *credential.Set
+	// attachDeadline 首帧 attach 截止（见 Options.AttachDeadline）。
+	attachDeadline time.Duration
+	// originCheck 握手来源判定（M3-5；见 Options.OriginCheck）。nil = 不判定。
+	originCheck func(r *http.Request) (status int, err error)
 }
 
 // NewWSCtr 构造 WSCtr。
-func NewWSCtr(bus *eventbus.Bus) WSCtr {
-	return &wsCtr{bus: bus, logger: slog.Default()}
+func NewWSCtr(bus *eventbus.Bus, opts ...Options) WSCtr {
+	c := &wsCtr{bus: bus, logger: slog.Default(), attachDeadline: defaultAttachDeadline}
+	if len(opts) > 0 {
+		c.creds = opts[0].Credentials
+		c.originCheck = opts[0].OriginCheck
+		if opts[0].AttachDeadline > 0 {
+			c.attachDeadline = opts[0].AttachDeadline
+		}
+	}
+	return c
 }
 
 const (
@@ -48,8 +94,11 @@ const (
 
 // wsClientFrame 客户端 → 服务端帧。
 type wsClientFrame struct {
-	Action   string `json:"action"`              // attach | detach | ping
-	AggID    string `json:"agg_id"`              // attach/detach 目标聚合（conversation id）
+	Action string `json:"action"` // attach | detach | ping
+	AggID  string `json:"agg_id"` // attach/detach 目标聚合（conversation id）
+	// Token 首帧 attach 携带的 stream 面凭据（M1-1；桌面态必需，独立态可选）。
+	// 形状的唯一真源在前端 @ark/desktop-contract 的 buildAttachFrame。
+	Token    string `json:"token"`
 	SinceSeq *int64 `json:"since_seq,omitempty"` // attach 续传游标（省略→snapshot；数字含 0→重放）
 }
 
@@ -76,13 +125,40 @@ type connState struct {
 	mu       sync.Mutex
 	attached map[string]bool
 
+	// handshake 在首帧 attach 通过凭据校验后关闭（幂等）；awaitAttach 到点仍未关闭即关闭连接。
+	handshake     chan struct{}
+	handshakeOnce sync.Once
+
 	closed    chan struct{}
 	closeOnce sync.Once
 }
 
+// handshakeDone 首帧握手是否已完成。
+func (st *connState) handshakeDone() bool {
+	select {
+	case <-st.handshake:
+		return true
+	default:
+		return false
+	}
+}
+
+// completeHandshake 标记首帧握手完成（重复调用安全）。
+func (st *connState) completeHandshake() { st.handshakeOnce.Do(func() { close(st.handshake) }) }
+
 // Handle 处理一次 WS 升级与生命周期。
 func (h *wsCtr) Handle(c *gin.Context) {
-	// M0 内网直连无鉴权：放行任意 Origin；M3 起改 OriginPatterns + 子协议 token 校验。
+	// 来源判定先于升级（M3-5）：错误的 Host 或来源在**握手**这一层就被拒，而不是先把连接
+	// 建起来再关（后者已经把订阅位与连接资源给出去了）。判定与 REST 共用同一个策略对象。
+	if h.originCheck != nil {
+		if status, err := h.originCheck(c.Request); err != nil {
+			c.Abort()
+			gincontext.FailWithStatus(c, status, err)
+			return
+		}
+	}
+	// InsecureSkipVerify 的取舍见 Options.OriginCheck：库自带的 origin 校验比本层的矩阵**更松**
+	// （同 Host 即放行），不能作为闸门；真正的闸门是上面那次 Decide。
 	ws, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -93,10 +169,11 @@ func (h *wsCtr) Handle(c *gin.Context) {
 	defer ws.CloseNow()
 
 	st := &connState{
-		conn:     ws,
-		write:    make(chan wsServerFrame, 256),
-		attached: make(map[string]bool),
-		closed:   make(chan struct{}),
+		conn:      ws,
+		write:     make(chan wsServerFrame, 256),
+		attached:  make(map[string]bool),
+		handshake: make(chan struct{}),
+		closed:    make(chan struct{}),
 	}
 	st.ctx, st.cancel = context.WithCancel(context.Background())
 	defer h.shutdown(st)
@@ -110,13 +187,56 @@ func (h *wsCtr) Handle(c *gin.Context) {
 	go h.writeLoop(st)
 	go h.pingLoop(st)
 	go h.livePump(st, live)
+	go h.awaitAttach(st)
 
 	h.readLoop(st)
+}
+
+// awaitAttach 首帧 attach 截止（M1-1）：到点仍未完成握手即按 1008 关闭。
+//
+// 为什么必须有时限：令牌不进 URL 意味着"连接先建立、凭据随后到"，这段窗口里连接
+// 已经占着 eventbus 的订阅位；没有时限就等于给了未鉴权连接一个常驻资源。
+func (h *wsCtr) awaitAttach(st *connState) {
+	t := time.NewTimer(h.attachDeadline)
+	defer t.Stop()
+	select {
+	case <-st.closed:
+	case <-st.handshake:
+	case <-t.C:
+		h.logger.Warn("ws 首帧 attach 超时，关闭连接", "deadline", h.attachDeadline)
+		h.closeWithStatus(st, websocket.StatusPolicyViolation, "attach deadline exceeded")
+	}
+}
+
+// authorizeStream 校验首帧 attach 携带的凭据是否具备 stream 面。
+// 未配置任何凭据（独立态默认）→ 一律通过：那时这条通道本就是回环内开放的。
+func (h *wsCtr) authorizeStream(token string) bool {
+	if !h.creds.Required() {
+		return true
+	}
+	return h.creds.Authorize(token, credential.ScopeStream)
+}
+
+// rejectHandshake 握手失败：记一行（不含令牌值）后以 1008 关闭。
+func (h *wsCtr) rejectHandshake(st *connState, reason string) {
+	h.logger.Warn("ws 首帧 attach 被拒，关闭连接", "reason", reason)
+	h.closeWithStatus(st, websocket.StatusPolicyViolation, reason)
+}
+
+// closeWithStatus 主动关闭：先发带状态码的 close 帧（客户端可据此判定 1008），再收内务。
+// coder/websocket 允许 Close 与 Read 并发（Close 会让 Read 返回错误），shutdown 再取消
+// ctx 兜底解除其余阻塞。
+func (h *wsCtr) closeWithStatus(st *connState, status websocket.StatusCode, reason string) {
+	_ = st.conn.Close(status, reason)
+	h.shutdown(st)
 }
 
 // readLoop 读取客户端帧并执行 attach/detach/ping；出错即结束整条连接。
 // coder/websocket 会在 Read 内自动应答协议层 ping/pong/close 控制帧，
 // 此处只处理应用层 JSON 帧（二进制帧忽略）。
+//
+// 首帧必须是 `attach`（握手）：它承载 stream 面凭据。通过之后本连接才进入订阅语义，
+// 后续帧与 M0 一致（attach/detach/ping）。
 func (h *wsCtr) readLoop(st *connState) {
 	for {
 		typ, data, err := st.conn.Read(st.ctx)
@@ -131,8 +251,24 @@ func (h *wsCtr) readLoop(st *connState) {
 			h.send(st, wsServerFrame{Type: "detached", Reason: "bad frame"})
 			continue
 		}
+		if !st.handshakeDone() {
+			if f.Action != "attach" {
+				h.rejectHandshake(st, "first frame must be attach")
+				return
+			}
+			if !h.authorizeStream(f.Token) {
+				h.rejectHandshake(st, "invalid stream token")
+				return
+			}
+			st.completeHandshake()
+		}
 		switch f.Action {
 		case "attach":
+			// 通道级 attach（握手帧本身，无 agg_id）没有订阅动作；带 agg_id 的首帧
+			// 视为"握手 + 订阅"一次完成（容错，见 buildAttachFrame 的调用方约定）。
+			if f.AggID == "" {
+				continue
+			}
 			h.attach(st, f)
 		case "detach":
 			h.detach(st, f.AggID)

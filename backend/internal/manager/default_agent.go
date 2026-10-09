@@ -96,17 +96,17 @@ func clearDefaultAgentFile(dir string) {
 }
 
 // SetDefaultAgent 切换「当前 Agent」（全局默认：新建会话/模型目录缺省取它；幂等）。
-// 未知 agent 报 agent_not_found；选择落盘 <AgentDir>/default.json，重启后保持。
-func (s *Service) SetDefaultAgent(_ context.Context, id string) (*dtoagent.AgentResp, error) {
+// 未知 agent 报 agent_not_found；选择落**载体**（memory = `<AgentDir>/default.json`，
+// sqlite = `meta.default_agent`），重启后保持。
+func (s *Service) SetDefaultAgent(ctx context.Context, id string) (*dtoagent.AgentResp, error) {
 	s.mu.Lock()
 	if _, ok := s.agents[id]; !ok {
 		s.mu.Unlock()
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
 	s.currentAgent = id
-	dir := s.agentDir
 	s.mu.Unlock()
-	if err := writeDefaultAgentFile(dir, id); err != nil {
+	if err := s.writeDefaultAgent(ctx, id); err != nil {
 		return nil, err
 	}
 	slog.Info("agent default switched", "agent", id)

@@ -47,6 +47,39 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if err := s.AddMemory(ctx, Memory{ConversationID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
 		t.Fatalf("AddMemory: %v", err)
 	}
+	// v8 三张表（M6-1）：这里**直接调 dao**（而不是 store 门面），为的是钉住精确的落库文本
+	// ——门面内部取"此刻"，而这一层要断言的是"写入的纳秒原样存下来"。
+	if ok, err := s.skills.CreateCAS(ctx, &SkillDefinition{
+		ID: "sk-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 skills 行: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.mcpServers.CreateCAS(ctx, &McpServerDefinition{
+		ID: "mcp-1", Body: `{"transport":"stdio"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 mcp_servers 行: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.agents.CreateCAS(ctx, &AgentDefinition{
+		ID: "ag-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 agents 行: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.automations.CreateCAS(ctx, &AutomationDefinition{
+		ID: "auto-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+		LastFiredAt: at.Format(model.LayoutTS), LastStatus: "completed", ConsecutiveFailures: 2,
+		RecentRuns: `[{"status":"completed"}]`,
+	}); err != nil || !ok {
+		t.Fatalf("写 automations 行: ok=%v err=%v", ok, err)
+	}
+	if err := s.capabilityRevision.Append(ctx, &CapabilityRevision{
+		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
+	}); err != nil {
+		t.Fatalf("写 capability_revisions 行: %v", err)
+	}
+	// 「当前 Agent」的显式选择（M6-6 落 meta）：值就是 agent id 本身，落库是 TEXT。
+	if err := s.SetDefaultAgentID(ctx, "ag-1"); err != nil {
+		t.Fatalf("写 default_agent meta: %v", err)
+	}
 
 	// 每项：表、列、期望的 typeof、期望的文本值（"" = 只校验类型不校验值）。
 	cases := []struct {
@@ -72,6 +105,24 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"messages", "created_at", "text", at.Format(model.LayoutTS), true},
 		{"permission_memories", "created_at", "text", at.Format(model.LayoutTS), true},
 		{"schema_migrations", "applied_at", "text", "", false},
+		// v8（M6-1）：定义行的两个提升列 + 审计的时间列。`revision` 是 INTEGER（CAS 判据，
+		// 与 `WHERE revision = ?` 的整型入参一致），时间列与既有各表同一布局。
+		{"skills", "revision", "integer", "1", true},
+		{"skills", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"mcp_servers", "revision", "integer", "1", true},
+		{"mcp_servers", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"agents", "revision", "integer", "1", true},
+		{"agents", "updated_at", "text", at.Format(model.LayoutTS), true},
+		// v10（M6-7）：定义列与运行态列。运行态列全是**非空**的（未触发过 = 空串 / 0 / '[]'），
+		// 不给 NULL 留第二种表示；`last_fired_at` 与其它时间列同一布局。
+		{"automations", "revision", "integer", "1", true},
+		{"automations", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"automations", "last_fired_at", "text", at.Format(model.LayoutTS), true},
+		{"automations", "last_status", "text", "completed", true},
+		{"automations", "consecutive_failures", "integer", "2", true},
+		{"automations", "recent_runs", "text", `[{"status":"completed"}]`, true},
+		{"capability_revisions", "seq", "integer", "1", true},
+		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
 	}
 	for _, tc := range cases {
 		var gotType, gotValue string
@@ -111,6 +162,68 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 	if conv.Origin != "automation:nightly" || conv.CapabilityJSON != `{"skills":["s1"]}` || conv.CapabilityFingerprint != "fp-abc" {
 		t.Errorf("v7 三列往返失真: origin=%q json=%q fp=%q", conv.Origin, conv.CapabilityJSON, conv.CapabilityFingerprint)
+	}
+
+	// v8：定义行的时间列同样要逐纳秒往返（这是"M6 换掉 mtime 判据"之后
+	// `updated_at` 唯一的对外可见用途——列表排序）。
+	sk, found, err := s.GetSkillDefinition(ctx, "sk-1")
+	if err != nil || !found {
+		t.Fatalf("GetSkillDefinition: found=%v err=%v", found, err)
+	}
+	if !sk.UpdatedAt.Equal(at) {
+		t.Errorf("skill.updated_at 往返失真: %s 期望 %s", sk.UpdatedAt, at)
+	}
+	if sk.Revision != 1 || sk.Body != `{"name":"格式探针"}` {
+		t.Errorf("skill 提升列/正文往返失真: rev=%d body=%q", sk.Revision, sk.Body)
+	}
+	mcp, found, err := s.GetMcpServerDefinition(ctx, "mcp-1")
+	if err != nil || !found {
+		t.Fatalf("GetMcpServerDefinition: found=%v err=%v", found, err)
+	}
+	if !mcp.UpdatedAt.Equal(at) {
+		t.Errorf("mcp.updated_at 往返失真: %s 期望 %s", mcp.UpdatedAt, at)
+	}
+	agent, found, err := s.GetAgentDefinition(ctx, "ag-1")
+	if err != nil || !found {
+		t.Fatalf("GetAgentDefinition: found=%v err=%v", found, err)
+	}
+	if !agent.UpdatedAt.Equal(at) || agent.Revision != 1 || agent.Body != `{"name":"格式探针"}` {
+		t.Errorf("agent 行往返失真: rev=%d at=%s body=%q", agent.Revision, agent.UpdatedAt, agent.Body)
+	}
+	// v10：运行态列的往返（时间列逐纳秒、失败计数是整数、运行史原样）。
+	auto, found, err := s.GetAutomationDefinition(ctx, "auto-1")
+	if err != nil || !found {
+		t.Fatalf("GetAutomationDefinition: found=%v err=%v", found, err)
+	}
+	if auto.LastFiredAt != at.Format(model.LayoutTS) || auto.ConsecutiveFailures != 2 ||
+		auto.LastStatus != "completed" || auto.RecentRuns != `[{"status":"completed"}]` {
+		t.Errorf("automation 运行态列往返失真: %+v", auto)
+	}
+	if auto.Revision != 1 || !auto.UpdatedAt.Equal(at) {
+		t.Errorf("automation 定义列往返失真: rev=%d at=%s", auto.Revision, auto.UpdatedAt)
+	}
+
+	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样
+	// （第一行可能是 events_last_seq），要按键查。
+	var (
+		metaType, metaValue string
+	)
+	if err := s.db.Raw("SELECT typeof(value), CAST(value AS TEXT) FROM meta WHERE key = ?",
+		model.MetaKeyDefaultAgent).Row().Scan(&metaType, &metaValue); err != nil {
+		t.Fatalf("读 meta.default_agent: %v", err)
+	}
+	if metaType != "text" || metaValue != "ag-1" {
+		t.Errorf("meta.default_agent 落库形态不符: typeof=%q value=%q", metaType, metaValue)
+	}
+	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "ag-1" {
+		t.Errorf("GetDefaultAgentID: id=%q ok=%v err=%v", id, ok, err)
+	}
+	revs, err := s.ListCapabilityRevisions(ctx, "skill", "sk-1")
+	if err != nil || len(revs) != 1 {
+		t.Fatalf("ListCapabilityRevisions: n=%d err=%v", len(revs), err)
+	}
+	if !revs[0].At.Equal(at) {
+		t.Errorf("capability_revisions.at 往返失真: %s 期望 %s", revs[0].At, at)
 	}
 
 	runs, err := s.ListRuns(ctx, "c1")

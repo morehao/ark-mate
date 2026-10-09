@@ -42,8 +42,18 @@ type (
 	Message = model.Message
 	// Input 待投递的用户输入队列行（§6 busy input 队列）。
 	Input = model.Input
+	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
+	AgentDefinition = model.AgentDefinition
+	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
+	AutomationDefinition = model.AutomationDefinition
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
 	ConversationMetaPatch = model.ConversationMetaPatch
+	// SkillDefinition 能力定义行（M6-1：sqlite 模式下能力面的事实源）。
+	SkillDefinition = model.SkillDefinition
+	// McpServerDefinition MCP server 定义行。
+	McpServerDefinition = model.McpServerDefinition
+	// CapabilityRevision 能力定义变更审计行（seq 单调 = 代际 rev 的来源）。
+	CapabilityRevision = model.CapabilityRevision
 )
 
 // 常见错误。
@@ -64,6 +74,13 @@ type Store struct {
 	inputs        *dao.InputDao
 	meta          *dao.MetaDao
 	migrations    *dao.MigrationDao
+
+	// 能力定义事实源（M6-1）：两张定义表 + 一张只追加的变更审计。
+	skills             *dao.SkillDao
+	mcpServers         *dao.McpServerDao
+	agents             *dao.AgentDao
+	automations        *dao.AutomationDao
+	capabilityRevision *dao.CapabilityRevisionDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -97,6 +114,12 @@ func New(db *gorm.DB) *Store {
 		inputs:        dao.NewInputDao(getDB),
 		meta:          dao.NewMetaDao(getDB),
 		migrations:    dao.NewMigrationDao(getDB),
+
+		skills:             dao.NewSkillDao(getDB),
+		mcpServers:         dao.NewMcpServerDao(getDB),
+		agents:             dao.NewAgentDao(getDB),
+		automations:        dao.NewAutomationDao(getDB),
+		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
 	}
 }
 
@@ -115,6 +138,9 @@ func (s *Store) Close() error {
 // ——— meta（计数 / 导入标记 / 任意键值） ———
 
 // GetMeta 读取任意 meta 键（不存在 → ("", false, nil)）。
+//
+// meta 是"目录级/进程级配置与标记"的收口（计数行、导入标记、当前 Agent）——计划 §7 P-8 把
+// `<AgentDir>/default.json` 也放在这里：它是目录级配置而不是某个 agent 的属性。
 func (s *Store) GetMeta(ctx context.Context, key string) (string, bool, error) {
 	return s.meta.Get(ctx, key)
 }

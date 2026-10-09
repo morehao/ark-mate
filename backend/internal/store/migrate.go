@@ -160,6 +160,86 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_conversations_fingerprint ON conversations(capability_fingerprint)`,
 		},
 	},
+	{
+		version: 8,
+		name:    "skills/mcp_servers/capability_revisions（M6-1 能力事实源：定义行 + 单调变更审计）",
+		statements: []string{
+			// 定义行：`body` 是唯一权威（原始 JSON，含未知键），只加两个提升列。
+			// 刻意不加 enabled/scope/runtimes 等派生列——它们都在 body 里，双写必然漂移
+			// （计划 §1 P-2）。定义规模是几十条，查询在 Go 侧做。
+			`CREATE TABLE skills (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+			// MCP server 定义与 skills 同形；分表而不是加 kind 列：两边的读取面/写面
+			// 与规模各走各的，合并只会让每个查询都带一个恒真的过滤条件。
+			`CREATE TABLE mcp_servers (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+			// 变更审计：**刻意不加外键**——审计必须在能力被删除后仍然存在，与 events 表
+			// "必须挂会话"的约束正好相反。AUTOINCREMENT 保证 seq 单调不复用，于是它
+			// 可以直接当"当前代际 rev"（M1 落地时取 MAX(seq)，不必另造进程内计数器）。
+			`CREATE TABLE capability_revisions (
+				seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+				kind          TEXT NOT NULL,
+				capability_id TEXT NOT NULL,
+				action        TEXT NOT NULL,
+				actor         TEXT NOT NULL,
+				at            TEXT NOT NULL,
+				digest        TEXT NOT NULL
+			)`,
+			// "这条能力的变更历史"：WHERE kind = ? AND capability_id = ? ORDER BY seq。
+			// seq 先进索引列之外还要带上它，才能同时满足过滤与有序取用。
+			`CREATE INDEX idx_capability_revisions_capability ON capability_revisions(kind, capability_id, seq)`,
+		},
+	},
+	{
+		version: 9,
+		name:    "agents（M6-6 agent 定义事实源；种子仍在代码里，本表只存覆盖）",
+		statements: []string{
+			// 与 skills/mcp_servers 同形（body 唯一权威 + revision CAS + updated_at）。
+			// 变更审计复用 v8 的 capability_revisions（kind='agent'）——"定义变更审计"只有一份。
+			//
+			// 「当前 Agent」（原 `<AgentDir>/default.json`）不在这里：它是目录级配置，
+			// 落 meta（model.MetaKeyDefaultAgent，计划 §7 P-8）。
+			`CREATE TABLE agents (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+		},
+	},
+	{
+		version: 10,
+		name:    "automations（M6-7 定时任务：定义列 + 运行态列，Plan §7 P-10/P-11）",
+		statements: []string{
+			// 定义（body + revision/updated_at）与运行态（last_* / consecutive_failures /
+			// recent_runs）**分列**：写面只 merge body，于是"往 body 里塞 last_fired_at"这种事
+			// 结构上不可能（拒写名单仍然保留，为的是不出现"我写了它为什么不生效"的困惑）。
+			//
+			// 运行态列不参与 revision CAS：调度器每次推进不该让定义看起来"被别人改过"。
+			// 非空约束配默认值：SQLite 的 ALTER 加列才需要默认值，这里新建表也一并写上，
+			// 让"未触发过"的落库形态唯一（空串 / 0 / '[]'），不给 NULL 留第二种表示。
+			`CREATE TABLE automations (
+				id                   TEXT PRIMARY KEY,
+				body                 TEXT NOT NULL,
+				revision             INTEGER NOT NULL DEFAULT 1,
+				updated_at           TEXT NOT NULL,
+				last_fired_at        TEXT NOT NULL DEFAULT '',
+				last_status          TEXT NOT NULL DEFAULT '',
+				last_reason          TEXT NOT NULL DEFAULT '',
+				last_conversation_id TEXT NOT NULL DEFAULT '',
+				consecutive_failures INTEGER NOT NULL DEFAULT 0,
+				recent_runs          TEXT NOT NULL DEFAULT '[]'
+			)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

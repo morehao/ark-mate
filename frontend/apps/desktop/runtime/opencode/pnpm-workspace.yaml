@@ -1,0 +1,12 @@
+# 同 runtime/dsh：独立工作区根 + 精确版本 pin（见该目录注释）。
+# opencode 只取**平台化二进制**：v2 起包名是 `@opencode/cli-<os>-<arch>`（v1 是 `opencode-<os>-<arch>`），
+# 与 v2 的 `latest` 同版本（`@opencode/cli@2.0.26` 是包装，平台包也是 2.0.26）。
+# 为什么不装 `@opencode/cli` 那层包装（本体只有 7.5 KB，但它是**安装期**才成形）：
+# 它的 `postinstall.mjs` 会把平台包里的二进制 hardlink（退化为 copy）到自己的 `bin/opencode.exe`，
+# 而载荷装配是"把依赖树整棵拷进 payloads/"——那样载荷里就是**两份 186 MB**（包装自己那份 + 平台包那份）。
+# 平台包直接铺在载荷根、入口 `bin/opencode`，一份二进制，且不依赖安装脚本跑没跑。
+packages: []
+# pnpm 的"最小发布年龄"闸门默认会拦住刚发布的版本；我们是**有意**钉死这个确切版本
+# （平台化二进制必须版本一致），所以显式豁免它——这行是 pnpm 自动补的，留着以便复现。
+minimumReleaseAgeExclude:
+  - '@opencode/cli-darwin-arm64@2.0.26'

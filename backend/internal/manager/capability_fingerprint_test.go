@@ -92,7 +92,7 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 		t.Fatal("应有非空指纹")
 	}
 	// 记录一下：解析出来的明文确实存在且会进注入值（对照面）。
-	got := svc.McpServersFor(agent, "stub", nil)
+	got := directMcp(svc.McpServersFor(agent, "stub", nil)) // 网关条目另计（它不含密钥）
 	if len(got) != 1 || got[0].Env["FS_TOKEN"] != "secret-one" {
 		t.Fatalf("注入侧应解析出明文: %+v", got)
 	}
@@ -235,8 +235,13 @@ func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 
 // TestCapabilityFingerprintMCPTransportFilter 按 runtime 可承载传输过滤：不该承载的 server
 // 不进指纹（它不会被注入）。
+//
+// **M7-3 之后这条只在网关关（FORGE_MCP_GATEWAY=off）时成立**：网关在环时远程 server 对每个
+// runtime 都可达（条目不逐条出现，折叠成一条常量条目），故"不可承载 ⇒ 不影响指纹"这个前提
+// 本身消失了——网关在环时的折叠语义见 `TestCapabilityFingerprintGatewayFolding`。
 func TestCapabilityFingerprintMCPTransportFilter(t *testing.T) {
 	svc := fpRig(t) // opencode: stdio + http
+	svc.SetMcpGatewayEnabled(false)
 	agent := &AgentRec{ID: "a"}
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",

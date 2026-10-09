@@ -17,13 +17,15 @@
  *
  * 退出码：0 = 全部通路 PASS；1 = 存在 FAIL。
  */
+import { buildAttachFrame } from '@ark/desktop-contract'
+
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/forge'
-// A6：后端启用 FORGE_TOKEN 时，同一套脚本带上令牌（REST 走 Authorization 头，
-// WS 因浏览器/Node 无法设握手头走 ?token= ——与面板 transport 的取法一致）。
+// 后端启用凭据时，同一套脚本带上令牌：REST 走 Authorization 头；
+// WS 走**带内首帧 attach**（M1-1 起令牌不进 URL —— 与 apps/web 的 transport 同一条规则，
+// 帧形状也用同一个 buildAttachFrame，避免脚本与产品各写一份）。
 const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
 const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
-const WS_QS = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''
 
 let failed = 0
 const ok = (name) => console.log(`  ✔ ${name}`)
@@ -264,14 +266,17 @@ async function checkBizError() {
 
 async function checkWs() {
   console.log('· WS 实时通道帧契约（经 vite proxy ws:true）')
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events' + WS_QS
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
   const ws = new WebSocket(wsUrl)
   const opened = new Promise((resolve, reject) => {
     ws.onopen = () => resolve()
     ws.onerror = () => reject(new Error('WS 连接错误/升级失败'))
   })
   await withTimeout(opened, 8000, 'WS open')
-  ok(`WS 升级成功（proxy ws:true 生效${TOKEN ? '，带 ?token=' : ''}）`)
+  // 首帧必须是通道级 attach（携带 stream 面凭据）；它没有任何服务端响应帧，
+  // 因此必须在断言 snapshot 之前发出，否则后续 attach 会被当成握手帧。
+  ws.send(JSON.stringify(buildAttachFrame(TOKEN || null)))
+  ok(`WS 升级成功（proxy ws:true 生效${TOKEN ? '，凭据走带内首帧 attach' : ''}）`)
 
   const nextFrame = (what, ms = 8000) =>
     withTimeout(

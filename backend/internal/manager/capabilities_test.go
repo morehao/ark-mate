@@ -15,7 +15,9 @@ import (
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/mcp"
 	"github.com/morehao/ark-forge/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -30,6 +32,9 @@ func writeCapFile(t *testing.T, path, content string) {
 	}
 }
 
+// 本文件里的装载用例走 **memory 载体的目录装载**（`LoadCapabilityDefinitions`）；sqlite 载体的
+// 整体替换式装载（含"库里删掉的行不会以幽灵定义留在内存里"）在 `capability_store_test.go`。
+//
 // TestLoadCapabilityDefinitionsAndList Service 集成：目录装载 + REST 三表列表（排序、headers 不读回）。
 func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 	dir := t.TempDir()
@@ -74,8 +79,14 @@ func TestRegisterToolAndSort(t *testing.T) {
 	}
 }
 
-// TestMcpServersFor P2 MCP 注入选择（§5.2/§5.3）：注册表全量 → runtime 的 McpTransports 过滤 →
-// agent.Mcps 白名单（nil = 全量；非 nil = 白名单；空 = 本 agent 禁用注入）。未知 runtime → 不下发。
+// TestMcpServersFor P2 MCP 注入选择（§5.2/§5.3）+ M7-3 的传输分派：stdlib 直连、远程折叠成网关条目。
+//
+// 语义（M7-3 之后）：
+//   - **网关开（默认）**：stdio server 原样直连；远程 server 不再逐条直连，而是合成**一条**
+//     `forge-gateway` stdio 条目 —— 于是"该 runtime 声明的传输"不再决定远程 server 的去留
+//     （那正是网关的收益），仅决定 stdio 那一支。
+//   - **网关关（FORGE_MCP_GATEWAY=off）**：回到老路 —— 按该 runtime 的 McpTransports 过滤后逐条直连。
+//   - 白名单优先级两态都生效：nil = 全量；非 nil = 命中制；空 = 本 agent 禁用注入。未知 runtime → 不下发。
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "stub", McpTransports: []string{"stdio"}},
@@ -98,15 +109,36 @@ func TestMcpServersFor(t *testing.T) {
 	onlyFS := &AgentRec{ID: "a1", Mcps: ptrOf([]string{"fs_stdio"})}
 	denyAll := &AgentRec{ID: "a2", Mcps: ptrOf([]string{})}
 
+	// 网关条目断言：一条 stdio 条目、命令是平台自身、参数是 mcp bridge + 稳定 scope。
+	assertGatewayEntry := func(entries []acl.McpServer) {
+		t.Helper()
+		last := entries[len(entries)-1]
+		if last.Name != mcp.GatewayServerName || last.Transport != capability.TransportStdio {
+			t.Fatalf("末条应是网关条目（stdio/forge-gateway），got %+v", last)
+		}
+		if last.Command == "" || !strings.HasSuffix(last.Command, "manager.test") {
+			t.Fatalf("网关条目命令应为平台自身可执行文件，got %q", last.Command)
+		}
+		args := strings.Join(last.Args, " ")
+		if !strings.HasPrefix(args, "mcp bridge --agent a0 --runtime stub") {
+			t.Fatalf("网关条目参数应是 mcp bridge + 稳定 scope，got %v", last.Args)
+		}
+	}
+
+	// 网关开（默认）：stdio 直连 1 条 + 网关 1 条。注意 stub **只声明 stdio**，而远程 server
+	// 照样经网关可达——这正是 §10.6-① 的收益。
 	got := svc.McpServersFor(noBind, "stub", nil)
-	if len(got) != 1 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
-		t.Fatalf("echo 仅 stdio 应取 1 条，got %+v", got)
+	if len(got) != 2 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
+		t.Fatalf("仅 stdio 的 runtime 应取「stdio 直连 + 网关」2 条，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 3 {
-		t.Fatalf("opencode 未声明白名单应取 3 条，got %+v", got)
+	assertGatewayEntry(got)
+	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 2 {
+		t.Fatalf("opencode 未声明白名单应取「stdio 直连 + 网关」2 条（不再逐条直连远程），got %+v", got)
 	}
-	if got := svc.McpServersFor(onlyFS, "opencode", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
-		t.Fatalf("白名单 fs_stdio 应取 1 条，got %+v", got)
+	// 白名单只钉 stdio server：直连 1 条 + **网关条目照样在**（条目恒定，不跟定义集走）；
+	// 它的远程面会是空的（网关按同一份白名单取数），所以"钉了 stdio 就没网关条目"不是判据。
+	if got := svc.McpServersFor(onlyFS, "opencode", nil); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
+		t.Fatalf("白名单 fs_stdio 应取「直连 1 条 + 恒定网关条目」，got %+v", got)
 	}
 	if got := svc.McpServersFor(denyAll, "opencode", nil); len(got) != 0 {
 		t.Fatalf("空白名单应禁用注入，got %+v", got)
@@ -114,9 +146,21 @@ func TestMcpServersFor(t *testing.T) {
 	if got := svc.McpServersFor(noBind, "ghost", nil); len(got) != 0 {
 		t.Fatalf("未知 runtime 应不下发，got %+v", got)
 	}
-	// Spec.McpTransports 为空 → 保守仅 stdio（ACP 全 agent 必须支持）。
-	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
-		t.Fatalf("未声明传输的 runtime 应保守取 stdio，got %+v", got)
+	// Spec.McpTransports 为空 → 该 runtime 的直连只承载 stdio（ACP 全 agent 必须支持）。
+	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 2 || got[0].Name != "fs_stdio" {
+		t.Fatalf("未声明传输的 runtime 应取「stdio 直连 + 网关」，got %+v", got)
+	}
+
+	// 回退开关：off → 老口径逐条直连（远程按该 runtime 的声明过滤）。
+	svc.SetMcpGatewayEnabled(false)
+	if got := svc.McpServersFor(noBind, "stub", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
+		t.Fatalf("网关关时应回到「仅承载得起的直连」，got %+v", got)
+	}
+	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 3 {
+		t.Fatalf("网关关时 opencode 应逐条直连 3 台，got %+v", got)
+	}
+	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 1 {
+		t.Fatalf("网关关时未声明传输的 runtime 应保守仅 stdio，got %+v", got)
 	}
 }
 
@@ -321,7 +365,9 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatalf("tools 应 2 条（mcp+builtin），got %+v", all)
 	}
 	for _, tl := range all {
-		if tl.Name == "read_file" && tl.Description != "读文件" {
+		// M7-4 起，**远程**（http）server 的工具在目录里按网关命名策略落前缀（`<serverID>__<tool>`），
+		// 与模型真实能调的名字逐字一致；builtin 不受影响（`web_search` 仍是原名）。
+		if tl.Name == "h__read_file" && tl.Description != "读文件" {
 			t.Fatalf("旧条目未被替换: %+v", tl)
 		}
 	}
@@ -344,8 +390,8 @@ func TestProbeMcpServer(t *testing.T) {
 	for _, tl := range mustListTools(t, svc) {
 		names[tl.Name] = true
 	}
-	if names["read_file"] || !names["write_file"] || !names["web_search"] {
-		t.Fatalf("二次探测后目录不符: %+v", names)
+	if names["h__read_file"] || !names["h__write_file"] || !names["web_search"] {
+		t.Fatalf("二次探测后目录不符（远程工具应带 serverID 前缀）: %+v", names)
 	}
 
 	// 未知 id → 40401；sse 传输 → 40501（明确降级，不臆造）。
@@ -728,8 +774,8 @@ func TestAutoProbeMcpServers(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "tool_a,tool_b" {
-		t.Fatalf("Tool 目录应含两个自动探测结果: %v", names)
+	if strings.Join(names, ",") != "a__tool_a,b__tool_b" {
+		t.Fatalf("Tool 目录应含两个自动探测结果（远程工具带 serverID 前缀）: %v", names)
 	}
 	mcps, _ := svc.ListMcpServers()
 	byID := map[string]dtocapability.McpServerResp{}

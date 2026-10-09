@@ -1,0 +1,10 @@
+{
+  "name": "ark-forge-payload-dsh",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.24.0",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2",
+    "npm": "11.13.0"
+  }
+}

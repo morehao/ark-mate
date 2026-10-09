@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/eventbus"
@@ -106,7 +107,11 @@ type Service struct {
 	currentAgent string
 	catalog      *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
-	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
+	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
+	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
+	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
+	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
+	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
 	capabilityDir string
 	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
 	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
@@ -151,47 +156,54 @@ type Service struct {
 	vaultTried bool
 	vaultErr   error
 
+	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
+	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
+	// 而洪水之后真问题也没人看。见 defWarnOnce。
+	defWarned map[string]bool
+
 	// B5 原生权限映射开关（FORGE_NATIVE_PERMISSION=off 关闭；默认开启）。
 	nativePermMu      sync.Mutex
 	nativePermEnabled bool
 	nativePermSet     bool
+
+	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；FORGE_MCP_GATEWAY=off 回退）。
+	// 零值 false 会被 NewService 显式置成 true——"忘了设"不该等于"静默关掉网关"。
+	mcpGatewayEnabled atomic.Bool
+	mcpGatewayWarnMu  sync.Mutex
+	mcpGatewayWarned  map[string]bool
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
 func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s := &Service{
-		reg:             reg,
-		bus:             bus,
-		agents:          make(map[string]*AgentRec),
-		conversations:   make(map[string]*ConversationRec),
-		inputs:          make(map[string][]QueuedInput),
-		ver:             make(map[string]int64),
-		providers:       make(map[string]*providerDef),
-		catalog:         newCatalogStore(),
-		caps:            capability.NewRegistry(),
-		mcpProbes:       make(map[string]mcpProbeStatus),
-		mcpProbeTimeout: defaultMCPProbeTimeout,
-		lastErrs:        make(map[string]agentLastErr),
-		scopeNotes:      make(map[string]scopeNote),
+		reg: reg,
+		bus: bus,
+		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
+		mcpGatewayWarned: make(map[string]bool),
+		agents:           make(map[string]*AgentRec),
+		conversations:    make(map[string]*ConversationRec),
+		inputs:           make(map[string][]QueuedInput),
+		ver:              make(map[string]int64),
+		providers:        make(map[string]*providerDef),
+		catalog:          newCatalogStore(),
+		caps:             capability.NewRegistry(),
+		mcpProbes:        make(map[string]mcpProbeStatus),
+		mcpProbeTimeout:  defaultMCPProbeTimeout,
+		lastErrs:         make(map[string]agentLastErr),
+		scopeNotes:       make(map[string]scopeNote),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
+	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
+	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
+	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
 	s.coalescer = newChunkCoalescer(func(typ, conversationID string, payload any) {
 		s.publishRaw(typ, conversationID, payload)
 	}, slog.Default())
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
-	for _, b := range builtinAgents {
-		if _, ok := reg.Get(b.runtime); !ok {
-			continue
-		}
-		s.agents[b.id] = &AgentRec{
-			ID:       b.id,
-			Name:     b.name,
-			Runtimes: []string{b.runtime},
-			State:    AgentStateStopped,
-		}
-	}
+	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
+	s.seedBuiltinAgents()
 	return s
 }
 

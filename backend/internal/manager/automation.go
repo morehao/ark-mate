@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -103,34 +104,61 @@ func (s *Service) LoadAutomationDefinitions(dir string) int {
 // 都改一遍用户文件；"once 过期置 inactive"那类改写由调度器的启动 pass 显式做，M4-4）。
 func loadAutomationFile(path, id string, now time.Time) *automationRec {
 	// 先把**文件名**记进 id：装载失败时列表仍然要指出"是哪个文件坏了"（否则一条 error
-	// 挂在空 id 上，等于没说）。
-	rec := &automationRec{def: automation.Automation{ID: id}}
+	// 挂在空 id 上，等于没说）——`buildAutomationRec` 承接这条约定。
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		rec.loadErr = fmt.Sprintf("读取失败：%v", err)
-		return rec
+		return &automationRec{def: automation.Automation{ID: id}, loadErr: fmt.Sprintf("读取失败：%v", err)}
 	}
 	var def automation.Automation
 	if err := json.Unmarshal(raw, &def); err != nil {
-		rec.loadErr = fmt.Sprintf("不是合法 JSON：%v", err)
-		return rec
+		return &automationRec{def: automation.Automation{ID: id}, loadErr: fmt.Sprintf("不是合法 JSON：%v", err)}
 	}
-	if def.ID == "" {
-		def.ID = id
+	return buildAutomationRec(def, id, now)
+}
+
+// LoadAutomationDefinitionsFromStore 从持久层装载定时任务（sqlite 模式；M6-7）。
+//
+// 与文件装载的差别只有三处，都是"载体换了"的必然结果：
+//
+//  1. **整体替换式**：先把内存清空再逐行铺——库里删掉的行不能以幽灵任务留在内存里
+//     （与能力/agent 面同源）。这也是"定义与运行态分列"之后唯一安全的装载方式；
+//  2. 一行 = 定义正文（含 `state`）+ 运行态列：由 `automationDefFromRow` 合成完整定义，
+//     再走**同一套** `buildAutomationRec`（校验、规范化、nextDue 计算全在那一处）；
+//  3. `dir` 仍然记下（`FORGE_AUTOMATIONS` 是导入/导出目录，且 memory 模式的写面仍需要它）。
+//
+// 容错逐字保留：坏定义**留在列表里带 `loadErr`**（用户写了文件却在面板上看不见、还不知道
+// 为什么，是最难排查的一类投诉）。
+func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir string) int {
+	s.mu.Lock()
+	s.automationDir = dir
+	s.automations = map[string]*automationRec{}
+	s.mu.Unlock()
+	if s.st == nil {
+		return 0
 	}
-	if def.ID != id {
-		rec.loadErr = fmt.Sprintf("文件里的 id %q 与文件名 %q 不一致", def.ID, id)
-		return rec
+	rows, err := s.st.ListAutomationDefinitions(ctx)
+	if err != nil {
+		slog.Warn("automation: 从持久层读定义失败", "err", err)
+		return 0
 	}
-	def.Schedule.Normalize()
-	if err := def.Validate(); err != nil {
-		rec.loadErr = errText(err)
-		return rec
+	now := time.Now()
+	loaded := 0
+	for i := range rows {
+		rec := loadAutomationRow(&rows[i], now)
+		if rec.loadErr == "" {
+			loaded++
+		} else {
+			slog.Warn("automation 定义装载失败（已留在列表里带 error，便于面板显示）",
+				"id", rows[i].ID, "err", rec.loadErr)
+		}
+		s.mu.Lock()
+		if s.automations == nil {
+			s.automations = map[string]*automationRec{}
+		}
+		s.automations[rows[i].ID] = rec
+		s.mu.Unlock()
 	}
-	rec.def = def
-	rec.def.State = automation.NormalizeState(def.State)
-	rec.applySchedule(now)
-	return rec
+	return loaded
 }
 
 // applySchedule 重算 nextDue 与启动动作（装载、改定义、改 schedule 后都要走这里）。
@@ -228,17 +256,14 @@ func asACLError(err error, dst **acl.Error) bool {
 // `create=true`：id 已存在 → 40901 `automation_exists`，**绝不覆盖**。
 // `patch` 是"这次要改的键"（覆盖写只改出现过的键 —— C9 第 2 步）；落盘前先按**合并结果**校验，
 // 校验不过 → **零字节落盘**（与能力写面同一条纪律）。
-func (s *Service) writeAutomation(id string, patch map[string]any, create bool) (dtoautomation.AutomationResp, error) {
-	dir, err := s.automationDirFor("automation 的增删改")
+func (s *Service) writeAutomation(ctx context.Context, id string, patch map[string]any, create bool) (dtoautomation.AutomationResp, error) {
+	// 打开草稿（**这一步就把载体的存在性与当前版本握在手里**：文件 = mtime，DB = 行 revision），
+	// 后面的"合并 → 校验 → 规范化 → 提交"对两种载体逐字相同。
+	draft, err := s.openAutomationDraft(ctx, id)
 	if err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
-	path, err := definitionPath(dir, "automation", id)
-	if err != nil {
-		return dtoautomation.AutomationResp{}, err
-	}
-	_, statErr := os.Stat(path)
-	exists := statErr == nil
+	exists := draft.existed
 	switch {
 	case create && exists:
 		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassLimit, "automation_exists",
@@ -270,13 +295,21 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 		}
 	}
 	patch["id"] = id
+	// 应用 patch（值 nil = 删键；顺序稳定）。文件载体与 DB 载体共用这一步，所以"只改出现过的键"
+	// 这条 C9 语义不因换载体而变。
+	for _, k := range sortedPatchKeys(patch) {
+		if patch[k] == nil {
+			draft.df.Delete(k)
+			continue
+		}
+		if err := draft.df.Set(k, patch[k]); err != nil {
+			return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
+				fmt.Sprintf("automation 定义 %s 的键 %q 无法序列化：%v", draft.locator, k, err), err)
+		}
+	}
 	// 合并后的**确切字节**先解成强类型再校验：PUT 的语义是"这几个键置成这些值"，
 	// 所以必须校验**合并结果**（而不是只校验 patch 里的键）。
-	draft, err := openDefinition(dir, "automation", id, patch)
-	if err != nil {
-		return dtoautomation.AutomationResp{}, err
-	}
-	merged, err := draft.Merged()
+	merged, err := draft.df.Marshal()
 	if err != nil {
 		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
@@ -309,7 +342,7 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 			}
 		}
 	}
-	if err := saveDefinition(draft); err != nil {
+	if err := s.commitAutomationDraft(ctx, draft, create); err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
 	def.State = automation.NormalizeState(def.State)
@@ -324,13 +357,9 @@ func (s *Service) writeAutomation(id string, patch map[string]any, create bool) 
 	return rec.view(), nil
 }
 
-// DeleteAutomationByID 删定义文件 + 摘内存条目；幂等（本来就不存在 → deleted:false）。
-func (s *Service) DeleteAutomationByID(id string) (bool, error) {
-	dir, err := s.automationDirFor("automation 的删除")
-	if err != nil {
-		return false, err
-	}
-	removed, err := removeDefinitionPermanently(dir, "automation", id)
+// DeleteAutomationByID 删载体里的定义 + 摘内存条目；幂等（本来就不存在 → deleted:false）。
+func (s *Service) DeleteAutomationByID(ctx context.Context, id string) (bool, error) {
+	removed, err := s.deleteAutomationDefinition(ctx, id)
 	if err != nil {
 		return false, err
 	}
@@ -361,37 +390,6 @@ func (s *Service) AutomationByID(id string) (dtoautomation.AutomationResp, bool)
 		return dtoautomation.AutomationResp{}, false
 	}
 	return rec.view(), true
-}
-
-// saveAutomationOverlay 运行态写回（`last_fired_at` / `last_status` / `state` / …）。
-//
-// **平台自己调**，不是用户写面。走同一套 C9 落盘：只改这几个键，用户手写的字段（含我们不认识的）
-// 原样保留；写回后重算调度态（`last_fired_at` 变了，`next_due` 必然要跟着变）。
-func (s *Service) saveAutomationOverlay(id string, overlay map[string]any) error {
-	dir, err := s.automationDirFor("automation 运行态写回")
-	if err != nil {
-		return err
-	}
-	if err := writeDefinition(dir, "automation", id, overlay); err != nil {
-		return err
-	}
-	// 写回后**重新装载这一条**，而不是在内存里逐键 merge。
-	//
-	// 逐键 merge 看着更省一次读盘，实际是个"忘了某个键"的陷阱：`recent_runs` 就那么漏过一次
-	// ——overlay 写盘时用内存里的旧环形缓冲覆盖文件，把刚追加的那条认领记录整段抹掉
-	// （文件里只剩最新一条）。重新装载让"内存 = 文件"成为定义，未知键/环形缓冲/时间格式
-	// 全走同一条解析路径，不可能各写一半。
-	rec := loadAutomationFile(filepath.Join(dir, id+".json"), id, time.Now())
-	if rec.loadErr != "" {
-		// 我们刚写成功却读不回来 → 只能是并发手改（或磁盘异常）：保留旧内存态并告警，
-		// 绝不用一条"读坏了的记录"覆盖调度态。
-		slog.Warn("automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
-		return nil
-	}
-	s.mu.Lock()
-	s.automations[id] = rec
-	s.mu.Unlock()
-	return nil
 }
 
 // automationDueSnapshot 取"到期待处理"的快照（调度器每 tick 调用）。

@@ -1,0 +1,30 @@
+/* 生成物，禁手改：由 apps/desktop/scripts/gen-shell-css.mjs 从 packages/ui/src/theme.ts 的 tokens 生成。
+   壳静态页（renderer/*.html）不引 antd、不走 React，因此只能消费这份 CSS 变量；
+   改了 tokens 就重跑脚本（`node apps/desktop/scripts/gen-shell-css.mjs`）。 */
+:root {
+  --fg-primary: #4f6ef7;
+  --fg-primary-hover: #6b86ff;
+  --fg-primary-active: #3a55d6;
+  --fg-primary-soft: rgba(79, 110, 247, 0.12);
+  --fg-gradient: linear-gradient(135deg, #4f6ef7 0%, #7a5af8 55%, #a855f7 100%);
+  --fg-bg: #f7f8fa;
+  --fg-surface: #ffffff;
+  --fg-soft-fill: #f1f3f5;
+  --fg-code-bg: #fafafa;
+  --fg-selected-bg: rgba(79, 110, 247, 0.10);
+  --fg-border: #e6e9ef;
+  --fg-border-strong: #d3d8e0;
+  --fg-text: #1f2430;
+  --fg-text-secondary: #56637a;
+  --fg-text-placeholder: #94a3b8;
+  --fg-success: #22c55e;
+  --fg-warning: #f59e0b;
+  --fg-warning-bg: #fffbe6;
+  --fg-warning-border: #ffe58f;
+  --fg-error: #ef4444;
+  --fg-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --fg-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --fg-radius-sm: 8px;
+  --fg-radius-md: 12px;
+  --fg-radius-lg: 14px;
+}

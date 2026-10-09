@@ -25,6 +25,23 @@ func TestMain(m *testing.M) {
 // runHelper 最小 MCP stdio 服务端：initialize / initialized / tools/list（含分页与故障注入）。
 func runHelper() {
 	mode := os.Getenv("FORGE_MCP_HELPER_MODE")
+	if mode == "server" {
+		// mode=server：跑**本包真实的服务端实现**（server.go），用来做自研互测与 stdout 纯度
+		// 检查。这里不手写帧，手写的那套（下面）继续负责"故障注入"这类客户端侧用例。
+		_ = Serve(context.Background(), os.Stdin, os.Stdout,
+			ServerInfo{Name: "test-gateway", Version: "9.9.9", Instructions: "测试网关"},
+			helperGatewayHandler(), ServerOptions{})
+		return
+	}
+	// 连接池用例要数"起了几次进程"：每次进入 helper 追加一行（含 pid），父进程数行数即可。
+	// 池化的收益正是"第二次调用不再起进程"，这是它唯一可观测的证据。
+	if logPath := os.Getenv("FORGE_MCP_HELPER_SPAWN_LOG"); logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintf(f, "%d\n", os.Getpid())
+			_ = f.Close()
+		}
+	}
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	out := bufio.NewWriter(os.Stdout)
@@ -53,7 +70,7 @@ func runHelper() {
 			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
 				"protocolVersion": protocolVersion,
 				"capabilities":    map[string]any{},
-				"serverInfo":      map[string]any{"name": "helper", "version": "1.2.3"},
+				"serverInfo":      map[string]any{"name": helperName(), "version": "1.2.3"},
 			}})
 		case "resources/list":
 			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
@@ -120,6 +137,17 @@ func runHelper() {
 			}
 			_ = json.Unmarshal(msg.Params, &p)
 			switch mode {
+			case "call_mixed":
+				// 同一条会话里既有"服务端错误响应"又有正常结果：用来验证池对错误的分线
+				// （错误响应不作废会话）。
+				if p.Name == "bad" {
+					send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+						"error": map[string]any{"code": -32602, "message": "unknown tool " + p.Name}})
+					continue
+				}
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok=" + p.Name}},
+				}})
 			case "call_rpc_error":
 				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
 					"error": map[string]any{"code": -32602, "message": "unknown tool " + p.Name}})
@@ -168,6 +196,39 @@ func stdioServer(t *testing.T) Server {
 	t.Helper()
 	t.Setenv("FORGE_MCP_HELPER", "1")
 	return Server{ID: "helper", Transport: "stdio", Command: os.Args[0]}
+}
+
+// helperName 让父进程能验证 **Server.Env**（而不是父进程环境）确实进了子进程：
+// 测试把 FORGE_MCP_HELPER_NAME 放进 Server.Env，这里把它当 serverInfo.name 回出来。
+func helperName() string {
+	if v := os.Getenv("FORGE_MCP_HELPER_NAME"); v != "" {
+		return v
+	}
+	return "helper"
+}
+
+// TestStdioServerEnvReachesChild Server.Env 必须真的进子进程环境，而不只是"父进程环境恰好有"。
+//
+// 这条钉的是实测缺陷（2026-10-09）：`Server` 曾无 `Env` 字段 ⇒ 平台探测/调用路径下发的 stdio
+// server 拿不到密钥型绑定解析后的 env（注入路径走 ACP，另有通道，于是同一个 server"会话里能用、
+// 平台探测必失败"）。
+func TestStdioServerEnvReachesChild(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s := stdioServer(t)
+	// 只放在 Server.Env 里：父进程环境没有这个键，子进程能读到才说明字段生效。
+	s.Env = map[string]string{"FORGE_MCP_HELPER_NAME": "from-server-env"}
+	res, err := ListTools(ctx, s)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if res.ServerName != "from-server-env" {
+		t.Fatalf("Server.Env 未进子进程：serverInfo.name=%q", res.ServerName)
+	}
+	// 且是**追加**语义：父进程环境仍在（否则 HOME/PATH 之类会被抹掉）。
+	if os.Getenv("FORGE_MCP_HELPER") == "" {
+		t.Fatal("夹具前提：父进程环境应有 FORGE_MCP_HELPER")
+	}
 }
 
 // TestStdioListToolsOK stdio 探测全流程：握手 → initialized → tools/list；空名工具跳过。

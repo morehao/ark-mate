@@ -41,6 +41,7 @@ type pendingPermission struct {
 // mock 不了，权限决策的 RPC 阻塞在 SDK 派发的 goroutine 里（见 acl/client.go 说明）。
 type PermissionManager struct {
 	mu         sync.Mutex
+	seq        uint64                            // 权限记忆写入序号（见 memoryEntry.seq；只在持锁期间自增）
 	pending    map[string]*pendingPermission     // key = callID
 	mem        map[string]map[string]memoryEntry // conversationID → action+identifier → 记忆（allow/reject 同键互斥）
 	timeout    time.Duration

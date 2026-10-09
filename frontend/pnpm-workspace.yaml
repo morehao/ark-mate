@@ -1,3 +1,14 @@
+# frontend 工作区（pnpm workspace）
 packages:
   - "apps/*"
   - "packages/*"
+
+# 供应链纪律：**默认拒绝**依赖的构建脚本（构建脚本 = 安装期执行任意代码），
+# 每个带脚本的依赖都必须在这里显式表态 true/false；未表态的会被 pnpm 报错拦下
+# （`ERR_PNPM_IGNORED_BUILDS`，并自动往本文件补一行占位），因此不存在"静默放行"。
+allowBuilds:
+  # esbuild：平台二进制由 `@esbuild/darwin-arm64` 这类可选依赖直接提供，脚本只做校验/补 shim，
+  # 不执行同样可用（实测 `esbuild --version` = 0.28.2，桌面壳的构建链跑通）。
+  esbuild: false
+  # electron-winstaller：只服务 Windows 安装器（M4-3）；届时若确证需要其脚本再改这一行。
+  electron-winstaller: false

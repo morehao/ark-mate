@@ -7,7 +7,9 @@
 //  4. 进程环境变量 `FORGE_*`（历史行为，始终最高）
 //  5. CLI flag（由 cmd 层在 Load 之后覆盖）
 //
-// 配置目录取自 `FORGE_CONFIG_DIR`，默认 `<默认数据目录>/config`（即 `~/.forge/config`）。
+// 数据目录取自 `FORGE_HOME`，默认 `~/.forge`；配置目录取自 `FORGE_CONFIG_DIR`，默认
+// `<数据目录>/config`（即 `~/.forge/config`）。这两个是**启动引导键**：只认进程环境变量，
+// 必须在读配置文件之前就有确定值（理由见 Config.HomeDir）。
 // 目录不存在 = 完全维持历史行为（向后兼容）；文件存在但键名/取值非法 = 启动即报错（不静默忽略）。
 package config
 
@@ -113,12 +115,46 @@ type Config struct {
 	ProcRegistryPath string
 	// ReapGrace 孤儿回收的 SIGTERM → SIGKILL 宽限期（FORGE_REAP_GRACE 覆盖，默认 2s）。
 	ReapGrace time.Duration
+	// HomeDir 数据目录（M3-3；FORGE_HOME 覆盖，默认 ~/.forge，家目录不可得时回落相对 `.forge`）。
+	//
+	// 为什么要有独立的键：CLI / 浏览器 / 桌面三个入口**共用一份数据目录**（设计 §481）——
+	// 按入口分裂就会出现"桌面打开后会话不见了"。这里存的是**已解析**的值：transcripts / db /
+	// agents / … 的默认位置都由它派生，各 runtime 子进程的配置隔离也以它为根（pkg/runtime.IsolationEnv）。
+	//
+	// 为什么它只吃**进程环境变量**、不进 config.json / env 文件的键值链（与 FORGE_CONFIG_DIR 同级）：
+	// 数据目录决定配置目录的默认位置（`<数据目录>/config`），而配置文件又在配置目录里——让文件里的值
+	// 参与决定"文件从哪读"是循环。它必须与 ConfigDirFromEnv() 用同一个事实源，否则会出现
+	// "配置从 A 读、数据落 B"的分裂（那正是本键要消灭的形态）。
+	//
+	// 显式给的值必须是绝对路径（相对路径随进程 CWD 漂移，见 materialize）；未设置时的兜底不受此约束。
+	HomeDir string
 	// ConfigDir 本次加载使用的配置目录（`forge config` 展示用；空 = 未解析）。
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
 	RemoteRuntimes []RemoteRuntime
-	// Token 单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
-	// 非空时除 /health 外的所有 /v1/forge 路由都要求 Bearer token（WS 可用 ?token=）。
+	// WebDir 前端资产目录（M2-1；FORGE_WEB_DIR 覆盖，默认空）。
+	// 空 = 用构建期内置资产；**非空即校验**（绝对路径 / 存在 / 目录 / 含 index.html），
+	// 不合法就拒绝启动——显式配置配错时静默回落到内嵌旧资产，是"用户看到旧界面还以为没生效"的根源。
+	WebDir string
+	// AllowedOrigins 额外允许的请求来源（M3-5；FORGE_ALLOWED_ORIGINS，逗号分隔，config.json 可写 JSON 数组；
+	// 默认空 = 只用内置 Origin 矩阵）。
+	//
+	// **这是给跨源开发/自建反代用的显式登记口，不是默认放开**：内置矩阵只放行「无 Origin」的壳内反代
+	// /同源导航、`forge-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
+	// internal/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
+	// 与自建反代（页面 origin ≠ 核心监听 origin）都落在矩阵之外，必须在这里指名登记。
+	//
+	// 取值必须是**纯 origin**（`scheme://host[:port]`，无路径/查询/片段，可带一个尾斜杠）；
+	// 统一小写后比较，顺序无关（解析后排序去重）。非法取值启动即报错。
+	//
+	// 只在**回环监听**时生效：`--addr 0.0.0.0` 等非回环监听下 Host/Origin 白名单整体不启用
+	// （设计 §9.4 明确 Host/Origin 白名单属于"对外产品化缺的四件事"之一，本期范围外），
+	// 此时本键也不参与判定——启动日志会打一条 WARN 说清楚。
+	AllowedOrigins []string
+	// Token 独立态单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
+	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
+	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
+	// 桌面态不使用它：那两个面互斥的凭据由壳经 --auth-stdin 下发。
 	Token string
 	// NativePermission 原生权限映射开关（B5；FORGE_NATIVE_PERMISSION 覆盖，默认 auto）：
 	//   auto = 把 agent 的 permission_policy 投影到底座原生权限开关；
@@ -129,6 +165,14 @@ type Config struct {
 	//   startup  = serve 启动后后台逐个探测全部已注册 MCP server（写 Tool 目录 + 探测状态）。
 	// 默认 off 是有意的：stdio server 探测会**拉起用户配置的子进程**，不宜默认执行。
 	McpAutoProbe string
+	// McpGateway 远程 MCP 的平台侧网关开关（M7；FORGE_MCP_GATEWAY 覆盖，默认 auto）：
+	//   auto = **远程传输**（sse/http/streamable_http）的 MCP 由平台网关代连：底座只看见一条
+	//          stdio 条目（`forge mcp bridge`），凭据不进底座可见面，且条目恒定 ⇒ 增删远程
+	//          server 不换代际；stdio server 仍由底座直连（S2 是另案）。
+	//   off  = 关掉网关，回到"远程传输按底座承载能力直连注入"的老路（§10.6 的 P-5 回退开关）。
+	// auto 而非 on：只有一个取值（auto）意味着"没有开关"，而这条路径改变了远程 MCP 的注入
+	// 形态，出问题时必须有一条不改文件、不改代码就能退回去的路。
+	McpGateway string
 }
 
 // 原生权限映射开关取值。
@@ -149,6 +193,18 @@ const (
 // ValidMcpAutoProbeModes 合法取值（错误提示用）。
 var ValidMcpAutoProbeModes = []string{McpAutoProbeOff, McpAutoProbeStartup}
 
+// 平台侧 MCP 网关开关取值。
+const (
+	McpGatewayAuto = "auto"
+	McpGatewayOff  = "off"
+)
+
+// ValidMcpGatewayModes 合法取值（错误提示用）。
+var ValidMcpGatewayModes = []string{McpGatewayAuto, McpGatewayOff}
+
+// McpGatewayEnabled 报告平台侧 MCP 网关是否启用（默认 auto = 启用；只有显式 off 才关）。
+func (c Config) McpGatewayEnabled() bool { return c.McpGateway != McpGatewayOff }
+
 // 持久层模式取值。StoreModeAuto 是**显式**的 auto：Config.StoreMode 里它落成空串
 // （空串同时表示"未设置"），真正的 auto 解析在 serve 装机时做——DB 文件已存在则 sqlite，
 // 否则 memory（见 internal/app/app.go）。
@@ -157,6 +213,22 @@ const (
 	StoreModeSQLite = "sqlite"
 	StoreModeMemory = "memory"
 )
+
+// ResolvedStoreMode 把"未声明"（含显式 auto，`LoadResolved` 已归一成空串）解析成实际模式：
+// DB 文件存在且非空 → sqlite，否则 memory。
+//
+// 这一条原先只写在 `internal/app` 的 Init 里；M7 的网关进程（`forge mcp bridge`）也要按**同一
+// 判据**决定去哪读定义——两处各写一遍的后果是"网关读到了另一份数据面"（比如 core 在 sqlite 模式
+// 而网关判成 memory，工具面就恒空），表现为"工具莫名不见了"。故判据收到 config 上，两边共用。
+func (c Config) ResolvedStoreMode() string {
+	if c.StoreMode != "" {
+		return c.StoreMode
+	}
+	if fi, err := os.Stat(c.DBPath); err == nil && fi.Size() > 0 {
+		return StoreModeSQLite
+	}
+	return StoreModeMemory
+}
 
 // ValidStoreModes 合法取值（错误提示用）。
 var ValidStoreModes = []string{StoreModeAuto, StoreModeSQLite, StoreModeMemory}
@@ -202,6 +274,7 @@ func Default() Config {
 		GenerationLimit:    DefaultGenerationLimit,
 		AutomationTick:     DefaultAutomationTick,
 		McpAutoProbe:       McpAutoProbeOff,
+		McpGateway:         McpGatewayAuto,
 		NativePermission:   NativePermissionAuto,
 	}
 }
@@ -229,7 +302,10 @@ var knownKeys = map[string]string{
 	"proc_registry":       "FORGE_PROC_REGISTRY",
 	"reap_grace":          "FORGE_REAP_GRACE",
 	"token":               "FORGE_TOKEN",
+	"allowed_origins":     "FORGE_ALLOWED_ORIGINS",
+	"web_dir":             "FORGE_WEB_DIR",
 	"mcp_auto_probe":      "FORGE_MCP_AUTO_PROBE",
+	"mcp_gateway":         "FORGE_MCP_GATEWAY",
 	"native_permission":   "FORGE_NATIVE_PERMISSION",
 }
 
@@ -241,6 +317,7 @@ var knownKeys = map[string]string{
 var knownListKeys = map[string]bool{
 	"workspace_roots": true,
 	"projection_dirs": true,
+	"allowed_origins": true,
 }
 
 // renamedKeys 已改名/已移除的配置键 → 可操作的改法。
@@ -350,12 +427,30 @@ func (r *resolver) sources() Sources {
 	return out
 }
 
-// ConfigDirFromEnv 解析配置目录：FORGE_CONFIG_DIR 优先，否则 <默认数据目录>/config。
+// ConfigDirFromEnv 解析配置目录：FORGE_CONFIG_DIR 优先，否则 <数据目录>/config。
+//
+// "数据目录"由 HomeDirFromEnv() 给出，所以 FORGE_HOME 一变，配置目录的默认位置跟着变——
+// 这条关系必须保持：从配置目录反推数据目录（旧 metaInfo 的 filepath.Dir 做法）会让
+// 「FORGE_CONFIG_DIR 与 FORGE_HOME 分家」的进程读到错误的数据目录。
 func ConfigDirFromEnv() string {
 	if v := strings.TrimSpace(os.Getenv("FORGE_CONFIG_DIR")); v != "" {
 		return v
 	}
-	return filepath.Join(defaultForgeHome(), "config")
+	return filepath.Join(HomeDirFromEnv(), "config")
+}
+
+// HomeDirFromEnv 解析数据目录：FORGE_HOME 优先，否则 ~/.forge。
+//
+// trim 后为空 = 未设置（与 FORGE_CONFIG_DIR 等键的语义一致：空串不是"数据目录是空路径"，
+// 否则派生路径会拼成 "/transcripts" 这种根目录下的怪地方）。
+// 家目录不可得时保留既有兜底（相对 `.forge`）：宁可落到 CWD 下，也不要拼出根目录路径。
+//
+// 只认进程环境变量的理由见 Config.HomeDir。
+func HomeDirFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("FORGE_HOME")); v != "" {
+		return v
+	}
+	return defaultForgeHome()
 }
 
 // defaultForgeHome 默认数据目录（~/.forge；家目录不可得时回落到相对路径）。
@@ -579,8 +674,25 @@ func materialize(r *resolver) (Config, error) {
 		}
 		c.ProjectionDirs = dirs
 	}
+	if v, ok := r.get("web_dir"); ok {
+		c.WebDir = strings.TrimSpace(v)
+	}
 	if v, ok := r.get("token"); ok {
 		c.Token = strings.TrimSpace(v)
+	}
+	// allowed_origins：额外允许的来源白名单（M3-5；逗号分隔或 JSON 数组，两种形式汇到同一条解析路径）。
+	if list, ok := r.list("allowed_origins"); ok {
+		origins, err := normalizeAllowedOrigins(list)
+		if err != nil {
+			return bad("allowed_origins", err.Error())
+		}
+		c.AllowedOrigins = origins
+	} else if v, ok := r.get("allowed_origins"); ok {
+		origins, err := parseAllowedOrigins(v)
+		if err != nil {
+			return bad("allowed_origins", err.Error())
+		}
+		c.AllowedOrigins = origins
 	}
 	if v, ok := r.get("native_permission"); ok {
 		mode := strings.ToLower(strings.TrimSpace(v))
@@ -607,8 +719,35 @@ func materialize(r *resolver) (Config, error) {
 		}
 	}
 
-	// 依赖家目录的派生默认值（未被任何来源显式设置时）。
-	home := defaultForgeHome()
+	if v, ok := r.get("mcp_gateway"); ok {
+		mode := strings.ToLower(strings.TrimSpace(v))
+		switch mode {
+		case McpGatewayAuto, "":
+			c.McpGateway = McpGatewayAuto
+		case McpGatewayOff:
+			c.McpGateway = McpGatewayOff
+		default:
+			return bad("mcp_gateway", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidMcpGatewayModes, "|"), v))
+		}
+	}
+
+	// 数据目录（M3-3）：FORGE_HOME 优先，默认 ~/.forge。
+	//
+	// 显式给的 FORGE_HOME 必须是绝对路径：相对路径按**进程 CWD** 解析，而 CLI（用户 shell 的 CWD）与
+	// 桌面（壳的 CWD，通常是 `/`）的 CWD 不同——同一个环境变量会静默打开两份数据目录，正是设计 §481
+	// 要消灭的"桌面打开后会话不见了"。未设置时的兜底（家目录不可得 → 相对 `.forge`）不是用户给的路径，
+	// 不适用这条约束（见 HomeDirFromEnv）。
+	if v, ok := os.LookupEnv("FORGE_HOME"); ok {
+		if t := strings.TrimSpace(v); t != "" && !filepath.IsAbs(t) {
+			return bad("FORGE_HOME", fmt.Sprintf(
+				"需为绝对路径（相对路径随进程 CWD 漂移，三端可能打开不同数据目录；家目录请写全路径），得到 %q", v))
+		}
+	}
+	home := HomeDirFromEnv()
+	c.HomeDir = home
+
+	// 依赖数据目录的派生默认值（未被任何来源显式设置时）。
 	if v, ok := r.get("transcripts"); ok {
 		c.TranscriptDir = v
 	} else {

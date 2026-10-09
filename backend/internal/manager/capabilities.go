@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,17 +16,147 @@ import (
 	"github.com/morehao/ark-forge/pkg/code"
 )
 
+// defWarnOnce 同一条定义问题在一个进程内只 WARN 一次（key 由调用方给，须含 id 与 revision）。
+//
+// 为什么要有它：`reloadCapabilityDefinitions` 的调用频率不再只是"启动一次"——导入会重装，
+// 平台侧网关**每次取数**都会重装（M7-2）。一条坏定义每次都报的后果不是"更显眼"，而是日志
+// 被刷成噪声、真问题被埋掉。key 里带 revision 是刻意的：**同一条定义改坏了两次要报两次**。
+func (s *Service) defWarnOnce(key, msg string, args ...any) {
+	s.mu.Lock()
+	if s.defWarned == nil {
+		s.defWarned = make(map[string]bool)
+	}
+	seen := s.defWarned[key]
+	s.defWarned[key] = true
+	s.mu.Unlock()
+	if seen {
+		return
+	}
+	slog.Warn(msg, args...)
+}
+
 // LoadCapabilityDefinitions 加载能力数据面目录并合并（dir 为空 = 仅代码注入/空表）。
 // 返回三类合计加载数（坏文件跳过，对齐 LoadAgentDefinitions 容错）。
+//
+// **语义降级（M6-2，必须写在注释里，避免后人误当事实源）**：自 v8 起，sqlite 模式下本方法
+// **不再是装载源**——能力定义的事实源是 DB（`skills`/`mcp_servers`），本方法只剩两个用途：
+//  1. **memory 模式**（`FORGE_STORE=memory`，或无 DB 文件时的 auto）的装载路径：memory 模式
+//     没有持久层，文件是它唯一的持久形态，不给它造第二套存储、也不让能力静默变空表；
+//  2. **导入/导出路径**（M6-4 的 `forge capability import|export`）：`LoadDir` 降级为
+//     "把存量文件读成定义"的编解码入口。
+//
+// 登记 `capabilityDir` 的语义也随之降级为"导入/导出目录"（见 service.capabilityDir）。
 func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	if s.caps == nil {
 		return 0
 	}
-	// 登记目录：§13.4 S4 的启停要写回 <dir>/skills/<id>.json（没有它就只能内存生效，报错给出路）。
+	// 登记目录：导入/导出与（M6-3 之前的）启停写回都按它定位（没有它就只能内存生效，报错给出路）。
 	s.mu.Lock()
 	s.capabilityDir = dir
 	s.mu.Unlock()
 	return s.caps.LoadDir(dir).Total()
+}
+
+// LoadCapabilityDefinitionsFromStore 从持久层装载能力定义（sqlite 模式的事实源，M6-2）。
+//
+// 三步：**清空 → 逐行解码 → 过注册闸门**。顺序不能换：
+//   - 先 Reset 是"整体替换"语义的前提（否则库里删掉的行会以幽灵定义留下，见 Registry.Reset）；
+//   - 过 `RegisterSkill`/`RegisterMcpServer` 闸门是必须的：定义进 DB 的**写面**要走同一道闸门，
+//     但 DB 是可达的（`forge capability import`、将来的 SQL 手工修库），装载是最后一道防线——
+//     一手坏定义不该让整个能力面起不来。
+//
+// 坏行/非法定义**逐条 WARN 跳过、不阻断启动**，与 `LoadDir` 的容错口径逐字一致（用户目录里
+// 一个坏文件从来不阻挡服务启动，DB 化不该把这条变严）。返回成功装载的条数。
+//
+// `importDir` 只用于登记"导入/导出目录"（能力定义仍在文件里的那份存量）；空串 = 不登记。
+func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, importDir string) int {
+	n, _ := s.reloadCapabilityDefinitions(ctx, importDir, slog.LevelInfo)
+	return n
+}
+
+// ReloadCapabilityDefinitions 重新装载定义（**网关每次取数前**调用；M7-2）。
+//
+// 与 `LoadCapabilityDefinitionsFromStore` 是同一份实现，只有日志档位不同：网关是个长命进程，
+// 底座的**每次** tools/list / tools/call 都会触发一次装载，用 Info 档会把日志刷成噪声——而噪声
+// 的代价是"真出问题时没人看日志"。逐行的坏定义问题仍走 WARN（但**同一条只报一次**，见 defWarnOnce）。
+func (s *Service) ReloadCapabilityDefinitions(ctx context.Context) (int, error) {
+	return s.reloadCapabilityDefinitions(ctx, "", slog.LevelDebug)
+}
+
+// reloadCapabilityDefinitions 装载内核（公开入口与网关共用；level 只作用于汇总行）。
+func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir string, level slog.Level) (int, error) {
+	if s.caps == nil || s.st == nil {
+		return 0, fmt.Errorf("能力注册表或持久层未初始化")
+	}
+	if importDir != "" {
+		s.mu.Lock()
+		s.capabilityDir = importDir
+		s.mu.Unlock()
+	}
+	// 装进**独立的**新注册表再整体换入（不是"先 Reset 再逐条注册"）：后者会在共享面上留下
+	// 一个空的/半装的可观测中间态，而网关每次取数前都重装定义 ⇒ 并发调用必然撞上它
+	// （`Registry.ReplaceAll` 的注释记了全过程）。坏定义照样逐行跳过，不影响换面。
+	fresh := capability.NewRegistry()
+	total := 0
+
+	skills, err := s.st.ListSkillDefinitions(ctx)
+	if err != nil {
+		s.defWarnOnce("store:skills", "capability: 从持久层读 skill 定义失败（能力面将为空）", "err", err)
+		return total, err
+	}
+	for i := range skills {
+		row := skills[i]
+		var sk capability.Skill
+		if err := json.Unmarshal([]byte(row.Body), &sk); err != nil {
+			s.defWarnOnce("skill:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		// id 以**行主键**为准：body 里的 id 与行主键不一致时，行主键是事实（它是 CAS 与审计的键）。
+		// 这与文件路径的"文件名兜底"同一思路——文件名/主键是可寻址的那一个。
+		if sk.ID != row.ID {
+			if sk.ID != "" {
+				s.defWarnOnce("skill-id:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", sk.ID)
+			}
+			sk.ID = row.ID
+		}
+		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
+		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
+		if err := fresh.RegisterSkill(&sk); err != nil {
+			s.defWarnOnce("skill-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		total++
+	}
+
+	mcps, err := s.st.ListMcpServerDefinitions(ctx)
+	if err != nil {
+		s.defWarnOnce("store:mcps", "capability: 从持久层读 mcp server 定义失败", "err", err)
+		return total, err
+	}
+	for i := range mcps {
+		row := mcps[i]
+		var m capability.McpServer
+		if err := json.Unmarshal([]byte(row.Body), &m); err != nil {
+			s.defWarnOnce("mcp:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp server 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		if m.ID != row.ID {
+			if m.ID != "" {
+				s.defWarnOnce("mcp-id:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", m.ID)
+			}
+			m.ID = row.ID
+		}
+		if err := fresh.RegisterMcpServer(&m); err != nil {
+			s.defWarnOnce("mcp-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		total++
+	}
+
+	// 一次换面：此后所有读者看到的是完整的新目录。
+	s.caps.ReplaceAll(fresh)
+	slog.Log(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	return total, nil
 }
 
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
@@ -146,17 +278,34 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 	}
 
 	// MCP：注册表全量 + 每条的 enabled/runtimes（候选里支持该传输的子集，保持候选声明顺序）。
+	//
+	// **M7-3 的语义变化**：网关在环时，远程传输（sse/http/streamable_http）对**每个**候选 runtime
+	// 都可承载——底座只看见一条 stdio 条目，平台替它连远端（§10.6-①）。这正是"逐 runtime 的传输
+	// 承载矩阵消失"在**读面**的体现：以前 dsh 声明的 `streamable_http` 到不了、面板会标"不承载"，
+	// 现在不该再标。开关关掉（mcp_gateway=off）时回到老口径，读面与注入面始终同源。
 	servers := s.caps.ListMcpServers()
 	mcpOut := make([]dtocapability.AgentMcpServerResp, 0, len(servers))
 	carried := make(map[string]bool, len(servers)) // server id → 至少一个候选可承载
+	carries := func(m capability.McpServer, r string) bool {
+		if _, known := transports[r]; !known {
+			return false // 未注册的候选 runtime：不推导它的承载能力（与 notes 的口径一致）
+		}
+		if s.McpGatewayEnabled() && capability.IsRemoteTransport(m.Transport) {
+			// 网关代连：对底座而言它就是一条 stdio 条目 ⇒ 已注册的 runtime 都承载。
+			return true
+		}
+		for _, t := range transports[r] {
+			if t == m.Transport {
+				return true
+			}
+		}
+		return false
+	}
 	for _, m := range servers {
 		carriers := make([]string, 0, len(runtimes))
 		for _, r := range runtimes {
-			for _, t := range transports[r] {
-				if t == m.Transport {
-					carriers = append(carriers, r)
-					break
-				}
+			if carries(m, r) {
+				carriers = append(carriers, r)
 			}
 		}
 		if len(carriers) > 0 {
@@ -313,72 +462,20 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 	}
 }
 
-// mcpSelectionFor 选出该 agent×runtime 的 MCP **候选定义**（未解析密钥）。
-//
-// 这是「哪些 server 属于这套能力」的**唯一**实现：注入面（McpServersFor）与代际指纹
-// （capabilityFingerprint）都从这里取。两处各写一遍的后果是"指纹里有的、注入时没有"（或反之）——
-// 后者更糟：指纹说这套能力包含某个 server，实际却没注入。
-//
-// 与注入面的差别只有一处、且是**有意**的：这里不解析密钥（能不能解析是环境事实，不该让指纹抖动）。
-//
-// **白名单优先级（M3）**：会话声明了 `capabilities.mcps` → 以它为准（M3-2 的落点）；
-// 会话没声明该 kind → 回落 `agent.Mcps`；两者都未声明 → 全量按 transport 过滤（今天的行为）。
-// 会话级的选定**覆盖**而不是求交：agent 声明是"这个 agent 默认能碰什么"，会话声明是用户此刻
-// 的显式选择，求交会让"agent 白名单里没有的 server"永远选不上，用户看不到任何解释。
-func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []capability.McpServer {
-	if s.caps == nil {
-		return nil
-	}
-	supported, ok := s.supportedMcpTransports(runtimeID)
-	if !ok {
-		return nil
-	}
-	want := make(map[string]bool, len(supported))
-	for _, t := range supported {
-		want[t] = true
-	}
-	allowIDs := (*[]string)(nil)
-	if sel != nil && sel.Mcps != nil {
-		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
-	} else if agent != nil {
-		allowIDs = agent.Mcps
-	}
-	var allow map[string]bool
-	if allowIDs != nil {
-		allow = make(map[string]bool, len(*allowIDs))
-		for _, id := range *allowIDs {
-			allow[id] = true
-		}
-	}
-	servers := s.caps.ListMcpServers()
-	out := make([]capability.McpServer, 0, len(servers))
-	for _, m := range servers {
-		if !m.IsEnabled() {
-			continue // 禁用 = 不注入（overlay：定义/密钥引用/探测结果都保留，只停止注入）
-		}
-		if !want[m.Transport] {
-			continue
-		}
-		if allow != nil && !allow[m.ID] {
-			continue // agent 白名单未启用该 server（含空白名单 = 全部跳过）
-		}
-		out = append(out, m)
-	}
-	return out
-}
-
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单（会话选定 > agent.Mcps；
-// 两者都未声明 = 全量；空数组 = 一个都不要）。headers/凭证一并携带（走 ACP wire）。
-// 未知 runtime → nil（维持现状不下发）。
+// **stdio 直连** + （有远程 server 时）**一条平台网关条目**（M7-3 的分派）。
+//
+// 老口径（M7 之前）是"注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单"，远程 server 由
+// 底座自己按传输直连；现在远程一律经网关（P-2），故这里只保留直连那一半，条目的合成在
+// `planMcpInjection`（唯一实现，指纹也用它——两处各写一遍会出现"指纹说含 X、注入里没有 X"）。
 //
 // `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
 // `conversations.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
 // 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
 func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
-	servers := s.mcpSelectionFor(agent, runtimeID, sel)
-	out := make([]acl.McpServer, 0, len(servers))
-	for _, m := range servers {
+	plan := s.planMcpInjection(agent, runtimeID, sel)
+	out := make([]acl.McpServer, 0, len(plan.Direct)+1)
+	for _, m := range plan.Direct {
 		name := m.Name
 		if name == "" {
 			name = m.ID
@@ -397,7 +494,23 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *Capabili
 			Env: env, Headers: headers,
 		})
 	}
+	if plan.Gateway != nil {
+		// 网关条目天生无密钥（只有 scope），故直接追加；远程凭据留在网关进程里（§10.6-②）。
+		out = append(out, *plan.Gateway)
+		if len(plan.Remote) > 0 {
+			slog.Debug("mcp 注入：远程 server 经平台网关代连",
+				"agent", agentIDOf(agent), "runtime", runtimeID, "remote", len(plan.Remote))
+		}
+	}
 	return out
+}
+
+// agentIDOf 空安全取 agent id（日志/诊断用）。
+func agentIDOf(a *AgentRec) string {
+	if a == nil {
+		return ""
+	}
+	return a.ID
 }
 
 // projectedRuntimeSet 本进程已解析出 skill 投影的 runtime 集合（激活判定与投放集共用）。

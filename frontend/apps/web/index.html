@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="ark-forge Web 问答控制台：基于不同 Agent 底座（opencode / deepseek-harness）进行问答会话，REST 命令 + WebSocket 实时事件流。"
+    />
+    <title>ark-forge · Agent 问答控制台</title>
+    <!-- 图标与 manifest 走**真实文件**（public/ 下的产物）：这样壳与核心的静态服务清单
+         （/favicon.svg、/manifest.webmanifest）才有对应产物，asset-parity 的一致性断言才可比。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#4f6ef7" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

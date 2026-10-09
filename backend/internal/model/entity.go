@@ -20,6 +20,20 @@ const (
 	TableMigration = "schema_migrations"
 	// TableInput 待投递的用户输入队列（§6 busy input 队列）。
 	TableInput = "inputs"
+	// TableSkill 能力定义（skill）——sqlite 模式下它是能力面的**事实源**（M6-1）。
+	TableSkill = "skills"
+	// TableMcpServer MCP server 定义（与 TableSkill 同形，见 McpServerDefinition）。
+	TableMcpServer = "mcp_servers"
+	// TableCapabilityRevision 能力定义变更审计（**全局单调 seq = 代际 rev 的来源**）。
+	//
+	// 表名里的 capability 是历史命名：M6-6 起它同时承载 agent（以及 M6-7 的 automation）
+	// 定义的变更——它就是"**定义变更**审计"这一件事，`kind` 列区分域。不改名是因为它已在
+	// v8 落地（改名要动迁移内核与既有测试），而"能力面"在本仓的口径本来就含 Agent 视角。
+	TableCapabilityRevision = "capability_revisions"
+	// TableAgent agent 定义（M6-6；与 TableSkill 同形）。
+	TableAgent = "agents"
+	// TableAutomation 定时任务：**定义列 + 运行态列**（M6-7，Plan §7 P-10）。
+	TableAutomation = "automations"
 )
 
 // 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
@@ -226,3 +240,161 @@ func (Migration) TableName() string { return TableMigration }
 
 // MigrationList 是 Migration 切片类型（gormdao 泛型参数要求具名切片）。
 type MigrationList []Migration
+
+// ——— 能力定义事实源（M6-1；表名见 TableSkill / TableMcpServer） ———
+
+// SkillDefinition 是一条 skill 定义行。
+//
+// `Body` 是**唯一权威**：定义原始 JSON 原样保存，未知键因此得以承载——落盘纪律（C9）的
+// **意图保留、机制换掉**：从"读 map → 只改目标键 → 原子替换文件"换成"事务 + 行 revision CAS"
+// （计划 §1 P-2/P-3）。
+//
+// `Revision`/`UpdatedAt` 是仅有的两个**提升列**。刻意**不加** `enabled`/`scope`/`runtimes`
+// 等派生列：它们都在 `body` 里，双写必然漂移；能力定义规模是几十条，查询在 Go 侧做即可。
+type SkillDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义原始 JSON（含未知键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据：从 1 起，每次成功提交 +1。
+	//
+	// 它就是今天 `checkUnchanged`（mtime+size）所处的位置——对外表现仍是同一个
+	// `definition_changed`(40901)，**名字与码都不变**。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (SkillDefinition) TableName() string { return TableSkill }
+
+// SkillDefinitionList 是 SkillDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type SkillDefinitionList []SkillDefinition
+
+// McpServerDefinition 是一条 MCP server 定义行（列与语义同 SkillDefinition）。
+//
+// 与 SkillDefinition 分表而不是加 kind 列：两张表的读取面、写面与规模都各走各的，
+// 合成一张"定义表 + kind"会让每个查询都带一个恒真的过滤条件，且 kind 与 id 的
+// 唯一性约束会变成"跨 kind 唯一"这种没人想要的东西。
+type McpServerDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义原始 JSON（含未知键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (McpServerDefinition) TableName() string { return TableMcpServer }
+
+// McpServerDefinitionList 是 McpServerDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type McpServerDefinitionList []McpServerDefinition
+
+// AgentDefinition 是一条 agent 定义行（M6-6；列与语义同 SkillDefinition）。
+//
+// **只存用户对种子的覆盖**：内置种子（`builtinAgents`：dsh/opencode）永不落行，装载时先铺种子
+// 再用行里的**非零字段**覆盖（`applyDefinition` 的部分合并语义逐字保留）。所以"DB 里有几行"
+// ≠ "平台有几个 agent"——`List` 出来的行里可能只有 `{"id":"x","name":"..."}`。
+//
+// Body 存的是 **typed marshal 的结果**（与今天 `persistAgentDef` 写文件的内容逐字节同源），
+// 不是"原始文件字节"：agent 的写面今天就走 typed 结构（`agentDefinitionFile`），DB 化只换载体
+// 不换形状——未知键在 agent 侧从来就没被保留过，这一条不在 M6-6 的语义变更范围里。
+type AgentDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义 JSON（typed marshal；见类型注释）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (AgentDefinition) TableName() string { return TableAgent }
+
+// AgentDefinitionList 是 AgentDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type AgentDefinitionList []AgentDefinition
+
+// AutomationDefinition 是一条定时任务（M6-7）。
+//
+// **定义与运行态分列**（Plan §7 P-10）：`Body` 只放用户写的定义（含 `state`——它刻意不在
+// `automation.ReservedKeys` 里，见那里的注释：启用/停用/归档本来就是用户操作），运行态
+// （`last_fired_at` / `last_status` / … / `recent_runs`）走列。于是"用户往 body 里塞运行态键"
+// 这件事**结构上不可能**，而拒写名单（`IsReservedKey` → 40001）仍然保留——否则用户会写出一个
+// "我写了它为什么不生效"的定义。
+//
+// **运行态列不参与 revision CAS**：`Revision`/`UpdatedAt` 只记定义（含 `state`，它是定义键）
+// 的提交。调度器每次推进只改运行态列 → 面板上的定义不会看起来"被别人改过"（文件载体里这一步
+// 会抬高 mtime；DB 载体把两件事分开之后，只有定义被真改过才撞 40901）。唯一例外是**首次**
+// 推进要往正文里补一个 `state`（用户没写过它），那一次会前进一版——之后逐字节稳定。
+//
+// `recent_runs` 存 JSON 文本（有界，`automation.RecentRunsMax`）：搬进 `events` 表会撞
+// `events.conversation_id NOT NULL REFERENCES conversations`，而 duplicate/overlap/skipped
+// 三类结果**没有会话可挂**（Plan §7 P-11）。
+type AutomationDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 用户写的定义（原始 JSON，含未知键；**不含**运行态键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次**定义**提交的时刻（RFC3339Nano(UTC)；运行态写回不刷新它）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	// LastFiredAt 最近一次被认领的 occurrence（RFC3339Nano(UTC)；空 = 从未触发）。
+	//
+	// 它是"这个 occurrence 是否已经触发过"的**唯一判据**（ADR-10），也是调度推进的 CAS 判据：
+	// 认领 = `WHERE id=? AND last_fired_at=<读到的值>`，0 行 = 别人先认领了。
+	LastFiredAt string `gorm:"column:last_fired_at;not null;default:''"`
+	// LastStatus 最近一次结果（completed/failed/interrupted/skipped）。
+	LastStatus string `gorm:"column:last_status;not null;default:''"`
+	// LastReason 最近一次没跑成/失败的原因（人话）。
+	LastReason string `gorm:"column:last_reason;not null;default:''"`
+	// LastConversationID 最近一次触发产生的会话（overlap 判据用它查会话是否还在跑）。
+	LastConversationID string `gorm:"column:last_conversation_id;not null;default:''"`
+	// ConsecutiveFailures 连续失败次数（跑成一次即清零）。
+	ConsecutiveFailures int64 `gorm:"column:consecutive_failures;not null;default:0"`
+	// RecentRuns 最近若干次触发的留痕（JSON 数组文本，最新在前，有界）。
+	RecentRuns string `gorm:"column:recent_runs;not null;default:'[]'"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (AutomationDefinition) TableName() string { return TableAutomation }
+
+// AutomationDefinitionList 是 AutomationDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type AutomationDefinitionList []AutomationDefinition
+
+// CapabilityRevision 是一条能力定义变更审计。
+//
+// **刻意不加外键**：审计必须在能力被删除后仍然存在——这与 `events` 表"必须挂会话"
+// （`events.conversation_id NOT NULL REFERENCES conversations(id)`）的约束正好相反，别照抄那套。
+//
+// `Seq` 是 `AUTOINCREMENT`（单调、不复用），因此可以直接当作设计文档 §3.3/§10.5-③ 的
+// "当前代际 rev"：M1 落地时它取 `MAX(seq)` 即可，不需要另造一个进程内计数器
+// （设计文档 §"M6 与 M1 有直接交叠"那条建议）。
+//
+// 注意本表**没有 `id` 列**（主键叫 `seq`）：gormdao 以 `id` 为主键的泛型方法
+// （GetByID/UpdateByID/UpdateMap/Delete）一律不可用，见 `internal/dao/doc.go`。
+type CapabilityRevision struct {
+	// Seq 全局单调序（AUTOINCREMENT 保证不复用）。
+	Seq int64 `gorm:"column:seq;primaryKey;autoIncrement"`
+	// Kind 定义种类。取值见 CapabilityKindSkill / CapabilityKindMcp / CapabilityKindAgent
+	// （M6-7 起还有 CapabilityKindAutomation）。
+	Kind string `gorm:"column:kind;not null"`
+	// CapabilityID 被改动的定义 id（定义删除后本行仍留着它）。
+	CapabilityID string `gorm:"column:capability_id;not null"`
+	// Action 变更动作。取值见 CapabilityActionCreate / …Update / …Delete / …Import。
+	Action string `gorm:"column:action;not null"`
+	// Actor 变更发起者（当前是调用方标识，如 "rest" / "cli" / "import"）。
+	Actor string `gorm:"column:actor;not null"`
+	// At 变更时刻（RFC3339Nano(UTC)）。
+	At time.Time `gorm:"column:at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	// Digest 提交后 body 的摘要（sha256 hex）：审计要能回答"那一版到底是什么"，
+	// 而不是只留一个自增号。
+	Digest string `gorm:"column:digest;not null"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (CapabilityRevision) TableName() string { return TableCapabilityRevision }
+
+// CapabilityRevisionList 是 CapabilityRevision 切片类型（gormdao 泛型参数要求具名切片）。
+type CapabilityRevisionList []CapabilityRevision

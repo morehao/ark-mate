@@ -11,9 +11,9 @@
 package router
 
 import (
-	"strings"
-
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-forge/internal/credential"
 	"github.com/morehao/ark-forge/internal/eventbus"
 	"github.com/morehao/ark-forge/internal/middleware"
 	"github.com/morehao/ark-forge/internal/service/svcagent"
@@ -49,51 +49,107 @@ type Ports struct {
 	Export       svcexport.ExportSvc
 }
 
-// Options 控制面装配选项（A6：单操作员 token）。
+// Options 控制面装配选项（M1-1：凭据表）。
 type Options struct {
-	// Token 非空时，除 /health 外的所有 /v1/forge 路由都要求 Bearer token：
-	// REST 用 `Authorization: Bearer <token>`；WS 因浏览器无法设握手头，额外接受 `?token=<token>`。
-	// 空 = 不鉴权（默认，仅绑定回环地址时的历史行为）。
-	Token string
+	// Credentials 凭据表（见 internal/credential）。
+	//
+	// 空表 = 不鉴权（默认，仅绑定回环地址时的历史行为）。非空时：
+	//   - 除 /health 外的 REST 路由要求具备 **rest 面**的凭据（`Authorization: Bearer <token>`，
+	//     不接受 `?token=`）；
+	//   - `/ws/events` **不挂** REST 凭据中间件——事件流的鉴权是**带内**的：
+	//     连接建立后须在 5s 内发首帧 `attach` 并携带**stream 面**凭据（见 controller/ctrws）。
+	//
+	// 桌面态两个面互斥（restToken / streamToken），独立态是同一条令牌同时带两个面。
+	Credentials *credential.Set
+
+	// Meta 系统面（`/v1/forge/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
+	// 资产相关字段由路由层按**已解析的资产**补全（M2-1 起不看构建 tag，M2-3 接真值）。
+	// nil = 用默认值（版本 + 空载荷）。
+	Meta func() ctrsystem.MetaSource
+
+	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
+	Web AssetInfo
+
+	// Origin 回环监听面的 Host 白名单 + Origin 矩阵（M3-5，internal/middleware）。
+	//
+	// nil / 未启用 = 不判定（测试路径与**非回环监听**：设计 §9.4 明确 Host/Origin 白名单属于
+	// "对外产品化缺的四件事"之一，本期只在回环监听面生效，由装配层打 WARN 说清）。
+	// 非 nil 时它同时供给两处，且**必须是同一个对象**：v1 组的 REST/`/health` 中间件，
+	// 与 WS 控制器的握手判定（见 registerStream）。
+	Origin *middleware.OriginPolicy
 }
 
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
 //
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
-// 实时通道契约见 docs/design-and-roadmap.md §4.5；A6 起可选单操作员 token 鉴权。
+// 实时通道契约见 docs/design-and-roadmap.md §4.5。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
+	o := opts0(opts)
+	creds := o.Credentials
+
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.MaxMultipartMemory = 8 << 20
 
 	// golib v1.32.14 起 versions 由可变参数改为切片，并默认挂载 ginmiddleware.Trace()
-	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）；
-	// v1.32.16 起它默认挂载的 AccessLog 还会按字段名脱敏 query/body 内容
-	// （*token*/*secret*/*password*… → ***），这对本仓尤其有用：WS 因浏览器无法设
-	// 握手头而用 `?token=` 传令牌（见 controller/ctrws），脱敏后该值不再进访问日志。
+	// （替代旧的 otelgin，未接入 otel 时仅透传 trace id，供 glog 关联链路）。
 	groups := ginserver.NewRouterGroups(r, AppName, []ginserver.VersionGroup{{
 		Version: ginserver.ApiVersionV1,
 	}})
 	v1 := groups.MustGetGroup(ginserver.ApiVersionV1)
 
-	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）；
-	// 之后的全部路由挂鉴权中间件（含 WS）。
+	// Host 白名单 + Origin 矩阵（M3-5）挂在 **v1 整组**上：REST 与 `/health` 都属于"有人拿浏览器/
+	// 脚本打进来的 API 面"，一律先过这道判定（含 /health：DNS rebinding 只要能碰到任意一条路径，
+	// 就说明 Host 白名单没生效）。必须在注册路由**之前** Use——gin 在注册时就冻结 handler 链
+	// （见 internal/controller/ctrws/ws_test.go 的同款注记）。
+	//
+	// **WS 单独处置**：事件流那一组来源判定在控制器里做（Accept 之前，见 ctrws.Options.OriginCheck），
+	// 所以它的组要在 Use 之前取——gin 的 Group() 会复制当时的 handler 链。
+	// 为什么不让中间件也盖住 WS：事件流的凭据本来就走**带内首帧**、不挂 REST 凭据中间件
+	// （浏览器无法为 WS 握手设请求头），来源判定同理归控制器——两处都挂会让 WS 的那份判定变成
+	// 永不执行的摆设，且"哪一层真正拦住了 WS"变得含糊。两处共用**同一个** OriginPolicy 对象
+	// （Decide 是唯一实现），所以哪一种挂法都不会分叉。
+	//
+	// 不在组里的是静态资产与 SPA 回落（`/`、`/assets/*`、前端深链）：页面导航与子资源加载
+	// 不带 Origin，把 Host 白名单压到它们头上会让"打开面板"这件事本身变成 421——真正的攻击面
+	// 是 API，页面本身没有任何凭据可偷（设计 §7.2 的凭据分层）。
+	wsGroup := v1.Group("")
+	v1.Use(middleware.Origin(o.Origin))
+
+	// 健康检查保持免鉴权（容器编排/反代的 liveness 探针不携带令牌）。
 	v1.GET("/health", health)
-	if len(opts) > 0 && strings.TrimSpace(opts[0].Token) != "" {
-		v1.Use(middleware.Token(opts[0].Token))
+	// 实时事件流：鉴权在**带内**（首帧 attach 带 stream 面凭据），因此不挂 REST 凭据中间件。
+	// 来源判定走**同一个** OriginPolicy（WS 也要看 Host），见 ctrws.Options.OriginCheck。
+	registerStream(wsGroup, bus, creds, o.Origin)
+
+	// 其余全部 REST 路由统一要求 rest 面凭据（空表时中间件是放行 no-op）。
+	rest := v1.Group("")
+	rest.Use(middleware.Credential(creds, credential.ScopeREST))
+
+	registerAgent(rest, ports)
+	registerWorkspace(rest, ports)
+	registerConversation(rest, ports)
+	registerRuntime(rest, ports)
+	registerCapability(rest, ports)
+	registerAutomation(rest, ports)
+	registerLibrary(rest, ports)
+	registerUsage(rest, ports)
+	meta := o.Meta
+	if meta == nil {
+		meta = defaultMeta
 	}
+	registerSystem(rest, meta, o.Web)
 
-	registerAgent(v1, ports)
-	registerWorkspace(v1, ports)
-	registerConversation(v1, ports)
-	registerRuntime(v1, ports)
-	registerCapability(v1, ports)
-	registerAutomation(v1, ports)
-	registerLibrary(v1, ports)
-	registerObservability(v1, ports, bus)
-
-	MountWeb(r)
+	MountWeb(r, o.Web)
 	return r
+}
+
+// opts0 取可变选项的第一项（未传时返回零值）——本包历史上用可变参数是为了"加字段不改调用点"。
+func opts0(opts []Options) Options {
+	if len(opts) == 0 {
+		return Options{}
+	}
+	return opts[0]
 }
 
 // health 健康检查（唯一免鉴权端点：不依赖任何领域端口）。

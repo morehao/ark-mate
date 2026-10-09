@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log/slog"
 	"strings"
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
@@ -16,16 +16,20 @@ import (
 
 // ——— M2-2/M2-3：能力定义的写面（Skill / MCP） ———
 //
-// 事实源是文件，写面只做"校验 → 落盘 → 更新内存"，但顺序与失败处理是全部的难点：
+// 写面只做"校验 → 提交 → 更新内存"，但顺序与失败处理是全部的难点：
 //
-//	① **先校验**（`RegisterSkill`/`RegisterMcpServer` 是唯一闸门：正文扫描、transport 枚举、
+//	① **先校验**（`ValidateSkill`/`ValidateMcpServer` 是唯一闸门：正文扫描、transport 枚举、
 //	   stdio 绝对路径、密钥引用词法、明文与密钥键不重复），且校验必须看到**合并后**的完整定义；
-//	② 通过后才落盘（C9，`openDefinition`/`saveDefinition`）；
-//	③ 落盘失败 → **回滚内存**，不留"内存里有、盘上没有"的幻影（本进程可用、重启即消失，
-//	   是最难查的一类不一致）。
+//	② 通过后才提交给载体（C9 的文件纪律 / DB 的 revision CAS，见 capability_repo.go）；
+//	③ 提交成功后才更新内存——顺序倒过来就会留下"内存里有、载体上没有"的幻影
+//	   （本进程可用、重启即消失，是最难查的一类不一致）。
 //
-// 顺序不能换：先写盘再校验，坏定义就短暂落过盘；只改内存不写盘，重启回到旧值而用户以为改成了。
-// 为此 `openDefinition` 只准备草稿不落盘，由本文件按序驱动校验与写盘。
+// 顺序不能换：先提交再校验，坏定义就短暂落下过；只改内存不提交，重启回到旧值而用户以为改成了。
+// 为此 `repo.open` 只准备草稿不提交，由本文件按序驱动校验与提交。
+//
+// **校验与提交分开之后，回滚路径消失了**：M6-3 之前是"先 `RegisterSkill` 入表、提交失败再回滚
+// 内存"，而回滚正是最容易漏的一条（漏了就成了幻影）。现在闸门是纯函数（`ValidateSkill`），
+// 同一份输入刚验过就必然能再入表，所以提交成功后那次 `RegisterSkill` 是**必然成功**的。
 
 // rawPatch 把写面的原文 JSON 对象转成落盘层要的 patch。
 //
@@ -105,11 +109,10 @@ func (s *Service) UpdateSkill(ctx context.Context, id string, req dtocapability.
 
 // writeSkill 写面主体（create / update 共用的全部顺序与失败处理）。
 func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapability.SkillWriteReq, create bool) (*dtocapability.SkillWriteResp, error) {
-	_ = ctx // 写面不参与会话生命周期；保留 ctx 是为了与其他服务方法同形（未来记审计日志要用）
 	if s.caps == nil {
 		return nil, errCapabilityUnavailable()
 	}
-	dir, err := s.capabilityDirFor(capSubSkills)
+	repo, err := s.definitionRepoFor(capSubSkills)
 	if err != nil {
 		return nil, err
 	}
@@ -130,47 +133,47 @@ func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapabili
 			return nil, capWriteErrParam(fmt.Sprintf(
 				"路径 id %q 与 body id %q 不一致（id 不可改：要换 id 就删掉重建）", pathID, bodyID))
 		}
-		// 文件必须自带 id：手写文件漏了 id 时顺手补上（否则装载时该文件只能被跳过）。
+		// 定义必须自带 id：手写文件漏了 id 时顺手补上（否则装载时该文件只能被跳过）。
 		patch["id"] = pathID
 	}
 
-	path, perr := definitionPath(dir, "skill", id)
-	if perr != nil {
+	if !validDefinitionID(id) {
 		if create {
-			return nil, perr
+			return nil, invalidDefinitionIDErr("skill", id)
 		}
 		// update 的幂等友好处理：id 非法时它**不可能**存在，404 比 400 更准确。
 		if _, in := s.caps.SkillByID(id); !in {
 			return nil, skillNotFoundErr(id)
 		}
-		return nil, perr
+		return nil, invalidDefinitionIDErr("skill", id)
 	}
 
 	_, inReg := s.caps.SkillByID(id)
-	_, statErr := os.Stat(path)
-	onDisk := statErr == nil
-
-	if create {
-		// 已存在 → 冲突，**不覆盖**。查两处是因为"存在"有两个来源：注册表（内存，可能来自
-		// 代码注入或本进程刚建的）与磁盘文件（可能手工建的、本进程还没装载）。
-		if inReg || onDisk {
-			return nil, skillExistsErr(id)
-		}
-	} else if !inReg && !onDisk {
-		// PUT 是"改一个已存在的定义"：两者都没有就是不存在（不是"顺便新建"，那样打错 id
-		// 会静默建出一个空技能）。只有文件、或只有内存条目，都算存在（后者是"把代码注入的
-		// 技能落成文件"这条修复路径）。
-		return nil, skillNotFoundErr(id)
-	}
-
-	draft, err := openDefinition(dir, capSubSkills, id, patch)
+	stored, err := repo.exists(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// 合并后的强类型视图：正文扫描闸门看的是**最终会落盘的内容**，而不是请求体那一段
+	if create {
+		// 已存在 → 冲突，**不覆盖**。查两处是因为"存在"有两个来源：注册表（内存，可能来自
+		// 代码注入或本进程刚建的）与载体（文件是手工建的、本进程还没装载；DB 行是导入进来的）。
+		if inReg || stored {
+			return nil, skillExistsErr(id)
+		}
+	} else if !inReg && !stored {
+		// PUT 是"改一个已存在的定义"：两者都没有就是不存在（不是"顺便新建"，那样打错 id
+		// 会静默建出一个空技能）。只有载体、或只有内存条目，都算存在（后者是"把代码注入的
+		// 技能落成定义"这条修复路径）。
+		return nil, skillNotFoundErr(id)
+	}
+
+	doc, rev, existed, err := repo.open(ctx, id, patch)
+	if err != nil {
+		return nil, err
+	}
+	// 合并后的强类型视图：正文扫描闸门看的是**最终会提交的内容**，而不是请求体那一段
 	// （`PUT {"name":"x"}` 不该让正文凭空变空从而绕过扫描）。
-	merged, err := draft.Merged()
+	merged, err := doc.Marshal()
 	if err != nil {
 		return nil, err
 	}
@@ -181,29 +184,31 @@ func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapabili
 	if sk.ID == "" {
 		sk.ID = id
 	}
-	sk.SourceFile = draft.Path() // 事实源文件（Library 的 origin/source_file 依据）
+	sk.SourceFile = repo.sourceFile(id) // 文件载体：事实源文件（Library 的 origin/source_file 依据）
 
-	prev, hadPrev := s.caps.SkillByID(id)
-	if err := s.caps.RegisterSkill(&sk); err != nil {
+	if err := capability.ValidateSkill(&sk); err != nil {
 		// 闸门拒绝（critical 正文 / id 非法 / scope 非法 / runtimes 重复）→ 40001。
-		// **零字节落盘**：patch 只在草稿里，草稿从未 Save。
+		// **零字节写入**：patch 只在草稿里，草稿从未提交。
 		return nil, acl.NewError(acl.ClassRequest, "definition_invalid",
 			fmt.Sprintf("skill %q 的定义被拒绝：%v", id, err), err)
 	}
-	if err := saveDefinition(draft); err != nil {
-		// 回滚内存：删掉刚落进去的条目，恢复原条目。不回滚就会留下"内存里有、盘上没有"的
-		// 幻影能力——本进程里可用、重启后消失，是最难排查的一类不一致。
-		if hadPrev {
-			_ = s.caps.RegisterSkill(&prev)
-		} else {
-			s.caps.RemoveSkill(id)
-		}
+	created, conflict, err := repo.commit(ctx, id, doc, rev, existed)
+	if err != nil {
 		return nil, err
 	}
+	if conflict {
+		// 载体的乐观锁没中：文件被手改 / 行 revision 变了（含"我以为新建、别人抢先建出来"）。
+		// 语义与 40901 的老文案一致——刷新重试，绝不 last-write-wins。
+		return nil, definitionChangedErr(repo.locator(id))
+	}
+	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功；真出错也只可能来自
+	// "注册表被并发改坏"，那种情况下**不能**谎报写失败（载体上已经写成功了），记 WARN 更诚实。
+	if err := s.caps.RegisterSkill(&sk); err != nil {
+		slog.Warn("capability: skill 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
+	}
 
-	created := create || !draft.existed
 	resp := &dtocapability.SkillWriteResp{
-		ID: sk.ID, Path: draft.Path(), Created: created,
+		ID: sk.ID, Path: repo.locator(id), Created: create || created,
 		Warnings: skillWarnings(sk),
 	}
 	t := s.reconcileSkillProjections()
@@ -212,47 +217,53 @@ func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapabili
 	case create:
 		resp.NextAction = "已新建：声明了候选 runtime 的 agent 下次拉起即可见；已物化的副本已按当前投影写出"
 	case created:
-		resp.NextAction = "已把该 skill 落成定义文件（此前只存在于内存/代码注入）；此后的修改都可持久化"
+		resp.NextAction = "已把该 skill 落成定义（此前只存在于内存/代码注入）；此后的修改都可持久化"
 	default:
 		resp.NextAction = "已覆盖写：只改了请求体里出现的键（其余键与未知键原样保留）；物化副本已按当前投影重校"
 	}
 	return resp, nil
 }
 
-// DeleteSkill 删除一个 skill 定义（DELETE /skills/:id）：删文件 + 撤回物化副本 + 摘内存条目。
+// DeleteSkill 删除一个 skill 定义（DELETE /skills/:id）：删定义 + 撤回物化副本 + 摘内存条目。
 //
 // 幂等：定义本来就不存在 → `deleted:false` 且无错（"让它不在"不要求"它曾在"）。
 func (s *Service) DeleteSkill(ctx context.Context, id string) (*dtocapability.SkillDeleteResp, error) {
-	_ = ctx
 	if s.caps == nil {
 		return nil, errCapabilityUnavailable()
 	}
-	dir, err := s.capabilityDirFor(capSubSkills)
+	repo, err := s.definitionRepoFor(capSubSkills)
 	if err != nil {
 		return nil, err
 	}
-	path, perr := definitionPath(dir, "skill", id)
-	if perr != nil {
+	if !validDefinitionID(id) {
 		if _, in := s.caps.SkillByID(id); !in {
 			return skillDeleteNoop(id, ""), nil // 非法 id 不可能存在 → 幂等无操作
 		}
-		return nil, perr
+		return nil, invalidDefinitionIDErr("skill", id)
 	}
 	_, inReg := s.caps.SkillByID(id)
-	if _, serr := os.Stat(path); os.IsNotExist(serr) && !inReg {
-		return skillDeleteNoop(id, path), nil
-	}
-
-	deleted, err := removeDefinitionPermanently(dir, capSubSkills, id)
+	stored, err := repo.exists(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	locator := repo.locator(id)
+	if !inReg && !stored {
+		return skillDeleteNoop(id, locator), nil
+	}
+
+	deleted, conflict, err := repo.remove(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if conflict {
+		return nil, definitionChangedErr(locator)
+	}
 	s.caps.RemoveSkill(id)
-	resp := &dtocapability.SkillDeleteResp{ID: id, Deleted: deleted, Path: path}
+	resp := &dtocapability.SkillDeleteResp{ID: id, Deleted: deleted, Path: locator}
 	// 删定义必须一起撤回已物化副本：否则底座目录里还留着它，agent 照旧看得见。
 	t := s.reconcileSkillProjections()
 	resp.Removed, resp.MaterializeErrors = t.Removed, t.Errors
-	resp.NextAction = "已删除：定义文件已移除，已物化的副本已撤回（正在跑的会话不受影响，下一轮/下次拉起不再注入）"
+	resp.NextAction = "已删除：定义已移除，已物化的副本已撤回（正在跑的会话不受影响，下一轮/下次拉起不再注入）"
 	return resp, nil
 }
 

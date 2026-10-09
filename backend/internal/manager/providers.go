@@ -15,9 +15,14 @@ import (
 	"github.com/morehao/ark-forge/pkg/redact"
 )
 
+// providersFileName provider 档案文件名（**目录级配置**：AgentDir 下的保留文件，不是 agent 定义）。
+//
+// 它留在文件侧（计划 §7 P-9）：档案是"这台机器上有哪些上游凭据"，与 agent 定义的生命周期不同。
+const providersFileName = "providers.json"
+
 // ——— Provider 注入面（P2）：档案只写不读回 + 启动 env 注入 + §5 密钥加密落盘 ———
 //
-// 档案存于 <AgentDir>/providers.json：{id: {type, model, key_ref}}。REST 语义：
+// 档案存于 <AgentDir>/providers.json（providersFileName）：{id: {type, model, key_ref}}。REST 语义：
 // GET /providers 只回 {id,type,model,has_key}（密钥绝不读回）；PATCH /providers/:id
 // 幂等 upsert（type/model 指针更新；key 非 nil 即覆盖/清除——空串 = 清除）。
 // 启动注入：agent.provider 指向档案 id 时，acquire 拨号把其密钥以 <TYPE>_API_KEY=… 注入
@@ -104,7 +109,7 @@ func (s *Service) loadProvidersFile(dir string) {
 	if dir == "" {
 		return
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "providers.json"))
+	b, err := os.ReadFile(filepath.Join(dir, providersFileName))
 	if err != nil {
 		return // 首次/未建 → 空表
 	}

@@ -30,7 +30,7 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 }
 
 // CreateAutomation 新建定义。`id` 必填（写面 DTO 的原文对象里取，非法类型 → 40000）。
-func (s *Service) CreateAutomation(_ context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
+func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
 	raw, ok := req["id"]
 	if !ok {
 		return nil, capWriteErrParam("缺少 id（automation 的 id 是文件名，必填且不可改）")
@@ -39,7 +39,7 @@ func (s *Service) CreateAutomation(_ context.Context, req dtoautomation.Automati
 	if !okStr || id == "" {
 		return nil, capWriteErrParam(`字段 "id" 须为非空字符串`)
 	}
-	v, err := s.writeAutomation(id, rawPatch(req), true)
+	v, err := s.writeAutomation(ctx, id, rawPatch(req), true)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func (s *Service) CreateAutomation(_ context.Context, req dtoautomation.Automati
 }
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
-func (s *Service) UpdateAutomation(_ context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	v, err := s.writeAutomation(id, rawPatch(req), false)
+func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
+	v, err := s.writeAutomation(ctx, id, rawPatch(req), false)
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +56,8 @@ func (s *Service) UpdateAutomation(_ context.Context, id string, req dtoautomati
 }
 
 // DeleteAutomation 删除定义（幂等）。
-func (s *Service) DeleteAutomation(_ context.Context, id string) (*dtoautomation.AutomationDeleteResp, error) {
-	removed, err := s.DeleteAutomationByID(id)
+func (s *Service) DeleteAutomation(ctx context.Context, id string) (*dtoautomation.AutomationDeleteResp, error) {
+	removed, err := s.DeleteAutomationByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}

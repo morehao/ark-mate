@@ -391,15 +391,33 @@ export const getMcpPrompt = (
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 
 /** 注册自定义 agent（校验 runtimes 已注册即「可启动预检」；provider 为档案 id，可选）。 */
-export const createAgent = (req: { id: string; name?: string; runtimes: string[]; provider?: string }): Promise<Agent> =>
-  http.post<Agent>('/forge/agents', req)
+export const createAgent = (req: {
+  id: string
+  name?: string
+  runtimes: string[]
+  provider?: string
+  /** MCP 白名单：省略 = 未声明（全量）；`[]` = 禁用全部；非空 = 白名单。 */
+  mcps?: string[]
+}): Promise<Agent> => http.post<Agent>('/forge/agents', req)
 
-/** 热更新 agent 元数据（name/provider/runtimes 子集；种子 runtimes 只读）。 */
+/**
+ * 热更新 agent 元数据（name/provider/runtimes/mcps 子集；种子 runtimes 只读）。
+ *
+ * `mcps` 三态：**省略键** = 不改；`null` = 清空白名单（回落"未声明" = 全量）；`[]` = 禁用全部；
+ * 非空 = 白名单。改白名单会让该 agent 的**空闲**会话句柄作废——下一轮按当前定义重建并按新
+ * 白名单注入（有在途轮次或未应答权限/提问的会话顺延到下一次重建）。所以类型是
+ * `string[] | null`（不能只写 `string[]`，否则"清空"表达不出来）。
+ */
 export const patchAgent = (
   id: string,
-  patch: { name?: string; provider?: string; runtimes?: string[]; permission_policy?: PermissionPolicy },
-): Promise<Agent> =>
-  http.patch<Agent>(`/forge/agents/${encodeURIComponent(id)}`, patch)
+  patch: {
+    name?: string
+    provider?: string
+    runtimes?: string[]
+    mcps?: string[] | null
+    permission_policy?: PermissionPolicy
+  },
+): Promise<Agent> => http.patch<Agent>(`/forge/agents/${encodeURIComponent(id)}`, patch)
 
 /** 删除自定义 agent（种子 agent-* 返回只读错误）：返回影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）。 */
 export const deleteAgent = (id: string): Promise<AgentDeleteResp> =>

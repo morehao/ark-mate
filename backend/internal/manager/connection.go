@@ -699,6 +699,48 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 	return nil
 }
 
+// evictIdleCapabilityHandles 作废该 agent **空闲**会话的句柄，让下一次 prompt 按**当前**定义
+// 重建会话（M6-8 / P-13，判据说明见 `agent_capability_notify.go` 文件头）。
+//
+// 与 `stopAgent`/`DetachAgent` 的分工：那两条是"用户显式停了 agent/删了 agent"，要关进程或摘登记；
+// 这条只是"定义换了，让活着的句柄在下一次重建时取到新值"，**不关进程、不删登记、不动会话记录**
+// （会话可续聊是 ADR-4 的承诺）。
+//
+// 返回（作废数, 顺延数）。顺延的判据与代际迁移纪律③**逐条相同**（有在途轮次 / 有未应答的权限或
+// 提问 → 不动）：同一条会话在两个机制下必须给出同样的裁决，否则"这一轮到底换没换面"会变成
+// 两处各说一套。探针读不到（句柄 `dead`）时不算顺延也不算作废（`disconnectConversation` 自己幂等）。
+func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicted, deferred int) {
+	if agentID == "" {
+		return 0, 0
+	}
+	o.mu.Lock()
+	victims := make([]*ActiveConversation, 0, 4)
+	for _, as := range o.conversations {
+		if as.AgentID == agentID {
+			victims = append(victims, as)
+		}
+	}
+	o.mu.Unlock()
+	for _, as := range victims {
+		// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
+		as.mu.Lock()
+		busy := as.busy || as.turn != nil
+		as.mu.Unlock()
+		if busy || o.perm.pendingCount(as.ID) > 0 || o.elic.pendingCount(as.ID) > 0 {
+			deferred++
+			continue
+		}
+		// 主动拆除：句柄作废、挂起的权限/提问一并收敛，会话记录与状态原样保留。
+		o.disconnectConversation(as, true)
+		evicted++
+	}
+	if evicted > 0 || deferred > 0 {
+		o.logger.Info("能力面变更：会话句柄将按当前定义重建",
+			"agent", agentID, "field", field, "evicted", evicted, "deferred", deferred)
+	}
+	return evicted, deferred
+}
+
 // evictAgentHandles 作废该 agent 在**未关闭**连接上的会话句柄（`closing` 里的连接由 dropConn 收尾，
 // 这里跳过以免重复处理）。刻意不关进程、不删会话记录：会话可续聊（下次 prompt 重建），
 // 共用该进程的别的 agent 不受影响。

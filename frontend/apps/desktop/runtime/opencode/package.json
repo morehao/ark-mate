@@ -1,0 +1,9 @@
+{
+  "name": "ark-forge-payload-opencode",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.24.0",
+  "dependencies": {
+    "@opencode/cli-darwin-arm64": "2.0.26"
+  }
+}

@@ -17,6 +17,21 @@ import (
 //   - env：调用方附加环境（如 provider 密钥注入），内部叠加在 spec.Launch.Env 之后；
 //   - opts.Logger：若设置，同源用于 stdio 传输日志（runtime/cmd 属性由调用方预置）。
 //
+// LaunchesLocally 报告该 runtime 是否由平台**在本机拉起子进程**（`Launch.Transport` 为空或
+// `stdio`）。判据与 `Connect` 的传输分派**同源**（同一个 switch 的两支）：凡是本机起进程的形态
+// → true，远程端点形态（http/ws/streamable_http…）→ false。
+//
+// 为什么需要它：平台侧 MCP 网关条目是一条**本机 stdio 命令**（`<平台可执行文件> mcp bridge …`）。
+// 把它下发给远程 ACP 端点，等于让对端按我们机器上的路径去起进程——对端根本没有那个文件。
+func LaunchesLocally(spec Spec) bool {
+	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
+	case "", "stdio":
+		return true
+	default:
+		return false
+	}
+}
+
 // 连接生命周期归调用方（编排器连接回收/Close），与任一请求 ctx 无关（拨号用脱离 ctx 的
 // 派生 context，语义同 orchestrator.acquire——请求返回不杀已起子进程）。
 func Connect(ctx context.Context, spec Spec, args []string, env []string, opts acl.ClientOptions) (*acl.Client, error) {
@@ -28,8 +43,13 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 	var t acl.Transport
 	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
 	case "", "stdio":
-		all := append([]string(nil), spec.Launch.Env...)
-		all = append(all, env...)
+		// 合并顺序＝优先级：`spec.Launch.Env` 是**平台对该 runtime 的声明**（含设计 §6.6 的配置隔离，
+		// M3-3），调用方附加项（provider 密钥 / 端点）是**每次连接**的增量。`mergeEnv` 的语义正是
+		// "base 已有的键不被 add 覆盖"，所以平台声明赢——否则一个 provider 档案里顺手写的
+		// `XDG_CONFIG_HOME` 就能把隔离改掉，而这类覆盖不会有任何提示。
+		// 去重还有一个更硬的理由：同名两条在 POSIX `getenv`（取第一条）与 Node `process.env`（取最后一条）
+		// 下语义相反，留着就是"同一个环境在两种子进程里行为不同"。
+		all := connectEnv(spec, env)
 		st := acl.NewStdioTransport(spec.Launch.Command, args, all)
 		st.SetLogger(logger)
 		t = st
@@ -93,4 +113,12 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// connectEnv 交给 acl 的最终附加环境：**平台声明（spec.Launch.Env）优先于调用方增量**。
+//
+// 单独提出来是为了能直接单测这条优先级——它是"配置隔离不会被 provider 档案悄悄改掉"（M3-3）
+// 的唯一保证点，而 `Connect` 本身要拉真进程、没法在单测里断言 cmd.Env。
+func connectEnv(spec Spec, env []string) []string {
+	return mergeEnv(spec.Launch.Env, env)
 }

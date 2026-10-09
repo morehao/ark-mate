@@ -26,6 +26,12 @@ const forgeMarker = ".forge-managed"
 //
 // 故两种 format 均合成/补全 frontmatter（name=skill id，description 退化 name→id）——
 // 原样写入 body 的旧约定在两个底座都不会被加载，属实测证伪，不再保留。
+//
+// 2026-10-08 补测（**另一条命题，不在上面那段的覆盖范围内**）：「平台默认根下写进去、底座开箱即读到」。
+// opencode v1.18.35 通过 → `opencodeSkillProjection().Tested` 已置 true，取证与反证见
+// pkg/runtime/adapters.go 该函数上方注释；dsh 侧待补（其 `Tested` 仍为 false）。
+// 另：上面「name 含大写下划线仍加载」在 v1.18.35 上复现（`Probe_Bad.Id` 照常加载）——
+// 仍是**实现宽容而非契约**，平台未对 skill id 施加 opencode 文档要求的词法闸门。
 const (
 	// FormatSkillMD 目录包 `<id>/SKILL.md`（保证 YAML frontmatter）。
 	FormatSkillMD = "SKILL.md"
@@ -199,6 +205,12 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	if s.ID == "" {
 		return "", fmt.Errorf("skill 物化: skill id 为空")
 	}
+	// 词法闸的同款重复判断（理由同上：本函数是导出 API）。id 会**原样写进 frontmatter 的 `name`**，
+	// 而底座对 name 有硬词法（dsh：`^[a-z0-9]+(?:-[a-z0-9]+)*$`，不合规只 warn 就丢弃整条）——
+	// 平台这边放行等于「自报 in_sync、底座永不加载」，所以与注册表用同一条规则再拦一次。
+	if !skillIDRE.MatchString(s.ID) || len(s.ID) > 64 {
+		return "", fmt.Errorf("skill 物化: skill id %q 不符底座词法（须 ^[a-z0-9]+(?:-[a-z0-9]+)*$ 且 ≤64 位）", s.ID)
+	}
 	if s.Body == "" {
 		return "", fmt.Errorf("skill 物化: skill %q body 为空（无事可写）", s.ID)
 	}
@@ -232,6 +244,15 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	// 只从集合里摘除自己，集合空了才删除目录（避免「先投影方退出后目录永久残留」）。
 	// 旧目录里的归属集合要先读出来合并（替换是"换内容"，不是"重置归属"）。
 	_, owners, _ := readMarker(filepath.Join(dir, forgeMarker))
+
+	// 投影根是 runtime **声明**的（不是平台猜的），所以替它把目录建出来不算越界；反之若不建，
+	// 新机器上「用户建的第一条 skill」会直接卡在下一行——`MkdirTemp(spec.Root, …)` 要求根已存在，
+	// 而默认根 `~/.agents/skills` 在从未装过 skill 的机器上根本不存在（2026-10-09 平台端到端实测：
+	// 只留一条 WARN、定义进表但 skill 静默不投放）。MkdirAll 对已存在的目录是空操作，也不跟随软链，
+	// 所以不会覆盖别人的东西；根一旦存在，下面的 staging/原子替换语义与原来完全一致。
+	if err := os.MkdirAll(spec.Root, 0o755); err != nil {
+		return "", fmt.Errorf("skill 物化: 创建投影根 %s 失败: %w", spec.Root, err)
+	}
 
 	staging, err := os.MkdirTemp(spec.Root, ".forge-stage-*")
 	if err != nil {

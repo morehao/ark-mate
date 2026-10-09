@@ -43,6 +43,14 @@ type Server struct {
 	Args      []string
 	URL       string
 	Headers   map[string]string
+	// Env 追加到 stdio 子进程的环境（在进程环境之上；非 stdio 传输忽略）。
+	//
+	// 约定与 acl.McpServer.Env 一致：**调用方已把密钥型绑定（`vault:`/`env:`）解析成明文**，
+	// 本包只负责下发。缺了它，靠 env 拿凭据的 stdio server 会"会话里能用、平台探测/调用必失败"
+	// （2026-10-09 实测：同一个 server，探测路径起的进程拿不到 env、ACP 注入路径拿得到）。
+	//
+	// 纪律：任何错误文案、日志、诊断都**不得包含这里的值**（键名可以）——本包是密钥经过的一层。
+	Env map[string]string
 }
 
 // Tool 是 tools/list 返回的一条工具（inputSchema 原样保真）。
@@ -60,15 +68,29 @@ type Result struct {
 }
 
 // Error 带稳定 code 的探测错误：manager 依 code 决定 REST 语义/日志，msg 面向用户可读。
+//
+// 它**保留底层错误链**（`Unwrap`）：包装不该抹掉"这是一条服务端 JSON-RPC 错误响应"这类
+// 判别信息——连接池正是靠它区分"会话坏了"与"这次调用被服务端拒了"（见 pool.go 语义 2）。
 type Error struct {
 	Code string
 	Msg  string
+	// cause 底层错误（可空）。**不参与 Error() 文案**：文案是给人看的一句话，
+	// 底层细节已经拼进 Msg（见 wrapProbe），这里只服务 errors.Is/As。
+	cause error
 }
 
 func (e *Error) Error() string { return e.Msg }
 
+// Unwrap 暴露底层错误（errors.Is/As 用）。
+func (e *Error) Unwrap() error { return e.cause }
+
 func errf(code, format string, args ...any) *Error {
 	return &Error{Code: code, Msg: fmt.Sprintf(format, args...)}
+}
+
+// errWrap 同 errf，但保留底层错误链。
+func errWrap(code string, cause error, format string, args ...any) *Error {
+	return &Error{Code: code, Msg: fmt.Sprintf(format, args...), cause: cause}
 }
 
 // CodeOf 取探测错误的稳定 code（非 *Error → ""）。
@@ -177,12 +199,27 @@ func CallTool(ctx context.Context, s Server, name string, args json.RawMessage) 
 // 结束后统一关闭传输。所有「需要握手」的能力（tools/list、tools/call、后续 resources/prompts）
 // 都走这里，避免每加一个能力就复制一遍传输分派与握手代码。
 func session(ctx context.Context, s Server, fn func(ctx context.Context, tr transport, init initializeResult) error) (initializeResult, error) {
-	tr, err := dial(ctx, s)
+	tr, init, err := openSession(ctx, s)
 	if err != nil {
 		return initializeResult{}, err
 	}
 	defer tr.close()
+	if err := fn(ctx, tr, init); err != nil {
+		return initializeResult{}, err
+	}
+	return init, nil
+}
 
+// openSession 建连并完成握手，**把已就绪的传输交给调用方**（不关闭）。
+//
+// 与 `session` 分开是给连接池用的（M7-2）：池要留住这条传输反复用，而一次性探测要在
+// 结束时关闭它。握手的两个步骤（initialize → notifications/initialized）只有这一份实现，
+// 池化不该让"两条路径的握手不同"成为可能。
+func openSession(ctx context.Context, s Server) (transport, initializeResult, error) {
+	tr, err := dial(ctx, s)
+	if err != nil {
+		return nil, initializeResult{}, err
+	}
 	var p initializeParams
 	p.ProtocolVersion = protocolVersion
 	p.Capabilities = map[string]any{}
@@ -191,15 +228,31 @@ func session(ctx context.Context, s Server, fn func(ctx context.Context, tr tran
 
 	var init initializeResult
 	if err := tr.call(ctx, "initialize", p, &init); err != nil {
-		return initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialize 握手失败", err)
+		tr.close()
+		return nil, initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialize 握手失败", err)
 	}
 	if err := tr.notify(ctx, "notifications/initialized", map[string]any{}); err != nil {
-		return initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialized 通知失败", err)
+		tr.close()
+		return nil, initializeResult{}, wrapProbe(ctx, "mcp_initialize_failed", "initialized 通知失败", err)
 	}
-	if err := fn(ctx, tr, init); err != nil {
-		return initializeResult{}, err
-	}
-	return init, nil
+	return tr, init, nil
+}
+
+// rpcResponseError 标记「服务端返回了 JSON-RPC 错误响应」。
+//
+// 与传输层故障分开是**池化**的前提：一条会话收到 `-32602 未知工具` 之后仍然健康，
+// 不该因此被作废重建；只有读失败/进程死/HTTP 5xx 这类才说明会话没了。
+type rpcResponseError struct{ rpc *rpcError }
+
+func (e *rpcResponseError) Error() string { return "JSON-RPC 错误：" + e.rpc.String() }
+
+// newRPCResponseError 把服务端的错误响应包成可判别的错误（三个传输共用）。
+func newRPCResponseError(e *rpcError) error { return &rpcResponseError{rpc: e} }
+
+// IsRPCResponseError 报告错误来自服务端的 JSON-RPC 错误响应（会话本身仍然健康）。
+func IsRPCResponseError(err error) bool {
+	var target *rpcResponseError
+	return errors.As(err, &target)
 }
 
 // dial 按传输形态建连；未知传输 → mcp_transport_unsupported（不臆造）。
@@ -510,7 +563,7 @@ type listToolsResult struct {
 // wrapProbe 把底层错误包成带 code 的探测错误；ctx 超时/取消优先报 mcp_timeout。
 func wrapProbe(ctx context.Context, code, what string, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return errf("mcp_timeout", "%s：%v", what, ctxErr)
+		return errWrap("mcp_timeout", err, "%s：%v", what, ctxErr)
 	}
-	return errf(code, "%s：%v", what, err)
+	return errWrap(code, err, "%s：%v", what, err)
 }

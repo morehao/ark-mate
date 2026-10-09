@@ -13,6 +13,7 @@ import (
 	"github.com/morehao/ark-forge/internal/testutil"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/mcp"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -248,10 +249,19 @@ func TestGenerationMigration(t *testing.T) {
 	}
 	last := news[len(news)-1]
 	servers, _ := last["mcpServers"].([]any)
-	if len(servers) != 1 {
-		t.Fatalf("新代际的注入集应只有白名单里的 fs，got %v", last["mcpServers"])
+	// M7-3 之后注入集里恒有一条平台网关条目（条目恒定、与"有没有远程 server"无关），
+	// 这里断言的是**白名单过滤**，故只数非网关的那几条。
+	direct := make([]any, 0, len(servers))
+	for _, s := range servers {
+		if b, err := json.Marshal(s); err == nil && strings.Contains(string(b), mcp.GatewayServerName) {
+			continue
+		}
+		direct = append(direct, s)
 	}
-	body, _ := json.Marshal(servers[0])
+	if len(direct) != 1 {
+		t.Fatalf("新代际的注入集应只有白名单里的 fs（网关条目另计），got %v", last["mcpServers"])
+	}
+	body, _ := json.Marshal(direct[0])
 	if !strings.Contains(string(body), "v2") {
 		t.Fatalf("新代际必须按**新**定义下发（v2），got %s", body)
 	}
@@ -638,15 +648,24 @@ func mustSpec(t *testing.T, r *genRig, id string) runtime.Spec {
 func TestStopAgentKeepsSharedGenerations(t *testing.T) {
 	r := newGenRigOn(t, "deepseekharness")
 	ctx := context.Background()
-	r.registerMcp(t, fsServer("v1"))
 	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2", Runtimes: []string{r.runtme}, State: AgentStateStopped}
-	sel := &CapabilitySelection{Mcps: ptrOf([]string{"fs"})}
+	// M7-3 之后"两个**不同** agent 共用代际"只在没有 MCP 面时成立：网关条目带着 agent scope
+	// （args 里的 `--agent` 不同 ⇒ 指纹不同），所以只要声明了 MCP 面，两个 agent 就各占一个代际。
+	// 这是**保守方向**的代价：宁可多起一个进程，也不能让底座在一个进程里混用两个 agent 的工具面
+	// （底座按进程缓存工具面与否尚无定论，见设计 §10.6-⑤）。代价记在计划/设计文档里。
+	// 本用例要验的是"停 A 不得关掉 B 在用的代际"，故两侧都显式关掉 MCP 面（`mcps: []`）→ 指纹为空、
+	// 二者逐字同键。
+	denyAll := ptrOf([]string{})
+	r.svc.agents["a1"].Mcps = denyAll
+	r.svc.agents["a2"].Mcps = denyAll
 
-	// 两个 agent 同 runtime、同权限配置 → 共用同一个代际（暖进程共享是有意的）。
-	_, a1 := r.startAs(t, "a1", sel)
-	_, a2 := r.startAs(t, "a2", sel)
+	_, a1 := r.startAs(t, "a1", nil)
+	_, a2 := r.startAs(t, "a2", nil)
+	if a1.Fingerprint != "" || a2.Fingerprint != "" {
+		t.Fatalf("显式关闭 MCP 面的缺省路径指纹应为空: %q / %q", a1.Fingerprint, a2.Fingerprint)
+	}
 	if a1.client != a2.client {
-		t.Fatal("同配置的两个 agent 应共用代际（进程级能力面相同）")
+		t.Fatal("同配置（含同一 MCP 面）的两个 agent 应共用代际")
 	}
 	// a1 的权限被收窄（漂移），随后停 a1：这条代际上还有 a2 的会话 → 不能关。
 	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}

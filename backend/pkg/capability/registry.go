@@ -34,6 +34,18 @@ func (r LoadResult) Total() int { return r.Skills + r.Mcps + r.Tools }
 // 合法 id/name：字母数字开头，后接字母数字/_/./-，≤64（对齐 Agent id 约束风格）。
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// skillIDRE 是 skill id 的词法上限——**取自底座的硬契约，不是平台审美**。
+//
+// dsh 的 `@deepseek-ai/dsh-skill` 用 `SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/` 校验 skill 文件
+// frontmatter 里的 `name`，不合规只打一条 warn 就**静默丢弃整条**（dsh-skill-filesystem/lib/index.js）。
+// 而平台物化时是把 id 原样写成 frontmatter 的 name（`MaterializedContent`），于是 id 不合规 =
+// 平台自报 `in_sync`、底座永远不加载——是最难排查的一类"生效失败"。
+//
+// opencode 宽容（`**/SKILL.md` 递归 + 只验 name 的存在性），dsh 不宽容，**取交集**即这条。
+// `nameRE` 仍是 MCP/tool 的规则（那些名字不喂给底座的 skill 校验，且历史上更宽）；
+// 路径安全那道判据在 `manager.validDefinitionID`，与此处正交。
+var skillIDRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 // NewRegistry 构造空注册表。
 func NewRegistry() *Registry {
 	return &Registry{
@@ -56,15 +68,19 @@ func (r *Registry) LoadDir(dir string) LoadResult {
 	}
 }
 
-// RegisterSkill 注册/覆盖一条 skill（供平台种子、运行态或测试直接注入）。
+// ValidateSkill 是 skill 定义的**唯一闸门**（纯校验，不碰注册表）。
 //
-// §13.2 S1 闸门：正文在**入表前**扫描，critical 直接拒载（返回错误 → 目录装载路径告警跳过）。
-// 落点选在这里而不是物化层，是因为注册表是唯一入口——绕过它的路径（种子/测试/未来 CRUD）
-// 都不该存在；物化层只负责把已经过闸的正文写到 runtime 目录。
-// 非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）供 REST 读模型暴露。
-func (r *Registry) RegisterSkill(s *Skill) error {
-	if s == nil || s.ID == "" || !nameRE.MatchString(s.ID) {
-		return fmt.Errorf("capability skill: id 非法（须字母数字开头，≤64 位）: %q", idOf(s))
+// §13.2 S1：正文扫描，critical 直接拒（返回错误 → 装载路径告警跳过）。落点选在这一层而不是
+// 物化层，是因为注册表是唯一入口——绕过它的路径（种子/测试/写面 CRUD）都不该存在；物化层只
+// 负责把已经过闸的正文写到 runtime 目录。非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）。
+//
+// 与 `RegisterSkill` 分开是 M6-3 的要求：写面必须**先校验、再提交、最后入表**（校验失败零写入；
+// 提交失败不留"内存里有、盘上没有"的幻影）。合成一步就只能"先入表再回滚"，而回滚路径正是
+// 最容易漏的那一条。校验是纯函数：同一份输入两次调用结果相同，所以"提交后入表必然成功"。
+func ValidateSkill(s *Skill) error {
+	if s == nil || s.ID == "" || !skillIDRE.MatchString(s.ID) || len(s.ID) > 64 {
+		return fmt.Errorf("capability skill: id 非法（须小写字母/数字，用连字符分段，形如 my-skill，≤64 位；"+
+			"底座 dsh 强制该词法，不合规会被静默丢弃）: %q", idOf(s))
 	}
 	// Scope：只认 global|workspace。未知取值报错而不是静默当 global——静默会把「我明明写了
 	// workspace 想让它跟着项目走」变成「悄悄写进了全局目录」。
@@ -91,14 +107,23 @@ func (r *Registry) RegisterSkill(s *Skill) error {
 		return criticalErr(s.ID, warnings)
 	}
 	s.Warnings = warnings
+	return nil
+}
+
+// RegisterSkill 校验并注册/覆盖一条 skill（供平台种子、运行态或测试直接注入）。
+// 写面请用 `ValidateSkill` + `RegisterSkill` 两步（见 ValidateSkill 的注释）。
+func (r *Registry) RegisterSkill(s *Skill) error {
+	if err := ValidateSkill(s); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.skills[s.ID] = s
 	r.mu.Unlock()
 	return nil
 }
 
-// RegisterMcpServer 注册/覆盖一个 MCP server。
-func (r *Registry) RegisterMcpServer(m *McpServer) error {
+// ValidateMcpServer 是 MCP server 定义的唯一闸门（纯校验，不碰注册表；理由同 ValidateSkill）。
+func ValidateMcpServer(m *McpServer) error {
 	if m == nil || m.ID == "" || !nameRE.MatchString(m.ID) {
 		return fmt.Errorf("capability mcp: id 非法（须字母数字开头，≤64 位）")
 	}
@@ -135,6 +160,14 @@ func (r *Registry) RegisterMcpServer(m *McpServer) error {
 		if _, dup := m.Headers[k]; dup {
 			return fmt.Errorf("capability mcp: server %q 的 %q 同时在 headers 与 secret_headers 里（键不得重复）", m.ID, k)
 		}
+	}
+	return nil
+}
+
+// RegisterMcpServer 校验并注册/覆盖一个 MCP server。
+func (r *Registry) RegisterMcpServer(m *McpServer) error {
+	if err := ValidateMcpServer(m); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	r.mcps[m.ID] = m
@@ -243,6 +276,58 @@ func (r *Registry) RemoveToolsForMcpServer(serverID string) int {
 		}
 	}
 	return n
+}
+
+// ReplaceAll 原子替换整个目录：`from` 的内容整体换入，**一次临界区**完成。
+//
+// 为什么需要它（M7-5 并发验收抓到的真实窗口）：重新装载定义原本走"`Reset()` 再逐条注册"，
+// 于是共享注册表上存在一个**可观测的中间态**——清空之后、注册完之前，读者看到的是空面或半装的面。
+// 网关（M7）**每次** tools/list / tools/call 前都重装定义，并发调用下这个窗口必然被撞上，症状是
+// "工具面突然少了几个/整条不见了"，而定义其实一个字都没改——这类"偶发、不可复现、看起来像远端
+// 抖动"的故障最难查。替换之后，读者要么看到旧面、要么看到新面，没有第三种。
+//
+// `from` 之后应被丢弃（这里复制而不是共享底层 map，免得两边互相看见后续注册）。
+func (r *Registry) ReplaceAll(from *Registry) {
+	from.mu.Lock()
+	skills := make(map[string]*Skill, len(from.skills))
+	for k, v := range from.skills {
+		skills[k] = v
+	}
+	mcps := make(map[string]*McpServer, len(from.mcps))
+	for k, v := range from.mcps {
+		mcps[k] = v
+	}
+	tools := make(map[string]*Tool, len(from.tools))
+	for k, v := range from.tools {
+		tools[k] = v
+	}
+	from.mu.Unlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skills, r.mcps, r.tools = skills, mcps, tools
+}
+
+// Reset 清空三张表。
+//
+// **不要**再拿它当"重新装载定义"的起手式（`Reset()` + 逐条注册 = 在共享面上留一个空的/半装的
+// 可观测中间态，M7-5 的并发用例实测撞上过）：重新装载请用 `ReplaceAll`。
+// 现在它只用于"确实要清空"的场合（构造期与非装载路径）。
+//
+// 为什么需要它：`RegisterSkill`/`RegisterMcpServer`/`RegisterTool` 都是**按 id 覆盖**，
+// 谁都不摘除"这次装载里没出现"的旧条目。装载源从目录换成 store 之后，"库里删了一行"
+// 必须让那条能力从内存里**消失**，否则它会以幽灵定义的形式继续出现在列表里、继续被注入
+// ——这正是设计文档 §3.5-⑤ 记录的缺陷（`RemoveSkill` 的注释里也写着"内存删了但文件还在
+// 会复活"，那是另一个方向的同一件事）。
+//
+// 与 `RemoveXxx` 的分工：那几个是**单条**摘除（写面自己知道删了哪一条，且顺序有意义），
+// Reset 是装载前的**清场**，只该由装载路径调用。
+func (r *Registry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skills = make(map[string]*Skill)
+	r.mcps = make(map[string]*McpServer)
+	r.tools = make(map[string]*Tool)
 }
 
 // SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证

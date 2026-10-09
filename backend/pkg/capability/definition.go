@@ -230,6 +230,79 @@ func NewDefinitionFile(path string) (*DefinitionFile, error) {
 	return &DefinitionFile{path: path, doc: map[string]json.RawMessage{}, mode: 0o644, existed: false}, nil
 }
 
+// NewDefinitionDoc 造一个**内存里**的空定义文档（sqlite 载体的新建路径，M6-3）。
+//
+// 与 NewDefinitionFile 的差别只有一处：不做绝对路径校验（DB 行没有文件路径；`path` 只是
+// 人读的定位串）。落盘纪律里与文件相关的那三条（staging/原子 rename/权限沿用/mtime 乐观锁）
+// 对 DB 载体不适用——DB 侧的乐观锁是行 revision，由 store 的事务承担。
+func NewDefinitionDoc(path string) *DefinitionFile {
+	return &DefinitionFile{path: path, doc: map[string]json.RawMessage{}, mode: 0o644, existed: false}
+}
+
+// DecodeDefinitionDoc 用一段定义正文造**内存里**的文档句柄（sqlite 载体的读口，M6-3）。
+//
+// 与 ReadDefinitionFile 共用同一套语义：读成 `map[string]json.RawMessage`（未知键原样保留）、
+// 非法 JSON 或"合法 JSON 但不是对象"都报 ErrNotObject（上层据此给"先修它"的 40001）。
+func DecodeDefinitionDoc(path string, raw []byte) (*DefinitionFile, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("%s 不是合法 JSON 对象：%w（%w）", path, err, ErrNotObject)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("%s 的内容不是 JSON 对象，无法作为能力定义读写：%w", path, ErrNotObject)
+	}
+	return &DefinitionFile{path: path, doc: doc, mode: 0o644, existed: true}, nil
+}
+
+// WriteDefinitionFile 把一段定义正文**覆盖写**到 path（M6-4 的导出路径用）。
+//
+// 与 `Save` 的分工：`Save` 是"改我读过的那份文件的几个键"——带 mtime 乐观锁、保留未知键与权限，
+// 面向"用户在编辑定义"；导出是"让文件变成 DB 里那一版"：正文已经由 DB 决定（没有"未知键"要保护，
+// 因为在 DB 的那份 body 里它们已经被保留），且**必须能覆盖已存在的文件**——否则第二次导出就会
+// 以"冲突"告终，而导出本来就没有并发语义可言。
+//
+// 复用 C9 里与内容无关的两条纪律：**同目录 staging + 原子 rename**（半成品绝不出现在目标路径上）
+// 与**权限沿用**（文件已存在时用它的权限位，不因一次导出把 0600 放宽成 0644）。
+func WriteDefinitionFile(path string, body []byte) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("定义文件路径须为绝对路径：%s", path)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建能力目录失败 %s：%w", dir, err)
+	}
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败 %s：%w", dir, err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("写入临时文件失败 %s：%w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("关闭临时文件失败 %s：%w", tmpName, err)
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		return fmt.Errorf("设置权限失败 %s：%w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("替换定义文件失败 %s：%w", path, err)
+	}
+	committed = true
+	return nil
+}
+
 // ConflictError 定义文件在"读→写"窗口内被外部改动（乐观锁拒绝）。
 //
 // 单独成类型是为了让上层能**按语义**分流：冲突是"请重试"（40901 / definition_changed），

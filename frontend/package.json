@@ -7,14 +7,26 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "pnpm --filter @ark/panel dev",
-    "dev:panel": "pnpm --filter @ark/panel dev",
+    "dev": "pnpm --filter @ark/web dev",
     "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
-    "build:panel": "pnpm --filter @ark/panel build",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
-    "typecheck:panel": "pnpm --filter @ark/panel typecheck",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",
-    "ui:accept": "node scripts/panel-ui-acceptance.mjs"
+    "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
+    "ui:accept": "node scripts/web-ui-acceptance.mjs",
+    "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs",
+    "smoke:desktop": "node scripts/desktop-runtime-smoke.mjs",
+    "asset-parity": "node scripts/asset-parity.mjs",
+    "verify:engines": "node apps/desktop/scripts/assert-engines.mjs",
+    "gen:compliance": "node apps/desktop/scripts/gen-compliance.mjs",
+    "verify:compliance": "node apps/desktop/scripts/verify-compliance.mjs",
+    "verify:release-json": "node apps/desktop/scripts/verify-release-json.mjs",
+    "verify:signature": "node apps/desktop/scripts/verify-signature.mjs",
+    "smoke:desktop:packaged": "FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-runtime-smoke.mjs",
+    "ui:accept:desktop-skills": "node scripts/desktop-skill-projection-acceptance.mjs",
+    "ui:accept:desktop-skills:packaged": "FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-skill-projection-acceptance.mjs"
+  },
+  "devDependencies": {
+    "@ark/desktop-contract": "workspace:*"
   }
 }

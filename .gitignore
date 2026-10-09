@@ -20,6 +20,14 @@ frontend/node_modules/
 frontend/**/node_modules/
 frontend/**/dist/
 frontend/**/.vite/
+# 桌面产品（apps/desktop）的产物面：dist 由 esbuild 产出、release 是 electron-builder 输出目录、
+# resources 是打包期装配的随包资产与运行时载荷（forge-core / web / payloads / runtime/bin）、
+# release.json 是唯一发布契约（M4-1，由 build-release-json.mjs 从实际产物生成）。
+# 四者都是**生成物**，真源分别是 apps/web/dist、后端构建产物与 apps/desktop/scripts/*。
+frontend/apps/desktop/dist/
+frontend/apps/desktop/release/
+frontend/apps/desktop/resources/
+frontend/apps/desktop/release.json
 # 注意：pnpm-lock.yaml 应入库（应用锁版本保证可复现安装），故不在此忽略。
 
 # Env

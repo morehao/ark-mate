@@ -35,6 +35,12 @@ export interface Agent {
   seed?: boolean
   /** 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探）；用于判定模型作用域。 */
   runtimes?: string[]
+  /**
+   * MCP server id 白名单（M6-8 起可写，`PATCH /agents/:id {"mcps": …}`）。三态在 wire 上必须分得清：
+   * 字段缺失 = 未声明（全量按 runtime transport 过滤）；`[]` = **本 agent 禁用 MCP 注入**；
+   * 非空 = 白名单。写面用 `null` 表达"清空回未声明"——面板只回显，不提供编辑（见 README）。
+   */
+  mcps?: string[]
   /** 默认权限策略（只读面；未声明 = 全 ask）。 */
   permission_policy?: PermissionPolicy
   /**

@@ -293,7 +293,7 @@ export type CapabilityWriteBody = Record<string, unknown>
 /** 新建/覆盖写一个 skill 的结果。 */
 export interface SkillWriteResp {
   id: string
-  /** 事实源文件路径。 */
+  /** 定义的定位串：memory 模式 = 定义文件路径，sqlite 模式 = `db:skill/<id>`（只是给人看的，不是判据）。 */
   path?: string
   /** true = 新建了文件（覆盖写时为 false）。 */
   created: boolean

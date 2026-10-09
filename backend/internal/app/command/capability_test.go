@@ -2,11 +2,14 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morehao/ark-forge/internal/store"
 )
 
 func writeDef(t *testing.T, dir, name, body string) string {
@@ -199,5 +202,63 @@ func TestCapabilityMigrateMissingDir(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "不存在") {
 		t.Fatalf("应给出明确提示:\n%s", out.String())
+	}
+}
+
+// TestCapabilityImportExportCLI 端到端接线：CLI 层只做"解析配置 → 调领域函数 → 打统计"，
+// 但**取错库路径/取错能力目录**这类接线错误只有真跑一次才看得见（而且它在生产里表现为
+// "导入成功了，可重启后能力面还是空的"——最难查的一类）。
+//
+// 全程私有 HOME（FORGE_HOME/FORGE_CONFIG_DIR/FORGE_DB/FORGE_CAPABILITIES 都指向临时目录），
+// 不碰用户真实的 ~/.forge（本机隔离纪律）。
+func TestCapabilityImportExportCLI(t *testing.T) {
+	home := t.TempDir()
+	dbPath := filepath.Join(home, "forge.db")
+	capDir := filepath.Join(home, "capabilities")
+	t.Setenv("FORGE_HOME", home)
+	t.Setenv("FORGE_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("FORGE_DB", dbPath)
+	t.Setenv("FORGE_CAPABILITIES", capDir)
+
+	writeDef(t, capDir, "demo.json", `{"id":"demo","name":"Demo","x-keep":{"nested":true}}`)
+	if err := os.MkdirAll(filepath.Join(capDir, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(capDir, "tools", "web.json"), []byte(`{"name":"web","source":"builtin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	capabilityImport(nil) // 会把统计打到 stdout（本仓 CLI 的既有风格）
+
+	ctx := context.Background()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("打开库: %v", err)
+	}
+	defer st.Close()
+	row, found, err := st.GetSkillDefinition(ctx, "demo")
+	if err != nil || !found {
+		t.Fatalf("导入后库里应有 demo: found=%v err=%v", found, err)
+	}
+	if !strings.Contains(row.Body, `"x-keep"`) {
+		t.Fatalf("未知键应一起导入: %s", row.Body)
+	}
+
+	// 面板改一版（写面路径），导出物必须来自 **DB** 而不是目录里那份旧文件。
+	if _, err := st.UpsertSkillDefinition(ctx, "demo", `{"id":"demo","name":"面板改的","x-keep":{"nested":true}}`, 1, "rest"); err != nil {
+		t.Fatal(err)
+	}
+	capabilityExport(nil)
+
+	got, err := os.ReadFile(filepath.Join(capDir, "skills", "demo.json"))
+	if err != nil {
+		t.Fatalf("导出后应有文件: %v", err)
+	}
+	if !strings.Contains(string(got), "面板改的") || !strings.Contains(string(got), `"x-keep"`) {
+		t.Fatalf("导出物应是 DB 那一版（含未知键）: %s", got)
+	}
+	// tools 不导出（不迁）。
+	if _, err := os.Stat(filepath.Join(capDir, "tools", "web.json")); err != nil {
+		t.Fatalf("导出不该动 tools/：%v", err)
 	}
 }

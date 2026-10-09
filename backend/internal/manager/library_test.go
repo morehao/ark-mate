@@ -112,7 +112,9 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 // TestLibraryKindFilterAndQuery `?kind=` 过滤、`?q=` 大小写不敏感子串、未知 kind → 40000。
 func TestLibraryKindFilterAndQuery(t *testing.T) {
 	svc := libraryRig(t)
-	if _, err := svc.CreateSkill(context.Background(), writeReq(t, `{"id":"PDF-Reader","name":"读 PDF","description":"解析文档"}`)); err != nil {
+	// id 必须符合底座词法（大写/下划线会被 dsh 静默丢弃，2026-10-08 实测），所以"大小写不敏感"
+	// 这一层改用**查询串**来测：id 全小写、查询给大写形态（`PDF-READER` 只可能命中 id 那条路）。
+	if _, err := svc.CreateSkill(context.Background(), writeReq(t, `{"id":"pdf-reader","name":"读 PDF","description":"解析文档"}`)); err != nil {
 		t.Fatal(err)
 	}
 	items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindSkill})
@@ -122,7 +124,7 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 	if len(items) != 1 || items[0].Kind != dtolibrary.KindSkill {
 		t.Fatalf("kind 过滤失效: %+v", items)
 	}
-	for _, q := range []string{"pdf", "PDF", "读 pdf", "解析"} {
+	for _, q := range []string{"pdf", "PDF", "PDF-READER", "读 pdf", "解析"} {
 		got, err := svc.ListLibrary(svclibrary.Query{Q: q})
 		if err != nil {
 			t.Fatal(err)

@@ -60,18 +60,30 @@ type stderrWaiter interface{ WaitStderr(time.Duration) }
 
 // AttachStderr 把传输层的 stderr 诊断尾巴挂到错误上（已有尾巴则不覆盖；最多保留 tailCap 行）。
 //
-// 挂之前先等 stderr 抽干（见 StdioTransport.WaitStderr）：不等待的话，"子进程写一行就退出"
+// 挂之前先等 stderr 抽干（见 snapshotStderr）：不等待的话，"子进程写一行就退出"
 // 这类最常见的启动失败会偶发挂上空尾巴——诊断面报"没有 stderr"其实是抢跑读到的。
 func AttachStderr(err error, t Transport) error {
 	ae, ok := As(err)
 	if !ok || ae == nil || t == nil || len(ae.StderrTail) > 0 {
 		return err
 	}
+	ae.StderrTail = snapshotStderr(t)
+	return err
+}
+
+// snapshotStderr 等 stderr 抽干后再取诊断尾巴——**顺序本身就是正确性**：先取再等等于抢跑，
+// "子进程写一行就退出"会拿到空尾巴，调用方据此就会报"底座没有输出"。
+//
+// 命中"进程退出 → 管道 EOF → 读取 goroutine 收尾"这条快路径时通常立即返回；
+// 只有进程仍活着时才真等满 stderrDrainWait。
+func snapshotStderr(t Transport) []string {
+	if t == nil {
+		return nil
+	}
 	if w, ok := t.(stderrWaiter); ok {
 		w.WaitStderr(stderrDrainWait)
 	}
-	ae.StderrTail = TailLines(t.StderrTail(), stderrTailCap)
-	return err
+	return TailLines(t.StderrTail(), stderrTailCap)
 }
 
 // TailLines 截取最近 n 行（超出保留尾部），供诊断外露统一裁剪。

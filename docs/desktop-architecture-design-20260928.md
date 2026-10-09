@@ -71,8 +71,8 @@ R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**
 | `apps/cli`（owns the `dsh` bin） | `backend/cmd/forge` | 命令行入口 |
 | `packages/*/*`（含 `client/ui-*` 组件层） | `packages/{ui,types,api,tsconfig}` | 能力层 |
 | `packages/bundle/web-app`：组装可运行的 web 产品（起 webServer + 打开浏览器） | 浏览器入口由核心托管前端资产（`forge web`） | 组装层在 ark-forge 落在 Go 侧 |
-| `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配、`release.json` 生成、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
-| `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` | 一个发布号标识整套；同时是 §6.7 版本闸门的落点 |
+| `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配（`prepare-runtime`）、`release.json` 生成与逐项复核（`build-release-json` / `verify-release-json`）、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
+| `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` + 交付事实（`signing` / `notarized` / `channel` / `macUpdate`，见计划 §12.27） | 一个发布号标识整套（`coreVersion` 必须等于 `appVersion`，由脚本断言）；同时是 §6.7 版本闸门的落点 |
 | pnpm 供应链纪律：`allowBuilds` 默认拒绝、`patchedDependencies`、`minimumReleaseAge`、随包第三方按平台钉死确切版本 | 沿用，并**扩展到随包 runtime**：Electron、`dsh`、`opencode` 的确切版本与平台矩阵写入 `release.json` 与合规清单（§11） | 随包第三方二进制必然出现在用户机器上，版本必须可复现、可审计 |
 
 **依赖边界（守卫测试固化，越界即 CI 失败）**：
@@ -219,7 +219,7 @@ graph TB
 | 事实 | 值 | 来源 |
 | --- | --- | --- |
 | Electron 自带 Node | **24.18.1**（V8 15.2.124.13-electron.0，ABI 149） | 实测 `ELECTRON_RUN_AS_NODE=1 <Electron 可执行文件> -e 'process.versions'`（2026-09-28，Electron 44.0.0） |
-| dsh 要求的 Node | `^22.19.0 \|\| >=24.0.0` | 源码 `package.json` 的 `engines`（0.1.7-rc.2） |
+| dsh 要求的 Node | `^22.19.0 \|\| >=24.0.0` | 源码 `package.json` 的 `engines`（0.1.7-rc.2）。**实测订正（2026-09-28，M3-7）**：发布到 npm 的包里**没有保留 `engines`**（闭包内 85 个包有 engines，`@deepseek-ai/*` 一个都没有），因此随包载荷里没有可判定的声明——M3-7 的 engines 判定对 dsh 目前**退化**为「ABI + Electron 版本」两项（那两项有牙齿），并逐份打印「无声明 + 看过哪些文件」。这条值仍是我们对该 runtime 的**要求**；要让判定真正成立，应由装配期把它写进 `payload.json`（见计划 §13 的 T11） |
 | 结论 | **满足**，且由发布期断言持续保证（§5.3） | — |
 
 ### 5.2 机制
@@ -242,7 +242,7 @@ graph TB
 2. 某 runtime 明确检查并拒绝非官方 Node（例如读 `process.versions.electron`）；
 3. `--expose-internals` 类内部符号依赖在 Electron 升级后断裂且无替代。
 
-**代价**：约 +90–110 MB，并多一个需要签名与公证的原生可执行文件。三条各自写成一个 smoke 用例，作为桌面构建的门禁。
+**代价**：约 +90–110 MB，并多一个需要单独签名的原生可执行文件（不公证，见 §8 决策）。三条各自写成一个 smoke 用例，作为桌面构建的门禁。
 
 ---
 
@@ -293,7 +293,7 @@ graph TB
 
 ```mermaid
 graph TB
-  subgraph Bundle["应用包（只读，随包签名 + 公证）"]
+  subgraph Bundle["应用包（只读，随包 ad-hoc 签名）"]
     CoreBin["forge-core<br>Go 静态二进制"]
     Assets["前端资产<br>内置 / 显式目录"]
     Payload["runtime payload<br>dsh 生产依赖树 · opencode · npm/npx JS"]
@@ -314,8 +314,49 @@ graph TB
 - **只读面**：核心二进制、前端资产、运行时载荷、清单——全部在应用包内，直接使用，不做首启物化。
 - **可写面**：只有 `FORGE_HOME` 下的状态目录。不往系统目录写任何东西，不持久改用户环境（私有 `bin` 只前置到子进程的临时 `PATH`，§6.6），不碰用户既有的 dsh / opencode 配置。
 - **完整性**：打包期逐文件生成清单 + CI 复算；启动期只做必要读取，全量复算由 `forge doctor --verify-payload` 承担。
+  **清单必须自描述**（M4-5 修正）：`fileList` 的相对路径基准由 `payload.json` 的 `fileListBase` 给出——
+  两份载荷的落点形态本就不同（dsh 的闭包在 `node_modules/` 下、opencode 直接铺在载荷根），此前清单里
+  没有任何字段说明这件事，任何"从清单复算载荷树"的消费方都只能靠猜。补齐这个字段正是
+  `forge doctor --verify-payload`（15k+ 个文件逐个 sha256 + 合成摘要）能成立的前提（计划 §12.31）。
+  收尾核对：`make verify/compliance`（NOTICES + CycloneDX SBOM 与 `release.json` 逐项一致，设计 §11.1）。
 - **命名空间**：`payloads/<name>/<version>/`（随包）+ `FORGE_RUNTIME_<NAME>` 覆盖。当前两份：`dsh`、`opencode`；`npx` 走 Electron 的 Node + 私有 bin，不单独占一份载荷。将来加 `python`（部分 MCP server 需要）只需新增一份载荷 + 一个名字，配置面不动。
-- **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
+- **回退条件**：若某 runtime 需要写自身所在目录，或平台签名/公证/hardened runtime 不允许包内执行该二进制，
+  则该载荷退回"从包内首启物化到 `FORGE_HOME`"——这是唯一允许引入物化的场景。
+- **形态结论（2026-09-28，M3-6）**：**当前不需要物化**，随包只读执行。三条回退条件的取证状态：
+  - ① **runtime 是否会写自身所在目录** —— 已验：桌面态经私有 bin 真起了两份载荷（`opencode` 完成
+    `initialize` + `session/new`；`dsh` 起进程并在 Electron 的 Node 上跑到 boot 阶段）后，两者载荷目录的
+    指纹（文件数 / 总字节 / 元数据摘要 / 目录 mtime）**逐字零变化**（见计划 §12.26；跑的是
+    `desktop-runtime-smoke.mjs`）。注意措辞：`dsh` 那天**没走完握手**，原因见下面的第四条约束；
+  - ② **签名 / 公证 / hardened runtime 是否允许包内执行** —— **拆成两半**（2026-09-28 决策，计划 §12.27）：
+    **hardened runtime 这一半由 M4-2a 用 ad-hoc 签名验证**（`codesign --options runtime -s -` 不要求证书，
+    是同一套运行时约束）；**公证那一半不做**（不上架、不付费），因此"异地机器 + staple"这条验收被撤销，
+    替换为"`tar.gz` 解到干净目录后首启无阻断"。
+    **结论（2026-09-28，M4-2a，计划 §12.29）**：**hardened runtime 半边已验绿**——打出来的包
+    （ad-hoc + `--options runtime` + entitlements 最小集）里，壳、核心与两份载荷全部能执行：
+    `FORGE_SMOKE_APP=<app> pnpm smoke:desktop` 40/40（dsh 与 opencode 的 `initialize` + `session/new`
+    都在包内那份 Electron 的 Node 上走完，且载荷目录指纹零变化）。公证半边**本期不做**（`spctl` 如实记录为
+    `rejected`，是 ad-hoc 的预期结论）。
+    **2026-10-09 复跑（随包载荷换代到 dsh `0.2.0-rc.2` / opencode `2.0.26` 之后）**：`pnpm
+    smoke:desktop:packaged` **41/41**（同一批断言，两份包内载荷目录指纹仍逐字零变化）、`pnpm
+    verify:signature` 44 个 Mach-O 对象全带 `--options runtime`。同批**补上 V9 判不到的那一层**——
+    包内**能力投放**：真包内壳 + 包内核心 + **打包时重新生成**的私有启动器 + 包内载荷，平台物化的
+    skill 逐字出现在**包内 dsh** 的模型请求体 `<available_skills>` 里（opencode 侧同判，见其
+    `<skill><id>…</id>…</skill>` 目录块），**27/27**；探针的 `HOME`/`FORGE_HOME` 仍全在仓库内，
+    收尾核对用户真实 `~/.agents`、`~/.forge`、`~/.local/state/opencode` 零变化。入口：
+    `make verify/hardened-runtime`（已把这条并进打包链）或 `pnpm ui:accept:desktop-skills:packaged`；
+    V9 判"包内能不能跑"，这条判"跑起来有没有把该给底座的给到"——两件事，别互相替代；
+  - ③ **Windows SmartScreen / AV 是否拦** —— **未验**（需要 Windows 测试机与出包，属 M4；见 T2）。
+
+- **第四条约束（2026-09-28 M3-8 实测新增，与上面三条并列，必须一起看）**：**载荷里的原生插件能不能在
+  壳随包的那份 Node 上 boot**。dsh 的传递依赖 `node-addon-require-builtin@0.1.6` 对 Electron 做
+  **V8 精确指纹**匹配（不是 ABI 匹配——ABI 两边都是 149，照样被拒），它的支持表只列了
+  `43.0.0 / 44.0.0 / 45.0.0-alpha.6`；本仓先前 pin 的 `44.4.5`（V8 15.2.124.28）不在表里，症状是
+  `dsh: fatal uncaught exception: … unsupported Electron runtime fingerprint`（进程起得来、握手发不出去）。
+  **处置：Electron 回到设计 §5.1 记的 `44.0.0`**（V8 15.2.124.13，ABI 同为 149），dsh 握手实测转绿。
+  教训要留住：**ABI 一致不等于能跑**——原生插件的 prebuilt 表可能还认 V8/Electron 版本；
+  M3-7 的 engines 断言目前只比 engines 声明 + ABI，抓不到这一层（见计划 §13 的 T11）。
+  因此这条结论是**有条件的**：②③ 一旦在 M4 被拒，按本节回退条件物化，且只对命中的那份载荷启用
+  （`--web-dir` 与 `FORGE_RUNTIME_<NAME>` 这两条既有通路已能承载，不需要新机制）。
 
 ### 6.4 与用户本机环境的隔离
 
@@ -353,10 +394,39 @@ graph TB
 | `PATH` | 私有 bin **前置** + 继承值（`私有bin + 分隔符 + 原 PATH`） | runtime / MCP 子进程（不注入 agent 常规 shell，不改用户环境） |
 | `FORGE_NODE_EXECUTABLE` | Electron 自身可执行文件的绝对路径 | 私有 `node` / `npx` 启动器，使转发到同一个 Node（对应参照实现的 `DSH_DESKTOP_NODE_EXECUTABLE`） |
 | `FORGE_HOME` | 桌面数据目录 | 核心 |
-| 各 runtime 的 home / config 变量 | `FORGE_HOME` 下的专属子目录 | 对应 runtime 子进程（隔离既有配置，但不影响其工具链可见性） |
-| `npm_config_cache` / `npm_config_prefix` | `FORGE_HOME` 下 | runtime / MCP 子进程 |
+| 各 runtime 的 home / config 变量（下表逐个列出） | `FORGE_HOME` 下的专属子目录 | 对应 runtime 子进程（隔离既有配置，但不影响其工具链可见性） |
+| `npm_config_cache` / `npm_config_prefix` | `FORGE_HOME` 下（`npm/cache`、`npm/global`） | runtime / MCP 子进程 |
 
 不覆盖：用户原有的 `PATH` 尾部、代理与凭据类变量、语言运行时变量。隔离的目标是**我们自己的 runtime 配置**（home / cache / prefix），不是用户的开发环境。
+
+#### 6.6.1 各 runtime 实际读取的变量（Q2 的核对结果，2026-09-28）
+
+计划 §15 Q2 要求"逐个查 dsh、opencode 实际读取的 home / config 变量名"。核对方式不是查文档而是**查载荷本身**
+（我们随包发的就是这些字节）：dsh 的 JS 闭包直接读源码，opencode 是单文件原生二进制、用 `strings` 提取
+（`strings payloads/opencode/<v>/bin/opencode | grep -oE '\b(XDG_[A-Z_]+|OPENCODE_[A-Z_]+|HOME)\b' | sort | uniq -c`）。
+
+| runtime | 变量 | 我们注入的值 | 依据（载荷内的证据） |
+| --- | --- | --- | --- |
+| dsh | `DSH_HOME` | `<FORGE_HOME>/runtime/dsh` | `@deepseek-ai/dsh-home-paths/lib/index.js`：`const DSH_HOME_ENV = "DSH_HOME"`，默认 `join(homedir(), ".dsh")` |
+| dsh | `DSH_AGENTS_HOME` | `<FORGE_HOME>/runtime/dsh/agents` | 同文件：`DSH_AGENTS_HOME ?? join(homedir(), …)`——**默认不跟着 `DSH_HOME` 走**，只给 `DSH_HOME` 会漏掉 agents 面，所以两个都注入 |
+| opencode | `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` | `<FORGE_HOME>/runtime/opencode/{config,data,cache}` | 二进制内的变量名（opencode 的配置/数据面走 XDG 约定） |
+| opencode | `XDG_STATE_HOME` | `<FORGE_HOME>/runtime/opencode/state` | **v2 补（2026-10-09 对 `@opencode/cli-darwin-arm64@2.0.26` 复核对齐）**：后台服务的登记文件解析式在二进制里是 `join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "opencode", "service.json")`。不隔离这一项，平台拉起的 `opencode acp` 会读到**用户自己**的登记：同版本同 url 直接复用用户的服务，版本不符还会走替换分支（SIGTERM 旧进程 + 删登记文件）——即"forge 动了本机" |
+| opencode | `OPENCODE_CONFIG_DIR` | `<FORGE_HOME>/runtime/opencode/config/opencode` | 同上；opencode 自己的配置目录覆盖点 |
+| opencode | `OPENCODE_DB` | `<FORGE_HOME>/runtime/opencode/data/opencode.db` | 同上；其会话库落在数据目录内 |
+| 两者 | `npm_config_cache` / `npm_config_prefix` | `<FORGE_HOME>/npm/{cache,global}` | 我们自己的 npm/js 生态（MCP server 用 `npx` 拉起时不该污染 `~/.npm`） |
+
+**隔离的代价（明写出来，免得被当成遗漏）**：桌面态下 dsh/opencode 读不到用户在终端里给它们配好的东西
+（`~/.dsh` 的 profile、`~/.config/opencode` 的 provider 凭证）。这是**有意**的：桌面态的凭证来源是平台自身
+（provider 档案 / 平台配置的 dsh profile），否则"终端里登录过"就成了桌面态能否工作的隐藏前提。
+代价的真实后果只有一个——用户在终端里配好的 runtime 配置不会自动出现在桌面态，需要在平台里配一次；
+反向也成立：桌面态不会把平台配置写回用户的 runtime 目录（这正是隔离要保证的）。
+
+三条纪律：
+1. **只注入"我们发的那份 runtime"需要的变量**，不整份重写 `HOME`——用户工具链（git / uv / 代理 / `SSH_AUTH_SOCK`）仍按用户环境工作（§6.4 的"隔离在配置面而不是环境面"）。
+2. 变量名是**实测值**，不是猜的：上表的每一项都能在载荷里指到出处；将来 dsh / opencode 换名，
+   做法是重新核对并更新本表，而不是"多注几个以防万一"（多注的变量不会报错，只会静默失效）。
+3. 注入点：变量随 `LaunchSpec.Env` 进对应 runtime 子进程（Go 侧 `pkg/runtime.IsolationEnv`），
+   不污染壳给核心的那份环境——`FORGE_HOME` 本身是全局的，各 runtime 的**子目录**是局部的。
 
 ### 6.7 UI/API 版本闸门
 
@@ -367,7 +437,7 @@ graph TB
 | 前端产物 | 构建时写入 `build id`（产物内常量或 `index.html` 的 meta） |
 | 核心 | 启动时读自己的期望值，并在 `/health` 或 `/meta` 回报 `coreVersion` / `webBuildId` / `apiContract` |
 | 前端 | 启动时比对自身 `build id` 与核心回报值；不一致 → 显示明确状态（"前端与核心版本不一致，请刷新或重新安装"），而不是白屏或零散接口错误 |
-| 打包期 | `release.json` 记录三者并做一致性断言，缺一即构建失败 |
+| 打包期 | `release.json` 记录三者并做一致性断言，缺一即构建失败。取值方式（M4-1）：`coreVersion` / `apiContract` 由 **`forge-core --version --json`** 交出（核心的版本出口，唯一取法——ldflags 注入是构建期生效的，只有问二进制才知道它带了哪个值）；`webBuildId` / `webDigest` 由打包脚本**复算** `resources/web`（摘要算法与核心侧的 `router.compositeDigest` 同源，两者逐字一致由 `make verify/release-json` 拿核心 `/meta` 的回报值对照） |
 
 ---
 
@@ -450,8 +520,8 @@ sequenceDiagram
 | 平台 | 形态 | 要点 |
 | --- | --- | --- |
 | Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-forge`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
-| macOS | dmg + 拖入 Applications，无需管理员 | hardened runtime + 公证；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍 |
-| 签名 | macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
+| macOS | **`tar.gz` 解压到 `~/Applications`（非浏览器渠道分发，不带 quarantine）；dmg 只作本地自测**（2026-09-28 决策：不公证、不签 Developer ID，见计划 §12.27） | hardened runtime 用 **ad-hoc 签名**开启并验证（`codesign --options runtime -s -`，不要求证书）；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层；完全未签名的对象在 arm64 上会被 `SIGKILL`）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍。**落地形态（M4-2a，见计划 §12.29）**：`hardenedRuntime: true` + `build/entitlements.mac.plist`（`allow-jit` 与 `disable-library-validation` 两条最小集）+ `build/entitlements.mac.inherit.plist`（子进程/嵌套对象）+ `afterSign: scripts/after-sign.cjs`（**补齐与复核**：osx-sign 已逐对象签；钩子只补漏网的，并在补签后重封外层封条——在 afterSign 里无脑重签会改坏 `CodeResources` 封条）；`make verify/signature` 逐对象断言"有签名 + 带 runtime 标记 + identity 与 `release.json` 一致" |
+| 签名 | ~~macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing~~ **决策更新（2026-09-28，见计划 §12.27）**：不上架、不付费 → **不做公证、不签 Developer ID**；改为 **ad-hoc 签名 + 内网 `tar.gz` 非浏览器渠道分发**（quarantine / Mark-of-the-Web 由下载器写入，`curl` 不写 → 不触发 Gatekeeper / SmartScreen）。代价：没有来源可信性，且 macOS 自动更新不可行（Squirrel.Mac 要求签名满足既有 designated requirement）→ 手动换包。**该决策长期有效**（2026-09-28 项目方复核：没有证书、也不需要上架应用市场 → 计划 **M4-2b 不执行**，`mac.notarize: false` 与 `release.json` 的 `signing=adhoc`/`notarized=false`/`channel=tarball`/`macUpdate=manual` 是**长期口径**而非占位；`make verify/signature` 只认 ad-hoc，出现别的声明即红）。若哪天重新开这条路，改动点是那四个字段 + `mac.identity`/`mac.notarize` + 两个 verifier 的期望集，并按"契约变更先改设计文档"走 | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
 
 ### 8.2 更新
 
@@ -461,9 +531,9 @@ sequenceDiagram
 | 可选增强 | 自建更新 feed（对象存储 / 内网），带退避与抖动；取不到策略时保留上次决策 |
 | 强制更新 | 仅在部署者自建 feed 时可启用 |
 
-**默认不发起任何更新检查**（R3），因此不存在"官方更新服务器"。同时**无遥测、无崩溃上报**——否则 §1.1 的出站判据自相矛盾。诊断改为本地日志 + 导出诊断包（桌面对话框保存位置；浏览器端等价物为下载）。
+**默认不发起任何更新检查**（R3），因此不存在"官方更新服务器"。同时**无遥测、无崩溃上报**——否则 §1.1 的出站判据自相矛盾。诊断改为本地日志 + 导出诊断包（桌面对话框保存位置；浏览器端等价物为下载）；诊断包里那段**机器可读**的内容由 `forge doctor --json` 产出（M4-5：资产来源与摘要、载荷清单与入口、ABI 与契约的一致性、数据目录可写性、端口占用；`--verify-payload` 再带上全量复算结论），脱敏口径见 §9.3。
 
-### 8.3 体积预算（估算，待实测）
+### 8.3 体积预算（估算；实测值与差距见计划 §12.26，**收口更新归 M5-5**）
 
 | 组件 | macOS arm64，安装后未压缩 |
 | --- | --- |
@@ -492,7 +562,7 @@ sequenceDiagram
 | 本机其它用户 / 进程调用 API | 两个凭据都只在内存中、每次启动随机；`streamToken` 只能订阅事件，改数据需要 `restToken`，而后者从不离开主进程 |
 | 令牌泄露给子进程 | 只经 stdin 传入；`restToken` / `streamToken` 从不写进任何子进程环境（其余环境按 §6.6 继承） |
 | 渲染进程被 XSS | REST 侧无凭据可偷；`streamToken` 即使被偷也只能读事件；CSP 无外域白名单（§9.2）使外泄没有目标 |
-| 资产或载荷被篡改 | 随包签名 + 公证；打包期清单 + CI 复算；`forge doctor` 可复核。显式目录来源在启动时计算并回报 digest，但不与签名清单比对——它是操作者显式选择的受信来源（§6.1） |
+| 资产或载荷被篡改 | 随包 ad-hoc 签名（只证明未损坏、**不证明来源**，见 §8 决策）+ 打包期清单 + CI 复算；`forge doctor` 可复核。显式目录来源在启动时计算并回报 digest，但不与签名清单比对——它是操作者显式选择的受信来源（§6.1） |
 
 ### 9.2 渲染进程加固基线
 
@@ -551,6 +621,20 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 | Node / Electron | MIT | 同上 |
 
 门禁动作：① 随包 `THIRD-PARTY-NOTICES`（各组件版本与来源 URL）；② 生成 SBOM 并在打包期校验资产与载荷版本和清单一致；③ 记录所捆绑 runtime 的确切版本，避免不可复现；④ 划清边界：opencode 的**托管服务**另有服务条款（[ToS](https://opencode.ai/legal/terms-of-service)），本期只捆绑其 CLI 二进制，不引入其托管服务的默认依赖。
+
+### 11.1 实现（M4-5，2026-09-29；计划 §12.31）
+
+| 项 | 落地形态 |
+| --- | --- |
+| 生成物 | `resources/compliance/THIRD-PARTY-NOTICES.txt` + `resources/compliance/sbom.cdx.json`（CycloneDX 1.5）；两者都是**生成物**（字段序固定、无时间戳/序列号、原子写），不手改 |
+| 生成 | `apps/desktop/scripts/gen-compliance.mjs`（`make desktop/compliance`；`make desktop/dist` 在 electron-builder **之前**自动跑） |
+| 随包 | `electron-builder.yml` 的 `extraResources` → `<Resources>/compliance/` |
+| 门禁 | `make verify/compliance`（`verify-compliance.mjs`：① 逐字节复算 ② 组件与 `release.json`/载荷清单/锁文件交叉校验 ③ SBOM 形状 ④ `--require-artifacts` 判**包内**那份）；`desktop/dist` 收尾跑 ④，`verify/desktop-dod` 跑 ①②③ |
+| 组件集合 | 随包载荷树里**实际存在**的每个 npm 包（按 `node_modules` 布局判定；`payloads/<name>/<version>` 下的 skill 模板等非依赖 `package.json` 不算），加 Electron / Node 与本应用自身 —— 本批 653 个 |
+| 版本事实 | 组件版本必须同时出现在 `release.json`、载荷清单（`payload.json`）与 `pnpm-lock.yaml`；例外只有一类：包自己声明 `bundleDependencies` 时随它发布的依赖（npm 是唯一一个，本批 138 个），锁文件不建模它们，故单独标注且不参与 pin 校验 |
+| 载荷 ↔ 包名 | `PAYLOAD_PACKAGES` 显式声明（`dsh` → `@deepseek-ai/dsh`、`opencode` → `@opencode/cli-darwin-arm64`；v1 时代是 `opencode-darwin-arm64`，v2 换成 `@opencode/cli-<os>-<arch>`）；生成期硬校验"树里确有此名此版本"，对不上即失败——载荷短名不是 npm 包名，许可证义务挂在真名上 |
+| 许可证文本 | 取自各包自己的 `package.json`（`license` / `licenses` 两种形态），**原样保留**、不做 SPDX 纠正；上游漏写字段的包必须在 `LICENSE_FALLBACKS` 显式登记，否则生成期失败（不静默记 unknown） |
+| 诊断 | `forge doctor`（设计 §6.3 的完整性一行）：`--verify-payload` 全量复算载荷树；打包态拿 `<Resources>/release.json` 逐项比对核心版本/契约代数/资产指纹/载荷清单 |
 
 ---
 
@@ -615,16 +699,18 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 
 | # | 问题 | 默认倾向 |
 | --- | --- | --- |
-| Q1 | `CGO_ENABLED=0` 是否全绿（纯 Go SQLite 的实际构建与运行）？ | 倾向成立，须实测；不成立则桌面按平台分发带 cgo 二进制的对应运行时库 |
-| Q2 | 各 runtime 实际读取哪些 home / config 变量（用于隔离用户既有配置）？ | 按各自文档逐个核对后写入 §6.6 注入表 |
-| Q3 | `streamToken` 的生命周期：随核心退出失效，还是短 TTL + 续期？ | 随核心进程生命周期（退出即失效、无续期面）；TTL 只在需要"页面凭据可轮换"时引入 |
-| Q4 | win-arm64 是否在发布范围内？ | 本期不做，列为后续 |
-| Q5 | 是否承诺 Python / uv（部分 MCP server 需要）？ | 不承诺；需要时按第二份载荷加入（§6.3 已留位） |
-| Q6 | 块级差分更新（electron-updater blockmap）在"只改一行 UI"时是否真的只重下变化的块？ | 默认依赖 blockmap，M4 实测；若实测退化成整包重下，再把前端资产挪成独立 sidecar 目录（`--web-dir` 已支持，改动只在打包脚本） |
+| Q1 | `CGO_ENABLED=0` 是否全绿（纯 Go SQLite 的实际构建与运行）？ | **已关闭（2026-09-28）**：`CGO_ENABLED=0 go build -tags release ./...` 与 `CGO_ENABLED=0 go test ./...` 双绿（证据：计划 m0-notes §1 的 Gate M0 命令矩阵、计划 §13 T3）——"不成立则按平台分发带 cgo 二进制的运行时库"这条退路不再需要 |
+| Q2 | 各 runtime 实际读取哪些 home / config 变量（用于隔离用户既有配置）？ | **已关闭（2026-09-28，查载荷本身而非文档）**：dsh = `DSH_HOME` + `DSH_AGENTS_HOME`（后者默认不跟随前者，必须同时给）；opencode = `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME`/`OPENCODE_CONFIG_DIR`/`OPENCODE_DB`；两者共用 npm 面 `npm_config_cache`/`npm_config_prefix`。逐项与出处见 §6.6.1 |
+| Q3 | `streamToken` 的生命周期：随核心退出失效，还是短 TTL + 续期？ | **已关闭**（M1-1，计划 §13 T5）：随核心进程生命周期（退出即失效、无续期面）；TTL 只在需要"页面凭据可轮换"时引入 |
+| Q4 | win-arm64 是否在发布范围内？ | **已关闭（本期不做）**：列为后续（计划 §12「明确不做」） |
+| Q5 | 是否承诺 Python / uv（部分 MCP server 需要）？ | **已关闭（本期不承诺）**：需要时按第二份载荷加入（§6.3 已留位） |
+| Q6 | 块级差分更新（electron-updater blockmap）在"只改一行 UI"时是否真的只重下变化的块？ | **未测（截至 2026-09-29）**：默认依赖 blockmap，M4-4 实测（计划 §13 T6）；若实测退化成整包重下，再把前端资产挪成独立 sidecar 目录（`--web-dir` 已支持，改动只在打包脚本） |
 
 ---
 
 ## 16. 评审检查清单
+
+> 本清单是**设计评审**用的提问清单（历史记录）。每条是否落地以**计划的 §12 进度表与 §13 欠账表**为准，这里不逐条勾选——勾选只会造出第二份进度事实源（两边一定会漂移）。
 
 - [ ] §1.1 的三条需求是否都被翻译成可执行、可判定的验收项？验收表里有没有"看起来对但没人能验"的条目？
 - [ ] §2.1 的四条依赖边界是否实现为守卫测试？桌面专属代码是否确实没有落进 `backend/` 与 `apps/web`？

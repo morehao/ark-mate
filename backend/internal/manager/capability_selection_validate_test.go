@@ -27,6 +27,10 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	spec.McpTransports = []string{"stdio"}
 	reg := runtime.NewRegistry(spec)
 	svc := NewService(reg, eventbus.New())
+	// 本组用例钉的是**按传输承载能力**拒选（`mcp_gateway=off` 的回退口径）；网关在环时远程
+	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
+	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
+	svc.SetMcpGatewayEnabled(false)
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
 	svc.SetSkillProjections([]SkillProjection{{
 		Runtime:    "stub",
@@ -391,6 +395,65 @@ func TestValidateSelectionUnknownRuntimeNoPanic(t *testing.T) {
 	// 一个只含空白的 id 会被规范化丢掉 → 不构成问题（与"未声明"同义）。
 	if err := svc.validateSelection(&CapabilitySelection{Mcps: ptrOf([]string{"  "})}, "ghost"); err != nil {
 		t.Fatalf("空白 id 规范化后应无问题，got %v", err)
+	}
+}
+
+// TestSelectionValidationRemoteReachableViaGateway M7-3 的**用户可见**语义变化：
+// 网关在环时，选定一台 stub 直连承载不了的 http server 应当**通过**校验（平台代连）；
+// 关掉网关则回到旧口径（拒选并说明"不承载 http 传输"）。读面（Library）与校验必须同向。
+func TestSelectionValidationRemoteReachableViaGateway(t *testing.T) {
+	svc, _, _ := validateRig(t) // 该 rig 默认关网关
+
+	sel := &CapabilitySelection{Mcps: ptrOf([]string{"web"})}
+	if err := svc.validateSelection(sel, "stub"); err == nil {
+		t.Fatal("网关关时，stub 承载不了 http → 应拒选（回退口径）")
+	} else if !strings.Contains(err.Error(), "不承载") {
+		t.Fatalf("回退口径应说明传输不承载: %v", err)
+	}
+
+	svc.SetMcpGatewayEnabled(true)
+	if err := svc.validateSelection(sel, "stub"); err != nil {
+		t.Fatalf("网关在环时应通过（平台代连）：%v", err)
+	}
+	// 读面同向：Library 的该 (server, runtime) 判据也必须转为可达，且理由说明"经网关代连"。
+	lib, err := svc.ListLibrary(libQueryAll())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range lib {
+		if item.ID != "web" || item.Kind != "mcp" {
+			continue
+		}
+		for _, ap := range item.Applicability {
+			if ap.Runtime != "stub" {
+				continue
+			}
+			found = true
+			if !ap.OK || !strings.Contains(ap.Reason, "网关") {
+				t.Fatalf("读面应报告经网关可达: %+v", ap)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("Library 应包含 web 对 stub 的适用性判定")
+	}
+
+	// 关掉网关 → 读面也随之回到"不承载"，两侧永不同向漂移。
+	svc.SetMcpGatewayEnabled(false)
+	lib2, err := svc.ListLibrary(libQueryAll())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range lib2 {
+		if item.ID != "web" || item.Kind != "mcp" {
+			continue
+		}
+		for _, ap := range item.Applicability {
+			if ap.Runtime == "stub" && ap.OK {
+				t.Fatalf("网关关时读面不该报可达: %+v", ap)
+			}
+		}
 	}
 }
 

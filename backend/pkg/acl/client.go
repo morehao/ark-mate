@@ -120,8 +120,9 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		ClientInfo:         &impl,
 	})
 	if err != nil {
-		// 先采集诊断尾巴再 Close（Close 会杀进程并关管道，之后读到的是空）。
-		tail := TailLines(t.StderrTail(), stderrTailCap)
+		// 先采集诊断尾巴再 Close（Close 会杀进程并关管道，之后读到的是空）；采集前等 stderr 抽干
+		// （snapshotStderr），否则"写一行就退出"的底座会偶发得到空尾巴。
+		tail := snapshotStderr(t)
 		_ = t.Close()
 		if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 			ae := NewError(ClassConnection, "timeout", "runtime 未在握手限期内响应 initialize", dctx.Err())
@@ -131,7 +132,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		return nil, withStderr(Classify(err), tail)
 	}
 	if initResp.ProtocolVersion != acpsdk.ProtocolVersionNumber {
-		tail := TailLines(t.StderrTail(), stderrTailCap)
+		tail := snapshotStderr(t)
 		_ = t.Close()
 		ae := NewError(ClassUnsupported, "protocol_mismatch",
 			fmt.Sprintf("agent 协商到协议 v%d，本层仅支持 v%d", initResp.ProtocolVersion, acpsdk.ProtocolVersionNumber), nil)
@@ -154,7 +155,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			}
 		}
 		if len(agentIDs) == 0 {
-			tail := TailLines(t.StderrTail(), stderrTailCap)
+			tail := snapshotStderr(t)
 			_ = t.Close()
 			ae := NewError(ClassAccess, "auth_required",
 				fmt.Sprintf("agent 要求鉴权（%v），M0 仅支持 agent 自托管鉴权", describeAuthMethods(initResp.AuthMethods)), nil)
@@ -162,7 +163,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			return nil, ae
 		}
 		if _, err := conn.Authenticate(dctx, acpsdk.AuthenticateRequest{MethodId: agentIDs[0]}); err != nil {
-			tail := TailLines(t.StderrTail(), stderrTailCap)
+			tail := snapshotStderr(t)
 			_ = t.Close()
 			if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 				ae := NewError(ClassConnection, "timeout", "runtime 未在握手限期内完成鉴权", dctx.Err())
