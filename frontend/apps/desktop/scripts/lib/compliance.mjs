@@ -45,7 +45,7 @@ export const UPSTREAM = {
   electron: 'https://github.com/electron/electron',
   node: 'https://nodejs.org/',
   '@deepseek-ai/dsh': 'https://www.npmjs.com/package/@deepseek-ai/dsh',
-  'opencode-darwin-arm64': 'https://github.com/anomalyco/opencode',
+  '@opencode/cli-darwin-arm64': 'https://github.com/anomalyco/opencode',
 }
 
 /**
@@ -53,13 +53,13 @@ export const UPSTREAM = {
  *
  * 为什么需要这张表：`release.json` 里的载荷名是**平台侧的叫法**（`dsh` / `opencode`，
  * 也是 `FORGE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
- * （`@deepseek-ai/dsh` / `opencode-darwin-arm64`）。两者的绑定不能靠"看起来像"来猜：
+ * （`@deepseek-ai/dsh` / `@opencode/cli-darwin-arm64`）。两者的绑定不能靠"看起来像"来猜：
  * 这里是**声明**，生成期硬校验"载荷树里确实有这个名字的包、版本也一致"，对不上就失败
  * （包改名/换发行包时当场红，而不是让 NOTICES 里出现一个不存在的组件名）。
  */
 export const PAYLOAD_PACKAGES = {
   dsh: '@deepseek-ai/dsh',
-  opencode: 'opencode-darwin-arm64',
+  opencode: '@opencode/cli-darwin-arm64',
 }
 
 /**
@@ -67,9 +67,11 @@ export const PAYLOAD_PACKAGES = {
  *
  * 为什么不用"找不到就当 unknown"：那会让 NOTICES 从此少一个组件而没人发现——而许可证义务
  * 恰恰是"漏一个就违约"的东西。缺字段就报错，逼人来这里登记（登记时去看上游仓库的 LICENSE）。
+ *
+ * v2 的 `@opencode/cli-*` 包自带 `"license": "MIT"`，这里的条目是别的平台包漏字段时的兜底。
  */
 export const LICENSE_FALLBACKS = {
-  'opencode-darwin-arm64': {
+  '@opencode/cli-darwin-arm64': {
     license: 'MIT',
     source: 'https://github.com/anomalyco/opencode/blob/dev/LICENSE',
   },

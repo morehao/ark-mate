@@ -69,8 +69,9 @@ const PAYLOADS = [
   {
     name: 'opencode',
     dir: 'opencode',
-    // opencode 是平台化二进制：包名即平台，入口就在包内的 bin/ 下。
-    dependency: (target) => `opencode-${EXOTIC[target.platform] ?? target.platform}-${target.arch}`,
+    // opencode 是平台化二进制：v2 起包名是 `@opencode/cli-<os>-<arch>`（v1 是 `opencode-<os>-<arch>`），
+    // 平台段与上游安装脚本的 target 口径一致（`windows` 而非 `win32`）。
+    dependency: (target) => `@opencode/cli-${EXOTIC[target.platform] ?? target.platform}-${target.arch}`,
     entry: (dep, target) => (target.platform === 'win32' ? 'bin/opencode.exe' : 'bin/opencode'),
     source: (dep) => `node_modules/${dep}`,
     // opencode 是原生二进制，不参与 Node 模块解析，包内容直接铺在载荷根（入口就是 bin/opencode）。
@@ -127,6 +128,13 @@ function installPayload(payloadDir, target, { offline }) {
     // 目标平台从命令行下发：镜像里同时存在多平台原生包，不指定就会把全平台都装进来。
     `--config.supportedArchitectures.os=${target.platform}`,
     `--config.supportedArchitectures.cpu=${target.arch}`,
+    // 模块目录与当前配置不符时（`.modules.yaml` 里记着上次用的 storeDir / nodeLinker，这次解析出来的
+    // 不一样）pnpm 会先把 `runtime/<name>/node_modules` 整个删掉重装，并且**默认要人在 TTY 上确认**——
+    // 构建步骤没有 TTY，于是直接 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止（2026-10-09 实测：
+    // 上一次带 `FORGE_PAYLOAD_STORE_DIR` 装的载荷，换回默认 store 就撞上这条）。
+    // 这里是**非交互构建**，而这个 node_modules 是构建中间产物（锁文件驱动、不入库、随时可重建），
+    // 自动重建才是对的行为：显式关掉那个确认，别让构建依赖"终端恰好是 TTY"。
+    '--config.confirmModulesPurge=false',
   ]
   if (process.env.FORGE_PAYLOAD_STORE_DIR) args.push(`--store-dir=${process.env.FORGE_PAYLOAD_STORE_DIR}`)
   if (process.env.FORGE_PAYLOAD_REGISTRY) args.push(`--config.registry=${process.env.FORGE_PAYLOAD_REGISTRY}`)
