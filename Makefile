@@ -15,7 +15,7 @@
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn forge-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test all clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 WEB_DIST_DIR  := backend/pkg/web/dist
@@ -178,19 +178,28 @@ desktop/dist: core/desktop desktop/payloads
 	@# （那条只到"界面渲染出来 + 核心可达"）。
 	cd $(FRONTEND_ROOT) && pnpm smoke:desktop:packaged
 
-# 启动**打好的包**（人工看界面用）：等价于在访达里双击 `release/<arch>/ark-forge.app`。
-# 壳自己解析包内载荷、自己起包内核心（`:0` + 双凭据经 stdin），跟开发态是同一套路径，
-# 区别只在"全都来自包内"——所以它也是看"签名形态下跑起来是什么样"的最短路径。
-#
-# 刻意**不**依赖 `desktop/dist`：出包是分钟级的 electron-builder + 数百 MB 载荷，误触代价太大，
-# 包不在场就给一条明确的出路（要连打包一起：`make desktop/dist && make desktop/run`）。
-desktop/run:
-	@command -v open >/dev/null 2>&1 || (echo "==> desktop/run 目前只支持 macOS（用 open 起 .app）；Windows/Linux 请等 M4-3 的出包形态"; exit 1)
+# 打开打好的包（`desktop/run` 与 `desktop/dist-run` 共用这一段，守卫只写一处）。
+define open-desktop-app
+	@command -v open >/dev/null 2>&1 || (echo "==> 只支持 macOS（用 open 起 .app）；Windows/Linux 请等 M4-3 的出包形态"; exit 1)
 	@test -d $(DESKTOP_APP) || (echo "==> 还没有打好的包：$(DESKTOP_APP)"; echo "    先跑 make desktop/dist（当前版本 $(DESKTOP_VERSION)）"; exit 1)
 	@# 数据面提醒：桌面包起的核心与 `make dev` / `make desktop/dev` 的核共用同一个 `~/.forge/forge.db`，
 	@# 两个核同时活着会让"这个改动到底生效了没"变玄学（脚本化靶子如 `ui:accept:desktop` 自带清场守卫）。
 	@echo "==> 打开 $(DESKTOP_APP)（它自己起核；别同时跑 make dev / desktop/dev——共用 ~/.forge/forge.db）"
 	@open $(DESKTOP_APP)
+endef
+
+# 启动**打好的包**（人工看界面用）：等价于在访达里双击 `release/<arch>/ark-forge.app`。
+# 壳自己解析包内载荷、自己起包内核心（`:0` + 双凭据经 stdin），跟开发态是同一套路径，
+# 区别只在"全都来自包内"——所以它也是看"签名形态下跑起来是什么样"的最短路径。
+#
+# 刻意**不**依赖 `desktop/dist`：出包是分钟级的 electron-builder + 数百 MB 载荷，误触代价太大，
+# 包不在场就给一条明确的出路。要连打包一起：`make desktop/dist-run`。
+desktop/run:
+	$(open-desktop-app)
+
+# `desktop/dist` + `desktop/run` 合体：打完直接开。给人用的路径——脚本化验证别用它（会真弹窗口）。
+desktop/dist-run: desktop/dist
+	$(open-desktop-app)
 
 # 资产一致性（M2-5 / V17）：同一个请求经壳（forge-app://）与核心（回环直连）各取一次，
 # 逐项比较 status / Content-Type / Cache-Control / 响应体 sha256。桌面态的两条服务路径由
