@@ -370,7 +370,7 @@ make vet / test   # go vet / go test ./...
 # 前端：cd frontend && pnpm typecheck / pnpm build
 ```
 
-验收驱动（都要先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
+验收驱动（浏览器入口都要先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
 
 ```bash
 cd frontend
@@ -378,6 +378,21 @@ pnpm smoke:e2e            # REST/WS 冒烟（不需要真实底座）
 pnpm smoke:e2e:live dsh   # 真一轮对话（需要装好底座与凭据）
 pnpm ui:accept            # 真 Chrome 界面验收：能力勾选面板 / `/` 命令补全 / 自动化页
                           # 可只跑一条：pnpm ui:accept cmd（cap | cmd | auto）
+```
+
+桌面入口的靶子反过来——**脚本自己起壳、自己起核**，所以跑之前别让 `make dev` / `make desktop/dev`
+的核同时活着（两个核心共用 `~/.forge/forge.db`）；前置是 `make desktop/payloads` 已在场
+（壳在启动期就解析随包载荷，缺了直接拒启、不回落 PATH）：
+
+```bash
+cd frontend
+pnpm smoke:desktop              # V9：真起两份随包载荷 + 隔离环境 + "载荷目录零变化"指纹（不联网、不跑模型）
+pnpm ui:accept:desktop          # 真 Electron 壳 + 真核心：契约 / 加固 / 凭据 / 事件流 / 退出六组
+pnpm ui:accept:desktop-skills   # 能力投放：平台物化的 skill 到底有没有落进底座真正读的那个根
+                                # （用脚本内置的假 LLM 取真请求体，零额度、零凭证）
+
+# 仓库根跑；桌面 DoD 汇总（上三条 + archtest/typecheck/契约/资产一致性/引擎 ABI/合规门禁）
+make verify/desktop-dod
 ```
 
 容器：
