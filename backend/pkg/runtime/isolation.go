@@ -27,9 +27,15 @@ import (
 // 规则：
 //   - 所有本地 runtime 都给 npm 面（npm_config_cache / npm_config_prefix）：MCP server 常经 npx 拉起，
 //     不隔离就会写用户自己的 ~/.npm；
-//   - deepseekharness（dsh）：DSH_HOME 与 DSH_AGENTS_HOME **都要给**——后者默认不跟着前者走
-//     （`DSH_AGENTS_HOME ?? join(homedir(), …)`），只给一个会漏掉 agents 面；
-//   - opencode：三个 XDG 变量 + OPENCODE_CONFIG_DIR + OPENCODE_DB；
+//   - deepseekharness（dsh）：只给 DSH_HOME。**刻意不给 DSH_AGENTS_HOME**——dsh 的 skill
+//     provider 按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析 agents 根，
+//     而平台把 skill 投射到 `${HOME}/.agents/skills`（见 deepseekharnessSkillProjection）。
+//     一旦注入 DSH_AGENTS_HOME，**读根就与写根分叉**，skill 静默不生效（2026-10-09 E5 实测：
+//     注入后 dsh 会话的 `<available_skills>` 里没有投影根下那条 skill，只有注入根下的）。
+//     历史：本表曾按"agents 面也要隔离"注入它，那是把"隔离用户既有配置"错用到了**平台自己的
+//     投放面**上——这条根是**用户全局共享**的（opencode 也读它），不是底座私有配置。
+//   - opencode：三个 XDG 变量 + OPENCODE_CONFIG_DIR + OPENCODE_DB（它没有 agents 根这类变量，
+//     故它与投影根天然一致——dsh 侧修完两侧才对称）；
 //   - 其它 id（远程端点、用户自定义 runtime）：只给 npm 面，不臆造 runtime 专属变量。
 //
 // home trim 后为空 → 返回 nil：宁可不注入，也不要给一堆 "/runtime/dsh" 这样的**半截路径**——
@@ -49,10 +55,7 @@ func IsolationEnv(runtimeID, home string) []string {
 	)
 	switch runtimeID {
 	case deepseekharness.ID:
-		env = append(env,
-			"DSH_HOME="+filepath.Join(home, "runtime", "dsh"),
-			"DSH_AGENTS_HOME="+filepath.Join(home, "runtime", "dsh", "agents"),
-		)
+		env = append(env, "DSH_HOME="+filepath.Join(home, "runtime", "dsh"))
 	case opencode.ID:
 		env = append(env,
 			"XDG_CONFIG_HOME="+filepath.Join(home, "runtime", "opencode", "config"),

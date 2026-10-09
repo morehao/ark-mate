@@ -24,7 +24,6 @@ func TestIsolationEnvBuiltinRuntimes(t *testing.T) {
 		{
 			runtimeID: deepseekharness.ID,
 			want: []string{
-				"DSH_AGENTS_HOME=" + filepath.Join(home, "runtime", "dsh", "agents"),
 				"DSH_HOME=" + filepath.Join(home, "runtime", "dsh"),
 				"npm_config_cache=" + filepath.Join(home, "npm", "cache"),
 				"npm_config_prefix=" + filepath.Join(home, "npm", "global"),
@@ -223,4 +222,45 @@ func contains(env []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestIsolationKeepsSkillRootAlignedWithProjection 隔离环境**不得**把底座的 skill 读根
+// 从平台声明的投影根上撬走。
+//
+// 这不是风格问题而是功能问题：平台把 skill 写到 `${HOME}/.agents/skills`（两个 adapter 的 skill
+// 投影根），而 dsh 的 agents 根按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析——
+// 只要隔离里注入 `DSH_AGENTS_HOME`，**写根与读根就分叉**，skill 静默不生效（平台照旧的
+// `in_sync`/`Tested: true` 还会说一切正常）。
+//
+// 2026-10-09 E5 实测（把 provider 指向本地假 LLM，抓 dsh 真实请求体）：注入时 dsh 会话的
+// `<available_skills>` 里**没有**投影根下那条 skill、只有注入根下的；去掉注入后投影根那条回来了。
+// 历史上本表注入过它（"agents 面也要隔离"），所以这里把它钉成不变量——同目录的
+// TestIsolationEnvBuiltinRuntimes 只管"注了什么"，这条管"注了会不会砸到投放面"。
+func TestIsolationKeepsSkillRootAlignedWithProjection(t *testing.T) {
+	home := t.TempDir()
+	cases := []struct {
+		runtimeID string
+		proj      Projection
+		diverting []string // 会把该 runtime 的 skill 读根撬到他处的环境变量前缀
+	}{
+		{deepseekharness.ID, deepseekharnessSkillProjection(), []string{"DSH_AGENTS_HOME="}},
+		{opencode.ID, opencodeSkillProjection(), nil},
+	}
+	for _, c := range cases {
+		// 前提：投影根仍是"用户全局 agents 面"。哪天它挪到平台自己的目录，撬根的变量就
+		// 未必是缺陷了——那时这条断言会红，提醒连带复核隔离表。
+		if !strings.Contains(c.proj.Root, "/.agents/skills") {
+			t.Fatalf("%s 的 skill 投影根不再是用户全局 agents 面（%q）：请连同隔离表与 E5 结论一起复核",
+				c.runtimeID, c.proj.Root)
+		}
+		for _, kv := range IsolationEnv(c.runtimeID, home) {
+			for _, bad := range c.diverting {
+				if strings.HasPrefix(kv, bad) {
+					t.Fatalf("隔离环境注入了 %s——它会让 %s 的 skill 读根与投影根 %s 分叉"+
+						"（2026-10-09 E5 实测：dsh 会话的 <available_skills> 里看不到投影根下的 skill）",
+						kv, c.runtimeID, c.proj.Root)
+				}
+			}
+		}
+	}
 }
