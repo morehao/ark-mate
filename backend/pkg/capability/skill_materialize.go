@@ -245,6 +245,15 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	// 旧目录里的归属集合要先读出来合并（替换是"换内容"，不是"重置归属"）。
 	_, owners, _ := readMarker(filepath.Join(dir, forgeMarker))
 
+	// 投影根是 runtime **声明**的（不是平台猜的），所以替它把目录建出来不算越界；反之若不建，
+	// 新机器上「用户建的第一条 skill」会直接卡在下一行——`MkdirTemp(spec.Root, …)` 要求根已存在，
+	// 而默认根 `~/.agents/skills` 在从未装过 skill 的机器上根本不存在（2026-10-09 平台端到端实测：
+	// 只留一条 WARN、定义进表但 skill 静默不投放）。MkdirAll 对已存在的目录是空操作，也不跟随软链，
+	// 所以不会覆盖别人的东西；根一旦存在，下面的 staging/原子替换语义与原来完全一致。
+	if err := os.MkdirAll(spec.Root, 0o755); err != nil {
+		return "", fmt.Errorf("skill 物化: 创建投影根 %s 失败: %w", spec.Root, err)
+	}
+
 	staging, err := os.MkdirTemp(spec.Root, ".forge-stage-*")
 	if err != nil {
 		return "", fmt.Errorf("skill 物化: 创建 staging 目录失败 %s: %w", spec.Root, err)

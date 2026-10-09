@@ -412,3 +412,31 @@ func TestReadMarkerLegacy(t *testing.T) {
 		t.Fatalf("空归属解析不符: id=%q owners=%v ok=%v", id, owners, ok)
 	}
 }
+
+// TestMaterializeSkillCreatesMissingProjectionRoot：投影根不存在时物化要自己把它建出来。
+//
+// 默认投影根 `~/.agents/skills` 在从未投放过 skill 的机器上不存在，而 staging 目录建在**根里面**
+// （同文件系统才能原子 rename），于是新机器的「第一条 skill」必然失败。既有测试全都拿
+// `t.TempDir()` 当根（天然存在），所以这条漏了很久——2026-10-09 平台端到端实测才发现
+// （新建 skill 只留一条 `WARN skill 物化跳过 … 创建 staging 目录失败: no such file or directory`）。
+func TestMaterializeSkillCreatesMissingProjectionRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "nested", "not-yet-existing", "skills")
+	spec := dshSpec(root)
+	sk := Skill{ID: "first-ever", Name: "First", Description: "新机器上的第一条", Body: "# first\nbody"}
+	p, err := MaterializeSkill(spec, sk)
+	if err != nil {
+		t.Fatalf("根不存在时物化应自建根并成功，实际报错: %v", err)
+	}
+	want := filepath.Join(root, "first-ever", "SKILL.md")
+	if p != want {
+		t.Fatalf("物化路径不符: %s != %s", p, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("SKILL.md 没写出来: %v", err)
+	}
+	// 幂等：根已在、产物已在，再物化一次仍应成功（且不因"根已存在"改变行为）。
+	if _, err := MaterializeSkill(spec, sk); err != nil {
+		t.Fatalf("二次物化失败: %v", err)
+	}
+}
