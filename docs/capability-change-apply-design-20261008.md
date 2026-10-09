@@ -408,13 +408,15 @@ type capabilityGeneration struct {
 | **M3 可见性** | 写面回执 `applies_to_runtimes`/`affected_conversations`/`apply_boundary`（同源判定）+ 事件 payload 增量 | A9、A12 |
 | **M4 对称性与文档** | `PATCH /mcps/:id` + README 路由表 + README「能力的生效边界」段落更新 + `capability migrate` 标注离线 | A11 |
 | **M5** | 会话 `capability_stale` 派生字段（含指纹缓存），按 §10.2 升级为 stale + diff | Q-2 裁决为终局必做，不再是"可选" |
-| **M6 事实源迁 DB** | §10.5 全量：`skills`/`mcp_servers` + **`agents`/`automations`（Q-7 一起迁）** 表 + 变更表（revision/审计）+ 一次性幂等导入 + 写面改事务与 revision CAS + `capability migrate` 转导入器 + `export/import`。**计划文档：`.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`**（能力面 8–12 人日；含 agent/automation 的扩展段另计） | §10.5、§10.5-⑧；A-系列需补"导入幂等""revision CAS 冲突返回 `definition_changed`"两条 |
+| **M6 事实源迁 DB**（能力面 **2026-10-09 已落地**；agent/automation 扩展段进行中） | §10.5 全量：`skills`/`mcp_servers` + **`agents`/`automations`（Q-7 一起迁）** 表 + 变更表（revision/审计）+ 一次性幂等导入 + 写面改事务与 revision CAS + `capability migrate` 转导入器 + `export/import`。**计划文档：`.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`**（能力面 8–12 人日；含 agent/automation 的扩展段另计） | §10.5、§10.5-⑧；A-系列需补"导入幂等""revision CAS 冲突返回 `definition_changed`"两条 |
 | **M7 MCP 平台侧网关（S1 只收远程）** | §10.6：`forge mcp bridge`（stdio MCP 服务端）+ 注入分派（远程走网关、stdio 仍直连）+ 工具命名策略 + **指纹改用注入条目**。**计划文档：`.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`**（9–13 人日） | §10.6；补"停用后下一次列工具即消失""密钥不出平台""加远程 server 不换代际"三条验收 |
 | **M8 探测与验收口径** | §10.7（终局版）：**投影端到端链**（`Tested=false` 的正主）→ 移出 T-1，改挂 **skill 功能验收**并立即补测；E4/E6 不设 owner（网关落地后消解，仅 stdio 直连留待办）；E2/E3 归 `CapabilityScope` 触发项；E5 归成本项 | README/UI 口径按能力种类分别措辞；投影端到端实测通过后把该 **`Projection.Tested`** 置 true 并把版本写进它的 `Note`（**不是** `Spec.TestedOnVersion`——那个字段属 `CapabilityScope`/E2/E3，两者同名不同物，见探针 note §7） |
 
 > **M8 进度（2026-10-08 起，10-09 收口）**：**opencode 侧已通过**并置 `Projection.Tested: true`（v1.18.35；取证 + 反证见 `.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md` 阶段 A）；**dsh 侧已通过**并同样置 `Projection.Tested: true`（v0.2.0-rc.2，见该 note 阶段 B）——原先记的"本机缺 `acp` profile 是硬前置"**是错的**：`dsh-app-boot` 的 `PROFILE_TEMPLATES` 使 profile 在**首次使用时自动初始化**（实测自建成功）。dsh 侧的取证是两段：源码/配置链（`acp` 模板含 `dsh-base` → 其 patch 常态挂 `skill-filesystem`+`tool-skill` → `agentsHome` 默认 `join(homedir(),".agents")`，故 rank 500 根正是 `${HOME}/.agents/skills`）+ 运行级观察（仅存在于该根的 `officecli` 被真实会话投给模型，且它非内置）。**仍未逐字复跑**：运行级观察在 desktop profile，acp profile 的逐字复跑归 M8 的平台级端到端。
 >
 > 探针产出的**新增待办已裁决并落地**：skill id 词法闸门走"**收紧写面**"——`pkg/capability/registry.go` 增 `skillIDRE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`（`RegisterSkill` 加 ≤64 判据），`MaterializeSkill` 同规则再拦一道，不合规一律 `40001 definition_invalid` 且零字节落盘；`nameRE` 保留给 MCP/tool。**理由从"依赖未文档化的宽容"升级为硬缺陷**：dsh 对 frontmatter 的 `name` 强制这条词法且**不合规静默丢弃整条**，而平台物化正是把 id 原样写成 `name` ⇒ 放行不合规 id = 造出「物化体检报 `in_sync`、底座永远读不到」的 skill（实测确认）。连带产出两条 README 口径要注意的边界：平台选的根是 **rank 500（最低优先）**，项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；且 `DSH_AGENTS_HOME` 会撬走底座的读取根——**平台自己的配置隔离曾注入它**（2026-10-09 修：E5 实测 dsh 会话`<available_skills>` 里看不到投影根下的 skill；护栏见 `TestIsolationKeepsSkillRootAlignedWithProjection`），现在刻意不注入；用户若在平台进程环境里设了它仍会与写入根分叉。
+
+> **M6 进度（2026-10-09）**：**能力面（§2–§6）已全部落地**——v8 迁移建 `skills`/`mcp_servers`/`capability_revisions` 三张表（`internal/store/migrate.go`）、写面按载体分派（`manager/capability_repo.go`：memory 走 `DefinitionFile`、sqlite 走"行 CAS + 同事务一条审计"）、装载侧整体替换式从 store 装载、一次性幂等导入（`meta.imported_capabilities` 目录指纹 + 按行判重、**绝不覆盖**）+ `forge capability import|export`。对外契约逐字不变（`definition_changed`/40901、`skill_exists`、`definition_invalid`/40001 的判据与文案都按载体分派但同码同义），并由"同一套写面断言跑两种载体"的用例（`capability_writeface_test.go`）钉住。**两处与 §10.5 原文的偏差（以代码为准）**：① `skill_not_persistable` **没有消失**——sqlite 模式下"DB 里没有这一行"（代码注入/内存注册的技能）仍会命中它，只是文案与出路换成"先用写面或导入落行"；② `SourceFile` 字段**保留**（DB 载体的条目取空串），因为 `Library` 的 origin 判定与面板展示仍读它——DB 化之后"文件来源"不再成立，口径在扩展段（M6-6）重定义。
 
 **计划文档索引**：**M1–M5 合为一篇** `.dsh/docs/plans/2026-10-08-capability-generation-plan.md`（12–16.5 人日；它们是同一套机制的五个阶段，共用同一批类型与同一条调用链，故不再逐阶段拆篇）；M6 → `2026-10-08-capability-store-migration-plan.md`；M7 → `2026-10-08-mcp-platform-gateway-plan.md`。
 
@@ -500,13 +502,18 @@ type capabilityGeneration struct {
    | mtime + size 乐观锁 | **行 revision 比较并替换**（`UPDATE … WHERE id=? AND revision=?`），不再受时钟/文件系统精度影响 |
    | 保留文件模式 | 不适用 |
    连带效果：`SourceFile` 字段与 `skill_not_persistable`（无定义文件）**消失**——写面不再有"不可持久化"这一类错误码路径。
+   > **落地回填（2026-10-09，M6-3/M6-5）**：这两条**没有按原文消失**，而是换了口径保留。`SourceFile` 仍在
+   > （DB 载体的条目取空串），因为 `Library` 的 origin 判定与面板仍在读它；`skill_not_persistable` 在
+   > sqlite 模式下由"没有定义行"触发（代码注入/内存注册的技能无处写回）。保留的理由是**对外错误面的
+   > 稳定性优先于文档里那句"消失"**：把"启停一个无定义行的技能"从"显式报错 + 给出路"改判成"静默成功"
+   > 会让用户以为开关生效了。
 3. **revision 与变更审计是白拿的**（这正是 §10.1 支柱 1/3 想要的）：新增一张变更表（如 `capability_revisions`：`kind, id, revision, action, actor, at, digest`），于是
    - 写面的"当前代际 rev"直接取全局单调序，§3.3 里的进程内 `capabilityRev` **降级为缓存**；
    - `capability_stale` 与 diff 有了**持久依据**（不用每次现算）；
    - 审计**可被消费**——对照 movo 的只写不读（§11.3-①）。
 4. **一次性导入既有文件。** 升级后把 `<CapabilityDir>/{skills,mcp,tools}/*.json` **幂等导入**（作为迁移内核的一步）。导入必须复用 `capability.RegisterSkill/RegisterMcpServer/RegisterTool` 的校验，否则 DB 会进不合法行；**逐条报告失败而不是整体失败**（参考 §11.2-⑤ 的分寸）。文件保留为 `forge capability export/import` 的载体，`capability migrate` 从"运维命令"转为"导入器"。
 5. **装配变化很小，但有一条边界要守。** `Registry` 仍是内存索引（解析、指纹、投放都读它），只是装载源从目录换成 store，写面变成"事务提交 → 更新内存索引"。**DB 访问必须留在 `internal` 侧**（`internal/dao` + `internal/store`）：`pkg/capability` 不得 import `internal/*`（archtest 守卫），所以它只接收已解析的定义，"从 DB 装载"放在 `internal/manager` 或 `internal/store`。
-6. **顺带消掉的旧问题**：`Registry.LoadDir` 只合并不摘除（幽灵定义，§3.5-⑤）随文件装载一起消失；`FORGE_CAPABILITIES` 从"事实源目录"变成"导入目录"。
+6. **顺带消掉的旧问题**：`Registry.LoadDir` 只合并不摘除（幽灵定义，§3.5-⑤）随文件装载一起消失；`FORGE_CAPABILITIES` 从"事实源目录"变成**导入/导出目录**（落地时把导出也算进来：`forge capability export` 把 DB 写回该目录，此后文件是导出物）。
 7. **影响面**：`internal/model`（`skills`/`mcp_servers` + **`agents`/`automations`（Q-7）** + 变更表）、`internal/store` 迁移内核（v8 起）、`internal/dao`、`manager/capabilities.go` 的装载、`manager/{skills,mcps}_write.go` 改事务 + revision CAS、`manager/agents.go`（种子×DB 的部分合并、`default.json` 落 meta）、`manager/automation.go` + `automation_sched.go`（运行态分列、调度推进事务化）、`capability/definition.go` 降级为导入/导出编解码、`app/command/capability.go`、README、`internal/store/format_test.go`。
 8. **agent / automation 定义一并迁（Q-7 已定，2026-10-08）**：不做"下一轮再说"。理由是不迁会留下"改 MCP 定义即时生效、改 agent 的 `Mcps` 白名单却要重启装载"的用户可见不一致，而 `Library` 的读路径 join 本来就不关心两侧存储形态。**三处必须在实施计划里正面处理**：① agent 有**代码内种子**（`builtinAgents`，只在内存、从不写文件），而文件/DB 覆盖种子时是**"只在字段非零值时才覆盖"**的部分合并——整行写会抹空种子字段；② `default.json` 是**目录级配置**（语义是"当前 agent"）却与 agent 文件同目录，且删 agent 时要连带清理；③ automation 的定义里**混着平台独占的运行态键**（`last_fired_at`/`last_status`/`recent_runs` 等，README 明写它们对写面不可写）——迁 DB 是顺手把"定义"与"运行态"**结构性**分开的机会（今天只靠拒写名单拦）。范围与估时见实施计划 `.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md` 的扩展段。
 

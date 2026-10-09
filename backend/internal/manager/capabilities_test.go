@@ -30,6 +30,9 @@ func writeCapFile(t *testing.T, path, content string) {
 	}
 }
 
+// 本文件里的装载用例走 **memory 载体的目录装载**（`LoadCapabilityDefinitions`）；sqlite 载体的
+// 整体替换式装载（含"库里删掉的行不会以幽灵定义留在内存里"）在 `capability_store_test.go`。
+//
 // TestLoadCapabilityDefinitionsAndList Service 集成：目录装载 + REST 三表列表（排序、headers 不读回）。
 func TestLoadCapabilityDefinitionsAndList(t *testing.T) {
 	dir := t.TempDir()

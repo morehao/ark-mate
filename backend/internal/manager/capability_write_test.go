@@ -15,6 +15,11 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
+// 本文件是**文件载体**（memory 模式 / 导入导出共用）那一层的单测：`writeDefinition` /
+// `openDefinition` / `removeDefinitionPermanently` 与 C9 的落盘纪律（未知键保留、原子替换、
+// 权限沿用、mtime 乐观锁）。DB 载体的同一批对外语义在 `capability_writeface_test.go`
+// （同一套断言跑两种载体）与 `capability_write_store_test.go`（事务 + revision CAS）。
+//
 // readDef 读定义文件为 map（断言用；空文件/不存在 → 空 map）。
 func readDef(t *testing.T, path string) map[string]any {
 	t.Helper()

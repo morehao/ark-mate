@@ -343,6 +343,9 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 未知键保留 → 同目录 staging + 原子 rename + 权限沿用 + mtime 乐观锁）——memory 模式没有持久层，
 文件是它唯一的持久形态，所以不跟着换。装载侧同源分派：sqlite 模式从 DB **整体替换**式装载
 （先清空再逐行过闸门，库里删掉的行不会以幽灵定义留在内存里），memory 模式仍是目录装载。
+错误面同样分叉但**只有一处**：`skill_not_persistable`（启停时载体里没有这条定义）在 memory 模式
+是"没配目录/没有定义文件"，在 sqlite 模式是"DB 里没有这一行"（代码注入或内存注册的技能）——
+后者在 DB 化之后仍可达，所以这个码**没有**随 M6 消失，只是文案与出路换成了"先用写面或导入落行"。
 
 **存量定义怎么搬到 DB（M6-4，一次性 + 幂等 + 可回退）**：装配期在 sqlite 模式下自动导入一次
 `<CapabilityDir>/{skills,mcp}/*.json`（逐条过同一道注册闸门；坏定义 WARN 计数、其余照常导入、
@@ -434,7 +437,9 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 `forge migrate`（transcript → SQLite 幂等导入）、`forge transcripts prune --older-than <dur>`
 （显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
 `forge capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
-能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过）、
+能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过。
+**它在 sqlite 模式下只对"导入前/导出后的存量文件"有意义**：文件不再是事实源，跑完还要 `import`
+才会进库）、
 `forge capability import` / `export`（M6：能力定义换事实源的两个运维口子。`import` 把
 `<CapabilityDir>/{skills,mcp}/*.json` 灌进 SQLite，**按行判重、已有行绝不覆盖**，坏定义逐条报出、
 其余照常导入；`export` 把 DB 里的定义写回能力目录（此后文件是**导出物**），未知键原样、两次导出
