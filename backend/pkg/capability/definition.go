@@ -230,6 +230,30 @@ func NewDefinitionFile(path string) (*DefinitionFile, error) {
 	return &DefinitionFile{path: path, doc: map[string]json.RawMessage{}, mode: 0o644, existed: false}, nil
 }
 
+// NewDefinitionDoc 造一个**内存里**的空定义文档（sqlite 载体的新建路径，M6-3）。
+//
+// 与 NewDefinitionFile 的差别只有一处：不做绝对路径校验（DB 行没有文件路径；`path` 只是
+// 人读的定位串）。落盘纪律里与文件相关的那三条（staging/原子 rename/权限沿用/mtime 乐观锁）
+// 对 DB 载体不适用——DB 侧的乐观锁是行 revision，由 store 的事务承担。
+func NewDefinitionDoc(path string) *DefinitionFile {
+	return &DefinitionFile{path: path, doc: map[string]json.RawMessage{}, mode: 0o644, existed: false}
+}
+
+// DecodeDefinitionDoc 用一段定义正文造**内存里**的文档句柄（sqlite 载体的读口，M6-3）。
+//
+// 与 ReadDefinitionFile 共用同一套语义：读成 `map[string]json.RawMessage`（未知键原样保留）、
+// 非法 JSON 或"合法 JSON 但不是对象"都报 ErrNotObject（上层据此给"先修它"的 40001）。
+func DecodeDefinitionDoc(path string, raw []byte) (*DefinitionFile, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("%s 不是合法 JSON 对象：%w（%w）", path, err, ErrNotObject)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("%s 的内容不是 JSON 对象，无法作为能力定义读写：%w", path, ErrNotObject)
+	}
+	return &DefinitionFile{path: path, doc: doc, mode: 0o644, existed: true}, nil
+}
+
 // ConflictError 定义文件在"读→写"窗口内被外部改动（乐观锁拒绝）。
 //
 // 单独成类型是为了让上层能**按语义**分流：冲突是"请重试"（40901 / definition_changed），

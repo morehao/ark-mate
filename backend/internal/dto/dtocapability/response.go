@@ -254,12 +254,12 @@ type SkillMaterializationState struct {
 type SkillToggleResp struct {
 	ID      string `json:"id"`
 	Enabled bool   `json:"enabled"`
-	// Path 写回的定义文件（不存在定义文件时请求直接失败，不会走到这里）。
+	// Path 写回的定义定位串（文件路径 / `db:skill/<id>`；载体里没有它时请求直接失败，不会走到这里）。
 	Path string `json:"path,omitempty"`
 	// Written/Removed 立刻重校物化的结果：启用会写文件，禁用会**撤回**已物化副本。
 	Written int `json:"written"`
 	Removed int `json:"removed"`
-	// MaterializeErrors 重校失败原因（定义文件已改成功，故不回滚——失败原因如实回带）。
+	// MaterializeErrors 重校失败原因（定义已改成功，故不回滚——失败原因如实回带）。
 	MaterializeErrors []string `json:"materialize_errors,omitempty"`
 	// NextAction 这一步之后该知道的事（如「已物化副本已撤回」）。
 	NextAction string `json:"next_action,omitempty"`
@@ -281,9 +281,10 @@ type AgentMcpServerResp struct {
 // SkillWriteResp 新建/覆盖 skill 定义的结果（POST /skills、PUT /skills/:id）。
 type SkillWriteResp struct {
 	ID string `json:"id"`
-	// Path 落盘的定义文件（事实源）。
+	// Path 定义的**定位串**（给人看的，不参与任何判据）：memory 模式 = 定义文件路径，
+	// sqlite 模式 = `db:skill/<id>`（事实源是 `skills` 表的那一行，没有文件可指）。
 	Path string `json:"path"`
-	// Created true = 本次新建了文件；false = 覆盖写既有文件。
+	// Created true = 本次新建了定义（文件 / DB 行）；false = 覆盖写既有定义。
 	Created bool `json:"created"`
 	// Written/Removed 写面之后立刻重校物化的结果（新增/改正文会写，禁用会撤回）。
 	Written int `json:"written"`
@@ -300,10 +301,10 @@ type SkillWriteResp struct {
 // SkillDeleteResp 删除 skill 定义的结果（DELETE /skills/:id）。
 type SkillDeleteResp struct {
 	ID string `json:"id"`
-	// Deleted 是否真的删掉了文件。**不存在 → false 且无错**：DELETE 的语义是"让它不在"，
+	// Deleted 是否真的删掉了定义。**不存在 → false 且无错**：DELETE 的语义是"让它不在"，
 	// 不是"证明它曾在"（幂等）。
 	Deleted bool `json:"deleted"`
-	// Path 被删的定义文件（Deleted=false 时仍回带，便于确认"本来就没有"）。
+	// Path 被删定义的定位串（文件路径 / `db:skill/<id>`；Deleted=false 时仍回带，便于确认"本来就没有"）。
 	Path string `json:"path,omitempty"`
 	// Removed 撤回的已物化副本数（删定义必须一起撤回，否则底座还看得见它）。
 	Removed int `json:"removed"`
@@ -314,7 +315,8 @@ type SkillDeleteResp struct {
 
 // McpWriteResp 新建/覆盖 MCP server 定义的结果（POST /mcps、PUT /mcps/:id）。
 type McpWriteResp struct {
-	ID      string `json:"id"`
+	ID string `json:"id"`
+	// Path 定义的定位串（同 SkillWriteResp.Path：文件路径或 `db:mcp/<id>`）。
 	Path    string `json:"path"`
 	Created bool   `json:"created"`
 	// UnresolvedSecretKeys 绑了密钥引用但当前解析不出来的键（只给键名）：
@@ -327,7 +329,8 @@ type McpWriteResp struct {
 type McpDeleteResp struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
-	Path    string `json:"path,omitempty"`
+	// Path 被删定义的定位串（文件路径 / `db:mcp/<id>`）。
+	Path string `json:"path,omitempty"`
 	// ToolsRemoved 一并摘除的、归属该 server 的 mcp 来源工具数。
 	// 必须一起摘：留着已删 server 的工具等于让用户看见一个调不通的能力。
 	ToolsRemoved int    `json:"tools_removed"`

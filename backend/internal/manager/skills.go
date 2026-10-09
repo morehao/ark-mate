@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -112,7 +111,7 @@ func (s *Service) SetSkillEnabled(ctx context.Context, id string, enabled bool) 
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "skill_not_found",
 			fmt.Sprintf("未知 skill %q", id), nil))
 	}
-	path, err := s.writeSkillEnabled(id, enabled)
+	path, err := s.writeSkillEnabled(ctx, id, enabled)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
@@ -140,36 +139,49 @@ func (s *Service) SetSkillEnabled(ctx context.Context, id string, enabled bool) 
 	return resp, nil
 }
 
-// writeSkillEnabled 把 `enabled` 写进定义文件并返回文件路径。
+// writeSkillEnabled 把 `enabled` 写进定义载体并返回定位串（memory 模式 = 文件路径，
+// sqlite 模式 = `db:skill/<id>`）。
 //
-// 落盘纪律（未知键保留 / mtime 乐观锁 / 同目录 staging + 原子 rename / 保留权限）全部委派给
-// `capability.DefinitionFile`——那是 C9 的**唯一实现处**。此前这里是手写的一份（读 map → 改一个键
-// → 同目录 tmp + rename），缺 mtime 乐观锁与权限保留；写面（M2）也会复用同一个句柄，所以
-// 在这里收敛成一份而不是各写各的。
-func (s *Service) writeSkillEnabled(id string, enabled bool) (string, error) {
-	dir := s.capabilityDirSnapshot()
-	if dir == "" {
-		return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
-			fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（FORGE_CAPABILITIES），没有可持久化的定义文件", id), nil)
-	}
-	path := filepath.Join(dir, "skills", id+".json")
-	f, err := capability.ReadDefinitionFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+// **只动一个键**：正文/来源/告警/未知键原样保留——启停是 overlay，不是重新注册。
+// 载体的落盘纪律（未知键保留 / 乐观锁 / 原子替换）全部委派给 `capability.DefinitionFile`
+// 与 store 的事务 CAS（见 capability_repo.go），这里只负责"启停"这一件事的顺序与出路。
+func (s *Service) writeSkillEnabled(ctx context.Context, id string, enabled bool) (string, error) {
+	if s.st == nil {
+		// memory 模式：启停必须写回定义文件，没有目录就无处写回（sqlite 模式不需要目录）。
+		// 这条对外码 `skill_not_persistable` 在 sqlite 模式下不再可达——DB 里的技能都有行，
+		// 没有行就没有这条能力（M6-3 的语义变化，README 有说明）。
+		if s.capabilityDirSnapshot() == "" {
 			return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
-				fmt.Sprintf("skill %q 没有定义文件 %s（代码注入/内存注册的技能无处写回）：请在能力目录里建成文件后再启停", id, path), nil)
+				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（FORGE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 		}
-		return "", acl.NewError(acl.ClassRequest, "skill_invalid",
-			fmt.Sprintf("读取 skill 定义失败 %s：%v", path, err), nil)
 	}
-	if err := f.Set("enabled", enabled); err != nil {
-		return "", code.FromError(err)
+	repo, err := s.definitionRepoFor(capSubSkills)
+	if err != nil {
+		return "", err
 	}
-	if err := f.Save(); err != nil {
-		return "", acl.NewError(acl.ClassService, "skill_write_failed",
-			fmt.Sprintf("写入 skill 定义失败 %s：%v", path, err), nil)
+	doc, rev, existed, err := repo.open(ctx, id, map[string]any{"enabled": enabled})
+	if err != nil {
+		return "", err
 	}
-	return path, nil
+	if !existed {
+		// 载体里没有它：代码注入/内存注册的技能无处写回。**不顺手新建**——启停不是定义的新建
+		// 路径，"点一下开关就在库里多出一条定义"比报错难查得多。两个载体的出路文案不同
+		// （一个要建文件、一个要用写面/导入落行），给出的动作必须各自可执行。
+		if s.st != nil {
+			return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
+				fmt.Sprintf("skill %q 在 %s 没有定义行（代码注入/内存注册的技能无处写回）：先用写面或导入把它落成定义后再启停",
+					id, repo.locator(id)), nil)
+		}
+		return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
+			fmt.Sprintf("skill %q 没有定义文件 %s（代码注入/内存注册的技能无处写回）：请在能力目录里建成文件后再启停",
+				id, repo.locator(id)), nil)
+	}
+	if _, conflict, err := repo.commit(ctx, id, doc, rev, existed); err != nil {
+		return "", err
+	} else if conflict {
+		return "", definitionChangedErr(repo.locator(id))
+	}
+	return repo.locator(id), nil
 }
 
 // SkillActivation 一个 skill 对某 agent 的适用性（§13.4 S5；Enabled 与 Activation 正交）。

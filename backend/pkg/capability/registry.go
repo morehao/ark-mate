@@ -68,13 +68,16 @@ func (r *Registry) LoadDir(dir string) LoadResult {
 	}
 }
 
-// RegisterSkill 注册/覆盖一条 skill（供平台种子、运行态或测试直接注入）。
+// ValidateSkill 是 skill 定义的**唯一闸门**（纯校验，不碰注册表）。
 //
-// §13.2 S1 闸门：正文在**入表前**扫描，critical 直接拒载（返回错误 → 目录装载路径告警跳过）。
-// 落点选在这里而不是物化层，是因为注册表是唯一入口——绕过它的路径（种子/测试/未来 CRUD）
-// 都不该存在；物化层只负责把已经过闸的正文写到 runtime 目录。
-// 非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）供 REST 读模型暴露。
-func (r *Registry) RegisterSkill(s *Skill) error {
+// §13.2 S1：正文扫描，critical 直接拒（返回错误 → 装载路径告警跳过）。落点选在这一层而不是
+// 物化层，是因为注册表是唯一入口——绕过它的路径（种子/测试/写面 CRUD）都不该存在；物化层只
+// 负责把已经过闸的正文写到 runtime 目录。非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）。
+//
+// 与 `RegisterSkill` 分开是 M6-3 的要求：写面必须**先校验、再提交、最后入表**（校验失败零写入；
+// 提交失败不留"内存里有、盘上没有"的幻影）。合成一步就只能"先入表再回滚"，而回滚路径正是
+// 最容易漏的那一条。校验是纯函数：同一份输入两次调用结果相同，所以"提交后入表必然成功"。
+func ValidateSkill(s *Skill) error {
 	if s == nil || s.ID == "" || !skillIDRE.MatchString(s.ID) || len(s.ID) > 64 {
 		return fmt.Errorf("capability skill: id 非法（须小写字母/数字，用连字符分段，形如 my-skill，≤64 位；"+
 			"底座 dsh 强制该词法，不合规会被静默丢弃）: %q", idOf(s))
@@ -104,14 +107,23 @@ func (r *Registry) RegisterSkill(s *Skill) error {
 		return criticalErr(s.ID, warnings)
 	}
 	s.Warnings = warnings
+	return nil
+}
+
+// RegisterSkill 校验并注册/覆盖一条 skill（供平台种子、运行态或测试直接注入）。
+// 写面请用 `ValidateSkill` + `RegisterSkill` 两步（见 ValidateSkill 的注释）。
+func (r *Registry) RegisterSkill(s *Skill) error {
+	if err := ValidateSkill(s); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.skills[s.ID] = s
 	r.mu.Unlock()
 	return nil
 }
 
-// RegisterMcpServer 注册/覆盖一个 MCP server。
-func (r *Registry) RegisterMcpServer(m *McpServer) error {
+// ValidateMcpServer 是 MCP server 定义的唯一闸门（纯校验，不碰注册表；理由同 ValidateSkill）。
+func ValidateMcpServer(m *McpServer) error {
 	if m == nil || m.ID == "" || !nameRE.MatchString(m.ID) {
 		return fmt.Errorf("capability mcp: id 非法（须字母数字开头，≤64 位）")
 	}
@@ -148,6 +160,14 @@ func (r *Registry) RegisterMcpServer(m *McpServer) error {
 		if _, dup := m.Headers[k]; dup {
 			return fmt.Errorf("capability mcp: server %q 的 %q 同时在 headers 与 secret_headers 里（键不得重复）", m.ID, k)
 		}
+	}
+	return nil
+}
+
+// RegisterMcpServer 校验并注册/覆盖一个 MCP server。
+func (r *Registry) RegisterMcpServer(m *McpServer) error {
+	if err := ValidateMcpServer(m); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	r.mcps[m.ID] = m
