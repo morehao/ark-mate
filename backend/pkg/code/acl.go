@@ -1,6 +1,8 @@
 package code
 
 import (
+	"strings"
+
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/golib/gerror"
 )
@@ -53,5 +55,57 @@ func fromACL(err error) (gerror.Error, bool) {
 	if msg == "" {
 		msg = ae.Code
 	}
+	if s := stderrMsgSuffix(ae.StderrTail); s != "" {
+		msg += "；" + s
+	}
 	return Error(c, msg), true
+}
+
+// 信封文案里底座 stderr 的量纲（**与 acl 侧的尾巴上限不是一回事**）：
+// acl 保留 200 行是给事件/诊断面板那种结构化字段用的；而 msg 会进前端错误气泡、访问日志
+// 与用户截图，两者差一个数量级，所以这里另设一个更小的上限。
+const (
+	stderrMsgLines = 5   // 最多带几行
+	stderrMsgRunes = 300 // 每行最多几个字符（rune，避免截断多字节）
+)
+
+// stderrMsgSuffix 把 acl 采集到的底座 stderr 尾巴并进对外文案。
+//
+// 为什么必须并：底座起不来时，ACP SDK 只回一句通用的 `Internal error`
+// （JSON-RPC -32603 的固定文案，见 acp-go-sdk errors.go），真因在子进程 stderr 里
+// （典型如 dsh 的 `.env` 保留键报错）。不并的话用户只看到 `50001 Internal error`，
+// 完整原因却躺在核心日志里——排障得先知道去翻日志。实测（2026-10-09）：同一条失败，
+// 从仓库根起核心建 dsh 会话就是这个面目。
+//
+// 尾巴在 acl.TailLines 出口已过 pkg/redact 闸门，这里再经 code.Error 过一次，不必自行脱敏。
+func stderrMsgSuffix(tail []string) string {
+	if len(tail) == 0 {
+		return ""
+	}
+	if len(tail) > stderrMsgLines {
+		tail = tail[len(tail)-stderrMsgLines:]
+	}
+	lines := make([]string, 0, len(tail))
+	for _, l := range tail {
+		if l = strings.TrimSpace(l); l == "" {
+			continue
+		}
+		lines = append(lines, truncateRunes(l, stderrMsgRunes))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "底座 stderr 尾部: " + strings.Join(lines, " | ")
+}
+
+// truncateRunes 按字符（不是字节）截断，超出部分用 … 收尾。
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
