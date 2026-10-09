@@ -54,11 +54,18 @@ func opencodeSpec() Spec {
 // 不用 `${XDG_CONFIG_HOME}` 的理由：opencode 的 skill 面与 XDG_CONFIG_HOME 无关，且该变量在
 // macOS 上普遍未设置，用它当默认根只会让默认形态在半个平台上直接报错。
 //
-// Tested=false 的理由（**刻意不虚报**）：`<root>/<id>/SKILL.md` + 强制 frontmatter 这个**形态**
-// 于 2026-09-09 用真实实现验证过（`opencode debug skill`，隔离 XDG_CONFIG_HOME，见
-// pkg/capability/skill_materialize.go 顶部实测记录），但「平台默认根下写进去、底座开箱即读到」
-// 这条**端到端**链尚未实测（那次的隔离 XDG_CONFIG_HOME 等价于显式配置 skills.paths）。
-// P-2 探针会一并测它，届时置 true 并把版本写进 Note。
+// Tested=true 的依据（两段，缺一不可）：
+//  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用真实实现验证过
+//     （`opencode debug skill`，隔离 XDG_CONFIG_HOME，见 pkg/capability/skill_materialize.go 顶部实测记录）。
+//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 opencode **v1.18.35** 补测通过
+//     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md）。关键取证：平台在**私有 HOME**
+//     下**不设任何 override**（不设 FORGE_PROJECTION_DIRS / 不写底座配置 / 不设 XDG_CONFIG_HOME）写到
+//     `${HOME}/.agents/skills/<id>/SKILL.md`，`opencode debug skill` 列出的 `location` **逐字等于**该文件路径；
+//     **反证** `OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 下该条消失（只剩内置 skill）——证明读到的正是
+//     「外部 skill 自动加载」这条路，而不是别的机制碰巧命中。
+//
+// 第 1 段不能顶替第 2 段：上次那次隔离 XDG_CONFIG_HOME 等价于显式配置 skills.paths，只能证明
+// 「给了路径就能读」，证明不了「开箱即读」。
 func opencodeSkillProjection() Projection {
 	return Projection{
 		Kind:   ProjectionSkill,
@@ -66,10 +73,11 @@ func opencodeSkillProjection() Projection {
 		Root:   "${HOME}/.agents/skills",
 		Layout: LayoutIDToken + "/SKILL.md",
 		Format: opencode.SkillFormat,
-		Tested: false,
-		Note: "opencode v1.18.32 源码级确认全局扫描 `~/.agents/skills/**/SKILL.md`（递归，故扁平落点也在扫描范围内）；" +
-			"内容形态（SKILL.md + 强制 YAML frontmatter）于 2026-09-09 用 opencode v1.18.29 的 `opencode debug skill` 实测通过，" +
-			"但「默认根开箱即读」这条端到端链待 P-2 探针确认",
+		Tested: true,
+		Note: "全局扫描 `~/.agents/skills/**/SKILL.md`（递归，扁平落点也在范围内）；" +
+			"内容形态于 2026-09-09 用 v1.18.29 实测通过；**默认根端到端于 2026-10-08 用 v1.18.35 实测通过**" +
+			"（平台不设任何 override 写入 `~/.agents/skills/<id>/SKILL.md` → `opencode debug skill` 的 location 逐字命中；" +
+			"`OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 下消失）",
 	}
 }
 
@@ -120,8 +128,21 @@ func deepseekharnessSpec() Spec {
 // 或 `<root>/<name>/SKILL.md`（目录包）；更深的 `**/SKILL.md` **不扫**（与 opencode 相反）。
 // 故 Layout 只能是 `<id>/SKILL.md`，且内容必须自带 YAML frontmatter（缺 name/description 整条丢弃）。
 //
-// Tested=false 的理由同 opencode：形态 2026-09-09 用 `dsh-skill-filesystem` 真实 provider 实测过
-// （无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫），但默认根端到端待 P-2。
+// Tested=true 的依据（两段，缺一不可）：
+//  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用 `dsh-skill-filesystem`
+//     真实 provider 实测过（无 frontmatter / 只有 name / 只有 description 三种都丢弃，嵌套不扫）
+//     ——与上面的「只扫根下一层」互相印证（见 pkg/capability/skill_materialize.go 顶部实测记录）。
+//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 dsh **0.2.0-rc.2** 确认
+//     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md §B-6）。取证分两路：
+//     · **源码链**（读本机安装版本 app.asar 内的实际代码）：`PROFILE_TEMPLATES.acp = [dsh-base, dsh-acp-app]`
+//     → `dsh-base@0.2.0-rc.2` 的 `cordis.patch.yml` 常态启用 `id: skill-filesystem` 与 `id: tool-skill`
+//     → provider 的 `includeDefaultRoots` 默认 true，rank 500 根 = `join(agentsHome,"skills")`，
+//     而 `agentsHome = resolve(config.agentsHome ?? process.env.DSH_AGENTS_HOME ?? join(homedir(),".agents"))`
+//     ⇒ 默认落点正是 `${HOME}/.agents/skills`。注意这条链对 **acp / web / headless 三个 profile 同款**
+//     （都含 dsh-base），故 acp 与实测用的 desktop 走的是同一份 provider 与同一个工具。
+//     · **运行级**：`~/.agents/skills/officecli`（第三方手工放置、无 `.forge-*` 标记、布局与 frontmatter
+//     均合规）**只存在于该根**——它在 asar 内 0 命中（非内置，而内置的 office-docx 有 6 命中），
+//     却出现在真实 dsh 会话投给模型的 skill 目录里 ⇒ 该根不是"被配置"而是**真被枚举并上图**。
 func deepseekharnessSkillProjection() Projection {
 	return Projection{
 		Kind:   ProjectionSkill,
@@ -129,9 +150,14 @@ func deepseekharnessSkillProjection() Projection {
 		Root:   "${HOME}/.agents/skills",
 		Layout: LayoutIDToken + "/SKILL.md",
 		Format: deepseekharness.SkillFormat,
-		Tested: false,
+		Tested: true,
 		Note: "dsh-skill-filesystem 源码确认 user 级根为 `$DSH_HOME/skills` 与 `~/.agents/skills`，取后者以与 DSH_HOME 解耦；" +
-			"**只扫根下一层**（`<n>.md` 或 `<n>/SKILL.md`），故落点必须扁平；内容形态（frontmatter 必填 name+description）" +
-			"于 2026-09-09 用真实 provider 实测通过，默认根端到端待 P-2 探针确认",
+			"**只扫根下一层**（`<n>.md` 或 `<n>/SKILL.md`），故落点必须扁平；frontmatter 必填 name+description 且 " +
+			"**name 强制 `^[a-z0-9]+(?:-[a-z0-9]+)*$`（不合规静默丢弃）**；" +
+			"形态于 2026-09-09 用真实 provider 实测通过，**默认根端到端于 2026-10-08 用 v0.2.0-rc.2 确认通过**" +
+			"（源码链：acp 模板含 dsh-base，其 patch 常态启用 skill-filesystem/tool-skill，agentsHome 默认 `<HOME>/.agents`；" +
+			"运行级：仅存在于该根的 officecli 被真实会话投给模型，且非内置）。" +
+			"两条边界：① 该根是**最低优先**（rank 500），项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；" +
+			"② 若环境设了 `DSH_AGENTS_HOME`，底座读的根会与本投影分叉（平台既不设也不校验该变量）",
 	}
 }
