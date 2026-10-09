@@ -667,4 +667,4 @@ movo 在「能力档案内容寻址 + 轮次边界滚动」上与本方案**同�
 - [x] Q-5（事实源迁 DB）、Q-6（远程 MCP 收进平台侧网关）、**Q-7（agent/automation 一起迁）**——**已定 2026-10-08**
 - [x] Q-8（网关是否代管 stdio）——**已给决策规则**：S1 先上，S2 按"是否按会话 spawn + 会话 cwd"两条实测分派（§9）
 - [ ] ADR-12（**终局版**）：是否同意"按环归属重切"——投影端到端链移出 T-1 改挂 skill 验收（并立即补测）、E4/E6 不设 owner、E2/E3 归 `CapabilityScope`、E5 归成本项
-- [x] M6/M7 已各自单独出计划文档：`.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`、`.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`（是否从 `.dsh/` 移到 `docs/` 入库待定）
+- [x] M6/M7 已各自单独出计划文档：`.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`、`.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`——**已定 2026-10-09：不移进 `docs/`**。理由是两类文档的生命周期不同：`docs/` 放的是**历史设计记录**（写成即冻结，说清"当时为什么这样定"），而这两份是**执行计划**（勾选框即进度、随开工不断改写，未开工的条目还会整段重写）。把它们搬进 `docs/` 会有两种坏结果——要么"历史记录"这个语义被可改写的勾选框污染，要么每次推进一步都要去改一份本该冻结的文档。留在 `.dsh/docs/plans/` 既保持可改写、又不破坏 `docs/` 的语义；代价是它们**不入库**（`.dsh/` 在 `.gitignore`），跨机器交接需连同 `.dsh/` 一起带
