@@ -48,7 +48,9 @@ func opencodeSpec() Spec {
 //
 // 根的选择：opencode v1.18.32 的 skill 发现（二进制内 `SkillDiscovery`）扫的全局根是
 // `~/.claude` 与 `~/.agents` 下的 `skills/**/SKILL.md`（`GA="skills/**/SKILL.md"`），
-// **递归**。这里取 `~/.agents/skills`（跨工具约定，dsh 同款），不用 `~/.config/opencode/skills`
+// **递归**；v2.0.26 的发现表（上游 docs/skills「Discovery」）仍是 `~/.config/opencode/skills` +
+// 兼容根 `~/.claude/skills`、`~/.agents/skills`，且实测仍读后者（见下 Tested 第 2 段）。
+// 这里取 `~/.agents/skills`（跨工具约定，dsh 同款），不用 `~/.config/opencode/skills`
 // ——后者是 openwork 自己的约定，opencode 本体不扫它。
 //
 // 不用 `${XDG_CONFIG_HOME}` 的理由：opencode 的 skill 面与 XDG_CONFIG_HOME 无关，且该变量在
@@ -56,16 +58,20 @@ func opencodeSpec() Spec {
 //
 // Tested=true 的依据（两段，缺一不可）：
 //  1. **形态**：`<root>/<id>/SKILL.md` + 强制 frontmatter，于 2026-09-09 用真实实现验证过
-//     （`opencode debug skill`，隔离 XDG_CONFIG_HOME，见 pkg/capability/skill_materialize.go 顶部实测记录）。
-//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，于 2026-10-08 用 opencode **v1.18.35** 补测通过
-//     （报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md）。关键取证：平台在**私有 HOME**
-//     下**不设任何 override**（不设 FORGE_PROJECTION_DIRS / 不写底座配置 / 不设 XDG_CONFIG_HOME）写到
-//     `${HOME}/.agents/skills/<id>/SKILL.md`，`opencode debug skill` 列出的 `location` **逐字等于**该文件路径；
-//     **反证** `OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 下该条消失（只剩内置 skill）——证明读到的正是
-//     「外部 skill 自动加载」这条路，而不是别的机制碰巧命中。
-//
-// 第 1 段不能顶替第 2 段：上次那次隔离 XDG_CONFIG_HOME 等价于显式配置 skills.paths，只能证明
-// 「给了路径就能读」，证明不了「开箱即读」。
+//     （`opencode debug skill`，隔离 XDG_CONFIG_HOME，见 pkg/capability/skill_materialize.go 顶部实测记录），
+//     并于 2026-10-09 在 **v2.0.26** 上复验（v2 的模型请求体里出现
+//     `<skill><id>…</id><name>…</name><description>…</description></skill>`）。
+//  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，两代底座各有一段取证：
+//     v1.18.35（2026-10-08）：平台在**私有 HOME** 下**不设任何 override**（不设 FORGE_PROJECTION_DIRS /
+//     不写底座配置 / 不设 XDG_CONFIG_HOME）写到 `${HOME}/.agents/skills/<id>/SKILL.md`，
+//     `opencode debug skill` 列出的 `location` **逐字等于**该文件路径；反证 `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`
+//     下该条消失（只剩内置 skill）——证明读到的正是「外部 skill 自动加载」这条路。
+//     v2.0.26（2026-10-09）：同样隔离、同样不设 override，**有**该文件时模型请求体的 skill 目录块里出现
+//     这条 skill；**把文件拿掉**后同一位置不再出现（负对照）。注意 v2 的两处口径变化：`debug` 子命令只剩
+//     agents/config/paths（`debug skill` 没了），`OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 在 v2 上**已不生效**
+//     ——v1 那套反证法在 v2 上不可用，现在的反证只能是「拿掉文件看它消失」。
+//     报告：.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md（v1）、
+//     .dsh/docs/notes/2026-10-09-opencode-v2-payload-verification-notes.md（v2 全量）。
 func opencodeSkillProjection() Projection {
 	return Projection{
 		Kind:   ProjectionSkill,
