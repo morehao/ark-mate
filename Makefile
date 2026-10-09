@@ -239,6 +239,13 @@ verify/desktop-dod:
 	# 这里的 `--require-artifacts`（包内那份）需要先出包，属 `make desktop/dist` 的收尾；DoD 跑源码侧。
 	cd $(FRONTEND_ROOT) && pnpm verify:compliance
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop
+	# 能力投放（M8 的桌面侧判据）：真 Electron 壳 + 真核心 + **真 dsh 子进程**，验"平台物化的 skill
+	# 落在底座真正读的那个根上、且底座的模型请求体里真看见它"。模型端点用**脚本内置的假 LLM**
+	# （零额度、零凭证），探针 HOME/FORGE_HOME 全在仓库内、收尾核对用户真实目录零变化。
+	# 为什么不并进 `ui:accept:desktop`：那条只打壳/契约/加固/凭据/事件流/退出六组，**看不见能力投放**
+	# ——2026-10-09 正是这条才发现"核心侧修好了、桌面私有启动器仍把 dsh 的 skill 读根撬走"。
+	# 前置与上面两条同款：`core/desktop`（脚本自己重建）与 `desktop/payloads`（壳启动期就要，缺了拒启）。
+	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop-skills
 	# V9（M3-8）：桌面态真起两份载荷（私有 bin + Electron 的 Node + 隔离环境）+ 一条"载荷目录零变化"
 	# 的指纹断言。它**不联网、不跑模型**，所以要真模型会话的那一档（RUNTIME_SMOKE_LIVE=1）不在这里。
 	# 三条回退条件里 ②③ 要 M4 的签名/公证/Windows 出包，脚本每次都显式打印"本脚本不判"。

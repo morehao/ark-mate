@@ -200,11 +200,15 @@ async function main() {
   )
   const built = rebuildCore()
   check('forge-core 已按当前代码重建', built.ok, built.detail ?? '')
+  const payloadsDir = join(DESKTOP, 'resources', 'payloads')
+  const payloadsReady = existsSync(payloadsDir) && readdirSync(payloadsDir).length > 0
   check(
-    '壳与载荷产物在位（壳 dist / resources/web / 私有 runtime bin）',
+    '壳与载荷产物在位（壳 dist / resources/web / 私有 runtime bin / resources/payloads）',
     existsSync(join(DESKTOP, 'dist', 'main.cjs')) &&
       existsSync(join(DESKTOP, 'resources', 'web', 'index.html')) &&
-      existsSync(join(DESKTOP, 'resources', 'runtime', 'bin')),
+      existsSync(join(DESKTOP, 'resources', 'runtime', 'bin')) &&
+      payloadsReady,
+    payloadsReady ? '' : '载荷不在场：先跑 `make desktop/payloads`（壳在启动期解析随包载荷，缺了直接拒启）',
   )
 
   rmSync(PROBE, { recursive: true, force: true })
