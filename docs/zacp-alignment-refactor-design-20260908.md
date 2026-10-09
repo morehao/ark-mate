@@ -1,17 +1,17 @@
-# ark-forge × zacp 重合面重构技术方案（含 SQLite 落库）
+# ark-mate × zacp 重合面重构技术方案（含 SQLite 落库）
 
 > 版本：v1 draft（2026-09-08）｜类型：技术重构 + 数据模型设计｜档位：标准档（含完整档必要的迁移/回滚与开放问题收口）
-> 前置材料：`.cache/ark-forge-audit-report.md`（ark-forge 全量缺陷清单，文件:行号 证据）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
+> 前置材料：`.cache/ark-mate-audit-report.md`（ark-mate 全量缺陷清单，文件:行号 证据；**本地材料，已随工作区清理、从未入库**）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
 > 关联文档：`docs/design-and-roadmap.md`（M0–M3 路线图，本文是其中与 zacp 重合部分的执行方案）；`frontend/DESIGN.md`（前端视觉纪律，本次不动）。
 
 ## 摘要（TL;DR）
 
-ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、权限确认、会话管理、Agent 选择与配置、持久化与重启恢复**。zacp 已跑通且这些面成熟；ark-forge 的对应实现存在三类问题：① 已实现但语义有错（权限拒绝语义、重启恢复会话只读卡死、WS 水位跨重启失效、用户消息双发、元数据不持久 + 无锁写）；② 文档自述与代码不符（超时环境变量未接线、usage 空载荷等，详见审计 §5 对照表）；③ 重合域缺失功能（DB 持久化、Agent 管理/热更新、空闲回收与断点恢复）——正好落在 ark-forge 自己的 M2/M3 路线图上。
+ark-mate 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、权限确认、会话管理、Agent 选择与配置、持久化与重启恢复**。zacp 已跑通且这些面成熟；ark-mate 的对应实现存在三类问题：① 已实现但语义有错（权限拒绝语义、重启恢复会话只读卡死、WS 水位跨重启失效、用户消息双发、元数据不持久 + 无锁写）；② 文档自述与代码不符（超时环境变量未接线、usage 空载荷等，详见审计 §5 对照表）；③ 重合域缺失功能（DB 持久化、Agent 管理/热更新、空闲回收与断点恢复）——正好落在 ark-mate 自己的 M2/M3 路线图上。
 
 本方案结论与核心取舍：
 
 1. **范围已拍板**：SQLite 落库（原 M2 #1）纳入本次重构；**不扩大范围**——登录鉴权、深色模式、文件/Git/TTY、workspace 项目目录、移动端/多主机一律不做。
-2. **不整仓照抄 zacp**：zacp 的薄网关权限与消息行模型是参照，但 ark-forge 的事件流、会话级权限记忆+撤销、elicitation 通道是更强的设计，予以保留并修复语义。
+2. **不整仓照抄 zacp**：zacp 的薄网关权限与消息行模型是参照，但 ark-mate 的事件流、会话级权限记忆+撤销、elicitation 通道是更强的设计，予以保留并修复语义。
 3. **存储采用「事件落库 + 会话/轮次物化」的混合模型**（决策记录见附录 A）：事件表承载权威历史与回放（保留现有事件流契约与前端渲染逻辑），sessions/runs 物化元数据、统计、搜索、重试所需读模型；进程内 eventbus 只做 live 扇出。
 4. **执行分四批**：P0 纯正确性修复 → P1 SQLite 落库与迁移（结构性大头）→ P2 Agent 管理面 + 生命周期（空闲回收/断点恢复）→ P3 前端可靠性细节（保留 React/antd 风格）。P0/P3 可与 P1/P2 并行。
 5. **三项开放点已定案（2026-09-08，见附录 A ADR-5）**：① events 为唯一事实源、runs/messages 为可重建读模型投影，P1 **保留 messages 表**不裁剪；② transcript 迁移后默认**停写 + 只读保留**（清理仅经显式命令，不自动删）；③ 权限「始终拒绝」**做成与 allow 对称的会话级可撤销记忆**（含 UI 留痕防静默）。
@@ -22,7 +22,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 
 ### 业务背景与现状
 
-- ark-forge 定位是「单机单操作员的 ACP 控制面底座」：一个 daemon 拉起 opencode / deepseek-harness / echo 等 ACP runtime，Web 面板做会话问答与权限/提问交互。会话历史以 JSONL transcript 落盘，运行态为进程内存 + eventbus。
+- ark-mate 定位是「单机单操作员的 ACP 控制面底座」：一个 daemon 拉起 opencode / deepseek-harness / echo 等 ACP runtime，Web 面板做会话问答与权限/提问交互。会话历史以 JSONL transcript 落盘，运行态为进程内存 + eventbus。
 - zacp 是「已发布（v0.9.0）的多 Agent Web 网关」：Go + Gin + SQLite(WAL)，前端 Vue3。会话/消息/工具详情均入 DB，Agent 支持页面增删改 + 配置文件热更新，有空闲回收与断线续流裁决。
 - 两端重合面内的成熟度差已在「摘要」列出，全部有源码证据（见审计报告）。
 
@@ -38,7 +38,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 **目标**
 
 - 把上表 1–3 类问题全部修掉；SQLite 成为会话/事件/元数据/统计的权威存储，进程重启与崩溃恢复后会话可看、可续、可操作。
-- Agent 从「代码播种只读」升级为「可注册/启停/配置注入 + 空闲回收 + 按需恢复」（对齐 zacp 已验证机制，落 ark-forge 的 definitions/registry 形态）。
+- Agent 从「代码播种只读」升级为「可注册/启停/配置注入 + 空闲回收 + 按需恢复」（对齐 zacp 已验证机制，落 ark-mate 的 definitions/registry 形态）。
 - 权限决策语义对齐 ACP：用户显式拒绝=Selected(deny 选项)（无法区分时兜底 Cancelled）、会话级 allow/reject 记忆双侧生效且可见可撤销。
 - 前端保持 React + antd + zustand + `DESIGN.md` 视觉语言不变，仅补齐可靠性行为细节。
 - README/路线图与实现重新对齐（删除或实装承诺项）。
@@ -63,7 +63,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 
 按批验收（每批单独可过评审）：
 
-- **P0 后**：echo 会话内「拒绝一次/始终拒绝/始终允许/取消」四态在 agent 侧可区分；`FORGE_PERMISSION_TIMEOUT`/`FORGE_ELICITATION_TIMEOUT` 生效且 UI 收敛以服务端事件为准；同一条用户输入不再双入 transcript/UI；`go test -race ./backend/...` 通过（消除 publish 写 Title 竞态）。
+- **P0 后**：echo 会话内「拒绝一次/始终拒绝/始终允许/取消」四态在 agent 侧可区分；`MATE_PERMISSION_TIMEOUT`/`MATE_ELICITATION_TIMEOUT` 生效且 UI 收敛以服务端事件为准；同一条用户输入不再双入 transcript/UI；`go test -race ./backend/...` 通过（消除 publish 写 Title 竞态）。
 - **P1 后**：kill -9 daemon 后重启——历史会话列表/内容/元数据（标题、置顶、归档）完整；in_progress 中断会话可「停止」收敛为 cancelled 并可再 prompt；WS 断线重连按水位续传不再丢事件；长会话统计/失败轮重试不再截断失真；旧 transcript 目录一次性导入数据校验通过（条数/首尾一致性）；迁移前数据可回滚恢复。
 - **P2 后**：不写 Go 代码即可注册第三个 ACP agent（definitions 校验→纳入同等对待）；页面可启停 agent 并热更新配置；空闲超时自动停进程、再次使用按需拉起并恢复会话（按 runtime 能力 resume 或重建）；README 承诺项与代码一致。
 - **P3 后**：刷新/断线续流、会话/消息加载四态、长列表分页、思考/工具详情瘦身行为经真实 Chrome DoD 走查通过；面板视觉与 DESIGN.md 无漂移。
@@ -75,12 +75,12 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 1. **DB 权威、总线 live**：一切可回放的历史（事件/元数据/轮次统计）落 SQLite；eventbus 只负责当前进程的实时扇出与断线重放读取（读 DB）。内存态仅是缓存，不再承担权威。
 2. **保留事件流范式**：事件词表、seq 语义、agg=session 不变；前端 applyEvent 增量归并逻辑尽可能不动。
 3. **写路径单点收口**：Service 是唯一写入口（现在已是），新增 Repository 层后所有 SessionRec 修改走「锁 + 落库」，消灭散落的无锁写。
-4. **参照机制而非代码**：热更新原子写、空闲回收锁外杀进程、消息拆分落库等机制对齐 zacp 已验证做法，但用 ark-forge 的模块形态实现。
+4. **参照机制而非代码**：热更新原子写、空闲回收锁外杀进程、消息拆分落库等机制对齐 zacp 已验证做法，但用 ark-mate 的模块形态实现。
 
 ### 系统上下文与依赖
 
 - 外部依赖仅：ACP runtime 子进程（opencode / dsh / echo）、本地 SQLite 文件（新增）、transcript 目录（迁移后转为只读旁路）。
-- 前端 → REST `/v1/forge/*` + WS `/v1/forge/ws/events`；不新增传输通道。
+- 前端 → REST `/v1/mate/*` + WS `/v1/mate/ws/events`；不新增传输通道。
 
 ### 重构后总体架构
 
@@ -91,8 +91,8 @@ flowchart TB
         ws["transport/ws<br>attach since_seq 续传"]
     end
 
-    subgraph BE["forge daemon（Go）"]
-        api["REST handler<br>/v1/forge/*"]
+    subgraph BE["mate daemon（Go）"]
+        api["REST handler<br>/v1/mate/*"]
         bus["eventbus（live 扇出<br>+ 每订阅缓冲）"]
         orch["Orchestrator<br>turn 生命周期/权限/elicitation"]
         svc["Service<br>（唯一写入口）"]
@@ -133,7 +133,7 @@ flowchart TB
 | `internal/server/handler` | history 读 bus | history/attach 读 Repository | 小改 |
 | `internal/acl` | 已含 Load/Resume/List | 保持；补 Selected(reject) 决策映射 | 小改 |
 | Agent Registry（P2） | 代码播种 | definitions 目录 + 校验 + 启停 + provider 注入 | 新增（对齐 M2 #2/#3） |
-| `cmd/forge` | serve/demo/acp-demo | 新增 `migrate --import-transcripts` 子命令、接线超时 env | 小改 |
+| `cmd/mate` | serve/demo/acp-demo | 新增 `migrate --import-transcripts` 子命令、接线超时 env | 小改 |
 | 前端 panel | M1 形态 | P3 可靠性细节；渲染逻辑保持 | 小改 |
 | transcript JSONL | 权威落盘 | 迁移后只读旁路（可选关闭） | 降级 |
 
@@ -148,7 +148,7 @@ flowchart TB
 
 | 方案 | 代价 | 否决/选择理由 |
 |---|---|---|
-| A. 照抄 zacp 消息行模型：DB 只有 messages 行，事件只 live，断流/历史改消息页拉取 | 需重写 WS/历史契约与前端 store 读模型；事件流范式与 elicitation/权限卡的瞬时态难以行化 | 否决：改动面远超问题本身，且丢掉 ark-forge 事件流优势 |
+| A. 照抄 zacp 消息行模型：DB 只有 messages 行，事件只 live，断流/历史改消息页拉取 | 需重写 WS/历史契约与前端 store 读模型；事件流范式与 elicitation/权限卡的瞬时态难以行化 | 否决：改动面远超问题本身，且丢掉 ark-mate 事件流优势 |
 | B. 纯事件落库（不做 runs/messages 物化） | 搜索/统计/重试要继续在事件增量上做窗口聚合，缺陷 9 复发 | 否决：无法根治截断失真；查询语义脆弱 |
 | **C. 事件落库 + sessions/runs/messages 物化（本文推荐）** | DB 双写（事件 + 物化行），需保证一致 | 采纳：契约与前端改动最小；物化行承接统计/搜索/重试/元数据；事件承接回放/审计 |
 | D. 只修内存态缺陷、不上 DB | 改动最小 | 否决（用户已拍板 SQLite 纳入）：重启恢复、seq、截断等结构性缺陷仍无解 |
@@ -172,7 +172,7 @@ REST/WS **保持不变的**：信封 `{code,requestID,msg,data}`、会话 CRUD/s
 
 | 方法 | 路径 | 说明 | 批次 |
 |---|---|---|---|
-| POST | `/admin/migrate` | 迁移 transcript → DB（或由 CLI `forge migrate` 触发） | P1 |
+| POST | `/admin/migrate` | 迁移 transcript → DB（或由 CLI `mate migrate` 触发） | P1 |
 | GET | `/sessions/:id/runs` | 轮次明细（状态/耗时/usage/错误）——先做只读最小面，统计 API 留 M3 | P1 |
 | POST | `/agents` `/agents/:id/start|stop` `PATCH /agents/:id` `DELETE /agents/:id` | definitions 注册/启停/热更新（含校验可启动预检） | P2 |
 | GET | `/providers` `PATCH /providers/:id` | provider 凭证注入面（密钥只写不读回） | P2 |
@@ -263,7 +263,7 @@ erDiagram
 
 #### 与 zacp 存储模式的差异（有意为之）
 
-| 点 | zacp | ark-forge 本次 | 理由 |
+| 点 | zacp | ark-mate 本次 | 理由 |
 |---|---|---|---|
 | 历史回放 | 消息行 + afterId 增量 | events 表 seq 回放（沿用契约） | 保留事件流前端；修复 seq 跨重启即可 |
 | 轮次/统计 | 无显式 runs | runs 物化 + first/last_seq | 根除截断失真 |
@@ -277,15 +277,15 @@ erDiagram
 3. **恢复语义**：启动扫 DB：sessions 全部可列；`status=in_progress` 且无终态 run → 置 `interrupted`，列表可点「停止/重发」；点击 prompt 时按 runtime caps 尝试 `acl.ResumeSession`（opencode load/resume）否则新建 ACP session 并回写（对齐 zacp unknown-session 自动恢复 + ark M3 #1 的会话态/连接态分离雏形）。
 4. **慢订阅补偿**：每订阅一个带缓冲 channel；缓冲满时不再静默丢，而是标记该订阅「需重放」，下一条事件改为发 `{type:"gap", from_seq}` 帧，客户端据此重新 attach（`since_seq=from_seq`）——修复 bus.go:72-77 丢帧无补偿与 ws.go 双路径竞态（重放/活流统一为「服务端按 seq 去重后投递」）。
 5. **双发去重**：保留本地先行发布 BusUserMessage（保证 UI 即时），但对 SDK `KindUserMessage` 回显做窗口去重（key=sessionID+text，300ms 内同文本仅发一次；或比对 `msg_id`）。简单且不依赖运行时回显行为。
-6. **超时单时钟**：config 读 `FORGE_PERMISSION_TIMEOUT`/`FORGE_ELICITATION_TIMEOUT` 并接线 `SetPermissionTimeout/SetElicitationTimeout`；到达超时由后端发布终态事件（permission/elicitation 卡片收敛为「超时自动拒绝/取消」），前端不再用自己的 timeout_at 计时器改变决策态。
+6. **超时单时钟**：config 读 `MATE_PERMISSION_TIMEOUT`/`MATE_ELICITATION_TIMEOUT` 并接线 `SetPermissionTimeout/SetElicitationTimeout`；到达超时由后端发布终态事件（permission/elicitation 卡片收敛为「超时自动拒绝/取消」），前端不再用自己的 timeout_at 计时器改变决策态。
 
 ### 数据迁移（P1 关键路径）
 
-1. **准备**：serve 启动前（或 CLI `forge migrate`）对现有 `~/.forge/transcripts/*.jsonl` 全量解析（复用 `transcript_load.go` 解析器），写入 `staging` 临时表。
+1. **准备**：serve 启动前（或 CLI `mate migrate`）对现有 `~/.ark-mate/transcripts/*.jsonl` 全量解析（复用 `transcript_load.go` 解析器），写入 `staging` 临时表。
 2. **导入事务**：逐会话按文件内 seq 顺序插入 events（重分配全局 seq 并记录映射）、重建 sessions（含 title/status 推导）、对已终态轮生成 runs/messages；幂等（导入标记 `meta.imported_transcripts=<dir hash>`）。
 3. **校验**：导入后对比（a）文件数/行数 vs events 行数、（b）每会话首尾事件、（c）会话列表条数；失败回滚 staging 并保留原 transcript 目录不动。
-4. **切换**：默认 `FORGE_STORE=sqlite`；提供 `FORGE_STORE=memory` 回退（过渡期保留 transcript 写入，见回滚方案）。
-5. **旁路（停写保留只读）**：导入成功后 transcript 目录不再写新文件（可配置 `FORGE_TRANSCRIPTS=keep|off`，默认 off；写失败不再告警刷屏）；**已有文件默认只读保留**，作为独立于 DB 的审计/灾难恢复副本与回滚保障，清理仅经显式命令 `forge transcripts prune --older-than <duration>`，不设自动删除（ADR-5）。
+4. **切换**：默认 `MATE_STORE=sqlite`；提供 `MATE_STORE=memory` 回退（过渡期保留 transcript 写入，见回滚方案）。
+5. **旁路（停写保留只读）**：导入成功后 transcript 目录不再写新文件（可配置 `MATE_TRANSCRIPTS=keep|off`，默认 off；写失败不再告警刷屏）；**已有文件默认只读保留**，作为独立于 DB 的审计/灾难恢复副本与回滚保障，清理仅经显式命令 `mate transcripts prune --older-than <duration>`，不设自动删除（ADR-5）。
 
 ## 方案与选型对比
 
@@ -330,7 +330,7 @@ erDiagram
 ### 回滚方案
 
 - P1 前：无数据迁移，直接 revert commit。
-- P1 后：`FORGE_STORE=memory` 回退运行（代码保留 transcript 写旁路），DB 文件不删；确认回滚稳定后再清理。
+- P1 后：`MATE_STORE=memory` 回退运行（代码保留 transcript 写旁路），DB 文件不删；确认回滚稳定后再清理。
 - P0 语义修正回滚：前端与服务端成对回滚；期间不产生错误落库数据。
 
 ## 实施计划
@@ -340,7 +340,7 @@ erDiagram
 | 批次 | 内容（要点） | 依赖 | 验收 |
 |---|---|---|---|
 | **P0 正确性**（~1 周） | permission reject/Selected/reject-always 记忆修复；超时 env 接线 + 单时钟；用户消息双发去重；publish Title 无锁写修复（加锁 + 元数据准备写库）；README 对照表口径修正 | 无 | `go test -race` 绿；echo 四态可区分；审计 §5 打折项清零（除需 DB 的） |
-| **P1 SQLite 落库**（~2.5–3.5 周） | store 包 + 迁移框架；sessions/events/runs/messages/permission_memories；Service 写路径收口；bus 只做 live + gap 补偿；WS attach/history 读 DB；重启恢复可操作（interrupted 收敛 + resume 接线雏形）；`forge migrate` + 导入校验 | P0 | kill -9 恢复全过；seq 跨重启连续；长会话统计不再截断 |
+| **P1 SQLite 落库**（~2.5–3.5 周） | store 包 + 迁移框架；sessions/events/runs/messages/permission_memories；Service 写路径收口；bus 只做 live + gap 补偿；WS attach/history 读 DB；重启恢复可操作（interrupted 收敛 + resume 接线雏形）；`mate migrate` + 导入校验 | P0 | kill -9 恢复全过；seq 跨重启连续；长会话统计不再截断 |
 | **P2 Agent 管理面**（~2–3 周） | Agent Registry：definitions 目录 + 注册向导后端（校验可启动/能力冻结）+ 启停 + provider 注入面 + 页面（settings/agents 编辑）；空闲回收 + 按需拉起恢复（对齐 zacp 机制） | P1 | 不写代码注册第三个 ACP agent；空闲回收/恢复 DoD 过 |
 | **P3 前端可靠性**（~1.5–2.5 周） | 权威收尾（turn 后 DB 增量收敛）；重连 resync 裁决 + stalled 保险丝；会话/消息四态 + 解析超时；列表分页 + active 提升；思考/工具详情按需加载（slim 消息）；错误按会话隔离；滚动/相对时间细节 | P1（接口就绪即可并行） | Chrome DoD 走查；视觉无漂移 |
 
@@ -349,7 +349,7 @@ erDiagram
 ### 资源需求与依赖
 
 - 环境：macOS/Linux 均可；Go 1.26.1；Node 24 + pnpm 11（仅前端）。
-- 前置：P1 启动前完成 `.cache/ark-forge-audit-report.md` 各条目的代码级复核（审计为静态读，个别行为以实测为准，如 echo 的 reject-all 在 UI 的实际往返）。
+- 前置：P1 启动前完成 `.cache/ark-mate-audit-report.md` 各条目的代码级复核（审计为静态读，个别行为以实测为准，如 echo 的 reject-all 在 UI 的实际往返）。
 
 ## 风险评估与应对
 
@@ -367,7 +367,7 @@ erDiagram
 **已定决策（2026-09-08，理由见附录 A ADR-5）**
 
 1. **events 表 + runs/messages 物化：接受双写**。语义按「events = 唯一事实源（写路径唯一提交点），runs/messages = 可重建的读模型投影（CQRS）」执行；P1 保留 messages 表，不裁剪。备选的「纯事件 + 查询时聚合」只是把物化挪到查询路径且更难做对，已否决。
-2. **transcript 迁移后：停写 + 默认只读保留，不自动删除**。已有文件作为独立于 DB 的审计/灾难恢复副本与 `FORGE_STORE=memory` 回滚保障；清理仅经显式命令 `forge transcripts prune --older-than <duration>`。
+2. **transcript 迁移后：停写 + 默认只读保留，不自动删除**。已有文件作为独立于 DB 的审计/灾难恢复副本与 `MATE_STORE=memory` 回滚保障；清理仅经显式命令 `mate transcripts prune --older-than <duration>`。
 3. **权限「始终拒绝」：做成会话级可撤销记忆**（permission_memories 双侧对称）。显式拒绝映射 `Selected(deny 选项)`、无 deny 选项时兜底 `Cancelled`；被记忆自动拒绝的请求在 UI 留痕（denied-by-memory），防止静默破坏后续轮次。
 
 **实现中解决**
@@ -401,7 +401,7 @@ erDiagram
 
 ### B. 参考资料
 
-- `.cache/ark-forge-audit-report.md`（缺陷清单与文件:行号 证据）
+- `.cache/ark-mate-audit-report.md`（缺陷清单与文件:行号 证据）
 - `docs/design-and-roadmap.md`（M0–M3 路线图，本文对应 M2 #1–#4 / M3 #1 的执行细化）
 - `docs/agent-interactions-acp-v1-design-20260907.md`（ACP elicitation/权限契约）
 - zacp 仓库（只读参照）：`backend/internal/store/*`、`backend/internal/config/agents_file.go`、`backend/internal/tty` 除外机制、`backend/internal/ws/*`、前端 `stores/session.ts` 等
@@ -419,14 +419,14 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
 - **显式拒绝映射 Selected(deny 选项)**：`acl.PermissionDecision` 增 `Rejected` 位；`permissionResponseFromDecision` 规则——Allowed→Selected（无选项兜底 Cancelled）；Rejected 且 optionID 在 agent 选项内→Selected{该选项}；Rejected 无可用 deny 选项/取消/超时→Cancelled。新增集成测试 `TestRequestPermissionRejectSelected` / `TestRequestPermissionRejectWithoutOption`。
 - **权限记忆双侧对称（实现 ADR-3 / 决策 3）**：`PermissionManager` 由「仅始终允许」泛化为 allow/reject 双侧、同键(title+kind)互斥覆盖的 `memories`；`Remember(session, tool, decision, optionID)`、`AutoDecision` 命中 reject 记忆直接拒绝（沿用当初所选 optionID）、`List/Revoke/ForgetSession`；`ResolveReject(callID, optionID, always)` 不再折叠。REST/DTO 改为 `memories`（`GET/POST /permissions/memories[/revoke]`，`SessionDetailResp.Memories` 含 `decision`）；旧 `/permissions/always*` 路径保留为兼容别名。单测扩展 `TestPermissionMemoryBothSides` 等。
 - **收敛事件（实现 ADR-4）**：Permission/Elicitation manager 增 `SetOnResolved`，任何挂起终局（user/timeout/cancel）由 Orchestrator 发布 `session.permission_resolved` / `session.elicitation_resolved`（payload 含 outcome/reason/allowed/rejected/option_id/always 或 action/reason）；前端据此收敛卡片，删除本地 `expirePermission/expireElicitation` 计时器与 store 动作，`timeout_at` 退化为展示信息。
-- **超时 env 接线**：config 读 `FORGE_PERMISSION_TIMEOUT` / `FORGE_ELICITATION_TIMEOUT`（默认 30min），serve/demo 均调用 `SetPermissionTimeout/SetElicitationTimeout`。
+- **超时 env 接线**：config 读 `MATE_PERMISSION_TIMEOUT` / `MATE_ELICITATION_TIMEOUT`（默认 30min），serve/demo 均调用 `SetPermissionTimeout/SetElicitationTimeout`。
 - **用户输入去双入**：agent 回传的 `user_message` 系会话镜像（宿主已在 Prompt 提交时发布 `BusUserMessage`），`orchestrator.eventSink` 丢弃该镜像，不再发布（消除 transcript/UI 双入）。
 - **publish 标题竞态修复**：`Service.publish` 的标题自动推导改在 `s.mu` 内读写（与 `UpdateSession`/`sessionResp` 同步）；新增 `TestPublishTitleConcurrentUpdate` 并发守门测试。
 - **验收状态**：`go build/vet ./...` 通过；`go test -race ./...` 全绿；`pnpm typecheck` / `pnpm build` 通过（产物已刷新 embed 宿主 `backend/internal/web/dist`）；echo 四态（拒绝一次/始终拒绝/始终允许/取消）在 agent 侧现可区分（Selected 带 deny 选项 vs Cancelled）。
 
 ### E. P1 基建落地记录（2026-09-08 实施后，第一批：存储层 + 迁移命令）
 
-本批落地「§数据模型/数据迁移」的**存储基建**：SQLite schema、自管迁移、events/sessions/permission_memories repository、transcript→DB 迁移命令；serve 运行态接线（发布持久化、seq 跨重启单调、重启恢复、history 改由 events 表回放、`FORGE_STORE` 切换、runs/messages 物化与消息搜索改表）为 P1 后续批次。
+本批落地「§数据模型/数据迁移」的**存储基建**：SQLite schema、自管迁移、events/sessions/permission_memories repository、transcript→DB 迁移命令；serve 运行态接线（发布持久化、seq 跨重启单调、重启恢复、history 改由 events 表回放、`MATE_STORE` 切换、runs/messages 物化与消息搜索改表）为 P1 后续批次。
 
 - **新增 `internal/store`**（纯 Go `github.com/glebarez/sqlite`，`database/sql` 驱动名 `sqlite`，不引 ORM）：
   - `store.go`：`Open(path)`（文件库 WAL + busy_timeout + 单连接串行化；`:memory:` 供测试）、meta 键值（`events_last_seq` 全局计数、`imported_transcripts` 导入标记）、`Session/Event/Memory/Run/Message` 行模型。
@@ -434,9 +434,9 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
   - `events.go`：`AppendEvent`（单事务：分配全局 seq → 插 events → 抬 session.last_seq）、`AppendEventJSON`（免二次序列化）、`EventsAfter`（按会话 + seq 游标回放，events 表兜底取代内存环淘汰限制）。
   - `sessions.go`：Upsert（last_seq 触顶不清零）/Get/List/元数据子集更新。`memories.go`：权限记忆 allow/reject 双侧，同键覆盖、逐条/整会话撤销。
   - `import.go`：`ImportBatch`——单事务导入（先建会话 → 分配 seq 插事件 → 抬水位 → 文件/事件数校验 → 写导入标记 → 提交），错配或任一步失败整体回滚，同 marker 幂等返回 `ErrAlreadyImported`。
-- **`forge migrate`**（cmd/forge）：glob transcript `*.jsonl` → `manager.ReadTranscriptFile`（新增导出复读器，复用 loadTranscriptFile 解析）→ 指纹 marker（文件名+大小 sha256）→ ImportBatch → 汇总输出；重复执行幂等跳过。
-- **config**：新增 `DBPath`（`FORGE_DB`，默认 `~/.forge/forge.db`）。
-- **测试**：`internal/store/store_test.go`——schema 迁移幂等、seq 全局单调 + session 水位、FK 保护、EventsAfter 分页/跨会话隔离、会话 CRUD 触顶、记忆双侧 CRUD、ImportBatch 幂等/校验/整体回滚；实测 `forge migrate` 对双会话 fixture（6 事件）导入成功且二次运行幂等跳过。
+- **`mate migrate`**（cmd/mate）：glob transcript `*.jsonl` → `manager.ReadTranscriptFile`（新增导出复读器，复用 loadTranscriptFile 解析）→ 指纹 marker（文件名+大小 sha256）→ ImportBatch → 汇总输出；重复执行幂等跳过。
+- **config**：新增 `DBPath`（`MATE_DB`，默认 `~/.ark-mate/mate.db`）。
+- **测试**：`internal/store/store_test.go`——schema 迁移幂等、seq 全局单调 + session 水位、FK 保护、EventsAfter 分页/跨会话隔离、会话 CRUD 触顶、记忆双侧 CRUD、ImportBatch 幂等/校验/整体回滚；实测 `mate migrate` 对双会话 fixture（6 事件）导入成功且二次运行幂等跳过。
 - **验收状态**：`go build/vet ./...` 通过；`go test ./...` 全绿（含新增 store）；gofmt 干净。README「无外部依赖进程」与「会话 wire transcript」条目已同步 P1 语义。
 
 ### F. P1-e 落地记录（2026-09-08：live 接线）
@@ -448,7 +448,7 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
   - `publish`：sqlite 模式先经 `store.AppendEvent` 事务取号，再 `bus.PublishAt` 镜像；DB 写失败告警并退化进程内取号（不阻断会话）。
   - `registerSession`/`markSession`/`UpdateSession`（PATCH）/标题自动推导 全部同步写库（sessions 为 DB 权威元数据镜像，best-effort 失败仅告警）。
   - `RestoreFromStore`：启动时从 DB 载入会话 + **按全局 seq 升序**把已落库事件注入 bus（`EventsAllAfter` 全表游标分页），旧游标续传不漂移；恢复过程 `registerSession` 跳过重复回写。
-- **serve 装配**：`FORGE_STORE=sqlite|memory|auto`（默认 auto：DB 文件已存在 → sqlite，否则 memory 保持 transcript 行为）；sqlite 模式 transcript 停写（文件只读保留）；DB 为空但 transcript 目录有文件时提示先 `forge migrate`。
+- **serve 装配**：`MATE_STORE=sqlite|memory|auto`（默认 auto：DB 文件已存在 → sqlite，否则 memory 保持 transcript 行为）；sqlite 模式 transcript 停写（文件只读保留）；DB 为空但 transcript 目录有文件时提示先 `mate migrate`。
 - **测试**：`eventbus` PublishAt 号序/防倒退/回放连续；`manager/service_store_test.go`——live 落库（events/last_seq/status/pinned/title）、重启恢复（会话元数据 + 号序回放 + 新事件 seq 跨重启连续）、跨会话注入全局升序不变量。
 - **验收状态**：`go build/vet ./...` 通过；`go test ./...` 全绿；`go test -race ./internal/{manager,store,server/eventbus}/` 通过；gofmt 干净。
 - **仍属 P1 后续**（E/F 未覆盖）：runs/messages 物化（turn 收口）、消息搜索改走 messages 表、permission_memories live 接线、慢订阅 gap 帧与重连去重窗口、重启后 Prompt 断点恢复（按 §关键逻辑 3，含 interrupted 态语义——编排侧重建，配合 P2 Agent/回收）。
@@ -499,7 +499,7 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
 - **Cwd 持久化（断点恢复地基）**：`SessionRec` 增 `Cwd` 字段，`persistSession`/`RestoreFromStore` 与
   `sessions.cwd` 列同步；Orchestrator `StartSession` 登记会话时写入绝对 cwd——重启后重建 ACP 会话可还原工作目录
   （供 P1-f4 编排侧断点恢复使用）。
-- **`forge transcripts prune --older-than <duration>`**（ADR-5 清理路径）：只删除目录下修改时间早于时长的
+- **`mate transcripts prune --older-than <duration>`**（ADR-5 清理路径）：只删除目录下修改时间早于时长的
   `*.jsonl`（时长支持 `30d`/`168h` 等，含天单位解析）；不设自动删除。实测：旧文件删除、新文件保留。
 - **验收状态**：`go build ./...` 通过；冒烟验证 prune 行为正确。
 
@@ -555,7 +555,7 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
 - **P1 端到端 DoD（真实 serve + echo runtime + kill -9）PASS**：
   ① create+首轮（权限确认真实往返）completed；runs=1；
   ② 第二轮发起后 `kill -9` 杀进程（模拟崩溃）；
-  ③ 重启（同一 FORGE_DB）：会话收敛 interrupted；
+  ③ 重启（同一 MATE_DB）：会话收敛 interrupted；
   ④ 同一会话续聊 → 断点恢复（重建 ACP 会话 + 别名归属）completed；runs=2（窗口不串、seq 连续）；
   ⑤ messages 表搜索命中（DB 读模型生效）。
   至此 P1 验收标准达成：kill -9 恢复全过；seq 跨重启连续；runs 窗口精确（不再依赖前端截断）；
@@ -566,7 +566,7 @@ P0（权限语义 + 超时接线 + 双入去重 + 标题竞态）已实现并通
 
 按 P2 里程碑先落「注册+启停」（排期约束下空闲回收/页面可后补，见 doc 阶段表脚注）：
 
-- **definitions 目录**：`FORGE_AGENTS`（默认 `~/.forge/agents`）下 `<id>.json` = 一个 agent 定义
+- **definitions 目录**：`MATE_AGENTS`（默认 `~/.ark-mate/agents`）下 `<id>.json` = 一个 agent 定义
   `{id,name,runtime,provider,env?}`；serve 启动 `LoadAgentDefinitions` 合并（坏 JSON / 未知 runtime 跳过告警；
   种子 agent 仅更新元数据）。config 增 `AgentDir`。
 - **REST**：`POST /agents`、`PATCH /agents/:id`、`DELETE /agents/:id`、`POST /agents/:id/start|stop`；
@@ -598,9 +598,9 @@ P2 剩余切片（页面除外，见后述）已落地并 DoD 验证：
   providers.json 随 `LoadAgentDefinitions` 一并装载（agent 扫描跳过该文件）。代码播种种子无 Provider；
   「第三个 ACP agent」注册后即可配 provider → 启动时密钥注入子进程 env。
 - **空闲回收（P2）**：`Orchestrator.reapIdleOnce` + `StartIdleReaper(interval,idle)`：扫连接——
-  无在途 turn、无任何会话引用、且自建立闲置超 `FORGE_IDLE_TIMEOUT`（默认 5m；0=关闭）→
+  无在途 turn、无任何会话引用、且自建立闲置超 `MATE_IDLE_TIMEOUT`（默认 5m；0=关闭）→
   dropConn 原子摘除 + 锁外 Close 停进程（对齐 zacp manager 锁外杀进程）。serve 接线
-  `StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)`（`FORGE_REAP_INTERVAL` 默认 5m）。
+  `StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)`（`MATE_REAP_INTERVAL` 默认 5m）。
 - **按需拉起恢复合流**：回收后 StartAgent/会话 acquire 自动重拨；dropConn 增 `ownerBefore` 保护——
   旧连接收尾的状态回落不覆盖已替换的新连接 running（回收后立刻重拨的竞态）。
   P1 断点恢复路径不变（prompt 时若无 ActiveSession 自动重建并 alias 归属）。
@@ -608,7 +608,7 @@ P2 剩余切片（页面除外，见后述）已落地并 DoD 验证：
   `TestProviderRoutes`；`reaper_test.go`（回收/跳过 busy 与会话/未到阈值/重拨状态保护）。
 - **验收 DoD（真实 serve + echo）PASS**：
   S2——PATCH providers（has_key=true、GET 无明文泄露）→ agent 引用 provider 启停正常 → 重启装载；
-  S3——StartAgent 暖进程 running → `FORGE_IDLE_TIMEOUT=2s` reap → stopped →
+  S3——StartAgent 暖进程 running → `MATE_IDLE_TIMEOUT=2s` reap → stopped →
   建会话+prompt 自动重拨并 completed（alias 状态回到 running 新连接）。
 - **验收状态**：gofmt 干净；`go build/vet ./...` 通过；`go test ./...` 全绿；关键包 `-race` 通过。
 - **P2 剩余**：页面（settings/agents 编辑 + 启停按钮，React 风格）；然后收 P3 前端可靠性细节。
@@ -619,7 +619,7 @@ P2 最后一块（页面，React/antd 风格）落地；至此 doc §执行 P2 �
 
 - **类型/API**：`Agent` 增 `provider?`；新增 `Provider {id,type,model?,has_key}` 与 `ProviderPatch`
   （types/agent.ts）；api 增 `createAgent/patchAgent/deleteAgent/startAgent/stopAgent/listProviders/upsertProvider`
-  （forge.ts，信封 unwrap 复用）。
+  （mate.ts，信封 unwrap 复用）。
 - **AgentsPage 升级为管理页**：保留只读列表样式；新增——「注册 Agent」向导（Modal+Form：
   ID 规则 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`、种子前缀 agent- 禁用、runtime 从 runtimes 选择、
   provider 档案可选）；每行「启动/停止」按钮（按 state 显隐/禁用，busyId 防连点）；

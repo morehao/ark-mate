@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/model"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // TestCapabilityDefinitionCAS 能力定义写面的核心不变量（M6-1 验收）。

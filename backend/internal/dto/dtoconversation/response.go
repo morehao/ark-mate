@@ -1,6 +1,6 @@
 package dtoconversation
 
-import "github.com/morehao/ark-forge/internal/eventbus"
+import "github.com/morehao/ark-mate/internal/eventbus"
 
 // ConversationResp 会话的对外表示（P0 起不含 runtime）。
 type ConversationResp struct {

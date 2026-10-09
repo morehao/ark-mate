@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // TestInitOrderingImportLoadSchedule M6-9：装配期三条时序（都必须"先 store、再导入、再装载、
@@ -54,7 +54,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	cfg.HomeDir = home
 	cfg.ConfigDir = filepath.Join(home, "config")
 	cfg.TranscriptDir = filepath.Join(home, "transcripts")
-	cfg.DBPath = filepath.Join(home, "forge.db")
+	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeSQLite
 	cfg.CapabilityDir = caps
 	cfg.AgentDir = agents

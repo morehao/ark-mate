@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // connKey 计算**基础**连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
@@ -160,7 +160,7 @@ func (o *Orchestrator) connOfClient(client *acl.Client) *runtimeConn {
 //  1. 先显式淘汰「无在途 turn 且无任何会话引用」的代际（= 计划里的"显式淘汰空闲代际"，
 //     不等空闲阈值：那些进程此刻已经没有任何人在用，收掉它们不损失任何东西）；
 //  2. 淘汰后仍达上限 → **带码拒绝**（40901 `generation_limit_reached`），并在文案里给出出路
-//     （复用现有能力集 / 等空闲代际回收 / 调大 FORGE_GENERATION_LIMIT）。
+//     （复用现有能力集 / 等空闲代际回收 / 调大 MATE_GENERATION_LIMIT）。
 //
 // 绝不"找个差不多的代际塞进去"：能力集是进程级的，塞错了底座会给错的那一套且**不报错**
 // ——那正是本仓 archtest 第 10 条守卫要防的事（猜细了是安全 bug）。
@@ -186,7 +186,7 @@ func (o *Orchestrator) admitGeneration(baseKey string) error {
 		return nil
 	}
 	return acl.NewError(acl.ClassLimit, "generation_limit_reached",
-		fmt.Sprintf("该配置下的能力代际已达上限 %d（%s）：请复用现有能力集（用同一套技能/MCP 组合）、或等空闲代际被回收后重试；确需更多并发能力集时调大 FORGE_GENERATION_LIMIT",
+		fmt.Sprintf("该配置下的能力代际已达上限 %d（%s）：请复用现有能力集（用同一套技能/MCP 组合）、或等空闲代际被回收后重试；确需更多并发能力集时调大 MATE_GENERATION_LIMIT",
 			limit, strings.Join(shortGenerationKeys(keys), ", ")), nil)
 }
 

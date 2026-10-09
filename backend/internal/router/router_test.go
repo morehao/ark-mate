@@ -13,17 +13,17 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// newEngine 走真实装配路径：manager.Service + router.New（含 /v1/forge 分组与默认中间件）。
+// newEngine 走真实装配路径：manager.Service + router.New（含 /v1/mate 分组与默认中间件）。
 func newEngine() *gin.Engine {
 	e, _ := newEngineWithService()
 	return e
@@ -65,10 +65,10 @@ func get(t *testing.T, e *gin.Engine, path string) *respEnvelope {
 	return &env
 }
 
-// TestRouterMountHealth /v1/forge/health 可达。
+// TestRouterMountHealth /v1/mate/health 可达。
 func TestRouterMountHealth(t *testing.T) {
 	e := newEngine()
-	req := httptest.NewRequest("GET", "/v1/forge/health", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	var out struct {
@@ -85,7 +85,7 @@ func TestRouterMountHealth(t *testing.T) {
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
-	env := get(t, e, "/v1/forge/agents")
+	env := get(t, e, "/v1/mate/agents")
 	if env.Code != 0 {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
@@ -97,13 +97,13 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agents 默认标记不符: %s", env.Data)
 	}
 
-	env = get(t, e, "/v1/forge/runtimes")
+	env = get(t, e, "/v1/mate/runtimes")
 	var rts []map[string]any
 	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
-	env = get(t, e, "/v1/forge/conversations")
+	env = get(t, e, "/v1/mate/conversations")
 	if env.Code != 0 {
 		t.Fatalf("conversations 信封不符: %+v", env)
 	}
@@ -114,7 +114,7 @@ func TestRouterListRealService(t *testing.T) {
 func TestRouterCapabilitiesListRealService(t *testing.T) {
 	e := newEngine()
 	for _, p := range []string{"/skills", "/mcps", "/tools"} {
-		env := get(t, e, "/v1/forge"+p)
+		env := get(t, e, "/v1/mate"+p)
 		if env.Code != 0 {
 			t.Fatalf("%s 信封不符: %+v", p, env)
 		}
@@ -130,7 +130,7 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 // 这是合法结果（面板据此显示「跟随 Agent 默认」并给出补救提示）。
 func TestRouterModelCatalog(t *testing.T) {
 	e := newEngine()
-	env := get(t, e, "/v1/forge/models")
+	env := get(t, e, "/v1/mate/models")
 	if env.Code != 0 {
 		t.Fatalf("/models 信封不符: %+v", env)
 	}
@@ -158,13 +158,13 @@ func TestRouterModelCatalog(t *testing.T) {
 	}
 
 	// 未知 agent → 40401（agent_not_found）。
-	env = get(t, e, "/v1/forge/models?agent=nope")
+	env = get(t, e, "/v1/mate/models?agent=nope")
 	if env.Code != 40401 {
 		t.Fatalf("未知 agent 应 40401: %+v", env)
 	}
 }
 
-// TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/forge 前缀。
+// TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/mate 前缀。
 func TestRouterRoutesRegistered(t *testing.T) {
 	e := newEngine()
 	routes := e.Routes()
@@ -174,21 +174,21 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		found[key] = true
 	}
 	for _, want := range []string{
-		"GET /v1/forge/health",
-		"GET /v1/forge/agents",
-		"POST /v1/forge/agents/:id/default",
-		"GET /v1/forge/runtimes",
-		"GET /v1/forge/conversations",
-		"POST /v1/forge/conversations",
-		"GET /v1/forge/conversations/:id/history",
-		"POST /v1/forge/conversations/:id/prompt",
-		"POST /v1/forge/conversations/:id/cancel",
-		"GET /v1/forge/providers",
-		"GET /v1/forge/models",
-		"GET /v1/forge/skills",
-		"GET /v1/forge/mcps",
-		"GET /v1/forge/tools",
-		"GET /v1/forge/ws/events",
+		"GET /v1/mate/health",
+		"GET /v1/mate/agents",
+		"POST /v1/mate/agents/:id/default",
+		"GET /v1/mate/runtimes",
+		"GET /v1/mate/conversations",
+		"POST /v1/mate/conversations",
+		"GET /v1/mate/conversations/:id/history",
+		"POST /v1/mate/conversations/:id/prompt",
+		"POST /v1/mate/conversations/:id/cancel",
+		"GET /v1/mate/providers",
+		"GET /v1/mate/models",
+		"GET /v1/mate/skills",
+		"GET /v1/mate/mcps",
+		"GET /v1/mate/tools",
+		"GET /v1/mate/ws/events",
 	} {
 		if !found[want] {
 			t.Fatalf("路由未注册: %s", want)
@@ -210,8 +210,8 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 		name string
 		path string
 	}{
-		{"未注册的 API 路径", "/v1/forge/nope"},
-		{"未注册的 API 深层路径", "/v1/forge/conversations/x/nope"},
+		{"未注册的 API 路径", "/v1/mate/nope"},
+		{"未注册的 API 深层路径", "/v1/mate/conversations/x/nope"},
 	}
 	e := newEngine()
 	for _, tc := range cases {
@@ -286,10 +286,10 @@ func repoFile(t *testing.T, name string) string {
 
 // TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」与真实路由表**双向**一致。
 //
-//   - README → router：README 里出现的每条 `/v1/forge` 路由（表格与正文反引号内）都必须真实注册。
+//   - README → router：README 里出现的每条 `/v1/mate` 路由（表格与正文反引号内）都必须真实注册。
 //     抓得住改名/删除（P0 把 /sessions 改名为 /conversations 后曾长期漂移），也连带锁住 README
 //     不再引用历史名。
-//   - router → README：每条注册的 `/v1/forge` 路由都必须在 README 出现。**这一向曾经缺失**，
+//   - router → README：每条注册的 `/v1/mate` 路由都必须在 README 出现。**这一向曾经缺失**，
 //     后果是新增端点可以不带文档静默进主干（只有改名才红）。
 //
 // 两个方向都指向同一条约定：README 的接口摘要是路由契约，改路由与改文档必须同一次提交。
@@ -297,13 +297,13 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	engine := newEngine()
 	registered := map[string]string{} // "METHOD /path" → 路径
 	for _, r := range engine.Routes() {
-		if !strings.HasPrefix(r.Path, "/v1/forge") {
+		if !strings.HasPrefix(r.Path, "/v1/mate") {
 			continue
 		}
 		registered[r.Method+" "+r.Path] = r.Path
 	}
 	if len(registered) == 0 {
-		t.Fatal("未取到任何 /v1/forge 路由（装配异常）")
+		t.Fatal("未取到任何 /v1/mate 路由（装配异常）")
 	}
 
 	readme, err := os.ReadFile(repoFile(t, "README.md"))
@@ -333,13 +333,13 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 			continue
 		}
 		seen[p] = true
-		if _, ok := registered["GET /v1/forge"+p]; ok {
+		if _, ok := registered["GET /v1/mate"+p]; ok {
 			continue
 		}
 		// 非 GET 的路由按方法前缀查（POST/PATCH/DELETE）。
 		found := false
 		for method := range registered {
-			if strings.HasSuffix(method, " "+"/v1/forge"+p) {
+			if strings.HasSuffix(method, " "+"/v1/mate"+p) {
 				found = true
 				break
 			}
@@ -355,14 +355,14 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	if strings.Contains(string(readme), "/sessions/") || strings.Contains(string(readme), "`/sessions`") {
 		t.Error("README 仍含历史路由 /sessions（应为 /conversations）")
 	}
-	// 反向（router → README）：每条注册的 /v1/forge 路由都必须在 README 出现。
+	// 反向（router → README）：每条注册的 /v1/mate 路由都必须在 README 出现。
 	//
 	// 上面那条只保证 README 不撒谎，抓得到改名/删除（README 引用的路径没注册）；但抓不到
 	// **新增**——端点悄悄上线、README 只字未提，守卫照样绿。补上这一向才是双向契约。
 	// 兼容别名同样算端点（历史上 `/permissions/always` 两个别名正是靠这条才被写进文档）。
 	var undocumented []string
 	for key, path := range registered {
-		if !seen[strings.TrimPrefix(path, "/v1/forge")] {
+		if !seen[strings.TrimPrefix(path, "/v1/mate")] {
 			undocumented = append(undocumented, key)
 		}
 	}
@@ -388,7 +388,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 }
 
 // standaloneCreds 独立态凭据：单一令牌同时具备 rest 与 stream 两个面
-// （= FORGE_TOKEN 折叠成的形态，见 internal/app 的 credentials()）。
+// （= MATE_TOKEN 折叠成的形态，见 internal/app 的 credentials()）。
 func standaloneCreds(token string) *credential.Set {
 	if token == "" {
 		return nil
@@ -414,17 +414,17 @@ func TestAuthToken(t *testing.T) {
 		wantCode   int
 	}
 	cases := []probe{
-		{"health 免鉴权", "GET", "/v1/forge/health", "", 200, 0},
-		{"缺令牌", "GET", "/v1/forge/agents", "", 401, 40101},
-		{"错令牌", "GET", "/v1/forge/agents", "Bearer wrong", 401, 40101},
-		{"非 Bearer 方案", "GET", "/v1/forge/agents", "Basic s3cret-token", 401, 40101},
-		{"正确 Bearer", "GET", "/v1/forge/agents", "Bearer " + token, 200, 0},
-		{"方案大小写不敏感", "GET", "/v1/forge/agents", "bearer " + token, 200, 0},
-		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/forge/agents?token=" + token, "", 401, 40101},
-		{"POST 也受保护", "POST", "/v1/forge/conversations/export", "", 401, 40101},
+		{"health 免鉴权", "GET", "/v1/mate/health", "", 200, 0},
+		{"缺令牌", "GET", "/v1/mate/agents", "", 401, 40101},
+		{"错令牌", "GET", "/v1/mate/agents", "Bearer wrong", 401, 40101},
+		{"非 Bearer 方案", "GET", "/v1/mate/agents", "Basic s3cret-token", 401, 40101},
+		{"正确 Bearer", "GET", "/v1/mate/agents", "Bearer " + token, 200, 0},
+		{"方案大小写不敏感", "GET", "/v1/mate/agents", "bearer " + token, 200, 0},
+		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/mate/agents?token=" + token, "", 401, 40101},
+		{"POST 也受保护", "POST", "/v1/mate/conversations/export", "", 401, 40101},
 		// WS 路由不挂 REST 凭据中间件（鉴权在带内首帧 attach）：非升级请求直接进入升级逻辑，
 		// 被升级库拒绝为 426 Upgrade Required。关键是「不再是 401」。
-		{"WS 不受 REST 中间件把守（鉴权在带内）", "GET", "/v1/forge/ws/events", "", 426, 0},
+		{"WS 不受 REST 中间件把守（鉴权在带内）", "GET", "/v1/mate/ws/events", "", 426, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -472,10 +472,10 @@ func TestCredentialsScopeSeparation(t *testing.T) {
 		header string
 		want   int
 	}{
-		{"restToken → REST 放行", "/v1/forge/agents", "Bearer " + rest, 200},
-		{"streamToken → REST 被拒（V15）", "/v1/forge/agents", "Bearer " + stream, 401},
-		{"无令牌 → REST 被拒", "/v1/forge/agents", "", 401},
-		{"restToken 也不能走查询参数", "/v1/forge/agents?token=" + rest, "", 401},
+		{"restToken → REST 放行", "/v1/mate/agents", "Bearer " + rest, 200},
+		{"streamToken → REST 被拒（V15）", "/v1/mate/agents", "Bearer " + stream, 401},
+		{"无令牌 → REST 被拒", "/v1/mate/agents", "", 401},
+		{"restToken 也不能走查询参数", "/v1/mate/agents?token=" + rest, "", 401},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -503,12 +503,12 @@ func TestCredentialCoversAllRestRoutes(t *testing.T) {
 		credential.Pair{Token: "rest-token-2f9c", Scopes: credential.ScopeREST},
 	))
 	exempt := map[string]bool{
-		"/v1/forge/health":    true, // liveness 探针免鉴权（容器编排不带令牌）
-		"/v1/forge/ws/events": true, // 鉴权在带内首帧 attach
+		"/v1/mate/health":    true, // liveness 探针免鉴权（容器编排不带令牌）
+		"/v1/mate/ws/events": true, // 鉴权在带内首帧 attach
 	}
 	checked := 0
 	for _, ri := range eng.Routes() {
-		if !strings.HasPrefix(ri.Path, "/v1/forge") || exempt[ri.Path] {
+		if !strings.HasPrefix(ri.Path, "/v1/mate") || exempt[ri.Path] {
 			continue
 		}
 		checked++
@@ -529,7 +529,7 @@ func TestCredentialCoversAllRestRoutes(t *testing.T) {
 // TestAuthTokenDisabled 未配置凭据 = 历史行为（不鉴权）。
 func TestAuthTokenDisabled(t *testing.T) {
 	eng := newAuthEngine(nil)
-	req := httptest.NewRequest("GET", "/v1/forge/agents", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/agents", nil)
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -549,7 +549,7 @@ func TestWorkspaceRoutes(t *testing.T) {
 	}
 	e := newEngine()
 
-	env := get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(dir))
+	env := get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(dir))
 	if env.Code != 0 {
 		t.Fatalf("browse 失败: %+v", env)
 	}
@@ -565,11 +565,11 @@ func TestWorkspaceRoutes(t *testing.T) {
 	}
 
 	// 相对路径 → 信封非 0（工作空间校验与建会话同一套语义）。
-	if env := get(t, e, "/v1/forge/workspaces/browse?path=relative"); env.Code == 0 {
+	if env := get(t, e, "/v1/mate/workspaces/browse?path=relative"); env.Code == 0 {
 		t.Fatalf("相对 path 应报错: %+v", env)
 	}
 
-	env = get(t, e, "/v1/forge/workspaces/recent")
+	env = get(t, e, "/v1/mate/workspaces/recent")
 	if env.Code != 0 {
 		t.Fatalf("recent 失败: %+v", env)
 	}
@@ -581,12 +581,12 @@ func TestWorkspaceRoutes(t *testing.T) {
 		t.Fatalf("新库无会话 → recent 应为空: %+v", recent)
 	}
 
-	if env := get(t, e, "/v1/forge/workspaces/recent?limit=abc"); env.Code != 40000 {
+	if env := get(t, e, "/v1/mate/workspaces/recent?limit=abc"); env.Code != 40000 {
 		t.Fatalf("非法 limit 应 40000: %+v", env)
 	}
 }
 
-// TestWorkspaceRoutesWithRoots 工作区根白名单（FORGE_WORKSPACE_ROOTS）在**真实装配**下的对外表现：
+// TestWorkspaceRoutesWithRoots 工作区根白名单（MATE_WORKSPACE_ROOTS）在**真实装配**下的对外表现：
 // 越界回语义错误码（业务码 40001，而不是笼统的 code=1）、上级止步于根、roots 随响应回读。
 func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	base := t.TempDir()
@@ -604,7 +604,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	}
 
 	// 缺省起点 = 首个工作区根；到根后不再给上级；roots 回读供面板解释边界。
-	env := get(t, e, "/v1/forge/workspaces/browse")
+	env := get(t, e, "/v1/mate/workspaces/browse")
 	if env.Code != 0 {
 		t.Fatalf("browse 失败: %+v", env)
 	}
@@ -620,7 +620,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	}
 
 	// 根内子目录：上级 = 根（允许回去）。
-	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(sub))
+	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(sub))
 	if env.Code != 0 {
 		t.Fatalf("根内浏览失败: %+v", env)
 	}
@@ -633,11 +633,11 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 	}
 
 	// 越界：语义错误码 40001（RestErr 映射），且消息点明是哪个配置在限制。
-	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside))
+	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside))
 	if env.Code != 40001 {
 		t.Fatalf("越界浏览应 40001（不是笼统的 1）: %+v", env)
 	}
-	if !strings.Contains(env.Msg, "workspace_outside_roots") || !strings.Contains(env.Msg, "FORGE_WORKSPACE_ROOTS") {
+	if !strings.Contains(env.Msg, "workspace_outside_roots") || !strings.Contains(env.Msg, "MATE_WORKSPACE_ROOTS") {
 		t.Fatalf("越界错误应指明原因与配置键: %q", env.Msg)
 	}
 }
@@ -666,7 +666,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, ""))
 
 	// 起步：不限制（restricted=false），可写，来源 = 默认值。
-	env := get(t, e, "/v1/forge/settings/workspace")
+	env := get(t, e, "/v1/mate/settings/workspace")
 	if env.Code != 0 {
 		t.Fatalf("settings GET 失败: %+v", env)
 	}
@@ -679,12 +679,12 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 未画边界时任何可读目录都能浏览（默认的零配置体验不能被这次改造破坏）。
-	if env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside)); env.Code != 0 {
+	if env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside)); env.Code != 0 {
 		t.Fatalf("不限制时根外目录应可浏览: %+v", env)
 	}
 
 	// PUT 画边界：生效名单 = 配置的根 + 隐式并入的代建根（顺序：配置项在前）。
-	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":[`+jsonString(root)+`]}`)
+	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[`+jsonString(root)+`]}`)
 	if env.Code != 0 {
 		t.Fatalf("settings PUT 失败: %+v", env)
 	}
@@ -699,7 +699,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 即时生效：根外被拒（语义码 + 配置键）、代建根本身放行（平台不产出越界会话）。
-	env = get(t, e, "/v1/forge/workspaces/browse?path="+url.QueryEscape(outside))
+	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside))
 	if env.Code != 40001 || !strings.Contains(env.Msg, "workspace_outside_roots") {
 		t.Fatalf("画边界后根外应 40001: %+v", env)
 	}
@@ -724,22 +724,22 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 坏项：逐项校验，回 40001 且不落盘。
-	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":["relative"]}`)
+	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":["relative"]}`)
 	if env.Code != 40001 {
 		t.Fatalf("非法根应 40001: %+v", env)
 	}
 
 	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
 	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
-	env = put(t, e, "/v1/forge/settings/workspace", `{"roots":[]}`)
+	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("锁定时应 settings_locked: %+v", env)
 	}
-	env = get(t, e, "/v1/forge/settings/workspace")
+	env = get(t, e, "/v1/mate/settings/workspace")
 	if err := json.Unmarshal(env.Data, &st); err != nil {
 		t.Fatalf("锁定态解析: %v", err)
 	}
-	if st.Writable || st.LockedBy != "FORGE_WORKSPACE_ROOTS" {
+	if st.Writable || st.LockedBy != "MATE_WORKSPACE_ROOTS" {
 		t.Fatalf("锁定态应透出: %+v", st)
 	}
 }
@@ -788,7 +788,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	e, svc := newEngineWithService()
 
 	// 未配白名单 → 资料库为空数组（不是错误：策展能力需要先画边界）。
-	env := get(t, e, "/v1/forge/workspaces/libraries")
+	env := get(t, e, "/v1/mate/workspaces/libraries")
 	if env.Code != 0 {
 		t.Fatalf("libraries 失败: %+v", env)
 	}
@@ -803,7 +803,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	env = get(t, e, "/v1/forge/workspaces/libraries")
+	env = get(t, e, "/v1/mate/workspaces/libraries")
 	if env.Code != 0 {
 		t.Fatalf("libraries 失败: %+v", env)
 	}
@@ -815,7 +815,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	}
 
 	// 目录内容：文件与目录都在，且带大小；文件条目**不可**当 cwd。
-	env = get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(lib))
+	env = get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(lib))
 	if env.Code != 0 {
 		t.Fatalf("files 失败: %+v", env)
 	}
@@ -826,15 +826,15 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if len(files.Entries) != 1 || files.Entries[0].IsDir || files.Entries[0].Size != 3 {
 		t.Fatalf("目录内容不符: %+v", files.Entries)
 	}
-	if env := get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(files.Entries[0].Path)); env.Code == 0 {
+	if env := get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(files.Entries[0].Path)); env.Code == 0 {
 		t.Fatalf("把文件当目录列内容应报错: %+v", env)
 	}
 	// 缺 path：调用方错误（不是回落到默认目录）。
-	if env := get(t, e, "/v1/forge/workspaces/files"); env.Code != 40001 {
+	if env := get(t, e, "/v1/mate/workspaces/files"); env.Code != 40001 {
 		t.Fatalf("缺 path 应 40001: %+v", env)
 	}
 	// 越界 → 与建会话同一个错。
-	if env := get(t, e, "/v1/forge/workspaces/files?path="+url.QueryEscape(base)); env.Code != 40001 {
+	if env := get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(base)); env.Code != 40001 {
 		t.Fatalf("越界应 40001: %+v", env)
 	}
 }

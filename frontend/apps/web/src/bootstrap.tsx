@@ -7,7 +7,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { AppShell } from '@ark/ui'
+import { AppShell } from '@ark-mate/ui'
 import { App } from './app'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
 

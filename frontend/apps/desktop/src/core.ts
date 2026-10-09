@@ -2,8 +2,8 @@
  * 核心子进程的启动与握手（M1-3 起外壳需要它；M1-6 补退出语义、M1-10 补孤儿验收）。
  *
  * 启动链（设计 §7.1）：壳生成两个令牌 → spawn 核心（`:0` + `--auth-stdin` + `--ready-stdout`）
- * → 令牌只经 **stdin 首行** 交付 → 读 stdout 的 `FORGE_READY {...}` 拿到实际地址
- * → 再用 `/v1/forge/health` 复核一次（就绪行给出地址，health 证明真的在服务）。
+ * → 令牌只经 **stdin 首行** 交付 → 读 stdout 的 `MATE_READY {...}` 拿到实际地址
+ * → 再用 `/v1/mate/health` 复核一次（就绪行给出地址，health 证明真的在服务）。
  *
  * 令牌的落点（设计 §7.2 / §9.1）：只在**本进程内存**里——不进 argv、不进 env、不写文件；
  * 子进程环境按设计 §6.6 原样继承调用方环境，因此更不能把令牌塞进 env（runtime 子进程会继承）。
@@ -16,7 +16,7 @@ import { payloadEnvironmentExtras, payloadInfoList, resolveRuntimePayloads } fro
 import { payloadsDir, webDir } from './paths'
 
 /** 就绪行的行首前缀（与核心侧 `app.ReadyPrefix` 同值）。 */
-export const READY_PREFIX = 'FORGE_READY '
+export const READY_PREFIX = 'MATE_READY '
 
 /** 就绪行等待预算（设计 §7.1：超时 → health 轮询兜底 → 再超时走恢复页）。 */
 const READY_TIMEOUT_MS = 10_000
@@ -153,7 +153,7 @@ async function waitHealthy(addr: string, log: (l: string) => void): Promise<void
   let lastErr = ''
   while (Date.now() < deadline) {
     try {
-      const r = await fetch(`http://${addr}/v1/forge/health`)
+      const r = await fetch(`http://${addr}/v1/mate/health`)
       if (r.ok) {
         log('[core] health ok')
         return
@@ -218,7 +218,7 @@ export async function stopCoreGracefully(
 /**
  * 向核心询问"有没有在途轮次"（M1-6 退出前二次确认的依据）。
  *
- * 用既有读模型：`GET /v1/forge/conversations` 的 `status=running` 即"这一轮还没收尾"。
+ * 用既有读模型：`GET /v1/mate/conversations` 的 `status=running` 即"这一轮还没收尾"。
  * **不新增端点**——这个判断是"退出前问一句"，不值得为它改对外路由表。
  *
  * 超时/出错时返回 `known:false`：调用方按**有任务**保守处理（设计 §7.4），
@@ -232,7 +232,7 @@ export async function probeRunningTurns(
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeoutMs)
   try {
-    const r = await fetch(`http://${handle.addr}/v1/forge/conversations?limit=200`, {
+    const r = await fetch(`http://${handle.addr}/v1/mate/conversations?limit=200`, {
       headers: { authorization: `Bearer ${handle.restToken}` },
       signal: ctl.signal,
     })

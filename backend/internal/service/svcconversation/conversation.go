@@ -5,7 +5,7 @@ package svcconversation
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 )
 
 // ConversationSvc 会话面的服务端口。

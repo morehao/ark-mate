@@ -3,7 +3,7 @@ package archtest
 import (
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— 第 10 条守卫：能力绑定粒度不得超出已实测范围 ———

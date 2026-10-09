@@ -1,7 +1,7 @@
 /** 输入发送键档位（持久化 localStorage；聊天/新建两处共用）。 */
 export type SendKeyMode = 'enter-send' | 'enter-newline'
 
-const LS_KEY = 'forge.sendKey'
+const LS_KEY = 'mate.sendKey'
 
 export function getSendKey(): SendKeyMode {
   try {

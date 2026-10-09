@@ -1,4 +1,4 @@
-# agent↔用户常用交互 · ACP v1 交互升级方案（ark-forge 演示底座）
+# agent↔用户常用交互 · ACP v1 交互升级方案（ark-mate 演示底座）
 
 > **Rev2（2026-09-08，生效版）：真实运行时对齐（中档）**
 >
@@ -55,7 +55,7 @@
 ### 1.4 约束
 
 - **协议版本**：ACP protocol version 1（initialize 沿用现有协商）。
-- **依赖**：`github.com/coder/acp-go-sdk v0.13.5`（不动版本号，仅本地 fork 补字段）；前端 React/antd/`@ark/types` 契约同步小改。
+- **依赖**：`github.com/coder/acp-go-sdk v0.13.5`（不动版本号，仅本地 fork 补字段）；前端 React/antd/`@ark-mate/types` 契约同步小改。
 - **兼容**：破坏性调整被允许，但只落在「开发期未冻结」面（demo 数据可丢弃）；对外的 REST/WS 字段变更一律**只增不改名**，除非在冻结前一次性收敛。
 - 单二进制交付不变（`make all`），fork 作为普通 module 编入，不新增运行时依赖。
 
@@ -278,9 +278,9 @@ sequenceDiagram
 | acl | `internal/acl/client.go` | 接线 complete handler 与内容校验钩子（可复用 CreateElicitation 通道或独立 `OnElicitationComplete`）；Initialize 保持能力声明（D8） |
 | manager | `internal/manager/elicitation.go` | pending 增 `requestID`/`toolCallID` 字段；挂起表拆「会话内 map」与「全局（requestId key）map」，超时/取消逻辑复用；新增 `validateContent(schema, content)`（见 §3.4）；`ResolveAccept` 前先校验 |
 | manager | `internal/manager/orchestrator.go` / `events.go` | `requestElicitation` 载荷按 scope 归类发布（会话内 `session.elicitation_request`；全局新 topic `elicitation.request.global`）；`CancelSession` 与全局取消都清对应表 |
-| service/handler/router | `internal/server/handler/*` | `ElicitationResp` 增 `tool_call_id?`/`request_id?`；`ResolveElicitation` 错误面区分 `validate_failed`（400）；新增全局端点 `GET/POST /v1/forge/elicitations`（无 session，request-scope，P1） |
+| service/handler/router | `internal/server/handler/*` | `ElicitationResp` 增 `tool_call_id?`/`request_id?`；`ResolveElicitation` 错误面区分 `validate_failed`（400）；新增全局端点 `GET/POST /v1/mate/elicitations`（无 session，request-scope，P1） |
 | echo runtime | `internal/runtime/echo/elicitation.go` | 场景 builder 改为带 scope 发送（用 fork 的 WithScope helper）；删除 `metaSessionKey` 与 `_meta` 注入；新增「带工具关联」表单变体（伪 `toolCallId`，仅展示 scope 语义）；url 场景 accept 后发一次 `elicitation/complete`（演示 D6） |
-| 前端 | `packages/types/{events,session}.ts`、`packages/api/.../forge.ts` | 类型补 `toolCallId/requestId`；ElicitationResp/Resolve 契约对齐；全局 elicitation 拉取/决策 API（P1） |
+| 前端 | `packages/types/{events,session}.ts`、`packages/api/.../mate.ts` | 类型补 `toolCallId/requestId`；ElicitationResp/Resolve 契约对齐；全局 elicitation 拉取/决策 API（P1） |
 | 前端 | `apps/panel/src/store.ts`、`Transcript.tsx`、`ChatPage.tsx` | 事件载荷透传新字段；流内卡展示 tool-call 关联；全局 pending 角标 + 弹层（P1，组件见 §3.7） |
 | 前端 | （P1）`apps/panel/src/components/ElicitationModal.tsx`（新） | request-scope 全局提问弹层：复用 ElicitationField 渲染 + 决策/超时收敛 |
 
@@ -302,7 +302,7 @@ sequenceDiagram
 
 - **只增字段**：`ElicitationResp`/事件载荷加 `tool_call_id?`（session+tool-call）、`request_id?`（request-scope，P1）；响应不破坏现有前端字段。
 - **错误面**：`POST /sessions/:id/elicitation` 在 content 校验失败时返回 `code=40000` 与字段明细（现缺失，需补），成功/未命中语义不变。
-- **全局通道（P1）**：`GET /v1/forge/elicitations`（无 session 参数，返回 request-scope 挂起）与 `POST /v1/forge/elicitation`（决策体同会话版）；WS 全局 topic 经 `attach(global)` 语义与 `session.elicitation_request` 并列（全局载荷带 `request_id`、无 `session_id`）。
+- **全局通道（P1）**：`GET /v1/mate/elicitations`（无 session 参数，返回 request-scope 挂起）与 `POST /v1/mate/elicitation`（决策体同会话版）；WS 全局 topic 经 `attach(global)` 语义与 `session.elicitation_request` 并列（全局载荷带 `request_id`、无 `session_id`）。
 
 ### 3.6 echo 演示场景矩阵（改造后）
 

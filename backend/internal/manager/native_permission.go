@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/opencode"
+	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // ——— B5：原生权限映射（platform permission_policy → runtime 原生权限开关） ———
@@ -212,7 +212,7 @@ func compactJSON(m map[string]string) string {
 }
 
 // nativePermissionEnvFor 返回该 runtime + 策略下的原生权限 env 并记一行日志（仅实际注入时）。
-// 开关关闭（FORGE_NATIVE_PERMISSION=off）→ 恒返回 nil。
+// 开关关闭（MATE_NATIVE_PERMISSION=off）→ 恒返回 nil。
 func (s *Service) nativePermissionEnvFor(runtimeID string, p *PermissionPolicy) []string {
 	if !s.NativePermissionEnabled() {
 		return nil

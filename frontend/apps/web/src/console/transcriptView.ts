@@ -1,4 +1,4 @@
-import type { StreamEntry } from '@ark/types'
+import type { StreamEntry } from '@ark-mate/types'
 
 // ——— 会话流视图模型（P3 余留：长会话只渲染尾部窗口 + 滚动跟随判定；纯函数，便于 Node 侧校验） ———
 

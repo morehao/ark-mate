@@ -13,7 +13,7 @@ import (
 //  1. `webSource` 随**构建形态**变化——release 构建内嵌了前端资产（builtin），默认构建没有；
 //     期望值由 build tag 决定（见 meta_web_source_*_test.go），因此 `make test` 与
 //     `make test/release` 各自验证自己那一支；
-//  2. `X-Forge-Carrier` 决定能力面的 available（壳的反代带这个头，浏览器入口没有）。
+//  2. `X-Mate-Carrier` 决定能力面的 available（壳的反代带这个头，浏览器入口没有）。
 func TestSystemRoutes(t *testing.T) {
 	eng := newEngine()
 
@@ -41,7 +41,7 @@ func TestSystemRoutes(t *testing.T) {
 		return env.Data
 	}
 
-	meta := getData("/v1/forge/meta", nil)
+	meta := getData("/v1/mate/meta", nil)
 	if meta["apiContract"] != "v1" {
 		t.Errorf("/meta 的 apiContract = %v，期望 v1", meta["apiContract"])
 	}
@@ -55,15 +55,15 @@ func TestSystemRoutes(t *testing.T) {
 		t.Errorf("本构建形态应报 webSource=%q，实际 %v", wantWebSource, meta["webSource"])
 	}
 
-	caps := getData("/v1/forge/capabilities", nil)
+	caps := getData("/v1/mate/capabilities", nil)
 	entries, _ := caps["entries"].(map[string]any)
 	if entries["desktop"] != false {
-		t.Errorf("无 X-Forge-Carrier 头时应按浏览器入口：%v", entries)
+		t.Errorf("无 X-Mate-Carrier 头时应按浏览器入口：%v", entries)
 	}
-	capsDesk := getData("/v1/forge/capabilities", map[string]string{"X-Forge-Carrier": "desktop"})
+	capsDesk := getData("/v1/mate/capabilities", map[string]string{"X-Mate-Carrier": "desktop"})
 	entriesDesk, _ := capsDesk["entries"].(map[string]any)
 	if entriesDesk["desktop"] != true {
-		t.Errorf("带 X-Forge-Carrier: desktop 时应按桌面入口：%v", entriesDesk)
+		t.Errorf("带 X-Mate-Carrier: desktop 时应按桌面入口：%v", entriesDesk)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestSystemRoutes(t *testing.T) {
 // 这条则把"这两个端点确实注册了、且确实被拦"钉在同一个用例里，改动分组时更好定位。
 func TestSystemRoutesRequireCredentials(t *testing.T) {
 	eng := newAuthEngine(standaloneCreds("secret-token"))
-	for _, path := range []string{"/v1/forge/meta", "/v1/forge/capabilities"} {
+	for _, path := range []string{"/v1/mate/meta", "/v1/mate/capabilities"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		eng.ServeHTTP(w, req)

@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // fakeRemote 一个最小的远端 MCP 服务端（http 传输；JSON 应答而非 SSE）。
@@ -182,13 +182,13 @@ type sourceRig struct {
 func newSourceRig(t *testing.T) *sourceRig {
 	t.Helper()
 	dir := t.TempDir()
-	st := testutil.OpenStore(t, filepath.Join(dir, "forge.db"))
+	st := testutil.OpenStore(t, filepath.Join(dir, "mate.db"))
 	t.Cleanup(func() { _ = st.Close() })
 	return &sourceRig{
 		t:  t,
 		st: st,
 		cfg: config.Config{
-			StoreMode: config.StoreModeSQLite, DBPath: filepath.Join(dir, "forge.db"),
+			StoreMode: config.StoreModeSQLite, DBPath: filepath.Join(dir, "mate.db"),
 			AgentDir: filepath.Join(dir, "agents"), CapabilityDir: filepath.Join(dir, "capabilities"),
 		},
 		log: &strings.Builder{},
@@ -214,7 +214,7 @@ func (r *sourceRig) seedAgent(id, body string) {
 }
 
 // source 装配数据面（同一库句柄；Logger 收进 buffer 供断言"降级有留痕"）。
-func (r *sourceRig) source(agentID string, pinned *[]string) *ForgeSource {
+func (r *sourceRig) source(agentID string, pinned *[]string) *MateSource {
 	r.t.Helper()
 	src, err := NewSource(context.Background(), SourceOptions{
 		Cfg: r.cfg, AgentID: agentID, McpsPinned: pinned, Store: r.st,
@@ -246,10 +246,10 @@ func toolNames(tools []mcp.Tool) []string {
 // TestSourceSharesDBWithCore 网关与核心各自持有**同一个库**的句柄时必须能共存：
 // 生产形态就是这样（核心常驻持有 store，网关是它拉起的另一个进程/句柄），而两个 SQLite 连接
 // 互相踩（锁等待、迁移竞争）会表现成"工具面时有时无"。本用例刻意**不注入** store 句柄，
-// 让 `NewSource` 自己开一个——这正是 `forge mcp bridge` 在真实运行时的样子。
+// 让 `NewSource` 自己开一个——这正是 `mate mcp bridge` 在真实运行时的样子。
 func TestSourceSharesDBWithCore(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "forge.db")
+	dbPath := filepath.Join(dir, "mate.db")
 	core := testutil.OpenStore(t, dbPath) // 核心侧常驻句柄（不关，模拟 serve 存活期）
 	t.Cleanup(func() { _ = core.Close() })
 	cfg := config.Config{

@@ -48,7 +48,7 @@ const (
 	MetaKeyDefaultAgent = "default_agent"
 	// MetaKeyImportedCapabilities 能力定义导入标记：value = 导入目录（skills+mcp 文件清单）的指纹。
 	//
-	// 只作**装配期自动导入**的幂等依据（目录没变就整体跳过）；显式 `forge capability import`
+	// 只作**装配期自动导入**的幂等依据（目录没变就整体跳过）；显式 `mate capability import`
 	// 不看它——那条路径每次按行判重（新丢进目录一个文件，跑一次就该进来）。
 	MetaKeyImportedCapabilities = "imported_capabilities"
 

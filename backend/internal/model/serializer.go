@@ -22,9 +22,9 @@ import (
 // 建表不由 gorm 负责（见 internal/store 的迁移内核），因此这里只需保证读写双向适配。
 const (
 	// serializerTS 是时间列使用的 serializer 名。
-	serializerTS = "arkforge_rfc3339"
+	serializerTS = "arkmate_rfc3339"
 	// serializerFlag 是布尔列使用的 serializer 名。
-	serializerFlag = "arkforge_flag"
+	serializerFlag = "arkmate_flag"
 )
 
 func init() {

@@ -130,7 +130,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, info ServerInfo, h Han
 		s.log = slog.Default()
 	}
 	if s.info.Name == "" {
-		s.info.Name = "ark-forge"
+		s.info.Name = "ark-mate"
 	}
 	if s.info.Version == "" {
 		s.info.Version = clientVersion
@@ -408,7 +408,7 @@ func (s *server) write(msg rpcMessage) {
 //
 // 常量放这里而不是 manager：注入端要用它拼条目、底座会在会话里显示它，未来网关自己
 // （instructions/日志）也要用；两份字面量迟早漂移。
-const GatewayServerName = "forge-gateway"
+const GatewayServerName = "mate-gateway"
 
 // GatewayScope 网关条目的 scope：注入端拼参数、网关端解参数，**两侧共用这一个类型**。
 type GatewayScope struct {

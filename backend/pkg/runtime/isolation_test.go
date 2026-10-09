@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/opencode"
+	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // TestIsolationEnvBuiltinRuntimes 逐变量钉住两个内置 runtime 的隔离注入表（设计 §6.6.1）。
@@ -100,7 +100,7 @@ func TestIsolationEnvEmptyHome(t *testing.T) {
 			t.Fatalf("home=%q 应返回 nil，got %v", home, got)
 		}
 	}
-	if got, want := IsolationEnv(opencode.ID, "  /tmp/forge-home  "), IsolationEnv(opencode.ID, "/tmp/forge-home"); !reflect.DeepEqual(got, want) {
+	if got, want := IsolationEnv(opencode.ID, "  /tmp/mate-home  "), IsolationEnv(opencode.ID, "/tmp/mate-home"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("前后空白应被去掉: %v vs %v", got, want)
 	}
 }

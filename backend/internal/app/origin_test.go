@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/middleware"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // 本文件是 M3-5 的**进程内集成**判据：走真实 Init（真起服务、真建 engine、真监听端口），
@@ -39,7 +39,7 @@ func originTestApp(t *testing.T, mutate func(cfg *config.Config)) (*App, string)
 	cfg.HomeDir = home
 	cfg.ConfigDir = filepath.Join(home, "config")
 	cfg.TranscriptDir = filepath.Join(home, "transcripts")
-	cfg.DBPath = filepath.Join(home, "forge.db")
+	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeMemory
 	cfg.WorkspaceDir = ""     // 关闭代建（本测试不建会话）
 	cfg.ProcRegistryPath = "" // 不写进程注册表
@@ -104,33 +104,33 @@ func TestInitOriginPolicyUsesRealListenPort(t *testing.T) {
 	}
 
 	// 合法 Host + 无 Origin → 放行。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, ""); status != http.StatusOK {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, ""); status != http.StatusOK {
 		t.Fatalf("合法 Host 无 Origin 应 200，got %d", status)
 	}
 	// 合法 Host + **实际端口**的同源 Origin → 放行（这条正是"端口不是猜的"的证据：
 	// 配置里写的是 `:0`，默认值是 10001，只有 ln.Addr() 才知道真实端口）。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://"+addr); status != http.StatusOK {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://"+addr); status != http.StatusOK {
 		t.Fatalf("同源 Origin 应 200，got %d", status)
 	}
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://localhost:"+port); status != http.StatusOK {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://localhost:"+port); status != http.StatusOK {
 		t.Fatalf("localhost 同源 Origin 应 200，got %d", status)
 	}
 	// 反向确认：默认端口（配置默认值 10001）**不是**本进程的端口 → 403。
-	if status, env := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://localhost:10001"); status != http.StatusForbidden ||
+	if status, env := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://localhost:10001"); status != http.StatusForbidden ||
 		env.Code != code.InvalidRequest {
 		t.Fatalf("默认端口 10001 的 Origin 应 403+带码，got %d %+v", status, env)
 	}
 	// 本地其它端口 → 403。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://127.0.0.1:9999"); status != http.StatusForbidden {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://127.0.0.1:9999"); status != http.StatusForbidden {
 		t.Fatalf("本地其它端口 Origin 应 403，got %d", status)
 	}
 	// 错误 Host → 421。
-	status, env := doRequest(t, a, "GET", "/v1/forge/health", "evil.com:"+port, "")
+	status, env := doRequest(t, a, "GET", "/v1/mate/health", "evil.com:"+port, "")
 	if status != http.StatusMisdirectedRequest || env.Code != code.InvalidRequest {
 		t.Fatalf("错误 Host 应 421+带码，got %d %+v", status, env)
 	}
 	// 错误 Host 即使 Origin 也对 → 仍 421（Host 先判）。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", "evil.com:"+port, "http://"+addr); status != http.StatusMisdirectedRequest {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", "evil.com:"+port, "http://"+addr); status != http.StatusMisdirectedRequest {
 		t.Fatalf("错误 Host 应 421（与 Origin 无关），got %d", status)
 	}
 }
@@ -140,20 +140,20 @@ func TestInitOriginPolicyExtraAllowTable(t *testing.T) {
 	a, addr := originTestApp(t, func(cfg *config.Config) {
 		cfg.AllowedOrigins = []string{"http://localhost:5173"}
 	})
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://localhost:5173"); status != http.StatusOK {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://localhost:5173"); status != http.StatusOK {
 		t.Fatalf("额外表命中的 Origin 应 200，got %d", status)
 	}
 	// 大小写 + 尾斜杠变体同样命中（与 pkg/config 的归一同一规则）。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "HTTP://LocalHost:5173/"); status != http.StatusOK {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "HTTP://LocalHost:5173/"); status != http.StatusOK {
 		t.Fatalf("额外表归一后的变体应 200，got %d", status)
 	}
 	// 没登记的邻近端口仍被拒（登记口不是"放开一整个网段"）。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", addr, "http://localhost:5174"); status != http.StatusForbidden {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", addr, "http://localhost:5174"); status != http.StatusForbidden {
 		t.Fatalf("未登记的邻近端口应 403，got %d", status)
 	}
 }
 
-// TestInitOriginPolicyDoesNotGateStaticAssets 挂载范围：白名单只覆盖 `/v1/forge` 组，
+// TestInitOriginPolicyDoesNotGateStaticAssets 挂载范围：白名单只覆盖 `/v1/mate` 组，
 // 静态资产与 SPA 回落不受影响（否则"打开面板"本身就是 421）。
 func TestInitOriginPolicyDoesNotGateStaticAssets(t *testing.T) {
 	a, addr := originTestApp(t, nil)
@@ -170,7 +170,7 @@ func TestInitOriginPolicyDoesNotGateStaticAssets(t *testing.T) {
 		t.Fatalf("静态入口应回 index.html，got %s", w.Body.String())
 	}
 	// 同一 Host 打 API 仍被拒——证明上一条不是因为"策略整体没生效"。
-	if status, _ := doRequest(t, a, "GET", "/v1/forge/health", "evil.com:1234", ""); status != http.StatusMisdirectedRequest {
+	if status, _ := doRequest(t, a, "GET", "/v1/mate/health", "evil.com:1234", ""); status != http.StatusMisdirectedRequest {
 		t.Fatalf("同 Host 打 API 应 421，got %d", status)
 	}
 }
@@ -188,7 +188,7 @@ func TestOriginPolicyDisabledWhenNonLoopback(t *testing.T) {
 	}
 	eng := router.New(router.Ports{}, eventbus.New(), router.Options{Origin: p})
 
-	req := httptest.NewRequest("GET", "/v1/forge/health", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	req.Host = "evil.com:10001"
 	req.Header.Set("Origin", "http://evil.com")
 	w := httptest.NewRecorder()

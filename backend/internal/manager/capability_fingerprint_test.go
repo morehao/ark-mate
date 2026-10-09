@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // fpRig 一套「已注册 runtime + 一个已解析 skill 投影」的最小装配。
@@ -236,7 +236,7 @@ func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 // TestCapabilityFingerprintMCPTransportFilter 按 runtime 可承载传输过滤：不该承载的 server
 // 不进指纹（它不会被注入）。
 //
-// **M7-3 之后这条只在网关关（FORGE_MCP_GATEWAY=off）时成立**：网关在环时远程 server 对每个
+// **M7-3 之后这条只在网关关（MATE_MCP_GATEWAY=off）时成立**：网关在环时远程 server 对每个
 // runtime 都可达（条目不逐条出现，折叠成一条常量条目），故"不可承载 ⇒ 不影响指纹"这个前提
 // 本身消失了——网关在环时的折叠语义见 `TestCapabilityFingerprintGatewayFolding`。
 func TestCapabilityFingerprintMCPTransportFilter(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtousage"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // ——— M3 首项：用量统计（GET /usage/summary） ———

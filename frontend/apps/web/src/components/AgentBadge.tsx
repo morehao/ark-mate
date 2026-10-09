@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Tooltip } from 'antd'
-import { Dot, Pill, agentStateMeta, tokens } from '@ark/ui'
-import type { Agent } from '@ark/types'
+import { Dot, Pill, agentStateMeta, tokens } from '@ark-mate/ui'
+import type { Agent } from '@ark-mate/types'
 import { agentNameOf } from '../console/util'
 
 interface Props {

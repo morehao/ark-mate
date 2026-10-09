@@ -138,14 +138,14 @@ func TestBuildDSN(t *testing.T) {
 	}{
 		{
 			name:       "绝对路径",
-			url:        "sqlite:///tmp/forge.db",
-			wantPrefix: "file:/tmp/forge.db?",
+			url:        "sqlite:///tmp/mate.db",
+			wantPrefix: "file:/tmp/mate.db?",
 			wantHas:    []string{"_txlock=immediate", "journal_mode%28WAL%29", "foreign_keys%281%29"},
 		},
 		{
 			name:       "内存库唯一命名且共享缓存",
 			url:        "sqlite://:memory:",
-			wantPrefix: "file:arkforge_mem_",
+			wantPrefix: "file:arkmate_mem_",
 			wantHas:    []string{"mode=memory", "cache=shared", "foreign_keys%281%29"},
 			// 内存库不支持 WAL。
 			wantNotHas: []string{"journal_mode"},

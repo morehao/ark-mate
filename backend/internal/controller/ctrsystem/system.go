@@ -5,7 +5,7 @@
 //   - `/capabilities` 回答"这个入口有哪些能力"，**两个入口同构**（id 集合与顺序完全一致），
 //     只有 `available` 的值不同——浏览器入口如实回报"无托盘 / 无原生对话框"。
 //
-// 能力**执行面**不在这里：那是 `__FORGE_DESKTOP__`（壳的 preload）。声明与执行分工见设计 §7.3。
+// 能力**执行面**不在这里：那是 `__MATE_DESKTOP__`（壳的 preload）。声明与执行分工见设计 §7.3。
 package ctrsystem
 
 import (
@@ -20,7 +20,7 @@ import (
 // 为什么用请求头而不是"核心自己的启动形态"：桌面安装里浏览器入口与桌面窗口打的是**同一个核心**，
 // 只有"这次请求是从哪条通道来的"才能决定该回报哪一套能力。壳是唯一会把 REST 请求带凭据转进来的
 // 组件（桌面态 restToken 只在壳手里），因此这个头是可信的入口声明。
-const CarrierHeader = "X-Forge-Carrier"
+const CarrierHeader = "X-Mate-Carrier"
 
 // CarrierDesktop 桌面载体的标识值。
 const CarrierDesktop = "desktop"
@@ -33,7 +33,7 @@ type Entries struct {
 
 // CapabilityEntry 一条能力的声明。
 type CapabilityEntry struct {
-	// ID 能力 id（闭集，与前端 @ark/desktop-contract 的 CapabilityId 一一对应）。
+	// ID 能力 id（闭集，与前端 @ark-mate/desktop-contract 的 CapabilityId 一一对应）。
 	ID string `json:"id"`
 	// Available 对**本次请求的入口**是否可用。
 	Available bool `json:"available"`
@@ -42,7 +42,7 @@ type CapabilityEntry struct {
 	BrowserFallback string `json:"browserFallback"`
 }
 
-// Capabilities `/v1/forge/capabilities` 的响应。
+// Capabilities `/v1/mate/capabilities` 的响应。
 type Capabilities struct {
 	Entries      Entries           `json:"entries"`
 	Capabilities []CapabilityEntry `json:"capabilities"`

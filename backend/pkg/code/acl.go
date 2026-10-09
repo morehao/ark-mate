@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -27,7 +27,7 @@ var notFoundCodes = map[string]bool{
 //
 // 这张表是 acl 分类（可操作语义：重试/登录/换参数/降级）到对外码的单向投影，
 // 因此**放在 code 包**而不是 acl 包：acl 是可复用的 ACP 客户端，不该知道
-// ark-forge 的信封编号；反过来 code 包作为"编号唯一事实源"必须收下这张表，
+// ark-mate 的信封编号；反过来 code 包作为"编号唯一事实源"必须收下这张表，
 // 否则同一个 acl 错误在控制器与领域层会映射成两个不同的码。
 func fromACL(err error) (gerror.Error, bool) {
 	ae, ok := acl.As(err)

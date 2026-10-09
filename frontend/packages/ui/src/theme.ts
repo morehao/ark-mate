@@ -1,9 +1,9 @@
 import type { ThemeConfig } from 'antd'
 
 /**
- * ark-forge 前端设计令牌（唯一事实源）。
+ * ark-mate 前端设计令牌（唯一事实源）。
  *
- * 设计方向：以 ark-forge-console.html 为基准的 modern-minimal 浅色应用壳
+ * 设计方向：以 ark-mate-console.html 为基准的 modern-minimal 浅色应用壳
  * （Linear / Vercel 语感），纪律对齐 ark-iam DESIGN：
  * 靛蓝只出现在主按钮 / 链接 / 选中态 / 品牌点；页面表面中性灰阶、hairline 分层；
  * 阴影只留给 Modal 等浮层。改动请同步 frontend/DESIGN.md 的 front matter。

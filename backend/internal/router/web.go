@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/pkg/web"
+	"github.com/morehao/ark-mate/pkg/web"
 )
 
 // 资产层（M2-1，设计 §6.1 / §6.2）：**两种来源，一套行为**。
@@ -27,7 +27,7 @@ import (
 
 // 前端构建期写进产物的构建 id 文件（M2-4）与读不到时的口径。
 //
-// 这三个常量与前端契约（`@ark/desktop-contract` 的 `UNKNOWN_BUILD_ID`）是**同一条契约的两侧**，
+// 这三个常量与前端契约（`@ark-mate/desktop-contract` 的 `UNKNOWN_BUILD_ID`）是**同一条契约的两侧**，
 // 由 archtest 守卫逐字比对（`TestBuildIDUnknownMatchesContract`）——两边各写一个 'unknown'
 // 但拼写不同的话，闸门会从"无法校验"变成"不一致"，把用户挡在整屏状态页外面。
 const (
@@ -43,7 +43,7 @@ type AssetSource string
 const (
 	// AssetSourceBuiltin 构建期内置（`-tags release` 的 //go:embed）。
 	AssetSourceBuiltin AssetSource = "builtin"
-	// AssetSourceDir 显式目录（`--web-dir` / `FORGE_WEB_DIR`）。
+	// AssetSourceDir 显式目录（`--web-dir` / `MATE_WEB_DIR`）。
 	AssetSourceDir AssetSource = "dir"
 )
 
@@ -177,7 +177,7 @@ func readBuildID(fsys fs.FS) string {
 // 按路径排序，逐行 `rel\0hex\n` 拼接后再 sha256。不含时间戳、不含绝对路径，
 // 因此同一份产物在内嵌与目录两种来源下**得到同一个值**（M2-5 的一致性断言就比它）。
 //
-// 导出（M4-5）是因为它不再只服务资产：`forge doctor --verify-payload` 要用**同一个**函数
+// 导出（M4-5）是因为它不再只服务资产：`mate doctor --verify-payload` 要用**同一个**函数
 // 复算随包载荷树的合成摘要。载荷清单是 JS 侧（`lib/payload.mjs` 的 `compositeDigest`）算的，
 // 三处（Go 资产 / Go 载荷 / JS 载荷）必须是同一套算法——不一致的典型后果是"门禁永远红"
 // 或更坏"永远绿"（两边各自算了个自洽的错值）。

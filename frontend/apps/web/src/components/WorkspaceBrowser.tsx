@@ -8,9 +8,9 @@ import {
   FolderOutlined,
   HomeOutlined,
 } from '@ant-design/icons'
-import { browseWorkspaces, workspaceFiles } from '@ark/api'
-import type { WorkspaceBrowseResp, WorkspaceEntry, WorkspaceFileEntry } from '@ark/types'
-import { useForge } from '../store'
+import { browseWorkspaces, workspaceFiles } from '@ark-mate/api'
+import type { WorkspaceBrowseResp, WorkspaceEntry, WorkspaceFileEntry } from '@ark-mate/types'
+import { useMate } from '../store'
 
 interface Props {
   /** 起始目录（缺省 = 服务端首个工作区根，未配白名单时 = 服务进程家目录）。 */
@@ -82,7 +82,7 @@ function formatTime(iso: string): string {
  * 因为资料场景下"这目录里到底有什么"与"能不能选它"同等重要。
  */
 export function WorkspaceBrowser({ start, onPick, onBack, backTitle = '返回', pickLabel = '使用此目录' }: Props) {
-  const showToast = useForge((s) => s.showToast)
+  const showToast = useMate((s) => s.showToast)
   const [browse, setBrowse] = useState<WorkspaceBrowseResp | null>(null)
   const [files, setFiles] = useState<WorkspaceFileEntry[]>([])
   const [loading, setLoading] = useState(false)

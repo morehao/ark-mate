@@ -9,7 +9,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
-	"github.com/morehao/ark-forge/pkg/redact"
+	"github.com/morehao/ark-mate/pkg/redact"
 )
 
 // Class 是可操作错误分类（对齐 codeg feedback.rs / AIR 词汇表，随 turn.error 上抛，前端据此渲染动作）。

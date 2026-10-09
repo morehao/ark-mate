@@ -1,4 +1,4 @@
-import type { ConversationSummary } from '@ark/types'
+import type { ConversationSummary } from '@ark-mate/types'
 
 // ——— 会话侧栏视图模型（P3 余留：列表分页 + active 提升 + 相对时间；纯函数，便于 Node 侧校验） ———
 

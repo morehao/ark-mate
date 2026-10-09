@@ -26,7 +26,7 @@
  * ## identity 可注入
  *
  * 从 electron-builder 的 mac 配置读（今天 `identity: "-"` = ad-hoc；将来填 Developer ID 名字即可），
- * 也可用 `FORGE_SIGN_IDENTITY` 覆盖（人工验证用）。**取不到 identity 就不签**——绝不"猜一个身份去签"。
+ * 也可用 `MATE_SIGN_IDENTITY` 覆盖（人工验证用）。**取不到 identity 就不签**——绝不"猜一个身份去签"。
  */
 
 const { execFileSync, spawnSync } = require('node:child_process')
@@ -134,13 +134,13 @@ module.exports = async function afterSign(context) {
   }
 
   const mac = context.packager.platformSpecificBuildOptions ?? {}
-  const identity = process.env.FORGE_SIGN_IDENTITY || mac.identity || null
+  const identity = process.env.MATE_SIGN_IDENTITY || mac.identity || null
   const buildDir = join(context.packager.info.projectDir ?? process.cwd(), 'build')
   const entitlements = mac.entitlements ? join(context.packager.info.projectDir ?? process.cwd(), mac.entitlements) : join(buildDir, 'entitlements.mac.plist')
   const entitlementsInherit = join(buildDir, 'entitlements.mac.inherit.plist')
 
   if (!identity) {
-    console.log('  · afterSign：没有可用 identity（mac.identity 为空且未设 FORGE_SIGN_IDENTITY），跳过逐对象复核')
+    console.log('  · afterSign：没有可用 identity（mac.identity 为空且未设 MATE_SIGN_IDENTITY），跳过逐对象复核')
     return
   }
 
@@ -156,10 +156,10 @@ module.exports = async function afterSign(context) {
     return
   }
 
-  const reportOnly = ['1', 'true', 'yes'].includes(String(process.env.FORGE_SIGN_REPORT_ONLY ?? '').toLowerCase())
+  const reportOnly = ['1', 'true', 'yes'].includes(String(process.env.MATE_SIGN_REPORT_ONLY ?? '').toLowerCase())
   console.log(
     `  · afterSign：发现 ${missing.length}/${objects.length} 个对象缺签名或缺 runtime 标记` +
-      (reportOnly ? '（FORGE_SIGN_REPORT_ONLY=1：只报告，不补签）' : '，逐个补签后重封外层封条'),
+      (reportOnly ? '（MATE_SIGN_REPORT_ONLY=1：只报告，不补签）' : '，逐个补签后重封外层封条'),
   )
   for (const item of missing) {
     if (!reportOnly) signOne(item.abs, { identity, entitlements: entitlementsInherit })

@@ -7,19 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
-// TestAutomationImportExportCLI `forge automation import|export` 走真实装配路径（配置解析 → 打开库 →
+// TestAutomationImportExportCLI `mate automation import|export` 走真实装配路径（配置解析 → 打开库 →
 // 调 manager）：存量文件进库、**一个文件里的定义与运行态各自落在正确的地方**、面板改过的那一版是导出物。
 func TestAutomationImportExportCLI(t *testing.T) {
 	home := t.TempDir()
-	dbPath := filepath.Join(home, "forge.db")
+	dbPath := filepath.Join(home, "mate.db")
 	autoDir := filepath.Join(home, "automations")
-	t.Setenv("FORGE_HOME", home)
-	t.Setenv("FORGE_CONFIG_DIR", filepath.Join(home, "config"))
-	t.Setenv("FORGE_DB", dbPath)
-	t.Setenv("FORGE_AUTOMATIONS", autoDir)
+	t.Setenv("MATE_HOME", home)
+	t.Setenv("MATE_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("MATE_DB", dbPath)
+	t.Setenv("MATE_AUTOMATIONS", autoDir)
 
 	cwd := t.TempDir()
 	body := `{"id":"nightly","name":"夜跑","enabled":true,` +

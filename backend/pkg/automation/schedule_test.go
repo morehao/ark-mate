@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // 期望值来源：`python3 -c "zoneinfo"` 与 `TZ=... date`（系统 tzdata）手算对照，

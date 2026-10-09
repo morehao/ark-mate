@@ -6,7 +6,7 @@ package svcagent
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 )
 
 // AgentSvc Agent 管理面的服务端口。

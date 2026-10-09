@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestToolsCollisionIsFailClosed 跨 server 的重名**整组丢弃**，不保留任何一个。

@@ -140,7 +140,7 @@ func TestKeyFileHardening(t *testing.T) {
 	}
 }
 
-// TestEnvKeyOverride FORGE_VAULT_KEY 覆盖：不读不建 keyfile，且与同密钥的 keyfile vault 互通。
+// TestEnvKeyOverride MATE_VAULT_KEY 覆盖：不读不建 keyfile，且与同密钥的 keyfile vault 互通。
 func TestEnvKeyOverride(t *testing.T) {
 	home := t.TempDir()
 	raw := make([]byte, keyLen)

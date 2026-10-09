@@ -1,7 +1,7 @@
 // Package dbclient 装配控制面的数据库句柄（gorm + 纯 Go SQLite）。
 //
 // 与 ark-iam 的 `pkg/dbclient` 的差异：ark-iam 是「一进程一库」的多租户服务，
-// 因此在包里持有 `dbMap[string]*gorm.DB` 全局单例；ark-forge 的持久层是**按实例**
+// 因此在包里持有 `dbMap[string]*gorm.DB` 全局单例；ark-mate 的持久层是**按实例**
 // 打开的（`store.Open(path)`，且测试大量使用各自独立的内存库），所以这里不持有
 // 单例，只提供 Open + dialector 注册两件事。
 package dbclient
@@ -20,7 +20,7 @@ import (
 
 const (
 	// serviceName ORM 日志里的服务名。
-	serviceName = "ark-forge"
+	serviceName = "ark-mate"
 	// maxOpenConns SQLite 是单写者模型：单连接即天然串行化所有事务，
 	// 规避多连接下的 `database is locked` 与读写竞态（与原 database/sql 实现一致）。
 	maxOpenConns = 1

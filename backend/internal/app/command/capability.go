@@ -10,13 +10,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
-// capabilityCmd 分发 `forge capability <动作>`。
+// capabilityCmd 分发 `mate capability <动作>`。
 func capabilityCmd(args []string) {
 	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, capabilityUsage)
@@ -36,22 +36,22 @@ func capabilityCmd(args []string) {
 }
 
 const capabilityUsage = `capability 用法：
-  forge capability migrate [--dir <能力目录>] [--dry-run]
+  mate capability migrate [--dir <能力目录>] [--dry-run]
       把 skill 定义里的旧 sources[] 改写为 runtimes[]（文件仍是事实源时的迁移）
-  forge capability import  [--dir <能力目录>] [--dry-run]
+  mate capability import  [--dir <能力目录>] [--dry-run]
       把目录里的 {skills,mcp}/*.json 导入 SQLite（M6：sqlite 模式下 DB 才是事实源）
       幂等：按行判重，**已有行绝不覆盖**；坏定义逐条报出、其余照常导入
-  forge capability export  [--dir <能力目录>] [--dry-run]
+  mate capability export  [--dir <能力目录>] [--dry-run]
       把 SQLite 里的定义写回目录（此后文件是**导出物**，不是事实源）
 `
 
-// capabilityImport 显式导入存量定义（`forge capability import`）。
+// capabilityImport 显式导入存量定义（`mate capability import`）。
 //
 // 与装配期自动导入的分工：自动导入看目录指纹（目录没变就整体跳过，保证"我删掉的技能不会自己
 // 回来"），显式导入**不看指纹**、每次按行判重——新丢进目录一个文件，跑一次就该进来。
 func capabilityImport(args []string) {
 	fs := flag.NewFlagSet("capability import", flag.ExitOnError)
-	dir := fs.String("dir", "", "能力目录（默认 FORGE_CAPABILITIES 或 ~/.forge/capabilities）")
+	dir := fs.String("dir", "", "能力目录（默认 MATE_CAPABILITIES 或 ~/.ark-mate/capabilities）")
 	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库")
 	_ = fs.Parse(args)
 
@@ -88,17 +88,17 @@ func capabilityImport(args []string) {
 	}
 }
 
-// capabilityExport 把 DB 里的定义写回目录（`forge capability export`）。
+// capabilityExport 把 DB 里的定义写回目录（`mate capability export`）。
 func capabilityExport(args []string) {
 	fs := flag.NewFlagSet("capability export", flag.ExitOnError)
-	dir := fs.String("dir", "", "能力目录（默认 FORGE_CAPABILITIES 或 ~/.forge/capabilities）")
+	dir := fs.String("dir", "", "能力目录（默认 MATE_CAPABILITIES 或 ~/.ark-mate/capabilities）")
 	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
 	_ = fs.Parse(args)
 
 	cfg, _ := mustConfig()
 	root := capabilityRoot(cfg, *dir)
 	if root == "" {
-		fmt.Fprintln(os.Stderr, "capability export: 能力目录为空（用 --dir 指定，或设置 FORGE_CAPABILITIES）")
+		fmt.Fprintln(os.Stderr, "capability export: 能力目录为空（用 --dir 指定，或设置 MATE_CAPABILITIES）")
 		os.Exit(2)
 	}
 	st, err := store.Open(cfg.DBPath)
@@ -123,7 +123,7 @@ func capabilityExport(args []string) {
 	}
 }
 
-// capabilityRoot 解析能力目录：--dir 优先，否则取配置（FORGE_CAPABILITIES / ~/.forge/capabilities）。
+// capabilityRoot 解析能力目录：--dir 优先，否则取配置（MATE_CAPABILITIES / ~/.ark-mate/capabilities）。
 func capabilityRoot(cfg config.Config, flagDir string) string {
 	if root := strings.TrimSpace(flagDir); root != "" {
 		return root
@@ -170,7 +170,7 @@ func (m *skillMigration) apply() error { return m.file.Save() }
 // `legacy_sources_key` 告警，把人引到这里）。
 func capabilityMigrate(args []string) {
 	fs := flag.NewFlagSet("capability migrate", flag.ExitOnError)
-	dir := fs.String("dir", "", "能力目录（默认 FORGE_CAPABILITIES 或 ~/.forge/capabilities）")
+	dir := fs.String("dir", "", "能力目录（默认 MATE_CAPABILITIES 或 ~/.ark-mate/capabilities）")
 	dryRun := fs.Bool("dry-run", false, "只打印将要写入的内容，不改任何文件")
 	_ = fs.Parse(args)
 
@@ -180,7 +180,7 @@ func capabilityMigrate(args []string) {
 		root = cfg.CapabilityDir
 	}
 	if root == "" {
-		fmt.Fprintln(os.Stderr, "capability migrate: 能力目录为空（用 --dir 指定，或设置 FORGE_CAPABILITIES）")
+		fmt.Fprintln(os.Stderr, "capability migrate: 能力目录为空（用 --dir 指定，或设置 MATE_CAPABILITIES）")
 		os.Exit(2)
 	}
 	res := migrateSkillsDir(root, *dryRun, os.Stdout)

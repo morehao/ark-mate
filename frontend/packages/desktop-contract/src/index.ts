@@ -1,9 +1,9 @@
 /**
- * @ark/desktop-contract —— 桌面载体契约的**唯一真源**（设计文档 §7.3）。
+ * @ark-mate/desktop-contract —— 桌面载体契约的**唯一真源**（设计文档 §7.3）。
  *
  * 为什么单独一个包：两个入口（浏览器 / 桌面窗口）共用同一份 `apps/web/dist`，所以"桌面多出来的
- * 东西"只能经契约进入。契约分两半——**声明面**走 HTTP（`GET /v1/forge/capabilities`，两端同构），
- * **执行面**走壳注入的唯一命名空间 `__FORGE_DESKTOP__`。本包把两半的形状、常量与判定函数收到一处：
+ * 东西"只能经契约进入。契约分两半——**声明面**走 HTTP（`GET /v1/mate/capabilities`，两端同构），
+ * **执行面**走壳注入的唯一命名空间 `__MATE_DESKTOP__`。本包把两半的形状、常量与判定函数收到一处：
  *
  *   - preload 侧（`apps/desktop/src/preload-app.ts`）与前端侧（`apps/web/src/carrier.ts`）
  *     引用**同一份**类型与**同一个**运行期守卫，字段不许各说各话；
@@ -15,16 +15,16 @@
  * 两个子模块只允许在**函数体内**读这些常量——模块顶层求值会在 `index.ts` 的常量初始化之前
  * 执行（ESM 先求值被导入的模块），拿到 TDZ 错误 `Cannot access 'X' before initialization`。
  */
-export const DESKTOP_NAMESPACE = '__FORGE_DESKTOP__'
-export const FORGE_SCHEME = 'forge-app'
-export const APP_ORIGIN = 'forge-app://app'
-export const SHELL_ORIGIN = 'forge-app://shell'
-export const CAPABILITIES_PATH = '/v1/forge/capabilities'
-export const META_PATH = '/v1/forge/meta'
+export const DESKTOP_NAMESPACE = '__MATE_DESKTOP__'
+export const MATE_SCHEME = 'mate-app'
+export const APP_ORIGIN = 'mate-app://app'
+export const SHELL_ORIGIN = 'mate-app://shell'
+export const CAPABILITIES_PATH = '/v1/mate/capabilities'
+export const META_PATH = '/v1/mate/meta'
 
 /**
  * CSP 策略（两处下发的**同一串**：核心在它服务的文档上加响应头 = 浏览器入口；壳在
- * `forge-app://app` 的文档响应上加同一个头 = 桌面窗口）。
+ * `mate-app://app` 的文档响应上加同一个头 = 桌面窗口）。
  *
  * 值本身是契约：Go 侧同值常量与这里**逐字相同**，由 archtest 守卫断言（M1-5）。纪律：
  * **不列任何外域**（无在线字体 / CDN / 遥测），`script-src` 不含 `unsafe-eval`（产物不得依赖 eval），
@@ -63,7 +63,7 @@ export type PlatformBridge = {
  * **只有"执行面"在这里**——能力**声明**走 HTTP（`CAPABILITIES_PATH`），两端同源同路径、结构同构，
  * 所以这里**没有** `capabilities()`（设计 §7.3 的声明面 / 执行面分工）。
  */
-export type ForgeDesktop = {
+export type MateDesktop = {
   boot(): Promise<{ streamBaseUrl: string; streamToken: string }>
   native: NativeBridge
   platform: PlatformBridge
@@ -96,7 +96,7 @@ export type CapabilityEntry = {
   browserFallback: BrowserFallback
 }
 
-/** `GET /v1/forge/capabilities` 的响应形状（两端同构，只有 `available` 的值不同）。 */
+/** `GET /v1/mate/capabilities` 的响应形状（两端同构，只有 `available` 的值不同）。 */
 export type Capabilities = {
   entries: { browser: boolean; desktop: boolean }
   capabilities: CapabilityEntry[]

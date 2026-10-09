@@ -3,7 +3,7 @@
  * 桌面入口界面与契约验收（M1-9 / M1-10；M5-2 会在这里补双端场景矩阵）——**真 Electron + 真核心**。
  *
  * 为什么单独一个脚本：`web-ui-acceptance.mjs` 打的是浏览器入口（真 Chrome + vite），
- * 而桌面入口有自己的一套东西——`forge-app://` scheme、壳反代、preload 注入面、CSP/导航/权限加固、
+ * 而桌面入口有自己的一套东西——`mate-app://` scheme、壳反代、preload 注入面、CSP/导航/权限加固、
  * 双凭据分层、父进程消失自保。这些只能在**真壳**里验。
  *
  * 零新依赖：CDP 用 Node 24 自带的全局 WebSocket 直连；壳用 node:child_process 起。
@@ -14,9 +14,9 @@
  *   KEEP_SHELL=1 ...                                      # 跑完不杀壳，便于人工接管
  *
  * 场景：
- *   guard        前置：不能有别的桌面壳/核心在跑（两个核心共用 ~/.forge/forge.db 会让断言读到别人的内存态）
+ *   guard        前置：不能有别的桌面壳/核心在跑（两个核心共用 ~/.ark-mate/mate.db 会让断言读到别人的内存态）
  *   shell        M1-3：origin、壳反代（页面不带凭据）、静态资产缓存头、深链与 /v1 归核心、壳静态页
- *   contract     M1-4：`__FORGE_DESKTOP__` 形状与契约一致；非载体 origin 为 undefined
+ *   contract     M1-4：`__MATE_DESKTOP__` 形状与契约一致；非载体 origin 为 undefined
  *   hardening    M1-5：CSP 与契约逐字一致、streamToken 不落存储面、权限全拒、导航被拦
  *   credentials  M1-9（V15）：渲染进程搜不到 restToken；streamToken 调 REST 401；attach 正/反例
  *   stream       M1-8：事件流直连回环 + 首帧 attach + 真实订阅收到服务端帧
@@ -89,7 +89,7 @@ let FAKE_BIN = ''
 let FAKE_MARKER = ''
 
 function setupFakeRuntimes() {
-  FAKE_BIN = mkdtempSync(join(tmpdir(), 'forge-fake-bin-'))
+  FAKE_BIN = mkdtempSync(join(tmpdir(), 'mate-fake-bin-'))
   FAKE_MARKER = join(FAKE_BIN, 'called')
   for (const name of ['dsh', 'opencode', 'node', 'npx']) {
     const file = join(FAKE_BIN, name)
@@ -103,13 +103,13 @@ function setupFakeRuntimes() {
   MINIMAL_ENV.PATH = `${FAKE_BIN}:/usr/bin:/bin`
 }
 
-/** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.forge 会让断言读到别人的内存态）。 */
+/** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.ark-mate 会让断言读到别人的内存态）。 */
 function scenarioGuard() {
-  section('前置：环境干净（同一份 ~/.forge 只能有一个核心）')
+  section('前置：环境干净（同一份 ~/.ark-mate 只能有一个核心）')
   const others = pidsMatching(new RegExp(`${CORE_RE.source}|${SHELL_RE.source}`))
   check('没有别的桌面壳/核心在跑', others.length === 0, others.length ? `pid=${others.join(',')}（请先关掉；本机 make dev 只跑浏览器入口，不冲突）` : '')
   check('apps/web/dist 已构建（壳要服务它）', existsSync(join(FRONTEND, 'apps', 'web', 'dist', 'index.html')), '缺则先 `cd frontend && pnpm build`')
-  // 每次起壳前把 forge-core（顺带刷新 resources/web）与壳的 dist/*.cjs 按当前代码重建：
+  // 每次起壳前把 mate-core（顺带刷新 resources/web）与壳的 dist/*.cjs 按当前代码重建：
   // 跑在旧产物上是这一路验收最贵的坑（新旧各踩过一次）。
   for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
 }
@@ -118,16 +118,16 @@ function scenarioGuard() {
 async function scenarioShell(cdp) {
   section('M1-3 scheme 三路分发与壳反代')
   const origin = await cdp.evalJs('return location.origin')
-  check('窗口 origin = forge-app://app', origin === 'forge-app://app', origin)
+  check('窗口 origin = mate-app://app', origin === 'mate-app://app', origin)
 
   const rendered = await waitFor(cdp, `return !!document.querySelector('#root') && (document.querySelector('#root').innerText ?? '').length > 0`)
   check('前端产物由壳服务并渲染（#root 有内容）', rendered)
 
-  const health = await cdp.evalJs(`const r = await fetch('/v1/forge/health'); return { s: r.status, b: (await r.text()).slice(0, 40) }`)
-  check('fetch /v1/forge/health 经壳反代 200（页面不带凭据）', health.s === 200 && health.b.includes('ok'), JSON.stringify(health))
+  const health = await cdp.evalJs(`const r = await fetch('/v1/mate/health'); return { s: r.status, b: (await r.text()).slice(0, 40) }`)
+  check('fetch /v1/mate/health 经壳反代 200（页面不带凭据）', health.s === 200 && health.b.includes('ok'), JSON.stringify(health))
 
-  const agents = await cdp.evalJs(`const r = await fetch('/v1/forge/agents'); const j = await r.json(); return { s: r.status, code: j.code, n: (j.data ?? []).length }`)
-  check('fetch /v1/forge/agents 经壳反代（restToken 由主进程注入）', agents.s === 200 && agents.code === 0, JSON.stringify(agents))
+  const agents = await cdp.evalJs(`const r = await fetch('/v1/mate/agents'); const j = await r.json(); return { s: r.status, code: j.code, n: (j.data ?? []).length }`)
+  check('fetch /v1/mate/agents 经壳反代（restToken 由主进程注入）', agents.s === 200 && agents.code === 0, JSON.stringify(agents))
 
   const asset = await cdp.evalJs(`
     const src = [...document.querySelectorAll('script[src],link[href]')].map(e => e.getAttribute('src') || e.getAttribute('href')).find(p => p && p.startsWith('/assets/'))
@@ -140,20 +140,20 @@ async function scenarioShell(cdp) {
   const index = await cdp.evalJs(`const r = await fetch('/index.html'); return { s: r.status, cache: r.headers.get('cache-control') }`)
   check('index.html no-store', index.s === 200 && index.cache === 'no-store', JSON.stringify(index))
 
-  const nf = await cdp.evalJs(`const r = await fetch('/v1/forge/does-not-exist'); const j = await r.json(); return { s: r.status, code: j.code }`)
+  const nf = await cdp.evalJs(`const r = await fetch('/v1/mate/does-not-exist'); const j = await r.json(); return { s: r.status, code: j.code }`)
   check('/v1 未注册路径回核心信封 404', nf.s === 404, JSON.stringify(nf))
 
-  await cdp.send('Page.navigate', { url: 'forge-app://shell/welcome.html' })
+  await cdp.send('Page.navigate', { url: 'mate-app://shell/welcome.html' })
   await sleep(700)
   const shellPage = await cdp.evalJs(`return { origin: location.origin, h1: document.querySelector('h1')?.innerText ?? null, bg: getComputedStyle(document.body).backgroundColor }`)
-  check('forge-app://shell/welcome.html 可打开且样式来自 tokens', shellPage.origin === 'forge-app://shell' && !!shellPage.h1 && shellPage.bg === 'rgb(247, 248, 250)', JSON.stringify(shellPage))
+  check('mate-app://shell/welcome.html 可打开且样式来自 tokens', shellPage.origin === 'mate-app://shell' && !!shellPage.h1 && shellPage.bg === 'rgb(247, 248, 250)', JSON.stringify(shellPage))
 
   // origin 恒定带来的收益（设计 §3）：刷新后 localStorage 仍在——这是"桌面入口不复用回环 origin"
   // 的直接兑现，也是 Gate M1 的手工确认项，既然能脚本化就别留给人工。
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(1500)
   await cdp.evalJs(`localStorage.setItem('gate-m1-probe', 'kept-across-reload'); return true`)
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(2000)
   const kept = await cdp.evalJs(`return localStorage.getItem('gate-m1-probe')`)
   check('原点恒定：刷新后 localStorage 仍在', kept === 'kept-across-reload', String(kept))
@@ -162,28 +162,28 @@ async function scenarioShell(cdp) {
 
 /** contract（M1-4）：注入面形状 + 非载体 origin 负例。 */
 async function scenarioContract(cdp) {
-  section('M1-4 载体契约（__FORGE_DESKTOP__）')
+  section('M1-4 载体契约（__MATE_DESKTOP__）')
   const shape = await cdp.evalJs(`
-    const d = window.__FORGE_DESKTOP__
+    const d = window.__MATE_DESKTOP__
     return { type: typeof d, top: d && Object.keys(d).sort(), native: d && Object.keys(d.native).sort(), platform: d && Object.keys(d.platform).sort() }
   `)
-  check('typeof __FORGE_DESKTOP__ = object', shape.type === 'object', shape.type)
+  check('typeof __MATE_DESKTOP__ = object', shape.type === 'object', shape.type)
   check('顶层键 = boot/native/platform（无 capabilities）', JSON.stringify(shape.top) === JSON.stringify(['boot', 'native', 'platform']), JSON.stringify(shape.top))
   check('native 键与契约一致', JSON.stringify(shape.native) === JSON.stringify(['openExternal', 'openPath', 'pathFor', 'pickDirectory']), JSON.stringify(shape.native))
   check('platform 键与契约一致', JSON.stringify(shape.platform) === JSON.stringify(['close', 'setBounds']), JSON.stringify(shape.platform))
 
   const helper = await cdp.evalJs(`
     const f = new File(['x'], 'pasted.txt')
-    return { path: window.__FORGE_DESKTOP__.native.pathFor(f), sniff: 'electron' in window }
+    return { path: window.__MATE_DESKTOP__.native.pathFor(f), sniff: 'electron' in window }
   `)
   check('pathFor(粘贴字节) 返回空串（无真实路径）', helper.path === '')
   check('页面没有 window.electron 嗅探面', helper.sniff === false)
 
-  await cdp.send('Page.navigate', { url: 'forge-app://shell/welcome.html' })
+  await cdp.send('Page.navigate', { url: 'mate-app://shell/welcome.html' })
   await sleep(700)
-  const neg = await cdp.evalJs('return typeof window.__FORGE_DESKTOP__')
-  check('负例：forge-app://shell/* 拿到 undefined（一次都不暴露）', neg === 'undefined', neg)
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  const neg = await cdp.evalJs('return typeof window.__MATE_DESKTOP__')
+  check('负例：mate-app://shell/* 拿到 undefined（一次都不暴露）', neg === 'undefined', neg)
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(1500)
 }
 
@@ -216,7 +216,7 @@ async function scenarioHardening(cdp) {
 async function scenarioCredentials(cdp) {
   section('M1-9 凭据分层（V15）')
   const boot = await cdp.evalJs(`
-    const b = await window.__FORGE_DESKTOP__.boot()
+    const b = await window.__MATE_DESKTOP__.boot()
     return { base: b.streamBaseUrl, stream: b.streamToken }
   `)
   check('boot() 下发回环基址与 streamToken', /^ws:\/\/127\.0\.0\.1:\d+$/.test(boot.base) && boot.stream.length === 43, boot.base)
@@ -238,14 +238,14 @@ async function scenarioCredentials(cdp) {
   // ② streamToken 调 REST → 401。**在 Node 侧发**：页面里根本打不到核心的 REST 面
   //    （CSP 的 connect-src 只放开 `'self'` 与 `ws://127.0.0.1:*`），这本身就是要断言的性质。
   const origin = boot.base.replace('ws://', 'http://')
-  const rest = await fetch(`${origin}/v1/forge/agents`, { headers: { authorization: `Bearer ${boot.stream}` } })
+  const rest = await fetch(`${origin}/v1/mate/agents`, { headers: { authorization: `Bearer ${boot.stream}` } })
   const restBody = await rest.json().catch(() => ({}))
   check('streamToken 调 REST → 401（V15 互斥）', rest.status === 401, `${rest.status} code=${restBody.code}`)
 
   // ②b 反向断言：页面**不能**直连核心 REST（CSP connect-src 不给 http 回环；REST 只能走壳反代）
   const direct = await cdp.evalJs(`
     try {
-      const r = await fetch(${JSON.stringify(origin)} + '/v1/forge/agents')
+      const r = await fetch(${JSON.stringify(origin)} + '/v1/mate/agents')
       return { blocked: false, status: r.status }
     } catch (e) { return { blocked: true, err: String(e).slice(0, 60) } }
   `)
@@ -254,7 +254,7 @@ async function scenarioCredentials(cdp) {
   // ③/④ attach 正反例：streamToken 通过、restToken 被拒（1008）——restToken 的值页面拿不到，
   //      因此这里只做"streamToken 通过"；restToken 的反例由 Go 侧单测与手工验收覆盖。
   const attach = await cdp.evalJs(`
-    const url = ${JSON.stringify(boot.base)} + '/v1/forge/ws/events'
+    const url = ${JSON.stringify(boot.base)} + '/v1/mate/ws/events'
     return await new Promise((resolve) => {
       const ws = new WebSocket(url)
       const out = { opened: false, closed: null, frames: [] }
@@ -267,7 +267,7 @@ async function scenarioCredentials(cdp) {
   check('streamToken 走首帧 attach → 正常订阅（收到 snapshot）', attach.frames?.includes('snapshot'), JSON.stringify(attach))
 
   const bad = await cdp.evalJs(`
-    const url = ${JSON.stringify(boot.base)} + '/v1/forge/ws/events'
+    const url = ${JSON.stringify(boot.base)} + '/v1/mate/ws/events'
     return await new Promise((resolve) => {
       const ws = new WebSocket(url)
       ws.onopen = () => ws.send(JSON.stringify({ action: 'attach', token: 'definitely-wrong-token' }))
@@ -281,22 +281,22 @@ async function scenarioCredentials(cdp) {
 /** stream（M1-8）：事件流真的通。 */
 async function scenarioStream(cdp) {
   section('M1-8 事件流（直连回环 + 首帧 attach）')
-  const boot = await cdp.evalJs(`const b = await window.__FORGE_DESKTOP__.boot(); return b`)
+  const boot = await cdp.evalJs(`const b = await window.__MATE_DESKTOP__.boot(); return b`)
   check('boot().streamBaseUrl 是回环地址', /^ws:\/\/127\.0\.0\.1:\d+$/.test(boot.streamBaseUrl), boot.streamBaseUrl)
 
   cdp.events.length = 0
   await cdp.send('Network.enable')
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(6000)
   const created = cdp.events.filter((e) => e.method === 'Network.webSocketCreated').map((e) => e.params.url)
-  check('WS 建连直连回环（非 forge-app://）', created.some((u) => u.startsWith('ws://127.0.0.1:')), JSON.stringify(created))
+  check('WS 建连直连回环（非 mate-app://）', created.some((u) => u.startsWith('ws://127.0.0.1:')), JSON.stringify(created))
   const handshake = cdp.events.find((e) => e.method === 'Network.webSocketHandshakeResponseReceived')
   check('WS 握手 101', handshake?.params.response?.status === 101, String(handshake?.params.response?.status))
   const sent = cdp.events.filter((e) => e.method === 'Network.webSocketFrameSent').map((e) => e.params.response?.payloadData ?? '')
   const attachFrame = sent.find((f) => f.includes('"action":"attach"'))
   check('首帧 attach 带 43 字符 streamToken', !!attachFrame && String(JSON.parse(attachFrame).token).length === 43, attachFrame?.slice(0, 60))
 
-  const conv = await cdp.evalJs(`const r = await fetch('/v1/forge/conversations'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
+  const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/conversations'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
   if (!conv) {
     check('订阅真实会话并收到服务端帧', false, '本地库没有会话可订阅')
     return
@@ -318,7 +318,7 @@ async function scenarioGate(cdp) {
   const idFile = join(webOut, 'build-id.txt')
 
   // ① 核心确实拿到了 --web-dir（M2-6）：/meta 应报 dir + 绝对路径 + 与文件一致的 build id
-  const meta = await cdp.evalJs(`const r = await fetch('/v1/forge/meta'); const j = await r.json(); return j.data`)
+  const meta = await cdp.evalJs(`const r = await fetch('/v1/mate/meta'); const j = await r.json(); return j.data`)
   check('核心以 dir 来源服务资产（--web-dir 生效）', meta.webSource === 'dir', `webSource=${meta.webSource}`)
   check('webPath 指向运行时树里那一份', typeof meta.webPath === 'string' && meta.webPath.endsWith(join('resources', 'web')), String(meta.webPath))
   const fileId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
@@ -326,19 +326,19 @@ async function scenarioGate(cdp) {
   check('coreVersion/apiContract 在位', !!meta.coreVersion && meta.apiContract === 'v1', `${meta.coreVersion}/${meta.apiContract}`)
 
   // ② 一致 → 正常进界面（没有整屏状态页）
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(2500)
-  const normal = await cdp.evalJs(`return { gate: !!document.querySelector('[data-forge-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
+  const normal = await cdp.evalJs(`return { gate: !!document.querySelector('[data-mate-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
   check('一致时正常进界面（无状态页）', normal.gate === false && normal.text > 0, JSON.stringify(normal))
 
   // ③ 造不一致：只改 build-id.txt，不重编译前端（V8 的手法）
   try {
     writeFileSync(idFile, 'tampered-build-id\n', 'utf8')
-    await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+    await cdp.send('Page.navigate', { url: 'mate-app://app/' })
     await sleep(2500)
     const bad = await cdp.evalJs(`
-      const w = document.querySelector('[data-forge-version-gate]')
-      return { gate: !!w, text: w?.innerText ?? '', btn: !!document.getElementById('forge-version-gate-reload'), app: (document.querySelector('#root')?.innerText ?? '').length }
+      const w = document.querySelector('[data-mate-version-gate]')
+      return { gate: !!w, text: w?.innerText ?? '', btn: !!document.getElementById('mate-version-gate-reload'), app: (document.querySelector('#root')?.innerText ?? '').length }
     `)
     check('改 build-id.txt 后出现整屏状态页', bad.gate === true, bad.gate ? '' : `页面文本长度=${bad.app}`)
     check('状态页写明"版本不一致"与两侧取值', /版本不一致/.test(bad.text) && bad.text.includes('tampered-build-id'), bad.text.slice(0, 120).replace(/\n/g, ' | '))
@@ -350,9 +350,9 @@ async function scenarioGate(cdp) {
   }
 
   // ④ 恢复 → 正常进界面
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(2500)
-  const restored = await cdp.evalJs(`return { gate: !!document.querySelector('[data-forge-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
+  const restored = await cdp.evalJs(`return { gate: !!document.querySelector('[data-mate-version-gate]'), text: (document.querySelector('#root')?.innerText ?? '').length }`)
   check('恢复一致后正常进入', restored.gate === false && restored.text > 0, JSON.stringify(restored))
 }
 
@@ -389,7 +389,7 @@ async function scenarioExit(shell) {
 
   // ③ 退出后无残留
   await sleep(400)
-  check('无 forge-core 残留', pidsMatching(CORE_RE).length === 0)
+  check('无 mate-core 残留', pidsMatching(CORE_RE).length === 0)
   check('无 electron 残留', pidsMatching(SHELL_RE).length === 0)
   const dangling = psAll()
     .split('\n')
@@ -411,9 +411,9 @@ async function scenarioExit(shell) {
 // ——— 直测 --exit-with-parent（父进程被强杀；核心 stderr 直接落文件才留得下原因行）———
 async function scenarioDirectParentGone() {
   section('M1-6 直测：父进程被 SIGKILL 后核心自退（--exit-with-parent）')
-  const core = join(DESKTOP, 'resources/forge-core')
-  const outFile = '/tmp/forge-accept-core.out'
-  const errFile = '/tmp/forge-accept-core.err'
+  const core = join(DESKTOP, 'resources/mate-core')
+  const outFile = '/tmp/mate-accept-core.out'
+  const errFile = '/tmp/mate-accept-core.err'
   const parentCode = `
     const { spawn } = require('node:child_process')
     const fs = require('node:fs')
@@ -503,19 +503,19 @@ async function scenarioNodeChannel(shell) {
   // ① 核心进程实际拿到的环境
   const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
   const path = envValue(psEnv, 'PATH')
-  const electron = envValue(psEnv, 'FORGE_NODE_EXECUTABLE')
+  const electron = envValue(psEnv, 'MATE_NODE_EXECUTABLE')
   check('核心 PATH 首段是私有 bin', (path ?? '').startsWith(`${binDir}:`), path)
   // 调用方 PATH 原样落在私有 bin 之后。**不硬编码 `/usr/bin:/bin`**：M3-4 起验收会把假底座目录
   // 前置到调用方 PATH（V10 ③），断言要跟着真实调用方 PATH 走，否则测的是"我记住的那个常量"。
   check('调用方 PATH 完整保留在尾部（不吞用户环境）', path === `${binDir}:${MINIMAL_ENV.PATH}`, path)
-  check('FORGE_NODE_EXECUTABLE 指向 Electron 本体', /Electron\.app\/Contents\/MacOS\/Electron$/.test(electron ?? ''), electron)
+  check('MATE_NODE_EXECUTABLE 指向 Electron 本体', /Electron\.app\/Contents\/MacOS\/Electron$/.test(electron ?? ''), electron)
   check('ELECTRON_RUN_AS_NODE=1（Node 模式随进程链继承）', envValue(psEnv, 'ELECTRON_RUN_AS_NODE') === '1')
 
   // ② 私有 bin 的 node/npx 就是 Electron 的 Node
-  // `FORGE_HOME` 必须一起给：我们的载荷会往自己的 home 写（dsh 连 `--version` 都写），
+  // `MATE_HOME` 必须一起给：我们的载荷会往自己的 home 写（dsh 连 `--version` 都写），
   // 缺了它就会落到用户的 `~/.dsh`——这一点是 isolation 场景的目录指纹断言抓出来的（M3-3 实测）。
-  const forgeHome = envValue(psEnv, 'FORGE_HOME') ?? ''
-  const childEnv = { PATH: `${binDir}:/usr/bin:/bin`, FORGE_NODE_EXECUTABLE: electron ?? '', FORGE_HOME: forgeHome }
+  const mateHome = envValue(psEnv, 'MATE_HOME') ?? ''
+  const childEnv = { PATH: `${binDir}:/usr/bin:/bin`, MATE_NODE_EXECUTABLE: electron ?? '', MATE_HOME: mateHome }
   const nodeProbe = spawnSync(join(binDir, 'node'), ['-p', 'JSON.stringify({e:process.versions.electron,n:process.versions.node,a:process.versions.modules})'], {
     encoding: 'utf8',
     env: childEnv,
@@ -547,7 +547,7 @@ async function scenarioNodeChannel(shell) {
   } else {
     const npxProbe = spawnSync(join(binDir, 'npx'), ['--version'], {
       encoding: 'utf8',
-      env: { ...childEnv, FORGE_NPX_ENTRY: npxEntry },
+      env: { ...childEnv, MATE_NPX_ENTRY: npxEntry },
     })
     check('私有 npx 跑起载荷里的 npm JS（Electron 的 Node 上）', /^\d+\.\d+\.\d+/.test((npxProbe.stdout ?? '').trim()), (npxProbe.stdout ?? '').trim() || (npxProbe.stderr ?? '').trim().slice(0, 80))
   }
@@ -557,7 +557,7 @@ async function scenarioNodeChannel(shell) {
   if (!dshEntry) {
     check('载荷里 dsh 的 bin.js 在场（`make desktop/payloads`）', false, '载荷缺失——先跑 make desktop/payloads')
   } else {
-    const dshProbe = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { ...childEnv, FORGE_DSH_ENTRY: dshEntry } })
+    const dshProbe = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { ...childEnv, MATE_DSH_ENTRY: dshEntry } })
     const dshOut = (dshProbe.stdout ?? '').trim()
     check(
       '私有 dsh 启动器跑起随包载荷（版本 == 载荷清单）',
@@ -566,21 +566,21 @@ async function scenarioNodeChannel(shell) {
     )
   }
 
-  // ②′ 私有 dsh 启动器自己兜底隔离变量：只给 FORGE_HOME，不给 DSH_HOME，看它认哪个 home。
+  // ②′ 私有 dsh 启动器自己兜底隔离变量：只给 MATE_HOME，不给 DSH_HOME，看它认哪个 home。
   // 用载荷自己的 dsh-home-paths 读出结果——"启动器有没有隔离"由被隔离者回答，不由我们推断。
   const homePathsEntry = payloadFile('dsh', 'node_modules', '@deepseek-ai', 'dsh-home-paths', 'lib', 'index.js')
-  if (homePathsEntry && forgeHome) {
+  if (homePathsEntry && mateHome) {
     const probe = spawnSync(
       join(binDir, 'node'),
       ['-e', `const m=require(process.argv[1]); process.stdout.write(m.dshHomePath())`, homePathsEntry],
       {
         encoding: 'utf8',
         // 不传 DSH_HOME：让启动器/环境里的兜底起作用（这里直接复现启动器的兜底语义）
-        env: { ...childEnv, DSH_HOME: `${forgeHome}/runtime/dsh` },
+        env: { ...childEnv, DSH_HOME: `${mateHome}/runtime/dsh` },
       },
     )
     const reported = (probe.stdout ?? '').trim()
-    check('私有通道下 dsh 的 home 落在 FORGE_HOME 内（不碰 ~/.dsh）', reported === `${forgeHome}/runtime/dsh`, reported || (probe.stderr ?? '').slice(0, 80))
+    check('私有通道下 dsh 的 home 落在 MATE_HOME 内（不碰 ~/.dsh）', reported === `${mateHome}/runtime/dsh`, reported || (probe.stderr ?? '').slice(0, 80))
   }
 
   // ③ 缺注入 → 大声失败，不静默回落
@@ -606,7 +606,7 @@ function dirFingerprint(dir) {
  *  为什么必须有这条：`~/.dsh` 是 **DSH 宿主会话自己的状态目录**——用户开着 dsh 时它本来就会被
  *  持续改写（2026-10-09 实测：一个 32s 的验收窗口里它自己长了 ~44KB，**文件数与目录 mtime 都没动**，
  *  只有 KB 在变；同一台机器上 `DeepSeek Harness.app` 已跑了一个多小时）。没有这条，
- *  "forge 有没有写用户目录"会被外部写者恒久弄红，而红出来的东西没法判定是不是 forge 干的。
+ *  "mate 有没有写用户目录"会被外部写者恒久弄红，而红出来的东西没法判定是不是 mate 干的。
  *  判据只看进程表：命令行里出现该目录对应的工具名，且**不属于本仓这条链**（探针路径都在仓库下）。
  *  走到这里时本仓的壳/核心/runtime 已全部回收，所以剩下的命中就是别人的进程。 */
 function externalWritersOf(dir) {
@@ -621,7 +621,7 @@ function externalWritersOf(dir) {
  * M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）。
  *
  * 验的是三件事，分别对应三层：
- *   ① `FORGE_HOME` 与 npm 面在**核心进程的环境**里（壳的职责；`env.ts`）；
+ *   ① `MATE_HOME` 与 npm 面在**核心进程的环境**里（壳的职责；`env.ts`）；
  *   ② 设计 §6.6.1 那张表的变量名**确实被载荷认**——用 dsh 自己的 `dsh-home-paths` 回答
  *      "我的 home 在哪"，而不是我们替它判断（文档写的变量名错了，这条会红）；
  *   ③ 用户既有的 `~/.dsh` / `~/.config/opencode` 在整轮验收（含其它场景真起的核心）前后**零变化**。
@@ -639,10 +639,10 @@ async function scenarioPayload(cdp, shell) {
   section('M3-4：载荷解析链与不探测本机（设计 §6.5）')
 
   // ① 壳 → 核心：`/meta` 的 payloads[]（壳经 `--payloads` 交过去的已解析结果）
-  await cdp.send('Page.navigate', { url: 'forge-app://app/' })
+  await cdp.send('Page.navigate', { url: 'mate-app://app/' })
   await sleep(200)
   const meta = await cdp.evalJs(
-    `const r = await fetch('/v1/forge/meta'); const j = await r.json(); return j.data`,
+    `const r = await fetch('/v1/mate/meta'); const j = await r.json(); return j.data`,
   )
   const list = Array.isArray(meta?.payloads) ? meta.payloads : []
   const dsh = list.find((p) => p.name === 'dsh')
@@ -660,9 +660,9 @@ async function scenarioPayload(cdp, shell) {
   const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
   const payloadsRoot = join(DESKTOP, 'resources', 'payloads')
   for (const [key, expect] of [
-    ['FORGE_DSH_ENTRY', join('dsh')],
-    ['FORGE_OPENCODE_BIN', join('opencode')],
-    ['FORGE_NPX_ENTRY', join('dsh')],
+    ['MATE_DSH_ENTRY', join('dsh')],
+    ['MATE_OPENCODE_BIN', join('opencode')],
+    ['MATE_NPX_ENTRY', join('dsh')],
   ]) {
     const value = envValue(psEnv, key)
     check(
@@ -680,9 +680,9 @@ async function scenarioPayload(cdp, shell) {
     timeout: 60_000,
     env: {
       PATH: `${binDir}${process.env.PATH ? `:${process.env.PATH}` : ''}`,
-      FORGE_NODE_EXECUTABLE: envValue(psEnv, 'FORGE_NODE_EXECUTABLE') ?? '',
-      FORGE_HOME: envValue(psEnv, 'FORGE_HOME') ?? '',
-      FORGE_DSH_ENTRY: envValue(psEnv, 'FORGE_DSH_ENTRY') ?? '',
+      MATE_NODE_EXECUTABLE: envValue(psEnv, 'MATE_NODE_EXECUTABLE') ?? '',
+      MATE_HOME: envValue(psEnv, 'MATE_HOME') ?? '',
+      MATE_DSH_ENTRY: envValue(psEnv, 'MATE_DSH_ENTRY') ?? '',
     },
   })
   const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.trim()
@@ -692,11 +692,11 @@ async function scenarioPayload(cdp, shell) {
 
   // ④ 解析链本身：三级行为逐条钉住（注入依赖 → 不动机器状态）
   const { resolvePayload } = await import(new URL(`../apps/desktop/src/payload.ts`, import.meta.url).href)
-  const tmpRoot = mkdtempSync(join(tmpdir(), 'forge-payload-probe-'))
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'mate-payload-probe-'))
   const fakeForeign = join(tmpRoot, 'foreign-dsh')
   writeFileSync(fakeForeign, '#!/bin/sh\necho foreign\n', { mode: 0o755 })
 
-  const explicit = resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { FORGE_RUNTIME_DSH: fakeForeign } })
+  const explicit = resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { MATE_RUNTIME_DSH: fakeForeign } })
   check('显式配置命中 → source=runtime-env（用户指名的优先）', explicit.source === 'runtime-env' && explicit.entry === fakeForeign, `${explicit.source}:${explicit.entry}`)
   check('显式配置下摘要记为 unknown（不是我们发的，没有可核对的清单）', explicit.digest === 'unknown', explicit.digest)
 
@@ -711,7 +711,7 @@ async function scenarioPayload(cdp, shell) {
 
   let badExplicitErr = ''
   try {
-    resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { FORGE_RUNTIME_DSH: join(tmpRoot, 'nope') } })
+    resolvePayload('dsh', undefined, { payloadsRoot: join(tmpRoot, 'empty'), env: { MATE_RUNTIME_DSH: join(tmpRoot, 'nope') } })
   } catch (e) {
     badExplicitErr = String(e)
   }
@@ -759,12 +759,12 @@ async function scenarioOrigin(shell) {
   check('拿到核心实际监听地址（端口是内核分配的，白名单必须按它判）', !!addr, addr || shell.logText().slice(-200))
   if (!addr) return
   const port = addr.slice(addr.indexOf(':') + 1)
-  const path = '/v1/forge/health'
+  const path = '/v1/mate/health'
 
-  // ① 放行面：无 Origin（壳内反代/curl）、forge-app://app（桌面直连）、核心自己的同源（浏览器入口）
+  // ① 放行面：无 Origin（壳内反代/curl）、mate-app://app（桌面直连）、核心自己的同源（浏览器入口）
   for (const [label, headers] of [
     ['无 Origin（壳内反代 / curl）', { Host: addr }],
-    ['Origin: forge-app://app（桌面直连）', { Host: addr, Origin: 'forge-app://app' }],
+    ['Origin: mate-app://app（桌面直连）', { Host: addr, Origin: 'mate-app://app' }],
     [`Origin: http://127.0.0.1:${port}（浏览器入口同源）`, { Host: addr, Origin: `http://127.0.0.1:${port}` }],
     [`Origin: http://localhost:${port}`, { Host: addr, Origin: `http://localhost:${port}` }],
   ]) {
@@ -777,7 +777,7 @@ async function scenarioOrigin(shell) {
     ['别的本地源 http://127.0.0.1:9999', { Host: addr, Origin: 'http://127.0.0.1:9999' }],
     ['别的本地源 http://localhost:9999', { Host: addr, Origin: 'http://localhost:9999' }],
     ['远端源 https://evil.example', { Host: addr, Origin: 'https://evil.example' }],
-    ['伪造 scheme forge-app://other', { Host: addr, Origin: 'forge-app://other' }],
+    ['伪造 scheme mate-app://other', { Host: addr, Origin: 'mate-app://other' }],
     ['Origin: null（沙箱 iframe / 重定向）', { Host: addr, Origin: 'null' }],
   ]) {
     const r = await rawRequest(addr, path, headers)
@@ -790,7 +790,7 @@ async function scenarioOrigin(shell) {
     ['Host: 127.0.0.1:其它端口', '127.0.0.1:1'],
     ['Host: 127.0.0.1.evil.example', `127.0.0.1.evil.example:${port}`],
   ]) {
-    const r = await rawRequest(addr, path, { Host: host, Origin: 'forge-app://app' })
+    const r = await rawRequest(addr, path, { Host: host, Origin: 'mate-app://app' })
     check(`拒绝：${label} → 421`, r.status === 421, `status=${r.status}`)
   }
 
@@ -801,7 +801,7 @@ async function scenarioOrigin(shell) {
       const req = http.request({
         host,
         port: Number(p),
-        path: '/v1/forge/ws/events',
+        path: '/v1/mate/ws/events',
         method: 'GET',
         headers: {
           Connection: 'Upgrade',
@@ -825,7 +825,7 @@ async function scenarioOrigin(shell) {
 
   const badOrigin = await wsHandshake({ Host: addr, Origin: 'http://127.0.0.1:9999' })
   check('WS：别的本地源的握手被拒（无 101）', badOrigin.status === 403, `status=${badOrigin.status}`)
-  const badHost = await wsHandshake({ Host: 'evil.example', Origin: 'forge-app://app' })
+  const badHost = await wsHandshake({ Host: 'evil.example', Origin: 'mate-app://app' })
   check('WS：伪造 Host 的握手被拒', badHost.status === 421, `status=${badHost.status}`)
 }
 
@@ -833,18 +833,18 @@ async function scenarioIsolation(shell) {
   section('M3-3：环境注入与 runtime 配置隔离（设计 §6.6 / §6.6.1）')
 
   const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
-  const home = envValue(psEnv, 'FORGE_HOME')
-  check('核心环境里有 FORGE_HOME（三端共用一份数据目录）', !!home && home.startsWith('/'), home)
-  check('FORGE_HOME 是绝对路径且指向 .forge 或其显式覆盖', !!home && home.includes('.forge') || !!process.env.FORGE_DESKTOP_HOME, home)
+  const home = envValue(psEnv, 'MATE_HOME')
+  check('核心环境里有 MATE_HOME（三端共用一份数据目录）', !!home && home.startsWith('/'), home)
+  check('MATE_HOME 是绝对路径且指向 .ark-mate 或其显式覆盖', !!home && home.includes('.ark-mate') || !!process.env.MATE_DESKTOP_HOME, home)
   const cache = envValue(psEnv, 'npm_config_cache')
   const prefix = envValue(psEnv, 'npm_config_prefix')
-  check('npm_config_cache 落在 FORGE_HOME 内（不污染 ~/.npm）', !!cache && !!home && cache.startsWith(`${home}/`), cache)
-  check('npm_config_prefix 落在 FORGE_HOME 内', !!prefix && !!home && prefix.startsWith(`${home}/`), prefix)
+  check('npm_config_cache 落在 MATE_HOME 内（不污染 ~/.npm）', !!cache && !!home && cache.startsWith(`${home}/`), cache)
+  check('npm_config_prefix 落在 MATE_HOME 内', !!prefix && !!home && prefix.startsWith(`${home}/`), prefix)
 
   // ② 设计 §6.6.1 的 dsh 行：变量名是实测值，用载荷自己的代码回话
   const nodeBin = join(DESKTOP, 'resources', 'runtime', 'bin', 'node')
   const homePaths = payloadFile('dsh', 'node_modules', '@deepseek-ai', 'dsh-home-paths', 'lib', 'index.js')
-  const electron = envValue(psEnv, 'FORGE_NODE_EXECUTABLE')
+  const electron = envValue(psEnv, 'MATE_NODE_EXECUTABLE')
   if (!homePaths) {
     check('载荷里有 dsh-home-paths（`make desktop/payloads`）', false, '载荷缺失')
   } else {
@@ -855,7 +855,7 @@ async function scenarioIsolation(shell) {
         encoding: 'utf8',
         env: {
           PATH: `${join(DESKTOP, 'resources', 'runtime', 'bin')}:/usr/bin:/bin`,
-          FORGE_NODE_EXECUTABLE: electron ?? '',
+          MATE_NODE_EXECUTABLE: electron ?? '',
           // 与隔离面同源：核心注入 DSH_HOME（Go 侧 IsolationEnv），私有 dsh 启动器另有同值兜底。
           // 这里给的就是"核心会给"的那个值——验的是设计 §6.6.1 的**变量名**有没有被载荷认。
           DSH_HOME: `${home}/runtime/dsh`,
@@ -864,7 +864,7 @@ async function scenarioIsolation(shell) {
     )
     const [reportedHome, reportedCache] = (probe.stdout ?? '').trim().split('\n')
     check('dsh 认 DSH_HOME（载荷自己的 dsh-home-paths 说的）', reportedHome === `${home}/runtime/dsh`, reportedHome || (probe.stderr ?? '').slice(0, 80))
-    check('dsh 的 cache 落在 FORGE_HOME 内', (reportedCache ?? '').startsWith(`${home}/`), reportedCache)
+    check('dsh 的 cache 落在 MATE_HOME 内', (reportedCache ?? '').startsWith(`${home}/`), reportedCache)
   }
 
   // ③ 用户既有配置目录：整轮验收前后零变化
@@ -872,7 +872,7 @@ async function scenarioIsolation(shell) {
   //
   // 一条已实测的**环境噪声**（2026-10-09）：用户自己可能正在跑 dsh（DSH 宿主会话会把
   // 会话日志/状态追加进 `~/.dsh`），验收窗口里那个目录会自己长大——文件数与 mtime 都没动、
-  // 只有 KB 在变，于是"forge 碰没碰用户目录"被外部写者弄成假红。判据因此加一段：前后不等时
+  // 只有 KB 在变，于是"mate 碰没碰用户目录"被外部写者弄成假红。判据因此加一段：前后不等时
   // **查进程表里有没有这个目录的外部写者**（走到这里本仓的壳/核心/runtime 已全部回收）；
   // 有 → 本条**跳过**（不是放过：它此刻不可判定），没有 → 照旧判红。
   const userDirs = [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')].filter((d) => existsSync(d))
@@ -905,7 +905,7 @@ const want = argv.length ? argv : SCENARIOS
 async function main() {
   const t0 = Date.now()
   console.log('桌面入口验收（真 Electron + 真核心）')
-  // guard **总是**跑（不是可选场景）：它既做前置检查，也负责把 forge-core 与壳产物按当前代码重建。
+  // guard **总是**跑（不是可选场景）：它既做前置检查，也负责把 mate-core 与壳产物按当前代码重建。
   // 首版把它做成"只在显式选 guard 时跑"，于是单跑某个场景时用的是上一次的旧二进制——
   // 实测表现为"改了核心代码，场景却看不到改动"（查了半天才发现跑的是 13:23 的产物）。
   // 隔离断言（M3-3）的前置快照：必须早于任何会真起核心/跑会话的场景。

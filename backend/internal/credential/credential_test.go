@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/credential"
+	"github.com/morehao/ark-mate/internal/credential"
 )
 
 // TestSetEmptyIsNotPermissive 空表**不放行**：不鉴权的判定属于调用方（Required()），
@@ -72,7 +72,7 @@ func TestScopesAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// TestStandaloneTokenHasBothScopes 独立态（FORGE_TOKEN）保持既有语义：
+// TestStandaloneTokenHasBothScopes 独立态（MATE_TOKEN）保持既有语义：
 // 同一个令牌同时具备两个面，REST 与事件流都能用。
 func TestStandaloneTokenHasBothScopes(t *testing.T) {
 	const tok = "legacy-single-operator-token"

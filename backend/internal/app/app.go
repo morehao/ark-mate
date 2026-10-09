@@ -1,7 +1,7 @@
 // Package app 是控制面应用的装配层（对齐 ark-iam 的 apps/<app>/app.go）。
 //
 // 职责边界：
-//   - cmd/forge：进程级分发（把参数交给 command.Run，把返回码交还 shell）；
+//   - cmd/mate：进程级分发（把参数交给 command.Run，把返回码交还 shell）；
 //   - internal/app/command：子命令参数解析与命令行输出；
 //   - 本包：按解析后的配置装配运行时依赖（事件总线 / 领域服务 / 编排器 / 持久层 /
 //     进程注册表 / 路由引擎），并持有启停生命周期；
@@ -23,17 +23,17 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/middleware"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/version"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/procreg"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/version"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ExitError 携带进程退出码的装配错误。
@@ -83,11 +83,11 @@ type App struct {
 	st  *store.Store
 	srv *httpServer
 
-	// creds 凭据表（M1-1）：桌面态由命令层经 --auth-stdin 注入；独立态由 FORGE_TOKEN 折叠而来。
-	// **不进 config.Config**——配置面会被 `forge config --json` 打印出来，令牌不该出现在那里。
+	// creds 凭据表（M1-1）：桌面态由命令层经 --auth-stdin 注入；独立态由 MATE_TOKEN 折叠而来。
+	// **不进 config.Config**——配置面会被 `mate config --json` 打印出来，令牌不该出现在那里。
 	creds *credential.Set
 
-	// readyStdout 是否在监听成功后往 stdout 打一行 `FORGE_READY {...}`（M1-2，桌面壳据此拿地址）。
+	// readyStdout 是否在监听成功后往 stdout 打一行 `MATE_READY {...}`（M1-2，桌面壳据此拿地址）。
 	readyStdout bool
 
 	// payloads 桌面态已解析的随包运行时载荷清单（M3-4）：**唯一真源是壳**（只有它做了
@@ -104,7 +104,7 @@ type App struct {
 // Option 装配可选项（M1-1/M1-2）。
 type Option func(*App)
 
-// WithCredentials 注入凭据表（桌面态双凭据；独立态通常不传，走 FORGE_TOKEN 折叠）。
+// WithCredentials 注入凭据表（桌面态双凭据；独立态通常不传，走 MATE_TOKEN 折叠）。
 func WithCredentials(creds *credential.Set) Option {
 	return func(a *App) { a.creds = creds }
 }
@@ -131,10 +131,10 @@ func New(cfg config.Config, sources config.Sources, opts ...Option) *App {
 	return a
 }
 
-// Service 返回领域服务实现（供命令层做迁移等直连操作，如 forge demo）。
+// Service 返回领域服务实现（供命令层做迁移等直连操作，如 mate demo）。
 func (a *App) Service() *manager.Service { return a.svc }
 
-// Orchestrator 返回编排器（供命令层直接驱动一次性会话，如 forge demo）。
+// Orchestrator 返回编排器（供命令层直接驱动一次性会话，如 mate demo）。
 func (a *App) Orchestrator() *manager.Orchestrator { return a.orch }
 
 // Engine 返回底层 gin.Engine（供测试挂载/断言路由）。
@@ -172,7 +172,7 @@ func (a *App) Init(ctx context.Context) error {
 	a.svc = manager.NewService(reg, a.bus)
 	a.reg = reg
 
-	// 持久层装配（P1）：FORGE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
+	// 持久层装配（P1）：MATE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
 	mode := cfg.ResolvedStoreMode()
 	switch mode {
@@ -190,15 +190,15 @@ func (a *App) Init(ctx context.Context) error {
 		a.st = st
 		a.svc.EnableStore(st)
 		// 能力定义一次性导入（M6-4）：v8 之后 DB 才是能力面的事实源，而存量定义还在
-		// `FORGE_CAPABILITIES` 目录里。**必须发生在 loadDefinitions 之前**——装载只从 DB 读，
+		// `MATE_CAPABILITIES` 目录里。**必须发生在 loadDefinitions 之前**——装载只从 DB 读，
 		// 导入晚了这一轮启动的能力面就是空的（用户看到"我的技能全没了"，哪怕下一轮就回来）。
 		//
 		// 幂等靠目录指纹（`meta.imported_capabilities`），且**按行判重**（导入绝不覆盖）：
 		// 目录没变 → 一个字节都不写；目录变了 → 只补缺失的行。失败只 WARN 不阻断启动
-		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `forge capability import`。
+		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `mate capability import`。
 		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量能力定义失败（能力面可能为空；可跑 `forge capability import` 重试）",
+			slog.Warn("serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
 				"err", iErr, "dir", cfg.CapabilityDir)
 		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
 			slog.Info("serve: 存量能力定义导入完成",
@@ -207,13 +207,13 @@ func (a *App) Init(ctx context.Context) error {
 				"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
 		}
 		// agent 定义一次性导入（M6-6）：与上面能力面**同一次触发、同一个理由**（v9 之后 DB 才是
-		// agent 定义的事实源，而存量定义还在 `FORGE_AGENTS` 里），也必须发生在 loadDefinitions 之前。
+		// agent 定义的事实源，而存量定义还在 `MATE_AGENTS` 里），也必须发生在 loadDefinitions 之前。
 		// 目录里的 `providers.json`（档案留在文件侧）与 `default.json`（显式选择进 meta）不参与导入。
 		//
 		// 两个域各自记指纹（`meta.imported_agents`）：只改 agent 目录不该让能力面的导入重跑一遍。
 		if imp, iErr := manager.ImportAgentDir(ctx, st, cfg.AgentDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `forge agent import` 重试）",
+			slog.Warn("serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `mate agent import` 重试）",
 				"err", iErr, "dir", cfg.AgentDir)
 		} else if !imp.Already && imp.Agents+imp.Inserted+imp.Existing+imp.Invalid > 0 {
 			slog.Info("serve: 存量 agent 定义导入完成",
@@ -221,14 +221,14 @@ func (a *App) Init(ctx context.Context) error {
 				"existing", imp.Existing, "invalid", imp.Invalid, "default_agent", imp.DefaultAgent)
 		}
 		// automation 定义一次性导入（M6-7）：与上面两个域**同一次触发、同一个理由**（v10 之后
-		// DB 才是定时任务的事实源，而存量定义还在 `FORGE_AUTOMATIONS` 里）。automation 的定义
+		// DB 才是定时任务的事实源，而存量定义还在 `MATE_AUTOMATIONS` 里）。automation 的定义
 		// 文件里还住着运行态（`last_fired_at`/`recent_runs`），导入会按保留键把它们切进**运行态列**
 		// ——所以搬运是"一个文件 → 一行里的两类列"，同一事务，不出现半截状态。
 		//
 		// 三个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让另外两个域重跑。
 		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `forge automation import` 重试）",
+			slog.Warn("serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 				"err", iErr, "dir", cfg.AutomationDir)
 		} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
 			slog.Info("serve: 存量 automation 定义导入完成",
@@ -239,14 +239,14 @@ func (a *App) Init(ctx context.Context) error {
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)
 		}
-		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `forge migrate`。
+		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `mate migrate`。
 		if conversations == 0 && events == 0 {
 			if files, gErr := filepath.Glob(filepath.Join(cfg.TranscriptDir, "*.jsonl")); gErr == nil && len(files) > 0 {
-				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `forge migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
+				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `mate migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
 			}
 		}
 	case config.StoreModeMemory, "":
-		// 会话 wire transcript（M1 #5，~/.forge/transcripts 或 FORGE_TRANSCRIPTS）。
+		// 会话 wire transcript（M1 #5，~/.ark-mate/transcripts 或 MATE_TRANSCRIPTS）。
 		a.svc.SetTranscriptDir(cfg.TranscriptDir)
 	default:
 		// 不可达：pkg/config 的 materialize 已按 ValidStoreModes 校验并把 auto 归一成空串，
@@ -299,26 +299,26 @@ func (a *App) Init(ctx context.Context) error {
 	if cfg.TurnTimeout > 0 {
 		a.orch.SetTurnTimeout(cfg.TurnTimeout)
 	}
-	// handoff memo 字符预算（P3 F3；FORGE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
+	// handoff memo 字符预算（P3 F3；MATE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
 	a.orch.SetHandoffMaxChars(cfg.HandoffMaxChars)
-	// 能力代际上限（M3-7；FORGE_GENERATION_LIMIT，0 = 不限制）。
+	// 能力代际上限（M3-7；MATE_GENERATION_LIMIT，0 = 不限制）。
 	a.orch.SetGenerationLimit(cfg.GenerationLimit)
-	// 权限/elicitation 挂起超时（默认 30min；FORGE_PERMISSION_TIMEOUT / FORGE_ELICITATION_TIMEOUT 覆盖）。
+	// 权限/elicitation 挂起超时（默认 30min；MATE_PERMISSION_TIMEOUT / MATE_ELICITATION_TIMEOUT 覆盖）。
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
-	// 原生权限映射（B5）：FORGE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
+	// 原生权限映射（B5）：MATE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
 	// 平台侧 MCP 网关开关（M7-3）：默认 auto（开），只有显式 off 才回退到"远程直连注入"。
 	a.svc.SetMcpGatewayEnabled(cfg.McpGatewayEnabled())
 	if !cfg.McpGatewayEnabled() {
-		slog.Warn("serve: FORGE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
+		slog.Warn("serve: MATE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
 	}
 	if cfg.NativePermission == config.NativePermissionOff {
 		a.svc.SetNativePermission(false)
-		slog.Info("serve: 原生权限映射已关闭（FORGE_NATIVE_PERMISSION=off）")
+		slog.Info("serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off）")
 	}
-	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（FORGE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
+	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
-	// M4-4 调度循环：`FORGE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
+	// M4-4 调度循环：`MATE_AUTOMATION_TICK=0` 关闭（装配期同步跑一次启动恢复 pass）。
 	a.svc.StartAutomationScheduler(cfg.AutomationTick)
 
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
@@ -381,15 +381,15 @@ func (a *App) Init(ctx context.Context) error {
 //
 // 两个来源，优先级明确：
 //  1. **命令层注入**（桌面态 `--auth-stdin` 的双凭据）：显式来源，最高优先级；
-//  2. **FORGE_TOKEN**（独立态历史行为）：折叠成一条同时具备 rest 与 stream 两个面的凭据，
+//  2. **MATE_TOKEN**（独立态历史行为）：折叠成一条同时具备 rest 与 stream 两个面的凭据，
 //     因此"同一个令牌既能调 REST 也能订阅事件流"的既有语义逐字保留。
 //
 // 两者同时存在时以注入为准并告警：桌面态的核心由壳 spawn，用户 shell 里残留的
-// FORGE_TOKEN 不该改变桌面态的凭据分层（它只该管独立态）。
+// MATE_TOKEN 不该改变桌面态的凭据分层（它只该管独立态）。
 func (a *App) credentials() *credential.Set {
 	if a.creds.Required() {
 		if a.cfg.Token != "" {
-			slog.Warn("serve: --auth-stdin 与 FORGE_TOKEN 同时存在，以 --auth-stdin 的双凭据为准（FORGE_TOKEN 被忽略）")
+			slog.Warn("serve: --auth-stdin 与 MATE_TOKEN 同时存在，以 --auth-stdin 的双凭据为准（MATE_TOKEN 被忽略）")
 		}
 		return a.creds
 	}
@@ -402,14 +402,14 @@ func (a *App) credentials() *credential.Set {
 	return nil
 }
 
-// metaInfo 组装 `/v1/forge/meta` 的诊断值（M1-7）。
+// metaInfo 组装 `/v1/mate/meta` 的诊断值（M1-7）。
 //
 // 资产相关字段（webPath / webDigest / webBuildId）由 router 从本次装配解析出的资产补，
 // 载荷清单（M3-4）来自壳经 `--payloads` 交来的已解析结果——核心不自己解析载荷，
 // 因为在桌面安装里**只有壳**做了显式配置 → 随包 → PATH 的三级解析（设计 §6.5）。
 func (a *App) metaInfo() ctrsystem.MetaSource {
-	// 数据目录直接用**已解析的键**（M3-3 起 FORGE_HOME 是独立键，默认 ~/.forge）。
-	// 不再从配置目录用 filepath.Dir 反推：FORGE_CONFIG_DIR 可以让配置目录与数据目录分家
+	// 数据目录直接用**已解析的键**（M3-3 起 MATE_HOME 是独立键，默认 ~/.ark-mate）。
+	// 不再从配置目录用 filepath.Dir 反推：MATE_CONFIG_DIR 可以让配置目录与数据目录分家
 	// （测试、容器挂载都用得到），反推会报出一个用户根本没在用的目录。
 	payloads := a.payloads
 	if payloads == nil {
@@ -431,7 +431,7 @@ func (a *App) metaInfo() ctrsystem.MetaSource {
 func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	cfg := a.cfg
 	// Agent definitions（P2 / M6-6）：**按持久层模式分派**——sqlite 模式下定义在 `agents` 表里
-	// （种子仍在代码中，行只存"对种子的覆盖"），memory 模式仍是 FORGE_AGENTS 目录下的 <id>.json。
+	// （种子仍在代码中，行只存"对种子的覆盖"），memory 模式仍是 MATE_AGENTS 目录下的 <id>.json。
 	// 两种模式都要拿到 `cfg.AgentDir`：providers.json 与 vault 锚点仍在文件侧（计划 §7 P-9）。
 	if mode == config.StoreModeSQLite {
 		a.svc.LoadAgentDefinitionsFromStore(ctx, cfg.AgentDir)
@@ -445,8 +445,8 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	// 第二套存储，也不让能力静默变空表（设计文档 §1.4 C-1 的精确措辞：sqlite 模式下"不支持
 	// 手工改文件"是结构性事实，memory 模式下那条仍是约定）。默认（make dev/server）是 sqlite。
 	//
-	// `capabilityDir`（FORGE_CAPABILITIES）在 sqlite 模式下**降级为导入/导出目录**：
-	// 存量定义还在那里，由 M6-4 的导入器一次性灌进 DB；`forge capability import|export` 也读它。
+	// `capabilityDir`（MATE_CAPABILITIES）在 sqlite 模式下**降级为导入/导出目录**：
+	// 存量定义还在那里，由 M6-4 的导入器一次性灌进 DB；`mate capability import|export` 也读它。
 	if mode == config.StoreModeSQLite {
 		a.svc.LoadCapabilityDefinitionsFromStore(ctx, cfg.CapabilityDir)
 	} else {
@@ -454,14 +454,14 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	}
 	// automation 定义（M6-7）：同样**按持久层模式分派**——sqlite 模式下定义与运行态都在
 	// `automations` 表里（存量文件由 M6-7 的导入器一次性灌进去），memory 模式仍是
-	// `FORGE_AUTOMATIONS/<id>.json`（定义与运行态同文件）。
+	// `MATE_AUTOMATIONS/<id>.json`（定义与运行态同文件）。
 	if mode == config.StoreModeSQLite {
 		a.svc.LoadAutomationDefinitionsFromStore(ctx, cfg.AutomationDir)
 	} else {
 		a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
 	}
 	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
-	// 目标根与形态来自 **runtime 的投影声明**；FORGE_PROJECTION_DIRS 只在需要覆盖根时才出现。
+	// 目标根与形态来自 **runtime 的投影声明**；MATE_PROJECTION_DIRS 只在需要覆盖根时才出现。
 	a.reconcileSkillProjections()
 	return nil
 }
@@ -472,7 +472,7 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 //  1. 先**全解析一遍**（含失败项），无论成败都登记进 manager——登记是审计视图的前提，
 //     解析失败的 runtime 必须以 not_configured 的形式可见，而不是从列表里消失；
 //  2. 再对解析成功的逐个重校（解析失败的重校直接短路）；
-//  3. 最后把**没人认领的覆盖项**告警出来——FORGE_PROJECTION_DIRS 里写了个没注册过的 runtime
+//  3. 最后把**没人认领的覆盖项**告警出来——MATE_PROJECTION_DIRS 里写了个没注册过的 runtime
 //     id 时，配置看着生效了、实际一次都没用过；这属于必须说出来的静默失效。
 func (a *App) reconcileSkillProjections() {
 	specs := a.reg.List()
@@ -507,7 +507,7 @@ func (a *App) reconcileSkillProjections() {
 	a.svc.SetSkillProjections(projections)
 	for _, key := range sortedKeys(a.cfg.ProjectionDirs) {
 		if !claimed[key] {
-			slog.Warn("serve: FORGE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
+			slog.Warn("serve: MATE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
 				"key", key, "dir", a.cfg.ProjectionDirs[key])
 		}
 	}
@@ -536,7 +536,7 @@ func (a *App) Run(ctx context.Context) error {
 		_ = a.srv.Stop(stopCtx)
 	}()
 
-	// MCP 自动探测（B4；FORGE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
+	// MCP 自动探测（B4；MATE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
 	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
@@ -546,7 +546,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	// 就绪行（M1-2）：监听器在 Init 期就绑好了，这里打的是**实际**地址（`:0` 时是内核分配的端口）。
-	// 只走 stdout 一行、不含任何令牌；壳按行首 `FORGE_READY ` 匹配，拿不到就退回 health 轮询。
+	// 只走 stdout 一行、不含任何令牌；壳按行首 `MATE_READY ` 匹配，拿不到就退回 health 轮询。
 	if a.readyStdout {
 		if line, err := ReadyLine(a.srv.Addr()); err != nil {
 			slog.Warn("serve: 组装就绪行失败，壳将退回 health 轮询", "err", err)

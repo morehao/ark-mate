@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 )
 
 // registerCapability P1 能力数据面：Skill/MCP/Tool 目录（platform 唯一事实源，REST 列出能力），

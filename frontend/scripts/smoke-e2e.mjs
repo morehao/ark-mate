@@ -2,11 +2,11 @@
 /**
  * 前后端联调「通路」冒烟（无需浏览器、无需新依赖，Node ≥ 22）。
  *
- * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 forge serve 127.0.0.1:10001）。
+ * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 mate serve 127.0.0.1:10001）。
  * 覆盖：
- *   1. REST 信封（health / agents / runtimes / conversations）——@ark/api 的 unwrap 语义前提；
+ *   1. REST 信封（health / agents / runtimes / conversations）——@ark-mate/api 的 unwrap 语义前提；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
- *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
+ *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent/Runtime 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
@@ -17,14 +17,14 @@
  *
  * 退出码：0 = 全部通路 PASS；1 = 存在 FAIL。
  */
-import { buildAttachFrame } from '@ark/desktop-contract'
+import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
-const API = E2E_BASE + '/v1/forge'
+const API = E2E_BASE + '/v1/mate'
 // 后端启用凭据时，同一套脚本带上令牌：REST 走 Authorization 头；
 // WS 走**带内首帧 attach**（M1-1 起令牌不进 URL —— 与 apps/web 的 transport 同一条规则，
 // 帧形状也用同一个 buildAttachFrame，避免脚本与产品各写一份）。
-const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
+const TOKEN = process.env.MATE_SMOKE_TOKEN || ''
 const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
 
 let failed = 0
@@ -170,7 +170,7 @@ async function checkRest() {
   }
 
   // M3 ② 消息级检索（锚点跳转数据面）：信封形状 + 锚点字段 + 参数校验。
-  const ms = await apiGet('/search/messages?q=forge-smoke-never-matches&limit=5')
+  const ms = await apiGet('/search/messages?q=mate-smoke-never-matches&limit=5')
   if (ms.http !== 200 || ms.env.code !== 0) return bad('GET /search/messages', `HTTP ${ms.http} code=${ms.env.code} msg=${ms.env.msg}`)
   const m = ms.env.data
   if (typeof m.source !== 'string' || !Array.isArray(m.hits) || typeof m.total !== 'number' || typeof m.has_more !== 'boolean')
@@ -266,7 +266,7 @@ async function checkBizError() {
 
 async function checkWs() {
   console.log('· WS 实时通道帧契约（经 vite proxy ws:true）')
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/mate/ws/events'
   const ws = new WebSocket(wsUrl)
   const opened = new Promise((resolve, reject) => {
     ws.onopen = () => resolve()

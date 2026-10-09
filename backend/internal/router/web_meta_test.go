@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // recomputeDigest 是 `webDigest` 的**独立第二实现**（照 meta.go/web.go 注释里的算法重写一遍）：
@@ -72,7 +72,7 @@ func TestMetaWebDigestIsRecomputable(t *testing.T) {
 	// 端到端：经真实装配取 /meta，三件套必须与解析结果一致。
 	eng := router.New(router.Ports{}, nil, router.Options{Web: assets})
 	w := httptest.NewRecorder()
-	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/forge/meta", nil))
+	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil))
 	if w.Code != 200 {
 		t.Fatalf("GET /meta HTTP %d：%s", w.Code, w.Body.String())
 	}
@@ -114,13 +114,13 @@ func TestMetaHomeAndContract(t *testing.T) {
 	eng := router.New(router.Ports{}, nil, router.Options{
 		Web: assets,
 		Meta: func() ctrsystem.MetaSource {
-			return ctrsystem.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/forge-home"}
+			return ctrsystem.MetaSource{CoreVersion: "9.9.9", APIContract: "v1", Home: "/tmp/mate-home"}
 		},
 	})
 	w := httptest.NewRecorder()
-	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/forge/meta", nil))
+	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil))
 	body := w.Body.String()
-	for _, want := range []string{`"coreVersion":"9.9.9"`, `"apiContract":"v1"`, `"home":"/tmp/forge-home"`} {
+	for _, want := range []string{`"coreVersion":"9.9.9"`, `"apiContract":"v1"`, `"home":"/tmp/mate-home"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/meta 应含 %s：%s", want, body)
 		}

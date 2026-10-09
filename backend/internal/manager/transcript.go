@@ -18,7 +18,7 @@ import (
 // 文件：<dir>/<conversationID>.jsonl
 // 首行 header，之后每行一个事件原语：
 //
-//	{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"...","agent_id":"...",
+//	{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"...","agent_id":"...",
 //	 "runtime":"...","cwd":"...","created_at":"..."}
 //	{"seq":2,"ts":"...","type":"session.user_message","payload":{...}}
 //
@@ -31,7 +31,7 @@ import (
 // "每轮事件原语（文本增量已攒批）"，前端/导入侧按 msg_id 拼接的语义不变。
 
 // wireTranscriptSchema transcript 文件 schema 名。
-const wireTranscriptSchema = "ark-forge.wire-transcript.v1"
+const wireTranscriptSchema = "ark-mate.wire-transcript.v1"
 
 // wireTranscriptHeader 文件首行（header）。
 type wireTranscriptHeader struct {

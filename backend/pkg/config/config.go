@@ -2,13 +2,13 @@
 //
 // 优先级（后者覆盖前者）：
 //  1. 内置默认值（Default()）
-//  2. 配置目录 `config.json`（`.forge/config` 目录化；A4）
+//  2. 配置目录 `config.json`（`.ark-mate/config` 目录化；A4）
 //  3. 配置目录 `env`（dotenv 风格 KEY=VALUE，便于与 `docker --env-file`/systemd 共用一个文件）
-//  4. 进程环境变量 `FORGE_*`（历史行为，始终最高）
+//  4. 进程环境变量 `MATE_*`（历史行为，始终最高）
 //  5. CLI flag（由 cmd 层在 Load 之后覆盖）
 //
-// 数据目录取自 `FORGE_HOME`，默认 `~/.forge`；配置目录取自 `FORGE_CONFIG_DIR`，默认
-// `<数据目录>/config`（即 `~/.forge/config`）。这两个是**启动引导键**：只认进程环境变量，
+// 数据目录取自 `MATE_HOME`，默认 `~/.ark-mate`；配置目录取自 `MATE_CONFIG_DIR`，默认
+// `<数据目录>/config`（即 `~/.ark-mate/config`）。这两个是**启动引导键**：只认进程环境变量，
 // 必须在读配置文件之前就有确定值（理由见 Config.HomeDir）。
 // 目录不存在 = 完全维持历史行为（向后兼容）；文件存在但键名/取值非法 = 启动即报错（不静默忽略）。
 package config
@@ -25,10 +25,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// Source 标识某个配置键的最终来源（`forge config` 展示 + 排障用）。
+// Source 标识某个配置键的最终来源（`mate config` 展示 + 排障用）。
 type Source string
 
 const (
@@ -48,18 +48,18 @@ type Config struct {
 	Addr string
 	// TranscriptDir 会话 wire transcript 落盘目录（M1 #5；空 = 禁用）。
 	TranscriptDir string
-	// DBPath SQLite 库文件路径（P1 落库：events/sessions/…；FORGE_DB 覆盖，默认 ~/.forge/forge.db）。
+	// DBPath SQLite 库文件路径（P1 落库：events/sessions/…；MATE_DB 覆盖，默认 ~/.ark-mate/mate.db）。
 	DBPath string
 	// StoreMode 持久层开关："sqlite" | "memory" | ""。
-	// 空串表示 auto（DB 文件已存在 → sqlite，否则 memory）：未设置与显式 FORGE_STORE=auto
-	// 都落成它。非法取值在 materialize 里报错，不再静默回落。FORGE_STORE 覆盖。
+	// 空串表示 auto（DB 文件已存在 → sqlite，否则 memory）：未设置与显式 MATE_STORE=auto
+	// 都落成它。非法取值在 materialize 里报错，不再静默回落。MATE_STORE 覆盖。
 	StoreMode string
-	// HandoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；FORGE_HANDOFF_MAX_CHARS
+	// HandoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；MATE_HANDOFF_MAX_CHARS
 	// 覆盖，默认 6000；0 = 关闭 memo 兜底）。跨 runtime / 无原生 resume 时把历史压成摘要注入
 	// 首条 prompt。
 	HandoffMaxChars int
 	// GenerationLimit 同一配置（runtime + 原生权限 + provider）下允许并存的**能力代际**上限
-	// （§13.4/风险表第 12 行；FORGE_GENERATION_LIMIT 覆盖，默认 4；**0 = 不限制**）。
+	// （§13.4/风险表第 12 行；MATE_GENERATION_LIMIT 覆盖，默认 4；**0 = 不限制**）。
 	// 代际按能力指纹内容寻址，指纹不同 = 能力集不同 = 各自一个进程；上限是"猜粗了只是多花内存"
 	// 这一侧的护栏：超限**带码拒绝新建**，绝不静默复用错的能力集（那才是安全 bug）。
 	GenerationLimit int
@@ -70,31 +70,31 @@ type Config struct {
 	PermissionTimeout time.Duration
 	// ElicitationTimeout 挂起结构化提问自动取消超时（默认 30min，对齐 AionUi）。
 	ElicitationTimeout time.Duration
-	// AgentDir Agent definitions 目录（P2：<id>.json 文件定义自定义 agent；FORGE_AGENTS 覆盖，
-	// 默认 ~/.forge/agents；空 = 不启用 definitions 落盘，仅内存注册）。
+	// AgentDir Agent definitions 目录（P2：<id>.json 文件定义自定义 agent；MATE_AGENTS 覆盖，
+	// 默认 ~/.ark-mate/agents；空 = 不启用 definitions 落盘，仅内存注册）。
 	AgentDir string
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
-	// FORGE_CAPABILITIES 覆盖，默认 ~/.forge/capabilities；空 = 不启用文件数据面）。
+	// MATE_CAPABILITIES 覆盖，默认 ~/.ark-mate/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
-	// AutomationDir 自动化定义目录（M4：<id>.json → Automation 注册表；FORGE_AUTOMATIONS 覆盖，
-	// 默认 ~/.forge/automations；空 = 不启用文件数据面，写面显式报 automation_dir_unset）。
+	// AutomationDir 自动化定义目录（M4：<id>.json → Automation 注册表；MATE_AUTOMATIONS 覆盖，
+	// 默认 ~/.ark-mate/automations；空 = 不启用文件数据面，写面显式报 automation_dir_unset）。
 	AutomationDir string
-	// AutomationTick 调度循环的 tick 间隔（FORGE_AUTOMATION_TICK 覆盖，默认 30s；**0 = 关闭调度**）。
+	// AutomationTick 调度循环的 tick 间隔（MATE_AUTOMATION_TICK 覆盖，默认 30s；**0 = 关闭调度**）。
 	// 0 关闭而不是"最快跑"：调度会真的建会话、跑 agent，停机维护时需要一个明确的关闭开关，
 	// 而不是靠把间隔调到很大来近似。
 	AutomationTick time.Duration
-	// WorkspaceDir 代建工作空间的根目录（FORGE_WORKSPACE_DIR 覆盖，默认 ~/.forge/workspaces）。
+	// WorkspaceDir 代建工作空间的根目录（MATE_WORKSPACE_DIR 覆盖，默认 ~/.ark-mate/workspaces）。
 	// 建会话未指定 cwd 时在 <dir>/<会话id>/ 下建临时工作空间。**空 = 关闭代建**：
 	// 此时未指定 cwd 直接报 workspace_required（绝不回落 serve 进程目录，见 manager.ResolveWorkspace）。
 	WorkspaceDir string
-	// WorkspaceRoots 允许作为工作空间的根白名单（FORGE_WORKSPACE_ROOTS，逗号分隔绝对路径；
+	// WorkspaceRoots 允许作为工作空间的根白名单（MATE_WORKSPACE_ROOTS，逗号分隔绝对路径；
 	// 默认空 = 不限制，保持本机单操作员零配置）。非空时**显式 cwd 与目录浏览都收在根内**：
 	// 浏览不能越过根向上。用途：容器化/对外提供服务时，目录浏览不再等价于"暴露整个 rootfs 结构"。
 	//
 	// 这里只存**显式配置**的值：平台代建根（WorkspaceDir）由 manager 在运行期隐式并进生效名单，
 	// 因此"代建根不在白名单里"不再是配置错误（见 manager.SetWorkspacePolicy）。
 	WorkspaceRoots []string
-	// ProjectionDirs 投影根的部署级覆盖（`FORGE_PROJECTION_DIRS=runtime:kind=dir[,...]`，
+	// ProjectionDirs 投影根的部署级覆盖（`MATE_PROJECTION_DIRS=runtime:kind=dir[,...]`，
 	// config.json 可写 JSON 数组）。键是 `<runtime>:<kind>`，值是**绝对目录**。
 	//
 	// 它在投影解析链里优先级最高（见 pkg/runtime.Resolve）：覆盖只替换 Root，投影**形态**
@@ -105,42 +105,42 @@ type Config struct {
 	// 「for 不 for runtime」这两套说法都被投影声明吸收，配置面只留一个键。
 	ProjectionDirs map[string]string
 	// IdleTimeout 空闲回收阈值：StartAgent 暖进程闲置超过该时长自动停进程（P2；
-	// FORGE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
+	// MATE_IDLE_TIMEOUT 覆盖，默认 5m；0 = 关闭回收）。
 	IdleTimeout time.Duration
-	// ReapInterval 空闲回收扫描间隔（P2；FORGE_REAP_INTERVAL 覆盖，默认 5m）。
+	// ReapInterval 空闲回收扫描间隔（P2；MATE_REAP_INTERVAL 覆盖，默认 5m）。
 	ReapInterval time.Duration
 	// ProcRegistryPath runtime 子进程注册表路径（M3 决策 v4③：daemon 崩溃/SIGKILL 后，
-	// 下次启动据此回收孤儿进程；FORGE_PROC_REGISTRY 覆盖，默认 <dir(DBPath)>/processes.json；
+	// 下次启动据此回收孤儿进程；MATE_PROC_REGISTRY 覆盖，默认 <dir(DBPath)>/processes.json；
 	// 取值 off/disable/none = 关闭登记与回收）。
 	ProcRegistryPath string
-	// ReapGrace 孤儿回收的 SIGTERM → SIGKILL 宽限期（FORGE_REAP_GRACE 覆盖，默认 2s）。
+	// ReapGrace 孤儿回收的 SIGTERM → SIGKILL 宽限期（MATE_REAP_GRACE 覆盖，默认 2s）。
 	ReapGrace time.Duration
-	// HomeDir 数据目录（M3-3；FORGE_HOME 覆盖，默认 ~/.forge，家目录不可得时回落相对 `.forge`）。
+	// HomeDir 数据目录（M3-3；MATE_HOME 覆盖，默认 ~/.ark-mate，家目录不可得时回落相对 `.ark-mate`）。
 	//
 	// 为什么要有独立的键：CLI / 浏览器 / 桌面三个入口**共用一份数据目录**（设计 §481）——
 	// 按入口分裂就会出现"桌面打开后会话不见了"。这里存的是**已解析**的值：transcripts / db /
 	// agents / … 的默认位置都由它派生，各 runtime 子进程的配置隔离也以它为根（pkg/runtime.IsolationEnv）。
 	//
-	// 为什么它只吃**进程环境变量**、不进 config.json / env 文件的键值链（与 FORGE_CONFIG_DIR 同级）：
+	// 为什么它只吃**进程环境变量**、不进 config.json / env 文件的键值链（与 MATE_CONFIG_DIR 同级）：
 	// 数据目录决定配置目录的默认位置（`<数据目录>/config`），而配置文件又在配置目录里——让文件里的值
 	// 参与决定"文件从哪读"是循环。它必须与 ConfigDirFromEnv() 用同一个事实源，否则会出现
 	// "配置从 A 读、数据落 B"的分裂（那正是本键要消灭的形态）。
 	//
 	// 显式给的值必须是绝对路径（相对路径随进程 CWD 漂移，见 materialize）；未设置时的兜底不受此约束。
 	HomeDir string
-	// ConfigDir 本次加载使用的配置目录（`forge config` 展示用；空 = 未解析）。
+	// ConfigDir 本次加载使用的配置目录（`mate config` 展示用；空 = 未解析）。
 	ConfigDir string
 	// RemoteRuntimes 远程 runtime 声明（配置目录 runtimes.json；A5）。
 	RemoteRuntimes []RemoteRuntime
-	// WebDir 前端资产目录（M2-1；FORGE_WEB_DIR 覆盖，默认空）。
+	// WebDir 前端资产目录（M2-1；MATE_WEB_DIR 覆盖，默认空）。
 	// 空 = 用构建期内置资产；**非空即校验**（绝对路径 / 存在 / 目录 / 含 index.html），
 	// 不合法就拒绝启动——显式配置配错时静默回落到内嵌旧资产，是"用户看到旧界面还以为没生效"的根源。
 	WebDir string
-	// AllowedOrigins 额外允许的请求来源（M3-5；FORGE_ALLOWED_ORIGINS，逗号分隔，config.json 可写 JSON 数组；
+	// AllowedOrigins 额外允许的请求来源（M3-5；MATE_ALLOWED_ORIGINS，逗号分隔，config.json 可写 JSON 数组；
 	// 默认空 = 只用内置 Origin 矩阵）。
 	//
 	// **这是给跨源开发/自建反代用的显式登记口，不是默认放开**：内置矩阵只放行「无 Origin」的壳内反代
-	// /同源导航、`forge-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
+	// /同源导航、`mate-app://app`（桌面直连）与核心**自身监听端口**上的 http 同源（见
 	// internal/middleware/origin.go，设计 §7.2 的 Origin 矩阵行）。`make dev`（vite :5173 → 代理到核心）
 	// 与自建反代（页面 origin ≠ 核心监听 origin）都落在矩阵之外，必须在这里指名登记。
 	//
@@ -151,23 +151,23 @@ type Config struct {
 	// （设计 §9.4 明确 Host/Origin 白名单属于"对外产品化缺的四件事"之一，本期范围外），
 	// 此时本键也不参与判定——启动日志会打一条 WARN 说清楚。
 	AllowedOrigins []string
-	// Token 独立态单操作员访问令牌（A6；FORGE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
+	// Token 独立态单操作员访问令牌（A6；MATE_TOKEN 覆盖，默认空 = 不鉴权，仅回环可访问）。
 	// 非空时除 /health 外的所有 REST 路由都要求 `Authorization: Bearer <token>`，
 	// 事件流则由连接后的首帧 attach 携带同一令牌（M1-1 起令牌不进 URL）。
 	// 桌面态不使用它：那两个面互斥的凭据由壳经 --auth-stdin 下发。
 	Token string
-	// NativePermission 原生权限映射开关（B5；FORGE_NATIVE_PERMISSION 覆盖，默认 auto）：
+	// NativePermission 原生权限映射开关（B5；MATE_NATIVE_PERMISSION 覆盖，默认 auto）：
 	//   auto = 把 agent 的 permission_policy 投影到底座原生权限开关；
 	//   off  = 不注入（底座走自身默认，平台拦截面照常生效）。
 	NativePermission string
-	// McpAutoProbe MCP 自动探测模式（B4；FORGE_MCP_AUTO_PROBE 覆盖，默认 off）：
+	// McpAutoProbe MCP 自动探测模式（B4；MATE_MCP_AUTO_PROBE 覆盖，默认 off）：
 	//   off      = 不自动探测（历史行为：只由 POST /mcps/:id/probe 显式触发）；
 	//   startup  = serve 启动后后台逐个探测全部已注册 MCP server（写 Tool 目录 + 探测状态）。
 	// 默认 off 是有意的：stdio server 探测会**拉起用户配置的子进程**，不宜默认执行。
 	McpAutoProbe string
-	// McpGateway 远程 MCP 的平台侧网关开关（M7；FORGE_MCP_GATEWAY 覆盖，默认 auto）：
+	// McpGateway 远程 MCP 的平台侧网关开关（M7；MATE_MCP_GATEWAY 覆盖，默认 auto）：
 	//   auto = **远程传输**（sse/http/streamable_http）的 MCP 由平台网关代连：底座只看见一条
-	//          stdio 条目（`forge mcp bridge`），凭据不进底座可见面，且条目恒定 ⇒ 增删远程
+	//          stdio 条目（`mate mcp bridge`），凭据不进底座可见面，且条目恒定 ⇒ 增删远程
 	//          server 不换代际；stdio server 仍由底座直连（S2 是另案）。
 	//   off  = 关掉网关，回到"远程传输按底座承载能力直连注入"的老路（§10.6 的 P-5 回退开关）。
 	// auto 而非 on：只有一个取值（auto）意味着"没有开关"，而这条路径改变了远程 MCP 的注入
@@ -217,7 +217,7 @@ const (
 // ResolvedStoreMode 把"未声明"（含显式 auto，`LoadResolved` 已归一成空串）解析成实际模式：
 // DB 文件存在且非空 → sqlite，否则 memory。
 //
-// 这一条原先只写在 `internal/app` 的 Init 里；M7 的网关进程（`forge mcp bridge`）也要按**同一
+// 这一条原先只写在 `internal/app` 的 Init 里；M7 的网关进程（`mate mcp bridge`）也要按**同一
 // 判据**决定去哪读定义——两处各写一遍的后果是"网关读到了另一份数据面"（比如 core 在 sqlite 模式
 // 而网关判成 memory，工具面就恒空），表现为"工具莫名不见了"。故判据收到 config 上，两边共用。
 func (c Config) ResolvedStoreMode() string {
@@ -279,34 +279,34 @@ func Default() Config {
 	}
 }
 
-// knownKeys 支持的配置键（规范名 → 环境变量名）。config.json / env 文件可用规范名或 FORGE_* 名。
+// knownKeys 支持的配置键（规范名 → 环境变量名）。config.json / env 文件可用规范名或 MATE_* 名。
 var knownKeys = map[string]string{
-	"addr":                "FORGE_ADDR",
-	"transcripts":         "FORGE_TRANSCRIPTS",
-	"db":                  "FORGE_DB",
-	"store":               "FORGE_STORE",
-	"agents":              "FORGE_AGENTS",
-	"capabilities":        "FORGE_CAPABILITIES",
-	"automations":         "FORGE_AUTOMATIONS",
-	"automation_tick":     "FORGE_AUTOMATION_TICK",
-	"workspace_dir":       "FORGE_WORKSPACE_DIR",
-	"workspace_roots":     "FORGE_WORKSPACE_ROOTS",
-	"projection_dirs":     "FORGE_PROJECTION_DIRS",
-	"idle_timeout":        "FORGE_IDLE_TIMEOUT",
-	"reap_interval":       "FORGE_REAP_INTERVAL",
-	"turn_timeout":        "FORGE_TURN_TIMEOUT",
-	"handoff_max_chars":   "FORGE_HANDOFF_MAX_CHARS",
-	"generation_limit":    "FORGE_GENERATION_LIMIT",
-	"permission_timeout":  "FORGE_PERMISSION_TIMEOUT",
-	"elicitation_timeout": "FORGE_ELICITATION_TIMEOUT",
-	"proc_registry":       "FORGE_PROC_REGISTRY",
-	"reap_grace":          "FORGE_REAP_GRACE",
-	"token":               "FORGE_TOKEN",
-	"allowed_origins":     "FORGE_ALLOWED_ORIGINS",
-	"web_dir":             "FORGE_WEB_DIR",
-	"mcp_auto_probe":      "FORGE_MCP_AUTO_PROBE",
-	"mcp_gateway":         "FORGE_MCP_GATEWAY",
-	"native_permission":   "FORGE_NATIVE_PERMISSION",
+	"addr":                "MATE_ADDR",
+	"transcripts":         "MATE_TRANSCRIPTS",
+	"db":                  "MATE_DB",
+	"store":               "MATE_STORE",
+	"agents":              "MATE_AGENTS",
+	"capabilities":        "MATE_CAPABILITIES",
+	"automations":         "MATE_AUTOMATIONS",
+	"automation_tick":     "MATE_AUTOMATION_TICK",
+	"workspace_dir":       "MATE_WORKSPACE_DIR",
+	"workspace_roots":     "MATE_WORKSPACE_ROOTS",
+	"projection_dirs":     "MATE_PROJECTION_DIRS",
+	"idle_timeout":        "MATE_IDLE_TIMEOUT",
+	"reap_interval":       "MATE_REAP_INTERVAL",
+	"turn_timeout":        "MATE_TURN_TIMEOUT",
+	"handoff_max_chars":   "MATE_HANDOFF_MAX_CHARS",
+	"generation_limit":    "MATE_GENERATION_LIMIT",
+	"permission_timeout":  "MATE_PERMISSION_TIMEOUT",
+	"elicitation_timeout": "MATE_ELICITATION_TIMEOUT",
+	"proc_registry":       "MATE_PROC_REGISTRY",
+	"reap_grace":          "MATE_REAP_GRACE",
+	"token":               "MATE_TOKEN",
+	"allowed_origins":     "MATE_ALLOWED_ORIGINS",
+	"web_dir":             "MATE_WEB_DIR",
+	"mcp_auto_probe":      "MATE_MCP_AUTO_PROBE",
+	"mcp_gateway":         "MATE_MCP_GATEWAY",
+	"native_permission":   "MATE_NATIVE_PERMISSION",
 }
 
 // knownListKeys 允许在 config.json 里写成 JSON 数组的多值键。
@@ -323,16 +323,16 @@ var knownListKeys = map[string]bool{
 // renamedKeys 已改名/已移除的配置键 → 可操作的改法。
 //
 // 处置是**只识别、不兼容**（ADR-11 不留别名）：仍然报错——「非法键名启动即报错」这条规则不软化
-// ——但把键认出来，给出新键名与等价写法。这样存量 `~/.forge/config/config.json` 里的旧键
+// ——但把键认出来，给出新键名与等价写法。这样存量 `~/.ark-mate/config/config.json` 里的旧键
 // 不会变成一个「看不懂的未知键」，用户拿到的是出路而不是死胡同；配置面也不会多出一个语义重复的别名。
 //
 // 为什么必须单独一层：直接删键的话，旧键会掉进「未知配置键」的通用报错里，用户只能靠自己猜
 // 新名字；而静默忽略更糟——物化会悄悄不发生，表现为「技能怎么不生效了」。
 var renamedKeys = map[string]string{
-	"skills_materialize_dir": "已改名为 FORGE_PROJECTION_DIRS。投影形态（放哪、什么格式）现在由 runtime 声明，" +
+	"skills_materialize_dir": "已改名为 MATE_PROJECTION_DIRS。投影形态（放哪、什么格式）现在由 runtime 声明，" +
 		"配置只能**覆盖根**，且必须指名是哪个 runtime 的哪类投影：`projection_dirs=opencode:skill=/x`" +
 		"（原 `skills_materialize_dir=/x` 那种「不分 runtime」的兼容路径已不存在——因为两个底座的落点与格式本就不同）",
-	"skills_materialize_dirs": "已改名为 FORGE_PROJECTION_DIRS，等价写法 `projection_dirs=opencode:skill=/x`" +
+	"skills_materialize_dirs": "已改名为 MATE_PROJECTION_DIRS，等价写法 `projection_dirs=opencode:skill=/x`" +
 		"（原 `skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`；键多了 `:kind` 一段，" +
 		"目前 kind 只有 skill）",
 }
@@ -349,8 +349,8 @@ func checkRenamedKey(key string) string {
 // renamedEnvNames 旧键对应的进程环境变量名（进程环境只按 knownKeys 读取，
 // 所以旧变量名不会被读到——必须显式检查，否则"设了旧变量但没生效"是静默的）。
 var renamedEnvNames = map[string]string{
-	"FORGE_SKILLS_MATERIALIZE_DIR":  "skills_materialize_dir",
-	"FORGE_SKILLS_MATERIALIZE_DIRS": "skills_materialize_dirs",
+	"MATE_SKILLS_MATERIALIZE_DIR":  "skills_materialize_dir",
+	"MATE_SKILLS_MATERIALIZE_DIRS": "skills_materialize_dirs",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -363,10 +363,10 @@ func knownKeyList() string {
 	return strings.Join(keys, ", ")
 }
 
-// normalizeKey 归一化键名：去空白、转小写、去可选 FORGE_ 前缀、- 转 _，并接受常见别名。
+// normalizeKey 归一化键名：去空白、转小写、去可选 MATE_ 前缀、- 转 _，并接受常见别名。
 func normalizeKey(k string) string {
 	k = strings.ToLower(strings.TrimSpace(k))
-	k = strings.TrimPrefix(k, "forge_")
+	k = strings.TrimPrefix(k, "mate_")
 	k = strings.ReplaceAll(k, "-", "_")
 	switch k {
 	case "transcript", "transcripts_dir", "transcript_dir":
@@ -427,38 +427,38 @@ func (r *resolver) sources() Sources {
 	return out
 }
 
-// ConfigDirFromEnv 解析配置目录：FORGE_CONFIG_DIR 优先，否则 <数据目录>/config。
+// ConfigDirFromEnv 解析配置目录：MATE_CONFIG_DIR 优先，否则 <数据目录>/config。
 //
-// "数据目录"由 HomeDirFromEnv() 给出，所以 FORGE_HOME 一变，配置目录的默认位置跟着变——
+// "数据目录"由 HomeDirFromEnv() 给出，所以 MATE_HOME 一变，配置目录的默认位置跟着变——
 // 这条关系必须保持：从配置目录反推数据目录（旧 metaInfo 的 filepath.Dir 做法）会让
-// 「FORGE_CONFIG_DIR 与 FORGE_HOME 分家」的进程读到错误的数据目录。
+// 「MATE_CONFIG_DIR 与 MATE_HOME 分家」的进程读到错误的数据目录。
 func ConfigDirFromEnv() string {
-	if v := strings.TrimSpace(os.Getenv("FORGE_CONFIG_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MATE_CONFIG_DIR")); v != "" {
 		return v
 	}
 	return filepath.Join(HomeDirFromEnv(), "config")
 }
 
-// HomeDirFromEnv 解析数据目录：FORGE_HOME 优先，否则 ~/.forge。
+// HomeDirFromEnv 解析数据目录：MATE_HOME 优先，否则 ~/.ark-mate。
 //
-// trim 后为空 = 未设置（与 FORGE_CONFIG_DIR 等键的语义一致：空串不是"数据目录是空路径"，
+// trim 后为空 = 未设置（与 MATE_CONFIG_DIR 等键的语义一致：空串不是"数据目录是空路径"，
 // 否则派生路径会拼成 "/transcripts" 这种根目录下的怪地方）。
-// 家目录不可得时保留既有兜底（相对 `.forge`）：宁可落到 CWD 下，也不要拼出根目录路径。
+// 家目录不可得时保留既有兜底（相对 `.ark-mate`）：宁可落到 CWD 下，也不要拼出根目录路径。
 //
 // 只认进程环境变量的理由见 Config.HomeDir。
 func HomeDirFromEnv() string {
-	if v := strings.TrimSpace(os.Getenv("FORGE_HOME")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("MATE_HOME")); v != "" {
 		return v
 	}
-	return defaultForgeHome()
+	return defaultMateHome()
 }
 
-// defaultForgeHome 默认数据目录（~/.forge；家目录不可得时回落到相对路径）。
-func defaultForgeHome() string {
+// defaultMateHome 默认数据目录（~/.ark-mate；家目录不可得时回落到相对路径）。
+func defaultMateHome() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".forge")
+		return filepath.Join(home, ".ark-mate")
 	}
-	return ".forge"
+	return ".ark-mate"
 }
 
 // LoadResolved 解析默认值 + 配置目录（config.json/env）+ 进程环境变量。
@@ -476,25 +476,25 @@ func LoadResolved(dir string) (Config, Sources, error) {
 	if err := loadEnvFile(filepath.Join(dir, "env"), r); err != nil {
 		return Default(), nil, err
 	}
-	// 4) 进程环境变量（仅对已设置且非空的 FORGE_* 生效，保持历史语义）
+	// 4) 进程环境变量（仅对已设置且非空的 MATE_* 生效，保持历史语义）
 	for key, envName := range knownKeys {
 		if v := os.Getenv(envName); v != "" {
 			r.set(key, v, SourceEnv)
 		}
 	}
 	// 已改名的旧环境变量：进程环境只按 knownKeys 读，故旧名必须显式检查——
-	// 否则「设了 FORGE_SKILLS_MATERIALIZE_DIR 但物化没发生」是完全静默的。
+	// 否则「设了 MATE_SKILLS_MATERIALIZE_DIR 但物化没发生」是完全静默的。
 	for envName, key := range renamedEnvNames {
 		if _, set := os.LookupEnv(envName); set {
 			return Default(), nil, fmt.Errorf("环境变量 %s %s", envName, renamedKeys[key])
 		}
 	}
-	// FORGE_PROC_REGISTRY 特例：显式设置为空/off 也要覆盖文件配置（关闭登记）。
-	if v, ok := os.LookupEnv("FORGE_PROC_REGISTRY"); ok {
+	// MATE_PROC_REGISTRY 特例：显式设置为空/off 也要覆盖文件配置（关闭登记）。
+	if v, ok := os.LookupEnv("MATE_PROC_REGISTRY"); ok {
 		r.set("proc_registry", v, SourceEnv)
 	}
-	// FORGE_WORKSPACE_DIR 同理：显式设置为空/off 要能覆盖文件配置（关闭代建）。
-	if v, ok := os.LookupEnv("FORGE_WORKSPACE_DIR"); ok {
+	// MATE_WORKSPACE_DIR 同理：显式设置为空/off 要能覆盖文件配置（关闭代建）。
+	if v, ok := os.LookupEnv("MATE_WORKSPACE_DIR"); ok {
 		r.set("workspace_dir", v, SourceEnv)
 	}
 
@@ -600,19 +600,19 @@ func materialize(r *resolver) (Config, error) {
 		switch strings.ToLower(strings.TrimSpace(v)) {
 		case StoreModeAuto:
 			// 显式 auto：等价于未设（按 DB 文件是否已存在决定），但它是合法取值——
-			// 文档一直写 `FORGE_STORE=sqlite|memory|auto`，此前 auto 只靠 default 分支
+			// 文档一直写 `MATE_STORE=sqlite|memory|auto`，此前 auto 只靠 default 分支
 			// 巧合生效，不认它反而会打脸自己的文档。
 			c.StoreMode = ""
 		case "sqlite", "memory":
 			c.StoreMode = strings.ToLower(strings.TrimSpace(v))
 		default:
 			// 非法值**报错**，不再静默回落 auto。原注释声称"非法/空值视为 auto（避免旧环境
-			// 变量把 daemon 卡死）"，但：（a）查历史，FORGE_STORE 从引入那版起的取值集就是
+			// 变量把 daemon 卡死）"，但：（a）查历史，MATE_STORE 从引入那版起的取值集就是
 			// sqlite|memory|auto，**从未有过今天已非法的取值**，严格化不会淘汰任何曾经可用的
 			// 配置；（b）store 定的是**持久化语义**，回落 auto 会按"DB 文件在不在"解析成
 			// sqlite 或 memory——一个错字可能把用户悄悄丢进**相反**的模式（如 sqlit 在无 DB
 			// 时进 memory，表现为"数据丢了"；memry 在有 DB 时进 sqlite，以为不落盘却落盘）；
-			// （c）回落后的 `forge config` 输出与合法的 auto **逐字相同**，用户无从察觉值被丢弃。
+			// （c）回落后的 `mate config` 输出与合法的 auto **逐字相同**，用户无从察觉值被丢弃。
 			// 空值/未设不报错（无偏好），故这里只拦非法取值；同级枚举键
 			// （native_permission / mcp_auto_probe）本来就是这么做的。
 			return bad("store", fmt.Sprintf("需为 %s 之一，得到 %q",
@@ -732,15 +732,15 @@ func materialize(r *resolver) (Config, error) {
 		}
 	}
 
-	// 数据目录（M3-3）：FORGE_HOME 优先，默认 ~/.forge。
+	// 数据目录（M3-3）：MATE_HOME 优先，默认 ~/.ark-mate。
 	//
-	// 显式给的 FORGE_HOME 必须是绝对路径：相对路径按**进程 CWD** 解析，而 CLI（用户 shell 的 CWD）与
+	// 显式给的 MATE_HOME 必须是绝对路径：相对路径按**进程 CWD** 解析，而 CLI（用户 shell 的 CWD）与
 	// 桌面（壳的 CWD，通常是 `/`）的 CWD 不同——同一个环境变量会静默打开两份数据目录，正是设计 §481
-	// 要消灭的"桌面打开后会话不见了"。未设置时的兜底（家目录不可得 → 相对 `.forge`）不是用户给的路径，
+	// 要消灭的"桌面打开后会话不见了"。未设置时的兜底（家目录不可得 → 相对 `.ark-mate`）不是用户给的路径，
 	// 不适用这条约束（见 HomeDirFromEnv）。
-	if v, ok := os.LookupEnv("FORGE_HOME"); ok {
+	if v, ok := os.LookupEnv("MATE_HOME"); ok {
 		if t := strings.TrimSpace(v); t != "" && !filepath.IsAbs(t) {
-			return bad("FORGE_HOME", fmt.Sprintf(
+			return bad("MATE_HOME", fmt.Sprintf(
 				"需为绝对路径（相对路径随进程 CWD 漂移，三端可能打开不同数据目录；家目录请写全路径），得到 %q", v))
 		}
 	}
@@ -756,7 +756,7 @@ func materialize(r *resolver) (Config, error) {
 	if v, ok := r.get("db"); ok {
 		c.DBPath = v
 	} else {
-		c.DBPath = filepath.Join(home, "forge.db")
+		c.DBPath = filepath.Join(home, "mate.db")
 	}
 	if v, ok := r.get("agents"); ok {
 		c.AgentDir = v
@@ -958,7 +958,7 @@ func normalizeWorkspaceRoots(items []string) ([]string, error) {
 	return out, nil
 }
 
-// parseProjectionDirs 解析 `runtime:kind=dir[,runtime:kind=dir]`（FORGE_PROJECTION_DIRS）。
+// parseProjectionDirs 解析 `runtime:kind=dir[,runtime:kind=dir]`（MATE_PROJECTION_DIRS）。
 func parseProjectionDirs(v string) (map[string]string, error) {
 	return normalizeProjectionDirs(strings.Split(v, ","))
 }

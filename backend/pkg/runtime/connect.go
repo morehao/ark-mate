@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // Connect 依投影 Spec 拉起 ACP server 子进程（stdio）并完成 initialize 握手。
@@ -102,7 +102,7 @@ func RemoteSpec(id, name, transport, endpoint string, headers map[string]string)
 		Description:       "远程 ACP 端点（" + tr + "：" + endpoint + "）",
 		McpTransports:     []string{"stdio"}, // MCP 注入面由远端 agent 决定，平台侧保守声明
 		ManagesOwnContext: true,
-		Notes:             "远程 runtime：由 .forge/config/runtimes.json 声明（A5）",
+		Notes:             "远程 runtime：由 .ark-mate/config/runtimes.json 声明（A5）",
 	}
 }
 

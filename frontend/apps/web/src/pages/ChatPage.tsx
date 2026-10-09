@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Dropdown } from 'antd'
 import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import { Ev } from '@ark/types'
-import { conversationHistory, conversationRuns } from '@ark/api'
-import { useForge } from '../store'
+import { tokens } from '@ark-mate/ui'
+import { Ev } from '@ark-mate/types'
+import { conversationHistory, conversationRuns } from '@ark-mate/api'
+import { useMate } from '../store'
 import { AgentBadge } from '../components/AgentBadge'
 import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
@@ -26,23 +26,23 @@ export function ChatPage() {
   const params = useParams<{ id: string }>()
   const paramId = params.id ?? null
 
-  const agents = useForge((s) => s.agents)
-  const conversations = useForge((s) => s.conversations)
-  const views = useForge((s) => s.views)
-  const activeId = useForge((s) => s.activeId)
-  const drawerOpen = useForge((s) => s.drawerOpen)
-  const activate = useForge((s) => s.activate)
-  const expireHydration = useForge((s) => s.expireHydration)
-  const sendPrompt = useForge((s) => s.sendPrompt)
-  const cancelQueuedInput = useForge((s) => s.cancelQueuedInput)
-  const cancel = useForge((s) => s.cancel)
-  const archiveConversation = useForge((s) => s.archiveConversation)
-  const showToast = useForge((s) => s.showToast)
-  const setDrawer = useForge((s) => s.setDrawer)
-  const anchorSeq = useForge((s) => s.anchorSeq)
-  const clearAnchor = useForge((s) => s.clearAnchor)
-  const loadOlder = useForge((s) => s.loadOlder)
-  const historyStart = useForge((s) => s.historyStart)
+  const agents = useMate((s) => s.agents)
+  const conversations = useMate((s) => s.conversations)
+  const views = useMate((s) => s.views)
+  const activeId = useMate((s) => s.activeId)
+  const drawerOpen = useMate((s) => s.drawerOpen)
+  const activate = useMate((s) => s.activate)
+  const expireHydration = useMate((s) => s.expireHydration)
+  const sendPrompt = useMate((s) => s.sendPrompt)
+  const cancelQueuedInput = useMate((s) => s.cancelQueuedInput)
+  const cancel = useMate((s) => s.cancel)
+  const archiveConversation = useMate((s) => s.archiveConversation)
+  const showToast = useMate((s) => s.showToast)
+  const setDrawer = useMate((s) => s.setDrawer)
+  const anchorSeq = useMate((s) => s.anchorSeq)
+  const clearAnchor = useMate((s) => s.clearAnchor)
+  const loadOlder = useMate((s) => s.loadOlder)
+  const historyStart = useMate((s) => s.historyStart)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lastParamRef = useRef<string | null | undefined>(undefined)

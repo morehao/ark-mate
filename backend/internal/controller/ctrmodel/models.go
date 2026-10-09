@@ -6,9 +6,9 @@ package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/service/svcagent"
-	"github.com/morehao/ark-forge/internal/service/svcruntime"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/service/svcagent"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

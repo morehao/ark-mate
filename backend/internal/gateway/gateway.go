@@ -2,7 +2,7 @@
 //
 // 形态（计划的 P-1/P-2，先认清否则会照抄错模板）：底座（opencode / dsh）按 ACP 规范在
 // `session/new` 里收到一条 **stdio** MCP 条目，条目指向平台自己的可执行文件
-// （`forge mcp bridge --agent <id> --runtime <id>`）；网关进程**只带 scope、不带 server 列表**，
+// （`mate mcp bridge --agent <id> --runtime <id>`）；网关进程**只带 scope、不带 server 列表**，
 // 自己打开本机 store 读该 scope 的能力定义、自己从 vault 解密钥、再把工具面暴露给底座。
 //
 // 为什么这样切（三条都是硬理由，不是偏好）：
@@ -25,8 +25,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/morehao/ark-forge/internal/version"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/version"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // Scope 一条网关进程服务的范围：**只由稳定的标识构成**（P-2）。
@@ -127,7 +127,7 @@ func (h *handler) CallTool(ctx context.Context, tool string, args json.RawMessag
 // 名字带 `<serverID>__` 前缀是**唯一**能分辨来源的地方（P-3 的命名空间）。
 func instructions(s Scope) string {
 	// 不用尖括号：`json.Marshal` 会把 `<` `>` 转义成 `\u003c`，模型读起来反而更差。
-	return "本 server 是 ark-forge 平台的 MCP 网关：它把该 agent/runtime 作用域下的远程 MCP server " +
+	return "本 server 是 ark-mate 平台的 MCP 网关：它把该 agent/runtime 作用域下的远程 MCP server " +
 		"汇聚成一条 stdio 连接。工具名形如 serverID__toolName（分隔符是两个下划线），前缀即来源 server。" +
 		"作用域：agent=" + s.AgentID + " runtime=" + s.RuntimeID + "。"
 }

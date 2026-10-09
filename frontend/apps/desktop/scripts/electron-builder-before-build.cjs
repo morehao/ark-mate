@@ -4,7 +4,7 @@
  * ## 为什么是 false（而不是只写 `npmRebuild: false`）
  *
  * `apps/desktop` **没有任何生产依赖**（`dependencies` 为空，由 `internal/archtest` 的前端边界
- * 守卫钉住）：运行时要用的东西——前端资产、`forge-core`、随包载荷、私有 bin——全部由本仓脚本
+ * 守卫钉住）：运行时要用的东西——前端资产、`mate-core`、随包载荷、私有 bin——全部由本仓脚本
  * 装配好，经 `extraResources` 进包（见 `electron-builder.yml`）。所以"帮忙装依赖/重建原生件"
  * 这件事对我们永远是空操作。返回 `false` 让 electron-builder 做两件事：
  *

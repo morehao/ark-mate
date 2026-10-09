@@ -1,4 +1,4 @@
-// forge 是 ark-forge 控制面的单二进制入口（无默认子命令）。
+// mate 是 ark-mate 控制面的单二进制入口（无默认子命令）。
 //
 // 本文件只做进程级收尾：把参数交给 internal/app/command 分发，并把返回码交还 shell。
 // 各子命令实现（serve/demo/migrate/transcripts/config）见
@@ -15,7 +15,7 @@ import (
 	// 没有它，`time.LoadLocation` 会失败，表现是"预览/调度在一台机器上对、在容器里错"——
 	// 这是最不该靠"部署时记得挂 zoneinfo"来兜的一类问题：时区错了，任务就会在错误的时间
 	// 干有副作用的事。内嵌一份，行为与宿主机无关。
-	"github.com/morehao/ark-forge/internal/app/command"
+	"github.com/morehao/ark-mate/internal/app/command"
 	_ "time/tzdata"
 )
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // TestPermissionPolicyDecide 匹配优先级：工具 title > ACP kind > default；大小写不敏感。

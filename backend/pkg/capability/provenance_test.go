@@ -94,7 +94,7 @@ func TestComputeDirHashSkipsBookkeeping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mkdir(t, dir, map[string]string{forgeMarker: "id\nopencode\n", ProvenanceFileName: "{}"})
+	mkdir(t, dir, map[string]string{mateMarker: "id\nopencode\n", ProvenanceFileName: "{}"})
 	after, err := ComputeDirHash(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func assertNoLeftovers(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".forge-stage-") || strings.HasSuffix(e.Name(), ".forge-old") {
+		if strings.HasPrefix(e.Name(), ".mate-stage-") || strings.HasSuffix(e.Name(), ".mate-old") {
 			t.Fatalf("残留临时目录: %s", e.Name())
 		}
 	}
@@ -362,8 +362,8 @@ func TestReconcileCleansStagingLeftovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 模拟中断残留 + 一个用户自有目录（名字不撞保留名）。
-	mkdir(t, filepath.Join(root, ".forge-stage-123456"), map[string]string{"SKILL.md": "半成品"})
-	mkdir(t, filepath.Join(root, "demo.forge-old"), map[string]string{"SKILL.md": "旧产物"})
+	mkdir(t, filepath.Join(root, ".mate-stage-123456"), map[string]string{"SKILL.md": "半成品"})
+	mkdir(t, filepath.Join(root, "demo.mate-old"), map[string]string{"SKILL.md": "旧产物"})
 	mkdir(t, filepath.Join(root, "user-own"), map[string]string{"note.txt": "用户的东西"})
 
 	if _, _, err := ReconcileSkills(ocSpec(root), []Skill{sk}); err != nil {

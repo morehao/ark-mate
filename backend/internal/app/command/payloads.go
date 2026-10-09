@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 )
 
 // 本文件是 `serve --payloads` 的**解析层**（M3-4 的 Go 侧一半）。

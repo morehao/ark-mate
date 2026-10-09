@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // writeDistLayout 造一份最小的 dist 目录（index.html + assets/<hash>.js）。
@@ -161,7 +161,7 @@ func TestMountWebServesDirAssets(t *testing.T) {
 		t.Errorf("非 API 未知路径应回落 index.html：%d", w.Code)
 	}
 	// API 未注册路径**不**回落（把 API 404 变成 HTML 会让前端把 HTML 当 JSON 解析）。
-	if w := do("/v1/forge/nope"); w.Code != 404 || !strings.Contains(w.Header().Get("Content-Type"), "application/json") {
+	if w := do("/v1/mate/nope"); w.Code != 404 || !strings.Contains(w.Header().Get("Content-Type"), "application/json") {
 		t.Errorf("API 未知路径应回 JSON 信封 404：%d %s", w.Code, w.Header().Get("Content-Type"))
 	}
 }

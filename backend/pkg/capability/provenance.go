@@ -32,15 +32,15 @@ import (
 //   - 软链：**不 follow**，把 `symlink:<相对路径>\nmode:<权限>\ntarget:<字面目标>\n` 入哈希；
 //     且目标**逃出目录即拒**（`ErrSymlinkEscape`）——一个指向 `~/.ssh` 的软链会被材质化进 agent 目录；
 //   - 其它类型（设备/管道…）：直接报错，不入哈希；
-//   - 遍历**排除平台记账文件**（`.forge-managed` 归属标记、本文件写的 sidecar）：它们随投影次数变化，
+//   - 遍历**排除平台记账文件**（`.mate-managed` 归属标记、本文件写的 sidecar）：它们随投影次数变化，
 //     入哈希会让"内容没变"被误判成"变了"。
 //
 // 与 compozy 的差异（有意）：那边的 provenance 服务于 marketplace 安装（registry/slug/version），
-// ark-forge 没有 marketplace，来源就是本机定义文件，所以 sidecar 记的是 **skill id + runtime + format
+// ark-mate 没有 marketplace，来源就是本机定义文件，所以 sidecar 记的是 **skill id + runtime + format
 // + 摘要 + 写入时间**——本地可审计需要的那几项，不假装有版本号。
 
-// ProvenanceFileName 物化目录里的摘要 sidecar（与 `.forge-managed` 归属标记并列）。
-const ProvenanceFileName = ".forge-provenance.json"
+// ProvenanceFileName 物化目录里的摘要 sidecar（与 `.mate-managed` 归属标记并列）。
+const ProvenanceFileName = ".mate-provenance.json"
 
 // provenanceVersion 当前 sidecar 结构版本（将来加字段时据此兼容读）。
 const provenanceVersion = 1
@@ -69,7 +69,7 @@ type Provenance struct {
 	Runtime string `json:"runtime,omitempty"`
 	// Format 本次采用的物化 format（已实证的那些之一）。
 	Format string `json:"format"`
-	// Hash 目录载荷摘要（`.forge-managed` 与 sidecar 自身除外）。
+	// Hash 目录载荷摘要（`.mate-managed` 与 sidecar 自身除外）。
 	Hash string `json:"hash"`
 	// Bytes 载荷字节数（人读用；不参与摘要）。
 	Bytes int `json:"bytes"`
@@ -86,7 +86,7 @@ type payloadFile struct {
 
 // bookkeepingFiles 平台记账文件：不参与摘要（它们随投影次数变化，不是"内容"）。
 func isBookkeepingFile(name string) bool {
-	return name == forgeMarker || name == ProvenanceFileName
+	return name == mateMarker || name == ProvenanceFileName
 }
 
 // hashPayload 计算一组载荷文件的摘要（算法见文件头注释）。

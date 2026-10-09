@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/model"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

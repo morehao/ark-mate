@@ -1,6 +1,6 @@
 # Docker 构建上下文瘦身（`docker build .` 会把整个仓库发给 daemon）。
 # 只保留镜像真正需要的东西：backend/（Go module）与 frontend/（workspace 源码 + lockfile）。
-# 不加这个文件时，本机上下文会带上 .cache/（数 GB）、.gocache/、./forge 与 node_modules。
+# 不加这个文件时，本机上下文会带上 .cache/（数 GB）、.gocache/、./mate 与 node_modules。
 
 # —— 版本控制 / 编辑器 / OS ——
 .git
@@ -13,7 +13,7 @@
 # —— 本地构建缓存与产物（真源都不在镜像里）——
 .cache
 .gocache
-/forge
+/mate
 **/*.test
 **/*.out
 go.work.sum
@@ -24,6 +24,14 @@ frontend/**/node_modules
 frontend/**/dist
 frontend/**/.vite
 frontend/**/*.tsbuildinfo
+
+# 桌面端的**本机装配产物**（`make desktop/*` 在工作区里攒出来的，与容器镜像完全无关）：
+#   resources/ = mate-core + web + payloads + runtime/bin，release/ = .app 与 dmg/tar.gz
+# 这两项合计可达数 GB，且**不受上面 `frontend/**/dist` 覆盖**（它们不叫 dist）——漏掉它们时
+# 每次 `docker build` 都要把这几 GB 打进上下文发给 daemon（2026-10-09 实测：清理前一次
+# `make image` 的上下文传输占了绝大部分耗时）。桌面交付形态由 `make desktop/dist` 产出，不经容器。
+frontend/apps/desktop/resources
+frontend/apps/desktop/release
 
 # —— 后端 embed 宿主（必须由镜像内的前端阶段重新生成，避免把宿主机旧产物嵌进去）——
 backend/pkg/web/dist

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // defWarnOnce 同一条定义问题在一个进程内只 WARN 一次（key 由调用方给，须含 id 与 revision）。
@@ -40,9 +40,9 @@ func (s *Service) defWarnOnce(key, msg string, args ...any) {
 //
 // **语义降级（M6-2，必须写在注释里，避免后人误当事实源）**：自 v8 起，sqlite 模式下本方法
 // **不再是装载源**——能力定义的事实源是 DB（`skills`/`mcp_servers`），本方法只剩两个用途：
-//  1. **memory 模式**（`FORGE_STORE=memory`，或无 DB 文件时的 auto）的装载路径：memory 模式
+//  1. **memory 模式**（`MATE_STORE=memory`，或无 DB 文件时的 auto）的装载路径：memory 模式
 //     没有持久层，文件是它唯一的持久形态，不给它造第二套存储、也不让能力静默变空表；
-//  2. **导入/导出路径**（M6-4 的 `forge capability import|export`）：`LoadDir` 降级为
+//  2. **导入/导出路径**（M6-4 的 `mate capability import|export`）：`LoadDir` 降级为
 //     "把存量文件读成定义"的编解码入口。
 //
 // 登记 `capabilityDir` 的语义也随之降级为"导入/导出目录"（见 service.capabilityDir）。
@@ -62,7 +62,7 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 // 三步：**清空 → 逐行解码 → 过注册闸门**。顺序不能换：
 //   - 先 Reset 是"整体替换"语义的前提（否则库里删掉的行会以幽灵定义留下，见 Registry.Reset）；
 //   - 过 `RegisterSkill`/`RegisterMcpServer` 闸门是必须的：定义进 DB 的**写面**要走同一道闸门，
-//     但 DB 是可达的（`forge capability import`、将来的 SQL 手工修库），装载是最后一道防线——
+//     但 DB 是可达的（`mate capability import`、将来的 SQL 手工修库），装载是最后一道防线——
 //     一手坏定义不该让整个能力面起不来。
 //
 // 坏行/非法定义**逐条 WARN 跳过、不阻断启动**，与 `LoadDir` 的容错口径逐字一致（用户目录里
@@ -444,7 +444,7 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 			return "", fmt.Errorf("vault 不可用：%w", err)
 		}
 		if st == nil {
-			return "", fmt.Errorf("vault 不可用：本进程未配置能力/agent 目录（无 ~/.forge 可放密文）")
+			return "", fmt.Errorf("vault 不可用：本进程未配置能力/agent 目录（无 ~/.ark-mate 可放密文）")
 		}
 		b, err := st.Get(ref, vault.KindMcpSecret)
 		if err != nil {

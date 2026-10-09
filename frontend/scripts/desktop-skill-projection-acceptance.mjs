@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 桌面态 **skill 投放**验收（真 Electron 壳 + 真 forge-core + 真 dsh / 真 opencode 子进程）。
+ * 桌面态 **skill 投放**验收（真 Electron 壳 + 真 mate-core + 真 dsh / 真 opencode 子进程）。
  *
  * 为什么单独一条：`desktop-ui-acceptance.mjs` 打的是壳/契约/加固/凭据/流/退出六个场景，
  * **不含能力投放**——skill 到底有没有落到底座真正读的那个根，它一概看不见。而这条链恰恰
@@ -9,7 +9,7 @@
  *
  * 验三条（都来自 2026-10-09 的实测）：
  *   A `fix(runtime)` 配置隔离**不注入** `DSH_AGENTS_HOME` ⇒ dsh 的读根 == 平台写根
- *     （`${HOME}/.agents/skills`）；若注入，底座会静默去读 `<FORGE_HOME>/runtime/dsh/agents/skills`。
+ *     （`${HOME}/.agents/skills`）；若注入，底座会静默去读 `<MATE_HOME>/runtime/dsh/agents/skills`。
  *   B `fix(capability)` 物化**自建投影根** ⇒ 全新 home 上"第一条 skill"也能落盘；
  *     此前 staging 目录建在根里面而根不存在，直接 `no such file or directory`、只留一条 WARN。
  *   C **opencode v2（2.0.26）**同样读 `${HOME}/.agents/skills`：v2 换了实现（Bun 单文件二进制、
@@ -24,29 +24,29 @@
  *     只存在于探针 home），但它说明"改了 HOME 就什么都读不到"是错的。
  *
  * 隔离与代价（都是刻意的）：
- *   - 用**自己的 `HOME` 与 `FORGE_HOME`**（<repo>/.dsh/tmp/desktop-skill-accept）：既不碰用户的
- *     `~/.forge/forge.db`，也让 `${HOME}/.agents/skills` 从**不存在**开始（那正是 B 的前提）。
- *     脚本收尾会核对用户真实的 `~/.agents/skills` 与 `~/.forge` 指纹**零变化**。
+ *   - 用**自己的 `HOME` 与 `MATE_HOME`**（<repo>/.dsh/tmp/desktop-skill-accept）：既不碰用户的
+ *     `~/.ark-mate/mate.db`，也让 `${HOME}/.agents/skills` 从**不存在**开始（那正是 B 的前提）。
+ *     脚本收尾会核对用户真实的 `~/.agents/skills` 与 `~/.ark-mate` 指纹**零变化**。
  *   - 模型端点是**脚本内置的假 LLM**（Anthropic `/v1/messages` 流式）：零额度、零凭证，
  *     只回答一句话，并把两个底座的真实请求体留在内存里给断言用。opencode 侧靠**写在自己的
  *     隔离配置目录里**的 provider 声明（`providers.probe.settings.baseURL` → 假 LLM）把请求引过来，
  *     不动用户配置、不设 `XDG_CONFIG_HOME`（那是隔离表干的事）。
- *   - 只重建 `forge-core`（Go 侧改动）。壳产物与载荷是既有生成物，脚本只断言它们在位。
+ *   - 只重建 `mate-core`（Go 侧改动）。壳产物与载荷是既有生成物，脚本只断言它们在位。
  *
  * 两档靶子（同一份断言，壳从哪来不同）：
- *   - **源码态**（缺省）：壳是 `electron .`，核心是 `apps/desktop/resources/forge-core`，载荷与私有
+ *   - **源码态**（缺省）：壳是 `electron .`，核心是 `apps/desktop/resources/mate-core`，载荷与私有
  *     启动器取自 `apps/desktop/resources/`。
- *   - **打包态**（`FORGE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）：
+ *   - **打包态**（`MATE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）：
  *     壳与核心都来自**打出来的包**（ad-hoc 签名 + `--options runtime`）。为什么值得单独一档——发布
  *     形态有四件东西是源码态看不见的：① 私有运行时启动器在**打包时重新生成**进
  *     `Contents/Resources/runtime/bin/`（隔离表就在那个生成物里，源码态那份读的是另一个路径）；
- *     ② 包内核心同样从包内拉起载荷（`FORGE_DSH_ENTRY` / `FORGE_OPENCODE_BIN` 都指包内）；
- *     ③ hardened runtime 真的生效；④ 探针的 `HOME`/`FORGE_HOME` 重定向在包内壳上同样成立。
+ *     ② 包内核心同样从包内拉起载荷（`MATE_DSH_ENTRY` / `MATE_OPENCODE_BIN` 都指包内）；
+ *     ③ hardened runtime 真的生效；④ 探针的 `HOME`/`MATE_HOME` 重定向在包内壳上同样成立。
  *     打包态**不重建任何东西**——被测的就是磁盘上那份包，重建等于把靶子换掉。
  *
  * 用法：
  *   `node scripts/desktop-skill-projection-acceptance.mjs`（源码态；`KEEP_PROBE=1` 保留探针目录）
- *   `FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-skill-projection-acceptance.mjs`
+ *   `MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-skill-projection-acceptance.mjs`
  *     （打包态；等价 `pnpm ui:accept:desktop-skills:packaged`，需要先 `make desktop/dist`）
  * **不进 CI**：要真 Electron + 真底座。
  */
@@ -76,18 +76,18 @@ import {
 
 const PROBE = join(REPO, '.dsh', 'tmp', 'desktop-skill-accept')
 const PROBE_HOME = join(PROBE, 'home')
-const PROBE_FORGE_HOME = join(PROBE_HOME, '.forge')
+const PROBE_MATE_HOME = join(PROBE_HOME, '.ark-mate')
 const SKILL_ID = 'probe-desktop'
 const BODY_MARK = 'DESKTOP-ONLY-MARK'
 const PROJECTION_ROOT = join(PROBE_HOME, '.agents', 'skills')
 const LLM_PORT = 10078
 /** opencode 的隔离配置目录（核心注入 `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 的落点）。 */
-const OPENCODE_CONFIG_DIR = join(PROBE_FORGE_HOME, 'runtime', 'opencode', 'config', 'opencode')
+const OPENCODE_CONFIG_DIR = join(PROBE_MATE_HOME, 'runtime', 'opencode', 'config', 'opencode')
 const OPENCODE_CONFIG = join(OPENCODE_CONFIG_DIR, 'opencode.json')
 
-/** 打包态靶子（`FORGE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）。
+/** 打包态靶子（`MATE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）。
  *  设了它就**不重建任何东西**——被测的就是磁盘上那份包，重新构建等于把靶子换掉。 */
-const PACKAGED_APP = process.env.FORGE_SMOKE_APP ? resolve(process.env.FORGE_SMOKE_APP) : null
+const PACKAGED_APP = process.env.MATE_SMOKE_APP ? resolve(process.env.MATE_SMOKE_APP) : null
 /** 壳与核心共用的资产根：源码态 `apps/desktop/resources/`，打包态 `.app/Contents/Resources/`。
  *  私有运行时启动器（隔离表在仓库里的第二份）与随包载荷都在这下面，且**打包时是重新生成的**——
  *  这正是"源码态全绿 ≠ 发布形态全绿"的那一处，也是本脚本要能打打包态的理由。 */
@@ -97,7 +97,7 @@ const PAYLOADS_DIR = join(ASSETS, 'payloads')
 const MODE = PACKAGED_APP ? `打包态（${PACKAGED_APP}）` : '源码态（electron .）'
 
 /** 本档要判的壳/核心进程匹配：打包态的壳是 `Contents/MacOS/<productName>`，不在 `SHELL_RE` 面上
- *  （核心两档都落在 `resources/forge-core serve`，所以 `CORE_RE` 通用）。 */
+ *  （核心两档都落在 `resources/mate-core serve`，所以 `CORE_RE` 通用）。 */
 const shellRe = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP).shell : SHELL_RE
 const coreRe = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP).core : CORE_RE
 const runningShells = () => pidsMatching(shellRe)
@@ -153,9 +153,9 @@ function fingerprint(dir) {
 
 /** 桌面态核心：直接重建（Go 侧改动；不拖 make core/desktop 的 pnpm 与 runtime-bin）。 */
 function rebuildCore() {
-  const out = join(DESKTOP, 'resources', 'forge-core')
+  const out = join(DESKTOP, 'resources', 'mate-core')
   try {
-    execFileSync('go', ['build', '-o', out, './cmd/forge'], {
+    execFileSync('go', ['build', '-o', out, './cmd/mate'], {
       cwd: join(REPO, 'backend'),
       env: { ...process.env, CGO_ENABLED: '0' },
       stdio: 'ignore',
@@ -260,7 +260,7 @@ function opencodeSkillsOf(raw) {
 
 /** 把 opencode 的 provider 指向脚本内置的假 LLM。
  *
- *  落在**它自己的隔离配置目录**（`<FORGE_HOME>/runtime/opencode/config/opencode`）里，因此
+ *  落在**它自己的隔离配置目录**（`<MATE_HOME>/runtime/opencode/config/opencode`）里，因此
  *  既不碰用户的 `~/.config/opencode`，也不需要给底座设任何 override 环境变量——"平台默认根下
  *  投放的 skill 底座开箱即读到"这条断言的前提正是"没人额外告诉它去哪读"。
  *  形状取 v2 的 `providers` + `package` + `settings.baseURL`（v1 的 `provider` 键在 v2 已改名）。 */
@@ -290,9 +290,9 @@ function writeOpencodeProbeConfig() {
 }
 
 const realAgentsRoot = join(homedir(), '.agents', 'skills')
-const realForgeRoot = join(homedir(), '.forge')
+const realMateRoot = join(homedir(), '.ark-mate')
 /** 用户自己的 opencode 状态目录：v2 的服务发现面（`service.json`）与 v1 的锁/历史都在这儿，
- *  forge 全程一个字节都不该碰（2026-10-09 补 XDG_STATE_HOME 隔离之前，这里正是会漏的地方）。 */
+ *  mate 全程一个字节都不该碰（2026-10-09 补 XDG_STATE_HOME 隔离之前，这里正是会漏的地方）。 */
 const realOpencodeState = join(homedir(), '.local', 'state', 'opencode')
 
 async function main() {
@@ -312,7 +312,7 @@ async function main() {
     check(
       '打包态靶子是一个完整的包（壳可执行 / 包内核心 / 包内 web / 私有 runtime bin / 包内载荷）',
       existsSync(join(PACKAGED_APP, 'Contents', 'MacOS')) &&
-        existsSync(join(ASSETS, 'forge-core')) &&
+        existsSync(join(ASSETS, 'mate-core')) &&
         existsSync(join(ASSETS, 'web', 'index.html')) &&
         existsSync(LAUNCHER_DIR) &&
         payloadsReady,
@@ -327,7 +327,7 @@ async function main() {
     check('随包载荷清单（本次判的就是这两个版本）', versions.length > 0, versions.join(' / '))
   } else {
     const built = rebuildCore()
-    check('forge-core 已按当前代码重建', built.ok, built.detail ?? '')
+    check('mate-core 已按当前代码重建', built.ok, built.detail ?? '')
     check(
       '壳与载荷产物在位（壳 dist / resources/web / 私有 runtime bin / resources/payloads）',
       existsSync(join(DESKTOP, 'dist', 'main.cjs')) &&
@@ -356,7 +356,7 @@ async function main() {
   check('opencode 探针 provider 已写进它自己的隔离配置目录', writeOpencodeProbeConfig(), OPENCODE_CONFIG)
 
   const beforeAgents = fingerprint(realAgentsRoot)
-  const beforeForge = fingerprint(realForgeRoot)
+  const beforeMate = fingerprint(realMateRoot)
   const beforeHostState = fingerprint(realOpencodeState)
 
   const llm = await startFakeLLM()
@@ -364,7 +364,7 @@ async function main() {
   const launchEnv = {
     ...process.env,
     HOME: PROBE_HOME,
-    FORGE_HOME: PROBE_FORGE_HOME,
+    MATE_HOME: PROBE_MATE_HOME,
     DEEPSEEK_API_KEY: 'probe-key',
     DEEPSEEK_BASE_URL: `http://127.0.0.1:${LLM_PORT}`,
     // opencode 侧同一条思路：密钥经它的 provider 声明（`env: ["PROBE_API_KEY"]`）读到，
@@ -385,17 +385,17 @@ async function main() {
   const coreEnv = envOf(shell.corePid)
   const envReadable = Object.keys(coreEnv).length > 0
   check(
-    '核心进程环境确实是探针 HOME/FORGE_HOME（不是用户真实目录）',
-    !envReadable || (coreEnv.HOME === PROBE_HOME && coreEnv.FORGE_HOME === PROBE_FORGE_HOME),
-    envReadable ? `HOME=${coreEnv.HOME} FORGE_HOME=${coreEnv.FORGE_HOME}` : 'ps -E 读不到（按"读不到"放过）',
+    '核心进程环境确实是探针 HOME/MATE_HOME（不是用户真实目录）',
+    !envReadable || (coreEnv.HOME === PROBE_HOME && coreEnv.MATE_HOME === PROBE_MATE_HOME),
+    envReadable ? `HOME=${coreEnv.HOME} MATE_HOME=${coreEnv.MATE_HOME}` : 'ps -E 读不到（按"读不到"放过）',
   )
 
   const cdp = await connectCDP(shell.port)
-  await waitFor(cdp, "return typeof window.__FORGE_DESKTOP__ === 'object'", 20000)
+  await waitFor(cdp, "return typeof window.__MATE_DESKTOP__ === 'object'", 20000)
 
   section('修复 B：全新 home 上第一条 skill 要落盘')
   const created = await cdp.evalJs(`
-    const r = await fetch('/v1/forge/skills', {
+    const r = await fetch('/v1/mate/skills', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(
@@ -424,7 +424,7 @@ async function main() {
   // 平台**自报**的物化体检：两个底座都在同一处 root 上投影，归属标记里应同时登记双方且状态 in_sync。
   // 这条是"平台侧"的说法，与下面两条"底座侧"的真请求体互为独立来源——两者不一致正是要抓的形态。
   const mat = await cdp.evalJs(`
-    const r = await fetch('/v1/forge/skills/${SKILL_ID}/materialization')
+    const r = await fetch('/v1/mate/skills/${SKILL_ID}/materialization')
     return await r.json()
   `)
   const matStates = mat?.data?.states ?? []
@@ -437,7 +437,7 @@ async function main() {
 
   section('修复 A · 底座侧：平台拉起的 dsh 要能读到这条 skill')
   const conv = await cdp.evalJs(`
-    const r = await fetch('/v1/forge/conversations', {
+    const r = await fetch('/v1/mate/conversations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'dsh', prompt: '报告你可见的 skill 名称。' }))},
@@ -487,7 +487,7 @@ async function main() {
   section('修复 A · 底座侧：平台拉起的 opencode v2 也要能读到同一条 skill')
   const ocBefore = llm.captured.length
   const convOc = await cdp.evalJs(`
-    const r = await fetch('/v1/forge/conversations', {
+    const r = await fetch('/v1/mate/conversations', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'opencode', prompt: '报告你可见的 skill 名称。' }))},
@@ -515,7 +515,7 @@ async function main() {
     Boolean(ocReq),
     ocBlocks.length ? ocBlocks.join(' | ').slice(0, 240) : '（没有一个请求带 skill 目录块）',
   )
-  // 次证（第二来源）：v2 的**服务发现面**必须落在 FORGE_HOME 内。
+  // 次证（第二来源）：v2 的**服务发现面**必须落在 MATE_HOME 内。
   // v2 新引入 `<XDG_STATE_HOME ?? ~/.local/state>/opencode/service.json`（后台服务登记 + 端口），
   // 不隔离它就会读到**用户自己的** service.json（同版本同 url 直接复用你的服务、版本不符还会
   // SIGTERM 旧进程再顶掉登记文件）——这正是 2026-10-09 补进隔离表的那一项，由子进程自己回答。
@@ -523,8 +523,8 @@ async function main() {
   const ocEnv = envOf(ocPids[0])
   const ocEnvReadable = Object.keys(ocEnv).length > 0
   check(
-    'opencode 子进程的 XDG_STATE_HOME 落在 FORGE_HOME 内（v2 的服务发现面不碰本机）',
-    !ocEnvReadable || (ocEnv.XDG_STATE_HOME ?? '').startsWith(`${PROBE_FORGE_HOME}/`),
+    'opencode 子进程的 XDG_STATE_HOME 落在 MATE_HOME 内（v2 的服务发现面不碰本机）',
+    !ocEnvReadable || (ocEnv.XDG_STATE_HOME ?? '').startsWith(`${PROBE_MATE_HOME}/`),
     ocEnvReadable
       ? `XDG_STATE_HOME=${ocEnv.XDG_STATE_HOME ?? '（未注入）'} / XDG_CONFIG_HOME=${ocEnv.XDG_CONFIG_HOME ?? '（未注入）'}`
       : 'ps -E 读不到（隔离表另由 pkg/runtime/isolation_test.go 与启动器守卫钉住）',
@@ -543,7 +543,7 @@ async function main() {
   check('dsh 子进程也随核心回收', pidsMatching(/--profile\s+acp/).length === 0)
   check('opencode 子进程也随核心回收', pidsMatching(/payloads\/opencode\/.*\/bin\/opencode\s+acp/).length === 0)
   check('用户真实 ~/.agents/skills 零变化', fingerprint(realAgentsRoot) === beforeAgents)
-  check('用户真实 ~/.forge 零变化', fingerprint(realForgeRoot) === beforeForge)
+  check('用户真实 ~/.ark-mate 零变化', fingerprint(realMateRoot) === beforeMate)
   check(
     '用户真实 ~/.local/state/opencode 零变化（v2 服务发现面：探针全程不该碰它）',
     fingerprint(realOpencodeState) === beforeHostState,

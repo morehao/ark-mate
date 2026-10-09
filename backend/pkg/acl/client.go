@@ -9,7 +9,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/morehao/ark-forge/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // defaultDialTimeout Dial 未显式配置且调用方 ctx 无截止时间时的握手上限。
@@ -98,7 +98,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	}
 
 	impl := acpsdk.Implementation{
-		Name:    firstNonEmpty(opts.ClientName, "ark-forge"),
+		Name:    firstNonEmpty(opts.ClientName, "ark-mate"),
 		Version: firstNonEmpty(opts.ClientVersion, "dev-m0"),
 	}
 	// 宿主能力声明：本层实现了 elicitation（表单/URL）与 session/request_permission 等交互通道，
@@ -287,7 +287,7 @@ func (h *hostClient) RequestPermission(ctx context.Context, p acpsdk.RequestPerm
 	return permissionResponseFromDecision(d, p.Options), nil
 }
 
-// hostClient 未开放的能力（fs/terminal）一律返回错误；ark-forge M0 不在
+// hostClient 未开放的能力（fs/terminal）一律返回错误；ark-mate M0 不在
 // clientCapabilities 中声明它们，正常 agent 不应发起这些请求。
 func (h *hostClient) ReadTextFile(context.Context, acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {
 	return acpsdk.ReadTextFileResponse{}, errors.New("fs.readTextFile 未开放")

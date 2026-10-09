@@ -270,7 +270,7 @@ func TestApplyProjectionLayout(t *testing.T) {
 	}
 }
 
-// TestProjectionPathAndDir 拼绝对路径与所属目录（.forge-managed 标记与 sidecar 落在目录里）。
+// TestProjectionPathAndDir 拼绝对路径与所属目录（.mate-managed 标记与 sidecar 落在目录里）。
 func TestProjectionPathAndDir(t *testing.T) {
 	p := baseSkillProjection()
 	p.Root = "/r"

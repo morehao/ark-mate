@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // testSpec 构造一处投影形态（落点 <id>/SKILL.md，即两个 adapter 当前的原生约定）。
@@ -27,12 +27,12 @@ func dshSpec(root string) MaterializeSpec {
 func TestMaterializeSkillConvention(t *testing.T) {
 	root := t.TempDir()
 	spec := ocSpec(root)
-	sk := Skill{ID: "forge-demo", Name: "Demo", Description: "演示技能", Body: "# demo skill\nbody"}
+	sk := Skill{ID: "mate-demo", Name: "Demo", Description: "演示技能", Body: "# demo skill\nbody"}
 	p, err := MaterializeSkill(spec, sk)
 	if err != nil {
 		t.Fatalf("MaterializeSkill: %v", err)
 	}
-	want := filepath.Join(root, "forge-demo", "SKILL.md")
+	want := filepath.Join(root, "mate-demo", "SKILL.md")
 	if p != want {
 		t.Fatalf("物化路径不符: %s != %s", p, want)
 	}
@@ -40,7 +40,7 @@ func TestMaterializeSkillConvention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantContent := "---\nname: \"forge-demo\"\ndescription: \"演示技能\"\n---\n" + sk.Body
+	wantContent := "---\nname: \"mate-demo\"\ndescription: \"演示技能\"\n---\n" + sk.Body
 	if string(b) != wantContent {
 		t.Fatalf("SKILL.md 内容不符:\n%q\nwant:\n%q", b, wantContent)
 	}
@@ -127,16 +127,16 @@ func TestApplyLayoutMatchesRuntime(t *testing.T) {
 	}
 }
 
-// TestReconcileSkills 删除联动 + 重校：带 forge 标记且不在注册表的目录被清，
+// TestReconcileSkills 删除联动 + 重校：带 mate 标记且不在注册表的目录被清，
 // 用户自有（无标记）目录绝不动；注册表 skill 缺失则写出。
 func TestReconcileSkills(t *testing.T) {
 	root := t.TempDir()
 	spec := ocSpec(root)
-	// 预置：forge 管理的 stale 目录（带标记）+ 用户自有 user-x（无标记）。
+	// 预置：mate 管理的 stale 目录（带标记）+ 用户自有 user-x（无标记）。
 	if err := os.MkdirAll(filepath.Join(root, "stale"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "stale", forgeMarker), []byte("stale\nopencode\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "stale", mateMarker), []byte("stale\nopencode\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "user-x"), 0o755); err != nil {
@@ -159,7 +159,7 @@ func TestReconcileSkills(t *testing.T) {
 		t.Fatalf("keep 未写出或内容不符: %q err=%v", b, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "stale")); !os.IsNotExist(err) {
-		t.Fatal("stale（forge 标记、不在注册表）应被删除联动")
+		t.Fatal("stale（mate 标记、不在注册表）应被删除联动")
 	}
 	if _, err := os.Stat(filepath.Join(root, "user-x")); err != nil {
 		t.Fatal("用户自有目录不应被动")
@@ -178,7 +178,7 @@ func TestReconcileCleansLegacyOrphanMarker(t *testing.T) {
 	if err := os.MkdirAll(orphan, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(orphan, forgeMarker), []byte("legacy-only\n\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(orphan, mateMarker), []byte("legacy-only\n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(orphan, "SKILL.md"), []byte("---\nname: x\n---\nold"), 0o644); err != nil {
@@ -199,7 +199,7 @@ func TestMaterializeWritesMarker(t *testing.T) {
 	if _, err := MaterializeSkill(ocSpec(root), sk); err != nil {
 		t.Fatal(err)
 	}
-	id, owners, ok := readMarker(filepath.Join(root, "m1", forgeMarker))
+	id, owners, ok := readMarker(filepath.Join(root, "m1", mateMarker))
 	if !ok || id != "m1" || !markerHasOwner(owners, "opencode") {
 		t.Fatalf("归属标记不符: id=%q owners=%v ok=%v", id, owners, ok)
 	}
@@ -354,7 +354,7 @@ func TestReconcileSharedRootResidualCleanup(t *testing.T) {
 	if _, _, err := ReconcileSkills(dshSpec(shared), skills); err != nil {
 		t.Fatal(err)
 	}
-	_, owners, _ := readMarker(filepath.Join(shared, "both", forgeMarker))
+	_, owners, _ := readMarker(filepath.Join(shared, "both", mateMarker))
 	if len(owners) != 2 || !markerHasOwner(owners, "opencode") || !markerHasOwner(owners, "deepseekharness") {
 		t.Fatalf("共享 root 归属集合应含两个投影方，got %v", owners)
 	}
@@ -370,7 +370,7 @@ func TestReconcileSharedRootResidualCleanup(t *testing.T) {
 	if w, r, err := ReconcileSkills(ocSpec(shared), ocOnlySet); err != nil || r != 0 {
 		t.Fatalf("oc 摘除登记不应删除目录: w=%d r=%d err=%v", w, r, err)
 	}
-	_, owners, _ = readMarker(filepath.Join(shared, "both", forgeMarker))
+	_, owners, _ = readMarker(filepath.Join(shared, "both", mateMarker))
 	if len(owners) != 1 || owners[0] != "deepseekharness" {
 		t.Fatalf("摘除后应只剩 dsh，got %v", owners)
 	}
@@ -394,10 +394,10 @@ func TestReadMarkerLegacy(t *testing.T) {
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(legacy, forgeMarker), []byte("legacy\nopencode\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, mateMarker), []byte("legacy\nopencode\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	id, owners, ok := readMarker(filepath.Join(legacy, forgeMarker))
+	id, owners, ok := readMarker(filepath.Join(legacy, mateMarker))
 	if !ok || id != "legacy" || len(owners) != 1 || owners[0] != "opencode" {
 		t.Fatalf("旧格式解析不符: id=%q owners=%v ok=%v", id, owners, ok)
 	}
@@ -405,10 +405,10 @@ func TestReadMarkerLegacy(t *testing.T) {
 	if err := os.MkdirAll(global, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(global, forgeMarker), []byte("global\n\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(global, mateMarker), []byte("global\n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if id, owners, ok := readMarker(filepath.Join(global, forgeMarker)); !ok || id != "global" || len(owners) != 0 {
+	if id, owners, ok := readMarker(filepath.Join(global, mateMarker)); !ok || id != "global" || len(owners) != 0 {
 		t.Fatalf("空归属解析不符: id=%q owners=%v ok=%v", id, owners, ok)
 	}
 }

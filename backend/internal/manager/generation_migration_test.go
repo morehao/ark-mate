@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/mcp"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— M3-6/M3-7：轮次边界的代际迁移、缩权与代际池 ———
@@ -500,7 +500,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}
 	// 拒绝文案必须给出路（用户看得懂"我该怎么办"）。
-	for _, want := range []string{"上限", "FORGE_GENERATION_LIMIT", "复用"} {
+	for _, want := range []string{"上限", "MATE_GENERATION_LIMIT", "复用"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("拒绝文案缺 %q：%v", want, err)
 		}

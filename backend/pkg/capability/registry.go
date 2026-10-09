@@ -446,13 +446,13 @@ func (r *Registry) loadSkillsDir(dir string) int {
 		}
 		// 旧键 `sources` 已被忽略（M1 起条目侧只声明 runtimes），而 encoding/json 丢未知键
 		// 是**静默**的：后果是技能从「只给 opencode」悄悄变成「给所有 runtime」——投放面被放宽，
-		// 用户看不到任何迹象。所以装载时显式挂一条告警，把人引到 `forge capability migrate`。
+		// 用户看不到任何迹象。所以装载时显式挂一条告警，把人引到 `mate capability migrate`。
 		if hasLegacySourcesKey(b) {
 			r.appendSkillWarning(d.ID, Warning{
 				Severity: SeverityInfo,
 				Pattern:  "legacy_sources_key",
 				Message: "该定义仍含已退役的 `sources` 字段（已被忽略）：技能会投放到**所有**支持 skill 投影的 runtime，" +
-					"而不是原来声明的那些。运行 `forge capability migrate` 把它转成 runtimes（值 = 原 sources 的 runtime 去重升序）",
+					"而不是原来声明的那些。运行 `mate capability migrate` 把它转成 runtimes（值 = 原 sources 的 runtime 去重升序）",
 			})
 		}
 		return nil

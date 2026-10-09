@@ -2,7 +2,7 @@ package manager
 
 // ——— 平台侧 MCP 网关复用的窄出口（M7-2）———
 //
-// 网关（`forge mcp bridge`）是**另一个进程**，但它必须与注入面共用同一套语义与同一份实现：
+// 网关（`mate mcp bridge`）是**另一个进程**，但它必须与注入面共用同一套语义与同一份实现：
 // "这个 agent 该看到哪些 MCP server"（选址）与"密钥引用怎么解析成明文"（凭据）。
 // 网关重写一套的后果是**静默分叉**——用户停用的 server 仍然能被模型调用，或者同一份引用在
 // 两个进程里解析出不同结果。故这两件事各开一个出口，而不是把整个 Service 暴露给网关。
@@ -13,7 +13,7 @@ package manager
 import (
 	"fmt"
 
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // GatewayMcpFace 返回网关应当暴露的**远程** server 定义（未解析密钥，顺序稳定）。

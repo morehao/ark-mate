@@ -1,8 +1,8 @@
 package manager
 
 import (
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— 能力集 → 指纹输入（§13.4 代际；`pkg/runtime.Fingerprint` 的唯一装配点） ———

@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— 当前 Agent（全局默认）切换：<AgentDir>/default.json ———
 //
 // 语义：**当前 Agent 是一个全局单例选择**（不是 agent 自身的属性）。未显式指定 agent_id 的
-// 动作都取它——新建会话（resolveConversationAgent）、模型目录缺省（GET /models）、forge demo。
+// 动作都取它——新建会话（resolveConversationAgent）、模型目录缺省（GET /models）、mate demo。
 // 回落链：显式选择（agent 仍存在）> 内置种子 dsh > id 升序首个；注册表为空才报错。
 //
 // 历史：默认 Agent 曾是硬编码常量（永远是 dsh），面板上「切换 agent」无从落地；现由用户经

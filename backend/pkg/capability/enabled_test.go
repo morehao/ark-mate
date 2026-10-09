@@ -50,7 +50,7 @@ func TestReconcileWithdrawsDisabledSkill(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 		t.Fatalf("应已物化: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, forgeMarker)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, mateMarker)); err != nil {
 		t.Fatalf("应带归属标记: %v", err)
 	}
 

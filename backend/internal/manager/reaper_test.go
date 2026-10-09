@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestReapIdleOnceBasic 空闲超阈值且无会话/无 busy → 回收并置 stopped。

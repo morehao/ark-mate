@@ -1,4 +1,4 @@
-// Package store 是 ark-forge 的 SQLite 持久层门面（gorm + 纯 Go dialector）。
+// Package store 是 ark-mate 的 SQLite 持久层门面（gorm + 纯 Go dialector）。
 //
 // 设计约束：
 //   - schema_migrations 自管迁移（对齐 zacp store.go 经验：事务 + 幂等 + 版本拒绝启动）；
@@ -20,9 +20,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/morehao/ark-forge/internal/dao"
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/dao"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/dbclient"
 	"gorm.io/gorm"
 )
 

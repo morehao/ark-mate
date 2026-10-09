@@ -2,11 +2,11 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrusage"
-	"github.com/morehao/ark-forge/internal/controller/ctrws"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/middleware"
+	"github.com/morehao/ark-mate/internal/controller/ctrusage"
+	"github.com/morehao/ark-mate/internal/controller/ctrws"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/middleware"
 )
 
 // registerUsage 用量统计（M3 首项）：runs 计数/时长 + 会话上下文/费用快照聚合

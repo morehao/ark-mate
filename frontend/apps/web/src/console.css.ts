@@ -1,4 +1,4 @@
-import { tokens } from '@ark/ui'
+import { tokens } from '@ark-mate/ui'
 
 /**
  * 问答控制台用到的少量全局 CSS（hover / 伪元素 / keyframes / 移动端抽屉）。

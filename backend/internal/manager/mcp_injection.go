@@ -17,7 +17,7 @@ package manager
 // 网关分派（P-2/P-3 的落点）：
 //
 //	stdio → 原样直连（C-5：stdio 子进程仍归底座自建自管；S2 是另案）
-//	远程  → 合成**一条** stdio 条目 `forge-gateway = <平台可执行文件> mcp bridge --agent … --runtime …`
+//	远程  → 合成**一条** stdio 条目 `mate-gateway = <平台可执行文件> mcp bridge --agent … --runtime …`
 //
 // 条目里**不含任何每台 server 的信息**——于是"加一个远程 server"不改变注入项、也就不换代际
 // （网关的头号收益）。唯一会让条目变的是 scope 本身与会话钉住的 `mcps`（用户的选定）。
@@ -27,10 +27,10 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/mcp"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // mcpInjectionPlan MCP 注入计划（**不含明文密钥**）。
@@ -73,7 +73,7 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 	all := s.caps.ListMcpServers()
 
 	if !s.McpGatewayEnabled() {
-		// 回退路径（FORGE_MCP_GATEWAY=off）：远程也直连，故传输判据就是该 runtime 的声明。
+		// 回退路径（MATE_MCP_GATEWAY=off）：远程也直连，故传输判据就是该 runtime 的声明。
 		plan.Direct = capability.SelectMcpServers(all, supported, allowIDs)
 		return plan
 	}
@@ -96,8 +96,8 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 	//   · 条件注入（"有远程才注入"）会让**从零到一**那次仍然改动底座的配置面 ⇒ 仍然换代际；
 	//   · 而缺省路径（指纹恒 ""）根本不会迁移，那条会话就会永远看不到后来加的远程 server
 	//     （静默——正是这套设计要消灭的失败面）。
-	// 代价如实记在配置项注释里：没有远程 server 的用户也会多一个空闲的 `forge mcp bridge` 子进程；
-	// 不接受这笔开销就用 `FORGE_MCP_GATEWAY=off` 回退（那时远程返回直连注入，条目也不再存在）。
+	// 代价如实记在配置项注释里：没有远程 server 的用户也会多一个空闲的 `mate mcp bridge` 子进程；
+	// 不接受这笔开销就用 `MATE_MCP_GATEWAY=off` 回退（那时远程返回直连注入，条目也不再存在）。
 	if allowIDs != nil && len(*allowIDs) == 0 {
 		// 显式"一个 MCP 都不要"（agent 的 `mcps: []` 或会话钉的 `[]`）：这是用户把整个 MCP 面
 		// 关掉了。此时连网关条目都不该出现——它的存在本身就是"这个面还在"，与声明相悖。
@@ -118,7 +118,7 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 // gatewayEntry 合成网关注入条目（P-2：一条 stdio 条目 + 稳定 scope）。
 //
 // `Command` 用**当前进程自己的可执行文件**：网关就是平台的另一个子命令，底座按 stdio server
-// 把它拉起来时不需要知道平台装在哪（也不该依赖 PATH 里有 `forge`）。
+// 把它拉起来时不需要知道平台装在哪（也不该依赖 PATH 里有 `mate`）。
 // 已知代价（写下来免得被当成 bug）：`go run` 起的开发进程路径是临时目录、每次重启都不同，
 // 于是**钉住会话**的指纹会随之变化（缺省路径指纹恒空，不受影响）；打包/安装形态下路径稳定。
 func (s *Service) gatewayEntry(agent *AgentRec, runtimeID string, sel *CapabilitySelection) (acl.McpServer, error) {
@@ -142,7 +142,7 @@ func (s *Service) gatewayEntry(agent *AgentRec, runtimeID string, sel *Capabilit
 	}, nil
 }
 
-// SetMcpGatewayEnabled 开关平台侧 MCP 网关（M7-3；`FORGE_MCP_GATEWAY=off` 回退）。
+// SetMcpGatewayEnabled 开关平台侧 MCP 网关（M7-3；`MATE_MCP_GATEWAY=off` 回退）。
 // 默认**开启**：不设置时远程 MCP 走网关（见 config.Config.McpGatewayEnabled）。
 func (s *Service) SetMcpGatewayEnabled(enabled bool) {
 	s.mcpGatewayEnabled.Store(enabled)

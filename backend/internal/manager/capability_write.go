@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // ——— 能力定义写面：C9 落盘纪律的唯一实现 ———
@@ -27,7 +27,7 @@ import (
 //     （风险表第 3 行）。
 //
 // 一个必须说清的边界：第 5 条防的是**并发写**（两个 PUT / PUT 撞上手工编辑 / 撞上
-// `forge capability migrate`），不是"客户端 GET 之后有人改了文件"。后者不需要报错也不该报错
+// `mate capability migrate`），不是"客户端 GET 之后有人改了文件"。后者不需要报错也不该报错
 // ——PUT 的语义是"这几个键置成这些值"，而未知键在第 1 步就被重新读入，所以别人在你 GET 之后
 // 写的**别的键**不会丢。会丢的只有"你们改了同一个键"，那时后写者赢是 PUT 的应有语义。
 
@@ -47,7 +47,7 @@ func errCapabilityUnavailable() error {
 // 措辞给出路：这是部署配置问题，用户要的是"该设哪个键"，不是一个"写入失败"。
 func capabilityDirUnsetErr(what string) error {
 	return acl.NewError(acl.ClassRequest, "capability_dir_unset",
-		fmt.Sprintf("未配置能力目录（FORGE_CAPABILITIES），%s只能内存生效、重启即失；设好目录后重试", what), nil)
+		fmt.Sprintf("未配置能力目录（MATE_CAPABILITIES），%s只能内存生效、重启即失；设好目录后重试", what), nil)
 }
 
 // capabilityDirFor 取某类定义的目录；未配置 → capability_dir_unset。

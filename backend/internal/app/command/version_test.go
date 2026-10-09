@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/version"
+	"github.com/morehao/ark-mate/internal/version"
 )
 
 // TestVersionOutput 版本出口的字节级契约（M4-1）。
 //
-// 为什么钉到字节：`build-release-json.mjs` 用 `forge-core --version --json` 填 release.json 的
+// 为什么钉到字节：`build-release-json.mjs` 用 `mate-core --version --json` 填 release.json 的
 // `coreVersion`/`apiContract`，而 `make verify/release-json` 会拿同一份输出复核。任何"顺手加个
 // 字段/换个换行"都会让两侧判据悄悄错位——版本出口是发布契约的输入，不是打印好看就行。
 func TestVersionOutput(t *testing.T) {

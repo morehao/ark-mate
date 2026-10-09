@@ -12,7 +12,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/coder/websocket"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // testACPResponder 是 pkg/runtime 测试用的**自建最小 ACP responder**。

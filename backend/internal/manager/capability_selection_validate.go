@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— M3-3 建会话时的能力选定校验 ———

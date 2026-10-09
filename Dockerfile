@@ -1,30 +1,30 @@
-# ark-forge 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
+# ark-mate 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
 #
 # 两个最终 target（文件最后一段 = 默认 target = 最小镜像）：
-#   forge           只含 forge 本体（+ echo 底座自检）；接 opencode/dsh 需自行挂载可执行文件
-#   forge-runtimes  额外内置 agent 底座 dsh / opencode，可用 build-arg 分别开关
+#   mate           只含 mate 本体（+ echo 底座自检）；接 opencode/dsh 需自行挂载可执行文件
+#   mate-runtimes  额外内置 agent 底座 dsh / opencode，可用 build-arg 分别开关
 #
 # 构建 · 最小镜像：
-#   docker build -t ark-forge:local .
+#   docker build -t ark-mate:local .
 # 构建 · 含底座（dsh + opencode 都要）：
-#   docker build -t ark-forge:runtimes --target forge-runtimes \
+#   docker build -t ark-mate:runtimes --target mate-runtimes \
 #     --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
 # 构建 · 只要 opencode：
-#   docker build -t ark-forge:oc --target forge-runtimes \
+#   docker build -t ark-mate:oc --target mate-runtimes \
 #     --build-arg WITH_DSH=false --build-arg WITH_OPENCODE=true .
 #
 # 运行（数据全落具名卷 /data；要映射出去必须监听 0.0.0.0）：
-#   docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
-#     -v ark-forge-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-forge:local
+#   docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
+#     -v ark-mate-data:/data -e MATE_ADDR=0.0.0.0:10001 ark-mate:local
 #
 # 受限网络（镜像站 / Go 代理 / npm 镜像）用 build-arg 覆盖，示例见 docs/deployment.md §4：
-#   docker build -t ark-forge:local \
+#   docker build -t ark-mate:local \
 #     --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
 #     --build-arg GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
 #     --build-arg RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
 #     --build-arg GO_PROXY=https://goproxy.cn,direct .
 #
-# 注意：WITH_DSH / WITH_OPENCODE 属于 forge-runtimes target。传给默认（最小）target 会**明确报错**
+# 注意：WITH_DSH / WITH_OPENCODE 属于 mate-runtimes target。传给默认（最小）target 会**明确报错**
 # 而不是静默忽略——静默忽略会让人以为镜像里有底座。
 
 ARG NODE_IMAGE=node:24-bookworm
@@ -69,42 +69,42 @@ COPY backend ./
 COPY --from=web /src/frontend/apps/web/dist ./pkg/web/dist
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod \
     --mount=type=cache,target=/root/.cache/go-build,id=gobuild \
-    go build -tags release -trimpath -ldflags "-s -w" -o /out/forge ./cmd/forge
+    go build -tags release -trimpath -ldflags "-s -w" -o /out/mate ./cmd/mate
 
 # —— 阶段 3：运行时基线（两个最终镜像共用：非 root + 数据卷 /data + tini 收孤儿）——
 # tini 作为 PID 1：daemon 会派生 opencode/dsh 子进程，容器里的孤儿进程需要有 init 回收。
 FROM ${RUNTIME_IMAGE} AS runtime-base
-ARG FORGE_UID=10001
-ARG FORGE_GID=10001
+ARG MATE_UID=10001
+ARG MATE_GID=10001
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tini; \
     rm -rf /var/lib/apt/lists/*; \
-    groupadd --system --gid "${FORGE_GID}" forge; \
-    useradd --system --uid "${FORGE_UID}" --gid "${FORGE_GID}" \
-        --home-dir /data --shell /usr/sbin/nologin forge; \
-    install -d -o forge -g forge /data /data/workspaces /workspaces
+    groupadd --system --gid "${MATE_GID}" mate; \
+    useradd --system --uid "${MATE_UID}" --gid "${MATE_GID}" \
+        --home-dir /data --shell /usr/sbin/nologin mate; \
+    install -d -o mate -g mate /data /data/workspaces /workspaces
 # 容器里必须显式 0.0.0.0:10001 才能被 -p 映射出去（二进制默认只绑回环）；
 # 数据/配置全部收在 /data 一个卷里，HOME 也指到卷上（内存/transcript/agents 目录都按它派生）。
 ENV HOME=/data \
     GIN_MODE=release \
-    FORGE_ADDR=0.0.0.0:10001 \
-    FORGE_STORE=sqlite \
-    FORGE_DB=/data/forge.db \
-    FORGE_TRANSCRIPTS=/data/transcripts \
-    FORGE_AGENTS=/data/agents \
-    FORGE_CAPABILITIES=/data/capabilities \
-    FORGE_WORKSPACE_DIR=/data/workspaces \
-    FORGE_CONFIG_DIR=/data/config
+    MATE_ADDR=0.0.0.0:10001 \
+    MATE_STORE=sqlite \
+    MATE_DB=/data/mate.db \
+    MATE_TRANSCRIPTS=/data/transcripts \
+    MATE_AGENTS=/data/agents \
+    MATE_CAPABILITIES=/data/capabilities \
+    MATE_WORKSPACE_DIR=/data/workspaces \
+    MATE_CONFIG_DIR=/data/config
 WORKDIR /data
-USER forge
+USER mate
 STOPSIGNAL SIGTERM
 EXPOSE 10001
 VOLUME ["/data"]
-# 端口从 FORGE_ADDR 现取（形如 0.0.0.0:10001 / :10001）；/health 免鉴权，带 FORGE_TOKEN 也通
+# 端口从 MATE_ADDR 现取（形如 0.0.0.0:10001 / :10001）；/health 免鉴权，带 MATE_TOKEN 也通
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl -fsS "http://127.0.0.1:${FORGE_ADDR##*:}/v1/forge/health" >/dev/null || exit 1
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/forge"]
+  CMD curl -fsS "http://127.0.0.1:${MATE_ADDR##*:}/v1/mate/health" >/dev/null || exit 1
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/mate"]
 CMD ["serve"]
 
 # —— 阶段 4：agent 底座（只产出 /opt/runtimes；node 本体也从这里取）——
@@ -125,7 +125,7 @@ RUN --mount=type=cache,target=/root/.npm,id=npm-cache \
     case "${WITH_OPENCODE}" in true|1) OC=on ;; false|0|"") OC=off ;; \
       *) echo "构建参数 WITH_OPENCODE 取值非法：${WITH_OPENCODE}（只接受 true|false）" >&2; exit 1 ;; esac; \
     if [ "${DSH}" = off ] && [ "${OC}" = off ]; then \
-      echo "WITH_DSH 与 WITH_OPENCODE 不能同时关闭：请改用 --target forge（最小镜像）" >&2; exit 1; \
+      echo "WITH_DSH 与 WITH_OPENCODE 不能同时关闭：请改用 --target mate（最小镜像）" >&2; exit 1; \
     fi; \
     mkdir -p /opt/runtimes; \
     if [ "${DSH}" = on ]; then \
@@ -137,23 +137,23 @@ RUN --mount=type=cache,target=/root/.npm,id=npm-cache \
       test -e /opt/runtimes/bin/opencode; \
     fi
 
-# —— 阶段 5：最终镜像 · 含 agent 底座（--target forge-runtimes）——
-FROM runtime-base AS forge-runtimes
+# —— 阶段 5：最终镜像 · 含 agent 底座（--target mate-runtimes）——
+FROM runtime-base AS mate-runtimes
 # node 本体（dsh / opencode 的 JS 入口都靠它；基础镜像不带 node，故从构建阶段拷入）
 COPY --from=runtimes-pkg /usr/local/bin/node /usr/local/bin/node
 COPY --from=runtimes-pkg /opt/runtimes /opt/runtimes
 ENV PATH=/opt/runtimes/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     DSH_HOME=/data/dsh
-COPY --from=build /out/forge /usr/local/bin/forge
+COPY --from=build /out/mate /usr/local/bin/mate
 
-# —— 阶段 6：默认 target · 最小镜像（只含 forge 本体）——
-FROM runtime-base AS forge
+# —— 阶段 6：默认 target · 最小镜像（只含 mate 本体）——
+FROM runtime-base AS mate
 # 本 target 不含底座：开关传成「开」时明确报错并给出正确命令，不静默忽略
 ARG WITH_DSH=false
 ARG WITH_OPENCODE=false
 RUN set -eux; \
     case "${WITH_DSH}" in false|0|"") ;; \
-      *) echo "--build-arg WITH_DSH=${WITH_DSH} 需要底座 target：请加 --target forge-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac; \
+      *) echo "--build-arg WITH_DSH=${WITH_DSH} 需要底座 target：请加 --target mate-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac; \
     case "${WITH_OPENCODE}" in false|0|"") ;; \
-      *) echo "--build-arg WITH_OPENCODE=${WITH_OPENCODE} 需要底座 target：请加 --target forge-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac
-COPY --from=build /out/forge /usr/local/bin/forge
+      *) echo "--build-arg WITH_OPENCODE=${WITH_OPENCODE} 需要底座 target：请加 --target mate-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac
+COPY --from=build /out/mate /usr/local/bin/mate

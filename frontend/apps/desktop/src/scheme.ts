@@ -1,15 +1,15 @@
 /**
- * `forge-app://` 自定义 scheme 的注册与**三路分发**（M1-3，设计 §3 / §6.2 / §9.2）。
+ * `mate-app://` 自定义 scheme 的注册与**三路分发**（M1-3，设计 §3 / §6.2 / §9.2）。
  *
- * 为什么需要它：桌面窗口的 origin 必须与随机端口解耦（`forge-app://app` 恒定，
+ * 为什么需要它：桌面窗口的 origin 必须与随机端口解耦（`mate-app://app` 恒定，
  * 磁盘缓存与页面存储跨启动稳定复用），并且 REST 凭据只能留在主进程——
- * 因此页面发出的 `/v1/forge/*` 请求由本模块**反代**给核心并注入 `Authorization`。
+ * 因此页面发出的 `/v1/mate/*` 请求由本模块**反代**给核心并注入 `Authorization`。
  *
  * 三路（顺序即优先级）：
- *   1. `forge-app://shell/<page>` → 壳自己的静态页（welcome / boot-failed / 更新对话框）；
- *   2. `forge-app://app/<静态路径>` → 前端产物：只服务 `/`、`/index.html`、`/assets/*`、
+ *   1. `mate-app://shell/<page>` → 壳自己的静态页（welcome / boot-failed / 更新对话框）；
+ *   2. `mate-app://app/<静态路径>` → 前端产物：只服务 `/`、`/index.html`、`/assets/*`、
  *      `/favicon.svg`、`/manifest.webmanifest` 这五类，**不含 SPA 回退**（回退归核心，设计 §6.2）；
- *   3. 其余（`forge-app://app/` 下的深链与全部 `/v1/*`）→ 反代核心。
+ *   3. 其余（`mate-app://app/` 下的深链与全部 `/v1/*`）→ 反代核心。
  *
  * 已知机制限制（不是取舍）：`protocol.handle` **不承载 WebSocket upgrade**，因此事件流由
  * 渲染进程直连回环（设计 §7.2）——壳在 boot 时把 `streamBaseUrl` 交给页面（M1-8）。
@@ -19,7 +19,7 @@ import { statSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { FORGE_SCHEME, CSP_POLICY, assetContentType } from '@ark/desktop-contract'
+import { MATE_SCHEME, CSP_POLICY, assetContentType } from '@ark-mate/desktop-contract'
 import type { CoreHandle } from './core'
 
 /** 壳服务的静态路径集合（核心侧静态规则的**子集**，M2-5 断言两者响应头逐字一致）。 */
@@ -40,9 +40,9 @@ const HOP_BY_HOP = new Set([
 export function registerSchemePrivileges(): void {
   protocol.registerSchemesAsPrivileged([
     {
-      scheme: FORGE_SCHEME,
+      scheme: MATE_SCHEME,
       privileges: {
-        standard: true, // 有 origin 语义（否则 location.origin 不是 forge-app://app）
+        standard: true, // 有 origin 语义（否则 location.origin 不是 mate-app://app）
         secure: true, // 与 https 同级的安全上下文（crypto.subtle / service worker 等）
         supportFetchAPI: true, // 页面里的 fetch 能打这个 scheme
         corsEnabled: true,
@@ -64,7 +64,7 @@ export type SchemeDeps = {
 
 /** 安装 scheme 处理器（`app.ready` 之后调用）。 */
 export function installSchemeHandler(deps: SchemeDeps): void {
-  protocol.handle(FORGE_SCHEME, async (request) => {
+  protocol.handle(MATE_SCHEME, async (request) => {
     const url = new URL(request.url)
     try {
       if (url.hostname === 'shell') {
@@ -158,7 +158,7 @@ async function proxyToCore(request: Request, core: CoreHandle | null): Promise<R
   // 入口标识（M1-7）：核心据此回答"这次请求走的是桌面窗口还是浏览器"
   // （`/capabilities` 的 available 与 `entries.desktop` 都看它）。壳是桌面态唯一持有
   // restToken 的组件，因此这个头是可信的入口声明；浏览器入口的请求不经过这里，自然没有它。
-  headers.set('x-forge-carrier', 'desktop')
+  headers.set('x-mate-carrier', 'desktop')
 
   const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers }
   if (request.method !== 'GET' && request.method !== 'HEAD') {

@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -248,7 +248,7 @@ func TestCreateConversationWorkspaceRequiredWhenDisabled(t *testing.T) {
 }
 
 // TestCreateConversationDiscardsTemporaryWorkspaceOnFailure 会话最终没建起来时，
-// 刚代建的目录必须被清理（否则每次失败都在 ~/.forge/workspaces 下留垃圾）。
+// 刚代建的目录必须被清理（否则每次失败都在 ~/.ark-mate/workspaces 下留垃圾）。
 func TestCreateConversationDiscardsTemporaryWorkspaceOnFailure(t *testing.T) {
 	root := t.TempDir()
 	svc := workspaceTestSvc(t)
@@ -414,7 +414,7 @@ func TestRecentWorkspaces(t *testing.T) {
 	}
 }
 
-// ——— 工作区根白名单（FORGE_WORKSPACE_ROOTS，A 的边界） ———
+// ——— 工作区根白名单（MATE_WORKSPACE_ROOTS，A 的边界） ———
 
 // TestWithinRoots 边界判定：逐段比较（不是字符串前缀）+ 两侧都解析符号链接真身。
 func TestWithinRoots(t *testing.T) {
@@ -478,7 +478,7 @@ func TestValidateWorkspaceRoots(t *testing.T) {
 		t.Fatalf("根外路径应 workspace_outside_roots，得到 %s: %v", code, err)
 	}
 	// 错误信息要能指导运维改哪个配置（否则只会看到"被拒"）。
-	if !strings.Contains(err.Error(), "FORGE_WORKSPACE_ROOTS") {
+	if !strings.Contains(err.Error(), "MATE_WORKSPACE_ROOTS") {
 		t.Fatalf("越界错误应点明配置键: %v", err)
 	}
 }
@@ -672,7 +672,7 @@ func TestWorkspaceLibraries(t *testing.T) {
 	rootB := filepath.Join(base, "repos")
 	// A 下两个资料库 + 一个隐藏目录 + 一个文件（都不算资料库）；
 	// A 下还有一个指向根外的符号链接（点进去必被拒 → 不列）。
-	for _, d := range []string{filepath.Join(rootA, "合同归档"), filepath.Join(rootA, ".private"), filepath.Join(rootB, "ark-forge")} {
+	for _, d := range []string{filepath.Join(rootA, "合同归档"), filepath.Join(rootA, ".private"), filepath.Join(rootB, "ark-mate")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -701,22 +701,22 @@ func TestWorkspaceLibraries(t *testing.T) {
 		t.Fatalf("mkdir provision: %v", err)
 	}
 	mustWorkspacePolicy(t, svc, provision, []string{mustEval(t, rootA), mustEval(t, rootB)})
-	// 会话聚合：合同归档用过 2 次、ark-forge 用过 1 次。
+	// 会话聚合：合同归档用过 2 次、ark-mate 用过 1 次。
 	base0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	svc.registerConversation(&ConversationRec{ID: "l-1", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootA, "合同归档")), UpdatedAt: base0})
 	svc.registerConversation(&ConversationRec{ID: "l-2", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootA, "合同归档")), UpdatedAt: base0.Add(time.Hour)})
-	svc.registerConversation(&ConversationRec{ID: "l-3", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootB, "ark-forge")), UpdatedAt: base0.Add(2 * time.Hour)})
+	svc.registerConversation(&ConversationRec{ID: "l-3", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootB, "ark-mate")), UpdatedAt: base0.Add(2 * time.Hour)})
 
 	list, err := svc.WorkspaceLibraries()
 	if err != nil {
 		t.Fatalf("WorkspaceLibraries: %v", err)
 	}
-	// 期望恰好 2 个：合同归档（A）、ark-forge（B）——隐藏目录/文件/根外符号链接/代建根 tmp 都不算。
-	// 排序按名（"ark-forge" < "合同归档"，ASCII 先于中文）。
+	// 期望恰好 2 个：合同归档（A）、ark-mate（B）——隐藏目录/文件/根外符号链接/代建根 tmp 都不算。
+	// 排序按名（"ark-mate" < "合同归档"，ASCII 先于中文）。
 	if len(list) != 2 {
 		t.Fatalf("资料库数量不符（代建根 tmp 不该出现）: %+v", list)
 	}
-	if list[0].Name != "ark-forge" || list[0].Root != mustEval(t, rootB) || list[0].Conversations != 1 {
+	if list[0].Name != "ark-mate" || list[0].Root != mustEval(t, rootB) || list[0].Conversations != 1 {
 		t.Fatalf("第一个资料库不符: %+v", list[0])
 	}
 	if list[1].Name != "合同归档" || list[1].Root != mustEval(t, rootA) {

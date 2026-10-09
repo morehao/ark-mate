@@ -21,7 +21,7 @@ import (
 )
 
 func TestMcpBridgeExitsWhenParentDies(t *testing.T) {
-	bin := buildForgeCLI(t)
+	bin := buildMateCLI(t)
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "gateway.pid")
 

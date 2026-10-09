@@ -135,7 +135,7 @@ export function assetDigest(rootDir) {
   const buildIdPath = join(rootDir, 'build-id.txt')
   if (!existsSync(buildIdPath)) {
     // 不是"回退 unknown"：打包是把资产冻进交付物的那一刻，这里读不到就是构建链缺了一环
-    // （前端构建的 forge-build-id 插件负责写它，M2-4）。
+    // （前端构建的 mate-build-id 插件负责写它，M2-4）。
     throw new Error(`资产目录里没有 build-id.txt（先跑 \`make web\` / \`make core/desktop\`）：${rootDir}`)
   }
   const buildId = readFileSync(buildIdPath, 'utf8').trim()

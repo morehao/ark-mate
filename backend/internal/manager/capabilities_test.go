@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/mcp"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -83,9 +83,9 @@ func TestRegisterToolAndSort(t *testing.T) {
 //
 // 语义（M7-3 之后）：
 //   - **网关开（默认）**：stdio server 原样直连；远程 server 不再逐条直连，而是合成**一条**
-//     `forge-gateway` stdio 条目 —— 于是"该 runtime 声明的传输"不再决定远程 server 的去留
+//     `mate-gateway` stdio 条目 —— 于是"该 runtime 声明的传输"不再决定远程 server 的去留
 //     （那正是网关的收益），仅决定 stdio 那一支。
-//   - **网关关（FORGE_MCP_GATEWAY=off）**：回到老路 —— 按该 runtime 的 McpTransports 过滤后逐条直连。
+//   - **网关关（MATE_MCP_GATEWAY=off）**：回到老路 —— 按该 runtime 的 McpTransports 过滤后逐条直连。
 //   - 白名单优先级两态都生效：nil = 全量；非 nil = 命中制；空 = 本 agent 禁用注入。未知 runtime → 不下发。
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
@@ -114,7 +114,7 @@ func TestMcpServersFor(t *testing.T) {
 		t.Helper()
 		last := entries[len(entries)-1]
 		if last.Name != mcp.GatewayServerName || last.Transport != capability.TransportStdio {
-			t.Fatalf("末条应是网关条目（stdio/forge-gateway），got %+v", last)
+			t.Fatalf("末条应是网关条目（stdio/mate-gateway），got %+v", last)
 		}
 		if last.Command == "" || !strings.HasSuffix(last.Command, "manager.test") {
 			t.Fatalf("网关条目命令应为平台自身可执行文件，got %q", last.Command)
@@ -464,7 +464,7 @@ func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
 func TestServiceReconcileSkills(t *testing.T) {
 	svc, _, _ := rigWithRuntime(t)
 	if err := svc.caps.RegisterSkill(&capability.Skill{
-		ID: "forge-demo", Name: "Demo", Body: "# demo body",
+		ID: "mate-demo", Name: "Demo", Body: "# demo body",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -481,12 +481,12 @@ func TestServiceReconcileSkills(t *testing.T) {
 	if w != 1 || r != 0 {
 		t.Fatalf("期望 written=1 removed=0，got w=%d r=%d", w, r)
 	}
-	p := filepath.Join(root, "forge-demo", "SKILL.md")
+	p := filepath.Join(root, "mate-demo", "SKILL.md")
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != "---\nname: \"forge-demo\"\ndescription: \"Demo\"\n---\n# demo body" {
+	if string(b) != "---\nname: \"mate-demo\"\ndescription: \"Demo\"\n---\n# demo body" {
 		t.Fatalf("物化内容不符（应带 frontmatter）: %q", b)
 	}
 	// 幂等重跑：无写无删。

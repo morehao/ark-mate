@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -257,7 +257,7 @@ func TestCapabilityDirUnsetIsActionable(t *testing.T) {
 		t.Fatal("未配置目录应报错")
 	} else if got := errCode(err); got != "capability_dir_unset" {
 		t.Fatalf("错误码应为 capability_dir_unset，got %q", got)
-	} else if !strings.Contains(err.Error(), "FORGE_CAPABILITIES") {
+	} else if !strings.Contains(err.Error(), "MATE_CAPABILITIES") {
 		t.Fatalf("文案应给出路（该设哪个键），got %v", err)
 	}
 }

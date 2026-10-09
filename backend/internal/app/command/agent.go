@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
-// agentCmd 分发 `forge agent <动作>`（M6-6：agent 定义的存量搬家，与 `forge capability` 同形）。
+// agentCmd 分发 `mate agent <动作>`（M6-6：agent 定义的存量搬家，与 `mate capability` 同形）。
 //
 // 只有 import / export 两个动作：agent 定义没有 `capability migrate` 那种历史键改写
 // （它今天就是 typed JSON，没有过 `sources[]` 那种需要保持语义的迁移）。
@@ -33,22 +33,22 @@ func agentCmd(args []string) {
 }
 
 const agentUsage = `agent 用法：
-  forge agent import [--dir <Agent 目录>] [--dry-run]
+  mate agent import [--dir <Agent 目录>] [--dry-run]
       把目录里的 <id>.json 导入 SQLite（M6：sqlite 模式下 DB 才是定义事实源）
       幂等：按行判重，**已有行绝不覆盖**；坏定义逐条报出、其余照常导入
       providers.json / default.json 是目录级配置，不参与导入（default.json 的显式选择进 meta）
-  forge agent export [--dir <Agent 目录>] [--dry-run]
+  mate agent export [--dir <Agent 目录>] [--dry-run]
       把 SQLite 里的定义写回目录（此后文件是**导出物**，不是事实源）；
       meta 里的「当前 Agent」一并写成 default.json
 `
 
-// agentImport 显式导入存量 agent 定义（`forge agent import`）。
+// agentImport 显式导入存量 agent 定义（`mate agent import`）。
 //
 // 与装配期自动导入的分工：自动导入看目录指纹（目录没变就整体跳过），显式导入**不看指纹**、
 // 每次按行判重——新丢进目录一个文件，跑一次就该进来。
 func agentImport(args []string) {
 	fs := flag.NewFlagSet("agent import", flag.ExitOnError)
-	dir := fs.String("dir", "", "Agent 定义目录（默认 FORGE_AGENTS 或 ~/.forge/agents）")
+	dir := fs.String("dir", "", "Agent 定义目录（默认 MATE_AGENTS 或 ~/.ark-mate/agents）")
 	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库")
 	_ = fs.Parse(args)
 
@@ -87,17 +87,17 @@ func agentImport(args []string) {
 	}
 }
 
-// agentExport 把 DB 里的定义写回目录（`forge agent export`）。
+// agentExport 把 DB 里的定义写回目录（`mate agent export`）。
 func agentExport(args []string) {
 	fs := flag.NewFlagSet("agent export", flag.ExitOnError)
-	dir := fs.String("dir", "", "Agent 定义目录（默认 FORGE_AGENTS 或 ~/.forge/agents）")
+	dir := fs.String("dir", "", "Agent 定义目录（默认 MATE_AGENTS 或 ~/.ark-mate/agents）")
 	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
 	_ = fs.Parse(args)
 
 	cfg, _ := mustConfig()
 	root := agentRoot(cfg, *dir)
 	if root == "" {
-		fmt.Fprintln(os.Stderr, "agent export: Agent 目录为空（用 --dir 指定，或设置 FORGE_AGENTS）")
+		fmt.Fprintln(os.Stderr, "agent export: Agent 目录为空（用 --dir 指定，或设置 MATE_AGENTS）")
 		os.Exit(2)
 	}
 	st, err := store.Open(cfg.DBPath)
@@ -122,7 +122,7 @@ func agentExport(args []string) {
 	}
 }
 
-// agentRoot 解析 Agent 定义目录：--dir 优先，否则取配置（FORGE_AGENTS / ~/.forge/agents）。
+// agentRoot 解析 Agent 定义目录：--dir 优先，否则取配置（MATE_AGENTS / ~/.ark-mate/agents）。
 func agentRoot(cfg config.Config, flagDir string) string {
 	if root := strings.TrimSpace(flagDir); root != "" {
 		return root

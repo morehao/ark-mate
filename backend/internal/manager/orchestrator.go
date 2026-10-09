@@ -7,20 +7,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/object/objusage"
-	"github.com/morehao/ark-forge/pkg/procreg"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
 // 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
 const agentCancelTimeout = 3 * time.Second
 
-// DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env FORGE_HANDOFF_MAX_CHARS 覆盖）。
+// DefaultHandoffMaxChars bounded handoff memo 默认字符预算（§18 D-3；env MATE_HANDOFF_MAX_CHARS 覆盖）。
 const DefaultHandoffMaxChars = 6000
 
-// DefaultGenerationLimit 同一配置下的能力代际上限默认值（风险表第 12 行；env FORGE_GENERATION_LIMIT）。
+// DefaultGenerationLimit 同一配置下的能力代际上限默认值（风险表第 12 行；env MATE_GENERATION_LIMIT）。
 const DefaultGenerationLimit = 4
 
 // acpSession 是 acl.Session 的最小接口（测试可注入桩；真实实现为 *acl.Session）。
@@ -117,15 +117,15 @@ type Orchestrator struct {
 	usageMu sync.Mutex
 	usage   map[string]objusage.UsageInfo
 
-	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / FORGE_TURN_TIMEOUT）。
+	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / MATE_TURN_TIMEOUT）。
 	turnTimeout time.Duration
 
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
-	// FORGE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
+	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
 	handoffMaxChars int
 
 	// generationLimit 同一基础键（runtime + 原生权限 + provider）下允许并存的代际上限
-	// （见 SetGenerationLimit / FORGE_GENERATION_LIMIT）。0 = 不限制。
+	// （见 SetGenerationLimit / MATE_GENERATION_LIMIT）。0 = 不限制。
 	generationLimit int
 
 	logger *slog.Logger

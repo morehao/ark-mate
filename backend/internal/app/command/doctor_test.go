@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // writeFiles 在 root 下写一组文件（rel → 内容），自动建父目录。
@@ -402,7 +402,7 @@ func TestScanPayloadManifests(t *testing.T) {
 
 // TestCheckHomeWritable 数据目录可写性：正常目录过、非目录挡。
 func TestCheckHomeWritable(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "forge-home")
+	home := filepath.Join(t.TempDir(), "mate-home")
 	if got := checkHomeWritable(home); got.Status != doctorOK {
 		t.Fatalf("期望 ok，得到 %s：%s", got.Status, got.Detail)
 	}
@@ -436,10 +436,10 @@ func TestRenderDoctorReport(t *testing.T) {
 	got := renderDoctorReport(doctorReport{
 		Version:     "0.1.0",
 		APIContract: "v1",
-		Home:        "/tmp/forge",
+		Home:        "/tmp/mate",
 		Addr:        "127.0.0.1:10001",
 		Checks: []doctorCheck{
-			{"home", doctorOK, "/tmp/forge 可写"},
+			{"home", doctorOK, "/tmp/mate 可写"},
 			{"port", doctorWarn, "被占用"},
 			{"assets", doctorFail, "没有可用的前端资产"},
 		},
@@ -459,7 +459,7 @@ func TestRenderDoctorReport(t *testing.T) {
 	}
 }
 
-// TestDoctorReportJSONShape 冻结 `forge doctor --json` 的形状（键序 = 结构体字段序）。
+// TestDoctorReportJSONShape 冻结 `mate doctor --json` 的形状（键序 = 结构体字段序）。
 //
 // 与 `TestVersionOutput` 同一条纪律：机器消费方（CI、诊断包、将来的面板）读的是**字节**，
 // 加字段/挪位置都会改变它——所以这里逐字断言，而不是"解析后看看有没有这个键"。
@@ -467,7 +467,7 @@ func TestDoctorReportJSONShape(t *testing.T) {
 	b, err := json.Marshal(doctorReport{
 		Version:     "0.1.0",
 		APIContract: "v1",
-		Home:        "/tmp/forge",
+		Home:        "/tmp/mate",
 		Addr:        "127.0.0.1:10001",
 		Checks:      []doctorCheck{{"home", doctorOK, "可写"}},
 		Passed:      true,
@@ -475,7 +475,7 @@ func TestDoctorReportJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"version":"0.1.0","apiContract":"v1","home":"/tmp/forge","addr":"127.0.0.1:10001",` +
+	const want = `{"version":"0.1.0","apiContract":"v1","home":"/tmp/mate","addr":"127.0.0.1:10001",` +
 		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {
 		t.Fatalf("--json 形状变了：\n got %s\nwant %s", b, want)

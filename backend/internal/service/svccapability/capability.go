@@ -5,7 +5,7 @@ package svccapability
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
 // CapabilitySvc 能力数据面的服务端口。

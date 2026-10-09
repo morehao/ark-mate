@@ -1,6 +1,6 @@
 package dtoautomation
 
-import "github.com/morehao/ark-forge/pkg/automation"
+import "github.com/morehao/ark-mate/pkg/automation"
 
 // AutomationResp 一条 automation 的对外形态（定义 + 运行态 + 内存态 next_due）。
 //
@@ -13,7 +13,7 @@ type AutomationResp struct {
 	State    string              `json:"state"`
 	Schedule automation.Schedule `json:"schedule"`
 	Target   automation.Target   `json:"target"`
-	// MaxRunDuration 本轮外层超时（空 = 只用 FORGE_TURN_TIMEOUT 看门狗）。
+	// MaxRunDuration 本轮外层超时（空 = 只用 MATE_TURN_TIMEOUT 看门狗）。
 	MaxRunDuration string `json:"max_run_duration,omitempty"`
 	// NextDueAt 下次到期（RFC3339 UTC；空 = 没有下一次：跑完的 once / 归档 / 装载失败）。
 	NextDueAt string `json:"next_due_at,omitempty"`

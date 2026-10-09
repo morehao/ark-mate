@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // automationRig 一个装了自动化目录的 Service（M4-3 的写面 + 注册表都在它上面测）。

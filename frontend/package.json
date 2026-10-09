@@ -1,13 +1,13 @@
 {
-  "name": "ark-forge-frontend",
+  "name": "ark-mate-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@11.24.0",
   "engines": {
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "pnpm --filter @ark/web dev",
+    "dev": "pnpm --filter @ark-mate/web dev",
     "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
@@ -22,11 +22,11 @@
     "verify:compliance": "node apps/desktop/scripts/verify-compliance.mjs",
     "verify:release-json": "node apps/desktop/scripts/verify-release-json.mjs",
     "verify:signature": "node apps/desktop/scripts/verify-signature.mjs",
-    "smoke:desktop:packaged": "FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-runtime-smoke.mjs",
+    "smoke:desktop:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-runtime-smoke.mjs",
     "ui:accept:desktop-skills": "node scripts/desktop-skill-projection-acceptance.mjs",
-    "ui:accept:desktop-skills:packaged": "FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-skill-projection-acceptance.mjs"
+    "ui:accept:desktop-skills:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-skill-projection-acceptance.mjs"
   },
   "devDependencies": {
-    "@ark/desktop-contract": "workspace:*"
+    "@ark-mate/desktop-contract": "workspace:*"
   }
 }

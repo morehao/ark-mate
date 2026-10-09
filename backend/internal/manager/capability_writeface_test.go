@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // 本文件是写面（Create/Update/Delete skill 与 mcp）的对外契约套件。M6 起它**逐条跑在两种载体上**
@@ -389,7 +389,7 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 //
 // memory：没有目录就没有落点 → 40001 `capability_dir_unset`（给出路），而不是"内存生效、盘上没留痕"；
 // sqlite：定义在 DB 里，**目录为空也必须能写**（这正是 M6 换事实源的用户可见收益：写面不再因为
-// "没配 FORGE_CAPABILITIES"而拒绝服务）。
+// "没配 MATE_CAPABILITIES"而拒绝服务）。
 func TestWriteFaceRequiresCapabilityDir(t *testing.T) {
 	ctx := context.Background()
 

@@ -44,7 +44,7 @@ func TestStringKeepsBenignContent(t *testing.T) {
 		"短值 abc123", // 过短
 		// 回归（TestWorkspaceRoutesWithRoots 曾因此变红）：绝对路径、URL、带扩展名文件名——
 		// 密钥（base64url）不含 / \\ . : 这些分隔符，长路径绝不能被整条洗成 ***。
-		"/Users/morehao/Documents/practice/go/ark-forge/backend/internal/manager",
+		"/Users/morehao/Documents/practice/go/ark-mate/backend/internal/manager",
 		"/tmp/TestWorkspaceRoutesWithRoots1234/workspaceAbc",
 		"https://api.example.com/v1/chat/completions?model=gpt-4o-mini",
 		"docs/p0-hardening-design-20260911.md",

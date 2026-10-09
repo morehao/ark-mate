@@ -21,7 +21,7 @@
  *
  * ## 用法
  *
- *   node scripts/verify-signature.mjs                       # 默认 release/mac-arm64/ark-forge.app
+ *   node scripts/verify-signature.mjs                       # 默认 release/mac-arm64/ark-mate.app
  *   node scripts/verify-signature.mjs --app <path.app>      # 显式指定（解包后的 .app 也行）
  *   node scripts/verify-signature.mjs --from-tarball        # 先把 release/*.tar.gz 解到临时目录再判
  *   --json  只打一份确定性 JSON（给后续门禁消费）
@@ -39,7 +39,7 @@ const SCRIPT_DIR = import.meta.dirname
 const DESKTOP = resolve(SCRIPT_DIR, '..')
 const RELEASE_DIR = join(DESKTOP, 'release')
 const RELEASE_JSON = join(DESKTOP, 'release.json')
-const DEFAULT_APP = join(RELEASE_DIR, 'mac-arm64', 'ark-forge.app')
+const DEFAULT_APP = join(RELEASE_DIR, 'mac-arm64', 'ark-mate.app')
 
 const MACHO_MAGICS = new Set([
   0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,
@@ -149,7 +149,7 @@ function extractAppFromTarball() {
     ? readdirSync(RELEASE_DIR).find((f) => f.endsWith('.tar.gz'))
     : undefined
   if (!tarball) throw new Error(`release/ 下没有 .tar.gz（先跑 make desktop/dist）：${RELEASE_DIR}`)
-  const dir = mkdtempSync(join(tmpdir(), 'forge-verify-signature-'))
+  const dir = mkdtempSync(join(tmpdir(), 'mate-verify-signature-'))
   const untar = run('tar', ['-xzf', join(RELEASE_DIR, tarball), '-C', dir])
   if (untar.status !== 0) throw new Error(`解 ${tarball} 失败：${untar.stderr.split('\n')[0]}`)
   const app = readdirSync(dir).find((n) => n.endsWith('.app'))

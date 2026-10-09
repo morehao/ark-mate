@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { DeleteOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark/ui'
-import { getWorkspaceSettings, toErrorMessage, updateWorkspaceSettings } from '@ark/api'
-import type { WorkspaceSettings } from '@ark/types'
-import { useForge } from '../store'
+import { PageContainer, tokens } from '@ark-mate/ui'
+import { getWorkspaceSettings, toErrorMessage, updateWorkspaceSettings } from '@ark-mate/api'
+import type { WorkspaceSettings } from '@ark-mate/types'
+import { useMate } from '../store'
 import { WorkspaceBrowser } from '../components/WorkspaceBrowser'
 
 /**
  * 设置页（Settings）——目前只有一节：**工作区目录白名单**。
  *
  * 这一节要解决的实际痛点不是"能不能改"，而是"改了到底算不算数"：白名单的最终来源可能是
- * `config.json`，也可能是优先级更高的 env 文件 / 进程 `FORGE_*` / CLI flag。后者存在时写
+ * `config.json`，也可能是优先级更高的 env 文件 / 进程 `MATE_*` / CLI flag。后者存在时写
  * `config.json` **必然被覆盖**，所以服务端直接拒绝写并回 `locked_by`（`settings_locked`）——
  * 面板据此转只读并显示锁定来源，而不是给一个必然失败的保存按钮。
  *
@@ -56,7 +56,7 @@ function isAbsolutePath(p: string): boolean {
 }
 
 export function SettingsPage() {
-  const showToast = useForge((s) => s.showToast)
+  const showToast = useMate((s) => s.showToast)
   const [snap, setSnap] = useState<WorkspaceSettings | null>(null)
   const [draft, setDraft] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -159,7 +159,7 @@ export function SettingsPage() {
             type="warning"
             showIcon
             message={`白名单由 ${snap.locked_by} 锁定，面板只读`}
-            description="该来源的优先级高于配置文件，从面板写入会被它覆盖（所以服务端直接拒绝）。要在这里维护白名单，请去掉该来源里的 FORGE_WORKSPACE_ROOTS。"
+            description="该来源的优先级高于配置文件，从面板写入会被它覆盖（所以服务端直接拒绝）。要在这里维护白名单，请去掉该来源里的 MATE_WORKSPACE_ROOTS。"
           />
         )}
         {snap && !snap.locked_by && snap.source === 'unavailable' && (
@@ -167,7 +167,7 @@ export function SettingsPage() {
             type="info"
             showIcon
             message="当前进程不可持久化设置"
-            description="该进程没有配置目录（如 demo 冒烟进程）：白名单只能由 FORGE_WORKSPACE_ROOTS 或配置文件设置。"
+            description="该进程没有配置目录（如 demo 冒烟进程）：白名单只能由 MATE_WORKSPACE_ROOTS 或配置文件设置。"
           />
         )}
 

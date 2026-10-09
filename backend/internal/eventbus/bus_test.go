@@ -186,7 +186,7 @@ func TestNoGapOnPromptConsumer(t *testing.T) {
 
 // TestSubscribeReplayBeyondBuffer 回归：回放条数超过默认缓冲（256）时 Subscribe 不得阻塞/死锁。
 // 历史上 Subscribe 用固定 256 缓冲同步投递且持锁，历史 >256 且 after 小时直接死锁
-// （`forge demo` 的 bus.Subscribe(0) 即触发点）。
+// （`mate demo` 的 bus.Subscribe(0) 即触发点）。
 func TestSubscribeReplayBeyondBuffer(t *testing.T) {
 	b := New()
 	const n = 1000

@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/automation"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/automation"
 )
 
 // ——— automation 面的控制器契约（M4-5）———
@@ -101,39 +101,39 @@ func TestAutomationRoutesHappyPath(t *testing.T) {
 	svc := &stubSvc{automations: []dtoautomation.AutomationResp{{ID: "daily"}}}
 	r := autoEngine(svc)
 
-	env, _ := do(t, r, "GET", "/v1/forge/automations", "")
+	env, _ := do(t, r, "GET", "/v1/mate/automations", "")
 	if env.Code != 0 {
 		t.Fatalf("列表应成功: %+v", env)
 	}
-	env, _ = do(t, r, "GET", "/v1/forge/automations/daily", "")
+	env, _ = do(t, r, "GET", "/v1/mate/automations/daily", "")
 	if env.Code != 0 || svc.autoGot != "daily" {
 		t.Fatalf("取单条应成功且透传 id: %+v got=%q", env, svc.autoGot)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/automations", `{"id":"daily","schedule":{"kind":"daily","timezone":"UTC","hour":9,"minute":0}}`)
+	env, _ = do(t, r, "POST", "/v1/mate/automations", `{"id":"daily","schedule":{"kind":"daily","timezone":"UTC","hour":9,"minute":0}}`)
 	if env.Code != 0 || svc.autoAction != "create" {
 		t.Fatalf("新建应成功: %+v action=%q", env, svc.autoAction)
 	}
 	// PUT 的"只改出现过的键"必须原样传到领域层（这里是原文对象，不是解好的结构体）
-	env, _ = do(t, r, "PUT", "/v1/forge/automations/daily", `{"name":"改名"}`)
+	env, _ = do(t, r, "PUT", "/v1/mate/automations/daily", `{"name":"改名"}`)
 	if env.Code != 0 || svc.autoAction != "update" || svc.autoID != "daily" {
 		t.Fatalf("覆盖写应成功: %+v action=%q id=%q", env, svc.autoAction, svc.autoID)
 	}
 	if _, ok := svc.autoReq["name"]; !ok || len(svc.autoReq) != 1 {
 		t.Fatalf("请求体应只带 name 一个键（PUT 语义靠它）: %+v", svc.autoReq)
 	}
-	env, _ = do(t, r, "DELETE", "/v1/forge/automations/daily", "")
+	env, _ = do(t, r, "DELETE", "/v1/mate/automations/daily", "")
 	if env.Code != 0 || svc.autoAction != "delete" {
 		t.Fatalf("删除应成功: %+v action=%q", env, svc.autoAction)
 	}
-	env, _ = do(t, r, "GET", "/v1/forge/automations/daily/runs", "")
+	env, _ = do(t, r, "GET", "/v1/mate/automations/daily/runs", "")
 	if env.Code != 0 {
 		t.Fatalf("运行史应成功: %+v", env)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/automations/daily/run", "")
+	env, _ = do(t, r, "POST", "/v1/mate/automations/daily/run", "")
 	if env.Code != 0 || svc.autoAction != "run" {
 		t.Fatalf("手动触发应成功: %+v action=%q", env, svc.autoAction)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/automations/preview", `{"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0}}`)
+	env, _ = do(t, r, "POST", "/v1/mate/automations/preview", `{"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0}}`)
 	if env.Code != 0 || len(svc.autoPreviewReq.Schedule) == 0 {
 		t.Fatalf("预览应成功: %+v req=%+v", env, svc.autoPreviewReq)
 	}
@@ -146,7 +146,7 @@ func TestAutomationRoutesHappyPath(t *testing.T) {
 func TestAutomationPreviewIsNotAnID(t *testing.T) {
 	svc := &stubSvc{}
 	r := autoEngine(svc)
-	env, _ := do(t, r, "POST", "/v1/forge/automations/preview", `{"schedule":{"kind":"once","timezone":"UTC","at":"2099-01-01T00:00:00Z"}}`)
+	env, _ := do(t, r, "POST", "/v1/mate/automations/preview", `{"schedule":{"kind":"once","timezone":"UTC","at":"2099-01-01T00:00:00Z"}}`)
 	if env.Code != 0 {
 		t.Fatalf("preview 不该被当成 :id: %+v", env)
 	}
@@ -169,23 +169,23 @@ func TestAutomationRoutesErrorCodes(t *testing.T) {
 		err    error
 		want   int
 	}{
-		{"取单条不存在", "GET", "/v1/forge/automations/nope", "",
+		{"取单条不存在", "GET", "/v1/mate/automations/nope", "",
 			acl.NewError(acl.ClassRequest, "automation_not_found", "未知 automation", nil), 40401},
-		{"新建重复", "POST", "/v1/forge/automations", `{"id":"d"}`,
+		{"新建重复", "POST", "/v1/mate/automations", `{"id":"d"}`,
 			acl.NewError(acl.ClassLimit, "automation_exists", "已存在", nil), 40901},
-		{"写平台独占键", "PUT", "/v1/forge/automations/d", `{"last_fired_at":"2026-01-01T00:00:00Z"}`,
+		{"写平台独占键", "PUT", "/v1/mate/automations/d", `{"last_fired_at":"2026-01-01T00:00:00Z"}`,
 			acl.NewError(acl.ClassRequest, "invalid_param", "平台写回键不可写", nil), 40001},
-		{"定义非法", "PUT", "/v1/forge/automations/d", `{"schedule":{"kind":"daily"}}`,
+		{"定义非法", "PUT", "/v1/mate/automations/d", `{"schedule":{"kind":"daily"}}`,
 			acl.NewError(acl.ClassRequest, "definition_invalid", "定义不可执行", nil), 40001},
-		{"未配置目录", "DELETE", "/v1/forge/automations/d", "",
+		{"未配置目录", "DELETE", "/v1/mate/automations/d", "",
 			acl.NewError(acl.ClassRequest, "automation_dir_unset", "未配置目录", nil), 40001},
-		{"预览非法 schedule", "POST", "/v1/forge/automations/preview", `{"schedule":{"kind":"daily"}}`,
+		{"预览非法 schedule", "POST", "/v1/mate/automations/preview", `{"schedule":{"kind":"daily"}}`,
 			acl.NewError(acl.ClassRequest, "invalid_param", "缺时区", nil), 40001},
-		{"手动触发已停用", "POST", "/v1/forge/automations/d/run", "",
+		{"手动触发已停用", "POST", "/v1/mate/automations/d/run", "",
 			acl.NewError(acl.ClassRequest, "automation_disabled", "已停用", nil), 40001},
-		{"运行史定义坏了", "GET", "/v1/forge/automations/d/runs", "",
+		{"运行史定义坏了", "GET", "/v1/mate/automations/d/runs", "",
 			acl.NewError(acl.ClassRequest, "definition_invalid", "定义不可执行", nil), 40001},
-		{"落盘冲突", "PUT", "/v1/forge/automations/d", `{"name":"x"}`,
+		{"落盘冲突", "PUT", "/v1/mate/automations/d", `{"name":"x"}`,
 			acl.NewError(acl.ClassLimit, "definition_changed", "请刷新重试", nil), 40901},
 	}
 	for _, c := range cases {
@@ -205,9 +205,9 @@ func TestAutomationBindErrorIsInvalidParam(t *testing.T) {
 	svc := &stubSvc{}
 	r := autoEngine(svc)
 	for _, c := range []struct{ method, path, body string }{
-		{"POST", "/v1/forge/automations", `[1,2,3]`},
-		{"PUT", "/v1/forge/automations/d", `not json`},
-		{"POST", "/v1/forge/automations/preview", `"x"`},
+		{"POST", "/v1/mate/automations", `[1,2,3]`},
+		{"PUT", "/v1/mate/automations/d", `not json`},
+		{"POST", "/v1/mate/automations/preview", `"x"`},
 	} {
 		env, _ := do(t, r, c.method, c.path, c.body)
 		if env.Code != 40000 {
@@ -220,7 +220,7 @@ func TestAutomationBindErrorIsInvalidParam(t *testing.T) {
 	// 领域层返回裸错误 → 由 code.FromError 兜成 50000（唯一兜底码），绝不透传
 	svc2 := &stubSvc{autoErr: errors.New("boom")}
 	r2 := autoEngine(svc2)
-	env, _ := do(t, r2, "GET", "/v1/forge/automations", "")
+	env, _ := do(t, r2, "GET", "/v1/mate/automations", "")
 	if env.Code != 50000 {
 		t.Fatalf("裸错误应兜底 50000，got %d", env.Code)
 	}

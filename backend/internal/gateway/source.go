@@ -31,12 +31,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/mcp"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // SourceOptions 数据面参数（`AgentID` 必填）。
@@ -64,8 +64,8 @@ type SourceOptions struct {
 	Now func() time.Time
 }
 
-// ForgeSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
-type ForgeSource struct {
+// MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
+type MateSource struct {
 	log       *slog.Logger
 	svc       *manager.Service
 	pool      *mcp.Pool
@@ -88,7 +88,7 @@ type ForgeSource struct {
 
 // NewSource 打开数据面（按 `Cfg.ResolvedStoreMode()` 分派 sqlite / memory 两条装载路径，
 // 与核心进程 `internal/app.loadDefinitions` 同一判据），返回可交给 `Run` 的 Source。
-func NewSource(ctx context.Context, opts SourceOptions) (*ForgeSource, error) {
+func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if opts.AgentID == "" {
 		return nil, fmt.Errorf("网关数据面缺少 agent id")
 	}
@@ -101,7 +101,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*ForgeSource, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &ForgeSource{
+	s := &MateSource{
 		log:          opts.Logger,
 		agentDir:     opts.Cfg.AgentDir,
 		agentID:      opts.AgentID,
@@ -148,7 +148,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*ForgeSource, error) {
 }
 
 // Close 释放网关自己开的东西（注入进来的不关：那是调用方的）。
-func (s *ForgeSource) Close() error {
+func (s *MateSource) Close() error {
 	if s.ownPool {
 		s.pool.Close()
 	}
@@ -159,7 +159,7 @@ func (s *ForgeSource) Close() error {
 }
 
 // Tools 取当下该 scope 的远程工具面（命名空间化后的名字）。
-func (s *ForgeSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
+func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 	servers, err := s.servers(ctx)
 	if err != nil {
 		return nil, err
@@ -233,7 +233,7 @@ func (s *ForgeSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 
 // Call 代理一次远端工具调用。**每次都重取定义**（P-4）：这样"停用一台 server"或"轮换密钥"
 // 在下一次调用就生效，而不是等底座换代际。
-func (s *ForgeSource) Call(ctx context.Context, name string, args json.RawMessage) (mcp.CallResult, error) {
+func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage) (mcp.CallResult, error) {
 	servers, err := s.servers(ctx)
 	if err != nil {
 		return mcp.CallResult{}, err
@@ -290,7 +290,7 @@ type gatewayServer struct {
 // 三处"降级而不是失败"都在这条路上：定义读不出来 → 返回错误（调用方降级成空面 + ERROR）；
 // 某台 server 的引用解析不了 → WARN + 跳过它；agent 查不到 → 返回错误（**不**回落成全量，
 // 见 `GatewayMcpFace` 的注释）。
-func (s *ForgeSource) servers(ctx context.Context) ([]gatewayServer, error) {
+func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (s *ForgeSource) servers(ctx context.Context) ([]gatewayServer, error) {
 }
 
 // reload 重新装载定义（受 `ReloadMinInterval` 节流；0 = 不节流）。
-func (s *ForgeSource) reload(ctx context.Context) error {
+func (s *MateSource) reload(ctx context.Context) error {
 	if s.st == nil {
 		return nil // memory 模式：定义来自文件，由核心进程改写；网关不做文件轮询
 	}
@@ -349,7 +349,7 @@ func (s *ForgeSource) reload(ctx context.Context) error {
 }
 
 // warnOnce 逐 key 只报一次（返回 true = 已经报过）。
-func (s *ForgeSource) warnOnce(key string) bool {
+func (s *MateSource) warnOnce(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := s.secretWarned[key]

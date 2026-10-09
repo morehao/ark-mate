@@ -38,7 +38,7 @@ export const SBOM_FILENAME = 'sbom.cdx.json'
 export const CYCLONEDX_SPEC_VERSION = '1.5'
 
 /** 本应用自己的许可与出处（仓库根 LICENSE 是 MIT；显式声明，不从文本里"识别"）。 */
-export const APP_LICENSE = { license: 'MIT', source: 'https://github.com/morehao/ark-forge' }
+export const APP_LICENSE = { license: 'MIT', source: 'https://github.com/morehao/ark-mate' }
 
 /** 已知上游出处（key = 包名 / 运行时名）。没有条目的包按 npm 注册表页机械推导。 */
 export const UPSTREAM = {
@@ -52,7 +52,7 @@ export const UPSTREAM = {
  * 载荷名 → 它在 npm 上的**真实包名**。
  *
  * 为什么需要这张表：`release.json` 里的载荷名是**平台侧的叫法**（`dsh` / `opencode`，
- * 也是 `FORGE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
+ * 也是 `MATE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
  * （`@deepseek-ai/dsh` / `@opencode/cli-darwin-arm64`）。两者的绑定不能靠"看起来像"来猜：
  * 这里是**声明**，生成期硬校验"载荷树里确实有这个名字的包、版本也一致"，对不上就失败
  * （包改名/换发行包时当场红，而不是让 NOTICES 里出现一个不存在的组件名）。
@@ -386,7 +386,7 @@ export function collectComplianceModel({ release, payloadsRoot, runtimeRoot }) {
     .sort((a, b) => (a.name < b.name ? -1 : 1))
 
   return {
-    app: { name: 'ark-forge', version: release.appVersion, ...APP_LICENSE },
+    app: { name: 'ark-mate', version: release.appVersion, ...APP_LICENSE },
     runtimes: [
       { name: 'electron', kind: 'electron', version: release.electron, license: 'MIT', source: UPSTREAM.electron },
       { name: 'node', kind: 'node', version: release.node, license: 'MIT', source: UPSTREAM.node },
@@ -401,7 +401,7 @@ export function collectComplianceModel({ release, payloadsRoot, runtimeRoot }) {
 /** `THIRD-PARTY-NOTICES.txt` 的文本（确定性：字段序固定、组件按 name@version 排序、无时间戳）。 */
 export function renderNotices(model) {
   const lines = []
-  lines.push(`ark-forge ${model.app.version} — 第三方软件声明（THIRD-PARTY NOTICES）`)
+  lines.push(`ark-mate ${model.app.version} — 第三方软件声明（THIRD-PARTY NOTICES）`)
   lines.push('='.repeat(72))
   lines.push('')
   lines.push(`本文件由 frontend/apps/desktop/scripts/gen-compliance.mjs 生成，**不要手工修改**：`)
@@ -451,27 +451,27 @@ export function renderSbom(model) {
     if (properties && properties.length > 0) out.properties = properties
     return out
   }
-  const appRef = `pkg:generic/ark-forge@${model.app.version}`
+  const appRef = `pkg:generic/ark-mate@${model.app.version}`
   const runtimePurl = (name, version) => `pkg:generic/${name}@${version}`
 
   const components = [
     component(COMPONENT_TYPE.electron, 'electron', model.runtimes.find((r) => r.kind === 'electron').version, 'MIT',
       runtimePurl('electron', model.runtimes.find((r) => r.kind === 'electron').version), [
-        { name: 'forge:source', value: UPSTREAM.electron },
+        { name: 'mate:source', value: UPSTREAM.electron },
       ]),
     component(COMPONENT_TYPE.node, 'node', model.runtimes.find((r) => r.kind === 'node').version, 'MIT',
       runtimePurl('node', model.runtimes.find((r) => r.kind === 'node').version), [
-        { name: 'forge:source', value: UPSTREAM.node },
-        { name: 'forge:nodeAbi', value: String(model.nodeAbi) },
+        { name: 'mate:source', value: UPSTREAM.node },
+        { name: 'mate:nodeAbi', value: String(model.nodeAbi) },
       ]),
     ...model.packages.map((pkg) => {
       // 载荷根那份包（`@deepseek-ai/dsh` / `opencode-darwin-arm64`）就在这里，带上
-      // `forge:payloadRoot` 与载荷 digest——**不另造一个"载荷"组件**（同一份软件出现两次
+      // `mate:payloadRoot` 与载荷 digest——**不另造一个"载荷"组件**（同一份软件出现两次
       // 只会让清单看起来更全，实际是同名不同物，机器消费方没法用）。
-      const props = [{ name: 'forge:payload', value: pkg.payloads.join('+') }]
-      if (pkg.payloadRoot) props.push({ name: 'forge:payloadRoot', value: pkg.payloadRoot })
-      if (pkg.digest) props.push({ name: 'forge:digest', value: pkg.digest })
-      props.push({ name: 'forge:bundledBy', value: pkg.bundledBy })
+      const props = [{ name: 'mate:payload', value: pkg.payloads.join('+') }]
+      if (pkg.payloadRoot) props.push({ name: 'mate:payloadRoot', value: pkg.payloadRoot })
+      if (pkg.digest) props.push({ name: 'mate:digest', value: pkg.digest })
+      props.push({ name: 'mate:bundledBy', value: pkg.bundledBy })
       return component(COMPONENT_TYPE.npm, pkg.name, pkg.version, pkg.license, purlFor(pkg.name, pkg.version), props)
     }),
   ]

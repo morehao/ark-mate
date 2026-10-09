@@ -2,20 +2,20 @@
  * 载体判定与形状守卫的单测（`node --test`，Node 24 内置，零新依赖）。
  *
  * 判定的取值组合**全枚举写死**（3 协议 × 4 主机 × 2 主框架 = 24 条）：这张表就是 V18 的
- * "判定层"覆盖——`forge-app://shell/*` 与子框架这两条负例正是 preload origin 守卫的回归点。
+ * "判定层"覆盖——`mate-app://shell/*` 与子框架这两条负例正是 preload origin 守卫的回归点。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { APP_ORIGIN, DESKTOP_NAMESPACE, isDesktopCarrier, assertForgeDesktop } from '../src/index.ts'
-import type { ForgeDesktop } from '../src/index.ts'
+import { APP_ORIGIN, DESKTOP_NAMESPACE, isDesktopCarrier, assertMateDesktop } from '../src/index.ts'
+import type { MateDesktop } from '../src/index.ts'
 
-const PROTOCOLS = ['forge-app:', 'https:', 'http:'] as const
+const PROTOCOLS = ['mate-app:', 'https:', 'http:'] as const
 const HOSTNAMES = ['app', 'shell', 'other', ''] as const
 
 test('契约常量与设计文档 §0.3 一致', () => {
-  assert.equal(DESKTOP_NAMESPACE, '__FORGE_DESKTOP__')
-  assert.equal(APP_ORIGIN, 'forge-app://app')
+  assert.equal(DESKTOP_NAMESPACE, '__MATE_DESKTOP__')
+  assert.equal(APP_ORIGIN, 'mate-app://app')
 })
 
 test('isDesktopCarrier：全组合逐条写死', () => {
@@ -23,7 +23,7 @@ test('isDesktopCarrier：全组合逐条写死', () => {
   for (const protocol of PROTOCOLS) {
     for (const hostname of HOSTNAMES) {
       for (const isMainFrame of [true, false]) {
-        const want = protocol === 'forge-app:' && hostname === 'app' && isMainFrame
+        const want = protocol === 'mate-app:' && hostname === 'app' && isMainFrame
         const got = isDesktopCarrier({ protocol, hostname }, isMainFrame)
         assert.equal(
           got,
@@ -57,13 +57,13 @@ function goodCarrier(): unknown {
   }
 }
 
-test('assertForgeDesktop：正例原样返回', () => {
+test('assertMateDesktop：正例原样返回', () => {
   const good = goodCarrier()
-  const got: ForgeDesktop = assertForgeDesktop(good)
+  const got: MateDesktop = assertMateDesktop(good)
   assert.equal(got, good)
 })
 
-test('assertForgeDesktop：六种坏形状全部抛错', () => {
+test('assertMateDesktop：六种坏形状全部抛错', () => {
   const missingField = goodCarrier() as { native: Record<string, unknown> }
   delete missingField.native.openPath
 
@@ -76,24 +76,24 @@ test('assertForgeDesktop：六种坏形状全部抛错', () => {
     ['空对象', {}],
     ['null', null],
     ['数组', []],
-    ['字符串', 'forge-app://app'],
+    ['字符串', 'mate-app://app'],
   ]
 
   for (const [name, value] of cases) {
-    assert.throws(() => assertForgeDesktop(value), /载体契约形状不符/, `${name} 应抛错`)
+    assert.throws(() => assertMateDesktop(value), /载体契约形状不符/, `${name} 应抛错`)
   }
 })
 
-test('assertForgeDesktop：错误信息含出问题的字段名', () => {
+test('assertMateDesktop：错误信息含出问题的字段名', () => {
   const nestedMissing = goodCarrier() as { platform: Record<string, unknown> }
   delete nestedMissing.platform.close
-  assert.throws(() => assertForgeDesktop(nestedMissing), /platform\.close/)
+  assert.throws(() => assertMateDesktop(nestedMissing), /platform\.close/)
 
   const bootMissing = goodCarrier() as Record<string, unknown>
   delete bootMissing.boot
-  assert.throws(() => assertForgeDesktop(bootMissing), /boot（缺失）/)
+  assert.throws(() => assertMateDesktop(bootMissing), /boot（缺失）/)
 
   const nativeWrong = goodCarrier() as Record<string, unknown>
   nativeWrong.native = null
-  assert.throws(() => assertForgeDesktop(nativeWrong), /native（类型 null）/)
+  assert.throws(() => assertMateDesktop(nativeWrong), /native（类型 null）/)
 })

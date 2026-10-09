@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
 import { ApiOutlined, ExperimentOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import { getAgentCapabilities, listMcpServers } from '@ark/api'
-import type { AgentCapabilities, McpServer } from '@ark/types'
-import { useForge } from '../store'
+import { tokens } from '@ark-mate/ui'
+import { getAgentCapabilities, listMcpServers } from '@ark-mate/api'
+import type { AgentCapabilities, McpServer } from '@ark-mate/types'
+import { useMate } from '../store'
 import { Label } from './WorkspaceBrowser'
 import {
   mcpOptionView,
@@ -61,7 +61,7 @@ interface OptionRow {
  * **权威判定仍在服务端**——清单可能是旧快照（定义刚被改/删），那时服务端会拒并给出原因。
  */
 export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) {
-  const showToast = useForge((s) => s.showToast)
+  const showToast = useMate((s) => s.showToast)
   const [open, setOpen] = useState(false)
   const [caps, setCaps] = useState<AgentCapabilities | null>(null)
   const [servers, setServers] = useState<McpServer[]>([])

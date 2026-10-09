@@ -4,8 +4,8 @@ import "github.com/gin-gonic/gin"
 
 // ContentSecurityPolicy 控制面下发**文档**的 CSP（设计 §9.2）。
 //
-// **两处下发同一策略**：核心服务浏览器入口时以响应头下发；桌面壳在 `forge-app://app`
-// 的文档响应上下同一个头。策略值的唯一真源在前端契约 `@ark/desktop-contract` 的
+// **两处下发同一策略**：核心服务浏览器入口时以响应头下发；桌面壳在 `mate-app://app`
+// 的文档响应上下同一个头。策略值的唯一真源在前端契约 `@ark-mate/desktop-contract` 的
 // `CSP_POLICY`，这里是与它**逐字相同**的 Go 常量——由 `archtest` 的
 // `TestRendererHardeningBaseline` 断言两处字符串一字不差（改一处忘另一处即红）。
 //

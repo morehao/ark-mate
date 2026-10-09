@@ -14,8 +14,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/morehao/ark-forge/internal/app"
-	"github.com/morehao/ark-forge/internal/credential"
+	"github.com/morehao/ark-mate/internal/app"
+	"github.com/morehao/ark-mate/internal/credential"
 )
 
 // serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。
@@ -25,16 +25,16 @@ import (
 // 依赖装配与启停生命周期全在 app 包（见其包注释的分层说明）。
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "", "监听地址（默认读 FORGE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
-	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 FORGE_TURN_TIMEOUT）")
+	addr := fs.String("addr", "", "监听地址（默认读 MATE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
+	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 MATE_TURN_TIMEOUT）")
 	authStdin := fs.Bool("auth-stdin", false,
 		"从 stdin 首行读取桌面态双凭据（JSON {\"restToken\":\"…\",\"streamToken\":\"…\"}，各 32 字节随机 base64url）；"+
 			"令牌因此不进 argv/env/文件/URL。解析失败或两者之一为空 → 退出码 2")
 	readyStdout := fs.Bool("ready-stdout", false,
-		"监听成功后往 stdout 打一行 `FORGE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
+		"监听成功后往 stdout 打一行 `MATE_READY {\"addr\":\"127.0.0.1:<port>\",\"port\":<port>}`（不含令牌）；"+
 			"桌面壳据此立刻拿到地址，不传则壳退回 health 轮询")
 	webDir := fs.String("web-dir", "",
-		"前端资产目录（绝对路径，须含 index.html；同 FORGE_WEB_DIR）。不传则用构建期内置资产；"+
+		"前端资产目录（绝对路径，须含 index.html；同 MATE_WEB_DIR）。不传则用构建期内置资产；"+
 			"两者都没有 → 拒绝启动（退出码 3）。显式给了目录就**只**用它，不回落内嵌")
 	exitWithParent := fs.Bool("exit-with-parent", false,
 		"父进程消失即自动退出（POSIX：父进程死后被 reparent，`Getppid` 随之变化）；"+
@@ -54,7 +54,7 @@ func serve(args []string) {
 	if *turnTimeout > 0 {
 		cfg.TurnTimeout = *turnTimeout
 	}
-	// CLI flag 优先级最高（与 --addr 同一条规则：默认 < config.json < env < FORGE_* < flag）。
+	// CLI flag 优先级最高（与 --addr 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *webDir != "" {
 		cfg.WebDir = *webDir
 	}

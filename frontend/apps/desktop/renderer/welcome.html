@@ -6,22 +6,22 @@
       壳静态页（不进共享构建、不引 antd、无脚本）。
       CSP 只放开本页需要的东西：样式来自同目录的两份 CSS（生成的 shell-tokens.css + 手写的 shell.css），
       其余全禁——注意**没有** unsafe-inline，所以本页不能写内联 <style>（见 shell.css 的说明）。
-      M1-3 起窗口加载 forge-app://app/（核心托管的同一份 apps/web/dist），本页作为壳侧
+      M1-3 起窗口加载 mate-app://app/（核心托管的同一份 apps/web/dist），本页作为壳侧
       兜底页（欢迎 / 启动失败 / 更新对话框）继续存在。
     -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:" />
-    <title>ark-forge</title>
+    <title>ark-mate</title>
     <link rel="stylesheet" href="shell-tokens.css" />
     <link rel="stylesheet" href="shell.css" />
   </head>
   <body>
     <div class="shell-card">
-      <h1 class="shell-title"><span class="shell-dot"></span>ark-forge 桌面壳（M0-5 骨架）</h1>
+      <h1 class="shell-title"><span class="shell-dot"></span>ark-mate 桌面壳（M0-5 骨架）</h1>
       <p class="shell-text">
         这是壳的静态页，用来验证「Electron 能起、preload 打得进 CJS、壳样式来自 tokens 生成物」三件事。
       </p>
       <p class="shell-text">
-        下一个里程碑（M1-3）会把窗口切到 <code class="shell-code">forge-app://app/</code>，加载核心托管的那一份
+        下一个里程碑（M1-3）会把窗口切到 <code class="shell-code">mate-app://app/</code>，加载核心托管的那一份
         <code class="shell-code">apps/web/dist</code>——与浏览器入口完全同一份产物。
       </p>
     </div>

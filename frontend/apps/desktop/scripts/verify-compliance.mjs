@@ -164,9 +164,9 @@ function main() {
     const pkgName = PAYLOAD_PACKAGES[p.name]
     const root = components.find((c) => c.name === pkgName && c.version === p.version)
     check(`NOTICES 逐字带上 ${p.name} 的载荷 digest`, noticesText.includes(p.digest))
-    check(`SBOM 的 ${pkgName} 组件带 forge:payloadRoot=${p.name} 与载荷 digest`,
-      Boolean(root) && (root.properties ?? []).some((x) => x.name === 'forge:payloadRoot' && x.value === p.name) &&
-        (root.properties ?? []).some((x) => x.name === 'forge:digest' && x.value === p.digest))
+    check(`SBOM 的 ${pkgName} 组件带 mate:payloadRoot=${p.name} 与载荷 digest`,
+      Boolean(root) && (root.properties ?? []).some((x) => x.name === 'mate:payloadRoot' && x.value === p.name) &&
+        (root.properties ?? []).some((x) => x.name === 'mate:digest' && x.value === p.digest))
   }
 
   // ③ SBOM 形状（解析回对象后逐项断言；只查形状，不改动任何值）。
@@ -200,7 +200,7 @@ function main() {
     if (values['from-tarball']) {
       const tarballs = existsSync(RELEASE_DIR) ? readdirSync(RELEASE_DIR).filter((f) => f.endsWith('.tar.gz')) : []
       if (tarballs.length !== 1) fail(`需要一个 tar.gz 产物（现有 ${tarballs.length} 个）\n  先跑 \`make desktop/dist\``)
-      const dir = mkdtempSync(join(tmpdir(), 'forge-verify-compliance-'))
+      const dir = mkdtempSync(join(tmpdir(), 'mate-verify-compliance-'))
       const untar = run('tar', ['-xzf', join(RELEASE_DIR, tarballs[0]), '-C', dir])
       check('tar.gz 可解', untar.status === 0, untar.stderr.split('\n')[0] ?? '')
       if (untar.status === 0) {
@@ -214,10 +214,10 @@ function main() {
         }
       }
     } else {
-      const app = join(RELEASE_DIR, 'mac-arm64', 'ark-forge.app')
+      const app = join(RELEASE_DIR, 'mac-arm64', 'ark-mate.app')
       if (!existsSync(app)) fail(`没有 ${app}\n  先跑 \`make desktop/dist\`（或用 --from-tarball 判分发形态）`)
       resourcesPath = join(app, 'Contents', 'Resources')
-      label = 'release/mac-arm64/ark-forge.app'
+      label = 'release/mac-arm64/ark-mate.app'
     }
     if (resourcesPath) {
       for (const file of [NOTICES_FILENAME, SBOM_FILENAME]) {

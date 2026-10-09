@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // TestFromACLCarriesStderrTail 底座起不来时，信封文案要带 stderr 尾巴（诊断可用性）。

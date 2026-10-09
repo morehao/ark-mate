@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestSecretRefLexiconMatchesVault §13.3 M1 的一致性守卫：能力数据面（pkg/capability）与
@@ -53,7 +53,7 @@ func TestMcpSecretResolution(t *testing.T) {
 		ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		Env:           map[string]string{"FS_ROOT": "/tmp/root"},
 		SecretEnv:     map[string]string{"FS_TOKEN": "vault:mcp/fs-token"},
-		Headers:       map[string]string{"X-Client": "forge"},
+		Headers:       map[string]string{"X-Client": "mate"},
 		SecretHeaders: map[string]string{"Authorization": "env:FS_AUTH_HEADER"},
 	}); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	if got[0].Env["FS_TOKEN"] != token || got[0].Env["FS_ROOT"] != "/tmp/root" {
 		t.Fatalf("env 注入不符: %+v", got[0].Env)
 	}
-	if got[0].Headers["Authorization"] != "Bearer from-env" || got[0].Headers["X-Client"] != "forge" {
+	if got[0].Headers["Authorization"] != "Bearer from-env" || got[0].Headers["X-Client"] != "mate" {
 		t.Fatalf("header 注入不符: %+v", got[0].Headers)
 	}
 
@@ -137,18 +137,18 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	svc := agentTestSvc(t, filepath.Join(t.TempDir(), "agents"))
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "s1", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
-		SecretEnv: map[string]string{"TOKEN": "env:FORGE_TEST_UNSET_VAR"},
+		SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := directMcp(svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil)); len(got) != 0 {
 		t.Fatalf("env 未设时不该注入: %+v", got)
 	}
-	if keys := svc.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:FORGE_TEST_UNSET_VAR"}}); len(keys) != 1 {
+	if keys := svc.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"}}); len(keys) != 1 {
 		t.Fatalf("应报 unresolved: %+v", keys)
 	}
 
-	// 2) vault 不可用（agentDir 为空 = 没有 ~/.forge）：明确指出"无 vault"，而不是当成"密钥为空"。
+	// 2) vault 不可用（agentDir 为空 = 没有 ~/.ark-mate）：明确指出"无 vault"，而不是当成"密钥为空"。
 	noVault := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
 	if err := noVault.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "s2", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
@@ -171,10 +171,10 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	dir := filepath.Join(home, "agents")
 	svc3 := agentTestSvc(t, dir)
 	const leaked = "sk-should-never-appear"
-	if err := os.Setenv("FORGE_TEST_WRONG_KIND", leaked); err != nil {
+	if err := os.Setenv("MATE_TEST_WRONG_KIND", leaked); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Unsetenv("FORGE_TEST_WRONG_KIND") })
+	t.Cleanup(func() { _ = os.Unsetenv("MATE_TEST_WRONG_KIND") })
 	st, err := vault.Open(home)
 	if err != nil {
 		t.Fatal(err)

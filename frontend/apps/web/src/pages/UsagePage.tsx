@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Empty, Input, Segmented, Select, Space, Spin, Statistic, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark/ui'
-import { toErrorMessage, usageSummary } from '@ark/api'
-import type { Agent, UsageBucket, UsageSummary } from '@ark/types'
-import { useForge } from '../store'
+import { PageContainer, tokens } from '@ark-mate/ui'
+import { toErrorMessage, usageSummary } from '@ark-mate/api'
+import type { Agent, UsageBucket, UsageSummary } from '@ark-mate/types'
+import { useMate } from '../store'
 import { fmtContext, fmtCost, fmtDuration, reportedLabel, successRate, usageRows, type UsageRow } from '../console/usageView'
 
 // ——— 用量视图（M3 GET /usage/summary；sqlite 模式才有数据） ———
 // 维度：agent（默认，按轮次降序）/ day（按日期升序）；筛选：时间区间（半开）+ agent。
-// 诚实降级：内存模式（FORGE_STORE=memory）后端返回 40501，此处显示后端原文，不臆造数字。
+// 诚实降级：内存模式（MATE_STORE=memory）后端返回 40501，此处显示后端原文，不臆造数字。
 // 口径（后端回显 context_semantics/cost_semantics/buckets_additive）：上下文与成本都是
 // **区间末快照**（各会话取区间内最后一次上报后求和），不是区间增量；day 分组不可相加。
 
@@ -80,9 +80,9 @@ const CELL: React.CSSProperties = { fontSize: 12.5, textAlign: 'right', whiteSpa
 
 /** 用量页（M3 首项的可视化面）。 */
 export function UsagePage() {
-  const agents = useForge((s) => s.agents)
-  const refreshAgents = useForge((s) => s.refreshAgents)
-  const showToast = useForge((s) => s.showToast)
+  const agents = useMate((s) => s.agents)
+  const refreshAgents = useMate((s) => s.refreshAgents)
+  const showToast = useMate((s) => s.showToast)
 
   const [mode, setMode] = useState<RangeMode>('7d')
   const [fromDay, setFromDay] = useState<string>(isoDay(new Date(Date.now() - 7 * 86_400_000)))

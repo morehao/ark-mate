@@ -23,7 +23,7 @@ export interface WorkspaceBrowseResp {
   /** 服务进程家目录（"回到主目录"用；不可得或不在工作区根内时缺省）。 */
   home?: string
   /**
-   * 生效的工作区根白名单（服务端 `FORGE_WORKSPACE_ROOTS`；空 = 不限制）。
+   * 生效的工作区根白名单（服务端 `MATE_WORKSPACE_ROOTS`；空 = 不限制）。
    * 服务端会把 `cwd` 与浏览都收在根内，故前端应当把根列成入口——
    * 既让"为什么上不去了"有解释，也让用户一进来就看到允许工作的位置。
    */
@@ -45,10 +45,10 @@ export interface WorkspaceRecent {
 }
 
 /**
- * 资料库 = 工作区根（`FORGE_WORKSPACE_ROOTS`）下的一级子目录。
+ * 资料库 = 工作区根（`MATE_WORKSPACE_ROOTS`）下的一级子目录。
  *
  * 服务端**零新状态**：不存登记表，目录名即资料库名（`GET /workspaces/libraries`）。
- * 未配 `FORGE_WORKSPACE_ROOTS` 时服务端返回空数组——资料库是"策展"能力，
+ * 未配 `MATE_WORKSPACE_ROOTS` 时服务端返回空数组——资料库是"策展"能力，
  * 前提是运维先把允许的工作区画出来；此时面板只保留"浏览目录"入口。
  */
 export interface WorkspaceLibrary {

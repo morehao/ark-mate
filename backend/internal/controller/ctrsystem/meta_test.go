@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 )
 
 // rawMeta 取 `/meta` 的原始 JSON（要断言"字段在不在"，不能用 map 解完再查零值）。
@@ -56,14 +56,14 @@ func TestMetaSnapshotShape(t *testing.T) {
 	// ② 有资产（dir）：webSource=dir、webPath 是那个绝对路径、webDigest 是 sha256:…
 	d2 := rawMeta(t, ctrsystem.MetaSource{
 		CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home",
-		Assets: ctrsystem.MetaAssets{Source: "dir", Path: "/opt/forge/web", Digest: "sha256:abc", BuildID: "bid-1"},
+		Assets: ctrsystem.MetaAssets{Source: "dir", Path: "/opt/mate/web", Digest: "sha256:abc", BuildID: "bid-1"},
 	})
 	var path, digest, buildID, source string
 	_ = json.Unmarshal(d2["webPath"], &path)
 	_ = json.Unmarshal(d2["webDigest"], &digest)
 	_ = json.Unmarshal(d2["webBuildId"], &buildID)
 	_ = json.Unmarshal(d2["webSource"], &source)
-	if source != "dir" || path != "/opt/forge/web" || digest != "sha256:abc" || buildID != "bid-1" {
+	if source != "dir" || path != "/opt/mate/web" || digest != "sha256:abc" || buildID != "bid-1" {
 		t.Errorf("资产字段投影不符：source=%q path=%q digest=%q buildId=%q", source, path, digest, buildID)
 	}
 

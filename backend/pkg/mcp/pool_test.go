@@ -21,10 +21,10 @@ import (
 // spawnLog 里每次建连追加一行。
 func poolServer(t *testing.T, id, mode, spawnLog string) Server {
 	t.Helper()
-	t.Setenv("FORGE_MCP_HELPER", "1")
-	env := map[string]string{"FORGE_MCP_HELPER_SPAWN_LOG": spawnLog}
+	t.Setenv("MATE_MCP_HELPER", "1")
+	env := map[string]string{"MATE_MCP_HELPER_SPAWN_LOG": spawnLog}
 	if mode != "" {
-		env["FORGE_MCP_HELPER_MODE"] = mode
+		env["MATE_MCP_HELPER_MODE"] = mode
 	}
 	return Server{ID: id, Transport: "stdio", Command: os.Args[0], Env: env}
 }
@@ -94,7 +94,7 @@ func TestPoolRebuildsOnDefinitionChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 只换密钥（env 值）：连接参数变了 → 必须重建，不能拿着旧凭据的连接继续用。
-	s.Env["FORGE_MCP_HELPER_NAME"] = "rotated-secret"
+	s.Env["MATE_MCP_HELPER_NAME"] = "rotated-secret"
 	if _, err := p.CallTool(ctx, s, "read_file", nil); err != nil {
 		t.Fatal(err)
 	}

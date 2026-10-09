@@ -5,32 +5,32 @@
 //   - 每个领域一个 routes_*.go，各自构造控制器并注册自己的路由；
 //   - 鉴权等横切关注点经 internal/middleware 挂载。
 //
-// 路由前缀由 golib ginserver 的版本分组给出：/{version}/{appName}（v1/forge）。
+// 路由前缀由 golib ginserver 的版本分组给出：/{version}/{appName}（v1/mate）。
 // 对外契约以本包注册的路径为准；README「控制面接口摘要」由
 // TestReadmeRoutesMatchRouter 守卫，新增/改名路由必须同步。
 package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/middleware"
-	"github.com/morehao/ark-forge/internal/service/svcagent"
-	"github.com/morehao/ark-forge/internal/service/svcautomation"
-	"github.com/morehao/ark-forge/internal/service/svccapability"
-	"github.com/morehao/ark-forge/internal/service/svcconversation"
-	"github.com/morehao/ark-forge/internal/service/svcexport"
-	"github.com/morehao/ark-forge/internal/service/svclibrary"
-	"github.com/morehao/ark-forge/internal/service/svcruntime"
-	"github.com/morehao/ark-forge/internal/service/svcsearch"
-	"github.com/morehao/ark-forge/internal/service/svcusage"
-	"github.com/morehao/ark-forge/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/service/svcagent"
+	"github.com/morehao/ark-mate/internal/service/svcautomation"
+	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/internal/service/svcconversation"
+	"github.com/morehao/ark-mate/internal/service/svcexport"
+	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
 
 // AppName 控制面应用的业务标识，构成路由前缀部分。
-const AppName = "forge"
+const AppName = "mate"
 
 // Ports 汇总路由注册所需的领域端口。
 //
@@ -62,7 +62,7 @@ type Options struct {
 	// 桌面态两个面互斥（restToken / streamToken），独立态是同一条令牌同时带两个面。
 	Credentials *credential.Set
 
-	// Meta 系统面（`/v1/forge/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
+	// Meta 系统面（`/v1/mate/meta`）里由**装配层**提供的部分（核心版本、数据目录、随包载荷…）；
 	// 资产相关字段由路由层按**已解析的资产**补全（M2-1 起不看构建 tag，M2-3 接真值）。
 	// nil = 用默认值（版本 + 空载荷）。
 	Meta func() ctrsystem.MetaSource

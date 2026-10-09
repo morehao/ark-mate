@@ -93,19 +93,19 @@
 
   <circle class="input" cx="76" cy="290" r="15" stroke="var(--line)" stroke-width="1" />
   <text class="badge" x="76" y="295" text-anchor="middle">2</text>
-  <text class="step-title" x="106" y="280">spawn forge-core</text>
+  <text class="step-title" x="106" y="280">spawn mate-core</text>
   <text class="step-detail" x="106" y="300">校验 --web-dir（壳指向包内 dist）或内置资产，监听 127.0.0.1:0</text>
   <text class="step-detail" x="106" y="316">两个凭据只经 stdin：不进 argv、不进 env、不落文件</text>
 
   <circle class="input" cx="76" cy="390" r="15" stroke="var(--line)" stroke-width="1" />
   <text class="badge" x="76" y="395" text-anchor="middle">3</text>
-  <text class="step-title" x="106" y="380">轮询 /v1/forge/health 直到就绪</text>
+  <text class="step-title" x="106" y="380">轮询 /v1/mate/health 直到就绪</text>
   <text class="step-detail" x="106" y="400">health 是唯一免鉴权端点，用来做就绪探针</text>
   <text class="step-detail" x="106" y="416">就绪前不开窗口：页面见不到半启动的后端</text>
 
   <circle class="input" cx="76" cy="490" r="15" stroke="var(--line)" stroke-width="1" />
   <text class="badge" x="76" y="495" text-anchor="middle">4</text>
-  <text class="step-title" x="106" y="480">loadURL forge-app://app/，壳服务 index 与 assets</text>
+  <text class="step-title" x="106" y="480">loadURL mate-app://app/，壳服务 index 与 assets</text>
   <text class="step-detail" x="106" y="500">壳从包内 dist 服务 index 与 /assets/*（immutable）</text>
   <text class="step-detail" x="106" y="516">页面 origin 恒定：磁盘缓存与本地存储跨启动稳定</text>
 
@@ -131,7 +131,7 @@
   <text class="note" x="52" y="866">零依赖判据：无 registry 请求 · 不写系统目录 · 不改用户 PATH</text>
 
   <!-- ===== 右栏：部署拓扑 ===== -->
-  <text class="frame-header" x="596" y="138">部署拓扑 · 随包只读资产与载荷 + 可写 FORGE_HOME</text>
+  <text class="frame-header" x="596" y="138">部署拓扑 · 随包只读资产与载荷 + 可写 MATE_HOME</text>
 
   <text class="zone-header" x="1026" y="172">签名应用包 · 只读（随包签名 + 公证）</text>
   <rect class="node neutral" x="1026" y="184" width="382" height="56" rx="10" />
@@ -139,7 +139,7 @@
   <text class="small" x="1046" y="228">自带 Node 24.18.1（实测）· Chromium 版本固定</text>
 
   <rect class="node neutral" x="1026" y="252" width="382" height="56" rx="10" />
-  <text class="label" x="1046" y="276">forge-core（单一 Go 静态二进制）</text>
+  <text class="label" x="1046" y="276">mate-core（单一 Go 静态二进制）</text>
   <text class="small" x="1046" y="296">REST · WS · 资产层（解析 → 校验 → 服务 → 闸门）</text>
 
   <rect class="node neutral" x="1026" y="320" width="382" height="56" rx="10" />
@@ -150,9 +150,9 @@
   <text class="label mono" x="1046" y="412">assets &amp; payload manifest</text>
   <text class="small" x="1046" y="432">前端 build id / digest · 版本 · 逐文件 sha256 · Node ABI</text>
 
-  <text class="zone-header" x="1026" y="510">FORGE_HOME · 可写（默认 ~/.forge，一份共享路径）</text>
+  <text class="zone-header" x="1026" y="510">MATE_HOME · 可写（默认 ~/.ark-mate，一份共享路径）</text>
   <rect class="node storage" x="1026" y="522" width="382" height="56" rx="10" />
-  <text class="label mono" x="1046" y="546">forge.db · transcripts</text>
+  <text class="label mono" x="1046" y="546">mate.db · transcripts</text>
   <text class="small" x="1046" y="566">会话、事件、历史回放（与 CLI / 浏览器共用）</text>
 
   <rect class="node risk" x="1026" y="590" width="382" height="56" rx="10" />
@@ -172,20 +172,20 @@
 
   <rect class="node neutral" x="600" y="164" width="380" height="76" rx="10" />
   <text class="label" x="790" y="196" text-anchor="middle">Electron 壳（主进程）</text>
-  <text class="small" x="790" y="218" text-anchor="middle">单实例锁 · forge-app:// 静态与反代 · 托盘 / 更新</text>
+  <text class="small" x="790" y="218" text-anchor="middle">单实例锁 · mate-app:// 静态与反代 · 托盘 / 更新</text>
 
   <rect class="node process" x="600" y="290" width="380" height="90" rx="10" />
-  <text class="label" x="790" y="322" text-anchor="middle">forge-core（唯一核心）</text>
+  <text class="label" x="790" y="322" text-anchor="middle">mate-core（唯一核心）</text>
   <text class="small" x="790" y="344" text-anchor="middle">回环 REST + WS + 资产层（浏览器入口）</text>
   <text class="small" x="790" y="364" text-anchor="middle">编排器 · 事件总线 · 持久层</text>
 
   <rect class="node input" x="600" y="430" width="184" height="68" rx="10" />
   <text class="label" x="692" y="458" text-anchor="middle">渲染进程窗口</text>
-  <text class="small" x="692" y="478" text-anchor="middle">forge-app://app（桌面）</text>
+  <text class="small" x="692" y="478" text-anchor="middle">mate-app://app（桌面）</text>
 
   <rect class="node input" x="796" y="430" width="184" height="68" rx="10" />
   <text class="label" x="888" y="458" text-anchor="middle">浏览器入口</text>
-  <text class="small" x="888" y="478" text-anchor="middle">forge web（回环 origin）</text>
+  <text class="small" x="888" y="478" text-anchor="middle">mate web（回环 origin）</text>
 
   <rect class="node process" x="600" y="544" width="380" height="128" rx="10" />
   <text class="label" x="790" y="572" text-anchor="middle">ACP runtime 子进程（stdio）</text>
@@ -214,13 +214,13 @@
   <text class="badge" x="790" y="693" text-anchor="middle">5</text>
 
   <!-- ===== 标题与图例 ===== -->
-  <text class="title" x="40" y="52">ark-forge 桌面端：启动链与部署拓扑</text>
+  <text class="title" x="40" y="52">ark-mate 桌面端：启动链与部署拓扑</text>
   <text class="subtitle" x="40" y="80">Electron 壳 + 随包资产与运行时（Node 由 Electron 提供，实测 24.18.1 满足 dsh engines）｜用户机器无需 Go / Node / pnpm / Python，也无需预装 dsh / opencode</text>
 
   <rect class="node neutral" x="56" y="944" width="16" height="16" rx="4" />
   <text class="small" x="82" y="957">只读：随包已签名（应用包内）</text>
   <rect class="node storage" x="336" y="944" width="16" height="16" rx="4" />
-  <text class="small" x="362" y="957">可写：FORGE_HOME 数据面</text>
+  <text class="small" x="362" y="957">可写：MATE_HOME 数据面</text>
   <rect class="node process" x="616" y="944" width="16" height="16" rx="4" />
   <text class="small" x="642" y="957">进程：核心与它拉起的子进程</text>
   <rect class="node input" x="896" y="944" width="16" height="16" rx="4" />

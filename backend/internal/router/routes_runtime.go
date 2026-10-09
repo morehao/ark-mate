@@ -2,9 +2,9 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrmodel"
-	"github.com/morehao/ark-forge/internal/controller/ctrprovider"
-	"github.com/morehao/ark-forge/internal/controller/ctrruntime"
+	"github.com/morehao/ark-mate/internal/controller/ctrmodel"
+	"github.com/morehao/ark-mate/internal/controller/ctrprovider"
+	"github.com/morehao/ark-mate/internal/controller/ctrruntime"
 )
 
 // registerRuntime 底座面：runtime 概要、provider 档案与模型目录。

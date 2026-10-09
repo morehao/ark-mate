@@ -4,7 +4,7 @@
 // 挂在任何单一领域端口上都说不通。它不拥有数据、也不写任何东西——只有一个查询方法。
 package svclibrary
 
-import "github.com/morehao/ark-forge/internal/dto/dtolibrary"
+import "github.com/morehao/ark-mate/internal/dto/dtolibrary"
 
 // Query 一次 Library 查询。
 type Query struct {

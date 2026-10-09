@@ -2,7 +2,7 @@
 //
 // 来源（只有一个机制能命中，不搜索、不回落）：
 //   - **构建期内置**：`-tags release` 时 `//go:embed dist`（见 web_embed_release.go）；
-//   - **显式目录**：`--web-dir` / `FORGE_WEB_DIR` 指向一份已构建的 `apps/web/dist`
+//   - **显式目录**：`--web-dir` / `MATE_WEB_DIR` 指向一份已构建的 `apps/web/dist`
 //     （桌面形态由壳指过来，独立部署也可指向 nginx 那份）。
 //
 // 两者的**差别只在来源**：缓存语义、SPA 回退、`/v1/*` 的信封 404 全由 internal/router 的

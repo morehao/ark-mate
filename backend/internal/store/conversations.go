@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dao"
+	"github.com/morehao/ark-mate/internal/dao"
 )
 
 // UpsertConversation 写入（覆盖）一条会话记录。last_seq 采用触顶语义（MAX），避免误清零。

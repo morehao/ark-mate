@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 本文件是**桌面渲染进程加固基线**的守卫（M1-5，设计 §9.2）。
@@ -18,7 +18,7 @@ import (
 //  2. webPreferences 的加固项（contextIsolation / sandbox / nodeIntegration / webviewTag /
 //     无 enableRemoteModule）是"少了不报错、多了才出事"的安全配置，静态断言比运行时断言更早。
 
-// cspPolicyInContract 从 `@ark/desktop-contract` 的 index.ts 里取出 CSP_POLICY 的字面量。
+// cspPolicyInContract 从 `@ark-mate/desktop-contract` 的 index.ts 里取出 CSP_POLICY 的字面量。
 func cspPolicyInContract(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(frontendRoot(t), "packages", "desktop-contract", "src", "index.ts")
@@ -110,7 +110,7 @@ func TestRendererHardeningBaseline(t *testing.T) {
 			t.Fatal("契约里的 CSP_POLICY 为空")
 		}
 		if router.ContentSecurityPolicy != want {
-			t.Errorf("CSP 两处不一致：\n  契约（@ark/desktop-contract/index.ts）= %q\n  核心（internal/router/csp.go）    = %q", want, router.ContentSecurityPolicy)
+			t.Errorf("CSP 两处不一致：\n  契约（@ark-mate/desktop-contract/index.ts）= %q\n  核心（internal/router/csp.go）    = %q", want, router.ContentSecurityPolicy)
 		}
 		// 纪律条款单独再钉一次：外域的"漏写"有时看起来无害（比如为了字体加个 CDN），
 		// 但 R3 的判据是"除模型 API 与用户触发的 MCP 拉取外零出站"。

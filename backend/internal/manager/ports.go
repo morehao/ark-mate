@@ -1,15 +1,15 @@
 package manager
 
 import (
-	"github.com/morehao/ark-forge/internal/service/svcagent"
-	"github.com/morehao/ark-forge/internal/service/svccapability"
-	"github.com/morehao/ark-forge/internal/service/svcconversation"
-	"github.com/morehao/ark-forge/internal/service/svcexport"
-	"github.com/morehao/ark-forge/internal/service/svclibrary"
-	"github.com/morehao/ark-forge/internal/service/svcruntime"
-	"github.com/morehao/ark-forge/internal/service/svcsearch"
-	"github.com/morehao/ark-forge/internal/service/svcusage"
-	"github.com/morehao/ark-forge/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/internal/service/svcagent"
+	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/internal/service/svcconversation"
+	"github.com/morehao/ark-mate/internal/service/svcexport"
+	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 )
 
 // 编译期断言：Service 必须满足控制面声明的全部领域端口。

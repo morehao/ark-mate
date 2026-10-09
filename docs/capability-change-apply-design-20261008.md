@@ -1,4 +1,4 @@
-# ark-forge 能力变更生效边界技术方案（MCP / Skill 定义变更何时落到 agent）
+# ark-mate 能力变更生效边界技术方案（MCP / Skill 定义变更何时落到 agent）
 
 > 定位：`docs/capability-ecosystem-design-20260922.md` 的续篇。前者回答「能力数据面长什么样」（三张表、投影、密钥、写面、Library），本方案只回答一个更窄的问题——**通过写面改了一个 skill / MCP 定义之后，已经在跑的那些会话什么时候拿到它**。
 >
@@ -45,7 +45,7 @@
 ### 1.4 约束与非功能需求
 
 - **C-1 事实源：文件 → DB（Q-5 已定，2026-10-08）**。开发阶段允许迁移本地持久数据（仓库 `AGENTS.md`「变更授权」），因此能力的**事实源迁到 DB**，`<CapabilityDir>` 降级为**导入/导出**载体。C9 纪律的**意图**保留（只改目标键、保留未知键、原子性、并发乐观锁），**机制**换成 DB 事务 + 行 revision 比较（比 mtime+size 更强）。详见 §10.5 与实施计划 `.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`。于是「不支持手工改文件」从"约定"升级为**结构性事实**：文件已不是事实源。
-  **两处口径精确化（2026-10-08，计划评审后）**：① **只迁 `skills` + `mcp_servers` 两张表**——`tools` 没有任何写路径（`<dir>/tools/*.json` 只被读，探测产物 `ReplaceToolsForMcpServer` 仅在内存），是每轮重建的派生数据；② **memory 模式例外**：`FORGE_STORE=memory`（无持久层）时能力仍从文件装载，本条"结构性事实"只对 **sqlite 模式**成立。
+  **两处口径精确化（2026-10-08，计划评审后）**：① **只迁 `skills` + `mcp_servers` 两张表**——`tools` 没有任何写路径（`<dir>/tools/*.json` 只被读，探测产物 `ReplaceToolsForMcpServer` 仅在内存），是每轮重建的派生数据；② **memory 模式例外**：`MATE_STORE=memory`（无持久层）时能力仍从文件装载，本条"结构性事实"只对 **sqlite 模式**成立。
 - **C-2 判据函数保持只读**：`planGenerationSwitch` 被单测逐条钉住，注释明确「只读、无副作用」（`backend/internal/manager/generation.go:70-71`）。任何状态对齐都不许塞进去。
 - **C-3 四条代际纪律不许破**（`backend/internal/manager/generation.go:16-25`）：只在真的变了时切 / 忙则顺延 / 探针不可读保守当忙 / 纯内容变化迁移失败回退。
 - **C-4 缩权与扩权的不对称不许动**：基础键变化（权限收回 / 换 provider）仍然「立刻生效且失败不回退」；本方案引入的 rev 变化属于**内容变化**，失败必须回退。
@@ -105,7 +105,7 @@
 > 边界与例外：
 > 1. 不打断在途轮次；有未应答的权限/提问时顺延到再下一轮（C-3 纪律不变）。
 > 2. 只对**底座事实允许到达**的 runtime 生效（`stdio` 通吃；`sse`/`http` 到不了 dsh，`streamable_http` 到不了 opencode）。写面回执必须如实回带。
-> 3. 代际数达上限（`FORGE_GENERATION_LIMIT`，默认 4）时，迁移会带码拒绝 `40901 generation_limit_reached`（继承既有语义，不新增特例）。
+> 3. 代际数达上限（`MATE_GENERATION_LIMIT`，默认 4）时，迁移会带码拒绝 `40901 generation_limit_reached`（继承既有语义，不新增特例）。
 > 4. **运行期直接编辑定义文件不在承诺范围内**——Q-5 迁 DB 后文件不再是事实源，因此这条是结构性的；从旧版本升级时文件会被一次性导入（§10.5-④）。
 > 5. Skill 侧有一件事**未实测**，但它不是"是否会重读"，而是"**底座开箱是否读我们写的默认根**"（`backend/pkg/runtime/adapters.go:56-61` 的 `Tested=false`，形态本身 2026-09-09 验证过）。区别很重要：只要边界重建进程，**新进程启动时读投影根**是底座的正常启动行为，"对新拉起的进程生效"与"下一轮生效"在机制上是同一件事（§10.7）。所以这条是 **skill 功能的可用性验收**，而**不是**承诺口径的上限；修正后的口径见 §10.7 与 ADR-15。
 
@@ -158,7 +158,7 @@ token 里带了 epoch，所以**跨重启的 token 不可比**：进程重启后
 | 会话类型 | 判据 | 理由 |
 |---|---|---|
 | 声明了 `capabilities`（`sel != nil`） | **内容指纹**（不动） | 内容寻址更精确：改了一个对该 runtime 不可达的 server，指纹不变 → 不迁移（正确）；改了又改回原样 → 指纹相同 → 不白迁。 |
-| 未声明（`sel == nil`） | **变更计数 token**（新增） | 缺省集无法在不破坏 R11 的前提下内容寻址：指纹算法把 runtime Spec/版本/投影声明都纳入了输入（`backend/internal/manager/capability_fingerprint.go:86-92`、`backend/pkg/runtime/fingerprint.go`），一旦升级 forge 版本或改了投影声明，指纹就变 → 所有缺省会话白迁一次。 |
+| 未声明（`sel == nil`） | **变更计数 token**（新增） | 缺省集无法在不破坏 R11 的前提下内容寻址：指纹算法把 runtime Spec/版本/投影声明都纳入了输入（`backend/internal/manager/capability_fingerprint.go:86-92`、`backend/pkg/runtime/fingerprint.go`），一旦升级 mate 版本或改了投影声明，指纹就变 → 所有缺省会话白迁一次。 |
 
 **唯一例外的边界**：选定路径的会话**不**参与 rev 比较。代价是"改了一个 dsh 不可达的 sse server"不会让选定路径的 dsh 会话迁移——这正是想要的。
 
@@ -217,7 +217,7 @@ ALTER TABLE conversations ADD COLUMN capability_profile TEXT NOT NULL DEFAULT ''
 | `POST /mcps/:id/probe`（写 Tool 目录） | ❌ **绝不** | — | Tool 目录是**平台的**读模型/选择面，不是 agent 的工具面——agent 的 MCP 是底座自己连的。让 probe +1 会把"探测一下"变成"所有会话重启一轮" |
 | `GET /library`、任何读面 | ❌ | — | 只读 |
 | `LoadCapabilityDefinitions`（启动装载） | ❌ | — | 启动时 rev 从 0 开始；新会话记录的也是 0 |
-| `forge capability migrate`（离线改文件） | ❌（且不在承诺内） | — | 需重启才装载（§3.2 例外 4） |
+| `mate capability migrate`（离线改文件） | ❌（且不在承诺内） | — | 需重启才装载（§3.2 例外 4） |
 
 两条硬约束：
 
@@ -325,7 +325,7 @@ type capabilityGeneration struct {
 
 **③ 事件 payload（增量，不新增 type）**
 
-`session.resumed`（`reason=generation`）的 payload 增 `capability_profile`（不透明串），`capability_fingerprint` 保持原义（缺省路径仍为空）。这是 payload 增量，**不触** `TestEventTypeContractFrozen` 的 type 清单；前端 `@ark/types` 的类型同步即可。
+`session.resumed`（`reason=generation`）的 payload 增 `capability_profile`（不透明串），`capability_fingerprint` 保持原义（缺省路径仍为空）。这是 payload 增量，**不触** `TestEventTypeContractFrozen` 的 type 清单；前端 `@ark-mate/types` 的类型同步即可。
 
 ### 4.6 对称性补齐（G4）
 
@@ -346,7 +346,7 @@ type capabilityGeneration struct {
 | ⑨ | 会话级 skill 子集 | 物化仍是进程级（M3 既定边界）：选定能隔离出独立进程，但**不能**把某个 skill 从该底座目录里排除。文档与 UI 口径要保持一致，别让 rev 机制看起来"顺带修好了它" |
 | ⑩ | 代际上限 | `admitGeneration` 满额 → `40901 generation_limit_reached`（`backend/internal/manager/connection.go:162-190`）。**这是"变更即生效"的公开例外**，写进 §3.2 与 README |
 | ⑪ | 一次写面 → 多个 runtime +1 | skill 变更会让两个 runtime 的缺省会话各迁一次；这是**正确**的（两个底座都真的会变），不是白迁移 |
-| ⑫ | 手工改文件 / 导入导出 | 迁 DB 后"运行期编辑定义文件"**结构上不生效**（文件不再是事实源，§10.5）；`capability migrate` 转为导入器，`forge capability export/import` 是其对偶 |
+| ⑫ | 手工改文件 / 导入导出 | 迁 DB 后"运行期编辑定义文件"**结构上不生效**（文件不再是事实源，§10.5）；`capability migrate` 转为导入器，`mate capability export/import` 是其对偶 |
 | ⑬ | 底座是否读/重读 skill 文件 | 两件事要分开（§10.7）：**"开箱是否读我们写的默认根"** 是 skill **功能验收**（`adapters.go:56-61` 的 `Tested=false`）；**"是否重读"**（E5）只决定**能否省掉重建**，属成本项。MCP 侧的"下一轮生效"由 ACP 协议保证（`session/new`/`load`/`resume` 都带 `mcpServers`），**不需要探针** |
 | ⑭ | 高频写面（脚本化） | 每次成功写面都会在下一轮边界换一次代际 → 代际抖动。文档给出运维建议（批量改完再发下一轮），不在 v1 做合并窗口 |
 
@@ -409,28 +409,28 @@ type capabilityGeneration struct {
 | **M4 对称性与文档** | `PATCH /mcps/:id` + README 路由表 + README「能力的生效边界」段落更新 + `capability migrate` 标注离线 | A11 |
 | **M5** | 会话 `capability_stale` 派生字段（含指纹缓存），按 §10.2 升级为 stale + diff | Q-2 裁决为终局必做，不再是"可选" |
 | **M6 事实源迁 DB**（能力面 **2026-10-09 已落地**；agent 面 **2026-10-09 已落地**；automation 扩展段进行中） | §10.5 全量：`skills`/`mcp_servers` + **`agents`/`automations`（Q-7 一起迁）** 表 + 变更表（revision/审计）+ 一次性幂等导入 + 写面改事务与 revision CAS + `capability migrate` 转导入器 + `export/import`。**计划文档：`.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md`**（能力面 8–12 人日；含 agent/automation 的扩展段另计） | §10.5、§10.5-⑧；A-系列需补"导入幂等""revision CAS 冲突返回 `definition_changed`"两条 |
-| **M7 MCP 平台侧网关（S1 只收远程）** | §10.6：`forge mcp bridge`（stdio MCP 服务端）+ 注入分派（远程走网关、stdio 仍直连）+ 工具命名策略 + **指纹改用注入条目**。**计划文档：`.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`**（9–13 人日） | §10.6；补"停用后下一次列工具即消失""密钥不出平台""加远程 server 不换代际"三条验收 |
+| **M7 MCP 平台侧网关（S1 只收远程）** | §10.6：`mate mcp bridge`（stdio MCP 服务端）+ 注入分派（远程走网关、stdio 仍直连）+ 工具命名策略 + **指纹改用注入条目**。**计划文档：`.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`**（9–13 人日） | §10.6；补"停用后下一次列工具即消失""密钥不出平台""加远程 server 不换代际"三条验收 |
 | **M8 探测与验收口径** | §10.7（终局版）：**投影端到端链**（`Tested=false` 的正主）→ 移出 T-1，改挂 **skill 功能验收**并立即补测；E4/E6 不设 owner（网关落地后消解，仅 stdio 直连留待办）；E2/E3 归 `CapabilityScope` 触发项；E5 归成本项 | README/UI 口径按能力种类分别措辞；投影端到端实测通过后把该 **`Projection.Tested`** 置 true 并把版本写进它的 `Note`（**不是** `Spec.TestedOnVersion`——那个字段属 `CapabilityScope`/E2/E3，两者同名不同物，见探针 note §7） |
 
 > **M8 进度（2026-10-08 起，10-09 收口）**：**opencode 侧已通过**并置 `Projection.Tested: true`（v1.18.35；取证 + 反证见 `.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md` 阶段 A）；**dsh 侧已通过**并同样置 `Projection.Tested: true`（v0.2.0-rc.2，见该 note 阶段 B）——原先记的"本机缺 `acp` profile 是硬前置"**是错的**：`dsh-app-boot` 的 `PROFILE_TEMPLATES` 使 profile 在**首次使用时自动初始化**（实测自建成功）。dsh 侧的取证是两段：源码/配置链（`acp` 模板含 `dsh-base` → 其 patch 常态挂 `skill-filesystem`+`tool-skill` → `agentsHome` 默认 `join(homedir(),".agents")`，故 rank 500 根正是 `${HOME}/.agents/skills`）+ 运行级观察（仅存在于该根的 `officecli` 被真实会话投给模型，且它非内置）。**仍未逐字复跑**：运行级观察在 desktop profile，acp profile 的逐字复跑归 M8 的平台级端到端。
 >
 > 探针产出的**新增待办已裁决并落地**：skill id 词法闸门走"**收紧写面**"——`pkg/capability/registry.go` 增 `skillIDRE = ^[a-z0-9]+(?:-[a-z0-9]+)*$`（`RegisterSkill` 加 ≤64 判据），`MaterializeSkill` 同规则再拦一道，不合规一律 `40001 definition_invalid` 且零字节落盘；`nameRE` 保留给 MCP/tool。**理由从"依赖未文档化的宽容"升级为硬缺陷**：dsh 对 frontmatter 的 `name` 强制这条词法且**不合规静默丢弃整条**，而平台物化正是把 id 原样写成 `name` ⇒ 放行不合规 id = 造出「物化体检报 `in_sync`、底座永远读不到」的 skill（实测确认）。连带产出两条 README 口径要注意的边界：平台选的根是 **rank 500（最低优先）**，项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会遮蔽它；且 `DSH_AGENTS_HOME` 会撬走底座的读取根——**平台自己的配置隔离曾注入它**（2026-10-09 修：E5 实测 dsh 会话`<available_skills>` 里看不到投影根下的 skill；护栏见 `TestIsolationKeepsSkillRootAlignedWithProjection`），现在刻意不注入；用户若在平台进程环境里设了它仍会与写入根分叉。
 
-> **M6 进度（2026-10-09）**：**能力面（§2–§6）已全部落地**——v8 迁移建 `skills`/`mcp_servers`/`capability_revisions` 三张表（`internal/store/migrate.go`）、写面按载体分派（`manager/capability_repo.go`：memory 走 `DefinitionFile`、sqlite 走"行 CAS + 同事务一条审计"）、装载侧整体替换式从 store 装载、一次性幂等导入（`meta.imported_capabilities` 目录指纹 + 按行判重、**绝不覆盖**）+ `forge capability import|export`。对外契约逐字不变（`definition_changed`/40901、`skill_exists`、`definition_invalid`/40001 的判据与文案都按载体分派但同码同义），并由"同一套写面断言跑两种载体"的用例（`capability_writeface_test.go`）钉住。**两处与 §10.5 原文的偏差（以代码为准）**：① `skill_not_persistable` **没有消失**——sqlite 模式下"DB 里没有这一行"（代码注入/内存注册的技能）仍会命中它，只是文案与出路换成"先用写面或导入落行"；② `SourceFile` 字段**保留**（DB 载体的条目取空串），因为 `Library` 的 origin 判定与面板展示仍读它——DB 化之后"文件来源"不再成立，口径在扩展段（M6-6）重定义。
+> **M6 进度（2026-10-09）**：**能力面（§2–§6）已全部落地**——v8 迁移建 `skills`/`mcp_servers`/`capability_revisions` 三张表（`internal/store/migrate.go`）、写面按载体分派（`manager/capability_repo.go`：memory 走 `DefinitionFile`、sqlite 走"行 CAS + 同事务一条审计"）、装载侧整体替换式从 store 装载、一次性幂等导入（`meta.imported_capabilities` 目录指纹 + 按行判重、**绝不覆盖**）+ `mate capability import|export`。对外契约逐字不变（`definition_changed`/40901、`skill_exists`、`definition_invalid`/40001 的判据与文案都按载体分派但同码同义），并由"同一套写面断言跑两种载体"的用例（`capability_writeface_test.go`）钉住。**两处与 §10.5 原文的偏差（以代码为准）**：① `skill_not_persistable` **没有消失**——sqlite 模式下"DB 里没有这一行"（代码注入/内存注册的技能）仍会命中它，只是文案与出路换成"先用写面或导入落行"；② `SourceFile` 字段**保留**（DB 载体的条目取空串），因为 `Library` 的 origin 判定与面板展示仍读它——DB 化之后"文件来源"不再成立，口径在扩展段（M6-6）重定义。
 
-> **M6-6 进度（agent 面已落地，2026-10-09）**：v9 迁移建 `agents` 表（与 skills/mcp_servers 同形：`id` + `body` + `revision` + `updated_at`），变更审计**复用** `capability_revisions`（`kind=agent`——"定义变更审计"只有一份）；「当前 Agent」的显式选择从 `<AgentDir>/default.json` 迁到 `meta.default_agent`（§7 P-8）。写面按载体分派（`manager/agents_carrier.go`：memory 走定义文件、sqlite 走"行 CAS + 同事务一条审计"），装载侧整体替换式（先清非种子再逐行铺）、一次性幂等导入（`meta.imported_agents` 目录指纹）+ `forge agent import|export`。**三条与计划的偏差/补强（以代码为准）**：① **`<AgentDir>` 保留**（P-9 原样）：`providers.json` 与 vault 锚点（该目录的父目录）仍在这里，sqlite 模式只是把它降级为导入/导出目录；② 行的正文以**行键为权威**（正文 id 与行键不一致时 WARN 并以行键为准），装载合并**非零字段才覆盖**——行里只写 `name` 时种子的 `runtimes` 原样保留（P-7 那条坑的护栏已落成用例）；③ 保留前缀 `agent-*` 与内置种子名**不能**作为定义行进库（`seedAgent` 只看 id 判只读，否则会造出删不掉、也改不了 runtime 的幽灵定义）。**写面顺序也比 M6 之前更严**：由"先改内存再写文件"改成"先校验 → 再提交载体 → 最后改内存"（载体失败时内存一个字段都不动）。
+> **M6-6 进度（agent 面已落地，2026-10-09）**：v9 迁移建 `agents` 表（与 skills/mcp_servers 同形：`id` + `body` + `revision` + `updated_at`），变更审计**复用** `capability_revisions`（`kind=agent`——"定义变更审计"只有一份）；「当前 Agent」的显式选择从 `<AgentDir>/default.json` 迁到 `meta.default_agent`（§7 P-8）。写面按载体分派（`manager/agents_carrier.go`：memory 走定义文件、sqlite 走"行 CAS + 同事务一条审计"），装载侧整体替换式（先清非种子再逐行铺）、一次性幂等导入（`meta.imported_agents` 目录指纹）+ `mate agent import|export`。**三条与计划的偏差/补强（以代码为准）**：① **`<AgentDir>` 保留**（P-9 原样）：`providers.json` 与 vault 锚点（该目录的父目录）仍在这里，sqlite 模式只是把它降级为导入/导出目录；② 行的正文以**行键为权威**（正文 id 与行键不一致时 WARN 并以行键为准），装载合并**非零字段才覆盖**——行里只写 `name` 时种子的 `runtimes` 原样保留（P-7 那条坑的护栏已落成用例）；③ 保留前缀 `agent-*` 与内置种子名**不能**作为定义行进库（`seedAgent` 只看 id 判只读，否则会造出删不掉、也改不了 runtime 的幽灵定义）。**写面顺序也比 M6 之前更严**：由"先改内存再写文件"改成"先校验 → 再提交载体 → 最后改内存"（载体失败时内存一个字段都不动）。
 
 > **M6-7 进度（automation 面已落地，2026-10-09）**：v10 迁移建 `automations` 表——**定义列**（`id`/`body`/`revision`/`updated_at`）与**运行态列**（`last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs`）分列（§7 P-10/P-11；`recent_runs` 是有界 JSON 列，不搬 `events` 表——duplicate/overlap/skipped 没有会话可挂，会被 `events.conversation_id NOT NULL REFERENCES conversations` 挡下）。定义列的 CAS 与审计**复用了** `dao.DefinitionDao` 与 `capability_revisions`（`kind=automation`）——三张定义表只有一份 CAS 实现。写面按载体分派（`manager/automation_carrier.go`：memory 走定义文件 + mtime 锁，sqlite 走行 CAS + 同事务一条审计），装载侧**整体替换式**（库里删掉的行不会以幽灵任务留在内存）、坏定义仍留列表带 `loadErr`。**P-12（本次唯一改了对外失败语义的一条）**：sqlite 模式下"一次调度推进"被拆成**认领事务 → 建会话 → 记录事务**，认领 = `WHERE id=? AND last_fired_at=<读到的值>` 的行 CAS（0 行 = 别人先认领 → 判 `duplicate`，**不建会话**），因此同一 occurrence **至多触发一次**；两个事务任一失败都**不推进内存游标**（与文件载体"写失败不阻断调度"相反），下一 tick 按已认领的游标判 duplicate 而**不会重复触发**，代价是那一轮留痕丢失（日志为 ERROR 级）。**三处与计划的偏差/补强（以代码为准）**：① `state` **留在定义正文**（不在计划 SQL 的运行态列里）：它刻意不在 `automation.ReservedKeys` 里——启用/停用/归档本来就是用户操作，`needs_attention` 改回 `active` 是"我修好了"的正常表达；代价是它的写回会前进一版 `revision`（与文件载体的 mtime 同解），而其余六个运行态列不参与 revision（调度器跑一轮不再让用户的保存请求无故撞 40901）；② 导入把**一个文件里的两类东西**按保留键切开、**同一事务**写进定义列与运行态列（`store.DefinitionImportItem.AutomationRuntime`），导出反向合成同一个 `<id>.json`，于是"导出 → 空库导入 → 再导出"逐字节相同；`last_fired_at` 归一为 UTC + RFC3339Nano（它是 CAS 的比较值）、`recent_runs` 进列时按 `RecentRunsMax` 截断；③ 路由注释里运行态键的码从笔误的 `40000` 改成实际的 **`40001`**（`invalid_param`），实现未变。
 
-> **M6-8 进度（2026-10-09）**：核 P-13 时发现前提也不成立——`mcps` 白名单在写面 DTO（`AgentCreateReq`/`AgentUpdateReq`/`AgentResp`）里**根本没有这个字段**，M6-6 之后它只从 DB 行读、而 `forge agent import` 又刻意不覆盖已有行 ⇒ sqlite 模式下事实上不可改。所以本条落成两半：**① 写面收下 `mcps`**（三态：键缺失不改 / `null` 清空回「未声明」/ `[]` 禁用全部 / 数组白名单；类型不符 → 40000 `invalid_param`，零副作用；创建面同样收下；两条载体落同一份字节）；**② 写面之后的能力面变更通知**：白名单**语义真的变了**（同集合换顺序/重复项不算）才作废该 agent 的**空闲**会话句柄，下一轮 `ensureConversation` 按当前定义重建并重新注入 MCP。**与 §3（缺省路径 rev）的分工**：那条解决「skill/MCP **定义**改动对缺省路径下一轮生效」，本条解决「**agent 定义**里的能力字段改动生效」——后者不依赖前者，因为它不需要给缺省路径换键。三处刻意边界（与 README 同名段落一致）：只作废**空闲**会话（有在途轮次 / 未应答权限或提问的顺延，与 ADR-13 纪律③同判据）、**不动代际键也不关进程**（R11 逐字不变、暖进程继续复用）、语义等价的改动不产生重建。
+> **M6-8 进度（2026-10-09）**：核 P-13 时发现前提也不成立——`mcps` 白名单在写面 DTO（`AgentCreateReq`/`AgentUpdateReq`/`AgentResp`）里**根本没有这个字段**，M6-6 之后它只从 DB 行读、而 `mate agent import` 又刻意不覆盖已有行 ⇒ sqlite 模式下事实上不可改。所以本条落成两半：**① 写面收下 `mcps`**（三态：键缺失不改 / `null` 清空回「未声明」/ `[]` 禁用全部 / 数组白名单；类型不符 → 40000 `invalid_param`，零副作用；创建面同样收下；两条载体落同一份字节）；**② 写面之后的能力面变更通知**：白名单**语义真的变了**（同集合换顺序/重复项不算）才作废该 agent 的**空闲**会话句柄，下一轮 `ensureConversation` 按当前定义重建并重新注入 MCP。**与 §3（缺省路径 rev）的分工**：那条解决「skill/MCP **定义**改动对缺省路径下一轮生效」，本条解决「**agent 定义**里的能力字段改动生效」——后者不依赖前者，因为它不需要给缺省路径换键。三处刻意边界（与 README 同名段落一致）：只作废**空闲**会话（有在途轮次 / 未应答权限或提问的顺延，与 ADR-13 纪律③同判据）、**不动代际键也不关进程**（R11 逐字不变、暖进程继续复用）、语义等价的改动不产生重建。
 
 > **M6-9 进度（2026-10-09）**：装配期时序收口。三条时序（开库 → 三域存量导入 → 装载 → 起调度）在 `app.go` 里本来就成立，"装载失败只告警不阻断"也成立（三个 `LoadXDefinitions*` 只返回计数，坏定义逐条 WARN 跳过；`loadDefinitions` 的 error 返回位今天恒为 nil）。缺的是**守卫**——三者被违反时都不报错，只表现成"东西看不见"或"启动恢复没发生"（过期 `once` 的置 inactive 只在启动时做一次，没有任何后续动作会补做）。新增 `internal/app/definitions_order_test.go` 的 `TestInitOrderingImportLoadSchedule` 走真 `Init`（sqlite + 三域夹具 + 起调度），用**行为**钉住整条链：能力面/agent 面本轮就可见 + 过期 `once` 已被置 `inactive` 且留 `skipped` 痕迹。
 
-> **M7-1 进度（网关骨架，2026-10-09）**：`forge mcp bridge --agent <id> --runtime <id>` 可跑——`pkg/mcp` 补出**服务端方向**（`initialize`/`initialized`/`tools/list`+翻页/`tools/call`/`ping`；坏帧 `-32700`、未知方法 `-32601`、未知工具 `-32602`、工具**执行**失败走 `isError:true` 的**结果**而不是协议错误；stdin EOF → 正常返回），`internal/gateway` 提供 `Scope`/`Source`/`Run`，CLI 只把协议流给 stdout、一切诊断给 stderr。**服务端写在 `pkg/mcp` 是刻意的**：帧类型是自研的，两侧合一处才能自研互测（本仓 `go.mod` 无 MCP SDK）；`TestServerInteropWithOwnClient` 用真子进程让本包客户端连本包服务端跑通 list/call。骨架期 `Source == nil`（工具面恒空、调用一律未知工具）**刻意响亮**：启动 WARN + 取数失败 ERROR，且在被注入之前（M7-3）对真实会话不可达。
+> **M7-1 进度（网关骨架，2026-10-09）**：`mate mcp bridge --agent <id> --runtime <id>` 可跑——`pkg/mcp` 补出**服务端方向**（`initialize`/`initialized`/`tools/list`+翻页/`tools/call`/`ping`；坏帧 `-32700`、未知方法 `-32601`、未知工具 `-32602`、工具**执行**失败走 `isError:true` 的**结果**而不是协议错误；stdin EOF → 正常返回），`internal/gateway` 提供 `Scope`/`Source`/`Run`，CLI 只把协议流给 stdout、一切诊断给 stderr。**服务端写在 `pkg/mcp` 是刻意的**：帧类型是自研的，两侧合一处才能自研互测（本仓 `go.mod` 无 MCP SDK）；`TestServerInteropWithOwnClient` 用真子进程让本包客户端连本包服务端跑通 list/call。骨架期 `Source == nil`（工具面恒空、调用一律未知工具）**刻意响亮**：启动 WARN + 取数失败 ERROR，且在被注入之前（M7-3）对真实会话不可达。
 
 > **M7-2 进度（取数与代理，2026-10-09）**：§10.6-②③ 的两条承诺落地。**② 密钥不出平台**：远程 MCP 的凭据在网关进程内解析（复用 `manager.ResolveMcpSecrets` 同一实现），底座可见面里只有一条 stdio 命令。**③ 调用期事实**：每次 `tools/list`/`tools/call` **重读**定义与 `enabled`（新增 `ReloadCapabilityDefinitions`/`ReloadAgentDefinitionsFromStore`，与启动装载同一份实现、只降日志档位并把逐行问题改成"同一条只 WARN 一次"），于是"停用一台 server"在下一次取数即消失、**已有会话**的下一次调用直接失败，密钥轮换下一次调用即用新值——都不需要换代际、不需要重启。选址语义抽到 `pkg/capability.SelectMcpServers`（注入面与网关面**唯一**实现，`RemoteMcpTransports()` 划出"网关代连"那一半）；连接池 `pkg/mcp/pool.go` 按 server 池化已握手会话（同会话串行、服务端错误响应不作废会话、**定义/密钥快照一变立刻作废旧连接**、上限 + 空闲回收）。**两处对 P-2 的补强（以代码为准）**：① 条目除 (agent, runtime) 外还带**会话钉住的 `mcps` 白名单**（JSON 三态）——它是用户约束，不带会让钉过 `["a"]` 的会话按 agent 默认面拿到更多远程 server（授权放大）；它不因定义集变化而变化，故不破坏"条目恒定"；② 网关**不按 runtime 的 transport 声明过滤**（那正是网关的收益：底座只看见一条 stdio 条目），`Spec.McpTransports` 从此只约束 stdio 直连那条路径（M7-3 逐个复核它的消费者）。
 
-> **M7-3 进度（注入分派与指纹，2026-10-09）**：§10.6-①④ 落地。**① 远程收进网关**：`McpServersFor` 只留 stdio 直连那一半，远程全部折叠成**一条** `forge-gateway` stdio 条目（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <钉住的白名单>]`）；远程 ACP 端点（`Launch.Transport` 是 http/ws）**不**下发这条条目——它是本机子进程配方，对端起不来，这类 runtime 保持旧形态（零回归）。**④ 指纹改用注入条目**：指纹对 manager 的**注入计划**取值——计划里只有定义（含 `vault:`/`env:` 引用）与网关条目（只有 scope），**解析后的明文永远不进指纹**（§13.4 边界①）。由此得到本计划最重要的一条性质：**条目恒定**——条目内容与"有几台远程 server"无关，所以增删改远程定义、轮换密钥都不换代际（唯一仍会变的只有会话钉住的 `mcps` 与 agent 本身），而**从零到一**那次也不换代际（无条件注入是它的前提；缺省路径指纹恒 `''` 不迁移，条件注入会让那条会话永远看不到后来的远程 server）。代价是一条常驻的空闲 `forge mcp bridge` 子进程，回退开关 `FORGE_MCP_GATEWAY=off`（P-5）。**三处读面同向放宽**：`AgentCapabilities` 的逐 runtime 承载矩阵、`Library` 的适用性判据、建会话的 `validateSelection`（以及 `CapabilityRouted` 的 transport 排除）——网关在环时远程 server 对每个已注册 runtime 都可达；`off` 时四处一起回到老口径，读面与注入面永不同向漂移。**一处保守取舍**：条目 args 带 `--agent`（网关按当下 agent 声明重解析面，保证 P-4），agent id 因此进指纹 ⇒ 配置相同的两个**不同 agent** 不再共享暖进程（宁可多一个进程，也不把 A 的面投给 B；底座是否按进程缓存工具面尚无定论）。
+> **M7-3 进度（注入分派与指纹，2026-10-09）**：§10.6-①④ 落地。**① 远程收进网关**：`McpServersFor` 只留 stdio 直连那一半，远程全部折叠成**一条** `mate-gateway` stdio 条目（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <钉住的白名单>]`）；远程 ACP 端点（`Launch.Transport` 是 http/ws）**不**下发这条条目——它是本机子进程配方，对端起不来，这类 runtime 保持旧形态（零回归）。**④ 指纹改用注入条目**：指纹对 manager 的**注入计划**取值——计划里只有定义（含 `vault:`/`env:` 引用）与网关条目（只有 scope），**解析后的明文永远不进指纹**（§13.4 边界①）。由此得到本计划最重要的一条性质：**条目恒定**——条目内容与"有几台远程 server"无关，所以增删改远程定义、轮换密钥都不换代际（唯一仍会变的只有会话钉住的 `mcps` 与 agent 本身），而**从零到一**那次也不换代际（无条件注入是它的前提；缺省路径指纹恒 `''` 不迁移，条件注入会让那条会话永远看不到后来的远程 server）。代价是一条常驻的空闲 `mate mcp bridge` 子进程，回退开关 `MATE_MCP_GATEWAY=off`（P-5）。**三处读面同向放宽**：`AgentCapabilities` 的逐 runtime 承载矩阵、`Library` 的适用性判据、建会话的 `validateSelection`（以及 `CapabilityRouted` 的 transport 排除）——网关在环时远程 server 对每个已注册 runtime 都可达；`off` 时四处一起回到老口径，读面与注入面永不同向漂移。**一处保守取舍**：条目 args 带 `--agent`（网关按当下 agent 声明重解析面，保证 P-4），agent id 因此进指纹 ⇒ 配置相同的两个**不同 agent** 不再共享暖进程（宁可多一个进程，也不把 A 的面投给 B；底座是否按进程缓存工具面尚无定论）。
 
 **计划文档索引**：**M1–M5 合为一篇** `.dsh/docs/plans/2026-10-08-capability-generation-plan.md`（12–16.5 人日；它们是同一套机制的五个阶段，共用同一批类型与同一条调用链，故不再逐阶段拆篇）；M6 → `2026-10-08-capability-store-migration-plan.md`；M7 → `2026-10-08-mcp-platform-gateway-plan.md`。
 
@@ -448,8 +448,8 @@ type capabilityGeneration struct {
 | 风险 | 影响 | 应对 |
 |---|---|---|
 | **白迁移**：改了一个不影响能力的键（如注释字段）也会在下一轮换代际 | 一次性 resume/handoff 开销 | **接受**并写进承诺（"改了定义 = 下一轮生效"）。理由：R2 的"我改了怎么没生效"比"我改了个注释怎么重启了"更难排查；且不引入第二套指纹语义 |
-| **handoff 有损**：迁移走 resume/handoff 兜底（`FORGE_HANDOFF_MAX_CHARS`） | 每次定义变更、每条会话至多丢一次上下文 | 承诺里写明；回执给 `affected_conversations` 让人有预期；不做"每轮都切"（C-3 纪律 ① 会挡住无变化的情况） |
-| **代际上限冲突** | 满额时"改动即生效"会拒发 | 继承既有语义 + 明确报错文案（§4.7-⑩）；文档给出 `FORGE_GENERATION_LIMIT` 出路 |
+| **handoff 有损**：迁移走 resume/handoff 兜底（`MATE_HANDOFF_MAX_CHARS`） | 每次定义变更、每条会话至多丢一次上下文 | 承诺里写明；回执给 `affected_conversations` 让人有预期；不做"每轮都切"（C-3 纪律 ① 会挡住无变化的情况） |
+| **代际上限冲突** | 满额时"改动即生效"会拒发 | 继承既有语义 + 明确报错文案（§4.7-⑩）；文档给出 `MATE_GENERATION_LIMIT` 出路 |
 | **skill 投影端到端未实测** | 承诺可能过头 | §3.2 例外 5（终局版）：这条是 **skill 功能可用性验收**，不是承诺上限——边界重建进程即兑现"下一轮"（§10.7）；UI 继续按 `untested` 呈现，端到端实测通过后置 `Tested=true` |
 | **高频写面 → 代际抖动** | 反复起进程 | §4.7-⑭ 运维建议；v1 不做合并窗口（做了就要定窗口时长，属发明语义） |
 | **两处判据漂移** | "面板说会生效、实际没生效" | 代际选择收敛成 `capabilityGenerationFor` 唯一实现；写面回执与 `/library` 共用判定函数（A9 断言） |
@@ -465,7 +465,7 @@ type capabilityGeneration struct {
 - **Q-5 事实源是否从文件迁到 DB**：✅ **已定（2026-10-08）：迁**。开发阶段允许迁移本地持久数据；落地设计见 **§10.5**。
 - **Q-6 授权收窄要不要走"调用期实时校验"**（而非换代际）：✅ **已定（2026-10-08）：走，远程 MCP 收进平台侧网关**。落地设计见 **§10.6**；这是"统一管理"与"收窄即时生效"两件事的共同前提。
 - **Q-7 agent / automation 定义是否一起迁 DB**：✅ **已定（2026-10-08）：一起迁**。理由：不迁会留下"改 MCP 即时生效、改 agent 白名单要重启"的用户可见不一致，而 `Library` 的读路径 join 本来就不关心两侧存储形态。**代价要正视（已核实）**：① agent 有**代码内种子**（`builtinAgents`，只在内存、从不写文件），覆盖是"**只在字段非零值时才覆盖**"的部分合并；② `default.json`（"当前 agent"）与 agent 文件同目录、删除时要连带清理；③ `providers.json` 也在同目录，且 **vault 根由该目录父级推导**——**目录必须保留**；④ automation 定义里混着平台独占运行态键（`last_fired_at`/`recent_runs` 等）。落地设计见 §10.5-⑧ 与实施计划扩展段。
-- **Q-8 `forge mcp bridge` 是否也代管 stdio server 的子进程**（§10.6-④ 的 S2）：**已给出决策规则（2026-10-08）：不现在拍，按两条廉价实测分派**。S2 的**独占**收益只有两条——① stdio 的密钥不再进底座（今天 `resolveMcpSecrets` 把明文经 `mcpServers[].env` 下发，`pkg/acl/mcp.go:22` 注释直言"这里只负责下发"）；② stdio 工具也走调用期策略。代价是接手三条**底座实现细节、非协议保证**的语义：**cwd**（会话级事实）、**spawn 粒度**（每会话还是每进程）、**子进程回收**（可复用 `procreg`+`ReapOrphans`）。分派规则：用最小 stdio server 打点测"是否按会话 spawn + 是否用会话 cwd"，是 → 做；否 → 暂不做（另有"现实里有多少密钥型 stdio server"一问，几乎没有则收益落空）。**倾向：S1 先上，两条实测并入 P-2 探针，S2 按实测结果设计**。
+- **Q-8 `mate mcp bridge` 是否也代管 stdio server 的子进程**（§10.6-④ 的 S2）：**已给出决策规则（2026-10-08）：不现在拍，按两条廉价实测分派**。S2 的**独占**收益只有两条——① stdio 的密钥不再进底座（今天 `resolveMcpSecrets` 把明文经 `mcpServers[].env` 下发，`pkg/acl/mcp.go:22` 注释直言"这里只负责下发"）；② stdio 工具也走调用期策略。代价是接手三条**底座实现细节、非协议保证**的语义：**cwd**（会话级事实）、**spawn 粒度**（每会话还是每进程）、**子进程回收**（可复用 `procreg`+`ReapOrphans`）。分派规则：用最小 stdio server 打点测"是否按会话 spawn + 是否用会话 cwd"，是 → 做；否 → 暂不做（另有"现实里有多少密钥型 stdio server"一问，几乎没有则收益落空）。**倾向：S1 先上，两条实测并入 P-2 探针，S2 按实测结果设计**。
 
 ---
 
@@ -525,17 +525,17 @@ type capabilityGeneration struct {
    - 写面的"当前代际 rev"直接取全局单调序，§3.3 里的进程内 `capabilityRev` **降级为缓存**；
    - `capability_stale` 与 diff 有了**持久依据**（不用每次现算）；
    - 审计**可被消费**——对照 movo 的只写不读（§11.3-①）。
-4. **一次性导入既有文件。** 升级后把 `<CapabilityDir>/{skills,mcp,tools}/*.json` **幂等导入**（作为迁移内核的一步）。导入必须复用 `capability.RegisterSkill/RegisterMcpServer/RegisterTool` 的校验，否则 DB 会进不合法行；**逐条报告失败而不是整体失败**（参考 §11.2-⑤ 的分寸）。文件保留为 `forge capability export/import` 的载体，`capability migrate` 从"运维命令"转为"导入器"。
+4. **一次性导入既有文件。** 升级后把 `<CapabilityDir>/{skills,mcp,tools}/*.json` **幂等导入**（作为迁移内核的一步）。导入必须复用 `capability.RegisterSkill/RegisterMcpServer/RegisterTool` 的校验，否则 DB 会进不合法行；**逐条报告失败而不是整体失败**（参考 §11.2-⑤ 的分寸）。文件保留为 `mate capability export/import` 的载体，`capability migrate` 从"运维命令"转为"导入器"。
 5. **装配变化很小，但有一条边界要守。** `Registry` 仍是内存索引（解析、指纹、投放都读它），只是装载源从目录换成 store，写面变成"事务提交 → 更新内存索引"。**DB 访问必须留在 `internal` 侧**（`internal/dao` + `internal/store`）：`pkg/capability` 不得 import `internal/*`（archtest 守卫），所以它只接收已解析的定义，"从 DB 装载"放在 `internal/manager` 或 `internal/store`。
-6. **顺带消掉的旧问题**：`Registry.LoadDir` 只合并不摘除（幽灵定义，§3.5-⑤）随文件装载一起消失；`FORGE_CAPABILITIES` 从"事实源目录"变成**导入/导出目录**（落地时把导出也算进来：`forge capability export` 把 DB 写回该目录，此后文件是导出物）。
+6. **顺带消掉的旧问题**：`Registry.LoadDir` 只合并不摘除（幽灵定义，§3.5-⑤）随文件装载一起消失；`MATE_CAPABILITIES` 从"事实源目录"变成**导入/导出目录**（落地时把导出也算进来：`mate capability export` 把 DB 写回该目录，此后文件是导出物）。
 7. **影响面**：`internal/model`（`skills`/`mcp_servers` + **`agents`/`automations`（Q-7）** + 变更表）、`internal/store` 迁移内核（v8 起）、`internal/dao`、`manager/capabilities.go` 的装载、`manager/{skills,mcps}_write.go` 改事务 + revision CAS、`manager/agents.go`（种子×DB 的部分合并、`default.json` 落 meta）、`manager/automation.go` + `automation_sched.go`（运行态分列、调度推进事务化）、`capability/definition.go` 降级为导入/导出编解码、`app/command/capability.go`、README、`internal/store/format_test.go`。
 8. **agent / automation 定义一并迁（Q-7 已定，2026-10-08）**：不做"下一轮再说"。理由是不迁会留下"改 MCP 定义即时生效、改 agent 的 `Mcps` 白名单却要重启装载"的用户可见不一致，而 `Library` 的读路径 join 本来就不关心两侧存储形态。**三处必须在实施计划里正面处理**：① agent 有**代码内种子**（`builtinAgents`，只在内存、从不写文件），而文件/DB 覆盖种子时是**"只在字段非零值时才覆盖"**的部分合并——整行写会抹空种子字段；② `default.json` 是**目录级配置**（语义是"当前 agent"）却与 agent 文件同目录，且删 agent 时要连带清理；③ automation 的定义里**混着平台独占的运行态键**（`last_fired_at`/`last_status`/`recent_runs` 等，README 明写它们对写面不可写）——迁 DB 是顺手把"定义"与"运行态"**结构性**分开的机会（今天只靠拒写名单拦）。范围与估时见实施计划 `.dsh/docs/plans/2026-10-08-capability-store-migration-plan.md` 的扩展段。
 
 ### 10.6 支柱二落地：远程 MCP 收进平台侧网关（Q-6 已定：方便统一管理）
 
-> **落地状态（2026-10-09）：S1 已实现并通过全部验收**，实现计划见 `.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`（M7-1…M7-5）。逐条对应：**① 形态**——`forge mcp bridge`（`pkg/mcp` 的服务端最小集 + `internal/gateway` 的数据面/代理），底座侧**恒定**是一条 stdio 条目 `forge-gateway`（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <钉住的白名单>]`）；逐 runtime 的 transport 承载矩阵在网关路径上消失，它此后只约束 **stdio 直连**那一条路（M7-3 逐个复核了它的四个消费者）。**② 密钥不出平台**——远程凭据只在网关进程内解析（复用 `ResolveMcpSecrets`），条目的命令行里只有 scope；指纹亦只含定义与引用，不含解析后的明文。**③ 调用期事实**——每次 `tools/list`/`tools/call` 前重读定义与 `enabled`（`ReloadCapabilityDefinitions`/`ReloadAgentDefinitionsFromStore`），停用/删除/轮换密钥在下一次取数或调用即生效，不需要换代际、不需要重启；探测面（`POST /mcps/:id/probe`）与网关真实面**同一个命名实现**（`capability.GatewayToolName`，`<serverID>__<tool>`），并有对拍用例逐项比对名字与描述。**④ S2 仍未做**（原样保留上一条的分派规则）。**⑤ 生效边界的落地结论**：网关条目恒定 ⇒ 增删改远程 MCP **不改变底座的配置面**，故不换代际；代价是"没有远程 server 也会多一个空闲 bridge 子进程"，回退开关 `FORGE_MCP_GATEWAY=off`（`auto` 默认）。**E4/E6（底座何时重列工具面）不再是阻塞项但仍是测量项**：网关侧已按每次调用记 `(server, tool, outcome, latency_ms)` 作为一手证据面，实测留待后续一次真底座长会话观察；本次收口不臆造结论。
+> **落地状态（2026-10-09）：S1 已实现并通过全部验收**，实现计划见 `.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`（M7-1…M7-5）。逐条对应：**① 形态**——`mate mcp bridge`（`pkg/mcp` 的服务端最小集 + `internal/gateway` 的数据面/代理），底座侧**恒定**是一条 stdio 条目 `mate-gateway`（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <钉住的白名单>]`）；逐 runtime 的 transport 承载矩阵在网关路径上消失，它此后只约束 **stdio 直连**那一条路（M7-3 逐个复核了它的四个消费者）。**② 密钥不出平台**——远程凭据只在网关进程内解析（复用 `ResolveMcpSecrets`），条目的命令行里只有 scope；指纹亦只含定义与引用，不含解析后的明文。**③ 调用期事实**——每次 `tools/list`/`tools/call` 前重读定义与 `enabled`（`ReloadCapabilityDefinitions`/`ReloadAgentDefinitionsFromStore`），停用/删除/轮换密钥在下一次取数或调用即生效，不需要换代际、不需要重启；探测面（`POST /mcps/:id/probe`）与网关真实面**同一个命名实现**（`capability.GatewayToolName`，`<serverID>__<tool>`），并有对拍用例逐项比对名字与描述。**④ S2 仍未做**（原样保留上一条的分派规则）。**⑤ 生效边界的落地结论**：网关条目恒定 ⇒ 增删改远程 MCP **不改变底座的配置面**，故不换代际；代价是"没有远程 server 也会多一个空闲 bridge 子进程"，回退开关 `MATE_MCP_GATEWAY=off`（`auto` 默认）。**E4/E6（底座何时重列工具面）不再是阻塞项但仍是测量项**：网关侧已按每次调用记 `(server, tool, outcome, latency_ms)` 作为一手证据面，实测留待后续一次真底座长会话观察；本次收口不臆造结论。
 
-1. **形态：一个稳定的 stdio 网关，而不是给每种远程传输各造一条注入路径。** 平台提供类似 `forge mcp bridge` 的 **stdio MCP server**，由底座按普通 stdio server 拉起，网关内部转发到远端（http / sse / streamable_http）。
+1. **形态：一个稳定的 stdio 网关，而不是给每种远程传输各造一条注入路径。** 平台提供类似 `mate mcp bridge` 的 **stdio MCP server**，由底座按普通 stdio server 拉起，网关内部转发到远端（http / sse / streamable_http）。
    - 对底座而言永远只有**一个** MCP 条目且 transport 恒为 stdio。**"逐 runtime 的 transport 承载矩阵"这个问题就此消失**——这是最大收益：`opencode: stdio/sse/http` 与 `dsh: stdio/streamable_http` 的差异不再限制任何东西。**规范背书**：所有底座 **MUST** 支持 stdio，http/sse 是可选能力（§12.3-②）；而"客户端自带 MCP server 来直接给模型提供工具"正是规范明确预期的用法（§12.3-③）。用户最初那句"变动对两个 runtime 都生效"因此在**架构层面**成立，而不是靠两边恰好都支持某种传输。
 2. **密钥不出平台。** 远端凭据在网关进程内解析（复用 `resolveMcpSecrets`），底座配置里只有 stdio 命令，平台**不再需要**把明文 env/header 放进底座可见的配置面——直接强化 README「MCP 明文 ⟂ 密钥」那条立场。
 3. **授权收窄与工具可见性变成调用期事实**（Q-6 的真正回报）：网关是平台进程，因此每次 `tools/list` 都能按**当下**定义过滤、每次 `tools/call` 都能按**当下**策略重查（movo 的 `_authorize` 模式，§11.2-④）。于是
@@ -594,30 +594,30 @@ type capabilityGeneration struct {
 - **会话钉住一个不可变版本**：`profile_version` 落在 binding 行上（`dsh_runtime/bindings/repository.py:41`）。
 - **MCP 完全不走底座注入，而在平台侧执行**：全仓 `mcpServers` **零命中**；底座只拿到"HTTP 工具网关 + 短期 HMAC token"，token claims 带 `profile_version`/`tool_names`/`scopes`（`dsh_runtime/tool_gateway/token.py:41-53`）。
 - **生效时机与本方案同构**（这是最有价值的一条互证）：每轮 `prepare_turn` 重编译 → hash 相同则零副作用返回（`profile/synchronizer.py:54-62`）→ 不同则发布新版本、**先建后继（seed 自前驱）再 best-effort 拆前驱会话**（`synchronizer.py:64-70`、`runtime_coordinator.py:105-134`）。
-- **粒度必须说清**：新版本 = 新 isolationKey（`runtime_coordinator.py:19-20`）= **同一宿主进程内的新 runtime 对象**（`services/chat-api/dsh/runtime-host/src/runtime-manager.mjs:5-8` 的 `#runtimes = new Map()`），**不是新 OS 进程**。所以它的切换成本结构不能直接类比 ark-forge（一个 `runtimeConn` = 一个 OS 进程）。
+- **粒度必须说清**：新版本 = 新 isolationKey（`runtime_coordinator.py:19-20`）= **同一宿主进程内的新 runtime 对象**（`services/chat-api/dsh/runtime-host/src/runtime-manager.mjs:5-8` 的 `#runtimes = new Map()`），**不是新 OS 进程**。所以它的切换成本结构不能直接类比 ark-mate（一个 `runtimeConn` = 一个 OS 进程）。
 
 ### 11.2 值得借鉴
 
 1. **让能力档案成为可查、可校验的一等实体**，而不只是连接键里的匿名哈希：它有版本表，且离线导入时会复算摘要并校验 `profile_version == rp-<hash[:24]>`，不符即报 `Runtime Profile bundle integrity check failed`（`profile/bundle.py:18-27`）。→ 支撑 §10.1 支柱 1，也让"写面回执 + diff"有地方可算。
-2. **"先建新、再 best-effort 拆旧"的滚动顺序**：后继就绪并持久化之后才丢弃前驱，失败时调用方仍持有旧绑定（`synchronizer.py:65-70`）。这与 ark-forge `connectConversation` 的"迁移失败回退钉住旧代际"（`backend/internal/manager/conversation_start.go:209-217`）是**同一条安全原则的两种写法**，互为外部证据。
-3. **忙时的并发正确性用条件更新（CAS）表达**：只有前驱 `active_turn` 为空或终态才允许被替换，否则 `BindingReplacementConflict`（`bindings/repository.py:78-81`），上层转成可判定的忙错误（`chat_service.py:222-235`）。→ ark-forge 的对应物是 `admitGeneration` + 在途轮次/未决权限判定。**分歧点**：它忙则**整轮拒绝**，本方案忙则**顺延到下一轮、本轮继续用旧代际跑**——后者用户无感，是本方案更优的一处。
+2. **"先建新、再 best-effort 拆旧"的滚动顺序**：后继就绪并持久化之后才丢弃前驱，失败时调用方仍持有旧绑定（`synchronizer.py:65-70`）。这与 ark-mate `connectConversation` 的"迁移失败回退钉住旧代际"（`backend/internal/manager/conversation_start.go:209-217`）是**同一条安全原则的两种写法**，互为外部证据。
+3. **忙时的并发正确性用条件更新（CAS）表达**：只有前驱 `active_turn` 为空或终态才允许被替换，否则 `BindingReplacementConflict`（`bindings/repository.py:78-81`），上层转成可判定的忙错误（`chat_service.py:222-235`）。→ ark-mate 的对应物是 `admitGeneration` + 在途轮次/未决权限判定。**分歧点**：它忙则**整轮拒绝**，本方案忙则**顺延到下一轮、本轮继续用旧代际跑**——后者用户无感，是本方案更优的一处。
 4. **授权收窄的零中断通道**：会话钉住的档案不可变，但**每次工具调用都按当下策略重查**（岗位策略 + 资源授权，`enterprise_capabilities/tools/service.py:479-505`），于是"停用某工具"立即生效、不必等切换。→ **Q-6 已定（2026-10-08）：采纳，远程 MCP 收进平台侧网关**，落地设计见 §10.6。
-5. **失败边界粒度化**：MCP 子工具 schema 无法规范化时只丢该子工具、不炸整个 server；而工具**重名**则整体编译失败（fail-closed）。→ ark-forge 的 `ReplaceToolsForMcpServer` 是整 server 替换，可参考这条"局部降级"与"结构性错误整体失败"的分寸。
+5. **失败边界粒度化**：MCP 子工具 schema 无法规范化时只丢该子工具、不炸整个 server；而工具**重名**则整体编译失败（fail-closed）。→ ark-mate 的 `ReplaceToolsForMcpServer` 是整 server 替换，可参考这条"局部降级"与"结构性错误整体失败"的分寸。
 
 ### 11.3 引以为戒
 
 1. **审计只写不读、无 stale 读模型**：`runtime_profile_audit` 只有写入（`profile/store.py:173-182`），全仓无读取方、无 API 暴露；唯一"哪个会话换了能力"的记录是日志。结果：**用户完全不知道自己的会话跑在旧能力上**。→ 直接支撑 Q-2 在终局必做，以及本方案写面回执的必要性。
-2. **单层内容哈希粒度太粗**：hash 覆盖整个档案，改一个凭据也会换会话。→ 支撑 §10.4-③ 的"分面"要求。ark-forge 已把密钥**引用**（而非值）纳入指纹（三条边界见 `backend/internal/manager/capability_fingerprint.go:13-22`，实现见 `:64` 的 `mcpFingerprintParts`），这条优势要保住、别退化。
-3. **旧 runtime 不回收**：Python 侧 `gateway.dispose_runtime` 有定义却**零调用者**（`dsh_runtime/gateway.py:106`），而 JS 宿主其实提供了该端点（`runtime-host/src/runtime-http-server.mjs:96`）——即能力端到端具备、调用方漏了；轮换只销毁**会话**（`runtime_coordinator.py:128-134`）。频繁改档案会按 `tenant:<id>:profile:<hash>` 累积 runtime。→ ark-forge 的 `reclaimGeneration`/孤儿回收是对的，保留。
-4. **凭据明文且原样回吐前端**：`external_tools.py` 的序列化把 `config` 整体回吐（`:99-104`，`authToken` 就在 `config` 里）。→ ark-forge 的 vault 引用方向正确，不要被带偏。
-5. **物化无体检**：内容寻址目录"已存在即直接复用"（`runtime-host/src/skill-bundle-materializer.mjs:40-43`：解包前只校验一次 archive 摘要，落地目录存在就直接 return），目录被外部篡改不会发现。→ ark-forge 的 provenance sidecar + 物化体检是优势，保留。
+2. **单层内容哈希粒度太粗**：hash 覆盖整个档案，改一个凭据也会换会话。→ 支撑 §10.4-③ 的"分面"要求。ark-mate 已把密钥**引用**（而非值）纳入指纹（三条边界见 `backend/internal/manager/capability_fingerprint.go:13-22`，实现见 `:64` 的 `mcpFingerprintParts`），这条优势要保住、别退化。
+3. **旧 runtime 不回收**：Python 侧 `gateway.dispose_runtime` 有定义却**零调用者**（`dsh_runtime/gateway.py:106`），而 JS 宿主其实提供了该端点（`runtime-host/src/runtime-http-server.mjs:96`）——即能力端到端具备、调用方漏了；轮换只销毁**会话**（`runtime_coordinator.py:128-134`）。频繁改档案会按 `tenant:<id>:profile:<hash>` 累积 runtime。→ ark-mate 的 `reclaimGeneration`/孤儿回收是对的，保留。
+4. **凭据明文且原样回吐前端**：`external_tools.py` 的序列化把 `config` 整体回吐（`:99-104`，`authToken` 就在 `config` 里）。→ ark-mate 的 vault 引用方向正确，不要被带偏。
+5. **物化无体检**：内容寻址目录"已存在即直接复用"（`runtime-host/src/skill-bundle-materializer.mjs:40-43`：解包前只校验一次 archive 摘要，落地目录存在就直接 return），目录被外部篡改不会发现。→ ark-mate 的 provenance sidecar + 物化体检是优势，保留。
 
 ### 11.4 它没有回答的问题（对本方案最要紧的一条）
 
 **"运行中的底座是否重读技能目录"在 movo 不存在**——它根本不投影 `SKILL.md`：技能正文作为字符串进档案、经内存 provider 下发给 ACP 宿主（frontmatter 校验只出现在 ZIP 安装入口 `services/skill_packages/validator.py:91-105`）。它是用"换 runtime 对象 + 重建会话"**回避**了热重载，而不是解决了它。所以：
 
 - 本方案 §3.2 例外 5 修正后的口径（"投影端到端链属 **skill 功能验收**，不是承诺上限"）**不能靠 movo 的证据升级**——movo 不投影 `SKILL.md`，对这条没有证据；仍需仓库自己做投影端到端实测（§10.7）。而"底座是否会**重读**"（E5）在终局只决定**能否省掉重建**（`docs/capability-ecosystem-design-20260922.md:807`）；
-- 反向也成立：movo 的形态说明"内容寻址即投影"是一条**真实可行的替代路线**（目录名 = 摘要，一次性消掉同名冲突/并发写/重复物化），但代价是放弃"底座原生扫描技能目录"这条路径——ark-forge 两个 adapter 明确声明的是后者（`backend/pkg/runtime/adapters.go:60-68`、`:115-135`），不是可以随手换的。
+- 反向也成立：movo 的形态说明"内容寻址即投影"是一条**真实可行的替代路线**（目录名 = 摘要，一次性消掉同名冲突/并发写/重复物化），但代价是放弃"底座原生扫描技能目录"这条路径——ark-mate 两个 adapter 明确声明的是后者（`backend/pkg/runtime/adapters.go:60-68`、`:115-135`），不是可以随手换的。
 
 ### 11.5 一句话结论
 
@@ -642,7 +642,7 @@ movo 在「能力档案内容寻址 + 轮次边界滚动」上与本方案**同�
 | ADR-8 | `probe` 绝不 +1 | Tool 目录是平台读模型，不是 agent 工具面 |
 | ADR-9 | 把「进键的 token」与「落库的指纹」拆成两个显式字段（`capabilityGeneration`） | 今天二者共用 `connectConversation` 的一个字符串参数；缺省路径要求它们取不同的值（进键=rev token、落库=`''`），继续共用会把 rev token 写进 `capability_fingerprint` 列，破坏"空 = 未声明能力选择"的对外契约，并让 `reason=generation` 的判据失效 |
 | ADR-10 | 新列与事件 payload 字段都叫 `capability_profile`（不用 `capability_rev_token`/`capability_token`） | 按终局命名一次到位，避免二次迁移；值形态从 rev token 演进到 digest 的前提是它**不透出为对外契约**（v1 只内部比较 + 对外给 `capability_stale` 布尔与写面回执） |
-| ADR-11 | 能力摘要必须能**分面比较**（工具面 / 技能面 / 凭据与端点面），只有会改变底座可见面的变化才触发滚动 | 避免重复 movo"改一个凭据也换会话"的缺陷（§11.3-②）；ark-forge 已把密钥**值**排除在指纹外（`capability_fingerprint.go:64-84`），这条优势必须保住 |
+| ADR-11 | 能力摘要必须能**分面比较**（工具面 / 技能面 / 凭据与端点面），只有会改变底座可见面的变化才触发滚动 | 避免重复 movo"改一个凭据也换会话"的缺陷（§11.3-②）；ark-mate 已把密钥**值**排除在指纹外（`capability_fingerprint.go:64-84`），这条优势必须保住 |
 | ADR-12 | **按"环归属"重切 E 系列，不整体升格**（终局版，§10.7）：**投影端到端链** → 移出 T-1，改挂 skill **功能验收**（唯一要测的）；**E4/E6 → 不设 owner**（网关落地后由平台在环消解，仅 stdio 直连路径留待办）；**E2/E3 → `CapabilityScope` 的触发项**（有人真需 `session` 粒度时）；**E5 → 成本项**（重建成本成为实测问题时） | 终局承诺来自**平台机制**而非底座行为：MCP 面由协议内建的 `mcpServers` 重绑保证（`session/new`/`load`/`resume`），skill 面由**进程生命周期归平台**保证（边界重建进程 = 新进程启动时读投影根）。所以"下一轮生效"要的是**缺省路径也走代际**（工程），不是探针（测量）。终局用「少滚动 + 平台在环」取代「细粒度 + 探测底座」 |
 | ADR-13 | **能力的**事实源从文件迁到 DB（Q-5，2026-10-08 定）；文件降级为导入/导出载体 | 开发阶段允许迁移持久数据；C9 的**意图**保留、**机制**换成事务 + 行 revision CAS；顺带白拿版本史/审计/diff，并消掉 `LoadDir` 只合并不摘除的幽灵定义缺陷（§10.5） |
 | ADR-14 | **远程 MCP 收进平台侧 stdio 网关**（Q-6，2026-10-08 定）；stdio 代管（S2）**不现在拍，按两条实测分派**（Q-8） | 一个稳定条目让"逐 runtime transport 承载矩阵"从架构上消失，密钥不出平台，工具可见性与授权收窄变成调用期事实（§10.6）；代价是平台开始承担远程连接与重连（C-5 收窄）。S2 的独占收益只有"stdio 密钥不进底座"与"stdio 工具也走调用期策略"两条，而代价是接手 cwd/spawn 粒度/子进程回收三条底座实现细节（见实施计划 P-6） |

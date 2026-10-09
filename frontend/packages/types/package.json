@@ -1,5 +1,5 @@
 {
-  "name": "@ark/types",
+  "name": "@ark-mate/types",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "devDependencies": {
-    "@ark/tsconfig": "workspace:*",
+    "@ark-mate/tsconfig": "workspace:*",
     "typescript": "^7.0.2"
   }
 }

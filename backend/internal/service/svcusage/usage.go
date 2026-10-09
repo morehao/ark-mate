@@ -4,7 +4,7 @@ package svcusage
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/dto/dtousage"
 )
 
 // UsageSvc 用量统计面的服务端口。

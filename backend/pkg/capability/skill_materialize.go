@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-// forgeMarker 标记目录由本平台物化（删除联动只动带标记目录，绝不动用户自有/他方内容）。
-const forgeMarker = ".forge-managed"
+// mateMarker 标记目录由本平台物化（删除联动只动带标记目录，绝不动用户自有/他方内容）。
+const mateMarker = ".mate-managed"
 
 // 已实证的物化 format（写入 <root>/<skillID>/SKILL.md；两种写法均保证 YAML frontmatter）：
 //
-// 2026-09-09 双底座实测（真实实现解析 forge 产物）：
+// 2026-09-09 双底座实测（真实实现解析 mate 产物）：
 //   - opencode v1.18.29（`opencode debug skill`，隔离 XDG_CONFIG_HOME）：无 frontmatter 的
 //     SKILL.md **不加载**；有 name+description 的正常加载；`**/SKILL.md` 递归扫描；
 //     name 与目录名不一致/含大写下划线仍加载（文档约束非强制）。
@@ -127,17 +127,17 @@ type MaterializeSpec struct {
 	// Root 已展开的**绝对**根目录（占位符由 runtime 层展开；本层不做任何猜测）。
 	Root string
 	// Layout 落点模板，须含 `<id>`，且**目录部分**必须含 `<id>`（每个技能独占一个平台可控目录
-	// ——`.forge-managed` 归属标记与摘要 sidecar 都要有地方落）。
+	// ——`.mate-managed` 归属标记与摘要 sidecar 都要有地方落）。
 	Layout string
 	// Format 内容合成格式（FormatSkillMD / FormatSkillMDFrontmatter；未实证的取值会报错）。
 	Format string
-	// Owner 归属名，写进 `.forge-managed` 标记的集合（通常是 runtime id）。共享 root 时
+	// Owner 归属名，写进 `.mate-managed` 标记的集合（通常是 runtime id）。共享 root 时
 	// 各投影方各登记一次，某个投影方退出时只摘除自己，集合空了才删目录。
 	Owner string
 }
 
 // DirFor 计算该 spec 下某 skill 的独占目录（落点的父目录）。
-// 导出给编排层做审计视图（.forge-managed 标记与摘要 sidecar 都落在这里）。
+// 导出给编排层做审计视图（.mate-managed 标记与摘要 sidecar 都落在这里）。
 func (m MaterializeSpec) DirFor(id string) (string, error) {
 	rel, err := applyLayout(m.Layout, id)
 	if err != nil {
@@ -235,7 +235,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	}
 	// §13.4 S3：**拒覆盖非自有目录**。此前这里是裸 `MkdirAll` + `WriteFile`：目标目录若已存在
 	// 且不是平台物化的（用户自己建的、别的工具装的），平台会直接往里写文件——同名即覆盖别人的东西。
-	// 现在先判定归属：不存在 → 新建；存在且带 `.forge-managed` → 可替换；否则显式拒绝。
+	// 现在先判定归属：不存在 → 新建；存在且带 `.mate-managed` → 可替换；否则显式拒绝。
 	if err := ensureReplaceableDir(dir); err != nil {
 		return "", err
 	}
@@ -243,7 +243,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	// C6：同一目录可能被多个 runtime 投影（共享 root），集合记录全部投影方——某个投影方退出时
 	// 只从集合里摘除自己，集合空了才删除目录（避免「先投影方退出后目录永久残留」）。
 	// 旧目录里的归属集合要先读出来合并（替换是"换内容"，不是"重置归属"）。
-	_, owners, _ := readMarker(filepath.Join(dir, forgeMarker))
+	_, owners, _ := readMarker(filepath.Join(dir, mateMarker))
 
 	// 投影根是 runtime **声明**的（不是平台猜的），所以替它把目录建出来不算越界；反之若不建，
 	// 新机器上「用户建的第一条 skill」会直接卡在下一行——`MkdirTemp(spec.Root, …)` 要求根已存在，
@@ -254,7 +254,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 		return "", fmt.Errorf("skill 物化: 创建投影根 %s 失败: %w", spec.Root, err)
 	}
 
-	staging, err := os.MkdirTemp(spec.Root, ".forge-stage-*")
+	staging, err := os.MkdirTemp(spec.Root, ".mate-stage-*")
 	if err != nil {
 		return "", fmt.Errorf("skill 物化: 创建 staging 目录失败 %s: %w", spec.Root, err)
 	}
@@ -269,7 +269,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	if err := os.WriteFile(filepath.Join(staging, "SKILL.md"), payload[0].Content, 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写 staging SKILL.md 失败: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(staging, forgeMarker),
+	if err := os.WriteFile(filepath.Join(staging, mateMarker),
 		[]byte(markerContent(s.ID, addOwner(owners, spec.Owner))), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写 staging 归属标记失败: %w", err)
 	}
@@ -299,7 +299,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 
 // ensureReplaceableDir 判定物化目标是否可写：
 //   - 不存在（或空路径）→ 可以；
-//   - 存在且是目录且带 `.forge-managed` 标记 → 平台自有，可以替换；
+//   - 存在且是目录且带 `.mate-managed` 标记 → 平台自有，可以替换；
 //   - 存在但**不是**目录 / 没有归属标记 → 拒绝（别人的东西，平台不动；错误里给出去路）。
 func ensureReplaceableDir(dir string) error {
 	info, err := os.Lstat(dir)
@@ -315,9 +315,9 @@ func ensureReplaceableDir(dir string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("skill 物化: 目标 %s 已存在且不是目录（平台不覆盖非自有内容）", dir)
 	}
-	if _, _, ok := readMarker(filepath.Join(dir, forgeMarker)); !ok {
+	if _, _, ok := readMarker(filepath.Join(dir, mateMarker)); !ok {
 		return fmt.Errorf("skill 物化: 目标目录 %s 已存在但没有 %s 归属标记（疑似用户自有/他方安装的内容）——"+
-			"平台不覆盖它：改名或移走该目录，或换一个物化根", dir, forgeMarker)
+			"平台不覆盖它：改名或移走该目录，或换一个物化根", dir, mateMarker)
 	}
 	return nil
 }
@@ -334,7 +334,7 @@ func replaceDir(staging, dir string) error {
 		}
 		return nil
 	}
-	backup := dir + ".forge-old"
+	backup := dir + ".mate-old"
 	_ = os.RemoveAll(backup) // 上次中断留下的残留
 	if err := os.Rename(dir, backup); err != nil {
 		return fmt.Errorf("skill 物化: 挪开旧产物失败 %s: %w", dir, err)
@@ -425,7 +425,7 @@ func readMarker(path string) (skillID string, owners []string, ok bool) {
 // 磁盘实测摘要 == 记录摘要。只比 SKILL.md 内容是不够的——多塞一个文件、改权限、把 SKILL.md 换成软链，
 // 内容比对全都看不出来，而摘要全都看得出来。任一不符 → 判为"需要重校"，下一次重校即修复。
 func skillUpToDate(dir string, s Skill, owner, content string) bool {
-	_, owners, ok := readMarker(filepath.Join(dir, forgeMarker))
+	_, owners, ok := readMarker(filepath.Join(dir, mateMarker))
 	if !ok {
 		return false
 	}
@@ -442,7 +442,7 @@ func skillUpToDate(dir string, s Skill, owner, content string) bool {
 	}
 	// SkillID 必须对得上（目录名 X 里躺着 Y 的摘要 = 真实的不一致）；Runtime/Format 只作审计
 	// 记录**不参与判定**——共享 root 下同一个目录会被多个投影方各投影一次，最后写入者是谁
-	// 无关紧要（归属集合由 `.forge-managed` 标记维护，内容一致性由摘要维护）。若把它们纳入判定，
+	// 无关紧要（归属集合由 `.mate-managed` 标记维护，内容一致性由摘要维护）。若把它们纳入判定，
 	// 共享 root 的两个投影方会互相把对方写的产物判成"过期"而反复重写（幂等性丢失）。
 	if p.SkillID != s.ID {
 		return false
@@ -457,7 +457,7 @@ func skillUpToDate(dir string, s Skill, owner, content string) bool {
 
 // ReconcileSkills 使投影目标与「投放到该目标的能力集」一致（§16.5 删除联动 + 启动重校）：
 //   - 为注册表里「投放到本 owner 且 format 可合成」的 skill 写缺失/更新（内容一致则跳过，幂等计数）；
-//   - 删除 root 下「带 .forge-managed 标记、标记含本 owner、且不在本次投影集合」的目录
+//   - 删除 root 下「带 .mate-managed 标记、标记含本 owner、且不在本次投影集合」的目录
 //     （平台 skill 移除 / 投放声明移除 / 技能被禁用 的联动清理）；共享 root 下只摘除自己在归属
 //     集合里的登记，集合空了才删目录（不误删他方产物）；
 //   - 未带标记的目录（用户自有/他方内容）绝不动。
@@ -516,7 +516,7 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 	for _, e := range entries {
 		// 平台保留名：staging 临时目录与替换时的旧产物备份。崩溃/断电可能把它们留下，
 		// 这里做一次清扫（它们只在物化根里出现，且**只有平台会造这种名字**，见 replaceDir）。
-		// 不清扫的话：一个失败的替换会在 root 里永久躺一个 `.forge-old`（它没有归属标记，
+		// 不清扫的话：一个失败的替换会在 root 里永久躺一个 `.mate-old`（它没有归属标记，
 		// 删除联动认不出来，永远没人管）。
 		if isStagingName(e.Name()) {
 			if e.IsDir() {
@@ -531,7 +531,7 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 		if !e.IsDir() || currentIDs[e.Name()] {
 			continue
 		}
-		marker := filepath.Join(root, e.Name(), forgeMarker)
+		marker := filepath.Join(root, e.Name(), mateMarker)
 		skillID, owners, mOK := readMarker(marker)
 		if !mOK {
 			continue // 无归属标记：用户自有/他方目录，不动
@@ -568,12 +568,12 @@ func MaterializedContent(s Skill, format string) (content string, ok bool) {
 
 // ManagedDir 报告目录是否由本平台物化（带归属标记）及登记的投影方集合。
 func ManagedDir(dir string) (owners []string, managed bool) {
-	_, owners, ok := readMarker(filepath.Join(dir, forgeMarker))
+	_, owners, ok := readMarker(filepath.Join(dir, mateMarker))
 	return owners, ok
 }
 
 // isStagingName 报告目录名是否为平台保留的临时名（staging 目录 / 旧产物备份）。
 // 这两个前缀是**平台保留名**：物化根里出现它们即视为平台自己的残留（可安全清扫）。
 func isStagingName(name string) bool {
-	return strings.HasPrefix(name, ".forge-stage-") || strings.HasSuffix(name, ".forge-old")
+	return strings.HasPrefix(name, ".mate-stage-") || strings.HasSuffix(name, ".mate-old")
 }

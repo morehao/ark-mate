@@ -1,6 +1,6 @@
 # 控制面 P0 加固设计（2026-09-11）
 
-> 参考实现：compozy（`/Users/morehao/Documents/study/ai-agent/compozy`，Go/MIT，与 ark-forge 同用
+> 参考实现：compozy（`/Users/morehao/Documents/study/ai-agent/compozy`，Go/MIT，与 ark-mate 同用
 > `coder/acp-go-sdk v0.13.5`、同 gin、同纯 Go SQLite）。本文档的全部 compozy 侧引用均由四路只读深扫产出，
 > 并**逐行回读核对**（其中 3 处错锚点已纠正：`internal/acp/start_process.go:146`、
 > `internal/mcp/mcppolicy/headers.go` 路径笔误、`internal/vault/types.go:30`）。
@@ -15,14 +15,14 @@
 
 ## 1. 背景与判定口径
 
-compozy 与 ark-forge 定位重叠度高（ACP runtime 的统一控制面），机制可直接互相参照；差异在于
-compozy 的复杂度来自「无人值守 + 多控制面 + 多租户工作区」，那部分对单操作员本地优先的 ark-forge 是负担。
+compozy 与 ark-mate 定位重叠度高（ACP runtime 的统一控制面），机制可直接互相参照；差异在于
+compozy 的复杂度来自「无人值守 + 多控制面 + 多租户工作区」，那部分对单操作员本地优先的 ark-mate 是负担。
 
 **判定口径**（本文档只收录满足全部三条的项）：
 
-1. 有 **ark-forge 侧的真实缺口**（不是"也可以更好"，是现状确实缺）；
+1. 有 **ark-mate 侧的真实缺口**（不是"也可以更好"，是现状确实缺）；
 2. 有 **compozy 侧的可验证实现**（`文件:行号` 锚点，已回读）；
-3. **不引入 ark-forge 定位外的能力**（多租户/沙箱/编排/网络/记忆/扩展面一律排除）。
+3. **不引入 ark-mate 定位外的能力**（多租户/沙箱/编排/网络/记忆/扩展面一律排除）。
 
 按此口径收敛出 **5 条 P0**（§2–§6）与 **3 条顺带安全硬化**（§7）。
 
@@ -30,7 +30,7 @@ compozy 的复杂度来自「无人值守 + 多控制面 + 多租户工作区」
 
 ## 2. ① 归属判定：从「猜」升级为「可寻址 + 歧义即拒 + 收尾」
 
-### 2.1 现状（ark-forge 侧证据）
+### 2.1 现状（ark-mate 侧证据）
 
 | 事实 | 证据 |
 | --- | --- |
@@ -84,7 +84,7 @@ T1/T2/T3 已实现，`go test ./...` 与前端 `pnpm typecheck` 全绿。与上�
 
 | 项 | 原方案 | 实施 | 理由 |
 | --- | --- | --- | --- |
-| T2 权限侧 | `_meta` 的 `request_id` 作「可寻址决策键」 | 只作**归属证据**（`PermissionRequest.RequestID` + 注册日志 `wire_request_id`），不改决策寻址 | ark-forge 的待决键是宿主自生成的 `call_id`（`manager/permission.go:149`），wire `request_id` 没有第二条寻址路径可用；compozy 需要它是因为它按 wire 请求寻址 |
+| T2 权限侧 | `_meta` 的 `request_id` 作「可寻址决策键」 | 只作**归属证据**（`PermissionRequest.RequestID` + 注册日志 `wire_request_id`），不改决策寻址 | ark-mate 的待决键是宿主自生成的 `call_id`（`manager/permission.go:149`），wire `request_id` 没有第二条寻址路径可用；compozy 需要它是因为它按 wire 请求寻址 |
 | T2 歧义取值 | 新增 `scope_source=ambiguous` 且扩 DTO/前端 | 常量落 `pkg/acl`，**不进 DTO**：歧义路径不注册挂起项，没有载荷承载；改为写 agent 诊断 `remediation` | 不为塞一个取值而改变「不归属就不投卡」的语义 |
 | T3 收敛 action | 只写「命中即收敛卡片」 | 收敛为 `accept`（无 content）+ `reason=complete` | agent 说流程已完成，`cancel` 会谎报「用户放弃」；URL 模式本就不由客户端收集 content |
 
@@ -127,7 +127,7 @@ compozy 对照：脱敏是**落库/回放/推流前的必经路径**，且分两
    - `manager/publish.go:18` 入口一处收口 → 覆盖 DB + WS + transcript + runs 物化；
    - `manager/event_sink.go:133-145` 的 `stderr_tail` 逐行过闸；
    - 错误/诊断出口（`manager/diagnostics.go`、`pkg/acl/errors.go`）统一过闸——compozy 在**唯一错误出口**
-     做递归脱敏（`internal/api/core/errors.go:46`），ark-forge 对应 `pkg/code.FromError`。
+     做递归脱敏（`internal/api/core/errors.go:46`），ark-mate 对应 `pkg/code.FromError`。
 3. 注入前把"凭证形状"变量从继承环境剔除（compozy `internal/session/provider_runtime_secrets.go:120`
    + `internal/procutil/env.go:84`）。
 
@@ -171,7 +171,7 @@ compozy 对照：脱敏是**落库/回放/推流前的必经路径**，且分两
 `TestWorkspaceRoutesWithRoots` 立刻红——错误文案里的绝对路径被整条洗成 `***`，
 等于把诊断能力洗没了（比漏一个未知形状的密钥更糟）。回归用例已进 `pkg/redact` 测试。
 
-**未做（划到 §7）**：注入前从继承环境剔除「凭证形状变量」——`FORGE_*` 之外目前不继承父进程
+**未做（划到 §7）**：注入前从继承环境剔除「凭证形状变量」——`MATE_*` 之外目前不继承父进程
 凭证 env 的实际风险面，与 MCP/stdio 侧同属 §7 的 env 卫生，合并做一次即可。
 
 新增测试：`pkg/redact`（形状族 / 正常内容不被洗 / 高熵边界 / 动态登记引用计数 / Payload 只洗字符串叶子）、
@@ -269,8 +269,8 @@ compozy 对照：AES-GCM，**AAD 绑定密文身份**（`internal/vault/cipherte
 
 1. 新增 `internal/vault`：
    - AES-256-GCM，**AAD 绑定 `{ref, kind}`**；
-   - 主密钥 `~/.forge/vault.key`：创建走 **O_EXCL + link 原子安装**（`internal/vault/crypto.go:146`）、
-     **拒符号链接**（`:114`）、**拒 group/other 权限位**（`:120`）；允许 `FORGE_VAULT_KEY` 覆盖；
+   - 主密钥 `~/.ark-mate/vault.key`：创建走 **O_EXCL + link 原子安装**（`internal/vault/crypto.go:146`）、
+     **拒符号链接**（`:114`）、**拒 group/other 权限位**（`:120`）；允许 `MATE_VAULT_KEY` 覆盖；
 2. `providers.json` 只存 `key_ref: "vault:providers/<id>"`（namespace 只留 providers，不抄他们 9 个 namespace）；
    `has_key` 语义不变；`UpdateProvider` 的"空串=清除"改为删 ref + 删密文；
 3. **启动迁移**：发现旧明文 `key` → 加密写回 + 清明文，幂等（本仓允许破坏性调整本地持久数据）；
@@ -298,9 +298,9 @@ vault 单测（加解密 / AAD 不匹配必失败 / keyfile 权限与符号链�
 **落成形态**：
 
 - `internal/vault`：AES-256-GCM，AAD = `kind + "\x00" + ref`（换引用或换 kind 必解不开）；
-  密文 `<forge_home>/vault/<namespace>/<name>.enc`（原子写，0600）；主密钥 `<forge_home>/vault.key`
+  密文 `<mate_home>/vault/<namespace>/<name>.enc`（原子写，0600）；主密钥 `<mate_home>/vault.key`
   （`O_EXCL` 临时文件 + `link` 原子安装，**并发首启只有一个赢家且绝不覆盖已有密钥**；读取时拒符号链接、
-  拒 group/other 权限位）；`FORGE_VAULT_KEY`（32 字节 base64/hex）覆盖时**不读不建 keyfile**。
+  拒 group/other 权限位）；`MATE_VAULT_KEY`（32 字节 base64/hex）覆盖时**不读不建 keyfile**。
 - `providers.json` 磁盘形状与内存形状拆开：磁盘 `providerFile` **只写 `key_ref`**（`key` 字段仅用于读旧文件
   做迁移），内存 `providerDef.Key` 是明文（注入 + `has_key` 用）。`has_key`、REST 形状、注入路径全不变。
 - 幂等迁移：`loadProvidersFile` 见旧明文 → `Put` 进 vault → 写回只留 ref；测试断言**二次装载文件字节不变**。
@@ -313,23 +313,23 @@ vault 单测（加解密 / AAD 不匹配必失败 / keyfile 权限与符号链�
 2. **解不开不静默**：`providerDef.keyErr` 记录装载时的解密失败，`providerEnvFor` 不注入（不再假装有密钥），
    `CredentialProblem` 报「密钥密文无法解密：确认 vault.key 未丢失/未被更换（备份清单见 deployment.md），
    或重设 key」。`ListProviders.has_key` 仍为 true——档案确实配了密钥，问题在密钥库。
-3. **vault 不可用时的降级是「保留明文」而不是「清空」**：无 forge home（`agentDir` 为空）或 keyfile
+3. **vault 不可用时的降级是「保留明文」而不是「清空」**：无 mate home（`agentDir` 为空）或 keyfile
    权限坏时，明文**原样留在 `providers.json`**（`persistProvidersFile` 在这种情况下才写 `key`），
-   日志与诊断报错。理由：丢了密钥比多留一会明文更糟；正常路径（有 forge home）绝不写明文。
+   日志与诊断报错。理由：丢了密钥比多留一会明文更糟；正常路径（有 mate home）绝不写明文。
    写入失败（`Put` 报错）走**回滚 + `vault_write_failed`**，绝不 pretend 成功。
 
-**§5.2 第 5 条（"拒绝密钥名 + 字面值写在配置里"）的 ark-forge 版落地**：复核发现
+**§5.2 第 5 条（"拒绝密钥名 + 字面值写在配置里"）的 ark-mate 版落地**：复核发现
 `agentDefinitionFile` 有个从未被读取/注入的 `env map[string]string` 字段（注释自称"预留：仅持久化"）——
 它唯一的作用是**诱使把密钥字面值停放在 `agents/*.json`**。已删除该字段（零行为变化：没有任何代码读它），
 并在结构体注释里留下"将来实现时必须支持 `vault:` 引用而不是字面值"。MCP 侧的 env 面不存在
 （`capability.McpServer` 无 `env`，见 §7 的复核结论），凭证面只剩 `Headers` → 归 §7。
 
-**未做（记录）**：主密钥轮换 / 批量重加密工具；`FORGE_VAULT_KEY` 的配置层校验
+**未做（记录）**：主密钥轮换 / 批量重加密工具；`MATE_VAULT_KEY` 的配置层校验
 （在 `vault.Open` 报错，启动即失败）；MCP `Headers` 接 vault（§7；届时 `pkg/capability` 需要它，
 得把 vault 提到 `pkg/vault` 或由 manager 侧注入密文读写）。
 
 **测试**：vault 单测（往返 / AAD 绑引用与 kind / 篡改 / 换主密钥 / 落盘 0600 且不含明文 / keyfile 过宽权限
-与符号链接拒绝 / `FORGE_VAULT_KEY` 覆盖 + 与同密钥 keyfile 互通 / 引用穿越与非法字符拒绝 / 空 home 报错）；
+与符号链接拒绝 / `MATE_VAULT_KEY` 覆盖 + 与同密钥 keyfile 互通 / 引用穿越与非法字符拒绝 / 空 home 报错）；
 manager 侧（旧明文幂等迁移 + 文件字节不变 + 注入仍可用 / Update 落盘即密文 + 覆盖 + 清除删密文幂等 /
 换 keyfile 后 `CredentialProblem` 报可执行原因 / 非法 provider id 拒绝 / 无 vault 时纯内存不落盘）。
 `docs/deployment.md` 数据目录表、env 表与备份清单已加 `vault.key`（丢了 = 密文不可恢复）。
@@ -465,22 +465,22 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 
 ## 7. ⑥ 顺带的三条安全硬化（均可直接对照实现）
 
-| 项 | 为什么 ark-forge 需要 | compozy 证据 |
+| 项 | 为什么 ark-mate 需要 | compozy 证据 |
 | --- | --- | --- |
 | **MCP probe 的 SSRF** | `POST /mcps/:id/probe` 按用户给的 URL 出站 = 内网扫描器。抄「解析一次、按该 IP 直连、永不二次解析」（堵 DNS rebinding）+ 私网/环回判定 | `internal/outboundpolicy/dialer.go:33`、`policy.go:173` |
 | **MCP 凭证与 header 卫生**（**已修正**，见下） | `capability.McpServer.Headers` 明文落盘（`pkg/capability/types.go:53` 注释自认"可含访问凭证"）且随 ACP wire 下发 → 应接 §5 的 vault，并拒 `\r\n` 头注入 + 限制敏感头来源 | `internal/mcppolicy/headers.go:59`、`:74` |
 
 > **修正（2026-09-11 复核）**：本条原先写的是"stdio MCP 的 env 禁用名单（`internal/config/mcp_server_validation.go:274-277`）"，
-> 经复核**对 ark-forge 不成立**——`capability.McpServer` 没有 `Env` 字段，`pkg/mcp/stdio.go:61`
+> 经复核**对 ark-mate 不成立**——`capability.McpServer` 没有 `Env` 字段，`pkg/mcp/stdio.go:61`
 > 只把 `s.Args` 交给 `exec.CommandContext`，**当前不存在 env 注入面**。该名单属**预防性**条目：
 > 只有当为 MCP 定义补 `env` 字段（对齐 ACP `mcpServers` 规范，见 `types.go:52-62` 的字段缺口）时，
 > 才需要同时抄 `NODE_OPTIONS` / `PYTHONPATH` / `PYTHONHOME` / `LD_PRELOAD` / `DYLD_*` 禁用名单
 > （`internal/config/mcp_server_validation.go:274-277`）。真正**现在**适用的是 header 那条。
-| **进程句柄 PID + 启动时间双校验** | `pkg/procreg` 孤儿回收只按 PID，PID 复用会误杀 | compozy 用 `procutil.MatchesStartTime`：`internal/toolruntime/registry.go:131`。**不要**抄他们取启动时间的方式（外部 `ps -o lstart=`，`process_started_at_unix.go:19`）——ark-forge 是启动者，spawn 时记 `time.Now()` 即可 |
+| **进程句柄 PID + 启动时间双校验** | `pkg/procreg` 孤儿回收只按 PID，PID 复用会误杀 | compozy 用 `procutil.MatchesStartTime`：`internal/toolruntime/registry.go:131`。**不要**抄他们取启动时间的方式（外部 `ps -o lstart=`，`process_started_at_unix.go:19`）——ark-mate 是启动者，spawn 时记 `time.Now()` 即可 |
 
-另：若 `FORGE_WORKSPACE_ROOTS` 目前只做字符串前缀比对，建议补工作区路径规范化三段式
+另：若 `MATE_WORKSPACE_ROOTS` 目前只做字符串前缀比对，建议补工作区路径规范化三段式
 （循环 percent 解码 + NFC → 最深已存在前缀 realpath → resolved-under-root，
-`internal/fileutil/path_containment.go:41` / `:66` / `:157`）——ark-forge 缺的正是"最深存在前缀"这一段。
+`internal/fileutil/path_containment.go:41` / `:66` / `:157`）——ark-mate 缺的正是"最深存在前缀"这一段。
 
 ---
 
@@ -510,7 +510,7 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 ## 9. 附 A：进入 backlog 的非 P0 项（P2）
 
 1. **事件注册表带元数据 + init 期自校验**（compozy `internal/events/registry.go:74` panic 校验）：
-   ark-forge `manager/events.go` 目前只有字面量 + 注释里的 payload 契约，可把 payload 契约变成结构化元数据。
+   ark-mate `manager/events.go` 目前只有字面量 + 注释里的 payload 契约，可把 payload 契约变成结构化元数据。
 2. **错误出口附可执行建议动作**（`internal/diagnostics/item.go:60`、
    `internal/diagnosticcontract/diagnostics.go:427` 按分类给动作）：配合 ①T2 的歧义诊断最有价值。
 3. **boot 顺序表 + 反向 cleanup 栈**（`internal/daemon/boot_components.go:9`、`boot_cleanup.go:32`：
@@ -518,7 +518,7 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 4. **流出口精确围栏 + 服务端裁剪的 resync 原因码**（`internal/api/core/sse.go:113` 出口统一脱敏；
    `internal/api/contract/session_transcript.go:14-17` 的
    `fence_missing` / `epoch_mismatch` / `generation_mismatch` / `sequence_reset`）→
-   ark-forge WS 的 `since_seq` + gap 帧可补"原因码"这一层。
+   ark-mate WS 的 `since_seq` + gap 帧可补"原因码"这一层。
 5. **端点注册表即契约事实源**（`internal/api/spec/operation_builder.go:14` + `magefiles/codegen.go:54`
    重生成比对）：比 README 反引号比对更强，但要把路由表搬到 spec 层——收益/代价需单独立项。
 6. **clientstate 订阅分代 + purge 预提交**（`internal/clientstate/contract.go:21-37`）：补 WS attach/detach
@@ -536,23 +536,23 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 | OpenAPI codegen 取代守卫测试 | 划算但非取代：codegen 只管 spec 派生的形状，业务码语义仍需注册表 |
 | `workspaceaccess` 四层同意 / `agentidentity` | 多工作空间同意与 agent 身份解析，单操作员下恒真 |
 | `mcp/auth` 全流程 OAuth / `admission` 排空闸门 | 多用户与无人值守设施 |
-| `providerenv` 整套 home 隔离 | ark-forge 已有独立 agentDir + 工作空间边界，整套抄属重复隔离；只摘"拒路径组件符号链接 + resolved-under-root"两个检查 |
+| `providerenv` 整套 home 隔离 | ark-mate 已有独立 agentDir + 工作空间边界，整套抄属重复隔离；只摘"拒路径组件符号链接 + resolved-under-root"两个检查 |
 | 每 session 一个 `events.db` 物理分库 | 单机单操作员 + 跨会话读是主路径；抄了要养 lease/只读池/每库迁移，并另建全局汇总投影补偿 |
 | `internal/session` 的 300+ 文件粒度 | 抄"设计时先拆、超 500 行即架构失败"的纪律，不抄粒度 |
 | 宿主端 terminal 全套 / 自研 JSON-RPC transport / `heartbeat/` | 越界或纯冗余（`heartbeat` 名字像存活探针，实际是作者态 `HEARTBEAT.md` 唤醒策略） |
 | loop / automation / scheduler / memory / network / extension / bridges / hooks | 定位外 |
 
-## 11. 附 C：反向发现——ark-forge 领先的地方
+## 11. 附 C：反向发现——ark-mate 领先的地方
 
-1. **elicitation**：compozy **生产代码零命中**（全仓仅 2 个测试 JSON fixture），ark-forge 有完整实现
+1. **elicitation**：compozy **生产代码零命中**（全仓仅 2 个测试 JSON fixture），ark-mate 有完整实现
    （schema 渲染 + scope 校验 + 超时收敛 + 决策归属校验）。
 2. **多币种与快照语义**：compozy 的日汇总把金额直接相加、provenance 冲突降级 `unknown`
    （`internal/store/globaldb/schema/definitions/20_sessions.sql:202-218`、
-   `queries/observe_overview.sql:1-35`）；ark-forge 是"快照取区间末 + 多币种不混加 + 上报率分列"
+   `queries/observe_overview.sql:1-35`）；ark-mate 是"快照取区间末 + 多币种不混加 + 上报率分列"
    （`internal/store/usage.go:16-21`），语义更严格——**若要借他们的 rollup 表结构，快照字段不能求和**。
-3. **轮次终态归因**：ark-forge 的 `userCancel > intentional > cancelled > err > completed` 优先级
+3. **轮次终态归因**：ark-mate 的 `userCancel > intentional > cancelled > err > completed` 优先级
    （`internal/manager/turn.go:114-137`）比 compozy 的 `StopCause` 枚举更细。
-4. **"主动拆除不算失败"**：ark-forge 的 `runtimeConn.intentional` 与 compozy 的
+4. **"主动拆除不算失败"**：ark-mate 的 `runtimeConn.intentional` 与 compozy 的
    `markStopRequested`（`internal/subprocess/process_shutdown.go:180`）等价，且已结构化成文档纪律。
 
 ---
@@ -585,11 +585,11 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 > - §13.3 的 **probe 缓存 key** 与 **§7 的 MCP 出站 SSRF** 落在同一处代码。
 >
 > 一句话判断：**compozy 把 MCP/skill 当"配置资源"管理（文件=事实源、派生记录入 SQLite、校验/生命周期/错误收口在一个域），
-> ark-forge 现在只有"写入侧"**——平台 JSON → 物化到 runtime 目录，读入侧（发现/校验/完整性/启停）整体缺失。
+> ark-mate 现在只有"写入侧"**——平台 JSON → 物化到 runtime 目录，读入侧（发现/校验/完整性/启停）整体缺失。
 
 ## 13.1 现状对照
 
-| 面 | MCP（ark-forge） | Skill（ark-forge） |
+| 面 | MCP（ark-mate） | Skill（ark-mate） |
 | --- | --- | --- |
 | 定义源 | `<CapabilityDir>/mcp/*.json`（`pkg/capability/registry.go:46-57`、`:206-217`） | `<CapabilityDir>/skills/*.json`（`:193-204`） |
 | 字段 | `{id,name,transport,command,args,url,headers}`（`types.go:52-62`）——无 `env` / `enabled` / `timeout` / 工具白名单 | `{id,name,description,body,sources[]}`（`types.go:35-50`）——无 `version` / `provenance` / 摘要 / 启停 |
@@ -610,35 +610,35 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 | **非内置**技能才校验（内置豁免）；critical → **拒载** | `internal/skills/registry_load.go:254`、`:262` `if hasCriticalWarning(warnings) {` |
 | 解析失败降级为诊断，不拖垮整个 registry | `registry_load.go:243` `processSkillWithDiagnostics` |
 
-**为什么是硬需求**：ark-forge 的 `Skill.Body`（`pkg/capability/types.go:41`）是平台 JSON 原文，被 `skill_materialize.go:162` **原样写入 runtime 原生技能目录**，写入前零检查——任何人往 `<CapabilityDir>/skills/*.json` 放一段"忽略之前所有指令"，平台会把它**主动物化**进 agent 的技能目录。
+**为什么是硬需求**：ark-mate 的 `Skill.Body`（`pkg/capability/types.go:41`）是平台 JSON 原文，被 `skill_materialize.go:162` **原样写入 runtime 原生技能目录**，写入前零检查——任何人往 `<CapabilityDir>/skills/*.json` 放一段"忽略之前所有指令"，平台会把它**主动物化**进 agent 的技能目录。
 **落点**：新增 `pkg/capability/verify.go`（模式表照搬，severity 三级），在 `Registry.RegisterSkill`（`registry.go:60-68`）挂闸；critical 拒载并计诊断。
 
 ## 13.3 MCP 侧可参照
 
-| # | 模式 | 为什么 ark-forge 需要 | compozy 锚点 | 建议 |
+| # | 模式 | 为什么 ark-mate 需要 | compozy 锚点 | 建议 |
 | --- | --- | --- | --- | --- |
-| M1 | **明文 vs 密钥在类型上分开**：`Env`/`SecretEnv`、`Headers`/`SecretHeaders` | ark-forge 只有 `Headers` 且明文落盘（`types.go:53`） | `internal/config/mcp_server.go:9-14` | 直接抄 |
+| M1 | **明文 vs 密钥在类型上分开**：`Env`/`SecretEnv`、`Headers`/`SecretHeaders` | ark-mate 只有 `Headers` 且明文落盘（`types.go:53`） | `internal/config/mcp_server.go:9-14` | 直接抄 |
 | M2 | **来源优先级显式序号表 + 遮蔽回显**（不靠加载顺序） | 现为单目录，加二级来源时立刻需要裁决 | `internal/settings/mcp_server_item.go:155` / `:172`（rank 上限 7）、`:42`（shadowed 回显） | 改造后抄（砍到 2–3 级） |
-| M3 | **校验挂在类型上**：一份 `Validate` 服务文件/sidecar/内嵌/API 四个入口；按**生效 transport** 做互斥字段校验 | ark-forge 校验散在 `Registry.RegisterMcpServer`（`registry.go:71-87`） | `internal/config/mcp_server_validation.go:15` `func (s MCPServer) Validate(path string) error`、`:69`（按 transport 分支） | 直接抄 |
+| M3 | **校验挂在类型上**：一份 `Validate` 服务文件/sidecar/内嵌/API 四个入口；按**生效 transport** 做互斥字段校验 | ark-mate 校验散在 `Registry.RegisterMcpServer`（`registry.go:71-87`） | `internal/config/mcp_server_validation.go:15` `func (s MCPServer) Validate(path string) error`、`:69`（按 transport 分支） | 直接抄 |
 | M4 | **校验「投影后的生效配置」+ 引用完整性** | 加分层后必须校验最终结果；引用完整性即 MCP↔agent 白名单 | `internal/settings/mcp_mutation.go:232`（被遮蔽时跳过校验）、`internal/config/tools.go:225`（引用未知 MCP 即拒） | 直接抄 |
 | M5 | **生命周期矩阵 → "改完要不要重启" + next_action 回执** | MCP 定义是启动时装载（`internal/app/app.go:232`），现在连"必须重启才生效"都不告诉用户 | `internal/config/lifecycle/lifecycle.go:96`（`mcp-servers.*` 默认 restart-required）、`internal/settings/collection_lifecycle.go:24`（新增降为 live-add）、`internal/settings/config_apply_runtime.go:126`（按 lifecycle 分派） | 改造后抄（两个枚举即可） |
 | M6 | **凭证只回 key**：`vault:` scheme + 读模型只给 `secret_env_keys` + 覆写时按 key 保留绑定 | 与 M1/§5 同批 | `internal/vault/types.go:98`、`internal/settings/mcp_secret_preservation.go:48`、`internal/api/contract/settings_collection_payloads.go:168` | 直接抄 |
-| M7 | **header/env 三档拒绝**：敏感头来源分级、保留名不可覆盖、CRLF、env 黑名单、stdio 不继承父 env | ark-forge 全无 | `internal/mcppolicy/headers.go:10` / `:59` / `:62` / `:79`、`internal/config/mcp_server_validation.go:274-277` | 直接抄 |
-| M8 | **探测缓存 key 编入「定义指纹 + 协议版本 + auth 哈希」+ 服务端 TTL** | ark-forge probe 结果无 key、无 TTL、重启即丢 → 配置改了也命中旧结果 | `internal/mcp/executor_cache.go:240`、`internal/mcp/executor_tools.go:51`、`internal/mcp/executor_client.go:57` / `:61` / `:88` | 直接抄（比"落库"更本质：key 里编定义指纹，改配置自然 miss） |
-| M9 | **每次变更落 apply record（失败也落）+ 诊断码注册表** | ark-forge 无审计面 | `internal/settings/config_apply_records.go:41`、`internal/diagnosticcontract/diagnostics.go:114` | 改造后抄（留 actor/target/action/status/diagnostic/created_at） |
+| M7 | **header/env 三档拒绝**：敏感头来源分级、保留名不可覆盖、CRLF、env 黑名单、stdio 不继承父 env | ark-mate 全无 | `internal/mcppolicy/headers.go:10` / `:59` / `:62` / `:79`、`internal/config/mcp_server_validation.go:274-277` | 直接抄 |
+| M8 | **探测缓存 key 编入「定义指纹 + 协议版本 + auth 哈希」+ 服务端 TTL** | ark-mate probe 结果无 key、无 TTL、重启即丢 → 配置改了也命中旧结果 | `internal/mcp/executor_cache.go:240`、`internal/mcp/executor_tools.go:51`、`internal/mcp/executor_client.go:57` / `:61` / `:88` | 直接抄（比"落库"更本质：key 里编定义指纹，改配置自然 miss） |
+| M9 | **每次变更落 apply record（失败也落）+ 诊断码注册表** | ark-mate 无审计面 | `internal/settings/config_apply_records.go:41`、`internal/diagnosticcontract/diagnostics.go:114` | 改造后抄（留 actor/target/action/status/diagnostic/created_at） |
 | M10 | **写入 = 编辑用户文件 + 校验生效配置后再落盘 + 保留未知键** | 补 CRUD 时最省事也最不砸用户配置 | `internal/config/mcpjson_write.go:45-79`（`:71` validateEffectiveConfigWrite、`:75` 落盘）、`internal/config/mcpjson.go:19`（兼容 `mcpServers`/`mcp_servers` 两键） | 直接抄 |
 
 ## 13.4 Skill 侧可参照
 
-| # | 模式 | 为什么 ark-forge 需要 | compozy 锚点 | 建议 |
+| # | 模式 | 为什么 ark-mate 需要 | compozy 锚点 | 建议 |
 | --- | --- | --- | --- | --- |
 | S1 | **装载期内容扫描 + critical 拒载** | 见 §13.2 | `internal/skills/verify.go:102` / `:11`、`registry_load.go:262` | 直接抄 |
 | S2 | **目录级 SHA-256**：排序相对路径 + 模式位 + 内容；遍历排除 sidecar 自身；软链不 follow、target 字面量入哈希、逃逸即拒 | 物化产物无摘要记录（审计/复现不了） | `internal/skills/provenance.go:54` / `:76` / `:91` / `:189` / `:216`、装载校验 `registry_load.go:319` | 直接抄 |
 | S3 | **安装事务**：staging 目录 → hash → sidecar → 原子 rename；拒覆盖非自有目录 | `skill_materialize.go:162` 是裸 `os.WriteFile`（非原子、跟随软链） | `internal/skills/marketplace/install.go:37` / `:128` / `:150` | 直接抄 |
-| S4 | **禁用 = 名字 overlay（不删除、不重建快照）** | ark-forge 无启停面，想关一个技能只能删文件 | `internal/skills/registry_disabled.go:8`、`registry_toggle.go:18`、`registry.go:61`、`catalog.go:214` | 直接抄（作用域收成 global/workspace 两级） |
+| S4 | **禁用 = 名字 overlay（不删除、不重建快照）** | ark-mate 无启停面，想关一个技能只能删文件 | `internal/skills/registry_disabled.go:8`、`registry_toggle.go:18`、`registry.go:61`、`catalog.go:214` | 直接抄（作用域收成 global/workspace 两级） |
 | S5 | **`Enabled` ⟂ `Activation`**：启用与"当前环境是否适用"正交，不适用要给人话原因 | 技能与 MCP 目录互不知情，运行时才发现不可用 | `internal/skills/types.go:59-64`（`requires_tools`/`requires_capabilities`）、`:98-102`（`Reasons`）、`activation.go:82` | 改造后抄 |
 | S6 | **技能不注册工具，只暴露只读三件套（全 RiskRead）** | 与"能力不重造"同向的边界纪律：技能=上下文注入，不是能力扩展 | `internal/tools/builtin/skills.go:24`、`builtin_ids.go:28`、`skills/catalog.go:20` | 直接抄（结论：别让 `Skill` 带可执行工具） |
-| S7 | **审批令牌绑定输入摘要** | ark-forge 权限记忆是 `action+identifier`（`manager/permission_memory.go`），无输入摘要 → 批准后输入被改挡不住 | `internal/tools/approval_token.go:238` / `:253` | 改造后抄 |
+| S7 | **审批令牌绑定输入摘要** | ark-mate 权限记忆是 `action+identifier`（`manager/permission_memory.go`），无输入摘要 → 批准后输入被改挡不住 | `internal/tools/approval_token.go:238` / `:253` | 改造后抄 |
 | S8 | **资源路径清洗 + 只读/特权变更路由分离 + 冲突落审计事件** | 读技能资源的路径穿越；"谁压制了谁"要可解释 | `internal/skills/resource.go:19` / `:65`、`internal/api/httpapi/routes.go:263` / `:267`、`internal/skills/observe_events.go:149` / `:275`、`expose_operation.go:118`（preflight→commit→rollback） | 改造后抄 |
 
 ## 13.5 修订后的实施顺序（并入 §8）
@@ -659,10 +659,10 @@ extension/hooks/network 等无关 settings 集合、skill 八级优先级梯级�
 ## 13.7 两处「compozy 自己也没有」——参照时要自己补
 
 1. **删除前不检查引用**：compozy 删 MCP server 不查 agent 引用（此为"未发现"结论，非逐行证据，
-   子扫描已如实标注）。ark-forge 有同型立场可直接套用——provider 悬空引用必须显式失败
+   子扫描已如实标注）。ark-mate 有同型立场可直接套用——provider 悬空引用必须显式失败
    （`internal/manager/providers.go:157-173`：*"悬空引用会让本该注入的密钥静默缺失，属配置错误——宁可显式失败"*）。
    补 MCP CRUD 时按此办理：删除/停用前查 `agent.Mcps` 白名单引用，有引用则拒绝并回带影响面。
-2. **MCP stdio 未进进程组**：compozy 只用 `exec.CommandContext`；**ark-forge 同样**
+2. **MCP stdio 未进进程组**：compozy 只用 `exec.CommandContext`；**ark-mate 同样**
    （`pkg/mcp/stdio.go:86-88` 只 `Process.Kill()` + `Wait()`），而 agent 侧已经做对
    （`pkg/acl/transport_unix.go:12` `SysProcAttr{Setpgid: true}`）。
    `npx -y @modelcontextprotocol/server-*` 这类命令会留下孙进程 → 抄 `pkg/acl` 的进程组清理即可（小改动，建议随 M1 一起做）。
@@ -685,7 +685,7 @@ extension/hooks/network 等无关 settings 集合、skill 八级优先级梯级�
   宁可重复判断）。物化层这一道是本仓补的——compozy 那边只有装载期一道。
 - **warning 不回滚、只留痕**：`Skill.Warnings`（`json:"-"`，派生字段不落盘/不从盘读，每次装载重算，
   免得「正文改了告警还是旧的」）→ `SkillResp.Warnings`（severity/pattern/message）→ 前端 `SkillWarning`。
-- **无豁免**：compozy 对 bundled 来源豁免校验（`registry_load.go:254`），ark-forge 没有内置 skill 来源
+- **无豁免**：compozy 对 bundled 来源豁免校验（`registry_load.go:254`），ark-mate 没有内置 skill 来源
   （只来自 `<CapabilityDir>/skills/*.json` 与显式注入），所以**不设豁免**——少一个「谁能绕过闸门」的判断点。
 - **已知边界（写进测试）**：规则是**字面匹配**（英文正则），中文改写/语序改写不命中
   （`TestVerifyContentHitsAreLiteral`）。它是「拦下最省事的那类注入」，不是语义检测器；升级到语义判定
@@ -710,7 +710,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 
 - **禁用不删东西**：定义文件、正文、sources 一律保留，只把定义文件里的 `enabled` 置 false
   （compozy 用独立的 disabled 名单文件，因为它从 marketplace 装技能、定义目录不归用户；
-  ark-forge 的技能定义本来就是**用户自己的文件**，所以开关写回定义本身——少一个"两处状态谁说了算"的问题）。
+  ark-mate 的技能定义本来就是**用户自己的文件**，所以开关写回定义本身——少一个"两处状态谁说了算"的问题）。
   `Enabled *bool` 用指针是为了区分"未声明"（默认启用）与"显式关掉"；`enabled` 键只在写回时出现。
 - **写盘按 M10 纪律**：读原文件为 `map[string]json.RawMessage` → 只改 `enabled` → `MarshalIndent` →
   临时文件 + `rename` 原子替换。**未知键原样保留**（用户自己加的 `x-user-note` 不会消失），
@@ -718,7 +718,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 - **没定义文件就显式失败**（`skill_not_persistable`，含应有的路径与出路）：代码注入/内存注册的
   skill 无处写回，假装成功会让用户以为改完了（对齐本仓"宁可显式失败"的立场）。
 - **立刻重校物化**：app 启动重校时把 (root, runtime) 目标登记到 Service，启停后同步重跑同一组目标。
-  **禁用 = 撤回**：已物化的副本从 runtime 目录里被摘掉（删除联动只动带 `.forge-managed` 标记的目录，
+  **禁用 = 撤回**：已物化的副本从 runtime 目录里被摘掉（删除联动只动带 `.mate-managed` 标记的目录，
   用户自有同名目录绝不误删，有测试钉住）。重校失败**不回滚**定义变更（文件已改，谎报失败更糟），
   失败原因随响应回带 `materialize_errors`。
 - **顺序刻意**：先磁盘（事实源）、再内存注册表、最后物化——每一步失败时后面的都不做，
@@ -732,7 +732,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
   sources 为空 / 候选 runtime 都没在 sources 里声明（**并列出声明了哪些 runtime**）/
   声明了但 format 未经实证（列出"哪个 runtime + 哪个 format"与已实证的 format 白名单）。
   与 compozy 的差异：那边是 `platforms/environments/requires_tools/requires_capabilities`
-  四族 gate（它有 marketplace 与部署环境概念），ark-forge 只有"候选 runtime + 物化 format"
+  四族 gate（它有 marketplace 与部署环境概念），ark-mate 只有"候选 runtime + 物化 format"
   两个维度，故**不照抄四族结构**，只抄"Gate → Reason(code+message) 必须可解释"这条纪律。
 - `pkg/capability.SupportedFormat` 作为 format 白名单的公开入口，并有测试断言它与物化层
   `materializedContentFor` 判定一致——两处漂移会让"适用"说谎。
@@ -744,10 +744,10 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 - **算法逐条对照** compozy `internal/skills/provenance.go:54`（`ComputeDirectoryHash`）与 `:189`（`writeHashEntry`）：
   相对路径收集后排序；普通文件写 `file:<slash 路径>\nmode:<权限>\n` + 内容 + `\0`（**权限入哈希**，chmod 也算变更）；
   软链**不 follow**，写 `symlink:<路径>\nmode:<权限>\ntarget:<字面目标>\n`，且目标解析后逃出目录即拒
-  （`ErrSymlinkEscape`）；设备/管道等未知类型直接报错；遍历**排除平台记账文件**（`.forge-managed` 与 sidecar 自身，
+  （`ErrSymlinkEscape`）；设备/管道等未知类型直接报错；遍历**排除平台记账文件**（`.mate-managed` 与 sidecar 自身，
   否则每次重校都"看起来变了"）。
 - **sidecar 记什么**：`{version, skill_id, runtime, format, hash, bytes, written_at}`（0600）。
-  与 compozy 的差异：那边 provenance 服务于 marketplace（registry/slug/version），ark-forge 没有 marketplace，
+  与 compozy 的差异：那边 provenance 服务于 marketplace（registry/slug/version），ark-mate 没有 marketplace，
   来源就是本机定义文件，所以记的是本地可审计所需的那几项，**不假装有版本号**。
 - **三件事因此成立**：审计（期望摘要 vs 实测摘要）、复现（换机器重算一致即产物一致）、篡改可见
   （改内容/加文件/改权限/换软链 → `tampered`，下一次重校即修复）。
@@ -760,20 +760,20 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
   skill + 记录摘要 == 期望载荷摘要 + 磁盘实测摘要 == 期望」——多塞文件/改权限/换软链这些**内容比对看不出来**的
   变化，摘要全看得出来。老产物（无 sidecar）第一次重校**就地升级**，之后保持幂等。
 - **一处踩坑记录**：sidecar 里的 `runtime`/`format` **不参与幂等判定**。共享 root 下同一目录会被多个 runtime
-  各投影一次，最后写入者是谁无关紧要（归属由 `.forge-managed` 标记维护）；一开始把它们纳入判定，共享 root 的
+  各投影一次，最后写入者是谁无关紧要（归属由 `.mate-managed` 标记维护）；一开始把它们纳入判定，共享 root 的
   两个 runtime 会互相把对方写的产物判成"过期"而反复重写（`TestReconcileSkillsForPerRuntime` /
   `TestReconcileSharedRootResidualCleanup` 立刻红）。这两条既有测试正好当了护栏。
 
 **S3 安装/物化事务**（`MaterializeSkillFor` + `replaceDir` + `ensureReplaceableDir`）：
 
 - **此前**：裸 `os.MkdirAll` + `os.WriteFile`（非原子、跟随软链、同名即覆盖别人目录）。
-- **现在**：`ensureReplaceableDir` 先判归属（不存在 → 可建；带 `.forge-managed` → 可替换；**是软链 / 不是目录 /
+- **现在**：`ensureReplaceableDir` 先判归属（不存在 → 可建；带 `.mate-managed` → 可替换；**是软链 / 不是目录 /
   无标记 → 显式拒绝**，错误里给出去路）→ staging 临时目录写全（SKILL.md + 归属标记 + sidecar）→ **重算 staging
-  摘要自校验**（"我以为我写了什么"变成可判定事实）→ `replaceDir` 原子换入（旧目录先挪到 `<dir>.forge-old`，
+  摘要自校验**（"我以为我写了什么"变成可判定事实）→ `replaceDir` 原子换入（旧目录先挪到 `<dir>.mate-old`，
   换入失败**挪回来**；成功后清理）。收益：agent 永远看不到半成品；失败时旧产物原样在；`MkdirTemp` 的随机后缀
-  天然避免并发同写；根目录不留 `.forge-stage-*`/`.forge-old` 残留（有断言）。
+  天然避免并发同写；根目录不留 `.mate-stage-*`/`.mate-old` 残留（有断言）。
 - **不做**：compozy 的 `MoveInstalledDir` 还带目录句柄持有 + publication lock + 清理诊断（多进程/多租户场景需要）。
-  ark-forge 是**单操作者本地平台**，不加锁；这条差异记在这里，免得后人以为漏抄。
+  ark-mate 是**单操作者本地平台**，不加锁；这条差异记在这里，免得后人以为漏抄。
 
 ## 13.11 实施记录（2026-09-11 第四轮，M1 + M6）
 
@@ -817,7 +817,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 
 §13 的服务端能力此前只在 REST 上可用，面板看不见——这一轮把**已有**能力接到 UI（不新增端点，
 故 README 路由表不变）。改动集中在 `apps/panel/src/pages/CapabilitiesPage.tsx`、
-`apps/panel/src/console/capabilityView.ts`（纯函数视图模型）、`packages/api/src/resources/forge.ts`。
+`apps/panel/src/console/capabilityView.ts`（纯函数视图模型）、`packages/api/src/resources/mate.ts`。
 
 - **S4 启停**：全局 Skills 行加 `Switch`（`PATCH /skills/:id`）。回执按事实拼一句话：
   写回/撤回条数 + `materialize_errors`（有就带上）+ `next_action`；成功后重拉 `/skills` 与

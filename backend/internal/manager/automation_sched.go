@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/redact"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/redact"
 )
 
 // ——— Automation 调度循环（M4-4）———
@@ -59,7 +59,7 @@ type automationRunOutcome struct {
 // ——过期的 `once` 置 inactive、已跑完的 `once` 补状态——所以放在装配期不会拉起任何底座进程。
 func (s *Service) StartAutomationScheduler(interval time.Duration) {
 	if interval <= 0 {
-		slog.Info("automation 调度未启动（FORGE_AUTOMATION_TICK=0）")
+		slog.Info("automation 调度未启动（MATE_AUTOMATION_TICK=0）")
 		return
 	}
 	s.mu.Lock()
@@ -268,7 +268,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 		advance: trigger != automation.TriggerManual, claimed: out.claimed,
 	}
 	res := s.finishAutomationRun(ctx, rec, out)
-	// max_run_duration：可选的**收紧**（默认只靠既有 FORGE_TURN_TIMEOUT 看门狗），
+	// max_run_duration：可选的**收紧**（默认只靠既有 MATE_TURN_TIMEOUT 看门狗），
 	// 走同一条取消通道，不引入第二套超时机制。
 	if d, err := rec.def.RunDuration(); err == nil && d > 0 {
 		go s.automationWatchdog(ctx, rec.def.ID, resp.ID, d)

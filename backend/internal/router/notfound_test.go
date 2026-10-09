@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // 未命中路由的三种去向（M2-2 把历史上按 build tag 分叉的两条测试合并成一组）：
@@ -99,7 +99,7 @@ func TestUnknownNonAPIPathEnvelopeWhenNoAssets(t *testing.T) {
 // TestUnknownAPIPathNeverFallsBack 有资产时 `/v1/*` 未注册路径**仍然**回信封 404。
 func TestUnknownAPIPathNeverFallsBack(t *testing.T) {
 	e := dirAssetsEngine(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/forge/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/mate/nope", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 

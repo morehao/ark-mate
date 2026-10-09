@@ -1,7 +1,7 @@
 import { Button, Tooltip } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import type { QueuedInput } from '@ark/types'
+import { tokens } from '@ark-mate/ui'
+import type { QueuedInput } from '@ark-mate/types'
 import { deliveryLabel, queueExcerpt, queueSummary } from '../console/queueView'
 
 interface Props {

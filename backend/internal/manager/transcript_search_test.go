@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestSearchConversations 验证会话搜索：正文命中 + 片段、元数据命中、大小写不敏感、

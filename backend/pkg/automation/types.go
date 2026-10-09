@@ -13,7 +13,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // 调度种类。**只有这三种**（ADR-3）：不引 cron 表达式。
@@ -67,7 +67,7 @@ type Automation struct {
 	Schedule Schedule `json:"schedule"`
 	Target   Target   `json:"target"`
 
-	// MaxRunDuration 本轮的外层超时（Go duration 字符串；空 = 只用既有 `FORGE_TURN_TIMEOUT`）。
+	// MaxRunDuration 本轮的外层超时（Go duration 字符串；空 = 只用既有 `MATE_TURN_TIMEOUT`）。
 	// **不引入第二套超时机制**：默认交给已有看门狗，这个字段只是可选的收紧，上限 60m。
 	MaxRunDuration string `json:"max_run_duration,omitempty"`
 
@@ -160,7 +160,7 @@ func (a *Automation) RunDuration() (time.Duration, error) {
 	}
 	if d > MaxRunDurationLimit {
 		return 0, acl.NewError(acl.ClassRequest, "invalid_param",
-			"max_run_duration 上限 "+MaxRunDurationLimit.String()+"（超过就交给 FORGE_TURN_TIMEOUT 看门狗）", nil)
+			"max_run_duration 上限 "+MaxRunDurationLimit.String()+"（超过就交给 MATE_TURN_TIMEOUT 看门狗）", nil)
 	}
 	return d, nil
 }

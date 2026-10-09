@@ -27,7 +27,7 @@
  *   已装好的树重新产出清单（用于复算/核对，或改了清单字段后重建）。重放**必须**显式给 --abi，
  *   否则会写进本机 Node 的 ABI（与 Electron 的不一样，会被交叉校验抓出来）。
  *
- * 环境变量（都可选）：`FORGE_PAYLOAD_REGISTRY`（CI 镜像源）、`FORGE_PAYLOAD_STORE_DIR`（pnpm store）。
+ * 环境变量（都可选）：`MATE_PAYLOAD_REGISTRY`（CI 镜像源）、`MATE_PAYLOAD_STORE_DIR`（pnpm store）。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -131,13 +131,13 @@ function installPayload(payloadDir, target, { offline }) {
     // 模块目录与当前配置不符时（`.modules.yaml` 里记着上次用的 storeDir / nodeLinker，这次解析出来的
     // 不一样）pnpm 会先把 `runtime/<name>/node_modules` 整个删掉重装，并且**默认要人在 TTY 上确认**——
     // 构建步骤没有 TTY，于是直接 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止（2026-10-09 实测：
-    // 上一次带 `FORGE_PAYLOAD_STORE_DIR` 装的载荷，换回默认 store 就撞上这条）。
+    // 上一次带 `MATE_PAYLOAD_STORE_DIR` 装的载荷，换回默认 store 就撞上这条）。
     // 这里是**非交互构建**，而这个 node_modules 是构建中间产物（锁文件驱动、不入库、随时可重建），
     // 自动重建才是对的行为：显式关掉那个确认，别让构建依赖"终端恰好是 TTY"。
     '--config.confirmModulesPurge=false',
   ]
-  if (process.env.FORGE_PAYLOAD_STORE_DIR) args.push(`--store-dir=${process.env.FORGE_PAYLOAD_STORE_DIR}`)
-  if (process.env.FORGE_PAYLOAD_REGISTRY) args.push(`--config.registry=${process.env.FORGE_PAYLOAD_REGISTRY}`)
+  if (process.env.MATE_PAYLOAD_STORE_DIR) args.push(`--store-dir=${process.env.MATE_PAYLOAD_STORE_DIR}`)
+  if (process.env.MATE_PAYLOAD_REGISTRY) args.push(`--config.registry=${process.env.MATE_PAYLOAD_REGISTRY}`)
   args.push(offline ? '--offline' : '--prefer-offline')
   // 依赖的生命周期脚本（koffi/node-pty 的 install、protobufjs 的 postinstall）由 pnpm 交给
   // `sh -c` 执行，脚本内部又会调 `node`——`env -i PATH=/usr/bin:/bin` 下这一步会直接
@@ -186,7 +186,7 @@ function assemble(payload, target, { skipInstall, offline, abi }) {
   if (!existsSync(srcRoot)) fail(`载荷源不存在：${srcRoot}`)
 
   // 装配到临时目录再整体换入：中断只会留下临时目录，不会留下"半份载荷 + 完整清单"。
-  const staging = mkdtempSync(join(tmpdir(), `forge-payload-${payload.name}-`))
+  const staging = mkdtempSync(join(tmpdir(), `mate-payload-${payload.name}-`))
   let result
   try {
     result = copyTreeFiltered(srcRoot, join(staging, payload.destSubdir), target)
@@ -207,7 +207,7 @@ function assemble(payload, target, { skipInstall, offline, abi }) {
       // 为什么必须记下来（M4-5 补）：fileList 是 `copyTreeFiltered` 按**复制源根**记的，而
       // 两份载荷的落点形态不同——dsh 的闭包在 `node_modules/` 下（源根 = 那份 node_modules），
       // opencode 的包内容直接铺在载荷根（源根 = 包目录）。于是同一个 fileList 在两份载荷里
-      // 指向的层级不一样，而此前清单里**没有任何字段**说明这件事：消费方（`forge doctor
+      // 指向的层级不一样，而此前清单里**没有任何字段**说明这件事：消费方（`mate doctor
       // --verify-payload` 是第一个）只能靠猜。路径算错必须明确失败，不能靠回落搜索
       // （src/paths.ts 的同一纪律）——所以把这个事实写进清单。
       fileListBase: payload.destSubdir,

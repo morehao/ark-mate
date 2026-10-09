@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/opencode"
+	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // ——— runtime 子进程的配置隔离（M3-3；设计 §6.6 / §6.6.1）———
@@ -66,7 +66,7 @@ func IsolationEnv(runtimeID, home string) []string {
 			// strings：`process.env.XDG_STATE_HOME ?? join(homedir(),".local","state")`）。
 			// 不隔离它，平台拉起的 acp 会**读用户自己的 service.json**，命中同版本同 url 时直接
 			// 复用用户的服务，版本不符时更会走"替换"分支（SIGTERM 旧进程 + 删登记文件）——
-			// 那是"forge 动了本机"最直接的一种。隔离后平台得到自己的服务登记。
+			// 那是"mate 动了本机"最直接的一种。隔离后平台得到自己的服务登记。
 			"XDG_STATE_HOME="+filepath.Join(home, "runtime", "opencode", "state"),
 			"OPENCODE_CONFIG_DIR="+filepath.Join(home, "runtime", "opencode", "config", "opencode"),
 			"OPENCODE_DB="+filepath.Join(home, "runtime", "opencode", "data", "opencode.db"),

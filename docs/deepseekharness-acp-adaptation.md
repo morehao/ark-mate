@@ -32,7 +32,7 @@
 
 ## 能力面（initialize，`packages/acp/acp/src/index.ts`）
 
-- `authMethods: []` → **authenticate 立即成功，无需鉴权**（ark-forge acl 不触发 agent 鉴权分支）。
+- `authMethods: []` → **authenticate 立即成功，无需鉴权**（ark-mate acl 不触发 agent 鉴权分支）。
 - `sessionCapabilities: { close: {}, list: {}, resume: {} }`；无 `loadSession`/fork → 对应门控报 unsupported 正确。
 - `promptCapabilities`: `image` 仅当持久附件仓 + 精确 provider/model 支持才 true；`audio:false`、`embeddedContext:false`。
 - 同连接可多会话并行（list 非空 → `MultiSessionConcurrent` true）。
@@ -43,16 +43,16 @@
 - stop reason 映射（`codec.ts`）：正常/被接管 quiescence → `end_turn`；超 token → `max_tokens`；
   `session/cancel` → `cancelled`（另有 refusal 位）。
 
-## ark-forge 侧已落地/需注意
+## ark-mate 侧已落地/需注意
 
 1. `internal/runtime/deepseekharness`：Command=`dsh`、Args=`["--profile","acp"]`、Version=`dsh --profile acp`；
    Caps：`SessionsPersistent=true`、`MultiSessionConcurrent=true`、`Images=false`、`EmbeddedContext=false`。
 2. 断连语义文案更新：harness 断连 ≠ 会话销毁，进行中 turn 被取消，持久会话可 resume；
    面板/M1 的 resume 入口按 `Client.Capabilities()` 裁剪（opencode 多 load/resume/fork，harness 无 load/fork）。
 3. `--config <cordis.yml>` 形态废弃：config 归属 `$DSH_HOME/profiles/acp`（或 `--patch` 覆盖），
-   不再由 ark-forge 传路径；若需自定义 profile 行，走 `dsh plugin --profile acp add/...` 或追加 `--patch`。
+   不再由 ark-mate 传路径；若需自定义 profile 行，走 `dsh plugin --profile acp add/...` 或追加 `--patch`。
 4. harness 冒烟（本机实测记录，2026-09-03）：`dsh@next`（0.1.2-rc.1）经 npx 缓存
-   `~/.npm/_npx/<hash>/node_modules/.bin` 注入 PATH 后，`forge demo --runtime deepseekharness
+   `~/.npm/_npx/<hash>/node_modules/.bin` 注入 PATH 后，`mate demo --runtime deepseekharness
    --prompt "请只回复两个字：明白"` 跑通：`session.created → thought/message 流 → turn.ended
    (end_turn)`，会话 id 形如 UUID（645fb04e-…）。agent=agent-deepseekharness。
 

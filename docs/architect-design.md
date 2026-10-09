@@ -1,7 +1,8 @@
-# ark-forge 架构设计
+# ark-mate 架构设计
 
-> 面向 Agent 应用开发的通用底座/平台（monorepo）：创建、运行、扩展与统一管理 Agent，
-> 作为 ACP Host，经 stdio 连接 opencode 与 deepseek-harness 等多个 Agent Runtime。
+> 基于开源 Agent Runtime 的**个人 Agent**（monorepo，定位见 [design-and-roadmap.md](./design-and-roadmap.md)
+> 「决策变更 v7」）：单机、单操作员、开箱即用；执行能力归外部 Runtime，本项目作为 ACP Host 经 stdio
+> 连接 opencode 与 deepseek-harness 等多个 Agent Runtime，并由此沉淀一层可复用的**底座能力**。
 
 > **决策更新（见 [design-and-roadmap.md](./design-and-roadmap.md) §0「决策变更 v2」）**：
 > ① 控制面 → 面板的实时传输由「SSE 首选、WS 仅双向需求时引入」调整为 **仅 WebSocket（不设 SSE 出口）**：
@@ -31,16 +32,19 @@
 
 ## 1. 定位与目标
 
-一款可自托管的 Agent 平台底座。与前缀 `ark-`（个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，
-本项目是其中的「Agent 锻造所」，聚焦：
+一款**基于开源 Agent Runtime 的个人 Agent**：单机、单操作员、开箱即用。与前缀 `ark-`
+（个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，本项目是其中的「个人 Agent 伙伴」
+（`ark-mate`），聚焦：
 
 - **Create**：定义、注册、复用 Agent。
 - **Run**：在统一控制面下跨越 Runtime 运行 Agent 会话。
 - **Extend**：通过 ACP 协议接入多种 Runtime（首版：opencode、deepseek-harness）。
 - **Manage**：生命周期、Registry、会话与配置的统一管理。
 
-元定位：**是底座/平台，不是单纯的 Agent SDK**。核心差异化是靠统一协议（ACP）承载多个外部 Agent 运行时，
-让用户在同一面板内切换与控制不同的底层 Agent。
+元定位：**先是个人 Agent，其次才是底座**。执行能力（推理 / skill / MCP）全部来自外部 ACP 运行时，
+平台自己不做运行时功能——所以它既不是 Agent SDK，也不是 Agent 引擎。**底座能力**（用统一协议承载
+多个外部运行时、会话与能力数据面、REST/WS 契约、桌面/容器交付形态）是同一内核的第二重身份，
+也是它与「单纯 Agent SDK」的差异点。
 
 定位边界（与 [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v3」一致）：
 - **能力不重造**：skills/MCP/推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
@@ -52,7 +56,7 @@
 | 决策 | 结论 | 说明 |
 |------|------|------|
 | 仓库结构 | **monorepo** | 前后端在同一仓库 |
-| 后端 module 粒度 | **单 module**（`backend/`，`github.com/morehao/ark-forge`）+ `internal/` 分层目录 | 抽离公共逻辑用「包」即可，无需 module；层目录保留 seam，待出现跨项目复用/独立版本化需求时再按层抽独立 module/仓（演进见 §5） |
+| 后端 module 粒度 | **单 module**（`backend/`，`github.com/morehao/ark-mate`）+ `internal/` 分层目录 | 抽离公共逻辑用「包」即可，无需 module；层目录保留 seam，待出现跨项目复用/独立版本化需求时再按层抽独立 module/仓（演进见 §5） |
 | 后端 | **Go** | daemon / 控制面 / ACP Host |
 | 前端 | **TypeScript + Vite(React)** | 面板 |
 | ACP 角色 | **Host（Client 侧）** | 拉起并连接 Agent 为 ACP server |
@@ -125,7 +129,7 @@ graph TB
         PR["Runtimes 页"]
     end
 
-    subgraph BE["Go daemon (cmd/forge)"]
+    subgraph BE["Go daemon (cmd/mate)"]
         API["server: gin router+handler + eventbus (REST + SSE)"]
         MGR["manager (agent 生命周期/会话编排)"]
         ACL["acl (ACP client: transport + 状态机)"]
@@ -154,7 +158,7 @@ graph TB
 ## 5. 目录结构（同仓：backend/ 单 Go module + frontend/ pnpm workspace）
 
 > **现状（2026-09 结构重构后）**：本节以下的目录树与 §6 的层描述是**设计期记录**（当时还规划过
-> `forge-cli`、`server/sse.go`、`server/handler/mock.go` 等，均未落地或用别的方式落地）。
+> `mate-cli`、`server/sse.go`、`server/handler/mock.go` 等，均未落地或用别的方式落地）。
 > 当前实际分层以 **README「仓库结构」与 `AGENTS.md`「布局与目录边界」为准**，要点：
 >
 > - **`pkg/` 与 `internal/` 二分**（对齐 ark-iam）：`acl` / `runtime` / `mcp` / `capability` /
@@ -171,7 +175,7 @@ graph TB
 
 本项目采用**前后端平级 monorepo**（`backend/` 与 `frontend/` 同仓平级）：
 
-- **后端侧**：单 module `github.com/morehao/ark-forge`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
+- **后端侧**：单 module `github.com/morehao/ark-mate`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
   go.mod/go.sum），`internal/` 下每层（acl / runtime / manager / server / infra / web）是一个**普通包目录**；
   Go 的 `internal/` 可见性保证仅本仓可 import，形成天然的分层边界，跨层 import 方向靠目录约定保证。
 - **前端侧**：`frontend/` 是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合；因其产物
@@ -190,20 +194,20 @@ module / 独立仓解决的是**跨项目共享 + 独立版本/发布**。`inter
 构建/tidy 的持续摩擦；需要约束跨层 import 方向时，用 golangci-lint 的 `depguard` 在 CI 强制即可。
 
 ```
-ark-forge/
+ark-mate/
 ├── Makefile               # 根编排入口：make web / make server / make build|vet|test / make all
 ├── docs/
 │   └── architect-design.md # 本文件
 ├── LICENSE                # MIT（已就位）
 ├── README.md              # 中英简介（已就位）
 │
-├── backend/               # 后端：单 Go module（github.com/morehao/ark-forge）
+├── backend/               # 后端：单 Go module（github.com/morehao/ark-mate）
 │   ├── go.mod             #   依赖统一收敛于此（gin/golib；单一 go.sum）
 │   ├── go.sum
 │   ├── cmd/
-│   │   ├── forge/         #   daemon 入口（main）
+│   │   ├── mate/         #   daemon 入口（main）
 │   │   │   └── main.go
-│   │   └── forge-cli/     #   可选、二期
+│   │   └── mate-cli/     #   可选、二期
 │   │
 │   └── internal/          # 分层目录即包边界（Go internal：仅本仓可 import；目录即未来抽离的 seam）
 │       ├── acl/           #   ACP Host 接入层（封装 coder/acp-go-sdk；候选抽离层，见上文「演进」）
@@ -221,7 +225,7 @@ ark-forge/
 │       │   └── session.go
 │       ├── server/        #   控制面 API（Gin + golib 按需引用）
 │       │   ├── server.go      #   Server 生命周期（Start/Stop），组装 handler+router
-│       │   ├── router/        #   路由注册：ginserver 版本分组 /{v1}/{forge}，挂 REST+SSE
+│       │   ├── router/        #   路由注册：ginserver 版本分组 /{v1}/{mate}，挂 REST+SSE
 │       │   │   └── router.go
 │       │   ├── handler/       #   各功能 handler（响应用 gincontext.Success/Fail）
 │       │   │   ├── handler.go #   Service 接口 + Handler 聚合（注入 eventbus）
@@ -257,7 +261,7 @@ ark-forge/
 `frontend/apps/panel` 构建产物（`dist/`）是**唯一真源**，支持两种宿主：
 
 1. **单二进制（默认交付）**：`make web` 把 `dist/` 拷入 `backend/pkg/web/dist`（该副本不入库），
-   `make all` 以 `-tags release` 编译，`web` 包经 `//go:embed dist` 把前端打入最终二进制，产出根目录 `./forge`。
+   `make all` 以 `-tags release` 编译，`web` 包经 `//go:embed dist` 把前端打入最终二进制，产出根目录 `./mate`。
 2. **前端独立部署/运行**：直接托管 `frontend/apps/panel/dist`（nginx 等任意静态宿主，配 SPA fallback）；
    开发期跑 `pnpm dev` + vite proxy（`/v1 → :8099`）联调。独立形态下前端 API base 可配置（`VITE_API_BASE`），
    跨域时后端按需开 CORS。
@@ -314,12 +318,12 @@ ark-forge/
 - **会话事件流走「单一通道 + type 判别」**：manager 产出的会话事件（token delta、thought、tool_call、message chunk、终态）统一走一条**进程内事件流**（`internal/acl` 订阅 ACP notification → 归一化 → manager 事件），由 `internal/server` 以单 SSE 通道转发，前端按 `type` 判别处理（见 §2「SSE 会话事件流范式」）；流式增量 live-only、终态持久化，支持 `after` 续传。
 
 ### 6.4 `internal/server` — 控制面 API
-- 用 **Gin + golib按需引用**组织：`router/` 用 `ginserver` 版本分组（`/{v1}/{forge}`，自动挂 otelgin + AccessLog）；`handler/` 按功能实现各处理函数，响应封装统一用 `gincontext` 的 `Success/Fail`（`{code, requestID, msg, data}`）。
+- 用 **Gin + golib按需引用**组织：`router/` 用 `ginserver` 版本分组（`/{v1}/{mate}`，自动挂 otelgin + AccessLog）；`handler/` 按功能实现各处理函数，响应封装统一用 `gincontext` 的 `Success/Fail`（`{code, requestID, msg, data}`）。
 - REST：管理类操作（列/创建 Agent、列 Runtime、启停、列会话）。
 - **SSE：事件总线 + 薄适配层（合理性优先的重新设计）**。会话事件不内联在 controller，而是抽独立 **`eventbus`** 层（单一事件通道）承载：
   - `eventbus.Bus`：`Publish(type, aggID, version, payload)` 分配全局递增 `seq`、写入内存历史缓冲、广播给订阅者；`Subscribe(after)` **先按 `seq > after` 同步回放历史、再收 live 增量**；`Unsubscribe` 释放；`LastSeq` 供 heartbeat 标注位置。
   - `handler/sse.go` 只做**协议薄适配**：订阅 `eventbus` → 把每个事件转成标准 `text/event-stream` 帧（`id: <seq>` + `event: <type>` + `data: {type,seq,agg_id,version,payload}`），叠加 `server.connected`/`server.heartbeat` 编排帧；`after` 从 query 或 `Last-Event-ID` 读取实现断线续传。业务与协议解耦：后续 manager 把归一化的 ACP notification 事件 `Publish` 进总线即可，SSE 无需感知域变化。
-- **单一 SSE 通道 + 编排帧**：单端点 `/v1/forge/sse/stream`、`type` 判别 union、`server.connected`/`server.heartbeat` 编排帧（`server.instance.disposed` 预留）。
+- **单一 SSE 通道 + 编排帧**：单端点 `/v1/mate/sse/stream`、`type` 判别 union、`server.connected`/`server.heartbeat` 编排帧（`server.instance.disposed` 预留）。
 - **断线续传**：`eventbus` 的 history 缓冲即首版内存缓冲，前端重连带 `after=seq` 续拉历史再继续 live。
 
 ### 6.5 `frontend/` — 前端 monorepo
@@ -344,9 +348,9 @@ ark-forge/
 
 - `make build` && `make vet` && `make test`：即 `cd backend && go build/vet/test ./...`（单 module，覆盖全部包）。
 - `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/pkg/web/dist`。
-- `make server`：`go run ./cmd/forge` 拉起后端（开发联调，不起前端）。
-- `make all`：产出仓库根单二进制 `./forge`（`-tags release` 内嵌前端）；`./forge` 拉起后冒烟。
-- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
+- `make server`：`go run ./cmd/mate` 拉起后端（开发联调，不起前端）。
+- `make all`：产出仓库根单二进制 `./mate`（`-tags release` 内嵌前端）；`./mate` 拉起后冒烟。
+- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-mate` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
 
 ## 9. 待办 / 风险
 

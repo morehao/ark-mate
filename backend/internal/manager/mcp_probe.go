@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // defaultMCPProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。
@@ -136,7 +136,7 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 			// `<serverID>__<tool>`（网关代连时统一加前缀）。面板若显示原名，用户就没法把面板上
 			// 看到的工具名拿去调——"探测面与真实面同源"就是 M7-④ 这条对齐要东西。
 			//
-			// 已知偏差（写下来免得被当成 bug）：`FORGE_MCP_GATEWAY=off`，或该 server 最终被注入给
+			// 已知偏差（写下来免得被当成 bug）：`MATE_MCP_GATEWAY=off`，或该 server 最终被注入给
 			// 一个**远程 ACP 端点**时，底座看到的是原名（那时没有网关条目）。目录是全平台一张表、
 			// 不含"按 runtime 的注入形态"，为这两种回退形态单开一列不值得；默认形态（本机 runtime +
 			// 网关 auto）下两者逐字一致。

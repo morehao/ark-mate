@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/procreg"
 )
 
 // SetProcRegistry 注入进程注册表（serve 装配；nil = 不登记）。

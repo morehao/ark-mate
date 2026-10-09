@@ -8,14 +8,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // configCmd 打印解析后的配置与每项来源（排障/上线核对用；不启动任何进程）。
 func configCmd(args []string) {
 	fs := flag.NewFlagSet("config", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "以 JSON 输出（含每项来源）")
-	dir := fs.String("config-dir", "", "配置目录（默认 FORGE_CONFIG_DIR 或 ~/.forge/config）")
+	dir := fs.String("config-dir", "", "配置目录（默认 MATE_CONFIG_DIR 或 ~/.ark-mate/config）")
 	_ = fs.Parse(args)
 
 	cfg, sources, err := config.LoadResolved(*dir)
@@ -75,10 +75,10 @@ func configCmd(args []string) {
 		return string(config.SourceDefault)
 	}
 	fmt.Printf("配置目录: %s\n", cfg.ConfigDir)
-	// 数据目录（M3-3）：只吃进程环境变量（FORGE_HOME），所以来源只有 env(process) 与 default 两种；
+	// 数据目录（M3-3）：只吃进程环境变量（MATE_HOME），所以来源只有 env(process) 与 default 两种；
 	// 它不出现在 sources 里（那不是配置文件里的键），这里显式说明，免得被当成"来源丢了"。
 	homeSrc := string(config.SourceDefault)
-	if strings.TrimSpace(os.Getenv("FORGE_HOME")) != "" {
+	if strings.TrimSpace(os.Getenv("MATE_HOME")) != "" {
 		homeSrc = string(config.SourceEnv)
 	}
 	fmt.Printf("数据目录: %s [%s]\n", cfg.HomeDir, homeSrc)
@@ -117,7 +117,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_grace", cfg.ReapGrace.String(), src("reap_grace"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "token", maskToken(cfg.Token), src("token"))
-	// 空 = 只用内置 Origin 矩阵（无 Origin / forge-app://app / 自身监听端口的同源）。
+	// 空 = 只用内置 Origin 矩阵（无 Origin / mate-app://app / 自身监听端口的同源）。
 	// 非空 = 跨源开发或自建反代的显式登记（M3-5），且只在回环监听时生效（见 pkg/config 的注释）。
 	fmt.Printf("  %-22s %-38s [%s]\n", "allowed_origins", emptyLabel(strings.Join(cfg.AllowedOrigins, ",")), src("allowed_origins"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))

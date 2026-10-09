@@ -12,18 +12,18 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
-// migrate 把 transcript 目录（默认 ~/.forge/transcripts）全量导入 SQLite（P1 迁移关键路径）：
+// migrate 把 transcript 目录（默认 ~/.ark-mate/transcripts）全量导入 SQLite（P1 迁移关键路径）：
 //   - 解析全部 *.jsonl（复用 manager 复读器；坏文件告警跳过）；
 //   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → conversations → 数量校验 → 导入标记）；
 //   - 幂等：同目录指纹已导入过则跳过；任一步失败整体回滚（原 transcript 目录不动）。
 func migrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	dbPath := fs.String("db", "", "SQLite 库路径（默认 FORGE_DB 或 ~/.forge/forge.db）")
-	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
+	dbPath := fs.String("db", "", "SQLite 库路径（默认 MATE_DB 或 ~/.ark-mate/mate.db）")
+	transcriptsDir := fs.String("transcripts", "", "transcript 目录（默认 MATE_TRANSCRIPTS 或 ~/.ark-mate/transcripts）")
 	_ = fs.Parse(args)
 
 	cfg, _ := mustConfig()

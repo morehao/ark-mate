@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/internal/service/svcworkspace"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/service/svcworkspace"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -80,7 +80,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 
 // Libraries 返回资料库列表（工作区根下的一级子目录，只读）。
 //
-// 无参数：资料库的集合完全由 FORGE_WORKSPACE_ROOTS + 磁盘决定，没有可调项——
+// 无参数：资料库的集合完全由 MATE_WORKSPACE_ROOTS + 磁盘决定，没有可调项——
 // 少一个参数就少一种"面板看到的和运维配的不一致"的可能。
 func (h *workspaceCtr) Libraries(c *gin.Context) {
 	list, err := h.svc.WorkspaceLibraries()

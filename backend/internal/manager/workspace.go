@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // 工作空间（workspace）= 会话的 ACP cwd：一个**规范化后的绝对路径**。
@@ -163,7 +163,7 @@ func resolveRealPath(p string) string {
 // 拒绝（而不是去猜中文文案），就把码放进消息里。
 func workspaceOutsideRootsError(path string, allowedRoots []string) error {
 	return acl.NewError(acl.ClassRequest, "workspace_outside_roots",
-		fmt.Sprintf("[workspace_outside_roots] 工作空间 %s 不在允许的工作区根之内（FORGE_WORKSPACE_ROOTS=%s）",
+		fmt.Sprintf("[workspace_outside_roots] 工作空间 %s 不在允许的工作区根之内（MATE_WORKSPACE_ROOTS=%s）",
 			path, strings.Join(allowedRoots, ",")), nil)
 }
 
@@ -203,7 +203,7 @@ func DiscardWorkspace(res WorkspaceResolution) {
 //
 // 两者一起设置而不是各设各的：白名单生效时代建根会**隐式并入**生效名单
 // （见 effectiveWorkspaceRootsLocked），于是"代建根不在白名单里"不再是配置错误——
-// 它是平台自己的目录，本来就该天然合法，不该要运维把它手写进 FORGE_WORKSPACE_ROOTS
+// 它是平台自己的目录，本来就该天然合法，不该要运维把它手写进 MATE_WORKSPACE_ROOTS
 // （旧行为：不自洽则 serve 启动失败）。分开设置则结果依赖调用顺序，容易漏，故仍收在一个入口。
 func (s *Service) SetWorkspacePolicy(dir string, roots []string) error {
 	dir = strings.TrimSpace(dir)

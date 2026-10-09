@@ -44,7 +44,7 @@ export function installTray(deps: TrayDeps): TrayHandle {
   if (process.platform === 'darwin') icon.setTemplateImage(true)
 
   const tray = new Tray(icon)
-  tray.setToolTip('ark-forge')
+  tray.setToolTip('ark-mate')
 
   const rebuild = (): void => {
     tray.setContextMenu(
@@ -59,7 +59,7 @@ export function installTray(deps: TrayDeps): TrayHandle {
           click: (item) => deps.setOpenAtLogin(item.checked),
         },
         { type: 'separator' },
-        { label: '退出 ark-forge', click: () => deps.requestQuit() },
+        { label: '退出 ark-mate', click: () => deps.requestQuit() },
       ]),
     )
   }

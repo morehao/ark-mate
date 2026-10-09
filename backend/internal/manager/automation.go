@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -52,7 +52,7 @@ func (s *Service) automationDirFor(what string) (string, error) {
 	s.mu.Unlock()
 	if dir == "" {
 		return "", acl.NewError(acl.ClassRequest, "automation_dir_unset",
-			fmt.Sprintf("未配置自动化目录（FORGE_AUTOMATIONS），%s只能内存生效、重启即失；设好目录后重试", what), nil)
+			fmt.Sprintf("未配置自动化目录（MATE_AUTOMATIONS），%s只能内存生效、重启即失；设好目录后重试", what), nil)
 	}
 	return dir, nil
 }
@@ -124,7 +124,7 @@ func loadAutomationFile(path, id string, now time.Time) *automationRec {
 //     （与能力/agent 面同源）。这也是"定义与运行态分列"之后唯一安全的装载方式；
 //  2. 一行 = 定义正文（含 `state`）+ 运行态列：由 `automationDefFromRow` 合成完整定义，
 //     再走**同一套** `buildAutomationRec`（校验、规范化、nextDue 计算全在那一处）；
-//  3. `dir` 仍然记下（`FORGE_AUTOMATIONS` 是导入/导出目录，且 memory 模式的写面仍需要它）。
+//  3. `dir` 仍然记下（`MATE_AUTOMATIONS` 是导入/导出目录，且 memory 模式的写面仍需要它）。
 //
 // 容错逐字保留：坏定义**留在列表里带 `loadErr`**（用户写了文件却在面板上看不见、还不知道
 // 为什么，是最难排查的一类投诉）。

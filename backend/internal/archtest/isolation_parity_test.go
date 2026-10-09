@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
-	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/opencode"
+	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // launcherIsolationRE 从 `gen-runtime-bin.mjs` 的一个启动器条目里抠出 `isolation: { … }` 的键名。

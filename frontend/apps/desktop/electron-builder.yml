@@ -4,7 +4,7 @@
 #
 # 壳按两类根解析路径（`src/paths.ts`，设计 §6.1 最后一条：路径算错必须明确失败，不做多级回落搜索）：
 #   - `app.getAppPath()`（= asar 内）：`dist/`（主进程 + preload）、`renderer/`（壳静态页）；
-#   - `process.resourcesPath`（= asar 外）：`forge-core`、`web/`、`payloads/`、`runtime/bin/`、`release.json`。
+#   - `process.resourcesPath`（= asar 外）：`mate-core`、`web/`、`payloads/`、`runtime/bin/`、`release.json`。
 # 所以 `files` **只**带壳自己的两个目录，`resources/**` 一律走 `extraResources`——把几百 MB 的
 # 载荷塞进 asar 不但体积翻倍，还会让 `payloads/` 不再是"随包只读的一份文件树"（设计 §6.3）。
 #
@@ -15,8 +15,8 @@
 # 也不需要 electron-builder 的 node module collector（它起步就是 `pnpm list --prod --json`，
 # 把包管理器的 store 状态拖进打包路径；受限环境里打不开那个 SQLite 索引就整包失败）。
 # 钩子返回 false 同时关掉这两件事，理由与代价写在 `scripts/electron-builder-before-build.cjs`。
-appId: com.arkforge.desktop
-productName: ark-forge
+appId: com.arkmate.desktop
+productName: ark-mate
 directories:
   output: release
   buildResources: build
@@ -41,15 +41,15 @@ files:
 # 随包运行时树：这些**必须**是 asar 外的真文件（核心要被 spawn、载荷要被 Node 解析、
 # 私有 bin 要被前置进子进程 PATH），路径与 src/paths.ts 的打包态分支逐一对应。
 extraResources:
-  - from: resources/forge-core
-    to: forge-core
+  - from: resources/mate-core
+    to: mate-core
   - from: resources/web
     to: web
   - from: resources/payloads
     to: payloads
   - from: resources/runtime/bin
     to: runtime/bin
-  # 唯一发布契约随包（M4-5 的 `forge doctor` 与合规门禁读它；verify 会断言它与源文件逐字节相同）。
+  # 唯一发布契约随包（M4-5 的 `mate doctor` 与合规门禁读它；verify 会断言它与源文件逐字节相同）。
   - from: release.json
     to: release.json
   # 随包再分发的合规文件（M4-5，设计 §11）：THIRD-PARTY-NOTICES + CycloneDX SBOM。

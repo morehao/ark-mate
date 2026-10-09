@@ -14,8 +14,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
@@ -27,7 +27,7 @@ type WSCtr interface {
 var _ WSCtr = (*wsCtr)(nil)
 
 // defaultAttachDeadline 首帧 attach 的截止时限（真源在 credential.StreamAttachDeadline，
-// 与前端 @ark/desktop-contract 的 STREAM_ATTACH_DEADLINE_MS 同值）。
+// 与前端 @ark-mate/desktop-contract 的 STREAM_ATTACH_DEADLINE_MS 同值）。
 const defaultAttachDeadline = credential.StreamAttachDeadline
 
 // Options WS 控制器装配选项（M1-1）。
@@ -97,7 +97,7 @@ type wsClientFrame struct {
 	Action string `json:"action"` // attach | detach | ping
 	AggID  string `json:"agg_id"` // attach/detach 目标聚合（conversation id）
 	// Token 首帧 attach 携带的 stream 面凭据（M1-1；桌面态必需，独立态可选）。
-	// 形状的唯一真源在前端 @ark/desktop-contract 的 buildAttachFrame。
+	// 形状的唯一真源在前端 @ark-mate/desktop-contract 的 buildAttachFrame。
 	Token    string `json:"token"`
 	SinceSeq *int64 `json:"since_seq,omitempty"` // attach 续传游标（省略→snapshot；数字含 0→重放）
 }

@@ -35,7 +35,7 @@ const (
 	// sharedMemoryBase 内存库的 file: URI 前缀。
 	sharedMemoryBase = "file:"
 	// memoryNamePrefix 内存库名前缀（配合 memSeq 保证同进程内每次 Open 各自独立）。
-	memoryNamePrefix = "arkforge_mem_"
+	memoryNamePrefix = "arkmate_mem_"
 	// memoryMode 是 SQLite 的内存库 URI 参数。
 	memoryMode = "memory"
 	// sharedCache 让连接池内的所有连接共享同一个内存库。

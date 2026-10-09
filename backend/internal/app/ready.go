@@ -12,7 +12,7 @@ import (
 // 契约（设计 §7.1）：核心 listen 成功后往 **stdout** 打**一行**，壳按**行首**匹配它；
 // 日志与它就绪行混在一起时，只有行首命中才算（前缀出现在别的日志中间不算匹配）。
 // 行内**不含任何令牌**——令牌只经 stdin 交付（M1-1）。
-const ReadyPrefix = "FORGE_READY "
+const ReadyPrefix = "MATE_READY "
 
 // ReadyPayload 就绪行载荷。
 //
@@ -28,7 +28,7 @@ type ReadyPayload struct {
 	WebBuildID string `json:"webBuildId,omitempty"`
 }
 
-// ReadyLine 由实际监听地址组装就绪行（形如 `FORGE_READY {"addr":"127.0.0.1:51234","port":51234}`）。
+// ReadyLine 由实际监听地址组装就绪行（形如 `MATE_READY {"addr":"127.0.0.1:51234","port":51234}`）。
 //
 // 地址解析失败（理论上不会：地址来自 net.Listener）时 port 记为 0 并在调用处告警——
 // 宁可让壳靠 health 轮询兜底，也不要在这里 panic 掉一个已经起来的服务。

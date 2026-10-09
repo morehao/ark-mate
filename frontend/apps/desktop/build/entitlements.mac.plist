@@ -18,7 +18,7 @@
 
   - `com.apple.security.cs.allow-unsigned-executable-memory` —— 老 Electron 文档里有它，但它是
     "允许未签名的可执行内存"，权限更宽。本轮先不加：`make verify/signature` + 打包态 smoke
-    （`FORGE_SMOKE_APP=… pnpm smoke:desktop`）会告诉我们到底需不需要；真需要时按"证而后加"补上，
+    （`MATE_SMOKE_APP=… pnpm smoke:desktop`）会告诉我们到底需不需要；真需要时按"证而后加"补上，
     并在计划 §12 记明是哪个进程、哪条错误码逼出来的。
   - `com.apple.security.cs.allow-dyld-environment-variables` —— 没有任何一处靠 DYLD_* 注入。
   - 网络/文件/摄像头等 App Sandbox 权限 —— 本项目**不进 App Store、不开 App Sandbox**（设计 §9）；
