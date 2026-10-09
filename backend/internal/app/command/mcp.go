@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/morehao/ark-forge/internal/gateway"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/gateway"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // mcpCmd 分发 `forge mcp <动作>`（M7-1：网关子命令）。

@@ -100,7 +100,7 @@ func Fingerprint(in FingerprintInput) string {
 		return ""
 	}
 	h := sha256.New()
-	writeFramed(h, "ark-forge/capability-fingerprint/v1")
+	writeFramed(h, "ark-mate/capability-fingerprint/v1")
 
 	writeFramed(h, "skills")
 	for _, s := range sortSkills(in.Skills) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // 工作空间的**只读辅助面**（浏览 + 最近使用）。
@@ -16,7 +16,7 @@ import (
 // 存在的理由：Web 面板没有原生目录选择器，用户需要一个"看到目录树再选"的入口；
 // 而工作空间是可复用的稳定身份（同一目录下可以有很多会话），所以"最近用过哪些目录"
 // 应当由既有会话派生，而不是另存一份状态（goose 维护 recent-dirs.json 是因为它没有
-// 会话↔目录的持久关联；ark-forge 有 conversations.cwd，派生即真相）。
+// 会话↔目录的持久关联；ark-mate 有 conversations.cwd，派生即真相）。
 
 // BrowseWorkspace 列出某绝对路径下的子目录（只读）。
 //

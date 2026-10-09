@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/middleware"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // 本文件是 M3-5 的**进程内集成**判据：走真实 Init（真起服务、真建 engine、真监听端口），

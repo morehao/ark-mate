@@ -1,4 +1,4 @@
-# ark-forge 能力变更生效边界技术方案（MCP / Skill 定义变更何时落到 agent）
+# ark-mate 能力变更生效边界技术方案（MCP / Skill 定义变更何时落到 agent）
 
 > 定位：`docs/capability-ecosystem-design-20260922.md` 的续篇。前者回答「能力数据面长什么样」（三张表、投影、密钥、写面、Library），本方案只回答一个更窄的问题——**通过写面改了一个 skill / MCP 定义之后，已经在跑的那些会话什么时候拿到它**。
 >
@@ -594,30 +594,30 @@ type capabilityGeneration struct {
 - **会话钉住一个不可变版本**：`profile_version` 落在 binding 行上（`dsh_runtime/bindings/repository.py:41`）。
 - **MCP 完全不走底座注入，而在平台侧执行**：全仓 `mcpServers` **零命中**；底座只拿到"HTTP 工具网关 + 短期 HMAC token"，token claims 带 `profile_version`/`tool_names`/`scopes`（`dsh_runtime/tool_gateway/token.py:41-53`）。
 - **生效时机与本方案同构**（这是最有价值的一条互证）：每轮 `prepare_turn` 重编译 → hash 相同则零副作用返回（`profile/synchronizer.py:54-62`）→ 不同则发布新版本、**先建后继（seed 自前驱）再 best-effort 拆前驱会话**（`synchronizer.py:64-70`、`runtime_coordinator.py:105-134`）。
-- **粒度必须说清**：新版本 = 新 isolationKey（`runtime_coordinator.py:19-20`）= **同一宿主进程内的新 runtime 对象**（`services/chat-api/dsh/runtime-host/src/runtime-manager.mjs:5-8` 的 `#runtimes = new Map()`），**不是新 OS 进程**。所以它的切换成本结构不能直接类比 ark-forge（一个 `runtimeConn` = 一个 OS 进程）。
+- **粒度必须说清**：新版本 = 新 isolationKey（`runtime_coordinator.py:19-20`）= **同一宿主进程内的新 runtime 对象**（`services/chat-api/dsh/runtime-host/src/runtime-manager.mjs:5-8` 的 `#runtimes = new Map()`），**不是新 OS 进程**。所以它的切换成本结构不能直接类比 ark-mate（一个 `runtimeConn` = 一个 OS 进程）。
 
 ### 11.2 值得借鉴
 
 1. **让能力档案成为可查、可校验的一等实体**，而不只是连接键里的匿名哈希：它有版本表，且离线导入时会复算摘要并校验 `profile_version == rp-<hash[:24]>`，不符即报 `Runtime Profile bundle integrity check failed`（`profile/bundle.py:18-27`）。→ 支撑 §10.1 支柱 1，也让"写面回执 + diff"有地方可算。
-2. **"先建新、再 best-effort 拆旧"的滚动顺序**：后继就绪并持久化之后才丢弃前驱，失败时调用方仍持有旧绑定（`synchronizer.py:65-70`）。这与 ark-forge `connectConversation` 的"迁移失败回退钉住旧代际"（`backend/internal/manager/conversation_start.go:209-217`）是**同一条安全原则的两种写法**，互为外部证据。
-3. **忙时的并发正确性用条件更新（CAS）表达**：只有前驱 `active_turn` 为空或终态才允许被替换，否则 `BindingReplacementConflict`（`bindings/repository.py:78-81`），上层转成可判定的忙错误（`chat_service.py:222-235`）。→ ark-forge 的对应物是 `admitGeneration` + 在途轮次/未决权限判定。**分歧点**：它忙则**整轮拒绝**，本方案忙则**顺延到下一轮、本轮继续用旧代际跑**——后者用户无感，是本方案更优的一处。
+2. **"先建新、再 best-effort 拆旧"的滚动顺序**：后继就绪并持久化之后才丢弃前驱，失败时调用方仍持有旧绑定（`synchronizer.py:65-70`）。这与 ark-mate `connectConversation` 的"迁移失败回退钉住旧代际"（`backend/internal/manager/conversation_start.go:209-217`）是**同一条安全原则的两种写法**，互为外部证据。
+3. **忙时的并发正确性用条件更新（CAS）表达**：只有前驱 `active_turn` 为空或终态才允许被替换，否则 `BindingReplacementConflict`（`bindings/repository.py:78-81`），上层转成可判定的忙错误（`chat_service.py:222-235`）。→ ark-mate 的对应物是 `admitGeneration` + 在途轮次/未决权限判定。**分歧点**：它忙则**整轮拒绝**，本方案忙则**顺延到下一轮、本轮继续用旧代际跑**——后者用户无感，是本方案更优的一处。
 4. **授权收窄的零中断通道**：会话钉住的档案不可变，但**每次工具调用都按当下策略重查**（岗位策略 + 资源授权，`enterprise_capabilities/tools/service.py:479-505`），于是"停用某工具"立即生效、不必等切换。→ **Q-6 已定（2026-10-08）：采纳，远程 MCP 收进平台侧网关**，落地设计见 §10.6。
-5. **失败边界粒度化**：MCP 子工具 schema 无法规范化时只丢该子工具、不炸整个 server；而工具**重名**则整体编译失败（fail-closed）。→ ark-forge 的 `ReplaceToolsForMcpServer` 是整 server 替换，可参考这条"局部降级"与"结构性错误整体失败"的分寸。
+5. **失败边界粒度化**：MCP 子工具 schema 无法规范化时只丢该子工具、不炸整个 server；而工具**重名**则整体编译失败（fail-closed）。→ ark-mate 的 `ReplaceToolsForMcpServer` 是整 server 替换，可参考这条"局部降级"与"结构性错误整体失败"的分寸。
 
 ### 11.3 引以为戒
 
 1. **审计只写不读、无 stale 读模型**：`runtime_profile_audit` 只有写入（`profile/store.py:173-182`），全仓无读取方、无 API 暴露；唯一"哪个会话换了能力"的记录是日志。结果：**用户完全不知道自己的会话跑在旧能力上**。→ 直接支撑 Q-2 在终局必做，以及本方案写面回执的必要性。
-2. **单层内容哈希粒度太粗**：hash 覆盖整个档案，改一个凭据也会换会话。→ 支撑 §10.4-③ 的"分面"要求。ark-forge 已把密钥**引用**（而非值）纳入指纹（三条边界见 `backend/internal/manager/capability_fingerprint.go:13-22`，实现见 `:64` 的 `mcpFingerprintParts`），这条优势要保住、别退化。
-3. **旧 runtime 不回收**：Python 侧 `gateway.dispose_runtime` 有定义却**零调用者**（`dsh_runtime/gateway.py:106`），而 JS 宿主其实提供了该端点（`runtime-host/src/runtime-http-server.mjs:96`）——即能力端到端具备、调用方漏了；轮换只销毁**会话**（`runtime_coordinator.py:128-134`）。频繁改档案会按 `tenant:<id>:profile:<hash>` 累积 runtime。→ ark-forge 的 `reclaimGeneration`/孤儿回收是对的，保留。
-4. **凭据明文且原样回吐前端**：`external_tools.py` 的序列化把 `config` 整体回吐（`:99-104`，`authToken` 就在 `config` 里）。→ ark-forge 的 vault 引用方向正确，不要被带偏。
-5. **物化无体检**：内容寻址目录"已存在即直接复用"（`runtime-host/src/skill-bundle-materializer.mjs:40-43`：解包前只校验一次 archive 摘要，落地目录存在就直接 return），目录被外部篡改不会发现。→ ark-forge 的 provenance sidecar + 物化体检是优势，保留。
+2. **单层内容哈希粒度太粗**：hash 覆盖整个档案，改一个凭据也会换会话。→ 支撑 §10.4-③ 的"分面"要求。ark-mate 已把密钥**引用**（而非值）纳入指纹（三条边界见 `backend/internal/manager/capability_fingerprint.go:13-22`，实现见 `:64` 的 `mcpFingerprintParts`），这条优势要保住、别退化。
+3. **旧 runtime 不回收**：Python 侧 `gateway.dispose_runtime` 有定义却**零调用者**（`dsh_runtime/gateway.py:106`），而 JS 宿主其实提供了该端点（`runtime-host/src/runtime-http-server.mjs:96`）——即能力端到端具备、调用方漏了；轮换只销毁**会话**（`runtime_coordinator.py:128-134`）。频繁改档案会按 `tenant:<id>:profile:<hash>` 累积 runtime。→ ark-mate 的 `reclaimGeneration`/孤儿回收是对的，保留。
+4. **凭据明文且原样回吐前端**：`external_tools.py` 的序列化把 `config` 整体回吐（`:99-104`，`authToken` 就在 `config` 里）。→ ark-mate 的 vault 引用方向正确，不要被带偏。
+5. **物化无体检**：内容寻址目录"已存在即直接复用"（`runtime-host/src/skill-bundle-materializer.mjs:40-43`：解包前只校验一次 archive 摘要，落地目录存在就直接 return），目录被外部篡改不会发现。→ ark-mate 的 provenance sidecar + 物化体检是优势，保留。
 
 ### 11.4 它没有回答的问题（对本方案最要紧的一条）
 
 **"运行中的底座是否重读技能目录"在 movo 不存在**——它根本不投影 `SKILL.md`：技能正文作为字符串进档案、经内存 provider 下发给 ACP 宿主（frontmatter 校验只出现在 ZIP 安装入口 `services/skill_packages/validator.py:91-105`）。它是用"换 runtime 对象 + 重建会话"**回避**了热重载，而不是解决了它。所以：
 
 - 本方案 §3.2 例外 5 修正后的口径（"投影端到端链属 **skill 功能验收**，不是承诺上限"）**不能靠 movo 的证据升级**——movo 不投影 `SKILL.md`，对这条没有证据；仍需仓库自己做投影端到端实测（§10.7）。而"底座是否会**重读**"（E5）在终局只决定**能否省掉重建**（`docs/capability-ecosystem-design-20260922.md:807`）；
-- 反向也成立：movo 的形态说明"内容寻址即投影"是一条**真实可行的替代路线**（目录名 = 摘要，一次性消掉同名冲突/并发写/重复物化），但代价是放弃"底座原生扫描技能目录"这条路径——ark-forge 两个 adapter 明确声明的是后者（`backend/pkg/runtime/adapters.go:60-68`、`:115-135`），不是可以随手换的。
+- 反向也成立：movo 的形态说明"内容寻址即投影"是一条**真实可行的替代路线**（目录名 = 摘要，一次性消掉同名冲突/并发写/重复物化），但代价是放弃"底座原生扫描技能目录"这条路径——ark-mate 两个 adapter 明确声明的是后者（`backend/pkg/runtime/adapters.go:60-68`、`:115-135`），不是可以随手换的。
 
 ### 11.5 一句话结论
 
@@ -642,7 +642,7 @@ movo 在「能力档案内容寻址 + 轮次边界滚动」上与本方案**同�
 | ADR-8 | `probe` 绝不 +1 | Tool 目录是平台读模型，不是 agent 工具面 |
 | ADR-9 | 把「进键的 token」与「落库的指纹」拆成两个显式字段（`capabilityGeneration`） | 今天二者共用 `connectConversation` 的一个字符串参数；缺省路径要求它们取不同的值（进键=rev token、落库=`''`），继续共用会把 rev token 写进 `capability_fingerprint` 列，破坏"空 = 未声明能力选择"的对外契约，并让 `reason=generation` 的判据失效 |
 | ADR-10 | 新列与事件 payload 字段都叫 `capability_profile`（不用 `capability_rev_token`/`capability_token`） | 按终局命名一次到位，避免二次迁移；值形态从 rev token 演进到 digest 的前提是它**不透出为对外契约**（v1 只内部比较 + 对外给 `capability_stale` 布尔与写面回执） |
-| ADR-11 | 能力摘要必须能**分面比较**（工具面 / 技能面 / 凭据与端点面），只有会改变底座可见面的变化才触发滚动 | 避免重复 movo"改一个凭据也换会话"的缺陷（§11.3-②）；ark-forge 已把密钥**值**排除在指纹外（`capability_fingerprint.go:64-84`），这条优势必须保住 |
+| ADR-11 | 能力摘要必须能**分面比较**（工具面 / 技能面 / 凭据与端点面），只有会改变底座可见面的变化才触发滚动 | 避免重复 movo"改一个凭据也换会话"的缺陷（§11.3-②）；ark-mate 已把密钥**值**排除在指纹外（`capability_fingerprint.go:64-84`），这条优势必须保住 |
 | ADR-12 | **按"环归属"重切 E 系列，不整体升格**（终局版，§10.7）：**投影端到端链** → 移出 T-1，改挂 skill **功能验收**（唯一要测的）；**E4/E6 → 不设 owner**（网关落地后由平台在环消解，仅 stdio 直连路径留待办）；**E2/E3 → `CapabilityScope` 的触发项**（有人真需 `session` 粒度时）；**E5 → 成本项**（重建成本成为实测问题时） | 终局承诺来自**平台机制**而非底座行为：MCP 面由协议内建的 `mcpServers` 重绑保证（`session/new`/`load`/`resume`），skill 面由**进程生命周期归平台**保证（边界重建进程 = 新进程启动时读投影根）。所以"下一轮生效"要的是**缺省路径也走代际**（工程），不是探针（测量）。终局用「少滚动 + 平台在环」取代「细粒度 + 探测底座」 |
 | ADR-13 | **能力的**事实源从文件迁到 DB（Q-5，2026-10-08 定）；文件降级为导入/导出载体 | 开发阶段允许迁移持久数据；C9 的**意图**保留、**机制**换成事务 + 行 revision CAS；顺带白拿版本史/审计/diff，并消掉 `LoadDir` 只合并不摘除的幽灵定义缺陷（§10.5） |
 | ADR-14 | **远程 MCP 收进平台侧 stdio 网关**（Q-6，2026-10-08 定）；stdio 代管（S2）**不现在拍，按两条实测分派**（Q-8） | 一个稳定条目让"逐 runtime transport 承载矩阵"从架构上消失，密钥不出平台，工具可见性与授权收窄变成调用期事实（§10.6）；代价是平台开始承担远程连接与重连（C-5 收窄）。S2 的独占收益只有"stdio 密钥不进底座"与"stdio 工具也走调用期策略"两条，而代价是接手 cwd/spawn 粒度/子进程回收三条底座实现细节（见实施计划 P-6） |

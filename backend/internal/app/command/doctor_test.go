@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // writeFiles 在 root 下写一组文件（rel → 内容），自动建父目录。

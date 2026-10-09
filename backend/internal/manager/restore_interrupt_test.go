@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // TestRestoreMarksInProgressAsInterrupted 重启恢复时残留 in_progress 会话收敛为 interrupted

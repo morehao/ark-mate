@@ -23,7 +23,7 @@ import (
 //	warning  放行但记在 skill 上（`Skill.Warnings` → REST 读模型暴露，让人自己判断）
 //	info     仅提示（当前只有「正文超长」一条）
 //
-// 与 compozy 的一处差异：那边「内置来源豁免校验」（`registry_load.go:254`），ark-forge 没有
+// 与 compozy 的一处差异：那边「内置来源豁免校验」（`registry_load.go:254`），ark-mate 没有
 // 内置 skill 来源（技能只来自 <CapabilityDir>/skills/*.json 与显式注入），故**不设豁免**——
 // 少一个「谁能绕过闸门」的判断点。
 

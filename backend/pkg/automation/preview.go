@@ -3,7 +3,7 @@ package automation
 import (
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // PreviewCountDefault / PreviewCountMax `POST /automations/preview` 的次数约束。

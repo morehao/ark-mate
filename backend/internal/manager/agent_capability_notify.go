@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // ——— M6-8 / P-13：agent 写面之后的能力面变更通知 ———

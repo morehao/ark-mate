@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // ——— 能力定义写面的**载体**（M6-3） ———

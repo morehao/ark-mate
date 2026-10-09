@@ -8,7 +8,7 @@ import (
 
 // ——— §13.3 M1/M6：密钥引用（明文 vs 密钥在类型上分开） ———
 //
-// 为什么需要：ark-forge 原先只有一个 `McpServer.Headers`，于是"非密钥的 header（如
+// 为什么需要：ark-mate 原先只有一个 `McpServer.Headers`，于是"非密钥的 header（如
 // `X-Client: forge`）"和"密钥（如 `Authorization: Bearer sk-…`）"**在同一个字段里**，
 // 谁也没法在类型层面说清哪个是秘密——结果就是密钥明文躺在 `<CapabilityDir>/mcp/*.json` 里，
 // 而读模型只好整个 `headers` 都不返回（要么泄密要么没用）。

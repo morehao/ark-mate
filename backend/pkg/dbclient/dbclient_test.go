@@ -145,7 +145,7 @@ func TestBuildDSN(t *testing.T) {
 		{
 			name:       "内存库唯一命名且共享缓存",
 			url:        "sqlite://:memory:",
-			wantPrefix: "file:arkforge_mem_",
+			wantPrefix: "file:arkmate_mem_",
 			wantHas:    []string{"mode=memory", "cache=shared", "foreign_keys%281%29"},
 			// 内存库不支持 WAL。
 			wantNotHas: []string{"journal_mode"},

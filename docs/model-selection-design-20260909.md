@@ -52,7 +52,7 @@
 **非目标（明确不做）**
 
 - 对话中的模型热切换（opencode 忽略 ACP 客户端模型选择，issue #13644）。
-- 不做 openwork 的 org/den/云端供应商权限层（ark-forge 单操作员、无云端模型市场）。
+- 不做 openwork 的 org/den/云端供应商权限层（ark-mate 单操作员、无云端模型市场）。
 - 不做模型的运行时训练/在线推理栈。
 
 ---
@@ -447,7 +447,7 @@ func (s *Session) SetConfigOption(ctx context.Context, configID, value string) e
 
 > 目标：把「会话级模型」做成可交互选择器。参考 openwork 的 `ModelSelect` / `ModelPickerModal`
 > 交互（搜索、按 provider 分组、推荐星标、effort 二级），但**不引入**其 org/den/云端供应商权限层
-> （ark-forge 单操作员、无云端模型市场）。面板基于 antd + `@ark/ui`，模型 pill 复用 `Pill`/`tokens`。
+> （ark-mate 单操作员、无云端模型市场）。面板基于 antd + `@ark/ui`，模型 pill 复用 `Pill`/`tokens`。
 
 ### 13.1 类型与 API（`packages/types` / `packages/api`）
 

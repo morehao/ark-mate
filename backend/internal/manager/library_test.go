@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtolibrary"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/service/svclibrary"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // libraryRig 一套四类齐全的 Library 夹具：

@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— Agent Registry（P2）：definitions 目录 + 注册/编辑/删除/启停 ———

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // testSpec 构造一处投影形态（落点 <id>/SKILL.md，即两个 adapter 当前的原生约定）。

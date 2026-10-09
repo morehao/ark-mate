@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // ——— M2-2/M2-3：能力定义的写面（Skill / MCP） ———

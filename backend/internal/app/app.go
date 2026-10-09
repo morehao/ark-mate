@@ -23,17 +23,17 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/middleware"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/version"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/procreg"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/version"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ExitError 携带进程退出码的装配错误。

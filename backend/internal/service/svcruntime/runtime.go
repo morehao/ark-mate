@@ -5,9 +5,9 @@ package svcruntime
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtomodel"
-	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
-	"github.com/morehao/ark-forge/internal/dto/dtoruntime"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
 // RuntimeSvc 底座（runtime/provider/模型目录）面的服务端口。

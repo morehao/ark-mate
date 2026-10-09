@@ -1,17 +1,17 @@
-# ark-forge × zacp 重合面重构技术方案（含 SQLite 落库）
+# ark-mate × zacp 重合面重构技术方案（含 SQLite 落库）
 
 > 版本：v1 draft（2026-09-08）｜类型：技术重构 + 数据模型设计｜档位：标准档（含完整档必要的迁移/回滚与开放问题收口）
-> 前置材料：`.cache/ark-forge-audit-report.md`（ark-forge 全量缺陷清单，文件:行号 证据）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
+> 前置材料：`.cache/ark-mate-audit-report.md`（ark-mate 全量缺陷清单，文件:行号 证据）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
 > 关联文档：`docs/design-and-roadmap.md`（M0–M3 路线图，本文是其中与 zacp 重合部分的执行方案）；`frontend/DESIGN.md`（前端视觉纪律，本次不动）。
 
 ## 摘要（TL;DR）
 
-ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、权限确认、会话管理、Agent 选择与配置、持久化与重启恢复**。zacp 已跑通且这些面成熟；ark-forge 的对应实现存在三类问题：① 已实现但语义有错（权限拒绝语义、重启恢复会话只读卡死、WS 水位跨重启失效、用户消息双发、元数据不持久 + 无锁写）；② 文档自述与代码不符（超时环境变量未接线、usage 空载荷等，详见审计 §5 对照表）；③ 重合域缺失功能（DB 持久化、Agent 管理/热更新、空闲回收与断点恢复）——正好落在 ark-forge 自己的 M2/M3 路线图上。
+ark-mate 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、权限确认、会话管理、Agent 选择与配置、持久化与重启恢复**。zacp 已跑通且这些面成熟；ark-mate 的对应实现存在三类问题：① 已实现但语义有错（权限拒绝语义、重启恢复会话只读卡死、WS 水位跨重启失效、用户消息双发、元数据不持久 + 无锁写）；② 文档自述与代码不符（超时环境变量未接线、usage 空载荷等，详见审计 §5 对照表）；③ 重合域缺失功能（DB 持久化、Agent 管理/热更新、空闲回收与断点恢复）——正好落在 ark-mate 自己的 M2/M3 路线图上。
 
 本方案结论与核心取舍：
 
 1. **范围已拍板**：SQLite 落库（原 M2 #1）纳入本次重构；**不扩大范围**——登录鉴权、深色模式、文件/Git/TTY、workspace 项目目录、移动端/多主机一律不做。
-2. **不整仓照抄 zacp**：zacp 的薄网关权限与消息行模型是参照，但 ark-forge 的事件流、会话级权限记忆+撤销、elicitation 通道是更强的设计，予以保留并修复语义。
+2. **不整仓照抄 zacp**：zacp 的薄网关权限与消息行模型是参照，但 ark-mate 的事件流、会话级权限记忆+撤销、elicitation 通道是更强的设计，予以保留并修复语义。
 3. **存储采用「事件落库 + 会话/轮次物化」的混合模型**（决策记录见附录 A）：事件表承载权威历史与回放（保留现有事件流契约与前端渲染逻辑），sessions/runs 物化元数据、统计、搜索、重试所需读模型；进程内 eventbus 只做 live 扇出。
 4. **执行分四批**：P0 纯正确性修复 → P1 SQLite 落库与迁移（结构性大头）→ P2 Agent 管理面 + 生命周期（空闲回收/断点恢复）→ P3 前端可靠性细节（保留 React/antd 风格）。P0/P3 可与 P1/P2 并行。
 5. **三项开放点已定案（2026-09-08，见附录 A ADR-5）**：① events 为唯一事实源、runs/messages 为可重建读模型投影，P1 **保留 messages 表**不裁剪；② transcript 迁移后默认**停写 + 只读保留**（清理仅经显式命令，不自动删）；③ 权限「始终拒绝」**做成与 allow 对称的会话级可撤销记忆**（含 UI 留痕防静默）。
@@ -22,7 +22,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 
 ### 业务背景与现状
 
-- ark-forge 定位是「单机单操作员的 ACP 控制面底座」：一个 daemon 拉起 opencode / deepseek-harness / echo 等 ACP runtime，Web 面板做会话问答与权限/提问交互。会话历史以 JSONL transcript 落盘，运行态为进程内存 + eventbus。
+- ark-mate 定位是「单机单操作员的 ACP 控制面底座」：一个 daemon 拉起 opencode / deepseek-harness / echo 等 ACP runtime，Web 面板做会话问答与权限/提问交互。会话历史以 JSONL transcript 落盘，运行态为进程内存 + eventbus。
 - zacp 是「已发布（v0.9.0）的多 Agent Web 网关」：Go + Gin + SQLite(WAL)，前端 Vue3。会话/消息/工具详情均入 DB，Agent 支持页面增删改 + 配置文件热更新，有空闲回收与断线续流裁决。
 - 两端重合面内的成熟度差已在「摘要」列出，全部有源码证据（见审计报告）。
 
@@ -38,7 +38,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 **目标**
 
 - 把上表 1–3 类问题全部修掉；SQLite 成为会话/事件/元数据/统计的权威存储，进程重启与崩溃恢复后会话可看、可续、可操作。
-- Agent 从「代码播种只读」升级为「可注册/启停/配置注入 + 空闲回收 + 按需恢复」（对齐 zacp 已验证机制，落 ark-forge 的 definitions/registry 形态）。
+- Agent 从「代码播种只读」升级为「可注册/启停/配置注入 + 空闲回收 + 按需恢复」（对齐 zacp 已验证机制，落 ark-mate 的 definitions/registry 形态）。
 - 权限决策语义对齐 ACP：用户显式拒绝=Selected(deny 选项)（无法区分时兜底 Cancelled）、会话级 allow/reject 记忆双侧生效且可见可撤销。
 - 前端保持 React + antd + zustand + `DESIGN.md` 视觉语言不变，仅补齐可靠性行为细节。
 - README/路线图与实现重新对齐（删除或实装承诺项）。
@@ -75,7 +75,7 @@ ark-forge 与 zacp 的产品重合面 = **会话/消息流式聊天主链路、�
 1. **DB 权威、总线 live**：一切可回放的历史（事件/元数据/轮次统计）落 SQLite；eventbus 只负责当前进程的实时扇出与断线重放读取（读 DB）。内存态仅是缓存，不再承担权威。
 2. **保留事件流范式**：事件词表、seq 语义、agg=session 不变；前端 applyEvent 增量归并逻辑尽可能不动。
 3. **写路径单点收口**：Service 是唯一写入口（现在已是），新增 Repository 层后所有 SessionRec 修改走「锁 + 落库」，消灭散落的无锁写。
-4. **参照机制而非代码**：热更新原子写、空闲回收锁外杀进程、消息拆分落库等机制对齐 zacp 已验证做法，但用 ark-forge 的模块形态实现。
+4. **参照机制而非代码**：热更新原子写、空闲回收锁外杀进程、消息拆分落库等机制对齐 zacp 已验证做法，但用 ark-mate 的模块形态实现。
 
 ### 系统上下文与依赖
 
@@ -148,7 +148,7 @@ flowchart TB
 
 | 方案 | 代价 | 否决/选择理由 |
 |---|---|---|
-| A. 照抄 zacp 消息行模型：DB 只有 messages 行，事件只 live，断流/历史改消息页拉取 | 需重写 WS/历史契约与前端 store 读模型；事件流范式与 elicitation/权限卡的瞬时态难以行化 | 否决：改动面远超问题本身，且丢掉 ark-forge 事件流优势 |
+| A. 照抄 zacp 消息行模型：DB 只有 messages 行，事件只 live，断流/历史改消息页拉取 | 需重写 WS/历史契约与前端 store 读模型；事件流范式与 elicitation/权限卡的瞬时态难以行化 | 否决：改动面远超问题本身，且丢掉 ark-mate 事件流优势 |
 | B. 纯事件落库（不做 runs/messages 物化） | 搜索/统计/重试要继续在事件增量上做窗口聚合，缺陷 9 复发 | 否决：无法根治截断失真；查询语义脆弱 |
 | **C. 事件落库 + sessions/runs/messages 物化（本文推荐）** | DB 双写（事件 + 物化行），需保证一致 | 采纳：契约与前端改动最小；物化行承接统计/搜索/重试/元数据；事件承接回放/审计 |
 | D. 只修内存态缺陷、不上 DB | 改动最小 | 否决（用户已拍板 SQLite 纳入）：重启恢复、seq、截断等结构性缺陷仍无解 |
@@ -263,7 +263,7 @@ erDiagram
 
 #### 与 zacp 存储模式的差异（有意为之）
 
-| 点 | zacp | ark-forge 本次 | 理由 |
+| 点 | zacp | ark-mate 本次 | 理由 |
 |---|---|---|---|
 | 历史回放 | 消息行 + afterId 增量 | events 表 seq 回放（沿用契约） | 保留事件流前端；修复 seq 跨重启即可 |
 | 轮次/统计 | 无显式 runs | runs 物化 + first/last_seq | 根除截断失真 |
@@ -349,7 +349,7 @@ erDiagram
 ### 资源需求与依赖
 
 - 环境：macOS/Linux 均可；Go 1.26.1；Node 24 + pnpm 11（仅前端）。
-- 前置：P1 启动前完成 `.cache/ark-forge-audit-report.md` 各条目的代码级复核（审计为静态读，个别行为以实测为准，如 echo 的 reject-all 在 UI 的实际往返）。
+- 前置：P1 启动前完成 `.cache/ark-mate-audit-report.md` 各条目的代码级复核（审计为静态读，个别行为以实测为准，如 echo 的 reject-all 在 UI 的实际往返）。
 
 ## 风险评估与应对
 
@@ -401,7 +401,7 @@ erDiagram
 
 ### B. 参考资料
 
-- `.cache/ark-forge-audit-report.md`（缺陷清单与文件:行号 证据）
+- `.cache/ark-mate-audit-report.md`（缺陷清单与文件:行号 证据）
 - `docs/design-and-roadmap.md`（M0–M3 路线图，本文对应 M2 #1–#4 / M3 #1 的执行细化）
 - `docs/agent-interactions-acp-v1-design-20260907.md`（ACP elicitation/权限契约）
 - zacp 仓库（只读参照）：`backend/internal/store/*`、`backend/internal/config/agents_file.go`、`backend/internal/tty` 除外机制、`backend/internal/ws/*`、前端 `stores/session.ts` 等

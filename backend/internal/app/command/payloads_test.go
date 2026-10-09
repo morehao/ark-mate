@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 )
 
 // TestParsePayloadsValid 合法清单被原样解析成结构化值：字段一一对应、顺序保持、entry 被忽略。

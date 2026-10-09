@@ -4,7 +4,7 @@ package svcsearch
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtosearch"
+	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 )
 
 // SearchSvc 消息检索面的服务端口。

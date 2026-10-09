@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // agentCmd 分发 `forge agent <动作>`（M6-6：agent 定义的存量搬家，与 `forge capability` 同形）。

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。

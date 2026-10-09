@@ -1,10 +1,10 @@
-# AGENTS.md — ark-forge
+# AGENTS.md — ark-mate
 
 ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 
 ## 布局与目录边界
 
-- `backend/`：唯一 Go module（`github.com/morehao/ark-forge`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
+- `backend/`：唯一 Go module（`github.com/morehao/ark-mate`，go 1.26.1）。**仓库根没有 go.mod / go.work——所有 go 命令必须在 `backend/` 下运行**。
   - **`pkg/` 与 `internal/` 的分界**（对齐 ark-iam）：可复用基础设施进 `pkg/`，应用专属逻辑留 `internal/`。`pkg/` 内部**不得 import `internal/`**（由 `internal/archtest` 守卫）。
     - `pkg/`：`code`（对外业务错误码唯一事实源：常量 + 注册表 + `FromError` 归一）、`acl`（ACP 客户端）、`runtime/{opencode,deepseekharness}`（adapter + 注册表，另有 `runtime` 根包的 Spec/投影/指纹）、`mcp`（自研 MCP 客户端）、`capability`、`routing`、`config`（进程配置）、`procreg`（进程注册表）、`web`（release 内嵌前端宿主）、`dbclient`（gorm 句柄装配 + 自注册纯 Go SQLite dialector）、`object/objusage`（跨层共享值对象）。
     - `internal/`：`app`（装配 + 启停生命周期）、`app/command`（CLI 子命令）、`router`（唯一路由装配点，按领域分 `routes_*.go`）、`controller/ctr<领域>`（传输层控制器）、`middleware`、`dto/dto<领域>`（请求/响应 DTO）、`service/svc<领域>`（领域端口）、`manager`（领域实现：Service / Orchestrator / 事件 / 权限；**按领域分文件，不设 god file**——`service.go`/`orchestrator.go` 只留类型、构造与装配，会话动作在 `conversations.go`、轮次在 `turn.go`、连接在 `connection.go`、进程回收在 `orphan_reap.go`、事件出口在 `event_sink.go`、权限/提问在 `interaction.go`/`permission_flow.go`）、`model`（持久层实体 + 列/取值约定）、`dao`（单表数据访问，基于 golib gormdao）、`store`（持久层门面：句柄 + 跨表事务 + 读模型 API）、`eventbus`、`testutil`（跨包复用的测试夹具；**不得 import `manager`**——manager 的测试是内部测试包，反向依赖会形成 `import cycle not allowed in test`，manager 专属组合留在其 `testrig_test.go`，由 `archtest` 守卫）、`archtest`（架构守卫测试）。
@@ -22,7 +22,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 - 编号沿用既有 5 位 HTTP 语义码（`40000/40001/40101/40401/40501/40901/50000/50001/50201`），**不按 ark-iam 的 6 位领域段重编**——它们已经是对外契约。ark-iam 借的是结构（`code.go` 注册表 + 按领域分文件），不是编号。
 - `50000` 是**唯一兜底码**：任何未归类 error 经 `code.FromError` 出口都落成它。历史上有 `1`（控制器手写）与 `50000`（领域层）两个泛化码，已统一为 `50000`。
 - **控制器错误出口一律带码**：`gincontext.Fail(c, code.FromError(err))` 或 `code.Error(code.X, …)`，不得透传裸 `err`——gincontext 对不带 `gerror.Error` 的错误填 `code: -1`，客户端拿不到可判定的码。由 `TestControllerErrorExitsCarryCode` 静态守卫。
-- acl 分类 → 码的映射表在 `pkg/code/acl.go`（不在 `pkg/acl`：acl 是可复用的 ACP 客户端，不该知道 ark-forge 的信封编号）。`agent_not_found`/`conversation_not_found`/`runtime_not_found`/`mcp_not_found`/`provider_not_found` 从 `ClassRequest` 提档到 `40401`。
+- acl 分类 → 码的映射表在 `pkg/code/acl.go`（不在 `pkg/acl`：acl 是可复用的 ACP 客户端，不该知道 ark-mate 的信封编号）。`agent_not_found`/`conversation_not_found`/`runtime_not_found`/`mcp_not_found`/`provider_not_found` 从 `ClassRequest` 提档到 `40401`。
 
 ## 常用命令（仓库根）
 

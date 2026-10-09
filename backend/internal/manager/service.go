@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // AgentRec 是进程内 Agent 定义（P0：Agent 不再绑定单一 runtime，路由候选见 Runtimes）。

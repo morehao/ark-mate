@@ -14,8 +14,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

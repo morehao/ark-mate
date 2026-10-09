@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/automation"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/automation"
 )
 
 // ——— automation 面的控制器契约（M4-5）———

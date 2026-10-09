@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // recomputeDigest 是 `webDigest` 的**独立第二实现**（照 meta.go/web.go 注释里的算法重写一遍）：

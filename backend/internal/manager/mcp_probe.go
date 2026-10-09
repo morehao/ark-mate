@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // defaultMCPProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。

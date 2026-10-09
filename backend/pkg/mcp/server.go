@@ -130,7 +130,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, info ServerInfo, h Han
 		s.log = slog.Default()
 	}
 	if s.info.Name == "" {
-		s.info.Name = "ark-forge"
+		s.info.Name = "ark-mate"
 	}
 	if s.info.Version == "" {
 		s.info.Version = clientVersion

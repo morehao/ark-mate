@@ -1,4 +1,4 @@
-# ark-forge 单机容器部署（docker compose up -d --build）
+# ark-mate 单机容器部署（docker compose up -d --build）
 #
 # 镜像形态由 build.target 与两个开关共同决定（与 Dockerfile 一致）：
 #   默认（不改任何变量）        → 最小镜像：只含 forge 本体，用内置 echo 底座自检
@@ -21,8 +21,8 @@ services:
         GO_PROXY: ${GO_PROXY:-https://proxy.golang.org,direct}
         DSH_VERSION: ${DSH_VERSION:-latest}
         OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
-    image: ${FORGE_IMAGE:-ark-forge}:${FORGE_TAG:-local}
-    container_name: ${FORGE_CONTAINER:-ark-forge}
+    image: ${FORGE_IMAGE:-ark-mate}:${FORGE_TAG:-local}
+    container_name: ${FORGE_CONTAINER:-ark-mate}
     restart: unless-stopped
     # 镜像 ENTRYPOINT 已带 tini（PID 1 收 agent 子进程的孤儿），这里不必再 init: true
     ports:

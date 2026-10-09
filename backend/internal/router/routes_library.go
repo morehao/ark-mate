@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrlibrary"
+	"github.com/morehao/ark-mate/internal/controller/ctrlibrary"
 )
 
 // registerLibrary M2-4 Library 统一读模型。

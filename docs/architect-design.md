@@ -1,4 +1,4 @@
-# ark-forge 架构设计
+# ark-mate 架构设计
 
 > 面向 Agent 应用开发的通用底座/平台（monorepo）：创建、运行、扩展与统一管理 Agent，
 > 作为 ACP Host，经 stdio 连接 opencode 与 deepseek-harness 等多个 Agent Runtime。
@@ -52,7 +52,7 @@
 | 决策 | 结论 | 说明 |
 |------|------|------|
 | 仓库结构 | **monorepo** | 前后端在同一仓库 |
-| 后端 module 粒度 | **单 module**（`backend/`，`github.com/morehao/ark-forge`）+ `internal/` 分层目录 | 抽离公共逻辑用「包」即可，无需 module；层目录保留 seam，待出现跨项目复用/独立版本化需求时再按层抽独立 module/仓（演进见 §5） |
+| 后端 module 粒度 | **单 module**（`backend/`，`github.com/morehao/ark-mate`）+ `internal/` 分层目录 | 抽离公共逻辑用「包」即可，无需 module；层目录保留 seam，待出现跨项目复用/独立版本化需求时再按层抽独立 module/仓（演进见 §5） |
 | 后端 | **Go** | daemon / 控制面 / ACP Host |
 | 前端 | **TypeScript + Vite(React)** | 面板 |
 | ACP 角色 | **Host（Client 侧）** | 拉起并连接 Agent 为 ACP server |
@@ -171,7 +171,7 @@ graph TB
 
 本项目采用**前后端平级 monorepo**（`backend/` 与 `frontend/` 同仓平级）：
 
-- **后端侧**：单 module `github.com/morehao/ark-forge`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
+- **后端侧**：单 module `github.com/morehao/ark-mate`（`go.mod` 位于 `backend/` 根，依赖统一收敛于单一
   go.mod/go.sum），`internal/` 下每层（acl / runtime / manager / server / infra / web）是一个**普通包目录**；
   Go 的 `internal/` 可见性保证仅本仓可 import，形成天然的分层边界，跨层 import 方向靠目录约定保证。
 - **前端侧**：`frontend/` 是独立的 pnpm workspace monorepo（apps + packages），与 Go 无 module 耦合；因其产物
@@ -190,14 +190,14 @@ module / 独立仓解决的是**跨项目共享 + 独立版本/发布**。`inter
 构建/tidy 的持续摩擦；需要约束跨层 import 方向时，用 golangci-lint 的 `depguard` 在 CI 强制即可。
 
 ```
-ark-forge/
+ark-mate/
 ├── Makefile               # 根编排入口：make web / make server / make build|vet|test / make all
 ├── docs/
 │   └── architect-design.md # 本文件
 ├── LICENSE                # MIT（已就位）
 ├── README.md              # 中英简介（已就位）
 │
-├── backend/               # 后端：单 Go module（github.com/morehao/ark-forge）
+├── backend/               # 后端：单 Go module（github.com/morehao/ark-mate）
 │   ├── go.mod             #   依赖统一收敛于此（gin/golib；单一 go.sum）
 │   ├── go.sum
 │   ├── cmd/
@@ -346,7 +346,7 @@ ark-forge/
 - `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/pkg/web/dist`。
 - `make server`：`go run ./cmd/forge` 拉起后端（开发联调，不起前端）。
 - `make all`：产出仓库根单二进制 `./forge`（`-tags release` 内嵌前端）；`./forge` 拉起后冒烟。
-- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-forge` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
+- 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-mate` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
 
 ## 9. 待办 / 风险
 

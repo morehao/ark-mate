@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— agent 定义读写面的**载体**（M6-6） ———

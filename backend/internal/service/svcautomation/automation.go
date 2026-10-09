@@ -6,7 +6,7 @@ package svcautomation
 import (
 	"context"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 )
 
 // AutomationSvc automation 数据面的服务端口。

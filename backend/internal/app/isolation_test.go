@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestInitInjectsRuntimeIsolation 装配路径真的接上了隔离（M3-3）。

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 )
 
 // rawMeta 取 `/meta` 的原始 JSON（要断言"字段在不在"，不能用 map 解完再查零值）。

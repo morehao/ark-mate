@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— per-agent 默认权限策略（M2 #7 / §4.5 权限位） ———

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtosearch"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtosearch"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。

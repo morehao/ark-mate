@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoautomation"
-	"github.com/morehao/ark-forge/internal/service/svcautomation"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/service/svcautomation"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // ——— M4-5：automation 的端口实现（写面适配 + 预览 + 运行史 + 手动触发）———

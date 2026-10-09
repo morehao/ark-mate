@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestSecretRefLexiconMatchesVault §13.3 M1 的一致性守卫：能力数据面（pkg/capability）与

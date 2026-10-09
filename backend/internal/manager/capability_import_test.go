@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // ——— M6-4 导入/导出验收 ———

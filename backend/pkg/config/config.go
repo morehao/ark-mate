@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // Source 标识某个配置键的最终来源（`forge config` 展示 + 排障用）。

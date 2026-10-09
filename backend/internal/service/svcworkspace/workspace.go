@@ -2,7 +2,7 @@
 // 最近使用派生、资料库与工作区根白名单的设置面。
 package svcworkspace
 
-import "github.com/morehao/ark-forge/internal/dto/dtoworkspace"
+import "github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 
 // WorkspaceSvc 工作空间面的服务端口。
 //

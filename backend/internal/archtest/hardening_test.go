@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // 本文件是**桌面渲染进程加固基线**的守卫（M1-5，设计 §9.2）。

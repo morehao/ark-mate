@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // writeLegacyProviders 写一份「旧版本」的明文 providers.json。

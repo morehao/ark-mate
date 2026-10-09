@@ -1,8 +1,8 @@
 package manager
 
 import (
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。

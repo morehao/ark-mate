@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/redact"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/redact"
 )
 
 // ——— Automation 调度循环（M4-4）———

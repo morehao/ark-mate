@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/redact"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/redact"
 )
 
 // publish 是**事件的唯一出口**，分两段：

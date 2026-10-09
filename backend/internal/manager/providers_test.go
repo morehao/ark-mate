@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
 // TestProviderRegistryWriteOnceReadNever 档案 upsert/持久化/重启装载 + 密钥只写不读回 +

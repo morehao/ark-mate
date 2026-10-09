@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morehao/ark-forge/internal/version"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/version"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // mustConfig 解析配置（含 .forge/config 目录化）。配置文件非法时打印明确错误并退出 2
@@ -23,7 +23,7 @@ func mustConfig() (config.Config, config.Sources) {
 	return cfg, sources
 }
 
-const usageText = `forge — ark-forge 控制面 daemon（release 单二进制内嵌前端面板）
+const usageText = `forge — ark-mate 控制面 daemon（release 单二进制内嵌前端面板）
 
 用法：
   forge serve [--addr 127.0.0.1:10001]

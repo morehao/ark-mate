@@ -1,4 +1,4 @@
-module github.com/morehao/ark-forge
+module github.com/morehao/ark-mate
 
 go 1.26.1
 

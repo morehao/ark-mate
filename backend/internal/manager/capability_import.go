@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // ——— 存量能力定义的一次性导入与导出（M6-4） ———

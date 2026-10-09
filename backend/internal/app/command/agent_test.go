@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 func writeAgentDef(t *testing.T, dir, name, body string) string {

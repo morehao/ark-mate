@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // modelApplyReason 从运行时错误里提取一句人类可读的「为什么这个值不可用」

@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestSQLiteLivePersistenceAcrossRestart 验证 P1 live 接线核心不变量：

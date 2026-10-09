@@ -1,4 +1,4 @@
-# ark-forge 桌面端架构设计
+# ark-mate 桌面端架构设计
 
 | 项 | 值 |
 | --- | --- |
@@ -6,7 +6,7 @@
 | 场景 | 增量改造（既有控制面新增桌面交付形态 + 运行时解析面改动）；桌面壳为新建 |
 | 篇幅档位 | 完整档（裁剪：无多租户、容灾、成本核算章节） |
 | 专题 | 架构设计 · 安全 · 性能与容量 |
-| 设计基线 | `ark-forge` HEAD `0c4768e`；参考实现 `deepseek-harness` `0.1.7-rc.2`；Electron 44 / Node 24.18.1（实测） |
+| 设计基线 | `ark-mate` HEAD `0c4768e`；参考实现 `deepseek-harness` `0.1.7-rc.2`；Electron 44 / Node 24.18.1（实测） |
 | 形态 | **一份 Go 核心**（回环 REST + WS + 资产层）**＋ 一个 Electron 壳 ＋ 一份随包资产与运行时载荷**。用户机器不需要 Go / Node / pnpm / Python，也不需要预装 dsh 或 opencode |
 
 ---
@@ -63,14 +63,14 @@ R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**
 
 **为什么"并列"却仍共享一份前端产物**：deepseek-harness 的 `apps/web`（`@deepseek-ai/dsh-web-frontend`）构建出的 `dist`，正是它桌面窗口渲染的那份 UI——桌面壳在 `dsh-app://app/` 路由下，从包内 `node_modules/@deepseek-ai/dsh-web-frontend/dist` 直接读静态资产，其余请求反代给本地 Host，事件流按壳在 boot 时下发的 `streamBaseUrl` 直连回环。即：**并列的是产品与流水线，共享的是 UI 产物。**
 
-| deepseek-harness | ark-forge | 说明 |
+| deepseek-harness | ark-mate | 说明 |
 | --- | --- | --- |
 | `apps/web`（`dsh-web-frontend`，Vite，`exports: ./dist/*`） | `apps/web`（Vite SPA，`exports: ./dist/*`） | 前端产品：产物被两个入口消费 |
 | `apps/desktop`（`dsh-desktop`：壳 + 打包 + 更新 + 安装器脚本） | `apps/desktop` | 桌面产品：依赖前端产品的 `dist` |
-| `apps/desktop-host` | `backend/`（Go 核心，含资产层与运行时编排） | 被壳 spawn 的宿主；ark-forge 里它就是 `forge` 二进制本身，不在 pnpm workspace 内 |
+| `apps/desktop-host` | `backend/`（Go 核心，含资产层与运行时编排） | 被壳 spawn 的宿主；ark-mate 里它就是 `forge` 二进制本身，不在 pnpm workspace 内 |
 | `apps/cli`（owns the `dsh` bin） | `backend/cmd/forge` | 命令行入口 |
 | `packages/*/*`（含 `client/ui-*` 组件层） | `packages/{ui,types,api,tsconfig}` | 能力层 |
-| `packages/bundle/web-app`：组装可运行的 web 产品（起 webServer + 打开浏览器） | 浏览器入口由核心托管前端资产（`forge web`） | 组装层在 ark-forge 落在 Go 侧 |
+| `packages/bundle/web-app`：组装可运行的 web 产品（起 webServer + 打开浏览器） | 浏览器入口由核心托管前端资产（`forge web`） | 组装层在 ark-mate 落在 Go 侧 |
 | `apps/desktop/scripts/*`：`prepare-runtime`、`sign-primary-runtime`、electron-builder 配置、更新环境、安装器测试 | `apps/desktop/scripts/*`：资产与载荷装配（`prepare-runtime`）、`release.json` 生成与逐项复核（`build-release-json` / `verify-release-json`）、打包、签名/公证、更新环境、安装器测试 | 把**发布契约**与业务逻辑分离，让"发布怎么发生"有唯一落点 |
 | `desktop-runtime.json`（逐文件完整性清单）+ `release.ts`（发布列车统一版本；实测 `apps/{web,cli,desktop,desktop-host}` 同为 `0.1.7-rc.2`） | `apps/desktop/release.json`：app 版本 + `forge-core` 版本 + **前端 build id / digest** + 各载荷 `name/version/digest` + 交付事实（`signing` / `notarized` / `channel` / `macUpdate`，见计划 §12.27） | 一个发布号标识整套（`coreVersion` 必须等于 `appVersion`，由脚本断言）；同时是 §6.7 版本闸门的落点 |
 | pnpm 供应链纪律：`allowBuilds` 默认拒绝、`patchedDependencies`、`minimumReleaseAge`、随包第三方按平台钉死确切版本 | 沿用，并**扩展到随包 runtime**：Electron、`dsh`、`opencode` 的确切版本与平台矩阵写入 `release.json` 与合规清单（§11） | 随包第三方二进制必然出现在用户机器上，版本必须可复现、可审计 |
@@ -260,7 +260,7 @@ graph TB
 **规则**：
 
 - 两种机制**不叠加**：给了 `--web-dir` 就用它，否则用内置。给了一个无效目录就**拒绝启动**，不静默回落到内置——"配错却照常跑起来"会让人看到旧界面却以为新版本已生效。
-- **不做隐式搜索**：没有"可执行文件同目录 → `../share/ark-forge/`"这类多级回落，来源永远只有这两个，实际来源永远写在启动日志与 `/meta` 里。
+- **不做隐式搜索**：没有"可执行文件同目录 → `../share/ark-mate/`"这类多级回落，来源永远只有这两个，实际来源永远写在启动日志与 `/meta` 里。
 - **显式覆盖只出现在"未打包"与"打包层"**：打包形态下 `--web-dir` 由壳按安装布局写死（参照实现的两个路径覆盖环境变量只在 `!app.isPackaged` 分支被读取，打包态是固定布局），核心既不推测也不搜索——来源永远是别人告诉它的。
 - 完整性分两种语义：**内置资产**由构建期清单 + 二进制签名保证（打包期复算、CI 门禁）；**显式目录**在启动时计算并回报 build id 与逐文件 digest，但不与签名清单比对——它表示"操作者显式选择了这个来源"。
 - 资产只允许来自本地（R3）。不实现远端拉取与运行期下载。
@@ -268,7 +268,7 @@ graph TB
 
 ### 6.2 静态资产服务路径：核心侧与壳侧
 
-**核心侧**（浏览器入口、Docker、CLI）：内置资产（`embed.FS`）与显式目录（`os.DirFS`）都归一成**同一个 `fs.FS` + 一套逻辑**——参照实现把 dist 服务交给组装层（其宿主 webserver 明确"不服务文件"），ark-forge 没有插件组装层、核心本身就是那一层：
+**核心侧**（浏览器入口、Docker、CLI）：内置资产（`embed.FS`）与显式目录（`os.DirFS`）都归一成**同一个 `fs.FS` + 一套逻辑**——参照实现把 dist 服务交给组装层（其宿主 webserver 明确"不服务文件"），ark-mate 没有插件组装层、核心本身就是那一层：
 
 | 关注点 | 一次定义，处处生效 |
 | --- | --- |
@@ -519,7 +519,7 @@ sequenceDiagram
 
 | 平台 | 形态 | 要点 |
 | --- | --- | --- |
-| Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-forge`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
+| Windows | **per-user 安装（免 UAC）**，装到 `%LOCALAPPDATA%\Programs\ark-mate`；目录式安装器：先解到 `$INSTDIR.new-<GUID>`，再**同卷两次 rename** 提升，失败回滚 | 不弹管理员提权是"零门槛"的关键一条；"10k+ 文件 / 数百 MB"体量下逐文件覆盖几乎必然留下半损坏状态，故必须原子化。**长路径**（>260 字符）需显式处理；杀软对数千小文件的扫描与新包的 SmartScreen 声誉需签名缓解 |
 | macOS | **`tar.gz` 解压到 `~/Applications`（非浏览器渠道分发，不带 quarantine）；dmg 只作本地自测**（2026-09-28 决策：不公证、不签 Developer ID，见计划 §12.27） | hardened runtime 用 **ad-hoc 签名**开启并验证（`codesign --options runtime -s -`，不要求证书）；**资产与载荷里的每个原生可执行文件都要单独签名**（不能只签外层；完全未签名的对象在 arm64 上会被 `SIGKILL`）；V8 需要 JIT 类 entitlement；对已签名子树设置"不重签"排除项，避免同一对象签两遍。**落地形态（M4-2a，见计划 §12.29）**：`hardenedRuntime: true` + `build/entitlements.mac.plist`（`allow-jit` 与 `disable-library-validation` 两条最小集）+ `build/entitlements.mac.inherit.plist`（子进程/嵌套对象）+ `afterSign: scripts/after-sign.cjs`（**补齐与复核**：osx-sign 已逐对象签；钩子只补漏网的，并在补签后重封外层封条——在 afterSign 里无脑重签会改坏 `CodeResources` 封条）；`make verify/signature` 逐对象断言"有签名 + 带 runtime 标记 + identity 与 `release.json` 一致" |
 | 签名 | ~~macOS：Developer ID + 公证；Windows：EV 或 Azure Trusted Signing~~ **决策更新（2026-09-28，见计划 §12.27）**：不上架、不付费 → **不做公证、不签 Developer ID**；改为 **ad-hoc 签名 + 内网 `tar.gz` 非浏览器渠道分发**（quarantine / Mark-of-the-Web 由下载器写入，`curl` 不写 → 不触发 Gatekeeper / SmartScreen）。代价：没有来源可信性，且 macOS 自动更新不可行（Squirrel.Mac 要求签名满足既有 designated requirement）→ 手动换包。**该决策长期有效**（2026-09-28 项目方复核：没有证书、也不需要上架应用市场 → 计划 **M4-2b 不执行**，`mac.notarize: false` 与 `release.json` 的 `signing=adhoc`/`notarized=false`/`channel=tarball`/`macUpdate=manual` 是**长期口径**而非占位；`make verify/signature` 只认 ad-hoc，出现别的声明即红）。若哪天重新开这条路，改动点是那四个字段 + `mac.identity`/`mac.notarize` + 两个 verifier 的期望集，并按"契约变更先改设计文档"走 | 签名调用按**内容缓存**，避免重复的硬件签名开销 |
 

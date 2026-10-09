@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoexport"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtoexport"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // 导出上限（超出显式标注 truncated，不静默截断）。

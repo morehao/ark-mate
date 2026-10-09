@@ -120,10 +120,10 @@ async function closeToTrayNotice(w: BrowserWindow): Promise<void> {
   if (readPrefs().trayNoticeShown) return
   const r = await dialog.showMessageBox(w, {
     type: 'info',
-    message: 'ark-forge 仍在后台运行',
+    message: 'ark-mate 仍在后台运行',
     detail:
       '关窗只是把窗口收进托盘：会话与定时任务都不受影响。\n' +
-      '想彻底退出，请用菜单栏托盘的「退出 ark-forge」，或按 ⌘Q。',
+      '想彻底退出，请用菜单栏托盘的「退出 ark-mate」，或按 ⌘Q。',
     buttons: ['明白了', '现在就退出'],
     defaultId: 0,
     cancelId: 0,
@@ -357,5 +357,5 @@ if (!app.requestSingleInstanceLock()) {
 // 兜底：未捕获异常也要留痕（壳的日志是桌面态排障的唯一入口，M4 的 forge doctor 会读它）。
 process.on('uncaughtException', (err) => {
   log(`uncaughtException: ${err?.stack ?? String(err)}`)
-  dialog.showErrorBox('ark-forge 桌面壳异常', String(err?.stack ?? err))
+  dialog.showErrorBox('ark-mate 桌面壳异常', String(err?.stack ?? err))
 })

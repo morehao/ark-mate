@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const modulePrefix = "github.com/morehao/ark-forge/"
+const modulePrefix = "github.com/morehao/ark-mate/"
 
 // backendRoot 返回 backend/ 目录（本包位于 backend/internal/archtest）。
 func backendRoot(t *testing.T) string {

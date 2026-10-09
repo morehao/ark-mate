@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/pkg/web"
+	"github.com/morehao/ark-mate/pkg/web"
 )
 
 // 资产层（M2-1，设计 §6.1 / §6.2）：**两种来源，一套行为**。

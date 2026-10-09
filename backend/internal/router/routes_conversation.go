@@ -2,9 +2,9 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrconversation"
-	"github.com/morehao/ark-forge/internal/controller/ctrexport"
-	"github.com/morehao/ark-forge/internal/controller/ctrsearch"
+	"github.com/morehao/ark-mate/internal/controller/ctrconversation"
+	"github.com/morehao/ark-mate/internal/controller/ctrexport"
+	"github.com/morehao/ark-mate/internal/controller/ctrsearch"
 )
 
 // registerConversation 会话面：概要/详情/新建/轮次执行/历史/权限与结构化提问决策，

@@ -2,8 +2,8 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctragent"
-	"github.com/morehao/ark-forge/internal/controller/ctrcapability"
+	"github.com/morehao/ark-mate/internal/controller/ctragent"
+	"github.com/morehao/ark-mate/internal/controller/ctrcapability"
 )
 
 // registerAgent Agent 管理面：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除，

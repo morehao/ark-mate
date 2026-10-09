@@ -9,9 +9,9 @@ import (
 	"io"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/internal/service/svccapability"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/service/svccapability"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

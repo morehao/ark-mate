@@ -1,11 +1,11 @@
-# ark-forge 详细设计方案与 Roadmap
+# ark-mate 详细设计方案与 Roadmap
 
 > 本文档在 [architect-design.md](./architect-design.md)（已确认的架构基线与关键决策）之上，给出：
 > ① 可执行的**详细设计方案**（领域模型、分层接口、API/事件契约、存储、前端架构）；
 > ② 参照 **codeg**（同赛道成熟参考实现）的能力对照与取舍矩阵；
 > ③ 分阶段 **Roadmap**（里程碑、每阶段范围/验收/风险）。
 >
-> 定位一句话：**ark-forge 是「面向 Agent 应用开发的通用底座/平台」——自托管的 ACP Host 控制面**；
+> 定位一句话：**ark-mate 是「面向 Agent 应用开发的通用底座/平台」——自托管的 ACP Host 控制面**；
 > codeg 是同一 ACP Host 思路下「做深做厚成桌面 IDE」的产品天花板，二者是「平台 vs 应用」的关系，
 > 设计上借鉴 codeg 的**宿主内核**（连接管理、事件流、可扩展注册）而非其桌面外壳。
 
@@ -19,13 +19,13 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 > ① **实时通道仅 WebSocket**——「REST 命令 + WS 事件推送」为唯一实时形态（codeg 同款），
 >    **不设 SSE 出口**：既有 SSE 端点/适配器代码随 M0 一并移除，事件流五条范式（§2-3）不变，仅换载体。
 >    理由与取舍见 §4.6。
-> ② **无跨 agent 协作**——ark-forge 只做「一次会话/一次运行**指定一个 agent runtime**」；
+> ② **无跨 agent 协作**——ark-mate 只做「一次会话/一次运行**指定一个 agent runtime**」；
 >    多 runtime 的意义 = 注册表 + 按会话/运行选择与切换，**不做** @委托/子 agent/并行协作（codeg 的
 >    delegation 相关内容从路线中移除，见 §5.4 矩阵更新）。
 
 > **决策变更 v3（定位边界，2026-09-04；本节以下均已按此更新）**：
 > ① **能力不重造**——skills/MCP/推理等「运行时能力」一律**直接复用底层 runtime 的原生实现**
->    （skill 执行、MCP 工具调用等归 runtime），ark-forge **不实现**任何 agent 运行时功能本身。
+>    （skill 执行、MCP 工具调用等归 runtime），ark-mate **不实现**任何 agent 运行时功能本身。
 > ② **数据管理是平台职责**——平台只做三类数据的**管理层**：会话数据（session/run/wire transcript、
 >    M2 起落库）、skill 数据（技能包存储/分发/启用的数据面）、MCP 数据（服务器定义/注册/注入面）。
 > ③ **单机单操作员（无多人协作）**——当前**不做**多用户/团队共享语义：M3 的「基础鉴权与多用户」取消、
@@ -36,7 +36,7 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 
 > **决策变更 v4（管理面范围校准，2026-09-04；基于对 iOfficeAI/AionUi 的只读调研，本节以下均已按此更新）**：
 > AionUi 是**应用型** Agent 工作台（Electron/Web 壳 + 外部 aioncore(Rust) 引擎 + ACP 接入外部 CLI
-> agent），与 ark-forge 同为「薄控制面 + 外部宿主内核」结构；其「数据/配置管理层」做得厚，可整体当
+> agent），与 ark-mate 同为「薄控制面 + 外部宿主内核」结构；其「数据/配置管理层」做得厚，可整体当
 > 蓝本。校准结论（执行与协作边界不因参照改变，仍守 v2② / v3③ / 能力不重造）：
 > ① **权限策略位**（M2 纳入）：权限请求 = 数据管理面——语义收敛 allow/reject × once/always，确认
 >    通道与消息流解耦、策略记忆落库（现状：`acl.AllowPermission` 布尔回调默认一律拒绝，无 confirm
@@ -57,7 +57,7 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 > **决策变更 v5（WS 载荷契约校准，2026-09-04；基于对 AionUi 的 WS 流式契约调研与 acp-go-sdk v0.13.5
 > wire 字段核验，本节以下均已按此更新）**：
 > 传输层不动：`seq / agg / attach / snapshot-重放` 契约保留（AionUi 用「msg_id 幂等 + 后端 DB 权威补拉」
-> 替代游标——其事件流只是渲染消息、权威在 DB；ark-forge 事件流是事实源，不降级）。
+> 替代游标——其事件流只是渲染消息、权威在 DB；ark-mate 事件流是事实源，不降级）。
 > 载荷语义层校准五处：
 > ① **消息分组键透传**——text/thought/user 增量 payload 增**可选** `msg_id`（ACP unstable messageId，uuid；
 >    runtime 未实现则为空）；前端并入同 `(kind, msg_id)` 文本段（跨工具穿插可归并），无 msg_id 回退
@@ -89,17 +89,17 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 
 ## 0. 为什么参考 codeg
 
-codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-forge 共享同一个
+codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个
 核心命题：**作为 ACP Host，用统一控制面连接、运行、管理多个外部 Agent Runtime**（codeg 内置 15 个 agent，
-ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已到 0.30 版本、形态完整**的参考系，其
-宿主角色的实现分层可直接映射到 ark-forge 的 `acl / runtime / manager / server`：
+ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已到 0.30 版本、形态完整**的参考系，其
+宿主角色的实现分层可直接映射到 ark-mate 的 `acl / runtime / manager / server`：
 
 > 另有**第二参照物（应用型）AionUi**（iOfficeAI；Electron/Web 壳 + 外部 aioncore 引擎 + ACP 接入外部
-> CLI agent，见 §5.8）：与 ark-forge 同为「薄控制面 + 外部宿主内核」结构，其**数据/配置管理层**
+> CLI agent，见 §5.8）：与 ark-mate 同为「薄控制面 + 外部宿主内核」结构，其**数据/配置管理层**
 > （权限策略、会话管理、usage 快照、cron/MCP/skills 数据契约）可整体当蓝本；执行层（内置引擎）/
 > Team 协作 / 远程通道 / 扩展 Hub 生态**不借鉴**（撞 v2② / v3③ / 能力不重造边界，见文首「决策变更 v4」）。
 
-| codeg（参考实现） | 角色 | ark-forge 对应层 | 借鉴程度 |
+| codeg（参考实现） | 角色 | ark-mate 对应层 | 借鉴程度 |
 |---|---|---|---|
 | `src-tauri/src/acp/registry.rs` + `custom_registry.rs` + `remote_registry.rs` | Agent 定义目录 / 自定义注册 / 远程 registry | `internal/manager`(Agent 定义+Registry) | **照搬思路**（模型收敛） |
 | `acp/manager.rs` + `connection.rs` + `lifecycle.rs` | 连接管理器：拉起子进程、ACP 会话生命周期 | `internal/acl` + `internal/runtime` | **照搬思路**（Go 重写，砍桌面特例） |
@@ -110,17 +110,17 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 
 参考时的**立场**（避免照抄成一个桌面 IDE）：
 
-- ark-forge 交付的是**自托管 daemon（`./forge` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
-  特性属于**应用层体验**，ark-forge 默认不做；当前定位为**单机单操作员**（决策 v3③），不保留
+- ark-mate 交付的是**自托管 daemon（`./forge` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
+  特性属于**应用层体验**，ark-mate 默认不做；当前定位为**单机单操作员**（决策 v3③），不保留
   「面向 Web 多用户/多租户」的能力位。
-- codeg 桌面经 Tauri 事件通道直连内核、服务端经 WebSocket；ark-forge 采纳同款形态：**REST 命令 +
+- codeg 桌面经 Tauri 事件通道直连内核、服务端经 WebSocket；ark-mate 采纳同款形态：**REST 命令 +
   WebSocket 事件推送为唯一实时通道**（不设 SSE 出口，决策 v2①，详见 §4.5/§4.6）。面板与 daemon 间
   **无多 agent 协作语义**：一次会话指定一个 runtime（决策 v2②）。
 - 借鉴的是 codeg 的**领域建模与状态机**（连接/会话/错误分类/断线策略），这些与 UI 形态无关，可整体迁移。
 
 ## 1. 现状盘点（写本文档时的仓库实况）
 
-### 1.1 ark-forge（本仓）
+### 1.1 ark-mate（本仓）
 
 - **已就位**：monorepo 骨架（backend/ 单 Go module + frontend/ pnpm workspace）；`server` 层可冒烟起服：
   gin 版本化路由（`/v1/forge/{health,agents,sessions,runtimes}`）、`handler.Service` 抽象 + `mockService`
@@ -128,7 +128,7 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
   SSE 端点/适配器已按决策 v2① 移除。
 - **空壳**：`internal/acl`（ACP Host 层）、`internal/runtime`（runtime adapter）、`internal/manager`（生命周期）、
   `internal/infra`（config/store/logger）——只有 doc.go。
-- **未启动**：`frontend/apps/panel` 只有 `<h1>ark-forge</h1>`；无 `coder/acp-go-sdk` 依赖、无 SQLite schema、
+- **未启动**：`frontend/apps/panel` 只有 `<h1>ark-mate</h1>`；无 `coder/acp-go-sdk` 依赖、无 SQLite schema、
   无真实 runtime adapter、无 main 里 mock 之外的装配。
 - 架构文档已锁定关键决策：ACP v1 / stdio / Host 角色 / 单 module 分层 / 会话事件流范式 / MVP 边界。
   （其「SSE 首选、WS 仅双向需求时引入」已被本文档决策 v2① 更新为 **仅 WebSocket**，见 §0/§4.5。）
@@ -140,9 +140,9 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
   `acp/event_stream.rs` + `internal_bus.rs`、`acp/delegation/`（@ 协作）。
 - **服务端形态**：`bin/codeg_server.rs`（axum 独立服务端，与桌面共用内核）+ `commands/remote_proxy.rs`（Web/移动端接入）。
 - **扩展面**：model_provider / MCP / skills / 跨 agent 会话导入 / automations / chat channels。
-- 详细机制摘要与 ark-forge 迁移要点见 §3-§5（由对 codeg 源码的逐文件精读提炼，标注文件证据）。
+- 详细机制摘要与 ark-mate 迁移要点见 §3-§5（由对 codeg 源码的逐文件精读提炼，标注文件证据）。
 
-## 2. 设计总则（ark-forge 特有，区别于 codeg）
+## 2. 设计总则（ark-mate 特有，区别于 codeg）
 
 1. **协议是第一公民**：统一在 **ACP v1（stdio JSON-RPC/NDJSON）** 之上抽象 runtime；绝不与具体 runtime 的
    私有 API 耦合（仅允许为诊断/降级读取其 stderr / 配置文件）。
@@ -161,7 +161,7 @@ ark-forge 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
    Runtime）；「多 runtime」只表现为注册表与**按会话/运行选择切换**，不存在 @委托、子 agent、并行跨 runtime
    协作。所有编排语义（任务/自动化等，若未来引入）同样遵守「一次运行单 runtime」约束。
 7. **能力不重造，平台只做数据/管理层（决策 v3①②）**：skills/MCP/推理等执行能力一律复用底层 runtime
-   原生实现——ark-forge **不实现** skill 执行器、MCP 客户端等运行时功能；平台职责限定为管理这些能力
+   原生实现——ark-mate **不实现** skill 执行器、MCP 客户端等运行时功能；平台职责限定为管理这些能力
    对应的**数据与配置**：会话数据、skill 包数据、MCP 服务器定义/注入面。
 
 ## 3. Roadmap 总览（先给骨架，细节见 §6）
@@ -196,7 +196,7 @@ Runtime（运行时类型：opencode | deepseekharness | …）
 Agent（Agent 定义 = Runtime 上的一个具名可运行实例）
   { ID, Name, Runtime, Config{model, provider, env, workspace?}, State }
   生命周期（长期）：draft → released；运行态：created → running → paused → stopped
-  —— codeg 语境：一个已安装且可选的 agent CLI（其 registry 条目）；ark-forge 语境还要绑定运行参数
+  —— codeg 语境：一个已安装且可选的 agent CLI（其 registry 条目）；ark-mate 语境还要绑定运行参数
 
 Session（一次可续谈的对话，绑定一个 Agent/Runtime 连接）
   { ID, AgentID, Runtime, RemoteSessionID?, Status, CreatedAt, UpdatedAt }
@@ -233,9 +233,9 @@ Event（会话事件流的原子载荷，eventbus 单一通道，见 §4.5）
 > `session.permission_request / session.runtime`（决策 v5④，仅契约先行）。各增量载荷的字段与归并语义
 > 见 §4.5「事件载荷契约（决策 v5 校准）」。
 
-> 对照 codeg：其会话事件先归一化为**统一 union**再达 UI（`session_state.rs`/`types.rs`）；ark-forge 用
+> 对照 codeg：其会话事件先归一化为**统一 union**再达 UI（`session_state.rs`/`types.rs`）；ark-mate 用
 > eventbus 的 `type` 判别 union + WS 事件帧承载（§4.5），等价但更薄。codeg 的事件更多维
-> （usage/feedback/子代理卡片等——子代理卡片与决策 v2② 冲突，不引入），ark-forge 在 M2+ 以**扩展 type**
+> （usage/feedback/子代理卡片等——子代理卡片与决策 v2② 冲突，不引入），ark-mate 在 M2+ 以**扩展 type**
 > 方式增长，不在首版堆满。
 
 ### 4.2 `internal/acl`（ACP Host 接入层）设计
@@ -397,7 +397,7 @@ cancelling/idle）承载——供侧栏/徽标与「等确认」指示，UI 不�
 
 架构文档 §2 原定「SSE 首选、WS 仅出现双向需求时引入」，历经两轮收敛：先评估为「WS 主 + SSE 备」，最终
 **决策 v2① 定为仅 WebSocket，不设 SSE 出口**。理由（对照 codeg 服务端形态 `codeg_server.rs`/
-`remote_proxy.rs` 的实践与 ark-forge 实际需求）：
+`remote_proxy.rs` 的实践与 ark-mate 实际需求）：
 
 | 考量 | WebSocket（唯一实时通道） | SSE（已否决，作为对照） |
 |---|---|---|
@@ -406,7 +406,7 @@ cancelling/idle）承载——供侧栏/徽标与「等确认」指示，UI 不�
 | 双向实时（控制信号、断连感知、未来 permission 应答/PTY） | 原生全双工 | 需另开通道 |
 | 反代/网关 | upgrade 后隧道式转发，配置成熟 | 需关 proxy_buffering、防空闲超时 |
 | 断线重连 | 显式 attach 协议承载（重连后按 lastAppliedSeq 补发） | 浏览器自带重连但与快照/重放语义叠加反而绕 |
-| 纯「服务器→客户端」单向简单性 | 略重 | 最优——但 ark-forge 的实时面不止单向流（见上） |
+| 纯「服务器→客户端」单向简单性 | 略重 | 最优——但 ark-mate 的实时面不止单向流（见上） |
 | 维护面 | 单一通道，一种契约 | 双通道双契约，无人使用时是纯负担 |
 
 **结论**：`server` 的「事件订阅抽象」seam 不变，**WS 是唯一输出适配器**；脚手架期遗留的 SSE 端点与
@@ -418,7 +418,7 @@ cancelling/idle）承载——供侧栏/徽标与「等确认」指示，UI 不�
 > `web/handlers/office_watch_proxy.rs`：重写 `window.EventSource` 指向代理、放行 `text/event-stream` 不压缩）；
 > 其控制面→UI 事件通道是 **WS（server/浏览器形态）与 Tauri 事件（桌面形态）**，前端 transport 无
 > EventSource client（`web-event-stream.ts` 实为 WS attach 封装）。即：SSE 只作为被代理外部服务的上游协议
-> 出现，从未作为 codeg 自身实时推送载体——与 ark-forge 仅保留 WS 的取舍一致。
+> 出现，从未作为 codeg 自身实时推送载体——与 ark-mate 仅保留 WS 的取舍一致。
 
 ### 4.7 存储设计（M2 引入 SQLite，`internal/infra/store`）
 
@@ -497,7 +497,7 @@ apps/panel/src/
   test-connection/OAuth 状态（login/logout/check-status）/original_json 保真 + per-agent 子集 +
   会话级启用集（「仅建会话时注入」）；harness 原生不读 MCP 配置，须经 ACP `session/new` wire 送达
   mcpServers、拒 sse（对齐 §5.3，传输支持随 runtime 能力裁剪）。工具执行由 runtime 完成，
-  ark-forge 不实现 MCP 客户端。→ P1 评估；
+  ark-mate 不实现 MCP 客户端。→ P1 评估；
 - skills **数据管理**位（决策 v3①②/v4④）：技能包的存储/分发/启用数据面（集中仓 + symlink 启用 + 声明式
   SkillStorageSpec）；skill 解析与执行归 runtime。最小闭环 = **注册与目录管理**（import/scan/路径检测，
   与「物化下发」分离）+ **会话级技能快照 + 聊天头指示器**（面板只读快照、不复算执行态）。→ P2 评估；
@@ -517,16 +517,16 @@ apps/panel/src/
 ### 5.1 三条可整体移植的工程纪律（codeg 精读最大收获）
 
 1. **状态迁移 = 带预期状态的 CAS；事件与迁移同事务写**（证据：`db/entities/work_task.rs` 状态机注释、
-   `work_task_event` append-only 与迁移同事务；delegation/automation 同款纪律）。→ ark-forge 的
+   `work_task_event` append-only 与迁移同事务；delegation/automation 同款纪律）。→ ark-mate 的
    Session/Run/Agent 状态机（§4.1）从 M0 起就按「CAS 迁移 + 事件同事务」实现，这是未来多进程/多租户安全的前提。
 2. **一切长时间行为 = 可跟踪条目 + 事件索引 + reconcile 兜底 + boot 恢复**（证据：work_task 引擎 30s
    reconcile、interrupted→failed 幂等恢复、merging 按 git truth 恢复；automation claim_due 同事务原子触发）。
-   → ark-forge 的 Run 执行态需要「进程内注册表 + 超时 reconcile + daemon 重启恢复」，M2 起显式建模。
+   → ark-mate 的 Run 执行态需要「进程内注册表 + 超时 reconcile + daemon 重启恢复」，M2 起显式建模。
 3. **业务核心与 transport 解耦（`_core` 函数 + 双壳）**（证据：AGENTS.md/CLAUDE.md 架构自述：
-   `_core` 后缀函数接收普通引用参数供 Tauri command 与 Axum handler 共用）。→ ark-forge 已天然是
+   `_core` 后缀函数接收普通引用参数供 Tauri command 与 Axum handler 共用）。→ ark-mate 已天然是
    「daemon 核心 + REST/WS 壳」；保持 `handler.Service` 接口与 manager 分离即可持续获得该属性。
 
-### 5.2 服务端形态、事件流与前端同步（codeg WS 形态 → ark-forge 采纳要点）
+### 5.2 服务端形态、事件流与前端同步（codeg WS 形态 → ark-mate 采纳要点）
 
 来源：`bin/codeg_server.rs`、`commands/remote_proxy.rs`、`web/ws_attach.rs`、`acp/event_stream.rs`、
 前端 `acp-connections-context.tsx` / `stores/conversation-runtime-store.ts` / `stores/canvas-store.ts`。
@@ -536,11 +536,11 @@ apps/panel/src/
   vs 直接持 broadcaster/bus）——印证 §5.1③「核心与 transport 解耦」。
 - **命令走 REST `POST /api/{command}`**（Bearer token，无信封：命令名即 URL、入参即 body），**推送走单一
   WebSocket `/ws/events`**；浏览器握手不能自定义头，token 经子协议 `codeg-token.{base64url}`。
-  → ark-forge **采纳同一形态**：REST 命令 + WS 事件推送，WS 为唯一实时通道（决策 v2①，§4.5/§4.6）。
-  子协议方案在 ark-forge 若需对外暴露（单操作员 token，决策 v3③）时复用
+  → ark-mate **采纳同一形态**：REST 命令 + WS 事件推送，WS 为唯一实时通道（决策 v2①，§4.5/§4.6）。
+  子协议方案在 ark-mate 若需对外暴露（单操作员 token，决策 v3③）时复用
   （`forge-token.{b64url}`，浏览器与非浏览器一致）。
 - codeg 教训一：早期全局 JSON 广播迫使前端做 receiver 去重与「未映射事件缓冲」，后来改为
-  **per-connection attach**。→ ark-forge 的事件必须携带 `session_id/agent_id` 供前端按会话过滤，并把
+  **per-connection attach**。→ ark-mate 的事件必须携带 `session_id/agent_id` 供前端按会话过滤，并把
   「续传口径」做成 first-class（快照/重放二分，见下），否则会重演去重噩梦。
 
 **最值得抄：快照/重放二分的事件订阅协议（`web/ws_attach.rs` + `event_stream.rs`）**
@@ -549,7 +549,7 @@ apps/panel/src/
   服务端**持锁原子「决策 + 注册订阅」**，杜绝快照与首事件之间的竞态。
 - 环形缓冲双上限（条数/字节，超限清空 → 下次 attach 自动走 snapshot）；前端 apply 幂等：`seq <=
   lastAppliedSeq` 直接丢，游标只前进不回退。
-- → ark-forge：一次 WS 连接上的 attach 即一次「带 since_seq 的订阅」。`since_seq` 落后于缓冲淘汰点或
+- → ark-mate：一次 WS 连接上的 attach 即一次「带 since_seq 的订阅」。`since_seq` 落后于缓冲淘汰点或
   daemon 重启时，先推整包 snapshot 再推增量；否则按 eventbus history 回放 + live。eventbus 的 history
   需补 **per-aggregate 容量上限 + 淘汰即快照回退** 语义（M1/M2 落地，见 §5.7）。
 
@@ -559,10 +559,10 @@ apps/panel/src/
   拼接）——面板逐 token setState 必卡，照抄该批量纪律（量级可更小）。
 - 列表/状态类（会话列表、agent 状态）与「会话流」分路：单独列表级订阅或轻量轮询，避免每个列表页消费
   全量流（对应 codeg `conversation://changed` 侧信道思路）。
-- 桌面特有可省略：attach/detach 多路复用与逐订阅 forwarder + epoch 清理、lagged 重连风暴处理（ark-forge
+- 桌面特有可省略：attach/detach 多路复用与逐订阅 forwarder + epoch 清理、lagged 重连风暴处理（ark-mate
   单面板单订阅连接自然规避）、viewer 跨客户端协作、Tauri app.emit 双通道。
 - codeg 对「out-of-turn 活动」用 `acp/background_watch.rs` 反代（tail Claude Code transcript 补 ACP 缺陷）；
-  ark-forge 首版**不做 transcript 逆向**——把这类活动当协议问题：需要时要求 runtime 走 ACP notification
+  ark-mate 首版**不做 transcript 逆向**——把这类活动当协议问题：需要时要求 runtime 走 ACP notification
   或显式上报，否则如实展示「该 runtime 不提供此事件」。
 
 ### 5.3 可扩展面：自定义 agent / 模型提供商 / MCP / skills / 会话导入（精读证据）
@@ -579,28 +579,28 @@ apps/panel/src/
   渠道非空；**坏行只跳过 + 告警，绝不拖垮整批/启动**）→ `build_meta` → fingerprint（不变则复用，零分配）
   → 发布进进程级注册表 → **无需重启即可启动**。
 - 内置模型目录（opencode_catalog / codex 目录）是**离线快照**：解析链恒为 live → 磁盘 cache（TTL 24h）→
-  编译期快照——ark-forge 若要「provider/模型选择」位，用同一三段式降级，快照经 go:embed 进二进制。
+  编译期快照——ark-mate 若要「provider/模型选择」位，用同一三段式降级，快照经 go:embed 进二进制。
 
 **模型提供商（provider → env 注入 cascade）**
 - provider 行 `{id, name, api_url, api_key, agent_type(唯一归属，不可变), model}`；codeg 明文存 SQLite 仅
-  展示层掩码——ark-forge **不照抄明文**，改加密密钥文件/OS keyring 等价物，行内只留引用（§4.7 已定）。
+  展示层掩码——ark-mate **不照抄明文**，改加密密钥文件/OS keyring 等价物，行内只留引用（§4.7 已定）。
 - 更新 cascade：改 url/key/model → 按 **per-agent env key 映射表**展开注入 spawn env（dsh→
   `DEEPSEEK_ACP_MODEL`、codex→`OPENAI_MODEL`…），并按 adapter 需要同步 agent 原生配置文件；改后计算
-  fingerprint，**给运行中会话标 stale**，前端提示「N 会话需重启」。→ ark-forge M2 只做
+  fingerprint，**给运行中会话标 stale**，前端提示「N 会话需重启」。→ ark-mate M2 只做
   「env 注入面 + stale 标记」，原生文件双写按 adapter 需要再补。
 
 **MCP 与 skills**
 - codeg 无中心 MCP 库，以各 agent 原生配置文件为真源 + 统一 canonical spec `{type: stdio|http|sse, command,
   args, env, url, headers}`；每 agent 一对 read/upsert/canonicalize 翻译器。
-- **对 ark-forge 的直接相关**：harness/deepseek-acp 原生**不读** MCP 配置——codeg 自记 `$DSH_HOME/mcp.json`，
+- **对 ark-mate 的直接相关**：harness/deepseek-acp 原生**不读** MCP 配置——codeg 自记 `$DSH_HOME/mcp.json`，
   建会话时经 ACP `session/new` 的 `mcpServers` **线上送达**（传输仅 stdio/streamable-http，拒 sse）。
-  → ark-forge 若做 MCP 位，对 harness 必须走 ACP wire 而非本地配置文件。
+  → ark-mate 若做 MCP 位，对 harness 必须走 ACP wire 而非本地配置文件。
 - skills：集中仓 `~/.codeg/skills/<id>/SKILL.md`，「启用」= symlink/junction 链到各 agent 技能目录；
   声明式 `SkillStorageSpec{global_dirs, project_rel_dirs, kind}`；dsh 技能位 `$DSH_HOME/skills` + 项目
   `.dsh/skills` / `.agents/skills`（深挖至最近 .git）。
-- **ark-forge 立场（决策 v3①）**：以上 MCP/skills 机制只取「**数据/配置管理层**」——canonical spec 定义、
+- **ark-mate 立场（决策 v3①）**：以上 MCP/skills 机制只取「**数据/配置管理层**」——canonical spec 定义、
   服务器/技能包注册、per-adapter 翻译与注入/送达；**执行**（MCP 工具调用、skill 解析与运行）一律由
-  runtime 原生完成，ark-forge 不实现运行时能力。
+  runtime 原生完成，ark-mate 不实现运行时能力。
 
 **会话聚合/导入（src/parsers/）**
 - 每 agent 一个 parser（统一 `AgentParser{list_conversations, get_conversation}`）发现/解析**原生存储**：
@@ -609,7 +609,7 @@ apps/panel/src/
 - 导入管线：全机扫描 → 按 (agent_type, external_id) reconcile（去重/原地刷新/soft-deleted 不复活）→
   落 `status=PendingReview("待审查")` 隔离「外来会话」与自建会话。
 - 自定义/无 parser agent：codeg 自录 **ACP wire transcript**（`acp_transcript.rs`：每 session 一个 JSONL，
-  header + prompt/update 行，schema v1）即可恢复任意 ACP agent 历史——ark-forge 若从 M0 起把每 session 的
+  header + prompt/update 行，schema v1）即可恢复任意 ACP agent 历史——ark-mate 若从 M0 起把每 session 的
   prompt/update 原语落盘，天然获得同能力（会话导入的通用兜底，见 §5.7）。
 
 **Go 侧分层优先级建议（映射 M0–M3/P1）**：① registry（AgentSpec + 自定义 CRUD + hydrate + preflight）→ M2；
@@ -620,11 +620,11 @@ apps/panel/src/
 ⑦ 远端 ACP registry 浏览 → P3。②③④⑤⑥ 全部挂在 **adapter 接口**之后、daemon 只懂统一结构——这正是
 「可插拔 runtime」的平台价值所在。
 
-### 5.4 能力取舍矩阵（ark-forge 语境）
+### 5.4 能力取舍矩阵（ark-mate 语境）
 
-| codeg 能力 | ark-forge 落法 | 阶段 | 理由 |
+| codeg 能力 | ark-mate 落法 | 阶段 | 理由 |
 |---|---|---|---|
-| 双模式同核（`_core` + EventEmitter） | **直接采用**：daemon 核心 + REST/WS 壳 | M0 起 | ark-forge 即 codeg server 模式的子集 |
+| 双模式同核（`_core` + EventEmitter） | **直接采用**：daemon 核心 + REST/WS 壳 | M0 起 | ark-mate 即 codeg server 模式的子集 |
 | WS 事件订阅（attach / snapshot / replay，`web/ws_attach.rs`） | **采用为唯一实时通道**（§4.5/§4.6），不设 SSE 出口 | M0（端点）→ M1（面板） | 双向 + 鉴权（子协议）+ 快照/重放 first-class；codeg 自身亦无 SSE 实时通道 |
 | ACP 连接管理（registry/manager/connection/session_state） | 移植思路到 acl/runtime/manager（§4.2/§4.3） | M0 | 同命题 |
 | 事件状态机纪律（CAS+同事务事件+单例引擎+文件锁） | 采用 | M0 起 | 多租户安全前提 |
@@ -641,21 +641,21 @@ apps/panel/src/
 
 ### 5.5 定位差异一句话
 
-codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度，甚至多 agent 同场协作；ark-forge 是
+codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度，甚至多 agent 同场协作；ark-mate 是
 「**可自托管的 agent 底座**」——价值在**统一拉起、管理、切换指定**多 runtime（一次运行一个 runtime，
 无跨 agent 协作），并通过 REST + WS 把能力开放给任意前端。凡 codeg 中「依赖本地桌面形态」或
-「依赖多 agent 协作」的能力，ark-forge 一律降级或不做；凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。
+「依赖多 agent 协作」的能力，ark-mate 一律降级或不做；凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。
 
 在此基础上，定位边界由**决策 v3** 明确为三点：
-- **能力不重造**：skills/MCP 等运行时能力复用底层 runtime 原生实现，ark-forge 只管理其数据与配置；
+- **能力不重造**：skills/MCP 等运行时能力复用底层 runtime 原生实现，ark-mate 只管理其数据与配置；
 - **数据管理是平台职责**：会话、skill、MCP 三类数据由平台统一管理（管理面，非运行时面）；
 - **无多人协作**：单机单操作员，多用户/鉴权登录/聊天远程通道不在路线——与决策 v2② 的「无跨 agent
   协作」叠加为「一个操作员 × 一次运行一个 runtime」。
 
-### 5.6 codeg ACP 内核 → ark-forge acl/runtime/manager 迁移清单（精读证据）
+### 5.6 codeg ACP 内核 → ark-mate acl/runtime/manager 迁移清单（精读证据）
 
 来源：`codeg/src-tauri/src/acp/`（registry.rs / manager.rs / connection.rs / session_state.rs / types.rs /
-error.rs / binary_cache.rs / preflight.rs / idle_sweep.rs），要点与 ark-forge Go 对应：
+error.rs / binary_cache.rs / preflight.rs / idle_sweep.rs），要点与 ark-mate Go 对应：
 
 **注册表（registry.rs / binary_cache.rs）**
 - codeg 以**静态注册表**描述每个内置 agent：分发三通道 `Npx{package@ver,cmd,args,env} /
@@ -663,7 +663,7 @@ error.rs / binary_cache.rs / preflight.rs / idle_sweep.rs），要点与 ark-for
 - 缓存布局 `<cache>/<registry_id>/<version>/<platform>/<cmd>`，按语义化版本取最高已缓存；下载后 sha256 校验、
   临时文件+rename 原子落盘。
 - 启动前 `preflight`（node/uv/binary/PATH 探测）给出结构化 `PreflightResult{checks,fixes}`。
-- **ark-forge 对应**：opencode 与 deepseek-harness 均**原生 ACP**（无需 codeg 为 claude/codex 引入的
+- **ark-mate 对应**：opencode 与 deepseek-harness 均**原生 ACP**（无需 codeg 为 claude/codex 引入的
   adapter npm 包），注册表退化为极简静态表：`{name, launch{cmd,args,envTemplate}, capabilityBaseline}`；
   但「静态表 + pinned 版本 + 结构化 preflight + 原子安装」的**形状直接采用**，作为 M2 自定义注册的底座。
 
@@ -691,16 +691,16 @@ error.rs / binary_cache.rs / preflight.rs / idle_sweep.rs），要点与 ark-for
 - 每连接一个**单写者权威状态**（SessionState reducer，`apply_event` 是唯一写入路径），文本/思考增量追加进
   live message，tool_call 按 id upsert，TurnComplete 沉淀末尾文本并清 live 区。
 - 统一事件 envelope `{seq, connection_id, …}`，seq 全局全序；`to_snapshot()` 供冷挂载、
-  `recent_events_after(seq)` 环形缓冲供带游标热挂载——**多客户端控制面最值得抄的机制**，与 ark-forge
+  `recent_events_after(seq)` 环形缓冲供带游标热挂载——**多客户端控制面最值得抄的机制**，与 ark-mate
   eventbus 的 history/after 同构，可加「快照式冷挂载」（连接建立时先给 snapshot 事件再给增量）。
 - 持久化与高频事件解耦：bus → 过滤出 lifecycle 相关 6 类 → per-connection worker（重试退避）写 DB；
   ContentDelta 等高頻事件不过 worker。
 - 错误三件套：stable `code`（机器可读）+ **净化后**的消息（剥 spawn 路径/本地路径/悬空逗号）+ `terminal`
   布尔（连接级死亡 vs turn 级可继续）；另有 AIR 词汇表 `category{connection,access,limit,request,service,
-  unknown}` + `actions{retry,login,new_session}`。→ ark-forge 直接照搬此词汇（§4.2 错误分类）。
+  unknown}` + `actions{retry,login,new_session}`。→ ark-mate 直接照搬此词汇（§4.2 错误分类）。
 
-**ark-forge 省略项**：桌面窗口 touch 保活、Tauri/WS 事件桥、反向 `fs/* terminal/*` host 通道（permission
-通道仍要）、Claude background_watch transcript 尾随、Cursor/pi/grok 等大量形状 hack（ark-forge 只有
+**ark-mate 省略项**：桌面窗口 touch 保活、Tauri/WS 事件桥、反向 `fs/* terminal/*` host 通道（permission
+通道仍要）、Claude background_watch transcript 尾随、Cursor/pi/grok 等大量形状 hack（ark-mate 只有
 opencode/harness 两形状）。
 
 ### 5.7 对齐修正（写文档时对 §4 的增补）
@@ -739,10 +739,10 @@ opencode/harness 两形状）。
   HTTP REST and WebSocket calls routed to aioncore」）；外部 CLI agent（Claude Code/Codex/…）经 **ACP**
   接入（readme.md:186），协议形状镜像于 `common/types/platform/acpTypes.ts`；会话/引擎/skills/MCP/cron
   的**执行实现均在外部 AionCore 仓库**（readme.md:713），本仓库只见数据模型、API 面与 UI。
-  即：AionUi 与 ark-forge 同为「薄控制面 + 外部宿主内核」，但它是「自带引擎的应用型工作台」——
+  即：AionUi 与 ark-mate 同为「薄控制面 + 外部宿主内核」，但它是「自带引擎的应用型工作台」——
   其**数据/配置管理层**可当蓝本，引擎/协作/远程层不借鉴。
 
-| AionUi 数据管理面形态（证据） | ark-forge 落点 |
+| AionUi 数据管理面形态（证据） | ark-mate 落点 |
 |---|---|
 | 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | **已落地（轻量化）**：ACP `session/request_permission` → `session.permission_request` 事件（options 透传）+ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝（默认 30min，`FORGE_PERMISSION_TIMEOUT`）。详见 §5.8.1 |
 | 会话 = 强类型定列 + extra JSON 快照；侧栏服务端分组读模型（pinned/项目/时间线）+ 软归档（archived_at 切片）+ 全局消息搜索 + 批量导出（`sidebar.ts`、`ipcBridge.ts:2423-2497`） | M3 会话数据管理面（v4②） |
@@ -801,9 +801,9 @@ turn.ended），title/置顶/归档等管理端点实测生效。
 `GuidActionRow.tsx:632-650`；选项来自握手目录快照 `agentRuntimeCatalog.ts:155-232`，非前端硬编码）→
 create 仅带 `assistant.id + overrides`（`useGuidSend.ts:162-195,233-249`），**CLI(ACP) 底座未显式选模型则
 不传 model**、交 CLI 自身默认（`useGuidSend.ts:140-171`）；会话**不可中途换底座**（会话 = 按 runtime
-判别联合 + assistant 快照：`storage.ts:154-160,237-296`），与 ark-forge「一次会话绑定一个 agent runtime」
+判别联合 + assistant 快照：`storage.ts:154-160,237-296`），与 ark-mate「一次会话绑定一个 agent runtime」
 （v2②）一致。
-ark-forge 落点（决策 v6②③，面板已落地）：① 新建会话 = **整页 `/new`**（无弹窗；hero + 助手胶囊条 +
+ark-mate 落点（决策 v6②③，面板已落地）：① 新建会话 = **整页 `/new`**（无弹窗；hero + 助手胶囊条 +
 内嵌输入卡[模型 pill 只读 + 圆形发送] + 示例指令，对照 AionUi /guid 形态）；② 默认选中**上次底座**
 （localStorage `forge.panel.lastAgentId`；AionUi 持久化 lastAssistantId：`useGuidAssistantSelection.ts:92-111`）；
 ③ 底座选择呈**胶囊卡片**（`StartPage.tsx`，图标 = runtime 缩写 + 状态点，点击即选 + 记忆）；④ 首轮前
@@ -811,7 +811,7 @@ ark-forge 落点（决策 v6②③，面板已落地）：① 新建会话 = **�
 ACP 忽略客户端模型选择的实测约束，issue #13644）。
 
 **不借鉴清单**（保持定位边界；AionUi 的这些卖点恰好撞 v2②/v3③/能力不重造）：
-1. **内置 agent 引擎**（embedded aionrs + AionCore 全套能力）——与 v3①「能力不重造」相反，ark-forge 能力委托 runtime；
+1. **内置 agent 引擎**（embedded aionrs + AionCore 全套能力）——与 v3①「能力不重造」相反，ark-mate 能力委托 runtime；
 2. **Team 多 agent 协作**（Leader/Teammate + mailbox + 共享任务板）——撞 v2②；
 3. **远程与 IM 通道**（WebUI remote / Telegram / Lark / DingTalk / WeChat，users/teams 表、QR+JWT 多端）——撞 v3③；
 4. **扩展 Hub 生态**（extension contributes + tarball+SHA-512 + permissions/risk 门禁）——单操作员自托管优先级低；
@@ -1000,7 +1000,7 @@ message × execution_mode existing|new_conversation × state{next_run,retry}，�
 后随 P1 排期）→ MCP 数据管理 → skills 数据管理（决策 v3①②/v4④：执行复用 runtime 能力，平台只做
 数据/配置层）。全部遵守决策 v2②
 （每次运行指定且仅指定一个 runtime，无跨 agent 协作）。每一项都先回答
-「谁是用户、和 codeg 桌面场景差在哪、ark-forge 的 Web/平台等价物长什么样」再立项。
+「谁是用户、和 codeg 桌面场景差在哪、ark-mate 的 Web/平台等价物长什么样」再立项。
 
 ## 7. 风险清单与验证方式
 

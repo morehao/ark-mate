@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // demo 在指定 runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。

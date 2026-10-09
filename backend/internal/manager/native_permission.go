@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/runtime/deepseekharness"
-	"github.com/morehao/ark-forge/pkg/runtime/opencode"
+	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // ——— B5：原生权限映射（platform permission_policy → runtime 原生权限开关） ———

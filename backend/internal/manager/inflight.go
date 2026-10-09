@@ -3,7 +3,7 @@ package manager
 import (
 	"sync"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // inFlightTracker 记录每连接（acl.Client）上正在执行 turn 的会话（§17 方案 B：连接共享、

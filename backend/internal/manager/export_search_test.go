@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoexport"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-mate/internal/dto/dtoexport"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/golib/gerror"
 )
 

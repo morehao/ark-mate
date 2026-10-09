@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // writeDistLayout 造一份最小的 dist 目录（index.html + assets/<hash>.js）。

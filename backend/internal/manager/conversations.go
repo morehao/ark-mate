@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ListConversations 返回会话概要；archived=false 仅未归档（默认），true 仅归档。

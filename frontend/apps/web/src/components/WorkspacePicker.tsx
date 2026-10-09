@@ -27,7 +27,7 @@ function isAbsolutePath(p: string): boolean {
  * 宽菜单，小节顺序为「当前目录 → 输入路径 → 最近目录 → 选择目录…」；每一项都是两行
  * （目录名 + 上级路径）。文案也沿用它的措辞（Choose directory… / Enter path / Recent directories）。
  *
- * 两处按 ark-forge 的实际情况做了裁剪（**没有做假的相似**）：
+ * 两处按 ark-mate 的实际情况做了裁剪（**没有做假的相似**）：
  *  - **不做 Git 工作树小节**：goose 是真有 worktree 集成，平台目前没有；写一行「未找到工作树」
  *    会让人以为支持了。
  *  - **不做「在文件管理器中打开」**：goose 是本地桌面应用（`shell.openPath`），平台是控制面，

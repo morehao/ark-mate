@@ -6,7 +6,7 @@ package version
 
 // Version 核心版本号。开发构建为 `dev`；发布构建由 Makefile 注入：
 //
-//	go build -ldflags "-X github.com/morehao/ark-forge/internal/version.Version=<tag>"
+//	go build -ldflags "-X github.com/morehao/ark-mate/internal/version.Version=<tag>"
 //
 // （M4-1 的 `release.json` 与 `forge-core --version` 都取这里，因此它是**唯一**版本源。）
 var Version = "dev"

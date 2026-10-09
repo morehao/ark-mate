@@ -9,11 +9,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/automation"
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // ——— automation 定义的载体（M6-7） ———

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/morehao/ark-forge/internal/app"
-	"github.com/morehao/ark-forge/internal/credential"
+	"github.com/morehao/ark-mate/internal/app"
+	"github.com/morehao/ark-mate/internal/credential"
 )
 
 // serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。

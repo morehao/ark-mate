@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrautomation"
+	"github.com/morehao/ark-mate/internal/controller/ctrautomation"
 )
 
 // registerAutomation M4：automation（定时任务）面。

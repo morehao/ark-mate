@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/mcp"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
 // fakeRemote 一个最小的远端 MCP 服务端（http 传输；JSON 应答而非 SSE）。

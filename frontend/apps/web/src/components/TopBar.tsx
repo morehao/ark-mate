@@ -97,7 +97,7 @@ export function TopBar() {
 
       <NavLink
         to="/conversations"
-        title="ark-forge 问答控制台"
+        title="ark-mate 问答控制台"
         style={{
           fontSize: 15,
           fontWeight: 660,

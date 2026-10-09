@@ -67,7 +67,7 @@
  *
  *   node scripts/desktop-runtime-smoke.mjs            # 全部场景（默认档：不联网、不跑模型）
  *   node scripts/desktop-runtime-smoke.mjs dsh        # 只跑指定场景
- *   FORGE_SMOKE_APP=/abs/ark-forge.app node scripts/desktop-runtime-smoke.mjs
+ *   FORGE_SMOKE_APP=/abs/ark-mate.app node scripts/desktop-runtime-smoke.mjs
  *                                                     # **打包态**（M4-2a）：起 .app 里的壳与核心，
  *                                                     # 判"签名 + hardened runtime 之后包内载荷仍能执行"（条件 ② 的 hardened runtime 半边）
  *   node scripts/desktop-runtime-smoke.mjs --help     # 本说明
@@ -140,7 +140,7 @@ import {
 /** 用户家目录（起壳的最小环境要保留它：Chromium 的 userData 要落盘）。 */
 const HOME = homedir()
 /**
- * 打包态（M4-2a）：`FORGE_SMOKE_APP=/abs/path/ark-forge.app` → 起来的是**打出来的包**里的壳与核心。
+ * 打包态（M4-2a）：`FORGE_SMOKE_APP=/abs/path/ark-mate.app` → 起来的是**打出来的包**里的壳与核心。
  *
  * 这是设计 §6.3 回退条件 ② 的唯一判据形态：源码态的壳没有签名、也没有 hardened runtime，
  * 只有真包（ad-hoc 签名 + `--options runtime`）才能回答"平台允不允许执行包内载荷"。
@@ -378,7 +378,7 @@ const INITIALIZE_PARAMS = {
     fs: { readTextFile: false, writeTextFile: false },
     terminal: false,
   },
-  clientInfo: { name: 'ark-forge-desktop-runtime-smoke', version: '0.1.0' },
+  clientInfo: { name: 'ark-mate-desktop-runtime-smoke', version: '0.1.0' },
 }
 
 /**

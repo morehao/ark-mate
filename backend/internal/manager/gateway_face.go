@@ -13,7 +13,7 @@ package manager
 import (
 	"fmt"
 
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 // GatewayMcpFace 返回网关应当暴露的**远程** server 定义（未解析密钥，顺序稳定）。

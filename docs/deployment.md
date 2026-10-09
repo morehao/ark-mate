@@ -1,4 +1,4 @@
-# ark-forge 部署与运维
+# ark-mate 部署与运维
 
 > 面向单操作员（决策 v3③：无多用户/团队语义、无登录鉴权）。本文只写**可复核**的部署形态与
 > 参数；除明确标注**未执行**的一项（systemd 单元）外，命令均在本机实跑过（容器镜像 §4 已实跑，
@@ -12,7 +12,7 @@
 | 单二进制（推荐） | `make all` | 仓库根 `./forge` | 先 `pnpm build` → 拷入 `backend/pkg/web/dist` → `go build -tags release`；前端面板经 `//go:embed` 内嵌，无外部静态文件依赖 |
 | 仅后端内核 | `make build` | 无独立产物 | 不带 `release` tag，`web` 包不参与编译（`MountWeb` 为空实现），面板不内嵌 |
 | 前后端分离 | `make dev` / 分开起 | `frontend/apps/panel/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
-| 容器 | `make image` / `docker build -t ark-forge .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
+| 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
 
 
 前置：Go（见 `backend/go.mod`）、Node（`frontend/.nvmrc`）+ pnpm（`frontend/package.json` 的
@@ -260,11 +260,11 @@ curl -H "Authorization: Bearer $FORGE_TOKEN" http://127.0.0.1:10001/v1/forge/age
 
 ## 3. systemd（裸机/VM）
 
-`/etc/systemd/system/ark-forge.service`：
+`/etc/systemd/system/ark-mate.service`：
 
 ```ini
 [Unit]
-Description=ark-forge 控制面 daemon（单操作员 ACP 会话底座）
+Description=ark-mate 控制面 daemon（单操作员 ACP 会话底座）
 After=network-online.target
 Wants=network-online.target
 
@@ -272,14 +272,14 @@ Wants=network-online.target
 Type=simple
 User=forge
 Group=forge
-WorkingDirectory=/opt/ark-forge
+WorkingDirectory=/opt/ark-mate
 Environment=GIN_MODE=release
 Environment=FORGE_ADDR=127.0.0.1:10001
-Environment=FORGE_DB=/var/lib/ark-forge/forge.db
-Environment=FORGE_TRANSCRIPTS=/var/lib/ark-forge/transcripts
-Environment=FORGE_AGENTS=/var/lib/ark-forge/agents
-Environment=FORGE_CAPABILITIES=/var/lib/ark-forge/capabilities
-ExecStart=/opt/ark-forge/forge serve
+Environment=FORGE_DB=/var/lib/ark-mate/forge.db
+Environment=FORGE_TRANSCRIPTS=/var/lib/ark-mate/transcripts
+Environment=FORGE_AGENTS=/var/lib/ark-mate/agents
+Environment=FORGE_CAPABILITIES=/var/lib/ark-mate/capabilities
+ExecStart=/opt/ark-mate/forge serve
 Restart=on-failure
 RestartSec=3
 # 单进程守护：会话/事件在 SQLite 与 transcript 中，重启后自动恢复
@@ -288,22 +288,22 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/ark-forge
+ReadWritePaths=/var/lib/ark-mate
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-sudo useradd --system --home /var/lib/ark-forge --shell /usr/sbin/nologin forge
-sudo install -d -o forge -g forge /var/lib/ark-forge /opt/ark-forge
-sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge
-sudo systemctl daemon-reload && sudo systemctl enable --now ark-forge
-systemctl status ark-forge --no-pager
+sudo useradd --system --home /var/lib/ark-mate --shell /usr/sbin/nologin forge
+sudo install -d -o forge -g forge /var/lib/ark-mate /opt/ark-mate
+sudo install -o forge -g forge -m 0755 ./forge /opt/ark-mate/forge
+sudo systemctl daemon-reload && sudo systemctl enable --now ark-mate
+systemctl status ark-mate --no-pager
 ```
 
 > 注意：底座子进程（opencode/dsh）由 daemon 拉起，需对 `forge` 用户可见（PATH 与配置）。
-> `ProtectHome=read-only` 下默认 `~/.forge` 不可写，故示例把数据目录改到 `/var/lib/ark-forge`。
+> `ProtectHome=read-only` 下默认 `~/.forge` 不可写，故示例把数据目录改到 `/var/lib/ark-mate`。
 
 ## 4. 容器
 
@@ -316,9 +316,9 @@ systemctl status ark-forge --no-pager
 
 ```bash
 # 最小镜像
-docker build -t ark-forge:local .
+docker build -t ark-mate:local .
 # 含底座（两个都装；只装一个把另一个置 false）
-docker build -t ark-forge:runtimes --target forge-runtimes \
+docker build -t ark-mate:runtimes --target forge-runtimes \
   --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
 # 等价的 make 封装
 make image                                             # 最小
@@ -334,7 +334,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
 - 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
   模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 forge 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
-  `FROM ark-forge:runtimes` + `USER root` + `apt-get install -y …`。
+  `FROM ark-mate:runtimes` + `USER root` + `apt-get install -y …`。
 - **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(forge)`、`HOME=/data` 运行，
   凭据要落在 `/data` 下且对 `forge` 可读。**注意 bind mount 通常不行**——宿主机上
   `~/.local/share/opencode/auth.json` 是 `600` 且属主为宿主用户，容器里的 `forge` 读不到（实测踩到）；
@@ -357,8 +357,8 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
 # 一条命令（仓库根 docker-compose.yml：具名卷 + 只绑回环 + /data 全集持久化）
 docker compose up -d --build
 # 或纯 docker run
-docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
-  -v ark-forge-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-forge:local
+docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
+  -v ark-mate-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-mate:local
 curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 ```
 
@@ -381,7 +381,7 @@ compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/�
 
 1. **底座**：最小镜像**不含任何底座**，因此容器内**没有免 key 自检手段**（此前靠内置 `echo` 自检，
    它已随 M0 删除）。要跑真实 agent，三选一——用 `forge-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH`
-   上，容器内自检即在此形态下做）、自建派生镜像（`FROM ark-forge:local` + 自己装），或 **Linux 宿主机**
+   上，容器内自检即在此形态下做）、自建派生镜像（`FROM ark-mate:local` + 自己装），或 **Linux 宿主机**
    下把本机可执行文件 bind mount 进最小镜像
    （`-v /usr/local/bin/opencode:/usr/local/bin/opencode:ro`，agent 需要的配置/密钥也要一并进来）。
    注意 macOS/Windows 上的可执行文件**不能**塞进 Linux 容器（平台/架构/glibc 都不匹配），这类机器请走前两条。
@@ -391,13 +391,13 @@ compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/�
    先 bind mount 进来，会话 `cwd` 用**容器内路径**（agent 也在同一容器里，这才是对 agent 正确的路径）：
 
    ```bash
-   docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
-     -v ark-forge-data:/data \
+   docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
+     -v ark-mate-data:/data \
      -v "$PWD:/workspaces/repo" \
      -e FORGE_ADDR=0.0.0.0:10001 \
      -e FORGE_WORKSPACE_ROOTS=/workspaces \
      -e FORGE_WORKSPACE_DIR=/workspaces/.forge-tmp \
-     ark-forge:local
+     ark-mate:local
    ```
 
    `FORGE_WORKSPACE_ROOTS`/`FORGE_WORKSPACE_DIR` 一起给：白名单画的是**用户目录**的边界，
@@ -443,16 +443,16 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 # ⚠️ 必须一起备份 ~/.forge/vault.key（provider 密钥的主密钥）：丢了 = 所有 provider 密文不可恢复
 #     （表现为 credential_missing「密钥密文无法解密」），只能重设各 provider 的 key。
 #     ~/.forge/vault/ 是密文目录，同样要带（缺了等于密钥没了）。
-sudo systemctl stop ark-forge
-tar czf ark-forge-$(date +%F).tgz -C /var/lib ark-forge
-sudo systemctl start ark-forge
+sudo systemctl stop ark-mate
+tar czf ark-mate-$(date +%F).tgz -C /var/lib ark-mate
+sudo systemctl start ark-mate
 
 # 升级：三步——① 先干跑迁移看一眼 ② 换二进制（SQLite 迁移在启动时自动执行，幂等）
 #              ③ 若你有 skill 定义用了已退役的 sources[]，改一行 projection_dirs 后重校
-sudo install -o forge -g forge -m 0755 ./forge /opt/ark-forge/forge.new
+sudo install -o forge -g forge -m 0755 ./forge /opt/ark-mate/forge.new
 ./forge.new capability migrate --dry-run       # 只报告会改哪些定义文件，不落盘
-sudo mv /opt/ark-forge/forge.new /opt/ark-forge/forge
-sudo systemctl restart ark-forge
+sudo mv /opt/ark-mate/forge.new /opt/ark-mate/forge
+sudo systemctl restart ark-mate
 # 能力/自动化定义的目录布局没有变化：定义文件仍是唯一事实源，升级不重写它们
 # （skill 的 `sources[]` 与 automation 的 `schedule/target` 都由装载期读，缺键即缺省）。
 
@@ -519,7 +519,7 @@ sudo systemctl restart ark-forge
 
 - `make all` → 仓库根 `./forge`（40 MB，含内嵌前端）；`GIN_MODE=release ./forge serve --addr
   127.0.0.1:18140`（`FORGE_STORE=sqlite` + 独立数据目录）→ `GET /v1/forge/health` = `{"code":0,
-  "msg":"ok"}`；`GET /` = 200 `text/html`，`<title>ark-forge · Agent 问答控制台</title>`，资产
+  "msg":"ok"}`；`GET /` = 200 `text/html`，`<title>ark-mate · Agent 问答控制台</title>`，资产
   `/assets/index-*.js` 可访问；release 模式无 gin debug 告警。
 - 按 §2.4 命令建 `echo` agent → `POST /conversations` 跑通一轮（权限卡经 REST 决策）→ 终态
   `completed`；`GET /usage/summary` 返回 `runs=1 completed=1 duration_ms=105 context_used=137
@@ -538,9 +538,9 @@ sudo systemctl restart ark-forge
 - 容器镜像（§4）：`registry-1.docker.io`/`auth.docker.io` 在本机持续超时，故基础镜像改用镜像站覆盖
   （`docker.m.daocloud.io/library/{node:24-bookworm,golang:1.26-bookworm,debian:bookworm-slim}` +
   `GO_PROXY=https://goproxy.cn,direct`），其余与默认路径一致：
-  - **最小镜像**：`docker build -t ark-forge:local .` 成功（141 MB）。容器 `-p 127.0.0.1:18001:10001
-    -v ark-forge-test-data:/data -e FORGE_ADDR=0.0.0.0:10001`：`GET /v1/forge/health` =
-    `{"code":0,"msg":"ok"}`；`GET /` = 200 `text/html` + `<title>ark-forge · Agent 问答控制台</title>`；
+  - **最小镜像**：`docker build -t ark-mate:local .` 成功（141 MB）。容器 `-p 127.0.0.1:18001:10001
+    -v ark-mate-test-data:/data -e FORGE_ADDR=0.0.0.0:10001`：`GET /v1/forge/health` =
+    `{"code":0,"msg":"ok"}`；`GET /` = 200 `text/html` + `<title>ark-mate · Agent 问答控制台</title>`；
     容器内 `id` = `uid=10001(forge) gid=10001(forge)`、`HOME=/data`、PID 1 为 `tini`；
     `forge config` 全部来源 `env(process)`：`/data/forge.db`、`/data/transcripts`、`/data/agents`、
     `/data/capabilities`、`/data/workspaces`、配置目录 `/data/config`、`proc_registry=/data/processes.json`。
@@ -573,10 +573,10 @@ sudo systemctl restart ark-forge
     `127.0.0.1:18003->10001/tcp`、health OK、`docker compose down -v` 干净回收容器与卷。
 - **含底座镜像用当前代码重建 + 容器内跑通一轮真实会话（2026-09-24 补做，T-5 收口）**：
   - 构建：`GO_PROXY="https://goproxy.cn,direct" DSH_VERSION=0.1.5-rc.3 OPENCODE_VERSION=1.18.32
-    make image/runtimes WITH_DSH=true WITH_OPENCODE=true` → `ark-forge:runtimes`（**673 MB**，
+    make image/runtimes WITH_DSH=true WITH_OPENCODE=true` → `ark-mate:runtimes`（**673 MB**，
     d1c6252c）。顺带修掉 Makefile 与文档不一致：该目标原来固定产出 `$(IMAGE_TAG)-runtimes`
-    （默认 `ark-forge:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是
-    `ark-forge:runtimes`——**开箱即用不了**；现由独立的 `RUNTIMES_TAG`（默认 `runtimes`）决定。
+    （默认 `ark-mate:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是
+    `ark-mate:runtimes`——**开箱即用不了**；现由独立的 `RUNTIMES_TAG`（默认 `runtimes`）决定。
   - 开关组合：只有 opencode 的一版也构建成功（`RUNTIMES_TAG=runtimes-oc`，**450 MB**，
     容器内 `opencode --version`=1.18.32、`dsh` 不存在），证明按 runtime 的开关确实各自生效。
   - 镜像内版本：`node -v`=v24.21.0、`dsh --version`=**0.1.5-rc.3**、`opencode --version`=**1.18.32**
@@ -668,8 +668,8 @@ sudo systemctl restart ark-forge
   注：默认最小镜像 `debian:bookworm-slim` 自带 `/usr/share/zoneinfo`，所以"默认镜像里能跑"并不能
   证明这条；上面的验证特意用了零 zoneinfo 的镜像。
 - 最小镜像本体（M4-7 补跑）：`GO_PROXY=https://goproxy.cn,direct make image` 成功产出
-  `ark-forge:local`（**142 MB**）；`docker run --tmpfs /data -e FORGE_STORE=memory
-  -e FORGE_TOKEN=... -p 127.0.0.1:10077:10001 ark-forge:local` 起得来且
+  `ark-mate:local`（**142 MB**）；`docker run --tmpfs /data -e FORGE_STORE=memory
+  -e FORGE_TOKEN=... -p 127.0.0.1:10077:10001 ark-mate:local` 起得来且
   `GET /v1/forge/health` → **200 `{"code":0,"msg":"ok"}`**。
   **默认 `GO_PROXY` 是 `proxy.golang.org`，在拉不到它的网络里会卡在 Go 构建阶段**——按 §4
   整组覆盖镜像源即可（本机就是走 `goproxy.cn` 才构建成功的）。

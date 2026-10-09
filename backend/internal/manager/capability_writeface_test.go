@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtocapability"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/testutil"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // 本文件是写面（Create/Update/Delete skill 与 mcp）的对外契约套件。M6 起它**逐条跑在两种载体上**

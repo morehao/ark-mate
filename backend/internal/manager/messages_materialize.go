@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— messages 物化（turn 收口，随 materializeRun 同窗口执行） ———

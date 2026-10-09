@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/model"
+	"github.com/morehao/ark-mate/internal/model"
 )
 
 // TestOnDiskFormatContract 锁定落库的**字节形态**。

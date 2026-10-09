@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/internal/version"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/version"
 )
 
 // 本文件是 `forge doctor`（M4-5）：**只读体检**——不装配 App、不连库、不监听、不写 FORGE_HOME

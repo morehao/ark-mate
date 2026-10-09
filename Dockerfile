@@ -1,24 +1,24 @@
-# ark-forge 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
+# ark-mate 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
 #
 # 两个最终 target（文件最后一段 = 默认 target = 最小镜像）：
 #   forge           只含 forge 本体（+ echo 底座自检）；接 opencode/dsh 需自行挂载可执行文件
 #   forge-runtimes  额外内置 agent 底座 dsh / opencode，可用 build-arg 分别开关
 #
 # 构建 · 最小镜像：
-#   docker build -t ark-forge:local .
+#   docker build -t ark-mate:local .
 # 构建 · 含底座（dsh + opencode 都要）：
-#   docker build -t ark-forge:runtimes --target forge-runtimes \
+#   docker build -t ark-mate:runtimes --target forge-runtimes \
 #     --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
 # 构建 · 只要 opencode：
-#   docker build -t ark-forge:oc --target forge-runtimes \
+#   docker build -t ark-mate:oc --target forge-runtimes \
 #     --build-arg WITH_DSH=false --build-arg WITH_OPENCODE=true .
 #
 # 运行（数据全落具名卷 /data；要映射出去必须监听 0.0.0.0）：
-#   docker run -d --name ark-forge -p 127.0.0.1:10001:10001 \
-#     -v ark-forge-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-forge:local
+#   docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
+#     -v ark-mate-data:/data -e FORGE_ADDR=0.0.0.0:10001 ark-mate:local
 #
 # 受限网络（镜像站 / Go 代理 / npm 镜像）用 build-arg 覆盖，示例见 docs/deployment.md §4：
-#   docker build -t ark-forge:local \
+#   docker build -t ark-mate:local \
 #     --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
 #     --build-arg GO_IMAGE=docker.m.daocloud.io/library/golang:1.26-bookworm \
 #     --build-arg RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \

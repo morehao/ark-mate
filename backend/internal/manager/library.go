@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/dto/dtolibrary"
-	"github.com/morehao/ark-forge/internal/service/svclibrary"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
+	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // ——— M2-4：Library 统一读模型 ———

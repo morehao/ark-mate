@@ -2,7 +2,7 @@
 // `gormdao.Dao` 之上（`internal/model` 提供实体）。
 //
 // 与 ark-iam 的 `pkg/iam/dao` 的差异：ark-iam 的构造器签名为 `NewXxxDao(opts ...DaoOption)`，
-// 未显式注入时回落到**进程级单例库**（`dbclient.IamDB`）。ark-forge 的库是按实例打开的
+// 未显式注入时回落到**进程级单例库**（`dbclient.IamDB`）。ark-mate 的库是按实例打开的
 // （`store.Open(path)`，且测试各自使用独立内存库），没有进程级默认库；若保留同样的
 // 可选注入 + 回落形态，就只能伪造一个全局库，从而引入「忘记注入 → 静默读写另一个库」
 // 的失败模式。因此这里把 `gormdao.DBGetter` 定为**必填参数**，DAO 永远绑定在明确的库上。

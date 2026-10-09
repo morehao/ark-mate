@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/router"
+	"github.com/morehao/ark-mate/internal/router"
 )
 
 // TestStaticCacheMatrix 三档缓存语义 + 内容 ETag + 条件请求（设计 §6.2，M2-2 的核心侧）。

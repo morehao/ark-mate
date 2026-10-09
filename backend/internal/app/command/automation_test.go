@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // TestAutomationImportExportCLI `forge automation import|export` 走真实装配路径（配置解析 → 打开库 →

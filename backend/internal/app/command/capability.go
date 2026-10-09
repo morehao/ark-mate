@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/capability"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // capabilityCmd 分发 `forge capability <动作>`。

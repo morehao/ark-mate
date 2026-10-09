@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/redact"
-	"github.com/morehao/ark-forge/pkg/routing"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/pkg/routing"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // maxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。

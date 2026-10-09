@@ -134,6 +134,6 @@
   <text class="small" x="72" y="822">apps/web 不引 Electron/Node · apps/desktop 不引 apps/web 源码 · packages/* 不引 apps/* · backend 不依赖 frontend · 桌面专属代码不进 backend/ 与 apps/web</text>
 
   <!-- 标题 -->
-  <text class="title" x="40" y="52">ark-forge monorepo：桌面端与 web 端的装配与构建 DAG</text>
+  <text class="title" x="40" y="52">ark-mate monorepo：桌面端与 web 端的装配与构建 DAG</text>
   <text class="subtitle" x="40" y="80">两个并列产品（apps/web · apps/desktop）共享能力层与 Go 核心；分开的是代码位置、构建流水线、交付物与发布节奏（参照 deepseek-harness 的 apps/* 与 packages/* 分层）</text>
 </svg>

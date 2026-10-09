@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // ——— 存量 agent 定义的一次性导入与导出（M6-6 下半） ———

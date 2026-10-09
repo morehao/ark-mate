@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // TestNativePermissionDSH B5：dsh 原生权限模式推导（auto/显式/off/未知）。

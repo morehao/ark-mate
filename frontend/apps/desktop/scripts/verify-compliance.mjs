@@ -214,10 +214,10 @@ function main() {
         }
       }
     } else {
-      const app = join(RELEASE_DIR, 'mac-arm64', 'ark-forge.app')
+      const app = join(RELEASE_DIR, 'mac-arm64', 'ark-mate.app')
       if (!existsSync(app)) fail(`没有 ${app}\n  先跑 \`make desktop/dist\`（或用 --from-tarball 判分发形态）`)
       resourcesPath = join(app, 'Contents', 'Resources')
-      label = 'release/mac-arm64/ark-forge.app'
+      label = 'release/mac-arm64/ark-mate.app'
     }
     if (resourcesPath) {
       for (const file of [NOTICES_FILENAME, SBOM_FILENAME]) {

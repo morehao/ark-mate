@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // writeTranscriptJSONL 直接落一个合法 transcript 文件（header + 事件行），用于回读测试。
@@ -26,7 +26,7 @@ func writeTranscriptJSONL(t *testing.T, dir, filename string, lines []string) {
 // TestLoadTranscriptsReseed 回读 transcript → 会话列表重建（标题/状态/时间）+ 事件注入 bus。
 func TestLoadTranscriptsReseed(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_old1","agent_id":"agent-opencode","runtime":"opencode","cwd":"/tmp","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_old1","agent_id":"agent-opencode","runtime":"opencode","cwd":"/tmp","created_at":"2026-09-07T03:12:40Z"}`
 	lines := []string{
 		header,
 		`{"seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"列出当前目录文件"}}`,
@@ -69,7 +69,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 // TestLoadTranscriptsNoTerminal 无终态事件 → 状态 in_progress（供 UI 停止自愈）。
 func TestLoadTranscriptsNoTerminal(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_old2","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_old2","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, "ses_old2.jsonl", []string{
 		header,
 		`{"seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
@@ -85,7 +85,7 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 // TestLoadTranscriptsIdempotent 对同一会话重复回灌不重复注册。
 func TestLoadTranscriptsIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_old3","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_old3","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, "ses_old3.jsonl", []string{header})
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
@@ -100,8 +100,8 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 // 「是否平台代建」权威标志都从 header 回灌；旧文件缺该字段 → 非临时（历史会话语义正确）。
 func TestLoadTranscriptsWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	temporaryHeader := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_ws_temp","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.forge/workspaces/ses_ws_temp","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
-	legacyHeader := `{"schema":"ark-forge.wire-transcript.v1","version":1,"session_id":"ses_ws_legacy","agent_id":"agent-opencode","runtime":"opencode","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
+	temporaryHeader := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_ws_temp","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.forge/workspaces/ses_ws_temp","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
+	legacyHeader := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_ws_legacy","agent_id":"agent-opencode","runtime":"opencode","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, "ses_ws_temp.jsonl", []string{temporaryHeader})
 	writeTranscriptJSONL(t, dir, "ses_ws_legacy.jsonl", []string{legacyHeader})
 

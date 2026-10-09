@@ -1,4 +1,4 @@
-# ark-forge
+# ark-mate
 
 面向 Agent 应用开发的通用底座/平台：创建、运行、扩展与统一管理 Agent，可接入 OpenCode、DeepSeek Harness 等 ACP 兼容的多种 Runtime。
 
@@ -35,7 +35,7 @@
 - **进程注册表 + 孤儿回收（M3 v4③）**：daemon 把拉起的 runtime 子进程（pid/pgid/命令/runtime/agent/实例 id）登记到 `<数据目录>/processes.json`（`FORGE_PROC_REGISTRY` 覆盖，`off` 关闭），正常停止/断连时摘除；启动时回收**上一实例遗留**的孤儿进程（SIGTERM → 宽限期 → SIGKILL 整个进程组），并以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。实测：opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出，故孤儿多出现在「runtime 忽略 EOF / 派生孙进程」场景，注册表为兜底防线。
 - **P2 空闲回收 + 按需拉起**：reapLoop（`FORGE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `FORGE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
 - **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写；**文本增量按 ③ 合并后落行**——`session.message`/`thought` 攒批 25ms / 4KB / 64 条，故一行可能覆盖多个 delta、长回复不再产生几百行，而工具卡/权限卡/提问卡/用户消息/终态仍一条一行）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`；P1 起提供 `forge migrate` 把既有 transcript 幂等导入 SQLite、`forge transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
-- **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-forge-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（**会话/归档双视图** · 按日分组 · 置顶 · 行内更多操作=重命名/归档/恢复 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / **结构化提问卡**——按 schema 渲染单选/多选/文本/数字/布尔控件并本地校验必填与范围 / meta 行（终态轮后附本轮用量行：上下文占用 · 较上轮 Δ · 成本；hover 弹出 goose 风格明细——上下文占用(快照)/首令牌/总耗时/成本，composer 下方常驻最近一轮汇总行） / **失败轮就地「重试该轮」**；消息可一键复制全文，正文内 ``` 围栏代码段渲染为带语言/行数、可复制、长块可折叠的代码卡片）、composer 追加、停止（**忙时可继续输入**：投递模式选「排队 / 打断并发送」，输入框上方实时列出已排队尚未发出的条目并可逐条撤下——队列只认事件、刷新后按当前态补齐）、「待确认」角标（权限 + 提问合并计数，含超时/取消自动收敛）、**会话详情面板**（元数据 + **运行统计**：轮次/失败/取消/工具数 + 失败轮列表一键重试 + 挂起权限就地决策 + 会话级权限记忆——始终允许/始终拒绝——逐条/一键撤销）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；会话头按绑定 agent 如实标注，agent 已不存在时就地给出路（用同一 id 重新注册 / 导出历史另开新会话），不再只显示一个悬空 id；`/conversations/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、**`/capabilities`（Agent 视角 + 全局目录：skill 行内启停开关与物化体检、MCP 密钥键名与未就绪标记、装载告警标签）**、**用量页（顶栏「用量」，数据面 `GET /usage/summary`：按 agent/日期聚合轮次·时长·上下文·成本，支持近 7/30 天与自定义区间；响应回显口径——上下文/成本为区间末快照、day 桶不可加、多币种不混加，上下文与费用上报率分列）**、`/settings` 为管理次要页；Agents 页每行展示 `permission_policy` 摘要（默认动作 + 工具项数 + 原生模式，hover 展开明细），编辑弹窗可直接改 `default`/`native_mode`/工具项 JSON。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
+- **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-mate-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（**会话/归档双视图** · 按日分组 · 置顶 · 行内更多操作=重命名/归档/恢复 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / **结构化提问卡**——按 schema 渲染单选/多选/文本/数字/布尔控件并本地校验必填与范围 / meta 行（终态轮后附本轮用量行：上下文占用 · 较上轮 Δ · 成本；hover 弹出 goose 风格明细——上下文占用(快照)/首令牌/总耗时/成本，composer 下方常驻最近一轮汇总行） / **失败轮就地「重试该轮」**；消息可一键复制全文，正文内 ``` 围栏代码段渲染为带语言/行数、可复制、长块可折叠的代码卡片）、composer 追加、停止（**忙时可继续输入**：投递模式选「排队 / 打断并发送」，输入框上方实时列出已排队尚未发出的条目并可逐条撤下——队列只认事件、刷新后按当前态补齐）、「待确认」角标（权限 + 提问合并计数，含超时/取消自动收敛）、**会话详情面板**（元数据 + **运行统计**：轮次/失败/取消/工具数 + 失败轮列表一键重试 + 挂起权限就地决策 + 会话级权限记忆——始终允许/始终拒绝——逐条/一键撤销）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；会话头按绑定 agent 如实标注，agent 已不存在时就地给出路（用同一 id 重新注册 / 导出历史另开新会话），不再只显示一个悬空 id；`/conversations/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、**`/capabilities`（Agent 视角 + 全局目录：skill 行内启停开关与物化体检、MCP 密钥键名与未就绪标记、装载告警标签）**、**用量页（顶栏「用量」，数据面 `GET /usage/summary`：按 agent/日期聚合轮次·时长·上下文·成本，支持近 7/30 天与自定义区间；响应回显口径——上下文/成本为区间末快照、day 桶不可加、多币种不混加，上下文与费用上报率分列）**、`/settings` 为管理次要页；Agents 页每行展示 `permission_policy` 摘要（默认动作 + 工具项数 + 原生模式，hover 展开明细），编辑弹窗可直接改 `default`/`native_mode`/工具项 JSON。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
 - **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **P3 收口**：传输保险丝/resync、hydration 四态均完成；会话侧栏（置顶 + 按日分组 + 近底跟随滚动）与工具/思考内联卡片为 M1 既有覆盖项，无需改动。
 - **P3 加载四态（前端）**：会话视图加 hydration 态——冷挂载/切回置 `hydrating`，服务端 snapshot 或首个事件置回就绪，空转 12s（保险丝重连前）自动回空态不再永久 loading；聊天页在 hydration 中显示「连接会话…」而非空态问候。
@@ -489,7 +489,7 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 仓库结构：
 
 ```
-backend/                单 Go module（github.com/morehao/ark-forge）
+backend/                单 Go module（github.com/morehao/ark-mate）
   cmd/forge             进程入口：只做子命令分发（→ internal/app/command）
   pkg/                  可复用基础设施（不得 import internal/，由 archtest 守卫）
     acl                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）

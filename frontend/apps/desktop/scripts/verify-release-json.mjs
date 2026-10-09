@@ -639,7 +639,7 @@ async function main() {
     const dmgs = files.filter((f) => f.endsWith('.dmg'))
     check('有 tar.gz（分发形态）', tarballs.length === 1, tarballs.join('、'))
     check('有 dmg（本地自测形态）', dmgs.length === 1, dmgs.join('、'))
-    const expectName = `ark-forge-${release.appVersion}-macos-${process.arch}`
+    const expectName = `ark-mate-${release.appVersion}-macos-${process.arch}`
     check(
       '产物命名与契约版本/架构一致',
       tarballs[0]?.startsWith(expectName) ?? false,

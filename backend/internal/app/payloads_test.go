@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // payloadTestConfig 造一份"能起得来"的最小配置（照 isolation_test 的口径）：

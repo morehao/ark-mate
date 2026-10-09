@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/service/svcconversation"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/service/svcconversation"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

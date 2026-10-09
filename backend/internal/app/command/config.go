@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/config"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // configCmd 打印解析后的配置与每项来源（排障/上线核对用；不启动任何进程）。

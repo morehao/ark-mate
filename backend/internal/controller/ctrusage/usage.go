@@ -6,9 +6,9 @@ package ctrusage
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/dto/dtousage"
-	"github.com/morehao/ark-forge/internal/service/svcusage"
-	"github.com/morehao/ark-forge/pkg/code"
+	"github.com/morehao/ark-mate/internal/dto/dtousage"
+	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 

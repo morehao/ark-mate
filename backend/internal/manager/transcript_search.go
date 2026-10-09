@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 )
 
 // SearchConversations 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。

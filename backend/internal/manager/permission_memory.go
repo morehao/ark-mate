@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // 会话级权限记忆的决策侧（与 allow_always / reject_always 选项一一对应）。

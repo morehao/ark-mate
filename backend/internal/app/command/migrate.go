@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/store"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/store"
 )
 
 // migrate 把 transcript 目录（默认 ~/.forge/transcripts）全量导入 SQLite（P1 迁移关键路径）：

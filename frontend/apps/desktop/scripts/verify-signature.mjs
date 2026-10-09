@@ -21,7 +21,7 @@
  *
  * ## 用法
  *
- *   node scripts/verify-signature.mjs                       # 默认 release/mac-arm64/ark-forge.app
+ *   node scripts/verify-signature.mjs                       # 默认 release/mac-arm64/ark-mate.app
  *   node scripts/verify-signature.mjs --app <path.app>      # 显式指定（解包后的 .app 也行）
  *   node scripts/verify-signature.mjs --from-tarball        # 先把 release/*.tar.gz 解到临时目录再判
  *   --json  只打一份确定性 JSON（给后续门禁消费）
@@ -39,7 +39,7 @@ const SCRIPT_DIR = import.meta.dirname
 const DESKTOP = resolve(SCRIPT_DIR, '..')
 const RELEASE_DIR = join(DESKTOP, 'release')
 const RELEASE_JSON = join(DESKTOP, 'release.json')
-const DEFAULT_APP = join(RELEASE_DIR, 'mac-arm64', 'ark-forge.app')
+const DEFAULT_APP = join(RELEASE_DIR, 'mac-arm64', 'ark-mate.app')
 
 const MACHO_MAGICS = new Set([
   0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,

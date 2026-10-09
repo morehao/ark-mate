@@ -36,7 +36,7 @@ import (
 //     入哈希会让"内容没变"被误判成"变了"。
 //
 // 与 compozy 的差异（有意）：那边的 provenance 服务于 marketplace 安装（registry/slug/version），
-// ark-forge 没有 marketplace，来源就是本机定义文件，所以 sidecar 记的是 **skill id + runtime + format
+// ark-mate 没有 marketplace，来源就是本机定义文件，所以 sidecar 记的是 **skill id + runtime + format
 // + 摘要 + 写入时间**——本地可审计需要的那几项，不假装有版本号。
 
 // ProvenanceFileName 物化目录里的摘要 sidecar（与 `.forge-managed` 归属标记并列）。

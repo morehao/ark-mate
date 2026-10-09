@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoconversation"
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/object/objusage"
+	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // registerConversation 登记一个新会话，返回记录指针。

@@ -81,7 +81,7 @@ function main() {
     digest: createHash('sha256').update(text).digest('hex'),
   }))
 
-  console.log(`==> 合规生成物（M4-5）：ark-forge ${model.app.version}`)
+  console.log(`==> 合规生成物（M4-5）：ark-mate ${model.app.version}`)
   console.log(`    组件：${model.packages.length} 个 npm 包（其中 ${model.bundled.length} 个是 npm 自带发布的 bundles）`)
   console.log(`    + 载荷自身 ${model.payloads.length} 份、运行时 ${model.runtimes.length} 个（Electron / Node）`)
   for (const row of rows) {

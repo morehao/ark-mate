@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/object/objusage"
-	"github.com/morehao/ark-forge/pkg/procreg"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/version"
+	"github.com/morehao/ark-mate/internal/version"
 )
 
 // TestVersionOutput 版本出口的字节级契约（M4-1）。

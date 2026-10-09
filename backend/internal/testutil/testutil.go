@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/store"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // StubRegistry 只注册一个**测试专用 stub runtime** 的注册表。

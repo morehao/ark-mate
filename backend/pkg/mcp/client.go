@@ -19,13 +19,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/capability"
 )
 
 const (
 	// protocolVersion 协商版本（客户端声明；服务端返回其支持版本，不强制相等——探测只读）。
 	protocolVersion = "2025-06-18"
-	clientName      = "ark-forge"
+	clientName      = "ark-mate"
 	clientVersion   = "0.1.0"
 
 	// maxResponseBytes 单条消息上限（防御异常 server 打爆内存）。

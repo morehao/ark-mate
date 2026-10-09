@@ -214,7 +214,7 @@
   <text class="badge" x="790" y="693" text-anchor="middle">5</text>
 
   <!-- ===== 标题与图例 ===== -->
-  <text class="title" x="40" y="52">ark-forge 桌面端：启动链与部署拓扑</text>
+  <text class="title" x="40" y="52">ark-mate 桌面端：启动链与部署拓扑</text>
   <text class="subtitle" x="40" y="80">Electron 壳 + 随包资产与运行时（Node 由 Electron 提供，实测 24.18.1 满足 dsh engines）｜用户机器无需 Go / Node / pnpm / Python，也无需预装 dsh / opencode</text>
 
   <rect class="node neutral" x="56" y="944" width="16" height="16" rx="4" />

@@ -1,4 +1,4 @@
-# ark-forge Agent × Runtime 解耦与能力复用重构设计
+# ark-mate Agent × Runtime 解耦与能力复用重构设计
 
 > 版本：v1（待审核）｜日期：2026-09-08｜类型：破坏性重构设计
 > 状态：**待审核**——审核通过前不得执行代码重构。
@@ -11,7 +11,7 @@
 
 ## 摘要（TL;DR）
 
-当前 ark-forge 是「ACP 控制面网关」：runtime（opencode / deepseek-harness / echo）是用户可见的
+当前 ark-mate 是「ACP 控制面网关」：runtime（opencode / deepseek-harness / echo）是用户可见的
 一等公民，用户新建会话须显式选底座；skill / MCP / 工具没有平台侧统一模型，只是透传或空壳
 （`McpServers: []`，见 `backend/internal/acl/session.go:65/83/102`）。
 
@@ -58,7 +58,7 @@
 缺「能力归一化 + 运行时投影」层，且「runtime 是一等公民」的心智模型与「透明」预期相悖。
 参照 goose：它把外部 ACP CLI（Claude Code / Codex）当作与 API 提供商同列的 `Provider`
 （`crates/goose-provider-types/src/base.rs:464-715`），一个 `stream(model, system, messages, tools)`
-接口统一所有后端，上层完全不感知后端差异。本设计把这一模式移植到 ark-forge，概念名沿用「Runtime」。
+接口统一所有后端，上层完全不感知后端差异。本设计把这一模式移植到 ark-mate，概念名沿用「Runtime」。
 
 ---
 
@@ -467,7 +467,7 @@ runtime 作为 hint），不保留 runtime 身份语义。
 
 ### 10.1 借鉴
 
-| goose | ark-forge 落地 |
+| goose | ark-mate 落地 |
 |---|---|
 | `Provider` trait + `stream(model, system, messages, tools)` | `runtime.Runtime` 接口 + `Prompt(PromptRequest)` |
 | `manages_own_context()`（`base.rs:631`） | `Runtime.ManagesOwnContext()` |
@@ -1275,7 +1275,7 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 **证据（真进程/真测试）**：
 - `make all` → `./forge`（40 MB，内嵌面板）；`GIN_MODE=release forge serve --addr
   127.0.0.1:18140`（sqlite + 独立数据目录）→ health `{"code":0,"msg":"ok"}`；`GET /` 200
-  `text/html`（标题 `ark-forge · Agent 问答控制台`，`/assets/index-*.js` 可访问），无 gin debug 告警。
+  `text/html`（标题 `ark-mate · Agent 问答控制台`，`/assets/index-*.js` 可访问），无 gin debug 告警。
 - 按文档命令建 `echo` agent → 跑通一轮（REST 决策权限）→ 终态 `completed`；`/usage/summary`
   `runs=1 completed=1 duration_ms=105 context_used=137 usage_reported=1 cost=0.00137 USD`。
 - 重启恢复：kill 后同库重启，`/conversations` 仍列出该会话（标题保留）。
@@ -1515,7 +1515,7 @@ A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
 #### 19.14 切片 A5：远程 runtime 传输（Streamable HTTP / WebSocket，完成）
 
 **动机**：此前 `acl.Transport` 只有 `StdioTransport` 一种实现，runtime 只能是「本机子进程」。
-A5 补上远程端点接入，使 ark-forge 既能驱动本机 CLI，也能接远端/容器内/另一台机器上的 ACP server。
+A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远端/容器内/另一台机器上的 ACP server。
 
 **关键设计决策：不新增连接抽象，把网络连接伪装成 io 流。**
 `acpsdk.NewClientSideConnection(client, peerInput io.Writer, peerOutput io.Reader)` 只吃流，

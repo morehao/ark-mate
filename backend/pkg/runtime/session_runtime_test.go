@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // dialTestSession 用自建 responder（acp_testserver_test.go）取一条**活的** acl.Session，

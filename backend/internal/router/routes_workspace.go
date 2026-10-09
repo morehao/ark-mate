@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrworkspace"
+	"github.com/morehao/ark-mate/internal/controller/ctrworkspace"
 )
 
 // registerWorkspace 工作空间只读面与白名单设置面。

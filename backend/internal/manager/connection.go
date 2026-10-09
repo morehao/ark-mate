@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // connKey 计算**基础**连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。

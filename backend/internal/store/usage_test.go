@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-forge/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // seedRun 写入一条 run（含 agent 归属的会话与用量快照 JSON）。

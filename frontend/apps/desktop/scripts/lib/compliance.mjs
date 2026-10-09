@@ -38,7 +38,7 @@ export const SBOM_FILENAME = 'sbom.cdx.json'
 export const CYCLONEDX_SPEC_VERSION = '1.5'
 
 /** 本应用自己的许可与出处（仓库根 LICENSE 是 MIT；显式声明，不从文本里"识别"）。 */
-export const APP_LICENSE = { license: 'MIT', source: 'https://github.com/morehao/ark-forge' }
+export const APP_LICENSE = { license: 'MIT', source: 'https://github.com/morehao/ark-mate' }
 
 /** 已知上游出处（key = 包名 / 运行时名）。没有条目的包按 npm 注册表页机械推导。 */
 export const UPSTREAM = {
@@ -386,7 +386,7 @@ export function collectComplianceModel({ release, payloadsRoot, runtimeRoot }) {
     .sort((a, b) => (a.name < b.name ? -1 : 1))
 
   return {
-    app: { name: 'ark-forge', version: release.appVersion, ...APP_LICENSE },
+    app: { name: 'ark-mate', version: release.appVersion, ...APP_LICENSE },
     runtimes: [
       { name: 'electron', kind: 'electron', version: release.electron, license: 'MIT', source: UPSTREAM.electron },
       { name: 'node', kind: 'node', version: release.node, license: 'MIT', source: UPSTREAM.node },
@@ -401,7 +401,7 @@ export function collectComplianceModel({ release, payloadsRoot, runtimeRoot }) {
 /** `THIRD-PARTY-NOTICES.txt` 的文本（确定性：字段序固定、组件按 name@version 排序、无时间戳）。 */
 export function renderNotices(model) {
   const lines = []
-  lines.push(`ark-forge ${model.app.version} — 第三方软件声明（THIRD-PARTY NOTICES）`)
+  lines.push(`ark-mate ${model.app.version} — 第三方软件声明（THIRD-PARTY NOTICES）`)
   lines.push('='.repeat(72))
   lines.push('')
   lines.push(`本文件由 frontend/apps/desktop/scripts/gen-compliance.mjs 生成，**不要手工修改**：`)
@@ -451,7 +451,7 @@ export function renderSbom(model) {
     if (properties && properties.length > 0) out.properties = properties
     return out
   }
-  const appRef = `pkg:generic/ark-forge@${model.app.version}`
+  const appRef = `pkg:generic/ark-mate@${model.app.version}`
   const runtimePurl = (name, version) => `pkg:generic/${name}@${version}`
 
   const components = [

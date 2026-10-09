@@ -1,7 +1,7 @@
-# ark-forge 仓库根构建编排
+# ark-mate 仓库根构建编排
 #
 # 仓库结构（前后端平级 monorepo）：
-#   backend/   —— 单 Go module：github.com/morehao/ark-forge（go.mod 在 backend/ 根）
+#   backend/   —— 单 Go module：github.com/morehao/ark-mate（go.mod 在 backend/ 根）
 #                 pkg/ 可复用基础设施（不 import internal/）+ internal/ 应用分层；
 #                 分层边界由 backend/internal/archtest 守卫测试强制
 #   frontend/  —— 独立 pnpm workspace（apps/web），产物可单独部署
@@ -29,7 +29,7 @@ DESKTOP_WEB_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/web
 # x64 → `mac`（`desktop/dist` 只传 `--mac`，所以这里按 `uname -m` 推是准的）。
 # `desktop/run` 与 `verify/hardened-runtime` 共用这一条路径，免得两处各写一遍、改一处忘一处。
 DESKTOP_ARCH_DIR := $(if $(filter arm64 aarch64,$(shell uname -m)),mac-arm64,mac)
-DESKTOP_APP := $(FRONTEND_ROOT)/apps/desktop/release/$(DESKTOP_ARCH_DIR)/ark-forge.app
+DESKTOP_APP := $(FRONTEND_ROOT)/apps/desktop/release/$(DESKTOP_ARCH_DIR)/ark-mate.app
 
 # —— 桌面发布号（M4-1）——
 # 版本的唯一事实源是 apps/desktop/package.json（npm 语义的应用版本）；核心的版本由 make 注入
@@ -38,7 +38,7 @@ DESKTOP_APP := $(FRONTEND_ROOT)/apps/desktop/release/$(DESKTOP_ARCH_DIR)/ark-for
 DESKTOP_VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' $(FRONTEND_ROOT)/apps/desktop/package.json | head -1)
 # 开发态（core/desktop）不注入 → 核心报 `dev`（internal/version 的口径）；只有 desktop/dist 注入。
 CORE_VERSION ?=
-CORE_LDFLAGS  = $(if $(CORE_VERSION),-ldflags "-X github.com/morehao/ark-forge/internal/version.Version=$(CORE_VERSION)",)
+CORE_LDFLAGS  = $(if $(CORE_VERSION),-ldflags "-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION)",)
 
 # 打包期下载缓存落仓库内（.cache/ 已 gitignore）：本机沙箱与 CI 都不该往 ~/Library/Caches 写。
 # 只认 ELECTRON_BUILDER_CACHE——它是 electron-builder 26 的**唯一**缓存根（Electron 发行包解到
@@ -150,7 +150,7 @@ desktop/accept: core/desktop desktop/payloads
 # CORE_VERSION 是 target-specific 变量（对 core/desktop 生效）：出包的核心必须带发布号，
 # 否则 build-release-json 会以"核心报 dev"直接失败。
 #
-# 交付物两种（§12.27）：release/ark-forge-<ver>-macos-<arch>.tar.gz 是**分发**形态（非浏览器渠道，
+# 交付物两种（§12.27）：release/ark-mate-<ver>-macos-<arch>.tar.gz 是**分发**形态（非浏览器渠道，
 # 不带 quarantine）；同目录的 .dmg 只作本地自测。签名是 ad-hoc（无证书，identity: "-"）；
 # 加固运行时与公证分别是 M4-2a / M4-2b 的范围。
 # 当前只出 macOS（`--mac`）：Windows 的 NSIS 分支在 M4-3 接（那时这条 recipe 再按平台分叉）。
@@ -188,7 +188,7 @@ define open-desktop-app
 	@open $(DESKTOP_APP)
 endef
 
-# 启动**打好的包**（人工看界面用）：等价于在访达里双击 `release/<arch>/ark-forge.app`。
+# 启动**打好的包**（人工看界面用）：等价于在访达里双击 `release/<arch>/ark-mate.app`。
 # 壳自己解析包内载荷、自己起包内核心（`:0` + 双凭据经 stdin），跟开发态是同一套路径，
 # 区别只在"全都来自包内"——所以它也是看"签名形态下跑起来是什么样"的最短路径。
 #
@@ -243,13 +243,13 @@ verify/release-json:
 # 签名事实逐对象复核（M4-2a）：`codesign --verify --deep --strict`（封条完整）+ 包里每个 Mach-O
 # 都有签名且带 `--options runtime` + identity 与 release.json 声明一致 + entitlements 真的签进去了。
 # `spctl -a -vvv -t exec` 的结论如实打印但**不判失败**（ad-hoc 必然被 Gatekeeper 拒，这是 §12.27 的预期）。
-# 默认判 `release/<arch>/ark-forge.app`（即 `$(DESKTOP_APP)`）；也可 `--from-tarball` 判解包后的那一份（分发形态）。
+# 默认判 `release/<arch>/ark-mate.app`（即 `$(DESKTOP_APP)`）；也可 `--from-tarball` 判解包后的那一份（分发形态）。
 verify/signature:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm verify:signature
 
 # 加固运行时下的**包内执行**（M4-2a）：设计 §6.3 回退条件 ② 的判据。
-# 与 `pnpm smoke:desktop` 的唯一区别：壳从**打出来的包**里起（`.app/Contents/MacOS/ark-forge`，
+# 与 `pnpm smoke:desktop` 的唯一区别：壳从**打出来的包**里起（`.app/Contents/MacOS/ark-mate`，
 # ad-hoc 签名 + `--options runtime`），核心与其下的 dsh / opencode 也全部来自包内。
 # 需要先有包（`make desktop/dist`）；签名形态本身由 `verify/signature` 判，这条判"能不能跑"。
 # 2026-10-09 起再加一条：**包内能力投放**（`ui:accept:desktop-skills:packaged`）——"能不能跑"之后
@@ -360,7 +360,7 @@ clean:
 #   make image                                    —— 最小镜像（只含 forge 本体 + echo 自检底座）
 #   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
 #                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
-#                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-forge:runtimes）
+#                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-mate:runtimes）
 #   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
 # 受限网络（镜像站 / Go 代理 / npm 镜像）直接覆盖下面的变量，例如：
 #   make image NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
@@ -374,11 +374,11 @@ NPM_REGISTRY     ?= https://registry.npmjs.org
 GO_PROXY         ?= https://proxy.golang.org,direct
 DSH_VERSION      ?= latest
 OPENCODE_VERSION ?= latest
-IMAGE            ?= ark-forge
+IMAGE            ?= ark-mate
 IMAGE_TAG        ?= local
 # 含底座镜像的 tag 单独一个变量：`make image/runtimes` 与 `make image/run IMAGE_TAG=runtimes`
-# 是文档里成对写的两条命令，若在这里复用 IMAGE_TAG，默认会产出 `ark-forge:local-runtimes`
-# 而 run/文档找的是 `ark-forge:runtimes`——开箱即用不了（实测踩到）。
+# 是文档里成对写的两条命令，若在这里复用 IMAGE_TAG，默认会产出 `ark-mate:local-runtimes`
+# 而 run/文档找的是 `ark-mate:runtimes`——开箱即用不了（实测踩到）。
 RUNTIMES_TAG     ?= runtimes
 FORGE_PORT       ?= 10001
 WITH_DSH         ?= false

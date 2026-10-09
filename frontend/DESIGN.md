@@ -1,7 +1,7 @@
 ---
 version: 1.0
-name: ark-forge-frontend-design
-description: "ark-forge Web 问答控制台（frontend/apps/web）统一视觉语言。以 ark-forge-console.html 原型为基准的 modern-minimal 浅色应用壳（Linear / Vercel 语感），纪律对齐 ark-iam DESIGN：靛蓝 #4f6ef7 是唯一强调色，仅用于主按钮 / 链接 / 选中态 / 品牌点；页面表面一律中性灰阶；卡片与内容区用冷调 hairline 边框分层、不使用卡片阴影（阴影仅留给 Modal / toast 浮层）；文字为三级灰阶并全站开启 tabular-nums。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
+name: ark-mate-frontend-design
+description: "ark-mate Web 问答控制台（frontend/apps/web）统一视觉语言。以 ark-mate-console.html 原型为基准的 modern-minimal 浅色应用壳（Linear / Vercel 语感），纪律对齐 ark-iam DESIGN：靛蓝 #4f6ef7 是唯一强调色，仅用于主按钮 / 链接 / 选中态 / 品牌点；页面表面一律中性灰阶；卡片与内容区用冷调 hairline 边框分层、不使用卡片阴影（阴影仅留给 Modal / toast 浮层）；文字为三级灰阶并全站开启 tabular-nums。代码事实源：packages/ui/src/theme.ts 的 tokens 对象（本文件与之一一对应，改动需同步两处）。"
 
 colors:
   brand-primary: "#4f6ef7"
@@ -44,15 +44,15 @@ spacing:
   transcript-max-width: 840px
 ---
 
-# ark-forge 前端 DESIGN.md
+# ark-mate 前端 DESIGN.md
 
 > 供 AI 编码代理与开发者共同遵循的前端「统一风格约定」。
 > **代码唯一事实源是 `packages/ui/src/theme.ts` 的 `tokens` 对象**：改任何色值/圆角/间距必须先改 tokens，再同步本文件 front matter（二者必须一致）。页面与组件一律引用 tokens / antd token，禁止出现 `#4f6ef7`、`#e6e9ef` 之类的裸色值。
 
 ## 1. 视觉主题总览
 
-- **定位**：ark-forge Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
-- **基准**：`ark-forge-console.html`（~/Downloads 下的高保真原型，不入库；仅作设计基准）——modern-minimal 浅色应用壳（Linear / Vercel 语感）。
+- **定位**：ark-mate Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
+- **基准**：`ark-mate-console.html`（~/Downloads 下的高保真原型，不入库；仅作设计基准）——modern-minimal 浅色应用壳（Linear / Vercel 语感）。
 - **画布**：页面底 `surface-layout`（冷白）；会话侧栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline` hairline 分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
 - **品牌**：靛蓝 `#4f6ef7` 是唯一强调色（主按钮 / 链接 / 选中态 / 焦点环 / 品牌点「ark·forge」的 ·）；会话选中态与 agent 选项卡用半透明 `primary-soft` / `selected-bg` 柔和底，主色不铺满页面。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。

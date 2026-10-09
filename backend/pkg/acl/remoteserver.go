@@ -19,7 +19,7 @@ import (
 // ——— 远程 ACP 传输的服务端半场（A5） ———
 //
 // 与客户端半场（remote.go）对称：把「一个 ACP server（peerInput/peerOutput 字节流）」
-// 暴露成远程端点，供本机/跨机的 ark-forge（或任何 ACP 客户端）以 http|ws 接入。
+// 暴露成远程端点，供本机/跨机的 ark-mate（或任何 ACP 客户端）以 http|ws 接入。
 //
 // 用途：
 //   - 远程 runtime：`.forge/config/runtimes.json` 声明的 http|ws 端点即由本层服务端半场承载

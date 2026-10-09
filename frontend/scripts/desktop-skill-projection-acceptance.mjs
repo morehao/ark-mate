@@ -46,7 +46,7 @@
  *
  * 用法：
  *   `node scripts/desktop-skill-projection-acceptance.mjs`（源码态；`KEEP_PROBE=1` 保留探针目录）
- *   `FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-skill-projection-acceptance.mjs`
+ *   `FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-skill-projection-acceptance.mjs`
  *     （打包态；等价 `pnpm ui:accept:desktop-skills:packaged`，需要先 `make desktop/dist`）
  * **不进 CI**：要真 Electron + 真底座。
  */

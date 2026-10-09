@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— M3-6：轮次边界的代际迁移（ADR-13） ———

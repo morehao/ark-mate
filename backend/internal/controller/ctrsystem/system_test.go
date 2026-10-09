@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 )
 
 // newEngine 挂上系统面控制器（最小引擎：本包只关心传输形状）。

@@ -1,4 +1,4 @@
-# ark-forge 能力库与自动化数据面技术方案（多 runtime 投影）
+# ark-mate 能力库与自动化数据面技术方案（多 runtime 投影）
 
 > 档位：标准档｜场景：S2 增量改造（主）+ 新子系统｜专题：数据模型设计、API 设计、架构设计
 > 参考对象：openwork（`/Users/morehao/Documents/study/ai-agent/openwork`，只读；基线 **`v0.18.49` / `e8c6de421`**，下文所有行号引用均针对该 commit）
@@ -12,7 +12,7 @@
 
 ### 业务背景与现状
 
-ark-forge 是**单操作员的 ACP 多 runtime 控制面**：一个 Go 单二进制（REST + WS + 内嵌面板）把 `opencode` / `deepseekharness` 两个 ACP 底座统一成一个平台会话模型。当前已落地的能力面：
+ark-mate 是**单操作员的 ACP 多 runtime 控制面**：一个 Go 单二进制（REST + WS + 内嵌面板）把 `opencode` / `deepseekharness` 两个 ACP 底座统一成一个平台会话模型。当前已落地的能力面：
 
 | 域 | 事实源 | 平台能做什么 | 代码位置 |
 |---|---|---|---|
@@ -46,7 +46,7 @@ ark-forge 是**单操作员的 ACP 多 runtime 控制面**：一个 Go 单二进
 
 **超出范畴的用例（非目标）**
 
-- **不引入 OAuth / 远端授权连接**。openwork 的 `ManagedMcpOAuthConnection`（`needs_auth`/`connected`/`reconnect_required`，`apps/app/src/app/types.ts:330-341`）服务于它的云端 Den 账号体系；ark-forge 是单操作员本机工具，密钥一律走既有的 `vault:` / `env:` 引用（`pkg/capability/secretref.go`）。**原因**：OAuth 需要一个回调 HTTP 端点 + 浏览器重定向 + 令牌存储，而单操作员场景下 `env:` 引用的成本是 0。
+- **不引入 OAuth / 远端授权连接**。openwork 的 `ManagedMcpOAuthConnection`（`needs_auth`/`connected`/`reconnect_required`，`apps/app/src/app/types.ts:330-341`）服务于它的云端 Den 账号体系；ark-mate 是单操作员本机工具，密钥一律走既有的 `vault:` / `env:` 引用（`pkg/capability/secretref.go`）。**原因**：OAuth 需要一个回调 HTTP 端点 + 浏览器重定向 + 令牌存储，而单操作员场景下 `env:` 引用的成本是 0。
 - **不做能力市场 / 插件包 / 版本门禁**。openwork 的 marketplace + plugin（一个包同时带 skill + MCP + command）依赖 Den 侧的发布与权限体系，本平台没有"发布方"这一角色。**原因**：见「不借鉴清单」。
 - **不做跨 agent 协作 / 多 runtime 并行执行**。一次会话仍绑定且仅绑定一个 runtime（既有决策 v2②），automation 一次触发也只指定一个 target。**原因**：这是一条定位红线，改动需单独走定位评审（roadmap §7.1 风险 8）。
 - **不做会话内热切换 runtime**（handoff 语义）——automation 只新建会话，不改写既有会话的 runtime。
@@ -130,9 +130,9 @@ openwork 是 macOS/Windows/Linux 桌面应用，**built on OpenCode**，仓库�
 
 | # | 差异 | 影响 | 对策 |
 |---|---|---|---|
-| 1 | openwork 的一切最终落到一个引擎的原生约定（OpenCode 的 `.opencode/` 目录、opencode config 的 mcp 段）；ark-forge 有 N 个底座 | 能力数据不能直接写成某个底座的文件形态，必须多一层翻译 | **投影契约**：投影是 runtime 的属性，数据层只描述"是什么" |
+| 1 | openwork 的一切最终落到一个引擎的原生约定（OpenCode 的 `.opencode/` 目录、opencode config 的 mcp 段）；ark-mate 有 N 个底座 | 能力数据不能直接写成某个底座的文件形态，必须多一层翻译 | **投影契约**：投影是 runtime 的属性，数据层只描述"是什么" |
 | 2 | openwork 的 `McpServerConfig.type` 只有 `remote` / `local` 两态；ACP 的 `session/new` 有四种 token（`stdio`/`sse`/`http`/`streamable_http`），且各底座支持度不同 | 一份 MCP 定义在底座 A 可注入、在底座 B 不可 | 复用既有 `Spec.McpTransports`（`pkg/runtime/contracts.go:41`）做**逐 runtime 可达性**，并在读模型里外露 `runtimes[]` 与不可达原因 |
-| 3 | openwork 是 Electron 桌面，有本地文件系统与后台守护；ark-forge 是 Web 控制面，agent 跑在服务端进程拉起的子进程里 | 工作空间、skill 目录的"本地"含义不同 | 投影的 `scope` 保留 `global\|workspace` 语义，但 workspace 投影的根是**会话 cwd**，受 `FORGE_WORKSPACE_ROOTS` 白名单约束（`pkg/config/config.go:74`）。**【实施后收窄 2026-09-23】**：`scope` 实际只用到 `global`——skill 投影落在平台自有的中立根（`~/.agents/skills`）；**workspace 作用域投影随 command 面（M5-0）一并否决**，故"会话 cwd 作为投影根"当前不成立。`FORGE_WORKSPACE_ROOTS` 及其符号链接规范化改由 workspace 库消费 |
+| 3 | openwork 是 Electron 桌面，有本地文件系统与后台守护；ark-mate 是 Web 控制面，agent 跑在服务端进程拉起的子进程里 | 工作空间、skill 目录的"本地"含义不同 | 投影的 `scope` 保留 `global\|workspace` 语义，但 workspace 投影的根是**会话 cwd**，受 `FORGE_WORKSPACE_ROOTS` 白名单约束（`pkg/config/config.go:74`）。**【实施后收窄 2026-09-23】**：`scope` 实际只用到 `global`——skill 投影落在平台自有的中立根（`~/.agents/skills`）；**workspace 作用域投影随 command 面（M5-0）一并否决**，故"会话 cwd 作为投影根"当前不成立。`FORGE_WORKSPACE_ROOTS` 及其符号链接规范化改由 workspace 库消费 |
 | 4 | openwork 的 automation 有 desktop / cloud 两个 `executionTarget`，需要 runner 注册、心跳、存在性窗口（`AUTOMATION_DESKTOP_RUNNER_PRESENCE_WINDOW_MS = 10min`，`automations.ts:216`） | 本平台只有一个执行位置（daemon 自己） | **删掉 executionTarget 维度**：只有一个落点，多一层选择只增加状态；`needs_attention` 的原因收敛为「agent 被删 / runtime 不可用 / 工作空间不存在 / 密钥缺失」 |
 | 5 | openwork 的 automation 与 threading 是服务端 + DB 强事务（claim 要求 transactional），因为执行者可能是**离线的桌面或远端容器** | 本平台 `FORGE_STORE=memory` 是合法模式，没有 DB；执行者就是本进程 | 定义走文件、台账走既有的 `conversations`；认领幂等靠「文件里的 `last_fired_at` + 进程内互斥」。**lease / heartbeat / attempt 三段式整天不需要**——它是"执行者可能消失"的产物。memory 模式下 automation 仍可用（只少运行史检索） |
 | 6 | openwork 的 `origin: openwork-connect` 指向云端分发；本平台没有分发方 | 来源轴只有一端 | 保留 `origin: local \| imported`（`imported` 预留给"从某个 runtime 原生目录反向扫描入库"，见开放问题） |
@@ -399,7 +399,7 @@ type Skill struct {
 |---|---|
 | **F1 代际绑定（采纳）** | 粒度与"一次任务"对齐（同一 cwd 下"这次只给我两个 skill"可表达），且不可变性由**结构**保证：勾选结果 → 能力指纹 → 内容寻址的代际（进程 + 投影根）。指纹相同则复用同一进程，故**稳态进程数与今天相同**；只有用户真的同时用多套能力时才多进程。会话记录钉住的指纹，审计可逐字节验证 |
 | F2 会话启用集快照（原案） | 不引入代际概念，实现更直接。**代价**：把不可变性变成**纪律**而不是结构——底座是否真按会话隔离，取决于一个未实测的假设（见 ADR-14）；且"改了不生效"只能靠"重建会话丢上下文"来换，等于用可用性买审计性 |
-| F3 workspace 级布尔（openwork 形态） | 实现最省（一个 `enabled` 字段 + 投影时过滤）。**代价**：粒度错位——ark-forge 的 workspace 是**会话的 cwd**，多个会话常共享同一 cwd；在 A 对话里关掉一个 MCP 会连带影响 B 对话，而这个因果关系不在用户视野里 |
+| F3 workspace 级布尔（openwork 形态） | 实现最省（一个 `enabled` 字段 + 投影时过滤）。**代价**：粒度错位——ark-mate 的 workspace 是**会话的 cwd**，多个会话常共享同一 cwd；在 A 对话里关掉一个 MCP 会连带影响 B 对话，而这个因果关系不在用户视野里 |
 | F4 只保留 `agent.Mcps`（不动） | 零改动。**代价**：无法回答"这次只开一个 MCP"——而输入卡的 `+` 入口（用户明确要求的能力）本质上就是这个动作 |
 
 **选 F1（代际绑定）**。理由的**决定性一条**是本仓既有的正确性前提：`orchestrator.go:123-124` 已经因为"**权限开关是进程级**"而把进程当作能力边界，`connKey`（`connection.go:13-16`）因此纳入 runtime + 原生权限 env + provider env。**F2 要求能力集是会话级的，比权限开关更细**——若底座实际上是进程级绑定，F2 会把两套不同能力集悄悄合并到一个进程且不报错。F1 不赌这个假设：它按最粗的绑定设计，底座若更细只是多花了内存（见 ADR-14 的代价不对称）。
@@ -862,7 +862,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 ### 实施记录与偏离（2026-09-23 收口）
 
-**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）；**T-4 面板界面验收于 2026-09-24 以真 Chrome 补做完毕**（M3-4 / M4-6 / M5′ 共 51 条断言全绿）；**同日内置底座镜像 `ark-forge:runtimes` 用当轮代码重建，并在容器内跑通一轮真实会话**（T-5 收口）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
+**交付状态**：M0（删 echo 演示底座）→ M1（投影契约 + 能力指纹）→ M2（写面 + Library）→ M3（代际绑定与轮次边界迁移）→ M4（Automations）→ M6（收口）全部完成；**M5 经 M5-0 实测否决后不执行**；**M5′ 命令发现面于 2026-09-24 追加实施**（详见「实施记录与偏离」）；**T-4 面板界面验收于 2026-09-24 以真 Chrome 补做完毕**（M3-4 / M4-6 / M5′ 共 51 条断言全绿）；**同日内置底座镜像 `ark-mate:runtimes` 用当轮代码重建，并在容器内跑通一轮真实会话**（T-5 收口）。收口时四条 make 目标（`build`/`vet`/`test`/`test/release`）+ `pnpm typecheck`/`build` + 10 条 archtest + 路由/错误码/事件三条守卫全绿。
 
 **实施偏离（原案 → 实际 → 为什么）**
 
@@ -898,7 +898,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
   1. `AutomationsPage.onPreview` 对 `form.validateFields()` 的失败走 `String(err)`，而 antd reject 的是 `{errorFields}` 普通对象 → 界面上一句 `[object Object]`，恰好把"预览就是为了先把话说清楚"反过来。修法 `describeFormError()`：校验失败列字段与人话原因，领域拒绝照常走 `toErrorMessage`（实测修后输出 `表单还没填完：工作空间（需要一个绝对路径的工作空间）、Prompt（任务内容不为空）`）。
   2. 斜杠补全原按"命令名里不含 `/`"截断上下文，但 opencode **实测**就把命名空间写进名字（`git/branch`/`git/commit-push`/`git/pr-merge`）→ 手打 `/git/` 时弹层当场消失。修法：上下文边界只认空白。
   3. 候选多时（实测 **23 条**）`.fg-cmd-pop` 整体滚动，把"命令由底座提供，平台只做回显"这句页脚滚出可视区——而它是用户判断命令来源的唯一线索。修法：滚动区收窄到列表，页脚常驻。
-- **T-5 内置底座镜像重建 + 容器内真实一轮（2026-09-24 补做）**：`make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（版本钉在 `dsh 0.1.5-rc.3` / `opencode 1.18.32`）→ `ark-forge:runtimes` **673 MB**；只装 opencode 的一版 **450 MB**（容器内 `dsh` 确实不存在），两个开关各自生效。镜像内 `node v24.21.0` / `dsh 0.1.5-rc.3` / `opencode 1.18.32`，`GET /` 命中的资产里含 M5′ 的 `fg-cmd-pop`（证明是当前代码而非旧产物；注意 `sh -lc` 会重置 `PATH`，容器内校验要用 `sh -c`）。**容器内真实会话**：`POST /agents/opencode/start`（`connected=true`）→ 建会话 → `POST /conversations/:id/prompt` → `status=completed`、`GET /usage/summary` = `runs=1 completed=1`；该会话 `history` 里出现 **`session.commands`**（容器内 3 条），即 M5′ 在打包产物里同样成立。**顺带修掉 Makefile 与文档的 tag 不一致**：`image/runtimes` 原固定产出 `$(IMAGE_TAG)-runtimes`（默认 `ark-forge:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是 `ark-forge:runtimes`——开箱即用不了；现由独立变量 `RUNTIMES_TAG`（默认 `runtimes`）决定，并把「容器里怎么给底座凭据」（`docker cp` + `chown`；bind mount 因宿主 `600` 权限读不到）写进 `docs/deployment.md` §4。**残留**：dsh 侧只验到「起得来 + 握手通」（其 provider 凭据是环境变量 `apiKeyEnv`，本机未导出），故真实轮次由 opencode 承担。
+- **T-5 内置底座镜像重建 + 容器内真实一轮（2026-09-24 补做）**：`make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（版本钉在 `dsh 0.1.5-rc.3` / `opencode 1.18.32`）→ `ark-mate:runtimes` **673 MB**；只装 opencode 的一版 **450 MB**（容器内 `dsh` 确实不存在），两个开关各自生效。镜像内 `node v24.21.0` / `dsh 0.1.5-rc.3` / `opencode 1.18.32`，`GET /` 命中的资产里含 M5′ 的 `fg-cmd-pop`（证明是当前代码而非旧产物；注意 `sh -lc` 会重置 `PATH`，容器内校验要用 `sh -c`）。**容器内真实会话**：`POST /agents/opencode/start`（`connected=true`）→ 建会话 → `POST /conversations/:id/prompt` → `status=completed`、`GET /usage/summary` = `runs=1 completed=1`；该会话 `history` 里出现 **`session.commands`**（容器内 3 条），即 M5′ 在打包产物里同样成立。**顺带修掉 Makefile 与文档的 tag 不一致**：`image/runtimes` 原固定产出 `$(IMAGE_TAG)-runtimes`（默认 `ark-mate:local-runtimes`），而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找的是 `ark-mate:runtimes`——开箱即用不了；现由独立变量 `RUNTIMES_TAG`（默认 `runtimes`）决定，并把「容器里怎么给底座凭据」（`docker cp` + `chown`；bind mount 因宿主 `600` 权限读不到）写进 `docs/deployment.md` §4。**残留**：dsh 侧只验到「起得来 + 握手通」（其 provider 凭据是环境变量 `apiKeyEnv`，本机未导出），故真实轮次由 opencode 承担。
 
 ---
 
@@ -928,7 +928,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 1. **假设 A 的 E1–E6 探针未跑**：绑定粒度与**跨代际 resume 质量**仍无实测数据。投影根是 per-runtime 的、跨代际共享，因此"切代之后模型还记不记得前文"这件事对真实底座**未取证**。不阻塞任何功能（见上文假设 A 与 ADR-14）。
 2. ~~**面板界面验收未在浏览器里执行**~~ —— **已于 2026-09-24 闭环**：M3-4 / M4-6 / M5′ 三条线以**真 Chrome + 真服务**跑完（`frontend/scripts/panel-ui-acceptance.mjs`，51 条断言全绿），过程中抓到并修掉 3 个真实缺陷（见下文 M5′ 与 T-4 实测记录）。证据：`.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md` + 22 张截图。
-3. ~~**`make image/runtimes` 未用当前代码重建**~~ —— **已于 2026-09-24 闭环**：用当轮代码重建 `ark-forge:runtimes`（673 MB，dsh 0.1.5-rc.3 / opencode 1.18.32 / node v24.21.0，内嵌前端含 M5′ 的 `fg-cmd-pop`），并**在容器内跑通一轮真实会话**（opencode → `status=completed`、`usage runs=1 completed=1`；同一条会话的 `history` 里出现 `session.commands`，证明 M5′ 在打包产物里同样成立）。顺带修掉 Makefile 与文档的 tag 不一致（`make image/runtimes` 原来产出 `ark-forge:local-runtimes`，而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找 `ark-forge:runtimes`，开箱即用不了）。**残留**：dsh 侧仍无真实轮次（其 provider 凭据走环境变量 `apiKeyEnv`，本机未导出），记录见 `docs/deployment.md` §4/§8。
+3. ~~**`make image/runtimes` 未用当前代码重建**~~ —— **已于 2026-09-24 闭环**：用当轮代码重建 `ark-mate:runtimes`（673 MB，dsh 0.1.5-rc.3 / opencode 1.18.32 / node v24.21.0，内嵌前端含 M5′ 的 `fg-cmd-pop`），并**在容器内跑通一轮真实会话**（opencode → `status=completed`、`usage runs=1 completed=1`；同一条会话的 `history` 里出现 `session.commands`，证明 M5′ 在打包产物里同样成立）。顺带修掉 Makefile 与文档的 tag 不一致（`make image/runtimes` 原来产出 `ark-mate:local-runtimes`，而文档成对写的 `make image/run IMAGE_TAG=runtimes` 找 `ark-mate:runtimes`，开箱即用不了）。**残留**：dsh 侧仍无真实轮次（其 provider 凭据走环境变量 `apiKeyEnv`，本机未导出），记录见 `docs/deployment.md` §4/§8。
 
 ---
 
@@ -936,7 +936,7 @@ runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度上被**确
 
 **结论：低风险，纯增量，无 API 破坏。** 依据是本机 `golib` checkout 的 `git diff v1.32.16..v1.32.20`（`/Users/morehao/Documents/practice/go/golib`）。
 
-**ark-forge 实际 import 的 golib 包**（`grep -rn "morehao/golib" backend`）：`biz/gcontext`、`biz/gcontext/gincontext`、`biz/gmiddleware/ginmiddleware`、`biz/gserver/ginserver`、`dbaccess/gormdao`、`dbaccess/dbgorm`、`gerror`、`glog`、`glog/driver/slog`。
+**ark-mate 实际 import 的 golib 包**（`grep -rn "morehao/golib" backend`）：`biz/gcontext`、`biz/gcontext/gincontext`、`biz/gmiddleware/ginmiddleware`、`biz/gserver/ginserver`、`dbaccess/gormdao`、`dbaccess/dbgorm`、`gerror`、`glog`、`glog/driver/slog`。
 
 **对这 9 个包，v1.32.16 → v1.32.20 的全部改动**：
 

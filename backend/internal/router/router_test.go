@@ -13,14 +13,14 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-forge/internal/credential"
-	"github.com/morehao/ark-forge/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-forge/internal/eventbus"
-	"github.com/morehao/ark-forge/internal/manager"
-	"github.com/morehao/ark-forge/internal/router"
-	"github.com/morehao/ark-forge/pkg/code"
-	"github.com/morehao/ark-forge/pkg/config"
-	"github.com/morehao/ark-forge/pkg/runtime"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // newEngine 走真实装配路径：manager.Service + router.New（含 /v1/forge 分组与默认中间件）。

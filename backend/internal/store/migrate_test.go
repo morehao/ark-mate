@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/pkg/dbclient"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/dbclient"
 )
 
 // applySchemaUpTo 把库迁到指定版本（只跑 v1..v 的 DDL 并记录版本），用于重放**历史版本的真实库形态**。

@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoagent"
-	"github.com/morehao/ark-forge/pkg/acl"
+	"github.com/morehao/ark-mate/internal/dto/dtoagent"
+	"github.com/morehao/ark-mate/pkg/acl"
 )
 
 // ——— 当前 Agent（全局默认）切换：<AgentDir>/default.json ———

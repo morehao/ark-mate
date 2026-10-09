@@ -15,8 +15,8 @@
 # 也不需要 electron-builder 的 node module collector（它起步就是 `pnpm list --prod --json`，
 # 把包管理器的 store 状态拖进打包路径；受限环境里打不开那个 SQLite 索引就整包失败）。
 # 钩子返回 false 同时关掉这两件事，理由与代价写在 `scripts/electron-builder-before-build.cjs`。
-appId: com.arkforge.desktop
-productName: ark-forge
+appId: com.arkmate.desktop
+productName: ark-mate
 directories:
   output: release
   buildResources: build

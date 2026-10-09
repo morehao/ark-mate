@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-forge/internal/model"
-	"github.com/morehao/ark-forge/internal/testutil"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/testutil"
 )
 
 // ——— M6-6：agent 定义的存量搬家（导入 / 导出） ———

@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/morehao/ark-forge/internal/dto/dtoprovider"
-	"github.com/morehao/ark-forge/internal/vault"
-	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/redact"
+	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/redact"
 )
 
 // providersFileName provider 档案文件名（**目录级配置**：AgentDir 下的保留文件，不是 agent 定义）。

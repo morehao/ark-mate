@@ -62,7 +62,7 @@ type Conversation struct {
 	Cwd string `gorm:"column:cwd;not null"`
 	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
 	// 权威标志：任何「临时空间」判定都必须读它，不得从路径形状反推。
-	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkforge_flag"`
+	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkmate_flag"`
 	// Provider provider 档案 id（会话级模型选择；空 = 跟随 agent）。
 	Provider string `gorm:"column:provider;not null"`
 	// Model 会话级模型 id（空 = 底座默认）。
@@ -73,8 +73,8 @@ type Conversation struct {
 	// conversations.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
 	ProviderSessionID string `gorm:"column:provider_session_id;not null"`
 	Title             string `gorm:"column:title;not null"`
-	Pinned            bool   `gorm:"column:pinned;serializer:arkforge_flag"`
-	Archived          bool   `gorm:"column:archived;serializer:arkforge_flag"`
+	Pinned            bool   `gorm:"column:pinned;serializer:arkmate_flag"`
+	Archived          bool   `gorm:"column:archived;serializer:arkmate_flag"`
 	// Status 会话状态。取值权威定义在 internal/manager/events.go（ConversationStatus*）。
 	Status string `gorm:"column:status;not null"`
 	// Origin 会话来源（M3；'' = 人工创建，'automation:<id>' = 该 automation 触发产生）。
@@ -89,8 +89,8 @@ type Conversation struct {
 	CapabilityFingerprint string `gorm:"column:capability_fingerprint;not null"`
 	// LastSeq 该会话已落库事件的最后 seq（events.seq 全局单调）。
 	LastSeq   int64     `gorm:"column:last_seq"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -124,7 +124,7 @@ type Event struct {
 	Type string `gorm:"column:type;not null"`
 	// PayloadJSON 事件载荷（一律序列化为 JSON 文本，含结构体载荷）。
 	PayloadJSON string    `gorm:"column:payload_json;not null"`
-	CreatedAt   time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -147,9 +147,9 @@ type Run struct {
 	LastSeq    int64  `gorm:"column:last_seq"`
 	// FirstTokenMS 本轮从用户消息到首个 assistant 输出（文本/思考/工具）的耗时（ms）；0 = 未记录。
 	FirstTokenMS int64     `gorm:"column:first_token_ms"`
-	StartedAt    time.Time `gorm:"column:started_at;not null;serializer:arkforge_rfc3339"`
+	StartedAt    time.Time `gorm:"column:started_at;not null;serializer:arkmate_rfc3339"`
 	// EndedAt 终态时间；未结束 → 零值（落库为空串）。
-	EndedAt time.Time `gorm:"column:ended_at;serializer:arkforge_rfc3339"`
+	EndedAt time.Time `gorm:"column:ended_at;serializer:arkmate_rfc3339"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -170,7 +170,7 @@ type Message struct {
 	ToolDetailsJSON string    `gorm:"column:tool_details_json;not null"`
 	SeqLo           int64     `gorm:"column:seq_lo"`
 	SeqHi           int64     `gorm:"column:seq_hi"`
-	CreatedAt       time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -187,7 +187,7 @@ type Memory struct {
 	Kind           string `gorm:"column:kind;not null"`
 	// Decision 决策方向。取值见 DecisionAllow / DecisionReject。
 	Decision  string    `gorm:"column:decision;not null"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -217,9 +217,9 @@ type Input struct {
 	Generation int64 `gorm:"column:generation;not null"`
 	// Status 队列项状态。取值见 InputStatusQueued / InputStatusDelivered / InputStatusStale。
 	Status    string    `gorm:"column:status;not null"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	// ClaimedAt 被 claim（投递）的时刻；未投递 → 零值（落库为空串）。
-	ClaimedAt time.Time `gorm:"column:claimed_at;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	ClaimedAt time.Time `gorm:"column:claimed_at;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -232,7 +232,7 @@ type InputList []Input
 type Migration struct {
 	Version   int       `gorm:"column:version;primaryKey"`
 	Name      string    `gorm:"column:name;not null"`
-	AppliedAt time.Time `gorm:"column:applied_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	AppliedAt time.Time `gorm:"column:applied_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -261,7 +261,7 @@ type SkillDefinition struct {
 	// `definition_changed`(40901)，**名字与码都不变**。
 	Revision int64 `gorm:"column:revision;not null"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -282,7 +282,7 @@ type McpServerDefinition struct {
 	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -307,7 +307,7 @@ type AgentDefinition struct {
 	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
 
 // TableName 实现 gormdao.Entity。
@@ -339,7 +339,7 @@ type AutomationDefinition struct {
 	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// UpdatedAt 最后一次**定义**提交的时刻（RFC3339Nano(UTC)；运行态写回不刷新它）。
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	// LastFiredAt 最近一次被认领的 occurrence（RFC3339Nano(UTC)；空 = 从未触发）。
 	//
 	// 它是"这个 occurrence 是否已经触发过"的**唯一判据**（ADR-10），也是调度推进的 CAS 判据：
@@ -387,7 +387,7 @@ type CapabilityRevision struct {
 	// Actor 变更发起者（当前是调用方标识，如 "rest" / "cli" / "import"）。
 	Actor string `gorm:"column:actor;not null"`
 	// At 变更时刻（RFC3339Nano(UTC)）。
-	At time.Time `gorm:"column:at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	At time.Time `gorm:"column:at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	// Digest 提交后 body 的摘要（sha256 hex）：审计要能回答"那一版到底是什么"，
 	// 而不是只留一个自增号。
 	Digest string `gorm:"column:digest;not null"`
