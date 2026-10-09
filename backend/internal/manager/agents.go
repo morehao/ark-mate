@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
+	"github.com/morehao/ark-forge/internal/model"
 	"github.com/morehao/ark-forge/pkg/acl"
 )
 
@@ -124,6 +125,23 @@ func (s *Service) ReloadAgentDefinitionsFromStore(ctx context.Context, dir strin
 
 // loadAgentDefinitionsFromStore 装载内核（公开入口与网关共用；level 只作用于汇总行）。
 func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string, level slog.Level) int {
+	// 库读在锁外（别把一次 DB 读塞进临界区），但**清空 + 补齐种子 + 逐行铺上**必须在同一个
+	// 临界区里完成：拆成两段就会留出"非种子 agent 全没了、行还没铺上"的窗口，读者（网关每次
+	// 调用前都重装、核心侧并发请求）会看到"agent 不存在"——而库里的行一个字都没改。
+	// M7-5 的并发用例就是这么撞上的。
+	var rows model.AgentDefinitionList
+	if s.st != nil {
+		r, err := s.st.ListAgentDefinitions(ctx)
+		if err != nil {
+			s.defWarnOnce("agents:store", "agents: 从持久层读定义失败", "err", err)
+			s.mu.Lock()
+			s.agentDir = dir
+			s.mu.Unlock()
+			return 0
+		}
+		rows = r
+	}
+
 	s.mu.Lock()
 	s.agentDir = dir
 	for id := range s.agents {
@@ -131,17 +149,7 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 			delete(s.agents, id)
 		}
 	}
-	s.mu.Unlock()
-	s.seedBuiltinAgents()
-
-	if s.st == nil {
-		return 0
-	}
-	rows, err := s.st.ListAgentDefinitions(ctx)
-	if err != nil {
-		s.defWarnOnce("agents:store", "agents: 从持久层读定义失败", "err", err)
-		return 0
-	}
+	s.seedBuiltinAgents() // 持锁调用（见函数注释：调用方持锁或处于构造期）
 	loaded := 0
 	for _, row := range rows {
 		var d agentDefinitionFile
@@ -155,12 +163,14 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 			s.defWarnOnce("agents:id:"+row.ID, "agents: 定义行 id 与正文 id 不一致，以行键为准", "row", row.ID, "body", d.ID)
 		}
 		d.ID = row.ID
-		if err := s.applyDefinition(d, true); err != nil {
+		if err := s.applyDefinitionLocked(d, true); err != nil {
 			s.defWarnOnce("agents:rej:"+row.ID, "agents: 定义行未采纳", "agent", row.ID, "err", err)
 			continue
 		}
 		loaded++
 	}
+	s.mu.Unlock()
+
 	if loaded > 0 {
 		slog.Log(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
 	}
@@ -205,6 +215,12 @@ func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.applyDefinitionLocked(d, silent)
+}
+
+// applyDefinitionLocked applyDefinition 的持锁版本（调用方持 s.mu）：整体替换式装载要在**同一个
+// 临界区**里清空 + 铺行，中途放开锁就会露出"agent 不存在"的窗口（见 loadAgentDefinitionsFromStore）。
+func (s *Service) applyDefinitionLocked(d agentDefinitionFile, silent bool) error {
 	if cur, exists := s.agents[d.ID]; exists {
 		if !silent {
 			return acl.NewError(acl.ClassRequest, "agent_exists", fmt.Sprintf("agent %q 已存在", d.ID), nil)

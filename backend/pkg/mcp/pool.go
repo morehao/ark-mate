@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -65,9 +66,22 @@ type pooledSession struct {
 	tr   transport
 	init initializeResult
 
-	mu       sync.Mutex // 会话级串行（语义 1）
-	lastUsed time.Time
+	mu sync.Mutex // 会话级串行（语义 1）
+
+	// lastUsed 是**原子**的纳秒时间戳，不是 time.Time 字段。
+	//
+	// 为什么：它在两条不同的锁下被访问——持会话锁的 `with` 写它（每次调用都会刷新），持池锁的
+	// `idle`/`evictForRoomLocked`/`ReapIdle` 读它。用普通字段就是 data race（`-race` 实测坐实，
+	// M7-5 的并发用例抓到的）：读写跨两把锁，谁也不能保证对方不在同时动它。用原子量把它降级成
+	// "一个数字的快照"——空闲判定本来就只需要近似值。
+	lastUsed atomic.Int64
 }
+
+// touch 刷新最后使用时间（纳秒时间戳）。
+func (ps *pooledSession) touch(now time.Time) { ps.lastUsed.Store(now.UnixNano()) }
+
+// usedAt 读最后使用时间。
+func (ps *pooledSession) usedAt() time.Time { return time.Unix(0, ps.lastUsed.Load()) }
 
 // Pool 按 server 池化 MCP 会话（零值不可用，用 NewPool）。
 type Pool struct {
@@ -168,7 +182,7 @@ func (p *Pool) with(ctx context.Context, s Server, fn func(ctx context.Context, 
 	// acquire 返回时**已持会话锁**（会话级串行，语义 1）：命中与新建两条路径都在自己的
 	// 临界区里加好锁再返回，避免"检查—加锁"之间被换出。
 	defer ps.mu.Unlock()
-	ps.lastUsed = p.opts.Now()
+	ps.touch(p.opts.Now())
 
 	err = fn(ctx, ps.tr, ps.init)
 	if err != nil && !IsRPCResponseError(err) {
@@ -210,7 +224,8 @@ func (p *Pool) acquire(ctx context.Context, s Server) (*pooledSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	ps := &pooledSession{id: s.ID, key: key, tr: tr, init: init, lastUsed: p.opts.Now()}
+	ps := &pooledSession{id: s.ID, key: key, tr: tr, init: init}
+	ps.touch(p.opts.Now())
 
 	p.mu.Lock()
 	if p.closed {
@@ -278,7 +293,7 @@ func (p *Pool) evictForRoomLocked() {
 	}
 	var oldest *pooledSession
 	for _, ps := range p.sessions {
-		if oldest == nil || ps.lastUsed.Before(oldest.lastUsed) {
+		if oldest == nil || ps.usedAt().Before(oldest.usedAt()) {
 			oldest = ps
 		}
 	}
@@ -291,7 +306,7 @@ func (p *Pool) evictForRoomLocked() {
 
 // idle 报告会话是否超过空闲阈值（调用方持 p.mu）。
 func (p *Pool) idle(ps *pooledSession) bool {
-	return p.opts.Now().Sub(ps.lastUsed) >= p.opts.IdleTimeout
+	return p.opts.Now().Sub(ps.usedAt()) >= p.opts.IdleTimeout
 }
 
 // ReapIdle 回收空闲超时的会话（返回关闭条数），并重试之前没关掉的 zombie。
@@ -304,7 +319,7 @@ func (p *Pool) ReapIdle() int {
 	defer p.mu.Unlock()
 	n := 0
 	for _, ps := range p.sessions {
-		if now.Sub(ps.lastUsed) >= p.opts.IdleTimeout {
+		if now.Sub(ps.usedAt()) >= p.opts.IdleTimeout {
 			delete(p.sessions, ps.id)
 			p.stats.Evicted++
 			p.closeOrZombieLocked(ps)

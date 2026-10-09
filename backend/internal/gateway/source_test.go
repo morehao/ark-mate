@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +42,13 @@ type fakeRemote struct {
 	tokens   []string
 	listFail bool // tools/list 回 JSON-RPC 错误（模拟"这台远端坏了"）
 	callFail bool // tools/call 回 JSON-RPC 错误
+
+	// 并发观测面（M7-5 的"同一会话串行、不同 server 并行"证据）：
+	inflight, maxInflight int32
+	entered               chan struct{} // 首次进入 tools/call 时关闭（nil = 不关）
+	enterOnce             sync.Once
+	waitFor               chan struct{} // 非 nil：进入 tools/call 后先等它有信号
+	holdForOverlap        time.Duration // >0：等"第二个并发请求"出现的最长时间（自证串行）
 }
 
 func newFakeRemote(t *testing.T, tools ...string) *fakeRemote {
@@ -103,10 +111,34 @@ func (f *fakeRemote) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		reply(map[string]any{"tools": items})
 	case "tools/call":
+		n := atomic.AddInt32(&f.inflight, 1)
+		for { // 记录并发峰值（compare-and-swap 循环，不用额外锁）
+			old := atomic.LoadInt32(&f.maxInflight)
+			if n <= old || atomic.CompareAndSwapInt32(&f.maxInflight, old, n) {
+				break
+			}
+		}
+		if f.entered != nil {
+			f.enterOnce.Do(func() { close(f.entered) })
+		}
+		if f.waitFor != nil {
+			select {
+			case <-f.waitFor:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if f.holdForOverlap > 0 {
+			// 自证用：如果这条会话被**并行**使用，这期间必然看到第二个同时在处理的请求。
+			deadline := time.Now().Add(f.holdForOverlap)
+			for time.Now().Before(deadline) && atomic.LoadInt32(&f.inflight) < 2 {
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
 		f.mu.Lock()
 		f.calls = append(f.calls, msg.Params.Name)
 		fail := f.callFail
 		f.mu.Unlock()
+		atomic.AddInt32(&f.inflight, -1)
 		if fail {
 			replyErr(-32603, "远端拒绝了这次调用")
 			return
@@ -128,6 +160,9 @@ func (f *fakeRemote) setListFail(v bool) {
 	f.listFail = v
 	f.mu.Unlock()
 }
+
+// maxConcurrent 峰值并发（同一 server 上同时在处理的 tools/call 数）。
+func (f *fakeRemote) maxConcurrent() int { return int(atomic.LoadInt32(&f.maxInflight)) }
 
 // setCallFail 让 tools/call 回 JSON-RPC 错误（M7-4 的调用留痕要能分辨 ok/error 两条分线）。
 func (f *fakeRemote) setCallFail(v bool) {

@@ -533,6 +533,8 @@ type capabilityGeneration struct {
 
 ### 10.6 支柱二落地：远程 MCP 收进平台侧网关（Q-6 已定：方便统一管理）
 
+> **落地状态（2026-10-09）：S1 已实现并通过全部验收**，实现计划见 `.dsh/docs/plans/2026-10-08-mcp-platform-gateway-plan.md`（M7-1…M7-5）。逐条对应：**① 形态**——`forge mcp bridge`（`pkg/mcp` 的服务端最小集 + `internal/gateway` 的数据面/代理），底座侧**恒定**是一条 stdio 条目 `forge-gateway`（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <钉住的白名单>]`）；逐 runtime 的 transport 承载矩阵在网关路径上消失，它此后只约束 **stdio 直连**那一条路（M7-3 逐个复核了它的四个消费者）。**② 密钥不出平台**——远程凭据只在网关进程内解析（复用 `ResolveMcpSecrets`），条目的命令行里只有 scope；指纹亦只含定义与引用，不含解析后的明文。**③ 调用期事实**——每次 `tools/list`/`tools/call` 前重读定义与 `enabled`（`ReloadCapabilityDefinitions`/`ReloadAgentDefinitionsFromStore`），停用/删除/轮换密钥在下一次取数或调用即生效，不需要换代际、不需要重启；探测面（`POST /mcps/:id/probe`）与网关真实面**同一个命名实现**（`capability.GatewayToolName`，`<serverID>__<tool>`），并有对拍用例逐项比对名字与描述。**④ S2 仍未做**（原样保留上一条的分派规则）。**⑤ 生效边界的落地结论**：网关条目恒定 ⇒ 增删改远程 MCP **不改变底座的配置面**，故不换代际；代价是"没有远程 server 也会多一个空闲 bridge 子进程"，回退开关 `FORGE_MCP_GATEWAY=off`（`auto` 默认）。**E4/E6（底座何时重列工具面）不再是阻塞项但仍是测量项**：网关侧已按每次调用记 `(server, tool, outcome, latency_ms)` 作为一手证据面，实测留待后续一次真底座长会话观察；本次收口不臆造结论。
+
 1. **形态：一个稳定的 stdio 网关，而不是给每种远程传输各造一条注入路径。** 平台提供类似 `forge mcp bridge` 的 **stdio MCP server**，由底座按普通 stdio server 拉起，网关内部转发到远端（http / sse / streamable_http）。
    - 对底座而言永远只有**一个** MCP 条目且 transport 恒为 stdio。**"逐 runtime 的 transport 承载矩阵"这个问题就此消失**——这是最大收益：`opencode: stdio/sse/http` 与 `dsh: stdio/streamable_http` 的差异不再限制任何东西。**规范背书**：所有底座 **MUST** 支持 stdio，http/sse 是可选能力（§12.3-②）；而"客户端自带 MCP server 来直接给模型提供工具"正是规范明确预期的用法（§12.3-③）。用户最初那句"变动对两个 runtime 都生效"因此在**架构层面**成立，而不是靠两边恰好都支持某种传输。
 2. **密钥不出平台。** 远端凭据在网关进程内解析（复用 `resolveMcpSecrets`），底座配置里只有 stdio 命令，平台**不再需要**把明文 env/header 放进底座可见的配置面——直接强化 README「MCP 明文 ⟂ 密钥」那条立场。

@@ -278,7 +278,41 @@ func (r *Registry) RemoveToolsForMcpServer(serverID string) int {
 	return n
 }
 
-// Reset 清空三张表（"整体替换"式装载的前置动作）。
+// ReplaceAll 原子替换整个目录：`from` 的内容整体换入，**一次临界区**完成。
+//
+// 为什么需要它（M7-5 并发验收抓到的真实窗口）：重新装载定义原本走"`Reset()` 再逐条注册"，
+// 于是共享注册表上存在一个**可观测的中间态**——清空之后、注册完之前，读者看到的是空面或半装的面。
+// 网关（M7）**每次** tools/list / tools/call 前都重装定义，并发调用下这个窗口必然被撞上，症状是
+// "工具面突然少了几个/整条不见了"，而定义其实一个字都没改——这类"偶发、不可复现、看起来像远端
+// 抖动"的故障最难查。替换之后，读者要么看到旧面、要么看到新面，没有第三种。
+//
+// `from` 之后应被丢弃（这里复制而不是共享底层 map，免得两边互相看见后续注册）。
+func (r *Registry) ReplaceAll(from *Registry) {
+	from.mu.Lock()
+	skills := make(map[string]*Skill, len(from.skills))
+	for k, v := range from.skills {
+		skills[k] = v
+	}
+	mcps := make(map[string]*McpServer, len(from.mcps))
+	for k, v := range from.mcps {
+		mcps[k] = v
+	}
+	tools := make(map[string]*Tool, len(from.tools))
+	for k, v := range from.tools {
+		tools[k] = v
+	}
+	from.mu.Unlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skills, r.mcps, r.tools = skills, mcps, tools
+}
+
+// Reset 清空三张表。
+//
+// **不要**再拿它当"重新装载定义"的起手式（`Reset()` + 逐条注册 = 在共享面上留一个空的/半装的
+// 可观测中间态，M7-5 的并发用例实测撞上过）：重新装载请用 `ReplaceAll`。
+// 现在它只用于"确实要清空"的场合（构造期与非装载路径）。
 //
 // 为什么需要它：`RegisterSkill`/`RegisterMcpServer`/`RegisterTool` 都是**按 id 覆盖**，
 // 谁都不摘除"这次装载里没出现"的旧条目。装载源从目录换成 store 之后，"库里删了一行"

@@ -93,7 +93,10 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 		s.capabilityDir = importDir
 		s.mu.Unlock()
 	}
-	s.caps.Reset()
+	// 装进**独立的**新注册表再整体换入（不是"先 Reset 再逐条注册"）：后者会在共享面上留下
+	// 一个空的/半装的可观测中间态，而网关每次取数前都重装定义 ⇒ 并发调用必然撞上它
+	// （`Registry.ReplaceAll` 的注释记了全过程）。坏定义照样逐行跳过，不影响换面。
+	fresh := capability.NewRegistry()
 	total := 0
 
 	skills, err := s.st.ListSkillDefinitions(ctx)
@@ -118,7 +121,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 		}
 		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
 		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
-		if err := s.caps.RegisterSkill(&sk); err != nil {
+		if err := fresh.RegisterSkill(&sk); err != nil {
 			s.defWarnOnce("skill-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
@@ -143,13 +146,15 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 			}
 			m.ID = row.ID
 		}
-		if err := s.caps.RegisterMcpServer(&m); err != nil {
+		if err := fresh.RegisterMcpServer(&m); err != nil {
 			s.defWarnOnce("mcp-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
 		total++
 	}
 
+	// 一次换面：此后所有读者看到的是完整的新目录。
+	s.caps.ReplaceAll(fresh)
 	slog.Log(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
 	return total, nil
 }

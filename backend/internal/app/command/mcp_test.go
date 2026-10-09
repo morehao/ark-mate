@@ -34,16 +34,21 @@ func buildForgeCLI(t *testing.T) string {
 	return bin
 }
 
+// isolatedCLIEnv 子进程的私有环境：网关按与核心进程同一个解析器定位数据面，所以在用户默认
+// 环境里跑它就会去读（并 **Migrate**！）用户自己的 `~/.forge/forge.db`。测试必须给私有
+// FORGE_HOME/FORGE_DB——否则用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
+func isolatedCLIEnv(t *testing.T) []string {
+	t.Helper()
+	home := t.TempDir()
+	return append(os.Environ(),
+		"FORGE_HOME="+home, "FORGE_DB="+filepath.Join(home, "forge.db"),
+		"FORGE_CONFIG_DIR="+filepath.Join(home, "config"))
+}
+
 func TestMcpBridgeCLI(t *testing.T) {
 	bin := buildForgeCLI(t)
 
-	// **隔离**：网关按与核心进程同一个解析器定位数据面，所以在用户默认环境里跑它就会去读
-	// （并 Migrate！）用户自己的 `~/.forge/forge.db`。测试必须给私有 FORGE_HOME/FORGE_DB
-	// ——否则这条用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
-	home := t.TempDir()
-	isolated := append(os.Environ(),
-		"FORGE_HOME="+home, "FORGE_DB="+filepath.Join(home, "forge.db"),
-		"FORGE_CONFIG_DIR="+filepath.Join(home, "config"))
+	isolated := isolatedCLIEnv(t)
 
 	frames := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"cli","version":"0"}}}`,
