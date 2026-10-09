@@ -165,6 +165,14 @@ type Config struct {
 	//   startup  = serve 启动后后台逐个探测全部已注册 MCP server（写 Tool 目录 + 探测状态）。
 	// 默认 off 是有意的：stdio server 探测会**拉起用户配置的子进程**，不宜默认执行。
 	McpAutoProbe string
+	// McpGateway 远程 MCP 的平台侧网关开关（M7；FORGE_MCP_GATEWAY 覆盖，默认 auto）：
+	//   auto = **远程传输**（sse/http/streamable_http）的 MCP 由平台网关代连：底座只看见一条
+	//          stdio 条目（`forge mcp bridge`），凭据不进底座可见面，且条目恒定 ⇒ 增删远程
+	//          server 不换代际；stdio server 仍由底座直连（S2 是另案）。
+	//   off  = 关掉网关，回到"远程传输按底座承载能力直连注入"的老路（§10.6 的 P-5 回退开关）。
+	// auto 而非 on：只有一个取值（auto）意味着"没有开关"，而这条路径改变了远程 MCP 的注入
+	// 形态，出问题时必须有一条不改文件、不改代码就能退回去的路。
+	McpGateway string
 }
 
 // 原生权限映射开关取值。
@@ -184,6 +192,18 @@ const (
 
 // ValidMcpAutoProbeModes 合法取值（错误提示用）。
 var ValidMcpAutoProbeModes = []string{McpAutoProbeOff, McpAutoProbeStartup}
+
+// 平台侧 MCP 网关开关取值。
+const (
+	McpGatewayAuto = "auto"
+	McpGatewayOff  = "off"
+)
+
+// ValidMcpGatewayModes 合法取值（错误提示用）。
+var ValidMcpGatewayModes = []string{McpGatewayAuto, McpGatewayOff}
+
+// McpGatewayEnabled 报告平台侧 MCP 网关是否启用（默认 auto = 启用；只有显式 off 才关）。
+func (c Config) McpGatewayEnabled() bool { return c.McpGateway != McpGatewayOff }
 
 // 持久层模式取值。StoreModeAuto 是**显式**的 auto：Config.StoreMode 里它落成空串
 // （空串同时表示"未设置"），真正的 auto 解析在 serve 装机时做——DB 文件已存在则 sqlite，
@@ -254,6 +274,7 @@ func Default() Config {
 		GenerationLimit:    DefaultGenerationLimit,
 		AutomationTick:     DefaultAutomationTick,
 		McpAutoProbe:       McpAutoProbeOff,
+		McpGateway:         McpGatewayAuto,
 		NativePermission:   NativePermissionAuto,
 	}
 }
@@ -284,6 +305,7 @@ var knownKeys = map[string]string{
 	"allowed_origins":     "FORGE_ALLOWED_ORIGINS",
 	"web_dir":             "FORGE_WEB_DIR",
 	"mcp_auto_probe":      "FORGE_MCP_AUTO_PROBE",
+	"mcp_gateway":         "FORGE_MCP_GATEWAY",
 	"native_permission":   "FORGE_NATIVE_PERMISSION",
 }
 
@@ -694,6 +716,19 @@ func materialize(r *resolver) (Config, error) {
 		default:
 			return bad("mcp_auto_probe", fmt.Sprintf("需为 %s 之一，得到 %q",
 				strings.Join(ValidMcpAutoProbeModes, "|"), v))
+		}
+	}
+
+	if v, ok := r.get("mcp_gateway"); ok {
+		mode := strings.ToLower(strings.TrimSpace(v))
+		switch mode {
+		case McpGatewayAuto, "":
+			c.McpGateway = McpGatewayAuto
+		case McpGatewayOff:
+			c.McpGateway = McpGatewayOff
+		default:
+			return bad("mcp_gateway", fmt.Sprintf("需为 %s 之一，得到 %q",
+				strings.Join(ValidMcpGatewayModes, "|"), v))
 		}
 	}
 

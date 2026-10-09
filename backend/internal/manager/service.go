@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/eventbus"
@@ -164,27 +165,38 @@ type Service struct {
 	nativePermMu      sync.Mutex
 	nativePermEnabled bool
 	nativePermSet     bool
+
+	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；FORGE_MCP_GATEWAY=off 回退）。
+	// 零值 false 会被 NewService 显式置成 true——"忘了设"不该等于"静默关掉网关"。
+	mcpGatewayEnabled atomic.Bool
+	mcpGatewayWarnMu  sync.Mutex
+	mcpGatewayWarned  map[string]bool
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
 func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s := &Service{
-		reg:             reg,
-		bus:             bus,
-		agents:          make(map[string]*AgentRec),
-		conversations:   make(map[string]*ConversationRec),
-		inputs:          make(map[string][]QueuedInput),
-		ver:             make(map[string]int64),
-		providers:       make(map[string]*providerDef),
-		catalog:         newCatalogStore(),
-		caps:            capability.NewRegistry(),
-		mcpProbes:       make(map[string]mcpProbeStatus),
-		mcpProbeTimeout: defaultMCPProbeTimeout,
-		lastErrs:        make(map[string]agentLastErr),
-		scopeNotes:      make(map[string]scopeNote),
+		reg: reg,
+		bus: bus,
+		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
+		mcpGatewayWarned: make(map[string]bool),
+		agents:           make(map[string]*AgentRec),
+		conversations:    make(map[string]*ConversationRec),
+		inputs:           make(map[string][]QueuedInput),
+		ver:              make(map[string]int64),
+		providers:        make(map[string]*providerDef),
+		catalog:          newCatalogStore(),
+		caps:             capability.NewRegistry(),
+		mcpProbes:        make(map[string]mcpProbeStatus),
+		mcpProbeTimeout:  defaultMCPProbeTimeout,
+		lastErrs:         make(map[string]agentLastErr),
+		scopeNotes:       make(map[string]scopeNote),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
+	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
+	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
+	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
 	s.coalescer = newChunkCoalescer(func(typ, conversationID string, payload any) {
 		s.publishRaw(typ, conversationID, payload)

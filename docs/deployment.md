@@ -193,8 +193,14 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 `automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
 `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
-`native_permission`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
+`native_permission` `mcp_gateway`；另可用 `FORGE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+
+`mcp_gateway`（`auto` 默认 | `off`）控制**远程 MCP 是否经平台侧网关**：`auto` 时远程传输
+（`sse`/`http`/`streamable_http`）的 MCP 由平台代连——底座只看见一条 stdio 条目
+（`forge-gateway` = `<平台可执行文件> mcp bridge --agent <id> --runtime <id>`），凭据不进底座可见面，
+且条目**恒定**（不随"有几台远程 server"变化）⇒ 增删改远程 server 都不换代际，网关下一次取数即生效；
+`off` 回退到"远程按底座声明的承载能力直连注入"的老路。stdio server 两种模式下都由底座直连。
 
 已改名的键仍会让启动失败（"非法键名即报错"这条规则不软化），但报错会**认出它**并给出新键与
 等价写法：`skills_materialize_dir` / `skills_materialize_dirs` → `projection_dirs`

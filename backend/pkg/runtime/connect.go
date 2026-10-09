@@ -17,6 +17,21 @@ import (
 //   - env：调用方附加环境（如 provider 密钥注入），内部叠加在 spec.Launch.Env 之后；
 //   - opts.Logger：若设置，同源用于 stdio 传输日志（runtime/cmd 属性由调用方预置）。
 //
+// LaunchesLocally 报告该 runtime 是否由平台**在本机拉起子进程**（`Launch.Transport` 为空或
+// `stdio`）。判据与 `Connect` 的传输分派**同源**（同一个 switch 的两支）：凡是本机起进程的形态
+// → true，远程端点形态（http/ws/streamable_http…）→ false。
+//
+// 为什么需要它：平台侧 MCP 网关条目是一条**本机 stdio 命令**（`<平台可执行文件> mcp bridge …`）。
+// 把它下发给远程 ACP 端点，等于让对端按我们机器上的路径去起进程——对端根本没有那个文件。
+func LaunchesLocally(spec Spec) bool {
+	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
+	case "", "stdio":
+		return true
+	default:
+		return false
+	}
+}
+
 // 连接生命周期归调用方（编排器连接回收/Close），与任一请求 ctx 无关（拨号用脱离 ctx 的
 // 派生 context，语义同 orchestrator.acquire——请求返回不杀已起子进程）。
 func Connect(ctx context.Context, spec Spec, args []string, env []string, opts acl.ClientOptions) (*acl.Client, error) {

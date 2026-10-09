@@ -54,6 +54,7 @@ func configCmd(args []string) {
 				"token":               maskToken(cfg.Token),
 				"allowed_origins":     strings.Join(cfg.AllowedOrigins, ","),
 				"mcp_auto_probe":      cfg.McpAutoProbe,
+				"mcp_gateway":         cfg.McpGateway,
 				"native_permission":   cfg.NativePermission,
 			},
 			"remote_runtimes": cfg.RemoteRuntimes,
@@ -121,6 +122,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "allowed_origins", emptyLabel(strings.Join(cfg.AllowedOrigins, ",")), src("allowed_origins"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_auto_probe", emptyLabel(cfg.McpAutoProbe), src("mcp_auto_probe"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "native_permission", emptyLabel(cfg.NativePermission), src("native_permission"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "mcp_gateway", emptyLabel(cfg.McpGateway), src("mcp_gateway"))
 	if len(cfg.RemoteRuntimes) == 0 {
 		fmt.Printf("  %-22s %-38s [%s]\n", "remote_runtimes", "(无)", string(config.SourceDefault))
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-forge/internal/dto/dtoagent"
 	"github.com/morehao/ark-forge/pkg/acl"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/mcp"
 )
 
 // ——— M6-8 / P-13：`mcps` 白名单的写面 + 「下一轮生效」 ———
@@ -296,7 +297,9 @@ func mcpNamesOf(t *testing.T, entries []map[string]any, i int) []string {
 	}
 	out := make([]string, 0, len(list))
 	for _, m := range list {
-		if name, _ := m["name"].(string); name != "" {
+		if name, _ := m["name"].(string); name != "" && name != mcp.GatewayServerName {
+			// 恒定的平台网关条目另计（M7-3）：本文件的断言都是"MCP 白名单 = 过滤器"，
+			// 网关条目与白名单无关，混进来只会让每条断言都要减一。
 			out = append(out, name)
 		}
 	}

@@ -195,6 +195,52 @@ func toolNames(tools []mcp.Tool) []string {
 }
 
 // TestSourceToolsNamespacesAndCalls 取数 + 命名空间化 + 代理调用（含密钥由网关就地解析）。
+// TestSourceSharesDBWithCore 网关与核心各自持有**同一个库**的句柄时必须能共存：
+// 生产形态就是这样（核心常驻持有 store，网关是它拉起的另一个进程/句柄），而两个 SQLite 连接
+// 互相踩（锁等待、迁移竞争）会表现成"工具面时有时无"。本用例刻意**不注入** store 句柄，
+// 让 `NewSource` 自己开一个——这正是 `forge mcp bridge` 在真实运行时的样子。
+func TestSourceSharesDBWithCore(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "forge.db")
+	core := testutil.OpenStore(t, dbPath) // 核心侧常驻句柄（不关，模拟 serve 存活期）
+	t.Cleanup(func() { _ = core.Close() })
+	cfg := config.Config{
+		StoreMode: config.StoreModeSQLite, DBPath: dbPath,
+		AgentDir: filepath.Join(dir, "agents"), CapabilityDir: filepath.Join(dir, "capabilities"),
+	}
+	// 用核心句柄写入定义（真实写入路径），再让网关自己开库读。
+	seedVia := func(id, body string) {
+		t.Helper()
+		if ok, err := core.UpsertMcpServerDefinition(context.Background(), id, body, 0, "test"); err != nil || !ok {
+			t.Fatalf("写定义 %s: ok=%v err=%v", id, ok, err)
+		}
+	}
+	remote := newFakeRemote(t, "echo")
+	t.Setenv("MCP_SHARED_DB_TOKEN", "tok-shared") // 密钥能解析，才谈得上"看得到工具面"
+	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
+	if ok, err := core.UpsertAgentDefinition(context.Background(), "a1",
+		`{"id":"a1","name":"A1","runtimes":["opencode"]}`, 0, "test"); err != nil || !ok {
+		t.Fatalf("写 agent: ok=%v err=%v", ok, err)
+	}
+
+	var buf strings.Builder
+	src, err := NewSource(context.Background(), SourceOptions{
+		Cfg: cfg, AgentID: "a1",
+		Logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	})
+	if err != nil {
+		t.Fatalf("装配数据面（自开库）: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	tools, err := src.Tools(context.Background())
+	if err != nil {
+		t.Fatalf("取工具面: %v", err)
+	}
+	if got := toolNames(tools); strings.Join(got, ",") != "web__echo" {
+		t.Fatalf("两个句柄共用一个库时应看到同一份定义，got %v（日志：%s）", got, buf.String())
+	}
+}
+
 func TestSourceToolsNamespacesAndCalls(t *testing.T) {
 	ctx := context.Background()
 	r := newSourceRig(t)

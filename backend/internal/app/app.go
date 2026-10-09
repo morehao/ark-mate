@@ -307,6 +307,11 @@ func (a *App) Init(ctx context.Context) error {
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
 	// 原生权限映射（B5）：FORGE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
+	// 平台侧 MCP 网关开关（M7-3）：默认 auto（开），只有显式 off 才回退到"远程直连注入"。
+	a.svc.SetMcpGatewayEnabled(cfg.McpGatewayEnabled())
+	if !cfg.McpGatewayEnabled() {
+		slog.Warn("serve: FORGE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
+	}
 	if cfg.NativePermission == config.NativePermissionOff {
 		a.svc.SetNativePermission(false)
 		slog.Info("serve: 原生权限映射已关闭（FORGE_NATIVE_PERMISSION=off）")

@@ -273,17 +273,34 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 	}
 
 	// MCP：注册表全量 + 每条的 enabled/runtimes（候选里支持该传输的子集，保持候选声明顺序）。
+	//
+	// **M7-3 的语义变化**：网关在环时，远程传输（sse/http/streamable_http）对**每个**候选 runtime
+	// 都可承载——底座只看见一条 stdio 条目，平台替它连远端（§10.6-①）。这正是"逐 runtime 的传输
+	// 承载矩阵消失"在**读面**的体现：以前 dsh 声明的 `streamable_http` 到不了、面板会标"不承载"，
+	// 现在不该再标。开关关掉（mcp_gateway=off）时回到老口径，读面与注入面始终同源。
 	servers := s.caps.ListMcpServers()
 	mcpOut := make([]dtocapability.AgentMcpServerResp, 0, len(servers))
 	carried := make(map[string]bool, len(servers)) // server id → 至少一个候选可承载
+	carries := func(m capability.McpServer, r string) bool {
+		if _, known := transports[r]; !known {
+			return false // 未注册的候选 runtime：不推导它的承载能力（与 notes 的口径一致）
+		}
+		if s.McpGatewayEnabled() && capability.IsRemoteTransport(m.Transport) {
+			// 网关代连：对底座而言它就是一条 stdio 条目 ⇒ 已注册的 runtime 都承载。
+			return true
+		}
+		for _, t := range transports[r] {
+			if t == m.Transport {
+				return true
+			}
+		}
+		return false
+	}
 	for _, m := range servers {
 		carriers := make([]string, 0, len(runtimes))
 		for _, r := range runtimes {
-			for _, t := range transports[r] {
-				if t == m.Transport {
-					carriers = append(carriers, r)
-					break
-				}
+			if carries(m, r) {
+				carriers = append(carriers, r)
 			}
 		}
 		if len(carriers) > 0 {
@@ -440,50 +457,20 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 	}
 }
 
-// mcpSelectionFor 选出该 agent×runtime 的 MCP **候选定义**（未解析密钥）。
-//
-// 这是「哪些 server 属于这套能力」的**唯一**实现：注入面（McpServersFor）与代际指纹
-// （capabilityFingerprint）都从这里取。两处各写一遍的后果是"指纹里有的、注入时没有"（或反之）——
-// 后者更糟：指纹说这套能力包含某个 server，实际却没注入。
-//
-// 与注入面的差别只有一处、且是**有意**的：这里不解析密钥（能不能解析是环境事实，不该让指纹抖动）。
-//
-// **白名单优先级（M3）**：会话声明了 `capabilities.mcps` → 以它为准（M3-2 的落点）；
-// 会话没声明该 kind → 回落 `agent.Mcps`；两者都未声明 → 全量按 transport 过滤（今天的行为）。
-// 会话级的选定**覆盖**而不是求交：agent 声明是"这个 agent 默认能碰什么"，会话声明是用户此刻
-// 的显式选择，求交会让"agent 白名单里没有的 server"永远选不上，用户看不到任何解释。
-func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []capability.McpServer {
-	if s.caps == nil {
-		return nil
-	}
-	supported, ok := s.supportedMcpTransports(runtimeID)
-	if !ok {
-		return nil
-	}
-	// 白名单优先级（会话选定 > agent 声明）留在这里——那是**优先级**，不是**选择**；
-	// 三个判据（启用 ∩ 传输 ∩ 白名单）只有一份实现，在 `pkg/capability.SelectMcpServers`
-	// （M7-2：网关面也消费它，两处各写一遍会静默不同面）。
-	allowIDs := (*[]string)(nil)
-	if sel != nil && sel.Mcps != nil {
-		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
-	} else if agent != nil {
-		allowIDs = agent.Mcps
-	}
-	return capability.SelectMcpServers(s.caps.ListMcpServers(), supported, allowIDs)
-}
-
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
-// 注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单（会话选定 > agent.Mcps；
-// 两者都未声明 = 全量；空数组 = 一个都不要）。headers/凭证一并携带（走 ACP wire）。
-// 未知 runtime → nil（维持现状不下发）。
+// **stdio 直连** + （有远程 server 时）**一条平台网关条目**（M7-3 的分派）。
+//
+// 老口径（M7 之前）是"注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单"，远程 server 由
+// 底座自己按传输直连；现在远程一律经网关（P-2），故这里只保留直连那一半，条目的合成在
+// `planMcpInjection`（唯一实现，指纹也用它——两处各写一遍会出现"指纹说含 X、注入里没有 X"）。
 //
 // `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
 // `conversations.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
 // 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
 func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
-	servers := s.mcpSelectionFor(agent, runtimeID, sel)
-	out := make([]acl.McpServer, 0, len(servers))
-	for _, m := range servers {
+	plan := s.planMcpInjection(agent, runtimeID, sel)
+	out := make([]acl.McpServer, 0, len(plan.Direct)+1)
+	for _, m := range plan.Direct {
 		name := m.Name
 		if name == "" {
 			name = m.ID
@@ -502,7 +489,23 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *Capabili
 			Env: env, Headers: headers,
 		})
 	}
+	if plan.Gateway != nil {
+		// 网关条目天生无密钥（只有 scope），故直接追加；远程凭据留在网关进程里（§10.6-②）。
+		out = append(out, *plan.Gateway)
+		if len(plan.Remote) > 0 {
+			slog.Debug("mcp 注入：远程 server 经平台网关代连",
+				"agent", agentIDOf(agent), "runtime", runtimeID, "remote", len(plan.Remote))
+		}
+	}
 	return out
+}
+
+// agentIDOf 空安全取 agent id（日志/诊断用）。
+func agentIDOf(a *AgentRec) string {
+	if a == nil {
+		return ""
+	}
+	return a.ID
 }
 
 // projectedRuntimeSet 本进程已解析出 skill 投影的 runtime 集合（激活判定与投放集共用）。

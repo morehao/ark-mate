@@ -177,7 +177,7 @@ func mcpApplicability(m capability.McpServer, runtimes []string, s *Service) []d
 
 // mcpRuntimeVerdict 单个 (server, runtime) 的可达性判定——**唯一实现**（理由同 skillRuntimeVerdict）。
 func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary.Applicability {
-	supported, _ := s.supportedMcpTransports(rt)
+	supported, known := s.supportedMcpTransports(rt)
 	carried := false
 	for _, t := range supported {
 		if t == m.Transport {
@@ -189,6 +189,12 @@ func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary
 	case !m.IsEnabled():
 		return dtolibrary.Applicability{Runtime: rt, OK: false,
 			Status: dtolibrary.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"}
+	case s.McpGatewayEnabled() && known && capability.IsRemoteTransport(m.Transport):
+		// M7-3：远程 server 对每个已注册 runtime 都可达——底座拿到的是**一条 stdio 条目**，
+		// 真正的 sse/http 由平台网关代连。故这里不再按底座声明的承载能力判"不适用"。
+		return dtolibrary.Applicability{Runtime: rt, OK: true,
+			Status: dtolibrary.StatusProjected,
+			Reason: fmt.Sprintf("经平台 MCP 网关代连（对底座是一条 stdio 条目；远端传输 %s）——开关 FORGE_MCP_GATEWAY=off 可回到直连口径", m.Transport)}
 	case !carried:
 		return dtolibrary.Applicability{Runtime: rt, OK: false,
 			Status: dtolibrary.StatusNotApplicable,
