@@ -43,6 +43,14 @@ type Server struct {
 	Args      []string
 	URL       string
 	Headers   map[string]string
+	// Env 追加到 stdio 子进程的环境（在进程环境之上；非 stdio 传输忽略）。
+	//
+	// 约定与 acl.McpServer.Env 一致：**调用方已把密钥型绑定（`vault:`/`env:`）解析成明文**，
+	// 本包只负责下发。缺了它，靠 env 拿凭据的 stdio server 会"会话里能用、平台探测/调用必失败"
+	// （2026-10-09 实测：同一个 server，探测路径起的进程拿不到 env、ACP 注入路径拿得到）。
+	//
+	// 纪律：任何错误文案、日志、诊断都**不得包含这里的值**（键名可以）——本包是密钥经过的一层。
+	Env map[string]string
 }
 
 // Tool 是 tools/list 返回的一条工具（inputSchema 原样保真）。

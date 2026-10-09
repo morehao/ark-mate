@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-forge/internal/vault"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/runtime"
 )
 
@@ -192,5 +194,82 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 	}
 	if !strings.Contains(problems[0], "TOKEN") || !strings.Contains(problems[0], "vault:mcp/wrong") {
 		t.Fatalf("失败原因应含键名与引用: %v", problems[0])
+	}
+}
+
+// TestMcpLiveAndProbeCarryResolvedEnv 密钥解析必须到得了**探测面与调用面**，不能只有注入面有。
+//
+// 这条钉的是一个实测过的缺陷（2026-10-09）：`mcp.Server` 当时连 `Env` 字段都没有，探测/调用路径
+// 于是既不传 env 也不传 secret_headers ⇒ 一个靠 env 拿凭据的 stdio server 会"会话里能用、
+// `POST /mcps/:id/probe` 必然失败"（`GET /mcps` 长期红）。证据是同一个 server 两处 spawn 的
+// 进程环境截然相反：探测路径 `core_pid=""`、ACP 注入路径 `core_pid="46579"`。
+func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
+	home := t.TempDir()
+	svc := agentTestSvc(t, filepath.Join(home, "agents"))
+	st, err := vault.Open(home)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	const token = "sk-live-secret"
+	if err := st.Put("vault:mcp/live", vault.KindMcpSecret, []byte(token)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LIVE_HDR", "Bearer live")
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
+		ID: "live", Name: "live", Transport: capability.TransportStdio, Command: "/usr/bin/env",
+		Env:           map[string]string{"PLAIN": "p"},
+		SecretEnv:     map[string]string{"TOKEN": "vault:mcp/live"},
+		SecretHeaders: map[string]string{"Authorization": "env:LIVE_HDR"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 mcp.Server。
+	got, err := svc.mcpLiveServer("live")
+	if err != nil {
+		t.Fatalf("mcpLiveServer: %v", err)
+	}
+	if got.Env["PLAIN"] != "p" || got.Env["TOKEN"] != token {
+		t.Fatalf("调用面未带解析后的 env: %+v", got.Env)
+	}
+	if got.Headers["Authorization"] != "Bearer live" {
+		t.Fatalf("调用面未带解析后的 header: %+v", got.Headers)
+	}
+
+	// 2) 解析不了 → 当场报错（不拿空凭证去探），且是 40001（配置问题）而不是 50001。
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
+		ID: "broken", Name: "broken", Transport: capability.TransportStdio, Command: "/usr/bin/env",
+		SecretEnv: map[string]string{"TOKEN": "vault:mcp/not-there"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.mcpLiveServer("broken"); err == nil {
+		t.Fatal("密钥解析失败时调用面应报错")
+	} else if numericCode(err) != code.InvalidRequest {
+		t.Fatalf("应是 40001（配置问题），got %d（%v）", numericCode(err), err)
+	} else if !strings.Contains(err.Error(), "mcp_secret_unresolved") {
+		t.Fatalf("错误里应有稳定 code，便于排障：%v", err)
+	}
+	if _, err := svc.ProbeMcpServer(context.Background(), "broken"); err == nil {
+		t.Fatal("密钥解析失败时探测应报错")
+	} else if numericCode(err) != code.InvalidRequest {
+		t.Fatalf("探测路径同样应是 40001，got %d（%v）", numericCode(err), err)
+	}
+	// 失败要留痕（GET /mcps 的 last_probe_*），否则用户只看到一次性的响应。
+	list, err := svc.ListMcpServers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded bool
+	for _, m := range list {
+		if m.ID == "broken" && m.LastProbeErr != "" {
+			recorded = true
+			if !strings.Contains(m.LastProbeErr, "mcp_secret_unresolved") {
+				t.Fatalf("留痕应带稳定 code: %s", m.LastProbeErr)
+			}
+		}
+	}
+	if !recorded {
+		t.Fatal("解析失败也要记 last_probe_error")
 	}
 }

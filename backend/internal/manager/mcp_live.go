@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
 	"github.com/morehao/ark-forge/pkg/acl"
-	"github.com/morehao/ark-forge/pkg/capability"
 	"github.com/morehao/ark-forge/pkg/code"
 	"github.com/morehao/ark-forge/pkg/mcp"
 )
@@ -29,10 +29,9 @@ const (
 //   - **工具级失败**（服务端 result.isError=true）不是平台错误：原样透传 is_error + content，
 //     信封 code=0（调用方据 is_error 判断）；只有传输/协议/超时才映射为信封错误码。
 func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
-	server, ok := s.caps.GetMcpServer(id)
-	if !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
-			fmt.Sprintf("未知 MCP server %q", id), nil))
+	server, err := s.mcpLiveServer(id)
+	if err != nil {
+		return nil, err
 	}
 	budget := defaultMcpCallTimeout
 	if req.TimeoutMS > 0 {
@@ -45,10 +44,7 @@ func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapab
 	defer cancel()
 
 	start := time.Now()
-	res, err := mcp.CallTool(cctx, mcp.Server{
-		ID: server.ID, Transport: server.Transport, Command: server.Command,
-		Args: server.Args, URL: server.URL, Headers: server.Headers,
-	}, tool, req.Arguments)
+	res, err := mcp.CallTool(cctx, server, tool, req.Arguments)
 	if err != nil {
 		// 稳定 code 进信封 msg（同探测）：信封 code 只有分类粒度，排障需要精确原因。
 		return nil, code.FromError(acl.NewError(mcpCallClass(err), mcp.CodeOf(err),
@@ -79,14 +75,28 @@ func mcpCallClass(err error) acl.Class {
 	}
 }
 
-// mcpCallBudget 资源/提示词拉取的统一预算（与探测同量级：一次建连 + 一次列表/读取）。
-func (s *Service) mcpLiveServer(id string) (capability.McpServer, error) {
+// mcpLiveServer 取条目并解析成 mcp 包输入：**密钥型绑定（`env:`/`vault:`）在这里解析成明文**，
+// 与注入面（McpServersFor）共用同一个 resolveMcpSecrets——两处各写一遍的后果就是今天这个缺陷：
+// 注入面带 env、探测/调用面不带，靠 env 拿凭据的 stdio server 于是"会话里能用、探测必失败"
+// （2026-10-09 实测）。
+//
+// 解析失败 → **当场报错**，不拿空凭证去连（同注入面的纪律）：半配置的 server 会让用户看到一个
+// 远处的 401，而"哪条引用解析不了"是此刻就能说清的事实，且错误里只有键名与引用、没有值。
+func (s *Service) mcpLiveServer(id string) (mcp.Server, error) {
 	server, ok := s.caps.GetMcpServer(id)
 	if !ok {
-		return capability.McpServer{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
+		return mcp.Server{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_not_found",
 			fmt.Sprintf("未知 MCP server %q", id), nil))
 	}
-	return server, nil
+	env, headers, problems := s.resolveMcpSecrets(server)
+	if len(problems) > 0 {
+		return mcp.Server{}, code.FromError(acl.NewError(acl.ClassRequest, "mcp_secret_unresolved",
+			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil))
+	}
+	return mcp.Server{
+		ID: server.ID, Transport: server.Transport, Command: server.Command,
+		Args: server.Args, URL: server.URL, Headers: headers, Env: env,
+	}, nil
 }
 
 // ListMcpResources 拉取某 MCP server 的资源列表（resources/list + resources/templates/list）。
@@ -97,7 +107,7 @@ func (s *Service) ListMcpResources(ctx context.Context, id string) (*dtocapabili
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
 	defer cancel()
-	res, err := mcp.ListResources(rctx, mcpServerOf(server))
+	res, err := mcp.ListResources(rctx, server)
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_resources_list_failed")
 	}
@@ -129,7 +139,7 @@ func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*dtocapa
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
 	defer cancel()
-	res, err := mcp.ReadResource(rctx, mcpServerOf(server), uri)
+	res, err := mcp.ReadResource(rctx, server, uri)
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_resource_read_failed")
 	}
@@ -148,7 +158,7 @@ func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*dtocapability
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
 	defer cancel()
-	prompts, err := mcp.ListPrompts(rctx, mcpServerOf(server))
+	prompts, err := mcp.ListPrompts(rctx, server)
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_prompts_list_failed")
 	}
@@ -173,7 +183,7 @@ func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req dtocapa
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
 	defer cancel()
-	res, err := mcp.GetPrompt(rctx, mcpServerOf(server), name, req.Arguments)
+	res, err := mcp.GetPrompt(rctx, server, name, req.Arguments)
 	if err != nil {
 		return nil, s.mcpLiveErr(err, "mcp_prompt_get_failed")
 	}
@@ -183,14 +193,6 @@ func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req dtocapa
 		out.Messages = append(out.Messages, dtocapability.McpPromptMessage{Role: m.Role, Content: m.Content})
 	}
 	return out, nil
-}
-
-// mcpServerOf 把能力目录条目映射为 mcp 包输入。
-func mcpServerOf(server capability.McpServer) mcp.Server {
-	return mcp.Server{
-		ID: server.ID, Transport: server.Transport, Command: server.Command,
-		Args: server.Args, URL: server.URL, Headers: server.Headers,
-	}
 }
 
 // mcpLiveErr 把 mcp 层错误映射为 REST 信封错误（稳定 code 进 msg，分类决定信封码）。

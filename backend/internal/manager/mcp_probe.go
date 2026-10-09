@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/morehao/ark-forge/internal/dto/dtocapability"
@@ -77,7 +78,8 @@ func mcpProbeClass(err error) acl.Class {
 	switch mcp.CodeOf(err) {
 	case "mcp_transport_unsupported":
 		return acl.ClassUnsupported
-	case "mcp_command_invalid", "mcp_url_invalid":
+	case "mcp_command_invalid", "mcp_url_invalid", "mcp_secret_unresolved":
+		// 密钥引用解析不了是**配置问题**（改引用或补 vault/env），不是服务端故障 ⇒ 40001。
 		return acl.ClassRequest
 	default:
 		return acl.ClassService
@@ -97,9 +99,23 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 	pctx, cancel := context.WithTimeout(ctx, s.mcpProbeBudget())
 	defer cancel()
 
+	// 密钥型绑定在这里**解析成明文**再下发（与注入面 McpServersFor 同一个 resolveMcpSecrets）。
+	// 此前本路径连 `mcp.Server.Env` 字段都没有 ⇒ 靠 env 拿凭据的 stdio server 必然探测失败，
+	// 而同一个 server 在会话里（走 ACP 注入面）却是好的——2026-10-09 实测坐实。
+	env, headers, problems := s.resolveMcpSecrets(server)
+	if len(problems) > 0 {
+		// 解析失败就**不拿空凭证去探**（同注入面纪律）：否则用户看到的是一个远处的 401，
+		// 而"哪条引用解析不了"是当下就能说清的事实。文案只含键名与引用，绝不含值。
+		// msg 里带 [:code] 是同一条排障约定（信封 code 只有分类粒度）。
+		err := acl.NewError(acl.ClassRequest, "mcp_secret_unresolved",
+			fmt.Sprintf("[mcp_secret_unresolved] 密钥引用解析失败（%s）", strings.Join(problems, "；")), nil)
+		s.recordMcpProbe(id, err)
+		return nil, code.FromError(err)
+	}
+
 	res, err := mcp.ListTools(pctx, mcp.Server{
 		ID: server.ID, Transport: server.Transport, Command: server.Command,
-		Args: server.Args, URL: server.URL, Headers: server.Headers,
+		Args: server.Args, URL: server.URL, Headers: headers, Env: env,
 	})
 	if err != nil {
 		s.recordMcpProbe(id, err)

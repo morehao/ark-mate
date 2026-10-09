@@ -53,7 +53,7 @@ func runHelper() {
 			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
 				"protocolVersion": protocolVersion,
 				"capabilities":    map[string]any{},
-				"serverInfo":      map[string]any{"name": "helper", "version": "1.2.3"},
+				"serverInfo":      map[string]any{"name": helperName(), "version": "1.2.3"},
 			}})
 		case "resources/list":
 			send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
@@ -168,6 +168,39 @@ func stdioServer(t *testing.T) Server {
 	t.Helper()
 	t.Setenv("FORGE_MCP_HELPER", "1")
 	return Server{ID: "helper", Transport: "stdio", Command: os.Args[0]}
+}
+
+// helperName 让父进程能验证 **Server.Env**（而不是父进程环境）确实进了子进程：
+// 测试把 FORGE_MCP_HELPER_NAME 放进 Server.Env，这里把它当 serverInfo.name 回出来。
+func helperName() string {
+	if v := os.Getenv("FORGE_MCP_HELPER_NAME"); v != "" {
+		return v
+	}
+	return "helper"
+}
+
+// TestStdioServerEnvReachesChild Server.Env 必须真的进子进程环境，而不只是"父进程环境恰好有"。
+//
+// 这条钉的是实测缺陷（2026-10-09）：`Server` 曾无 `Env` 字段 ⇒ 平台探测/调用路径下发的 stdio
+// server 拿不到密钥型绑定解析后的 env（注入路径走 ACP，另有通道，于是同一个 server"会话里能用、
+// 平台探测必失败"）。
+func TestStdioServerEnvReachesChild(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s := stdioServer(t)
+	// 只放在 Server.Env 里：父进程环境没有这个键，子进程能读到才说明字段生效。
+	s.Env = map[string]string{"FORGE_MCP_HELPER_NAME": "from-server-env"}
+	res, err := ListTools(ctx, s)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if res.ServerName != "from-server-env" {
+		t.Fatalf("Server.Env 未进子进程：serverInfo.name=%q", res.ServerName)
+	}
+	// 且是**追加**语义：父进程环境仍在（否则 HOME/PATH 之类会被抹掉）。
+	if os.Getenv("FORGE_MCP_HELPER") == "" {
+		t.Fatal("夹具前提：父进程环境应有 FORGE_MCP_HELPER")
+	}
 }
 
 // TestStdioListToolsOK stdio 探测全流程：握手 → initialized → tools/list；空名工具跳过。

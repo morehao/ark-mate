@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -70,6 +72,20 @@ func dialStdio(ctx context.Context, s Server) (transport, error) {
 	}
 	tail := newTailBuffer(4 << 10)
 	cmd.Stderr = tail
+	// Server.Env 是**追加**在进程环境之上（保留继承语义：HOME/PATH 之类仍来自父进程）。
+	// 只在非空时设 Env：`cmd.Env = nil` 与"继承"虽等价，但会让"这里到底动没动环境"看不出来。
+	if len(s.Env) > 0 {
+		env := os.Environ()
+		names := make([]string, 0, len(s.Env))
+		for n := range s.Env {
+			names = append(names, n)
+		}
+		sort.Strings(names) // 确定性：同一份定义每次拉起的环境序一致（便于比对与排障）
+		for _, n := range names {
+			env = append(env, n+"="+s.Env[n])
+		}
+		cmd.Env = env
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, errf("mcp_spawn_failed", "启动 %q 失败：%v", s.Command, err)
 	}
