@@ -256,8 +256,8 @@ func commentLine(line string) bool {
 // 不引 `electron`、不引 `node:*` 内置模块、不引 `@ark/desktop`、不嗅探 `window.electron`。
 //
 // 这条是"两端功能完全一致"的结构性保证：共享 UI 在**类型与依赖层面**就拿不到桌面 API，
-// 于是不存在"只有桌面能跑"的分支；桌面多出来的能力只能经 `GET /v1/forge/capabilities`（声明面）
-// 与 `__FORGE_DESKTOP__`（执行面，存在性探测降级）进入，且浏览器端必须有服务端等价路径（V3）。
+// 于是不存在"只有桌面能跑"的分支；桌面多出来的能力只能经 `GET /v1/mate/capabilities`（声明面）
+// 与 `__MATE_DESKTOP__`（执行面，存在性探测降级）进入，且浏览器端必须有服务端等价路径（V3）。
 func TestWebUiMustNotReachDesktopApis(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
 	files := listFrontendSources(t, filepath.Join(frontendRoot(t), "apps", "web", "src"))

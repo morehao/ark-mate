@@ -14,14 +14,14 @@ func TestStdioTransportEcho(t *testing.T) {
 	if err := tp.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if _, err := tp.Stdin().Write([]byte("hello forge\n")); err != nil {
+	if _, err := tp.Stdin().Write([]byte("hello mate\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	line, err := bufio.NewReader(tp.Stdout()).ReadString('\n')
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if strings.TrimSpace(line) != "hello forge" {
+	if strings.TrimSpace(line) != "hello mate" {
 		t.Fatalf("回环内容不符: %q", line)
 	}
 	if err := tp.Close(); err != nil {

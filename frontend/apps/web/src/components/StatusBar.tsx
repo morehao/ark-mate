@@ -1,13 +1,13 @@
 import { tokens } from '@ark/ui'
 import { Dot } from '@ark/ui'
-import { useForge } from '../store'
+import { useMate } from '../store'
 
 /** 底部状态条（console.html .statusbar）：WS 连接态 + eventbus 水位 + 语义提示。 */
 export function StatusBar() {
-  const wsState = useForge((s) => s.wsState)
-  const activeId = useForge((s) => s.activeId)
-  const views = useForge((s) => s.views)
-  const conversations = useForge((s) => s.conversations)
+  const wsState = useMate((s) => s.wsState)
+  const activeId = useMate((s) => s.activeId)
+  const views = useMate((s) => s.views)
+  const conversations = useMate((s) => s.conversations)
 
   const wsMeta =
     wsState === 'open'

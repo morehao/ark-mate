@@ -18,7 +18,7 @@ import (
 //
 // P-13 的原话是"入 DB 只解决*读到的是新的*，不解决*何时生效*"。核这件事时发现前半句也没成立：
 // `mcps` 在 M6-6 之前只从定义文件读、M6-6 之后只从 DB 行读，而**两个写面都没有这个字段**
-// （`AgentCreateReq`/`AgentUpdateReq`/`AgentResp` 里都没有它），`forge agent import` 又刻意
+// （`AgentCreateReq`/`AgentUpdateReq`/`AgentResp` 里都没有它），`mate agent import` 又刻意
 // 不覆盖已有行 ⇒ 白名单事实上不可改。所以本任务的落地是两半：**给写面**（含三态）+ **发通知**。
 
 // TestAgentMcpsWriteFaceThreeStates 写面三态：缺键不改 / null 清空 / [] 禁用全部 / 数组白名单，

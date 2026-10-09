@@ -34,7 +34,7 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // 写死版本会让"残留壳检测"当场静默失效——表现为下一次运行被单实例锁挡住，
 // 而日志里只有一句"已有实例在运行"（实测踩过）。
 export const SHELL_RE = /electron@\d+\.\d+\.\d+.*MacOS\/Electron \./
-export const CORE_RE = /resources\/forge-core serve/
+export const CORE_RE = /resources\/mate-core serve/
 
 /**
  * 从 **apps/desktop** 出发解析裸模块（Electron 二进制路径等）。
@@ -203,7 +203,7 @@ export function installCleanupHooks(onFatal) {
 }
 
 /** 最小 CDP 客户端（Node 24 全局 WebSocket；零依赖）。 */
-export async function connectCDP(port, urlPrefix = 'forge-app://') {
+export async function connectCDP(port, urlPrefix = 'mate-app://') {
   const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
   const page = list.find((t) => t.type === 'page' && t.url.startsWith(urlPrefix))
   if (!page) throw new Error(`没有 ${urlPrefix} 的 page target：${JSON.stringify(list.map((t) => t.url))}`)
@@ -257,16 +257,16 @@ export async function waitFor(cdp, expr, timeoutMs = 8000, stepMs = 300) {
 }
 
 /**
- * 把当前代码重建一遍：forge-core（make core/desktop，顺带刷新 resources/web）与壳的
+ * 把当前代码重建一遍：mate-core（make core/desktop，顺带刷新 resources/web）与壳的
  * dist/*.cjs。**每次起壳前都要做**——跑在旧产物上是这一路验收最贵的坑（实测踩过两次）。
  */
 export function rebuildAll() {
   const out = []
   try {
     execFileSync('make', ['core/desktop'], { cwd: REPO, stdio: 'ignore' })
-    out.push(['forge-core + resources/web 已重建', true, ''])
+    out.push(['mate-core + resources/web 已重建', true, ''])
   } catch (e) {
-    out.push(['forge-core + resources/web 已重建', false, String(e).slice(0, 160)])
+    out.push(['mate-core + resources/web 已重建', false, String(e).slice(0, 160)])
   }
   try {
     execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: DESKTOP, stdio: 'ignore' })
@@ -320,10 +320,10 @@ export async function launchShell({ remoteDebugPort, env } = {}) {
 // "源码态能不能跑"，而是"**签名 + hardened runtime 之后的包**能不能跑包内的载荷"——只有真起包里
 // 那份可执行文件才能回答。
 
-/** 打包态壳/核心的进程匹配（核心路径在 `.app/Contents/Resources/forge-core`）。 */
+/** 打包态壳/核心的进程匹配（核心路径在 `.app/Contents/Resources/mate-core`）。 */
 export function packagedProcessRes(appPath) {
   const macos = join(appPath, 'Contents', 'MacOS')
-  const core = join(appPath, 'Contents', 'Resources', 'forge-core')
+  const core = join(appPath, 'Contents', 'Resources', 'mate-core')
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return { shell: new RegExp(`${esc(macos)}/`), core: new RegExp(`${esc(core)} serve`) }
 }
@@ -352,7 +352,7 @@ export function packagedExecutable(appPath) {
  */
 export async function launchPackagedShell({ appPath, remoteDebugPort, env, userDataDir } = {}) {
   const port = remoteDebugPort ?? 9600 + Math.floor(Math.random() * 200)
-  const userData = userDataDir ?? mkdtempSync(join(tmpdir(), 'forge-packaged-userdata-'))
+  const userData = userDataDir ?? mkdtempSync(join(tmpdir(), 'mate-packaged-userdata-'))
   const exe = packagedExecutable(appPath)
   const log = []
   const child = spawn(exe, [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`], {

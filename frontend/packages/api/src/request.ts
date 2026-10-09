@@ -4,7 +4,7 @@ import type { Envelope } from '@ark/types'
 import { BizCode } from '@ark/types'
 
 /**
- * forge 控制面 HTTP 客户端。
+ * mate 控制面 HTTP 客户端。
  *
  * - baseURL '/v1'，dev 走 vite proxy（127.0.0.1:10001），release 内嵌同源；
  * - 后端统一信封 {code, requestID, msg, data}：code=0 时返回 data，
@@ -23,10 +23,10 @@ export class HttpError extends Error {
 const instance = axios.create({ baseURL: '/v1', timeout: 30_000 })
 
 /**
- * 单操作员令牌（A6）：后端配置 FORGE_TOKEN 后，除 /health 外所有接口都要求 Bearer token。
+ * 单操作员令牌（A6）：后端配置 MATE_TOKEN 后，除 /health 外所有接口都要求 Bearer token。
  * 令牌只存在浏览器本地（localStorage），不写进 URL/日志；面板顶栏可设置/清除。
  */
-const TOKEN_KEY = 'forge.token'
+const TOKEN_KEY = 'mate.token'
 
 export function getToken(): string {
   try {

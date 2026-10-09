@@ -10,9 +10,9 @@
  *   1. **继承调用方环境为基线**——不做白名单。MCP server 与用户工具链（git/python/uv/代理/
  *      `SSH_AUTH_SOCK`）都靠它；白名单化的症状是"某些工具在桌面态莫名找不到"。
  *   2. `PATH` 只做**前置**：`<私有 bin><分隔符><原 PATH>`。用户原有的 PATH 尾部必须保留。
- *   3. `ELECTRON_RUN_AS_NODE` 与 `FORGE_NODE_EXECUTABLE` 成对出现：前者让 Electron 以 Node 模式启动，
+ *   3. `ELECTRON_RUN_AS_NODE` 与 `MATE_NODE_EXECUTABLE` 成对出现：前者让 Electron 以 Node 模式启动，
  *      后者让私有 `node`/`npx` 启动器知道该转发到哪个可执行文件（对应参照实现的
- *      `DSH_DESKTOP_NODE_EXECUTABLE`，这里按本仓命名前缀为 `FORGE_`）。
+ *      `DSH_DESKTOP_NODE_EXECUTABLE`，这里按本仓命名前缀为 `MATE_`）。
  */
 
 /** 桌面态子进程环境里本仓注入的变量名（唯一真源：壳、启动器脚本、验收脚本都引用它）。 */
@@ -20,7 +20,7 @@ export const NODE_ENV_VARS = {
   /** 让 Electron 以 Node 模式启动（不加载 Chromium）。 */
   runAsNode: 'ELECTRON_RUN_AS_NODE',
   /** Electron 可执行文件的绝对路径；私有 `node`/`npx` 启动器据此转发。 */
-  nodeExecutable: 'FORGE_NODE_EXECUTABLE',
+  nodeExecutable: 'MATE_NODE_EXECUTABLE',
 } as const
 
 export type NodeModeEnvironmentInput = {

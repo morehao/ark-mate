@@ -4,7 +4,7 @@ import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import { modelValues } from '@ark/types'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker } from './WorkspacePicker'
@@ -14,9 +14,9 @@ import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode
 import { browseWorkspaces } from '@ark/api'
 
 // 新建会话时记住的「上次所选模型」。
-// 键名前缀随 M0-1 的前端产品包改名统一为 `forge.web.*`（与其它前端持久键同前缀）；
+// 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
 // 旧键名不回填——代价是既有本地选择在改名后一次性回到默认模型。
-const LAST_MODEL_KEY = 'forge.web.lastModel'
+const LAST_MODEL_KEY = 'mate.web.lastModel'
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
 const EXAMPLES = [
@@ -33,10 +33,10 @@ const EXAMPLES = [
  */
 export function StartPanel() {
   const navigate = useNavigate()
-  const agents = useForge((s) => s.agents)
-  const createAndRun = useForge((s) => s.createAndRun)
-  const modelCatalog = useForge((s) => s.modelCatalog)
-  const loadModelCatalog = useForge((s) => s.loadModelCatalog)
+  const agents = useMate((s) => s.agents)
+  const createAndRun = useMate((s) => s.createAndRun)
+  const modelCatalog = useMate((s) => s.modelCatalog)
+  const loadModelCatalog = useMate((s) => s.loadModelCatalog)
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)

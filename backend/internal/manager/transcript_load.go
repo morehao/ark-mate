@@ -163,7 +163,7 @@ func parseRFC3339(s string) time.Time {
 	return time.Time{}
 }
 
-// ——— 导出面（供 `forge migrate` 等外部命令复读 transcript，避免重复解析） ———
+// ——— 导出面（供 `mate migrate` 等外部命令复读 transcript，避免重复解析） ———
 
 // TranscriptEvent 是一条可复读的事件原语（type + payload）。
 type TranscriptEvent struct {

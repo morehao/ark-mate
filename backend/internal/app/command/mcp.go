@@ -13,7 +13,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
-// mcpCmd 分发 `forge mcp <动作>`（M7-1：网关子命令）。
+// mcpCmd 分发 `mate mcp <动作>`（M7-1：网关子命令）。
 func mcpCmd(args []string) {
 	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, mcpUsage)
@@ -29,14 +29,14 @@ func mcpCmd(args []string) {
 }
 
 const mcpUsage = `mcp 用法：
-  forge mcp bridge --agent <agentID> --runtime <runtimeID> [--mcps '<JSON 数组>']
+  mate mcp bridge --agent <agentID> --runtime <runtimeID> [--mcps '<JSON 数组>']
       平台侧 MCP stdio 网关：以 stdio 上的 MCP 服务端形态暴露该 scope 下的远程 MCP 工具
       （底座经 ACP 的 mcpServers 把这条命令拉起来；参数只带 scope 与**会话钉住的白名单**，
       不带 server 定义集——后者会让增删一个 server 就换代际）
       协议流走 stdout，**一切诊断走 stderr**（stdout 混进一行日志就会毁掉整条会话）
 `
 
-// mcpBridge `forge mcp bridge`：平台侧 MCP stdio 网关的进程入口。
+// mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。
 //
 // 三条纪律（都不是风格问题）：
 //  1. **stdout 只走协议**（C10）：日志 handler 显式绑 stderr，不用 fmt.Print 写任何诊断；
@@ -44,8 +44,8 @@ const mcpUsage = `mcp 用法：
 //  2. **参数解析与注入端同源**（P-2）：用 `mcp.ParseScopeArgs` 解 `mcp.GatewayBridgeArgs`
 //     拼出来的那串。未知参数**当场失败**——静默忽略会表现成"网关起来了但 scope 不对"，
 //     而 scope 不对的症状是"工具面不对"，最难查的一类。
-//  3. **配置只用来定位数据面**（M7-2）：网关要自己打开 core 那份库（`FORGE_DB` /
-//     `~/.forge/forge.db`），所以它按**与核心进程同一个解析器**（`mustConfig` → config
+//  3. **配置只用来定位数据面**（M7-2）：网关要自己打开 core 那份库（`MATE_DB` /
+//     `~/.ark-mate/mate.db`），所以它按**与核心进程同一个解析器**（`mustConfig` → config
 //     优先级链）取路径。这不是"第二条事实源"：取值来源与核心逐条相同（env / 配置文件 /
 //     默认 home），且 `serve` 没有可让两者分叉的 CLI flag（既没有 `--db` 也没有 `--config`，
 //     见 `serve` 的 flag 集）。将来若给 `serve` 加这类 flag，必须同步把取值交给网关

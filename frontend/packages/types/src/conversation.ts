@@ -318,7 +318,7 @@ export interface ConversationPromptResp {
   event_seq: number
   /** 本次输入已入队（delivery=after_turn|interrupt_then_prompt 且会话正忙）。 */
   queued?: boolean
-  /** 入队项的 id（可用 DELETE /v1/forge/conversations/:id/inputs/:input_id 撤下）。 */
+  /** 入队项的 id（可用 DELETE /v1/mate/conversations/:id/inputs/:input_id 撤下）。 */
   input_id?: string
 }
 

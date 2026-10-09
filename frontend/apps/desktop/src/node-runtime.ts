@@ -9,7 +9,7 @@
  *
  *   1. 壳 spawn 核心时，把设计 §6.6 的环境交给它（`env.ts` 的 `coreEnvironment()`）；
  *   2. 核心 spawn runtime 时**原样继承**那份环境（Go 侧 `os.Environ()` 的语义），
- *      `PATH` 首段因此是私有 bin、`FORGE_NODE_EXECUTABLE` 因此在场；
+ *      `PATH` 首段因此是私有 bin、`MATE_NODE_EXECUTABLE` 因此在场；
  *   3. 私有 bin 里的 `dsh` / `opencode` 启动器把"名字"翻译成"随包载荷 + Electron 的 Node"。
  *
  * 因此 `utilityProcess` 在本仓**没有用武之地**：它是给"Electron 自己 fork 一个 Node 子进程并走

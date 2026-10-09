@@ -31,7 +31,7 @@ func TestInitInjectsRuntimeIsolation(t *testing.T) {
 	cfg.HomeDir = home
 	cfg.ConfigDir = filepath.Join(home, "config")
 	cfg.TranscriptDir = filepath.Join(home, "transcripts")
-	cfg.DBPath = filepath.Join(home, "forge.db")
+	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeMemory
 	cfg.WorkspaceDir = ""     // 关闭代建（本测试不建会话）
 	cfg.ProcRegistryPath = "" // 不写进程注册表

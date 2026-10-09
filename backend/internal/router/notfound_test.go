@@ -99,7 +99,7 @@ func TestUnknownNonAPIPathEnvelopeWhenNoAssets(t *testing.T) {
 // TestUnknownAPIPathNeverFallsBack 有资产时 `/v1/*` 未注册路径**仍然**回信封 404。
 func TestUnknownAPIPathNeverFallsBack(t *testing.T) {
 	e := dirAssetsEngine(t)
-	req := httptest.NewRequest(http.MethodGet, "/v1/forge/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/mate/nope", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 

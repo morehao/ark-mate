@@ -21,8 +21,8 @@ import (
 // 与能力面（M6-4）同构的三条路径，只是目录形状不同：
 //
 //	装配期（sqlite 模式）自动导入一次：目录指纹进 `meta.imported_agents`，目录没变就跳过；
-//	`forge agent import`：显式重跑，每次按行判重（新丢进目录一个文件，跑一次就该进来）；
-//	`forge agent export`：把 DB 里的定义写回目录（文件从此是**导出物**，不再是事实源）。
+//	`mate agent import`：显式重跑，每次按行判重（新丢进目录一个文件，跑一次就该进来）；
+//	`mate agent export`：把 DB 里的定义写回目录（文件从此是**导出物**，不再是事实源）。
 //
 // 目录形状：`<AgentDir>/*.json`（**扁平**，与 `LoadAgentDefinitions` 的既有约定一致），
 // 其中两个文件**不是 agent 定义**、必须跳过：
@@ -51,7 +51,7 @@ type AgentImportStats struct {
 func ImportAgentDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (AgentImportStats, error) {
 	var stats AgentImportStats
 	if st == nil {
-		return stats, errors.New("manager: 导入 agent 定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导入 agent 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	dir = strings.TrimSpace(dir)
 	stats.Dir = dir
@@ -130,10 +130,10 @@ func importAgentDefaultSelection(ctx context.Context, st *store.Store, dir strin
 func ExportAgentDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
 	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
-		return stats, errors.New("manager: 导出 agent 定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导出 agent 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	if stats.Dir == "" {
-		return stats, errors.New("manager: 导出 agent 定义需要 AgentDir（--dir 或 FORGE_AGENTS）")
+		return stats, errors.New("manager: 导出 agent 定义需要 AgentDir（--dir 或 MATE_AGENTS）")
 	}
 	rows, err := st.ListAgentDefinitions(ctx)
 	if err != nil {
@@ -247,7 +247,7 @@ func agentReservedFile(base string) bool {
 // fingerprintFiles 目录指纹（文件名 + 大小，稳定序）——导入幂等标记。
 //
 // 与 `fingerprintCapabilityFiles` 同一套口径（只改内容不改大小的编辑可能漏判，后果只是"这次没
-// 自动导入"，显式 `forge agent import` 随时可补），但目录更扁平，所以直接收文件列表。
+// 自动导入"，显式 `mate agent import` 随时可补），但目录更扁平，所以直接收文件列表。
 func fingerprintFiles(files []string) string {
 	sorted := append([]string{}, files...)
 	sort.Strings(sorted)

@@ -22,7 +22,7 @@ import {
   toErrorMessage,
 } from '@ark/api'
 import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
@@ -66,9 +66,9 @@ interface ProviderFormValues {
 
 /** Agents 管理页（P2）：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除 + provider 注入面。 */
 export function AgentsPage() {
-  const agents = useForge((s) => s.agents)
-  const refreshAgents = useForge((s) => s.refreshAgents)
-  const showToast = useForge((s) => s.showToast)
+  const agents = useMate((s) => s.agents)
+  const refreshAgents = useMate((s) => s.refreshAgents)
+  const showToast = useMate((s) => s.showToast)
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -252,7 +252,7 @@ export function AgentsPage() {
     >
       {agents.length === 0 && (
         <div style={{ padding: 32, textAlign: 'center', color: tokens.textPlaceholder, fontSize: 13 }}>
-          暂无 Agent（服务不可达或未播种）。检查后端 forge serve 是否在运行。
+          暂无 Agent（服务不可达或未播种）。检查后端 mate serve 是否在运行。
         </div>
       )}
       {agents.map((a, i) => {

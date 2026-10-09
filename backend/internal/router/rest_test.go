@@ -687,14 +687,14 @@ func newRestEngine(deps router.Ports) *gin.Engine {
 // 领域层（语义判断全在 manager，handler 不做第二套）、body 非法回 40000、领域错误经 RestErr 映射。
 func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	snap := &dtoworkspace.WorkspaceSettingsResp{
-		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.forge/workspaces"},
-		Restricted: true, ProvisionDir: "/home/u/.forge/workspaces", ProvisionIncluded: true,
+		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.ark-mate/workspaces"},
+		Restricted: true, ProvisionDir: "/home/u/.ark-mate/workspaces", ProvisionIncluded: true,
 		Source: "config.json", Writable: true,
 	}
 	svc := &stubSvc{settingsResp: snap}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "GET", "/v1/forge/settings/workspace", "")
+	env, _ := do(t, r, "GET", "/v1/mate/settings/workspace", "")
 	if env.Code != 0 {
 		t.Fatalf("GET 应成功: %+v", env)
 	}
@@ -707,7 +707,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	}
 
 	// PUT：roots 原样下发（含空数组 = 恢复不限制），响应回更新后的快照。
-	env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":["/srv/docs"]}`)
+	env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":["/srv/docs"]}`)
 	if env.Code != 0 {
 		t.Fatalf("PUT 应成功: %+v", env)
 	}
@@ -715,23 +715,23 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 		t.Fatalf("roots 应原样下发: %+v", svc.settingsRoots)
 	}
 	svc.settingsCalled = false
-	if _, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":[]}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
+	if _, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":[]}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
 		t.Fatalf("空数组应下发空名单（= 不限制）: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
 	}
 	// 字段缺省与空数组同义：都是"取消限制"（白名单只有"画边界/不画边界"两种状态）。
 	svc.settingsCalled = false
-	if _, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
+	if _, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{}`); !svc.settingsCalled || len(svc.settingsRoots) != 0 {
 		t.Fatalf("缺省 roots 应下发空名单: called=%v roots=%+v", svc.settingsCalled, svc.settingsRoots)
 	}
 
 	// body 非法 → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
-	if env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{`); env.Code != 40000 {
+	if env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{`); env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000: %+v", env)
 	}
 
 	// 领域拒绝（锁定 / 只读 / 非法目录）经 RestErr 映射为业务码，且不吞掉语义码。
-	svc.settingsErr = gerror.Error{Code: 40001, Msg: "[settings_locked] 被 FORGE_WORKSPACE_ROOTS 锁定"}
-	env, _ = do(t, r, "PUT", "/v1/forge/settings/workspace", `{"roots":["/srv/docs"]}`)
+	svc.settingsErr = gerror.Error{Code: 40001, Msg: "[settings_locked] 被 MATE_WORKSPACE_ROOTS 锁定"}
+	env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":["/srv/docs"]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("领域错误应经 RestErr 透出: %+v", env)
 	}
@@ -772,7 +772,7 @@ func TestListEndpoints(t *testing.T) {
 	}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "GET", "/v1/forge/agents", "")
+	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
 	if env.Code != 0 || env.Msg != "success" {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
@@ -788,13 +788,13 @@ func TestListEndpoints(t *testing.T) {
 		t.Fatalf("seed 字段名不符: %s", env.Data)
 	}
 
-	env, _ = do(t, r, "GET", "/v1/forge/runtimes", "")
+	env, _ = do(t, r, "GET", "/v1/mate/runtimes", "")
 	var rts []dtoruntime.RuntimeResp
 	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 || rts[1].Name != "deepseekharness" {
 		t.Fatalf("runtimes data 不符: %s", env.Data)
 	}
 
-	env, _ = do(t, r, "GET", "/v1/forge/conversations", "")
+	env, _ = do(t, r, "GET", "/v1/mate/conversations", "")
 	var sess []dtoconversation.ConversationResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
 		t.Fatalf("conversations data 不符: %s", env.Data)
@@ -810,7 +810,7 @@ func TestListConversationsWorkspaceQuery(t *testing.T) {
 	}}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/conversations?cwd=/work/alpha", "")
+	env, code := do(t, r, "GET", "/v1/mate/conversations?cwd=/work/alpha", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
@@ -827,7 +827,7 @@ func TestListConversationsWorkspaceQuery(t *testing.T) {
 
 	// 未指定 cwd → 不过滤（空串透传）。
 	svc.listCwd = "sentinel"
-	if _, code := do(t, r, "GET", "/v1/forge/conversations", ""); code != 200 {
+	if _, code := do(t, r, "GET", "/v1/mate/conversations", ""); code != 200 {
 		t.Fatalf("无 cwd 应 200，got %d", code)
 	}
 	if svc.listCwd != "" {
@@ -835,7 +835,7 @@ func TestListConversationsWorkspaceQuery(t *testing.T) {
 	}
 
 	// 相对路径 → 40000（在 handler 层拦截，不进入 service）。
-	env, _ = do(t, r, "GET", "/v1/forge/conversations?cwd=relative/dir", "")
+	env, _ = do(t, r, "GET", "/v1/mate/conversations?cwd=relative/dir", "")
 	if env.Code != 40000 {
 		t.Fatalf("相对 cwd 应 40000，got %+v", env)
 	}
@@ -850,7 +850,7 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 	}}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "GET", "/v1/forge/agents", "")
+	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
 	var agents []dtoagent.AgentResp
 	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 {
 		t.Fatalf("agents data 不符: %s", env.Data)
@@ -862,7 +862,7 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 
 	svc.updateAgentResp = &dtoagent.AgentResp{ID: "pol", Name: "策略", State: "stopped",
 		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "allow"}}
-	env, code := do(t, r, "PATCH", "/v1/forge/agents/pol", `{"permission_policy":{"default":"allow"}}`)
+	env, code := do(t, r, "PATCH", "/v1/mate/agents/pol", `{"permission_policy":{"default":"allow"}}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH 失败: http=%d env=%+v", code, env)
 	}
@@ -871,7 +871,7 @@ func TestAgentPermissionPolicyRoute(t *testing.T) {
 	}
 	// 非法策略由 manager 返回 request 类错误 → 信封透传（HTTP 200 + code≠0）。
 	svc.updateAgentErr = gerror.Error{Code: 40001, Msg: `permission_policy.default: 动作 "sometimes" 非法`}
-	if env, code := do(t, r, "PATCH", "/v1/forge/agents/pol", `{"permission_policy":{"default":"sometimes"}}`); code != 200 || env.Code != 40001 {
+	if env, code := do(t, r, "PATCH", "/v1/mate/agents/pol", `{"permission_policy":{"default":"sometimes"}}`); code != 200 || env.Code != 40001 {
 		t.Fatalf("非法策略应 40001，got http=%d code=%d", code, env.Code)
 	}
 }
@@ -886,7 +886,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-stub&group_by=day", "")
+	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-stub&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
@@ -905,11 +905,11 @@ func TestUsageSummaryRoute(t *testing.T) {
 
 	// 业务错误（40001/40501）→ HTTP 200 + code≠0 透传。
 	svc.usageErr = gerror.Error{Code: 40001, Msg: `[invalid_usage_group_by] group_by 仅支持 agent|day："tool"`}
-	if env, code := do(t, r, "GET", "/v1/forge/usage/summary?group_by=tool", ""); code != 200 || env.Code != 40001 {
+	if env, code := do(t, r, "GET", "/v1/mate/usage/summary?group_by=tool", ""); code != 200 || env.Code != 40001 {
 		t.Fatalf("非法 group_by 应 40001: http=%d env=%+v", code, env)
 	}
 	svc.usageErr = gerror.Error{Code: 40501, Msg: "[usage_stats_unsupported] 内存模式无统计"}
-	if env, _ := do(t, r, "GET", "/v1/forge/usage/summary", ""); env.Code != 40501 {
+	if env, _ := do(t, r, "GET", "/v1/mate/usage/summary", ""); env.Code != 40501 {
 		t.Fatalf("内存模式应 40501: %+v", env)
 	}
 }
@@ -922,7 +922,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 func TestListFailure(t *testing.T) {
 	svc := &stubSvc{listAgentsErr: errors.New("boom")}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/forge/agents", "")
+	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
 	if env.Code != code.Internal {
 		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
 	}
@@ -935,7 +935,7 @@ func TestListFailure(t *testing.T) {
 func TestCreateConversation(t *testing.T) {
 	svc := &stubSvc{createResp: &dtoconversation.ConversationCreateResp{ID: "s-abc", AgentID: "agent-opencode", Status: "in_progress", EventSeq: 9}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -954,7 +954,7 @@ func TestCreateConversation(t *testing.T) {
 // TestCreateConversationBadBody 非 JSON 请求体 → code 40000（agent_id 现为可选，不再校验缺失）。
 func TestCreateConversationBadBody(t *testing.T) {
 	r := newRestEngine(stubDeps(&stubSvc{}))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations", `not-json{`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations", `not-json{`)
 	if env.Code != 40000 {
 		t.Fatalf("非 JSON 期望 40000，got %+v", env)
 	}
@@ -964,7 +964,7 @@ func TestCreateConversationBadBody(t *testing.T) {
 func TestCreateConversationOptionalAgent(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"prompt":"hi"}`)
 	if env.Code != 0 {
 		t.Fatalf("省略 agent_id 应被接受: %+v", env)
 	}
@@ -977,7 +977,7 @@ func TestCreateConversationOptionalAgent(t *testing.T) {
 func TestCreateConversationServiceError(t *testing.T) {
 	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "turn in progress"}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations", `{"agent_id":"a","prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"agent_id":"a","prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "turn in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
 	}
@@ -989,12 +989,12 @@ func TestPromptAndCancel(t *testing.T) {
 	r := newRestEngine(stubDeps(svc))
 
 	// prompt 缺 prompt → 40000。
-	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{}`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{}`)
 	if env.Code != 40000 {
 		t.Fatalf("prompt 缺参期望 40000，got %+v", env)
 	}
 	// 正常 prompt。
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{"prompt":"再来一轮"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{"prompt":"再来一轮"}`)
 	if env.Code != 0 || !svc.promptCalled || svc.promptID != "s1" || svc.promptText != "再来一轮" {
 		t.Fatalf("prompt 调用不符: called=%v id=%s env=%+v", svc.promptCalled, svc.promptID, env)
 	}
@@ -1007,12 +1007,12 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// §6 投递模式透传到 service（delivery 不是路由层的事，路由只负责别把它吃掉）。
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
 	if env.Code != 0 || svc.promptDelivery != "after_turn" {
 		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
 	}
 	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
-	env, _ = do(t, r, "GET", "/v1/forge/conversations/s1/inputs", "")
+	env, _ = do(t, r, "GET", "/v1/mate/conversations/s1/inputs", "")
 	if env.Code != 0 || !svc.inputsListed || svc.inputsListConv != "s1" {
 		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
 	}
@@ -1031,13 +1031,13 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。
-	env, _ = do(t, r, "DELETE", "/v1/forge/conversations/s1/inputs/in-9", "")
+	env, _ = do(t, r, "DELETE", "/v1/mate/conversations/s1/inputs/in-9", "")
 	if env.Code != 0 || !svc.inputDeleted || svc.inputDeleteID != "in-9" {
 		t.Fatalf("撤下排队输入不符: env=%+v deleted=%v id=%q", env, svc.inputDeleted, svc.inputDeleteID)
 	}
 
 	// cancel。
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/cancel", "")
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/cancel", "")
 	if env.Code != 0 || !svc.cancelCalled || svc.cancelID != "s1" {
 		t.Fatalf("cancel 调用不符: env=%+v called=%v", env, svc.cancelCalled)
 	}
@@ -1056,61 +1056,61 @@ func TestHistoryParamParsing(t *testing.T) {
 	r := newRestEngine(stubDeps(svc))
 
 	// 默认 after=0 limit=200。
-	do(t, r, "GET", "/v1/forge/conversations/s1/history", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history", "")
 	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyBefore != 0 || svc.historyLimit != 200 {
 		t.Fatalf("默认参数不符: %+v %d/%d %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
 	}
 
 	// 显式 after/limit。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/conversations/s1/history?after=7&limit=50", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history?after=7&limit=50", "")
 	if svc.historyAfter != 7 || svc.historyLimit != 50 {
 		t.Fatalf("显式参数不符: after=%d limit=%d", svc.historyAfter, svc.historyLimit)
 	}
 
 	// before 游标（C2：向前翻页）；after/before 同时给 → 40001（互斥）。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/conversations/s1/history?before=42&limit=5", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history?before=42&limit=5", "")
 	if svc.historyBefore != 42 || svc.historyAfter != 0 || svc.historyLimit != 5 || !svc.historyHasBefore {
 		t.Fatalf("before 参数不符: before=%d after=%d limit=%d has=%v", svc.historyBefore, svc.historyAfter, svc.historyLimit, svc.historyHasBefore)
 	}
 	// before=0 显式给出 = 取末尾一页（HasBefore 区分「未给 before」与「before=0」）。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/conversations/s1/history?before=0", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history?before=0", "")
 	if !svc.historyHasBefore || svc.historyBefore != 0 {
 		t.Fatalf("before=0 应置 HasBefore: %+v", svc)
 	}
 	svc.historyCalled = false
-	envBoth, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=1&before=2", "")
+	envBoth, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=1&before=2", "")
 	if envBoth.Code != 40001 {
 		t.Fatalf("after+before 期望 40001，got %+v", envBoth)
 	}
-	envBadBefore, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?before=-3", "")
+	envBadBefore, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?before=-3", "")
 	if envBadBefore.Code != 40000 {
 		t.Fatalf("负 before 期望 40000，got %+v", envBadBefore)
 	}
 
 	// limit 上限 1000 夹取。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/conversations/s1/history?limit=999999", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history?limit=999999", "")
 	if svc.historyLimit != 1000 {
 		t.Fatalf("limit 应夹到 1000，got %d", svc.historyLimit)
 	}
 
 	// limit=0 → 1。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/forge/conversations/s1/history?limit=0", "")
+	do(t, r, "GET", "/v1/mate/conversations/s1/history?limit=0", "")
 	if svc.historyLimit != 1 {
 		t.Fatalf("limit=0 应夹到 1，got %d", svc.historyLimit)
 	}
 
 	// 非法 after → 40000。
 	svc.historyCalled = false
-	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=-1", "")
+	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=-1", "")
 	if env.Code != 40000 {
 		t.Fatalf("负 after 期望 40000，got %+v", env)
 	}
-	env, _ = do(t, r, "GET", "/v1/forge/conversations/s1/history?after=abc", "")
+	env, _ = do(t, r, "GET", "/v1/mate/conversations/s1/history?after=abc", "")
 	if env.Code != 40000 {
 		t.Fatalf("非数字 after 期望 40000，got %+v", env)
 	}
@@ -1123,7 +1123,7 @@ func TestHistoryParamParsing(t *testing.T) {
 func TestHistorySuccess(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/history?after=1&limit=10", "")
+	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=1&limit=10", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1143,7 +1143,7 @@ func TestPermissionMemoriesList(t *testing.T) {
 		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
 	}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/permissions/memories", "")
+	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1160,7 +1160,7 @@ func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/permissions/memories/revoke",
+	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1169,7 +1169,7 @@ func TestRevokeMemory(t *testing.T) {
 		t.Fatalf("撤销单条透传不符: %+v", svc)
 	}
 
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/permissions/memories/revoke", `{}`)
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/permissions/memories/revoke", `{}`)
 	if env.Code != 0 {
 		t.Fatalf("一键撤销信封不符: %+v", env)
 	}
@@ -1186,7 +1186,7 @@ func TestElicitationList(t *testing.T) {
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/forge/conversations/s1/elicitations", "")
+	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/elicitations", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1200,7 +1200,7 @@ func TestElicitationList(t *testing.T) {
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/elicitation",
+	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1214,11 +1214,11 @@ func TestResolveElicitation(t *testing.T) {
 func TestResolveElicitationBadBody(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/forge/conversations/s1/elicitation", `{"action":"accept"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/elicitation", `{"action":"accept"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 elicitation_id 应 40000: %+v", env)
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/elicitation", `{"elicitation_id":"el-abc"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/elicitation", `{"elicitation_id":"el-abc"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 action 应 40000: %+v", env)
 	}
@@ -1229,24 +1229,24 @@ func TestAgentManagementRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "POST", "/v1/forge/agents", `{"id":"alias-stub","name":"别名stub","runtimes":["stub"]}`)
+	env, code := do(t, r, "POST", "/v1/mate/agents", `{"id":"alias-stub","name":"别名stub","runtimes":["stub"]}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/start", "")
+	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/start", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-stub" {
 		t.Fatalf("start 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/stop", "")
+	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/stop", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-stub" {
 		t.Fatalf("stop 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
-	env, code = do(t, r, "PATCH", "/v1/forge/agents/alias-stub", `{"name":"别名stub v2"}`)
+	env, code = do(t, r, "PATCH", "/v1/mate/agents/alias-stub", `{"name":"别名stub v2"}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
 	}
 	// 切换「当前 Agent」：路径参数透传到服务并回带 is_default 表示。
-	env, code = do(t, r, "POST", "/v1/forge/agents/alias-stub/default", "")
+	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/default", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-stub" {
 		t.Fatalf("set default 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
@@ -1254,7 +1254,7 @@ func TestAgentManagementRoutes(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-stub" || !def.IsDefault {
 		t.Fatalf("set default 载荷不符: %s", env.Data)
 	}
-	env, code = do(t, r, "DELETE", "/v1/forge/agents/alias-stub", "")
+	env, code = do(t, r, "DELETE", "/v1/mate/agents/alias-stub", "")
 	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-stub" {
 		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
 	}
@@ -1270,11 +1270,11 @@ func TestAgentManagementRoutes(t *testing.T) {
 func TestProviderRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, code := do(t, r, "PATCH", "/v1/forge/providers/default", `{"type":"openai","model":"gpt-4o","key":"sk-x"}`)
+	env, code := do(t, r, "PATCH", "/v1/mate/providers/default", `{"type":"openai","model":"gpt-4o","key":"sk-x"}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH provider 失败 code=%d env=%d", code, env.Code)
 	}
-	env, code = do(t, r, "GET", "/v1/forge/providers", "")
+	env, code = do(t, r, "GET", "/v1/mate/providers", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET providers 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1289,7 +1289,7 @@ func TestCapabilityRoutes(t *testing.T) {
 	}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/skills", "")
+	env, code := do(t, r, "GET", "/v1/mate/skills", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET skills 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1298,7 +1298,7 @@ func TestCapabilityRoutes(t *testing.T) {
 		t.Fatalf("skills data 不符: %s", env.Data)
 	}
 
-	env, code = do(t, r, "GET", "/v1/forge/mcps", "")
+	env, code = do(t, r, "GET", "/v1/mate/mcps", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET mcps 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1307,7 +1307,7 @@ func TestCapabilityRoutes(t *testing.T) {
 		t.Fatalf("mcps data 不符: %s", env.Data)
 	}
 
-	env, code = do(t, r, "GET", "/v1/forge/tools", "")
+	env, code = do(t, r, "GET", "/v1/mate/tools", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET tools 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1323,7 +1323,7 @@ func TestSkillToggleRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":false}`)
+	env, code := do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":false}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("PATCH skill 失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
@@ -1336,13 +1336,13 @@ func TestSkillToggleRoute(t *testing.T) {
 	}
 
 	// 启用方向也要通（同一个 handler，方向由入参决定）。
-	env, code = do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":true}`)
+	env, code = do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":true}`)
 	if code != 200 || env.Code != 0 || !svc.skillToggleEnabled {
 		t.Fatalf("PATCH enable 失败 code=%d env=%d", code, env.Code)
 	}
 
 	// 坏入参：控制器绑定失败 → 40000。
-	env, code = do(t, r, "PATCH", "/v1/forge/skills/plan", `{"enabled":`)
+	env, code = do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":`)
 	if code != 200 || env.Code != 40000 {
 		t.Fatalf("坏入参应 40000，code=%d env=%d", code, env.Code)
 	}
@@ -1354,7 +1354,7 @@ func TestSkillMaterializationRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/skills/plan/materialization", "")
+	env, code := do(t, r, "GET", "/v1/mate/skills/plan/materialization", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET materialization 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1390,7 +1390,7 @@ func TestAgentCapabilitiesRoute(t *testing.T) {
 	}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/agents/a1/capabilities", "")
+	env, code := do(t, r, "GET", "/v1/mate/agents/a1/capabilities", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET agent capabilities 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1410,7 +1410,7 @@ func TestAgentCapabilitiesRoute(t *testing.T) {
 
 	// 未知 agent：Service 返回 40401 → 信封透传（HTTP 200 + code≠0）。
 	svc.agentCapErr = gerror.Error{Code: 40401, Msg: `未知 agent "nope"`}
-	env, code = do(t, r, "GET", "/v1/forge/agents/nope/capabilities", "")
+	env, code = do(t, r, "GET", "/v1/mate/agents/nope/capabilities", "")
 	if code != 200 || env.Code != 40401 {
 		t.Fatalf("未知 agent 应 40401，got http=%d code=%d", code, env.Code)
 	}
@@ -1428,7 +1428,7 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "POST", "/v1/forge/mcps/fs/probe", "")
+	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/probe", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("POST probe 失败 code=%d env=%d", code, env.Code)
 	}
@@ -1444,11 +1444,11 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	}
 
 	svc.probeErr = gerror.Error{Code: 40401, Msg: `未知 MCP server "nope"`}
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/nope/probe", ""); code != 200 || env.Code != 40401 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/nope/probe", ""); code != 200 || env.Code != 40401 {
 		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
 	}
 	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP 未知传输（不臆造）"}
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/weird1/probe", ""); code != 200 || env.Code != 40501 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/weird1/probe", ""); code != 200 || env.Code != 40501 {
 		t.Fatalf("未知传输应 40501，got http=%d code=%d", code, env.Code)
 	}
 }
@@ -1464,19 +1464,19 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 		err    error
 		code   int
 	}{
-		{"delete_seed", "DELETE", "/v1/forge/agents/dsh", "",
+		{"delete_seed", "DELETE", "/v1/mate/agents/dsh", "",
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
-		{"delete_unknown", "DELETE", "/v1/forge/agents/nope", "",
+		{"delete_unknown", "DELETE", "/v1/mate/agents/nope", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"update_seed_runtime", "PATCH", "/v1/forge/agents/dsh", `{"runtimes":["stub"]}`,
+		{"update_seed_runtime", "PATCH", "/v1/mate/agents/dsh", `{"runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 runtime 只读", nil), 40001},
-		{"create_reserved", "POST", "/v1/forge/agents", `{"id":"agent-x","runtimes":["stub"]}`,
+		{"create_reserved", "POST", "/v1/mate/agents", `{"id":"agent-x","runtimes":["stub"]}`,
 			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
-		{"start_unknown", "POST", "/v1/forge/agents/nope/start", "",
+		{"start_unknown", "POST", "/v1/mate/agents/nope/start", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"stop_busy", "POST", "/v1/forge/agents/dsh/stop", "",
+		{"stop_busy", "POST", "/v1/mate/agents/dsh/stop", "",
 			acl.NewError(acl.ClassLimit, "agent_busy", "有在途 turn", nil), 40901},
-		{"start_unavailable", "POST", "/v1/forge/agents/dsh/start", "",
+		{"start_unavailable", "POST", "/v1/mate/agents/dsh/start", "",
 			acl.NewError(acl.ClassUnsupported, "runtime_unavailable", "命令不可执行", nil), 40501},
 	}
 	for _, tc := range cases {
@@ -1495,7 +1495,7 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 	// 已映射错误不得被二次映射（restErr 幂等）。
 	svc := &stubSvc{agentErr: gerror.Error{Code: 40001, Msg: "已映射"}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "DELETE", "/v1/forge/agents/nope", "")
+	env, _ := do(t, r, "DELETE", "/v1/mate/agents/nope", "")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
 	}
@@ -1510,7 +1510,7 @@ func TestMessageSearchRoute(t *testing.T) {
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, http := do(t, r, "GET", "/v1/forge/search/messages?q=502&limit=5", "")
+	env, http := do(t, r, "GET", "/v1/mate/search/messages?q=502&limit=5", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
@@ -1522,17 +1522,17 @@ func TestMessageSearchRoute(t *testing.T) {
 	}
 
 	// 缺 q → 40001（HTTP 200 + 信封非 0）。
-	env, http = do(t, r, "GET", "/v1/forge/search/messages", "")
+	env, http = do(t, r, "GET", "/v1/mate/search/messages", "")
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_query") {
 		t.Fatalf("缺 q 校验不符: http=%d %+v", http, env)
 	}
 	// 非法 limit → 40001。
-	env, http = do(t, r, "GET", "/v1/forge/search/messages?q=a&limit=abc", "")
+	env, http = do(t, r, "GET", "/v1/mate/search/messages?q=a&limit=abc", "")
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_search_limit") {
 		t.Fatalf("limit 校验不符: http=%d %+v", http, env)
 	}
 	// 默认 limit=30。
-	_, _ = do(t, r, "GET", "/v1/forge/search/messages?q=a", "")
+	_, _ = do(t, r, "GET", "/v1/mate/search/messages?q=a", "")
 	if svc.searchMsgLimit != 30 {
 		t.Fatalf("默认 limit 应为 30: %d", svc.searchMsgLimit)
 	}
@@ -1546,7 +1546,7 @@ func TestExportRoute(t *testing.T) {
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, http := do(t, r, "POST", "/v1/forge/conversations/export", `{"ids":["c-1"],"format":"markdown"}`)
+	env, http := do(t, r, "POST", "/v1/mate/conversations/export", `{"ids":["c-1"],"format":"markdown"}`)
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
@@ -1558,14 +1558,14 @@ func TestExportRoute(t *testing.T) {
 	}
 
 	// 缺 ids → 40000（参数绑定失败）。
-	env, http = do(t, r, "POST", "/v1/forge/conversations/export", `{"format":"text"}`)
+	env, http = do(t, r, "POST", "/v1/mate/conversations/export", `{"format":"text"}`)
 	if http != 200 || env.Code != 40000 {
 		t.Fatalf("缺 ids 校验不符: http=%d %+v", http, env)
 	}
 	// 服务错误映射（40001 非法格式）。
 	svc2 := &stubSvc{exportErr: gerror.Error{Code: 40001, Msg: "不支持的导出格式 [invalid_export_format]"}}
 	r2 := newRestEngine(stubDeps(svc2))
-	env, http = do(t, r2, "POST", "/v1/forge/conversations/export", `{"ids":["c-1"],"format":"pdf"}`)
+	env, http = do(t, r2, "POST", "/v1/mate/conversations/export", `{"ids":["c-1"],"format":"pdf"}`)
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_export_format") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
@@ -1581,7 +1581,7 @@ func TestAgentDiagnosticsRoute(t *testing.T) {
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, http := do(t, r, "GET", "/v1/forge/agents/a1/diagnostics", "")
+	env, http := do(t, r, "GET", "/v1/mate/agents/a1/diagnostics", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
@@ -1598,7 +1598,7 @@ func TestAgentDiagnosticsRoute(t *testing.T) {
 	// 未知 agent → 40401（handler 经 svc.RestErr 映射）。
 	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil)}
 	r2 := newRestEngine(stubDeps(svc2))
-	env, http = do(t, r2, "GET", "/v1/forge/agents/nope/diagnostics", "")
+	env, http = do(t, r2, "GET", "/v1/mate/agents/nope/diagnostics", "")
 	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "未知 agent") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
@@ -1611,7 +1611,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 	r := newRestEngine(stubDeps(svc))
 
 	body := `{"arguments":{"path":"/tmp/a"},"timeout_ms":1500}`
-	env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/read_file/call", body)
+	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call", body)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("POST call 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
@@ -1631,7 +1631,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 
 	// 空 body = 无参数调用（不应报参数错误）。
 	svc.callMcpReq = dtocapability.McpToolCallReq{}
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/t/call", ""); code != 200 || env.Code != 0 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/t/call", ""); code != 200 || env.Code != 0 {
 		t.Fatalf("空 body 应放行，got http=%d code=%d", code, env.Code)
 	}
 	if len(svc.callMcpReq.Arguments) != 0 || svc.callMcpReq.TimeoutMS != 0 {
@@ -1639,7 +1639,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 	}
 
 	// 非法 JSON body → 40000（参数错误）。
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/tools/t/call", "{oops"); code != 200 || env.Code != 40000 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/t/call", "{oops"); code != 200 || env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
 	}
 
@@ -1648,7 +1648,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 		ServerID: "fs", Tool: "read_file", IsError: true,
 		Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"权限不足"}`)}, Text: "权限不足",
 	}
-	env, _ = do(t, r, "POST", "/v1/forge/mcps/fs/tools/read_file/call", "")
+	env, _ = do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call", "")
 	var failed dtocapability.McpToolCallResp
 	_ = json.Unmarshal(env.Data, &failed)
 	if env.Code != 0 || !failed.IsError {
@@ -1666,7 +1666,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 		{gerror.Error{Code: 40901, Msg: "[mcp_timeout] tools/call 失败"}, 40901},
 	} {
 		svc.callMcpErr = tc.err
-		if env, code := do(t, r, "POST", "/v1/forge/mcps/x/tools/t/call", ""); code != 200 || env.Code != tc.want {
+		if env, code := do(t, r, "POST", "/v1/mate/mcps/x/tools/t/call", ""); code != 200 || env.Code != tc.want {
 			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
 		}
 	}
@@ -1677,7 +1677,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/forge/mcps/fs/resources", "")
+	env, code := do(t, r, "GET", "/v1/mate/mcps/fs/resources", "")
 	if code != 200 || env.Code != 0 || svc.mcpLiveID != "fs" {
 		t.Fatalf("GET resources 失败 http=%d code=%d id=%q", code, env.Code, svc.mcpLiveID)
 	}
@@ -1687,7 +1687,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		t.Fatalf("资源结果不符: %+v", res)
 	}
 
-	env, code = do(t, r, "POST", "/v1/forge/mcps/fs/resources/read", `{"uri":"file:///tmp/a.txt"}`)
+	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/resources/read", `{"uri":"file:///tmp/a.txt"}`)
 	if code != 200 || env.Code != 0 || svc.mcpLiveURI != "file:///tmp/a.txt" {
 		t.Fatalf("POST resources/read 失败 http=%d code=%d uri=%q", code, env.Code, svc.mcpLiveURI)
 	}
@@ -1697,11 +1697,11 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		t.Fatalf("读取结果不符: %+v", rd)
 	}
 	// 缺 uri → 桩返回空（真实实现报 40001）；非法 JSON → 40000。
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/resources/read", "{oops"); code != 200 || env.Code != 40000 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/resources/read", "{oops"); code != 200 || env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
 	}
 
-	env, code = do(t, r, "GET", "/v1/forge/mcps/fs/prompts", "")
+	env, code = do(t, r, "GET", "/v1/mate/mcps/fs/prompts", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET prompts 失败 http=%d code=%d", code, env.Code)
 	}
@@ -1711,7 +1711,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		t.Fatalf("提示词列表不符: %+v", ps)
 	}
 
-	env, code = do(t, r, "POST", "/v1/forge/mcps/fs/prompts/greet/get", `{"arguments":{"who":"世界"}}`)
+	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/prompts/greet/get", `{"arguments":{"who":"世界"}}`)
 	if code != 200 || env.Code != 0 || svc.mcpLiveName != "greet" || svc.mcpLiveArgs["who"] != "世界" {
 		t.Fatalf("POST prompts/get 失败 http=%d code=%d name=%q args=%v", code, env.Code, svc.mcpLiveName, svc.mcpLiveArgs)
 	}
@@ -1722,7 +1722,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 	}
 	// 空 body = 无参数取用。
 	svc.mcpLiveArgs = map[string]string{"x": "y"}
-	if env, code := do(t, r, "POST", "/v1/forge/mcps/fs/prompts/greet/get", ""); code != 200 || env.Code != 0 || len(svc.mcpLiveArgs) != 0 {
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/prompts/greet/get", ""); code != 200 || env.Code != 0 || len(svc.mcpLiveArgs) != 0 {
 		t.Fatalf("空 body 应零值，got http=%d code=%d args=%v", code, env.Code, svc.mcpLiveArgs)
 	}
 
@@ -1732,9 +1732,9 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 		want int
 		path string
 	}{
-		{gerror.Error{Code: 40401, Msg: "未知 MCP server"}, 40401, "/v1/forge/mcps/nope/resources"},
-		{gerror.Error{Code: 40501, Msg: "未知传输"}, 40501, "/v1/forge/mcps/s/prompts"},
-		{gerror.Error{Code: 50201, Msg: "[mcp_resource_read_failed] x"}, 50201, "/v1/forge/mcps/fs/resources"},
+		{gerror.Error{Code: 40401, Msg: "未知 MCP server"}, 40401, "/v1/mate/mcps/nope/resources"},
+		{gerror.Error{Code: 40501, Msg: "未知传输"}, 40501, "/v1/mate/mcps/s/prompts"},
+		{gerror.Error{Code: 50201, Msg: "[mcp_resource_read_failed] x"}, 50201, "/v1/mate/mcps/fs/resources"},
 	} {
 		svc.mcpLiveErr = tc.err
 		if env, code := do(t, r, "GET", tc.path, ""); code != 200 || env.Code != tc.want {
@@ -1749,7 +1749,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 func TestResolvePermissionReceiptShape(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, code := do(t, r, "POST", "/v1/forge/conversations/s1/permission",
+	env, code := do(t, r, "POST", "/v1/mate/conversations/s1/permission",
 		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("决策信封不符: code=%d env=%+v", code, env)
@@ -1768,7 +1768,7 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 		}
 	}
 	// 拒绝决策：rejected=true、allowed=false（不再出现「allowed:false 但语义是拒绝」的含糊回执）。
-	env, _ = do(t, r, "POST", "/v1/forge/conversations/s1/permission",
+	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/permission",
 		`{"call_id":"tc2","option_id":"reject_once","allowed":false}`)
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("拒绝回执解析失败: %v", err)
@@ -1798,7 +1798,7 @@ func TestLibraryRouteShape(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, httpCode := do(t, r, "GET", "/v1/forge/library?kind=skill&q=dem", "")
+	env, httpCode := do(t, r, "GET", "/v1/mate/library?kind=skill&q=dem", "")
 	if httpCode != 200 || env.Code != 0 {
 		t.Fatalf("GET /library 应成功: http=%d env=%+v", httpCode, env)
 	}
@@ -1818,7 +1818,7 @@ func TestLibraryRouteShape(t *testing.T) {
 
 	// 未知 kind 的**校验在领域层**（控制器只透传 query），这里验证领域错误经信封落成 40000。
 	svc.capErr = code.Error(code.InvalidParam, "未知 kind \"command\"")
-	env, httpCode = do(t, r, "GET", "/v1/forge/library?kind=command", "")
+	env, httpCode = do(t, r, "GET", "/v1/mate/library?kind=command", "")
 	if httpCode != 200 || env.Code != code.InvalidParam {
 		t.Fatalf("领域层拒绝应落成 40000: http=%d env=%+v", httpCode, env)
 	}

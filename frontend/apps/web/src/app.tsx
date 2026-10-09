@@ -4,7 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { tokens } from '@ark/ui'
 import { consoleStyleSheet } from './console.css'
 import { TopBar } from './components/TopBar'
-import { useForge } from './store'
+import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { AutomationsPage } from './pages/AutomationsPage'
@@ -23,12 +23,12 @@ function Manage({ children }: { children: ReactNode }) {
 export function App() {
   // 启动一次：常驻 WS 连接 + 拉取 agents/conversations（跨路由共享一份状态）
   useEffect(() => {
-    useForge.getState().boot()
+    useMate.getState().boot()
   }, [])
 
-  const wsState = useForge((s) => s.wsState)
-  const carrierError = useForge((s) => s.carrierError)
-  const toast = useForge((s) => s.toast)
+  const wsState = useMate((s) => s.wsState)
+  const carrierError = useMate((s) => s.carrierError)
+  const toast = useMate((s) => s.toast)
 
   return (
     <div

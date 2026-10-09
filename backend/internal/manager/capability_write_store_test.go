@@ -21,7 +21,7 @@ import (
 // 的断言，证明文件载体零回归）；本文件补的是 DB 载体独有的那几条：行与其 revision、审计、
 // CAS 拒绝、以及"闸门拒绝时零写入"。
 
-// storeCapRig sqlite 模式的能力写面夹具：**不配 FORGE_CAPABILITIES 目录**（DB 模式不需要），
+// storeCapRig sqlite 模式的能力写面夹具：**不配 MATE_CAPABILITIES 目录**（DB 模式不需要），
 // 登记一处物化目标（启停/写入后应立刻重校）。
 func storeCapRig(t *testing.T) (*rig, string) {
 	t.Helper()
@@ -373,7 +373,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	}
 }
 
-// TestStoreWriteFaceRequiresNoCapabilityDir DB 模式**不需要** FORGE_CAPABILITIES 目录。
+// TestStoreWriteFaceRequiresNoCapabilityDir DB 模式**不需要** MATE_CAPABILITIES 目录。
 //
 // 这条是 M6-3 的语义变化：memory 模式下没目录就只能内存生效（报 `capability_dir_unset`），
 // DB 模式下定义存在行里，目录只是可选的导入/导出位置。

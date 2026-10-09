@@ -3,7 +3,7 @@ import { Button, Checkbox, Input, InputNumber, Popover, Radio } from 'antd'
 import { CheckOutlined, CloseOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark/ui'
 import type { ElicitationFieldSchema, PermissionOption, StreamEntry } from '@ark/types'
-import { useForge, type PermissionDecision } from '../store'
+import { useMate, type PermissionDecision } from '../store'
 import { copyText } from '../console/clipboard'
 import { parseMsg } from '../console/message'
 import { runStatRows, type RunUsageInfo } from '../console/usageView'
@@ -56,7 +56,7 @@ function decisionFor(opt: PermissionOption): PermissionDecision {
 
 /** 权限确认卡（ACP session/request_permission → 用户点选经 REST 回传）。 */
 function PermissionCard({ e }: { e: StreamEntry }) {
-  const respond = useForge((s) => s.respondPermission)
+  const respond = useMate((s) => s.respondPermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
   // 兜底「拒绝」在 agent 提供 deny 选项时自动带选首个（拒绝与取消/超时保持可区分）。
@@ -195,9 +195,9 @@ function summarizeContent(schema: StreamEntry['schema'], content?: Record<string
 
 /** 结构化提问卡（ACP elicitation/create → schema 渲染表单 / 引导链接 → 用户提交经 REST 回传）。 */
 function ElicitationCard({ e }: { e: StreamEntry }) {
-  const respond = useForge((s) => s.respondElicitation)
+  const respond = useMate((s) => s.respondElicitation)
   const resolved = e.resolved ?? false
-  const busy = useForge((s) => {
+  const busy = useMate((s) => {
     const v = s.activeId ? s.views[s.activeId] : undefined
     return v?.streaming ?? false
   })
@@ -475,7 +475,7 @@ function ElicitationField({
 
 /** 消息头右侧的「复制整条消息」小按钮（Clipboard API + execCommand 兜底）。 */
 function MsgCopy({ text }: { text: string }) {
-  const toast = useForge((s) => s.showToast)
+  const toast = useMate((s) => s.showToast)
   return (
     <Button
       type="text"
@@ -495,7 +495,7 @@ function MsgCopy({ text }: { text: string }) {
 
 /** 围栏代码块：mono 卡片 + 语言/行数 + 一键复制 + 长块折叠。 */
 function CodeBlock({ lang, text }: { lang?: string; text: string }) {
-  const toast = useForge((s) => s.showToast)
+  const toast = useMate((s) => s.showToast)
   const code = text
   const lines = code.split('\n').length
   const long = code.length > 700 || lines > 22

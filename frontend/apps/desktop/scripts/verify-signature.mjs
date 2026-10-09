@@ -149,7 +149,7 @@ function extractAppFromTarball() {
     ? readdirSync(RELEASE_DIR).find((f) => f.endsWith('.tar.gz'))
     : undefined
   if (!tarball) throw new Error(`release/ 下没有 .tar.gz（先跑 make desktop/dist）：${RELEASE_DIR}`)
-  const dir = mkdtempSync(join(tmpdir(), 'forge-verify-signature-'))
+  const dir = mkdtempSync(join(tmpdir(), 'mate-verify-signature-'))
   const untar = run('tar', ['-xzf', join(RELEASE_DIR, tarball), '-C', dir])
   if (untar.status !== 0) throw new Error(`解 ${tarball} 失败：${untar.stderr.split('\n')[0]}`)
   const app = readdirSync(dir).find((n) => n.endsWith('.app'))

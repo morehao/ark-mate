@@ -110,7 +110,7 @@ ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 
 参考时的**立场**（避免照抄成一个桌面 IDE）：
 
-- ark-mate 交付的是**自托管 daemon（`./forge` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
+- ark-mate 交付的是**自托管 daemon（`./mate` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
   特性属于**应用层体验**，ark-mate 默认不做；当前定位为**单机单操作员**（决策 v3③），不保留
   「面向 Web 多用户/多租户」的能力位。
 - codeg 桌面经 Tauri 事件通道直连内核、服务端经 WebSocket；ark-mate 采纳同款形态：**REST 命令 +
@@ -123,7 +123,7 @@ ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 ### 1.1 ark-mate（本仓）
 
 - **已就位**：monorepo 骨架（backend/ 单 Go module + frontend/ pnpm workspace）；`server` 层可冒烟起服：
-  gin 版本化路由（`/v1/forge/{health,agents,sessions,runtimes}`）、`handler.Service` 抽象 + `mockService`
+  gin 版本化路由（`/v1/mate/{health,agents,sessions,runtimes}`）、`handler.Service` 抽象 + `mockService`
   占位、`eventbus`（全局 seq + history 回放 + `after` 续传）。**实时通道为 WS（M0 落地）**；脚手架期的
   SSE 端点/适配器已按决策 v2① 移除。
 - **空壳**：`internal/acl`（ACP Host 层）、`internal/runtime`（runtime adapter）、`internal/manager`（生命周期）、
@@ -309,13 +309,13 @@ type Session interface {
   [issue #24494](https://github.com/anomalyco/opencode/issues/24494)）。指定可用模型须走启动环境：
   `export OPENCODE_MODEL=yygu-v2/deepseek-v4-flash`（并在 opencode.json 配 `"model":"{env:OPENCODE_MODEL}"` 引用）。
   单机单 operator 下与 dsh 的 `DEEPSEEK_API_KEY` 透传同模式；
-- **单轮 turn 看门狗**：`FORGE_TURN_TIMEOUT`（serve 亦支持 `--turn-timeout`，Go duration，0=关闭，
+- **单轮 turn 看门狗**：`MATE_TURN_TIMEOUT`（serve 亦支持 `--turn-timeout`，Go duration，0=关闭，
   默认关）——turn 超时自动 cancel（复用有界取消路径）并发终态事件，兜住「吞错挂起 → busy 永久占用」，
   前端配合「服务端忙水位 + 停止按钮」即可自愈。
 
 ### 4.4 REST API 契约（M1 冻结面）
 
-沿用 `gincontext.Success/Fail`（`{code,requestID,msg,data}`）与路由前缀 `/v1/forge`：
+沿用 `gincontext.Success/Fail`（`{code,requestID,msg,data}`）与路由前缀 `/v1/mate`：
 
 | 方法 | 路径 | 用途 | M 归属 |
 |---|---|---|---|
@@ -348,7 +348,7 @@ type Session interface {
 { "type": "<事件type>", "seq": n, "agg_id": "s1|r1", "version": n, "payload": {...} }
 ```
 
-**端点 `/v1/forge/ws/events`（M0 起可用；单操作员默认无鉴权，决策 v3③）**：
+**端点 `/v1/mate/ws/events`（M0 起可用；单操作员默认无鉴权，决策 v3③）**：
 - 一条 WS 承载「订阅控制 + 事件推送」，客户端帧与服务端帧按顶层 `action`/`type` 判别：
   - 客户端 → 服务端：`{action:"attach", agg_id, since_seq?}` / `{action:"detach", agg_id}` /
     `{action:"ping"}`；可同时 attach 多个聚合（会话/运行）。
@@ -360,7 +360,7 @@ type Session interface {
 - 心跳：WS 协议层 ping/pong（30s）；应用层编排帧 `server.connected`（连接建立）/`server.instance.disposed`
   （daemon 关闭）各推一次，供客户端感知。
 - 鉴权：默认无（单操作员，本机监听）；若确需对外暴露，再按「单操作员 token」最小实现评估——token 经 WS
-  子协议（`forge-token.{b64url}`，浏览器可用）或首帧 auth，REST 走 header（协议位仅为该场景预留）。
+  子协议（`mate-token.{b64url}`，浏览器可用）或首帧 auth，REST 走 header（协议位仅为该场景预留）。
 - **刻意不做**（相对 codeg 传输层）：多路复用/逐订阅 forwarder、多通道并存——一条 WS 即一个面板实例的
   全部实时面；事件按 `agg_id` 路由到会话视图、按 `seq` 幂等去重（前端只前进不回退）。
 
@@ -538,7 +538,7 @@ apps/panel/src/
   WebSocket `/ws/events`**；浏览器握手不能自定义头，token 经子协议 `codeg-token.{base64url}`。
   → ark-mate **采纳同一形态**：REST 命令 + WS 事件推送，WS 为唯一实时通道（决策 v2①，§4.5/§4.6）。
   子协议方案在 ark-mate 若需对外暴露（单操作员 token，决策 v3③）时复用
-  （`forge-token.{b64url}`，浏览器与非浏览器一致）。
+  （`mate-token.{b64url}`，浏览器与非浏览器一致）。
 - codeg 教训一：早期全局 JSON 广播迫使前端做 receiver 去重与「未映射事件缓冲」，后来改为
   **per-connection attach**。→ ark-mate 的事件必须携带 `session_id/agent_id` 供前端按会话过滤，并把
   「续传口径」做成 first-class（快照/重放二分，见下），否则会重演去重噩梦。
@@ -632,7 +632,7 @@ apps/panel/src/
 | 自定义 agent 注册（custom_registry + 预检 initialize + 能力冻结） | 采用（Agent 定义 CRUD + 校验向导） | M2 | 「不写代码接入新 runtime」是平台定位核心卖点 |
 | model_provider 配置 | 采用注入面（env 模板替身注入 agent 子进程） | M2 | harness 的 DEEPSEEK_API_KEY 即用例 |
 | @协作 delegation（broker/spawner/独立子 ACP 会话 + one-shot/resume + 级联 cancel + 深度限制） | **不做（决策 v2②）**：当前定位无跨 agent 协作，一次运行只指定一个 runtime；该机制在定位扩展前不进路线。其在「CAS/事件同事务/异步跟踪」上的纪律已由 §5.1 吸收 | — | 定位约束；避免为「平台卖点」提前堆协作复杂度 |
-| 任务板 todo→…→review→merge（worktree 隔离 + git truth 校验） | P1 候选：服务端 repo 副本/分支隔离 + 产物 diff 展示 + 人工采纳（review 门保留）；每次运行仍单 runtime 指定；merge 自动合入延后 | P1 | worktree 模型天然适配服务端沙箱；远端 forge 集成成本高 |
+| 任务板 todo→…→review→merge（worktree 隔离 + git truth 校验） | P1 候选：服务端 repo 副本/分支隔离 + 产物 diff 展示 + 人工采纳（review 门保留）；每次运行仍单 runtime 指定；merge 自动合入延后 | P1 | worktree 模型天然适配服务端沙箱；远端 mate 集成成本高 |
 | automation（composer 快照重放 + cron/on-demand + LaunchSession/EnqueueTask） | P1 候选，与任务板同期；动作只留 LaunchSession（单 runtime 会话） | P1 | 纯服务端逻辑可搬 |
 | chat channel / 远程驱动（webhook/IM bridge） | **不做（决策 v3③）**：多人/远程协作语义不在当前定位，接口不留排期位 | — | 无多用户场景则无远程驱动价值；定位扩展前不进路线 |
 | 编辑器/终端/文件树/Split View/canvas 桌面体验 | **不做**；Web 只做只读文件树 + 变更 diff 页帮用户验收 | — | 桌面专属；编辑归 agent/外部 IDE |
@@ -717,7 +717,7 @@ opencode/harness 两形状）。
   （或 daemon 重启）先推整包 `snapshot` 再推增量，否则回放 + live（对齐 §5.2 的 attach 协议）；eventbus
   history 增加 per-aggregate 条数/字节双上限，超限淘汰并把「该聚合已不可增量续传」记为快照回退信号。
   事件必须携带 `session_id/agent_id`（现 agg_id 已含），前端按会话过滤而非全量消费。鉴权：默认无
-  （决策 v3③，单操作员）；若对外暴露，WS 子协议 `forge-token.{b64url}`、REST 走 header（单操作员 token）。
+  （决策 v3③，单操作员）；若对外暴露，WS 子协议 `mate-token.{b64url}`、REST 走 header（单操作员 token）。
 - §4.8 前端：会话运行时采用**双层结构**（连接/活状态层 + 时间线渲染层分离，按最小 slice 订阅）与
   **批量 flush**（高频 delta 16ms/攒批一次进 reducer）、seq 幂等去重（`seq <= lastAppliedSeq` 丢弃、
   游标只前进）——面板流式渲染不卡的纪律，见 §5.2。
@@ -744,7 +744,7 @@ opencode/harness 两形状）。
 
 | AionUi 数据管理面形态（证据） | ark-mate 落点 |
 |---|---|
-| 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | **已落地（轻量化）**：ACP `session/request_permission` → `session.permission_request` 事件（options 透传）+ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝（默认 30min，`FORGE_PERMISSION_TIMEOUT`）。详见 §5.8.1 |
+| 权限 = 独立 confirm 通道：permission 消息（call_id/options）+ confirm REST（always_allow）+ approvals/check 策略记忆 + allow/reject×once/always 语义（`ipcBridge.ts:513-529`、`chatLib.ts` IConfirmation、`chat/approval/ApprovalStore.ts`） | **已落地（轻量化）**：ACP `session/request_permission` → `session.permission_request` 事件（options 透传）+ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝（默认 30min，`MATE_PERMISSION_TIMEOUT`）。详见 §5.8.1 |
 | 会话 = 强类型定列 + extra JSON 快照；侧栏服务端分组读模型（pinned/项目/时间线）+ 软归档（archived_at 切片）+ 全局消息搜索 + 批量导出（`sidebar.ts`、`ipcBridge.ts:2423-2497`） | M3 会话数据管理面（v4②） |
 | 会话 runtime 摘要状态机：ensure/restart/cancel/lease + pending_confirmations + can_send，UI 不持进程（`ipcBridge.ts:341-361`、`runtime/agent-process-registry.ts`） | M3 会话态/连接态分离（v4③） |
 | MCP：IMcpServer 判别联合传输（stdio/sse/http/streamable_http）+ toggle/test-connection/OAuth/original_json 保真 + per-agent 子集 + 会话启用集「仅建会话时注入」（`common/config/storage.ts:595-640`、`ipcBridge.ts:1205-1269`） | P1 MCP 数据模型（v4④） |
@@ -805,7 +805,7 @@ create 仅带 `assistant.id + overrides`（`useGuidSend.ts:162-195,233-249`）�
 （v2②）一致。
 ark-mate 落点（决策 v6②③，面板已落地）：① 新建会话 = **整页 `/new`**（无弹窗；hero + 助手胶囊条 +
 内嵌输入卡[模型 pill 只读 + 圆形发送] + 示例指令，对照 AionUi /guid 形态）；② 默认选中**上次底座**
-（localStorage `forge.panel.lastAgentId`；AionUi 持久化 lastAssistantId：`useGuidAssistantSelection.ts:92-111`）；
+（localStorage `mate.panel.lastAgentId`；AionUi 持久化 lastAssistantId：`useGuidAssistantSelection.ts:92-111`）；
 ③ 底座选择呈**胶囊卡片**（`StartPage.tsx`，图标 = runtime 缩写 + 状态点，点击即选 + 记忆）；④ 首轮前
 标注「模型 = 底座自身默认，不在此选模型」（对应 AionUi「CLI 不传 model」语义 + opencode
 ACP 忽略客户端模型选择的实测约束，issue #13644）。
@@ -846,13 +846,13 @@ prompt → 事件流入 eventbus → **经 WS 端点出流**（attach/快照/事
 4. `internal/infra/config`：runtime 配置加载（CLI flag/env/配置文件三选一起步）；日志（golib glog）。
 5. `server` WS 事件端点：升级连接（无鉴权）→ attach/detach/ping 帧 → 订阅 eventbus → snapshot/event 帧
    （§4.5 基本版）；**清理移除脚手架期遗留的 SSE 端点与适配器代码**（决策 v2①，不留第二出口）。
-6. `cmd/forge/main.go` 重装配（去 mock feed），暴露 `--runtime` 开关供本地冒烟。
+6. `cmd/mate/main.go` 重装配（去 mock feed），暴露 `--runtime` 开关供本地冒烟。
 
 **不做**：SQLite、Agent CRUD、断线续传的持久化、前端改动。
 
 **实现落点（M0 代码提交）**：1–6 全部落地。其中 acl 层对「agent 自托管鉴权」做直通
 （Authenticate methodId 取 `AuthMethodAgent.Id`，opencode 即此形态；env_var/terminal 仍报
-`access/auth_required`，M3 补全流程）；验证方式 `forge demo --runtime opencode --allow-all`
+`access/auth_required`，M3 补全流程）；验证方式 `mate demo --runtime opencode --allow-all`
 （真实 opencode 1.18.27 冒烟：session.created → thought/message 流 → turn.ended）。
 
 **DoD（验收）**：`make server` 起服后，经 WS 客户端（wscat / 小型 Go client / 单测）attach 会话能看到
@@ -882,7 +882,7 @@ prompt → 事件流入 eventbus → **经 WS 端点出流**（attach/快照/事
 **不做**：Agent 创建编辑、provider 配置、多 tab/复杂 UI、任何跨 agent 协作形态（决策 v2②，codeg 类
 shell 均不做，见 §5.4）。
 
-**DoD**：`make web && make all` 产出 `./forge` 单二进制，浏览器直接可用——面板经 **WS** 收到
+**DoD**：`make web && make all` 产出 `./mate` 单二进制，浏览器直接可用——面板经 **WS** 收到
 snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 runtime 均可在面板跑通 fresh session 流式对话。
 **量级**：3–4 周。
 
@@ -903,7 +903,7 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 > **M1 剩余项（已补，2026-09-03，提交见 feat(eventbus|server|manager|panel)）**：
 > - **会话 wire transcript JSONL 落盘**（M1 #5，schema v1）：每 session 一个
 >   `<sessionID>.jsonl`（首行 header + prompt/update 原语行，append-only 不重写）；目录
->   `FORGE_TRANSCRIPTS`/默认 `~/.forge/transcripts`，serve 与 demo 均落盘；写入失败仅告警
+>   `MATE_TRANSCRIPTS`/默认 `~/.ark-mate/transcripts`，serve 与 demo 均落盘；写入失败仅告警
 >   （尽力而为旁路事实源，对齐 codeg acp_transcript.rs，§5.3/§5.7）。
 > - **REST `GET /sessions/:id/history`**（§4.4 M1 冻结面补缺）：eventbus 按聚合回放，
 >   `after`/`limit` 分页（默认 200、上限 1000、`has_more` 翻页），未知会话 40401。
@@ -924,7 +924,7 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 > （脚本 /tmp/pbtest/panel-browser-check.mjs 与 focus-multiturn.mjs）。
 > **轻量管理面补记（2026-09-07，提交见 feat(permission|session)：d5f165f / 491acab）**：参照 AionUi 的
 > 轻量化决策（§5.8.1），在 M1 面板之上补齐两件事，其余仍按 M2/M3/P1 规划：
-> - **会话重启存活**：daemon 启动回读 `FORGE_TRANSCRIPTS` 下 transcript，重建会话列表与元数据
+> - **会话重启存活**：daemon 启动回读 `MATE_TRANSCRIPTS` 下 transcript，重建会话列表与元数据
 >   （标题/状态/时间，状态由最后一条终态事件推导）+ 把历史事件注入 eventbus——管理面在重启后仍有
 >   会话可见、旧会话可经 history/WS 回看。**仍不引入 DB**（属 M2 §4.7）；transcript header 仅文件为空时写
 >   （重启 resume 不重写，保持「首行=header」不变式）。实现见 `internal/manager/transcript_load.go`、
@@ -932,7 +932,7 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 >   回读**轻量提前兑现**（非 SQLite events 表）。
 > - **权限确认通道（轻量化，详见 §5.8.1）**：`session/request_permission` → `session.permission_request` 事件
 >   （options + `timeout_at`）→ `POST /sessions/:id/permission` 决策 + 会话级「始终允许」记忆 + 超时自动拒绝
->   （默认 30min，`FORGE_PERMISSION_TIMEOUT`）；前端权限确认卡 + 聊天头待决角标 + **超时/取消/终态就地收敛**
+>   （默认 30min，`MATE_PERMISSION_TIMEOUT`）；前端权限确认卡 + 聊天头待决角标 + **超时/取消/终态就地收敛**
 >   （`expirePermission` + `settlePerms`，不发 API）。→ M2 #7 的 confirm 通道 + 策略记忆（记忆部分）**提前
 >   轻量落地**；仅「按 per-agent 默认策略落库/查询」仍留 M2。
 > - **会话元数据 + 侧栏增强**：`title/pinned/archived/created_at/updated_at`（REST list/get/patch + 标题自动推导、
@@ -965,7 +965,7 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 
 ### M3 — 平台化一期（单操作员底座稳定冒烟）
 
-**目标**：`./forge` 可作为单操作员底座稳定运行：多会话并发、重启恢复、可观测
+**目标**：`./mate` 可作为单操作员底座稳定运行：多会话并发、重启恢复、可观测
 （决策 v3③：无多用户/团队共享语义，无登录鉴权排期）。
 
 **要做**：
@@ -980,10 +980,10 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
    （wire transcript 已是事实源，导出直接基于它：JSON/纯文本）；
 3. 用量/日志：runs.usage_json 按「per-turn 明细（input/output/thought/cached）+ 会话快照」粒度落库 +
    会话粒度 token 统计 API；stderr 诊断尾巴（对照 codeg stderr_tail）；
-4. 审计与配置管理：`.forge/config` 目录化（runtimes/agents/providers 的可导出配置，备份友好）；
+4. 审计与配置管理：`.ark-mate/config` 目录化（runtimes/agents/providers 的可导出配置，备份友好）；
 5. 可选① 远程 runtime（Streamable HTTP/WS 传输）评估——`acl.Transport` 第二实现验证 seam；
 6. 可选② 对外暴露评估（决策 v3③）：默认仅监听本机（127.0.0.1）；若确需监听非本机地址，按
-   「单操作员 token」最小实现（REST header + WS 子协议 `forge-token.{b64url}`），不做多用户/RBAC。
+   「单操作员 token」最小实现（REST header + WS 子协议 `mate-token.{b64url}`），不做多用户/RBAC。
 
 **不做**：多租户隔离与 RBAC、计费、登录/多用户鉴权（决策 v3③，单操作员定位外）、
 跨 agent 协作（决策 v2②，定位外）。
@@ -1022,7 +1022,7 @@ message × execution_mode existing|new_conversation × state{next_run,retry}，�
 - 静态：`make build && make vet && make test`；CI 挂 golangci-lint（含 depguard 约束跨层 import 方向，
   见架构文档 §5）+ `pnpm typecheck`。
 - 集成：adapter 夹具测试（假 ACP server：echo / 慢流 / cancel 语义）；真实 runtime 冒烟仅手工/标记跳过。
-- 端到端：`make web && make all` 产出 `./forge`；按 §6 各 DoD 逐条手工验收（WS 客户端 + 浏览器双路径）。
+- 端到端：`make web && make all` 产出 `./mate`；按 §6 各 DoD 逐条手工验收（WS 客户端 + 浏览器双路径）。
 - 回归对照：每次里程碑完成时，用**同一 prompt** 在 opencode 与 harness 上各跑 fresh session，
   验证「切换指定 runtime」后的能力不对称 UI 裁剪（harness 隐藏续谈/派生）仍正确。
 

@@ -9,7 +9,7 @@ type WorkspaceBrowseResp struct {
 	Parent string `json:"parent,omitempty"`
 	// Home 服务进程家目录（前端"回到主目录"用；不可得或不在工作区根白名单内时为空）。
 	Home string `json:"home,omitempty"`
-	// Roots 生效的工作区根白名单（FORGE_WORKSPACE_ROOTS；空 = 不限制）。
+	// Roots 生效的工作区根白名单（MATE_WORKSPACE_ROOTS；空 = 不限制）。
 	// 透出给面板是为了让"为什么上不去了"有解释，也让它能把根直接列成入口。
 	Roots []string `json:"roots,omitempty"`
 	// Entries 子目录列表（按名称升序；默认隐藏 "." 开头的目录；
@@ -34,7 +34,7 @@ type WorkspaceRecentResp struct {
 }
 
 // WorkspaceLibraryResp 资料库 = 工作区根下的一级子目录（给"选名字而不是选路径"用）。
-// 派生自 FORGE_WORKSPACE_ROOTS + 文件系统，不另存登记表：见 manager.WorkspaceLibraries。
+// 派生自 MATE_WORKSPACE_ROOTS + 文件系统，不另存登记表：见 manager.WorkspaceLibraries。
 type WorkspaceLibraryResp struct {
 	Path string `json:"path"` // 绝对路径（可直接作为建会话的 cwd）
 	Name string `json:"name"` // 目录名即资料库名

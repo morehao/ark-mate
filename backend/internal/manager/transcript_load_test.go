@@ -100,7 +100,7 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 // 「是否平台代建」权威标志都从 header 回灌；旧文件缺该字段 → 非临时（历史会话语义正确）。
 func TestLoadTranscriptsWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	temporaryHeader := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_ws_temp","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.forge/workspaces/ses_ws_temp","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
+	temporaryHeader := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_ws_temp","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.ark-mate/workspaces/ses_ws_temp","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
 	legacyHeader := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"ses_ws_legacy","agent_id":"agent-opencode","runtime":"opencode","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, "ses_ws_temp.jsonl", []string{temporaryHeader})
 	writeTranscriptJSONL(t, dir, "ses_ws_legacy.jsonl", []string{legacyHeader})
@@ -116,7 +116,7 @@ func TestLoadTranscriptsWorkspace(t *testing.T) {
 	for _, c := range conversations {
 		byID[c.ID] = c
 	}
-	if got := byID["ses_ws_temp"]; got.Cwd != "/home/u/.forge/workspaces/ses_ws_temp" || !got.WorkspaceTemporary {
+	if got := byID["ses_ws_temp"]; got.Cwd != "/home/u/.ark-mate/workspaces/ses_ws_temp" || !got.WorkspaceTemporary {
 		t.Fatalf("代建标记/工作空间未回灌: %+v", got)
 	}
 	if got := byID["ses_ws_legacy"]; got.Cwd != "/work/alpha" || got.WorkspaceTemporary {

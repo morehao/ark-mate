@@ -23,7 +23,7 @@ import (
 	"github.com/morehao/ark-mate/internal/version"
 )
 
-// 本文件是 `forge doctor`（M4-5）：**只读体检**——不装配 App、不连库、不监听、不写 FORGE_HOME
+// 本文件是 `mate doctor`（M4-5）：**只读体检**——不装配 App、不连库、不监听、不写 MATE_HOME
 // 以外的任何路径。它回答的是"这份部署现在到底装成什么样"，以及"它自己说自己是什么"。
 //
 // ## 为什么要有这条命令（而不是"启动失败时看日志"）
@@ -33,7 +33,7 @@ import (
 // （`/meta` 照发一份自洽的值），要么只表现为运行期某个具体功能报错——而用户手里的现场往往
 // 已经不可复现（改过文件、换过包）。所以判据必须是"拿**盘上的实际内容**复算，再与各处声明比"，
 // 这正是本命令与 `make verify/release-json` 同一条纪律（见 design §6.3 的完整性一行：
-// "打包期逐文件生成清单 + CI 复算；全量复算由 `forge doctor --verify-payload` 承担"）。
+// "打包期逐文件生成清单 + CI 复算；全量复算由 `mate doctor --verify-payload` 承担"）。
 //
 // ## 声明 vs 事实（本命令的分工）
 //
@@ -64,7 +64,7 @@ type doctorCheck struct {
 	Detail string       `json:"detail"`
 }
 
-// doctorReport `forge doctor --json` 的输出形状。
+// doctorReport `mate doctor --json` 的输出形状。
 //
 // 为什么把 failed / warnings / passed 也放进响应：机器消费方（CI、诊断包、将来的面板）不该
 // 自己数一遍 `checks`——"怎么算失败"必须由产生结论的那一侧给出，否则同一份报告在两边可能
@@ -149,8 +149,8 @@ type doctorOptions struct {
 // doctor 子命令入口。退出码：0 = 没有失败项；1 = 有失败项；2 = 用法/配置错误。
 func doctor(args []string) {
 	fset := flag.NewFlagSet("doctor", flag.ExitOnError)
-	home := fset.String("home", "", "数据目录（同 FORGE_HOME；默认读配置解析结果）")
-	webDir := fset.String("web-dir", "", "前端资产目录（绝对路径，须含 index.html；同 FORGE_WEB_DIR）")
+	home := fset.String("home", "", "数据目录（同 MATE_HOME；默认读配置解析结果）")
+	webDir := fset.String("web-dir", "", "前端资产目录（绝对路径，须含 index.html；同 MATE_WEB_DIR）")
 	addr := fset.String("addr", "", "端口占用检查目标（默认读配置解析结果，通常 127.0.0.1:10001）")
 	payloads := fset.String("payloads", "",
 		"桌面壳交来的已解析载荷清单（JSON 数组，与 serve 的 --payloads 同款）；"+
@@ -176,7 +176,7 @@ func doctor(args []string) {
 		ReleaseJSON:   strings.TrimSpace(*releaseJSON),
 		VerifyPayload: *verifyPayload,
 	}
-	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < FORGE_* < flag）。
+	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *home != "" {
 		opts.Home = *home
 	}
@@ -308,7 +308,7 @@ func runDoctor(opts doctorOptions) doctorReport {
 // 否则"0 项失败"会让人以为一切都已校验过（warn 的常见含义正是"这一项没校验成"）。
 func renderDoctorReport(r doctorReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "==> forge doctor（核心 %s / 契约 %s）\n", r.Version, r.APIContract)
+	fmt.Fprintf(&b, "==> mate doctor（核心 %s / 契约 %s）\n", r.Version, r.APIContract)
 	fmt.Fprintf(&b, "    数据目录 %s\n    检查地址 %s\n", orDash(r.Home), orDash(r.Addr))
 	if r.VerifyPayload {
 		b.WriteString("    载荷全量复算：已开启\n")
@@ -338,17 +338,17 @@ func renderDoctorReport(r doctorReport) string {
 // 探针名带 pid：并发/中断留下的残file不会互相误伤，且一眼能看出是谁的。
 func checkHomeWritable(home string) doctorCheck {
 	if strings.TrimSpace(home) == "" {
-		return doctorCheck{"home", doctorFail, "数据目录为空（配置没解析出 FORGE_HOME / 默认 ~/.forge）"}
+		return doctorCheck{"home", doctorFail, "数据目录为空（配置没解析出 MATE_HOME / 默认 ~/.ark-mate）"}
 	}
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return doctorCheck{"home", doctorFail, fmt.Sprintf("%s 不可建/不可进入：%v", home, err)}
 	}
-	probe := filepath.Join(home, fmt.Sprintf(".forge-doctor-%d", os.Getpid()))
-	if err := os.WriteFile(probe, []byte("forge-doctor"), 0o600); err != nil {
+	probe := filepath.Join(home, fmt.Sprintf(".mate-doctor-%d", os.Getpid()))
+	if err := os.WriteFile(probe, []byte("mate-doctor"), 0o600); err != nil {
 		return doctorCheck{"home", doctorFail, fmt.Sprintf("%s 不可写：%v", home, err)}
 	}
 	defer func() { _ = os.Remove(probe) }()
-	if b, err := os.ReadFile(probe); err != nil || string(b) != "forge-doctor" {
+	if b, err := os.ReadFile(probe); err != nil || string(b) != "mate-doctor" {
 		return doctorCheck{"home", doctorFail, fmt.Sprintf("%s 写入后读不回（挂载只读或写入未落盘）：%v", home, err)}
 	}
 	return doctorCheck{"home", doctorOK, fmt.Sprintf("%s 可写（探针已清理）", home)}
@@ -377,16 +377,16 @@ func checkPortBindable(addr string) doctorCheck {
 	}
 	if healthReachable(addr) {
 		return doctorCheck{"port", doctorWarn,
-			fmt.Sprintf("%s 已被占用，且 /v1/forge/health 有响应——本平台核心很可能已在运行", addr)}
+			fmt.Sprintf("%s 已被占用，且 /v1/mate/health 有响应——本平台核心很可能已在运行", addr)}
 	}
 	return doctorCheck{"port", doctorWarn,
-		fmt.Sprintf("%s 已被占用，但 /v1/forge/health 无响应——占用者是别的进程", addr)}
+		fmt.Sprintf("%s 已被占用，但 /v1/mate/health 无响应——占用者是别的进程", addr)}
 }
 
 // healthReachable 探一次健康检查（2s 上限：体检不该被一个挂死的端口拖住）。
 func healthReachable(addr string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + addr + "/v1/forge/health")
+	resp, err := client.Get("http://" + addr + "/v1/mate/health")
 	if err != nil {
 		return false
 	}
@@ -395,7 +395,7 @@ func healthReachable(addr string) bool {
 }
 
 // loadReleaseContract 读发布契约。显式路径读不到 → 警告（调用方处理）；未给路径时
-// 取**核心二进制同目录**那一份：打包态的布局是 `<Resources>/{forge-core,release.json}`，
+// 取**核心二进制同目录**那一份：打包态的布局是 `<Resources>/{mate-core,release.json}`，
 // 所以"我是谁"由可执行文件的位置回答，而开发态那里本来就没有这个文件（不判失败）。
 func loadReleaseContract(explicit string) (releaseContractDoc, string, bool) {
 	path := explicit
@@ -783,14 +783,14 @@ func checkWirePayloads(wire []ctrsystem.PayloadInfo, manifests []payloadOnDisk, 
 //
 // 三条判据的分工：
 //   - coreVersion / apiContract：契约说的核心版本，就是**正在跑的这个二进制**报的版本——
-//     这条抓"包里混进了另一个核心"（换过 forge-core、打包用了旧构建）；
+//     这条抓"包里混进了另一个核心"（换过 mate-core、打包用了旧构建）；
 //   - webBuildId / webDigest：契约说的资产，就是核心**此刻解析到的那份资产**——
 //     这条抓"资产被换过/不是打包时那一份"（版本闸门 V8 的同源判据）；
 //   - payloads[]：契约说的载荷，就是盘上清单里的那几份（与 checkPayloadManifests 的分工是
 //     "契约 ↔ 清单"，那边是"清单 ↔ 文件"）。
 //
 // `dev` 核心跳过版本比对并**明说**（开发态的核心报 dev 是既有的既定口径，不是缺陷）：
-// 把它判成失败会让 `go run ./cmd/forge doctor --release-json …` 在开发态永远红。
+// 把它判成失败会让 `go run ./cmd/mate doctor --release-json …` 在开发态永远红。
 func checkContract(contract releaseContractDoc, assets router.AssetInfo, assetsOK bool, manifests []payloadOnDisk, manifestsOK bool) []doctorCheck {
 	var checks []doctorCheck
 

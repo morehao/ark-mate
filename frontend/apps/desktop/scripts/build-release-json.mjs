@@ -13,7 +13,7 @@
  *
  * 1. **确定性（C9）**：字段顺序固定、无时间戳、载荷按 name 排序、原子写。两次构建的
  *    release.json 除版本号外逐字节相同；`make verify/release-json` 拿这条当判据。
- * 2. **值一律取自"实际产物"，不取自声明**：coreVersion 来自 `forge-core --version --json`
+ * 2. **值一律取自"实际产物"，不取自声明**：coreVersion 来自 `mate-core --version --json`
  *    （不是 package.json），webBuildId/webDigest 来自 `resources/web` 的内容，electron/node/ABI
  *    来自 `assert-engines.mjs`（它自己跑 Electron 二进制去问）。**任何一项拿不到就失败**，
  *    不写空值、不写 `null`、不猜。
@@ -44,7 +44,7 @@ const DESKTOP = resolve(SCRIPT_DIR, '..')
 const FRONTEND = resolve(DESKTOP, '..', '..')
 
 const RESOURCES = join(DESKTOP, 'resources')
-const CORE_BINARY = join(RESOURCES, 'forge-core')
+const CORE_BINARY = join(RESOURCES, 'mate-core')
 const WEB_DIR = join(RESOURCES, 'web')
 const PAYLOADS_DIR = join(RESOURCES, 'payloads')
 const DEFAULT_OUT = join(DESKTOP, 'release.json')
@@ -168,7 +168,7 @@ function main() {
     fail(
       `核心报的版本是 ${JSON.stringify(coreInfo.version)}，与 apps/desktop/package.json 的 ${JSON.stringify(appVersion)} 不一致`,
       '发布号标识整套（设计 §2 第 75 行的那条）：出包时核心必须带同样的版本，',
-      '用 `make desktop/dist`（它会给 forge-core 注入 -X …/version.Version=<appVersion>）；',
+      '用 `make desktop/dist`（它会给 mate-core 注入 -X …/version.Version=<appVersion>）；',
       '如果你只跑了 `make core/desktop`，那份核心是 dev 构建，不能拿来出包',
     )
   }
@@ -209,7 +209,7 @@ function main() {
   if (!values.quiet) {
     console.log('==> release.json（唯一发布契约，M4-1）')
     console.log(`  appVersion   ${release.appVersion}（apps/desktop/package.json）`)
-    console.log(`  coreVersion  ${release.coreVersion}（forge-core --version）  apiContract ${release.apiContract}`)
+    console.log(`  coreVersion  ${release.coreVersion}（mate-core --version）  apiContract ${release.apiContract}`)
     console.log(`  webBuildId   ${release.webBuildId}（resources/web/build-id.txt）`)
     console.log(`  webDigest    ${shortDigest(release.webDigest)}  ${web.files} 个文件 ${formatBytes(web.bytes)}`)
     console.log(`  electron     ${release.electron} / Node ${release.node} / ABI ${release.nodeAbi}（assert-engines）`)

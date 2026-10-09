@@ -138,8 +138,8 @@ func TestBuildDSN(t *testing.T) {
 	}{
 		{
 			name:       "绝对路径",
-			url:        "sqlite:///tmp/forge.db",
-			wantPrefix: "file:/tmp/forge.db?",
+			url:        "sqlite:///tmp/mate.db",
+			wantPrefix: "file:/tmp/mate.db?",
 			wantHas:    []string{"_txlock=immediate", "journal_mode%28WAL%29", "foreign_keys%281%29"},
 		},
 		{

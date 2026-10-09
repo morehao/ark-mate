@@ -40,7 +40,7 @@ import type {
   SkillMaterializationResp,
   Tool,
 } from '@ark/types'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import {
   fmtProbeAt,
   libraryKindColor,
@@ -191,8 +191,8 @@ function Card({ children }: { children: ReactNode }) {
 
 /** 能力目录管理页（P1 全局只读 + P2 Agent 视角与 MCP live 探测）。 */
 export function CapabilitiesPage() {
-  const showToast = useForge((s) => s.showToast)
-  const agents = useForge((s) => s.agents)
+  const showToast = useMate((s) => s.showToast)
+  const agents = useMate((s) => s.agents)
   const [agentId, setAgentId] = useState<string>('')
   const [caps, setCaps] = useState<AgentCapabilities | null>(null)
   const [capsErr, setCapsErr] = useState<string | null>(null)
@@ -748,7 +748,7 @@ export function CapabilitiesPage() {
   return (
     <PageContainer
       title="能力"
-      description="按 Agent 看可见能力（skill 源裁剪 / MCP 启用与可承载底座 / 工具归属），并对 MCP server 触发 live tools/list 探测。全局目录来自 ~/.forge/capabilities/{skills,mcp,tools}。"
+      description="按 Agent 看可见能力（skill 源裁剪 / MCP 启用与可承载底座 / 工具归属），并对 MCP server 触发 live tools/list 探测。全局目录来自 ~/.ark-mate/capabilities/{skills,mcp,tools}。"
       extra={
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadAll()}>
@@ -799,7 +799,7 @@ export function CapabilitiesPage() {
           />
           <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             {library.length === 0 ? (
-              <SectionEmpty text="没有匹配的能力（能力定义在 ~/.forge/capabilities/{skills,mcp,tools}）" />
+              <SectionEmpty text="没有匹配的能力（能力定义在 ~/.ark-mate/capabilities/{skills,mcp,tools}）" />
             ) : (
               library.map(libraryRow)
             )}
@@ -940,7 +940,7 @@ export function CapabilitiesPage() {
         <Card>
           <SectionHeader
             title="Skills"
-            hint="目录条目（平台唯一事实源，`~/.forge/capabilities/skills/*.json`）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影。新建/编辑走同一条闸门：正文扫描不过 → 40001 且**零字节落盘**"
+            hint="目录条目（平台唯一事实源，`~/.ark-mate/capabilities/skills/*.json`）：启用即按其 runtimes 投放（落点与格式由底座投影声明决定）、禁用即撤回副本（定义与正文保留）；「体检」看物化摘要是否被改动，并如实标注未实测/未配置的投影。新建/编辑走同一条闸门：正文扫描不过 → 40001 且**零字节落盘**"
             count={skills.length}
             loading={busy === 'skills'}
             onRefresh={() => refresh('skills')}
@@ -952,7 +952,7 @@ export function CapabilitiesPage() {
           />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {skills.length === 0 ? (
-              <SectionEmpty text="暂无 skill（~/.forge/capabilities/skills/*.json）" />
+              <SectionEmpty text="暂无 skill（~/.ark-mate/capabilities/skills/*.json）" />
             ) : (
               skills.map((s) => {
                 const warn = skillWarningsView(s.warnings)
@@ -1004,7 +1004,7 @@ export function CapabilitiesPage() {
           />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {globalMcpRows.length === 0 ? (
-              <SectionEmpty text="暂无 MCP server（~/.forge/capabilities/mcp/*.json）" />
+              <SectionEmpty text="暂无 MCP server（~/.ark-mate/capabilities/mcp/*.json）" />
             ) : (
               globalMcpRows.map((m) => (
                 <Row key={m.id}>
@@ -1040,7 +1040,7 @@ export function CapabilitiesPage() {
           />
           <div style={{ maxHeight: 340, overflowY: 'auto' }}>
             {tools.length === 0 ? (
-              <SectionEmpty text="暂无 tool（~/.forge/capabilities/tools/*.json、代码注入或 MCP 探测）" />
+              <SectionEmpty text="暂无 tool（~/.ark-mate/capabilities/tools/*.json、代码注入或 MCP 探测）" />
             ) : (
               tools.map((t) => (
                 <Row key={t.name}>

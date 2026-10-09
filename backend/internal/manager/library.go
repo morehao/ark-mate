@@ -127,7 +127,7 @@ func skillRuntimeVerdict(sk capability.Skill, p SkillProjection) dtolibrary.Appl
 	case p.Err != "":
 		return dtolibrary.Applicability{Runtime: rt, OK: false,
 			Status: dtolibrary.StatusNotConfigured,
-			Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 FORGE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)}
+			Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 MATE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)}
 	case !p.Projection.Tested:
 		return dtolibrary.Applicability{Runtime: rt, OK: true,
 			Status: dtolibrary.StatusUntested,
@@ -194,7 +194,7 @@ func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary
 		// 真正的 sse/http 由平台网关代连。故这里不再按底座声明的承载能力判"不适用"。
 		return dtolibrary.Applicability{Runtime: rt, OK: true,
 			Status: dtolibrary.StatusProjected,
-			Reason: fmt.Sprintf("经平台 MCP 网关代连（对底座是一条 stdio 条目；远端传输 %s）——开关 FORGE_MCP_GATEWAY=off 可回到直连口径", m.Transport)}
+			Reason: fmt.Sprintf("经平台 MCP 网关代连（对底座是一条 stdio 条目；远端传输 %s）——开关 MATE_MCP_GATEWAY=off 可回到直连口径", m.Transport)}
 	case !carried:
 		return dtolibrary.Applicability{Runtime: rt, OK: false,
 			Status: dtolibrary.StatusNotApplicable,

@@ -3,7 +3,7 @@ package capability
 // ——— 网关暴露的工具命名（M7-2 落地，M7-4 补策略） ———
 //
 // 网关把多台远端 server 的工具面拼成**一个**工具面交给底座，工具名因此成了平台侧责任：
-// 底座只看见 `forge-gateway` 一台 server，模型看到的名字里必须能分辨来源，否则"两个 server
+// 底座只看见 `mate-gateway` 一台 server，模型看到的名字里必须能分辨来源，否则"两个 server
 // 都有 search 工具"就会表现成"调了 search，但不是你以为的那台"。
 //
 // 命名形态：`<serverID>__<toolName>`（双下划线）。选它的理由：底座/模型侧无需任何额外映射，

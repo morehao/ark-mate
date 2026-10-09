@@ -9,7 +9,7 @@ package ctrsystem
 //	webPath         资产层（dir 时是**绝对路径**；builtin 为 null）
 //	webDigest       资产层（逐文件 sha256 的确定性合成；两种来源同值）
 //	webBuildId      前端产物里的构建 id（M2-4）
-//	home            数据目录（默认 ~/.forge）
+//	home            数据目录（默认 ~/.ark-mate）
 //	payloads        随包运行时载荷（M3-4 起由壳经 --payloads 交来的已解析清单；非桌面态为空数组）
 //
 // 为什么把"来源"做成一个结构体而不是继续用一堆闭包参数：这份响应是**版本闸门与诊断**的
@@ -30,7 +30,7 @@ type PayloadInfo struct {
 	Source string `json:"source"`
 }
 
-// MetaInfo `/v1/forge/meta` 的响应（字段契约见计划 §5 M1-7/M2-3）。
+// MetaInfo `/v1/mate/meta` 的响应（字段契约见计划 §5 M1-7/M2-3）。
 type MetaInfo struct {
 	CoreVersion string `json:"coreVersion"`
 	WebBuildID  string `json:"webBuildId"`

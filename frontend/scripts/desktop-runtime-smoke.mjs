@@ -18,7 +18,7 @@
  * | # | 触发条件 | 本脚本 |
  * | --- | --- | --- |
  * | ① | 某 runtime 需要**写自己所在目录**（包内只读 → 不行就物化） | **验到**：跑前/跑后对载荷目录取指纹，断言零变化（`fingerprint` 场景） |
- * | ② | 平台签名 / 公证 / hardened runtime 不允许包内执行 | **源码态不判**；**打包态判到 hardened runtime 这半边**（`FORGE_SMOKE_APP=…`，M4-2a）；公证那半边本期不做（§12.27） |
+ * | ② | 平台签名 / 公证 / hardened runtime 不允许包内执行 | **源码态不判**；**打包态判到 hardened runtime 这半边**（`MATE_SMOKE_APP=…`，M4-2a）；公证那半边本期不做（§12.27） |
  * | ③ | Windows SmartScreen / AV 拦 | **不判**：需要 Windows 测试机与出包，属 M4 |
  *
  * ②③ 的状态每次运行都会**显式打印一行**：免得读日志的人把"全绿"当成"三条件已验完"。
@@ -46,7 +46,7 @@
  * 已知的"载荷目录之外"的写点（**故意不在指纹范围内**，但要说清，免得被当成漏报）：
  * `node-addon-require-builtin` 会把预编译 `.node` 物化到系统临时目录
  * （`$TMPDIR/node-addon-native-custom-loader-<uid>/native-cache/`）再加载——那是 tmpdir，
- * 不是载荷目录，也正是设计 §6.3"可写面只有 FORGE_HOME"允许的形状。
+ * 不是载荷目录，也正是设计 §6.3"可写面只有 MATE_HOME"允许的形状。
  *
  * ## 当前实测状态（2026-09-28，本机 Electron 44.4.5）
  *
@@ -60,18 +60,18 @@
  *   （即：dsh 的"会不会写自己所在目录"这个问题答完了；"能不能在 Electron 的 Node 上 boot"是新暴露的、
  *   §6.3 三条之外的另一条形态约束。）
  * - `dsh-diag` / `dsh-alt-node` 是**定位工具**（不计入 V9 判据）：前者把同一份 dsh 换本机 Node 起
- *   （握手绿 → 协议面没问题），后者用 `FORGE_SMOKE_ALT_NODE` 指一份别处的 Electron 起
+ *   （握手绿 → 协议面没问题），后者用 `MATE_SMOKE_ALT_NODE` 指一份别处的 Electron 起
  *   （实测 **Electron 44.0.0 → 握手绿**，而设计 §5.1 记的本来就是 44.0.0）。
  *
  * ## 用法
  *
  *   node scripts/desktop-runtime-smoke.mjs            # 全部场景（默认档：不联网、不跑模型）
  *   node scripts/desktop-runtime-smoke.mjs dsh        # 只跑指定场景
- *   FORGE_SMOKE_APP=/abs/ark-mate.app node scripts/desktop-runtime-smoke.mjs
+ *   MATE_SMOKE_APP=/abs/ark-mate.app node scripts/desktop-runtime-smoke.mjs
  *                                                     # **打包态**（M4-2a）：起 .app 里的壳与核心，
  *                                                     # 判"签名 + hardened runtime 之后包内载荷仍能执行"（条件 ② 的 hardened runtime 半边）
  *   node scripts/desktop-runtime-smoke.mjs --help     # 本说明
- *   FORGE_SMOKE_ALT_NODE=/abs/Electron node scripts/desktop-runtime-smoke.mjs dsh-alt-node
+ *   MATE_SMOKE_ALT_NODE=/abs/Electron node scripts/desktop-runtime-smoke.mjs dsh-alt-node
  *                                                     # 候选修复验证（换 Node 再起 dsh）
  *
  * 场景：
@@ -81,15 +81,15 @@
  *   fingerprint  触发条件 ①：两份载荷目录指纹在整轮前后零变化
  *   live         可选 LIVE 档：真发一次 `session/prompt`（要凭据，**不进 CI**）
  *   dsh-diag     诊断：同一份 dsh 载荷换**本机 Node** 起（定位阻塞点；不计入判据）
- *   dsh-alt-node 候选修复验证：换 `FORGE_SMOKE_ALT_NODE` 指的 Electron 再起 dsh（不计入判据）
+ *   dsh-alt-node 候选修复验证：换 `MATE_SMOKE_ALT_NODE` 指的 Electron 再起 dsh（不计入判据）
  *
  * 环境变量：
  *   KEEP_SHELL=1                 跑完不杀壳（人工接管用；下次跑会被 guard 挡下）
  *   RUNTIME_SMOKE_LIVE=1         开启 LIVE 档
- *   FORGE_SMOKE_DSH_API_KEY      LIVE 档 dsh 的凭据（透传成子进程的 DEEPSEEK_API_KEY）
- *   FORGE_SMOKE_OPENCODE_API_KEY LIVE 档 opencode 的凭据（透传成子进程的 OPENCODE_API_KEY）
- *   FORGE_SMOKE_ALT_NODE         `dsh-alt-node` 用的候选 Node/Electron 可执行文件绝对路径
- *   FORGE_SMOKE_APP              打包态：`.app` 的绝对路径（起包内的壳与核心；缺省的源码态不判条件 ②）
+ *   MATE_SMOKE_DSH_API_KEY      LIVE 档 dsh 的凭据（透传成子进程的 DEEPSEEK_API_KEY）
+ *   MATE_SMOKE_OPENCODE_API_KEY LIVE 档 opencode 的凭据（透传成子进程的 OPENCODE_API_KEY）
+ *   MATE_SMOKE_ALT_NODE         `dsh-alt-node` 用的候选 Node/Electron 可执行文件绝对路径
+ *   MATE_SMOKE_APP              打包态：`.app` 的绝对路径（起包内的壳与核心；缺省的源码态不判条件 ②）
  *
  * **不进 CI**：要真 Electron + 真核心 + 随包载荷（`make desktop/payloads`）。
  * 零新依赖：ACP 客户端就是 NDJSON over stdio（协议帧形状对齐
@@ -140,14 +140,14 @@ import {
 /** 用户家目录（起壳的最小环境要保留它：Chromium 的 userData 要落盘）。 */
 const HOME = homedir()
 /**
- * 打包态（M4-2a）：`FORGE_SMOKE_APP=/abs/path/ark-mate.app` → 起来的是**打出来的包**里的壳与核心。
+ * 打包态（M4-2a）：`MATE_SMOKE_APP=/abs/path/ark-mate.app` → 起来的是**打出来的包**里的壳与核心。
  *
  * 这是设计 §6.3 回退条件 ② 的唯一判据形态：源码态的壳没有签名、也没有 hardened runtime，
  * 只有真包（ad-hoc 签名 + `--options runtime`）才能回答"平台允不允许执行包内载荷"。
  */
-const PACKAGED_APP = process.env.FORGE_SMOKE_APP ? resolve(process.env.FORGE_SMOKE_APP) : null
-if (PACKAGED_APP && !existsSync(join(PACKAGED_APP, 'Contents', 'Resources', 'forge-core'))) {
-  console.error(`FORGE_SMOKE_APP 指向的不是一个打包好的 .app：${PACKAGED_APP}`)
+const PACKAGED_APP = process.env.MATE_SMOKE_APP ? resolve(process.env.MATE_SMOKE_APP) : null
+if (PACKAGED_APP && !existsSync(join(PACKAGED_APP, 'Contents', 'Resources', 'mate-core'))) {
+  console.error(`MATE_SMOKE_APP 指向的不是一个打包好的 .app：${PACKAGED_APP}`)
   process.exit(1)
 }
 
@@ -191,7 +191,7 @@ installCleanupHooks()
 
 /** 我们起的 runtime 子进程 pid（收尾时用它 + 载荷路径双条件判定残留，不动用户自己的进程）。 */
 const spawnedRuntimePids = new Set()
-/** 临时目录（FORGE_HOME / 工作区 / 指纹缓存），收尾统一删。 */
+/** 临时目录（MATE_HOME / 工作区 / 指纹缓存），收尾统一删。 */
 const tempDirs = []
 
 // ————————————————————————————— 小工具 —————————————————————————————
@@ -387,8 +387,8 @@ const INITIALIZE_PARAMS = {
  * 三条纪律：
  *  1. **PATH 前置私有 bin**（宁可重复校准也不假设）：设计 §6.6 的私有 bin 必须是 PATH 首段，
  *     否则机器上恰好装过的同名命令会顶掉随包那份；
- *  2. **载荷入口来自核心环境**（`FORGE_DSH_ENTRY` / `FORGE_OPENCODE_BIN` / `FORGE_NODE_EXECUTABLE`
- *     / `FORGE_HOME`）——本脚本不自己拼这几条路径，拼了就等于在验"我记住的那个常量"；
+ *  2. **载荷入口来自核心环境**（`MATE_DSH_ENTRY` / `MATE_OPENCODE_BIN` / `MATE_NODE_EXECUTABLE`
+ *     / `MATE_HOME`）——本脚本不自己拼这几条路径，拼了就等于在验"我记住的那个常量"；
  *  3. **配置隔离按 runtime 叠加**（`backend/pkg/runtime/isolation.go` 的 `IsolationEnv` 逐条对齐）。
  *     为什么要在这里补：核心进程自己的环境里**没有**这些变量——它们是核心在 `Connect` 时按
  *     runtime 注入子进程的。不补的话 dsh/opencode 会去写用户的 `~/.dsh`、`~/.config/opencode`。
@@ -396,17 +396,17 @@ const INITIALIZE_PARAMS = {
 /**
  * 探针 runtime 的**可写面**（dsh / opencode 的 home 与 npm 面都挂在它下面）。
  *
- * 刻意**不**沿用 `coreEnv.FORGE_HOME`：那是壳按默认注入的**用户真实** `~/.forge`，拿它当可写面
- * 会让探针往用户真实数据目录里写——2026-10-09 实测 `~/.forge/runtime/dsh/sessions/` 里留下一批
- * `--var-folders-*forge-smoke-dsh-ws-*`，而载荷指纹那两条断言只看载荷目录、**看不见这里**；
+ * 刻意**不**沿用 `coreEnv.MATE_HOME`：那是壳按默认注入的**用户真实** `~/.ark-mate`，拿它当可写面
+ * 会让探针往用户真实数据目录里写——2026-10-09 实测 `~/.ark-mate/runtime/dsh/sessions/` 里留下一批
+ * `--var-folders-*mate-smoke-dsh-ws-*`，而载荷指纹那两条断言只看载荷目录、**看不见这里**；
  * 更隐蔽的是它还会**读**用户真实的 dsh profile / session 状态，让"干净机器上是什么样"失真。
  *
- * 载荷**入口**（`FORGE_*_ENTRY` / `FORGE_HOME`）仍从核心进程环境取——那是本脚本的纪律 2
+ * 载荷**入口**（`MATE_*_ENTRY` / `MATE_HOME`）仍从核心进程环境取——那是本脚本的纪律 2
  * （不自己拼常量、不 `which`）；这里只是不拿它当可写面。整轮共用一个临时 home（收尾统一删）。
  */
 let smokeProbeHomeDir
 function smokeProbeHome() {
-  smokeProbeHomeDir ??= makeTemp('forge-smoke-home-')
+  smokeProbeHomeDir ??= makeTemp('mate-smoke-home-')
   return smokeProbeHomeDir
 }
 
@@ -448,7 +448,7 @@ function runtimeEnvOf(coreEnv, runtimeId) {
  *
  * 为什么要单独探一次：ACP 握手响应里没有 Node 版本；而"runtime 跑在 Electron 的 Node 上"这条
  * 恰恰是 V10 ① 的核心。私有 bin 的 `node` 与私有 bin 的 `dsh` 走**同一个 `exec` 目标**
- * （`ELECTRON_RUN_AS_NODE=1 "$FORGE_NODE_EXECUTABLE" …`），因此它报的版本就是 runtime 拿到的版本。
+ * （`ELECTRON_RUN_AS_NODE=1 "$MATE_NODE_EXECUTABLE" …`），因此它报的版本就是 runtime 拿到的版本。
  */
 function probeNodeChannel(env) {
   const probe = spawnSync(join(BIN_DIR, 'node'), ['-p', 'JSON.stringify(process.versions)'], {
@@ -505,12 +505,12 @@ function scenarioGuard() {
   check(
     '没有别的桌面壳/核心在跑',
     others.length === 0,
-    others.length ? `pid=${others.join(',')}（两个核心共用 ~/.forge/forge.db，请先关掉）` : '',
+    others.length ? `pid=${others.join(',')}（两个核心共用 ~/.ark-mate/mate.db，请先关掉）` : '',
   )
   if (PACKAGED_APP) {
     // 打包态**故意不重建**：起的就是盘上那个包，重建等于把"判的是这个包"这件事悄悄换掉。
     for (const [rel, why] of [
-      ['forge-core', '壳要 spawn 它'],
+      ['mate-core', '壳要 spawn 它'],
       ['web/index.html', '壳与核心共用这一份资产'],
       ['release.json', '唯一发布契约随包'],
     ]) {
@@ -522,7 +522,7 @@ function scenarioGuard() {
       existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')),
       existsSync(join(DESKTOP, '..', 'web', 'dist', 'index.html')) ? '' : '缺则先 `cd frontend && pnpm build`',
     )
-    // 每次起壳前按当前代码重建 forge-core（顺带刷新 resources/web）与壳的产物：
+    // 每次起壳前按当前代码重建 mate-core（顺带刷新 resources/web）与壳的产物：
     // 跑在旧产物上是这一路验收最贵的坑（`desktop-ui-acceptance.mjs` 的 guard 注释里记着实测）。
     for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
   }
@@ -569,19 +569,19 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
 
   const env = runtimeEnvOf(coreEnv, runtimeId)
   // 工作区给临时目录：session/new 要求绝对 cwd，且**不能污染仓库**（opencode 会在 cwd 下落状态）。
-  const workspace = makeTemp(`forge-smoke-${runtimeId}-ws-`)
+  const workspace = makeTemp(`mate-smoke-${runtimeId}-ws-`)
 
   // 私有 bin 的 dsh/opencode 启动器只做转发；目标没注入就 127。先静态核对要交出去的那几件套。
   const launcher = join(BIN_DIR, runtimeId)
-  const needed = runtimeId === 'dsh' ? ['FORGE_NODE_EXECUTABLE', 'FORGE_HOME', 'FORGE_DSH_ENTRY'] : ['FORGE_HOME', 'FORGE_OPENCODE_BIN']
+  const needed = runtimeId === 'dsh' ? ['MATE_NODE_EXECUTABLE', 'MATE_HOME', 'MATE_DSH_ENTRY'] : ['MATE_HOME', 'MATE_OPENCODE_BIN']
   for (const key of needed) {
     check(`注入变量在场：${key}`, !!env[key], env[key] ? env[key].replace(DESKTOP, '…') : '(空)')
   }
 
   // ——— "跑在哪份解释器上"的三条证据 ———
   //
-  // ① 启动器脚本的 exec 目标（生成物，逐字节确定）：dsh 是 `ELECTRON_RUN_AS_NODE=1 exec "$FORGE_NODE_EXECUTABLE" "$FORGE_DSH_ENTRY"`，
-  //    opencode 是 `exec "$FORGE_OPENCODE_BIN"`（原生二进制，不经 Node）。
+  // ① 启动器脚本的 exec 目标（生成物，逐字节确定）：dsh 是 `ELECTRON_RUN_AS_NODE=1 exec "$MATE_NODE_EXECUTABLE" "$MATE_DSH_ENTRY"`，
+  //    opencode 是 `exec "$MATE_OPENCODE_BIN"`（原生二进制，不经 Node）。
   // ② 私有 bin 的 `node` 报的 `process.versions`：与 dsh 走同一个 exec 目标，所以它报的版本
   //    就是 dsh 拿到的版本。**本机自己的 node 是另一个版本**（互为反证：24.21.0 不可能是本机那份）。
   // ③ 进程内自述（dsh 特有）：它的 boot 会打印 `native runtime fingerprint: Node x.y.z, V8 …`；
@@ -592,7 +592,7 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
   if (runtimeId === 'dsh') {
     check(
       '私有 bin 的 dsh 启动器把参数交给 Electron 的 Node（读生成物）',
-      /ELECTRON_RUN_AS_NODE=1 exec "\$FORGE_NODE_EXECUTABLE" "\$FORGE_DSH_ENTRY"/.test(launcherScript),
+      /ELECTRON_RUN_AS_NODE=1 exec "\$MATE_NODE_EXECUTABLE" "\$MATE_DSH_ENTRY"/.test(launcherScript),
       `launcher=${launcher.replace(DESKTOP, '…')}`,
     )
     check(
@@ -605,7 +605,7 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
   } else {
     check(
       '私有 bin 的 opencode 启动器直接 exec 随包原生二进制（不经 Node）',
-      /exec "\$FORGE_OPENCODE_BIN" "\$@"$/.test(launcherScript.trim()),
+      /exec "\$MATE_OPENCODE_BIN" "\$@"$/.test(launcherScript.trim()),
       `launcher=${launcher.replace(DESKTOP, '…')}`,
     )
   }
@@ -784,24 +784,24 @@ function scenarioFingerprint(before) {
 
 /**
  * 候选修复验证场景（**不属于 V9 退出判据**）：换一个**别的 Electron/Node 可执行文件**当
- * `FORGE_NODE_EXECUTABLE`，看 dsh 的 ACP 握手能不能起来。
+ * `MATE_NODE_EXECUTABLE`，看 dsh 的 ACP 握手能不能起来。
  *
  * 为什么值得单独一条：dsh 的阻塞点（`printDshBlockerDiagnosis`）是原生插件对 Electron 做的
  * **V8 版本精确指纹**匹配，而设计 §5.1 记的本来就是 Electron **44.0.0**（V8 15.2.124.13，在表里），
  * 仓库实际 pin 的是 44.4.5（V8 15.2.124.28，不在表里）。要判断"把 pin 调回 44.0.x 就能解掉"这个
- * 假设成不成立，不必先改 `apps/desktop/package.json` —— 用 `FORGE_SMOKE_ALT_NODE` 指一份别处的
+ * 假设成不成立，不必先改 `apps/desktop/package.json` —— 用 `MATE_SMOKE_ALT_NODE` 指一份别处的
  * Electron 就能当场验：**同一条私有 bin、同一份载荷、同一套环境**，只换那一个变量。
  *
- * 用法：`FORGE_SMOKE_ALT_NODE=/abs/path/to/Electron node scripts/desktop-runtime-smoke.mjs dsh-alt-node`
+ * 用法：`MATE_SMOKE_ALT_NODE=/abs/path/to/Electron node scripts/desktop-runtime-smoke.mjs dsh-alt-node`
  */
 async function scenarioAltNodeExecutable(coreEnv) {
-  const alt = process.env.FORGE_SMOKE_ALT_NODE ?? ''
-  section('候选修复验证（不计入 V9 判据）：换 FORGE_NODE_EXECUTABLE 再起一次 dsh')
+  const alt = process.env.MATE_SMOKE_ALT_NODE ?? ''
+  section('候选修复验证（不计入 V9 判据）：换 MATE_NODE_EXECUTABLE 再起一次 dsh')
   if (!alt || !existsSync(alt)) {
-    check('已有 FORGE_SMOKE_ALT_NODE 指向一个存在的可执行文件', false, `当前：${alt || '(未设)'}`)
+    check('已有 MATE_SMOKE_ALT_NODE 指向一个存在的可执行文件', false, `当前：${alt || '(未设)'}`)
     return
   }
-  const versions = probeNodeChannel({ ...runtimeEnvOf(coreEnv, 'dsh'), FORGE_NODE_EXECUTABLE: alt, PATH: `${BIN_DIR}:/usr/bin:/bin` })
+  const versions = probeNodeChannel({ ...runtimeEnvOf(coreEnv, 'dsh'), MATE_NODE_EXECUTABLE: alt, PATH: `${BIN_DIR}:/usr/bin:/bin` })
   note(`候选：${alt} → node=${versions.node ?? '?'} v8=${versions.v8 ?? '?'} abi=${versions.modules ?? '?'} electron=${versions.electron ?? '(非 Electron)'}`)
 
   const payload = readPayload('dsh')
@@ -809,8 +809,8 @@ async function scenarioAltNodeExecutable(coreEnv) {
     check('dsh 载荷在位', false, '缺——先 `make desktop/payloads`')
     return
   }
-  const env = { ...runtimeEnvOf(coreEnv, 'dsh'), FORGE_NODE_EXECUTABLE: alt }
-  const workspace = makeTemp('forge-smoke-alt-node-ws-')
+  const env = { ...runtimeEnvOf(coreEnv, 'dsh'), MATE_NODE_EXECUTABLE: alt }
+  const workspace = makeTemp('mate-smoke-alt-node-ws-')
   const srv = startAcpServer({ command: join(BIN_DIR, 'dsh'), args: RUNTIMES.dsh.args, env, cwd: workspace })
   let init = null
   let err = ''
@@ -853,8 +853,8 @@ async function scenarioDshUnderLocalNode(coreEnv) {
     return
   }
   const env = runtimeEnvOf(coreEnv, 'dsh')
-  // 不给 FORGE_NODE_EXECUTABLE：这条诊断走的就是本机 node，不碰私有 bin 的转发。
-  const workspace = makeTemp('forge-smoke-dsh-diag-ws-')
+  // 不给 MATE_NODE_EXECUTABLE：这条诊断走的就是本机 node，不碰私有 bin 的转发。
+  const workspace = makeTemp('mate-smoke-dsh-diag-ws-')
   const srv = startAcpServer({
     command: process.execPath,
     args: [payload.entry, '--profile', 'acp'],
@@ -890,7 +890,7 @@ async function scenarioDshUnderLocalNode(coreEnv) {
 /**
  * 触发条件 ②③ 的口径：**显式打印**当前这一轮到底判了什么（免得把"全绿"当成三条件已验完）。
  *
- * M4-2a 起 ② 拆成两半（计划 §12.27）：hardened runtime 这一半在**打包态**（`FORGE_SMOKE_APP=…`）
+ * M4-2a 起 ② 拆成两半（计划 §12.27）：hardened runtime 这一半在**打包态**（`MATE_SMOKE_APP=…`）
  * 被本脚本判到（起的就是签名 + `--options runtime` 的那个包）；公证那一半**本期不做**（不付费、不上架）。
  * ③ 仍需要 Windows 出包。
  */
@@ -907,7 +907,7 @@ function printUnverifiableConditions() {
   }
   section('触发条件 ②③：本脚本（源码态）不判')
   console.log('  ⚠ ②③ 需要 M4 的签名/公证/Windows 出包，源码态跑的本脚本判不了（见计划 §M3-6/§M3-8、设计 §6.3）：')
-  console.log('     ② 平台签名 / hardened runtime 是否允许包内执行该二进制 —— 用 `FORGE_SMOKE_APP=<app> pnpm smoke:desktop`（M4-2a）；')
+  console.log('     ② 平台签名 / hardened runtime 是否允许包内执行该二进制 —— 用 `MATE_SMOKE_APP=<app> pnpm smoke:desktop`（M4-2a）；')
   console.log('     ③ Windows SmartScreen / AV 是否拦 —— 需要 Windows 测试机与出包。')
   console.log('     ⇒ 因此"全绿"只等于**触发条件 ①** 已验完，不等于 §6.3 的三条件已验完。')
 }
@@ -923,12 +923,12 @@ function printLiveGate() {
   section('可选 LIVE 档（真模型；默认跳过）')
   const on = process.env.RUNTIME_SMOKE_LIVE === '1'
   const creds = {
-    dsh: !!process.env.FORGE_SMOKE_DSH_API_KEY,
-    opencode: !!process.env.FORGE_SMOKE_OPENCODE_API_KEY,
+    dsh: !!process.env.MATE_SMOKE_DSH_API_KEY,
+    opencode: !!process.env.MATE_SMOKE_OPENCODE_API_KEY,
   }
   if (!on) {
     console.log('  ⏭ 跳过：未设 RUNTIME_SMOKE_LIVE=1（默认档不联网、不跑模型、不需要任何凭据）')
-    console.log('     要跑：RUNTIME_SMOKE_LIVE=1 FORGE_SMOKE_DSH_API_KEY=… FORGE_SMOKE_OPENCODE_API_KEY=… \\')
+    console.log('     要跑：RUNTIME_SMOKE_LIVE=1 MATE_SMOKE_DSH_API_KEY=… MATE_SMOKE_OPENCODE_API_KEY=… \\')
     console.log('           node scripts/desktop-runtime-smoke.mjs live')
     console.log('     ⚠ 它**不进 CI**（要凭据 + 真模型 + 真出网）；本机从未用凭据验过这条路径——')
     console.log('       本轮的 LIVE 档只做了形状实现与门禁，**没有**真跑过。')
@@ -942,7 +942,7 @@ function printLiveGate() {
 async function scenarioResidue() {
   section('收尾：无残留（本仓的壳/核心/载荷进程）')
   await sleep(300)
-  check('无 forge-core 残留', pidsMatching(PROC_RES.core).length === 0)
+  check('无 mate-core 残留', pidsMatching(PROC_RES.core).length === 0)
   check('无桌面壳残留', pidsMatching(PROC_RES.shell).length === 0)
   // 只认"命令行里带我们载荷目录"的进程：用户自己开的 `dsh web` / 全局 `opencode` 不在此列
   // （这正是不能用 `pkill -f dsh` 的原因——那会误杀别人的会话）。
@@ -976,10 +976,10 @@ function printHelp() {
   console.log('    fingerprint 触发条件 ①：两份载荷目录指纹整轮前后零变化')
   console.log('    live        可选 LIVE 档：真发一次 session/prompt（要凭据，**不进 CI**）')
   console.log('    dsh-diag    诊断（**不计入** V9 判据）：同一份 dsh 载荷换本机 Node 起，用于定位阻塞点')
-  console.log('    dsh-alt-node 候选修复验证（**不计入** V9 判据）：换 FORGE_SMOKE_ALT_NODE 指的 Electron 再起 dsh')
+  console.log('    dsh-alt-node 候选修复验证（**不计入** V9 判据）：换 MATE_SMOKE_ALT_NODE 指的 Electron 再起 dsh')
   console.log('  环境变量：KEEP_SHELL=1 跑完不杀壳；RUNTIME_SMOKE_LIVE=1 开 LIVE 档；')
-  console.log('           FORGE_SMOKE_DSH_API_KEY / FORGE_SMOKE_OPENCODE_API_KEY 为 LIVE 档凭据；')
-  console.log('           FORGE_SMOKE_ALT_NODE 为 dsh-alt-node 的候选 Node/Electron 可执行文件绝对路径')
+  console.log('           MATE_SMOKE_DSH_API_KEY / MATE_SMOKE_OPENCODE_API_KEY 为 LIVE 档凭据；')
+  console.log('           MATE_SMOKE_ALT_NODE 为 dsh-alt-node 的候选 Node/Electron 可执行文件绝对路径')
 }
 
 /** 默认场景集（不含 `dsh-diag` / `dsh-alt-node`：它们是定位工具，不是退出判据）。 */
@@ -1031,7 +1031,7 @@ async function main() {
       shell = PACKAGED_APP
         ? await launchPackagedShell({
             appPath: PACKAGED_APP,
-            env: { PATH: '/usr/bin:/bin', HOME, FORGE_DESKTOP_HOME: makeTemp('forge-smoke-home-') },
+            env: { PATH: '/usr/bin:/bin', HOME, MATE_DESKTOP_HOME: makeTemp('mate-smoke-home-') },
           })
         : await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
       if (!shell.corePid) {
@@ -1045,8 +1045,8 @@ async function main() {
       const addr = coreAddrOf(shell)
       check('拿到核心实际监听地址（内核分配的端口）', /^127\.0\.0\.1:\d+$/.test(addr), addr || shell.logText().slice(-200))
       if (addr) {
-        const health = await fetch(`http://${addr}/v1/forge/health`).then((r) => r.status).catch(() => 0)
-        check('核心 /v1/forge/health 200（壳→核这段是通的）', health === 200, `status=${health}`)
+        const health = await fetch(`http://${addr}/v1/mate/health`).then((r) => r.status).catch(() => 0)
+        check('核心 /v1/mate/health 200（壳→核这段是通的）', health === 200, `status=${health}`)
       }
 
       // —— 核心进程**实际拿到**的环境（不是我们构造的）：runtime 看见的 PATH 就是它。
@@ -1057,31 +1057,31 @@ async function main() {
       }
       check('核心 PATH 首段是私有 bin', String(coreEnv.PATH ?? '').startsWith(`${BIN_DIR}:`), String(coreEnv.PATH ?? '').replace(DESKTOP, '…'))
       check(
-        PACKAGED_APP ? 'FORGE_NODE_EXECUTABLE 指向包内那份壳可执行文件' : 'FORGE_NODE_EXECUTABLE 指向 Electron 本体',
+        PACKAGED_APP ? 'MATE_NODE_EXECUTABLE 指向包内那份壳可执行文件' : 'MATE_NODE_EXECUTABLE 指向 Electron 本体',
         PACKAGED_APP
-          ? String(coreEnv.FORGE_NODE_EXECUTABLE ?? '').startsWith(join(PACKAGED_APP, 'Contents', 'MacOS'))
-          : /Electron\.app\/Contents\/MacOS\/Electron$/.test(coreEnv.FORGE_NODE_EXECUTABLE ?? ''),
-        coreEnv.FORGE_NODE_EXECUTABLE ?? '(未注入)',
+          ? String(coreEnv.MATE_NODE_EXECUTABLE ?? '').startsWith(join(PACKAGED_APP, 'Contents', 'MacOS'))
+          : /Electron\.app\/Contents\/MacOS\/Electron$/.test(coreEnv.MATE_NODE_EXECUTABLE ?? ''),
+        coreEnv.MATE_NODE_EXECUTABLE ?? '(未注入)',
       )
-      check('FORGE_HOME 是绝对路径（可写面只有它）', String(coreEnv.FORGE_HOME ?? '').startsWith('/'), coreEnv.FORGE_HOME ?? '(未注入)')
-      // 上一条判的是"核心自己被注入了 FORGE_HOME"；这一条判**探针**别把它当可写面：
-      // 核心的 FORGE_HOME 在开发机上就是用户真实的 `~/.forge`，探针往那儿写会污染真机状态
+      check('MATE_HOME 是绝对路径（可写面只有它）', String(coreEnv.MATE_HOME ?? '').startsWith('/'), coreEnv.MATE_HOME ?? '(未注入)')
+      // 上一条判的是"核心自己被注入了 MATE_HOME"；这一条判**探针**别把它当可写面：
+      // 核心的 MATE_HOME 在开发机上就是用户真实的 `~/.ark-mate`，探针往那儿写会污染真机状态
       // （见 smokeProbeHome 的注释），而载荷指纹断言看不出来。
       check(
-        '探针的可写面是临时目录（不是核心的 FORGE_HOME）',
-        smokeProbeHome().startsWith(tmpdir()) && smokeProbeHome() !== coreEnv.FORGE_HOME,
+        '探针的可写面是临时目录（不是核心的 MATE_HOME）',
+        smokeProbeHome().startsWith(tmpdir()) && smokeProbeHome() !== coreEnv.MATE_HOME,
         `probe=${smokeProbeHome().replace(DESKTOP, '…')}`,
       )
 
       // 壳给核心的三个载荷入口：都指向随包载荷，且文件真的在。
-      for (const key of ['FORGE_DSH_ENTRY', 'FORGE_OPENCODE_BIN', 'FORGE_NPX_ENTRY']) {
+      for (const key of ['MATE_DSH_ENTRY', 'MATE_OPENCODE_BIN', 'MATE_NPX_ENTRY']) {
         const v = coreEnv[key] ?? ''
         check(`${key} 指向随包载荷`, v.startsWith(`${PAYLOAD_ROOT}/`) && existsSync(v), v.replace(DESKTOP, '…') || '(未注入)')
       }
 
       // LIVE 档的凭据注入（默认档完全不碰）
-      if (process.env.FORGE_SMOKE_DSH_API_KEY) coreEnv.DEEPSEEK_API_KEY = process.env.FORGE_SMOKE_DSH_API_KEY
-      if (process.env.FORGE_SMOKE_OPENCODE_API_KEY) coreEnv.OPENCODE_API_KEY = process.env.FORGE_SMOKE_OPENCODE_API_KEY
+      if (process.env.MATE_SMOKE_DSH_API_KEY) coreEnv.DEEPSEEK_API_KEY = process.env.MATE_SMOKE_DSH_API_KEY
+      if (process.env.MATE_SMOKE_OPENCODE_API_KEY) coreEnv.OPENCODE_API_KEY = process.env.MATE_SMOKE_OPENCODE_API_KEY
 
       for (const id of ['dsh', 'opencode']) {
         if (!selected.includes(id)) continue
@@ -1095,7 +1095,7 @@ async function main() {
       shell = PACKAGED_APP
         ? await launchPackagedShell({
             appPath: PACKAGED_APP,
-            env: { PATH: '/usr/bin:/bin', HOME, FORGE_DESKTOP_HOME: makeTemp('forge-smoke-home-') },
+            env: { PATH: '/usr/bin:/bin', HOME, MATE_DESKTOP_HOME: makeTemp('mate-smoke-home-') },
           })
         : await launchShell({ env: { PATH: '/usr/bin:/bin', HOME } })
       check('壳与核心起来了（诊断需要读核心的真实环境）', !!shell.corePid, `core=${shell.corePid}`)

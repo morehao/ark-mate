@@ -1,9 +1,9 @@
 // Package vault 是本地密钥的**加密落盘层**：AES-256-GCM，AAD 绑定密文身份（`{kind, ref}`），
-// 主密钥走 keyfile（`<forge_home>/vault.key`）或 `FORGE_VAULT_KEY` 覆盖。
+// 主密钥走 keyfile（`<mate_home>/vault.key`）或 `MATE_VAULT_KEY` 覆盖。
 //
 // 为什么需要它：provider 档案原先明文落 `providers.json`，任何能读文件的人（备份、误提交、
 // 同步盘）都能拿到底座 API key。现在文件里只留**引用**（`vault:providers/<id>`），
-// 密文单独落 `<forge_home>/vault/<namespace>/<name>.enc`。
+// 密文单独落 `<mate_home>/vault/<namespace>/<name>.enc`。
 //
 // AAD 绑定身份的意义：把 A 的密文挪到 B 的引用上（或换 kind）**解密必然失败**，
 // 而不是悄悄解出别人的密钥。密文文件被文件名/引用错配时不可能"错位成功"。
@@ -33,12 +33,12 @@ import (
 const (
 	// RefPrefix 引用语法前缀：`vault:<namespace>/<name>`。
 	RefPrefix = "vault:"
-	// KeyFileName 主密钥文件名（位于 forge home）。
+	// KeyFileName 主密钥文件名（位于 mate home）。
 	KeyFileName = "vault.key"
-	// DirName 密文目录名（位于 forge home）。
+	// DirName 密文目录名（位于 mate home）。
 	DirName = "vault"
 	// EnvKey 覆盖主密钥的进程环境变量：32 字节的 base64 或 hex。
-	EnvKey = "FORGE_VAULT_KEY"
+	EnvKey = "MATE_VAULT_KEY"
 	// KindMcpSecret MCP server 密钥（secret_env / secret_headers）的 kind（参与 AAD）。
 	// 与 provider 密钥分开：同一份密文在两个 kind 之间不可互换（AAD 里带 kind）。
 	KindMcpSecret = "mcp_secret"
@@ -60,14 +60,14 @@ var refSegmentRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 // Store 一个已装载主密钥的 vault 句柄（并发安全：aead 与路径都是只读）。
 type Store struct {
 	dir     string // 密文目录
-	keyPath string // 主密钥路径（FORGE_VAULT_KEY 覆盖时为空 = 无 keyfile）
+	keyPath string // 主密钥路径（MATE_VAULT_KEY 覆盖时为空 = 无 keyfile）
 	aead    cipher.AEAD
 }
 
-// Open 装载/创建主密钥并返回 vault 句柄。home 为 forge home
-// （默认 `~/.forge`；密文落 `<home>/vault/`、密钥落 `<home>/vault.key`）。
+// Open 装载/创建主密钥并返回 vault 句柄。home 为 mate home
+// （默认 `~/.ark-mate`；密文落 `<home>/vault/`、密钥落 `<home>/vault.key`）。
 //
-// `FORGE_VAULT_KEY` 非空时优先用它，且**不读不建 keyfile**（容器/CI 友好）。
+// `MATE_VAULT_KEY` 非空时优先用它，且**不读不建 keyfile**（容器/CI 友好）。
 func Open(home string) (*Store, error) {
 	if home == "" {
 		return nil, errors.New("vault: home 目录为空")
@@ -99,7 +99,7 @@ func newStore(dir, keyPath string, key []byte) (*Store, error) {
 	return &Store{dir: dir, keyPath: keyPath, aead: aead}, nil
 }
 
-// KeyPath 主密钥路径（FORGE_VAULT_KEY 覆盖时为空）。
+// KeyPath 主密钥路径（MATE_VAULT_KEY 覆盖时为空）。
 func (s *Store) KeyPath() string { return s.keyPath }
 
 // Dir 密文目录。

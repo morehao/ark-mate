@@ -91,7 +91,7 @@ type Projection struct {
 	Kind ProjectionKind
 	// Scope global | workspace。空 = global。
 	// 注意：M1 只把 workspace 表达出来（数据面语义），**消费面（会话 cwd 下的投影）留到 M3**，
-	// 因为它的落点取决于假设 B（底座原生 `.opencode/` 还是平台自有 `.forge/`），尚未实测。
+	// 因为它的落点取决于假设 B（底座原生 `.opencode/` 还是平台自有 `.ark-mate/`），尚未实测。
 	Scope string
 	// Root 默认根；支持 `${HOME}` / `${XDG_CONFIG_HOME}` 占位（此处**不展开**，展开归 Resolve）。
 	// 空 = 该 kind 不投影。
@@ -131,7 +131,7 @@ type ProjectionRootEnv func(name string) (string, bool)
 // Resolve 解析某 runtime 在某 kind 上的**有效投影**（唯一解析链）。
 //
 // 解析链（按优先级）：
-//  1. `overrides["<runtime>:<kind>"]`（部署显式覆盖 `FORGE_PROJECTION_DIRS`，最高）；
+//  1. `overrides["<runtime>:<kind>"]`（部署显式覆盖 `MATE_PROJECTION_DIRS`，最高）；
 //  2. `spec.Projections` 里该 kind 声明的 `Root`（adapter 默认根）；
 //  3. 都没有 → 返回 ok=false（该 (runtime, kind) 投影**关闭**，调用方报 not_configured）。
 //
@@ -172,7 +172,7 @@ func Resolve(spec Spec, kind ProjectionKind, overrides map[string]string, env Pr
 		// 但**显式覆盖成空**是配置错误（用户以为改了、其实关掉了），报错不静默。
 		if hasOverride {
 			return Projection{}, false, fmt.Errorf(
-				"FORGE_PROJECTION_DIRS 里 %s 的值为空：要么给一个绝对目录，要么删掉这一项（空值不等于「不投影」）", key)
+				"MATE_PROJECTION_DIRS 里 %s 的值为空：要么给一个绝对目录，要么删掉这一项（空值不等于「不投影」）", key)
 		}
 		return Projection{}, false, nil
 	}
@@ -194,7 +194,7 @@ func Resolve(spec Spec, kind ProjectionKind, overrides map[string]string, env Pr
 //
 // 纪律：**变量未设置就报错**，不退回空串也不退回「家目录」猜值——静默猜出来的根会写到
 // 用户没预期的目录，而这恰恰是「投影写错地方」最难排查的形态。$HOME 都没有的进程本就
-// 不该开物化；XDG_CONFIG_HOME 没设的机器请在 `FORGE_PROJECTION_DIRS` 里给绝对路径。
+// 不该开物化；XDG_CONFIG_HOME 没设的机器请在 `MATE_PROJECTION_DIRS` 里给绝对路径。
 //
 // 只认 `${...}` 形态：`$HOME` 这样不带花括号的写法一律当普通字符（避免与路径里的字面 `$` 混淆），
 // 未闭合的 `${` 也报错。
@@ -223,7 +223,7 @@ func ExpandProjectionRoot(root string, env ProjectionRootEnv) (string, error) {
 		val, ok := env(name)
 		if !ok || strings.TrimSpace(val) == "" {
 			return "", fmt.Errorf("环境变量 %s 未设置（占位符只支持 ${HOME} / ${XDG_CONFIG_HOME}；"+
-				"请在 FORGE_PROJECTION_DIRS 里直接给绝对路径）", name)
+				"请在 MATE_PROJECTION_DIRS 里直接给绝对路径）", name)
 		}
 		b.WriteString(val)
 		rest = tail[j+1:]
@@ -241,7 +241,7 @@ func ExpandProjectionRoot(root string, env ProjectionRootEnv) (string, error) {
 // 为什么强制含 `<id>`：不含的话所有 skill 会写到**同一个文件**，后写的静默盖掉先写的——
 // 这是「一条配置看起来生效了、其实只剩一个技能」的错误形态，必须在声明期就拦住。
 //
-// 为什么要求独占目录：`.forge-managed` 归属标记与摘要 sidecar 都要有地方落，而它们只能落在
+// 为什么要求独占目录：`.mate-managed` 归属标记与摘要 sidecar 都要有地方落，而它们只能落在
 // 平台可控的**目录**里。`<id>.md` 这种平铺模板看似更贴合某些底座（dsh 也扫 `<name>.md`），
 // 但它让"这个文件是不是平台写的"无从判定，删除联动也就只能靠猜——所以不收。
 func ValidateProjectionLayout(layout string) error {
@@ -293,7 +293,7 @@ func ProjectionPath(p Projection, id string) (string, error) {
 	return filepath.Join(p.Root, rel), nil
 }
 
-// ProjectionDir 拼出某能力投影后所在的**目录**（落点的父目录；`.forge-managed` 标记与
+// ProjectionDir 拼出某能力投影后所在的**目录**（落点的父目录；`.mate-managed` 标记与
 // 摘要 sidecar 都落在这里）。
 func ProjectionDir(p Projection, id string) (string, error) {
 	full, err := ProjectionPath(p, id)

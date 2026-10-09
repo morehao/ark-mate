@@ -190,7 +190,7 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 }
 
 // directMcp 剔除**恒定的平台网关条目**：M7-3 之后，只要 MCP 面没被显式关掉
-// （`mcps: []`），注入集里永远有一条 `forge-gateway`——它不跟定义集走，也不该干扰
+// （`mcps: []`），注入集里永远有一条 `mate-gateway`——它不跟定义集走，也不该干扰
 // "哪几台 server 被注入"这类断言。要断言它**在不在**请用 `gatewayMcp`。
 func directMcp(servers []acl.McpServer) []acl.McpServer {
 	out := make([]acl.McpServer, 0, len(servers))

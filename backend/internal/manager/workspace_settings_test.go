@@ -199,14 +199,14 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	root := t.TempDir()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	store := &fakeRootsStore{src: "env(process)", locked: "FORGE_WORKSPACE_ROOTS"}
+	store := &fakeRootsStore{src: "env(process)", locked: "MATE_WORKSPACE_ROOTS"}
 	svc.SetWorkspaceSettingsStore(store)
 
 	resp, err := svc.WorkspaceSettings()
 	if err != nil {
 		t.Fatalf("WorkspaceSettings: %v", err)
 	}
-	if resp.Writable || resp.LockedBy != "FORGE_WORKSPACE_ROOTS" {
+	if resp.Writable || resp.LockedBy != "MATE_WORKSPACE_ROOTS" {
 		t.Fatalf("锁定态应透出给面板（它据此转只读）: %+v", resp)
 	}
 	err = func() error { _, e := svc.UpdateWorkspaceSettings([]string{root}); return e }()
@@ -214,7 +214,7 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 		t.Fatalf("应 settings_locked: %v", err)
 	}
 	// 报错要点名去哪改（"被锁定"本身不是可执行信息）。
-	if msg := err.Error(); !strings.Contains(msg, "FORGE_WORKSPACE_ROOTS") || !strings.Contains(msg, "[settings_locked]") {
+	if msg := err.Error(); !strings.Contains(msg, "MATE_WORKSPACE_ROOTS") || !strings.Contains(msg, "[settings_locked]") {
 		t.Fatalf("锁定错误应点明来源与语义码: %v", msg)
 	}
 	if len(store.saved) != 0 {

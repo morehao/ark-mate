@@ -4,7 +4,7 @@ import { BookOutlined, CheckOutlined, FolderOpenOutlined, FolderOutlined, PlusOu
 import { tokens } from '@ark/ui'
 import { browseWorkspaces, recentWorkspaces, workspaceLibraries } from '@ark/api'
 import type { WorkspaceLibrary, WorkspaceRecent } from '@ark/types'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { DirLabel, Label, WorkspaceBrowser, splitDirPath } from './WorkspaceBrowser'
 
 interface Props {
@@ -40,7 +40,7 @@ function isAbsolutePath(p: string): boolean {
  * 已建会话里只做只读展示（见 Composer 的 workspace 药丸）。
  */
 export function WorkspacePicker({ value, onChange, disabled }: Props) {
-  const showToast = useForge((s) => s.showToast)
+  const showToast = useMate((s) => s.showToast)
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [manual, setManual] = useState('')

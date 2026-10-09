@@ -33,7 +33,7 @@ import {
 } from '@ark/api'
 import type { Automation, AutomationPreviewItem, AutomationRunRecord } from '@ark/types'
 import { useNavigate } from 'react-router-dom'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { WorkspacePicker } from '../components/WorkspacePicker'
 import {
   KIND_OPTIONS,
@@ -84,9 +84,9 @@ const toneColor = (tone: 'success' | 'muted' | 'warning' | 'danger'): string => 
 }
 
 export function AutomationsPage() {
-  const showToast = useForge((s) => s.showToast)
-  const agents = useForge((s) => s.agents)
-  const refreshAgents = useForge((s) => s.refreshAgents)
+  const showToast = useMate((s) => s.showToast)
+  const agents = useMate((s) => s.agents)
+  const refreshAgents = useMate((s) => s.refreshAgents)
   const navigate = useNavigate()
 
   const [rows, setRows] = useState<Automation[]>([])

@@ -22,16 +22,16 @@ func writeAgentDef(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// TestAgentImportExportCLI `forge agent import|export` 走真实装配路径（配置解析 → 打开库 → 调 manager）：
+// TestAgentImportExportCLI `mate agent import|export` 走真实装配路径（配置解析 → 打开库 → 调 manager）：
 // 存量文件进库、面板改过的那一版是导出物、目录级配置不被当成定义。
 func TestAgentImportExportCLI(t *testing.T) {
 	home := t.TempDir()
-	dbPath := filepath.Join(home, "forge.db")
+	dbPath := filepath.Join(home, "mate.db")
 	agentDir := filepath.Join(home, "agents")
-	t.Setenv("FORGE_HOME", home)
-	t.Setenv("FORGE_CONFIG_DIR", filepath.Join(home, "config"))
-	t.Setenv("FORGE_DB", dbPath)
-	t.Setenv("FORGE_AGENTS", agentDir)
+	t.Setenv("MATE_HOME", home)
+	t.Setenv("MATE_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("MATE_DB", dbPath)
+	t.Setenv("MATE_AGENTS", agentDir)
 
 	writeAgentDef(t, agentDir, "u1.json", `{"id":"u1","name":"U1","runtimes":["stub"],"provider":"openai:gpt-4o"}`)
 	writeAgentDef(t, agentDir, "providers.json", `{"p1":{"type":"openai","model":"gpt-4o"}}`)

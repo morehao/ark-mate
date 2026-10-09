@@ -171,7 +171,7 @@ compozy 对照：脱敏是**落库/回放/推流前的必经路径**，且分两
 `TestWorkspaceRoutesWithRoots` 立刻红——错误文案里的绝对路径被整条洗成 `***`，
 等于把诊断能力洗没了（比漏一个未知形状的密钥更糟）。回归用例已进 `pkg/redact` 测试。
 
-**未做（划到 §7）**：注入前从继承环境剔除「凭证形状变量」——`FORGE_*` 之外目前不继承父进程
+**未做（划到 §7）**：注入前从继承环境剔除「凭证形状变量」——`MATE_*` 之外目前不继承父进程
 凭证 env 的实际风险面，与 MCP/stdio 侧同属 §7 的 env 卫生，合并做一次即可。
 
 新增测试：`pkg/redact`（形状族 / 正常内容不被洗 / 高熵边界 / 动态登记引用计数 / Payload 只洗字符串叶子）、
@@ -269,8 +269,8 @@ compozy 对照：AES-GCM，**AAD 绑定密文身份**（`internal/vault/cipherte
 
 1. 新增 `internal/vault`：
    - AES-256-GCM，**AAD 绑定 `{ref, kind}`**；
-   - 主密钥 `~/.forge/vault.key`：创建走 **O_EXCL + link 原子安装**（`internal/vault/crypto.go:146`）、
-     **拒符号链接**（`:114`）、**拒 group/other 权限位**（`:120`）；允许 `FORGE_VAULT_KEY` 覆盖；
+   - 主密钥 `~/.ark-mate/vault.key`：创建走 **O_EXCL + link 原子安装**（`internal/vault/crypto.go:146`）、
+     **拒符号链接**（`:114`）、**拒 group/other 权限位**（`:120`）；允许 `MATE_VAULT_KEY` 覆盖；
 2. `providers.json` 只存 `key_ref: "vault:providers/<id>"`（namespace 只留 providers，不抄他们 9 个 namespace）；
    `has_key` 语义不变；`UpdateProvider` 的"空串=清除"改为删 ref + 删密文；
 3. **启动迁移**：发现旧明文 `key` → 加密写回 + 清明文，幂等（本仓允许破坏性调整本地持久数据）；
@@ -298,9 +298,9 @@ vault 单测（加解密 / AAD 不匹配必失败 / keyfile 权限与符号链�
 **落成形态**：
 
 - `internal/vault`：AES-256-GCM，AAD = `kind + "\x00" + ref`（换引用或换 kind 必解不开）；
-  密文 `<forge_home>/vault/<namespace>/<name>.enc`（原子写，0600）；主密钥 `<forge_home>/vault.key`
+  密文 `<mate_home>/vault/<namespace>/<name>.enc`（原子写，0600）；主密钥 `<mate_home>/vault.key`
   （`O_EXCL` 临时文件 + `link` 原子安装，**并发首启只有一个赢家且绝不覆盖已有密钥**；读取时拒符号链接、
-  拒 group/other 权限位）；`FORGE_VAULT_KEY`（32 字节 base64/hex）覆盖时**不读不建 keyfile**。
+  拒 group/other 权限位）；`MATE_VAULT_KEY`（32 字节 base64/hex）覆盖时**不读不建 keyfile**。
 - `providers.json` 磁盘形状与内存形状拆开：磁盘 `providerFile` **只写 `key_ref`**（`key` 字段仅用于读旧文件
   做迁移），内存 `providerDef.Key` 是明文（注入 + `has_key` 用）。`has_key`、REST 形状、注入路径全不变。
 - 幂等迁移：`loadProvidersFile` 见旧明文 → `Put` 进 vault → 写回只留 ref；测试断言**二次装载文件字节不变**。
@@ -313,9 +313,9 @@ vault 单测（加解密 / AAD 不匹配必失败 / keyfile 权限与符号链�
 2. **解不开不静默**：`providerDef.keyErr` 记录装载时的解密失败，`providerEnvFor` 不注入（不再假装有密钥），
    `CredentialProblem` 报「密钥密文无法解密：确认 vault.key 未丢失/未被更换（备份清单见 deployment.md），
    或重设 key」。`ListProviders.has_key` 仍为 true——档案确实配了密钥，问题在密钥库。
-3. **vault 不可用时的降级是「保留明文」而不是「清空」**：无 forge home（`agentDir` 为空）或 keyfile
+3. **vault 不可用时的降级是「保留明文」而不是「清空」**：无 mate home（`agentDir` 为空）或 keyfile
    权限坏时，明文**原样留在 `providers.json`**（`persistProvidersFile` 在这种情况下才写 `key`），
-   日志与诊断报错。理由：丢了密钥比多留一会明文更糟；正常路径（有 forge home）绝不写明文。
+   日志与诊断报错。理由：丢了密钥比多留一会明文更糟；正常路径（有 mate home）绝不写明文。
    写入失败（`Put` 报错）走**回滚 + `vault_write_failed`**，绝不 pretend 成功。
 
 **§5.2 第 5 条（"拒绝密钥名 + 字面值写在配置里"）的 ark-mate 版落地**：复核发现
@@ -324,12 +324,12 @@ vault 单测（加解密 / AAD 不匹配必失败 / keyfile 权限与符号链�
 并在结构体注释里留下"将来实现时必须支持 `vault:` 引用而不是字面值"。MCP 侧的 env 面不存在
 （`capability.McpServer` 无 `env`，见 §7 的复核结论），凭证面只剩 `Headers` → 归 §7。
 
-**未做（记录）**：主密钥轮换 / 批量重加密工具；`FORGE_VAULT_KEY` 的配置层校验
+**未做（记录）**：主密钥轮换 / 批量重加密工具；`MATE_VAULT_KEY` 的配置层校验
 （在 `vault.Open` 报错，启动即失败）；MCP `Headers` 接 vault（§7；届时 `pkg/capability` 需要它，
 得把 vault 提到 `pkg/vault` 或由 manager 侧注入密文读写）。
 
 **测试**：vault 单测（往返 / AAD 绑引用与 kind / 篡改 / 换主密钥 / 落盘 0600 且不含明文 / keyfile 过宽权限
-与符号链接拒绝 / `FORGE_VAULT_KEY` 覆盖 + 与同密钥 keyfile 互通 / 引用穿越与非法字符拒绝 / 空 home 报错）；
+与符号链接拒绝 / `MATE_VAULT_KEY` 覆盖 + 与同密钥 keyfile 互通 / 引用穿越与非法字符拒绝 / 空 home 报错）；
 manager 侧（旧明文幂等迁移 + 文件字节不变 + 注入仍可用 / Update 落盘即密文 + 覆盖 + 清除删密文幂等 /
 换 keyfile 后 `CredentialProblem` 报可执行原因 / 非法 provider id 拒绝 / 无 vault 时纯内存不落盘）。
 `docs/deployment.md` 数据目录表、env 表与备份清单已加 `vault.key`（丢了 = 密文不可恢复）。
@@ -478,7 +478,7 @@ memory 模式全链路）；store 侧 1 例（v6 建表 + 队首按创建时间 
 > （`internal/config/mcp_server_validation.go:274-277`）。真正**现在**适用的是 header 那条。
 | **进程句柄 PID + 启动时间双校验** | `pkg/procreg` 孤儿回收只按 PID，PID 复用会误杀 | compozy 用 `procutil.MatchesStartTime`：`internal/toolruntime/registry.go:131`。**不要**抄他们取启动时间的方式（外部 `ps -o lstart=`，`process_started_at_unix.go:19`）——ark-mate 是启动者，spawn 时记 `time.Now()` 即可 |
 
-另：若 `FORGE_WORKSPACE_ROOTS` 目前只做字符串前缀比对，建议补工作区路径规范化三段式
+另：若 `MATE_WORKSPACE_ROOTS` 目前只做字符串前缀比对，建议补工作区路径规范化三段式
 （循环 percent 解码 + NFC → 最深已存在前缀 realpath → resolved-under-root，
 `internal/fileutil/path_containment.go:41` / `:66` / `:157`）——ark-mate 缺的正是"最深存在前缀"这一段。
 
@@ -718,7 +718,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 - **没定义文件就显式失败**（`skill_not_persistable`，含应有的路径与出路）：代码注入/内存注册的
   skill 无处写回，假装成功会让用户以为改完了（对齐本仓"宁可显式失败"的立场）。
 - **立刻重校物化**：app 启动重校时把 (root, runtime) 目标登记到 Service，启停后同步重跑同一组目标。
-  **禁用 = 撤回**：已物化的副本从 runtime 目录里被摘掉（删除联动只动带 `.forge-managed` 标记的目录，
+  **禁用 = 撤回**：已物化的副本从 runtime 目录里被摘掉（删除联动只动带 `.mate-managed` 标记的目录，
   用户自有同名目录绝不误删，有测试钉住）。重校失败**不回滚**定义变更（文件已改，谎报失败更糟），
   失败原因随响应回带 `materialize_errors`。
 - **顺序刻意**：先磁盘（事实源）、再内存注册表、最后物化——每一步失败时后面的都不做，
@@ -744,7 +744,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 - **算法逐条对照** compozy `internal/skills/provenance.go:54`（`ComputeDirectoryHash`）与 `:189`（`writeHashEntry`）：
   相对路径收集后排序；普通文件写 `file:<slash 路径>\nmode:<权限>\n` + 内容 + `\0`（**权限入哈希**，chmod 也算变更）；
   软链**不 follow**，写 `symlink:<路径>\nmode:<权限>\ntarget:<字面目标>\n`，且目标解析后逃出目录即拒
-  （`ErrSymlinkEscape`）；设备/管道等未知类型直接报错；遍历**排除平台记账文件**（`.forge-managed` 与 sidecar 自身，
+  （`ErrSymlinkEscape`）；设备/管道等未知类型直接报错；遍历**排除平台记账文件**（`.mate-managed` 与 sidecar 自身，
   否则每次重校都"看起来变了"）。
 - **sidecar 记什么**：`{version, skill_id, runtime, format, hash, bytes, written_at}`（0600）。
   与 compozy 的差异：那边 provenance 服务于 marketplace（registry/slug/version），ark-mate 没有 marketplace，
@@ -760,18 +760,18 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
   skill + 记录摘要 == 期望载荷摘要 + 磁盘实测摘要 == 期望」——多塞文件/改权限/换软链这些**内容比对看不出来**的
   变化，摘要全看得出来。老产物（无 sidecar）第一次重校**就地升级**，之后保持幂等。
 - **一处踩坑记录**：sidecar 里的 `runtime`/`format` **不参与幂等判定**。共享 root 下同一目录会被多个 runtime
-  各投影一次，最后写入者是谁无关紧要（归属由 `.forge-managed` 标记维护）；一开始把它们纳入判定，共享 root 的
+  各投影一次，最后写入者是谁无关紧要（归属由 `.mate-managed` 标记维护）；一开始把它们纳入判定，共享 root 的
   两个 runtime 会互相把对方写的产物判成"过期"而反复重写（`TestReconcileSkillsForPerRuntime` /
   `TestReconcileSharedRootResidualCleanup` 立刻红）。这两条既有测试正好当了护栏。
 
 **S3 安装/物化事务**（`MaterializeSkillFor` + `replaceDir` + `ensureReplaceableDir`）：
 
 - **此前**：裸 `os.MkdirAll` + `os.WriteFile`（非原子、跟随软链、同名即覆盖别人目录）。
-- **现在**：`ensureReplaceableDir` 先判归属（不存在 → 可建；带 `.forge-managed` → 可替换；**是软链 / 不是目录 /
+- **现在**：`ensureReplaceableDir` 先判归属（不存在 → 可建；带 `.mate-managed` → 可替换；**是软链 / 不是目录 /
   无标记 → 显式拒绝**，错误里给出去路）→ staging 临时目录写全（SKILL.md + 归属标记 + sidecar）→ **重算 staging
-  摘要自校验**（"我以为我写了什么"变成可判定事实）→ `replaceDir` 原子换入（旧目录先挪到 `<dir>.forge-old`，
+  摘要自校验**（"我以为我写了什么"变成可判定事实）→ `replaceDir` 原子换入（旧目录先挪到 `<dir>.mate-old`，
   换入失败**挪回来**；成功后清理）。收益：agent 永远看不到半成品；失败时旧产物原样在；`MkdirTemp` 的随机后缀
-  天然避免并发同写；根目录不留 `.forge-stage-*`/`.forge-old` 残留（有断言）。
+  天然避免并发同写；根目录不留 `.mate-stage-*`/`.mate-old` 残留（有断言）。
 - **不做**：compozy 的 `MoveInstalledDir` 还带目录句柄持有 + publication lock + 清理诊断（多进程/多租户场景需要）。
   ark-mate 是**单操作者本地平台**，不加锁；这条差异记在这里，免得后人以为漏抄。
 
@@ -817,7 +817,7 @@ M5/M8（生命周期矩阵 + probe 缓存 key，与 §7 的 probe 加固合批�
 
 §13 的服务端能力此前只在 REST 上可用，面板看不见——这一轮把**已有**能力接到 UI（不新增端点，
 故 README 路由表不变）。改动集中在 `apps/panel/src/pages/CapabilitiesPage.tsx`、
-`apps/panel/src/console/capabilityView.ts`（纯函数视图模型）、`packages/api/src/resources/forge.ts`。
+`apps/panel/src/console/capabilityView.ts`（纯函数视图模型）、`packages/api/src/resources/mate.ts`。
 
 - **S4 启停**：全局 Skills 行加 `Switch`（`PATCH /skills/:id`）。回执按事实拼一句话：
   写回/撤回条数 + `materialize_errors`（有就带上）+ `next_action`；成功后重拉 `/skills` 与

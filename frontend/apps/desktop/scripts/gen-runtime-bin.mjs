@@ -4,10 +4,10 @@
  *
  * 产出 `apps/desktop/resources/runtime/bin/`：
  *
- *   node      → 用 Electron 的 Node 执行（`ELECTRON_RUN_AS_NODE=1` + `FORGE_NODE_EXECUTABLE`）
- *   npx       → 同上，再执行载荷里 npm 的 `npx-cli.js`（`FORGE_NPX_ENTRY`）
- *   dsh       → 同上，再执行随包载荷里的 dsh 入口（`FORGE_DSH_ENTRY`）
- *   opencode  → 直接执行随包载荷里的平台化二进制（`FORGE_OPENCODE_BIN`）
+ *   node      → 用 Electron 的 Node 执行（`ELECTRON_RUN_AS_NODE=1` + `MATE_NODE_EXECUTABLE`）
+ *   npx       → 同上，再执行载荷里 npm 的 `npx-cli.js`（`MATE_NPX_ENTRY`）
+ *   dsh       → 同上，再执行随包载荷里的 dsh 入口（`MATE_DSH_ENTRY`）
+ *   opencode  → 直接执行随包载荷里的平台化二进制（`MATE_OPENCODE_BIN`）
  *
  * 为什么是**生成物**而不是手写文件：每个启动器都要同时有 POSIX 与 Windows 两个版本，
  * 且都要做同一件事——"目标没注入就大声失败"。手写的典型结局是两版行为悄悄分叉，
@@ -33,20 +33,20 @@ const LAUNCHERS = [
   {
     name: 'node',
     // Node 本身没有入口文件：`node <script.js> …` 直接转发。
-    targetVar: 'FORGE_NODE_EXECUTABLE',
+    targetVar: 'MATE_NODE_EXECUTABLE',
     targetLabel: 'Electron 可执行文件（壳启动时注入）',
     nodeMode: true,
     passthroughOnly: true,
   },
   {
     name: 'npx',
-    targetVar: 'FORGE_NPX_ENTRY',
+    targetVar: 'MATE_NPX_ENTRY',
     targetLabel: '随包载荷里 npm 的 npx-cli.js（壳按 payload 解析结果注入）',
     nodeMode: true,
   },
   {
     name: 'dsh',
-    targetVar: 'FORGE_DSH_ENTRY',
+    targetVar: 'MATE_DSH_ENTRY',
     targetLabel: '随包载荷里 dsh 的 bin.js（壳按 payload 解析结果注入）',
     nodeMode: true,
     // dsh 自己的**数据面**（设计 §6.6.1）：**必须在启动器里兜底**，因为 dsh 连 `--version` 都会写自己的 home
@@ -65,7 +65,7 @@ const LAUNCHERS = [
   },
   {
     name: 'opencode',
-    targetVar: 'FORGE_OPENCODE_BIN',
+    targetVar: 'MATE_OPENCODE_BIN',
     targetLabel: '随包载荷里 opencode 的平台化二进制（壳按 payload 解析结果注入）',
     // 原生二进制，不需要 Electron 的 Node 模式。
     nodeMode: false,
@@ -86,8 +86,8 @@ const LAUNCHERS = [
 /** 启动器运行前必须由壳注入的变量：Node 模式两个（转发目标 + Node），原生二进制一个。 */
 function requiredVars(launcher) {
   const vars = [
-    ...(launcher.nodeMode ? ['FORGE_NODE_EXECUTABLE'] : []),
-    ...(launcher.isolation ? ['FORGE_HOME'] : []),
+    ...(launcher.nodeMode ? ['MATE_NODE_EXECUTABLE'] : []),
+    ...(launcher.isolation ? ['MATE_HOME'] : []),
     launcher.targetVar,
   ]
   return vars.filter((v, i, all) => all.indexOf(v) === i)
@@ -99,15 +99,15 @@ function isolationLines(launcher, style) {
   if (!entries.length) return []
   return entries.map(([key, sub]) =>
     style === 'posix'
-      ? `: "\${${key}:=$FORGE_HOME/${sub}}" ; export ${key}`
-      : `if not defined ${key} set "${key}=%FORGE_HOME%/${sub.replace(/\//g, '\\')}"`,
+      ? `: "\${${key}:=$MATE_HOME/${sub}}" ; export ${key}`
+      : `if not defined ${key} set "${key}=%MATE_HOME%/${sub.replace(/\//g, '\\')}"`,
   )
 }
 
 function posixScript(launcher) {
   // 三种转发形态：node 自身（只转发参数）/ Node 模式的入口 JS（node + 入口 + 参数）/ 原生二进制。
   const exec = launcher.nodeMode
-    ? `ELECTRON_RUN_AS_NODE=1 exec "$FORGE_NODE_EXECUTABLE" ${launcher.name === 'node' ? '"$@"' : `"$${launcher.targetVar}" "$@"`}`
+    ? `ELECTRON_RUN_AS_NODE=1 exec "$MATE_NODE_EXECUTABLE" ${launcher.name === 'node' ? '"$@"' : `"$${launcher.targetVar}" "$@"`}`
     : `exec "$${launcher.targetVar}" "$@"`
   return [
     '#!/bin/sh',
@@ -129,7 +129,7 @@ function posixScript(launcher) {
 
 function windowsScript(launcher) {
   const exec = launcher.nodeMode
-    ? `"%FORGE_NODE_EXECUTABLE%" ${launcher.name === 'node' ? '%*' : `"%${launcher.targetVar}%" %*`}`
+    ? `"%MATE_NODE_EXECUTABLE%" ${launcher.name === 'node' ? '%*' : `"%${launcher.targetVar}%" %*`}`
     : `"%${launcher.targetVar}%" %*`
   return [
     '@echo off',

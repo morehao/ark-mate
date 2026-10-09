@@ -12,7 +12,7 @@ import (
 // `<配置目录>/config.json`，并把「该键被更高优先级来源锁定」这一事实显式报给上层。
 //
 // 为什么不另开一份 settings.json：白名单只应有一个事实源。真正的风险也不是"写哪个文件"，
-// 而是**面板写了却不生效**——配置优先级是 默认值 < config.json < env 文件 < 进程 `FORGE_*` < flag，
+// 而是**面板写了却不生效**——配置优先级是 默认值 < config.json < env 文件 < 进程 `MATE_*` < flag，
 // 高优先级来源存在时写 config.json 必然被覆盖。所以这里不隐藏优先级，而是把它报出来（Status），
 // 由上层拒绝写并让面板转只读。
 type SettingsStore struct {
@@ -57,7 +57,7 @@ func (s *SettingsStore) SaveWorkspaceRoots(roots []string) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	mode := os.FileMode(0o600) // 配置目录里可能有 FORGE_TOKEN：默认不给同组/其他用户读
+	mode := os.FileMode(0o600) // 配置目录里可能有 MATE_TOKEN：默认不给同组/其他用户读
 	if st, serr := os.Stat(path); serr == nil {
 		mode = st.Mode().Perm() // 已有文件保留原权限（不借写回之机改运维的设置）
 	}
@@ -86,7 +86,7 @@ func (s *SettingsStore) Status() (source, lockedBy string) {
 	case SourceDefault, SourceFile:
 		return string(src), ""
 	case SourceEnv:
-		return string(src), "FORGE_WORKSPACE_ROOTS"
+		return string(src), "MATE_WORKSPACE_ROOTS"
 	case SourceEnvFile:
 		return string(src), filepath.Join(s.dir, "env")
 	default: // SourceFlag：CLI flag 高于一切配置面

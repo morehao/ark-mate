@@ -94,7 +94,7 @@ type Service struct {
 	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
 	// 见 SetWorkspacePolicy / ResolveWorkspace。
 	workspaceDir string
-	// workspaceRoots 允许作为工作空间的根白名单（FORGE_WORKSPACE_ROOTS；空 = 不限制）。
+	// workspaceRoots 允许作为工作空间的根白名单（MATE_WORKSPACE_ROOTS；空 = 不限制）。
 	// 非空时显式 cwd 与目录浏览都被收在内，浏览也不允许越过根向上。
 	// 这里存的是**显式配置**的那一份；对外生效名单还要并上代建根（effectiveWorkspaceRootsLocked）。
 	// 见 SetWorkspacePolicy / withinRoots。
@@ -161,12 +161,12 @@ type Service struct {
 	// 而洪水之后真问题也没人看。见 defWarnOnce。
 	defWarned map[string]bool
 
-	// B5 原生权限映射开关（FORGE_NATIVE_PERMISSION=off 关闭；默认开启）。
+	// B5 原生权限映射开关（MATE_NATIVE_PERMISSION=off 关闭；默认开启）。
 	nativePermMu      sync.Mutex
 	nativePermEnabled bool
 	nativePermSet     bool
 
-	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；FORGE_MCP_GATEWAY=off 回退）。
+	// mcpGatewayEnabled 平台侧 MCP 网关开关（M7-3；MATE_MCP_GATEWAY=off 回退）。
 	// 零值 false 会被 NewService 显式置成 true——"忘了设"不该等于"静默关掉网关"。
 	mcpGatewayEnabled atomic.Bool
 	mcpGatewayWarnMu  sync.Mutex

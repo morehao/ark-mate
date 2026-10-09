@@ -33,7 +33,7 @@ const norm = (s: string | null | undefined): string => (s ?? '').trim()
 /**
  * 比较"编译进页面的构建 id"与"核心实际服务的那份资产的构建 id"。
  *
- * @param webBuildId 页面里的编译期常量（`__FORGE_WEB_BUILD_ID__`）
+ * @param webBuildId 页面里的编译期常量（`__MATE_WEB_BUILD_ID__`）
  * @param coreBuildId `/meta` 回报的 `webBuildId`
  */
 export function versionGate(webBuildId: string, coreBuildId: string): VersionGateResult {

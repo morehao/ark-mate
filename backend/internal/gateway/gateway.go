@@ -2,7 +2,7 @@
 //
 // 形态（计划的 P-1/P-2，先认清否则会照抄错模板）：底座（opencode / dsh）按 ACP 规范在
 // `session/new` 里收到一条 **stdio** MCP 条目，条目指向平台自己的可执行文件
-// （`forge mcp bridge --agent <id> --runtime <id>`）；网关进程**只带 scope、不带 server 列表**，
+// （`mate mcp bridge --agent <id> --runtime <id>`）；网关进程**只带 scope、不带 server 列表**，
 // 自己打开本机 store 读该 scope 的能力定义、自己从 vault 解密钥、再把工具面暴露给底座。
 //
 // 为什么这样切（三条都是硬理由，不是偏好）：

@@ -28,7 +28,7 @@ import (
 // DefinitionImportOptions 导入的行为开关（各域共用）。
 type DefinitionImportOptions struct {
 	// Auto 装配期自动导入：幂等靠目录指纹（见 DefinitionImportStats.Marker），目录没变就整体跳过。
-	// 显式 `forge … import` 用 false（每次按行判重）。
+	// 显式 `mate … import` 用 false（每次按行判重）。
 	Auto bool
 	// DryRun 只扫描与校验、不写库（与 `capability migrate --dry-run` 同口径）。
 	DryRun bool
@@ -99,7 +99,7 @@ func countDryRun(ctx context.Context, st *store.Store, items []store.DefinitionI
 // fingerprintPaths 目录指纹（`子目录/文件名:大小`，稳定序）——导入幂等标记的唯一算法。
 //
 // 只取文件名 + 大小而不是内容哈希：与 `fingerprintTranscripts` 同构，代价是"只改内容不改大小的
-// 编辑可能漏判"，但漏判的后果只是"这次没自动导入"（显式 `forge … import` 随时可补），
+// 编辑可能漏判"，但漏判的后果只是"这次没自动导入"（显式 `mate … import` 随时可补），
 // 而把"目录没变"判成"变了"会让**每次启动**都重跑一遍导入（噪音 + 无意义的事务）。
 func fingerprintPaths(paths []string) string {
 	sorted := append([]string{}, paths...)

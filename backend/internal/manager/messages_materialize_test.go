@@ -112,7 +112,7 @@ func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
 	svc.registerConversation(&ConversationRec{ID: "s-s", AgentID: "agent-stub"})
-	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 forge 服务"})
+	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 mate 服务"})
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
 	svc.publish(BusTurnEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
 
@@ -120,7 +120,7 @@ func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || hits[0].ID != "s-s" || !strings.Contains(hits[0].Snippet, "部署 forge") {
+	if len(hits) != 1 || hits[0].ID != "s-s" || !strings.Contains(hits[0].Snippet, "部署 mate") {
 		t.Fatalf("sqlite 搜索应命中且带片段: %+v", hits)
 	}
 	if hits[0].Matches < 1 {

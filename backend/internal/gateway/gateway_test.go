@@ -152,7 +152,7 @@ func (g *rig) handshake() mcpFrame {
 		g.t.Fatalf("initialize 失败: %+v", init.Error)
 	}
 	// 网关自述要交代命名空间规则（模型靠它分辨来源 server）。
-	if !strings.Contains(string(init.Result), "forge-gateway") || !strings.Contains(string(init.Result), "__") {
+	if !strings.Contains(string(init.Result), "mate-gateway") || !strings.Contains(string(init.Result), "__") {
 		g.t.Fatalf("initialize 自述应含网关名与命名规则: %s", init.Result)
 	}
 	return init

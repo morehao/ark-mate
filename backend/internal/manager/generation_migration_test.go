@@ -500,7 +500,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("错误应带码 generation_limit_reached，got %v", err)
 	}
 	// 拒绝文案必须给出路（用户看得懂"我该怎么办"）。
-	for _, want := range []string{"上限", "FORGE_GENERATION_LIMIT", "复用"} {
+	for _, want := range []string{"上限", "MATE_GENERATION_LIMIT", "复用"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("拒绝文案缺 %q：%v", want, err)
 		}

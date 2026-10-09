@@ -26,7 +26,7 @@ func libraryRig(t *testing.T) *Service {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "opencode", Name: "opencode", McpTransports: []string{"stdio"},
 			Projections: []runtime.Projection{opencodeSkillProjectionForTest()}},
-		// deepseekharness 没有投影解析（未配 FORGE_PROJECTION_DIRS）→ not_configured 分支。
+		// deepseekharness 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
 		runtime.Spec{ID: "deepseekharness", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
 	svc := NewService(reg, eventbus.New())

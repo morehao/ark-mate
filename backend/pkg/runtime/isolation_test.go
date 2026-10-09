@@ -100,7 +100,7 @@ func TestIsolationEnvEmptyHome(t *testing.T) {
 			t.Fatalf("home=%q 应返回 nil，got %v", home, got)
 		}
 	}
-	if got, want := IsolationEnv(opencode.ID, "  /tmp/forge-home  "), IsolationEnv(opencode.ID, "/tmp/forge-home"); !reflect.DeepEqual(got, want) {
+	if got, want := IsolationEnv(opencode.ID, "  /tmp/mate-home  "), IsolationEnv(opencode.ID, "/tmp/mate-home"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("前后空白应被去掉: %v vs %v", got, want)
 	}
 }

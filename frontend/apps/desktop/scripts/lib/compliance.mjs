@@ -52,7 +52,7 @@ export const UPSTREAM = {
  * 载荷名 → 它在 npm 上的**真实包名**。
  *
  * 为什么需要这张表：`release.json` 里的载荷名是**平台侧的叫法**（`dsh` / `opencode`，
- * 也是 `FORGE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
+ * 也是 `MATE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
  * （`@deepseek-ai/dsh` / `@opencode/cli-darwin-arm64`）。两者的绑定不能靠"看起来像"来猜：
  * 这里是**声明**，生成期硬校验"载荷树里确实有这个名字的包、版本也一致"，对不上就失败
  * （包改名/换发行包时当场红，而不是让 NOTICES 里出现一个不存在的组件名）。
@@ -457,21 +457,21 @@ export function renderSbom(model) {
   const components = [
     component(COMPONENT_TYPE.electron, 'electron', model.runtimes.find((r) => r.kind === 'electron').version, 'MIT',
       runtimePurl('electron', model.runtimes.find((r) => r.kind === 'electron').version), [
-        { name: 'forge:source', value: UPSTREAM.electron },
+        { name: 'mate:source', value: UPSTREAM.electron },
       ]),
     component(COMPONENT_TYPE.node, 'node', model.runtimes.find((r) => r.kind === 'node').version, 'MIT',
       runtimePurl('node', model.runtimes.find((r) => r.kind === 'node').version), [
-        { name: 'forge:source', value: UPSTREAM.node },
-        { name: 'forge:nodeAbi', value: String(model.nodeAbi) },
+        { name: 'mate:source', value: UPSTREAM.node },
+        { name: 'mate:nodeAbi', value: String(model.nodeAbi) },
       ]),
     ...model.packages.map((pkg) => {
       // 载荷根那份包（`@deepseek-ai/dsh` / `opencode-darwin-arm64`）就在这里，带上
-      // `forge:payloadRoot` 与载荷 digest——**不另造一个"载荷"组件**（同一份软件出现两次
+      // `mate:payloadRoot` 与载荷 digest——**不另造一个"载荷"组件**（同一份软件出现两次
       // 只会让清单看起来更全，实际是同名不同物，机器消费方没法用）。
-      const props = [{ name: 'forge:payload', value: pkg.payloads.join('+') }]
-      if (pkg.payloadRoot) props.push({ name: 'forge:payloadRoot', value: pkg.payloadRoot })
-      if (pkg.digest) props.push({ name: 'forge:digest', value: pkg.digest })
-      props.push({ name: 'forge:bundledBy', value: pkg.bundledBy })
+      const props = [{ name: 'mate:payload', value: pkg.payloads.join('+') }]
+      if (pkg.payloadRoot) props.push({ name: 'mate:payloadRoot', value: pkg.payloadRoot })
+      if (pkg.digest) props.push({ name: 'mate:digest', value: pkg.digest })
+      props.push({ name: 'mate:bundledBy', value: pkg.bundledBy })
       return component(COMPONENT_TYPE.npm, pkg.name, pkg.version, pkg.license, purlFor(pkg.name, pkg.version), props)
     }),
   ]

@@ -9,7 +9,7 @@ import (
 // ——— §13.3 M1/M6：密钥引用（明文 vs 密钥在类型上分开） ———
 //
 // 为什么需要：ark-mate 原先只有一个 `McpServer.Headers`，于是"非密钥的 header（如
-// `X-Client: forge`）"和"密钥（如 `Authorization: Bearer sk-…`）"**在同一个字段里**，
+// `X-Client: mate`）"和"密钥（如 `Authorization: Bearer sk-…`）"**在同一个字段里**，
 // 谁也没法在类型层面说清哪个是秘密——结果就是密钥明文躺在 `<CapabilityDir>/mcp/*.json` 里，
 // 而读模型只好整个 `headers` 都不返回（要么泄密要么没用）。
 //
@@ -17,7 +17,7 @@ import (
 // `SecretEnv`/`SecretHeaders` 的**值只能是引用**，永远不接受明文。引用两种：
 //
 //	vault:<namespace>/<name>  平台托管密文（AES-256-GCM，见 §5）；定义文件里只有引用，
-//	                          密钥本体在 `<forge_home>/vault/<ns>/<name>.enc`
+//	                          密钥本体在 `<mate_home>/vault/<ns>/<name>.enc`
 //	env:<ENV_NAME>            进程环境变量（容器/CI 注入；盘上什么都没有）
 //
 // 这一层只做**词法**校验（纯字符串，不碰磁盘/不碰密钥材料），解析成明文发生在注入前一刻，

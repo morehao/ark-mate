@@ -8,7 +8,7 @@ import (
 // registerAutomation M4：automation（定时任务）面。
 //
 // 定义的事实源**按持久层模式分派**（M6-7）：sqlite 模式是 `automations` 表（定义列 + 运行态列），
-// memory 模式仍是 `<AutomationDir>/<id>.json`（`FORGE_AUTOMATIONS` 在 sqlite 模式下降级为
+// memory 模式仍是 `<AutomationDir>/<id>.json`（`MATE_AUTOMATIONS` 在 sqlite 模式下降级为
 // 导入/导出目录）。接口只是它的编辑器与观察窗：
 //
 //   - `GET /automations` 列表（含**装载失败的**定义，带 `error` —— 写得不对却"列表里没有、

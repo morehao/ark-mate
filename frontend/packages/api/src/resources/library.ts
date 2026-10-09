@@ -17,5 +17,5 @@ export const listLibrary = (params: { kind?: string; q?: string } = {}): Promise
   if (params.kind) qs.set('kind', params.kind)
   if (params.q) qs.set('q', params.q)
   const suffix = qs.toString()
-  return http.get<LibraryItem[]>(`/forge/library${suffix ? `?${suffix}` : ''}`)
+  return http.get<LibraryItem[]>(`/mate/library${suffix ? `?${suffix}` : ''}`)
 }

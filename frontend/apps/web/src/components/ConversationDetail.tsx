@@ -13,7 +13,7 @@ import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
 import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
 import { modelValues } from '@ark/types'
 import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
 import { agentNameOf, shortId } from '../console/util'
@@ -42,16 +42,16 @@ export function ConversationDetailDrawer({
   conversationId: string
   onClose: () => void
 }) {
-  const agents = useForge((s) => s.agents)
-  const views = useForge((s) => s.views)
-  const respond = useForge((s) => s.respondPermission)
-  const renameConversation = useForge((s) => s.renameConversation)
-  const togglePin = useForge((s) => s.togglePin)
-  const archiveConversation = useForge((s) => s.archiveConversation)
-  const showToast = useForge((s) => s.showToast)
-  const modelCatalog = useForge((s) => s.modelCatalog)
-  const loadModelCatalog = useForge((s) => s.loadModelCatalog)
-  const updateConversationModel = useForge((s) => s.updateConversationModel)
+  const agents = useMate((s) => s.agents)
+  const views = useMate((s) => s.views)
+  const respond = useMate((s) => s.respondPermission)
+  const renameConversation = useMate((s) => s.renameConversation)
+  const togglePin = useMate((s) => s.togglePin)
+  const archiveConversation = useMate((s) => s.archiveConversation)
+  const showToast = useMate((s) => s.showToast)
+  const modelCatalog = useMate((s) => s.modelCatalog)
+  const loadModelCatalog = useMate((s) => s.loadModelCatalog)
+  const updateConversationModel = useMate((s) => s.updateConversationModel)
 
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [run, setRun] = useState<RunSummary | null>(null)

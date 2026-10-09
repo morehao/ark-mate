@@ -10,11 +10,11 @@ import (
 )
 
 // transcriptPrune 显式清理 transcript 目录中超过 --older-than 的文件（ADR-5：
-// transcript 为审计/回滚保留，不设自动删除；清理仅经本命令，默认目录 FORGE_TRANSCRIPTS）。
+// transcript 为审计/回滚保留，不设自动删除；清理仅经本命令，默认目录 MATE_TRANSCRIPTS）。
 func transcriptsPrune(args []string) {
 	fs := flag.NewFlagSet("transcripts prune", flag.ExitOnError)
 	olderThan := fs.String("older-than", "", "删除修改时间早于此时长的 *.jsonl（必填；支持 30d / 168h / 72h30m 等）")
-	dir := fs.String("dir", "", "transcript 目录（默认 FORGE_TRANSCRIPTS 或 ~/.forge/transcripts）")
+	dir := fs.String("dir", "", "transcript 目录（默认 MATE_TRANSCRIPTS 或 ~/.ark-mate/transcripts）")
 	_ = fs.Parse(args)
 	cfg, _ := mustConfig()
 	if *dir != "" {

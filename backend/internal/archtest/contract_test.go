@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// frozenEventTypes 是控制面**对外契约**的事件 type 全集（`/v1/forge/ws/events` 帧的
+// frozenEventTypes 是控制面**对外契约**的事件 type 全集（`/v1/mate/ws/events` 帧的
 // `type` 字段 + sqlite `events.type` 列 + transcript 回放）。前端 @ark/types 的
 // events.ts 按这些字面量做联合类型，历史数据里也存着它们。
 //

@@ -203,7 +203,7 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 	}
 }
 
-// TestProviderPlaintextSurvivesWhenVaultUnavailable vault 不可用（agentDir 为空 = 无 forge home）
+// TestProviderPlaintextSurvivesWhenVaultUnavailable vault 不可用（agentDir 为空 = 无 mate home）
 // 时：不清空密钥、不写盘（纯内存），且不 pretend 加密成功。
 func TestProviderPlaintextSurvivesWhenVaultUnavailable(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil) // 未 LoadAgentDefinitions → agentDir == ""

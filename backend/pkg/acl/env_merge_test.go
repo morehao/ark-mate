@@ -9,7 +9,7 @@ import "testing"
 // 语义相反，隔离就守不住了。合并后必须"每键一次 + 显式值胜出"。
 func TestMergeEnvExplicitWins(t *testing.T) {
 	base := []string{"PATH=/usr/bin", "XDG_CONFIG_HOME=/Users/me/.config", "LANG=zh_CN.UTF-8"}
-	override := []string{"XDG_CONFIG_HOME=/home/forge/runtime/opencode/config", "DSH_HOME=/home/forge/runtime/dsh"}
+	override := []string{"XDG_CONFIG_HOME=/home/mate/runtime/opencode/config", "DSH_HOME=/home/mate/runtime/dsh"}
 
 	got := mergeEnv(base, override)
 
@@ -23,13 +23,13 @@ func TestMergeEnvExplicitWins(t *testing.T) {
 			t.Fatalf("%s 出现 %d 次：%v", key, n, got)
 		}
 	}
-	if !hasKV(got, "XDG_CONFIG_HOME=/home/forge/runtime/opencode/config") {
+	if !hasKV(got, "XDG_CONFIG_HOME=/home/mate/runtime/opencode/config") {
 		t.Fatalf("显式值没赢：%v", got)
 	}
 	if !hasKV(got, "PATH=/usr/bin") || !hasKV(got, "LANG=zh_CN.UTF-8") {
 		t.Fatalf("未冲突的既有项丢了：%v", got)
 	}
-	if !hasKV(got, "DSH_HOME=/home/forge/runtime/dsh") {
+	if !hasKV(got, "DSH_HOME=/home/mate/runtime/dsh") {
 		t.Fatalf("新增项丢了：%v", got)
 	}
 }

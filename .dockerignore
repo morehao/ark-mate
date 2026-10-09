@@ -1,6 +1,6 @@
 # Docker 构建上下文瘦身（`docker build .` 会把整个仓库发给 daemon）。
 # 只保留镜像真正需要的东西：backend/（Go module）与 frontend/（workspace 源码 + lockfile）。
-# 不加这个文件时，本机上下文会带上 .cache/（数 GB）、.gocache/、./forge 与 node_modules。
+# 不加这个文件时，本机上下文会带上 .cache/（数 GB）、.gocache/、./mate 与 node_modules。
 
 # —— 版本控制 / 编辑器 / OS ——
 .git
@@ -13,7 +13,7 @@
 # —— 本地构建缓存与产物（真源都不在镜像里）——
 .cache
 .gocache
-/forge
+/mate
 **/*.test
 **/*.out
 go.work.sum

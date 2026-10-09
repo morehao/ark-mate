@@ -110,13 +110,13 @@ Resolve(typ, apiKey)
 
 | 方法 | 路径 | 语义 |
 |---|---|---|
-| GET | `/v1/forge/models?provider=:type` | 平台侧模型目录（三段式；响应带 `source`） |
-| GET | `/v1/forge/providers/:id/models` | 某 provider 档案的可选模型（live 优先，兜底快照） |
-| PATCH | `/v1/forge/providers/:id` | `model` 受目录约束（不在目录 → 40001 友好文案） |
-| POST | `/v1/forge/conversations` | 新增 `model`（会话级） |
-| GET/PATCH | `/v1/forge/conversations/:id` | 详情/PATCH 增 `model` |
+| GET | `/v1/mate/models?provider=:type` | 平台侧模型目录（三段式；响应带 `source`） |
+| GET | `/v1/mate/providers/:id/models` | 某 provider 档案的可选模型（live 优先，兜底快照） |
+| PATCH | `/v1/mate/providers/:id` | `model` 受目录约束（不在目录 → 40001 友好文案） |
+| POST | `/v1/mate/conversations` | 新增 `model`（会话级） |
+| GET/PATCH | `/v1/mate/conversations/:id` | 详情/PATCH 增 `model` |
 
-> 每新增/改名路由都需同步 `README.md`「控制面接口摘要」反引号 `/v1/forge` 路径，
+> 每新增/改名路由都需同步 `README.md`「控制面接口摘要」反引号 `/v1/mate` 路径，
 > 保持 `internal/server/router/router_test.go:TestReadmeRoutesMatchRouter` 绿。
 
 ---
@@ -164,7 +164,7 @@ Resolve(typ, apiKey)
 ## 9. 一致性守卫
 
 - 路由新增 → 同步 README + `TestReadmeRoutesMatchRouter` 保持绿。
-- 事件类型 / 存储变更 → 同步 `manager/events.go` 与 `store/schema.go` 迁移（v4 幂等，`forge migrate` 可导入）。
+- 事件类型 / 存储变更 → 同步 `manager/events.go` 与 `store/schema.go` 迁移（v4 幂等，`mate migrate` 可导入）。
 - 前端 `typecheck` + `go test ./...` 保持通过；相关单测走真实装配路径（`manager.NewService` + `router.New`）。
 
 ---
@@ -241,12 +241,12 @@ func Valid(typ ProviderType) bool
 //   未过期缓存 → (models, SourceCache, nil)
 //   否则 go:embed 快照 → (models, SourceSnapshot, nil)
 // apiKey 为空：跳过 live，直接快照。
-// cacheDir：测试可注入临时目录；空 = DefaultCacheDir()（$FORGE_MODEL_CACHE_DIR，否则 ~/.forge/cache/models）。
+// cacheDir：测试可注入临时目录；空 = DefaultCacheDir()（$MATE_MODEL_CACHE_DIR，否则 ~/.ark-mate/cache/models）。
 func Resolve(ctx context.Context, typ ProviderType, apiKey, cacheDir string) ([]Model, Source, error)
 ```
 
 > 实现注（2026-09-09）：`Resolve` 实际签名比上文多了 `cacheDir`（默认 `DefaultCacheDir()`，便于测试
-> 指向临时目录，避免污染宿主 `~/.forge`）；另暴露 `SupportedTypes() []ProviderType` 与
+> 指向临时目录，避免污染宿主 `~/.ark-mate`）；另暴露 `SupportedTypes() []ProviderType` 与
 > `ErrUnknownProvider`。`manager` 层新增 `Service.ListModels`/`ListProviderModels`，
 > `restErr` 把 `provider_not_found` 映射到 40401。
 
@@ -259,7 +259,7 @@ func liveFetch(ctx context.Context, typ ProviderType, apiKey string) ([]Model, e
 // snapshotModels 读 go:embed 快照 catalog/snapshots/<typ>.json。
 func snapshotModels(typ ProviderType) ([]Model, error)
 
-// cachePath 磁盘缓存路径 ~/.forge/cache/models/<typ>.json。
+// cachePath 磁盘缓存路径 ~/.ark-mate/cache/models/<typ>.json。
 func cachePath(typ ProviderType) (string, error)
 ```
 
@@ -381,7 +381,7 @@ func (s *Session) SetConfigOption(ctx context.Context, configID, value string) e
 
 ### 12.3 store：迁移 v4
 
-`internal/store/schema.go` 追加迁移（幂等，`forge migrate` 可导入）：
+`internal/store/schema.go` 追加迁移（幂等，`mate migrate` 可导入）：
 
 ```go
 {
@@ -475,13 +475,13 @@ export interface Provider { id; type; model?; has_key; models?: ModelOption[] } 
 `packages/types/src/conversation.ts`：`ConversationSummary`/`ConversationDetail` 增 `provider?`、`model?`；
 `CreateConversationReq` 增 `model?: string`；`ConversationPatch` 增 `model?: string`。
 
-`packages/api/src/resources/forge.ts`：
+`packages/api/src/resources/mate.ts`：
 
 ```ts
 export const listModels = (agentId?: string): Promise<ModelOption[]> =>
-  http.get<ModelOption[]>(`/forge/models${agentId ? `?agent=${agentId}` : ''}`)
+  http.get<ModelOption[]>(`/mate/models${agentId ? `?agent=${agentId}` : ''}`)
 export const listProviderModels = (id: string): Promise<ModelOption[]> =>
-  http.get<ModelOption[]>(`/forge/providers/${encodeURIComponent(id)}/models`)
+  http.get<ModelOption[]>(`/mate/providers/${encodeURIComponent(id)}/models`)
 ```
 `createConversation`/`updateConversation` 已在 `req`/`patch` 上透传 `model`（Phase B 后端字段）。
 
@@ -502,8 +502,8 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 ### 13.3 页面接线
 
 - **`StartPage.tsx`**（新建会话，默认 agent）：
-  - `useState<ModelRef|null>` 初值 = `localStorage['forge.panel.lastModel']`（对照既有的
-    `forge.panel.lastAgentId` 记忆）；进入时拉当前 agent/provider 的模型目录。
+  - `useState<ModelRef|null>` 初值 = `localStorage['mate.panel.lastModel']`（对照既有的
+    `mate.panel.lastAgentId` 记忆）；进入时拉当前 agent/provider 的模型目录。
   - 现只读 pill「模型 · Agent 默认」（`StartPage.tsx:163`）→ 换成 `ModelSelect`。
   - `createAndRun(prompt, model)` 传递 `model`；发送后记忆 `lastModel`。
 - **`ChatPage.tsx`**：
@@ -516,7 +516,7 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 
 ### 13.4 数据流与状态（`store.ts`）
 
-- `ForgeState` 增 `modelCatalog: ModelOption[]`、`modelSource: Source | ''`；`ForgeActions` 增
+- `MateState` 增 `modelCatalog: ModelOption[]`、`modelSource: Source | ''`；`MateActions` 增
   `loadModelCatalog(agentId?: string)`（回调 `listModels`，失败 toast + 记 snapshot 兜底）。
 - `createAndRun(prompt: string, model?: ModelRef)`：`createConversation({ prompt, model: model?.modelID })`。
 - `sendPrompt` 不变；`updateConversation` 复用现有 `rename/togglePin` 同一封装。
@@ -531,7 +531,7 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 
 ### 13.6 文件清单
 
-`packages/types/src/{agent,conversation,model}.ts`、`packages/api/src/resources/forge.ts`、
+`packages/types/src/{agent,conversation,model}.ts`、`packages/api/src/resources/mate.ts`、
 `apps/panel/src/components/{ModelSelect,ModelPickerModal}.tsx`、
 `apps/panel/src/pages/{StartPage,ChatPage,AgentsPage}.tsx`、`apps/panel/src/store.ts`、
 `apps/panel/src/console.css.ts`（新增交互态）。
@@ -545,7 +545,7 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 >   - `createConversation`/`updateConversation` 经 `@ark/api` 透传 `model`（`CreateConversationReq.model/effort`、
 >     `ConversationPatch.model`、`ConversationSummary.provider/model`）。
 >   - UI：新建会话（StartPage）用 `ModelSelect`（antd Select + provider 分组 + 推荐星标 + 搜索，
->     允许清空回「Agent 默认」；记住 `forge.panel.lastModel`）；会话详情抽屉「模型」行——`deepseekharness`
+>     允许清空回「Agent 默认」；记住 `mate.panel.lastModel`）；会话详情抽屉「模型」行——`deepseekharness`
 >     显示可改 `ModelSelect`（选后 `updateConversation({model})`，dsh 即时），`opencode` 只读（label 提示仅创建时），
 >     `echo` 显示「无模型」。
 >   - **未做**（留待打磨）：`ModelPickerModal` 全览弹窗、AgentsPage provider 表单单模型改 Select、

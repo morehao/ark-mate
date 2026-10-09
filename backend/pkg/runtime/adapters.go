@@ -62,7 +62,7 @@ func opencodeSpec() Spec {
 //     并于 2026-10-09 在 **v2.0.26** 上复验（v2 的模型请求体里出现
 //     `<skill><id>…</id><name>…</name><description>…</description></skill>`）。
 //  2. **端到端**：「平台默认根下写进去、底座开箱即读到」，两代底座各有一段取证：
-//     v1.18.35（2026-10-08）：平台在**私有 HOME** 下**不设任何 override**（不设 FORGE_PROJECTION_DIRS /
+//     v1.18.35（2026-10-08）：平台在**私有 HOME** 下**不设任何 override**（不设 MATE_PROJECTION_DIRS /
 //     不写底座配置 / 不设 XDG_CONFIG_HOME）写到 `${HOME}/.agents/skills/<id>/SKILL.md`，
 //     `opencode debug skill` 列出的 `location` **逐字等于**该文件路径；反证 `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`
 //     下该条消失（只剩内置 skill）——证明读到的正是「外部 skill 自动加载」这条路。
@@ -146,7 +146,7 @@ func deepseekharnessSpec() Spec {
 //     而 `agentsHome = resolve(config.agentsHome ?? process.env.DSH_AGENTS_HOME ?? join(homedir(),".agents"))`
 //     ⇒ 默认落点正是 `${HOME}/.agents/skills`。注意这条链对 **acp / web / headless 三个 profile 同款**
 //     （都含 dsh-base），故 acp 与实测用的 desktop 走的是同一份 provider 与同一个工具。
-//     · **运行级**：`~/.agents/skills/officecli`（第三方手工放置、无 `.forge-*` 标记、布局与 frontmatter
+//     · **运行级**：`~/.agents/skills/officecli`（第三方手工放置、无 `.mate-*` 标记、布局与 frontmatter
 //     均合规）**只存在于该根**——它在 asar 内 0 命中（非内置，而内置的 office-docx 有 6 命中），
 //     却出现在真实 dsh 会话投给模型的 skill 目录里 ⇒ 该根不是"被配置"而是**真被枚举并上图**。
 func deepseekharnessSkillProjection() Projection {

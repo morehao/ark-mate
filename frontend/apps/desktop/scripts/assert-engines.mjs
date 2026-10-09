@@ -5,7 +5,7 @@
  * ## 这条断言为什么存在
  *
  * 桌面态**没有随包的独立 Node 运行时**：壳把 Electron 二进制本身当 Node 用
- * （`ELECTRON_RUN_AS_NODE=1` + `FORGE_NODE_EXECUTABLE`，见 M3-2 的私有 bin 生成器），
+ * （`ELECTRON_RUN_AS_NODE=1` + `MATE_NODE_EXECUTABLE`，见 M3-2 的私有 bin 生成器），
  * 所以随包载荷（dsh 的 JS 闭包）里的代码跑在 **Electron 自带的那个 Node** 上——
  * 既不是机器上恰好装着的 node，也不是跑本脚本的解释器。
  * 实例：开发机上跑本脚本的是 Node v24.16.0，而 Electron 44.4.5 自带 Node 24.21.0，
@@ -58,7 +58,7 @@
  * 这类容易写错的通配组合）。
  *
  * 用法：node scripts/assert-engines.mjs [--json] [--payloads-dir <dir>] [--self-test] [--require-engines]
- * 环境变量：FORGE_ELECTRON_BINARY 覆盖 Electron 二进制路径（人工验证用；默认从
+ * 环境变量：MATE_ELECTRON_BINARY 覆盖 Electron 二进制路径（人工验证用；默认从
  *          frontend/node_modules 解析真 Electron）。
  */
 
@@ -81,7 +81,7 @@ const USAGE = `用法：node scripts/assert-engines.mjs [--json] [--payloads-dir
   --self-test       只跑 semver 判定的自检表（不读载荷、不跑 Electron）
   --require-engines 没有任何载荷能判定 engines.node 时视为失败（fail-closed；默认关）
 
-环境变量 FORGE_ELECTRON_BINARY 覆盖 Electron 二进制路径。`
+环境变量 MATE_ELECTRON_BINARY 覆盖 Electron 二进制路径。`
 
 /** 统一失败出口：可操作的说明写 stderr，退出码 1。 */
 function fail(...lines) {
@@ -269,11 +269,11 @@ export function satisfiesRange(candidate, range) {
 // —— Electron：解析二进制 + 实测它自带的 Node ——————————————————————————————
 
 function resolveElectronBinary() {
-  const override = process.env.FORGE_ELECTRON_BINARY
+  const override = process.env.MATE_ELECTRON_BINARY
   if (override) {
     const abs = resolve(override)
-    if (!existsSync(abs)) fail(`FORGE_ELECTRON_BINARY 指向的文件不存在：${abs}`)
-    return { path: abs, source: 'FORGE_ELECTRON_BINARY（环境变量覆盖）' }
+    if (!existsSync(abs)) fail(`MATE_ELECTRON_BINARY 指向的文件不存在：${abs}`)
+    return { path: abs, source: 'MATE_ELECTRON_BINARY（环境变量覆盖）' }
   }
   const require = createRequire(import.meta.url)
   let resolved
@@ -288,7 +288,7 @@ function resolveElectronBinary() {
   if (typeof resolved !== 'string') {
     fail(
       'require("electron") 没返回二进制路径——本脚本得用仓库的 node 跑（不能跑在 Electron 里）',
-      '也可以显式给 FORGE_ELECTRON_BINARY=<Electron 二进制路径>',
+      '也可以显式给 MATE_ELECTRON_BINARY=<Electron 二进制路径>',
     )
   }
   if (!existsSync(resolved)) {

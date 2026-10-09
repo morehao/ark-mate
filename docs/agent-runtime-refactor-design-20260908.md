@@ -386,7 +386,7 @@ type ProjectionSpec struct {
 
 | 字段 | opencode | deepseek-harness | echo |
 |---|---|---|---|
-| Command/Args | `opencode acp` | `dsh --profile acp` | `forge acp-demo` |
+| Command/Args | `opencode acp` | `dsh --profile acp` | `mate acp-demo` |
 | McpTransportSupport | http / sse / stdio | stdio / streamable-http | stdio（演示） |
 | ModeMapping | 空（实测：无一一对应词表，per-action permission） | 空（实测：DSH_PERMISSION_MODE env + 预设） | allow/reject × once/always |
 | ModelConfigOptionID | 空（走 `OPENCODE_MODEL` env） | provider 配置 | 空 |
@@ -428,7 +428,7 @@ func Resolve(ctx context.Context, agent agent.Agent, conv conversation.Conversat
 
 ## 8. API 契约变更（破坏性清单）
 
-### 8.1 REST（`/v1/forge`）
+### 8.1 REST（`/v1/mate`）
 
 | 变更 | 现状 | 目标 |
 |---|---|---|
@@ -534,9 +534,9 @@ runtime 作为 hint），不保留 runtime 身份语义。
   与内存 Registry 共用）+ `Registry`（目录加载 `<dir>/{skills,mcp,tools}/*.json` + Register* 注入
   + 按 id/name 排序列表；坏文件/非法条目跳过告警，对齐 LoadAgentDefinitions 容错）。
 - Service 集成（`manager/capabilities.go`）：`LoadCapabilityDefinitions`（serve 装配；数据源默认
-  `~/.forge/capabilities`，FORGE_CAPABILITIES 覆盖）+ `ListSkills/ListMcpServers/ListTools`——
+  `~/.ark-mate/capabilities`，MATE_CAPABILITIES 覆盖）+ `ListSkills/ListMcpServers/ListTools`——
   MCP headers/凭证只存内部供 P2 注入、REST 不读回（同 providers has_key 立场）。
-- REST：`GET /v1/forge/skills|mcps|tools`（信封 `data` 数组；空目录返回 `[]`，非 null）。
+- REST：`GET /v1/mate/skills|mcps|tools`（信封 `data` 数组；空目录返回 `[]`，非 null）。
 - 验收状态：`go build/vet ./...` 通过、`go test -race ./...` 全绿；capability/manager/handler/router
   新增单测覆盖目录加载、排序、非法条目、空表形态与 REST 列表。
 - 前端能力卡（§8.3）：`/capabilities` 管理页（Skills / MCP Servers / Tools 三组只读目录，
@@ -560,9 +560,9 @@ runtime 作为 hint），不保留 runtime 身份语义。
 - 验收状态：`go vet ./...` 通过、`go test -race ./...` 全绿；新增 acl 转换器单测 + manager 注入过滤单测
   （echo 仅 stdio 取 1、opencode 取 3、未知 runtime 不下发、未声明传输保守 stdio）；另增 acl 真 stdio
   往返集成断言（`TestMcpServersInjectionOverWire`：判别联合各子对象 + 有序 headers + 空列表保 `[]`）。
-- **冒烟 DoD（人工，需真实底座）**：`echo` 全链路新建会话无回归；置 `~/.forge/capabilities/mcp/fs.json`
+- **冒烟 DoD（人工，需真实底座）**：`echo` 全链路新建会话无回归；置 `~/.ark-mate/capabilities/mcp/fs.json`
   （stdio server）后 `opencode`/`dsh` 各起一轮，观察底座是否拉起注入的 MCP server。
-- **echo 全链路自动化冒烟（2026-09-08）**：构建真实 `forge` 二进制 + `serve`（memory 模式，agents/caps
+- **echo 全链路自动化冒烟（2026-09-08）**：构建真实 `mate` 二进制 + `serve`（memory 模式，agents/caps
   临时目录）+ REST 驱动：新建会话 → 权限 round×2 resolve（allow-once）→ boom 错误轮（`turn.error`）→
   同会话重试恢复 → 多轮文本标记命中；`/agents` 列出种子 + echo 自定义 agent、`/mcps` 列出 stdio server。
   事件谱系 `turn.ended×3 / permission_request×3 / turn.error×1`。
@@ -672,25 +672,25 @@ ProviderSessionID 同源）；采用的价值是给未来 backend-wide Runtime�
 
 **实证（2026-09-08，opencode v1.18.29 spike）**：opencode 自动扫描
 `~/.config/opencode/skills/<skill>/…`（无需 config 项）；`config.skills` 数组为 v2 语法，
-v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 "Skill not found"）。
+v1 不识别（config skills 源 spike：可用列表无 mate-demo-skill，报 "Skill not found"）。
 物化约定：`format == "SKILL.md"` → `<root>/<skillID>/SKILL.md`（body 即内容），幂等覆盖。
 
 - **切片 B1（2026-09-08）**：`capability.MaterializeSkill(root, skill)` /
   `RemoveSkillDir(root, id)`（按上述约定写/删；未实测 format（如 dsh "agents/skills"）
   跳过告警，不臆造）+ 单测（约定路径/内容/幂等/删除/校验）。
 - **切片 B2（2026-09-08，enable 接线）**：config 增 `SkillMaterializeDir`
-  （`FORGE_SKILLS_MATERIALIZE_DIR`，默认空 = 关）；serve 装载能力后
+  （`MATE_SKILLS_MATERIALIZE_DIR`，默认空 = 关）；serve 装载能力后
   `Service.MaterializeSkills(dir)` 把 opencode SKILL.md 源 skill 物化到该目录（部分失败
   告警可容忍，全失败才报错）。端到端验证：temp 能力目录 + enable 目录 → 写出
-  `<root>/forge-demo/SKILL.md`（body 一致）+ serve 日志 count=1；echo 全链路回归通过。
-- **切片 D（2026-09-08，删除联动 + 启动重校）**：物化目录写 forge 归属标记
-  `<skillID>/.forge-managed`；`capability.ReconcileSkills(root, current)` 启动重校——内容一致
+  `<root>/mate-demo/SKILL.md`（body 一致）+ serve 日志 count=1；echo 全链路回归通过。
+- **切片 D（2026-09-08，删除联动 + 启动重校）**：物化目录写 mate 归属标记
+  `<skillID>/.mate-managed`；`capability.ReconcileSkills(root, current)` 启动重校——内容一致
   跳过（幂等计数）、缺失/更新写出，仅删「带标记且不在注册表」目录，**用户自有目录绝不动**；
   Service 增 `ReconcileSkills`（返回 written/removed）替换 serve 装配调用，日志 written/removed。
   端到端验证：run1 写 skill-a → run2（删 a 增 b + 用户目录 user-x）written=1 removed=1，产物 =
   skill-b + user-x（skill-a 清、user-x 保留）；echo 全链路回归通过；vet + race 全绿。
 - **enable 决策（遗留，部署评审）**：目标目录为真实 opencode 用户配置时须运维显式开启
-  （`FORGE_SKILLS_MATERIALIZE_DIR`）。dsh 未实证 → 降级只列不物化。
+  （`MATE_SKILLS_MATERIALIZE_DIR`）。dsh 未实证 → 降级只列不物化。
   （**2026-09-09 已实证并修正，见 §19.4**：原「body 即内容」约定被双底座实测证伪。）
 
 ### 16.6 Resume 承载矩阵（§16 切片 C，实测/记录 2026-09-08）
@@ -698,12 +698,12 @@ v1 不识别（config skills 源 spike：可用列表无 forge-demo-skill，报 
 - **echo**：未声明 `sessionCapabilities.resume` → `acl.ResumeSession` 在**能力门被拒**
   （`resume_session_unsupported`，wire 前，不会发到 agent）——实测守卫单测锁定
   （注：echo agent 有 ResumeSession handler 但无能力声明，能力门先行）。
-- **opencode / dsh**：已实测（2026-09-08 握手能力断言，forge serve INFO 日志，无模型 turn）：
+- **opencode / dsh**：已实测（2026-09-08 握手能力断言，mate serve INFO 日志，无模型 turn）：
   opencode `sessions_persistent/multi_session_concurrent/load_session/resume/list/fork/close` 全
   true；dsh `sessions_persistent/multi_session_concurrent/resume/list/close` true、
   `load_session=false`、`fork=false`。→ 两底座 **resume 握手级支持**（`acl.Client.ResumeSession`
-  能力门通过），剩余为 forge 侧恢复流程接入（重建投影）——投影 `Resume` 仍按单会话投影语义
-  不支持隐式热切换，接入随 §5.6 后续推进；forge P0 仍不做进程重启断点恢复（ADR-4 P3）。
+  能力门通过），剩余为 mate 侧恢复流程接入（重建投影）——投影 `Resume` 仍按单会话投影语义
+  不支持隐式热切换，接入随 §5.6 后续推进；mate P0 仍不做进程重启断点恢复（ADR-4 P3）。
 - 结论：三投影「不支持面」明确；与 §5.6 原生 resume 蓝图的对齐点 = `acl.Client.ResumeSession`
   能力门（已实现，按 caps 门控）+ 重建投影；backend-wide 多会话重构时按底座探测接入。
 
@@ -749,7 +749,7 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
 
 1. **切片 E0（测量，2026-09-08，完成）**：并发探测——同 runtime 连接上两会话同时在途 turn 的
    事件谱系/归属（echo 免费真进程；opencode/dsh 授权短模型调用）。产出写入 §17.2 决策依据。
-   **结果**：① echo（真进程，forge REST 两会话背靠背）：两会话同连接各自全链路
+   **结果**：① echo（真进程，mate REST 两会话背靠背）：两会话同连接各自全链路
    （permission round + turn.ended），事件按会话隔离、无串扰 → 共享连接多会话可用；
    ② opencode（真进程，两会话几乎同时发起、真重叠 18/16 thought）：两会话各自 turn.ended、
    无错误无串扰 → **共享连接多会话并发在 opencode 上稳定**。dsh 未测（连接模型同构，留 E2
@@ -837,11 +837,11 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
   **kill -9 DoD 实测（真进程 + sqlite）**：opencode 与 dsh 均在「生成中途 kill -9」→ 重启 →
   同 uuid prompt 恢复成功：事件序列含 session.resumed + 续轮 turn.ended；DB 保持同一会话 id、
   provider_session_id 不变（opencode ses_*/dsh uuid）、status 终态 completed；无重复建会话。
-  注意：实测发现 pkill -f 匹配不到 env 前缀进程（argv 不含 FORGE_ADDR），杀服务须按端口
+  注意：实测发现 pkill -f 匹配不到 env 前缀进程（argv 不含 MATE_ADDR），杀服务须按端口
   lsof -ti tcp:<port> kill -9；巨型 opencode.log（316MB）会致后续 spawn FileSystem.open 失败。
 - **F3 handoff memo 兜底 + 跨 runtime 续聊（2026-09-09，完成）**：历史 → bounded memo
   （svc.HandoffMemo：用户轮聚合、滤 thought/tool/usage、rune 安全预算截断保最新，预算 env
-  FORGE_HANDOFF_MAX_CHARS 默认 6000 / SetHandoffMaxChars，0=关闭）→ 无原生 resume（echo/无
+  MATE_HANDOFF_MAX_CHARS 默认 6000 / SetHandoffMaxChars，0=关闭）→ 无原生 resume（echo/无
   provider/原生恢复失败/agent 路由已迁移）时建 fresh session，memo 注入首条 prompt（仅发
   runtime 的文本前缀，user_message 事件保持用户原文）→ session.resumed reason=handoff，并更新
   rec 的 provider_session_id/runtime_hint。SDK v0.13.5 无 provider handoff 通道 → 拒绝自动
@@ -858,7 +858,7 @@ backend-wide 采用 = 编排层对「连接/会话」的建模与 Runtime 会话
   同切片修正前端冒烟脚本与当前 REST/WS 契约的漂移：`/sessions`→`/conversations`、Agent 字段
   `runtime`→`state`、snapshot 帧 `event_seq` omitempty（水位 0 时省略，改判 state 对象）、新增
   「会话 id 全为平台 uuid」断言。**验证**：pnpm typecheck + pnpm build 全绿；vite dev(:5173) +
-  forge serve(:8099, sqlite, echo agent) 下 `smoke:e2e` 全 PASS（含 id 形状断言）、
+  mate serve(:8099, sqlite, echo agent) 下 `smoke:e2e` 全 PASS（含 id 形状断言）、
   `e2e-live-turn.mjs alias-echo` 收到真实 turn.ended 全链路事件（seq 3→9）；用 vite lib 打包
   真实 store.ts/console/util.ts 后在 Node 直接调用 applyEvent/titleFor/shortId（handoff/restart
   文案、tone、seq 幂等、短 id、标题回退均 PASS）。
@@ -909,8 +909,8 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 实现细节）；能力可用性必须按 runtime 声明推导（MCP 传输支持、skill 物化目标），故本管理面端点
 显式给出归属，并在 DTO 注释里声明「不构成对外路由承诺」。
 
-**同切片修复（真缺陷，非顺手改）**：`config.Load` 中 `FORGE_SKILLS_MATERIALIZE_DIR` 的 `else` 分支
-误把 `CapabilityDir` 覆盖为 `~/.forge/capabilities`，导致 **`FORGE_CAPABILITIES` 被吞**（能力目录
+**同切片修复（真缺陷，非顺手改）**：`config.Load` 中 `MATE_SKILLS_MATERIALIZE_DIR` 的 `else` 分支
+误把 `CapabilityDir` 覆盖为 `~/.ark-mate/capabilities`，导致 **`MATE_CAPABILITIES` 被吞**（能力目录
 永远落到 home 默认）——真进程实测端点返回空目录时暴露。修复为两项独立解析；新增
 `TestCapabilityDirIndependentOfSkillMaterialize` 回归。
 
@@ -952,7 +952,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   sse 降级、http JSON、http SSE、HTTP 5xx），`TestProbeMcpServer`（成功替换 + 二次探测收敛 +
   归属标注 + 状态回读 + 未知 id 40401 + sse 40501）、`TestProbeMcpServerRoute`。
 - 真进程（`:18122`，memory + caps fixtures）：
-  - stdio：Node 写的真实 MCP 服务端 → 握手 `forge-demo-mcp 0.2.0`、`added=2`、schema 保真；
+  - stdio：Node 写的真实 MCP 服务端 → 握手 `mate-demo-mcp 0.2.0`、`added=2`、schema 保真；
     切换服务端输出后二次探测 `added=1 removed=2`（旧条目删除、builtin/静态条目保留）；
   - 失败：`/nonexistent/mcp-server-xyz` → `50201` + `last_probe_error` 记录，且**目录保留上次快照**；
   - 超时：服务端不回 → 15s 后 `50201 [mcp_timeout] tools/list 失败：context deadline exceeded`；
@@ -982,10 +982,10 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 **证据**：
 
 - `pnpm typecheck` + `pnpm --filter @ark/panel typecheck` + `pnpm build` 全绿。
-- 真实联调（vite dev :5173 → forge serve :8099，sqlite + caps fixtures）：`smoke:e2e` 全 PASS，
+- 真实联调（vite dev :5173 → mate serve :8099，sqlite + caps fixtures）：`smoke:e2e` 全 PASS，
   新增断言「`/agents/:id/capabilities` 形状 + agent_id 一致」「`/mcps` 含 tool_count 等探测状态」
-  「未知 server 探测 → 40401」；经 vite proxy 触发 stdio 探测（`forge-demo-mcp 0.2.0`，added=2）
-  与 streamable_http 探测（`forge-http-mcp 0.3.0`，added=1），`/mcps` 状态回读正确；
+  「未知 server 探测 → 40401」；经 vite proxy 触发 stdio 探测（`mate-demo-mcp 0.2.0`，added=2）
+  与 streamable_http 探测（`mate-http-mcp 0.3.0`，added=1），`/mcps` 状态回读正确；
   `alias-echo`（白名单 fs_demo）只见 `fs_read`，`mix`（无白名单）见全部 mcp 工具 —— 与后端
   可见性规则一致。
 - 代码级：vite lib 打包真实 `capabilityView.ts` 后在 Node 调用 `mcpRows`/`probeSummary`/
@@ -1027,7 +1027,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 - 单测：`TestMaterializeSkillConvention`（路径/frontmatter 内容/幂等/删除）、
   `TestMaterializeSkillDshFrontmatter`（合成、已有 frontmatter 补键且不重复、空 description 退化、
   多 source 等价、重校幂等与变更重写）、`TestReconcileSkills`、`TestServiceReconcileSkills` 更新。
-- **跨实现端到端**：真实 `forge serve`（`FORGE_SKILLS_MATERIALIZE_DIR=/tmp/dsh-e2e/root2`，
+- **跨实现端到端**：真实 `mate serve`（`MATE_SKILLS_MATERIALIZE_DIR=/tmp/dsh-e2e/root2`，
   两个 skill：dsh 声明 + opencode 声明）写出 2 个产物 → **同一产物目录**分别交给
   真实 dsh provider 与真实 `opencode debug skill` 解析：两者都正确列出 `dsh-plan`
   与 `oc-raw`（名称/描述一致），**零告警**。
@@ -1067,7 +1067,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   `TestOrchestratorPermissionPolicyAutoDecide`（allow 自动放行+审计事件+无挂起+无记忆；deny 自动拒绝；
   ask 回落挂起；nil 策略行为不变）、`TestAgentPermissionPolicyPersist`（加载/只读面/PATCH 校验/落盘/
   重启恢复/非法定义跳过）、`TestAgentPermissionPolicyRoute`（REST 透传 + 40001）。
-- **真进程**（`:18126`，echo 底座，`FORGE_PERMISSION_TIMEOUT=3s`）：
+- **真进程**（`:18126`，echo 底座，`MATE_PERMISSION_TIMEOUT=3s`）：
   - `allow-echo`（`default: allow`）→ 事件序列 `thought → message → session.permission_policy(allow/allow)
     → session.permission → tool_call → tool_update → message → turn.ended`，**用户零征询**；
   - `deny-echo`（`tools: {execute: deny}`）→ `session.permission_policy(deny/reject)`，**用户零征询**，
@@ -1101,7 +1101,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 - 纯函数 Node 直调（vite lib 打包真实模块）：25 项断言全 PASS（分页截断/顺序保留/active 提升与
   remaining/active 不存在不提升/全量展开；相对时间 9 档含未来与非法输入；尾部窗口 4 档；
   滚动跟随 4 档）。
-- 真实联调（vite dev :5173 → forge serve :8099 sqlite + echo 底座）：播种 **45 个会话** →
+- 真实联调（vite dev :5173 → mate serve :8099 sqlite + echo 底座）：播种 **45 个会话** →
   `smoke:e2e` 全 PASS（新增断言「`updated_at` 可解析」，相对时间/排序的数据前提）；
   `GET /conversations` 45 条 > RAIL_PAGE 40 → 真实触发「显示更早」分支。
 - 构建产物校验：`apps/panel/dist` 内含新增文案（显示更早的 / 分钟前 / 刚刚 / 昨天 / 天前）；
@@ -1138,7 +1138,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
   day 分桶、空区间零值）、`TestUsageSummaryService`（服务面 + 5 组参数校验 + 内存模式降级）、
   `TestOrchestratorUsageEvent`（事件载荷 + 快照覆盖 + 全零不污染）、`TestUsageSummaryRoute`
   （参数透传 + 信封 + 40001/40501）、acl `usage`/`usage_with_cost` 归一化、`TestUsageInfoReported`。
-- **真进程**（`forge serve` :18127 sqlite + echo 底座）：echo 演示底座新增标准
+- **真进程**（`mate serve` :18127 sqlite + echo 底座）：echo 演示底座新增标准
   `session/usage_update` 上报（按输入长度确定性取值，用于打通链路；真实底座按其自身上报）：
   - 三轮（echo1×2 会话 + echo2×1）→ `/usage/summary` `runs=3 conversations=3 context_used=422
     context_size=384000 usage_reported=3 cost=0.00422 USD`，与
@@ -1183,7 +1183,7 @@ P1 已补：`GET /conversations/:id/runs` 现含每轮 `usage`，会话视图在
 - 单测：`TestUsageSummaryFieldWiseSnapshotAndCurrency`（字段级快照 + 空币种归一 + 多币种 MIXED 明细
   + 单币种求和）、`TestUsageInfoReported`（HasContext/HasCost 分列判定）、`TestUsageSummaryAggregate`
   与 `TestUsageSummaryService` 增补 `cost_reported`、口径字段与 `buckets_additive` 断言。
-- 真进程（`forge serve` :18099 sqlite，直接写库构造 3 会话 4 轮）：agent 分组
+- 真进程（`mate serve` :18099 sqlite，直接写库构造 3 会话 4 轮）：agent 分组
   `usage_reported=2 cost_reported=3 cost_currency=MIXED cost_by_currency={EUR:0.2,USD:0.6}
   context_used=280 context_size=1300`；`agent-echo` 桶 `MIXED{EUR:0.2,USD:0.5}`、
   `agent-other` 桶 `USD 0.1`（空币种归一）；day 分组 `buckets_additive=false`，
@@ -1226,7 +1226,7 @@ P1 已补：`GET /conversations/:id/runs` 现含每轮 `usage`，会话视图在
 
 - 单测：`TestRunUsageExposedInListRuns`（有上报 → `Usage` 结构体；空串 → `nil`；`FirstTokenMS` 透传）、
   `TestRunMaterializationAtTurnEnd`（不回归，且无 assistant 输出轮 `first_token_ms=0`）。
-- 真进程（`forge serve` sqlite）：echo 底座一轮 `runs` 返回 `usage {used:135,size:128000,cost_amount:0.00135}`、
+- 真进程（`mate serve` sqlite）：echo 底座一轮 `runs` 返回 `usage {used:135,size:128000,cost_amount:0.00135}`、
   `duration_s≈2.07`；`first_token_ms` 逻辑正确（echo 亚毫秒响应 → 0 被 `omitempty` 省略；真实底座有模型延迟）。
 - 前端 `pnpm typecheck` + `pnpm --filter @ark/panel build` 通过；后端 `go test` 全绿（store/manager）。
 
@@ -1246,11 +1246,11 @@ P1 已补：`GET /conversations/:id/runs` 现含每轮 `usage`，会话视图在
 agent CRUD/启停/能力目录、provider、conversation 详情/元数据/runs/搜索、权限与记忆、elicitation、
 skills/mcps/tools、`POST /mcps/:id/probe`、`/usage/summary`、`/health`、`/ws/events`）；修正
 「控制面 REST 默认拒绝权限」的过时语义（现为 `ask` → 挂起 → 用户决策/超时拒绝 + per-agent 策略）；
-修正默认监听面（裸跑 `forge serve` 实测 `*:8099`，即所有网卡且**无鉴权** → 文档改为显式提示收在
+修正默认监听面（裸跑 `mate serve` 实测 `*:8099`，即所有网卡且**无鉴权** → 文档改为显式提示收在
 本机）；补齐 CLI 子命令（`migrate`/`transcripts prune`/`acp-demo`）与仓库结构（mcp/capability/
 store/infra）。
 
-**2) 自动守卫 `TestReadmeRoutesMatchRouter`**：解析 README 反引号内全部 `/v1/forge` 路由，与
+**2) 自动守卫 `TestReadmeRoutesMatchRouter`**：解析 README 反引号内全部 `/v1/mate` 路由，与
 `engine.Routes()`（34 条）逐条比对，并禁止历史 `/sessions` 路径复活。反向注入（把
 `/usage/summary` 改错）确认会红 → 守卫有效，非空断言（≥20 条）。
 
@@ -1269,11 +1269,11 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 
 **5) 部署文档 `docs/deployment.md` + `Dockerfile`**：交付形态（`make all` 单二进制内嵌面板 /
 `make build` 无面板 / 分离部署 / 容器）、运行与**默认监听面安全边界**、数据目录与持久层开关、
-13 个 `FORGE_*` 环境变量全表（取自 `config.go`）、底座前置条件、systemd 单元 + 容器编排、健康检查、
+13 个 `MATE_*` 环境变量全表（取自 `config.go`）、底座前置条件、systemd 单元 + 容器编排、健康检查、
 备份/升级/**回滚（旧二进制遇高版本 schema 会拒绝启动）**、排障表。
 
 **证据（真进程/真测试）**：
-- `make all` → `./forge`（40 MB，内嵌面板）；`GIN_MODE=release forge serve --addr
+- `make all` → `./mate`（40 MB，内嵌面板）；`GIN_MODE=release mate serve --addr
   127.0.0.1:18140`（sqlite + 独立数据目录）→ health `{"code":0,"msg":"ok"}`；`GET /` 200
   `text/html`（标题 `ark-mate · Agent 问答控制台`，`/assets/index-*.js` 可访问），无 gin debug 告警。
 - 按文档命令建 `echo` agent → 跑通一轮（REST 决策权限）→ 终态 `completed`；`/usage/summary`
@@ -1281,13 +1281,13 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 - 重启恢复：kill 后同库重启，`/conversations` 仍列出该会话（标题保留）。
 - 种子只读修复后：`DELETE /agents/dsh` → 40001 `seed_agent_readonly`；`PATCH runtimes` → 40001；
   `PATCH name` 成功且 `seed:true`；`POST /agents/nope/start` → 40401（此前均为 `code=-1`）。
-- 裸跑 `forge serve` → `lsof` 实测 `*:8099`。
+- 裸跑 `mate serve` → `lsof` 实测 `*:8099`。
 - `go vet` + `go test -race ./...` 全绿（新增 `TestSeedAgentReadonly`、`TestAgentErrorEnvelopeMapping`、
   `TestReadmeRoutesMatchRouter`；REST 断言 `seed` 字段）；前端 `pnpm typecheck` + `pnpm build` 通过。
 
 **降级（明确未执行，不臆造成果）**：
 - **systemd**：本机为 macOS，无 systemd → 单元文件仅做 INI 语法/关键指令校验（3 section、
-  6 条 `Environment=`、`ExecStart` 绝对路径、`FORGE_ADDR` 收在本机），未做语义执行；上线前需
+  6 条 `Environment=`、`ExecStart` 绝对路径、`MATE_ADDR` 收在本机），未做语义执行；上线前需
   目标机 `systemd-analyze verify` 并实测。
 - **容器镜像**：Docker 守护进程可用，但到 `auth.docker.io` 拉取基础镜像元数据持续 `i/o timeout`
   （`docker build` 与 `buildx --check` 均失败）→ 镜像**未构建**；Dockerfile 三阶段与已验证的
@@ -1299,23 +1299,23 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 
 #### 19.9 切片 H2：默认监听面收窄（127.0.0.1:10001）（完成）
 
-**动机**：§19.8 记录的真进程实测暴露——`forge serve` 不带 `--addr` 时默认 `:8099` 绑定**所有网卡**
+**动机**：§19.8 记录的真进程实测暴露——`mate serve` 不带 `--addr` 时默认 `:8099` 绑定**所有网卡**
 （`lsof` 显示 `*:8099`），而控制面**无鉴权**（M3 可选②单操作员 token 未实现），任何同网段主机均可
 读写全部会话与权限记忆。用户决策：**收窄 + 端口改为 10001**。
 
 **变更**：`config.Default()` 的 `Addr` 由 `:8099` → `127.0.0.1:10001`（仅回环）。全链一致更新：
-- 后端：`config.go` 默认值、`config_test.go` 两处断言与注释、`cmd/forge` usage 与 `--addr` 帮助、
+- 后端：`config.go` 默认值、`config_test.go` 两处断言与注释、`cmd/mate` usage 与 `--addr` 帮助、
   `server.go`/`web/doc.go` 注释；
 - 前端：`apps/panel/vite.config.ts` dev 代理 target、`packages/api/src/request.ts` 注释、
   `scripts/smoke-e2e.mjs`/`e2e-live-turn.mjs` 说明；
 - 构建与文档：`Makefile`（dev 健康检查 URL 与提示语）、`README.md`（10 处 + 安全段改写为
   「默认仅回环，对外需显式 `0.0.0.0:10001` 并自担风险」）、`docs/deployment.md`（§2.1 安全边界、
-  systemd/容器示例、验证记录）、`Dockerfile`（容器内显式 `FORGE_ADDR=0.0.0.0:10001` + `EXPOSE 10001`
+  systemd/容器示例、验证记录）、`Dockerfile`（容器内显式 `MATE_ADDR=0.0.0.0:10001` + `EXPOSE 10001`
   ——容器必须绑 0.0.0.0 才能被端口映射访问，故容器形态保留显式覆盖）。
 
 **证据（真进程）**：
-- 裸跑 `forge serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` = `TCP 127.0.0.1:10001 (LISTEN)`
-  （IPv4 回环，非 `*:10001`）；`curl 127.0.0.1:10001/v1/forge/health` = `{"code":0,"msg":"ok"}`。
+- 裸跑 `mate serve`（不带 `--addr`）→ `lsof -nP -iTCP -sTCP:LISTEN` = `TCP 127.0.0.1:10001 (LISTEN)`
+  （IPv4 回环，非 `*:10001`）；`curl 127.0.0.1:10001/v1/mate/health` = `{"code":0,"msg":"ok"}`。
 - 负向验证：本机 LAN 地址 `172.16.0.122:10001` 连接失败（`curl` code=000）→ 确认不再对外可达。
 - dev 链路：后端默认地址 + vite dev（:5173 代理到 127.0.0.1:10001）→ `smoke:e2e` 全 PASS（含 WS
   升级/attach/ping/detach）；`e2e-live-turn`（echo + `permission_policy: allow`）收到终态
@@ -1324,7 +1324,7 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
   + `pnpm build` 通过。
 
 **遗留**：默认收窄只是网络面收窄，**无鉴权**问题仍在（A6 单操作员 token）；容器/跨机部署需显式
-`FORGE_ADDR=0.0.0.0:10001`，已在文档标注。§19.8 中「默认绑所有网卡」的表述已被本切片取代（保留为
+`MATE_ADDR=0.0.0.0:10001`，已在文档标注。§19.8 中「默认绑所有网卡」的表述已被本切片取代（保留为
 历史记录）。
 
 #### 19.10 切片 A1：runtime 子进程注册表 + 启动孤儿回收（完成）
@@ -1333,8 +1333,8 @@ code=seed_agent_readonly …"`，与 README「非 0 业务错误码（40001/4040
 daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）可能残留。此前无任何跨实例记账手段。
 
 **实现**：
-- 新增 `internal/infra/procreg`：JSON 注册表（`<dir(FORGE_DB)>/processes.json`，`FORGE_PROC_REGISTRY`
-  覆盖，`off/disable/none` 关闭；`FORGE_REAP_GRACE` 默认 2s）。条目含
+- 新增 `internal/infra/procreg`：JSON 注册表（`<dir(MATE_DB)>/processes.json`，`MATE_PROC_REGISTRY`
+  覆盖，`off/disable/none` 关闭；`MATE_REAP_GRACE` 默认 2s）。条目含
   `pid/pgid/command/runtime/agent_id/started_at/instance`，原子写（临时文件 + rename，0600），
   损坏时备份为 `.corrupt` 并以空表继续（不阻塞启动）。
 - 回收策略（**宁可漏杀，不可误杀**）：只处理 `instance != 本实例` 的条目；进程不存在 → 只清账；
@@ -1342,7 +1342,7 @@ daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）�
   宽限期后仍存活则 SIGKILL，随后摘除条目。
 - 接线：`acl.StdioTransport.PidInfo()`（新增 `PidReporter` 可选接口）+ `acl.Client.PidInfo()` 暴露
   子进程标识；`Orchestrator.SetProcRegistry/ReapOrphans`，`acquire` 拨号成功后登记、`dropConn`/
-  `Close` 摘除；`cmd/forge serve` 启动即 `ReapOrphans` 并记录日志。
+  `Close` 摘除；`cmd/mate serve` 启动即 `ReapOrphans` 并记录日志。
 
 **实测中修掉的两个真问题**：
 1. **僵尸误判**：子进程被 SIGTERM 杀死后若父进程未 `wait`，`kill(pid, 0)` 仍返回成功 → 回收器
@@ -1355,7 +1355,7 @@ daemon 被 `SIGKILL`/崩溃时无收尾机会，子进程（及其孙进程）�
 **证据**：
 - 单测 `internal/infra/procreg`（5 例，含真实进程组回收、PID 复用跳过、僵尸收尸、损坏文件容错、
   禁用态 no-op）+ `internal/acl.TestPidInfo`；`go vet` + `go test -race ./...` 全绿。
-- 真进程（`forge serve`，真实 opencode 底座）：`POST /agents/oc/start` → 注册表出现
+- 真进程（`mate serve`，真实 opencode 底座）：`POST /agents/oc/start` → 注册表出现
   `pid=84461 pgid=84461 command=opencode runtime=opencode agent=oc`，`stop` 后条目摘除。
 - 真进程（启动回收）：上一实例登记 + 独立进程组 + 忽略 SIGTERM 的替身进程组 → 启动日志
   `procreg: 启动孤儿回收完成 reaped=1 cleaned=0 skipped=0`，进程消失（SIGTERM 超时后升级 SIGKILL），
@@ -1443,7 +1443,7 @@ A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
      （上次失败采集）/`none`。Service 侧新增 `diagMu` + `lastErrs`（每 agent 最近一次失败，会话→agent
      反查），启动失败与轮次失败都写入。
 3. **pid 与进程注册表解耦**：`registerProc` 现在无条件把 `client.PidInfo().PID` 落到连接上（注册表未
-   启用时 pid 仍可用于诊断），修掉「未配 `FORGE_PROC_REGISTRY` 时 diagnostics.pid 恒为 0」。
+   启用时 pid 仍可用于诊断），修掉「未配 `MATE_PROC_REGISTRY` 时 diagnostics.pid 恒为 0」。
 4. 前端：Agents 页每行新增「诊断」按钮 → 弹窗展示连接态/pid/启动命令/最近失败/stderr 尾巴 +
    「重新采集」；错误条目内折叠展示尾巴。
 
@@ -1470,39 +1470,39 @@ A3 把尾巴接到「错误事件 + 诊断快照」两条出口上。
 所以「非空尾巴」的证据来自真实子进程（python ACP 桩、`sh` 失败进程）而非 dsh/opencode；这不是能力
 缺失，而是这两个底座安静。尾巴上限 20 行/200 行环形缓冲，超出即截断（只保留最近），不做落盘。
 
-#### 19.13 切片 A4：`.forge/config` 目录化（完成）
+#### 19.13 切片 A4：`.ark-mate/config` 目录化（完成）
 
-**动机**：`config.go` 的包注释从 M0 起就写着「配置文件随 M2 的 `.forge/config` 目录化引入」，但
-15 个 `FORGE_*` 环境变量始终只能靠 shell/systemd/docker 三处各写一遍。A4 落地配置目录，且**不破坏
+**动机**：`config.go` 的包注释从 M0 起就写着「配置文件随 M2 的 `.ark-mate/config` 目录化引入」，但
+15 个 `MATE_*` 环境变量始终只能靠 shell/systemd/docker 三处各写一遍。A4 落地配置目录，且**不破坏
 既有环境变量语义**（目录不存在时行为与之前逐字节一致）。
 
 **设计**：
-1. **目录约定**：`FORGE_CONFIG_DIR`（默认 `~/.forge/config`）下两个可选文件——
+1. **目录约定**：`MATE_CONFIG_DIR`（默认 `~/.ark-mate/config`）下两个可选文件——
    `config.json`（JSON 对象）与 `env`（dotenv：`#` 注释、空行、可选 `export ` 前缀、成对引号）。
-   键名接受规范名（`addr`）、`FORGE_*` 原名、`-` 分隔写法与少量别名（`transcript`/`db_path`/
+   键名接受规范名（`addr`）、`MATE_*` 原名、`-` 分隔写法与少量别名（`transcript`/`db_path`/
    `agent_dir`/`capability_dir`）。
 2. **优先级**：默认值 < `config.json` < `env` < 进程环境变量 < CLI flag。实现上是
    `resolver`（键值 + 来源）逐层覆盖，最后 `materialize` 一次性解析成 `Config` 并补齐**派生默认值**
    （`transcripts`/`db`/`agents`/`capabilities` 依赖家目录，`proc_registry` 依赖 `dir(DBPath)`）——
    派生必须发生在全部覆盖之后，否则「文件里改了 db，proc_registry 仍指向旧目录」。
 3. **严格性**：未知键/非法 JSON/非标量/非法 duration/非法整数 → `LoadResolved` 返回错误，
-   `forge serve` 退出码 2 并在 stderr 打印文件路径、问题键与合法键清单。环境变量的历史宽容语义
-   保留（如 `FORGE_STORE=foo` 仍视为 auto），避免旧部署脚本因一个拼写把 daemon 卡死。
-4. **可核对面**：新增 `forge config [--json] [--config-dir]`，打印解析结果与**每项来源**
+   `mate serve` 退出码 2 并在 stderr 打印文件路径、问题键与合法键清单。环境变量的历史宽容语义
+   保留（如 `MATE_STORE=foo` 仍视为 auto），避免旧部署脚本因一个拼写把 daemon 卡死。
+4. **可核对面**：新增 `mate config [--json] [--config-dir]`，打印解析结果与**每项来源**
    （`default|config.json|env|env(process)`）；不启动任何进程、不写任何文件。
 5. 顺带修：sqlite 模式启动前 `MkdirAll(dir(DBPath))`——配置目录化后 DB 路径可由文件指定，父目录
    不存在时此前直接 `unable to open database file` 失败（实测暴露）。
 
 **证据**：
-- 单测 `internal/infra/config`：`TestConfigDirFilePriority`（三层覆盖 + 别名/`FORGE_` 原名/数字
+- 单测 `internal/infra/config`：`TestConfigDirFilePriority`（三层覆盖 + 别名/`MATE_` 原名/数字
   标量/含空格值 + proc_registry 派生）、`TestConfigDirMissingIsNoop`（无文件 → 来源全空、默认
   行为不变）、`TestConfigDirErrors`（7 个非法用例：未知键/坏 JSON/非标量/坏 duration/坏整数/
-  env 未知键/缺等号）、`TestLoadResolvedExplicitDir`；既有 4 个测试加 `FORGE_CONFIG_DIR` 指向临时
+  env 未知键/缺等号）、`TestLoadResolvedExplicitDir`；既有 4 个测试加 `MATE_CONFIG_DIR` 指向临时
   目录（防开发者本机配置污染断言）。
-- 真进程：`forge config` 文本/`--json` 两种输出实测（来源标注正确）；`forge serve` 按
-  `config.json` 监听 `127.0.0.1:10008` + sqlite + DB 落 `/tmp/a4/data/forge.db`（经该 daemon 建的
-  会话在 DB 中可查、events 5 行）；非法配置两种（未知键、坏 duration）→ `forge config`/`forge
-  serve` 均退出码 2；`FORGE_ADDR` 覆盖时来源变 `env(process)`；目录缺失时 `addr` 回落
+- 真进程：`mate config` 文本/`--json` 两种输出实测（来源标注正确）；`mate serve` 按
+  `config.json` 监听 `127.0.0.1:10008` + sqlite + DB 落 `/tmp/a4/data/mate.db`（经该 daemon 建的
+  会话在 DB 中可查、events 5 行）；非法配置两种（未知键、坏 duration）→ `mate config`/`mate
+  serve` 均退出码 2；`MATE_ADDR` 覆盖时来源变 `env(process)`；目录缺失时 `addr` 回落
   `127.0.0.1:10001`（来源 default）。
 - `go vet ./...` + `go test -race -count=1 ./...` 全绿。**诚实记录**：其中一次全量 race 运行
   出现 `FAIL internal/manager` 但未打印失败用例；随后该包 6 次单跑（含 `-count=3`）与全量 2 次
@@ -1535,9 +1535,9 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
    `StderrTail()`，经 `/agents/:id/diagnostics` 外露（远程 agent `connected=true, pid=0`）。
 4. **服务端半场**（`acl/remoteserver.go`）：`ServeWSSession` 与 `NewRemoteHandler`
    （POST 请求流 + GET 长流 + 按 id 精确投递/通知广播 + 会话 id 下发）。新增 CLI
-   `forge acp-serve --transport ws|http --listen --path`，把内置 echo 底座暴露成远程端点——
+   `mate acp-serve --transport ws|http --listen --path`，把内置 echo 底座暴露成远程端点——
    免模型 key 即可跨进程/跨机演示远程链路，也让端到端测试用**同一套生产代码**两侧对打。
-5. **注册面**：`.forge/config/runtimes.json`（A4 的配置目录）声明
+5. **注册面**：`.ark-mate/config/runtimes.json`（A4 的配置目录）声明
    `{id,name,transport,endpoint,headers}`；serve 启动注册进同一注册表（与内置 id 冲突即退出 2），
    agent 的 `runtimes` 字段直接引用。`runtime.Connect` 按 `LaunchSpec.Transport` 分派。
 6. **可用性判定修正**：`routing.Installed` 原先只查 `exec.LookPath(Command)`，远程 runtime
@@ -1552,8 +1552,8 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
   含状态与响应体 / Close 幂等）；`runtime.TestConnectRemoteTransport`（ws+http 两形态，远端跑
   真实 echo 底座，含权限往返）、`TestConnectUnsupportedTransport`；`routing.TestInstalled`
   补远程用例；`config.TestRemoteRuntimesJSON{,Errors}`（归一化 + 8 个非法用例）。
-- 真进程：`forge acp-serve` 起 ws(10020)/http(10021) 两个 echo 端点 → `runtimes.json` 声明 →
-  `forge serve` 注册成功 → `GET /runtimes` 5 项 → 两个远程 agent 各跑一轮（权限请求 → REST
+- 真进程：`mate acp-serve` 起 ws(10020)/http(10021) 两个 echo 端点 → `runtimes.json` 声明 →
+  `mate serve` 注册成功 → `GET /runtimes` 5 项 → 两个远程 agent 各跑一轮（权限请求 → REST
   决策 → 工具卡 → `turn.ended`）→ 杀掉 ws 端点后重建会话得 `50201` + `stderr_source=last_error`
   + 尾巴 `ws read: … EOF`。
 - `go vet ./...` + `go test -race -count=1 ./...` 全绿。
@@ -1572,7 +1572,7 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
 「任意人可建会话、可跑任意 agent 命令」暴露到网络上。A6 提供最小可用的单操作员令牌。
 
 **设计**：
-1. **配置**：`FORGE_TOKEN`（或 `.forge/config` 的 `token`，复用 A4 的配置目录）。空 = 不鉴权
+1. **配置**：`MATE_TOKEN`（或 `.ark-mate/config` 的 `token`，复用 A4 的配置目录）。空 = 不鉴权
    （历史行为，仍建议只绑回环）。
 2. **鉴权面**：`router.Options{Token}` → `authToken` 中间件挂在 `/health` **之后**注册的
    全部路由上（含 WS）。REST 读 `Authorization: Bearer <token>`；WS 因浏览器无法设置握手头，
@@ -1580,11 +1580,11 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
 3. **失败语义**：HTTP **401** + REST 信封 `{code:40101,requestID,msg,data:{}}`——鉴权失败属于
    传输层，不套用「业务错误一律 HTTP 200」的约定（否则 axios 拦截器无法区分）。比较用
    `subtle.ConstantTimeCompare`，避免逐字符计时侧信道。
-4. **令牌不外泄**：`forge config`（文本/JSON）只打印掩码 `cf…3a（14 字符）`；日志不打令牌。
+4. **令牌不外泄**：`mate config`（文本/JSON）只打印掩码 `cf…3a（14 字符）`；日志不打令牌。
 5. **前端**：`@ark/api` 新增 `getToken/setToken`（localStorage），axios 请求拦截器自动加头；
    WS URL 追加 `?token=`；顶栏新增「令牌」按钮（锁图标，已配置时高亮）+ 设置弹窗（保存后
    自动重连 WS 并重新拉数据）；收到 `code=40101` 自动弹窗提示。
-6. 顺带：`scripts/smoke-e2e.mjs` 与 `scripts/e2e-live-turn.mjs` 支持 `FORGE_SMOKE_TOKEN`
+6. 顺带：`scripts/smoke-e2e.mjs` 与 `scripts/e2e-live-turn.mjs` 支持 `MATE_SMOKE_TOKEN`
    （REST 头 + WS 查询参数），使既有联调脚本在鉴权模式下继续可用；鉴权模式下可直接把
    `E2E_BASE` 指向 daemon 端口（不经 vite 代理，避免为联调改 vite 配置）。
 
@@ -1595,8 +1595,8 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
 - 真进程（config.json 的 `token`）：`/health` 200；`/agents` 无令牌/错令牌 → HTTP 401 +
   `code=40101`（含 requestID 与提示）；正确 Bearer 与 `?token=` → 200；`POST /conversations/export`
   同样受保护。WS 探针（Node 24 内置 WebSocket）：无令牌 `ERROR → CLOSE 1006`、错令牌被拒、
-  带 `?token=` `OPEN → {"type":"pong"}`。`FORGE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS；
-  `FORGE_SMOKE_TOKEN=… node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（真实 dsh 轮次，
+  带 `?token=` `OPEN → {"type":"pong"}`。`MATE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS；
+  `MATE_SMOKE_TOKEN=… node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（真实 dsh 轮次，
   REST 头 + WS 查询参数都带令牌）。
 - `go vet ./...` + `go test -race -count=1 ./...` 全绿；前端 typecheck + build 通过。
 
@@ -1656,7 +1656,7 @@ WS URL 中，可能被反代访问日志记录（建议反代对 `/ws/events` �
 MCP 行为）。
 
 **设计**：
-1. **live-only，不落盘**：资源与提示词**不进能力目录**（不写 `~/.forge/capabilities/*`、不落库）——
+1. **live-only，不落盘**：资源与提示词**不进能力目录**（不写 `~/.ark-mate/capabilities/*`、不落库）——
    它们是 server 的实时视图（随权限/内容变化），每次请求现拉。对比：tools 会写目录（探测结果需要
    被 agent 能力视图引用），而 resources/prompts 目前没有消费方需要缓存。这是有意的取舍，不是遗漏。
 2. **方法面**（MCP 2025-06-18）：
@@ -1739,8 +1739,8 @@ MCP 行为）。
 在首次点击前，`/tools` 与 agent 能力视图都是空的——目录「看起来没生效」。B4 提供启动时自动探测。
 
 **设计**：
-1. **配置项**：`mcp_auto_probe`（`FORGE_MCP_AUTO_PROBE` 覆盖），取值 `off`（默认）| `startup`；
-   非法值 → 启动 exit 2 并列出合法取值（复用 A4 的配置校验路径）。`forge config` 展示取值与来源。
+1. **配置项**：`mcp_auto_probe`（`MATE_MCP_AUTO_PROBE` 覆盖），取值 `off`（默认）| `startup`；
+   非法值 → 启动 exit 2 并列出合法取值（复用 A4 的配置校验路径）。`mate config` 展示取值与来源。
 2. **默认 off 是有意的**：stdio 探测会**拉起用户配置的子进程**（http/sse 会向外发请求）。
    自动执行属于「改变用户机器行为」，必须显式开启；不开时与历史行为完全一致。
 3. **实现**：`manager.Service.AutoProbeMcpServers(ctx)` 串行遍历已注册 server（避免同时拉起大量
@@ -1790,7 +1790,7 @@ MCP 行为）。
 | `default: ask/allow`（auto） | **不注入**（dsh 默认即 workspace-write，注入只会覆盖环境值） | 全 ask → 不注入 |
 | `tools` 键 | 不参与（dsh 无工具级开关） | 按别名映射到 permission 键；同键冲突取更严者；未映射键跳过并记日志 |
 | `native_mode` | 显式 `read-only/workspace-write/danger-full-access` 原样注入 | 只认 `off` |
-| `native_mode: off` / `FORGE_NATIVE_PERMISSION=off` | 不注入 | 不注入 |
+| `native_mode: off` / `MATE_NATIVE_PERMISSION=off` | 不注入 | 不注入 |
 
 `default: allow` **不**自动升级为 `danger-full-access`：allow 的语义是「平台自动放行」，而
 danger-full-access 会同时关掉沙箱与审批——要完全放开必须显式写 `native_mode: danger-full-access`。
@@ -1811,9 +1811,9 @@ danger-full-access 会同时关掉沙箱与审批——要完全放开必须显�
   `danger-full-access` → 成功写入。证明 `DSH_PERMISSION_MODE` 真实生效。
 - 平台真进程（daemon 10016）：`ps eww` 读到 4 个子进程的原生权限 env（见 deployment.md）；
   opencode A/B（`oc-ask` 有挂起权限请求 / `oc-nobash` 无）；dsh `default:deny`+read-only 写入被拒且文件未生成；
-  `FORGE_NATIVE_PERMISSION=off` → 两个 runtime 均无注入。
+  `MATE_NATIVE_PERMISSION=off` → 两个 runtime 均无注入。
 - 顺带修复：`eventbus.Subscribe` 固定 256 缓冲同步回放，历史 >256 且 after 小时**持锁死锁**
-  （`forge demo` 的 `Subscribe(0)` 必现，本次实测复现）→ 缓冲按回放条数分配 + 回归测试（独立提交 757cbba）。
+  （`mate demo` 的 `Subscribe(0)` 必现，本次实测复现）→ 缓冲按回放条数分配 + 回归测试（独立提交 757cbba）。
 - `go vet ./...` + `go test -race -count=1 ./...` 全绿；`make all` 通过。
 
 **遗留/降级**：① 底座「不问就执行」的缺口只对**有原生开关**的 runtime 有效（echo 无开关；远程 runtime
@@ -1933,13 +1933,13 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 1. `capability.MaterializeSkillFor(root, runtime, s)` / `ReconcileSkillsFor(root, runtime, skills)`：
    内容只取 `sources[].runtime == runtime` 的那条源（format 也来自该源）；`runtime == ""` 保持
    原语义（首个已实证 format、不过滤 runtime），`MaterializeSkill`/`ReconcileSkills` 变为其薄封装。
-2. 归属标记 `.forge-managed` 升级为两行（首行 skill id、次行 runtime），**删除联动按 runtime 收敛**：
+2. 归属标记 `.mate-managed` 升级为两行（首行 skill id、次行 runtime），**删除联动按 runtime 收敛**：
    共享 root 下每个 runtime 只删自己标记的目录，绝不删别的 runtime 的产物；幂等判定只看「标记存在 +
    内容一致」（若把 runtime 计入幂等，两个 runtime 共享 root 会互相改写标记形成写-写乒乓）。
-3. 配置 `FORGE_SKILLS_MATERIALIZE_DIRS=runtime=dir[,runtime=dir]`（新键 `skills_materialize_dirs`）：
-   非法形态（缺 `=`、空 runtime/dir、重复 runtime）→ `forge serve` 启动即报错（退出码 2）；
-   与 `FORGE_SKILLS_MATERIALIZE_DIR` 可并存（先跑单 root 全量，再按 runtime 各跑一次）。
-4. `serve` 启动时按 runtime 名排序遍历（日志/执行顺序稳定）；`forge config` 增该键（JSON 与文本输出）。
+3. 配置 `MATE_SKILLS_MATERIALIZE_DIRS=runtime=dir[,runtime=dir]`（新键 `skills_materialize_dirs`）：
+   非法形态（缺 `=`、空 runtime/dir、重复 runtime）→ `mate serve` 启动即报错（退出码 2）；
+   与 `MATE_SKILLS_MATERIALIZE_DIR` 可并存（先跑单 root 全量，再按 runtime 各跑一次）。
+4. `serve` 启动时按 runtime 名排序遍历（日志/执行顺序稳定）；`mate config` 增该键（JSON 与文本输出）。
 
 **证据**：
 - 单测：`capability.TestMaterializeSkillForPerRuntime`（双源 skill 各写自己的 root + 标记 runtime、
@@ -2001,7 +2001,7 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 
 **证据**：单测 `capability.TestReconcileSharedRootResidualCleanup`（双 runtime 登记 → 幂等 0/0 →
 oc 摘除登记且目录保留 → dsh 也退出 → 目录删除）、`TestReadMarkerLegacy`（旧格式/空归属解析）；
-真进程（`FORGE_SKILLS_MATERIALIZE_DIRS=opencode=/tmp/c6/shared,deepseekharness=/tmp/c6/shared`）：
+真进程（`MATE_SKILLS_MATERIALIZE_DIRS=opencode=/tmp/c6/shared,deepseekharness=/tmp/c6/shared`）：
 首轮标记 `both|deepseekharness,opencode`；移除 oc-only 声明 → `removed=1` 且 `both` 归属不变；
 把 both 的 oc 源删掉 → 标记降为 `deepseekharness`（目录保留）；再删 both 声明 → `removed=1`、目录消失、
 无残留（见 deployment.md）。`go vet` + `go test -race -count=1 ./...` 全绿。
@@ -2063,7 +2063,7 @@ oc 摘除登记且目录保留 → dsh 也退出 → 目录删除）、`TestRead
 | O11 | **权限策略增强**：无「按工具参数模式匹配」（如 bash 命令白名单）；前端策略编辑的工具项是 JSON 文本域（无键值行编辑器）；原生配置在连接建立时固定，运行中 PATCH 只影响新连接 | 精细化策略 / 更好的编辑体验 | §19.5 · §19.20 · §19.21 |
 | O12 | **排障可见性**：跨会话 elicitation 决策与「未知 id」同码同文案（细节只在服务端 WARN）；决策回执里的 `always` 是请求意图而非「记忆是否真的写入」（记忆以 memories 读面为准） | 需要更强审计/排障信息 | §19.23 · §19.25 |
 | O13 | **事件持久化边角**：`AppendEvent` 写库失败的事件不出现在 REST 历史（bus 侧仍有，且有告警） | 需要历史与 bus 完全一致 | §19.22 |
-| O14 | **Resume 未接入 forge 恢复流程**：`acl.Client.ResumeSession` 能力门已实现（echo 明确不支持；opencode/dsh 握手级支持），但 forge 侧「重建投影 + 别名归属」的恢复流程未接；P0 不做进程重启断点恢复（ADR-4 P3） | 需要跨 daemon 重启续跑同一底座会话 | §16.6 · §17.4 |
+| O14 | **Resume 未接入 mate 恢复流程**：`acl.Client.ResumeSession` 能力门已实现（echo 明确不支持；opencode/dsh 握手级支持），但 mate 侧「重建投影 + 别名归属」的恢复流程未接；P0 不做进程重启断点恢复（ADR-4 P3） | 需要跨 daemon 重启续跑同一底座会话 | §16.6 · §17.4 |
 | O15 | **会话 `provider_session_id` 未持久化**：断点恢复（重启后对既有会话重发 prompt 时重建 ACP 会话）是**新会话 + 别名归属**，不是底座侧会话续接；底座会话 id 未落库 | 需要真正的底座会话续接（与 O14 同源） | §17.4 |
 
 ### 20.3 已关闭（CLOSED，保留追溯）

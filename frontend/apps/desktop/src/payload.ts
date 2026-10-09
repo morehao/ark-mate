@@ -6,7 +6,7 @@
  * 设计 §6.5 的链是三级：**显式配置 → 随包载荷 → PATH**。对本模块负责的三份载荷（dsh / opencode /
  * npm 的 npx 入口）只有前两级是合法的：
  *
- *   - 命中**显式配置**（`FORGE_RUNTIME_<NAME>`）→ `runtime-env`：用户明确指名用哪一份，我们就用它；
+ *   - 命中**显式配置**（`MATE_RUNTIME_<NAME>`）→ `runtime-env`：用户明确指名用哪一份，我们就用它；
  *   - 命中**随包载荷** → `bundled`：这是桌面态的常态；
  *   - 都没命中 → **启动期错误**，不回落 PATH。
  *
@@ -61,8 +61,8 @@ export type PayloadResolutionDeps = {
 
 /** 本模块认识的载荷：名字 → 显式覆盖的环境变量。 */
 const PAYLOAD_ENV_VARS: Record<string, string> = {
-  dsh: 'FORGE_RUNTIME_DSH',
-  opencode: 'FORGE_RUNTIME_OPENCODE',
+  dsh: 'MATE_RUNTIME_DSH',
+  opencode: 'MATE_RUNTIME_OPENCODE',
 }
 
 /** 随包载荷清单里读出来的元数据（`payload.json` 的子集）。 */
@@ -131,7 +131,7 @@ export function resolvePayload(name: string, entryRel: string | undefined, deps:
     throw new Error(
       `找不到随包运行时载荷 ${name}：${join(deps.payloadsRoot, name)}\n` +
         `  桌面态**不回落**到机器上装的同名命令（设计 §6.5：随包运行时与用户自己装的 runtime 是两件事）。\n` +
-        `  先构建：make desktop/payloads；或显式指定：${envVar ?? `FORGE_RUNTIME_${name.toUpperCase()}`}=<可执行文件绝对路径>`,
+        `  先构建：make desktop/payloads；或显式指定：${envVar ?? `MATE_RUNTIME_${name.toUpperCase()}`}=<可执行文件绝对路径>`,
     )
   }
 
@@ -184,10 +184,10 @@ export function resolveRuntimePayloads(deps: PayloadResolutionDeps): {
  */
 export function payloadEnvironmentExtras(payloads: ReturnType<typeof resolveRuntimePayloads>): Record<string, string> {
   const extras: Record<string, string> = {
-    FORGE_DSH_ENTRY: payloads.dsh.entry,
-    FORGE_OPENCODE_BIN: payloads.opencode.entry,
+    MATE_DSH_ENTRY: payloads.dsh.entry,
+    MATE_OPENCODE_BIN: payloads.opencode.entry,
   }
-  if (payloads.npxEntry) extras.FORGE_NPX_ENTRY = payloads.npxEntry
+  if (payloads.npxEntry) extras.MATE_NPX_ENTRY = payloads.npxEntry
   return extras
 }
 

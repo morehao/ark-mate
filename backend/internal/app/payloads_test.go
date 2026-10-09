@@ -28,7 +28,7 @@ func payloadTestConfig(t *testing.T) config.Config {
 	cfg.HomeDir = home
 	cfg.ConfigDir = filepath.Join(home, "config")
 	cfg.TranscriptDir = filepath.Join(home, "transcripts")
-	cfg.DBPath = filepath.Join(home, "forge.db")
+	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeMemory
 	cfg.WorkspaceDir = ""
 	cfg.ProcRegistryPath = ""
@@ -63,7 +63,7 @@ func initPayloadTestApp(t *testing.T, opts ...Option) *App {
 	return a
 }
 
-// getMetaPayloadsRaw 经真实路由取 `/v1/forge/meta`，返回 data.payloads 的**原始 JSON**。
+// getMetaPayloadsRaw 经真实路由取 `/v1/mate/meta`，返回 data.payloads 的**原始 JSON**。
 //
 // 用原始字节而不是解完再查值：本用例要断言的正是"字段顺序/形状"（nil 切片会变 null、
 // 字段顺序变了前端契约就漂移），解析成结构体后这些信息就没了。
@@ -74,13 +74,13 @@ func getMetaPayloadsRaw(t *testing.T, a *App) string {
 		t.Fatal("Engine() 为空：Init 没有装配起 HTTP 引擎")
 	}
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/forge/meta", nil)
-	// M3-5 起 `/v1/forge` 组有 Host 白名单：请求的 Host 必须是**实际监听地址**
+	req := httptest.NewRequest(http.MethodGet, "/v1/mate/meta", nil)
+	// M3-5 起 `/v1/mate` 组有 Host 白名单：请求的 Host 必须是**实际监听地址**
 	// （httptest 默认填 example.com，那在真实装配下就是 421——这正是白名单该做的事）。
 	req.Host = a.srv.Addr()
 	eng.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("GET /v1/forge/meta HTTP %d：%s", w.Code, w.Body.String())
+		t.Fatalf("GET /v1/mate/meta HTTP %d：%s", w.Code, w.Body.String())
 	}
 	var env struct {
 		Code int `json:"code"`

@@ -248,7 +248,7 @@ func TestCreateConversationWorkspaceRequiredWhenDisabled(t *testing.T) {
 }
 
 // TestCreateConversationDiscardsTemporaryWorkspaceOnFailure 会话最终没建起来时，
-// 刚代建的目录必须被清理（否则每次失败都在 ~/.forge/workspaces 下留垃圾）。
+// 刚代建的目录必须被清理（否则每次失败都在 ~/.ark-mate/workspaces 下留垃圾）。
 func TestCreateConversationDiscardsTemporaryWorkspaceOnFailure(t *testing.T) {
 	root := t.TempDir()
 	svc := workspaceTestSvc(t)
@@ -414,7 +414,7 @@ func TestRecentWorkspaces(t *testing.T) {
 	}
 }
 
-// ——— 工作区根白名单（FORGE_WORKSPACE_ROOTS，A 的边界） ———
+// ——— 工作区根白名单（MATE_WORKSPACE_ROOTS，A 的边界） ———
 
 // TestWithinRoots 边界判定：逐段比较（不是字符串前缀）+ 两侧都解析符号链接真身。
 func TestWithinRoots(t *testing.T) {
@@ -478,7 +478,7 @@ func TestValidateWorkspaceRoots(t *testing.T) {
 		t.Fatalf("根外路径应 workspace_outside_roots，得到 %s: %v", code, err)
 	}
 	// 错误信息要能指导运维改哪个配置（否则只会看到"被拒"）。
-	if !strings.Contains(err.Error(), "FORGE_WORKSPACE_ROOTS") {
+	if !strings.Contains(err.Error(), "MATE_WORKSPACE_ROOTS") {
 		t.Fatalf("越界错误应点明配置键: %v", err)
 	}
 }

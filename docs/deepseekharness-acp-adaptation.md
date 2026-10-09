@@ -52,7 +52,7 @@
 3. `--config <cordis.yml>` 形态废弃：config 归属 `$DSH_HOME/profiles/acp`（或 `--patch` 覆盖），
    不再由 ark-mate 传路径；若需自定义 profile 行，走 `dsh plugin --profile acp add/...` 或追加 `--patch`。
 4. harness 冒烟（本机实测记录，2026-09-03）：`dsh@next`（0.1.2-rc.1）经 npx 缓存
-   `~/.npm/_npx/<hash>/node_modules/.bin` 注入 PATH 后，`forge demo --runtime deepseekharness
+   `~/.npm/_npx/<hash>/node_modules/.bin` 注入 PATH 后，`mate demo --runtime deepseekharness
    --prompt "请只回复两个字：明白"` 跑通：`session.created → thought/message 流 → turn.ended
    (end_turn)`，会话 id 形如 UUID（645fb04e-…）。agent=agent-deepseekharness。
 

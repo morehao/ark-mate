@@ -2,13 +2,13 @@
  * 载体判定与形状守卫（纯函数，零依赖）。
  *
  * **判定**（`isDesktopCarrier`）回答"这个 document 是不是桌面载体主框架"——preload 用它决定
- * 要不要暴露 `__FORGE_DESKTOP__`（不满足就一次都不调用，V18 的负例），主进程用它做 IPC origin 校验：
+ * 要不要暴露 `__MATE_DESKTOP__`（不满足就一次都不调用，V18 的负例），主进程用它做 IPC origin 校验：
  * 每个 handler 首行拒绝非 app origin / 非主框架的调用方。
  *
- * **守卫**（`assertForgeDesktop`）在 preload 暴露**之前**自检一次形状：形状错了就在 preload 阶段
+ * **守卫**（`assertMateDesktop`）在 preload 暴露**之前**自检一次形状：形状错了就在 preload 阶段
  * 炸掉，而不是让页面拿到半个对象、在某个业务路径上以"某方法是 undefined"的形式晚炸。
  */
-import { APP_ORIGIN, type ForgeDesktop } from './index.ts'
+import { APP_ORIGIN, type MateDesktop } from './index.ts'
 
 /** `location` 的最小投影：只取判定需要的两个字段（`URL` 与 `Location` 都满足）。 */
 export type CarrierLocation = { protocol: string; hostname: string }
@@ -17,8 +17,8 @@ export type CarrierLocation = { protocol: string; hostname: string }
  * 是否桌面载体的**主框架**。
  *
  * 判定口径（设计 §7.3）＝ 协议 + 主机 + 主框架**三者同时**成立：
- * `forge-app:` + `app` + `isMainFrame === true`。因此 `forge-app://shell/*`（壳静态页）、
- * `forge-app://other/*`、`https:` / `http:` 的任何页面、以及任意**子框架**都判否。
+ * `mate-app:` + `app` + `isMainFrame === true`。因此 `mate-app://shell/*`（壳静态页）、
+ * `mate-app://other/*`、`https:` / `http:` 的任何页面、以及任意**子框架**都判否。
  */
 export function isDesktopCarrier(loc: CarrierLocation | null | undefined, isMainFrame: boolean): boolean {
   if (loc == null || !isMainFrame) return false
@@ -43,9 +43,9 @@ function isFn(v: unknown): boolean {
  * 运行期形状守卫：字段缺失或类型不符即抛错，**错误信息里列出出问题的字段名**。
  *
  * 校验的是**结构化形状**（不 import 任何 Electron 类型）：`boot` 是函数、`native` / `platform`
- * 是对象且各自的方法是函数。通过则原样返回（便于 `const api = assertForgeDesktop(shape)`）。
+ * 是对象且各自的方法是函数。通过则原样返回（便于 `const api = assertMateDesktop(shape)`）。
  */
-export function assertForgeDesktop(value: unknown): ForgeDesktop {
+export function assertMateDesktop(value: unknown): MateDesktop {
   if (!isRecord(value)) {
     throw new Error(`载体契约形状不符：期望对象，实际 ${typeName(value)}`)
   }
@@ -76,5 +76,5 @@ export function assertForgeDesktop(value: unknown): ForgeDesktop {
   if (bad.length > 0) {
     throw new Error(`载体契约形状不符：${bad.join('，')}`)
   }
-  return value as unknown as ForgeDesktop
+  return value as unknown as MateDesktop
 }

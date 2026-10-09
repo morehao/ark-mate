@@ -10,7 +10,7 @@ import (
 // Origin 白名单（M3-5，设计 §7.2 的 Origin 矩阵行 / §9.1）。
 //
 // 默认矩阵（见 internal/middleware/origin.go）**只**放行：无 Origin 的壳内反代/curl/同源导航、
-// `forge-app://app`（桌面直连）与核心自身端口上的 http 同源。本键是**额外的显式登记口**：
+// `mate-app://app`（桌面直连）与核心自身端口上的 http 同源。本键是**额外的显式登记口**：
 // 跨源开发（`make dev` 的 vite :5173 → 代理到核心）与自建反代（页面 origin 与核心监听 origin 不同）
 // 都落在默认矩阵之外，必须在这里指名登记——**不是默认放开**，也不是"配了就放行任意 Origin"。
 //
@@ -21,11 +21,11 @@ import (
 // OriginSchemes 允许出现在 allowed_origins 里的 scheme（错误提示用）。
 //
 // 为什么是白名单而不是"任意 RFC 3986 scheme"：只有会**加载页面**的上下文才会带 Origin——
-// 浏览器是 http/https，桌面壳自定义 scheme 是 forge-app；放行 ftp/file 之类只会把
+// 浏览器是 http/https，桌面壳自定义 scheme 是 mate-app；放行 ftp/file 之类只会把
 // 一条永远命中不了的登记项写进配置，或者更糟：让人以为"登记了某个协议就给那个协议开了口子"。
-var OriginSchemes = []string{"http", "https", "forge-app"}
+var OriginSchemes = []string{"http", "https", "mate-app"}
 
-// parseAllowedOrigins 解析 `scheme://host[:port][,...]`（FORGE_ALLOWED_ORIGINS 的逗号分隔写法）。
+// parseAllowedOrigins 解析 `scheme://host[:port][,...]`（MATE_ALLOWED_ORIGINS 的逗号分隔写法）。
 func parseAllowedOrigins(v string) ([]string, error) {
 	return normalizeAllowedOrigins(strings.Split(v, ","))
 }
@@ -82,7 +82,7 @@ func normalizeAllowedOrigins(items []string) ([]string, error) {
 	}
 	// 全空（如显式设为空格）= 不登记任何额外来源：与"未设置"同义，不报错（便于用 env 临时清空）。
 	//
-	// 排序是刻意的：白名单的语义是**集合**，而 `forge config` 的输出会被用来 diff / 排障 /
+	// 排序是刻意的：白名单的语义是**集合**，而 `mate config` 的输出会被用来 diff / 排障 /
 	// 进工单，输入顺序不该泄漏到输出里（同一个集合两次打印必须逐字相同）。
 	sort.Strings(out)
 	return out, nil

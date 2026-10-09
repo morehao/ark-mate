@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// TestMain 复用测试二进制作为 stdio MCP 服务端（FORGE_MCP_HELPER=1 时进入 helper 循环）。
+// TestMain 复用测试二进制作为 stdio MCP 服务端（MATE_MCP_HELPER=1 时进入 helper 循环）。
 func TestMain(m *testing.M) {
-	if os.Getenv("FORGE_MCP_HELPER") == "1" {
+	if os.Getenv("MATE_MCP_HELPER") == "1" {
 		runHelper()
 		return
 	}
@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 
 // runHelper 最小 MCP stdio 服务端：initialize / initialized / tools/list（含分页与故障注入）。
 func runHelper() {
-	mode := os.Getenv("FORGE_MCP_HELPER_MODE")
+	mode := os.Getenv("MATE_MCP_HELPER_MODE")
 	if mode == "server" {
 		// mode=server：跑**本包真实的服务端实现**（server.go），用来做自研互测与 stdout 纯度
 		// 检查。这里不手写帧，手写的那套（下面）继续负责"故障注入"这类客户端侧用例。
@@ -35,7 +35,7 @@ func runHelper() {
 	}
 	// 连接池用例要数"起了几次进程"：每次进入 helper 追加一行（含 pid），父进程数行数即可。
 	// 池化的收益正是"第二次调用不再起进程"，这是它唯一可观测的证据。
-	if logPath := os.Getenv("FORGE_MCP_HELPER_SPAWN_LOG"); logPath != "" {
+	if logPath := os.Getenv("MATE_MCP_HELPER_SPAWN_LOG"); logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err == nil {
 			fmt.Fprintf(f, "%d\n", os.Getpid())
@@ -194,14 +194,14 @@ func runHelper() {
 
 func stdioServer(t *testing.T) Server {
 	t.Helper()
-	t.Setenv("FORGE_MCP_HELPER", "1")
+	t.Setenv("MATE_MCP_HELPER", "1")
 	return Server{ID: "helper", Transport: "stdio", Command: os.Args[0]}
 }
 
 // helperName 让父进程能验证 **Server.Env**（而不是父进程环境）确实进了子进程：
-// 测试把 FORGE_MCP_HELPER_NAME 放进 Server.Env，这里把它当 serverInfo.name 回出来。
+// 测试把 MATE_MCP_HELPER_NAME 放进 Server.Env，这里把它当 serverInfo.name 回出来。
 func helperName() string {
-	if v := os.Getenv("FORGE_MCP_HELPER_NAME"); v != "" {
+	if v := os.Getenv("MATE_MCP_HELPER_NAME"); v != "" {
 		return v
 	}
 	return "helper"
@@ -217,7 +217,7 @@ func TestStdioServerEnvReachesChild(t *testing.T) {
 	defer cancel()
 	s := stdioServer(t)
 	// 只放在 Server.Env 里：父进程环境没有这个键，子进程能读到才说明字段生效。
-	s.Env = map[string]string{"FORGE_MCP_HELPER_NAME": "from-server-env"}
+	s.Env = map[string]string{"MATE_MCP_HELPER_NAME": "from-server-env"}
 	res, err := ListTools(ctx, s)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -226,8 +226,8 @@ func TestStdioServerEnvReachesChild(t *testing.T) {
 		t.Fatalf("Server.Env 未进子进程：serverInfo.name=%q", res.ServerName)
 	}
 	// 且是**追加**语义：父进程环境仍在（否则 HOME/PATH 之类会被抹掉）。
-	if os.Getenv("FORGE_MCP_HELPER") == "" {
-		t.Fatal("夹具前提：父进程环境应有 FORGE_MCP_HELPER")
+	if os.Getenv("MATE_MCP_HELPER") == "" {
+		t.Fatal("夹具前提：父进程环境应有 MATE_MCP_HELPER")
 	}
 }
 
@@ -252,7 +252,7 @@ func TestStdioListToolsOK(t *testing.T) {
 
 // TestStdioPagination tools/list nextCursor 翻页（两页合并）。
 func TestStdioPagination(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "paginate")
+	t.Setenv("MATE_MCP_HELPER_MODE", "paginate")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res, err := ListTools(ctx, stdioServer(t))
@@ -266,7 +266,7 @@ func TestStdioPagination(t *testing.T) {
 
 // TestStdioInitializeError 握手失败 → mcp_initialize_failed。
 func TestStdioInitializeError(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "init_error")
+	t.Setenv("MATE_MCP_HELPER_MODE", "init_error")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := ListTools(ctx, stdioServer(t))
@@ -277,7 +277,7 @@ func TestStdioInitializeError(t *testing.T) {
 
 // TestStdioBadJSON 响应非 JSON → tools 阶段报错（initialize 已过）。
 func TestStdioBadJSON(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "bad_json")
+	t.Setenv("MATE_MCP_HELPER_MODE", "bad_json")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := ListTools(ctx, stdioServer(t))
@@ -288,7 +288,7 @@ func TestStdioBadJSON(t *testing.T) {
 
 // TestStdioTimeout ctx 到期 → mcp_timeout（子进程被 CommandContext 杀掉，读立即返回）。
 func TestStdioTimeout(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "no_response")
+	t.Setenv("MATE_MCP_HELPER_MODE", "no_response")
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
 	_, err := ListTools(ctx, stdioServer(t))
@@ -449,7 +449,7 @@ func TestCallToolStdioOK(t *testing.T) {
 
 // TestCallToolIsError 工具级失败（isError=true）不是传输/协议错误，须原样透传。
 func TestCallToolIsError(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "call_is_error")
+	t.Setenv("MATE_MCP_HELPER_MODE", "call_is_error")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res, err := CallTool(ctx, stdioServer(t), "read_file", nil)
@@ -463,7 +463,7 @@ func TestCallToolIsError(t *testing.T) {
 
 // TestCallToolRPCError JSON-RPC 错误 → mcp_tools_call_failed（带稳定 code）。
 func TestCallToolRPCError(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "call_rpc_error")
+	t.Setenv("MATE_MCP_HELPER_MODE", "call_rpc_error")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := CallTool(ctx, stdioServer(t), "no_such_tool", nil)
@@ -561,7 +561,7 @@ func TestListResourcesAndTemplates(t *testing.T) {
 
 // TestListResourcesTemplatesUnsupported 服务端未实现 templates → 降级为空 + 记录原因（不报错）。
 func TestListResourcesTemplatesUnsupported(t *testing.T) {
-	t.Setenv("FORGE_MCP_HELPER_MODE", "no_templates")
+	t.Setenv("MATE_MCP_HELPER_MODE", "no_templates")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res, err := ListResources(ctx, stdioServer(t))

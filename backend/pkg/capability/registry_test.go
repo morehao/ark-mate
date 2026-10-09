@@ -167,7 +167,7 @@ func TestRegisterSkillRuntimesAndScope(t *testing.T) {
 // TestLoadLegacySourcesWarns 旧 `sources` 键被忽略这件事**必须可见**。
 //
 // `encoding/json` 丢未知键是静默的，而这里丢掉的后果是投放面被放宽（「只给 opencode」变成
-// 「给所有 runtime」）。装载期为这类文件挂一条 info 告警，把人引到 `forge capability migrate`。
+// 「给所有 runtime」）。装载期为这类文件挂一条 info 告警，把人引到 `mate capability migrate`。
 func TestLoadLegacySourcesWarns(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "skills", "legacy.json"),
@@ -192,7 +192,7 @@ func TestLoadLegacySourcesWarns(t *testing.T) {
 	if found == nil {
 		t.Fatalf("含 sources 的定义应挂 legacy_sources_key 告警: %+v", legacy.Warnings)
 	}
-	if !strings.Contains(found.Message, "forge capability migrate") {
+	if !strings.Contains(found.Message, "mate capability migrate") {
 		t.Fatalf("告警要给出出路: %q", found.Message)
 	}
 	// 没有旧键的定义不该被挂告警（避免噪声把真告警淹掉）。

@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { LockOutlined, MenuOutlined, UnlockOutlined } from '@ant-design/icons'
 import { Button, Input, Modal } from 'antd'
 import { tokens } from '@ark/ui'
-import { useForge } from '../store'
+import { useMate } from '../store'
 
 const NAV = [
   { to: '/conversations', label: '问答' },
@@ -34,14 +34,14 @@ function navStyle(active: boolean): CSSProperties {
 /** 顶栏（console.html .appbar）：burger + logo + 视图 chip + 管理入口 + WS 状态。 */
 export function TopBar() {
   const location = useLocation()
-  const conversations = useForge((s) => s.conversations)
-  const wsState = useForge((s) => s.wsState)
-  const setDrawer = useForge((s) => s.setDrawer)
+  const conversations = useMate((s) => s.conversations)
+  const wsState = useMate((s) => s.wsState)
+  const setDrawer = useMate((s) => s.setDrawer)
 
-  const token = useForge((s) => s.token)
-  const tokenModalOpen = useForge((s) => s.tokenModalOpen)
-  const saveToken = useForge((s) => s.saveToken)
-  const setTokenModal = useForge((s) => s.setTokenModal)
+  const token = useMate((s) => s.token)
+  const tokenModalOpen = useMate((s) => s.tokenModalOpen)
+  const saveToken = useMate((s) => s.saveToken)
+  const setTokenModal = useMate((s) => s.setTokenModal)
   const [draft, setDraft] = useState(token)
 
   // 弹窗打开时同步当前令牌（外部清除后再次打开不应显示旧值）。
@@ -107,7 +107,7 @@ export function TopBar() {
           whiteSpace: 'nowrap',
         }}
       >
-        ark<span style={{ color: tokens.primary }}>·</span>forge
+        ark<span style={{ color: tokens.primary }}>·</span>mate
       </NavLink>
 
       <span style={{ width: 1, height: 18, background: tokens.borderStrong, flex: 'none' }} aria-hidden="true" />
@@ -148,7 +148,7 @@ export function TopBar() {
       <button
         type="button"
         onClick={() => setTokenModal(true)}
-        title={token ? '已配置访问令牌（点击修改/清除）' : '未配置访问令牌（后端启用 FORGE_TOKEN 时必填）'}
+        title={token ? '已配置访问令牌（点击修改/清除）' : '未配置访问令牌（后端启用 MATE_TOKEN 时必填）'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -195,8 +195,8 @@ export function TopBar() {
         width={460}
       >
         <div style={{ fontSize: 12.5, lineHeight: 1.8, color: tokens.textSecondary, marginBottom: 10 }}>
-          后端以 <code style={{ fontFamily: tokens.fontMono }}>FORGE_TOKEN</code>（或
-          <code style={{ fontFamily: tokens.fontMono }}> .forge/config</code> 的 <code>token</code>）启用鉴权后，
+          后端以 <code style={{ fontFamily: tokens.fontMono }}>MATE_TOKEN</code>（或
+          <code style={{ fontFamily: tokens.fontMono }}> .ark-mate/config</code> 的 <code>token</code>）启用鉴权后，
           除 <code>/health</code> 外的所有接口都需要该令牌。令牌只保存在本浏览器（localStorage），
           不会写入 URL 或日志。
         </div>
@@ -204,7 +204,7 @@ export function TopBar() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onPressEnter={() => saveToken(draft)}
-          placeholder="粘贴 FORGE_TOKEN；留空 = 清除"
+          placeholder="粘贴 MATE_TOKEN；留空 = 清除"
           autoComplete="off"
         />
         <div style={{ marginTop: 10 }}>

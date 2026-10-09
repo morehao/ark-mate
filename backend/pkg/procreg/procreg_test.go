@@ -49,7 +49,7 @@ func TestRegistryPersistAndOrphans(t *testing.T) {
 	if reg.Instance() == "" {
 		t.Fatal("实例 id 应为非空")
 	}
-	if err := reg.Add(procreg.Entry{PID: 4242, PGID: 4242, Command: "forge", Runtime: "stub", AgentID: "a1"}); err != nil {
+	if err := reg.Add(procreg.Entry{PID: 4242, PGID: 4242, Command: "mate", Runtime: "stub", AgentID: "a1"}); err != nil {
 		t.Fatal(err)
 	}
 	// 落盘形状：version + entries。

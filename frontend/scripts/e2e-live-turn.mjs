@@ -13,10 +13,10 @@
 import { buildAttachFrame } from '@ark/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
-const API = E2E_BASE + '/v1/forge'
-// 后端启用凭据时用 FORGE_SMOKE_TOKEN 传入：REST 走 Authorization 头，
+const API = E2E_BASE + '/v1/mate'
+// 后端启用凭据时用 MATE_SMOKE_TOKEN 传入：REST 走 Authorization 头，
 // WS 走带内首帧 attach（M1-1 起令牌不进 URL）。
-const TOKEN = process.env.FORGE_SMOKE_TOKEN || ''
+const TOKEN = process.env.MATE_SMOKE_TOKEN || ''
 const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
 
 const [, , AGENT_ID = '', PROMPT = ''] = process.argv
@@ -33,7 +33,7 @@ async function main() {
   console.log(`真会话 e2e  agent=${AGENT_ID} prompt=${JSON.stringify(PROMPT)} base=${E2E_BASE}\n`)
 
   // 1) REST 创建（真实 dial + session/new；带 prompt → 首轮异步开跑）
-  console.log('· POST /v1/forge/conversations …')
+  console.log('· POST /v1/mate/conversations …')
   const r = await fetch(API + '/conversations', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },
@@ -48,7 +48,7 @@ async function main() {
   console.log(`  ✔ 会话 ${id} status=${status} 水位 event_seq=${event_seq}`)
 
   // 2) WS attach（since_seq = 创建返回水位 → 只收首轮增量）
-  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/forge/ws/events'
+  const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/mate/ws/events'
   const ws = new WebSocket(wsUrl)
   await new Promise((resolve, reject) => {
     ws.onopen = resolve

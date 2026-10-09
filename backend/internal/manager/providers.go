@@ -29,7 +29,7 @@ const providersFileName = "providers.json"
 // 子进程 env（默认映射；未知 type 取大写 type + _API_KEY）。
 //
 // 落盘形态（§5）：文件里**只留引用** `key_ref: "vault:providers/<id>"`，密文单独落
-// `<forge_home>/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 {kind, ref}）。
+// `<mate_home>/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 {kind, ref}）。
 // 明文只存在于内存（d.Key）与子进程 env，绝不写盘——除非 vault 不可用且文件里本来就是
 // 旧明文（此时**保留明文**而不是丢弃：丢了比多留一会更糟，并在诊断里报错）。
 // keyfile 丢失 = 密文不可恢复（见 docs/deployment.md 的备份清单）。
@@ -76,8 +76,8 @@ func envKeyOf(typ string) string {
 
 // providerVault 返回 vault 句柄（惰性创建 + 缓存）。
 //
-// home 取 agentDir 的父目录（默认 ~/.forge/agents → ~/.forge）：密钥 ~/.forge/vault.key、
-// 密文 ~/.forge/vault/。agentDir 为空（纯内存场景/未配置）→ (nil, nil) = 无 vault，
+// home 取 agentDir 的父目录（默认 ~/.ark-mate/agents → ~/.ark-mate）：密钥 ~/.ark-mate/vault.key、
+// 密文 ~/.ark-mate/vault/。agentDir 为空（纯内存场景/未配置）→ (nil, nil) = 无 vault，
 // 此时密钥只在内存、绝不落盘。
 func (s *Service) providerVault() (*vault.Store, error) {
 	s.mu.Lock()
@@ -175,7 +175,7 @@ func (s *Service) loadProvidersFile(dir string) {
 // vaultUnavailable 把「没有 vault」与「vault 初始化失败」统一成可读原因。
 func vaultUnavailable(err error) string {
 	if err == nil {
-		return "agentDir 未配置（无 forge home）"
+		return "agentDir 未配置（无 mate home）"
 	}
 	return err.Error()
 }
@@ -275,7 +275,7 @@ func (s *Service) UpdateProvider(_ context.Context, id string, patch dtoprovider
 		} else if st != nil {
 			d.Key, d.KeyRef, d.keyErr = *patch.Key, providerRef(id), nil
 		} else {
-			// 无 forge home（纯内存场景）：只留内存，persist 也写不出去。
+			// 无 mate home（纯内存场景）：只留内存，persist 也写不出去。
 			d.Key, d.KeyRef, d.keyErr = *patch.Key, "", nil
 		}
 	}

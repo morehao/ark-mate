@@ -1,6 +1,6 @@
 package command
 
-// `forge mcp bridge` 的**进程级**用例：帧形状与 stdout 纯度已经在包内验过
+// `mate mcp bridge` 的**进程级**用例：帧形状与 stdout 纯度已经在包内验过
 // （`pkg/mcp/server_test.go`、`internal/gateway/gateway_test.go`），这里钉的是**进程入口**：
 // 子命令分发、参数解析、退出码，以及"诊断绝不写 stdout"这条在真实二进制上是否成立。
 //
@@ -18,15 +18,15 @@ import (
 	"testing"
 )
 
-// buildForgeCLI 把 `./cmd/forge` 编到临时目录（同一测试内多次调用只编一次）。
-func buildForgeCLI(t *testing.T) string {
+// buildMateCLI 把 `./cmd/mate` 编到临时目录（同一测试内多次调用只编一次）。
+func buildMateCLI(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(t.TempDir(), "forge")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/forge")
+	bin := filepath.Join(t.TempDir(), "mate")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/mate")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("构建 CLI 失败: %v\n%s", err, out)
@@ -35,18 +35,18 @@ func buildForgeCLI(t *testing.T) string {
 }
 
 // isolatedCLIEnv 子进程的私有环境：网关按与核心进程同一个解析器定位数据面，所以在用户默认
-// 环境里跑它就会去读（并 **Migrate**！）用户自己的 `~/.forge/forge.db`。测试必须给私有
-// FORGE_HOME/FORGE_DB——否则用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
+// 环境里跑它就会去读（并 **Migrate**！）用户自己的 `~/.ark-mate/mate.db`。测试必须给私有
+// MATE_HOME/MATE_DB——否则用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
 func isolatedCLIEnv(t *testing.T) []string {
 	t.Helper()
 	home := t.TempDir()
 	return append(os.Environ(),
-		"FORGE_HOME="+home, "FORGE_DB="+filepath.Join(home, "forge.db"),
-		"FORGE_CONFIG_DIR="+filepath.Join(home, "config"))
+		"MATE_HOME="+home, "MATE_DB="+filepath.Join(home, "mate.db"),
+		"MATE_CONFIG_DIR="+filepath.Join(home, "config"))
 }
 
 func TestMcpBridgeCLI(t *testing.T) {
-	bin := buildForgeCLI(t)
+	bin := buildMateCLI(t)
 
 	isolated := isolatedCLIEnv(t)
 
@@ -125,7 +125,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 		t.Fatalf("参数错误要说清楚：%q", badErr.String())
 	}
 
-	// 用法文本要能被 `forge mcp bridge -h` 找到（承接口径，不进 README 路由表——它不是 HTTP 端点）。
+	// 用法文本要能被 `mate mcp bridge -h` 找到（承接口径，不进 README 路由表——它不是 HTTP 端点）。
 	help := exec.Command(bin, "mcp", "bridge", "-h")
 	help.Env = isolated
 	var helpOut, helpErr strings.Builder
@@ -146,7 +146,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 	if err := top.Run(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(topOut.String(), "forge mcp bridge") {
+	if !strings.Contains(topOut.String(), "mate mcp bridge") {
 		t.Fatalf("顶层 usage 应列出 mcp bridge：\n%s", topOut.String())
 	}
 	if _, err := os.Stat(bin); err != nil {

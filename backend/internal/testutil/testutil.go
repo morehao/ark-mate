@@ -36,7 +36,7 @@ func StubRegistry() *runtime.Registry {
 	return runtime.NewRegistry(runtime.Spec{ID: "stub", Name: "Stub"})
 }
 
-// TempDBPath 在当前测试的临时目录里给一个 sqlite 库路径（`<t.TempDir()>/forge.db`）。
+// TempDBPath 在当前测试的临时目录里给一个 sqlite 库路径（`<t.TempDir()>/mate.db`）。
 //
 // 返回**路径**而不是 *store.Store：重启恢复类测试需要在同一路径上先后打开两个句柄
 // （关掉第一个再开第二个，模拟进程重启），只给句柄就没法表达这件事。也要注意不要写成
@@ -44,7 +44,7 @@ func StubRegistry() *runtime.Registry {
 // 打不开同一个库了，所以路径必须先取到变量。
 func TempDBPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "forge.db")
+	return filepath.Join(t.TempDir(), "mate.db")
 }
 
 // OpenStore 打开 path 处的 sqlite 库，失败即终止当前测试。

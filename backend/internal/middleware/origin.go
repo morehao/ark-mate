@@ -30,9 +30,9 @@ import (
 // DesktopAppOrigin 桌面壳渲染进程的 Origin（设计 §7.2 的 Origin 矩阵行）。
 //
 // 为什么它是**唯一**硬编码放行的自定义 scheme：桌面态的事件流由渲染进程**直连回环**
-// （`protocol.handle` 不承载 WS upgrade），页面 origin 是 `forge-app://app`——它不是 http(s)，
+// （`protocol.handle` 不承载 WS upgrade），页面 origin 是 `mate-app://app`——它不是 http(s)，
 // 无法用"自身监听端口的同源"这条规则表达。
-const DesktopAppOrigin = "forge-app://app"
+const DesktopAppOrigin = "mate-app://app"
 
 // loopbackHostNames Host 白名单的主机集合（大小写不敏感；端口另判）。
 //
@@ -44,7 +44,7 @@ var loopbackHostNames = []string{"127.0.0.1", "::1", "localhost"}
 // maxEchoLen 拒绝文案里回显 Host/Origin 的截断长度。
 //
 // 这两个值**完全由调用方控制**：回显它们是为了让排障一眼看到"你到底从哪来的"（跨源开发时
-// 尤其重要：文案会直接告诉他去 FORGE_ALLOWED_ORIGINS 登记什么），但无上限回显等于把响应体
+// 尤其重要：文案会直接告诉他去 MATE_ALLOWED_ORIGINS 登记什么），但无上限回显等于把响应体
 // 交给对方决定大小。
 const maxEchoLen = 120
 
@@ -84,14 +84,14 @@ func (d Decision) Err() error {
 type OriginPolicy struct {
 	enabled bool
 	port    int
-	// extra 额外允许表（FORGE_ALLOWED_ORIGINS，归一后的比较键）。
+	// extra 额外允许表（MATE_ALLOWED_ORIGINS，归一后的比较键）。
 	extra map[string]bool
 }
 
 // NewOriginPolicy 用**实际监听地址**（`host:port`）与额外允许表构造策略。
 //
 // 启用条件（设计 §9.4）：监听主机必须是 Host 白名单集合里的回环主机。非回环监听
-// （`--addr 0.0.0.0`、`FORGE_ADDR=:10001` 等）**不启用**——设计把 Host/Origin 白名单与
+// （`--addr 0.0.0.0`、`MATE_ADDR=:10001` 等）**不启用**——设计把 Host/Origin 白名单与
 // "令牌强制/TLS 终止/多操作员审计"并列为对外产品化缺的四件事之一，本期范围外；`--addr`
 // 的 flag 说明也写明对外暴露自担风险。装配层据此打 WARN，不在这里静默/假装启用。
 // 注意 Host 白名单与启用条件是**同一个集合**：两者不一致就会出现"启用了但每个请求都被拒"。
@@ -157,7 +157,7 @@ func (p *OriginPolicy) Decide(r *http.Request) Decision {
 	// **明确声明了"来源不可知"**，绝不能因为"不是合法 URL"就当成无 Origin 放行。
 	return Decision{
 		Status: http.StatusForbidden,
-		Msg: fmt.Sprintf("请求来源 %s 不在允许的 Origin 矩阵内；跨源开发/自建反代请用 FORGE_ALLOWED_ORIGINS 显式登记",
+		Msg: fmt.Sprintf("请求来源 %s 不在允许的 Origin 矩阵内；跨源开发/自建反代请用 MATE_ALLOWED_ORIGINS 显式登记",
 			truncateForEcho(origin)),
 	}
 }
@@ -181,10 +181,10 @@ func (p *OriginPolicy) hostAllowed(hostport string) bool {
 // originAllowed 报告 Origin 头的值是否命中矩阵。
 //
 // 三类放行：
-//  1. 桌面直连的 `forge-app://app`；
+//  1. 桌面直连的 `mate-app://app`；
 //  2. `http://127.0.0.1:<实际端口>` / `http://[::1]:<实际端口>` / `http://localhost:<实际端口>`
 //     ——浏览器入口页面自身的同源（核心自己服务的那份 dist）；
-//  3. 额外允许表（FORGE_ALLOWED_ORIGINS，配置层已归一：小写 + 无尾斜杠）。
+//  3. 额外允许表（MATE_ALLOWED_ORIGINS，配置层已归一：小写 + 无尾斜杠）。
 //
 // 其余一律拒，包括 `Origin: null`（沙箱 iframe / 某些重定向的"来源不可知"声明）：
 // 它既不是空串，也进不了允许表——配置层要求登记项必须是 `scheme://host[:port]`，
@@ -232,7 +232,7 @@ func (p *OriginPolicy) CheckFunc() func(*http.Request) (int, error) {
 	}
 }
 
-// Origin 挂载 Host 白名单 + Origin 矩阵（挂在 `/v1/forge` 组的 REST 与 /health 上，见 internal/router）。
+// Origin 挂载 Host 白名单 + Origin 矩阵（挂在 `/v1/mate` 组的 REST 与 /health 上，见 internal/router）。
 //
 // 范围说明：只覆盖 API 组里的这些路由。静态资产与 SPA 回落（`/`、`/assets/*`、深链）不在组里——
 // 页面导航与子资源加载本来就不带 Origin（除 CORS 与非 GET 同源请求），真正的攻击面是 API。

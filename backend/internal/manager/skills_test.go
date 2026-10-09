@@ -255,9 +255,9 @@ func TestSkillActivationReasons(t *testing.T) {
 			t.Fatalf("%s: 原因不含 %q: %s", c.name, c.reasonHas, joined)
 		}
 	}
-	// 「声明了但本进程没解析出投影」要给**改法**（去配 FORGE_PROJECTION_DIRS），而不是只说不可用。
+	// 「声明了但本进程没解析出投影」要给**改法**（去配 MATE_PROJECTION_DIRS），而不是只说不可用。
 	act := SkillActivationFor(capability.Skill{ID: "f"}, []string{"opencode"}, inAgent, map[string]bool{})
-	if act.Applicable || !strings.Contains(strings.Join(act.Reasons, " | "), "FORGE_PROJECTION_DIRS") {
+	if act.Applicable || !strings.Contains(strings.Join(act.Reasons, " | "), "MATE_PROJECTION_DIRS") {
 		t.Fatalf("未登记投影应给出配置出路: applicable=%v reasons=%v", act.Applicable, act.Reasons)
 	}
 	// 禁用的 skill 命中原因里要给出恢复动作（不然用户只看到「不可用」）。

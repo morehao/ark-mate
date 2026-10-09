@@ -4,7 +4,7 @@ import type { StreamConfig } from '../carrier'
 
 /**
  * WS 事件传输（P3 可靠性细节）：
- * - 浏览器原生 WebSocket；路径 = 同源 /v1/forge/ws/events（dev 走 vite 代理，prod 内嵌同源）
+ * - 浏览器原生 WebSocket；路径 = 同源 /v1/mate/ws/events（dev 走 vite 代理，prod 内嵌同源）
  * - 指数退避断线重连（300ms 起、封顶 8s）；重连后对全部订阅 agg 按 lastSeq 重新 attach
  *   （0 = 全量回放，>0 = 增量续传；服务端 EventsAfter 为开区间 → 权威收尾：重连重放
  *   不会重复本地已应用事件，seq 只前进不回退）
@@ -23,7 +23,7 @@ export class WsTransport {
   /**
    * 事件流配置（基址 + 通道凭据）：由**载体**解析后注入（M1-8）。
    *
-   * 为什么不让 transport 自己读 location / localStorage：桌面窗口的 origin 是 `forge-app://app`，
+   * 为什么不让 transport 自己读 location / localStorage：桌面窗口的 origin 是 `mate-app://app`，
    * 事件流却要直连 `ws://127.0.0.1:<port>`——基址只可能来自壳的 `boot()`。把"配置从哪来"
    * 收在 carrier.ts 一处，transport 只消费它。
    */
@@ -122,7 +122,7 @@ export class WsTransport {
     // M1-1：令牌**不进 URL**（URL 会同时进浏览器历史、反代/网关日志与 Referer），
     // 改走带内首帧 attach——连接建立后的第一条帧就是它，服务端 5s 内未收到即关闭（1008）。
     // 帧形状的唯一真源是 @ark/desktop-contract 的 buildAttachFrame（桌面态带 streamToken）。
-    const url = `${cfg.baseUrl}/v1/forge/ws/events`
+    const url = `${cfg.baseUrl}/v1/mate/ws/events`
     this.onState('connecting')
     let ws: WebSocket
     try {

@@ -60,8 +60,8 @@ func (s *Service) ResolveRuntime(agent *AgentRec) (string, error) {
 	}
 	if len(av.NotInstalled) == 0 {
 		return "", acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("agent %q 候选 runtime 均未注册：%v（检查底座是否已注册：`forge config --json` 看 runtimes 来源；"+
-				"修复步骤见 GET /v1/forge/agents/%s/diagnostics 的 remediation）", agent.ID, av.NotFound, agent.ID), nil)
+			fmt.Sprintf("agent %q 候选 runtime 均未注册：%v（检查底座是否已注册：`mate config --json` 看 runtimes 来源；"+
+				"修复步骤见 GET /v1/mate/agents/%s/diagnostics 的 remediation）", agent.ID, av.NotFound, agent.ID), nil)
 	}
 	return "", acl.NewError(acl.ClassRequest, "runtime_unavailable",
 		fmt.Sprintf("agent %q 候选 runtime 均不可用：未注册 %v；命令不可执行 %v（命令不可执行 = 已注册但 CLI 不在 PATH："+

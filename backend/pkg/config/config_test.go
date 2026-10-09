@@ -35,11 +35,11 @@ func unset(t *testing.T, key string) {
 	})
 }
 
-// TestLoadDefaults 无环境变量时默认 127.0.0.1:10001（仅回环，无鉴权面不收外网）+ ~/.forge/transcripts。
+// TestLoadDefaults 无环境变量时默认 127.0.0.1:10001（仅回环，无鉴权面不收外网）+ ~/.ark-mate/transcripts。
 func TestLoadDefaults(t *testing.T) {
 	hermetic(t)
-	unset(t, "FORGE_ADDR")
-	unset(t, "FORGE_TRANSCRIPTS")
+	unset(t, "MATE_ADDR")
+	unset(t, "MATE_TRANSCRIPTS")
 	c := Load()
 	if c.Addr != "127.0.0.1:10001" {
 		t.Fatalf("默认 Addr 不符: %q", c.Addr)
@@ -55,33 +55,33 @@ func TestLoadDefaults(t *testing.T) {
 // TestLoadEnvOverrides 环境变量覆盖默认值。
 func TestLoadEnvOverrides(t *testing.T) {
 	hermetic(t)
-	tsetenv(t, "FORGE_ADDR", ":9999")
-	tsetenv(t, "FORGE_TRANSCRIPTS", "/tmp/forge-tx")
+	tsetenv(t, "MATE_ADDR", ":9999")
+	tsetenv(t, "MATE_TRANSCRIPTS", "/tmp/mate-tx")
 	c := Load()
 	if c.Addr != ":9999" {
 		t.Fatalf("Addr 覆盖不符: %q", c.Addr)
 	}
-	if c.TranscriptDir != "/tmp/forge-tx" {
+	if c.TranscriptDir != "/tmp/mate-tx" {
 		t.Fatalf("TranscriptDir 覆盖不符: %q", c.TranscriptDir)
 	}
 }
 
-// TestHomeDirFromEnv 数据目录认 FORGE_HOME（M3-3）：未设 → ~/.forge；设了 → 用设的值；
+// TestHomeDirFromEnv 数据目录认 MATE_HOME（M3-3）：未设 → ~/.ark-mate；设了 → 用设的值；
 // 空白字符串 = 当未设。
 //
-// 同时钉住它与 ConfigDirFromEnv 的关系（FORGE_HOME 变了，配置目录的默认位置跟着变）与派生路径的根：
+// 同时钉住它与 ConfigDirFromEnv 的关系（MATE_HOME 变了，配置目录的默认位置跟着变）与派生路径的根：
 // 数据目录换了而 transcripts/db 没跟着换 = 只搬了一半，等于数据分裂。
 func TestHomeDirFromEnv(t *testing.T) {
-	unset(t, "FORGE_HOME")
-	unset(t, "FORGE_CONFIG_DIR")
+	unset(t, "MATE_HOME")
+	unset(t, "MATE_CONFIG_DIR")
 
-	// 未设：回落 ~/.forge（家目录不可得时回落相对 ".forge"，保持既有兜底）。
+	// 未设：回落 ~/.ark-mate（家目录不可得时回落相对 ".ark-mate"，保持既有兜底）。
 	def := HomeDirFromEnv()
 	if want := wantDefaultHome(); def != want {
-		t.Fatalf("未设 FORGE_HOME 应回落 %q，got %q", want, def)
+		t.Fatalf("未设 MATE_HOME 应回落 %q，got %q", want, def)
 	}
-	if filepath.Base(def) != ".forge" {
-		t.Fatalf("默认数据目录应叫 .forge: %q", def)
+	if filepath.Base(def) != ".ark-mate" {
+		t.Fatalf("默认数据目录应叫 .ark-mate: %q", def)
 	}
 	if got := ConfigDirFromEnv(); got != filepath.Join(def, "config") {
 		t.Fatalf("配置目录应派生自数据目录: got %q", got)
@@ -89,12 +89,12 @@ func TestHomeDirFromEnv(t *testing.T) {
 
 	// 设了：用设的值，且配置目录的默认位置跟着变。
 	home := t.TempDir()
-	tsetenv(t, "FORGE_HOME", home)
+	tsetenv(t, "MATE_HOME", home)
 	if got := HomeDirFromEnv(); got != home {
-		t.Fatalf("FORGE_HOME 未生效: got %q want %q", got, home)
+		t.Fatalf("MATE_HOME 未生效: got %q want %q", got, home)
 	}
 	if got := ConfigDirFromEnv(); got != filepath.Join(home, "config") {
-		t.Fatalf("FORGE_HOME 变了配置目录应跟着变: got %q", got)
+		t.Fatalf("MATE_HOME 变了配置目录应跟着变: got %q", got)
 	}
 	// 全链路（不只是那两个纯函数）：解析出的数据目录与各派生默认值都以它为根。
 	cfg, _, err := LoadResolved("")
@@ -104,57 +104,57 @@ func TestHomeDirFromEnv(t *testing.T) {
 	if cfg.HomeDir != home {
 		t.Fatalf("Config.HomeDir 不符: got %q want %q", cfg.HomeDir, home)
 	}
-	if cfg.ConfigDir != filepath.Join(home, "config") || cfg.DBPath != filepath.Join(home, "forge.db") ||
+	if cfg.ConfigDir != filepath.Join(home, "config") || cfg.DBPath != filepath.Join(home, "mate.db") ||
 		cfg.TranscriptDir != filepath.Join(home, "transcripts") {
 		t.Fatalf("派生路径未跟着数据目录走: config=%q db=%q tx=%q", cfg.ConfigDir, cfg.DBPath, cfg.TranscriptDir)
 	}
 
-	// FORGE_CONFIG_DIR 仍优先：配置目录可以与数据目录分家，此时数据目录只从 FORGE_HOME 来。
+	// MATE_CONFIG_DIR 仍优先：配置目录可以与数据目录分家，此时数据目录只从 MATE_HOME 来。
 	cfgDir := t.TempDir()
-	tsetenv(t, "FORGE_CONFIG_DIR", cfgDir)
+	tsetenv(t, "MATE_CONFIG_DIR", cfgDir)
 	if got := ConfigDirFromEnv(); got != cfgDir {
-		t.Fatalf("FORGE_CONFIG_DIR 应优先: got %q", got)
+		t.Fatalf("MATE_CONFIG_DIR 应优先: got %q", got)
 	}
 	if c, _, err := LoadResolved(""); err != nil || c.ConfigDir != cfgDir || c.HomeDir != home {
 		t.Fatalf("分家时应各归各: err=%v cfgDir=%q home=%q", err, c.ConfigDir, c.HomeDir)
 	}
-	unset(t, "FORGE_CONFIG_DIR")
+	unset(t, "MATE_CONFIG_DIR")
 
 	// 空白字符串 = 未设（不产生"数据目录是空白"这种半截值）。
 	for _, blank := range []string{"", "   ", "\t"} {
-		tsetenv(t, "FORGE_HOME", blank)
+		tsetenv(t, "MATE_HOME", blank)
 		if got := HomeDirFromEnv(); got != wantDefaultHome() {
-			t.Fatalf("FORGE_HOME=%q 应视为未设: got %q", blank, got)
+			t.Fatalf("MATE_HOME=%q 应视为未设: got %q", blank, got)
 		}
 	}
 }
 
-// TestForgeHomeMustBeAbsolute 显式给的 FORGE_HOME 是相对路径 → 启动即报错。
+// TestMateHomeMustBeAbsolute 显式给的 MATE_HOME 是相对路径 → 启动即报错。
 //
 // 为什么它算"非法取值"而不是宽容接受：相对路径按**进程 CWD** 解析，CLI（用户 shell 的 CWD）与桌面
 // （壳的 CWD）会静默打开两份数据目录——正是设计 §481 要消灭的"桌面打开后会话不见了"。
-// 未设置时的兜底（家目录不可得 → 相对 ".forge"）不受这条约束：那不是用户给的路径。
-func TestForgeHomeMustBeAbsolute(t *testing.T) {
+// 未设置时的兜底（家目录不可得 → 相对 ".ark-mate"）不受这条约束：那不是用户给的路径。
+func TestMateHomeMustBeAbsolute(t *testing.T) {
 	hermetic(t)
-	tsetenv(t, "FORGE_HOME", "relative/forge-home")
+	tsetenv(t, "MATE_HOME", "relative/mate-home")
 	if _, _, err := LoadResolved(""); err == nil || !strings.Contains(err.Error(), "绝对路径") {
-		t.Fatalf("相对 FORGE_HOME 应报错，got %v", err)
+		t.Fatalf("相对 MATE_HOME 应报错，got %v", err)
 	}
 	for _, ok := range []string{"", "   ", t.TempDir()} {
-		tsetenv(t, "FORGE_HOME", ok)
+		tsetenv(t, "MATE_HOME", ok)
 		if _, _, err := LoadResolved(""); err != nil {
-			t.Fatalf("FORGE_HOME=%q 不应报错: %v", ok, err)
+			t.Fatalf("MATE_HOME=%q 不应报错: %v", ok, err)
 		}
 	}
 }
 
-// wantDefaultHome 未设 FORGE_HOME 时的期望数据目录：与生产代码同一套兜底
-// （家目录不可得时回落相对 ".forge"），避免拿不到家目录的环境出现假红。
+// wantDefaultHome 未设 MATE_HOME 时的期望数据目录：与生产代码同一套兜底
+// （家目录不可得时回落相对 ".ark-mate"），避免拿不到家目录的环境出现假红。
 func wantDefaultHome() string {
 	if h, err := os.UserHomeDir(); err == nil && h != "" {
-		return filepath.Join(h, ".forge")
+		return filepath.Join(h, ".ark-mate")
 	}
-	return ".forge"
+	return ".ark-mate"
 }
 
 // TestDefault 默认值结构。
@@ -164,45 +164,45 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-// TestCapabilityDirIndependentOfProjectionDirs 回归：FORGE_CAPABILITIES 必须生效，
-// 且不受 FORGE_PROJECTION_DIRS 是否设置影响（曾因 else 分支误覆盖 CapabilityDir
-// 导致能力目录被吞、永远落到 ~/.forge/capabilities）。
+// TestCapabilityDirIndependentOfProjectionDirs 回归：MATE_CAPABILITIES 必须生效，
+// 且不受 MATE_PROJECTION_DIRS 是否设置影响（曾因 else 分支误覆盖 CapabilityDir
+// 导致能力目录被吞、永远落到 ~/.ark-mate/capabilities）。
 func TestCapabilityDirIndependentOfProjectionDirs(t *testing.T) {
 	hermetic(t)
-	unset(t, "FORGE_PROJECTION_DIRS")
-	tsetenv(t, "FORGE_CAPABILITIES", "/tmp/forge-caps")
+	unset(t, "MATE_PROJECTION_DIRS")
+	tsetenv(t, "MATE_CAPABILITIES", "/tmp/mate-caps")
 	c := Load()
-	if c.CapabilityDir != "/tmp/forge-caps" {
-		t.Fatalf("FORGE_CAPABILITIES 未生效: %q", c.CapabilityDir)
+	if c.CapabilityDir != "/tmp/mate-caps" {
+		t.Fatalf("MATE_CAPABILITIES 未生效: %q", c.CapabilityDir)
 	}
 	if len(c.ProjectionDirs) != 0 {
 		t.Fatalf("未设置投影覆盖时应为空（默认全用 adapter 声明的原生根），got %+v", c.ProjectionDirs)
 	}
 
-	tsetenv(t, "FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/forge-skills")
+	tsetenv(t, "MATE_PROJECTION_DIRS", "opencode:skill=/tmp/mate-skills")
 	c = Load()
-	if c.CapabilityDir != "/tmp/forge-caps" || c.ProjectionDirs["opencode:skill"] != "/tmp/forge-skills" {
+	if c.CapabilityDir != "/tmp/mate-caps" || c.ProjectionDirs["opencode:skill"] != "/tmp/mate-skills" {
 		t.Fatalf("两项应互不影响: caps=%q projection=%q", c.CapabilityDir, c.ProjectionDirs)
 	}
 }
 
-// hermetic 把配置目录指向空临时目录（避免开发者本机 ~/.forge/config 影响断言）。
+// hermetic 把配置目录指向空临时目录（避免开发者本机 ~/.ark-mate/config 影响断言）。
 func hermetic(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	tsetenv(t, "FORGE_CONFIG_DIR", dir)
+	tsetenv(t, "MATE_CONFIG_DIR", dir)
 	return dir
 }
 
 // TestConfigDirFilePriority 优先级：config.json < env 文件 < 进程环境变量（A4）。
 func TestConfigDirFilePriority(t *testing.T) {
 	dir := hermetic(t)
-	unset(t, "FORGE_ADDR")
-	unset(t, "FORGE_DB")
+	unset(t, "MATE_ADDR")
+	unset(t, "MATE_DB")
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
   "addr": "127.0.0.1:20001",
   "db": "/tmp/from-config/db.sqlite",
-  "FORGE_IDLE_TIMEOUT": "90s",
+  "MATE_IDLE_TIMEOUT": "90s",
   "handoff_max_chars": 1234,
   "generation_limit": 7
 }`), 0o600); err != nil {
@@ -210,8 +210,8 @@ func TestConfigDirFilePriority(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "env"), []byte(`
 # dotenv 风格：注释与空行忽略
-FORGE_ADDR=127.0.0.1:20002
-export FORGE_REAP_GRACE=7s
+MATE_ADDR=127.0.0.1:20002
+export MATE_REAP_GRACE=7s
 agents = /tmp/from-envfile/agents
 `), 0o600); err != nil {
 		t.Fatalf("写 env: %v", err)
@@ -231,7 +231,7 @@ agents = /tmp/from-envfile/agents
 		t.Fatalf("config.json 的 db 未生效: %q %v", c.DBPath, src["db"])
 	}
 	if c.IdleTimeout.String() != "1m30s" || src["idle_timeout"] != SourceFile {
-		t.Fatalf("FORGE_ 前缀键名应被接受: %v %v", c.IdleTimeout, src["idle_timeout"])
+		t.Fatalf("MATE_ 前缀键名应被接受: %v %v", c.IdleTimeout, src["idle_timeout"])
 	}
 	if c.HandoffMaxChars != 1234 {
 		t.Fatalf("数字标量应被接受: %d", c.HandoffMaxChars)
@@ -251,7 +251,7 @@ agents = /tmp/from-envfile/agents
 	}
 
 	// 进程环境变量优先级最高。
-	tsetenv(t, "FORGE_ADDR", "127.0.0.1:20003")
+	tsetenv(t, "MATE_ADDR", "127.0.0.1:20003")
 	c2, src2, err := LoadResolved("")
 	if err != nil {
 		t.Fatalf("LoadResolved(env): %v", err)
@@ -267,8 +267,8 @@ agents = /tmp/from-envfile/agents
 // TestConfigDirMissingIsNoop 目录/文件缺失 = 历史行为不变（向后兼容）。
 func TestConfigDirMissingIsNoop(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "not-created")
-	tsetenv(t, "FORGE_CONFIG_DIR", dir)
-	unset(t, "FORGE_ADDR")
+	tsetenv(t, "MATE_CONFIG_DIR", dir)
+	unset(t, "MATE_ADDR")
 	c, src, err := LoadResolved("")
 	if err != nil {
 		t.Fatalf("目录缺失不应报错: %v", err)
@@ -296,8 +296,8 @@ func TestConfigDirErrors(t *testing.T) {
 		{"非法整数", "config.json", `{"handoff_max_chars":"abc"}`, "非负整数"},
 		{"非法整数(代际上限)", "config.json", `{"generation_limit":"abc"}`, "非负整数"},
 		{"负数(代际上限)", "config.json", `{"generation_limit":-1}`, "非负整数"},
-		{"未知键(env)", "env", "FORGE_NOPE=1\n", "未知配置键"},
-		{"缺等号(env)", "env", "FORGE_ADDR\n", "KEY=VALUE"},
+		{"未知键(env)", "env", "MATE_NOPE=1\n", "未知配置键"},
+		{"缺等号(env)", "env", "MATE_ADDR\n", "KEY=VALUE"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -314,7 +314,7 @@ func TestConfigDirErrors(t *testing.T) {
 	}
 }
 
-// TestLoadResolvedExplicitDir 显式目录参数优先于 FORGE_CONFIG_DIR。
+// TestLoadResolvedExplicitDir 显式目录参数优先于 MATE_CONFIG_DIR。
 func TestLoadResolvedExplicitDir(t *testing.T) {
 	hermetic(t) // 指向空目录（会被忽略）
 	dir := t.TempDir()
@@ -389,7 +389,7 @@ func TestRemoteRuntimesJSONErrors(t *testing.T) {
 // TestMcpAutoProbeMode B4：mcp_auto_probe 取值解析（off 默认 / startup / 大小写 / 非法值报错）。
 func TestMcpAutoProbeMode(t *testing.T) {
 	hermetic(t)
-	unset(t, "FORGE_MCP_AUTO_PROBE")
+	unset(t, "MATE_MCP_AUTO_PROBE")
 
 	c, _, err := LoadResolved("")
 	if err != nil {
@@ -399,7 +399,7 @@ func TestMcpAutoProbeMode(t *testing.T) {
 		t.Fatalf("默认应为 off，got %q", c.McpAutoProbe)
 	}
 
-	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "startup")
+	tsetenv(t, "MATE_MCP_AUTO_PROBE", "startup")
 	c, srcs, err := LoadResolved("")
 	if err != nil {
 		t.Fatalf("startup 加载失败: %v", err)
@@ -411,17 +411,17 @@ func TestMcpAutoProbeMode(t *testing.T) {
 		t.Fatal("应记录取值来源")
 	}
 
-	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "STARTUP")
+	tsetenv(t, "MATE_MCP_AUTO_PROBE", "STARTUP")
 	if c, _, err := LoadResolved(""); err != nil || c.McpAutoProbe != McpAutoProbeStartup {
 		t.Fatalf("大小写不敏感失败: %v %q", err, c.McpAutoProbe)
 	}
 
-	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "off")
+	tsetenv(t, "MATE_MCP_AUTO_PROBE", "off")
 	if c, _, err := LoadResolved(""); err != nil || c.McpAutoProbe != McpAutoProbeOff {
 		t.Fatalf("off 解析失败: %v %q", err, c.McpAutoProbe)
 	}
 
-	tsetenv(t, "FORGE_MCP_AUTO_PROBE", "bogus")
+	tsetenv(t, "MATE_MCP_AUTO_PROBE", "bogus")
 	if _, _, err := LoadResolved(""); err == nil || !strings.Contains(err.Error(), "off|startup") {
 		t.Fatalf("非法值应报错并列出合法取值，got %v", err)
 	}
@@ -431,11 +431,11 @@ func TestMcpAutoProbeMode(t *testing.T) {
 //
 // 重点是**非法值必须报错**：此前非法/空值都静默回落 auto，而 auto 会按"DB 文件在不在"
 // 解析成 sqlite 或 memory——一个错字可能把用户悄悄丢进相反的模式（sqlit 在无 DB 时进
-// memory，表现为"数据丢了"），且回落后的 `forge config` 输出与合法的 auto 逐字相同，
+// memory，表现为"数据丢了"），且回落后的 `mate config` 输出与合法的 auto 逐字相同，
 // 用户拿不到任何"值被丢弃了"的信号。未设置（无偏好）仍必须宽松地走 auto。
 func TestStoreMode(t *testing.T) {
 	hermetic(t)
-	unset(t, "FORGE_STORE")
+	unset(t, "MATE_STORE")
 
 	// 未设置 = 无偏好 = auto（空串），且不应报错。
 	c, _, err := LoadResolved("")
@@ -447,7 +447,7 @@ func TestStoreMode(t *testing.T) {
 	}
 
 	// 显式 auto 与未设置等价，但它是**合法取值**（文档一直这么写）。
-	tsetenv(t, "FORGE_STORE", StoreModeAuto)
+	tsetenv(t, "MATE_STORE", StoreModeAuto)
 	c, srcs, err := LoadResolved("")
 	if err != nil {
 		t.Fatalf("显式 auto 不应报错: %v", err)
@@ -465,7 +465,7 @@ func TestStoreMode(t *testing.T) {
 		{"SQLITE", StoreModeSQLite},     // 大小写不敏感
 		{"  memory  ", StoreModeMemory}, // 前后空白容忍
 	} {
-		tsetenv(t, "FORGE_STORE", tc.in)
+		tsetenv(t, "MATE_STORE", tc.in)
 		c, _, err := LoadResolved("")
 		if err != nil {
 			t.Fatalf("%q 不应报错: %v", tc.in, err)
@@ -479,7 +479,7 @@ func TestStoreMode(t *testing.T) {
 	// 非法值必须报错，且提示里要列出合法取值（用户照着改就行）。
 	// 注意 "auto "（带尾空格）**不算非法**：与同级枚举键一致地做了 TrimSpace，见上面的空白容忍用例。
 	for _, bad := range []string{"sqlit", "memry", "garbage", "postgres"} {
-		tsetenv(t, "FORGE_STORE", bad)
+		tsetenv(t, "MATE_STORE", bad)
 		_, _, err := LoadResolved("")
 		if err == nil {
 			t.Errorf("%q 是非法取值，必须报错（此前会静默回落 auto）", bad)
@@ -494,14 +494,14 @@ func TestStoreMode(t *testing.T) {
 // TestProjectionDirs 投影根覆盖配置解析（`runtime:kind=dir` 列表）。
 func TestProjectionDirs(t *testing.T) {
 	hermetic(t)
-	t.Setenv("FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/oc, deepseekharness:skill=/tmp/dsh")
+	t.Setenv("MATE_PROJECTION_DIRS", "opencode:skill=/tmp/oc, deepseekharness:skill=/tmp/dsh")
 	cfg := Load()
 	if len(cfg.ProjectionDirs) != 2 || cfg.ProjectionDirs["opencode:skill"] != "/tmp/oc" ||
 		cfg.ProjectionDirs["deepseekharness:skill"] != "/tmp/dsh" {
 		t.Fatalf("解析不符: %+v", cfg.ProjectionDirs)
 	}
 	// 目录里的 `=` 只按**第一个** `=` 切分（路径含 `=` 也能表达）。
-	t.Setenv("FORGE_PROJECTION_DIRS", "opencode:skill=/tmp/a=b")
+	t.Setenv("MATE_PROJECTION_DIRS", "opencode:skill=/tmp/a=b")
 	if cfg := Load(); cfg.ProjectionDirs["opencode:skill"] != "/tmp/a=b" {
 		t.Fatalf("含 `=` 的路径应保留: %+v", cfg.ProjectionDirs)
 	}
@@ -518,13 +518,13 @@ func TestProjectionDirs(t *testing.T) {
 	} {
 		// 注意：显式设为**空串**不算错误——进程环境只对"非空"生效（历史语义，全键一致），
 		// 空 = 未设置 = 全用 adapter 的原生根，见下面的断言。
-		t.Setenv("FORGE_PROJECTION_DIRS", bad)
+		t.Setenv("MATE_PROJECTION_DIRS", bad)
 		if _, _, err := LoadResolved(""); err == nil {
 			t.Fatalf("非法配置 %q 应报错", bad)
 		}
 	}
 	// 未设置 → 空 map（全用 adapter 声明的原生根）。
-	t.Setenv("FORGE_PROJECTION_DIRS", "")
+	t.Setenv("MATE_PROJECTION_DIRS", "")
 	if cfg := Load(); len(cfg.ProjectionDirs) != 0 {
 		t.Fatalf("空值应不启用: %+v", cfg.ProjectionDirs)
 	}
@@ -537,8 +537,8 @@ func TestProjectionDirs(t *testing.T) {
 func TestRenamedKeysRejectedWithHint(t *testing.T) {
 	hermetic(t)
 	for _, old := range []struct{ key, env, wantHint string }{
-		{"skills_materialize_dir", "FORGE_SKILLS_MATERIALIZE_DIR", "FORGE_PROJECTION_DIRS"},
-		{"skills_materialize_dirs", "FORGE_SKILLS_MATERIALIZE_DIRS", "FORGE_PROJECTION_DIRS"},
+		{"skills_materialize_dir", "MATE_SKILLS_MATERIALIZE_DIR", "MATE_PROJECTION_DIRS"},
+		{"skills_materialize_dirs", "MATE_SKILLS_MATERIALIZE_DIRS", "MATE_PROJECTION_DIRS"},
 	} {
 		// 进程环境变量：只按 knownKeys 读取，故旧变量名必须显式检查（否则设了也不生效且无声）。
 		t.Setenv(old.env, "/tmp/whatever")
@@ -569,12 +569,12 @@ func TestRenamedKeysRejectedWithHint(t *testing.T) {
 	}
 }
 
-// TestWorkspaceRoots 工作区根白名单（FORGE_WORKSPACE_ROOTS，A 的边界）解析与形态校验。
+// TestWorkspaceRoots 工作区根白名单（MATE_WORKSPACE_ROOTS，A 的边界）解析与形态校验。
 func TestWorkspaceRoots(t *testing.T) {
 	hermetic(t)
 
 	// 逗号分隔 + 空白容忍 + 去重（同一目录写两次只会让错误信息变长）。
-	t.Setenv("FORGE_WORKSPACE_ROOTS", " /srv/ws , /data/work ,/srv/ws,")
+	t.Setenv("MATE_WORKSPACE_ROOTS", " /srv/ws , /data/work ,/srv/ws,")
 	cfg := Load()
 	want := []string{"/srv/ws", "/data/work"}
 	if len(cfg.WorkspaceRoots) != len(want) {
@@ -588,7 +588,7 @@ func TestWorkspaceRoots(t *testing.T) {
 
 	// 相对路径不是边界（比较基于真身，必须能解析成绝对路径）→ 启动即报错。
 	for _, bad := range []string{"relative/root", "/srv/ws,relative"} {
-		t.Setenv("FORGE_WORKSPACE_ROOTS", bad)
+		t.Setenv("MATE_WORKSPACE_ROOTS", bad)
 		if _, _, err := LoadResolved(""); err == nil {
 			t.Fatalf("非法配置 %q 应报错", bad)
 		}
@@ -596,7 +596,7 @@ func TestWorkspaceRoots(t *testing.T) {
 
 	// 未设置 / 显式空 = 不限制（空切片，与"未设置"同义）。
 	for _, v := range []string{"", "   "} {
-		t.Setenv("FORGE_WORKSPACE_ROOTS", v)
+		t.Setenv("MATE_WORKSPACE_ROOTS", v)
 		if cfg := Load(); len(cfg.WorkspaceRoots) != 0 {
 			t.Fatalf("空值应等于不限制: %+v", cfg.WorkspaceRoots)
 		}
@@ -607,7 +607,7 @@ func TestWorkspaceRoots(t *testing.T) {
 // 也是面板写回用的形式（写回格式与读回格式必须自洽，见 SettingsStore.SaveWorkspaceRoots）。
 func TestWorkspaceRootsArrayForm(t *testing.T) {
 	dir := hermetic(t)
-	unset(t, "FORGE_WORKSPACE_ROOTS")
+	unset(t, "MATE_WORKSPACE_ROOTS")
 	// 第二条路径含逗号：逗号分隔写法根本无法表达，只能数组。
 	body := `{"workspace_roots": ["/srv/ws", "/data/a,b", "/srv/ws"]}`
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
@@ -626,11 +626,11 @@ func TestWorkspaceRootsArrayForm(t *testing.T) {
 	}
 
 	// 进程 env（更高优先级）覆盖数组形式：两种**书写形式**不能各自为政。
-	tsetenv(t, "FORGE_WORKSPACE_ROOTS", "/env/root")
+	tsetenv(t, "MATE_WORKSPACE_ROOTS", "/env/root")
 	if cfg := Load(); len(cfg.WorkspaceRoots) != 1 || cfg.WorkspaceRoots[0] != "/env/root" {
 		t.Fatalf("env 应覆盖 config.json 的数组值: %+v", cfg.WorkspaceRoots)
 	}
-	unset(t, "FORGE_WORKSPACE_ROOTS")
+	unset(t, "MATE_WORKSPACE_ROOTS")
 
 	// 单值键写成数组 = 配置错误（静默取第一项会让运维以为整份配置生效了）。
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"addr": ["a","b"]}`), 0o600); err != nil {
@@ -652,9 +652,9 @@ func TestWorkspaceRootsArrayForm(t *testing.T) {
 // 且文件里其它键原样保留（read-modify-write 不是"覆盖整份配置"）。
 func TestSaveWorkspaceRootsRoundTrip(t *testing.T) {
 	dir := hermetic(t)
-	unset(t, "FORGE_WORKSPACE_ROOTS")
-	// 预置其它键（含 FORGE_* 形式的键：写回不得把它们改写成规范名或丢掉）。
-	seed := `{"addr":"127.0.0.1:20001","FORGE_IDLE_TIMEOUT":"90s"}`
+	unset(t, "MATE_WORKSPACE_ROOTS")
+	// 预置其它键（含 MATE_* 形式的键：写回不得把它们改写成规范名或丢掉）。
+	seed := `{"addr":"127.0.0.1:20001","MATE_IDLE_TIMEOUT":"90s"}`
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(seed), 0o600); err != nil {
 		t.Fatalf("写 config.json: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestSettingsStoreStatus(t *testing.T) {
 		{"", "default", ""},
 		{SourceDefault, "default", ""},
 		{SourceFile, "config.json", ""},
-		{SourceEnv, "env(process)", "FORGE_WORKSPACE_ROOTS"},
+		{SourceEnv, "env(process)", "MATE_WORKSPACE_ROOTS"},
 		{SourceEnvFile, "env", filepath.Join(dir, "env")},
 		{SourceFlag, "flag", "命令行参数"},
 	}

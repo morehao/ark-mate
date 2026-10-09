@@ -36,7 +36,7 @@ func originEngine(t *testing.T, policy *middleware.OriginPolicy) *gin.Engine {
 	return router.New(router.Ports{}, eventbus.New(), router.Options{Origin: policy, Web: assets})
 }
 
-// TestRouterOriginPolicyMountScope 白名单只覆盖 `/v1/forge` 组：API 被判定，静态入口不判定。
+// TestRouterOriginPolicyMountScope 白名单只覆盖 `/v1/mate` 组：API 被判定，静态入口不判定。
 func TestRouterOriginPolicyMountScope(t *testing.T) {
 	policy := middleware.NewOriginPolicy("127.0.0.1:10001", nil)
 	if !policy.Enabled() {
@@ -58,15 +58,15 @@ func TestRouterOriginPolicyMountScope(t *testing.T) {
 	}
 
 	// API：错误 Host → 421（带码）、错误 Origin → 403（带码）、正确 Host+Origin → 200。
-	if status, body := call("/v1/forge/health", "evil.com:10001", ""); status != http.StatusMisdirectedRequest ||
+	if status, body := call("/v1/mate/health", "evil.com:10001", ""); status != http.StatusMisdirectedRequest ||
 		int(body["code"].(float64)) != code.InvalidRequest {
 		t.Fatalf("API 错误 Host 应 421+带码，got %d %v", status, body)
 	}
-	if status, body := call("/v1/forge/health", "127.0.0.1:10001", "http://127.0.0.1:9999"); status != http.StatusForbidden ||
+	if status, body := call("/v1/mate/health", "127.0.0.1:10001", "http://127.0.0.1:9999"); status != http.StatusForbidden ||
 		int(body["code"].(float64)) != code.InvalidRequest {
 		t.Fatalf("API 错误 Origin 应 403+带码，got %d %v", status, body)
 	}
-	if status, _ := call("/v1/forge/health", "127.0.0.1:10001", "http://127.0.0.1:10001"); status != http.StatusOK {
+	if status, _ := call("/v1/mate/health", "127.0.0.1:10001", "http://127.0.0.1:10001"); status != http.StatusOK {
 		t.Fatalf("API 正确 Host+Origin 应 200，got %d", status)
 	}
 
@@ -106,7 +106,7 @@ func TestRouterWSHandshakeHonorsOriginPolicy(t *testing.T) {
 		_ = srv.Shutdown(ctx)
 	})
 
-	url := "ws://" + addr + "/v1/forge/ws/events"
+	url := "ws://" + addr + "/v1/mate/ws/events"
 	dial := func(origin string) (*websocket.Conn, *http.Response, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -154,7 +154,7 @@ func TestRouterWSHandshakeHonorsOriginPolicy(t *testing.T) {
 // 这条防的是"把策略接成必填"：既有测试与只跑 API 的进程都不该被连带改变。
 func TestRouterNoOriginPolicyIsNoop(t *testing.T) {
 	eng := originEngine(t, nil)
-	req := httptest.NewRequest("GET", "/v1/forge/health", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	req.Host = "evil.com"
 	req.Header.Set("Origin", "http://evil.com")
 	w := httptest.NewRecorder()

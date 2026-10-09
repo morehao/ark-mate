@@ -152,7 +152,7 @@ func (s *Service) writeSkillEnabled(ctx context.Context, id string, enabled bool
 		// 没有行就没有这条能力（M6-3 的语义变化，README 有说明）。
 		if s.capabilityDirSnapshot() == "" {
 			return "", acl.NewError(acl.ClassRequest, "skill_not_persistable",
-				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（FORGE_CAPABILITIES），没有可持久化的定义文件", id), nil)
+				fmt.Sprintf("skill %q 无法启停：本进程未装载能力数据面目录（MATE_CAPABILITIES），没有可持久化的定义文件", id), nil)
 		}
 	}
 	repo, err := s.definitionRepoFor(capSubSkills)
@@ -200,7 +200,7 @@ type SkillActivation struct {
 //  1. 已禁用（enabled:false）——平台不投放；
 //  2. 候选 runtime 里没有「该技能声明要给它 + 它在本进程登记了投影」的交集；
 //     这一条要分清三种子情况（用户的改法完全不同）：技能没声明任何 runtimes 白名单但候选
-//     runtime 一个都没投影（→ 去配 FORGE_PROJECTION_DIRS / 换 runtime）、技能声明的白名单
+//     runtime 一个都没投影（→ 去配 MATE_PROJECTION_DIRS / 换 runtime）、技能声明的白名单
 //     与候选不相交（→ 改技能的 runtimes）、候选 runtime 未注册（→ 注册它）。
 //
 // `projections` 是**已解析**投影的 runtime 集合（键 = runtime id）。
@@ -233,7 +233,7 @@ func SkillActivationFor(sk capability.Skill, runtimes []string, inAgent map[stri
 		case len(noProjection) > 0 && len(notDeclared) == 0:
 			reasons = append(reasons, fmt.Sprintf(
 				"候选 runtime %v 没有可用的 skill 投影登记（本进程没解析出它们的投影根）："+
-					"用 FORGE_PROJECTION_DIRS 指定，或确认该 runtime 确实声明了 skill 投影", noProjection))
+					"用 MATE_PROJECTION_DIRS 指定，或确认该 runtime 确实声明了 skill 投影", noProjection))
 		case len(notDeclared) > 0 && len(noProjection) == 0:
 			reasons = append(reasons, fmt.Sprintf(
 				"技能声明只给 %v 用，与该 agent 的候选 runtime %v 不相交——要投放就把它加进技能的 runtimes",

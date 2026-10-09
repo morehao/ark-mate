@@ -22,8 +22,8 @@ import (
 // 与能力面（M6-4）/ agent 面（M6-6）同构的三条路径，差别只在**一个文件装了两样东西**：
 //
 //	装配期（sqlite 模式）自动导入一次：目录指纹进 `meta.imported_automations`，目录没变就跳过；
-//	`forge automation import`：显式重跑，每次按行判重；
-//	`forge automation export`：把库里的定义写回目录（文件从此是**导出物**）。
+//	`mate automation import`：显式重跑，每次按行判重；
+//	`mate automation export`：把库里的定义写回目录（文件从此是**导出物**）。
 //
 // 同一个 `.json` 里既有用户写的定义，也有平台写回的运行态（`last_fired_at` / `recent_runs` / …）。
 // 进库之后后者是**列**（Plan §7 P-10），所以导入要按 `automation.ReservedKeys` 把文件切成两半，
@@ -49,7 +49,7 @@ type AutomationImportStats struct {
 func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (AutomationImportStats, error) {
 	var stats AutomationImportStats
 	if st == nil {
-		return stats, errors.New("manager: 导入 automation 定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导入 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	dir = strings.TrimSpace(dir)
 	stats.Dir = dir
@@ -81,10 +81,10 @@ func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts 
 func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
 	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
-		return stats, errors.New("manager: 导出 automation 定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导出 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	if stats.Dir == "" {
-		return stats, errors.New("manager: 导出 automation 定义需要 AutomationDir（--dir 或 FORGE_AUTOMATIONS）")
+		return stats, errors.New("manager: 导出 automation 定义需要 AutomationDir（--dir 或 MATE_AUTOMATIONS）")
 	}
 	rows, err := st.ListAutomationDefinitions(ctx)
 	if err != nil {

@@ -19,7 +19,7 @@ import type { MenuProps } from 'antd'
 import type { ConversationSearchHit, ConversationSummary, MessageSearchHit, MessageSearchResp } from '@ark/types'
 import { conversationSearch, exportConversations, messageSearch, toErrorMessage } from '@ark/api'
 import { dedupeHits, exportDownloadName, exportSummary, roleLabel, sourceLabel } from '../console/searchView'
-import { useForge } from '../store'
+import { useMate } from '../store'
 import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
 import { agentNameOf, titleFor } from '../console/util'
 
@@ -92,19 +92,19 @@ function ViewTab({
 /** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）。 */
 export function ConversationRail({ onCreate }: Props) {
   const navigate = useNavigate()
-  const conversations = useForge((s) => s.conversations)
-  const agents = useForge((s) => s.agents)
-  const views = useForge((s) => s.views)
-  const activeId = useForge((s) => s.activeId)
-  const drawerOpen = useForge((s) => s.drawerOpen)
-  const railMode = useForge((s) => s.railMode)
-  const setDrawer = useForge((s) => s.setDrawer)
-  const togglePin = useForge((s) => s.togglePin)
-  const archiveConversation = useForge((s) => s.archiveConversation)
-  const renameConversation = useForge((s) => s.renameConversation)
-  const setRailMode = useForge((s) => s.setRailMode)
-  const jumpToAnchor = useForge((s) => s.jumpToAnchor)
-  const showToast = useForge((s) => s.showToast)
+  const conversations = useMate((s) => s.conversations)
+  const agents = useMate((s) => s.agents)
+  const views = useMate((s) => s.views)
+  const activeId = useMate((s) => s.activeId)
+  const drawerOpen = useMate((s) => s.drawerOpen)
+  const railMode = useMate((s) => s.railMode)
+  const setDrawer = useMate((s) => s.setDrawer)
+  const togglePin = useMate((s) => s.togglePin)
+  const archiveConversation = useMate((s) => s.archiveConversation)
+  const renameConversation = useMate((s) => s.renameConversation)
+  const setRailMode = useMate((s) => s.setRailMode)
+  const jumpToAnchor = useMate((s) => s.jumpToAnchor)
+  const showToast = useMate((s) => s.showToast)
 
   // 行内「重命名」弹窗
   const [renaming, setRenaming] = useState<{ id: string; init: string } | null>(null)

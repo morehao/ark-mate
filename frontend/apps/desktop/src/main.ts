@@ -2,9 +2,9 @@
  * 桌面壳主进程（M1-6：启动链 + 托盘 + 退出语义）。
  *
  * 启动链（设计 §7.1）：
- *   单实例锁 claim → 注册并锁定 `forge-app://` scheme → spawn 核心（`:0` + 双凭据经 stdin
+ *   单实例锁 claim → 注册并锁定 `mate-app://` scheme → spawn 核心（`:0` + 双凭据经 stdin
  *   + `--ready-stdout` + `--exit-with-parent`）→ 读就绪行拿地址 → health 复核
- *   → 开窗口 `loadURL('forge-app://app/')` → 壳服务 index/assets、反代 `/v1/*`（注入 restToken）。
+ *   → 开窗口 `loadURL('mate-app://app/')` → 壳服务 index/assets、反代 `/v1/*`（注入 restToken）。
  *
  * 退出语义（设计 §7.4，M1-6）：
  *   关窗 → 隐藏到托盘（首次给一次持久化确认）→ 真正退出时：**先问核心有没有在途轮次**
@@ -138,7 +138,7 @@ async function closeToTrayNotice(w: BrowserWindow): Promise<void> {
  * 渲染进程加固的"窗口侧"三项（M1-5，设计 §9.2）：
  *
  *   1. **导航**：只放行自己的 app origin；`http(s)` 交给系统浏览器；其余（`file:`、`javascript:`、
- *      `forge://`、任何第三方 origin）一律 `preventDefault` 拦下——桌面窗口不该变成浏览器；
+ *      `mate://`、任何第三方 origin）一律 `preventDefault` 拦下——桌面窗口不该变成浏览器；
  *   2. **新窗口**：`setWindowOpenHandler` 一律 `deny`；要开外部链接就走系统浏览器。
  *      将来的多窗口是**我们自己的入口**（按工作区开窗），不是页面 `window.open` 出来的；
  *   3. **权限**：默认**全拒**（当前不需要任何权限）。request 与 check 两个 handler 都装——
@@ -182,10 +182,10 @@ function hardenWindow(w: BrowserWindow): void {
 // ——————————————————————————— 深链接 ———————————————————————————
 
 /**
- * `forge://…` 深链接（设计 §7.1：单实例转发）。
+ * `mate://…` 深链接（设计 §7.1：单实例转发）。
  *
  * 本轮只做**最小可用**：聚焦窗口，若 URL 带路径就转到同源的 app 路由
- * （`forge://conversations/abc` → `forge-app://app/conversations/abc`）。
+ * （`mate://conversations/abc` → `mate-app://app/conversations/abc`）。
  * 设计文档没有规定深链接的语义映射表（哪条路径开哪个视图），因此不在这里自造规则；
  * 定了之后（与 M5-1 一起）只改这一处。
  */
@@ -204,9 +204,9 @@ function handleDeepLink(url: string): void {
   }
 }
 
-/** 从 argv 里挑出 `forge://…`（第二次启动 / Windows·Linux 的深链接入口）。 */
+/** 从 argv 里挑出 `mate://…`（第二次启动 / Windows·Linux 的深链接入口）。 */
 function deepLinkFromArgv(argv: string[]): string | null {
-  return argv.find((a) => a.startsWith('forge://')) ?? null
+  return argv.find((a) => a.startsWith('mate://')) ?? null
 }
 
 // ——————————————————————————— 退出 ———————————————————————————
@@ -285,12 +285,12 @@ if (!app.requestSingleInstanceLock()) {
     handleDeepLink(url)
   })
 
-  // 深链接 scheme（`forge://…`）。未打包态按 Electron 文档显式给 execPath + 入口，
+  // 深链接 scheme（`mate://…`）。未打包态按 Electron 文档显式给 execPath + 入口，
   // 否则注册到的是 electron 的默认二进制而不是本应用。
   if (!app.isPackaged) {
-    app.setAsDefaultProtocolClient('forge', process.execPath, [app.getAppPath()])
+    app.setAsDefaultProtocolClient('mate', process.execPath, [app.getAppPath()])
   } else {
-    app.setAsDefaultProtocolClient('forge')
+    app.setAsDefaultProtocolClient('mate')
   }
 
   app.whenReady().then(async () => {
@@ -354,7 +354,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
-// 兜底：未捕获异常也要留痕（壳的日志是桌面态排障的唯一入口，M4 的 forge doctor 会读它）。
+// 兜底：未捕获异常也要留痕（壳的日志是桌面态排障的唯一入口，M4 的 mate doctor 会读它）。
 process.on('uncaughtException', (err) => {
   log(`uncaughtException: ${err?.stack ?? String(err)}`)
   dialog.showErrorBox('ark-mate 桌面壳异常', String(err?.stack ?? err))

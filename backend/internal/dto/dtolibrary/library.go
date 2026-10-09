@@ -37,7 +37,7 @@ type LibraryItem struct {
 //
 //	projected      可用（可直接选）
 //	untested       会投放，但该 runtime 的投影声明尚未经实测——不替用户担保底座开箱读到它
-//	not_configured 声明了但本进程没解析出落点（去配 FORGE_PROJECTION_DIRS / 检查 adapter 声明）
+//	not_configured 声明了但本进程没解析出落点（去配 MATE_PROJECTION_DIRS / 检查 adapter 声明）
 //	not_applicable 底座不支持或未注册（换 runtime，或注册它）
 //	disabled       被显式关掉（改回 enabled:true）
 type Applicability struct {

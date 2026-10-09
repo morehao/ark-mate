@@ -25,7 +25,7 @@
  *
  * ## `coreVersion` 的两档口径（2026-10-09）
  *
- * "核心自报的版本 == 契约声明的版本"这条**只在打包档成立**：源码态的 `resources/forge-core` 由
+ * "核心自报的版本 == 契约声明的版本"这条**只在打包档成立**：源码态的 `resources/mate-core` 由
  * `make core/desktop` 产出，**按设计不注入版本号**（报 `dev`），拿它比 `0.1.0` 不是抓漂移而是
  * 没有可比对象。因此源码态对 `coreVersion` 打**信息行**（`·`，不计入判据），其余六项照旧复算；
  * `--require-artifacts` 下仍要求逐字相等（包内核心报 `dev` 即红）。别把这条读成"放宽"——
@@ -54,7 +54,7 @@ const DESKTOP = resolve(SCRIPT_DIR, '..')
 const RESOURCES = join(DESKTOP, 'resources')
 const RELEASE_JSON = join(DESKTOP, 'release.json')
 const RELEASE_DIR = join(DESKTOP, 'release')
-const CORE = join(RESOURCES, 'forge-core')
+const CORE = join(RESOURCES, 'mate-core')
 const WEB = join(RESOURCES, 'web')
 const PAYLOADS = join(RESOURCES, 'payloads')
 
@@ -120,7 +120,7 @@ function signatureFacts(path) {
   }
 }
 
-/** 读就绪行（`FORGE_READY {"addr":"127.0.0.1:1234","port":1234}`）。 */
+/** 读就绪行（`MATE_READY {"addr":"127.0.0.1:1234","port":1234}`）。 */
 function waitForReady(child) {
   let buffer = ''
   const logs = []
@@ -136,10 +136,10 @@ function waitForReady(child) {
         const line = buffer.slice(0, idx).trim()
         buffer = buffer.slice(idx + 1)
         if (!line) continue
-        if (line.startsWith('FORGE_READY ')) {
+        if (line.startsWith('MATE_READY ')) {
           clearTimeout(timer)
           try {
-            resolvePromise(JSON.parse(line.slice('FORGE_READY '.length)))
+            resolvePromise(JSON.parse(line.slice('MATE_READY '.length)))
           } catch (e) {
             reject(new Error(`就绪行不是 JSON（${e.message}）：${line}`))
           }
@@ -185,10 +185,10 @@ async function killTree(child) {
  */
 async function metaFromCore() {
   if (!existsSync(CORE)) throw new Error(`核心二进制不存在：${CORE}（先跑 make core/desktop）`)
-  const home = mkdtempSync(join(tmpdir(), 'forge-verify-home-'))
-  const env = { ...process.env, FORGE_HOME: home, FORGE_TRANSCRIPTS: join(home, 'transcripts'), FORGE_STORE: 'memory' }
+  const home = mkdtempSync(join(tmpdir(), 'mate-verify-home-'))
+  const env = { ...process.env, MATE_HOME: home, MATE_TRANSCRIPTS: join(home, 'transcripts'), MATE_STORE: 'memory' }
   // 抹掉会影响这次测量的一切：令牌（/meta 会要求凭据）、自动化 tick、以及"用哪份资产"的旁路。
-  for (const key of ['FORGE_TOKEN', 'FORGE_WEB_DIR', 'FORGE_ADDR', 'FORGE_AUTOMATION_TICK', 'FORGE_CONFIG_DIR']) {
+  for (const key of ['MATE_TOKEN', 'MATE_WEB_DIR', 'MATE_ADDR', 'MATE_AUTOMATION_TICK', 'MATE_CONFIG_DIR']) {
     delete env[key]
   }
 
@@ -199,10 +199,10 @@ async function metaFromCore() {
   })
   try {
     const ready = await waitForReady(child)
-    const res = await fetch(`http://127.0.0.1:${ready.port}/v1/forge/meta`)
-    if (!res.ok) throw new Error(`/v1/forge/meta 返回 ${res.status}`)
+    const res = await fetch(`http://127.0.0.1:${ready.port}/v1/mate/meta`)
+    if (!res.ok) throw new Error(`/v1/mate/meta 返回 ${res.status}`)
     const body = await res.json()
-    if (body?.data === undefined) throw new Error(`/v1/forge/meta 的信封里没有 data：${JSON.stringify(body).slice(0, 200)}`)
+    if (body?.data === undefined) throw new Error(`/v1/mate/meta 的信封里没有 data：${JSON.stringify(body).slice(0, 200)}`)
     return body.data
   } finally {
     await killTree(child)
@@ -293,7 +293,7 @@ function verifyInsidePackage(appPath, resourcesPath, release, sourceText) {
   }
 
   for (const [rel, label] of [
-    ['forge-core', '桌面核'],
+    ['mate-core', '桌面核'],
     ['web/index.html', '前端资产'],
     ['runtime/bin/node', '私有 bin（POSIX）'],
     ['runtime/bin/node.cmd', '私有 bin（Windows）'],
@@ -311,7 +311,7 @@ function verifyInsidePackage(appPath, resourcesPath, release, sourceText) {
   // 壳的产物必须在 asar 里（`files` 只带 dist/renderer），运行时树必须在 asar 外。
   check('壳的 dist/ 在 asar 内（不是散在 Resources 下）', !existsSync(join(resourcesPath, 'dist')) && !existsSync(join(resourcesPath, 'app', 'dist')))
 
-  const packagedCore = join(resourcesPath, 'forge-core')
+  const packagedCore = join(resourcesPath, 'mate-core')
   if (existsSync(packagedCore)) {
     const r = run(packagedCore, ['--version', '--json'])
     let info = null
@@ -368,9 +368,9 @@ function verifyInsidePackage(appPath, resourcesPath, release, sourceText) {
 async function launchPackagedApp(appPath, release) {
   const executable = appExecutable(appPath)
   const port = 9500 + Math.floor(Math.random() * 300)
-  const home = mkdtempSync(join(tmpdir(), 'forge-verify-launch-'))
+  const home = mkdtempSync(join(tmpdir(), 'mate-verify-launch-'))
 
-  const env = { ...process.env, FORGE_DESKTOP_HOME: join(home, 'forge-home') }
+  const env = { ...process.env, MATE_DESKTOP_HOME: join(home, 'mate-home') }
   delete env.ELECTRON_RUN_AS_NODE
   const child = spawn(executable, [`--remote-debugging-port=${port}`, `--user-data-dir=${join(home, 'user-data')}`], {
     env,
@@ -387,7 +387,7 @@ async function launchPackagedApp(appPath, release) {
     // 为什么要轮询而不是求值一次：CDP 的 page target 在**文档创建时**就出现，此时 React 还没挂载
     // （`#root` 是空的）。一次求值会把"界面正在渲染"误判成"界面没出来"——实测就是这样。
     const expression = `(async () => {
-        const r = await fetch('/v1/forge/meta', { cache: 'no-store' })
+        const r = await fetch('/v1/mate/meta', { cache: 'no-store' })
         const body = await r.json()
         return {
           status: r.status,
@@ -402,14 +402,14 @@ async function launchPackagedApp(appPath, release) {
         }
       })()`
     // 求值**允许瞬时失败**：CDP 的 page target 在文档刚创建时就出现，此时 `location.href` 可能还没落成
-    // `forge-app://app/`，相对路径 fetch 会抛 "Failed to parse URL from /v1/forge/meta"（实测在加固
+    // `mate-app://app/`，相对路径 fetch 会抛 "Failed to parse URL from /v1/mate/meta"（实测在加固
     // 运行时下更容易撞到：包起来比源码态慢一拍）。一次求值失败不等于首启失败——重试到超时，
     // 并把最后一次错误带进详情，免得"重试掩盖了真实错误"。
     let facts = null
     let lastError = null
     for (let i = 0; i < 40; i++) {
       try {
-        facts = await cdpEval(port, 'forge-app://app', expression)
+        facts = await cdpEval(port, 'mate-app://app', expression)
         lastError = null
         if ((facts?.rootChildren ?? 0) > 0) break
       } catch (e) {
@@ -418,7 +418,7 @@ async function launchPackagedApp(appPath, release) {
       await sleep(500)
     }
     check(
-      '解包首启：壳进到应用页（forge-app://app）且界面已渲染',
+      '解包首启：壳进到应用页（mate-app://app）且界面已渲染',
       (facts?.rootChildren ?? 0) > 0,
       `#root 子节点 ${facts?.rootChildren}（href=${facts?.href} readyState=${facts?.readyState}${facts?.text ? `，页面文字「${facts.text.replace(/\s+/g, ' ').trim()}」` : ''}）` +
         (lastError ? `；最后一次求值失败：${lastError.message.split('\n')[0]}` : ''),
@@ -538,7 +538,7 @@ async function main() {
   // `coreVersion` 的判据**分两档**，因为"核心二进制自报什么"这件事在两种语境下是不同的断言：
   //   - `--require-artifacts`（打包/发布语境，`desktop/dist` 收尾那条）：必须**逐字相等**——
   //     包内核心报 `dev` 照样红，这才是"发布版本一致性"的真判据；
-  //   - 源码态：`resources/forge-core` 由 `make core/desktop` 产出，**按设计不注入版本号**（报 `dev`）。
+  //   - 源码态：`resources/mate-core` 由 `make core/desktop` 产出，**按设计不注入版本号**（报 `dev`）。
   //     拿它去比 `0.1.0` 不是抓到漂移，而是"没有可比对象"（2026-10-09 实测：`pnpm asset-parity`
   //     会经 rebuildAll 重建 dev 核心，于是这条在源码态恒红）。所以源码态只接受"等于声明的版本
   //     或显式的 dev"，并**用信息行说明发布一致性由打包档判**——不用绿勾冒充已校验。
@@ -553,7 +553,7 @@ async function main() {
     )
   } else {
     note(
-      `coreVersion 未在源码态判：resources/forge-core 报 dev（make core/desktop 按设计不注入版本号），` +
+      `coreVersion 未在源码态判：resources/mate-core 报 dev（make core/desktop 按设计不注入版本号），` +
         `与声明的 ${release.coreVersion} 没有可比对象；发布版本一致性由 desktop/dist 收尾的 ` +
         `\`--require-artifacts --launch\` 判`,
     )
@@ -647,7 +647,7 @@ async function main() {
     )
 
     if (tarballs.length === 1) {
-      const dir = mkdtempSync(join(tmpdir(), 'forge-verify-untar-'))
+      const dir = mkdtempSync(join(tmpdir(), 'mate-verify-untar-'))
       const untar = run('tar', ['-xzf', join(RELEASE_DIR, tarballs[0]), '-C', dir])
       check('tar.gz 可解（解到干净目录不报错）', untar.status === 0, untar.stderr.split('\n')[0] ?? '')
       if (untar.status === 0) {

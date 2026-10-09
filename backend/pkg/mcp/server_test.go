@@ -333,7 +333,7 @@ func TestServerInteropWithOwnClient(t *testing.T) {
 	defer cancel()
 
 	s := stdioServer(t)
-	s.Env = map[string]string{"FORGE_MCP_HELPER_MODE": "server"}
+	s.Env = map[string]string{"MATE_MCP_HELPER_MODE": "server"}
 	res, err := ListTools(ctx, s)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -377,7 +377,7 @@ func TestServerInteropWithOwnClient(t *testing.T) {
 // stdout，并同时断言**诊断确实去了 stderr**（否则"stdout 干净"可能只是因为压根没日志）。
 func TestServerStdoutPurity(t *testing.T) {
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), "FORGE_MCP_HELPER=1", "FORGE_MCP_HELPER_MODE=server")
+	cmd.Env = append(os.Environ(), "MATE_MCP_HELPER=1", "MATE_MCP_HELPER_MODE=server")
 	frames := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -483,7 +483,7 @@ func TestGatewayArgsRoundTrip(t *testing.T) {
 			t.Fatalf("%v 应报错", bad)
 		}
 	}
-	if GatewayServerName != "forge-gateway" {
+	if GatewayServerName != "mate-gateway" {
 		t.Fatalf("条目名是底座会话里可见的稳定标识，不该改: %q", GatewayServerName)
 	}
 }

@@ -209,16 +209,16 @@ func TestCapabilityMigrateMissingDir(t *testing.T) {
 // 但**取错库路径/取错能力目录**这类接线错误只有真跑一次才看得见（而且它在生产里表现为
 // "导入成功了，可重启后能力面还是空的"——最难查的一类）。
 //
-// 全程私有 HOME（FORGE_HOME/FORGE_CONFIG_DIR/FORGE_DB/FORGE_CAPABILITIES 都指向临时目录），
-// 不碰用户真实的 ~/.forge（本机隔离纪律）。
+// 全程私有 HOME（MATE_HOME/MATE_CONFIG_DIR/MATE_DB/MATE_CAPABILITIES 都指向临时目录），
+// 不碰用户真实的 ~/.ark-mate（本机隔离纪律）。
 func TestCapabilityImportExportCLI(t *testing.T) {
 	home := t.TempDir()
-	dbPath := filepath.Join(home, "forge.db")
+	dbPath := filepath.Join(home, "mate.db")
 	capDir := filepath.Join(home, "capabilities")
-	t.Setenv("FORGE_HOME", home)
-	t.Setenv("FORGE_CONFIG_DIR", filepath.Join(home, "config"))
-	t.Setenv("FORGE_DB", dbPath)
-	t.Setenv("FORGE_CAPABILITIES", capDir)
+	t.Setenv("MATE_HOME", home)
+	t.Setenv("MATE_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("MATE_DB", dbPath)
+	t.Setenv("MATE_CAPABILITIES", capDir)
 
 	writeDef(t, capDir, "demo.json", `{"id":"demo","name":"Demo","x-keep":{"nested":true}}`)
 	if err := os.MkdirAll(filepath.Join(capDir, "tools"), 0o755); err != nil {

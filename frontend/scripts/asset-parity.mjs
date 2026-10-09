@@ -3,7 +3,7 @@
  * 资产一致性断言（M2-5，设计 §6.2 / V17）：**同一个请求，两条服务路径，必须给出同一个答案**。
  *
  * 静态资产在桌面安装里有两条服务路径：
- *   壳侧：`forge-app://app/...`（`scheme.handle` 读运行时树里的 dist，注入 restToken 只作用于 /v1）
+ *   壳侧：`mate-app://app/...`（`scheme.handle` 读运行时树里的 dist，注入 restToken 只作用于 /v1）
  *   核心侧：`http://127.0.0.1:<port>/...`（核心按 `--web-dir` 读**同一份** dist）
  *
  * 两者由不同代码实现（TS vs Go），因此必须有机器判据：对同一组路径分别取一次，
@@ -55,7 +55,7 @@ function assetPaths(assetsJs) {
   ]
 }
 
-/** 从壳侧读一次（CDP 在 `forge-app://app` 页面里 fetch：走的是 scheme.handle）。 */
+/** 从壳侧读一次（CDP 在 `mate-app://app` 页面里 fetch：走的是 scheme.handle）。 */
 async function fetchViaShell(cdp, path) {
   return cdp.evalJs(`
     const r = await fetch(${JSON.stringify(path)}, { cache: 'no-store' })
@@ -106,7 +106,7 @@ async function main() {
   const cdp = await connectCDP(shell.port)
   try {
     // 核心地址从载体契约拿（`boot().streamBaseUrl` 就是回环地址，换 http 即为 REST/静态基址）
-    const boot = await cdp.evalJs(`return await window.__FORGE_DESKTOP__.boot()`)
+    const boot = await cdp.evalJs(`return await window.__MATE_DESKTOP__.boot()`)
     const coreBase = String(boot.streamBaseUrl).replace(/^ws:\/\//, 'http://')
     check('从载体契约拿到核心地址', /^http:\/\/127\.0\.0\.1:\d+$/.test(coreBase), coreBase)
 
@@ -173,7 +173,7 @@ async function main() {
     const idFile = join(DESKTOP_WEB, 'build-id.txt')
     const fileId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
     check('运行时资产里有 build-id.txt', !!fileId, fileId || '(缺)')
-    const meta = await cdp.evalJs(`const r = await fetch('/v1/forge/meta'); const j = await r.json(); return j.data`)
+    const meta = await cdp.evalJs(`const r = await fetch('/v1/mate/meta'); const j = await r.json(); return j.data`)
     check('/meta 的 webBuildId 与文件一致', meta.webBuildId === fileId, `meta=${meta.webBuildId} file=${fileId}`)
     check('/meta 报 dir 来源且路径指向运行时树', meta.webSource === 'dir' && String(meta.webPath).endsWith(join('resources', 'web')), `${meta.webSource} ${meta.webPath}`)
 

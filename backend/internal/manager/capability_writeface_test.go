@@ -389,7 +389,7 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 //
 // memory：没有目录就没有落点 → 40001 `capability_dir_unset`（给出路），而不是"内存生效、盘上没留痕"；
 // sqlite：定义在 DB 里，**目录为空也必须能写**（这正是 M6 换事实源的用户可见收益：写面不再因为
-// "没配 FORGE_CAPABILITIES"而拒绝服务）。
+// "没配 MATE_CAPABILITIES"而拒绝服务）。
 func TestWriteFaceRequiresCapabilityDir(t *testing.T) {
 	ctx := context.Background()
 

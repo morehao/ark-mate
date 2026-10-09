@@ -22,8 +22,8 @@ import (
 // ——否则用户会遇到"我删掉的技能又回来了"。据此：
 //
 //	装配期（sqlite 模式）自动导入一次：目录指纹进 `meta.imported_capabilities`，目录没变就跳过；
-//	`forge capability import`：显式重跑，每次按行判重（新丢进目录一个文件，跑一次就该进来）；
-//	`forge capability export`：把 DB 里的定义写回目录（文件从此是**导出物**，不再是事实源）。
+//	`mate capability import`：显式重跑，每次按行判重（新丢进目录一个文件，跑一次就该进来）；
+//	`mate capability export`：把 DB 里的定义写回目录（文件从此是**导出物**，不再是事实源）。
 //
 // 三条都属于**运维动作**，刻意不加 REST 路由（C1 的双向比对开销与新的对外面都不值当）。
 
@@ -43,7 +43,7 @@ type CapabilityImportStats struct {
 func ImportCapabilityDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (CapabilityImportStats, error) {
 	var stats CapabilityImportStats
 	if st == nil {
-		return stats, errors.New("manager: 导入能力定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导入能力定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	dir = strings.TrimSpace(dir)
 	stats.Dir = dir
@@ -72,10 +72,10 @@ func ImportCapabilityDir(ctx context.Context, st *store.Store, dir string, opts 
 func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
 	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
-		return stats, errors.New("manager: 导出能力定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
+		return stats, errors.New("manager: 导出能力定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
 	if stats.Dir == "" {
-		return stats, errors.New("manager: 导出能力定义需要能力目录（--dir 或 FORGE_CAPABILITIES）")
+		return stats, errors.New("manager: 导出能力定义需要能力目录（--dir 或 MATE_CAPABILITIES）")
 	}
 	skills, err := st.ListSkillDefinitions(ctx)
 	if err != nil {

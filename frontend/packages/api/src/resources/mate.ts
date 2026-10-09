@@ -62,30 +62,30 @@ import type {
   WorkspaceSettings,
 } from '@ark/types'
 
-// ——— forge 控制面 REST（/v1/forge，见 backend/internal/router/routes_*.go） ———
+// ——— mate 控制面 REST（/v1/mate，见 backend/internal/router/routes_*.go） ———
 
-export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/forge/agents')
+export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/mate/agents')
 
 // ——— automation（定时任务，M4）：定义的事实源是文件，接口是编辑器与观察窗 ———
 
 /** 列出全部 automation（**含装载失败的那些**：坏定义带 `error` 出现在列表里，不静默消失）。 */
-export const listAutomations = (): Promise<Automation[]> => http.get<Automation[]>('/forge/automations')
+export const listAutomations = (): Promise<Automation[]> => http.get<Automation[]>('/mate/automations')
 
 /** 取一条（不存在 → 40401）。 */
 export const getAutomation = (id: string): Promise<Automation> =>
-  http.get<Automation>(`/forge/automations/${encodeURIComponent(id)}`)
+  http.get<Automation>(`/mate/automations/${encodeURIComponent(id)}`)
 
 /** 新建定义（`id` 必填 = 文件名；已存在 → 40901，绝不覆盖）。 */
 export const createAutomation = (body: AutomationWriteBody): Promise<Automation> =>
-  http.post<Automation>('/forge/automations', body)
+  http.post<Automation>('/mate/automations', body)
 
 /** 覆盖写：**只改 body 里出现过的键**（未出现的保留原值，`null` 删键）。 */
 export const updateAutomation = (id: string, body: AutomationWriteBody): Promise<Automation> =>
-  http.put<Automation>(`/forge/automations/${encodeURIComponent(id)}`, body)
+  http.put<Automation>(`/mate/automations/${encodeURIComponent(id)}`, body)
 
 /** 删除（幂等：本来就不存在 → `deleted:false` 且不报错）。 */
 export const deleteAutomation = (id: string): Promise<AutomationDeleteResp> =>
-  http.delete<AutomationDeleteResp>(`/forge/automations/${encodeURIComponent(id)}`)
+  http.delete<AutomationDeleteResp>(`/mate/automations/${encodeURIComponent(id)}`)
 
 /**
  * 预览未来若干次到期时刻（**不落盘、不建会话**，也不要求定义已存在）。
@@ -96,22 +96,22 @@ export const previewAutomation = (body: {
   schedule: Record<string, unknown>
   count?: number
   from?: string
-}): Promise<AutomationPreviewResp> => http.post<AutomationPreviewResp>('/forge/automations/preview', body)
+}): Promise<AutomationPreviewResp> => http.post<AutomationPreviewResp>('/mate/automations/preview', body)
 
 /** 运行史（最新 20 条，含 `overlap`/`duplicate`/`skipped`）。 */
 export const listAutomationRuns = (id: string): Promise<AutomationRunsResp> =>
-  http.get<AutomationRunsResp>(`/forge/automations/${encodeURIComponent(id)}/runs`)
+  http.get<AutomationRunsResp>(`/mate/automations/${encodeURIComponent(id)}/runs`)
 
 /**
  * 手动触发一次（走同一认领判据：上一次还在跑 → `overlap`；**不推进认领游标**，
  * 手动试跑不该静默吃掉当晚的排期）。失败会同时抛错并已留痕。
  */
 export const runAutomationNow = (id: string): Promise<AutomationRunResp> =>
-  http.post<AutomationRunResp>(`/forge/automations/${encodeURIComponent(id)}/run`)
+  http.post<AutomationRunResp>(`/mate/automations/${encodeURIComponent(id)}/run`)
 
 /** agent 诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。 */
 export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
-  http.get<AgentDiagnostics>(`/forge/agents/${encodeURIComponent(id)}/diagnostics`)
+  http.get<AgentDiagnostics>(`/mate/agents/${encodeURIComponent(id)}/diagnostics`)
 
 /** 列出未归档会话（`archived=true` 列出已归档；`cwd` 非空 = 只列工作空间精确等于该路径的会话）。 */
 export const listConversations = (archived = false, cwd?: string): Promise<ConversationSummary[]> => {
@@ -119,7 +119,7 @@ export const listConversations = (archived = false, cwd?: string): Promise<Conve
   if (archived) s.set('archived', 'true')
   if (cwd) s.set('cwd', cwd)
   const q = s.toString()
-  return http.get<ConversationSummary[]>(`/forge/conversations${q ? `?${q}` : ''}`)
+  return http.get<ConversationSummary[]>(`/mate/conversations${q ? `?${q}` : ''}`)
 }
 
 /**
@@ -131,15 +131,15 @@ export const browseWorkspaces = (path?: string, hidden = false): Promise<Workspa
   if (path) s.set('path', path)
   if (hidden) s.set('hidden', 'true')
   const q = s.toString()
-  return http.get<WorkspaceBrowseResp>(`/forge/workspaces/browse${q ? `?${q}` : ''}`)
+  return http.get<WorkspaceBrowseResp>(`/mate/workspaces/browse${q ? `?${q}` : ''}`)
 }
 
 /**
  * 资料库列表（工作区根下的一级子目录，服务端零新状态）。
- * 未配 `FORGE_WORKSPACE_ROOTS` 时返回空数组。
+ * 未配 `MATE_WORKSPACE_ROOTS` 时返回空数组。
  */
 export const workspaceLibraries = (): Promise<WorkspaceLibrary[]> =>
-  http.get<WorkspaceLibrary[]>('/forge/workspaces/libraries')
+  http.get<WorkspaceLibrary[]>('/mate/workspaces/libraries')
 
 /**
  * 列目录**内容**（文件 + 子目录，带大小/修改时间）——"看资料"面。
@@ -149,7 +149,7 @@ export const workspaceLibraries = (): Promise<WorkspaceLibrary[]> =>
 export const workspaceFiles = (path: string, hidden = false): Promise<WorkspaceFilesResp> => {
   const s = new URLSearchParams({ path })
   if (hidden) s.set('hidden', 'true')
-  return http.get<WorkspaceFilesResp>(`/forge/workspaces/files?${s.toString()}`)
+  return http.get<WorkspaceFilesResp>(`/mate/workspaces/files?${s.toString()}`)
 }
 
 /**
@@ -159,79 +159,79 @@ export const workspaceFiles = (path: string, hidden = false): Promise<WorkspaceF
  * `writable=false`（被 env/flag 锁定或无配置目录）时面板必须转只读展示，不要给一个必然失败的保存按钮。
  */
 export const getWorkspaceSettings = (): Promise<WorkspaceSettings> =>
-  http.get<WorkspaceSettings>('/forge/settings/workspace')
+  http.get<WorkspaceSettings>('/mate/settings/workspace')
 
 /**
  * **全量替换**工作区根白名单（`PUT /settings/workspace`）。
  * 空数组 = 恢复"不限制"；服务端逐项要求绝对路径 / 存在 / 是目录，落盘后对新会话即时生效。
  */
 export const updateWorkspaceSettings = (roots: string[]): Promise<WorkspaceSettings> =>
-  http.put<WorkspaceSettings>('/forge/settings/workspace', { roots })
+  http.put<WorkspaceSettings>('/mate/settings/workspace', { roots })
 
 /** 最近使用的工作空间（服务端从既有会话派生；排除平台代建的临时空间）。 */
 export const recentWorkspaces = (limit = 10): Promise<WorkspaceRecent[]> =>
-  http.get<WorkspaceRecent[]>(`/forge/workspaces/recent?limit=${limit}`)
+  http.get<WorkspaceRecent[]>(`/mate/workspaces/recent?limit=${limit}`)
 
 /** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
 export const conversationSearch = (q: string, limit = 30): Promise<ConversationSearchHit[]> => {
   const s = new URLSearchParams({ q, limit: String(limit) })
-  return http.get<ConversationSearchHit[]>(`/forge/conversations/search?${s.toString()}`)
+  return http.get<ConversationSearchHit[]>(`/mate/conversations/search?${s.toString()}`)
 }
 
 /** 跨会话消息级检索（M3 ②：返回 seq 锚点，用于跳转定位）。 */
 export const messageSearch = (q: string, limit = 30): Promise<MessageSearchResp> => {
   const s = new URLSearchParams({ q, limit: String(limit) })
-  return http.get<MessageSearchResp>(`/forge/search/messages?${s.toString()}`)
+  return http.get<MessageSearchResp>(`/mate/search/messages?${s.toString()}`)
 }
 
 /** 批量导出会话（markdown|text|json；ids 上限 50）。 */
 export const exportConversations = (ids: string[], format: 'markdown' | 'text' | 'json' = 'markdown'): Promise<ExportResp> =>
-  http.post<ExportResp>('/forge/conversations/export', { ids, format })
+  http.post<ExportResp>('/mate/conversations/export', { ids, format })
 
 /** 单会话详情（元数据 + 挂起权限）。 */
 export const getConversation = (id: string): Promise<ConversationDetail> =>
-  http.get<ConversationDetail>(`/forge/conversations/${encodeURIComponent(id)}`)
+  http.get<ConversationDetail>(`/mate/conversations/${encodeURIComponent(id)}`)
 
 /** 某会话的轮次明细（runs 表读模型；含每轮用量快照。内存模式返回空数组）。 */
 export const conversationRuns = (id: string): Promise<{ id: string; runs: ConversationRun[] }> =>
-  http.get<{ id: string; runs: ConversationRun[] }>(`/forge/conversations/${encodeURIComponent(id)}/runs`)
+  http.get<{ id: string; runs: ConversationRun[] }>(`/mate/conversations/${encodeURIComponent(id)}/runs`)
 
 /** 更新会话元数据（title/pinned/archived 子集，nil 不更新）。 */
 export const updateConversation = (id: string, patch: ConversationPatch): Promise<ConversationSummary> =>
-  http.patch<ConversationSummary>(`/forge/conversations/${encodeURIComponent(id)}`, patch)
+  http.patch<ConversationSummary>(`/mate/conversations/${encodeURIComponent(id)}`, patch)
 
 /** 新建会话：指定 agent + 首轮 prompt，后台即起真实会话；返回 attach 续传水位。 */
 export const createConversation = (req: CreateConversationReq): Promise<CreateConversationResp> =>
-  http.post<CreateConversationResp>('/forge/conversations', req)
+  http.post<CreateConversationResp>('/mate/conversations', req)
 
 export const promptConversation = (id: string, req: PromptReq): Promise<ConversationPromptResp> =>
-  http.post<ConversationPromptResp>(`/forge/conversations/${encodeURIComponent(id)}/prompt`, req)
+  http.post<ConversationPromptResp>(`/mate/conversations/${encodeURIComponent(id)}/prompt`, req)
 
 export const cancelConversation = (id: string): Promise<CancelConversationResp> =>
-  http.post<CancelConversationResp>(`/forge/conversations/${encodeURIComponent(id)}/cancel`)
+  http.post<CancelConversationResp>(`/mate/conversations/${encodeURIComponent(id)}/cancel`)
 
 /** 列出会话的挂起权限请求。 */
 export const listPendingPermissions = (id: string): Promise<PermissionResp[]> =>
-  http.get<PermissionResp[]>(`/forge/conversations/${encodeURIComponent(id)}/permissions`)
+  http.get<PermissionResp[]>(`/mate/conversations/${encodeURIComponent(id)}/permissions`)
 
 /** 对挂起权限请求决策（allow/reject × once/always）。 */
 export const resolvePermission = (id: string, req: ResolvePermissionReq): Promise<ResolvePermissionResp> =>
-  http.post<ResolvePermissionResp>(`/forge/conversations/${encodeURIComponent(id)}/permission`, req)
+  http.post<ResolvePermissionResp>(`/mate/conversations/${encodeURIComponent(id)}/permission`, req)
 
 /** 撤销会话级权限记忆（始终允许/始终拒绝；title+kind 均空 = 一键撤销全部）。 */
 export const revokeMemory = (id: string, req: RevokeMemoryReq = {}): Promise<{ title: string; kind: string }> =>
   http.post<{ title: string; kind: string }>(
-    `/forge/conversations/${encodeURIComponent(id)}/permissions/memories/revoke`,
+    `/mate/conversations/${encodeURIComponent(id)}/permissions/memories/revoke`,
     req,
   )
 
 /** 列出会话的挂起结构化提问（elicitation 表单/URL 卡）。 */
 export const listPendingElicitations = (id: string): Promise<ElicitationResp[]> =>
-  http.get<ElicitationResp[]>(`/forge/conversations/${encodeURIComponent(id)}/elicitations`)
+  http.get<ElicitationResp[]>(`/mate/conversations/${encodeURIComponent(id)}/elicitations`)
 
 /** 对挂起结构化提问决策（accept/decline/cancel；accept 可带 content）。 */
 export const resolveElicitation = (id: string, req: ResolveElicitationReq): Promise<ResolveElicitationResp> =>
-  http.post<ResolveElicitationResp>(`/forge/conversations/${encodeURIComponent(id)}/elicitation`, req)
+  http.post<ResolveElicitationResp>(`/mate/conversations/${encodeURIComponent(id)}/elicitation`, req)
 
 /** 会话历史页（事件按 seq 升序）。 */
 export interface ConversationHistoryPage {
@@ -258,7 +258,7 @@ export const conversationHistory = (
   if (opts.before != null) q.set('before', String(opts.before))
   if (opts.limit != null) q.set('limit', String(opts.limit))
   const s = q.toString()
-  return http.get<ConversationHistoryPage>(`/forge/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
+  return http.get<ConversationHistoryPage>(`/mate/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
 }
 
 /**
@@ -268,7 +268,7 @@ export const conversationHistory = (
  * 冷挂载（刷新/直达）时 WS 只发 snapshot 不回放历史，没有它队列会在刷新后凭空消失。
  */
 export const listQueuedInputs = (conversationId: string): Promise<QueuedInputResp[]> =>
-  http.get<QueuedInputResp[]>(`/forge/conversations/${encodeURIComponent(conversationId)}/inputs`)
+  http.get<QueuedInputResp[]>(`/mate/conversations/${encodeURIComponent(conversationId)}/inputs`)
 
 /**
  * §6：撤下一条**尚未投递**的排队输入。
@@ -278,16 +278,16 @@ export const listQueuedInputs = (conversationId: string): Promise<QueuedInputRes
  */
 export const cancelQueuedInput = (conversationId: string, inputId: string): Promise<CancelQueuedInputResp> =>
   http.delete<CancelQueuedInputResp>(
-    `/forge/conversations/${encodeURIComponent(conversationId)}/inputs/${encodeURIComponent(inputId)}`,
+    `/mate/conversations/${encodeURIComponent(conversationId)}/inputs/${encodeURIComponent(inputId)}`,
   )
 
 // ——— P1 能力数据面（Skill/MCP/Tool 目录，REST 列出能力） ———
 
-export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/forge/skills')
+export const listSkills = (): Promise<Skill[]> => http.get<Skill[]>('/mate/skills')
 
-export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/forge/mcps')
+export const listMcpServers = (): Promise<McpServer[]> => http.get<McpServer[]>('/mate/mcps')
 
-export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/forge/tools')
+export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/mate/tools')
 
 /**
  * §13.4 S4：启停一个 skill（写回定义文件的 enabled 并立刻重校物化——启用写文件、禁用撤回副本）。
@@ -295,7 +295,7 @@ export const listTools = (): Promise<Tool[]> => http.get<Tool[]>('/forge/tools')
  * 定义文件写成功即成功；物化失败在 `materialize_errors` 里回（不回滚定义，禁用本身是安全方向）。
  */
 export const setSkillEnabled = (id: string, enabled: boolean): Promise<SkillToggleResp> =>
-  http.patch<SkillToggleResp>(`/forge/skills/${encodeURIComponent(id)}`, { enabled })
+  http.patch<SkillToggleResp>(`/mate/skills/${encodeURIComponent(id)}`, { enabled })
 
 /**
  * §13.4 S2：skill 的物化审计（**只报不修**）。
@@ -304,7 +304,7 @@ export const setSkillEnabled = (id: string, enabled: boolean): Promise<SkillTogg
  * 按平台版本覆盖，用户自有目录（user_owned）平台不碰。
  */
 export const getSkillMaterialization = (id: string): Promise<SkillMaterializationResp> =>
-  http.get<SkillMaterializationResp>(`/forge/skills/${encodeURIComponent(id)}/materialization`)
+  http.get<SkillMaterializationResp>(`/mate/skills/${encodeURIComponent(id)}/materialization`)
 
 /**
  * M2 写面：新建一个 skill 定义（body = skill 定义原文，`id` 必填）。
@@ -313,7 +313,7 @@ export const getSkillMaterialization = (id: string): Promise<SkillMaterializatio
  * 且**零字节落盘**；id 已存在 → 40901 `skill_exists`。
  */
 export const createSkill = (body: CapabilityWriteBody): Promise<SkillWriteResp> =>
-  http.post<SkillWriteResp>('/forge/skills', body)
+  http.post<SkillWriteResp>('/mate/skills', body)
 
 /**
  * M2 写面：覆盖写一个 skill 定义——**只改请求体里出现过的键**。
@@ -322,33 +322,33 @@ export const createSkill = (body: CapabilityWriteBody): Promise<SkillWriteResp> 
  * 40401 `skill_not_found`（**不会顺便新建**）；读写窗口内被外部改动 → 40901 `definition_changed`。
  */
 export const updateSkill = (id: string, body: CapabilityWriteBody): Promise<SkillWriteResp> =>
-  http.put<SkillWriteResp>(`/forge/skills/${encodeURIComponent(id)}`, body)
+  http.put<SkillWriteResp>(`/mate/skills/${encodeURIComponent(id)}`, body)
 
 /** M2 写面：删定义文件 + 撤回已物化副本（幂等：不存在 → `deleted:false` 且不报错）。 */
 export const deleteSkill = (id: string): Promise<SkillDeleteResp> =>
-  http.delete<SkillDeleteResp>(`/forge/skills/${encodeURIComponent(id)}`)
+  http.delete<SkillDeleteResp>(`/mate/skills/${encodeURIComponent(id)}`)
 
 /** M2 写面：新建一个 MCP server 定义（闸门比 skill 多：transport/绝对路径/引用词法…）。 */
 export const createMcpServer = (body: CapabilityWriteBody): Promise<McpWriteResp> =>
-  http.post<McpWriteResp>('/forge/mcps', body)
+  http.post<McpWriteResp>('/mate/mcps', body)
 
 /** M2 写面：覆盖写一个 MCP server 定义（键的出现与否有语义，同 skill）。 */
 export const updateMcpServer = (id: string, body: CapabilityWriteBody): Promise<McpWriteResp> =>
-  http.put<McpWriteResp>(`/forge/mcps/${encodeURIComponent(id)}`, body)
+  http.put<McpWriteResp>(`/mate/mcps/${encodeURIComponent(id)}`, body)
 
 /** M2 写面：删 MCP server 定义 + 摘除归属它的工具条目（幂等）。 */
 export const deleteMcpServer = (id: string): Promise<McpDeleteResp> =>
-  http.delete<McpDeleteResp>(`/forge/mcps/${encodeURIComponent(id)}`)
+  http.delete<McpDeleteResp>(`/mate/mcps/${encodeURIComponent(id)}`)
 
 // ——— P2 §8.1/§5.2：Agent 统一能力目录 + MCP live 探测 ———
 
 /** 某 Agent 的统一能力目录（skills 已按候选 runtime 裁剪；MCP 带 enabled/runtimes 标注）。 */
 export const getAgentCapabilities = (agentId: string): Promise<AgentCapabilities> =>
-  http.get<AgentCapabilities>(`/forge/agents/${encodeURIComponent(agentId)}/capabilities`)
+  http.get<AgentCapabilities>(`/mate/agents/${encodeURIComponent(agentId)}/capabilities`)
 
 /** 对某 MCP server 做一次 live tools/list 探测（结果写 Tool 目录，返回本轮增删）。 */
 export const probeMcpServer = (id: string): Promise<McpProbeResult> =>
-  http.post<McpProbeResult>(`/forge/mcps/${encodeURIComponent(id)}/probe`)
+  http.post<McpProbeResult>(`/mate/mcps/${encodeURIComponent(id)}/probe`)
 
 /**
  * 调用某 MCP server 的工具（B1：tools/call）。
@@ -362,21 +362,21 @@ export const callMcpTool = (
   req: McpToolCallReq = {},
 ): Promise<McpToolCallResult> =>
   http.post<McpToolCallResult>(
-    `/forge/mcps/${encodeURIComponent(serverId)}/tools/${encodeURIComponent(tool)}/call`,
+    `/mate/mcps/${encodeURIComponent(serverId)}/tools/${encodeURIComponent(tool)}/call`,
     req,
   )
 
 /** 实时拉取某 MCP server 的资源列表（B2：resources/list + resources/templates/list）。 */
 export const listMcpResources = (id: string): Promise<McpResourcesResult> =>
-  http.get<McpResourcesResult>(`/forge/mcps/${encodeURIComponent(id)}/resources`)
+  http.get<McpResourcesResult>(`/mate/mcps/${encodeURIComponent(id)}/resources`)
 
 /** 读取一个 MCP 资源（B2：resources/read）。 */
 export const readMcpResource = (id: string, uri: string): Promise<McpResourceReadResult> =>
-  http.post<McpResourceReadResult>(`/forge/mcps/${encodeURIComponent(id)}/resources/read`, { uri })
+  http.post<McpResourceReadResult>(`/mate/mcps/${encodeURIComponent(id)}/resources/read`, { uri })
 
 /** 实时拉取某 MCP server 的提示词模板（B2：prompts/list）。 */
 export const listMcpPrompts = (id: string): Promise<McpPromptsResult> =>
-  http.get<McpPromptsResult>(`/forge/mcps/${encodeURIComponent(id)}/prompts`)
+  http.get<McpPromptsResult>(`/mate/mcps/${encodeURIComponent(id)}/prompts`)
 
 /** 取用一条 MCP 提示词（B2：prompts/get；参数值必须是字符串）。 */
 export const getMcpPrompt = (
@@ -384,7 +384,7 @@ export const getMcpPrompt = (
   name: string,
   args: Record<string, string> = {},
 ): Promise<McpPromptGetResult> =>
-  http.post<McpPromptGetResult>(`/forge/mcps/${encodeURIComponent(id)}/prompts/${encodeURIComponent(name)}/get`, {
+  http.post<McpPromptGetResult>(`/mate/mcps/${encodeURIComponent(id)}/prompts/${encodeURIComponent(name)}/get`, {
     arguments: args,
   })
 
@@ -398,7 +398,7 @@ export const createAgent = (req: {
   provider?: string
   /** MCP 白名单：省略 = 未声明（全量）；`[]` = 禁用全部；非空 = 白名单。 */
   mcps?: string[]
-}): Promise<Agent> => http.post<Agent>('/forge/agents', req)
+}): Promise<Agent> => http.post<Agent>('/mate/agents', req)
 
 /**
  * 热更新 agent 元数据（name/provider/runtimes/mcps 子集；种子 runtimes 只读）。
@@ -417,34 +417,34 @@ export const patchAgent = (
     mcps?: string[] | null
     permission_policy?: PermissionPolicy
   },
-): Promise<Agent> => http.patch<Agent>(`/forge/agents/${encodeURIComponent(id)}`, patch)
+): Promise<Agent> => http.patch<Agent>(`/mate/agents/${encodeURIComponent(id)}`, patch)
 
 /** 删除自定义 agent（种子 agent-* 返回只读错误）：返回影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）。 */
 export const deleteAgent = (id: string): Promise<AgentDeleteResp> =>
-  http.delete<AgentDeleteResp>(`/forge/agents/${encodeURIComponent(id)}`)
+  http.delete<AgentDeleteResp>(`/mate/agents/${encodeURIComponent(id)}`)
 
 /**
  * 切换「当前 Agent」（全局默认单例：新建会话、模型目录缺省都取它；幂等）。
  * 返回切换后的 agent（`is_default=true`）；选择落 `<AgentDir>/default.json`，重启后保持。
  */
 export const setDefaultAgent = (id: string): Promise<Agent> =>
-  http.post<Agent>(`/forge/agents/${encodeURIComponent(id)}/default`)
+  http.post<Agent>(`/mate/agents/${encodeURIComponent(id)}/default`)
 
 /** 启动 agent 对应 runtime 连接（真实进程；已运行幂等）。 */
 export const startAgent = (id: string): Promise<{ id: string; state: string }> =>
-  http.post<{ id: string; state: string }>(`/forge/agents/${encodeURIComponent(id)}/start`)
+  http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/start`)
 
 /** 停止 agent 对应 runtime 进程（有在途 turn 报 agent_busy）。 */
 export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
-  http.post<{ id: string; state: string }>(`/forge/agents/${encodeURIComponent(id)}/stop`)
+  http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/stop`)
 
 // ——— P2 provider 注入面（密钥只写不读回） ———
 
-export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/forge/providers')
+export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/mate/providers')
 
 /** upsert provider 档案；key 传空串清除密钥。 */
 export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
-  http.patch<Provider>(`/forge/providers/${encodeURIComponent(id)}`, patch)
+  http.patch<Provider>(`/mate/providers/${encodeURIComponent(id)}`, patch)
 
 // ——— 模型目录（运行时派生：ACP session config options） ———
 
@@ -453,7 +453,7 @@ export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provid
  * 选项全量来自运行时自报，`source` 标注取样来源（session|resume|cache|none）。
  */
 export const listModels = (agentId?: string): Promise<ModelCatalogResp> =>
-  http.get<ModelCatalogResp>(`/forge/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
+  http.get<ModelCatalogResp>(`/mate/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
 
 // ——— M3 用量统计 ———
 
@@ -465,5 +465,5 @@ export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
   if (q.agent_id) p.set('agent_id', q.agent_id)
   if (q.group_by) p.set('group_by', q.group_by)
   const qs = p.toString()
-  return http.get<UsageSummary>(`/forge/usage/summary${qs ? `?${qs}` : ''}`)
+  return http.get<UsageSummary>(`/mate/usage/summary${qs ? `?${qs}` : ''}`)
 }

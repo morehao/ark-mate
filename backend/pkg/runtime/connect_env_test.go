@@ -13,7 +13,7 @@ func TestConnectEnvPlatformDeclarationWins(t *testing.T) {
 	spec := Spec{
 		ID: "opencode",
 		Launch: LaunchSpec{
-			Env: []string{"XDG_CONFIG_HOME=/home/forge/runtime/opencode/config", "OPENCODE_DB=/home/forge/x.db"},
+			Env: []string{"XDG_CONFIG_HOME=/home/mate/runtime/opencode/config", "OPENCODE_DB=/home/mate/x.db"},
 		},
 	}
 	got := connectEnv(spec, []string{"XDG_CONFIG_HOME=/home/user/.config", "OPENAI_API_KEY=sk-1"})
@@ -27,7 +27,7 @@ func TestConnectEnvPlatformDeclarationWins(t *testing.T) {
 			t.Fatalf("环境里 %s 出现了 %d 次（同名两条在 POSIX getenv 与 Node process.env 下语义相反）：%v", key, n, got)
 		}
 	}
-	if !containsEnv(got, "XDG_CONFIG_HOME=/home/forge/runtime/opencode/config") {
+	if !containsEnv(got, "XDG_CONFIG_HOME=/home/mate/runtime/opencode/config") {
 		t.Fatalf("隔离值被调用方增量覆盖了：%v", got)
 	}
 	if containsEnv(got, "XDG_CONFIG_HOME=/home/user/.config") {

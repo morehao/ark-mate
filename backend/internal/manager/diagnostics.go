@@ -185,7 +185,7 @@ func (s *Service) remediationFor(agent *AgentRec, spec runtime.Spec, specOK, con
 	}
 
 	if !specOK {
-		add(fmt.Sprintf("runtime %q 未注册：确认底座已注册（`forge config --json` 可查 runtimes 来源）或重新注册该 runtime",
+		add(fmt.Sprintf("runtime %q 未注册：确认底座已注册（`mate config --json` 可查 runtimes 来源）或重新注册该 runtime",
 			agent.pickRuntime()))
 	} else if !routing.Installed(spec) {
 		add(fmt.Sprintf("runtime %q 的启动命令 %q 当前不可执行：安装该底座并确保它在 PATH 中（或把配置改成绝对路径）",

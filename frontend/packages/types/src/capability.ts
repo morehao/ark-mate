@@ -1,4 +1,4 @@
-// P1 能力数据面对外类型（backend /v1/forge/skills|mcps|tools；见
+// P1 能力数据面对外类型（backend /v1/mate/skills|mcps|tools；见
 // backend/internal/dto/dtocapability 的 SkillResp/McpServerResp/ToolResp）。
 // MCP headers/凭证后端不读回，故此处无 headers 字段。
 

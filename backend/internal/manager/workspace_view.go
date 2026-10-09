@@ -25,7 +25,7 @@ import (
 // 返回的 Path/Parent 与建会话时的 cwd 同形态（ValidateWorkspace 规范化），
 // 前端把 entries[i].path 直接当 cwd 提交即可命中同一条会话分组。
 //
-// 配了 FORGE_WORKSPACE_ROOTS 后这个接口**只有浏览窗口变窄，没有语义变化**：
+// 配了 MATE_WORKSPACE_ROOTS 后这个接口**只有浏览窗口变窄，没有语义变化**：
 //   - path 越界 → workspace_outside_roots（与建会话同一条校验、同一个错）；
 //   - Parent 只到根为止（到根时留空）——否则"上级"按钮就是白名单的绕过入口；
 //   - home 不在白名单内时干脆不返回（前端据此隐藏"主目录"按钮，而不是给一个必然报错的入口）。
@@ -94,7 +94,7 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspac
 
 // WorkspaceLibraries 返回**资料库**列表：工作区根下的一级子目录。
 //
-// 为什么是"根的一级子目录"而不是一张登记表：配好 FORGE_WORKSPACE_ROOTS 之后，运维挂进来的
+// 为什么是"根的一级子目录"而不是一张登记表：配好 MATE_WORKSPACE_ROOTS 之后，运维挂进来的
 // 每个一级目录本来就是一堆资料的集合（/srv/docs/合同归档、/srv/docs/技术资料）。于是这一层
 // **零新状态**——不引入 projects.json 之类的登记表，也就没有"登记项与磁盘不一致"这类要维护的
 // 脏数据；目录名即资料库名，用户不必面对绝对路径（资料/文档场景的主要痛点）。

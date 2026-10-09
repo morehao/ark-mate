@@ -22,8 +22,8 @@ import (
 // 暴露成远程端点，供本机/跨机的 ark-mate（或任何 ACP 客户端）以 http|ws 接入。
 //
 // 用途：
-//   - 远程 runtime：`.forge/config/runtimes.json` 声明的 http|ws 端点即由本层服务端半场承载
-//     （历史上的 `forge acp-serve` 已随 echo 演示底座一并删除，远程传输**功能不受影响**）；
+//   - 远程 runtime：`.ark-mate/config/runtimes.json` 声明的 http|ws 端点即由本层服务端半场承载
+//     （历史上的 `mate acp-serve` 已随 echo 演示底座一并删除，远程传输**功能不受影响**）；
 //   - 单测/端到端测试以真实 SDK agent 侧验证客户端传输适配器。
 //
 // HTTP 形态对齐 MCP Streamable HTTP 的既有约定（本项目 pkg/mcp 同款）：

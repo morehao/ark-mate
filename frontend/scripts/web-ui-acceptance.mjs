@@ -29,10 +29,10 @@ import { fileURLToPath } from 'node:url'
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 const WEB_URL = process.env.WEB_URL ?? 'http://localhost:5173'
-const FORGE_URL = process.env.FORGE_URL ?? 'http://127.0.0.1:10001'
+const MATE_URL = process.env.MATE_URL ?? 'http://127.0.0.1:10001'
 const CHROME = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const SHOT_DIR = process.env.SHOT_DIR ?? join(REPO_ROOT, '.dsh/docs/notes/2026-09-24-panel-ui-acceptance')
-const PROFILE = join(tmpdir(), `forge-ui-accept-${process.pid}`)
+const PROFILE = join(tmpdir(), `mate-ui-accept-${process.pid}`)
 const SKILLS = { applicable: 'ui-verify-oc', inapplicable: 'ui-verify-dsh' }
 const AUTO_ID = 'ui-verify-daily'
 
@@ -297,7 +297,7 @@ async function waitConversationTerminal(id, timeoutMs = 90000) {
 }
 
 async function api(method, path, body) {
-  const res = await fetch(`${FORGE_URL}${path.startsWith('/v1') ? path : `/v1/forge${path}`}`, {
+  const res = await fetch(`${MATE_URL}${path.startsWith('/v1') ? path : `/v1/mate${path}`}`, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -534,13 +534,13 @@ async function scenarioAutomation(browser) {
   check('工作空间选择器打开（有候选区与手输入口）', wsItems > 0 && (await page.box(q(manualInput))) !== null, `候选条目=${wsItems}`)
   // 点一条**带 title 的候选**（资料库/最近目录；apply 直接落值并收起弹层）。
   // 不带 title 的那条是「选择目录…」，它进浏览视图、不落值。
-  // 手输路径走服务端校验，必须落在 FORGE_WORKSPACE_ROOTS 内——`/tmp` 会被正当拒掉
+  // 手输路径走服务端校验，必须落在 MATE_WORKSPACE_ROOTS 内——`/tmp` 会被正当拒掉
   // （workspace_outside_roots），第一版就是拿 /tmp 撞了这条规则。
   const cand = `[...document.querySelectorAll('.fg-ws-item[title]')][0]`
   if (await page.box(cand)) {
     await page.click(cand)
   } else {
-    const roots = await api('GET', `/workspaces/browse?path=${encodeURIComponent(process.env.HOME + '/.forge/workspaces')}`)
+    const roots = await api('GET', `/workspaces/browse?path=${encodeURIComponent(process.env.HOME + '/.ark-mate/workspaces')}`)
     const p = roots.json.data?.path
     if (!p) throw new Error(`拿不到可用的工作区根：${JSON.stringify(roots.json).slice(0, 200)}`)
     await page.type(q(manualInput), p)
@@ -552,7 +552,7 @@ async function scenarioAutomation(browser) {
       await page.click(q('.fg-ws-pill'))
       await sleep(500)
     }
-    const roots = await api('GET', `/workspaces/browse?path=${encodeURIComponent(process.env.HOME + '/.forge/workspaces')}`)
+    const roots = await api('GET', `/workspaces/browse?path=${encodeURIComponent(process.env.HOME + '/.ark-mate/workspaces')}`)
     await page.type(q(manualInput), roots.json.data.path)
     await page.press('Enter')
     await sleep(600)
@@ -753,7 +753,7 @@ async function setDraft(page, text) {
 async function main() {
   const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
   const health = await api('GET', '/health')
-  check('后端 health 可达', health.json.code === 0, `${FORGE_URL} → ${JSON.stringify(health.json)}`)
+  check('后端 health 可达', health.json.code === 0, `${MATE_URL} → ${JSON.stringify(health.json)}`)
   const webRoot = await fetch(WEB_URL).then((r) => r.status)
   check('前端入口可达（vite）', webRoot === 200, `${WEB_URL} → HTTP ${webRoot}`)
 

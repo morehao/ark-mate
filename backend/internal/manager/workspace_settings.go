@@ -20,8 +20,8 @@ import (
 //     所以这里**拒绝写**（settings_locked）而不是假装成功——面板据此转为只读展示。
 //
 // 安全权衡（必须显式说清）：这条接口让面板可以放宽自己的边界，因此对"能调到它的人"来说，
-// 白名单退化成"默认视图"而非"边界"。防护等级等于 FORGE_TOKEN；要真正锁死，就在进程 env 里
-// 设 FORGE_WORKSPACE_ROOTS（本文件会把它识别为锁定来源，面板立即变只读）。见 docs/deployment.md。
+// 白名单退化成"默认视图"而非"边界"。防护等级等于 MATE_TOKEN；要真正锁死，就在进程 env 里
+// 设 MATE_WORKSPACE_ROOTS（本文件会把它识别为锁定来源，面板立即变只读）。见 docs/deployment.md。
 
 // WorkspaceRootsStore 白名单的持久化端口，由 infra 实现（config.SettingsStore）。
 //
@@ -83,7 +83,7 @@ func (s *Service) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.Workspa
 	s.mu.Unlock()
 	if store == nil {
 		return nil, acl.NewError(acl.ClassRequest, "settings_readonly",
-			"当前进程未启用设置持久化（无配置目录）：工作区根白名单只能由 FORGE_WORKSPACE_ROOTS 或配置文件设置", nil)
+			"当前进程未启用设置持久化（无配置目录）：工作区根白名单只能由 MATE_WORKSPACE_ROOTS 或配置文件设置", nil)
 	}
 	if _, lockedBy := store.Status(); lockedBy != "" {
 		return nil, acl.NewError(acl.ClassRequest, "settings_locked",

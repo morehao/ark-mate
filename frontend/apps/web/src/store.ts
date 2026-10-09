@@ -373,7 +373,7 @@ interface Toast {
   msg: string
 }
 
-export interface ForgeState {
+export interface MateState {
   agents: Agent[]
   conversations: ConversationSummary[]
   views: Record<string, ConversationView>
@@ -410,7 +410,7 @@ export interface ElicitationDecision {
   label: string
 }
 
-export interface ForgeActions {
+export interface MateActions {
   boot: () => void
   refreshAgents: () => Promise<void>
   refreshConversations: () => Promise<void>
@@ -462,9 +462,9 @@ export interface ForgeActions {
   applyFrame: (f: WsServerFrame) => void
 }
 
-export type ForgeStore = ForgeState & ForgeActions
+export type MateStore = MateState & MateActions
 
-export const initialState: ForgeState = {
+export const initialState: MateState = {
   agents: [],
   conversations: [],
   views: {},
@@ -490,11 +490,11 @@ let transportRef: WsTransport | null = null
 // reportApiError：401（A6 令牌缺失/无效）时自动打开令牌弹窗，其余走 toast。
 function reportApiError(err: unknown): void {
   if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
-    useForge.setState({ tokenModalOpen: true })
-    useForge.getState().showToast('需要访问令牌：请在顶栏「令牌」中填写 FORGE_TOKEN')
+    useMate.setState({ tokenModalOpen: true })
+    useMate.getState().showToast('需要访问令牌：请在顶栏「令牌」中填写 MATE_TOKEN')
     return
   }
-  useForge.getState().showToast(toErrorMessage(err))
+  useMate.getState().showToast(toErrorMessage(err))
 }
 
 // transport 单例：常驻整个会话生命周期（跨路由保活），重连/重订阅由 transport 自理。
@@ -511,16 +511,16 @@ function ensureTransport(): WsTransport {
         transportRef?.attach(f.agg_id)
         return
       }
-      useForge.getState().applyFrame(f)
+      useMate.getState().applyFrame(f)
     },
     (st) => {
-      useForge.getState().setWsState(st === 'open' ? 'open' : st === 'connecting' ? 'connecting' : 'closed')
+      useMate.getState().setWsState(st === 'open' ? 'open' : st === 'connecting' ? 'connecting' : 'closed')
     },
   )
   return transportRef
 }
 
-export const useForge = create<ForgeStore>((set, get) => {
+export const useMate = create<MateStore>((set, get) => {
   const showToast = (msg: string): void => {
     const id = ++toastSeq
     set({ toast: { id, msg } })
@@ -653,7 +653,7 @@ export const useForge = create<ForgeStore>((set, get) => {
 
     boot: () => {
       // 载体接入（M1-8）：先问清"事件流打哪儿、通道凭据是什么"，再建常驻连接。
-      // 桌面窗口的 origin 是 forge-app://app，基址只可能来自壳的 boot()——所以这一步不能省。
+      // 桌面窗口的 origin 是 mate-app://app，基址只可能来自壳的 boot()——所以这一步不能省。
       void (async () => {
         let cfg: StreamConfig
         try {

@@ -107,7 +107,7 @@ func TestOriginPolicyHostWhitelist(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, _ := serveThroughREST(t, p, "GET", "/v1/forge/health", tc.host, "")
+			status, _ := serveThroughREST(t, p, "GET", "/v1/mate/health", tc.host, "")
 			if !tc.denied {
 				if status != http.StatusOK {
 					t.Fatalf("Host=%q 应放行，got %d", tc.host, status)
@@ -121,26 +121,26 @@ func TestOriginPolicyHostWhitelist(t *testing.T) {
 	}
 }
 
-// TestOriginPolicyOriginMatrix Origin 矩阵：无 Origin / forge-app://app / 自身监听端口的同源 / 额外允许表。
+// TestOriginPolicyOriginMatrix Origin 矩阵：无 Origin / mate-app://app / 自身监听端口的同源 / 额外允许表。
 func TestOriginPolicyOriginMatrix(t *testing.T) {
-	p := policyFor(t, "127.0.0.1:51234", "http://localhost:5173", "https://forge.example.com")
+	p := policyFor(t, "127.0.0.1:51234", "http://localhost:5173", "https://mate.example.com")
 	host := "127.0.0.1:51234"
 	cases := []originCase{
 		{name: "无 Origin（壳内反代/curl/导航）", host: host},
-		{name: "桌面直连 forge-app://app", host: host, origin: "forge-app://app"},
+		{name: "桌面直连 mate-app://app", host: host, origin: "mate-app://app"},
 		{name: "同源 127.0.0.1", host: host, origin: "http://127.0.0.1:51234"},
 		{name: "同源 localhost", host: host, origin: "http://localhost:51234"},
 		{name: "同源 IPv6", host: host, origin: "http://[::1]:51234"},
 		{name: "同源大小写变体", host: host, origin: "HTTP://LocalHost:51234"},
 		{name: "额外表命中", host: host, origin: "http://localhost:5173"},
 		{name: "额外表大小写+尾斜杠归一", host: host, origin: "HTTP://LOCALHOST:5173/"},
-		{name: "额外表 https 反代", host: host, origin: "https://forge.example.com"},
+		{name: "额外表 https 反代", host: host, origin: "https://mate.example.com"},
 		{name: "Origin: null（沙箱 iframe）", host: host, origin: "null", denied: true, status: 403},
 		{name: "https 外域", host: host, origin: "https://evil.com", denied: true, status: 403},
 		{name: "本地其它端口", host: host, origin: "http://127.0.0.1:9999", denied: true, status: 403},
 		{name: "localhost 其它端口", host: host, origin: "http://localhost:9999", denied: true, status: 403},
 		{name: "默认端口 10001 不是本进程端口", host: host, origin: "http://localhost:10001", denied: true, status: 403},
-		{name: "另一套自定义 scheme", host: host, origin: "forge-app://other", denied: true, status: 403},
+		{name: "另一套自定义 scheme", host: host, origin: "mate-app://other", denied: true, status: 403},
 		{name: "同源但 https（回环只有明文）", host: host, origin: "https://127.0.0.1:51234", denied: true, status: 403},
 		{name: "同源但缺端口", host: host, origin: "http://127.0.0.1", denied: true, status: 403},
 		{name: "端口后缀伪装", host: host, origin: "http://127.0.0.1:51234.evil.com", denied: true, status: 403},
@@ -150,7 +150,7 @@ func TestOriginPolicyOriginMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, env := serveThroughREST(t, p, "GET", "/v1/forge/health", tc.host, tc.origin)
+			status, env := serveThroughREST(t, p, "GET", "/v1/mate/health", tc.host, tc.origin)
 			if !tc.denied {
 				if status != http.StatusOK {
 					t.Fatalf("Host=%q Origin=%q 应放行，got %d", tc.host, tc.origin, status)
@@ -182,7 +182,7 @@ func TestOriginPolicyDisabledOnNonLoopback(t *testing.T) {
 		if p.Enabled() {
 			t.Fatalf("addr=%q 不应启用白名单", addr)
 		}
-		req := httptest.NewRequest("GET", "/v1/forge/health", nil)
+		req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 		req.Host = "evil.com:10001"
 		req.Header.Set("Origin", "http://evil.com")
 		if d := p.Decide(req); !d.Allowed() {
@@ -195,7 +195,7 @@ func TestOriginPolicyDisabledOnNonLoopback(t *testing.T) {
 
 	// nil 策略同样放行（Options.Origin 缺省 = 不判定）。
 	var nilPolicy *middleware.OriginPolicy
-	req := httptest.NewRequest("GET", "/v1/forge/health", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	req.Host = "evil.com"
 	if d := nilPolicy.Decide(req); !d.Allowed() {
 		t.Fatalf("nil 策略应放行，got %+v", d)
@@ -209,7 +209,7 @@ func TestOriginPolicyDisabledOnNonLoopback(t *testing.T) {
 func consistencyCases() []originCase {
 	return []originCase{
 		{name: "合法 Host 无 Origin", host: "127.0.0.1:40001"},
-		{name: "合法 Host 桌面 Origin", host: "127.0.0.1:40001", origin: "forge-app://app"},
+		{name: "合法 Host 桌面 Origin", host: "127.0.0.1:40001", origin: "mate-app://app"},
 		{name: "合法 Host 同源 Origin", host: "127.0.0.1:40001", origin: "http://localhost:40001"},
 		{name: "合法 Host 额外表命中", host: "localhost:40001", origin: "http://localhost:5173"},
 		{name: "非法 Host", host: "evil.com:40001", denied: true, status: 421},
@@ -231,8 +231,8 @@ func TestOriginPolicyRESTAndWSAgree(t *testing.T) {
 	p := policyFor(t, "127.0.0.1:40001", "http://localhost:5173")
 	for _, tc := range consistencyCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			restStatus, restEnv := serveThroughREST(t, p, "GET", "/v1/forge/health", tc.host, tc.origin)
-			wsStatus, wsEnv := serveThroughWSHandler(t, p, "/v1/forge/ws/events", tc.host, tc.origin)
+			restStatus, restEnv := serveThroughREST(t, p, "GET", "/v1/mate/health", tc.host, tc.origin)
+			wsStatus, wsEnv := serveThroughWSHandler(t, p, "/v1/mate/ws/events", tc.host, tc.origin)
 
 			restDenied := restStatus == http.StatusForbidden || restStatus == http.StatusMisdirectedRequest
 			wsDenied := wsStatus == http.StatusForbidden || wsStatus == http.StatusMisdirectedRequest
@@ -277,7 +277,7 @@ func TestWSHandshakeOriginRejectedOnRealListener(t *testing.T) {
 
 	eng := gin.New()
 	h := ctrws.NewWSCtr(eventbus.New(), ctrws.Options{OriginCheck: p.CheckFunc()})
-	eng.GET("/v1/forge/ws/events", h.Handle)
+	eng.GET("/v1/mate/ws/events", h.Handle)
 
 	srv := &http.Server{Handler: eng}
 	go func() { _ = srv.Serve(ln) }()
@@ -287,7 +287,7 @@ func TestWSHandshakeOriginRejectedOnRealListener(t *testing.T) {
 		_ = srv.Shutdown(ctx)
 	})
 
-	url := "ws://" + addr + "/v1/forge/ws/events"
+	url := "ws://" + addr + "/v1/mate/ws/events"
 	dial := func(origin string) (*websocket.Conn, *http.Response, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -299,7 +299,7 @@ func TestWSHandshakeOriginRejectedOnRealListener(t *testing.T) {
 	}
 
 	// 放行：无 Origin（壳内/脚本）、桌面直连、自身端口同源、额外表命中。
-	for _, origin := range []string{"", "forge-app://app", "http://" + addr, "http://localhost:5173"} {
+	for _, origin := range []string{"", "mate-app://app", "http://" + addr, "http://localhost:5173"} {
 		conn, resp, err := dial(origin)
 		if err != nil {
 			status := 0

@@ -2,7 +2,7 @@
 
 面向 Agent 应用开发的通用底座/平台：创建、运行、扩展与统一管理 Agent，可接入 OpenCode、DeepSeek Harness 等 ACP 兼容的多种 Runtime。
 
-> A self-hostable forge for building, running, extending, and managing AI agents. Hosts multiple agent runtimes — OpenCode, DeepSeek Harness, and ACP-compatible executors — under one unified control plane.
+> A self-hostable mate for building, running, extending, and managing AI agents. Hosts multiple agent runtimes — OpenCode, DeepSeek Harness, and ACP-compatible executors — under one unified control plane.
 
 **定位边界**（详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v3」）：
 - **能力不重造**：skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
@@ -12,35 +12,35 @@
 ## 特性（当前形态）
 
 - **ACP 直连运行时**：内置 `opencode`（`opencode acp`）与 `deepseekharness`（`dsh --profile acp`）两个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
-- **远程 runtime（A5）**：除本地子进程外，同一套 ACP 客户端还可接**远程端点**——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知/权限请求，另开 GET 长流收无在途请求时的服务端消息，响应头 `Acp-Session-Id` 回带）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.forge/config/runtimes.json` 声明（`id/name/transport/endpoint/headers`），启动即注册进同一 runtime 注册表，agent 的 `runtimes` 字段直接引用；传输层不新增依赖、不加第二套客户端（把网络连接伪装成 io 流，握手/权限/elicitation 逻辑与 stdio 完全同构）。远程传输的**服务端半场**在 `pkg/acl`（`ServeWSSession` / `NewRemoteHandler`）；历史上的 `forge acp-serve` 演示子命令已随 echo 底座删除（远程**功能**不受影响，失去的只是开箱演示）。远程 runtime 无 pid（进程注册表/孤儿回收不适用），连接级诊断（建连失败、HTTP 状态、被丢弃的非 JSON 消息）进 `/agents/:id/diagnostics` 的 `stderr_tail`。**统一脱敏闸门**：stderr 尾巴（`pkg/acl.TailLines`）、对外错误文案（`pkg/code.Error`）与全部事件载荷（`manager.publish`，即 events 表/transcript/WS 三处同一份）在离开进程前统一过 `pkg/redact`——命中凭证形状（`sk-*`/`AKIA*`/`ghp_*`/`Bearer`/JWT/PEM 私钥块/`api_key=` 形态）、已登记的真实 provider key（注入时 `RegisterDynamicSecret`）或高熵随机串时替换为 `***`；正常内容（sha256/git 摘要、UUID、长标识符）不被改写。**底座起不来时，REST 信封的 `msg` 会带底座 stderr 的尾巴**（在 `pkg/code` 的 acl→信封投影点并入，最多 5 行、每行按字符截断、走同一个脱敏闸门）：ACP SDK 对传输失败只会回一句通用文案（JSON-RPC `-32603` 的固定 message `Internal error`，且会被换成"底座未完成 ACP 握手就断开"），真因在子进程 stderr 里——不并的话用户只看到 `50001 Internal error`，完整原因却躺在核心日志里（2026-10-09 实测：从含保留键 `.env` 的目录起核心、再建 dsh 会话，就是这个面目）。量纲与选行都刻意与诊断面板不同：面板/事件的 `stderr_tail` 保留 200 行，信封 `msg` 只带 5 行（它进错误气泡与截图）；且**先因后果**——Node（dsh）把原因打在栈**之前**，单纯"取最后 5 行"会只剩一串 `at …` 与 `Node.js v24.x`（这正是第一版实现踩到的坑），所以先认原因行（`Error:`/`panic:`/`Traceback`/`fatal:`…）再从它开始取，Python 这类"原因在最后一行"则由窗口回退覆盖。
-- **结构化提问通道（ACP `elicitation/*`，unstable 契约）**：agent 发起 `elicitation/create`——form 模式携带 JSON Schema 表单（单选/多选/文本/数字/布尔等字段 + required/default/枚举约束）、url 模式携带引导链接——服务端发布 `session.elicitation_request` 事件 → UI 依据 schema 渲染提问卡 → 用户提交（content）/拒绝/取消经 `POST /conversations/:id/elicitation` 决策回流给 agent；超时自动取消（默认 30min，`FORGE_ELICITATION_TIMEOUT` 可覆盖）；宿主在 Initialize 中声明 `ClientCapabilities.Elicitation{Form,Url}`。**会话归属（两段式）**：Go SDK（coder/acp-go-sdk v0.13.5）未建模规范 scope 字段、顶层 `sessionId` 在解码时被丢弃，但 elicitation 变体里的 **`_meta` 会被完整保留** → 宿主**先读 `_meta`**（`sessionId`/`session_id`/`conversationId`/`conversation_id`，只认非空字符串，见 `pkg/acl/scope.go`）置 `scope_source=wire`；未命中才按「连接上唯一在途 turn」归属（`orchestrator.busyConn`）置 `inferred_inflight`；两者都不成立时置 `ambiguous`——不猜测、按取消回应，并把事实与建议写进该 agent 诊断的 `remediation`（`GET /agents/:id/diagnostics`），不再无痕消失。归属来源随载荷回带（`scope_source`: `wire` | `inferred_inflight` | `ambiguous`），REST/WS 均可观测。**决策带 scope 校验**：只有登记该提问的会话能决策（`POST /conversations/:id/elicitation` 的 `:id` 与归属会话不符时，与「未知 elicitation_id」同码同文案 40001，不泄露他会话挂起项，挂起项保持不动）。**URL 模式收尾**：agent 发 `elicitation/complete`（unstable 通知，只带 ACP 侧 `elicitationId`）时，宿主按该 id 反查 URL 模式挂起项并以 `accept` 收敛（收敛事件 `action=accept`、`reason=complete`，前端标注「链接流程已完成」，与「用户提交」可区分），不再把卡片挂到超时；已决/重放/非 URL 模式一律无副作用（仅记日志）。规范 scope 解析列为触发式能力位（首个真实 elicitation wire 出现时启用，预案见 `docs/agent-interactions-acp-v1-design-20260907.md` §0/§2.4A）。
-- **权限确认通道（ACP 一致）**：agent 发起 `session/request_permission` → 服务端发布 `session.permission_request` 事件（含 options：allow/reject × once/always）→ 用户经 `POST /conversations/:id/permission` 决策 → 决策回流给 agent（**显式拒绝带 deny 选项时回 Selected{该选项}，agent 可区分拒绝/取消/超时**；无可选 deny 选项时兜底 Cancelled）。**决策回执如实描述实际投递结果**（`allowed/rejected/always` + 请求 `option_id` + ACP 形态 `outcome`/`selected_option_id`）——`option_id` 缺省或无效时回执给出兜底选中的第一个选项，显式拒绝无 deny 选项时回执 `outcome=cancelled`，不回显请求参数、不猜测。**决策带 scope 校验（C3）**：只有登记该请求的会话能决策——`POST /conversations/:id/permission` 的 `:id` 不存在时 40401（`conversation_not_found`），与挂起项归属不符时与「未知 call_id」同码同文案 40001，不泄露他会话挂起项且挂起项保持不动（与 elicitation 决策同一口径）；支持会话级权限记忆——「始终允许」与「始终拒绝」**双侧对称、同键互斥覆盖**（决策 `{title, kind, decision: allow|reject}`，可见可撤销：`GET /conversations/:id/permissions/memories` 列出、`POST …/memories/revoke` 单条或一键撤销，旧 `/permissions/always` 路径兼容别名）；挂起超时自动拒绝/取消（默认 30min，`FORGE_PERMISSION_TIMEOUT`/`FORGE_ELICITATION_TIMEOUT` 可覆盖）；`session/cancel` 按 ACP 规范回 Cancelled 全部挂起。**任何挂起（权限/提问）一旦终局即发布收敛事件**（`session.permission_resolved` / `session.elicitation_resolved`），前端以服务端事件为唯一事实收敛卡片（`timeout_at` 仅作展示，无前端自设时钟）。
-- **免安装免 key 的演示底座已移除（M0）**：内置 `echo` runtime（daemon 自派生 `forge acp-demo` 子进程充当 ACP server，每轮 prompt 发起真实 `session/request_permission`，并可触发结构化提问与失败轮）已**彻底删除**，内置 runtime 收敛为 `opencode` / `deepseekharness`。**失去的产品能力如实记录在此**：① 不装 opencode/dsh、没有模型 key 也能在面板点通权限确认卡与结构化提问的**首次体验路径消失**；② `forge acp-serve` 与 `forge acp-demo` 子命令一并删除——远程传输**功能不受影响**（`.forge/config/runtimes.json` 声明远程端点照常工作），失去的只是服务端半场的开箱演示；③ 最小容器镜像失去免 key 自检手段，容器内自检须挂真实底座（见 `docs/deployment.md`）。权限/提问通道本身的实现与覆盖**不变**（`pkg/acl/remote_test.go` 的 ws/http 全链路含权限往返；`pkg/acl/elicitation_e2e_test.go` 与 `permission_e2e_test.go` 用自建最小 ACP responder 覆盖 elicitation 四场景与权限 reject/失败轮；台账见 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`）。
+- **远程 runtime（A5）**：除本地子进程外，同一套 ACP 客户端还可接**远程端点**——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知/权限请求，另开 GET 长流收无在途请求时的服务端消息，响应头 `Acp-Session-Id` 回带）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.ark-mate/config/runtimes.json` 声明（`id/name/transport/endpoint/headers`），启动即注册进同一 runtime 注册表，agent 的 `runtimes` 字段直接引用；传输层不新增依赖、不加第二套客户端（把网络连接伪装成 io 流，握手/权限/elicitation 逻辑与 stdio 完全同构）。远程传输的**服务端半场**在 `pkg/acl`（`ServeWSSession` / `NewRemoteHandler`）；历史上的 `mate acp-serve` 演示子命令已随 echo 底座删除（远程**功能**不受影响，失去的只是开箱演示）。远程 runtime 无 pid（进程注册表/孤儿回收不适用），连接级诊断（建连失败、HTTP 状态、被丢弃的非 JSON 消息）进 `/agents/:id/diagnostics` 的 `stderr_tail`。**统一脱敏闸门**：stderr 尾巴（`pkg/acl.TailLines`）、对外错误文案（`pkg/code.Error`）与全部事件载荷（`manager.publish`，即 events 表/transcript/WS 三处同一份）在离开进程前统一过 `pkg/redact`——命中凭证形状（`sk-*`/`AKIA*`/`ghp_*`/`Bearer`/JWT/PEM 私钥块/`api_key=` 形态）、已登记的真实 provider key（注入时 `RegisterDynamicSecret`）或高熵随机串时替换为 `***`；正常内容（sha256/git 摘要、UUID、长标识符）不被改写。**底座起不来时，REST 信封的 `msg` 会带底座 stderr 的尾巴**（在 `pkg/code` 的 acl→信封投影点并入，最多 5 行、每行按字符截断、走同一个脱敏闸门）：ACP SDK 对传输失败只会回一句通用文案（JSON-RPC `-32603` 的固定 message `Internal error`，且会被换成"底座未完成 ACP 握手就断开"），真因在子进程 stderr 里——不并的话用户只看到 `50001 Internal error`，完整原因却躺在核心日志里（2026-10-09 实测：从含保留键 `.env` 的目录起核心、再建 dsh 会话，就是这个面目）。量纲与选行都刻意与诊断面板不同：面板/事件的 `stderr_tail` 保留 200 行，信封 `msg` 只带 5 行（它进错误气泡与截图）；且**先因后果**——Node（dsh）把原因打在栈**之前**，单纯"取最后 5 行"会只剩一串 `at …` 与 `Node.js v24.x`（这正是第一版实现踩到的坑），所以先认原因行（`Error:`/`panic:`/`Traceback`/`fatal:`…）再从它开始取，Python 这类"原因在最后一行"则由窗口回退覆盖。
+- **结构化提问通道（ACP `elicitation/*`，unstable 契约）**：agent 发起 `elicitation/create`——form 模式携带 JSON Schema 表单（单选/多选/文本/数字/布尔等字段 + required/default/枚举约束）、url 模式携带引导链接——服务端发布 `session.elicitation_request` 事件 → UI 依据 schema 渲染提问卡 → 用户提交（content）/拒绝/取消经 `POST /conversations/:id/elicitation` 决策回流给 agent；超时自动取消（默认 30min，`MATE_ELICITATION_TIMEOUT` 可覆盖）；宿主在 Initialize 中声明 `ClientCapabilities.Elicitation{Form,Url}`。**会话归属（两段式）**：Go SDK（coder/acp-go-sdk v0.13.5）未建模规范 scope 字段、顶层 `sessionId` 在解码时被丢弃，但 elicitation 变体里的 **`_meta` 会被完整保留** → 宿主**先读 `_meta`**（`sessionId`/`session_id`/`conversationId`/`conversation_id`，只认非空字符串，见 `pkg/acl/scope.go`）置 `scope_source=wire`；未命中才按「连接上唯一在途 turn」归属（`orchestrator.busyConn`）置 `inferred_inflight`；两者都不成立时置 `ambiguous`——不猜测、按取消回应，并把事实与建议写进该 agent 诊断的 `remediation`（`GET /agents/:id/diagnostics`），不再无痕消失。归属来源随载荷回带（`scope_source`: `wire` | `inferred_inflight` | `ambiguous`），REST/WS 均可观测。**决策带 scope 校验**：只有登记该提问的会话能决策（`POST /conversations/:id/elicitation` 的 `:id` 与归属会话不符时，与「未知 elicitation_id」同码同文案 40001，不泄露他会话挂起项，挂起项保持不动）。**URL 模式收尾**：agent 发 `elicitation/complete`（unstable 通知，只带 ACP 侧 `elicitationId`）时，宿主按该 id 反查 URL 模式挂起项并以 `accept` 收敛（收敛事件 `action=accept`、`reason=complete`，前端标注「链接流程已完成」，与「用户提交」可区分），不再把卡片挂到超时；已决/重放/非 URL 模式一律无副作用（仅记日志）。规范 scope 解析列为触发式能力位（首个真实 elicitation wire 出现时启用，预案见 `docs/agent-interactions-acp-v1-design-20260907.md` §0/§2.4A）。
+- **权限确认通道（ACP 一致）**：agent 发起 `session/request_permission` → 服务端发布 `session.permission_request` 事件（含 options：allow/reject × once/always）→ 用户经 `POST /conversations/:id/permission` 决策 → 决策回流给 agent（**显式拒绝带 deny 选项时回 Selected{该选项}，agent 可区分拒绝/取消/超时**；无可选 deny 选项时兜底 Cancelled）。**决策回执如实描述实际投递结果**（`allowed/rejected/always` + 请求 `option_id` + ACP 形态 `outcome`/`selected_option_id`）——`option_id` 缺省或无效时回执给出兜底选中的第一个选项，显式拒绝无 deny 选项时回执 `outcome=cancelled`，不回显请求参数、不猜测。**决策带 scope 校验（C3）**：只有登记该请求的会话能决策——`POST /conversations/:id/permission` 的 `:id` 不存在时 40401（`conversation_not_found`），与挂起项归属不符时与「未知 call_id」同码同文案 40001，不泄露他会话挂起项且挂起项保持不动（与 elicitation 决策同一口径）；支持会话级权限记忆——「始终允许」与「始终拒绝」**双侧对称、同键互斥覆盖**（决策 `{title, kind, decision: allow|reject}`，可见可撤销：`GET /conversations/:id/permissions/memories` 列出、`POST …/memories/revoke` 单条或一键撤销，旧 `/permissions/always` 路径兼容别名）；挂起超时自动拒绝/取消（默认 30min，`MATE_PERMISSION_TIMEOUT`/`MATE_ELICITATION_TIMEOUT` 可覆盖）；`session/cancel` 按 ACP 规范回 Cancelled 全部挂起。**任何挂起（权限/提问）一旦终局即发布收敛事件**（`session.permission_resolved` / `session.elicitation_resolved`），前端以服务端事件为唯一事实收敛卡片（`timeout_at` 仅作展示，无前端自设时钟）。
+- **免安装免 key 的演示底座已移除（M0）**：内置 `echo` runtime（daemon 自派生 `mate acp-demo` 子进程充当 ACP server，每轮 prompt 发起真实 `session/request_permission`，并可触发结构化提问与失败轮）已**彻底删除**，内置 runtime 收敛为 `opencode` / `deepseekharness`。**失去的产品能力如实记录在此**：① 不装 opencode/dsh、没有模型 key 也能在面板点通权限确认卡与结构化提问的**首次体验路径消失**；② `mate acp-serve` 与 `mate acp-demo` 子命令一并删除——远程传输**功能不受影响**（`.ark-mate/config/runtimes.json` 声明远程端点照常工作），失去的只是服务端半场的开箱演示；③ 最小容器镜像失去免 key 自检手段，容器内自检须挂真实底座（见 `docs/deployment.md`）。权限/提问通道本身的实现与覆盖**不变**（`pkg/acl/remote_test.go` 的 ws/http 全链路含权限往返；`pkg/acl/elicitation_e2e_test.go` 与 `permission_e2e_test.go` 用自建最小 ACP responder 覆盖 elicitation 四场景与权限 reject/失败轮；台账见 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`）。
 - **能力数据面（Skill/MCP/Tool）**：`<CapabilityDir>/skills|mcp|tools/*.json` 是唯一事实源，坏定义告警跳过（不拖垮整表）。**Skill 正文装载期扫描（§13.2）**：入表前对 `body` 跑 11 条模式（9 条 critical：改写/无视/遗忘指令、角色劫持、插入新指令、system prompt override、`rm -rf`、删除全部文件、套取凭据；2 条 warning：敏感路径引用、可疑命令串联）——**critical 直接拒载**（`RegisterSkill` 报错 → 目录装载告警跳过，绝不进注册表、更不会被物化进 agent 技能目录），物化层再拦一道（导出 API 直接调用也不放行）；warning 放行但记在条目上，经 `GET /skills` 的 `warnings` 暴露（severity/pattern/message），超 5 万字符记 info。规则是**字面匹配**（英文正则）：语序改写/中文改写可绕过，这条边界写在测试里，别当成语义检测。面板「能力」页在 Skill 行显示告警标签（`N 条告警`，hover 逐条列 severity/pattern/说明）。MCP stdio 子进程进**独立进程组**（`pkg/mcp/proc_unix.go`，与 agent 侧 `Setpgid` 同款）：close 连孙进程一起回收——`npx -y …` 会 fork 出 node 层，只杀直接子进程既留孤儿、又让 `Wait()` 卡到孙进程退出。
 - **Skill 启停与激活（§13.4 S4/S5）**：`PATCH /skills/:id {enabled}` 写回定义**载体**（memory 模式 = 定义文件、sqlite 模式 = `skills` 表那一行，见下文「写面的载体」）——**禁用是 overlay**：定义、正文、runtimes 一律保留，只把 `enabled` 置 false，随时可改回（与「删掉定义文件」的本质区别）；写盘按 M10 纪律（读原文件为 map → 只改一个键 → 临时文件 + rename 原子替换），**未知键原样保留**，不砸用户自己的字段；载体里没有它（代码注入/内存注册）时**显式报错**`skill_not_persistable` 而不是假装生效。落盘后立刻对登记过的物化目标重校：**禁用把已物化副本从 runtime 目录撤回**、启用重新写出（重校失败不回滚定义变更，失败原因随响应回带 `materialize_errors`）。**启用（Enabled）与适用（Applicable）正交**：`GET /agents/:id/capabilities` 的 skills 不再按候选 runtime 静默过滤，而是全量列出 + 每条给 `enabled`/`applicable`/`reasons`（人话原因：已被禁用 / 候选 runtime 都没在 `runtimes` 里声明（并列出声明了哪些）/ 声明了但该 runtime 没有可用的投影落点）——不适用是环境事实，不是让人看不见。面板 Skill 行的开关即调此接口（禁用后行标「已禁用」，Agent 视角对不适用项标「不适用」并 hover 出原因）。
-- **能力的生效边界（M3 / ADR-13）**：一条会话可以钉住技能/MCP 的**子集**（`POST /conversations` 的 `capabilities`，逐 kind 三态：键缺失 = 未声明 → 回落 agent 声明；`[]` = 一个都不要；非空 = 白名单，且**覆盖**而非求交）。选定解析出的**能力指纹**决定这条会话用哪个**能力代际**（能力集是进程级的：ACP 没有"给活会话换能力"的通道，所以每套能力各自一个 runtime 子进程，同指纹共享）。生效边界只有一条规则——**下一个轮次**——但四个方向的处置不同：① **扩权/改内容**在下一个轮次边界迁移过去（走既有 resume/handoff 语义）；② **缩权**（收回原生权限、换 provider 档案，即进程级能力面变化）**立刻生效**：迁移失败**不回退**，宁可这一轮带码拒发（`40901 generation_switch_required`），也不用已被收回的权限面继续跑；③ **忙则顺延**（有在途轮次、或有未应答的权限/提问都不切），探针不可读时保守当忙；④ 纯内容变化迁移失败**回退旧代际继续跑**（只落 `generation_switch_failed` 诊断，不产生"会话不可用"）。**代际上限**：同一配置（runtime + 原生权限 + provider）下默认 4 个并存代际（`FORGE_GENERATION_LIMIT`，0 = 不限制），达上限时先淘汰「无会话引用且空闲」的代际，仍超限则 `40901 generation_limit_reached` 并要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug，猜粗了只是多花内存）。迁移可观测：`session.resumed` 带 `reason=generation`。
+- **能力的生效边界（M3 / ADR-13）**：一条会话可以钉住技能/MCP 的**子集**（`POST /conversations` 的 `capabilities`，逐 kind 三态：键缺失 = 未声明 → 回落 agent 声明；`[]` = 一个都不要；非空 = 白名单，且**覆盖**而非求交）。选定解析出的**能力指纹**决定这条会话用哪个**能力代际**（能力集是进程级的：ACP 没有"给活会话换能力"的通道，所以每套能力各自一个 runtime 子进程，同指纹共享）。生效边界只有一条规则——**下一个轮次**——但四个方向的处置不同：① **扩权/改内容**在下一个轮次边界迁移过去（走既有 resume/handoff 语义）；② **缩权**（收回原生权限、换 provider 档案，即进程级能力面变化）**立刻生效**：迁移失败**不回退**，宁可这一轮带码拒发（`40901 generation_switch_required`），也不用已被收回的权限面继续跑；③ **忙则顺延**（有在途轮次、或有未应答的权限/提问都不切），探针不可读时保守当忙；④ 纯内容变化迁移失败**回退旧代际继续跑**（只落 `generation_switch_failed` 诊断，不产生"会话不可用"）。**代际上限**：同一配置（runtime + 原生权限 + provider）下默认 4 个并存代际（`MATE_GENERATION_LIMIT`，0 = 不限制），达上限时先淘汰「无会话引用且空闲」的代际，仍超限则 `40901 generation_limit_reached` 并要求复用现有能力集——**绝不静默复用错误的能力集**（猜细了是安全 bug，猜粗了只是多花内存）。迁移可观测：`session.resumed` 带 `reason=generation`。
 - **MCP 明文 ⟂ 密钥（§13.3 M1/M6）**：`McpServer` 四个字典各司其职——`env`/`headers` 是**明文**（可读回键名、可 diff），`secret_env`/`secret_headers` 的**值只能是引用**（`vault:<ns>/<name>` 走 §5 的 AES-256-GCM 密文，或 `env:<ENV_NAME>` 走进程环境变量），**明文密钥一律拒收**（写进定义文件就是等着落盘）。引用只在**注入前一刻**由 manager 解析成明文（`KindMcpSecret` 参与 AAD，与 provider 密钥不通用），定义文件与日志里永远没有密钥本体；解析失败（密文缺失 / env 未设 / vault 不可用 / kind 不符）**不注入该 server** 并逐条 WARN（键名 + 引用 + 出路，不含值）——不静默塞空凭证让 server 带着 401 在很远的地方报错。**同一套解析在探测面与调用面同样生效**（`POST /mcps/:id/probe`、工具/资源/提示词调用共用 `resolveMcpSecrets`，明文 env 与 `secret_headers` 经 `mcp.Server.Env`/`Headers` 下发到 stdio 子进程）：这两条路径在 2026-10-09 前**不下发** env，表现为"靠 env 拿凭据的 stdio server 会话里能用、`GET /mcps` 却长期报探测失败"（同一个 server 两处 spawn 的进程环境实测相反）；解析失败时它们也不拿空凭证去试，而是当场 `40001 [mcp_secret_unresolved]` 并留 `last_probe_error`（只有键名与引用）。读模型**只回键名**（`env_keys`/`secret_env_keys`/`secret_header_keys`，连引用都不回），并给 `unresolved_secret_keys` 把"绑了但解析不了"的半配置摆到列表上。明文 header 命中像凭据的键名（`Authorization`/`X-Api-Key`/`*-token`…）时注册期**只告警**建议改放 `secret_headers`——值层识别属 §7 的凭据卫生，猜错会挡掉正常配置。面板 MCP 行展示 `密钥 N` 与 `密钥未就绪 N` 两个标签（hover 列出键名与排查出路），值在任何界面都不出现。
-- **远程 MCP 经平台侧网关（M7，`FORGE_MCP_GATEWAY=auto|off`）**：远程传输（`sse`/`http`/`streamable_http`）的 MCP 由平台**代连**——底座侧只注入**一条恒定**的 stdio 条目 `forge-gateway`（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <会话钉住的白名单>]`），网关进程自己读平台的库与 vault、解开引用、按当下定义连远端并把工具面拼给底座。**收益是结构性的**：底座的配置面不再随"有几台远程 server / URL 改没改 / 密钥换没换"变化，于是**增删改远程 MCP 不再换代际**（下一次 `tools/list`/`tools/call` 就生效，P-4 的"可执行性即时、可见性下一轮"）；密钥本体也不再进入底座可见面——"MCP 明文 ⟂ 密钥"从约定变成结构事实（底座的 `mcpServers` 里只有我们那条命令与 scope 参数）。**工具命名**是 `<serverID>__<toolName>`（网关列举面与 `POST /mcps/:id/probe` 的 Tool 目录**同一实现**，面板上的名字就是模型能调的名字）；前后缀都可能带下划线，故跨 server 撞名（`a`+`b__x` vs `a__b`+`x`）按 **fail-closed 整组丢弃**并 ERROR 留痕——保留"第一个"会让调用静默落到另一台 server 上。**每次调用**在网关 stderr 留一条 `(server, tool, outcome=ok|error|deny, latency_ms)`：这是"底座何时重列工具面、收窄是否即时生效"唯一的一手证据（网关无状态、不落库）。**边界与回退**（如实记）：① stdio server 两种模式下都由底座**直连**（不经网关），② 另一台机器上的**远程 ACP 端点**拿不到这条条目（它是本机子进程配方，对端起不来），按自己声明的传输直连注入 ⇒ 那两类形态与 M7 之前逐字一致；③ `off` 时四处读面/校验（注入、`AgentCapabilities` 承载矩阵、`Library` 适用性、建会话校验）**一起**回到老口径，读数面与注入面永不同向漂移；④ 缺省路径（未声明 `capabilities`）的指纹恒 `""`、按 R11 不迁移——所以"从零到一加一台远程 server"**必须**靠恒定注入才能被看见，这也是条目无条件的理由（代价：没有远程 server 的会话也会多一个空闲的 `forge mcp bridge` 子进程，不接受就用 `off`）。⑤ 生命周期：stdin EOF 即退出（首要），另有 ppid 轮询兜底（底座被强杀）与 SIGPIPE 忽略（否则一条日志就能把停机路径打死、连连接池都来不及关）；⑥ S2（把 stdio server 也交给网关代理）**暂不做**：那会把"平台多一跳"引入到本来最快的路径上，收益要等 E4/E6（底座是否按进程缓存工具面）实测后才有定论。
-- **物化摘要与审计（§13.4 S2）+ 原子物化（S3）**：物化产物带**目录级 SHA-256 摘要** sidecar（`.forge-provenance.json`：算法逐条对照 compozy `internal/skills/provenance.go`——相对路径排序后入哈希、普通文件写入 `file:<path>\nmode:<perm>\n`+内容+`\0`、**软链不 follow**（字面目标入哈希，逃逸即拒 `ErrSymlinkEscape`）、未知文件类型报错、**排除平台记账文件**（`.forge-managed` 与 sidecar 本身））。**投影由 runtime 声明（M1）**：skill 落到哪、叫什么文件名、写成哪种格式，不再由配置里的一个"物化根"决定，而是每个 runtime 自带**投影声明**（`Projection{Kind,Scope,Root,Layout,Format}`）——两个底座的落点与格式本就不同，把这件事塞进一个配置键只会让"设了根但没生效"变成猜谜。当前两个 adapter 都声明 `~/.agents/skills` + `<id>/SKILL.md`，且**两个底座的这条链都已端到端实测通过**（`Projection.Tested: true`）：opencode v2.0.26（2026-10-09 复验：真模型请求体的 skill 目录块里逐字出现平台刚物化的 `<id>probe-desktop</id>`；**反证**是同 env、同 provider 配置下把该文件拿掉后同一位置不再出现。v2 换了两处口径——`debug` 子命令只剩 agents/config/paths、`OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 已不生效，v1 那套「列 `location` / 关外部 skill 看命中 0」的取证法在 v2 上不可用；v1 取证见 `.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md`，v2 全量见 `.dsh/docs/notes/2026-10-09-opencode-v2-payload-verification-notes.md`）、dsh v0.2.0-rc.2（`dsh-base` 常态挂 `skill-filesystem`，其 rank 500 根按 `agentsHome` 默认解析到同一路径；运行级证据是**只存在于该根且非内置**的 skill 被真实会话投给模型；2026-10-09 再补一次**平台路径**实测：真核心 → 内置 `dsh` agent → 会话请求体里 `<available_skills>` 逐字出现平台刚物化的那条 skill——前提是隔离表**不注入** `DSH_AGENTS_HOME`，见下条边界）。**dsh 侧两条必须进承诺措辞的边界**：该根 rank 500 是**最低优先**，项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会**遮蔽**它——所以"平台投放的 skill 一定生效"这种措辞不成立；底座按 `$DSH_AGENTS_HOME ?? ~/.agents` 解析该根，所以**任何**注入 `DSH_AGENTS_HOME` 的地方都会让读根与写根**悄悄分叉**、skill 静默不生效（平台侧还照旧报 `in_sync`/`Tested: true`）；平台的配置隔离**刻意不注入它**（2026-10-09 修：曾有版本按"agents 面也要隔离"注入过，E5 实测 dsh 会话的 `<available_skills>` 里看不到投影根下的 skill；同一张隔离表在仓库里还有第二份——桌面态随包载荷的**私有启动器**（`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`）也在兜底它，同批修掉，护栏见 `pkg/runtime/isolation_test.go` 的 `TestIsolationKeepsSkillRootAlignedWithProjection` 与 `internal/archtest` 的 `TestDesktopLauncherIsolationMatchesCore`（启动器隔离表 ⊆ 核心隔离表）；桌面态真机验收：`pnpm ui:accept:desktop-skills`），但用户若在平台进程环境里设了它仍会分叉。另外 **skill id 有底座契约的词法**（`^[a-z0-9]+(-[a-z0-9]+)*$`、≤64），写面不合规即 `40001`——见 `POST /skills` 行。部署要换根用 `FORGE_PROJECTION_DIRS` 覆盖（见下），**只换根、不改形态**。摘要带来三件事：**审计**（`GET /skills/:id/materialization` 给出期望 vs 实测）、**复现**（换机器/换时间重算，摘要一致即产物一致）、**篡改可见**（改内容/加文件/改权限/换软链都判 `tampered`，重校即修复）。物化本身改为**staging → 写全 → 自校验摘要 → 原子 rename**：agent 永远看不到半成品，中途失败旧产物原样保留；**拒覆盖非自有目录**（目标存在但不带 `.forge-managed` 标记 / 是软链 / 不是目录 → 显式报错，不改别人一个字节——此前是裸 `MkdirAll` + `WriteFile`，同名即覆盖用户目录）。投影根**不存在就建出来**（`MkdirAll`，幂等、不覆盖任何东西）：staging 目录建在根里面（同文件系统才能原子 rename），所以根不在就是硬失败；而默认根 `~/.agents/skills` 在从未投放过 skill 的机器上并不存在——2026-10-09 平台端到端实测：新机器上"第一条 skill"只留一条 WARN（`创建 staging 目录失败 … no such file or directory`），定义进表而 skill 静默不投放。老产物（无 sidecar）在下一次重校被**就地升级**，之后保持幂等。**体检状态集**：`in_sync`/`missing`/`tampered`/`stale`/`disabled`/`user_owned`/`not_applicable`，另加两个"不是故障但要说清楚"的：`untested`（该 runtime 的投影声明尚未经实测——**照常投放**，只是不敢替用户担保底座开箱就读到它）与 `not_configured`（声明了但本进程没解析出该 runtime 的落点，`FORGE_PROJECTION_DIRS` 里那项要配、或者 adapter 没声明）。定义文件里出现退役的 `sources` 键时不再静默：装载期给该 skill 挂一条 `legacy_sources_key` 告警（`GET /skills` 的 `warnings` 可见），文案直接给出 `forge capability migrate`。面板 Skill 行的「体检」按钮即调此接口：弹窗逐个物化目标给状态/期望与实测摘要/归属/写入时间，并写明**只报不修**（修复走启用或重校）。
-- **定时任务（M4 / automation，载体 M6-7 起分叉）**：定义与运行事实的载体**按持久层模式分派**——`FORGE_STORE=sqlite` 时是 `automations` 表：**定义列**（`body` + `revision`/`updated_at`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=automation`）与**运行态列**（`last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs`）分列，于是"用户往定义里塞运行态键"**结构上不可能**（拒写名单仍保留 → 40001，免得出现"我写了它为什么不生效"）；`state` **刻意留在定义里**（启用/停用/归档本来就是用户操作，把 `needs_attention` 改回 `active` 是"我修好了"的正常表达）。`FORGE_AUTOMATIONS` 目录在 sqlite 模式下降级为**导入/导出目录**，memory 模式仍是**唯一**载体（`<AutomationDir>/<id>.json`，默认 `~/.forge/automations`）。定义每种写法都可能被手工编辑，所以里面既有 `schedule`（`once` 带 `at` / `daily` / `weekly` + 显式 IANA `timezone`，没有 `hourly`/`monthly`；`weekly` 的 `days_of_week` 是 **`0=周日` 的整数集合**（与 `time.Weekday` 对齐），写面容忍重复/乱序，装载时归一为去重升序**并回写文件**——否则「文件里写的」与「调度实际用的」会是两个值）也有平台写回的运行态（`last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 环形留痕，写面拒收这几个键）。**认领的落点随载体不同**：memory 模式"跑完再写回"（文件 mtime 乐观锁给不了跨进程认领，崩溃窗口内可能重复跑一次），sqlite 模式**在建会话之前先认领**（`last_fired_at` 的行 CAS，0 行 = 别人先认领了 → 判 `duplicate` 且不建会话），因此同一 occurrence **至多触发一次**；运行态写回失败时 sqlite 模式**不推进内存游标**（下一个 tick 按已认领的游标判 `duplicate`，不会重复触发，丢的是这一轮留痕，日志是 ERROR 级），而 memory 模式维持历史语义（写失败不阻断调度）。**一次触发只有一个事实源**：会话状态就是运行状态（不另建运行态状态机）；**认领三态**按 `duplicate → overlap → claimed` 的顺序判——"这次触发过没有"必须先于"上一次还在不在跑"，否则一条「上次会话卡住不结束」的任务会在重启后把同一 occurrence 再跑一遍；`overlap` 记跳过而**不排队**（排队等于让有副作用的 prompt 堆积后一起冲出去）。**停机恢复（ADR-9）**：启动时收敛一次——过期的 `once`（从未跑过）置 `inactive` 并留一条 `skipped` 痕迹而**不补跑**（它是闹钟不是补偿任务），`daily`/`weekly` 补**最近一次**；**认领游标无论成败都推进（ADR-10）**，失败落 `needs_attention` + `consecutive_failures`（不自动重试），否则同一次错过会每 30s 重报一次、把真正的问题淹掉。触发时以 `origin=automation:<id>` 建会话（可在会话列表按来源筛出）并可按 `target.runtime_hint` **显式指定该 agent 候选里的 runtime**（不在候选里 → 40401，绝不静默回落路由）。运行史与事件**各有分工**：`GET /automations/:id/runs` 读载体里的 `recent_runs`（sqlite 模式是 `recent_runs` 列，有界 20 条）（duplicate/overlap/失败**没有会话可挂**，落 events 表会被 `conversation_id NOT NULL REFERENCES conversations(id)` 挡下），`automation.run` 事件只走实时通道（WS 推送）。调度是单 goroutine ticker（`FORGE_AUTOMATION_TICK`，默认 30s；0 = 关闭），触发本身串行化（认领判定是纯函数，纯函数不提供互斥）。`POST /automations/preview` 把"到底什么时候跑"变成可见事实（时区 + DST + weekly 星期集合叠加后没人能从 JSON 里读出来）。
-- **控制面 REST**（`/v1/forge`）：agent/runtime/会话列表 + 会话动作——`POST /conversations`（指定 agent + prompt 后台起真实会话，可带 `model` 会话级模型）、`GET /conversations/:id`（详情 + 挂起权限）、`GET /conversations/:id/history`（事件回放分页：`after` 向后 / `before` 向前翻页）、`GET /conversations/:id/runs`（轮次明细：失败轮输入/统计回溯）、会话状态含 `interrupted`（重启前中断残留，可续聊重发）、`POST /conversations/:id/prompt`（同会话多轮；`delivery` 三值见「busy input 队列」）、`POST /conversations/:id/cancel`、`GET /conversations/:id/inputs`（待投递队列当前态）、`DELETE /conversations/:id/inputs/:input_id`（撤下排队输入）、`PATCH /conversations/:id`（title/pinned/archived/model 元数据）、`GET /conversations/:id/permissions`、`POST /conversations/:id/permission`（决策）、`GET /conversations/:id/elicitations`、`POST /conversations/:id/elicitation`（结构化提问决策）。
+- **远程 MCP 经平台侧网关（M7，`MATE_MCP_GATEWAY=auto|off`）**：远程传输（`sse`/`http`/`streamable_http`）的 MCP 由平台**代连**——底座侧只注入**一条恒定**的 stdio 条目 `mate-gateway`（`<平台可执行文件> mcp bridge --agent <id> --runtime <id> [--mcps <会话钉住的白名单>]`），网关进程自己读平台的库与 vault、解开引用、按当下定义连远端并把工具面拼给底座。**收益是结构性的**：底座的配置面不再随"有几台远程 server / URL 改没改 / 密钥换没换"变化，于是**增删改远程 MCP 不再换代际**（下一次 `tools/list`/`tools/call` 就生效，P-4 的"可执行性即时、可见性下一轮"）；密钥本体也不再进入底座可见面——"MCP 明文 ⟂ 密钥"从约定变成结构事实（底座的 `mcpServers` 里只有我们那条命令与 scope 参数）。**工具命名**是 `<serverID>__<toolName>`（网关列举面与 `POST /mcps/:id/probe` 的 Tool 目录**同一实现**，面板上的名字就是模型能调的名字）；前后缀都可能带下划线，故跨 server 撞名（`a`+`b__x` vs `a__b`+`x`）按 **fail-closed 整组丢弃**并 ERROR 留痕——保留"第一个"会让调用静默落到另一台 server 上。**每次调用**在网关 stderr 留一条 `(server, tool, outcome=ok|error|deny, latency_ms)`：这是"底座何时重列工具面、收窄是否即时生效"唯一的一手证据（网关无状态、不落库）。**边界与回退**（如实记）：① stdio server 两种模式下都由底座**直连**（不经网关），② 另一台机器上的**远程 ACP 端点**拿不到这条条目（它是本机子进程配方，对端起不来），按自己声明的传输直连注入 ⇒ 那两类形态与 M7 之前逐字一致；③ `off` 时四处读面/校验（注入、`AgentCapabilities` 承载矩阵、`Library` 适用性、建会话校验）**一起**回到老口径，读数面与注入面永不同向漂移；④ 缺省路径（未声明 `capabilities`）的指纹恒 `""`、按 R11 不迁移——所以"从零到一加一台远程 server"**必须**靠恒定注入才能被看见，这也是条目无条件的理由（代价：没有远程 server 的会话也会多一个空闲的 `mate mcp bridge` 子进程，不接受就用 `off`）。⑤ 生命周期：stdin EOF 即退出（首要），另有 ppid 轮询兜底（底座被强杀）与 SIGPIPE 忽略（否则一条日志就能把停机路径打死、连连接池都来不及关）；⑥ S2（把 stdio server 也交给网关代理）**暂不做**：那会把"平台多一跳"引入到本来最快的路径上，收益要等 E4/E6（底座是否按进程缓存工具面）实测后才有定论。
+- **物化摘要与审计（§13.4 S2）+ 原子物化（S3）**：物化产物带**目录级 SHA-256 摘要** sidecar（`.mate-provenance.json`：算法逐条对照 compozy `internal/skills/provenance.go`——相对路径排序后入哈希、普通文件写入 `file:<path>\nmode:<perm>\n`+内容+`\0`、**软链不 follow**（字面目标入哈希，逃逸即拒 `ErrSymlinkEscape`）、未知文件类型报错、**排除平台记账文件**（`.mate-managed` 与 sidecar 本身））。**投影由 runtime 声明（M1）**：skill 落到哪、叫什么文件名、写成哪种格式，不再由配置里的一个"物化根"决定，而是每个 runtime 自带**投影声明**（`Projection{Kind,Scope,Root,Layout,Format}`）——两个底座的落点与格式本就不同，把这件事塞进一个配置键只会让"设了根但没生效"变成猜谜。当前两个 adapter 都声明 `~/.agents/skills` + `<id>/SKILL.md`，且**两个底座的这条链都已端到端实测通过**（`Projection.Tested: true`）：opencode v2.0.26（2026-10-09 复验：真模型请求体的 skill 目录块里逐字出现平台刚物化的 `<id>probe-desktop</id>`；**反证**是同 env、同 provider 配置下把该文件拿掉后同一位置不再出现。v2 换了两处口径——`debug` 子命令只剩 agents/config/paths、`OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 已不生效，v1 那套「列 `location` / 关外部 skill 看命中 0」的取证法在 v2 上不可用；v1 取证见 `.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md`，v2 全量见 `.dsh/docs/notes/2026-10-09-opencode-v2-payload-verification-notes.md`）、dsh v0.2.0-rc.2（`dsh-base` 常态挂 `skill-filesystem`，其 rank 500 根按 `agentsHome` 默认解析到同一路径；运行级证据是**只存在于该根且非内置**的 skill 被真实会话投给模型；2026-10-09 再补一次**平台路径**实测：真核心 → 内置 `dsh` agent → 会话请求体里 `<available_skills>` 逐字出现平台刚物化的那条 skill——前提是隔离表**不注入** `DSH_AGENTS_HOME`，见下条边界）。**dsh 侧两条必须进承诺措辞的边界**：该根 rank 500 是**最低优先**，项目级 `<cwd>/.agents/skills`(200) 与 `~/.dsh/skills`(400) 会**遮蔽**它——所以"平台投放的 skill 一定生效"这种措辞不成立；底座按 `$DSH_AGENTS_HOME ?? ~/.agents` 解析该根，所以**任何**注入 `DSH_AGENTS_HOME` 的地方都会让读根与写根**悄悄分叉**、skill 静默不生效（平台侧还照旧报 `in_sync`/`Tested: true`）；平台的配置隔离**刻意不注入它**（2026-10-09 修：曾有版本按"agents 面也要隔离"注入过，E5 实测 dsh 会话的 `<available_skills>` 里看不到投影根下的 skill；同一张隔离表在仓库里还有第二份——桌面态随包载荷的**私有启动器**（`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`）也在兜底它，同批修掉，护栏见 `pkg/runtime/isolation_test.go` 的 `TestIsolationKeepsSkillRootAlignedWithProjection` 与 `internal/archtest` 的 `TestDesktopLauncherIsolationMatchesCore`（启动器隔离表 ⊆ 核心隔离表）；桌面态真机验收：`pnpm ui:accept:desktop-skills`），但用户若在平台进程环境里设了它仍会分叉。另外 **skill id 有底座契约的词法**（`^[a-z0-9]+(-[a-z0-9]+)*$`、≤64），写面不合规即 `40001`——见 `POST /skills` 行。部署要换根用 `MATE_PROJECTION_DIRS` 覆盖（见下），**只换根、不改形态**。摘要带来三件事：**审计**（`GET /skills/:id/materialization` 给出期望 vs 实测）、**复现**（换机器/换时间重算，摘要一致即产物一致）、**篡改可见**（改内容/加文件/改权限/换软链都判 `tampered`，重校即修复）。物化本身改为**staging → 写全 → 自校验摘要 → 原子 rename**：agent 永远看不到半成品，中途失败旧产物原样保留；**拒覆盖非自有目录**（目标存在但不带 `.mate-managed` 标记 / 是软链 / 不是目录 → 显式报错，不改别人一个字节——此前是裸 `MkdirAll` + `WriteFile`，同名即覆盖用户目录）。投影根**不存在就建出来**（`MkdirAll`，幂等、不覆盖任何东西）：staging 目录建在根里面（同文件系统才能原子 rename），所以根不在就是硬失败；而默认根 `~/.agents/skills` 在从未投放过 skill 的机器上并不存在——2026-10-09 平台端到端实测：新机器上"第一条 skill"只留一条 WARN（`创建 staging 目录失败 … no such file or directory`），定义进表而 skill 静默不投放。老产物（无 sidecar）在下一次重校被**就地升级**，之后保持幂等。**体检状态集**：`in_sync`/`missing`/`tampered`/`stale`/`disabled`/`user_owned`/`not_applicable`，另加两个"不是故障但要说清楚"的：`untested`（该 runtime 的投影声明尚未经实测——**照常投放**，只是不敢替用户担保底座开箱就读到它）与 `not_configured`（声明了但本进程没解析出该 runtime 的落点，`MATE_PROJECTION_DIRS` 里那项要配、或者 adapter 没声明）。定义文件里出现退役的 `sources` 键时不再静默：装载期给该 skill 挂一条 `legacy_sources_key` 告警（`GET /skills` 的 `warnings` 可见），文案直接给出 `mate capability migrate`。面板 Skill 行的「体检」按钮即调此接口：弹窗逐个物化目标给状态/期望与实测摘要/归属/写入时间，并写明**只报不修**（修复走启用或重校）。
+- **定时任务（M4 / automation，载体 M6-7 起分叉）**：定义与运行事实的载体**按持久层模式分派**——`MATE_STORE=sqlite` 时是 `automations` 表：**定义列**（`body` + `revision`/`updated_at`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=automation`）与**运行态列**（`last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs`）分列，于是"用户往定义里塞运行态键"**结构上不可能**（拒写名单仍保留 → 40001，免得出现"我写了它为什么不生效"）；`state` **刻意留在定义里**（启用/停用/归档本来就是用户操作，把 `needs_attention` 改回 `active` 是"我修好了"的正常表达）。`MATE_AUTOMATIONS` 目录在 sqlite 模式下降级为**导入/导出目录**，memory 模式仍是**唯一**载体（`<AutomationDir>/<id>.json`，默认 `~/.ark-mate/automations`）。定义每种写法都可能被手工编辑，所以里面既有 `schedule`（`once` 带 `at` / `daily` / `weekly` + 显式 IANA `timezone`，没有 `hourly`/`monthly`；`weekly` 的 `days_of_week` 是 **`0=周日` 的整数集合**（与 `time.Weekday` 对齐），写面容忍重复/乱序，装载时归一为去重升序**并回写文件**——否则「文件里写的」与「调度实际用的」会是两个值）也有平台写回的运行态（`last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 环形留痕，写面拒收这几个键）。**认领的落点随载体不同**：memory 模式"跑完再写回"（文件 mtime 乐观锁给不了跨进程认领，崩溃窗口内可能重复跑一次），sqlite 模式**在建会话之前先认领**（`last_fired_at` 的行 CAS，0 行 = 别人先认领了 → 判 `duplicate` 且不建会话），因此同一 occurrence **至多触发一次**；运行态写回失败时 sqlite 模式**不推进内存游标**（下一个 tick 按已认领的游标判 `duplicate`，不会重复触发，丢的是这一轮留痕，日志是 ERROR 级），而 memory 模式维持历史语义（写失败不阻断调度）。**一次触发只有一个事实源**：会话状态就是运行状态（不另建运行态状态机）；**认领三态**按 `duplicate → overlap → claimed` 的顺序判——"这次触发过没有"必须先于"上一次还在不在跑"，否则一条「上次会话卡住不结束」的任务会在重启后把同一 occurrence 再跑一遍；`overlap` 记跳过而**不排队**（排队等于让有副作用的 prompt 堆积后一起冲出去）。**停机恢复（ADR-9）**：启动时收敛一次——过期的 `once`（从未跑过）置 `inactive` 并留一条 `skipped` 痕迹而**不补跑**（它是闹钟不是补偿任务），`daily`/`weekly` 补**最近一次**；**认领游标无论成败都推进（ADR-10）**，失败落 `needs_attention` + `consecutive_failures`（不自动重试），否则同一次错过会每 30s 重报一次、把真正的问题淹掉。触发时以 `origin=automation:<id>` 建会话（可在会话列表按来源筛出）并可按 `target.runtime_hint` **显式指定该 agent 候选里的 runtime**（不在候选里 → 40401，绝不静默回落路由）。运行史与事件**各有分工**：`GET /automations/:id/runs` 读载体里的 `recent_runs`（sqlite 模式是 `recent_runs` 列，有界 20 条）（duplicate/overlap/失败**没有会话可挂**，落 events 表会被 `conversation_id NOT NULL REFERENCES conversations(id)` 挡下），`automation.run` 事件只走实时通道（WS 推送）。调度是单 goroutine ticker（`MATE_AUTOMATION_TICK`，默认 30s；0 = 关闭），触发本身串行化（认领判定是纯函数，纯函数不提供互斥）。`POST /automations/preview` 把"到底什么时候跑"变成可见事实（时区 + DST + weekly 星期集合叠加后没人能从 JSON 里读出来）。
+- **控制面 REST**（`/v1/mate`）：agent/runtime/会话列表 + 会话动作——`POST /conversations`（指定 agent + prompt 后台起真实会话，可带 `model` 会话级模型）、`GET /conversations/:id`（详情 + 挂起权限）、`GET /conversations/:id/history`（事件回放分页：`after` 向后 / `before` 向前翻页）、`GET /conversations/:id/runs`（轮次明细：失败轮输入/统计回溯）、会话状态含 `interrupted`（重启前中断残留，可续聊重发）、`POST /conversations/:id/prompt`（同会话多轮；`delivery` 三值见「busy input 队列」）、`POST /conversations/:id/cancel`、`GET /conversations/:id/inputs`（待投递队列当前态）、`DELETE /conversations/:id/inputs/:input_id`（撤下排队输入）、`PATCH /conversations/:id`（title/pinned/archived/model 元数据）、`GET /conversations/:id/permissions`、`POST /conversations/:id/permission`（决策）、`GET /conversations/:id/elicitations`、`POST /conversations/:id/elicitation`（结构化提问决策）。
 - **busy input 队列（§6：排队 / 插话）**：会话正忙时 `POST /conversations/:id/prompt` 不再只能报错——body 的 `delivery` 三值决定：缺省/`reject` = 报 `turn_in_progress`（历史行为）；`after_turn` = **入队**，当前轮结束自动投递；`interrupt_then_prompt` = 入队 + **取消当前轮**随后投递（服务端原子化：`CancelTurn` 有界等待、取消失败即撤下该队项，不留「谁也不等」的孤儿）。入队响应带 `queued:true` + `input_id`，`GET /conversations/:id/inputs` 给**待投递项的当前态**（`input_id`/`text`/`delivery`/`target_turn_id`/`generation`/`created_at`），`DELETE /conversations/:id/inputs/:input_id` 可撤下**尚未投递**的项。顺序严格 FIFO（`created_at, id`）——插话不插队（否则连按三次「插话」会逆序执行）。**投递判据是会话执行代际**：入队时记下 `generation`（连接断开重连 / 会话重开都会自增），投递前不等即**作废**（`stale` 台账行 + WARN），旧队列项绝不灌进用户没见过的上下文。**失败轮不自动续投**（避免把队列变成「连续失败重放」）、**进程停机不投**——重启时全库 `queued` 行统一置作废（等的那一轮已随进程消失），不替用户按下发送。事实源：sqlite = `inputs` 表（投递状态即审计台账），memory = 进程内队列。事件三件：`session.input_queued`（建项，载荷含文本/投递模式/目标轮）/`session.input_delivered`（已作为新一轮发出，其后紧跟该轮 `session.user_message`）/`session.input_cancelled`（离队但没投：`user_cancel|deliver_failed|stale`）——**撤下与发出是两条不同的事实**，前端队列只认事件、不做本地推断。**每种离队都必须留下事件**：进程重启作废队项时也逐条补发 `input_cancelled(reason=stale)`，否则「只认事件」的前端会在刷新后留下一条永远投不出、也撤不掉的幻影队项。面板侧：会话忙时输入框不再锁死，多出一个投递模式选择（排队 / 打断并发送），输入框上方显示已排队但尚未发出的条目并可逐条撤下（离队原因以系统提示落进流里，如「投递失败——请重发」）；冷挂载（刷新/直达）时 `GET /inputs` 把当前态查回来补齐队列。
 - **轻量会话管理面**：会话元数据（title 由首条用户消息自动推导、pinned/archived、created_at/updated_at）经列表/详情暴露；runtime 能力基线（capabilities）只读暴露；前端侧栏按「置顶 / 今天 / 昨天 / 更早」分组并支持置顶。
-- **实时事件流 WS**（`/v1/forge/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；**慢订阅丢帧发 `gap` 帧**（客户端按水位立即重挂续传）；传输层 `github.com/coder/websocket`。
-- **Agent 管理面（P2：注册 + 启停 + 热更新 + 切换当前）**：REST `POST /agents`（注册，校验 runtime 已注册即「可启动预检」）、`PATCH /agents/:id`（name/provider/runtime/`mcps` 白名单热更新——改白名单会作废该 agent 的**空闲**会话句柄，下一轮按新白名单注入，见接口摘要该行）、`POST /agents/:id/default`（切换**当前 Agent**：全局默认单例，新建会话与 `GET /models` 缺省都取它）、`DELETE /agents/:id`、`POST /agents/:id/start|stop`（真实进程级启停；有在途 turn 时 stop 报 `agent_busy`）；定义载体**按持久层模式分叉（M6-6）**：`FORGE_STORE=sqlite` 时定义存在 `agents` 表里（`id` + 完整 `body` + `revision`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=agent` 的变更），`FORGE_AGENTS` 目录降级为**导入/导出目录**；memory 模式仍是 `FORGE_AGENTS`（默认 `~/.forge/agents`）下的 `<id>.json`，serve 启动时装载——两种模式都**不写代码即可注册第三个 ACP agent**（复用既有 runtime + provider 档案）。**MCP 白名单的写面与生效（M6-8 / P-13）**：`mcps` 是**唯一的 per-agent 能力字段**（skill 的适用面由 skill 自己的 `runtimes` 声明，与 agent 定义无关）。它在 M6-8 之前只有"定义文件 / DB 行"这一条路——写面 DTO 里根本没有这个字段，而 `forge agent import` 又刻意不覆盖已有行 ⇒ sqlite 模式下事实上改不了；现在写面收下它（三态见接口摘要）。入 DB 只解决"读到的是新的"：会话的能力面是在**开会话那一刻**注入的，此后一条活着的句柄一直用它出生时那一套；钉住能力选择的会话由代际机制在轮次边界自愈，而**缺省路径**（未声明能力选择）的指纹恒为空、按 R11 不迁移。所以写面改完白名单会**立刻作废该 agent 的空闲会话句柄**（下一轮 `ensureConversation` 按当前定义重建并投新面）。三处刻意的边界：① 只作废**空闲**会话——有在途轮次或有未应答权限/提问的顺延（与 ADR-13 纪律③逐条同判据，绝不打断跑着的一轮）；② **不动代际键、不关进程**（句柄作废 ≠ 连接关闭，缺省路径的键与 R11 逐字不变，同配置仍共享一个暖进程）；③ 语义相同的改动（同集合换顺序/重复项）**不算变化**，不产生任何重建——白名单是过滤器，重排不改变注入结果。**这条不等于"skill/MCP 定义改动对缺省路径下一轮生效"**：那件事仍归 `docs/capability-change-apply-design-20261008.md` §3（缺省路径 rev）。**种子与行是两层**：内置 `dsh`/`opencode` 永远在代码里（不落行），行只存"对种子的覆盖"，装载时先铺种子再用行里的**非零字段**覆盖（所以一行只写 `name` 不会把种子的 `runtimes` 抹空）；`providers.json`（provider 档案）与 vault 锚点仍留在 `FORGE_AGENTS` 目录侧——**换事实源不等于可以砍掉这个目录**；内置播种 agent `dsh`/`opencode` 与保留前缀 `agent-*` 只读（runtime 不可改、不可删；`AgentResp.seed` 为服务端权威标记，历史上前端按 id 前缀猜测，播种 id 改名后失效）。「当前 Agent」不再是硬编码常量（历史实现恒为 `dsh`）：显式选择在 memory 模式落 `<AgentDir>/default.json`（`{"default_agent":"<id>"}`，与 `providers.json` 同属**目录级配置**，不是 agent 定义）、sqlite 模式落 `meta.default_agent`（同一个值的另一个载体），回落链「显式选择（agent 仍存在）> 内置种子 `dsh` > id 升序首个」，被切换的 agent 被删除时自动清除选择；`AgentResp.is_default` 即由此计算。修复一个潜伏缺陷：runtime 子进程此前以 `exec.CommandContext(请求 ctx)` 启动，请求返回即被杀（StartAgent 暖启动断连）——现拨号用脱离请求的上下文，连接生命周期归编排器（watchConn/Stop/Close）。**删除面与错误分类（P2 收口）**：`DELETE /agents/:id` 回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent），有在途 turn 报 `agent_busy`；**归属不可变**——存量会话的 agent 归属不被改写、也不静默改绑（goose 在 provider 不可用时会兜底全局默认并写回会话行，本平台不学这条：我们的 agent 携带权限策略/MCP 白名单/原生上下文，静默改写等于静默换掉权限边界），但内存里仍活跃的会话在删除那一刻即被摘除，修掉此前「删了还能跑、重启后才失效」的半死态。会话侧错误按层拆开：`agent_not_found`（会话绑定的 agent 不存在，文案给出「同 id 重新注册即可复活绑定 / 导出历史另开新会话」两条出路）、`runtime_not_found` / `runtime_unavailable`（底座未注册 / 命令不在 PATH，文案指向 diagnostics 的 `remediation`）、`credential_missing`（agent 绑定的 provider 档案悬空或缺 key → 拨号前显式失败，不静默以「无密钥」姿态起进程）。诊断面把「怎么修」一并外露：`remediation` 由事实推导（runtime 未注册 / 启动命令不可执行 / 档案悬空 / 底座自报的鉴权方式 `caps.AuthGuidance` / runtime 声明的 `SetupSteps`——opencode 与 dsh 各自带安装与登录步骤），健康快照不掺安装说明。
+- **实时事件流 WS**（`/v1/mate/ws/events`）：attach/detach 订阅（按会话聚合过滤），`since_seq` 游标续传/全量回放，历史缓冲超限自动淘汰并「快照回退」，心跳与断线重连；**慢订阅丢帧发 `gap` 帧**（客户端按水位立即重挂续传）；传输层 `github.com/coder/websocket`。
+- **Agent 管理面（P2：注册 + 启停 + 热更新 + 切换当前）**：REST `POST /agents`（注册，校验 runtime 已注册即「可启动预检」）、`PATCH /agents/:id`（name/provider/runtime/`mcps` 白名单热更新——改白名单会作废该 agent 的**空闲**会话句柄，下一轮按新白名单注入，见接口摘要该行）、`POST /agents/:id/default`（切换**当前 Agent**：全局默认单例，新建会话与 `GET /models` 缺省都取它）、`DELETE /agents/:id`、`POST /agents/:id/start|stop`（真实进程级启停；有在途 turn 时 stop 报 `agent_busy`）；定义载体**按持久层模式分叉（M6-6）**：`MATE_STORE=sqlite` 时定义存在 `agents` 表里（`id` + 完整 `body` + `revision`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=agent` 的变更），`MATE_AGENTS` 目录降级为**导入/导出目录**；memory 模式仍是 `MATE_AGENTS`（默认 `~/.ark-mate/agents`）下的 `<id>.json`，serve 启动时装载——两种模式都**不写代码即可注册第三个 ACP agent**（复用既有 runtime + provider 档案）。**MCP 白名单的写面与生效（M6-8 / P-13）**：`mcps` 是**唯一的 per-agent 能力字段**（skill 的适用面由 skill 自己的 `runtimes` 声明，与 agent 定义无关）。它在 M6-8 之前只有"定义文件 / DB 行"这一条路——写面 DTO 里根本没有这个字段，而 `mate agent import` 又刻意不覆盖已有行 ⇒ sqlite 模式下事实上改不了；现在写面收下它（三态见接口摘要）。入 DB 只解决"读到的是新的"：会话的能力面是在**开会话那一刻**注入的，此后一条活着的句柄一直用它出生时那一套；钉住能力选择的会话由代际机制在轮次边界自愈，而**缺省路径**（未声明能力选择）的指纹恒为空、按 R11 不迁移。所以写面改完白名单会**立刻作废该 agent 的空闲会话句柄**（下一轮 `ensureConversation` 按当前定义重建并投新面）。三处刻意的边界：① 只作废**空闲**会话——有在途轮次或有未应答权限/提问的顺延（与 ADR-13 纪律③逐条同判据，绝不打断跑着的一轮）；② **不动代际键、不关进程**（句柄作废 ≠ 连接关闭，缺省路径的键与 R11 逐字不变，同配置仍共享一个暖进程）；③ 语义相同的改动（同集合换顺序/重复项）**不算变化**，不产生任何重建——白名单是过滤器，重排不改变注入结果。**这条不等于"skill/MCP 定义改动对缺省路径下一轮生效"**：那件事仍归 `docs/capability-change-apply-design-20261008.md` §3（缺省路径 rev）。**种子与行是两层**：内置 `dsh`/`opencode` 永远在代码里（不落行），行只存"对种子的覆盖"，装载时先铺种子再用行里的**非零字段**覆盖（所以一行只写 `name` 不会把种子的 `runtimes` 抹空）；`providers.json`（provider 档案）与 vault 锚点仍留在 `MATE_AGENTS` 目录侧——**换事实源不等于可以砍掉这个目录**；内置播种 agent `dsh`/`opencode` 与保留前缀 `agent-*` 只读（runtime 不可改、不可删；`AgentResp.seed` 为服务端权威标记，历史上前端按 id 前缀猜测，播种 id 改名后失效）。「当前 Agent」不再是硬编码常量（历史实现恒为 `dsh`）：显式选择在 memory 模式落 `<AgentDir>/default.json`（`{"default_agent":"<id>"}`，与 `providers.json` 同属**目录级配置**，不是 agent 定义）、sqlite 模式落 `meta.default_agent`（同一个值的另一个载体），回落链「显式选择（agent 仍存在）> 内置种子 `dsh` > id 升序首个」，被切换的 agent 被删除时自动清除选择；`AgentResp.is_default` 即由此计算。修复一个潜伏缺陷：runtime 子进程此前以 `exec.CommandContext(请求 ctx)` 启动，请求返回即被杀（StartAgent 暖启动断连）——现拨号用脱离请求的上下文，连接生命周期归编排器（watchConn/Stop/Close）。**删除面与错误分类（P2 收口）**：`DELETE /agents/:id` 回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent），有在途 turn 报 `agent_busy`；**归属不可变**——存量会话的 agent 归属不被改写、也不静默改绑（goose 在 provider 不可用时会兜底全局默认并写回会话行，本平台不学这条：我们的 agent 携带权限策略/MCP 白名单/原生上下文，静默改写等于静默换掉权限边界），但内存里仍活跃的会话在删除那一刻即被摘除，修掉此前「删了还能跑、重启后才失效」的半死态。会话侧错误按层拆开：`agent_not_found`（会话绑定的 agent 不存在，文案给出「同 id 重新注册即可复活绑定 / 导出历史另开新会话」两条出路）、`runtime_not_found` / `runtime_unavailable`（底座未注册 / 命令不在 PATH，文案指向 diagnostics 的 `remediation`）、`credential_missing`（agent 绑定的 provider 档案悬空或缺 key → 拨号前显式失败，不静默以「无密钥」姿态起进程）。诊断面把「怎么修」一并外露：`remediation` 由事实推导（runtime 未注册 / 启动命令不可执行 / 档案悬空 / 底座自报的鉴权方式 `caps.AuthGuidance` / runtime 声明的 `SetupSteps`——opencode 与 dsh 各自带安装与登录步骤），健康快照不掺安装说明。
 - **P2 页面（Agents 管理页）**：原只读列表升级为管理面——注册向导（ID/名称/Runtime/Provider 档案，`agent-` 保留前缀与格式校验）、**「设为当前」切换当前 Agent**（`is_default` 行标出当前，切换后新建会话面板的 Agent 徽标即时跟随；当前行不再显示该按钮）、启动/停止按钮、编辑（热更新 name/provider；种子 runtime 只读）、删除（仅自定义，Popconfirm 里如实列出影响面：多少条会话将失去执行者、是否当前 Agent；删除回执再报实际摘除数）；下方 Provider 档案区（新建/编辑：type/model/密钥输入，`has_key` 标签只写不读回、留空不变更）；诊断弹窗把 `remediation` 作为「建议处理步骤」列出（怎么装底座、怎么补密钥）。Settings 页文案同步指向该页。
-- **P2 provider 注入面**：`GET /providers` + `PATCH /providers/:id`（档案 upsert；密钥**只写不读回**——GET 只给 `has_key`；`key` 空串=清除）；agent 引用 provider 档案时启动拨号注入 `<TYPE>_API_KEY`（type 未知取大写 type + `_API_KEY`），档案落 `<AgentDir>/providers.json`。**密钥加密落盘（§5 vault）**：文件里只留引用 `key_ref: "vault:providers/<id>"`，密文落 `~/.forge/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 `{kind, ref}`——密文挪到别的引用/kind 上必然解不开），明文只在内存与子进程 env；主密钥 `~/.forge/vault.key`（0600，拒符号链接与过宽权限；可用 `FORGE_VAULT_KEY` 覆盖）**必须纳入备份**，丢了密文不可恢复；旧版明文档案在启动时幂等迁移（加密写回 + 清明文），密文解不开时报 `credential_missing` 并带出「确认 vault.key 未丢失/未被更换」的出路。
+- **P2 provider 注入面**：`GET /providers` + `PATCH /providers/:id`（档案 upsert；密钥**只写不读回**——GET 只给 `has_key`；`key` 空串=清除）；agent 引用 provider 档案时启动拨号注入 `<TYPE>_API_KEY`（type 未知取大写 type + `_API_KEY`），档案落 `<AgentDir>/providers.json`。**密钥加密落盘（§5 vault）**：文件里只留引用 `key_ref: "vault:providers/<id>"`，密文落 `~/.ark-mate/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 `{kind, ref}`——密文挪到别的引用/kind 上必然解不开），明文只在内存与子进程 env；主密钥 `~/.ark-mate/vault.key`（0600，拒符号链接与过宽权限；可用 `MATE_VAULT_KEY` 覆盖）**必须纳入备份**，丢了密文不可恢复；旧版明文档案在启动时幂等迁移（加密写回 + 清明文），密文解不开时报 `credential_missing` 并带出「确认 vault.key 未丢失/未被更换」的出路。
 - **模型目录（运行时派生，无内置清单）**：`GET /models`（`?agent=<id>`，缺省取默认 agent）返回**由运行时自报**的会话配置项（ACP session config options）——模型目录（`category=model`）为主，运行时给出的其它选项（如 `mode`/`thought_level`）一并原样透出但只作展示，平台**不提供思考档位选择面**（少一个「取值随模型变化」的耦合点），也**不内置任何模型清单**（原 `internal/modelcatalog` 的 `go:embed` 快照 + 上游 live + 24h 磁盘缓存三段式已整体删除；provider 档案维度的模型目录路由（`GET /models` 外的旧路径）也已下线——provider 档案只承担密钥/启动 env 注入）。取样来源由响应 `source` 标注：`session`（直接读该 agent 的活跃会话）→ `cache`（内存 TTL 5min）→ `resume`（恢复该 agent 最近一条历史会话读取，读完即 `session/close`）→ `none`（空目录 + `note` + 运行时声明的鉴权引导 `auth_guidance`，面板据此提示登录）。**绝不新建探测会话**：dsh 的 `session/new` 经 `persistence.ensureMaterialized` 落持久记录、opencode 同样落库，而两家都不广告 `session/delete`，探测会留下永久垃圾。取值一律是**不透明字符串**（dsh 为 `JSON.stringify([provider, model])`、opencode 为 `provider/model`），前端只按 `category` 渲染并原样回传，绝不解析或拼接；可用性以运行时 `session/set_config_option` 的成败为唯一判据（平台不做白名单预判，设置失败即建会话失败、绝不静默回落默认模型），被运行时拒绝过的取值在目录里带 `unavailable`/`unavailable_reason` 标注。dsh 在 provider 拓扑变化时主动推送 `session/config_option_update`，平台据此刷新缓存并向 WS 转发 `session.config_options` 事件，模型下拉与「当前模型」无需轮询保持一致。
 - **命令发现面（不做投影/写面）**：底座经 ACP `available_commands_update` 自报的斜杠命令由平台**原样接收并回显**——WS 转发 `session.commands`（全量列表 `{name, description?, hint?}`，顺序由底座给出），面板在会话输入框里输入 `/` 时按该列表给候选提示。**平台不拥有这些命令**：ACP 规范里命令只有通告、没有独立执行方法，执行就是把命令行当普通提示词发出去（平台本来就支持），所以没有投影、没有写面、也没有 REST 读端点（会话重开靠事件重放，见 ADR-17）。**逐底座如实**：opencode 会通告（v2.0.26 实测只通告内置的 `init`/`review`/`compact`——**skill 不再作为命令通告**，v2 把 skill 目录块直接放进模型请求体，取证见 `pkg/runtime/adapters.go` 的 `opencodeSkillProjection`），**dsh 不通告**（命令是插件进程内注册，ACP 面明确不含）——面板对不提供发现面的底座不显示候选，且**不会说成"你还没配命令"**。
-- **进程注册表 + 孤儿回收（M3 v4③）**：daemon 把拉起的 runtime 子进程（pid/pgid/命令/runtime/agent/实例 id）登记到 `<数据目录>/processes.json`（`FORGE_PROC_REGISTRY` 覆盖，`off` 关闭），正常停止/断连时摘除；启动时回收**上一实例遗留**的孤儿进程（SIGTERM → 宽限期 → SIGKILL 整个进程组），并以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。实测：opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出，故孤儿多出现在「runtime 忽略 EOF / 派生孙进程」场景，注册表为兜底防线。
-- **P2 空闲回收 + 按需拉起**：reapLoop（`FORGE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `FORGE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
-- **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写；**文本增量按 ③ 合并后落行**——`session.message`/`thought` 攒批 25ms / 4KB / 64 条，故一行可能覆盖多个 delta、长回复不再产生几百行，而工具卡/权限卡/提问卡/用户消息/终态仍一条一行）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `FORGE_TRANSCRIPTS` 或默认 `~/.forge/transcripts`；P1 起提供 `forge migrate` 把既有 transcript 幂等导入 SQLite、`forge transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
+- **进程注册表 + 孤儿回收（M3 v4③）**：daemon 把拉起的 runtime 子进程（pid/pgid/命令/runtime/agent/实例 id）登记到 `<数据目录>/processes.json`（`MATE_PROC_REGISTRY` 覆盖，`off` 关闭），正常停止/断连时摘除；启动时回收**上一实例遗留**的孤儿进程（SIGTERM → 宽限期 → SIGKILL 整个进程组），并以「pgid 与登记值一致」防 PID 复用误杀（不一致只清账并留日志）。实测：opencode 子进程在 daemon 被 `kill -9` 后随 stdin EOF 自行退出，故孤儿多出现在「runtime 忽略 EOF / 派生孙进程」场景，注册表为兜底防线。
+- **P2 空闲回收 + 按需拉起**：reapLoop（`MATE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `MATE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
+- **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写；**文本增量按 ③ 合并后落行**——`session.message`/`thought` 攒批 25ms / 4KB / 64 条，故一行可能覆盖多个 delta、长回复不再产生几百行，而工具卡/权限卡/提问卡/用户消息/终态仍一条一行）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `MATE_TRANSCRIPTS` 或默认 `~/.ark-mate/transcripts`；P1 起提供 `mate migrate` 把既有 transcript 幂等导入 SQLite、`mate transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
 - **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-mate-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（**会话/归档双视图** · 按日分组 · 置顶 · 行内更多操作=重命名/归档/恢复 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / **结构化提问卡**——按 schema 渲染单选/多选/文本/数字/布尔控件并本地校验必填与范围 / meta 行（终态轮后附本轮用量行：上下文占用 · 较上轮 Δ · 成本；hover 弹出 goose 风格明细——上下文占用(快照)/首令牌/总耗时/成本，composer 下方常驻最近一轮汇总行） / **失败轮就地「重试该轮」**；消息可一键复制全文，正文内 ``` 围栏代码段渲染为带语言/行数、可复制、长块可折叠的代码卡片）、composer 追加、停止（**忙时可继续输入**：投递模式选「排队 / 打断并发送」，输入框上方实时列出已排队尚未发出的条目并可逐条撤下——队列只认事件、刷新后按当前态补齐）、「待确认」角标（权限 + 提问合并计数，含超时/取消自动收敛）、**会话详情面板**（元数据 + **运行统计**：轮次/失败/取消/工具数 + 失败轮列表一键重试 + 挂起权限就地决策 + 会话级权限记忆——始终允许/始终拒绝——逐条/一键撤销）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；会话头按绑定 agent 如实标注，agent 已不存在时就地给出路（用同一 id 重新注册 / 导出历史另开新会话），不再只显示一个悬空 id；`/conversations/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、**`/capabilities`（Agent 视角 + 全局目录：skill 行内启停开关与物化体检、MCP 密钥键名与未就绪标记、装载告警标签）**、**用量页（顶栏「用量」，数据面 `GET /usage/summary`：按 agent/日期聚合轮次·时长·上下文·成本，支持近 7/30 天与自定义区间；响应回显口径——上下文/成本为区间末快照、day 桶不可加、多币种不混加，上下文与费用上报率分列）**、`/settings` 为管理次要页；Agents 页每行展示 `permission_policy` 摘要（默认动作 + 工具项数 + 原生模式，hover 展开明细），编辑弹窗可直接改 `default`/`native_mode`/工具项 JSON。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
-- **单二进制交付**：`make all` 把面板产物内嵌进 `./forge`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
+- **单二进制交付**：`make all` 把面板产物内嵌进 `./mate`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
 - **P3 收口**：传输保险丝/resync、hydration 四态均完成；会话侧栏（置顶 + 按日分组 + 近底跟随滚动）与工具/思考内联卡片为 M1 既有覆盖项，无需改动。
 - **P3 加载四态（前端）**：会话视图加 hydration 态——冷挂载/切回置 `hydrating`，服务端 snapshot 或首个事件置回就绪，空转 12s（保险丝重连前）自动回空态不再永久 loading；聊天页在 hydration 中显示「连接会话…」而非空态问候。
 - **P3 传输可靠性（前端）**：WS 传输增 **stalled 保险丝**（OPEN 后 70s 无任何服务端帧——半开/黑洞连接——主动断开并重连，健康连接每 25s ping→pong 计入活跃度不会误熔断）与**重连 resync 裁决**（重连后按各 agg 已确认水位重新 attach，服务端 EventsAfter 开区间 → 增量续传不重复、权威收尾）。
-- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `capability_revisions` + `schema_migrations` 自管迁移），`forge migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`FORGE_STORE=sqlite|memory|auto`）；messages 逐轮物化（user 原文 + assistant 文本片段按 msg_id 拼接 + 交错时间线 + 工具最终态），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh/opencode 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
+- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `capability_revisions` + `schema_migrations` 自管迁移），`mate migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`MATE_STORE=sqlite|memory|auto`）；messages 逐轮物化（user 原文 + assistant 文本片段按 msg_id 拼接 + 交错时间线 + 工具最终态），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh/opencode 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
 
 里程碑与后续规划见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/agent-runtime-refactor-design-20260908.md](docs/agent-runtime-refactor-design-20260908.md) §20；harness adapter 的源码级适配核实记录见 [docs/deepseekharness-acp-adaptation.md](docs/deepseekharness-acp-adaptation.md)。
 
@@ -70,9 +70,9 @@ npm i -g @deepseek-ai/dsh@next     # 或不经安装：npx --yes @deepseek-ai/ds
 dsh --profile acp --help           # 验证可用（首用会自动初始化 profile）
 ```
 
-**版本混装排查**：若 forge 日志里 dsh 子进程启动即崩、ACP 连接随即断开（`connection closed … cause="peer connection closed"`），且 stderr 出现
+**版本混装排查**：若 mate 日志里 dsh 子进程启动即崩、ACP 连接随即断开（`connection closed … cause="peer connection closed"`），且 stderr 出现
 `stdio app: the launcher must provide ctx.appExit and ctx.appReady before the tree mounts`
-（堆栈同时含 `…/installation/lib/node_modules/@deepseek-ai/dsh` 与 `~/.npm/_npx/…/@deepseek-ai/dsh-acp-app`），说明 **dsh 启动器与 acp 插件来自两棵不同版本树**（典型：全局 `latest` 0.1.1-rc.2 启动器 + npx 缓存里 @next 的 acp 插件）。修法：`npm i -g @deepseek-ai/dsh@next` 让全局树自洽后 `dsh --version` 应为 ≥ 0.1.2-rc.1（forge 按 PATH spawn dsh，升级后无需重启 serve）；仍报错则备份重建 `~/.dsh/profiles/acp`（曾被混装写坏时）。
+（堆栈同时含 `…/installation/lib/node_modules/@deepseek-ai/dsh` 与 `~/.npm/_npx/…/@deepseek-ai/dsh-acp-app`），说明 **dsh 启动器与 acp 插件来自两棵不同版本树**（典型：全局 `latest` 0.1.1-rc.2 启动器 + npx 缓存里 @next 的 acp 插件）。修法：`npm i -g @deepseek-ai/dsh@next` 让全局树自洽后 `dsh --version` 应为 ≥ 0.1.2-rc.1（mate 按 PATH spawn dsh，升级后无需重启 serve）；仍报错则备份重建 `~/.dsh/profiles/acp`（曾被混装写坏时）。
 
 模型凭证：harness 读取进程环境 `DEEPSEEK_API_KEY`；若你本机 `dsh` 已配好 profile/home 设置，无 shell 环境变量也能跑。
 
@@ -80,47 +80,47 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 
 ```bash
 make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → go build -tags release
-./forge           # 产物在仓库根
+./mate           # 产物在仓库根
 ```
 
 ### 3. 启动并打开面板
 
 ```bash
-./forge serve --addr 127.0.0.1:10001
+./mate serve --addr 127.0.0.1:10001
 ```
 
-> **默认监听地址（安全相关）**：`forge serve` 不带 `--addr` 时读 `FORGE_ADDR`，默认
+> **默认监听地址（安全相关）**：`mate serve` 不带 `--addr` 时读 `MATE_ADDR`，默认
 > `127.0.0.1:10001`——**仅回环，不对外**（默认无鉴权，故默认收窄；`lsof` 可见
-> `127.0.0.1:10001`）。确需跨机访问时**先设 `FORGE_TOKEN`**（A6 单操作员令牌，见下）再显式改
+> `127.0.0.1:10001`）。确需跨机访问时**先设 `MATE_TOKEN`**（A6 单操作员令牌，见下）再显式改
 > `--addr 0.0.0.0:10001`，并置于反向代理/防火墙之后，见 `docs/deployment.md`「安全边界」。
 > 生产建议同时 `export GIN_MODE=release`（消除 debug 模式告警）。
 
 > **回环面的 Host 白名单 + Origin 矩阵（M3-5）**：核心在**回环监听**时启用这套判定（设计 §7.2 / §9.1）
 > ——`Host` 的主机部分必须是 `127.0.0.1` / `[::1]` / `localhost`，且端口等于**实际监听端口**
-> （不匹配 → `421`）；`Origin` 只放行「无 Origin」（壳内反代 / curl / 页面导航）、`forge-app://app`
+> （不匹配 → `421`）；`Origin` 只放行「无 Origin」（壳内反代 / curl / 页面导航）、`mate-app://app`
 > （桌面态事件流直连）与自身监听端口上的 http 同源（其余 → `403`，含 `Origin: null`）。
-> **跨源开发与自建反代需显式登记**：`FORGE_ALLOWED_ORIGINS=http://localhost:5173,https://forge.example.com`
+> **跨源开发与自建反代需显式登记**：`MATE_ALLOWED_ORIGINS=http://localhost:5173,https://mate.example.com`
 > （逗号分隔，`config.json` 可写 JSON 数组；取值必须是纯 origin `scheme://host[:port]`，带路径/查询
 > 或未知 scheme 启动即报错）。这是**显式登记口，不是默认放开**——`make dev` 的 vite :5173 → 核心
 > :10001 正是靠它。绑非回环地址（如 `--addr 0.0.0.0:10001`）时这套判定**不启用**（设计 §9.4：
 > 对外产品化所需的 Host/Origin 白名单与令牌强制、TLS 终止、多操作员审计同属未完成项），
 > 启动日志会打一条 WARN 说明。
 
-**凭据（A6 单操作员令牌 → M1-1 分面凭据）**：设 `FORGE_TOKEN=<随机串>`（或 `.forge/config` 的
+**凭据（A6 单操作员令牌 → M1-1 分面凭据）**：设 `MATE_TOKEN=<随机串>`（或 `.ark-mate/config` 的
 `token`）后，除 `/health` 外的**全部** REST 路由都要求 `Authorization: Bearer <token>`。
 **`?token=` 查询参数已删除**（令牌进 URL 会同时进浏览器历史、反代/网关日志与 Referer）：事件流
 那条通道改走**带内首帧 `attach`**——连接建立后必须在 5s 内发出 `{action:"attach", token:"…"}`
 （未按时送达或凭据不符 → 服务端以 1008 关闭）。前端顶栏「令牌」按钮可填写/清除（只存本浏览器
-localStorage），收到 401 会自动弹出。令牌比较用恒定时间实现，`forge config` 只显示掩码
+localStorage），收到 401 会自动弹出。令牌比较用恒定时间实现，`mate config` 只显示掩码
 （`cf…3a（14 字符）`）。未设置凭据 = 历史行为（不鉴权，仅建议回环使用）。
 
 > **桌面态是两个凭据**（设计 §7.2）：壳 spawn 核心时用 `--auth-stdin` 经 stdin 首行下发
 > `{"restToken":"…","streamToken":"…"}`（各 32 字节随机 base64url；**不进 argv/env/文件/URL**）。
 > 两个面**互斥**：`restToken` 只用于壳的反代（从不进渲染进程），`streamToken` 只在事件流首帧被接受。
-> 独立态的 `FORGE_TOKEN` 则是同一条令牌同时具备两个面——语义与旧版逐字相同。
+> 独立态的 `MATE_TOKEN` 则是同一条令牌同时具备两个面——语义与旧版逐字相同。
 >
 > 桌面态还用 `--addr 127.0.0.1:0`（内核分配端口，避免与用户已有服务撞端口）与 `--ready-stdout`：
-> 监听成功后核心往 **stdout** 打一行 `FORGE_READY {"addr":"127.0.0.1:51234","port":51234}`（**不含令牌**），
+> 监听成功后核心往 **stdout** 打一行 `MATE_READY {"addr":"127.0.0.1:51234","port":51234}`（**不含令牌**），
 > 壳按**行首**匹配它（gin 的路由转储等日志同样落在 stdout，按子串匹配会把日志误当就绪行）；
 > 拿不到就退回 health 轮询兜底。
 
@@ -132,32 +132,32 @@ localStorage），收到 401 会自动弹出。令牌比较用恒定时间实现
 3. 回复期间可点「⏹ 取消」；结束后可在 composer 输入下一条（多轮同会话）；
 4. 断开/刷新后重新点选会话，会按游标全量/增量续传补齐会话视图。
 
-监听地址也可用环境变量覆盖：`FORGE_ADDR=:9999 ./forge serve`。会话 wire transcript 默认落
-`~/.forge/transcripts/`，可用 `FORGE_TRANSCRIPTS=/path/to/dir` 改目录（每会话一个
-`<会话ID>.jsonl`，schema v1，可直接查看/留档）；SQLite 库默认 `~/.forge/forge.db`
-（`FORGE_DB` 覆盖，`FORGE_STORE=sqlite|memory|auto` 控制持久层）。完整环境变量与部署形态见
+监听地址也可用环境变量覆盖：`MATE_ADDR=:9999 ./mate serve`。会话 wire transcript 默认落
+`~/.ark-mate/transcripts/`，可用 `MATE_TRANSCRIPTS=/path/to/dir` 改目录（每会话一个
+`<会话ID>.jsonl`，schema v1，可直接查看/留档）；SQLite 库默认 `~/.ark-mate/mate.db`
+（`MATE_DB` 覆盖，`MATE_STORE=sqlite|memory|auto` 控制持久层）。完整环境变量与部署形态见
 `docs/deployment.md`。
 
-**配置目录（`.forge/config` 目录化，M3 A4）**：不想导 15 个环境变量时，把配置写在
-`~/.forge/config/`（`FORGE_CONFIG_DIR` 覆盖）：
+**配置目录（`.ark-mate/config` 目录化，M3 A4）**：不想导 15 个环境变量时，把配置写在
+`~/.ark-mate/config/`（`MATE_CONFIG_DIR` 覆盖）：
 
 ```
-~/.forge/config/config.json   # {"addr":"127.0.0.1:10001","store":"sqlite","db":"/data/forge.db","idle_timeout":"5m"}
-~/.forge/config/env           # dotenv：FORGE_TRANSCRIPTS=/data/transcripts（# 注释、可 export 前缀）
-~/.forge/config/runtimes.json # 远程 runtime 声明（A5）：[{"id":"remote-acp","transport":"ws","endpoint":"ws://10.0.0.9:10020/acp"}]
+~/.ark-mate/config/config.json   # {"addr":"127.0.0.1:10001","store":"sqlite","db":"/data/mate.db","idle_timeout":"5m"}
+~/.ark-mate/config/env           # dotenv：MATE_TRANSCRIPTS=/data/transcripts（# 注释、可 export 前缀）
+~/.ark-mate/config/runtimes.json # 远程 runtime 声明（A5）：[{"id":"remote-acp","transport":"ws","endpoint":"ws://10.0.0.9:10020/acp"}]
 ```
 
-优先级：默认值 < `config.json` < `env` < 进程环境变量 `FORGE_*` < CLI flag。目录/文件不存在
-= 完全维持历史行为；**键名或取值非法则启动即报错**（不静默回落）。`forge config`（`--json` 可
+优先级：默认值 < `config.json` < `env` < 进程环境变量 `MATE_*` < CLI flag。目录/文件不存在
+= 完全维持历史行为；**键名或取值非法则启动即报错**（不静默回落）。`mate config`（`--json` 可
 带来源）打印最终配置与每项来源，上线前可直接核对。
 
 旧键名不会被静默接受：`skills_materialize_dir` / `skills_materialize_dirs` 仍会让启动失败，
 但报错会**认出它**并给出新键与等价写法（`skills_materialize_dirs=opencode=/x` ≡
 `projection_dirs=opencode:skill=/x`）——升级就是改这一行，而"设了却悄悄没生效"这条路被堵住。
 
-**投影根覆盖（`FORGE_PROJECTION_DIRS`）**：skill/MCP 落到哪个原生目录由 runtime 的**投影声明**
+**投影根覆盖（`MATE_PROJECTION_DIRS`）**：skill/MCP 落到哪个原生目录由 runtime 的**投影声明**
 决定（见「物化摘要与审计」）；本机默认根不适用时才需要覆盖，写法
-`FORGE_PROJECTION_DIRS=opencode:skill=/data/agents/skills`（多值逗号分隔，`config.json` 可写 JSON
+`MATE_PROJECTION_DIRS=opencode:skill=/data/agents/skills`（多值逗号分隔，`config.json` 可写 JSON
 数组；键是 `<runtime>:<kind>`，值是**绝对**目录）。**只覆盖根，不改形态**——摆放方式与文件格式
 仍由 adapter 声明，所以不会出现"路径对了但底座读不到"。
 
@@ -165,12 +165,12 @@ localStorage），收到 401 会自动弹出。令牌比较用恒定时间实现
 
 ```bash
 # 完整跑一次 fresh 会话并打印事件（超时 5min 默认）
-./forge demo --runtime opencode --prompt "你好，请用一句话介绍你自己"
-./forge demo --runtime deepseekharness --prompt "你好，请用一句话介绍你自己"
+./mate demo --runtime opencode --prompt "你好，请用一句话介绍你自己"
+./mate demo --runtime deepseekharness --prompt "你好，请用一句话介绍你自己"
 
 
 # REST 触发 + WS 收流（可用任意 WS 客户端，如 wscat / 浏览器控制台）
-curl -s localhost:10001/v1/forge/conversations \
+curl -s localhost:10001/v1/mate/conversations \
   -H 'content-type: application/json' \
   -d '{"agent_id":"opencode","prompt":"请只回复两个字：明白"}'
 # → {"code":0,...,"data":{"id":"...","event_seq":7,...}}，随后 WS attach 该会话即可收增量
@@ -185,7 +185,7 @@ curl -s localhost:10001/v1/forge/conversations \
 > dsh 注入 `DSH_PERMISSION_MODE`（`default:deny` → `read-only`；显式 `native_mode: workspace-write|danger-full-access`
 > 原样使用；其余不注入以免覆盖环境值），opencode 注入 `OPENCODE_CONFIG_CONTENT` 的 `permission` 表
 > （`tools` 的 bash/edit/read/write/fetch 等键按别名映射，全 ask 时不注入）。`native_mode: off`
-> 或 `FORGE_NATIVE_PERMISSION=off` 可整体关闭。未声明策略的 agent 行为不变。
+> 或 `MATE_NATIVE_PERMISSION=off` 可整体关闭。未声明策略的 agent 行为不变。
 
 > **验证权限/提问/失败轮通道（echo 已删除后）**：这三条链路仍由真实底座驱动即可复现——
 > 权限：任意 agent 跑一个会触发 `session/request_permission` 的 prompt，面板右侧出权限确认卡
@@ -207,28 +207,28 @@ make dev
 
 # 方式 B：分开两个终端（日志可分别看）
 # 终端 A：后端（默认 :10001）
-make server            # = cd backend && go run ./cmd/forge serve
+make server            # = cd backend && go run ./cmd/mate serve
 # 终端 B：前端（vite dev :5173，/v1 代理到 127.0.0.1:10001，含 ws）
 cd frontend && pnpm dev
 ```
 
-> **用量/会话统计需要 sqlite 持久层**：`make dev` / `make server` 默认 `FORGE_STORE=sqlite`
-> （自动创建 `~/.forge/forge.db`），这样才有 `runs` 读模型与每轮用量。若想轻量纯内存，
-> 用 `FORGE_STORE=memory make dev` 覆盖（此时 `/usage/summary` 返回 40501、每轮用量不显示）。
-> 已有 transcript（内存模式积累的旧会话）需先一次性 `cd backend && go run ./cmd/forge migrate`
+> **用量/会话统计需要 sqlite 持久层**：`make dev` / `make server` 默认 `MATE_STORE=sqlite`
+> （自动创建 `~/.ark-mate/mate.db`），这样才有 `runs` 读模型与每轮用量。若想轻量纯内存，
+> 用 `MATE_STORE=memory make dev` 覆盖（此时 `/usage/summary` 返回 40501、每轮用量不显示）。
+> 已有 transcript（内存模式积累的旧会话）需先一次性 `cd backend && go run ./cmd/mate migrate`
 > 导入 SQLite，否则 sqlite 模式下旧会话不在面板列表（serve 会提示你 migrate）。
 > 注意：`runs` 在**轮次收口时**物化，**开启 sqlite 之后新增轮次**才有单轮用量；历史轮次只有
 > runs 计数、无用量（usage 来自实时 ACP 上报，回放不重算）。
 
 ## 控制面接口摘要
 
-REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`code=0` 成功，非 0 为业务错误（40401 未知 agent/会话、40901 会话正忙、40501 能力不支持、50201 runtime/连接故障等）。
+REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`code=0` 成功，非 0 为业务错误（40401 未知 agent/会话、40901 会话正忙、40501 能力不支持、50201 runtime/连接故障等）。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |
 | GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webSource?, webPath, webDigest, home, payloads[]}`。`webSource` 只在核心真的内嵌了前端资产时报 `builtin`（release 构建），默认构建**省略该字段**；`webPath`/`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串。`payloads[]` 是桌面壳经 `--payloads` 交来的**已解析**随包载荷清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）——清单真源是壳（只有它做三级解析，M3-4），非桌面态为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
-| GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Forge-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力） |
+| GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Mate-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力） |
 | GET | `/agents` | Agent 列表（含 `permission_policy` 只读面，含 `native_mode`；`is_default` 标出「当前 Agent」；`conversation_count` = 绑定它的会话数，即删除影响面） |
 | POST | `/agents` | 注册 Agent `{id, name?, runtimes[], provider?, mcps?, permission_policy?}`（落定义载体：memory 文件 / sqlite `agents` 行）；`mcps` 缺省 = 未声明（全量），`[]` = 本 agent 禁用 MCP 注入 |
 | PATCH | `/agents/:id` | 热更新 `{name?, runtimes?, provider?, mcps?, permission_policy?}`（指针字段，nil 不更新）。**`mcps` 是三态**：键缺失 = 不改、`null` = 清空白名单（回落"未声明"= 全量）、`[]` = 禁用全部、数组 = 白名单；改了白名单**且语义真的变了**（同集合换顺序不算）→ 立刻作废该 agent 的**空闲**会话句柄，下一轮按当前定义重建并按新白名单注入（有在途轮次或有未应答权限/提问的会话**顺延**到下一次重建——与代际迁移的"忙则顺延"同一条判据）。只改 name/provider/runtime 候选不作废任何会话 |
@@ -241,15 +241,15 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/providers` · PATCH `/providers/:id` | provider 档案列表 / 更新 `{type?, model?, key?}`（密钥只写不读回，仅 `has_key`） |
 | GET | `/models` | 运行时派生的模型目录（`?agent=<id>`，缺省默认 agent）：ACP 会话配置项直投影 `{source, options[{category,id,name,type,current_value,values[{value,name,group,…}]}], auth_guidance}`；`source`=`session\|resume\|cache\|none`，平台无内置清单 |
 | GET | `/conversations` | 会话列表（`?archived=true` 过滤归档；`?cwd=<绝对路径>` 只返回工作空间**精确等于**该路径的会话，用于「按工作空间查看/分组」）。每条会话回读 `cwd`、`workspace_temporary` 与 `origin`（**来源，非用户输入**：缺省 = 人工建；`automation:<id>` = 该定时任务触发——面板据此打「定时」标，也是「这条会话是谁开的」的唯一权威判据） |
-| GET | `/workspaces/browse` | 目录浏览（`?path=<绝对路径>`（缺省 = 首个工作区根，未配白名单时= 服务进程家目录）、`?hidden=true` 含隐藏目录）：**只列目录** → `{path, parent, home, roots, entries:[{name, path}]}`；`entries[].path` 与建会话 cwd 同形态（已符号链接规范化），可直接提交。配了 `FORGE_WORKSPACE_ROOTS` 时被收窄：越界 `path` → `workspace_outside_roots`，`parent` 到根为止（越不过去），根外的符号链接子项不列出，`home` 不在根内则不返回 |
-| GET | `/workspaces/libraries` | **资料库**列表 = `FORGE_WORKSPACE_ROOTS` 下的一级子目录（`{name, path, root, last_used_at, conversations}`，按名排序）：**零新状态**（不存登记表，目录名即资料库名），未配白名单时为空数组。用途是资料/文档场景"选名字而不是选绝对路径" |
+| GET | `/workspaces/browse` | 目录浏览（`?path=<绝对路径>`（缺省 = 首个工作区根，未配白名单时= 服务进程家目录）、`?hidden=true` 含隐藏目录）：**只列目录** → `{path, parent, home, roots, entries:[{name, path}]}`；`entries[].path` 与建会话 cwd 同形态（已符号链接规范化），可直接提交。配了 `MATE_WORKSPACE_ROOTS` 时被收窄：越界 `path` → `workspace_outside_roots`，`parent` 到根为止（越不过去），根外的符号链接子项不列出，`home` 不在根内则不返回 |
+| GET | `/workspaces/libraries` | **资料库**列表 = `MATE_WORKSPACE_ROOTS` 下的一级子目录（`{name, path, root, last_used_at, conversations}`，按名排序）：**零新状态**（不存登记表，目录名即资料库名），未配白名单时为空数组。用途是资料/文档场景"选名字而不是选绝对路径" |
 | GET | `/workspaces/files` | 目录**内容**清单（`?path=<绝对目录>` 必填、`?hidden=true` 含隐藏项）：`{path, roots, entries:[{name, path, is_dir, size, modified_at}]}`（目录在前、文件在后）。与 `browse` 分工：**browse 用于选工作空间**（只列目录，条目可直接当 cwd），**files 用于看资料**（列文件，条目**不可**当 cwd）。边界与 browse 一致（越界拒绝、根外真身的符号链接不列） |
 | GET | `/workspaces/recent` | 最近使用的工作空间（`?limit=` 默认 10 上限 50）：**从既有会话派生**（`{path, name, last_used_at, conversations}`，按最近使用倒序、同目录聚合计数、排除平台代建的临时空间），不另存状态 |
-| GET · PUT | `/settings/workspace` | 工作区根白名单的**设置面**：GET 回 `{configured[], roots[], restricted, provision_dir, provision_included, source, locked_by?, writable}`——`configured` 是面板可编辑的显式名单，`roots` 是**生效**名单（= `configured` ∪ 平台代建根；代建根**无需**手写进配置，它由平台隐式并入）；PUT `{roots[]}` **全量替换**（`{"roots":[]}` 或字段缺省 = 恢复"不限制"），逐项要求绝对路径 / 存在 / 是目录，落盘 `<配置目录>/config.json` 并对**新**会话与浏览面即时生效（已建会话 cwd 不变）。被进程 `FORGE_*` / env 文件 / flag 改动过该键时回 `settings_locked`（写入必被覆盖 → 面板转只读），无配置目录的进程回 `settings_readonly` |
+| GET · PUT | `/settings/workspace` | 工作区根白名单的**设置面**：GET 回 `{configured[], roots[], restricted, provision_dir, provision_included, source, locked_by?, writable}`——`configured` 是面板可编辑的显式名单，`roots` 是**生效**名单（= `configured` ∪ 平台代建根；代建根**无需**手写进配置，它由平台隐式并入）；PUT `{roots[]}` **全量替换**（`{"roots":[]}` 或字段缺省 = 恢复"不限制"），逐项要求绝对路径 / 存在 / 是目录，落盘 `<配置目录>/config.json` 并对**新**会话与浏览面即时生效（已建会话 cwd 不变）。被进程 `MATE_*` / env 文件 / flag 改动过该键时回 `settings_locked`（写入必被覆盖 → 面板转只读），无配置目录的进程回 `settings_readonly` |
 | GET | `/conversations/search` | 会话搜索（`?q=` 必填、`?limit=` 默认 30 上限 50；含归档、`updated` 降序） |
 | GET | `/search/messages` | 跨会话消息检索（`?q=` 必填、`?limit=` 默认 30 上限 200；返回 `seq` 锚点用于跳转定位，`source` 标数据面） |
 | POST | `/conversations/export` | 批量导出 `{ids[], format?: markdown\|text\|json}`（ids 上限 50）→ `{files:[{filename, content, bytes, events, truncated?}], skipped[], total_bytes}` |
-| POST | `/conversations` | `{agent_id, prompt?, cwd?, runtime_hint?, model?, capabilities?}` → `{id, event_seq, cwd, workspace_temporary, …}`（带 prompt 则后台起首轮；`model` 为 `GET /models` 的 `options[category=model]` 里的**不透明 `value`**，原样回传、经 `session/set_config_option` 会话级应用，运行时拒绝即建会话失败）。**工作空间**：`cwd` 非空时校验「绝对 / 存在 / 是目录」并按符号链接规范化，且（若配了 `FORGE_WORKSPACE_ROOTS`）必须落在某个允许的工作区根之内，否则报 `workspace_outside_roots`；为空时平台在 `FORGE_WORKSPACE_DIR`（默认 `~/.forge/workspaces`）下按**会话 id** 代建 `<id>/` 并回 `workspace_temporary=true`；代建关闭（`workspace_dir` 为空）且未指定则报 `workspace_required`——**不回落 serve 进程目录**（那会让所有会话共用一个沙箱边界）。工作空间建成即不可变（它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的边界）。**能力选定（M3）**：`capabilities: {skills?, mcps?}` 把这条会话钉在技能/MCP 的一个子集上，逐 kind **三态**——键缺失 = 未声明（回落 agent 声明）；`[]` = 明确一个都不要；非空 = 白名单。传了键就按白名单**覆盖**（不是求交，否则"这条会话想放宽"永远表达不出来）。选定与它解析出的**能力指纹**一起落库，重启后不漂移。不可达（id 不存在 / 该 runtime 不适用，两者**同码不同文案**）→ `40001 capability_not_applicable` 且**零副作用**（不建会话、不拉进程、不写库、不留代建目录）。生效边界见「能力的生效边界」一节 |
+| POST | `/conversations` | `{agent_id, prompt?, cwd?, runtime_hint?, model?, capabilities?}` → `{id, event_seq, cwd, workspace_temporary, …}`（带 prompt 则后台起首轮；`model` 为 `GET /models` 的 `options[category=model]` 里的**不透明 `value`**，原样回传、经 `session/set_config_option` 会话级应用，运行时拒绝即建会话失败）。**工作空间**：`cwd` 非空时校验「绝对 / 存在 / 是目录」并按符号链接规范化，且（若配了 `MATE_WORKSPACE_ROOTS`）必须落在某个允许的工作区根之内，否则报 `workspace_outside_roots`；为空时平台在 `MATE_WORKSPACE_DIR`（默认 `~/.ark-mate/workspaces`）下按**会话 id** 代建 `<id>/` 并回 `workspace_temporary=true`；代建关闭（`workspace_dir` 为空）且未指定则报 `workspace_required`——**不回落 serve 进程目录**（那会让所有会话共用一个沙箱边界）。工作空间建成即不可变（它是底座 ACP session 的 cwd，也是原生权限 `workspace-write` 的边界）。**能力选定（M3）**：`capabilities: {skills?, mcps?}` 把这条会话钉在技能/MCP 的一个子集上，逐 kind **三态**——键缺失 = 未声明（回落 agent 声明）；`[]` = 明确一个都不要；非空 = 白名单。传了键就按白名单**覆盖**（不是求交，否则"这条会话想放宽"永远表达不出来）。选定与它解析出的**能力指纹**一起落库，重启后不漂移。不可达（id 不存在 / 该 runtime 不适用，两者**同码不同文案**）→ `40001 capability_not_applicable` 且**零副作用**（不建会话、不拉进程、不写库、不留代建目录）。生效边界见「能力的生效边界」一节 |
 | GET | `/conversations/:id` | 会话详情（元数据 + 挂起权限 + 权限记忆） |
 | PATCH | `/conversations/:id` | 元数据更新 `{title?, pinned?, archived?, model?}`（`model` 会话级模型：opencode 仅创建时可选，dsh 会话内即时） |
 | GET | `/conversations/:id/history` | 事件回放（`?after=` 向后 / `?before=` 向前（加载更早，`before=0`=末尾一页）互斥 + `limit`，默认 200/上限 1000；sqlite 模式读 events 表可翻到会话第一条） |
@@ -270,7 +270,7 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | GET | `/skills` · `/mcps` · `/tools` | 能力数据面目录（Skill/MCP/Tool；MCP 含探测状态与 `tool_count`、`enabled`/`scope`；skill 含 `enabled` 与正文扫描 `warnings`） |
 | POST | `/skills` | 新建 skill 定义（body = skill 定义，`id` 必填）：**先过注册闸门**（正文扫描、`runtimes` 去重、**id 词法**）→ 通过才提交给载体（memory = 原子替换文件、sqlite = 事务插行 + 变更审计，未知键一律保留）→ 最后才更新内存；id 已存在 → 40901 `skill_exists`，闸门拒绝 → 40001 `definition_invalid` 且**零写入**（草稿从未提交，无需回滚）。**id 词法是底座契约，不是平台审美**：须匹配 `^[a-z0-9]+(-[a-z0-9]+)*$` 且 ≤64 位——dsh 的 `dsh-skill` 对 skill 文件 frontmatter 的 `name` 强制这一条，不合规只打一条 warn 就**静默丢弃整条**，而平台物化正是把 id 原样写成 `name`，于是放行不合规 id 等于造出「物化体检报 `in_sync`、底座永远读不到」的 skill（2026-10-08 实测确认）；物化层同规则再拦一道（导出 API 被直接调用也不放行）。MCP/tool 的 id 规则不受此波及 |
 | PUT | `/skills/:id` | 覆盖写 skill 定义：**只改 body 里出现过的键**（未出现的保留原值；`null` 删键、`""`/`[]` 清空），路径 id 与 body id 不一致 → 40000；提交前用载体的乐观锁复核（文件 = mtime+size、DB = 行 `revision`），读写窗口内被外部改动 → 40901 `definition_changed`（**绝不 last-write-wins**） |
-| DELETE | `/skills/:id` | 删定义（文件 / DB 行）+ 撤回已物化的 `.forge-managed` 副本 + 摘内存条目；幂等（本来就不存在 → `deleted:false` 且 code=0，不报 404） |
+| DELETE | `/skills/:id` | 删定义（文件 / DB 行）+ 撤回已物化的 `.mate-managed` 副本 + 摘内存条目；幂等（本来就不存在 → `deleted:false` 且 code=0，不报 404） |
 | PATCH | `/skills/:id` | `{enabled}` 启停一个 skill（§13.4 S4）：写回定义载体的 `enabled`（**只改这一个键、未知键原样保留**）+ 更新注册表 + 立刻重校投影；禁用 = overlay，已物化副本被**撤回**，随时可恢复。载体里没有它（代码注入/内存注册）→ 40001 `skill_not_persistable`，**不顺手新建** |
 | GET | `/skills/:id/materialization` | 物化体检（§13.4 S2，只读）：每处物化目标的期望摘要 `hash` vs 实测 `actual_hash` + `status`（`in_sync`/`missing`/`tampered`/`stale`/`disabled`/`user_owned`/`not_applicable`/`untested`/`not_configured`）+ `owners`（该落点上共同投放的 runtime 集合）；回答「agent 实际读到的与注册表一致吗」 |
 | POST | `/mcps` | 新建 MCP server 定义：闸门比 skill 多（transport 枚举、stdio **绝对路径**、`vault:`/`env:` 引用词法、明文与密钥键不重复），写面**一个都不新开也不放行**——定义怎么进注册表就走同一条路；id 已存在 → 40901 `mcp_exists`；载体同 skill 写面（memory 文件 / sqlite `mcp_servers` 行 + 变更审计） |
@@ -331,16 +331,16 @@ REST 前缀 `/v1/forge`；响应统一信封 `{code, requestID, msg, data}`，`c
 | 定义被闸门拒绝（正文 critical / transport 非法 / stdio 非绝对路径 / 引用词法…） | `40001` | `definition_invalid` | 改定义内容重试；**被拒的定义零字节落盘** |
 | 目标不存在（`PUT` 到不存在的 id） | `40401` | `skill_not_found` · `mcp_not_found` | 刷新列表（**平台不会"顺便新建"**，打错 id 不会静默建出空定义） |
 | id 已被占用 / 读写窗口内被外部改动 | `40901` | `*_exists` · `definition_changed` | 换 id 或刷新后重试（**平台绝不 last-write-wins**） |
-| 未配置能力目录（**仅 memory 模式**） | `40001` | `capability_dir_unset` | 设 `FORGE_CAPABILITIES`；不静默"内存生效"（sqlite 模式的定义在 DB 里，写面不需要目录） |
+| 未配置能力目录（**仅 memory 模式**） | `40001` | `capability_dir_unset` | 设 `MATE_CAPABILITIES`；不静默"内存生效"（sqlite 模式的定义在 DB 里，写面不需要目录） |
 
-**写面的载体按持久层模式分叉（M6-3）**：`FORGE_STORE=sqlite` 时能力定义的事实源是 DB——
+**写面的载体按持久层模式分叉（M6-3）**：`MATE_STORE=sqlite` 时能力定义的事实源是 DB——
 `skills`/`mcp_servers` 两张表**就是定义本身**（`id` + 完整 `body` + `revision`），写面走
 **单事务：行 CAS + 同事务追一条变更审计**（`capability_revisions`：kind / capability_id / action /
 actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文件的 mtime+size 换成行 `revision`，
 但对外语义**逐字不变**：同一个 `definition_changed`/40901、同一句"刷新后重试、你的改动未写入"、
 绝不 last-write-wins；响应里的 `path` 在 sqlite 模式回带定位串 `db:skill/<id>`（`db:mcp/<id>`），
 文件模式仍是定义文件路径——**它只是给人看的定位串，不是任何判据**。**memory 模式一切照旧**：
-定义是 `FORGE_CAPABILITIES/{skills,mcp}/<id>.json`，落盘走 C9/M10 纪律（读 map → 只改目标键 →
+定义是 `MATE_CAPABILITIES/{skills,mcp}/<id>.json`，落盘走 C9/M10 纪律（读 map → 只改目标键 →
 未知键保留 → 同目录 staging + 原子 rename + 权限沿用 + mtime 乐观锁）——memory 模式没有持久层，
 文件是它唯一的持久形态，所以不跟着换。装载侧同源分派：sqlite 模式从 DB **整体替换**式装载
 （先清空再逐行过闸门，库里删掉的行不会以幽灵定义留在内存里），memory 模式仍是目录装载。
@@ -354,13 +354,13 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 所以重启不会重复导入、"我故意删掉的技能"也不会自己回来。导入**绝不覆盖**已有行（只插缺失的，
 逐条计入 `existing`）：文件是旧的一版、面板才是新的，按文件回滚等于静默的数据丢失。目录里的
 `tools/*.json` **不参与持久化**（工具是探测产物，每轮重建），但导入器会**报数**并在启动日志里
-写明（静默丢弃用户放进去的文件是最坏的一种"成功"）。补齐/重跑用 `forge capability import`
-（不看指纹、每次按行判重），把 DB 写回目录用 `forge capability export`（此后文件是导出物，
-`FORGE_CAPABILITIES` 在 sqlite 模式下就是这个**导入/导出目录**）。
+写明（静默丢弃用户放进去的文件是最坏的一种"成功"）。补齐/重跑用 `mate capability import`
+（不看指纹、每次按行判重），把 DB 写回目录用 `mate capability export`（此后文件是导出物，
+`MATE_CAPABILITIES` 在 sqlite 模式下就是这个**导入/导出目录**）。
 
 **Agent 定义走同一条搬家路径（M6-6）**：装配期在 sqlite 模式下自动导入一次
 `<AgentDir>/*.json`，指纹进 `meta.imported_agents`（**两个域各自记指纹**：只改 agent 目录不会让
-能力面的导入重跑一遍），`forge agent import|export` 是对应的运维口子，语义与能力面逐条相同
+能力面的导入重跑一遍），`mate agent import|export` 是对应的运维口子，语义与能力面逐条相同
 （按行判重、绝不覆盖、坏定义逐条报出、`export` 后文件是导出物且 `meta.default_agent` 一并写成
 `default.json`）。三处与能力面**刻意不同**，都是 agent 侧的事实：① 目录里的 `providers.json`
 （档案留在文件侧）与 `default.json`（显式选择进 meta）不是 agent 定义，导入导出都跳过它们；
@@ -370,7 +370,7 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 
 **定时任务定义走同一条搬家路径（M6-7）**：装配期在 sqlite 模式下自动导入一次
 `<AutomationDir>/*.json`，指纹进 `meta.imported_automations`（**三个域各自记指纹**），
-`forge automation import|export` 是对应的运维口子。它与前两个域**唯一的结构性差别**是"一个文件
+`mate automation import|export` 是对应的运维口子。它与前两个域**唯一的结构性差别**是"一个文件
 装了两样东西"：导入按 `automation.ReservedKeys` 把文件切成**定义正文 + 运行态列**并**同一事务**
 写进去（不出现"定义进来了、运行史没进来"的半截状态），导出反向合成同一个 `<id>.json`
 （所以"导出 → 空库导入 → 再导出"逐字节相同）。时间归一成 UTC + RFC3339Nano——它是认领 CAS 的
@@ -388,7 +388,7 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 | 定义不可执行（schedule 语义不合法 / `timezone` 不是 IANA 名 / `target.cwd` 非绝对路径 / `target.prompt` 为空 / 文件不是 JSON 对象） | `40001` | `definition_invalid` | 改定义内容重试；**被拒的定义零字节落盘** |
 | 目标不存在 | `40401` | `automation_not_found` | 刷新列表（**平台不会"顺便新建"**） |
 | id 已被占用 / 读写窗口内被外部改动 | `40901` | `automation_exists` · `definition_changed` | 换 id 或刷新后重试 |
-| 未配置定时任务目录（**仅 memory 模式**） | `40001` | `automation_dir_unset` | 设 `FORGE_AUTOMATIONS`；sqlite 模式的定义在 DB 里，写面不需要目录 |
+| 未配置定时任务目录（**仅 memory 模式**） | `40001` | `automation_dir_unset` | 设 `MATE_AUTOMATIONS`；sqlite 模式的定义在 DB 里，写面不需要目录 |
 | 定义已停用/归档，却要手动触发 | `40001` | `automation_disabled` | 先 `PUT {"enabled":true}`（或把 `state` 从 `archived` 改回 `active`）再触发 |
 
 **触发失败不算接口错误**：定时触发失败时接口是 `code=0`，失败事实落在定义文件的
@@ -401,7 +401,7 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 | 情形 | code | msg 里的分类名 | 用户该做什么 |
 | --- | --- | --- | --- |
 | 建会话时选的能力不可达（id 不存在 / 该 runtime 不适用） | `40001` | `capability_not_applicable` | 按 msg 里逐条列出的原因改选；**零副作用**（不建会话、不拉进程、不写库） |
-| 能力代际数达上限（`FORGE_GENERATION_LIMIT`，默认 4） | `40901` | `generation_limit_reached` | 复用现有能力集（同一套技能/MCP 组合）、等空闲代际被回收、或调大上限。**平台绝不静默复用一个错误的能力集** |
+| 能力代际数达上限（`MATE_GENERATION_LIMIT`，默认 4） | `40901` | `generation_limit_reached` | 复用现有能力集（同一套技能/MCP 组合）、等空闲代际被回收、或调大上限。**平台绝不静默复用一个错误的能力集** |
 | 权限面已收窄（原生权限/provider 变化）而新代际建不起来 | `40901` | `generation_switch_required` | 稍后重试（先修配置）；**这一轮不会用已经收回的权限面继续跑**——宁可拒发 |
 
 WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|ping}`；**每次连接的第一条帧必须是通道级 `attach`**（`{action:"attach", token:"…"}`，无 `agg_id`）——它交付 stream 面凭据，服务端 5s 内未收到即关闭（1008），令牌因此不进 URL；其后的 `attach` 才带 `agg_id` 与 `since_seq`（省略 → snapshot + live；数字含 0 → 按序重放 + live）。服务端 `{type: snapshot|event|detached|pong}`，event 载荷 `{type, seq, agg_id, version, payload}`，type 域见 `backend/internal/manager/events.go`（`session.message/thought/tool_call/tool_update/user_message`、`session.permission_request/permission_resolved`、`session.elicitation_request/elicitation_resolved`、`session.input_queued/input_delivered/input_cancelled`（§6 排队输入）、`session.config_options`（运行时会话配置项全量更新，如模型）、`session.commands`（底座自报的会话可用斜杠命令**全量**列表——**发现面，不是平台声明的能力**：只有 opencode 会通告，dsh 的 ACP 面不含命令故永不产生该事件；空数组表示"通告了当前没有命令"，执行只是把命令行当普通提示词发出去，平台不投影也不写面）、`turn.ended/error`、`run.cancelled`、`automation.run`（一次 automation 触发的结果，含没产生会话的 duplicate/overlap/skipped——**持久运行史在定义文件的 `recent_runs`，这条事件只走实时通道**）等）。会话动作的 POST 响应返回当前 `event_seq` 水位，作为 attach 续传起点。**文本增量在服务端攒批**（③ 合并，25ms / 4KB / 64 条）：一帧 `session.message`/`thought` 可能覆盖多个 delta，客户端按 `msg_id` 追加同一条消息的渲染逻辑不变；工具卡/权限卡/终态等事件不合并，顺序不被文本增量越过。
@@ -409,7 +409,7 @@ WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|p
 ## 开发
 
 ```bash
-make all      # 单二进制（前端 pnpm build → 内嵌 → go build -tags release），产物 ./forge
+make all      # 单二进制（前端 pnpm build → 内嵌 → go build -tags release），产物 ./mate
 make web      # 仅构建前端并刷新 embed 宿主目录
 make build    # 不带 release 的内核编译（无需前端产物）
 make vet / test   # go vet / go test ./...
@@ -427,7 +427,7 @@ pnpm ui:accept            # 真 Chrome 界面验收：能力勾选面板 / `/` �
 ```
 
 桌面入口的靶子反过来——**脚本自己起壳、自己起核**，所以跑之前别让 `make dev` / `make desktop/dev`
-的核同时活着（两个核心共用 `~/.forge/forge.db`）；前置是 `make desktop/payloads` 已在场
+的核同时活着（两个核心共用 `~/.ark-mate/mate.db`）；前置是 `make desktop/payloads` 已在场
 （壳在启动期就解析随包载荷，缺了直接拒启、不回落 PATH）：
 
 ```bash
@@ -444,45 +444,45 @@ make verify/desktop-dod
 容器：
 
 ```bash
-make image                                    # 最小镜像：只含 forge 本体（不含底座；容器能起、health 通，但无免 key 自检）
+make image                                    # 最小镜像：只含 mate 本体（不含底座；容器能起、health 通，但无免 key 自检）
 make image/runtimes WITH_DSH=true WITH_OPENCODE=true   # 额外内置 dsh / opencode（可分别开关）
 make image/run                                # 起容器（具名卷 /data，端口只绑回环）
 docker compose up -d --build                  # 等价的 compose 路径（变量见 .env.example）
 ```
 
 数据（SQLite / transcript / agents / capabilities / 配置 / 代建工作空间）全落在 `/data` 一个卷里；
-容器内必须 `FORGE_ADDR=0.0.0.0:10001` 才映射得出去，对外部署先设 `FORGE_TOKEN`。完整参数、
+容器内必须 `MATE_ADDR=0.0.0.0:10001` 才映射得出去，对外部署先设 `MATE_TOKEN`。完整参数、
 底座开关语义与受限网络（镜像站 / Go 代理）覆盖方式见 `docs/deployment.md` §4。
 
-CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真实会话冒烟）、
-`forge migrate`（transcript → SQLite 幂等导入）、`forge transcripts prune --older-than <dur>`
-（显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
-`forge capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
+CLI 子命令：`mate serve`（控制面 daemon）、`mate demo`（单轮真实会话冒烟）、
+`mate migrate`（transcript → SQLite 幂等导入）、`mate transcripts prune --older-than <dur>`
+（显式清理 transcript；不设自动删除）、`mate config`（打印解析后配置与每项来源）、
+`mate capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
 能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过。
 **它在 sqlite 模式下只对"导入前/导出后的存量文件"有意义**：文件不再是事实源，跑完还要 `import`
 才会进库）、
-`forge capability import` / `export`（M6：能力定义换事实源的两个运维口子。`import` 把
+`mate capability import` / `export`（M6：能力定义换事实源的两个运维口子。`import` 把
 `<CapabilityDir>/{skills,mcp}/*.json` 灌进 SQLite，**按行判重、已有行绝不覆盖**，坏定义逐条报出、
 其余照常导入；`export` 把 DB 里的定义写回能力目录（此后文件是**导出物**），未知键原样、两次导出
 逐字节相同，`--dry-run` 只打印将要写出的内容。装配期在 sqlite 模式下会自动跑一次 `import`
 （幂等靠目录指纹 `meta.imported_capabilities`：目录没变就整体跳过，所以"我删掉的技能"不会自己
 回来），需要重跑或补文件时用显式命令）、
-`forge agent import` / `export`（M6-6：agent 定义换事实源的两个运维口子，形态与 `forge capability
+`mate agent import` / `export`（M6-6：agent 定义换事实源的两个运维口子，形态与 `mate capability
 import|export` 一致——`import` 把 `<AgentDir>/*.json` 灌进 SQLite（**按行判重、已有行绝不覆盖**，
 `providers.json`/`default.json` 不参与，`default.json` 的显式选择在 meta 未设置时被采纳进
 `meta.default_agent`），`export` 把 DB 里的定义写回目录并**同时写出 `default.json`**；装配期在
 sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_agents`）、
-`forge automation import` / `export`（M6-7：定时任务换事实源的两个运维口子，形态与 `forge agent
+`mate automation import` / `export`（M6-7：定时任务换事实源的两个运维口子，形态与 `mate agent
 import|export` 一致——文件里的运行态键被切成**运行态列**导入、导出时再合成同一个文件；装配期在
 sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automations`）、
-`forge doctor`（**只读体检**：前端资产来源与逐文件摘要、随包载荷清单与入口存在性、载荷
+`mate doctor`（**只读体检**：前端资产来源与逐文件摘要、随包载荷清单与入口存在性、载荷
 `nodeAbi` 与 `release.json` 的一致性、数据目录可写性、监听端口占用；`--verify-payload` 对载荷树做
 **全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数），`--json` 供诊断包/CI 消费。
 打包态还会拿 `<Resources>/release.json` 逐项比对 coreVersion / 契约代数 / webBuildId / webDigest /
 载荷清单——不符退出码 1；"无法校验"（非打包态没有契约、端口已被自己占用）只记警告，不判失败）、
-`forge --version [--json]`（核心版本与 API 契约版本；`--json` 供打包期读取，是桌面发布契约
+`mate --version [--json]`（核心版本与 API 契约版本；`--json` 供打包期读取，是桌面发布契约
 `release.json` 的 `coreVersion` / `apiContract` 唯一取法）。
-（历史上的 `forge acp-serve` / `forge acp-demo` 已随 echo 演示底座删除。）
+（历史上的 `mate acp-serve` / `mate acp-demo` 已随 echo 演示底座删除。）
 
 部署形态（单二进制 / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。
 
@@ -490,14 +490,14 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 
 ```
 backend/                单 Go module（github.com/morehao/ark-mate）
-  cmd/forge             进程入口：只做子命令分发（→ internal/app/command）
+  cmd/mate             进程入口：只做子命令分发（→ internal/app/command）
   pkg/                  可复用基础设施（不得 import internal/，由 archtest 守卫）
     acl                 ACP 客户端（stdio 传输、能力探测、权限、elicitation（unstable）、错误分类）
     runtime/            运行时注册表 + adapter（opencode/、deepseekharness/，纯数据）
     mcp                 自研最小 MCP 客户端（stdio / http / streamable_http / sse）
     capability          Skill/MCP/Tool 能力定义装载 + skill 物化（投影落点由 runtime 声明）
     routing             路由引擎 FirstAvailable 切片
-    config              进程配置（flag + FORGE_* 环境变量 + .forge/config 目录化）
+    config              进程配置（flag + MATE_* 环境变量 + .ark-mate/config 目录化）
     procreg             进程注册表（孤儿 runtime 子进程回收）
     web                 release 内嵌前端产物宿主（go:embed dist）
     dbclient             gorm 句柄装配 + 自注册纯 Go SQLite dialector（无 CGO）
@@ -522,7 +522,7 @@ frontend/               pnpm workspace（apps/* + packages/*）
   packages/desktop-contract  @ark/desktop-contract（载体契约唯一真源：常量 + 类型 + 纯函数判定；零 Electron 引用）
   packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
   packages/types        @ark/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
-  packages/api          @ark/api（axios 客户端 + /v1/forge resources）
+  packages/api          @ark/api（axios 客户端 + /v1/mate resources）
   packages/ui           @ark/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
 docs/                   设计/路线图 + runtime 适配核实 + 部署运维
   deployment.md         部署/运维（单二进制、systemd、容器、环境变量、备份、排障）

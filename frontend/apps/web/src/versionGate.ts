@@ -5,7 +5,7 @@
  *   - 一致 / 无法判定 → 正常进界面（无法判定时只记 console 警告，见契约里的理由）；
  *   - 两侧都是已知值且不一致 → **整屏状态页**（不是白屏、不是零散接口报错），带刷新按钮。
  *
- * 取数走 `/v1/forge/meta`：桌面态由壳反代注入 restToken、浏览器态同源（独立部署时带用户令牌）。
+ * 取数走 `/v1/mate/meta`：桌面态由壳反代注入 restToken、浏览器态同源（独立部署时带用户令牌）。
  */
 import { getToken } from '@ark/api'
 import { tokens } from '@ark/ui'
@@ -13,13 +13,13 @@ import { UNKNOWN_BUILD_ID, versionGate, type VersionGateResult } from '@ark/desk
 
 /** 编译期注入的构建 id（声明见 src/env.d.ts）。取不到就按 unknown——与核心同一口径。 */
 export const INJECTED_BUILD_ID: string =
-  typeof __FORGE_WEB_BUILD_ID__ === 'string' ? __FORGE_WEB_BUILD_ID__ : UNKNOWN_BUILD_ID
+  typeof __MATE_WEB_BUILD_ID__ === 'string' ? __MATE_WEB_BUILD_ID__ : UNKNOWN_BUILD_ID
 
 /** 从核心取它实际服务的那份资产的构建 id。失败返回 null（调用方按"无法判定"处理）。 */
 async function fetchCoreBuildId(): Promise<string | null> {
   const token = getToken()
   try {
-    const res = await fetch('/v1/forge/meta', {
+    const res = await fetch('/v1/mate/meta', {
       headers: token ? { authorization: `Bearer ${token}` } : {},
     })
     if (!res.ok) return null
@@ -34,7 +34,7 @@ async function fetchCoreBuildId(): Promise<string | null> {
 /**
  * 跑一次闸门。
  *
- * **vite dev 下直接放行**：dev 的页面由 vite 从源码现编译（`__FORGE_WEB_BUILD_ID__` 是启动那刻
+ * **vite dev 下直接放行**：dev 的页面由 vite 从源码现编译（`__MATE_WEB_BUILD_ID__` 是启动那刻
  * 的 HEAD），而 `make dev` 给核心的 `--web-dir` 指向的是上一次 `pnpm build` 的产物——两者本来
  * 就可能不是同一次构建，比对它们等于拿 A 的身份证核对 B 的档案。闸门的契约是"**被服务的产物**"
  * 前后一致，因此只对产物形态生效（内嵌 release、桌面壳的 dist、部署者的 dist）。
@@ -56,7 +56,7 @@ export async function runVersionGate(): Promise<VersionGateResult> {
 export function renderVersionMismatch(root: HTMLElement, web: string, core: string): void {
   root.innerHTML = ''
   const wrap = document.createElement('div')
-  wrap.setAttribute('data-forge-version-gate', 'mismatch')
+  wrap.setAttribute('data-mate-version-gate', 'mismatch')
   wrap.style.cssText = [
     'position:fixed', 'inset:0', 'display:flex', 'flex-direction:column',
     'align-items:center', 'justify-content:center', 'gap:16px', 'padding:32px',
@@ -78,7 +78,7 @@ export function renderVersionMismatch(root: HTMLElement, web: string, core: stri
   hint.textContent = '这条判据比的是页面里编译进的构建 id 与核心实际读到的那份资产的 build-id.txt。'
 
   const btn = document.createElement('button')
-  btn.id = 'forge-version-gate-reload'
+  btn.id = 'mate-version-gate-reload'
   btn.textContent = '刷新'
   btn.style.cssText = [
     `background:${tokens.primary}`, 'color:#fff', 'border:none', 'border-radius:6px',

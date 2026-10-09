@@ -54,7 +54,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	cfg.HomeDir = home
 	cfg.ConfigDir = filepath.Join(home, "config")
 	cfg.TranscriptDir = filepath.Join(home, "transcripts")
-	cfg.DBPath = filepath.Join(home, "forge.db")
+	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeSQLite
 	cfg.CapabilityDir = caps
 	cfg.AgentDir = agents

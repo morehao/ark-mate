@@ -9,7 +9,7 @@
 //     也拿不到任何写能力；
 //  2. 让外部 origin 的恶意页面即使打到回环，也拿不到任何一个面。
 //
-// 令牌传递（同设计 §7.2）：只经 **stdin** 交给核心（桌面态）、或由部署者设 FORGE_TOKEN（独立态）；
+// 令牌传递（同设计 §7.2）：只经 **stdin** 交给核心（桌面态）、或由部署者设 MATE_TOKEN（独立态）；
 // 不进 argv / env / 文件 / URL。
 package credential
 
@@ -32,7 +32,7 @@ type Scope uint8
 const (
 	// ScopeREST REST 面：容器/独立部署的直连，以及桌面态壳的反代。改数据的能力都在这里。
 	ScopeREST Scope = 1 << iota
-	// ScopeStream 事件流面（只读）：`/v1/forge/ws/events` 的首帧 attach 凭据。
+	// ScopeStream 事件流面（只读）：`/v1/mate/ws/events` 的首帧 attach 凭据。
 	ScopeStream
 )
 
