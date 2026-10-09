@@ -57,7 +57,7 @@ func TestImportCapabilityDirCountsAndAudit(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	ctx := context.Background()
 
-	stats, err := ImportCapabilityDir(ctx, st, dir, CapabilityImportOptions{}, nil)
+	stats, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{}, nil)
 	if err != nil {
 		t.Fatalf("ImportCapabilityDir: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 	ctx := context.Background()
 
 	// 装配期自动导入（看目录指纹）。
-	first, err := ImportCapabilityDir(ctx, st, dir, CapabilityImportOptions{Auto: true}, nil)
+	first, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || first.Inserted != 3 {
 		t.Fatalf("首次自动导入应插 3 行: %+v err=%v", first, err)
 	}
@@ -118,7 +118,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 	}
 
 	// 第二次自动导入：目录没变 → 整体跳过，一个字节都不写，**面板那一版也不动**。
-	second, err := ImportCapabilityDir(ctx, st, dir, CapabilityImportOptions{Auto: true}, nil)
+	second, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
 		t.Fatalf("第二次自动导入: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestImportCapabilityDirIsIdempotentAndNeverOverwrites(t *testing.T) {
 		[]byte(`{"id":"gamma","name":"Gamma"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	third, err := ImportCapabilityDir(ctx, st, dir, CapabilityImportOptions{}, nil)
+	third, err := ImportCapabilityDir(ctx, st, dir, DefinitionImportOptions{}, nil)
 	if err != nil {
 		t.Fatalf("显式导入: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 	ctx := context.Background()
 
 	src := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportCapabilityDir(ctx, src, srcDir, CapabilityImportOptions{}, nil); err != nil {
+	if _, err := ImportCapabilityDir(ctx, src, srcDir, DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	beforeSkills, err := src.ListSkillDefinitions(ctx)
@@ -181,7 +181,7 @@ func TestImportExportRoundTripKeepsUnknownKeys(t *testing.T) {
 
 	// 用导出物重建一个空库：逐字段（逐字节）一致。
 	dst := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportCapabilityDir(ctx, dst, exportDir, CapabilityImportOptions{}, nil); err != nil {
+	if _, err := ImportCapabilityDir(ctx, dst, exportDir, DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	afterSkills, err := dst.ListSkillDefinitions(ctx)
@@ -246,7 +246,7 @@ func TestExportCapabilityDirDryRunWritesNothing(t *testing.T) {
 }
 
 func TestImportExportRequireStore(t *testing.T) {
-	if _, err := ImportCapabilityDir(context.Background(), nil, "/tmp/x", CapabilityImportOptions{}, nil); err == nil {
+	if _, err := ImportCapabilityDir(context.Background(), nil, "/tmp/x", DefinitionImportOptions{}, nil); err == nil {
 		t.Fatal("无持久层应显式失败")
 	}
 	if _, err := ExportCapabilityDir(context.Background(), nil, "/tmp/x", false, nil); err == nil {
@@ -254,7 +254,7 @@ func TestImportExportRequireStore(t *testing.T) {
 	}
 	// 空目录 = 没有存量要搬，不是错误（sqlite 模式的写面本来就不需要目录）。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	stats, err := ImportCapabilityDir(context.Background(), st, "", CapabilityImportOptions{}, nil)
+	stats, err := ImportCapabilityDir(context.Background(), st, "", DefinitionImportOptions{}, nil)
 	if err != nil || stats.Dir != "" {
 		t.Fatalf("空目录应静默无事: %+v err=%v", stats, err)
 	}

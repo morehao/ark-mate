@@ -47,7 +47,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | --- | --- | --- | --- |
 | SQLite 库 | `~/.forge/forge.db` | `FORGE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） |
 | transcript | `~/.forge/transcripts/` | `FORGE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
-| Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`） |
+| Agent 定义 | `~/.forge/agents/<id>.json` | `FORGE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`）。**`FORGE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh`/`opencode` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`forge agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。两种模式下 `providers.json` 与 vault 锚点（本目录的父目录）都仍在这里 |
 | 密钥库（vault） | `~/.forge/vault.key` + `~/.forge/vault/` | `FORGE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
 | 自动化定义 | `~/.forge/automations/<id>.json` | `FORGE_AUTOMATIONS` | 定时任务的定义 + 运行态同文件（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）。**备份它就是备份任务**（含运行史）；手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.forge/capabilities/` | `FORGE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`FORGE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`forge capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `forge capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
@@ -126,7 +126,7 @@ curl -s http://127.0.0.1:10001/v1/forge/health     # {"code":0,"msg":"ok"}
 | `FORGE_STORE` | auto | `auto` / `sqlite` / `memory`（空同 `auto`）；非法值报错 |
 | `FORGE_DB` | `~/.forge/forge.db` | SQLite 路径 |
 | `FORGE_TRANSCRIPTS` | `~/.forge/transcripts` | wire transcript 目录 |
-| `FORGE_AGENTS` | `~/.forge/agents` | agent definitions 目录（vault 的 home 取它的父目录：`~/.forge`） |
+| `FORGE_AGENTS` | `~/.forge/agents` | Agent 定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 的 `agents` 表里）。两种模式下 vault 的 home 都取它的父目录（`~/.forge`），`providers.json` 也仍在它里面 |
 | `FORGE_VAULT_KEY` | 空 | 主密钥覆盖（32 字节 base64/hex）；**非空时不读不建 `vault.key`**（容器/CI 用）；密钥丢失 = 已有密文不可恢复 |
 | `FORGE_CAPABILITIES` | `~/.forge/capabilities` | 能力定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 里） |
 | `FORGE_AUTOMATIONS` | `~/.forge/automations` | 自动化定义目录（`<id>.json`；定义与运行态 overlay 同文件，手工可读） |

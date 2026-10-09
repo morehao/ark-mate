@@ -203,7 +203,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 目录没变 → 一个字节都不写；目录变了 → 只补缺失的行。失败只 WARN 不阻断启动
 		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `forge capability import`。
 		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
-			manager.CapabilityImportOptions{Auto: true}, nil); iErr != nil {
+			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			slog.Warn("serve: 导入存量能力定义失败（能力面可能为空；可跑 `forge capability import` 重试）",
 				"err", iErr, "dir", cfg.CapabilityDir)
 		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
@@ -211,6 +211,20 @@ func (a *App) Init(ctx context.Context) error {
 				"dir", imp.Dir, "skills", imp.Skills, "mcps", imp.Mcps,
 				"inserted", imp.Inserted, "existing", imp.Existing,
 				"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
+		}
+		// agent 定义一次性导入（M6-6）：与上面能力面**同一次触发、同一个理由**（v9 之后 DB 才是
+		// agent 定义的事实源，而存量定义还在 `FORGE_AGENTS` 里），也必须发生在 loadDefinitions 之前。
+		// 目录里的 `providers.json`（档案留在文件侧）与 `default.json`（显式选择进 meta）不参与导入。
+		//
+		// 两个域各自记指纹（`meta.imported_agents`）：只改 agent 目录不该让能力面的导入重跑一遍。
+		if imp, iErr := manager.ImportAgentDir(ctx, st, cfg.AgentDir,
+			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+			slog.Warn("serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `forge agent import` 重试）",
+				"err", iErr, "dir", cfg.AgentDir)
+		} else if !imp.Already && imp.Agents+imp.Inserted+imp.Existing+imp.Invalid > 0 {
+			slog.Info("serve: 存量 agent 定义导入完成",
+				"dir", imp.Dir, "agents", imp.Agents, "inserted", imp.Inserted,
+				"existing", imp.Existing, "invalid", imp.Invalid, "default_agent", imp.DefaultAgent)
 		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {

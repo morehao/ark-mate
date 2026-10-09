@@ -70,7 +70,7 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	loaded := 0
 	for _, p := range files {
 		base := filepath.Base(p)
-		if base == "providers.json" || base == defaultAgentFile {
+		if base == providersFileName || base == defaultAgentFile {
 			continue // 目录级配置（provider 档案 / 当前 Agent 选择），非 agent 定义
 		}
 		b, err := os.ReadFile(p)

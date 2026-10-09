@@ -2,14 +2,11 @@ package manager
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,49 +27,20 @@ import (
 //
 // 三条都属于**运维动作**，刻意不加 REST 路由（C1 的双向比对开销与新的对外面都不值当）。
 
-// CapabilityImportOptions 导入的行为开关。
-type CapabilityImportOptions struct {
-	// Auto 装配期自动导入：幂等靠目录指纹（见 CapabilityImportStats.Marker），
-	// 目录没变就整体跳过。显式 `forge capability import` 用 false（每次按行判重）。
-	Auto bool
-	// DryRun 只扫描与校验、不写库（与 `capability migrate --dry-run` 同口径）。
-	DryRun bool
-}
-
-// CapabilityImportStats 一次导入的完整计数（人话输出与启动日志共用同一份事实）。
+// CapabilityImportStats 一次导入的完整计数 = 域无关计数（DefinitionImportStats）
+// + 能力面自己的分域计数（Skills / Mcps）。
 type CapabilityImportStats struct {
-	// Dir 实际读取的能力目录（空 = 没配置，什么都没做）。
-	Dir string
-	// Marker 本次的目录指纹（Auto 模式写入 meta，作为下次的幂等依据）。
-	Marker string
+	DefinitionImportStats
 	// Skills / Mcps 目录里**过了闸门**的条数。
 	Skills int
 	Mcps   int
-	// Invalid 读不了或过不了闸门的文件数（逐条 WARN，**不整体失败**）。
-	Invalid int
-	// Tools `<dir>/tools/*.json` 的条数（P-1：这张表不迁）。**计数不打折**：静默丢弃
-	// 静态工具文件会表现为"我明明放了 /tools 里那个文件，它怎么没了"。
-	Tools int
-	// Inserted / Existing 真的插进库的行数 / 库里已有而按"绝不覆盖"保留的行数。
-	Inserted int
-	Existing int
-	// Already true = 目录指纹没变，整体跳过（一个字节都没写）。
-	Already bool
-}
-
-// CapabilityExportStats 一次导出的计数。
-type CapabilityExportStats struct {
-	Dir     string
-	Written int // 写出的文件数（DryRun 下是"将要写出"的）
-	Failed  int // 解码/写盘失败的文件数（逐条已报出）
-	DryRun  bool
 }
 
 // ImportCapabilityDir 从目录导入存量能力定义到持久层（sqlite 模式专用）。
 //
 // 逐条过 `capability.ValidateSkill`/`ValidateMcpServer` 闸门（与装载、写面同一道门）：
 // 一手坏定义不该让整次导入失败（其余照常进来），但必须**逐条可见**——统计 + `out` 里的行。
-func ImportCapabilityDir(ctx context.Context, st *store.Store, dir string, opts CapabilityImportOptions, out io.Writer) (CapabilityImportStats, error) {
+func ImportCapabilityDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (CapabilityImportStats, error) {
 	var stats CapabilityImportStats
 	if st == nil {
 		return stats, errors.New("manager: 导入能力定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
@@ -86,44 +54,23 @@ func ImportCapabilityDir(ctx context.Context, st *store.Store, dir string, opts 
 	items, scanStats := scanCapabilityDir(dir, out)
 	stats = scanStats
 	if opts.DryRun {
-		for _, it := range items {
-			if _, found, err := getDefinitionRow(ctx, st, it); err != nil {
-				return stats, err
-			} else if !found {
-				stats.Inserted++
-			} else {
-				stats.Existing++
-			}
-		}
-		return stats, nil
+		return stats, countDryRun(ctx, st, items, &stats.DefinitionImportStats)
 	}
 	marker := ""
 	if opts.Auto {
 		marker = stats.Marker
 	}
-	res, err := st.ImportCapabilityDefinitions(ctx, items, marker)
-	if errors.Is(err, store.ErrAlreadyImported) {
-		stats.Already = true
-		stats.Inserted, stats.Existing = 0, 0
-		return stats, nil
-	}
-	if err != nil {
-		return stats, err
-	}
-	stats.Inserted, stats.Existing = res.Inserted, res.Existing
-	if out != nil && res.Inserted > 0 {
-		fmt.Fprintf(out, "capability import: 导入 %d 条（%d 条已存在，按「导入绝不覆盖」保留）\n",
-			res.Inserted, res.Existing)
-	}
-	return stats, nil
+	err := importDefinitionRows(ctx, st, items, model.MetaKeyImportedCapabilities, marker,
+		&stats.DefinitionImportStats, "capability", out)
+	return stats, err
 }
 
 // ExportCapabilityDir 把持久层里的能力定义写回目录（文件从此是导出物）。
 //
 // 正文**逐字节取自 DB**（`Marshal` 语义复用：键排序 + 2 空格缩进 + 末尾换行），未知键因此原样
 // 落在文件里；写盘走 `capability.WriteDefinitionFile`（同目录 staging + 原子 rename + 权限沿用）。
-func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (CapabilityExportStats, error) {
-	stats := CapabilityExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
+func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
+	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
 		return stats, errors.New("manager: 导出能力定义需要 sqlite 持久层（FORGE_STORE=sqlite）")
 	}
@@ -157,14 +104,17 @@ func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRu
 		return rows[i].id < rows[j].id
 	})
 
+	// 逐条经 DefinitionFile 归一一次（DB 里的 body 可能是手工写进去的：少缩进/带 BOM），
+	// 导出物必须与写面产出的文件**逐字节同形**（幂等：导出两次结果相同）。
+	outRows := make([]exportRow, 0, len(rows))
 	for _, r := range rows {
-		// 经 DefinitionFile 归一一次：DB 里的 body 可能是手工写进去的（不留神就少缩进/带 BOM），
-		// 导出物必须与写面产出的文件**逐字节同形**（幂等：导出两次结果相同）。
-		doc, err := capability.DecodeDefinitionDoc(filepath.Join(stats.Dir, r.sub, r.id+".json"), []byte(r.body))
+		rel := r.sub + "/" + r.id + ".json"
+		path := filepath.Join(stats.Dir, r.sub, r.id+".json")
+		doc, err := capability.DecodeDefinitionDoc(path, []byte(r.body))
 		if err != nil {
 			stats.Failed++
 			if out != nil {
-				fmt.Fprintf(out, "  ✗ %s/%s.json: %v\n", r.sub, r.id, err)
+				fmt.Fprintf(out, "  ✗ %s: %v\n", rel, err)
 			}
 			continue
 		}
@@ -172,27 +122,13 @@ func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRu
 		if err != nil {
 			stats.Failed++
 			if out != nil {
-				fmt.Fprintf(out, "  ✗ %s/%s.json: %v\n", r.sub, r.id, err)
+				fmt.Fprintf(out, "  ✗ %s: %v\n", rel, err)
 			}
 			continue
 		}
-		if dryRun {
-			stats.Written++
-			if out != nil {
-				fmt.Fprintf(out, "  ── %s/%s.json（--dry-run，未写盘）\n%s", r.sub, r.id, indentJSONBlock(string(body)))
-			}
-			continue
-		}
-		if err := capability.WriteDefinitionFile(filepath.Join(stats.Dir, r.sub, r.id+".json"), body); err != nil {
-			stats.Failed++
-			fmt.Fprintf(os.Stderr, "capability export: 写出 %s/%s.json 失败: %v\n", r.sub, r.id, err)
-			continue
-		}
-		stats.Written++
-		if out != nil {
-			fmt.Fprintf(out, "  ✓ %s/%s.json\n", r.sub, r.id)
-		}
+		outRows = append(outRows, exportRow{Label: rel, Path: path, Body: body})
 	}
+	writeExportRows(outRows, dryRun, &stats, "capability", out)
 	return stats, nil
 }
 
@@ -200,9 +136,9 @@ func ExportCapabilityDir(ctx context.Context, st *store.Store, dir string, dryRu
 //
 // 与 `Registry.LoadDir` 的关系：**同一个目录、同一道闸门**，但这里的产物是"要写进 DB 的正文"，
 // 而不是内存注册表条目——导入完成后由装载层从 DB 读回来，装载路径只有一条。
-func scanCapabilityDir(dir string, out io.Writer) ([]store.CapabilityImportItem, CapabilityImportStats) {
-	stats := CapabilityImportStats{Dir: dir}
-	items := make([]store.CapabilityImportItem, 0, 8)
+func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem, CapabilityImportStats) {
+	stats := CapabilityImportStats{DefinitionImportStats: DefinitionImportStats{Dir: dir}}
+	items := make([]store.DefinitionImportItem, 0, 8)
 
 	skillFiles := globSorted(filepath.Join(dir, capSubSkills))
 	for _, path := range skillFiles {
@@ -232,7 +168,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.CapabilityImportItem,
 			warnFile(out, "skill", path, err)
 			continue
 		}
-		items = append(items, store.CapabilityImportItem{
+		items = append(items, store.DefinitionImportItem{
 			Kind: model.CapabilityKindSkill, ID: sk.ID, Body: string(body),
 		})
 		stats.Skills++
@@ -266,7 +202,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.CapabilityImportItem,
 			warnFile(out, "mcp", path, err)
 			continue
 		}
-		items = append(items, store.CapabilityImportItem{
+		items = append(items, store.DefinitionImportItem{
 			Kind: model.CapabilityKindMcp, ID: m.ID, Body: string(body),
 		})
 		stats.Mcps++
@@ -275,7 +211,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.CapabilityImportItem,
 	// tools 不迁（P-1），但**必须报数**：静默丢弃用户放在这里的文件是最坏的一种"成功"。
 	stats.Tools = len(globSorted(filepath.Join(dir, "tools")))
 
-	stats.Marker = fingerprintCapabilityFiles(skillFiles, mcpFiles)
+	stats.Marker = fingerprintPaths(append(append([]string{}, skillFiles...), mcpFiles...))
 	return items, stats
 }
 
@@ -290,27 +226,12 @@ func globSorted(dir string) []string {
 	return files
 }
 
-// fingerprintCapabilityFiles 目录指纹（相对子目录 + 文件名 + 大小，稳定序）——导入幂等标记。
-//
-// 与 `fingerprintTranscripts` 同构（文件名 + 大小）：只改文件内容而不改大小的编辑可能漏判，
-// 但漏判的后果只是"这次没自动导入"（显式 `forge capability import` 随时可补），
-// 而把"目录没变"判成"变了"会让每次启动都重跑一遍导入（噪音 + 无意义的事务）。
-func fingerprintCapabilityFiles(skillFiles, mcpFiles []string) string {
-	h := sha256.New()
-	for _, p := range append(append([]string{}, skillFiles...), mcpFiles...) {
-		fi, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		sub := filepath.Base(filepath.Dir(p))
-		_, _ = fmt.Fprintf(h, "%s/%s:%d\n", sub, filepath.Base(p), fi.Size())
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
 // warnFile 一条坏定义：WARN 日志 + （有人看输出时）一行人话。
+//
+// `kind` 是**定义的域**（skill / mcp / agent），它同时是日志与输出的分类依据——不写死
+// "capability"，否则 agent 的坏定义会以能力面的名义报出来（排查时先被误导一次）。
 func warnFile(out io.Writer, kind, path string, err error) {
-	slog.Warn("capability: 导入时跳过一条定义", "kind", kind, "file", path, "err", err)
+	slog.Warn("定义导入：跳过一条坏定义", "kind", kind, "file", path, "err", err)
 	if out != nil {
 		fmt.Fprintf(out, "  ✗ %s/%s: %v\n", kind, filepath.Base(path), err)
 	}
@@ -329,7 +250,7 @@ func indentJSONBlock(s string) string {
 }
 
 // getDefinitionRow 读一条定义行是否存在（DryRun 统计用）。
-func getDefinitionRow(ctx context.Context, st *store.Store, it store.CapabilityImportItem) (string, bool, error) {
+func getDefinitionRow(ctx context.Context, st *store.Store, it store.DefinitionImportItem) (string, bool, error) {
 	if it.Kind == model.CapabilityKindMcp {
 		row, found, err := st.GetMcpServerDefinition(ctx, it.ID)
 		if err != nil || !found {

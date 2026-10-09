@@ -65,7 +65,7 @@ func capabilityImport(args []string) {
 	defer st.Close()
 
 	stats, err := manager.ImportCapabilityDir(context.Background(), st, root,
-		manager.CapabilityImportOptions{DryRun: *dryRun}, os.Stdout)
+		manager.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "capability import: %v（未写入任何内容）\n", err)
 		os.Exit(1)

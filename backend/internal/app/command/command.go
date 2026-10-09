@@ -35,11 +35,13 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge capability migrate      skill 定义迁移（旧 sources[] → runtimes[]；--dry-run 可预览）
   forge capability import       ▲ 能力目录 → SQLite 导入（M6：sqlite 模式下 DB 是事实源；按行判重不覆盖）
   forge capability export       把 SQLite 里的能力定义写回能力目录（此后文件是导出物）
+  forge agent import            Agent 定义目录 → SQLite 导入（M6-6：sqlite 模式下 DB 是事实源；按行判重不覆盖）
+  forge agent export            把 SQLite 里的 Agent 定义写回定义目录（此后文件是导出物）
   forge doctor [flags]          只读体检：资产来源与摘要、随包载荷清单与全量复算、数据目录可写性、端口占用
   forge --version [--json]      打印核心版本与 API 契约版本（--json 供机器读）
 
 子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
-            forge capability {migrate,import,export} -h / forge doctor -h
+            forge capability {migrate,import,export} -h / forge agent {import,export} -h / forge doctor -h
 `
 
 // versionInfo `forge --version --json` 的输出形状（M4-1）。
@@ -106,6 +108,8 @@ func Run(args []string) int {
 		configCmd(args[1:])
 	case "capability":
 		capabilityCmd(args[1:])
+	case "agent":
+		agentCmd(args[1:])
 	case "doctor":
 		doctor(args[1:])
 	case "-h", "--help", "help":
