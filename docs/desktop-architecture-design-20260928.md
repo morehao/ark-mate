@@ -335,7 +335,16 @@ graph TB
     （ad-hoc + `--options runtime` + entitlements 最小集）里，壳、核心与两份载荷全部能执行：
     `FORGE_SMOKE_APP=<app> pnpm smoke:desktop` 40/40（dsh 与 opencode 的 `initialize` + `session/new`
     都在包内那份 Electron 的 Node 上走完，且载荷目录指纹零变化）。公证半边**本期不做**（`spctl` 如实记录为
-    `rejected`，是 ad-hoc 的预期结论）；
+    `rejected`，是 ad-hoc 的预期结论）。
+    **2026-10-09 复跑（随包载荷换代到 dsh `0.2.0-rc.2` / opencode `2.0.26` 之后）**：`pnpm
+    smoke:desktop:packaged` **41/41**（同一批断言，两份包内载荷目录指纹仍逐字零变化）、`pnpm
+    verify:signature` 44 个 Mach-O 对象全带 `--options runtime`。同批**补上 V9 判不到的那一层**——
+    包内**能力投放**：真包内壳 + 包内核心 + **打包时重新生成**的私有启动器 + 包内载荷，平台物化的
+    skill 逐字出现在**包内 dsh** 的模型请求体 `<available_skills>` 里（opencode 侧同判，见其
+    `<skill><id>…</id>…</skill>` 目录块），**27/27**；探针的 `HOME`/`FORGE_HOME` 仍全在仓库内，
+    收尾核对用户真实 `~/.agents`、`~/.forge`、`~/.local/state/opencode` 零变化。入口：
+    `make verify/hardened-runtime`（已把这条并进打包链）或 `pnpm ui:accept:desktop-skills:packaged`；
+    V9 判"包内能不能跑"，这条判"跑起来有没有把该给底座的给到"——两件事，别互相替代；
   - ③ **Windows SmartScreen / AV 是否拦** —— **未验**（需要 Windows 测试机与出包，属 M4；见 T2）。
 
 - **第四条约束（2026-09-28 M3-8 实测新增，与上面三条并列，必须一起看）**：**载荷里的原生插件能不能在

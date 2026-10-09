@@ -249,11 +249,19 @@ verify/signature:
 # 与 `pnpm smoke:desktop` 的唯一区别：壳从**打出来的包**里起（`.app/Contents/MacOS/ark-forge`，
 # ad-hoc 签名 + `--options runtime`），核心与其下的 dsh / opencode 也全部来自包内。
 # 需要先有包（`make desktop/dist`）；签名形态本身由 `verify/signature` 判，这条判"能不能跑"。
+# 2026-10-09 起再加一条：**包内能力投放**（`ui:accept:desktop-skills:packaged`）——"能不能跑"之后
+# 还要问"跑起来有没有把该给底座的给到"（skill 到底进没进包内 dsh 的模型请求体）。
 verify/hardened-runtime:
 	$(require-node)
 	@test -d $(DESKTOP_APP) || (echo "==> 没有打好的包：先跑 make desktop/dist"; exit 1)
 	cd $(FRONTEND_ROOT) && pnpm verify:signature
 	cd $(FRONTEND_ROOT) && pnpm smoke:desktop:packaged
+	# 能力投放的**发布形态**判据（A-1 那一半）：V9 只判"包内两份载荷能握手"，判不到"平台物化的
+	# skill 有没有真的进包内 dsh 的模型请求体"。而包内有四件东西是源码态看不见的——私有运行时
+	# 启动器在**打包时重新生成**（隔离表就在那个生成物里）、核心与载荷都从包内拉起、hardened
+	# runtime 真的生效、探针的 HOME/FORGE_HOME 重定向在包内壳上同样成立。所以它挂在这条链上，
+	# 而不是挂进 `verify/desktop-dod`（DoD 是源码态、不要求磁盘上有包）。
+	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop-skills:packaged
 
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。

@@ -33,14 +33,28 @@
  *     不动用户配置、不设 `XDG_CONFIG_HOME`（那是隔离表干的事）。
  *   - 只重建 `forge-core`（Go 侧改动）。壳产物与载荷是既有生成物，脚本只断言它们在位。
  *
- * 用法：`node scripts/desktop-skill-projection-acceptance.mjs`（`KEEP_PROBE=1` 保留探针目录）。
+ * 两档靶子（同一份断言，壳从哪来不同）：
+ *   - **源码态**（缺省）：壳是 `electron .`，核心是 `apps/desktop/resources/forge-core`，载荷与私有
+ *     启动器取自 `apps/desktop/resources/`。
+ *   - **打包态**（`FORGE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）：
+ *     壳与核心都来自**打出来的包**（ad-hoc 签名 + `--options runtime`）。为什么值得单独一档——发布
+ *     形态有四件东西是源码态看不见的：① 私有运行时启动器在**打包时重新生成**进
+ *     `Contents/Resources/runtime/bin/`（隔离表就在那个生成物里，源码态那份读的是另一个路径）；
+ *     ② 包内核心同样从包内拉起载荷（`FORGE_DSH_ENTRY` / `FORGE_OPENCODE_BIN` 都指包内）；
+ *     ③ hardened runtime 真的生效；④ 探针的 `HOME`/`FORGE_HOME` 重定向在包内壳上同样成立。
+ *     打包态**不重建任何东西**——被测的就是磁盘上那份包，重建等于把靶子换掉。
+ *
+ * 用法：
+ *   `node scripts/desktop-skill-projection-acceptance.mjs`（源码态；`KEEP_PROBE=1` 保留探针目录）
+ *   `FORGE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-forge.app node scripts/desktop-skill-projection-acceptance.mjs`
+ *     （打包态；等价 `pnpm ui:accept:desktop-skills:packaged`，需要先 `make desktop/dist`）
  * **不进 CI**：要真 Electron + 真底座。
  */
 import { execFileSync, spawn } from 'node:child_process'
 import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   CORE_RE,
   DESKTOP,
@@ -49,10 +63,13 @@ import {
   connectCDP,
   installCleanupHooks,
   killShellTree,
+  launchPackagedShell,
   launchShell,
+  packagedProcessRes,
   pidsMatching,
   parseProcessEnv,
   sleep,
+  stopPackagedShell,
   stopShellTree,
   waitFor,
 } from './lib/desktop-harness.mjs'
@@ -67,6 +84,38 @@ const LLM_PORT = 10078
 /** opencode 的隔离配置目录（核心注入 `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 的落点）。 */
 const OPENCODE_CONFIG_DIR = join(PROBE_FORGE_HOME, 'runtime', 'opencode', 'config', 'opencode')
 const OPENCODE_CONFIG = join(OPENCODE_CONFIG_DIR, 'opencode.json')
+
+/** 打包态靶子（`FORGE_SMOKE_APP=<abs .app>`，与 `pnpm smoke:desktop:packaged` 同一个开关）。
+ *  设了它就**不重建任何东西**——被测的就是磁盘上那份包，重新构建等于把靶子换掉。 */
+const PACKAGED_APP = process.env.FORGE_SMOKE_APP ? resolve(process.env.FORGE_SMOKE_APP) : null
+/** 壳与核心共用的资产根：源码态 `apps/desktop/resources/`，打包态 `.app/Contents/Resources/`。
+ *  私有运行时启动器（隔离表在仓库里的第二份）与随包载荷都在这下面，且**打包时是重新生成的**——
+ *  这正是"源码态全绿 ≠ 发布形态全绿"的那一处，也是本脚本要能打打包态的理由。 */
+const ASSETS = PACKAGED_APP ? join(PACKAGED_APP, 'Contents', 'Resources') : join(DESKTOP, 'resources')
+const LAUNCHER_DIR = join(ASSETS, 'runtime', 'bin')
+const PAYLOADS_DIR = join(ASSETS, 'payloads')
+const MODE = PACKAGED_APP ? `打包态（${PACKAGED_APP}）` : '源码态（electron .）'
+
+/** 本档要判的壳/核心进程匹配：打包态的壳是 `Contents/MacOS/<productName>`，不在 `SHELL_RE` 面上
+ *  （核心两档都落在 `resources/forge-core serve`，所以 `CORE_RE` 通用）。 */
+const shellRe = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP).shell : SHELL_RE
+const coreRe = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP).core : CORE_RE
+const runningShells = () => pidsMatching(shellRe)
+const runningCores = () => pidsMatching(coreRe)
+
+/** 清场（含异常路径）：源码态走 harness 的 killShellTree，打包态的壳要按 .app 路径再来一遍。 */
+function killOurTree() {
+  killShellTree()
+  if (!PACKAGED_APP) return
+  const res = packagedProcessRes(PACKAGED_APP)
+  for (const re of [res.shell, res.core]) {
+    for (const pid of pidsMatching(re)) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {}
+    }
+  }
+}
 
 let pass = 0
 let fail = 0
@@ -248,33 +297,60 @@ const realOpencodeState = join(homedir(), '.local', 'state', 'opencode')
 
 async function main() {
   section('前置：清场与产物')
-  if (pidsMatching(SHELL_RE).length || pidsMatching(CORE_RE).length) killShellTree()
+  console.log(`   靶子：${MODE}`)
+  if (runningShells().length || runningCores().length) killOurTree()
   await sleep(500)
   check(
     '没有别的桌面壳/核心在跑（两个核心共用数据目录会让断言读到别人的内存态）',
-    pidsMatching(SHELL_RE).length === 0 && pidsMatching(CORE_RE).length === 0,
+    runningShells().length === 0 && runningCores().length === 0,
   )
-  const built = rebuildCore()
-  check('forge-core 已按当前代码重建', built.ok, built.detail ?? '')
-  const payloadsDir = join(DESKTOP, 'resources', 'payloads')
-  const payloadsReady = existsSync(payloadsDir) && readdirSync(payloadsDir).length > 0
-  check(
-    '壳与载荷产物在位（壳 dist / resources/web / 私有 runtime bin / resources/payloads）',
-    existsSync(join(DESKTOP, 'dist', 'main.cjs')) &&
-      existsSync(join(DESKTOP, 'resources', 'web', 'index.html')) &&
-      existsSync(join(DESKTOP, 'resources', 'runtime', 'bin')) &&
-      payloadsReady,
-    payloadsReady ? '' : '载荷不在场：先跑 `make desktop/payloads`（壳在启动期解析随包载荷，缺了直接拒启）',
-  )
+
+  const payloadsReady = existsSync(PAYLOADS_DIR) && readdirSync(PAYLOADS_DIR).length > 0
+  if (PACKAGED_APP) {
+    // 打包态**一个字节都不重建**：被测的就是磁盘上这份包。这里只断言四件套齐（缺一件就说明包本身不完整，
+    // 而不是"验收失败"），并把载荷版本打出来——"投放成立"这个结论必须锚在具体版本上。
+    check(
+      '打包态靶子是一个完整的包（壳可执行 / 包内核心 / 包内 web / 私有 runtime bin / 包内载荷）',
+      existsSync(join(PACKAGED_APP, 'Contents', 'MacOS')) &&
+        existsSync(join(ASSETS, 'forge-core')) &&
+        existsSync(join(ASSETS, 'web', 'index.html')) &&
+        existsSync(LAUNCHER_DIR) &&
+        payloadsReady,
+      PACKAGED_APP,
+    )
+    const versions = payloadsReady
+      ? readdirSync(PAYLOADS_DIR).map((name) => {
+          const vs = readdirSync(join(PAYLOADS_DIR, name))
+          return `${name}@${vs.sort()[vs.length - 1] ?? '?'}`
+        })
+      : []
+    check('随包载荷清单（本次判的就是这两个版本）', versions.length > 0, versions.join(' / '))
+  } else {
+    const built = rebuildCore()
+    check('forge-core 已按当前代码重建', built.ok, built.detail ?? '')
+    check(
+      '壳与载荷产物在位（壳 dist / resources/web / 私有 runtime bin / resources/payloads）',
+      existsSync(join(DESKTOP, 'dist', 'main.cjs')) &&
+        existsSync(join(ASSETS, 'web', 'index.html')) &&
+        existsSync(LAUNCHER_DIR) &&
+        payloadsReady,
+      payloadsReady ? '' : '载荷不在场：先跑 `make desktop/payloads`（壳在启动期解析随包载荷，缺了直接拒启）',
+    )
+  }
 
   rmSync(PROBE, { recursive: true, force: true })
   mkdirSync(PROBE_HOME, { recursive: true })
-  const binGen = regenerateRuntimeBin()
-  check('私有运行时启动器已按当前代码重建（隔离表就在生成物里）', binGen.ok, binGen.detail ?? '')
-  const dshLauncher = binGen.ok ? readFileSync(join(DESKTOP, 'resources', 'runtime', 'bin', 'dsh'), 'utf8') : ''
+  if (!PACKAGED_APP) {
+    const binGen = regenerateRuntimeBin()
+    check('私有运行时启动器已按当前代码重建（隔离表就在生成物里）', binGen.ok, binGen.detail ?? '')
+  }
+  const dshLauncherPath = join(LAUNCHER_DIR, 'dsh')
+  const dshLauncher = existsSync(dshLauncherPath) ? readFileSync(dshLauncherPath, 'utf8') : ''
   check(
-    '私有启动器不再兜底 DSH_AGENTS_HOME（它会把 dsh 的读根从平台写根上撬走）',
+    `私有启动器（${PACKAGED_APP ? '包内那份生成物' : '本仓生成物'}）不再兜底 DSH_AGENTS_HOME` +
+      '（它会把 dsh 的读根从平台写根上撬走）',
     dshLauncher.length > 0 && !dshLauncher.includes('DSH_AGENTS_HOME'),
+    PACKAGED_APP ? dshLauncherPath : '',
   )
   check('投影根从"不存在"开始（修复 B 的前提）', !existsSync(PROJECTION_ROOT))
   check('opencode 探针 provider 已写进它自己的隔离配置目录', writeOpencodeProbeConfig(), OPENCODE_CONFIG)
@@ -284,21 +360,28 @@ async function main() {
   const beforeHostState = fingerprint(realOpencodeState)
 
   const llm = await startFakeLLM()
-  section('真壳 + 真核心')
-  const shell = await launchShell({
-    env: {
-      ...process.env,
-      HOME: PROBE_HOME,
-      FORGE_HOME: PROBE_FORGE_HOME,
-      DEEPSEEK_API_KEY: 'probe-key',
-      DEEPSEEK_BASE_URL: `http://127.0.0.1:${LLM_PORT}`,
-      // opencode 侧同一条思路：密钥经它的 provider 声明（`env: ["PROBE_API_KEY"]`）读到，
-      // 端点由隔离配置目录里的 `settings.baseURL` 指过来。
-      PROBE_API_KEY: 'probe-key',
-      ELECTRON_RUN_AS_NODE: undefined,
-    },
-  })
-  check('壳起来了，核心打印了就绪行', shell.logText().includes('core ready'))
+  section(`真壳 + 真核心（${MODE}）`)
+  const launchEnv = {
+    ...process.env,
+    HOME: PROBE_HOME,
+    FORGE_HOME: PROBE_FORGE_HOME,
+    DEEPSEEK_API_KEY: 'probe-key',
+    DEEPSEEK_BASE_URL: `http://127.0.0.1:${LLM_PORT}`,
+    // opencode 侧同一条思路：密钥经它的 provider 声明（`env: ["PROBE_API_KEY"]`）读到，
+    // 端点由隔离配置目录里的 `settings.baseURL` 指过来。
+    PROBE_API_KEY: 'probe-key',
+    ELECTRON_RUN_AS_NODE: undefined,
+  }
+  // 两档只换"壳从哪来"：打包态起的是包内那份 hardened runtime 的壳（它会 spawn 包内核心、
+  // 并用包内重新生成的私有启动器拉起包内载荷）。
+  const shell = PACKAGED_APP
+    ? await launchPackagedShell({ appPath: PACKAGED_APP, env: launchEnv })
+    : await launchShell({ env: launchEnv })
+  check(
+    '壳起来了，核心打印了就绪行',
+    shell.logText().includes('core ready'),
+    PACKAGED_APP ? `包内壳 pid=${shell.shellPid} / 包内核心 pid=${shell.corePid}` : '',
+  )
   const coreEnv = envOf(shell.corePid)
   const envReadable = Object.keys(coreEnv).length > 0
   check(
@@ -448,9 +531,15 @@ async function main() {
   )
 
   section('收尾')
-  const stopped = await stopShellTree()
+  // 打包态的壳不在 `SHELL_RE` 面上（它是 `Contents/MacOS/<productName>`），所以走 harness 那条
+  // 打包态收场：SIGKILL 壳 → 等核心自行停机（`--exit-with-parent`）→ 兜底清后代 → 删临时 userData。
+  const stopped = PACKAGED_APP ? await stopPackagedShell(shell) : await stopShellTree()
   await sleep(500)
-  check('壳/核心全部退出，无残留', pidsMatching(SHELL_RE).length === 0 && pidsMatching(CORE_RE).length === 0, JSON.stringify(stopped))
+  check(
+    '壳/核心全部退出，无残留',
+    runningShells().length === 0 && runningCores().length === 0,
+    JSON.stringify(stopped),
+  )
   check('dsh 子进程也随核心回收', pidsMatching(/--profile\s+acp/).length === 0)
   check('opencode 子进程也随核心回收', pidsMatching(/payloads\/opencode\/.*\/bin\/opencode\s+acp/).length === 0)
   check('用户真实 ~/.agents/skills 零变化', fingerprint(realAgentsRoot) === beforeAgents)
@@ -465,6 +554,15 @@ async function main() {
 }
 
 installCleanupHooks()
+// 打包态的壳不在 harness 的 `SHELL_RE` 面上，异常/中断路径得自己再兜一层（否则包内壳会留在后台）。
+if (PACKAGED_APP) {
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => {
+      killOurTree()
+      process.exit(130)
+    })
+  }
+}
 let keepProbe = false
 process.on('exit', () => {
   if (!keepProbe && !process.env.KEEP_PROBE) rmSync(PROBE, { recursive: true, force: true })
@@ -476,9 +574,9 @@ try {
   console.error(`\n未捕获异常：${e?.stack ?? e}`)
   fail++
 } finally {
-  killShellTree()
+  killOurTree()
   await sleep(300)
-  console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
+  console.log(`\n结果：${pass} 通过 / ${fail} 失败（靶子：${MODE}）`)
   keepProbe = fail > 0
   if (fail) console.log(`失败，探针目录保留在 ${PROBE} 便于取证`)
   process.exit(fail ? 1 : 0)
