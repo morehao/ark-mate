@@ -424,6 +424,8 @@ type capabilityGeneration struct {
 
 > **M6-8 进度（2026-10-09）**：核 P-13 时发现前提也不成立——`mcps` 白名单在写面 DTO（`AgentCreateReq`/`AgentUpdateReq`/`AgentResp`）里**根本没有这个字段**，M6-6 之后它只从 DB 行读、而 `forge agent import` 又刻意不覆盖已有行 ⇒ sqlite 模式下事实上不可改。所以本条落成两半：**① 写面收下 `mcps`**（三态：键缺失不改 / `null` 清空回「未声明」/ `[]` 禁用全部 / 数组白名单；类型不符 → 40000 `invalid_param`，零副作用；创建面同样收下；两条载体落同一份字节）；**② 写面之后的能力面变更通知**：白名单**语义真的变了**（同集合换顺序/重复项不算）才作废该 agent 的**空闲**会话句柄，下一轮 `ensureConversation` 按当前定义重建并重新注入 MCP。**与 §3（缺省路径 rev）的分工**：那条解决「skill/MCP **定义**改动对缺省路径下一轮生效」，本条解决「**agent 定义**里的能力字段改动生效」——后者不依赖前者，因为它不需要给缺省路径换键。三处刻意边界（与 README 同名段落一致）：只作废**空闲**会话（有在途轮次 / 未应答权限或提问的顺延，与 ADR-13 纪律③同判据）、**不动代际键也不关进程**（R11 逐字不变、暖进程继续复用）、语义等价的改动不产生重建。
 
+> **M6-9 进度（2026-10-09）**：装配期时序收口。三条时序（开库 → 三域存量导入 → 装载 → 起调度）在 `app.go` 里本来就成立，"装载失败只告警不阻断"也成立（三个 `LoadXDefinitions*` 只返回计数，坏定义逐条 WARN 跳过；`loadDefinitions` 的 error 返回位今天恒为 nil）。缺的是**守卫**——三者被违反时都不报错，只表现成"东西看不见"或"启动恢复没发生"（过期 `once` 的置 inactive 只在启动时做一次，没有任何后续动作会补做）。新增 `internal/app/definitions_order_test.go` 的 `TestInitOrderingImportLoadSchedule` 走真 `Init`（sqlite + 三域夹具 + 起调度），用**行为**钉住整条链：能力面/agent 面本轮就可见 + 过期 `once` 已被置 `inactive` 且留 `skipped` 痕迹。
+
 **计划文档索引**：**M1–M5 合为一篇** `.dsh/docs/plans/2026-10-08-capability-generation-plan.md`（12–16.5 人日；它们是同一套机制的五个阶段，共用同一批类型与同一条调用链，故不再逐阶段拆篇）；M6 → `2026-10-08-capability-store-migration-plan.md`；M7 → `2026-10-08-mcp-platform-gateway-plan.md`。
 
 依赖关系与**建议顺序**：
