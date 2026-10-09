@@ -245,13 +245,26 @@ func mustRuns(t *testing.T, m map[string]any) []any {
 func TestAutomationTickOverlapSkips(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
-	now := time.Now()
+	// 固定时钟 + 钉死第一次触发的 occurrence（上海 09:00 = 01:00Z）。
+	//
+	// 为什么不能用 time.Now()：装载期的 next_due 由**真实墙钟**推出（LoadAutomationDefinitions →
+	// applySchedule → Schedule.Startup），而下面要拨回的"下一次到期点"是 now-1h。若 now 距当日
+	// occurrence 不足一小时（本地 09:00–10:00 这一小时），拨回值会落在 last_fired_at **之前**，
+	// Decide 便判 duplicate（claim.go:29-34：duplicate 优先于 overlap），而 duplicate 不写盘
+	// （noRecord，automation_sched.go:184-193）——文件里的 last_status 会停在第一次的 claimed，
+	// 这条用例就假红。钉死游标同时让用例不再依赖"跑测试时真实日期是哪天"。
+	now := time.Date(2026, 10, 9, 2, 30, 0, 0, time.UTC)
+	r.svc.mu.Lock()
+	r.svc.automations["daily"].nextDue = time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
+	r.svc.mu.Unlock()
 	r.svc.automationTick(context.Background(), now)
 	if n := len(r.conversationsOf(t, "daily")); n != 1 {
 		t.Fatalf("首次触发应建 1 个会话，got %d", n)
 	}
 	// 制造"下一次 occurrence 也到期了，但上一次会话仍在跑"：把内存游标拨回过去
 	// （等价于调度器在会话结束前又扫到一个新的到期点）。
+	// 该值**必须严格晚于 last_fired_at**（上一次认领 = 01:00Z）：这是真实调度必然满足的不变式
+	// ——NextDue 只在 latest > lastFiredAt 时才给到期点（schedule.go:91-93）。
 	past := now.Add(-time.Hour)
 	r.svc.mu.Lock()
 	r.svc.automations["daily"].nextDue = past
