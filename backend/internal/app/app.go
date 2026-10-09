@@ -402,8 +402,14 @@ func (a *App) metaInfo() ctrsystem.MetaSource {
 // 失败只告警不阻断（用户目录缺文件是常态），但必须发生在路由起来之前。
 func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	cfg := a.cfg
-	// Agent definitions（P2）：FORGE_AGENTS 目录下 <id>.json → 注册到 agents 表（服务端无页面时也热加载）。
-	a.svc.LoadAgentDefinitions(cfg.AgentDir)
+	// Agent definitions（P2 / M6-6）：**按持久层模式分派**——sqlite 模式下定义在 `agents` 表里
+	// （种子仍在代码中，行只存"对种子的覆盖"），memory 模式仍是 FORGE_AGENTS 目录下的 <id>.json。
+	// 两种模式都要拿到 `cfg.AgentDir`：providers.json 与 vault 锚点仍在文件侧（计划 §7 P-9）。
+	if mode == config.StoreModeSQLite {
+		a.svc.LoadAgentDefinitionsFromStore(ctx, cfg.AgentDir)
+	} else {
+		a.svc.LoadAgentDefinitions(cfg.AgentDir)
+	}
 	// 能力数据面（P1 / M6-2）：**按持久层模式分派**——sqlite 模式下 DB 是事实源（v8 的
 	// skills/mcp_servers），memory 模式下文件仍是装载源。
 	//

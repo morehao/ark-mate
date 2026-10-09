@@ -2,8 +2,6 @@ package manager
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -212,12 +210,11 @@ func (s *Service) libraryAgents() []dtolibrary.LibraryItem {
 	for _, a := range s.agents {
 		agents = append(agents, a)
 	}
-	agentDir := s.agentDir
 	s.mu.Unlock()
 
 	out := make([]dtolibrary.LibraryItem, 0, len(agents))
 	for _, a := range agents {
-		src := agentSourceFile(agentDir, a.ID)
+		src := s.agentSourceFile(a.ID)
 		it := dtolibrary.LibraryItem{
 			ID: a.ID, Kind: dtolibrary.KindAgent, Name: libraryName(a.Name, a.ID),
 			Origin: libraryOrigin(src), Scope: capability.SkillScopeGlobal,
@@ -287,18 +284,6 @@ func (s *Service) registeredRuntimeIDs() []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// agentSourceFile 某 agent 的定义文件路径（不存在 → 空 = 内置播种）。
-func agentSourceFile(dir, id string) string {
-	if dir == "" || !validDefinitionID(id) {
-		return ""
-	}
-	path := filepath.Join(dir, id+".json")
-	if _, err := os.Stat(path); err != nil {
-		return ""
-	}
-	return path
 }
 
 // libraryName 名称回落（未声明 name 的条目显示 id，而不是空字符串）。

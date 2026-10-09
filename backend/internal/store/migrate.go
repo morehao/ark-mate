@@ -198,6 +198,23 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_capability_revisions_capability ON capability_revisions(kind, capability_id, seq)`,
 		},
 	},
+	{
+		version: 9,
+		name:    "agents（M6-6 agent 定义事实源；种子仍在代码里，本表只存覆盖）",
+		statements: []string{
+			// 与 skills/mcp_servers 同形（body 唯一权威 + revision CAS + updated_at）。
+			// 变更审计复用 v8 的 capability_revisions（kind='agent'）——"定义变更审计"只有一份。
+			//
+			// 「当前 Agent」（原 `<AgentDir>/default.json`）不在这里：它是目录级配置，
+			// 落 meta（model.MetaKeyDefaultAgent，计划 §7 P-8）。
+			`CREATE TABLE agents (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

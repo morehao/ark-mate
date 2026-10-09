@@ -140,14 +140,14 @@ func TestMigrateRefusesFutureSchema(t *testing.T) {
 	}
 }
 
-// TestMigrateV7ToV8KeepsData v7 → v8 升级：v8 是**纯增表**（skills / mcp_servers /
-// capability_revisions），既有数据一行不丢，新表从空开始。
+// TestMigrateV7ToLatestKeepsData v7 → 最新（v8 起）升级：v8 是**纯增表**（skills /
+// mcp_servers / capability_revisions），既有数据一行不丢，新表从空开始。
 //
 // 两个容易搞错的点，各自钉一条：
 //  1. 新表**必须是空的**。用户的存量能力眼下还在 `<CapabilityDir>` 的文件里，要由 M6-4 的
 //     导入器灌进来；升级时"顺手把什么默认值填进去"会让导入无法判断"库里到底有没有东西"。
 //  2. v8 的库能被二进制打开、能升到最新、且**重复迁移幂等**（用户每次启动都会跑一遍）。
-func TestMigrateV7ToV8KeepsData(t *testing.T) {
+func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := dbclient.Open(path)
@@ -222,7 +222,96 @@ func TestMigrateV7ToV8KeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 8 {
-		t.Fatalf("schema 版本应为 v8（latest=%d），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 9 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 9 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	}
+}
+
+// TestMigrateV8ToV9AddsAgents v8 → v9 升级：v9 同样是**纯增表**（agents），既有定义行一行不丢，
+// 新表从空开始（存量 agent 还在 `<AgentDir>/*.json` 里，等 M6-6 的导入器灌进来）。
+func TestMigrateV8ToV9AddsAgents(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v8.db")
+	db, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开库: %v", err)
+	}
+	s := New(db)
+	defer func() { _ = s.Close() }()
+
+	// 造一个**真实的 v8 库**并写一行 skill 定义 + 一条审计。
+	applySchemaUpTo(t, s, 8)
+	if ok, err := s.UpsertSkillDefinition(ctx, "sk-old", `{"name":"v8 存量"}`, 0, "test"); err != nil || !ok {
+		t.Fatalf("写 v8 skill 行: ok=%v err=%v", ok, err)
+	}
+
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("v8 → v9 升级失败: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("重复迁移应幂等: %v", err)
+	}
+
+	// ① v8 的行与审计原样还在。
+	sk, found, err := s.GetSkillDefinition(ctx, "sk-old")
+	if err != nil || !found || sk.Body != `{"name":"v8 存量"}` || sk.Revision != 1 {
+		t.Fatalf("升级后 v8 skill 行失真: found=%v err=%v row=%+v", found, err, sk)
+	}
+	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "sk-old"); err != nil || len(revs) != 1 {
+		t.Fatalf("升级后 v8 审计应保留: n=%d err=%v", len(revs), err)
+	}
+
+	// ② agents 表建出来了且**从空开始**（种子不落行；存量定义等导入器）。
+	if n, err := s.CountAgentDefinitions(ctx); err != nil || n != 0 {
+		t.Fatalf("升级后 agents 应为空: n=%d err=%v", n, err)
+	}
+	if _, ok, err := s.GetDefaultAgentID(ctx); err != nil || ok {
+		t.Fatalf("升级后 default_agent 应未设置: ok=%v err=%v", ok, err)
+	}
+
+	// ③ agent 写路径真的落到新表上（行 + 审计，且审计 seq 从 v8 的那条之后继续）。
+	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent","name":"升级后新建"}`, 0, "rest"); err != nil || !ok {
+		t.Fatalf("升级后写 agent 定义: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent","name":"改名"}`, 1, "rest"); err != nil || !ok {
+		t.Fatalf("升级后覆盖写 agent 定义: ok=%v err=%v", ok, err)
+	}
+	// CAS 没中 → 行与审计都不变（与能力面同一条不变量）。
+	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent"}`, 1, "rest"); err != nil || ok {
+		t.Fatalf("过期 revision 应被拒: ok=%v err=%v", ok, err)
+	}
+	ag, found, err := s.GetAgentDefinition(ctx, "my-agent")
+	if err != nil || !found || ag.Revision != 2 || ag.Body != `{"id":"my-agent","name":"改名"}` {
+		t.Fatalf("agent 行不符: found=%v err=%v row=%+v", found, err, ag)
+	}
+	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "my-agent")
+	if err != nil || len(revs) != 2 || revs[0].Action != "create" || revs[1].Action != "update" {
+		t.Fatalf("agent 审计不符: %+v err=%v", revs, err)
+	}
+
+	// ④ 「当前 Agent」落 meta，且能被清除（被删 agent 的连带清理）。
+	if err := s.SetDefaultAgentID(ctx, "my-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "my-agent" {
+		t.Fatalf("读 default_agent: id=%q ok=%v err=%v", id, ok, err)
+	}
+	if err := s.ClearDefaultAgentID(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.GetDefaultAgentID(ctx); err != nil || ok {
+		t.Fatalf("清除后应报未设置: ok=%v err=%v", ok, err)
+	}
+
+	// ⑤ 删除也留痕（审计在行消失后仍可查）。
+	if ok, err := s.DeleteAgentDefinition(ctx, "my-agent", 2, "rest"); err != nil || !ok {
+		t.Fatalf("删 agent 行: ok=%v err=%v", ok, err)
+	}
+	if _, found, _ := s.GetAgentDefinition(ctx, "my-agent"); found {
+		t.Fatal("删除后不该还读到行")
+	}
+	revs, err = s.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "my-agent")
+	if err != nil || len(revs) != 3 || revs[2].Action != "delete" || revs[2].Digest != "" {
+		t.Fatalf("删除审计不符（删定义也留痕且 digest 为空）: %+v err=%v", revs, err)
 	}
 }

@@ -185,17 +185,8 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		s.publishRaw(typ, conversationID, payload)
 	}, slog.Default())
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
-	for _, b := range builtinAgents {
-		if _, ok := reg.Get(b.runtime); !ok {
-			continue
-		}
-		s.agents[b.id] = &AgentRec{
-			ID:       b.id,
-			Name:     b.name,
-			Runtimes: []string{b.runtime},
-			State:    AgentStateStopped,
-		}
-	}
+	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
+	s.seedBuiltinAgents()
 	return s
 }
 

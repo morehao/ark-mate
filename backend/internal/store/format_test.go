@@ -59,10 +59,19 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil || !ok {
 		t.Fatalf("写 mcp_servers 行: ok=%v err=%v", ok, err)
 	}
+	if ok, err := s.agents.CreateCAS(ctx, &AgentDefinition{
+		ID: "ag-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 agents 行: ok=%v err=%v", ok, err)
+	}
 	if err := s.capabilityRevision.Append(ctx, &CapabilityRevision{
 		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
 	}); err != nil {
 		t.Fatalf("写 capability_revisions 行: %v", err)
+	}
+	// 「当前 Agent」的显式选择（M6-6 落 meta）：值就是 agent id 本身，落库是 TEXT。
+	if err := s.SetDefaultAgentID(ctx, "ag-1"); err != nil {
+		t.Fatalf("写 default_agent meta: %v", err)
 	}
 
 	// 每项：表、列、期望的 typeof、期望的文本值（"" = 只校验类型不校验值）。
@@ -95,6 +104,8 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"skills", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"mcp_servers", "revision", "integer", "1", true},
 		{"mcp_servers", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"agents", "revision", "integer", "1", true},
+		{"agents", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"capability_revisions", "seq", "integer", "1", true},
 		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
 	}
@@ -156,6 +167,28 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 	if !mcp.UpdatedAt.Equal(at) {
 		t.Errorf("mcp.updated_at 往返失真: %s 期望 %s", mcp.UpdatedAt, at)
+	}
+	agent, found, err := s.GetAgentDefinition(ctx, "ag-1")
+	if err != nil || !found {
+		t.Fatalf("GetAgentDefinition: found=%v err=%v", found, err)
+	}
+	if !agent.UpdatedAt.Equal(at) || agent.Revision != 1 || agent.Body != `{"name":"格式探针"}` {
+		t.Errorf("agent 行往返失真: rev=%d at=%s body=%q", agent.Revision, agent.UpdatedAt, agent.Body)
+	}
+	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样
+	// （第一行可能是 events_last_seq），要按键查。
+	var (
+		metaType, metaValue string
+	)
+	if err := s.db.Raw("SELECT typeof(value), CAST(value AS TEXT) FROM meta WHERE key = ?",
+		model.MetaKeyDefaultAgent).Row().Scan(&metaType, &metaValue); err != nil {
+		t.Fatalf("读 meta.default_agent: %v", err)
+	}
+	if metaType != "text" || metaValue != "ag-1" {
+		t.Errorf("meta.default_agent 落库形态不符: typeof=%q value=%q", metaType, metaValue)
+	}
+	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "ag-1" {
+		t.Errorf("GetDefaultAgentID: id=%q ok=%v err=%v", id, ok, err)
 	}
 	revs, err := s.ListCapabilityRevisions(ctx, "skill", "sk-1")
 	if err != nil || len(revs) != 1 {

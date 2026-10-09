@@ -25,7 +25,13 @@ const (
 	// TableMcpServer MCP server 定义（与 TableSkill 同形，见 McpServerDefinition）。
 	TableMcpServer = "mcp_servers"
 	// TableCapabilityRevision 能力定义变更审计（**全局单调 seq = 代际 rev 的来源**）。
+	//
+	// 表名里的 capability 是历史命名：M6-6 起它同时承载 agent（以及 M6-7 的 automation）
+	// 定义的变更——它就是"**定义变更**审计"这一件事，`kind` 列区分域。不改名是因为它已在
+	// v8 落地（改名要动迁移内核与既有测试），而"能力面"在本仓的口径本来就含 Agent 视角。
 	TableCapabilityRevision = "capability_revisions"
+	// TableAgent agent 定义（M6-6；与 TableSkill 同形）。
+	TableAgent = "agents"
 )
 
 // 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
@@ -283,6 +289,31 @@ func (McpServerDefinition) TableName() string { return TableMcpServer }
 // McpServerDefinitionList 是 McpServerDefinition 切片类型（gormdao 泛型参数要求具名切片）。
 type McpServerDefinitionList []McpServerDefinition
 
+// AgentDefinition 是一条 agent 定义行（M6-6；列与语义同 SkillDefinition）。
+//
+// **只存用户对种子的覆盖**：内置种子（`builtinAgents`：dsh/opencode）永不落行，装载时先铺种子
+// 再用行里的**非零字段**覆盖（`applyDefinition` 的部分合并语义逐字保留）。所以"DB 里有几行"
+// ≠ "平台有几个 agent"——`List` 出来的行里可能只有 `{"id":"x","name":"..."}`。
+//
+// Body 存的是 **typed marshal 的结果**（与今天 `persistAgentDef` 写文件的内容逐字节同源），
+// 不是"原始文件字节"：agent 的写面今天就走 typed 结构（`agentDefinitionFile`），DB 化只换载体
+// 不换形状——未知键在 agent 侧从来就没被保留过，这一条不在 M6-6 的语义变更范围里。
+type AgentDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义 JSON（typed marshal；见类型注释）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (AgentDefinition) TableName() string { return TableAgent }
+
+// AgentDefinitionList 是 AgentDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type AgentDefinitionList []AgentDefinition
+
 // CapabilityRevision 是一条能力定义变更审计。
 //
 // **刻意不加外键**：审计必须在能力被删除后仍然存在——这与 `events` 表"必须挂会话"
@@ -297,9 +328,10 @@ type McpServerDefinitionList []McpServerDefinition
 type CapabilityRevision struct {
 	// Seq 全局单调序（AUTOINCREMENT 保证不复用）。
 	Seq int64 `gorm:"column:seq;primaryKey;autoIncrement"`
-	// Kind 能力种类。取值见 CapabilityKindSkill / CapabilityKindMcp。
+	// Kind 定义种类。取值见 CapabilityKindSkill / CapabilityKindMcp / CapabilityKindAgent
+	// （M6-7 起还有 CapabilityKindAutomation）。
 	Kind string `gorm:"column:kind;not null"`
-	// CapabilityID 被改动的能力 id（能力删除后本行仍留着它）。
+	// CapabilityID 被改动的定义 id（定义删除后本行仍留着它）。
 	CapabilityID string `gorm:"column:capability_id;not null"`
 	// Action 变更动作。取值见 CapabilityActionCreate / …Update / …Delete / …Import。
 	Action string `gorm:"column:action;not null"`

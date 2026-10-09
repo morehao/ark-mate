@@ -55,7 +55,7 @@ type definitionRepo interface {
 // definitionRepoFor 按持久层模式取载体。返回错误 = 该模式下写面不可用（memory 模式未配置目录）。
 func (s *Service) definitionRepoFor(sub string) (definitionRepo, error) {
 	if s.st != nil {
-		return &storeDefinitionRepo{st: s.st, sub: sub, actor: capabilityWriteActor}, nil
+		return &storeDefinitionRepo{st: s.st, sub: sub, actor: definitionWriteActor}, nil
 	}
 	dir, err := s.capabilityDirFor(sub)
 	if err != nil {
@@ -64,12 +64,12 @@ func (s *Service) definitionRepoFor(sub string) (definitionRepo, error) {
 	return &fileDefinitionRepo{dir: dir, sub: sub}, nil
 }
 
-// capabilityWriteActor 变更审计里的"谁改的"。
+// definitionWriteActor 变更审计里的"谁改的"。
 //
 // 当前没有鉴权、REST 写面是唯一调用者，所以按调用面记账；将来多了 CLI/导入等调用方，
 // 各自传自己的标识（它们不走这个常量）。**刻意不从 ctx 里猜**：审计的价值恰恰在于它写的是
 // 事实，猜出来的 actor 比"rest"更坏。
-const capabilityWriteActor = "rest"
+const definitionWriteActor = "rest"
 
 // ——— 文件载体（memory 模式，C9） ———
 
