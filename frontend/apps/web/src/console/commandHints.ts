@@ -1,4 +1,4 @@
-import type { CommandInfo } from '@ark/types'
+import type { CommandInfo } from '@ark-mate/types'
 
 /**
  * 斜杠命令补全的**纯逻辑**（无 React、无 IO），便于单点读懂与复用。

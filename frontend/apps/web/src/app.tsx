@@ -1,7 +1,7 @@
 // 应用壳（console.html .app）：顶栏 + WS reconnecting 横幅 + 路由区 + 全局 toast。
 import { useEffect, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { tokens } from '@ark/ui'
+import { tokens } from '@ark-mate/ui'
 import { consoleStyleSheet } from './console.css'
 import { TopBar } from './components/TopBar'
 import { useMate } from './store'

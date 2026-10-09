@@ -55,7 +55,7 @@
 ### 1.4 约束
 
 - **协议版本**：ACP protocol version 1（initialize 沿用现有协商）。
-- **依赖**：`github.com/coder/acp-go-sdk v0.13.5`（不动版本号，仅本地 fork 补字段）；前端 React/antd/`@ark/types` 契约同步小改。
+- **依赖**：`github.com/coder/acp-go-sdk v0.13.5`（不动版本号，仅本地 fork 补字段）；前端 React/antd/`@ark-mate/types` 契约同步小改。
 - **兼容**：破坏性调整被允许，但只落在「开发期未冻结」面（demo 数据可丢弃）；对外的 REST/WS 字段变更一律**只增不改名**，除非在冻结前一次性收敛。
 - 单二进制交付不变（`make all`），fork 作为普通 module 编入，不新增运行时依赖。
 

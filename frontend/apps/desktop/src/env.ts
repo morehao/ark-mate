@@ -13,7 +13,7 @@
  */
 import { delimiter, join, resolve } from 'node:path'
 
-import { desktopNodeEnvironment } from '@ark/desktop-contract'
+import { desktopNodeEnvironment } from '@ark-mate/desktop-contract'
 
 import { runtimeBinDir } from './paths'
 

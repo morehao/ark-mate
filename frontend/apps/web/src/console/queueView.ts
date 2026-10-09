@@ -1,5 +1,5 @@
-import { Ev } from '@ark/types'
-import type { BusEvent, QueuedInput, QueuedInputResp } from '@ark/types'
+import { Ev } from '@ark-mate/types'
+import type { BusEvent, QueuedInput, QueuedInputResp } from '@ark-mate/types'
 
 // ——— §6 busy input 队列视图模型（纯函数，便于 Node 侧校验） ———
 //

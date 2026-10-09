@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Empty, Input, Segmented, Select, Space, Spin, Statistic, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark/ui'
-import { toErrorMessage, usageSummary } from '@ark/api'
-import type { Agent, UsageBucket, UsageSummary } from '@ark/types'
+import { PageContainer, tokens } from '@ark-mate/ui'
+import { toErrorMessage, usageSummary } from '@ark-mate/api'
+import type { Agent, UsageBucket, UsageSummary } from '@ark-mate/types'
 import { useMate } from '../store'
 import { fmtContext, fmtCost, fmtDuration, reportedLabel, successRate, usageRows, type UsageRow } from '../console/usageView'
 

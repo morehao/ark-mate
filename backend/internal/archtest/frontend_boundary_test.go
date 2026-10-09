@@ -216,29 +216,29 @@ const importPrefix = `(?:from\s+|import\s*\(\s*|import\s+|require\s*\(\s*)`
 // specifierImport 匹配一条模块引入并捕获其 specifier。
 var specifierImport = regexp.MustCompile(importPrefix + `['"]([^'"]+)['"]`)
 
-// TestDesktopMustNotImportWebSource 断言 `frontend/apps/desktop/src/**` **不**引 `@ark/web`。
+// TestDesktopMustNotImportWebSource 断言 `frontend/apps/desktop/src/**` **不**引 `@ark-mate/web`。
 //
 // 桌面产品依赖的是 `apps/web/dist` 这份**产物**（壳按路径读静态文件、核心按 `--web-dir` 读同一目录），
-// 一旦有人 `from '@ark/web'`，就是把前端源码拉进桌面构建：产物与源码两份开始漂移，
+// 一旦有人 `from '@ark-mate/web'`，就是把前端源码拉进桌面构建：产物与源码两份开始漂移，
 // 而"两端同一份 UI"正是 R1 的实现方式。按路径读 dist 不在本断言范围（那是允许的）。
 func TestDesktopMustNotImportWebSource(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
 	files := listFrontendSources(t, filepath.Join(frontendRoot(t), "apps", "desktop", "src"))
 	vs := scanSources(t, repoRoot, files, specifierImport, func(line string) bool {
 		m := specifierImport.FindStringSubmatch(line)
-		return m == nil || m[1] != "@ark/web"
+		return m == nil || m[1] != "@ark-mate/web"
 	})
-	reportViolations(t, "apps/desktop 引了前端产品包 @ark/web（只允许按路径读它的 dist 产物）", vs)
+	reportViolations(t, "apps/desktop 引了前端产品包 @ark-mate/web（只允许按路径读它的 dist 产物）", vs)
 }
 
 // —— B3：桌面能力不得渗进共享 UI ——
 
-// webForbiddenImport 匹配共享 UI 里**不允许出现**的模块引入：electron、node: 内置、@ark/desktop。
+// webForbiddenImport 匹配共享 UI 里**不允许出现**的模块引入：electron、node: 内置、@ark-mate/desktop。
 //
 // 只匹配"引入语句"而不是裸词，是为了不误伤注释里正常提到 Electron 的文字；
-// `@ark/desktop` 用**完整 specifier**（`'@ark/desktop'`）而不是前缀——`@ark/desktop-contract`
+// `@ark-mate/desktop` 用**完整 specifier**（`'@ark-mate/desktop'`）而不是前缀——`@ark-mate/desktop-contract`
 // 是**允许**被共享 UI 消费的（M1-8 的载体接入正是用它，它是零 Electron 引用的纯契约包）。
-var webForbiddenImport = regexp.MustCompile(importPrefix + `['"](electron|node:[^'"]+|@ark/desktop)['"]`)
+var webForbiddenImport = regexp.MustCompile(importPrefix + `['"](electron|node:[^'"]+|@ark-mate/desktop)['"]`)
 
 // windowElectron 匹配"嗅探 Electron"的历史写法（设计 §10.1 明令禁止：不得读 window.electron）。
 //
@@ -253,7 +253,7 @@ func commentLine(line string) bool {
 }
 
 // TestWebUiMustNotReachDesktopApis 断言 `frontend/apps/web/src/**` 够不到桌面能力：
-// 不引 `electron`、不引 `node:*` 内置模块、不引 `@ark/desktop`、不嗅探 `window.electron`。
+// 不引 `electron`、不引 `node:*` 内置模块、不引 `@ark-mate/desktop`、不嗅探 `window.electron`。
 //
 // 这条是"两端功能完全一致"的结构性保证：共享 UI 在**类型与依赖层面**就拿不到桌面 API，
 // 于是不存在"只有桌面能跑"的分支；桌面多出来的能力只能经 `GET /v1/mate/capabilities`（声明面）
@@ -275,7 +275,7 @@ var relativeImport = regexp.MustCompile(importPrefix + `['"](\.[^'"]*)['"]`)
 //
 // 依赖方向是"能力层被产品层消费"，反过来就会出现：能力层里的组件直接 import 某个产品包的源码，
 // 于是抽出复用/换产品时全部连坐，且 `apps/web` 的依赖图不再封闭。产品层要用能力层就按包名引
-// （`@ark/ui` 等），凭相对路径反向穿透一律拒绝。
+// （`@ark-mate/ui` 等），凭相对路径反向穿透一律拒绝。
 func TestPackagesMustNotImportApps(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
 	packagesDir := filepath.Join(frontendRoot(t), "packages")
@@ -290,7 +290,7 @@ func TestPackagesMustNotImportApps(t *testing.T) {
 		}
 		src := filepath.Join(packagesDir, e.Name(), "src")
 		if _, err := os.Stat(src); err != nil {
-			continue // 没有 src 的包（如 @ark/tsconfig）不参与
+			continue // 没有 src 的包（如 @ark-mate/tsconfig）不参与
 		}
 		files = append(files, listFrontendSources(t, src)...)
 	}

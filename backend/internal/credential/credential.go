@@ -22,7 +22,7 @@ import (
 
 // StreamAttachDeadline 事件流**首帧 attach** 的截止时限（M1-1）。
 //
-// 与前端契约 `@ark/desktop-contract` 的 `STREAM_ATTACH_DEADLINE_MS = 5000` 同值：
+// 与前端契约 `@ark-mate/desktop-contract` 的 `STREAM_ATTACH_DEADLINE_MS = 5000` 同值：
 // 壳按这个数做启动预算，服务端按这个数关门——两边写死同一个数字，改动必须同时改两处。
 const StreamAttachDeadline = 5 * time.Second
 

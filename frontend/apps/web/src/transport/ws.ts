@@ -1,5 +1,5 @@
-import { buildAttachFrame } from '@ark/desktop-contract'
-import type { WsClientFrame, WsServerFrame } from '@ark/types'
+import { buildAttachFrame } from '@ark-mate/desktop-contract'
+import type { WsClientFrame, WsServerFrame } from '@ark-mate/types'
 import type { StreamConfig } from '../carrier'
 
 /**
@@ -121,7 +121,7 @@ export class WsTransport {
     }
     // M1-1：令牌**不进 URL**（URL 会同时进浏览器历史、反代/网关日志与 Referer），
     // 改走带内首帧 attach——连接建立后的第一条帧就是它，服务端 5s 内未收到即关闭（1008）。
-    // 帧形状的唯一真源是 @ark/desktop-contract 的 buildAttachFrame（桌面态带 streamToken）。
+    // 帧形状的唯一真源是 @ark-mate/desktop-contract 的 buildAttachFrame（桌面态带 streamToken）。
     const url = `${cfg.baseUrl}/v1/mate/ws/events`
     this.onState('connecting')
     let ws: WebSocket

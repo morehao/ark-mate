@@ -1,5 +1,5 @@
 {
-  "name": "@ark/desktop-contract",
+  "name": "@ark-mate/desktop-contract",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "node --test \"tests/**/*.test.ts\""
   },
   "devDependencies": {
-    "@ark/tsconfig": "workspace:*",
+    "@ark-mate/tsconfig": "workspace:*",
     "typescript": "^7.0.2"
   }
 }

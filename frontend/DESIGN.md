@@ -56,7 +56,7 @@ spacing:
 - **画布**：页面底 `surface-layout`（冷白）；会话侧栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline` hairline 分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
 - **品牌**：靛蓝 `#4f6ef7` 是唯一强调色（主按钮 / 链接 / 选中态 / 焦点环 / 品牌点「ark·mate」的 ·）；会话选中态与 agent 选项卡用半透明 `primary-soft` / `selected-bg` 柔和底，主色不铺满页面。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。
-- 全站 `tabular-nums`（由 `@ark/ui` AppShell 根容器开启），seq / 计数等数字等宽。
+- 全站 `tabular-nums`（由 `@ark-mate/ui` AppShell 根容器开启），seq / 计数等数字等宽。
 
 ## 2. 布局骨架
 
@@ -91,8 +91,8 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 
 ### Do
 - 改设计值：先改 `packages/ui/src/theme.ts` 的 `tokens`，再同步本文件 front matter（两处一致）。
-- 引用颜色一律 `tokens.*`（`import { tokens } from '@ark/ui'`）或 antd `theme.useToken()`。
-- 状态/语义展示用 `@ark/ui` 的 `sessionStatusMeta / agentStateMeta / Dot / Pill`。
+- 引用颜色一律 `tokens.*`（`import { tokens } from '@ark-mate/ui'`）或 antd `theme.useToken()`。
+- 状态/语义展示用 `@ark-mate/ui` 的 `sessionStatusMeta / agentStateMeta / Dot / Pill`。
 - 主色仅用于主操作 / 链接 / 选中态 / 焦点；页面表面中性灰阶 + 白卡 + hairline。
 
 ### Don't

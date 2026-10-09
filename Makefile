@@ -133,7 +133,7 @@ desktop/compliance:
 # 所以开发态也必须先装配载荷——否则 `make desktop/dev` 会以 boot-failed 页告终，而不是悄悄用机器上那份。
 desktop/dev: core/desktop desktop/payloads
 	$(require-node)
-	cd $(FRONTEND_ROOT) && pnpm -F @ark/desktop dev
+	cd $(FRONTEND_ROOT) && pnpm -F @ark-mate/desktop dev
 
 # 桌面入口界面/契约验收（真 Electron + 真核心，脚本自己起壳、自造自清；**不进 CI**）：
 # 与 `pnpm ui:accept`（浏览器入口，需先 make dev）互为两靶；覆盖 M1 的 scheme/契约/加固/凭据/事件流/退出六组。

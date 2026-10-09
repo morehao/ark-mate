@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
 import { ApiOutlined, ExperimentOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import { getAgentCapabilities, listMcpServers } from '@ark/api'
-import type { AgentCapabilities, McpServer } from '@ark/types'
+import { tokens } from '@ark-mate/ui'
+import { getAgentCapabilities, listMcpServers } from '@ark-mate/api'
+import type { AgentCapabilities, McpServer } from '@ark-mate/types'
 import { useMate } from '../store'
 import { Label } from './WorkspaceBrowser'
 import {

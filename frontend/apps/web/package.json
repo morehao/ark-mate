@@ -1,5 +1,5 @@
 {
-  "name": "@ark/web",
+  "name": "@ark-mate/web",
   "version": "0.1.0",
   "type": "module",
   "exports": {
@@ -18,11 +18,11 @@
   },
   "devDependencies": {
     "@ant-design/icons": "^6.3.4",
-    "@ark/api": "workspace:*",
-    "@ark/desktop-contract": "workspace:*",
-    "@ark/tsconfig": "workspace:*",
-    "@ark/types": "workspace:*",
-    "@ark/ui": "workspace:*",
+    "@ark-mate/api": "workspace:*",
+    "@ark-mate/desktop-contract": "workspace:*",
+    "@ark-mate/tsconfig": "workspace:*",
+    "@ark-mate/types": "workspace:*",
+    "@ark-mate/ui": "workspace:*",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",

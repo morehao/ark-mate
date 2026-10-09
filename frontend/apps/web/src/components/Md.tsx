@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { CheckOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
+import { tokens } from '@ark-mate/ui'
 
 /**
  * 轻量消息 Markdown（无第三方依赖）：块级 = 标题/无序/有序/任务列表/表格/引用/分隔线/段落，

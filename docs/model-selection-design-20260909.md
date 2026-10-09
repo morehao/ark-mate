@@ -447,7 +447,7 @@ func (s *Session) SetConfigOption(ctx context.Context, configID, value string) e
 
 > 目标：把「会话级模型」做成可交互选择器。参考 openwork 的 `ModelSelect` / `ModelPickerModal`
 > 交互（搜索、按 provider 分组、推荐星标、effort 二级），但**不引入**其 org/den/云端供应商权限层
-> （ark-mate 单操作员、无云端模型市场）。面板基于 antd + `@ark/ui`，模型 pill 复用 `Pill`/`tokens`。
+> （ark-mate 单操作员、无云端模型市场）。面板基于 antd + `@ark-mate/ui`，模型 pill 复用 `Pill`/`tokens`。
 
 ### 13.1 类型与 API（`packages/types` / `packages/api`）
 
@@ -496,7 +496,7 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
   - `value: ModelRef | null`；`onChange(model: ModelRef, behavior?: string|null)`；`disabled`。
 - **`ModelPickerModal.tsx`**（可选，等价 openwork 全览）：`Dialog` + 搜索框 + provider 手风琴 +
   推荐/全量分组 + 收藏（star 切换）+ effort 子选择；`target: 'default' | 'session'`。
-- 展示态复用 `@ark/ui` 的 `Pill`（自带 `title` tooltip + 截断），触发态包一层 `Select`/Popover。
+- 展示态复用 `@ark-mate/ui` 的 `Pill`（自带 `title` tooltip + 截断），触发态包一层 `Select`/Popover。
 - 交互态 CSS 收口 `console.css.ts`；颜色/圆角走 `theme.ts` `tokens`。
 
 ### 13.3 页面接线
@@ -542,7 +542,7 @@ export const listProviderModels = (id: string): Promise<ModelOption[]> =>
 >   - 类型以**后端 DTO 为准**收敛：`ModelOption{provider,id,title,description?,behavior?,recommended?,is_free?}`，
 >     目录响应为 `ModelCatalogResp{source,models,note?}`（`listModels(agentId?)`/`listProviderModels(id)` 均返回
 >     `ModelCatalogResp`，非 §13.1 的裸数组）；`ModelRef{providerID?,modelID}` 中 `providerID` 目前仅作展示分组。
->   - `createConversation`/`updateConversation` 经 `@ark/api` 透传 `model`（`CreateConversationReq.model/effort`、
+>   - `createConversation`/`updateConversation` 经 `@ark-mate/api` 透传 `model`（`CreateConversationReq.model/effort`、
 >     `ConversationPatch.model`、`ConversationSummary.provider/model`）。
 >   - UI：新建会话（StartPage）用 `ModelSelect`（antd Select + provider 分组 + 推荐星标 + 搜索，
 >     允许清空回「Agent 默认」；记住 `mate.panel.lastModel`）；会话详情抽屉「模型」行——`deepseekharness`

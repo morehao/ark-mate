@@ -1,5 +1,5 @@
-import type { BusEvent } from '@ark/types'
-import { Ev } from '@ark/types'
+import type { BusEvent } from '@ark-mate/types'
+import { Ev } from '@ark-mate/types'
 
 /** 一条失败 turn 的摘要（供详情面板/聊天流「重试该轮」）。 */
 export interface FailedTurn {

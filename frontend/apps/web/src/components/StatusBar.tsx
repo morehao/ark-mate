@@ -1,5 +1,5 @@
-import { tokens } from '@ark/ui'
-import { Dot } from '@ark/ui'
+import { tokens } from '@ark-mate/ui'
+import { Dot } from '@ark-mate/ui'
 import { useMate } from '../store'
 
 /** 底部状态条（console.html .statusbar）：WS 连接态 + eventbus 水位 + 语义提示。 */

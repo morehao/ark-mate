@@ -7,7 +7,7 @@
  * `tokens`（业务代码禁止硬编码色值）。于是：**生成**一份 `renderer/shell-tokens.css`，
  * 生成物入库、禁手改；改了 tokens 就跑本脚本刷新。
  *
- * 为什么直接 import `.ts` 而不是走 `@ark/ui` 的入口：`@ark/ui` 的入口是 React 组件库
+ * 为什么直接 import `.ts` 而不是走 `@ark-mate/ui` 的入口：`@ark-mate/ui` 的入口是 React 组件库
  * （引 antd），Node 跑不动；`theme.ts` 自身只有一个 `import type`（可擦除），Node 24 的
  * 原生类型擦除直接吃得下——**零新依赖**。
  *

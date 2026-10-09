@@ -6,7 +6,7 @@
  *      （preload 先于页面脚本执行，所以**不需要 boot 门**——这一点刻意不照搬参照实现的
  *      注入表/门：我们的产物是封闭静态包，没有运行期插件装载）；禁止 UA 嗅探、禁止读
  *      `window.electron`、禁止编译期分支（设计 §10.1）。
- *   2. **global 名字与帧形状只在契约包**：本文件从 `@ark/desktop-contract` 取 `DESKTOP_NAMESPACE`
+ *   2. **global 名字与帧形状只在契约包**：本文件从 `@ark-mate/desktop-contract` 取 `DESKTOP_NAMESPACE`
  *      与 `assertMateDesktop`，业务代码里不得再出现字符串字面量 `'__MATE_DESKTOP__'`。
  *   3. **桌面态要问壳要基址**：窗口的 origin 是 `mate-app://app`，事件流却必须直连回环
  *      （`protocol.handle` 不承载 WebSocket upgrade，设计 §7.2），所以基址只能由 `boot()` 给。
@@ -14,8 +14,8 @@
  * 浏览器态则一切同源：REST 与事件流都打 `location`，通道凭据用独立态的 `MATE_TOKEN`
  * （有则带、无则 null——核心决定要不要）。
  */
-import { getToken } from '@ark/api'
-import { DESKTOP_NAMESPACE, assertMateDesktop, type MateDesktop } from '@ark/desktop-contract'
+import { getToken } from '@ark-mate/api'
+import { DESKTOP_NAMESPACE, assertMateDesktop, type MateDesktop } from '@ark-mate/desktop-contract'
 
 /** 事件流连接配置：基址 + 通道级凭据（首帧 attach 用）。 */
 export type StreamConfig = {

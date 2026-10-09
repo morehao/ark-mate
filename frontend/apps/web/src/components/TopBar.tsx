@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { LockOutlined, MenuOutlined, UnlockOutlined } from '@ant-design/icons'
 import { Button, Input, Modal } from 'antd'
-import { tokens } from '@ark/ui'
+import { tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 
 const NAV = [

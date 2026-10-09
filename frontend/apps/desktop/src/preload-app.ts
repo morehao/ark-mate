@@ -10,12 +10,12 @@
  *   3. **只暴露执行面**：`boot()` + `native.*` + `platform.*`；**没有** `capabilities()`
  *      （能力声明走 `GET /v1/mate/capabilities`，两端同源同路径）。
  *
- * 输出是 CommonJS（`dist/preload-app.cjs`）——preload 必须 CJS；`@ark/desktop-contract`
+ * 输出是 CommonJS（`dist/preload-app.cjs`）——preload 必须 CJS；`@ark-mate/desktop-contract`
  * 由 esbuild 打进同一份产物（纯 TS 源、零运行期依赖）。
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
-import { DESKTOP_NAMESPACE, assertMateDesktop, isDesktopCarrier, type MateDesktop, type Rect } from '@ark/desktop-contract'
+import { DESKTOP_NAMESPACE, assertMateDesktop, isDesktopCarrier, type MateDesktop, type Rect } from '@ark-mate/desktop-contract'
 import { CH } from './channels'
 
 const carrier = isDesktopCarrier({ protocol: location.protocol, hostname: location.hostname }, process.isMainFrame)

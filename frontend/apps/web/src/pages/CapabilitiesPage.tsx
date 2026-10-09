@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Alert, Button, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Tabs, Tag, Tooltip } from 'antd'
 import { ExperimentOutlined, FileSearchOutlined, FileTextOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark/ui'
+import { PageContainer, tokens } from '@ark-mate/ui'
 import {
   callMcpTool,
   createMcpServer,
@@ -23,7 +23,7 @@ import {
   toErrorMessage,
   updateMcpServer,
   updateSkill,
-} from '@ark/api'
+} from '@ark-mate/api'
 import type {
   AgentCapabilities,
   AgentSkill,
@@ -39,7 +39,7 @@ import type {
   Skill,
   SkillMaterializationResp,
   Tool,
-} from '@ark/types'
+} from '@ark-mate/types'
 import { useMate } from '../store'
 import {
   fmtProbeAt,

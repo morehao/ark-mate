@@ -10,7 +10,7 @@ import (
 )
 
 // frozenEventTypes 是控制面**对外契约**的事件 type 全集（`/v1/mate/ws/events` 帧的
-// `type` 字段 + sqlite `events.type` 列 + transcript 回放）。前端 @ark/types 的
+// `type` 字段 + sqlite `events.type` 列 + transcript 回放）。前端 @ark-mate/types 的
 // events.ts 按这些字面量做联合类型，历史数据里也存着它们。
 //
 // 因此：新增事件是**兼容变更**（改这个列表 + 前端），改名/删除是**破坏性变更**
@@ -83,7 +83,7 @@ func TestEventTypeContractFrozen(t *testing.T) {
 // TestFrontendEventTypesMatchRegistry 钉住事件契约的**第三条边**：后端 events.go ↔ 前端 Ev。
 //
 // 上面 TestEventTypeContractFrozen 钉的是「真实常量 ↔ frozenEventTypes」，而它自己的注释
-// 就写着「前端 @ark/types 的 events.ts 按这些字面量做联合类型」——但**此前没有任何测试
+// 就写着「前端 @ark-mate/types 的 events.ts 按这些字面量做联合类型」——但**此前没有任何测试
 // 兜住前端那一份**：后端改一个事件名（或前端手滑打错一个字母），前端 Ev 会静默失配，
 // 直到某个 WS 帧在浏览器里没人认领才暴露。这与错误码的 BizCode 第三条边是同一个缺口
 // （见 pkg/code 的 TestFrontendBizCodesMatchRegistry），这里用同样办法补上：

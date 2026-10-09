@@ -17,7 +17,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
 
-import { APP_ORIGIN, SHELL_ORIGIN } from '@ark/desktop-contract'
+import { APP_ORIGIN, SHELL_ORIGIN } from '@ark-mate/desktop-contract'
 import { probeRunningTurns, startCore, stopCoreGracefully, type CoreHandle } from './core'
 import { installIpcHandlers } from './ipc'
 import { coreExecutable, rendererDir, webDir } from './paths'

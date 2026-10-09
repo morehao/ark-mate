@@ -981,7 +981,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 
 **证据**：
 
-- `pnpm typecheck` + `pnpm --filter @ark/panel typecheck` + `pnpm build` 全绿。
+- `pnpm typecheck` + `pnpm --filter @ark-mate/panel typecheck` + `pnpm build` 全绿。
 - 真实联调（vite dev :5173 → mate serve :8099，sqlite + caps fixtures）：`smoke:e2e` 全 PASS，
   新增断言「`/agents/:id/capabilities` 形状 + agent_id 一致」「`/mcps` 含 tool_count 等探测状态」
   「未知 server 探测 → 40401」；经 vite proxy 触发 stdio 探测（`mate-demo-mcp 0.2.0`，added=2）
@@ -1097,7 +1097,7 @@ opencode/dsh 授权实测）+ 跨 runtime 续聊各一轮。
 
 **证据**：
 
-- `pnpm typecheck` + `pnpm --filter @ark/panel typecheck` + `pnpm build` 全绿。
+- `pnpm typecheck` + `pnpm --filter @ark-mate/panel typecheck` + `pnpm build` 全绿。
 - 纯函数 Node 直调（vite lib 打包真实模块）：25 项断言全 PASS（分页截断/顺序保留/active 提升与
   remaining/active 不存在不提升/全量展开；相对时间 9 档含未来与非法输入；尾部窗口 4 档；
   滚动跟随 4 档）。
@@ -1228,7 +1228,7 @@ P1 已补：`GET /conversations/:id/runs` 现含每轮 `usage`，会话视图在
   `TestRunMaterializationAtTurnEnd`（不回归，且无 assistant 输出轮 `first_token_ms=0`）。
 - 真进程（`mate serve` sqlite）：echo 底座一轮 `runs` 返回 `usage {used:135,size:128000,cost_amount:0.00135}`、
   `duration_s≈2.07`；`first_token_ms` 逻辑正确（echo 亚毫秒响应 → 0 被 `omitempty` 省略；真实底座有模型延迟）。
-- 前端 `pnpm typecheck` + `pnpm --filter @ark/panel build` 通过；后端 `go test` 全绿（store/manager）。
+- 前端 `pnpm typecheck` + `pnpm --filter @ark-mate/panel build` 通过；后端 `go test` 全绿（store/manager）。
 
 **遗留**：单轮用量只在**轮次终态后**显示（runs 落库于 turn 收口）；轮进行中的实时用量尚未接（WS
 `session.usage` 事件已在流内，可后续在 assistant 尾部滚动显示）；goose 风格的「输入/输出/总计」与
@@ -1581,7 +1581,7 @@ A5 补上远程端点接入，使 ark-mate 既能驱动本机 CLI，也能接远
    传输层，不套用「业务错误一律 HTTP 200」的约定（否则 axios 拦截器无法区分）。比较用
    `subtle.ConstantTimeCompare`，避免逐字符计时侧信道。
 4. **令牌不外泄**：`mate config`（文本/JSON）只打印掩码 `cf…3a（14 字符）`；日志不打令牌。
-5. **前端**：`@ark/api` 新增 `getToken/setToken`（localStorage），axios 请求拦截器自动加头；
+5. **前端**：`@ark-mate/api` 新增 `getToken/setToken`（localStorage），axios 请求拦截器自动加头；
    WS URL 追加 `?token=`；顶栏新增「令牌」按钮（锁图标，已配置时高亮）+ 设置弹窗（保存后
    自动重连 WS 并重新拉数据）；收到 `code=40101` 自动弹窗提示。
 6. 顺带：`scripts/smoke-e2e.mjs` 与 `scripts/e2e-live-turn.mjs` 支持 `MATE_SMOKE_TOKEN`
@@ -1843,7 +1843,7 @@ danger-full-access 会同时关掉沙箱与审批——要完全放开必须显�
    便于 Node 侧独立校验（前端无测试框架，沿用「纯函数 + Node 断言」的既有做法）。
 
 **证据**：
-- `pnpm --filter @ark/panel typecheck` 通过；`make all` 通过（web 构建 + 内嵌 + release 二进制）。
+- `pnpm --filter @ark-mate/panel typecheck` 通过；`make all` 通过（web 构建 + 内嵌 + release 二进制）。
 - 真进程（release 二进制 127.0.0.1:10018，sqlite 库）：`/usage/summary` 三组查询与非法分组返回值见
   deployment.md；`/` 200 且 bundle 含新 UI 字样；策略 PATCH 往返一致、非法 `native_mode` 40001。
 - `frontend/scripts/smoke-e2e.mjs` 新增 `checkUsage()`（totals 字段齐备、group_by=day、非法分组 40001）→
@@ -1871,7 +1871,7 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
    - 语义：`after`/`before` 互斥（服务层兜底 40001）；`has_more` 沿当前方向；响应新增 `first_seq`/`last_seq`。
    - `HasBefore` 区分「未给 before」与「`before=0`（显式取末尾一页）」。
 3. handler 绑定 `before` 并校验（负值 40000、互斥 40001）。
-4. 前端：`@ark/api.conversationHistory` 支持 `before` + `first_seq/last_seq`；store 新增 `loadOlder(id)`
+4. 前端：`@ark-mate/api.conversationHistory` 支持 `before` + `first_seq/last_seq`；store 新增 `loadOlder(id)`
    （游标 = 当前视图最小 seq，折叠到空视图后整体前插，`lastSeq` 不回退；翻到最早后置 `historyStart[id]=true`）；
    ChatPage 在流式结束且未到最早时显示「加载更早的消息」。纯函数 `olderCursor`/`prependOlder`
    落在 `console/transcriptView.ts`（Node 侧可校验）。
@@ -1906,7 +1906,7 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
    「未知 id」完全相同的错误（`elicitation_not_found` → 40001，同文案），**不泄露他会话挂起项的存在**。
 4. 对外载荷带 scope：`ElicitationItem`/`ElicitationResp` 增 `conversation_id`（与 `session_id` 同值，
    语义显式化）与 `scope_source`；WS `session.elicitation_request` 载荷同步补 `conversation_id`/`scope_source`；
-   `session.elicitation_resolved` 增 `conversation_id`。前端 `@ark/types` 同步字段。
+   `session.elicitation_resolved` 增 `conversation_id`。前端 `@ark-mate/types` 同步字段。
 5. 推断注入点标注来源：`reqElic` 成功推断后置 `ScopeSource=inferred_inflight`（SDK 补上 scope 后改置 `wire`）。
 
 **证据**：
@@ -1971,7 +1971,7 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 3. `Orchestrator.ResolvePermission(...) (PermissionDecisionOutcome, bool, error)`；
    `Service.ResolvePermission(...) (*handler.PermissionDecisionResp, error)`；
    handler 直接回 `{call_id, allowed, rejected, always, option_id, outcome, selected_option_id}`。
-4. 前端 `@ark/types` 的 `ResolvePermissionResp` 同步扩字段（面板不改行为，仍以 WS 事件收敛卡片）。
+4. 前端 `@ark-mate/types` 的 `ResolvePermissionResp` 同步扩字段（面板不改行为，仍以 WS 事件收敛卡片）。
 
 **证据**：
 - 单测：`acl.TestEffectivePermissionOutcome`（8 例矩阵：放行指定/缺省/无效/无选项、拒绝 deny/无 deny/无效、

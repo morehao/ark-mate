@@ -1,5 +1,5 @@
 /**
- * @ark/desktop-contract —— 桌面载体契约的**唯一真源**（设计文档 §7.3）。
+ * @ark-mate/desktop-contract —— 桌面载体契约的**唯一真源**（设计文档 §7.3）。
  *
  * 为什么单独一个包：两个入口（浏览器 / 桌面窗口）共用同一份 `apps/web/dist`，所以"桌面多出来的
  * 东西"只能经契约进入。契约分两半——**声明面**走 HTTP（`GET /v1/mate/capabilities`，两端同构），

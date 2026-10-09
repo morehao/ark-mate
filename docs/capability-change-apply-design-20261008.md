@@ -325,7 +325,7 @@ type capabilityGeneration struct {
 
 **③ 事件 payload（增量，不新增 type）**
 
-`session.resumed`（`reason=generation`）的 payload 增 `capability_profile`（不透明串），`capability_fingerprint` 保持原义（缺省路径仍为空）。这是 payload 增量，**不触** `TestEventTypeContractFrozen` 的 type 清单；前端 `@ark/types` 的类型同步即可。
+`session.resumed`（`reason=generation`）的 payload 增 `capability_profile`（不透明串），`capability_fingerprint` 保持原义（缺省路径仍为空）。这是 payload 增量，**不触** `TestEventTypeContractFrozen` 的 type 清单；前端 `@ark-mate/types` 的类型同步即可。
 
 ### 4.6 对称性补齐（G4）
 

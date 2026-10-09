@@ -16,7 +16,7 @@ import {
   getToken,
   toErrorMessage,
   updateConversation,
-} from '@ark/api'
+} from '@ark-mate/api'
 import type {
   Agent,
   BusEvent,
@@ -30,8 +30,8 @@ import type {
   QueuedInput,
   StreamEntry,
   WsServerFrame,
-} from '@ark/types'
-import { BizCode, Ev } from '@ark/types'
+} from '@ark-mate/types'
+import { BizCode, Ev } from '@ark-mate/types'
 import { resolveStreamConfig, type StreamConfig } from './carrier'
 import { WsTransport } from './transport/ws'
 import { olderCursor, prependOlder } from './console/transcriptView'

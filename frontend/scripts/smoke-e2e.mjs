@@ -4,9 +4,9 @@
  *
  * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 mate serve 127.0.0.1:10001）。
  * 覆盖：
- *   1. REST 信封（health / agents / runtimes / conversations）——@ark/api 的 unwrap 语义前提；
+ *   1. REST 信封（health / agents / runtimes / conversations）——@ark-mate/api 的 unwrap 语义前提；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
- *   3. 载荷键形状与 @ark/types 声明一致（Agent/Runtime 列表字段）；
+ *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent/Runtime 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
@@ -17,7 +17,7 @@
  *
  * 退出码：0 = 全部通路 PASS；1 = 存在 FAIL。
  */
-import { buildAttachFrame } from '@ark/desktop-contract'
+import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/mate'

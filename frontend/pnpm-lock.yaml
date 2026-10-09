@@ -8,16 +8,16 @@ importers:
 
   .:
     devDependencies:
-      '@ark/desktop-contract':
+      '@ark-mate/desktop-contract':
         specifier: workspace:*
         version: link:packages/desktop-contract
 
   apps/desktop:
     devDependencies:
-      '@ark/desktop-contract':
+      '@ark-mate/desktop-contract':
         specifier: workspace:*
         version: link:../../packages/desktop-contract
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/node':
@@ -44,19 +44,19 @@ importers:
       '@ant-design/icons':
         specifier: ^6.3.4
         version: 6.3.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@ark/api':
+      '@ark-mate/api':
         specifier: workspace:*
         version: link:../../packages/api
-      '@ark/desktop-contract':
+      '@ark-mate/desktop-contract':
         specifier: workspace:*
         version: link:../../packages/desktop-contract
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
-      '@ark/types':
+      '@ark-mate/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@ark/ui':
+      '@ark-mate/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@types/react':
@@ -95,14 +95,14 @@ importers:
 
   packages/api:
     dependencies:
-      '@ark/types':
+      '@ark-mate/types':
         specifier: workspace:*
         version: link:../types
       axios:
         specifier: ^1.20.0
         version: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     devDependencies:
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -111,7 +111,7 @@ importers:
 
   packages/desktop-contract:
     devDependencies:
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -122,7 +122,7 @@ importers:
 
   packages/types:
     devDependencies:
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -131,7 +131,7 @@ importers:
 
   packages/ui:
     dependencies:
-      '@ark/types':
+      '@ark-mate/types':
         specifier: workspace:*
         version: link:../types
       antd:
@@ -147,7 +147,7 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
-      '@ark/tsconfig':
+      '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/react':

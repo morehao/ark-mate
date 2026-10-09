@@ -8,7 +8,7 @@ import {
   MedicineBoxOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
-import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark/ui'
+import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark-mate/ui'
 import {
   agentDiagnostics,
   createAgent,
@@ -20,8 +20,8 @@ import {
   stopAgent,
   upsertProvider,
   toErrorMessage,
-} from '@ark/api'
-import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark/types'
+} from '@ark-mate/api'
+import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark-mate/types'
 import { useMate } from '../store'
 import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
 

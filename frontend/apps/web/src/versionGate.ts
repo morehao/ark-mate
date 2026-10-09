@@ -7,9 +7,9 @@
  *
  * 取数走 `/v1/mate/meta`：桌面态由壳反代注入 restToken、浏览器态同源（独立部署时带用户令牌）。
  */
-import { getToken } from '@ark/api'
-import { tokens } from '@ark/ui'
-import { UNKNOWN_BUILD_ID, versionGate, type VersionGateResult } from '@ark/desktop-contract'
+import { getToken } from '@ark-mate/api'
+import { tokens } from '@ark-mate/ui'
+import { UNKNOWN_BUILD_ID, versionGate, type VersionGateResult } from '@ark-mate/desktop-contract'
 
 /** 编译期注入的构建 id（声明见 src/env.d.ts）。取不到就按 unknown——与核心同一口径。 */
 export const INJECTED_BUILD_ID: string =

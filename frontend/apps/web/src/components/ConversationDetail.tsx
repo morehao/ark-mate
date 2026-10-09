@@ -8,11 +8,11 @@ import {
   EditOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import { Dot, Pill, conversationStatusMeta } from '@ark/ui'
-import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark/types'
-import { modelValues } from '@ark/types'
-import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark/api'
+import { tokens } from '@ark-mate/ui'
+import { Dot, Pill, conversationStatusMeta } from '@ark-mate/ui'
+import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark-mate/types'
+import { modelValues } from '@ark-mate/types'
+import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark-mate/api'
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'

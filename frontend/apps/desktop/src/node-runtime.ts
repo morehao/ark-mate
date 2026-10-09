@@ -20,7 +20,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
-import { NODE_ENV_VARS } from '@ark/desktop-contract'
+import { NODE_ENV_VARS } from '@ark-mate/desktop-contract'
 
 import { coreEnvironment } from './env'
 import { runtimeBinDir } from './paths'

@@ -60,7 +60,7 @@ import type {
   WorkspaceLibrary,
   WorkspaceRecent,
   WorkspaceSettings,
-} from '@ark/types'
+} from '@ark-mate/types'
 
 // ——— mate 控制面 REST（/v1/mate，见 backend/internal/router/routes_*.go） ———
 

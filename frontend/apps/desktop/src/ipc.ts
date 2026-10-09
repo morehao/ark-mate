@@ -13,7 +13,7 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 
-import { isDesktopCarrier, type Rect } from '@ark/desktop-contract'
+import { isDesktopCarrier, type Rect } from '@ark-mate/desktop-contract'
 import { CH, type OpenTarget } from './channels'
 
 /**

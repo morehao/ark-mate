@@ -1,4 +1,4 @@
-import type { ConversationRun, RunUsage, UsageBucket, UsageSummary } from '@ark/types'
+import type { ConversationRun, RunUsage, UsageBucket, UsageSummary } from '@ark-mate/types'
 
 // ——— 用量视图模型（M3 用量统计；纯函数，便于 Node 侧校验） ———
 

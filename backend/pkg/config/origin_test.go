@@ -127,8 +127,9 @@ func TestAllowedOriginsSchemeWhitelist(t *testing.T) {
 	hermetic(t)
 	t.Setenv("MATE_ALLOWED_ORIGINS", "http://a.example,https://b.example:8443,mate-app://app")
 	cfg := Load()
-	// 顺序即 sort.Strings 的结果（normalizeAllowedOrigins 末尾刻意排序）：`mate-app` 的 m 在
-	// `http`/`https` 之后，与旧名 `forge-app`（f 在最前）相反——改名会挪动它在这个数组里的位置。
+	// 顺序即 sort.Strings 的结果（normalizeAllowedOrigins 末尾刻意排序）：桌面自定义 scheme 的
+	// 首字母从 f（旧名）变成 m（mate-app），在字典序里由最前挪到了 `http`/`https` 之后——
+	// 所以下面这个数组不是"随手写的顺序"，改名时会跟着挪。
 	want := []string{"http://a.example", "https://b.example:8443", "mate-app://app"}
 	if len(cfg.AllowedOrigins) != len(want) {
 		t.Fatalf("解析不符: %+v", cfg.AllowedOrigins)

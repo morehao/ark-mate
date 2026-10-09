@@ -8,8 +8,8 @@ import {
   FolderOutlined,
   HomeOutlined,
 } from '@ant-design/icons'
-import { browseWorkspaces, workspaceFiles } from '@ark/api'
-import type { WorkspaceBrowseResp, WorkspaceEntry, WorkspaceFileEntry } from '@ark/types'
+import { browseWorkspaces, workspaceFiles } from '@ark-mate/api'
+import type { WorkspaceBrowseResp, WorkspaceEntry, WorkspaceFileEntry } from '@ark-mate/types'
 import { useMate } from '../store'
 
 interface Props {

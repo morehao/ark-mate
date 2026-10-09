@@ -1,4 +1,4 @@
-import type { PermissionAction, PermissionPolicy } from '@ark/types'
+import type { PermissionAction, PermissionPolicy } from '@ark-mate/types'
 
 // ——— 权限策略视图模型（C1：Agents 页展示/编辑；纯函数，便于 Node 侧校验） ———
 

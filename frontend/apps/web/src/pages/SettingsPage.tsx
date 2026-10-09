@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { DeleteOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark/ui'
-import { getWorkspaceSettings, toErrorMessage, updateWorkspaceSettings } from '@ark/api'
-import type { WorkspaceSettings } from '@ark/types'
+import { PageContainer, tokens } from '@ark-mate/ui'
+import { getWorkspaceSettings, toErrorMessage, updateWorkspaceSettings } from '@ark-mate/api'
+import type { WorkspaceSettings } from '@ark-mate/types'
 import { useMate } from '../store'
 import { WorkspaceBrowser } from '../components/WorkspaceBrowser'
 

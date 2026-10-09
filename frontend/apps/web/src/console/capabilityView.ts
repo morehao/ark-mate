@@ -7,7 +7,7 @@ import type {
   SkillMaterializationState,
   SkillWarning,
   Tool,
-} from '@ark/types'
+} from '@ark-mate/types'
 
 // ——— 能力卡视图模型（P2 §8.1/§5.2；纯函数，便于单测/Node 侧校验） ———
 

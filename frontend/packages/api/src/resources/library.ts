@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { LibraryItem } from '@ark/types'
+import type { LibraryItem } from '@ark-mate/types'
 
 // ——— M2-4 Library 统一读模型（GET /library） ———
 

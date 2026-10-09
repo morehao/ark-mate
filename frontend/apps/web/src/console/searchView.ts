@@ -3,7 +3,7 @@
  *
  * 纯函数：便于用真实模块构建后做断言（与 console/railView、console/transcriptView 同约定）。
  */
-import type { MessageSearchHit, StreamEntry } from '@ark/types'
+import type { MessageSearchHit, StreamEntry } from '@ark-mate/types'
 
 /** 命中角色标签（UI 徽标文案）。 */
 export function roleLabel(role: string): string {

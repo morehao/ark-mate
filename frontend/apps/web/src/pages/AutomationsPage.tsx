@@ -20,7 +20,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DeleteOutlined, EditOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Dot, PageContainer, tokens } from '@ark/ui'
+import { Dot, PageContainer, tokens } from '@ark-mate/ui'
 import {
   createAutomation,
   deleteAutomation,
@@ -30,8 +30,8 @@ import {
   runAutomationNow,
   toErrorMessage,
   updateAutomation,
-} from '@ark/api'
-import type { Automation, AutomationPreviewItem, AutomationRunRecord } from '@ark/types'
+} from '@ark-mate/api'
+import type { Automation, AutomationPreviewItem, AutomationRunRecord } from '@ark-mate/types'
 import { useNavigate } from 'react-router-dom'
 import { useMate } from '../store'
 import { WorkspacePicker } from '../components/WorkspacePicker'

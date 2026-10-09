@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { AxiosError, AxiosRequestConfig } from 'axios'
-import type { Envelope } from '@ark/types'
-import { BizCode } from '@ark/types'
+import type { Envelope } from '@ark-mate/types'
+import { BizCode } from '@ark-mate/types'
 
 /**
  * mate 控制面 HTTP 客户端。

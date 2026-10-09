@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Input, Popover, Tooltip } from 'antd'
 import { BookOutlined, CheckOutlined, FolderOpenOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons'
-import { tokens } from '@ark/ui'
-import { browseWorkspaces, recentWorkspaces, workspaceLibraries } from '@ark/api'
-import type { WorkspaceLibrary, WorkspaceRecent } from '@ark/types'
+import { tokens } from '@ark-mate/ui'
+import { browseWorkspaces, recentWorkspaces, workspaceLibraries } from '@ark-mate/api'
+import type { WorkspaceLibrary, WorkspaceRecent } from '@ark-mate/types'
 import { useMate } from '../store'
 import { DirLabel, Label, WorkspaceBrowser, splitDirPath } from './WorkspaceBrowser'
 

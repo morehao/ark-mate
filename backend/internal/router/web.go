@@ -27,7 +27,7 @@ import (
 
 // 前端构建期写进产物的构建 id 文件（M2-4）与读不到时的口径。
 //
-// 这三个常量与前端契约（`@ark/desktop-contract` 的 `UNKNOWN_BUILD_ID`）是**同一条契约的两侧**，
+// 这三个常量与前端契约（`@ark-mate/desktop-contract` 的 `UNKNOWN_BUILD_ID`）是**同一条契约的两侧**，
 // 由 archtest 守卫逐字比对（`TestBuildIDUnknownMatchesContract`）——两边各写一个 'unknown'
 // 但拼写不同的话，闸门会从"无法校验"变成"不一致"，把用户挡在整屏状态页外面。
 const (

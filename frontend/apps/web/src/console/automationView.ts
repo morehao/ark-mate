@@ -6,7 +6,7 @@ import type {
   AutomationSchedule,
   AutomationScheduleKind,
   AutomationState,
-} from '@ark/types'
+} from '@ark-mate/types'
 
 // ——— automation 视图（M4-6）：纯函数，全部可在 typecheck 下穷举 ———
 //

@@ -7,7 +7,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "pnpm --filter @ark/web dev",
+    "dev": "pnpm --filter @ark-mate/web dev",
     "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
@@ -27,6 +27,6 @@
     "ui:accept:desktop-skills:packaged": "MATE_SMOKE_APP=apps/desktop/release/mac-arm64/ark-mate.app node scripts/desktop-skill-projection-acceptance.mjs"
   },
   "devDependencies": {
-    "@ark/desktop-contract": "workspace:*"
+    "@ark-mate/desktop-contract": "workspace:*"
   }
 }

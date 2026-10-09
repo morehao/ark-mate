@@ -10,7 +10,7 @@
  * 判定：收到终态帧（turn.ended / turn.error / run.cancelled）即 PASS；
  * 若在超时前未收尾则 POST /cancel 并继续等终态。退出码 0=通路可用。
  */
-import { buildAttachFrame } from '@ark/desktop-contract'
+import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
 const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
 const API = E2E_BASE + '/v1/mate'

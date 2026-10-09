@@ -519,11 +519,11 @@ backend/                单 Go module（github.com/morehao/ark-mate）
 frontend/               pnpm workspace（apps/* + packages/*）
   apps/web/             Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
   apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）
-  packages/desktop-contract  @ark/desktop-contract（载体契约唯一真源：常量 + 类型 + 纯函数判定；零 Electron 引用）
-  packages/tsconfig     @ark/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
-  packages/types        @ark/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
-  packages/api          @ark/api（axios 客户端 + /v1/mate resources）
-  packages/ui           @ark/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
+  packages/desktop-contract  @ark-mate/desktop-contract（载体契约唯一真源：常量 + 类型 + 纯函数判定；零 Electron 引用）
+  packages/tsconfig     @ark-mate/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
+  packages/types        @ark-mate/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
+  packages/api          @ark-mate/api（axios 客户端 + /v1/mate resources）
+  packages/ui           @ark-mate/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
 docs/                   设计/路线图 + runtime 适配核实 + 部署运维
   deployment.md         部署/运维（单二进制、systemd、容器、环境变量、备份、排障）
   design-and-roadmap.md 总体设计与 M0–M3 路线图（历史设计记录）

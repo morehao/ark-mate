@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { Select, Tag } from 'antd'
 import type { SelectProps } from 'antd'
-import { tokens } from '@ark/ui'
-import type { ConfigOptionValue } from '@ark/types'
+import { tokens } from '@ark-mate/ui'
+import type { ConfigOptionValue } from '@ark-mate/types'
 
 interface ModelSelectProps {
   /** 候选值（来自运行时目录 category=model 的 values；空 = 运行时没有可选项）。 */
@@ -76,7 +76,7 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
  *  - **关闭态只显示名称**：antd 把 option.label 原样渲染进选择器，若把描述塞进 label，
  *    收起的选择器会宽达 500+px 成为不可压缩的 flex item，把所在行挤塌（见 StartPanel
  *    底栏）。描述与「不可用」标记一律走 optionRender，只在下拉面板出现。
- * 交互态 CSS 收口 console.css.ts；颜色/圆角走 @ark/ui tokens，不硬编码。
+ * 交互态 CSS 收口 console.css.ts；颜色/圆角走 @ark-mate/ui tokens，不硬编码。
  */
 export function ModelSelect({
   values,

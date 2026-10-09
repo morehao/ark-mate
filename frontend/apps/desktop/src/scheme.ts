@@ -19,7 +19,7 @@ import { statSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { MATE_SCHEME, CSP_POLICY, assetContentType } from '@ark/desktop-contract'
+import { MATE_SCHEME, CSP_POLICY, assetContentType } from '@ark-mate/desktop-contract'
 import type { CoreHandle } from './core'
 
 /** 壳服务的静态路径集合（核心侧静态规则的**子集**，M2-5 断言两者响应头逐字一致）。 */

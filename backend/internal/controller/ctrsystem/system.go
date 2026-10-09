@@ -33,7 +33,7 @@ type Entries struct {
 
 // CapabilityEntry 一条能力的声明。
 type CapabilityEntry struct {
-	// ID 能力 id（闭集，与前端 @ark/desktop-contract 的 CapabilityId 一一对应）。
+	// ID 能力 id（闭集，与前端 @ark-mate/desktop-contract 的 CapabilityId 一一对应）。
 	ID string `json:"id"`
 	// Available 对**本次请求的入口**是否可用。
 	Available bool `json:"available"`
