@@ -59,7 +59,8 @@ const LAUNCHERS = [
     // 就与平台写根分叉、skill **静默不投放**（2026-10-09 桌面态验收实测：平台物化的 `probe-desktop`
     // 不在 dsh 会话的 `<available_skills>` 里，而子进程环境里正是这个变量）。Go 侧
     // `pkg/runtime/isolation.go` 曾犯同一个错、同批修掉；两侧由 archtest 的
-    // `TestDesktopLauncherIsolationMatchesCore` 钉住"启动器隔离表 ⊆ 核心隔离表"。
+    // `TestDesktopLauncherIsolationMatchesCore` 钉住"启动器隔离表 ⊆ 核心隔离表"，且**核心新增的变量
+    // 必须二选一**：在这里兜底，或在那个守卫的 `launcherCoreOnly` 里登记"启动器刻意不兜底 + 理由"。
     isolation: { DSH_HOME: 'runtime/dsh' },
   },
   {
@@ -69,9 +70,13 @@ const LAUNCHERS = [
     // 原生二进制，不需要 Electron 的 Node 模式。
     nodeMode: false,
     passthroughOnly: true,
-    // opencode 侧只兜底它**专属**的两个变量：`XDG_*` 是通用变量，全局改会连累用户其它工具，
-    // 那三个只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
+    // opencode 侧只兜底它**专属**的两个变量 + `XDG_STATE_HOME`：前者是 opencode 自己的配置/库落点；
+    // 后者是 v2 的**服务发现面**（`<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`），
+    // 不兜底时这条"壳直接跑载荷"的路径会去读/替换**用户自己的**后台服务登记——那正是"动了本机"。
+    // 其余 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` 是通用变量（全局改会连累用户其它
+    // 工具），只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
     isolation: {
+      XDG_STATE_HOME: 'runtime/opencode/state',
       OPENCODE_CONFIG_DIR: 'runtime/opencode/config/opencode',
       OPENCODE_DB: 'runtime/opencode/data/opencode.db',
     },

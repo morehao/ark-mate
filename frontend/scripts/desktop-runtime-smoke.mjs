@@ -431,6 +431,10 @@ function runtimeEnvOf(coreEnv, runtimeId) {
     isolation.XDG_CONFIG_HOME = join(home, 'runtime', 'opencode', 'config')
     isolation.XDG_DATA_HOME = join(home, 'runtime', 'opencode', 'data')
     isolation.XDG_CACHE_HOME = join(home, 'runtime', 'opencode', 'cache')
+    // v2 的服务发现面（`<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`）：探针不隔离它就会
+    // **读/替换用户自己的后台服务登记**——那正是"探针动了本机"（本脚本 2026-10-09 起把可写面收进临时
+    // home，这一条必须跟着核心 isolation.go 的表走）。
+    isolation.XDG_STATE_HOME = join(home, 'runtime', 'opencode', 'state')
     isolation.OPENCODE_CONFIG_DIR = join(home, 'runtime', 'opencode', 'config', 'opencode')
     isolation.OPENCODE_DB = join(home, 'runtime', 'opencode', 'data', 'opencode.db')
   }

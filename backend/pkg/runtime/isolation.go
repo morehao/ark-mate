@@ -34,7 +34,7 @@ import (
 //     注入后 dsh 会话的 `<available_skills>` 里没有投影根下那条 skill，只有注入根下的）。
 //     历史：本表曾按"agents 面也要隔离"注入它，那是把"隔离用户既有配置"错用到了**平台自己的
 //     投放面**上——这条根是**用户全局共享**的（opencode 也读它），不是底座私有配置。
-//   - opencode：三个 XDG 变量 + OPENCODE_CONFIG_DIR + OPENCODE_DB（它没有 agents 根这类变量，
+//   - opencode：四个 XDG 变量 + OPENCODE_CONFIG_DIR + OPENCODE_DB（它没有 agents 根这类变量，
 //     故它与投影根天然一致——dsh 侧修完两侧才对称）；
 //   - 其它 id（远程端点、用户自定义 runtime）：只给 npm 面，不臆造 runtime 专属变量。
 //
@@ -61,6 +61,13 @@ func IsolationEnv(runtimeID, home string) []string {
 			"XDG_CONFIG_HOME="+filepath.Join(home, "runtime", "opencode", "config"),
 			"XDG_DATA_HOME="+filepath.Join(home, "runtime", "opencode", "data"),
 			"XDG_CACHE_HOME="+filepath.Join(home, "runtime", "opencode", "cache"),
+			// XDG_STATE_HOME 是 opencode v2 新增的**服务发现面**：后台服务的登记文件是
+			// `<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`（对 2.0.26 的二进制取
+			// strings：`process.env.XDG_STATE_HOME ?? join(homedir(),".local","state")`）。
+			// 不隔离它，平台拉起的 acp 会**读用户自己的 service.json**，命中同版本同 url 时直接
+			// 复用用户的服务，版本不符时更会走"替换"分支（SIGTERM 旧进程 + 删登记文件）——
+			// 那是"forge 动了本机"最直接的一种。隔离后平台得到自己的服务登记。
+			"XDG_STATE_HOME="+filepath.Join(home, "runtime", "opencode", "state"),
 			"OPENCODE_CONFIG_DIR="+filepath.Join(home, "runtime", "opencode", "config", "opencode"),
 			"OPENCODE_DB="+filepath.Join(home, "runtime", "opencode", "data", "opencode.db"),
 		)

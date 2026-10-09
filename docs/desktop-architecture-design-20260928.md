@@ -401,6 +401,7 @@ graph TB
 | dsh | `DSH_HOME` | `<FORGE_HOME>/runtime/dsh` | `@deepseek-ai/dsh-home-paths/lib/index.js`：`const DSH_HOME_ENV = "DSH_HOME"`，默认 `join(homedir(), ".dsh")` |
 | dsh | `DSH_AGENTS_HOME` | `<FORGE_HOME>/runtime/dsh/agents` | 同文件：`DSH_AGENTS_HOME ?? join(homedir(), …)`——**默认不跟着 `DSH_HOME` 走**，只给 `DSH_HOME` 会漏掉 agents 面，所以两个都注入 |
 | opencode | `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` | `<FORGE_HOME>/runtime/opencode/{config,data,cache}` | 二进制内的变量名（opencode 的配置/数据面走 XDG 约定） |
+| opencode | `XDG_STATE_HOME` | `<FORGE_HOME>/runtime/opencode/state` | **v2 补（2026-10-09 对 `@opencode/cli-darwin-arm64@2.0.26` 复核对齐）**：后台服务的登记文件解析式在二进制里是 `join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "opencode", "service.json")`。不隔离这一项，平台拉起的 `opencode acp` 会读到**用户自己**的登记：同版本同 url 直接复用用户的服务，版本不符还会走替换分支（SIGTERM 旧进程 + 删登记文件）——即"forge 动了本机" |
 | opencode | `OPENCODE_CONFIG_DIR` | `<FORGE_HOME>/runtime/opencode/config/opencode` | 同上；opencode 自己的配置目录覆盖点 |
 | opencode | `OPENCODE_DB` | `<FORGE_HOME>/runtime/opencode/data/opencode.db` | 同上；其会话库落在数据目录内 |
 | 两者 | `npm_config_cache` / `npm_config_prefix` | `<FORGE_HOME>/npm/{cache,global}` | 我们自己的 npm/js 生态（MCP server 用 `npx` 拉起时不该污染 `~/.npm`） |
@@ -622,7 +623,7 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 | 门禁 | `make verify/compliance`（`verify-compliance.mjs`：① 逐字节复算 ② 组件与 `release.json`/载荷清单/锁文件交叉校验 ③ SBOM 形状 ④ `--require-artifacts` 判**包内**那份）；`desktop/dist` 收尾跑 ④，`verify/desktop-dod` 跑 ①②③ |
 | 组件集合 | 随包载荷树里**实际存在**的每个 npm 包（按 `node_modules` 布局判定；`payloads/<name>/<version>` 下的 skill 模板等非依赖 `package.json` 不算），加 Electron / Node 与本应用自身 —— 本批 653 个 |
 | 版本事实 | 组件版本必须同时出现在 `release.json`、载荷清单（`payload.json`）与 `pnpm-lock.yaml`；例外只有一类：包自己声明 `bundleDependencies` 时随它发布的依赖（npm 是唯一一个，本批 138 个），锁文件不建模它们，故单独标注且不参与 pin 校验 |
-| 载荷 ↔ 包名 | `PAYLOAD_PACKAGES` 显式声明（`dsh` → `@deepseek-ai/dsh`、`opencode` → `opencode-darwin-arm64`）；生成期硬校验"树里确有此名此版本"，对不上即失败——载荷短名不是 npm 包名，许可证义务挂在真名上 |
+| 载荷 ↔ 包名 | `PAYLOAD_PACKAGES` 显式声明（`dsh` → `@deepseek-ai/dsh`、`opencode` → `@opencode/cli-darwin-arm64`；v1 时代是 `opencode-darwin-arm64`，v2 换成 `@opencode/cli-<os>-<arch>`）；生成期硬校验"树里确有此名此版本"，对不上即失败——载荷短名不是 npm 包名，许可证义务挂在真名上 |
 | 许可证文本 | 取自各包自己的 `package.json`（`license` / `licenses` 两种形态），**原样保留**、不做 SPDX 纠正；上游漏写字段的包必须在 `LICENSE_FALLBACKS` 显式登记，否则生成期失败（不静默记 unknown） |
 | 诊断 | `forge doctor`（设计 §6.3 的完整性一行）：`--verify-payload` 全量复算载荷树；打包态拿 `<Resources>/release.json` 逐项比对核心版本/契约代数/资产指纹/载荷清单 |
 

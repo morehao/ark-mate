@@ -37,6 +37,8 @@ func TestIsolationEnvBuiltinRuntimes(t *testing.T) {
 				"XDG_CACHE_HOME=" + filepath.Join(home, "runtime", "opencode", "cache"),
 				"XDG_CONFIG_HOME=" + filepath.Join(home, "runtime", "opencode", "config"),
 				"XDG_DATA_HOME=" + filepath.Join(home, "runtime", "opencode", "data"),
+				// v2 的服务登记面（`<home>/opencode/service.json`）：不隔离就会读/替换用户自己的服务。
+				"XDG_STATE_HOME=" + filepath.Join(home, "runtime", "opencode", "state"),
 				"npm_config_cache=" + filepath.Join(home, "npm", "cache"),
 				"npm_config_prefix=" + filepath.Join(home, "npm", "global"),
 			},
