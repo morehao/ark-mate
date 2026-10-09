@@ -231,6 +231,9 @@ verify/compliance:
 #   （Go 与 JS 两套实现必须给出同一个值 = 版本闸门的前提）→ electron/node/nodeAbi 重跑 M3-7 的断言
 #   → 载荷 name/version/digest 重读 payload.json。
 # 需要核心与资产已在场（`make core/desktop`）；不打包也能跑，不需要载荷。
+# 一条口径（2026-10-09）：`coreVersion` **只在打包档判**——源码态的 `resources/forge-core` 按设计
+# 不注入版本号（报 `dev`），与声明的发布号没有可比对象，此时打信息行而不是判红；发布版本一致性的
+# 唯一真判据是 `desktop/dist` 收尾那条 `--require-artifacts --launch`。别把这条读成放宽。
 # `--require-artifacts --launch`（desktop/dist 收尾自动跑）：再加"包内那份 release.json 与源文件
 # 逐字节相同""tar.gz 解到干净目录后布局完整、且壳能起来"。
 verify/release-json:

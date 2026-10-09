@@ -22,6 +22,14 @@
  *   --no-live 跳过"起核心对 /meta"（只用于排障；默认一定要跑，它是两侧算法的唯一交叉验证）
  *
  * 退出码 1 = 有任何一条不符（人话报告在 stdout）。
+ *
+ * ## `coreVersion` 的两档口径（2026-10-09）
+ *
+ * "核心自报的版本 == 契约声明的版本"这条**只在打包档成立**：源码态的 `resources/forge-core` 由
+ * `make core/desktop` 产出，**按设计不注入版本号**（报 `dev`），拿它比 `0.1.0` 不是抓漂移而是
+ * 没有可比对象。因此源码态对 `coreVersion` 打**信息行**（`·`，不计入判据），其余六项照旧复算；
+ * `--require-artifacts` 下仍要求逐字相等（包内核心报 `dev` 即红）。别把这条读成"放宽"——
+ * 发布版本一致性的唯一真判据一直是 `desktop/dist` 收尾那条 `--require-artifacts --launch`。
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -62,6 +70,9 @@ function check(name, ok, detail = '') {
   console.log(`  ${ok ? '✅' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`)
   return !!ok
 }
+/** 信息行：**不是**判据（没有 ✅，也不计入失败）。用于记录"这一档判不了、由另一档判"的事实——
+ *  别用绿色对勾冒充"已校验"（本仓对"假绿"的口径与"假红"一样严）。 */
+const note = (text) => console.log(`  · ${text}`)
 const section = (t) => console.log(`\n=== ${t} ===`)
 
 function fail(message) {
@@ -524,7 +535,29 @@ async function main() {
       return { raw: r.stdout, status: r.status }
     }
   })()
-  check('coreVersion 与核心二进制自报一致', coreInfo?.version === release.coreVersion, `二进制报 ${coreInfo?.version ?? '（读不到）'}`)
+  // `coreVersion` 的判据**分两档**，因为"核心二进制自报什么"这件事在两种语境下是不同的断言：
+  //   - `--require-artifacts`（打包/发布语境，`desktop/dist` 收尾那条）：必须**逐字相等**——
+  //     包内核心报 `dev` 照样红，这才是"发布版本一致性"的真判据；
+  //   - 源码态：`resources/forge-core` 由 `make core/desktop` 产出，**按设计不注入版本号**（报 `dev`）。
+  //     拿它去比 `0.1.0` 不是抓到漂移，而是"没有可比对象"（2026-10-09 实测：`pnpm asset-parity`
+  //     会经 rebuildAll 重建 dev 核心，于是这条在源码态恒红）。所以源码态只接受"等于声明的版本
+  //     或显式的 dev"，并**用信息行说明发布一致性由打包档判**——不用绿勾冒充已校验。
+  const coreVersionOk = requireArtifacts
+    ? coreInfo?.version === release.coreVersion
+    : coreInfo?.version === release.coreVersion || coreInfo?.version === 'dev'
+  if (requireArtifacts || coreInfo?.version !== 'dev') {
+    check(
+      'coreVersion 与核心二进制自报一致',
+      coreVersionOk,
+      `二进制报 ${coreInfo?.version ?? '（读不到）'}${requireArtifacts ? '（打包档：必须与声明逐字相等）' : ''}`,
+    )
+  } else {
+    note(
+      `coreVersion 未在源码态判：resources/forge-core 报 dev（make core/desktop 按设计不注入版本号），` +
+        `与声明的 ${release.coreVersion} 没有可比对象；发布版本一致性由 desktop/dist 收尾的 ` +
+        `\`--require-artifacts --launch\` 判`,
+    )
+  }
   check('apiContract 与核心二进制自报一致', coreInfo?.apiContract === release.apiContract, `二进制报 ${coreInfo?.apiContract ?? '（读不到）'}`)
   check('coreVersion = appVersion（发布号标识整套）', release.coreVersion === release.appVersion, `${release.coreVersion} vs ${release.appVersion}`)
 
@@ -578,7 +611,12 @@ async function main() {
     try {
       const meta = await metaFromCore()
       check('核心报告的 webSource = dir（核心读的确实是这一份目录）', meta.webSource === 'dir', String(meta.webSource))
-      check('核心报告的 coreVersion 与契约一致', meta.coreVersion === release.coreVersion, String(meta.coreVersion))
+      // 与上面 ② 的 coreVersion 同一条口径：`/meta` 报的是**同一个**核心，源码态它同样是 dev。
+      if (requireArtifacts || meta.coreVersion !== 'dev') {
+        check('核心报告的 coreVersion 与契约一致', meta.coreVersion === release.coreVersion, String(meta.coreVersion))
+      } else {
+        note(`核心经 /meta 报的 coreVersion 同样跳过：报 dev（与 ② 同一个源码态核心），由打包档判`)
+      }
       check('核心报告的 apiContract 与契约一致', meta.apiContract === release.apiContract, String(meta.apiContract))
       check('核心报告的 webBuildId 与契约一致', meta.webBuildId === release.webBuildId, String(meta.webBuildId))
       check(
