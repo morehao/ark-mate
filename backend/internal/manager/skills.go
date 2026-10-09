@@ -87,7 +87,7 @@ func (s *Service) ReconcileSkillProjection(p SkillProjection) (int, int, error) 
 	return capability.ReconcileSkills(p.MaterializeSpec(), s.caps.ListSkills())
 }
 
-// capabilityDirSnapshot 能力数据面目录（启停写回定义文件用）。
+// capabilityDirSnapshot 能力定义目录（memory 模式下是启停写回位置；sqlite 模式下是导入/导出目录）。
 func (s *Service) capabilityDirSnapshot() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

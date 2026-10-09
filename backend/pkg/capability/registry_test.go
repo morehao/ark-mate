@@ -203,3 +203,39 @@ func TestLoadLegacySourcesWarns(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistryReset Reset 是"整体替换"式装载的前提：三张表都必须真的清空。
+//
+// 缺了它，装载源换成 store 之后"库里删了一行"不会让能力从内存消失（幽灵定义，见 Reset 注释）。
+// 断言三张表而不是只断言 skill：只清一部分的写法（漏掉 tools）会留下"删了 server 但工具还在"
+// 的残影，而那种残影在列表上看不出来。
+func TestRegistryReset(t *testing.T) {
+	r := NewRegistry()
+	if err := r.RegisterSkill(&Skill{ID: "s1", Name: "S"}); err != nil {
+		t.Fatalf("RegisterSkill: %v", err)
+	}
+	if err := r.RegisterMcpServer(&McpServer{ID: "m1", Transport: TransportSSE, URL: "http://localhost:1"}); err != nil {
+		t.Fatalf("RegisterMcpServer: %v", err)
+	}
+	if err := r.RegisterTool(&Tool{Name: "t1", Source: ToolSourceBuiltin}); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
+	}
+	r.Reset()
+	if got := r.ListSkills(); len(got) != 0 {
+		t.Fatalf("Reset 后 skills 应为空: %+v", got)
+	}
+	if got := r.ListMcpServers(); len(got) != 0 {
+		t.Fatalf("Reset 后 mcps 应为空: %+v", got)
+	}
+	if got := r.ListTools(); len(got) != 0 {
+		t.Fatalf("Reset 后 tools 应为空: %+v", got)
+	}
+	// 清空之后必须还能正常注册（Reset 不能把 map 置成 nil：那样写回会 panic，
+	// 而 panic 会出现在启动路径上——比"没清干净"严重得多）。
+	if err := r.RegisterSkill(&Skill{ID: "s2", Name: "S2"}); err != nil {
+		t.Fatalf("Reset 后注册: %v", err)
+	}
+	if got := r.ListSkills(); len(got) != 1 || got[0].ID != "s2" {
+		t.Fatalf("Reset 后注册不符: %+v", got)
+	}
+}

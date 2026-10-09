@@ -106,7 +106,11 @@ type Service struct {
 	currentAgent string
 	catalog      *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
 	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
-	// capabilityDir 能力数据面目录（启停写回定义文件用；LoadCapabilityDefinitions 登记）。
+	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
+	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
+	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
+	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
+	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
 	capabilityDir string
 	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
 	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。

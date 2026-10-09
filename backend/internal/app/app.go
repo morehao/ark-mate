@@ -246,7 +246,7 @@ func (a *App) Init(ctx context.Context) error {
 		}
 	}
 
-	if err := a.loadDefinitions(); err != nil {
+	if err := a.loadDefinitions(ctx, mode); err != nil {
 		return err
 	}
 
@@ -381,14 +381,26 @@ func (a *App) metaInfo() ctrsystem.MetaSource {
 
 // loadDefinitions 装载 Agent / 能力定义并重校 skill 物化。
 //
-// 都放在这里而不是各自的构造里：它们是"文件系统即配置"的装载点，
+// 都放在这里而不是各自的构造里：它们是"配置即事实源"的装载点，
 // 失败只告警不阻断（用户目录缺文件是常态），但必须发生在路由起来之前。
-func (a *App) loadDefinitions() error {
+func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	cfg := a.cfg
 	// Agent definitions（P2）：FORGE_AGENTS 目录下 <id>.json → 注册到 agents 表（服务端无页面时也热加载）。
 	a.svc.LoadAgentDefinitions(cfg.AgentDir)
-	// 能力数据面（P1）：FORGE_CAPABILITIES 目录下 skills|mcp|tools/*.json → Skill/MCP/Tool 目录。
-	a.svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
+	// 能力数据面（P1 / M6-2）：**按持久层模式分派**——sqlite 模式下 DB 是事实源（v8 的
+	// skills/mcp_servers），memory 模式下文件仍是装载源。
+	//
+	// 为什么 memory 模式不跟着换：memory 模式没有持久层，文件是它唯一的持久形态；不给它造
+	// 第二套存储，也不让能力静默变空表（设计文档 §1.4 C-1 的精确措辞：sqlite 模式下"不支持
+	// 手工改文件"是结构性事实，memory 模式下那条仍是约定）。默认（make dev/server）是 sqlite。
+	//
+	// `capabilityDir`（FORGE_CAPABILITIES）在 sqlite 模式下**降级为导入/导出目录**：
+	// 存量定义还在那里，由 M6-4 的导入器一次性灌进 DB；`forge capability import|export` 也读它。
+	if mode == config.StoreModeSQLite {
+		a.svc.LoadCapabilityDefinitionsFromStore(ctx, cfg.CapabilityDir)
+	} else {
+		a.svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
+	}
 	a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
 	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
 	// 目标根与形态来自 **runtime 的投影声明**；FORGE_PROJECTION_DIRS 只在需要覆盖根时才出现。

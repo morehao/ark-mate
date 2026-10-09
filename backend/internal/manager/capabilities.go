@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,15 +18,106 @@ import (
 
 // LoadCapabilityDefinitions 加载能力数据面目录并合并（dir 为空 = 仅代码注入/空表）。
 // 返回三类合计加载数（坏文件跳过，对齐 LoadAgentDefinitions 容错）。
+//
+// **语义降级（M6-2，必须写在注释里，避免后人误当事实源）**：自 v8 起，sqlite 模式下本方法
+// **不再是装载源**——能力定义的事实源是 DB（`skills`/`mcp_servers`），本方法只剩两个用途：
+//  1. **memory 模式**（`FORGE_STORE=memory`，或无 DB 文件时的 auto）的装载路径：memory 模式
+//     没有持久层，文件是它唯一的持久形态，不给它造第二套存储、也不让能力静默变空表；
+//  2. **导入/导出路径**（M6-4 的 `forge capability import|export`）：`LoadDir` 降级为
+//     "把存量文件读成定义"的编解码入口。
+//
+// 登记 `capabilityDir` 的语义也随之降级为"导入/导出目录"（见 service.capabilityDir）。
 func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	if s.caps == nil {
 		return 0
 	}
-	// 登记目录：§13.4 S4 的启停要写回 <dir>/skills/<id>.json（没有它就只能内存生效，报错给出路）。
+	// 登记目录：导入/导出与（M6-3 之前的）启停写回都按它定位（没有它就只能内存生效，报错给出路）。
 	s.mu.Lock()
 	s.capabilityDir = dir
 	s.mu.Unlock()
 	return s.caps.LoadDir(dir).Total()
+}
+
+// LoadCapabilityDefinitionsFromStore 从持久层装载能力定义（sqlite 模式的事实源，M6-2）。
+//
+// 三步：**清空 → 逐行解码 → 过注册闸门**。顺序不能换：
+//   - 先 Reset 是"整体替换"语义的前提（否则库里删掉的行会以幽灵定义留下，见 Registry.Reset）；
+//   - 过 `RegisterSkill`/`RegisterMcpServer` 闸门是必须的：定义进 DB 的**写面**要走同一道闸门，
+//     但 DB 是可达的（`forge capability import`、将来的 SQL 手工修库），装载是最后一道防线——
+//     一手坏定义不该让整个能力面起不来。
+//
+// 坏行/非法定义**逐条 WARN 跳过、不阻断启动**，与 `LoadDir` 的容错口径逐字一致（用户目录里
+// 一个坏文件从来不阻挡服务启动，DB 化不该把这条变严）。返回成功装载的条数。
+//
+// `importDir` 只用于登记"导入/导出目录"（能力定义仍在文件里的那份存量）；空串 = 不登记。
+func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, importDir string) int {
+	if s.caps == nil || s.st == nil {
+		return 0
+	}
+	if importDir != "" {
+		s.mu.Lock()
+		s.capabilityDir = importDir
+		s.mu.Unlock()
+	}
+	s.caps.Reset()
+	total := 0
+
+	skills, err := s.st.ListSkillDefinitions(ctx)
+	if err != nil {
+		slog.Warn("capability: 从持久层读 skill 定义失败（能力面将为空）", "err", err)
+		return total
+	}
+	for i := range skills {
+		row := skills[i]
+		var sk capability.Skill
+		if err := json.Unmarshal([]byte(row.Body), &sk); err != nil {
+			slog.Warn("capability: skill 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		// id 以**行主键**为准：body 里的 id 与行主键不一致时，行主键是事实（它是 CAS 与审计的键）。
+		// 这与文件路径的"文件名兜底"同一思路——文件名/主键是可寻址的那一个。
+		if sk.ID != row.ID {
+			if sk.ID != "" {
+				slog.Warn("capability: skill 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", sk.ID)
+			}
+			sk.ID = row.ID
+		}
+		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
+		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
+		if err := s.caps.RegisterSkill(&sk); err != nil {
+			slog.Warn("capability: skill 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		total++
+	}
+
+	mcps, err := s.st.ListMcpServerDefinitions(ctx)
+	if err != nil {
+		slog.Warn("capability: 从持久层读 mcp server 定义失败", "err", err)
+		return total
+	}
+	for i := range mcps {
+		row := mcps[i]
+		var m capability.McpServer
+		if err := json.Unmarshal([]byte(row.Body), &m); err != nil {
+			slog.Warn("capability: mcp server 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		if m.ID != row.ID {
+			if m.ID != "" {
+				slog.Warn("capability: mcp 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", m.ID)
+			}
+			m.ID = row.ID
+		}
+		if err := s.caps.RegisterMcpServer(&m); err != nil {
+			slog.Warn("capability: mcp 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			continue
+		}
+		total++
+	}
+
+	slog.Info("capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	return total
 }
 
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。

@@ -258,6 +258,24 @@ func (r *Registry) RemoveToolsForMcpServer(serverID string) int {
 	return n
 }
 
+// Reset 清空三张表（"整体替换"式装载的前置动作）。
+//
+// 为什么需要它：`RegisterSkill`/`RegisterMcpServer`/`RegisterTool` 都是**按 id 覆盖**，
+// 谁都不摘除"这次装载里没出现"的旧条目。装载源从目录换成 store 之后，"库里删了一行"
+// 必须让那条能力从内存里**消失**，否则它会以幽灵定义的形式继续出现在列表里、继续被注入
+// ——这正是设计文档 §3.5-⑤ 记录的缺陷（`RemoveSkill` 的注释里也写着"内存删了但文件还在
+// 会复活"，那是另一个方向的同一件事）。
+//
+// 与 `RemoveXxx` 的分工：那几个是**单条**摘除（写面自己知道删了哪一条，且顺序有意义），
+// Reset 是装载前的**清场**，只该由装载路径调用。
+func (r *Registry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skills = make(map[string]*Skill)
+	r.mcps = make(map[string]*McpServer)
+	r.tools = make(map[string]*Tool)
+}
+
 // SupportedFormat 报告某物化 format 是否已实证（激活判定用：声明了 runtime 但 format 未实证
 // = 该 runtime 物化不出来，要给用户一个人话原因，而不是让技能静默消失）。
 func SupportedFormat(format string) bool {
