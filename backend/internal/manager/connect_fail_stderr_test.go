@@ -41,6 +41,69 @@ sys.exit(3)
 		CapabilityScope: runtime.CapabilityScopeProcess}
 }
 
+// nodeStyleBootFailSpec 复刻 dsh（Node）失败时的 stderr 形态：源码片段 + `Error: <真因>` +
+// 栈帧 + Node 版本号。这是**真实场景的形状**——2026-10-09 从仓库根起核心建 dsh 会话时，
+// 核心日志里的 stderr 就是这个顺序，而最初的"取最后 5 行"实现给出的全是一串 `at …`。
+func nodeStyleBootFailSpec(t *testing.T) runtime.Spec {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "nodeboom.py")
+	src := `import sys
+lines = [
+    "    throw new Error(binName + ': ' + path + ' sets ...');",
+    "          ^",
+    'Error: dsh: /repo/.env sets "DSH_VERSION", which only the launching environment may set',
+    "    at readEnvLayer (file:///dsh-app-boot/lib/index.js:3415:9)",
+    "    at loadLayeredEnv (file:///dsh-app-boot/lib/index.js:3436:18)",
+    "    at runCli (file:///dsh/lib/bin.js:216:19)",
+    "    at async runDesktopCli (file:///dsh-desktop-host/lib/cli.js:93:2)",
+    "    at async file:///dsh-desktop-host/lib/cli.js:112:2)",
+    "",
+    "Node.js v24.18.1",
+]
+for l in lines:
+    sys.stderr.write(l + "\n")
+sys.stderr.flush()
+sys.exit(1)
+`
+	if err := os.WriteFile(script, []byte(src), 0o600); err != nil {
+		t.Fatalf("写 Node 形态桩失败: %v", err)
+	}
+	return runtime.Spec{ID: "stub", Name: "Stub",
+		Launch:          runtime.LaunchSpec{Command: "python3", Args: []string{script}},
+		CapabilityScope: runtime.CapabilityScopeProcess}
+}
+
+// TestConnectFailurePicksCauseLineOverTail 原因在栈**之前**时（Node 形态），信封必须给出原因行。
+//
+// 这条是上一条的对照：只"取尾部窗口"会退回一串栈帧 + `Node.js v24.18.1`，用户拿不到死因。
+func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
+	reg := runtime.NewRegistry(nodeStyleBootFailSpec(t))
+	svc := NewService(reg, eventbus.New())
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	orch := NewOrchestrator(svc, reg)
+	t.Cleanup(orch.Close)
+
+	_, err := svc.CreateConversation(context.Background(),
+		dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	if err == nil {
+		t.Fatal("底座起不来时建会话必须失败")
+	}
+	var ge gerror.Error
+	if !errors.As(code.FromError(err), &ge) {
+		t.Fatal("信封错误必须带业务码")
+	}
+	if !strings.Contains(ge.Msg, `Error: dsh: /repo/.env sets "DSH_VERSION"`) {
+		t.Fatalf("文案必须带原因行（不能只有栈帧）: %q", ge.Msg)
+	}
+	if strings.Contains(ge.Msg, "Node.js v24.18.1") {
+		t.Fatalf("原因在栈前时，窗口不该退化到结尾的版本行: %q", ge.Msg)
+	}
+	if strings.Contains(ge.Msg, "Internal error") {
+		t.Fatalf("SDK 那句通用文案应被替换成有信息量的一句: %q", ge.Msg)
+	}
+}
+
 // TestConnectFailureSurfacesStderrTail 底座起不来时，**信封文案必须带底座 stderr 的诊断尾巴**。
 //
 // 钉的是一个真实排障场景（2026-10-09 实测）：从含保留键 `.env` 的目录起核心 → dsh 会话建不起来，
