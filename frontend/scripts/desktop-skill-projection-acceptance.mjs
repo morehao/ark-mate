@@ -1,24 +1,36 @@
 #!/usr/bin/env node
 /**
- * 桌面态 **skill 投放**验收（真 Electron 壳 + 真 forge-core + 真 dsh 子进程）。
+ * 桌面态 **skill 投放**验收（真 Electron 壳 + 真 forge-core + 真 dsh / 真 opencode 子进程）。
  *
  * 为什么单独一条：`desktop-ui-acceptance.mjs` 打的是壳/契约/加固/凭据/流/退出六个场景，
  * **不含能力投放**——skill 到底有没有落到底座真正读的那个根，它一概看不见。而这条链恰恰
  * 有个"平台自报一切正常、底座什么都没收到"的失效形态（2026-10-09 实测踩到两次），
  * 只能用"真底座 + 真请求体"验，不能靠单测：两次缺陷都在单测全绿的情况下存在。
  *
- * 验两条修复（都来自 2026-10-09 的 E5 探针）：
+ * 验三条（都来自 2026-10-09 的实测）：
  *   A `fix(runtime)` 配置隔离**不注入** `DSH_AGENTS_HOME` ⇒ dsh 的读根 == 平台写根
  *     （`${HOME}/.agents/skills`）；若注入，底座会静默去读 `<FORGE_HOME>/runtime/dsh/agents/skills`。
  *   B `fix(capability)` 物化**自建投影根** ⇒ 全新 home 上"第一条 skill"也能落盘；
  *     此前 staging 目录建在根里面而根不存在，直接 `no such file or directory`、只留一条 WARN。
+ *   C **opencode v2（2.0.26）**同样读 `${HOME}/.agents/skills`：v2 换了实现（Bun 单文件二进制、
+ *     `debug` 子命令只剩 agents/config/paths、`OPENCODE_DISABLE_EXTERNAL_SKILLS` 不再生效），
+ *     v1 那套取证手段全失效——只能用"真模型请求体里有没有这条 skill"来判。
+ *     请求体里的形态是 `<skill><id>…</id><name>…</name><description>…</description></skill>`
+ *     （**不是**斜杠命令通告：v2 只把 init/review/compact 当命令，skill 只进模型目录块）。
+ *     一条实测到的边界，别把这条验收读成"封闭沙箱"：v2 的发现面还包括**项目级逐级向上扫**
+ *     （cwd → 上层的 `.agents/skills` / `.claude/skills` / `.opencode/skills`），而本脚本的探针
+ *     工作区就在用户 home 树里——所以**用户自己**的 `~/.agents/skills` 也会经由项目路径进目录块
+ *     （2026-10-09 实测：把 cwd 换到 `/tmp` 后它才消失）。这不影响本节的判据（`probe-desktop`
+ *     只存在于探针 home），但它说明"改了 HOME 就什么都读不到"是错的。
  *
  * 隔离与代价（都是刻意的）：
  *   - 用**自己的 `HOME` 与 `FORGE_HOME`**（<repo>/.dsh/tmp/desktop-skill-accept）：既不碰用户的
  *     `~/.forge/forge.db`，也让 `${HOME}/.agents/skills` 从**不存在**开始（那正是 B 的前提）。
  *     脚本收尾会核对用户真实的 `~/.agents/skills` 与 `~/.forge` 指纹**零变化**。
  *   - 模型端点是**脚本内置的假 LLM**（Anthropic `/v1/messages` 流式）：零额度、零凭证，
- *     只回答一句话，并把 dsh 真实请求体留在内存里给断言用。
+ *     只回答一句话，并把两个底座的真实请求体留在内存里给断言用。opencode 侧靠**写在自己的
+ *     隔离配置目录里**的 provider 声明（`providers.probe.settings.baseURL` → 假 LLM）把请求引过来，
+ *     不动用户配置、不设 `XDG_CONFIG_HOME`（那是隔离表干的事）。
  *   - 只重建 `forge-core`（Go 侧改动）。壳产物与载荷是既有生成物，脚本只断言它们在位。
  *
  * 用法：`node scripts/desktop-skill-projection-acceptance.mjs`（`KEEP_PROBE=1` 保留探针目录）。
@@ -52,6 +64,9 @@ const SKILL_ID = 'probe-desktop'
 const BODY_MARK = 'DESKTOP-ONLY-MARK'
 const PROJECTION_ROOT = join(PROBE_HOME, '.agents', 'skills')
 const LLM_PORT = 10078
+/** opencode 的隔离配置目录（核心注入 `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` 的落点）。 */
+const OPENCODE_CONFIG_DIR = join(PROBE_FORGE_HOME, 'runtime', 'opencode', 'config', 'opencode')
+const OPENCODE_CONFIG = join(OPENCODE_CONFIG_DIR, 'opencode.json')
 
 let pass = 0
 let fail = 0
@@ -187,8 +202,49 @@ function availableSkillsOf(body) {
   return ''
 }
 
+/** 从 opencode 的真实请求体里取 skill 目录块（形态 `<skill><id>…</id><name>…</name>…</skill>`）。
+ *  为什么按原文而不是解析后的 messages：v2 把它放在 system 文本里，且**不是**斜杠命令通告
+ *  （v2 的 `available_commands_update` 只有 init/review/compact）——按命令找会一条都看不到。 */
+function opencodeSkillsOf(raw) {
+  return [...String(raw).matchAll(/<skill>([\s\S]*?)<\/skill>/g)].map((m) => m[1].replace(/\s+/g, ' ').trim())
+}
+
+/** 把 opencode 的 provider 指向脚本内置的假 LLM。
+ *
+ *  落在**它自己的隔离配置目录**（`<FORGE_HOME>/runtime/opencode/config/opencode`）里，因此
+ *  既不碰用户的 `~/.config/opencode`，也不需要给底座设任何 override 环境变量——"平台默认根下
+ *  投放的 skill 底座开箱即读到"这条断言的前提正是"没人额外告诉它去哪读"。
+ *  形状取 v2 的 `providers` + `package` + `settings.baseURL`（v1 的 `provider` 键在 v2 已改名）。 */
+function writeOpencodeProbeConfig() {
+  mkdirSync(OPENCODE_CONFIG_DIR, { recursive: true })
+  writeFileSync(
+    OPENCODE_CONFIG,
+    JSON.stringify(
+      {
+        $schema: 'https://opencode.ai/config.json',
+        model: 'probe/probe-model',
+        providers: {
+          probe: {
+            name: 'Probe',
+            env: ['PROBE_API_KEY'],
+            package: '@opencode/ai/providers/anthropic-compatible',
+            settings: { baseURL: `http://127.0.0.1:${LLM_PORT}` },
+            models: { 'probe-model': {} },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  )
+  return existsSync(OPENCODE_CONFIG)
+}
+
 const realAgentsRoot = join(homedir(), '.agents', 'skills')
 const realForgeRoot = join(homedir(), '.forge')
+/** 用户自己的 opencode 状态目录：v2 的服务发现面（`service.json`）与 v1 的锁/历史都在这儿，
+ *  forge 全程一个字节都不该碰（2026-10-09 补 XDG_STATE_HOME 隔离之前，这里正是会漏的地方）。 */
+const realOpencodeState = join(homedir(), '.local', 'state', 'opencode')
 
 async function main() {
   section('前置：清场与产物')
@@ -221,9 +277,11 @@ async function main() {
     dshLauncher.length > 0 && !dshLauncher.includes('DSH_AGENTS_HOME'),
   )
   check('投影根从"不存在"开始（修复 B 的前提）', !existsSync(PROJECTION_ROOT))
+  check('opencode 探针 provider 已写进它自己的隔离配置目录', writeOpencodeProbeConfig(), OPENCODE_CONFIG)
 
   const beforeAgents = fingerprint(realAgentsRoot)
   const beforeForge = fingerprint(realForgeRoot)
+  const beforeHostState = fingerprint(realOpencodeState)
 
   const llm = await startFakeLLM()
   section('真壳 + 真核心')
@@ -234,6 +292,9 @@ async function main() {
       FORGE_HOME: PROBE_FORGE_HOME,
       DEEPSEEK_API_KEY: 'probe-key',
       DEEPSEEK_BASE_URL: `http://127.0.0.1:${LLM_PORT}`,
+      // opencode 侧同一条思路：密钥经它的 provider 声明（`env: ["PROBE_API_KEY"]`）读到，
+      // 端点由隔离配置目录里的 `settings.baseURL` 指过来。
+      PROBE_API_KEY: 'probe-key',
       ELECTRON_RUN_AS_NODE: undefined,
     },
   })
@@ -259,7 +320,7 @@ async function main() {
           id: SKILL_ID,
           name: SKILL_ID,
           description: '桌面态投放探针',
-          runtimes: ['deepseekharness'],
+          runtimes: ['deepseekharness', 'opencode'],
           body: `# ${SKILL_ID}\n\n正文标记：${BODY_MARK}\n`,
         }),
       )},
@@ -277,7 +338,21 @@ async function main() {
   )
   check('核心日志没有物化失败的 WARN', !shell.logText().includes('skill 物化跳过'))
 
-  section('修复 A：平台拉起的 dsh 要能读到这条 skill')
+  // 平台**自报**的物化体检：两个底座都在同一处 root 上投影，归属标记里应同时登记双方且状态 in_sync。
+  // 这条是"平台侧"的说法，与下面两条"底座侧"的真请求体互为独立来源——两者不一致正是要抓的形态。
+  const mat = await cdp.evalJs(`
+    const r = await fetch('/v1/forge/skills/${SKILL_ID}/materialization')
+    return await r.json()
+  `)
+  const matStates = mat?.data?.states ?? []
+  const ocState = matStates.find((s) => (s.owners ?? []).includes('opencode') || s.runtime === 'opencode')
+  check(
+    '平台自报的物化体检：opencode 那一处 in_sync（与 dsh 共享同一 root）',
+    ocState?.status === 'in_sync',
+    JSON.stringify(matStates).slice(0, 240),
+  )
+
+  section('修复 A · 底座侧：平台拉起的 dsh 要能读到这条 skill')
   const conv = await cdp.evalJs(`
     const r = await fetch('/v1/forge/conversations', {
       method: 'POST',
@@ -322,13 +397,68 @@ async function main() {
       : 'ps -E 读不到（以请求体那条为准）',
   )
 
+  // ——— C：opencode v2 ———
+  // v2 把 skill 放进**模型目录块**（`<skill><id>…</id>…</skill>`），不再作为斜杠命令通告；
+  // 且 v2 的取证件（`debug skill`）与反证法（`OPENCODE_DISABLE_EXTERNAL_SKILLS`）都已失效，
+  // 所以这条只能看真请求体。只看**本节新增**的那些请求，避免拿 dsh 那一轮的命中冒充。
+  section('修复 A · 底座侧：平台拉起的 opencode v2 也要能读到同一条 skill')
+  const ocBefore = llm.captured.length
+  const convOc = await cdp.evalJs(`
+    const r = await fetch('/v1/forge/conversations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: ${JSON.stringify(JSON.stringify({ agent_id: 'opencode', prompt: '报告你可见的 skill 名称。' }))},
+    })
+    return await r.json()
+  `)
+  check('经壳反代起 opencode 会话成功', convOc?.code === 0, JSON.stringify(convOc).slice(0, 160))
+
+  let ocReq = null
+  for (let i = 0; i < 160; i++) {
+    ocReq = llm.captured.slice(ocBefore).find((c) => opencodeSkillsOf(c.raw).some((b) => b.includes(`<id>${SKILL_ID}</id>`)))
+    if (ocReq) break
+    await sleep(250)
+  }
+  const ocNew = llm.captured.slice(ocBefore)
+  llm.captured.forEach((c, i) => writeFileSync(join(PROBE, `llm-req-${String(i + 1).padStart(2, '0')}.json`), c.raw))
+  check(
+    '假 LLM 收到了 opencode v2 的真实模型请求（零额度）',
+    ocNew.some((c) => c.path.includes('/messages')),
+    `本节收到 ${ocNew.length} 个请求：${ocNew.map((c) => c.path).join(', ')}`,
+  )
+  const ocBlocks = ocReq ? opencodeSkillsOf(ocReq.raw) : []
+  check(
+    `opencode v2 请求体的 skill 目录块里出现 ${SKILL_ID}`,
+    Boolean(ocReq),
+    ocBlocks.length ? ocBlocks.join(' | ').slice(0, 240) : '（没有一个请求带 skill 目录块）',
+  )
+  // 次证（第二来源）：v2 的**服务发现面**必须落在 FORGE_HOME 内。
+  // v2 新引入 `<XDG_STATE_HOME ?? ~/.local/state>/opencode/service.json`（后台服务登记 + 端口），
+  // 不隔离它就会读到**用户自己的** service.json（同版本同 url 直接复用你的服务、版本不符还会
+  // SIGTERM 旧进程再顶掉登记文件）——这正是 2026-10-09 补进隔离表的那一项，由子进程自己回答。
+  const ocPids = pidsMatching(/payloads\/opencode\/.*\/bin\/opencode\s+acp/)
+  const ocEnv = envOf(ocPids[0])
+  const ocEnvReadable = Object.keys(ocEnv).length > 0
+  check(
+    'opencode 子进程的 XDG_STATE_HOME 落在 FORGE_HOME 内（v2 的服务发现面不碰本机）',
+    !ocEnvReadable || (ocEnv.XDG_STATE_HOME ?? '').startsWith(`${PROBE_FORGE_HOME}/`),
+    ocEnvReadable
+      ? `XDG_STATE_HOME=${ocEnv.XDG_STATE_HOME ?? '（未注入）'} / XDG_CONFIG_HOME=${ocEnv.XDG_CONFIG_HOME ?? '（未注入）'}`
+      : 'ps -E 读不到（隔离表另由 pkg/runtime/isolation_test.go 与启动器守卫钉住）',
+  )
+
   section('收尾')
   const stopped = await stopShellTree()
   await sleep(500)
   check('壳/核心全部退出，无残留', pidsMatching(SHELL_RE).length === 0 && pidsMatching(CORE_RE).length === 0, JSON.stringify(stopped))
   check('dsh 子进程也随核心回收', pidsMatching(/--profile\s+acp/).length === 0)
+  check('opencode 子进程也随核心回收', pidsMatching(/payloads\/opencode\/.*\/bin\/opencode\s+acp/).length === 0)
   check('用户真实 ~/.agents/skills 零变化', fingerprint(realAgentsRoot) === beforeAgents)
   check('用户真实 ~/.forge 零变化', fingerprint(realForgeRoot) === beforeForge)
+  check(
+    '用户真实 ~/.local/state/opencode 零变化（v2 服务发现面：探针全程不该碰它）',
+    fingerprint(realOpencodeState) === beforeHostState,
+  )
 
   cdp.close()
   llm.server.close()

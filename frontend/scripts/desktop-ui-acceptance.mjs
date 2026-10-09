@@ -60,6 +60,7 @@ const SNAPSHOT = new Map()
 
 // ——— 断言台账（与 web-ui-acceptance.mjs 同风格）———
 const results = []
+let skipped = 0
 function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail })
   console.log(`  ${ok ? '✅' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`)
@@ -530,7 +531,11 @@ async function scenarioNodeChannel(shell) {
   // （载荷里的原生模块就是按它编译的，ABI 对不上会运行期才炸）。
   const declaredElectron = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8'))?.devDependencies?.electron ?? ''
   const dshManifest = payloadFile('dsh', 'payload.json')
-  const declaredAbi = dshManifest ? JSON.parse(readFileSync(dshManifest, 'utf8'))?.nodeAbi ?? '' : ''
+  // 随包 dsh 的**版本从清单读**，不写死：写死的那版（`0.1.7-rc.2`）在 2026-10-09 把 dsh 提到
+  // `0.2.0-rc.2` 时立刻变成假红——夹具的版本号只能有一个来源（`make desktop/payloads` 的产物）。
+  const dshMeta = dshManifest ? JSON.parse(readFileSync(dshManifest, 'utf8')) : {}
+  const declaredAbi = dshMeta?.nodeAbi ?? ''
+  const declaredDshVersion = dshMeta?.version ?? ''
   const detail = `electron=${versions.e ?? '(无)'} node=${versions.n ?? '?'} abi=${versions.a ?? '?'}（声明 ${declaredElectron}${declaredAbi ? ` / 载荷 ABI ${declaredAbi}` : ''}）`
   check('私有 node 是 Electron 的 Node（版本 == 仓库声明）', !!versions.e && versions.e === declaredElectron, detail)
   check('私有 node 的 ABI 与载荷清单一致（原生模块按它编译）', !!versions.a && versions.a === declaredAbi, detail)
@@ -553,7 +558,12 @@ async function scenarioNodeChannel(shell) {
     check('载荷里 dsh 的 bin.js 在场（`make desktop/payloads`）', false, '载荷缺失——先跑 make desktop/payloads')
   } else {
     const dshProbe = spawnSync(join(binDir, 'dsh'), ['--version'], { encoding: 'utf8', env: { ...childEnv, FORGE_DSH_ENTRY: dshEntry } })
-    check('私有 dsh 启动器跑起随包载荷', (dshProbe.stdout ?? '').trim() === '0.1.7-rc.2', (dshProbe.stdout ?? '').trim() || (dshProbe.stderr ?? '').trim().slice(0, 80))
+    const dshOut = (dshProbe.stdout ?? '').trim()
+    check(
+      '私有 dsh 启动器跑起随包载荷（版本 == 载荷清单）',
+      !!declaredDshVersion && dshOut === declaredDshVersion,
+      dshOut ? `${dshOut}（清单 ${declaredDshVersion || '?'}）` : (dshProbe.stderr ?? '').trim().slice(0, 80),
+    )
   }
 
   // ②′ 私有 dsh 启动器自己兜底隔离变量：只给 FORGE_HOME，不给 DSH_HOME，看它认哪个 home。
@@ -589,6 +599,22 @@ function dirFingerprint(dir) {
     kb: Number((size.stdout ?? '').trim().split(/\s+/)[0] || 0),
     mtime: (stat.stdout ?? '').trim(),
   }
+}
+
+/** 用户自己的工具是否正在写这个目录（外部写者在场 → 该目录的"零变化"断言不可判定）。
+ *
+ *  为什么必须有这条：`~/.dsh` 是 **DSH 宿主会话自己的状态目录**——用户开着 dsh 时它本来就会被
+ *  持续改写（2026-10-09 实测：一个 32s 的验收窗口里它自己长了 ~44KB，**文件数与目录 mtime 都没动**，
+ *  只有 KB 在变；同一台机器上 `DeepSeek Harness.app` 已跑了一个多小时）。没有这条，
+ *  "forge 有没有写用户目录"会被外部写者恒久弄红，而红出来的东西没法判定是不是 forge 干的。
+ *  判据只看进程表：命令行里出现该目录对应的工具名，且**不属于本仓这条链**（探针路径都在仓库下）。
+ *  走到这里时本仓的壳/核心/runtime 已全部回收，所以剩下的命中就是别人的进程。 */
+function externalWritersOf(dir) {
+  const tool = dir.includes('.dsh') ? /\bdsh\b|DeepSeek Harness/ : /opencode/i
+  return psAll()
+    .split('\n')
+    .filter((l) => tool.test(l) && !l.includes(REPO) && !l.includes('grep'))
+    .map((l) => l.trim())
 }
 
 /**
@@ -843,6 +869,12 @@ async function scenarioIsolation(shell) {
 
   // ③ 用户既有配置目录：整轮验收前后零变化
   // `~/.npm` 故意不在名单里：验收脚本自己会跑 pnpm/npm，那条路径本来就会被外层工具碰。
+  //
+  // 一条已实测的**环境噪声**（2026-10-09）：用户自己可能正在跑 dsh（DSH 宿主会话会把
+  // 会话日志/状态追加进 `~/.dsh`），验收窗口里那个目录会自己长大——文件数与 mtime 都没动、
+  // 只有 KB 在变，于是"forge 碰没碰用户目录"被外部写者弄成假红。判据因此加一段：前后不等时
+  // **查进程表里有没有这个目录的外部写者**（走到这里本仓的壳/核心/runtime 已全部回收）；
+  // 有 → 本条**跳过**（不是放过：它此刻不可判定），没有 → 照旧判红。
   const userDirs = [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')].filter((d) => existsSync(d))
   if (!userDirs.length) {
     check('用户既有配置目录存在（否则隔离断言是空的）', false, '~/.dsh 与 ~/.config/opencode 都不存在')
@@ -851,7 +883,18 @@ async function scenarioIsolation(shell) {
     const before = SNAPSHOT.get(dir)
     const after = dirFingerprint(dir)
     const same = !!before && JSON.stringify(before) === JSON.stringify(after)
-    check(`用户既有配置未被读写：${dir.replace(HOME, '~')}`, same, same ? `${after.files} 文件 / ${after.kb} KB` : `前 ${JSON.stringify(before)} → 后 ${JSON.stringify(after)}`)
+    const label = `用户既有配置未被读写：${dir.replace(HOME, '~')}`
+    if (same) {
+      check(label, true, `${after.files} 文件 / ${after.kb} KB`)
+      continue
+    }
+    const writers = externalWritersOf(dir)
+    if (writers.length) {
+      skipped++
+      console.log(`  ⏭ ${label}：跳过 — 外部写者在写该目录（${writers[0].slice(0, 100)}）；前 ${JSON.stringify(before)} → 后 ${JSON.stringify(after)}`)
+      continue
+    }
+    check(label, false, `前 ${JSON.stringify(before)} → 后 ${JSON.stringify(after)}（进程表里没有该目录的外部写者）`)
   }
 }
 
@@ -918,7 +961,7 @@ async function main() {
 
   const passed = results.filter((r) => r.ok).length
   const failed = results.filter((r) => !r.ok)
-  console.log(`\n——— 汇总：${passed}/${results.length} 通过（${((Date.now() - t0) / 1000).toFixed(1)}s）———`)
+  console.log(`\n——— 汇总：${passed}/${results.length} 通过（${((Date.now() - t0) / 1000).toFixed(1)}s）${skipped ? `，另有 ${skipped} 条因环境不可判定而跳过` : ''}———`)
   if (failed.length) {
     console.log('失败项：')
     for (const f of failed) console.log(`  ❌ ${f.name}${f.detail ? ` — ${f.detail}` : ''}`)
