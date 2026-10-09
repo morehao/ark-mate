@@ -215,6 +215,31 @@ var schemaMigrations = []migration{
 			)`,
 		},
 	},
+	{
+		version: 10,
+		name:    "automations（M6-7 定时任务：定义列 + 运行态列，Plan §7 P-10/P-11）",
+		statements: []string{
+			// 定义（body + revision/updated_at）与运行态（last_* / consecutive_failures /
+			// recent_runs）**分列**：写面只 merge body，于是"往 body 里塞 last_fired_at"这种事
+			// 结构上不可能（拒写名单仍然保留，为的是不出现"我写了它为什么不生效"的困惑）。
+			//
+			// 运行态列不参与 revision CAS：调度器每次推进不该让定义看起来"被别人改过"。
+			// 非空约束配默认值：SQLite 的 ALTER 加列才需要默认值，这里新建表也一并写上，
+			// 让"未触发过"的落库形态唯一（空串 / 0 / '[]'），不给 NULL 留第二种表示。
+			`CREATE TABLE automations (
+				id                   TEXT PRIMARY KEY,
+				body                 TEXT NOT NULL,
+				revision             INTEGER NOT NULL DEFAULT 1,
+				updated_at           TEXT NOT NULL,
+				last_fired_at        TEXT NOT NULL DEFAULT '',
+				last_status          TEXT NOT NULL DEFAULT '',
+				last_reason          TEXT NOT NULL DEFAULT '',
+				last_conversation_id TEXT NOT NULL DEFAULT '',
+				consecutive_failures INTEGER NOT NULL DEFAULT 0,
+				recent_runs          TEXT NOT NULL DEFAULT '[]'
+			)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

@@ -226,6 +226,21 @@ func (a *App) Init(ctx context.Context) error {
 				"dir", imp.Dir, "agents", imp.Agents, "inserted", imp.Inserted,
 				"existing", imp.Existing, "invalid", imp.Invalid, "default_agent", imp.DefaultAgent)
 		}
+		// automation 定义一次性导入（M6-7）：与上面两个域**同一次触发、同一个理由**（v10 之后
+		// DB 才是定时任务的事实源，而存量定义还在 `FORGE_AUTOMATIONS` 里）。automation 的定义
+		// 文件里还住着运行态（`last_fired_at`/`recent_runs`），导入会按保留键把它们切进**运行态列**
+		// ——所以搬运是"一个文件 → 一行里的两类列"，同一事务，不出现半截状态。
+		//
+		// 三个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让另外两个域重跑。
+		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
+			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+			slog.Warn("serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `forge automation import` 重试）",
+				"err", iErr, "dir", cfg.AutomationDir)
+		} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
+			slog.Info("serve: 存量 automation 定义导入完成",
+				"dir", imp.Dir, "automations", imp.Automations, "inserted", imp.Inserted,
+				"existing", imp.Existing, "invalid", imp.Invalid)
+		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)
@@ -438,7 +453,14 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	} else {
 		a.svc.LoadCapabilityDefinitions(cfg.CapabilityDir)
 	}
-	a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
+	// automation 定义（M6-7）：同样**按持久层模式分派**——sqlite 模式下定义与运行态都在
+	// `automations` 表里（存量文件由 M6-7 的导入器一次性灌进去），memory 模式仍是
+	// `FORGE_AUTOMATIONS/<id>.json`（定义与运行态同文件）。
+	if mode == config.StoreModeSQLite {
+		a.svc.LoadAutomationDefinitionsFromStore(ctx, cfg.AutomationDir)
+	} else {
+		a.svc.LoadAutomationDefinitions(cfg.AutomationDir)
+	}
 	// skill 投影（§16.5 切片 D / design §5.4）：把注册表里的 skill 投影到各 runtime 的原生目录。
 	// 目标根与形态来自 **runtime 的投影声明**；FORGE_PROJECTION_DIRS 只在需要覆盖根时才出现。
 	a.reconcileSkillProjections()

@@ -34,6 +34,8 @@ const (
 	MetaKeyEventsLastSeq = "events_last_seq"
 	// MetaKeyImportMarker transcript 导入标记：value = 导入目录指纹（幂等依据）。
 	MetaKeyImportMarker = "imported_transcripts"
+	// MetaKeyImportedAutomations automation 定义导入标记（与能力/agent 面同构）。
+	MetaKeyImportedAutomations = "imported_automations"
 	// MetaKeyImportedAgents agent 定义导入标记：value = <AgentDir> 内定义文件的指纹（幂等依据）。
 	//
 	// 与 MetaKeyImportedCapabilities 同构（见那里的注释）；分键而不是共用，是因为两个目录的
@@ -56,6 +58,8 @@ const (
 	CapabilityKindMcp = "mcp"
 	// CapabilityKindAgent 定义种类：agent（M6-6；capability_revisions.kind）。
 	CapabilityKindAgent = "agent"
+	// CapabilityKindAutomation 定义种类：automation（M6-7；capability_revisions.kind）。
+	CapabilityKindAutomation = "automation"
 
 	// CapabilityActionCreate 新建定义。
 	CapabilityActionCreate = "create"

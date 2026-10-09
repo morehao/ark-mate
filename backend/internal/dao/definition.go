@@ -138,6 +138,24 @@ func (d *McpServerDao) WithTx(tx *gorm.DB) *McpServerDao {
 	return &McpServerDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
 
+// AutomationDao 访问 automations 表。
+//
+// 它比 skills/mcp_servers/agents 多两类方法（**运行态列**的读写）——但定义列的 CAS 仍然只有
+// 这一份实现：`UpdateCAS` 只碰 body/revision/updated_at，运行态列由本文件末尾的方法单独更新。
+type AutomationDao struct {
+	*DefinitionDao[model.AutomationDefinition, model.AutomationDefinitionList]
+}
+
+// NewAutomationDao 构造 AutomationDao。
+func NewAutomationDao(getDB gormdao.DBGetter) *AutomationDao {
+	return &AutomationDao{DefinitionDao: newDefinitionDao[model.AutomationDefinition, model.AutomationDefinitionList]("AutomationDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *AutomationDao) WithTx(tx *gorm.DB) *AutomationDao {
+	return &AutomationDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
 // AgentDao 访问 agents 表。
 type AgentDao struct {
 	*DefinitionDao[model.AgentDefinition, model.AgentDefinitionList]

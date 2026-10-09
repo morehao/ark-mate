@@ -44,6 +44,8 @@ type (
 	Input = model.Input
 	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
 	AgentDefinition = model.AgentDefinition
+	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
+	AutomationDefinition = model.AutomationDefinition
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
 	ConversationMetaPatch = model.ConversationMetaPatch
 	// SkillDefinition 能力定义行（M6-1：sqlite 模式下能力面的事实源）。
@@ -77,6 +79,7 @@ type Store struct {
 	skills             *dao.SkillDao
 	mcpServers         *dao.McpServerDao
 	agents             *dao.AgentDao
+	automations        *dao.AutomationDao
 	capabilityRevision *dao.CapabilityRevisionDao
 }
 
@@ -115,6 +118,7 @@ func New(db *gorm.DB) *Store {
 		skills:             dao.NewSkillDao(getDB),
 		mcpServers:         dao.NewMcpServerDao(getDB),
 		agents:             dao.NewAgentDao(getDB),
+		automations:        dao.NewAutomationDao(getDB),
 		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
 	}
 }

@@ -64,6 +64,13 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil || !ok {
 		t.Fatalf("写 agents 行: ok=%v err=%v", ok, err)
 	}
+	if ok, err := s.automations.CreateCAS(ctx, &AutomationDefinition{
+		ID: "auto-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+		LastFiredAt: at.Format(model.LayoutTS), LastStatus: "completed", ConsecutiveFailures: 2,
+		RecentRuns: `[{"status":"completed"}]`,
+	}); err != nil || !ok {
+		t.Fatalf("写 automations 行: ok=%v err=%v", ok, err)
+	}
 	if err := s.capabilityRevision.Append(ctx, &CapabilityRevision{
 		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
 	}); err != nil {
@@ -106,6 +113,14 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"mcp_servers", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"agents", "revision", "integer", "1", true},
 		{"agents", "updated_at", "text", at.Format(model.LayoutTS), true},
+		// v10（M6-7）：定义列与运行态列。运行态列全是**非空**的（未触发过 = 空串 / 0 / '[]'），
+		// 不给 NULL 留第二种表示；`last_fired_at` 与其它时间列同一布局。
+		{"automations", "revision", "integer", "1", true},
+		{"automations", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"automations", "last_fired_at", "text", at.Format(model.LayoutTS), true},
+		{"automations", "last_status", "text", "completed", true},
+		{"automations", "consecutive_failures", "integer", "2", true},
+		{"automations", "recent_runs", "text", `[{"status":"completed"}]`, true},
 		{"capability_revisions", "seq", "integer", "1", true},
 		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
 	}
@@ -175,6 +190,19 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if !agent.UpdatedAt.Equal(at) || agent.Revision != 1 || agent.Body != `{"name":"格式探针"}` {
 		t.Errorf("agent 行往返失真: rev=%d at=%s body=%q", agent.Revision, agent.UpdatedAt, agent.Body)
 	}
+	// v10：运行态列的往返（时间列逐纳秒、失败计数是整数、运行史原样）。
+	auto, found, err := s.GetAutomationDefinition(ctx, "auto-1")
+	if err != nil || !found {
+		t.Fatalf("GetAutomationDefinition: found=%v err=%v", found, err)
+	}
+	if auto.LastFiredAt != at.Format(model.LayoutTS) || auto.ConsecutiveFailures != 2 ||
+		auto.LastStatus != "completed" || auto.RecentRuns != `[{"status":"completed"}]` {
+		t.Errorf("automation 运行态列往返失真: %+v", auto)
+	}
+	if auto.Revision != 1 || !auto.UpdatedAt.Equal(at) {
+		t.Errorf("automation 定义列往返失真: rev=%d at=%s", auto.Revision, auto.UpdatedAt)
+	}
+
 	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样
 	// （第一行可能是 events_last_seq），要按键查。
 	var (

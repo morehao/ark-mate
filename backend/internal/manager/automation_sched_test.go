@@ -355,7 +355,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	if n := r.svc.LoadAutomationDefinitions(r.dir); n != 1 {
 		t.Fatalf("装载应为 1，got %d", n)
 	}
-	r.svc.automationStartupPass()
+	r.svc.automationStartupPass(context.Background())
 	got := r.file(t, "mig")
 	if got["state"] != automation.StateInactive {
 		t.Fatalf("过期的 once 应置 inactive，got %v", got["state"])
@@ -373,15 +373,15 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 		t.Fatalf("过期的 once 不该被 tick 补跑，got %d 个会话", n)
 	}
 	// 幂等：状态已是 inactive → 再跑启动 pass 不追加留痕（否则每次重启都留一条）
-	r.svc.automationStartupPass()
-	r.svc.automationStartupPass()
+	r.svc.automationStartupPass(context.Background())
+	r.svc.automationStartupPass(context.Background())
 	if n := len(mustRuns(t, r.file(t, "mig"))); n != 1 {
 		t.Fatalf("启动 pass 应幂等，留痕 got %d", n)
 	}
 	// 反过来：用户手工把状态改回 active（"我想再试一次"）→ 平台会**再告诉他一次**
 	// "那一刻已经过去"，而不是默默不动（once 的语义是闹钟，过了就是过了）。
-	r.svc.writeAutomation("mig", map[string]any{"state": automation.StateActive}, false)
-	r.svc.automationStartupPass()
+	r.svc.writeAutomation(context.Background(), "mig", map[string]any{"state": automation.StateActive}, false)
+	r.svc.automationStartupPass(context.Background())
 	if got := r.file(t, "mig"); got["state"] != automation.StateInactive || len(mustRuns(t, got)) != 2 {
 		t.Fatalf("改回 active 后应再次收敛到 inactive 并留痕: %v", got)
 	}
@@ -424,7 +424,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	if _, err := r.svc.runAutomationNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
 		t.Fatalf("未知 id 应 automation_not_found，got %v", err)
 	}
-	if _, err := r.svc.writeAutomation("daily", map[string]any{"enabled": false}, false); err != nil {
+	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"enabled": false}, false); err != nil {
 		t.Fatalf("停用: %v", err)
 	}
 	if _, err := r.svc.runAutomationNow(context.Background(), "daily"); errCode(err) != "automation_disabled" {
@@ -511,12 +511,12 @@ func TestAutomationReservedKeysRejected(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
 	for _, k := range []string{"last_fired_at", "last_conversation_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
-		if _, err := r.svc.writeAutomation("daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
+		if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
 			t.Fatalf("写 %s 应被拒（40000），got %v", k, err)
 		}
 	}
 	// 用户可写的（含 state）必须照旧可写
-	if _, err := r.svc.writeAutomation("daily", map[string]any{"state": automation.StateArchived}, false); err != nil {
+	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"state": automation.StateArchived}, false); err != nil {
 		t.Fatalf("state 应可写: %v", err)
 	}
 	if got := r.file(t, "daily"); got["state"] != automation.StateArchived {
@@ -594,7 +594,7 @@ func TestAutomationReloadAfterRestart(t *testing.T) {
 func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
-	if _, err := r.svc.writeAutomation("daily", map[string]any{"max_run_duration": "80ms"}, false); err != nil {
+	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"max_run_duration": "80ms"}, false); err != nil {
 		t.Fatalf("设置 max_run_duration: %v", err)
 	}
 	out, err := r.svc.runAutomationNow(context.Background(), "daily")

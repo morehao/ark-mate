@@ -222,8 +222,8 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 9 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 9 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 10 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 10 以提醒同步），got %d", latestSchemaVersion(), maxV)
 	}
 }
 
@@ -313,5 +313,89 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	revs, err = s.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "my-agent")
 	if err != nil || len(revs) != 3 || revs[2].Action != "delete" || revs[2].Digest != "" {
 		t.Fatalf("删除审计不符（删定义也留痕且 digest 为空）: %+v err=%v", revs, err)
+	}
+}
+
+// TestMigrateV9ToV10AddsAutomations v9 → v10 升级：v10 同样是**纯增表**（automations），
+// 既有 agent/能力定义一行不丢，新表从空开始（存量定时任务还在 `<AutomationDir>/*.json` 里）。
+//
+// 运行态列的默认值也要钉住：未触发过的形态是**空串 / 0 / '[]'** 而不是 NULL——多一种表示就多
+// 一条"面板上明明是空的，读出来却是个 nil 解引用"的路径。
+func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v9.db")
+	db, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开库: %v", err)
+	}
+	s := New(db)
+	defer func() { _ = s.Close() }()
+
+	applySchemaUpTo(t, s, 9)
+	if ok, err := s.UpsertAgentDefinition(ctx, "ag-old", `{"id":"ag-old","name":"v9 存量"}`, 0, "test"); err != nil || !ok {
+		t.Fatalf("写 v9 agent 行: ok=%v err=%v", ok, err)
+	}
+
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("v9 → v10 升级失败: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("重复迁移应幂等: %v", err)
+	}
+
+	// ① v9 的行原样还在。
+	if ag, found, err := s.GetAgentDefinition(ctx, "ag-old"); err != nil || !found || ag.Revision != 1 {
+		t.Fatalf("升级后 v9 agent 行失真: found=%v err=%v row=%+v", found, err, ag)
+	}
+	// ② automations 从空开始。
+	if n, err := s.CountAutomationDefinitions(ctx); err != nil || n != 0 {
+		t.Fatalf("升级后 automations 应为空: n=%d err=%v", n, err)
+	}
+
+	// ③ 新建行的运行态列有确定的默认形态（不是 NULL）。
+	if ok, err := s.UpsertAutomationDefinition(ctx, "nightly", `{"id":"nightly","name":"夜跑"}`, 0, "rest"); err != nil || !ok {
+		t.Fatalf("升级后写 automation 定义: ok=%v err=%v", ok, err)
+	}
+	row, found, err := s.GetAutomationDefinition(ctx, "nightly")
+	if err != nil || !found {
+		t.Fatalf("读回 automation: found=%v err=%v", found, err)
+	}
+	if row.LastFiredAt != "" || row.LastStatus != "" || row.LastReason != "" ||
+		row.LastConversationID != "" || row.ConsecutiveFailures != 0 || row.RecentRuns != "[]" {
+		t.Fatalf("未触发过的运行态默认值不符: %+v", row)
+	}
+
+	// ④ 认领是一道 CAS：只有还等于读到的那个值才推得动（"不重复触发"的仲裁者）。
+	if ok, err := s.ClaimAutomationOccurrence(ctx, "nightly", "", "2026-10-09T01:00:00Z"); err != nil || !ok {
+		t.Fatalf("首次认领应成功: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.ClaimAutomationOccurrence(ctx, "nightly", "", "2026-10-09T01:00:00Z"); err != nil || ok {
+		t.Fatalf("同一 occurrence 的二次认领必须失败（否则会重复触发）: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.ClaimAutomationOccurrence(ctx, "nightly", "2026-10-09T01:00:00Z", "2026-10-10T01:00:00Z"); err != nil || !ok {
+		t.Fatalf("下一个 occurrence 应能认领: ok=%v err=%v", ok, err)
+	}
+
+	// ⑤ 运行态写回同事务 + 认领 CAS；定义 revision 不被运行态写回抬高（与文件载体的有意差异）。
+	before, _, _ := s.GetAutomationDefinition(ctx, "nightly")
+	if ok, err := s.SaveAutomationRuntime(ctx, "nightly", "2026-10-09T01:00:00Z",
+		AutomationRuntimeState{LastFiredAt: "2026-10-10T01:00:00Z", LastStatus: "completed", ConsecutiveFailures: 0}); err != nil || ok {
+		t.Fatalf("拿过期的认领写回运行态必须被拒: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.SaveAutomationRuntime(ctx, "nightly", "2026-10-10T01:00:00Z",
+		AutomationRuntimeState{LastFiredAt: "2026-10-10T01:00:00Z", LastStatus: "completed", RecentRuns: `[{"status":"completed"}]`}); err != nil || !ok {
+		t.Fatalf("运行态写回: ok=%v err=%v", ok, err)
+	}
+	after, _, _ := s.GetAutomationDefinition(ctx, "nightly")
+	if after.Revision != before.Revision || !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("运行态写回不该抬高定义 revision: before=%+v after=%+v", before, after)
+	}
+	if after.LastStatus != "completed" || after.RecentRuns != `[{"status":"completed"}]` {
+		t.Fatalf("运行态列未落库: %+v", after)
+	}
+	// 审计只记定义变更（运行态推进不产生审计行）。
+	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "nightly")
+	if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionCreate {
+		t.Fatalf("automation 审计应只有建定义那一条: %+v err=%v", revs, err)
 	}
 }

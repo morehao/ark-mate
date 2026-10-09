@@ -45,6 +45,9 @@ type automationRunOutcome struct {
 	failure bool
 	// noRecord 不追加 recent_runs、不写盘（duplicate：本次没有任何新事实）。
 	noRecord bool
+	// claimed 已在**建会话之前**把认领游标落库（DB 载体的 scheduled/recovery 路径；见
+	// `claimAutomationOccurrence`）。带它之后运行态写回的 CAS 判据是"这次刚认领的那个值"。
+	claimed bool
 	// cause 失败原因的原错误（**只给手动触发用**：定时触发把原因写进文件就够了，
 	// 而手动触发时用户就在等一个回答，必须把真实错误码原样给他）。
 	cause error
@@ -70,7 +73,7 @@ func (s *Service) StartAutomationScheduler(interval time.Duration) {
 	s.automationDone = done
 	s.mu.Unlock()
 
-	s.automationStartupPass()
+	s.automationStartupPass(ctx)
 
 	go func() {
 		defer close(done)
@@ -111,7 +114,7 @@ func (s *Service) StopAutomationScheduler() {
 // 只处理 `once` 的两种终局，**不补跑**：`once` 是"就在那一刻跑一次"的语义（像闹钟），
 // 进程没在跑就是错过了——补跑一个早已过去的 `once` 只会让人意外（"我约的是凌晨三点的迁移"）。
 // daily/weekly 的"补最近一次"由第一个 tick 走正常到期路径（rec.startup=recover → trigger=recovery）。
-func (s *Service) automationStartupPass() {
+func (s *Service) automationStartupPass(ctx context.Context) {
 	for _, rec := range s.automationRecs() {
 		if rec.loadErr != "" {
 			continue
@@ -127,7 +130,7 @@ func (s *Service) automationStartupPass() {
 				missed = *rec.def.Schedule.At
 			}
 			slog.Warn("automation: once 已过期且从未运行，置 inactive（不补跑）", "automation", rec.def.ID)
-			s.finishAutomationRun(rec, automationRunOutcome{
+			s.finishAutomationRun(ctx, rec, automationRunOutcome{
 				scheduledFor: missed,
 				status:       automation.RunSkipped,
 				trigger:      automation.TriggerRecovery,
@@ -139,7 +142,8 @@ func (s *Service) automationStartupPass() {
 			if rec.def.State == automation.StateInactive || automation.Terminal(rec.def.State) || rec.def.LastFiredAt == nil {
 				continue
 			}
-			if err := s.saveAutomationOverlay(rec.def.ID, map[string]any{"state": automation.StateInactive}); err != nil {
+			if err := s.saveAutomationOverlay(ctx, rec.def.ID,
+				map[string]any{"state": automation.StateInactive}, automationLastFiredText(rec.def.LastFiredAt)); err != nil {
 				slog.Warn("automation: 补写 inactive 失败", "automation", rec.def.ID, "err", err)
 			}
 		}
@@ -197,7 +201,41 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 			scheduledFor: scheduledFor, status: automation.RunOverlap, trigger: trigger, advance: true,
 			reason: claim.Reason + "；下一次 occurrence 照常",
 		}
-		return s.finishAutomationRun(rec, out)
+		return s.finishAutomationRun(ctx, rec, out)
+	}
+
+	// **预认领**（Plan §7 P-12）：DB 载体在**建会话之前**用一次 CAS 把 `last_fired_at` 钉到
+	// 本次 occurrence 上——同一 occurrence 至多触发一次（at-most-once）。两个 tick 同时到、
+	// 或"会话建好了进程却没来得及写回"，都只会有一次真的跑起来。
+	//
+	// 文件载体不做这一步：那张表靠文件 mtime 乐观锁，跨进程认领它给不了（也正因为如此，
+	// 文件载体的崩溃窗口里可能重复跑一次——这是**有意的差异**，不是漏改）。
+	//
+	// 认领失败**不建会话**、**不推进内存游标**（下一 tick 重试）；认领不到 = 别人先认领了，
+	// 与 duplicate 同解（不写、不追加留痕，只推事件）。
+	out := automationRunOutcome{}
+	if s.st != nil && trigger != automation.TriggerManual {
+		claimed, err := s.claimAutomationOccurrence(ctx, rec, scheduledFor)
+		if err != nil {
+			out := automationRunOutcome{
+				scheduledFor: scheduledFor, status: automation.RunSkipped, trigger: trigger,
+				failure: true, cause: err,
+				reason: "认领失败（本次未建会话，下一个 tick 重试）：" + errText(err),
+			}
+			slog.Warn("automation 认领失败", "automation", rec.def.ID, "err", err)
+			s.emitAutomationRun(rec.def.ID, out)
+			return out
+		}
+		if !claimed {
+			s.refreshAutomationSchedule(rec.def.ID)
+			out := automationRunOutcome{
+				scheduledFor: scheduledFor, status: automation.RunDuplicate, trigger: trigger, noRecord: true,
+				reason: "认领游标已被推进：这个 occurrence 已经触发过（本次不再建会话）",
+			}
+			s.emitAutomationRun(rec.def.ID, out)
+			return out
+		}
+		out.claimed = true
 	}
 
 	// claimed：真的建会话。
@@ -217,19 +255,19 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 	if err != nil {
 		out := automationRunOutcome{
 			scheduledFor: scheduledFor, status: automation.RunSkipped, trigger: trigger, advance: true,
-			failure: true, cause: err,
+			failure: true, cause: err, claimed: out.claimed,
 			reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(err),
 		}
 		slog.Warn("automation 触发失败", "automation", rec.def.ID, "err", err)
-		return s.finishAutomationRun(rec, out)
+		return s.finishAutomationRun(ctx, rec, out)
 	}
-	out := automationRunOutcome{
+	out = automationRunOutcome{
 		scheduledFor: scheduledFor, status: automation.RunClaimed, trigger: trigger,
 		conversationID: resp.ID,
 		// 手动触发不推进游标（见字段注释）。
-		advance: trigger != automation.TriggerManual,
+		advance: trigger != automation.TriggerManual, claimed: out.claimed,
 	}
-	res := s.finishAutomationRun(rec, out)
+	res := s.finishAutomationRun(ctx, rec, out)
 	// max_run_duration：可选的**收紧**（默认只靠既有 FORGE_TURN_TIMEOUT 看门狗），
 	// 走同一条取消通道，不引入第二套超时机制。
 	if d, err := rec.def.RunDuration(); err == nil && d > 0 {
@@ -280,11 +318,15 @@ func (s *Service) automationWatchdog(ctx context.Context, automationID, conversa
 	_ = s.CancelTurn(context.WithoutCancel(ctx), conversationID)
 }
 
-// finishAutomationRun 把结果写回定义文件（overlay）并推事件，然后刷新内存调度态。
+// finishAutomationRun 把结果写回载体（定义文件 / 运行态列）并推事件，然后刷新内存调度态。
 //
-// 写盘失败**不阻断**：内存态照样推进（本进程内不会重复触发），并且事件里带上写盘失败的事实
-// ——"调度跑起来了但状态没落盘"必须可见，否则重启后会重跑一次而没人知道为什么。
-func (s *Service) finishAutomationRun(rec automationRec, out automationRunOutcome) automationRunOutcome {
+// 写回失败的语义按载体分岔（Plan §7 P-12），两处都保持"事实可见"这条底线：
+//
+//	DB 载体：**内存态不推进**（与文件载体相反）。认领已经在建会话之前落库了，所以"记录失败"
+//	  不会变成重复触发；下一 tick 看到游标已推进 → duplicate → 不重复跑。这一轮的留痕会丢，
+//	  因此错误日志是 ERROR 级：丢了什么必须看得见。
+//	文件载体：维持历史语义（写失败不阻断调度，事件里带上失败事实）。
+func (s *Service) finishAutomationRun(ctx context.Context, rec automationRec, out automationRunOutcome) automationRunOutcome {
 	if out.noRecord {
 		return out
 	}
@@ -329,9 +371,20 @@ func (s *Service) finishAutomationRun(rec automationRec, out automationRunOutcom
 	}
 	overlay["recent_runs"] = runs
 
-	if err := s.saveAutomationOverlay(rec.def.ID, overlay); err != nil {
-		slog.Error("automation 运行态写回失败（内存调度态照常推进，重启后可能重跑一次）",
-			"automation", rec.def.ID, "err", err)
+	// 认领 CAS 判据：预认领过 → 就是刚写进去的那个值；否则 = 进临界区时读到的旧值
+	// （文件载体忽略这个参数，它靠自己的 mtime 乐观锁）。
+	expected := automationLastFiredText(rec.def.LastFiredAt)
+	if out.claimed {
+		expected = out.scheduledFor.UTC().Format(time.RFC3339Nano)
+	}
+	if err := s.saveAutomationOverlay(ctx, rec.def.ID, overlay, expected); err != nil {
+		if s.st != nil {
+			slog.Error("automation 运行态写回失败（内存调度态不推进，下一 tick 按已认领的游标判为 duplicate，不会重复触发；这一轮留痕丢失）",
+				"automation", rec.def.ID, "err", err)
+		} else {
+			slog.Error("automation 运行态写回失败（内存调度态照常推进，重启后可能重跑一次）",
+				"automation", rec.def.ID, "err", err)
+		}
 	}
 	out.state = state
 	s.emitAutomationRun(rec.def.ID, out)

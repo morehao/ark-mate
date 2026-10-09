@@ -23,11 +23,17 @@ import (
 
 // DefinitionImportItem 一条待导入的定义（调用方已逐条过闸门）。
 type DefinitionImportItem struct {
-	// Kind 见 model.CapabilityKindSkill / CapabilityKindMcp / CapabilityKindAgent。
+	// Kind 见 model.CapabilityKindSkill / CapabilityKindMcp / CapabilityKindAgent /
+	// CapabilityKindAutomation。
 	Kind string
 	ID   string
 	// Body 定义正文（承载未知键的完整 JSON）。
 	Body string
+	// AutomationRuntime 仅 kind=automation 时有意义：定时任务的运行态在 DB 载体里是**列**，
+	// 而存量文件里它是同文件的一部分（`last_fired_at`/`recent_runs`/…）。导入必须把两部分
+	// **同一事务**写进去，否则会出现"定义进来了、运行史没进来"的半截状态。
+	// nil = 该定义没有任何运行态（未触发过），落成默认列值。
+	AutomationRuntime *AutomationRuntimeState
 }
 
 // DefinitionImportResult 一次导入的逐条计数。
@@ -104,6 +110,21 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentDefinition{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
+	case model.CapabilityKindAutomation:
+		row := &model.AutomationDefinition{
+			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",
+		}
+		if it.AutomationRuntime != nil {
+			row.LastFiredAt = it.AutomationRuntime.LastFiredAt
+			row.LastStatus = it.AutomationRuntime.LastStatus
+			row.LastReason = it.AutomationRuntime.LastReason
+			row.LastConversationID = it.AutomationRuntime.LastConversationID
+			row.ConsecutiveFailures = it.AutomationRuntime.ConsecutiveFailures
+			if it.AutomationRuntime.RecentRuns != "" {
+				row.RecentRuns = it.AutomationRuntime.RecentRuns
+			}
+		}
+		return s.automations.WithTx(tx).CreateCAS(ctx, row)
 	default:
 		// 不可达（调用方按 model 常量构造 item）：宁可整体回滚也不要静默丢一条定义。
 		return false, fmt.Errorf("store: 未知定义种类 %q（导入）", it.Kind)
