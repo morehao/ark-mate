@@ -160,6 +160,44 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_conversations_fingerprint ON conversations(capability_fingerprint)`,
 		},
 	},
+	{
+		version: 8,
+		name:    "skills/mcp_servers/capability_revisions（M6-1 能力事实源：定义行 + 单调变更审计）",
+		statements: []string{
+			// 定义行：`body` 是唯一权威（原始 JSON，含未知键），只加两个提升列。
+			// 刻意不加 enabled/scope/runtimes 等派生列——它们都在 body 里，双写必然漂移
+			// （计划 §1 P-2）。定义规模是几十条，查询在 Go 侧做。
+			`CREATE TABLE skills (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+			// MCP server 定义与 skills 同形；分表而不是加 kind 列：两边的读取面/写面
+			// 与规模各走各的，合并只会让每个查询都带一个恒真的过滤条件。
+			`CREATE TABLE mcp_servers (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+			// 变更审计：**刻意不加外键**——审计必须在能力被删除后仍然存在，与 events 表
+			// "必须挂会话"的约束正好相反。AUTOINCREMENT 保证 seq 单调不复用，于是它
+			// 可以直接当"当前代际 rev"（M1 落地时取 MAX(seq)，不必另造进程内计数器）。
+			`CREATE TABLE capability_revisions (
+				seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+				kind          TEXT NOT NULL,
+				capability_id TEXT NOT NULL,
+				action        TEXT NOT NULL,
+				actor         TEXT NOT NULL,
+				at            TEXT NOT NULL,
+				digest        TEXT NOT NULL
+			)`,
+			// "这条能力的变更历史"：WHERE kind = ? AND capability_id = ? ORDER BY seq。
+			// seq 先进索引列之外还要带上它，才能同时满足过滤与有序取用。
+			`CREATE INDEX idx_capability_revisions_capability ON capability_revisions(kind, capability_id, seq)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

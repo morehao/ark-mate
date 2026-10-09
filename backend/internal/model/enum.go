@@ -34,4 +34,18 @@ const (
 	MetaKeyEventsLastSeq = "events_last_seq"
 	// MetaKeyImportMarker transcript 导入标记：value = 导入目录指纹（幂等依据）。
 	MetaKeyImportMarker = "imported_transcripts"
+
+	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
+	CapabilityKindSkill = "skill"
+	// CapabilityKindMcp 能力种类：mcp server（capability_revisions.kind）。
+	CapabilityKindMcp = "mcp"
+
+	// CapabilityActionCreate 新建定义。
+	CapabilityActionCreate = "create"
+	// CapabilityActionUpdate 覆盖定义。
+	CapabilityActionUpdate = "update"
+	// CapabilityActionDelete 删除定义。
+	CapabilityActionDelete = "delete"
+	// CapabilityActionImport 由存量文件一次性导入（M6-4）。
+	CapabilityActionImport = "import"
 )

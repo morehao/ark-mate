@@ -47,6 +47,23 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if err := s.AddMemory(ctx, Memory{ConversationID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
 		t.Fatalf("AddMemory: %v", err)
 	}
+	// v8 三张表（M6-1）：这里**直接调 dao**（而不是 store 门面），为的是钉住精确的落库文本
+	// ——门面内部取"此刻"，而这一层要断言的是"写入的纳秒原样存下来"。
+	if ok, err := s.skills.CreateCAS(ctx, &SkillDefinition{
+		ID: "sk-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 skills 行: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.mcpServers.CreateCAS(ctx, &McpServerDefinition{
+		ID: "mcp-1", Body: `{"transport":"stdio"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 mcp_servers 行: ok=%v err=%v", ok, err)
+	}
+	if err := s.capabilityRevision.Append(ctx, &CapabilityRevision{
+		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
+	}); err != nil {
+		t.Fatalf("写 capability_revisions 行: %v", err)
+	}
 
 	// 每项：表、列、期望的 typeof、期望的文本值（"" = 只校验类型不校验值）。
 	cases := []struct {
@@ -72,6 +89,14 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"messages", "created_at", "text", at.Format(model.LayoutTS), true},
 		{"permission_memories", "created_at", "text", at.Format(model.LayoutTS), true},
 		{"schema_migrations", "applied_at", "text", "", false},
+		// v8（M6-1）：定义行的两个提升列 + 审计的时间列。`revision` 是 INTEGER（CAS 判据，
+		// 与 `WHERE revision = ?` 的整型入参一致），时间列与既有各表同一布局。
+		{"skills", "revision", "integer", "1", true},
+		{"skills", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"mcp_servers", "revision", "integer", "1", true},
+		{"mcp_servers", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"capability_revisions", "seq", "integer", "1", true},
+		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
 	}
 	for _, tc := range cases {
 		var gotType, gotValue string
@@ -111,6 +136,33 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 	if conv.Origin != "automation:nightly" || conv.CapabilityJSON != `{"skills":["s1"]}` || conv.CapabilityFingerprint != "fp-abc" {
 		t.Errorf("v7 三列往返失真: origin=%q json=%q fp=%q", conv.Origin, conv.CapabilityJSON, conv.CapabilityFingerprint)
+	}
+
+	// v8：定义行的时间列同样要逐纳秒往返（这是"M6 换掉 mtime 判据"之后
+	// `updated_at` 唯一的对外可见用途——列表排序）。
+	sk, found, err := s.GetSkillDefinition(ctx, "sk-1")
+	if err != nil || !found {
+		t.Fatalf("GetSkillDefinition: found=%v err=%v", found, err)
+	}
+	if !sk.UpdatedAt.Equal(at) {
+		t.Errorf("skill.updated_at 往返失真: %s 期望 %s", sk.UpdatedAt, at)
+	}
+	if sk.Revision != 1 || sk.Body != `{"name":"格式探针"}` {
+		t.Errorf("skill 提升列/正文往返失真: rev=%d body=%q", sk.Revision, sk.Body)
+	}
+	mcp, found, err := s.GetMcpServerDefinition(ctx, "mcp-1")
+	if err != nil || !found {
+		t.Fatalf("GetMcpServerDefinition: found=%v err=%v", found, err)
+	}
+	if !mcp.UpdatedAt.Equal(at) {
+		t.Errorf("mcp.updated_at 往返失真: %s 期望 %s", mcp.UpdatedAt, at)
+	}
+	revs, err := s.ListCapabilityRevisions(ctx, "skill", "sk-1")
+	if err != nil || len(revs) != 1 {
+		t.Fatalf("ListCapabilityRevisions: n=%d err=%v", len(revs), err)
+	}
+	if !revs[0].At.Equal(at) {
+		t.Errorf("capability_revisions.at 往返失真: %s 期望 %s", revs[0].At, at)
 	}
 
 	runs, err := s.ListRuns(ctx, "c1")

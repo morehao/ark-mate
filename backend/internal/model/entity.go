@@ -20,6 +20,12 @@ const (
 	TableMigration = "schema_migrations"
 	// TableInput 待投递的用户输入队列（§6 busy input 队列）。
 	TableInput = "inputs"
+	// TableSkill 能力定义（skill）——sqlite 模式下它是能力面的**事实源**（M6-1）。
+	TableSkill = "skills"
+	// TableMcpServer MCP server 定义（与 TableSkill 同形，见 McpServerDefinition）。
+	TableMcpServer = "mcp_servers"
+	// TableCapabilityRevision 能力定义变更审计（**全局单调 seq = 代际 rev 的来源**）。
+	TableCapabilityRevision = "capability_revisions"
 )
 
 // 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
@@ -226,3 +232,88 @@ func (Migration) TableName() string { return TableMigration }
 
 // MigrationList 是 Migration 切片类型（gormdao 泛型参数要求具名切片）。
 type MigrationList []Migration
+
+// ——— 能力定义事实源（M6-1；表名见 TableSkill / TableMcpServer） ———
+
+// SkillDefinition 是一条 skill 定义行。
+//
+// `Body` 是**唯一权威**：定义原始 JSON 原样保存，未知键因此得以承载——落盘纪律（C9）的
+// **意图保留、机制换掉**：从"读 map → 只改目标键 → 原子替换文件"换成"事务 + 行 revision CAS"
+// （计划 §1 P-2/P-3）。
+//
+// `Revision`/`UpdatedAt` 是仅有的两个**提升列**。刻意**不加** `enabled`/`scope`/`runtimes`
+// 等派生列：它们都在 `body` 里，双写必然漂移；能力定义规模是几十条，查询在 Go 侧做即可。
+type SkillDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义原始 JSON（含未知键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据：从 1 起，每次成功提交 +1。
+	//
+	// 它就是今天 `checkUnchanged`（mtime+size）所处的位置——对外表现仍是同一个
+	// `definition_changed`(40901)，**名字与码都不变**。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (SkillDefinition) TableName() string { return TableSkill }
+
+// SkillDefinitionList 是 SkillDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type SkillDefinitionList []SkillDefinition
+
+// McpServerDefinition 是一条 MCP server 定义行（列与语义同 SkillDefinition）。
+//
+// 与 SkillDefinition 分表而不是加 kind 列：两张表的读取面、写面与规模都各走各的，
+// 合成一张"定义表 + kind"会让每个查询都带一个恒真的过滤条件，且 kind 与 id 的
+// 唯一性约束会变成"跨 kind 唯一"这种没人想要的东西。
+type McpServerDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义原始 JSON（含未知键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (McpServerDefinition) TableName() string { return TableMcpServer }
+
+// McpServerDefinitionList 是 McpServerDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type McpServerDefinitionList []McpServerDefinition
+
+// CapabilityRevision 是一条能力定义变更审计。
+//
+// **刻意不加外键**：审计必须在能力被删除后仍然存在——这与 `events` 表"必须挂会话"
+// （`events.conversation_id NOT NULL REFERENCES conversations(id)`）的约束正好相反，别照抄那套。
+//
+// `Seq` 是 `AUTOINCREMENT`（单调、不复用），因此可以直接当作设计文档 §3.3/§10.5-③ 的
+// "当前代际 rev"：M1 落地时它取 `MAX(seq)` 即可，不需要另造一个进程内计数器
+// （设计文档 §"M6 与 M1 有直接交叠"那条建议）。
+//
+// 注意本表**没有 `id` 列**（主键叫 `seq`）：gormdao 以 `id` 为主键的泛型方法
+// （GetByID/UpdateByID/UpdateMap/Delete）一律不可用，见 `internal/dao/doc.go`。
+type CapabilityRevision struct {
+	// Seq 全局单调序（AUTOINCREMENT 保证不复用）。
+	Seq int64 `gorm:"column:seq;primaryKey;autoIncrement"`
+	// Kind 能力种类。取值见 CapabilityKindSkill / CapabilityKindMcp。
+	Kind string `gorm:"column:kind;not null"`
+	// CapabilityID 被改动的能力 id（能力删除后本行仍留着它）。
+	CapabilityID string `gorm:"column:capability_id;not null"`
+	// Action 变更动作。取值见 CapabilityActionCreate / …Update / …Delete / …Import。
+	Action string `gorm:"column:action;not null"`
+	// Actor 变更发起者（当前是调用方标识，如 "rest" / "cli" / "import"）。
+	Actor string `gorm:"column:actor;not null"`
+	// At 变更时刻（RFC3339Nano(UTC)）。
+	At time.Time `gorm:"column:at;not null;serializer:arkforge_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	// Digest 提交后 body 的摘要（sha256 hex）：审计要能回答"那一版到底是什么"，
+	// 而不是只留一个自增号。
+	Digest string `gorm:"column:digest;not null"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (CapabilityRevision) TableName() string { return TableCapabilityRevision }
+
+// CapabilityRevisionList 是 CapabilityRevision 切片类型（gormdao 泛型参数要求具名切片）。
+type CapabilityRevisionList []CapabilityRevision

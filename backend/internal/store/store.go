@@ -44,6 +44,12 @@ type (
 	Input = model.Input
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
 	ConversationMetaPatch = model.ConversationMetaPatch
+	// SkillDefinition 能力定义行（M6-1：sqlite 模式下能力面的事实源）。
+	SkillDefinition = model.SkillDefinition
+	// McpServerDefinition MCP server 定义行。
+	McpServerDefinition = model.McpServerDefinition
+	// CapabilityRevision 能力定义变更审计行（seq 单调 = 代际 rev 的来源）。
+	CapabilityRevision = model.CapabilityRevision
 )
 
 // 常见错误。
@@ -64,6 +70,11 @@ type Store struct {
 	inputs        *dao.InputDao
 	meta          *dao.MetaDao
 	migrations    *dao.MigrationDao
+
+	// 能力定义事实源（M6-1）：两张定义表 + 一张只追加的变更审计。
+	skills             *dao.SkillDao
+	mcpServers         *dao.McpServerDao
+	capabilityRevision *dao.CapabilityRevisionDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -97,6 +108,10 @@ func New(db *gorm.DB) *Store {
 		inputs:        dao.NewInputDao(getDB),
 		meta:          dao.NewMetaDao(getDB),
 		migrations:    dao.NewMigrationDao(getDB),
+
+		skills:             dao.NewSkillDao(getDB),
+		mcpServers:         dao.NewMcpServerDao(getDB),
+		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
 	}
 }
 
