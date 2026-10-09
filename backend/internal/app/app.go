@@ -195,6 +195,23 @@ func (a *App) Init(ctx context.Context) error {
 		}
 		a.st = st
 		a.svc.EnableStore(st)
+		// 能力定义一次性导入（M6-4）：v8 之后 DB 才是能力面的事实源，而存量定义还在
+		// `FORGE_CAPABILITIES` 目录里。**必须发生在 loadDefinitions 之前**——装载只从 DB 读，
+		// 导入晚了这一轮启动的能力面就是空的（用户看到"我的技能全没了"，哪怕下一轮就回来）。
+		//
+		// 幂等靠目录指纹（`meta.imported_capabilities`），且**按行判重**（导入绝不覆盖）：
+		// 目录没变 → 一个字节都不写；目录变了 → 只补缺失的行。失败只 WARN 不阻断启动
+		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `forge capability import`。
+		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
+			manager.CapabilityImportOptions{Auto: true}, nil); iErr != nil {
+			slog.Warn("serve: 导入存量能力定义失败（能力面可能为空；可跑 `forge capability import` 重试）",
+				"err", iErr, "dir", cfg.CapabilityDir)
+		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
+			slog.Info("serve: 存量能力定义导入完成",
+				"dir", imp.Dir, "skills", imp.Skills, "mcps", imp.Mcps,
+				"inserted", imp.Inserted, "existing", imp.Existing,
+				"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
+		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)

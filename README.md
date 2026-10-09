@@ -39,7 +39,7 @@
 - **P3 收口**：传输保险丝/resync、hydration 四态均完成；会话侧栏（置顶 + 按日分组 + 近底跟随滚动）与工具/思考内联卡片为 M1 既有覆盖项，无需改动。
 - **P3 加载四态（前端）**：会话视图加 hydration 态——冷挂载/切回置 `hydrating`，服务端 snapshot 或首个事件置回就绪，空转 12s（保险丝重连前）自动回空态不再永久 loading；聊天页在 hydration 中显示「连接会话…」而非空态问候。
 - **P3 传输可靠性（前端）**：WS 传输增 **stalled 保险丝**（OPEN 后 70s 无任何服务端帧——半开/黑洞连接——主动断开并重连，健康连接每 25s ping→pong 计入活跃度不会误熔断）与**重连 resync 裁决**（重连后按各 agg 已确认水位重新 attach，服务端 EventsAfter 开区间 → 增量续传不重复、权威收尾）。
-- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + `schema_migrations` 自管迁移），`forge migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`FORGE_STORE=sqlite|memory|auto`）；messages 逐轮物化（user 原文 + assistant 文本片段按 msg_id 拼接 + 交错时间线 + 工具最终态），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh/opencode 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
+- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `capability_revisions` + `schema_migrations` 自管迁移），`forge migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`FORGE_STORE=sqlite|memory|auto`）；messages 逐轮物化（user 原文 + assistant 文本片段按 msg_id 拼接 + 交错时间线 + 工具最终态），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh/opencode 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
 
 里程碑与后续规划见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/agent-runtime-refactor-design-20260908.md](docs/agent-runtime-refactor-design-20260908.md) §20；harness adapter 的源码级适配核实记录见 [docs/deepseekharness-acp-adaptation.md](docs/deepseekharness-acp-adaptation.md)。
 
@@ -344,6 +344,16 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 文件是它唯一的持久形态，所以不跟着换。装载侧同源分派：sqlite 模式从 DB **整体替换**式装载
 （先清空再逐行过闸门，库里删掉的行不会以幽灵定义留在内存里），memory 模式仍是目录装载。
 
+**存量定义怎么搬到 DB（M6-4，一次性 + 幂等 + 可回退）**：装配期在 sqlite 模式下自动导入一次
+`<CapabilityDir>/{skills,mcp}/*.json`（逐条过同一道注册闸门；坏定义 WARN 计数、其余照常导入、
+不阻断启动），成功后把目录指纹写进 `meta.imported_capabilities`——**幂等靠指纹而不是"表空不空"**，
+所以重启不会重复导入、"我故意删掉的技能"也不会自己回来。导入**绝不覆盖**已有行（只插缺失的，
+逐条计入 `existing`）：文件是旧的一版、面板才是新的，按文件回滚等于静默的数据丢失。目录里的
+`tools/*.json` **不参与持久化**（工具是探测产物，每轮重建），但导入器会**报数**并在启动日志里
+写明（静默丢弃用户放进去的文件是最坏的一种"成功"）。补齐/重跑用 `forge capability import`
+（不看指纹、每次按行判重），把 DB 写回目录用 `forge capability export`（此后文件是导出物，
+`FORGE_CAPABILITIES` 在 sqlite 模式下就是这个**导入/导出目录**）。
+
 **定时任务面（`/automations`）沿用同一条分派线**（请求形态 → `40000`；取值语义 → `40001`），
 `msg` 写清是哪一种：
 
@@ -425,6 +435,12 @@ CLI 子命令：`forge serve`（控制面 daemon）、`forge demo`（单轮真�
 （显式清理 transcript；不设自动删除）、`forge config`（打印解析后配置与每项来源）、
 `forge capability migrate`（把 skill 定义里退役的 `sources[]` 就地转成 `runtimes[]`；`--dir` 指定
 能力目录、`--dry-run` 只打印将要做的改动，可重复执行——已是新形态的定义一律跳过）、
+`forge capability import` / `export`（M6：能力定义换事实源的两个运维口子。`import` 把
+`<CapabilityDir>/{skills,mcp}/*.json` 灌进 SQLite，**按行判重、已有行绝不覆盖**，坏定义逐条报出、
+其余照常导入；`export` 把 DB 里的定义写回能力目录（此后文件是**导出物**），未知键原样、两次导出
+逐字节相同，`--dry-run` 只打印将要写出的内容。装配期在 sqlite 模式下会自动跑一次 `import`
+（幂等靠目录指纹 `meta.imported_capabilities`：目录没变就整体跳过，所以"我删掉的技能"不会自己
+回来），需要重跑或补文件时用显式命令）、
 `forge doctor`（**只读体检**：前端资产来源与逐文件摘要、随包载荷清单与入口存在性、载荷
 `nodeAbi` 与 `release.json` 的一致性、数据目录可写性、监听端口占用；`--verify-payload` 对载荷树做
 **全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数），`--json` 供诊断包/CI 消费。

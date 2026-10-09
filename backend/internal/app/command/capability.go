@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -9,22 +10,125 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-forge/internal/manager"
+	"github.com/morehao/ark-forge/internal/store"
 	"github.com/morehao/ark-forge/pkg/capability"
+	"github.com/morehao/ark-forge/pkg/config"
 )
 
 // capabilityCmd 分发 `forge capability <动作>`。
 func capabilityCmd(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "capability 用法：forge capability migrate [--dir <能力目录>] [--dry-run]")
+		fmt.Fprint(os.Stderr, capabilityUsage)
 		os.Exit(2)
 	}
 	switch args[0] {
 	case "migrate":
 		capabilityMigrate(args[1:])
+	case "import":
+		capabilityImport(args[1:])
+	case "export":
+		capabilityExport(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "未知的 capability 动作 %q（当前只有 migrate）\n", args[0])
+		fmt.Fprintf(os.Stderr, "未知的 capability 动作 %q\n\n%s", args[0], capabilityUsage)
 		os.Exit(2)
 	}
+}
+
+const capabilityUsage = `capability 用法：
+  forge capability migrate [--dir <能力目录>] [--dry-run]
+      把 skill 定义里的旧 sources[] 改写为 runtimes[]（文件仍是事实源时的迁移）
+  forge capability import  [--dir <能力目录>] [--dry-run]
+      把目录里的 {skills,mcp}/*.json 导入 SQLite（M6：sqlite 模式下 DB 才是事实源）
+      幂等：按行判重，**已有行绝不覆盖**；坏定义逐条报出、其余照常导入
+  forge capability export  [--dir <能力目录>] [--dry-run]
+      把 SQLite 里的定义写回目录（此后文件是**导出物**，不是事实源）
+`
+
+// capabilityImport 显式导入存量定义（`forge capability import`）。
+//
+// 与装配期自动导入的分工：自动导入看目录指纹（目录没变就整体跳过，保证"我删掉的技能不会自己
+// 回来"），显式导入**不看指纹**、每次按行判重——新丢进目录一个文件，跑一次就该进来。
+func capabilityImport(args []string) {
+	fs := flag.NewFlagSet("capability import", flag.ExitOnError)
+	dir := fs.String("dir", "", "能力目录（默认 FORGE_CAPABILITIES 或 ~/.forge/capabilities）")
+	dryRun := fs.Bool("dry-run", false, "只扫描与校验，不写库")
+	_ = fs.Parse(args)
+
+	cfg, _ := mustConfig()
+	root := capabilityRoot(cfg, *dir)
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "capability import: 打开持久层 %s 失败: %v\n", cfg.DBPath, err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	stats, err := manager.ImportCapabilityDir(context.Background(), st, root,
+		manager.CapabilityImportOptions{DryRun: *dryRun}, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "capability import: %v（未写入任何内容）\n", err)
+		os.Exit(1)
+	}
+	verb := "新增"
+	if *dryRun {
+		verb = "将新增"
+	}
+	if stats.Already {
+		fmt.Printf("capability import: %s 的目录指纹未变（装配期已导入过）；要重跑显式导入就用本次这条命令\n", root)
+	}
+	fmt.Printf("capability import: 扫描 skill %d 条 / mcp %d 条 → %s；库中已有 %d 条（不覆盖），%s %d 条\n",
+		stats.Skills, stats.Mcps, cfg.DBPath, stats.Existing, verb, stats.Inserted)
+	if stats.Invalid > 0 {
+		fmt.Printf("  跳过坏定义 %d 条（上面逐条列了原因）\n", stats.Invalid)
+	}
+	if stats.Tools > 0 {
+		fmt.Printf("  ⚠ %s/tools 下有 %d 个文件：工具目录**不参与持久化**（探测产物每轮重建），本次未导入\n",
+			root, stats.Tools)
+	}
+}
+
+// capabilityExport 把 DB 里的定义写回目录（`forge capability export`）。
+func capabilityExport(args []string) {
+	fs := flag.NewFlagSet("capability export", flag.ExitOnError)
+	dir := fs.String("dir", "", "能力目录（默认 FORGE_CAPABILITIES 或 ~/.forge/capabilities）")
+	dryRun := fs.Bool("dry-run", false, "只打印将要写出的内容，不改任何文件")
+	_ = fs.Parse(args)
+
+	cfg, _ := mustConfig()
+	root := capabilityRoot(cfg, *dir)
+	if root == "" {
+		fmt.Fprintln(os.Stderr, "capability export: 能力目录为空（用 --dir 指定，或设置 FORGE_CAPABILITIES）")
+		os.Exit(2)
+	}
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "capability export: 打开持久层 %s 失败: %v\n", cfg.DBPath, err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	stats, err := manager.ExportCapabilityDir(context.Background(), st, root, *dryRun, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "capability export: %v\n", err)
+		os.Exit(1)
+	}
+	mode := "已写出"
+	if *dryRun {
+		mode = "待写出（--dry-run，未写盘）"
+	}
+	fmt.Printf("capability export: %s %d 个文件 → %s，失败 %d 个\n", mode, stats.Written, root, stats.Failed)
+	if stats.Failed > 0 {
+		os.Exit(1)
+	}
+}
+
+// capabilityRoot 解析能力目录：--dir 优先，否则取配置（FORGE_CAPABILITIES / ~/.forge/capabilities）。
+func capabilityRoot(cfg config.Config, flagDir string) string {
+	if root := strings.TrimSpace(flagDir); root != "" {
+		return root
+	}
+	return cfg.CapabilityDir
 }
 
 // legacySource 旧 `sources[]` 条目里平台关心的两段（其余字段忽略）。

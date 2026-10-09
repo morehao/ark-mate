@@ -112,15 +112,6 @@ func (s *Store) CountMcpServerDefinitions(ctx context.Context) (int64, error) {
 	return s.mcpServers.Count(ctx)
 }
 
-// AppendCapabilityRevision 只追一条审计（**不**改定义行）。
-//
-// 只给导入用（M6-4）：导入是"把存量文件一次性灌进空表"，一次导入的所有定义共用一条
-// `action=import` 的审计行，而不是每条定义各写一条——那样在"导入 200 条"时会把
-// 审计刷成 200 行无关噪音，且丢失"这是一次动作"这个事实。
-func (s *Store) AppendCapabilityRevision(ctx context.Context, rev *model.CapabilityRevision) error {
-	return s.capabilityRevision.Append(ctx, rev)
-}
-
 // ListCapabilityRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
 func (s *Store) ListCapabilityRevisions(ctx context.Context, kind, capabilityID string) (model.CapabilityRevisionList, error) {
 	return s.capabilityRevision.ListByCapability(ctx, kind, capabilityID)

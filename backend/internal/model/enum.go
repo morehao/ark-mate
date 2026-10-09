@@ -34,6 +34,11 @@ const (
 	MetaKeyEventsLastSeq = "events_last_seq"
 	// MetaKeyImportMarker transcript 导入标记：value = 导入目录指纹（幂等依据）。
 	MetaKeyImportMarker = "imported_transcripts"
+	// MetaKeyImportedCapabilities 能力定义导入标记：value = 导入目录（skills+mcp 文件清单）的指纹。
+	//
+	// 只作**装配期自动导入**的幂等依据（目录没变就整体跳过）；显式 `forge capability import`
+	// 不看它——那条路径每次按行判重（新丢进目录一个文件，跑一次就该进来）。
+	MetaKeyImportedCapabilities = "imported_capabilities"
 
 	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
 	CapabilityKindSkill = "skill"
@@ -48,4 +53,6 @@ const (
 	CapabilityActionDelete = "delete"
 	// CapabilityActionImport 由存量文件一次性导入（M6-4）。
 	CapabilityActionImport = "import"
+	// CapabilityActorImport 导入动作的执行者（写面是 "rest"，导入是运维动作，两者在审计里可分辨）。
+	CapabilityActorImport = "import"
 )

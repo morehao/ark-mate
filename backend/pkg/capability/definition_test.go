@@ -254,3 +254,57 @@ func TestDefinitionFileRejectsNonObject(t *testing.T) {
 		t.Fatalf("不存在应返回 IsNotExist 错误: %v", err)
 	}
 }
+
+// TestWriteDefinitionFile 导出路径的覆盖写纪律：**能覆盖已存在的文件**（否则第二次导出就冲突）、
+// 权限沿用、父目录自建、同目录 staging 不留残渣。
+func TestWriteDefinitionFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skills", "demo.json")
+
+	// 父目录不存在也要能写（导出到一个全新目录是常规用法）。
+	if err := WriteDefinitionFile(path, []byte("{\n  \"id\": \"demo\"\n}\n")); err != nil {
+		t.Fatalf("WriteDefinitionFile: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "{\n  \"id\": \"demo\"\n}\n" {
+		t.Fatalf("内容不符: %q err=%v", got, err)
+	}
+
+	// 已存在也要能覆盖（这是与 Save 的关键区别：Save 会以 mtime 冲突拒绝，导出没有并发语义）。
+	if err := WriteDefinitionFile(path, []byte("{\n  \"id\": \"demo\",\n  \"name\": \"N\"\n}\n")); err != nil {
+		t.Fatalf("覆盖写: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	if !strings.Contains(string(got), `"name": "N"`) {
+		t.Fatalf("覆盖写内容不符: %s", got)
+	}
+
+	// 权限沿用：0600 的文件不该因为一次导出被放宽成 0644。
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDefinitionFile(path, []byte("{\n  \"id\": \"demo\"\n}\n")); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("权限应沿用 0600，got %v", fi.Mode().Perm())
+	}
+
+	// staging 残渣：目录里只该有目标文件本身。
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "demo.json" {
+		t.Fatalf("同目录 staging 应清理干净: %+v", entries)
+	}
+
+	// 相对路径拒绝（与 NewDefinitionFile 同口径：导出物必须落在明确的位置）。
+	if err := WriteDefinitionFile("relative.json", []byte("{}")); err == nil {
+		t.Fatal("相对路径应被拒绝")
+	}
+}
