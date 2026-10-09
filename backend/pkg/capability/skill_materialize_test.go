@@ -82,6 +82,15 @@ func TestMaterializeSkillValidation(t *testing.T) {
 	if _, err := MaterializeSkill(ocSpec(root), inj); err == nil {
 		t.Fatal("含路径分隔符的 id 应被拒")
 	}
+	// 词法闸（导出 API 的第二道，与注册表同一条规则）：id 会**原样写进 frontmatter 的 name**，
+	// 而 dsh 对 name 强制 `^[a-z0-9]+(?:-[a-z0-9]+)*$`、不合规只 warn 就丢弃整条 ——
+	// 所以「路径安全但词法不合规」的 id 也必须在这里被拒，否则平台自报 in_sync、底座永不加载。
+	badLex := Skill{ID: "Probe_Bad.Id", Body: "x"}
+	if _, err := MaterializeSkill(ocSpec(root), badLex); err == nil {
+		t.Fatal("不符底座词法的 id 应被拒")
+	} else if !strings.Contains(err.Error(), "词法") {
+		t.Fatalf("id 报错应说明词法：%v", err)
+	}
 }
 
 // TestApplyLayoutMatchesRuntime 两处落点规则的取值必须一致。

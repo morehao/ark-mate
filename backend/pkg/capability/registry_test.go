@@ -95,6 +95,35 @@ func TestRegistryValidation(t *testing.T) {
 	}
 }
 
+// TestRegisterSkillIDLexiconFollowsBase 钉住 skill id 的词法**上限来自底座**。
+//
+// dsh 的 `dsh-skill` 用 `SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/` 校验 skill 文件 frontmatter 的
+// `name`，不合规只打一条 warn 就**静默丢弃整条**；而平台物化时把 id 原样写成 name，所以平台闸门
+// 一旦比它宽，就会出现「平台自报 in_sync、底座永远不加载」。两个方向都要钉：宽了要拒，**收得比
+// 底座更紧也不行**（那会把底座明明能加载的 id 挡在门外）。
+func TestRegisterSkillIDLexiconFollowsBase(t *testing.T) {
+	r := NewRegistry()
+	// 合法：单字符、连字符分段、纯数字段、恰好 64 位。
+	for _, id := range []string{"a", "my-skill", "skill-1", "a1-b2-c3", "2026-10-09", strings.Repeat("a", 64), strings.Repeat("a-", 31) + "a"} {
+		if err := r.RegisterSkill(&Skill{ID: id, Body: "# x"}); err != nil {
+			t.Fatalf("id %q 应通过（底座词法允许）：%v", id, err)
+		}
+	}
+	// 非法：大写 / 下划线 / 点 / 空格 / 首尾连字符 / 连续连字符 / 非 ASCII / 路径分隔符 / 超 64 位。
+	for _, id := range []string{
+		"", "Probe_Bad.Id", "UPPER", "under_score", "dot.name", "has space",
+		"-lead", "trail-", "double--hyphen", "中文", "a/b", `a\b`, strings.Repeat("a", 65),
+	} {
+		if err := r.RegisterSkill(&Skill{ID: id, Body: "# x"}); err == nil {
+			t.Fatalf("id %q 应被拒（不符底座词法 ^[a-z0-9]+(?:-[a-z0-9]+)*$ 且 ≤64 位）", id)
+		}
+	}
+	// MCP 的规则**不跟着收紧**：它不喂给底座的 skill 校验，历史上更宽（大写/下划线仍合法）。
+	if err := r.RegisterMcpServer(&McpServer{ID: "My_Mcp", Transport: "stdio", Command: "/usr/local/bin/npx"}); err != nil {
+		t.Fatalf("MCP id 不该被 skill 词法波及：%v", err)
+	}
+}
+
 // TestRegisterSkillRuntimesAndScope 条目侧只声明「给谁用」（runtimes）与作用域（scope）；
 // 两者都在**入表前**校验：写错的取值会让投放判据失准，不能静默放过。
 func TestRegisterSkillRuntimesAndScope(t *testing.T) {

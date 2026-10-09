@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,38 @@ func TestCreateSkillCriticalBodyRejectedWithZeroBytes(t *testing.T) {
 	}
 	if _, ok := svc.caps.SkillByID("evil"); ok {
 		t.Fatal("被拒的定义不得进注册表")
+	}
+}
+
+// TestCreateSkillInvalidIDRejectedWithZeroBytes 不合约定的 skill id → 40001 且**零字节落盘**。
+//
+// 依据是**底座的硬契约**而非平台审美：dsh 的 `dsh-skill` 对 frontmatter 的 `name` 强制
+// `^[a-z0-9]+(?:-[a-z0-9]+)*$`，不合规只 warn 就丢弃整条；平台物化又把 id 原样写成 name，
+// 于是放行这种 id = 造出一个「物化体检 in_sync、底座永远读不到」的 skill（2026-10-08 实测确认）。
+func TestCreateSkillInvalidIDRejectedWithZeroBytes(t *testing.T) {
+	svc, dir := writeRig(t)
+	for _, id := range []string{"Probe_Bad.Id", "UPPER", "under_score", "dot.name"} {
+		_, err := svc.CreateSkill(context.Background(), writeReq(t, fmt.Sprintf(`{"id":%q,"body":"# x"}`, id)))
+		if err == nil {
+			t.Fatalf("id %q 应被拒（不符底座词法）", id)
+		}
+		if numericCode(err) != code.InvalidRequest {
+			t.Fatalf("id %q 应报 40001 definition_invalid，got %d（%v）", id, numericCode(err), err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "skills", id+".json")); !os.IsNotExist(statErr) {
+			t.Fatalf("被拒的定义不得落盘（零字节）：%s", id)
+		}
+		if _, ok := svc.caps.SkillByID(id); ok {
+			t.Fatalf("被拒的定义不得进注册表：%s", id)
+		}
+	}
+	// 反向：底座能加载的 id 必须放行（否则是"把底座明明支持的挡在门外"）。
+	resp, err := svc.CreateSkill(context.Background(), writeReq(t, `{"id":"my-skill-2","body":"# ok"}`))
+	if err != nil {
+		t.Fatalf("合规 id 应放行：%v", err)
+	}
+	if _, statErr := os.Stat(resp.Path); statErr != nil {
+		t.Fatalf("合规 id 应落盘：%v", statErr)
 	}
 }
 

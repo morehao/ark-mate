@@ -34,6 +34,18 @@ func (r LoadResult) Total() int { return r.Skills + r.Mcps + r.Tools }
 // 合法 id/name：字母数字开头，后接字母数字/_/./-，≤64（对齐 Agent id 约束风格）。
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// skillIDRE 是 skill id 的词法上限——**取自底座的硬契约，不是平台审美**。
+//
+// dsh 的 `@deepseek-ai/dsh-skill` 用 `SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/` 校验 skill 文件
+// frontmatter 里的 `name`，不合规只打一条 warn 就**静默丢弃整条**（dsh-skill-filesystem/lib/index.js）。
+// 而平台物化时是把 id 原样写成 frontmatter 的 name（`MaterializedContent`），于是 id 不合规 =
+// 平台自报 `in_sync`、底座永远不加载——是最难排查的一类"生效失败"。
+//
+// opencode 宽容（`**/SKILL.md` 递归 + 只验 name 的存在性），dsh 不宽容，**取交集**即这条。
+// `nameRE` 仍是 MCP/tool 的规则（那些名字不喂给底座的 skill 校验，且历史上更宽）；
+// 路径安全那道判据在 `manager.validDefinitionID`，与此处正交。
+var skillIDRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 // NewRegistry 构造空注册表。
 func NewRegistry() *Registry {
 	return &Registry{
@@ -63,8 +75,9 @@ func (r *Registry) LoadDir(dir string) LoadResult {
 // 都不该存在；物化层只负责把已经过闸的正文写到 runtime 目录。
 // 非 critical 告警不拒载，但记在条目上（`Skill.Warnings`）供 REST 读模型暴露。
 func (r *Registry) RegisterSkill(s *Skill) error {
-	if s == nil || s.ID == "" || !nameRE.MatchString(s.ID) {
-		return fmt.Errorf("capability skill: id 非法（须字母数字开头，≤64 位）: %q", idOf(s))
+	if s == nil || s.ID == "" || !skillIDRE.MatchString(s.ID) || len(s.ID) > 64 {
+		return fmt.Errorf("capability skill: id 非法（须小写字母/数字，用连字符分段，形如 my-skill，≤64 位；"+
+			"底座 dsh 强制该词法，不合规会被静默丢弃）: %q", idOf(s))
 	}
 	// Scope：只认 global|workspace。未知取值报错而不是静默当 global——静默会把「我明明写了
 	// workspace 想让它跟着项目走」变成「悄悄写进了全局目录」。

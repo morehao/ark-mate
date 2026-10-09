@@ -26,6 +26,12 @@ const forgeMarker = ".forge-managed"
 //
 // 故两种 format 均合成/补全 frontmatter（name=skill id，description 退化 name→id）——
 // 原样写入 body 的旧约定在两个底座都不会被加载，属实测证伪，不再保留。
+//
+// 2026-10-08 补测（**另一条命题，不在上面那段的覆盖范围内**）：「平台默认根下写进去、底座开箱即读到」。
+// opencode v1.18.35 通过 → `opencodeSkillProjection().Tested` 已置 true，取证与反证见
+// pkg/runtime/adapters.go 该函数上方注释；dsh 侧待补（其 `Tested` 仍为 false）。
+// 另：上面「name 含大写下划线仍加载」在 v1.18.35 上复现（`Probe_Bad.Id` 照常加载）——
+// 仍是**实现宽容而非契约**，平台未对 skill id 施加 opencode 文档要求的词法闸门。
 const (
 	// FormatSkillMD 目录包 `<id>/SKILL.md`（保证 YAML frontmatter）。
 	FormatSkillMD = "SKILL.md"
@@ -198,6 +204,12 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 	}
 	if s.ID == "" {
 		return "", fmt.Errorf("skill 物化: skill id 为空")
+	}
+	// 词法闸的同款重复判断（理由同上：本函数是导出 API）。id 会**原样写进 frontmatter 的 `name`**，
+	// 而底座对 name 有硬词法（dsh：`^[a-z0-9]+(?:-[a-z0-9]+)*$`，不合规只 warn 就丢弃整条）——
+	// 平台这边放行等于「自报 in_sync、底座永不加载」，所以与注册表用同一条规则再拦一次。
+	if !skillIDRE.MatchString(s.ID) || len(s.ID) > 64 {
+		return "", fmt.Errorf("skill 物化: skill id %q 不符底座词法（须 ^[a-z0-9]+(?:-[a-z0-9]+)*$ 且 ≤64 位）", s.ID)
 	}
 	if s.Body == "" {
 		return "", fmt.Errorf("skill 物化: skill %q body 为空（无事可写）", s.ID)
