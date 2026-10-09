@@ -1,7 +1,7 @@
 # ark-mate × zacp 重合面重构技术方案（含 SQLite 落库）
 
 > 版本：v1 draft（2026-09-08）｜类型：技术重构 + 数据模型设计｜档位：标准档（含完整档必要的迁移/回滚与开放问题收口）
-> 前置材料：`.cache/ark-mate-audit-report.md`（ark-mate 全量缺陷清单，文件:行号 证据）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
+> 前置材料：`.cache/ark-mate-audit-report.md`（ark-mate 全量缺陷清单，文件:行号 证据；**本地材料，已随工作区清理、从未入库**）；zacp 后端/前端只读精读报告（本文引用其机制但不搬运代码）。
 > 关联文档：`docs/design-and-roadmap.md`（M0–M3 路线图，本文是其中与 zacp 重合部分的执行方案）；`frontend/DESIGN.md`（前端视觉纪律，本次不动）。
 
 ## 摘要（TL;DR）

@@ -1,13 +1,36 @@
 # ark-mate
 
-面向 Agent 应用开发的通用底座/平台：创建、运行、扩展与统一管理 Agent，可接入 OpenCode、DeepSeek Harness 等 ACP 兼容的多种 Runtime。
+**基于开源 Agent Runtime 的个人 Agent**：单机、单操作员、开箱即用，执行能力来自 OpenCode、DeepSeek Harness 等 ACP 兼容的开源运行时；同一内核同时沉淀一层**可复用的底座能力**。
 
-> A self-hostable mate for building, running, extending, and managing AI agents. Hosts multiple agent runtimes — OpenCode, DeepSeek Harness, and ACP-compatible executors — under one unified control plane.
+> A personal agent built on open-source agent runtimes — OpenCode, DeepSeek Harness, and other ACP-compatible executors — with a reusable control plane underneath.
 
-**定位边界**（详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v3」）：
-- **能力不重造**：skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
-- **数据管理是平台职责**：统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据；
-- **单机单操作员**：不做多人协作 / 多用户鉴权 / 远程聊天通道（跨 agent 协作亦不在定位内）。
+**定位层次**（详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v7」）：
+1. **主体是个人 Agent**：单机、单操作员、开箱即用，面向「我自己的助手」——建会话、跑起来、看见过程与结果。
+2. **底座能力是同一内核的第二重身份**：把「多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 桌面/容器交付形态」沉淀成可复用的一层，面向「把控制面接到自己的 runtime / 自己的前端上」。
+3. **三条不变的红线**（沿用决策 v3）：**能力不重造**（skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能）；**数据管理是平台职责**（统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据）；**单机单操作员**（不做多人协作 / 多用户鉴权 / 远程聊天通道，跨 agent 协作亦不在定位内）。
+
+## 三分钟跑起来（个人使用）
+
+```bash
+make dev      # 后端 :10001 + 前端 vite :5173，Ctrl-C 一起收
+make all      # 或：出单二进制 ./mate（前端经 go:embed 内嵌），一个文件起全部
+```
+
+本机自备 Go ≥ 1.26、Node 24.x、pnpm 11.x（见「快速开始」前置表），以及至少一个 ACP 兼容底座
+（`opencode` 或 `dsh`）与模型 API key。数据默认落 `~/.ark-mate`（`MATE_HOME` 覆盖），`make dev`
+默认 sqlite（`~/.ark-mate/mate.db`）。**桌面形态不需要**用户机器装 Go / Node / 底座——见
+[docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
+
+## 底座能力面向谁
+
+「个人 Agent」是主体，底座能力是同一内核顺带提供的第二层，面向两类用法：
+
+- **换自己的 runtime**：`pkg/runtime` 是可扩展的 adapter 注册表 + 投影/指纹声明；远程 ACP 端点经
+  `.ark-mate/config/runtimes.json` 声明即可接入（见下文「远程 runtime（A5）」）。
+- **接自己的前端 / 自动化**：对外契约只有 `REST + WS`（本 README 的「控制面接口摘要」就是路由表），
+  内核不绑定自带面板——`apps/web` 是**产物包**，桌面壳与核心读同一份 `dist`。
+
+底座能力**不**承诺的东西与决策 v3 的三条红线一致：不做运行时功能、不做多用户、不做跨 agent 协作。
 
 ## 特性（当前形态）
 

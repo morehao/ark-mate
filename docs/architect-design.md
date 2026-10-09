@@ -1,7 +1,8 @@
 # ark-mate 架构设计
 
-> 面向 Agent 应用开发的通用底座/平台（monorepo）：创建、运行、扩展与统一管理 Agent，
-> 作为 ACP Host，经 stdio 连接 opencode 与 deepseek-harness 等多个 Agent Runtime。
+> 基于开源 Agent Runtime 的**个人 Agent**（monorepo，定位见 [design-and-roadmap.md](./design-and-roadmap.md)
+> 「决策变更 v7」）：单机、单操作员、开箱即用；执行能力归外部 Runtime，本项目作为 ACP Host 经 stdio
+> 连接 opencode 与 deepseek-harness 等多个 Agent Runtime，并由此沉淀一层可复用的**底座能力**。
 
 > **决策更新（见 [design-and-roadmap.md](./design-and-roadmap.md) §0「决策变更 v2」）**：
 > ① 控制面 → 面板的实时传输由「SSE 首选、WS 仅双向需求时引入」调整为 **仅 WebSocket（不设 SSE 出口）**：
@@ -31,16 +32,19 @@
 
 ## 1. 定位与目标
 
-一款可自托管的 Agent 平台底座。与前缀 `ark-`（个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，
-本项目是其中的「Agent 锻造所」，聚焦：
+一款**基于开源 Agent Runtime 的个人 Agent**：单机、单操作员、开箱即用。与前缀 `ark-`
+（个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，本项目是其中的「个人 Agent 伙伴」
+（`ark-mate`），聚焦：
 
 - **Create**：定义、注册、复用 Agent。
 - **Run**：在统一控制面下跨越 Runtime 运行 Agent 会话。
 - **Extend**：通过 ACP 协议接入多种 Runtime（首版：opencode、deepseek-harness）。
 - **Manage**：生命周期、Registry、会话与配置的统一管理。
 
-元定位：**是底座/平台，不是单纯的 Agent SDK**。核心差异化是靠统一协议（ACP）承载多个外部 Agent 运行时，
-让用户在同一面板内切换与控制不同的底层 Agent。
+元定位：**先是个人 Agent，其次才是底座**。执行能力（推理 / skill / MCP）全部来自外部 ACP 运行时，
+平台自己不做运行时功能——所以它既不是 Agent SDK，也不是 Agent 引擎。**底座能力**（用统一协议承载
+多个外部运行时、会话与能力数据面、REST/WS 契约、桌面/容器交付形态）是同一内核的第二重身份，
+也是它与「单纯 Agent SDK」的差异点。
 
 定位边界（与 [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v3」一致）：
 - **能力不重造**：skills/MCP/推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；

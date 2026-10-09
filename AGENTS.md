@@ -1,6 +1,6 @@
 # AGENTS.md — ark-mate
 
-ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
+基于开源 Agent Runtime（opencode / deepseekharness）的**个人 Agent**；同一内核另沉淀一层可复用的**底座能力**（多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 桌面/容器交付）。前后端平级 monorepo。代码注释与 commit message 用简体中文；commit 用 conventional 前缀（`feat`/`fix`/`refactor` + 中文 scope）。
 
 ## 布局与目录边界
 
@@ -27,7 +27,7 @@ ACP 兼容 runtime（opencode / deepseekharness）的统一控制面平台。前
 ## 常用命令（仓库根）
 
 - `make dev` 前后端联调（go run serve → 等 :10001 health → vite :5173，Ctrl-C 一起收）；`make server` 仅后端；`make web` 只构建前端并刷新 embed 宿主；`make all` 出单二进制 `./mate`（先 web 再 `go build -tags release`）。
-- `make build/vet/test` = `cd backend && go build|vet|test ./...`。无独立 lint。另有 **`make test/release`**（`go test -tags release ./...`，依赖 `web` 目标先出前端产物）：**带 release tag 的代码只有这条能覆盖**，默认 `go test` 根本编译不到它们（历史上 `NoRoute` 的非 API 行为就是这么长期没人验的）。
+- `make build && make vet && make test` = `cd backend && go build|vet|test ./...`（注意**没有** `build/vet/test` 这种合并目标：make 会把斜杠当成目标名的一部分而报 `No rule to make target`）。无独立 lint。另有 **`make test/release`**（`go test -tags release ./...`，依赖 `web` 目标先出前端产物）：**带 release tag 的代码只有这条能覆盖**，默认 `go test` 根本编译不到它们（历史上 `NoRoute` 的非 API 行为就是这么长期没人验的）。
 - 容器：`make image`（默认最小镜像）/ `make image/runtimes WITH_DSH=true WITH_OPENCODE=true`（内置底座）/ `IMAGE_TAG=runtimes make image/run`；开关只认 `true|false` 且必须与 `--target` 配套（最小 target 传开会构建失败，不静默忽略）。基础镜像与仓库地址可用变量覆盖（`NODE_IMAGE/GO_IMAGE/RUNTIME_IMAGE/GO_PROXY/NPM_REGISTRY`），细节见 `docs/deployment.md` §4。
 - 单包 / 单测试：`cd backend && go test ./internal/manager -run TestName -v`。全量 `go test ./...` 约 2 分钟、**不依赖外部 runtime**（夹具用 `testutil.StubRegistry()` 提供的 stub runtime 注册表，需要真 ACP 语义的用例用自建最小 responder，见 `pkg/runtime/acp_testserver_test.go` / `pkg/acl/elicitation_e2e_test.go`）。
 - 前端：`cd frontend && pnpm dev / typecheck / build`。

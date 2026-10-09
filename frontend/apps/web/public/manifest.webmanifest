@@ -1,7 +1,7 @@
 {
   "name": "ark-mate",
   "short_name": "ark-mate",
-  "description": "ACP 兼容 runtime 的统一控制面平台",
+  "description": "基于开源 Agent Runtime 的个人 Agent",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
