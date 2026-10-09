@@ -23,6 +23,58 @@ func GatewayToolName(serverID, toolName string) string {
 	return serverID + GatewayToolSep + toolName
 }
 
+// NamespacedTool 一条"要加来源前缀"的工具（`Name` 由 NamespaceTools 填，调用方不必自己拼）。
+type NamespacedTool struct {
+	ServerID string
+	Raw      string // server 自己报的原名
+	Name     string // 暴露名（含前缀）；由 NamespaceTools 统一填
+}
+
+// ToolNameConflict 一组互相冲突的暴露名（同一个名字被多台 server 占用）。
+type ToolNameConflict struct {
+	Name   string
+	Claims []NamespacedTool
+}
+
+// NamespaceTools 批量加前缀并做 **fail-closed** 冲突裁决，返回**保留下来的下标**（调用方自己
+// 保留原始载荷，例如工具描述/schema）与冲突明细。
+//
+// 为什么要冲突裁决：`SplitGatewayToolName` 走"最长 server id 前缀"，这只在**没有重名**时给出
+// 唯一解。`serverID` 与工具名都允许下划线，所以 `"a" + "__" + "b__c"` 与 `"a__b" + "__" + "c"`
+// 会撞成同一个暴露名，此时按名字反查来源是**歧义**的。
+//
+// 裁决规则是"**整组丢弃**"而不是"保留第一个"：保留第一个会让调用静默落到一台**不是调用方
+// 以为的** server 上（安全性问题），而"这个工具不见了"是看得见的降级——后者可排查、前者不可。
+// 冲突必须由调用方响亮留痕（日志 + 面板），否则用户只会看到"有些工具没了"。
+func NamespaceTools(items []NamespacedTool) (keptIdx []int, conflicts []ToolNameConflict) {
+	byName := make(map[string][]int, len(items))
+	order := make([]string, 0, len(items))
+	for i, it := range items {
+		if it.ServerID == "" || it.Raw == "" {
+			continue // 无名条目无法被调用，不入面（与探测面口径一致）
+		}
+		name := GatewayToolName(it.ServerID, it.Raw)
+		if _, seen := byName[name]; !seen {
+			order = append(order, name)
+		}
+		items[i].Name = name
+		byName[name] = append(byName[name], i)
+	}
+	for _, name := range order {
+		idx := byName[name]
+		if len(idx) == 1 {
+			keptIdx = append(keptIdx, idx[0])
+			continue
+		}
+		claims := make([]NamespacedTool, 0, len(idx))
+		for _, i := range idx {
+			claims = append(claims, items[i])
+		}
+		conflicts = append(conflicts, ToolNameConflict{Name: name, Claims: claims})
+	}
+	return keptIdx, conflicts
+}
+
 // SplitGatewayToolName 从网关工具名解出来源 server 与原始工具名。
 //
 // `serverIDs` 是**当下**该 scope 的 server 集合（不是定义全量）：解析结果必须落在真实存在的

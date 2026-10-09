@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -187,7 +188,9 @@ func (s *ForgeSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 	}
 	wg.Wait()
 
-	tools := make([]mcp.Tool, 0, 16)
+	// 先按 server 收齐，再**统一命名**：跨 server 的重名只有在这一层才看得见（见 NamespaceTools）。
+	payload := make([]mcp.Tool, 0, 16)
+	names := make([]capability.NamespacedTool, 0, 16)
 	for i, o := range out {
 		srv := servers[i]
 		if o.err != nil {
@@ -201,11 +204,30 @@ func (s *ForgeSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 			if t.Name == "" {
 				continue // 无名工具无法被调用，不进面（与探测面的口径一致）
 			}
-			t.Name = capability.GatewayToolName(srv.def.ID, t.Name)
-			tools = append(tools, t)
+			payload = append(payload, t)
+			names = append(names, capability.NamespacedTool{ServerID: srv.def.ID, Raw: t.Name})
 		}
 	}
-	s.log.Debug("mcp 网关: 工具面已取数", "servers", len(servers), "tools", len(tools))
+	kept, conflicts := capability.NamespaceTools(names)
+	for _, c := range conflicts {
+		// fail-closed（P-3）：同一个暴露名来自多台 server 时**整组丢弃**，不保留任何一个——
+		// 保留"第一个"会让调用静默落到一台不是调用方以为的 server 上。这里必须响亮：用户只会
+		// 看到"有些工具没了"，而原因（哪两台 server 撞了名）只有日志说得清。
+		owners := make([]string, 0, len(c.Claims))
+		for _, cl := range c.Claims {
+			owners = append(owners, cl.ServerID+"→"+cl.Raw)
+		}
+		s.log.Error("mcp 网关: 工具名跨 server 冲突，整组丢弃（fail-closed）",
+			"name", c.Name, "claims", strings.Join(owners, ", "))
+	}
+	tools := make([]mcp.Tool, 0, len(kept))
+	for _, i := range kept {
+		t := payload[i]
+		t.Name = names[i].Name
+		tools = append(tools, t)
+	}
+	s.log.Debug("mcp 网关: 工具面已取数",
+		"servers", len(servers), "tools", len(tools), "conflicts", len(conflicts))
 	return tools, nil
 }
 
@@ -223,6 +245,10 @@ func (s *ForgeSource) Call(ctx context.Context, name string, args json.RawMessag
 	defID, tool, ok := capability.SplitGatewayToolName(name, ids)
 	if !ok {
 		// 未知/已停用的工具：按 MCP 的"未知工具"分线（协议层 -32602），不是内部错误。
+		// 否决同样留痕：模型调一个已被收窄掉的工具时，日志里必须能看出"平台拒绝了它"，
+		// 而不是"远端没回话"——同样的 (tool, allow/deny) 证据面。
+		s.log.Info("mcp 网关: 工具调用被拒（不在当下工具面）",
+			"tool", name, "outcome", "deny", "candidates", strings.Join(ids, ","))
 		return mcp.CallResult{}, mcp.ErrToolNotFound
 	}
 	var target *gatewayServer
@@ -237,7 +263,20 @@ func (s *ForgeSource) Call(ctx context.Context, name string, args json.RawMessag
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.perServer)
 	defer cancel()
-	return s.pool.CallTool(cctx, target.client, tool, args)
+	// 每次调用**记一条**(server, tool, 结果, 耗时)：这是"底座何时重列工具面 / 收窄是否即时
+	// 生效"（设计 §10.6-⑤ 的 E4/E6）唯一的一手证据，不落库（v1 网关无状态）。
+	start := s.now()
+	res, err := s.pool.CallTool(cctx, target.client, tool, args)
+	if err != nil {
+		s.log.Info("mcp 网关: 工具调用失败",
+			"server", defID, "tool", tool, "outcome", "error",
+			"err", err, "latency_ms", s.now().Sub(start).Milliseconds())
+		return res, err
+	}
+	s.log.Info("mcp 网关: 工具调用完成",
+		"server", defID, "tool", tool, "outcome", "ok",
+		"latency_ms", s.now().Sub(start).Milliseconds())
+	return res, nil
 }
 
 // gatewayServer 一台远程 server 的"定义 + 注入形态"。

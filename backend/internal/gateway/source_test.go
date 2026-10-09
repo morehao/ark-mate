@@ -40,6 +40,7 @@ type fakeRemote struct {
 	calls    []string
 	tokens   []string
 	listFail bool // tools/list 回 JSON-RPC 错误（模拟"这台远端坏了"）
+	callFail bool // tools/call 回 JSON-RPC 错误
 }
 
 func newFakeRemote(t *testing.T, tools ...string) *fakeRemote {
@@ -104,7 +105,12 @@ func (f *fakeRemote) handle(w http.ResponseWriter, r *http.Request) {
 	case "tools/call":
 		f.mu.Lock()
 		f.calls = append(f.calls, msg.Params.Name)
+		fail := f.callFail
 		f.mu.Unlock()
+		if fail {
+			replyErr(-32603, "远端拒绝了这次调用")
+			return
+		}
 		reply(map[string]any{"content": []map[string]any{{"type": "text", "text": "called " + msg.Params.Name}}})
 	default:
 		replyErr(-32601, "method not found")
@@ -120,6 +126,13 @@ func (f *fakeRemote) snapshot() (calls, tokens []string) {
 func (f *fakeRemote) setListFail(v bool) {
 	f.mu.Lock()
 	f.listFail = v
+	f.mu.Unlock()
+}
+
+// setCallFail 让 tools/call 回 JSON-RPC 错误（M7-4 的调用留痕要能分辨 ok/error 两条分线）。
+func (f *fakeRemote) setCallFail(v bool) {
+	f.mu.Lock()
+	f.callFail = v
 	f.mu.Unlock()
 }
 

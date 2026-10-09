@@ -127,8 +127,23 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 
 	tools := make([]capability.Tool, 0, len(res.Tools))
 	for _, t := range res.Tools {
+		if t.Name == "" {
+			continue // 无名工具无法被调用，不进面（与网关口径一致）
+		}
+		name := t.Name
+		if capability.IsRemoteTransport(server.Transport) {
+			// **与网关同一命名策略**（同一个 `GatewayToolName` 实现）：远程工具在模型眼里叫
+			// `<serverID>__<tool>`（网关代连时统一加前缀）。面板若显示原名，用户就没法把面板上
+			// 看到的工具名拿去调——"探测面与真实面同源"就是 M7-④ 这条对齐要东西。
+			//
+			// 已知偏差（写下来免得被当成 bug）：`FORGE_MCP_GATEWAY=off`，或该 server 最终被注入给
+			// 一个**远程 ACP 端点**时，底座看到的是原名（那时没有网关条目）。目录是全平台一张表、
+			// 不含"按 runtime 的注入形态"，为这两种回退形态单开一列不值得；默认形态（本机 runtime +
+			// 网关 auto）下两者逐字一致。
+			name = capability.GatewayToolName(id, t.Name)
+		}
 		tools = append(tools, capability.Tool{
-			Name: t.Name, Description: t.Description,
+			Name: name, Description: t.Description,
 			Source: capability.ToolSourceMCP, McpServer: id, Schema: t.InputSchema,
 		})
 	}

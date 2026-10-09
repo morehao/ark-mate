@@ -365,7 +365,9 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatalf("tools 应 2 条（mcp+builtin），got %+v", all)
 	}
 	for _, tl := range all {
-		if tl.Name == "read_file" && tl.Description != "读文件" {
+		// M7-4 起，**远程**（http）server 的工具在目录里按网关命名策略落前缀（`<serverID>__<tool>`），
+		// 与模型真实能调的名字逐字一致；builtin 不受影响（`web_search` 仍是原名）。
+		if tl.Name == "h__read_file" && tl.Description != "读文件" {
 			t.Fatalf("旧条目未被替换: %+v", tl)
 		}
 	}
@@ -388,8 +390,8 @@ func TestProbeMcpServer(t *testing.T) {
 	for _, tl := range mustListTools(t, svc) {
 		names[tl.Name] = true
 	}
-	if names["read_file"] || !names["write_file"] || !names["web_search"] {
-		t.Fatalf("二次探测后目录不符: %+v", names)
+	if names["h__read_file"] || !names["h__write_file"] || !names["web_search"] {
+		t.Fatalf("二次探测后目录不符（远程工具应带 serverID 前缀）: %+v", names)
 	}
 
 	// 未知 id → 40401；sse 传输 → 40501（明确降级，不臆造）。
@@ -772,8 +774,8 @@ func TestAutoProbeMcpServers(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "tool_a,tool_b" {
-		t.Fatalf("Tool 目录应含两个自动探测结果: %v", names)
+	if strings.Join(names, ",") != "a__tool_a,b__tool_b" {
+		t.Fatalf("Tool 目录应含两个自动探测结果（远程工具带 serverID 前缀）: %v", names)
 	}
 	mcps, _ := svc.ListMcpServers()
 	byID := map[string]dtocapability.McpServerResp{}
