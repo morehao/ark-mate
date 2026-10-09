@@ -13,6 +13,9 @@ type AgentResp struct {
 	// Runtimes 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探；0/1 个即确定）。
 	// 供前端判定模型作用域（opencode=进程级锁定 / dsh=会话级可改）；空 = 未知。
 	Runtimes []string `json:"runtimes,omitempty"`
+	// Mcps MCP server id 白名单（P2 §5.2）。缺省 = 未声明 → 全量按 runtime transport 过滤；
+	// `[]` = 本 agent 禁用 MCP 注入（两者在 wire 上必须可区分，故用指针 + omitempty）。
+	Mcps *[]string `json:"mcps,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 	// ConversationCount 绑定该 agent 的会话数（删除影响面：历史保留可读，删除后无法继续提问）。

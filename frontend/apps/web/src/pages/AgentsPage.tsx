@@ -281,6 +281,42 @@ export function AgentsPage() {
             {a.provider && <Tag style={{ marginInlineEnd: 0, fontSize: 11 }}>{a.provider}</Tag>}
             <Tooltip
               title={
+                a.mcps === undefined ? (
+                  <div style={{ fontSize: 12 }}>
+                    未声明白名单：该 agent 的会话按 runtime 支持的传输**全量注入**已注册 MCP。
+                    <div style={{ color: tokens.textPlaceholder, fontFamily: tokens.fontMono }}>
+                      {'PATCH /agents/:id {"mcps": [...]}'}
+                    </div>
+                  </div>
+                ) : a.mcps.length === 0 ? (
+                  <div style={{ fontSize: 12 }}>
+                    **禁用 MCP 注入**（空白名单，不是"没设置"）：该 agent 的会话一个 MCP server 都不给。
+                    <div style={{ color: tokens.textPlaceholder, fontFamily: tokens.fontMono }}>
+                      {'PATCH /agents/:id {"mcps": null}'}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12 }}>
+                    <div>MCP 白名单（只投这几个）：</div>
+                    {a.mcps.map((id) => (
+                      <div key={id} style={{ fontFamily: tokens.fontMono }}>
+                        {id}
+                      </div>
+                    ))}
+                    <div style={{ color: tokens.textPlaceholder }}>改动在**下一轮**生效（空闲会话重建后按新白名单注入）</div>
+                  </div>
+                )
+              }
+            >
+              <Tag
+                color={a.mcps === undefined ? 'default' : a.mcps.length === 0 ? 'red' : 'green'}
+                style={{ marginInlineEnd: 0, fontSize: 11 }}
+              >
+                {a.mcps === undefined ? 'MCP 全量' : a.mcps.length === 0 ? 'MCP 禁用' : `MCP ${a.mcps.length}`}
+              </Tag>
+            </Tooltip>
+            <Tooltip
+              title={
                 a.permission_policy ? (
                   <div style={{ fontSize: 12 }}>
                     <div>default：{a.permission_policy.default || 'ask'}</div>

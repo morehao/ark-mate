@@ -250,7 +250,7 @@ func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) 
 		req.Name = req.ID
 	}
 	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider,
-		PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
+		Mcps: req.Mcps, PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
 	if err := s.applyDefinition(d, false); err != nil {
 		return nil, err
 	}
@@ -282,6 +282,9 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 	// 目标定义（纯计算；cur 只读，失败路径不留痕）。
 	next := agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider,
 		Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy, PermissionPolicy: cur.PermissionPolicy}
+	// 通知判据要在**改内存之前**取值：`next` 由 `cur` 派生，下面会把新值写回同一个对象，
+	// 改完再比就是拿新值跟新值比（通知永远不发）。
+	beforeMcps := cur.Mcps
 	if patch.Runtimes != nil && len(*patch.Runtimes) > 0 {
 		if seedAgent(id) {
 			s.mu.Unlock()
@@ -310,6 +313,16 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 		}
 		next.PermissionPolicy = pol
 	}
+	// MCP 白名单三态（缺键不改 / null 清空 / [] 禁用全部 / 数组白名单）：解析失败是**请求形态**
+	// 问题（40000），此刻内存与载体都还没动。
+	mcps, mcpsPresent, err := decodeAgentMcpsPatch(patch.Mcps)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if mcpsPresent {
+		next.Mcps = mcps
+	}
 	s.mu.Unlock()
 
 	if err := s.updateAgentDefinition(ctx, next); err != nil {
@@ -321,11 +334,17 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 		after.Name = next.Name
 		after.Runtimes = next.Runtimes
 		after.Provider = next.Provider
+		after.Mcps = next.Mcps
 		if next.PermissionPolicy != nil {
 			after.PermissionPolicy = next.PermissionPolicy
 		}
 	}
 	s.mu.Unlock()
+	// M6-8 / P-13：白名单真的变了才发通知——空闲会话的句柄作废，下一轮按当前定义重建；
+	// 有在途轮次或未决权限/提问的顺延。载体已经提交成功，通知失败不改写响应（只落日志）。
+	if agentMcpsChanged(beforeMcps, next.Mcps) {
+		s.notifyAgentCapabilityChange(id, capabilityFaceFieldMcps)
+	}
 	return s.agentRespLocked(id), nil
 }
 
@@ -436,6 +455,6 @@ func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	}
 	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-		PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
+		Mcps: a.Mcps, PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
 		ConversationCount: s.conversationCountLocked(a.ID)}
 }
