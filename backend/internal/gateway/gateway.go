@@ -32,10 +32,13 @@ import (
 // Scope 一条网关进程服务的范围：**只由稳定的标识构成**（P-2）。
 //
 // 它同时也是"注入条目的全部信息"——所以条目里绝不能出现 server 列表、数量、启用集：
-// 那些都会随定义变化，从而改变注入项、触发代际迁移。
+// 那些都会随定义变化，从而改变注入项、触发代际迁移。（唯一多出来的一项是会话**钉住的**
+// 白名单 `McpsPinned`，它是用户的选定而不是定义集，见 `mcp.GatewayScope` 的注释。）
 type Scope struct {
 	AgentID   string
 	RuntimeID string
+	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 回落 agent 声明）。
+	McpsPinned *[]string
 }
 
 // Source 网关的数据面（M7-2 的实现：按 scope 取数 + 密钥就地解析 + 远端代理与连接池）。

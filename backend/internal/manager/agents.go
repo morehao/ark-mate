@@ -111,6 +111,19 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 //  3. `dir` 仍然要设：`providers.json` 与 vault 锚点（`<AgentDir>` 的父目录）都还在文件侧
 //     （计划 §7 P-9，目录不能被砍掉）。
 func (s *Service) LoadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
+	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelInfo)
+}
+
+// ReloadAgentDefinitionsFromStore 重新装载 agent 定义（**网关每次取数前**调用；M7-2）。
+//
+// 与 `LoadAgentDefinitionsFromStore` 是同一份实现，只有汇总行的日志档位不同（理由同
+// `ReloadCapabilityDefinitions`：网关是个长命进程，每次 tools/list/call 都会重装）。
+func (s *Service) ReloadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
+	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelDebug)
+}
+
+// loadAgentDefinitionsFromStore 装载内核（公开入口与网关共用；level 只作用于汇总行）。
+func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string, level slog.Level) int {
 	s.mu.Lock()
 	s.agentDir = dir
 	for id := range s.agents {
@@ -126,30 +139,30 @@ func (s *Service) LoadAgentDefinitionsFromStore(ctx context.Context, dir string)
 	}
 	rows, err := s.st.ListAgentDefinitions(ctx)
 	if err != nil {
-		slog.Warn("agents: 从持久层读定义失败", "err", err)
+		s.defWarnOnce("agents:store", "agents: 从持久层读定义失败", "err", err)
 		return 0
 	}
 	loaded := 0
 	for _, row := range rows {
 		var d agentDefinitionFile
 		if err := json.Unmarshal([]byte(row.Body), &d); err != nil {
-			slog.Warn("agents: 定义行 JSON 非法，已跳过", "agent", row.ID, "err", err)
+			s.defWarnOnce("agents:json:"+row.ID, "agents: 定义行 JSON 非法，已跳过", "agent", row.ID, "err", err)
 			continue
 		}
 		if d.ID != "" && d.ID != row.ID {
 			// 行键是权威（它才是主键）；正文里的 id 只可能是历史遗留，静默采用会让
 			// "删了 a 却仍在用 b"这种漂移无法察觉。
-			slog.Warn("agents: 定义行 id 与正文 id 不一致，以行键为准", "row", row.ID, "body", d.ID)
+			s.defWarnOnce("agents:id:"+row.ID, "agents: 定义行 id 与正文 id 不一致，以行键为准", "row", row.ID, "body", d.ID)
 		}
 		d.ID = row.ID
 		if err := s.applyDefinition(d, true); err != nil {
-			slog.Warn("agents: 定义行未采纳", "agent", row.ID, "err", err)
+			s.defWarnOnce("agents:rej:"+row.ID, "agents: 定义行未采纳", "agent", row.ID, "err", err)
 			continue
 		}
 		loaded++
 	}
 	if loaded > 0 {
-		slog.Info("agents: 定义已从持久层装载", "count", loaded)
+		slog.Log(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
 	}
 	// provider 档案与「当前 Agent」仍在文件/独立键上：前者是目录级配置（providers.json），
 	// 后者落 meta（计划 §7 P-8）。

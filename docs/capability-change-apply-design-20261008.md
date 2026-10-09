@@ -426,6 +426,10 @@ type capabilityGeneration struct {
 
 > **M6-9 进度（2026-10-09）**：装配期时序收口。三条时序（开库 → 三域存量导入 → 装载 → 起调度）在 `app.go` 里本来就成立，"装载失败只告警不阻断"也成立（三个 `LoadXDefinitions*` 只返回计数，坏定义逐条 WARN 跳过；`loadDefinitions` 的 error 返回位今天恒为 nil）。缺的是**守卫**——三者被违反时都不报错，只表现成"东西看不见"或"启动恢复没发生"（过期 `once` 的置 inactive 只在启动时做一次，没有任何后续动作会补做）。新增 `internal/app/definitions_order_test.go` 的 `TestInitOrderingImportLoadSchedule` 走真 `Init`（sqlite + 三域夹具 + 起调度），用**行为**钉住整条链：能力面/agent 面本轮就可见 + 过期 `once` 已被置 `inactive` 且留 `skipped` 痕迹。
 
+> **M7-1 进度（网关骨架，2026-10-09）**：`forge mcp bridge --agent <id> --runtime <id>` 可跑——`pkg/mcp` 补出**服务端方向**（`initialize`/`initialized`/`tools/list`+翻页/`tools/call`/`ping`；坏帧 `-32700`、未知方法 `-32601`、未知工具 `-32602`、工具**执行**失败走 `isError:true` 的**结果**而不是协议错误；stdin EOF → 正常返回），`internal/gateway` 提供 `Scope`/`Source`/`Run`，CLI 只把协议流给 stdout、一切诊断给 stderr。**服务端写在 `pkg/mcp` 是刻意的**：帧类型是自研的，两侧合一处才能自研互测（本仓 `go.mod` 无 MCP SDK）；`TestServerInteropWithOwnClient` 用真子进程让本包客户端连本包服务端跑通 list/call。骨架期 `Source == nil`（工具面恒空、调用一律未知工具）**刻意响亮**：启动 WARN + 取数失败 ERROR，且在被注入之前（M7-3）对真实会话不可达。
+
+> **M7-2 进度（取数与代理，2026-10-09）**：§10.6-②③ 的两条承诺落地。**② 密钥不出平台**：远程 MCP 的凭据在网关进程内解析（复用 `manager.ResolveMcpSecrets` 同一实现），底座可见面里只有一条 stdio 命令。**③ 调用期事实**：每次 `tools/list`/`tools/call` **重读**定义与 `enabled`（新增 `ReloadCapabilityDefinitions`/`ReloadAgentDefinitionsFromStore`，与启动装载同一份实现、只降日志档位并把逐行问题改成"同一条只 WARN 一次"），于是"停用一台 server"在下一次取数即消失、**已有会话**的下一次调用直接失败，密钥轮换下一次调用即用新值——都不需要换代际、不需要重启。选址语义抽到 `pkg/capability.SelectMcpServers`（注入面与网关面**唯一**实现，`RemoteMcpTransports()` 划出"网关代连"那一半）；连接池 `pkg/mcp/pool.go` 按 server 池化已握手会话（同会话串行、服务端错误响应不作废会话、**定义/密钥快照一变立刻作废旧连接**、上限 + 空闲回收）。**两处对 P-2 的补强（以代码为准）**：① 条目除 (agent, runtime) 外还带**会话钉住的 `mcps` 白名单**（JSON 三态）——它是用户约束，不带会让钉过 `["a"]` 的会话按 agent 默认面拿到更多远程 server（授权放大）；它不因定义集变化而变化，故不破坏"条目恒定"；② 网关**不按 runtime 的 transport 声明过滤**（那正是网关的收益：底座只看见一条 stdio 条目），`Spec.McpTransports` 从此只约束 stdio 直连那条路径（M7-3 逐个复核它的消费者）。
+
 **计划文档索引**：**M1–M5 合为一篇** `.dsh/docs/plans/2026-10-08-capability-generation-plan.md`（12–16.5 人日；它们是同一套机制的五个阶段，共用同一批类型与同一条调用链，故不再逐阶段拆篇）；M6 → `2026-10-08-capability-store-migration-plan.md`；M7 → `2026-10-08-mcp-platform-gateway-plan.md`。
 
 依赖关系与**建议顺序**：

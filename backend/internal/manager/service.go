@@ -155,6 +155,11 @@ type Service struct {
 	vaultTried bool
 	vaultErr   error
 
+	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
+	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
+	// 而洪水之后真问题也没人看。见 defWarnOnce。
+	defWarned map[string]bool
+
 	// B5 原生权限映射开关（FORGE_NATIVE_PERMISSION=off 关闭；默认开启）。
 	nativePermMu      sync.Mutex
 	nativePermEnabled bool

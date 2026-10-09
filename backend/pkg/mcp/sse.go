@@ -247,7 +247,7 @@ func (t *sseTransport) call(ctx context.Context, method string, params any, out 
 				continue // 通知或其它请求的响应：串行流程下丢弃
 			}
 			if m.Error != nil {
-				return fmt.Errorf("JSON-RPC 错误：%s", m.Error.String())
+				return newRPCResponseError(m.Error)
 			}
 			if out == nil {
 				return nil

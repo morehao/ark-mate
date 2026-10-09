@@ -37,6 +37,14 @@ func buildForgeCLI(t *testing.T) string {
 func TestMcpBridgeCLI(t *testing.T) {
 	bin := buildForgeCLI(t)
 
+	// **隔离**：网关按与核心进程同一个解析器定位数据面，所以在用户默认环境里跑它就会去读
+	// （并 Migrate！）用户自己的 `~/.forge/forge.db`。测试必须给私有 FORGE_HOME/FORGE_DB
+	// ——否则这条用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
+	home := t.TempDir()
+	isolated := append(os.Environ(),
+		"FORGE_HOME="+home, "FORGE_DB="+filepath.Join(home, "forge.db"),
+		"FORGE_CONFIG_DIR="+filepath.Join(home, "config"))
+
 	frames := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"cli","version":"0"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -44,6 +52,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ghost__tool","arguments":{}}}`,
 	}
 	cmd := exec.Command(bin, "mcp", "bridge", "--agent", "a1", "--runtime", "r1")
+	cmd.Env = isolated
 	cmd.Stdin = strings.NewReader(strings.Join(frames, "\n") + "\n")
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -85,8 +94,8 @@ func TestMcpBridgeCLI(t *testing.T) {
 			t.Fatalf("缺少 id=%v 的响应：%s", want, stdout.String())
 		}
 	}
-	// 诊断在 stderr：网关启动、scope、以及"骨架形态"的响亮提示都该在这里。
-	for _, want := range []string{"mcp bridge", "agent=a1", "runtime=r1", "数据面未接线"} {
+	// 诊断在 stderr：网关启动、scope、数据面取数失败的原因都该在这里（空面必须响亮）。
+	for _, want := range []string{"mcp bridge", "agent=a1", "runtime=r1", "取工具面失败"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr 应含 %q：\n%s", want, stderr.String())
 		}
@@ -94,6 +103,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 
 	// 参数漂移必须当场失败，且**不得往 stdout 写任何东西**（那里是协议流）。
 	bad := exec.Command(bin, "mcp", "bridge", "--agent", "a1", "--runtime", "r1", "--servers", "a,b")
+	bad.Env = isolated
 	bad.Stdin = strings.NewReader("")
 	var badOut, badErr strings.Builder
 	bad.Stdout = &badOut
@@ -112,6 +122,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 
 	// 用法文本要能被 `forge mcp bridge -h` 找到（承接口径，不进 README 路由表——它不是 HTTP 端点）。
 	help := exec.Command(bin, "mcp", "bridge", "-h")
+	help.Env = isolated
 	var helpOut, helpErr strings.Builder
 	help.Stdout = &helpOut
 	help.Stderr = &helpErr
@@ -124,6 +135,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 
 	// 顶层 usage 要有 mcp 行（子命令可发现性由 CLI 文本承担，没有 HTTP 路由可查）。
 	top := exec.Command(bin, "help")
+	top.Env = isolated
 	var topOut strings.Builder
 	top.Stdout = &topOut
 	if err := top.Run(); err != nil {

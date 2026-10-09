@@ -165,7 +165,7 @@ func (t *stdioTransport) await(id int, out any) error {
 			continue // 通知或其它请求的响应：探测流程串行，丢弃
 		}
 		if msg.Error != nil {
-			return fmt.Errorf("JSON-RPC 错误：%s", msg.Error.String())
+			return newRPCResponseError(msg.Error)
 		}
 		if out == nil {
 			return nil

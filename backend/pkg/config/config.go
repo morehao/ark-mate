@@ -194,6 +194,22 @@ const (
 	StoreModeMemory = "memory"
 )
 
+// ResolvedStoreMode 把"未声明"（含显式 auto，`LoadResolved` 已归一成空串）解析成实际模式：
+// DB 文件存在且非空 → sqlite，否则 memory。
+//
+// 这一条原先只写在 `internal/app` 的 Init 里；M7 的网关进程（`forge mcp bridge`）也要按**同一
+// 判据**决定去哪读定义——两处各写一遍的后果是"网关读到了另一份数据面"（比如 core 在 sqlite 模式
+// 而网关判成 memory，工具面就恒空），表现为"工具莫名不见了"。故判据收到 config 上，两边共用。
+func (c Config) ResolvedStoreMode() string {
+	if c.StoreMode != "" {
+		return c.StoreMode
+	}
+	if fi, err := os.Stat(c.DBPath); err == nil && fi.Size() > 0 {
+		return StoreModeSQLite
+	}
+	return StoreModeMemory
+}
+
 // ValidStoreModes 合法取值（错误提示用）。
 var ValidStoreModes = []string{StoreModeAuto, StoreModeSQLite, StoreModeMemory}
 

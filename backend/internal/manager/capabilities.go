@@ -16,6 +16,25 @@ import (
 	"github.com/morehao/ark-forge/pkg/code"
 )
 
+// defWarnOnce 同一条定义问题在一个进程内只 WARN 一次（key 由调用方给，须含 id 与 revision）。
+//
+// 为什么要有它：`reloadCapabilityDefinitions` 的调用频率不再只是"启动一次"——导入会重装，
+// 平台侧网关**每次取数**都会重装（M7-2）。一条坏定义每次都报的后果不是"更显眼"，而是日志
+// 被刷成噪声、真问题被埋掉。key 里带 revision 是刻意的：**同一条定义改坏了两次要报两次**。
+func (s *Service) defWarnOnce(key, msg string, args ...any) {
+	s.mu.Lock()
+	if s.defWarned == nil {
+		s.defWarned = make(map[string]bool)
+	}
+	seen := s.defWarned[key]
+	s.defWarned[key] = true
+	s.mu.Unlock()
+	if seen {
+		return
+	}
+	slog.Warn(msg, args...)
+}
+
 // LoadCapabilityDefinitions 加载能力数据面目录并合并（dir 为空 = 仅代码注入/空表）。
 // 返回三类合计加载数（坏文件跳过，对齐 LoadAgentDefinitions 容错）。
 //
@@ -51,8 +70,23 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 //
 // `importDir` 只用于登记"导入/导出目录"（能力定义仍在文件里的那份存量）；空串 = 不登记。
 func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, importDir string) int {
+	n, _ := s.reloadCapabilityDefinitions(ctx, importDir, slog.LevelInfo)
+	return n
+}
+
+// ReloadCapabilityDefinitions 重新装载定义（**网关每次取数前**调用；M7-2）。
+//
+// 与 `LoadCapabilityDefinitionsFromStore` 是同一份实现，只有日志档位不同：网关是个长命进程，
+// 底座的**每次** tools/list / tools/call 都会触发一次装载，用 Info 档会把日志刷成噪声——而噪声
+// 的代价是"真出问题时没人看日志"。逐行的坏定义问题仍走 WARN（但**同一条只报一次**，见 defWarnOnce）。
+func (s *Service) ReloadCapabilityDefinitions(ctx context.Context) (int, error) {
+	return s.reloadCapabilityDefinitions(ctx, "", slog.LevelDebug)
+}
+
+// reloadCapabilityDefinitions 装载内核（公开入口与网关共用；level 只作用于汇总行）。
+func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir string, level slog.Level) (int, error) {
 	if s.caps == nil || s.st == nil {
-		return 0
+		return 0, fmt.Errorf("能力注册表或持久层未初始化")
 	}
 	if importDir != "" {
 		s.mu.Lock()
@@ -64,28 +98,28 @@ func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, import
 
 	skills, err := s.st.ListSkillDefinitions(ctx)
 	if err != nil {
-		slog.Warn("capability: 从持久层读 skill 定义失败（能力面将为空）", "err", err)
-		return total
+		s.defWarnOnce("store:skills", "capability: 从持久层读 skill 定义失败（能力面将为空）", "err", err)
+		return total, err
 	}
 	for i := range skills {
 		row := skills[i]
 		var sk capability.Skill
 		if err := json.Unmarshal([]byte(row.Body), &sk); err != nil {
-			slog.Warn("capability: skill 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			s.defWarnOnce("skill:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
 		// id 以**行主键**为准：body 里的 id 与行主键不一致时，行主键是事实（它是 CAS 与审计的键）。
 		// 这与文件路径的"文件名兜底"同一思路——文件名/主键是可寻址的那一个。
 		if sk.ID != row.ID {
 			if sk.ID != "" {
-				slog.Warn("capability: skill 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", sk.ID)
+				s.defWarnOnce("skill-id:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", sk.ID)
 			}
 			sk.ID = row.ID
 		}
 		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
 		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
 		if err := s.caps.RegisterSkill(&sk); err != nil {
-			slog.Warn("capability: skill 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			s.defWarnOnce("skill-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: skill 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
 		total++
@@ -93,31 +127,31 @@ func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, import
 
 	mcps, err := s.st.ListMcpServerDefinitions(ctx)
 	if err != nil {
-		slog.Warn("capability: 从持久层读 mcp server 定义失败", "err", err)
-		return total
+		s.defWarnOnce("store:mcps", "capability: 从持久层读 mcp server 定义失败", "err", err)
+		return total, err
 	}
 	for i := range mcps {
 		row := mcps[i]
 		var m capability.McpServer
 		if err := json.Unmarshal([]byte(row.Body), &m); err != nil {
-			slog.Warn("capability: mcp server 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
+			s.defWarnOnce("mcp:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp server 定义解码失败，跳过", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
 		if m.ID != row.ID {
 			if m.ID != "" {
-				slog.Warn("capability: mcp 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", m.ID)
+				s.defWarnOnce("mcp-id:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp 定义 body 里的 id 与行主键不一致，以行主键为准", "row", row.ID, "body", m.ID)
 			}
 			m.ID = row.ID
 		}
 		if err := s.caps.RegisterMcpServer(&m); err != nil {
-			slog.Warn("capability: mcp 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
+			s.defWarnOnce("mcp-rej:"+row.ID+"@"+fmt.Sprint(row.Revision), "capability: mcp 定义未采纳", "id", row.ID, "revision", row.Revision, "err", err)
 			continue
 		}
 		total++
 	}
 
-	slog.Info("capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
-	return total
+	slog.Log(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	return total, nil
 }
 
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
@@ -426,38 +460,16 @@ func (s *Service) mcpSelectionFor(agent *AgentRec, runtimeID string, sel *Capabi
 	if !ok {
 		return nil
 	}
-	want := make(map[string]bool, len(supported))
-	for _, t := range supported {
-		want[t] = true
-	}
+	// 白名单优先级（会话选定 > agent 声明）留在这里——那是**优先级**，不是**选择**；
+	// 三个判据（启用 ∩ 传输 ∩ 白名单）只有一份实现，在 `pkg/capability.SelectMcpServers`
+	// （M7-2：网关面也消费它，两处各写一遍会静默不同面）。
 	allowIDs := (*[]string)(nil)
 	if sel != nil && sel.Mcps != nil {
 		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
 	} else if agent != nil {
 		allowIDs = agent.Mcps
 	}
-	var allow map[string]bool
-	if allowIDs != nil {
-		allow = make(map[string]bool, len(*allowIDs))
-		for _, id := range *allowIDs {
-			allow[id] = true
-		}
-	}
-	servers := s.caps.ListMcpServers()
-	out := make([]capability.McpServer, 0, len(servers))
-	for _, m := range servers {
-		if !m.IsEnabled() {
-			continue // 禁用 = 不注入（overlay：定义/密钥引用/探测结果都保留，只停止注入）
-		}
-		if !want[m.Transport] {
-			continue
-		}
-		if allow != nil && !allow[m.ID] {
-			continue // agent 白名单未启用该 server（含空白名单 = 全部跳过）
-		}
-		out = append(out, m)
-	}
-	return out
+	return capability.SelectMcpServers(s.caps.ListMcpServers(), supported, allowIDs)
 }
 
 // McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：

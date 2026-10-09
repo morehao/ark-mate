@@ -174,13 +174,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	// 持久层装配（P1）：FORGE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
-	mode := cfg.StoreMode
-	if mode == "" {
-		mode = config.StoreModeMemory
-		if fi, err := os.Stat(cfg.DBPath); err == nil && fi.Size() > 0 {
-			mode = config.StoreModeSQLite
-		}
-	}
+	mode := cfg.ResolvedStoreMode()
 	switch mode {
 	case config.StoreModeSQLite:
 		// 配置目录化后 DB 路径可由文件指定，父目录未必存在：先补齐（此前只依赖用户手建目录）。

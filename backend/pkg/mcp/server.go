@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -409,42 +410,95 @@ func (s *server) write(msg rpcMessage) {
 // （instructions/日志）也要用；两份字面量迟早漂移。
 const GatewayServerName = "forge-gateway"
 
+// GatewayScope 网关条目的 scope：注入端拼参数、网关端解参数，**两侧共用这一个类型**。
+type GatewayScope struct {
+	AgentID   string
+	RuntimeID string
+	// McpsPinned 会话钉住的 MCP 白名单（`conversations.capability_json` 的 `mcps`）：
+	//
+	//	nil    = 该会话**没有**钉（网关回落 agent 声明；缺省路径就是这一支）
+	//	非 nil = 以它为准（空切片 = 本会话一个远程 MCP 都不要）
+	//
+	// 为什么要带上它：会话钉住的白名单是一条**用户约束**（可能比 agent 声明更窄，也可能更宽）。
+	// 不带它的后果不是"少几个工具"，而是**按 agent 默认面把授权放大**——钉过 `["a"]` 的会话会
+	// 看到全部远程 server。它与 P-2 的反例（`--servers a,b,c`）不是一回事：那条禁的是把
+	// **定义集**写进条目（增删一个 server 就换条目/换代际）；这里带的是**用户的选定**，
+	// 它不因定义集变化而变化，钉住同一份选定的多个会话得到逐字相同的条目。
+	McpsPinned *[]string
+}
+
 // GatewayBridgeArgs 拼网关子命令的参数（不含可执行文件名）。
 //
-// **只带 scope（agent + runtime），不带 server 列表/数量/启用集**——这是本计划最关键的一条：
-// 注入条目一旦只由稳定 scope 决定，"加一个远程 MCP server"就不改变条目、也就不换代际
-// （计划的 P-2）。反例 `--servers a,b,c` 会让每次增删都换一次代际，直接毁掉网关的头号收益。
-func GatewayBridgeArgs(agentID, runtimeID string) []string {
-	return []string{"mcp", "bridge", "--agent", agentID, "--runtime", runtimeID}
+// **不含定义集**——这是本计划最关键的一条（P-2）：条目一旦只由 scope（agent + runtime [+ 会话
+// 钉住的白名单]）决定，"加一个远程 MCP server"就不改变条目、也就不换代际。反例 `--servers a,b,c`
+// 会让每次增删都换一次代际，直接毁掉网关的头号收益。
+func GatewayBridgeArgs(sc GatewayScope) []string {
+	args := []string{"mcp", "bridge", "--agent", sc.AgentID, "--runtime", sc.RuntimeID}
+	if sc.McpsPinned != nil {
+		// JSON 数组：能**无歧义**表达"显式空"（`[]` = 一个都不要）与任意 id 词法
+		// （server id 允许空格等字符，逗号分隔会歧义）。这里不走 shell，故无需转义。
+		b, err := json.Marshal(*sc.McpsPinned)
+		if err != nil {
+			// []string 的 Marshal 不会失败；真失败了也不能拼出半截参数——回退成显式空集
+			// （更窄的一支，宁可少给工具也不放大授权）。
+			b = []byte("[]")
+		}
+		args = append(args, "--mcps", string(b))
+	}
+	return args
 }
 
 // ParseScopeArgs 解析 GatewayBridgeArgs 拼出的那串参数（两侧同形，见 GatewayBridgeArgs）。
 //
 // 未知参数**报错而不是忽略**：参数漂移（比如将来加了 `--servers` 而网关端还没实现）必须
 // 当场失败——静默忽略会让网关"起来了但 scope 不对"，症状是"工具面不对"，最难查的一类。
-func ParseScopeArgs(args []string) (agentID, runtimeID string, err error) {
+func ParseScopeArgs(args []string) (GatewayScope, error) {
+	var sc GatewayScope
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--agent", "--runtime":
+		case "--agent", "--runtime", "--mcps":
 			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("%s 缺少取值", args[i])
+				return GatewayScope{}, fmt.Errorf("%s 缺少取值", args[i])
 			}
 			v := args[i+1]
 			i++
-			if args[i-1] == "--agent" {
-				agentID = v
-			} else {
-				runtimeID = v
+			switch args[i-1] {
+			case "--agent":
+				sc.AgentID = v
+			case "--runtime":
+				sc.RuntimeID = v
+			case "--mcps":
+				var pinned []string
+				if err := json.Unmarshal([]byte(v), &pinned); err != nil {
+					return GatewayScope{}, fmt.Errorf("--mcps 须为 JSON 数组（未知取值 %q）：%w", v, err)
+				}
+				if pinned == nil {
+					pinned = []string{} // `[]` 必须解成"非 nil 的空集"，否则三态退化
+				}
+				sc.McpsPinned = &pinned
 			}
 		default:
-			return "", "", fmt.Errorf("未知参数 %q", args[i])
+			return GatewayScope{}, fmt.Errorf("未知参数 %q", args[i])
 		}
 	}
-	if agentID == "" {
-		return "", "", errors.New("--agent 必填（网关条目的 scope：注入时由平台拼出）")
+	if sc.AgentID == "" {
+		return GatewayScope{}, errors.New("--agent 必填（网关条目的 scope：注入时由平台拼出）")
 	}
-	if runtimeID == "" {
-		return "", "", errors.New("--runtime 必填（网关条目的 scope：注入时由平台拼出）")
+	if sc.RuntimeID == "" {
+		return GatewayScope{}, errors.New("--runtime 必填（网关条目的 scope：注入时由平台拼出）")
 	}
-	return agentID, runtimeID, nil
+	for _, id := range derefPinned(sc.McpsPinned) {
+		if strings.TrimSpace(id) == "" {
+			return GatewayScope{}, errors.New("--mcps 里不得有空 id（显式空集请写 []）")
+		}
+	}
+	return sc, nil
+}
+
+// derefPinned 空安全取值（nil → nil）。
+func derefPinned(p *[]string) []string {
+	if p == nil {
+		return nil
+	}
+	return *p
 }

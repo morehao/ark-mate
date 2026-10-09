@@ -29,9 +29,10 @@ func mcpCmd(args []string) {
 }
 
 const mcpUsage = `mcp 用法：
-  forge mcp bridge --agent <agentID> --runtime <runtimeID>
+  forge mcp bridge --agent <agentID> --runtime <runtimeID> [--mcps '<JSON 数组>']
       平台侧 MCP stdio 网关：以 stdio 上的 MCP 服务端形态暴露该 scope 下的远程 MCP 工具
-      （底座经 ACP 的 mcpServers 把这条命令拉起来；参数只带 scope，不带 server 列表）
+      （底座经 ACP 的 mcpServers 把这条命令拉起来；参数只带 scope 与**会话钉住的白名单**，
+      不带 server 定义集——后者会让增删一个 server 就换代际）
       协议流走 stdout，**一切诊断走 stderr**（stdout 混进一行日志就会毁掉整条会话）
 `
 
@@ -43,14 +44,18 @@ const mcpUsage = `mcp 用法：
 //  2. **参数解析与注入端同源**（P-2）：用 `mcp.ParseScopeArgs` 解 `mcp.GatewayBridgeArgs`
 //     拼出来的那串。未知参数**当场失败**——静默忽略会表现成"网关起来了但 scope 不对"，
 //     而 scope 不对的症状是"工具面不对"，最难查的一类。
-//  3. **不读配置文件**：网关是底座拉起的子进程，它的取数范围只由 scope 决定（M7-2 自己开
-//     store）；这里不去解析 FORGE_* —— 那些是**核心进程**的配置，混进来就有了第二条事实源。
+//  3. **配置只用来定位数据面**（M7-2）：网关要自己打开 core 那份库（`FORGE_DB` /
+//     `~/.forge/forge.db`），所以它按**与核心进程同一个解析器**（`mustConfig` → config
+//     优先级链）取路径。这不是"第二条事实源"：取值来源与核心逐条相同（env / 配置文件 /
+//     默认 home），且 `serve` 没有可让两者分叉的 CLI flag（既没有 `--db` 也没有 `--config`，
+//     见 `serve` 的 flag 集）。将来若给 `serve` 加这类 flag，必须同步把取值交给网关
+//     （否则网关会去读默认库，症状是"工具面恒空"）。
 func mcpBridge(args []string) {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprint(os.Stderr, mcpUsage)
 		return
 	}
-	agentID, runtimeID, err := mcp.ParseScopeArgs(args)
+	scope, err := mcp.ParseScopeArgs(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp bridge: %v\n\n%s", err, mcpUsage)
 		os.Exit(2)
@@ -63,11 +68,34 @@ func mcpBridge(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// 数据面（M7-2）：自己读平台的库与 vault。取数失败**不**让网关起不来——起不来的症状是
+	// 底座那边"这个 MCP server 没起来"（连工具面都看不到），而"起来了但这一轮没有工具"是
+	// 看得见的降级，且日志里有原因。
+	cfg, _ := mustConfig()
+	src, sErr := gateway.NewSource(ctx, gateway.SourceOptions{
+		Cfg:        cfg,
+		AgentID:    scope.AgentID,
+		McpsPinned: scope.McpsPinned,
+		Logger:     logger,
+	})
+	if sErr != nil {
+		logger.Error("mcp bridge: 数据面装配失败（本轮工具面为空）", "err", sErr)
+	} else {
+		defer func() {
+			if cErr := src.Close(); cErr != nil {
+				logger.Warn("mcp bridge: 数据面关闭失败", "err", cErr)
+			}
+		}()
+	}
+
+	var face gateway.Source
+	if src != nil {
+		face = src
+	}
 	err = gateway.Run(ctx, os.Stdin, os.Stdout, gateway.Options{
-		Scope:  gateway.Scope{AgentID: agentID, RuntimeID: runtimeID},
+		Scope:  gateway.Scope{AgentID: scope.AgentID, RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
+		Source: face,
 		Logger: logger,
-		// Source 在 M7-2 接线：网关在被注入之前（M7-3）对真实会话不可达，所以骨架形态
-		// （空工具面）不会出现在用户面前；接线失败会在 tools/list 上响亮地 WARN。
 	})
 	switch {
 	case err == nil:

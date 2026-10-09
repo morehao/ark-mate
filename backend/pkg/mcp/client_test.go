@@ -33,6 +33,15 @@ func runHelper() {
 			helperGatewayHandler(), ServerOptions{})
 		return
 	}
+	// 连接池用例要数"起了几次进程"：每次进入 helper 追加一行（含 pid），父进程数行数即可。
+	// 池化的收益正是"第二次调用不再起进程"，这是它唯一可观测的证据。
+	if logPath := os.Getenv("FORGE_MCP_HELPER_SPAWN_LOG"); logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintf(f, "%d\n", os.Getpid())
+			_ = f.Close()
+		}
+	}
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	out := bufio.NewWriter(os.Stdout)
@@ -128,6 +137,17 @@ func runHelper() {
 			}
 			_ = json.Unmarshal(msg.Params, &p)
 			switch mode {
+			case "call_mixed":
+				// 同一条会话里既有"服务端错误响应"又有正常结果：用来验证池对错误的分线
+				// （错误响应不作废会话）。
+				if p.Name == "bad" {
+					send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+						"error": map[string]any{"code": -32602, "message": "unknown tool " + p.Name}})
+					continue
+				}
+				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok=" + p.Name}},
+				}})
 			case "call_rpc_error":
 				send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
 					"error": map[string]any{"code": -32602, "message": "unknown tool " + p.Name}})

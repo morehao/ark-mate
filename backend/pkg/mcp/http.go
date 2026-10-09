@@ -64,7 +64,7 @@ func (t *httpTransport) call(ctx context.Context, method string, params any, out
 		return err
 	}
 	if resp.Error != nil {
-		return fmt.Errorf("JSON-RPC 错误：%s", resp.Error.String())
+		return newRPCResponseError(resp.Error)
 	}
 	if out == nil {
 		return nil
