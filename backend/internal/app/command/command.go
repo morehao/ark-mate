@@ -39,12 +39,14 @@ const usageText = `forge — ark-forge 控制面 daemon（release 单二进制�
   forge agent export            把 SQLite 里的 Agent 定义写回定义目录（此后文件是导出物）
   forge automation import       定时任务目录 → SQLite 导入（M6-7：定义与运行态一并搬；按行判重不覆盖）
   forge automation export       把 SQLite 里的定时任务写回目录（定义与运行态合成同一个文件）
+  forge mcp bridge --agent <id> --runtime <id>
+                                平台侧 MCP stdio 网关（底座经 ACP 拉起；远程 MCP 经它代理）
   forge doctor [flags]          只读体检：资产来源与摘要、随包载荷清单与全量复算、数据目录可写性、端口占用
   forge --version [--json]      打印核心版本与 API 契约版本（--json 供机器读）
 
 子命令帮助：forge serve -h / forge demo -h / forge migrate -h / forge transcripts prune -h / forge config -h
             forge capability {migrate,import,export} -h / forge agent {import,export} -h
-            forge automation {import,export} -h / forge doctor -h
+            forge automation {import,export} -h / forge mcp bridge -h / forge doctor -h
 `
 
 // versionInfo `forge --version --json` 的输出形状（M4-1）。
@@ -115,6 +117,8 @@ func Run(args []string) int {
 		agentCmd(args[1:])
 	case "automation":
 		automationCmd(args[1:])
+	case "mcp":
+		mcpCmd(args[1:])
 	case "doctor":
 		doctor(args[1:])
 	case "-h", "--help", "help":

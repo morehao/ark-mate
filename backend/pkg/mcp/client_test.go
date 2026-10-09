@@ -25,6 +25,14 @@ func TestMain(m *testing.M) {
 // runHelper 最小 MCP stdio 服务端：initialize / initialized / tools/list（含分页与故障注入）。
 func runHelper() {
 	mode := os.Getenv("FORGE_MCP_HELPER_MODE")
+	if mode == "server" {
+		// mode=server：跑**本包真实的服务端实现**（server.go），用来做自研互测与 stdout 纯度
+		// 检查。这里不手写帧，手写的那套（下面）继续负责"故障注入"这类客户端侧用例。
+		_ = Serve(context.Background(), os.Stdin, os.Stdout,
+			ServerInfo{Name: "test-gateway", Version: "9.9.9", Instructions: "测试网关"},
+			helperGatewayHandler(), ServerOptions{})
+		return
+	}
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	out := bufio.NewWriter(os.Stdout)
