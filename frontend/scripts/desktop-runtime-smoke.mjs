@@ -393,12 +393,29 @@ const INITIALIZE_PARAMS = {
  *     为什么要在这里补：核心进程自己的环境里**没有**这些变量——它们是核心在 `Connect` 时按
  *     runtime 注入子进程的。不补的话 dsh/opencode 会去写用户的 `~/.dsh`、`~/.config/opencode`。
  */
+/**
+ * 探针 runtime 的**可写面**（dsh / opencode 的 home 与 npm 面都挂在它下面）。
+ *
+ * 刻意**不**沿用 `coreEnv.FORGE_HOME`：那是壳按默认注入的**用户真实** `~/.forge`，拿它当可写面
+ * 会让探针往用户真实数据目录里写——2026-10-09 实测 `~/.forge/runtime/dsh/sessions/` 里留下一批
+ * `--var-folders-*forge-smoke-dsh-ws-*`，而载荷指纹那两条断言只看载荷目录、**看不见这里**；
+ * 更隐蔽的是它还会**读**用户真实的 dsh profile / session 状态，让"干净机器上是什么样"失真。
+ *
+ * 载荷**入口**（`FORGE_*_ENTRY` / `FORGE_HOME`）仍从核心进程环境取——那是本脚本的纪律 2
+ * （不自己拼常量、不 `which`）；这里只是不拿它当可写面。整轮共用一个临时 home（收尾统一删）。
+ */
+let smokeProbeHomeDir
+function smokeProbeHome() {
+  smokeProbeHomeDir ??= makeTemp('forge-smoke-home-')
+  return smokeProbeHomeDir
+}
+
 function runtimeEnvOf(coreEnv, runtimeId) {
   const env = { ...coreEnv }
   const path = env.PATH ?? '/usr/bin:/bin'
   env.PATH = path.startsWith(`${BIN_DIR}:`) ? path : `${BIN_DIR}:${path}`
 
-  const home = coreEnv.FORGE_HOME || makeTemp('forge-smoke-home-')
+  const home = smokeProbeHome()
   // npm 面：所有本地 runtime 都给（MCP server 常经 npx 拉起，不隔离就写用户的 ~/.npm）。
   const isolation = {
     npm_config_cache: join(home, 'npm', 'cache'),
@@ -1043,6 +1060,14 @@ async function main() {
         coreEnv.FORGE_NODE_EXECUTABLE ?? '(未注入)',
       )
       check('FORGE_HOME 是绝对路径（可写面只有它）', String(coreEnv.FORGE_HOME ?? '').startsWith('/'), coreEnv.FORGE_HOME ?? '(未注入)')
+      // 上一条判的是"核心自己被注入了 FORGE_HOME"；这一条判**探针**别把它当可写面：
+      // 核心的 FORGE_HOME 在开发机上就是用户真实的 `~/.forge`，探针往那儿写会污染真机状态
+      // （见 smokeProbeHome 的注释），而载荷指纹断言看不出来。
+      check(
+        '探针的可写面是临时目录（不是核心的 FORGE_HOME）',
+        smokeProbeHome().startsWith(tmpdir()) && smokeProbeHome() !== coreEnv.FORGE_HOME,
+        `probe=${smokeProbeHome().replace(DESKTOP, '…')}`,
+      )
 
       // 壳给核心的三个载荷入口：都指向随包载荷，且文件真的在。
       for (const key of ['FORGE_DSH_ENTRY', 'FORGE_OPENCODE_BIN', 'FORGE_NPX_ENTRY']) {
