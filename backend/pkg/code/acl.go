@@ -31,12 +31,13 @@ var notFoundCodes = map[string]bool{
 // 为什么需要它：acl 的 Class 表达的是**可操作语义**（重试/登录/换参数/降级），而对外码表达的是
 // **用户该做什么**。绝大多数时候两者同向，但有一类故障它们的指向不同——
 //
-//	config_write_failed：平台生成/落盘/自校验某个 runtime 的模型配置文件失败（T5）。
+//	resource_sync_failed：平台把应用层清单交付给某个底座失败（v12 的同步链路；v11 叫
+//	  config_write_failed）。
 //	  它落 ClassService（确实是平台侧的失败，不是用户请求错），而 ClassService 默认映到
-//	  BadGateway(50201)"上游连接失败"——那会把排障方向指向底座进程/网络，而真因在平台自己的
-//	  生成器或磁盘上。改映到 UpstreamFailed(50001) 与它的实际语义一致：**服务侧失败、改参数无用**。
+//	  BadGateway(50201)"上游连接失败"——那会把排障方向指向底座进程/网络，而真因可能在平台自己的
+//	  生成器、校验门或磁盘上。改映到 UpstreamFailed(50001) 与它的实际语义一致：**服务侧失败、改参数无用**。
 var classCodeOverrides = map[string]int{
-	"config_write_failed": UpstreamFailed,
+	"resource_sync_failed": UpstreamFailed,
 }
 
 // fromACL 把 acl 层错误按其 Class 映射为业务码。

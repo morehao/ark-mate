@@ -1,18 +1,22 @@
 /**
- * 设置 · 模型（第 4 节）：**两个平级的管理对象** —— ① 供应商凭据 ② 模型。
+ * 设置 · 模型（第 4 节）：**两个平级的管理对象** —— ① 供应商 ② 模型。
  *
- * 命名纪律（A13 守卫钉住）：面向用户说「供应商」「模型」；`provider` / `model_id` / `config_write`
- * 这类词只出现在**指向具体资源/接口**的地方（表格列、错误出路），**不当标题**。
- * 也不许把运行时的**不透明 value**（`["p","m"]` / `p/m`）直接摆给用户看——用户看 `model_id` 与显示名。
+ * 命名纪律（A13 守卫钉住）：这一整节面向用户的字（标题 / 正文 / toast / tooltip / 空态 /
+ * 错误出路 / 状态标签）只说「供应商」「模型」「已生效 / 待生效」「已保存」。底座名与 `provider`
+ * / `runtime` 这类代码词一个都不许出现在**用户可见的字**里；它们只允许出现在指向接口的映射代码
+ * （对象键、字段访问）里——那不是给用户看的字。
  *
- * 两条诚实性约束（本屏与初稿最大的差别，改文案前先读）：
- *  ① 「已保存」**不等于**「已生效」：模型配置在**新进程启动时**读，所以保存成功的提示只能说
- *     「已保存，将在下一个会话进程生效」，并且顶部常驻一条配置状态条（路径 / 生成时间 / pending）。
- *  ② 「生效状态列」是按**对账差集**算出来的三态（已生效 / 待生效 / 底座独有），不是按"我们发过一次写"。
+ * 两条诚实性约束（改文案前先读）：
+ *  ① 「已保存」**不等于**「已生效」：生效结论只读聚合字段 `effective` / `effective_at`
+ *     （applied | pending | failed；now | next_session | next_launch），
+ *     **不渲染** `sync[]` 里的逐后端明细（那是机器面）。
+ *  ② `effective_at` 取**所有后端里最晚的那个**（保守）：改密钥在某一侧可能这一轮就生效，
+ *     页面仍会说「下次启动应用生效」。这是拍板接受的代价，**不要"优化"掉它**，
+ *     也不要在页面上解释差异（那必然要把后端名带回来）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Collapse, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip,
+  Alert, Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -20,80 +24,73 @@ import {
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import {
-  applyModels,
   createModel,
   createProvider,
   deleteModel,
   deleteProvider,
   listModels,
   listProviders,
-  listRuntimes,
   patchModel,
+  patchProvider,
   probeProvider,
+  syncModels,
   toErrorMessage,
-  upsertProvider,
 } from '@ark-mate/api'
 import type {
-  ModelRow, ModelsResp, Provider, ProviderCheck, ProviderProbeResp, Runtime, RuntimeConfigResp,
+  ModelRow, ModelsResp, Provider, ProviderCheck, ProviderPatch, ProviderProbeResp,
 } from '@ark-mate/types'
 import { useMate } from '../../store'
 import { CardHeader } from './CardHeader'
 
-/** 一个 runtime 的读面（清单 + 事实 + 差集 + 物化状态）。 */
-type RuntimeView = ModelsResp | null
+/** 供应商 id 的词法（与 `POST /providers` 的校验一致；它会进凭据引用名）。 */
+const VENDOR_ID_RE = /^[A-Za-z0-9._-]{1,64}$/
 
-const PROVIDER_ID_RE = /^[A-Za-z0-9._-]{1,64}$/
+/** 本期只有一种协议（枚举，不做自由串）。 */
+const PROTOCOLS = [{ value: 'openai', label: 'openai' }]
 
 interface ProviderFormValues {
   id?: string
-  type?: string
+  name?: string
+  protocol?: string
+  base_url?: string
+  api_key?: string
+  /** 勾上 = 清掉已存密钥（密钥只写不读回，"留空"与"清除"必须分得开）。 */
+  api_key_clear?: boolean
   note?: string
-  key?: string
-  /**
-   * 逐 runtime 的运行时参数（H3）。键是 `rt:field`（形如 `opencode:baseURL`），
-   * 值是表单文本；object 类字段按 **JSON 文本**编辑，提交前解析（解析失败当场报错，不静默丢弃）。
-   */
-  [projectionKey: string]: unknown
 }
-
-/** 表单字段名：`<runtime>:<field>`（AntD 的 name 路径不支持嵌套的 runtime 名做动态键，故用扁平键）。 */
-const projectionFieldName = (runtime: string, field: string): string => `${runtime}:${field}`
 
 interface ModelFormValues {
-  provider_id: string
-  model_id: string
+  /** 供应商选择（wire 字段是 `provider_id`，只在提交时以对象键拼出来，不进用户可见的字）。 */
+  vendor?: string
+  model_id?: string
   name?: string
-  hidden?: boolean
-  pinned?: boolean
-  is_default?: boolean
+  note?: string
 }
 
-/** 生效状态三态：**按对账差集**算，不按"我们发过写"。 */
-type EffectState = 'live' | 'pending' | 'runtime-only'
+/** 聚合生效结论的展示映射（**只**用 `effective` / `effective_at`，不碰 `sync[]`）。 */
+const EFFECT_LABEL: Record<string, string> = {
+  applied: '已生效',
+  pending: '待生效',
+  failed: '同步失败',
+}
 
-const EFFECT_META: Record<EffectState, { label: string; color: string }> = {
-  live: { label: '已生效', color: tokens.success },
-  pending: { label: '待生效', color: tokens.warning },
-  'runtime-only': { label: '底座独有', color: tokens.textPlaceholder },
+const EFFECT_AT_LABEL: Record<string, string> = {
+  now: '现在',
+  next_session: '下次会话',
+  next_launch: '下次启动应用',
+}
+
+const effectColor = (effective: string): string => {
+  if (effective === 'applied') return tokens.success
+  if (effective === 'failed') return tokens.error
+  return tokens.warning
 }
 
 export function ModelSettingsPanel() {
-  const agents = useMate((s) => s.agents)
   const showToast = useMate((s) => s.showToast)
 
   const [providers, setProviders] = useState<Provider[]>([])
-  const [runtimes, setRuntimes] = useState<Runtime[]>([])
-  const [providerId, setProviderId] = useState<string>('')
-  // runtime 候选从**已注册的 agent** 的 `runtimes[]` 并集里取（平台没有单独的 runtime 列表面，
-  // 而 agent 的 runtimes 就是"哪些底座真的在用"的权威投影）。dsh/opencode 两个内置 agent 恒在。
-  const runtimeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const a of agents) for (const rt of a.runtimes ?? []) set.add(rt)
-    const ids = Array.from(set).sort()
-    return ids.length ? ids : ['deepseekharness', 'opencode']
-  }, [agents])
-  const [runtimeId, setRuntimeId] = useState<string>('opencode')
-  const [view, setView] = useState<RuntimeView>(null)
+  const [view, setView] = useState<ModelsResp | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [probe, setProbe] = useState<{ id: string; data: ProviderProbeResp | null; err: string | null } | null>(null)
   const [providerModal, setProviderModal] = useState<{ mode: 'create' } | { mode: 'edit'; row: Provider } | null>(null)
@@ -104,29 +101,16 @@ export function ModelSettingsPanel() {
 
   const loadProviders = useCallback(async () => {
     try {
-      const rows = await listProviders()
-      setProviders(rows)
-      setProviderId((cur) => cur || rows[0]?.id || '')
+      setProviders(await listProviders())
     } catch (err) {
       showToast(toErrorMessage(err))
     }
   }, [showToast])
 
-  // 运行时参数 schema 由后端派生（`GET /runtimes` 的 provider_projection）——前端不硬编码字段：
-  // 只渲染「该底座声明了 schema」的那几块，加一个底座不需要改这里。
-  const schemaRuntimes = useMemo(
-    () => runtimes.filter((r) => r.provider_projection && (r.provider_projection.fields?.length ?? 0) > 0),
-    [runtimes],
-  )
-
-  const loadView = useCallback(async (rt: string, refresh = false) => {
-    if (!rt) return
+  const loadModels = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true)
     try {
-      const resp = await listModels(undefined, rt, refresh)
-      // 旧形态回落（未声明落点的 runtime）也能喂进来：这里只用到 declared/diff/config，
-      // 缺字段时按空数组处理，不额外分支。
-      setView(resp as ModelsResp)
+      setView(await listModels())
     } catch (err) {
       showToast(toErrorMessage(err))
     } finally {
@@ -134,24 +118,14 @@ export function ModelSettingsPanel() {
     }
   }, [showToast])
 
-  useEffect(() => {
-    void loadProviders()
-    void (async () => {
-      try {
-        setRuntimes(await listRuntimes())
-      } catch {
-        // 拿不到底座列表 = 运行时参数区不渲染（其余照常）；不打断设置页。
-        setRuntimes([])
-      }
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const reloadAll = useCallback(async () => {
+    await Promise.all([loadProviders(), loadModels()])
+  }, [loadProviders, loadModels])
 
   useEffect(() => {
-    if (!runtimeId) return
-    void loadView(runtimeId)
+    void reloadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtimeId])
+  }, [])
 
   const guard = async <T,>(p: Promise<T>): Promise<T | undefined> => {
     setBusy(true)
@@ -165,102 +139,68 @@ export function ModelSettingsPanel() {
     }
   }
 
-  /** 写面之后的统一收尾：提示语**只说"已保存、将在下一个会话进程生效"**，绝不说"已生效"。 */
-  const afterModelWrite = async (note: string): Promise<void> => {
-    showToast(note)
-    await loadView(runtimeId, false)
-  }
-
   // ——— ① 供应商 ———
 
   const openProviderModal = (target: { mode: 'create' } | { mode: 'edit'; row: Provider }): void => {
     setProviderModal(target)
-    if (target.mode === 'edit') {
-      providerForm.setFieldsValue({ id: target.row.id, type: target.row.type, note: target.row.note, key: '' })
-      // 回填运行时参数：object 类字段按 JSON 文本回显（与提交时的解析口径对称）。
-      const projections = target.row.projections ?? {}
-      const filled: Record<string, unknown> = {}
-      for (const rt of schemaRuntimes) {
-        const frag = projections[rt.id] ?? {}
-        for (const f of rt.provider_projection?.fields ?? []) {
-          const v = frag[f.name]
-          if (v === undefined) continue
-          filled[projectionFieldName(rt.id, f.name)] = f.type === 'object' ? JSON.stringify(v, null, 2) : String(v)
-        }
-      }
-      providerForm.setFieldsValue(filled)
-    } else {
-      providerForm.resetFields()
-    }
   }
 
-  /** 把表单里的运行时参数收集成 `{runtime: fragment}`；object 字段解析失败即抛（不静默丢弃）。 */
-  const collectProjections = (values: Record<string, unknown>): Record<string, Record<string, unknown>> => {
-    const out: Record<string, Record<string, unknown>> = {}
-    for (const rt of schemaRuntimes) {
-      const frag: Record<string, unknown> = {}
-      for (const f of rt.provider_projection?.fields ?? []) {
-        const raw = values[projectionFieldName(rt.id, f.name)]
-        if (raw === undefined || raw === null || raw === '') continue
-        if (f.type === 'object') {
-          try {
-            frag[f.name] = JSON.parse(String(raw))
-          } catch (err) {
-            throw new Error(`${rt.id} 的 ${f.name} 不是合法 JSON：${toErrorMessage(err)}`)
-          }
-        } else {
-          frag[f.name] = String(raw)
-        }
+  // 表单初值用 **`initialValues`**，不是在 openProviderModal 里命令式地 `setFieldsValue`。
+  //
+  // 为什么（2026-10-10 实测，踩了两轮）：`Modal` 带 `destroyOnHidden`，关着时里面的 `Form`
+  // 根本没挂载。无论是"打开弹窗的那一刻"直接写值，还是退一步放进 `useEffect`，都**早于**
+  // rc-dialog 真正把内容挂上去（实测：加了 useEffect 仍然落在一个未连接的 form 实例上，
+  // 控制台留一句 `Instance created by useForm is not connected to any Form element`）。
+  // 后果是**静默的**：新建供应商时那条默认 `protocol` 不生效，点保存只报「协议必填」——
+  // 用户以为是自己没填。因为内容每次关闭都销毁、每次打开都重新挂载，`initialValues`
+  // 每开一次都会重新生效，这正是它该待的地方。
+  const providerInitialValues: ProviderFormValues = providerModal?.mode === 'edit'
+    ? {
+        id: providerModal.row.id,
+        name: providerModal.row.name ?? '',
+        protocol: providerModal.row.protocol,
+        base_url: providerModal.row.base_url ?? '',
+        api_key: '',
+        api_key_clear: false,
+        note: providerModal.row.note ?? '',
       }
-      if (Object.keys(frag).length > 0) out[rt.id] = frag
-    }
-    return out
-  }
+    : ({ protocol: PROTOCOLS[0].value } as ProviderFormValues)
 
   const submitProvider = async (): Promise<void> => {
-    const v = await providerForm.validateFields()
-    let projections: Record<string, Record<string, unknown>>
-    try {
-      projections = collectProjections(v as unknown as Record<string, unknown>)
-    } catch (err) {
-      showToast(toErrorMessage(err))
-      return
-    }
+    // 校验失败时 antd 会 reject：**接住它**。不接的话控制台会留下一条
+    // `Uncaught (in promise)`——行内错误提示照样会画出来，所以用户看不出差别，
+    // 但"页面无未捕获异常"这条验收判据会被它判红，而且真出问题时它会把真相淹掉。
+    const v = await providerForm.validateFields().catch(() => undefined)
+    if (!v) return
     if (providerModal?.mode === 'create') {
-      if (!PROVIDER_ID_RE.test(v.id ?? '')) {
-        showToast('id 只能含字母数字与 . _ -（1-64 位）：它会成为密钥文件名的一部分')
+      if (!VENDOR_ID_RE.test(v.id ?? '')) {
+        showToast('id 只能含字母数字与 . _ -（1-64 位）')
         return
       }
       const created = await guard(createProvider({
-        id: v.id ?? '', type: v.type ?? '', note: v.note, key: v.key || undefined,
-        projections: Object.keys(projections).length ? projections : undefined,
+        id: v.id ?? '',
+        name: v.name || undefined,
+        protocol: v.protocol ?? PROTOCOLS[0].value,
+        base_url: v.base_url || undefined,
+        api_key: v.api_key || undefined,
+        note: v.note || undefined,
       }))
       if (!created) return
-      showToast('凭据已保存（密钥不读回）。改密钥要等下一个轮次边界才会被会话拿到')
+      showToast('供应商已保存：密钥只写不读回；生效时刻见「模型」块顶部的状态')
     } else if (providerModal?.mode === 'edit') {
       const row = providerModal.row
-      const patch: {
-        type?: string
-        note?: string
-        key?: string
-        projections?: Record<string, Record<string, unknown>>
-      } = {}
-      if (v.type !== row.type) patch.type = v.type
+      const patch: ProviderPatch = {}
+      if ((v.name ?? '') !== (row.name ?? '')) patch.name = v.name ?? ''
+      if ((v.protocol ?? '') !== row.protocol) patch.protocol = v.protocol ?? ''
+      if ((v.base_url ?? '') !== (row.base_url ?? '')) patch.base_url = v.base_url ?? ''
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
-      // 密钥留空 = 不改（避免"编辑备注顺手把密钥清掉"）。
-      if (v.key) patch.key = v.key
-      // 运行时参数：只在**真的改了**时才提交（逐 runtime 比较，避免"打开就保存"把空对象写成删除）。
-      const before = row.projections ?? {}
-      for (const [rt, frag] of Object.entries(projections)) {
-        if (JSON.stringify(before[rt] ?? {}) !== JSON.stringify(frag)) {
-          patch.projections = { ...(patch.projections ?? {}), [rt]: frag }
-        }
-      }
+      if (v.api_key) patch.api_key = v.api_key
+      else if (v.api_key_clear) patch.api_key = ''
       if (Object.keys(patch).length === 0) {
         showToast('没有改动')
         return
       }
-      const updated = await guard(upsertProvider(row.id, patch))
+      const updated = await guard(patchProvider(row.id, patch))
       if (!updated) return
       const eff = updated.effect
       showToast(eff && eff.effect === 'none'
@@ -268,21 +208,20 @@ export function ModelSettingsPanel() {
         : `已保存：${eff?.note ?? '引用它的会话会在下一个轮次边界拿到新凭据'}`)
     }
     setProviderModal(null)
-    await loadProviders()
+    await reloadAll()
   }
 
   const removeProvider = async (row: Provider): Promise<void> => {
     const resp = await guard(deleteProvider(row.id))
     if (!resp) return
     if (!resp.deleted) {
-      showToast('这条凭据已经不存在（幂等）')
+      showToast('这条供应商已经不存在')
     } else if (resp.vault_ciphertext_left) {
-      showToast(`凭据已删除，但密文残留：${resp.vault_ciphertext_left}（mate doctor 的孤儿密文段可见）`)
+      showToast(`供应商已删除，但密文残留：${resp.vault_ciphertext_left}`)
     } else {
-      showToast('凭据已删除')
+      showToast('供应商已删除')
     }
-    if (providerId === row.id) setProviderId('')
-    await loadProviders()
+    await reloadAll()
   }
 
   const runProbe = async (row: Provider, upstream: boolean): Promise<void> => {
@@ -297,172 +236,178 @@ export function ModelSettingsPanel() {
 
   // ——— ② 模型 ———
 
-  const providerOptions = useMemo(
-    () => providers.map((p) => ({ value: p.id, label: `${p.id}（${p.type}）` })),
+  const modelOptions = useMemo(
+    () => (view?.models ?? []).map((m) => ({ value: m.id, label: m.name || m.model_id })),
+    [view],
+  )
+
+  const vendorOptions = useMemo(
+    () => providers.map((p) => ({ value: p.id, label: p.name ? `${p.name}（${p.id}）` : p.id })),
     [providers],
   )
 
-  /** 生效状态：两侧都有 = 已生效；平台有、底座没有 = 待生效；底座有、平台没有 = 底座独有。 */
-  const stateOf = (value: string): EffectState => {
-    const inDeclared = (view?.declared ?? []).some((d) => d.value === value)
-    const inAdvertised = (view?.advertised ?? []).some((a) => a.value === value)
-    if (inDeclared && inAdvertised) return 'live'
-    if (inDeclared) return 'pending'
-    return 'runtime-only'
-  }
-
   const openModelModal = (target: { mode: 'create' } | { mode: 'edit'; row: ModelRow }): void => {
     setModelModal(target)
-    if (target.mode === 'edit') {
-      modelForm.setFieldsValue({
-        provider_id: target.row.provider_id, model_id: target.row.model_id, name: target.row.name,
-        hidden: target.row.hidden, pinned: target.row.pinned, is_default: target.row.is_default,
-      })
-    } else {
-      modelForm.resetFields()
-      modelForm.setFieldsValue({ provider_id: providerOptions[0]?.value })
-    }
   }
 
+  // 同 provider 那份：用 `initialValues`（理由见 providerInitialValues 上面的注释）。
+  const modelInitialValues: ModelFormValues = modelModal?.mode === 'edit'
+    ? {
+        vendor: modelModal.row.provider_id,
+        model_id: modelModal.row.model_id,
+        name: modelModal.row.name ?? '',
+        note: modelModal.row.note ?? '',
+      }
+    : ({ vendor: vendorOptions[0]?.value } as ModelFormValues)
+
   const submitModel = async (): Promise<void> => {
-    const v = await modelForm.validateFields()
+    // 同 submitProvider：接住校验失败，别留 Uncaught (in promise)。
+    const v = await modelForm.validateFields().catch(() => undefined)
+    if (!v) return
     if (modelModal?.mode === 'create') {
       const created = await guard(createModel({
-        runtime: runtimeId, provider_id: v.provider_id, model_id: v.model_id,
-        name: v.name, hidden: v.hidden, pinned: v.pinned, is_default: v.is_default,
+        // 对象键是 wire 字段名（不是给用户看的字）。
+        provider_id: v.vendor ?? '',
+        model_id: v.model_id ?? '',
+        name: v.name || undefined,
+        note: v.note || undefined,
       }))
       if (!created) return
       // **文案纪律**：清单写面在下一进程生效，绝不说"已生效"。
-      await afterModelWrite('已保存，将在下一个会话进程生效（配置在进程启动时读）')
+      showToast('模型已保存，已提交同步：生效时刻见「模型」块顶部的状态')
     } else if (modelModal?.mode === 'edit') {
       const row = modelModal.row
-      const updated = await guard(patchModel(row.id, {
-        name: v.name, hidden: !!v.hidden, pinned: !!v.pinned,
-        is_default: v.is_default && !row.is_default ? true : undefined,
-      }))
+      const patch: { name?: string; note?: string } = {}
+      if ((v.name ?? '') !== (row.name ?? '')) patch.name = v.name ?? ''
+      if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
+      if (Object.keys(patch).length === 0) {
+        showToast('没有改动')
+        return
+      }
+      const updated = await guard(patchModel(row.id, patch))
       if (!updated) return
-      await afterModelWrite(v.is_default && !row.is_default
-        ? '已设为该底座的默认模型：新会话创建时立即下发；既有会话在下一个会话进程读到它'
-        : '已保存，将在下一个会话进程生效（配置在进程启动时读）')
+      showToast('模型已保存，已提交同步：生效时刻见「模型」块顶部的状态')
     }
     setModelModal(null)
+    await loadModels()
   }
 
   const removeModel = async (row: ModelRow): Promise<void> => {
     const resp = await guard(deleteModel(row.id))
     if (!resp) return
     if (!resp.deleted) {
-      showToast('这条模型条目已经不存在（幂等）')
+      showToast('这条模型已经不存在')
+    } else if (resp.default_cleared) {
+      showToast('模型已删除；它正好是默认模型，默认已一并清空')
     } else {
-      showToast('已删除：既有会话不受影响（底座已保存的取值仍可继续发请求）')
+      showToast('模型已删除')
     }
-    await loadView(runtimeId, false)
+    await loadModels()
   }
 
   /**
-   * 置/取消默认。两个方向都走同一条 PATCH——**取消默认必须真的能取消**：只置不撤的话，
-   * 用户想让底座回到自己的默认就只能删掉整条模型，而删掉又会丢掉 `extra`/`hidden` 那些留痕。
-   * 文案分开，因为两件事的后果不同（置默认影响新会话下发的取值；取消默认让新会话回到底座默认）。
+   * 设/取消**唯一**默认模型。两个方向都走同一条 PATCH：
+   *  - 选一条 → `is_default: true`（服务端会先清掉旧的那条）；
+   *  - 清空 → 对当前默认那条 `is_default: false`（"取消默认"必须真的能取消）。
    */
-  const setDefault = async (row: ModelRow, next: boolean): Promise<void> => {
-    const updated = await guard(patchModel(row.id, { is_default: next }))
-    if (!updated) return
-    await afterModelWrite(next
-      ? '已设为默认：新会话创建时立即下发；既有会话在下一个会话进程读到它'
-      : '已取消默认：新会话按底座自己的默认起；已有会话的取值不变')
+  const setDefaultModel = async (id: string | undefined): Promise<void> => {
+    const current = view?.default_model ?? ''
+    if (id === current) return
+    if (!id) {
+      if (!current) return
+      const updated = await guard(patchModel(current, { is_default: false }))
+      if (!updated) return
+      showToast('已取消默认模型：新会话按会话自己的默认起')
+    } else {
+      const target = (view?.models ?? []).find((m) => m.id === id)
+      if (!target) return
+      const updated = await guard(patchModel(id, { is_default: true }))
+      if (!updated) return
+      showToast(`已把「${target.name || target.model_id}」设为默认模型`)
+    }
+    await loadModels()
   }
 
-  const applyNow = async (): Promise<void> => {
-    const resp = await guard(applyModels(runtimeId))
+  const resync = async (): Promise<void> => {
+    const resp = await guard(syncModels())
     if (!resp) return
-    const st = resp.applied.find((a) => a.runtime === runtimeId)
-    showToast(st?.note ?? '已重新物化。**此刻还拿不到底座的新目录**（要新进程）——生效状态列稍后会显示"已生效"')
-    await loadView(runtimeId, true)
+    showToast('已提交同步：生效时刻见「模型」块顶部的状态')
+    await loadModels(true)
   }
 
-  const config: RuntimeConfigResp | undefined = view?.config
-  const declaredColumns: ColumnsType<ModelRow> = [
+  // ——— 渲染 ———
+
+  const providerColumns: ColumnsType<Provider> = [
     {
-      title: '模型', dataIndex: 'model_id', key: 'model_id',
+      title: 'id', dataIndex: 'id', key: 'id', width: 150,
+      render: (v: string) => <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{v}</span>,
+    },
+    { title: '展示名', dataIndex: 'name', key: 'name', width: 140, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
+    { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 90 },
+    {
+      title: '端点', key: 'endpoint', width: 220,
+      render: (_: unknown, row: Provider) => (row.base_url
+        ? <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{row.base_url}</span>
+        : <Tag color="orange">缺端点</Tag>),
+    },
+    {
+      title: '密钥', dataIndex: 'has_key', key: 'has_key', width: 80,
+      render: (v: boolean) => (v ? <Tag color="green">已存</Tag> : <Tag color="orange">未设置</Tag>),
+    },
+    { title: '模型数', dataIndex: 'model_count', key: 'model_count', width: 76 },
+    { title: '备注', dataIndex: 'note', key: 'note', width: 120, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
+    {
+      title: '本地体检', key: 'problems', width: 150,
+      render: (_: unknown, row: Provider) => (row.problems?.length
+        ? <Tooltip title={row.problems.join('；')}><Tag color="orange">{row.problems.length} 项待处理</Tag></Tooltip>
+        : <span style={{ fontSize: 12, color: tokens.textPlaceholder }}>正常</span>),
+    },
+    {
+      title: '操作', key: 'actions', width: 210,
+      render: (_: unknown, row: Provider) => (
+        <Space size={2} wrap>
+          <Button type="link" size="small" onClick={() => openProviderModal({ mode: 'edit', row })}>编辑</Button>
+          <Button type="link" size="small" icon={<ExperimentOutlined />} onClick={() => void runProbe(row, false)}>
+            自检
+          </Button>
+          <Popconfirm
+            title="删除这条供应商？"
+            description="被 Agent 或模型引用时会被拒绝——那是为了避免静默换掉凭据来源。"
+            onConfirm={() => void removeProvider(row)}
+          >
+            <Button type="link" size="small" danger>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
+  const modelColumns: ColumnsType<ModelRow> = [
+    {
+      title: '模型', key: 'model_id',
       render: (_: unknown, row: ModelRow) => (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{row.model_id}</span>
-          {row.pinned && <Tag color="blue">置顶</Tag>}
-          {row.hidden && <Tag>已隐藏</Tag>}
+          {row.id === (view?.default_model ?? '') && <Tag color="blue">默认</Tag>}
         </span>
       ),
     },
-    { title: '显示名', dataIndex: 'name', key: 'name', width: 160, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
+    { title: '显示名', dataIndex: 'name', key: 'name', width: 150, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
     {
-      title: '供应商', dataIndex: 'provider_id', key: 'provider_id', width: 140,
-      render: (v: string) => <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{v}</span>,
-    },
-    {
-      title: '默认', key: 'default', width: 72,
+      title: '供应商', key: 'vendor', width: 150,
       render: (_: unknown, row: ModelRow) => (
-        <Tooltip title={row.is_default
-          ? '该底座的默认模型；点一下**取消**默认（取消后新会话按底座自己的默认起）'
-          : '点一下把它设为该底座的默认模型'}>
-          {row.is_default ? (
-            <Popconfirm
-              title="取消这条默认模型？"
-              description="取消后新会话按底座自己的默认起；已经有会话的取值不变。"
-              okText="取消默认"
-              cancelText="算了"
-              onConfirm={() => void setDefault(row, false)}
-            >
-              <Button
-                type="text"
-                size="small"
-                disabled={busy}
-                style={{ color: tokens.warning, fontSize: 15 }}
-                aria-label="取消默认模型"
-              >
-                ★
-              </Button>
-            </Popconfirm>
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              disabled={busy}
-              onClick={() => void setDefault(row, true)}
-              style={{ color: tokens.textPlaceholder, fontSize: 15 }}
-              aria-label="设为默认模型"
-            >
-              ☆
-            </Button>
-          )}
-        </Tooltip>
+        <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{row.provider_id}</span>
       ),
     },
-    {
-      title: '生效状态', key: 'effect', width: 200,
-      render: (_: unknown, row: ModelRow) => {
-        const st = stateOf(row.value)
-        const meta = EFFECT_META[st]
-        return (
-          <Tooltip title={st === 'pending'
-            ? '平台已声明，底座还没广告它：配置文件在**新进程**启动时读——点上面的「立即应用」或新开一个会话'
-            : st === 'runtime-only'
-              ? '底座自带的条目（平台没有声明它）：平台不管它，如实展示、不删'
-              : '两侧都有：已生效'}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 3, background: meta.color }} />
-              <span style={{ fontSize: 12 }}>{meta.label}</span>
-            </span>
-          </Tooltip>
-        )
-      },
-    },
+    { title: '备注', dataIndex: 'note', key: 'note', width: 140, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
     {
       title: '操作', key: 'actions', width: 150,
       render: (_: unknown, row: ModelRow) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => openModelModal({ mode: 'edit', row })}>编辑</Button>
           <Popconfirm
-            title="删除这条模型条目？"
-            description="既有会话不受影响（底座已保存的取值仍可继续发请求）；但清单里没有它之后，新会话不会再自动用它。"
+            title="删除这条模型？"
+            description="既有会话不受影响；但它从清单里消失后，新会话不会再自动用它。"
             onConfirm={() => void removeModel(row)}
           >
             <Button type="link" size="small" danger>删除</Button>
@@ -472,12 +417,8 @@ export function ModelSettingsPanel() {
     },
   ]
 
-  const advertisedRows = useMemo(() => {
-    const declared = new Set((view?.declared ?? []).map((d) => d.value))
-    return (view?.advertised ?? [])
-      .filter((a) => !declared.has(a.value))
-      .map((a, i) => ({ key: `${a.value}-${i}`, ...a }))
-  }, [view])
+  const effective = view?.effective ?? ''
+  const effectiveAt = view?.effective_at ?? ''
 
   return (
     <div className="fg-model-panel">
@@ -485,12 +426,12 @@ export function ModelSettingsPanel() {
       <section className="fg-card" aria-label="供应商">
         <CardHeader
           title="供应商"
-          hint="上游凭据：登记密钥、声明它在各底座上怎么写、自检能不能连通"
+          hint="登记一个 OpenAI 兼容端点与它的密钥；模型挂在供应商下面"
           extra={(
             <Space size={6}>
               <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadProviders()}>刷新</Button>
               <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openProviderModal({ mode: 'create' })}>
-                新建凭据
+                新建供应商
               </Button>
             </Space>
           )}
@@ -500,8 +441,8 @@ export function ModelSettingsPanel() {
             <Alert
               type="info"
               showIcon
-              message="还没有供应商凭据"
-              description="模型条目必须挂靠在一条凭据下：先在这里建一条（填上游类型与密钥），再到下面「模型」块里登记模型。"
+              message="还没有供应商"
+              description="模型条目必须挂在一个供应商下：先在这里新建一条（填端点与密钥），再到下面「模型」块里登记模型。"
             />
           )}
           {providers.length > 0 && (
@@ -510,54 +451,11 @@ export function ModelSettingsPanel() {
               rowKey="id"
               pagination={false}
               dataSource={providers}
-              columns={[
-                {
-                  title: 'id', dataIndex: 'id', key: 'id',
-                  render: (v: string) => <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{v}</span>,
-                },
-                { title: '上游类型', dataIndex: 'type', key: 'type', width: 130 },
-                {
-                  title: '密钥', dataIndex: 'has_key', key: 'has_key', width: 90,
-                  render: (v: boolean) => (v ? <Tag color="green">已存</Tag> : <Tag color="orange">未设置</Tag>),
-                },
-                {
-                  title: '被引用', key: 'refs', width: 220,
-                  render: (_: unknown, row: Provider) => (
-                    <span style={{ fontSize: 12, color: tokens.textSecondary }}>
-                      {row.refs?.agents?.length ? `Agent ${row.refs.agents.join('、')}` : '暂无 Agent 使用'}
-                      {row.refs?.runtimes?.length ? `（${row.refs.runtimes.join('、')}）` : ''}
-                    </span>
-                  ),
-                },
-                {
-                  title: '本地体检', key: 'problems', width: 240,
-                  render: (_: unknown, row: Provider) => (row.problems?.length
-                    ? <Tooltip title={row.problems.join('；')}><Tag color="orange">{row.problems.length} 项待处理</Tag></Tooltip>
-                    : <span style={{ fontSize: 12, color: tokens.textPlaceholder }}>正常</span>),
-                },
-                {
-                  title: '操作', key: 'actions', width: 260,
-                  render: (_: unknown, row: Provider) => (
-                    <Space size={2} wrap>
-                      <Button type="link" size="small" onClick={() => openProviderModal({ mode: 'edit', row })}>编辑</Button>
-                      <Button type="link" size="small" icon={<ExperimentOutlined />} onClick={() => void runProbe(row, false)}>
-                        自检
-                      </Button>
-                      <Popconfirm
-                        title="删除这条凭据？"
-                        description="被 Agent 或模型条目引用时会被拒绝——那是为了避免静默换掉凭据来源。"
-                        onConfirm={() => void removeProvider(row)}
-                      >
-                        <Button type="link" size="small" danger>删除</Button>
-                      </Popconfirm>
-                    </Space>
-                  ),
-                },
-              ]}
+              columns={providerColumns}
             />
           )}
 
-          {/* 自检结果就地展开（pass 绿 / fail 红 / warn·unknown 灰，每条带可执行的 remedy）。 */}
+          {/* 自检结果就地展开（每条带可执行的 remedy）。 */}
           {probe && (
             <div className="fg-probe" aria-label="自检结果">
               <div className="fg-probe-head">
@@ -593,21 +491,26 @@ export function ModelSettingsPanel() {
       <section className="fg-card" aria-label="模型">
         <CardHeader
           title="模型"
-          hint="清单、默认模型与生效对账（每个底座一份清单、一个默认）"
+          hint="清单、默认模型与生效结论"
           extra={(
             <Space size={6}>
+              {/* 唯一的默认模型选择器（A14：结构断言按这个 aria-label 数，恰好一个）。 */}
               <Select
                 size="small"
-                value={runtimeId}
-                style={{ width: 150 }}
-                onChange={setRuntimeId}
-                options={runtimeOptions.map((id) => ({ value: id, label: id }))}
+                allowClear
+                aria-label="默认模型"
+                placeholder="默认模型"
+                value={view?.default_model || undefined}
+                style={{ width: 190 }}
+                loading={busy}
+                options={modelOptions}
+                onChange={(v?: string) => void setDefaultModel(v)}
               />
-              <Button size="small" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadView(runtimeId, true)}>
-                刷新目录
+              <Button size="small" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadModels(true)}>
+                刷新
               </Button>
-              <Button size="small" icon={<SyncOutlined />} disabled={busy} onClick={() => void applyNow()}>
-                立即应用
+              <Button size="small" icon={<SyncOutlined />} disabled={busy} onClick={() => void resync()}>
+                重新同步
               </Button>
               <Button
                 size="small" type="primary" icon={<PlusOutlined />}
@@ -620,23 +523,26 @@ export function ModelSettingsPanel() {
           )}
         />
         <div className="fg-card-body">
-          {/* 配置状态条：路径 / 生成时间 / pending。**摘要对不上就报出来，不静默覆盖。** */}
-          {config && (
+          {/* 生效结论：只读聚合字段。逐后端的明细属机器面，这里一律不渲染。 */}
+          {view && (
             <div className="fg-cfgbar">
-              <span className={`fg-cfgbar-dot${config.pending ? ' fg-pending' : ''}`} aria-hidden />
-              <span>
-                {config.declared
-                  ? (config.writable
-                    ? `配置文件：${config.path ?? '—'}`
-                    : `该底座尚未实测：只读（平台会生成候选，但不落盘）`)
-                  : '该底座未声明模型配置落点：平台清单对它不可达'}
-              </span>
-              {config.generated_at && <span className="fg-cfgbar-dim">生成于 {config.generated_at}</span>}
-              <span className="fg-cfgbar-dim">通道 {config.channel ?? '—'}</span>
-              {config.pending && <Tag color="orange">待生效（新进程启动时读）</Tag>}
+              <span className="fg-cfgbar-dot" aria-hidden style={{ background: effectColor(effective) }} />
+              <span>同步状态：{EFFECT_LABEL[effective] ?? '待生效'}</span>
+              {effective === 'pending' && EFFECT_AT_LABEL[effectiveAt] && (
+                <span className="fg-cfgbar-dim">{EFFECT_AT_LABEL[effectiveAt]}</span>
+              )}
             </div>
           )}
-          {config?.note && <Alert type="info" showIcon message={config.note} style={{ marginBottom: 8 }} />}
+          {/* 失败时的出路：聚合结论只知道"有失败的项"，具体逐项留在诊断面——所以这里给可执行动作。 */}
+          {effective === 'failed' && (
+            <Alert
+              type="error"
+              showIcon
+              message="有同步失败的项"
+              description="先到上面的供应商块点「自检」核对端点与密钥（它会逐条给出待处理项），修好后点「重新同步」。"
+            />
+          )}
+          {view?.note && <Alert type="info" showIcon message={view.note} style={{ marginBottom: 8 }} />}
 
           {view && (
             <>
@@ -645,55 +551,15 @@ export function ModelSettingsPanel() {
                 rowKey="id"
                 pagination={false}
                 loading={busy}
-                dataSource={view.declared ?? []}
-                locale={{ emptyText: '还没有声明任何模型。先建一条供应商凭据，再点右上「新建模型」。' }}
-                columns={declaredColumns}
+                dataSource={view.models ?? []}
+                locale={{ emptyText: '还没有登记任何模型。先建一条供应商，再点右上「新建模型」。' }}
+                columns={modelColumns}
               />
 
               <div className="fg-diffnote">
-                <b>生效说明</b>：新会话默认用它；会话内可另选（立即生效）。「保存成功」只表示**已写入平台清单**，
-                底座的配置文件在**新进程启动时**才读——所以状态列才是"到底生效了没有"的唯一答案。
+                <b>生效说明</b>：「保存成功」只表示**已写入平台清单**；清单要等新的会话进程启动才被读到，
+                所以顶部的同步状态才是"到底生效了没有"的答案。默认模型在新建会话时下发。
               </div>
-
-              {/* 差集：如实报出"写了没生效"与"底座有平台没声明"。 */}
-              {(view.diff?.declared_not_advertised?.length ?? 0) > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 8 }}
-                  message={`有 ${view.diff.declared_not_advertised.length} 条平台已声明但底座还没广告`}
-                  description={(
-                    <ul className="fg-difflist">
-                      {view.diff.declared_not_advertised.map((d) => (
-                        <li key={d.value}>
-                          <code>{d.model_id || d.value}</code>
-                          <span className={`fg-sev fg-${d.severity}`}>{d.severity}</span>
-                          <span>{d.reason}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                />
-              )}
-
-              {advertisedRows.length > 0 && (
-                <div className="fg-advertised">
-                  <div className="fg-advertised-head">
-                    底座独有（{advertisedRows.length} 条，平台不声明也不删）
-                    <Tooltip title="这些是底座自己的目录里的条目（opencode 的内置 models.dev 目录会一直在，那是常态不是故障）">
-                      <span className="fg-diffnote-inline">为什么会有？</span>
-                    </Tooltip>
-                  </div>
-                  <div className="fg-advertised-list">
-                    {advertisedRows.slice(0, 40).map((a) => (
-                      <span key={a.key} className="fg-advertised-item">
-                        <code>{a.value}</code>
-                        {a.unavailable && <span className="fg-cfgbar-dim">运行时标为不可用</span>}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -702,106 +568,67 @@ export function ModelSettingsPanel() {
       {/* ——— 供应商表单 ——— */}
       <Modal
         open={providerModal !== null}
-        title={providerModal?.mode === 'create' ? '新建供应商凭据' : '编辑供应商凭据'}
+        title={providerModal?.mode === 'create' ? '新建供应商' : '编辑供应商'}
         onCancel={() => setProviderModal(null)}
         onOk={() => void submitProvider()}
         confirmLoading={busy}
         okText="保存"
         destroyOnHidden
       >
-        <Form form={providerForm} layout="vertical" preserve={false}>
-          <Form.Item label="id" name="id" rules={[{ required: true, message: 'id 必填（它会成为密钥文件名的一部分）' }]}>
-            <Input disabled={providerModal?.mode === 'edit'} placeholder="例如 deepseek-main（仅字母数字与 . _ -）" />
+        <Form form={providerForm} layout="vertical" preserve={false} initialValues={providerInitialValues}>
+          <Form.Item label="id" name="id" rules={[{ required: true, message: 'id 必填' }]}>
+            <Input disabled={providerModal?.mode === 'edit'} placeholder="例如 my-gateway（仅字母数字与 . _ -）" />
           </Form.Item>
-          <Form.Item label="上游类型" name="type" rules={[{ required: providerModal?.mode === 'create', message: '类型决定注入哪个环境变量' }]}>
-            <Select
-              showSearch
-              placeholder="例如 deepseek / openai / anthropic"
-              options={['deepseek', 'openai', 'anthropic', 'openrouter', 'groq'].map((v) => ({ value: v, label: v }))}
-            />
+          <Form.Item label="展示名" name="name">
+            <Input placeholder="可选，例如「内网网关」" />
+          </Form.Item>
+          <Form.Item label="协议" name="protocol" rules={[{ required: true, message: '协议必填' }]}>
+            <Select options={PROTOCOLS} />
+          </Form.Item>
+          <Form.Item label="端点" name="base_url" extra="OpenAI 兼容端点；留空 = 缺端点，界面会提示，且清单不会下发">
+            <Input placeholder="https://llm.internal/v1" autoComplete="off" />
           </Form.Item>
           <Form.Item
             label={providerModal?.mode === 'edit' ? '密钥（留空 = 不改）' : '密钥'}
-            name="key"
-            extra="密钥只写不读回；保存后要等下一个轮次边界才会被会话拿到"
+            name="api_key"
+            extra="密钥只写不读回；是否需要等下一轮由平台如实回带"
           >
             <Input.Password placeholder="sk-…" autoComplete="off" />
           </Form.Item>
+          {providerModal?.mode === 'edit' && (
+            <Form.Item name="api_key_clear" valuePropName="checked">
+              <Checkbox>清除已存密钥</Checkbox>
+            </Form.Item>
+          )}
           <Form.Item label="备注" name="note">
             <Input placeholder="例如「主账号」" />
           </Form.Item>
-          {schemaRuntimes.length > 0 && (
-            <Collapse
-              ghost
-              size="small"
-              items={schemaRuntimes.map((rt) => ({
-                key: rt.id,
-                label: `运行时参数 · ${rt.name || rt.id}`,
-                children: (
-                  <div className="fg-projfields">
-                    <div className="fg-diffnote">
-                      {rt.provider_projection?.note}
-                      「未知键」会原样保留，平台只校验它认识的字段。
-                    </div>
-                    {(rt.provider_projection?.fields ?? []).map((f) => (
-                      <Form.Item
-                        key={f.name}
-                        label={`${f.name}${f.required ? '' : '（可选）'}${f.type === 'object' ? ' · JSON' : ''}`}
-                        name={projectionFieldName(rt.id, f.name)}
-                        extra={f.note}
-                      >
-                        {f.type === 'object'
-                          ? <Input.TextArea rows={3} placeholder='{"key":"value"}' autoComplete="off" />
-                          : <Input placeholder={f.note} autoComplete="off" />}
-                      </Form.Item>
-                    ))}
-                  </div>
-                ),
-              }))}
-            />
-          )}
         </Form>
       </Modal>
 
       {/* ——— 模型表单 ——— */}
       <Modal
         open={modelModal !== null}
-        title={modelModal?.mode === 'create' ? `新建模型 · ${runtimeId}` : '编辑模型'}
+        title={modelModal?.mode === 'create' ? '新建模型' : '编辑模型'}
         onCancel={() => setModelModal(null)}
         onOk={() => void submitModel()}
         confirmLoading={busy}
         okText="保存"
         destroyOnHidden
       >
-        <Form form={modelForm} layout="vertical" preserve={false}>
-          <Form.Item label="供应商" name="provider_id" rules={[{ required: true, message: '必须挂靠在一条凭据下' }]}>
-            <Select
-              disabled={modelModal?.mode === 'edit'}
-              placeholder="选择一条供应商凭据"
-              options={providerOptions}
-            />
+        <Form form={modelForm} layout="vertical" preserve={false} initialValues={modelInitialValues}>
+          <Form.Item label="供应商" name="vendor" rules={[{ required: true, message: '必须挂在一个供应商下' }]}>
+            <Select disabled={modelModal?.mode === 'edit'} placeholder="选择一个供应商" options={vendorOptions} />
           </Form.Item>
-          <Form.Item label="模型 id" name="model_id" rules={[{ required: true, message: '模型 id 必填' }]}>
-            <Input disabled={modelModal?.mode === 'edit'} placeholder="底座侧认的模型 id，例如 deepseek-v4-flash" />
+          <Form.Item label="上游模型 id" name="model_id" rules={[{ required: true, message: '模型 id 必填' }]}>
+            <Input disabled={modelModal?.mode === 'edit'} placeholder="发给端点的模型 id，例如 gpt-4o-mini" />
           </Form.Item>
-          <Form.Item label="显示名" name="name" extra="只影响平台呈现与配置里的 name；改不动底座候选里的路由前缀">
+          <Form.Item label="展示名" name="name" extra="只影响平台呈现；留空则显示上游模型 id">
             <Input placeholder="可选" />
           </Form.Item>
-          <Space size={24}>
-            <Form.Item label="在该底座隐藏" name="hidden" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label="置顶" name="pinned" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label="设为默认" name="is_default" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-          </Space>
-          <div className="fg-diffnote">
-            「隐藏」只影响平台的选择器，**不会**把模型从底座删掉；「置顶」只改平台列表顺序。
-            两者都不下发。
-          </div>
+          <Form.Item label="备注" name="note">
+            <Input placeholder="可选" />
+          </Form.Item>
         </Form>
       </Modal>
     </div>

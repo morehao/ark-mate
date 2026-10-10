@@ -13,17 +13,21 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// ——— 平台模型清单的写面（v11 M5）：CRUD + 每 runtime 一个默认 + 两条通道的生效回执 ———
+// ——— 应用层模型清单的写面（v12）：CRUD + **单一**默认模型 + 同步触发 ———
 //
-// 清单的存储形态由 `store` 保证两条不变量（见 store/model.go）：`(runtime, provider_id, model_id)`
-// 唯一、每个 runtime 至多一条 `is_default`。本文件负责**业务判据**：runtime 是否承载清单、
-// provider 是否存在、id 生成、以及删除默认模型时的拒绝与出路。
+// 与 v11 的两处根本差别：
 //
-// 清单需要 sqlite 持久层：memory 模式没有 `models` 表（也没有任何平台侧清单载体），
-// 所以那里的写面明确报 40501 而不是"内存生效、盘上没留痕"。
+//	① **没有 runtime 维度**：一份清单投给所有已注册底座（ADR-1/B3）。于是 v11 里那套
+//	   "runtime 是否已声明 ConfigProjection"的前置校验、逐 runtime 的物化、逐 runtime 的默认
+//	   全部消失；
+//	② **默认模型是单一值**（`meta.MetaKeyDefaultModel`，ADR-21）：它是**用户的偏好**，
+//	   不是模型行的属性。`is_default` 只是写面的**触发字段**，不落进资源、不出现在读面
+//	   （A14 的结构断言就钉这一点）。
+//
+// 清单需要 sqlite 持久层：memory 模式没有 `models` 表，所以那里的写面明确报 40501
+// 而不是"内存生效、盘上没留痕"。
 
 // modelListAvailable 清单写面是否可用（sqlite 模式才有清单载体）。
 func (s *Service) modelListAvailable() bool { return s.st != nil }
@@ -34,19 +38,17 @@ func modelListUnavailableErr() error {
 			"模型面仍由运行时派生", nil)
 }
 
-// configProjectionOf 取某 runtime 已解析的模型配置落点（未注册/未声明 → declared=false）。
-func (s *Service) configProjectionOf(runtimeID string) (runtime.ConfigProjectionPath, bool, error) {
-	spec, ok := s.reg.Get(runtimeID)
-	if !ok {
-		return runtime.ConfigProjectionPath{}, false, acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
+// rejectRuntimeField 显式拒收请求体里的 `runtime`（A2）。
+//
+// 为什么宁可报错也不静默忽略：模型不再分底座之后，`runtime` 是一个会让人以为"这条模型只给
+// 某个底座"的陷阱。静默收下就等于承认它有意义——而它什么都不做。
+func rejectRuntimeField(v *string) error {
+	if v == nil {
+		return nil
 	}
-	p, declared, err := runtime.ResolveConfigProjection(spec)
-	if err != nil {
-		return runtime.ConfigProjectionPath{}, false, acl.NewError(acl.ClassUnsupported, "config_projection_invalid",
-			fmt.Sprintf("runtime %q 的模型配置落点声明非法：%v", runtimeID, err), nil)
-	}
-	return p, declared, nil
+	return acl.NewError(acl.ClassRequest, "invalid_param",
+		fmt.Sprintf("`runtime` 不是模型资源的字段（收到 %q）：v12 起一份清单投给所有已注册底座。"+
+			"要只为某个底座准备模型，请改用该底座自己的配置；平台侧不再有逐底座清单", *v), nil)
 }
 
 // CreateModel 新建一条模型条目（POST /models）。
@@ -54,13 +56,8 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	if !s.modelListAvailable() {
 		return nil, modelListUnavailableErr()
 	}
-	_, declared, err := s.configProjectionOf(req.Runtime)
-	if err != nil {
+	if err := rejectRuntimeField(req.Runtime); err != nil {
 		return nil, err
-	}
-	// E3：runtime 必须已声明 ConfigProjection（否则清单没有兑现通道，"写进去也不会生效"）。
-	if !declared {
-		return nil, configProjectionMissingErr(req.Runtime)
 	}
 	if strings.TrimSpace(req.ModelID) == "" {
 		return nil, acl.NewError(acl.ClassRequest, "invalid_param", "model_id 必填", nil)
@@ -69,36 +66,29 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 		return nil, err
 	}
 	id := uuid.NewString()
-	body, err := modelBody(dtomodel.ModelResp{
-		ModelID: req.ModelID, Name: derefString(req.Name), Extra: req.Extra,
-		Hidden: derefBool(req.Hidden), Pinned: derefBool(req.Pinned),
-	})
+	body, err := modelBody(req.Name, req.Note)
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.st.CreateModelDefinition(ctx, id, req.Runtime, req.ProviderID, req.ModelID, body, definitionWriteActor)
+	ok, err := s.st.CreateModelDefinition(ctx, id, req.ProviderID, strings.TrimSpace(req.ModelID), body, definitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, modelExistsErr(req.Runtime, req.ProviderID, req.ModelID)
+		return nil, modelExistsErr(req.ProviderID, req.ModelID)
 	}
-	// 置默认（同事务语义由 store 的 SetDefaultModel 保证：先清同 runtime 再置新）。
 	if derefBool(req.IsDefault) {
-		if ok, err := s.st.SetDefaultModel(ctx, id, definitionWriteActor); err != nil || !ok {
-			if err != nil {
-				return nil, err
-			}
-			return nil, modelNotFoundErr(id)
+		if err := s.st.SetDefaultModelID(ctx, id); err != nil {
+			return nil, err
 		}
 	}
 	resp, err := s.modelResp(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	resp.Effect = s.modelEffect(req.Runtime, derefBool(req.IsDefault))
-	// ② 清单已提交 → 立刻重新生成该 runtime 的配置（T5）。失败不回滚清单（见 tryMaterialize）。
-	if note := s.tryMaterialize(ctx, req.Runtime); note != "" {
+	resp.Effect = s.modelEffect(derefBool(req.IsDefault))
+	// 清单已提交 → 立刻同步给各底座。失败不回滚清单（见 trySyncModels）。
+	if note := s.trySyncModels(ctx); note != "" {
 		resp.Effect.Note = note
 	}
 	return resp, nil
@@ -108,6 +98,9 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error) {
 	if !s.modelListAvailable() {
 		return nil, modelListUnavailableErr()
+	}
+	if err := rejectRuntimeField(patch.Runtime); err != nil {
+		return nil, err
 	}
 	row, found, err := s.st.GetModelDefinition(ctx, id)
 	if err != nil {
@@ -121,52 +114,46 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 		return nil, err
 	}
 	// 指针更新：只改 patch 里出现过的键。
+	name := cur.Name
 	if patch.Name != nil {
-		cur.Name = *patch.Name
+		name = *patch.Name
 	}
-	if patch.Extra != nil {
-		cur.Extra = patch.Extra
+	note := cur.Note
+	if patch.Note != nil {
+		note = *patch.Note
 	}
-	if patch.Hidden != nil {
-		cur.Hidden = *patch.Hidden
-	}
-	if patch.Pinned != nil {
-		cur.Pinned = *patch.Pinned
-	}
-	body, err := modelBody(cur)
-	if err != nil {
-		return nil, err
-	}
-	ok, err := s.st.UpsertModelDefinition(ctx, id, body, row.Revision, definitionWriteActor)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, definitionChangedErr("db:model/" + id)
-	}
-	// 置/清默认是**两个方向**，都必须被处理：只处理 `true` 会让 `is_default:false` 静默无效
-	// （2026-10-10 实测：取消默认后平台仍在下发那个取值，用户只能删掉整条模型才停）。
-	if patch.IsDefault != nil {
-		var ok bool
-		var err error
-		if *patch.IsDefault {
-			ok, err = s.st.SetDefaultModel(ctx, id, definitionWriteActor)
-		} else {
-			ok, err = s.st.ClearDefaultModel(ctx, id, definitionWriteActor)
+	if patch.Name != nil || patch.Note != nil {
+		body, err := modelBody(&name, &note)
+		if err != nil {
+			return nil, err
 		}
+		ok, err := s.st.UpsertModelDefinition(ctx, id, body, row.Revision, definitionWriteActor)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			return nil, modelNotFoundErr(id)
+			return nil, definitionChangedErr("db:model/" + id)
+		}
+	}
+	// 置/清默认是**两个方向**，都必须被处理：只处理 `true` 会让 `is_default:false` 静默无效。
+	if patch.IsDefault != nil {
+		if *patch.IsDefault {
+			if err := s.st.SetDefaultModelID(ctx, id); err != nil {
+				return nil, err
+			}
+		} else if cleared, err := s.st.ClearDefaultModelID(ctx, id); err != nil {
+			return nil, err
+		} else if !cleared {
+			// 它不是默认：幂等无操作（不是错误）。
+			_ = cleared
 		}
 	}
 	resp, err := s.modelResp(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	resp.Effect = s.modelEffect(row.Runtime, patch.IsDefault != nil && *patch.IsDefault)
-	if note := s.tryMaterialize(ctx, row.Runtime); note != "" {
+	resp.Effect = s.modelEffect(patch.IsDefault != nil && *patch.IsDefault)
+	if note := s.trySyncModels(ctx); note != "" {
 		resp.Effect.Note = note
 	}
 	return resp, nil
@@ -174,10 +161,9 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 
 // DeleteModel 删除一条模型条目（DELETE /models/:id）。
 //
-// 幂等；但**若它是该 runtime 的默认模型则拒绝**（40501 `model_is_default` + 可执行出路）：
-// 不静默把默认置空——那会让"平台的默认模型"在一个用户看不见的时刻消失。
-// 删掉一条模型**不会弄坏既有会话**（dsh 逐字：「a saved selection can still submit requests
-// after its catalog entry disappears」），所以这里不需要扫描会话改绑，UI 文案也不该吓唬用户。
+// 幂等。**行为变更（B4）**：v11 里"它是该 runtime 的默认模型"会被 40501 拒绝，v12 **允许删**
+// 并**连带清空默认**——默认是**偏好**，偏好跟着资源消失比拦住用户更合理；清了就说出来
+// （`DefaultCleared`），不静默。
 func (s *Service) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDeleteResp, error) {
 	if !s.modelListAvailable() {
 		return nil, modelListUnavailableErr()
@@ -189,27 +175,27 @@ func (s *Service) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDe
 	if !found {
 		return &dtomodel.ModelDeleteResp{Deleted: false}, nil
 	}
-	if row.IsDefault {
-		return nil, acl.NewError(acl.ClassUnsupported, "model_is_default",
-			fmt.Sprintf("模型条目 %q 是 runtime %q 的默认模型，不能直接删除：那会让平台的默认模型在你看不见的时刻消失。"+
-				"先把它设为默认的那个换成另一条（PATCH /models/<其它条目> {\\\"is_default\\\":true}），再删这一条",
-				modelIDOf(row.Body), row.Runtime), nil)
-	}
 	ok, err := s.st.DeleteModelDefinition(ctx, id, row.Revision, definitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
-	// 删掉一条也要重新物化：底座的配置里不能继续留着它。
-	s.tryMaterialize(ctx, row.Runtime)
-	return &dtomodel.ModelDeleteResp{Deleted: ok}, nil
+	resp := &dtomodel.ModelDeleteResp{Deleted: ok}
+	if cleared, cerr := s.st.ClearDefaultModelID(ctx, id); cerr != nil {
+		return nil, cerr
+	} else if cleared {
+		resp.DefaultCleared = true
+	}
+	// 删掉一条也要重新同步：底座的配置里不能继续留着它。
+	s.trySyncModels(ctx)
+	return resp, nil
 }
 
-// ListModels 列出平台清单（runtimeID 为空 = 全部）。
-func (s *Service) ListModels(ctx context.Context, runtimeID string) ([]dtomodel.ModelResp, error) {
+// ListModels 列出全部平台清单（**不分页**：清单上限 200 条，全量返回）。
+func (s *Service) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) {
 	if !s.modelListAvailable() {
 		return []dtomodel.ModelResp{}, nil
 	}
-	rows, err := s.st.ListModelDefinitions(ctx, runtimeID)
+	rows, err := s.st.ListModelDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -221,37 +207,54 @@ func (s *Service) ListModels(ctx context.Context, runtimeID string) ([]dtomodel.
 		}
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Runtime != out[j].Runtime {
-			return out[i].Runtime < out[j].Runtime
-		}
-		return out[i].ID < out[j].ID
-	})
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
 // DefaultModelValueFor 返回某 runtime 当前默认模型的**不透明值**（无默认 → 空串）。
 //
 // 这是 T2 快路径（会话创建时下发）与 T5 慢路径（物化进配置文件）**共用的取值面**：
-// 两条路读同一个 `is_default`，所以"底座自己认的默认"与"平台下发的默认"逐字同源。
+// 两条路读同一个 `meta.default_model`，所以"底座自己认的默认"与"平台下发的默认"逐字同源。
+//
+// v12 起默认是**单一值**，所以这里没有"某 runtime 的默认"这回事——只是把同一个平台模型 id
+// 按该 runtime 的生成规则折成它认得不透明值。
 func (s *Service) DefaultModelValueFor(ctx context.Context, runtimeID string) (string, error) {
-	if !s.modelListAvailable() {
-		return "", nil
-	}
-	row, found, err := s.st.DefaultModelDefinition(ctx, runtimeID)
-	if err != nil || !found {
+	row, ok, err := s.defaultModelRow(ctx)
+	if err != nil || !ok {
 		return "", err
 	}
-	return modelValueFor(runtimeID, row.ProviderID, modelIDOf(row.Body))
+	v, verr := modelValueFor(runtimeID, row.ProviderID, row.ModelID)
+	if verr != nil {
+		// 该 runtime 没有声明模型值形态 = **它不消费平台默认模型**（不是失败）：
+		// 回空串表示"不下发"，与会话侧"没有默认"逐字同一形态。
+		return "", nil
+	}
+	return v, nil
 }
 
-// modelValueFor 平台清单 → 运行时认得的不透明值（**两条算法必须共用它**，见 E6）。
+// defaultModelRow 读出默认模型那一行（未设 / 指向已删模型 → (nil,false,nil)）。
+func (s *Service) defaultModelRow(ctx context.Context) (*store.ModelDefinition, bool, error) {
+	if s.st == nil {
+		return nil, false, nil
+	}
+	id, ok, err := s.st.DefaultModelID(ctx)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	row, found, err := s.st.GetModelDefinition(ctx, id)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	return row, true, nil
+}
+
+// modelValueFor 平台清单 → 运行时认得的不透明值（**两条算法必须共用它**）。
 //
 //	dsh（deepseekharness）：`JSON.stringify([provider, model])`（ACP 的 modelValue()）
 //	opencode：`<provider>/<model>`
 //
 // 为什么不解析运行时的值反推：那是把"事实"当"意图"。平台只存生成 value 的输入，
-// 生成规则在这里唯一一份——T5 写进配置文件的值与 T2 下发给会话的值因此不可能分叉。
+// 生成规则在这里唯一一份——下发与物化因此不可能分叉。
 func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
 	switch runtimeID {
 	case "deepseekharness":
@@ -270,21 +273,16 @@ func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
 
 // ——— 内部工具 ———
 
-// modelBody 把一条清单条目编成正文 JSON（platform 拥有 `model_id`/`name`/`extra`/`hidden`/`pinned`；
-// `is_default` 是**列**，不进正文，避免双写漂移）。
-func modelBody(m dtomodel.ModelResp) (string, error) {
-	body := map[string]any{"model_id": m.ModelID}
-	if m.Name != "" {
-		body["name"] = m.Name
+// modelBody 把一条清单条目编成正文 JSON（v12 只留 `name`/`note`）。
+//
+// `model_id` **不进正文**：它是列（唯一索引要它），双写必然漂移。
+func modelBody(name, note *string) (string, error) {
+	body := map[string]any{}
+	if name != nil && *name != "" {
+		body["name"] = *name
 	}
-	if len(m.Extra) > 0 {
-		body["extra"] = m.Extra
-	}
-	if m.Hidden {
-		body["hidden"] = true
-	}
-	if m.Pinned {
-		body["pinned"] = true
+	if note != nil && *note != "" {
+		body["note"] = *note
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -293,30 +291,19 @@ func modelBody(m dtomodel.ModelResp) (string, error) {
 	return string(b), nil
 }
 
-// modelRespFromRow 把一行模型条目投影成对外表示（含生成的 `value`）。
+// modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。
 func modelRespFromRow(row *store.ModelDefinition) (dtomodel.ModelResp, error) {
 	var body map[string]any
 	if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
 		return dtomodel.ModelResp{}, fmt.Errorf("manager: 模型条目 %s 的正文非法: %w", row.ID, err)
 	}
 	out := dtomodel.ModelResp{
-		ID: row.ID, Runtime: row.Runtime, ProviderID: row.ProviderID,
-		ModelID:   bodyString(body, "model_id"),
-		Name:      bodyString(body, "name"),
-		Hidden:    bodyBool(body, "hidden"),
-		Pinned:    bodyBool(body, "pinned"),
-		IsDefault: row.IsDefault,
-		Revision:  row.Revision,
-	}
-	if extra, ok := body["extra"].(map[string]any); ok {
-		out.Extra = extra
+		ID: row.ID, ProviderID: row.ProviderID, ModelID: row.ModelID,
+		Name: bodyString(body, "name"), Note: bodyString(body, "note"),
+		Revision: row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
 		out.UpdatedAt = model.FormatTime(row.UpdatedAt)
-	}
-	// 生成的 value 失败不是错误：某些 runtime 的形态未声明时它为空（前端据此不提供"复制 value"）。
-	if v, err := modelValueFor(row.Runtime, row.ProviderID, out.ModelID); err == nil {
-		out.Value = v
 	}
 	return out, nil
 }
@@ -337,10 +324,10 @@ func (s *Service) modelResp(ctx context.Context, id string) (*dtomodel.ModelResp
 	return &out, nil
 }
 
-// requireProvider 校验挂靠的凭据存在（不存在 → 40401 provider_not_found）。
+// requireProvider 校验挂靠的供应商存在（不存在 → 40401 provider_not_found）。
 func (s *Service) requireProvider(ctx context.Context, providerID string) error {
 	if strings.TrimSpace(providerID) == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_param", "provider_id 必填（模型条目必须挂靠在一条凭据下）", nil)
+		return acl.NewError(acl.ClassRequest, "invalid_param", "provider_id 必填（模型必须挂靠在一条供应商下）", nil)
 	}
 	if s.st != nil {
 		if _, found, err := s.st.GetProviderDefinition(ctx, providerID); err != nil {
@@ -354,26 +341,14 @@ func (s *Service) requireProvider(ctx context.Context, providerID string) error 
 	s.mu.Unlock()
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "provider_not_found",
-			fmt.Sprintf("provider 档案 %q 不存在：模型条目必须挂靠在一条已登记的凭据下", providerID), nil)
+			fmt.Sprintf("供应商 %q 不存在：模型必须挂靠在一条已登记的供应商下", providerID), nil)
 	}
 	return nil
 }
 
 // modelEffect 计算模型清单改动的生效面回执（只读、无副作用；判据与代际裁决同源）。
-func (s *Service) modelEffect(runtimeID string, defaultTouched bool) *dtomodel.ModelEffect {
-	channels := []string{"config_write"}
-	effect := "next_process"
-	if defaultTouched {
-		// 默认模型还有 T2 那条快路径：新会话创建时平台立刻下发——**这是 dsh 首版（T5 只读）
-		// 唯一能兑现默认的通道**，所以它必须在回执里出现，不能被 T5 的 next_process 盖住。
-		channels = append(channels, "session_config")
-		effect = "next_session"
-	}
-	eff := &dtomodel.ModelEffect{
-		Channels:          channels,
-		Effect:            effect,
-		AppliesToRuntimes: []string{runtimeID},
-	}
+func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
+	eff := &dtomodel.ModelEffect{Effect: "next_session"}
 	o := s.orch
 	s.mu.Lock()
 	recs := make([]ConversationRec, 0, len(s.conversations))
@@ -385,7 +360,7 @@ func (s *Service) modelEffect(runtimeID string, defaultTouched bool) *dtomodel.M
 	s.mu.Unlock()
 	for i := range recs {
 		agent, ok := s.AgentByID(recs[i].AgentID)
-		if !ok || !containsString(agent.Runtimes, runtimeID) {
+		if !ok || len(agent.Runtimes) == 0 {
 			continue
 		}
 		eff.AffectedConversations++
@@ -400,42 +375,22 @@ func (s *Service) modelEffect(runtimeID string, defaultTouched bool) *dtomodel.M
 			eff.Deferred++
 		}
 	}
-	switch {
-	case defaultTouched && eff.AffectedConversations == 0:
-		eff.Note = "已保存：新会话创建时由平台下发这个默认模型；引用该 runtime 的会话会在下一个会话进程读到它"
-	case defaultTouched:
+	if defaultTouched {
 		eff.Note = "已保存：新会话创建时由平台下发这个默认模型（立即）；既有会话在下一个会话进程读到配置。**不是「已生效」**"
-	default:
+	} else {
 		eff.Note = "已保存，将在下一个会话进程生效（配置在进程启动时读）；此刻底座的模型目录仍是旧的那份"
 	}
 	return eff
 }
 
-// configProjectionMissingErr runtime 未声明模型配置落点（清单没有兑现通道）。
-func configProjectionMissingErr(runtimeID string) error {
-	return acl.NewError(acl.ClassUnsupported, "config_projection_unsupported",
-		fmt.Sprintf("runtime %q 未声明模型配置落点（ConfigProjection）：平台清单没有兑现通道，"+
-			"写进去也不会被这个底座认领", runtimeID), nil)
-}
-
-func modelExistsErr(runtimeID, providerID, modelID string) error {
+func modelExistsErr(providerID, modelID string) error {
 	return acl.NewError(acl.ClassLimit, "model_exists",
-		fmt.Sprintf("runtime %q 下已经声明过模型 %q（挂靠在 %q）：同一条模型在同一个底座上只能有一行",
-			runtimeID, modelID, providerID), nil)
+		fmt.Sprintf("供应商 %q 下已经声明过模型 %q：同一条模型在同一个供应商下只能有一行",
+			providerID, modelID), nil)
 }
 
 func modelNotFoundErr(id string) error {
 	return acl.NewError(acl.ClassRequest, "model_not_found", fmt.Sprintf("未知模型条目 %q", id), nil)
-}
-
-// modelIDOf 从正文里取 model_id（清单的唯一性判据之一）。
-func modelIDOf(body string) string { return store.ModelIDOfBody(body) }
-
-func derefString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
 }
 
 func derefBool(p *bool) bool {
@@ -443,15 +398,6 @@ func derefBool(p *bool) bool {
 		return false
 	}
 	return *p
-}
-
-func bodyBool(body map[string]any, key string) bool {
-	v, ok := body[key]
-	if !ok {
-		return false
-	}
-	b, _ := v.(bool)
-	return b
 }
 
 func containsString(list []string, want string) bool {
@@ -465,31 +411,35 @@ func containsString(list []string, want string) bool {
 
 // ——— 派生只读：`GET /agents` 的 `default_model` ———
 
-// defaultModelByRuntime 读一次库里各 runtime 的默认模型（`models.is_default`）。
+// defaultModelByRuntime 读一次库里的默认模型（v12 是**单一值**，这里为保持既有 wire 形状
+// 把它摊到每个已注册 runtime 上）。
 //
-// 读一次就够：`models` 是几十行，而 `GET /agents` 要对每个 agent 求交——逐 agent 查库会让
-// 这个只读接口的 IO 次数随 agent 数增长。返回 nil = 没有清单载体（memory 模式）或读失败
-// （失败只告警：`default_model` 是**呈现**，不该因为它读不到而让 agent 列表打不开）。
+// 为什么摊：`GET /agents` 的 `default_model` 是逐 runtime 的 map（那是 agent 读面，不是
+// 「设置 · 模型」的用户面，A14 的断言只针对后者）。读一次就够：`models` 是几十行，
+// 而 `GET /agents` 要对每个 agent 求交——逐 agent 查库会让这个只读接口的 IO 次数随 agent 数增长。
 func (s *Service) defaultModelByRuntime(ctx context.Context) map[string]string {
 	if s.st == nil {
 		return nil
 	}
-	rows, err := s.st.ListDefaultModelDefinitions(ctx)
+	row, ok, err := s.defaultModelRow(ctx)
 	if err != nil {
 		slog.Warn("models: 读默认模型失败（本次 /agents 的 default_model 为空）", "err", err)
 		return nil
 	}
-	out := make(map[string]string, len(rows))
-	for i := range rows {
-		out[rows[i].Runtime] = store.ModelIDOfBody(rows[i].Body)
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	for _, spec := range s.reg.List() {
+		out[spec.ID] = row.ModelID
 	}
 	return out
 }
 
-// derivedDefaultModels 按 agent 的 `runtimes[]` 与各 runtime 的默认模型求交。
+// derivedDefaultModels 按 agent 的 `runtimes[]` 与默认模型求交。
 //
 // 返回 nil 而不是空 map：`omitempty` 让"这个 agent 没有任何默认"在 wire 上是一个**缺席的键**
-// 而不是 `{}`（两者前端都要能处理，但少一种形状少一类边界）。
+// 而不是 `{}`。
 func derivedDefaultModels(runtimes []string, defaults map[string]string) map[string]string {
 	if len(defaults) == 0 {
 		return nil
@@ -506,11 +456,10 @@ func derivedDefaultModels(runtimes []string, defaults map[string]string) map[str
 	return out
 }
 
-// rejectDerivedDefaultModel 显式拒绝 agent 写面里的 `default_model`（E8）。
+// rejectDerivedDefaultModel 显式拒绝 agent 写面里的 `default_model`。
 //
 // 为什么宁可报错也不静默忽略：agent 的 body 会**原样保留未知键**（落盘纪律），所以静默收下
-// 会让它变成一个「写了、存了、什么都不发生」的字段——正是业务风险 B1 要防的那种骗人。
-// `null` 视为"没带"（客户端把可选键显式置空是常见写法，不该因此报错）。
+// 会让它变成一个「写了、存了、什么都不发生」的字段。`null` 视为"没带"。
 func rejectDerivedDefaultModel(raw json.RawMessage) error {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
@@ -518,5 +467,5 @@ func rejectDerivedDefaultModel(raw json.RawMessage) error {
 	}
 	return acl.NewError(acl.ClassRequest, "default_model_is_derived",
 		"`default_model` 是平台清单的**派生只读**投影，不能写在 agent 上："+
-			"默认模型归属于 (platform, runtime)，改它请到「设置 · 模型」里点星号（改的是该 runtime 的 models.is_default）", nil)
+			"默认模型归属于平台清单，改它请到「设置 · 模型」里点星号（改的是 meta 的单一 default_model）", nil)
 }

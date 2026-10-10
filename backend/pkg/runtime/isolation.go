@@ -141,6 +141,16 @@ func (r *Registry) ApplyIsolationEnv(home string) []string {
 	}
 	// map 迭代无序 → 返回值排序，日志与测试才有稳定输出。
 	sort.Strings(applied)
+
+	// **落点要等隔离 env 应用之后才可解析**，所以同步实现在这里再登记一次。
+	//
+	// 时序事实（`DefaultRegistry()` 是逐字实现在装配最前面的）：`Spec.ModelConfig.Root` 用的是
+	// `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}`，而这两个变量正是本函数注入的。`DefaultRegistry()`
+	// 里那次登记因此**必然解析失败**（进程环境里没有它们，而解析刻意不回落进程环境——回落到用户
+	// 自己的 home 是隔离纪律的硬红线）。所以装机期调用本函数之后重跑一次登记：
+	// `registerBuiltinSyncers` 幂等（`RegisterSyncer` 同 ID 覆盖），解析不了只会 `continue`。
+	// 少了这一步，`sync[]` 会永远如实报 `unsupported`——用户看到"保存成功"而底座永远拿不到清单。
+	registerBuiltinSyncers(r)
 	return applied
 }
 

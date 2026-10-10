@@ -41,7 +41,8 @@ func TestProbeDefaultMakesZeroUpstreamRequests(t *testing.T) {
 	ctx := context.Background()
 	svc := probeSvc(t)
 	key := "sk-probe"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Type: "openai", Key: &key}); err != nil {
+	baseURL := "https://api.openai.com/v1"
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", BaseURL: &baseURL, APIKey: &key}); err != nil {
 		t.Fatal(err)
 	}
 	tr := &countingTransport{inner: http.DefaultTransport}
@@ -57,7 +58,7 @@ func TestProbeDefaultMakesZeroUpstreamRequests(t *testing.T) {
 	for _, c := range resp.Checks {
 		names = append(names, c.Name)
 	}
-	want := []string{"exists", "type", "secret", "refs", "injection", "catalog"}
+	want := []string{"exists", "protocol", "base_url", "secret", "refs", "delivery", "catalog"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("本地段检查项不符: got %v want %v", names, want)
 	}
@@ -124,30 +125,15 @@ func TestProbeUpstreamFourOutcomes(t *testing.T) {
 	})
 }
 
-// probeUpstreamAgainst 用给定 URL 覆盖该 type 的登记端点，跑一次上游段。
-func probeUpstreamAgainst(t *testing.T, url, typ, key string) dtoprovider.ProviderCheckResp {
+// probeUpstreamAgainst 用给定 URL 当作该供应商的**资源端点**，跑一次上游段。
+//
+// v12 起上游段按**资源字段**探（`GET <base_url>/models`），不再有 v11 那张"type → 厂商 URL"
+// 的登记表——所以这里直接构造一条带 `BaseURL` 的档案，没有可覆盖的全局状态。
+func probeUpstreamAgainst(t *testing.T, url, protocol, key string) dtoprovider.ProviderCheckResp {
 	t.Helper()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	if url != "" {
-		old, had := upstreamEndpoints[typ]
-		upstreamEndpoints[typ] = upstreamEndpoint{URL: url, ModelsPath: propModelsPath(old, had)}
-		defer func() {
-			if had {
-				upstreamEndpoints[typ] = old
-			} else {
-				delete(upstreamEndpoints, typ)
-			}
-		}()
-	}
-	d := &providerDef{ID: "probe-target", Type: typ, Key: key}
+	d := &providerDef{ID: "probe-target", Protocol: protocol, BaseURL: url, Key: key}
 	return svc.probeUpstream(context.Background(), d, probeOptions{})
-}
-
-func propModelsPath(old upstreamEndpoint, had bool) string {
-	if had && old.ModelsPath != "" {
-		return old.ModelsPath
-	}
-	return "data"
 }
 
 // TestProbeRedactsSecretInFailureText 上游失败文案必须先过 redact：密钥真值不能出现在响应里。
@@ -159,19 +145,17 @@ func TestProbeRedactsSecretInFailureText(t *testing.T) {
 	const secret = "sk-super-secret-value-1234567890"
 	svc := probeSvc(t)
 	key := secret
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Type: "openai", Key: &key}); err != nil {
+	baseURL := "https://api.openai.com/v1"
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", BaseURL: &baseURL, APIKey: &key}); err != nil {
 		t.Fatal(err)
 	}
 	// 先让 redact 登记这个真值（生产路径里 providerEnvFor 会做这件事）。
-	_ = svc.providerEnvFor("p1")
+	_ = svc.providerEnvFor("opencode", "p1")
 
 	// 一个会把密钥回显进错误里的假 transport（模拟某些库把 URL/头拼进错误）。
 	tr := &countingTransport{inner: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return nil, &leakyError{msg: "Get \"https://api.openai.com/v1/models?key=" + secret + "\": dial tcp: timeout"}
 	})}
-	old := upstreamEndpoints["openai"]
-	upstreamEndpoints["openai"] = upstreamEndpoint{URL: "https://api.openai.com/v1/models", ModelsPath: "data"}
-	defer func() { upstreamEndpoints["openai"] = old }()
 
 	resp, err := svc.probeProvider(ctx, "p1", dtoprovider.ProviderProbeReq{Upstream: true}, probeOptions{transport: tr})
 	if err != nil {

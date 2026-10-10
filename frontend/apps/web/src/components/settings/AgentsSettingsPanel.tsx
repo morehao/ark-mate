@@ -416,7 +416,7 @@ export function AgentsSettingsPanel() {
           style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 18px', fontSize: 12.5 }}
         >
           <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{p.id}</span>
-          <Pill>{p.type}</Pill>
+          <Pill>{p.protocol}</Pill>
           <Tag style={{ marginInlineEnd: 0, fontSize: 11 }} color={p.has_key ? 'green' : 'default'}>
             {p.has_key ? '密钥已存' : '无密钥'}
           </Tag>
@@ -432,12 +432,12 @@ export function AgentsSettingsPanel() {
       ))}
 
       {/* —— 默认模型（派生只读）——
-          它**没有写入方**：值是 `GET /agents` 按 `models.is_default` 与 `agent.runtimes[]` 求交算出来的，
-          所以这里只呈现 + 一句指路，不给输入框（给了就等于许诺一个平台不会存的值）。 */}
+          它**没有写入方**：值是 `GET /agents` 把「设置 · 模型」里那个唯一默认摊到 `agent.runtimes[]`
+          上算出来的，所以这里只呈现 + 一句指路，不给输入框（给了就等于许诺一个平台不会存的值）。 */}
       <div style={{ padding: '20px 18px 8px' }}>
         <b style={{ fontSize: 13 }}>默认模型（只读）</b>
         <span style={{ marginLeft: 8, fontSize: 11.5, color: tokens.textPlaceholder }}>
-          由「设置 · 模型」里每个底座的那个星号决定
+          由「设置 · 模型」里那个默认模型决定
         </span>
       </div>
       <div style={{ padding: '0 18px 12px' }}>

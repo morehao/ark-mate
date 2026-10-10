@@ -9,42 +9,31 @@ import (
 	"gorm.io/gorm"
 )
 
-// 本文件是**平台模型清单**事实源（v11，设置 · 模型）的门面。
+// 本文件是**平台模型清单**事实源（v12）的门面。
 //
-// 它与 providers 面共用同一条提交路径（`commitDefinitionChange`：行 CAS + 同事务一条审计），
-// 但多两条本表专有的不变量：
+// 与 v11 的差别只有一处，但它是本次改造的核心：**模型不再带 runtime 维度**。
+// 身份从三元组 `(runtime, provider_id, model_id)` 塌成两元组 `(provider_id, model_id)`，
+// 后者由库级唯一索引真实表达（不是"提交事务里先查后写"那种约定）。
 //
-//  1. **`(runtime, provider_id, model_id)` 唯一**。前两列是列、`model_id` 在 `body` 里，
-//     所以库级唯一索引表达不了——判据是**提交事务内**的一次存在性查询（不是"先查后写"，
-//     那中间有窗口）。
-//  2. **每个 runtime 至多一条 `is_default`**。判据是同一事务里的两条语句
-//     （先 `ClearDefaults(runtime)` 再 `SetDefaultCAS`），单表两句在 `commitDefinitionChange`
-//     的事务里天然原子。
+// 另外两个 v11 的"每 runtime"机制随之消失：
+//   - `is_default` 列 → `meta.MetaKeyDefaultModel` 的**单一值**（ADR-21：用户面只有一个默认）；
+//   - `model_id` 在 body 里 → `model_id` 是**列**（唯一索引要它）。
 //
-// 两条都刻意**不由调用方维持**：它们是数据不变量，落在写面的唯一入口上才不会漏。
+// 定义行仍走 `commitDefinitionChange`（行 CAS + 同事务一条审计）：这是"一次写面 = 一行 + 一条审计"
+// 的既有纪律，与 skills/mcp_servers/agents 同形。
 
 // CreateModelDefinition 新建一条模型条目 + 一条审计，同事务。
 //
 // 返回 false 的两种情形都是"没写进去，也没有审计"：
-//   - 同 `(runtime, provider_id, model_id)` 已存在（调用方翻成 `model_exists`(40901)）；
+//   - 同 `(provider_id, model_id)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
 //   - 主键 `id` 已存在（并发新建抢先，同一个对外表现）。
 func (s *Store) CreateModelDefinition(
-	ctx context.Context, id, runtimeID, providerID, modelID, body, actor string,
+	ctx context.Context, id, providerID, modelID, body, actor string,
 ) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionCreate, body, 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
-			txDao := s.models.WithTx(tx)
-			rows, err := txDao.ListByProvider(ctx, providerID)
-			if err != nil {
-				return false, err
-			}
-			for i := range rows {
-				if rows[i].Runtime == runtimeID && ModelIDOfBody(rows[i].Body) == modelID {
-					return false, nil
-				}
-			}
-			return txDao.CreateCAS(ctx, &model.ModelDefinition{
-				ID: id, Runtime: runtimeID, ProviderID: providerID,
+			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelDefinition{
+				ID: id, ProviderID: providerID, ModelID: modelID,
 				Body: body, Revision: 1, UpdatedAt: now,
 			})
 		})
@@ -52,9 +41,8 @@ func (s *Store) CreateModelDefinition(
 
 // UpsertModelDefinition 覆盖一条模型条目的正文 + 一条审计，同事务。
 //
-// `DefinitionDao.UpdateCAS` 只碰 `body/revision/updated_at`，**不动 `is_default`**——
-// 于是"改别名/隐藏/置顶"不会顺手把默认位清掉（这正是列与正文分开的一处收益）。
-// 置默认有它自己的入口（SetDefaultModel）。
+// 只碰 `body/revision/updated_at`（`DefinitionDao.UpdateCAS` 的既有语义）——`provider_id` /
+// `model_id` 是身份，改它们等于换一条资源，不在覆盖语义里。
 func (s *Store) UpsertModelDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionUpdate, body, expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
@@ -64,9 +52,8 @@ func (s *Store) UpsertModelDefinition(ctx context.Context, id, body string, expe
 
 // DeleteModelDefinition 删除一条模型条目 + 一条审计，同事务。
 //
-// **不做"删掉默认就顺手置空"的兜底**：删除默认模型必须在写面被拒（`model_is_default`(40501)），
-// 否则「平台的默认模型」会在一个用户看不见的时刻消失（设计「接口设计」的 DELETE 行）。
-// 判据由 manager 在读→删窗口里给出（它持有行的 revision）。
+// 它**不**负责清默认：清不清是业务判据（v12 的语义是"允许删 + 连带清空默认"），
+// 默认的落地由 manager 在同一请求里调 `ClearDefaultModelID`。
 func (s *Store) DeleteModelDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionDelete, "", expectedRev,
 		func(tx *gorm.DB, _ time.Time) (bool, error) {
@@ -79,97 +66,63 @@ func (s *Store) GetModelDefinition(ctx context.Context, id string) (*ModelDefini
 	return s.models.Get(ctx, id)
 }
 
-// ListModelDefinitions 列出模型清单（runtimeID 为空 = 全部；id 升序）。
-func (s *Store) ListModelDefinitions(ctx context.Context, runtimeID string) (model.ModelDefinitionList, error) {
-	return s.models.ListByRuntime(ctx, runtimeID)
+// ListModelDefinitions 列出全部模型条目（id 升序）。
+//
+// v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
+func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelDefinitionList, error) {
+	return s.models.ListAll(ctx)
 }
 
-// ListModelDefinitionsByProvider 列出挂靠在某条 provider 下的条目（删除保护的引用判据）。
+// ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（删除保护的引用判据）。
 func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
 	return s.models.ListByProvider(ctx, providerID)
 }
 
-// ListDefaultModelDefinitions 列出全部 runtime 的默认模型（跨 runtime，runtime 升序）。
-func (s *Store) ListDefaultModelDefinitions(ctx context.Context) (model.ModelDefinitionList, error) {
-	return s.models.ListDefaults(ctx)
+// FindModelDefinition 按 `(provider_id, model_id)` 取一条（`model_exists` 判定）。
+func (s *Store) FindModelDefinition(ctx context.Context, providerID, modelID string) (*ModelDefinition, bool, error) {
+	return s.models.GetByProviderModel(ctx, providerID, modelID)
 }
 
-// DefaultModelDefinition 读某 runtime 的默认模型（不存在 → (nil, false, nil)）。
+// ——— 默认模型：`meta` 里的单一值（ADR-21） ———
+
+// DefaultModelID 读默认模型（**一个**平台模型 id；未设 → ("", false, nil)）。
 //
-// 它是 T2 快路径（会话创建时下发默认模型）与 T5 慢路径（物化进配置文件）**共用的取值面**：
-// 两条路读同一个 `is_default`，所以"底座自己认的默认"与"平台下发的默认"逐字同源。
-func (s *Store) DefaultModelDefinition(ctx context.Context, runtimeID string) (*ModelDefinition, bool, error) {
-	return s.models.GetDefault(ctx, runtimeID)
+// 它不带 runtime 维度：交付时由编排层把它派生成每个底座各自的默认（`Set.DefaultModel`）。
+// "读出来那个 id 还存在吗"由调用方判——模型被删掉而 meta 还留着旧值是一个**可报**的状态
+// （doctor 报它、交付时忽略它），不该由读面替用户悄悄改写偏好。
+func (s *Store) DefaultModelID(ctx context.Context) (string, bool, error) {
+	v, ok, err := s.meta.Get(ctx, model.MetaKeyDefaultModel)
+	if err != nil || !ok || v == "" {
+		return "", false, err
+	}
+	return v, true, nil
 }
 
-// SetDefaultModel 把一条模型置为该 runtime 的默认（清旧默认 + 置新默认 + 一条审计，同事务）。
+// SetDefaultModelID 把默认模型设成某一条（覆盖式：meta 是 KV，天然单一值）。
+func (s *Store) SetDefaultModelID(ctx context.Context, id string) error {
+	return s.meta.Set(ctx, model.MetaKeyDefaultModel, id)
+}
+
+// ClearDefaultModelID 清除默认模型——**仅当它当前正是 id**（删模型时的连带清空）。
 //
-// 返回 false = 行不存在，或 CAS 未中（有人在这中间改过这一行）→ 调用方翻成
-// `model_not_found`(40401) / `definition_changed`(40901)。
-// 已经是默认 → 直接返回 true（幂等，不写无意义的一版）。
-//
-// 审计的 digest 是**正文**的摘要，而 `is_default` 在列上——所以"置默认"这一版审计里
-// digest 与上一版相同。这是刻意的取舍：拿 body 摘要当审计指纹的既有纪律不破，
-// 而"谁在什么时候把默认换成了哪个"由审计的 `at`/`actor` 与 `capability_id` 回答。
-func (s *Store) SetDefaultModel(ctx context.Context, id, actor string) (bool, error) {
-	row, found, err := s.models.Get(ctx, id)
-	if err != nil {
+// 为什么带条件：删除是并发动作，"删 A"不该把用户刚设的默认 B 一起清掉。返回是否真的清了。
+func (s *Store) ClearDefaultModelID(ctx context.Context, id string) (bool, error) {
+	cur, ok, err := s.DefaultModelID(ctx)
+	if err != nil || !ok || cur != id {
 		return false, err
 	}
-	if !found {
-		return false, nil
-	}
-	if row.IsDefault {
-		return true, nil
-	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionUpdate, row.Body, row.Revision,
-		func(tx *gorm.DB, now time.Time) (bool, error) {
-			txDao := s.models.WithTx(tx)
-			if err := txDao.ClearDefaults(ctx, row.Runtime); err != nil {
-				return false, err
-			}
-			return txDao.SetDefaultCAS(ctx, id, row.Revision, now)
-		})
+	return true, s.meta.Set(ctx, model.MetaKeyDefaultModel, "")
 }
 
-// ClearDefaultModel 把一条模型从"该 runtime 的默认"上摘下来（一行 + 一条审计，同事务）。
-//
-// 为什么必须有这个入口：`PATCH /models/:id {is_default:false}` 曾经被**静默忽略**
-// （写面只处理 `true`），于是"取消默认"看起来成功、实际什么都没发生——而后果不小：平台会继续把
-// 那个取值下发到每一条新会话，用户必须删掉整条模型才能让底座不再被喂它
-// （2026-10-10 端到端探针在"删掉 overlay 后怎么恢复"这一步撞出来的）。
-//
-// 返回 false = 行不存在或 CAS 未中 → 调用方翻成 `model_not_found`/`definition_changed`。
-// **本来就不是默认 → 直接返回 true**（幂等，不写无意义的一版）。
-func (s *Store) ClearDefaultModel(ctx context.Context, id, actor string) (bool, error) {
-	row, found, err := s.models.Get(ctx, id)
-	if err != nil {
-		return false, err
+// MigrationNotesV12 读 v12 迁移留下的待处置事实（不存在 → (nil, false, nil)）。
+func (s *Store) MigrationNotesV12(ctx context.Context) (*MigrationNotes, bool, error) {
+	raw, ok, err := s.meta.Get(ctx, model.MetaKeyMigrationNotes)
+	if err != nil || !ok || raw == "" {
+		return nil, false, err
 	}
-	if !found {
-		return false, nil
+	var notes MigrationNotes
+	if err := json.Unmarshal([]byte(raw), &notes); err != nil {
+		return nil, false, err
 	}
-	if !row.IsDefault {
-		return true, nil
-	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionUpdate, row.Body, row.Revision,
-		func(tx *gorm.DB, now time.Time) (bool, error) {
-			return s.models.WithTx(tx).ClearDefaultCAS(ctx, id, row.Revision, now)
-		})
-}
-
-// ModelIDOfBody 从一条模型条目的正文里取 `model_id`。
-//
-// 唯一性判据 `(runtime, provider_id, model_id)` 的第三项在 body 里（见 ModelDefinition 注释），
-// 所以这里必须解析一个 key——它不是一个"业务字段的便利访问器"，而是**约束的一部分**。
-// 解析失败返回空串：空串与任何真实 `model_id` 都不相等，于是坏正文不会被误判成"重复"，
-// 而是走到 create 分支（坏正文本身由写面校验拦下）。
-func ModelIDOfBody(body string) string {
-	var probe struct {
-		ModelID string `json:"model_id"`
-	}
-	if err := json.Unmarshal([]byte(body), &probe); err != nil {
-		return ""
-	}
-	return probe.ModelID
+	return &notes, true, nil
 }

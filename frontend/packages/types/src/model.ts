@@ -1,8 +1,14 @@
 /**
- * 会话配置项（ACP session config options）的直投影。
+ * 模型面（v12）：**两个读面分得很开**，改这个文件前先认清哪一个是哪一个。
  *
- * 数据源 = **运行时**（dsh / opencode 的 ACP server），不是平台内置清单：
- * 平台已删除 go:embed 快照 + 上游 live + 磁盘缓存的三段式目录，可选项完全由运行时自报。
+ *  - ① **运行时目录面**（`ModelCatalogResp`，`GET /models/catalog?agent=`）：运行时（ACP server）
+ *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它。
+ *  - ② **平台清单面**（`ModelsResp`，`GET /models`）：用户登记的应用层资源（供应商下的模型），
+ *    外加**聚合**生效结论。设置 · 模型 那一节用它。
+ *
+ * 两者相遇过（v11 把 `advertised`/`diff`/`config` 塞在 `GET /models` 里），v12 把平台面与底座面
+ * 拆开：`ModelsResp` 里**没有** `advertised`/`diff`/`config`/`options`，逐 runtime 的同步明细
+ * 落在 `sync[]`、标为**机器面**——设置 · 模型 那一节不得渲染它（ADR-22，A13/A14 守卫钉住）。
  */
 
 /** 目录取样来源：session=活跃会话 / resume=恢复历史会话读取 / cache=内存缓存 / none=无来源。 */
@@ -54,10 +60,9 @@ export interface AuthGuidance {
 }
 
 /**
- * 模型目录响应（**旧形态**）：`options` 为运行时配置项全量投影。
+ * 运行时目录响应（`GET /models/catalog?agent=`，v12 拆出的独立读面）。
  *
- * v11 起它只对**未声明模型配置落点**的 runtime 回落出现（`GET /models` 的 `options` 字段）；
- * 声明了落点的 runtime（opencode / dsh）走 `ModelsResp` 的四段形态。
+ * 它是**事实**（运行时广告什么、会话能选什么），`value` 是不透明串；平台声明的那份是 `ModelsResp`。
  */
 export interface ModelCatalogResp {
   agent: string
@@ -72,127 +77,121 @@ export interface ModelCatalogResp {
   note?: string
 }
 
-/** 平台声明的一条模型条目（`GET /models` 的 `declared[]`）。 */
+/** 平台声明的一条模型条目（`GET /models` 的 `models[]`）。 */
 export interface ModelRow {
+  /** 平台 id。 */
   id: string
-  runtime: string
+  /** 挂靠的供应商 id。 */
   provider_id: string
-  /** 平台写出去给底座的模型 id（**不是**运行时的 value）。 */
+  /** 发给上游的模型 id（**不是**运行时的 value，也不是平台 id）。 */
   model_id: string
-  /** 平台侧显示名（改不动 ACP 候选项里的路由前缀）。 */
+  /** 展示名（空 = 前端回落显示 model_id）。 */
   name?: string
-  extra?: Record<string, unknown>
-  /** 平台侧隐藏：**不下发**（底座的目录里仍会出现它——隐藏不是"删掉它"）。 */
-  hidden: boolean
-  /** 平台侧置顶（只改平台列表顺序，不下发）。 */
-  pinned: boolean
-  is_default: boolean
-  /** 平台按该 runtime 规则**生成**的不透明值（会话级下发与对账都用它）。 */
-  value: string
+  /** 备注（不驱动行为）。 */
+  note?: string
+  /** 载体版本（行 CAS 判据）。 */
   revision: number
   updated_at?: string
-  /** 写面回执（只在写面响应里出现）。 */
+  /** 写面回执（只在写面响应里出现；列表里为空）。 */
   effect?: ModelEffect
 }
 
-/** 模型写面的生效面回执：两条通道 + 最早的生效时刻。 */
+/** 模型清单写面的生效面回执（v12 只有一条通道：把整份清单交给各 adapter）。 */
 export interface ModelEffect {
-  /** config_write（新进程读配置）+ 改了默认时的 session_config（新会话创建时下发）。 */
-  channels: string[]
-  /** next_session（下一次建会话时下发）| next_process（新 runtime 进程读配置）。 */
+  /** next_session（下一次会话创建/换代际）| next_process（新进程读配置）。 */
   effect: string
-  applies_to_runtimes: string[]
+  /** 受影响（可能落到任一已注册底座）的会话数。 */
   affected_conversations: number
+  /** 其中本轮不能就地换代际的会话数（有在途轮次 / 有未应答权限或提问）。 */
   deferred: number
   note?: string
 }
 
-/** 运行时实际广告的一个模型候选（`GET /models` 的 `advertised[]`）。 */
-export interface AdvertisedModel {
-  value: string
-  name?: string
-  group?: string
-  group_name?: string
-  unavailable?: boolean
-  unavailable_reason?: string
-}
-
-/** 差集里的一条：`severity` ∈ error（选了就报错）/ degrade（静默降级）/ info（只是事实）。 */
-export interface ModelDiffEntry {
-  model_id?: string
-  value: string
-  provider_id?: string
-  route?: string
-  severity: 'error' | 'degrade' | 'info' | string
-  reason: string
-}
-
-/** 清单（意图）与运行时广告（事实）的两个差集。差集为空 = 已生效。 */
-export interface ModelDiff {
-  declared_not_advertised: ModelDiffEntry[]
-  advertised_not_declared: ModelDiffEntry[]
-}
-
-/** 某 runtime 的模型配置物化状态（T5）。`pending:true` 就是在说"还没生效"。 */
-export interface RuntimeConfigResp {
+/** 某 runtime 的一次同步结论（`sync[]` 的条目）。⚠️ **机器面 / 诊断面**：设置 · 模型不得渲染它。 */
+export interface RuntimeSyncResp {
   runtime: string
-  declared: boolean
-  /** 落点是否经真实底座实测；false = 只读（生成候选但不落盘）。 */
-  tested: boolean
-  writable: boolean
-  channel?: string
-  path?: string
-  digest?: string
-  generated_at?: string
-  changed: boolean
+  /** applied | unchanged | unsupported | untested | failed。 */
+  status: string
+  /** 人话落点（给排障看的「同步到哪了」）。 */
+  where: string
+  /** immediate | next_turn | next_session | next_process（清单通道的生效时刻）。 */
+  effect: string
+  /** true = 平台已交付但底座还没读到（新进程才读）——**不许把它说成"已生效"**。 */
   pending: boolean
-  model_count: number
-  note?: string
+  /** 凭据交付面的结论，与清单**分开报**（两者的生效时机本就不同）。 */
+  credential: CredentialSyncResp
+  /** 底座事实上报的候选（尽力采样；拿不到为 null）。 */
+  advertised?: string[]
+  /** 声明了但没出现在 advertised 里的。 */
+  missing?: string[]
+  /** 可执行的一句话清单。 */
+  problems: string[]
 }
 
-/** `GET /models` 的响应：平台清单 + 运行时事实 + 差集 + 物化状态（v11 起的主形态）。 */
+/** 凭据交付面的结论（机器面）。 */
+export interface CredentialSyncResp {
+  /** native_doc | env | none。 */
+  channel: string
+  /** applied | unchanged | unsupported | untested | failed。 */
+  status: string
+  /** 同 RuntimeSyncResp.effect 的取值域。 */
+  effect: string
+  /** 该通道是否已实测；false 时界面必须显示「待实测」而不是「已生效」。 */
+  tested: boolean
+  /** 人话落点（绝不回显密钥）。 */
+  where: string
+}
+
+/**
+ * `GET /models` 的响应：平台清单 + **聚合**生效结论（v12）。
+ *
+ * **用户面只有 `models` / `default_model` / `effective` / `effective_at` 四个字段**（ADR-22/ADR-21）：
+ * `default_model` 是**单一值**（不带 runtime 维度），`effective`/`effective_at` 是所有 runtime 里
+ * 最保守的聚合结论。`sync[]` 是机器面，设置 · 模型 那一节**不得渲染**它。
+ */
 export interface ModelsResp {
-  runtime: string
-  agent?: string
-  declared: ModelRow[]
-  advertised: AdvertisedModel[]
-  diff: ModelDiff
-  config: RuntimeConfigResp
-  /** 旧形态回落：仅当该 runtime **未声明** ConfigProjection 时出现。 */
-  options?: ConfigOption[]
-  source?: ModelCatalogSource
-  fetched_at?: string
-  auth_guidance?: AuthGuidance[]
+  /** 平台清单（不分页：上限 200 条）。 */
+  models: ModelRow[]
+  /** 唯一默认模型的**平台模型 id**（空 = 未设）。 */
+  default_model: string
+  /** 用户面聚合结论：applied | pending | failed。 */
+  effective: string
+  /** 生效时刻：now | next_session | next_launch（取保守值 = 所有 runtime 里最晚的那个）。 */
+  effective_at: string
+  /** ⚠️ 机器面 / 诊断面：逐 runtime 明细。**前端不得直接渲染**这里的 runtime / where / problems。 */
+  sync: RuntimeSyncResp[]
+  /** 人话说明（清单为空 / 没有可同步的底座等）。 */
   note?: string
 }
 
-/** 写面的请求体（与后端 DTO 逐字对应）。 */
+/** `POST /models` 的请求体。**没有 `runtime`**：模型不带底座维度（带 `runtime` 会被 40001 拒）。 */
 export interface ModelCreateReq {
-  runtime: string
   provider_id: string
   model_id: string
   name?: string
-  extra?: Record<string, unknown>
-  hidden?: boolean
-  pinned?: boolean
+  note?: string
+  /** true = 把这条设为**唯一**默认模型。 */
   is_default?: boolean
 }
 
+/** `PATCH /models/:id`：指针更新（省略 = 不改）。 */
 export interface ModelPatchReq {
   name?: string
-  extra?: Record<string, unknown>
-  hidden?: boolean
-  pinned?: boolean
+  note?: string
+  /** true = 设为唯一默认；false = 取消默认（幂等）。 */
   is_default?: boolean
 }
 
+/** `DELETE /models/:id` 的结果（幂等）。 */
 export interface ModelDeleteResp {
   deleted: boolean
-  next_action?: string
+  /** 本次删除连带清空了默认模型（用户可见的副作用，必须说出来）。 */
+  default_cleared?: boolean
 }
 
-export interface ModelApplyResp {
-  applied: RuntimeConfigResp[]
+/** `POST /models/sync` 的响应：逐 runtime 的同步结论（机器面，只用于判断成败）。 */
+export interface ModelSyncResp {
+  applied: RuntimeSyncResp[]
 }
 
 /** 按 category 取配置项（语义化取值的唯一入口）。 */
@@ -202,30 +201,14 @@ export const configOptionByCategory = (
 ): ConfigOption | undefined => (options ?? []).find((o) => o.category === category)
 
 /**
- * 模型项候选值（无模型项 → 空数组：运行时没有可切换的模型）。
+ * 会话级模型候选值（无模型项 → 空数组：运行时没有可切换的模型）。
  *
- * **两种响应都能喂**（`ModelSelect` 因此零改动：它只消费 `ConfigOptionValue[]` 与 `value`）：
- *  - v11 的四段形态：候选取 `advertised[]`（运行时事实），并**在这里**把平台侧 `hidden` 的条目
- *    过滤掉——隐藏只影响平台选择器，不影响会话与物化（"隐藏不是删掉它"）；
- *  - 旧形态：直投影 `options[category=model].values`。
+ * **只吃运行时目录面**（`ModelCatalogResp`）：候选取 `options[category=model].values`，
+ * 它们的 `value` 是不透明串、必须原样回传给会话接口。平台清单（`ModelsResp`）不喂这里——
+ * 那是应用层资源，不是运行时候选。
  */
-export const modelValues = (resp?: ModelCatalogResp | ModelsResp): ConfigOptionValue[] => {
-  if (!resp) return []
-  if ('advertised' in resp) {
-    const hidden = new Set((resp.declared ?? []).filter((d) => d.hidden).map((d) => d.value))
-    return (resp.advertised ?? [])
-      .filter((a) => !hidden.has(a.value))
-      .map((a) => ({
-        value: a.value,
-        name: a.name || a.value,
-        group: a.group,
-        group_name: a.group_name,
-        unavailable: a.unavailable,
-        unavailable_reason: a.unavailable_reason,
-      }))
-  }
-  return configOptionByCategory(resp.options, 'model')?.values ?? []
-}
+export const modelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+  configOptionByCategory(resp?.options, 'model')?.values ?? []
 
 /** 模型引用：创建/切换会话时选定的模型（运行时目录里的不透明 value）。 */
 export interface ModelRef {

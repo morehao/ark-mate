@@ -136,19 +136,14 @@ export function AutomationsPage() {
     return (a?.runtimes ?? []).map((r) => ({ label: r, value: r }))
   }
 
+  // 表单初值走 **`initialValues`**（见下面 editorInitialValues），不在这里命令式写。
+  //
+  // 为什么（与设置 · 模型 那次是**同一个坑**，2026-10-10 一起修）：`Modal` 带 `destroyOnHidden`，
+  // 关着时里面的 `Form` 根本没挂载；无论"打开那一刻"直接 `setFieldsValue`，还是放进 `useEffect`，
+  // 都早于 rc-dialog 真正挂内容 → 值被丢掉（控制台留一句 `Instance created by useForm is not
+  // connected to any Form element`）。后果是**静默的**：新建自动化时那些默认值（kind/时区/小时…）
+  // 不生效，点保存只报一堆"必填"，弹窗不关——而用户以为自己没填。
   const openCreate = (): void => {
-    form.resetFields()
-    form.setFieldsValue({
-      kind: 'daily',
-      timezone: localTimezone(),
-      hour: 9,
-      minute: 0,
-      days_of_week: [],
-      enabled: true,
-      agent_id: agents[0]?.id ?? 'dsh',
-      cwd: '',
-      prompt: '',
-    })
     setKind('daily')
     setPreview(null)
     setPreviewErr(null)
@@ -156,12 +151,26 @@ export function AutomationsPage() {
   }
 
   const openEdit = (a: Automation): void => {
-    form.setFieldsValue(formFromAutomation(a))
     setKind(a.schedule.kind)
     setPreview(null)
     setPreviewErr(null)
     setEditor({ mode: 'edit', a })
   }
+
+  // 内容每次关闭都销毁、每次打开都重新挂载，所以 `initialValues` 每开一次都会重新生效。
+  const editorInitialValues: Partial<FormValues> = editor?.mode === 'edit'
+    ? formFromAutomation(editor.a)
+    : {
+        kind: 'daily',
+        timezone: localTimezone(),
+        hour: 9,
+        minute: 0,
+        days_of_week: [],
+        enabled: true,
+        agent_id: agents[0]?.id ?? 'dsh',
+        cwd: '',
+        prompt: '',
+      }
 
   /** 预览：不落盘、不建会话——所以它敢在"保存之前"点。 */
   const onPreview = async (): Promise<void> => {
@@ -372,7 +381,7 @@ export function AutomationsPage() {
         okText="保存"
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" requiredMark={false}>
+        <Form form={form} layout="vertical" requiredMark={false} initialValues={editorInitialValues}>
           {editor?.mode === 'create' && (
             <Form.Item
               name="id"

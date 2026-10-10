@@ -76,17 +76,19 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("写 capability_revisions 行: %v", err)
 	}
-	// v11（设置 · 模型）：provider 档案行 + 模型清单行。后者多三个列，其中 `is_default` 是
-	// **布尔列**（INTEGER 0/1）——裸 SQL 的置默认语句不经过 serializer，所以它的落库形态
-	// 必须在这里被钉死（`model.FlagValue` 的唯一用途就是它）。
+	// v12（设置 · 模型）：供应商行 + 应用层模型清单行。
+	//
+	// **落库格式的硬契约仍然是两条**：时间列 TEXT + RFC3339Nano(UTC)、布尔列 INTEGER 0/1。
+	// v12 把模型面的**布尔列删掉了**（`is_default` 换成 meta 的单一值），所以这条用例里
+	// 布尔列的样本改由「会话置顶」承担——契约本身不变，样本源换一个。
 	if ok, err := s.providers.CreateCAS(ctx, &ProviderDefinition{
-		ID: "pv-1", Body: `{"type":"deepseek","key_ref":"vault:providers/pv-1"}`, Revision: 1, UpdatedAt: at,
+		ID: "pv-1", Body: `{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/pv-1"}`, Revision: 1, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 providers 行: ok=%v err=%v", ok, err)
 	}
 	if ok, err := s.models.CreateCAS(ctx, &ModelDefinition{
-		ID: "md-1", Runtime: "opencode", ProviderID: "pv-1",
-		Body: `{"model_id":"deepseek-v4-flash","name":"Flash"}`, IsDefault: true, Revision: 1, UpdatedAt: at,
+		ID: "md-1", ProviderID: "pv-1", ModelID: "deepseek-v4-flash",
+		Body: `{"name":"Flash"}`, Revision: 1, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 models 行: ok=%v err=%v", ok, err)
 	}
@@ -137,13 +139,15 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"automations", "recent_runs", "text", `[{"status":"completed"}]`, true},
 		{"capability_revisions", "seq", "integer", "1", true},
 		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
-		// v11（设置 · 模型）：档案行与清单行。`models.is_default` 的落库形态是这一层的关键
-		// ——它由两条裸 SQL 维护（先清同 runtime、再置新），所以不能靠 serializer 兜底。
+		// v12（设置 · 模型）：供应商行与**应用层**清单行。
+		//
+		// v12 把模型面的布尔列删掉了（`is_default` 换成 meta 的单一值），所以这里不再有
+		// "裸 SQL 维护的布尔列"这个样本——但**契约本身不变**（布尔列一律 INTEGER 0/1），
+		// 样本改由 `conversations.pinned` 承担（见上面的用例）。
 		{"providers", "revision", "integer", "1", true},
 		{"providers", "updated_at", "text", at.Format(model.LayoutTS), true},
-		{"models", "runtime", "text", "opencode", true},
 		{"models", "provider_id", "text", "pv-1", true},
-		{"models", "is_default", "integer", "1", true},
+		{"models", "model_id", "text", "deepseek-v4-flash", true},
 		{"models", "revision", "integer", "1", true},
 		{"models", "updated_at", "text", at.Format(model.LayoutTS), true},
 	}
@@ -230,19 +234,16 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetProviderDefinition: found=%v err=%v", found, err)
 	}
-	if pv.Revision != 1 || !pv.UpdatedAt.Equal(at) || pv.Body != `{"type":"deepseek","key_ref":"vault:providers/pv-1"}` {
+	if pv.Revision != 1 || !pv.UpdatedAt.Equal(at) || pv.Body != `{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/pv-1"}` {
 		t.Errorf("provider 行往返失真: rev=%d at=%s body=%q", pv.Revision, pv.UpdatedAt, pv.Body)
 	}
 	md, found, err := s.GetModelDefinition(ctx, "md-1")
 	if err != nil || !found {
 		t.Fatalf("GetModelDefinition: found=%v err=%v", found, err)
 	}
-	if md.Runtime != "opencode" || md.ProviderID != "pv-1" || !md.IsDefault ||
+	if md.ProviderID != "pv-1" || md.ModelID != "deepseek-v4-flash" ||
 		md.Revision != 1 || !md.UpdatedAt.Equal(at) {
 		t.Errorf("model 行往返失真: %+v", md)
-	}
-	if got := ModelIDOfBody(md.Body); got != "deepseek-v4-flash" {
-		t.Errorf("model_id 从正文取出失真: %q", got)
 	}
 
 	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样

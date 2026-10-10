@@ -395,36 +395,30 @@ func (ProviderDefinition) TableName() string { return TableProvider }
 // ProviderDefinitionList 是 ProviderDefinition 切片类型（gormdao 泛型参数要求具名切片）。
 type ProviderDefinitionList []ProviderDefinition
 
-// ModelDefinition 是平台声明的一条模型条目（v11 建成；与 ProviderDefinition 同形，多两个身份列）。
+// ModelDefinition 是平台声明的一条模型条目（v12 重建；**不带底座维度**）。
 //
-// 一条模型条目必须说清「给哪个底座用、挂在哪条凭据/路由下」，因为两个底座写出来的配置
-// schema 完全不同（dsh 写 patch 的 `models[]`；opencode 写 `providers.<route>.models{}`）
-// ——**同一条模型在两个 runtime 上就是两行**。
+// 一条模型条目说清「挂在哪条供应商下、发给上游的是哪个模型 id」——它**不再**说"给哪个底座用"：
+// 一份清单同时投给所有已注册底座（ADR-1、B3）。v11 的身份三元组 `(runtime, provider_id, model_id)`
+// 因此塌成两列：`(provider_id, model_id)` **唯一**（库级唯一索引真表达得了，见 v12 迁移）。
 //
-// 为什么 `Runtime` 与 `ProviderID` 是**列**而不是 body 字段：它们是平台侧唯一的查询/约束轴
-// （「物化 opencode 的配置」= `WHERE runtime='opencode'`；「删 provider 前查引用」=
-// `WHERE provider_id=?`），且两条都在热路径上（每次物化、每次删除保护校验）。放进 body
-// 就得全表扫 + 反序列化。
+// 为什么两列是**列**而不是 body 字段：它们是平台侧唯一的查询/约束轴
+// （「同步时按供应商取模型」= `WHERE provider_id=?`；「`model_exists` 判定」= 同一索引），
+// 都在热路径上。放进 body 就得全表扫 + 反序列化。
 //
-// `IsDefault` 同样是列（虽然设计草稿把它列在 body 里）：每 runtime 默认的唯一性由**一条 SQL**
-// 保证（先清同 runtime 再置新，同一事务），且默认模型的取值面是 `WHERE runtime=? AND is_default=1`
-// ——与上面两个身份列同一类「查询轴」，放 body 就表达不了。`Body` 存 `{model_id, name?, extra?,
-// hidden?, pinned?}`（**不含 is_default**，避免双写漂移）。
+// `Body` 存 `{name?, note?}`（**不含 model_id**——它已是列，双写必然漂移；也不含 v11 的
+// `extra`/`hidden`/`pinned`：三者都删掉了，ADR-7）。
+//
+// 默认模型**不在这里**：它是**用户的偏好**、是单一值，住 `meta.MetaKeyDefaultModel`（ADR-21）。
+// v11 的 `is_default` 列（每 runtime 至多一条）随之删除——那是把底座维度从后门带回用户面的东西。
 type ModelDefinition struct {
 	ID string `gorm:"column:id;primaryKey"`
-	// Runtime 该条目供哪个底座使用（"dsh" | "opencode"）。
-	Runtime string `gorm:"column:runtime;not null"`
-	// ProviderID 挂靠的 provider 档案 id（指向 providers.id）。
+	// ProviderID 挂靠的供应商 id（指向 providers.id）。
 	ProviderID string `gorm:"column:provider_id;not null"`
-	// Body 平台声明正文 JSON（含未知键）：{model_id, name?, extra?, hidden?, pinned?}。
+	// ModelID 发给上游的模型 id（**不是**平台模型 id，那是 ID 列）。
+	ModelID string `gorm:"column:model_id;not null"`
+	// Body 平台声明正文 JSON（含未知键）：{name?, note?}。
 	Body string `gorm:"column:body;not null"`
-	// IsDefault 是否该 runtime 的默认模型（每个 runtime 至多一条，由 store 的同事务两条 SQL 保证）。
-	//
-	// 落库形态由 `serializer:arkmate_flag` 保证（INTEGER 0/1，见 store/format_test.go）；
-	// **裸 SQL 入参不经过 serializer**，所以 `SetDefaultModel` 的两条语句一律用
-	// `model.FlagValue` 手工转换。
-	IsDefault bool `gorm:"column:is_default;not null;serializer:arkmate_flag"`
-	// Revision 写面 CAS 判据（同 SkillDefinition.Revision；置默认也前进一版）。
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`

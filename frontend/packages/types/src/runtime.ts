@@ -3,30 +3,17 @@ export interface CapabilityKV {
   value: boolean
 }
 
-/** 一条可声明的「运行时参数」（H1/H3）：平台按 adapter 的声明派生，前端只渲染、不硬编码字段。 */
-export interface ProviderProjectionField {
-  name: string
-  /** string | object（object 在表单里按 JSON 文本编辑）。 */
-  type: string
-  required: boolean
-  note?: string
-}
-
-/** 某 runtime 认的运行时参数 schema（`GET /runtimes` 的 `provider_projection`）。 */
-export interface ProviderProjectionSchema {
-  runtime: string
-  fields: ProviderProjectionField[]
-  note?: string
-}
-
+/**
+ * 一个底座（`GET /runtimes`）。
+ *
+ * **v12 删掉了 `provider_projection`**：那是一张"每个底座认哪些运行时参数"的 schema，前端据此
+ * 渲染逐底座的投影表单——逐底座投影本身就是被删掉的东西（ADR-7）。运行时参数不再暴露给用户，
+ * 协议差异由各 adapter 自己知道（ADR-11）。
+ */
 export interface Runtime {
   name: string
   id: string
   version: string
-  capabilities: CapabilityKV[] // 静态能力基线（read-only）
-  /**
-   * 该底座认的**逐 runtime 运行时参数** schema（`projections.<runtime>` 里能写哪些键）。
-   * 缺席 = 该底座不承载平台模型清单（对它写运行时参数没有意义）。
-   */
-  provider_projection?: ProviderProjectionSchema
+  /** 静态能力基线（read-only）。 */
+  capabilities: CapabilityKV[]
 }

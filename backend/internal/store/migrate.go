@@ -3,17 +3,36 @@ package store
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"gorm.io/gorm"
 )
 
-// migration 是一次原子 schema 变更：其 statements 在单个事务内顺序执行。
+// migration 是一次原子 schema 变更：其 statements 与 apply 在单个事务内顺序执行。
 type migration struct {
 	version    int
 	name       string
 	statements []string
+	// apply 是同事务内的 **Go 数据迁移**步骤（在 statements 之后执行）。
+	//
+	// 为什么需要它：v1–v11 都是纯 DDL，一条语句一行读得完；而 v12 要把 `models` 的身份列
+	// 从三元组归并成两元组、重写 `providers.body`、把逐 runtime 的 `is_default` 换算成单一
+	// `default_model`，并在同一事务里**逐组对账**。这些表达不了成 SQL 字符串——硬写成 SQL
+	// 会把"归并规则"藏进一段没人能审的串里，而它是本次唯一不可逆的数据变换。
+	//
+	// 失败即整体回滚（事务由 applyMigration 持有），不存在"迁移了一半"。
+	apply func(ctx context.Context, tx *gorm.DB, s *Store) error
+	// backup 非空 = 执行本迁移**之前**先把库文件复制成 `<db>.bak-<backup>-<ts>`。
+	//
+	// 只有"就地改写既有数据"的迁移需要它（v12），纯 DDL 不需要。备份只管 DB 文件：
+	// vault（密文与主密钥）不在其内，而 v12 也不触碰 vault，所以回退时不必恢复 vault
+	// （§安全：完整备份是三件套 mate.db + vault/ + vault.key）。
+	backup string
 }
 
 // schemaMigrations 是版本-迁移表（有序；追加迁移 = 在尾部新增，绝不回改历史）。
@@ -275,6 +294,25 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_models_provider ON models(provider_id)`,
 		},
 	},
+	{
+		version: 12,
+		name:    "providers/models 去底座维度（v12）：body 改写 + (provider_id,model_id) 归并 + meta.default_model",
+		backup:  "v12",
+		statements: []string{
+			// 归并的目标表：`model_id` 从 body 提升为**列**，`is_default` 删除（默认模型改住
+			// meta 的单一值）。先建成临时名，Go 步骤把归并结果灌进去，最后 DROP 旧表 + RENAME
+			// ——整套在同一事务里，失败即回到 v11 的样子。
+			`CREATE TABLE models_v12 (
+				id          TEXT PRIMARY KEY,
+				provider_id TEXT NOT NULL,
+				model_id    TEXT NOT NULL,
+				body        TEXT NOT NULL,
+				revision    INTEGER NOT NULL DEFAULT 1,
+				updated_at  TEXT NOT NULL
+			)`,
+		},
+		apply: migrateV12,
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
@@ -320,6 +358,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 				break
 			}
 		}
+		// 备份必须发生在**事务开始之前**——它要复制的是"迁移前那个文件"，
+		// 而 SQLite 的事务是文件级的，事务内复制拿到的是未提交视图，回退时不可靠。
+		if m.backup != "" {
+			path, berr := s.backupBeforeMigration(m)
+			if berr != nil {
+				return berr
+			}
+			s.migrationBackupPath = path
+		}
 		if err := s.applyMigration(ctx, m); err != nil {
 			return err
 		}
@@ -327,12 +374,77 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// applyMigration 在单个事务内执行一次迁移的语句并记录版本。
+// backupBeforeMigration 把库文件复制成 `<db>.bak-<tag>-<ts>`，返回该路径。
+//
+// 就地改写既有数据的迁移（v12）在用户库上是**不可逆点**：一旦 v12 落地，旧二进制会因为
+// `latestSchemaVersion` 前进而拒绝启动，唯一的退路就是这份文件（§回退窗口）。
+// 所以它必须是"复制成功才算数"：复制失败 → **不迁移**（留在旧版本上，如实报错），
+// 而不是"先迁了再说"。
+//
+// 内存库（path 为空）不备份：没有文件可复制，而它也不承载用户数据（测试/演示形态）。
+func (s *Store) backupBeforeMigration(m migration) (string, error) {
+	if s.path == "" || s.path == ":memory:" {
+		return "", nil
+	}
+	src, err := os.Open(s.path)
+	if err != nil {
+		return "", fmt.Errorf("store: 迁移 v%d 前无法打开库文件备份（拒绝迁移）: %w", m.version, err)
+	}
+	defer src.Close()
+	dst := fmt.Sprintf("%s.bak-%s-%s", s.path, m.backup, time.Now().UTC().Format("20060102T150405Z"))
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("store: 迁移 v%d 前无法创建备份 %s（拒绝迁移）: %w", m.version, dst, err)
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return "", fmt.Errorf("store: 迁移 v%d 的备份写入失败（拒绝迁移）: %w", m.version, err)
+	}
+	if err := out.Close(); err != nil {
+		return "", fmt.Errorf("store: 迁移 v%d 的备份收尾失败（拒绝迁移）: %w", m.version, err)
+	}
+	return dst, nil
+}
+
+// MigrationBackupPath 返回本次进程启动时那次迁移备份的路径（空 = 没有迁移过，或库无文件）。
+//
+// `mate doctor` 用它打印"回退到旧版本要恢复哪个文件"（§回退窗口的对外口径）。
+func (s *Store) MigrationBackupPath() string { return s.migrationBackupPath }
+
+// MigrationBackupPaths 列出本机全部 DB 迁移备份（新的在前；空 = 没迁移过或库无文件）。
+//
+// `mate doctor` 用它打印"回退到旧版本要恢复哪个文件"——体检常常跑在**另一次启动**里
+// （迁移已经发生过了，本次进程没有备份记录），所以它必须能从磁盘上找出来。
+func (s *Store) MigrationBackupPaths() []string { return s.findMigrationBackups("v12") }
+
+// findMigrationBackups 列出库文件所在目录里 `<db>.bak-<tag>-*` 形式的备份（新的在前）。
+//
+// 用 glob 而不是只认内存里那一份：doctor 常常在**另一次**启动里跑（迁移已经发生过了，
+// 本次进程没有备份记录），而用户问的正是"我该恢复哪个文件"。
+func (s *Store) findMigrationBackups(tag string) []string {
+	if s.path == "" || s.path == ":memory:" {
+		return nil
+	}
+	matches, err := filepath.Glob(s.path + ".bak-" + tag + "-*")
+	if err != nil {
+		return nil
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
+	return matches
+}
+
+// applyMigration 在单个事务内执行一次迁移的语句与数据步骤，并记录版本。
 func (s *Store) applyMigration(ctx context.Context, m migration) error {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, stmt := range m.statements {
 			if err := tx.Exec(stmt).Error; err != nil {
 				return fmt.Errorf("store: apply migration v%d (%s): %w", m.version, m.name, err)
+			}
+		}
+		if m.apply != nil {
+			if err := m.apply(ctx, tx, s); err != nil {
+				return fmt.Errorf("store: apply migration v%d (%s) 的数据步骤: %w", m.version, m.name, err)
 			}
 		}
 		if err := s.migrations.WithTx(tx).Record(ctx, m.version, m.name); err != nil {

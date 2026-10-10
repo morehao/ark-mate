@@ -17,6 +17,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/pkg/resource"
 )
 
 // ——— 存量 provider 档案的一次性导入与导出（v11 下半） ———
@@ -147,11 +148,14 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 	return stats, nil
 }
 
-// providerExpected 一条"文件里应该有"的档案（对账用的三个字段）。
+// providerExpected 一条"文件里应该有"的档案（对账字段）。
+//
+// v12 把 `type` 换成了 `protocol` + `base_url`：对账比的是**资源身份**，不是 v11 的凭据档案类型。
 type providerExpected struct {
-	ID     string
-	Type   string
-	KeyRef string
+	ID       string
+	Protocol string
+	BaseURL  string
+	KeyRef   string
 }
 
 // scanProviderFile 解析 `providers.json`：逐条过闸门、把旧明文迁进 vault、拼出要写进 DB 的正文。
@@ -208,7 +212,27 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 			}
 			body[k] = v
 		}
-		typ := bodyString(body, "type")
+		// **v11 → v12 字段映射**（迁移逃生门）：文件里可能还是旧 `type`（自由串）+ `projections`。
+		// 导入保留对它的识别并映射成 `protocol` + `base_url`，映射完就把旧键删掉——
+		// 留着它们等于让"底座维度"从导入路径重新进库。
+		protocol := bodyString(body, "protocol")
+		baseURL := bodyString(body, "base_url")
+		if protocol == "" {
+			protocol = string(resource.ProtocolOpenAI)
+		}
+		if baseURL == "" {
+			baseURL = v11FileBaseURL(&providerFile{
+				Type:        bodyString(body, "type"),
+				Projections: anyToProjections(body["projections"]),
+			})
+		}
+		delete(body, "type")
+		delete(body, "projections")
+		delete(body, "model")
+		body["protocol"] = protocol
+		if baseURL != "" {
+			body["base_url"] = baseURL
+		}
 		keyRef := bodyString(body, "key_ref")
 		if k := bodyString(entry, "key"); k != "" {
 			// 旧明文档案 → 走既有 vault 加密路径（**不新写一套**）。
@@ -242,7 +266,7 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 		items = append(items, store.DefinitionImportItem{
 			Kind: model.CapabilityKindProvider, ID: id, Body: string(b),
 		})
-		expected = append(expected, providerExpected{ID: id, Type: typ, KeyRef: keyRef})
+		expected = append(expected, providerExpected{ID: id, Protocol: protocol, BaseURL: baseURL, KeyRef: keyRef})
 	}
 	if out != nil {
 		fmt.Fprintf(out, "provider import: 扫描 %s，%d 条档案\n", path, len(items))
@@ -263,11 +287,12 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 	for i := range rows {
 		var body map[string]any
 		if err := json.Unmarshal([]byte(rows[i].Body), &body); err != nil {
-			got[rows[i].ID] = providerExpected{ID: rows[i].ID, Type: "<body 非法>"}
+			got[rows[i].ID] = providerExpected{ID: rows[i].ID, Protocol: "<body 非法>"}
 			continue
 		}
 		got[rows[i].ID] = providerExpected{
-			ID: rows[i].ID, Type: bodyString(body, "type"), KeyRef: bodyString(body, "key_ref"),
+			ID: rows[i].ID, Protocol: bodyString(body, "protocol"),
+			BaseURL: bodyString(body, "base_url"), KeyRef: bodyString(body, "key_ref"),
 		}
 	}
 	var mismatch []string
@@ -277,8 +302,11 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 			mismatch = append(mismatch, fmt.Sprintf("%s: 文件里有、DB 里没有", w.ID))
 			continue
 		}
-		if g.Type != w.Type {
-			mismatch = append(mismatch, fmt.Sprintf("%s: type 不一致（文件 %q / DB %q）", w.ID, w.Type, g.Type))
+		if g.Protocol != w.Protocol {
+			mismatch = append(mismatch, fmt.Sprintf("%s: protocol 不一致（文件 %q / DB %q）", w.ID, w.Protocol, g.Protocol))
+		}
+		if g.BaseURL != w.BaseURL {
+			mismatch = append(mismatch, fmt.Sprintf("%s: base_url 不一致（文件 %q / DB %q）", w.ID, w.BaseURL, g.BaseURL))
 		}
 		if g.KeyRef != w.KeyRef {
 			mismatch = append(mismatch, fmt.Sprintf("%s: key_ref 不一致（文件 %q / DB %q）", w.ID, w.KeyRef, g.KeyRef))
@@ -394,4 +422,14 @@ func writeFileAtomic(path string, body []byte, perm os.FileMode) error {
 func contentFingerprint(b []byte) string {
 	sum := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// anyToProjections 把导入文件里 `projections` 的任意 JSON 值折成 `map[string]any`
+// （只服务于 v11 → v12 的 `baseURL` 推导；形状不对就当没有）。
+func anyToProjections(v any) map[string]any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m
 }

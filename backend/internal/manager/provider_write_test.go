@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/vault"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/resource"
 )
 
 // ——— v11 provider 写面：CRUD 的失败面、写面顺序与补偿、生效回执 ———
@@ -34,30 +34,32 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 
 	key := "sk-abc"
 	// ① POST 成功。
-	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "deepseek-main", Type: "deepseek", Key: &key, Note: ptr("主账号"),
-	})
+	resp, err := svc.CreateProvider(ctx, func() dtoprovider.ProviderCreateReq {
+		r := providerReq("deepseek-main", &key)
+		r.Note = ptr("主账号")
+		return r
+	}())
 	if err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
-	if resp.ID != "deepseek-main" || resp.Type != "deepseek" || !resp.HasKey || resp.Note != "主账号" {
+	if resp.ID != "deepseek-main" || resp.Protocol != "openai" || resp.BaseURL == "" || !resp.HasKey || resp.Note != "主账号" {
 		t.Fatalf("新建响应不符: %+v", resp)
 	}
 	if resp.Revision != 0 {
 		t.Fatalf("memory 模式的 revision 应为 0（文件载体没有版本号），got %d", resp.Revision)
 	}
 	// ② POST 冲突 → provider_exists(40901)。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "deepseek-main", Type: "openai"}); errCode(err) != "provider_exists" {
+	if _, err := svc.CreateProvider(ctx, providerReq("deepseek-main", nil)); errCode(err) != "provider_exists" {
 		t.Fatalf("重复新建应 provider_exists，got %q（%v）", errCode(err), err)
 	}
 	// ③ id 非法 → invalid_provider_id。
 	for _, id := range []string{"", "../x", "a/b"} {
-		if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: id, Type: "openai"}); errCode(err) != "invalid_provider_id" {
+		if _, err := svc.CreateProvider(ctx, providerReq(id, nil)); errCode(err) != "invalid_provider_id" {
 			t.Fatalf("id %q 应 invalid_provider_id，got %q", id, errCode(err))
 		}
 	}
 	// ④ PATCH 不存在 → provider_not_found(40401)。
-	if _, err := svc.UpdateProvider(ctx, "nope", dtoprovider.ProviderPatchReq{Type: ptr("openai")}); errCode(err) != "provider_not_found" {
+	if _, err := svc.UpdateProvider(ctx, "nope", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.example.com/v1")}); errCode(err) != "provider_not_found" {
 		t.Fatalf("PATCH 不存在应 provider_not_found，got %q（%v）", errCode(err), err)
 	}
 
@@ -73,16 +75,23 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 		t.Fatalf("通道应为 dial_env: %+v", done.Effect)
 	}
 
-	// ⑥ PATCH type → effect=next_turn（驱动行为的字段）。
-	changed, err := svc.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{Type: ptr("openai")})
+	// ⑥ PATCH 端点 → effect=next_turn（驱动行为的字段）。
+	changed, err := svc.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
 	if err != nil {
-		t.Fatalf("PATCH type: %v", err)
+		t.Fatalf("PATCH base_url: %v", err)
 	}
 	if changed.Effect == nil || changed.Effect.Effect != "next_turn" {
-		t.Fatalf("改 type 应回 effect=next_turn: %+v", changed.Effect)
+		t.Fatalf("改端点应回 effect=next_turn: %+v", changed.Effect)
 	}
-	if got := svc.providerEnvFor("deepseek-main"); len(got) != 1 || got[0] != "OPENAI_API_KEY="+key {
-		t.Fatalf("改 type 后注入变量名应随之变化: %v", got)
+	// 引用名**只跟 id 有关**（逐供应商派生）——这正是 A12 要的不变量。
+	// 这里用纯函数断言（夹具的注册表是空的，`providerEnvFor` 需要一个声明了 `RefPattern`
+	// 的 runtime 才有意义；那条路径由 `TestProviderRegistryWriteOnceReadNever` 端到端覆盖）。
+	ref := resource.RefFor("MATE_%s_API_KEY", "deepseek-main")
+	if !strings.HasPrefix(ref, "MATE_DEEPSEEK_MAIN_") || !strings.HasSuffix(ref, "_API_KEY") {
+		t.Fatalf("v12 的引用名应是逐供应商派生的：%q", ref)
+	}
+	if resource.RefFor("MATE_%s_API_KEY", "deepseek_main") == ref {
+		t.Fatalf("规范化会碰撞的两个 id 必须靠哈希后缀区分开：%q", ref)
 	}
 
 	// ⑦ DELETE 幂等：第一次 true，第二次 false 且 code=0（不报错）。
@@ -99,7 +108,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 		t.Fatalf("删除档案应删掉密文: %v", err)
 	}
 	// ⑨ 删被引用的档案 → provider_in_use(40901) + referenced_by_agents[]。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "inuse", Type: "openai"}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("inuse", nil)); err != nil {
 		t.Fatal(err)
 	}
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, Provider: "inuse"}
@@ -128,7 +137,7 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	dir := filepath.Join(home, "agents")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 
@@ -137,7 +146,7 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 		t.Fatalf("预置行: ok=%v err=%v", ok, err)
 	}
 	key := "sk-ghost"
-	_, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "ghost", Type: "deepseek", Key: &key})
+	_, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "ghost", Protocol: "openai", APIKey: &key})
 	if errCode(err) != "provider_exists" {
 		t.Fatalf("CAS 未命中应翻成 provider_exists，got %q（%v）", errCode(err), err)
 	}
@@ -167,12 +176,12 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	dir := filepath.Join(home, "agents")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 
 	old := "sk-old"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Type: "openai", Key: &old}); err != nil {
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &old}); err != nil {
 		t.Fatal(err)
 	}
 	// 让内存里的 revision 过期（模拟"有人在这中间改过载体"）：直接抬高库里的版本。
@@ -180,7 +189,7 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 		t.Fatalf("抬高版本: ok=%v err=%v", ok, err)
 	}
 	neu := "sk-new"
-	_, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{Key: &neu})
+	_, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &neu})
 	if errCode(err) != "definition_changed" {
 		t.Fatalf("CAS 未命中应 definition_changed，got %q（%v）", errCode(err), err)
 	}
@@ -197,7 +206,7 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 		t.Fatalf("补偿应写回旧密文，got %q（期望 %q）", string(got), old)
 	}
 	// 内存也没被改脏（写面的承诺：载体提交成功之前内存一个字段都不动）。
-	if env := svc.providerEnvFor("p1"); len(env) != 1 || env[0] != "OPENAI_API_KEY="+old {
+	if env := svc.providerEnvFor("opencode", "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
 		t.Fatalf("失败的写面不该改内存: %v", env)
 	}
 }
@@ -212,7 +221,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t) // stub ACP（真子进程）+ 真库 + agent a1
 	key := "sk-old"
-	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Type: "openai", Key: &key}); err != nil {
+	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &key}); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	r.svc.agents["a1"].Provider = "p1"
@@ -225,9 +234,11 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	busy.busy = true
 	busy.mu.Unlock()
 
-	changed, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{Type: ptr("deepseek")})
+	// 走 env 通道的底座上，改**密钥**才会换基础键（改了它才谈得上"下一轮拿到新 env"）。
+	neu := "sk-new"
+	changed, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &neu})
 	if err != nil {
-		t.Fatalf("PATCH type: %v", err)
+		t.Fatalf("PATCH 密钥: %v", err)
 	}
 	eff := changed.Effect
 	if eff == nil {
@@ -254,7 +265,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 		rec := r.svc.conversationRec(tc.id)
 		plan := r.orch.planGenerationSwitch(tc.as, rec)
 		if !plan.PermChanged {
-			t.Fatalf("%s: 改 provider type 必须让基础键变化（这正是'下一轮生效'的判据）", tc.id)
+			t.Fatalf("%s: 改供应商端点必须让基础键变化（这正是'下一轮生效'的判据）", tc.id)
 		}
 		if plan.Action != tc.want {
 			t.Fatalf("%s: 裁决应为 %s，got %s（%s）", tc.id, tc.want, plan.Action, plan.Reason)
@@ -273,12 +284,12 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 // TestProviderEffectNilWithoutOrchestrator 没有编排器时**不编数**（回 nil 而不是回 0）。
 func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Type: "openai"}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{Type: ptr("deepseek")})
+	resp, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,24 +301,26 @@ func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 // TestProviderProblemsSurfaceBeforeConversation G3：`problems[]` 让用户在开会话**之前**就看到问题。
 func TestProviderProblemsSurfaceBeforeConversation(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Type: "deepseek"}); err != nil {
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
-	items, _ := svc.ListProviders()
+	items, _ := svc.ListProviders(context.Background())
 	if len(items) != 1 {
 		t.Fatalf("列表面不符: %+v", items)
 	}
-	if len(items[0].Problems) == 0 || !strings.Contains(strings.Join(items[0].Problems, " "), "DEEPSEEK_API_KEY") {
-		t.Fatalf("无密钥的档案应给出可执行问题（并指明本应注入的变量名）: %+v", items[0].Problems)
+	// v12 的问题清单不再有"本应注入哪个变量名"这回事（引用名是逐供应商派生的），
+	// 但它必须仍然给出**可执行的出路**。
+	if len(items[0].Problems) == 0 || !strings.Contains(strings.Join(items[0].Problems, " "), "密钥") {
+		t.Fatalf("无密钥的供应商应给出可执行问题: %+v", items[0].Problems)
 	}
 	if !strings.Contains(strings.Join(items[0].Problems, " "), "设置 · 模型") {
 		t.Fatalf("问题文案应指向设置 · 模型: %+v", items[0].Problems)
 	}
 	// 引用面是只读派生：agent 一引用就出现。
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"opencode"}, Provider: "no-key"}
-	items, _ = svc.ListProviders()
+	items, _ = svc.ListProviders(context.Background())
 	if len(items[0].Refs.Agents) != 1 || items[0].Refs.Agents[0] != "a1" ||
 		len(items[0].Refs.Runtimes) != 1 || items[0].Refs.Runtimes[0] != "opencode" {
 		t.Fatalf("引用面不符: %+v", items[0].Refs)
@@ -317,7 +330,7 @@ func TestProviderProblemsSurfaceBeforeConversation(t *testing.T) {
 // TestCredentialProblemPointsAtModelSettings C6：三条文案的出路都指向「设置 · 模型」。
 func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
 
 	// ① 悬空引用。
@@ -326,12 +339,12 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 		t.Fatalf("悬空引用应报 credential_missing 并指向设置 · 模型: %v", err)
 	}
 	// ② 存在但无密钥。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "nokey", Type: "deepseek"}); err != nil {
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "nokey", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
 	err = svc.CredentialProblem(&AgentRec{ID: "a1", Provider: "nokey"})
 	if errCode(err) != "credential_missing" || !strings.Contains(err.Error(), "设置 · 模型") ||
-		!strings.Contains(err.Error(), "DEEPSEEK_API_KEY") {
-		t.Fatalf("无密钥应报 credential_missing（含注入变量名）并指向设置 · 模型: %v", err)
+		!strings.Contains(err.Error(), "nokey") {
+		t.Fatalf("无密钥应报 credential_missing（指明是哪条供应商）并指向设置 · 模型: %v", err)
 	}
 }

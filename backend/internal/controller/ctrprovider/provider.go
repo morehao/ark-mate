@@ -33,9 +33,9 @@ func NewProviderCtr(svc svcruntime.RuntimeSvc) ProviderCtr {
 	return &providerCtr{svc: svc}
 }
 
-// List 列出 provider 档案（key 绝不读回，只给 has_key）。
+// List 列出供应商（密钥绝不读回，只给 has_key）。
 func (h *providerCtr) List(c *gin.Context) {
-	items, err := h.svc.ListProviders()
+	items, err := h.svc.ListProviders(c.Request.Context())
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

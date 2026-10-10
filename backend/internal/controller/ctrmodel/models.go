@@ -13,11 +13,12 @@ import (
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// ModelCtr 模型面控制器：运行时派生的目录（读）+ 平台清单的写面（CRUD）。
+// ModelCtr 模型面控制器：运行时派生的目录（读）+ 平台清单的写面（CRUD + 同步）。
 type ModelCtr interface {
 	List(c *gin.Context)
+	Catalog(c *gin.Context)
 	Create(c *gin.Context)
-	Apply(c *gin.Context)
+	Sync(c *gin.Context)
 	Update(c *gin.Context)
 	Delete(c *gin.Context)
 }
@@ -37,13 +38,10 @@ func NewModelCtr(svc svcruntime.RuntimeSvc, agentSvc svcagent.AgentSvc) ModelCtr
 	return &modelCtr{svc: svc, agentSvc: agentSvc}
 }
 
-// List 返回模型读面：**平台清单（declared）+ 运行时事实（advertised）+ 差集（diff）+ 物化状态（config）**。
+// List 返回模型读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细（sync[]）**。
 //
-// 参数：`?runtime=<id>`（缺省取该 agent 的首选 runtime）、`?agent=<id>`（缺省当前 Agent）、
-// `?refresh=1`（跳过 5 分钟目录缓存重新取样运行时目录——**清单与差集本来就是实时算的**）。
-//
-// 未声明模型配置落点的 runtime 回落到纯旧形态（`options` + `auth_guidance`），
-// 让未来接入的第三个底座的只读面不受影响。
+// 参数：`?runtime=<id>`（只看那一个 runtime 的机器面明细）、`?agent=<id>`（缺省当前 Agent）、
+// `?refresh=1`（保留参数以兼容既有调用；读面本身**无副作用**，不重跑同步）。
 func (h *modelCtr) List(c *gin.Context) {
 	agentID := c.Query("agent")
 	if agentID == "" {
@@ -57,18 +55,17 @@ func (h *modelCtr) List(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Apply 强制重新物化模型配置文件（`POST /models/apply`；`{runtime?}` 空 = 全部已声明落点）。
+// Catalog 返回某 agent 的**运行时派生**模型目录（会话级模型选择器的数据来源）。
 //
-// 成功路径只回 `pending:true`——此刻拿不到 `advertised`，**不许假装已生效**。
-func (h *modelCtr) Apply(c *gin.Context) {
-	var req dtomodel.ModelApplyReq
-	if c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
-			return
-		}
+// 它与 `List`（平台声明）刻意分开：这里返回的 `options[].values[].value` 是底座的
+// **不透明串**，必须原样回传（dsh 是 `JSON.stringify([provider,model])`、opencode 是
+// `provider/model`），前端不得解析或拼接。
+func (h *modelCtr) Catalog(c *gin.Context) {
+	agentID := c.Query("agent")
+	if agentID == "" {
+		agentID = h.agentSvc.DefaultAgentID()
 	}
-	resp, err := h.svc.ApplyModels(c.Request.Context(), req.Runtime)
+	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -76,7 +73,26 @@ func (h *modelCtr) Apply(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Create 新建一条模型条目（同三元组已存在 → 40901 `model_exists`）。
+// Sync 重新同步模型清单（`POST /models/sync`；`{runtime?}` 空 = 全部已注册 runtime）。
+//
+// 成功路径只回逐 runtime 的结论——此刻拿不到 `advertised`，**不许假装已生效**。
+func (h *modelCtr) Sync(c *gin.Context) {
+	var req dtomodel.ModelSyncReq
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+			return
+		}
+	}
+	resp, err := h.svc.SyncModels(c.Request.Context(), req.Runtime)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Create 新建一条模型条目（同 `(provider_id, model_id)` 已存在 → 40901 `model_exists`）。
 func (h *modelCtr) Create(c *gin.Context) {
 	var req dtomodel.ModelCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -106,7 +122,7 @@ func (h *modelCtr) Update(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Delete 删除一条模型条目（幂等；默认模型 → 40501 `model_is_default` + 可执行出路）。
+// Delete 删除一条模型条目（幂等；若它是默认模型则**连带清空**并在响应里说明）。
 func (h *modelCtr) Delete(c *gin.Context) {
 	resp, err := h.svc.DeleteModel(c.Request.Context(), c.Param("id"))
 	if err != nil {

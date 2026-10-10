@@ -204,7 +204,12 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 
 	// ① 平台声明一条、底座却什么都没广告（这里用"有目录条目但零候选"造出 advertised=0 的事实）：
 	//    这正是"写了完全没生效"的形态 → 高危。
-	m := r.createModel(t, "opencode", "p1", "m-1")
+	m := r.createModel(t, "p1", "m-1")
+	// 运行时目录里的取值是**不透明串**，由平台的同一份生成规则折出来（v12 起清单行不再回带它）。
+	value, err := modelValueFor("opencode", m.ProviderID, m.ModelID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	seedCatalog(r.svc, agentID, "opencode")
 	facts := r.svc.runtimeModelFacts(ctx, "opencode", state)
 	if !facts.AdvertisedKnown || facts.AdvertisedCount != 0 {
@@ -213,18 +218,18 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	if !facts.HighRisk || facts.ModelCount != 1 {
 		t.Fatalf("声明 1 条而广告 0 条必须判高危：%+v", facts)
 	}
-	if facts.DeclaredNotAdvertised != 1 {
+	if len(facts.Missing) != 1 {
 		t.Fatalf("差集应恰好是那一条：%+v", facts)
 	}
 
 	// ② 底座广告了它 → 不高危、差集为空。
-	seedCatalog(r.svc, agentID, "opencode", aclValue(m.Value))
+	seedCatalog(r.svc, agentID, "opencode", aclValue(value))
 	facts = r.svc.runtimeModelFacts(ctx, "opencode", state)
 	if !facts.AdvertisedKnown || facts.HighRisk || facts.AdvertisedCount != 1 {
 		t.Fatalf("两侧一致时不该高危：%+v", facts)
 	}
-	if facts.DeclaredNotAdvertised != 0 {
-		t.Fatalf("两侧一致时 declared_not_advertised 应为 0：%+v", facts)
+	if len(facts.Missing) != 0 {
+		t.Fatalf("两侧一致时 Missing 应为空：%+v", facts)
 	}
 
 	// ③ 完全没有取样来源 → **无法校验**，不是高危、也不是一致。
@@ -308,4 +313,16 @@ func TestCollectProviderDoctorFactsNoStoreNoHome(t *testing.T) {
 	if got.ProviderIDs == nil || got.DanglingRefs == nil || got.OrphanCiphertexts == nil || got.Runtimes == nil {
 		t.Fatal("列表字段必须非 nil（JSON 里空 = []，不出现 null）")
 	}
+}
+
+// seedCatalog 往内存目录缓存里塞一份**伪造的运行时事实**（对账的另一半）。
+//
+// 这是把"运行时广告了什么"变成可构造输入的唯一干净办法：目录缓存本来就是内存态，
+// 而 `ModelCatalog` 在无活会话时读它（source=cache）。用真会话造这一侧会让单测依赖真底座，
+// 而本用例要钉的是**对账算法**本身。
+func seedCatalog(svc *Service, agentID, runtimeID string, values ...acl.ConfigOptionValue) {
+	svc.catalog.put(agentID, runtimeID, []acl.ConfigOption{{
+		ID: "model", Name: "Model", Category: acl.CategoryModel, Type: "select",
+		Values: values,
+	}})
 }

@@ -1,0 +1,44 @@
+# ark-mate 生成的模型清单 overlay（平台自有文件；经 dsh --patch 递入）
+# 归属标记：本文件只有平台会写；dsh 自己的 cordis.patch.yml 不在此列。
+- id: acp
+  config:
+    provider: "beta.gw"
+    model: "qwen:7b"
+- id: llm-pi-ai
+  config:
+    providers:
+      "alpha-gw":
+        displayName: "alpha-gw"
+        api: "openai-completions"
+        apiKeyEnv: "OPENAI_API_KEY"
+        baseURL: "https://alpha.example.com/v1"
+        models:
+          - id: "gpt-4o"
+            name: "大模型 \"A\" \\ 备用"
+          - id: "gpt-4o-mini"
+            name: "小模型·中文"
+- id: llm-pi-ai
+  config:
+    providers:
+      "beta.gw":
+        displayName: "beta.gw"
+        api: "openai-completions"
+        apiKeyEnv: "OPENAI_API_KEY"
+        baseURL: "https://beta.example.com/openai/v1"
+        models:
+          - id: "llama/3-8b"
+          - id: "qwen:7b"
+            name: "qwen #7b"
+- id: llm-pi-ai
+  config:
+    providers:
+      "zeta":
+        displayName: "zeta"
+        api: "openai-completions"
+        apiKeyEnv: "DEEPSEEK_API_KEY"
+        baseURL: "https://zeta.example.com/v1"
+        models:
+          - id: "deepseek-chat"
+            name: "DeepSeek 对话"
+          - id: "deepseek-reasoner"
+            name: "推理\t模型"

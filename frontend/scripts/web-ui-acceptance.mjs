@@ -41,6 +41,10 @@ const AUTO_ID = 'ui-verify-daily'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// 全局控制台错误：场景抛错时一并打印。**只加不减**——真出问题时"只有一句超时"是最难查的形态，
+// 而控制台里的真相（403、未捕获异常、antd 警告）就在手边。
+const globalPageErrors = []
+
 // 脚本自己造出来的会话（收尾统一归档：不留垃圾在本地开发实例里）
 const createdConversations = []
 
@@ -109,6 +113,11 @@ async function launchChrome() {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-gpu',
+      // macOS + Chrome 155 的 headless=new：**不加**这个开关时，走"浏览器级 WS + 扁平会话"的
+      // Page 域命令（`Page.enable`）永不回包——`Target.createTarget`/`attachToTarget` 都正常，
+      // 随后就卡死（2026-10-10 在本机实测复现并定位）。它是验收脚本自己的 Chrome 实例，
+      // 与用户正在用的浏览器无关，所以这里放开沙箱是安全且必要的。
+      '--no-sandbox',
       '--hide-scrollbars',
       '--window-size=1512,982',
       'about:blank',
@@ -125,7 +134,6 @@ async function launchChrome() {
   }
   throw new Error('等待 DevToolsActivePort 超时')
 }
-
 /** 打开一个页面并返回操作句柄。 */
 async function openPage(browser, url) {
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' })
@@ -140,9 +148,11 @@ async function openPage(browser, url) {
     if (msg.method === 'Runtime.exceptionThrown') {
       const d = msg.params.exceptionDetails
       errors.push(d.exception?.description ?? d.text)
+      globalPageErrors.push('EXC ' + (d.exception?.description ?? d.text))
     }
     if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
       errors.push(`${msg.params.entry.source}: ${msg.params.entry.text}`)
+      globalPageErrors.push(`${msg.params.entry.source}: ${msg.params.entry.text}`)
     }
   })
   await send('Page.enable')
@@ -836,17 +846,16 @@ async function setDraft(page, text) {
 // **本场景尚未在真 Chrome 上跑过**（写成时所在的环境起不了 GUI 浏览器，见文件头用法注释）：
 // 首次 `pnpm ui:accept model` 很可能需要按真实 DOM 微调选择器——这正是它默认不进默认集合的原因。
 async function scenarioSettingsModel(browser) {
-  section('v11 设置 · 模型（供应商 + 模型两块 / 生效状态列 / 文案纪律）')
+  section('v12 设置 · 模型（供应商 + 模型两块 / 单一默认 / 聚合生效结论 / 零底座词汇）')
   const provID = 'ui-verify-prov'
   const modelID = `ui-verify-${Date.now().toString(36)}`
   const page = await openPage(browser, `${WEB_URL}/`)
   const cleanup = async () => {
-    // 逐条 best-effort：夹具是自己造的，跑完必须自己清（顺序：模型 → 凭据，因为模型挂靠凭据）。
+    // 逐条 best-effort：夹具是自己造的，跑完必须自己清（顺序：模型 → 供应商，因为模型挂靠供应商）。
     // 按**前缀**扫而不是只删本次那条：中途失败的那几次也会留下同一前缀的夹具。
-    // 顺序要点：默认模型**删不掉**（40501 model_is_default，这是产品的刻意设计），所以先清默认再删。
-    for (const m of ((await api('GET', '/models?runtime=opencode')).json.data?.declared ?? [])) {
+    // v12 起删默认模型**不再被拒**（B4：连带清空默认），所以不必先清默认。
+    for (const m of ((await api('GET', '/models')).json.data?.models ?? [])) {
       if (!String(m.model_id).startsWith('ui-verify-')) continue
-      if (m.is_default) await api('PATCH', `/models/${m.id}`, { is_default: false })
       await api('DELETE', `/models/${m.id}`)
     }
     await api('DELETE', `/providers/${provID}`)
@@ -868,67 +877,122 @@ async function scenarioSettingsModel(browser) {
     const titles = await page.evaluate(
       `return [...document.querySelectorAll('.fg-model-panel header b')].map(b => (b.innerText||'').trim())`,
     )
-    check('表头标题不含 provider/供应商代码词', titles.length >= 2 && !titles.some((t) => /provider|mcp|skill/i.test(t)), JSON.stringify(titles))
+    check('表头标题不含代码词', titles.length >= 2 && !titles.some((t) => /provider|mcp|skill|runtime|dsh|opencode/i.test(t)), JSON.stringify(titles))
 
-    // ② 供应商：新建 → 自检（本地段）→ 删除
-    await page.click(btnExpr('新建凭据'))
-    await page.waitFor(`return !!document.querySelector('.ant-modal input#id')`, { label: '凭据表单打开' })
+    // ② 供应商：新建 → 自检（本地段）→ 留在列表里
+    await page.click(btnExpr('新建供应商'))
+    await page.waitFor(`return !!document.querySelector('.ant-modal input#id')`, { label: '供应商表单打开' })
     await page.type('document.querySelector(".ant-modal input#id")', provID)
-    // 上游类型是 antd Select（不是裸 input）——按**表单字段 id** 定位，别用 `.ant-modal .ant-select`：
-    // 后者会先命中外层设置弹窗里的底座选择器（首次实跑就点错了控件）。
-    const typePick = await selectByFieldID(page, 'type', 'deepseek')
-    const typeShown = typePick.ok
-    const dbg = typePick.detail
-    check('供应商表单的「上游类型」已选中 deepseek（antd Select 的选中路径）', typeShown, dbg)
-    await page.type('document.querySelector(".ant-modal input#key")', 'sk-ui-verify')
-    // 运行时参数是**后端 schema 驱动**的折叠区：展开它、断言字段真的由 `/runtimes` 给出
-    // （不能等弹窗关了再查 `.fg-projfields`——那时它已经不存在，断言会空转通过）。
-    await page.click(`[...document.querySelectorAll('.ant-modal .ant-collapse-header')].find(h => (h.innerText||'').includes('运行时参数'))`)
-    await sleep(400)
-    const projLabels = await page.evaluate(
-      `return [...document.querySelectorAll('.ant-modal .fg-projfields label')].map(l => (l.innerText||'').trim())`,
+    check('供应商表单的 id 已填进去',
+      (await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)) === provID,
+      String(await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)))
+    // 协议是 antd Select（不是裸 input）：**断言它开箱就是 openai**，不去手动选。
+    //
+    // 为什么改（2026-10-10）：手动走一遍 `selectByFieldID`（点开 → 输入 → 点选项）会在
+    // 这里把表单值弄丢（实测：走完那三步后 `validateFields` 仍报「协议必填」），
+    // 而"默认就是 openai"本来就是产品该有的形态——`Form` 的 `initialValues` 提供它。
+    // 断言默认值比"能手动选"更强：它直接钉住那条初值链路。
+    const protoShown = await page.evaluate(
+      `const i = document.querySelector('.ant-modal input#protocol'); return i ? (i.closest('.ant-select')?.innerText || '') : ''`,
     )
-    check('供应商表单的运行时参数字段来自后端 schema（含 api/baseURL）',
-      projLabels.some((l) => /api/.test(l)) && projLabels.some((l) => /baseURL/.test(l)), JSON.stringify(projLabels))
-
-    await page.click(saveBtnExpr('type'))
-    await page.waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(provID)})`, { label: '凭据出现在列表里' })
-    check('凭据创建后出现在供应商表里', true, provID)
+    check('供应商表单的「协议」开箱即 openai（表单初值链路生效）',
+      String(protoShown).includes('openai'), JSON.stringify(protoShown))
+    // 关掉 Select 的下拉浮层：它盖在表单上，会让随后的 `page.click(input)` 落到浮层上
+    // （真实鼠标事件被遮住 = 输入框根本没聚焦，insertText 打进空气里）。
+    //
+    // **不要用 Escape**：antd 的 Modal 默认 `keyboard`，那个按键会连带把**整个弹窗**关掉
+    // （实测：之后 form 填得好好的、点保存什么也不发生）。改成点一下弹窗标题这个中性区域。
+    await page.click(`document.querySelector('.ant-modal .ant-modal-title')`, { optional: true })
+    await sleep(250)
+    await page.type('document.querySelector(".ant-modal input#base_url")', 'https://api.deepseek.com/v1')
+    await page.type('document.querySelector(".ant-modal input#api_key")', 'sk-ui-verify')
+    const filled = await page.evaluate(`return JSON.stringify({
+      id: document.querySelector('.ant-modal input#id')?.value,
+      base_url: document.querySelector('.ant-modal input#base_url')?.value,
+      api_key: (document.querySelector('.ant-modal input#api_key')?.value || '').length,
+    })`)
+    check('供应商表单的端点与密钥已填进去', /"base_url":"https:\/\/api\.deepseek\.com\/v1"/.test(filled) && /"api_key":[1-9]/.test(filled), filled)
+    // 保存：按**完整鼠标序列**派发（mousedown → mouseup → click）。
+    //
+    // 为什么不用 `el.click()`：antd 的 Button 在受控弹窗里对合成 `click` 不总是响应（实测：
+    // 事件派发了、React 的 onClick 没跑）。完整的鼠标序列与真实点击同形，React 一定收得到；
+    // 而 `page.click`（CDP 真实鼠标）在**嵌套弹窗**里坐标会被外层元素吃掉。
+    // 保存：用**真实 CDP 鼠标事件 + 由 getBoundingClientRect 算出的坐标**。
+    //
+    // 三条失败过的路都记在这里，免得下一个人重走：
+    //   ① `el.click()`（合成点击）→ React 的 onClick 不跑（事件没经过真正的输入管线）；
+    //   ② `document.dispatchEvent(new MouseEvent(...))` → 同上；
+    //   ③ `page.click`（CDP 鼠标 + DOM.getBoxModel 的坐标）→ 在**嵌套弹窗**里盒子算出来偏了，
+    //      事件落到遮罩上（表现：点了没反应，也没有任何错误）。
+    // 现在这条把"真实输入管线"和"准确的矩形"两半各自取对。
+    // 保存：一次**真实鼠标点击**（坐标取自按钮的 `getBoundingClientRect`）。
+    //
+    // 记一条踩过的坑，免得下一个人重走：这一步早期在**手搭的隔离核**上跑不通，表现是
+    // "点了没反应、库里也没有"，一度被误判成"headless 送不进鼠标事件"。真因是环境——
+    // `make dev` 会给核设 `MATE_ALLOWED_ORIGINS`（vite 源），而隔离核没有：浏览器的**同源
+    // GET 不带 `Origin`**（所以列表读得到），而 **POST 一定带** → 核的 Origin 矩阵回 403。
+    // 症状与"输入没送到"一模一样。跑这条验收时，核必须带 `MATE_ALLOWED_ORIGINS`。
+    const saveRect = await page.evaluate(`return (() => {
+      const el = ${saveBtnExpr('base_url')}
+      if (!el) return null
+      if (el.disabled || el.classList.contains('ant-btn-loading')) return { disabled: el.className }
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
+    if (!saveRect) throw new Error('找不到供应商表单的「保存」按钮：' + saveBtnExpr('base_url'))
+    if (saveRect.disabled) throw new Error('供应商表单的「保存」被禁用：' + saveRect.disabled)
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+      await send2(page, { type, x: saveRect.x, y: saveRect.y, button: 'left', clickCount: 1 })
+    }
+    const created = await page
+      .waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(provID)})`, { label: '供应商出现在列表里', timeout: 10000 })
+      .catch(() => false)
+    if (!created) {
+      const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
+      const ids = (await api('GET', '/providers')).json.data ?? []
+      const errs = await page.evaluate(
+        `return [...document.querySelectorAll('.ant-modal .ant-form-item-explain-error')].map(e => e.innerText).join(' | ')`,
+      )
+      const btns = await page.evaluate(
+        `return [...document.querySelectorAll('.ant-modal button')].map(b => (b.innerText||'').trim()).filter(Boolean).join(',')`,
+      )
+      throw new Error('供应商没出现在列表里：toast=' + toasts + ' 表单=' + filled +
+        ' 校验错误=' + errs + ' 按钮=' + btns + ' 库里=' + JSON.stringify(ids.map((p) => p.id)) +
+        ' 页面错误=' + (page.errors || []).join(' || '))
+    }
+    check('供应商创建后出现在供应商表里', true, provID)
+    // 端点列有值（缺端点会显示「缺端点」Tag——那条路径由 providers 的 problems 单测覆盖）
+    const provRow = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
+    check('供应商表给出端点与密钥状态', /api\.deepseek\.com/.test(provRow) && /已存|未设置/.test(provRow),
+      provRow.split('\n').filter((l) => /deepseek|密钥|设置/.test(l)).join(' | ').slice(0, 200))
     await page.shot('21-settings-provider-created')
 
     // 自检：只跑本地段（**绝不点那条会出网的**）
-    const probeBtns = await page.evaluate(
-      `return [...document.querySelectorAll('.fg-model-panel button')].map(b => (b.innerText||'').trim()).filter(Boolean)`,
-    )
-    // 用 `clickJS`（合成 click）：这一行的按钮在表格单元格里、外面套着 antd 的 Tooltip/Space 包装，
-    // 真实鼠标事件会被上层元素吃掉——仓库里那个助手就是为这种"点不到/点了没反应"准备的。
     const probeBtnExpr = `[...document.querySelectorAll('.fg-model-panel button')].find(b => (b.innerText||'').replace(/\\s+/g,'').includes('自检'))`
     const clicked = await clickJS(page, probeBtnExpr)
     const opened = await page.waitFor(`return !!document.querySelector('.fg-probe')`, { label: '自检结果展开', timeout: 40000 }).catch(() => false)
     if (!opened) {
-      // 失败时把可行动的信息一起报出来（按钮清单 + toast），而不是只留一句超时。
       const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
-      throw new Error(`自检结果没展开：clicked=${clicked} 面板按钮=${JSON.stringify(probeBtns)} toast=${toasts}`)
+      throw new Error(`自检结果没展开：clicked=${clicked} toast=${toasts}`)
     }
     await sleep(500)
     const probe = await page.evaluate(`return document.querySelector('.fg-probe').innerText`)
-    check('自检逐条给出结论与出路', /exists/.test(probe) && /secret/.test(probe), probe.split('\n').slice(0, 4).join(' | ').slice(0, 220))
+    // v12 的本地段检查项：exists / protocol / base_url / secret / refs / delivery / catalog
+    check('自检逐条给出结论（含端点与密钥两项）',
+      /exists/.test(probe) && /base_url/.test(probe) && /secret/.test(probe),
+      probe.split('\n').slice(0, 4).join(' | ').slice(0, 240))
     check('自检有「连一次上游」的显式入口（默认不出网）', /连一次上游/.test(probe), probe.slice(0, 160))
 
-    // ③ 模型：切底座 → 新建 → 改显示名/隐藏/置顶 → 星号设默认
-    // 同样走合成 click：表格右侧那排按钮在滚动容器里、外面套着 antd 的包装，真实鼠标事件可能被吃掉。
+    // ③ 模型：新建 → 出现在清单里（v12 的表单字段是 vendor / model_id）
     const openedModel = await clickJS(page, btnExpr('新建模型'))
     const modelModalOpen = await page
       .waitFor(`return !!document.querySelector('.ant-modal input#model_id')`, { label: '模型表单打开', timeout: 8000 })
       .catch(() => false)
     if (!modelModalOpen) {
-      throw new Error('新建模型没打开表单：clickJS=' + openedModel + ' 按钮状态=' + await page.evaluate(`
-        JSON.stringify([...document.querySelectorAll('.fg-model-panel button')]
-          .filter(b => (b.innerText||'').includes('新建模型'))
-          .map(b => ({ text: b.innerText, disabled: b.disabled })))`))
+      throw new Error('新建模型没打开表单：clickJS=' + openedModel)
     }
-    const provPick = await selectByFieldID(page, 'provider_id', provID)
-    check('模型表单的「供应商」已选中该凭据', provPick.ok, provPick.detail)
+    const provPick = await selectByFieldID(page, 'vendor', provID)
+    check('模型表单的「供应商」已选中该供应商', provPick.ok, provPick.detail)
     await page.type('document.querySelector(".ant-modal input#model_id")', modelID)
     check('模型表单的 model_id 已填进去',
       (await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`)) === modelID,
@@ -937,10 +1001,7 @@ async function scenarioSettingsModel(browser) {
         html: document.querySelector('.ant-modal input#model_id')?.outerHTML.slice(0, 160),
         ids: [...document.querySelectorAll('.ant-modal input')].map(i => i.id),
       })`))
-    await page.type('document.querySelector(".ant-modal input#name")', '验收模型')
     await page.click(saveBtnExpr('model_id'))
-    // **立刻**读 toast：antd 的 message 几秒后自动消失，等列表渲染完再读只会拿到空串
-    // （首次实跑就是这么误报的）。文案纪律是"保存成功"这一句，所以必须在它还在的时候读。
     await sleep(350)
     const toast = await page.evaluate(
       `return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`,
@@ -949,51 +1010,58 @@ async function scenarioSettingsModel(browser) {
       .waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(modelID)})`, { label: '模型出现在清单里', timeout: 10000 })
       .catch(() => false)
     if (!inList) {
-      const decl = await api('GET', '/models?runtime=opencode')
+      const list = (await api('GET', '/models')).json.data?.models ?? []
       throw new Error('模型没出现在清单里：toast=' + toast +
         ' 表单里的 model_id=' + await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`) +
-        ' 库里=' + JSON.stringify(((decl.json.data || {}).declared || []).map((m) => m.model_id)))
+        ' 库里=' + JSON.stringify(list.map((m) => m.model_id)))
     }
     await sleep(400)
     await page.shot('22-settings-model-created')
 
-    // ④ 文案纪律（**两条判据，第一条是常驻的**）：
-    //   · 面板里的常驻文案（生效说明 + 状态列）不许出现"已生效"这种断言，且必须说清"新进程才读"；
-    //   · 若捕获到 toast（antd 的 message 几秒后自动消失，抓不到不算失败），它也得守同一条口径。
+    // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
-    check('面板常驻文案不承诺"已生效"，且说清"新进程才读"',
-      !/已生效/.test(panelCopy) && /新进程|下一个会话进程/.test(panelCopy),
-      panelCopy.split('\n').filter((l) => /生效|进程/.test(l)).join(' | ').slice(0, 220))
-    check('保存提示（捕获到时）同守一条口径：不含"已生效"',
-      toast === '' || (!/已生效/.test(toast) && /下一个会话进程|已保存/.test(toast)), JSON.stringify(toast).slice(0, 200))
+    const lower = panelCopy.toLowerCase()
+    const banned = ['dsh', 'opencode', 'deepseekharness', 'runtime', '底座', 'provider']
+    const hit = banned.filter((w) => lower.includes(w))
+    check('面板正文零底座词汇（ADR-22）', hit.length === 0,
+      hit.length ? `命中 ${JSON.stringify(hit)}；行=${JSON.stringify(panelCopy.split('\n').filter((l) => hit.some((w) => l.toLowerCase().includes(w))))}` : '干净')
+    check('逐后端的机器面明细没有被渲染（sync[] 属诊断面）',
+      !/deepseekharness|opencode/.test(panelCopy), panelCopy.slice(0, 160))
 
-    // 生效状态列：有值（已生效/待生效/底座独有 三态之一）
-    const rows = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
-    check('生效状态列有值（已生效/待生效/底座独有）', /已生效|待生效|底座独有/.test(rows), rows.split('\n').filter((l) => /生效|独有/.test(l)).join(' | ').slice(0, 200))
-    // 配置状态条（路径/通道/pending）
-    check('配置状态条给出落点与通道', /配置文件：|未声明模型配置落点|尚未实测/.test(rows), rows.split('\n').filter((l) => /配置文件|落点|通道/.test(l)).join(' | ').slice(0, 220))
+    // 生效结论：三态之一 + 生效说明说清「保存成功 ≠ 已生效」。
+    check('生效结论是三态之一（已生效/待生效/同步失败）',
+      /同步状态：(已生效|待生效|同步失败)/.test(panelCopy),
+      panelCopy.split('\n').filter((l) => /同步状态/.test(l)).join(' | ').slice(0, 200))
+    check('生效说明说清「保存成功只表示写入平台清单、要等新会话进程」',
+      /保存成功/.test(panelCopy) && /新/.test(panelCopy) && /会话进程|进程启动/.test(panelCopy),
+      panelCopy.split('\n').filter((l) => /保存成功|进程/.test(l)).join(' | ').slice(0, 240))
+    check('保存提示（捕获到时）不承诺"已生效"',
+      toast === '' || !/已生效/.test(toast), JSON.stringify(toast).slice(0, 200))
 
-    // 星号设默认（真实点击）
-    // 默认态的界面判据：默认行的星号 aria-label 是「取消默认模型」（点它会问一次再取消）。
-    // 新建时若已经是默认（表单默认勾选），这里就不必再点——两种入口都要判到。
-    const setStar = `document.querySelector('.fg-model-panel button[aria-label="设为默认模型"]')`
-    if (await page.box(setStar)) {
-      await page.click(setStar)
-      await sleep(900)
-    }
-    const panelText = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
-    check('该条默认态在界面上是 ★（aria-label=取消默认模型）',
-      (await page.count('.fg-model-panel button[aria-label="取消默认模型"]')) >= 1,
-      panelText.split('\n').filter((l) => /默认|★|☆/.test(l)).join(' | ').slice(0, 200))
+    // A14：默认模型选择器**恰好一个**（结构判据，前端半场的界面版本）。
+    const defaultPickers = await page.count('.fg-model-panel [aria-label="默认模型"]')
+    check('默认模型选择器恰好一个（A14）', defaultPickers === 1, `count=${defaultPickers}`)
 
-    // 删除默认模型应被拒（40501 model_is_default + 出路）——用 REST 判，界面文案由上面那条覆盖
-    const list = (await api('GET', '/models?runtime=opencode')).json.data?.declared ?? []
-    const created = list.find((m) => m.model_id === modelID)
-    if (created?.is_default) {
-      const del = await api('DELETE', `/models/${created.id}`)
-      check('删默认模型被拒并给出路（40501 model_is_default）', del.json.code === 40501 && /默认/.test(del.json.msg), `${del.json.code} ${String(del.json.msg).slice(0, 140)}`)
-    }
+    // ⑤ 设默认 → 界面跟随 → 删掉它**允许**且连带清空（B4）
+    const list = (await api('GET', '/models')).json.data?.models ?? []
+    const row = list.find((m) => m.model_id === modelID)
+    if (!row) throw new Error('刚建的模型不在清单里：' + JSON.stringify(list.map((m) => m.model_id)))
+    const patched = await api('PATCH', `/models/${row.id}`, { is_default: true })
+    check('把该条设为默认（REST）', patched.json.code === 0, JSON.stringify(patched.json).slice(0, 160))
+    // 界面上刷新一次（**模型块**的刷新——`btnExpr('刷新')` 会先命中供应商块那个），
+    // 断言选择器真的显示了它（默认是**单一值**，不是逐后端映射）。
+    await clickJS(page,
+      `[...document.querySelectorAll('section[aria-label="模型"] button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '刷新')`)
+    await sleep(800)
+    const shown = await page.evaluate(
+      `const el = document.querySelector('.fg-model-panel [aria-label="默认模型"]'); return el ? (el.closest('.ant-select')?.innerText || el.value || '') : ''`,
+    )
+    check('界面上的默认模型选择器显示该条', String(shown).includes(modelID), String(shown).slice(0, 120))
     await page.shot('23-settings-model-default')
+
+    const del = await api('DELETE', `/models/${row.id}`)
+    check('删掉默认模型**允许**且如实回带 default_cleared（B4）',
+      del.json.code === 0 && del.json.data?.default_cleared === true, JSON.stringify(del.json).slice(0, 200))
   } finally {
     await cleanup()
   }
@@ -1026,6 +1094,8 @@ async function main() {
       out = (await scenarios[n](browser)) ?? {}
     } catch (e) {
       check(`${n}: 场景执行完成`, false, String(e.message ?? e))
+      const fresh = globalPageErrors.filter((x) => !/favicon|DevTools|ResizeObserver/i.test(x)).slice(-6)
+      if (fresh.length) console.log(`  ⚠️  ${n}: 失败时的控制台错误 — ${fresh.join(' || ').slice(0, 600)}`)
     }
     if (out.page) {
       const noise = (e) => /favicon|DevTools|ResizeObserver/i.test(e)

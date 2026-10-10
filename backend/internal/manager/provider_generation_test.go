@@ -25,9 +25,7 @@ func TestProviderKeyChangeSwitchesGenerationNextTurn(t *testing.T) {
 	r.svc.mu.Unlock()
 
 	const secret = "sk-a2-secret"
-	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "p1", Type: "openai", Key: ptrOf(secret),
-	}); err != nil {
+	if _, err := r.svc.CreateProvider(ctx, providerReq("p1", ptrOf(secret))); err != nil {
 		t.Fatalf("建档案: %v", err)
 	}
 	agent, _ := r.svc.AgentByID("a1")
@@ -39,11 +37,15 @@ func TestProviderKeyChangeSwitchesGenerationNextTurn(t *testing.T) {
 		t.Fatal("配置未变时不得换代际（每轮都换 = 白丢上下文）")
 	}
 
-	// 改 type：注入的变量名从 OPENAI_API_KEY 变成 DEEPSEEK_API_KEY —— 拨号基键的一个维度。
-	next := "deepseek"
-	resp, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{Type: &next})
+	// 改密钥：v12 里走 **env 通道**的底座上，"进程级配置面变了"的杠杆就是密钥本身
+	// （v11 的 `type` 已删——它决定注入变量名那条路径也一并没了，引用名改为逐供应商派生）。
+	//
+	// 端点的改动不在这里验：它影响的是**交付物**（配置内容），其代际效应由同步摘要承载
+	// （ADR-13：摘要并进代际键），而那个摘要只有真正交付过的 runtime 才有。
+	next := "sk-new"
+	resp, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &next})
 	if err != nil {
-		t.Fatalf("改类型: %v", err)
+		t.Fatalf("改密钥: %v", err)
 	}
 	// 回执如实说明"下一轮生效"（C5：与代际裁决**同源**）。
 	if resp.Effect == nil || resp.Effect.Channel != "dial_env" || resp.Effect.Effect != "next_turn" {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/pkg/resource"
 )
 
 // ——— provider 连接自检（M4） ———
@@ -37,39 +38,6 @@ const (
 	probeSkip    = "skip"
 	probeUnknown = "unknown"
 )
-
-// upstreamEndpoint 一个上游厂商的最小探测端点。
-//
-// "最小请求"= 取模型列表（只读、无副作用、体积可由我们自己截断）；不带任何 body。
-type upstreamEndpoint struct {
-	// URL 探测地址。
-	URL string
-	// Header 额外请求头（把密钥放 header 的厂商用它；空 = 用 Authorization: Bearer）。
-	Header func(secret string) map[string]string
-	// ModelsPath 从响应 JSON 里取"模型条数"的路径（简化表达：顶层键名，其值应为数组）。
-	ModelsPath string
-}
-
-// upstreamEndpoints 已登记的 type → 上游端点。
-//
-// **刻意是一张小表而不是"任何 type 都试一下"**：未登记的 type 一律记 `unknown`（无法校验），
-// 而不是 fail——平台不知道它的上游长什么样，猜一个地址发密钥是错的。
-//
-// 这张表是**事实登记**，不是"支持的厂商列表"：厂商换域名/换鉴权头时只改这里。
-var upstreamEndpoints = map[string]upstreamEndpoint{
-	"openai":     {URL: "https://api.openai.com/v1/models", ModelsPath: "data"},
-	"deepseek":   {URL: "https://api.deepseek.com/v1/models", ModelsPath: "data"},
-	"openrouter": {URL: "https://openrouter.ai/api/v1/models", ModelsPath: "data"},
-	"groq":       {URL: "https://api.groq.com/openai/v1/models", ModelsPath: "data"},
-	"anthropic": {
-		URL:        "https://api.anthropic.com/v1/models",
-		ModelsPath: "data",
-		Header: func(secret string) map[string]string {
-			// Anthropic 用 x-api-key + 必填的 anthropic-version。
-			return map[string]string{"x-api-key": secret, "anthropic-version": "2023-06-01"}
-		},
-	},
-}
 
 // probeUpstreamTimeout 上游段的超时：单次请求、不重试。
 //
@@ -122,36 +90,53 @@ func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.
 // probeLocal 本地段（零出网）。
 func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, snap *providerDef) []dtoprovider.ProviderCheckResp {
 	out := make([]dtoprovider.ProviderCheckResp, 0, 7)
+	// 该供应商的凭据引用名（逐供应商唯一，ADR-16）——诊断里报的是**键名**，绝不报值。
+	refName := s.providerRefName(id)
 
 	// ① exists：档案存在。
 	if d == nil {
 		return append(out, dtoprovider.ProviderCheckResp{
 			Name: "exists", Status: probeFail,
-			Detail: fmt.Sprintf("provider 档案 %q 不存在", id),
+			Detail: fmt.Sprintf("这条供应商 %q 不存在", id),
 			Remedy: "刷新列表；若刚在别处删过它，请同步引用它的 agent 的凭据选择",
 		})
 	}
 	out = append(out, dtoprovider.ProviderCheckResp{
-		Name: "exists", Status: probePass, Detail: "档案存在（载体：" + s.providerLocator(id) + "）",
+		Name: "exists", Status: probePass, Detail: "这条供应商在册（载体：" + locatorKind(s.providerLocator(id)) + "）",
 	})
 
-	// ② type：能否推出注入变量名；未知 type 记 warn（仍会注入大写 type + _API_KEY）。
-	envKey := envKeyOf(snap.Type)
-	switch {
-	case snap.Type == "":
+	// ② protocol：本期只支持 OpenAI 兼容端点。
+	switch snap.Protocol {
+	case string(resource.ProtocolOpenAI):
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "type", Status: probeFail, Detail: "type 为空：推不出注入变量名，这条凭据不会注入任何东西",
-			Remedy: "在「设置 · 模型」的供应商块里补一个上游类型（如 deepseek / openai）",
+			Name: "protocol", Status: probePass, Detail: "protocol=openai（OpenAI 兼容端点）",
 		})
-	case knownProviderType(snap.Type):
+	case "":
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "type", Status: probePass, Detail: "type=" + snap.Type + " → " + envKey,
+			Name: "protocol", Status: probeWarn, Detail: "protocol 为空：按 openai 处理（写面写入时总是显式落这一个值）",
 		})
 	default:
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "type", Status: probeWarn,
-			Detail: "type=" + snap.Type + " 不在已知上游类型表里：平台仍会注入 " + envKey + "，但无法为它做上游自检",
-			Remedy: "确认底座认的就是 " + envKey + "；否则把它改成已知上游类型",
+			Name: "protocol", Status: probeFail, Detail: "不支持的协议 " + snap.Protocol,
+			Remedy: "本期只支持 OpenAI 兼容端点；原生 anthropic/gemini 协议需要各自的 api 映射与鉴权形态",
+		})
+	}
+
+	// ②′ base_url：缺端点 = 这条供应商的模型不会被交付给任何底座（fail-loud 而不是"照发"）。
+	switch {
+	case strings.TrimSpace(snap.BaseURL) == "":
+		out = append(out, dtoprovider.ProviderCheckResp{
+			Name: "base_url", Status: probeFail, Detail: "缺端点（base_url 为空）：它的模型不会被交付给任何会话进程",
+			Remedy: "在「设置 · 模型」的供应商块补一个 OpenAI 兼容端点（例如 https://api.openai.com/v1）",
+		})
+	case !strings.HasPrefix(snap.BaseURL, "http://") && !strings.HasPrefix(snap.BaseURL, "https://"):
+		out = append(out, dtoprovider.ProviderCheckResp{
+			Name: "base_url", Status: probeWarn, Detail: "端点不是 http(s) URL：" + snap.BaseURL,
+			Remedy: "确认这是一个能被解析的绝对 URL",
+		})
+	default:
+		out = append(out, dtoprovider.ProviderCheckResp{
+			Name: "base_url", Status: probePass, Detail: "端点 " + snap.BaseURL,
 		})
 	}
 
@@ -159,7 +144,7 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 	switch {
 	case snap.Key != "" && snap.KeyRef != "":
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "secret", Status: probePass, Detail: "密钥可解密（" + snap.KeyRef + "）",
+			Name: "secret", Status: probePass, Detail: "密钥可解密（密文在 vault 里）",
 		})
 	case snap.Key != "":
 		out = append(out, dtoprovider.ProviderCheckResp{
@@ -174,7 +159,7 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 		})
 	default:
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "secret", Status: probeFail, Detail: "没有密钥（本应注入 " + envKey + "）",
+			Name: "secret", Status: probeFail, Detail: "没有密钥（本应注入 " + refName + "）",
 			Remedy: "在「设置 · 模型」的供应商块补一条密钥，或清空引用它的 agent 的凭据选择",
 		})
 	}
@@ -211,21 +196,23 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 		})
 	}
 
-	// ⑤ injection：注入变量名 + 是否并入代际基础键（纯提示，永远 pass）。
+	// ⑤ delivery：凭据交付面（纯提示，永远 pass）。
+	//
+	// 报的是**两条通道各是什么**，并给逐供应商的引用名——用户能拿去核对子进程 env 或凭据文档。
 	out = append(out, dtoprovider.ProviderCheckResp{
-		Name: "injection", Status: probePass,
-		Detail: "以 " + envKey + " 注入 runtime 子进程 env；provider env 已在连接代际键里" +
-			"（所以改它会让引用它的会话在下一个轮次边界重建连接）",
+		Name: "delivery", Status: probePass,
+		Detail: "凭据引用名 " + refName + "；密钥并入连接代际键（改它会让引用它的会话在下一个轮次边界重建连接）。" +
+			"原生凭据文档由平台落盘（0600）；env 通道由平台注入子进程",
 	})
 
 	// ⑥ catalog：引用它的 agent 的模型目录能不能读到、有没有被运行时标成不可用的取值。
 	// 只读现有取样（会话/缓存/resume），**不新建会话**——与 `GET /models` 同一条路径。
-	out = append(out, s.probeLocalCatalog(ctx, agentIDs, envKey)...)
+	out = append(out, s.probeLocalCatalog(ctx, agentIDs, refName)...)
 	return out
 }
 
 // probeLocalCatalog 对每个引用它的 agent 读一次模型目录（`GET /models` 的同一实现）。
-func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, envKey string) []dtoprovider.ProviderCheckResp {
+func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, refName string) []dtoprovider.ProviderCheckResp {
 	if len(agentIDs) == 0 {
 		return []dtoprovider.ProviderCheckResp{{
 			Name: "catalog", Status: probeSkip, Detail: "没有引用它的 Agent：没有目录可查",
@@ -262,13 +249,13 @@ func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, envK
 			out = append(out, dtoprovider.ProviderCheckResp{
 				Name: "catalog", Status: probeUnknown,
 				Detail: fmt.Sprintf("agent %s 的模型目录暂不可读（source=%s）：%s", agentID, resp.Source, resp.Note),
-				Remedy: "先在该 Agent 上发一条消息，让底座报出目录后重跑自检",
+				Remedy: "先在该 Agent 上发一条消息，让会话进程报出目录后重跑自检",
 			})
 		case len(unavailable) > 0:
 			out = append(out, dtoprovider.ProviderCheckResp{
 				Name: "catalog", Status: probeWarn,
 				Detail: fmt.Sprintf("agent %s 的目录可读，但有条目被运行时标为不可用：%v", agentID, unavailable),
-				Remedy: "在底座内完成 provider 登录（按下面返回的 auth_guidance 执行），或检查 " + envKey + " 是否正确",
+				Remedy: "在会话进程内完成登录（按下面返回的 auth_guidance 执行），或检查 " + refName + " 是否正确",
 			})
 		default:
 			out = append(out, dtoprovider.ProviderCheckResp{
@@ -288,12 +275,13 @@ func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, envK
 //	fail    —— 401/403（密钥不对）或网络/超时（连不上）
 //	unknown —— 该 type 未登记端点（**无法校验**，不是失败；与 `mate doctor` 的口径一致）
 func (s *Service) probeUpstream(ctx context.Context, snap *providerDef, opts probeOptions) dtoprovider.ProviderCheckResp {
-	ep, ok := upstreamEndpoints[snap.Type]
-	if !ok {
+	// v12 起上游段就是一次 `GET <base_url>/models` 带 `Authorization: Bearer <key>`——
+	// 按**资源字段**探，而不是 v11 那张"type → 厂商 URL"硬编码表（自建网关因此也能自检）。
+	if strings.TrimSpace(snap.BaseURL) == "" {
 		return dtoprovider.ProviderCheckResp{
 			Name: "upstream", Status: probeUnknown,
-			Detail: "type=" + snap.Type + " 未登记上游端点：**无法校验**（不是失败）",
-			Remedy: "这条凭据的上游连通性需要你在底座里验证；平台不为未登记的 type 猜地址、也不把密钥发出去",
+			Detail: "这条供应商没有端点（base_url 为空）：**无法校验**（不是失败）",
+			Remedy: "先在「设置 · 模型」里补一个 OpenAI 兼容端点，再做上游自检",
 		}
 	}
 	if snap.Key == "" {
@@ -302,19 +290,14 @@ func (s *Service) probeUpstream(ctx context.Context, snap *providerDef, opts pro
 			Remedy: "先补一条密钥（密钥解不开时上游段必然失败）",
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep.URL, nil)
+	url := strings.TrimRight(snap.BaseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return dtoprovider.ProviderCheckResp{
 			Name: "upstream", Status: probeFail, Detail: "构造上游请求失败：" + err.Error(),
 		}
 	}
-	if ep.Header != nil {
-		for k, v := range ep.Header(snap.Key) {
-			req.Header.Set(k, v)
-		}
-	} else {
-		req.Header.Set("Authorization", "Bearer "+snap.Key)
-	}
+	req.Header.Set("Authorization", "Bearer "+snap.Key)
 	req.Header.Set("Accept", "application/json")
 
 	client := &http.Client{Timeout: probeUpstreamTimeout, Transport: opts.transport}
@@ -333,7 +316,7 @@ func (s *Service) probeUpstream(ctx context.Context, snap *providerDef, opts pro
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		_, detail := countModels(resp, ep.ModelsPath)
+		_, detail := countModels(resp, "data")
 		return dtoprovider.ProviderCheckResp{
 			Name: "upstream", Status: probePass,
 			Detail: fmt.Sprintf("上游可达且鉴权通过（HTTP %d，%s）；只计数、不落清单", resp.StatusCode, detail),
@@ -388,4 +371,20 @@ func knownProviderType(typ string) bool {
 		return true
 	}
 	return false
+}
+
+// locatorKind 把载体定位串折成**用户词**（`db` / `file` / `未知`）。
+//
+// 为什么要折：原始定位串（`db:provider/<id>` / `<AgentDir>/providers.json`）是**排障标识**，
+// 里面带着资源层的代码词（`provider`）。设置 · 模型 那一节的用户面不许出现这类词（ADR-22），
+// 而自检结果是要渲染在那一节里的。需要完整定位串的场合是 `mate doctor` 与诊断接口。
+func locatorKind(locator string) string {
+	switch {
+	case strings.HasPrefix(locator, "db:"):
+		return "db"
+	case locator == "":
+		return "未知"
+	default:
+		return "file"
+	}
 }

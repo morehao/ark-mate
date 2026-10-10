@@ -78,7 +78,7 @@ func TestDoctorProviderSectionClean(t *testing.T) {
 	}
 	r.withStore(t, func(st *store.Store) {
 		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"type":"deepseek","key_ref":"vault:providers/p1"}`); err != nil {
+			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := st.UpsertAgentDefinition(context.Background(), "a1",
@@ -230,7 +230,7 @@ func TestDoctorProviderSectionNoStore(t *testing.T) {
 func TestDoctorProviderSectionReadOnly(t *testing.T) {
 	r := newProviderDoctorRig(t)
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"type":"deepseek"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"protocol":"openai","base_url":"https://api.deepseek.com/v1"}`); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -266,7 +266,7 @@ func TestRunDoctorProviderSectionNoFailures(t *testing.T) {
 	}
 	r.withStore(t, func(st *store.Store) {
 		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"type":"deepseek","key_ref":"vault:providers/p1"}`); err != nil {
+			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -336,7 +336,7 @@ func TestDoctorProviderVaultFail(t *testing.T) {
 	}
 	r.withStore(t, func(st *store.Store) {
 		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"type":"deepseek","key_ref":"vault:providers/p1"}`); err != nil {
+			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -359,7 +359,7 @@ func TestDoctorProviderVaultFail(t *testing.T) {
 func TestDoctorProviderVaultNotYetCreated(t *testing.T) {
 	r := newProviderDoctorRig(t)
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"type":"deepseek"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"protocol":"openai","base_url":"https://api.deepseek.com/v1"}`); err != nil {
 			t.Fatal(err)
 		}
 	})

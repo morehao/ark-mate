@@ -1,35 +1,22 @@
 package dtomodel
 
-// ——— 平台模型清单（v11，设置 · 模型）的对外面 ———
+// ——— 应用层模型清单（v12，设置 · 模型）的对外面 ———
 //
 // 与 `response.go` 里的运行时目录面（`ModelCatalogResp`，读面）刻意分开：这里管的是**平台声明**，
-// 那边是**运行时事实**。两者在 `GET /models` 的对账响应里相遇（G9），但它们的来源、写入方与
-// 生命周期完全不同——混在一个结构里会让"这条到底是谁说的"变得不可判定。
+// 那边是**运行时事实**。两者在 `GET /models` 的同步状态里相遇，但它们的来源、写入方与生命周期
+// 完全不同——混在一个结构里会让"这条到底是谁说的"变得不可判定。
 
-// ModelResp 一条平台模型条目。
+// ModelResp 一条模型条目（**不带 runtime 维度**：同一份清单投给所有已注册底座）。
 type ModelResp struct {
-	ID         string `json:"id"`
-	Runtime    string `json:"runtime"`
+	ID string `json:"id"`
+	// ProviderID 挂靠的供应商 id。
 	ProviderID string `json:"provider_id"`
-	// ModelID 平台写出去给底座的模型 id（**不是**运行时给的不透明 value，见 Value）。
+	// ModelID 发给上游的模型 id（**不是**运行时给的不透明 value，也不是平台 id）。
 	ModelID string `json:"model_id"`
-	// Name 平台侧显示名（可选）。它只影响平台呈现与配置里的 name 字段，**改不动 ACP 候选项里的
-	// 路由前缀**（那恒为路由 key，见事实 #27）。
+	// Name 展示名（可选；空 = 前端回落显示 ModelID）。
 	Name string `json:"name,omitempty"`
-	// Extra 该条目的额外配置（原样物化进配置；形状由各 runtime 的生成器解释）。
-	Extra map[string]any `json:"extra,omitempty"`
-	// Hidden 平台侧隐藏（**不下发**：底座的目录里仍然会出现它——隐藏不是"删掉它"）。
-	Hidden bool `json:"hidden"`
-	// Pinned 平台侧置顶（只改平台列表顺序，不下发）。
-	Pinned bool `json:"pinned"`
-	// IsDefault 是否该 runtime 的默认模型（每个 runtime 至多一条）。
-	IsDefault bool `json:"is_default"`
-	// Value 平台按该 runtime 的规则**生成**的不透明值（dsh = JSON.stringify([provider,model])、
-	// opencode = provider/model）。会话级下发（T2）与对账都用它。
-	//
-	// 它**不进清单的存储**：清单只存生成 value 的输入（runtime/provider_id/model_id）。
-	// 这是本方案里最容易写错的一处——把运行时给的 value 存回清单，等于把"事实"当成了"意图"。
-	Value string `json:"value"`
+	// Note 备注（不驱动行为）。
+	Note string `json:"note,omitempty"`
 	// Revision 载体版本（行 CAS 判据）。
 	Revision int64 `json:"revision"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano）。
@@ -38,21 +25,15 @@ type ModelResp struct {
 	Effect *ModelEffect `json:"effect,omitempty"`
 }
 
-// ModelEffect 模型清单写面的生效面回执（T4 的落地形态在模型面上的那一份）。
+// ModelEffect 模型清单写面的生效面回执。
 //
-// 模型面有**两条**通道，而它们不是替代关系（ADR-11）：
-//
-//	config_write（T5）  新进程启动时读配置 → 引用该 runtime 的会话在轮次边界换代际。
-//	session_config（T2）新会话创建时由平台下发 → **立即**，且首版 dsh 侧 T5 只读时它是唯一兑现路径。
+// v12 起只有**一条**通道（把整份清单交给各 adapter），所以它不再有 v11 那种
+// `config_write` / `session_config` 的并列——写面提交后触发一次同步，逐 runtime 的结论在
+// `GET /models` 的 `sync[]` 里。这里只回答"这次改动会影响哪些会话、什么时候"。
 type ModelEffect struct {
-	// Channels 本条改动走的通道（config_write 恒在；改了默认模型时还有 session_config）。
-	Channels []string `json:"channels"`
-	// Effect 生效时刻：next_session（下一次建会话时下发）| next_process（新 runtime 进程读配置）。
-	// 两条通道同时在时取**最早**的那个（用户关心的是"最快什么时候能用上"）。
+	// Effect 生效时刻：next_session（下一次会话创建/换代际）| next_process（新底座进程读配置）。
 	Effect string `json:"effect"`
-	// AppliesToRuntimes 受影响的 runtime（恒为这一条所属的 runtime）。
-	AppliesToRuntimes []string `json:"applies_to_runtimes"`
-	// AffectedConversations 由**可能落到该 runtime** 的 agent 服务的会话数（换代际的影响面）。
+	// AffectedConversations 由**可能落到任一已注册底座**的 agent 服务的会话数（换代际的影响面）。
 	AffectedConversations int `json:"affected_conversations"`
 	// Deferred 其中本轮不能就地换代际的会话数（有在途轮次 / 有未应答权限或提问）。
 	Deferred int `json:"deferred"`
@@ -61,85 +42,105 @@ type ModelEffect struct {
 }
 
 // ModelCreateReq POST /models 的请求体。
+//
+// `runtime` **不在**资源字段表里（A2）：请求体里出现它 → 40001。它不是一个"被忽略的旧字段"，
+// 而是一个会让人以为模型分底座的陷阱——静默收下就等于承认它有意义。
 type ModelCreateReq struct {
-	Runtime    string         `json:"runtime" binding:"required"`
-	ProviderID string         `json:"provider_id" binding:"required"`
-	ModelID    string         `json:"model_id" binding:"required"`
-	Name       *string        `json:"name"`
-	Extra      map[string]any `json:"extra"`
-	Hidden     *bool          `json:"hidden"`
-	Pinned     *bool          `json:"pinned"`
-	IsDefault  *bool          `json:"is_default"`
+	ProviderID string  `json:"provider_id" binding:"required"`
+	ModelID    string  `json:"model_id" binding:"required"`
+	Name       *string `json:"name"`
+	Note       *string `json:"note"`
+	// IsDefault true = 把这条设为**唯一**默认模型（写进 meta 的单一值，ADR-21）。
+	IsDefault *bool `json:"is_default"`
+	// Runtime 仅为**显式拒收**而存在（A2）。它不是资源字段，任何非 nil 取值都报 40001。
+	Runtime *string `json:"runtime"`
 }
 
 // ModelPatchReq PATCH /models/:id：指针更新（nil = 不改）。
 type ModelPatchReq struct {
-	Name      *string        `json:"name"`
-	Extra     map[string]any `json:"extra"`
-	Hidden    *bool          `json:"hidden"`
-	Pinned    *bool          `json:"pinned"`
-	IsDefault *bool          `json:"is_default"`
+	Name      *string `json:"name"`
+	Note      *string `json:"note"`
+	IsDefault *bool   `json:"is_default"`
+	// Runtime 见 ModelCreateReq：显式拒收（A2）。
+	Runtime *string `json:"runtime"`
 }
 
 // ModelDeleteResp DELETE /models/:id 的结果。
 //
 // `Deleted` 幂等：本来就不存在 → false 且 code=0。
-// 若目标是该 runtime 的默认模型 → **拒绝删除**（40501 `model_is_default`）并回带 `NextAction`：
-// 不静默把默认置空——那会让"平台的默认模型"在一个用户看不见的时刻消失。
+//
+// v12 的**行为变更**（B4）：删掉那条正好是默认模型的条目**不再被拒绝**——默认是**偏好**，
+// 偏好跟着资源消失比拦住用户更合理；`DefaultCleared` 如实回带"顺手清了默认"。
+// （v11 是 40501 `model_is_default` 拒绝。）
 type ModelDeleteResp struct {
 	Deleted bool `json:"deleted"`
-	// NextAction 被拒时的可执行出路（先指定另一个默认，再删这一条）。
-	NextAction string `json:"next_action,omitempty"`
+	// DefaultCleared 本次删除连带清空了默认模型（用户可见的副作用，必须说出来）。
+	DefaultCleared bool `json:"default_cleared,omitempty"`
 }
 
-// RuntimeConfigResp 某 runtime 的**模型配置物化状态**（T5）。
+// ModelsResp `GET /models` 的响应。
 //
-// 它是 `GET /models` 的 `config` 段与 `POST /models/apply` 的响应共用的形状——两处必须同形，
-// 否则"保存之后它到底写了什么"会有两套说法。
-//
-// `Pending` 是**诚实性字段**：平台已声明、配置文件已（或未）写出，但底座要**新进程**才读得到。
-// 所以它恒为 true 直到有新进程把内容读进去——界面不许把 `changed=true` 说成"已生效"。
-type RuntimeConfigResp struct {
-	Runtime string `json:"runtime"`
-	// Declared 该 runtime 是否声明了模型配置落点（false = T5 不可达）。
-	Declared bool `json:"declared"`
-	// Tested 落点是否经真实底座实测；false = **只读**（生成候选但不落盘）。
-	Tested bool `json:"tested"`
-	// Writable 现在能不能真的写（Declared && Tested）。
-	Writable bool `json:"writable"`
-	// Channel 交付通道（config_dir_read | cli_patch_arg | env_content）。
-	Channel string `json:"channel,omitempty"`
-	// Path 配置文件绝对路径（未声明时为空）。
-	Path string `json:"path,omitempty"`
-	// Digest 当前落盘（或候选）内容的摘要。
-	Digest string `json:"digest,omitempty"`
-	// GeneratedAt 最近一次物化的时刻（RFC3339Nano）。
-	GeneratedAt string `json:"generated_at,omitempty"`
-	// Changed 本次调用是否真的改变了落盘内容。
-	Changed bool `json:"changed"`
-	// Pending true = 要等新进程才生效（**不许把它说成"已生效"**）。
-	Pending bool `json:"pending"`
-	// ModelCount 本次生成用到的清单条数（0 = 平台没声明任何模型 → 不写任何东西）。
-	ModelCount int `json:"model_count"`
-	// Note 人话说明（含"未实测只读""空清单不写"这类如实措辞）。
+// **用户面只有 `models` / `default_model` / `effective` / `effective_at` 四个字段**（ADR-22）：
+// 设置 · 模型 那一节不许出现底座词汇，所以逐 runtime 的明细一律落在 `sync[]` 里，标为**机器面**。
+// 前端**不得直接渲染** `sync[].runtime` / `where` / `problems` 的值——A13 的守卫只拦字面量，
+// 所以这条边界还要由 A14 的结构断言 + code review 一起兜。
+type ModelsResp struct {
+	// Models 平台清单（**不分页**：清单上限 200 条，全量返回的依据见设计 §数据模型）。
+	Models []ModelResp `json:"models"`
+	// DefaultModel 唯一默认模型的**平台模型 id**（空 = 未设）。
+	//
+	// 交付时由编排层把它派生成每个 runtime 各自的默认——存储层不带底座维度，投影层才带。
+	DefaultModel string `json:"default_model"`
+	// Effective 用户面**聚合结论**：applied | pending | failed。
+	Effective string `json:"effective"`
+	// EffectiveAt 用户能理解的时间点：now | next_session | next_launch。
+	// 取**保守值**（所有 runtime 里最晚的那个）——见 ADR-22 的代价说明。
+	EffectiveAt string `json:"effective_at"`
+	// Sync ⚠️ **机器面 / 诊断面**：逐 runtime 明细。前端不得直接渲染这里的 runtime/where/problems。
+	Sync []RuntimeSyncResp `json:"sync"`
+	// Note 人话说明（清单为空 / 没有可同步的底座等）。
 	Note string `json:"note,omitempty"`
 }
 
-// ModelApplyReq `POST /models/apply` 的请求体。
-type ModelApplyReq struct {
-	// Runtime 要重新物化的 runtime；空 = 全部已声明落点的 runtime。
+// RuntimeSyncResp 某 runtime 的一次同步结论（机器面）。
+type RuntimeSyncResp struct {
 	Runtime string `json:"runtime"`
+	// Status applied | unchanged | unsupported | untested | failed。
+	Status string `json:"status"`
+	// Where 人话落点（给排障看的「同步到哪了」）。
+	Where string `json:"where"`
+	// Effect immediate | next_turn | next_session | next_process（**清单**通道的生效时刻）。
+	Effect string `json:"effect"`
+	// Pending true = 平台已交付但底座还没读到（新进程才读）——**不许把它说成"已生效"**。
+	Pending bool `json:"pending"`
+	// Credential 凭据交付面的结论，与清单**分开报**（ADR-14）。
+	Credential CredentialSyncResp `json:"credential"`
+	// Advertised 底座事实上报的候选（尽力采样；拿不到为 null）。
+	Advertised []string `json:"advertised,omitempty"`
+	// Missing 声明了但没出现在 advertised 里的。
+	Missing []string `json:"missing,omitempty"`
+	// Problems 可执行的一句话清单。
+	Problems []string `json:"problems"`
 }
 
-// ModelApplyResp `POST /models/apply` 的响应：逐 runtime 的物化结果。
-//
-// **成功路径里没有 `advertised`**：那要新进程才拿得到，此刻报它就是假装已生效。
-type ModelApplyResp struct {
-	Applied []RuntimeConfigResp `json:"applied"`
+// CredentialSyncResp 凭据交付面的结论（机器面）。
+type CredentialSyncResp struct {
+	// Channel native_doc | env | none。
+	Channel string `json:"channel"`
+	// Status applied | unchanged | unsupported | untested | failed。
+	Status string `json:"status"`
+	// Effect 同 RuntimeSyncResp.Effect 的取值域。
+	Effect string `json:"effect"`
+	// Tested 该通道是否已实测；**false 时界面必须显示「待实测」而不是「已生效」**。
+	Tested bool `json:"tested"`
+	// Where 人话落点（绝不回显密钥）。
+	Where string `json:"where"`
 }
 
 // AdvertisedModel 运行时**实际广告**的一个模型候选（事实）。它与 `ModelResp`（意图）来源不同、
 // 生命周期不同，所以类型也分开——混在一起会让"这条到底是谁说的"不可判定。
+//
+// 它**不进用户面**：只在机器面（`sync[]`、`mate doctor`）出现。
 type AdvertisedModel struct {
 	// Value 运行时不透明串（dsh 形如 `["provider","model"]`、opencode 形如 `provider/model`）。
 	Value string `json:"value"`
@@ -152,51 +153,15 @@ type AdvertisedModel struct {
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-// ModelDiffEntry 差集里的一条。
-type ModelDiffEntry struct {
-	ModelID    string `json:"model_id,omitempty"`
-	Value      string `json:"value"`
-	ProviderID string `json:"provider_id,omitempty"`
-	// Route 该条所属的路由（展示分组用；**不参与判据**）。
-	Route string `json:"route,omitempty"`
-	// Severity error（选了会报错）| degrade（静默降级）| info（只是事实）。
-	Severity string `json:"severity"`
-	// Reason 一句人话说明（含"该怎么处置"）。
-	Reason string `json:"reason"`
-}
-
-// ModelDiff 清单（意图）与运行时广告（事实）的两个差集。
-//
-// **两个差集的默认期望不同**（这条非对称必须先写下来，否则对账上线第一天就会被当成 bug）：
-//
-//	dsh    声明 `models` = 整体替换该路由目录 ⇒ `declared_not_advertised` 期望为空；
-//	opencode 声明 = 追加（upsert），内置 models.dev 目录也在候选里
-//	       ⇒ `advertised_not_declared` **默认非空**，那不是故障。
-type ModelDiff struct {
-	DeclaredNotAdvertised []ModelDiffEntry `json:"declared_not_advertised"`
-	AdvertisedNotDeclared []ModelDiffEntry `json:"advertised_not_declared"`
-}
-
-// ModelsResp `GET /models` 的响应：**平台清单 + 运行时事实 + 差集 + 物化状态**。
-type ModelsResp struct {
+// ModelSyncReq `POST /models/sync` 的请求体。
+type ModelSyncReq struct {
+	// Runtime 要重新同步的 runtime；空 = 全部已注册。
 	Runtime string `json:"runtime"`
-	Agent   string `json:"agent,omitempty"`
-	// Declared 平台清单（意图）。
-	Declared []ModelResp `json:"declared"`
-	// Advertised 运行时实际广告的模型候选（事实）。
-	Advertised []AdvertisedModel `json:"advertised"`
-	// Diff 两个差集（差集为空 = 已生效）。
-	Diff ModelDiff `json:"diff"`
-	// Config 该 runtime 的模型配置物化状态（含 pending：**不许把"已保存"说成"已生效"**）。
-	Config RuntimeConfigResp `json:"config"`
-	// Options 旧形态回落：**仅当该 runtime 未声明 ConfigProjection** 时填充（避免第三个 runtime
-	// 未来接入时"没有清单可读"就什么都读不到）。
-	Options []ConfigOptionResp `json:"options,omitempty"`
-	// Source 目录取样来源（session|resume|cache|none；仅旧形态回落时有意义）。
-	Source    string `json:"source,omitempty"`
-	FetchedAt string `json:"fetched_at,omitempty"`
-	// AuthGuidance 运行时声明的鉴权方式（旧形态回落时透出）。
-	AuthGuidance []AuthGuidanceResp `json:"auth_guidance,omitempty"`
-	// Note 人话说明（目录不可读/未声明落点等）。
-	Note string `json:"note,omitempty"`
+}
+
+// ModelSyncResp `POST /models/sync` 的响应：逐 runtime 的同步结论。
+//
+// **成功路径里没有 `advertised`**：那要新进程才拿得到，此刻报它就是假装已生效。
+type ModelSyncResp struct {
+	Applied []RuntimeSyncResp `json:"applied"`
 }

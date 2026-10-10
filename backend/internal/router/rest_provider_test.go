@@ -17,7 +17,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	e, _ := newEngineWithService()
 
 	// POST → 新建成功，密钥只以 has_key 呈现。
-	env, _ := do(t, e, "POST", "/v1/mate/providers", `{"id":"p1","type":"deepseek","key":"sk-secret","note":"主账号"}`)
+	env, _ := do(t, e, "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai","base_url":"https://api.deepseek.com/v1","api_key":"sk-secret","note":"主账号"}`)
 	if env.Code != 0 {
 		t.Fatalf("POST /providers 应成功: %+v", env)
 	}
@@ -25,7 +25,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &created); err != nil {
 		t.Fatalf("解析新建响应: %v", err)
 	}
-	if created.ID != "p1" || created.Type != "deepseek" || !created.HasKey || created.Note != "主账号" {
+	if created.ID != "p1" || created.Protocol != "openai" || created.BaseURL == "" || !created.HasKey || created.Note != "主账号" {
 		t.Fatalf("新建响应不符: %+v", created)
 	}
 	if strings.Contains(string(env.Data), "sk-secret") {
@@ -33,13 +33,13 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	}
 
 	// POST 再建同 id → 40901 provider_exists。
-	env, _ = do(t, e, "POST", "/v1/mate/providers", `{"id":"p1","type":"openai"}`)
+	env, _ = do(t, e, "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "已存在") {
 		t.Fatalf("重复新建应 40901（provider_exists，文案说明已存在）: %+v", env)
 	}
 
 	// POST id 非法 → 40001 invalid_provider_id。
-	env, _ = do(t, e, "POST", "/v1/mate/providers", `{"id":"../escape","type":"openai"}`)
+	env, _ = do(t, e, "POST", "/v1/mate/providers", `{"id":"../escape","protocol":"openai"}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "非法") {
 		t.Fatalf("非法 id 应 40001（invalid_provider_id，文案说明规则）: %+v", env)
 	}
@@ -58,19 +58,19 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	}
 
 	// PATCH 不存在 → 40401 provider_not_found（v11 收紧：不再 upsert）。
-	env, _ = do(t, e, "PATCH", "/v1/mate/providers/nope", `{"type":"openai"}`)
+	env, _ = do(t, e, "PATCH", "/v1/mate/providers/nope", `{"protocol":"openai"}`)
 	if env.Code != 40401 || !strings.Contains(env.Msg, "不存在") {
 		t.Fatalf("PATCH 不存在应 40401（provider_not_found，文案指出用 POST）: %+v", env)
 	}
 
-	// PATCH 成功：改 type + 清密钥。
-	env, _ = do(t, e, "PATCH", "/v1/mate/providers/p1", `{"type":"openai","key":""}`)
+	// PATCH 成功：改端点 + 清密钥。
+	env, _ = do(t, e, "PATCH", "/v1/mate/providers/p1", `{"base_url":"https://api.openai.com/v1","api_key":""}`)
 	if env.Code != 0 {
 		t.Fatalf("PATCH /providers/p1 应成功: %+v", env)
 	}
 	var patched dtoprovider.ProviderResp
 	_ = json.Unmarshal(env.Data, &patched)
-	if patched.Type != "openai" || patched.HasKey {
+	if patched.BaseURL != "https://api.openai.com/v1" || patched.HasKey {
 		t.Fatalf("PATCH 后形态不符: %+v", patched)
 	}
 

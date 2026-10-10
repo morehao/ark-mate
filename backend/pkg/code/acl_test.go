@@ -60,9 +60,8 @@ func TestStderrMsgSuffix(t *testing.T) {
 // 这张表的每一行都是"用户下一步该做什么"的判据，所以它必须被逐条写死而不是靠 Class 默认值兜底：
 //
 //	provider_exists / provider_in_use / model_exists → 40901（时机/状态冲突，换 id 或解开引用）
-//	model_is_default                                 → 40501（当前形态不支持这个动作，先指定另一个默认）
 //	model_not_found / provider_not_found             → 40401（平台不会"顺便新建"）
-//	config_write_failed                              → 50001（服务侧失败；**不是** 50201"上游连接失败"，
+//	resource_sync_failed                             → 50001（服务侧失败；**不是** 50201"上游连接失败"，
 //	                                                   否则排障方向会被带到底座进程/网络上）
 func TestFromACLProviderModelCodesFrozen(t *testing.T) {
 	cases := []struct {
@@ -73,12 +72,11 @@ func TestFromACLProviderModelCodesFrozen(t *testing.T) {
 		{"provider_exists", acl.ClassLimit, Conflict},
 		{"provider_in_use", acl.ClassLimit, Conflict},
 		{"model_exists", acl.ClassLimit, Conflict},
-		{"model_is_default", acl.ClassUnsupported, NotSupported},
 		{"model_not_found", acl.ClassRequest, NotFound},
 		{"provider_not_found", acl.ClassRequest, NotFound},
 		{"invalid_provider_id", acl.ClassRequest, InvalidRequest},
 		{"definition_changed", acl.ClassLimit, Conflict},
-		{"config_write_failed", acl.ClassService, UpstreamFailed},
+		{"resource_sync_failed", acl.ClassService, UpstreamFailed},
 	}
 	for _, tc := range cases {
 		got, ok := fromACL(acl.NewError(tc.class, tc.name, "细节", nil))
@@ -93,7 +91,7 @@ func TestFromACLProviderModelCodesFrozen(t *testing.T) {
 	if len(classCodeOverrides) != 1 {
 		t.Fatalf("例外表新增了条目（%v）：每一条都要有"+"这里写的那个量级"+"的理由", classCodeOverrides)
 	}
-	// 未登记的名字仍按 Class 兜底（config_write_failed 之外的服务侧错误仍是 50201）。
+	// 未登记的名字仍按 Class 兜底（resource_sync_failed 之外的服务侧错误仍是 50201）。
 	if got, _ := fromACL(acl.NewError(acl.ClassService, "backend_boom", "x", nil)); got.Code != BadGateway {
 		t.Fatalf("ClassService 的默认映射应仍是 %d，got %d", BadGateway, got.Code)
 	}

@@ -486,7 +486,7 @@ func TestDoctorReportJSONShape(t *testing.T) {
 		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,"vaultHome":"",` +
 		`"vaultUsable":false,"vaultSource":"","ciphertextRefs":null,"ciphertextFiles":null,"vaultDirScan":"",` +
 		`"missingCiphertexts":null,"noKeyProviders":null,"danglingRefs":null,"importMismatch":null,` +
-		`"importMismatchBenignOnly":false,"orphanCiphertexts":null,"runtimes":null},` +
+		`"importMismatchBenignOnly":false,"orphanCiphertexts":null,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
 		`"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {
 		t.Fatalf("--json 形状变了：\n got %s\nwant %s", b, want)

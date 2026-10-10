@@ -1,0 +1,62 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "providers": {
+    "alpha-gw": {
+      "name": "alpha-gw",
+      "env": [
+        "MATE_ALPHA_GW_255CB31F_API_KEY"
+      ],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://alpha.example.com/v1"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "大模型 \"A\" \\ 备用"
+        },
+        "gpt-4o-mini": {
+          "name": "小模型·中文"
+        }
+      }
+    },
+    "beta.gw": {
+      "name": "beta.gw",
+      "env": [
+        "MATE_BETA_GW_39E72D68_API_KEY"
+      ],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://beta.example.com/openai/v1"
+      },
+      "models": {
+        "llama/3-8b": {},
+        "qwen:7b": {
+          "name": "qwen #7b"
+        }
+      }
+    },
+    "zeta": {
+      "name": "zeta",
+      "env": [
+        "MATE_ZETA_5CC10D91_API_KEY"
+      ],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://zeta.example.com/v1"
+      },
+      "models": {
+        "deepseek-chat": {
+          "name": "DeepSeek 对话"
+        },
+        "deepseek-reasoner": {
+          "name": "推理\t模型"
+        }
+      }
+    }
+  },
+  "model": "beta.gw/qwen:7b",
+  "_arkMate": {
+    "generator_version": 1,
+    "manager": "ark-mate"
+  }
+}

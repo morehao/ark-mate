@@ -24,9 +24,16 @@ func (s *Service) EnableStore(st *store.Store) {
 	// T5 的配置指纹随持久层一起装载（它并进代际键，重启后必须仍然生效——
 	// 否则重启会把"已物化的清单"当成"没有清单"，下一轮凭空重换代际）。
 	s.loadRuntimeConfigDigests(context.Background())
-	// 装配期同步一次 `--patch` 参数（T5 的 cli_patch_arg 通道）：平台的服务重启之后，
-	// 上一轮物化留下的 overlay 必须仍然被递进去——"重启即丢参数"会让已生效的清单悄悄回退。
-	s.SyncRuntimeConfigArgs()
+	// 装配期把启动面与当前声明对齐一次（v12：启动参数/内联内容/凭据 env 都由 adapter 经
+	// `resource.Delivery` 装卸）。重启后平台必须重新交付——否则上一轮的交付物与新声明可能分叉，
+	// 而界面显示的是"已同步"。
+	if ids, err := s.runtimeIDsForSync(""); err == nil {
+		for _, id := range ids {
+			if _, serr := s.SyncRuntime(context.Background(), id); serr != nil {
+				slog.Warn("runtime sync: 装配期同步失败", "runtime", id, "err", serr)
+			}
+		}
+	}
 }
 
 // RestoreFromStore 启动恢复（sqlite 模式）：从 DB 载入会话记录并把全部已落库事件

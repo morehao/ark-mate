@@ -222,8 +222,8 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 11 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 11 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 12 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 12 以提醒同步），got %d", latestSchemaVersion(), maxV)
 	}
 }
 
@@ -436,17 +436,17 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	if n, err := s.CountProviderDefinitions(ctx); err != nil || n != 0 {
 		t.Fatalf("升级后 providers 应为空: n=%d err=%v", n, err)
 	}
-	if rows, err := s.ListModelDefinitions(ctx, ""); err != nil || len(rows) != 0 {
+	if rows, err := s.ListModelDefinitions(ctx); err != nil || len(rows) != 0 {
 		t.Fatalf("升级后 models 应为空: n=%d err=%v", len(rows), err)
 	}
 
 	// ③ 两张表都可写、可读，且审计按 kind 隔离（provider / model 各自一条）。
 	if ok, err := s.UpsertProviderDefinition(ctx, "deepseek-main",
-		`{"type":"deepseek","key_ref":"vault:providers/deepseek-main"}`, 0, "rest"); err != nil || !ok {
-		t.Fatalf("升级后写 provider 档案: ok=%v err=%v", ok, err)
+		`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/deepseek-main"}`, 0, "rest"); err != nil || !ok {
+		t.Fatalf("升级后写供应商: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, "md-1", "opencode", "deepseek-main", "deepseek-v4-flash",
-		`{"model_id":"deepseek-v4-flash"}`, "rest"); err != nil || !ok {
+	if ok, err := s.CreateModelDefinition(ctx, "md-1", "deepseek-main", "deepseek-v4-flash",
+		`{"name":"Flash"}`, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写模型条目: ok=%v err=%v", ok, err)
 	}
 	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "deepseek-main"); err != nil || len(revs) != 1 {
@@ -456,12 +456,18 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 		t.Fatalf("model 审计应为 1 条: n=%d err=%v", len(revs), err)
 	}
 
-	// ④ 模型的默认位落成 INTEGER 0/1（裸 SQL 维护，见 store/model.go）。
-	var typeOfDefault string
-	if err := s.db.Raw(`SELECT typeof(is_default) FROM models WHERE id = ?`, "md-1").Row().Scan(&typeOfDefault); err != nil {
-		t.Fatalf("读 models.is_default 的 typeof: %v", err)
+	// ④ v12 起模型面**没有布尔列**了（默认模型是 meta 的单一值）：
+	// 身份列 `model_id` 是**列**，且 `(provider_id, model_id)` 由库级唯一索引保证。
+	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.ModelID != "deepseek-v4-flash" {
+		t.Fatalf("读回模型条目失真: found=%v err=%v row=%+v", found, err, md)
 	}
-	if typeOfDefault != "integer" {
-		t.Fatalf("models.is_default 的 typeof 应为 integer，实际 %q", typeOfDefault)
+	if ok, err := s.CreateModelDefinition(ctx, "md-2", "deepseek-main", "deepseek-v4-flash",
+		`{}`, "rest"); err != nil || ok {
+		t.Fatalf("同 (provider_id, model_id) 应被唯一索引拦下: ok=%v err=%v", ok, err)
+	}
+	var idx int64
+	if err := s.db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_models_provider_model'`).
+		Row().Scan(&idx); err != nil || idx != 1 {
+		t.Fatalf("v12 应建唯一索引 idx_models_provider_model: n=%d err=%v", idx, err)
 	}
 }

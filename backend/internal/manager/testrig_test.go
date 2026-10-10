@@ -25,6 +25,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -139,7 +140,10 @@ for line in sys.stdin:
 	if err := os.WriteFile(script, []byte(code), 0o600); err != nil {
 		t.Fatalf("写 ACP 桩脚本失败: %v", err)
 	}
+	// v12：夹具 spec 也带**凭据交付面声明**——"要不要把密钥注入子进程 env"由各底座自己的
+	// 声明决定（ADR-4），没有声明的 runtime 平台一律不注入，`providerEnvFor` 会回 nil。
 	return runtime.Spec{ID: "stub", Name: "Stub", Launch: runtime.LaunchSpec{Command: "python3", Args: []string{script}},
+		Credential:      resource.CredentialSpec{RefPattern: "MATE_%s_API_KEY", FallbackEnv: true},
 		CapabilityScope: runtime.CapabilityScopeProcess}
 }
 

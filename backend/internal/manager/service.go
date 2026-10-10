@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -90,9 +91,8 @@ type Service struct {
 	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
 	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
 	runtimeCfgDigests map[string]string
-	// runtimeCfgCandidates 最近一次生成的候选内容（**未实测时也保留**）：
-	// H6 探针需要"平台会写成什么"的那份字节，而那时落点还是只读的。
-	runtimeCfgCandidates map[string]string
+	// runtimeSyncOutcomes 各 runtime **最后一次同步的结论**（v12：读面直接读它，不在读路径上重跑同步）。
+	runtimeSyncOutcomes map[string]resource.Outcome
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）

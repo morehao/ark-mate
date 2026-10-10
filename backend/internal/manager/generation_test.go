@@ -189,7 +189,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
 	// 全部代际都在同一个基础键下（停机时一次性关掉）。
-	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(agent.Provider))
+	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(spec.ID, agent.Provider))
 	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}

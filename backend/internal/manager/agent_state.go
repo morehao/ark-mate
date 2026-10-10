@@ -168,11 +168,8 @@ func (s *Service) ListRuntimes() ([]dtoruntime.RuntimeResp, error) {
 			Vers: sp.Version,
 			Caps: capabilityKVs(sp.Caps),
 		}
-		// H1/H3：把该 runtime 认的运行时参数 schema 一并透出（前端据此渲染表单，不硬编码字段）。
-		if schema, ok := runtime.ProviderProjectionSchemaFor(sp); ok {
-			schema.Fields = append([]runtime.ProviderProjectionField{}, schema.Fields...)
-			resp.ProviderProjection = &schema
-		}
+		// v12：不再透出逐底座的运行时参数 schema（逐底座投影已删，ADR-7）——
+		// 协议的差异由各 adapter 自己知道（ADR-11），用户面不再需要为它付一个表单。
 		out = append(out, resp)
 	}
 	return out, nil

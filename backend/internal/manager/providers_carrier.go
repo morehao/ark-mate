@@ -75,8 +75,9 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 			Revision:  row.Revision,
 			UpdatedAt: row.UpdatedAt,
 			Body:      body,
-			Type:      bodyString(body, "type"),
-			Model:     bodyString(body, "model"),
+			Protocol:  bodyString(body, "protocol"),
+			BaseURL:   bodyString(body, "base_url"),
+			Name:      bodyString(body, "name"),
 			Note:      bodyString(body, "note"),
 			KeyRef:    bodyString(body, "key_ref"),
 		}
@@ -123,10 +124,20 @@ func providerBodyJSON(d *providerDef) (string, error) {
 		}
 		body[k] = v
 	}
-	if d.Type != "" {
-		body["type"] = d.Type
+	// v12 的 owned 键：`protocol` / `base_url` / `name` / `note` / `key_ref`（+ 降级时的 `key`）。
+	// `type` 与 `projections` 是 v11 的遗留：写面主动删掉它们，避免"改了供应商还留着旧底座维度"。
+	delete(body, "type")
+	delete(body, "projections")
+	body["protocol"] = d.Protocol
+	if d.BaseURL != "" {
+		body["base_url"] = d.BaseURL
 	} else {
-		delete(body, "type")
+		delete(body, "base_url")
+	}
+	if d.Name != "" {
+		body["name"] = d.Name
+	} else {
+		delete(body, "name")
 	}
 	if d.Note != "" {
 		body["note"] = d.Note

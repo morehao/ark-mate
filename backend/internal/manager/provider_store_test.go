@@ -118,15 +118,25 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 		}
 		got[rows[i].ID] = body
 	}
-	// 已迁到 vault 的那条：type 原样、key_ref 原样、历史 model 与 note 都活下来。
+	// 已迁到 vault 的那条：**v11 → v12 的字段映射**逐条成立
+	//   `type: "deepseek"` → `protocol: "openai"` + `base_url: https://api.deepseek.com/v1`
+	//   （按冻结的已知端点表推导；这是 T6.1 的"导入保留对 v11 type 的识别"）
+	//   `key_ref` 原样；`note`（未知键）原样活下来。
+	//   `model` 是 v11 的历史静默陷阱键（写了不生效），v12 的映射**主动删掉它**。
 	if b := got["deepseek-main"]; b == nil {
 		t.Fatal("deepseek-main 未导入")
 	} else {
-		if b["type"] != "deepseek" || b["key_ref"] != existingRef {
+		if b["protocol"] != "openai" || b["base_url"] != "https://api.deepseek.com/v1" || b["key_ref"] != existingRef {
 			t.Fatalf("deepseek-main 身份字段不符: %+v", b)
 		}
-		if b["model"] != "deepseek-v4-flash" || b["note"] != "主账号" {
-			t.Fatalf("deepseek-main 的未知键/历史键丢失: %+v", b)
+		if _, has := b["type"]; has {
+			t.Fatalf("v11 的 `type` 应被映射删掉（底座维度不得从导入路径重新进库）: %+v", b)
+		}
+		if _, has := b["model"]; has {
+			t.Fatalf("v11 的历史静默陷阱键 `model` 应被映射删掉: %+v", b)
+		}
+		if b["note"] != "主账号" {
+			t.Fatalf("deepseek-main 的未知键丢失: %+v", b)
 		}
 	}
 	// 明文那条：**只留引用**，明文既不进 DB body 也不在导出物里；密文可解出原值。
@@ -134,8 +144,13 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if lb == nil {
 		t.Fatal("legacy-openai 未导入")
 	}
-	if lb["type"] != "openai" || lb["model"] != "gpt-4o" {
-		t.Fatalf("legacy-openai 身份/历史字段不符: %+v", lb)
+	// v11 → v12 映射：`type: "openai"` → `protocol: "openai"` + 冻结表推导的 `base_url`；
+	// `model` 是 v11 的历史静默陷阱键，映射主动删掉它。
+	if lb["protocol"] != "openai" || lb["base_url"] != "https://api.openai.com/v1" {
+		t.Fatalf("legacy-openai 身份字段不符: %+v", lb)
+	}
+	if _, has := lb["model"]; has {
+		t.Fatalf("v11 的历史静默陷阱键 `model` 应被映射删掉: %+v", lb)
 	}
 	if lb["key_ref"] != providerRef("legacy-openai") {
 		t.Fatalf("legacy-openai 应只留 key_ref: %+v", lb)
@@ -172,7 +187,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
-	items, _ := svc.ListProviders()
+	items, _ := svc.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("装载后档案数不符: %+v", items)
 	}
@@ -180,14 +195,14 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	for _, it := range items {
 		byID[it.ID] = it
 	}
-	if it := byID["deepseek-main"]; it.Type != "deepseek" || !it.HasKey {
+	if it := byID["deepseek-main"]; it.Protocol != "openai" || !it.HasKey {
 		t.Fatalf("deepseek-main 装载形态不符: %+v", it)
 	}
-	if it := byID["legacy-openai"]; it.Type != "openai" || !it.HasKey {
+	if it := byID["legacy-openai"]; it.Protocol != "openai" || !it.HasKey {
 		t.Fatalf("legacy-openai 装载形态不符: %+v", it)
 	}
 	// 注入值就是迁移前那份（明文解出来了）。
-	if got := svc.providerEnvFor("legacy-openai"); len(got) != 1 || got[0] != "OPENAI_API_KEY="+legacySecret {
+	if got := svc.providerEnvFor("opencode", "legacy-openai"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_LEGACY_OPENAI_") {
 		t.Fatalf("迁移后注入不符: %v", got)
 	}
 	// 引用它的 agent 不再被报悬空（B3 的装载顺序判据）。
@@ -196,8 +211,9 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 }
 
-// publisherRegistry 一个空注册表（纯列表/装载类用例不需要真 runtime）。
-func publisherRegistry() *runtime.Registry { return runtime.NewRegistry() }
+// publisherRegistry 一个最小注册表：**带凭据交付面声明**（v12 起"要不要注入 env"由各底座
+// 自己的声明决定，没有声明的 runtime 平台一律不注入——所以凡是要验注入的夹具都得声明它）。
+func publisherRegistry() *runtime.Registry { return v12ProviderRegistry() }
 
 // TestProviderWriteBackDisabledInSQLiteMode B4 / A5：sqlite 模式下写面**不再回写**
 // `providers.json`——内容与 mtime 都不变。
@@ -226,12 +242,10 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 
 	// 写面：新建一条（走 store）+ 覆盖一条（走 store）。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "brand-new", Type: "openai", Key: ptr("sk-new-secret"),
-	}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
 		t.Fatalf("CreateProvider(新建): %v", err)
 	}
-	if _, err := svc.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Type: ptr("anthropic")}); err != nil {
+	if _, err := svc.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
 	}
 	// 行确实写进了 DB。
@@ -243,7 +257,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
 		t.Fatalf("新行 body 非法: %v", err)
 	}
-	if body["type"] != "openai" || body["key_ref"] != providerRef("brand-new") {
+	if body["protocol"] != "openai" || body["base_url"] == "" || body["key_ref"] != providerRef("brand-new") {
 		t.Fatalf("新行 body 不符: %+v", body)
 	}
 
@@ -264,9 +278,7 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir) // memory 模式（无持久层）
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "p1", Type: "openai", Key: ptr("sk-memory-secret"),
-	}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	raw := readProvidersFile(t, dir)
@@ -278,11 +290,11 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	}
 	// 重启（新 Service，同一目录）→ 档案与注入都还在。
 	svc2 := agentTestSvc(t, dir)
-	items, _ := svc2.ListProviders()
+	items, _ := svc2.ListProviders(context.Background())
 	if len(items) != 1 || items[0].ID != "p1" || !items[0].HasKey {
 		t.Fatalf("memory 模式重启后档案丢失: %+v", items)
 	}
-	if got := svc2.providerEnvFor("p1"); len(got) != 1 || got[0] != "OPENAI_API_KEY=sk-memory-secret" {
+	if got := svc2.providerEnvFor("opencode", "p1"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P1_") || !strings.HasSuffix(got[0], "_API_KEY=sk-memory-secret") {
 		t.Fatalf("memory 模式重启后注入不符: %v", got)
 	}
 }
@@ -302,9 +314,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 	for _, id := range []string{"p-b", "p-a"} {
-		if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-			ID: id, Type: "deepseek", Key: ptr("sk-" + id),
-		}); err != nil {
+		if _, err := svc.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {
 			t.Fatalf("CreateProvider(%s): %v", id, err)
 		}
 	}
@@ -333,7 +343,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(first), &file); err != nil {
 		t.Fatalf("导出物不是合法 JSON: %v", err)
 	}
-	if len(file) != 2 || file["p-a"]["type"] != "deepseek" || file["p-a"]["key_ref"] != providerRef("p-a") {
+	if len(file) != 2 || file["p-a"]["protocol"] != "openai" || file["p-a"]["key_ref"] != providerRef("p-a") {
 		t.Fatalf("导出物内容不符: %+v", file)
 	}
 	if strings.Contains(first, "sk-p-a") {
@@ -341,11 +351,11 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// 回灌：memory 模式的旧二进制读这份文件即可用（与 A4 的"逐字段等价"反向闭合）。
 	svcMemory := agentTestSvc(t, dir)
-	items, _ := svcMemory.ListProviders()
+	items, _ := svcMemory.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("回灌后档案数不符: %+v", items)
 	}
-	if got := svcMemory.providerEnvFor("p-a"); len(got) != 1 || got[0] != "DEEPSEEK_API_KEY=sk-p-a" {
+	if got := svcMemory.providerEnvFor("opencode", "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
 		t.Fatalf("回灌后注入不符: %v", got)
 	}
 }

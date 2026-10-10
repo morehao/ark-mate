@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/manager"
@@ -54,6 +55,11 @@ func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []do
 	checks = append(checks, checkProviderRefs(facts))
 	checks = append(checks, checkProviderImport(facts))
 	checks = append(checks, checkProviderOrphans(facts))
+	// v12 新增的四条（T6.2）：缺端点、回退依据、迁移待处置事实、敏感文件清单。
+	checks = append(checks, checkProviderBaseURL(facts))
+	checks = append(checks, checkMigrationBackup(facts))
+	checks = append(checks, checkMigrationNotes(facts))
+	checks = append(checks, checkSensitiveFiles(facts)...)
 	checks = append(checks, checkRuntimeModels(facts)...)
 	return facts, checks
 }
@@ -248,27 +254,27 @@ func checkRuntimeModels(facts manager.ProviderDoctorFacts) []doctorCheck {
 	return checks
 }
 
-// checkRuntimeModelState 单个 runtime 的物化状态（path / digest / pending / writable / tested）。
+// checkRuntimeModelState 单个 runtime 的**同步结论**（v12：交付结论由 adapter 回带，平台如实转述）。
 func checkRuntimeModelState(rt manager.ProviderRuntimeFacts) doctorCheck {
 	name := "models " + rt.Runtime
-	detail := fmt.Sprintf("declared=%t tested=%t writable=%t channel=%s path=%s digest=%s pending=%t model_count=%d",
-		rt.Declared, rt.Tested, rt.Writable, orDash(rt.Channel), orDash(rt.Path), orDash(shortDigest(rt.Digest)), rt.Pending, rt.ModelCount)
-	if !rt.Declared {
-		return doctorCheck{name, doctorWarn, detail + "：该 runtime 未声明模型配置落点（T5 不可达，平台清单对它没有兑现通道）" + noteSuffix(rt.Note)}
+	detail := fmt.Sprintf("status=%s effect=%s pending=%t credential=%s(tested=%t) where=%s model_count=%d",
+		orDash(rt.Status), orDash(rt.Effect), rt.Pending, orDash(rt.CredentialChannel), rt.CredentialTested,
+		orDash(rt.Where), rt.ModelCount)
+	switch rt.Status {
+	case "failed":
+		return doctorCheck{name, doctorFail, detail + "：同步失败" + noteSuffix(rt.Note)}
+	case "unsupported":
+		return doctorCheck{name, doctorWarn, detail + "：该底座未声明模型清单交付面（平台不为它猜交付形态）" + noteSuffix(rt.Note)}
+	case "untested":
+		return doctorCheck{name, doctorWarn, detail + "：尚未同步过或该落点未实测" + noteSuffix(rt.Note)}
+	default:
+		return doctorCheck{name, doctorOK, detail + noteSuffix(rt.Note)}
 	}
-	if !rt.Tested {
-		return doctorCheck{name, doctorWarn, detail +
-			"：落点**未实测 ⇒ 只读**（平台会生成候选，但不落盘、也不改启动参数）" + noteSuffix(rt.Note)}
-	}
-	return doctorCheck{name, doctorOK, detail + noteSuffix(rt.Note)}
 }
 
-// checkRuntimeModelDiff 差集：**取不到运行时广告就记"无法校验"，不许猜**。
+// checkRuntimeModelDiff 对账：**取不到运行时广告就记"无法校验"，不许猜**。
 func checkRuntimeModelDiff(rt manager.ProviderRuntimeFacts) doctorCheck {
 	name := "models " + rt.Runtime + " 对账"
-	if !rt.Declared {
-		return doctorCheck{name, doctorWarn, "该 runtime 未声明模型配置落点：差异无从谈起"}
-	}
 	if !rt.AdvertisedKnown {
 		return doctorCheck{name, doctorWarn, orDash(rt.DiffNote)}
 	}
@@ -278,18 +284,12 @@ func checkRuntimeModelDiff(rt manager.ProviderRuntimeFacts) doctorCheck {
 			"declared=%d advertised=0：平台声明的 %d 条一条都没进目录（高危，见下一条）",
 			rt.ModelCount, rt.ModelCount)}
 	}
-	detail := fmt.Sprintf("declared=%d advertised=%d declared_not_advertised=%d advertised_not_declared=%d",
-		rt.ModelCount, rt.AdvertisedCount, rt.DeclaredNotAdvertised, rt.AdvertisedNotDeclared)
-	switch {
-	case rt.WorstSeverity == "error":
-		return doctorCheck{name, doctorFail, detail + "：有**声明了但底座没广告**的条目（硬白名单路由上选了会直接报错）——写了没生效"}
-	case rt.WorstSeverity == "degrade":
-		return doctorCheck{name, doctorWarn, detail + "：有声明了但底座没广告的条目（咨询性目录：能力会被静默降级成 text-only）"}
-	case rt.DeclaredNotAdvertised > 0:
-		return doctorCheck{name, doctorWarn, detail + "：有声明了但底座没广告的条目"}
-	default:
-		return doctorCheck{name, doctorOK, detail + fmt.Sprintf("：清单与运行时目录一致（底座自带目录另有 %d 条，平台不管它）", rt.AdvertisedNotDeclared)}
+	detail := fmt.Sprintf("declared=%d advertised=%d missing=%d",
+		rt.ModelCount, rt.AdvertisedCount, len(rt.Missing))
+	if len(rt.Missing) > 0 {
+		return doctorCheck{name, doctorWarn, detail + "：有**声明了但底座没广告**的条目（写了没生效）：" + bracketList(rt.Missing)}
 	}
+	return doctorCheck{name, doctorOK, detail + "：清单里的条目都出现在运行时目录里（底座自带目录的条目平台不管）"}
 }
 
 // shortDigest 摘要太长，报告里只留前 12 位（完整值在 `mate doctor --json` 的 facts 里）。
@@ -342,4 +342,88 @@ func bracketList(items []string) string {
 		return "（空）"
 	}
 	return "【" + sampleList(items) + "】"
+}
+
+// checkProviderBaseURL 「缺端点」问题项（B1）。
+//
+// v11 的端点藏在逐底座的 `projections` 里，迁移时推不出来就留空——那些供应商的模型一条也不会
+// 被交付给任何底座，而它看起来只是"一条普通的供应商"。这条把它显式摆出来（fail-loud，附出路）。
+func checkProviderBaseURL(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "providers 端点"
+	if len(facts.MissingBaseURL) == 0 {
+		return doctorCheck{name, doctorOK, "每条供应商都有可用的 `base_url`"}
+	}
+	return doctorCheck{name, doctorFail, fmt.Sprintf(
+		"%d 条供应商缺 `base_url`：%s。它们的模型**不会被交付给任何底座**（不假装同步成功）——"+
+			"在「设置 · 模型」的供应商块给它们各补一个 OpenAI 兼容端点",
+		len(facts.MissingBaseURL), bracketList(facts.MissingBaseURL))}
+}
+
+// checkMigrationBackup 打印 DB 迁移备份路径（§回退窗口的唯一依据）。
+//
+// 「无法校验」的口径：没迁移过 = 不需要备份（OK，不是 warn）；迁移过但找不到备份文件
+// = **回退窗口缺失**（fail：v12 之后旧二进制会拒绝启动，没有备份就只能前滚）。
+func checkMigrationBackup(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "迁移备份"
+	if facts.MigrationBackup != "" {
+		return doctorCheck{name, doctorOK, "可回退依据：`" + facts.MigrationBackup +
+			"`（**只管 DB**：密钥不在其内，而 v12 不触碰 vault，所以回退不必恢复 vault）"}
+	}
+	if facts.RuntimeConfigDigestWritten || facts.ProviderRows > 0 {
+		return doctorCheck{name, doctorWarn, "本机已有资源数据但没有找到 `mate.db.bak-v12-*`：" +
+			"若这个库是从 v11 升上来的，说明备份已被清理——**回退窗口已关闭**（v12 之后只能前滚；" +
+			"逃生门是 `mate provider export`）"}
+	}
+	return doctorCheck{name, doctorOK, "没有需要备份的迁移（这个库不是从 v11 升上来的）"}
+}
+
+// checkMigrationNotes 迁移留下的待人工处置事实（默认模型冲突 / 归并冲突 / 无出口字段）。
+//
+// 迁移**不阻塞**这些（B1/R3），但它们必须被看见——否则"未迁移字段"就成了一句没人能验证的话。
+func checkMigrationNotes(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "迁移对账"
+	n := facts.MigrationNotes
+	if n == nil {
+		return doctorCheck{name, doctorOK, "没有 v12 迁移留下的待处置事实"}
+	}
+	parts := []string{}
+	if len(n.DefaultModelConflicts) > 0 {
+		parts = append(parts, "默认模型冲突："+strings.Join(n.DefaultModelConflicts, "；"))
+	}
+	if len(n.ModelNameConflicts) > 0 {
+		parts = append(parts, fmt.Sprintf("模型显示名冲突 %d 条：%s", len(n.ModelNameConflicts), bracketList(n.ModelNameConflicts)))
+	}
+	if len(n.UnmigratedFields) > 0 {
+		parts = append(parts, "v12 无出口的 v11 字段（值仍在 `mate.db.bak-v12-*` 里）："+bracketList(n.UnmigratedFields))
+	}
+	if len(parts) == 0 {
+		return doctorCheck{name, doctorOK, "v11 → v12 的逐组对账无冲突（没有丢字段、没有默认模型归并冲突）"}
+	}
+	return doctorCheck{name, doctorWarn, "迁移时留下了需要你看一眼的事实（**不阻塞**，也不假装迁移过）：" +
+		strings.Join(parts, "；")}
+}
+
+// checkSensitiveFiles 敏感文件清单（v12 新增一处明文落点）。
+//
+// 权限宽于 0600 → **fail**（不是 warn）：dsh 对可被属主之外读取的凭据文档是**拒启**，
+// 而这份文档里是明文密钥。无法判定权限（Windows）→ warn，如实说"无法校验"。
+func checkSensitiveFiles(facts manager.ProviderDoctorFacts) []doctorCheck {
+	if len(facts.SensitiveFiles) == 0 {
+		return []doctorCheck{{"敏感文件", doctorOK, "没有需要单独看待的明文凭据落点"}}
+	}
+	out := make([]doctorCheck, 0, len(facts.SensitiveFiles))
+	for _, f := range facts.SensitiveFiles {
+		name := "敏感文件 " + filepath.Base(f.Path)
+		switch {
+		case !f.Exists:
+			out = append(out, doctorCheck{name, doctorOK, "尚未创建（" + f.Path + "）：没有落点就没有风险"})
+		case !f.PermChecked:
+			out = append(out, doctorCheck{name, doctorWarn, f.Path + "：" + f.Note})
+		case f.OK:
+			out = append(out, doctorCheck{name, doctorOK, f.Path + " 权限 " + f.Perm + "（期望 " + f.Expected + "）"})
+		default:
+			out = append(out, doctorCheck{name, doctorFail, f.Path + " 权限 " + f.Perm + "：" + f.Note})
+		}
+	}
+	return out
 }

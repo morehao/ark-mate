@@ -51,8 +51,8 @@ export interface Agent {
   /**
    * 该 agent 在各 runtime 上的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
    *
-   * 没有写入方（`POST/PATCH /agents` 显式拒绝它）——它随「设置 · 模型」里的星号自动变，
-   * 所以这里只读呈现 + 一句"去设置 · 模型 改"的跳转。
+   * 没有写入方（`POST/PATCH /agents` 显式拒绝它）。v12 起来源是「设置 · 模型」里那个**唯一的**
+   * 默认模型摊到各 runtime 上的投影，所以这里只读呈现 + 一句"去设置 · 模型 改"的跳转。
    */
   default_model?: Record<string, string>
 }
@@ -68,26 +68,36 @@ export interface AgentDeleteResp {
   was_default: boolean
 }
 
-/** 一条供应商凭据（**不含模型**：默认模型归平台清单，见 `ModelRow.is_default`）。 */
+/**
+ * 一条供应商（`GET/POST /providers`）：**一个 OpenAI 兼容端点 + 一把密钥**（v12）。
+ *
+ * 与 v11 的差别（形状是资源本身，不再是"逐底座参数档案"）：
+ *  - `type`（自由串）→ `protocol`（枚举，本期仅 `openai`）+ `base_url`；
+ *  - `projections` 删除——底座运行时参数不再暴露给用户；
+ *  - `delivery` 删除——那是静态说明表，不是这条资源的写入方。
+ */
 export interface Provider {
   id: string
-  type: string
+  /** 展示名（空 = 前端回落显示 id）。 */
+  name?: string
+  /** 上游协议（本期恒为 `openai`）。 */
+  protocol: string
+  /** OpenAI 兼容端点（空 = 缺端点，界面要显式标出，且它不会下发给任何底座）。 */
+  base_url: string
   /** 密钥只写不读回：仅表示是否已存有密钥。 */
   has_key: boolean
   /** 载体版本（sqlite = 行 revision；memory = 0，文件载体没有版本号）。 */
   revision: number
   updated_at?: string
   note?: string
-  /** 只读派生的引用面（哪些 agent 在用它、它们可能落到哪些 runtime）。 */
-  refs: ProviderRefs
-  /** 开会话之前就能看见的问题清单（空 = 本地段全部通过）。 */
+  /** 挂靠在本供应商下的模型条数（读取时现算的派生值）。 */
+  model_count: number
+  /** 开会话之前就能看见的问题清单（空 = 本地段全部通过；可直接展示）。 */
   problems: string[]
-  /** 交付通道与生效时刻（静态事实表）。 */
-  delivery?: Delivery
-  /** 逐 runtime 的可达性（刻意不给合并结论）。 */
+  /** 只读派生的引用面（哪些 agent 在用它、这些 agent 声明了哪些 runtime）。 */
+  refs: ProviderRefs
+  /** 逐**已注册** runtime 的可达性（刻意不给合并结论）。 */
   applicability?: Applicability[]
-  /** 逐 runtime 的运行时参数声明（写面原样回显，供编辑表单回填）。 */
-  projections?: Record<string, Record<string, unknown>>
   /** 写面回执（只在写面响应里出现）。 */
   effect?: ProviderEffect
 }
@@ -98,15 +108,6 @@ export interface ProviderRefs {
   runtimes: string[]
 }
 
-/** 交付通道与生效时刻（`@ark-mate/types` 的静态事实投影）。 */
-export interface Delivery {
-  /** dial_env | session_config | session_inject | materialize | config_write。 */
-  channel: string
-  /** immediate | next_turn | next_session | next_process。 */
-  effect: string
-  note: string
-}
-
 /** 逐 runtime 的可达性（形状与 `/library` 的 applicability 保持一致）。 */
 export interface Applicability {
   runtime: string
@@ -115,10 +116,16 @@ export interface Applicability {
   reason: string
 }
 
-/** provider 写面的生效面回执：只有 `type`/`key` 变了才说"下一轮生效"。 */
+/**
+ * 供应商写面的生效面回执：只有端到端凭据面变了才说"下一轮生效"。
+ *
+ * `channel` 是本供应商实际走的凭据交付面（`native_doc` = 底座私有凭据文档；`env` = 子进程环境变量）。
+ * 用户面**不得**渲染这两个值（A13/A14）；它只用于写面回执的一句话说明。
+ */
 export interface ProviderEffect {
+  /** native_doc | env。 */
   channel: string
-  /** next_turn | none。 */
+  /** next_turn（下一次轮次边界换代际）| none（只改了不驱动行为的字段，如 name/note）。 */
   effect: string
   applies_to_agents: string[]
   affected_conversations: number
@@ -126,31 +133,33 @@ export interface ProviderEffect {
   note?: string
 }
 
+/** `PATCH /providers/:id` 请求体（指针语义，省略 = 不改）。 */
 export interface ProviderPatch {
-  type?: string
+  name?: string
+  /** 本期仅 `openai`。 */
+  protocol?: string
+  base_url?: string
+  /** 省略 = 不动；空串 = 清除（删引用 + 删密文）；非空 = 覆盖。密钥只写不读回。 */
+  api_key?: string
   note?: string
-  /** 非 nil 即覆盖/清除（空串 = 清除）。`model` 已删除（v11）。 */
-  key?: string
-  /**
-   * 逐 runtime 的**运行时参数**声明：`{"<runtime>": {"api":"…","baseURL":"…","package":"…"}}`。
-   * 缺省 = 不改；某 runtime 给**空对象** = 删掉那一份声明；给了就**逐 runtime 合并**（不抹另一份）。
-   */
-  projections?: Record<string, Record<string, unknown>>
 }
 
+/** `POST /providers` 请求体（id 必填且过词法校验 `^[A-Za-z0-9._-]{1,64}$`）。 */
 export interface ProviderCreateReq {
   id: string
-  type: string
+  name?: string
+  protocol: string
+  base_url?: string
+  api_key?: string
   note?: string
-  key?: string
-  /** 见 ProviderPatch.projections。 */
-  projections?: Record<string, Record<string, unknown>>
 }
 
 export interface ProviderDeleteResp {
   deleted: boolean
-  /** 被拒时的引用名单（先解开这些引用再删）。 */
+  /** 被拒时的 agent 引用名单（先解开这些引用再删）。 */
   referenced_by_agents?: string[]
+  /** 被拒时的模型引用名单（先删掉这些模型再删）。 */
+  referenced_by_models?: string[]
   /** 行已删但密文残留（如实回带，doctor 会列出孤儿密文）。 */
   vault_ciphertext_left?: string
 }
@@ -164,7 +173,7 @@ export interface ProviderProbeResp {
 }
 
 export interface ProviderCheck {
-  /** exists | type | secret | refs | injection | catalog | upstream。 */
+  /** exists | protocol | base_url | secret | refs | delivery | upstream。 */
   name: string
   /** pass | fail | warn | skip | unknown。 */
   status: string

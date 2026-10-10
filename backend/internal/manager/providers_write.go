@@ -7,35 +7,36 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/resource"
 )
 
-// ——— provider 凭据的**写面**（v11：POST / PATCH / DELETE） ———
+// ——— 供应商的**写面**（v12：POST / PATCH / DELETE） ———
 //
-// 写面顺序是固定的，且不是实现细节而是**语义**（设计「新表 providers」的事务边界段）：
+// 写面顺序是固定的，且不是实现细节而是**语义**：
 //
-//	① 校验（id 词法、type、引用约束）
+//	① 校验（id 词法、协议、端点）
 //	② vault 写入/删除（密文）
 //	③ 载体提交（sqlite = 行 CAS + 审计；memory = 原子替换文件）
 //	④ 更新内存
 //
 // 为什么 ③ 在 ② 之后：vault（文件 + AES-GCM）与 SQLite 无法同事务，所以只能选一个"谁先谁后"，
-// 并在 ③ 失败时**补偿** ②。这里的取向与既有的启动期明文迁移一致——宁可多留一份密文，
+// 并在 ③ 失败时**补偿** ②。取向与既有的启动期明文迁移一致——宁可多留一份密文，
 // 也不让"行说改过了、密钥却是旧的"。
 //
-// ④ 在最后是 ③ 的自然推论：**在载体提交成功之前，内存里一个字段都不动**
-// （这与 agent/能力写面的「失败即无副作用」同一条纪律，但这里更强：连内存都不需要回滚）。
+// ④ 在最后是 ③ 的自然推论：**在载体提交成功之前，内存里一个字段都不动**。
 
-// providerCreate 是"新建一条档案"的内部形态（POST 与导入共用同一份字段搬运）。
+// CreateProvider 新建一条供应商（POST /providers）。
 func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
 	if err := validateProviderID(req.ID); err != nil {
 		return nil, err
 	}
-	if req.Type == "" {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_param", "type 必填（决定注入哪个环境变量名）", nil)
+	protocol, err := normalizeProtocol(req.Protocol)
+	if err != nil {
+		return nil, err
 	}
 	// ① 已存在？——先看内存（快路径），再让载体自己兜并发（CreateCAS 未命中 → provider_exists）。
 	s.mu.Lock()
@@ -45,37 +46,45 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		return nil, providerExistsErr(req.ID)
 	}
 
-	d := &providerDef{ID: req.ID, Type: req.Type, Body: map[string]any{}}
+	d := &providerDef{ID: req.ID, Protocol: protocol, Body: map[string]any{"protocol": protocol}}
+	if req.Name != nil {
+		d.Name = *req.Name
+	}
+	if d.Name != "" {
+		d.Body["name"] = d.Name
+	}
+	if req.BaseURL != nil {
+		d.BaseURL = strings.TrimSpace(*req.BaseURL)
+	}
+	if d.BaseURL != "" {
+		d.Body["base_url"] = d.BaseURL
+	}
 	if req.Note != nil {
 		d.Note = *req.Note
-	}
-	if len(req.Projections) > 0 {
-		if err := s.validateProjections(req.Projections); err != nil {
-			return nil, err
+		if d.Note != "" {
+			d.Body["note"] = d.Note
 		}
-		d.Body["projections"] = toAnyMap(req.Projections)
 	}
 
 	// ② vault：新建时"清空密钥"没有意义（还没有密文），只在给了非空 key 时写。
 	var st *vault.Store
-	if req.Key != nil && *req.Key != "" {
+	if req.APIKey != nil && *req.APIKey != "" {
 		var verr error
 		st, verr = s.providerVault()
 		if verr != nil {
-			// 绝不因为 vault 坏了就把明文写进载体。
 			return nil, acl.NewError(acl.ClassRequest, "vault_unavailable",
 				"无法加密保存密钥（vault 初始化失败）: "+verr.Error(), nil)
 		}
 		if st == nil {
 			// 无 mate home（纯内存场景/demo）：密钥只在内存，载体里写不出 key_ref。
-			// 这与文件载体的既有降级路径逐字一致，且**不出网也不落盘**。
-			d.Key = *req.Key
+			d.Key = *req.APIKey
 		} else {
-			if err := st.Put(providerRef(req.ID), vault.KindProviderKey, []byte(*req.Key)); err != nil {
+			if err := st.Put(providerRef(req.ID), vault.KindProviderKey, []byte(*req.APIKey)); err != nil {
 				return nil, acl.NewError(acl.ClassRequest, "vault_write_failed",
 					"密钥加密写入失败: "+err.Error(), nil)
 			}
-			d.Key, d.KeyRef = *req.Key, providerRef(req.ID)
+			d.Key, d.KeyRef = *req.APIKey, providerRef(req.ID)
+			d.Body["key_ref"] = d.KeyRef
 		}
 	}
 
@@ -85,7 +94,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		if d.KeyRef != "" && st != nil {
 			if derr := st.Delete(d.KeyRef); derr != nil {
 				return nil, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-					"档案未创建（载体提交失败: "+err.Error()+"），且刚写入的密文删除失败（残留于 "+d.KeyRef+"）: "+derr.Error(), nil)
+					"供应商未创建（载体提交失败: "+err.Error()+"），且刚写入的密文删除失败（残留于 "+d.KeyRef+"）: "+derr.Error(), nil)
 			}
 		}
 		if isDuplicateDefinition(err) {
@@ -97,15 +106,15 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 	// ④ 内存。
 	s.mu.Lock()
 	s.providers[d.ID] = d
-	resp := s.providerRespLocked(d.ID, d)
+	resp := s.providerRespLocked(ctx, d.ID, d)
 	s.mu.Unlock()
 	resp.Effect = s.providerEffect(d.ID)
 	return &resp, nil
 }
 
-// UpdateProvider 覆盖一条已存在的档案（**只更新，不再 upsert**；不存在 → `provider_not_found`）。
+// UpdateProvider 覆盖一条已存在的供应商（**只更新，不再 upsert**；不存在 → `provider_not_found`）。
 //
-// key 语义：`nil` = 不动；`""` = 清除（删 ref + 删密文）；非空 = 覆盖。
+// api_key 语义：`nil` = 不动；`""` = 清除（删 ref + 删密文）；非空 = 覆盖。
 func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
 	if err := validateProviderID(id); err != nil {
 		return nil, err
@@ -122,51 +131,61 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	s.mu.Unlock()
 	if !exists {
 		return nil, acl.NewError(acl.ClassRequest, "provider_not_found",
-			fmt.Sprintf("provider 档案 %q 不存在：PATCH 只更新、不再顺带新建（要新建用 POST /providers）", id), nil)
+			fmt.Sprintf("供应商 %q 不存在：PATCH 只更新、不再顺带新建（要新建用 POST /providers）", id), nil)
 	}
 
 	// 目标状态：只改 patch 里出现过的键。
 	next := snap
 	next.Body = cloneAnyMap(snap.Body)
-	if patch.Type != nil {
-		next.Type = *patch.Type
+	behaviorChanged := false
+	if patch.Protocol != nil {
+		protocol, err := normalizeProtocol(*patch.Protocol)
+		if err != nil {
+			return nil, err
+		}
+		if next.Protocol != protocol {
+			behaviorChanged = true
+		}
+		next.Protocol = protocol
+		next.Body["protocol"] = protocol
+	}
+	if patch.BaseURL != nil {
+		v := strings.TrimSpace(*patch.BaseURL)
+		if next.BaseURL != v {
+			behaviorChanged = true
+		}
+		next.BaseURL = v
+		if v == "" {
+			delete(next.Body, "base_url")
+		} else {
+			next.Body["base_url"] = v
+		}
+	}
+	if patch.Name != nil {
+		next.Name = *patch.Name
+		if next.Name == "" {
+			delete(next.Body, "name")
+		} else {
+			next.Body["name"] = next.Name
+		}
 	}
 	if patch.Note != nil {
 		next.Note = *patch.Note
-	}
-	if patch.Projections != nil {
-		if err := s.validateProjections(patch.Projections); err != nil {
-			return nil, err
-		}
-		// 逐 runtime**合并**（不是在整份上替换）：只改 opencode 那一份时不该把 dsh 那份抹掉。
-		merged := map[string]any{}
-		if cur, ok := next.Body["projections"].(map[string]any); ok {
-			for rt, frag := range cur {
-				merged[rt] = frag
-			}
-		}
-		for rt, frag := range patch.Projections {
-			if len(frag) == 0 {
-				delete(merged, rt) // 空对象 = 明确删掉这一份声明
-				continue
-			}
-			merged[rt] = toAnyMap2(frag)
-		}
-		if len(merged) == 0 {
-			delete(next.Body, "projections")
+		if next.Note == "" {
+			delete(next.Body, "note")
 		} else {
-			next.Body["projections"] = merged
+			next.Body["note"] = next.Note
 		}
 	}
 
 	// ② vault：写入新密文或删除旧密文（失败即中止，载体与内存都没动过）。
 	oldRef, oldKey := next.KeyRef, next.Key
 	var st *vault.Store
-	needsVault := patch.Key != nil
+	needsVault := patch.APIKey != nil
 	if needsVault {
 		var verr error
 		st, verr = s.providerVault()
-		if patch.Key != nil && *patch.Key != "" && verr != nil {
+		if patch.APIKey != nil && *patch.APIKey != "" && verr != nil {
 			return nil, acl.NewError(acl.ClassRequest, "vault_unavailable",
 				"无法加密保存密钥（vault 初始化失败）: "+verr.Error(), nil)
 		}
@@ -176,19 +195,20 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	}
 	secretChanged := false
 	switch {
-	case patch.Key != nil && *patch.Key != "":
+	case patch.APIKey != nil && *patch.APIKey != "":
 		if st == nil {
-			// 无 mate home（纯内存场景）：只留内存，载体里写不出 key_ref。
-			next.Key, next.KeyRef, next.keyErr = *patch.Key, "", nil
+			next.Key, next.KeyRef, next.keyErr = *patch.APIKey, "", nil
+			delete(next.Body, "key_ref")
 		} else {
-			if err := st.Put(providerRef(id), vault.KindProviderKey, []byte(*patch.Key)); err != nil {
+			if err := st.Put(providerRef(id), vault.KindProviderKey, []byte(*patch.APIKey)); err != nil {
 				return nil, acl.NewError(acl.ClassRequest, "vault_write_failed",
 					"密钥加密写入失败: "+err.Error(), nil)
 			}
-			next.Key, next.KeyRef, next.keyErr = *patch.Key, providerRef(id), nil
+			next.Key, next.KeyRef, next.keyErr = *patch.APIKey, providerRef(id), nil
+			next.Body["key_ref"] = next.KeyRef
 		}
 		secretChanged = true
-	case patch.Key != nil && *patch.Key == "":
+	case patch.APIKey != nil && *patch.APIKey == "":
 		// 清除：删 ref + 删密文。密文删不掉就**不继续**（否则会留下一条"引用没了、密文还在"
 		// 的孤儿，而用户以为已经清干净）——报 vault_delete_failed 并保持载体不动。
 		if st != nil && oldRef != "" {
@@ -198,6 +218,7 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 			}
 		}
 		next.Key, next.KeyRef, next.keyErr = "", "", nil
+		delete(next.Body, "key_ref")
 		secretChanged = true
 	}
 
@@ -208,7 +229,7 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 			switch {
 			case oldRef != "" && oldKey != "":
 				_ = st.Put(oldRef, vault.KindProviderKey, []byte(oldKey))
-			case oldRef == "" && oldKey == "" && patch.Key != nil && *patch.Key != "":
+			case oldRef == "" && oldKey == "" && patch.APIKey != nil && *patch.APIKey != "":
 				_ = st.Delete(providerRef(id))
 			}
 		}
@@ -218,15 +239,15 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	// ④ 内存。
 	s.mu.Lock()
 	s.providers[id] = &next
-	resp := s.providerRespLocked(id, &next)
+	resp := s.providerRespLocked(ctx, id, &next)
 	s.mu.Unlock()
 
-	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 note 就如实回 none。
-	if !secretChanged && patch.Type == nil {
+	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 name/note 就如实回 none。
+	if !secretChanged && !behaviorChanged {
 		resp.Effect = &dtoprovider.ProviderEffect{
 			Channel: dialEnvChannel(), Effect: "none",
 			AppliesToAgents: []string{},
-			Note:            "只改了不驱动行为的字段（type/key 未变）：本轮与后续轮次的行为都不变",
+			Note:            "只改了不驱动行为的字段（协议/端点/密钥都未变）：本轮与后续轮次的行为都不变",
 		}
 		return &resp, nil
 	}
@@ -234,9 +255,9 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	return &resp, nil
 }
 
-// DeleteProvider 删除一条档案（幂等；被引用 → `provider_in_use`(40901) + 引用名单）。
+// DeleteProvider 删除一条供应商（幂等；被引用 → `provider_in_use`(40901) + 引用名单）。
 //
-// 顺序刻意与写面**相反**（设计「删除保护」）：**先摘内存 → 再删行 + 审计 → 最后删密文**。
+// 顺序刻意与写面**相反**：**先摘内存 → 再删行 + 审计 → 最后删密文**。
 // 理由：反过来（先删密文再删行）会留下一个"行在、密钥没了"的档案，那会让 `has_key` 撒谎；
 // 而"行已删、密文残留"是一个**如实可报**的状态（响应里说明，doctor 里列进孤儿密文）。
 func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
@@ -255,7 +276,6 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 	sort.Strings(refAgents)
 	_, exists := s.providers[id]
 	s.mu.Unlock()
-	sort.Strings(refAgents)
 	refModels := s.providerModelRefs(ctx, id)
 	if len(refAgents) > 0 || len(refModels) > 0 {
 		return nil, acl.NewError(acl.ClassLimit, "provider_in_use",
@@ -282,7 +302,6 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		return nil, err
 	}
 	if !removed {
-		// 载体里本来就没有（内存与载体不同步的极端情况）：保持"幂等"语义。
 		return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
 	}
 
@@ -291,8 +310,9 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 	if d != nil && d.KeyRef != "" {
 		if st, verr := s.providerVault(); verr == nil && st != nil {
 			if derr := st.Delete(d.KeyRef); derr != nil {
+				resp.VaultCiphertextLeft = d.KeyRef
 				return resp, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-					fmt.Sprintf("档案 %q 已删除，但密钥密文删除失败（残留于 %s）: %v；"+
+					fmt.Sprintf("供应商 %q 已删除，但密钥密文删除失败（残留于 %s）: %v；"+
 						"该残留不会造成误用（AAD 绑定引用，且已无行指向它），`mate doctor` 的孤儿密文段会列出它",
 						id, d.KeyRef, derr), nil)
 			}
@@ -301,46 +321,21 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 	return resp, nil
 }
 
-// validateProjections 校验逐 runtime 的运行时参数声明。
+// normalizeProtocol 校验并归一协议取值（本期只有 `openai`）。
 //
-// 三条判据：① 该 runtime **已注册**（写一条没人认的声明等于给自己挖坑）；② 它**承载平台模型清单**
-// （未声明 ConfigProjection 的底座没有"运行时参数"这回事）；③ 认识的字段类型要对（未知键放过）。
-func (s *Service) validateProjections(projections map[string]map[string]any) error {
-	rts := make([]string, 0, len(projections))
-	for rt := range projections {
-		rts = append(rts, rt)
+// 空 = 默认 `openai`（客户端的常见写法）；给了不认识的取值 → 40501 并列出合法取值
+// （枚举型键的既有纪律：不静默回落）。
+func normalizeProtocol(v string) (string, error) {
+	if strings.TrimSpace(v) == "" {
+		return string(resource.ProtocolOpenAI), nil
 	}
-	sort.Strings(rts)
-	for _, rt := range rts {
-		spec, ok := s.reg.Get(rt)
-		if !ok {
-			return acl.NewError(acl.ClassRequest, "runtime_not_found",
-				fmt.Sprintf("运行时参数里写了 runtime %q，但它未注册", rt), nil)
-		}
-		if problems := runtime.ValidateProviderProjection(spec, projections[rt]); len(problems) > 0 {
-			return acl.NewError(acl.ClassRequest, "invalid_param",
-				"运行时参数不合法："+strings.Join(problems, "；"), nil)
-		}
+	p := resource.Protocol(strings.ToLower(strings.TrimSpace(v)))
+	if !resource.ValidProtocols[p] {
+		return "", acl.NewError(acl.ClassUnsupported, "protocol_unsupported",
+			fmt.Sprintf("不支持的协议 %q：本期只支持 OpenAI 兼容端点（`openai`）。"+
+				"原生 anthropic / gemini 协议需要各自的 api 映射与鉴权形态，尚未取证", v), nil)
 	}
-	return nil
-}
-
-// toAnyMap 把 `map[string]map[string]any` 的**一份**片段拷成 `map[string]any`。
-func toAnyMap2(frag map[string]any) map[string]any {
-	out := make(map[string]any, len(frag))
-	for k, v := range frag {
-		out[k] = v
-	}
-	return out
-}
-
-// toAnyMap 把 `{runtime: fragment}` 拷成可 JSON 序列化的通用形状。
-func toAnyMap(in map[string]map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for rt, frag := range in {
-		out[rt] = toAnyMap2(frag)
-	}
-	return out
+	return string(p), nil
 }
 
 // validateProviderID id 词法校验（它会进 vault 文件名 → 必须过引用校验，防路径穿越）。
@@ -355,21 +350,21 @@ func validateProviderID(id string) error {
 	return nil
 }
 
-// dialEnvChannel 凭据的交付通道（取自静态交付表，避免"一处声明"再多一个漂移点）。
+// dialEnvChannel 凭据的交付通道（env 注入那一档；取自静态交付表，避免"一处声明"再多一个漂移点）。
 func dialEnvChannel() string {
-	d, _ := objdelivery.For(objdelivery.KindProvider)
+	d, _ := objdelivery.For(model.CapabilityKindProvider)
 	return d.Channel
 }
 
-// providerExistsErr 新建撞上已存在的档案（与 skill_exists/mcp_exists 同形）。
+// providerExistsErr 新建撞上已存在的供应商（与 skill_exists/mcp_exists 同形）。
 func providerExistsErr(id string) error {
 	return acl.NewError(acl.ClassLimit, "provider_exists",
-		fmt.Sprintf("provider 档案 %q 已存在（要改它用 PATCH /providers/%s）", id, id), nil)
+		fmt.Sprintf("供应商 %q 已存在（要改它用 PATCH /providers/%s）", id, id), nil)
 }
 
 // providerInUseMsg 删除被拒时的文案：把两类引用都摆出来，并给出可执行的下一步。
 func providerInUseMsg(id string, agents, models []string) string {
-	msg := fmt.Sprintf("provider 档案 %q 正在被引用，删除会静默换掉这些引用的凭据来源：", id)
+	msg := fmt.Sprintf("供应商 %q 正在被引用，删除会静默换掉这些引用的凭据来源：", id)
 	if len(agents) > 0 {
 		msg += fmt.Sprintf(" agent %v", agents)
 	}

@@ -205,14 +205,13 @@ func (d *ModelDao) WithTx(tx *gorm.DB) *ModelDao {
 	return &ModelDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
 
-// ListByRuntime 列出某 runtime 的清单（id 升序；runtimeID 为空 = 全部，id 升序）。
-func (d *ModelDao) ListByRuntime(ctx context.Context, runtimeID string) (model.ModelDefinitionList, error) {
+// ListAll 列出全部模型条目（id 升序）。
+//
+// v12 起模型**不带 runtime 维度**，所以"列某 runtime 的清单"不再是一个查询轴：
+// 同一份清单投给所有已注册底座，`ListAll` 就是同步时的那一次读取。
+func (d *ModelDao) ListAll(ctx context.Context) (model.ModelDefinitionList, error) {
 	var rows model.ModelDefinitionList
-	q := d.DB(ctx).Order("id ASC")
-	if runtimeID != "" {
-		q = q.Where("runtime = ?", runtimeID)
-	}
-	err := q.Find(&rows).Error
+	err := d.DB(ctx).Order("id ASC").Find(&rows).Error
 	return rows, err
 }
 
@@ -223,22 +222,13 @@ func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model
 	return rows, err
 }
 
-// ListDefaults 列出全部默认模型（is_default = 1；跨 runtime）。
-func (d *ModelDao) ListDefaults(ctx context.Context) (model.ModelDefinitionList, error) {
-	var rows model.ModelDefinitionList
-	err := d.DB(ctx).Where("is_default = ?", model.FlagValue(true)).Order("runtime ASC").Find(&rows).Error
-	return rows, err
-}
-
-// GetDefault 读某 runtime 的默认模型（不存在 → (nil, false, nil)）。
+// GetByProviderModel 按 `(provider_id, model_id)` 取一条（`model_exists` 判定；不存在 → (nil,false,nil)）。
 //
-// "每 runtime 至多一条"由 SetDefaultModel 的同事务两条 SQL 保证（见 store），
-// 所以这里用 Take 而不是 Find：多出来一条就是不该发生的事，宁可让它显形。
-func (d *ModelDao) GetDefault(ctx context.Context, runtimeID string) (*model.ModelDefinition, bool, error) {
+// 它对应的就是 v12 建的唯一索引 `idx_models_provider_model`：**判据交由库级唯一性表达**，
+// 而不是"先查后写"（那中间有窗口）。
+func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, modelID string) (*model.ModelDefinition, bool, error) {
 	var row model.ModelDefinition
-	err := d.DB(ctx).
-		Where("runtime = ? AND is_default = ?", runtimeID, model.FlagValue(true)).
-		Take(&row).Error
+	err := d.DB(ctx).Where("provider_id = ? AND model_id = ?", providerID, modelID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil
 	}
@@ -246,49 +236,4 @@ func (d *ModelDao) GetDefault(ctx context.Context, runtimeID string) (*model.Mod
 		return nil, false, err
 	}
 	return &row, true, nil
-}
-
-// ClearDefaults 把某 runtime 的全部条目标记为"非默认"（置默认的第一步）。
-//
-// 裸 SQL 的布尔的入参不过 serializer，故显式用 `model.FlagValue`。
-func (d *ModelDao) ClearDefaults(ctx context.Context, runtimeID string) error {
-	return d.DB(ctx).Model(new(model.ModelDefinition)).
-		Where("runtime = ?", runtimeID).
-		Update("is_default", model.FlagValue(false)).Error
-}
-
-// ClearDefaultCAS 把一条模型标记为非默认，**仅当 revision 仍等于 expectedRev**。
-//
-// 与 SetDefaultCAS 同一条纪律（条件更新是并发下的唯一仲裁者）。它不需要"先清同 runtime 再置"
-// 那一步：清默认只影响这一行，别的行本来就不是默认。
-func (d *ModelDao) ClearDefaultCAS(ctx context.Context, id string, expectedRev int64, now time.Time) (bool, error) {
-	res := d.DB(ctx).Model(new(model.ModelDefinition)).
-		Where("id = ? AND revision = ?", id, expectedRev).
-		Updates(map[string]any{
-			"is_default": model.FlagValue(false),
-			"revision":   expectedRev + 1,
-			"updated_at": model.FormatTimeOrNow(now),
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
-}
-
-// SetDefaultCAS 把一条模型置为该 runtime 的默认，**仅当 revision 仍等于 expectedRev**。
-//
-// 返回 false = 有人在这中间改过（或行已不存在）→ 调用方翻成 `definition_changed`(40901)。
-// 与 DefinitionDao.UpdateCAS 同一纪律：条件更新是并发下的唯一仲裁者，没有旁路。
-func (d *ModelDao) SetDefaultCAS(ctx context.Context, id string, expectedRev int64, now time.Time) (bool, error) {
-	res := d.DB(ctx).Model(new(model.ModelDefinition)).
-		Where("id = ? AND revision = ?", id, expectedRev).
-		Updates(map[string]any{
-			"is_default": model.FlagValue(true),
-			"revision":   expectedRev + 1,
-			"updated_at": model.FormatTimeOrNow(now),
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
 }

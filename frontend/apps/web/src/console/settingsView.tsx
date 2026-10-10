@@ -31,12 +31,13 @@ export const SETTINGS_MENU = {
 } as const satisfies { label: string; icon: ReactNode }
 
 /**
- * 分节的**命名纪律**（A13 守卫钉住）：面向用户的标题里不出现 `provider`/`mcp`/`skill` 这类代码词。
- * 「模型」这一节的标题与两块小标题只说「供应商」「模型」——用户视角的词，而不是资源层的词。
+ * 分节的**命名纪律**（A13 守卫钉住）：这一节面向用户的标题里不出现 `provider`/`mcp`/`skill`
+ * 这类代码词，也不出现任何底座名（`dsh`/`opencode`/`runtime`/`底座`）。「模型」这一节的标题与
+ * 两块小标题只说「供应商」「模型」——用户视角的词，而不是资源层的词。
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'general', label: '通用', hint: '工作区目录白名单', icon: <SettingOutlined />, order: 10 },
-  { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认 / 生效对账', icon: <ApiOutlined />, order: 15 },
+  { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认模型 / 生效结论', icon: <ApiOutlined />, order: 15 },
   { id: 'agents', label: 'Agent 管理', hint: '注册 / 启停 / 凭据引用', icon: <ClusterOutlined />, order: 20 },
   { id: 'token', label: '访问令牌', hint: '后端启用 MATE_TOKEN 时必填', icon: <KeyOutlined />, order: 30 },
 ]

@@ -11,40 +11,28 @@ import (
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 )
 
-// TestProviderRespCarriesDeliveryAndApplicability `GET /providers` 的 M6 加法（纯加法，不动既有字段）：
-// 每条档案回带 `delivery`（通道/生效时刻/人话 note）与逐**已注册 runtime** 的 `applicability`。
+// TestProviderRespCarriesApplicability `GET /providers` 的两块派生只读面：
+// **逐已注册 runtime 的可达性**（端点/凭据通道）与**本地段问题清单**。
 //
-// 逐条断言而不是只看"字段非空"：这三样东西各自的失败模式不同——通道写错会让用户等错时刻、
-// applicability 少一个 runtime 会让某个底座的可达性看不见、note 缺失会让界面只剩一个代号。
-func TestProviderRespCarriesDeliveryAndApplicability(t *testing.T) {
+// v12 删掉了 v11 的 `delivery` 字段（它描述的是"凭据恒为 dial_env / next_turn"这条静态事实，
+// 而 v12 的凭据通道**按 runtime 分面**：dsh 走原生文档可热生效、opencode 走 env 换代际——
+// 一条静态声明表达不了它，说了就是说谎）。逐 runtime 的通道由 `applicability[].reason` 回答。
+func TestProviderRespCarriesApplicability(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir) // 已注册 runtime：deepseekharness / opencode / stub（升序）
 
 	key := "sk-secret-abc"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "ds", Type: "deepseek", Key: &key,
-	}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
-	items, err := svc.ListProviders()
+	items, err := svc.ListProviders(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListProviders: %v (%d 条)", err, len(items))
 	}
 	resp := items[0]
 
-	// ① delivery：provider 凭据恒为 dial_env / next_turn，note 按实际注入变量名具体化。
-	if resp.Delivery.Channel != objdelivery.ChannelDialEnv {
-		t.Errorf("delivery.channel 应为 %q，得到 %q", objdelivery.ChannelDialEnv, resp.Delivery.Channel)
-	}
-	if resp.Delivery.Effect != objdelivery.EffectNextTurn {
-		t.Errorf("delivery.effect 应为 %q，得到 %q", objdelivery.EffectNextTurn, resp.Delivery.Effect)
-	}
-	if !strings.Contains(resp.Delivery.Note, "DEEPSEEK_API_KEY") {
-		t.Errorf("delivery.note 应带实际注入变量名 DEEPSEEK_API_KEY，得到 %q", resp.Delivery.Note)
-	}
-
-	// ② applicability：逐个已注册 runtime 一条，推得出变量名 → ok/projected 且 reason 带变量名。
+	// ① 逐已注册 runtime 一条，端点齐备 → ok/projected，reason 里带端点与该底座的凭据通道。
 	wantRuntimes := []string{"deepseekharness", "opencode", "stub"}
 	if len(resp.Applicability) != len(wantRuntimes) {
 		t.Fatalf("applicability 应覆盖 %d 个已注册 runtime，得到 %+v", len(wantRuntimes), resp.Applicability)
@@ -57,13 +45,26 @@ func TestProviderRespCarriesDeliveryAndApplicability(t *testing.T) {
 		if !a.OK || a.Status != objdelivery.StatusProjected {
 			t.Errorf("%s 应 ok/projected，得到 %+v", rt, a)
 		}
-		if !strings.Contains(a.Reason, "DEEPSEEK_API_KEY") {
-			t.Errorf("%s 的 reason 应带具体变量名，得到 %q", rt, a.Reason)
+		if !strings.Contains(a.Reason, "https://api.example.com/v1") {
+			t.Errorf("%s 的 reason 应带端点，得到 %q", rt, a.Reason)
+		}
+	}
+	// ② 通道分面：同一个供应商在两个底座上走的通道**必须各自如实**——dsh 的原生凭据文档已实测
+	//    （Credential.Tested），opencode 的本期只有 env（它的原生面是自己的 SQLite 表）。
+	for _, a := range resp.Applicability {
+		switch a.Runtime {
+		case "deepseekharness":
+			if !strings.Contains(a.Reason, "凭据文档") {
+				t.Errorf("dsh 的凭据通道应报原生文档（已实测可热生效），得到 %q", a.Reason)
+			}
+		case "opencode":
+			if !strings.Contains(a.Reason, "MATE_") {
+				t.Errorf("opencode 的凭据通道应报逐供应商的 env 引用名，得到 %q", a.Reason)
+			}
 		}
 	}
 
-	// ③ wire 形状：`delivery` 是对象、`applicability` 是数组，键名逐字是 channel/effect/note 与
-	//    runtime/ok/status/reason（前端按这套形状读）。
+	// ③ wire 形状：`applicability` 是数组，元素键名逐字是 runtime/ok/status/reason。
 	raw, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatalf("序列化失败: %v", err)
@@ -72,14 +73,8 @@ func TestProviderRespCarriesDeliveryAndApplicability(t *testing.T) {
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		t.Fatalf("反序列化失败: %v", err)
 	}
-	delivery, ok := wire["delivery"].(map[string]any)
-	if !ok {
-		t.Fatalf("delivery 应是对象: %s", raw)
-	}
-	for _, k := range []string{"channel", "effect", "note"} {
-		if _, exists := delivery[k]; !exists {
-			t.Errorf("delivery 缺键 %q: %s", k, raw)
-		}
+	if _, exists := wire["delivery"]; exists {
+		t.Errorf("v12 不该再有 delivery 字段（凭据通道按 runtime 分面，一条静态声明表达不了）: %s", raw)
 	}
 	list, ok := wire["applicability"].([]any)
 	if !ok || len(list) == 0 {
@@ -96,35 +91,35 @@ func TestProviderRespCarriesDeliveryAndApplicability(t *testing.T) {
 	}
 }
 
-// TestProviderApplicabilityNotConfiguredWhenTypeEmpty type 为空（推不出注入变量名）→ 每个 runtime
-// 一条 not ok/`not_configured`，且 reason 必须**可执行**（说清去哪儿补什么）。
+// TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty 缺端点 → 每个 runtime 一条
+// not ok/`not_configured`，且 reason 必须**可执行**（说清去哪儿补什么）。
 //
-// 路径用 PATCH 把 type 清空来构造：POST 会拒绝空 type，而 PATCH 允许（清空历史 type 是真实存在的
-// 存量形态），正是这条分支要覆盖的场景。
-func TestProviderApplicabilityNotConfiguredWhenTypeEmpty(t *testing.T) {
+// v11 的判据是"type 推不推得出注入变量名"；v12 换成"有没有端点"——因为真正的失败模式变了：
+// 缺 `base_url` 的供应商**不会被交付给任何底座**（它的模型一条也到不了底座），而这在 v11 里
+// 根本不是一个可表达的形态（端点藏在逐底座的 projections 里）。
+func TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir)
 
 	key := "sk-secret-abc"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
-		ID: "legacy", Type: "openai", Key: &key,
-	}); err != nil {
+	if _, err := svc.CreateProvider(ctx, providerReq("legacy", &key)); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
+	// 把端点清空（存量 v11 数据迁移后推不出端点的形态；PATCH 允许它，因为写面不该逼用户在
+	// 一次编辑里就填完所有东西）。
 	empty := ""
-	if _, err := svc.UpdateProvider(ctx, "legacy", dtoprovider.ProviderPatchReq{Type: &empty}); err != nil {
-		t.Fatalf("UpdateProvider(清空 type): %v", err)
+	if _, err := svc.UpdateProvider(ctx, "legacy", dtoprovider.ProviderPatchReq{BaseURL: &empty}); err != nil {
+		t.Fatalf("UpdateProvider(清空端点): %v", err)
 	}
 
-	items, err := svc.ListProviders()
+	items, err := svc.ListProviders(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListProviders: %v (%d 条)", err, len(items))
 	}
 	resp := items[0]
-	// type 推不出 → note 退回表里的 <TYPE>_API_KEY 占位（不许编出一个变量名）。
-	if !strings.Contains(resp.Delivery.Note, "<TYPE>_API_KEY") {
-		t.Errorf("type 为空时 note 应保留占位，得到 %q", resp.Delivery.Note)
+	if resp.BaseURL != "" {
+		t.Fatalf("端点应已清空: %q", resp.BaseURL)
 	}
 	if len(resp.Applicability) == 0 {
 		t.Fatal("applicability 不应为空（还没有任何已注册 runtime 才是合法空）")
@@ -133,12 +128,12 @@ func TestProviderApplicabilityNotConfiguredWhenTypeEmpty(t *testing.T) {
 		if a.OK || a.Status != objdelivery.StatusNotConfigured {
 			t.Errorf("%s 应 not ok/not_configured，得到 %+v", a.Runtime, a)
 		}
-		if a.Reason == "" {
-			t.Errorf("%s 的 reason 必须可执行，得到空串", a.Runtime)
+		if !strings.Contains(a.Reason, "base_url") {
+			t.Errorf("%s 的 reason 必须指出缺的是端点，得到 %q", a.Runtime, a.Reason)
 		}
 	}
-	// 档案自身的问题面照旧（缺 type 的可执行出路在 problems 里），两块信息不互相替代。
+	// 档案自身的问题面照旧（缺端点的可执行出路在 problems 里），两块信息不互相替代。
 	if len(resp.Problems) == 0 {
-		t.Error("type 为空也应在 problems 里给出可执行出路")
+		t.Error("缺端点也应在 problems 里给出可执行出路")
 	}
 }

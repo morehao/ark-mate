@@ -3,15 +3,17 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
-	"github.com/morehao/ark-mate/pkg/runtime"
+	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— K2：`mate doctor` 的 provider（供应商凭据）与模型清单体检 ———
@@ -102,8 +104,49 @@ type ProviderDoctorFacts struct {
 	// OrphanCiphertexts 孤儿密文：`<vault>/providers/*.enc` 里没有对应档案行的那些（升序）。
 	OrphanCiphertexts []string `json:"orphanCiphertexts"`
 
-	// Runtimes 逐 runtime 的模型配置物化状态与对账（runtime 升序）。
+	// Runtimes 逐 runtime 的清单同步结论与对账（runtime 升序）。
 	Runtimes []ProviderRuntimeFacts `json:"runtimes"`
+
+	// MissingBaseURL 缺端点的供应商 id（升序）。
+	//
+	// 它是 v12 新增的两类问题项之一（B1）：v11 里端点藏在逐底座的 `projections` 里，
+	// 迁移后**推不出来**就留空——那些供应商的模型一条也不会被交付给任何底座，
+	// 而界面上它看起来"就是一条供应商"。必须在体检里显式说出来，并给可执行的出路。
+	MissingBaseURL []string `json:"missingBaseUrl"`
+
+	// MigrationNotes v12 迁移留下的**待人工处置事实**（`meta.migration_notes`；不存在 → nil）。
+	//
+	// 它回答的是"迁移有没有悄悄丢东西"：默认模型冲突（多底座默认不一致，已按 runtime id
+	// 字典序取一）、归并时的显示名冲突、v12 无出口的 v11 字段（`extra`/`compat`/`package`…）。
+	MigrationNotes *store.MigrationNotes `json:"migrationNotes,omitempty"`
+
+	// MigrationBackup DB 迁移备份路径（`mate.db.bak-v12-<ts>`；空 = 本机没迁移过或库无文件）。
+	//
+	// 这是**回退窗口的唯一依据**：v12 落地后旧二进制会因为 schema 版本前进而拒绝启动，
+	// 唯一的退路就是恢复这份文件（它**只管 DB**，密钥不在其内——v12 不触碰 vault）。
+	MigrationBackup string `json:"migrationBackup,omitempty"`
+
+	// SensitiveFiles 需要与 `mate.db` 同等看待的敏感文件（含权限位）。
+	//
+	// v12 新增了一处明文落点：dsh 的原生凭据文档（隔离根内，0600）。它不是"平台的配置文件"，
+	// 而是**明文密钥**——备份/同步整个目录即带走它，所以体检必须像看 vault 一样看它。
+	SensitiveFiles []SensitiveFileFacts `json:"sensitiveFiles"`
+}
+
+// SensitiveFileFacts 一个敏感文件的体检事实。
+//
+// `Perm` 是八进制权限串（如 `0600`）；`PermChecked=false` = 平台**无法**判定（Windows 没有可检查
+// 的 mode）——那时如实说"无法校验"，既不假装合规也不假报失败（与 doctor 的既有口径一致）。
+type SensitiveFileFacts struct {
+	Path        string `json:"path"`
+	Exists      bool   `json:"exists"`
+	Perm        string `json:"perm,omitempty"`
+	PermChecked bool   `json:"permChecked"`
+	// Expected 期望的权限（八进制串），供报告直接对照。
+	Expected string `json:"expected"`
+	// OK 该文件当前是否满足期望（不存在 = OK：没有落点就没有风险；无法判定 = 按"无法校验"报 warn）。
+	OK   bool   `json:"ok"`
+	Note string `json:"note,omitempty"`
 }
 
 // ProviderDanglingRef 一条悬空引用（agent → 不存在的 provider 档案 id）。
@@ -112,40 +155,35 @@ type ProviderDanglingRef struct {
 	ProviderID string `json:"providerId"`
 }
 
-// ProviderRuntimeFacts 某 runtime 的模型清单事实（状态 + 对账）。
+// ProviderRuntimeFacts 某 runtime 的清单同步事实（状态 + 对账）。
+//
+// v12 起"能不能写"这件事不再由平台门控（没有 `ConfigProjection.Tested`/`Writable` 了）：
+// 交付结论由 adapter 回带，平台如实转述。所以这一段的字段就是**端口结论的直投影**。
 type ProviderRuntimeFacts struct {
 	Runtime string `json:"runtime"`
-	// Declared 该 runtime 是否声明了模型配置落点（false = T5 不可达，平台清单对它没有兑现通道）。
-	Declared bool `json:"declared"`
-	// Tested 落点是否经真实底座实测（false = **只读**：生成候选但不落盘）。
-	Tested bool `json:"tested"`
-	// Writable 现在能不能真的写（Declared && Tested）。
-	Writable bool `json:"writable"`
-	// Channel 交付通道（config_dir_read | cli_patch_arg | env_content）。
-	Channel string `json:"channel,omitempty"`
-	// Path 配置文件绝对路径（未声明时为空）。
-	Path string `json:"path,omitempty"`
-	// Digest 已落盘（或候选）内容的摘要；空 = 从未物化。
-	Digest string `json:"digest,omitempty"`
-	// GeneratedAt 最近一次物化的时刻（RFC3339Nano）。
-	GeneratedAt string `json:"generatedAt,omitempty"`
-	// Pending 恒 true 直到有新进程真正读到它（**不许说成"已生效"**）。
+	// Status applied | unchanged | unsupported | untested | failed。
+	Status string `json:"status"`
+	// Where 人话落点（"同步到哪了"）。
+	Where string `json:"where,omitempty"`
+	// Effect 清单通道的生效时刻（immediate | next_turn | next_session | next_process）。
+	Effect string `json:"effect,omitempty"`
+	// CredentialChannel native_doc | env | none（凭据通道与清单分开报，ADR-14）。
+	CredentialChannel string `json:"credentialChannel,omitempty"`
+	// CredentialTested 该凭据通道是否已实测（false → 界面上只能说「待实测」）。
+	CredentialTested bool `json:"credentialTested"`
+	// Pending true = 平台已交付但底座还没读到（**不许说成"已生效"**）。
 	Pending bool `json:"pending"`
-	// ModelCount 平台声明的清单条数（该 runtime）。
+	// ModelCount 平台声明的清单条数。
 	ModelCount int `json:"modelCount"`
-	// Note 人话说明（未实测只读、未声明落点…）。
+	// Note 人话说明（未同步过、未声明交付面、逐条 problem…）。
 	Note string `json:"note,omitempty"`
 
 	// AdvertisedKnown 本次是否真的取到了运行时广告的目录（离线命令 = false）。
 	AdvertisedKnown bool `json:"advertisedKnown"`
 	// AdvertisedCount 运行时广告的模型候选数（AdvertisedKnown=false 时无意义）。
 	AdvertisedCount int `json:"advertisedCount"`
-	// DeclaredNotAdvertised 平台声明了、底座没广告（"写了没生效"）的条数。
-	DeclaredNotAdvertised int `json:"declaredNotAdvertised"`
-	// AdvertisedNotDeclared 底座有、平台没声明（opencode 上属常态）的条数。
-	AdvertisedNotDeclared int `json:"advertisedNotDeclared"`
-	// WorstSeverity declared_not_advertised 里最重的一档（error | degrade | info | ""）。
-	WorstSeverity string `json:"worstSeverity,omitempty"`
+	// Missing 平台声明了、底座没广告（"写了没生效"）的条目。
+	Missing []string `json:"missing,omitempty"`
 	// DiffNote 差集不可得的原因（AdvertisedKnown=false 时必填）。
 	DiffNote string `json:"diffNote,omitempty"`
 	// HighRisk **写了完全没生效**的形态：declared 非空而 advertised 一条都没有。
@@ -172,6 +210,8 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		ImportMismatch:     []string{},
 		OrphanCiphertexts:  []string{},
 		Runtimes:           []ProviderRuntimeFacts{},
+		MissingBaseURL:     []string{},
+		SensitiveFiles:     []SensitiveFileFacts{},
 	}
 	facts.VaultHome = providerVaultHome(opts.Home, agentDir)
 
@@ -198,6 +238,9 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 					// 正文非法：既不声称它有密钥，也不声称它没有——只在 id 面上出现。
 					continue
 				}
+				if strings.TrimSpace(bodyString(body, "base_url")) == "" {
+					facts.MissingBaseURL = append(facts.MissingBaseURL, rows[i].ID)
+				}
 				switch {
 				case bodyString(body, "key_ref") != "":
 					facts.CiphertextRefs = append(facts.CiphertextRefs, rows[i].ID)
@@ -210,9 +253,22 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 			sort.Strings(facts.ProviderIDs)
 			sort.Strings(facts.CiphertextRefs)
 			sort.Strings(facts.NoKeyProviders)
+			sort.Strings(facts.MissingBaseURL)
 			facts.ProviderRows = len(facts.ProviderIDs)
+			// 迁移留下的待处置事实 + 回退依据（两者都读 meta，读不到只告警不影响其余事实）。
+			if notes, ok, err := st.MigrationNotesV12(ctx); err == nil && ok {
+				facts.MigrationNotes = notes
+				if notes.BackupPath != "" {
+					facts.MigrationBackup = notes.BackupPath
+				}
+			}
+			if facts.MigrationBackup == "" {
+				if list := st.MigrationBackupPaths(); len(list) > 0 {
+					facts.MigrationBackup = list[0]
+				}
+			}
 		}
-		if models, err := st.ListModelDefinitions(ctx, ""); err == nil {
+		if models, err := st.ListModelDefinitions(ctx); err == nil {
 			facts.ModelRows = len(models)
 		}
 		if _, ok, err := st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest); err == nil {
@@ -228,6 +284,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		}
 		facts.DanglingRefs = danglingProviderRefs(ctx, st, facts.ProviderIDs)
 	}
+	facts.SensitiveFiles = collectSensitiveFiles(opts.Home, agentDir, st)
 
 	// ——— vault（载体无关） ———
 	facts.VaultUsable, facts.VaultSource, facts.VaultNote = probeVault(facts.VaultHome)
@@ -419,7 +476,7 @@ func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string)
 	if st == nil {
 		return out
 	}
-	reg := runtime.DefaultRegistry()
+	reg := goruntime.DefaultRegistry()
 	reg.ApplyIsolationEnv(strings.TrimSpace(home))
 	svc := NewService(reg, nil)
 	defer svc.coalescer.Close()
@@ -443,18 +500,16 @@ func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string)
 // 端到端跑到——`CollectProviderDoctorFacts` 里的 Service 天然没有编排器，永远走 unknown 分支。
 func (s *Service) runtimeModelFacts(ctx context.Context, runtimeID string, state RuntimeConfigState) ProviderRuntimeFacts {
 	facts := ProviderRuntimeFacts{
-		Runtime:  runtimeID,
-		Declared: state.Declared,
-		Tested:   state.Tested,
-		Writable: state.Writable,
-		Channel:  state.Channel,
-		Path:     state.Path,
-		Digest:   state.Digest,
-		Pending:  state.Pending,
-		Note:     state.Note,
+		Runtime:           runtimeID,
+		Status:            state.Status,
+		Where:             state.Where,
+		Effect:            state.Effect,
+		CredentialChannel: state.Credential.Channel,
+		CredentialTested:  state.Credential.Tested,
+		Pending:           state.Pending,
+		Note:              strings.Join(state.Problems, "；"),
 	}
-	facts.GeneratedAt = state.GeneratedAt
-	if declared, err := s.ListModels(ctx, runtimeID); err != nil {
+	if declared, err := s.ListModels(ctx); err != nil {
 		facts.DiffNote = "读平台清单失败：" + err.Error()
 		return facts
 	} else {
@@ -472,23 +527,38 @@ func (s *Service) runtimeModelFacts(ctx context.Context, runtimeID string, state
 	default:
 		facts.AdvertisedKnown = true
 		facts.AdvertisedCount = len(sample.Models)
-		// 高危：**写了完全没生效**（声明了 N 条、底座一条都没广告）。它单独报，不与差集混在一起。
+		// 高危：**写了完全没生效**（声明了 N 条、底座一条都没广告）。
 		facts.HighRisk = facts.ModelCount > 0 && facts.AdvertisedCount == 0
-		if diff, derr := s.reconcileModels(ctx, runtimeID, agentID); derr == nil {
-			facts.DeclaredNotAdvertised = len(diff.DeclaredNotAdvertised)
-			facts.AdvertisedNotDeclared = len(diff.AdvertisedNotDeclared)
-			for _, e := range diff.DeclaredNotAdvertised {
-				if providerSeverityRank(e.Severity) > providerSeverityRank(facts.WorstSeverity) {
-					facts.WorstSeverity = e.Severity
-				}
-			}
-			facts.DiffNote = ""
-		} else {
-			facts.AdvertisedKnown = false
-			facts.DiffNote = "对账失败：" + derr.Error()
-		}
+		facts.Missing = missingDeclaredModels(ctx, s, sample)
 	}
 	return facts
+}
+
+// missingDeclaredModels 声明了却没出现在运行时广告里的候选（机器面，人话化）。
+//
+// 判据是**同一份生成规则**（`modelValueFor`）：平台声明 → 该 runtime 认得的不透明值，
+// 再与广告集合比对。两处各写一遍迟早分叉。
+func missingDeclaredModels(ctx context.Context, s *Service, sample advertisedSample) []string {
+	declared, err := s.ListModels(ctx)
+	if err != nil {
+		return nil
+	}
+	advertised := map[string]bool{}
+	for _, m := range sample.Models {
+		advertised[m.Value] = true
+	}
+	var out []string
+	for i := range declared {
+		v, err := modelValueFor(sample.Runtime, declared[i].ProviderID, declared[i].ModelID)
+		if err != nil || v == "" {
+			continue
+		}
+		if !advertised[v] {
+			out = append(out, declared[i].ProviderID+"/"+declared[i].ModelID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // unknownModelDiffNote 差集取不到事实一侧时的说明（**"无法校验"**，不是任何一侧为空）。
@@ -504,15 +574,89 @@ func unknownModelDiffNote(reason string) string {
 		"发一条消息或跑 `GET /models?refresh=1` 才有事实一侧）"
 }
 
-// providerSeverityRank 严重度排序（error > degrade > info > 空），取"最重的一条"给结论用。
-func providerSeverityRank(severity string) int {
-	switch severity {
-	case severityError:
-		return 3
-	case severityDegrade:
-		return 2
-	case severityInfo:
-		return 1
+// collectSensitiveFiles 列出需要与 `mate.db` 同等看待的敏感文件及其权限（v12 的新增面）。
+//
+// 为什么把 dsh 的凭据文档列进来：v12 起密钥多了一处**明文落点**
+// （`<MATE_HOME>/runtime/dsh/.credentials.yaml`，权限 0600）。它与 vault 密文不是一回事——
+// 备份/同步那个目录就会连明文一起带走，而用户以为"密钥是加密存的"。体检必须像看 vault 一样看它。
+//
+// 哈希已完备的两条纪律这里都体现：① 权限宽于 0600 → **fail-loud**（dsh 对可被属主之外读取的
+// 文档是**拒启**，不是告警）；② 平台无法判定权限（Windows）→ 如实记"无法校验"，不假绿也不假红。
+func collectSensitiveFiles(home, agentDir string, st *store.Store) []SensitiveFileFacts {
+	out := []SensitiveFileFacts{}
+	root := strings.TrimSpace(home)
+	if root == "" {
+		root = filepath.Dir(strings.TrimSpace(agentDir))
 	}
-	return 0
+	if strings.TrimSpace(root) == "" || root == "." {
+		return out
+	}
+	// 逐个已注册 runtime 的**原生凭据文档**（声明在 `CredentialSpec.NativeDoc` 里，
+	// 占位符用该 runtime 自己的隔离 env 展开——与物化时同一条解析链，绝不落到用户自己的目录）。
+	reg := goruntime.DefaultRegistry()
+	for _, spec := range reg.List() {
+		if strings.TrimSpace(spec.Credential.NativeDoc) == "" {
+			continue
+		}
+		path := resolveDoctorDocPath(spec, root)
+		if path == "" {
+			continue
+		}
+		out = append(out, statSensitiveFile(path))
+	}
+	_ = st
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// resolveDoctorDocPath 展开某 runtime 的凭据文档路径（占位符只认该 runtime 自己的隔离 env）。
+func resolveDoctorDocPath(spec goruntime.Spec, root string) string {
+	launch := map[string]string{}
+	for _, kv := range spec.Launch.Env {
+		if name, val, ok := strings.Cut(kv, "="); ok {
+			launch[strings.TrimSpace(name)] = val
+		}
+	}
+	// doctor 是只读命令、不应用隔离表：占位符里只有 `${MATE_HOME}` 这类根可以从入参推出来，
+	// 其余（`$DSH_HOME` 之类）在启动器里可能没值 → 这时**跳过**而不是猜一个路径。
+	lookup := func(name string) (string, bool) {
+		if v, ok := launch[name]; ok && strings.TrimSpace(v) != "" {
+			return v, true
+		}
+		if name == "MATE_HOME" && root != "" {
+			return root, true
+		}
+		return "", false
+	}
+	p, err := goruntime.ExpandProjectionRoot(spec.Credential.NativeDoc, lookup)
+	if err != nil || strings.TrimSpace(p) == "" {
+		return ""
+	}
+	return p
+}
+
+// statSensitiveFile 采集一个敏感文件的存在性与权限（八进制串）。
+func statSensitiveFile(path string) SensitiveFileFacts {
+	f := SensitiveFileFacts{Path: path, Expected: "0600"}
+	info, err := os.Stat(path)
+	if err != nil {
+		f.OK = true // 不存在 = 没有落点 = 没有风险
+		return f
+	}
+	f.Exists = true
+	if runtime.GOOS == "windows" {
+		// Windows 没有可检查的 mode（dsh 官方口径也是"跳过而不是伪造"）。
+		f.PermChecked = false
+		f.OK = true
+		f.Note = "平台无法判定权限（Windows 没有可检查的 mode）：**无法校验**，不当作合规也不当作失败"
+		return f
+	}
+	f.PermChecked = true
+	f.Perm = fmt.Sprintf("%04o", info.Mode().Perm())
+	f.OK = info.Mode().Perm()&0o077 == 0
+	if !f.OK {
+		f.Note = "权限宽于 0600：这份文档里有**明文密钥**，且底座对「可被属主之外读取」的文档是**拒启**；" +
+			"立刻 `chmod 600` 它"
+	}
+	return f
 }

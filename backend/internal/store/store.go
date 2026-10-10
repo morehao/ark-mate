@@ -69,6 +69,11 @@ var (
 // Store 是持久层门面：持有 gorm 句柄，聚合 schema 迁移与各领域 DAO。
 type Store struct {
 	db *gorm.DB
+	// path 库文件路径（"" 或 ":memory:" = 进程内临时库）。
+	// 迁移备份与 doctor 的"该恢复哪个文件"都要用它，所以它必须在 Store 上而不只是 Open 的入参。
+	path string
+	// migrationBackupPath 本次进程启动时那次迁移备份的路径（空 = 本次没迁移过）。
+	migrationBackupPath string
 
 	conversations *dao.ConversationDao
 	events        *dao.EventDao
@@ -100,6 +105,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := New(db)
+	s.path = path
 	if err := s.Migrate(context.Background()); err != nil {
 		_ = s.Close()
 		return nil, err

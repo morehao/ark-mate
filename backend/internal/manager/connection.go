@@ -60,7 +60,7 @@ func generationKey(connKey, fingerprint, configDigest string) string {
 // 迟早会漂移成"迁移判据说没变、acquire 却换了进程"。
 func (o *Orchestrator) baseKeyFor(agent *AgentRec, spec runtime.Spec) string {
 	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	keyEnv := o.svc.providerEnvFor(agent.Provider)
+	keyEnv := o.svc.providerEnvFor(spec.ID, agent.Provider)
 	return connKey(spec.ID, nativeEnv, keyEnv)
 }
 
@@ -321,7 +321,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		return nil, err
 	}
 	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	keyEnv := o.svc.providerEnvFor(agent.Provider)
+	keyEnv := o.svc.providerEnvFor(spec.ID, agent.Provider)
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
 	var env []string
