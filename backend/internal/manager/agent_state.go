@@ -133,9 +133,9 @@ func (s *Service) ListAgents() ([]dtoagent.AgentResp, error) {
 	for _, a := range s.agents {
 		out = append(out, dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 			IsDefault: a.ID == cur, Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-			PermissionPolicy:   toPermissionPolicyResp(a.PermissionPolicy),
-			ConversationCount:  s.conversationCountLocked(a.ID),
-			DefaultModel:       derivedDefaultModels(a.Runtimes, defaults),
+			PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
+			ConversationCount: s.conversationCountLocked(a.ID),
+			DefaultModel:      derivedDefaultModels(a.Runtimes, defaults),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

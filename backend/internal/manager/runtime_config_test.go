@@ -206,6 +206,9 @@ func configTestRig(t *testing.T, tested bool) (*genRig, string) {
 		t.Fatal("默认注册表里应有 opencode")
 	}
 	oc.Launch.Env = append(oc.Launch.Env, "OPENCODE_CONFIG_DIR="+filepath.Join(dir, "oc-config"))
+	// 隔离纪律（同 model_list_test.go 的注释）：夹具里把 Command 换成不存在的桩名，
+	// 万一有路径真的去 spawn 底座，也只会失败而不会碰用户自己装的那份。
+	oc.Launch.Command = "mate-test-opencode-stub-not-on-path"
 	oc.ConfigProjection.Tested = tested
 	if tested {
 		oc.ConfigProjection.TestedOnVersion = "test-version"

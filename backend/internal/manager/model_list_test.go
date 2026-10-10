@@ -49,8 +49,15 @@ func newModelRig(t *testing.T) *modelRig {
 	if !ok {
 		t.Fatal("默认注册表里应有 opencode")
 	}
+	// **隔离纪律（硬约束）**：夹具注册的是真实 adapter 的声明，而 `ModelCatalog` 在没有活会话/缓存时
+	// 会走 resume 分支**真的 spawn 底座**。若不隔离，那一次 spawn 会去读用户自己的
+	// `~/.local/share/opencode/...`（2026-10-10 实测触发过一次）。两道保险：
+	//   ① 注入隔离 env（home 全落在 t.TempDir 下）；
+	//   ② 把 Command 换成一个**不存在**的桩名——真到 spawn 那一步只会失败，绝不落到用户装的那份。
 	oc.Launch.Env = append(oc.Launch.Env,
 		"OPENCODE_CONFIG_DIR="+filepath.Join(t.TempDir(), "opencode-config"))
+	oc.Launch.Command = "mate-test-opencode-stub-not-on-path"
+	r.svc.reg.ApplyIsolationEnv(t.TempDir())
 	r.svc.reg.Register(oc)
 	return &modelRig{genRig: r}
 }

@@ -174,14 +174,41 @@ func aclRuntimeNotFound(id string) error {
 	return acl.NewError(acl.ClassRequest, "runtime_not_found", "runtime "+id+" 未注册", nil)
 }
 
-// advertisedModels 取某 agent 的运行时目录里的模型候选（读 `GET /models` 的同一实现）。
-func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomodel.AdvertisedModel, error) {
+// advertisedSample 一次运行时目录取样（**事实一侧**），并带上"这份取样到底可不可信"的来源。
+//
+// 为什么要把来源一起带出来：空目录有**两种完全不同的含义**，只看长度分不开——
+//
+//	source=none    没有来源（离线进程没有编排器 / 该 agent 还没有会话）→ **无法校验**；
+//	source=session|cache|resume  真的读到了目录，它就是"底座此刻广告了什么"。
+//
+// 把两者混成一个"空"会在对账上造出两个方向的谎：对 `mate doctor` 是**假红**
+// （把"没取到"报成"写了完全没生效"），对 `GET /models` 是**假绿**（把"没取到"报成"两侧一致"）。
+type advertisedSample struct {
+	// Models 运行时不透明值（category=model 的全量候选，按 value 升序）。
+	Models []dtomodel.AdvertisedModel
+	// Source 取样来源（session|cache|resume|none）；空 = 本次没有取样（无 agent / 无执行面）。
+	Source string
+	// Note 取样面给的人话说明（source=none 时就是"为什么没有"）。
+	Note string
+}
+
+// Known 本次取样是否真的读到了运行时目录。
+func (a advertisedSample) Known() bool {
+	switch a.Source {
+	case catalogFromSession, catalogFromCache, catalogFromResume:
+		return true
+	}
+	return false
+}
+
+// advertisedSample 取某 agent 的运行时目录（读 `GET /models` 的同一实现），带上来源与说明。
+func (s *Service) advertisedSample(ctx context.Context, agentID string) (advertisedSample, error) {
 	if agentID == "" || s.orch == nil {
-		return []dtomodel.AdvertisedModel{}, nil
+		return advertisedSample{Models: []dtomodel.AdvertisedModel{}}, nil
 	}
 	resp, err := s.ModelCatalog(ctx, agentID)
 	if err != nil {
-		return nil, err
+		return advertisedSample{}, err
 	}
 	out := []dtomodel.AdvertisedModel{}
 	for _, opt := range resp.Options {
@@ -196,7 +223,19 @@ func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomo
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Value < out[j].Value })
-	return out, nil
+	return advertisedSample{Models: out, Source: resp.Source, Note: resp.Note}, nil
+}
+
+// advertisedModels 取某 agent 的运行时目录里的模型候选（读 `GET /models` 的同一实现）。
+//
+// 只要候选、不要来源的调用方用它；**要判"这份事实可不可信"的调用方必须走 `advertisedSample`**
+// （差集与体检都属后者，见 `advertisedSample` 的注释）。
+func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomodel.AdvertisedModel, error) {
+	sample, err := s.advertisedSample(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return sample.Models, nil
 }
 
 // agentForRuntime 取一个"服务该 runtime"的 agent id（对账要借它的目录读数）。
@@ -256,9 +295,9 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID, agentID string, ref
 	_, declared, _ := s.configProjectionOf(runtimeID)
 
 	resp := &dtomodel.ModelsResp{
-		Runtime:  runtimeID,
-		Agent:    agentID,
-		Declared: []dtomodel.ModelResp{},
+		Runtime:    runtimeID,
+		Agent:      agentID,
+		Declared:   []dtomodel.ModelResp{},
 		Advertised: []dtomodel.AdvertisedModel{},
 	}
 	if items, err := s.ListModels(ctx, runtimeID); err == nil {

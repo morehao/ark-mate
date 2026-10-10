@@ -35,6 +35,13 @@ import (
 // 第二次启动不该把第一次的备份冲掉）。
 const providersBackupName = "providers.json.bak-v11"
 
+// providerMismatchExtraMarker 对账不一致里**"库里有、文件里没有"**这一类的判据标记。
+//
+// 它是"写入侧拼串"与"读取侧分档"之间唯一的耦合点，所以提成常量：`mate doctor` 要据它
+// 把"写面新建后快照滞后"（正常，只告警）与"真不一致"（判失败）分开。两侧各手抄一份
+// 中文串，会在某次改文案时静默失效——那时 doctor 会把正常状态报成失败。
+const providerMismatchExtraMarker = "DB 里有、文件里没有"
+
 // ProviderImportStats 一次导入的完整计数 = 域无关计数 + provider 面自己的计数。
 type ProviderImportStats struct {
 	DefinitionImportStats
@@ -285,7 +292,8 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 	}
 	sort.Strings(extra)
 	for _, id := range extra {
-		mismatch = append(mismatch, fmt.Sprintf("%s: DB 里有、文件里没有（写面新建？跑 `mate provider export` 同步文件）", id))
+		mismatch = append(mismatch, fmt.Sprintf("%s: %s（写面新建？跑 `mate provider export` 同步文件）",
+			id, providerMismatchExtraMarker))
 	}
 	return mismatch
 }

@@ -348,9 +348,9 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | GET | `/agents/:id/capabilities` | 该 Agent 视角的统一能力目录（按候选 runtime 聚合 skill/MCP/tool + runtimes） |
 | GET | `/agents/:id/diagnostics` | agent 诊断快照（连接态 + `pid` + `stderr_tail` + 最近失败；`stderr_source` 标来源 live/last_error/none；`remediation` = 按事实推导的可执行修复步骤：runtime 未注册 / 启动命令不可执行 / provider 档案悬空或无密钥 / 底座自报鉴权方式 / 底座安装步骤） |
 | GET | `/runtimes` | 底座列表（ACP adapter 注册表） |
-| GET | `/providers` | 供应商凭据列表：`{id,type,model?,has_key,revision,updated_at,note?,refs{agents[],runtimes[]},problems[]}`（密钥只写不读回，仅 `has_key`；`problems[]` 是"开会话之前就能看见"的本地段问题清单）。**载体按持久层模式分叉（v11）**：`MATE_STORE=sqlite` 时档案存在 `providers` 表里（`id` + `body` + `revision`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=provider` 的变更），`<AgentDir>/providers.json` 降级为导入/导出载体（写面**不再回写**它）；memory 模式仍是该文件。**密钥加密落盘（§5 vault）**：载体里只留引用 `key_ref: "vault:providers/<id>"`，密文落 `~/.ark-mate/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 `{kind, ref}`——密文挪到别的引用/kind 上必然解不开），明文只在内存与子进程 env |
-| POST | `/providers` | 新建档案 `{id,type,model?,note?,key?}`：id 过词法校验（仅 `a-zA-Z0-9._-`，≤64，会成为 vault 文件名）；已存在 → `40901` `provider_exists`（**绝不覆盖**，改它用 PATCH）；`type` 必填（决定注入哪个环境变量名）。**写面顺序固定**：① 校验 → ② vault 写密文 → ③ 载体提交（行 CAS + 审计）→ ④ 更新内存；③ 失败补偿 ②（删掉刚写的密文，不留孤儿） |
-| PATCH | `/providers/:id` | **只更新**（v11 起不再 upsert；不存在 → `40401` `provider_not_found`）：`{type?,model?,note?,key?}` 指针更新；`key:""` = 清除（删 ref + 删密文）。响应带 `effect{channel,effect,applies_to_agents,affected_conversations,deferred,note}` —— **生效面回执**：只有 `type`/`key` 变了才说"下一个轮次边界生效"（`effect=next_turn`），只改 `note` 如实回 `effect=none`；`deferred` 是其中"有在途轮次或有未应答权限/提问、将顺延到再下一轮"的会话数，判据与代际裁决**同源** |
+| GET | `/providers` | 供应商凭据列表：`{id,type,has_key,revision,updated_at,note?,refs{agents[],runtimes[]},problems[],delivery,applicability[]}`（密钥只写不读回，仅 `has_key`；**没有 `model` 字段**——那是个历史遗留的静默陷阱，v11 已删：默认模型归平台清单 `models.is_default`，见 `/models`）。`problems[]` 是"开会话之前就能看见"的本地段问题清单；`delivery{channel,effect,note}` 与逐已注册 runtime 的 `applicability[{runtime,ok,status,reason}]` 与 `/library` 共用 `pkg/object/objdelivery` 的值对象（凭据恒为 `dial_env`/`next_turn`，`applicability` 回答"这条凭据能不能到达某个底座子进程 env"：推得出注入变量名 → `ok:true`/`projected`，推不出（`type` 为空）→ `ok:false`/`not_configured` 并给可执行出路）。**载体按持久层模式分叉（v11）**：`MATE_STORE=sqlite` 时档案存在 `providers` 表里（`id` + `body` + `revision`，写面单事务 = 行 CAS + 同一张审计表追一条 `kind=provider` 的变更），`<AgentDir>/providers.json` 降级为导入/导出载体（写面**不再回写**它）；memory 模式仍是该文件。**密钥加密落盘（§5 vault）**：载体里只留引用 `key_ref: "vault:providers/<id>"`，密文落 `~/.ark-mate/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 `{kind, ref}`——密文挪到别的引用/kind 上必然解不开），明文只在内存与子进程 env |
+| POST | `/providers` | 新建档案 `{id,type,note?,key?}`：id 过词法校验（仅 `a-zA-Z0-9._-`，≤64，会成为 vault 文件名）；已存在 → `40901` `provider_exists`（**绝不覆盖**，改它用 PATCH）；`type` 必填（决定注入哪个环境变量名）。**写面顺序固定**：① 校验 → ② vault 写密文 → ③ 载体提交（行 CAS + 审计）→ ④ 更新内存；③ 失败补偿 ②（删掉刚写的密文，不留孤儿） |
+| PATCH | `/providers/:id` | **只更新**（v11 起不再 upsert；不存在 → `40401` `provider_not_found`）：`{type?,note?,key?}` 指针更新（**没有 `model`**，见上）；`key:""` = 清除（删 ref + 删密文）。响应带 `effect{channel,effect,applies_to_agents,affected_conversations,deferred,note}` —— **生效面回执**：只有 `type`/`key` 变了才说"下一个轮次边界生效"（`effect=next_turn`），只改 `note` 如实回 `effect=none`；`deferred` 是其中"有在途轮次或有未应答权限/提问、将顺延到再下一轮"的会话数，判据与代际裁决**同源** |
 | POST | `/providers/:id/probe` | 连接自检两段：`{upstream?:bool}` → `{ok,checks:[{name,status,detail,remedy}]}`，`status ∈ pass\|fail\|warn\|skip\|unknown`。**本地段无条件且零出网**（exists/type/secret/refs/injection/catalog：档案在不在、`type` 能否推出注入变量名、密钥能否解出来、被哪些 Agent 引用、注入变量名、引用它的 Agent 的模型目录可不可读）；**上游段仅当 `{"upstream":true}`** —— 对该 `type` 已登记的上游端点发**一次**最小请求（超时 5s、不重试、**不落清单不写缓存不进 `/models`**、错误文本先过 redact），只判"连得上/鉴权过/几条模型"。`type` 未登记端点 → `unknown`（**无法校验**，不是 fail，与 `mate doctor` 同口径）。`ok` = "没有 fail"（warn/skip/unknown 都不算失败）。**`GET` 与页面加载永不触发上游段**（那条路径会把用户密钥发到第三方） |
 | DELETE | `/providers/:id` | 删档案：幂等（不存在 → `deleted:false` 且 code=0）；被 agent 或模型条目引用 → `40901` `provider_in_use` + `referenced_by_agents[]`（**不做级联清空**：清空引用等于静默换掉凭据来源）。删除顺序**先摘内存 → 再删行 + 审计 → 最后删密文**；密文删除失败 → `40001` `vault_delete_failed`，但**如实说明「行已删、密文残留」**（反过来先删密文会留下"行在、密钥没了"的档案，让 `has_key` 撒谎） |
 | POST | `/models` | 新建一条**平台模型清单**条目：`{runtime,provider_id,model_id,name?,extra?,hidden?,pinned?,is_default?}` → 条目（含平台按该 runtime 规则**生成**的 `value`）。`runtime` 必须**已声明 `ConfigProjection`**（即该底座有平台清单的兑现通道），否则 `40501` `config_projection_unsupported`；同 `(runtime,provider_id,model_id)` 已存在 → `40901` `model_exists`；`provider_id` 不存在 → `40401` `provider_not_found`；memory 模式（无清单载体）→ `40501` `model_list_unavailable`。**同一条模型在两个底座上就是两行**（两个底座写出的配置 schema 完全不同）。响应带 `effect{channels,effect,…}`：`config_write`（新进程读配置）+ 改了默认时的 `session_config`（新会话创建时下发，**立即**）；`effect` 取最早的那个 |
@@ -496,6 +496,21 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 手工塞进几百条，"有界"是列的契约）；保留键类型写坏（如 `last_fired_at: 123`）**逐条报错**而不是
 静默丢弃。
 
+**供应商档案走同一条搬家路径（v11）**：装配期在 sqlite 模式下自动导入一次
+`<AgentDir>/providers.json`（整个 provider 域只有**一个文件**，所以幂等判据取**文件内容指纹**
+而不是"名字+大小"——这条域最常见的编辑就是"把 `type` 从一个上游改成另一个"，长度可能一模一样），
+指纹进 `meta.imported_providers`（**第四个域，各自记指纹**）；`mate provider import|export` 是对应的
+运维口子。导入**逐条过同一道闸门**（id 要能当 vault 引用的路径段）、旧明文密钥走**既有**的 vault
+加密路径（只留 `key_ref`）、正文保留除 `id`/`key` 外的**所有键**（历史 `model` 与手写备注都不会在
+搬家时消失），迁移前**一次性**备份成 `<AgentDir>/providers.json.bak-v11`（已存在则不覆盖），导入
+**绝不覆盖**已有行、文件**不删也不回写**。它与前三个域有两处结构性差别：① 事实源换到 DB 之后
+`providers.json` 降级为**导入/导出载体**（写面一个字节都不回写它，"文件与 DB 谁是权威"因此不存在），
+② 密钥不在文件里而在 **vault**（`<mate home>/vault.key` + `vault/providers/<id>.enc`）——所以这一次的
+事实源切换带**不可逆动作**（关闭回退窗口）：执行前的六项检查与"回退旧二进制前必须先
+`mate provider export`"的步骤见 [部署文档 §6](docs/deployment.md)。对账不一致（库里与文件里不等价）
+**只告警不阻断**启动，落 `meta.providers_import_mismatch`，由 `mate doctor` 的 `providers import`
+那一条逐条报出。
+
 **定时任务面（`/automations`）沿用同一条分派线**（请求形态 → `40000`；取值语义 → `40001`），
 `msg` 写清是哪一种：
 
@@ -619,9 +634,22 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_agents
 `mate automation import` / `export`（M6-7：定时任务换事实源的两个运维口子，形态与 `mate agent
 import|export` 一致——文件里的运行态键被切成**运行态列**导入、导出时再合成同一个文件；装配期在
 sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automations`）、
+`mate provider import` / `export`（v11：供应商档案换事实源的两个运维口子——整个域只有
+`<AgentDir>/providers.json` 一个文件，`import` 把它灌进 SQLite（**按行判重、已有行绝不覆盖**，
+旧明文密钥迁进 vault，迁移前备份 `providers.json.bak-v11`），`export` 把 DB 里的档案**确定性**
+写回该文件（导出两次逐字节相同；这是回退旧二进制的**唯一**回灌路径，见 `docs/deployment.md` §6。
+装配期在 sqlite 模式下自动跑一次 `import`，幂等靠**文件内容指纹** `meta.imported_providers`）、
 `mate doctor`（**只读体检**：前端资产来源与逐文件摘要、随包载荷清单与入口存在性、载荷
-`nodeAbi` 与 `release.json` 的一致性、数据目录可写性、监听端口占用；`--verify-payload` 对载荷树做
-**全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数），`--json` 供诊断包/CI 消费。
+`nodeAbi` 与 `release.json` 的一致性、数据目录可写性、监听端口占用；**K2 起还有 provider 与模型清单
+一段**——档案数与 vault 可达性、悬空引用（agent 指向不存在的档案）、导入对账（
+`meta.providers_import_mismatch` 逐条）、孤儿密文（无对应档案行的 `<vault>/providers/*.enc`，
+只列出不自动删）、逐 runtime 的模型配置物化状态（path/digest/pending/writable/tested）与
+"清单 vs 运行时广告"的差集，`declared` 非空而 `advertised` 一条都没有的形态**单独判高危**；
+这一段读库走 `mode=ro`（不跑迁移）、vault 只探测不创建 keyfile，判据仍是"无法校验记警告、
+事实与声明不符才退出 1"——**离线命令取不到运行时广告时如实记 unknown**，既不假绿也不假红）；
+`--verify-payload` 对载荷树做
+**全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数），`--json` 供诊断包/CI 消费
+（`providers` 段是键名稳定的机器可读事实）。
 打包态还会拿 `<Resources>/release.json` 逐项比对 coreVersion / 契约代数 / webBuildId / webDigest /
 载荷清单——不符退出码 1；"无法校验"（非打包态没有契约、端口已被自己占用）只记警告，不判失败）、
 `mate --version [--json]`（核心版本与 API 契约版本；`--json` 供打包期读取，是桌面发布契约

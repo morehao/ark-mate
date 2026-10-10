@@ -39,7 +39,7 @@ type RuntimeConfigState = dtomodel.RuntimeConfigResp
 
 // runtimeConfigDigestKey meta 键的 value 形状：`{"<runtime>": {...}}`。
 type runtimeConfigDigestEntry struct {
-	Digest     string `json:"digest"`
+	Digest      string `json:"digest"`
 	GeneratedAt string `json:"generated_at"`
 	// GeneratorVersion 生成器版本（格式 + 模板契约的代数）。改模板时 +1，
 	// 于是"旧摘要"会被识别成"需要重新物化"而不是"文件被外部改过"。
@@ -276,20 +276,20 @@ func buildRuntimeConfig(proj runtime.ConfigProjectionPath, models []runtimeConfi
 //   - 顶层 `model` 是默认模型（短形式 `<route>/<model>`）；
 //   - 未知顶层键被 schema **剥掉**（zod 默认行为），所以归属标记 `_arkMate` 不会影响解析。
 type opencodeConfigDoc struct {
-	Schema    string                          `json:"$schema"`
-	Providers map[string]opencodeProviderDoc  `json:"providers"`
-	Model     string                          `json:"model,omitempty"`
-	Ownership map[string]any                  `json:"_arkMate,omitempty"`
+	Schema    string                         `json:"$schema"`
+	Providers map[string]opencodeProviderDoc `json:"providers"`
+	Model     string                         `json:"model,omitempty"`
+	Ownership map[string]any                 `json:"_arkMate,omitempty"`
 }
 
 // opencodeProviderDoc opencode 的一个 provider 路由声明。
 type opencodeProviderDoc struct {
-	Name     string                       `json:"name,omitempty"`
-	Env      []string                     `json:"env,omitempty"`
-	Package  string                       `json:"package,omitempty"`
-	Settings map[string]any               `json:"settings,omitempty"`
-	Models   map[string]opencodeModelDoc  `json:"models,omitempty"`
-	Options  map[string]any               `json:"options,omitempty"`
+	Name     string                      `json:"name,omitempty"`
+	Env      []string                    `json:"env,omitempty"`
+	Package  string                      `json:"package,omitempty"`
+	Settings map[string]any              `json:"settings,omitempty"`
+	Models   map[string]opencodeModelDoc `json:"models,omitempty"`
+	Options  map[string]any              `json:"options,omitempty"`
 }
 
 // opencodeModelDoc opencode 的模型条目（`models.<id>`，key 就是条目的本地 id）。

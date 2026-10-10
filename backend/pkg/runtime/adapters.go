@@ -43,9 +43,9 @@ func opencodeSpec() Spec {
 		//
 		// Tested 的取值见下面的长注释。
 		ConfigProjection: ConfigProjection{
-			Format:          ConfigFormatOpencodeJSON,
-			Root:            "${OPENCODE_CONFIG_DIR}",
-			Filename:        "opencode.json",
+			Format:      ConfigFormatOpencodeJSON,
+			Root:        "${OPENCODE_CONFIG_DIR}",
+			Filename:    "opencode.json",
 			Channel:     ConfigChannelEnvContent,
 			FileChannel: ConfigChannelDirRead,
 			// Tested=true 的**范围**要说清（这是"用实测结论换写入权"的那条纪律）：

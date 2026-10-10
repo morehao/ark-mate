@@ -205,8 +205,9 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 // TestProviderEffectIsSameSourceAsGenerationPlan C5/A2：生效面回执与代际裁决**同源**。
 //
 // 判据不是"返回了两个数字"，而是：改 `type` 之后
-//  ① 空闲会话的句柄代际键**真的换了**（下一轮拿到新 env）；
-//  ② 忙会话的裁决就是 `planGenerationSwitch` 给出的 `defer`（回执里的 deferred 与它逐条一致）。
+//
+//	① 空闲会话的句柄代际键**真的换了**（下一轮拿到新 env）；
+//	② 忙会话的裁决就是 `planGenerationSwitch` 给出的 `defer`（回执里的 deferred 与它逐条一致）。
 func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t) // stub ACP（真子进程）+ 真库 + agent a1

@@ -29,9 +29,10 @@ func seedCatalog(svc *Service, agentID, runtimeID string, values ...acl.ConfigOp
 // TestModelReconcileExactDiff A14 ②：对账闭环——构造差集，断言报出的**正好**是差的那几条。
 //
 // 三条断言（计划 A14 的原文）：
-//  ① advertised 与 declared 一致 → 两侧差集都为空；
-//  ② 去掉一条 → `declared_not_advertised` **恰好是它**；
-//  ③ 多一条 → `advertised_not_declared` **恰好是它**（**恰好相等，不是包含**）。
+//
+//	① advertised 与 declared 一致 → 两侧差集都为空；
+//	② 去掉一条 → `declared_not_advertised` **恰好是它**；
+//	③ 多一条 → `advertised_not_declared` **恰好是它**（**恰好相等，不是包含**）。
 func TestModelReconcileExactDiff(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
@@ -188,10 +189,10 @@ func TestDshValidationGate(t *testing.T) {
 	spec := runtimeSpecForGate("deepseekharness", script)
 
 	cases := []struct {
-		name  string
-		dump  string
-		exit  string
-		pass  bool
+		name string
+		dump string
+		exit string
+		pass bool
 	}{
 		{"ok", `{"x-cordis":{"complete":true,"diagnostics":[]}}`, "0", true},
 		// ④ 的负例：目标 id 不存在 → **诊断非空但退出码 0**。
