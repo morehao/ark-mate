@@ -444,7 +444,7 @@ function runtimeEnvOf(coreEnv, runtimeId) {
     isolation.OPENCODE_CONFIG_CONTENT = ''
     isolation.OPENCODE_CONFIG_PROJECT_DISABLE = 'true'
     isolation.OPENCODE_MODELS_PATH = ''
-    isolation.OPENCODE_MODELS_URL = 
+    isolation.OPENCODE_MODELS_URL = ''
   }
   // "已有键不覆盖"（isolation.go 的 ApplyIsolationEnv 语义）：显式配置优先。
   for (const [k, v] of Object.entries(isolation)) if (env[k] === undefined) env[k] = v

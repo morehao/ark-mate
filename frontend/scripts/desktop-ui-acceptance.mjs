@@ -294,7 +294,11 @@ async function scenarioStream(cdp) {
 
   const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/conversations'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
   if (!conv) {
-    check('订阅真实会话并收到服务端帧', false, '本地库没有会话可订阅')
+    // **如实跳过，不判红**：这一条需要"库里已经有一条会话"这个环境前提（探针不替用户造会话——
+    // 那会往他的库里写东西）。判红会让"新机器上第一次跑 DoD"永远红一次，而那不是产品缺陷；
+    // 记绿又会假装验过。与隔离那一条同款处理（仓库纪律：既不许假绿，也不许假红）。
+    skipped++
+    console.log('  ⏭ 订阅真实会话并收到服务端帧：跳过 — 本地库没有会话可订阅（先在界面上建一条会话再跑）')
     return
   }
   cdp.events.length = 0

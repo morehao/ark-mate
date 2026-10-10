@@ -75,8 +75,9 @@ const LAUNCHERS = [
     // 不兜底时这条"壳直接跑载荷"的路径会去读/替换**用户自己的**后台服务登记——那正是"动了本机"。
     // 其余 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` 是通用变量（全局改会连累用户其它
     // 工具），只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
-    // F3（模型清单 T5 的隔离前提）：三个必堵 + 两个可复现键。空串是**有意的取值**
-    // （`${VAR:=}` = 未设置则置空），JS 侧 falsy 等价于"没设"——正是"不覆盖、也不回落用户的值"。
+    // F3（模型清单 T5 的隔离前提）：三个必堵 + 两个可复现键。空串是**有意的取值**，
+    // 生成器对空值走 `unset` 分支（见 isolationLines 的注释）——语义是"清掉用户 shell 里的同名变量"，
+    // 正是"不覆盖、也不回落用户的值"。
     // 理由逐条见 Go 侧 `pkg/runtime/isolation.go` 的同名注释（那是这张表的权威副本）。
     isolation: {
       XDG_STATE_HOME: 'runtime/opencode/state',
@@ -101,15 +102,32 @@ function requiredVars(launcher) {
   return vars.filter((v, i, all) => all.indexOf(v) === i)
 }
 
-/** 兜底导出隔离变量（只在未设置时赋值，绝不覆盖核心/壳显式注入的值）。 */
+/**
+ * 兜底导出隔离变量（只在未设置时赋值，绝不覆盖核心/壳显式注入的值）。
+ *
+ * **空串是有语义的、不是"没写"**：`OPENCODE_CONFIG` 这类键在 Go 侧那张权威表里就是**空值**——
+ * 含义是"清掉用户 shell 里可能存在的同名变量"（JS 侧 `''` 是 falsy，等价于"没设"）。
+ * 所以这里必须按空值走**另一条分支**，绝不能拿 `$MATE_HOME/` 去兜底：
+ * `OPENCODE_CONFIG=$MATE_HOME/` 会让底座把**一个目录**当成配置文件去读（实测 `EISDIR`，
+ * 桌面态的 skill 验收就是这么抓到它的——2026-10-10），而 `OPENCODE_CONFIG_CONTENT=$MATE_HOME/`
+ * 则是把路径当"内联配置内容"，比目录那条更隐蔽。
+ *
+ * 早先版本的 `: "${VAR:=$MATE_HOME/${sub}}"` 对所有键一视同仁，正是把"空的语义"机械地翻译成了
+ * "兜底成 $MATE_HOME/"——这类错误的形态**很坏**：启动器照常 exec，底座才在内部报一个看不出
+ * 因果的错（`Config.load` 里一句 EISDIR），而静态那半的一致性守卫只比**键名**，比不出这种错。
+ */
 function isolationLines(launcher, style) {
   const entries = Object.entries(launcher.isolation ?? {})
   if (!entries.length) return []
-  return entries.map(([key, sub]) =>
-    style === 'posix'
+  return entries.map(([key, sub]) => {
+    if (sub === '') {
+      // 空值 = **清除**（unset 比空串更彻底：连"存在但为空"都不留给下游判断）。
+      return style === 'posix' ? `unset ${key}` : `set "${key}="`
+    }
+    return style === 'posix'
       ? `: "\${${key}:=$MATE_HOME/${sub}}" ; export ${key}`
-      : `if not defined ${key} set "${key}=%MATE_HOME%/${sub.replace(/\//g, '\\')}"`,
-  )
+      : `if not defined ${key} set "${key}=%MATE_HOME%/${sub.replace(/\//g, '\\')}"`
+  })
 }
 
 function posixScript(launcher) {
