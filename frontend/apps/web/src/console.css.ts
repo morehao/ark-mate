@@ -65,7 +65,7 @@ export const consoleStyleSheet = `
     box-shadow: inset 0 0 0 1px ${tokens.primary};
   }
 
-  /* 会话侧栏（桌面静态分栏；≤920px 在下方媒体里抽屉化） */
+  /* 左栏（导航 + 会话区 + 状态）：桌面常驻 288px；≤920px 在下方媒体里抽屉化 */
   .fg-rail {
     width: 288px;
     flex: none;
@@ -76,15 +76,286 @@ export const consoleStyleSheet = `
     border-right: 1px solid ${tokens.border};
   }
 
-  /* 移动端（≤920px）：burger 出现、侧栏抽屉化、管理入口收纳 */
-  .fg-burger { display: none; }
+  /* 品牌区：48px（原顶栏 52px，省下的 4px 留给会话区） */
+  .fg-rail-brand {
+    flex: none;
+    display: flex;
+    align-items: center;
+    height: 48px;
+    padding: 0 14px;
+    font-size: 15px;
+    font-weight: 660;
+    letter-spacing: -0.02em;
+    color: ${tokens.text};
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  /* 导航区：一级 32px / 二级 30px，条目间距 1px */
+  .fg-nav-rail {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 8px 8px;
+  }
+  .fg-navitem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px;
+    /* 导航项里既有 <NavLink>（a）也有 <button>（组行文字区 / footer 触发器）：
+       - 不重置背景，button 会带 UA 的 buttonface 底（#efefef），底部多出一块灰"区块"；
+       - 不重置 text-align，button 的 UA text-align:center 会把 flex:1 的 label 文字顶到该行中间，
+         图标与文字之间就出现一条大缝（2026-10-10 实测踩到）。 */
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    border-radius: 8px;
+    font-size: 13px;
+    color: ${tokens.textSecondary};
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-navitem:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; font-weight: 600; }
+  /* 一级项图标：定宽 16 让所有文案左对齐；未选中比文案再弱一档，选中吃主色 */
+  .fg-navitem-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    font-size: 14.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-navitem:hover .fg-navitem-icon { color: ${tokens.textSecondary}; }
+  .fg-navitem.fg-on .fg-navitem-icon { color: ${tokens.primary}; }
+  .fg-navitem-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-navitem-count { flex: none; font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textSecondary}; }
+
+  /* 组行：文字区（进总览 + 展开）与箭头区分工，箭头的点击面独立 */
+  .fg-navgroup-row { padding-right: 4px; }
+  .fg-navgroup-text {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .fg-navgroup-caret {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: ${tokens.textPlaceholder};
+    cursor: pointer;
+  }
+  .fg-navgroup-caret:hover { background: ${tokens.border}; color: ${tokens.text}; }
+
+  /* 二级项：缩进 26px；命中态用主色文字 + 弱底 */
+  .fg-navsub-list { display: flex; flex-direction: column; gap: 1px; }
+  .fg-navsub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px 0 26px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: ${tokens.textSecondary};
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-navsub:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-navsub.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; font-weight: 600; }
+  .fg-navsub-label { flex: 1; min-width: 0; }
+  /* pending（待开发）：可读但不可点，右挂「待开发」标签 */
+  .fg-navsub.fg-pending { color: ${tokens.textPlaceholder}; cursor: default; }
+  .fg-navsub.fg-pending:hover { background: transparent; color: ${tokens.textPlaceholder}; }
+  .fg-navsub-tag {
+    flex: none;
+    padding: 0 5px;
+    border: 1px solid ${tokens.border};
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 15px;
+    color: ${tokens.textPlaceholder};
+  }
+
+  /* 会话区：占满品牌/导航/footer 之外的高度（滚动落在内部列表上）；上面一道 hairline 把「导航」与「会话」两段分开 */
+  .fg-rail-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid ${tokens.border};
+  }
+
+  /* 左栏 footer：固定左下，点「设置」在**它上方**展开二级菜单（向上生长）。这一行只有「设置」一个入口
+     （令牌已收进设置菜单；WS 状态在窗口右下角的全局状态条，不重复一份）。
+     高度是 auto：菜单展开时 footer 变高、会话区（flex:1）相应让位，不需要浮层/portal。 */
+  .fg-rail-foot {
+    flex: none;
+    /* 兜底：会话区恒常驻（flex:1 已吃掉 free space），这里不产生位移；
+       万一某路由不渲染会话区，auto margin 仍会把 footer 顶到左栏底。 */
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid ${tokens.border};
+  }
+  .fg-rail-footrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    height: 40px;
+    /* 与 .fg-nav-rail 同为 8px：设置图标与主导航图标同一条竖线 */
+    padding: 0 8px;
+  }
+  .fg-rail-footrow .fg-navitem { flex: 1; min-width: 0; }
+
+  /* 设置弹窗（一体式）：左列分节列表 + 右列内容，各自滚动；换节时弹窗高矮不变。 */
+  .fg-setdlg {
+    display: flex;
+    height: min(64vh, 640px);
+  }
+  .fg-setdlg-nav {
+    flex: none;
+    width: 208px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 12px;
+    border-right: 1px solid ${tokens.border};
+    overflow-y: auto;
+  }
+  .fg-setdlg-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    color: ${tokens.textSecondary};
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-setdlg-item:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-setdlg-item.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-setdlg-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    font-size: 15px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-setdlg-item:hover .fg-setdlg-icon { color: ${tokens.textSecondary}; }
+  .fg-setdlg-item.fg-on .fg-setdlg-icon { color: ${tokens.primary}; }
+  .fg-setdlg-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .fg-setdlg-label { font-size: 13px; line-height: 1.4; }
+  .fg-setdlg-item.fg-on .fg-setdlg-label { font-weight: 600; }
+  .fg-setdlg-hint { font-size: 11px; line-height: 1.4; color: ${tokens.textPlaceholder}; }
+  .fg-setdlg-body { flex: 1; min-width: 0; padding-left: 20px; overflow-y: auto; }
+
+  /* 设置弹窗的内容体（每节共用）：顶部一句说明 + 右侧动作，下面一张白卡。 */
+  .fg-setsec { display: flex; flex-direction: column; gap: 12px; }
+  .fg-setsec-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .fg-setsec-desc { font-size: 12.5px; line-height: 1.6; color: ${tokens.textSecondary}; }
+  .fg-setsec-card {
+    border: 1px solid ${tokens.border};
+    border-radius: ${tokens.radiusMd};
+    background: ${tokens.surface};
+    overflow: hidden;
+  }
+
+  .fg-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* 窄屏顶条（宽屏隐藏）：左栏收成抽屉后唯一的开启入口 */
+  .fg-burger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.surface};
+    color: ${tokens.text};
+    cursor: pointer;
+  }
+  .fg-mobilebar { display: none; }
   .fg-scrim-mobile { display: none; }
+
+  /* 移动端（≤920px）：左栏抽屉化（top 0——顶栏已撤，抽屉盖满全高） */
   @media (max-width: 920px) {
+    /* 窄屏设置弹窗：分节列表横过来当顶条，内容占满（hint 会折行把列表撑高，隐掉） */
+    .fg-setdlg { flex-direction: column; height: min(68vh, 560px); }
+    .fg-setdlg-nav {
+      width: auto;
+      flex-direction: row;
+      gap: 6px;
+      padding: 0 0 10px;
+      border-right: 0;
+      border-bottom: 1px solid ${tokens.border};
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    .fg-setdlg-item { flex: none; }
+    .fg-setdlg-hint { display: none; }
+    .fg-setdlg-body { padding: 12px 0 0; }
+
     .fg-burger { display: inline-flex; }
-    .fg-nav { display: none; }
+    .fg-mobilebar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: none;
+      height: 52px;
+      padding: 0 12px;
+      background: ${tokens.surface};
+      border-bottom: 1px solid ${tokens.border};
+    }
+    .fg-mobilebar-title { font-size: 13.5px; font-weight: 600; color: ${tokens.text}; }
     .fg-rail {
       position: fixed;
-      top: 52px;
+      top: 0;
       bottom: 0;
       left: 0;
       z-index: 40;

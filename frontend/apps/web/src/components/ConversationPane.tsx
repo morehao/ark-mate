@@ -4,6 +4,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   InboxOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   PushpinFilled,
@@ -18,7 +19,7 @@ import { automationIDFromOrigin, isAutomationOrigin } from '../console/automatio
 import type { MenuProps } from 'antd'
 import type { ConversationSearchHit, ConversationSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
 import { conversationSearch, exportConversations, messageSearch, toErrorMessage } from '@ark-mate/api'
-import { dedupeHits, exportDownloadName, exportSummary, roleLabel, sourceLabel } from '../console/searchView'
+import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
 import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
 import { agentNameOf, titleFor } from '../console/util'
@@ -89,14 +90,16 @@ function ViewTab({
   )
 }
 
-/** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）。 */
-export function ConversationRail({ onCreate }: Props) {
+/** 会话列表区（原会话侧栏 .side）：视图切换 + 搜索 + 会话列表（分组/置顶/行内更多操作）。
+ *
+ * 外壳（宽度 / 抽屉位移 / `.fg-rail` 类）已上移给 NavRail——本组件只负责"内容体"，
+ * 由 NavRail 提供左栏容器与窄屏抽屉态。 */
+export function ConversationPane({ onCreate }: Props) {
   const navigate = useNavigate()
   const conversations = useMate((s) => s.conversations)
   const agents = useMate((s) => s.agents)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
-  const drawerOpen = useMate((s) => s.drawerOpen)
   const railMode = useMate((s) => s.railMode)
   const setDrawer = useMate((s) => s.setDrawer)
   const togglePin = useMate((s) => s.togglePin)
@@ -183,34 +186,6 @@ export function ConversationRail({ onCreate }: Props) {
     setDrawer(false)
     jumpToAnchor(h.conversation_id, h.seq)
     navigate(`/conversations/${h.conversation_id}`)
-  }
-
-  // 导出当前视图全部会话（markdown）：多文件逐个下载（浏览器无目录写权限，逐个触发最稳）。
-  const exportVisible = async () => {
-    const ids = (railPage.visible ?? []).map((c) => c.id)
-    if (ids.length === 0) return
-    setExportBusy(true)
-    try {
-      const resp = await exportConversations(ids, 'markdown')
-      for (const f of resp.files) {
-        const blob = new Blob([f.content], { type: 'text/markdown;charset=utf-8' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = exportDownloadName(f.filename, f.conversation_id, f.format)
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        URL.revokeObjectURL(url)
-      }
-      showToast(
-        exportSummary(resp.exported, resp.total_bytes, resp.skipped ?? [], resp.files.filter((f) => f.truncated).length),
-      )
-    } catch (e) {
-      showToast(`导出失败：${toErrorMessage(e)}`)
-    } finally {
-      setExportBusy(false)
-    }
   }
 
   // 单会话导出（行内菜单）：markdown 单文件下载。
@@ -425,7 +400,8 @@ export function ConversationRail({ onCreate }: Props) {
         ? { key: 'restore', icon: <UndoOutlined />, label: '从归档恢复' }
         : { key: 'archive', icon: <InboxOutlined />, label: '归档' },
       { type: 'divider' },
-      { key: 'export', icon: <DownloadOutlined />, label: '导出 Markdown' },
+      // 单会话导出（批量导出已于 2026-10-10 按反馈撤掉：列表工具栏不再放导出）
+      { key: 'export', icon: exportBusy ? <LoadingOutlined /> : <DownloadOutlined />, label: '导出 Markdown', disabled: exportBusy },
     ]
     const onMenu: MenuProps['onClick'] = ({ key }) => {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
@@ -593,7 +569,7 @@ export function ConversationRail({ onCreate }: Props) {
   }
 
   return (
-    <aside className={`fg-rail${drawerOpen ? ' fg-open' : ''}`} aria-label="会话列表">
+    <div className="fg-rail-pane" aria-label="会话列表">
       <div
         style={{
           display: 'flex',
@@ -611,17 +587,6 @@ export function ConversationRail({ onCreate }: Props) {
             归档
           </ViewTab>
         </span>
-        <Button
-          size="small"
-          icon={<DownloadOutlined />}
-          loading={exportBusy}
-          disabled={railPage.visible.length === 0}
-          onClick={() => void exportVisible()}
-          title="导出当前列表全部会话（Markdown，逐个下载）"
-          style={{ borderRadius: 8 }}
-        >
-          导出
-        </Button>
         {!archivedView && (
           <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
             新建会话
@@ -764,6 +729,6 @@ export function ConversationRail({ onCreate }: Props) {
           maxLength={80}
         />
       </Modal>
-    </aside>
+    </div>
   )
 }

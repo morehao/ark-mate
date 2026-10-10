@@ -28,7 +28,7 @@ export function AgentBadge({ agent, agentId, fallbackName, prefix = 'Agent' }: P
   const state = agent ? agentStateMeta(agent.state) : { label: '状态未知（Agent 未加载）', color: tokens.textPlaceholder }
 
   const rows: Array<[string, ReactNode]> = [['状态', state.label]]
-  if (agent?.is_default) rows.push(['当前', '新建会话与模型目录缺省都用它（可在 Agents 页切换）'])
+  if (agent?.is_default) rows.push(['当前', '新建会话与模型目录缺省都用它（可在「设置 · Agent 管理」切换）'])
   if (agent?.provider) rows.push(['provider', agent.provider])
   if (agent?.runtimes?.length) rows.push(['runtime 候选', agent.runtimes.join(' → ')])
   if (id) rows.push(['id', <span style={{ fontFamily: tokens.fontMono, overflowWrap: 'anywhere' }}>{id}</span>])

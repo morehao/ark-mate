@@ -307,6 +307,29 @@ cd frontend && pnpm dev
 > 底座的数据面照旧被隔离：核心按 `pkg/runtime/isolation.go` 注入 `XDG_*` / `OPENCODE_*`，这份
 > opencode 的 home 落在 `MATE_HOME` 下，不碰你自己的安装（桌面态用的是同一张表）。
 
+> **`.env` 还有个容易漏掉的读者：`dsh` 底座自己。**（2026-10-10 复核；此前已在
+> `.dsh/docs/notes/2026-10-08-skill-projection-e2e-probe-notes.md` 与
+> `.dsh/docs/plans/2026-09-28-desktop-architecture-plan.md` 里记过）dsh 在
+> **真实运行**时会读两级 `.env`——**调用目录（cwd）**与 **`$DSH_HOME`**（`dsh --version` 这类快路径
+> 不读），优先级是 **继承的进程环境 > `cwd/.env` > `$DSH_HOME/.env`**（`.env` 不覆盖已继承的变量）。
+> 任何一级里出现"决定进程怎么启动 / 从哪加载代码与指令 / 怎么联网"的名字，dsh 就**直接拒绝启动**：
+> 判据是 `dsh-app-boot` 的 `isBootstrapOnly` = **49 个固定名单**（`PATH`/`HOME`/`SHELL`/`NODE_OPTIONS`/
+> `NODE_PATH`/`NODE_EXTRA_CA_CERTS`/`LD_*`/`BASH_ENV`/`SHELLOPTS`/`PERL*`/`PYTHON*`/`RUBY*`/
+> `JAVA_TOOL_OPTIONS`/`GIT_*`/`EDITOR`/`VISUAL`/`PAGER`/`BROWSER`/`DEEPSEEK_BASE_URL`/`SSL_CERT_*`/
+> `*_CA_BUNDLE`/代理四项…，`0.2.0-rc.2` 逐字读出）∪ 四个**前缀** `DSH_` / `XDG_` / `DYLD_` /
+> `BASH_FUNC_`；唯一例外是 **`$DSH_HOME/.env` 可以写代理四项**（`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/
+> `NO_PROXY`）——cwd 那份不行，它随 clone 而来。报错原文：
+> `dsh: <dir>/.env sets "DSH_VERSION", which only the launching environment may set …; export
+> DSH_VERSION instead of putting it in a .env file`。
+>
+> 本仓对应的坑就是 `.env` 里那条 `DSH_VERSION`（命中 `DSH_` 前缀），而它的**作用面只有"以仓库根为
+> cwd 起核心"**：运行时子进程继承核心的 cwd（`pkg/acl/transport.go` 的 `SetDir` 没有生产调用方），
+> `make dev` / `make server` 都 `cd backend` 起核心，**不受影响**；同一核心上 `opencode` 底座照常握手
+> （**dsh 专有**）。要给 compose 钉底座版本时改用 `export DSH_VERSION=…`（compose 与 dsh 都是"继承
+> 环境优先"），或直接删掉那行——`latest` 正是 `Dockerfile` 的 `ARG DSH_VERSION` 默认值。本次新增的
+> `OPENCODE_BIN`、以及 `MATE_*` / `WITH_*` / `OPENCODE_VERSION` / 镜像变量都**不在**名单内
+> （23 键实测矩阵与上述名单双向印证）。
+
 ## 控制面接口摘要
 
 REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`code=0` 成功，非 0 为业务错误（40401 未知 agent/会话、40901 会话正忙、40501 能力不支持、50201 runtime/连接故障等）。

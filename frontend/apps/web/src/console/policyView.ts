@@ -1,6 +1,6 @@
 import type { PermissionAction, PermissionPolicy } from '@ark-mate/types'
 
-// ——— 权限策略视图模型（C1：Agents 页展示/编辑；纯函数，便于 Node 侧校验） ———
+// ——— 权限策略视图模型（C1：设置在「Agent 管理」节展示/编辑；纯函数，便于 Node 侧校验） ———
 
 /** 解析工具项 JSON（对象且值 ∈ ask|allow|deny）；空串 → {}；非法 → 抛错供表单校验展示。 */
 export function parsePolicyTools(raw?: string): Record<string, PermissionAction> {
@@ -21,7 +21,7 @@ export function parsePolicyTools(raw?: string): Record<string, PermissionAction>
   return out
 }
 
-/** 权限策略一行摘要（Agents 页展示）：`ask` / `allow` / `deny` + 工具项数 + 原生模式。 */
+/** 权限策略一行摘要（Agent 管理节展示）：`ask` / `allow` / `deny` + 工具项数 + 原生模式。 */
 export function policySummary(p?: PermissionPolicy): string {
   if (!p) return '未声明（全 ask）'
   const base = p.default || 'ask'
