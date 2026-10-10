@@ -59,12 +59,17 @@ func NewRegistry() *Registry {
 
 // LoadDir 从目录加载能力定义（P1 数据面）：<dir>/skills|mcp|tools/*.json。
 // 子目录缺失/文件坏/字段非法 → 跳过并告警（对齐 LoadAgentDefinitions 的容错语义）。
-func (r *Registry) LoadDir(dir string) LoadResult {
+//
+// `normalizeSkill`（可 nil）在**入表之前**改写每一条 skill 定义，供调用方做标识归一这类
+// "本包不该知道"的翻译——典型用途：runtime 标识的历史别名（老定义里写着旧名字，而平台现在
+// 拿新名字去比对，不归一那条技能就再也不投放）。**包边界同 `MaterializeSpec`**：本包不认识
+// runtime，翻译由知道沿革的那一层传进来。
+func (r *Registry) LoadDir(dir string, normalizeSkill func(*Skill)) LoadResult {
 	if dir == "" {
 		return LoadResult{}
 	}
 	return LoadResult{
-		Skills: r.loadSkillsDir(filepath.Join(dir, "skills")),
+		Skills: r.loadSkillsDir(filepath.Join(dir, "skills"), normalizeSkill),
 		Mcps:   r.loadMcpsDir(filepath.Join(dir, "mcp")),
 		Tools:  r.loadToolsDir(filepath.Join(dir, "tools")),
 	}
@@ -433,7 +438,7 @@ func nameOf(t *Tool) string {
 	return t.Name
 }
 
-func (r *Registry) loadSkillsDir(dir string) int {
+func (r *Registry) loadSkillsDir(dir string, normalizeSkill func(*Skill)) int {
 	return scanDir(dir, "skill", func(b []byte, key, path string) error {
 		var d Skill
 		if err := json.Unmarshal(b, &d); err != nil {
@@ -443,6 +448,9 @@ func (r *Registry) loadSkillsDir(dir string) int {
 			d.ID = key
 		}
 		d.SourceFile = path // 事实源文件（Library 的 origin/source_file 依据）
+		if normalizeSkill != nil {
+			normalizeSkill(&d)
+		}
 		if err := r.RegisterSkill(&d); err != nil {
 			return err
 		}

@@ -1,19 +1,19 @@
-package deepseekharness
+package dsh
 
 import (
 	"reflect"
 	"testing"
 )
 
-// TestDeclaredBaseline 钉住 deepseek-harness adapter 声明（数据契约防漂移）。
+// TestDeclaredBaseline 钉住 dsh adapter 声明（数据契约防漂移）。
 func TestDeclaredBaseline(t *testing.T) {
-	if ID != "deepseekharness" || Name != "deepseek-harness" || Version != "dsh --profile acp" {
+	if ID != "dsh" || Name != "dsh" || Version != "dsh --profile acp" {
 		t.Fatalf("元数据不符: %s %s %s", ID, Name, Version)
 	}
 	if Command != "dsh" || !reflect.DeepEqual(Args, []string{"--profile", "acp"}) {
 		t.Fatalf("启动形态不符: %q %v", Command, Args)
 	}
-	// 能力基线按 docs/deepseekharness-acp-adaptation.md 源码核实：
+	// 能力基线按 docs/dsh-acp-adaptation.md 源码核实：
 	// 持久会话（list/resume/close）为真；无 load/fork；image/embeddedContext 为假。
 	if !Caps.SessionsPersistent || !Caps.MultiSessionConcurrent {
 		t.Fatalf("持久会话基线不符: %+v", Caps)

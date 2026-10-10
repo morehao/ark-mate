@@ -63,7 +63,6 @@ interface FormValues extends ScheduleFormValues {
   name: string
   enabled: boolean
   agent_id: string
-  runtime_hint?: string
   cwd: string
   model?: string
   prompt: string
@@ -129,12 +128,6 @@ export function AutomationsPage() {
     () => agents.map((a) => ({ label: `${a.name}（${a.id}）`, value: a.id })),
     [agents],
   )
-
-  /** 某 agent 声明的 runtime 候选（`runtime_hint` 只能从这里选——选了别的服务端会 40401）。 */
-  const runtimeOptionsFor = (agentID?: string): { label: string; value: string }[] => {
-    const a = agents.find((x) => x.id === agentID)
-    return (a?.runtimes ?? []).map((r) => ({ label: r, value: r }))
-  }
 
   // 表单初值走 **`initialValues`**（见下面 editorInitialValues），不在这里命令式写。
   //
@@ -267,7 +260,6 @@ export function AutomationsPage() {
           ) : (
             <span style={{ fontSize: 12, color: tokens.textSecondary }}>
               {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'} · {a.target.agent_id}
-              {a.target.runtime_hint ? ` / ${a.target.runtime_hint}` : ''}
             </span>
           )}
         </div>
@@ -482,23 +474,8 @@ export function AutomationsPage() {
           <Form.Item name="agent_id" label="Agent" rules={[{ required: true, message: '选一个 agent' }]}>
             <Select options={agentOptions} placeholder="由哪个 agent 执行" />
           </Form.Item>
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, cur) => prev.agent_id !== cur.agent_id}
-          >
-            {({ getFieldValue }) => {
-              const opts = runtimeOptionsFor(getFieldValue('agent_id') as string | undefined)
-              return (
-                <Form.Item
-                  name="runtime_hint"
-                  label="Runtime（可空 = 按 agent 的路由策略）"
-                  extra="只能选该 agent 声明的候选；平台绝不静默回落到别的 runtime"
-                >
-                  <Select allowClear options={opts} placeholder="留空即按路由策略" />
-                </Form.Item>
-              )
-            }}
-          </Form.Item>
+          {/* 这里曾有 "Runtime" 选择器（target.runtime_hint）：底座由构建期固定，用户面没有这个
+              选择面；服务端对带 target.runtime_hint 的写面请求是 40001（显式拒绝）。 */}
           <Form.Item
             name="cwd"
             label="工作空间（创建时钉住，须为存在的绝对路径）"
@@ -602,7 +579,6 @@ const FIELD_LABEL: Record<string, string> = {
   minute: '分',
   days_of_week: '每周的哪几天',
   agent_id: 'Agent',
-  runtime_hint: 'Runtime',
   cwd: '工作空间',
   model: '模型',
   prompt: 'Prompt',

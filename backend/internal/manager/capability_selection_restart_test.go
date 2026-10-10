@@ -21,6 +21,7 @@ import (
 func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
+	setBuildRuntime(t, "stub") // 夹具只注册 stub：底座必须与它一致
 	spec := stubACPSpec(t)
 	spec.McpTransports = []string{"stdio"} // 桩 runtime 只承载 stdio（保守形态）
 	reg := runtime.NewRegistry(spec)
@@ -31,12 +32,12 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	svc1 := NewService(reg, eventbus.New())
 	svc1.EnableStore(st1)
 	registerStdioMcps(t, svc1)
-	svc1.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	svc1.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch1 := NewOrchestrator(svc1, reg)
 	agent1, _ := svc1.AgentByID("a1")
 
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"git"})}
-	res, err := orch1.startConversationOn(ctx, agent1, "stub", StartOptions{Cwd: cwd, Selection: pinned})
+	res, err := orch1.startConversationOn(ctx, agent1, StartOptions{Cwd: cwd, Selection: pinned})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	if _, _, err := svc2.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
-	svc2.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	svc2.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	agent2, _ := svc2.AgentByID("a1")
 
 	rec2 := svc2.conversationRec(convID)

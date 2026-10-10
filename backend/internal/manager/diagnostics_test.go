@@ -52,7 +52,8 @@ for line in sys.stdin:
 func TestAgentDiagnosticsStartFailure(t *testing.T) {
 	reg := runtime.NewRegistry(brokenRuntimeSpec())
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a-broken"] = &AgentRec{ID: "a-broken", Name: "Broken", Runtimes: []string{"broken"}}
+	setBuildRuntime(t, "broken") // 夹具注册表只有 broken
+	svc.agents["a-broken"] = &AgentRec{ID: "a-broken", Name: "Broken"}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
@@ -91,7 +92,8 @@ func TestAgentDiagnosticsStartFailure(t *testing.T) {
 func TestAgentDiagnosticsLiveTail(t *testing.T) {
 	reg := runtime.NewRegistry(stubRuntimeSpec(t))
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a-stub"] = &AgentRec{ID: "a-stub", Name: "Stub", Runtimes: []string{"stub"}}
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
+	svc.agents["a-stub"] = &AgentRec{ID: "a-stub", Name: "Stub"}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
@@ -178,7 +180,8 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 		SetupSteps: []string{"安装 opencode CLI 并确认它在 PATH 中"},
 	})
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a-oc"] = &AgentRec{ID: "a-oc", Name: "OC", Runtimes: []string{"opencode"}, Provider: "gone"}
+	setBuildRuntime(t, "opencode") // 夹具注册表只有 opencode
+	svc.agents["a-oc"] = &AgentRec{ID: "a-oc", Name: "OC", Provider: "gone"}
 
 	diag, err := svc.AgentDiagnostics(ctx, "a-oc")
 	if err != nil {
@@ -194,15 +197,21 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 		t.Fatalf("期望 3 条（命令不可执行/档案悬空/SetupSteps），got %v", diag.Remediation)
 	}
 
-	// ② runtime 未注册（agent 候选不在注册表）→ 单独的「未注册」步骤，不误报命令不可执行。
-	svc.agents["a-ghost"] = &AgentRec{ID: "a-ghost", Name: "Ghost", Runtimes: []string{"ghost"}}
-	diag2, err := svc.AgentDiagnostics(ctx, "a-ghost")
+	// ② 构建期底座未装配 → 单独的「未装配」步骤，不误报命令不可执行。
+	//
+	// 历史：这里种的是"agent 的候选里有未注册的 runtime"。候选面下线后，唯一能让诊断报
+	// 「未装配」的形态是**构建期选定的那个不在注册表里**（注册表是空的）。
+	reg2 := runtime.NewRegistry()
+	svc2 := NewService(reg2, eventbus.New())
+	setBuildRuntime(t, "ghost")
+	svc2.agents["a-ghost"] = &AgentRec{ID: "a-ghost", Name: "Ghost"}
+	diag2, err := svc2.AgentDiagnostics(ctx, "a-ghost")
 	if err != nil {
 		t.Fatalf("AgentDiagnostics(ghost): %v", err)
 	}
 	joined2 := strings.Join(diag2.Remediation, "\n")
-	if !strings.Contains(joined2, `runtime "ghost" 未注册`) || strings.Contains(joined2, "不可执行") {
-		t.Fatalf("未注册应单独成一类: %v", diag2.Remediation)
+	if !strings.Contains(joined2, `runtime "ghost" 未装配`) || strings.Contains(joined2, "不可执行") {
+		t.Fatalf("未装配应单独成一类: %v", diag2.Remediation)
 	}
 
 	// ③ 健康且已连接（桩 runtime 真握手成功）→ 不带任何 remediation（诊断快照不掺噪音）。
@@ -210,7 +219,8 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 	stub.SetupSteps = []string{"装 stub（仅在有问题时才该出现）"}
 	reg3 := runtime.NewRegistry(stub)
 	svc3 := NewService(reg3, eventbus.New())
-	svc3.agents["a-ok"] = &AgentRec{ID: "a-ok", Name: "OK", Runtimes: []string{"stub"}}
+	setBuildRuntime(t, "stub")
+	svc3.agents["a-ok"] = &AgentRec{ID: "a-ok", Name: "OK"}
 	orch3 := NewOrchestrator(svc3, reg3)
 	t.Cleanup(orch3.Close)
 	if err := svc3.StartAgent(ctx, "a-ok"); err != nil {

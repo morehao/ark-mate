@@ -27,7 +27,7 @@ func TestAgentMcpsWriteFaceThreeStates(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
 	if err := r.svc.createAgentDefinition(ctx, agentDefinitionFile{
-		ID: "a1", Name: "A1", Runtimes: []string{r.runtme}, Mcps: ptrOf([]string{"fs"}),
+		ID: "a1", Name: "A1", Mcps: ptrOf([]string{"fs"}),
 	}); err != nil {
 		t.Fatalf("落一条定义: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestAgentMcpsCreateWritesWhitelist(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
 	resp, err := r.svc.CreateAgent(ctx, dtoagent.AgentCreateReq{
-		ID: "b1", Name: "B1", Runtimes: []string{r.runtme}, Mcps: ptrOf([]string{"fs"}),
+		ID: "b1", Name: "B1", Mcps: ptrOf([]string{"fs"}),
 	})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -120,11 +120,11 @@ func TestAgentMcpsFileCarrier(t *testing.T) {
 	dir := t.TempDir()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub = true
-		c.agents = []*AgentRec{{ID: "f1", Name: "F1", Runtimes: []string{"stub"}, State: AgentStateStopped}}
+		c.agents = []*AgentRec{{ID: "f1", Name: "F1", State: AgentStateStopped}}
 	})
 	r.Svc.agentDir = dir
 	if _, err := r.Svc.CreateAgent(ctx, dtoagent.AgentCreateReq{
-		ID: "f2", Name: "F2", Runtimes: []string{"stub"}, Mcps: ptrOf([]string{"fs"}),
+		ID: "f2", Name: "F2", Mcps: ptrOf([]string{"fs"}),
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestAgentMcpsChangeDefersBusyConversation(t *testing.T) {
 	}
 }
 
-// TestAgentWriteWithoutMcpsChangeKeepsHandles 不涉及能力面的写（改名/换 runtime 候选）不得动会话：
+// TestAgentWriteWithoutMcpsChangeKeepsHandles 不涉及能力面的写（改名）不得动会话：
 // "改个显示名 = 所有会话重建"是不可接受的代价。
 func TestAgentWriteWithoutMcpsChangeKeepsHandles(t *testing.T) {
 	ctx := context.Background()

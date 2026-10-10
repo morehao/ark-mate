@@ -12,7 +12,7 @@ func TestAdapterProjectionDeclarations(t *testing.T) {
 		notHas []string
 	}{
 		{id: "opencode", spec: opencodeSpec(), has: []string{"stdio", "sse", "http"}, notHas: []string{"streamable_http"}},
-		{id: "deepseekharness", spec: deepseekharnessSpec(), has: []string{"stdio", "streamable_http"}, notHas: []string{"sse", "http"}},
+		{id: "dsh", spec: dshSpec(), has: []string{"stdio", "streamable_http"}, notHas: []string{"sse", "http"}},
 	}
 	for _, c := range cases {
 		s := c.spec

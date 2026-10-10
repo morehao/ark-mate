@@ -9,7 +9,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/redact"
-	"github.com/morehao/ark-mate/pkg/routing"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -100,7 +99,8 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*dtoagent.Agen
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q（若它是已被删除的 agent：用同一个 id 重新注册即可让绑定它的会话复活）", id), nil)
 	}
-	runtimeID := agent.pickRuntime()
+	// 运行时身份取自**构建期常量**（agent 不再声明候选）：诊断面如实报"本二进制认哪一个底座"。
+	runtimeID := runtime.SelectedRuntime()
 	resp := &dtoagent.AgentDiagnosticsResp{
 		AgentID:      id,
 		Name:         agent.Name,
@@ -163,7 +163,7 @@ func (s *Service) clearAgentLastError(agentID string) {
 // remediationFor 推导该 agent 当前的可执行修复步骤（诊断面给「怎么修」，而不是只有报错）。
 //
 // 事实来源（按序合并、去重）：
-//  1. runtime 未注册 / 已注册但启动命令不可执行（与路由用同一判定 routing.Installed）；
+//  1. runtime 未装配 / 已装配但启动命令不可执行（判定见 pkg/runtime/installed.go）；
 //  2. provider 档案悬空或无密钥（CredentialProblem 原文，已含出路）；
 //  3. 已连接时底座自报的鉴权方式（caps.AuthGuidance，如「在终端执行 xxx 登录」）；
 //  4. 最近失败的 stderr 呈鉴权特征 → 指向 provider 档案/底座登录；
@@ -185,9 +185,9 @@ func (s *Service) remediationFor(agent *AgentRec, spec runtime.Spec, specOK, con
 	}
 
 	if !specOK {
-		add(fmt.Sprintf("runtime %q 未注册：确认底座已注册（`mate config --json` 可查 runtimes 来源）或重新注册该 runtime",
-			agent.pickRuntime()))
-	} else if !routing.Installed(spec) {
+		add(fmt.Sprintf("runtime %q 未装配：它由**构建期**注入（`-X pkg/runtime.BuildRuntime`），"+
+			"请重新构建该二进制，或在 .ark-mate/config/runtimes.json 里声明同 id 的远程端点", runtime.SelectedRuntime()))
+	} else if !runtime.Installed(spec) {
 		add(fmt.Sprintf("runtime %q 的启动命令 %q 当前不可执行：安装该底座并确保它在 PATH 中（或把配置改成绝对路径）",
 			spec.ID, spec.Launch.Command))
 	}

@@ -12,9 +12,9 @@ import (
 //
 // **为什么 syncer 不进 `Spec`**（ADR-2）：`Spec` 是**声明式半场**——纯数据，会被打印、
 // 被 `/meta` 与诊断读出、被测试断言。混入可执行对象会让「描述」与「行为」同源。
-// 另外两条理由：注册时机不同（`Spec` 在 `DefaultRegistry()` 里静态构造，`Syncer` 要按 runtime
-// 实例与配置构造），以及**测试要能只注册 stub**（`TestSyncerContractEmptySet` 就靠这张表，
-// 否则每个用例都得伪造一份完整 `Spec`）。
+// 另外两条理由：注册时机不同（`Spec` 在 `AllBuiltinSpecs()` / `ProductRegistry()` 里静态构造，
+// `Syncer` 要按 runtime 实例与配置构造），以及**测试要能只注册 stub**
+// （`TestSyncerContractEmptySet` 就靠这张表，否则每个用例都得伪造一份完整 `Spec`）。
 type Registry struct {
 	specs   map[string]Spec
 	syncers map[string]resource.Syncer
@@ -110,18 +110,11 @@ func replaceArg(args []string, flag, value string) []string {
 	return out
 }
 
-// DefaultRegistry 返回内置 runtime 的注册表（opencode / deepseekharness）。
-// adapter 子包只提供纯数据与端口实现，父包在此汇入统一 Spec（避免父子 import 环）。
-//
-// **Syncer 的登记在 `registerBuiltinSyncers`**（M2/M3 落地）：它引用各 adapter 的
-// `NewSyncer`，而那条装配边要等生成器从 `internal/manager` 下沉到位才存在。
-func DefaultRegistry() *Registry {
-	oc := opencodeSpec()
-	dh := deepseekharnessSpec()
-	r := NewRegistry(oc, dh)
-	registerBuiltinSyncers(r)
-	return r
-}
+// 注册表的**构造入口**不在本文件：构建期固定底座之后有两张语义不同的入口，
+// 分别见 build.go 的 `ProductRegistry`（产品装配：只注册构建期选中的那一个）与
+// `AllBuiltinRegistry`（全部内置：测试 / 诊断 / 能力矩阵守卫用）。
+// adapter 子包只提供纯数据与端口实现，父包汇入统一 Spec（避免父子 import 环）；
+// **Syncer 的登记在 `registerBuiltinSyncers`**（它引用各 adapter 的 `NewSyncer`）。
 
 // Get 按 ID 取 Spec。
 func (r *Registry) Get(id string) (Spec, bool) {

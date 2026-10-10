@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— provider 连接自检（M4） ———
@@ -164,7 +165,7 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 		})
 	}
 
-	// ④ refs：被哪些 agent 引用 + 这些 agent 的候选 runtime。
+	// ④ refs：被哪些 agent 引用 + 这些 agent 的底座（构建期常量，所有 agent 同一个）。
 	s.mu.Lock()
 	agentIDs := make([]string, 0, 4)
 	rtSet := map[string]bool{}
@@ -173,9 +174,9 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 			continue
 		}
 		agentIDs = append(agentIDs, agentID)
-		for _, rt := range a.Runtimes {
-			rtSet[rt] = true
-		}
+	}
+	if len(agentIDs) > 0 {
+		rtSet[runtime.SelectedRuntime()] = true
 	}
 	s.mu.Unlock()
 	sort.Strings(agentIDs)

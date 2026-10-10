@@ -193,10 +193,11 @@ func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
 	reg := testutil.StubRegistry()
 	svc := NewService(reg, eventbus.New())
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	if _, err := svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "ws-probe", Name: "工作空间测试", Runtimes: []string{"stub"},
+		ID: "ws-probe", Name: "工作空间测试",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}

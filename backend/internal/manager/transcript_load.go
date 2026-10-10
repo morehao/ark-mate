@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -126,7 +127,7 @@ func loadTranscriptFile(path string) *transcriptFile {
 			// （旧文件缺 workspace_temporary → false，历史会话本就不是代建的）。
 			Cwd:                hdr.Cwd,
 			WorkspaceTemporary: hdr.WorkspaceTemporary,
-			RuntimeHint:        hdr.Runtime,
+			RuntimeHint:        runtime.NormalizeID(hdr.Runtime),
 			Status:             statusFromLastEventType(lastType),
 			Title:              firstUserText,
 			CreatedAt:          createdAt,
@@ -195,7 +196,7 @@ func ReadTranscriptFile(path string) (*TranscriptData, bool) {
 	data := &TranscriptData{
 		SessionID:   rec.conversation.ID,
 		AgentID:     rec.conversation.AgentID,
-		RuntimeHint: rec.conversation.RuntimeHint,
+		RuntimeHint: runtime.NormalizeID(rec.conversation.RuntimeHint),
 		Title:       rec.conversation.Title,
 		Status:      rec.conversation.Status,
 		CreatedAt:   rec.conversation.CreatedAt,

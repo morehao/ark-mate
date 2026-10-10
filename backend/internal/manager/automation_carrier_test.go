@@ -30,7 +30,8 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	spec := silentACPSpec(t)
 	reg := runtime.NewRegistry(spec)
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"silent"}, State: AgentStateStopped}
+	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))

@@ -34,7 +34,7 @@ func TestNativePermissionDSH(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			env, desc := nativePermissionEnv("deepseekharness", c.pol)
+			env, desc := nativePermissionEnv("dsh", c.pol)
 			if c.empty {
 				if len(env) != 0 {
 					t.Fatalf("应不注入，got %v", env)
@@ -172,10 +172,10 @@ func TestOpencodePermissionConfigStable(t *testing.T) {
 func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	ro := []string{"DSH_PERMISSION_MODE=read-only"}
 	full := []string{"DSH_PERMISSION_MODE=danger-full-access"}
-	if connKey("deepseekharness", ro) == connKey("deepseekharness", full) {
+	if connKey("dsh", ro) == connKey("dsh", full) {
 		t.Fatal("不同原生权限配置应产生不同连接键")
 	}
-	if connKey("deepseekharness", ro) != connKey("deepseekharness", ro) {
+	if connKey("dsh", ro) != connKey("dsh", ro) {
 		t.Fatal("相同配置应产生相同连接键（可共享暖进程）")
 	}
 	if connKey("stub", nil) != "stub" {
@@ -183,25 +183,25 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	}
 	// 同一策略两次计算结果一致（env 顺序稳定）。
 	pol := &PermissionPolicy{Default: "deny"}
-	if connKey("deepseekharness", mustEnv(t, pol)) != connKey("deepseekharness", mustEnv(t, pol)) {
+	if connKey("dsh", mustEnv(t, pol)) != connKey("dsh", mustEnv(t, pol)) {
 		t.Fatal("同一策略的连接键应稳定")
 	}
 }
 
 func mustEnv(t *testing.T, p *PermissionPolicy) []string {
 	t.Helper()
-	env, _ := nativePermissionEnv("deepseekharness", p)
+	env, _ := nativePermissionEnv("dsh", p)
 	return env
 }
 
 // TestNativePermissionEnvForSwitch B5：Service 开关关闭后不注入。
 func TestNativePermissionEnvForSwitch(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil)
-	if env := svc.nativePermissionEnvFor("deepseekharness", &PermissionPolicy{Default: "deny"}); len(env) != 1 {
+	if env := svc.nativePermissionEnvFor("dsh", &PermissionPolicy{Default: "deny"}); len(env) != 1 {
 		t.Fatalf("默认应注入，got %v", env)
 	}
 	svc.SetNativePermission(false)
-	if env := svc.nativePermissionEnvFor("deepseekharness", &PermissionPolicy{Default: "deny"}); len(env) != 0 {
+	if env := svc.nativePermissionEnvFor("dsh", &PermissionPolicy{Default: "deny"}); len(env) != 0 {
 		t.Fatalf("关闭后应不注入，got %v", env)
 	}
 }

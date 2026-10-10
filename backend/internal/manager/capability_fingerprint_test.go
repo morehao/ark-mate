@@ -146,7 +146,7 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 	base := svc.capabilityFingerprint(agent, "opencode", NewCapabilitySelection())
 
 	// 加一条不投给 opencode 的 → 指纹不变。
-	must(capability.Skill{ID: "for-dsh", Runtimes: []string{"deepseekharness"}, Body: "# d"})
+	must(capability.Skill{ID: "for-dsh", Runtimes: []string{"dsh"}, Body: "# d"})
 	if got := svc.capabilityFingerprint(agent, "opencode", NewCapabilitySelection()); got != base {
 		t.Fatal("不投给该 runtime 的 skill 不该影响指纹")
 	}

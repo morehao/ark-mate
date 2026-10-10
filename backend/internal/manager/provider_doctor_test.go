@@ -73,11 +73,11 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	}
 	// agent 行：一条悬空引用（`zz` 不存在）+ 一条正常引用。
 	if _, err := f.st.UpsertAgentDefinition(ctx, "a-broken",
-		`{"id":"a-broken","name":"broken","runtimes":["opencode"],"provider":"zz"}`, 0, "t"); err != nil {
+		`{"id":"a-broken","name":"broken","provider":"zz"}`, 0, "t"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.st.UpsertAgentDefinition(ctx, "a-ok",
-		`{"id":"a-ok","name":"ok","runtimes":["opencode"],"provider":"ok-key"}`, 0, "t"); err != nil {
+		`{"id":"a-ok","name":"ok","provider":"ok-key"}`, 0, "t"); err != nil {
 		t.Fatal(err)
 	}
 	// 导入对账标记：一条"真不一致"（文件里有、库里没有）。
@@ -194,8 +194,9 @@ func TestProviderMismatchBenignOnly(t *testing.T) {
 func TestProviderDoctorHighRisk(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
-	// 夹具的 a1 出生时只声明了桩 runtime；这里让它也服务 opencode（对账借读的判据是 runtimes[]）。
-	r.svc.agents["a1"].Runtimes = []string{"opencode"}
+	// 对账借读的判据是"这个 agent 跑在哪个底座"——底座是构建期常量，所以这里把它设成要体检的
+	// 那个（`newModelRig` 默认是 stub；opencode 的声明它也已经注册进来了）。
+	setBuildRuntime(t, "opencode")
 	agentID := r.svc.agentForRuntime("opencode")
 	if agentID == "" {
 		t.Fatal("夹具里应有一个服务 opencode 的 agent")

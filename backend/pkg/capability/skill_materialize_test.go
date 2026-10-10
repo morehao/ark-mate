@@ -18,7 +18,7 @@ func testSpec(root, owner, format string) MaterializeSpec {
 // ocSpec / dshSpec 两个底座的形态（当前 Format 语义等价，落点相同）。
 func ocSpec(root string) MaterializeSpec { return testSpec(root, "opencode", FormatSkillMD) }
 func dshSpec(root string) MaterializeSpec {
-	return testSpec(root, "deepseekharness", FormatSkillMDFrontmatter)
+	return testSpec(root, "dsh", FormatSkillMDFrontmatter)
 }
 
 // TestMaterializeSkillConvention 物化约定（2026-09-09 双底座实测修正）：
@@ -278,7 +278,7 @@ func TestReconcileRespectsSkillRuntimes(t *testing.T) {
 	ocRoot, dshRoot := t.TempDir(), t.TempDir()
 	both := Skill{ID: "both", Name: "双", Description: "d", Body: "# both"}
 	ocOnly := Skill{ID: "oc-only", Name: "oc", Description: "d", Body: "# oc", Runtimes: []string{"opencode"}}
-	dshOnly := Skill{ID: "dsh-only", Name: "dsh", Description: "d", Body: "# dsh", Runtimes: []string{"deepseekharness"}}
+	dshOnly := Skill{ID: "dsh-only", Name: "dsh", Description: "d", Body: "# dsh", Runtimes: []string{"dsh"}}
 	skills := []Skill{both, ocOnly, dshOnly}
 
 	if w, r, err := ReconcileSkills(ocSpec(ocRoot), skills); err != nil || w != 2 || r != 0 {
@@ -355,7 +355,7 @@ func TestReconcileSharedRootResidualCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, owners, _ := readMarker(filepath.Join(shared, "both", mateMarker))
-	if len(owners) != 2 || !markerHasOwner(owners, "opencode") || !markerHasOwner(owners, "deepseekharness") {
+	if len(owners) != 2 || !markerHasOwner(owners, "opencode") || !markerHasOwner(owners, "dsh") {
 		t.Fatalf("共享 root 归属集合应含两个投影方，got %v", owners)
 	}
 	// 幂等：两边再跑都 0/0（登记已完成，不再互相改写标记）。
@@ -371,7 +371,7 @@ func TestReconcileSharedRootResidualCleanup(t *testing.T) {
 		t.Fatalf("oc 摘除登记不应删除目录: w=%d r=%d err=%v", w, r, err)
 	}
 	_, owners, _ = readMarker(filepath.Join(shared, "both", mateMarker))
-	if len(owners) != 1 || owners[0] != "deepseekharness" {
+	if len(owners) != 1 || owners[0] != "dsh" {
 		t.Fatalf("摘除后应只剩 dsh，got %v", owners)
 	}
 	if _, err := os.Stat(filepath.Join(shared, "both")); err != nil {
@@ -438,5 +438,69 @@ func TestMaterializeSkillCreatesMissingProjectionRoot(t *testing.T) {
 	// 幂等：根已在、产物已在，再物化一次仍应成功（且不因"根已存在"改变行为）。
 	if _, err := MaterializeSkill(spec, sk); err != nil {
 		t.Fatalf("二次物化失败: %v", err)
+	}
+}
+
+// TestOwnerAliasClaimsLegacyMarker runtime 标识改名后的**老产物认领**（2026-10-11：
+// `deepseekharness` → `dsh`）。三件事缺一不可，缺哪一件都是静默失效：
+//
+//	① 认领：标记里只有旧名字时，`skillUpToDate` 要判"已由我登记"，否则每次重校都白写一遍；
+//	② 自愈：写回时把旧名字**替换**成新名字（不是并列追加），否则旧名字永远留在集合里；
+//	③ 删除联动：集合里只剩旧名字时，禁用/删除技能必须**删得掉目录**——不认领旧名字的话
+//	   会误判成"还有别的投影方在用"，目录保留，底座照样读到已禁用的技能。
+func TestOwnerAliasClaimsLegacyMarker(t *testing.T) {
+	root := t.TempDir()
+	// 老形态：只有旧名字（模拟 2026-10-11 之前物化的产物）
+	legacy := testSpec(root, "deepseekharness", FormatSkillMDFrontmatter)
+	sk := Skill{ID: "old-skill", Name: "Old", Description: "老产物", Body: "# old"}
+	if _, err := MaterializeSkill(legacy, sk); err != nil {
+		t.Fatalf("物化老形态: %v", err)
+	}
+	dir := filepath.Join(root, "old-skill")
+	if owners, ok := ManagedDir(dir); !ok || len(owners) != 1 || owners[0] != "deepseekharness" {
+		t.Fatalf("夹具前提不成立（应只有旧名字）: %v ok=%v", owners, ok)
+	}
+
+	// 新形态：带别名。
+	newSpec := testSpec(root, "dsh", FormatSkillMDFrontmatter)
+	newSpec.OwnerAliases = []string{"deepseekharness"}
+
+	// ① 认领后判"已是最新"（内容未变 → 不该重写）。
+	content, ok := MaterializedContent(sk, newSpec.Format)
+	if !ok {
+		t.Fatal("内容合成失败")
+	}
+	if !skillUpToDate(dir, sk, newSpec, content) {
+		t.Fatal("带别名的投影方应认领只有旧名字的产物（否则每次重校都白写）")
+	}
+
+	// ② 写回时把旧名字替换成新名字（不并列）。
+	if _, err := MaterializeSkill(newSpec, sk); err != nil {
+		t.Fatalf("新形态物化: %v", err)
+	}
+	owners, _ := ManagedDir(dir)
+	if len(owners) != 1 || owners[0] != "dsh" {
+		t.Fatalf("写回应把旧名字替换成新名字（集合应恰好 [dsh]）: %v", owners)
+	}
+
+	// ③ 删除联动：集合里**只有旧名字**时也要删得掉目录。
+	//
+	// 夹具要点：必须先把目录清掉再用**老形态**重物化——否则 `MaterializeSkill` 会把旧名字
+	// **并列追加**进已有集合（`[dsh, deepseekharness]`），`dsh` 还在里面，这条用例在"修好"与
+	// "没修好"两种实现下都会通过（假绿）。它要复现的现场是：老版本物化出来的产物，标记里只有旧名字。
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MaterializeSkill(legacy, sk); err != nil {
+		t.Fatalf("再造一次老形态: %v", err)
+	}
+	if owners, _ := ManagedDir(dir); len(owners) != 1 || owners[0] != "deepseekharness" {
+		t.Fatalf("夹具前提不成立（应只有旧名字，否则「删不掉」也会通过）: %v", owners)
+	}
+	if _, removed, err := ReconcileSkills(newSpec, nil); err != nil || removed != 1 {
+		t.Fatalf("禁用/删除技能应摘掉只登记着旧名字的目录: removed=%d err=%v", removed, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("目录应已被删除: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package deepseekharness
+package dsh
 
 import (
 	"encoding/json"

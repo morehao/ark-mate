@@ -80,7 +80,8 @@ sys.exit(1)
 func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 	reg := runtime.NewRegistry(nodeStyleBootFailSpec(t))
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
@@ -118,7 +119,8 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	spec := bootFailSpec(t, 3000)
 	reg := runtime.NewRegistry(spec)
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 

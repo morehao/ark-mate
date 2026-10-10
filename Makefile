@@ -42,7 +42,17 @@ DESKTOP_APP := $(FRONTEND_ROOT)/apps/desktop/release/$(DESKTOP_ARCH_DIR)/ark-mat
 DESKTOP_VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' $(FRONTEND_ROOT)/apps/desktop/package.json | head -1)
 # 开发态（core/desktop）不注入 → 核心报 `dev`（internal/version 的口径）；只有 desktop/dist 注入。
 CORE_VERSION ?=
-CORE_LDFLAGS  = $(if $(CORE_VERSION),-ldflags "-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION)",)
+
+# —— 底座构建期固定（产品约束：用户不能选 runtime，见 backend/pkg/runtime/build.go）——
+# 不指定 = dsh（dsh）。它是**编译期**的 `-X` 注入，不是运行时配置、也不是环境变量：
+# 换底座要重新构建（桌面/容器本来就要重打包）。
+# 取值只做**词法**校验（存在性交给核心启动时的 ProductRegistry fail-closed）：远程 runtime 的 id
+# 由 `.ark-mate/config/runtimes.json` 声明，这里写不出白名单，写死了会挡住合法的远程 id。
+RUNTIME ?= dsh
+ifneq ($(shell echo '$(RUNTIME)' | grep -Eq '^[a-z0-9][a-z0-9_-]*$$' && echo ok),ok)
+$(error RUNTIME 取值非法：$(RUNTIME)（须是 [a-z0-9][a-z0-9_-]*；不指定则默认 dsh）)
+endif
+CORE_LDFLAGS  = -ldflags "$(strip $(if $(CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION),) -X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=$(RUNTIME))"
 
 # 打包期下载缓存落仓库内（.cache/ 已 gitignore）：本机沙箱与 CI 都不该往 ~/Library/Caches 写。
 # 只认 ELECTRON_BUILDER_CACHE——它是 electron-builder 26 的**唯一**缓存根（Electron 发行包解到
@@ -384,8 +394,9 @@ dev/opencode-bin:
 
 # 后端开发起服（mate 无默认子命令，需显式 serve）
 server: web-assets dev/opencode-bin
+	@echo "==> 底座  runtime=$(RUNTIME) [构建期固定；改它要重新构建]"
 	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
-	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) go run ./cmd/mate serve --web-dir $(WEB_DIR)
+	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) go run $(CORE_LDFLAGS) ./cmd/mate serve --web-dir $(WEB_DIR)
 
 # 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
 # /v1/mate/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
@@ -393,11 +404,11 @@ server: web-assets dev/opencode-bin
 # 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
 dev: dev/opencode-bin
 	$(require-node)
-	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE))"
+	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME))"
 	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) MATE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run ./cmd/mate serve --web-dir $(WEB_DIR) & \
+	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) MATE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run $(CORE_LDFLAGS) ./cmd/mate serve --web-dir $(WEB_DIR) & \
 	BACKEND_PID=$$!; \
 	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/mate/health ..."; \
 	HEALTHY=""; \
@@ -420,9 +431,14 @@ dev: dev/opencode-bin
 	wait
 
 # 全仓只有这一个构建配置：不带任何构建标签，不依赖前端产物（核心从不自带资产）。
+#
+# 它也认 `RUNTIME`（注入 CORE_LDFLAGS）：不然 `make build RUNTIME=opencode` 会**静默什么都不做**
+# ——那正是本仓明令要防的"写了、跑了、没效果"。取值是否存在由核心启动时的 ProductRegistry 判定。
 build:
-	cd backend && go build ./...
+	cd backend && go build $(CORE_LDFLAGS) ./...
 
+# vet / test **刻意不注入** RUNTIME：测试进程内自己设 `runtime.BuildRuntime`（见各包夹具），
+# 注入只会让"默认值是 dsh"这条判据在测试里消失。
 vet:
 	cd backend && go vet ./...
 
@@ -467,10 +483,13 @@ MATE_PORT       ?= 10001
 WITH_DSH         ?= false
 WITH_OPENCODE    ?= false
 
+# `MATE_RUNTIME` 走全局的 $(RUNTIME)（默认 dsh）——镜像里**核心认哪一个底座**；
+# WITH_DSH / WITH_OPENCODE 决定镜像里**装哪几份底座二进制**，两者是两件事（见 Dockerfile 头注释）。
 IMAGE_ARGS := --build-arg NODE_IMAGE=$(NODE_IMAGE) --build-arg GO_IMAGE=$(GO_IMAGE) \
               --build-arg RUNTIME_IMAGE=$(RUNTIME_IMAGE) --build-arg NPM_REGISTRY=$(NPM_REGISTRY) \
               --build-arg GO_PROXY=$(GO_PROXY) --build-arg DSH_VERSION=$(DSH_VERSION) \
-              --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION)
+              --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION) \
+              --build-arg MATE_RUNTIME=$(RUNTIME)
 
 image:
 	docker build -t $(IMAGE):$(IMAGE_TAG) $(IMAGE_ARGS) .

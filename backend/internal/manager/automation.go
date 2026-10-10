@@ -13,7 +13,9 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/automation"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 	"github.com/morehao/golib/glog"
 )
@@ -294,6 +296,16 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 				fmt.Sprintf("路径 id %q 与 body id %q 不一致", id, s), nil)
 		}
 	}
+	// `target.runtime_hint` 是**已下线的选择面**（底座由构建期固定）。两条路分开处理，
+	// 因为正确出路不同：
+	//   ① 本次请求**带了这个键**（有人在试着设它）→ 40001 + 指路。静默忽略会让它变成
+	//      "写了、存了、什么都不发生"的骗人字段（同 dtoagent 的 default_model / runtimes）；
+	//   ② 键只是**老定义里的残留**（本次没带）→ 落盘前删掉（自愈）+ WARN。这一条不能也拒绝：
+	//      否则任何带该键的存量 automation 会**永远存不回去**，而界面已经没有这个字段可让
+	//      用户删——那等于把一个历史遗留键变成资源锁死。
+	if err := rejectRuntimeHintInPatch(id, patch); err != nil {
+		return dtoautomation.AutomationResp{}, err
+	}
 	patch["id"] = id
 	// 应用 patch（值 nil = 删键；顺序稳定）。文件载体与 DB 载体共用这一步，所以"只改出现过的键"
 	// 这条 C9 语义不因换载体而变。
@@ -313,6 +325,14 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 	if err != nil {
 		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
+	}
+	merged, droppedLegacy, err := dropLegacyRuntimeHint(draft.df, merged, id)
+	if err != nil {
+		return dtoautomation.AutomationResp{}, err
+	}
+	if droppedLegacy {
+		glog.Warnw(ctx, "automation 定义里已下线的 target.runtime_hint 已清除（底座由构建期固定）",
+			"automation", id, "runtime", runtime.SelectedRuntime())
 	}
 	var def automation.Automation
 	if err := json.Unmarshal(merged, &def); err != nil {
@@ -466,4 +486,52 @@ func (r *automationRec) view() dtoautomation.AutomationResp {
 		v.LastFiredAt = r.def.LastFiredAt.UTC().Format(time.RFC3339)
 	}
 	return v
+}
+
+// rejectRuntimeHintInPatch 本次请求若显式带了 `target.runtime_hint`（非 null）→ 40001。
+//
+// 只看**请求体**，不看合并结果：合并结果里可能是老定义的残留，那条走自愈（见 dropLegacyRuntimeHint）。
+// 两条路必须分开，否则"存量定义带着历史键"会被锁死成永远存不回去。
+func rejectRuntimeHintInPatch(id string, patch map[string]any) error {
+	tgt, ok := patch["target"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	v, ok := tgt["runtime_hint"]
+	if !ok || v == nil {
+		return nil
+	}
+	return acl.NewError(acl.ClassRequest, "runtime_selection_removed",
+		fmt.Sprintf("target.runtime_hint 已下线：底座由构建期固定（本机为 %s），不能在 automation 上选择；"+
+			"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
+}
+
+// dropLegacyRuntimeHint 把**合并结果**里残留的 `target.runtime_hint` 删掉（自愈），返回新字节与
+// 是否真的删了一个键。
+//
+// 只删这一个键：`target` 下用户自加的别的键原样保留（C9 的"只改必要的键"在这里同样成立，
+// 所以走 map 删除而不是用强类型 `def.Target` 整体覆盖）。
+func dropLegacyRuntimeHint(df *capability.DefinitionFile, merged []byte, id string) ([]byte, bool, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(merged, &doc); err != nil {
+		return merged, false, nil // 形状问题由紧随其后的强类型解与 Validate 报出来
+	}
+	tgt, ok := doc["target"].(map[string]any)
+	if !ok {
+		return merged, false, nil
+	}
+	if _, has := tgt["runtime_hint"]; !has {
+		return merged, false, nil
+	}
+	delete(tgt, "runtime_hint")
+	if err := df.Set("target", tgt); err != nil {
+		return merged, false, acl.NewError(acl.ClassService, "definition_write_failed",
+			fmt.Sprintf("automation %s 的 target 无法序列化：%v", id, err), err)
+	}
+	next, err := df.Marshal()
+	if err != nil {
+		return merged, false, acl.NewError(acl.ClassService, "definition_write_failed",
+			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
+	}
+	return next, true, nil
 }

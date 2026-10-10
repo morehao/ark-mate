@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
@@ -154,35 +154,35 @@ func opencodeSkillProjection() Projection {
 	}
 }
 
-// deepseekharnessSpec 汇入 deepseek-harness adapter 的启动/能力描述。
-func deepseekharnessSpec() Spec {
+// dshSpec 汇入 deepseek-harness adapter 的启动/能力描述。
+func dshSpec() Spec {
 	return Spec{
-		ID:      deepseekharness.ID,
-		Name:    deepseekharness.Name,
-		Version: deepseekharness.Version,
+		ID:      dsh.ID,
+		Name:    dsh.Name,
+		Version: dsh.Version,
 		Launch: LaunchSpec{
-			Command: deepseekharness.Command,
-			Args:    deepseekharness.Args,
+			Command: dsh.Command,
+			Args:    dsh.Args,
 		},
 		Caps: Capabilities{
-			SessionsPersistent:     deepseekharness.Caps.SessionsPersistent,
-			MultiSessionConcurrent: deepseekharness.Caps.MultiSessionConcurrent,
-			Images:                 deepseekharness.Caps.Images,
-			EmbeddedContext:        deepseekharness.Caps.EmbeddedContext,
+			SessionsPersistent:     dsh.Caps.SessionsPersistent,
+			MultiSessionConcurrent: dsh.Caps.MultiSessionConcurrent,
+			Images:                 dsh.Caps.Images,
+			EmbeddedContext:        dsh.Caps.EmbeddedContext,
 		},
-		Description:       "deepseek-harness ACP 执行后端",
+		Description:       "dsh（deepseek-harness）ACP 执行后端",
 		McpTransports:     []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
 		ManagesOwnContext: true,                                 // §6.2：后端自管上下文/工具
 		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。
-		Notes: deepseekharness.Notes + "\n\n" + deepseekharnessModelConfigEvidence,
+		Notes: dsh.Notes + "\n\n" + dshModelConfigEvidence,
 		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 remediation 外露）。
 		SetupSteps: []string{
 			"安装含 acp profile 模板的 dsh（npm @next 0.1.2-rc.1+；latest 0.1.1-rc.2 缺该模板），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
 			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
 		},
-		Projections: []Projection{deepseekharnessSkillProjection()},
+		Projections: []Projection{dshSkillProjection()},
 		// 模型清单的**落点**（M3）：平台的 overlay + 启动参数 `--patch <绝对路径>`。
 		//
 		// 为什么不用 `$DSH_HOME/cordis.patch.yml`（home 级 patch）：那份是 dsh 自己的持久层，
@@ -192,7 +192,7 @@ func deepseekharnessSpec() Spec {
 		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
 		//
 		// 格式（patch 的 `- id:` 条目、`--patch` 参数、两级校验门）全部住在
-		// `pkg/runtime/deepseekharness`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
+		// `pkg/runtime/dsh`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
 		ModelConfig: ModelConfigLocation{
 			Root:     "${DSH_HOME}",
 			Filename: "mate-models.patch.yml",
@@ -232,9 +232,9 @@ func deepseekharnessSpec() Spec {
 	}
 }
 
-// deepseekharnessModelConfigEvidence dsh 清单通道（`--patch` overlay）的实测结论与三条已知坑
+// dshModelConfigEvidence dsh 清单通道（`--patch` overlay）的实测结论与三条已知坑
 // （原先写在已删除的 `ConfigProjection.Note` 上；写入权是用实测换的，依据不能丢）。
-const deepseekharnessModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2）。" +
+const dshModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2）。" +
 	"① 机制（最小 ACP 客户端直接问底座，见 .dsh/docs/notes/probes/dsh-acp-catalog.mjs）：" +
 	"在 `llm-pi-ai.config.providers.<route>` 上声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）" +
 	"**确实**会以一组出现在 ACP 的 `options[category=model]` 里（实测候选 `[\"arkprobe\",\"ark-probe-x\"]` " +
@@ -250,7 +250,7 @@ const deepseekharnessModelConfigEvidence = "清单通道端到端实测（2026-1
 	"declared`（它同时被 llm-deepseek 与 pi-ai 声明）——平台给 dsh 加模型必须**新开一条自己的 route** " +
 	"并在 `acp` 行把 provider 指向它。"
 
-// deepseekharnessSkillProjection dsh 的 skill 投影（原生形态见下）。
+// dshSkillProjection dsh 的 skill 投影（原生形态见下）。
 //
 // 根的选择：dsh 的 `dsh-skill-filesystem` provider 声明的 user 级根有两个——
 // `$DSH_HOME/skills`（"user-dsh"）与 `~/.agents/skills`（"user-agents"）。
@@ -276,13 +276,13 @@ const deepseekharnessModelConfigEvidence = "清单通道端到端实测（2026-1
 //     · **运行级**：`~/.agents/skills/officecli`（第三方手工放置、无 `.mate-*` 标记、布局与 frontmatter
 //     均合规）**只存在于该根**——它在 asar 内 0 命中（非内置，而内置的 office-docx 有 6 命中），
 //     却出现在真实 dsh 会话投给模型的 skill 目录里 ⇒ 该根不是"被配置"而是**真被枚举并上图**。
-func deepseekharnessSkillProjection() Projection {
+func dshSkillProjection() Projection {
 	return Projection{
 		Kind:   ProjectionSkill,
 		Scope:  ScopeGlobal,
 		Root:   "${HOME}/.agents/skills",
 		Layout: LayoutIDToken + "/SKILL.md",
-		Format: deepseekharness.SkillFormat,
+		Format: dsh.SkillFormat,
 		Tested: true,
 		Note: "dsh-skill-filesystem 源码确认 user 级根为 `$DSH_HOME/skills` 与 `~/.agents/skills`，取后者以与 DSH_HOME 解耦；" +
 			"**只扫根下一层**（`<n>.md` 或 `<n>/SKILL.md`），故落点必须扁平；frontmatter 必填 name+description 且 " +
@@ -309,7 +309,7 @@ func registerBuiltinSyncers(r *Registry) {
 	if r == nil {
 		return
 	}
-	for _, id := range []string{opencode.ID, deepseekharness.ID} {
+	for _, id := range []string{opencode.ID, dsh.ID} {
 		spec, ok := r.Get(id)
 		if !ok {
 			continue
@@ -321,8 +321,8 @@ func registerBuiltinSyncers(r *Registry) {
 		switch id {
 		case opencode.ID:
 			r.RegisterSyncer(id, opencode.NewSyncer(opencode.Options{ConfigPath: loc.Path}, r.DeliveryFor(id)))
-		case deepseekharness.ID:
-			r.RegisterSyncer(id, deepseekharness.NewSyncer(deepseekharness.Options{
+		case dsh.ID:
+			r.RegisterSyncer(id, dsh.NewSyncer(dsh.Options{
 				PatchPath:         loc.Path,
 				CredentialDocPath: loc.CredentialDocPath,
 				RefPattern:        spec.Credential.RefPattern,

@@ -368,7 +368,7 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 				`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`)); err != nil {
 				t.Fatal(err)
 			}
-			agent := &AgentRec{ID: "a1", Runtimes: []string{"opencode"}}
+			agent := &AgentRec{ID: "a1"}
 			if got := directMcp(wf.svc.McpServersFor(agent, "opencode", nil)); len(got) != 1 {
 				t.Fatalf("默认应注入，got %+v", got)
 			}

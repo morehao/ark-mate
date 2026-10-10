@@ -1,34 +1,34 @@
 package dtoagent
 
-// AgentResp Agent 的对外表示（P0 起不含 runtime：路由是隐藏实现细节）。
+// AgentResp Agent 的对外表示。
+//
+// **没有 runtime 字段**：底座由构建期固定（pkg/runtime/build.go），agent 不再声明运行时候选，
+// 用户面也就没有可读/可写的 runtime 选择面。运行时身份只在诊断面（AgentDiagnosticsResp.Runtime）
+// 如实出现——那是"事实"，不是"选项"。
 type AgentResp struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Provider  string `json:"provider,omitempty"`
 	State     string `json:"state"`
 	IsDefault bool   `json:"is_default"` // 「当前 Agent」（全局默认单例；可切换，见 POST /agents/:id/default）
-	// Seed 内置播种/保留前缀 Agent：只读（不可删、runtime 不可改；name/provider/策略可改）。
+	// Seed 内置播种/保留前缀 Agent：只读（不可删；name/provider/策略可改）。
 	// 由服务端权威判定（历史上前端按 id 前缀猜，与播种 id 改名后不一致）。
 	Seed bool `json:"seed"`
-	// Runtimes 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探；0/1 个即确定）。
-	// 供前端判定模型作用域（opencode=进程级锁定 / dsh=会话级可改）；空 = 未知。
-	Runtimes []string `json:"runtimes,omitempty"`
-	// Mcps MCP server id 白名单（P2 §5.2）。缺省 = 未声明 → 全量按 runtime transport 过滤；
+	// Mcps MCP server id 白名单（P2 §5.2）。缺省 = 未声明 → 全量按当前底座 transport 过滤；
 	// `[]` = 本 agent 禁用 MCP 注入（两者在 wire 上必须可区分，故用指针 + omitempty）。
 	Mcps *[]string `json:"mcps,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 	// ConversationCount 绑定该 agent 的会话数（删除影响面：历史保留可读，删除后无法继续提问）。
 	ConversationCount int `json:"conversation_count"`
-	// DefaultModel 该 agent 在各 runtime 上的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
+	// DefaultModel 该 agent 的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
 	//
-	// 它**没有写入方**：`GET /agents` 按 `agent.runtimes[]` 与 `models.is_default` 求交算出来，
-	// 于是它随 `is_default` **自动变**，结构上不可能漂移（存一份就必然要配一条同步逻辑，
-	// 忘了同步就漂移）。每个 runtime 至多一个键；该 runtime 没有默认时不出现在里面。
+	// 它**没有写入方**：`GET /agents` 按**构建期底座**与 `models.is_default` 算出（v12 起
+	// `models.is_default` 是单一值，键因此恒定只有一个），于是它随 `is_default` **自动变**，
+	// 结构上不可能漂移。该底座没有默认模型时不出现在里面。
 	//
-	// 为什么必须在 agent 上呈现：agent 管理页要能回答"这个 agent 会用哪个模型"，
-	// 否则用户只能在两个页面之间自己拼。而 `runtimes[]` 是**列表**，所以它必须按 runtime 索引，
-	// 任何单值字段都表达不了。
+	// 为什么保留 map 形状而不是收成单值：它是既有对外契约（前端按 runtime 取键），
+	// 收窄会连带改模型面的 wire 形状——那是另一件事，不在本次范围。
 	DefaultModel map[string]string `json:"default_model,omitempty"`
 }
 
@@ -54,7 +54,7 @@ type PermissionPolicyResp struct {
 	// Tools 工具粒度动作：键 = 工具 title 或 ACP kind，值 = ask | allow | deny。
 	Tools map[string]string `json:"tools,omitempty"`
 	// NativeMode 原生权限模式（B5）：""/"auto" 推导；"off" 不注入；
-	// "read-only"|"workspace-write"|"danger-full-access" 显式指定（当前作用于 deepseekharness）。
+	// "read-only"|"workspace-write"|"danger-full-access" 显式指定（当前作用于 dsh）。
 	NativeMode string `json:"native_mode,omitempty"`
 }
 

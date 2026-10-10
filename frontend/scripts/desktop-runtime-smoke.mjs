@@ -162,11 +162,11 @@ const PROC_RES = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP) : { shell: SHEL
 /** 展示用：把绝对路径缩成可读（打包态缩 `.app` 之前那一段）。 */
 const ELIDE_FROM = PACKAGED_APP ?? DESKTOP
 
-/** 两份随包载荷。runtime id 与 `backend/pkg/runtime/{deepseekharness,opencode}` 的 ID 一致。 */
+/** 两份随包载荷。runtime id 与 `backend/pkg/runtime/{dsh,opencode}` 的 ID 一致。 */
 const RUNTIMES = {
   dsh: {
-    label: 'dsh（deepseekharness）',
-    // 形态来自 backend/pkg/runtime/deepseekharness：Command="dsh"，Args=["--profile","acp"]。
+    label: 'dsh（dsh）',
+    // 形态来自 backend/pkg/runtime/dsh：Command="dsh"，Args=["--profile","acp"]。
     args: ['--profile', 'acp'],
   },
   opencode: {

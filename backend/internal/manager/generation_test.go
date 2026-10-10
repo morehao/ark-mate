@@ -117,7 +117,8 @@ func acpRig(t *testing.T) *rig {
 	t.Helper()
 	reg := runtime.NewRegistry(stubACPSpec(t))
 	svc := NewService(reg, eventbus.New())
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return &rig{Svc: svc, Orch: orch}
@@ -237,7 +238,7 @@ func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
 // TestAdaptersDeclareProcessScope M1-2 的验收面落在 archtest（第 10 条守卫），这里补一条
 // 就近断言：两个内置 adapter 都声明 process 且未实测（P-2 未出结论前不放宽）。
 func TestAdaptersDeclareProcessScope(t *testing.T) {
-	for _, sp := range runtime.DefaultRegistry().List() {
+	for _, sp := range runtime.AllBuiltinRegistry().List() {
 		if sp.CapabilityScope != runtime.CapabilityScopeProcess {
 			t.Fatalf("%s 应声明 process：%q", sp.ID, sp.CapabilityScope)
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -232,7 +233,7 @@ func TestSkillActivationReasons(t *testing.T) {
 		},
 		{
 			name:      "候选未被本技能声明",
-			sk:        capability.Skill{ID: "e", Runtimes: []string{"deepseekharness"}},
+			sk:        capability.Skill{ID: "e", Runtimes: []string{"dsh"}},
 			reasonHas: "不相交",
 		},
 	}
@@ -270,7 +271,8 @@ func TestSkillActivationReasons(t *testing.T) {
 // TestAgentCapabilitiesListsInapplicableSkills §13.4 S5：agent 能力目录**不再静默过滤**不适用技能。
 func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
 	svc, _, _ := rigWithRuntime(t, runtime.Spec{ID: "opencode", McpTransports: []string{"stdio"}})
-	svc.agents["ag-1"] = &AgentRec{ID: "ag-1", Name: "A1", Runtimes: []string{"opencode"}, State: AgentStateStopped}
+	setBuildRuntime(t, "opencode") // 夹具注册表只有 opencode
+	svc.agents["ag-1"] = &AgentRec{ID: "ag-1", Name: "A1", State: AgentStateStopped}
 	// 适用（opencode 源）、不适用（只有 echo 源）、禁用但本来适用。
 	must := func(s capability.Skill) {
 		t.Helper()
@@ -507,5 +509,43 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatal("未知 skill 应报错")
 	} else if envelopeCode(t, err) != code.NotFound {
 		t.Fatalf("未知 skill 应为 %d，got %v", code.NotFound, err)
+	}
+}
+
+// TestLegacyRuntimeIDInSkillDeclsStillApplies 老 skill 定义里的**旧 runtime 标识**照常投放。
+//
+// 现场：定义写在 2026-10-11 之前，`runtimes: ["deepseekharness"]`；而平台此后拿 `dsh` 去比对。
+// 不归一的话这条技能**再也不投放**，而界面上它仍是"已启用"（静默失效）。本用例同时钉住两件事：
+// 归一发生在**入表之前**（内存里就是新值），以及归一后的声明确实适用于当前底座。
+func TestLegacyRuntimeIDInSkillDeclsStillApplies(t *testing.T) {
+	setBuildRuntime(t, dsh.ID)
+	svc, _, _ := newTestRig(t)
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	def := `{"id":"legacy-rt","name":"老标识","description":"d","body":"# d","runtimes":["deepseekharness"]}`
+	if err := os.WriteFile(filepath.Join(skillsDir, "legacy-rt.json"), []byte(def), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if n := svc.LoadCapabilityDefinitions(dir); n == 0 {
+		t.Fatal("定义应被装载")
+	}
+	var got *capability.Skill
+	for _, sk := range svc.caps.ListSkills() {
+		if sk.ID == "legacy-rt" {
+			s := sk
+			got = &s
+		}
+	}
+	if got == nil {
+		t.Fatal("legacy-rt 未入表")
+	}
+	if len(got.Runtimes) != 1 || got.Runtimes[0] != dsh.ID {
+		t.Fatalf("装载时应把旧标识归一到 %q（内存里就得是新值，否则下游比对全部落空）: %v", dsh.ID, got.Runtimes)
+	}
+	if !got.AppliesToRuntime(dsh.ID) {
+		t.Fatalf("归一后应适用于当前底座 %q", dsh.ID)
 	}
 }

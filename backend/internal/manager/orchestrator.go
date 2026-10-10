@@ -150,8 +150,9 @@ type runtimeConn struct {
 }
 
 // RunOptions 一次 RunOnce（demo）的入参。
+//
+// **没有 runtime 字段**：底座是构建期固定的（pkg/runtime/build.go），不是这次运行的入参。
 type RunOptions struct {
-	RuntimeID  string // opencode / deepseekharness
 	Prompt     string
 	Cwd        string   // 空则用当前工作目录
 	Env        []string // 附加环境

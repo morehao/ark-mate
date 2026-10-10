@@ -33,7 +33,6 @@ const hasReservedPrefix = (id: string): boolean => id.startsWith('agent-')
 interface AgentFormValues {
   id?: string
   name?: string
-  runtimes: string[]
   provider?: string
   /** 权限策略（C1 起可编辑）：默认动作 + 原生模式 + 工具项 JSON。 */
   policy_default?: PermissionAction
@@ -140,7 +139,6 @@ export function AgentsSettingsPanel() {
   }
 
   const openCreate = (): void => {
-    agentForm.setFieldsValue({ runtimes: [] })
     setAgentModal({ mode: 'create' })
   }
 
@@ -148,7 +146,6 @@ export function AgentsSettingsPanel() {
     const p = a.permission_policy
     agentForm.setFieldsValue({
       name: a.name,
-      runtimes: [],
       provider: a.provider,
       policy_default: p?.default ?? 'ask',
       policy_native: p?.native_mode ?? 'auto',
@@ -162,7 +159,7 @@ export function AgentsSettingsPanel() {
     const v = await agentForm.validateFields()
     if (agentModal.mode === 'create') {
       const ok = await guard(
-        createAgent({ id: v.id ?? '', name: v.name, runtimes: v.runtimes ?? [], provider: v.provider || undefined }),
+        createAgent({ id: v.id ?? '', name: v.name, provider: v.provider || undefined }),
       )
       if (ok === undefined) return
     } else {
@@ -177,7 +174,6 @@ export function AgentsSettingsPanel() {
         patchAgent(agentModal.agent.id, {
           name: v.name,
           provider: v.provider || undefined,
-          runtimes: v.runtimes?.length ? v.runtimes : undefined,
           permission_policy: {
             default: v.policy_default ?? 'ask',
             native_mode: v.policy_native ?? 'auto',
@@ -432,8 +428,8 @@ export function AgentsSettingsPanel() {
       ))}
 
       {/* —— 默认模型（派生只读）——
-          它**没有写入方**：值是 `GET /agents` 把「设置 · 模型」里那个唯一默认摊到 `agent.runtimes[]`
-          上算出来的，所以这里只呈现 + 一句指路，不给输入框（给了就等于许诺一个平台不会存的值）。 */}
+          它**没有写入方**：值是 `GET /agents` 把「设置 · 模型」里那个唯一默认按**构建期底座**
+          算出来的，所以这里只呈现 + 一句指路，不给输入框（给了就等于许诺一个平台不会存的值）。 */}
       <div style={{ padding: '20px 18px 8px' }}>
         <b style={{ fontSize: 13 }}>默认模型（只读）</b>
         <span style={{ marginLeft: 8, fontSize: 11.5, color: tokens.textPlaceholder }}>
@@ -607,18 +603,8 @@ export function AgentsSettingsPanel() {
           <Form.Item name="name" label="名称">
             <Input placeholder="展示名（留空 = 用 ID）" autoComplete="off" />
           </Form.Item>
-          <Form.Item
-            name="runtimes"
-            label="Runtimes（逗号/回车分隔，可多个）"
-            rules={agentModal?.mode === 'create' ? [{ required: true, message: '至少一个 runtime' }] : []}
-          >
-            <Select
-              mode="tags"
-              open={false}
-              placeholder="如 opencode, deepseek-harness"
-              tokenSeparators={[',']}
-            />
-          </Form.Item>
+          {/* 这里曾有 "Runtimes" 多选框：底座由构建期固定（`-X pkg/runtime.BuildRuntime`），
+              用户面没有这个选择面。服务端对带 `runtimes` 的写面请求是 40001（显式拒绝）。 */}
           <Form.Item name="provider" label="凭据（可选）">
             <Select
               allowClear

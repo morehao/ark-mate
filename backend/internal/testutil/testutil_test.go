@@ -7,7 +7,7 @@ import (
 
 // TestStubRegistryIsStubOnly 锁定 StubRegistry 的**刻意收窄**：只装 stub。
 //
-// 如果哪天有人把它"顺手"改成 runtime.DefaultRegistry()（opencode + dsh），
+// 如果哪天有人把它"顺手"改成 runtime.AllBuiltinRegistry()（opencode + dsh），
 // 多数依赖它的用例仍会过——正是这种"改了也没红"的漂移最危险：测试从此在验证
 // 「内置清单恰好长这样」，内置清单增删一个底座，一堆与它无关的断言跟着变。
 func TestStubRegistryIsStubOnly(t *testing.T) {

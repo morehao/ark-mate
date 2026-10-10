@@ -23,11 +23,14 @@ export interface AutomationSchedule {
   days_of_week?: number[]
 }
 
-/** 触发时怎么建会话。 */
+/**
+ * 触发时怎么建会话。
+ *
+ * **没有 runtime_hint**：底座由构建期固定（`-X pkg/runtime.BuildRuntime`）。老定义里若还留着
+ * `target.runtime_hint`，写面会被服务端 40001 拒绝（`runtime_selection_removed`），不会静默忽略。
+ */
 export interface AutomationTarget {
   agent_id: string
-  /** 显式指定该 agent 候选里的 runtime（不在候选里 → 40401，平台绝不静默回落路由）。 */
-  runtime_hint?: string
   /** 工作空间（**创建时钉住**；必须非空绝对路径）。 */
   cwd: string
   model?: string

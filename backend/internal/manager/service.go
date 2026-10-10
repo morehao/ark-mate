@@ -15,29 +15,22 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// AgentRec 是进程内 Agent 定义（P0：Agent 不再绑定单一 runtime，路由候选见 Runtimes）。
+// AgentRec 是进程内 Agent 定义。
+//
+// **没有 runtime 维度**：agent 是"对当前底座的命名配置"（provider 档案 / 权限策略 / MCP 白名单 /
+// skill 可用面），跑在哪个底座上是**构建期固定**的（pkg/runtime/build.go）。曾经的 `Runtimes`
+// 候选列表与 `RoutingPolicy` 随之下线——留着它们只会让下一个人以为"平台还能按候选试探"。
 type AgentRec struct {
 	ID       string
 	Name     string
-	Runtimes []string // 路由候选 runtime（P0 取首候选；P2 升级为路由引擎）
-	Provider string   // provider 档案 id（P2 provider 注入面）；空 = 默认
+	Provider string // provider 档案 id（P2 provider 注入面）；空 = 默认
 	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。nil = 未声明（默认：注册表全量按
 	// runtime 传输过滤注入）；非 nil（可为空数组）= 白名单（空 = 本 agent 禁用 MCP 注入）。
 	Mcps *[]string
-	// RoutingPolicy 路由策略声明（P2 §7）：first_available | capability_routed；空 = 默认。
-	RoutingPolicy string
 	// PermissionPolicy 默认权限策略（M2 #7）：nil = 全 ask（历史行为）。
 	// 注：B5 起该策略还会投影到底座原生权限开关（见 native_permission.go）。
 	PermissionPolicy *PermissionPolicy
 	State            string
-}
-
-// pickRuntime 返回 Agent 的路由首选 runtime（P0 取首候选；P2 升级为路由引擎）。
-func (a *AgentRec) pickRuntime() string {
-	if len(a.Runtimes) == 0 {
-		return ""
-	}
-	return a.Runtimes[0]
 }
 
 // ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。

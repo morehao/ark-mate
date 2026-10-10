@@ -136,6 +136,15 @@ type MaterializeSpec struct {
 	// Owner 归属名，写进 `.mate-managed` 标记的集合（通常是 runtime id）。共享 root 时
 	// 各投影方各登记一次，某个投影方退出时只摘除自己，集合空了才删目录。
 	Owner string
+	// OwnerAliases 该投影方的**历史归属名**（例如 runtime 标识改名前的拼写）。
+	//
+	// 为什么需要它（不是可选的美化）：归属集合是**留在磁盘上的**老数据。若只认新名字，
+	// 老标记里那条旧名字会永远留在集合里 → ① 每次重校都判"未登记"从而重复写一遍内容；
+	// ② **禁用/删除技能的删除联动会以为"还有别的投影方在用它"而拒绝删目录**，底座照样读到
+	// 已禁用的技能（静默失效）。所以旧名字必须被**认领**（视为同一个 owner）、并在写回时**替换**成新名字。
+	//
+	// 由调用方（知道 runtime 标识沿革的那一层）提供：本包不认识 runtime，见文件顶注 P-1。
+	OwnerAliases []string
 }
 
 // DirFor 计算该 spec 下某 skill 的独占目录（落点的父目录）。
@@ -272,7 +281,7 @@ func MaterializeSkill(spec MaterializeSpec, s Skill) (string, error) {
 		return "", fmt.Errorf("skill 物化: 写 staging SKILL.md 失败: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(staging, mateMarker),
-		[]byte(markerContent(s.ID, addOwner(owners, spec.Owner))), 0o644); err != nil {
+		[]byte(markerContent(s.ID, claimAs(owners, spec.Owner, spec.OwnerAliases))), 0o644); err != nil {
 		return "", fmt.Errorf("skill 物化: 写 staging 归属标记失败: %w", err)
 	}
 	prov := Provenance{
@@ -397,6 +406,45 @@ func markerHasOwner(owners []string, owner string) bool {
 	return false
 }
 
+// ownerMatches 报告归属集合是否含该投影方**或它的任一历史别名**（认领旧产物）。
+func ownerMatches(owners []string, owner string, aliases []string) bool {
+	if owner != "" && markerHasOwner(owners, owner) {
+		return true
+	}
+	for _, a := range aliases {
+		if a != "" && markerHasOwner(owners, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// claimAs 把归属集合里的历史别名**替换**成当前名字（写回时自愈：旧名字不再留在集合里）。
+func claimAs(owners []string, owner string, aliases []string) []string {
+	out := owners
+	for _, a := range aliases {
+		if a == "" {
+			continue
+		}
+		out, _ = removeOwner(out, a)
+	}
+	return addOwner(out, owner)
+}
+
+// releaseOwner 摘除自己的登记（含历史别名），返回剩余集合与是否发生过摘除。
+func releaseOwner(owners []string, owner string, aliases []string) ([]string, bool) {
+	out, removed := removeOwner(owners, owner)
+	for _, a := range aliases {
+		if a == "" {
+			continue
+		}
+		var r bool
+		out, r = removeOwner(out, a)
+		removed = removed || r
+	}
+	return out, removed
+}
+
 // readMarker 解析归属标记（首行 skill id，第二行逗号分隔的投影方集合）；文件缺失/为空 → ok=false。
 // 兼容旧格式（第二行单个投影方）：解析结果同为单元素集合。
 func readMarker(path string) (skillID string, owners []string, ok bool) {
@@ -426,12 +474,12 @@ func readMarker(path string) (skillID string, owners []string, ok bool) {
 // §13.4 S2 起还要求**摘要自洽**：sidecar 在且记的是同一个 skill、记录摘要 == 期望载荷摘要、
 // 磁盘实测摘要 == 记录摘要。只比 SKILL.md 内容是不够的——多塞一个文件、改权限、把 SKILL.md 换成软链，
 // 内容比对全都看不出来，而摘要全都看得出来。任一不符 → 判为"需要重校"，下一次重校即修复。
-func skillUpToDate(dir string, s Skill, owner, content string) bool {
+func skillUpToDate(dir string, s Skill, spec MaterializeSpec, content string) bool {
 	_, owners, ok := readMarker(filepath.Join(dir, mateMarker))
 	if !ok {
 		return false
 	}
-	if owner != "" && !markerHasOwner(owners, owner) {
+	if !ownerMatches(owners, spec.Owner, spec.OwnerAliases) {
 		return false
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
@@ -499,7 +547,7 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 			glog.Warnw(context.Background(), "skill 物化跳过", "skill", sk.ID, "owner", spec.Owner, "err", dErr)
 			continue
 		}
-		if skillUpToDate(dir, sk, spec.Owner, content) {
+		if skillUpToDate(dir, sk, spec, content) {
 			continue
 		}
 		if _, mErr := MaterializeSkill(spec, sk); mErr != nil {
@@ -538,14 +586,16 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 		if !mOK {
 			continue // 无归属标记：用户自有/他方目录，不动
 		}
-		// 只摘除自己在归属集合里的登记，集合空了才删目录（共享 root 下不误删他方产物）。
+		// 只摘除自己在归属集合里的登记（**含历史别名**——不摘旧的，集合就永远非空，
+		// 下面的"集合空了才删目录"便永不成立，禁用/删除技能时副本会留在底座读得到的地方），
+		// 集合空了才删目录（共享 root 下不误删他方产物）。
 		// `owners` 为空 = 旧版单 root 产物（标记第二行空）或无主的平台残留：它是**平台自己写的**，
 		// 却没有任何投影方认领——留着只会永久占位，且平台有能力识别它，故直接清理。
 		if spec.Owner != "" && len(owners) > 0 {
-			if !markerHasOwner(owners, spec.Owner) {
+			if !ownerMatches(owners, spec.Owner, spec.OwnerAliases) {
 				continue
 			}
-			rest, _ := removeOwner(owners, spec.Owner)
+			rest, _ := releaseOwner(owners, spec.Owner, spec.OwnerAliases)
 			if len(rest) > 0 {
 				if wErr := os.WriteFile(marker, []byte(markerContent(skillID, rest)), 0o644); wErr != nil {
 					glog.Warnw(context.Background(), "skill 物化: 更新归属标记失败", "dir", e.Name(), "err", wErr)

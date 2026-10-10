@@ -49,8 +49,8 @@ func originTestApp(t *testing.T, mutate func(cfg *config.Config)) (*App, string)
 	cfg.Addr = "127.0.0.1:0" // 桌面态：内核分配端口（策略里的端口只能是实际值）
 	cfg.WebDir = web
 	cfg.ProjectionDirs = map[string]string{
-		"opencode:skill":        filepath.Join(home, "proj-opencode"),
-		"deepseekharness:skill": filepath.Join(home, "proj-dsh"),
+		"opencode:skill": filepath.Join(home, "proj-opencode"),
+		"dsh:skill":      filepath.Join(home, "proj-dsh"),
 	}
 	if mutate != nil {
 		mutate(&cfg)

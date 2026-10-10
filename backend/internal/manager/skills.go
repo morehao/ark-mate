@@ -51,6 +51,10 @@ func (p SkillProjection) MaterializeSpec() capability.MaterializeSpec {
 		Layout: p.Projection.Layout,
 		Format: p.Projection.Format,
 		Owner:  p.Runtime,
+		// 该投影方的历史归属名：物化层据此**认领**旧副本并在写回时把旧名字换成新名字。
+		// 漏了它的后果很具体——`.mate-managed` 里那条旧名字永远留在集合里，于是
+		// "集合空了才删目录"永不成立，**禁用/删除技能时副本删不掉**，底座照样读到已禁用的技能。
+		OwnerAliases: runtime.LegacyAliasesOf(p.Runtime),
 	}
 }
 

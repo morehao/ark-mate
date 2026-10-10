@@ -20,12 +20,12 @@ func TestResolveConfigLocationUsesIsolationEnv(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(home, "user-owned-opencode"))
 	t.Setenv("DSH_HOME", filepath.Join(home, "user-owned-dsh"))
 
-	reg := NewRegistry(opencodeSpec(), deepseekharnessSpec())
+	reg := NewRegistry(opencodeSpec(), dshSpec())
 	applied := reg.ApplyIsolationEnv(home)
 	if len(applied) != 2 {
 		t.Fatalf("两个本地 runtime 都应被注入隔离 env: %v", applied)
 	}
-	for _, id := range []string{"opencode", "deepseekharness"} {
+	for _, id := range []string{"opencode", "dsh"} {
 		spec, ok := reg.Get(id)
 		if !ok {
 			t.Fatalf("%s 未注册", id)
@@ -51,7 +51,7 @@ func TestResolveConfigLocationUsesIsolationEnv(t *testing.T) {
 	if filepath.Base(ocp.Path) != "opencode.json" || ocp.CredentialDocPath != "" {
 		t.Fatalf("opencode 的声明不符: %+v", ocp)
 	}
-	dsh, _ := reg.Get("deepseekharness")
+	dsh, _ := reg.Get("dsh")
 	dshp, _, _ := ResolveConfigLocation(dsh)
 	if filepath.Base(dshp.Path) != "mate-models.patch.yml" || dshp.CredentialDocPath == "" ||
 		filepath.Base(dshp.CredentialDocPath) != ".credentials.yaml" {
@@ -131,14 +131,14 @@ func TestSpecModelConfigIsSeparateFromProjections(t *testing.T) {
 // TestBuiltinSyncersRegisteredAfterIsolation 同步实现的登记**必须发生在隔离 env 应用之后**。
 //
 // 时序事实：`Spec.ModelConfig.Root` 里的 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}` 正是
-// `ApplyIsolationEnv` 注入的；而 `DefaultRegistry()` 跑在装配最前面。所以 `DefaultRegistry()` 那次
-// 登记**必然解析失败**（解析刻意不回落进程环境——回落到用户自己的 home 是隔离纪律的红线）。
+// `ApplyIsolationEnv` 注入的；而构造注册表跑在装配最前面。所以构造时那次登记**必然解析失败**
+// （解析刻意不回落进程环境——回落到用户自己的 home 是隔离纪律的红线）。
 // 少了"隔离后再登记一次"，`sync[]` 会永远报 `unsupported`：界面说保存成功、底座永远拿不到清单。
 //
 // 夹具用 `t.TempDir()` 当 home：真正的落点全部落在临时目录里，**绝不碰真 `~/.dsh` / `~/.config/opencode`**。
 func TestBuiltinSyncersRegisteredAfterIsolation(t *testing.T) {
-	reg := DefaultRegistry()
-	for _, id := range []string{"opencode", "deepseekharness"} {
+	reg := AllBuiltinRegistry()
+	for _, id := range []string{"opencode", "dsh"} {
 		if _, ok := reg.Syncer(id); ok {
 			t.Fatalf("%s：隔离 env 未应用时落点解析不出来，不该有 syncer（拿到就说明解析回落了进程环境）", id)
 		}
@@ -147,7 +147,7 @@ func TestBuiltinSyncersRegisteredAfterIsolation(t *testing.T) {
 	if ids := reg.ApplyIsolationEnv(home); len(ids) != 2 {
 		t.Fatalf("两个本地 runtime 都应被注入隔离 env: %v", ids)
 	}
-	for _, id := range []string{"opencode", "deepseekharness"} {
+	for _, id := range []string{"opencode", "dsh"} {
 		s, ok := reg.Syncer(id)
 		if !ok || s == nil {
 			t.Fatalf("%s：隔离 env 应用后应登记同步实现", id)

@@ -27,7 +27,7 @@ func TestForModelIsT5ConfigWrite(t *testing.T) {
 	if written.Status != StatusWritten || !written.OK {
 		t.Errorf("written=true 应得到 ok/written，得到 %+v", written)
 	}
-	untested := ConfigApplicability("deepseekharness", "<MATE_HOME>/runtime/dsh/mate-models.patch.yml", false)
+	untested := ConfigApplicability("dsh", "<MATE_HOME>/runtime/dsh/mate-models.patch.yml", false)
 	if untested.Status != StatusUntested || !untested.OK {
 		t.Errorf("written=false 应得到 ok/untested，得到 %+v", untested)
 	}

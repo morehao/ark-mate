@@ -169,10 +169,10 @@ func (s *Service) ModelCatalog(ctx context.Context, agentID string) (*dtomodel.M
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			"[agent_not_found] 未知 agent "+agentID, nil))
 	}
-	spec, ok := s.reg.Get(agent.pickRuntime())
+	spec, ok := s.reg.Get(runtime.SelectedRuntime())
 	if !ok {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "runtime_not_registered",
-			"[runtime_not_registered] agent "+agentID+" 的 runtime 未注册", nil))
+			"[runtime_not_registered] 构建期选定的 runtime 未装配（agent "+agentID+"）", nil))
 	}
 
 	// orch 为 nil = 纯列表装配（测试/无执行面）：退化为空目录，不做任何拨号。

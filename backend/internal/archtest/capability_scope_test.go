@@ -60,7 +60,7 @@ func capabilityScopeViolations(specs []runtime.Spec) []string {
 // TestCapabilityScopeDeclaration 真实注册表必须全部合规，且守卫本身有牙齿（合成违规必须被抓到）。
 func TestCapabilityScopeDeclaration(t *testing.T) {
 	// 1) 真实声明（两个 adapter）。
-	if bad := capabilityScopeViolations(runtime.DefaultRegistry().List()); len(bad) > 0 {
+	if bad := capabilityScopeViolations(runtime.AllBuiltinRegistry().List()); len(bad) > 0 {
 		t.Fatalf("runtime 能力绑定粒度声明违规：\n%s", joinLines(bad))
 	}
 	// 2) 负例：声明比 process 更细但不实测 → 必须红。

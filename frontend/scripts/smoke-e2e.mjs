@@ -4,9 +4,10 @@
  *
  * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 mate serve 127.0.0.1:10001）。
  * 覆盖：
- *   1. REST 信封（health / agents / runtimes / conversations）——@ark-mate/api 的 unwrap 语义前提；
+ *   1. REST 信封（health / agents / conversations）——@ark-mate/api 的 unwrap 语义前提；
+ *      并断言 `/runtimes` 已下线、agent 不再带 runtimes（底座由构建期固定）；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
- *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent/Runtime 列表字段）；
+ *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent 列表字段）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
@@ -86,15 +87,12 @@ async function checkRest() {
   if (seeds.length === 0) return bad('GET /agents 种子标记', '内置播种 agent 应带 seed:true')
   ok(`GET /agents → ${agentList.length} 个（字段 id/name/state/seed 齐；种子 ${seeds.length} 个）`)
 
+  // 底座由构建期固定（用户不能选 runtime）：`/runtimes` 必须**不存在**，agent 也不再带 runtimes。
   const rts = await apiGet('/runtimes')
-  if (rts.env.code !== 0) return bad('GET /runtimes 信封', JSON.stringify(rts.env))
-  const runtimeList = rts.env.data
-  if (!Array.isArray(runtimeList) || runtimeList.length === 0) return bad('GET /runtimes 载荷', '应为非空数组')
-  const r0 = runtimeList[0]
-  for (const key of ['name', 'version']) {
-    if (!(key in r0)) return bad('GET /runtimes 载荷', `Runtime 缺字段 ${key}`)
-  }
-  ok(`GET /runtimes → ${runtimeList.length} 个（字段 name/version 齐）`)
+  if (rts.env.code === 0) return bad('GET /runtimes 应已下线', JSON.stringify(rts.env).slice(0, 200))
+  ok(`GET /runtimes → 已下线（code=${rts.env.code}）`)
+  if ('runtimes' in a0) return bad('GET /agents 载荷', 'agent 不应再带 runtimes（构建期固定底座）')
+  ok('GET /agents → 无 runtimes 字段（底座由构建期固定）')
 
   const convs = await apiGet('/conversations')
   if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /conversations', JSON.stringify(convs.env))

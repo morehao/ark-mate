@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
@@ -22,7 +22,7 @@ func TestIsolationEnvBuiltinRuntimes(t *testing.T) {
 		want      []string
 	}{
 		{
-			runtimeID: deepseekharness.ID,
+			runtimeID: dsh.ID,
 			want: []string{
 				"DSH_HOME=" + filepath.Join(home, "runtime", "dsh"),
 				"npm_config_cache=" + filepath.Join(home, "npm", "cache"),
@@ -121,7 +121,7 @@ func TestIsolationEnvEmptyHome(t *testing.T) {
 		if got := IsolationEnv(opencode.ID, home); got != nil {
 			t.Fatalf("home=%q 应返回 nil，got %v", home, got)
 		}
-		if got := IsolationEnv(deepseekharness.ID, home); got != nil {
+		if got := IsolationEnv(dsh.ID, home); got != nil {
 			t.Fatalf("home=%q 应返回 nil，got %v", home, got)
 		}
 	}
@@ -136,7 +136,7 @@ func TestApplyIsolationEnv(t *testing.T) {
 	home := t.TempDir()
 	reg := NewRegistry(
 		Spec{ID: opencode.ID, Name: "opencode", Launch: LaunchSpec{Command: "opencode", Args: []string{"acp"}}},
-		Spec{ID: deepseekharness.ID, Name: "dsh", Launch: LaunchSpec{Command: "dsh"}},
+		Spec{ID: dsh.ID, Name: "dsh", Launch: LaunchSpec{Command: "dsh"}},
 		Spec{ID: "custom-acp", Name: "custom", Launch: LaunchSpec{Command: "custom-acp"}},
 		// 远程端点：transport 非 stdio → 不拉子进程，Launch.Env 不会被读，故整份不注入。
 		Spec{ID: "remote-ws", Launch: LaunchSpec{Transport: "ws", Endpoint: "ws://127.0.0.1:1/acp"}},
@@ -147,10 +147,10 @@ func TestApplyIsolationEnv(t *testing.T) {
 	}
 
 	applied := reg.ApplyIsolationEnv(home)
-	if want := []string{"custom-acp", deepseekharness.ID, opencode.ID}; !reflect.DeepEqual(applied, want) {
+	if want := []string{"custom-acp", dsh.ID, opencode.ID}; !reflect.DeepEqual(applied, want) {
 		t.Fatalf("实际注入的 runtime 不符: got %v want %v", applied, want)
 	}
-	for _, id := range []string{opencode.ID, deepseekharness.ID, "custom-acp"} {
+	for _, id := range []string{opencode.ID, dsh.ID, "custom-acp"} {
 		spec, _ := reg.Get(id)
 		if want := IsolationEnv(id, home); !reflect.DeepEqual(spec.Launch.Env, want) {
 			t.Fatalf("%s 的 Launch.Env 不符:\n got %v\nwant %v", id, spec.Launch.Env, want)
@@ -270,7 +270,7 @@ func TestIsolationKeepsSkillRootAlignedWithProjection(t *testing.T) {
 		proj      Projection
 		diverting []string // 会把该 runtime 的 skill 读根撬到他处的环境变量前缀
 	}{
-		{deepseekharness.ID, deepseekharnessSkillProjection(), []string{"DSH_AGENTS_HOME="}},
+		{dsh.ID, dshSkillProjection(), []string{"DSH_AGENTS_HOME="}},
 		{opencode.ID, opencodeSkillProjection(), nil},
 	}
 	for _, c := range cases {

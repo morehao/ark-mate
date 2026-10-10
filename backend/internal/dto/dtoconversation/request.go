@@ -42,10 +42,10 @@ type ConversationCreateReq struct {
 	// automation 触发。不让客户端自称自动化产物——它会给会话列表打标、也是
 	// `GET /automations/:id/runs` 的快速路径，能自称就意味着能伪造别人的运行史。
 	Origin string `json:"-"`
-	// RuntimeHint 指定 runtime（**内部字段**，`json:"-"`）：空 = 走 agent 的 routing_policy；
-	// 非空时必须是该 agent 声明的候选之一，否则报 `runtime_not_found`（绝不静默回落路由——
-	// "用户以为指定了、实际没指定"是最坏形态）。目前只有 automation 触发会设置它。
-	RuntimeHint string `json:"-"`
+	// 这里曾有 `RuntimeHint string `json:"-"``（automation 的 target.runtime_hint）：底座由构建期
+	// 固定（pkg/runtime/build.go），"按会话指定底座"这条路径整体下线——留着它只会让下一个人以为
+	// 平台还能按会话切换。automation 定义里若还写着 `target.runtime_hint`，写面会 40001（见
+	// internal/manager/automation.go 的闸门），读面按已下线键 WARN 后忽略。
 }
 
 // SkillsPtr / McpsPtr 取字段（nil 安全的取值，供调用方少写一层判空）。

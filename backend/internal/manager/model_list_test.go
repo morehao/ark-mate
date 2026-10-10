@@ -15,7 +15,7 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -54,9 +54,9 @@ func newModelRig(t *testing.T) *modelRig {
 	// **隔离纪律（硬约束）**：`ModelCatalog` 在没有活会话/缓存时会走 resume 分支**真的 spawn
 	// 底座**。夹具必须同时做两件事：① 注入隔离 env（home 全落在 t.TempDir 下）；② 把 Command
 	// 换成一个**不存在**的桩名——真到 spawn 那一步只会失败，绝不落到用户装的那份。
-	real := runtime.DefaultRegistry()
+	real := runtime.AllBuiltinRegistry()
 	home := t.TempDir()
-	for _, id := range []string{"opencode", deepseekharness.ID} {
+	for _, id := range []string{"opencode", dsh.ID} {
 		sp, ok := real.Get(id)
 		if !ok {
 			t.Fatalf("默认注册表里应有 %s", id)
@@ -176,7 +176,7 @@ func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
 // 判据是"同一输入产出逐字节相同的值"——两个底座各一条。清单里**不存** value：它只存生成
 // value 的输入（这正是本方案最容易写错的一处：把运行时给的 value 存回清单就是把"事实"当"意图"）。
 func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
-	v, err := modelValueFor("deepseekharness", "deepseek-main", "deepseek-v4-flash")
+	v, err := modelValueFor("dsh", "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,13 +213,12 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 }
 
 // TestAgentDefaultModelIsDerivedReadOnly：`GET /agents` 的 `default_model` 随默认**自动变**，
-// 没有任何同步写逻辑；且按 `agent.runtimes[]` 求交（列表 → 按 runtime 索引）。
+// 没有任何同步写逻辑；键只有**构建期底座**那一个（v12 之前按 `agent.runtimes[]` 求交）。
 func TestAgentDefaultModelIsDerivedReadOnly(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
-	// a1 同时服务 stub 与 opencode；另有 a2 只服务 stub。
-	r.svc.agents["a1"].Runtimes = []string{"stub", "opencode"}
-	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2", Runtimes: []string{"stub"}}
+	// 第二个 agent：派生值与"是哪个 agent"无关（它只跟构建期底座与默认模型有关）。
+	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2"}
 
 	m1 := r.createModel(t, "p1", "m-1")
 	m2 := r.createModel(t, "p1", "m-2")
@@ -244,19 +243,18 @@ func TestAgentDefaultModelIsDerivedReadOnly(t *testing.T) {
 	if _, err := r.svc.UpdateModel(ctx, m1.ID, dtomodel.ModelPatchReq{IsDefault: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	// 单一默认摊到**已注册**的每个 runtime：a1 服务 stub 与 opencode，两者都拿到同一个值。
-	if dm := find("a1").DefaultModel; dm["opencode"] != "m-1" || dm["stub"] != "m-1" {
-		t.Fatalf("a1 的默认应覆盖它声明的两个 runtime: %+v", dm)
+	// 单一默认摊到**构建期底座**那一个键：两个 agent 拿到同一个值。
+	if dm := find("a1").DefaultModel; len(dm) != 1 || dm[runtime.SelectedRuntime()] != "m-1" {
+		t.Fatalf("a1 的默认应只有构建期底座一个键: %+v", dm)
+	}
+	if dm := find("a2").DefaultModel; len(dm) != 1 || dm[runtime.SelectedRuntime()] != "m-1" {
+		t.Fatalf("a2 与 a1 同源（派生只按构建期底座算）: %+v", dm)
 	}
 	if _, err := r.svc.UpdateModel(ctx, m2.ID, dtomodel.ModelPatchReq{IsDefault: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	if dm := find("a1").DefaultModel; dm["opencode"] != "m-2" {
+	if dm := find("a1").DefaultModel; dm[runtime.SelectedRuntime()] != "m-2" {
 		t.Fatalf("a1 的默认应跟随默认值变为 m-2: %+v", dm)
-	}
-	// 求交：a2 不服务 opencode → 它没有该键（列表语义天然按 runtime 索引）。
-	if dm := find("a2").DefaultModel; len(dm) != 1 || dm["stub"] != "m-2" {
-		t.Fatalf("a2 只服务 stub，应只有该键: %+v", dm)
 	}
 }
 
@@ -265,7 +263,7 @@ func TestAgentWriteFaceRejectsDefaultModel(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
 	_, err := r.svc.CreateAgent(ctx, dtoagent.AgentCreateReq{
-		ID: "a-new", Runtimes: []string{"stub"},
+		ID:           "a-new",
 		DefaultModel: json.RawMessage(`{"stub":"m-1"}`),
 	})
 	if errCode(err) != "default_model_is_derived" || codeOf(err) != 40001 {
@@ -289,7 +287,7 @@ func TestAgentWriteFaceRejectsDefaultModel(t *testing.T) {
 // TestModelListRequiresSQLite memory 模式（无清单载体）→ 40501，而不是"内存生效、盘上没留痕"。
 func TestModelListRequiresSQLite(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(runtime.DefaultRegistry(), eventbus.New())
+	svc := NewService(runtime.AllBuiltinRegistry(), eventbus.New())
 	_, err := svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p", ModelID: "m"})
 	if errCode(err) != "model_list_unavailable" || codeOf(err) != 40501 {
 		t.Fatalf("memory 模式的清单写面应 40501 model_list_unavailable，got %q/%d（%v）", errCode(err), codeOf(err), err)
@@ -318,7 +316,7 @@ func TestResolveDefaultModelFallbackChain(t *testing.T) {
 		t.Fatalf("有默认应回生成的值: %q err=%v", v, err)
 	}
 	// dsh 的形态是 JSON 数组（同一个平台模型 id，两种底座各自的词汇）。
-	if _, err := r.svc.DefaultModelValueFor(ctx, "deepseekharness"); err != nil {
+	if _, err := r.svc.DefaultModelValueFor(ctx, "dsh"); err != nil {
 		t.Fatalf("dsh 也该能算出它的值: %v", err)
 	}
 	if v, err := r.svc.DefaultModelValueFor(ctx, "stub"); err != nil || v != "" {
@@ -353,8 +351,8 @@ func TestDefaultModelReasoningEffortNotSent(t *testing.T) {
 	}
 	// dsh 必须**声明凭据交付面**（原 v11 断言的是"已声明模型配置落点"，v12 的那个概念换成
 	// 落点 + 凭据两条声明；这里断言后者，因为它是新链路的关键）。
-	reg := runtime.DefaultRegistry()
-	sp, ok := reg.Get(deepseekharness.ID)
+	reg := runtime.AllBuiltinRegistry()
+	sp, ok := reg.Get(dsh.ID)
 	if !ok {
 		t.Fatal("dsh 应已注册")
 	}

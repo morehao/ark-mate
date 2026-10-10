@@ -32,7 +32,7 @@ type LaunchSpec struct {
 // 启动形态 + 传输能力 + **纯数据**的落点/凭据声明；可执行半场 = acl 连接 + 该 adapter 的
 // `resource.Syncer`，后者按 ADR-2 挂在 `Registry` 的第二张表上，不进 Spec）。
 type Spec struct {
-	ID      string // 注册表键，如 "opencode"、"deepseekharness"
+	ID      string // 注册表键，如 "opencode"、"dsh"
 	Name    string // 展示名
 	Version string // 展示用启动形态描述
 	Launch  LaunchSpec

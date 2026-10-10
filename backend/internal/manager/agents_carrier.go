@@ -184,12 +184,7 @@ func (s *Service) writeAgentFile(d agentDefinitionFile) error {
 		return err
 	}
 	// 空字段回填：文件模式的定义文件是"完整定义"（种子没有文件时不会走到这里，用户 agent 的
-	// Name/runtimes 一定有值；回填是防止 PATCH 只改 provider 时把别的键写成空）。
-	if len(d.Runtimes) == 0 {
-		if a, ok := s.AgentByID(d.ID); ok {
-			d.Runtimes = a.Runtimes
-		}
-	}
+	// Name 一定有值；回填是防止 PATCH 只改 provider 时把别的键写成空）。
 	if d.Name == "" {
 		if a, ok := s.AgentByID(d.ID); ok {
 			d.Name = a.Name

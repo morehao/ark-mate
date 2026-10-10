@@ -300,13 +300,13 @@ func (o *Orchestrator) WaitTurn(ctx context.Context, conversationID string) (str
 	return t.stop, t.err
 }
 
-// RunOnce 在指定 runtime 上跑一次 fresh conversation + prompt 并等待结束（mate demo 用）。
+// RunOnce 在**构建期选定的** runtime 上跑一次 fresh conversation + prompt 并等待结束（mate demo 用）。
 func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult, error) {
 	agent, err := o.svc.requireDefaultAgent()
 	if err != nil {
 		return nil, err
 	}
-	res, err := o.startConversationOn(ctx, agent, opt.RuntimeID, StartOptions{Cwd: opt.Cwd})
+	res, err := o.startConversationOn(ctx, agent, StartOptions{Cwd: opt.Cwd})
 	if err != nil {
 		return nil, err
 	}

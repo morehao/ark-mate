@@ -30,7 +30,7 @@ func TestRegistryLoadDirAndList(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "tools", "ghost.json"), `{"name":"ghost","source":"bogus"}`) // 非法 source → 跳过
 
 	r := NewRegistry()
-	res := r.LoadDir(dir)
+	res := r.LoadDir(dir, nil)
 	if res.Skills != 2 || res.Mcps != 2 || res.Tools != 1 {
 		t.Fatalf("加载数不符: %+v", res)
 	}
@@ -129,7 +129,7 @@ func TestRegisterSkillIDLexiconFollowsBase(t *testing.T) {
 func TestRegisterSkillRuntimesAndScope(t *testing.T) {
 	r := NewRegistry()
 	// 合法：去空白 + 生效作用域默认 global。
-	if err := r.RegisterSkill(&Skill{ID: "ok", Runtimes: []string{" opencode ", "deepseekharness"}}); err != nil {
+	if err := r.RegisterSkill(&Skill{ID: "ok", Runtimes: []string{" opencode ", "dsh"}}); err != nil {
 		t.Fatalf("合法 runtimes 应通过: %v", err)
 	}
 	sk, _ := r.SkillByID("ok")
@@ -176,7 +176,7 @@ func TestLoadLegacySourcesWarns(t *testing.T) {
 		`{"id":"fresh","name":"F","body":"# f","runtimes":["opencode"]}`)
 
 	r := NewRegistry()
-	if res := r.LoadDir(dir); res.Skills != 2 {
+	if res := r.LoadDir(dir, nil); res.Skills != 2 {
 		t.Fatalf("应装载 2 条: %+v", res)
 	}
 	legacy, _ := r.SkillByID("legacy")

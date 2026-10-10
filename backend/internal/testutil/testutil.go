@@ -34,8 +34,8 @@ import (
 // 它的实现，只需要一个「稳定存在、从不拉进程」的 runtime id，故改名为 stub——名字本身
 // 就说明它是夹具而不是产品 runtime，避免后来人以为「测试还在用 echo」。
 //
-// 测试刻意用 stub-only 而不是 runtime.DefaultRegistry()：后者带 opencode 与
-// deepseekharness，会让「没指定 runtime 的 agent 回落到谁」这类断言依赖内置清单的完整
+// 测试刻意用 stub-only 而不是 runtime.AllBuiltinRegistry()：后者带 opencode 与
+// dsh，会让「没指定 runtime 的 agent 回落到谁」这类断言依赖内置清单的完整
 // 内容——内置清单增删一个底座，一堆与它无关的测试跟着红。需要多底座的用例自己
 // runtime.NewRegistry(...) 显式声明。
 func StubRegistry() *runtime.Registry {

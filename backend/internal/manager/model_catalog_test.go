@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -18,9 +19,10 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	reg := testutil.StubRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", State: AgentStateStopped}
 	return svc, orch
 }
 
@@ -109,15 +111,21 @@ func TestModelCatalogNoSource(t *testing.T) {
 	}
 }
 
-// TestModelCatalogUnknownAgent 未知 agent / 未注册 runtime → 请求类错误。
+// TestModelCatalogUnknownAgent 未知 agent → agent_not_found；构建期底座未装配 →
+// runtime_not_registered（历史断言「agent 声明了未注册的候选」随候选面一起下线）。
 func TestModelCatalogUnknownAgent(t *testing.T) {
 	svc, _ := catalogRig(t)
 	if _, err := svc.ModelCatalog(context.Background(), "nope"); err == nil {
 		t.Fatal("未知 agent 应报错")
 	}
-	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Runtimes: []string{"ghost"}}
+	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost"}
+	setBuildRuntime(t, "ghost") // 换一个不在注册表里的构建期底座
+	// 注意：这条错误在 ModelCatalog 里已被 `code.FromError` 归一（`runtime_not_registered` 只留在
+	// 文案里），所以判据是信封码 + 文案，而不是 acl 的稳定 code。
 	if _, err := svc.ModelCatalog(context.Background(), "agent-ghost"); err == nil {
-		t.Fatal("未注册 runtime 应报错")
+		t.Fatal("构建期底座未装配应报错")
+	} else if numericCode(err) != 40001 || !strings.Contains(err.Error(), "runtime_not_registered") {
+		t.Fatalf("应是 40001 runtime_not_registered，got %d（%v）", numericCode(err), err)
 	}
 }
 
