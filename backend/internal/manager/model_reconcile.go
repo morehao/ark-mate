@@ -106,7 +106,7 @@ func (s *Service) reconcileModels(ctx context.Context, runtimeID, agentID string
 			ProviderID: m.ProviderID,
 			Route:      m.ProviderID,
 			Severity:   declaredNotAdvertisedSeverity(runtimeID, m.ProviderID),
-			Reason:     declaredNotAdvertisedReason(runtimeID, m.ProviderID),
+			Reason:     declaredNotAdvertisedReason(runtimeID, m.ProviderID) + s.projectionHint(runtimeID, m.ProviderID),
 		})
 	}
 	for _, a := range advertised {
@@ -140,6 +140,27 @@ func declaredNotAdvertisedReason(runtimeID, providerID string) string {
 	default:
 		return base + "：确认配置已物化且**拉了新进程**（配置在进程启动时读），或看这条 provider 的 baseURL/密钥是否可用"
 	}
+}
+
+// projectionHint 给"声明了但没广告到"补一句**最可能的成因**：该 provider 有没有声明这个 runtime
+// 的运行时参数（`projections.<runtime>`）。
+//
+// 为什么值得单列：dsh 侧一条没有 `api`/`baseURL` 的 route 是**不可用**的，而它失败起来很不像"缺参数"
+// ——实测表现是新会话直接 `Internal error`（2026-10-10）。把"你还没填运行时参数"摆在差集条目里，
+// 用户就不用从一句不透明的错误倒推。
+func (s *Service) projectionHint(runtimeID, providerID string) string {
+	s.mu.Lock()
+	d := s.providers[providerID]
+	s.mu.Unlock()
+	if d == nil {
+		return ""
+	}
+	frags, _ := d.Body["projections"].(map[string]any)
+	frag, _ := frags[runtimeID].(map[string]any)
+	if len(frag) > 0 {
+		return ""
+	}
+	return "；**提示**：这条供应商没有声明 " + runtimeID + " 的运行时参数（在「设置 · 模型」的供应商表单里填 `api`/`baseURL`，opencode 侧通常还要 `package`）——dsh 上缺它这条 route 不可用"
 }
 
 // routeOfValue 从不透明值里取出路由前缀（只用于**展示分组**，不参与任何判据）。
@@ -317,6 +338,12 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID, agentID string, ref
 	}
 	if st, serr := s.runtimeConfigState(ctx, runtimeID, nil); serr == nil && st != nil {
 		resp.Config = *st
+		// **`pending` 的权威判据是差集**（有样本时）：清单里每一条都被底座广告到了 ⇒ 不是 pending；
+		// 还有没广告到的（或被判 error/degrade 的）⇒ 仍是 pending。没有样本（离线/无会话）时保留
+		// `runtimeConfigState` 的保守值 true——"不知道"不许说成"已生效"。
+		if resp.Note == "" && len(resp.Advertised) > 0 {
+			resp.Config.Pending = len(resp.Diff.DeclaredNotAdvertised) > 0
+		}
 	}
 	// 未声明落点的 runtime：回落到纯旧形态（`options` + 取样来源），避免"没有清单就什么都读不到"。
 	if !declared {

@@ -122,6 +122,14 @@ func (s *Service) runtimeConfigState(ctx context.Context, runtimeID string, gene
 		if e, ok := s.runtimeConfigEntry(ctx, runtimeID); ok {
 			st.GeneratedAt = e.GeneratedAt
 		}
+		// **写过一份配置 = 至少在"还没被任何活进程读到"这个意义上 pending**。
+		//
+		// 这条判据是契约里写死的那句（README 的 `/models/apply` 行）：「成功路径**没有**
+		// `advertised`——那要新进程才拿得到，此刻报它就是假装已生效，只如实回 `pending:true`」。
+		// 单看落盘状态是分不出来"底座读到没有"的，所以这里取**保守**的一侧：说 pending。
+		// 真正回答"生效没有"的是同一响应里的 `diff`（declared vs advertised，需要一次活会话取样），
+		// `ModelsView` 在有样本时会用差集把它校正过来（见那里的 override）。
+		st.Pending = true
 	}
 	if generated != nil {
 		st.ModelCount = len(generated)
