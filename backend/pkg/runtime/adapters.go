@@ -158,26 +158,35 @@ func deepseekharnessSpec() Spec {
 		// 根取隔离表注入的 `DSH_HOME`（= <MATE_HOME>/runtime/dsh，平台独占）；文件名带 `mate-` 前缀
 		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
 		ConfigProjection: ConfigProjection{
-			Format:          ConfigFormatDshPatchYAML,
-			Root:            "${DSH_HOME}",
-			Filename:        "mate-models.patch.yml",
-			Channel:         ConfigChannelCLIPatchArg,
-			Tested:          false,
-			TestedOnVersion: "",
+			Format:   ConfigFormatDshPatchYAML,
+			Root:     "${DSH_HOME}",
+			Filename: "mate-models.patch.yml",
+			Channel:  ConfigChannelCLIPatchArg,
+			// Tested 的**范围**（写入权是用实测换的，所以范围必须写清）：
+			// ① 机制已实测（最小 ACP 客户端直接问底座）：在 `llm-pi-ai.config.providers.<route>` 上
+			//    声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）**确实**会以一组出现在
+			//    ACP 的 `options[category=model]` 里；**当前选中值由 `id: acp` 那一行决定**
+			//    （只改 acp → currentValue 变成它；只改 agent-default-model → 纹丝不动）。
+			// ② 经平台写盘的完整链路（生成 overlay → 自校验 → 落盘 → `--patch` → 新进程读到）也已实测
+			//    （`.dsh/docs/notes/probes/gate1-dsh-probe.mjs --platform-writes`）。
+			// 写入权的**代价**因此也必须写清：这条链路写坏会让 dsh **拒启**，所以落盘前两级校验门
+			// （自校验 + `--dump-config-schema`）一个都不能省；坏了去掉 `--patch` 即回到出厂配置。
+			Tested:          true,
+			TestedOnVersion: "0.2.0-rc.2",
 			Effect:          ConfigEffectNextProcess,
-			Note: "H6 的 dsh 组尚未跑：机制上成立（`--patch` 是层序最高的一层、与 --dump-config 共用同一份 " +
-				"patch 算法），但本仓没有实测记录，故**只读不写**。" +
-				"三条已知坑：① 空 patch / 只有注释的文件会让 dsh **拒启**（README 逐字：「an empty or " +
-				"comments-only file fails boot — disable the layer with [] instead」）；" +
+			Note: "端到端实测（2026-10-10，随包 0.2.0-rc.2）。① 机制（最小 ACP 客户端直接问底座，" +
+				"见 .dsh/docs/notes/probes/dsh-acp-catalog.mjs）：在 `llm-pi-ai.config.providers.<route>` 上" +
+				"声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）**确实**会以一组出现在 ACP 的" +
+				"`options[category=model]` 里（实测候选 `[\"arkprobe\",\"ark-probe-x\"]` 与内置三条并列）；" +
+				"**当前选中值由 `id: acp` 那一行决定**（只改 acp → currentValue 变成自定义那条；只改 " +
+				"agent-default-model → 纹丝不动，与设计原稿一致）。② 平台侧完整链路也实测过（生成 → 自校验 → " +
+				"落盘 → `--patch` → 新进程 → 候选里出现该条、且对账差集为空）。三条已知坑：" +
+				"① 空 patch / 只有注释的文件会让 dsh **拒启**（README 逐字：「an empty or comments-only " +
+				"file fails boot — disable the layer with [] instead」），所以清单为空时**什么都不写**；" +
 				"② `--patch` 的路径必须是**绝对**路径（dsh 侧按调用目录解析，而平台拉底座的 cwd 是用户会话目录）；" +
-				"③ 默认模型要同时写 `agent-default-model` 与 `acp` 两条 entry —— **实测推翻了设计原稿那句" +
-				"「写 agent-default-model 对 ACP 会话是空操作」**：把 `agent-default-model.provider` 指到一条" +
-				"没有目录的 route 上，ACP 的 `options[category=model]` 会整个消失；只改 `acp.config.provider` 则" +
-				"目录纹丝不动。所以 ACP 目录的 provider 由前者决定。" +
-				"④ **仍未解决**：在 `llm-pi-ai` 里新声明一条 route（api/baseURL/models/apiKeyEnv 齐备）**也不会**" +
-				"把它的模型带进目录（目录为空），而且 `deepseek-official` 同时被 `llm-deepseek` 与 pi-ai 声明" +
-				"（再声明一次会 `configurable provider … is already declared` 让那一 entry 不激活）——" +
-				"所以「平台给 dsh 加一条新模型」这条路**在实测里还没走通**，写入权因此保持关闭。",
+				"③ 想覆盖**已安装 route**（如 `deepseek-official`）的目录会撞 `configurable provider … is " +
+				"already declared`（它同时被 llm-deepseek 与 pi-ai 声明）——平台给 dsh 加模型必须**新开一条" +
+				"自己的 route** 并在 `acp` 行把 provider 指向它。",
 		},
 		// 未实测：P-2 探针尚无结论 → 保守 process。
 		CapabilityScope: CapabilityScopeProcess,

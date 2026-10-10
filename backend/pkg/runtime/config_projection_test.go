@@ -55,16 +55,15 @@ func TestResolveConfigProjectionUsesIsolationEnv(t *testing.T) {
 		dshp.Filename != "mate-models.patch.yml" || dshp.Format != ConfigFormatDshPatchYAML {
 		t.Fatalf("dsh 的声明不符: %+v", dshp.ConfigProjection)
 	}
-	// 写入权是**用实测结论换的**：opencode 已实测（见 adapter 的 Note 与 TestedOnVersion）→ 可写；
-	// dsh 尚未实测（H6 的 dsh 组）→ 只读。这条差异是本方案最要紧的一处纪律，别把它抹平。
-	if !ocp.Writable() {
-		t.Fatal("opencode 已实测通过，应可写")
+	// 写入权是**用实测结论换的**：两个底座都已在随包载荷上实测通过（见各自 adapter 的 Note 与
+	// TestedOnVersion）→ 都可写。这条判据存在的意义是"没实测就必须只读"，所以两个都断言
+	// **实测版本号非空**——把 Tested 置 true 却不记版本号，等于把结论与它成立的那一版解绑。
+	if !ocp.Writable() || !dshp.Writable() {
+		t.Fatalf("两个底座都已实测通过，应可写：opencode=%v dsh=%v", ocp.Writable(), dshp.Writable())
 	}
-	if dshp.Writable() {
-		t.Fatal("dsh 尚未实测，必须只读（写坏 patch = 拒启）")
-	}
-	if dshp.TestedOnVersion != "" {
-		t.Fatalf("dsh 未实测时不该有实测版本号: %q", dshp.TestedOnVersion)
+	if ocp.TestedOnVersion == "" || dshp.TestedOnVersion == "" {
+		t.Fatalf("可写就必须记实测版本号（结论与版本绑定）：opencode=%q dsh=%q",
+			ocp.TestedOnVersion, dshp.TestedOnVersion)
 	}
 	if ocp.EffectiveEffect() != ConfigEffectNextProcess || dshp.EffectiveEffect() != ConfigEffectNextProcess {
 		t.Fatalf("未声明 effect 时应取最保守的 next_process")

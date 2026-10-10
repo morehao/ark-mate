@@ -144,11 +144,20 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 	if !ok {
 		return nil, definitionChangedErr("db:model/" + id)
 	}
-	if patch.IsDefault != nil && *patch.IsDefault {
-		if ok, err := s.st.SetDefaultModel(ctx, id, definitionWriteActor); err != nil || !ok {
-			if err != nil {
-				return nil, err
-			}
+	// 置/清默认是**两个方向**，都必须被处理：只处理 `true` 会让 `is_default:false` 静默无效
+	// （2026-10-10 实测：取消默认后平台仍在下发那个取值，用户只能删掉整条模型才停）。
+	if patch.IsDefault != nil {
+		var ok bool
+		var err error
+		if *patch.IsDefault {
+			ok, err = s.st.SetDefaultModel(ctx, id, definitionWriteActor)
+		} else {
+			ok, err = s.st.ClearDefaultModel(ctx, id, definitionWriteActor)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			return nil, modelNotFoundErr(id)
 		}
 	}

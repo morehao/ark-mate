@@ -167,9 +167,10 @@ func TestRouterModelCatalog(t *testing.T) {
 	if len(resp.Declared) != 0 || len(resp.Advertised) != 0 {
 		t.Fatalf("尚未声明任何模型、也没有编排器：两侧都应为空: %s", env.Data)
 	}
-	// 物化状态要说清"该 runtime 声明了落点但没有写入权"（dsh 未实测 → 只读）。
-	if !resp.Config.Declared || resp.Config.Writable {
-		t.Fatalf("dsh 的落点应 declared=true / writable=false（未实测只读）: %+v", resp.Config)
+	// 物化状态要说清"该 runtime 声明了落点、而且已有写入权"（dsh 0.2.0-rc.2 起已实测）。
+	// 这条断言的价值不在"现在能写"，而在**写入权必须与实测绑定**：把 Tested 改回 false 时它必须变红。
+	if !resp.Config.Declared || !resp.Config.Writable {
+		t.Fatalf("dsh 的落点应 declared=true / writable=true（已实测）: %+v", resp.Config)
 	}
 	if resp.Config.Channel != "cli_patch_arg" {
 		t.Fatalf("dsh 的通道应是 cli_patch_arg: %+v", resp.Config)

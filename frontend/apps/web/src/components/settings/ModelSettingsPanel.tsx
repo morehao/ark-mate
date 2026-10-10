@@ -359,10 +359,17 @@ export function ModelSettingsPanel() {
     await loadView(runtimeId, false)
   }
 
-  const setDefault = async (row: ModelRow): Promise<void> => {
-    const updated = await guard(patchModel(row.id, { is_default: true }))
+  /**
+   * 置/取消默认。两个方向都走同一条 PATCH——**取消默认必须真的能取消**：只置不撤的话，
+   * 用户想让底座回到自己的默认就只能删掉整条模型，而删掉又会丢掉 `extra`/`hidden` 那些留痕。
+   * 文案分开，因为两件事的后果不同（置默认影响新会话下发的取值；取消默认让新会话回到底座默认）。
+   */
+  const setDefault = async (row: ModelRow, next: boolean): Promise<void> => {
+    const updated = await guard(patchModel(row.id, { is_default: next }))
     if (!updated) return
-    await afterModelWrite('已设为默认：新会话创建时立即下发；既有会话在下一个会话进程读到它')
+    await afterModelWrite(next
+      ? '已设为默认：新会话创建时立即下发；既有会话在下一个会话进程读到它'
+      : '已取消默认：新会话按底座自己的默认起；已有会话的取值不变')
   }
 
   const applyNow = async (): Promise<void> => {
@@ -393,17 +400,39 @@ export function ModelSettingsPanel() {
     {
       title: '默认', key: 'default', width: 72,
       render: (_: unknown, row: ModelRow) => (
-        <Tooltip title={row.is_default ? '该底座的默认模型' : '点一下把它设为该底座的默认模型'}>
-          <Button
-            type="text"
-            size="small"
-            disabled={busy}
-            onClick={() => void setDefault(row)}
-            style={{ color: row.is_default ? tokens.warning : tokens.textPlaceholder, fontSize: 15 }}
-            aria-label={row.is_default ? '已是默认模型' : '设为默认模型'}
-          >
-            {row.is_default ? '★' : '☆'}
-          </Button>
+        <Tooltip title={row.is_default
+          ? '该底座的默认模型；点一下**取消**默认（取消后新会话按底座自己的默认起）'
+          : '点一下把它设为该底座的默认模型'}>
+          {row.is_default ? (
+            <Popconfirm
+              title="取消这条默认模型？"
+              description="取消后新会话按底座自己的默认起；已经有会话的取值不变。"
+              okText="取消默认"
+              cancelText="算了"
+              onConfirm={() => void setDefault(row, false)}
+            >
+              <Button
+                type="text"
+                size="small"
+                disabled={busy}
+                style={{ color: tokens.warning, fontSize: 15 }}
+                aria-label="取消默认模型"
+              >
+                ★
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Button
+              type="text"
+              size="small"
+              disabled={busy}
+              onClick={() => void setDefault(row, true)}
+              style={{ color: tokens.textPlaceholder, fontSize: 15 }}
+              aria-label="设为默认模型"
+            >
+              ☆
+            </Button>
+          )}
         </Tooltip>
       ),
     },

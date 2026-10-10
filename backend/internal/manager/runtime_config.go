@@ -129,7 +129,12 @@ func (s *Service) runtimeConfigState(ctx context.Context, runtimeID string, gene
 	if !proj.Tested {
 		st.Note = "该落点尚未经真实底座端到端实测（H6）：**只读不写**——平台会生成候选内容，但不会落盘、也不会改启动参数。" +
 			proj.UnverifiedReason()
+		return st, nil
 	}
+	// 已实测：这条状态也要有一句人话，别让前端在"能写"的时候拿到空 note。
+	// 它说的是**生效时刻**（本方案反复要防的就是"已保存"被读成"已生效"）。
+	st.Note = "该落点已实测（" + proj.TestedOnVersion + "）：清单改动会写进该文件 / 启动参数，" +
+		"由**新进程**启动时读它——此刻底座的目录仍是旧的那份（生效状态列与对账差集回答「到底生效没有」）"
 	return st, nil
 }
 
@@ -400,15 +405,21 @@ func buildOpencodeJSON(models []runtimeConfigModel, providers map[string]provide
 //
 // 三条从随包文档逐字抄来的约束（写错任何一条都不是"没生效"而是"**拒启**"或"无声"）：
 //
-//  1. 目标条目是 **`agent-default-model` 与 `acp` 两条都写**。设计原稿说"只有 `id: acp` 是 ACP
-//     平面消费的行、写 `agent-default-model` 是空操作"——**实测推翻了这个说法**（见下面
-//     `buildDshPatchYAML` 里的注释与 `.dsh/docs/notes/2026-10-10-settings-model-management-gates-notes.md`
-//     的 dsh 组记录）：把 `agent-default-model.provider` 指到一条没有目录的 route 上，ACP 的
-//     `options[category=model]` 会**整个消失**；只改 `acp.config.provider` 则目录纹丝不动。
-//     所以两条都写——少写哪一条都会让"平台设的默认"落在一个不被目录消费的地方。
+//  1. 目标条目是 **`id: acp`**——ACP 平面唯一消费"当前选中"的行。这条**经实测确认**（2026-10-10，
+//     最小 ACP 客户端直接问底座）：只改 `acp.config.provider/model` → `currentValue` 变成它；
+//     只改 `agent-default-model` → `currentValue` **纹丝不动**。所以生成器**默认不写**
+//     `agent-default-model`（不写就没有第二个会漂移的事实）。
+//
+//     ⚠️ 一条同批测到、值得写下来的教训：这个结论**一度被一个探针 bug 推翻过**——探针当时读的是
+//     `GET /models` 的 `options[]`，而 v11 起那个字段只对**未声明 ConfigProjection** 的 runtime
+//     回落（dsh 已声明，所以它恒为空）。读错字段让"新 route 的模型没进目录"看起来成立，
+//     于是生成器被改成两条都写。用最小 ACP 客户端直接问底座之后才看清：**目录里一直都有**。
+//     教训：**结论要落在底座自己的回答上**（`options[category=model]`），不要落在平台的投影上。
+//
 //  2. patch 里除 `id` 外的键会被**原样拷到目标 entry 上**，而 `config` 是**整体替换**该行的
 //     config（不与它合并）⇒ 必须**重述**要保留的每个字段。本生成器只写模型路由与默认模型，
 //     其余字段由平台自己的 overlay 层承担（它不是 dsh 的 home patch）。
+//
 //  3. **绝不能产出空文件 / 只有注释的文件 / 只有 `---` 的文件**——dsh 逐字说那会 `fails boot`。
 //     本函数在 `len(models) == 0` 时由调用方短路（`buildRuntimeConfig` 返回 nil），
 //     所以这里只会在"有内容"时被调用。
@@ -418,30 +429,14 @@ func buildDshPatchYAML(models []runtimeConfigModel, providers map[string]provide
 	var b []byte
 	b = append(b, []byte("# ark-mate 生成的模型清单 overlay（平台自有文件；经 dsh --patch 递入）\n")...)
 	b = append(b, []byte("# 归属标记：本文件只有平台会写；dsh 自己的 cordis.patch.yml 不在此列。\n")...)
-	var def *runtimeConfigModel
-	for i := range models {
-		if models[i].IsDefault {
-			def = &models[i]
-			break
+	for _, m := range models {
+		if !m.IsDefault {
+			continue
 		}
-	}
-	if def != nil {
-		// **两条 entry 都写**，因为实测（2026-10-10，随包 0.2.0-rc.2）推翻了设计里那句
-		// 「写 agent-default-model 对 ACP 会话是空操作」：
-		//
-		//   · 只改 `agent-default-model.provider`（指向一条目录里没有的 route）→ ACP 的
-		//     `options[category=model]` **整个消失**（目录为空）；
-		//   · 只改 `acp.config.provider` → ACP 的目录**一点没变**（仍是原 provider 的三条）。
-		//
-		// 也就是说：**ACP 平面广告哪个 provider 的模型目录，由 `agent-default-model` 决定**；
-		// `acp` 那一行的 config 读的是"当前选中"，改它不改变候选集。所以默认模型必须落在这两行上
-		// （缺了 agent-default-model 就等于默认值只写进了一个不被目录消费的行）。
-		//
-		// 这条是"机制上等价"级别的结论，不是调参试出来的：目录有/无随该行切换而切换，可复现。
-		for _, id := range []string{"agent-default-model", "acp"} {
-			b = append(b, []byte("- id: "+id+"\n  config:\n")...)
-			b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(def.ProviderID), yamlQuote(def.ModelID))...)
-		}
+		// 目标行 `id: acp`：平台会话真正消费"当前选中"的那一行（实测：只改它 currentValue 就变；
+		// 只改 agent-default-model 则不变）。
+		b = append(b, []byte("- id: acp\n  config:\n")...)
+		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(m.ProviderID), yamlQuote(m.ModelID))...)
 	}
 	// 路由声明：按 route 分组（`llm-pi-ai` 的 `providers.<route>.models[]` 是**整体替换**语义，
 	// 所以平台列出的就是该路由的全部——首版**不自动把底座默认值补进来**，那会造出平台没声明的条目）。
@@ -457,8 +452,15 @@ func buildDshPatchYAML(models []runtimeConfigModel, providers map[string]provide
 			p := providers[route]
 			b = append(b, []byte("- id: llm-pi-ai\n  config:\n    providers:\n")...)
 			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(route))...)
-			if p.Type != "" {
-				b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(p.Type))...)
+			// **`api` 只来自投影声明（`projections.<runtime>.api`），不来自 provider 的 `type`**：
+			// `type` 是**凭据**类型（决定注入哪个 `<TYPE>_API_KEY`），`api` 是**wire 协议**
+			// （openai-completions | openai-responses | anthropic-messages）。两者不是一回事——
+			// 早先版本按 type 写一次 api、又按投影写第二次，产出的 YAML 里出现**重复键**
+			// （谁赢取决于解析器，dsh 对"这条 route 可用不可用"的判定也随之不可预期）。
+			if frag := p.Fragment; frag != nil {
+				if api := bodyString(frag, "api"); api != "" {
+					b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(api))...)
+				}
 			}
 			if k := envKeyOf(p.Type); k != "" {
 				b = append(b, fmt.Sprintf("        apiKeyEnv: %s\n", yamlQuote(k))...)
@@ -466,9 +468,6 @@ func buildDshPatchYAML(models []runtimeConfigModel, providers map[string]provide
 			if frag := p.Fragment; frag != nil {
 				if base := bodyString(frag, "baseURL"); base != "" {
 					b = append(b, fmt.Sprintf("        baseURL: %s\n", yamlQuote(base))...)
-				}
-				if api := bodyString(frag, "api"); api != "" {
-					b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(api))...)
 				}
 				// `compat` 是嵌套表：用 **YAML 的 flow mapping** 形态内联（JSON 是 YAML 的子集，
 				// 所以把 JSON 对象原样写出来就是合法的 YAML，且键序由 encoding/json 固定）。

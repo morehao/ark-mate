@@ -200,6 +200,12 @@ func TestDshValidationGate(t *testing.T) {
 		{"incomplete", `{"x-cordis":{"complete":false,"diagnostics":[]}}`, "0", false},
 		{"nonzero_exit", `{"x-cordis":{"complete":true,"diagnostics":[]}}`, "1", false},
 		{"not_json", `dsh: some human output`, "0", false},
+		// **大 dump 也必须能过**：真实 `--dump-config-schema` 的输出就是一份完整 JSON Schema
+		// （远超 8KB）。早先版本先把 stdout 截断到 8000 字节**再**解析，于是每一份候选都被判成
+		// "不是 JSON"——校验门对所有输入恒红（2026-10-10 实测：dsh 侧 T5 一次都没写成功）。
+		// 这一条就是那个 bug 的防回归：把 JSON 撑到 20KB 再判。
+		{"big_valid_dump", `{"x-cordis":{"complete":true,"diagnostics":[]},"pad":"` +
+			strings.Repeat("x", 20000) + `"}`, "0", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

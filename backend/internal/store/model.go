@@ -132,6 +132,32 @@ func (s *Store) SetDefaultModel(ctx context.Context, id, actor string) (bool, er
 		})
 }
 
+// ClearDefaultModel 把一条模型从"该 runtime 的默认"上摘下来（一行 + 一条审计，同事务）。
+//
+// 为什么必须有这个入口：`PATCH /models/:id {is_default:false}` 曾经被**静默忽略**
+// （写面只处理 `true`），于是"取消默认"看起来成功、实际什么都没发生——而后果不小：平台会继续把
+// 那个取值下发到每一条新会话，用户必须删掉整条模型才能让底座不再被喂它
+// （2026-10-10 端到端探针在"删掉 overlay 后怎么恢复"这一步撞出来的）。
+//
+// 返回 false = 行不存在或 CAS 未中 → 调用方翻成 `model_not_found`/`definition_changed`。
+// **本来就不是默认 → 直接返回 true**（幂等，不写无意义的一版）。
+func (s *Store) ClearDefaultModel(ctx context.Context, id, actor string) (bool, error) {
+	row, found, err := s.models.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	if !row.IsDefault {
+		return true, nil
+	}
+	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionUpdate, row.Body, row.Revision,
+		func(tx *gorm.DB, now time.Time) (bool, error) {
+			return s.models.WithTx(tx).ClearDefaultCAS(ctx, id, row.Revision, now)
+		})
+}
+
 // ModelIDOfBody 从一条模型条目的正文里取 `model_id`。
 //
 // 唯一性判据 `(runtime, provider_id, model_id)` 的第三项在 body 里（见 ModelDefinition 注释），

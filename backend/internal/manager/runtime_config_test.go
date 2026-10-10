@@ -104,10 +104,11 @@ func TestBuildDshPatchYAMLByteExact(t *testing.T) {
 		Format: runtime.ConfigFormatDshPatchYAML, Channel: runtime.ConfigChannelCLIPatchArg,
 	}}
 	models := []runtimeConfigModel{
-		{ModelID: "deepseek-v4-flash", ProviderID: "deepseek-official", IsDefault: true},
+		{ModelID: "ark-probe-x", ProviderID: "arkprobe", IsDefault: true},
 	}
 	providers := map[string]providerProjection{
-		"deepseek-official": {ID: "deepseek-official", Type: "deepseek", HasKey: true},
+		"arkprobe": {ID: "arkprobe", Type: "deepseek", HasKey: true,
+			Fragment: map[string]any{"api": "openai-completions", "baseURL": "https://gw.example/v1"}},
 	}
 	got, err := buildRuntimeConfig(proj, models, providers)
 	if err != nil {
@@ -118,21 +119,28 @@ func TestBuildDshPatchYAMLByteExact(t *testing.T) {
 	if !strings.Contains(s, "- id: acp\n") {
 		t.Fatalf("必须打 `id: acp` 这一行:\n%s", s)
 	}
-	// ② **两条 entry 都写**（实测：ACP 的模型目录由 `agent-default-model` 的 provider 决定，
-	// 只改 `acp` 那一行目录纹丝不动）。
-	if !strings.Contains(s, "- id: agent-default-model\n") {
-		t.Fatalf("必须同时写 agent-default-model（ACP 目录的 provider 由它决定）:\n%s", s)
+	// ② **绝不写 agent-default-model**（ACP 平面不消费它，写它等于空操作 + 第二个会漂移的事实）。
+	if strings.Contains(s, "agent-default-model") {
+		t.Fatalf("默认不写 agent-default-model（对 ACP 会话是空操作）:\n%s", s)
 	}
-	if !strings.Contains(s, "- id: acp\n") {
-		t.Fatalf("也仍要写 acp（当前选中的那一行）:\n%s", s)
-	}
-	// ③ 默认模型落在 acp 行的 config 里。
-	if !strings.Contains(s, `    provider: "deepseek-official"`+"\n"+`    model: "deepseek-v4-flash"`+"\n") {
+	// ③ 默认模型落在 acp 行的 config 里（实测：**只改 acp 这一行** currentValue 才会变；
+	// 只改 agent-default-model 纹丝不动）。
+	if !strings.Contains(s, `    provider: "arkprobe"`+"\n"+`    model: "ark-probe-x"`+"\n") {
 		t.Fatalf("acp 行的 config 应带 provider/model:\n%s", s)
 	}
 	// ④ 路由声明走 llm-pi-ai 的 providers.<route>.models[]（整体替换语义 ⇒ 平台列出的就是全部）。
-	if !strings.Contains(s, "- id: llm-pi-ai\n") || !strings.Contains(s, `          - id: "deepseek-v4-flash"`) {
+	if !strings.Contains(s, "- id: llm-pi-ai\n") || !strings.Contains(s, `          - id: "ark-probe-x"`) {
 		t.Fatalf("缺少 llm-pi-ai 路由声明:\n%s", s)
+	}
+	// ⑤ `api` **只出现一次**，且取自投影声明（早先版本按 type 写一次、再按投影写第二次 → 重复键）。
+	if n := strings.Count(s, "        api: "); n != 1 {
+		t.Fatalf("api 应恰好出现一次（重复键会让 dsh 的可用性判定不可预期），实际 %d 次:\n%s", n, s)
+	}
+	if !strings.Contains(s, `        api: "openai-completions"`) {
+		t.Fatalf("api 应取自投影声明（wire 协议），不是 provider 的 type:\n%s", s)
+	}
+	if !strings.Contains(s, `        apiKeyEnv: "DEEPSEEK_API_KEY"`) {
+		t.Fatalf("apiKeyEnv 仍应来自凭据类型（决定注入哪个 env）:\n%s", s)
 	}
 	if !strings.Contains(s, `        apiKeyEnv: "DEEPSEEK_API_KEY"`) {
 		t.Fatalf("apiKeyEnv 必须是引用（不是明文）:\n%s", s)

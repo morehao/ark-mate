@@ -400,3 +400,44 @@ func TestDefaultModelReasoningEffortNotSent(t *testing.T) {
 	}
 	_ = testutil.StubRegistry() // 保持 testutil 依赖（夹具在别处复用）
 }
+
+// TestClearDefaultModel PATCH 的两个方向都要生效。
+//
+// 这条来自一次**端到端探针**：删掉 dsh 的 overlay 之后想恢复，只删文件不够——平台侧仍声明着默认，
+// T2 会继续把它下发、底座已经不认识了，于是每条新会话都失败；而"清掉默认"这个动作当时是**静默无效**的
+// （写面只处理 `is_default:true`），于是恢复了半天以为自己没清干净。
+func TestClearDefaultModel(t *testing.T) {
+	ctx := context.Background()
+	r := newModelRig(t)
+	created := r.createModel(t, "opencode", "p1", "m1")
+	row := created.ID
+	// 置默认。
+	if _, err := r.svc.UpdateModel(ctx, row, dtomodel.ModelPatchReq{IsDefault: boolPtr(true)}); err != nil {
+		t.Fatalf("置默认: %v", err)
+	}
+	if v, err := r.svc.DefaultModelValueFor(ctx, "opencode"); err != nil || v == "" {
+		t.Fatalf("置默认后应有默认值: %q %v", v, err)
+	}
+	// 清默认 —— 必须真的清掉。
+	if _, err := r.svc.UpdateModel(ctx, row, dtomodel.ModelPatchReq{IsDefault: boolPtr(false)}); err != nil {
+		t.Fatalf("清默认: %v", err)
+	}
+	if v, err := r.svc.DefaultModelValueFor(ctx, "opencode"); err != nil || v != "" {
+		t.Fatalf("清默认后不该再有默认值: %q %v", v, err)
+	}
+	// 幂等：本来就不是默认 → 仍然成功。
+	if _, err := r.svc.UpdateModel(ctx, row, dtomodel.ModelPatchReq{IsDefault: boolPtr(false)}); err != nil {
+		t.Fatalf("重复清默认应幂等: %v", err)
+	}
+	// 审计里要留下"清默认"那一版（一行 + 一条审计同事务的纪律）：版本号至少推进了两次。
+	got, found, err := r.svc.st.GetModelDefinition(ctx, row)
+	if err != nil || !found {
+		t.Fatalf("读行: found=%v err=%v", found, err)
+	}
+	if got.Revision < 2 {
+		t.Fatalf("置默认与清默认都应各推进一版 revision，实际 %d", got.Revision)
+	}
+	if got.IsDefault {
+		t.Fatal("清默认后列上的 is_default 应为 false")
+	}
+}

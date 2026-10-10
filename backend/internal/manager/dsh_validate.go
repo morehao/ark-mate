@@ -125,23 +125,27 @@ func (s *Service) validateDshPatchCandidate(ctx context.Context, spec runtime.Sp
 	} else if runErr != nil {
 		return nil, fmt.Errorf("manager: 跑 dsh 校验门失败（%s）: %w", cmd, runErr)
 	}
+	// **先解析完整输出，再为"给人看的证据"截断**——顺序反了就会把大 dump 截成非法 JSON，
+	// 于是每一份稍大的候选都被判成"无法校验"（2026-10-10 实测踩到：dsh 的 schema dump 本来就
+	// 远超 8KB，所以校验门对所有输入都恒红）。这类 bug 的形态很坏：它**看起来**像底座拒绝了候选。
 	raw := stdout.String()
-	if len(raw) > 8000 {
-		raw = raw[:8000] + "…（截断）"
-	}
-	res.Raw = raw
+	res.Raw = clipText(raw, 8000)
 	if se := strings.TrimSpace(stderr.String()); se != "" {
 		res.Diagnostics = append(res.Diagnostics, "stderr: "+firstLine(se))
 	}
 	// 解析 `x-cordis`（dump 的输出是 JSON；解析不了就是"无法校验"→ 记诊断而不是当成通过）。
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		res.Diagnostics = append(res.Diagnostics, "dump 输出不是 JSON：无法校验")
+		// 带上**证据**：只说"不是 JSON"的话，用户（和排查的人）看到的就是一句无法行动的话。
+		// 把输出的开头几行贴进诊断里——它通常就是 dsh 自己那句拒绝原因。
+		res.Diagnostics = append(res.Diagnostics,
+			"dump 输出不是 JSON：无法校验（输出开头："+clipText(firstLine(raw), 200)+"）")
 		return res, nil
 	}
 	xc, _ := doc["x-cordis"].(map[string]any)
 	if xc == nil {
-		res.Diagnostics = append(res.Diagnostics, "dump 输出里没有 x-cordis：无法校验")
+		res.Diagnostics = append(res.Diagnostics,
+			"dump 输出里没有 x-cordis：无法校验（输出开头："+clipText(firstLine(raw), 200)+"）")
 		return res, nil
 	}
 	if b, ok := xc["complete"].(bool); ok {
@@ -162,6 +166,14 @@ func (s *Service) validateDshPatchCandidate(ctx context.Context, spec runtime.Sp
 // dshDumpPassed 校验门的判据（三条同时成立）。
 func dshDumpPassed(res *dshDumpResult) bool {
 	return res != nil && res.ExitCode == 0 && res.Complete && len(res.Diagnostics) == 0
+}
+
+// clipText 截断一段文本（诊断里只放开头，避免把整份 dump 塞进错误消息）。
+func clipText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…（截断）"
 }
 
 // diagnosticText 把一条诊断渲染成人话（形状不稳，尽量兼容）。

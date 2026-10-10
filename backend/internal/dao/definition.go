@@ -257,6 +257,24 @@ func (d *ModelDao) ClearDefaults(ctx context.Context, runtimeID string) error {
 		Update("is_default", model.FlagValue(false)).Error
 }
 
+// ClearDefaultCAS 把一条模型标记为非默认，**仅当 revision 仍等于 expectedRev**。
+//
+// 与 SetDefaultCAS 同一条纪律（条件更新是并发下的唯一仲裁者）。它不需要"先清同 runtime 再置"
+// 那一步：清默认只影响这一行，别的行本来就不是默认。
+func (d *ModelDao) ClearDefaultCAS(ctx context.Context, id string, expectedRev int64, now time.Time) (bool, error) {
+	res := d.DB(ctx).Model(new(model.ModelDefinition)).
+		Where("id = ? AND revision = ?", id, expectedRev).
+		Updates(map[string]any{
+			"is_default": model.FlagValue(false),
+			"revision":   expectedRev + 1,
+			"updated_at": model.FormatTimeOrNow(now),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // SetDefaultCAS 把一条模型置为该 runtime 的默认，**仅当 revision 仍等于 expectedRev**。
 //
 // 返回 false = 有人在这中间改过（或行已不存在）→ 调用方翻成 `definition_changed`(40901)。

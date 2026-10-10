@@ -534,6 +534,26 @@ mate provider export --dir <AgentDir>          # 先 --dry-run 看一眼也行�
 #    providers/models 两张表，旧二进制读 providers.json 照常工作。
 ```
 
+**别把"删掉平台写的 overlay"当成一步恢复**（2026-10-10 端到端实测）：T5 与 T2 是两条同时生效的路径。
+去掉 `--patch`（删掉 `<MATE_HOME>/runtime/<id>/<overlay>` 或让平台不再注入它）之后，**老的进程**照常跑，
+但**新会话会失败**——因为平台侧仍声明着那条默认模型，T2 会把它下发下去，而底座此刻已经不认识它
+（dsh 逐字：`Invalid params: unknown model option: ["<provider>","<model>"]`）。设计上这是**有意的**：
+"运行时拒绝该值 → 建会话失败，绝不静默回落到出厂默认"（静默回落会让用户以为模型还在按他设的跑）。
+所以恢复动作是**两步**：
+
+```bash
+# 1) 去掉平台写的配置面（删 overlay / 清掉启动参数 / 或把清单清空——平台见清单为空就什么都不写）
+rm -f <MATE_HOME>/runtime/<id>/<overlay>
+# 2) 把平台的那条默认模型取消掉（否则它还会被下发给每条新会话）
+curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d '{"is_default":false}'
+# 或者：在面板「设置 · 模型」里点掉那颗星（同一件事）。
+# 之后新会话按底座自己的默认起；要彻底复原就把清单条目删掉。
+```
+
+`mate doctor` 在**任一条**仍处于这个状态时会报出来（`providers.runtimes[].advertisedKnown=true` 而
+`declared` 非空的条目不落在 advertised 里 → 差集非空 + 高危档），所以"哪台机器正卡在这两步之间"是
+可查的，不用靠记。
+
 **为什么这一段的检查项不放进 README**：README 的「存量迁移」那几段讲的是**机制**（谁搬到哪、
 幂等靠什么、为什么不覆盖），而这里六条是**发布会话里要照着敲的命令**，它们的判据（备份在哪、
 `mate doctor --json` 的哪两个字段、`--dry-run` 成功）与本节开头的备份/回滚命令是同一套东西。
