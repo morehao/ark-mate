@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip,
+  Alert, Button, Collapse, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -27,13 +27,14 @@ import {
   deleteProvider,
   listModels,
   listProviders,
+  listRuntimes,
   patchModel,
   probeProvider,
   toErrorMessage,
   upsertProvider,
 } from '@ark-mate/api'
 import type {
-  ModelRow, ModelsResp, Provider, ProviderCheck, ProviderProbeResp, RuntimeConfigResp,
+  ModelRow, ModelsResp, Provider, ProviderCheck, ProviderProbeResp, Runtime, RuntimeConfigResp,
 } from '@ark-mate/types'
 import { useMate } from '../../store'
 import { CardHeader } from './CardHeader'
@@ -48,7 +49,15 @@ interface ProviderFormValues {
   type?: string
   note?: string
   key?: string
+  /**
+   * 逐 runtime 的运行时参数（H3）。键是 `rt:field`（形如 `opencode:baseURL`），
+   * 值是表单文本；object 类字段按 **JSON 文本**编辑，提交前解析（解析失败当场报错，不静默丢弃）。
+   */
+  [projectionKey: string]: unknown
 }
+
+/** 表单字段名：`<runtime>:<field>`（AntD 的 name 路径不支持嵌套的 runtime 名做动态键，故用扁平键）。 */
+const projectionFieldName = (runtime: string, field: string): string => `${runtime}:${field}`
 
 interface ModelFormValues {
   provider_id: string
@@ -73,6 +82,7 @@ export function ModelSettingsPanel() {
   const showToast = useMate((s) => s.showToast)
 
   const [providers, setProviders] = useState<Provider[]>([])
+  const [runtimes, setRuntimes] = useState<Runtime[]>([])
   const [providerId, setProviderId] = useState<string>('')
   // runtime 候选从**已注册的 agent** 的 `runtimes[]` 并集里取（平台没有单独的 runtime 列表面，
   // 而 agent 的 runtimes 就是"哪些底座真的在用"的权威投影）。dsh/opencode 两个内置 agent 恒在。
@@ -102,6 +112,13 @@ export function ModelSettingsPanel() {
     }
   }, [showToast])
 
+  // 运行时参数 schema 由后端派生（`GET /runtimes` 的 provider_projection）——前端不硬编码字段：
+  // 只渲染「该底座声明了 schema」的那几块，加一个底座不需要改这里。
+  const schemaRuntimes = useMemo(
+    () => runtimes.filter((r) => r.provider_projection && (r.provider_projection.fields?.length ?? 0) > 0),
+    [runtimes],
+  )
+
   const loadView = useCallback(async (rt: string, refresh = false) => {
     if (!rt) return
     if (refresh) setRefreshing(true)
@@ -119,6 +136,14 @@ export function ModelSettingsPanel() {
 
   useEffect(() => {
     void loadProviders()
+    void (async () => {
+      try {
+        setRuntimes(await listRuntimes())
+      } catch {
+        // 拿不到底座列表 = 运行时参数区不渲染（其余照常）；不打断设置页。
+        setRuntimes([])
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -152,13 +177,55 @@ export function ModelSettingsPanel() {
     setProviderModal(target)
     if (target.mode === 'edit') {
       providerForm.setFieldsValue({ id: target.row.id, type: target.row.type, note: target.row.note, key: '' })
+      // 回填运行时参数：object 类字段按 JSON 文本回显（与提交时的解析口径对称）。
+      const projections = target.row.projections ?? {}
+      const filled: Record<string, unknown> = {}
+      for (const rt of schemaRuntimes) {
+        const frag = projections[rt.id] ?? {}
+        for (const f of rt.provider_projection?.fields ?? []) {
+          const v = frag[f.name]
+          if (v === undefined) continue
+          filled[projectionFieldName(rt.id, f.name)] = f.type === 'object' ? JSON.stringify(v, null, 2) : String(v)
+        }
+      }
+      providerForm.setFieldsValue(filled)
     } else {
       providerForm.resetFields()
     }
   }
 
+  /** 把表单里的运行时参数收集成 `{runtime: fragment}`；object 字段解析失败即抛（不静默丢弃）。 */
+  const collectProjections = (values: Record<string, unknown>): Record<string, Record<string, unknown>> => {
+    const out: Record<string, Record<string, unknown>> = {}
+    for (const rt of schemaRuntimes) {
+      const frag: Record<string, unknown> = {}
+      for (const f of rt.provider_projection?.fields ?? []) {
+        const raw = values[projectionFieldName(rt.id, f.name)]
+        if (raw === undefined || raw === null || raw === '') continue
+        if (f.type === 'object') {
+          try {
+            frag[f.name] = JSON.parse(String(raw))
+          } catch (err) {
+            throw new Error(`${rt.id} 的 ${f.name} 不是合法 JSON：${toErrorMessage(err)}`)
+          }
+        } else {
+          frag[f.name] = String(raw)
+        }
+      }
+      if (Object.keys(frag).length > 0) out[rt.id] = frag
+    }
+    return out
+  }
+
   const submitProvider = async (): Promise<void> => {
     const v = await providerForm.validateFields()
+    let projections: Record<string, Record<string, unknown>>
+    try {
+      projections = collectProjections(v as unknown as Record<string, unknown>)
+    } catch (err) {
+      showToast(toErrorMessage(err))
+      return
+    }
     if (providerModal?.mode === 'create') {
       if (!PROVIDER_ID_RE.test(v.id ?? '')) {
         showToast('id 只能含字母数字与 . _ -（1-64 位）：它会成为密钥文件名的一部分')
@@ -166,16 +233,29 @@ export function ModelSettingsPanel() {
       }
       const created = await guard(createProvider({
         id: v.id ?? '', type: v.type ?? '', note: v.note, key: v.key || undefined,
+        projections: Object.keys(projections).length ? projections : undefined,
       }))
       if (!created) return
       showToast('凭据已保存（密钥不读回）。改密钥要等下一个轮次边界才会被会话拿到')
     } else if (providerModal?.mode === 'edit') {
       const row = providerModal.row
-      const patch: { type?: string; note?: string; key?: string } = {}
+      const patch: {
+        type?: string
+        note?: string
+        key?: string
+        projections?: Record<string, Record<string, unknown>>
+      } = {}
       if (v.type !== row.type) patch.type = v.type
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
       // 密钥留空 = 不改（避免"编辑备注顺手把密钥清掉"）。
       if (v.key) patch.key = v.key
+      // 运行时参数：只在**真的改了**时才提交（逐 runtime 比较，避免"打开就保存"把空对象写成删除）。
+      const before = row.projections ?? {}
+      for (const [rt, frag] of Object.entries(projections)) {
+        if (JSON.stringify(before[rt] ?? {}) !== JSON.stringify(frag)) {
+          patch.projections = { ...(patch.projections ?? {}), [rt]: frag }
+        }
+      }
       if (Object.keys(patch).length === 0) {
         showToast('没有改动')
         return
@@ -621,6 +701,36 @@ export function ModelSettingsPanel() {
           <Form.Item label="备注" name="note">
             <Input placeholder="例如「主账号」" />
           </Form.Item>
+          {schemaRuntimes.length > 0 && (
+            <Collapse
+              ghost
+              size="small"
+              items={schemaRuntimes.map((rt) => ({
+                key: rt.id,
+                label: `运行时参数 · ${rt.name || rt.id}`,
+                children: (
+                  <div className="fg-projfields">
+                    <div className="fg-diffnote">
+                      {rt.provider_projection?.note}
+                      「未知键」会原样保留，平台只校验它认识的字段。
+                    </div>
+                    {(rt.provider_projection?.fields ?? []).map((f) => (
+                      <Form.Item
+                        key={f.name}
+                        label={`${f.name}${f.required ? '' : '（可选）'}${f.type === 'object' ? ' · JSON' : ''}`}
+                        name={projectionFieldName(rt.id, f.name)}
+                        extra={f.note}
+                      >
+                        {f.type === 'object'
+                          ? <Input.TextArea rows={3} placeholder='{"key":"value"}' autoComplete="off" />
+                          : <Input placeholder={f.note} autoComplete="off" />}
+                      </Form.Item>
+                    ))}
+                  </div>
+                ),
+              }))}
+            />
+          )}
         </Form>
       </Modal>
 

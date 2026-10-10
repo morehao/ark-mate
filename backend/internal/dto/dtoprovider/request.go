@@ -14,6 +14,11 @@ type ProviderPatchReq struct {
 	Type *string `json:"type"`
 	Note *string `json:"note"`
 	Key  *string `json:"key"`
+	// Projections 逐 runtime 的**运行时参数**声明（H1）：`{"<runtime>": {"api":"…","baseURL":"…"}}`。
+	//
+	// 语义与其它指针字段一致：**nil = 不改**；给了就以它为准（该 runtime 没有的键不参与，所以
+	// "只改 opencode 那一份"是安全的）。未知键原样保留（平台只校验它认识的字段）。
+	Projections map[string]map[string]any `json:"projections"`
 }
 
 // ProviderCreateReq POST /providers：新建一条档案（id 必填且过词法校验）。
@@ -25,6 +30,8 @@ type ProviderCreateReq struct {
 	Type string  `json:"type"`
 	Note *string `json:"note"`
 	Key  *string `json:"key"`
+	// Projections 见 ProviderPatchReq：逐 runtime 的运行时参数（自定义模型要连通就得写它）。
+	Projections map[string]map[string]any `json:"projections"`
 }
 
 // ProviderProbeReq POST /providers/:id/probe 的请求体。

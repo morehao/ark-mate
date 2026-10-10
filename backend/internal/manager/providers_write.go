@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— provider 凭据的**写面**（v11：POST / PATCH / DELETE） ———
@@ -46,6 +48,12 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 	d := &providerDef{ID: req.ID, Type: req.Type, Body: map[string]any{}}
 	if req.Note != nil {
 		d.Note = *req.Note
+	}
+	if len(req.Projections) > 0 {
+		if err := s.validateProjections(req.Projections); err != nil {
+			return nil, err
+		}
+		d.Body["projections"] = toAnyMap(req.Projections)
 	}
 
 	// ② vault：新建时"清空密钥"没有意义（还没有密文），只在给了非空 key 时写。
@@ -125,6 +133,30 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	}
 	if patch.Note != nil {
 		next.Note = *patch.Note
+	}
+	if patch.Projections != nil {
+		if err := s.validateProjections(patch.Projections); err != nil {
+			return nil, err
+		}
+		// 逐 runtime**合并**（不是在整份上替换）：只改 opencode 那一份时不该把 dsh 那份抹掉。
+		merged := map[string]any{}
+		if cur, ok := next.Body["projections"].(map[string]any); ok {
+			for rt, frag := range cur {
+				merged[rt] = frag
+			}
+		}
+		for rt, frag := range patch.Projections {
+			if len(frag) == 0 {
+				delete(merged, rt) // 空对象 = 明确删掉这一份声明
+				continue
+			}
+			merged[rt] = toAnyMap2(frag)
+		}
+		if len(merged) == 0 {
+			delete(next.Body, "projections")
+		} else {
+			next.Body["projections"] = merged
+		}
 	}
 
 	// ② vault：写入新密文或删除旧密文（失败即中止，载体与内存都没动过）。
@@ -267,6 +299,48 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		}
 	}
 	return resp, nil
+}
+
+// validateProjections 校验逐 runtime 的运行时参数声明。
+//
+// 三条判据：① 该 runtime **已注册**（写一条没人认的声明等于给自己挖坑）；② 它**承载平台模型清单**
+// （未声明 ConfigProjection 的底座没有"运行时参数"这回事）；③ 认识的字段类型要对（未知键放过）。
+func (s *Service) validateProjections(projections map[string]map[string]any) error {
+	rts := make([]string, 0, len(projections))
+	for rt := range projections {
+		rts = append(rts, rt)
+	}
+	sort.Strings(rts)
+	for _, rt := range rts {
+		spec, ok := s.reg.Get(rt)
+		if !ok {
+			return acl.NewError(acl.ClassRequest, "runtime_not_found",
+				fmt.Sprintf("运行时参数里写了 runtime %q，但它未注册", rt), nil)
+		}
+		if problems := runtime.ValidateProviderProjection(spec, projections[rt]); len(problems) > 0 {
+			return acl.NewError(acl.ClassRequest, "invalid_param",
+				"运行时参数不合法："+strings.Join(problems, "；"), nil)
+		}
+	}
+	return nil
+}
+
+// toAnyMap 把 `map[string]map[string]any` 的**一份**片段拷成 `map[string]any`。
+func toAnyMap2(frag map[string]any) map[string]any {
+	out := make(map[string]any, len(frag))
+	for k, v := range frag {
+		out[k] = v
+	}
+	return out
+}
+
+// toAnyMap 把 `{runtime: fragment}` 拷成可 JSON 序列化的通用形状。
+func toAnyMap(in map[string]map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for rt, frag := range in {
+		out[rt] = toAnyMap2(frag)
+	}
+	return out
 }
 
 // validateProviderID id 词法校验（它会进 vault 文件名 → 必须过引用校验，防路径穿越）。

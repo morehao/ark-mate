@@ -324,13 +324,35 @@ func buildOpencodeJSON(models []runtimeConfigModel, providers map[string]provide
 		}
 		if frag := p.Fragment; frag != nil {
 			pd.Package = bodyString(frag, "package")
-			if base := bodyString(frag, "settings_baseURL"); base != "" {
-				pd.Settings = map[string]any{"baseURL": base}
-			} else if st, ok := frag["settings"].(map[string]any); ok {
-				pd.Settings = st
+			// baseURL 的三种写法（按优先级）：`baseURL`（H1 的 schema 名）> `settings.baseURL` >
+			// 历史的 `settings_baseURL`。取 `settings` 而不是 `options`：opencode 的 provider
+			// 端点就住在 `settings` 里（验收脚本证过底座真按它发请求）。
+			switch {
+			case bodyString(frag, "baseURL") != "":
+				pd.Settings = map[string]any{"baseURL": bodyString(frag, "baseURL")}
+			case bodyString(frag, "settings_baseURL") != "":
+				pd.Settings = map[string]any{"baseURL": bodyString(frag, "settings_baseURL")}
+			default:
+				if st, ok := frag["settings"].(map[string]any); ok {
+					pd.Settings = st
+				}
 			}
+			opts := map[string]any{}
 			if opt, ok := frag["options"].(map[string]any); ok {
-				pd.Options = opt
+				for k, v := range opt {
+					opts[k] = v
+				}
+			}
+			// `api`/`compat` 归进 options（opencode 侧把它们当 provider options 透传）——
+			// 不写出去就等于"用户声明了、平台默默丢了"，那是本方案反复要消灭的形态。
+			if api := bodyString(frag, "api"); api != "" {
+				opts["api"] = api
+			}
+			if compat, ok := frag["compat"].(map[string]any); ok {
+				opts["compat"] = compat
+			}
+			if len(opts) > 0 {
+				pd.Options = opts
 			}
 		}
 		doc.Providers[routeID] = pd
@@ -447,6 +469,15 @@ func buildDshPatchYAML(models []runtimeConfigModel, providers map[string]provide
 				}
 				if api := bodyString(frag, "api"); api != "" {
 					b = append(b, fmt.Sprintf("        api: %s\n", yamlQuote(api))...)
+				}
+				// `compat` 是嵌套表：用 **YAML 的 flow mapping** 形态内联（JSON 是 YAML 的子集，
+				// 所以把 JSON 对象原样写出来就是合法的 YAML，且键序由 encoding/json 固定）。
+				if compat, ok := frag["compat"].(map[string]any); ok && len(compat) > 0 {
+					cb, err := json.Marshal(compat)
+					if err != nil {
+						return nil, fmt.Errorf("manager: 序列化 %s 的 compat 失败: %w", route, err)
+					}
+					b = append(b, fmt.Sprintf("        compat: %s\n", cb)...)
 				}
 			}
 			b = append(b, []byte("        models:\n")...)

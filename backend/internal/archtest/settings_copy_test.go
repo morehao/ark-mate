@@ -87,10 +87,18 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 	}
 
 	// 面板里也不许把运行时的**不透明 value** 当展示名摆给用户看（只说 model_id 与显示名）。
-	if strings.Contains(src, "JSON.stringify") {
-		t.Error("面板里不该出现 JSON.stringify：运行时的 value 是不透明串，展示给用户的是 model_id 与显示名")
+	//
+	// 判据收紧到"**对 model 的 value 做 JSON.stringify**"，而不是禁止整个 `JSON.stringify`：
+	// 后者是误伤（运行时参数里的 object 字段本来就要按 JSON 文本编辑/比较），一条会哭狼的守卫
+	// 迟早被人删掉。这里只抓最要命的形态——把不透明的价值串序列化出来给用户看。
+	if runtimeValueRenderedRE.MatchString(src) {
+		t.Error("面板里不该把运行时的 value 序列化出来展示（那是不透明串）：给用户看的是 model_id 与显示名")
 	}
 }
+
+// runtimeValueRenderedRE 抓"对某个 `.value` 做 JSON.stringify"这一形态（不透明的模型取值
+// 只许原样回传，不许被解析/序列化后展示）。允许 `JSON.stringify(frag)` 这类与模型取值无关的用法。
+var runtimeValueRenderedRE = regexp.MustCompile(`JSON\.stringify\([^)]*\.value`)
 
 // assertNoCodeWords 断言一段面向用户的文案里没有代码词。
 func assertNoCodeWords(t *testing.T, where, text string) {

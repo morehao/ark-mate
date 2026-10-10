@@ -59,6 +59,13 @@ func newModelRig(t *testing.T) *modelRig {
 	oc.Launch.Command = "mate-test-opencode-stub-not-on-path"
 	r.svc.reg.ApplyIsolationEnv(t.TempDir())
 	r.svc.reg.Register(oc)
+	// dsh 也注册一份（同样把 Command 换成桩名）：H 阶段的逐 runtime 声明需要**两个**承载清单的底座
+	// 才能验"只改一份不抹另一份"；而 dsh 的落点当前是只读的，注册它不会写任何东西。
+	if dsh, ok := real.Get(deepseekharness.ID); ok {
+		dsh.Launch.Command = "mate-test-dsh-stub-not-on-path"
+		dsh.Launch.Env = append(dsh.Launch.Env, "DSH_HOME="+filepath.Join(t.TempDir(), "dsh-home"))
+		r.svc.reg.Register(dsh)
+	}
 	return &modelRig{genRig: r}
 }
 

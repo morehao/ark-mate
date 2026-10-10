@@ -30,6 +30,9 @@ type ProviderResp struct {
 	// 它是**读取时现算的派生值**，且刻意不给"合并结论"：同一份凭据在不同底座上的可达性
 	// 本来就是逐条的，"对 opencode 可用、对 dsh 不可用"是有用信息。
 	Applicability []objdelivery.Applicability `json:"applicability"`
+	// Projections 逐 runtime 的运行时参数声明（**写面原样回显**，编辑表单据此回填）。
+	// 它不是派生值：它就是 body 里那一份（未知键也一起回来）。
+	Projections map[string]map[string]any `json:"projections,omitempty"`
 	// Refs 引用面：哪些 agent 用它，以及这些 agent 可能落在哪些 runtime。
 	//
 	// 它是**只读派生**（每次读取时按 agent 注册表现算），没有写入方——存一份就必然漂移。

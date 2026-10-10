@@ -41,6 +41,7 @@ import type {
   ProviderCreateReq,
   ProviderDeleteResp,
   ProviderProbeResp,
+  Runtime,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -450,6 +451,13 @@ export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
 // ——— P2 provider 注入面（密钥只写不读回） ———
 
 export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/mate/providers')
+
+/**
+ * 底座列表（含每个底座认的运行时参数 schema）。
+ *
+ * 它是「每个底座的运行时参数」那张表单的**唯一数据源**：加一个底座不需要改前端。
+ */
+export const listRuntimes = (): Promise<Runtime[]> => http.get<Runtime[]>('/mate/runtimes')
 
 /** 新建一条供应商凭据（id 已存在 → 40901 `provider_exists`，绝不覆盖）。 */
 export const createProvider = (req: ProviderCreateReq): Promise<Provider> =>

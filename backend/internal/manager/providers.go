@@ -16,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // providersFileName provider 档案文件名（**目录级配置**：AgentDir 下的保留文件，不是 agent 定义）。
@@ -290,6 +291,7 @@ func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.Prov
 		Revision:      d.Revision,
 		Delivery:      providerDelivery(d),
 		Applicability: s.providerApplicabilityLocked(d),
+		Projections:   providerProjections(d),
 		Refs:          dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},
 		Problems:      providerProblems(d),
 	}
@@ -312,6 +314,24 @@ func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.Prov
 	sort.Strings(resp.Refs.Agents)
 	sort.Strings(resp.Refs.Runtimes)
 	return resp
+}
+
+// providerProjections 把 body 里的逐 runtime 运行时参数**原样**投影出来（H1：编辑表单据它回填）。
+func providerProjections(d *providerDef) map[string]map[string]any {
+	raw, ok := d.Body["projections"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]any, len(raw))
+	for rt, frag := range raw {
+		if m, ok := frag.(map[string]any); ok {
+			out[rt] = m
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // providerDelivery provider 凭据的交付声明（M6）。
@@ -342,18 +362,36 @@ func (s *Service) providerApplicabilityLocked(d *providerDef) []objdelivery.Appl
 	runtimes := s.registeredRuntimeIDs()
 	out := make([]objdelivery.Applicability, 0, len(runtimes))
 	envKey := envKeyOf(d.Type)
+	// H1/H2：该 runtime 上的**运行时参数声明**（`body.projections.<runtime>`）。
+	// 它回答的是另一件事——"这条凭据的模型能不能在这个底座上连通"（api/baseURL/package）。
+	// 两者同属可达性，所以并列在 reason 里：**两类事实都摆出来，不给合并结论**。
+	projections, _ := d.Body["projections"].(map[string]any)
 	for _, rt := range runtimes {
+		frag, _ := projections[rt].(map[string]any)
+		fragNote := ""
+		if len(frag) > 0 {
+			fragNote = "；已声明运行时参数（" + runtime.ProjectionSummary(frag) + "）"
+		}
 		if envKey == "" {
 			out = append(out, objdelivery.Applicability{
 				Runtime: rt, OK: false, Status: objdelivery.StatusNotConfigured,
 				Reason: "推不出注入变量名（type 为空）：在「设置 · 模型」里给它补一个上游类型，" +
-					"这条凭据才会以 <TYPE>_API_KEY 注入 " + rt + " 的子进程 env",
+					"这条凭据才会以 <TYPE>_API_KEY 注入 " + rt + " 的子进程 env" + fragNote,
 			})
 			continue
 		}
+		if spec, ok := s.reg.Get(rt); ok {
+			if problems := runtime.ValidateProviderProjection(spec, frag); len(problems) > 0 {
+				out = append(out, objdelivery.Applicability{
+					Runtime: rt, OK: false, Status: objdelivery.StatusNotConfigured,
+					Reason: "运行时参数不合法：" + strings.Join(problems, "；"),
+				})
+				continue
+			}
+		}
 		out = append(out, objdelivery.Applicability{
 			Runtime: rt, OK: true, Status: objdelivery.StatusProjected,
-			Reason: "以 " + envKey + " 注入 " + rt + " 的子进程 env（agent 绑定该档案拨号时生效）",
+			Reason: "以 " + envKey + " 注入 " + rt + " 的子进程 env（agent 绑定该档案拨号时生效）" + fragNote,
 		})
 	}
 	return out

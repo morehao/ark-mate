@@ -86,6 +86,8 @@ export interface Provider {
   delivery?: Delivery
   /** 逐 runtime 的可达性（刻意不给合并结论）。 */
   applicability?: Applicability[]
+  /** 逐 runtime 的运行时参数声明（写面原样回显，供编辑表单回填）。 */
+  projections?: Record<string, Record<string, unknown>>
   /** 写面回执（只在写面响应里出现）。 */
   effect?: ProviderEffect
 }
@@ -129,6 +131,11 @@ export interface ProviderPatch {
   note?: string
   /** 非 nil 即覆盖/清除（空串 = 清除）。`model` 已删除（v11）。 */
   key?: string
+  /**
+   * 逐 runtime 的**运行时参数**声明：`{"<runtime>": {"api":"…","baseURL":"…","package":"…"}}`。
+   * 缺省 = 不改；某 runtime 给**空对象** = 删掉那一份声明；给了就**逐 runtime 合并**（不抹另一份）。
+   */
+  projections?: Record<string, Record<string, unknown>>
 }
 
 export interface ProviderCreateReq {
@@ -136,6 +143,8 @@ export interface ProviderCreateReq {
   type: string
   note?: string
   key?: string
+  /** 见 ProviderPatch.projections。 */
+  projections?: Record<string, Record<string, unknown>>
 }
 
 export interface ProviderDeleteResp {
