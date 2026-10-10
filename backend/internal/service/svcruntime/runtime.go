@@ -33,6 +33,10 @@ type RuntimeSvc interface {
 	// ProbeProvider 跑一次连接自检（本地段无条件、上游段仅当 req.Upstream）。
 	ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error)
 
+	// ModelsView 返回 `GET /models` 的完整读面：平台清单（declared）+ 运行时事实（advertised）
+	// + 两个差集（diff）+ 物化状态（config）；未声明落点的 runtime 回落到纯旧形态（options）。
+	ModelsView(ctx context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error)
+
 	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
 	// source=session|resume|cache|none 标注取样来源。它是**事实**（运行时广告什么）；
 	// 平台声明的那份是 `models` 表，读面见 ListModels。

@@ -37,6 +37,9 @@ func newEngine() *gin.Engine {
 func newEngineWithService() (*gin.Engine, *manager.Service) {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
+	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
+	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
+	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	assets, _ := router.ResolveAssets("")
@@ -135,23 +138,44 @@ func TestRouterModelCatalog(t *testing.T) {
 		t.Fatalf("/models 信封不符: %+v", env)
 	}
 	var resp struct {
-		Agent   string           `json:"agent"`
-		Runtime string           `json:"runtime"`
-		Source  string           `json:"source"`
-		Options []map[string]any `json:"options"`
-		Note    string           `json:"note"`
+		Agent      string           `json:"agent"`
+		Runtime    string           `json:"runtime"`
+		Declared   []map[string]any `json:"declared"`
+		Advertised []map[string]any `json:"advertised"`
+		Diff       struct {
+			DeclaredNotAdvertised []map[string]any `json:"declared_not_advertised"`
+			AdvertisedNotDeclared []map[string]any `json:"advertised_not_declared"`
+		} `json:"diff"`
+		Config struct {
+			Runtime  string `json:"runtime"`
+			Declared bool   `json:"declared"`
+			Tested   bool   `json:"tested"`
+			Writable bool   `json:"writable"`
+			Channel  string `json:"channel"`
+			Note     string `json:"note"`
+		} `json:"config"`
+		Note string `json:"note"`
 	}
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("/models data 解析: %v", err)
 	}
-	if resp.Source != "none" {
-		t.Fatalf("无运行时来源应 source=none: %s", resp.Source)
+	// 真实装配（无编排器）下：清单为空、目录空，但**形状必须是新的四段**。
+	if resp.Declared == nil || resp.Advertised == nil ||
+		resp.Diff.DeclaredNotAdvertised == nil || resp.Diff.AdvertisedNotDeclared == nil {
+		t.Fatalf("declared/advertised/diff 两侧都必须是数组（空也要是 []，前端不必判 null）: %s", env.Data)
 	}
-	if len(resp.Options) != 0 {
-		t.Fatalf("平台不得内置模型清单，选项应为空: %s", env.Data)
+	if len(resp.Declared) != 0 || len(resp.Advertised) != 0 {
+		t.Fatalf("尚未声明任何模型、也没有编排器：两侧都应为空: %s", env.Data)
 	}
-	if resp.Note == "" {
-		t.Fatalf("空目录必须带说明: %s", env.Data)
+	// 物化状态要说清"该 runtime 声明了落点但没有写入权"（dsh 未实测 → 只读）。
+	if !resp.Config.Declared || resp.Config.Writable {
+		t.Fatalf("dsh 的落点应 declared=true / writable=false（未实测只读）: %+v", resp.Config)
+	}
+	if resp.Config.Channel != "cli_patch_arg" {
+		t.Fatalf("dsh 的通道应是 cli_patch_arg: %+v", resp.Config)
+	}
+	if resp.Config.Note == "" {
+		t.Fatalf("只读必须带说明: %s", env.Data)
 	}
 	if resp.Agent != "dsh" {
 		t.Fatalf("缺省应取默认 agent(dsh): %s", resp.Agent)
@@ -378,6 +402,9 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 func newAuthEngine(creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
+	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
+	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
+	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{

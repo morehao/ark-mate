@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -178,10 +177,15 @@ func ResolveConfigProjection(spec Spec) (ConfigProjectionPath, bool, error) {
 	return out, true, nil
 }
 
-// expandConfigRoot 展开配置根里的 `${VAR}`（先看 spec.Launch.Env，再看进程环境）。
+// expandConfigRoot 展开配置根里的 `${VAR}`——**只看该 runtime 自己的 `Launch.Env`**。
 //
-// 与 `ExpandProjectionRoot` 的差别只在**取值来源**（多一层 Launch.Env），校验口径逐字相同：
-// 占位符未设置就报错，不猜值；展开后必须是绝对路径。
+// 为什么**刻意不看进程环境**（这与 `Resolve` 的投影根解析不同，是有意的偏离）：
+// `OPENCODE_CONFIG_DIR` / `DSH_HOME` 都是平台经隔离表注入**子进程**的值。若这里回落到进程环境，
+// 那么在"隔离还没应用"的任何路径上（测试、误装配、未来的新入口），平台就会解析到**用户自己**的
+// `~/.dsh` / `~/.config/opencode` ——然后按 T5 往里写配置文件。那是 AGENTS.md 明令禁止的行为，
+// 而且**静默**：只有路径看起来"正常"。
+//
+// 所以这里 **fail-closed**：解析不到就报错（提示先过 `ApplyIsolationEnv`），绝不猜、绝不回落。
 func expandConfigRoot(spec Spec, root string) (string, error) {
 	launch := map[string]string{}
 	for _, kv := range spec.Launch.Env {
@@ -190,14 +194,16 @@ func expandConfigRoot(spec Spec, root string) (string, error) {
 		}
 	}
 	lookup := func(name string) (string, bool) {
-		if v, ok := launch[name]; ok && strings.TrimSpace(v) != "" {
-			return v, true
+		v, ok := launch[name]
+		if !ok || strings.TrimSpace(v) == "" {
+			return "", false
 		}
-		return os.LookupEnv(name)
+		return v, true
 	}
 	out, err := ExpandProjectionRoot(root, lookup)
 	if err != nil {
-		return "", fmt.Errorf("%w（提示：该 runtime 的隔离 env 里应当有对应变量，见 pkg/runtime/isolation.go）", err)
+		return "", fmt.Errorf("%w（提示：该 runtime 的隔离 env 里应当有对应变量——平台只在**自己的**隔离根上物化，"+
+			"绝不回落到进程环境或用户自己的目录；请确认装配期已调用 Registry.ApplyIsolationEnv）", err)
 	}
 	return out, nil
 }

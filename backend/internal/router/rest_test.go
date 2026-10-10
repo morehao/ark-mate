@@ -327,6 +327,12 @@ func (s *stubSvc) ApplyModels(_ context.Context, runtimeID string) (*dtomodel.Mo
 	}
 	return &dtomodel.ModelApplyResp{Applied: []dtomodel.RuntimeConfigResp{{Runtime: runtimeID, Pending: true}}}, nil
 }
+func (s *stubSvc) ModelsView(_ context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelsResp{Runtime: runtimeID, Agent: agentID}, nil
+}
 func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr

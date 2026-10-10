@@ -137,3 +137,66 @@ type ModelApplyReq struct {
 type ModelApplyResp struct {
 	Applied []RuntimeConfigResp `json:"applied"`
 }
+
+// AdvertisedModel 运行时**实际广告**的一个模型候选（事实）。它与 `ModelResp`（意图）来源不同、
+// 生命周期不同，所以类型也分开——混在一起会让"这条到底是谁说的"不可判定。
+type AdvertisedModel struct {
+	// Value 运行时不透明串（dsh 形如 `["provider","model"]`、opencode 形如 `provider/model`）。
+	Value string `json:"value"`
+	Name  string `json:"name,omitempty"`
+	Group string `json:"group,omitempty"`
+	// GroupName 分组名（agent 以分组形态下发时才有）。
+	GroupName string `json:"group_name,omitempty"`
+	// Unavailable 平台观测：该值最近被运行时拒绝过（如凭证缺失）。
+	Unavailable       bool   `json:"unavailable,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+}
+
+// ModelDiffEntry 差集里的一条。
+type ModelDiffEntry struct {
+	ModelID    string `json:"model_id,omitempty"`
+	Value      string `json:"value"`
+	ProviderID string `json:"provider_id,omitempty"`
+	// Route 该条所属的路由（展示分组用；**不参与判据**）。
+	Route string `json:"route,omitempty"`
+	// Severity error（选了会报错）| degrade（静默降级）| info（只是事实）。
+	Severity string `json:"severity"`
+	// Reason 一句人话说明（含"该怎么处置"）。
+	Reason string `json:"reason"`
+}
+
+// ModelDiff 清单（意图）与运行时广告（事实）的两个差集。
+//
+// **两个差集的默认期望不同**（这条非对称必须先写下来，否则对账上线第一天就会被当成 bug）：
+//
+//	dsh    声明 `models` = 整体替换该路由目录 ⇒ `declared_not_advertised` 期望为空；
+//	opencode 声明 = 追加（upsert），内置 models.dev 目录也在候选里
+//	       ⇒ `advertised_not_declared` **默认非空**，那不是故障。
+type ModelDiff struct {
+	DeclaredNotAdvertised []ModelDiffEntry `json:"declared_not_advertised"`
+	AdvertisedNotDeclared []ModelDiffEntry `json:"advertised_not_declared"`
+}
+
+// ModelsResp `GET /models` 的响应：**平台清单 + 运行时事实 + 差集 + 物化状态**。
+type ModelsResp struct {
+	Runtime string `json:"runtime"`
+	Agent   string `json:"agent,omitempty"`
+	// Declared 平台清单（意图）。
+	Declared []ModelResp `json:"declared"`
+	// Advertised 运行时实际广告的模型候选（事实）。
+	Advertised []AdvertisedModel `json:"advertised"`
+	// Diff 两个差集（差集为空 = 已生效）。
+	Diff ModelDiff `json:"diff"`
+	// Config 该 runtime 的模型配置物化状态（含 pending：**不许把"已保存"说成"已生效"**）。
+	Config RuntimeConfigResp `json:"config"`
+	// Options 旧形态回落：**仅当该 runtime 未声明 ConfigProjection** 时填充（避免第三个 runtime
+	// 未来接入时"没有清单可读"就什么都读不到）。
+	Options []ConfigOptionResp `json:"options,omitempty"`
+	// Source 目录取样来源（session|resume|cache|none；仅旧形态回落时有意义）。
+	Source    string `json:"source,omitempty"`
+	FetchedAt string `json:"fetched_at,omitempty"`
+	// AuthGuidance 运行时声明的鉴权方式（旧形态回落时透出）。
+	AuthGuidance []AuthGuidanceResp `json:"auth_guidance,omitempty"`
+	// Note 人话说明（目录不可读/未声明落点等）。
+	Note string `json:"note,omitempty"`
+}

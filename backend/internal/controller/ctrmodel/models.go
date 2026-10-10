@@ -37,16 +37,19 @@ func NewModelCtr(svc svcruntime.RuntimeSvc, agentSvc svcagent.AgentSvc) ModelCtr
 	return &modelCtr{svc: svc, agentSvc: agentSvc}
 }
 
-// List 返回某 agent 的运行时派生模型目录。
+// List 返回模型读面：**平台清单（declared）+ 运行时事实（advertised）+ 差集（diff）+ 物化状态（config）**。
 //
-// 目录来源是运行时（ACP session config options），不是平台内置清单：
-// 无 agent 参数时取默认 agent（dsh），以便面板首屏直接可用。
+// 参数：`?runtime=<id>`（缺省取该 agent 的首选 runtime）、`?agent=<id>`（缺省当前 Agent）、
+// `?refresh=1`（跳过 5 分钟目录缓存重新取样运行时目录——**清单与差集本来就是实时算的**）。
+//
+// 未声明模型配置落点的 runtime 回落到纯旧形态（`options` + `auth_guidance`），
+// 让未来接入的第三个底座的只读面不受影响。
 func (h *modelCtr) List(c *gin.Context) {
 	agentID := c.Query("agent")
 	if agentID == "" {
 		agentID = h.agentSvc.DefaultAgentID()
 	}
-	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
+	resp, err := h.svc.ModelsView(c.Request.Context(), c.Query("runtime"), agentID, c.Query("refresh") == "1")
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

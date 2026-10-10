@@ -72,6 +72,23 @@ func (r *Registry) SetLaunchEnv(runtimeID, key, value string) error {
 	return nil
 }
 
+// SetLaunchArgs 覆盖某 runtime 的启动参数（T5 的 `cli_patch_arg` 通道用它按 overlay 的存在性
+// 增删 `--patch <绝对路径>`）。
+//
+// 只影响**此后新拉起的进程**：这正是"下一个进程生效"的语义，也是"坏了就去掉参数"那条恢复路径的实现。
+func (r *Registry) SetLaunchArgs(runtimeID string, args []string) error {
+	if r == nil {
+		return nil
+	}
+	spec, ok := r.specs[runtimeID]
+	if !ok {
+		return fmt.Errorf("runtime %q 未注册", runtimeID)
+	}
+	spec.Launch.Args = append([]string(nil), args...)
+	r.specs[runtimeID] = spec
+	return nil
+}
+
 // List 返回全部 Spec（按 ID 排序，保证稳定输出）。
 func (r *Registry) List() []Spec {
 	ids := make([]string, 0, len(r.specs))

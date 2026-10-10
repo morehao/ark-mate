@@ -555,6 +555,14 @@ func (s *Service) MaterializeRuntimeConfig(ctx context.Context, runtimeID string
 	if err := selfCheckRuntimeConfig(proj, data); err != nil {
 		return nil, configWriteFailed(err, "自校验")
 	}
+	// ②′ 底座级校验门（仅 dsh 的 `cli_patch_arg`）：把候选**作为 `--patch`** 递进去跑一次 dump。
+	// 判据是 exitCode==0 **且 diagnostics 为空** **且 complete==true**——只看退出码会漏掉
+	// 「目标 entry id 不存在」（那是 warning、退出码 0）。未实测时这一步不跑（因为压根不写）。
+	if proj.Writable() {
+		if err := s.validateDshCandidateIfWritable(ctx, spec, proj, data); err != nil {
+			return nil, configWriteFailed(err, "底座校验门")
+		}
+	}
 	digest := sha256Hex(data)
 
 	st, serr := s.runtimeConfigState(ctx, runtimeID, data)
@@ -633,14 +641,14 @@ func (s *Service) applyRuntimeConfigDelivery(runtimeID string, proj runtime.Conf
 		}
 		return s.reg.SetLaunchEnv(runtimeID, key, string(data))
 	case runtime.ConfigChannelCLIPatchArg:
-		// dsh：只记候选内容，参数由 adapter 在装配期读（M5c）。
+		// dsh：文件已经由调用方写好，这里把 `--patch <绝对路径>` 同步进启动参数。
 		s.mu.Lock()
 		if s.runtimeCfgCandidates == nil {
 			s.runtimeCfgCandidates = map[string]string{}
 		}
 		s.runtimeCfgCandidates[runtimeID] = string(data)
 		s.mu.Unlock()
-		return nil
+		return s.syncPatchArg(runtimeID, proj.Path)
 	case runtime.ConfigChannelDirRead:
 		// 只写文件（没有额外通道）。文件已经在调用方写好。
 		return nil
@@ -756,6 +764,9 @@ func (s *Service) ApplyModels(ctx context.Context, runtimeID string) (*dtomodel.
 		}
 		sort.Strings(ids)
 	}
+	// 先按 overlay 的存在性同步启动参数（`cli_patch_arg` 通道）：这既是"写入权关着时也能生效"
+	// 的那条路径（探针手写 overlay），也是"坏配置的恢复路径"（文件删掉 → 参数自动摘掉）。
+	s.SyncRuntimeConfigArgs()
 	out := &dtomodel.ModelApplyResp{Applied: make([]dtomodel.RuntimeConfigResp, 0, len(ids))}
 	for _, id := range ids {
 		st, err := s.MaterializeRuntimeConfig(ctx, id, true)
