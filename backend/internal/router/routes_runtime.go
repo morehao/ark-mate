@@ -19,6 +19,8 @@ func registerRuntime(v1 *gin.RouterGroup, ports Ports) {
 
 	v1.GET("/runtimes", rt.List)
 	v1.GET("/providers", provider.List)
+	v1.POST("/providers", provider.Create)
 	v1.PATCH("/providers/:id", provider.Update)
+	v1.DELETE("/providers/:id", provider.Delete)
 	v1.GET("/models", model.List)
 }

@@ -455,8 +455,8 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 
 	// 档案存在但无 key → 仍拒绝，并指出本应注入的变量名（可操作）。
 	typ := "deepseek"
-	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{Type: &typ}); err != nil {
-		t.Fatalf("UpdateProvider: %v", err)
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "gone", Type: typ}); err != nil {
+		t.Fatalf("CreateProvider: %v", err)
 	}
 	err = svc.StartAgent(ctx, "a-prov")
 	if !errors.As(err, &ae) || ae.Code != "credential_missing" || !strings.Contains(ae.Details, "DEEPSEEK_API_KEY") {

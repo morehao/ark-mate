@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/vault"
 )
@@ -70,12 +71,14 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 			continue
 		}
 		p := &providerDef{
-			ID:       row.ID,
-			Revision: row.Revision,
-			Body:     body,
-			Type:     bodyString(body, "type"),
-			Model:    bodyString(body, "model"),
-			KeyRef:   bodyString(body, "key_ref"),
+			ID:        row.ID,
+			Revision:  row.Revision,
+			UpdatedAt: row.UpdatedAt,
+			Body:      body,
+			Type:      bodyString(body, "type"),
+			Model:     bodyString(body, "model"),
+			Note:      bodyString(body, "note"),
+			KeyRef:    bodyString(body, "key_ref"),
 		}
 		switch {
 		case p.KeyRef != "":
@@ -125,6 +128,11 @@ func providerBodyJSON(d *providerDef) (string, error) {
 	} else {
 		delete(body, "type")
 	}
+	if d.Note != "" {
+		body["note"] = d.Note
+	} else {
+		delete(body, "note")
+	}
 	if d.KeyRef != "" {
 		body["key_ref"] = d.KeyRef
 	} else {
@@ -150,7 +158,8 @@ func providerBodyJSON(d *providerDef) (string, error) {
 // 返回 `definition_changed`(40901) 而不是静默覆盖——与其余四个定义面逐字同形。
 func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef) error {
 	if s.st == nil {
-		return s.persistProvidersFile()
+		// 文件载体：写"内存现状 + 这一条"（提交时它还没进内存，见 persistProvidersFileWith 的注释）。
+		return s.persistProvidersFileWith(d)
 	}
 	body, err := providerBodyJSON(d)
 	if err != nil {
@@ -169,6 +178,7 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 		d.Body = parsed
 	}
 	d.Revision = expected + 1
+	d.UpdatedAt = time.Now().UTC()
 	return nil
 }
 
@@ -177,13 +187,8 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 // 返回 false = 载体里本来就没有（行不存在 / 文件里没有这一条）——调用方据此保持"删除是幂等的"。
 func (s *Service) removeProviderDefinition(ctx context.Context, id string) (bool, error) {
 	if s.st == nil {
-		s.mu.Lock()
-		_, existed := s.providers[id]
-		delete(s.providers, id)
-		s.mu.Unlock()
-		if !existed {
-			return false, nil
-		}
+		// 文件载体：**内存已由调用方摘除**（删除顺序是「先摘内存 → 再提交载体 → 最后删密文」），
+		// 所以这里只把结果落盘一次，不再回内存里判"有没有"——那样会因为已经摘掉而误报 false。
 		return true, s.persistProvidersFile()
 	}
 	row, found, err := s.st.GetProviderDefinition(ctx, id)

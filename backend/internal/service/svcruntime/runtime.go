@@ -17,11 +17,18 @@ type RuntimeSvc interface {
 	// ListRuntimes 返回可用 Runtime 概要。
 	ListRuntimes() ([]dtoruntime.RuntimeResp, error)
 
-	// ListProviders 列出 provider 档案概要（密钥只写不读回）。
+	// ListProviders 列出 provider 档案概要（密钥只写不读回；带引用面与问题清单）。
 	ListProviders() ([]dtoprovider.ProviderResp, error)
 
-	// UpdateProvider upsert provider 档案（type/model/key 子集；key 空串 = 清除）。
+	// CreateProvider 新建 provider 档案（id 已存在 → `provider_exists`(40901)，绝不覆盖）。
+	CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error)
+
+	// UpdateProvider 覆盖 provider 档案（**只更新**；不存在 → `provider_not_found`(40401)）。
+	// type/model/note 指针更新；key 非 nil 即覆盖/清除（空串 = 清除 ref + 密文）。
 	UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error)
+
+	// DeleteProvider 删除 provider 档案（幂等；被 agent 或模型条目引用 → `provider_in_use`(40901)）。
+	DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error)
 
 	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
 	// 平台不内置任何模型清单：source=session|resume|cache|none 标注取样来源。

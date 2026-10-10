@@ -217,15 +217,19 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
+	// 先走一次导入，让"文件里的 existing"成为 DB 行的起点（真实升级后的形态）。
+	if _, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
+		t.Fatalf("ImportProviderFile: %v", err)
+	}
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 
 	// 写面：新建一条（走 store）+ 覆盖一条（走 store）。
-	if _, err := svc.UpdateProvider(ctx, "brand-new", dtoprovider.ProviderPatchReq{
-		Type: ptr("openai"), Key: ptr("sk-new-secret"),
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+		ID: "brand-new", Type: "openai", Key: ptr("sk-new-secret"),
 	}); err != nil {
-		t.Fatalf("UpdateProvider(新建): %v", err)
+		t.Fatalf("CreateProvider(新建): %v", err)
 	}
 	if _, err := svc.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Type: ptr("anthropic")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
@@ -260,10 +264,10 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir) // memory 模式（无持久层）
-	if _, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{
-		Type: ptr("openai"), Key: ptr("sk-memory-secret"),
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+		ID: "p1", Type: "openai", Key: ptr("sk-memory-secret"),
 	}); err != nil {
-		t.Fatalf("UpdateProvider: %v", err)
+		t.Fatalf("CreateProvider: %v", err)
 	}
 	raw := readProvidersFile(t, dir)
 	if strings.Contains(raw, "sk-memory-secret") {
@@ -298,10 +302,10 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	svc.EnableStore(st)
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 	for _, id := range []string{"p-b", "p-a"} {
-		if _, err := svc.UpdateProvider(ctx, id, dtoprovider.ProviderPatchReq{
-			Type: ptr("deepseek"), Key: ptr("sk-" + id),
+		if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+			ID: id, Type: "deepseek", Key: ptr("sk-" + id),
 		}); err != nil {
-			t.Fatalf("UpdateProvider(%s): %v", id, err)
+			t.Fatalf("CreateProvider(%s): %v", id, err)
 		}
 	}
 	// DryRun 不写盘。

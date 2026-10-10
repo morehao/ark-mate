@@ -83,7 +83,7 @@ func TestProviderKeyMigratedToVaultOnLoad(t *testing.T) {
 	}
 }
 
-// TestProviderUpdateEncryptsAndClearDeletes UpdateProvider 落盘即密文 + 引用；
+// TestProviderUpdateEncryptsAndClearDeletes 写面落盘即密文 + 引用；
 // 空串清除 = 删 ref + 删密文文件（幂等）。
 func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 	home := t.TempDir()
@@ -92,7 +92,7 @@ func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 
 	key := "sk-live-secret-xyz"
 	typ := "deepseek"
-	resp, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{Type: &typ, Key: &key})
+	resp, err := svc.CreateProvider(context.Background(), dtoprovider.ProviderCreateReq{ID: "ds", Type: typ, Key: &key})
 	if err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
@@ -155,8 +155,8 @@ func TestProviderCiphertextMismatchSurfacesKeyErr(t *testing.T) {
 	dir := filepath.Join(home, "agents")
 	svc := agentTestSvc(t, dir)
 	key := "sk-will-be-orphaned"
-	if _, err := svc.UpdateProvider(context.Background(), "default",
-		dtoprovider.ProviderPatchReq{Type: strPtr("openai"), Key: &key}); err != nil {
+	if _, err := svc.CreateProvider(context.Background(),
+		dtoprovider.ProviderCreateReq{ID: "default", Type: "openai", Key: &key}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,9 +196,14 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 	svc := agentTestSvc(t, filepath.Join(t.TempDir(), "agents"))
 	key := "sk-x"
 	for _, id := range []string{"../escape", "a/b", "a b", ".."} {
+		if _, err := svc.CreateProvider(context.Background(),
+			dtoprovider.ProviderCreateReq{ID: id, Type: "openai", Key: &key}); err == nil {
+			t.Fatalf("非法 provider id 应被拒绝: %q", id)
+		}
+		// PATCH 走同一条词法校验（id 会进 vault 文件名）。
 		if _, err := svc.UpdateProvider(context.Background(), id,
 			dtoprovider.ProviderPatchReq{Key: &key}); err == nil {
-			t.Fatalf("非法 provider id 应被拒绝: %q", id)
+			t.Fatalf("非法 provider id 的 PATCH 应被拒绝: %q", id)
 		}
 	}
 }
@@ -208,8 +213,8 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 func TestProviderPlaintextSurvivesWhenVaultUnavailable(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil) // 未 LoadAgentDefinitions → agentDir == ""
 	key := "sk-memory-only"
-	resp, err := svc.UpdateProvider(context.Background(), "default",
-		dtoprovider.ProviderPatchReq{Type: strPtr("openai"), Key: &key})
+	resp, err := svc.CreateProvider(context.Background(),
+		dtoprovider.ProviderCreateReq{ID: "default", Type: "openai", Key: &key})
 	if err != nil {
 		t.Fatalf("无 vault 时仍应可用（仅内存）: %v", err)
 	}

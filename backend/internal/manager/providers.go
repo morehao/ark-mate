@@ -1,15 +1,17 @@
 package manager
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/redact"
@@ -39,6 +41,8 @@ type providerDef struct {
 	ID    string `json:"id"`
 	Type  string `json:"type"`
 	Model string `json:"model,omitempty"`
+	// Note 备注（不驱动行为）。它是 body 里的一个普通键，这里提升成字段只为让写面读起来清楚。
+	Note string `json:"note,omitempty"`
 	// Key 内存明文（仅注入/判 has_key 用；落盘一律走 KeyRef）。
 	Key string `json:"-"`
 	// KeyRef 密文引用（落盘字段）。
@@ -53,6 +57,8 @@ type providerDef struct {
 	Body map[string]any `json:"-"`
 	// Revision 载体里的行版本（sqlite = `providers.revision`；memory = 0，文件载体没有版本号）。
 	Revision int64 `json:"-"`
+	// UpdatedAt 最后一次成功提交的时刻（sqlite = 行上的 updated_at；memory = 零值）。
+	UpdatedAt time.Time `json:"-"`
 }
 
 // providerFile providers.json 的磁盘形状。
@@ -63,6 +69,7 @@ type providerFile struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`
 	Model  string `json:"model,omitempty"`
+	Note   string `json:"note,omitempty"`
 	KeyRef string `json:"key_ref,omitempty"`
 	Key    string `json:"key,omitempty"`
 }
@@ -134,7 +141,7 @@ func (s *Service) loadProvidersFile(dir string) {
 		if d == nil || id == "" {
 			continue
 		}
-		p := &providerDef{ID: id, Type: d.Type, Model: d.Model}
+		p := &providerDef{ID: id, Type: d.Type, Model: d.Model, Note: d.Note}
 		// 文件载体的 body 由定形结构体**重建**（未知键在文件里本来就被丢掉了，P6）：这一步只为让
 		// sqlite 与 memory 两条路在内存里同形，**不改变文件载体的既有语义**。
 		p.Body = map[string]any{}
@@ -143,6 +150,9 @@ func (s *Service) loadProvidersFile(dir string) {
 		}
 		if d.Model != "" {
 			p.Body["model"] = d.Model
+		}
+		if d.Note != "" {
+			p.Body["note"] = d.Note
 		}
 		switch {
 		case d.Key != "":
@@ -199,20 +209,26 @@ func vaultUnavailable(err error) string {
 	return err.Error()
 }
 
-// persistProvidersFile 原子写 providers.json（只写引用；仅未迁移的明文档案继续写 key）。
-func (s *Service) persistProvidersFile() error {
+// persistProvidersFile 原子写 providers.json（内存现状）。
+func (s *Service) persistProvidersFile() error { return s.persistProvidersFileWith(nil) }
+
+// persistProvidersFileWith 原子写 providers.json：**内存现状 + 这一条**（内存里还没有它）。
+//
+// 为什么需要一个"额外一条"的参数：写面的顺序是「载体提交成功之后才更新内存」（③ → ④），
+// 所以提交那一刻这条档案还不在 `s.providers` 里。若这里只序列化内存，新建的那条会被写成
+// **空文件**——一个只会在文件载体上出现、且完全静默的失败。
+// `override == nil` 就是"内存现状"（装载写回等路径）。
+func (s *Service) persistProvidersFileWith(override *providerDef) error {
 	s.mu.Lock()
 	dir := s.agentDir
-	cp := make(map[string]*providerFile, len(s.providers))
+	cp := make(map[string]*providerFile, len(s.providers)+1)
 	for id, d := range s.providers {
-		f := &providerFile{ID: id, Type: d.Type, Model: d.Model, KeyRef: d.KeyRef}
-		if d.KeyRef == "" && d.Key != "" {
-			// vault 不可用的降级路径：明文已在文件里，写回时必须保留（否则等于删密钥）。
-			f.Key = d.Key
-		}
-		cp[id] = f
+		cp[id] = providerFileOf(id, d)
 	}
 	s.mu.Unlock()
+	if override != nil {
+		cp[override.ID] = providerFileOf(override.ID, override)
+	}
 	if dir == "" {
 		return nil
 	}
@@ -230,95 +246,92 @@ func (s *Service) persistProvidersFile() error {
 	return os.Rename(tmp, filepath.Join(dir, "providers.json"))
 }
 
+// providerFileOf 把内存档案投影成文件载体的一行（只写引用；仅"vault 不可用且确有明文"时写 key）。
+func providerFileOf(id string, d *providerDef) *providerFile {
+	if d == nil {
+		return &providerFile{ID: id}
+	}
+	f := &providerFile{ID: id, Type: d.Type, Model: d.Model, Note: d.Note, KeyRef: d.KeyRef}
+	if d.KeyRef == "" && d.Key != "" {
+		// vault 不可用的降级路径：明文已在内存里，写回时必须保留（否则等于删密钥）。
+		f.Key = d.Key
+	}
+	return f
+}
+
 // ListProviders 列出 provider 档案概要（密钥只以 has_key 呈现，绝不读回）。
+//
+// 每一条都带**引用面**（哪些 agent 在用它、它们可能落到哪些 runtime）与**问题清单**
+// （密钥缺失/密文解不开/type 推不出注入变量名）：这两样是"开会话之前就能看见"的那一面（G3），
+// 而且都是**读取时现算的派生值**——存一份必然漂移。
 func (s *Service) ListProviders() ([]dtoprovider.ProviderResp, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	out := make([]dtoprovider.ProviderResp, 0, len(s.providers))
 	for id, d := range s.providers {
 		if d == nil {
 			continue
 		}
-		out = append(out, dtoprovider.ProviderResp{
-			ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != "" || d.KeyRef != "",
-		})
+		out = append(out, s.providerRespLocked(id, d))
 	}
+	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-// UpdateProvider upsert 档案：type/model 指针更新、key 非 nil 即覆盖/清除（空串 = 清除 ref + 密文）。
-func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	if id == "" {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
+// providerRespLocked 把一条档案投影成对外表示（**调用方必须持 s.mu**）。
+//
+// 为什么引用面也要在持锁时算：s.agents 与 s.providers 同属这一个锁的保护区，分成两段读会
+// 让"引用面"与"档案本身"来自两个不同时刻（删 agent 与改档案并发时会看到不存在的引用）。
+func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.ProviderResp {
+	resp := dtoprovider.ProviderResp{
+		ID: id, Type: d.Type, Model: d.Model, Note: d.Note,
+		HasKey:   d.Key != "" || d.KeyRef != "",
+		Revision: d.Revision,
+		Refs:     dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},
+		Problems: providerProblems(d),
 	}
-	// id 会进 vault 文件名 → 必须过引用校验（防路径穿越），并给出可执行提示。
-	if _, err := vault.ValidateRef(providerRef(id)); err != nil {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）: %v", id, err), nil)
+	if !d.UpdatedAt.IsZero() {
+		resp.UpdatedAt = model.FormatTime(d.UpdatedAt)
 	}
-	// vault 句柄在持锁外取（避免 s.mu 重入）。
-	var st *vault.Store
-	var verr error
-	if patch.Key != nil && *patch.Key != "" {
-		st, verr = s.providerVault()
-		if verr != nil {
-			// 绝不因为 vault 坏了就把明文写盘。
-			return nil, acl.NewError(acl.ClassRequest, "vault_unavailable",
-				"无法加密保存密钥（vault 初始化失败）: "+verr.Error(), nil)
+	seenRT := map[string]bool{}
+	for agentID, a := range s.agents {
+		if a == nil || a.Provider != id {
+			continue
+		}
+		resp.Refs.Agents = append(resp.Refs.Agents, agentID)
+		for _, rt := range a.Runtimes {
+			if !seenRT[rt] {
+				seenRT[rt] = true
+				resp.Refs.Runtimes = append(resp.Refs.Runtimes, rt)
+			}
 		}
 	}
-	if patch.Key != nil && *patch.Key == "" {
-		st, verr = s.providerVault()
-		if verr != nil {
-			st = nil // 清除仍应尽力而为（删不掉密文不算失败，ref 会被清掉）
-		}
-	}
+	sort.Strings(resp.Refs.Agents)
+	sort.Strings(resp.Refs.Runtimes)
+	return resp
+}
 
-	s.mu.Lock()
-	d, ok := s.providers[id]
-	if !ok {
-		d = &providerDef{ID: id}
-		s.providers[id] = d
+// providerProblems 本地段能回答的问题清单（零网络请求；**可执行的一句话**）。
+//
+// 它与 `POST /providers/:id/probe` 的本地段回答同一类问题，差别只是这里给的是"列表页一眼可见"
+// 的那几条（自检还多问引用面与目录可达性）。空数组 = 本地段全部通过。
+func providerProblems(d *providerDef) []string {
+	out := []string{}
+	switch {
+	case d.Key == "" && d.KeyRef != "" && d.keyErr != nil:
+		out = append(out, "密钥密文无法解密（"+d.KeyRef+"）："+d.keyErr.Error()+
+			"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），或重设密钥")
+	case d.Key == "" && d.KeyRef == "":
+		out = append(out, "尚未设置密钥：本应注入 "+envKeyOf(d.Type)+
+			"，在「设置 · 模型」的供应商块补一条密钥后才会注入")
+	case d.Key == "" && d.KeyRef != "":
+		out = append(out, "有密文引用但明文不可用（vault 不可达）：确认 mate home 下的 vault 可用")
 	}
-	if patch.Type != nil {
-		d.Type = *patch.Type
+	if d.Type == "" {
+		out = append(out, "type 为空：推不出注入变量名，这条凭据不会向子进程注入任何东西"+
+			"（在「设置 · 模型」里补一个上游类型）")
 	}
-	if patch.Model != nil {
-		d.Model = *patch.Model
-	}
-	oldRef := d.KeyRef
-	if patch.Key != nil {
-		if *patch.Key == "" {
-			// 清除：删 ref + 删密文。
-			d.Key, d.KeyRef, d.keyErr = "", "", nil
-		} else if st != nil {
-			d.Key, d.KeyRef, d.keyErr = *patch.Key, providerRef(id), nil
-		} else {
-			// 无 mate home（纯内存场景）：只留内存，persist 也写不出去。
-			d.Key, d.KeyRef, d.keyErr = *patch.Key, "", nil
-		}
-	}
-	s.mu.Unlock()
-
-	if patch.Key != nil && *patch.Key != "" && st != nil {
-		if err := st.Put(providerRef(id), vault.KindProviderKey, []byte(*patch.Key)); err != nil {
-			s.mu.Lock()
-			d.Key, d.KeyRef = "", oldRef // 回滚：密文没写成，内存也不能留假成功
-			s.mu.Unlock()
-			return nil, acl.NewError(acl.ClassRequest, "vault_write_failed",
-				"密钥加密写入失败: "+err.Error(), nil)
-		}
-	}
-	if patch.Key != nil && *patch.Key == "" && st != nil && oldRef != "" {
-		if err := st.Delete(oldRef); err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-				"密钥密文删除失败: "+err.Error(), nil)
-		}
-	}
-	if err := s.persistProviderDefinition(ctx, d); err != nil {
-		return nil, err
-	}
-	return &dtoprovider.ProviderResp{ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != "" || d.KeyRef != ""}, nil
+	return out
 }
 
 // providerEnvFor 返回给某 provider 档案注入的 env（KEY=VALUE 列表；无 key/未知档案 → nil）。
@@ -359,16 +372,19 @@ func (s *Service) CredentialProblem(agent *AgentRec) error {
 	ref := fmt.Sprintf("agent %q 绑定的 provider 档案 %q", agent.ID, agent.Provider)
 	if d == nil {
 		return acl.NewError(acl.ClassRequest, "credential_missing",
-			ref+" 不存在：在 Agents 页新建该档案，或清空该 agent 的 provider（改用它底座自身的登录态）", nil)
+			ref+" 不存在：在「设置 · 模型」的供应商块里新建这条凭据，或清空该 agent 的凭据选择"+
+				"（改用它底座自身的登录态）", nil)
 	}
 	if d.Key == "" {
 		if d.KeyRef != "" && d.keyErr != nil {
 			return acl.NewError(acl.ClassRequest, "credential_missing",
 				ref+" 的密钥密文无法解密（"+d.KeyRef+"）："+d.keyErr.Error()+
-					"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），或重设 key", nil)
+					"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），"+
+					"或到「设置 · 模型」重设密钥", nil)
 		}
 		return acl.NewError(acl.ClassRequest, "credential_missing",
-			ref+" 没有密钥（本应注入 "+envKeyOf(d.Type)+"）：在 Agents 页补 key，或清空该 agent 的 provider", nil)
+			ref+" 没有密钥（本应注入 "+envKeyOf(d.Type)+"）：到「设置 · 模型」的供应商块补密钥，"+
+				"或清空该 agent 的凭据选择", nil)
 	}
 	return nil
 }

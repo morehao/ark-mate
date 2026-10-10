@@ -15,7 +15,9 @@ import (
 // ProviderCtr provider 档案控制器（密钥只写不读回）。
 type ProviderCtr interface {
 	List(c *gin.Context)
+	Create(c *gin.Context)
 	Update(c *gin.Context)
+	Delete(c *gin.Context)
 }
 
 var _ ProviderCtr = (*providerCtr)(nil)
@@ -40,7 +42,23 @@ func (h *providerCtr) List(c *gin.Context) {
 	gincontext.Success(c, items)
 }
 
-// Update upsert provider 档案（type/model 子集更新；key 非 nil 覆盖/清除）。
+// Create 新建一条 provider 档案（id 已存在 → 40901 `provider_exists`，绝不覆盖）。
+func (h *providerCtr) Create(c *gin.Context) {
+	var req dtoprovider.ProviderCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateProvider(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Update 覆盖一条已存在的档案（type/model/note 子集更新；key 非 nil 覆盖/清除；
+// 不存在 → 40401 `provider_not_found`——**不再 upsert**，见设计 D-4）。
 func (h *providerCtr) Update(c *gin.Context) {
 	var patch dtoprovider.ProviderPatchReq
 	if err := c.ShouldBindJSON(&patch); err != nil {
@@ -48,6 +66,16 @@ func (h *providerCtr) Update(c *gin.Context) {
 		return
 	}
 	resp, err := h.svc.UpdateProvider(c.Request.Context(), c.Param("id"), patch)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Delete 删除一条档案（幂等；被引用 → 40901 `provider_in_use` + 引用名单）。
+func (h *providerCtr) Delete(c *gin.Context) {
+	resp, err := h.svc.DeleteProvider(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
