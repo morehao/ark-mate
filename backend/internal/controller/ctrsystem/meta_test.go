@@ -34,10 +34,10 @@ func rawMeta(t *testing.T, src ctrsystem.MetaSource) map[string]json.RawMessage 
 // 而"缺字段"与"显式 null"在 JS 里行为不同（`in` 为 false vs true）。契约里 `webPath`/`webDigest`
 // 写的是 `…|null`，因此必须**恒出现**。
 func TestMetaSnapshotShape(t *testing.T) {
-	// ① 无资产（只服务 API 的装配）：webSource 省略，webPath/webDigest 是显式 null，payloads 是 []。
+	// ① 无资产（只服务 API 的装配）：webPath/webDigest 是显式 null，payloads 是 []。
 	d := rawMeta(t, ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home"})
 	if _, ok := d["webSource"]; ok {
-		t.Errorf("没有资产时 webSource 应省略（omitempty），实际存在：%s", d["webSource"])
+		t.Errorf("2026-10-10 起不该再有 webSource 字段，实际存在：%s", d["webSource"])
 	}
 	for _, k := range []string{"webPath", "webDigest"} {
 		raw, ok := d[k]
@@ -53,29 +53,28 @@ func TestMetaSnapshotShape(t *testing.T) {
 		t.Errorf("payloads 应为空数组而不是 null，实际 %s", d["payloads"])
 	}
 
-	// ② 有资产（dir）：webSource=dir、webPath 是那个绝对路径、webDigest 是 sha256:…
+	// ② 有资产：webPath 是那份目录的绝对路径、webDigest 是 sha256:…、webBuildId 现场读。
 	d2 := rawMeta(t, ctrsystem.MetaSource{
 		CoreVersion: "dev", APIContract: "v1", Home: "/tmp/home",
-		Assets: ctrsystem.MetaAssets{Source: "dir", Path: "/opt/mate/web", Digest: "sha256:abc", BuildID: "bid-1"},
+		Assets: ctrsystem.MetaAssets{Path: "/opt/mate/web", Digest: "sha256:abc", BuildID: "bid-1"},
 	})
-	var path, digest, buildID, source string
+	var path, digest, buildID string
 	_ = json.Unmarshal(d2["webPath"], &path)
 	_ = json.Unmarshal(d2["webDigest"], &digest)
 	_ = json.Unmarshal(d2["webBuildId"], &buildID)
-	_ = json.Unmarshal(d2["webSource"], &source)
-	if source != "dir" || path != "/opt/mate/web" || digest != "sha256:abc" || buildID != "bid-1" {
-		t.Errorf("资产字段投影不符：source=%q path=%q digest=%q buildId=%q", source, path, digest, buildID)
+	if path != "/opt/mate/web" || digest != "sha256:abc" || buildID != "bid-1" {
+		t.Errorf("资产字段投影不符：path=%q digest=%q buildId=%q", path, digest, buildID)
 	}
 
-	// ③ builtin：没有路径（内嵌资产没有文件系统路径），但摘要照样有。
+	// ③ 摘要而没有路径（理论上不会出现，客户端仍要能解析）：webPath 保持 null、摘要照发。
 	d3 := rawMeta(t, ctrsystem.MetaSource{
 		CoreVersion: "dev", APIContract: "v1",
-		Assets: ctrsystem.MetaAssets{Source: "builtin", Digest: "sha256:def"},
+		Assets: ctrsystem.MetaAssets{Digest: "sha256:def"},
 	})
 	if string(d3["webPath"]) != "null" {
-		t.Errorf("builtin 的 webPath 应为 null，实际 %s", d3["webPath"])
+		t.Errorf("没有路径时 webPath 应为 null，实际 %s", d3["webPath"])
 	}
 	if string(d3["webDigest"]) != `"sha256:def"` {
-		t.Errorf("builtin 也要有 webDigest，实际 %s", d3["webDigest"])
+		t.Errorf("摘要照发，实际 %s", d3["webDigest"])
 	}
 }

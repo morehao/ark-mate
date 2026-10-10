@@ -27,7 +27,7 @@
  *   - 用**自己的 `HOME` 与 `MATE_HOME`**（<repo>/.dsh/tmp/desktop-skill-accept）：既不碰用户的
  *     `~/.ark-mate/mate.db`，也让 `${HOME}/.agents/skills` 从**不存在**开始（那正是 B 的前提）。
  *     脚本收尾会核对用户真实的 `~/.agents/skills` 与 `~/.ark-mate` 指纹**零变化**。
- *   - 模型端点是**脚本内置的假 LLM**（Anthropic `/v1/messages` 流式）：零额度、零凭证，
+ *   - 模型端点是**共用 lib 的假 LLM**（`lib/fake-llm.mjs`，Anthropic `/v1/messages` 流式）：零额度、零凭证，
  *     只回答一句话，并把两个底座的真实请求体留在内存里给断言用。opencode 侧靠**写在自己的
  *     隔离配置目录里**的 provider 声明（`providers.probe.settings.baseURL` → 假 LLM）把请求引过来，
  *     不动用户配置、不设 `XDG_CONFIG_HOME`（那是隔离表干的事）。
@@ -51,7 +51,6 @@
  * **不进 CI**：要真 Electron + 真底座。
  */
 import { execFileSync, spawn } from 'node:child_process'
-import http from 'node:http'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -73,6 +72,8 @@ import {
   stopShellTree,
   waitFor,
 } from './lib/desktop-harness.mjs'
+// 假 LLM 抽在 lib 里（另一个消费方是 `desktop-no-host-acceptance.mjs`）：两份复制会静默漂移。
+import { startFakeLLM } from './lib/fake-llm.mjs'
 
 const PROBE = join(REPO, '.dsh', 'tmp', 'desktop-skill-accept')
 const PROBE_HOME = join(PROBE, 'home')
@@ -174,68 +175,6 @@ function regenerateRuntimeBin() {
   } catch (e) {
     return { ok: false, detail: String(e).slice(0, 200) }
   }
-}
-
-/** 脚本内置的假 LLM：Anthropic `/v1/messages`（流式）+ OpenAI 面（顺手，便于日后扩到 opencode）。 */
-function startFakeLLM() {
-  const captured = []
-  const server = http.createServer((req, res) => {
-    let raw = ''
-    req.on('data', (d) => (raw += d))
-    req.on('end', () => {
-      let body = {}
-      try {
-        body = JSON.parse(raw || '{}')
-      } catch {}
-      captured.push({ path: req.url, body, raw })
-      if (req.url.startsWith('/v1/models')) {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        return res.end(JSON.stringify({ data: [{ id: 'probe-model', object: 'model' }] }))
-      }
-      if (req.url.includes('/messages')) {
-        const ev = (kind, obj) => res.write(`event: ${kind}\ndata: ${JSON.stringify(obj)}\n\n`)
-        res.writeHead(200, {
-          'content-type': 'text/event-stream',
-          'cache-control': 'no-cache',
-          connection: 'close',
-        })
-        ev('message_start', {
-          type: 'message_start',
-          message: {
-            id: 'msg_1',
-            type: 'message',
-            role: 'assistant',
-            model: body.model ?? 'probe-model',
-            content: [],
-            stop_reason: null,
-            stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 1 },
-          },
-        })
-        ev('content_block_start', {
-          type: 'content_block_start',
-          index: 0,
-          content_block: { type: 'text', text: '' },
-        })
-        ev('content_block_delta', {
-          type: 'content_block_delta',
-          index: 0,
-          delta: { type: 'text_delta', text: 'PROBE-REPLY-OK' },
-        })
-        ev('content_block_stop', { type: 'content_block_stop', index: 0 })
-        ev('message_delta', {
-          type: 'message_delta',
-          delta: { stop_reason: 'end_turn', stop_sequence: null },
-          usage: { output_tokens: 1 },
-        })
-        ev('message_stop', { type: 'message_stop' })
-        return res.end()
-      }
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ id: 'chatcmpl-probe', choices: [{ message: { role: 'assistant', content: 'PROBE-REPLY-OK' } }] }))
-    })
-  })
-  return new Promise((resolve) => server.listen(LLM_PORT, '127.0.0.1', () => resolve({ server, captured })))
 }
 
 /** 从请求体里取 dsh 看到的 skill 目录块（它在**用户消息**的 <system-reminder> 里，不在 system）。 */
@@ -359,7 +298,7 @@ async function main() {
   const beforeMate = fingerprint(realMateRoot)
   const beforeHostState = fingerprint(realOpencodeState)
 
-  const llm = await startFakeLLM()
+  const llm = await startFakeLLM({ port: LLM_PORT })
   section(`真壳 + 真核心（${MODE}）`)
   const launchEnv = {
     ...process.env,

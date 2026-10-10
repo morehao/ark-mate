@@ -61,7 +61,7 @@ export async function startCore(opts: StartCoreOptions): Promise<CoreHandle> {
   const child = spawn(
     opts.exe,
     // 桌面态的核心：内核分配端口 + 双凭据经 stdin + 就绪行回写 + 父进程消失自退（M1-6）。
-    // **不带** `-tags release` 的内嵌资产（资产由壳服务，核心只在需要时按 `--web-dir` 读同一份，M2-6 接线）。
+    // 核心从不自带前端资产（2026-10-10 起 `-tags release` / `go:embed` 已删）：资产由壳服务，核心按 `--web-dir` 读同一份（M2-6 接线）。
     [
       'serve',
       '--addr', '127.0.0.1:0',

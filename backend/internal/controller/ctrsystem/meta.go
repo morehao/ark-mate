@@ -5,17 +5,18 @@ package ctrsystem
 //	字段            来源
 //	coreVersion     internal/version（发布构建由 -ldflags 注入）
 //	apiContract     internal/version（契约代数，与核心版本解耦）
-//	webSource       资产层（builtin | dir | 空=没有资产）
-//	webPath         资产层（dir 时是**绝对路径**；builtin 为 null）
-//	webDigest       资产层（逐文件 sha256 的确定性合成；两种来源同值）
+//	webPath         资产层（资产目录的**绝对路径**；未接资产层时为 null）
+//	webDigest       资产层（逐文件 sha256 的确定性合成）
 //	webBuildId      前端产物里的构建 id（M2-4）
 //	home            数据目录（默认 ~/.ark-mate）
 //	payloads        随包运行时载荷（M3-4 起由壳经 --payloads 交来的已解析清单；非桌面态为空数组）
 //
+// 2026-10-10 起没有 `webSource` 字段：核心只有"调用方给的目录"这一种资产来源，一个恒为 `dir`
+// 的字段不携带信息（改看 `webPath` 就知道核心读的是哪一份）。
+//
 // 为什么把"来源"做成一个结构体而不是继续用一堆闭包参数：这份响应是**版本闸门与诊断**的
 // 唯一入口（设计 §6.7 / V5/V6），字段来源散在各层会让"某字段为什么是空的"无从追查；
 // 集中在一处后，`Snapshot()` 就是这段契约的可读实现。
-
 // PayloadInfo 随包运行时载荷的一条（M3-4 起填）。
 //
 // 值来自**壳的**三级解析结果（设计 §6.5：显式配置 → 随包 → PATH）：只有壳做了那次解析，
@@ -35,9 +36,7 @@ type MetaInfo struct {
 	CoreVersion string `json:"coreVersion"`
 	WebBuildID  string `json:"webBuildId"`
 	APIContract string `json:"apiContract"`
-	// WebSource builtin | dir（未接资产层时为空 → 字段省略）。
-	WebSource string `json:"webSource,omitempty"`
-	// WebPath dir 来源的绝对路径；其余为 null（**显式 null**，客户端按可空字段处理）。
+	// WebPath 资产目录的**绝对路径**；未接资产层时为 null（**显式 null**，客户端按可空字段处理）。
 	WebPath *string `json:"webPath"`
 	// WebDigest 逐文件 sha256 的确定性合成；未接资产层时为 null。
 	WebDigest *string       `json:"webDigest"`
@@ -47,10 +46,8 @@ type MetaInfo struct {
 
 // MetaAssets 资产层交给 `/meta` 的那部分（由 internal/router 从 AssetInfo 投影过来）。
 type MetaAssets struct {
-	// Source builtin | dir；空串 = 本次进程没有资产（默认构建且未给 --web-dir 时会拒绝启动，
-	// 因此这只在"仅供 API"的装配里出现）。
-	Source string
-	// Path dir 来源的绝对路径。
+	// Path 资产目录的绝对路径；空串 = 本次进程没有资产（未给 --web-dir 时会拒绝启动，
+	// 因此这只在"仅供 API"的装配与测试里出现）。
 	Path string
 	// Digest 合成摘要（`sha256:<hex>`）。
 	Digest string
@@ -83,9 +80,6 @@ func (s MetaSource) Snapshot() MetaInfo {
 	}
 	if m.Payloads == nil {
 		m.Payloads = []PayloadInfo{}
-	}
-	if s.Assets.Source != "" {
-		m.WebSource = s.Assets.Source
 	}
 	if s.Assets.Path != "" {
 		p := s.Assets.Path

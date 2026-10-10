@@ -12,9 +12,6 @@ backend/cmd/mate/mate
 # Go workspace（当前单 module 无 go.work；未来抽独立 module 联调时仍生效）
 go.work.sum
 
-# Go: 前端产物 embed 宿主副本（真源在 frontend/，make web 刷新）
-backend/pkg/web/dist/
-
 # Node / Web (frontend monorepo)
 frontend/node_modules/
 frontend/**/node_modules/

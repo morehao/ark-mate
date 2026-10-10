@@ -13,12 +13,11 @@ import (
 func registerSystem(v1 *gin.RouterGroup, meta func() ctrsystem.MetaSource, assets AssetInfo) {
 	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource {
 		src := meta()
-		// 资产相关字段由本包按**已解析的资产**补全：builtin → 只报 webSource；dir → 另报 webPath；
-		// 两者都报 webDigest（内容摘要，解析期算）。build id **现场读**——它是闸门用来发现
+		// 资产相关字段由本包按**已解析的资产**补全：webPath 是那份目录的绝对路径，再由 `/meta`
+		// 投影出 webDigest（内容摘要，解析期算）。build id **现场读**——它是闸门用来发现
 		// "资产被换过"的字段，缓存住就失去意义（M2-4）。
 		if assets.Has() {
 			src.Assets = ctrsystem.MetaAssets{
-				Source:  string(assets.Source),
 				Path:    assets.Path,
 				Digest:  assets.Digest,
 				BuildID: assets.CurrentBuildID(),

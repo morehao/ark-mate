@@ -33,9 +33,6 @@ frontend/**/*.tsbuildinfo
 frontend/apps/desktop/resources
 frontend/apps/desktop/release
 
-# —— 后端 embed 宿主（必须由镜像内的前端阶段重新生成，避免把宿主机旧产物嵌进去）——
-backend/pkg/web/dist
-
 # —— 环境变量与密钥（绝不进镜像；容器里用 -e / compose 注入）——
 .env
 .env.*

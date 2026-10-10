@@ -5,11 +5,12 @@
 > ② 参照 **codeg**（同赛道成熟参考实现）的能力对照与取舍矩阵；
 > ③ 分阶段 **Roadmap**（里程碑、每阶段范围/验收/风险）。
 >
-> 定位一句话：**ark-mate 是「基于开源 Agent Runtime 的个人 Agent」——单机、单操作员、开箱即用**；
-> 同一内核另沉淀一层可复用的**底座能力**（多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 +
-> 桌面/容器交付形态），见文首「决策变更 v7」。codeg 是同一 ACP Host 思路下「做深做厚成桌面 IDE」的
-> 产品天花板，二者是「应用 vs 平台」的关系，设计上借鉴 codeg 的**宿主内核**（连接管理、事件流、
-> 可扩展注册）而非其桌面外壳。
+> 定位一句话（**以文首「决策变更 v8」为准**）：**ark-mate 分两层——底座层**（`mate` 内核：多 runtime 统一
+> 接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态）**与其上的产品层**（面向用户的**个人 Agent 助手**，
+> 聚焦桌面端）；单机、单操作员、开箱即用。底座支持多个 agent runtime 接入（当前 `dsh` / `opencode`
+> 两个一等适配，**不追求数量**）；浏览器入口只是**开发形态**。codeg 是同一 ACP Host 思路下「做深做厚成
+> 桌面 IDE」的产品天花板，二者是「应用 vs 平台」的关系，设计上借鉴 codeg 的**宿主内核**（连接管理、事件流、
+> 注册与生命周期）而非其桌面外壳。
 
 **目录**：§0 为什么参考 codeg · §1 现状盘点 · §2 设计总则 · §3 Roadmap 总览 · §4 详细设计方案（领域模型
 4.1 / acl 4.2 / runtime+manager 4.3 / REST 4.4 / 实时事件流(WS 唯一) 4.5 / 实时通道决策 4.6 / 存储 4.7 /
@@ -102,12 +103,58 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    agent 协作」逐条不变：本次只换叙事与名字，不扩边界。「底座能力」仍指「把控制面接自己的 runtime」，
 >    不是「再做一个通用 Agent 框架」。
 
+> **决策变更 v8（定位层次重述 + 接边收窄 + 桌面优先，2026-10-10；本节以下均已按此更新）**：
+> ① **两层结构**——本项目自上而下分两层：**底座层**（`mate` 内核：多 runtime 统一接入 + 会话与能力数据面
+>    + REST/WS 契约 + 交付形态）与**产品层**（底座之上的**个人 Agent 助手**，面向用户、聚焦桌面端）。
+>    两层职责与承诺并列成立；**不再使用**「先是产品、其次底座 / 第二重身份 / 顺带提供」这类主次句式
+>    （v7① 的「主体换位」叙述由本条取代，改名与仓库结构仍从 v7②）。
+> ② **runtime 接边有界**——底座支持多个 agent runtime 接入，当前为 `dsh` 与 `opencode` **两个一等适配**；
+>    **不追求数量，不承诺接入任意 ACP 生态**。「不写代码注册新 agent / 远程 ACP 端点」作为**工程能力**
+>    留在功能清单里，但**不作定位卖点、不作里程碑出口**。原因如实写：接一个 runtime 要同时过隔离表三份
+>    （`backend/pkg/runtime/isolation.go`、`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`、
+>    `frontend/scripts/desktop-runtime-smoke.mjs`）、投影声明与实测 `Tested`、能力粒度声明
+>    （`CapabilityScope`，未实测不得声明比 `process` 更细）、随包载荷与 ABI 断言——**成本在维护面，不在 adapter**。
+> ③ **聚焦桌面端**——交付重心是桌面应用（macOS / Windows；随包运行时，用户机器不需要 Go / Node / 预装底座）。
+>    **主线排期只推进桌面**；单二进制 + Web 面板、容器、远程 ACP 端点为**服务端/开发形态**，冻结为**维护态**
+>    （保留可用、继续被测试、可修缺陷；**不加新功能、不进主线排期**）。其中**浏览器入口只是开发过程使用的
+>    形态**，不列入交付面；服务端形态的界面按「自用 / 开发」对待，不承诺 UI 体验。形态清单与「维护态」的
+>    精确定义（含保留项、不做项、退出条件）见
+>    `.dsh/docs/specs/2026-10-10-positioning-v8-alignment-design.md` §3.1–§3.4。
+> ④ **口径统一（消歧）**——**一份 UI 产物（`apps/web/dist`），两种加载方式**：开发态（vite，含 HMR）与
+>    交付态（Electron 壳；资产由壳与核心两条路径服务，**深链回退归核心**）。文档不再出现「两个端 /
+>    两个并列产品」。删掉 `apps/web` 等于删掉整个控制台 UI（壳内只有 `welcome` / `boot-failed` 两张静态页），
+>    且核心资产层是桌面态的承重墙（`scheme.ts` 对非静态路径一律 `proxyToCore`）——**不做单端化**。
+> ⑤ **不变与澄清**——决策 v3 三条红线（能力不重造 / 数据管理是平台职责 / 单机单操作员）、v2②（无跨 agent
+>    协作）、v7② 的改名与仓库结构逐条不变。**「聚焦桌面端」不等于做「桌面 IDE 外壳」**：编辑器 / 终端 /
+>    文件树 / Split View / canvas 仍不做。desktop 设计的 R1「同一份产物 + 同一套契约 + 同一份数据 +
+>    同一套 DoD」不变量保留——但它的第二个靶（浏览器入口）是**开发期验收靶**，不是第二个产品。
+
+> **决策变更 v9（交付形态收敛：核心不自带资产，删掉 `go:embed` 与单二进制，2026-10-10）**：
+> ① **形态清单收敛**——v8③ 列的「单二进制 + Web 面板」**整条删除**（`make all` 与仓库根 `./mate` 产物
+>    不再存在）。服务端形态只剩两种：**容器**（镜像内自带一份 dist）与**自建二进制 + 外挂 dist**
+>    （`go build ./cmd/mate` + `serve --web-dir …`）；两者仍是**维护态**。桌面（`make desktop/*`）与
+>    浏览器开发态（`make dev`，唯一 HMR 循环）不变。
+> ② **资产单源**——**核心永远不自带前端资产**：资产只有一份 `frontend/apps/web/dist`，由调用方经
+>    `--web-dir` / `MATE_WEB_DIR` 显式交给核心，**没给就拒绝启动（退出码 3）**。这条把 v8④「一份 UI 产物、
+>    两种加载方式」从**纪律**变成**结构**：`//go:embed` 的存在本身就是"第二份资产"，桌面核因此被明令
+>    禁止带 `-tags release`——现在这个例外连同理由一起消失了。
+> ③ **构建标签维度消失**——`-tags release` / `!release` 全仓不再有（平台标签 `unix`/`!unix` 保留），
+>    连带 `make test/release`：它的存在理由是"带 release tag 的代码默认 `go test` 编译不到（历史上
+>    `NoRoute` 的非 API 行为就这么长期没人验）"，理由随代码一起删除。**发起布的那份与开发时跑的那份
+>    现在是同一个构建配置。**
+> ④ **代价与不变**——失去"一个文件拷走就能跑"（需要者自行 `tar` 一份"二进制 + web/"，属分钟级操作）；
+>    容器镜像体积不变（原本资产也在镜像里，只是从二进制内部挪到镜像内一个目录）；`/meta` 少一个
+>    恒为 `dir` 的 `webSource` 字段（`webPath`/`webDigest`/`webBuildId` 保留）。v3 三条红线、v2②、
+>    v7②、v8① 两层结构 / v8② 接边有界 / v8⑤ 逐条不变。证据与实测见
+>    `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个
 核心命题：**作为 ACP Host，用统一控制面连接、运行、管理多个外部 Agent Runtime**（codeg 内置 15 个 agent，
-ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已到 0.30 版本、形态完整**的参考系，其
-宿主角色的实现分层可直接映射到 ark-mate 的 `acl / runtime / manager / server`：
+ark-mate 是 `opencode` + `deepseek-harness` **两个一等适配**——**有界**，见决策 v8②）。codeg 是这一命题下
+**已到 0.30 版本、形态完整**的参考系，其宿主角色的实现分层可直接映射到 ark-mate 的
+`acl / runtime / manager / server`：
 
 > 另有**第二参照物（应用型）AionUi**（iOfficeAI；Electron/Web 壳 + 外部 aioncore 引擎 + ACP 接入外部
 > CLI agent，见 §5.8）：与 ark-mate 同为「薄控制面 + 外部宿主内核」结构，其**数据/配置管理层**
@@ -125,7 +172,7 @@ ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 
 参考时的**立场**（避免照抄成一个桌面 IDE）：
 
-- ark-mate 交付的是**自托管 daemon（`./mate` 单二进制）+ Web 面板**，codeg 的编辑器/终端/Split View/桌面
+- ark-mate 交付的是**桌面应用 + 自托管 daemon（二进制 + 一份外挂 `apps/web/dist`）**，codeg 的编辑器/终端/Split View/桌面
   特性属于**应用层体验**，ark-mate 默认不做；当前定位为**单机单操作员**（决策 v3③），不保留
   「面向 Web 多用户/多租户」的能力位。
 - codeg 桌面经 Tauri 事件通道直连内核、服务端经 WebSocket；ark-mate 采纳同款形态：**REST 命令 +
@@ -175,6 +222,8 @@ ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 6. **一次运行只指定一个 runtime（无跨 agent 协作）**：会话/运行在创建时绑定并固定一个 Agent（其下唯一
    Runtime）；「多 runtime」只表现为注册表与**按会话/运行选择切换**，不存在 @委托、子 agent、并行跨 runtime
    协作。所有编排语义（任务/自动化等，若未来引入）同样遵守「一次运行单 runtime」约束。
+   **数量有界（决策 v8②）**：当前 `dsh` / `opencode` 两个一等适配，**不追求数量、不承诺接入任意 ACP 生态**；
+   「配置化注册新 agent」是工程能力，不是定位承诺。
 7. **能力不重造，平台只做数据/管理层（决策 v3①②）**：skills/MCP/推理等执行能力一律复用底层 runtime
    原生实现——ark-mate **不实现** skill 执行器、MCP 客户端等运行时功能；平台职责限定为管理这些能力
    对应的**数据与配置**：会话数据、skill 包数据、MCP 服务器定义/注入面。
@@ -185,12 +234,16 @@ ark-mate 首版 opencode + deepseek-harness）。codeg 是这一命题下**已�
 |---|---|---|---|
 | **M0** | 打通 ACP 直连 | acl+runtime+manager 落地，真实拉起 opencode/harness，事件流入 eventbus 并经 **WS 端点（attach/快照/事件，无鉴权）** 出流 | `make server` 后经 WS 客户端（wscat/小 Go 客户端/后续面板）可见真实 token 流 |
 | **M1** | 面板 MVP | Sessions 流式页 + Agents/Runtimes 列表，REST+WS 全链路 | 浏览器完成「选一个 agent → 发 prompt → 看流式回包 → 中断」 |
-| **M2** | 可扩展底座 | 持久化(SQLite)、Agent 定义 CRUD + 自定义 ACP agent 注册、provider 配置注入、**权限策略位**（决策 v4①）、断线续传（快照/重放） | 不写代码即可接入第三个 ACP agent |
+| **M2** | 平台化底座 | 持久化(SQLite)、Agent 定义 CRUD + 自定义 ACP agent 注册、provider 配置注入、**权限策略位**（决策 v4①）、断线续传（快照/重放） | 定义可管理 + 会话可恢复（**不以「接入第三个 ACP agent」为出口**，决策 v8②） |
 | **M3** | 平台化一期 | 多会话并发与恢复、切换指定 runtime、**会话数据管理面**（分组/归档/搜索/导出，决策 v4②）、用量/日志（per-turn 明细 + 会话快照） | 自托管 daemon 可作为单操作员底座稳定冒烟（多会话并发 + 重启恢复 + 会话管理 + 可观测） |
 | **P1+** | 单 runtime 自动化与生态 | 任务板(worktree 隔离)、automation（先定 **cron 数据契约**，决策 v4④）、MCP/skills **数据管理**位（执行复用 runtime 能力，决策 v3①/v4④；均单 runtime 指定；无跨 agent 协作） | 见 §5.4 取舍矩阵 |
 | **不做** | — | 桌面 IDE 外壳（编辑器/终端/Split View）、移动端、多人协作（多用户/团队共享/鉴权登录）、聊天/远程通道（webhook/IM）、跨 agent 协作/委托（决策 v2②/v3③） | 见 §5.4 |
 
-> 说明：M0–M3 为当前工作焦点（本文档主体），P1+ 为方向性路线（能力位保留，不排期承诺）。
+> 说明：M0–M3 为底座侧历史里程碑（本文档主体），P1+ 为方向性路线（能力位保留，不排期承诺）。
+> **主线口径（决策 v8③）**：当前**主线交付是桌面**——里程碑见
+> [desktop-architecture-design-20260928.md](./desktop-architecture-design-20260928.md) §13 与
+> `.dsh/docs/plans/2026-09-28-desktop-architecture-plan.md`（壳 → 资产层 → 包内执行 → 安装签名 → 一致性收口）；
+> 上表的 M0–M3 与「服务端形态」同属**底座侧**（服务端形态为维护态：能修、不加新功能、不进主线排期）。
 > 详细到「每个阶段：做什么 / 怎么做 / 验收」见 §6。
 
 ## 4. 详细设计方案（主体）
@@ -644,7 +697,7 @@ apps/panel/src/
 | ACP 连接管理（registry/manager/connection/session_state） | 移植思路到 acl/runtime/manager（§4.2/§4.3） | M0 | 同命题 |
 | 事件状态机纪律（CAS+同事务事件+单例引擎+文件锁） | 采用 | M0 起 | 多租户安全前提 |
 | 错误分类与可操作提示（feedback.rs） | 采用（turn.error + 错误码） | M0/M1 | 前端横幅/重试依赖它 |
-| 自定义 agent 注册（custom_registry + 预检 initialize + 能力冻结） | 采用（Agent 定义 CRUD + 校验向导） | M2 | 「不写代码接入新 runtime」是平台定位核心卖点 |
+| 自定义 agent 注册（custom_registry + 预检 initialize + 能力冻结） | 采用（Agent 定义 CRUD + 校验向导） | M2 | 机制采用；**但「接入更多 runtime」不是定位卖点**（决策 v8②：有界适配面，成本在维护面——隔离表三份 / 投影实测 / 能力粒度 / 载荷与 ABI 断言） |
 | model_provider 配置 | 采用注入面（env 模板替身注入 agent 子进程） | M2 | harness 的 DEEPSEEK_API_KEY 即用例 |
 | @协作 delegation（broker/spawner/独立子 ACP 会话 + one-shot/resume + 级联 cancel + 深度限制） | **不做（决策 v2②）**：当前定位无跨 agent 协作，一次运行只指定一个 runtime；该机制在定位扩展前不进路线。其在「CAS/事件同事务/异步跟踪」上的纪律已由 §5.1 吸收 | — | 定位约束；避免为「平台卖点」提前堆协作复杂度 |
 | 任务板 todo→…→review→merge（worktree 隔离 + git truth 校验） | P1 候选：服务端 repo 副本/分支隔离 + 产物 diff 展示 + 人工采纳（review 门保留）；每次运行仍单 runtime 指定；merge 自动合入延后 | P1 | worktree 模型天然适配服务端沙箱；远端 mate 集成成本高 |
@@ -656,10 +709,12 @@ apps/panel/src/
 
 ### 5.5 定位差异一句话
 
-codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度，甚至多 agent 同场协作；ark-mate 是
-「**可自托管的 agent 底座**」——价值在**统一拉起、管理、切换指定**多 runtime（一次运行一个 runtime，
-无跨 agent 协作），并通过 REST + WS 把能力开放给任意前端。凡 codeg 中「依赖本地桌面形态」或
-「依赖多 agent 协作」的能力，ark-mate 一律降级或不做；凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。
+codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度，甚至多 agent 同场协作；ark-mate 分两层：
+**底座层**是「**可自托管的 agent 内核**」——价值在**统一拉起、管理、切换指定** runtime（一次运行一个
+runtime，无跨 agent 协作；当前 `dsh` / `opencode` 两个一等适配，**不追求数量**，决策 v8②），并通过
+REST + WS 把能力开放给任意前端；**产品层**是底座之上的**个人 Agent 助手**（**聚焦桌面端**，决策 v8①③）。
+凡 codeg 中「依赖本地桌面形态（IDE 外壳）」或「依赖多 agent 协作」的能力，ark-mate 一律降级或不做；
+凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。
 
 在此基础上，定位边界由**决策 v3** 明确为三点：
 - **能力不重造**：skills/MCP 等运行时能力复用底层 runtime 原生实现，ark-mate 只管理其数据与配置；
@@ -953,9 +1008,14 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 > - **会话元数据 + 侧栏增强**：`title/pinned/archived/created_at/updated_at`（REST list/get/patch + 标题自动推导、
 >   可覆盖）+ 侧栏按日分组·置顶。属 M1 会话列表的轻量读模型；§4.9 v4② 的软归档切面/搜索/导出仍属 M3。
 
-### M2 — 可扩展底座（不写代码接入第三个 ACP agent）
+### M2 — 平台化底座：定义可管理 + 会话可恢复
 
-**目标**：平台化第一步——Agent 定义成为一等可管理资源；runtime 接入成本从「写 Go adapter」降到「配置」。
+> **口径修订（决策 v8②，2026-10-10）**：本节标题与 DoD 原为「可扩展底座（不写代码接入第三个 ACP agent）」，
+> 把**接入数量**当成了里程碑出口。修订后：机制保留（配置化注册仍是能力），但**不以接入数量衡量定位**，
+> 出口改判「定义可管理 + 会话可恢复」。
+
+**目标**：平台化第一步——Agent 定义成为一等可管理资源；runtime 接入成本从「写 Go adapter」降到「配置」
+（**这是工程收益，不是定位承诺**：有界适配面的真实成本在维护侧，见决策 v8②）。
 
 **要做**：
 1. `internal/infra/store`：SQLite schema（§4.7）落地；`events` 表承接 durable 终态，history 分页 API 实装；
@@ -974,8 +1034,9 @@ snapshot + 流式事件完成对话并可中断，刷新后会话续看；两 ru
 
 **不做**：多用户/鉴权、用量统计、会话导入、MCP/skills（位预留）。
 
-**DoD**：通过面板注册第三个 ACP 兼容 agent（如某 registry 现成条目或自写 echo agent），不写 Go 代码即可
-对话；重启 daemon 后会话终态可经 history 恢复；`make test` 含 adapter 夹具测试。
+**DoD**（v8② 修订）：面板上完成一次**自定义 agent 注册并对话**（现成条目或自写 echo agent，不写 Go 代码）
+**且**重启 daemon 后会话终态可经 history 恢复；`make test` 含 adapter 夹具测试。
+**不作为定位出口**：「总共能接多少个 runtime」不进本节完成判据（决策 v8②）。
 **量级**：4–6 周。
 
 ### M3 — 平台化一期（单操作员底座稳定冒烟）
@@ -1030,7 +1091,7 @@ message × execution_mode existing|new_conversation × state{next_run,retry}，�
 | 5 | 事件体积膨胀（harness 高频 thought/token） | M2 前 | 增量 live-only、终态落库（§2 范式已定）；必要时增量节流/批量合并；前端批量 flush（§4.8） |
 | 6 | 断连续传依赖内存缓冲，daemon 重启即丢 | M2 边界内 | M2 起 durable 终态落 `events` 表，实时通道 `after`/快照从库补历史；内存缓冲只兜 live 段（快照/重放二分，§4.5） |
 | 7 | 单操作员 daemon 被误暴露（默认 127.0.0.1 被改成公网监听却无鉴权） | M3 | 默认仅监听本机；确需对外暴露先过「单操作员 token」最小实现（§6 M3 #6）；部署文档给出反代/防火墙建议 |
-| 8 | 平台定位漂移成「又一个桌面 IDE」「偷偷长出多 agent 协作」或「长出多人协作/多用户」 | 全程 | 以 §2 七条总则为评审红线；P1+ 立项先过 §5.4 矩阵；新增「协作类」需求（含多人/远程）必须显式走定位评审（决策 v2②/v3③） |
+| 8 | 平台定位漂移成三条路：① **桌面 IDE 外壳**（编辑器/终端/文件树/Split View/canvas）；② **通用 agent 框架 / 开放 runtime 生态**（把「接入更多 runtime」「做 runtime 功能」当卖点）；③ **多 agent 协作或多人协作** | 全程 | 以 §2 七条总则为评审红线；P1+ 立项先过 §5.4 矩阵。①③ 由决策 v7 / v2② / v3③ 挡住，**② 由决策 v8② 挡住**（有界适配面、卖点退场）。新增「协作类」需求（含多人/远程）必须显式走定位评审。**注意「聚焦桌面端」（v8③）不等于 ①**：翻的是交付优先级，功能边界不动 |
 
 ### 7.2 验证方式（每里程碑重复执行）
 

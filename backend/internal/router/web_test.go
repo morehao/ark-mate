@@ -77,9 +77,6 @@ func TestResolveAssetsDirSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAssets: %v", err)
 	}
-	if info.Source != router.AssetSourceDir {
-		t.Errorf("来源应为 dir，实际 %q", info.Source)
-	}
 	if !filepath.IsAbs(info.Path) || info.Path != dir {
 		t.Errorf("AssetInfo.Path 应为绝对路径 %q，实际 %q", dir, info.Path)
 	}
@@ -91,38 +88,29 @@ func TestResolveAssetsDirSource(t *testing.T) {
 		t.Fatalf("FS 读 index.html 失败：%v（body=%q）", err, string(body))
 	}
 
-	// 显式目录**不回落内嵌**（设计 §6.1 规则）：即使 release 构建里内嵌存在，也只用这份目录。
-	// 用一个只存在于目录里的文件来证明"命中的是目录"。
+	// 显式目录是**唯一**来源（设计 §6.1 规则）：用一个只存在于目录里的文件来证明
+	// "命中的是这份目录"，而不是任何别处。
 	if _, err := fs.Stat(info.FS, "assets/index-abc.js"); err != nil {
 		t.Fatalf("目录来源应能读到它自己的 assets：%v", err)
 	}
 }
 
-// TestResolveAssetsNoDir 未给 `--web-dir`：release 构建用内嵌；默认构建**拒绝**并给出两条出路。
+// TestResolveAssetsNoDir 未给 `--web-dir`：**拒绝启动**并指出唯一出路。
 //
-// 期望值随构建 tag 变化（wantWebSource 由 meta_web_source_{dev,release}_test.go 提供）：
-// 默认构建下"没有资产"是错误（部署形态装错），这是 M2-1 的核心失败语义之一。
+// 本仓从 2026-10-10 起没有第二来源可回落（`//go:embed` 已删），所以这条在任何构建形态下都一样：
+// "没有资产"是错误（部署形态装错），这是 M2-1 的核心失败语义之一。
 func TestResolveAssetsNoDir(t *testing.T) {
 	info, err := router.ResolveAssets("")
-	if wantWebSource == "" {
-		if err == nil {
-			t.Fatal("默认构建（无内嵌资产）未给 --web-dir 时必须报错")
+	if err == nil {
+		t.Fatalf("未给 --web-dir 时必须报错，实际拿到 %+v", info)
+	}
+	for _, want := range []string{"--web-dir", "MATE_WEB_DIR"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("错误信息应指出出路（含 %q）：%v", want, err)
 		}
-		for _, want := range []string{"-tags release", "--web-dir"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("错误信息应指出两条出路（含 %q）：%v", want, err)
-			}
-		}
-		return
 	}
-	if err != nil {
-		t.Fatalf("release 构建应能用内嵌资产：%v", err)
-	}
-	if info.Source != router.AssetSourceBuiltin {
-		t.Errorf("来源应为 builtin，实际 %q", info.Source)
-	}
-	if info.Path != "" {
-		t.Errorf("builtin 来源不该有路径，实际 %q", info.Path)
+	if info.Has() {
+		t.Error("报错时不该同时给出可用资产")
 	}
 }
 

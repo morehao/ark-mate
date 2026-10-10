@@ -52,6 +52,8 @@ import {
   sleep,
   waitFor,
 } from './lib/desktop-harness.mjs'
+// 诱饵目录抽在 lib 里（另一个消费方是 `desktop-no-host-acceptance.mjs`）：名单复制两份会静默漂移。
+import { installDecoyBin } from './lib/decoy-bin.mjs'
 
 /** 用户家目录（隔离断言用；不假设它一定是某个固定值）。 */
 const HOME = homedir()
@@ -79,8 +81,9 @@ installCleanupHooks()
 const MINIMAL_ENV = { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' }
 
 /**
- * 调用方 PATH 里的**假底座**（M3-4 / V10 ③）：dsh / opencode / node 各一个，被调到就把自己的名字
- * 追加到标记文件并打印 `FAKE-<NAME>-CALLED`。
+ * 调用方 PATH 里的**假底座**（M3-4 / V10 ③）：`dsh` / `opencode` / `node` / `npx` 各一个，被调到就把
+ * 自己的名字追加到标记文件并打印 `FAKE-<NAME>-CALLED`。名单与生成逻辑在 `lib/decoy-bin.mjs`
+ * （`desktop-no-host-acceptance.mjs` 共用同一份，避免"少一个名字 = 少一条判据"的静默漂移）。
  *
  * 为什么要做成"会写标记文件"而不是只看日志：日志里没有 `FAKE-DSH-CALLED` 可能只是因为那段日志没被我们读到；
  * 标记文件不存在才是"真的没被调到"的硬证据（M3-8 会再用真会话复验一遍）。
@@ -89,18 +92,11 @@ let FAKE_BIN = ''
 let FAKE_MARKER = ''
 
 function setupFakeRuntimes() {
-  FAKE_BIN = mkdtempSync(join(tmpdir(), 'mate-fake-bin-'))
-  FAKE_MARKER = join(FAKE_BIN, 'called')
-  for (const name of ['dsh', 'opencode', 'node', 'npx']) {
-    const file = join(FAKE_BIN, name)
-    writeFileSync(
-      file,
-      `#!/bin/sh\necho "${name}" >> "${FAKE_MARKER}"\necho "FAKE-${name.toUpperCase()}-CALLED"\nexit 0\n`,
-      { mode: 0o755 },
-    )
-  }
+  const decoy = installDecoyBin()
+  FAKE_BIN = decoy.binDir
+  FAKE_MARKER = decoy.marker
   // 假 bin 放在**最前面**：链上任何"探测本机"的写法都会先撞上它。
-  MINIMAL_ENV.PATH = `${FAKE_BIN}:/usr/bin:/bin`
+  MINIMAL_ENV.PATH = decoy.path
 }
 
 /** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.ark-mate 会让断言读到别人的内存态）。 */
@@ -317,9 +313,9 @@ async function scenarioGate(cdp) {
   const webOut = join(DESKTOP, 'resources', 'web') // 壳与核心读的同一份（make core/desktop 刷新）
   const idFile = join(webOut, 'build-id.txt')
 
-  // ① 核心确实拿到了 --web-dir（M2-6）：/meta 应报 dir + 绝对路径 + 与文件一致的 build id
+  // ① 核心确实拿到了 --web-dir（M2-6）：/meta 应报绝对路径 + 与文件一致的 build id
+  // （`webSource` 字段已于 2026-10-10 删除：核心只有目录一种资产来源，改看 webPath）
   const meta = await cdp.evalJs(`const r = await fetch('/v1/mate/meta'); const j = await r.json(); return j.data`)
-  check('核心以 dir 来源服务资产（--web-dir 生效）', meta.webSource === 'dir', `webSource=${meta.webSource}`)
   check('webPath 指向运行时树里那一份', typeof meta.webPath === 'string' && meta.webPath.endsWith(join('resources', 'web')), String(meta.webPath))
   const fileId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
   check('webBuildId 与产物里的 build-id.txt 一致', !!fileId && meta.webBuildId === fileId, `meta=${meta.webBuildId} file=${fileId}`)

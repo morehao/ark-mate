@@ -1,15 +1,18 @@
 # ark-mate 架构设计
 
-> 基于开源 Agent Runtime 的**个人 Agent**（monorepo，定位见 [design-and-roadmap.md](./design-and-roadmap.md)
-> 「决策变更 v7」）：单机、单操作员、开箱即用；执行能力归外部 Runtime，本项目作为 ACP Host 经 stdio
-> 连接 opencode 与 deepseek-harness 等多个 Agent Runtime，并由此沉淀一层可复用的**底座能力**。
+> **底座 + 其上的个人 Agent 助手**（monorepo；定位唯一事实源见
+> [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v8」）：**底座层** = `mate` 内核，作为
+> ACP Host 经 stdio（或远程端点）连接 `opencode` 与 `deepseek-harness` **两个一等适配**的 Agent Runtime，
+> 并沉淀会话与能力数据面、REST/WS 契约与交付形态（**不追求 runtime 数量**，v8②）；**产品层** = 底座之上
+> 的**个人 Agent 助手**，**聚焦桌面端**（v8①③）。单机、单操作员、开箱即用。
 
 > **决策更新（见 [design-and-roadmap.md](./design-and-roadmap.md) §0「决策变更 v2」）**：
 > ① 控制面 → 面板的实时传输由「SSE 首选、WS 仅双向需求时引入」调整为 **仅 WebSocket（不设 SSE 出口）**：
 >    REST 命令 + WS 事件推送（attach/快照/重放协议）；脚手架期遗留的 SSE 端点/适配器代码随 M0 移除。
 >    事件流五条范式不变，仅换载体。
 > ② 产品定位收敛为**一次会话/一次运行指定一个 Agent Runtime，无跨 agent 协作**（多 runtime = 注册表 +
->    按会话选择切换）。本文档后续章节中与上述冲突的表述（如 SSE 首选、跨 runtime 编排）以该更新为准。
+>    按会话选择切换；**数量有界**，决策 v8②：两个一等适配，不追求数量）。本文档后续章节中与上述冲突的
+>    表述（如 SSE 首选、跨 runtime 编排）以该更新为准。
 > ③ **deepseek-harness 启动形态勘误**：本文档 §2/§6.2/§7 所述 `dsh-acp-demo --config <cordis.yml>`
 >    已随上游演进废弃，现为统一启动器 `dsh --profile acp`（会话可持久化 list/resume/close、无 load/fork），
 >    以 [design-and-roadmap.md](./design-and-roadmap.md) 与
@@ -32,24 +35,26 @@
 
 ## 1. 定位与目标
 
-一款**基于开源 Agent Runtime 的个人 Agent**：单机、单操作员、开箱即用。与前缀 `ark-`
+一款**底座 + 其上的个人 Agent 助手**：单机、单操作员、开箱即用。与前缀 `ark-`
 （个人品牌标识象征）下的其他项目（如 `ark-iam`）共享品牌，本项目是其中的「个人 Agent 伙伴」
-（`ark-mate`），聚焦：
+（`ark-mate`）。**两层结构（决策 v8①）**：
 
-- **Create**：定义、注册、复用 Agent。
-- **Run**：在统一控制面下跨越 Runtime 运行 Agent 会话。
-- **Extend**：通过 ACP 协议接入多种 Runtime（首版：opencode、deepseek-harness）。
-- **Manage**：生命周期、Registry、会话与配置的统一管理。
+- **底座层**（`mate` 内核）：**Create** 定义、注册、复用 Agent；**Run** 在统一控制面下运行 Agent 会话；
+  **Extend** 通过 ACP 协议接入 Runtime（当前 opencode、deepseek-harness 两个一等适配，**不追求数量**）；
+  **Manage** 生命周期、Registry、会话与配置的统一管理。
+- **产品层**（底座之上）：面向用户的**个人 Agent 助手**，**聚焦桌面端**（macOS / Windows，随包运行时）。
 
-元定位：**先是个人 Agent，其次才是底座**。执行能力（推理 / skill / MCP）全部来自外部 ACP 运行时，
-平台自己不做运行时功能——所以它既不是 Agent SDK，也不是 Agent 引擎。**底座能力**（用统一协议承载
-多个外部运行时、会话与能力数据面、REST/WS 契约、桌面/容器交付形态）是同一内核的第二重身份，
-也是它与「单纯 Agent SDK」的差异点。
+元定位（**决策 v8①，取代旧版「先是个人 Agent，其次才是底座」的主次句式**）：**底座与产品是上下两层，
+职责与承诺并列成立**。执行能力（推理 / skill / MCP）全部来自外部 ACP 运行时，平台自己不做运行时功能——
+所以它既不是 Agent SDK，也不是 Agent 引擎。底座层（用统一协议承载外部运行时、会话与能力数据面、
+REST/WS 契约、交付形态）本身即是可独立使用的一层，也是它与「单纯 Agent SDK」的差异点。
 
-定位边界（与 [design-and-roadmap.md](./design-and-roadmap.md) 文首「决策变更 v3」一致）：
-- **能力不重造**：skills/MCP/推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
-- **数据管理是平台职责**：统一管理会话数据（wire transcript/历史）、skill 数据、MCP 服务器数据；
-- **单机单操作员**：不做多人协作、多用户鉴权与远程聊天通道。
+定位边界（**决策 v3 + v8**）：
+- **能力不重造**（v3①）：skills/MCP/推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能；
+- **数据管理是平台职责**（v3②）：统一管理会话数据（wire transcript/历史）、skill 数据、MCP 服务器数据；
+- **单机单操作员**（v3③）：不做多人协作、多用户鉴权与远程聊天通道；
+- **runtime 接边有界**（v8②）：两个一等适配，**不承诺接入任意 ACP 生态**（成本在维护面，不在 adapter）；
+- **交付聚焦桌面**（v8③）：浏览器入口只是**开发形态**；自建二进制 / 容器 / 远程端点属服务端与开发形态（维护态）。
 
 ## 2. 关键决策（已确认）
 
@@ -64,7 +69,7 @@
 | 传输 | **stdio**（本地子进程） | 两 runtime 均原生 ACP server over stdio |
 | ACP Client 实现 | **引入现有库 `github.com/coder/acp-go-sdk`** | 纯 Go、覆盖 client/server 侧；`internal/acl` 封装它并抽象兜底（见 §9） |
 | Runtime 技术栈 | opencode（TS/Effect）、deepseek-harness（TS/Node） | 均为 Node 系；Go 后端**只拉其 ACP 子进程**，经 stdio 通信，**无语言/库耦合** |
-| 交付 | 单二进制（前端经 `go:embed` 嵌入）；前端产物亦可独立部署 | `make web` 将前端构建产物拷入 `backend/pkg/web/dist`，`-tags release` 下经 `//go:embed` 打入 Go 二进制；独立部署则直接托管 `frontend/apps/panel/dist` |
+| 交付 | **桌面为主**（`make desktop/dist`）；自建二进制与容器为服务端形态（维护态，决策 v8③） | 前端资产**只有 `frontend/apps/web/dist` 一份**（不再拷副本、不再 `go:embed`，2026-10-10 起 `go:embed` 与单二进制形态一并删除）：核心由调用方用 `--web-dir`（或 `MATE_WEB_DIR`）指过去，**没给就拒绝启动（退出码 3）**、不存在任何回落来源；容器镜像内自带一份 dist 并设 `MATE_WEB_DIR`，桌面壳指向包内 `resources/web`——见 [desktop-architecture-design-20260928.md](./desktop-architecture-design-20260928.md) |
 
 ### 流式输出传输选型（控制面 → 面板）
 流式会话有两段链路，传输选型需分开说明，避免混淆：
@@ -195,7 +200,7 @@ module / 独立仓解决的是**跨项目共享 + 独立版本/发布**。`inter
 
 ```
 ark-mate/
-├── Makefile               # 根编排入口：make web / make server / make build|vet|test / make all
+├── Makefile               # 根编排入口：make web（只构建前端产物）/ make server / make build|vet|test
 ├── docs/
 │   └── architect-design.md # 本文件
 ├── LICENSE                # MIT（已就位）
@@ -236,37 +241,36 @@ ark-mate/
 │       │   │   └── mock.go    #   mock Service 占位（manager 实现前可独立冒烟）
 │       │   └── eventbus/      #   会话事件总线（单一通道 + after 续传，见 §2）
 │       │       └── bus.go     #   Publish/Subscribe/Unsubscribe/LastSeq + history 缓冲
-│       ├── infra/         #   基础设施
+│       └── infra/         #   基础设施
 │       │   ├── config/
 │       │   ├── store/     #   SQLite
 │       │   └── logger/
-│       └── web/           #   前端产物 go:embed 宿主（release 编译）
-│           ├── doc.go     #   包说明：产物来源 / 编译形态 / 三种运行形态
-│           ├── web.go     #   //go:build release；//go:embed dist
-│           └── dist/      #   make web 从 frontend 拷贝的产物副本（不入库，见 .gitignore）
 │
 ├── frontend/              # 前端 monorepo（pnpm workspace；可独立部署/单独运行）
 │   ├── pnpm-workspace.yaml
 │   ├── package.json
 │   ├── apps/
 │   │   └── panel/         #   主面板（Vite + React + TS）
-│   │       ├── dist/      #   构建产物（唯一真源）：供独立部署；make web 拷入 backend/pkg/web/dist
+│   │       ├── dist/      #   构建产物（唯一真源）：面板只此一份，由 --web-dir / MATE_WEB_DIR 指过来
 │   │       └── src/
 │   │           ├── pages/ #   Agents / Sessions / Runtimes
 │   │           └── api/
 │   └── packages/          #   共享前端包（api client、ui 等）
 ```
 
-### 前后端交付关系（embed + 独立部署双宿主）
-`frontend/apps/panel` 构建产物（`dist/`）是**唯一真源**，支持两种宿主：
+### 前后端交付关系（核心托管 + 独立部署双宿主）
+`frontend/apps/web` 构建产物（`dist/`）是**唯一真源**，支持两种宿主：
 
-1. **单二进制（默认交付）**：`make web` 把 `dist/` 拷入 `backend/pkg/web/dist`（该副本不入库），
-   `make all` 以 `-tags release` 编译，`web` 包经 `//go:embed dist` 把前端打入最终二进制，产出根目录 `./mate`。
-2. **前端独立部署/运行**：直接托管 `frontend/apps/panel/dist`（nginx 等任意静态宿主，配 SPA fallback）；
+1. **核心托管（桌面 / 自建二进制 / 容器）**：资产**只有 `frontend/apps/web/dist` 一份**，由调用方用 `--web-dir`
+   （或 `MATE_WEB_DIR`）指给核心——桌面壳指包内 `resources/web`；自建二进制
+   （`cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate`）指本机那份 dist；容器镜像内 `COPY` 一份并设
+   `MATE_WEB_DIR`。核心**永不自带**资产，没给就拒绝启动（退出码 3）——2026-10-10 起 `go:embed` 与单二进制形态一并删除。
+2. **前端独立部署/运行**：直接托管 `frontend/apps/web/dist`（nginx 等任意静态宿主，配 SPA fallback）；
    开发期跑 `pnpm dev` + vite proxy（`/v1 → :8099`）联调。独立形态下前端 API base 可配置（`VITE_API_BASE`），
    跨域时后端按需开 CORS。
 
-默认（不带 release tag）的 `go build` 不编译 `web` 包，后端可独立起服冒烟，不受前端产物有无影响。
+**核心侧的资产面只有「调用方给的目录」一种**：`make build` 只编后端，起服必须给 `--web-dir` / `MATE_WEB_DIR`，
+没给就拒绝启动（退出码 3）——「后端起来了但没面板」这种半状态在结构上不存在（2026-10-10 起）。
 二者通过 **REST + SSE** 通信，不共享代码/依赖。
 
 ## 6. 模块职责与数据流
@@ -334,7 +338,7 @@ ark-mate/
 | 模块 | 首版包含 | 首版不包含 |
 |------|----------|-----------|
 | ACP 接入 | stdio 拉起 + v1 协商 + 会话 CRUD + prompt 流式 | HTTP/WS 远程传输、v2、认证流程 |
-| Runtime | opencode、deepseek-harness 两个 adapter | 更多 runtime |
+| Runtime | opencode、deepseek-harness 两个 adapter（**两个一等适配即目标状态**，决策 v8②） | ——（**不把「更多 runtime」列为路线目标**） |
 | 管理 | 创建/启停/销毁、会话列表、runtime 列表 | 权限/审计、多用户、RBAC |
 | 前端 | Sessions 流式页 + Agents 列表 + Runtimes 列表 | 复杂编排画布、多语言 |
 | 扩展 | 无（不实现 MCP-append） | MCP、插件系统、skill |
@@ -347,9 +351,9 @@ ark-mate/
 ## 8. 验证方式（实现后执行）
 
 - `make build` && `make vet` && `make test`：即 `cd backend && go build/vet/test ./...`（单 module，覆盖全部包）。
-- `make web`（仓库根实现，对应原 `cd web && pnpm build`）：构建前端并刷新 `backend/pkg/web/dist`。
+- `make web`（仓库根实现，对应原 `cd web && pnpm build`）：只构建前端产物 `frontend/apps/web/dist`（不再往核心侧拷副本）。
 - `make server`：`go run ./cmd/mate` 拉起后端（开发联调，不起前端）。
-- `make all`：产出仓库根单二进制 `./mate`（`-tags release` 内嵌前端）；`./mate` 拉起后冒烟。
+- 自建二进制：`cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate`，再 `./mate serve --web-dir <abs>/apps/web/dist` 拉起冒烟（核心不自带资产，没给目录即拒启，退出码 3）。
 - 手工冒烟：配置一个 runtime（如已安装 opencode），`ark-mate` 拉起其 ACP server，经面板发送 prompt，观察 SSE 流式回包；再切换 deepseek-harness（`dsh-acp-demo --config <cordis.yml>`，注入 `DEEPSEEK_API_KEY`）验证跨 runtime 可切换，注意 harness 仅支持新鲜会话。
 
 ## 9. 待办 / 风险
