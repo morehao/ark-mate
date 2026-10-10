@@ -34,6 +34,16 @@ const (
 	TableAgent = "agents"
 	// TableAutomation 定时任务：**定义列 + 运行态列**（M6-7，Plan §7 P-10）。
 	TableAutomation = "automations"
+	// TableProvider provider 档案（供应商凭据）：一条上游凭据的登记（v11）。
+	//
+	// 它是 `providers.json` 的 DB 载体（设计 §「新表 providers」）：sqlite 模式下档案的事实源，
+	// memory 模式下文件仍是事实源，写面按持久层模式分派（`providers_carrier.go`）。
+	TableProvider = "providers"
+	// TableModel 平台模型清单（v11）：一条模型条目 = (runtime, provider_id, model_id)。
+	//
+	// 它是**清单的唯一来源**，物化成各 runtime 的配置文件（T5 `config_write`）；
+	// 运行时实际广告的目录是「事实」，不落这张表（设计 D-6 / ADR-10）。
+	TableModel = "models"
 )
 
 // 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
@@ -362,6 +372,63 @@ func (AutomationDefinition) TableName() string { return TableAutomation }
 
 // AutomationDefinitionList 是 AutomationDefinition 切片类型（gormdao 泛型参数要求具名切片）。
 type AutomationDefinitionList []AutomationDefinition
+
+// ProviderDefinition 是一条 provider 档案行（列与语义同 SkillDefinition / McpServerDefinition /
+// AgentDefinition；v11 建成）。
+//
+// `Body` 是唯一权威：存 `{type, key_ref, note?}` 以及文件时代留下来的未知键（含历史 `model`，
+// 迁入时**原样保留**，保证零丢失）。**明文密钥绝不进 body**：只允许 `key_ref`；密文归 vault
+// （`KindProviderKey`，AAD 绑定 `vault:providers/<id>`）。
+type ProviderDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// Body 定义原始 JSON（含未知键）。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (ProviderDefinition) TableName() string { return TableProvider }
+
+// ProviderDefinitionList 是 ProviderDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type ProviderDefinitionList []ProviderDefinition
+
+// ModelDefinition 是平台声明的一条模型条目（v12 重建；**不带底座维度**）。
+//
+// 一条模型条目说清「挂在哪条供应商下、发给上游的是哪个模型 id」——它**不再**说"给哪个底座用"：
+// 一份清单同时投给所有已注册底座（ADR-1、B3）。v11 的身份三元组 `(runtime, provider_id, model_id)`
+// 因此塌成两列：`(provider_id, model_id)` **唯一**（库级唯一索引真表达得了，见 v12 迁移）。
+//
+// 为什么两列是**列**而不是 body 字段：它们是平台侧唯一的查询/约束轴
+// （「同步时按供应商取模型」= `WHERE provider_id=?`；「`model_exists` 判定」= 同一索引），
+// 都在热路径上。放进 body 就得全表扫 + 反序列化。
+//
+// `Body` 存 `{name?, note?}`（**不含 model_id**——它已是列，双写必然漂移；也不含 v11 的
+// `extra`/`hidden`/`pinned`：三者都删掉了，ADR-7）。
+//
+// 默认模型**不在这里**：它是**用户的偏好**、是单一值，住 `meta.MetaKeyDefaultModel`（ADR-21）。
+// v11 的 `is_default` 列（每 runtime 至多一条）随之删除——那是把底座维度从后门带回用户面的东西。
+type ModelDefinition struct {
+	ID string `gorm:"column:id;primaryKey"`
+	// ProviderID 挂靠的供应商 id（指向 providers.id）。
+	ProviderID string `gorm:"column:provider_id;not null"`
+	// ModelID 发给上游的模型 id（**不是**平台模型 id，那是 ID 列）。
+	ModelID string `gorm:"column:model_id;not null"`
+	// Body 平台声明正文 JSON（含未知键）：{name?, note?}。
+	Body string `gorm:"column:body;not null"`
+	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
+	Revision int64 `gorm:"column:revision;not null"`
+	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (ModelDefinition) TableName() string { return TableModel }
+
+// ModelDefinitionList 是 ModelDefinition 切片类型（gormdao 泛型参数要求具名切片）。
+type ModelDefinitionList []ModelDefinition
 
 // CapabilityRevision 是一条能力定义变更审计。
 //

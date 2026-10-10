@@ -32,8 +32,16 @@ func TestIsolationEnvBuiltinRuntimes(t *testing.T) {
 		{
 			runtimeID: opencode.ID,
 			want: []string{
+				// F3：配置层③⑥与"关项目级发现"三个必堵键 + 两个可复现键。
+				// 空值 = "等价于没设"（JS 侧 falsy），`true` 是开关键——它们**不是路径**，
+				// 所以下面 underHome 的断言对它们单独放行（见该循环的例外表）。
+				"OPENCODE_CONFIG=",
+				"OPENCODE_CONFIG_CONTENT=",
 				"OPENCODE_CONFIG_DIR=" + filepath.Join(home, "runtime", "opencode", "config", "opencode"),
+				"OPENCODE_CONFIG_PROJECT_DISABLE=true",
 				"OPENCODE_DB=" + filepath.Join(home, "runtime", "opencode", "data", "opencode.db"),
+				"OPENCODE_MODELS_PATH=",
+				"OPENCODE_MODELS_URL=",
 				"XDG_CACHE_HOME=" + filepath.Join(home, "runtime", "opencode", "cache"),
 				"XDG_CONFIG_HOME=" + filepath.Join(home, "runtime", "opencode", "config"),
 				"XDG_DATA_HOME=" + filepath.Join(home, "runtime", "opencode", "data"),
@@ -50,7 +58,24 @@ func TestIsolationEnvBuiltinRuntimes(t *testing.T) {
 			t.Fatalf("%s 的隔离环境不符:\n got %v\nwant %v", tc.runtimeID, got, tc.want)
 		}
 		for _, kv := range got {
-			_, val, _ := strings.Cut(kv, "=")
+			key, val, _ := strings.Cut(kv, "=")
+			// 例外表：这三个键的**正确取值不是路径**——空值表示"清掉用户的同名变量"（等价于没设），
+			// `true` 是开关键。它们不落任何目录，所以不适用"值必须在数据目录之下"这条。
+			switch key {
+			case "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_MODELS_PATH", "OPENCODE_MODELS_URL":
+				if val != "" {
+					t.Fatalf("%s 的 %s 应被清空（用户设了它会顶掉平台那份配置），实际 %q", tc.runtimeID, key, val)
+				}
+				continue
+			case "OPENCODE_CONFIG_PROJECT_DISABLE":
+				if val != "true" {
+					t.Fatalf("%s 的 %s 应为 true，实际 %q", tc.runtimeID, key, val)
+				}
+				continue
+			}
+			if val == "" {
+				t.Fatalf("%s 的 %s 值不应为空（空值等于没隔离）", tc.runtimeID, key)
+			}
 			if !underHome(home, val) {
 				t.Fatalf("%s 的值 %q 不在数据目录 %q 之下", tc.runtimeID, val, home)
 			}

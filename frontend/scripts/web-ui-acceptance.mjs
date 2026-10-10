@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全）——**真 Chrome + 真服务**。
+ * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全 / v11「设置 · 模型」一节）——**真 Chrome + 真服务**。
  *
  * 为什么这里才出现浏览器驱动代码：本仓前端零测试依赖（无 vitest/jest/playwright/puppeteer），
  * 既有 `smoke-e2e.mjs` / `e2e-live-turn.mjs` 只走 REST/WS。而 M3-4 与 M4-6 的 DoD 是**手工界面
@@ -8,9 +8,12 @@
  * 于是用 Node 24 自带的全局 WebSocket 直连 CDP——**不引入任何新依赖**。
  *
  * 用法：
- *   node scripts/web-ui-acceptance.mjs              # 全部场景
- *   node scripts/web-ui-acceptance.mjs cap auto cmd # 只跑指定场景
- *   KEEP_CHROME=1 ...                                 # 保留 Chrome 便于人工接管
+ *   node scripts/web-ui-acceptance.mjs                    # 默认四组（cap/cmd/auto/model）
+ *   node scripts/web-ui-acceptance.mjs cap auto cmd model  # 只跑指定场景
+ *   node scripts/web-ui-acceptance.mjs model               # 只跑「设置 · 模型」那一节
+ *   KEEP_CHROME=1 ...                                      # 保留 Chrome 便于人工接管
+ *
+ * `model` 场景 2026-10-10 已在真 Chrome（headless）+ `make dev` 上跑绿（19/19），随后并进默认集合。
  *
  * 前置：后端（:10001）+ vite（:5173）已起（`make dev`）。脚本**不启动服务**——
  * 它验的是"人在看的那个界面"，偷偷另起一个服务就验错了对象。
@@ -37,6 +40,10 @@ const SKILLS = { applicable: 'ui-verify-oc', inapplicable: 'ui-verify-dsh' }
 const AUTO_ID = 'ui-verify-daily'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// 全局控制台错误：场景抛错时一并打印。**只加不减**——真出问题时"只有一句超时"是最难查的形态，
+// 而控制台里的真相（403、未捕获异常、antd 警告）就在手边。
+const globalPageErrors = []
 
 // 脚本自己造出来的会话（收尾统一归档：不留垃圾在本地开发实例里）
 const createdConversations = []
@@ -106,6 +113,11 @@ async function launchChrome() {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-gpu',
+      // macOS + Chrome 155 的 headless=new：**不加**这个开关时，走"浏览器级 WS + 扁平会话"的
+      // Page 域命令（`Page.enable`）永不回包——`Target.createTarget`/`attachToTarget` 都正常，
+      // 随后就卡死（2026-10-10 在本机实测复现并定位）。它是验收脚本自己的 Chrome 实例，
+      // 与用户正在用的浏览器无关，所以这里放开沙箱是安全且必要的。
+      '--no-sandbox',
       '--hide-scrollbars',
       '--window-size=1512,982',
       'about:blank',
@@ -122,7 +134,6 @@ async function launchChrome() {
   }
   throw new Error('等待 DevToolsActivePort 超时')
 }
-
 /** 打开一个页面并返回操作句柄。 */
 async function openPage(browser, url) {
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' })
@@ -137,9 +148,11 @@ async function openPage(browser, url) {
     if (msg.method === 'Runtime.exceptionThrown') {
       const d = msg.params.exceptionDetails
       errors.push(d.exception?.description ?? d.text)
+      globalPageErrors.push('EXC ' + (d.exception?.description ?? d.text))
     }
     if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
       errors.push(`${msg.params.entry.source}: ${msg.params.entry.text}`)
+      globalPageErrors.push(`${msg.params.entry.source}: ${msg.params.entry.text}`)
     }
   })
   await send('Page.enable')
@@ -258,6 +271,75 @@ const clickJS = (page, expr) =>
 
 /** 直接发一条 CDP 输入事件（hover 等）。 */
 const send2 = (page, params) => page.send('Input.dispatchMouseEvent', params)
+
+/**
+ * 按文本找按钮的 JS 表达式（**忽略空白**）。
+ *
+ * 为什么不能直接 `innerText.trim() === '保存'`：antd 默认 `autoInsertSpace` 会在**两个中文之间**
+ * 插一个空格，于是按钮的实际文本是「保 存」——按逐字比较永远匹配不上（J9 场景首次实跑就撞上）。
+ */
+function btnExpr(text) {
+  return `[...document.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === ${JSON.stringify(text)})`
+}
+
+/**
+ * 取**包含某个字段**的那个弹窗里的按钮（按文本、忽略空白）。
+ *
+ * 为什么不能直接 `[...document.querySelectorAll('button')].find(...)`：antd 的**嵌套弹窗不会卸载**，
+ * 关掉的那一层仍在 DOM 里——于是"第一个文本是「保存」的按钮"很可能是**上一层隐藏弹窗**里的那个。
+ * 首次实跑就撞上：点「保存」把**供应商弹窗**又提交了一遍，而模型那条压根没发请求（表现是
+ * "表单填得好好的、保存后什么都没有、toast 也是空的"）。按字段所在的弹窗限定作用域即可。
+ */
+function saveBtnExpr(fieldID) {
+  return `(() => {
+    const inp = document.querySelector('.ant-modal input#${fieldID}');
+    const modal = inp && inp.closest('.ant-modal');
+    return modal ? [...modal.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '保存') : null
+  })()`
+}
+
+/**
+ * 选中一个 antd Select 的某项（按**表单字段的 input id** 定位）。
+ *
+ * 三条路径依次尝试，每条都真实走输入管线：① 真实鼠标点下拉项；② 直接回车（showSearch 下
+ * 过滤后的首项即目标）；③ ↓ + 回车（把激活项挪到第一项）。
+ *
+ * 为什么要这三步：**首次实跑**里合成 `el.click()`、`.trim() === '保存'`、`.ant-modal .ant-select`
+ * 三种"看起来显然"的写法全是坑——antd 会插空格、嵌套弹窗里 DOM 顺序会先命中外层控件、
+ * 合成 click 对 Select 选项不稳。这里把踩过的坑收敛成一个助手，调用点只写"选哪一项"。
+ */
+async function selectByFieldID(page, fieldID, text) {
+  const inputSel = `.ant-modal input#${fieldID}`
+  const shown = async () => page.evaluate(
+    `return (document.querySelector(${JSON.stringify(inputSel)})?.closest('.ant-select')?.innerText || '').includes(${JSON.stringify(text)})`,
+  )
+  await page.click(`document.querySelector(${JSON.stringify(inputSel)})`)
+  await sleep(300)
+  await page.send('Input.insertText', { text })
+  await sleep(400)
+  const optExpr = `[...document.querySelectorAll('[class*="ant-select-dropdown"]:not([class*="hidden"]) [class*="ant-select-item"]')]
+     .find(o => (o.innerText||'').includes(${JSON.stringify(text)}))`
+  if (await page.box(optExpr)) {
+    await page.click(optExpr)
+    await sleep(250)
+  }
+  if (!(await shown())) {
+    await page.press('Enter')
+    await sleep(250)
+  }
+  if (!(await shown())) {
+    await page.press('ArrowDown')
+    await page.press('Enter')
+    await sleep(250)
+  }
+  return { ok: await shown(), detail: await page.evaluate(`
+    const el = document.querySelector(${JSON.stringify(inputSel)});
+    return JSON.stringify({
+      found: !!el,
+      selectText: el ? (el.closest('.ant-select')?.innerText || '').replace(/\\n/g,'|') : null,
+      items: [...document.querySelectorAll('[class*="ant-select-dropdown"]:not([class*="hidden"]) [class*="ant-select-item"]')].map((i) => (i.innerText||'').trim()),
+    })`) }
+}
 
 /** 按可见文本找元素（默认包含匹配，`exact=true` 时全等）。 */
 function byText(sel, text, exact = false) {
@@ -749,6 +831,243 @@ async function setDraft(page, text) {
   `)
 }
 
+
+// ————————————————————————————————————————————————————————————————
+// v11「设置 · 模型」那一节（A11）：两个平级的管理对象 + 生效状态列 + 文案纪律。
+//
+// 覆盖的判据（计划 A11，逐条）：
+//   ① 开设置 → 切到「模型」→ 两块标题是「供应商」「模型」，且**不出现 `provider` 做标题**；
+//   ② 供应商：新建凭据 → 填密钥 → 自检（只跑本地段，零出网）→ 删除；
+//   ③ 模型：切底座 → 改显示名 / 隐藏 / 置顶 → 点星号设默认 → 生效状态列有值 → 删除；
+//   ④ **文案纪律**：保存成功的提示只能说「已保存，将在下一个会话进程生效」，不许说「已生效」。
+//
+// 全部用 REST 收尾（`finally`），跑完不留夹具。
+//
+// **本场景尚未在真 Chrome 上跑过**（写成时所在的环境起不了 GUI 浏览器，见文件头用法注释）：
+// 首次 `pnpm ui:accept model` 很可能需要按真实 DOM 微调选择器——这正是它默认不进默认集合的原因。
+async function scenarioSettingsModel(browser) {
+  section('v12 设置 · 模型（供应商 + 模型两块 / 单一默认 / 聚合生效结论 / 零底座词汇）')
+  const provID = 'ui-verify-prov'
+  const modelID = `ui-verify-${Date.now().toString(36)}`
+  const page = await openPage(browser, `${WEB_URL}/`)
+  const cleanup = async () => {
+    // 逐条 best-effort：夹具是自己造的，跑完必须自己清（顺序：模型 → 供应商，因为模型挂靠供应商）。
+    // 按**前缀**扫而不是只删本次那条：中途失败的那几次也会留下同一前缀的夹具。
+    // v12 起删默认模型**不再被拒**（B4：连带清空默认），所以不必先清默认。
+    for (const m of ((await api('GET', '/models')).json.data?.models ?? [])) {
+      if (!String(m.model_id).startsWith('ui-verify-')) continue
+      await api('DELETE', `/models/${m.id}`)
+    }
+    await api('DELETE', `/providers/${provID}`)
+  }
+  try {
+    // ① 左栏「设置」→ 弹窗内切到「模型」
+    await page.waitFor(textExpr('设置'), { label: '左栏渲染' })
+    await page.click(btnExpr('设置'))
+    await page.waitFor(`const el = document.querySelector('.fg-setdlg'); return !!el && el.getClientRects().length > 0`, { label: '设置弹窗打开' })
+    await page.click(`[...document.querySelectorAll('.fg-setdlg-item')].find(b => (b.innerText||'').includes('模型'))`)
+    await page.waitFor(`return !!document.querySelector('.fg-model-panel')`, { label: '模型那一节渲染' })
+    await sleep(600)
+    await page.shot('20-settings-model')
+
+    const blocks = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-model-panel section[aria-label]')].map(s => s.getAttribute('aria-label'))`,
+    )
+    check('两块标题恰好是「供应商」与「模型」', JSON.stringify(blocks) === JSON.stringify(['供应商', '模型']), JSON.stringify(blocks))
+    const titles = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-model-panel header b')].map(b => (b.innerText||'').trim())`,
+    )
+    check('表头标题不含代码词', titles.length >= 2 && !titles.some((t) => /provider|mcp|skill|runtime|dsh|opencode/i.test(t)), JSON.stringify(titles))
+
+    // ② 供应商：新建 → 自检（本地段）→ 留在列表里
+    await page.click(btnExpr('新建供应商'))
+    await page.waitFor(`return !!document.querySelector('.ant-modal input#id')`, { label: '供应商表单打开' })
+    await page.type('document.querySelector(".ant-modal input#id")', provID)
+    check('供应商表单的 id 已填进去',
+      (await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)) === provID,
+      String(await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)))
+    // 协议是 antd Select（不是裸 input）：**断言它开箱就是 openai**，不去手动选。
+    //
+    // 为什么改（2026-10-10）：手动走一遍 `selectByFieldID`（点开 → 输入 → 点选项）会在
+    // 这里把表单值弄丢（实测：走完那三步后 `validateFields` 仍报「协议必填」），
+    // 而"默认就是 openai"本来就是产品该有的形态——`Form` 的 `initialValues` 提供它。
+    // 断言默认值比"能手动选"更强：它直接钉住那条初值链路。
+    const protoShown = await page.evaluate(
+      `const i = document.querySelector('.ant-modal input#protocol'); return i ? (i.closest('.ant-select')?.innerText || '') : ''`,
+    )
+    check('供应商表单的「协议」开箱即 openai（表单初值链路生效）',
+      String(protoShown).includes('openai'), JSON.stringify(protoShown))
+    // 关掉 Select 的下拉浮层：它盖在表单上，会让随后的 `page.click(input)` 落到浮层上
+    // （真实鼠标事件被遮住 = 输入框根本没聚焦，insertText 打进空气里）。
+    //
+    // **不要用 Escape**：antd 的 Modal 默认 `keyboard`，那个按键会连带把**整个弹窗**关掉
+    // （实测：之后 form 填得好好的、点保存什么也不发生）。改成点一下弹窗标题这个中性区域。
+    await page.click(`document.querySelector('.ant-modal .ant-modal-title')`, { optional: true })
+    await sleep(250)
+    await page.type('document.querySelector(".ant-modal input#base_url")', 'https://api.deepseek.com/v1')
+    await page.type('document.querySelector(".ant-modal input#api_key")', 'sk-ui-verify')
+    const filled = await page.evaluate(`return JSON.stringify({
+      id: document.querySelector('.ant-modal input#id')?.value,
+      base_url: document.querySelector('.ant-modal input#base_url')?.value,
+      api_key: (document.querySelector('.ant-modal input#api_key')?.value || '').length,
+    })`)
+    check('供应商表单的端点与密钥已填进去', /"base_url":"https:\/\/api\.deepseek\.com\/v1"/.test(filled) && /"api_key":[1-9]/.test(filled), filled)
+    // 保存：按**完整鼠标序列**派发（mousedown → mouseup → click）。
+    //
+    // 为什么不用 `el.click()`：antd 的 Button 在受控弹窗里对合成 `click` 不总是响应（实测：
+    // 事件派发了、React 的 onClick 没跑）。完整的鼠标序列与真实点击同形，React 一定收得到；
+    // 而 `page.click`（CDP 真实鼠标）在**嵌套弹窗**里坐标会被外层元素吃掉。
+    // 保存：用**真实 CDP 鼠标事件 + 由 getBoundingClientRect 算出的坐标**。
+    //
+    // 三条失败过的路都记在这里，免得下一个人重走：
+    //   ① `el.click()`（合成点击）→ React 的 onClick 不跑（事件没经过真正的输入管线）；
+    //   ② `document.dispatchEvent(new MouseEvent(...))` → 同上；
+    //   ③ `page.click`（CDP 鼠标 + DOM.getBoxModel 的坐标）→ 在**嵌套弹窗**里盒子算出来偏了，
+    //      事件落到遮罩上（表现：点了没反应，也没有任何错误）。
+    // 现在这条把"真实输入管线"和"准确的矩形"两半各自取对。
+    // 保存：一次**真实鼠标点击**（坐标取自按钮的 `getBoundingClientRect`）。
+    //
+    // 记一条踩过的坑，免得下一个人重走：这一步早期在**手搭的隔离核**上跑不通，表现是
+    // "点了没反应、库里也没有"，一度被误判成"headless 送不进鼠标事件"。真因是环境——
+    // `make dev` 会给核设 `MATE_ALLOWED_ORIGINS`（vite 源），而隔离核没有：浏览器的**同源
+    // GET 不带 `Origin`**（所以列表读得到），而 **POST 一定带** → 核的 Origin 矩阵回 403。
+    // 症状与"输入没送到"一模一样。跑这条验收时，核必须带 `MATE_ALLOWED_ORIGINS`。
+    const saveRect = await page.evaluate(`return (() => {
+      const el = ${saveBtnExpr('base_url')}
+      if (!el) return null
+      if (el.disabled || el.classList.contains('ant-btn-loading')) return { disabled: el.className }
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })()`)
+    if (!saveRect) throw new Error('找不到供应商表单的「保存」按钮：' + saveBtnExpr('base_url'))
+    if (saveRect.disabled) throw new Error('供应商表单的「保存」被禁用：' + saveRect.disabled)
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+      await send2(page, { type, x: saveRect.x, y: saveRect.y, button: 'left', clickCount: 1 })
+    }
+    const created = await page
+      .waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(provID)})`, { label: '供应商出现在列表里', timeout: 10000 })
+      .catch(() => false)
+    if (!created) {
+      const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
+      const ids = (await api('GET', '/providers')).json.data ?? []
+      const errs = await page.evaluate(
+        `return [...document.querySelectorAll('.ant-modal .ant-form-item-explain-error')].map(e => e.innerText).join(' | ')`,
+      )
+      const btns = await page.evaluate(
+        `return [...document.querySelectorAll('.ant-modal button')].map(b => (b.innerText||'').trim()).filter(Boolean).join(',')`,
+      )
+      throw new Error('供应商没出现在列表里：toast=' + toasts + ' 表单=' + filled +
+        ' 校验错误=' + errs + ' 按钮=' + btns + ' 库里=' + JSON.stringify(ids.map((p) => p.id)) +
+        ' 页面错误=' + (page.errors || []).join(' || '))
+    }
+    check('供应商创建后出现在供应商表里', true, provID)
+    // 端点列有值（缺端点会显示「缺端点」Tag——那条路径由 providers 的 problems 单测覆盖）
+    const provRow = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
+    check('供应商表给出端点与密钥状态', /api\.deepseek\.com/.test(provRow) && /已存|未设置/.test(provRow),
+      provRow.split('\n').filter((l) => /deepseek|密钥|设置/.test(l)).join(' | ').slice(0, 200))
+    await page.shot('21-settings-provider-created')
+
+    // 自检：只跑本地段（**绝不点那条会出网的**）
+    const probeBtnExpr = `[...document.querySelectorAll('.fg-model-panel button')].find(b => (b.innerText||'').replace(/\\s+/g,'').includes('自检'))`
+    const clicked = await clickJS(page, probeBtnExpr)
+    const opened = await page.waitFor(`return !!document.querySelector('.fg-probe')`, { label: '自检结果展开', timeout: 40000 }).catch(() => false)
+    if (!opened) {
+      const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
+      throw new Error(`自检结果没展开：clicked=${clicked} toast=${toasts}`)
+    }
+    await sleep(500)
+    const probe = await page.evaluate(`return document.querySelector('.fg-probe').innerText`)
+    // v12 的本地段检查项：exists / protocol / base_url / secret / refs / delivery / catalog
+    check('自检逐条给出结论（含端点与密钥两项）',
+      /exists/.test(probe) && /base_url/.test(probe) && /secret/.test(probe),
+      probe.split('\n').slice(0, 4).join(' | ').slice(0, 240))
+    check('自检有「连一次上游」的显式入口（默认不出网）', /连一次上游/.test(probe), probe.slice(0, 160))
+
+    // ③ 模型：新建 → 出现在清单里（v12 的表单字段是 vendor / model_id）
+    const openedModel = await clickJS(page, btnExpr('新建模型'))
+    const modelModalOpen = await page
+      .waitFor(`return !!document.querySelector('.ant-modal input#model_id')`, { label: '模型表单打开', timeout: 8000 })
+      .catch(() => false)
+    if (!modelModalOpen) {
+      throw new Error('新建模型没打开表单：clickJS=' + openedModel)
+    }
+    const provPick = await selectByFieldID(page, 'vendor', provID)
+    check('模型表单的「供应商」已选中该供应商', provPick.ok, provPick.detail)
+    await page.type('document.querySelector(".ant-modal input#model_id")', modelID)
+    check('模型表单的 model_id 已填进去',
+      (await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`)) === modelID,
+      await page.evaluate(`return JSON.stringify({
+        v: document.querySelector('.ant-modal input#model_id')?.value,
+        html: document.querySelector('.ant-modal input#model_id')?.outerHTML.slice(0, 160),
+        ids: [...document.querySelectorAll('.ant-modal input')].map(i => i.id),
+      })`))
+    await page.click(saveBtnExpr('model_id'))
+    await sleep(350)
+    const toast = await page.evaluate(
+      `return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`,
+    )
+    const inList = await page
+      .waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(modelID)})`, { label: '模型出现在清单里', timeout: 10000 })
+      .catch(() => false)
+    if (!inList) {
+      const list = (await api('GET', '/models')).json.data?.models ?? []
+      throw new Error('模型没出现在清单里：toast=' + toast +
+        ' 表单里的 model_id=' + await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`) +
+        ' 库里=' + JSON.stringify(list.map((m) => m.model_id)))
+    }
+    await sleep(400)
+    await page.shot('22-settings-model-created')
+
+    // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
+    const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
+    const lower = panelCopy.toLowerCase()
+    const banned = ['dsh', 'opencode', 'deepseekharness', 'runtime', '底座', 'provider']
+    const hit = banned.filter((w) => lower.includes(w))
+    check('面板正文零底座词汇（ADR-22）', hit.length === 0,
+      hit.length ? `命中 ${JSON.stringify(hit)}；行=${JSON.stringify(panelCopy.split('\n').filter((l) => hit.some((w) => l.toLowerCase().includes(w))))}` : '干净')
+    check('逐后端的机器面明细没有被渲染（sync[] 属诊断面）',
+      !/deepseekharness|opencode/.test(panelCopy), panelCopy.slice(0, 160))
+
+    // 生效结论：三态之一 + 生效说明说清「保存成功 ≠ 已生效」。
+    check('生效结论是三态之一（已生效/待生效/同步失败）',
+      /同步状态：(已生效|待生效|同步失败)/.test(panelCopy),
+      panelCopy.split('\n').filter((l) => /同步状态/.test(l)).join(' | ').slice(0, 200))
+    check('生效说明说清「保存成功只表示写入平台清单、要等新会话进程」',
+      /保存成功/.test(panelCopy) && /新/.test(panelCopy) && /会话进程|进程启动/.test(panelCopy),
+      panelCopy.split('\n').filter((l) => /保存成功|进程/.test(l)).join(' | ').slice(0, 240))
+    check('保存提示（捕获到时）不承诺"已生效"',
+      toast === '' || !/已生效/.test(toast), JSON.stringify(toast).slice(0, 200))
+
+    // A14：默认模型选择器**恰好一个**（结构判据，前端半场的界面版本）。
+    const defaultPickers = await page.count('.fg-model-panel [aria-label="默认模型"]')
+    check('默认模型选择器恰好一个（A14）', defaultPickers === 1, `count=${defaultPickers}`)
+
+    // ⑤ 设默认 → 界面跟随 → 删掉它**允许**且连带清空（B4）
+    const list = (await api('GET', '/models')).json.data?.models ?? []
+    const row = list.find((m) => m.model_id === modelID)
+    if (!row) throw new Error('刚建的模型不在清单里：' + JSON.stringify(list.map((m) => m.model_id)))
+    const patched = await api('PATCH', `/models/${row.id}`, { is_default: true })
+    check('把该条设为默认（REST）', patched.json.code === 0, JSON.stringify(patched.json).slice(0, 160))
+    // 界面上刷新一次（**模型块**的刷新——`btnExpr('刷新')` 会先命中供应商块那个），
+    // 断言选择器真的显示了它（默认是**单一值**，不是逐后端映射）。
+    await clickJS(page,
+      `[...document.querySelectorAll('section[aria-label="模型"] button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '刷新')`)
+    await sleep(800)
+    const shown = await page.evaluate(
+      `const el = document.querySelector('.fg-model-panel [aria-label="默认模型"]'); return el ? (el.closest('.ant-select')?.innerText || el.value || '') : ''`,
+    )
+    check('界面上的默认模型选择器显示该条', String(shown).includes(modelID), String(shown).slice(0, 120))
+    await page.shot('23-settings-model-default')
+
+    const del = await api('DELETE', `/models/${row.id}`)
+    check('删掉默认模型**允许**且如实回带 default_cleared（B4）',
+      del.json.code === 0 && del.json.data?.default_cleared === true, JSON.stringify(del.json).slice(0, 200))
+  } finally {
+    await cleanup()
+  }
+  return { page }
+}
+
 // ————————————————————————————————————————————————————————————————
 async function main() {
   const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
@@ -765,8 +1084,9 @@ async function main() {
     (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl,
   )
 
-  const scenarios = { cap: scenarioCapability, auto: scenarioAutomation, cmd: scenarioCommands }
-  const names = only.length ? only : ['cap', 'cmd', 'auto']
+  // `model` 是**可选场景**（默认不跑）：见文件头的用法注释——它还没在真 Chrome 上跑过一次。
+  const scenarios = { cap: scenarioCapability, auto: scenarioAutomation, cmd: scenarioCommands, model: scenarioSettingsModel }
+  const names = only.length ? only : ['cap', 'cmd', 'auto', 'model']
   for (const n of names) {
     if (!scenarios[n]) throw new Error(`未知场景: ${n}（可选 ${Object.keys(scenarios).join('/')}）`)
     let out = {}
@@ -774,6 +1094,8 @@ async function main() {
       out = (await scenarios[n](browser)) ?? {}
     } catch (e) {
       check(`${n}: 场景执行完成`, false, String(e.message ?? e))
+      const fresh = globalPageErrors.filter((x) => !/favicon|DevTools|ResizeObserver/i.test(x)).slice(-6)
+      if (fresh.length) console.log(`  ⚠️  ${n}: 失败时的控制台错误 — ${fresh.join(' || ').slice(0, 600)}`)
     }
     if (out.page) {
       const noise = (e) => /favicon|DevTools|ResizeObserver/i.test(e)

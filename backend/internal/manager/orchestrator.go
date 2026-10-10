@@ -141,8 +141,10 @@ type runtimeConn struct {
 	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机/停 agent 用它一次性找到**该配置的
 	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
 	baseKey string
-	started time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
-	pid     int       // 子进程 pid（进程注册表登记用；0 = 未登记）
+	// configDigest 该连接建立时的平台模型配置指纹（T5）。代际裁决用它判断"清单变了没有"。
+	configDigest string
+	started      time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
+	pid          int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
 	// 而非对端或子进程意外断开。拆除方在 Close 之前置位，dropConn 据此判定拆除原因；
 	// 主动拆除不得把会话写成失败态（见 disconnectConversation 的状态语义）。

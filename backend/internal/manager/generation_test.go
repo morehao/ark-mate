@@ -51,18 +51,18 @@ func waitConnCount(t *testing.T, r *rig, want int) {
 // 与内存翻倍，而且没人会立刻发现）。
 func TestGenerationKeyZeroRegression(t *testing.T) {
 	base := connKey("opencode", []string{"A=1"}, []string{"B=2"})
-	if got := generationKey(base, ""); got != base {
+	if got := generationKey(base, "", ""); got != base {
 		t.Fatalf("空指纹必须原样返回基础键（R11）：\n%s\n%s", base, got)
 	}
 	// 非空指纹必须改键（否则两套不同的能力会共用一个进程）。
-	if got := generationKey(base, "abc123"); got == base {
+	if got := generationKey(base, "abc123", ""); got == base {
 		t.Fatal("非空指纹必须产生不同的键")
 	}
 	// 同指纹稳定、不同指纹不同。
-	if generationKey(base, "abc123") != generationKey(base, "abc123") {
+	if generationKey(base, "abc123", "") != generationKey(base, "abc123", "") {
 		t.Fatal("同指纹应得同键")
 	}
-	if generationKey(base, "abc123") == generationKey(base, "def456") {
+	if generationKey(base, "abc123", "") == generationKey(base, "def456", "") {
 		t.Fatal("不同指纹应得不同键")
 	}
 }
@@ -79,11 +79,11 @@ func TestGenerationKeyNoPrefixAmbiguity(t *testing.T) {
 
 	// 短键 + 指纹 vs 长键本身：必须不同（否则"给短键指定了能力"会被当成"长键的缺省代际"，
 	// 两套不同的能力共用一个进程）。
-	if generationKey(short, "zz") == long {
-		t.Fatalf("代际键与另一个基础键撞车：\nshort=%q\nlong =%q", generationKey(short, "zz"), long)
+	if generationKey(short, "zz", "") == long {
+		t.Fatalf("代际键与另一个基础键撞车：\nshort=%q\nlong =%q", generationKey(short, "zz", ""), long)
 	}
 	// 同指纹下两个不同基础键的键也必须不同。
-	if generationKey(short, "zz") == generationKey(long, "zz") {
+	if generationKey(short, "zz", "") == generationKey(long, "zz", "") {
 		t.Fatal("不同基础键的同指纹代际键不该相同")
 	}
 }
@@ -95,7 +95,7 @@ func TestGenerationKeyFindsAllGenerations(t *testing.T) {
 	// 一个缺省代际 + 两个能力代际 + 一个别的配置（不该被匹配到）。
 	o.conns[base] = &runtimeConn{key: base, baseKey: base}
 	for _, fp := range []string{"fp1", "fp2"} {
-		k := generationKey(base, fp)
+		k := generationKey(base, fp, "")
 		o.conns[k] = &runtimeConn{key: k, baseKey: base}
 	}
 	otherBase := connKey("stub", []string{"DSH_PERMISSION_MODE=read-only"})
@@ -189,7 +189,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
 	// 全部代际都在同一个基础键下（停机时一次性关掉）。
-	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(agent.Provider))
+	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(spec.ID, agent.Provider))
 	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}

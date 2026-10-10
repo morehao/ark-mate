@@ -281,6 +281,55 @@ export const consoleStyleSheet = `
   .fg-setdlg-hint { font-size: 11px; line-height: 1.4; color: ${tokens.textPlaceholder}; }
   .fg-setdlg-body { flex: 1; min-width: 0; padding-left: 20px; overflow-y: auto; }
 
+  /* ——— 设置 · 模型（第 4 节）：两个平级的块（供应商 / 模型） ———
+     颜色/圆角/间距一律取 tokens（业务代码与样式都不得硬编码色值）。 */
+  .fg-model-panel { display: flex; flex-direction: column; gap: 16px; }
+  .fg-model-panel .fg-card { border: 1px solid ${tokens.border}; border-radius: ${tokens.radiusMd}; background: ${tokens.surface}; overflow: hidden; }
+  .fg-model-panel .fg-card-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+
+  /* 配置状态条：路径 / 生成时间 / 通道 / pending。pending 必须看得见——它与"已保存"是两件事。 */
+  .fg-cfgbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px; border-radius: ${tokens.radiusSm};
+    background: ${tokens.softFill}; font-size: 12px; color: ${tokens.textSecondary};
+  }
+  .fg-cfgbar-dot { width: 6px; height: 6px; border-radius: 3px; background: ${tokens.success}; flex: none; }
+  .fg-cfgbar-dot.fg-pending { background: ${tokens.warning}; }
+  .fg-cfgbar-dim { color: ${tokens.textPlaceholder}; font-size: 11.5px; }
+
+  /* 生效说明（固定一行）：把"默认"与"会话内另选"的两层关系说清，避免用户以为默认=强制。 */
+  .fg-diffnote { font-size: 12px; line-height: 1.6; color: ${tokens.textPlaceholder}; }
+  .fg-diffnote-inline { margin-left: 6px; color: ${tokens.primary}; cursor: help; }
+
+  /* 差集列表：逐条给出 model_id + 严重度 + 一句可执行的说明。 */
+  .fg-difflist { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.7; }
+  .fg-difflist li { display: flex; gap: 8px; align-items: baseline; }
+  .fg-sev { flex: none; font-size: 11px; padding: 0 6px; border-radius: ${tokens.radiusSm}; }
+  .fg-sev.fg-error { background: ${tokens.primarySoft}; color: ${tokens.error}; }
+  .fg-sev.fg-degrade { background: ${tokens.warningBg}; color: ${tokens.warning}; }
+  .fg-sev.fg-info { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
+
+  /* 「底座独有」折叠区：默认非空（opencode 的内置目录），所以它不该长得像报错。 */
+  .fg-advertised { border-top: 1px dashed ${tokens.border}; padding-top: 8px; }
+  .fg-advertised-head { font-size: 12px; color: ${tokens.textSecondary}; display: flex; align-items: center; }
+  .fg-advertised-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-height: 96px; overflow-y: auto; }
+  .fg-advertised-item {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+    padding: 1px 6px; border: 1px solid ${tokens.border}; border-radius: ${tokens.radiusSm};
+    color: ${tokens.textSecondary};
+  }
+
+  /* 自检结果：就地展开成 check 列表（pass 绿 / fail 红 / warn·unknown 灰），每条带 remedy。 */
+  .fg-probe { margin-top: 8px; border: 1px solid ${tokens.border}; border-radius: ${tokens.radiusSm}; overflow: hidden; }
+  .fg-probe-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: ${tokens.softFill}; font-size: 12.5px; }
+  .fg-probe-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; border-top: 1px solid ${tokens.border}; font-size: 12px; }
+  .fg-probe-dot { width: 6px; height: 6px; border-radius: 3px; background: ${tokens.textPlaceholder}; flex: none; }
+  .fg-probe-dot.fg-pass { background: ${tokens.success}; }
+  .fg-probe-dot.fg-fail { background: ${tokens.error}; }
+  .fg-probe-name { flex: none; width: 76px; color: ${tokens.textSecondary}; font-family: ${tokens.fontMono}; font-size: 11.5px; }
+  .fg-probe-detail { flex: 1; min-width: 0; }
+  .fg-probe-remedy { flex: none; max-width: 46%; color: ${tokens.primary}; }
+
   /* 设置弹窗的内容体（每节共用）：顶部一句说明 + 右侧动作，下面一张白卡。 */
   .fg-setsec { display: flex; flex-direction: column; gap: 12px; }
   .fg-setsec-head {

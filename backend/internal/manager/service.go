@@ -11,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -87,6 +88,11 @@ type Service struct {
 	orch *Orchestrator
 	tx   *transcriptRecorder // 会话 wire transcript（nil = 未启用，见 SetTranscriptDir）
 	st   *store.Store        // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
+	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
+	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
+	runtimeCfgDigests map[string]string
+	// runtimeSyncOutcomes 各 runtime **最后一次同步的结论**（v12：读面直接读它，不在读路径上重跑同步）。
+	runtimeSyncOutcomes map[string]resource.Outcome
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）

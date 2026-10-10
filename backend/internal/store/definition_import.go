@@ -110,6 +110,10 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentDefinition{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
+	case model.CapabilityKindProvider:
+		return s.providers.WithTx(tx).CreateCAS(ctx, &model.ProviderDefinition{
+			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
+		})
 	case model.CapabilityKindAutomation:
 		row := &model.AutomationDefinition{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",

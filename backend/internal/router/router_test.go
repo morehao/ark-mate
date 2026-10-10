@@ -37,6 +37,9 @@ func newEngine() *gin.Engine {
 func newEngineWithService() (*gin.Engine, *manager.Service) {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
+	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
+	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
+	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	assets, _ := router.ResolveAssets("")
@@ -125,40 +128,81 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 	}
 }
 
-// TestRouterModelCatalog 模型目录经真实 Service（无执行面装配）：平台不再内置任何模型清单，
-// 目录只能来自运行时——本装配下无 Orchestrator/无连接 → 返回**空目录** + source=none + 说明，
-// 这是合法结果（面板据此显示「跟随 Agent 默认」并给出补救提示）。
+// TestRouterModelCatalog `GET /models`（应用层清单 + 聚合生效结论）与 `GET /models/catalog`
+// （运行时目录）经真实 Service（无执行面装配）的形状与语义。
+//
+// 两条不同的读面必须在同一个用例里被区分开，否则很容易被"合成一个端点"的冲动改坏：
+// `/models` 是**平台声明**（意图），`/models/catalog` 是**运行时事实**（ACP session config
+// options 的不透明值）。v11 把它们挤在一个响应里（`declared`/`advertised`/`diff`/`config`），
+// v12 拆开：意图面带上**聚合**结论，事实面单独一条路由。
 func TestRouterModelCatalog(t *testing.T) {
 	e := newEngine()
+
+	// —— ① `/models`：清单 + 聚合结论（用户面只有这四个字段）+ 机器面明细 ——
 	env := get(t, e, "/v1/mate/models")
 	if env.Code != 0 {
 		t.Fatalf("/models 信封不符: %+v", env)
 	}
 	var resp struct {
-		Agent   string           `json:"agent"`
-		Runtime string           `json:"runtime"`
-		Source  string           `json:"source"`
-		Options []map[string]any `json:"options"`
-		Note    string           `json:"note"`
+		Models       []map[string]any `json:"models"`
+		DefaultModel string           `json:"default_model"`
+		Effective    string           `json:"effective"`
+		EffectiveAt  string           `json:"effective_at"`
+		Sync         []struct {
+			Runtime    string   `json:"runtime"`
+			Status     string   `json:"status"`
+			Pending    bool     `json:"pending"`
+			Problems   []string `json:"problems"`
+			Credential struct {
+				Channel string `json:"channel"`
+				Tested  bool   `json:"tested"`
+			} `json:"credential"`
+		} `json:"sync"`
+		Note string `json:"note"`
 	}
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("/models data 解析: %v", err)
 	}
-	if resp.Source != "none" {
-		t.Fatalf("无运行时来源应 source=none: %s", resp.Source)
+	// 数组/字符串字段不许缺席（空也要是 []/有效取值，前端不必判 null）。
+	if resp.Models == nil {
+		t.Fatalf("models 必须是数组（空也要是 []）: %s", env.Data)
 	}
-	if len(resp.Options) != 0 {
-		t.Fatalf("平台不得内置模型清单，选项应为空: %s", env.Data)
+	if resp.Effective == "" || resp.EffectiveAt == "" {
+		t.Fatalf("effective/effective_at 是用户面的聚合结论，不许缺席: %s", env.Data)
 	}
-	if resp.Note == "" {
-		t.Fatalf("空目录必须带说明: %s", env.Data)
+	if len(resp.Sync) == 0 {
+		t.Fatalf("sync[] 应逐已注册 runtime 各一条（机器面）: %s", env.Data)
 	}
-	if resp.Agent != "dsh" {
-		t.Fatalf("缺省应取默认 agent(dsh): %s", resp.Agent)
+	for _, s := range resp.Sync {
+		if s.Runtime == "" || s.Status == "" || s.Problems == nil {
+			t.Fatalf("sync[] 的每条都要有 runtime/status/problems([]): %+v", s)
+		}
+	}
+	// 用户面零底座词汇的结构保证（A14）：响应里**没有**逐 runtime 的默认映射。
+	if strings.Contains(string(env.Data), "default_models") {
+		t.Fatalf("用户面不许有逐 runtime 的默认映射: %s", env.Data)
 	}
 
+	// —— ② `/models/catalog`：运行时目录（无编排器 → 空目录 + source=none + 说明） ——
+	env = get(t, e, "/v1/mate/models/catalog?agent=dsh")
+	if env.Code != 0 {
+		t.Fatalf("/models/catalog 信封不符: %+v", env)
+	}
+	var cat struct {
+		Agent   string `json:"agent"`
+		Runtime string `json:"runtime"`
+		Source  string `json:"source"`
+		Options []any  `json:"options"`
+		Note    string `json:"note"`
+	}
+	if err := json.Unmarshal(env.Data, &cat); err != nil {
+		t.Fatalf("/models/catalog data 解析: %v", err)
+	}
+	if cat.Agent != "dsh" || cat.Source != "none" || cat.Options == nil {
+		t.Fatalf("无执行面时目录应为空 + source=none（options 仍须是 []）: %s", env.Data)
+	}
 	// 未知 agent → 40401（agent_not_found）。
-	env = get(t, e, "/v1/mate/models?agent=nope")
+	env = get(t, e, "/v1/mate/models/catalog?agent=nope")
 	if env.Code != 40401 {
 		t.Fatalf("未知 agent 应 40401: %+v", env)
 	}
@@ -378,6 +422,9 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 func newAuthEngine(creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	reg := runtime.DefaultRegistry()
+	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
+	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
+	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{

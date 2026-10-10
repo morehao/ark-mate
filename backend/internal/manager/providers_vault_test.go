@@ -10,7 +10,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/vault"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // writeLegacyProviders 写一份「旧版本」的明文 providers.json。
@@ -62,10 +61,10 @@ func TestProviderKeyMigratedToVaultOnLoad(t *testing.T) {
 		t.Fatal("密文文件不应含明文")
 	}
 	// 3) 注入仍可用（内存里是解密后的明文），has_key 不变。
-	if got := svc.providerEnvFor("default"); len(got) != 1 || got[0] != "OPENAI_API_KEY="+secret {
+	if got := svc.providerEnvFor("opencode", "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
 		t.Fatalf("迁移后注入不符: %v", got)
 	}
-	items, _ := svc.ListProviders()
+	items, _ := svc.ListProviders(context.Background())
 	if len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("has_key 应保持 true: %+v", items)
 	}
@@ -78,12 +77,12 @@ func TestProviderKeyMigratedToVaultOnLoad(t *testing.T) {
 	if got := readProvidersFile(t, dir); got != raw {
 		t.Fatalf("二次装载应幂等: %s", got)
 	}
-	if got := svc2.providerEnvFor("default"); len(got) != 1 || got[0] != "OPENAI_API_KEY="+secret {
+	if got := svc2.providerEnvFor("opencode", "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+secret) {
 		t.Fatalf("重启后注入不符: %v", got)
 	}
 }
 
-// TestProviderUpdateEncryptsAndClearDeletes UpdateProvider 落盘即密文 + 引用；
+// TestProviderUpdateEncryptsAndClearDeletes 写面落盘即密文 + 引用；
 // 空串清除 = 删 ref + 删密文文件（幂等）。
 func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 	home := t.TempDir()
@@ -91,8 +90,7 @@ func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 	svc := agentTestSvc(t, dir)
 
 	key := "sk-live-secret-xyz"
-	typ := "deepseek"
-	resp, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{Type: &typ, Key: &key})
+	resp, err := svc.CreateProvider(context.Background(), providerReq("ds", &key))
 	if err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
@@ -110,30 +108,30 @@ func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 	if _, err := os.Stat(enc); err != nil {
 		t.Fatalf("密文未落盘: %v", err)
 	}
-	if got := svc.providerEnvFor("ds"); len(got) != 1 || got[0] != "DEEPSEEK_API_KEY="+key {
+	if got := svc.providerEnvFor("opencode", "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key) {
 		t.Fatalf("注入不符: %v", got)
 	}
 	// 覆盖写同一档案：仍是 1 份密文、新值生效。
 	key2 := "sk-live-secret-2"
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{Key: &key2}); err != nil {
+	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.providerEnvFor("ds"); len(got) != 1 || got[0] != "DEEPSEEK_API_KEY="+key2 {
+	if got := svc.providerEnvFor("opencode", "ds"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") || !strings.HasSuffix(got[0], "_API_KEY="+key2) {
 		t.Fatalf("覆盖后注入不符: %v", got)
 	}
 
 	// 清除：has_key=false、env nil、密文文件删除、文件里无 ref。
 	clear := ""
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{Key: &clear}); err != nil {
+	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
 		t.Fatalf("清除失败: %v", err)
 	}
-	if svc.providerEnvFor("ds") != nil {
+	if svc.providerEnvFor("opencode", "ds") != nil {
 		t.Fatal("清除后不应注入")
 	}
 	if _, err := os.Stat(enc); !os.IsNotExist(err) {
 		t.Fatalf("清除应删掉密文文件: %v", err)
 	}
-	items, _ := svc.ListProviders()
+	items, _ := svc.ListProviders(context.Background())
 	for _, it := range items {
 		if it.ID == "ds" && it.HasKey {
 			t.Fatalf("清除后 has_key 应为 false: %+v", it)
@@ -143,7 +141,7 @@ func TestProviderUpdateEncryptsAndClearDeletes(t *testing.T) {
 		t.Fatal("清除后不应留 ref")
 	}
 	// 幂等：再清除一次不报错。
-	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{Key: &clear}); err != nil {
+	if _, err := svc.UpdateProvider(context.Background(), "ds", dtoprovider.ProviderPatchReq{APIKey: &clear}); err != nil {
 		t.Fatalf("重复清除应幂等: %v", err)
 	}
 }
@@ -155,8 +153,8 @@ func TestProviderCiphertextMismatchSurfacesKeyErr(t *testing.T) {
 	dir := filepath.Join(home, "agents")
 	svc := agentTestSvc(t, dir)
 	key := "sk-will-be-orphaned"
-	if _, err := svc.UpdateProvider(context.Background(), "default",
-		dtoprovider.ProviderPatchReq{Type: strPtr("openai"), Key: &key}); err != nil {
+	if _, err := svc.CreateProvider(context.Background(),
+		providerReq("default", &key)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,11 +172,11 @@ func TestProviderCiphertextMismatchSurfacesKeyErr(t *testing.T) {
 	}
 
 	svc2 := agentTestSvc(t, dir)
-	if got := svc2.providerEnvFor("default"); got != nil {
+	if got := svc2.providerEnvFor("opencode", "default"); got != nil {
 		t.Fatalf("解不开时不应注入 env: %v", got)
 	}
 	// has_key 仍为 true（档案确实配了密钥），但诊断要说明原因。
-	items, _ := svc2.ListProviders()
+	items, _ := svc2.ListProviders(context.Background())
 	if len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("has_key 应仍为 true: %+v", items)
 	}
@@ -196,9 +194,14 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 	svc := agentTestSvc(t, filepath.Join(t.TempDir(), "agents"))
 	key := "sk-x"
 	for _, id := range []string{"../escape", "a/b", "a b", ".."} {
-		if _, err := svc.UpdateProvider(context.Background(), id,
-			dtoprovider.ProviderPatchReq{Key: &key}); err == nil {
+		if _, err := svc.CreateProvider(context.Background(),
+			providerReq(id, &key)); err == nil {
 			t.Fatalf("非法 provider id 应被拒绝: %q", id)
+		}
+		// PATCH 走同一条词法校验（id 会进 vault 文件名）。
+		if _, err := svc.UpdateProvider(context.Background(), id,
+			dtoprovider.ProviderPatchReq{APIKey: &key}); err == nil {
+			t.Fatalf("非法 provider id 的 PATCH 应被拒绝: %q", id)
 		}
 	}
 }
@@ -206,22 +209,22 @@ func TestProviderInvalidIDRejected(t *testing.T) {
 // TestProviderPlaintextSurvivesWhenVaultUnavailable vault 不可用（agentDir 为空 = 无 mate home）
 // 时：不清空密钥、不写盘（纯内存），且不 pretend 加密成功。
 func TestProviderPlaintextSurvivesWhenVaultUnavailable(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), nil) // 未 LoadAgentDefinitions → agentDir == ""
+	svc := NewService(v12ProviderRegistry(), nil) // 未 LoadAgentDefinitions → agentDir == ""
 	key := "sk-memory-only"
-	resp, err := svc.UpdateProvider(context.Background(), "default",
-		dtoprovider.ProviderPatchReq{Type: strPtr("openai"), Key: &key})
+	resp, err := svc.CreateProvider(context.Background(),
+		providerReq("default", &key))
 	if err != nil {
 		t.Fatalf("无 vault 时仍应可用（仅内存）: %v", err)
 	}
 	if !resp.HasKey {
 		t.Fatal("应 has_key=true")
 	}
-	if got := svc.providerEnvFor("default"); len(got) != 1 || got[0] != "OPENAI_API_KEY="+key {
+	if got := svc.providerEnvFor("opencode", "default"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DEFAULT_") || !strings.HasSuffix(got[0], "_API_KEY="+key) {
 		t.Fatalf("内存注入不符: %v", got)
 	}
 	// 重启 = 新 Service → 内存档案不复存在（没有任何落盘）。
-	svc2 := NewService(runtime.NewRegistry(), nil)
-	if got := svc2.providerEnvFor("default"); got != nil {
+	svc2 := NewService(v12ProviderRegistry(), nil)
+	if got := svc2.providerEnvFor("opencode", "default"); got != nil {
 		t.Fatalf("无 vault 时不应落盘: %v", got)
 	}
 }

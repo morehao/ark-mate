@@ -54,3 +54,45 @@ func TestStderrMsgSuffix(t *testing.T) {
 		t.Fatalf("截断不该破坏前缀: %q", one)
 	}
 }
+
+// TestFromACLProviderModelCodesFrozen 钉住「设置 · 模型」（v11）新增语义的**分类 → 对外码**映射。
+//
+// 这张表的每一行都是"用户下一步该做什么"的判据，所以它必须被逐条写死而不是靠 Class 默认值兜底：
+//
+//	provider_exists / provider_in_use / model_exists → 40901（时机/状态冲突，换 id 或解开引用）
+//	model_not_found / provider_not_found             → 40401（平台不会"顺便新建"）
+//	resource_sync_failed                             → 50001（服务侧失败；**不是** 50201"上游连接失败"，
+//	                                                   否则排障方向会被带到底座进程/网络上）
+func TestFromACLProviderModelCodesFrozen(t *testing.T) {
+	cases := []struct {
+		name  string
+		class acl.Class
+		want  int
+	}{
+		{"provider_exists", acl.ClassLimit, Conflict},
+		{"provider_in_use", acl.ClassLimit, Conflict},
+		{"model_exists", acl.ClassLimit, Conflict},
+		{"model_not_found", acl.ClassRequest, NotFound},
+		{"provider_not_found", acl.ClassRequest, NotFound},
+		{"invalid_provider_id", acl.ClassRequest, InvalidRequest},
+		{"definition_changed", acl.ClassLimit, Conflict},
+		{"resource_sync_failed", acl.ClassService, UpstreamFailed},
+	}
+	for _, tc := range cases {
+		got, ok := fromACL(acl.NewError(tc.class, tc.name, "细节", nil))
+		if !ok {
+			t.Fatalf("%s: fromACL 应命中", tc.name)
+		}
+		if got.Code != tc.want {
+			t.Errorf("%s（Class=%s）应映射为 %d，got %d", tc.name, tc.class, tc.want, got.Code)
+		}
+	}
+	// classCodeOverrides 只该改**一个**码，别把它当成"绕过 Class 语义"的通用后门。
+	if len(classCodeOverrides) != 1 {
+		t.Fatalf("例外表新增了条目（%v）：每一条都要有"+"这里写的那个量级"+"的理由", classCodeOverrides)
+	}
+	// 未登记的名字仍按 Class 兜底（resource_sync_failed 之外的服务侧错误仍是 50201）。
+	if got, _ := fromACL(acl.NewError(acl.ClassService, "backend_boom", "x", nil)); got.Code != BadGateway {
+		t.Fatalf("ClassService 的默认映射应仍是 %d，got %d", BadGateway, got.Code)
+	}
+}

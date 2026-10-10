@@ -1,6 +1,12 @@
 package runtime
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
@@ -30,19 +36,80 @@ func opencodeSpec() Spec {
 		Description:       "opencode（terminal AI）ACP 执行后端",
 		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
 		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
-		Notes:             opencode.Notes,
+		// Notes 里带上**清单通道**的实测结论（原先挂在已删除的 `ConfigProjection.Note` 上，
+		// 那些知识不能随字段一起消失——见 const 的注释）。
+		Notes: opencode.Notes + "\n\n" + opencodeModelConfigEvidence,
 		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 /agents/:id/diagnostics 外露为 remediation）。
 		SetupSteps: []string{
 			"安装 opencode CLI（ACP 子命令由它提供），确认 `opencode --version` 可执行且 opencode 在 PATH 中",
 			"在底座内完成 provider 登录，或给该 agent 绑定 provider 档案以注入密钥 env",
 		},
 		Projections: []Projection{opencodeSkillProjection()},
+		// 模型清单的**落点**（M2）：主通道是内联 content（`opencode.json` 仍写，`OPENCODE_CONFIG_CONTENT`
+		// 是压过项目级发现的那条注入），根取隔离表注入的 `OPENCODE_CONFIG_DIR`（平台独占；用户的
+		// `~/.config/opencode` 一个字节不碰）。
+		//
+		// **格式与通道的细节不在这里**（T1/A9 由 archtest 的 TestInternalHasNoRuntimeConfigLiterals
+		// 钉住）：`providers` 复数键、官方原生 package 字符串、走哪个环境变量内联——这些是 opencode
+		// 的私有知识，全部住在 `pkg/runtime/opencode`。内核只知道"这个底座把清单落在哪个文件"，
+		// 因为路径的 `${...}` 占位符只能靠它自己的隔离 env 解出来。
+		ModelConfig: ModelConfigLocation{
+			Root:     "${OPENCODE_CONFIG_DIR}",
+			Filename: "opencode.json",
+		},
+		// 凭据面（ADR-4 / Q1'）：用**官方字段** `providers.<route>.env` 引用 + 平台子进程 env 注入，
+		// **这是它的终局形态而非欠账**。
+		//
+		// 为什么 opencode 不走原生凭据文档（有证据，不是省事）：2.0.26 的通用凭据面已经不是文件——
+		// 二进制里它的凭据存储是自己的 SQLite 表（`CREATE TABLE workspace (id, provider, binding,
+		// created_at, last_used_at)`），而 `auth.json` 全程只有 4 处引用，其中一处是名为
+		// `20260805200742_import_legacy_credentials` 的**迁移**（读 `<data>/auth.json`，失败文案逐字
+		// 「Legacy credential file must contain an object」）。也就是说 `auth.json` 是**迁移输入（legacy）**，
+		// 而写它的私有 DB 属越界（别人的 schema、别人的迁移、`binding` 语义不明）。
+		// 2026-10-10 用户拍板**接受 opencode 换代际生效**，所以 env 通道不是"等着换掉的东西"：
+		// 只有将来官方给出受支持的非交互凭据面（`auth.json` 恢复成文件面、或官方接口），才需要重新取证
+		// ——那是**增量**，不是补债。
+		Credential: resource.CredentialSpec{
+			// 逐供应商派生（ADR-16），`MATE_` 前缀同时是平台在凭据文档里的命名空间（R13：
+			// 用 `OPENAI_API_KEY` 这类"知名"名会被用户 shell 里的同名变量静默遮蔽）。
+			RefPattern:  "MATE_%s_API_KEY",
+			FallbackEnv: true,
+			// Tested=false 指的是**原生凭据文档**这条通道（它为空、不存在），不是清单通道：
+			// opencode 从来不走原生文档，所以它永远不该被"实测通过"。
+			Tested: false,
+			Note: "opencode 的原生凭据面在 2.0.26 已是它自己的 SQLite 表，auth.json 只剩 legacy 迁移输入" +
+				"——本期用官方 env 字段 + 平台 env 注入，这是它的终局形态而非欠账（ADR-4/Q1'）。" +
+				"两条与密钥面直接相关的已知边界：① 内联内容走 env，同机同用户 `ps eww` 可见（清单不是密钥，" +
+				"可接受；**因此绝不能把 apiKey 放进内联内容**，密钥只以逐供应商引用名的形式出现在配置里）；" +
+				"② `is_default` 指向不存在/被 `disabled:true` 的条目时，底座会**静默退到第一个可用模型**" +
+				"（事实 #46）——平台的对账负责把这个事实报出来，而不是在配置里保证它一定生效。",
+		},
 		// 未实测：P-2 探针尚无结论 → 保守 process（EffectiveCapabilityScope 也会强制回落）。
 		CapabilityScope: CapabilityScopeProcess,
 		Tested:          false,
 		TestedOnVersion: "",
 	}
 }
+
+// opencodeModelConfigEvidence opencode 清单通道的端到端实测结论与已知边界（原先写在
+// `ConfigProjection.Note` 上；字段随 ADR-7 删除，但**结论不能丢**——它正是"平台写的清单真的被
+// 底座读到并生效"这条写入权的依据，下一个人排查"我加了模型为什么选不到"时要能直接读到它）。
+const opencodeModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 2.0.26，私有 HOME/MATE_HOME，" +
+	"探针 .dsh/tmp/gate1-opencode-probe.mjs）：" +
+	"① 平台声明一条底座原本不知道的 model id（`arkprobe/ark-probe-*`）→ 新进程的 ACP model 候选里" +
+	"**逐字出现**它，且 `current_value` 就是它（慢路径默认模型生效）；" +
+	"② 会话 cwd 放一份声明了不同 model 的 `opencode.json` → 候选里**没有**那条敌意模型；" +
+	"③ 父进程 env 预设 `OPENCODE_CONFIG_CONTENT`（敌意目录）→ 候选里同样没有它。" +
+	"两条反证也跑了（同一脚本的 --falsify / --falsify-env）：拿掉 `OPENCODE_CONFIG_PROJECT_DISABLE` 时" +
+	"cwd 的项目级文件**确实**抢占成功（甚至抢走了默认模型），拿掉平台对 `OPENCODE_CONFIG_CONTENT` 的" +
+	"同键替换时父 env 的内联内容**确实**抢先 —— 所以上面三条 PASS 是修复带来的，不是本来就不会发生。" +
+	"已知边界：① 内联内容走 env，同机同用户 ps eww 可见（清单不是密钥，可接受；" +
+	"**因此绝不能把 apiKey 放进内联内容**，密钥仍走 env 引用）；" +
+	"② 管理员面（managed 配置 / macOS MDM）仍然压过平台，受管机器上「平台清单 = 最终生效清单」不成立；" +
+	"③ 空清单会让 opencode 起不了会话（loadCatalog 重试 5s 后抛 No models are available）——" +
+	"所以清单为空时**撤回**：删掉平台写的文件并撤销内联注入，绝不留下空的注入内容（H4 的 Plan B）；" +
+	"④ `is_default` 指向不存在/被 `disabled:true` 的条目时，底座会**静默退到第一个可用模型**（事实 #46）——" +
+	"平台的对账负责把这个事实报出来，而不是在配置里保证它一定生效。"
 
 // opencodeSkillProjection opencode 的 skill 投影（原生形态见下）。
 //
@@ -109,19 +176,79 @@ func deepseekharnessSpec() Spec {
 		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。
-		Notes: deepseekharness.Notes,
+		Notes: deepseekharness.Notes + "\n\n" + deepseekharnessModelConfigEvidence,
 		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 remediation 外露）。
 		SetupSteps: []string{
 			"安装含 acp profile 模板的 dsh（npm @next 0.1.2-rc.1+；latest 0.1.1-rc.2 缺该模板），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
 			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
 		},
 		Projections: []Projection{deepseekharnessSkillProjection()},
+		// 模型清单的**落点**（M3）：平台的 overlay + 启动参数 `--patch <绝对路径>`。
+		//
+		// 为什么不用 `$DSH_HOME/cordis.patch.yml`（home 级 patch）：那份是 dsh 自己的持久层，
+		// 平台写它会把用户从底座设置界面里的权利挤掉，且写坏就是**拒启**、只能靠修复文件恢复。
+		// 平台的 overlay + 启动参数坏了把参数去掉即可（回到出厂配置），且归属干净（那个文件只有平台写）。
+		// 根取隔离表注入的 `DSH_HOME`（= <MATE_HOME>/runtime/dsh，平台独占）；文件名带 `mate-` 前缀
+		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
+		//
+		// 格式（patch 的 `- id:` 条目、`--patch` 参数、两级校验门）全部住在
+		// `pkg/runtime/deepseekharness`——内核只知道落点，因为占位符只能靠该 runtime 的隔离 env 解出来。
+		ModelConfig: ModelConfigLocation{
+			Root:     "${DSH_HOME}",
+			Filename: "mate-models.patch.yml",
+			// 原生凭据文档与清单配置同住这个平台独占根（解析由 ResolveConfigLocation 一起做）。
+			CredentialDoc: ".credentials.yaml",
+		},
+		// 凭据面（ADR-4）：写**底座的原生凭据文档**，换来热生效（B9）。
+		Credential: resource.CredentialSpec{
+			NativeDoc:       "${DSH_HOME}/.credentials.yaml",
+			RefPattern:      "MATE_%s_API_KEY",
+			FallbackEnv:     false,
+			Tested:          true,
+			TestedOnVersion: "0.2.0-rc.2",
+			Note: "原生凭据文档**已端到端实测**（H6 探针 7/7 PASS，2026-10-10，dsh 0.2.0-rc.2）：" +
+				"① **热生效成立**——同一进程内把文档的 refs 从 key-A 改成 key-B（平台式临时文件 + 原子 rename），" +
+				"下一轮请求的 `Authorization` 就是 key-B，**未重启**；" +
+				"② **env 赢**——文档与子进程 env 同时给时实际用的是 env（所以同一 runtime 的 env 与文档" +
+				"**绝不能同时启用**，否则轮换后的旧值被陈旧 env 永久遮蔽且无任何报错）；" +
+				"③ **0644 是拒用不是告警**——凭据插件在启动期 `loadInitial` 抛错、该 route 报 `no credential`，" +
+				"文案指向 `chmod 600`；" +
+				"④ **dsh 从不回写该文件**——平台读-改-写（只替换 refs）逐字保住注释与 `records:` 分节，" +
+				"文件 sha 前后相同；" +
+				"⑤ 官方文档逐字：「只有你的 OS 用户能读取该文件，但 agent 的工具进程以同一用户身份运行，" +
+				"因此**该存储无法向 agent 隔离机密**」——所以这是**用持久化换热生效**，不是安全改进（B10）。" +
+				"五条纪律（§安全）：① 权限 0600（父目录 0700）且**落盘后读回校验**，不满足即中止（dsh 拒启）；" +
+				"② 密钥绝不进日志/错误文案/事件/API/doctor/导出（诊断只许出现**键名**）；" +
+				"③ 同一 runtime 的 env 与文档不得同时启用（`FallbackEnv:false` 就是这条的声明）；" +
+				"④ 只写平台独占根，绝不写用户的 `~/.dsh`；" +
+				"⑤ 空集撤回只移除**平台自己写过的** refs 条目，用户自己的 refs 与 `records:`/注释逐字节保留。" +
+				"残余未取证：平台与 dsh 自身写路径「同一瞬间都写」未被压测（由 dsh 的 watch 对账与平台侧" +
+				"读-改-写兜住）；Windows 无 mode 可查、权限门未验；**版本敏感**——载荷升级时先置回 `false` 再重跑探针。",
+		},
 		// 未实测：P-2 探针尚无结论 → 保守 process。
 		CapabilityScope: CapabilityScopeProcess,
 		Tested:          false,
 		TestedOnVersion: "",
 	}
 }
+
+// deepseekharnessModelConfigEvidence dsh 清单通道（`--patch` overlay）的实测结论与三条已知坑
+// （原先写在已删除的 `ConfigProjection.Note` 上；写入权是用实测换的，依据不能丢）。
+const deepseekharnessModelConfigEvidence = "清单通道端到端实测（2026-10-10，随包 0.2.0-rc.2）。" +
+	"① 机制（最小 ACP 客户端直接问底座，见 .dsh/docs/notes/probes/dsh-acp-catalog.mjs）：" +
+	"在 `llm-pi-ai.config.providers.<route>` 上声明一条自定义 route（api + baseURL + apiKeyEnv + models 齐备）" +
+	"**确实**会以一组出现在 ACP 的 `options[category=model]` 里（实测候选 `[\"arkprobe\",\"ark-probe-x\"]` " +
+	"与内置三条并列）；**当前选中值由 `id: acp` 那一行决定**（只改 acp → currentValue 变成自定义那条；" +
+	"只改 agent-default-model → 纹丝不动）。② 平台侧完整链路也实测过（生成 → 自校验 → 底座级校验门 → " +
+	"落盘 → `--patch` → 新进程 → 候选里出现该条、且对账差集为空，见 " +
+	".dsh/docs/notes/probes/gate1-dsh-probe.mjs --platform-writes）。写入权的**代价**必须说清：" +
+	"这条链路写坏会让 dsh **拒启**，所以落盘前两级校验门（自校验 + `--dump-config-schema`）一个都不能省。" +
+	"三条已知坑：① 空 patch / 只有注释的文件会让 dsh **拒启**（README 逐字：「an empty or comments-only " +
+	"file fails boot — disable the layer with [] instead」），所以清单为空时**撤回**（删文件 + 摘参数）；" +
+	"② `--patch` 的路径必须是**绝对**路径（dsh 侧按调用目录解析，而平台拉底座的 cwd 是用户会话目录）；" +
+	"③ 想覆盖**已安装 route**（如 `deepseek-official`）的目录会撞 `configurable provider … is already " +
+	"declared`（它同时被 llm-deepseek 与 pi-ai 声明）——平台给 dsh 加模型必须**新开一条自己的 route** " +
+	"并在 `acp` 行把 provider 指向它。"
 
 // deepseekharnessSkillProjection dsh 的 skill 投影（原生形态见下）。
 //
@@ -168,4 +295,73 @@ func deepseekharnessSkillProjection() Projection {
 			"平台的配置隔离**刻意不注入它**（2026-10-09 修：曾注入，E5 实测导致 dsh 会话的 `<available_skills>` 看不到本投影根下的 skill；" +
 			"护栏见 `pkg/runtime/isolation_test.go` 的 TestIsolationKeepsSkillRootAlignedWithProjection），但用户若在平台进程环境里设了它仍会静默分叉",
 	}
+}
+
+// registerBuiltinSyncers 把各 adapter 的同步实现登记进 `Registry` 的第二张表。
+//
+// 这是「父包汇入」这条既有约定的延申：adapter 子包提供实现，父包决定它在注册表里的键、**并把已解析的
+// 落点交给它**（路径的 `${...}` 占位符只能靠该 runtime 自己的隔离 env 解出来，而 adapter 拿不到注册表
+// ——约束⑦）。所以装配形态是"先 `ResolveConfigLocation` → 再把 `Path` 传进去"，adapter 永远不自己拼 HOME。
+//
+// 落点解析失败（声明非法 / 隔离 env 没应用）时**不登记**：此时该 runtime 的 `sync[]` 会如实报
+// `unsupported`——比登记一个会写错地方的实现好得多（写错落点等于去动用户自己的目录，隔离纪律的硬红线）。
+func registerBuiltinSyncers(r *Registry) {
+	if r == nil {
+		return
+	}
+	for _, id := range []string{opencode.ID, deepseekharness.ID} {
+		spec, ok := r.Get(id)
+		if !ok {
+			continue
+		}
+		loc, declared, err := ResolveConfigLocation(spec)
+		if err != nil || !declared {
+			continue
+		}
+		switch id {
+		case opencode.ID:
+			r.RegisterSyncer(id, opencode.NewSyncer(opencode.Options{ConfigPath: loc.Path}, r.DeliveryFor(id)))
+		case deepseekharness.ID:
+			r.RegisterSyncer(id, deepseekharness.NewSyncer(deepseekharness.Options{
+				PatchPath:         loc.Path,
+				CredentialDocPath: loc.CredentialDocPath,
+				RefPattern:        spec.Credential.RefPattern,
+				// 底座级校验门要用的那两个参数（T3.2）：
+				//
+				// `DshBin` 取**平台自己会拉起的那一个**——即该 spec 的 `Launch.Command` 经 PATH 解析
+				// 的结果（与 `exec` 拉底座完全同一条解析链）。为什么不 `LookPath("dsh")` 写死名字：
+				// 测试夹具会把 Command 换成桩名，那时解析必然失败 → 校验门**如实跳过**（adapter 在
+				// DshBin=="" 时报"未跑底座级校验"），而不是去执行宿主上恰好装着的那份 dsh
+				// ——全量 `go test ./...` 不依赖外部 runtime，这条是本仓的既有纪律。
+				//
+				// `StagingHome` 落在**平台自己的隔离根**里（`<MATE_HOME>/runtime/dsh/validate-staging`）：
+				// 校验是在候选落盘**之前**跑的，必须用一个与真 home 分开的目录，否则半成品会先污染
+				// 底座真正要读的那份 home。
+				DshBin:      resolveLaunchBinary(spec.Launch.Command),
+				StagingHome: filepath.Join(loc.RootAbs, "validate-staging"),
+			}, r.DeliveryFor(id)))
+		}
+	}
+}
+
+// resolveLaunchBinary 把 spec 声明的启动命令解析成绝对路径（解析不到 → 空串 = 不跑底座级校验）。
+//
+// 显式、不探测：只看该 runtime 自己声明的 `Command`，找不到就返回空——**绝不**去猜别的位置。
+// 这样"平台会执行哪个二进制"与"拿哪个二进制做校验"永远是同一个答案。
+func resolveLaunchBinary(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	if filepath.IsAbs(command) {
+		if info, err := os.Stat(command); err == nil && !info.IsDir() {
+			return command
+		}
+		return ""
+	}
+	abs, err := exec.LookPath(command)
+	if err != nil {
+		return ""
+	}
+	return abs
 }

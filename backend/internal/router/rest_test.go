@@ -267,17 +267,71 @@ func (s *stubSvc) StopAgent(_ context.Context, id string) error {
 	s.agentAction = "stop:" + id
 	return nil
 }
-func (s *stubSvc) ListProviders() ([]dtoprovider.ProviderResp, error) {
+func (s *stubSvc) ListProviders(context.Context) ([]dtoprovider.ProviderResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
 	return s.providers, nil
 }
+func (s *stubSvc) CreateProvider(_ context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtoprovider.ProviderResp{ID: req.ID, Protocol: req.Protocol, HasKey: req.APIKey != nil && *req.APIKey != ""}, nil
+}
 func (s *stubSvc) UpdateProvider(_ context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
-	return &dtoprovider.ProviderResp{ID: id, HasKey: patch.Key != nil && *patch.Key != ""}, nil
+	return &dtoprovider.ProviderResp{ID: id, HasKey: patch.APIKey != nil && *patch.APIKey != ""}, nil
+}
+func (s *stubSvc) DeleteProvider(_ context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtoprovider.ProviderDeleteResp{Deleted: true}, nil
+}
+func (s *stubSvc) ProbeProvider(_ context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtoprovider.ProviderProbeResp{ID: id, Upstream: req.Upstream, OK: true}, nil
+}
+func (s *stubSvc) ListModels(_ context.Context) ([]dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return nil, nil
+}
+func (s *stubSvc) CreateModel(_ context.Context, req dtomodel.ModelCreateReq) (*dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelResp{ID: "m1", ProviderID: req.ProviderID, ModelID: req.ModelID}, nil
+}
+func (s *stubSvc) UpdateModel(_ context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelResp{ID: id}, nil
+}
+func (s *stubSvc) DeleteModel(_ context.Context, id string) (*dtomodel.ModelDeleteResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelDeleteResp{Deleted: true}, nil
+}
+func (s *stubSvc) SyncModels(_ context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelSyncResp{Applied: []dtomodel.RuntimeSyncResp{{Runtime: runtimeID, Pending: true}}}, nil
+}
+func (s *stubSvc) ModelsView(_ context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelsResp{}, nil
 }
 func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {

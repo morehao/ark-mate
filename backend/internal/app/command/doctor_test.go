@@ -463,6 +463,11 @@ func TestRenderDoctorReport(t *testing.T) {
 //
 // 与 `TestVersionOutput` 同一条纪律：机器消费方（CI、诊断包、将来的面板）读的是**字节**，
 // 加字段/挪位置都会改变它——所以这里逐字断言，而不是"解析后看看有没有这个键"。
+//
+// K2 起多一个 `providers` 段：它把 provider / 模型清单的事实摆成机器可读的形状
+// （`mate doctor` 的 `checks[]` 只回答"过没过"）。这里的 null 是**零值结构体**的产物
+// （本用例直接构造 doctorReport，没走采集）；真实运行里那些列表恒为 `[]`
+// （`CollectProviderDoctorFacts` 逐个初始化），机器消费方不必区分 null 与空。
 func TestDoctorReportJSONShape(t *testing.T) {
 	b, err := json.Marshal(doctorReport{
 		Version:     "0.1.0",
@@ -476,7 +481,13 @@ func TestDoctorReportJSONShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = `{"version":"0.1.0","apiContract":"v1","home":"/tmp/mate","addr":"127.0.0.1:10001",` +
-		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],"failed":0,"warnings":0,"passed":true}`
+		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],` +
+		`"providers":{"carrier":"","providerRows":0,"providerIds":null,"modelRows":0,` +
+		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,"vaultHome":"",` +
+		`"vaultUsable":false,"vaultSource":"","ciphertextRefs":null,"ciphertextFiles":null,"vaultDirScan":"",` +
+		`"missingCiphertexts":null,"noKeyProviders":null,"danglingRefs":null,"importMismatch":null,` +
+		`"importMismatchBenignOnly":false,"orphanCiphertexts":null,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
+		`"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {
 		t.Fatalf("--json 形状变了：\n got %s\nwant %s", b, want)
 	}

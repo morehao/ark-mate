@@ -1,5 +1,7 @@
 package runtime
 
+import "github.com/morehao/ark-mate/pkg/resource"
+
 // Capabilities 是 runtime 的能力基线声明（静态）。
 // 真实运行时能力以 ACP initialize 探测结果为准（acl.Capabilities）。
 type Capabilities struct {
@@ -27,7 +29,8 @@ type LaunchSpec struct {
 }
 
 // Spec 是注册表里一个 runtime 的投影描述（§6.1 ProjectionSpec 的声明式半场：
-// 启动形态 + 传输能力 + 配置投影字段；可执行半场 = acl 连接 + 后续 Runtime 接口）。
+// 启动形态 + 传输能力 + **纯数据**的落点/凭据声明；可执行半场 = acl 连接 + 该 adapter 的
+// `resource.Syncer`，后者按 ADR-2 挂在 `Registry` 的第二张表上，不进 Spec）。
 type Spec struct {
 	ID      string // 注册表键，如 "opencode"、"deepseekharness"
 	Name    string // 展示名
@@ -53,6 +56,23 @@ type Spec struct {
 	// Projections 该 runtime 承载各类能力的**原生形态**声明（投影契约，见 projection.go）。
 	// 空 = 该 runtime 不承载任何平台可投影的能力（远程端点即如此 → not_applicable）。
 	Projections []Projection
+	// ModelConfig 该 runtime 的**模型清单落点**（见 config_location.go）：**只有位置**，不含格式。
+	//
+	// 为什么只留位置、删掉格式与通道（ADR-2/ADR-11）：`providers` 复数键、`- id: acp`、`--patch`
+	// 这些是**底座的私有知识**，只有写字节的 adapter 知道；留在内核里等于每接一个底座就改内核。
+	// 落点之所以还在 `Spec`，是因为 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}` 这类占位符**只能靠该
+	// runtime 自己的隔离 env 解出来**（adapter 拿不到注册表，约束⑦），解析必须发生在父包。
+	//
+	// 未声明 Filename = 该 runtime 不承载平台模型清单：清单写面按"未声明"拒绝（40501），
+	// `GET /models` 回落成只读运行时目录。
+	//
+	// 与 Projections 分开的理由见 config_location.go 文件头（一个能力一个目录 vs 一个 runtime 一个文件）。
+	ModelConfig ModelConfigLocation
+	// Credential 该 runtime 的**凭据交付面**声明（纯数据，见 pkg/resource.CredentialSpec）。
+	//
+	// 与 ModelConfig 分开：清单与凭据是**两条通道**，生效时刻与失败半径都不同（ADR-4/ADR-14）。
+	// 零值 = 该 runtime 没声明凭据面。
+	Credential resource.CredentialSpec
 	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
 	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
 	CapabilityScope string

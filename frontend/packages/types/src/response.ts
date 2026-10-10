@@ -31,7 +31,7 @@ export const BizCode = {
   Conflict: 40901,
   /** 服务内部错误（后端唯一兜底码）。 */
   Internal: 50000,
-  /** 上游执行失败（runtime / MCP server 报错）。 */
+  /** 上游执行失败（runtime / MCP server 报错；含 `resource_sync_failed` 50001——同步失败）。 */
   UpstreamFailed: 50001,
   /** 上游连接失败（进程拉不起、连接断开、不可达）。 */
   BadGateway: 50201,

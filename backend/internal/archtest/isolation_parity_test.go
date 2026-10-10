@@ -30,6 +30,9 @@ var (
 // 为什么要有这张登记表而不是"核心有、启动器没有就放过"：那样核心一旦新增变量，JS 侧漏跟就是静默的
 // ——壳直接跑随包载荷的路径上没人再兜底它，去读写用户真实目录，而两侧的守卫都绿。登记在这里意味着
 // "这条路径不需要它，理由如下"，新增变量必须先二选一（补进启动器 / 在此登记），否则守卫红。
+// reDanglingAssign 抓"赋值右侧为空"这一形态（`isolation.KEY =` 后直接换行）。
+var reDanglingAssign = regexp.MustCompile(`isolation\.[A-Za-z_]+ *= *\n`)
+
 var launcherCoreOnly = map[string]map[string]bool{
 	// npm 面：MCP server 常经 npx 拉起，那是**核心**拉子进程时要隔离的东西；壳直接跑载荷不经过 npx。
 	deepseekharness.ID: {"npm_config_cache": true, "npm_config_prefix": true},
@@ -70,6 +73,14 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 			"请修本守卫而不是放宽它：%s", path)
 	}
 	block := src[start:end]
+
+	// 悬空赋值（与启动器那条同一个事故）：本守卫按**文本**解析这张表，所以"某一行只写了
+	// `isolation.KEY =` 而值被截掉"这种语法错误能一路绿到最后，直到真的去跑探针才炸
+	// （V9 冒烟探针 2026-10-10 就是这么红的，而它在 DoD 链的最末一环）。
+	if reDanglingAssign.MatchString(src) {
+		t.Fatalf("%s 里有悬空赋值（`isolation.KEY =` 后面没有值）——三副本同步时最容易被截断的正是最后一行，"+
+			"而这类错只在**运行期**才现形", path)
+	}
 
 	// 以 runtime 分支切段：公共段（所有本地 runtime 都给）+ dsh 段 + opencode（else）段。
 	dshAt := strings.Index(block, "if (runtimeId === 'dsh')")
@@ -203,6 +214,37 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 			t.Fatalf("启动器 %s 的 isolation 表解析出 0 个变量（表格式变了，请修本守卫而不是放宽它）", name)
 		}
 		parsed[name] = keys
+	}
+
+	// ——— 空值语义（2026-10-10 的真事故）———
+	//
+	// 只比**键名**会漏掉一类很坏的错：把「清掉用户同名变量」（Go 侧那条的取值是**空串**）机械地
+	// 翻译成「未设置就兜底成 $MATE_HOME/」。产出的启动器照常 exec，底座才在内部报一个看不出因果的
+	// 错——`OPENCODE_CONFIG=$MATE_HOME/` 会让它把**一个目录**当配置文件读（EISDIR），桌面态的
+	// skill 验收就是这么抓到的（真请求一个都没发出去）。
+	//
+	// 所以这里钉一条：生成器对空值必须走**单独一条分支**，且那条分支里不许出现 `MATE_HOME`。
+	src := string(raw)
+	if !strings.Contains(src, "if (sub === '')") {
+		t.Fatalf("生成器没有对「空值」单独分支：空的语义是**清除**用户同名变量，不是兜底成 `$MATE_HOME/…`。" +
+			"把它并进普通分支就会产出 `OPENCODE_CONFIG=$MATE_HOME/` 这种把目录当配置文件读的启动器（EISDIR）")
+	}
+	emptyBranch := src[strings.Index(src, "if (sub === '')"):]
+	if cut := strings.Index(emptyBranch, "return style ==="); cut > 0 {
+		emptyBranch = emptyBranch[:cut]
+	}
+	if strings.Contains(emptyBranch, "MATE_HOME") {
+		t.Fatalf("空值分支里出现了 MATE_HOME：空值只能「清除」（unset / set \"KEY=\"），" +
+			"拿 $MATE_HOME 兜底会让底座把目录当配置文件读（实测 EISDIR）")
+	}
+
+	// 悬空赋值（2026-10-10 的真事故之二）：本守卫按**文本**解析这三份表，所以"某一行只写了
+	// `isolation.KEY =` 而值被截掉"这种**语法错误**能一路绿到最后——直到真的去跑那个脚本才炸
+	// （V9 冒烟探针就这么红在 `SyntaxError: Unexpected token`，而那一步在 DoD 链的最后一环）。
+	// 这里用一条正则把"赋值右侧为空"挡在静态阶段：它挡不了所有语法错，但挡得住"手抄一行时截断"。
+	if reDanglingAssign.MatchString(string(raw)) {
+		t.Fatalf("%s 里有悬空赋值（`isolation.KEY =` 后面没有值）——这类语法错会让脚本在**运行期**才炸，"+
+			"而本草稿式的三副本同步最容易被截断的正是最后一行", path)
 	}
 
 	// fail-closed：条目或隔离表数量变了，说明生成器结构动了，本守卫的解析前提不再成立。

@@ -19,9 +19,25 @@ import (
 // agentTestSvc 播 deepseekharness/opencode/echo（内置 agent 播种 + echo 自定义；不拨真实子进程）。
 func agentTestSvc(t *testing.T, agentDir string) *Service {
 	t.Helper()
+	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
+	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
+	// 这里给 opencode 声明 env 通道（与真实 adapter 同形），deepseekharness 声明原生文档
+	// （与真实 adapter 同形：dsh 的密钥走 .credentials.yaml，平台不重复注入 env）。
+	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
+	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
+	//
+	// 两个声明都**直接取真实 adapter 的那一份**（不在这里手抄路径/模板）——手抄会把底座的
+	// 私有知识（凭据文档路径）带进平台内核，`TestInternalHasNoRuntimeConfigLiterals` 会判红，
+	// 而且抄出来的那份迟早与 adapter 漂移。
+	real := runtime.DefaultRegistry()
+	dhSpec, dshOK := real.Get("deepseekharness")
+	ocSpec, ocOK := real.Get("opencode")
+	if !dshOK || !ocOK {
+		t.Fatal("默认注册表里应有 deepseekharness 与 opencode")
+	}
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"},
-		runtime.Spec{ID: "opencode", Name: "opencode"},
+		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness", Credential: dhSpec.Credential},
+		runtime.Spec{ID: "opencode", Name: "opencode", Credential: ocSpec.Credential},
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
 	svc := NewService(reg, eventbus.New())
@@ -453,19 +469,19 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 		t.Fatalf("文案应指明档案不存在并给出路: %s", ae.Details)
 	}
 
-	// 档案存在但无 key → 仍拒绝，并指出本应注入的变量名（可操作）。
-	typ := "deepseek"
-	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{Type: &typ}); err != nil {
-		t.Fatalf("UpdateProvider: %v", err)
+	// 档案存在但无 key → 仍拒绝，并**指出这条供应商**（v12 不再有"某个变量名"那回事：
+	// 引用名是逐供应商派生的，改密钥就是改它）。
+	if _, err := svc.CreateProvider(ctx, providerReq("gone", nil)); err != nil {
+		t.Fatalf("CreateProvider: %v", err)
 	}
 	err = svc.StartAgent(ctx, "a-prov")
-	if !errors.As(err, &ae) || ae.Code != "credential_missing" || !strings.Contains(ae.Details, "DEEPSEEK_API_KEY") {
-		t.Fatalf("无 key 档案应报 credential_missing 并指明注入变量，got %v", err)
+	if !errors.As(err, &ae) || ae.Code != "credential_missing" || !strings.Contains(ae.Details, "gone") {
+		t.Fatalf("无 key 供应商应报 credential_missing 并指明它，got %v", err)
 	}
 
 	// 补齐 key → 凭据面放行（不再报 credential_missing）。
 	key := "sk-test"
-	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{Key: &key}); err != nil {
+	if _, err := svc.UpdateProvider(ctx, "gone", dtoprovider.ProviderPatchReq{APIKey: &key}); err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}
 	a, _ := svc.AgentByID("a-prov")

@@ -32,6 +32,16 @@ import type {
   McpWriteResp,
   McpDeleteResp,
   ModelCatalogResp,
+  ModelCreateReq,
+  ModelDeleteResp,
+  ModelPatchReq,
+  ModelRow,
+  ModelsResp,
+  ModelSyncResp,
+  ProviderCreateReq,
+  ProviderDeleteResp,
+  ProviderProbeResp,
+  Runtime,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -438,22 +448,87 @@ export const startAgent = (id: string): Promise<{ id: string; state: string }> =
 export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
   http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/stop`)
 
-// ——— P2 provider 注入面（密钥只写不读回） ———
+// ——— 供应商面（密钥只写不读回） ———
 
 export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/mate/providers')
 
-/** upsert provider 档案；key 传空串清除密钥。 */
-export const upsertProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
-  http.patch<Provider>(`/mate/providers/${encodeURIComponent(id)}`, patch)
+/**
+ * 底座列表（name / id / version / capabilities）。
+ *
+ * v12 起它**不再**携带"逐底座的运行时参数 schema"（`provider_projection` 随 ADR-7 删除）——
+ * 设置 · 模型 不再有那张表单，加一个底座也不需要改前端。
+ */
+export const listRuntimes = (): Promise<Runtime[]> => http.get<Runtime[]>('/mate/runtimes')
 
-// ——— 模型目录（运行时派生：ACP session config options） ———
+/** 新建一条供应商（id 已存在 → 40901 `provider_exists`，绝不覆盖）。 */
+export const createProvider = (req: ProviderCreateReq): Promise<Provider> =>
+  http.post<Provider>('/mate/providers', req)
 
 /**
- * 模型目录：`?agent=<id>` 指定 agent（缺省取后端默认 agent）。
- * 选项全量来自运行时自报，`source` 标注取样来源（session|resume|cache|none）。
+ * 更新一条**已存在**的供应商（PATCH，不 upsert；不存在 → 40401 `provider_not_found`）。
+ * `api_key` 传空串清除密钥。响应带 `effect`（生效面回执：改端点/密钥才是"下一轮生效"）。
  */
-export const listModels = (agentId?: string): Promise<ModelCatalogResp> =>
-  http.get<ModelCatalogResp>(`/mate/models${agentId ? `?agent=${encodeURIComponent(agentId)}` : ''}`)
+export const patchProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
+  http.patch<Provider>(`/mate/providers/${encodeURIComponent(id)}`, patch)
+
+/** 删除一条供应商（幂等；被 agent 或模型引用 → 40901 `provider_in_use` + 引用名单）。 */
+export const deleteProvider = (id: string): Promise<ProviderDeleteResp> =>
+  http.delete<ProviderDeleteResp>(`/mate/providers/${encodeURIComponent(id)}`)
+
+/**
+ * 连接自检两段：**本地段无条件且零出网**；上游段仅当 `upstream: true`。
+ * 上游段会把用户密钥发给第三方，所以绝不能被页面加载顺手触发。
+ */
+export const probeProvider = (id: string, upstream = false): Promise<ProviderProbeResp> =>
+  http.post<ProviderProbeResp>(`/mate/providers/${encodeURIComponent(id)}/probe`, { upstream })
+
+// ——— 模型面（平台清单 + 聚合生效结论 + 清单写面；运行时目录单列） ———
+
+/**
+ * 平台模型清单读面（`GET /models`）：`{models, default_model, effective, effective_at, sync[], note?}`。
+ *
+ * `?runtime=` 收窄同步明细的取样面（不传 = 全部已注册）；设置 · 模型 那一节**只消费前四个字段**，
+ * `sync[]` 是机器面、不得渲染（ADR-22）。
+ */
+export const listModels = (runtimeId?: string): Promise<ModelsResp> => {
+  const p = new URLSearchParams()
+  if (runtimeId) p.set('runtime', runtimeId)
+  const qs = p.toString()
+  return http.get<ModelsResp>(`/mate/models${qs ? `?${qs}` : ''}`)
+}
+
+/**
+ * 运行时目录读面（`GET /models/catalog?agent=`）：运行时自报的会话配置项投影。
+ *
+ * 它是**另一个屏幕**（会话级模型选择器）的数据源，`value` 必须原样回传——与平台清单不是一回事。
+ */
+export const listModelCatalog = (agentId?: string): Promise<ModelCatalogResp> => {
+  const p = new URLSearchParams()
+  if (agentId) p.set('agent', agentId)
+  const qs = p.toString()
+  return http.get<ModelCatalogResp>(`/mate/models/catalog${qs ? `?${qs}` : ''}`)
+}
+
+/** 新建一条模型条目（同 `(provider_id, model_id)` 已存在 → 40901 `model_exists`）。 */
+export const createModel = (req: ModelCreateReq): Promise<ModelRow> =>
+  http.post<ModelRow>('/mate/models', req)
+
+/** 更新一条模型条目（指针更新；`is_default:true` 同时清掉旧的唯一默认）。 */
+export const patchModel = (id: string, patch: ModelPatchReq): Promise<ModelRow> =>
+  http.patch<ModelRow>(`/mate/models/${encodeURIComponent(id)}`, patch)
+
+/** 删除一条模型条目（幂等；若它正好是默认模型则连带清空默认）。 */
+export const deleteModel = (id: string): Promise<ModelDeleteResp> =>
+  http.delete<ModelDeleteResp>(`/mate/models/${encodeURIComponent(id)}`)
+
+/**
+ * 重新同步模型清单（`POST /models/sync`；`runtime` 空 = 全部已注册）。
+ *
+ * 同步失败 → 50001 `resource_sync_failed`。成功路径**只回逐 runtime 的机器面结论**——
+ * 界面要说"已提交同步"，不许把它说成"已生效"（生效结论读 `GET /models` 的聚合字段）。
+ */
+export const syncModels = (runtime?: string): Promise<ModelSyncResp> =>
+  http.post<ModelSyncResp>('/mate/models/sync', runtime ? { runtime } : {})
 
 // ——— M3 用量统计 ———
 

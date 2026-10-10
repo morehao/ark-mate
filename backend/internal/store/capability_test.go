@@ -160,17 +160,27 @@ func digestOf(body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestCapabilityDefinitionColumnsFrozen 钉住三张新表的列集合。
+// TestCapabilityDefinitionColumnsFrozen 钉住定义面各表的列集合。
 //
 // 这一条对应计划 §1 P-2 的"加一条守卫测试：提升列与 body 派生值一致（防'有人后来往表里
 // 塞派生列'）"——最直接的实现就是**把列集合冻住**：`body` 之外的任何列都是派生列，
 // 而派生列与 body 的双写必然漂移（漂移本身不会让别的测试变红）。
+//
+// `models` 是唯一一处**刻意**多于 `{id, body, revision, updated_at}` 的表：v11 多的是
+// `runtime` / `provider_id` / `is_default`（三个查询轴），**v12 换成 `provider_id` / `model_id`**
+// ——`model_id` 从 body 提升为列之后，`(provider_id, model_id)` 的唯一性才能由**库级唯一索引**
+// 表达（v11 那条"提交事务内先查后写"的约定随之退役）。`runtime` 与 `is_default` 被删除：
+// 模型不再带底座维度、默认模型改住 `meta` 的单一值（ADR-21）。
+//
+// 所以这张表的列集合是**冻结形态**，不是"可以顺手再加列"的许可。
 func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 	s := openMem(t)
 	want := map[string][]string{
 		model.TableSkill:              {"id", "body", "revision", "updated_at"},
 		model.TableMcpServer:          {"id", "body", "revision", "updated_at"},
 		model.TableCapabilityRevision: {"seq", "kind", "capability_id", "action", "actor", "at", "digest"},
+		model.TableProvider:           {"id", "body", "revision", "updated_at"},
+		model.TableModel:              {"id", "provider_id", "model_id", "body", "revision", "updated_at"},
 	}
 	for table, wantCols := range want {
 		rows, err := s.db.Raw(`PRAGMA table_info(` + table + `)`).Rows()

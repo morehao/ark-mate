@@ -258,6 +258,20 @@ func getDefinitionRow(ctx context.Context, st *store.Store, it store.DefinitionI
 		}
 		return row.Body, true, nil
 	}
+	if it.Kind == model.CapabilityKindAgent {
+		row, found, err := st.GetAgentDefinition(ctx, it.ID)
+		if err != nil || !found {
+			return "", found, err
+		}
+		return row.Body, true, nil
+	}
+	if it.Kind == model.CapabilityKindProvider {
+		row, found, err := st.GetProviderDefinition(ctx, it.ID)
+		if err != nil || !found {
+			return "", found, err
+		}
+		return row.Body, true, nil
+	}
 	row, found, err := st.GetSkillDefinition(ctx, it.ID)
 	if err != nil || !found {
 		return "", found, err

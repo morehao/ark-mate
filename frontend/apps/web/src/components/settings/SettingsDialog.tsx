@@ -3,6 +3,7 @@ import { SETTINGS_MENU, SETTINGS_SECTIONS, settingsSectionOf } from '../../conso
 import { useMate } from '../../store'
 import { AgentsSettingsPanel } from './AgentsSettingsPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
+import { ModelSettingsPanel } from './ModelSettingsPanel'
 import { TokenSettingsPanel } from './TokenSettingsPanel'
 
 /**
@@ -54,6 +55,7 @@ export function SettingsDialog() {
 
         <div className="fg-setdlg-body">
           {sectionId === 'general' && <GeneralSettingsPanel />}
+          {sectionId === 'model' && <ModelSettingsPanel />}
           {sectionId === 'agents' && <AgentsSettingsPanel />}
           {sectionId === 'token' && <TokenSettingsPanel />}
         </div>

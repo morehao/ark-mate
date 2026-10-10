@@ -53,9 +53,9 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 
 | 路径 | 默认 | 覆盖 | 内容 |
 | --- | --- | --- | --- |
-| SQLite 库 | `~/.ark-mate/mate.db` | `MATE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） |
+| SQLite 库 | `~/.ark-mate/mate.db` | `MATE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） + capability/agent/automation 定义 + **v11 起 provider 档案（`providers` 表）与平台模型清单（`models` 表）**。**v11 起它是 provider 档案的权威**——所以它必须在备份清单里（见 §6），"只备 `providers.json`"从这一版起不再等价 |
 | transcript | `~/.ark-mate/transcripts/` | `MATE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
-| Agent 定义 | `~/.ark-mate/agents/<id>.json` | `MATE_AGENTS` | 自定义 agent（含 `permission_policy`）、`providers.json`（provider 密钥只存 `key_ref`）。**`MATE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh`/`opencode` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`mate agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。两种模式下 `providers.json` 与 vault 锚点（本目录的父目录）都仍在这里 |
+| Agent 定义 | `~/.ark-mate/agents/<id>.json` | `MATE_AGENTS` | 自定义 agent（含 `permission_policy`）。**`MATE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh`/`opencode` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`mate agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。目录里的 `providers.json` 同属**目录级配置**且**v11 起也只是导入/导出载体**（档案的权威在 DB；写面一个字节都不回写它，回退旧二进制前要 `mate provider export` 回灌，见 §6），迁移前的快照是 `providers.json.bak-v11`（**建议一起备份**，它是回退窗口里唯一那份"迁移前真相"）；vault 锚点（本目录的父目录）两种模式下都在这里 |
 | 密钥库（vault） | `~/.ark-mate/vault.key` + `~/.ark-mate/vault/` | `MATE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
 | 自动化定义 | `~/.ark-mate/automations/<id>.json` | `MATE_AUTOMATIONS` | 定时任务。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：定义与运行态存在 DB 的 `automations` 表里（**定义列** `body`+`revision` 与**运行态列** `last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 分列；`state` 属于定义，因为启用/停用是用户操作），本目录只作**导入/导出**位置（装配期自动导入一次、`mate automation import\|export` 手动搬运；导入会把文件里的运行态键切进运行态列，导出时再合成同一个文件）。memory 模式下 `<id>.json` 仍是唯一定义 + 运行态载体（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）——**备份它就是备份任务**（含运行史）。两种模式下手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
@@ -355,8 +355,14 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   docker exec -u root <容器> sh -c 'chown -R mate:mate /data/.config /data/.local && chmod 600 /data/.config/opencode/opencode.json /data/.local/share/opencode/auth.json'
   ```
 
-  dsh 侧的 provider 凭据走**环境变量**（`~/.dsh/settings.yaml` 里 `apiKeyEnv: YYUG_API_KEY` 之类），
-  即容器启动时 `-e` 传入。没有对应变量时 dsh 仍能起来并完成 ACP 握手，但第一轮请求会失败——
+  dsh 侧的 provider 凭据同样走**环境变量**（平台把 `provider` 档案的密钥以 `<TYPE>_API_KEY`
+  注入子进程；容器里用 `-e` 传同名变量即可）。**平台不写 dsh 自己的 home patch**（`~/.dsh/settings.yaml`
+  那些 profile/plugin 层仍是用户与 dsh 自己的事）：dsh 侧的**模型清单**走平台自有的 overlay
+  `<MATE_HOME>/runtime/dsh/mate-models.patch.yml`（容器里 `/data/runtime/dsh/mate-models.patch.yml`），
+  由平台按"文件存在且非空"幂等地作为 `--patch <绝对路径>` 递进启动参数——坏了把参数摘掉就回到出厂配置，
+  不需要修复 dsh 的任何文件。**当前该落点的 `Tested=false`，所以是只读的**：平台会生成候选内容，
+  但**不落盘、也不改启动参数**（`mate doctor` 的 `models deepseekharness` 那一条会如实报"未实测 ⇒ 只读"）。
+  没有对应变量时 dsh 仍能起来并完成 ACP 握手，但第一轮请求会失败——
   这是如实语义，不是平台静默降级（实测见 §8）。
 
 ### 4.1 运行
@@ -453,9 +459,14 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 
 ```bash
 # 备份（停服或在线 SQLite 备份均可；transcript/agents/capabilities/vault 是纯文件）
+# ⚠️ 必须备份 MATE_DB（默认 ~/.ark-mate/mate.db）：**v11 起 provider 档案的权威在这里**
+#     （providers 表），会话/事件/各域定义也都在这里——"只备 providers.json"从这一版起不再等价。
 # ⚠️ 必须一起备份 ~/.ark-mate/vault.key（provider 密钥的主密钥）：丢了 = 所有 provider 密文不可恢复
 #     （表现为 credential_missing「密钥密文无法解密」），只能重设各 provider 的 key。
 #     ~/.ark-mate/vault/ 是密文目录，同样要带（缺了等于密钥没了）。
+#     vault.key 是**列在 DB 之外的**，所以"只备库"同样不等价——两样都要。
+# ◯ 建议一起备份 <AgentDir>/providers.json 与它的 providers.json.bak-v11（v11 的迁移前快照）：
+#     前者是导入/导出载体（导出确认、对账、跨机搬迁都用它），后者是回退窗口里唯一那份"迁移前真相"。
 sudo systemctl stop ark-mate
 tar czf ark-mate-$(date +%F).tgz -C /var/lib ark-mate
 sudo systemctl start ark-mate
@@ -471,12 +482,16 @@ sudo systemctl restart ark-mate
 
 # 回滚：换回旧二进制重启。**但只要新版本已经把库迁移到更高 schema 版本，旧二进制会拒绝启动**
 # （store.migrate: schema vN 高于本二进制支持的 vM），此时唯一的回滚路径是"恢复库备份 + 换回旧二进制"。
-# 本仓当前最新 schema = **v7**（v7 = M3 的能力钉住三列两索引）。所以：
-#   · v6 二进制 → v7 库：停服 → `tar xzf <升级前的备份>` 覆盖 `MATE_DB`（v7 列没了，能力选定随之丢失，
-#     这是备份点的状态，不是数据损坏）→ 换回 v6 二进制 → 起服
-#   · 跨过 v7 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
-#     升级重放 v7（能力列重新加一遍），而中间版本的任何数据改造都不会被撤销
-#   · 只想"临时退一版"而不动库：保持 v7 库、换回**仍然支持 v7** 的二进制（v7 之后的修复版本都属于这一类）
+# 本仓当前最新 schema = **v11**（v11 = 设置 · 模型的 providers/models 两张表 + 索引）。
+# v11 与前十个版本的区别值得单独记住：**它这一次带了不可逆动作**——provider 档案的事实源从
+# `<AgentDir>/providers.json` 搬进了库，升级后旧二进制读到的是**导入时刻的快照**。所以 v11 的
+# 回退除了换二进制，还要先 `mate provider export` 把库回灌成文件（步骤与检查项见 §6.1）。所以：
+#   · v10 二进制 → v11 库：停服 → `mate provider export --dir <AgentDir>` 回灌文件 →
+#     `tar xzf <升级前的备份>` 覆盖 `MATE_DB`（v11 两张表没了，provider 档案回到文件侧，这是备份点的
+#     状态，不是数据损坏）→ 换回 v10 二进制 → 起服
+#   · 跨过 v11 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
+#     升级重放 v11（两张表重新建一遍），而中间版本的任何数据改造都不会被撤销
+#   · 只想"临时退一版"而不动库：保持 v11 库、换回**仍然支持 v11** 的二进制（v11 之后的修复版本都属于这一类）
 # 备忘：`MATE_DB` 默认 `~/.ark-mate/mate.db`；备份命令见本节开头（vault.key 与 vault/ 必须一起备）。
 ```
 
@@ -485,6 +500,65 @@ sudo systemctl restart ark-mate
 不会改写会话状态（见 §8 连接拆除语义）。所有已存在的会话（不论上一轮终态）在重启后都可继续提问：
 `dsh`/`opencode` 走原生 resume，未声明原生恢复能力的底座走 handoff memo。transcript 模式（memory）
 启动时回读 JSONL 重建会话列表。
+
+### 6.1 供应商档案换事实源（v11）：不可逆动作、执行前检查项、回退
+
+**为什么这一段单独写**：v11 之前，provider 档案的事实源是 `<AgentDir>/providers.json` 这个**文件**；
+v11 之后 sqlite 模式下换成了 `mate.db` 的 `providers` 表，文件降级为**导入/导出载体**——
+于是"回退旧二进制"这件事多了一个前提：**旧版本读的是那份文件，不是库**。
+切换与 `mate provider export` 之外没有第二条回灌路径，所以它是一个**不可逆动作**（在文件被导出覆盖
+之前，窗口是关着的）。
+
+**执行前检查项**（六条；`sqlite` 模式下装配期的自动导入会在这个窗口里发生，所以要在**换二进制之前**跑）：
+
+| # | 检查 | 命令 / 判据 | 不满足时说明什么 |
+| --- | --- | --- | --- |
+| ① | 备份存在且可读 | `test -r <AgentDir>/providers.json.bak-v11 && wc -c < <AgentDir>/providers.json.bak-v11`（能读出来、非空） | 没有备份就没有回退路径：先跑一次导入（或手工复制 `providers.json`）再继续 |
+| ② | 模型清单为空 | `models` 表行数 == 0（`mate doctor --json` 的 `providers.modelRows`） | 非空说明这台机器已经在用 v11 的模型清单：这时候回退旧二进制会连它一起丢，先确认不需要 |
+| ③ | 无待物化配置 | `mate doctor --json` 的 `providers.runtimeConfigDigestWritten == false`（`meta.runtime_config_digest` 未被写过） | 已物化过说明模型清单的落盘/注入路径已经在跑：回退前先记下 `<MATE_HOME>/runtime/<id>/…` 里那几份文件的状态 |
+| ④ | vault 可达 | `mate doctor --json` 的 `checks[]` 里 **`vault` 无 `fail`** | `fail` 意味着密文已经在而主密钥不可用：先把 `vault.key` 找回来/修好，否则迁移会只搬 `key_ref`、迁移后一条密钥也解不开 |
+| ⑤ | 对账干净 | `mate doctor --json` 的 `providers.importMismatch` 为空（`meta.providers_import_mismatch` 无值） | 有值说明库与文件已经不等价：按 doctor 逐条报出的内容处理（`mate provider export` 同步文件，或查为什么文件里有而库里没有） |
+| ⑥ | 导出可用 | `mate provider export --dry-run` 成功（打印将要写出的内容，不改文件） | 导出失败 = 回退路径本身不通：先修它（DB 不可写/目录不可写）再切 |
+
+**回退步骤**（换回旧二进制**之前**必须先做第 1 步）：
+
+```bash
+# 1) 把 DB 回灌成 providers.json——这是回退窗口的**唯一**回灌路径。
+#    旧二进制只读这个文件；不做这一步，它读到的就是"导入那一刻的快照"，
+#    此后在面板/REST 里改过的凭据、新建的档案、改过的 type 全部会丢。
+mate provider export --dir <AgentDir>          # 先 --dry-run 看一眼也行（它只打印不落盘）
+# 2) 确认导出物对：条数与库一致、key_ref 都在（明文密钥不会出现在导出物里）。
+# 3) 换回旧二进制重启。若库已经被新版本迁到更高 schema（本仓 v11），
+#    旧二进制会拒绝启动（store.migrate 的拒绝启动保护）——那时唯一的路径是
+#    "恢复升级前的库备份（§6 开头那份 tar）+ 换回旧二进制"；v11 之前的库本身没有
+#    providers/models 两张表，旧二进制读 providers.json 照常工作。
+```
+
+**别把"删掉平台写的 overlay"当成一步恢复**（2026-10-10 端到端实测）：T5 与 T2 是两条同时生效的路径。
+去掉 `--patch`（删掉 `<MATE_HOME>/runtime/<id>/<overlay>` 或让平台不再注入它）之后，**老的进程**照常跑，
+但**新会话会失败**——因为平台侧仍声明着那条默认模型，T2 会把它下发下去，而底座此刻已经不认识它
+（dsh 逐字：`Invalid params: unknown model option: ["<provider>","<model>"]`）。设计上这是**有意的**：
+"运行时拒绝该值 → 建会话失败，绝不静默回落到出厂默认"（静默回落会让用户以为模型还在按他设的跑）。
+所以恢复动作是**两步**：
+
+```bash
+# 1) 去掉平台写的配置面（删 overlay / 清掉启动参数 / 或把清单清空——平台见清单为空就什么都不写）
+rm -f <MATE_HOME>/runtime/<id>/<overlay>
+# 2) 把平台的那条默认模型取消掉（否则它还会被下发给每条新会话）
+curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d '{"is_default":false}'
+# 或者：在面板「设置 · 模型」里点掉那颗星（同一件事）。
+# 之后新会话按底座自己的默认起；要彻底复原就把清单条目删掉。
+```
+
+`mate doctor` 在**任一条**仍处于这个状态时会报出来（`providers.runtimes[].advertisedKnown=true` 而
+`declared` 非空的条目不落在 advertised 里 → 差集非空 + 高危档），所以"哪台机器正卡在这两步之间"是
+可查的，不用靠记。
+
+**为什么这一段的检查项不放进 README**：README 的「存量迁移」那几段讲的是**机制**（谁搬到哪、
+幂等靠什么、为什么不覆盖），而这里六条是**发布会话里要照着敲的命令**，它们的判据（备份在哪、
+`mate doctor --json` 的哪两个字段、`--dry-run` 成功）与本节开头的备份/回滚命令是同一套东西。
+放在一起，执行的人一屏就能看完"查什么 → 做什么 → 怎么退回去"；机制叙述里插一张命令表反而会把
+两件事搅在一起（README 那一侧只留一句指针）。
 
 ## 7. 排障
 

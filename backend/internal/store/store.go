@@ -44,6 +44,10 @@ type (
 	Input = model.Input
 	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
 	AgentDefinition = model.AgentDefinition
+	// ProviderDefinition provider 档案行（v11；与 SkillDefinition 同形）。
+	ProviderDefinition = model.ProviderDefinition
+	// ModelDefinition 平台模型清单行（v11；比 ProviderDefinition 多 runtime/provider_id/is_default 三列）。
+	ModelDefinition = model.ModelDefinition
 	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
 	AutomationDefinition = model.AutomationDefinition
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
@@ -65,6 +69,11 @@ var (
 // Store 是持久层门面：持有 gorm 句柄，聚合 schema 迁移与各领域 DAO。
 type Store struct {
 	db *gorm.DB
+	// path 库文件路径（"" 或 ":memory:" = 进程内临时库）。
+	// 迁移备份与 doctor 的"该恢复哪个文件"都要用它，所以它必须在 Store 上而不只是 Open 的入参。
+	path string
+	// migrationBackupPath 本次进程启动时那次迁移备份的路径（空 = 本次没迁移过）。
+	migrationBackupPath string
 
 	conversations *dao.ConversationDao
 	events        *dao.EventDao
@@ -81,6 +90,10 @@ type Store struct {
 	agents             *dao.AgentDao
 	automations        *dao.AutomationDao
 	capabilityRevision *dao.CapabilityRevisionDao
+
+	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
+	providers *dao.ProviderDao
+	models    *dao.ModelDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -92,6 +105,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := New(db)
+	s.path = path
 	if err := s.Migrate(context.Background()); err != nil {
 		_ = s.Close()
 		return nil, err
@@ -120,6 +134,9 @@ func New(db *gorm.DB) *Store {
 		agents:             dao.NewAgentDao(getDB),
 		automations:        dao.NewAutomationDao(getDB),
 		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
+
+		providers: dao.NewProviderDao(getDB),
+		models:    dao.NewModelDao(getDB),
 	}
 }
 

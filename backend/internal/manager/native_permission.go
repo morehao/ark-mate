@@ -103,11 +103,11 @@ func nativePermissionEnv(runtimeID string, p *PermissionPolicy) (env []string, d
 		if err != nil {
 			return nil, "opencode 权限配置序列化失败：" + err.Error()
 		}
-		note := "OPENCODE_CONFIG_CONTENT permission=" + compactJSON(cfg)
+		note := opencode.EnvConfigContent + " permission=" + compactJSON(cfg)
 		if len(skipped) > 0 {
 			note += "（未映射键 " + strings.Join(skipped, ",") + "，仍由平台拦截面裁决）"
 		}
-		return []string{"OPENCODE_CONFIG_CONTENT=" + string(raw)}, note
+		return []string{opencode.EnvConfigContent + "=" + string(raw)}, note
 	default:
 		return nil, "runtime " + runtimeID + " 无原生权限开关（仅平台拦截面）"
 	}

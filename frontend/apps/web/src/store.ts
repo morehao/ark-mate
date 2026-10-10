@@ -7,7 +7,7 @@ import {
   createConversation,
   listAgents,
   listConversations,
-  listModels,
+  listModelCatalog,
   listQueuedInputs,
   promptConversation,
   resolveElicitation,
@@ -399,7 +399,11 @@ export interface MateState {
   /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
-  /** 模型目录（当前 agent 的运行时会话配置项投影；null = 未加载）。 */
+  /**
+   * 运行时目录读面（当前 agent 的 ACP 会话配置项投影；null = 未加载）。
+   *
+   * v12 起它来自独立的 `GET /models/catalog?agent=`——与设置 · 模型的平台清单是两个读面。
+   */
   modelCatalog: ModelCatalogResp | null
 }
 
@@ -767,7 +771,9 @@ export const useMate = create<MateStore>((set, get) => {
 
     loadModelCatalog: async (agentId) => {
       try {
-        const resp = await listModels(agentId || undefined)
+        // v12：走独立的运行时目录读面（`GET /models/catalog?agent=`）——不再复用 `GET /models`，
+        // 后者已改成平台清单面。
+        const resp = await listModelCatalog(agentId || undefined)
         set({ modelCatalog: resp })
       } catch (err) {
         // 取不到目录 = 运行时没有可用来源（未启动/未登录）：保持空目录（面板显示空态 + 提示），

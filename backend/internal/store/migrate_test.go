@@ -222,8 +222,8 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 10 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 10 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 12 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 12 以提醒同步），got %d", latestSchemaVersion(), maxV)
 	}
 }
 
@@ -397,5 +397,77 @@ func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
 	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "nightly")
 	if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionCreate {
 		t.Fatalf("automation 审计应只有建定义那一条: %+v err=%v", revs, err)
+	}
+}
+
+// TestMigrateV10ToV11AddsProviderAndModel v10 → v11 升级：v11 同样是**纯增表**
+// （providers + models），既有 agent/能力/automation 定义一行不丢，两张新表从空开始。
+//
+// 两张表**同版**是刻意的（设计「数据迁移与校验」第 2 条）：不出现"升级后供应商有了、
+// 模型还不能用"的中间态。`models` 在文件时代**没有载体**（模型面整个由运行时派生），
+// 所以它只建空表、没有任何东西要搬——升级后的第一屏是「清单为空」而不是「清单等于底座现有模型」。
+func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v10.db")
+	db, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开库: %v", err)
+	}
+	s := New(db)
+	defer func() { _ = s.Close() }()
+
+	applySchemaUpTo(t, s, 10)
+	if ok, err := s.UpsertAgentDefinition(ctx, "ag-old", `{"id":"ag-old","name":"v10 存量"}`, 0, "test"); err != nil || !ok {
+		t.Fatalf("写 v10 agent 行: ok=%v err=%v", ok, err)
+	}
+
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("v10 → v11 升级失败: %v", err)
+	}
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("重复迁移应幂等: %v", err)
+	}
+
+	// ① v10 的行原样还在。
+	if ag, found, err := s.GetAgentDefinition(ctx, "ag-old"); err != nil || !found || ag.Revision != 1 {
+		t.Fatalf("升级后 v10 agent 行失真: found=%v err=%v row=%+v", found, err, ag)
+	}
+	// ② 两张新表从空开始。
+	if n, err := s.CountProviderDefinitions(ctx); err != nil || n != 0 {
+		t.Fatalf("升级后 providers 应为空: n=%d err=%v", n, err)
+	}
+	if rows, err := s.ListModelDefinitions(ctx); err != nil || len(rows) != 0 {
+		t.Fatalf("升级后 models 应为空: n=%d err=%v", len(rows), err)
+	}
+
+	// ③ 两张表都可写、可读，且审计按 kind 隔离（provider / model 各自一条）。
+	if ok, err := s.UpsertProviderDefinition(ctx, "deepseek-main",
+		`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/deepseek-main"}`, 0, "rest"); err != nil || !ok {
+		t.Fatalf("升级后写供应商: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.CreateModelDefinition(ctx, "md-1", "deepseek-main", "deepseek-v4-flash",
+		`{"name":"Flash"}`, "rest"); err != nil || !ok {
+		t.Fatalf("升级后写模型条目: ok=%v err=%v", ok, err)
+	}
+	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "deepseek-main"); err != nil || len(revs) != 1 {
+		t.Fatalf("provider 审计应为 1 条: n=%d err=%v", len(revs), err)
+	}
+	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindModel, "md-1"); err != nil || len(revs) != 1 {
+		t.Fatalf("model 审计应为 1 条: n=%d err=%v", len(revs), err)
+	}
+
+	// ④ v12 起模型面**没有布尔列**了（默认模型是 meta 的单一值）：
+	// 身份列 `model_id` 是**列**，且 `(provider_id, model_id)` 由库级唯一索引保证。
+	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.ModelID != "deepseek-v4-flash" {
+		t.Fatalf("读回模型条目失真: found=%v err=%v row=%+v", found, err, md)
+	}
+	if ok, err := s.CreateModelDefinition(ctx, "md-2", "deepseek-main", "deepseek-v4-flash",
+		`{}`, "rest"); err != nil || ok {
+		t.Fatalf("同 (provider_id, model_id) 应被唯一索引拦下: ok=%v err=%v", ok, err)
+	}
+	var idx int64
+	if err := s.db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_models_provider_model'`).
+		Row().Scan(&idx); err != nil || idx != 1 {
+		t.Fatalf("v12 应建唯一索引 idx_models_provider_model: n=%d err=%v", idx, err)
 	}
 }

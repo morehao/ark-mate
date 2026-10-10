@@ -4,6 +4,8 @@
 // `pkg/capability` 的注册表、`manager.agents` 与（后续）`manager.automation`。
 package dtolibrary
 
+import "github.com/morehao/ark-mate/pkg/object/objdelivery"
+
 // LibraryItem 一条统一能力条目（skill / mcp / agent / tool；command 见 M5）。
 //
 // 这是面板与输入卡的**唯一读模型**：同一个条目在面板里的样子与在输入卡 `+` 里的样子来自同一份
@@ -33,28 +35,20 @@ type LibraryItem struct {
 
 // Applicability 某条目在**某一个** runtime 上的可达性。
 //
-// Status 的五个取值各自对应一条不同的用户动作：
-//
-//	projected      可用（可直接选）
-//	untested       会投放，但该 runtime 的投影声明尚未经实测——不替用户担保底座开箱读到它
-//	not_configured 声明了但本进程没解析出落点（去配 MATE_PROJECTION_DIRS / 检查 adapter 声明）
-//	not_applicable 底座不支持或未注册（换 runtime，或注册它）
-//	disabled       被显式关掉（改回 enabled:true）
-type Applicability struct {
-	Runtime string `json:"runtime"`
-	OK      bool   `json:"ok"`
-	Status  string `json:"status"`
-	// Reason 人话原因（**不是错误码**）：调用方要能把这句话直接显示给用户。
-	Reason string `json:"reason,omitempty"`
-}
+// M6 起类型定义迁到 `pkg/object/objdelivery`（交付矩阵与可达性是两个面共用的值对象：
+// `/library` 与 `/providers` 用同一套形状），这里留**类型别名**——JSON 形状逐字不变（前端零改），
+// 既有调用点也零改。取值语义（projected/written/untested/not_configured/not_applicable/disabled）
+// 与注释见 objdelivery.Applicability。
+type Applicability = objdelivery.Applicability
 
-// Applicability 的 Status 取值（唯一事实源，测试与前端按它对齐）。
+// Applicability 的 Status 取值（唯一事实源是 objdelivery，这里只是转发以便既有调用点零改）。
 const (
-	StatusProjected     = "projected"
-	StatusUntested      = "untested"
-	StatusNotConfigured = "not_configured"
-	StatusNotApplicable = "not_applicable"
-	StatusDisabled      = "disabled"
+	StatusProjected     = objdelivery.StatusProjected
+	StatusWritten       = objdelivery.StatusWritten
+	StatusUntested      = objdelivery.StatusUntested
+	StatusNotConfigured = objdelivery.StatusNotConfigured
+	StatusNotApplicable = objdelivery.StatusNotApplicable
+	StatusDisabled      = objdelivery.StatusDisabled
 )
 
 // Kind 取值（M5 之前不含 command）。

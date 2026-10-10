@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // TestNativePermissionDSH B5：dsh 原生权限模式推导（auto/显式/off/未知）。
@@ -64,13 +65,13 @@ func TestNativePermissionOpencode(t *testing.T) {
 			"mystery": "allow", // 未映射 → 跳过
 		},
 	})
-	if len(env) != 1 || !strings.HasPrefix(env[0], "OPENCODE_CONFIG_CONTENT=") {
-		t.Fatalf("应注入 OPENCODE_CONFIG_CONTENT，got %v", env)
+	if len(env) != 1 || !strings.HasPrefix(env[0], opencode.EnvConfigContent+"=") {
+		t.Fatalf("应注入 %s，got %v", opencode.EnvConfigContent, env)
 	}
 	var cfg struct {
 		Permission map[string]string `json:"permission"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(env[0], "OPENCODE_CONFIG_CONTENT=")), &cfg); err != nil {
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(env[0], opencode.EnvConfigContent+"=")), &cfg); err != nil {
 		t.Fatalf("注入内容应为合法 JSON: %v", err)
 	}
 	want := map[string]string{"*": "ask", "bash": "deny", "edit": "deny", "webfetch": "allow"}

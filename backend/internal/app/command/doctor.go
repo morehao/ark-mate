@@ -19,12 +19,18 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/version"
 )
 
-// 本文件是 `mate doctor`（M4-5）：**只读体检**——不装配 App、不连库、不监听、不写 MATE_HOME
+// 本文件是 `mate doctor`（M4-5）：**只读体检**——不装配 App、不监听、不写 MATE_HOME
 // 以外的任何路径。它回答的是"这份部署现在到底装成什么样"，以及"它自己说自己是什么"。
+//
+// K2 起它多读两样东西（**仍然只读**）：`mate.db` 以 SQLite `mode=ro` 打开（不跑迁移，
+// 见 `store.OpenReadOnly`），`<mate home>/vault` 只探测不创建 keyfile。这两处刻意写下来，
+// 因为它们看起来像"什么都没写"而实际会落笔——`mode=ro` 仍可能让 SQLite 重建 `-shm`/`-wal`
+// 两个共享内存面文件；探针也只落在 MATE_HOME 之内。
 //
 // ## 为什么要有这条命令（而不是"启动失败时看日志"）
 //
@@ -76,9 +82,14 @@ type doctorReport struct {
 	Addr          string        `json:"addr"`
 	VerifyPayload bool          `json:"verifyPayload"`
 	Checks        []doctorCheck `json:"checks"`
-	Failed        int           `json:"failed"`
-	Warnings      int           `json:"warnings"`
-	Passed        bool          `json:"passed"`
+	// Providers provider / 模型清单段的机器可读事实（K2；键名稳定）。
+	//
+	// 它与人话的 `checks` 并存而不是互替：`checks[]` 回答"这一项过没过"，这一段回答
+	// "事实到底是几"。结构体定义在 manager（事实的构造函数也在那里），键名即它的字段序。
+	Providers manager.ProviderDoctorFacts `json:"providers"`
+	Failed    int                         `json:"failed"`
+	Warnings  int                         `json:"warnings"`
+	Passed    bool                        `json:"passed"`
 }
 
 // payloadManifestDoc 是随包载荷清单 `payload.json` 的读取形状（M3-1 的产出，M4-5 的复算对象）。
@@ -144,6 +155,13 @@ type doctorOptions struct {
 	PayloadsGiven bool
 	ReleaseJSON   string
 	VerifyPayload bool
+	// AgentDir agent 定义目录（K2：provider 档案的**文件侧**载体与 vault 锚点的来源）。
+	AgentDir string
+	// DBPath 库文件路径（K2：providers/models 两张表的读取对象）。
+	DBPath string
+	// StoreMode 解析后的持久层模式（sqlite|memory）：memory 形态下 DB 不是 provider 档案的
+	// 事实源，K2 那一段据此如实记"不适用"，而不是报 0 条（那会假绿）。
+	StoreMode string
 }
 
 // doctor 子命令入口。退出码：0 = 没有失败项；1 = 有失败项；2 = 用法/配置错误。
@@ -175,6 +193,9 @@ func doctor(args []string) {
 		PayloadsDir:   strings.TrimSpace(*payloadsDir),
 		ReleaseJSON:   strings.TrimSpace(*releaseJSON),
 		VerifyPayload: *verifyPayload,
+		AgentDir:      cfg.AgentDir,
+		DBPath:        cfg.DBPath,
+		StoreMode:     cfg.ResolvedStoreMode(),
 	}
 	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *home != "" {
@@ -280,6 +301,10 @@ func runDoctor(opts doctorOptions) doctorReport {
 		checks = append(checks, checkContract(contract, assets, assetsErr == nil, manifests, manifestsOK)...)
 	}
 
+	// provider（供应商凭据）与模型清单（K2）：全部只读，事实由 manager 构造（本文件只排版）。
+	providers, providerChecks := checkProviderSection(opts)
+	checks = append(checks, providerChecks...)
+
 	failed, warnings := 0, 0
 	for _, c := range checks {
 		switch c.Status {
@@ -296,6 +321,7 @@ func runDoctor(opts doctorOptions) doctorReport {
 		Addr:          opts.Addr,
 		VerifyPayload: opts.VerifyPayload,
 		Checks:        checks,
+		Providers:     providers,
 		Failed:        failed,
 		Warnings:      warnings,
 		Passed:        failed == 0,

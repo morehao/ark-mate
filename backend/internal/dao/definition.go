@@ -170,3 +170,70 @@ func NewAgentDao(getDB gormdao.DBGetter) *AgentDao {
 func (d *AgentDao) WithTx(tx *gorm.DB) *AgentDao {
 	return &AgentDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
+
+// ProviderDao 访问 providers 表（v11；列与语义同 skills/mcp_servers/agents）。
+type ProviderDao struct {
+	*DefinitionDao[model.ProviderDefinition, model.ProviderDefinitionList]
+}
+
+// NewProviderDao 构造 ProviderDao。
+func NewProviderDao(getDB gormdao.DBGetter) *ProviderDao {
+	return &ProviderDao{DefinitionDao: newDefinitionDao[model.ProviderDefinition, model.ProviderDefinitionList]("ProviderDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *ProviderDao) WithTx(tx *gorm.DB) *ProviderDao {
+	return &ProviderDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
+// ModelDao 访问 models 表（v11；平台模型清单）。
+//
+// 它比 providers 多两类方法（**身份列的过滤**与**每 runtime 默认的置位**），
+// 但定义行的 CAS 仍然只有 DefinitionDao 那一份实现（UpdateCAS 只碰 body/revision/updated_at，
+// 因此覆盖正文不会顺手动到 is_default）。
+type ModelDao struct {
+	*DefinitionDao[model.ModelDefinition, model.ModelDefinitionList]
+}
+
+// NewModelDao 构造 ModelDao。
+func NewModelDao(getDB gormdao.DBGetter) *ModelDao {
+	return &ModelDao{DefinitionDao: newDefinitionDao[model.ModelDefinition, model.ModelDefinitionList]("ModelDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *ModelDao) WithTx(tx *gorm.DB) *ModelDao {
+	return &ModelDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
+// ListAll 列出全部模型条目（id 升序）。
+//
+// v12 起模型**不带 runtime 维度**，所以"列某 runtime 的清单"不再是一个查询轴：
+// 同一份清单投给所有已注册底座，`ListAll` 就是同步时的那一次读取。
+func (d *ModelDao) ListAll(ctx context.Context) (model.ModelDefinitionList, error) {
+	var rows model.ModelDefinitionList
+	err := d.DB(ctx).Order("id ASC").Find(&rows).Error
+	return rows, err
+}
+
+// ListByProvider 列出挂靠在某条 provider 下的清单（删除保护的引用判据；id 升序）。
+func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
+	var rows model.ModelDefinitionList
+	err := d.DB(ctx).Where("provider_id = ?", providerID).Order("id ASC").Find(&rows).Error
+	return rows, err
+}
+
+// GetByProviderModel 按 `(provider_id, model_id)` 取一条（`model_exists` 判定；不存在 → (nil,false,nil)）。
+//
+// 它对应的就是 v12 建的唯一索引 `idx_models_provider_model`：**判据交由库级唯一性表达**，
+// 而不是"先查后写"（那中间有窗口）。
+func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, modelID string) (*model.ModelDefinition, bool, error) {
+	var row model.ModelDefinition
+	err := d.DB(ctx).Where("provider_id = ? AND model_id = ?", providerID, modelID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &row, true, nil
+}
