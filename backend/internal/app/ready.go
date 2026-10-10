@@ -17,13 +17,14 @@ const ReadyPrefix = "MATE_READY "
 // ReadyPayload 就绪行载荷。
 //
 // 字段是**增量**的：M1-2 只保证 `addr` / `port`（壳启动链唯一必需的两项）；
-// 资产来源与 build id 由 M2-3 接上真实值后出现在同一行里——壳对缺失字段按"未知"处理，
+// build id 由 M2-4 接上真实值后出现在同一行里——壳对缺失字段按"未知"处理，
 // 因此现在不填不会造成"半个契约"（填一个编造的值才会）。
+//
+// 2026-10-10 起删掉了 `webSource`：本字段从未被填过（声明" M2-3 起填"，一直没接），而资产来源
+// 又只剩"调用方给的目录"一种，留着只会让人以为它在报什么。
 type ReadyPayload struct {
 	Addr string `json:"addr"`
 	Port int    `json:"port"`
-	// WebSource 资产来源（builtin|dir），M2-3 起填。
-	WebSource string `json:"webSource,omitempty"`
 	// WebBuildID 前端构建 id，M2-4 起填。
 	WebBuildID string `json:"webBuildId,omitempty"`
 }

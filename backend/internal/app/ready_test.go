@@ -32,9 +32,10 @@ func TestReadyLineShape(t *testing.T) {
 	if p.Addr != "127.0.0.1:51234" || p.Port != 51234 {
 		t.Fatalf("载荷不符：%+v", p)
 	}
-	// M2-3 之前这两个字段缺席（壳按未知处理）——出现即说明有人填了编造的值。
-	if p.WebSource != "" || p.WebBuildID != "" {
-		t.Fatalf("M1-2 阶段不应填资产字段（M2-3 才接真值）：%+v", p)
+	// M2-3 之前 build id 缺席（壳按未知处理）——出现即说明有人填了编造的值。
+	// （`webSource` 字段已于 2026-10-10 删除：核心只有目录一种资产来源。）
+	if p.WebBuildID != "" {
+		t.Fatalf("M1-2 阶段不应填资产字段（M2-4 才接真值）：%+v", p)
 	}
 }
 

@@ -104,10 +104,11 @@ func TestStaticCacheMatrix(t *testing.T) {
 	}
 }
 
-// TestAssetDigestIsSourceIndependent 同一份产物在**两种来源**下得到同一个合成摘要。
+// TestAssetDigestIsSourceIndependent 同一份产物换到另一个路径后，合成摘要必须不变。
 //
 // 这是 V7「两个入口同一份产物」与 M2-5 一致性断言的基石：摘要只由内容决定，
-// 与"内嵌还是目录"、与绝对路径、与 mtime 都无关。
+// 与部署位置、与绝对路径、与 mtime 都无关。
+// （`//go:embed` 那条来源已于 2026-10-10 删除，测试改为"复制到另一个目录"来证明位置无关性。）
 func TestAssetDigestIsSourceIndependent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "dist")
 	writeDistLayout(t, dir)
@@ -127,13 +128,5 @@ func TestAssetDigestIsSourceIndependent(t *testing.T) {
 	}
 	if fromDir.Digest != fromDir2.Digest {
 		t.Fatalf("同一份产物换了路径后摘要变了：%s vs %s", fromDir.Digest, fromDir2.Digest)
-	}
-	// 内嵌来源（release 构建才有）也必须给出同一套摘要——这正是 M2-5 要比的那条。
-	if builtin, err := router.ResolveAssets(""); err == nil {
-		if builtin.Digest != fromDir.Digest && builtin.Source == router.AssetSourceBuiltin {
-			// 内嵌的那份是 make web 拷进 pkg/web/dist 的**同一份**产物吗？不一定（时间点不同）。
-			// 因此这里只记录，不作为断言——两个来源比对留给 M2-5 的脚本（同一时刻取同一份 dist）。
-			t.Logf("内嵌摘要与临时目录不同（预期，两者产物可能来自不同构建）：%s vs %s", builtin.Digest, fromDir.Digest)
-		}
 	}
 }

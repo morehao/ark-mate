@@ -4,6 +4,11 @@
 > 参考对象：openwork（`/Users/morehao/Documents/study/ai-agent/openwork`，只读；基线 **`v0.18.49` / `e8c6de421`**，下文所有行号引用均针对该 commit）
 > 相关既有文档：[`design-and-roadmap.md`](design-and-roadmap.md) §5.8/§P1+、[`p0-hardening-design-20260911.md`](p0-hardening-design-20260911.md) §13
 >
+> **定位口径（2026-10-10 加注，不改写下文）**：本文写于决策 v7 时代，正文里的「单操作员的 ACP **多 runtime** 控制面」
+> 是**当时的描述**。现行口径以 [`design-and-roadmap.md`](design-and-roadmap.md) 文首「**决策变更 v8**」为准：
+> 两层（底座 + 其上的个人 Agent 助手）、**runtime 接边有界**（`dsh` / `opencode` 两个一等适配，不追求数量）、
+> **聚焦桌面端**（浏览器入口只是开发形态）。
+>
 > **范围标注约定**：斜杠命令（command）按评审结论延后到 M5（可取消），因此本文档中凡涉及 command 的设计点一律标注 **【M5】**。M1–M4 不实现、不注册、不装载；`GET /library` 的 `kind` 枚举在那之前只含 `skill | mcp | agent | tool`。
 
 ---

@@ -232,8 +232,8 @@ func runDoctor(opts doctorOptions) doctorReport {
 		checks = append(checks, doctorCheck{"assets", doctorFail, assetsErr.Error()})
 	} else {
 		checks = append(checks, doctorCheck{"assets", doctorOK,
-			fmt.Sprintf("source=%s path=%s digest=%s buildId=%s files=%d",
-				assets.Source, orDash(assets.Path), orDash(assets.Digest), orDash(assets.CurrentBuildID()), len(assets.Digests))})
+			fmt.Sprintf("dir=%s digest=%s buildId=%s files=%d",
+				orDash(assets.Path), orDash(assets.Digest), orDash(assets.CurrentBuildID()), len(assets.Digests))})
 	}
 
 	// 发布契约（声明面）：打包态才有；读不到记警告。

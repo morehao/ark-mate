@@ -79,7 +79,6 @@ func TestMetaWebDigestIsRecomputable(t *testing.T) {
 	var env struct {
 		Code int `json:"code"`
 		Data struct {
-			WebSource string  `json:"webSource"`
 			WebPath   *string `json:"webPath"`
 			WebDigest *string `json:"webDigest"`
 			Payloads  []any   `json:"payloads"`
@@ -87,9 +86,6 @@ func TestMetaWebDigestIsRecomputable(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("信封解析失败：%v", err)
-	}
-	if env.Data.WebSource != string(router.AssetSourceDir) {
-		t.Errorf("webSource = %q，期望 dir", env.Data.WebSource)
 	}
 	if env.Data.WebPath == nil || *env.Data.WebPath != dir {
 		t.Errorf("webPath = %v，期望 %q", env.Data.WebPath, dir)

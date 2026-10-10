@@ -15,15 +15,16 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/pkg/web"
 )
 
-// 资产层（M2-1，设计 §6.1 / §6.2）：**两种来源，一套行为**。
+// 资产层（M2-1，设计 §6.1 / §6.2）：**唯一来源 = 调用方显式给的目录**。
 //
-// 这个文件替代了历史上的 web_release.go / web_dev.go 分叉：那时"有没有资产"由**构建 tag**决定，
-// 于是默认构建只能到一个"能调 API 但打不开界面"的服务，桌面核又被迫带 release tag（与
-// "桌面核不内嵌资产"冲突）。现在来源是**运行时解出来的**（显式目录 > 内嵌 > 拒绝启动），
-// 构建形态只决定"内嵌那一份在不在"。
+// 这里的历史有两层：最早是 `web_release.go` / `web_dev.go` 的构建 tag 分叉（"有没有资产"由 tag
+// 决定，于是默认构建只能到一个"能调 API 但打不开界面"的服务）；M2-1 改成运行时解
+// （显式目录 > 内嵌 > 拒绝启动）。**2026-10-10 起内嵌整条路删掉**（`//go:embed`、`-tags release`、
+// `pkg/web` 一并消失）：核心**永远不自带前端资产**，资产是一份 `apps/web/dist`，由调用方
+// （桌面壳 / 容器 / `make dev`）用 `--web-dir` 指过来。这样"资产在哪"只剩一个答案，而
+// "只有一份 dist"（设计 §6.1 的红线）从"靠纪律"变成结构上不可能违反。
 
 // 前端构建期写进产物的构建 id 文件（M2-4）与读不到时的口径。
 //
@@ -37,27 +38,16 @@ const (
 	BuildIDUnknown = "unknown"
 )
 
-// AssetSource 资产来源（同时是 `/meta` 的 webSource 取值，设计 §6.7）。
-type AssetSource string
-
-const (
-	// AssetSourceBuiltin 构建期内置（`-tags release` 的 //go:embed）。
-	AssetSourceBuiltin AssetSource = "builtin"
-	// AssetSourceDir 显式目录（`--web-dir` / `MATE_WEB_DIR`）。
-	AssetSourceDir AssetSource = "dir"
-)
-
 // AssetInfo 已解析的前端资产。零值（FS == nil）= 没有资产（只有测试会走到）。
 type AssetInfo struct {
-	Source AssetSource
-	// Path 目录来源的**绝对路径**；builtin 为空。
+	// Path 资产目录的**绝对路径**（本仓从 2026-10-10 起只有目录这一种来源）。
 	Path string
 	// FS 资产根（内含 index.html 与 assets/）。
 	FS fs.FS
 	// BuildID 前端构建 id（M2-4 填；从 build-id.txt 读）。
 	BuildID string
 	// Digests 逐文件 sha256（rel path → hex），解析期算一次。
-	// 两个用途：静态响应的**内容 ETag**（内嵌资产没有 mtime，只有内容摘要可靠），
+	// 两个用途：静态响应的**内容 ETag**（mtime 不可靠：解包/COPY 时间因部署方式而异），
 	// 以及 /meta 的 webDigest 合成（M2-3）。
 	Digests map[string]string
 	// Digest 逐文件摘要的确定性合成（`sha256:<hex>`；排序后按 `rel\0hex\n` 拼接再哈希）。
@@ -67,24 +57,20 @@ type AssetInfo struct {
 // Has 报告是否真的拿到了资产。
 func (a AssetInfo) Has() bool { return a.FS != nil }
 
-// ResolveAssets 按设计 §6.1 解析资产来源。**无效即报错**（调用方按退出码 3 收尾）：
+// ResolveAssets 解析前端资产目录（设计 §6.1）。**没有目录即报错**（调用方按退出码 3 收尾）：
 //
-//   - 给了 webDir：必须绝对、存在、是目录、且含 index.html；合法就用它，**不回落内嵌**；
-//   - 未给 webDir：用内嵌；内嵌也没有（默认构建）→ 报错，并给出"两条出路"的提示。
+//   - `webDir` 必须绝对、存在、是目录、且含 index.html。
 //
-// "不回落"是刻意的（设计 §6.1 规则）：显式目录配错时必须**拒绝启动**，而不是悄悄用内嵌的旧资产——
+// 为什么"配错就拒启"而不是回落到别的来源：本仓从 2026-10-10 起**没有第二来源可回落**
+// （内嵌已删）。显式目录配错时必须**拒绝启动**，而不是起一个"能调 API 但打不开界面"的服务——
 // 后者表现为"用户看到旧界面，还以为是新版本没生效"，是最难排查的一类问题。
 func ResolveAssets(webDir string) (AssetInfo, error) {
 	dir := strings.TrimSpace(webDir)
 	if dir == "" {
-		sub, ok := web.Dist()
-		if !ok {
-			return AssetInfo{}, fmt.Errorf(
-				"没有可用的前端资产：本构建未内嵌（未带 -tags release），也没有给 --web-dir\n" +
-					"  独立二进制：用 `-tags release` 构建（资产进二进制）\n" +
-					"  桌面形态：由壳传 --web-dir 指向包内那一份 dist")
-		}
-		return withDigests(AssetInfo{Source: AssetSourceBuiltin, FS: sub})
+		return AssetInfo{}, fmt.Errorf(
+			"没有前端资产：必须用 --web-dir 指向一份 dist（绝对路径）\n" +
+				"  桌面形态：壳会传 --web-dir 指向包内那一份\n" +
+				"  自建/容器：把 apps/web/dist 放到任意目录，用 --web-dir 或 MATE_WEB_DIR 指过去")
 	}
 
 	if !filepath.IsAbs(dir) {
@@ -102,13 +88,13 @@ func ResolveAssets(webDir string) (AssetInfo, error) {
 	if _, err := os.Stat(index); err != nil {
 		return AssetInfo{}, fmt.Errorf("--web-dir 目录里没有 index.html：%s（%v）", index, err)
 	}
-	return withDigests(AssetInfo{Source: AssetSourceDir, Path: abs, FS: os.DirFS(abs)})
+	return withDigests(AssetInfo{Path: abs, FS: os.DirFS(abs)})
 }
 
 // withDigests 解析期算一遍逐文件 sha256 与合成摘要。
 //
-// 为什么在解析期而不是每次请求：内嵌资产没有 mtime，**内容摘要**是唯一可靠的条件请求依据；
-// 而逐请求哈希 1.3MB 的 chunk 纯属浪费（单操作员回环服务也不该这么花）。
+// 为什么在解析期而不是每次请求：目录资产的 mtime 不可靠（部署方式决定），**内容摘要**才是可靠
+// 的条件请求依据；而逐请求哈希 1.3MB 的 chunk 纯属浪费（单操作员回环服务也不该这么花）。
 // 走查失败（理论上不会：ResolveAssets 已校验 index.html）时返回 Info 但不带摘要——
 // 让"没有 ETag"退化成普通的可缓存响应，而不是让服务起不来。
 func withDigests(info AssetInfo) (AssetInfo, error) {
@@ -175,7 +161,8 @@ func readBuildID(fsys fs.FS) string {
 
 // CompositeDigest 逐文件摘要的确定性合成（C9 的"可复现"要求）：
 // 按路径排序，逐行 `rel\0hex\n` 拼接后再 sha256。不含时间戳、不含绝对路径，
-// 因此同一份产物在内嵌与目录两种来源下**得到同一个值**（M2-5 的一致性断言就比它）。
+// 因此同一份产物在**不同部署位置**下得到同一个值（M2-5 的资产一致性断言比它：
+// 壳侧与核心侧读同一个目录，但走的实现不同）。
 //
 // 导出（M4-5）是因为它不再只服务资产：`mate doctor --verify-payload` 要用**同一个**函数
 // 复算随包载荷树的合成摘要。载荷清单是 JS 侧（`lib/payload.mjs` 的 `compositeDigest`）算的，
@@ -214,8 +201,8 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 	}
 	index, err := fs.ReadFile(assets.FS, "index.html")
 	if err != nil {
-		// ResolveAssets 已经校验过 index.html 存在；这里再兜一次是因为 FS 也可能是内嵌的。
-		panic(fmt.Sprintf("资产里读不到 index.html（来源 %s）：%v", assets.Source, err))
+		// ResolveAssets 已经校验过 index.html 存在；这里再兜一次是因为 FS 也可能被换掉。
+		panic(fmt.Sprintf("资产里读不到 index.html（目录 %s）：%v", assets.Path, err))
 	}
 	indexResp := func(c *gin.Context) {
 		// 浏览器入口的文档也下发 CSP（与桌面壳同一个头，M1-5）：前端产物不得依赖 eval，
@@ -250,12 +237,12 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 
 // serveStaticFile 服务一个**存在的**静态文件：内容 ETag + 条件请求 304 + 三档缓存头。
 //
-// 为什么不用 `c.FileFromFS`：它背后是 http.ServeContent，条件请求只认 mtime——
-// 而内嵌资产的 mtime 是零值（两个来源还会给出不同的 Last-Modified，正是设计 §6.2 要避免的
-// "两侧行为不一致"）。改用**内容摘要**做 ETag：内嵌与目录两种来源给出同一个值，
-// 且强校验（内容变了 ETag 必变）。
+// 为什么不用 `c.FileFromFS`：它背后是 http.ServeContent，条件请求只认 mtime——而目录资产的
+// mtime 因部署方式而异（解包、COPY、rsync 各不同），同一份内容能给出不同 Last-Modified，
+// 正是设计 §6.2 要避免的"两侧行为不一致"。改用**内容摘要**做 ETag：位置无关，且强校验
+// （内容变了 ETag 必变）。
 //
-// 不设 Last-Modified：零值/来源相关的 mtime 只会误导缓存；有强 ETag 就够了。
+// 不设 Last-Modified：位置相关的 mtime 只会误导缓存；有强 ETag 就够了。
 func serveStaticFile(c *gin.Context, assets AssetInfo, rel string) {
 	data, err := fs.ReadFile(assets.FS, rel)
 	if err != nil {

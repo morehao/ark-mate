@@ -10,9 +10,8 @@ import (
 // TestSystemRoutes 系统面（M1-7）：`/meta` 与 `/capabilities` 挂在真实装配路径上可取。
 //
 // 这里着重钉两件事：
-//  1. `webSource` 随**构建形态**变化——release 构建内嵌了前端资产（builtin），默认构建没有；
-//     期望值由 build tag 决定（见 meta_web_source_*_test.go），因此 `make test` 与
-//     `make test/release` 各自验证自己那一支；
+//  1. `webSource` 字段**不再存在**（2026-10-10：核心只有"调用方给的目录"一种资产来源），
+//     资产面只剩 `webPath` / `webDigest` / `webBuildId`；本装配未接资产层 → webPath 为 null；
 //  2. `X-Mate-Carrier` 决定能力面的 available（壳的反代带这个头，浏览器入口没有）。
 func TestSystemRoutes(t *testing.T) {
 	eng := newEngine()
@@ -48,11 +47,11 @@ func TestSystemRoutes(t *testing.T) {
 	if cv, _ := meta["coreVersion"].(string); cv == "" {
 		t.Error("/meta 的 coreVersion 不该为空（未注入 ldflags 时至少是 dev）")
 	}
-	if got := meta["webSource"]; got != nil && got != wantWebSource {
-		t.Errorf("/meta 的 webSource = %v，本构建形态下期望 %q", got, wantWebSource)
+	if _, ok := meta["webSource"]; ok {
+		t.Errorf("/meta 不该再有 webSource 字段（资产来源只有目录一种），实际 %v", meta["webSource"])
 	}
-	if wantWebSource != "" && meta["webSource"] != wantWebSource {
-		t.Errorf("本构建形态应报 webSource=%q，实际 %v", wantWebSource, meta["webSource"])
+	if _, ok := meta["webPath"]; !ok {
+		t.Error("/meta 必须出现 webPath（未接资产层时是显式 null）")
 	}
 
 	caps := getData("/v1/mate/capabilities", nil)

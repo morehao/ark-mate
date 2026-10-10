@@ -7,18 +7,20 @@
 #   frontend/  —— 独立 pnpm workspace（apps/web），产物可单独部署
 #
 # 交付形态：
-#   make all   —— 单二进制：前端产物拷入 backend/pkg/web/dist 后，
-#                 以 -tags release 编译（启用 //go:embed），输出根目录 ./mate
-#   make web   —— 仅构建前端并刷新 embed 宿主目录
+#   make desktop/dist —— 桌面安装包（**主线交付**，决策 v8③）
+#   make web   —— 只构建前端产物（apps/web/dist）
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
 #   make server —— 仅后端开发起服（不起前端，前端经 vite dev proxy 联调）
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn mate-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
+#
+# 前端资产只有一份（`frontend/apps/web/dist`）：核心**从不自带**资产，由调用方用
+# `--web-dir` / `MATE_WEB_DIR` 指过去——桌面壳指包内那份、容器指镜像内那份、`make dev` 指工作区那份。
+# （2026-10-10 起 `//go:embed` 与 `-tags release` 已删除，详见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test all clean image image/runtimes image/run
+.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
-WEB_DIST_DIR  := backend/pkg/web/dist
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
 CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/mate-core
 
@@ -51,7 +53,7 @@ ELECTRON_BUILDER_CACHE ?= $(CURDIR)/.cache/electron-builder
 ELECTRON_MIRROR ?=
 
 # 前端产物目录（`--web-dir` 指向它）。
-# 为什么 dev 也要显式给：默认 tag 的核心**没有**内嵌资产，M2-1 的失败语义会让它拒绝启动
+# 为什么 dev 也要显式给：核心**从不**内嵌资产（2026-10-10 起连 embed 都没有了），M2-1 的失败语义会让它拒绝启动
 # （退出码 3）——那是为"独立二进制装错形态"设计的，dev 的正确做法就是明说自己用哪份资产。
 # 目录不存在就先构建一次；vite dev 用的是内存产物，与这份 dist 互不影响。
 WEB_DIR := $(CURDIR)/$(FRONTEND_ROOT)/apps/web/dist
@@ -79,23 +81,24 @@ define require-node
 	@cur=$$(node -v 2>/dev/null | sed 's/^v//'); if [ "$${cur%%.*}" != "$(NODE_VERSION_MAJOR)" ]; then echo "==> Node 版本不符：frontend/.nvmrc 要求 Node $(NODE_VERSION_MAJOR).x（$(NODE_VERSION)），当前 $${cur:-未安装}"; echo "    团队统一 fnm，请先切换：fnm use $(NODE_VERSION_MAJOR)"; exit 1; fi
 endef
 
-# 前端产物 → embed 宿主（backend/pkg/web/dist，不入库）
+# 前端产物（`frontend/apps/web/dist` 是**唯一一份**，没有第二个落点）。
+#
+# 2026-10-10 起不再往 `backend/pkg/web/dist` 拷一份给 embed 用：核心从不自带资产，
+# 需要资产的形态各自用 `--web-dir` / `MATE_WEB_DIR` 指过来（桌面壳指包内那份、容器指镜像内那份）。
 web:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm build
-	rm -rf $(WEB_DIST_DIR)
-	cp -r $(FRONTEND_ROOT)/apps/web/dist $(WEB_DIST_DIR)
 
 # 桌面随包核心 `mate-core`：壳 spawn 它（`:0` + 双凭据经 stdin + 就绪行回写）。
 #
-# **故意不带 `-tags release`**：桌面核不内嵌前端资产——资产由壳服务，核心按 `--web-dir`
-# 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份 apps/web/dist，核心不再内嵌一份副本）。
+# 资产由壳服务、核心按 `--web-dir` 读同一份目录（设计 §6.1 最后一条：桌面包里只有一份
+# apps/web/dist，核心从不内嵌副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
 core/desktop: web desktop/runtime-bin
 	cd backend && CGO_ENABLED=0 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/mate
 	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
-	@# 只有一份 dist 是设计 §6.1 的红线——核心故意不带 -tags release（不内嵌），
-	@# 否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。
+	@# 只有一份 dist 是设计 §6.1 的红线——核心从不自带资产（2026-10-10 起连 `//go:embed`
+	@# 都删了），否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。
 	rm -rf $(DESKTOP_WEB_OUT)
 	mkdir -p $(DESKTOP_WEB_OUT)
 	cp -R $(FRONTEND_ROOT)/apps/web/dist/. $(DESKTOP_WEB_OUT)/
@@ -265,6 +268,26 @@ verify/hardened-runtime:
 	# runtime 真的生效、探针的 HOME/MATE_HOME 重定向在包内壳上同样成立。所以它挂在这条链上，
 	# 而不是挂进 `verify/desktop-dod`（DoD 是源码态、不要求磁盘上有包）。
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop-skills:packaged
+	# 不依赖宿主机环境（设计 R2 / M4-6）的**发布形态**判据：包内壳 + 包内核心 + 包内载荷，在
+	# 最小 PATH（诱饵 + 系统目录）与私有 HOME 下跑完"一轮 → 退出 → 重开续聊"。包里有四件源码态
+	# 看不见的东西（打包时重新生成的私有启动器、包内核心、hardened runtime、包内重启后的会话续聊），
+	# 所以它与上面那条一样挂在这条链上，而不是挂进源码态的 DoD。
+	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop-nohost:packaged
+
+# 桌面「不依赖宿主机环境」（设计 R2 / 计划 M4-6，2026-10-10）：
+#   - 静态那一半：`internal/archtest` 的 `TestDesktopRuntimeMustNotBindHostToolPaths`（进包且运行期
+#     生效的代码里不得出现宿主工具绑定）。它管"**有没有**这条路"；下面的动态那一半管"**今天这条路
+#     有没有被走到**"。少了任何一半结论都不成立。
+#   - 动态那一半：最小 PATH（诱饵目录 + `/usr/bin:/bin`；诱饵是会写标记文件的假 dsh/opencode/node/npx）
+#     + 私有 HOME/MATE_HOME 下起真壳 + 真核心 + **真 dsh 子进程**，跑完「建会话 → 一轮 → 退出 →
+#     重开 → 续聊一轮」，并断言诱饵一次都没被调到。
+#   - 与 2026-10-10 之前的 `make verify/clean-vm`（干净 VM 首启）的关系：判据改成"打包态 + 最小 PATH"
+#     后**不再需要一台干净机器**（宿主环境是被 PATH/HOME 剥掉的，不是被换掉的），VM 降为可选佐证。
+#   - 打包态那一半不进 DoD（DoD 是源码态、不要求磁盘上有包），挂 `verify/hardened-runtime`。
+verify/no-host-dep:
+	$(require-node)
+	cd backend && go test ./internal/archtest/ -run TestDesktopRuntimeMustNotBindHostToolPaths -count=1
+	cd $(FRONTEND_ROOT) && pnpm verify:no-host
 
 # 桌面 DoD 汇总（计划 §0.1 的 `make verify/desktop-dod`）：把可脚本化的验收串成一条命令，
 # 里程碑 Gate 与改动收口都跑它。M5-5 会把 V1–V18 中其余可脚本化的部分也并进来。
@@ -286,6 +309,10 @@ verify/desktop-dod:
 	# ——2026-10-09 正是这条才发现"核心侧修好了、桌面私有启动器仍把 dsh 的 skill 读根撬走"。
 	# 前置与上面两条同款：`core/desktop`（脚本自己重建）与 `desktop/payloads`（壳启动期就要，缺了拒启）。
 	cd $(FRONTEND_ROOT) && pnpm ui:accept:desktop-skills
+	# R2（M4-6，2026-10-10）：最小 PATH + 诱饵 + 私有 HOME/MATE_HOME 下起真壳 + 真核心 + **真 dsh
+	# 子进程**，跑完「一轮 → 退出 → 重开续聊」，并断言诱饵一次都没被调到。静态那一半（archtest 第
+	# 21 条）已由本目标开头那次 `go test ./internal/archtest/` 覆盖；打包态那一半挂 `verify/hardened-runtime`。
+	cd $(FRONTEND_ROOT) && pnpm verify:no-host
 	# V9（M3-8）：桌面态真起两份载荷（私有 bin + Electron 的 Node + 隔离环境）+ 一条"载荷目录零变化"
 	# 的指纹断言。它**不联网、不跑模型**，所以要真模型会话的那一档（RUNTIME_SMOKE_LIVE=1）不在这里。
 	# 三条回退条件里 ②③ 要 M4 的签名/公证/Windows 出包，脚本每次都显式打印"本脚本不判"。
@@ -333,7 +360,7 @@ dev:
 	cd $(FRONTEND_ROOT) && pnpm dev & \
 	wait
 
-# 默认构建：不带 release tag，web 包的 embed 不参与编译、不依赖前端产物
+# 全仓只有这一个构建配置：不带任何构建标签，不依赖前端产物（核心从不自带资产）。
 build:
 	cd backend && go build ./...
 
@@ -343,20 +370,17 @@ vet:
 test:
 	cd backend && go test ./...
 
-# release 形态的测试：MountWeb 等带 //go:build release 的代码只在这个 tag 下编译，
-# 默认 go test 完全覆盖不到（历史上 NoRoute 的非 API 行为就是这么长期没人验的）。
-# 依赖 web 目标：pkg/web/dist 必须有产物，否则 embed 编译失败。
-test/release: web
-	cd backend && go test -tags release ./...
-
-# 单二进制：先 web（构建 + 拷贝 + embed），再以 -tags release 编译，输出仓库根 ./mate
-all: web
-	cd backend && go build -tags release -o ../mate ./cmd/mate
-
 clean:
-	rm -rf $(FRONTEND_ROOT)/apps/web/dist $(WEB_DIST_DIR) mate
+	rm -rf $(FRONTEND_ROOT)/apps/web/dist
 
-# —— 容器镜像（Dockerfile 多阶段：前端 → Go 内嵌编译 → 精简运行时）——
+# —— 容器镜像（Dockerfile 多阶段：前端 → Go 编译 → 精简运行时）——
+#   make image                                    —— 最小镜像（只含 mate 本体）
+#   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
+#                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
+#                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-mate:runtimes）
+#   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
+# 前端资产由镜像内的 web 阶段构建后 COPY 进镜像（`MATE_WEB_DIR=/usr/local/share/mate/web`），
+# 二进制本身不带资产（2026-10-10 起）。
 #   make image                                    —— 最小镜像（只含 mate 本体 + echo 自检底座）
 #   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
 #                                                 —— 额外内置 dsh / opencode（开关可分别置 false）

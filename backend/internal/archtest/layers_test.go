@@ -21,7 +21,8 @@ func backendRoot(t *testing.T) string {
 }
 
 // hasGoFiles 判断目录下是否直接存在 .go 文件。
-// 用于跳过非 Go 目录（如 pkg/web/dist —— 前端构建产物，由 make web 刷新）。
+// 用于跳过没有 Go 文件的目录（历史上 `pkg/web/dist` 就是这样一个 embed 宿主目录，
+// 2026-10-10 随 `//go:embed` 一起删除）。
 func hasGoFiles(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

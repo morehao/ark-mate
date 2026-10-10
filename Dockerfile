@@ -1,4 +1,4 @@
-# ark-mate 容器镜像（多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时）
+# ark-mate 容器镜像（多阶段：Node 构建前端 → Go 编译 → 镜像内 COPY 一份 dist → 精简运行时）
 #
 # 两个最终 target（文件最后一段 = 默认 target = 最小镜像）：
 #   mate           只含 mate 本体（+ echo 底座自检）；接 opencode/dsh 需自行挂载可执行文件
@@ -53,7 +53,10 @@ RUN --mount=type=cache,target=/pnpm-store,id=pnpm-store \
     pnpm install --frozen-lockfile --store-dir=/pnpm-store; \
     pnpm build
 
-# —— 阶段 2：编译内嵌前端的单二进制（等价仓库根 `make all`）——
+# —— 阶段 2：编译 mate 本体（前端资产**不进二进制**）——
+# 2026-10-10 起核心不再内嵌前端资产（`//go:embed` 与 `-tags release` 一并删除）：资产是一份
+# `apps/web/dist`，最终镜像把它 COPY 进去、用 `MATE_WEB_DIR` 指过去（见阶段 3）。
+# 于是镜像里的二进制与 `make dev` / 桌面核跑的是**同一个构建配置**，不再有一条"只有发布才编译"的路。
 # GOTOOLCHAIN 保持官方镜像默认的 local：go.mod 要求的版本比镜像里的新时直接失败，
 # 而不是悄悄下载另一个工具链（fail closed）。
 FROM ${GO_IMAGE} AS build
@@ -65,11 +68,9 @@ WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod go mod download
 COPY backend ./
-# 前端产物只从 web 阶段取（.dockerignore 已排除宿主机的 backend/pkg/web/dist，防串味）
-COPY --from=web /src/frontend/apps/web/dist ./pkg/web/dist
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod \
     --mount=type=cache,target=/root/.cache/go-build,id=gobuild \
-    go build -tags release -trimpath -ldflags "-s -w" -o /out/mate ./cmd/mate
+    go build -trimpath -ldflags "-s -w" -o /out/mate ./cmd/mate
 
 # —— 阶段 3：运行时基线（两个最终镜像共用：非 root + 数据卷 /data + tini 收孤儿）——
 # tini 作为 PID 1：daemon 会派生 opencode/dsh 子进程，容器里的孤儿进程需要有 init 回收。
@@ -84,6 +85,10 @@ RUN set -eux; \
     useradd --system --uid "${MATE_UID}" --gid "${MATE_GID}" \
         --home-dir /data --shell /usr/sbin/nologin mate; \
     install -d -o mate -g mate /data /data/workspaces /workspaces
+# 前端资产（M2-1）：核心**不自带**资产，由这里把 web 阶段那份 dist 放进镜像，并用 MATE_WEB_DIR
+# 指过去。两个最终镜像共用本层，因此两份镜像的资产来源一致（宿主机上的旧 dist 进不来：
+# .dockerignore 排除了 frontend/**/dist，这里取的只能是镜像内 web 阶段刚构建的那份）。
+COPY --from=web /src/frontend/apps/web/dist /usr/local/share/mate/web
 # 容器里必须显式 0.0.0.0:10001 才能被 -p 映射出去（二进制默认只绑回环）；
 # 数据/配置全部收在 /data 一个卷里，HOME 也指到卷上（内存/transcript/agents 目录都按它派生）。
 ENV HOME=/data \
@@ -95,7 +100,8 @@ ENV HOME=/data \
     MATE_AGENTS=/data/agents \
     MATE_CAPABILITIES=/data/capabilities \
     MATE_WORKSPACE_DIR=/data/workspaces \
-    MATE_CONFIG_DIR=/data/config
+    MATE_CONFIG_DIR=/data/config \
+    MATE_WEB_DIR=/usr/local/share/mate/web
 WORKDIR /data
 USER mate
 STOPSIGNAL SIGTERM

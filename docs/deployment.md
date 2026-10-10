@@ -1,32 +1,40 @@
 # ark-mate 部署与运维
 
-> 面向**个人 Agent 的单机部署**：单操作员（决策 v3③：无多用户/团队语义、无登录鉴权）。本文只写**可复核**的部署形态与
-> 参数；除明确标注**未执行**的一项（systemd 单元）外，命令均在本机实跑过（容器镜像 §4 已实跑，
-> 见文末「验证记录」）。设计背景见 `docs/design-and-roadmap.md`
+> 面向**个人 Agent 助手**（两层：底座 + 产品，决策 v8①）的单机部署：单操作员（决策 v3③：无多用户/团队语义、
+> 无登录鉴权）。**交付重心是桌面应用**（决策 v8③）——桌面安装包见
+> [desktop-architecture-design-20260928.md](./desktop-architecture-design-20260928.md)；本文讲的是**服务端形态**与
+> 底座运维，它们冻结为**维护态**（保留可用、继续被测试、可修缺陷；**不加新功能、不进主线排期**）。
+> **浏览器入口只是开发过程使用的形态**，不是交付面——服务端形态的界面按「自用 / 开发」对待，不承诺 UI 体验。
+> 本文只写**可复核**的部署形态与参数；除明确标注**未执行**的一项（systemd 单元）外，命令均在本机实跑过
+> （容器镜像 §4 已实跑，见文末「验证记录」）。设计背景见 `docs/design-and-roadmap.md`
 > §M3 与 `docs/agent-runtime-refactor-design-20260908.md`。
 
-## 1. 交付形态
+## 1. 交付形态（服务端形态，维护态）
 
 | 形态 | 命令 | 产物 | 说明 |
 | --- | --- | --- | --- |
-| 单二进制（推荐） | `make all` | 仓库根 `./mate` | 先 `pnpm build` → 拷入 `backend/pkg/web/dist` → `go build -tags release`；前端面板经 `//go:embed` 内嵌，无外部静态文件依赖 |
-| 仅后端内核 | `make build` | 无独立产物 | 不带 `release` tag，`web` 包不参与编译（`MountWeb` 为空实现），面板不内嵌 |
-| 前后端分离 | `make dev` / 分开起 | `frontend/apps/panel/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
-| 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 内嵌编译 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
+| **桌面应用（主线交付）** | `make desktop/dist` | dmg / Windows 安装器 | 随包运行时，用户机器不需要 Go / Node / 预装底座；**详见 [desktop 设计](./desktop-architecture-design-20260928.md)**，本文不复述 |
+| 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3） |
+| 仅后端内核 | `make build` | 无独立产物 | 任何构建都不带资产，`make build` 只编后端；面板要由 `--web-dir` / `MATE_WEB_DIR` 提供，没给即拒启（退出码 3） |
+| 前端产物独立托管 | `make web` | `frontend/apps/web/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
+| 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 并设 `MATE_WEB_DIR` 指过去 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
 
+> 服务端形态的界面走浏览器（**开发 / 自用**路径）：前端开发态是 `make dev`（vite :5173 + 代理 `/v1`，
+> 唯一 HMR 循环）；这条路径**不构成交付承诺**。
 
 前置：Go（见 `backend/go.mod`）、Node（`frontend/.nvmrc`）+ pnpm（`frontend/package.json` 的
-`packageManager`）。`make all` 会校验 Node 主版本与 `.nvmrc` 一致。
+`packageManager`）。`make web` 会校验 Node 主版本与 `.nvmrc` 一致。
 
 ## 2. 运行
 
 ```bash
 # 最小启动（数据默认落 ~/.ark-mate/）
-GIN_MODE=release ./mate serve --addr 127.0.0.1:10001
+GIN_MODE=release ./mate serve --addr 127.0.0.1:10001 --web-dir /abs/path/to/apps/web/dist
 curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 ```
 
-浏览器打开 <http://127.0.0.1:10001>（release 产物自带面板）。
+浏览器打开 <http://127.0.0.1:10001>（面板就是 `--web-dir` / `MATE_WEB_DIR` 指的那份 `apps/web/dist`；
+核心不自带资产，没给目录它根本不启动）。
 
 ### 2.1 监听地址与安全边界（重要）
 
@@ -307,7 +315,7 @@ systemctl status ark-mate --no-pager
 
 ## 4. 容器
 
-`Dockerfile` 是多阶段构建（Node 构建前端 → Go 内嵌编译 → 精简运行时），**两个最终 target**：
+`Dockerfile` 是多阶段构建（Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 到 `/usr/local/share/mate/web` 并以 `MATE_WEB_DIR` 指过去 → 精简运行时），**两个最终 target**：
 
 | target | 内容 | 体积（本机实测） | 适用 |
 | --- | --- | --- | --- |
@@ -477,8 +485,8 @@ sudo systemctl restart ark-mate
 
 | 现象 | 排查 |
 | --- | --- |
-| 面板打不开 / `GET /` 404 | 用了 `make build`（未内嵌前端）→ 改用 `make all`；或检查是否访问了后端端口 |
-| 启动即 panic「web dist 未内嵌」 | `-tags release` 编译前未跑 `make web`（`make all` 会顺序执行） |
+| 面板打不开 / `GET /` 404 | 核心没拿到资产（没给 `--web-dir`/`MATE_WEB_DIR`）会**拒绝启动**并打印它要的那份路径，能起服说明资产已就位 → 那 404 通常是访问了错的端口，或给的目录里没有 `index.html`（SPA 回退无处可回） |
+| 启动即退出（退出码 3）「没有前端资产」 | 没给 `--web-dir`/`MATE_WEB_DIR`，或给的路径不是目录 / 里面没有 `index.html`；刻意**不回落**任何来源——"配错却照常跑起来"会让人看着旧界面以为新版本已经生效 |
 | 会话建不了、`agent_not_found` | agent 被删或 definitions 目录不可写；内置种子 `dsh`/`opencode` 只读不可删 |
 | 轮次一直转、无输出 | 底座进程未起（`opencode acp` / `dsh --profile acp` 不在 PATH）；设 `MATE_TURN_TIMEOUT` 让看门狗兜底 |
 | 权限卡不出现 | agent 配了 `permission_policy: allow|deny` → 已自动决策（看 `session.permission_policy` 事件与日志） |

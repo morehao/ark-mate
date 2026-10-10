@@ -395,7 +395,7 @@ async function launchPackagedApp(appPath, release) {
           coreVersion: body?.data?.coreVersion,
           webBuildId: body?.data?.webBuildId,
           webDigest: body?.data?.webDigest,
-          webSource: body?.data?.webSource,
+          webPath: body?.data?.webPath,
           rootChildren: document.querySelector('#root')?.childElementCount ?? -1,
           readyState: document.readyState,
           text: (document.body?.innerText ?? '').slice(0, 120),
@@ -427,7 +427,7 @@ async function launchPackagedApp(appPath, release) {
     check(
       '解包首启：核心服务的资产就是契约里那份',
       facts?.webBuildId === release.webBuildId && facts?.webDigest === release.webDigest,
-      `webBuildId=${facts?.webBuildId} webSource=${facts?.webSource}`,
+      `webBuildId=${facts?.webBuildId} webPath=${facts?.webPath}`,
     )
   } catch (e) {
     check('解包首启：壳能起来并交出页面', false, e.message)
@@ -610,7 +610,7 @@ async function main() {
     section('③ 核心 /meta 交叉验证（Go 与 JS 两套摘要实现必须给出同一个值）')
     try {
       const meta = await metaFromCore()
-      check('核心报告的 webSource = dir（核心读的确实是这一份目录）', meta.webSource === 'dir', String(meta.webSource))
+      check('核心报告读的资产目录就是运行时树里那一份（/meta.webPath）', meta.webPath === WEB, String(meta.webPath))
       // 与上面 ② 的 coreVersion 同一条口径：`/meta` 报的是**同一个**核心，源码态它同样是 dev。
       if (requireArtifacts || meta.coreVersion !== 'dev') {
         check('核心报告的 coreVersion 与契约一致', meta.coreVersion === release.coreVersion, String(meta.coreVersion))

@@ -175,7 +175,7 @@ async function main() {
     check('运行时资产里有 build-id.txt', !!fileId, fileId || '(缺)')
     const meta = await cdp.evalJs(`const r = await fetch('/v1/mate/meta'); const j = await r.json(); return j.data`)
     check('/meta 的 webBuildId 与文件一致', meta.webBuildId === fileId, `meta=${meta.webBuildId} file=${fileId}`)
-    check('/meta 报 dir 来源且路径指向运行时树', meta.webSource === 'dir' && String(meta.webPath).endsWith(join('resources', 'web')), `${meta.webSource} ${meta.webPath}`)
+    check('/meta 的 webPath 指向运行时树（核心读的就是这一份）', String(meta.webPath).endsWith(join('resources', 'web')), String(meta.webPath))
 
     // 核心侧也读同一个值（证明两侧读的是同一份文件，而不是"页面恰好也拿到了"）
     const coreId = await fetchViaCore(coreBase, '/build-id.txt')

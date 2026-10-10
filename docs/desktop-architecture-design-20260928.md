@@ -17,20 +17,25 @@
 
 | # | 需求 | 可验证判据 | 验收环境 |
 | --- | --- | --- | --- |
-| R1 | web 端与桌面端功能完全一致 | 同一份前端产物、同一套 `/v1/mate` REST + WS、同一份数据目录；**同一个 DoD 脚本**在两种入口下全绿；且不存在"桌面能、浏览器不能"的流程（§10.2） | 双端各跑一次 + 单向断言 |
-| R2 | 桌面安装不依赖用户本机的 node / pnpm / go | 干净虚拟机（`PATH` 中无 `go`/`node`/`npx`/`pnpm`，且**未安装 dsh / opencode**）：安装 → 首启 → 新建会话 → 权限卡 → 提问卡 → 退出 → 重启续聊，全流程无"环境缺失"类错误 | macOS 干净用户 + Windows 干净用户 |
+| R1 | **一份产物、两种加载方式**：交付态（桌面）与开发态（浏览器靶）功能一致 | 同一份前端产物、同一套 `/v1/mate` REST + WS、同一份数据目录；**同一个 DoD 脚本**在两个靶上全绿；且不存在"桌面能、浏览器不能"的流程（§10.2） | 交付态跑一次 + 开发态跑一次 + 单向断言 |
+| R2 | 桌面安装不依赖用户本机的 node / pnpm / go | 最小 `PATH`（`<诱饵目录>:/usr/bin:/bin`，诱饵 = 会写标记文件的假 `dsh`/`opencode`/`node`/`npx`）+ 私有 `HOME`/`MATE_HOME`：首启 → 新建会话 → 跑完一轮 → 退出 → **重启续聊**，全程无"环境缺失"类错误，且诱饵**一次都没被调到**。**权限卡 / 提问卡暂无端到端覆盖**（假 LLM 发不出 `tool_use`，见 `.dsh/docs/plans/2026-10-10-no-host-dependency-plan.md` §5） | 打包态 `pnpm ui:accept:desktop-nohost:packaged`（源码态 `make verify/no-host-dep`）+ 静态配对 `internal/archtest/desktop_host_path_test.go`。**干净机器（VM / 干净用户）自 2026-10-10 起不再是必做**，仅作可选佐证 |
 | R3 | 不存在远端 server | 首启到可用只发生两类出站：① 用户自配的模型 API；② 用户显式触发的 MCP 包拉取。无遥测、无崩溃上报、无默认更新检查 | 抓包 + 连接清单 |
 
-R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**两个入口加载同一份产物、共用同一套契约**（§3）。
+R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**两个靶加载同一份产物、共用同一套契约**（§3）。
+
+> **定位口径（决策 v8①③，2026-10-10）**：本项目只有**一个产品**——桌面应用。`apps/web` 是**唯一 UI 产物**，
+> 浏览器入口只是**开发过程使用的形态**（它是唯一带 HMR 的开发循环），**不是第二个产品、也不是交付面**。
+> R1 是**架构不变量**（挡住「桌面偷偷长出独占流程」），**不是**「两端同等排期」的承诺。
 
 ### 1.2 非目标
 
 | 非目标 | 原因 |
 | --- | --- |
 | 跨机 / 局域网访问 | 与 R3 冲突；对外监听需先补 TLS、鉴权模型、多操作员归属与审计（§9.4） |
-| 多用户 / 多操作员 | 产品定位即「单机单操作员的个人 Agent」（决策 v7①） |
+| 多用户 / 多操作员 | 产品定位即「单机单操作员的个人 Agent」（决策 v8①，沿用 v7①） |
 | Linux 桌面发行 | 本期只做 macOS + Windows；Linux 走容器与源码 |
 | 发现或复用用户本机已有的 dsh / opencode / node | 运行时随包交付；桌面端不探测 `PATH`、不引导用户自行安装（§6.4） |
+| **桌面 IDE 外壳**（编辑器 / 终端 / 文件树 / Split View / canvas） | 决策 v8⑤：「聚焦桌面端」= 聚焦**交付形态与用户体验**，不是把产品做深成一个 IDE；编辑/终端归 agent 或外部 IDE |
 | 桌面端独占功能 | 与 R1 冲突：桌面只允许"多给"，不允许"少给"（§10） |
 | 重造 runtime 能力（skills / MCP / 推理） | 能力复用底层 runtime，平台只做数据与控制面 |
 | 从网络获取 UI 资产 | 与 R3 冲突；资产来源只允许本地（§6.1） |
@@ -39,34 +44,39 @@ R1 的实现方式决定了整体架构：一致性不靠两套实现，而靠**
 
 ## 2. 工程结构
 
-### 2.1 两个并列产品：`apps/web` 与 `apps/desktop`
+### 2.1 一个产品、一份 UI 产物：`apps/desktop`（交付态）与 `apps/web`（产物包）
 
 工程分三层，依赖单向向下：
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 能力层 | `frontend/packages/{ui,types,api,tsconfig}` | 组件库、类型、API 客户端、构建配置；被产品层消费 |
-| 产品层 | `frontend/apps/web`、`frontend/apps/desktop` | **两个并列产品**：各自独立构建、独立交付、各自专属能力 |
+| 能力层 | `frontend/packages/{ui,types,api,tsconfig}` | 组件库、类型、API 客户端、构建配置；被产物/产品层消费 |
+| 产物 / 产品层 | `frontend/apps/desktop`（**唯一产品形态**）、`frontend/apps/web`（**UI 产物包**） | 桌面壳是交付态产品；`apps/web` 产出唯一一份 UI `dist`（开发态由 vite 托管、交付态由壳与核心加载） |
 | 核心层 | `backend/`（单 Go module）+ `cmd/mate` | 回环 REST/WS + 资产层 + 运行时编排；不属于 pnpm workspace |
 
-**两个产品的关系**：
+**两者关系（决策 v8①③，2026-10-10 口径修订）**：
 
-- `apps/web` = **Web 前端产品**：Vite SPA，产物 `apps/web/dist`；对外只暴露产物（`exports: { "./dist/*": "./dist/*" }`），不暴露源码。
-- `apps/desktop` = **桌面产品**：Electron 壳 + 资产与载荷装配 + 打包 / 签名 / 更新；**依赖 `apps/web` 的产物**，不 import 其源码。
-- **交付物不同**：web 产品随 `mate` 二进制 / 镜像交付（浏览器入口由核心托管前端资产）；桌面产品随 dmg / 安装包交付。
-- **专属能力不同**：桌面产品有托盘、更新、原生对话框；web 产品没有，且不得依赖它们（§10.1）。
+- `apps/desktop` = **唯一产品形态（交付态）**：Electron 壳 + 资产与载荷装配 + 打包 / 签名 / 更新；**依赖
+  `apps/web` 的产物**，不 import 其源码。
+- `apps/web` = **UI 产物包**（**不是第二个产品**）：Vite SPA，产物 `apps/web/dist`；对外只暴露产物
+  （`exports: { "./dist/*": "./dist/*" }`），不暴露源码。它有两个消费方：交付态（壳与核心读同一份）、
+  开发态（vite 托管，**唯一 HMR 循环**）。
+- **交付物**：桌面安装包（dmg / Windows 安装器）是**交付物**；`mate` 二进制与容器镜像属**服务端形态**
+  （维护态，决策 v8③），其界面路径按「自用 / 开发」对待，不承诺 UI 体验。
+- **专属能力**：托盘、更新、原生对话框只存在于交付态；共享代码不得依赖它们（§10.1）。
 - **共享不变量**：同一份 `apps/web/dist`（R1 的实现方式）、同一套 `/v1/mate` 契约、同一份数据目录、同一套 DoD 脚本。
 
-每个产品自带 `dev` / `build` / `typecheck` 脚本，根 workspace 只做聚合与 `ui:accept`；两个产品的构建缓存按 target 分开，避免把开发态产物喂给桌面包。
+两者各自带 `dev` / `build` / `typecheck` 脚本，根 workspace 只做聚合与 `ui:accept`；构建缓存按 target 分开，
+避免把开发态产物喂给桌面包。
 
 **产物包纪律**（照参照实现的做法固化）：`apps/web` 对外是**产物包而非应用**——`dependencies` 为空（依赖在构建期全部打进 `dist`）、`exports` 只开 `./dist/*` 与 `./package.json`、`files` 只发 `dist` 并**排除 sourcemap 与开发面**；它必须是非 private 包，随桌面运行时闭包一起发布，桌面壳与核心都从**运行时依赖树里的同一份**读（§6.2）。守卫测试因此直接断言 `exports` 与 `files`，而不只是扫描 import。
 
-**为什么"并列"却仍共享一份前端产物**：deepseek-harness 的 `apps/web`（`@deepseek-ai/dsh-web-frontend`）构建出的 `dist`，正是它桌面窗口渲染的那份 UI——桌面壳在 `dsh-app://app/` 路由下，从包内 `node_modules/@deepseek-ai/dsh-web-frontend/dist` 直接读静态资产，其余请求反代给本地 Host，事件流按壳在 boot 时下发的 `streamBaseUrl` 直连回环。即：**并列的是产品与流水线，共享的是 UI 产物。**
+**为什么两个包却仍共享一份前端产物**（决策 v8④ 口径）：deepseek-harness 的 `apps/web`（`@deepseek-ai/dsh-web-frontend`）构建出的 `dist`，正是它桌面窗口渲染的那份 UI——桌面壳在 `dsh-app://app/` 路由下，从包内 `node_modules/@deepseek-ai/dsh-web-frontend/dist` 直接读静态资产，其余请求反代给本地 Host，事件流按壳在 boot 时下发的 `streamBaseUrl` 直连回环。即：**产物只有一份，加载方式有两种（交付态 / 开发态）。**
 
 | deepseek-harness | ark-mate | 说明 |
 | --- | --- | --- |
-| `apps/web`（`dsh-web-frontend`，Vite，`exports: ./dist/*`） | `apps/web`（Vite SPA，`exports: ./dist/*`） | 前端产品：产物被两个入口消费 |
-| `apps/desktop`（`dsh-desktop`：壳 + 打包 + 更新 + 安装器脚本） | `apps/desktop` | 桌面产品：依赖前端产品的 `dist` |
+| `apps/web`（`dsh-web-frontend`，Vite，`exports: ./dist/*`） | `apps/web`（Vite SPA，`exports: ./dist/*`） | **UI 产物包**：同一份 `dist` 被两种加载方式共用（交付态桌面 / 开发态浏览器靶） |
+| `apps/desktop`（`dsh-desktop`：壳 + 打包 + 更新 + 安装器脚本） | `apps/desktop` | **唯一产品形态（交付态）**：依赖 `apps/web` 的 `dist` |
 | `apps/desktop-host` | `backend/`（Go 核心，含资产层与运行时编排） | 被壳 spawn 的宿主；ark-mate 里它就是 `mate` 二进制本身，不在 pnpm workspace 内 |
 | `apps/cli`（owns the `dsh` bin） | `backend/cmd/mate` | 命令行入口 |
 | `packages/*/*`（含 `client/ui-*` 组件层） | `packages/{ui,types,api,tsconfig}` | 能力层 |
@@ -102,18 +112,22 @@ apps/desktop（Electron 壳 + 打包 / 签名 / 更新）
 
 | 目标 | 产物 | 依赖 |
 | --- | --- | --- |
-| `make web` | `apps/web/dist` + 核心侧资产目录 | — |
-| `make all` | `./mate`（默认内嵌前端资产） | `web` |
+| `make web` | `apps/web/dist`（唯一一份资产） | — |
 | `make image` | 容器镜像 | `web` |
-| `make desktop` | macOS dmg / Windows 安装包 | `web` + `mate` + 资产与载荷装配 |
+| `make desktop/dist` | macOS dmg / Windows 安装包 | `core/desktop`（= `web` + 核编译）+ 资产与载荷装配 |
 
-**"并列"的准确含义**：
+> 单二进制形态（`make all` 产出仓库根 `./mate`、前端资产经 `go:embed` 内嵌）已于 **2026-10-10 取消**：核心
+> **永不自带**资产，资产只有 `apps/web/dist` 一份，由调用方 `--web-dir`/`MATE_WEB_DIR` 指过去（没给即拒启，
+> 退出码 3）；要自建就用 `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` + 外挂那份 dist。
 
-| 并列（各自独立，不允许互相渗透） | 共享（不允许分裂） |
+**「独立 vs 共享」的准确含义**（决策 v8④：**产物只有一份，加载方式有两种**；独立的只是**流水线与交付物**，
+**不是第二个产品**）：
+
+| 独立（各自构建、互不渗透） | 共享（不允许分裂） |
 | --- | --- |
-| 代码位置（两个 app 包）· 构建流水线 · 交付物（安装包 vs 二进制 / 镜像）· 发布节奏 · 专属能力（托盘、更新、原生对话框） | 前端产物（同一份 `apps/web/dist`）· `/v1/mate` REST + WS 契约 · 数据目录 · DoD 脚本（同一套打两个靶子） |
+| 代码位置（两个 app 包）· 构建流水线 · 交付物（安装包 vs 二进制 / 镜像）· 发布节奏 · 专属能力（托盘、更新、原生对话框） | 前端产物（同一份 `apps/web/dist`——交付态与开发态共用）· `/v1/mate` REST + WS 契约 · 数据目录 · DoD 脚本（同一套打两个靶子） |
 
-> **层次组织**：产品层放在 `frontend/apps/*`，与 `packages/*` 同一个 pnpm workspace，工具链（`.nvmrc` / `packageManager`）统一。若要将仓库按"产品"而非"语言"划分（`apps/*` + `packages/*` 提到顶层、`backend/` 并入 `apps/`），在引入第三个产品（例如独立部署的服务端装配）时再评估。
+> **层次组织**：产物层与产品放在 `frontend/apps/*`，与 `packages/*` 同一个 pnpm workspace，工具链（`.nvmrc` / `packageManager`）统一。若要将仓库按"产品"而非"语言"划分（`apps/*` + `packages/*` 提到顶层、`backend/` 并入 `apps/`），在引入第三个消费方（例如独立部署的服务端装配）时再评估。
 > **不做**：桌面产品不新增 Go module，壳也不 import Go 代码；共享走 API 与 `release.json`，避免把 monorepo 边界搅浑。
 
 ### 2.2 影响面与唯一的行为变更
@@ -122,17 +136,21 @@ apps/desktop（Electron 壳 + 打包 / 签名 / 更新）
 
 | 面 | 改动 | 兼容性要求 |
 | --- | --- | --- |
-| 资产来源 | 两种机制：构建期内置 + `--web-dir` 显式目录（桌面形态由壳指向包内 dist） | 独立二进制默认行为不变；实际路径与 build id 可观测（§6.1） |
+| 资产来源 | 唯一机制：`--web-dir` 显式目录（桌面形态由壳指向包内 dist；构建期内置那一支 2026-10-10 已删） | 没给目录即拒启（退出码 3）；实际路径（`webPath`）与 build id 可观测（§6.1） |
 | 运行时解析 | 新增"随包载荷"为一等来源；桌面态只认载荷 + 显式覆盖 | CLI / Docker / 开发态行为不变（仍走 `PATH`，§6.5） |
 | 配置 | 新增：资产来源与路径、载荷名称解析、桌面握手开关、宿主能力面 | 全部有默认值；未设即现状行为 |
 | MCP stdio | 支持把 `npx` 指向随包转发启动器（绝对路径） | MCP 契约（要求绝对路径）不变 |
-| 构建流水线 | 建立 `apps/web` / `apps/desktop` 两个产品包与 `make desktop`；资产装配与 engines 断言进 CI | `make all` / `make image` 保持可用 |
-| 前端 | 桌面能力经宿主能力面暴露（声明面 + 执行面，§7.3），不嗅探 UA | web 端行为不变 |
+| 构建流水线 | 建立 `apps/web`（UI 产物包）/ `apps/desktop`（产品）两个包与 `make desktop`；资产装配与 engines 断言进 CI | `make image` 保持可用（`make all` 单二进制已于 2026-10-10 取消） |
+| 前端 | 桌面能力经宿主能力面暴露（声明面 + 执行面，§7.3），不嗅探 UA | 开发态（浏览器靶）行为不变 |
 | 数据目录 | 一份共享路径，不按入口分裂（§8.4） | 既有用户的 `vault.key` / `mate.db` / transcripts 位置不变 |
 
 ---
 
 ## 3. 总体形态：一份核心，多入口
+
+> **口径（决策 v8③）**：下面两个入口**不是平级的**——桌面入口是**交付态**（唯一产品形态），浏览器入口是
+> **开发态**（唯一 HMR 循环 + R1 的第二个靶）。服务端形态（自建二进制 + 外挂 dist / 容器内 dist）用同一份产物，其界面按
+> 「自用 / 开发」对待。
 
 ```mermaid
 graph TB
@@ -145,7 +163,7 @@ graph TB
     WS --> ORCH
     ASSET --> HTTP
   end
-  subgraph Entries["两个入口 · 同一份前端产物 apps/web/dist"]
+  subgraph Entries["两种加载方式 · 同一份前端产物 apps/web/dist"]
     B["浏览器入口<br>回环 origin：核心服务静态 + REST + WS"]
     SH["桌面壳主进程<br>mate-app://app：服务静态 + 反代 REST"]
     D["桌面窗口<br>mate-app://app + 事件流直连回环"]
@@ -248,27 +266,28 @@ graph TB
 
 ## 6. 资产与运行时载荷交付
 
-### 6.1 前端资产：两种来源机制
+### 6.1 前端资产：唯一来源是调用方给的目录（2026-10-10 收敛）
 
-前端资产（`apps/web/dist`）只有两种进入方式，其余场景都由它们组合出来：
+前端资产（`apps/web/dist`）只有一种进入方式——调用方给的目录，其余场景都是「谁把这份目录指给核心」的组合。
+（2026-10-10 之前还有第二种：构建期经 `//go:embed` 把 dist 打进二进制；那一支与「单二进制」形态已一并删除
+——**两种来源意味着两份资产的可能，而本设计的红线是只有一份**，理由见决策 v9。）
 
 | 机制 | 何时用 | 行为 |
 | --- | --- | --- |
-| 构建期内置（嵌入二进制） | 单文件分发：独立 `mate` 二进制、镜像里的自带形态 | 编译期把 `dist` 打进二进制，随二进制一起签名与校验；启动即用 |
-| 运行期目录覆盖（`--web-dir` / `MATE_WEB_DIR`，绝对路径） | 桌面形态（壳把它指向包内那一份 dist）、开发（vite 产物目录）、部署者热修与白标 | 启动时校验目录存在且含 `index.html`；实际路径、build id、digest 写入启动日志与 `/meta` |
+| 运行期目录（`--web-dir` / `MATE_WEB_DIR`，必须是绝对路径） | **所有形态**：桌面（壳指向包内那一份 dist）、容器（镜像内 `COPY` 的那份）、开发（vite 产物目录）、自建二进制、部署者热修与白标 | 启动时校验目录存在且含 `index.html`；实际路径（`/meta` 的 `webPath`）、build id、digest 写入启动日志与 `/meta` |
 
 **规则**：
 
-- 两种机制**不叠加**：给了 `--web-dir` 就用它，否则用内置。给了一个无效目录就**拒绝启动**，不静默回落到内置——"配错却照常跑起来"会让人看到旧界面却以为新版本已生效。
-- **不做隐式搜索**：没有"可执行文件同目录 → `../share/ark-mate/`"这类多级回落，来源永远只有这两个，实际来源永远写在启动日志与 `/meta` 里。
+- **没有第二种来源可回落**：给了目录就用它，没给就**拒绝启动**（退出码 3），给了无效目录同样拒绝启动——"配错却照常跑起来"会让人看到旧界面却以为新版本已生效，而"没配也能跑"会让一份资产变成两份。
+- **不做隐式搜索**：没有"可执行文件同目录 → `../share/ark-mate/`"这类多级回落，来源永远只有「调用方给的那一个」，实际采用的绝对路径永远写在启动日志与 `/meta` 的 `webPath` 里。
 - **显式覆盖只出现在"未打包"与"打包层"**：打包形态下 `--web-dir` 由壳按安装布局写死（参照实现的两个路径覆盖环境变量只在 `!app.isPackaged` 分支被读取，打包态是固定布局），核心既不推测也不搜索——来源永远是别人告诉它的。
-- 完整性分两种语义：**内置资产**由构建期清单 + 二进制签名保证（打包期复算、CI 门禁）；**显式目录**在启动时计算并回报 build id 与逐文件 digest，但不与签名清单比对——它表示"操作者显式选择了这个来源"。
+- 完整性：目录在启动时计算并回报 build id 与逐文件 digest（`/meta` 与 `mate doctor` 都能看），但不与签名清单比对——它表示"操作者显式选择了这个来源"；桌面打包期另由 `release.json` 记录资产清单与摘要、壳与核心两侧断言同一值（§6.7）。
 - 资产只允许来自本地（R3）。不实现远端拉取与运行期下载。
 - 桌面窗口的静态资产由壳服务（§6.2）；桌面形态的核心**不内嵌**资产，而是被 spawn 时收到指向同一份 dist 的 `--web-dir`，因此浏览器入口与桌面窗口读的是同一目录、同一 build id。
 
 ### 6.2 静态资产服务路径：核心侧与壳侧
 
-**核心侧**（浏览器入口、Docker、CLI）：内置资产（`embed.FS`）与显式目录（`os.DirFS`）都归一成**同一个 `fs.FS` + 一套逻辑**——参照实现把 dist 服务交给组装层（其宿主 webserver 明确"不服务文件"），ark-mate 没有插件组装层、核心本身就是那一层：
+**核心侧**（浏览器入口、Docker、CLI）：调用方给的目录（`os.DirFS`）归一成**同一个 `fs.FS` + 一套逻辑**——参照实现把 dist 服务交给组装层（其宿主 webserver 明确"不服务文件"），ark-mate 没有插件组装层、核心本身就是那一层：
 
 | 关注点 | 一次定义，处处生效 |
 | --- | --- |
@@ -276,7 +295,7 @@ graph TB
 | 缓存语义 | `index.html` → `no-store`；带内容 hash 的 `assets/*` → `immutable, max-age=31536000` |
 | 完整性 | 资产清单（逐文件 sha256 或包级 sha256），启动时校验；缺失/不符 → 明确报错 |
 | 版本闸门 | §6.7 |
-| 可观测 | `/meta` 回报来源、`buildid`、`digest` |
+| 可观测 | `/meta` 回报 `webPath`（实际采用的绝对路径）、`webBuildId`、`webDigest` |
 
 **壳侧**（桌面窗口）：壳只服务五个路径——`/`、`/index.html`、`/assets/*`、`/favicon.svg`、`/manifest.webmanifest`——从运行时依赖树里的那一份 `apps/web/dist` 读（`release.json` 记录其 build id 与 digest，两侧断言同一值）；其余请求（含 SPA 回退与全部 `/v1/*`）交给核心。壳与核心读**同一个目录**，因此不存在两份资产，也不存在"index 引用到别处 assets"的错配。
 
@@ -295,7 +314,7 @@ graph TB
 graph TB
   subgraph Bundle["应用包（只读，随包 ad-hoc 签名）"]
     CoreBin["mate-core<br>Go 静态二进制"]
-    Assets["前端资产<br>内置 / 显式目录"]
+    Assets["前端资产<br>调用方给的目录（唯一一份）"]
     Payload["runtime payload<br>dsh 生产依赖树 · opencode · npm/npx JS"]
     Manifest["资产与载荷清单<br>name / version / digest / Node ABI"]
   end
@@ -488,7 +507,7 @@ sequenceDiagram
 
 ### 7.3 载体契约：声明面与执行面
 
-两个入口共用一份产物，所以"桌面多出来的东西"只能经**契约**进入，不能靠产物分叉。契约分两半：
+两种加载方式共用一份产物，所以"桌面多出来的东西"只能经**契约**进入，不能靠产物分叉。契约分两半：
 
 | 半 | 机制 | 覆盖 |
 | --- | --- | --- |
@@ -538,7 +557,7 @@ sequenceDiagram
 | 组件 | macOS arm64，安装后未压缩 |
 | --- | --- |
 | Electron 运行时 | 90–120 MB |
-| `mate-core`（独立二进制形态含内嵌资产；桌面形态不含，少约 1.3 MB） | 15–30 MB |
+| `mate-core`（桌面核与独立二进制是**同一份**、都不含前端资产；那约 1.3 MB 的 dist 在运行时树里另算） | 15–30 MB |
 | dsh 生产依赖树 | 40–120 MB |
 | npm/npx JS + 转发启动器 | 10–20 MB |
 | opencode 二进制 | 40–100 MB |
@@ -642,12 +661,12 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 
 | # | 验收项 | 怎么验 | 阈值 |
 | --- | --- | --- | --- |
-| V1 | 零依赖首启（R2） | 干净 macOS/Windows 虚拟机（无 go/node/pnpm，且未装 dsh/opencode）走完整流程 | 无环境类错误；无 registry 请求 |
-| V2 | 双端一致（R1） | 同一份 CDP 脚本打 web 与 Electron 窗口 | 全绿且断言数一致 |
+| V1 | 零依赖首启（R2） | 打包态 + 最小 `PATH`（`<诱饵目录>:/usr/bin:/bin`）+ 私有 `HOME`/`MATE_HOME`：首启 → 新建会话 → 跑完一轮 → 退出 → **重开续聊**（`pnpm ui:accept:desktop-nohost:packaged`；源码态 `make verify/no-host-dep`） | 无环境类错误；诱饵（假 `dsh`/`opencode`/`node`/`npx`）**零命中**；重启后会话仍在且二轮成功。**零出站**（无 registry 请求 / 遥测 / 更新检查）**尚未判**——R3 的抓包口径还没建（见计划 §5）；干净机器自 2026-10-10 起降为可选佐证 |
+| V2 | 两种加载方式一致（R1） | 同一份 CDP 脚本打**交付态**（Electron 窗口）与**开发态**（浏览器靶） | 全绿且断言数一致 |
 | V3 | 单向一致性 | 逐个桌面独有能力，在浏览器端用服务端路径跑完 | 无"仅桌面可完成"的流程 |
 | V4 | 无远端 server（R3） | 抓包 + 连接清单 | 除模型 API 与用户触发的 MCP 拉取外无出站；无遥测 / 崩溃上报；默认无更新检查 |
-| V5 | 资产来源 | 两种机制各起一次（内置 / `--web-dir` 显式目录） | 行为一致（缓存头、SPA 回退、build id）；`/meta` 回报的实际路径与来源相符 |
-| V6 | 资产失效语义 | `--web-dir` 指向不存在的目录，或目录内缺 `index.html` | **拒绝启动**并给出明确错误，不静默回落到内置资产 |
+| V5 | 资产来源 | 给了 `--web-dir` 起一次；再故意不给目录起一次 | 给了即正常服务（缓存头、SPA 回退、build id），`/meta` 的 `webPath` 与实际路径相符；**不给则拒启（退出码 3）** |
+| V6 | 资产失效语义 | `--web-dir` 指向不存在的目录，或目录内缺 `index.html`，或不给目录 | **拒绝启动**并给出明确错误；没有可回落的来源（2026-10-10 起内置那一支已删） |
 | V7 | 缓存语义 | 检查 `index.html` 与 `assets/*` 的响应头 | `no-store` / `immutable` 分别命中 |
 | V8 | 版本闸门 | 人为构造前端与核心 build id 不一致 | 显示明确状态页，非白屏 |
 | V9 | Electron 作为 Node | 三条回退触发条件各一个 smoke 用例 | 全过则不启用独立 Node 载荷 |
@@ -661,7 +680,7 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 | V17 | 壳侧与核心侧资产一致 | 同一路径分别经壳与核心各取一次（`Content-Type` / `Cache-Control` / 内容）；再从非资产深链刷新 | 逐字一致；深链由核心回退产出 `index.html` |
 | V18 | 载体契约 | 两个入口各查一次 `/v1/mate/capabilities`；桌面窗口内断言 `__MATE_DESKTOP__` 的形状；origin 守卫测两层——preload 单元测试（mock `location` 与 `contextBridge`，负例是 origin 表 `mate-app://shell/*`、`mate-app://other/*`、`https://…`、`http://…` 加 `isMainFrame === false`） | 声明面两端同构；执行面只在 `mate-app://app` 主框架可见；"判定"与"是否调用暴露"两层都有覆盖，字段与共享契约模块一致 |
 
-**回归范围**：`make all`、`make image`、`make test`、`pnpm ui:accept`、依赖边界守卫，以及 §2.2 那一条行为变更（运行时解析策略）。
+**回归范围**：`make image`、`make test`、`pnpm ui:accept`、依赖边界守卫，以及 §2.2 那一条行为变更（运行时解析策略）。
 
 ---
 
@@ -669,11 +688,11 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 
 | 里程碑 | 交付 | 出口判据 |
 | --- | --- | --- |
-| M1 壳与握手 | 建立 `apps/web` 与 `apps/desktop` 两个并列产品包（骨架 + 依赖边界守卫）＋ Electron 最小壳：单实例锁、注册 `mate-app://`、spawn 核心、`:0` + stdin 双凭据、health 轮询、壳服务 index/assets、boot 下发流基址与 `streamToken`、退出语义、渲染进程加固基线 | V11、V13、V15、V9 第一轮 |
-| M2 资产层 | 两种资产来源（构建期内置 + `--web-dir`）与失败语义、核心侧与壳侧两条服务路径与一致性断言、缓存语义、完整性校验、`/meta` 可观测、版本闸门 | V5–V8、V17 |
+| M1 壳与握手 | 建立 `apps/web`（UI 产物包）与 `apps/desktop`（产品）两个包（骨架 + 依赖边界守卫）＋ Electron 最小壳：单实例锁、注册 `mate-app://`、spawn 核心、`:0` + stdin 双凭据、health 轮询、壳服务 index/assets、boot 下发流基址与 `streamToken`、退出语义、渲染进程加固基线 | V11、V13、V15、V9 第一轮 |
+| M2 资产层 | 资产来源（`--web-dir`，2026-10-10 起是唯一来源）与失败语义、核心侧与壳侧两条服务路径与一致性断言、缓存语义、完整性校验、`/meta` 可观测、版本闸门 | V5–V8、V17 |
 | M3 包内执行 | 资产与载荷随包只读运行；Electron 作为 Node 执行 dsh / opencode；`npx` 转发启动器；Origin 矩阵；确认是否需要 §6.3 的物化回退 | V9、V16；`PATH` 中无 node 也能起 runtime |
 | M4 安装与签名 | `apps/desktop/scripts/` 的打包 / 签名 / 安装器流水线与 `release.json`、per-user 安装器、公证、合规门禁 | V1、V12、V14 |
-| M5 一致性收口 | 宿主能力面、`mate web` 共用启动器、双端与单向一致性矩阵脚本化 | V2、V3 |
+| M5 一致性收口 | 宿主能力面、`mate web` 共用启动器、两种加载方式一致性 + 单向一致性矩阵脚本化 | V2、V3 |
 
 顺序要点：**M3 必须在 M4 之前**——签名会锁死资产与载荷形态（包内执行 vs 物化），先签名再改形态，代价翻倍。
 
@@ -716,7 +735,7 @@ DoD 脚本除"两入口各跑一次"，再加一条单向断言：对每个桌�
 - [ ] §2.1 的四条依赖边界是否实现为守卫测试？桌面专属代码是否确实没有落进 `backend/` 与 `apps/web`？
 - [ ] §4 是否接受"体积 +90–120 MB 换渲染统一与单一验收靶子"？若不接受，是否明确转向 Wails v3 或瘦启动器形态？
 - [ ] §5.3 的 engines / ABI 打包期断言是否会被实现（共用 Electron Node 的唯一安全网）？
-- [ ] §6.1 只有"内置"与"显式目录"两种来源、且显式目录无效即拒绝启动，是否被接受（代价：部署者配错时启动失败，而不是静默用旧资产或旧界面）？
+- [ ] §6.1 只有"内置"与"显式目录"两种来源、且显式目录无效即拒绝启动，是否被接受（代价：部署者配错时启动失败，而不是静默用旧资产或旧界面）？——**2026-10-10 收敛定论**：来源只剩「显式目录」一种，内置那一支已删（§6.1、决策 v9）
 - [ ] §6.2 的缓存语义、两侧一致性断言与"只接受绝对路径、不做隐式搜索"是否有明确实现归属？
 - [ ] §6.3 的"包内只读不物化"是否接受，并接受其回退条件（运行时自写目录 / 平台拒绝）在 M3 用实测定论？
 - [ ] §6.7 版本闸门是否成为常设机制，`release.json` 是否成为唯一发布契约？

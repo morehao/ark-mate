@@ -1,38 +1,56 @@
 # ark-mate
 
-**基于开源 Agent Runtime 的个人 Agent**：单机、单操作员、开箱即用，执行能力来自 OpenCode、DeepSeek Harness 等 ACP 兼容的开源运行时；同一内核同时沉淀一层**可复用的底座能力**。
+**底座 + 其上的个人 Agent 助手**：底座是 `mate` 内核（多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约），其上是面向用户的**个人 Agent 助手**，**聚焦桌面端**；单机、单操作员、开箱即用，执行能力来自 OpenCode、DeepSeek Harness 等 ACP 兼容的开源运行时。
 
-> A personal agent built on open-source agent runtimes — OpenCode, DeepSeek Harness, and other ACP-compatible executors — with a reusable control plane underneath.
+> A personal agent assistant on top of a reusable agent core — OpenCode, DeepSeek Harness, and other ACP-compatible executors behind one control plane. Desktop-first.
 
-**定位层次**（详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v7」）：
-1. **主体是个人 Agent**：单机、单操作员、开箱即用，面向「我自己的助手」——建会话、跑起来、看见过程与结果。
-2. **底座能力是同一内核的第二重身份**：把「多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 桌面/容器交付形态」沉淀成可复用的一层，面向「把控制面接到自己的 runtime / 自己的前端上」。
-3. **三条不变的红线**（沿用决策 v3）：**能力不重造**（skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能）；**数据管理是平台职责**（统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据）；**单机单操作员**（不做多人协作 / 多用户鉴权 / 远程聊天通道，跨 agent 协作亦不在定位内）。
+**定位（两层，详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v8」）**：
+1. **底座层** = `mate` 内核：把「多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态」做成可复用的一层，面向「把控制面接到自己的 runtime / 自己的前端上」。**runtime 接边有界**：当前 `dsh` / `opencode` **两个一等适配**，**不追求数量、不承诺接入任意 ACP 生态**——接入成本在维护面（隔离表三份 / 投影实测 `Tested` / 能力粒度声明 / 随包载荷与 ABI 断言），不在 adapter。
+2. **产品层** = 底座之上的**个人 Agent 助手**：面向「我自己的助手」——建会话、跑起来、看见过程与结果，**聚焦桌面端**（macOS / Windows，随包运行时，用户机器不需要 Go / Node / 预装底座）。
+3. **一份 UI 产物，两种加载方式**：开发态（vite，含 HMR）与交付态（Electron 壳）。**浏览器入口只是开发过程使用的形态**，不是交付面。
+4. **三条不变的红线**（沿用决策 v3）：**能力不重造**（skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能）；**数据管理是平台职责**（统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据）；**单机单操作员**（不做多人协作 / 多用户鉴权 / 远程聊天通道，跨 agent 协作亦不在定位内）。
 
-## 三分钟跑起来（个人使用）
+## 三分钟跑起来
+
+**交付态（用户）**：装桌面应用即可，随包运行时——机器上不需要 Go / Node / 底座：
 
 ```bash
-make dev      # 后端 :10001 + 前端 vite :5173，Ctrl-C 一起收
-make all      # 或：出单二进制 ./mate（前端经 go:embed 内嵌），一个文件起全部
+make desktop/dist   # 出安装包（当前只出 macOS，ad-hoc 签名、未公证；Windows 安装器见计划 M4-3）
 ```
 
-本机自备 Go ≥ 1.26、Node 24.x、pnpm 11.x（见「快速开始」前置表），以及至少一个 ACP 兼容底座
-（`opencode` 或 `dsh`）与模型 API key。数据默认落 `~/.ark-mate`（`MATE_HOME` 覆盖），`make dev`
-默认 sqlite（`~/.ark-mate/mate.db`）。**桌面形态不需要**用户机器装 Go / Node / 底座——见
-[docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
+**开发态（改代码）**：本机自备 Go ≥ 1.26、Node 24.x、pnpm 11.x（见「快速开始」前置表），以及至少一个
+ACP 兼容底座（`opencode` 或 `dsh`）与模型 API key。数据默认落 `~/.ark-mate`（`MATE_HOME` 覆盖）。
 
-## 底座能力面向谁
+```bash
+make dev           # 浏览器开发态：vite :5173（**HMR**）+ 后端 :10001，改 UI 走这条最快
+make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native / 凭据 / 打包前行为
+```
 
-「个人 Agent」是主体，底座能力是同一内核顺带提供的第二层，面向两类用法：
+> **服务端形态（维护态）不自带面板资产**（2026-10-10 起 `go:embed` 已删除）：核心要面板就得
+> 用 `--web-dir` / `MATE_WEB_DIR` 指一份 `frontend/apps/web/dist`（加 `make web` 出这份产物），
+> 没给就**拒绝启动**（退出码 3）；容器镜像里已经带好那份并设了 `MATE_WEB_DIR`。
 
-- **换自己的 runtime**：`pkg/runtime` 是可扩展的 adapter 注册表 + 投影/指纹声明；远程 ACP 端点经
-  `.ark-mate/config/runtimes.json` 声明即可接入（见下文「远程 runtime（A5）」）。
+> **改 UI 为什么走 `make dev`**：桌面态**没有 HMR**（壳加载的是构建产物），浏览器开发态才是唯一的热更新
+> 循环；两者跑的是**同一份** `apps/web/dist` 与**同一套** `/v1/mate` 契约。桌面态的调试路径（CDP 附渲染
+> 进程、`KEEP_SHELL=1`、主进程 `--inspect`）见 [docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
+> **别同时跑** `make dev` 与 `make desktop/dev`——两个核心共用 `~/.ark-mate/mate.db`。
+
+## 底座边界（支持谁、不承诺什么）
+
+底座层是上面两层结构中的下层，面向两类用法：
+
+- **换自己的 runtime**：`pkg/runtime` 是 adapter 注册表 + 投影/指纹声明；远程 ACP 端点经
+  `.ark-mate/config/runtimes.json` 声明即可接入（见下文「远程 runtime（A5）」）——**属工程能力，不属定位承诺**。
 - **接自己的前端 / 自动化**：对外契约只有 `REST + WS`（本 README 的「控制面接口摘要」就是路由表），
   内核不绑定自带面板——`apps/web` 是**产物包**，桌面壳与核心读同一份 `dist`。
 
-底座能力**不**承诺的东西与决策 v3 的三条红线一致：不做运行时功能、不做多用户、不做跨 agent 协作。
+**不承诺**：不做运行时功能（决策 v3①）、不做多用户（v3③）、不做跨 agent 协作（v2②）、
+**不承诺「接入任意 ACP 生态」与 runtime 数量**（决策 v8②）。
 
 ## 特性（当前形态）
+
+> 本节是**能力清单**，不是承诺面：哪些是定位承诺、哪些只是「工程上具备」，见上文「定位」与「底座边界」
+> （决策 v8②：**runtime 数量与「接入任意 ACP 生态」都不在承诺面**）。
 
 - **ACP 直连运行时**：内置 `opencode`（`opencode acp`）与 `deepseekharness`（`dsh --profile acp`）两个 runtime adapter；子进程 stdio 拉起、能力探测、权限请求归一。
 - **远程 runtime（A5）**：除本地子进程外，同一套 ACP 客户端还可接**远程端点**——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知/权限请求，另开 GET 长流收无在途请求时的服务端消息，响应头 `Acp-Session-Id` 回带）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.ark-mate/config/runtimes.json` 声明（`id/name/transport/endpoint/headers`），启动即注册进同一 runtime 注册表，agent 的 `runtimes` 字段直接引用；传输层不新增依赖、不加第二套客户端（把网络连接伪装成 io 流，握手/权限/elicitation 逻辑与 stdio 完全同构）。远程传输的**服务端半场**在 `pkg/acl`（`ServeWSSession` / `NewRemoteHandler`）；历史上的 `mate acp-serve` 演示子命令已随 echo 底座删除（远程**功能**不受影响，失去的只是开箱演示）。远程 runtime 无 pid（进程注册表/孤儿回收不适用），连接级诊断（建连失败、HTTP 状态、被丢弃的非 JSON 消息）进 `/agents/:id/diagnostics` 的 `stderr_tail`。**统一脱敏闸门**：stderr 尾巴（`pkg/acl.TailLines`）、对外错误文案（`pkg/code.Error`）与全部事件载荷（`manager.publish`，即 events 表/transcript/WS 三处同一份）在离开进程前统一过 `pkg/redact`——命中凭证形状（`sk-*`/`AKIA*`/`ghp_*`/`Bearer`/JWT/PEM 私钥块/`api_key=` 形态）、已登记的真实 provider key（注入时 `RegisterDynamicSecret`）或高熵随机串时替换为 `***`；正常内容（sha256/git 摘要、UUID、长标识符）不被改写。**底座起不来时，REST 信封的 `msg` 会带底座 stderr 的尾巴**（在 `pkg/code` 的 acl→信封投影点并入，最多 5 行、每行按字符截断、走同一个脱敏闸门）：ACP SDK 对传输失败只会回一句通用文案（JSON-RPC `-32603` 的固定 message `Internal error`，且会被换成"底座未完成 ACP 握手就断开"），真因在子进程 stderr 里——不并的话用户只看到 `50001 Internal error`，完整原因却躺在核心日志里（2026-10-09 实测：从含保留键 `.env` 的目录起核心、再建 dsh 会话，就是这个面目）。量纲与选行都刻意与诊断面板不同：面板/事件的 `stderr_tail` 保留 200 行，信封 `msg` 只带 5 行（它进错误气泡与截图）；且**先因后果**——Node（dsh）把原因打在栈**之前**，单纯"取最后 5 行"会只剩一串 `at …` 与 `Node.js v24.x`（这正是第一版实现踩到的坑），所以先认原因行（`Error:`/`panic:`/`Traceback`/`fatal:`…）再从它开始取，Python 这类"原因在最后一行"则由窗口回退覆盖。
@@ -59,7 +77,7 @@ make all      # 或：出单二进制 ./mate（前端经 go:embed 内嵌），�
 - **P2 空闲回收 + 按需拉起**：reapLoop（`MATE_REAP_INTERVAL`，默认 5m）扫「无在途 turn、无会话引用、闲置 > `MATE_IDLE_TIMEOUT`（默认 5m；0=关闭）」的暖进程 → 原子摘除 + 停进程；之后会话/StartAgent 自动按需重拨；旧连接收尾不覆盖新连接 running（ownerBefore 保护）。
 - **会话 wire transcript（重启存活）**：每 session 一个 JSONL（header + prompt/update 原语，schema v1，append-only 不重写；**文本增量按 ③ 合并后落行**——`session.message`/`thought` 攒批 25ms / 4KB / 64 条，故一行可能覆盖多个 delta、长回复不再产生几百行，而工具卡/权限卡/提问卡/用户消息/终态仍一条一行）；daemon **启动时回读 transcript 重建会话列表与元数据（标题/状态/时间），并把历史事件注入 eventbus**——管理面在重启后仍有会话可见、旧会话可经 WS/history 回看，会话列表不随进程失联（轻量「重启存活」，不引入 DB）；目录 `MATE_TRANSCRIPTS` 或默认 `~/.ark-mate/transcripts`；P1 起提供 `mate migrate` 把既有 transcript 幂等导入 SQLite、`mate transcripts prune --older-than <duration>` 显式清理（旁路停写/只读保留/不设自动删除见设计文档 ADR-5）。
 - **Web 问答控制台**（浅色 modern-minimal 应用壳，视觉基准 ark-mate-console.html；frontend 为 `apps/*` + `packages/*` 多包 workspace，React 19 + antd 6 + zustand + axios，结构与脚本对齐 ark-iam/frontend）：主视图即会话问答——会话侧栏（**会话/归档双视图** · 按日分组 · 置顶 · 行内更多操作=重命名/归档/恢复 · 新建会话 · 选 Agent 底座）、流式正文（思考 / 工具卡 / 权限确认卡 / **结构化提问卡**——按 schema 渲染单选/多选/文本/数字/布尔控件并本地校验必填与范围 / meta 行（终态轮后附本轮用量行：上下文占用 · 较上轮 Δ · 成本；hover 弹出 goose 风格明细——上下文占用(快照)/首令牌/总耗时/成本，composer 下方常驻最近一轮汇总行） / **失败轮就地「重试该轮」**；消息可一键复制全文，正文内 ``` 围栏代码段渲染为带语言/行数、可复制、长块可折叠的代码卡片）、composer 追加、停止（**忙时可继续输入**：投递模式选「排队 / 打断并发送」，输入框上方实时列出已排队尚未发出的条目并可逐条撤下——队列只认事件、刷新后按当前态补齐）、「待确认」角标（权限 + 提问合并计数，含超时/取消自动收敛）、**会话详情面板**（元数据 + **运行统计**：轮次/失败/取消/工具数 + 失败轮列表一键重试 + 挂起权限就地决策 + 会话级权限记忆——始终允许/始终拒绝——逐条/一键撤销）、断线自动重连 + reconnecting 横幅（重连按水位续传，浏览器原生 WebSocket）；会话头按绑定 agent 如实标注，agent 已不存在时就地给出路（用同一 id 重新注册 / 导出历史另开新会话），不再只显示一个悬空 id；`/conversations/:id` 直达激活，刷新/冷启动即续看；`/agents`、`/runtimes`、**`/capabilities`（Agent 视角 + 全局目录：skill 行内启停开关与物化体检、MCP 密钥键名与未就绪标记、装载告警标签）**、**用量页（顶栏「用量」，数据面 `GET /usage/summary`：按 agent/日期聚合轮次·时长·上下文·成本，支持近 7/30 天与自定义区间；响应回显口径——上下文/成本为区间末快照、day 桶不可加、多币种不混加，上下文与费用上报率分列）**、`/settings` 为管理次要页；Agents 页每行展示 `permission_policy` 摘要（默认动作 + 工具项数 + 原生模式，hover 展开明细），编辑弹窗可直接改 `default`/`native_mode`/工具项 JSON。经真实 Chrome 驱动的 DoD 验收（新建→多轮→刷新续看→cancel 全过）。
-- **单二进制交付**：`make all` 把面板产物内嵌进 `./mate`（release tag + `go:embed`），一个文件起全部（REST + WS + 静态页面）。
+- **服务端形态（维护态）**：核心**不自带**面板资产——资产只有一份 `apps/web/dist`，跑时用 `--web-dir`（或 `MATE_WEB_DIR`）指过去，没给就拒启（退出码 3）；容器镜像内已带一份并设好该变量。2026-10-10 起 `go:embed` 与"单二进制"形态整体删除（理由与代价见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`）。
 - **P3 收口**：传输保险丝/resync、hydration 四态均完成；会话侧栏（置顶 + 按日分组 + 近底跟随滚动）与工具/思考内联卡片为 M1 既有覆盖项，无需改动。
 - **P3 加载四态（前端）**：会话视图加 hydration 态——冷挂载/切回置 `hydrating`，服务端 snapshot 或首个事件置回就绪，空转 12s（保险丝重连前）自动回空态不再永久 loading；聊天页在 hydration 中显示「连接会话…」而非空态问候。
 - **P3 传输可靠性（前端）**：WS 传输增 **stalled 保险丝**（OPEN 后 70s 无任何服务端帧——半开/黑洞连接——主动断开并重连，健康连接每 25s ping→pong 计入活跃度不会误熔断）与**重连 resync 裁决**（重连后按各 agg 已确认水位重新 attach，服务端 EventsAfter 开区间 → 增量续传不重复、权威收尾）。
@@ -99,17 +117,22 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 
 模型凭证：harness 读取进程环境 `DEEPSEEK_API_KEY`；若你本机 `dsh` 已配好 profile/home 设置，无 shell 环境变量也能跑。
 
-### 2. 构建单二进制
+### 2. 构建服务端形态（可选，维护态）
+
+> **主线交付是桌面**（`make desktop/dist`）；这一节是"自己起一个带面板的守护进程"的形态，属维护态。
+> 核心**不自带**面板资产（2026-10-10 起 `go:embed` 已删除）：面板资产只有 `frontend/apps/web/dist`
+> 一份，起服务时用 `--web-dir` / `MATE_WEB_DIR` 指过去，没给就**拒绝启动**（退出码 3）。
 
 ```bash
-make all          # = 前端 pnpm build → 拷贝到 backend/pkg/web/dist → go build -tags release
-./mate           # 产物在仓库根
+make web                                                      # 构建前端产物 → frontend/apps/web/dist
+cd backend && CGO_ENABLED=0 go build -o ../mate ./cmd/mate     # 产物在仓库根 ./mate
 ```
 
 ### 3. 启动并打开面板
 
 ```bash
-./mate serve --addr 127.0.0.1:10001
+./mate serve --addr 127.0.0.1:10001 --web-dir "$PWD/frontend/apps/web/dist"
+# 等价写法：MATE_WEB_DIR=$PWD/frontend/apps/web/dist ./mate serve --addr 127.0.0.1:10001
 ```
 
 > **默认监听地址（安全相关）**：`mate serve` 不带 `--addr` 时读 `MATE_ADDR`，默认
@@ -250,7 +273,7 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |
-| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webSource?, webPath, webDigest, home, payloads[]}`。`webSource` 只在核心真的内嵌了前端资产时报 `builtin`（release 构建），默认构建**省略该字段**；`webPath`/`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串。`payloads[]` 是桌面壳经 `--payloads` 交来的**已解析**随包载荷清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）——清单真源是壳（只有它做三级解析，M3-4），非桌面态为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
+| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webPath, webDigest, home, payloads[]}`。`webPath` 是核心实际读的那份资产目录的绝对路径（没接资产层时为 null）、`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串（`webSource` 字段已于 2026-10-10 删除：核心只有"调用方给的目录"一种来源）。`payloads[]` 是桌面壳经 `--payloads` 交来的**已解析**随包载荷清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）——清单真源是壳（只有它做三级解析，M3-4），非桌面态为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
 | GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Mate-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力） |
 | GET | `/agents` | Agent 列表（含 `permission_policy` 只读面，含 `native_mode`；`is_default` 标出「当前 Agent」；`conversation_count` = 绑定它的会话数，即删除影响面） |
 | POST | `/agents` | 注册 Agent `{id, name?, runtimes[], provider?, mcps?, permission_policy?}`（落定义载体：memory 文件 / sqlite `agents` 行）；`mcps` 缺省 = 未声明（全量），`[]` = 本 agent 禁用 MCP 注入 |
@@ -324,9 +347,9 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 
 **HTTP 状态码的第三个取值**：请求**未命中任何路由**时回 HTTP 404 + `code=40401`（标准信封）。
 与上一条不冲突——「语义错误走 200」说的是路由命中了、领域层判定失败；未命中路由属于 HTTP 语义
-问题，代理与客户端靠状态码识别，不该伪装成"接口存在但拒绝了"。API 路径（`/v1/`）在两个构建形态
-下行为一致；非 API 路径在 release（内嵌前端）下回落 SPA `index.html`，非 release 下同样回信封
-404——没有内嵌前端就没有可回落的页面。
+问题，代理与客户端靠状态码识别，不该伪装成"接口存在但拒绝了"。API 路径（`/v1/`）在任何形态下
+行为一致；非 API 路径在**给了 `--web-dir`**（拿得到资产）时回落 SPA `index.html`，没有资产时回
+信封 404——没有资产就没有可回落的页面（2026-10-10 起资产只有一个来源：调用方给的目录）。
 
 | code | 含义 |
 | --- | --- |
@@ -431,21 +454,47 @@ WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|p
 
 ## 开发
 
+**桌面是主线**（决策 v8③）——日常用 `make dev` 改 UI（**唯一 HMR 循环**），用 `make desktop/*` 验交付态：
+
 ```bash
-make all      # 单二进制（前端 pnpm build → 内嵌 → go build -tags release），产物 ./mate
-make web      # 仅构建前端并刷新 embed 宿主目录
-make build    # 不带 release 的内核编译（无需前端产物）
-make vet / test   # go vet / go test ./...
-# 前端：cd frontend && pnpm typecheck / pnpm build
+make dev            # 浏览器开发态：vite :5173（HMR）+ 后端 :10001，改 UI 走这条最快
+make desktop/dev    # 桌面态：先出 mate-core + 装配随包载荷，再起 Electron 壳（脚本内的真核心）
+make desktop/accept # 真 Electron + 真核心的界面/契约验收（自起自清）
+make desktop/dist   # 出安装包（dmg / Windows 安装器）
 ```
 
-验收驱动（浏览器入口都要先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
+服务端形态（**维护态**：能跑、能修缺陷、不加新功能）：
+
+```bash
+make web      # 只构建前端产物（frontend/apps/web/dist，唯一一份）
+make build    # 内核编译（全仓只有一个构建配置：不带任何构建标签，不依赖前端产物）
+make vet / test   # go vet / go test ./...
+# 前端：cd frontend && pnpm typecheck / pnpm build
+# 起带面板的服务：cd backend && CGO_ENABLED=0 go build -o ../mate ./cmd/mate && \
+#                 ./mate serve --web-dir "$PWD/frontend/apps/web/dist"
+```
+
+**桌面态调试**（细节见 [desktop 设计](docs/desktop-architecture-design-20260928.md)）：
+
+```bash
+cd frontend
+KEEP_SHELL=1 pnpm ui:accept:desktop shell   # 跑完不杀壳：窗口留着，可连 DevTools 慢慢看
+pnpm ui:accept:desktop stream               # 也可只跑一条场景（脚本里的 SCENARIOS 列表）
+# 附渲染进程调试端口（`pnpm dev` 默认不带）：
+cd apps/desktop && node scripts/build.mjs && ../../node_modules/.bin/electron . --remote-debugging-port=9222
+#   然后 chrome://inspect 配 127.0.0.1:9222；主进程调试用 --inspect=9229
+```
+
+> 起壳前清掉宿主 `ELECTRON_RUN_AS_NODE`（否则 Electron 以纯 Node 跑、没有窗口）；桌面态与 `make dev`
+> **别同时跑**（两个核心共用 `~/.ark-mate/mate.db`）。桌面态**没有 HMR**，改 UI 请走 `make dev`。
+
+验收驱动（**浏览器靶 = 开发态**，先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
 
 ```bash
 cd frontend
 pnpm smoke:e2e            # REST/WS 冒烟（不需要真实底座）
 pnpm smoke:e2e:live dsh   # 真一轮对话（需要装好底座与凭据）
-pnpm ui:accept            # 真 Chrome 界面验收：能力勾选面板 / `/` 命令补全 / 自动化页
+pnpm ui:accept            # 开发态界面验收（真 Chrome + CDP）：能力勾选面板 / `/` 命令补全 / 自动化页
                           # 可只跑一条：pnpm ui:accept cmd（cap | cmd | auto）
 ```
 
@@ -507,7 +556,7 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 `release.json` 的 `coreVersion` / `apiContract` 唯一取法）。
 （历史上的 `mate acp-serve` / `mate acp-demo` 已随 echo 演示底座删除。）
 
-部署形态（单二进制 / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。
+部署形态（自建二进制 + 外挂 dist / systemd / 容器 / 环境变量全表 / 备份升级 / 排障）见 **`docs/deployment.md`**。
 
 仓库结构：
 
@@ -522,7 +571,6 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     routing             路由引擎 FirstAvailable 切片
     config              进程配置（flag + MATE_* 环境变量 + .ark-mate/config 目录化）
     procreg             进程注册表（孤儿 runtime 子进程回收）
-    web                 release 内嵌前端产物宿主（go:embed dist）
     dbclient             gorm 句柄装配 + 自注册纯 Go SQLite dialector（无 CGO）
     object/objusage     跨层共享值对象（会话用量快照）
   internal/             应用专属逻辑
@@ -548,7 +596,7 @@ frontend/               pnpm workspace（apps/* + packages/*）
   packages/api          @ark-mate/api（axios 客户端 + /v1/mate resources）
   packages/ui           @ark-mate/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
 docs/                   设计/路线图 + runtime 适配核实 + 部署运维
-  deployment.md         部署/运维（单二进制、systemd、容器、环境变量、备份、排障）
+  deployment.md         部署/运维（自建二进制 + 外挂 dist、systemd、容器、环境变量、备份、排障）
   design-and-roadmap.md 总体设计与 M0–M3 路线图（历史设计记录）
   agent-runtime-refactor-design-20260908.md  P0–P3 重构设计与逐切片证据（§19.x）；§20 未实现能力/降级清单
 ```

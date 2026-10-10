@@ -327,19 +327,15 @@ func (a *App) Init(ctx context.Context) error {
 		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
-	// 资产层（M2-1）：显式目录优先、内嵌兜底、两者都没有即**拒绝启动**（退出码 3）。
-	// 放在监听之前：装错资产时不该先占住端口再报错。
+	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
+	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。
 	assets, err := router.ResolveAssets(cfg.WebDir)
 	if err != nil {
 		return assetErr("serve: %v", err)
 	}
 	a.assets = assets
 	if assets.Has() {
-		where := string(assets.Source)
-		if assets.Source == router.AssetSourceDir {
-			where += " " + assets.Path
-		}
-		slog.Info("serve: 前端资产已就绪", "source", where)
+		slog.Info("serve: 前端资产已就绪", "dir", assets.Path)
 	}
 
 	// M3-5：先绑定监听器，再用**实际监听地址**构造 Host 白名单 + Origin 矩阵，最后装配路由。
