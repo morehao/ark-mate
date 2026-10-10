@@ -21,6 +21,11 @@ make desktop/dist   # 出安装包（当前只出 macOS，ad-hoc 签名、未公
 **开发态（改代码）**：本机自备 Go ≥ 1.26、Node 24.x、pnpm 11.x（见「快速开始」前置表），以及至少一个
 ACP 兼容底座（`opencode` 或 `dsh`）与模型 API key。数据默认落 `~/.ark-mate`（`MATE_HOME` 覆盖）。
 
+> **`opencode` 可以不装在本机**：`make dev` / `make server` 默认从 `PATH` 找 `opencode`，用
+> `OPENCODE_BIN=<可执行文件>` 就能改成指定哪一份（仓库里那份随包载荷就是现成的候选；桌面态一直用
+> 随包载荷、**不看** `PATH`）。写进仓库根的 `.env` 一次配好，或命令行临时给；详见「前后端分离开发」
+> 一节的 `OPENCODE_BIN`。
+
 ```bash
 make dev           # 浏览器开发态：vite :5173（**HMR**）+ 后端 :10001，改 UI 走这条最快
 make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native / 凭据 / 打包前行为
@@ -265,6 +270,42 @@ cd frontend && pnpm dev
 > 导入 SQLite，否则 sqlite 模式下旧会话不在面板列表（serve 会提示你 migrate）。
 > 注意：`runs` 在**轮次收口时**物化，**开启 sqlite 之后新增轮次**才有单轮用量；历史轮次只有
 > runs 计数、无用量（usage 来自实时 ACP 上报，回放不重算）。
+
+> **dev / server 用哪一份 `opencode`：`OPENCODE_BIN`**。核心拉底座用的是写死的名字
+> （`pkg/runtime/opencode/opencode.go` 的 `Command = "opencode"`），由 `exec` 走 `PATH` 解析，
+> 所以 `make dev` / `make server` 命中的是**本机装的那份**；桌面态不同——壳在启动期解析随包载荷、
+> 把私有 bin 注入子进程 `PATH`，**刻意不回落** `PATH`（设计 §6.5）。于是本机装的是 v1、而仓库的
+> 声明与取证以 v2 为准时（2026-10-10 实测：本机 1.18.35 / 随包 2.0.26），显式指定一份即可，
+> **不必动本机安装、也不必改全局 `PATH`**。
+>
+> 两个写法：**写进仓库根的 `.env`**（一次配好；这正是 `docker compose` 用的那个本地配置文件的
+> 同一个文件，compose 不读这一项、互不干扰）或**命令行临时给**：
+>
+> ```bash
+> # ① 一次配好：把下面这行加进仓库根的 .env（.env 已 gitignore；模板见 .env.example）
+> #    OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+> #
+> # ② 临时盖过 .env（优先级见下）
+> make dev OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+> make server OPENCODE_BIN=/opt/other/opencode
+> ```
+>
+> 版本目录按 `resources/payloads/opencode/<version>/` 里实际那份填（`make desktop/payloads` 的产物，
+> 桌面态用的就是它）；也可以给任意绝对路径。**取值优先级：命令行 > 进程环境变量 > `.env` >
+> `PATH` 上解析**（dotenv 系工具的通行约定）——`.env` 写好后 `make dev OPENCODE_BIN=…` 仍能临时盖过它。
+> `.env` 的解析支持 `KEY=v` / `KEY = v` / `export KEY=v` / 双引号包裹 / 行尾 `# 注释`（单引号不支持）；
+> Makefile **只挑 `OPENCODE_BIN` 一个键**，不做整份 `-include`（那个文件是 compose 的 dotenv，
+> 引号/多行值/保留键整份交给 make 解析会串味甚至语法错）。
+>
+> 语义是**显式覆盖、不探测**：都没有 = 与今天逐字相同（`PATH` 上那份；核心侧不做任何 `which` /
+> `command -v`）；有值就在**核心子进程**的 `PATH` 前置一个只含 `opencode` 一个名字的转发目录
+> （`.cache/dev-bin/`，已 gitignore；**不复用**桌面私有 bin —— 那目录里还有 node/npx/dsh
+> 三个启动器，整段前置会让 vite/pnpm 调到的 `node` 因 `MATE_NODE_EXECUTABLE` 未设置以 127 失败），
+> 前端（vite）不拿这个 `PATH`。有值但不可执行会**当场失败**——静默忽略的症状是"以为换成了 v2、
+> 其实还在跑 v1"。三种来源的症状完全一样，所以两条命令启动时都会回显**实际生效的那一份与来源**：
+> `==> 底座  opencode: <路径> [命令行]` / `[环境变量]` / `[.env]` / `PATH 上解析 [未指定 OPENCODE_BIN]`。
+> 底座的数据面照旧被隔离：核心按 `pkg/runtime/isolation.go` 注入 `XDG_*` / `OPENCODE_*`，这份
+> opencode 的 home 落在 `MATE_HOME` 下，不碰你自己的安装（桌面态用的是同一张表）。
 
 ## 控制面接口摘要
 

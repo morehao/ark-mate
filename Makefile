@@ -11,6 +11,8 @@
 #   make web   —— 只构建前端产物（apps/web/dist）
 #   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
 #   make server —— 仅后端开发起服（不起前端，前端经 vite dev proxy 联调）
+#                  以上两条都认 `OPENCODE_BIN=<可执行文件>`：显式指定核心拉哪一份 opencode
+#                  （本机装的是 v1、想跑随包 v2 时用；见下文「开发态 opencode 底座用哪一份」）
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn mate-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 #
@@ -18,7 +20,7 @@
 # `--web-dir` / `MATE_WEB_DIR` 指过去——桌面壳指包内那份、容器指镜像内那份、`make dev` 指工作区那份。
 # （2026-10-10 起 `//go:embed` 与 `-tags release` 已删除，详见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。）
 
-.PHONY: dev web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
+.PHONY: dev dev/opencode-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
@@ -75,6 +77,49 @@ MATE_STORE ?= sqlite
 # `Origin: http://localhost:5173`，而默认矩阵只放行"核心自己的 origin"（以及 mate-app://app 与无 Origin）。
 # 所以这里显式登记；默认矩阵里没有它——验收 V16 正是要证明别的本地源（127.0.0.1:9999）仍被拒。
 DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
+
+# —— 开发态 opencode 底座用哪一份可执行文件（可选；`make dev` / `make server` 认它）——
+# 为什么需要这个入口：核心拉哪个底座是**写死的名字**（pkg/runtime/opencode/opencode.go 的
+# `Command = "opencode"`），由 exec 走 PATH 解析。桌面态由壳把随包载荷注入私有 bin，而
+# `make dev` / `make server` 这两条"核心自己从 PATH 找"的形态只会命中**本机装的那份**。
+# 于是当本机装的是 v1、而仓库的声明与取证以 v2 为准时（2026-10-10 实测：本机 1.18.35 /
+# 随包 2.0.26），这个人就成了"只有他的开发循环跑在另一代底座上"。
+#
+#   make dev OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+#
+# 也可以写进仓库根的 `.env`（本仓既有的本地配置文件：docker compose 读它、模板是 `.env.example`、
+# 已在 .gitignore 里），这样不必每次手敲——**本次就按这条走**：
+#
+#   OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+#
+# 取值优先级：**命令行 > 进程环境变量 > `.env` > PATH 上解析**（与 dotenv 系工具的通行约定一致：
+# `make dev OPENCODE_BIN=…` 临时盖过 `.env`，`.env` 里的值被同名环境变量盖过）。三种来源的症状
+# 完全一样（都只是"某个路径生效了"），所以 `make dev`/`make server` 会**回显来源**：
+# `[命令行]` / `[环境变量]` / `[.env]` / `PATH 上解析 [未指定 OPENCODE_BIN]`。
+#
+# 语义是**显式覆盖、不探测**：都没有 = 完全维持现状（PATH 上那份，行为与今天逐字相同，不做任何
+# `which`/`command -v`）。有值就在**核心子进程**的 PATH 前置一个只含 `opencode` 一个名字的转发
+# 目录（`.cache/dev-bin/`，已 gitignore）——**刻意不复用桌面私有 bin**：那目录里还有
+# node/npx/dsh 三个启动器，整段前置会让 vite/pnpm 调到的 `node` 因 MATE_NODE_EXECUTABLE
+# 未设置直接以 127 失败。前端进程不拿这个 PATH。
+# 有值但不可执行 → 当场失败：静默忽略的症状是"以为换成了 v2、其实还在跑 v1"，那正是这里要消灭的。
+# 隔离不受影响：核心拉底座时按 pkg/runtime/isolation.go 注入 XDG/OPENCODE_* 隔离变量，这份
+# opencode 的 home 落 MATE_HOME 下，不碰用户自己的安装。也因此这里**不替用户探测版本**——
+# v2 连 `--version` 都会写 config/cache/state/share 四个面（2026-10-10 实测），探一下就是动本机。
+#
+# `.env` 为什么是**只挑一个键**、而不是 `-include .env`：那个文件是 docker compose 的 dotenv，
+# 里面的引号 / 多行值 / 保留键（PATH 之类）整份交给 make 解析，轻则串味重则让 make 直接语法错；
+# 这里只要 OPENCODE_BIN 一行，其余键归 compose，互不干扰。支持 `KEY=v` / `KEY = v` /
+# `export KEY=v` / 双引号包裹 / 行尾 `# 注释`；**单引号不支持**（会被当成值的一部分，随后在
+# dev/opencode-bin 的存在性校验里带着原样值响亮失败，不静默）。
+ENV_FILE ?= .env
+OPENCODE_BIN_FROM_FILE := $(shell awk 'match($$0, /^[[:space:]]*(export[[:space:]]+)?OPENCODE_BIN[[:space:]]*=/) { v = substr($$0, RLENGTH + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$$/, "", v); if (v ~ /^".*"$$/) { v = substr(v, 2, length(v) - 2) } else { sub(/[[:space:]]+\#.*$$/, "", v); sub(/[[:space:]]+$$/, "", v) }; out = v } END { print out }' $(ENV_FILE) 2>/dev/null)
+OPENCODE_BIN ?= $(OPENCODE_BIN_FROM_FILE)
+DEV_BIN_DIR  := $(CURDIR)/.cache/dev-bin
+# 来源的唯一取法：make 的 $(origin)（command line / environment / file / undefined）。
+OPENCODE_BIN_SOURCE := $(if $(OPENCODE_BIN),$(if $(filter command line,$(origin OPENCODE_BIN)),命令行,$(if $(filter environment,$(origin OPENCODE_BIN)),环境变量,$(if $(filter file,$(origin OPENCODE_BIN)),$(ENV_FILE),其它))),未指定)
+# 只有有值才前置 PATH（空值 = 连赋值都不做，保持"今天就是这样"）。
+DEV_PATH_PREFIX := $(if $(OPENCODE_BIN),$(DEV_BIN_DIR):,)
 
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
 define require-node
@@ -325,20 +370,34 @@ $(WEB_DIR)/index.html:
 
 web-assets: $(WEB_DIR)/index.html
 
+# 开发态 opencode 转发（见上方 OPENCODE_BIN 一节）：校验 + 生成一个**只转发 opencode** 的 shim。
+# 幂等；OPENCODE_BIN 为空时什么都不做（也不清理旧 shim——它不在 PATH 上，留着无害）。
+dev/opencode-bin:
+	@if [ -n "$(OPENCODE_BIN)" ]; then \
+	  if [ ! -f "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不是普通文件：$(OPENCODE_BIN)"; exit 1; fi; \
+	  if [ ! -x "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不可执行：$(OPENCODE_BIN)"; exit 1; fi; \
+	  abs=$$(cd "$$(dirname "$(OPENCODE_BIN)")" && pwd)/$$(basename "$(OPENCODE_BIN)"); \
+	  mkdir -p $(DEV_BIN_DIR); \
+	  printf '#!/bin/sh\n# 生成物（Makefile 的 dev/opencode-bin）——不要手改；改 OPENCODE_BIN 重新生成。\nexec "%s" "$$@"\n' "$$abs" > $(DEV_BIN_DIR)/opencode; \
+	  chmod +x $(DEV_BIN_DIR)/opencode; \
+	fi
+
 # 后端开发起服（mate 无默认子命令，需显式 serve）
-server: web-assets
-	cd backend && MATE_STORE=$(MATE_STORE) go run ./cmd/mate serve --web-dir $(WEB_DIR)
+server: web-assets dev/opencode-bin
+	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
+	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) go run ./cmd/mate serve --web-dir $(WEB_DIR)
 
 # 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
 # /v1/mate/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
 # 避免后端尚未 listen 时 vite ws 代理出现 ECONNREFUSED 的启动竞态。
 # 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
-dev:
+dev: dev/opencode-bin
 	$(require-node)
 	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE))"
+	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
 	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
 	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && MATE_STORE=$(MATE_STORE) MATE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run ./cmd/mate serve --web-dir $(WEB_DIR) & \
+	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) MATE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run ./cmd/mate serve --web-dir $(WEB_DIR) & \
 	BACKEND_PID=$$!; \
 	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/mate/health ..."; \
 	HEALTHY=""; \
