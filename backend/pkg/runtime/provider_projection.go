@@ -40,9 +40,9 @@ type ProviderProjectionField struct {
 
 // ProviderProjectionSchema 某 runtime 的运行时参数 schema。
 type ProviderProjectionSchema struct {
-	Runtime string                   `json:"runtime"`
+	Runtime string                    `json:"runtime"`
 	Fields  []ProviderProjectionField `json:"fields"`
-	Note    string                   `json:"note,omitempty"`
+	Note    string                    `json:"note,omitempty"`
 }
 
 // 两个底座共有的字段（wire 协议与端点）。
