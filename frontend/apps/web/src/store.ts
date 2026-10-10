@@ -26,6 +26,7 @@ import type {
   ConfigOption,
   ConversationSummary,
   ModelCatalogResp,
+  ModelsResp,
   ModelRef,
   QueuedInput,
   StreamEntry,
@@ -400,7 +401,8 @@ export interface MateState {
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
   /** 模型目录（当前 agent 的运行时会话配置项投影；null = 未加载）。 */
-  modelCatalog: ModelCatalogResp | null
+  /** 模型读面（v11 起是 declared/advertised/diff/config 四段；未声明落点的 runtime 回落旧形态）。 */
+  modelCatalog: ModelsResp | ModelCatalogResp | null
 }
 
 export interface PermissionDecision {

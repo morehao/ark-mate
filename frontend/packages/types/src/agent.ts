@@ -48,6 +48,13 @@ export interface Agent {
    * （归属不可变：平台不自动改绑；用同一个 id 重新注册可复活绑定）。
    */
   conversation_count?: number
+  /**
+   * 该 agent 在各 runtime 上的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
+   *
+   * 没有写入方（`POST/PATCH /agents` 显式拒绝它）——它随「设置 · 模型」里的星号自动变，
+   * 所以这里只读呈现 + 一句"去设置 · 模型 改"的跳转。
+   */
+  default_model?: Record<string, string>
 }
 
 /** 删除 agent 的结果与影响面（`DELETE /agents/:id`）。 */
@@ -61,19 +68,99 @@ export interface AgentDeleteResp {
   was_default: boolean
 }
 
+/** 一条供应商凭据（**不含模型**：默认模型归平台清单，见 `ModelRow.is_default`）。 */
 export interface Provider {
   id: string
   type: string
-  model?: string
   /** 密钥只写不读回：仅表示是否已存有密钥。 */
   has_key: boolean
+  /** 载体版本（sqlite = 行 revision；memory = 0，文件载体没有版本号）。 */
+  revision: number
+  updated_at?: string
+  note?: string
+  /** 只读派生的引用面（哪些 agent 在用它、它们可能落到哪些 runtime）。 */
+  refs: ProviderRefs
+  /** 开会话之前就能看见的问题清单（空 = 本地段全部通过）。 */
+  problems: string[]
+  /** 交付通道与生效时刻（静态事实表）。 */
+  delivery?: Delivery
+  /** 逐 runtime 的可达性（刻意不给合并结论）。 */
+  applicability?: Applicability[]
+  /** 写面回执（只在写面响应里出现）。 */
+  effect?: ProviderEffect
+}
+
+/** provider 的引用面（只读派生，无写入方）。 */
+export interface ProviderRefs {
+  agents: string[]
+  runtimes: string[]
+}
+
+/** 交付通道与生效时刻（`@ark-mate/types` 的静态事实投影）。 */
+export interface Delivery {
+  /** dial_env | session_config | session_inject | materialize | config_write。 */
+  channel: string
+  /** immediate | next_turn | next_session | next_process。 */
+  effect: string
+  note: string
+}
+
+/** 逐 runtime 的可达性（形状与 `/library` 的 applicability 保持一致）。 */
+export interface Applicability {
+  runtime: string
+  ok: boolean
+  status: string
+  reason: string
+}
+
+/** provider 写面的生效面回执：只有 `type`/`key` 变了才说"下一轮生效"。 */
+export interface ProviderEffect {
+  channel: string
+  /** next_turn | none。 */
+  effect: string
+  applies_to_agents: string[]
+  affected_conversations: number
+  deferred: number
+  note?: string
 }
 
 export interface ProviderPatch {
   type?: string
-  model?: string
-  /** 非 nil 即覆盖/清除（空串 = 清除）。 */
+  note?: string
+  /** 非 nil 即覆盖/清除（空串 = 清除）。`model` 已删除（v11）。 */
   key?: string
+}
+
+export interface ProviderCreateReq {
+  id: string
+  type: string
+  note?: string
+  key?: string
+}
+
+export interface ProviderDeleteResp {
+  deleted: boolean
+  /** 被拒时的引用名单（先解开这些引用再删）。 */
+  referenced_by_agents?: string[]
+  /** 行已删但密文残留（如实回带，doctor 会列出孤儿密文）。 */
+  vault_ciphertext_left?: string
+}
+
+export interface ProviderProbeResp {
+  id: string
+  upstream: boolean
+  /** "没有 fail"（warn/skip/unknown 都不算失败）。 */
+  ok: boolean
+  checks: ProviderCheck[]
+}
+
+export interface ProviderCheck {
+  /** exists | type | secret | refs | injection | catalog | upstream。 */
+  name: string
+  /** pass | fail | warn | skip | unknown。 */
+  status: string
+  detail: string
+  remedy?: string
 }
 
 /** 某 agent 最近一次失败的诊断快照（A3）。 */

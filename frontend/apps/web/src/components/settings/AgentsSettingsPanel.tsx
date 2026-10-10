@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AutoComplete, Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
+import { Button, Form, Input, Modal, Popconfirm, Select, Space, Tag, Tooltip } from 'antd'
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -18,7 +18,6 @@ import {
   setDefaultAgent,
   startAgent,
   stopAgent,
-  upsertProvider,
   toErrorMessage,
 } from '@ark-mate/api'
 import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark-mate/types'
@@ -58,28 +57,22 @@ const POLICY_NATIVE_OPTIONS: { label: string; value: NativePermissionMode }[] = 
 
 
 
-interface ProviderFormValues {
-  type: string
-  model?: string
-  key?: string
-}
-
 /** Agents 管理页（P2）：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除 + provider 注入面。 */
 export function AgentsSettingsPanel() {
   const agents = useMate((s) => s.agents)
   const refreshAgents = useMate((s) => s.refreshAgents)
   const showToast = useMate((s) => s.showToast)
+  /** 一跳换到「设置 · 模型」那一节（同一弹窗内换节，零跳转成本）。 */
+  const openSettingsSection = useMate((s) => s.openSettingsSection)
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   // 切换「当前 Agent」的在途标记（与启停各自独立，避免互相盖住 loading）。
   const [busyDefaultId, setBusyDefaultId] = useState<string | null>(null)
   const [agentModal, setAgentModal] = useState<{ mode: 'create' } | { mode: 'edit'; agent: Agent } | null>(null)
-  const [providerModal, setProviderModal] = useState<{ id: string; existing: Provider | null } | null>(null)
   // A3 诊断抽屉：{ agentId, data | null（加载中）, err }
   const [diag, setDiag] = useState<{ id: string; name: string; data: AgentDiagnostics | null; err: string | null } | null>(null)
   const [agentForm] = Form.useForm<AgentFormValues>()
-  const [providerForm] = Form.useForm<ProviderFormValues>()
 
   const loadProviders = useCallback(async () => {
     try {
@@ -196,18 +189,6 @@ export function AgentsSettingsPanel() {
     }
     setAgentModal(null)
     agentForm.resetFields()
-    afterMutate()
-  }
-
-  const submitProvider = async (): Promise<void> => {
-    if (!providerModal) return
-    const v = await providerForm.validateFields()
-    const patch: { type: string; model?: string; key?: string } = { type: v.type, model: v.model || undefined }
-    if (v.key != null && v.key !== '') patch.key = v.key
-    const ok = await guard(upsertProvider(providerModal.id, patch))
-    if (ok === undefined) return
-    setProviderModal(null)
-    providerForm.resetFields()
     afterMutate()
   }
 
@@ -415,16 +396,18 @@ export function AgentsSettingsPanel() {
         )
       })}
 
-      {/* —— provider 档案区（P2 注入面：密钥只写不读回） —— */}
+      {/* —— 凭据引用（只读）：凭据与模型都在「设置 · 模型」里管理 ——
+          这里**不再**提供编辑按钮：密钥/类型属于凭据资源的写面，而它已经搬到那一节。
+          保留的是一眼可读的"谁被引用、它现在可不可用"，以及一步跳到写面的入口。 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 18px 8px' }}>
-        <b style={{ fontSize: 13 }}>Provider 档案</b>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => { providerForm.resetFields(); setProviderModal({ id: '', existing: null }) }}>
-          新建 Provider
+        <b style={{ fontSize: 13 }}>凭据引用</b>
+        <Button size="small" type="link" onClick={() => openSettingsSection('model')}>
+          在「设置 · 模型」里管理 →
         </Button>
       </div>
       {providers.length === 0 && (
         <div style={{ padding: '0 18px 12px', color: tokens.textPlaceholder, fontSize: 12 }}>
-          暂无档案。新建后可被 agent 引用，启动时以其密钥注入子进程 env。
+          还没有供应商凭据。到「设置 · 模型」的供应商块新建一条，再回到这里把 Agent 的凭据指向它。
         </div>
       )}
       {providers.map((p) => (
@@ -434,18 +417,50 @@ export function AgentsSettingsPanel() {
         >
           <span style={{ fontFamily: tokens.fontMono, fontSize: 12 }}>{p.id}</span>
           <Pill>{p.type}</Pill>
-          {p.model && <span style={{ color: tokens.textSecondary }}>{p.model}</span>}
           <Tag style={{ marginInlineEnd: 0, fontSize: 11 }} color={p.has_key ? 'green' : 'default'}>
             {p.has_key ? '密钥已存' : '无密钥'}
           </Tag>
-          <span style={{ marginLeft: 'auto' }}>
-            <Button size="small" onClick={() => { providerForm.setFieldsValue({ type: p.type, model: p.model, key: '' }); setProviderModal({ id: p.id, existing: p }) }}>
-              编辑
-            </Button>
+          {p.problems?.length ? (
+            <Tooltip title={p.problems.join('；')}>
+              <Tag color="orange" style={{ marginInlineEnd: 0, fontSize: 11 }}>{p.problems.length} 项待处理</Tag>
+            </Tooltip>
+          ) : null}
+          <span style={{ color: tokens.textPlaceholder, fontSize: 11.5 }}>
+            {p.refs?.agents?.length ? `被 ${p.refs.agents.join('、')} 引用` : '未被引用'}
           </span>
         </div>
       ))}
 
+      {/* —— 默认模型（派生只读）——
+          它**没有写入方**：值是 `GET /agents` 按 `models.is_default` 与 `agent.runtimes[]` 求交算出来的，
+          所以这里只呈现 + 一句指路，不给输入框（给了就等于许诺一个平台不会存的值）。 */}
+      <div style={{ padding: '20px 18px 8px' }}>
+        <b style={{ fontSize: 13 }}>默认模型（只读）</b>
+        <span style={{ marginLeft: 8, fontSize: 11.5, color: tokens.textPlaceholder }}>
+          由「设置 · 模型」里每个底座的那个星号决定
+        </span>
+      </div>
+      <div style={{ padding: '0 18px 12px' }}>
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          {agents.map((a) => {
+            const dm = a.default_model ?? {}
+            const keys = Object.keys(dm)
+            return (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span style={{ fontFamily: tokens.fontMono, minWidth: 120 }}>{a.id}</span>
+                {keys.length === 0
+                  ? <span style={{ color: tokens.textPlaceholder }}>未设置默认模型（新会话跟随底座默认）</span>
+                  : keys.map((rt) => (
+                    <Tag key={rt} style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                      {rt} · {dm[rt]}
+                    </Tag>
+                  ))}
+                <Button type="link" size="small" onClick={() => openSettingsSection('model')}>去改 →</Button>
+              </div>
+            )
+          })}
+        </Space>
+      </div>
 
       {/* A3 诊断（stderr 诊断尾巴 + 最近失败；连接态） */}
       <Modal
@@ -604,7 +619,7 @@ export function AgentsSettingsPanel() {
               tokenSeparators={[',']}
             />
           </Form.Item>
-          <Form.Item name="provider" label="Provider 档案（可选）">
+          <Form.Item name="provider" label="凭据（可选）">
             <Select
               allowClear
               placeholder="选择下方档案；留空 = 默认（不注入密钥）"
@@ -645,34 +660,6 @@ export function AgentsSettingsPanel() {
         </Form>
       </Modal>
 
-      {/* Provider 档案编辑（新建时 id 必填） */}
-      <Modal
-        title={providerModal?.existing ? `编辑 ${providerModal.id}` : '新建 Provider'}
-        open={providerModal !== null}
-        onCancel={() => { setProviderModal(null); providerForm.resetFields() }}
-        onOk={() => void submitProvider()}
-        okText="保存"
-        width={440}
-        destroyOnClose
-      >
-        <Form form={providerForm} layout="vertical" onFinish={() => void submitProvider()}>
-          {providerModal && !providerModal.existing && (
-            <Form.Item name="id" label="ID" rules={[{ required: true, message: '必填' }, { pattern: AGENT_ID_RE, message: '字母/数字开头，可含 _ -，最长 64' }]}>
-              <Input placeholder="如 openai / deepseek / my-custom" style={{ fontFamily: tokens.fontMono }} autoComplete="off" />
-            </Form.Item>
-          )}
-          <Form.Item name="type" label="Type（env 变量名映射：openai→OPENAI_API_KEY，未知取大写 type + _API_KEY）" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder="openai / anthropic / deepseek …" autoComplete="off" />
-          </Form.Item>
-          {/* Model 仅作档案留痕（模型选择的权威来源是运行时会话配置项，平台不内置清单）。 */}
-          <Form.Item name="model" label="Model（档案留痕，可留空）">
-            <AutoComplete placeholder="如 gpt-5 / deepseek-chat" allowClear options={[]} />
-          </Form.Item>
-          <Form.Item name="key" label={providerModal?.existing?.has_key ? '密钥（已存；输入即覆盖）' : '密钥'}>
-            <Input.Password placeholder="只写不读回；留空 = 不变更" autoComplete="new-password" />
-          </Form.Item>
-        </Form>
-      </Modal>
       </div>
     </div>
   )
