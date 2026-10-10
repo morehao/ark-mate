@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +18,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // fileExists 判断路径存在（doctor 与状态面用）。
@@ -113,7 +113,7 @@ func (s *Service) providerVault() (*vault.Store, error) {
 	s.vaultStore, s.vaultErr = st, err
 	s.mu.Unlock()
 	if err != nil {
-		slog.Warn("vault: 初始化失败（provider 密钥暂无法加密落盘）", "err", err)
+		glog.Warnw(context.Background(), "vault: 初始化失败（provider 密钥暂无法加密落盘）", "err", err)
 	}
 	return st, err
 }
@@ -130,7 +130,7 @@ func (s *Service) loadProvidersFile(dir string) {
 	}
 	var m map[string]*providerFile
 	if err := json.Unmarshal(b, &m); err != nil {
-		slog.Warn("providers: providers.json 解析失败（忽略）", "err", err)
+		glog.Warnw(context.Background(), "providers: providers.json 解析失败（忽略）", "err", err)
 		return
 	}
 	// vault 句柄必须在持锁外取（providerVault 自己要拿 s.mu）。
@@ -151,7 +151,7 @@ func (s *Service) loadProvidersFile(dir string) {
 			ref := providerRef(id)
 			if err := st.Put(ref, vault.KindProviderKey, []byte(d.Key)); err != nil {
 				p.Key, p.keyErr = d.Key, err
-				slog.Warn("providers: 密钥加密迁移失败（保留明文，不丢密钥）", "provider", id, "err", err)
+				glog.Warnw(context.Background(), "providers: 密钥加密迁移失败（保留明文，不丢密钥）", "provider", id, "err", err)
 				break
 			}
 			p.Key, p.KeyRef = d.Key, ref
@@ -162,13 +162,13 @@ func (s *Service) loadProvidersFile(dir string) {
 			p.Body["key_ref"] = d.KeyRef
 			if st == nil {
 				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", d.KeyRef, vaultUnavailable(verr))
-				slog.Warn("providers: 有密文但 vault 不可用", "provider", id, "ref", d.KeyRef, "err", p.keyErr)
+				glog.Warnw(context.Background(), "providers: 有密文但 vault 不可用", "provider", id, "ref", d.KeyRef, "err", p.keyErr)
 				break
 			}
 			pt, err := st.Get(d.KeyRef, vault.KindProviderKey)
 			if err != nil {
 				p.keyErr = err
-				slog.Warn("providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", id, "err", err)
+				glog.Warnw(context.Background(), "providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", id, "err", err)
 				break
 			}
 			p.Key = string(pt)
@@ -180,10 +180,10 @@ func (s *Service) loadProvidersFile(dir string) {
 	s.mu.Unlock()
 	if migrated > 0 {
 		if err := s.persistProvidersFile(); err != nil {
-			slog.Warn("providers: 迁移写回失败", "migrated", migrated, "err", err)
+			glog.Warnw(context.Background(), "providers: 迁移写回失败", "migrated", migrated, "err", err)
 			return
 		}
-		slog.Info("providers: 明文密钥已迁移进 vault", "count", migrated)
+		glog.Infow(context.Background(), "providers: 明文密钥已迁移进 vault", "count", migrated)
 	}
 }
 
@@ -461,7 +461,7 @@ func (s *Service) providerEnvFor(runtimeID, providerID string) []string {
 	s.mu.Unlock()
 	if d == nil || d.Key == "" {
 		if d != nil && d.KeyRef != "" {
-			slog.Warn("providers: 密钥不可用（密文未解密），不注入 env", "provider", providerID, "err", d.keyErr)
+			glog.Warnw(context.Background(), "providers: 密钥不可用（密文未解密），不注入 env", "provider", providerID, "err", d.keyErr)
 		}
 		return nil
 	}

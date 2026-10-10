@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/morehao/ark-mate/internal/gateway"
 	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/golib/glog"
 )
 
 // mcpCmd 分发 `mate mcp <动作>`（M7-1：网关子命令）。
@@ -61,10 +61,6 @@ func mcpBridge(args []string) {
 		os.Exit(2)
 	}
 
-	// 日志一律 stderr（显式构造，不依赖 slog.Default 的偶然取值——那正是 C10 的隐患）。
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
-
 	// 父进程自保（M7-5）。底座是本进程的**直接父进程**，常态下它一死我们的 stdin 就被关闭 →
 	// `Serve` 读到 EOF → 正常退出（首要机制，见函数尾的 switch）。但 EOF 不够覆盖两种情形：
 	// ① 底座被强杀时写端可能仍被别处持着（管道被继承），EOF 不会到达；② stdin 上正阻塞着一次
@@ -79,7 +75,7 @@ func mcpBridge(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go watchParentExit(ctx, os.Getppid, parentPollInterval, func() {
-		logger.Warn("mcp bridge: 父进程（底座）已消失，开始停机")
+		glog.Warnw(context.Background(), "mcp bridge: 父进程（底座）已消失，开始停机")
 		cancel()
 	})
 
@@ -91,14 +87,13 @@ func mcpBridge(args []string) {
 		Cfg:        cfg,
 		AgentID:    scope.AgentID,
 		McpsPinned: scope.McpsPinned,
-		Logger:     logger,
 	})
 	if sErr != nil {
-		logger.Error("mcp bridge: 数据面装配失败（本轮工具面为空）", "err", sErr)
+		glog.Errorw(context.Background(), "mcp bridge: 数据面装配失败（本轮工具面为空）", "err", sErr)
 	} else {
 		defer func() {
 			if cErr := src.Close(); cErr != nil {
-				logger.Warn("mcp bridge: 数据面关闭失败", "err", cErr)
+				glog.Warnw(context.Background(), "mcp bridge: 数据面关闭失败", "err", cErr)
 			}
 		}()
 	}
@@ -110,14 +105,13 @@ func mcpBridge(args []string) {
 	err = gateway.Run(ctx, os.Stdin, os.Stdout, gateway.Options{
 		Scope:  gateway.Scope{AgentID: scope.AgentID, RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
 		Source: face,
-		Logger: logger,
 	})
 	switch {
 	case err == nil:
 		return // stdin EOF：父进程（底座）结束，正常退出
 	case errors.Is(err, context.Canceled):
 		// SIGINT/SIGTERM：正常停机，不打错误行（否则每次收尾都像出了故障）。
-		logger.Info("mcp bridge: 收到停机信号，退出")
+		glog.Infow(context.Background(), "mcp bridge: 收到停机信号，退出")
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "mcp bridge: %v\n", err)

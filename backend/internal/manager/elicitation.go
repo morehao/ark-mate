@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // 结构化提问通道（elicitation/*）配置。与权限通道同构：注册挂起 → 发事件 → 等待决策 → 回馈。
@@ -46,7 +46,6 @@ type ElicitationManager struct {
 	mu         sync.Mutex
 	pending    map[string]*pendingElicitation
 	timeout    time.Duration
-	logger     *slog.Logger
 	onResolved func(conversationID, id, reason string, d acl.ElicitationOutcome)
 }
 
@@ -58,14 +57,6 @@ func NewElicitationManager(timeout time.Duration) *ElicitationManager {
 	return &ElicitationManager{
 		pending: make(map[string]*pendingElicitation),
 		timeout: timeout,
-		logger:  slog.Default(),
-	}
-}
-
-// SetLogger 设置日志。
-func (m *ElicitationManager) SetLogger(l *slog.Logger) {
-	if l != nil {
-		m.logger = l
 	}
 }
 
@@ -179,7 +170,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	m.mu.Lock()
 	m.pending[id] = p
 	m.mu.Unlock()
-	m.logger.Info("elicitation: request registered", "conversation", conversationID, "id", id,
+	glog.Infow(ctx, "elicitation: request registered", "conversation", conversationID, "id", id,
 		"mode", req.Mode, "scope_source", scopeSource)
 
 	if publish != nil {
@@ -209,7 +200,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 		d = acl.ElicitationOutcome{Action: "cancel"} // 取消
 		reason = reasonCancel
 	case <-timer.C:
-		m.logger.Warn("elicitation: request timeout, auto-cancel", "conversation", conversationID, "id", id)
+		glog.Warnw(ctx, "elicitation: request timeout, auto-cancel", "conversation", conversationID, "id", id)
 		d = acl.ElicitationOutcome{Action: "cancel"}
 		reason = reasonTimeout
 	}
@@ -220,7 +211,7 @@ func (m *ElicitationManager) RegisterAndWait(ctx context.Context, conversationID
 	if onResolved != nil {
 		onResolved(conversationID, id, reason, d)
 	}
-	m.logger.Info("elicitation: resolved", "conversation", conversationID, "id", id, "action", d.Action, "reason", reason)
+	glog.Infow(ctx, "elicitation: resolved", "conversation", conversationID, "id", id, "action", d.Action, "reason", reason)
 	return d
 }
 
@@ -235,7 +226,7 @@ func (m *ElicitationManager) resolve(conversationID, id, reason string, d acl.El
 		return false, false
 	}
 	if conversationID != "" && p.conversationID != conversationID {
-		m.logger.Warn("elicitation: 决策会话与归属会话不符，拒绝（scope mismatch）",
+		glog.Warnw(context.Background(), "elicitation: 决策会话与归属会话不符，拒绝（scope mismatch）",
 			"id", id, "owner", p.conversationID, "caller", conversationID)
 		return true, true
 	}
@@ -293,13 +284,13 @@ func (m *ElicitationManager) CompleteByURLID(ownerConversation, urlID string) bo
 	}
 	if hit == nil {
 		m.mu.Unlock()
-		m.logger.Debug("elicitation: complete 未命中挂起项（已决/重放）", "url_id", urlID)
+		glog.Debugw(context.Background(), "elicitation: complete 未命中挂起项（已决/重放）", "url_id", urlID)
 		return false
 	}
 	if ownerConversation != "" && hit.conversationID != ownerConversation {
 		owner := hit.conversationID
 		m.mu.Unlock()
-		m.logger.Warn("elicitation: complete 与归属会话不符，拒绝（scope mismatch）",
+		glog.Warnw(context.Background(), "elicitation: complete 与归属会话不符，拒绝（scope mismatch）",
 			"url_id", urlID, "owner", owner, "caller", ownerConversation)
 		return false
 	}
@@ -308,7 +299,7 @@ func (m *ElicitationManager) CompleteByURLID(ownerConversation, urlID string) bo
 	default:
 	}
 	m.mu.Unlock()
-	m.logger.Info("elicitation: complete 收敛挂起项", "url_id", urlID, "conversation", hit.conversationID)
+	glog.Infow(context.Background(), "elicitation: complete 收敛挂起项", "url_id", urlID, "conversation", hit.conversationID)
 	return true
 }
 

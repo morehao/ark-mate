@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"log/slog"
 	"reflect"
 	"sort"
 	"strings"
@@ -67,21 +66,16 @@ type chunkCoalescer struct {
 	bufs    map[chunkKey]*chunkBuf
 	nextOrd int64
 	flushFn func(typ, conversationID string, payload any)
-	log     *slog.Logger
 	done    chan struct{}
 	once    sync.Once
 	wg      sync.WaitGroup
 }
 
 // newChunkCoalescer 构造合并器并启动定时窗口 goroutine（flushFn 必填，通常为 Service.publishRaw）。
-func newChunkCoalescer(flushFn func(typ, conversationID string, payload any), log *slog.Logger) *chunkCoalescer {
-	if log == nil {
-		log = slog.Default()
-	}
+func newChunkCoalescer(flushFn func(typ, conversationID string, payload any)) *chunkCoalescer {
 	c := &chunkCoalescer{
 		bufs:    make(map[chunkKey]*chunkBuf),
 		flushFn: flushFn,
-		log:     log,
 		done:    make(chan struct{}),
 	}
 	c.wg.Add(1)

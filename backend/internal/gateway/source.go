@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/mcp"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // SourceOptions 数据面参数（`AgentID` 必填）。
@@ -46,7 +46,6 @@ type SourceOptions struct {
 	AgentID string
 	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 回落 agent 声明）。
 	McpsPinned *[]string
-	Logger     *slog.Logger
 
 	// Store 注入已打开的持久层（测试用；nil → 按 Cfg 打开）。非 nil 时由调用方负责关闭。
 	Store *store.Store
@@ -66,7 +65,6 @@ type SourceOptions struct {
 
 // MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
 type MateSource struct {
-	log       *slog.Logger
 	svc       *manager.Service
 	pool      *mcp.Pool
 	ownPool   bool
@@ -92,9 +90,6 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if opts.AgentID == "" {
 		return nil, fmt.Errorf("网关数据面缺少 agent id")
 	}
-	if opts.Logger == nil {
-		opts.Logger = slog.Default()
-	}
 	if opts.PerServerTimeout <= 0 {
 		opts.PerServerTimeout = 8 * time.Second
 	}
@@ -102,7 +97,6 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		opts.Now = time.Now
 	}
 	s := &MateSource{
-		log:          opts.Logger,
 		agentDir:     opts.Cfg.AgentDir,
 		agentID:      opts.AgentID,
 		pinned:       opts.McpsPinned,
@@ -116,7 +110,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	if opts.Pool != nil {
 		s.pool = opts.Pool
 	} else {
-		s.pool = mcp.NewPool(mcp.PoolOptions{Logger: opts.Logger})
+		s.pool = mcp.NewPool(mcp.PoolOptions{})
 		s.ownPool = true
 	}
 
@@ -141,7 +135,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		s.svc.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
-	s.log.Info("mcp 网关数据面就绪",
+	glog.Infow(ctx, "mcp 网关数据面就绪",
 		"agent", s.agentID, "store", opts.Cfg.ResolvedStoreMode(), "db", opts.Cfg.DBPath,
 		"pinned", s.pinned != nil)
 	return s, nil
@@ -196,7 +190,7 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 		if o.err != nil {
 			// 一台远端不通/超时：这一轮它没有工具，其余照常（网关是单点，不能因为一台挂住就
 			// 让整个工具面消失）。错误进日志——降级必须留痕。
-			s.log.Error("mcp 网关: 列举远端工具失败（本轮该 server 无工具）",
+			glog.Errorw(ctx, "mcp 网关: 列举远端工具失败（本轮该 server 无工具）",
 				"server", srv.client.ID, "transport", srv.client.Transport, "err", o.err)
 			continue
 		}
@@ -217,7 +211,7 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 		for _, cl := range c.Claims {
 			owners = append(owners, cl.ServerID+"→"+cl.Raw)
 		}
-		s.log.Error("mcp 网关: 工具名跨 server 冲突，整组丢弃（fail-closed）",
+		glog.Errorw(ctx, "mcp 网关: 工具名跨 server 冲突，整组丢弃（fail-closed）",
 			"name", c.Name, "claims", strings.Join(owners, ", "))
 	}
 	tools := make([]mcp.Tool, 0, len(kept))
@@ -226,7 +220,7 @@ func (s *MateSource) Tools(ctx context.Context) ([]mcp.Tool, error) {
 		t.Name = names[i].Name
 		tools = append(tools, t)
 	}
-	s.log.Debug("mcp 网关: 工具面已取数",
+	glog.Debugw(ctx, "mcp 网关: 工具面已取数",
 		"servers", len(servers), "tools", len(tools), "conflicts", len(conflicts))
 	return tools, nil
 }
@@ -247,7 +241,7 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 		// 未知/已停用的工具：按 MCP 的"未知工具"分线（协议层 -32602），不是内部错误。
 		// 否决同样留痕：模型调一个已被收窄掉的工具时，日志里必须能看出"平台拒绝了它"，
 		// 而不是"远端没回话"——同样的 (tool, allow/deny) 证据面。
-		s.log.Info("mcp 网关: 工具调用被拒（不在当下工具面）",
+		glog.Infow(ctx, "mcp 网关: 工具调用被拒（不在当下工具面）",
 			"tool", name, "outcome", "deny", "candidates", strings.Join(ids, ","))
 		return mcp.CallResult{}, mcp.ErrToolNotFound
 	}
@@ -268,12 +262,12 @@ func (s *MateSource) Call(ctx context.Context, name string, args json.RawMessage
 	start := s.now()
 	res, err := s.pool.CallTool(cctx, target.client, tool, args)
 	if err != nil {
-		s.log.Info("mcp 网关: 工具调用失败",
+		glog.Infow(ctx, "mcp 网关: 工具调用失败",
 			"server", defID, "tool", tool, "outcome", "error",
 			"err", err, "latency_ms", s.now().Sub(start).Milliseconds())
 		return res, err
 	}
-	s.log.Info("mcp 网关: 工具调用完成",
+	glog.Infow(ctx, "mcp 网关: 工具调用完成",
 		"server", defID, "tool", tool, "outcome", "ok",
 		"latency_ms", s.now().Sub(start).Milliseconds())
 	return res, nil
@@ -304,7 +298,7 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 		_, headers, problems := s.svc.ResolveMcpSecrets(def)
 		if len(problems) > 0 {
 			if !s.warnOnce("secret:" + def.ID) {
-				s.log.Warn("mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)
+				glog.Warnw(ctx, "mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)
 			}
 			continue
 		}

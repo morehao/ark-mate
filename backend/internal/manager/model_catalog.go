@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 运行时派生的模型目录（决策记录 D2/D3）———
@@ -250,7 +250,7 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spe
 	// 取样用完即释放（close 只解除活跃态，不删该会话的持久记录）。
 	defer func() {
 		if cerr := sess.Close(context.WithoutCancel(ctx)); cerr != nil {
-			slog.Default().Debug("目录取样会话 close 失败（忽略）", "agent", agent.ID, "err", cerr)
+			glog.Debugw(ctx, "目录取样会话 close 失败（忽略）", "agent", agent.ID, "err", cerr)
 		}
 	}()
 	return sess.ConfigOptions(), nil
@@ -382,9 +382,9 @@ func (s *Service) authGuidanceFor(agentID string) []dtomodel.AuthGuidanceResp {
 // logCatalogFallback 目录降级留痕（resume 取样失败不阻塞接口：返回空目录由面板提示）。
 func (s *Service) logCatalogFallback(agentID, runtimeID string, err error) {
 	if ae, ok := acl.As(err); ok && ae != nil {
-		slog.Default().Debug("模型目录 resume 取样失败", "agent", agentID, "runtime", runtimeID,
+		glog.Debugw(context.Background(), "模型目录 resume 取样失败", "agent", agentID, "runtime", runtimeID,
 			"code", ae.Code, "class", string(ae.Class), "err", ae.Details)
 		return
 	}
-	slog.Default().Debug("模型目录 resume 取样失败", "agent", agentID, "runtime", runtimeID, "err", err)
+	glog.Debugw(context.Background(), "模型目录 resume 取样失败", "agent", agentID, "runtime", runtimeID, "err", err)
 }

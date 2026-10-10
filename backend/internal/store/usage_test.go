@@ -34,7 +34,7 @@ func seedConversationAgent(t *testing.T, s *Store, id, agentID string) {
 // TestUsageSummaryAggregate 用量聚合：计数/时长全量累加；上下文/费用按会话取最后快照；
 // 区间半开、agent 过滤、group_by=day 的 UTC 日期分桶。
 func TestUsageSummaryAggregate(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	day := func(d int, h int) time.Time {
 		return time.Date(2026, 9, d, h, 0, 0, 0, time.UTC)
 	}
@@ -156,7 +156,7 @@ func TestUsageInfoReported(t *testing.T) {
 //   - 一次上报只带上下文时，不应抹掉该会话此前上报的费用（反之亦然）；
 //   - 空币种归一 USD；出现多种币种时金额置零、币种 MIXED、明细走 CostByCurrency。
 func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	day := func(d, h int) time.Time {
 		return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC)
 	}
@@ -192,7 +192,7 @@ func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
 	}
 
 	// 单币种（含空币种归一）→ 正常求和。
-	s2 := openMem(t)
+	s2 := openTestDB(t)
 	seedRun(t, s2, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(time.Second),
 		`{"used":10,"size":100,"cost_amount":0.5,"cost_currency":"USD"}`)
 	seedRun(t, s2, "r2", "c2", "agent-a", "completed", day(1, 11), day(1, 11).Add(time.Second),

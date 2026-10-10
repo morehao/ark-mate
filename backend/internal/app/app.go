@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,6 +33,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/procreg"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ExitError 携带进程退出码的装配错误。
@@ -157,7 +157,7 @@ func (a *App) Init(ctx context.Context) error {
 			return usageErr("serve: runtimes.json 的 id %q 与内置 runtime 冲突", rt.ID)
 		}
 		reg.Register(runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
-		slog.Info("serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
+		glog.Infow(ctx, "serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
 	}
 
 	// runtime 子进程的配置隔离（M3-3；设计 §6.6）：把各底座的 home / cache / npm prefix 重定向到
@@ -165,7 +165,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 只作用于**本地子进程** runtime（远程端点不拉进程，Launch.Env 不会被读），已有键不覆盖——
 	// 适配器或 provider 档案显式给的取值优先（见 runtime.Registry.ApplyIsolationEnv）。
 	if ids := reg.ApplyIsolationEnv(cfg.HomeDir); len(ids) > 0 {
-		slog.Info("serve: 已注入 runtime 配置隔离环境", "home", cfg.HomeDir, "runtimes", ids)
+		glog.Infow(ctx, "serve: 已注入 runtime 配置隔离环境", "home", cfg.HomeDir, "runtimes", ids)
 	}
 
 	a.bus = eventbus.New()
@@ -198,10 +198,10 @@ func (a *App) Init(ctx context.Context) error {
 		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `mate capability import`。
 		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
+			glog.Warnw(ctx, "serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
 				"err", iErr, "dir", cfg.CapabilityDir)
 		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
-			slog.Info("serve: 存量能力定义导入完成",
+			glog.Infow(ctx, "serve: 存量能力定义导入完成",
 				"dir", imp.Dir, "skills", imp.Skills, "mcps", imp.Mcps,
 				"inserted", imp.Inserted, "existing", imp.Existing,
 				"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
@@ -213,10 +213,10 @@ func (a *App) Init(ctx context.Context) error {
 		// 两个域各自记指纹（`meta.imported_agents`）：只改 agent 目录不该让能力面的导入重跑一遍。
 		if imp, iErr := manager.ImportAgentDir(ctx, st, cfg.AgentDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `mate agent import` 重试）",
+			glog.Warnw(ctx, "serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `mate agent import` 重试）",
 				"err", iErr, "dir", cfg.AgentDir)
 		} else if !imp.Already && imp.Agents+imp.Inserted+imp.Existing+imp.Invalid > 0 {
-			slog.Info("serve: 存量 agent 定义导入完成",
+			glog.Infow(ctx, "serve: 存量 agent 定义导入完成",
 				"dir", imp.Dir, "agents", imp.Agents, "inserted", imp.Inserted,
 				"existing", imp.Existing, "invalid", imp.Invalid, "default_agent", imp.DefaultAgent)
 		}
@@ -228,10 +228,10 @@ func (a *App) Init(ctx context.Context) error {
 		// 三个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让另外两个域重跑。
 		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
+			glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 				"err", iErr, "dir", cfg.AutomationDir)
 		} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
-			slog.Info("serve: 存量 automation 定义导入完成",
+			glog.Infow(ctx, "serve: 存量 automation 定义导入完成",
 				"dir", imp.Dir, "automations", imp.Automations, "inserted", imp.Inserted,
 				"existing", imp.Existing, "invalid", imp.Invalid)
 		}
@@ -244,16 +244,16 @@ func (a *App) Init(ctx context.Context) error {
 		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
 		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.AgentDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			slog.Warn("serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
+			glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 				"err", iErr, "dir", cfg.AgentDir)
 		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
-			slog.Info("serve: 存量 provider 档案导入完成",
+			glog.Infow(ctx, "serve: 存量 provider 档案导入完成",
 				"dir", imp.Dir, "providers", imp.Providers, "inserted", imp.Inserted,
 				"existing", imp.Existing, "backup", imp.Backup, "plaintext_left", imp.Plaintext)
 		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
-			slog.Warn("serve: 从持久层恢复失败", "err", rErr)
+			glog.Warnw(ctx, "serve: 从持久层恢复失败", "err", rErr)
 		}
 		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `mate migrate`。
 		if conversations == 0 && events == 0 {
@@ -290,13 +290,13 @@ func (a *App) Init(ctx context.Context) error {
 	if p := cfg.ProcRegistryPath; p != "" {
 		pr, prErr := procreg.Open(p)
 		if prErr != nil {
-			slog.Warn("serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
+			glog.Warnw(ctx, "serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
 		} else {
 			a.orch.SetProcRegistry(pr)
 			if rep, rErr := a.orch.ReapOrphans(cfg.ReapGrace); rErr != nil {
-				slog.Warn("serve: 孤儿进程回收失败", "err", rErr)
+				glog.Warnw(ctx, "serve: 孤儿进程回收失败", "err", rErr)
 			} else if rep.Total() > 0 {
-				slog.Info("serve: 孤儿进程回收", "reaped", len(rep.Reaped),
+				glog.Infow(ctx, "serve: 孤儿进程回收", "reaped", len(rep.Reaped),
 					"cleaned", len(rep.Cleaned), "skipped", len(rep.Skipped), "registry", p)
 			}
 		}
@@ -309,7 +309,7 @@ func (a *App) Init(ctx context.Context) error {
 	if mode == config.StoreModeSQLite {
 		// 启动恢复会话级权限记忆（permission_memories 表 → perm.mem，allow/reject 双侧）。
 		if err := a.orch.RestoreMemoriesFromStore(ctx); err != nil {
-			slog.Warn("serve: 恢复权限记忆失败", "err", err)
+			glog.Warnw(ctx, "serve: 恢复权限记忆失败", "err", err)
 		}
 	}
 	if cfg.TurnTimeout > 0 {
@@ -326,11 +326,11 @@ func (a *App) Init(ctx context.Context) error {
 	// 平台侧 MCP 网关开关（M7-3）：默认 auto（开），只有显式 off 才回退到"远程直连注入"。
 	a.svc.SetMcpGatewayEnabled(cfg.McpGatewayEnabled())
 	if !cfg.McpGatewayEnabled() {
-		slog.Warn("serve: MATE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
+		glog.Warnw(ctx, "serve: MATE_MCP_GATEWAY=off —— 远程 MCP 回到直连注入（按底座承载能力过滤）")
 	}
 	if cfg.NativePermission == config.NativePermissionOff {
 		a.svc.SetNativePermission(false)
-		slog.Info("serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off）")
+		glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off）")
 	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
@@ -351,7 +351,7 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	a.assets = assets
 	if assets.Has() {
-		slog.Info("serve: 前端资产已就绪", "dir", assets.Path)
+		glog.Infow(ctx, "serve: 前端资产已就绪", "dir", assets.Path)
 	}
 
 	// M3-5：先绑定监听器，再用**实际监听地址**构造 Host 白名单 + Origin 矩阵，最后装配路由。
@@ -364,14 +364,14 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	originPolicy := middleware.NewOriginPolicy(ln.Addr().String(), cfg.AllowedOrigins)
 	if originPolicy.Enabled() {
-		slog.Info("serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
+		glog.Infow(ctx, "serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
 			"listen", ln.Addr().String(), "port", originPolicy.Port(), "allowed_origins", len(cfg.AllowedOrigins))
 	} else {
 		// 非回环监听的**明确放弃**，不是漏了：设计 §9.4 把 Host/Origin 白名单与
 		// "令牌强制 / TLS 终止 / 多操作员审计"并列为对外产品化缺的四件事之一，本期范围外；
 		// `--addr` 的 flag 说明也写明对外暴露自担风险。这里必须打 WARN —— 用户以为自己在
 		// 对外服务却没有任何 Host/Origin 防护，是那种"不说不出来就永远不知道"的形态。
-		slog.Warn("serve: 监听地址不是回环白名单主机（127.0.0.1/::1/localhost），Host 白名单 + Origin 矩阵**未启用**；"+
+		glog.Warnw(ctx, "serve: 监听地址不是回环白名单主机（127.0.0.1/::1/localhost），Host 白名单 + Origin 矩阵**未启用**；"+
 			"设计 §9.4 明确对外产品化所需的 Host/Origin 白名单不在本期范围，请自行用反向代理/防火墙收口",
 			"listen", ln.Addr().String(), "allowed_origins", len(cfg.AllowedOrigins))
 	}
@@ -383,7 +383,7 @@ func (a *App) Init(ctx context.Context) error {
 		Origin:      originPolicy,
 	}))
 	if creds := a.credentials(); creds.Required() {
-		slog.Info("serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
+		glog.Infow(ctx, "serve: 已启用凭据鉴权（除 /health 外的 REST 要求 rest 面 Bearer；WS 首帧 attach 要求 stream 面）",
 			"entries", creds.Count(), "ws_attach_deadline", credential.StreamAttachDeadline)
 	}
 	return nil
@@ -401,7 +401,7 @@ func (a *App) Init(ctx context.Context) error {
 func (a *App) credentials() *credential.Set {
 	if a.creds.Required() {
 		if a.cfg.Token != "" {
-			slog.Warn("serve: --auth-stdin 与 MATE_TOKEN 同时存在，以 --auth-stdin 的双凭据为准（MATE_TOKEN 被忽略）")
+			glog.Warnw(context.Background(), "serve: --auth-stdin 与 MATE_TOKEN 同时存在，以 --auth-stdin 的双凭据为准（MATE_TOKEN 被忽略）")
 		}
 		return a.creds
 	}
@@ -496,7 +496,7 @@ func (a *App) reconcileSkillProjections() {
 		p, ok, err := runtime.Resolve(sp, runtime.ProjectionSkill, a.cfg.ProjectionDirs, nil)
 		switch {
 		case err != nil:
-			slog.Warn("serve: skill 投影解析失败（该 runtime 不会收到任何技能）", "runtime", sp.ID, "err", err)
+			glog.Warnw(context.Background(), "serve: skill 投影解析失败（该 runtime 不会收到任何技能）", "runtime", sp.ID, "err", err)
 			projections = append(projections, manager.SkillProjection{Runtime: sp.ID, Err: err.Error()})
 			continue
 		case !ok:
@@ -506,12 +506,12 @@ func (a *App) reconcileSkillProjections() {
 		proj := manager.SkillProjection{Runtime: sp.ID, Projection: p}
 		w, r, mErr := a.svc.ReconcileSkillProjection(proj)
 		if mErr != nil {
-			slog.Warn("serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)
+			glog.Warnw(context.Background(), "serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)
 		} else if w > 0 || r > 0 {
-			slog.Info("serve: skill 物化重校完成", "runtime", sp.ID, "root", p.Root, "written", w, "removed", r)
+			glog.Infow(context.Background(), "serve: skill 物化重校完成", "runtime", sp.ID, "root", p.Root, "written", w, "removed", r)
 		}
 		if !p.Tested {
-			slog.Info("serve: skill 投影形态尚未端到端实测（产物会写，但底座是否读得到未验证）",
+			glog.Infow(context.Background(), "serve: skill 投影形态尚未端到端实测（产物会写，但底座是否读得到未验证）",
 				"runtime", sp.ID, "root", p.Root, "note", p.UnverifiedReason())
 		}
 		projections = append(projections, proj)
@@ -519,7 +519,7 @@ func (a *App) reconcileSkillProjections() {
 	a.svc.SetSkillProjections(projections)
 	for _, key := range sortedKeys(a.cfg.ProjectionDirs) {
 		if !claimed[key] {
-			slog.Warn("serve: MATE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
+			glog.Warnw(context.Background(), "serve: MATE_PROJECTION_DIRS 的这一项没有对应的已注册 runtime:skill，未生效（拼写？该 runtime 未注册？）",
 				"key", key, "dir", a.cfg.ProjectionDirs[key])
 		}
 	}
@@ -552,7 +552,7 @@ func (a *App) Run(ctx context.Context) error {
 	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
-			slog.Info("serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
+			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
 			_ = a.svc.AutoProbeMcpServers(ctx)
 		}()
 	}
@@ -561,7 +561,7 @@ func (a *App) Run(ctx context.Context) error {
 	// 只走 stdout 一行、不含任何令牌；壳按行首 `MATE_READY ` 匹配，拿不到就退回 health 轮询。
 	if a.readyStdout {
 		if line, err := ReadyLine(a.srv.Addr()); err != nil {
-			slog.Warn("serve: 组装就绪行失败，壳将退回 health 轮询", "err", err)
+			glog.Warnw(ctx, "serve: 组装就绪行失败，壳将退回 health 轮询", "err", err)
 		} else {
 			fmt.Println(line)
 		}

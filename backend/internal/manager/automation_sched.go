@@ -2,13 +2,13 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— Automation 调度循环（M4-4）———
@@ -59,7 +59,7 @@ type automationRunOutcome struct {
 // ——过期的 `once` 置 inactive、已跑完的 `once` 补状态——所以放在装配期不会拉起任何底座进程。
 func (s *Service) StartAutomationScheduler(interval time.Duration) {
 	if interval <= 0 {
-		slog.Info("automation 调度未启动（MATE_AUTOMATION_TICK=0）")
+		glog.Infow(context.Background(), "automation 调度未启动（MATE_AUTOMATION_TICK=0）")
 		return
 	}
 	s.mu.Lock()
@@ -129,7 +129,7 @@ func (s *Service) automationStartupPass(ctx context.Context) {
 			if rec.def.Schedule.At != nil {
 				missed = *rec.def.Schedule.At
 			}
-			slog.Warn("automation: once 已过期且从未运行，置 inactive（不补跑）", "automation", rec.def.ID)
+			glog.Warnw(ctx, "automation: once 已过期且从未运行，置 inactive（不补跑）", "automation", rec.def.ID)
 			s.finishAutomationRun(ctx, rec, automationRunOutcome{
 				scheduledFor: missed,
 				status:       automation.RunSkipped,
@@ -144,7 +144,7 @@ func (s *Service) automationStartupPass(ctx context.Context) {
 			}
 			if err := s.saveAutomationOverlay(ctx, rec.def.ID,
 				map[string]any{"state": automation.StateInactive}, automationLastFiredText(rec.def.LastFiredAt)); err != nil {
-				slog.Warn("automation: 补写 inactive 失败", "automation", rec.def.ID, "err", err)
+				glog.Warnw(ctx, "automation: 补写 inactive 失败", "automation", rec.def.ID, "err", err)
 			}
 		}
 	}
@@ -222,7 +222,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 				failure: true, cause: err,
 				reason: "认领失败（本次未建会话，下一个 tick 重试）：" + errText(err),
 			}
-			slog.Warn("automation 认领失败", "automation", rec.def.ID, "err", err)
+			glog.Warnw(ctx, "automation 认领失败", "automation", rec.def.ID, "err", err)
 			s.emitAutomationRun(rec.def.ID, out)
 			return out
 		}
@@ -258,7 +258,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 			failure: true, cause: err, claimed: out.claimed,
 			reason: "触发失败（已跳过本次，等修好后的下一个 occurrence）：" + errText(err),
 		}
-		slog.Warn("automation 触发失败", "automation", rec.def.ID, "err", err)
+		glog.Warnw(ctx, "automation 触发失败", "automation", rec.def.ID, "err", err)
 		return s.finishAutomationRun(ctx, rec, out)
 	}
 	out = automationRunOutcome{
@@ -312,7 +312,7 @@ func (s *Service) automationWatchdog(ctx context.Context, automationID, conversa
 	if !s.conversationRunning(conversationID) {
 		return
 	}
-	slog.Warn("automation 本轮超过 max_run_duration，自动取消",
+	glog.Warnw(ctx, "automation 本轮超过 max_run_duration，自动取消",
 		"automation", automationID, "conversation", conversationID, "max_run_duration", d.String())
 	// 取消的终态（run.cancelled）由 runTurn 依取消语义发布；这里只负责按下按钮。
 	_ = s.CancelTurn(context.WithoutCancel(ctx), conversationID)
@@ -379,10 +379,10 @@ func (s *Service) finishAutomationRun(ctx context.Context, rec automationRec, ou
 	}
 	if err := s.saveAutomationOverlay(ctx, rec.def.ID, overlay, expected); err != nil {
 		if s.st != nil {
-			slog.Error("automation 运行态写回失败（内存调度态不推进，下一 tick 按已认领的游标判为 duplicate，不会重复触发；这一轮留痕丢失）",
+			glog.Errorw(ctx, "automation 运行态写回失败（内存调度态不推进，下一 tick 按已认领的游标判为 duplicate，不会重复触发；这一轮留痕丢失）",
 				"automation", rec.def.ID, "err", err)
 		} else {
-			slog.Error("automation 运行态写回失败（内存调度态照常推进，重启后可能重跑一次）",
+			glog.Errorw(ctx, "automation 运行态写回失败（内存调度态照常推进，重启后可能重跑一次）",
 				"automation", rec.def.ID, "err", err)
 		}
 	}

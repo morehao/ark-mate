@@ -12,7 +12,7 @@ import (
 // 与能力面重复一遍是刻意的：本面是**第五次**同形落地，而"两边共用 commitDefinitionChange"
 // 这件事之所以可信，正是因为它被逐面钉过一次（任何一面偷偷绕开提交路径，这里就会缺审计）。
 func TestProviderDefinitionCAS(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 
 	// —— 新建（expectedRev=0）——
@@ -106,7 +106,7 @@ func TestProviderDefinitionCAS(t *testing.T) {
 // **由库自己保证**：重复插入被 SQLite 拒，且**拒绝时一行一审计都不落**
 // （"检查失败"与"写了一半"必须可分辨）。
 func TestModelDefinitionPairUnique(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 
 	if ok, err := s.CreateModelDefinition(ctx, "m1", "p1", "v4-flash", `{"name":"Flash"}`, "rest"); err != nil || !ok {
@@ -149,7 +149,7 @@ func TestModelDefinitionPairUnique(t *testing.T) {
 //  3. 模型行的正文改动**不碰**默认（两者在不同载体里，v11 那种"改别名顺手把默认清掉"的
 //     双写漂移在 v12 结构上不可能）。
 func TestDefaultModelIsSingleValue(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 
 	if ok, err := s.CreateModelDefinition(ctx, "a", "p1", "m-a", `{}`, "rest"); err != nil || !ok {

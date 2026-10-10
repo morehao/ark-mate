@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // AgentRec 是进程内 Agent 定义（P0：Agent 不再绑定单一 runtime，路由候选见 Runtimes）。
@@ -206,7 +206,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
 	s.coalescer = newChunkCoalescer(func(typ, conversationID string, payload any) {
 		s.publishRaw(typ, conversationID, payload)
-	}, slog.Default())
+	})
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
 	s.seedBuiltinAgents()
@@ -329,7 +329,7 @@ func (s *Service) markConversation(id, status string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateConversationMeta(ctx, id, store.ConversationMetaPatch{Status: &status}); err != nil {
-			slog.Default().Warn("store: mark conversation failed", "conversation", id, "err", err)
+			glog.Warnw(context.Background(), "store: mark conversation failed", "conversation", id, "err", err)
 		}
 	}
 }

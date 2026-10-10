@@ -17,7 +17,7 @@ import (
 // 因此这里不测「Go 值对不对」（那是别的测试的事），只测库里真实存的 typeof 与文本形态，
 // 把 model 的 serializer 约定钉死在测试里。
 func TestOnDiskFormatContract(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 	// 取一个带纳秒的时间：RFC3339Nano 会裁掉末尾多余的 0，必须能原样往返。
 	at := time.Date(2026, 9, 10, 10, 42, 23, 123456789, time.UTC)
@@ -294,7 +294,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 // transcript header 里没有 provider/model/runtime_hint/provider_session_id 四个字段，
 // 若导入沿用全列 upsert 语义，会把它们按零值覆盖——用户选过的模型在重复导入后消失。
 func TestUpsertForImportKeepsModelSelection(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 	if err := s.UpsertConversation(ctx, Conversation{
 		ID: "c1", AgentID: "a1", Status: "completed",

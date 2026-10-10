@@ -7,7 +7,6 @@ package ctrws
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
+	"github.com/morehao/golib/glog"
 )
 
 // WSCtr 实时事件通道（WS）控制器。
@@ -63,9 +63,8 @@ type Options struct {
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
 // 契约见 docs/design-and-roadmap.md §4.5。
 type wsCtr struct {
-	bus    *eventbus.Bus
-	logger *slog.Logger
-	creds  *credential.Set
+	bus   *eventbus.Bus
+	creds *credential.Set
 	// attachDeadline 首帧 attach 截止（见 Options.AttachDeadline）。
 	attachDeadline time.Duration
 	// originCheck 握手来源判定（M3-5；见 Options.OriginCheck）。nil = 不判定。
@@ -74,7 +73,7 @@ type wsCtr struct {
 
 // NewWSCtr 构造 WSCtr。
 func NewWSCtr(bus *eventbus.Bus, opts ...Options) WSCtr {
-	c := &wsCtr{bus: bus, logger: slog.Default(), attachDeadline: defaultAttachDeadline}
+	c := &wsCtr{bus: bus, attachDeadline: defaultAttachDeadline}
 	if len(opts) > 0 {
 		c.creds = opts[0].Credentials
 		c.originCheck = opts[0].OriginCheck
@@ -163,7 +162,7 @@ func (h *wsCtr) Handle(c *gin.Context) {
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
-		h.logger.Debug("ws upgrade failed", "err", err)
+		glog.Debugw(c.Request.Context(), "ws upgrade failed", "err", err)
 		return
 	}
 	defer ws.CloseNow()
@@ -203,7 +202,7 @@ func (h *wsCtr) awaitAttach(st *connState) {
 	case <-st.closed:
 	case <-st.handshake:
 	case <-t.C:
-		h.logger.Warn("ws 首帧 attach 超时，关闭连接", "deadline", h.attachDeadline)
+		glog.Warnw(st.ctx, "ws 首帧 attach 超时，关闭连接", "deadline", h.attachDeadline)
 		h.closeWithStatus(st, websocket.StatusPolicyViolation, "attach deadline exceeded")
 	}
 }
@@ -219,7 +218,7 @@ func (h *wsCtr) authorizeStream(token string) bool {
 
 // rejectHandshake 握手失败：记一行（不含令牌值）后以 1008 关闭。
 func (h *wsCtr) rejectHandshake(st *connState, reason string) {
-	h.logger.Warn("ws 首帧 attach 被拒，关闭连接", "reason", reason)
+	glog.Warnw(st.ctx, "ws 首帧 attach 被拒，关闭连接", "reason", reason)
 	h.closeWithStatus(st, websocket.StatusPolicyViolation, reason)
 }
 
@@ -373,7 +372,7 @@ func (h *wsCtr) writeLoop(st *connState) {
 		case frame := <-st.write:
 			b, err := json.Marshal(frame)
 			if err != nil {
-				h.logger.Debug("ws marshal failed", "type", frame.Type, "err", err)
+				glog.Debugw(st.ctx, "ws marshal failed", "type", frame.Type, "err", err)
 				continue
 			}
 			wctx, wcancel := context.WithTimeout(st.ctx, wsWriteWait)
@@ -403,7 +402,7 @@ func (h *wsCtr) pingLoop(st *connState) {
 			err := st.conn.Ping(pctx)
 			pcancel()
 			if err != nil {
-				h.logger.Debug("ws ping failed, closing", "err", err)
+				glog.Debugw(st.ctx, "ws ping failed, closing", "err", err)
 				h.shutdown(st)
 				return
 			}
@@ -416,7 +415,7 @@ func (h *wsCtr) send(st *connState, f wsServerFrame) {
 	select {
 	case st.write <- f:
 	default:
-		h.logger.Debug("ws write queue full, dropping frame", "type", f.Type)
+		glog.Debugw(st.ctx, "ws write queue full, dropping frame", "type", f.Type)
 	}
 }
 

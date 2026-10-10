@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -374,10 +376,17 @@ func TestServerInteropWithOwnClient(t *testing.T) {
 //
 // 为什么单独立一条：底座把 stdout 当协议流读，一行日志就让整套 JSON-RPC 错位，症状是
 // "工具莫名不可用"，而根因（`fmt.Print`）在代码评审里极易漏。这里真起子进程、逐行解析
-// stdout，并同时断言**诊断确实去了 stderr**（否则"stdout 干净"可能只是因为压根没日志）。
+// stdout，并同时断言**诊断确实写出了日志**（否则"stdout 干净"可能只是因为压根没日志）。
+//
+// 2026-10-10 起诊断出口是 **glog**，而 glog 的 console writer 写的就是 os.Stdout（golib 里
+// 硬编码，没有 stderr 选项）——所以真实 `mate mcp` 只能把它配成**文件** writer
+// （见 internal/app/command/logging.go）。子进程这里照同一形态初始化，断言落在文件上；
+// "mcp 子命令绝不配 console writer"这条本身由 internal/app/command 的守卫直接钉住。
 func TestServerStdoutPurity(t *testing.T) {
+	logDir := t.TempDir()
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(os.Environ(), "MATE_MCP_HELPER=1", "MATE_MCP_HELPER_MODE=server")
+	cmd.Env = append(os.Environ(), "MATE_MCP_HELPER=1", "MATE_MCP_HELPER_MODE=server",
+		"MATE_MCP_HELPER_LOG_DIR="+logDir)
 	frames := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -437,9 +446,31 @@ func TestServerStdoutPurity(t *testing.T) {
 			t.Fatalf("缺少 id=%v 的响应：%s", want, stdout.String())
 		}
 	}
-	if !strings.Contains(stderr.String(), "mcp bridge") {
-		t.Fatalf("诊断应走 stderr（否则「stdout 干净」可能只是因为压根没有日志）：%q", stderr.String())
+	if got := readLogTree(t, logDir); !strings.Contains(got, "mcp bridge") {
+		t.Fatalf("诊断必须真的写进日志出口（否则「stdout 干净」可能只是因为压根没有日志）：%q", got)
 	}
+}
+
+// readLogTree 把 glog 文件 writer 在 dir 下写出的全部日志读成一段文本
+// （布局是 <dir>/<YYYYMMDD>/<service>_full.log）。
+func readLogTree(t *testing.T, dir string) string {
+	t.Helper()
+	var sb strings.Builder
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, rErr := os.ReadFile(path)
+		if rErr != nil {
+			return rErr
+		}
+		sb.Write(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("读日志目录 %s: %v", dir, err)
+	}
+	return sb.String()
 }
 
 // TestGatewayArgsRoundTrip 注入端与网关端的参数形态同源：拼出来的必须能解回来，

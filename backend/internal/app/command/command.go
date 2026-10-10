@@ -7,6 +7,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
+	"github.com/morehao/golib/glog"
 )
 
 // mustConfig 解析配置（含 .ark-mate/config 目录化）。配置文件非法时打印明确错误并退出 2
@@ -85,6 +86,10 @@ func Run(args []string) int {
 		fmt.Fprint(os.Stderr, usageText)
 		return 1
 	}
+	// 进程日志出口（zap driver 的匿名引入在 cmd/mate）：必须先于任何子命令动作，
+	// 且 `mcp` 要按 stdout 协议纪律换成文件 writer（见 initProcessLogger）。
+	initProcessLogger(args)
+	defer func() { _ = glog.Close() }()
 	switch args[0] {
 	case "--version", "-version", "-v":
 		// 打包期消费点（M4-1）：`mate --version` 是 release.json 的 coreVersion 唯一取法。

@@ -23,10 +23,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/golib/glog"
 )
 
 // Scope 一条网关进程服务的范围：**只由稳定的标识构成**（P-2）。
@@ -58,8 +58,6 @@ type Options struct {
 	Scope Scope
 	// Source 数据面（nil = M7-1 的骨架形态，见 Source 注释）。
 	Source Source
-	// Logger 诊断出口。**必须是 stderr**（C10）；nil → slog.Default()（其默认 handler 也写 stderr）。
-	Logger *slog.Logger
 	// PageSize tools/list 每页条数（<=0 → mcp 包默认）。
 	PageSize int
 }
@@ -68,29 +66,24 @@ type Options struct {
 //
 // 返回值语义见 `mcp.Serve`：EOF → nil（正常退出路径，M7-5 的孙进程回收靠它）。
 func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options) error {
-	log := opts.Logger
-	if log == nil {
-		log = slog.Default()
-	}
 	if opts.Source == nil {
-		log.Warn("mcp bridge: 数据面未接线（M7-1 骨架形态）：工具面恒为空、调用一律未知工具",
+		glog.Warnw(ctx, "mcp bridge: 数据面未接线（M7-1 骨架形态）：工具面恒为空、调用一律未知工具",
 			"agent", opts.Scope.AgentID, "runtime", opts.Scope.RuntimeID)
 	}
-	h := &handler{src: opts.Source, log: log, scope: opts.Scope}
-	log.Info("mcp bridge: 网关启动（scope 只由 agent+runtime 决定 ⇒ 条目恒定、不换代际）",
+	h := &handler{src: opts.Source, scope: opts.Scope}
+	glog.Infow(ctx, "mcp bridge: 网关启动（scope 只由 agent+runtime 决定 ⇒ 条目恒定、不换代际）",
 		"agent", opts.Scope.AgentID, "runtime", opts.Scope.RuntimeID, "pid", pidOf())
 
 	return mcp.Serve(ctx, in, out, mcp.ServerInfo{
 		Name:         mcp.GatewayServerName,
 		Version:      version.Version,
 		Instructions: instructions(opts.Scope),
-	}, h, mcp.ServerOptions{PageSize: opts.PageSize, Logger: log})
+	}, h, mcp.ServerOptions{PageSize: opts.PageSize})
 }
 
 // handler 把 Source 接到 MCP 服务端的能力面上。
 type handler struct {
 	src   Source
-	log   *slog.Logger
 	scope Scope
 
 	warnedEmpty bool // "数据面未接线"只响一次，别把 stderr 刷爆
@@ -100,7 +93,7 @@ func (h *handler) ListTools(ctx context.Context) ([]mcp.Tool, error) {
 	if h.src == nil {
 		if !h.warnedEmpty {
 			h.warnedEmpty = true
-			h.log.Warn("mcp bridge: tools/list 时数据面仍为空（骨架形态；M7-2 接线后这里才该有工具）")
+			glog.Warnw(ctx, "mcp bridge: tools/list 时数据面仍为空（骨架形态；M7-2 接线后这里才该有工具）")
 		}
 		return nil, nil
 	}
@@ -108,10 +101,10 @@ func (h *handler) ListTools(ctx context.Context) ([]mcp.Tool, error) {
 	if err != nil {
 		// 取数失败（store 打不开 / 定义全是坏的）：**回空面而不是炸会话**——网关是单点，
 		// 炸掉整条会话的代价远大于"这一轮没有工具"。错误如实进日志（M7-4 的可观测面）。
-		h.log.Error("mcp bridge: 取工具面失败，本轮回空面", "err", err)
+		glog.Errorw(ctx, "mcp bridge: 取工具面失败，本轮回空面", "err", err)
 		return nil, nil
 	}
-	h.log.Debug("mcp bridge: tools/list", "tools", len(tools))
+	glog.Debugw(ctx, "mcp bridge: tools/list", "tools", len(tools))
 	return tools, nil
 }
 

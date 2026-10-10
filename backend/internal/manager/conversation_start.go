@@ -3,13 +3,13 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ApplyConversationModel 把模型变更应用到**已存在的会话**（会话内改模型）。
@@ -124,7 +124,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	// 只读——只有 T5 的话，dsh 上"设为默认"点了等于没点。
 	if opt.Model.Model == "" {
 		if v, err := o.svc.DefaultModelValueFor(ctx, spec.ID); err != nil {
-			slog.Default().Warn("读取平台默认模型失败（本次不下发，交给底座自己的默认）",
+			glog.Warnw(ctx, "读取平台默认模型失败（本次不下发，交给底座自己的默认）",
 				"runtime", spec.ID, "err", err)
 		} else if v != "" {
 			opt.Model = runtime.ModelConfig{Model: v}
@@ -281,7 +281,7 @@ func (o *Orchestrator) connectConversation(ctx context.Context, recIn *Conversat
 			sess, err = rc.client.ResumeSession(ctx, nativeID, opts)
 		}
 		if err != nil {
-			o.logger.Warn("原生恢复失败，转 handoff memo 兜底", "conversation", rec.ID,
+			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "conversation", rec.ID,
 				"runtime", spec.ID, "provider_session", nativeID, "err", err)
 			resumeOK = false
 		}
@@ -326,7 +326,7 @@ func (o *Orchestrator) connectConversation(ctx context.Context, recIn *Conversat
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
 				o.svc.catalog.markRejected(agent.ID, rec.Model, modelApplyReason(err))
 			}
-			o.logger.Warn("恢复后重放会话模型失败（忽略，继续用运行时当前值）",
+			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
 				"conversation", rec.ID, "runtime", spec.ID, "model", rec.Model, "err", err)
 		}
 	} else if len(as.proj.ConfigOptions()) > 0 {
@@ -397,7 +397,7 @@ func (o *Orchestrator) applyModelOnConversation(ctx context.Context, as *ActiveC
 	// 不预判、但留痕：取值不在会话当前广告列表里（缓存滞后/跨会话选择）时记一条，仍然下发由
 	// 运行时裁决——协议保证运行时只接受已广告的值，平台侧预判会因快照滞后造成假阴性。
 	if !acl.HasConfigValue(as.proj.ConfigOptions(), acl.CategoryModel, model.Model) {
-		o.logger.Debug("模型取值不在当前广告列表中，交由运行时裁决",
+		glog.Debugw(ctx, "模型取值不在当前广告列表中，交由运行时裁决",
 			"conversation", as.ID, "model", model.Model)
 	}
 	applied, err := as.proj.ApplyModel(ctx, model)
@@ -415,7 +415,7 @@ func (o *Orchestrator) applyModelOnConversation(ctx context.Context, as *ActiveC
 	}
 	// 运行时明确拒绝：记录该取值不可用（目录里标灰）后原样上抛。
 	o.svc.catalog.markRejected(agentID, model.Model, modelApplyReason(err))
-	slog.Default().Warn("apply model rejected by runtime",
+	glog.Warnw(ctx, "apply model rejected by runtime",
 		"conversation", as.ID, "runtime", spec.ID, "model", model.Model, "err", err)
 	return err
 }

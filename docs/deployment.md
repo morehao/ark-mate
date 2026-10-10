@@ -451,7 +451,10 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 - 存活探针：`GET /v1/mate/health`（`code:0`）。
 - 就绪判据（无独立 readiness 端点，按下列信号组合）：health 通 + `GET /v1/mate/agents` 返回非空
   + `GET /v1/mate/runtimes` 含预期底座。
-- 日志：stdout（JSON/text 由 slog 输出）。权限自动决策、MCP 探测、断连回收等关键路径均有日志
+- 日志：stdout（zap 编码的 JSON 行，由 golib 的 `glog` 输出，级别固定 info）。例外两条：
+  `mate mcp` 的 stdout 是 JSON-RPC 协议流，日志改落 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`；
+  `mate --json` 系子命令不装日志出口（保住 stdout 的机器可读性）。
+  权限自动决策、MCP 探测、断连回收等关键路径均有日志
   （如 `permission: auto-decided by agent policy`、`mcp: probe ...`）。
 - 事件留痕：会话事件同时落 SQLite `events` 表与 transcript 文件，可离线复盘。
 

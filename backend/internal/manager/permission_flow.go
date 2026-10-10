@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
@@ -30,11 +31,11 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 				"title": req.ToolCall.Title, "kind": req.ToolCall.Kind,
 				"allowed": d.Allowed, "rejected": d.Rejected, "option_id": d.OptionID,
 			})
-			o.logger.Info("permission: auto-decided by agent policy", "conversation", sid,
+			glog.Infow(ctx, "permission: auto-decided by agent policy", "conversation", sid,
 				"agent", agentID, "action", action, "title", req.ToolCall.Title, "kind", req.ToolCall.Kind)
 			return d
 		}
-		o.logger.Warn("permission: agent policy action has no matching option, fallback to ask",
+		glog.Warnw(ctx, "permission: agent policy action has no matching option, fallback to ask",
 			"conversation", sid, "agent", agentID, "action", action, "options", len(req.Options))
 	}
 	if d, ok := o.perm.AutoDecision(sid, req); ok {

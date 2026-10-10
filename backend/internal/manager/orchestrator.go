@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/ark-mate/pkg/procreg"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
@@ -127,8 +127,6 @@ type Orchestrator struct {
 	// generationLimit 同一基础键（runtime + 原生权限 + provider）下允许并存的代际上限
 	// （见 SetGenerationLimit / MATE_GENERATION_LIMIT）。0 = 不限制。
 	generationLimit int
-
-	logger *slog.Logger
 }
 
 type runtimeConn struct {
@@ -207,7 +205,6 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
 		generationLimit: DefaultGenerationLimit,
-		logger:          slog.Default(),
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
 	// （conversation.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
@@ -261,7 +258,7 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 		})
 	}
 	o.perm.LoadMemories(items)
-	o.logger.Info("permission memories restored", "count", len(items))
+	glog.Infow(ctx, "permission memories restored", "count", len(items))
 	return nil
 }
 
@@ -295,13 +292,6 @@ func (o *Orchestrator) GenerationLimit() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.generationLimit
-}
-
-// SetLogger 设置编排日志。
-func (o *Orchestrator) SetLogger(l *slog.Logger) {
-	if l != nil {
-		o.logger = l
-	}
 }
 
 // conversation 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。

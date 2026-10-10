@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— §6 busy input 队列（排队 / 插话） ———
@@ -120,7 +120,7 @@ func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedI
 	if s.st != nil {
 		rows, err := s.st.ListQueuedInputs(ctx, convID)
 		if err != nil {
-			slog.Default().Warn("读取待投递输入失败", "conversation", convID, "err", err)
+			glog.Warnw(ctx, "读取待投递输入失败", "conversation", convID, "err", err)
 			return nil
 		}
 		out := make([]QueuedInput, 0, len(rows))
@@ -161,24 +161,24 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 		for {
 			head, err := s.st.HeadQueuedInput(ctx, convID)
 			if err != nil {
-				slog.Default().Warn("取队首输入失败", "conversation", convID, "err", err)
+				glog.Warnw(ctx, "取队首输入失败", "conversation", convID, "err", err)
 				return nil, false
 			}
 			if head == nil {
 				return nil, false
 			}
 			if head.Generation != generation {
-				slog.Default().Warn("排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
+				glog.Warnw(ctx, "排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
 					"conversation", convID, "input_id", head.ID, "queued_gen", head.Generation, "now_gen", generation)
 				if _, err := s.st.StaleQueuedInput(ctx, head.ID); err != nil {
-					slog.Default().Warn("标记排队输入作废失败", "input_id", head.ID, "err", err)
+					glog.Warnw(ctx, "标记排队输入作废失败", "input_id", head.ID, "err", err)
 					return nil, false
 				}
 				continue
 			}
 			ok, err := s.st.ClaimQueuedInput(ctx, head.ID, time.Now().UTC())
 			if err != nil {
-				slog.Default().Warn("认领排队输入失败", "input_id", head.ID, "err", err)
+				glog.Warnw(ctx, "认领排队输入失败", "input_id", head.ID, "err", err)
 				return nil, false
 			}
 			if !ok {
@@ -195,7 +195,7 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 		in := list[0]
 		list = list[1:]
 		if in.Generation != generation {
-			slog.Default().Warn("排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
+			glog.Warnw(ctx, "排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
 				"conversation", convID, "input_id", in.ID, "queued_gen", in.Generation, "now_gen", generation)
 			continue
 		}
@@ -239,18 +239,18 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 	}
 	pending, err := s.st.ListAllQueuedInputs(ctx)
 	if err != nil {
-		slog.Default().Warn("读取重启前的排队输入失败", "err", err)
+		glog.Warnw(ctx, "读取重启前的排队输入失败", "err", err)
 		return
 	}
 	n, err := s.st.StaleAllQueuedInputs(ctx)
 	if err != nil {
-		slog.Default().Warn("作废重启前的排队输入失败", "err", err)
+		glog.Warnw(ctx, "作废重启前的排队输入失败", "err", err)
 		return
 	}
 	if n == 0 {
 		return
 	}
-	slog.Default().Warn("重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
+	glog.Warnw(ctx, "重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
 	for _, r := range pending {
 		// agent_id 此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
 		s.publish(BusInputCancelled, r.ConversationID, map[string]any{
@@ -287,7 +287,7 @@ func (o *Orchestrator) deliverQueued(as *ActiveConversation) {
 	// 先启动新一轮、再发布 delivered：反过来（先发 delivered 再 Prompt）一旦启动失败，
 	// 前端会看到队列项凭空消失而其文本从未作为 user_message 出现过。
 	if _, err := o.Prompt(context.Background(), as.ID, q.Text); err != nil {
-		o.logger.Warn("排队输入投递失败", "conversation", as.ID, "input_id", q.ID, "err", err)
+		glog.Warnw(context.Background(), "排队输入投递失败", "conversation", as.ID, "input_id", q.ID, "err", err)
 		o.svc.publish(BusInputCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "agent_id": as.AgentID, "input_id": q.ID,
 			"delivery": q.Delivery, "reason": ReasonDeliverFail,

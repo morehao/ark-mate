@@ -1,12 +1,13 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— M6-8 / P-13：agent 写面之后的能力面变更通知 ———
@@ -82,7 +83,7 @@ func (s *Service) notifyAgentCapabilityChange(agentID, field string) (evicted, d
 		return 0, 0
 	}
 	evicted, deferred = s.orch.evictIdleCapabilityHandles(agentID, field)
-	slog.Info("能力面变更：空闲会话句柄已作废（下一轮按当前定义重建）",
+	glog.Infow(context.Background(), "能力面变更：空闲会话句柄已作废（下一轮按当前定义重建）",
 		"agent", agentID, "field", field, "evicted", evicted, "deferred", deferred)
 	return evicted, deferred
 }

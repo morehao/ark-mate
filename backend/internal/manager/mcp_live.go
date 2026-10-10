@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/golib/glog"
 )
 
 // MCP 工具调用预算（B1）：默认 30s（工具可能慢），上限 5min（防请求挂死）。
@@ -50,7 +50,7 @@ func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapab
 		return nil, code.FromError(acl.NewError(mcpCallClass(err), mcp.CodeOf(err),
 			fmt.Sprintf("[%s] %s", mcp.CodeOf(err), err.Error()), nil))
 	}
-	slog.Default().Info("mcp 工具调用完成", "server", id, "tool", tool,
+	glog.Infow(ctx, "mcp 工具调用完成", "server", id, "tool", tool,
 		"is_error", res.IsError, "blocks", len(res.Content), "ms", time.Since(start).Milliseconds())
 	return &dtocapability.McpToolCallResp{
 		ServerID: id, Tool: tool, IsError: res.IsError,

@@ -1,13 +1,14 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
-	"log/slog"
 	"sort"
 	"strings"
 
 	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— B5：原生权限映射（platform permission_policy → runtime 原生权限开关） ———
@@ -221,6 +222,6 @@ func (s *Service) nativePermissionEnvFor(runtimeID string, p *PermissionPolicy) 
 	if len(extra) == 0 {
 		return nil
 	}
-	slog.Default().Info("原生权限映射", "runtime", runtimeID, "detail", desc)
+	glog.Infow(context.Background(), "原生权限映射", "runtime", runtimeID, "detail", desc)
 	return extra
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
@@ -128,7 +129,7 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, conversationID, t
 			// 取消失败（会话/连接已变）：入队项留着没有意义——就地撤下，避免留下一条
 			// 「谁也不等」的孤儿队列项。
 			if _, derr := o.svc.deleteQueuedInput(ctx, conversationID, q.ID); derr != nil {
-				o.logger.Warn("取消当前轮失败且撤下排队项失败", "conversation", conversationID, "input_id", q.ID, "err", derr)
+				glog.Warnw(ctx, "取消当前轮失败且撤下排队项失败", "conversation", conversationID, "input_id", q.ID, "err", derr)
 			}
 			o.svc.publish(BusInputCancelled, conversationID, map[string]any{
 				"session_id": conversationID, "agent_id": as.AgentID, "input_id": q.ID,
@@ -150,7 +151,7 @@ func (o *Orchestrator) watchdogTurn(as *ActiveConversation, conversationID strin
 	select {
 	case <-t.done:
 	case <-timer.C:
-		o.logger.Warn("turn 超过看门狗时限，自动取消", "conversation", conversationID, "timeout", o.turnTimeout.String())
+		glog.Warnw(context.Background(), "turn 超过看门狗时限，自动取消", "conversation", conversationID, "timeout", o.turnTimeout.String())
 		_ = o.CancelTurn(context.Background(), conversationID)
 	}
 }
@@ -200,7 +201,7 @@ func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 		// 归 interrupted —— 无终态、可续聊重发（与崩溃恢复同义）。刻意不发 turn.error /
 		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
 		o.svc.markConversation(as.ID, ConversationStatusInterrupted)
-		o.logger.Info("turn 因连接主动拆除而中断（会话保留，可续聊重发）",
+		glog.Infow(context.Background(), "turn 因连接主动拆除而中断（会话保留，可续聊重发）",
 			"conversation", as.ID, "agent", as.AgentID)
 	case cancelled:
 		o.svc.markConversation(as.ID, ConversationStatusCancelled)
@@ -270,7 +271,7 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) er
 	select {
 	case <-done:
 	case <-cctx.Done():
-		o.logger.Debug("conversation/cancel RPC 未在限期内响应，本地强制解除",
+		glog.Debugw(ctx, "conversation/cancel RPC 未在限期内响应，本地强制解除",
 			"conversation", conversationID, "timeout", agentCancelTimeout.String())
 	}
 	t.cancel()                                // 解除 SDK 阻塞

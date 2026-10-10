@@ -8,8 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,7 +51,7 @@ func poolCtx(t *testing.T) context.Context {
 func TestPoolReusesSession(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "spawn.log")
 	ctx := poolCtx(t)
-	p := NewPool(PoolOptions{Logger: testLogger()})
+	p := NewPool(PoolOptions{})
 	t.Cleanup(p.Close)
 	s := poolServer(t, "alpha", "", log)
 
@@ -87,7 +85,7 @@ func TestPoolReusesSession(t *testing.T) {
 func TestPoolRebuildsOnDefinitionChange(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "spawn.log")
 	ctx := poolCtx(t)
-	p := NewPool(PoolOptions{Logger: testLogger()})
+	p := NewPool(PoolOptions{})
 	t.Cleanup(p.Close)
 	s := poolServer(t, "alpha", "", log)
 	if _, err := p.CallTool(ctx, s, "read_file", nil); err != nil {
@@ -118,7 +116,7 @@ func TestPoolRebuildsOnDefinitionChange(t *testing.T) {
 func TestPoolRPCErrorKeepsSession(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "spawn.log")
 	ctx := poolCtx(t)
-	p := NewPool(PoolOptions{Logger: testLogger()})
+	p := NewPool(PoolOptions{})
 	t.Cleanup(p.Close)
 	s := poolServer(t, "alpha", "call_mixed", log)
 
@@ -152,7 +150,6 @@ func TestPoolReapIdleClosesSession(t *testing.T) {
 	p := NewPool(PoolOptions{
 		IdleTimeout: time.Minute,
 		Now:         func() time.Time { return now },
-		Logger:      testLogger(),
 	})
 	t.Cleanup(p.Close)
 	s := poolServer(t, "alpha", "", log)
@@ -182,7 +179,7 @@ func TestPoolReapIdleClosesSession(t *testing.T) {
 func TestPoolEvictsWhenFull(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "spawn.log")
 	ctx := poolCtx(t)
-	p := NewPool(PoolOptions{MaxSessions: 1, Logger: testLogger()})
+	p := NewPool(PoolOptions{MaxSessions: 1})
 	t.Cleanup(p.Close)
 	a := poolServer(t, "alpha", "", log)
 	b := poolServer(t, "beta", "", log)
@@ -208,7 +205,7 @@ func TestPoolEvictsWhenFull(t *testing.T) {
 // TestPoolCloseIsTerminal 退出路径：Close 之后取用一律失败（且幂等）。
 func TestPoolCloseIsTerminal(t *testing.T) {
 	ctx := poolCtx(t)
-	p := NewPool(PoolOptions{Logger: testLogger()})
+	p := NewPool(PoolOptions{})
 	s := poolServer(t, "alpha", "", filepath.Join(t.TempDir(), "spawn.log"))
 	if _, err := p.CallTool(ctx, s, "read_file", nil); err != nil {
 		t.Fatal(err)
@@ -245,9 +242,4 @@ func TestServerKeyCoversConnectionFields(t *testing.T) {
 			t.Fatalf("第 %d 项变化没进键（会让旧连接被错误复用）", i)
 		}
 	}
-}
-
-// testLogger 池的日志走 io.Discard：用例只断言行为，不靠日志文本（日志是给人看的）。
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

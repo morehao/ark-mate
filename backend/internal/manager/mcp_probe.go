@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/golib/glog"
 )
 
 // defaultMCPProbeTimeout 单次探测预算（覆盖 spawn + initialize + tools/list 翻页）。
@@ -178,26 +178,26 @@ func (s *Service) ProbeMcpServer(ctx context.Context, id string) (*dtocapability
 func (s *Service) AutoProbeMcpServers(ctx context.Context) error {
 	servers := s.caps.ListMcpServers()
 	if len(servers) == 0 {
-		slog.Default().Info("mcp 自动探测：无已注册 server，跳过")
+		glog.Infow(ctx, "mcp 自动探测：无已注册 server，跳过")
 		return nil
 	}
-	slog.Default().Info("mcp 自动探测开始", "servers", len(servers))
+	glog.Infow(ctx, "mcp 自动探测开始", "servers", len(servers))
 	var okCount, failCount int
 	for _, sv := range servers {
 		if err := ctx.Err(); err != nil {
-			slog.Default().Warn("mcp 自动探测被中断", "done", okCount+failCount, "total", len(servers), "err", err)
+			glog.Warnw(ctx, "mcp 自动探测被中断", "done", okCount+failCount, "total", len(servers), "err", err)
 			return err
 		}
 		res, err := s.ProbeMcpServer(ctx, sv.ID)
 		if err != nil {
 			failCount++
-			slog.Default().Warn("mcp 自动探测失败", "server", sv.ID, "err", err)
+			glog.Warnw(ctx, "mcp 自动探测失败", "server", sv.ID, "err", err)
 			continue
 		}
 		okCount++
-		slog.Default().Info("mcp 自动探测完成", "server", sv.ID,
+		glog.Infow(ctx, "mcp 自动探测完成", "server", sv.ID,
 			"tools", res.ToolCount, "added", res.Added, "removed", res.Removed)
 	}
-	slog.Default().Info("mcp 自动探测结束", "ok", okCount, "failed", failCount)
+	glog.Infow(ctx, "mcp 自动探测结束", "ok", okCount, "failed", failCount)
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +17,7 @@ import (
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 存量 provider 档案的一次性导入与导出（v11 下半） ———
@@ -131,18 +131,18 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 	// ⑤ 对账：不一致只告警（档案数量是几十条，任何不一致都该被人看见，而不是被静默放过或直接拒绝启动）。
 	stats.Mismatch = reconcileProviderRows(ctx, st, expected)
 	if len(stats.Mismatch) > 0 {
-		slog.Warn("providers: 导入对账不一致（档案行与 providers.json 不等价；跑 `mate doctor --json` 查看）",
+		glog.Warnw(ctx, "providers: 导入对账不一致（档案行与 providers.json 不等价；跑 `mate doctor --json` 查看）",
 			"dir", dir, "count", len(stats.Mismatch))
 		if err := st.SetMeta(ctx, model.MetaKeyProvidersImportMismatch, strings.Join(stats.Mismatch, "\n")); err != nil {
-			slog.Warn("providers: 写对账不一致标记失败", "err", err)
+			glog.Warnw(ctx, "providers: 写对账不一致标记失败", "err", err)
 		}
 	} else if err := st.SetMeta(ctx, model.MetaKeyProvidersImportMismatch, ""); err != nil {
-		slog.Warn("providers: 清除对账不一致标记失败", "err", err)
+		glog.Warnw(ctx, "providers: 清除对账不一致标记失败", "err", err)
 	}
 
 	// ⑥ 不删、不回写。若正文里仍有明文，明确说出来（它是降级路径的痕迹，不是失败）。
 	if stats.Plaintext > 0 {
-		slog.Warn("providers: 有档案的密钥仍是明文（vault 不可用）；修好 vault 后重跑 `mate provider import`",
+		glog.Warnw(ctx, "providers: 有档案的密钥仍是明文（vault 不可用）；修好 vault 后重跑 `mate provider import`",
 			"count", stats.Plaintext)
 	}
 	return stats, nil
@@ -181,7 +181,7 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 		vaultTried = true
 		vst, verr = vault.Open(filepath.Dir(dir))
 		if verr != nil {
-			slog.Warn("providers: vault 不可用，旧明文将原样保留在正文里", "err", verr)
+			glog.Warnw(context.Background(), "providers: vault 不可用，旧明文将原样保留在正文里", "err", verr)
 		}
 		return vst
 	}

@@ -11,14 +11,16 @@
 package procreg
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // Entry 一条子进程登记。
@@ -76,7 +78,7 @@ func Open(path string) (*Registry, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		bak := path + ".corrupt"
 		_ = os.WriteFile(bak, data, 0o600)
-		slog.Warn("procreg: 注册表损坏，已备份并重建", "path", path, "backup", bak, "err", err)
+		glog.Warnw(context.Background(), "procreg: 注册表损坏，已备份并重建", "path", path, "backup", bak, "err", err)
 		return r, nil
 	}
 	for _, e := range file.Entries {
@@ -198,7 +200,7 @@ func (r *Registry) Reap(grace time.Duration) (Report, error) {
 		if e.PGID > 0 {
 			if cur := pgidOf(e.PID); cur != e.PGID {
 				rep.Skipped = append(rep.Skipped, e)
-				slog.Warn("procreg: 跳过疑似 PID 复用的登记（pgid 不一致）",
+				glog.Warnw(context.Background(), "procreg: 跳过疑似 PID 复用的登记（pgid 不一致）",
 					"pid", e.PID, "want_pgid", e.PGID, "got_pgid", cur, "command", e.Command)
 				_ = r.Remove(e.PID)
 				continue
@@ -206,12 +208,12 @@ func (r *Registry) Reap(grace time.Duration) (Report, error) {
 		}
 		if err := killGroup(e, termSignal()); err != nil && !gone(err) {
 			rep.Skipped = append(rep.Skipped, e)
-			slog.Warn("procreg: 终止孤儿进程失败", "pid", e.PID, "pgid", e.PGID, "err", err)
+			glog.Warnw(context.Background(), "procreg: 终止孤儿进程失败", "pid", e.PID, "pgid", e.PGID, "err", err)
 			continue
 		}
 		if !waitGone(e.PID, grace) {
 			if err := killGroup(e, killSignal()); err != nil && !gone(err) {
-				slog.Warn("procreg: 强杀孤儿进程失败", "pid", e.PID, "err", err)
+				glog.Warnw(context.Background(), "procreg: 强杀孤儿进程失败", "pid", e.PID, "err", err)
 			}
 			waitGone(e.PID, grace)
 		}
@@ -219,7 +221,7 @@ func (r *Registry) Reap(grace time.Duration) (Report, error) {
 		_ = r.Remove(e.PID)
 	}
 	if rep.Total() > 0 {
-		slog.Info("procreg: 启动孤儿回收完成",
+		glog.Infow(context.Background(), "procreg: 启动孤儿回收完成",
 			"reaped", len(rep.Reaped), "cleaned", len(rep.Cleaned), "skipped", len(rep.Skipped))
 	}
 	return rep, nil

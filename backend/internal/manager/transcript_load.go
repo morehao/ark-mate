@@ -2,12 +2,14 @@ package manager
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // loadTranscripts 在 daemon 启动（SetTranscriptDir 之后）回读 transcript 目录，重建会话列表与
@@ -36,7 +38,7 @@ func (s *Service) loadTranscripts() {
 			}
 		}
 	}
-	slog.Default().Debug("transcripts loaded", "count", len(files))
+	glog.Debugw(context.Background(), "transcripts loaded", "count", len(files))
 }
 
 // transcriptLine 是回读时保留的事件原语（type + 聚合版本 + 载荷），用于注入 bus。
@@ -57,7 +59,7 @@ type transcriptFile struct {
 func loadTranscriptFile(path string) *transcriptFile {
 	f, err := os.Open(path)
 	if err != nil {
-		slog.Warn("transcript: load open failed", "path", path, "err", err)
+		glog.Warnw(context.Background(), "transcript: load open failed", "path", path, "err", err)
 		return nil
 	}
 	defer f.Close()
@@ -104,7 +106,7 @@ func loadTranscriptFile(path string) *transcriptFile {
 		lines = append(lines, transcriptLine{typ: ev.Type, version: int64(len(lines)) + 1, payload: ev.Payload})
 	}
 	if err := sc.Err(); err != nil {
-		slog.Warn("transcript: load scan failed", "path", path, "err", err)
+		glog.Warnw(context.Background(), "transcript: load scan failed", "path", path, "err", err)
 	}
 	if hdr == nil {
 		return nil

@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/morehao/ark-mate/pkg/logging"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
@@ -19,8 +19,6 @@ const defaultDialTimeout = 15 * time.Second
 type ClientOptions struct {
 	// OnEvent 接收归一化后的 ACP notification（acl 不感知总线，由注入方决定去向）。
 	OnEvent func(Event)
-	// Logger 透传给 SDK 连接诊断（nil → 静默）。
-	Logger *slog.Logger
 	// RequestPermission 处理 agent 的一次权限请求并**阻塞等待宿主决策**（同步变体，
 	// 由 SDK 在独立的 goroutine 中调用，见 acp-go-sdk connection.go 的 go func 分发，
 	// 阻塞不会卡死通知读循环）。nil 时回退旧 AllowPermission（若也 nil 则一律拒绝）。
@@ -80,9 +78,9 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	}
 	host := &hostClient{opts: opts, reg: newSessionRegistry()}
 	conn := acpsdk.NewClientSideConnection(host, t.Stdin(), t.Stdout())
-	if opts.Logger != nil {
-		conn.SetLogger(opts.Logger)
-	}
+	// SDK 的连接诊断**只能**收 *slog.Logger（SetLogger 的签名如此），这里是全仓
+	// 唯一的 slog 边界：桥进 glog，避免协议层诊断绕开平台的日志出口。
+	conn.SetLogger(logging.SDKLogger())
 
 	// 握手限时：runtime 只起进程不答 initialize（如卡在交互登录）时拨号有界返回，
 	// 归类 connection/timeout，避免 REST 创建会话无限挂起。

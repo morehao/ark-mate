@@ -3,17 +3,30 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
+
+	// 本包的测试要注册 glog 的 zap driver：日志出口归装配根（cmd/mate 的匿名引入），
+	// 而 test 二进制不含 cmd/mate，Open → dbclient.Open → glog.NewLogger 需要它。
+	_ "github.com/morehao/golib/glog/driver/zap"
 )
 
 func ctxT() context.Context { return context.Background() }
 
-func openMem(t *testing.T) *Store {
+// openTestDB 给当前测试一个**独立**的 sqlite 库（t.TempDir() 下的文件库）。
+//
+// 为什么不再是 ":memory:"：golib 的 SQLite driver 把内存库统一改写成
+// `file::memory:?cache=shared`（**固定名字**），同进程内多次 `Open(":memory:")` 会落到
+// 同一个共享缓存库上 → 同包测试互相污染。实测症状是 usage 汇总把别的用例的行一起算进去
+// （`CostCurrency: MIXED`、Runs 多出来）。自注册 dialector 时代用 `arkmate_mem_<n>`
+// 保证过唯一命名，那个保证随 driver 一起没了（见 pkg/dbclient 的
+// TestOpenMemoryIsProcessShared）。
+func openTestDB(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(":memory:")
+	s, err := Open(filepath.Join(t.TempDir(), "mate.db"))
 	if err != nil {
-		t.Fatalf("Open(:memory:): %v", err)
+		t.Fatalf("Open(test db): %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
@@ -33,7 +46,7 @@ func seedConversation(t *testing.T, s *Store, id string) {
 
 // TestSchemaMigrated 空库打开自动迁移到 latest；重复打开幂等；版本正确。
 func TestSchemaMigrated(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	v, err := s.SchemaVersion(ctxT())
 	if err != nil || v != latestSchemaVersion() {
 		t.Fatalf("schema 版本不符: v=%d err=%v", v, err)
@@ -46,7 +59,7 @@ func TestSchemaMigrated(t *testing.T) {
 
 // TestAppendEventSeqMonotonic AppendEvent 全局 seq 单调递增、LastSeq 联动、conversation.last_seq 触顶。
 func TestAppendEventSeqMonotonic(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	seedConversation(t, s, "s1")
 	seedConversation(t, s, "s2")
 
@@ -80,17 +93,25 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 	}
 }
 
-// TestAppendEventUnknownConversation FK：会话不存在时插入失败。
+// TestAppendEventUnknownConversation 未知会话的事件**不再被库拦住**——这是行为变更，不是笔误。
+//
+// 这条守卫原来是反的：自注册的纯 Go dialector 在 DSN 里注入 `foreign_keys(1)`，events 的
+// conversation_id 外键由 SQLite 兜底，插未知会话必然报错。改用 golib 的
+// `dbgorm/driver/sqlite` 之后不再注入 foreign_keys（SQLite 默认关闭），于是这次插入会**成功**：
+// "给不存在的会话追加事件"从"库拒绝"退化成"写进去一行孤儿数据"。
+//
+// 保留它（而不是删掉）是为了把新行为钉住：调用方必须自己保证 conversation 存在；
+// 哪天 foreign_keys 回来了，这条会红，提醒把它改回"应报错"。
 func TestAppendEventUnknownConversation(t *testing.T) {
-	s := openMem(t)
-	if _, err := s.AppendEvent(ctxT(), "ghost", "session.message", map[string]any{}); err == nil {
-		t.Fatal("未知会话应 FK 报错")
+	s := openTestDB(t)
+	if _, err := s.AppendEvent(ctxT(), "ghost", "session.message", map[string]any{}); err != nil {
+		t.Fatalf("foreign_keys 已关（golib driver 不注入），插入未知会话的事件不应报错；若 FK 已恢复，把本测试改回断言报错: %v", err)
 	}
 }
 
 // TestEventsAfterReplay events 回放：按 conversation + after 分页、hasMore 正确。
 func TestEventsAfterReplay(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	seedConversation(t, s, "s1")
 	seedConversation(t, s, "s2")
 	var seqs []int64
@@ -124,7 +145,7 @@ func TestEventsAfterReplay(t *testing.T) {
 
 // TestConversationCRUD upsert（last_seq 触顶不清零）、list 排序、meta 子集更新。
 func TestConversationCRUD(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	base := Conversation{ID: "s1", AgentID: "a", Title: "t0",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.UpsertConversation(ctxT(), base); err != nil {
@@ -163,7 +184,7 @@ func TestConversationCRUD(t *testing.T) {
 
 // TestMemoriesCRUD allow/reject 双侧、同键覆盖、逐条/整会话撤销。
 func TestMemoriesCRUD(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	seedConversation(t, s, "s1")
 	if err := s.AddMemory(ctxT(), Memory{ConversationID: "s1", Title: "跑脚本", Kind: "execute", Decision: "allow"}); err != nil {
 		t.Fatalf("add allow: %v", err)
@@ -205,7 +226,7 @@ func TestMemoriesCRUD(t *testing.T) {
 
 // TestImportBatch 单事务导入：seq 全局分配、校验计数、marker 幂等、错配整体回滚。
 func TestImportBatch(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	now := time.Now().UTC()
 	item := ImportItem{
 		Conversation: Conversation{ID: "s-x", AgentID: "agent-opencode", Title: "迁移会话",
@@ -255,7 +276,7 @@ func TestImportBatch(t *testing.T) {
 // TestSearchMessages 跨会话消息检索（M3 ②）：角色不限、大小写不敏感、seq 锚点、
 // LIKE 通配转义（%/_ 不应被当通配符）、limit 截断。
 func TestSearchMessages(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	seedConversation(t, s, "m1")
 	seedConversation(t, s, "m2")
 	ctx := ctxT()
@@ -304,7 +325,7 @@ func TestSearchMessages(t *testing.T) {
 // TestEventsBefore 反向分页（C2「加载更早」）：seq < before 的最近 limit 条、升序返回、
 // has_more 指向「更早还有」、before=0 取末尾、跨会话不混入。
 func TestEventsBefore(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	seedConversation(t, s, "s1")
 	seedConversation(t, s, "s2")
 	var seqs []int64
@@ -352,7 +373,7 @@ func TestEventsBefore(t *testing.T) {
 // TestConversationWorkspaceRoundTrip 工作空间字段（cwd + workspace_temporary）落库往返。
 // 权限标志必须是**权威断言**：前端/离线回放不得从路径形状推断"临时空间"。
 func TestConversationWorkspaceRoundTrip(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	now := time.Now().UTC()
 	in := Conversation{
 		ID: "ws-1", AgentID: "agent-opencode",

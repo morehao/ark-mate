@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/golib/glog"
 )
 
 // registerConversation 登记一个新会话，返回记录指针。
@@ -30,7 +30,7 @@ func (s *Service) EnableStore(st *store.Store) {
 	if ids, err := s.runtimeIDsForSync(""); err == nil {
 		for _, id := range ids {
 			if _, serr := s.SyncRuntime(context.Background(), id); serr != nil {
-				slog.Warn("runtime sync: 装配期同步失败", "runtime", id, "err", serr)
+				glog.Warnw(context.Background(), "runtime sync: 装配期同步失败", "runtime", id, "err", serr)
 			}
 		}
 	}
@@ -88,7 +88,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		for {
 			evs, more, err := s.st.EventsAllAfter(ctx, after, 2000)
 			if err != nil {
-				slog.Default().Warn("restore: read events failed", "err", err)
+				glog.Warnw(ctx, "restore: read events failed", "err", err)
 				break
 			}
 			for _, ev := range evs {
@@ -105,7 +105,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	// §6：重启前排队未投递的输入一律作废——它们等的那一轮已随进程消失，自动重放等于替用户
 	// 按下发送（且上下文已断）。保留行仅作审计（见 inputqueue.go）。
 	s.staleQueuedInputsOnRestore(ctx)
-	slog.Default().Info("store restored", "conversations", conversations, "events", injected)
+	glog.Infow(ctx, "store restored", "conversations", conversations, "events", injected)
 	return conversations, injected, nil
 }
 
@@ -150,7 +150,7 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		UpdatedAt:             rec.UpdatedAt,
 	})
 	if err != nil {
-		slog.Default().Warn("store: upsert conversation failed", "conversation", rec.ID, "err", err)
+		glog.Warnw(context.Background(), "store: upsert conversation failed", "conversation", rec.ID, "err", err)
 	}
 }
 
@@ -164,7 +164,7 @@ func (s *Service) persistMemoryAdd(conversationID, title, kind, decision string,
 	if err := s.st.AddMemory(ctx, store.Memory{
 		ConversationID: conversationID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
 	}); err != nil {
-		slog.Default().Warn("store: add permission memory failed", "conversation", conversationID, "title", title, "err", err)
+		glog.Warnw(context.Background(), "store: add permission memory failed", "conversation", conversationID, "title", title, "err", err)
 	}
 }
 
@@ -176,7 +176,7 @@ func (s *Service) persistMemoryDel(conversationID, title, kind string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if _, err := s.st.DeleteMemory(ctx, conversationID, title, kind); err != nil {
-		slog.Default().Warn("store: delete permission memory failed", "conversation", conversationID, "title", title, "err", err)
+		glog.Warnw(context.Background(), "store: delete permission memory failed", "conversation", conversationID, "title", title, "err", err)
 	}
 }
 
@@ -188,7 +188,7 @@ func (s *Service) persistMemoryDelAll(conversationID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.st.DeleteConversationMemories(ctx, conversationID); err != nil {
-		slog.Default().Warn("store: delete conversation memories failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "store: delete conversation memories failed", "conversation", conversationID, "err", err)
 	}
 }
 
@@ -229,16 +229,16 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 
 	last, err := s.st.RunLastSeq(ctx, conversationID)
 	if err != nil {
-		slog.Default().Warn("store: run last seq failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "store: run last seq failed", "conversation", conversationID, "err", err)
 		return
 	}
 	evs, more, err := s.st.EventsAfter(ctx, conversationID, last, 5000)
 	if err != nil {
-		slog.Default().Warn("store: run window read failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "store: run window read failed", "conversation", conversationID, "err", err)
 		return
 	}
 	if more {
-		slog.Default().Warn("store: run window 超 5000 条被截断", "conversation", conversationID)
+		glog.Warnw(context.Background(), "store: run window 超 5000 条被截断", "conversation", conversationID)
 	}
 	if len(evs) == 0 {
 		return // 无新事件（重复终态调用等）→ 幂等跳过
@@ -304,7 +304,7 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 		StartedAt: started, EndedAt: ended,
 	}
 	if err := s.st.CreateRun(ctx, r); err != nil {
-		slog.Default().Warn("store: create run failed", "conversation", conversationID, "run", runID, "err", err)
+		glog.Warnw(context.Background(), "store: create run failed", "conversation", conversationID, "run", runID, "err", err)
 		return
 	}
 	// 终态补齐（CreateRun 直接带终态写入，FinishRun 幂等再走一遍以统一 ended 口径）。

@@ -10,7 +10,7 @@ import (
 // TestInputQueueSchemaAndClaim §6 队列的持久层契约：v6 迁移建表、插入-取队首-认领，
 // 且**认领是条件更新**（第二条路径拿不到）；已投递/已作废是台账行，不可删。
 func TestInputQueueSchemaAndClaim(t *testing.T) {
-	st := openMem(t)
+	st := openTestDB(t)
 	ctx := ctxT()
 
 	ver, err := st.SchemaVersion(ctx)

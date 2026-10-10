@@ -12,9 +12,12 @@ package mcp
 // 工具面）、sampling/roots、listChanged 通知、断线重连。进程级生命周期由调用方负责
 // （stdin EOF 即退出，见 Serve 的返回值语义）。
 //
-// **C10：stdout 纯度**——本文件的 `w` 上只允许出现 JSON-RPC 帧；一切诊断走 `slog`（默认
-// handler 写 stderr）。这条不是洁癖：底座把网关的 stdout 当协议流读，一行日志就会让整套
-// JSON-RPC 错位，表现为"工具莫名不可用"。`server_test.go` 有一条纯度用例钉住。
+// **C10：stdout 纯度**——本文件的 `w` 上只允许出现 JSON-RPC 帧；一切诊断走 `glog`。
+//
+// 这条不是洁癖：底座把网关的 stdout 当协议流读，一行日志就会让整套 JSON-RPC 错位，表现为
+// "工具莫名不可用"。注意 glog 的 console writer 写的就是 **os.Stdout**（golib 里硬编码，
+// 没有 stderr 选项），所以 `mate mcp` 只能把出口配成文件（见 internal/app/command/logging.go），
+// 由 internal/app/command 的守卫与 `server_test.go` 的纯度用例两侧钉住。
 
 import (
 	"bufio"
@@ -23,10 +26,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/morehao/golib/glog"
 )
 
 const (
@@ -97,8 +101,6 @@ func (h HandlerFuncs) CallTool(ctx context.Context, name string, args json.RawMe
 type ServerOptions struct {
 	// PageSize tools/list 每页条数（<=0 → serverDefaultPageSize）。
 	PageSize int
-	// Logger 诊断出口（nil → slog.Default()）。**永远不会是 stdout**：见 C10。
-	Logger *slog.Logger
 }
 
 // server 一次服务端会话的运行时状态。
@@ -106,7 +108,6 @@ type server struct {
 	info     ServerInfo
 	h        Handler
 	pageSize int
-	log      *slog.Logger
 
 	wmu sync.Mutex // 帧写锁：并发请求的响应不能交错（一行一帧）
 	w   io.Writer
@@ -122,12 +123,9 @@ type server struct {
 //   - ctx 取消 → 等在途请求结束（它们拿的是同一个 ctx）后返回 ctx.Err()；
 //   - 只有"读失败"（非 EOF）才返回非 nil（解析不了的帧只回 -32700，不终止会话）。
 func Serve(ctx context.Context, r io.Reader, w io.Writer, info ServerInfo, h Handler, opts ServerOptions) error {
-	s := &server{info: info, h: h, pageSize: opts.PageSize, log: opts.Logger, w: w}
+	s := &server{info: info, h: h, pageSize: opts.PageSize, w: w}
 	if s.pageSize <= 0 {
 		s.pageSize = serverDefaultPageSize
-	}
-	if s.log == nil {
-		s.log = slog.Default()
 	}
 	if s.info.Name == "" {
 		s.info.Name = "ark-mate"
@@ -177,26 +175,26 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, info ServerInfo, h Han
 			}
 			if f.err != nil {
 				if errors.Is(f.err, io.EOF) {
-					s.log.Info("mcp bridge: stdin 已关闭，网关退出（父进程结束）")
+					glog.Infow(ctx, "mcp bridge: stdin 已关闭，网关退出（父进程结束）")
 					return nil
 				}
 				return fmt.Errorf("mcp server: 读取请求失败：%w", f.err)
 			}
 			if len(f.line) > maxResponseBytes {
-				s.log.Warn("mcp bridge: 请求超过单帧上限，已丢弃", "bytes", len(f.line), "limit", maxResponseBytes)
+				glog.Warnw(ctx, "mcp bridge: 请求超过单帧上限，已丢弃", "bytes", len(f.line), "limit", maxResponseBytes)
 				s.replyParseError(nil, fmt.Sprintf("请求超过 %d 字节上限", maxResponseBytes))
 				continue
 			}
 			var msg rpcMessage
 			if err := json.Unmarshal(f.line, &msg); err != nil {
-				s.log.Warn("mcp bridge: 收到非 JSON 帧", "err", err)
+				glog.Warnw(ctx, "mcp bridge: 收到非 JSON 帧", "err", err)
 				s.replyParseError(nil, "请求不是合法 JSON")
 				continue
 			}
 			// 通知（无 id）不需要响应；有 id 的请求各自一条 goroutine——底座可能并发 tools/call，
 			// 串行处理会让一个慢远端工具阻塞其他工具（写侧由 wmu 保证不交错）。
 			if msg.ID == nil {
-				s.handleNotification(msg)
+				s.handleNotification(ctx, msg)
 				continue
 			}
 			wg.Add(1)
@@ -210,15 +208,15 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, info ServerInfo, h Han
 
 // handleNotification 处理通知（无响应）。目前只认 `notifications/initialized` 与
 // `notifications/cancelled`，其余只记日志（服务端不对通知报错：规范要求忽略未知通知）。
-func (s *server) handleNotification(msg rpcMessage) {
+func (s *server) handleNotification(ctx context.Context, msg rpcMessage) {
 	switch msg.Method {
 	case "notifications/initialized":
 		s.initialized = true
-		s.log.Info("mcp bridge: 底座已完成 MCP 握手")
+		glog.Infow(ctx, "mcp bridge: 底座已完成 MCP 握手")
 	case "notifications/cancelled":
-		s.log.Debug("mcp bridge: 收到取消通知（穿透到下游靠 ctx，不额外记账）")
+		glog.Debugw(ctx, "mcp bridge: 收到取消通知（穿透到下游靠 ctx，不额外记账）")
 	default:
-		s.log.Debug("mcp bridge: 忽略未知通知", "method", msg.Method)
+		glog.Debugw(ctx, "mcp bridge: 忽略未知通知", "method", msg.Method)
 	}
 }
 
@@ -226,7 +224,7 @@ func (s *server) handleNotification(msg rpcMessage) {
 func (s *server) handleRequest(ctx context.Context, msg rpcMessage) {
 	switch msg.Method {
 	case "initialize":
-		s.reply(*msg.ID, s.initializeResult())
+		s.reply(*msg.ID, s.initializeResult(ctx))
 	case "ping":
 		s.reply(*msg.ID, json.RawMessage(`{}`))
 	case "tools/list":
@@ -240,7 +238,7 @@ func (s *server) handleRequest(ctx context.Context, msg rpcMessage) {
 
 // initializeResult 握手结果：声明只有 tools 能力（无 listChanged 推送——工具面变化靠
 // 下一轮重新列取，见 README 的"可见性/可执行性"分线）。
-func (s *server) initializeResult() json.RawMessage {
+func (s *server) initializeResult(ctx context.Context) json.RawMessage {
 	res := struct {
 		ProtocolVersion string         `json:"protocolVersion"`
 		Capabilities    map[string]any `json:"capabilities"`
@@ -255,7 +253,7 @@ func (s *server) initializeResult() json.RawMessage {
 	b, err := json.Marshal(res)
 	if err != nil {
 		// 三个 string 字段 + 一张字面量 map，Marshal 不可能失败；真失败了也不能回半截 JSON。
-		s.log.Error("mcp bridge: 握手结果序列化失败", "err", err)
+		glog.Errorw(ctx, "mcp bridge: 握手结果序列化失败", "err", err)
 		return json.RawMessage(`{}`)
 	}
 	return b
@@ -284,7 +282,7 @@ func (s *server) handleListTools(ctx context.Context, msg rpcMessage) {
 	}
 	tools, err := s.h.ListTools(ctx)
 	if err != nil {
-		s.log.Warn("mcp bridge: tools/list 失败", "err", err)
+		glog.Warnw(ctx, "mcp bridge: tools/list 失败", "err", err)
 		s.replyError(*msg.ID, codeInternalError, "tools/list 失败："+err.Error(), nil)
 		return
 	}
@@ -309,7 +307,7 @@ func (s *server) handleListTools(ctx context.Context, msg rpcMessage) {
 	}
 	b, err := json.Marshal(result)
 	if err != nil {
-		s.log.Error("mcp bridge: tools/list 结果序列化失败", "err", err)
+		glog.Errorw(ctx, "mcp bridge: tools/list 结果序列化失败", "err", err)
 		s.replyError(*msg.ID, codeInternalError, "tools/list 结果序列化失败", nil)
 		return
 	}
@@ -342,13 +340,13 @@ func (s *server) handleCallTool(ctx context.Context, msg rpcMessage) {
 		}
 		// 工具**执行**失败 → 回 isError 结果（模型看得到原因，会话不炸）。内容按 MCP 的
 		// 文本块形状给出，与下游的真实文本块同形，底座无需分辨两种错误。
-		s.log.Warn("mcp bridge: tools/call 失败", "tool", params.Name, "err", err)
+		glog.Warnw(ctx, "mcp bridge: tools/call 失败", "tool", params.Name, "err", err)
 		s.reply(*msg.ID, errorResult(err.Error()))
 		return
 	}
 	b, merr := json.Marshal(res)
 	if merr != nil {
-		s.log.Error("mcp bridge: tools/call 结果序列化失败", "tool", params.Name, "err", merr)
+		glog.Errorw(ctx, "mcp bridge: tools/call 结果序列化失败", "tool", params.Name, "err", merr)
 		s.reply(*msg.ID, errorResult("结果序列化失败："+merr.Error()))
 		return
 	}
@@ -388,9 +386,12 @@ func (s *server) replyError(id json.RawMessage, code int, msg string, data json.
 
 // write 写一帧（持有写锁：并发响应不得交错；帧内不含裸换行——json.Marshal 会转义）。
 func (s *server) write(msg rpcMessage) {
+	// 这一层不穿 ctx：两条日志说的都是"这一帧写不出去"（连接级事实，与某个请求无关），
+	// 而为此改 reply/replyError 的签名要动近 20 处调用点。
+	ctx := context.Background()
 	b, err := json.Marshal(msg)
 	if err != nil {
-		s.log.Error("mcp bridge: 响应序列化失败", "err", err)
+		glog.Errorw(ctx, "mcp bridge: 响应序列化失败", "err", err)
 		return
 	}
 	b = append(b, '\n')
@@ -398,7 +399,7 @@ func (s *server) write(msg rpcMessage) {
 	defer s.wmu.Unlock()
 	if _, err := s.w.Write(b); err != nil {
 		// 写不出去说明父进程已经走了；不在这里退出（读侧会因 EOF 收敛），只记日志。
-		s.log.Warn("mcp bridge: 写响应失败（父进程是否已退出？）", "err", err)
+		glog.Warnw(ctx, "mcp bridge: 写响应失败（父进程是否已退出？）", "err", err)
 	}
 }
 

@@ -1,14 +1,16 @@
 package capability
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // mateMarker 标记目录由本平台物化（删除联动只动带标记目录，绝不动用户自有/他方内容）。
@@ -347,7 +349,7 @@ func replaceDir(staging, dir string) error {
 		return fmt.Errorf("skill 物化: 换入新产物失败 %s: %w", dir, err)
 	}
 	if err := os.RemoveAll(backup); err != nil {
-		slog.Warn("skill 物化: 清理旧产物失败（不影响新产物）", "backup", backup, "err", err)
+		glog.Warnw(context.Background(), "skill 物化: 清理旧产物失败（不影响新产物）", "backup", backup, "err", err)
 	}
 	return nil
 }
@@ -494,14 +496,14 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 		}
 		dir, dErr := spec.DirFor(sk.ID)
 		if dErr != nil {
-			slog.Warn("skill 物化跳过", "skill", sk.ID, "owner", spec.Owner, "err", dErr)
+			glog.Warnw(context.Background(), "skill 物化跳过", "skill", sk.ID, "owner", spec.Owner, "err", dErr)
 			continue
 		}
 		if skillUpToDate(dir, sk, spec.Owner, content) {
 			continue
 		}
 		if _, mErr := MaterializeSkill(spec, sk); mErr != nil {
-			slog.Warn("skill 物化跳过", "skill", sk.ID, "owner", spec.Owner, "err", mErr)
+			glog.Warnw(context.Background(), "skill 物化跳过", "skill", sk.ID, "owner", spec.Owner, "err", mErr)
 			continue
 		}
 		written++
@@ -521,9 +523,9 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 		if isStagingName(e.Name()) {
 			if e.IsDir() {
 				if rmErr := os.RemoveAll(filepath.Join(root, e.Name())); rmErr != nil {
-					slog.Warn("skill 物化: 清理 staging 残留失败", "dir", e.Name(), "err", rmErr)
+					glog.Warnw(context.Background(), "skill 物化: 清理 staging 残留失败", "dir", e.Name(), "err", rmErr)
 				} else {
-					slog.Info("skill 物化: 清理 staging 残留", "dir", e.Name())
+					glog.Infow(context.Background(), "skill 物化: 清理 staging 残留", "dir", e.Name())
 				}
 			}
 			continue
@@ -546,13 +548,13 @@ func ReconcileSkills(spec MaterializeSpec, current []Skill) (written, removed in
 			rest, _ := removeOwner(owners, spec.Owner)
 			if len(rest) > 0 {
 				if wErr := os.WriteFile(marker, []byte(markerContent(skillID, rest)), 0o644); wErr != nil {
-					slog.Warn("skill 物化: 更新归属标记失败", "dir", e.Name(), "err", wErr)
+					glog.Warnw(context.Background(), "skill 物化: 更新归属标记失败", "dir", e.Name(), "err", wErr)
 				}
 				continue // 仍被他方投影：保留目录，仅摘除自己的登记
 			}
 		}
 		if dErr := os.RemoveAll(filepath.Join(root, e.Name())); dErr != nil {
-			slog.Warn("skill 物化: 删除联动失败", "dir", e.Name(), "err", dErr)
+			glog.Warnw(context.Background(), "skill 物化: 删除联动失败", "dir", e.Name(), "err", dErr)
 			continue
 		}
 		removed++

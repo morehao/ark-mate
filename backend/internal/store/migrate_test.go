@@ -129,7 +129,7 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 // 一个它不认识的 schema，损坏是静默且不可逆的（v8 的 `capability_revisions` 正是"新列/新表"
 // 频出的那一类改动）。
 func TestMigrateRefusesFutureSchema(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := context.Background()
 	if err := s.db.Exec(`INSERT INTO `+model.TableMigration+` (version, name, applied_at) VALUES (?,?,?)`,
 		latestSchemaVersion()+1, "future", model.NowTS()).Error; err != nil {

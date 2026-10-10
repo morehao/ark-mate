@@ -23,14 +23,15 @@ package manager
 // （网关的头号收益）。唯一会让条目变的是 scope 本身与会话钉住的 `mcps`（用户的选定）。
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/mcp"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // mcpInjectionPlan MCP 注入计划（**不含明文密钥**）。
@@ -163,5 +164,5 @@ func (s *Service) mcpGatewayWarnOnce(key, msg string, args ...any) {
 	if seen {
 		return
 	}
-	slog.Warn(msg, args...)
+	glog.Warnw(context.Background(), msg, args...)
 }

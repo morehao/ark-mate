@@ -2,10 +2,10 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/procreg"
+	"github.com/morehao/golib/glog"
 )
 
 // SetProcRegistry 注入进程注册表（serve 装配；nil = 不登记）。
@@ -53,10 +53,10 @@ func (o *Orchestrator) registerProc(rc *runtimeConn) {
 		PID: info.PID, PGID: info.PGID, Command: info.Command,
 		Runtime: rc.spec.ID, AgentID: rc.agentID,
 	}); err != nil {
-		o.logger.Warn("procreg: 登记子进程失败", "pid", info.PID, "err", err)
+		glog.Warnw(context.Background(), "procreg: 登记子进程失败", "pid", info.PID, "err", err)
 		return
 	}
-	o.logger.Info("procreg: 登记 runtime 子进程",
+	glog.Infow(context.Background(), "procreg: 登记 runtime 子进程",
 		"runtime", rc.spec.ID, "agent", rc.agentID, "pid", info.PID, "pgid", info.PGID)
 }
 
@@ -72,7 +72,7 @@ func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
 		return
 	}
 	if err := reg.Remove(rc.pid); err != nil {
-		o.logger.Warn("procreg: 摘除子进程登记失败", "pid", rc.pid, "err", err)
+		glog.Warnw(context.Background(), "procreg: 摘除子进程登记失败", "pid", rc.pid, "err", err)
 	}
 }
 
@@ -137,7 +137,7 @@ func (o *Orchestrator) StartIdleReaper(interval, idle time.Duration) {
 				return
 			case now := <-t.C:
 				if n := o.reapIdleOnce(now, idle); n > 0 {
-					slog.Info("orchestrator: 空闲回收", "reaped", n, "idle", idle.String())
+					glog.Infow(context.Background(), "orchestrator: 空闲回收", "reaped", n, "idle", idle.String())
 				}
 			}
 		}

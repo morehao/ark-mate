@@ -1,8 +1,10 @@
 package manager
 
 import (
+	"context"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/golib/glog"
 )
 
 // eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
@@ -15,7 +17,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		// 断连后迟到事件（映射已清）不再落入孤儿聚合，丢弃并留 debug。
 		cid := o.resolveProvider(ev.SessionID)
 		if cid == "" {
-			o.logger.Debug("event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
+			glog.Debugw(context.Background(), "event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
 			return
 		}
 		ev.SessionID = cid
@@ -52,7 +54,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
-			o.logger.Debug("skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
+			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
 		case acl.KindUsage:
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。

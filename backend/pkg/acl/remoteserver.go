@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 远程 ACP 传输的服务端半场（A5） ———
@@ -39,8 +39,6 @@ type RemoteServerOptions struct {
 	Serve func(peerInput io.Writer, peerOutput io.Reader)
 	// SessionIDPrefix 会话 id 前缀（默认 "acp"；便于日志辨认）。
 	SessionIDPrefix string
-	// Logger 诊断日志（nil = 静默）。
-	Logger *slog.Logger
 }
 
 // RemoteHandler 是 Streamable HTTP 形态的服务端（挂到 http.Handler 即可）。
@@ -231,12 +229,12 @@ func (h *RemoteHandler) newSession() *remoteSession {
 	}
 	// Serve 约定：peerInput = agent 写向客户端，peerOutput = agent 读自客户端。
 	h.opts.Serve(a2cW, c2aR)
-	go s.route(h.opts.Logger)
+	go s.route()
 	return s
 }
 
 // route 读 agent 输出并按 id 精确投递，通知类消息投给在途请求流（无则在 GET 长流）。
-func (s *remoteSession) route(logger *slog.Logger) {
+func (s *remoteSession) route() {
 	sc := bufio.NewScanner(s.agentOut)
 	sc.Buffer(make([]byte, 64*1024), 16<<20)
 	for sc.Scan() {
@@ -279,8 +277,9 @@ func (s *remoteSession) route(logger *slog.Logger) {
 			}
 		}
 	}
-	if logger != nil && sc.Err() != nil {
-		logger.Info("remote server: agent 输出结束", "err", sc.Err())
+	if sc.Err() != nil {
+		// 读循环 goroutine，没有可用的请求 ctx。
+		glog.Infow(context.Background(), "remote server: agent 输出结束", "err", sc.Err())
 	}
 	s.close()
 }

@@ -3,10 +3,10 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— messages 物化（turn 收口，随 materializeRun 同窗口执行） ———
@@ -42,7 +42,7 @@ func (s *Service) materializeMessages(conversationID, runID string, evs []store.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.st.CreateMessages(ctx, rows); err != nil {
-		slog.Default().Warn("store: create messages failed", "conversation", conversationID, "run", runID, "err", err)
+		glog.Warnw(context.Background(), "store: create messages failed", "conversation", conversationID, "run", runID, "err", err)
 	}
 }
 

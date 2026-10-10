@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— M2-2/M2-3：能力定义的写面（Skill / MCP） ———
@@ -204,7 +204,7 @@ func (s *Service) writeSkill(ctx context.Context, pathID string, req dtocapabili
 	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功；真出错也只可能来自
 	// "注册表被并发改坏"，那种情况下**不能**谎报写失败（载体上已经写成功了），记 WARN 更诚实。
 	if err := s.caps.RegisterSkill(&sk); err != nil {
-		slog.Warn("capability: skill 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
+		glog.Warnw(ctx, "capability: skill 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
 	}
 
 	resp := &dtocapability.SkillWriteResp{
