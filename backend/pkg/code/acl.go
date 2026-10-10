@@ -21,6 +21,22 @@ var notFoundCodes = map[string]bool{
 	"skill_not_found":        true,
 	"provider_not_found":     true,
 	"automation_not_found":   true,
+	// 设置 · 模型（v11）：PATCH/DELETE 打到不存在的模型条目——与"打错 id 的新建"是两件事，
+	// 必须能被前端分辨（刷新列表 vs 改参数）。
+	"model_not_found": true,
+}
+
+// classCodeOverrides 是"分类对、但对外码要换一个"的例外表（按稳定 code 名）。
+//
+// 为什么需要它：acl 的 Class 表达的是**可操作语义**（重试/登录/换参数/降级），而对外码表达的是
+// **用户该做什么**。绝大多数时候两者同向，但有一类故障它们的指向不同——
+//
+//	config_write_failed：平台生成/落盘/自校验某个 runtime 的模型配置文件失败（T5）。
+//	  它落 ClassService（确实是平台侧的失败，不是用户请求错），而 ClassService 默认映到
+//	  BadGateway(50201)"上游连接失败"——那会把排障方向指向底座进程/网络，而真因在平台自己的
+//	  生成器或磁盘上。改映到 UpstreamFailed(50001) 与它的实际语义一致：**服务侧失败、改参数无用**。
+var classCodeOverrides = map[string]int{
+	"config_write_failed": UpstreamFailed,
 }
 
 // fromACL 把 acl 层错误按其 Class 映射为业务码。
@@ -49,6 +65,9 @@ func fromACL(err error) (gerror.Error, bool) {
 		c = NotSupported
 	case acl.ClassService, acl.ClassConnection:
 		c = BadGateway
+	}
+	if o, ok := classCodeOverrides[ae.Code]; ok {
+		c = o
 	}
 	// acl 的 Details 是脱敏后给用户看的一句话；缺省回落到稳定 code，
 	// 保证 msg 永不为空（空 msg 在前端会渲染成一个没有内容的错误气泡）。
