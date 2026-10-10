@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -16,12 +17,12 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// agentTestSvc 播 deepseekharness/opencode/echo（内置 agent 播种 + echo 自定义；不拨真实子进程）。
+// agentTestSvc 播 dsh/opencode/echo（内置 agent 播种 + echo 自定义；不拨真实子进程）。
 func agentTestSvc(t *testing.T, agentDir string) *Service {
 	t.Helper()
 	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
 	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
-	// 这里给 opencode 声明 env 通道（与真实 adapter 同形），deepseekharness 声明原生文档
+	// 这里给 opencode 声明 env 通道（与真实 adapter 同形），dsh 声明原生文档
 	// （与真实 adapter 同形：dsh 的密钥走 .credentials.yaml，平台不重复注入 env）。
 	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
 	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
@@ -29,14 +30,14 @@ func agentTestSvc(t *testing.T, agentDir string) *Service {
 	// 两个声明都**直接取真实 adapter 的那一份**（不在这里手抄路径/模板）——手抄会把底座的
 	// 私有知识（凭据文档路径）带进平台内核，`TestInternalHasNoRuntimeConfigLiterals` 会判红，
 	// 而且抄出来的那份迟早与 adapter 漂移。
-	real := runtime.DefaultRegistry()
-	dhSpec, dshOK := real.Get("deepseekharness")
+	real := runtime.AllBuiltinRegistry()
+	dhSpec, dshOK := real.Get("dsh")
 	ocSpec, ocOK := real.Get("opencode")
 	if !dshOK || !ocOK {
-		t.Fatal("默认注册表里应有 deepseekharness 与 opencode")
+		t.Fatal("默认注册表里应有 dsh 与 opencode")
 	}
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness", Credential: dhSpec.Credential},
+		runtime.Spec{ID: "dsh", Name: "dsh", Credential: dhSpec.Credential},
 		runtime.Spec{ID: "opencode", Name: "opencode", Credential: ocSpec.Credential},
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
@@ -54,8 +55,8 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agents")
 	svc := agentTestSvc(t, dir)
 
-	// 注册自定义 agent（echo runtime 上的别名，不写代码新增 ACP agent）。
-	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Name: "别名stub", Runtimes: []string{"stub"}, Provider: "openai:gpt-4o"})
+	// 注册自定义 agent（对**当前底座**的一份命名配置，不写代码新增 ACP agent）。
+	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Name: "别名stub", Provider: "openai:gpt-4o"})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 
 	// 重启（新 Service + 同一目录）→ definitions 加载。
 	svc2 := agentTestSvc(t, dir)
-	if a, ok := svc2.AgentByID("alias-stub"); !ok || len(a.Runtimes) != 1 || a.Runtimes[0] != "stub" || a.Provider != "openai:gpt-4o" {
+	if a, ok := svc2.AgentByID("alias-stub"); !ok || a.Provider != "openai:gpt-4o" {
 		t.Fatalf("重启后未加载 definition: %+v ok=%v", a, ok)
 	}
 
@@ -94,15 +95,13 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 		t.Fatalf("未切换前当前 Agent 应为 dsh: %s", got)
 	}
 
-	// 非法：保留前缀 id 拒绝；重复 id 拒绝；未知 runtime 拒绝。
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "agent-x", Runtimes: []string{"stub"}}); err == nil {
+	// 非法：保留前缀 id 拒绝；重复 id 拒绝。
+	// （"未知 runtime 拒绝"随候选面一起下线：agent 不再声明底座，未知 id 无处可存。）
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "agent-x"}); err == nil {
 		t.Fatal("保留前缀应拒绝")
 	}
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err == nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub"}); err == nil {
 		t.Fatal("重复 id 应拒绝")
-	}
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "ghost", Runtimes: []string{"no-such-runtime"}}); err == nil {
-		t.Fatal("未知 runtime 应拒绝")
 	}
 
 	// 删除自定义 + 定义文件清理。
@@ -170,7 +169,7 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	}
 
 	// 删除「当前 Agent」→ 清除显式选择 + 回落内置种子（default.json 一并清理）。
-	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
+	if _, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub"}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := svc2.SetDefaultAgent(ctx, "alias-stub"); err != nil {
@@ -187,19 +186,23 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	}
 }
 
-// TestAgentRegistryLoadSkipsBroken 目录加载：坏 JSON / 未知 runtime 定义跳过不 panic。
-func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
+// TestAgentRegistryLoadToleratesDeprecatedRuntimeKeys 目录加载：坏 JSON 跳过不 panic；
+// 而带已下线键（`runtimes`）的老定义**照常装载**——读面宽容、写面拒绝（见
+// TestCreateAgentRejectsRuntimeSelection）。这与"静默丢掉整个 agent"是两回事：老文件里的
+// 名字/provider/策略都还有效，把它整条扔掉才是真正的破坏。
+func TestAgentRegistryLoadToleratesDeprecatedRuntimeKeys(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agents")
 	_ = os.MkdirAll(dir, 0o755)
 	_ = os.WriteFile(filepath.Join(dir, "good.json"), []byte(`{"id":"good-stub","name":"好","runtimes":["stub"]}`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`{not json`), 0o644)
-	_ = os.WriteFile(filepath.Join(dir, "noruntime.json"), []byte(`{"id":"x1","runtimes":["nope"]}`), 0o644)
+	// 老文件里写着一个早就没人认得的 id：底座是构建期常量，这个键不参与任何判断。
+	_ = os.WriteFile(filepath.Join(dir, "noruntime.json"), []byte(`{"id":"x1","name":"老定义","runtimes":["nope"]}`), 0o644)
 	svc := agentTestSvc(t, dir)
 	if _, ok := svc.AgentByID("good-stub"); !ok {
 		t.Fatal("good 应加载")
 	}
-	if _, ok := svc.AgentByID("x1"); ok {
-		t.Fatal("未知 runtime 应跳过")
+	if a, ok := svc.AgentByID("x1"); !ok || a.Name != "老定义" {
+		t.Fatalf("带已下线 runtimes 键的老定义应照常装载（读面宽容）: %+v ok=%v", a, ok)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "bad.json")); err != nil {
 		t.Fatalf("bad.json 应保留未动: %v", err)
@@ -210,7 +213,7 @@ func TestAgentRegistryLoadSkipsBroken(t *testing.T) {
 func TestAgentStartStopGuards(t *testing.T) {
 	ctx := context.Background()
 	svc := agentTestSvc(t, "")
-	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.StartAgent(ctx, "alias-stub"); err == nil {
@@ -232,9 +235,9 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	_ = os.MkdirAll(dir, 0o755)
 	// 定义文件带策略 + 一个非法策略（应跳过）。
 	_ = os.WriteFile(filepath.Join(dir, "pol-stub.json"),
-		[]byte(`{"id":"pol-stub","name":"策略stub","runtimes":["stub"],"permission_policy":{"default":"deny","tools":{"bash":"allow"}}}`), 0o644)
+		[]byte(`{"id":"pol-stub","name":"策略stub","permission_policy":{"default":"deny","tools":{"bash":"allow"}}}`), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "bad-pol.json"),
-		[]byte(`{"id":"bad-pol","runtimes":["stub"],"permission_policy":{"tools":{"bash":"yes"}}}`), 0o644)
+		[]byte(`{"id":"bad-pol","permission_policy":{"tools":{"bash":"yes"}}}`), 0o644)
 	svc := agentTestSvc(t, dir)
 
 	a, ok := svc.AgentByID("pol-stub")
@@ -295,7 +298,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 	}
 
 	// CreateAgent 带策略 → 落盘 + 可读回。
-	created, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "new-pol", Runtimes: []string{"stub"},
+	created, err := svc2.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "new-pol",
 		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "deny"}})
 	if err != nil || created.PermissionPolicy == nil || created.PermissionPolicy.Default != "deny" {
 		t.Fatalf("CreateAgent 带策略失败: %v %+v", err, created)
@@ -307,7 +310,10 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 }
 
 // TestSeedAgentReadonly 种子 agent 只读不变量（修复：内置播种 id 由 agent-<runtime> 改为
-// dsh/opencode 后，仅按前缀判定的守卫失效 → 种子可删、runtime 可改）。
+// dsh/opencode 后，仅按前缀判定的守卫失效 → 种子可删）。
+//
+// v12 起"种子 runtime 不可改"这条随字段一起下线：agent 没有 runtime 可选，改它一律是
+// `runtime_selection_removed`（对所有 agent 一视同仁，不是"种子特权"）。
 func TestSeedAgentReadonly(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
@@ -343,13 +349,12 @@ func TestSeedAgentReadonly(t *testing.T) {
 		t.Fatal("agent- 前缀应不可删除")
 	}
 
-	// 种子 runtime 不可改；name/provider/策略可改。
-	rt := []string{"opencode"}
+	// 底座不可选：带 `runtimes` 的 PATCH 被显式拒绝（种子也不例外）。
 	var ae *acl.Error
-	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: &rt}); err == nil {
-		t.Fatal("种子 runtime 应不可修改")
-	} else if !errors.As(err, &ae) || ae.Code != "seed_agent_readonly" {
-		t.Fatalf("改 runtime 应 seed_agent_readonly，got %v", err)
+	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["opencode"]`)}); err == nil {
+		t.Fatal("带 runtimes 的 PATCH 应被拒（底座由构建期固定）")
+	} else if !errors.As(err, &ae) || ae.Code != "runtime_selection_removed" {
+		t.Fatalf("带 runtimes 应 runtime_selection_removed，got %v", err)
 	}
 	name := "dsh（默认）"
 	pol := &dtoagent.PermissionPolicyResp{Default: "ask"}
@@ -358,13 +363,13 @@ func TestSeedAgentReadonly(t *testing.T) {
 		t.Fatalf("种子 name/策略应可改且 seed 仍为 true: %v %+v", err, u)
 	}
 
-	// 自定义 agent 仍可改 runtime / 删除。
-	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub", Runtimes: []string{"stub"}}); err != nil {
+	// 自定义 agent 仍可改元数据 / 删除（底座不在此列：它对所有 agent 都是构建期常量）。
+	if _, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "alias-stub"}); err != nil {
 		t.Fatal(err)
 	}
-	rt2 := []string{"stub", "opencode"}
-	if _, err := svc.UpdateAgent(ctx, "alias-stub", dtoagent.AgentUpdateReq{Runtimes: &rt2}); err != nil {
-		t.Fatalf("自定义 agent runtime 应可改: %v", err)
+	alias := "别名"
+	if _, err := svc.UpdateAgent(ctx, "alias-stub", dtoagent.AgentUpdateReq{Name: &alias}); err != nil {
+		t.Fatalf("自定义 agent 元数据应可改: %v", err)
 	}
 	if _, err := svc.DeleteAgent(ctx, "alias-stub"); err != nil {
 		t.Fatalf("自定义 agent 应可删: %v", err)
@@ -377,13 +382,14 @@ func TestSeedAgentReadonly(t *testing.T) {
 func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub：底座必须与它一致
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	svc.attachOrchestrator(orch)
 
-	svc.agents["alias-stub"] = &AgentRec{ID: "alias-stub", Name: "别名 echo", Runtimes: []string{"stub"}}
-	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲", Runtimes: []string{"stub"}}
+	svc.agents["alias-stub"] = &AgentRec{ID: "alias-stub", Name: "别名 echo"}
+	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲"}
 	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "alias-stub", Status: ConversationStatusInProgress})
 	svc.registerConversation(&ConversationRec{ID: "c2", AgentID: "alias-stub", Status: ConversationStatusInProgress})
 	svc.registerConversation(&ConversationRec{ID: "c3", AgentID: "dsh", Status: ConversationStatusInProgress})
@@ -432,7 +438,7 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	}
 
 	// 有在途 turn → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
-	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙", Runtimes: []string{"stub"}}
+	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙"}
 	busy := &ActiveConversation{ID: "cb", AgentID: "alias-busy", Runtime: "stub", sess: &stubConversation{stop: "end_turn"}}
 	busy.busy = true
 	orch.conversations["cb"] = busy
@@ -454,12 +460,13 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
+	setBuildRuntime(t, "stub") // 夹具注册表只有 stub：底座必须与它一致
 	svc := NewService(reg, eventbus.New())
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	svc.attachOrchestrator(orch)
 
-	svc.agents["a-prov"] = &AgentRec{ID: "a-prov", Name: "P", Runtimes: []string{"stub"}, Provider: "gone"}
+	svc.agents["a-prov"] = &AgentRec{ID: "a-prov", Name: "P", Provider: "gone"}
 	err := svc.StartAgent(ctx, "a-prov")
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "credential_missing" {
@@ -490,9 +497,62 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	}
 
 	// 未绑定档案（provider 为空）→ 合法：用底座自身登录态，不报错。
-	svc.agents["a-plain"] = &AgentRec{ID: "a-plain", Name: "Plain", Runtimes: []string{"stub"}}
+	svc.agents["a-plain"] = &AgentRec{ID: "a-plain", Name: "Plain"}
 	p, _ := svc.AgentByID("a-plain")
 	if err := svc.CredentialProblem(p); err != nil {
 		t.Fatalf("未绑定档案不应报凭据问题: %v", err)
+	}
+}
+
+// TestCreateAgentRejectsRuntimeSelection 写面显式拒绝 `runtimes` / `routing_policy`（40001）。
+//
+// 为什么是"拒绝"而不是"忽略"：JSON 绑定默认丢弃未知键，静默收下会让这两个键变成
+// 「写了、存了、什么都不发生」的骗人字段——用户会以为"我换了底座"。`null` 视为"没带"
+// （与 default_model 同一条纪律）。
+func TestCreateAgentRejectsRuntimeSelection(t *testing.T) {
+	ctx := context.Background()
+	svc := agentTestSvc(t, filepath.Join(t.TempDir(), "agents"))
+
+	bad := func(name string, err error) {
+		t.Helper()
+		var ae *acl.Error
+		if err == nil {
+			t.Fatalf("%s 应被拒绝", name)
+		}
+		if !errors.As(err, &ae) || ae.Code != "runtime_selection_removed" || ae.Class != acl.ClassRequest {
+			t.Fatalf("%s 应是 request/runtime_selection_removed，got %v", name, err)
+		}
+		if !strings.Contains(ae.Details, "构建期") {
+			t.Fatalf("%s 的文案应指路「底座由构建期固定」: %s", name, ae.Details)
+		}
+	}
+	bad("CreateAgent 带 runtimes", func() error {
+		_, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "a-deny-rt", Runtimes: json.RawMessage(`["opencode"]`)})
+		return err
+	}())
+	bad("CreateAgent 带 routing_policy", func() error {
+		_, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "a-deny-pol", RoutingPolicy: json.RawMessage(`"first_available"`)})
+		return err
+	}())
+	bad("UpdateAgent 带 runtimes", func() error {
+		_, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["opencode"]`)})
+		return err
+	}())
+	bad("UpdateAgent 带 routing_policy", func() error {
+		_, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{RoutingPolicy: json.RawMessage(`"capability_routed"`)})
+		return err
+	}())
+	// 被拒即无副作用：两个键一个也没落进内存/定义文件。
+	if _, err := os.Stat(filepath.Join(svc.agentDirSnapshot(), "a-deny-rt.json")); !os.IsNotExist(err) {
+		t.Fatalf("被拒的创建不该留下定义文件: %v", err)
+	}
+	if _, ok := svc.AgentByID("a-deny-rt"); ok {
+		t.Fatal("被拒的创建不该登记 agent")
+	}
+	// `null` = 没带（不报错），与"显式选择某个底座"是两回事。
+	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{
+		Runtimes: json.RawMessage(`null`), RoutingPolicy: json.RawMessage(`null`),
+	}); err != nil {
+		t.Fatalf("null 应视为没带，不该报错: %v", err)
 	}
 }

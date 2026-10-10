@@ -41,7 +41,6 @@ import type {
   ProviderCreateReq,
   ProviderDeleteResp,
   ProviderProbeResp,
-  Runtime,
   PermissionResp,
   PromptReq,
   ConversationPromptResp,
@@ -400,30 +399,31 @@ export const getMcpPrompt = (
 
 // ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
 
-/** 注册自定义 agent（校验 runtimes 已注册即「可启动预检」；provider 为档案 id，可选）。 */
+/** 注册自定义 agent（provider 为档案 id，可选）。 */
 export const createAgent = (req: {
   id: string
   name?: string
-  runtimes: string[]
   provider?: string
   /** MCP 白名单：省略 = 未声明（全量）；`[]` = 禁用全部；非空 = 白名单。 */
   mcps?: string[]
 }): Promise<Agent> => http.post<Agent>('/mate/agents', req)
 
 /**
- * 热更新 agent 元数据（name/provider/runtimes/mcps 子集；种子 runtimes 只读）。
+ * 热更新 agent 元数据（name/provider/mcps 子集）。
  *
  * `mcps` 三态：**省略键** = 不改；`null` = 清空白名单（回落"未声明" = 全量）；`[]` = 禁用全部；
  * 非空 = 白名单。改白名单会让该 agent 的**空闲**会话句柄作废——下一轮按当前定义重建并按新
  * 白名单注入（有在途轮次或未应答权限/提问的会话顺延到下一次重建）。所以类型是
  * `string[] | null`（不能只写 `string[]`，否则"清空"表达不出来）。
+ *
+ * **没有 runtimes**：底座由构建期固定（`-X pkg/runtime.BuildRuntime`），写面带 `runtimes` /
+ * `routing_policy` 会被服务端 40001 拒绝（显式拒绝，不是静默忽略）。
  */
 export const patchAgent = (
   id: string,
   patch: {
     name?: string
     provider?: string
-    runtimes?: string[]
     mcps?: string[] | null
     permission_policy?: PermissionPolicy
   },
@@ -451,14 +451,6 @@ export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
 // ——— 供应商面（密钥只写不读回） ———
 
 export const listProviders = (): Promise<Provider[]> => http.get<Provider[]>('/mate/providers')
-
-/**
- * 底座列表（name / id / version / capabilities）。
- *
- * v12 起它**不再**携带"逐底座的运行时参数 schema"（`provider_projection` 随 ADR-7 删除）——
- * 设置 · 模型 不再有那张表单，加一个底座也不需要改前端。
- */
-export const listRuntimes = (): Promise<Runtime[]> => http.get<Runtime[]>('/mate/runtimes')
 
 /** 新建一条供应商（id 已存在 → 40901 `provider_exists`，绝不覆盖）。 */
 export const createProvider = (req: ProviderCreateReq): Promise<Provider> =>

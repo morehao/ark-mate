@@ -36,7 +36,7 @@ func dialTestSession(t *testing.T, r *testACPResponder) (*acl.Client, *acl.Sessi
 	return cl, sess
 }
 
-// TestTwoProjectionConstructors 验证 opencode / deepseekharness 两投影各自携带
+// TestTwoProjectionConstructors 验证 opencode / dsh 两投影各自携带
 // §6.2 Spec 身份（ID/ManagesOwnContext），共用同一「活会话」实现。
 func TestTwoProjectionConstructors(t *testing.T) {
 	_, sess := dialTestSession(t, newTestACPResponder())
@@ -50,7 +50,7 @@ func TestTwoProjectionConstructors(t *testing.T) {
 		ownCtx bool
 	}{
 		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true},
-		{"deepseekharness", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true},
+		{"dsh", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true},
 	} {
 		rt := tc.build(sess)
 		if rt.ID() != tc.id {
@@ -86,7 +86,7 @@ func TestNewProjectionDispatcher(t *testing.T) {
 		want bool
 	}{
 		{"opencode", true},
-		{"deepseekharness", true},
+		{"dsh", true},
 		{"unknown-rt", false},
 	} {
 		spec := Spec{ID: tc.id}

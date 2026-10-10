@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -63,7 +64,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		rec := &ConversationRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
 			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
-			Model: sess.Model, RuntimeHint: sess.RuntimeHint,
+			Model: sess.Model, RuntimeHint: runtime.NormalizeID(sess.RuntimeHint),
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, Origin: sess.Origin, CapabilityJSON: sess.CapabilityJSON,

@@ -245,12 +245,11 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 	// 在哪一层无关。所以直接调真实路径，把它带码的错误落成 needs_attention 的**原因**，
 	// 用户在面板上看到的正是"为什么没跑成"。
 	resp, err := s.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
-		AgentID:     rec.def.Target.AgentID,
-		Prompt:      rec.def.Target.Prompt,
-		Cwd:         rec.def.Target.Cwd,
-		Model:       rec.def.Target.Model,
-		Origin:      automationOrigin(rec.def.ID),
-		RuntimeHint: rec.def.Target.RuntimeHint,
+		AgentID: rec.def.Target.AgentID,
+		Prompt:  rec.def.Target.Prompt,
+		Cwd:     rec.def.Target.Cwd,
+		Model:   rec.def.Target.Model,
+		Origin:  automationOrigin(rec.def.ID),
 	})
 	if err != nil {
 		out := automationRunOutcome{

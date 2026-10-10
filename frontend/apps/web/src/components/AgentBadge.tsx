@@ -19,8 +19,10 @@ interface Props {
  * 当前 Agent 标识（新建会话面板 / 会话头共用，**纯展示不可点**）。
  *
  * 视觉 = 状态点 + 「Agent · 名称」mono 胶囊（+ 当前标记）；详情走 hover 浮层
- * （状态 / provider / runtime 候选 / id）。会话与 Agent 是一对一绑定（切换 Agent = 新建会话），
+ * （状态 / provider / id）。会话与 Agent 是一对一绑定（切换 Agent = 新建会话），
  * 所以问答过程里只需要在会话头如实标出这一处，不用逐条消息重复标。
+ *
+ * **不显示 runtime 候选**：底座由构建期固定，用户面没有这个选择面（agent 也不再声明它）。
  */
 export function AgentBadge({ agent, agentId, fallbackName, prefix = 'Agent' }: Props) {
   const id = agent?.id ?? agentId
@@ -30,7 +32,6 @@ export function AgentBadge({ agent, agentId, fallbackName, prefix = 'Agent' }: P
   const rows: Array<[string, ReactNode]> = [['状态', state.label]]
   if (agent?.is_default) rows.push(['当前', '新建会话与模型目录缺省都用它（可在「设置 · Agent 管理」切换）'])
   if (agent?.provider) rows.push(['provider', agent.provider])
-  if (agent?.runtimes?.length) rows.push(['runtime 候选', agent.runtimes.join(' → ')])
   if (id) rows.push(['id', <span style={{ fontFamily: tokens.fontMono, overflowWrap: 'anywhere' }}>{id}</span>])
 
   const chip = (

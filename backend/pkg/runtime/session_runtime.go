@@ -10,7 +10,7 @@ import (
 // ID/ManagesOwnContext/… 均取自该 runtime 的投影 Spec（§6.1/§6.2），Prompt/Capabilities/
 // ProviderSessionID 透传底层 acl.Session。
 //
-// opencode / deepseekharness 两投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
+// opencode / dsh 两投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
 // ApplyMode/ApplyModel/Resume 需底座侧原生支持或映射实测，当前统一显式返回 unsupported_*
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
@@ -111,7 +111,7 @@ func NewOpencodeRuntime(sess *acl.Session) *OpencodeRuntime {
 
 // NewDeepseekHarnessRuntime 包装已建立的 deepseek-harness（dsh）会话（后端自管上下文，§6.2）。
 func NewDeepseekHarnessRuntime(sess *acl.Session) *DeepseekHarnessRuntime {
-	return newSessionRuntime(deepseekharnessSpec(), sess)
+	return newSessionRuntime(dshSpec(), sess)
 }
 
 // NewProjection 依 Spec 分发到对应投影构造器（Orchestrator 采用 Runtime 的单一接缝，
@@ -121,7 +121,7 @@ func NewProjection(spec Spec, sess *acl.Session) Runtime {
 	switch spec.ID {
 	case "opencode":
 		return NewOpencodeRuntime(sess)
-	case "deepseekharness":
+	case "dsh":
 		return NewDeepseekHarnessRuntime(sess)
 	default:
 		return nil

@@ -60,7 +60,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, withStore
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"stub"}}}
+		c.agents = []*AgentRec{{ID: "a1", Name: "A1"}}
 	})
 	g := sess.(*gatedSession)
 	as := &ActiveConversation{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
@@ -69,22 +69,52 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: ConversationStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
-		// 放行所有阻塞中的轮次并等收尾，再摘句柄——否则清库时还有 runTurn 在写（噪声日志/竞态）。
+		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 runTurn 在写。
+		//
+		// 判据**不能**是 `as.busy == false`：`runTurn` 的收尾顺序是
+		// 「先置 `as.busy = false` / `as.turn = nil` → 再发布终态事件、落库（events/runs/transcript）
+		// → 最后 `close(t.done)`」。用 busy 判据会在"还没写完库"时就返回，紧随其后的关库与
+		// `t.TempDir()` 清理便与那次写入赛跑：SQLite 在失败**之前**会先建出 `-journal`，
+		// 于是 `RemoveAll` 的 `unlinkat` 撞上这个瞬态文件 → 偶发
+		// `TempDir RemoveAll cleanup: directory not empty`（本仓实测基线约 3%）。
+		//
+		// 这里**只等、绝不写**（不 flush、不关合并器）：任何在清理期额外触发的写都只会把
+		// `-journal` 的瞬态窗口撑得更大——实测把 `coalescer.Close()` 挂进清理链会把概率从
+		// 约 3% 抬到约 40%。等 `t.done`（收尾写完才关闭）才是与 `runTurn` 同步的正确信号。
 		for i := 0; i < 8; i++ {
 			select {
 			case g.release <- struct{}{}:
 			default:
 			}
 		}
-		deadline := time.Now().Add(time.Second)
-		for time.Now().Before(deadline) {
+		drainTurn := func() bool { // true = 已无在途轮次
 			as.mu.Lock()
-			busy := as.busy
+			t := as.turn
 			as.mu.Unlock()
-			if !busy {
+			if t == nil {
+				return true
+			}
+			select {
+			case <-t.done:
+				return false // 这一轮收尾完了；可能又被投递了下一轮，外层再判一次
+			case <-time.After(time.Second):
+				return true
+			}
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if !drainTurn() {
+				continue
+			}
+			// `as.turn = nil` 早于 `close(t.done)`，所以"看到 nil"仍有可能是收尾窗口：
+			// 给一个静默窗口再确认一次确实没有新轮次，才摘句柄。
+			time.Sleep(5 * time.Millisecond)
+			as.mu.Lock()
+			still := as.turn
+			as.mu.Unlock()
+			if still == nil {
 				break
 			}
-			time.Sleep(5 * time.Millisecond)
 		}
 		r.Orch.evictConversation(as)
 	})

@@ -9,15 +9,15 @@ import (
 // TestDefaultRegistry 内置 runtime 的注册与静态能力基线（M0 DoD：
 // GET /runtimes、/agents 返回真实数据的前提）。
 func TestDefaultRegistry(t *testing.T) {
-	reg := DefaultRegistry()
+	reg := AllBuiltinRegistry()
 	items := reg.ListItems()
 
-	// 内置 runtime 收敛为两个：opencode / deepseekharness（echo 演示底座已于 M0 删除）。
+	// 内置 runtime 收敛为两个：opencode / dsh（echo 演示底座已于 M0 删除）。
 	if len(items) != 2 {
 		t.Fatalf("期望 2 个 runtime，got %d: %+v", len(items), items)
 	}
-	// List/ListItems 按 ID 排序：deepseekharness < opencode。
-	if items[0].ID != "deepseekharness" || items[1].ID != "opencode" {
+	// List/ListItems 按 ID 排序：dsh < opencode。
+	if items[0].ID != "dsh" || items[1].ID != "opencode" {
 		t.Fatalf("排序不符: %+v", items)
 	}
 	// echo 必须彻底消失：既不在清单里，也不能靠别名复活。
@@ -44,11 +44,11 @@ func TestDefaultRegistry(t *testing.T) {
 		t.Fatal("opencode SessionsPersistent 应为 true")
 	}
 
-	dh, ok := reg.Get("deepseekharness")
+	dh, ok := reg.Get("dsh")
 	if !ok {
-		t.Fatal("deepseekharness 未注册")
+		t.Fatal("dsh 未注册")
 	}
-	if dh.Name != "deepseek-harness" || dh.Version != "dsh --profile acp" {
+	if dh.Name != "dsh" || dh.Version != "dsh --profile acp" {
 		t.Fatalf("harness spec 不符: %+v", dh)
 	}
 	if dh.Launch.Command != "dsh" || !reflect.DeepEqual(dh.Launch.Args, []string{"--profile", "acp"}) {
@@ -134,7 +134,7 @@ func TestRegistryListItemsMapsSpec(t *testing.T) {
 
 // TestListItemsStableOrder 多次调用输出稳定（前端列表渲染确定性）。
 func TestListItemsStableOrder(t *testing.T) {
-	reg := DefaultRegistry()
+	reg := AllBuiltinRegistry()
 	a := reg.ListItems()
 	b := reg.ListItems()
 	if !reflect.DeepEqual(a, b) {

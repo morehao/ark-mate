@@ -476,7 +476,11 @@ func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string)
 	if st == nil {
 		return out
 	}
-	reg := goruntime.DefaultRegistry()
+	// 体检刻意用**全部内置**注册表（`AllBuiltinRegistry`）而不是产品装配用的 `ProductRegistry`：
+	// doctor 回答的是"**这台机器上**有哪些底座的配置物化痕迹 / 敏感文件"，不是"本二进制只认哪一个"。
+	// 构建期把产品钉在 dsh 上，并不代表磁盘上不再有另一份底座的遗留物——那恰恰是体检该如实报出来的
+	// 东西（换成 ProductRegistry 会让它们整段消失，表现为"报告一切正常"，而磁盘上的东西一个没少）。
+	reg := goruntime.AllBuiltinRegistry()
 	reg.ApplyIsolationEnv(strings.TrimSpace(home))
 	svc := NewService(reg, nil)
 	defer svc.coalescer.Close()
@@ -593,7 +597,8 @@ func collectSensitiveFiles(home, agentDir string, st *store.Store) []SensitiveFi
 	}
 	// 逐个已注册 runtime 的**原生凭据文档**（声明在 `CredentialSpec.NativeDoc` 里，
 	// 占位符用该 runtime 自己的隔离 env 展开——与物化时同一条解析链，绝不落到用户自己的目录）。
-	reg := goruntime.DefaultRegistry()
+	// 同 `collectRuntimeModelFacts`：体检看全部内置底座，不按构建期选择裁剪（那是产品装配的事）。
+	reg := goruntime.AllBuiltinRegistry()
 	for _, spec := range reg.List() {
 		if strings.TrimSpace(spec.Credential.NativeDoc) == "" {
 			continue

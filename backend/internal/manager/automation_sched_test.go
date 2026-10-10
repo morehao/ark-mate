@@ -76,7 +76,8 @@ func newSchedRig(t *testing.T) *schedRig {
 	reg := runtime.NewRegistry(spec)
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"silent"}, State: AgentStateStopped}
+	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	dir := t.TempDir()
@@ -524,43 +525,45 @@ func TestAutomationReservedKeysRejected(t *testing.T) {
 	}
 }
 
-// TestAutomationRuntimeHint 手动触发走 target.runtime_hint：不在 agent 候选里就拒绝（不静默回落）。
-func TestAutomationRuntimeHint(t *testing.T) {
+// TestAutomationRejectsRuntimeHint `target.runtime_hint` 整体下线：写面带它就显式拒绝
+// （40001 `runtime_selection_removed`），存量定义里的残留则"读面宽容 + 下次落盘自愈"。
+//
+// 这取代了原来的 TestAutomationRuntimeHint（它测的是"hint 不在 agent 候选里 → 40401"）：
+// 候选面已不存在，那个键不再是"选错了"而是"这个面没有了"。两条路必须分开，
+// 因为正确出路不同——见 `rejectRuntimeHintInPatch` / `dropLegacyRuntimeHint` 的注释：
+// 请求里带了就报错（否则它变成"写了、存了、什么都不发生"的骗人字段），老文件里的残留就删掉
+// （否则存量 automation 永远存不回去，而界面已经没有这个字段可让用户删）。
+func TestAutomationRejectsRuntimeHint(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
+
+	// ① 请求体里带它 → 显式拒绝。
+	_, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{
+		"target": map[string]any{"agent_id": "a1", "cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
+	}, false)
+	if err == nil {
+		t.Fatal("写面带 target.runtime_hint 应被拒")
+	}
+	if got := errCode(err); got != "runtime_selection_removed" {
+		t.Fatalf("应是 runtime_selection_removed，got %q（%v）", got, err)
+	}
+	if !strings.Contains(err.Error(), "构建期") {
+		t.Fatalf("文案应指路「底座由构建期固定」: %v", err)
+	}
+
+	// ② 老定义里的残留（本次请求没带）→ 照常装载，且下一次落盘把它删掉（自愈）。
 	got := r.file(t, "daily")
 	got["target"].(map[string]any)["runtime_hint"] = "silent"
 	raw, _ := json.Marshal(got)
 	writeAutomationFile(t, filepath.Join(r.dir, "daily.json"), string(raw))
-	r.svc.LoadAutomationDefinitions(r.dir)
-	out, err := r.svc.runAutomationNow(context.Background(), "daily")
-	if err != nil || out.status != automation.RunClaimed {
-		t.Fatalf("runtime_hint 命中候选应成功: %v %+v", err, out)
+	if n := r.svc.LoadAutomationDefinitions(r.dir); n != 1 {
+		t.Fatalf("带残留 runtime_hint 的老定义应照常装载，got %d", n)
 	}
-	// 另起一条（daily 的会话还在跑，复用会先撞 overlap 而验不到 hint 这一层）
-	body := map[string]any{
-		"id": "bad", "enabled": true,
-		"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-		"target":   map[string]any{"agent_id": "a1", "cwd": r.cwd, "prompt": "x", "runtime_hint": "not-declared"},
+	if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{"name": "改名"}, false); err != nil {
+		t.Fatalf("只改别的键不该被残留键拦住: %v", err)
 	}
-	badRaw, _ := json.Marshal(body)
-	writeAutomationFile(t, filepath.Join(r.dir, "bad.json"), string(badRaw))
-	if n := r.svc.LoadAutomationDefinitions(r.dir); n != 2 {
-		t.Fatalf("装载应为 2，got %d", n)
-	}
-	// 手动触发失败要**既报错又留痕**（把 skipped 当成功返回等于让面板显示一个绿色的失败）
-	// 注意用 numericCode：手动触发失败经 code.FromError 归一成信封错误，acl 码已被吸收进 40401。
-	if _, err := r.svc.runAutomationNow(context.Background(), "bad"); numericCode(err) != 40401 ||
-		!strings.Contains(err.Error(), "runtime_hint") {
-		t.Fatalf("不在候选里的 runtime_hint 应报 40401，got %v（%d）", err, numericCode(err))
-	}
-	// 而且失败要**可见**：落 needs_attention 且理由说清是 runtime 的问题
-	gotBad := r.file(t, "bad")
-	if gotBad["state"] != automation.StateNeedsAttention {
-		t.Fatalf("hint 不可达应落 needs_attention，got %v", gotBad["state"])
-	}
-	if !strings.Contains(gotBad["last_reason"].(string), "候选") {
-		t.Fatalf("理由应说明不在候选里：%v", gotBad["last_reason"])
+	if _, has := r.file(t, "daily")["target"].(map[string]any)["runtime_hint"]; has {
+		t.Fatalf("落盘时应把残留的 runtime_hint 自愈删掉: %v", r.file(t, "daily"))
 	}
 }
 

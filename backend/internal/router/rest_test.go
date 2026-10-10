@@ -17,7 +17,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
@@ -33,11 +32,9 @@ import (
 
 type stubSvc struct {
 	agents        []dtoagent.AgentResp
-	runtimes      []dtoruntime.RuntimeResp
 	conversations []dtoconversation.ConversationResp
 
 	listAgentsErr        error
-	listRuntimesErr      error
 	listConversationsErr error
 	listCwd              string // 最近一次 ListConversations 的工作空间过滤参数
 	listArchivedOnly     bool   // 最近一次 ListConversations 的 archived 参数
@@ -501,12 +498,6 @@ func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*dtocapability.M
 	}
 	return &dtocapability.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
-func (s *stubSvc) ListRuntimes() ([]dtoruntime.RuntimeResp, error) {
-	if s.listRuntimesErr != nil {
-		return nil, s.listRuntimesErr
-	}
-	return s.runtimes, nil
-}
 func (s *stubSvc) ListConversations(archived bool, cwd string) ([]dtoconversation.ConversationResp, error) {
 	s.listArchivedOnly, s.listCwd = archived, cwd
 	if s.listConversationsErr != nil {
@@ -814,14 +805,10 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 
 // ——— 用例 ———
 
-// TestListEndpoints GET /agents /runtimes /conversations 返回 code=0 + 真实列表载荷。
+// TestListEndpoints GET /agents /conversations 返回 code=0 + 真实列表载荷。
 func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
-		agents: []dtoagent.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
-		runtimes: []dtoruntime.RuntimeResp{
-			{Name: "opencode", ID: "opencode", Vers: "opencode acp"},
-			{Name: "deepseekharness", ID: "deepseekharness", Vers: "dsh --profile acp"},
-		},
+		agents:        []dtoagent.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
 		conversations: []dtoconversation.ConversationResp{{ID: "s1", AgentID: "a", Status: "completed"}},
 	}
 	r := newRestEngine(stubDeps(svc))
@@ -841,17 +828,28 @@ func TestListEndpoints(t *testing.T) {
 	if !strings.Contains(string(env.Data), `"seed":true`) {
 		t.Fatalf("seed 字段名不符: %s", env.Data)
 	}
-
-	env, _ = do(t, r, "GET", "/v1/mate/runtimes", "")
-	var rts []dtoruntime.RuntimeResp
-	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 || rts[1].Name != "deepseekharness" {
-		t.Fatalf("runtimes data 不符: %s", env.Data)
+	// 底座由构建期固定：agent 响应里**不该再有 runtimes** 这个选择面字段。
+	var rawAgents []map[string]any
+	if err := json.Unmarshal(env.Data, &rawAgents); err != nil {
+		t.Fatalf("agents 原始载荷解析失败: %s", env.Data)
+	}
+	if _, has := rawAgents[0]["runtimes"]; has {
+		t.Fatalf("agent 响应不应带 runtimes: %s", env.Data)
 	}
 
 	env, _ = do(t, r, "GET", "/v1/mate/conversations", "")
 	var sess []dtoconversation.ConversationResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
 		t.Fatalf("conversations data 不符: %s", env.Data)
+	}
+}
+
+// TestRuntimesEndpointGone `GET /runtimes` 必须**不存在**（用户面零 runtime 选择入口）。
+func TestRuntimesEndpointGone(t *testing.T) {
+	r := newRestEngine(stubDeps(&stubSvc{}))
+	_, code := do(t, r, "GET", "/v1/mate/runtimes", "")
+	if code == 0 {
+		t.Fatal("GET /v1/mate/runtimes 不该再可用：底座由构建期固定")
 	}
 }
 
@@ -1283,7 +1281,7 @@ func TestAgentManagementRoutes(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "POST", "/v1/mate/agents", `{"id":"alias-stub","name":"别名stub","runtimes":["stub"]}`)
+	env, code := do(t, r, "POST", "/v1/mate/agents", `{"id":"alias-stub","name":"别名stub"}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
@@ -1522,10 +1520,13 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
 		{"delete_unknown", "DELETE", "/v1/mate/agents/nope", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"update_seed_runtime", "PATCH", "/v1/mate/agents/dsh", `{"runtimes":["stub"]}`,
-			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 runtime 只读", nil), 40001},
-		{"create_reserved", "POST", "/v1/mate/agents", `{"id":"agent-x","runtimes":["stub"]}`,
+		{"update_seed", "PATCH", "/v1/mate/agents/dsh", `{"name":"x"}`,
+			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 只读", nil), 40001},
+		{"create_reserved", "POST", "/v1/mate/agents", `{"id":"agent-x"}`,
 			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
+		// 已下线的选择面：`runtimes` / `routing_policy` 一律 40001（**不是**静默忽略）。
+		{"create_with_runtimes", "POST", "/v1/mate/agents", `{"id":"x","runtimes":["stub"]}`,
+			acl.NewError(acl.ClassRequest, "runtime_selection_removed", "底座由构建期固定", nil), 40001},
 		{"start_unknown", "POST", "/v1/mate/agents/nope/start", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
 		{"stop_busy", "POST", "/v1/mate/agents/dsh/stop", "",

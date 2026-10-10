@@ -28,7 +28,7 @@ func TestUsageSummaryService(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。
-	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", Runtimes: []string{"stub"}}
+	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub"}
 	svc.registerConversation(&ConversationRec{ID: "u1", AgentID: "agent-stub"})
 	svc.registerConversation(&ConversationRec{ID: "u2", AgentID: "agent-stub"})
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})

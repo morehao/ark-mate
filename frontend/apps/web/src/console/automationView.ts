@@ -288,7 +288,6 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
   name: string
   enabled: boolean
   agent_id: string
-  runtime_hint?: string
   cwd: string
   model?: string
   prompt: string
@@ -305,7 +304,6 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
     minute: a.schedule.minute ?? 0,
     days_of_week: a.schedule.days_of_week ?? [],
     agent_id: a.target.agent_id,
-    runtime_hint: a.target.runtime_hint,
     cwd: a.target.cwd,
     model: a.target.model,
     prompt: a.target.prompt,
@@ -317,6 +315,9 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
  * 写面 body：**只带用户填了的键**（`undefined` 不进 body，键的出现与否是 PUT 的语义）。
  *
  * `id` 只在新建时带（覆盖写时路径就是 id；带上也让服务端校验一次一致性）。
+ *
+ * **不带 `runtime_hint`**：底座由构建期固定，用户面没有这个选择面；服务端对带它的请求是 40001。
+ * 老定义里若还残留这个键，服务端会在下次保存时自愈清除（只删这一个键）。
  */
 export function writeBody(
   v: ScheduleFormValues & {
@@ -324,7 +325,6 @@ export function writeBody(
     name: string
     enabled: boolean
     agent_id: string
-    runtime_hint?: string
     cwd: string
     model?: string
     prompt: string
@@ -344,10 +344,6 @@ export function writeBody(
   }
   if (opts.create && v.id) body.id = v.id
   const target = body.target as Record<string, unknown>
-  // 空字符串有意落成 null（删键）：空 runtime_hint 与"没写 runtime_hint"必须是一回事，
-  // 否则文件里会留一个 `"runtime_hint": ""`，读它的人以为有个值。
-  if (v.runtime_hint) target.runtime_hint = v.runtime_hint
-  else if (!opts.create) target.runtime_hint = null
   if (v.model) target.model = v.model
   if (v.max_run_duration) body.max_run_duration = v.max_run_duration
   return body

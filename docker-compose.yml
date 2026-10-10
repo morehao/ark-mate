@@ -1,9 +1,13 @@
 # ark-mate 单机容器部署（docker compose up -d --build）
 #
 # 镜像形态由 build.target 与两个开关共同决定（与 Dockerfile 一致）：
-#   默认（不改任何变量）        → 最小镜像：只含 mate 本体，用内置 echo 底座自检
+#   默认（不改任何变量）        → 最小镜像：只含 mate 本体
 #   MATE_BUILD_TARGET=mate-runtimes + WITH_DSH/WITH_OPENCODE → 额外内置 dsh / opencode
 # 二者必须一起改：只打开关、不改 target，会被最小镜像的守卫明确拒绝（不静默忽略）。
+#
+# **另有一个正交的变量 `MATE_RUNTIME`**：核心**认哪一个**底座（构建期 `-X` 注入，默认
+# dsh = dsh）。它与 WITH_* 是两件事：后者决定镜像里**装**哪几份底座二进制。
+# 用户面改不了它——换底座要重新构建（见 README「底座由构建期固定」）。
 #
 # 变量都可在同目录 .env 里给（模板见 .env.example）；受限网络（镜像站 / 代理）也走同一套变量。
 services:
@@ -12,6 +16,7 @@ services:
       context: .
       target: ${MATE_BUILD_TARGET:-mate}
       args:
+        MATE_RUNTIME: ${MATE_RUNTIME:-dsh}
         WITH_DSH: ${WITH_DSH:-false}
         WITH_OPENCODE: ${WITH_OPENCODE:-false}
         NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm}

@@ -29,7 +29,7 @@ func agentDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	t.Helper()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"},
+		runtime.Spec{ID: "dsh", Name: "dsh"},
 		runtime.Spec{ID: "opencode", Name: "opencode"},
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
@@ -56,7 +56,7 @@ func TestAgentDefinitionsStoreRoundTrip(t *testing.T) {
 	svc, st := agentDBRig(t, t.TempDir())
 
 	resp, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{
-		ID: "alias-stub", Name: "别名stub", Runtimes: []string{"stub"}, Provider: "openai:gpt-4o",
+		ID: "alias-stub", Name: "别名stub", Provider: "openai:gpt-4o",
 	})
 	if err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -78,22 +78,24 @@ func TestAgentDefinitionsStoreRoundTrip(t *testing.T) {
 	if def["name"] != "别名stub" || def["provider"] != "openai:gpt-4o" {
 		t.Fatalf("行正文缺字段: %+v", def)
 	}
-	if rs, _ := def["runtimes"].([]any); len(rs) != 1 || rs[0] != "stub" {
-		t.Fatalf("行正文 runtimes 不符: %+v", def["runtimes"])
+	// 底座是构建期常量：定义正文里**没有**（也不该有）runtime 键，否则就是留了一个
+	// "写了、存了、什么都不发生"的骗人字段。
+	if _, exists := def["runtimes"]; exists {
+		t.Fatalf("定义正文不该再有 runtimes 键: %+v", def)
 	}
 	// 不落文件（DB 载体的定义不在盘上）。
 	if _, err := os.Stat(filepath.Join(svc.agentDirSnapshot(), "alias-stub.json")); !os.IsNotExist(err) {
 		t.Fatalf("sqlite 载体不该写定义文件: %v", err)
 	}
 
-	// PATCH name：行 revision 抬升，runtimes/provider 不被抹掉。
+	// PATCH name：行 revision 抬升，provider 不被抹掉。
 	name := "别名stub-v2"
 	if _, err := svc.UpdateAgent(ctx, "alias-stub", dtoagent.AgentUpdateReq{Name: &name}); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
 	row, _, _ = st.GetAgentDefinition(ctx, "alias-stub")
 	if row.Revision != 2 || !strings.Contains(row.Body, "别名stub-v2") ||
-		!strings.Contains(row.Body, `"stub"`) || !strings.Contains(row.Body, "openai:gpt-4o") {
+		!strings.Contains(row.Body, "openai:gpt-4o") {
 		t.Fatalf("覆盖写后的行不符: rev=%d body=%s", row.Revision, row.Body)
 	}
 	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "alias-stub")
@@ -139,14 +141,18 @@ func TestAgentDefinitionsStoreRoundTrip(t *testing.T) {
 }
 
 // TestAgentStoreLoaderSeedMerge 装载的**部分合并**语义（计划 §7 P-7 的护栏）：
-// 行里只有 name 时，种子的 runtimes 必须原样保留——"整行 update 把种子字段抹空"是最容易丢的一条。
+// 行里没写的字段不得把种子已有的值抹空——"整行 update 把种子字段抹空"是最容易丢的一条。
+//
+// v12 的落差：这条护栏原先的判据是"种子的 `runtimes` 必须原样保留"。底座的键下线之后，
+// 种子身上唯一还能被行覆盖的只有 name（它的 provider/白名单/策略本来就来自行），所以这里
+// 断言的是"名字被覆盖、种子身份不变、用户 agent 字段逐字装载"这三件事。
 func TestAgentStoreLoaderSeedMerge(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	// 只覆盖 name 的一行（种子 dsh 的 runtime 不写进行里）。
+	// 只覆盖 name 的一行（种子的其余字段不写进行里）。
 	mustSeedAgentRow(t, st, "dsh", `{"id":"dsh","name":"我的 dsh"}`)
-	// 一个用户 agent（自带走全部字段）。
-	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1","runtimes":["stub"]}`)
+	// 一个用户 agent（自带全部字段）。
+	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1","provider":"p1"}`)
 
 	svc, _ := agentDBRig(t, t.TempDir())
 	// 上面 rig 用的是新库，这里换成预置过行的库再装载（装载路径只有一条）。
@@ -161,13 +167,10 @@ func TestAgentStoreLoaderSeedMerge(t *testing.T) {
 	if seed.Name != "我的 dsh" {
 		t.Fatalf("行里的 name 应覆盖种子: %+v", seed)
 	}
-	if len(seed.Runtimes) != 1 || seed.Runtimes[0] != "deepseekharness" {
-		t.Fatalf("行里没写 runtimes → 必须保留种子的 runtimes（否则运行时直接不可用）: %+v", seed)
-	}
 	if !seedAgent(seed.ID) {
 		t.Fatal("dsh 仍是种子（只读判定不得因为有了行而失效）")
 	}
-	if u, ok := svc.AgentByID("u1"); !ok || len(u.Runtimes) != 1 || u.Runtimes[0] != "stub" {
+	if u, ok := svc.AgentByID("u1"); !ok || u.Name != "U1" || u.Provider != "p1" {
 		t.Fatalf("用户 agent 未装载正确: %+v ok=%v", u, ok)
 	}
 
@@ -186,8 +189,8 @@ func TestAgentStoreLoaderSeedMerge(t *testing.T) {
 	}
 }
 
-// TestSeedAgentReadonlyOnStore 有了行之后种子仍然只读：改 runtime / 删除都被拒，
-// **且行本身一个字节都不动**（拒绝必须无副作用）。
+// TestSeedAgentReadonlyOnStore 有了行之后种子仍然只读：删除被拒、且行本身一个字节都不动
+// （拒绝必须无副作用）；`runtimes` 这条写面则对**所有** agent 一视同仁地拒（底座选择面已下线）。
 func TestSeedAgentReadonlyOnStore(t *testing.T) {
 	ctx := context.Background()
 	svc, st := agentDBRig(t, t.TempDir())
@@ -197,11 +200,11 @@ func TestSeedAgentReadonlyOnStore(t *testing.T) {
 	}
 	before, _, _ := st.GetAgentDefinition(ctx, "dsh")
 
-	runtimes := []string{"stub"}
-	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: &runtimes}); err == nil {
-		t.Fatal("改种子 runtime 应被拒")
-	} else if got := errCode(err); got != "seed_agent_readonly" {
-		t.Fatalf("应是 seed_agent_readonly，got %q（%v）", got, err)
+	// 底座不可选：种子带上 `runtimes` 一样被拒（理由不是"种子特权"，而是这个键不存在了）。
+	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["stub"]`)}); err == nil {
+		t.Fatal("带 runtimes 的 PATCH 应被拒")
+	} else if got := errCode(err); got != "runtime_selection_removed" {
+		t.Fatalf("应是 runtime_selection_removed，got %q（%v）", got, err)
 	}
 	if _, err := svc.DeleteAgent(ctx, "dsh"); err == nil {
 		t.Fatal("删种子应被拒")
@@ -212,7 +215,7 @@ func TestSeedAgentReadonlyOnStore(t *testing.T) {
 	if after.Revision != before.Revision || after.Body != before.Body {
 		t.Fatalf("被拒的写面不该动行: before=%+v after=%+v", before, after)
 	}
-	if a, _ := svc.AgentByID("dsh"); a.Name != "我的 dsh" || a.Runtimes[0] != "deepseekharness" {
+	if a, _ := svc.AgentByID("dsh"); a.Name != "我的 dsh" {
 		t.Fatalf("被拒的写面不该动内存: %+v", a)
 	}
 
@@ -246,7 +249,7 @@ func TestDefaultAgentFromStoreFallback(t *testing.T) {
 	}
 
 	// 定义"回来" → 重新装载后选择生效。
-	mustSeedAgentRow(t, st, "gone", `{"id":"gone","name":"回来了","runtimes":["stub"]}`)
+	mustSeedAgentRow(t, st, "gone", `{"id":"gone","name":"回来了"}`)
 	svc.LoadAgentDefinitionsFromStore(ctx, t.TempDir())
 	if got := svc.DefaultAgentID(); got != "gone" {
 		t.Fatalf("定义回来后显式选择应生效: %q", got)
@@ -258,7 +261,7 @@ func TestDefaultAgentFromStoreFallback(t *testing.T) {
 func TestAgentLibraryOriginOnStore(t *testing.T) {
 	ctx := context.Background()
 	svc, st := agentDBRig(t, t.TempDir())
-	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1","runtimes":["stub"]}`)
+	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1"}`)
 	svc.LoadAgentDefinitionsFromStore(ctx, t.TempDir())
 
 	items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindAgent})

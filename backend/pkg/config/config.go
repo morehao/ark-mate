@@ -993,6 +993,10 @@ func normalizeProjectionDirs(items []string) (map[string]string, error) {
 		if !hasColon || runtimeID == "" || kind == "" {
 			return nil, fmt.Errorf("条目 %q 的键需为 `<runtime>:<kind>`（如 opencode:skill），得到 %q", item, key)
 		}
+		// 标识归一（历史别名，见 runtime.NormalizeID）：老配置写的是 `deepseekharness:skill`，
+		// 而平台现在拿 `dsh` 去查这张表——不归一，用户自定义的投影根会**静默失效**（回落到
+		// adapter 声明的默认根），表现为"技能跑到别的目录去了"而没有任何报错。
+		runtimeID = runtime.NormalizeID(runtimeID)
 		if !runtime.ValidProjectionKinds[runtime.ProjectionKind(kind)] {
 			return nil, fmt.Errorf("条目 %q 的 kind %q 不是可投影的能力种类（合法：%s）",
 				item, kind, projectionKindList())

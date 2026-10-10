@@ -1,16 +1,16 @@
-// Package deepseekharness 声明 deepseek-harness（dsh）的 ACP server 启动形态与
+// Package dsh 声明 deepseek-harness（dsh）的 ACP server 启动形态与
 // 能力基线（纯数据，不依赖父包）。
 //
 // 形态说明（基于 deepseek-harness 源码 2026-08 快照核实，见
-// docs/deepseekharness-acp-adaptation.md）：当前版本不再提供独立 `dsh-acp-demo`
+// docs/dsh-acp-adaptation.md）：当前版本不再提供独立 `dsh-acp-demo`
 // bin，ACP server 是统一启动器 `dsh` 的一个 profile：`dsh --profile acp`。
-package deepseekharness
+package dsh
 
 // ID 是注册表键。
-const ID = "deepseekharness"
+const ID = "dsh"
 
 // Name 是展示名。
-const Name = "deepseek-harness"
+const Name = "dsh"
 
 // Version 是展示用启动形态。
 const Version = "dsh --profile acp"

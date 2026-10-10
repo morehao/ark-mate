@@ -26,6 +26,13 @@
 #
 # 注意：WITH_DSH / WITH_OPENCODE 属于 mate-runtimes target。传给默认（最小）target 会**明确报错**
 # 而不是静默忽略——静默忽略会让人以为镜像里有底座。
+#
+# MATE_RUNTIME（**所有 target**，默认 dsh）：核心**认哪一个**底座，走 `-X` 编译期注入
+# （见 backend/pkg/runtime/build.go）。它与 WITH_DSH / WITH_OPENCODE 是**两件事**：后者决定镜像里
+# 装哪几份底座二进制，前者决定核心认哪一份。两者不一致是允许的（最小镜像不装任何底座时核心照样
+# 认 dsh，只是拉不起来，诊断面会说清）；选了一个镜像里没装的底座，同样在会话建立时才暴露成
+# `runtime_unavailable`。用户面（REST / 控制台）改不了它——换底座要重新构建。选中的 id 若不存在，
+# 核心启动即失败（fail-closed，不给"能启动但没底座"的进程）。
 
 ARG NODE_IMAGE=node:24-bookworm
 ARG GO_IMAGE=golang:1.26-bookworm
@@ -61,6 +68,9 @@ RUN --mount=type=cache,target=/pnpm-store,id=pnpm-store \
 # 而不是悄悄下载另一个工具链（fail closed）。
 FROM ${GO_IMAGE} AS build
 ARG GO_PROXY
+# 构建期固定底座（默认 dsh）。取值只做词法校验：存在性交给核心启动时的 ProductRegistry
+# fail-closed——远程 runtime 的 id 由 runtimes.json 声明，这里写不出白名单。
+ARG MATE_RUNTIME=dsh
 ENV GOPROXY=${GO_PROXY} \
     CGO_ENABLED=0
 WORKDIR /src/backend
@@ -70,7 +80,13 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomod go mod download
 COPY backend ./
 RUN --mount=type=cache,target=/go/pkg/mod,id=gomod \
     --mount=type=cache,target=/root/.cache/go-build,id=gobuild \
-    go build -trimpath -ldflags "-s -w" -o /out/mate ./cmd/mate
+    set -eux; \
+    case "${MATE_RUNTIME}" in \
+      ""|*[!a-z0-9_-]*|[!a-z0-9]*) echo "MATE_RUNTIME 取值非法：${MATE_RUNTIME}（须是 [a-z0-9][a-z0-9_-]*）" >&2; exit 1 ;; \
+    esac; \
+    go build -trimpath \
+      -ldflags "-s -w -X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=${MATE_RUNTIME}" \
+      -o /out/mate ./cmd/mate
 
 # —— 阶段 3：运行时基线（两个最终镜像共用：非 root + 数据卷 /data + tini 收孤儿）——
 # tini 作为 PID 1：daemon 会派生 opencode/dsh 子进程，容器里的孤儿进程需要有 init 回收。

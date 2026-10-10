@@ -276,9 +276,10 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 func TestEnsureConversationResumeGating(t *testing.T) {
 	svc, orch, _ := newTestRig(t) // 空 runtime 注册表
 	ctx := context.Background()
-	// agent 存在、但其 runtime 未注册（CreateAgent 会先校验 runtime，构造不出该状态 → 直接落注册表）。
+	// agent 存在、但**构建期底座未装配**（空注册表 → 解析必然失败；候选面下线后这是构造
+	// "runtime 解析不了"的唯一形态）。
 	svc.mu.Lock()
-	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", Runtimes: []string{"no-such-runtime"}, State: AgentStateStopped}
+	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", State: AgentStateStopped}
 	svc.mu.Unlock()
 	svc.registerConversation(&ConversationRec{
 		ID: "c-stub", AgentID: "no-such-agent", RuntimeHint: "stub", Status: ConversationStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选

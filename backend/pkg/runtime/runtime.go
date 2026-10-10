@@ -50,7 +50,7 @@ type PromptRequest struct {
 // 契约：实现方须使 ID/ManagesOwnContext/Capabilities 与底层会话自洽；对不支持的操作（如某
 // runtime 无 Resume/ApplyMode/ApplyModel）返回明确错误，不得静默吞掉。
 type Runtime interface {
-	// ID 返回投影 id（对应 Spec.ID：opencode/deepseekharness）。
+	// ID 返回投影 id（对应 Spec.ID：opencode/dsh）。
 	ID() string
 	// ManagesOwnContext 后端自管上下文/工具（§6.2 三投影均 true）。
 	ManagesOwnContext() bool

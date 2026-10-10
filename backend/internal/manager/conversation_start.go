@@ -36,36 +36,26 @@ func (o *Orchestrator) ApplyConversationModel(ctx context.Context, conversationI
 	return true, nil
 }
 
-// StartConversation 在 agent 路由选定的 runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
+// StartConversation 在**构建期选定的** runtime 上建立持久 ACP 会话（conversation/new，绝对 cwd），
 // 并发布 conversation.created。不发起 prompt；Prompt 负责每轮。
-// 路由 = ResolveRuntime（§7 FirstAvailable：候选顺序 × 已注册 × 命令可执行）。
+//
+// 底座不是这次调用的入参：它是二进制的属性（pkg/runtime/build.go）。这里只做"取那一个 + 校验
+// 已装配"（`ResolveRuntime`）。
 func (o *Orchestrator) StartConversation(ctx context.Context, agentID string, opt StartOptions) (*CreateResult, error) {
 	agent, ok := o.svc.AgentByID(agentID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
 	}
-	runtimeID, err := o.svc.ResolveRuntime(agent)
+	return o.startConversationOn(ctx, agent, opt)
+}
+
+// startConversationOn 在**构建期选定的** runtime 上建立持久 ACP 会话（Service.CreateConversation
+// 与 RunOnce 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
+func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, opt StartOptions) (*CreateResult, error) {
+	runtimeID, err := o.svc.ResolveRuntime()
 	if err != nil {
 		return nil, err
 	}
-	return o.startConversationOn(ctx, agent, runtimeID, opt)
-}
-
-// StartConversationOn 在**显式指定**的 runtime 上建会话（automation 的 target.runtime_hint）。
-//
-// 与 StartConversation 的唯一区别是跳过路由解析；成员校验在调用方（CreateConversation）完成：
-// "这个 runtime 是不是该 agent 的候选"属于配置事实，放在持有 agent 定义的那一层判更合适。
-func (o *Orchestrator) StartConversationOn(ctx context.Context, agentID, runtimeID string, opt StartOptions) (*CreateResult, error) {
-	agent, ok := o.svc.AgentByID(agentID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", agentID), nil)
-	}
-	return o.startConversationOn(ctx, agent, runtimeID, opt)
-}
-
-// startConversationOn 在指定 runtime 上建立持久 ACP 会话（StartConversation 的路由首候选、
-// RunOnce 的显式 --runtime 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
-func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec, runtimeID string, opt StartOptions) (*CreateResult, error) {
 	spec, ok := o.reg.Get(runtimeID)
 	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
@@ -195,20 +185,20 @@ func (o *Orchestrator) ensureConversation(ctx context.Context, conversationID st
 			fmt.Sprintf("会话 %q 绑定的 agent %q 已不存在：用同一个 id 重新注册该 agent 后可继续，或导出本会话历史另开新会话",
 				conversationID, rec.AgentID), nil)
 	}
-	// runtime 选择：会话原 runtime 未注册 / agent 现路由首选已迁移（跨 runtime 续聊，§18 F3）
-	// → 取 agent 现路由 runtime；否则沿用 rec.RuntimeHint。
-	target := rec.RuntimeHint
-	if _, ok := o.reg.Get(target); !ok {
-		target = ""
+	// runtime 选择：**构建期选定的那一个**。
+	//
+	// 历史：这里曾在「会话原 runtime（`rec.RuntimeHint`）」与「agent 现路由首选」之间做迁移判定
+	// （跨 runtime 续聊，§18 F3）。产品钉在单一底座之后没有第二个候选——若会话记录里的原生 runtime
+	// 与当前不同（改过构建 / 老数据），下面 `connectConversation` 的 `sameRuntime` 判据自然为 false，
+	// 走 fresh + handoff memo 重灌，会话照样能续。**这条路径要有真实用例**（M5 验收项）。
+	runtimeID, err := o.svc.ResolveRuntime()
+	if err != nil {
+		return nil, err
 	}
-	if resolved, err := o.svc.ResolveRuntime(agent); err == nil && resolved != "" && resolved != target {
-		// agent 定义已更新/原 runtime 失联：切到现首选 runtime（fresh + memo 重灌）。
-		target = resolved
-	}
-	spec, ok := o.reg.Get(target)
-	if !ok || target == "" {
+	spec, ok := o.reg.Get(runtimeID)
+	if !ok {
 		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("runtime %q 未注册（agent %q 亦无可路由 runtime）", target, rec.AgentID), nil)
+			fmt.Sprintf("runtime %q 未注册（agent %q 无法建会话）", runtimeID, rec.AgentID), nil)
 	}
 	cwd := rec.Cwd
 	if cwd == "" {

@@ -48,12 +48,14 @@ type Schedule struct {
 // `Cwd` 在**创建定义时**钉死，触发时不再解析"当前工作空间"：openwork 在这件事上吃过的亏
 // （`automations.ts:124-130` 的注释：切换活跃工作空间会静默改掉所有 automation 的目标）
 // 是同一类缺陷，不该复现（ADR-6）。
+//
+// **没有 runtime_hint**：底座由构建期固定（backend/pkg/runtime/build.go）。老定义里若还留着
+// `target.runtime_hint`：读面宽容（本结构丢弃它），写面显式拒绝（manager 的闸门 → 40001）。
 type Target struct {
-	AgentID     string `json:"agent_id"`
-	RuntimeHint string `json:"runtime_hint,omitempty"` // 空 = 走 agent 的 routing_policy
-	Cwd         string `json:"cwd"`
-	Model       string `json:"model,omitempty"`
-	Prompt      string `json:"prompt"`
+	AgentID string `json:"agent_id"`
+	Cwd     string `json:"cwd"`
+	Model   string `json:"model,omitempty"`
+	Prompt  string `json:"prompt"`
 }
 
 // Automation 定义文件（`<AutomationDir>/<id>.json`）的完整形态。

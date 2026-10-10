@@ -230,14 +230,8 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
 	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
 	selection := capabilitySelectionFromReq(req.Capabilities)
-	// runtime_hint（automation 的 target.runtime_hint）：必须在该 agent 声明的候选里。
-	// 成员校验放在这里而不是编排器：它是**配置事实**（agent 定义），且必须在建连之前判
-	// （校验不过一个副作用都不留：刚代建的工作空间也要撤掉）。
-	if err := s.assertRuntimeHint(agentID, req.RuntimeHint); err != nil {
-		DiscardWorkspace(ws)
-		return nil, code.FromError(err)
-	}
-	res, err := s.startConversation(runCtx, agentID, req.RuntimeHint, StartOptions{
+	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
+	res, err := s.startConversation(runCtx, agentID, StartOptions{
 		ConversationID:     convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
@@ -265,39 +259,10 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	return resp, nil
 }
 
-// assertRuntimeHint 校验显式指定的 runtime 是该 agent 的候选之一（空 = 未指定，直接通过）。
-func (s *Service) assertRuntimeHint(agentID, runtimeID string) error {
-	if runtimeID == "" {
-		return nil
-	}
-	agent, _ := s.AgentByID(agentID)
-	if agent != nil {
-		for _, r := range agent.Runtimes {
-			if r == runtimeID {
-				return nil
-			}
-		}
-	}
-	return acl.NewError(acl.ClassRequest, "runtime_not_found",
-		fmt.Sprintf("runtime_hint %q 不在 agent %q 的候选 runtime %v 里（不静默回落路由）",
-			runtimeID, agentID, agentRuntimes(agent)), nil)
-}
-
-// startConversation 建会话：runtimeID 空 = 走 agent 的 routing_policy；非空 = 显式指定
-// （成员校验已由 assertRuntimeHint 完成）。
-func (s *Service) startConversation(ctx context.Context, agentID, runtimeID string, opt StartOptions) (*CreateResult, error) {
-	if runtimeID == "" {
-		return s.orch.StartConversation(ctx, agentID, opt)
-	}
-	return s.orch.StartConversationOn(ctx, agentID, runtimeID, opt)
-}
-
-// agentRuntimes 取 agent 声明的 runtime 候选（nil agent 安全，供错误消息用）。
-func agentRuntimes(a *AgentRec) []string {
-	if a == nil {
-		return nil
-	}
-	return append([]string(nil), a.Runtimes...)
+// startConversation 建会话。**底座不由调用方指定**：编排器内部取构建期选定的那一个
+// （见 pkg/runtime/build.go 与 Orchestrator.StartConversation）。
+func (s *Service) startConversation(ctx context.Context, agentID string, opt StartOptions) (*CreateResult, error) {
+	return s.orch.StartConversation(ctx, agentID, opt)
 }
 
 // PromptConversation 向既有会话追加一轮 prompt（后台执行）。

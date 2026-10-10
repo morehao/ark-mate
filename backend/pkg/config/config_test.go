@@ -494,10 +494,10 @@ func TestStoreMode(t *testing.T) {
 // TestProjectionDirs 投影根覆盖配置解析（`runtime:kind=dir` 列表）。
 func TestProjectionDirs(t *testing.T) {
 	hermetic(t)
-	t.Setenv("MATE_PROJECTION_DIRS", "opencode:skill=/tmp/oc, deepseekharness:skill=/tmp/dsh")
+	t.Setenv("MATE_PROJECTION_DIRS", "opencode:skill=/tmp/oc, dsh:skill=/tmp/dsh")
 	cfg := Load()
 	if len(cfg.ProjectionDirs) != 2 || cfg.ProjectionDirs["opencode:skill"] != "/tmp/oc" ||
-		cfg.ProjectionDirs["deepseekharness:skill"] != "/tmp/dsh" {
+		cfg.ProjectionDirs["dsh:skill"] != "/tmp/dsh" {
 		t.Fatalf("解析不符: %+v", cfg.ProjectionDirs)
 	}
 	// 目录里的 `=` 只按**第一个** `=` 切分（路径含 `=` 也能表达）。

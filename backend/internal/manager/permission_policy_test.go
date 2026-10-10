@@ -97,11 +97,11 @@ func TestAutoPermissionDecision(t *testing.T) {
 // allow → 直接放行（不挂起、不写记忆）；deny → 直接拒绝；ask → 回落挂起征询。
 func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	svc.agents["a-allow"] = &AgentRec{ID: "a-allow", Runtimes: []string{"stub"},
+	svc.agents["a-allow"] = &AgentRec{ID: "a-allow",
 		PermissionPolicy: &PermissionPolicy{Tools: map[string]string{"bash": "allow"}}}
-	svc.agents["a-deny"] = &AgentRec{ID: "a-deny", Runtimes: []string{"stub"},
+	svc.agents["a-deny"] = &AgentRec{ID: "a-deny",
 		PermissionPolicy: &PermissionPolicy{Default: "deny"}}
-	svc.agents["a-ask"] = &AgentRec{ID: "a-ask", Runtimes: []string{"stub"},
+	svc.agents["a-ask"] = &AgentRec{ID: "a-ask",
 		PermissionPolicy: &PermissionPolicy{Default: "ask"}}
 
 	opts := []acl.PermissionOption{
@@ -171,7 +171,7 @@ func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 	}
 
 	// 无策略 agent（nil）→ 行为不变（挂起）。
-	svc.agents["a-none"] = &AgentRec{ID: "a-none", Runtimes: []string{"stub"}}
+	svc.agents["a-none"] = &AgentRec{ID: "a-none"}
 	svc.registerConversation(&ConversationRec{ID: "c-none", AgentID: "a-none"})
 	if d = orch.requestPermission(context.Background(), reqFor("c-none")); d.Allowed || d.Rejected {
 		t.Fatalf("无策略应回落征询: %+v", d)

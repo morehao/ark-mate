@@ -1,5 +1,7 @@
-// Package svcruntime 定义底座面的服务端口：runtime 概要、provider 档案
-// 与运行时派生的模型目录。
+// Package svcruntime 定义底座面的服务端口：provider 档案与运行时派生的模型目录。
+//
+// **没有 runtime 概览**：底座由构建期固定（backend/pkg/runtime/build.go），用户面不存在
+// "列出有哪些底座"的读面（`GET /runtimes` 已随 agent 候选面一并下线）。
 package svcruntime
 
 import (
@@ -7,16 +9,12 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
-// RuntimeSvc 底座（runtime/provider/模型目录）面的服务端口。
+// RuntimeSvc 底座（provider/模型目录）面的服务端口。
 //
 // 实现方（internal/manager）以编译期断言 var _ RuntimeSvc = (*T)(nil) 保证一致性。
 type RuntimeSvc interface {
-	// ListRuntimes 返回可用 Runtime 概要。
-	ListRuntimes() ([]dtoruntime.RuntimeResp, error)
-
 	// ListProviders 列出供应商概要（密钥只写不读回；带引用面、模型条数与问题清单）。
 	ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error)
 

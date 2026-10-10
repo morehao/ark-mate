@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -376,12 +375,15 @@ func TestStartConversationUnknownAgent(t *testing.T) {
 	}
 }
 
-// TestStartConversationUnknownRuntime agent 指向未注册 runtime → runtime_not_found（拨号前拦截）。
+// TestStartConversationUnknownRuntime 构建期底座未装配 → runtime_not_found（拨号前拦截）。
+//
+// 历史：这里种的是一个"指向未注册 runtime 的 agent"（agent 可声明候选的年代）。候选面下线后
+// 唯一能让底座解析失败的形态只剩"构建期选定的那个不在注册表里"。
 func TestStartConversationUnknownRuntime(t *testing.T) {
-	svc, orch, _ := newTestRig(t)
+	svc, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
 	// 手工种一个指向未注册 runtime 的 agent（真实场景来自配置漂移）。
 	svc.mu.Lock()
-	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost", Runtimes: []string{"not-registered"}}
+	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost"}
 	svc.mu.Unlock()
 	_, err := orch.StartConversation(context.Background(), "agent-ghost", StartOptions{Cwd: "/tmp"})
 	var ae *acl.Error
@@ -392,7 +394,7 @@ func TestStartConversationUnknownRuntime(t *testing.T) {
 
 // TestResolveConversationAgent 空 agent_id → 默认播种 Agent（dsh）；非空原样返回。
 func TestResolveConversationAgent(t *testing.T) {
-	reg := runtime.NewRegistry(runtime.Spec{ID: "deepseekharness", Name: "deepseek-harness"})
+	reg := runtime.NewRegistry(runtime.Spec{ID: "dsh", Name: "dsh"})
 	svc := NewService(reg, nil) // 默认 agent dsh 已播种
 	if id, err := svc.resolveConversationAgent(""); err != nil || id != "dsh" {
 		t.Fatalf("空 agent_id 应落到默认 dsh: id=%q err=%v", id, err)
@@ -402,53 +404,35 @@ func TestResolveConversationAgent(t *testing.T) {
 	}
 }
 
-// TestRunOnceUnknownRuntime demo 路径未知 runtime 直接报错。
-func TestRunOnceUnknownRuntime(t *testing.T) {
+// TestRunOnceUnregisteredRuntime 构建期选定的 runtime 不在注册表里时直接报错
+// （正常路径由装配期的 ProductRegistry fail-closed 拦住，这里是兜底判据）。
+func TestRunOnceUnregisteredRuntime(t *testing.T) {
 	_, orch, _ := newTestRig(t)
-	if _, err := orch.RunOnce(context.Background(), RunOptions{RuntimeID: "nope", Prompt: "x"}); err == nil {
-		t.Fatal("未知 runtime 应报错")
+	if _, err := orch.RunOnce(context.Background(), RunOptions{Prompt: "x"}); err == nil {
+		t.Fatal("构建期 runtime 未注册应报错")
 	}
 }
 
-// TestServiceResolveRuntime FirstAvailable 路由（§7 切片 4）：首候选不可执行 → 取次候选；
-// 已注册但不可执行 → runtime_unavailable；全未注册 → runtime_not_found；空候选 → no_runtime。
-func TestServiceResolveRuntime(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc, _, _ := rigWithRuntime(t,
-		runtime.Spec{ID: "stub", Launch: runtime.LaunchSpec{Command: exe}},
-		runtime.Spec{ID: "ghost", Launch: runtime.LaunchSpec{Command: "ghost-cmd-zzz-not-exist"}},
-	)
-	seed := func(id string, runtimes ...string) {
-		svc.mu.Lock()
-		defer svc.mu.Unlock()
-		svc.agents[id] = &AgentRec{ID: id, Name: id, Runtimes: runtimes}
-	}
-	codeOf := func(err error) string {
-		var ae *acl.Error
-		if errors.As(err, &ae) {
-			return ae.Code
-		}
-		return ""
+// TestServiceResolveRuntimeUsesBuildRuntime 底座解析只剩一步：取构建期常量并校验它已装配。
+//
+// 历史：这里曾是 FirstAvailable / CapabilityRouted 路由引擎的用例（首候选不可执行 → 取次候选、
+// runtime_unavailable / no_runtime …）。用户不能选择 runtime 之后，路由的每个输入都成了常量，
+// 那些码与分支整体不存在了；留下的唯一失败面是"构建期选定的那个没装配"。
+func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
+	// 已装配：原样返回构建期常量（不是"注册表里第一个"，也不是 agent 的候选）。
+	svc, _, _ := rigWithRuntime(t, runtime.Spec{ID: "stub", Name: "Stub"})
+	setBuildRuntime(t, "stub")
+	if id, err := svc.ResolveRuntime(); err != nil || id != "stub" {
+		t.Fatalf("应返回构建期底座 stub，id=%q err=%v", id, err)
 	}
 
-	seed("a1", "ghost", "stub")
-	if id, err := svc.ResolveRuntime(svc.agents["a1"]); err != nil || id != "stub" {
-		t.Fatalf("应回退取 echo，id=%q err=%v", id, err)
-	}
-	seed("a2", "ghost")
-	if _, err := svc.ResolveRuntime(svc.agents["a2"]); codeOf(err) != "runtime_unavailable" {
-		t.Fatalf("期望 runtime_unavailable，got %v", err)
-	}
-	seed("a3", "nope", "nope2")
-	if _, err := svc.ResolveRuntime(svc.agents["a3"]); codeOf(err) != "runtime_not_found" {
-		t.Fatalf("期望 runtime_not_found，got %v", err)
-	}
-	seed("a4")
-	if _, err := svc.ResolveRuntime(svc.agents["a4"]); codeOf(err) != "no_runtime" {
-		t.Fatalf("期望 no_runtime，got %v", err)
+	// 未装配：明确报 runtime_not_found（不静默回落到注册表里的别的底座）。
+	empty := NewService(runtime.NewRegistry(), nil)
+	setBuildRuntime(t, "stub")
+	_, err := empty.ResolveRuntime()
+	var ae *acl.Error
+	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
+		t.Fatalf("空注册表应报 runtime_not_found，got %v", err)
 	}
 }
 

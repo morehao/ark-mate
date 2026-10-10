@@ -20,7 +20,7 @@ import (
 func TestProviderRespCarriesApplicability(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
-	svc := agentTestSvc(t, dir) // 已注册 runtime：deepseekharness / opencode / stub（升序）
+	svc := agentTestSvc(t, dir) // 已注册 runtime：dsh / opencode / stub（升序）
 
 	key := "sk-secret-abc"
 	if _, err := svc.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
@@ -33,7 +33,7 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 	resp := items[0]
 
 	// ① 逐已注册 runtime 一条，端点齐备 → ok/projected，reason 里带端点与该底座的凭据通道。
-	wantRuntimes := []string{"deepseekharness", "opencode", "stub"}
+	wantRuntimes := []string{"dsh", "opencode", "stub"}
 	if len(resp.Applicability) != len(wantRuntimes) {
 		t.Fatalf("applicability 应覆盖 %d 个已注册 runtime，得到 %+v", len(wantRuntimes), resp.Applicability)
 	}
@@ -53,7 +53,7 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 	//    （Credential.Tested），opencode 的本期只有 env（它的原生面是自己的 SQLite 表）。
 	for _, a := range resp.Applicability {
 		switch a.Runtime {
-		case "deepseekharness":
+		case "dsh":
 			if !strings.Contains(a.Reason, "凭据文档") {
 				t.Errorf("dsh 的凭据通道应报原生文档（已实测可热生效），得到 %q", a.Reason)
 			}

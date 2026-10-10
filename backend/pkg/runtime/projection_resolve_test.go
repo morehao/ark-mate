@@ -68,7 +68,7 @@ func TestResolveProjectionChain(t *testing.T) {
 		{
 			name:      "链1 覆盖只作用于自己的键",
 			spec:      skillSpec("opencode", baseSkillProjection()),
-			overrides: map[string]string{"deepseekharness:skill": "/deploy/skills"},
+			overrides: map[string]string{"dsh:skill": "/deploy/skills"},
 			wantOK:    true,
 			wantRoot:  "/home/u/.agents/skills",
 		},
@@ -205,7 +205,7 @@ func LayoutToken(name string) string { return LayoutIDToken + "/" + name }
 // TestResolveRealAdapters M1-2 验收：两个 adapter 各 1 条 skill 投影，Format 非空；
 // 远程端点 not_applicable（空 Projections）。
 func TestResolveRealAdapters(t *testing.T) {
-	for _, spec := range []Spec{opencodeSpec(), deepseekharnessSpec()} {
+	for _, spec := range []Spec{opencodeSpec(), dshSpec()} {
 		if n := len(spec.Projections); n != 1 {
 			t.Fatalf("%s 应恰好声明 1 条投影，got %d（%+v）", spec.ID, n, spec.Projections)
 		}
@@ -311,7 +311,7 @@ func TestCapabilityScopeDefaults(t *testing.T) {
 		})
 	}
 	// 两个真实 adapter 当前都必须落在最保守的一档（P-2 无结论）。
-	for _, spec := range []Spec{opencodeSpec(), deepseekharnessSpec(), RemoteSpec("r1", "R1", "ws", "ws://x/acp", nil)} {
+	for _, spec := range []Spec{opencodeSpec(), dshSpec(), RemoteSpec("r1", "R1", "ws", "ws://x/acp", nil)} {
 		if got := spec.EffectiveCapabilityScope(); got != CapabilityScopeProcess {
 			t.Fatalf("%s 未实测应回落 process，got %q", spec.ID, got)
 		}

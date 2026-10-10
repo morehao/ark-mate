@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— M2-4：Library 统一读模型 ———
@@ -228,15 +229,16 @@ func (s *Service) libraryAgents() []dtolibrary.LibraryItem {
 			// 不是可用性。可用性由逐 runtime 可达性回答。
 			Enabled: true, SourceFile: src,
 		}
-		for _, rt := range a.Runtimes {
-			if _, ok := s.reg.Get(rt); ok {
-				it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: true,
-					Status: dtolibrary.StatusProjected, Reason: "候选 runtime 已注册"})
-			} else {
-				it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: false,
-					Status: dtolibrary.StatusNotApplicable,
-					Reason: fmt.Sprintf("候选 runtime %q 未注册：该 agent 暂时起不来（去注册这个 runtime，或把它换掉）", rt)})
-			}
+		// 底座是构建期常量：agent 条目只报**这一个** runtime 的可达性（v12 之前按 agent 的
+		// 候选列表逐条报）。
+		rt := runtime.SelectedRuntime()
+		if _, ok := s.reg.Get(rt); ok {
+			it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: true,
+				Status: dtolibrary.StatusProjected, Reason: "底座已装配（构建期固定）"})
+		} else {
+			it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: false,
+				Status: dtolibrary.StatusNotApplicable,
+				Reason: fmt.Sprintf("底座 %q 未装配：检查构建期注入（-X pkg/runtime.BuildRuntime）与 runtimes.json", rt)})
 		}
 		out = append(out, it)
 	}

@@ -33,8 +33,6 @@ export interface Agent {
   is_default?: boolean
   /** 种子 agent（内置播种/保留前缀）：只读（不可删、runtime 不可改）；由服务端权威判定。 */
   seed?: boolean
-  /** 候选 runtime 顺序（ResolveRuntime FirstAvailable 按此试探）；用于判定模型作用域。 */
-  runtimes?: string[]
   /**
    * MCP server id 白名单（M6-8 起可写，`PATCH /agents/:id {"mcps": …}`）。三态在 wire 上必须分得清：
    * 字段缺失 = 未声明（全量按 runtime transport 过滤）；`[]` = **本 agent 禁用 MCP 注入**；
@@ -49,10 +47,10 @@ export interface Agent {
    */
   conversation_count?: number
   /**
-   * 该 agent 在各 runtime 上的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
+   * 该 agent 的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
    *
-   * 没有写入方（`POST/PATCH /agents` 显式拒绝它）。v12 起来源是「设置 · 模型」里那个**唯一的**
-   * 默认模型摊到各 runtime 上的投影，所以这里只读呈现 + 一句"去设置 · 模型 改"的跳转。
+   * 没有写入方（`POST/PATCH /agents` 显式拒绝它）。键恒为**构建期选定的那一个底座**
+   * （用户不能选 runtime）：来源是「设置 · 模型」里那个唯一的默认模型。
    */
   default_model?: Record<string, string>
 }

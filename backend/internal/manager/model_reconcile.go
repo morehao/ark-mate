@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— 运行时广告（**事实**）一侧的取样 ———
@@ -91,21 +92,22 @@ func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomo
 
 // agentForRuntime 取一个"服务该 runtime"的 agent id（对账要借它的目录读数）。
 //
-// 优先「当前 Agent」，否则取声明了该 runtime 的第一个（id 升序）——对账是只读的，
-// 借哪个 agent 读目录不影响"平台清单 vs 底座事实"这个比对本身。
+// 每个 agent 都服务**同一个**底座（构建期固定），所以判据先看"请求的是不是那一个"：不是 → 借不到
+// （空的 agent id 会让对账如实报 unknown，而不是拿 dsh 的 agent 去读 opencode 的目录）。
+// 是 → 优先「当前 Agent」，否则 id 升序首个——对账是只读的，借哪个 agent 读目录不影响
+// "平台清单 vs 底座事实"这个比对本身。
 func (s *Service) agentForRuntime(runtimeID string) string {
+	if runtimeID != runtime.SelectedRuntime() {
+		return ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cur := s.currentDefaultLocked(); cur != "" {
-		if a, ok := s.agents[cur]; ok && containsString(a.Runtimes, runtimeID) {
-			return cur
-		}
+		return cur
 	}
 	ids := make([]string, 0, len(s.agents))
-	for id, a := range s.agents {
-		if a != nil && containsString(a.Runtimes, runtimeID) {
-			ids = append(ids, id)
-		}
+	for id := range s.agents {
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	if len(ids) == 0 {
@@ -114,13 +116,13 @@ func (s *Service) agentForRuntime(runtimeID string) string {
 	return ids[0]
 }
 
+// runtimeOfAgent 某 agent 实际跑的底座。底座是构建期常量：agent 存在即返回它。
 func (s *Service) runtimeOfAgent(agentID string) string {
 	if agentID == "" {
 		return ""
 	}
-	a, ok := s.AgentByID(agentID)
-	if !ok || len(a.Runtimes) == 0 {
+	if _, ok := s.AgentByID(agentID); !ok {
 		return ""
 	}
-	return a.Runtimes[0]
+	return runtime.SelectedRuntime()
 }

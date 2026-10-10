@@ -26,8 +26,8 @@ func libraryRig(t *testing.T) *Service {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "opencode", Name: "opencode", McpTransports: []string{"stdio"},
 			Projections: []runtime.Projection{opencodeSkillProjectionForTest()}},
-		// deepseekharness 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
-		runtime.Spec{ID: "deepseekharness", Name: "dsh", McpTransports: []string{"stdio"}},
+		// dsh 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
+		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
 	svc := NewService(reg, eventbus.New())
 	svc.LoadCapabilityDefinitions(dir)
@@ -37,8 +37,8 @@ func libraryRig(t *testing.T) *Service {
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: false},
 	}})
-	svc.agents["a-local"] = &AgentRec{ID: "a-local", Name: "本地 agent", Runtimes: []string{"opencode", "nope"}}
-	svc.agents["dsh"] = &AgentRec{ID: "dsh", Name: "播种", Runtimes: []string{"opencode"}}
+	svc.agents["a-local"] = &AgentRec{ID: "a-local", Name: "本地 agent"}
+	svc.agents["dsh"] = &AgentRec{ID: "dsh", Name: "播种"}
 	return svc
 }
 
@@ -64,7 +64,7 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	def := `{"id":"a-local","name":"本地 agent","runtimes":["opencode"]}`
+	def := `{"id":"a-local","name":"本地 agent"}`
 	if err := os.WriteFile(filepath.Join(agentDir, "a-local.json"), []byte(def), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	if a := statusFor("demo", "opencode"); a.Status != dtolibrary.StatusUntested || !a.OK {
 		t.Fatalf("未实测的投影应是 untested 且 OK=true：%+v", a)
 	}
-	// deepseekharness 声明了投影但本进程没解析出来 → not_configured（它压根不在投影列表里，
+	// dsh 声明了投影但本进程没解析出来 → not_configured（它压根不在投影列表里，
 	// 所以这里断言的是"没有它的条目"而不是硬编一个状态——见下一条说明）。
 	// 落点说明：投影列表来自 adapter 声明 + 配置解析，未解析的 runtime 不会出现在列表里；
 	// not_configured 由**声明了但解析失败**的投影产生（p.Err != ""）。
@@ -184,9 +184,9 @@ func TestLibrarySkillApplicability(t *testing.T) {
 		{Runtime: "opencode", Projection: runtime.Projection{Kind: runtime.ProjectionSkill,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: true}},
-		{Runtime: "deepseekharness", Err: "未配置投影根"},
+		{Runtime: "dsh", Err: "未配置投影根"},
 	})
-	if a := statusFor("demo", "deepseekharness"); a.Status != dtolibrary.StatusNotConfigured || a.OK {
+	if a := statusFor("demo", "dsh"); a.Status != dtolibrary.StatusNotConfigured || a.OK {
 		t.Fatalf("解析失败的投影应是 not_configured 且 OK=false：%+v", a)
 	}
 	if a := statusFor("demo", "opencode"); a.Status != dtolibrary.StatusProjected {
@@ -200,7 +200,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	if sk, ok := svc.caps.SkillByID("demo"); !ok || len(sk.Runtimes) != 1 {
 		t.Fatalf("skills 应已更新: %+v ok=%v", sk, ok)
 	}
-	if a := statusFor("demo", "deepseekharness"); a.Status != dtolibrary.StatusNotApplicable {
+	if a := statusFor("demo", "dsh"); a.Status != dtolibrary.StatusNotApplicable {
 		t.Fatalf("白名单未含该 runtime 应是 not_applicable：%+v", a)
 	}
 
@@ -271,25 +271,36 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	}
 }
 
-// TestLibraryAgentApplicability agent 的候选 runtime 就是它的使用边界：未注册的候选 → not_applicable。
+// TestLibraryAgentApplicability agent 条目只报**构建期底座**那一个的可达性：
+// 已装配 → projected；未装配 → not_applicable。
+//
+// 历史语义是"逐个 agent 声明的候选 runtime 报"，随候选面下线——现在"这个 agent 能不能跑"
+// 只取决于**本二进制认哪个底座、它在不在注册表里**。
 func TestLibraryAgentApplicability(t *testing.T) {
 	svc := libraryRig(t)
 	items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindAgent, Q: "a-local"})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("应找到 a-local: %+v err=%v", items, err)
 	}
-	got := map[string]dtolibrary.Applicability{}
-	for _, a := range items[0].Applicability {
-		got[a.Runtime] = a
+	if len(items[0].Applicability) != 1 {
+		t.Fatalf("agent 只应报构建期底座那一条: %+v", items[0].Applicability)
 	}
-	if a := got["opencode"]; a.Status != dtolibrary.StatusProjected || !a.OK {
-		t.Fatalf("已注册候选应 projected：%+v", a)
-	}
-	if a := got["nope"]; a.Status != dtolibrary.StatusNotApplicable || a.OK {
-		t.Fatalf("未注册候选应 not_applicable：%+v", a)
+	a := items[0].Applicability[0]
+	if a.Runtime != runtime.SelectedRuntime() || a.Status != dtolibrary.StatusProjected || !a.OK {
+		t.Fatalf("已装配的构建期底座应 projected：%+v", a)
 	}
 	if !items[0].Enabled {
 		t.Fatal("agent 没有禁用开关，Enabled 恒 true（State 是运行态，不是可用性）")
+	}
+
+	// 构建期底座未装配 → 唯一那条 not_applicable（"agent 不可用"的新判据）。
+	setBuildRuntime(t, "nope")
+	items, err = svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindAgent, Q: "a-local"})
+	if err != nil || len(items) != 1 || len(items[0].Applicability) != 1 {
+		t.Fatalf("未装配时也应是恰好一条: %+v err=%v", items, err)
+	}
+	if a := items[0].Applicability[0]; a.Runtime != "nope" || a.Status != dtolibrary.StatusNotApplicable || a.OK {
+		t.Fatalf("未装配的构建期底座应 not_applicable：%+v", a)
 	}
 }
 

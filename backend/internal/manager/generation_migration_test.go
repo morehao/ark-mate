@@ -43,10 +43,13 @@ func newGenRig(t *testing.T) *genRig { return newGenRigOn(t, "stub") }
 
 // newGenRigOn 指定 spec/agent 的 runtime id。
 //
-// 用真 runtime id（如 `deepseekharness`）+ 桩命令是有意的：原生权限映射按 runtime id 分派，
+// 用真 runtime id（如 `dsh`）+ 桩命令是有意的：原生权限映射按 runtime id 分派，
 // "收回权限 → 基础键变化"这条链路只有真 id 才走得通（自造 id 没有原生权限开关）。
 func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	t.Helper()
+	// 底座是构建期常量：夹具只用这一个 spec，就得把它设成构建期选中的那个，
+	// 否则 ResolveRuntime 一律报"未装配"（新语义下路由没有第二个输入了）。
+	setBuildRuntime(t, runtimeID)
 	spec := stubACPSpec(t)
 	spec.ID = runtimeID
 	spec.Name = runtimeID
@@ -57,7 +60,7 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc.EnableStore(st)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{runtimeID}, State: AgentStateStopped}
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return &genRig{svc: svc, orch: orch, bus: bus, runtme: runtimeID}
@@ -111,7 +114,7 @@ func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *ActiveC
 func (r *genRig) startAs(t *testing.T, agentID string, sel *CapabilitySelection) (string, *ActiveConversation) {
 	t.Helper()
 	agent, _ := r.svc.AgentByID(agentID)
-	res, err := r.orch.startConversationOn(context.Background(), agent, r.runtme,
+	res, err := r.orch.startConversationOn(context.Background(), agent,
 		StartOptions{Cwd: t.TempDir(), Selection: sel})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
@@ -394,9 +397,9 @@ func TestMigrationFallback(t *testing.T) {
 // 权限面被收回（基础键变）而新代际建不起来时，**不许回退**——旧进程代表的正是那套已经被
 // 收回的权限面，宁可这一轮带码拒发。
 func TestPermissionWithdrawalDoesNotFallBack(t *testing.T) {
-	// 真 runtime id（deepseekharness）+ 桩命令：原生权限映射按 runtime id 分派，
+	// 真 runtime id（dsh）+ 桩命令：原生权限映射按 runtime id 分派，
 	// 只有真 id 才产得出 `DSH_PERMISSION_MODE=`，"收回权限 → 基础键变化"这条链路才走得到。
-	r := newGenRigOn(t, "deepseekharness")
+	r := newGenRigOn(t, "dsh")
 	r.registerMcp(t, fsServer("v1"))
 	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeWorkspaceWrite}
 	convID, as1 := r.start(t, &CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
@@ -594,7 +597,7 @@ func TestEnsureConversationMigratesOnRebuild(t *testing.T) {
 // 表现就是"agent 已停、旧权限面的进程还在跑，直到空闲回收"。判据只看会话归属就不受漂移影响。
 // 同时验证：与别的 agent 共用的代际**不**因为停 A 而被关。
 func TestStopAgentClosesDriftedGenerations(t *testing.T) {
-	r := newGenRigOn(t, "deepseekharness")
+	r := newGenRigOn(t, "dsh")
 	ctx := context.Background()
 	r.registerMcp(t, fsServer("v1"))
 	sel := &CapabilitySelection{Mcps: ptrOf([]string{"fs"})}
@@ -602,7 +605,7 @@ func TestStopAgentClosesDriftedGenerations(t *testing.T) {
 	// a1 的会话建在"无原生权限配置"的基础键上（此刻没有别的 agent 参与）。
 	convID, as1 := r.start(t, sel)
 	oldClient := as1.client
-	if rc := r.orch.connOfClient(oldClient); rc == nil || !strings.Contains(rc.baseKey, "deepseekharness") {
+	if rc := r.orch.connOfClient(oldClient); rc == nil || !strings.Contains(rc.baseKey, "dsh") {
 		t.Fatalf("初始连接基础键异常: %+v", rc)
 	}
 
@@ -646,9 +649,9 @@ func mustSpec(t *testing.T, r *genRig, id string) runtime.Spec {
 //
 // 与上一个用例合起来构成本次改动的边界：补扫只认「这条代际上只有本 agent 的会话」。
 func TestStopAgentKeepsSharedGenerations(t *testing.T) {
-	r := newGenRigOn(t, "deepseekharness")
+	r := newGenRigOn(t, "dsh")
 	ctx := context.Background()
-	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2", Runtimes: []string{r.runtme}, State: AgentStateStopped}
+	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2", State: AgentStateStopped}
 	// M7-3 之后"两个**不同** agent 共用代际"只在没有 MCP 面时成立：网关条目带着 agent scope
 	// （args 里的 `--agent` 不同 ⇒ 指纹不同），所以只要声明了 MCP 面，两个 agent 就各占一个代际。
 	// 这是**保守方向**的代价：宁可多起一个进程，也不能让底座在一个进程里混用两个 agent 的工具面
@@ -686,7 +689,7 @@ func TestStopAgentKeepsSharedGenerations(t *testing.T) {
 // TestStopAgentClosesWarmGenerationUnderDriftedKey 停 agent 也要收掉**它创建的暖进程**
 // （StartAgent 建、没有任何会话引用）。权限漂移后暖进程落在旧基础键下，前两类扫描都够不着它。
 func TestStopAgentClosesWarmGenerationUnderDriftedKey(t *testing.T) {
-	r := newGenRigOn(t, "deepseekharness")
+	r := newGenRigOn(t, "dsh")
 	ctx := context.Background()
 	agent, _ := r.svc.AgentByID("a1")
 	spec := mustSpec(t, r, r.runtme)

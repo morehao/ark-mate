@@ -11,7 +11,7 @@ import (
 func TestSpecsHaveNoModelEnv(t *testing.T) {
 	t.Setenv("OPENCODE_MODEL", "yygu-v2/deepseek-v4-flash")
 	t.Setenv("OPENCODE_OTHER", "should-not-pass")
-	for _, spec := range []Spec{opencodeSpec(), deepseekharnessSpec()} {
+	for _, spec := range []Spec{opencodeSpec(), dshSpec()} {
 		if len(spec.Launch.Env) != 0 {
 			t.Fatalf("%s 不应注入启动 env: %v", spec.ID, spec.Launch.Env)
 		}

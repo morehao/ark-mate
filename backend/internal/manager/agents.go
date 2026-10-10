@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -30,11 +31,16 @@ const (
 var agentIDRE = regexp.MustCompile(agentIDPattern)
 
 // agentDefinitionFile 磁盘上的 agent 定义。
+//
+// **没有 runtime 字段**：跑在哪个底座上是**构建期固定**的（pkg/runtime/build.go）。
+// 历史上的 `runtimes` 与 `routing_policy` 已删除，老文件 / 老 DB 行里若还留着这两个键：
+// **读面宽容**（丢弃 + WARN，见 warnDeprecatedAgentKeys），**写面显式拒绝**（dtoagent 里的
+// reject-only 字段 → 40001）。刻意不做成"静默忽略"——用户改了一个键却什么都不发生，
+// 正是本仓明令要防的骗人字段（与 `default_model` 同一条纪律）。
 type agentDefinitionFile struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Runtimes []string `json:"runtimes"`           // 路由候选 runtime（P0 取首候选）
-	Provider string   `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"` // provider 档案 id（P2 provider 注入面）；可为空
 	// 这里曾有 `Env map[string]string`（"预留：按 agent 附加 env，本轮不注入，仅持久化"）。
 	// §5 复核后**删除**：它从未被读取/注入，唯一作用是诱使把密钥字面值停放在 agents/*.json 里
 	// （明文落盘）。将来真要支持「按 agent 附加 env」，值必须支持 `vault:<ns>/<name>` 引用，
@@ -42,10 +48,6 @@ type agentDefinitionFile struct {
 	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。缺省 = 未声明（全启用按 runtime 传输
 	// 过滤）；`mcps: []` = 本 agent 禁用 MCP 注入。指针以区分「未声明」与「空白名单」。
 	Mcps *[]string `json:"mcps,omitempty"`
-	// RoutingPolicy 路由策略（P2 §7）：first_available（默认）| capability_routed。
-	// 缺省/空 = first_available；capability_routed 下若声明 Mcps 白名单，则只在能承载
-	// 所需 MCP transport 的 runtime 里选。未知值回退默认（解析见 Service.ResolveRuntime）。
-	RoutingPolicy string `json:"routing_policy,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7）：缺省 = 全 ask（行为与历史一致）。
 	PermissionPolicy *PermissionPolicy `json:"permission_policy,omitempty"`
 }
@@ -84,6 +86,7 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 			glog.Warnw(context.Background(), "agents: 定义 JSON 非法", "file", p, "err", err)
 			continue
 		}
+		warnDeprecatedAgentKeys(b, p)
 		if err := s.applyDefinition(d, true); err != nil {
 			glog.Warnw(context.Background(), "agents: 定义未采纳", "file", p, "err", err)
 			continue
@@ -167,6 +170,7 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 			s.defWarnOnce("agents:id:"+row.ID, "agents: 定义行 id 与正文 id 不一致，以行键为准", "row", row.ID, "body", d.ID)
 		}
 		d.ID = row.ID
+		warnDeprecatedAgentKeys([]byte(row.Body), "agents 行 "+row.ID)
 		if err := s.applyDefinitionLocked(d, true); err != nil {
 			s.defWarnOnce("agents:rej:"+row.ID, "agents: 定义行未采纳", "agent", row.ID, "err", err)
 			continue
@@ -196,10 +200,9 @@ func (s *Service) seedBuiltinAgents() {
 			continue
 		}
 		s.agents[b.id] = &AgentRec{
-			ID:       b.id,
-			Name:     b.name,
-			Runtimes: []string{b.runtime},
-			State:    AgentStateStopped,
+			ID:    b.id,
+			Name:  b.name,
+			State: AgentStateStopped,
 		}
 	}
 }
@@ -208,11 +211,6 @@ func (s *Service) seedBuiltinAgents() {
 func (s *Service) applyDefinition(d agentDefinitionFile, silent bool) error {
 	if !agentIDRE.MatchString(d.ID) {
 		return acl.NewError(acl.ClassRequest, "invalid_agent_id", fmt.Sprintf("id 非法（须 %s）", agentIDPattern), nil)
-	}
-	for _, r := range d.Runtimes {
-		if _, ok := s.reg.Get(r); !ok {
-			return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
-		}
 	}
 	if err := d.PermissionPolicy.Validate(); err != nil {
 		return acl.NewError(acl.ClassRequest, "invalid_permission_policy", err.Error(), nil)
@@ -232,17 +230,11 @@ func (s *Service) applyDefinitionLocked(d agentDefinitionFile, silent bool) erro
 		if d.Name != "" {
 			cur.Name = d.Name
 		}
-		if len(d.Runtimes) > 0 {
-			cur.Runtimes = d.Runtimes
-		}
 		if d.Provider != "" {
 			cur.Provider = d.Provider
 		}
 		if d.Mcps != nil {
 			cur.Mcps = d.Mcps
-		}
-		if d.RoutingPolicy != "" {
-			cur.RoutingPolicy = d.RoutingPolicy
 		}
 		if d.PermissionPolicy != nil {
 			cur.PermissionPolicy = d.PermissionPolicy
@@ -250,8 +242,8 @@ func (s *Service) applyDefinitionLocked(d agentDefinitionFile, silent bool) erro
 		return nil
 	}
 	s.agents[d.ID] = &AgentRec{
-		ID: d.ID, Name: d.Name, Runtimes: d.Runtimes, Provider: d.Provider, Mcps: d.Mcps,
-		RoutingPolicy: d.RoutingPolicy, PermissionPolicy: d.PermissionPolicy, State: AgentStateStopped,
+		ID: d.ID, Name: d.Name, Provider: d.Provider, Mcps: d.Mcps,
+		PermissionPolicy: d.PermissionPolicy, State: AgentStateStopped,
 	}
 	return nil
 }
@@ -279,13 +271,16 @@ func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) 
 	if err := rejectDerivedDefaultModel(req.DefaultModel); err != nil {
 		return nil, err
 	}
+	if err := rejectRuntimeSelection(req.Runtimes, req.RoutingPolicy); err != nil {
+		return nil, err
+	}
 	if strings.HasPrefix(req.ID, reservedAgentPrefix) {
 		return nil, acl.NewError(acl.ClassRequest, "reserved_agent_id", fmt.Sprintf("%q 为种子保留前缀，自定义 agent 请用其它 id", reservedAgentPrefix), nil)
 	}
 	if req.Name == "" {
 		req.Name = req.ID
 	}
-	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Runtimes: req.Runtimes, Provider: req.Provider,
+	d := agentDefinitionFile{ID: req.ID, Name: req.Name, Provider: req.Provider,
 		Mcps: req.Mcps, PermissionPolicy: fromPermissionPolicyResp(req.PermissionPolicy)}
 	if err := s.applyDefinition(d, false); err != nil {
 		return nil, err
@@ -305,11 +300,14 @@ func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) 
 	return s.agentRespLocked(req.ID), nil
 }
 
-// UpdateAgent 更新 agent 元数据（name/runtimes/provider 子集；provider 传空串 = 清除）。
+// UpdateAgent 更新 agent 元数据（name/provider/权限策略/MCP 白名单子集；provider 传空串 = 清除）。
 // 顺序是"先校验 → 再提交载体 → 最后改内存"：载体提交失败时内存一个字段都不动
 // （M6 之前是"先改内存再写文件"，写失败会留下"内存里有、盘上没有"的半死态）。
 func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
 	if err := rejectDerivedDefaultModel(patch.DefaultModel); err != nil {
+		return nil, err
+	}
+	if err := rejectRuntimeSelection(patch.Runtimes, patch.RoutingPolicy); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -319,25 +317,11 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
 	// 目标定义（纯计算；cur 只读，失败路径不留痕）。
-	next := agentDefinitionFile{ID: id, Name: cur.Name, Runtimes: cur.Runtimes, Provider: cur.Provider,
-		Mcps: cur.Mcps, RoutingPolicy: cur.RoutingPolicy, PermissionPolicy: cur.PermissionPolicy}
+	next := agentDefinitionFile{ID: id, Name: cur.Name, Provider: cur.Provider,
+		Mcps: cur.Mcps, PermissionPolicy: cur.PermissionPolicy}
 	// 通知判据要在**改内存之前**取值：`next` 由 `cur` 派生，下面会把新值写回同一个对象，
 	// 改完再比就是拿新值跟新值比（通知永远不发）。
 	beforeMcps := cur.Mcps
-	if patch.Runtimes != nil && len(*patch.Runtimes) > 0 {
-		if seedAgent(id) {
-			s.mu.Unlock()
-			return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
-				fmt.Sprintf("种子 agent %q 的 runtime 不可修改（可直接编辑 definitions 文件）", id), nil)
-		}
-		for _, r := range *patch.Runtimes {
-			if _, rok := s.reg.Get(r); !rok {
-				s.mu.Unlock()
-				return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", r), nil)
-			}
-		}
-		next.Runtimes = *patch.Runtimes
-	}
 	if patch.Name != nil {
 		next.Name = *patch.Name
 	}
@@ -371,7 +355,6 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 	s.mu.Lock()
 	if after, ok := s.agents[id]; ok {
 		after.Name = next.Name
-		after.Runtimes = next.Runtimes
 		after.Provider = next.Provider
 		after.Mcps = next.Mcps
 		if next.PermissionPolicy != nil {
@@ -451,9 +434,9 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	spec, ok := s.reg.Get(agent.pickRuntime())
-	if !ok {
-		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
+	spec, err := s.selectedSpec()
+	if err != nil {
+		return err
 	}
 	// 暖启动没有会话，因此没有能力选择 → 空指纹（缺省代际，与代际机制之前同键）。
 	if _, err := s.orch.acquire(ctx, agent, spec, ""); err != nil {
@@ -477,9 +460,9 @@ func (s *Service) StopAgent(ctx context.Context, id string) error {
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	spec, ok := s.reg.Get(agent.pickRuntime())
-	if !ok {
-		return acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", agent.pickRuntime()), nil)
+	spec, err := s.selectedSpec()
+	if err != nil {
+		return err
 	}
 	return s.orch.stopAgent(ctx, agent, spec)
 }
@@ -495,8 +478,48 @@ func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 		return nil
 	}
 	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
-		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
+		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID),
 		Mcps: a.Mcps, PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
 		ConversationCount: s.conversationCountLocked(a.ID),
-		DefaultModel:      derivedDefaultModels(a.Runtimes, defaults)}
+		DefaultModel:      derivedDefaultModels([]string{runtime.SelectedRuntime()}, defaults)}
+}
+
+// rejectRuntimeSelection 显式拒绝 agent 写面里的 `runtimes` / `routing_policy`。
+//
+// 为什么宁可报错也不静默忽略（与 `rejectDerivedDefaultModel` 同一条纪律）：平台不再按 agent 选
+// 底座，而 JSON 绑定默认丢弃未知键——静默收下会让这两个键变成「写了、存了、什么都不发生」的
+// 骗人字段，用户会以为"我改了底座却没生效"。`null` 视为"没带"。
+func rejectRuntimeSelection(runtimes, routingPolicy json.RawMessage) error {
+	if !jsonNullish(runtimes) || !jsonNullish(routingPolicy) {
+		return acl.NewError(acl.ClassRequest, "runtime_selection_removed",
+			fmt.Sprintf("底座由构建期固定（本机为 %s），不能在 agent 上选择："+
+				"`runtimes` / `routing_policy` 已下线，换底座要重新构建（-X pkg/runtime.BuildRuntime=<id>）",
+				runtime.SelectedRuntime()), nil)
+	}
+	return nil
+}
+
+// jsonNullish 该原始 JSON 是否"没带"（空 / null）。
+func jsonNullish(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed == "" || trimmed == "null"
+}
+
+// warnDeprecatedAgentKeys 对老定义里的**已下线键**如实告警（读面宽容，写面拒绝）。
+//
+// 静默丢弃会让"我的 agents/*.json 里明明写着 runtimes"这件事没有任何线索——用户只会困惑
+// 为什么改了没用。写面（REST）那条路由 `rejectRuntimeSelection` 负责 40001，这里只管装载。
+func warnDeprecatedAgentKeys(raw []byte, source string) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return // 正文非法的情形由调用方按各自的错误路径处理
+	}
+	for _, key := range []string{"runtimes", "routing_policy"} {
+		v, ok := probe[key]
+		if !ok || jsonNullish(v) {
+			continue
+		}
+		glog.Warnw(context.Background(), "agents: 定义里的键已下线，本次装载忽略（写回时消失）",
+			"source", source, "key", key, "runtime", runtime.SelectedRuntime())
+	}
 }

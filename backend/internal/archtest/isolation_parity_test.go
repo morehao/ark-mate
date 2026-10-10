@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
@@ -16,7 +16,7 @@ import (
 var (
 	launcherIsolationRE = regexp.MustCompile(`(?s)isolation:\s*\{([^}]*)\}`)
 	launcherEnvKeyRE    = regexp.MustCompile(`([A-Z][A-Z0-9_]*)\s*:`)
-	launcherRuntimeOf   = map[string]string{"dsh": deepseekharness.ID, "opencode": opencode.ID}
+	launcherRuntimeOf   = map[string]string{"dsh": dsh.ID, "opencode": opencode.ID}
 )
 
 // smokeKeyRE 抠出 V9 探针隔离表里的变量名：字面量里的 `KEY: value` 与后续的 `isolation.KEY = value`。
@@ -35,7 +35,7 @@ var reDanglingAssign = regexp.MustCompile(`isolation\.[A-Za-z_]+ *= *\n`)
 
 var launcherCoreOnly = map[string]map[string]bool{
 	// npm 面：MCP server 常经 npx 拉起，那是**核心**拉子进程时要隔离的东西；壳直接跑载荷不经过 npx。
-	deepseekharness.ID: {"npm_config_cache": true, "npm_config_prefix": true},
+	dsh.ID: {"npm_config_cache": true, "npm_config_prefix": true},
 	opencode.ID: {
 		"npm_config_cache": true, "npm_config_prefix": true,
 		// 通用 XDG 三兄弟：改它们会连累用户其它工具，只在核心按 runtime 拉 ACP 时注入
@@ -119,7 +119,7 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 		}
 		return allowed
 	}
-	dshCore, ocCore := allowedOf(deepseekharness.ID), allowedOf(opencode.ID)
+	dshCore, ocCore := allowedOf(dsh.ID), allowedOf(opencode.ID)
 
 	// 探针的**有效**隔离表 = 公共面 ∪ 该 runtime 的分支（脚本里就是这两段合起来落进 env 的）。
 	commonKeys := keysOf(common)
@@ -139,7 +139,7 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 		core      map[string]bool
 		runtimeID string
 	}{
-		{"dsh 分支", dshPart, dshCore, deepseekharness.ID},
+		{"dsh 分支", dshPart, dshCore, dsh.ID},
 		{"opencode 分支", ocPart, ocCore, opencode.ID},
 	} {
 		branchKeys := keysOf(c.part)

@@ -13,6 +13,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -54,7 +55,7 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 	s.mu.Lock()
 	s.capabilityDir = dir
 	s.mu.Unlock()
-	return s.caps.LoadDir(dir).Total()
+	return s.caps.LoadDir(dir, normalizeSkillRuntimeDecls).Total()
 }
 
 // LoadCapabilityDefinitionsFromStore 从持久层装载能力定义（sqlite 模式的事实源，M6-2）。
@@ -81,6 +82,16 @@ func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, import
 // 的代价是"真出问题时没人看日志"。逐行的坏定义问题仍走 WARN（但**同一条只报一次**，见 defWarnOnce）。
 func (s *Service) ReloadCapabilityDefinitions(ctx context.Context) (int, error) {
 	return s.reloadCapabilityDefinitions(ctx, "", glog.DebugLevel)
+}
+
+// normalizeSkillRuntimeDecls 把 skill 的投放声明归一到当前 runtime 标识（历史别名，
+// 见 runtime.NormalizeID）。它是 `capability.LoadDir` 的归一钩子，也用在 DB 装载与写面。
+//
+// **必须做，不是美化**：老定义写着 `runtimes: ["deepseekharness"]`，而平台现在拿 `dsh` 去比对
+// ——不归一，这条技能**再也不投放**，而界面上它仍是"已启用"（静默失效，正是本仓反复被咬的那类）。
+// 归一后，写面/重校会把新值落回定义文件，别名自然会收敛掉。
+func normalizeSkillRuntimeDecls(sk *capability.Skill) {
+	sk.Runtimes = runtime.NormalizeIDs(sk.Runtimes)
 }
 
 // reloadCapabilityDefinitions 装载内核（公开入口与网关共用；level 只作用于汇总行）。
@@ -119,6 +130,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 			}
 			sk.ID = row.ID
 		}
+		normalizeSkillRuntimeDecls(&sk)
 		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
 		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
 		if err := fresh.RegisterSkill(&sk); err != nil {
@@ -241,15 +253,13 @@ func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabil
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q", agentID), nil))
 	}
-	runtimes := append([]string(nil), a.Runtimes...)
+	// 底座是构建期常量：能力面按**这一个** runtime 推导（v12 之前是 agent 声明的候选列表）。
+	runtimes := []string{runtime.SelectedRuntime()}
 	inAgent := make(map[string]bool, len(runtimes))
 	for _, r := range runtimes {
 		inAgent[r] = true
 	}
 	notes := make([]string, 0, 2)
-	if len(runtimes) == 0 {
-		notes = append(notes, "该 agent 未声明候选 runtime，能力目录为空")
-	}
 	// agent 白名单语义：nil = 未声明（全启用）；非 nil = 命中制（空数组 = 禁用 MCP 注入）。
 	enabled := func(id string) bool {
 		if a.Mcps == nil {

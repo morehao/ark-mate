@@ -105,7 +105,17 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		now:          opts.Now,
 		secretWarned: make(map[string]bool),
 	}
-	s.svc = manager.NewService(runtime.DefaultRegistry(), nil)
+	// 与核心进程同一套装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 网关子进程与核心必须看同一个底座，否则"平台说 A、网关按 B 过滤"会静默分叉。
+	remoteSpecs := make([]runtime.Spec, 0, len(opts.Cfg.RemoteRuntimes))
+	for _, rt := range opts.Cfg.RemoteRuntimes {
+		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
+	}
+	reg, err := runtime.ProductRegistry(remoteSpecs)
+	if err != nil {
+		return nil, fmt.Errorf("网关装配底座: %w", err)
+	}
+	s.svc = manager.NewService(reg, nil)
 
 	if opts.Pool != nil {
 		s.pool = opts.Pool

@@ -250,14 +250,14 @@ func (s *Service) defaultModelRow(ctx context.Context) (*store.ModelDefinition, 
 
 // modelValueFor 平台清单 → 运行时认得的不透明值（**两条算法必须共用它**）。
 //
-//	dsh（deepseekharness）：`JSON.stringify([provider, model])`（ACP 的 modelValue()）
+//	dsh（dsh）：`JSON.stringify([provider, model])`（ACP 的 modelValue()）
 //	opencode：`<provider>/<model>`
 //
 // 为什么不解析运行时的值反推：那是把"事实"当"意图"。平台只存生成 value 的输入，
 // 生成规则在这里唯一一份——下发与物化因此不可能分叉。
 func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
 	switch runtimeID {
-	case "deepseekharness":
+	case "dsh":
 		b, err := json.Marshal([]string{providerID, modelID})
 		if err != nil {
 			return "", err
@@ -359,8 +359,7 @@ func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	}
 	s.mu.Unlock()
 	for i := range recs {
-		agent, ok := s.AgentByID(recs[i].AgentID)
-		if !ok || len(agent.Runtimes) == 0 {
+		if _, ok := s.AgentByID(recs[i].AgentID); !ok {
 			continue
 		}
 		eff.AffectedConversations++

@@ -29,6 +29,17 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
+// setBuildRuntime 把构建期底座设成 id，用例结束自动还原。
+//
+// 夹具用的是 stub-only 注册表（id="stub"），而 runtime.SelectedRuntime() 是编译期常量
+// （默认 dsh）——不覆盖它，任何 ResolveRuntime 都会报"未装配"。
+func setBuildRuntime(t *testing.T, id string) {
+	t.Helper()
+	old := runtime.BuildRuntime
+	runtime.BuildRuntime = id
+	t.Cleanup(func() { runtime.BuildRuntime = old })
+}
+
 // rigConfig 夹具的差异面（零值即"最裸的架子"：空注册表、无总线、无库、无 agent）。
 type rigConfig struct {
 	stub   bool        // 注册表装测试专用 stub runtime（false = 空注册表）
@@ -61,6 +72,9 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 	reg := runtime.NewRegistry()
 	if cfg.stub {
 		reg = testutil.StubRegistry()
+		// 注册表里只有 stub，而底座是构建期常量：不把它设成 stub，本夹具上任何
+		// 「解析底座」都会报 runtime_not_found（那不是这些用例要验的东西）。
+		setBuildRuntime(t, "stub")
 	}
 	var bus *eventbus.Bus
 	if cfg.bus {
@@ -166,7 +180,7 @@ func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) { c.stub = true })
 	if _, err := r.Svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "alias-stub", Runtimes: []string{"stub"},
+		ID: "alias-stub",
 	}); err != nil {
 		t.Fatalf("reaper 架子创建 alias-stub 失败: %v", err)
 	}
@@ -181,7 +195,7 @@ func newSearchRig(t *testing.T) (*Service, *store.Store) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, true
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1", Runtimes: []string{"stub"}}}
+		c.agents = []*AgentRec{{ID: "a1", Name: "A1"}}
 	})
 	return r.Svc, r.St
 }

@@ -396,7 +396,7 @@ async function api(method, path, body) {
 async function seedSkills() {
   for (const [id, runtimes, name] of [
     [SKILLS.applicable, ['opencode'], 'UI验收-仅opencode'],
-    [SKILLS.inapplicable, ['deepseekharness'], 'UI验收-仅dsh'],
+    [SKILLS.inapplicable, ['dsh'], 'UI验收-仅dsh'],
   ]) {
     const r = await api('POST', '/skills', {
       id,
@@ -497,7 +497,7 @@ async function scenarioCapability(browser) {
       console.log('  [debug] 可见 popover =', await page.evaluate(`return !!document.querySelector('.ant-popover:not(.ant-popover-hidden) .fg-cap-pop')`))
       console.log('  [debug] why 的 rect =', JSON.stringify(await page.box(whyExpr)))
     }
-    check('hover 不适用项给出原因（tooltip）', /runtimes|不相交|deepseekharness/.test(tip), tip.slice(0, 200))
+    check('hover 不适用项给出原因（tooltip）', /runtimes|不相交|dsh/.test(tip), tip.slice(0, 200))
   } else {
     check('hover 不适用项给出原因（tooltip）', false, '没有 .fg-cap-opt-why 元素')
   }
@@ -1021,12 +1021,12 @@ async function scenarioSettingsModel(browser) {
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
     const lower = panelCopy.toLowerCase()
-    const banned = ['dsh', 'opencode', 'deepseekharness', 'runtime', '底座', 'provider']
+    const banned = ['dsh', 'opencode', 'dsh', 'runtime', '底座', 'provider']
     const hit = banned.filter((w) => lower.includes(w))
     check('面板正文零底座词汇（ADR-22）', hit.length === 0,
       hit.length ? `命中 ${JSON.stringify(hit)}；行=${JSON.stringify(panelCopy.split('\n').filter((l) => hit.some((w) => l.toLowerCase().includes(w))))}` : '干净')
     check('逐后端的机器面明细没有被渲染（sync[] 属诊断面）',
-      !/deepseekharness|opencode/.test(panelCopy), panelCopy.slice(0, 160))
+      !/dsh|opencode/.test(panelCopy), panelCopy.slice(0, 160))
 
     // 生效结论：三态之一 + 生效说明说清「保存成功 ≠ 已生效」。
     check('生效结论是三态之一（已生效/待生效/同步失败）',

@@ -36,7 +36,7 @@ func newEngine() *gin.Engine {
 // 而生产入口（serve）走的是 app.Init，那里会按退出码 3 拒绝启动。
 func newEngineWithService() (*gin.Engine, *manager.Service) {
 	gin.SetMode(gin.TestMode)
-	reg := runtime.DefaultRegistry()
+	reg := runtime.AllBuiltinRegistry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
@@ -83,8 +83,9 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）、
-// runtimes 2 个（opencode / deepseekharness；echo 演示底座已于 M0 删除）。
+// TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）。
+// 夹具用 `AllBuiltinRegistry`（全部内置），因此两个种子都在——**产品装配只播构建期选中的那一个**
+// （见 internal/app 的 TestInitPinsBuildRuntime），这里测的是路由装配，不是构建期选择。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine()
 
@@ -99,11 +100,9 @@ func TestRouterListRealService(t *testing.T) {
 	if agents[0]["is_default"] != true || agents[1]["id"] != "opencode" || agents[1]["is_default"] != false {
 		t.Fatalf("agents 默认标记不符: %s", env.Data)
 	}
-
-	env = get(t, e, "/v1/mate/runtimes")
-	var rts []map[string]any
-	if err := json.Unmarshal(env.Data, &rts); err != nil || len(rts) != 2 {
-		t.Fatalf("runtimes data 不符: %s", env.Data)
+	// agent 的对外表示里**不该再有 runtimes**：底座由构建期固定，用户面没有这个读面。
+	if _, has := agents[0]["runtimes"]; has {
+		t.Fatalf("agent 响应不应再带 runtimes 字段（构建期固定底座）: %s", env.Data)
 	}
 
 	env = get(t, e, "/v1/mate/conversations")
@@ -221,7 +220,6 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"GET /v1/mate/health",
 		"GET /v1/mate/agents",
 		"POST /v1/mate/agents/:id/default",
-		"GET /v1/mate/runtimes",
 		"GET /v1/mate/conversations",
 		"POST /v1/mate/conversations",
 		"GET /v1/mate/conversations/:id/history",
@@ -237,6 +235,10 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		if !found[want] {
 			t.Fatalf("路由未注册: %s", want)
 		}
+	}
+	// **负向断言**：`/runtimes` 必须不存在（用户面零 runtime 选择入口；见 pkg/runtime/build.go）。
+	if found["GET /v1/mate/runtimes"] {
+		t.Fatal("GET /v1/mate/runtimes 不该再注册：底座由构建期固定，用户面没有这个读面")
 	}
 }
 
@@ -421,7 +423,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 // newAuthEngine 装配带凭据表的引擎（M1-1）。
 func newAuthEngine(creds *credential.Set) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	reg := runtime.DefaultRegistry()
+	reg := runtime.AllBuiltinRegistry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
 	// 否则模型配置落点会因为解析不到隔离根而报错（这是刻意的 fail-closed：绝不回落到用户目录）。
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))

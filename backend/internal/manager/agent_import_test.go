@@ -27,7 +27,7 @@ func agentSeedDir(t *testing.T) string {
 		}
 	}
 	write("u1.json", `{"id":"u1","name":"U1","runtimes":["stub"],"provider":"openai:gpt-4o"}`)
-	write("u2.json", `{"name":"U2（id 取自文件名）","runtimes":["deepseekharness"]}`)
+	write("u2.json", `{"name":"U2（id 取自文件名）","runtimes":["dsh"]}`)
 	write("broken.json", `{"id":"broken",`)
 	write("agent-legacy.json", `{"id":"agent-legacy","name":"保留前缀","runtimes":["stub"]}`)
 	write("providers.json", `{"p1":{"type":"openai","model":"gpt-4o"}}`)
@@ -90,10 +90,18 @@ func TestImportAgentDirCountsAndDefaultSelection(t *testing.T) {
 			t.Fatalf("目录级配置文件不该被导入: %s", r.Body)
 		}
 	}
-	// runtimes 原样进正文（装载期才校验 runtime 是否注册）。
+	// 导入是 **typed 归一**（落库正文按 `agentDefinitionFile` 重编），不是原样搬字节：老定义里
+	// 已下线的 `runtimes` 键会被丢掉——留着它会让"这个键还有意义"看起来成立。
+	for _, id := range []string{"u1", "u2"} {
+		row, _, _ := st.GetAgentDefinition(ctx, id)
+		if strings.Contains(row.Body, "runtimes") {
+			t.Fatalf("%s 正文里不该留下已下线的 runtimes 键: %s", id, row.Body)
+		}
+	}
+	// id 取自文件名的那条：name 原样保留，id 由文件名回填。
 	u2, _, _ := st.GetAgentDefinition(ctx, "u2")
-	if !strings.Contains(u2.Body, "deepseekharness") {
-		t.Fatalf("u2 正文缺 runtimes: %s", u2.Body)
+	if !strings.Contains(u2.Body, "U2（id 取自文件名）") || !strings.Contains(u2.Body, `"id": "u2"`) {
+		t.Fatalf("u2 正文应保留 name 并由文件名回填 id: %s", u2.Body)
 	}
 	// 导入动作留痕（actor=import，action=import）。
 	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "u1")
@@ -140,8 +148,8 @@ func TestImportAgentDirNeverOverwrites(t *testing.T) {
 	ctx := context.Background()
 	dir := agentSeedDir(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"面板上改过的","runtimes":["stub"]}`)
-	if ok, err := st.UpsertAgentDefinition(ctx, "u1", `{"id":"u1","name":"面板上改过的 v2","runtimes":["stub"]}`, 1, "rest"); err != nil || !ok {
+	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"面板上改过的"}`)
+	if ok, err := st.UpsertAgentDefinition(ctx, "u1", `{"id":"u1","name":"面板上改过的 v2"}`, 1, "rest"); err != nil || !ok {
 		t.Fatalf("面板改一版: ok=%v err=%v", ok, err)
 	}
 
@@ -169,7 +177,7 @@ func TestExportAgentDirRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 面板改一版：导出物必须来自 DB，而不是目录里那份旧文件。
-	if ok, err := st.UpsertAgentDefinition(ctx, "u1", `{"id":"u1","name":"面板改的","runtimes":["stub"],"provider":"openai:gpt-4o"}`, 1, "rest"); err != nil || !ok {
+	if ok, err := st.UpsertAgentDefinition(ctx, "u1", `{"id":"u1","name":"面板改的","provider":"openai:gpt-4o"}`, 1, "rest"); err != nil || !ok {
 		t.Fatal(err)
 	}
 
@@ -218,9 +226,9 @@ func TestExportAgentDirRoundTrip(t *testing.T) {
 func TestExportAgentDirDryRunAndReservedID(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1","runtimes":["stub"]}`)
+	mustSeedAgentRow(t, st, "u1", `{"id":"u1","name":"U1"}`)
 	// id 合法但与保留文件同名 → 不导出（否则会覆盖 providers.json 这类目录级配置）。
-	mustSeedAgentRow(t, st, "providers", `{"id":"providers","name":"撞名","runtimes":["stub"]}`)
+	mustSeedAgentRow(t, st, "providers", `{"id":"providers","name":"撞名"}`)
 
 	dst := t.TempDir()
 	stats, err := ExportAgentDir(ctx, st, dst, true, nil)

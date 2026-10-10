@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
@@ -27,9 +27,9 @@ import (
 // 规则：
 //   - 所有本地 runtime 都给 npm 面（npm_config_cache / npm_config_prefix）：MCP server 常经 npx 拉起，
 //     不隔离就会写用户自己的 ~/.npm；
-//   - deepseekharness（dsh）：只给 DSH_HOME。**刻意不给 DSH_AGENTS_HOME**——dsh 的 skill
+//   - dsh（dsh）：只给 DSH_HOME。**刻意不给 DSH_AGENTS_HOME**——dsh 的 skill
 //     provider 按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析 agents 根，
-//     而平台把 skill 投射到 `${HOME}/.agents/skills`（见 deepseekharnessSkillProjection）。
+//     而平台把 skill 投射到 `${HOME}/.agents/skills`（见 dshSkillProjection）。
 //     一旦注入 DSH_AGENTS_HOME，**读根就与写根分叉**，skill 静默不生效（2026-10-09 E5 实测：
 //     注入后 dsh 会话的 `<available_skills>` 里没有投影根下那条 skill，只有注入根下的）。
 //     历史：本表曾按"agents 面也要隔离"注入它，那是把"隔离用户既有配置"错用到了**平台自己的
@@ -54,7 +54,7 @@ func IsolationEnv(runtimeID, home string) []string {
 		"npm_config_prefix="+filepath.Join(home, "npm", "global"),
 	)
 	switch runtimeID {
-	case deepseekharness.ID:
+	case dsh.ID:
 		env = append(env, "DSH_HOME="+filepath.Join(home, "runtime", "dsh"))
 	case opencode.ID:
 		env = append(env,
@@ -144,9 +144,9 @@ func (r *Registry) ApplyIsolationEnv(home string) []string {
 
 	// **落点要等隔离 env 应用之后才可解析**，所以同步实现在这里再登记一次。
 	//
-	// 时序事实（`DefaultRegistry()` 是逐字实现在装配最前面的）：`Spec.ModelConfig.Root` 用的是
-	// `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}`，而这两个变量正是本函数注入的。`DefaultRegistry()`
-	// 里那次登记因此**必然解析失败**（进程环境里没有它们，而解析刻意不回落进程环境——回落到用户
+	// 时序事实（`ProductRegistry` / `AllBuiltinRegistry` 都跑在装配最前面）：`Spec.ModelConfig.Root`
+	// 用的是 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}`，而这两个变量正是本函数注入的。构造注册表时
+	// 那次登记因此**必然解析失败**（进程环境里没有它们，而解析刻意不回落进程环境——回落到用户
 	// 自己的 home 是隔离纪律的硬红线）。所以装机期调用本函数之后重跑一次登记：
 	// `registerBuiltinSyncers` 幂等（`RegisterSyncer` 同 ID 覆盖），解析不了只会 `continue`。
 	// 少了这一步，`sync[]` 会永远如实报 `unsupported`——用户看到"保存成功"而底座永远拿不到清单。

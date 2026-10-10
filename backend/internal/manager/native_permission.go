@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/pkg/runtime/deepseekharness"
+	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 	"github.com/morehao/golib/glog"
 )
@@ -19,7 +19,7 @@ import (
 //   - 底座的沙箱比策略更严/更松（例如策略 allow 了写文件，但底座沙箱仍拒绝工作区外写入）。
 //
 // B5 在**启动时**把策略投影到底座的原生开关（不改变拦截面的存在，形成双层）：
-//   - deepseekharness：`DSH_PERMISSION_MODE=read-only|workspace-write|danger-full-access`
+//   - dsh：`DSH_PERMISSION_MODE=read-only|workspace-write|danger-full-access`
 //     （该变量同时决定 sandbox 模式与 approval 策略：仅 danger-full-access 时 approval=never）；
 //   - opencode：`OPENCODE_CONFIG_CONTENT={"permission":{...}}`（进程内配置覆盖，不落用户配置文件；
 //     `opencode debug config` 可验证生效）。
@@ -85,7 +85,7 @@ func nativePermissionEnv(runtimeID string, p *PermissionPolicy) (env []string, d
 	}
 
 	switch runtimeID {
-	case deepseekharness.ID:
+	case dsh.ID:
 		dm, why, inject := dshPermissionMode(p, mode)
 		if !inject {
 			return nil, why

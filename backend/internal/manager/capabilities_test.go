@@ -164,17 +164,19 @@ func TestMcpServersFor(t *testing.T) {
 	}
 }
 
-// TestAgentCapabilities 统一能力目录（§8.1）可见性规则：skill 按候选 runtime 裁剪、
-// MCP 全量 + enabled/runtimes 标注、tool 按归属 server 的启用×可承载过滤、未知 runtime 降级记 notes。
+// TestAgentCapabilities 统一能力目录（§8.1）可见性规则：skill 按构建期底座裁剪、
+// MCP 全量 + enabled/runtimes 标注、tool 按归属 server 的启用×可承载过滤。
 func TestAgentCapabilities(t *testing.T) {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
 	)
 	svc := NewService(reg, eventbus.New())
-	// 本进程解析出 opencode 的 skill 投影（ghost 未注册 → 不可能有投影）。
+	// 底座是构建期常量：把它设成注册表里唯一的那个，能力面才按它推导。
+	setBuildRuntime(t, "opencode")
+	// 本进程解析出 opencode 的 skill 投影。
 	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "opencode")})
 	svc.agents["a1"] = &AgentRec{
-		ID: "a1", Name: "A1", Runtimes: []string{"opencode", "ghost"},
+		ID: "a1", Name: "A1",
 		Mcps: ptrOf([]string{"fs"}), State: AgentStateStopped,
 	}
 	mustSkill := func(s capability.Skill) {
@@ -184,7 +186,7 @@ func TestAgentCapabilities(t *testing.T) {
 		}
 	}
 	mustSkill(capability.Skill{ID: "plan", Name: "plan"}) // 未声明 runtimes = 全部
-	// 声明只给 ghost 用：ghost 是候选但没登记投影 → 不适用（但**必须列出**，不能静默消失）。
+	// 声明只给 ghost 用：ghost 不是本构建的底座 → 不适用（但**必须列出**，不能静默消失）。
 	mustSkill(capability.Skill{ID: "no-src", Name: "no-src", Runtimes: []string{"ghost"}})
 	mustMcp := func(id, transport string) {
 		t.Helper()
@@ -211,8 +213,8 @@ func TestAgentCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentCapabilities: %v", err)
 	}
-	if got.AgentID != "a1" || len(got.Runtimes) != 2 || got.Runtimes[0] != "opencode" {
-		t.Fatalf("agent/runtimes 不符: %+v", got)
+	if got.AgentID != "a1" || len(got.Runtimes) != 1 || got.Runtimes[0] != "opencode" {
+		t.Fatalf("agent/runtimes 不符（构建期底座只报一个）: %+v", got)
 	}
 	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出；适用性取决于
 	// 「候选 runtime ∩ 技能声明的 runtimes ∩ 已解析投影」，不适用时带人话原因。
@@ -230,7 +232,7 @@ func TestAgentCapabilities(t *testing.T) {
 	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Runtimes) != 0 || len(noSrc.Reasons) == 0 {
 		t.Fatalf("no-src 应不适用（runtimes 空）+ 有原因: %+v", noSrc)
 	}
-	// MCP：全量 3 条；白名单只启用 fs；carriers 只含能承载该传输的候选（ghost 未注册不计）。
+	// MCP：全量 3 条；白名单只启用 fs；carriers 就是构建期底座那一个（承载该传输时）。
 	if len(got.McpServers) != 3 {
 		t.Fatalf("mcp_servers 应全量 3 条，got %+v", got.McpServers)
 	}
@@ -262,13 +264,13 @@ func TestAgentCapabilities(t *testing.T) {
 			t.Fatalf("tools 含不可见条目 %q（全量 %v）", n, names)
 		}
 	}
-	// notes：ghost 未注册降级说明。
-	if len(got.Notes) != 1 || !strings.Contains(got.Notes[0], "ghost") {
-		t.Fatalf("notes 应记录未注册 runtime，got %+v", got.Notes)
+	// notes：候选面下线后，能力面按构建期常量推导，没有"未注册的候选"这种降级说明。
+	if len(got.Notes) != 0 {
+		t.Fatalf("构建期底座已装配，不该有降级说明，got %+v", got.Notes)
 	}
 
 	// mcps: [] → 禁用注入：fs 未启用、fs_read 不可见、notes 记明。
-	svc.agents["a2"] = &AgentRec{ID: "a2", Runtimes: []string{"opencode"}, Mcps: ptrOf([]string{}), State: AgentStateStopped}
+	svc.agents["a2"] = &AgentRec{ID: "a2", Mcps: ptrOf([]string{}), State: AgentStateStopped}
 	got2, err := svc.AgentCapabilities("a2")
 	if err != nil {
 		t.Fatalf("AgentCapabilities(a2): %v", err)
@@ -469,7 +471,7 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := svc.caps.RegisterSkill(&capability.Skill{
-		ID: "plain", Name: "P", Body: "# p", Runtimes: []string{"deepseekharness"}, // 不投放给 opencode → 跳过
+		ID: "plain", Name: "P", Body: "# p", Runtimes: []string{"dsh"}, // 不投放给 opencode → 跳过
 	}); err != nil {
 		t.Fatal(err)
 	}

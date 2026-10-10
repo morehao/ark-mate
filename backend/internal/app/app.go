@@ -149,16 +149,20 @@ func (a *App) Engine() *gin.Engine {
 func (a *App) Init(ctx context.Context) error {
 	cfg := a.cfg
 
-	reg := runtime.DefaultRegistry()
-	// 远程 runtime（A5）：配置目录 runtimes.json 声明的远程 ACP 端点注册进同一注册表，
-	// agent 的 runtimes 字段即可引用；与内置 id 冲突时启动即失败（不静默覆盖内置底座）。
+	// 产品装配：**只注册构建期选中的那一个底座**（见 pkg/runtime/build.go）。
+	// 远程 runtime（A5）：runtimes.json 声明的远程 ACP 端点参与同一次选择——选中的 id 命中其中
+	// 一条声明时实现来自远端；未选中的声明不进入本进程的注册表（它们是**候选**，不是装配结果）。
+	// 与内置 id 冲突、或选中的 id 谁都不是 → 启动即失败（不静默覆盖内置，也不给出空注册表）。
+	remoteSpecs := make([]runtime.Spec, 0, len(cfg.RemoteRuntimes))
 	for _, rt := range cfg.RemoteRuntimes {
-		if _, exists := reg.Get(rt.ID); exists {
-			return usageErr("serve: runtimes.json 的 id %q 与内置 runtime 冲突", rt.ID)
-		}
-		reg.Register(runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
-		glog.Infow(ctx, "serve: 注册远程 runtime", "id", rt.ID, "transport", rt.Transport, "endpoint", rt.Endpoint)
+		remoteSpecs = append(remoteSpecs, runtime.RemoteSpec(rt.ID, rt.Name, rt.Transport, rt.Endpoint, rt.Headers))
 	}
+	reg, err := runtime.ProductRegistry(remoteSpecs)
+	if err != nil {
+		return usageErr("serve: %v", err)
+	}
+	glog.Infow(ctx, "serve: 已装配底座", "runtime", runtime.SelectedRuntime(),
+		"remotes", len(cfg.RemoteRuntimes))
 
 	// runtime 子进程的配置隔离（M3-3；设计 §6.6）：把各底座的 home / cache / npm prefix 重定向到
 	// 数据目录下的专属子目录，避免平台拉起的底座去读写用户自己装的那份配置（也避免被它改写）。

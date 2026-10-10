@@ -111,7 +111,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	if _, err := svc.CreateProvider(ctx, providerReq("inuse", nil)); err != nil {
 		t.Fatal(err)
 	}
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, Provider: "inuse"}
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Provider: "inuse"}
 	err = nil
 	if _, err = svc.DeleteProvider(ctx, "inuse"); errCode(err) != "provider_in_use" {
 		t.Fatalf("被引用的档案应 provider_in_use，got %q（%v）", errCode(err), err)
@@ -318,8 +318,9 @@ func TestProviderProblemsSurfaceBeforeConversation(t *testing.T) {
 	if !strings.Contains(strings.Join(items[0].Problems, " "), "设置 · 模型") {
 		t.Fatalf("问题文案应指向设置 · 模型: %+v", items[0].Problems)
 	}
-	// 引用面是只读派生：agent 一引用就出现。
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"opencode"}, Provider: "no-key"}
+	// 引用面是只读派生：agent 一引用就出现。底座维度只有**构建期那一个**（不再是逐 agent 收集候选）。
+	setBuildRuntime(t, "opencode") // v12ProviderRegistry 只注册了 opencode
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Provider: "no-key"}
 	items, _ = svc.ListProviders(context.Background())
 	if len(items[0].Refs.Agents) != 1 || items[0].Refs.Agents[0] != "a1" ||
 		len(items[0].Refs.Runtimes) != 1 || items[0].Refs.Runtimes[0] != "opencode" {

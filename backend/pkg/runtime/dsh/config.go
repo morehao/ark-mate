@@ -5,7 +5,7 @@
 // 也不 import 父包 `pkg/runtime`（父子 import 环，约束⑦）。改启动面的两件事（写文件 / 装卸启动参数）
 // 只能经端口传进来的 `resource.Delivery` 完成；跑底座级校验门所需的外部信息（可执行文件、staging
 // 目录）只能经 `Options` 传进来——adapter 拿不到注册表，也不该自己拼 HOME。
-package deepseekharness
+package dsh
 
 import (
 	"bytes"

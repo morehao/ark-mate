@@ -139,7 +139,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_CAPABILITIES` | `~/.ark-mate/capabilities` | 能力定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 里） |
 | `MATE_AUTOMATIONS` | `~/.ark-mate/automations` | 自动化定义目录：memory 模式是装载源（`<id>.json`，定义与运行态 overlay 同文件，手工可读），sqlite 模式是**导入/导出目录**（定义与运行态在 DB 的 `automations` 表里） |
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
-| `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`deepseekharness:skill`；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
+| `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`dsh:skill`（旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `MATE_WORKSPACE_DIR` | `~/.ark-mate/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `MATE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `MATE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
@@ -253,13 +253,13 @@ curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/agent
 ### 2.4 底座前置条件
 
 - `opencode`：需本机可执行 `opencode acp`。
-- `deepseekharness`（dsh）：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
+- `dsh`：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
 
 内置播种 agent 为 `dsh`（默认）与 `opencode`——**两个都要求本机装有对应底座并完成 provider 登录**。
 
 > **`echo` 演示底座已删除（M0）**：此前 daemon 会自派生 `mate acp-demo` 子进程充当免安装、免模型
 > key 的 ACP 对端（用于冒烟与权限/提问演示），`mate acp-serve` 还能把它暴露成远程端点。这两条
-> 路径已随 echo **彻底移除**，内置 runtime 收敛为 `opencode` / `deepseekharness`。远程传输**功能**
+> 路径已随 echo **彻底移除**，内置 runtime 收敛为 `opencode` / `dsh`。远程传输**功能**
 > 不受影响（`.ark-mate/config/runtimes.json` 声明远程端点照常工作），失去的只是开箱演示；覆盖缺口
 > 台账见仓库 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`。
 
@@ -331,14 +331,24 @@ docker build -t ark-mate:runtimes --target mate-runtimes \
 # 等价的 make 封装
 make image                                             # 最小
 make image/runtimes WITH_DSH=true WITH_OPENCODE=true   # 含底座
+make image RUNTIME=opencode                            # 核心认哪一个底座（构建期固定）
 make image/run IMAGE_TAG=runtimes                      # 起容器
 ```
+
+`MATE_RUNTIME`（默认 `dsh`）与 `WITH_DSH` / `WITH_OPENCODE` 是**两件事**：
+后者决定镜像里**装**哪几份底座二进制，前者决定**核心认哪一个 id**（编译期 `-X` 注入）。用户面
+（REST / 控制台）改不了它——换底座要重新构建。两者不一致是允许的（最小镜像不装任何底座时核心照样
+认 dsh，只是拉不起来，诊断面会说清）；选中的 id 谁都不是则**核心启动即失败**（fail-closed，
+不给"能启动但没底座"的进程）。
 
 开关语义（刻意 fail closed，不静默降级）：
 
 - `WITH_DSH` / `WITH_OPENCODE` 只认 `true|false`（`1|0` 亦可）；取值拼错 → **构建即失败**并列出合法取值。
 - 开关必须与 target 配套：`--build-arg WITH_DSH=true` 传给默认（最小）target → 构建失败并提示改用
   `--target mate-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。两个开关同时关也失败。
+- `MATE_RUNTIME` 只做**词法**校验（`[a-z0-9][a-z0-9_-]*`，取值拼错 → 构建即失败）；id 是否存在
+  交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
+  构建期写不出白名单）。
 - 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
   模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
@@ -361,7 +371,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   `<MATE_HOME>/runtime/dsh/mate-models.patch.yml`（容器里 `/data/runtime/dsh/mate-models.patch.yml`），
   由平台按"文件存在且非空"幂等地作为 `--patch <绝对路径>` 递进启动参数——坏了把参数摘掉就回到出厂配置，
   不需要修复 dsh 的任何文件。**当前该落点的 `Tested=false`，所以是只读的**：平台会生成候选内容，
-  但**不落盘、也不改启动参数**（`mate doctor` 的 `models deepseekharness` 那一条会如实报"未实测 ⇒ 只读"）。
+  但**不落盘、也不改启动参数**（`mate doctor` 的 `models dsh` 那一条会如实报"未实测 ⇒ 只读"）。
   没有对应变量时 dsh 仍能起来并完成 ACP 握手，但第一轮请求会失败——
   这是如实语义，不是平台静默降级（实测见 §8）。
 
@@ -450,7 +460,8 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 
 - 存活探针：`GET /v1/mate/health`（`code:0`）。
 - 就绪判据（无独立 readiness 端点，按下列信号组合）：health 通 + `GET /v1/mate/agents` 返回非空
-  + `GET /v1/mate/runtimes` 含预期底座。
+  + `GET /v1/mate/agents/<id>/diagnostics` 的 `runtime` 等于构建期注入的那个 id（`GET /runtimes`
+  已随「底座由构建期固定」一并删除）。
 - 日志：stdout（zap 编码的 JSON 行，由 golib 的 `glog` 输出，级别固定 info）。例外两条：
   `mate mcp` 的 stdout 是 JSON-RPC 协议流，日志改落 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`；
   `mate --json` 系子命令不装日志出口（保住 stdout 的机器可读性）。
@@ -589,6 +600,31 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含 dsh/opencode → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
 | `docker build` 卡在拉基础镜像 / `go mod download` 超时 | 受限网络用 §4.3 的 build-arg（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`）整组覆盖 |
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target mate-runtimes`（或 `make image/runtimes`），不做静默忽略 |
+
+### 6.2 runtime 标识归一（`deepseekharness` → `dsh`）：老数据自动继续生效
+
+2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `pkg/runtime/dsh`、展示名 `dsh`）——它本来就是同一个
+东西在其余六个面上的名字：二进制 `dsh`、隔离根 `<MATE_HOME>/runtime/dsh`、随包载荷 `payloads/dsh/`、
+桌面启动器分支 `runtimeId === 'dsh'`、环境变量前缀 `DSH_`、种子 agent id `dsh`。构建参数随之变成
+`RUNTIME=dsh` / `--build-arg MATE_RUNTIME=dsh`（不指定时的默认值）。
+
+**升级到本版之后，老数据不需要任何手工动作**——5 处持久化面在读时归一、并在**原有的写路径**上自愈：
+
+| 面 | 处理 |
+| --- | --- |
+| `conversations.runtime_hint`（sqlite 列） | 读回时归一；下次落库写新值 |
+| transcript header 的 `runtime`（append-only 历史文件） | **读时归一，文件不重写**（历史就是历史） |
+| skill 定义的 `runtimes[]`（文件 / DB 行） | 装载与写面归一（不归一的后果是技能**不再投放**而界面仍显示"已启用"） |
+| `config` 的 `projection_dirs` 键（`<runtime>:<kind>`） | 解析时归一（否则自定义投影根**静默失效**、回落到默认根） |
+| `~/.agents/skills/*/.mate-managed` 的归属集合 | 物化重校时**认领**旧名字并在写回时替换成新名字 |
+
+> 最后一条要特别说明：若不认领旧名字，归属集合里那条旧名字会永远留着，于是"集合空了才删目录"
+> 永不成立——**禁用/删除技能时副本删不掉，底座照旧读到已禁用的技能**。这是本次归一里唯一一处
+> 会静默出错的地方，护栏见 `pkg/capability` 的 `TestOwnerAliasClaimsLegacyMarker`（回退那行即变红）。
+
+**别名什么时候可以删**：当 `mate doctor` 能报告"本机没有任何老数据引用它"之后，
+`pkg/runtime/legacy.go` 的 `LegacyDeepseekharnessID` / `NormalizeID` / `LegacyAliasesOf` 与它们的
+用例可一并删除。在此之前请把别名当成**数据兼容面**对待：它只出现在读路径上，新写入的任何地方都不会再有旧值。
 
 ## 8. 验证记录（本机实跑）
 

@@ -342,7 +342,7 @@ async function main() {
           id: SKILL_ID,
           name: SKILL_ID,
           description: '桌面态投放探针',
-          runtimes: ['deepseekharness', 'opencode'],
+          runtimes: ['dsh', 'opencode'],
           body: `# ${SKILL_ID}\n\n正文标记：${BODY_MARK}\n`,
         }),
       )},

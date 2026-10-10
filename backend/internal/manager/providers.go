@@ -344,11 +344,10 @@ func (s *Service) providerRespLocked(ctx context.Context, id string, d *provider
 			continue
 		}
 		resp.Refs.Agents = append(resp.Refs.Agents, agentID)
-		for _, rt := range a.Runtimes {
-			if !seenRT[rt] {
-				seenRT[rt] = true
-				resp.Refs.Runtimes = append(resp.Refs.Runtimes, rt)
-			}
+		// 底座是构建期常量：引用它的 agent 都跑在同一个 runtime 上（v12 之前逐个 agent 收集候选）。
+		if rt := runtime.SelectedRuntime(); !seenRT[rt] {
+			seenRT[rt] = true
+			resp.Refs.Runtimes = append(resp.Refs.Runtimes, rt)
 		}
 	}
 	sort.Strings(resp.Refs.Agents)

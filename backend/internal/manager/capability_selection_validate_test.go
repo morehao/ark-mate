@@ -23,6 +23,7 @@ import (
 // 否则"不可达"这条断言就没有对照组。
 func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	t.Helper()
+	setBuildRuntime(t, "stub") // 夹具只注册 stub：底座必须与它一致
 	spec := stubACPSpec(t)
 	spec.McpTransports = []string{"stdio"}
 	reg := runtime.NewRegistry(spec)
@@ -31,7 +32,7 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
 	svc.SetMcpGatewayEnabled(false)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Runtimes: []string{"stub"}, State: AgentStateStopped}
+	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	svc.SetSkillProjections([]SkillProjection{{
 		Runtime:    "stub",
 		Projection: opencodeSkillProjectionForTest(),

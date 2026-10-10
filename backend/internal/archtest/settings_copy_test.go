@@ -16,7 +16,7 @@ import (
 // **只扫字符串字面量**，不扫标识符：`runtimeId` / `provider_id` 这类内部名（以及对象键、字段访问）
 // 天天要出现，扫它们会让守卫变成噪声，而噪声守卫迟早被人绕过。判据是"用户会不会读到这个串"。
 var forbiddenSettingsWords = []string{
-	"dsh", "opencode", "deepseekharness", "runtime", "底座",
+	"dsh", "opencode", "dsh", "runtime", "底座",
 	"provider", "mcp", "skill", "token",
 }
 

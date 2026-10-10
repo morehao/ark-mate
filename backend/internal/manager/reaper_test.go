@@ -48,7 +48,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o.conns["stub"] = fresh()
 	o.conns["opencode"] = busy
 	o.inflight.Mark(busy.client, "s1")
-	o.conns["deepseekharness"] = withConversation
+	o.conns["dsh"] = withConversation
 	o.conversations["s-x"] = &ActiveConversation{client: withConversation.client}
 	o.mu.Unlock()
 
@@ -58,7 +58,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o.mu.Lock()
 	_, a := o.conns["stub"]
 	_, b := o.conns["opencode"]
-	_, c := o.conns["deepseekharness"]
+	_, c := o.conns["dsh"]
 	o.mu.Unlock()
 	if !a || !b || !c {
 		t.Fatalf("连接不应被摘除: echo=%v opencode=%v dsh=%v", a, b, c)
