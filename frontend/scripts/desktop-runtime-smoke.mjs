@@ -437,6 +437,14 @@ function runtimeEnvOf(coreEnv, runtimeId) {
     isolation.XDG_STATE_HOME = join(home, 'runtime', 'opencode', 'state')
     isolation.OPENCODE_CONFIG_DIR = join(home, 'runtime', 'opencode', 'config', 'opencode')
     isolation.OPENCODE_DB = join(home, 'runtime', 'opencode', 'data', 'opencode.db')
+    // F3（模型清单 T5 的隔离前提）：与核心逐条对齐（本表三份副本，改一处就得改三处）。
+    // 空串是有意的取值：清掉用户 shell 里的同名变量（层③ `OPENCODE_CONFIG` 高于平台写的 global 文件、
+    // 层⑥ `OPENCODE_CONFIG_CONTENT` 高于平台写的任何文件），并关掉会走到文件系统根的项目级发现（层④⑤）。
+    isolation.OPENCODE_CONFIG = ''
+    isolation.OPENCODE_CONFIG_CONTENT = ''
+    isolation.OPENCODE_CONFIG_PROJECT_DISABLE = 'true'
+    isolation.OPENCODE_MODELS_PATH = ''
+    isolation.OPENCODE_MODELS_URL = 
   }
   // "已有键不覆盖"（isolation.go 的 ApplyIsolationEnv 语义）：显式配置优先。
   for (const [k, v] of Object.entries(isolation)) if (env[k] === undefined) env[k] = v

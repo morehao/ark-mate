@@ -75,10 +75,18 @@ const LAUNCHERS = [
     // 不兜底时这条"壳直接跑载荷"的路径会去读/替换**用户自己的**后台服务登记——那正是"动了本机"。
     // 其余 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` 是通用变量（全局改会连累用户其它
     // 工具），只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
+    // F3（模型清单 T5 的隔离前提）：三个必堵 + 两个可复现键。空串是**有意的取值**
+    // （`${VAR:=}` = 未设置则置空），JS 侧 falsy 等价于"没设"——正是"不覆盖、也不回落用户的值"。
+    // 理由逐条见 Go 侧 `pkg/runtime/isolation.go` 的同名注释（那是这张表的权威副本）。
     isolation: {
       XDG_STATE_HOME: 'runtime/opencode/state',
       OPENCODE_CONFIG_DIR: 'runtime/opencode/config/opencode',
       OPENCODE_DB: 'runtime/opencode/data/opencode.db',
+      OPENCODE_CONFIG: '',
+      OPENCODE_CONFIG_CONTENT: '',
+      OPENCODE_CONFIG_PROJECT_DISABLE: 'true',
+      OPENCODE_MODELS_PATH: '',
+      OPENCODE_MODELS_URL: '',
     },
   },
 ]
