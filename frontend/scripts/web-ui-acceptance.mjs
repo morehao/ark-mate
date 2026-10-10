@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全）——**真 Chrome + 真服务**。
+ * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全 / v11「设置 · 模型」一节）——**真 Chrome + 真服务**。
  *
  * 为什么这里才出现浏览器驱动代码：本仓前端零测试依赖（无 vitest/jest/playwright/puppeteer），
  * 既有 `smoke-e2e.mjs` / `e2e-live-turn.mjs` 只走 REST/WS。而 M3-4 与 M4-6 的 DoD 是**手工界面
@@ -8,9 +8,15 @@
  * 于是用 Node 24 自带的全局 WebSocket 直连 CDP——**不引入任何新依赖**。
  *
  * 用法：
- *   node scripts/web-ui-acceptance.mjs              # 全部场景
- *   node scripts/web-ui-acceptance.mjs cap auto cmd # 只跑指定场景
- *   KEEP_CHROME=1 ...                                 # 保留 Chrome 便于人工接管
+ *   node scripts/web-ui-acceptance.mjs                    # 默认三组（cap/cmd/auto）
+ *   node scripts/web-ui-acceptance.mjs cap auto cmd model  # 只跑指定场景
+ *   node scripts/web-ui-acceptance.mjs model               # 只跑「设置 · 模型」那一节
+ *   KEEP_CHROME=1 ...                                      # 保留 Chrome 便于人工接管
+ *
+ * ⚠️ `model` 场景**默认不跑**（不在默认三组里）：它要真 Chrome + `make dev` 起的真服务，而它是在
+ * **没有 GUI 会话的环境里写的**（2026-10-10 的会话里 Electron/Chrome 的沙箱起不来），所以到写成为止
+ * **没有被执行过一次**。默认跑它会让 `pnpm ui:accept` 在任何人第一次跑之前就是红的——那比"少一个场景"
+ * 更糟。请在能起 Chrome 的机器上先单独跑 `pnpm ui:accept model`，绿了再把它并进默认集合。
  *
  * 前置：后端（:10001）+ vite（:5173）已起（`make dev`）。脚本**不启动服务**——
  * 它验的是"人在看的那个界面"，偷偷另起一个服务就验错了对象。
@@ -749,6 +755,122 @@ async function setDraft(page, text) {
   `)
 }
 
+
+// ————————————————————————————————————————————————————————————————
+// v11「设置 · 模型」那一节（A11）：两个平级的管理对象 + 生效状态列 + 文案纪律。
+//
+// 覆盖的判据（计划 A11，逐条）：
+//   ① 开设置 → 切到「模型」→ 两块标题是「供应商」「模型」，且**不出现 `provider` 做标题**；
+//   ② 供应商：新建凭据 → 填密钥 → 自检（只跑本地段，零出网）→ 删除；
+//   ③ 模型：切底座 → 改显示名 / 隐藏 / 置顶 → 点星号设默认 → 生效状态列有值 → 删除；
+//   ④ **文案纪律**：保存成功的提示只能说「已保存，将在下一个会话进程生效」，不许说「已生效」。
+//
+// 全部用 REST 收尾（`finally`），跑完不留夹具。
+//
+// **本场景尚未在真 Chrome 上跑过**（写成时所在的环境起不了 GUI 浏览器，见文件头用法注释）：
+// 首次 `pnpm ui:accept model` 很可能需要按真实 DOM 微调选择器——这正是它默认不进默认集合的原因。
+async function scenarioSettingsModel(browser) {
+  section('v11 设置 · 模型（供应商 + 模型两块 / 生效状态列 / 文案纪律）')
+  const provID = 'ui-verify-prov'
+  const modelID = `ui-verify-${Date.now().toString(36)}`
+  const page = await openPage(browser, `${WEB_URL}/`)
+  const cleanup = async () => {
+    // 逐条 best-effort：夹具是自己造的，跑完必须自己清（顺序：模型 → 凭据，因为模型挂靠凭据）。
+    for (const m of ((await api('GET', '/models?runtime=opencode')).json.data?.declared ?? [])) {
+      if (m.model_id === modelID) await api('DELETE', `/models/${m.id}`)
+    }
+    await api('DELETE', `/providers/${provID}`)
+  }
+  try {
+    // ① 左栏「设置」→ 弹窗内切到「模型」
+    await page.waitFor(textExpr('设置'), { label: '左栏渲染' })
+    await page.click(byText('button', '设置'))
+    await page.waitFor(`const el = document.querySelector('.fg-setdlg'); return !!el && el.getClientRects().length > 0`, { label: '设置弹窗打开' })
+    await page.click(`[...document.querySelectorAll('.fg-setdlg-item')].find(b => (b.innerText||'').includes('模型'))`)
+    await page.waitFor(`return !!document.querySelector('.fg-model-panel')`, { label: '模型那一节渲染' })
+    await sleep(600)
+    await page.shot('20-settings-model')
+
+    const blocks = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-model-panel section[aria-label]')].map(s => s.getAttribute('aria-label'))`,
+    )
+    check('两块标题恰好是「供应商」与「模型」', JSON.stringify(blocks) === JSON.stringify(['供应商', '模型']), JSON.stringify(blocks))
+    const titles = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-model-panel header b')].map(b => (b.innerText||'').trim())`,
+    )
+    check('表头标题不含 provider/供应商代码词', titles.length >= 2 && !titles.some((t) => /provider|mcp|skill/i.test(t)), JSON.stringify(titles))
+
+    // ② 供应商：新建 → 自检（本地段）→ 删除
+    await page.click(byText('button', '新建凭据'))
+    await page.waitFor(`return !!document.querySelector('.ant-modal input#id')`, { label: '凭据表单打开' })
+    await page.type('document.querySelector(".ant-modal input#id")', provID)
+    // 上游类型是 antd Select（不是裸 input）：必须走 pickSelect（点开 → 输入 → 选中）。
+    await page.pickSelect('document.querySelector(".ant-modal .ant-select")', 'deepseek')
+    await page.type('document.querySelector(".ant-modal input#key")', 'sk-ui-verify')
+    await page.click(`[...document.querySelectorAll('.ant-modal button')].find(b => (b.innerText||'').trim() === '保存')`)
+    await page.waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(provID)})`, { label: '凭据出现在列表里' })
+    await page.shot('21-settings-provider-created')
+    // 「运行时参数」折叠区：字段来自 /runtimes 的 schema（不是前端硬编码）
+    const projLabels = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-projfields label')].map(l => (l.innerText||'').trim())`,
+    )
+    check('供应商表单渲染了后端给的运行时参数字段', projLabels.length === 0 || projLabels.some((l) => /baseURL|api/.test(l)), JSON.stringify(projLabels))
+
+    // 自检：只跑本地段（**绝不点那条会出网的**）
+    await page.click(`[...document.querySelectorAll('button')].find(b => (b.innerText||'').includes('自检'))`)
+    await page.waitFor(`return !!document.querySelector('.fg-probe')`, { label: '自检结果展开' })
+    await sleep(500)
+    const probe = await page.evaluate(`return document.querySelector('.fg-probe').innerText`)
+    check('自检逐条给出结论与出路', /exists/.test(probe) && /secret/.test(probe), probe.split('\n').slice(0, 4).join(' | ').slice(0, 220))
+    check('自检有「连一次上游」的显式入口（默认不出网）', /连一次上游/.test(probe), probe.slice(0, 160))
+
+    // ③ 模型：切底座 → 新建 → 改显示名/隐藏/置顶 → 星号设默认
+    await page.click(byText('button', '新建模型'))
+    await page.waitFor(`return !!document.querySelector('.ant-modal input#model_id')`, { label: '模型表单打开' })
+    await page.pickSelect('document.querySelector(".ant-modal .ant-select")', provID)
+    await page.type('document.querySelector(".ant-modal input#model_id")', modelID)
+    await page.type('document.querySelector(".ant-modal input#name")', '验收模型')
+    await page.click(`[...document.querySelectorAll('.ant-modal button')].find(b => (b.innerText||'').trim() === '保存')`)
+    await page.waitFor(`return (document.body.innerText||'').includes(${JSON.stringify(modelID)})`, { label: '模型出现在清单里' })
+    await sleep(400)
+    await page.shot('22-settings-model-created')
+
+    // ④ 文案纪律：toast 只许说"将在下一个会话进程生效"
+    const toast = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
+    check('保存提示是「将在下一个会话进程生效」而不是「已生效」',
+      /下一个会话进程生效/.test(toast) && !/已生效/.test(toast), toast.slice(0, 200))
+
+    // 生效状态列：有值（已生效/待生效/底座独有 三态之一）
+    const rows = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
+    check('生效状态列有值（已生效/待生效/底座独有）', /已生效|待生效|底座独有/.test(rows), rows.split('\n').filter((l) => /生效|独有/.test(l)).join(' | ').slice(0, 200))
+    // 配置状态条（路径/通道/pending）
+    check('配置状态条给出落点与通道', /配置文件：|未声明模型配置落点|尚未实测/.test(rows), rows.split('\n').filter((l) => /配置文件|落点|通道/.test(l)).join(' | ').slice(0, 220))
+
+    // 星号设默认（真实点击）
+    const star = `[...document.querySelectorAll('.fg-model-panel button[aria-label]')].find(b => (b.getAttribute('aria-label')||'').includes('设为默认模型'))`
+    if (await page.box(star)) {
+      await page.click(star)
+      await sleep(800)
+      const after = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
+      check('点星号后该条成为默认（★）', (await page.count('.fg-model-panel button[aria-label="已是默认模型"]')) >= 1, after.split('\n').slice(0, 6).join(' | '))
+    } else {
+      check('点星号后该条成为默认（★）', false, '没找到「设为默认模型」的星号按钮')
+    }
+
+    // 删除默认模型应被拒（40501 model_is_default + 出路）——用 REST 判，界面文案由上面那条覆盖
+    const list = (await api('GET', '/models?runtime=opencode')).json.data?.declared ?? []
+    const created = list.find((m) => m.model_id === modelID)
+    if (created?.is_default) {
+      const del = await api('DELETE', `/models/${created.id}`)
+      check('删默认模型被拒并给出路（40501 model_is_default）', del.json.code === 40501 && /默认/.test(del.json.msg), `${del.json.code} ${String(del.json.msg).slice(0, 140)}`)
+    }
+    await page.shot('23-settings-model-default')
+  } finally {
+    await cleanup()
+  }
+  return { page }
+}
+
 // ————————————————————————————————————————————————————————————————
 async function main() {
   const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
@@ -765,7 +887,8 @@ async function main() {
     (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl,
   )
 
-  const scenarios = { cap: scenarioCapability, auto: scenarioAutomation, cmd: scenarioCommands }
+  // `model` 是**可选场景**（默认不跑）：见文件头的用法注释——它还没在真 Chrome 上跑过一次。
+  const scenarios = { cap: scenarioCapability, auto: scenarioAutomation, cmd: scenarioCommands, model: scenarioSettingsModel }
   const names = only.length ? only : ['cap', 'cmd', 'auto']
   for (const n of names) {
     if (!scenarios[n]) throw new Error(`未知场景: ${n}（可选 ${Object.keys(scenarios).join('/')}）`)
