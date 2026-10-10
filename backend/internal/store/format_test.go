@@ -76,6 +76,20 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("写 capability_revisions 行: %v", err)
 	}
+	// v11（设置 · 模型）：provider 档案行 + 模型清单行。后者多三个列，其中 `is_default` 是
+	// **布尔列**（INTEGER 0/1）——裸 SQL 的置默认语句不经过 serializer，所以它的落库形态
+	// 必须在这里被钉死（`model.FlagValue` 的唯一用途就是它）。
+	if ok, err := s.providers.CreateCAS(ctx, &ProviderDefinition{
+		ID: "pv-1", Body: `{"type":"deepseek","key_ref":"vault:providers/pv-1"}`, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 providers 行: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.models.CreateCAS(ctx, &ModelDefinition{
+		ID: "md-1", Runtime: "opencode", ProviderID: "pv-1",
+		Body: `{"model_id":"deepseek-v4-flash","name":"Flash"}`, IsDefault: true, Revision: 1, UpdatedAt: at,
+	}); err != nil || !ok {
+		t.Fatalf("写 models 行: ok=%v err=%v", ok, err)
+	}
 	// 「当前 Agent」的显式选择（M6-6 落 meta）：值就是 agent id 本身，落库是 TEXT。
 	if err := s.SetDefaultAgentID(ctx, "ag-1"); err != nil {
 		t.Fatalf("写 default_agent meta: %v", err)
@@ -123,6 +137,15 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"automations", "recent_runs", "text", `[{"status":"completed"}]`, true},
 		{"capability_revisions", "seq", "integer", "1", true},
 		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
+		// v11（设置 · 模型）：档案行与清单行。`models.is_default` 的落库形态是这一层的关键
+		// ——它由两条裸 SQL 维护（先清同 runtime、再置新），所以不能靠 serializer 兜底。
+		{"providers", "revision", "integer", "1", true},
+		{"providers", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"models", "runtime", "text", "opencode", true},
+		{"models", "provider_id", "text", "pv-1", true},
+		{"models", "is_default", "integer", "1", true},
+		{"models", "revision", "integer", "1", true},
+		{"models", "updated_at", "text", at.Format(model.LayoutTS), true},
 	}
 	for _, tc := range cases {
 		var gotType, gotValue string
@@ -201,6 +224,25 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 	if auto.Revision != 1 || !auto.UpdatedAt.Equal(at) {
 		t.Errorf("automation 定义列往返失真: rev=%d at=%s", auto.Revision, auto.UpdatedAt)
+	}
+	// v11：provider 档案行与模型清单行的往返（时间列逐纳秒、身份列原样、默认位是布尔）。
+	pv, found, err := s.GetProviderDefinition(ctx, "pv-1")
+	if err != nil || !found {
+		t.Fatalf("GetProviderDefinition: found=%v err=%v", found, err)
+	}
+	if pv.Revision != 1 || !pv.UpdatedAt.Equal(at) || pv.Body != `{"type":"deepseek","key_ref":"vault:providers/pv-1"}` {
+		t.Errorf("provider 行往返失真: rev=%d at=%s body=%q", pv.Revision, pv.UpdatedAt, pv.Body)
+	}
+	md, found, err := s.GetModelDefinition(ctx, "md-1")
+	if err != nil || !found {
+		t.Fatalf("GetModelDefinition: found=%v err=%v", found, err)
+	}
+	if md.Runtime != "opencode" || md.ProviderID != "pv-1" || !md.IsDefault ||
+		md.Revision != 1 || !md.UpdatedAt.Equal(at) {
+		t.Errorf("model 行往返失真: %+v", md)
+	}
+	if got := ModelIDOfBody(md.Body); got != "deepseek-v4-flash" {
+		t.Errorf("model_id 从正文取出失真: %q", got)
 	}
 
 	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样

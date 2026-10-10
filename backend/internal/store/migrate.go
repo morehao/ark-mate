@@ -240,6 +240,41 @@ var schemaMigrations = []migration{
 			)`,
 		},
 	},
+	{
+		version: 11,
+		name:    "providers/models（设置 · 模型：供应商凭据迁 DB + 平台模型清单）",
+		statements: []string{
+			// provider 档案：与 skills/mcp_servers/agents 同形（body 唯一权威 + revision CAS +
+			// updated_at）。明文密钥绝不进 body（只允许 key_ref），密文仍在 vault。
+			// 同版建 models，是为了不出现「升级后供应商有了、模型还不能用」的中间态
+			// （设计「数据迁移与校验」第 2 条）。
+			`CREATE TABLE providers (
+				id         TEXT PRIMARY KEY,
+				body       TEXT NOT NULL,
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+			// 平台模型清单：比 providers 多两个**身份列**（runtime / provider_id）——
+			// 它们是平台侧唯一的查询/约束轴（物化按 runtime 取；删除保护按 provider_id 查），
+			// 都在热路径上，放 body 就得全表扫 + 反序列化。
+			//
+			// is_default 是列而不是 body 字段：每 runtime 默认的唯一性由「先清同 runtime 再置新」
+			// 两条 SQL 在同一事务里保证，且默认模型的取值面是 `WHERE runtime=? AND is_default=1`。
+			// 落库形态是 INTEGER 0/1（model.FlagValue；裸 SQL 不经过 serializer）。
+			`CREATE TABLE models (
+				id          TEXT PRIMARY KEY,
+				runtime     TEXT NOT NULL,
+				provider_id TEXT NOT NULL,
+				body        TEXT NOT NULL,
+				is_default  INTEGER NOT NULL DEFAULT 0,
+				revision    INTEGER NOT NULL DEFAULT 1,
+				updated_at  TEXT NOT NULL
+			)`,
+			// 物化按 runtime 取清单（热路径）；删除保护按 provider_id 查引用（热路径）。
+			`CREATE INDEX idx_models_runtime ON models(runtime)`,
+			`CREATE INDEX idx_models_provider ON models(provider_id)`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

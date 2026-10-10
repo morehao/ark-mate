@@ -170,3 +170,107 @@ func NewAgentDao(getDB gormdao.DBGetter) *AgentDao {
 func (d *AgentDao) WithTx(tx *gorm.DB) *AgentDao {
 	return &AgentDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
+
+// ProviderDao 访问 providers 表（v11；列与语义同 skills/mcp_servers/agents）。
+type ProviderDao struct {
+	*DefinitionDao[model.ProviderDefinition, model.ProviderDefinitionList]
+}
+
+// NewProviderDao 构造 ProviderDao。
+func NewProviderDao(getDB gormdao.DBGetter) *ProviderDao {
+	return &ProviderDao{DefinitionDao: newDefinitionDao[model.ProviderDefinition, model.ProviderDefinitionList]("ProviderDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *ProviderDao) WithTx(tx *gorm.DB) *ProviderDao {
+	return &ProviderDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
+// ModelDao 访问 models 表（v11；平台模型清单）。
+//
+// 它比 providers 多两类方法（**身份列的过滤**与**每 runtime 默认的置位**），
+// 但定义行的 CAS 仍然只有 DefinitionDao 那一份实现（UpdateCAS 只碰 body/revision/updated_at，
+// 因此覆盖正文不会顺手动到 is_default）。
+type ModelDao struct {
+	*DefinitionDao[model.ModelDefinition, model.ModelDefinitionList]
+}
+
+// NewModelDao 构造 ModelDao。
+func NewModelDao(getDB gormdao.DBGetter) *ModelDao {
+	return &ModelDao{DefinitionDao: newDefinitionDao[model.ModelDefinition, model.ModelDefinitionList]("ModelDao", getDB)}
+}
+
+// WithTx 返回绑定事务的新 DAO。
+func (d *ModelDao) WithTx(tx *gorm.DB) *ModelDao {
+	return &ModelDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
+}
+
+// ListByRuntime 列出某 runtime 的清单（id 升序；runtimeID 为空 = 全部，id 升序）。
+func (d *ModelDao) ListByRuntime(ctx context.Context, runtimeID string) (model.ModelDefinitionList, error) {
+	var rows model.ModelDefinitionList
+	q := d.DB(ctx).Order("id ASC")
+	if runtimeID != "" {
+		q = q.Where("runtime = ?", runtimeID)
+	}
+	err := q.Find(&rows).Error
+	return rows, err
+}
+
+// ListByProvider 列出挂靠在某条 provider 下的清单（删除保护的引用判据；id 升序）。
+func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
+	var rows model.ModelDefinitionList
+	err := d.DB(ctx).Where("provider_id = ?", providerID).Order("id ASC").Find(&rows).Error
+	return rows, err
+}
+
+// ListDefaults 列出全部默认模型（is_default = 1；跨 runtime）。
+func (d *ModelDao) ListDefaults(ctx context.Context) (model.ModelDefinitionList, error) {
+	var rows model.ModelDefinitionList
+	err := d.DB(ctx).Where("is_default = ?", model.FlagValue(true)).Order("runtime ASC").Find(&rows).Error
+	return rows, err
+}
+
+// GetDefault 读某 runtime 的默认模型（不存在 → (nil, false, nil)）。
+//
+// "每 runtime 至多一条"由 SetDefaultModel 的同事务两条 SQL 保证（见 store），
+// 所以这里用 Take 而不是 Find：多出来一条就是不该发生的事，宁可让它显形。
+func (d *ModelDao) GetDefault(ctx context.Context, runtimeID string) (*model.ModelDefinition, bool, error) {
+	var row model.ModelDefinition
+	err := d.DB(ctx).
+		Where("runtime = ? AND is_default = ?", runtimeID, model.FlagValue(true)).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &row, true, nil
+}
+
+// ClearDefaults 把某 runtime 的全部条目标记为"非默认"（置默认的第一步）。
+//
+// 裸 SQL 的布尔的入参不过 serializer，故显式用 `model.FlagValue`。
+func (d *ModelDao) ClearDefaults(ctx context.Context, runtimeID string) error {
+	return d.DB(ctx).Model(new(model.ModelDefinition)).
+		Where("runtime = ?", runtimeID).
+		Update("is_default", model.FlagValue(false)).Error
+}
+
+// SetDefaultCAS 把一条模型置为该 runtime 的默认，**仅当 revision 仍等于 expectedRev**。
+//
+// 返回 false = 有人在这中间改过（或行已不存在）→ 调用方翻成 `definition_changed`(40901)。
+// 与 DefinitionDao.UpdateCAS 同一纪律：条件更新是并发下的唯一仲裁者，没有旁路。
+func (d *ModelDao) SetDefaultCAS(ctx context.Context, id string, expectedRev int64, now time.Time) (bool, error) {
+	res := d.DB(ctx).Model(new(model.ModelDefinition)).
+		Where("id = ? AND revision = ?", id, expectedRev).
+		Updates(map[string]any{
+			"is_default": model.FlagValue(true),
+			"revision":   expectedRev + 1,
+			"updated_at": model.FormatTimeOrNow(now),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}

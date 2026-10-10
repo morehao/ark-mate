@@ -51,6 +51,17 @@ const (
 	// 只作**装配期自动导入**的幂等依据（目录没变就整体跳过）；显式 `mate capability import`
 	// 不看它——那条路径每次按行判重（新丢进目录一个文件，跑一次就该进来）。
 	MetaKeyImportedCapabilities = "imported_capabilities"
+	// MetaKeyImportedProviders provider 档案导入标记：value = `providers.json` 的内容指纹。
+	//
+	// 与 MetaKeyImportedCapabilities/MetaKeyImportedAgents 同构：装配期**一次性幂等**导入
+	// （文件时代 → providers 表）的判据，只跑一次。文件**不删也不回写**（设计「数据迁移与校验」）。
+	MetaKeyImportedProviders = "imported_providers"
+	// MetaKeyRuntimeConfigDigest 运行时配置文件的物化摘要（T5）。
+	//
+	// value 是 JSON：`{"<runtime>": {"digest":..., "generated_at":..., "generator_version":...}}`。
+	// 用途有三（设计「meta 新增键」）：① 判断是否需要重新物化；② 检测配置文件被外部改过
+	// （摘要对不上 → 报冲突，不静默覆盖）；③ 回退时知道该删什么。
+	MetaKeyRuntimeConfigDigest = "runtime_config_digest"
 
 	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
 	CapabilityKindSkill = "skill"
@@ -60,6 +71,10 @@ const (
 	CapabilityKindAgent = "agent"
 	// CapabilityKindAutomation 定义种类：automation（M6-7；capability_revisions.kind）。
 	CapabilityKindAutomation = "automation"
+	// CapabilityKindProvider 定义种类：provider 档案（设置 · 模型；capability_revisions.kind）。
+	CapabilityKindProvider = "provider"
+	// CapabilityKindModel 定义种类：平台模型清单条目（设置 · 模型；capability_revisions.kind）。
+	CapabilityKindModel = "model"
 
 	// CapabilityActionCreate 新建定义。
 	CapabilityActionCreate = "create"

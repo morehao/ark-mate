@@ -44,6 +44,10 @@ type (
 	Input = model.Input
 	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
 	AgentDefinition = model.AgentDefinition
+	// ProviderDefinition provider 档案行（v11；与 SkillDefinition 同形）。
+	ProviderDefinition = model.ProviderDefinition
+	// ModelDefinition 平台模型清单行（v11；比 ProviderDefinition 多 runtime/provider_id/is_default 三列）。
+	ModelDefinition = model.ModelDefinition
 	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
 	AutomationDefinition = model.AutomationDefinition
 	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
@@ -81,6 +85,10 @@ type Store struct {
 	agents             *dao.AgentDao
 	automations        *dao.AutomationDao
 	capabilityRevision *dao.CapabilityRevisionDao
+
+	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
+	providers *dao.ProviderDao
+	models    *dao.ModelDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -120,6 +128,9 @@ func New(db *gorm.DB) *Store {
 		agents:             dao.NewAgentDao(getDB),
 		automations:        dao.NewAutomationDao(getDB),
 		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
+
+		providers: dao.NewProviderDao(getDB),
+		models:    dao.NewModelDao(getDB),
 	}
 }
 
