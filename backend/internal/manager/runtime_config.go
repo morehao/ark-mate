@@ -378,9 +378,12 @@ func buildOpencodeJSON(models []runtimeConfigModel, providers map[string]provide
 //
 // 三条从随包文档逐字抄来的约束（写错任何一条都不是"没生效"而是"**拒启**"或"无声"）：
 //
-//  1. 目标条目是 **`id: acp`**——ACP 平面唯一消费模型的行（`fallbackSelection` →
-//     `AcpModelControl.selected`）。写 `agent-default-model` 对 ACP 会话是**空操作**
-//     （那个平面不消费它），所以生成器**默认不写它**（不写就没有第二个会漂移的事实）。
+//  1. 目标条目是 **`agent-default-model` 与 `acp` 两条都写**。设计原稿说"只有 `id: acp` 是 ACP
+//     平面消费的行、写 `agent-default-model` 是空操作"——**实测推翻了这个说法**（见下面
+//     `buildDshPatchYAML` 里的注释与 `.dsh/docs/notes/2026-10-10-settings-model-management-gates-notes.md`
+//     的 dsh 组记录）：把 `agent-default-model.provider` 指到一条没有目录的 route 上，ACP 的
+//     `options[category=model]` 会**整个消失**；只改 `acp.config.provider` 则目录纹丝不动。
+//     所以两条都写——少写哪一条都会让"平台设的默认"落在一个不被目录消费的地方。
 //  2. patch 里除 `id` 外的键会被**原样拷到目标 entry 上**，而 `config` 是**整体替换**该行的
 //     config（不与它合并）⇒ 必须**重述**要保留的每个字段。本生成器只写模型路由与默认模型，
 //     其余字段由平台自己的 overlay 层承担（它不是 dsh 的 home patch）。
@@ -393,13 +396,30 @@ func buildDshPatchYAML(models []runtimeConfigModel, providers map[string]provide
 	var b []byte
 	b = append(b, []byte("# ark-mate 生成的模型清单 overlay（平台自有文件；经 dsh --patch 递入）\n")...)
 	b = append(b, []byte("# 归属标记：本文件只有平台会写；dsh 自己的 cordis.patch.yml 不在此列。\n")...)
-	for _, m := range models {
-		if !m.IsDefault {
-			continue
+	var def *runtimeConfigModel
+	for i := range models {
+		if models[i].IsDefault {
+			def = &models[i]
+			break
 		}
-		// 目标行 `id: acp`：平台会话真正消费的那一行。
-		b = append(b, []byte("- id: acp\n  config:\n")...)
-		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(m.ProviderID), yamlQuote(m.ModelID))...)
+	}
+	if def != nil {
+		// **两条 entry 都写**，因为实测（2026-10-10，随包 0.2.0-rc.2）推翻了设计里那句
+		// 「写 agent-default-model 对 ACP 会话是空操作」：
+		//
+		//   · 只改 `agent-default-model.provider`（指向一条目录里没有的 route）→ ACP 的
+		//     `options[category=model]` **整个消失**（目录为空）；
+		//   · 只改 `acp.config.provider` → ACP 的目录**一点没变**（仍是原 provider 的三条）。
+		//
+		// 也就是说：**ACP 平面广告哪个 provider 的模型目录，由 `agent-default-model` 决定**；
+		// `acp` 那一行的 config 读的是"当前选中"，改它不改变候选集。所以默认模型必须落在这两行上
+		// （缺了 agent-default-model 就等于默认值只写进了一个不被目录消费的行）。
+		//
+		// 这条是"机制上等价"级别的结论，不是调参试出来的：目录有/无随该行切换而切换，可复现。
+		for _, id := range []string{"agent-default-model", "acp"} {
+			b = append(b, []byte("- id: "+id+"\n  config:\n")...)
+			b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(def.ProviderID), yamlQuote(def.ModelID))...)
+		}
 	}
 	// 路由声明：按 route 分组（`llm-pi-ai` 的 `providers.<route>.models[]` 是**整体替换**语义，
 	// 所以平台列出的就是该路由的全部——首版**不自动把底座默认值补进来**，那会造出平台没声明的条目）。

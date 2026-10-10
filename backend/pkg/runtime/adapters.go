@@ -170,8 +170,14 @@ func deepseekharnessSpec() Spec {
 				"三条已知坑：① 空 patch / 只有注释的文件会让 dsh **拒启**（README 逐字：「an empty or " +
 				"comments-only file fails boot — disable the layer with [] instead」）；" +
 				"② `--patch` 的路径必须是**绝对**路径（dsh 侧按调用目录解析，而平台拉底座的 cwd 是用户会话目录）；" +
-				"③ 目标条目是 `id: acp`（ACP 平面唯一消费模型的行），**不是** agent-default-model" +
-				"（ACP 平面不消费它，写它等于空操作）。",
+				"③ 默认模型要同时写 `agent-default-model` 与 `acp` 两条 entry —— **实测推翻了设计原稿那句" +
+				"「写 agent-default-model 对 ACP 会话是空操作」**：把 `agent-default-model.provider` 指到一条" +
+				"没有目录的 route 上，ACP 的 `options[category=model]` 会整个消失；只改 `acp.config.provider` 则" +
+				"目录纹丝不动。所以 ACP 目录的 provider 由前者决定。" +
+				"④ **仍未解决**：在 `llm-pi-ai` 里新声明一条 route（api/baseURL/models/apiKeyEnv 齐备）**也不会**" +
+				"把它的模型带进目录（目录为空），而且 `deepseek-official` 同时被 `llm-deepseek` 与 pi-ai 声明" +
+				"（再声明一次会 `configurable provider … is already declared` 让那一 entry 不激活）——" +
+				"所以「平台给 dsh 加一条新模型」这条路**在实测里还没走通**，写入权因此保持关闭。",
 		},
 		// 未实测：P-2 探针尚无结论 → 保守 process。
 		CapabilityScope: CapabilityScopeProcess,

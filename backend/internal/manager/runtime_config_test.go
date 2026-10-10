@@ -118,9 +118,13 @@ func TestBuildDshPatchYAMLByteExact(t *testing.T) {
 	if !strings.Contains(s, "- id: acp\n") {
 		t.Fatalf("必须打 `id: acp` 这一行:\n%s", s)
 	}
-	// ② **绝不写 agent-default-model**（ACP 平面不消费它，写它等于空操作 + 第二个会漂移的事实）。
-	if strings.Contains(s, "agent-default-model") {
-		t.Fatalf("默认不写 agent-default-model（对 ACP 会话是空操作）:\n%s", s)
+	// ② **两条 entry 都写**（实测：ACP 的模型目录由 `agent-default-model` 的 provider 决定，
+	// 只改 `acp` 那一行目录纹丝不动）。
+	if !strings.Contains(s, "- id: agent-default-model\n") {
+		t.Fatalf("必须同时写 agent-default-model（ACP 目录的 provider 由它决定）:\n%s", s)
+	}
+	if !strings.Contains(s, "- id: acp\n") {
+		t.Fatalf("也仍要写 acp（当前选中的那一行）:\n%s", s)
 	}
 	// ③ 默认模型落在 acp 行的 config 里。
 	if !strings.Contains(s, `    provider: "deepseek-official"`+"\n"+`    model: "deepseek-v4-flash"`+"\n") {
