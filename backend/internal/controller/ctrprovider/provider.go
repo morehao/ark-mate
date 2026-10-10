@@ -18,6 +18,7 @@ type ProviderCtr interface {
 	Create(c *gin.Context)
 	Update(c *gin.Context)
 	Delete(c *gin.Context)
+	Probe(c *gin.Context)
 }
 
 var _ ProviderCtr = (*providerCtr)(nil)
@@ -66,6 +67,25 @@ func (h *providerCtr) Update(c *gin.Context) {
 		return
 	}
 	resp, err := h.svc.UpdateProvider(c.Request.Context(), c.Param("id"), patch)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Probe 连接自检：本地段无条件（零出网）；上游段仅当请求体带 `{"upstream":true}`
+// ——它会把用户密钥发到第三方，必须是用户的一次显式动作，绝不被 GET 或页面加载顺手触发。
+func (h *providerCtr) Probe(c *gin.Context) {
+	var req dtoprovider.ProviderProbeReq
+	// 允许空 body（= 只跑本地段）。
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+			return
+		}
+	}
+	resp, err := h.svc.ProbeProvider(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

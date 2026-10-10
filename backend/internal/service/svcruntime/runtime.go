@@ -30,6 +30,9 @@ type RuntimeSvc interface {
 	// DeleteProvider 删除 provider 档案（幂等；被 agent 或模型条目引用 → `provider_in_use`(40901)）。
 	DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error)
 
+	// ProbeProvider 跑一次连接自检（本地段无条件、上游段仅当 req.Upstream）。
+	ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error)
+
 	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
 	// 平台不内置任何模型清单：source=session|resume|cache|none 标注取样来源。
 	ModelCatalog(ctx context.Context, agentID string) (*dtomodel.ModelCatalogResp, error)

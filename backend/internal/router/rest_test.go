@@ -291,6 +291,12 @@ func (s *stubSvc) DeleteProvider(_ context.Context, id string) (*dtoprovider.Pro
 	}
 	return &dtoprovider.ProviderDeleteResp{Deleted: true}, nil
 }
+func (s *stubSvc) ProbeProvider(_ context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtoprovider.ProviderProbeResp{ID: id, Upstream: req.Upstream, OK: true}, nil
+}
 func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr

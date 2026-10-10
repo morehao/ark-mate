@@ -75,3 +75,29 @@ type ProviderDeleteResp struct {
 	// 并在 `mate doctor` 的孤儿密文段列出。反过来（先删密文再删行）会让 has_key 撒谎。
 	VaultCiphertextLeft string `json:"vault_ciphertext_left,omitempty"`
 }
+
+// ProviderProbeResp `POST /providers/:id/probe` 的响应：一次自检的逐条结论。
+//
+// `OK` 是"**没有 fail**"（warn/skip/unknown 都不算失败）——与 `mate doctor` 的口径一致：
+// **无法校验记警告，事实与声明不符才失败**。所以前端不能用 `OK == false` 之外的方式推导
+// "有没有问题"：真正的处置在每一条的 `status` 与 `remedy` 里。
+type ProviderProbeResp struct {
+	ID string `json:"id"`
+	// Upstream 本次是否发起了上游请求（用户显式选择的事实，回执里如实重复一次）。
+	Upstream bool `json:"upstream"`
+	OK       bool `json:"ok"`
+	// Checks 逐条结论（本地段在前，上游段在后）。
+	Checks []ProviderCheckResp `json:"checks"`
+}
+
+// ProviderCheckResp 一条自检结论。
+type ProviderCheckResp struct {
+	// Name 检查项：exists / type / secret / refs / injection / catalog / upstream。
+	Name string `json:"name"`
+	// Status pass | fail | warn | skip | unknown。
+	Status string `json:"status"`
+	// Detail 事实（含数字与变量名，人话）。
+	Detail string `json:"detail"`
+	// Remedy 可执行的下一步（空 = 这一条不需要动作，如纯提示的 injection）。
+	Remedy string `json:"remedy,omitempty"`
+}
