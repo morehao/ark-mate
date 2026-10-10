@@ -1,9 +1,16 @@
-import { tokens } from '@ark-mate/ui'
-import { Dot } from '@ark-mate/ui'
+import { useLocation } from 'react-router-dom'
+import { Dot, tokens } from '@ark-mate/ui'
+import { railContextOf } from '../console/navView'
 import { useMate } from '../store'
 
-/** 底部状态条（console.html .statusbar）：WS 连接态 + eventbus 水位 + 语义提示。 */
+/**
+ * 全局底部状态条（console.html .statusbar）：**常驻在每个页面**的右列底部。
+ *
+ * 版面：左侧是 eventbus 水位（诊断面），右侧最靠边的是 WS 连接态（常驻状态灯），
+ * 中间只在问答页显示会话语义提示。WS 不再在左栏 footer 重复一份。
+ */
 export function StatusBar() {
+  const pathname = useLocation().pathname
   const wsState = useMate((s) => s.wsState)
   const activeId = useMate((s) => s.activeId)
   const views = useMate((s) => s.views)
@@ -42,15 +49,20 @@ export function StatusBar() {
         whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0, overflow: 'hidden' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{seqText}</span>
+      <span style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+        {railContextOf(pathname) === 'chat' && (
+          <span style={{ opacity: 0.85 }}>问答会话绑定唯一 Agent · 切换 Agent = 新建会话</span>
+        )}
+        {/* 常驻状态灯：永远在最右下角 */}
+        <span
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          title={wsState === 'open' ? '事件流已连接' : '事件流断开后会按会话水位自动续传'}
+        >
           <Dot color={wsMeta.color} pulse={'pulse' in wsMeta && !!wsMeta.pulse} size={6} />
           {wsMeta.text}
         </span>
-        <span style={{ opacity: 0.6 }}>·</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{seqText}</span>
       </span>
-      <span style={{ flex: 'none', opacity: 0.85 }}>问答会话绑定唯一 Agent · 切换 Agent = 新建会话</span>
     </footer>
   )
 }

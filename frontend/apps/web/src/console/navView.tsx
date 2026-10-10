@@ -1,10 +1,20 @@
 /**
- * 左栏导航的事实源（唯一）：一级/二级条目、选中判定、展开态。
+ * 左栏导航的事实源（唯一）：一级/二级条目、图标、选中判定、展开态。
  *
- * 纪律（设计 §模块划分与职责）：组件里不得再出现 `to` / `label` 字面量——
- * 新增一个入口只改本文件。命名口径对齐 workdsh：MCP → 「连接器」、skill → 「技能」，
- * 只在 UI 文案层生效，REST / 事件 / 目录名仍是 skills / mcp。
+ * 纪律（设计 §模块划分与职责）：组件里不得再出现 `to` / `label` / 图标字面量——
+ * 新增一个入口只改本文件。
+ * 命名口径对齐 workdsh：MCP → 「连接器」、skill → 「技能」，只在 UI 文案层生效，
+ * REST / 事件 / 目录名仍是 skills / mcp。
+ *
+ * 例外：「设置」不是路由入口（它是左栏 footer 的菜单 + 居中弹窗），定义在 `console/settingsView.tsx`。
  */
+import type { ReactNode } from 'react'
+import {
+  AppstoreOutlined,
+  BarChartOutlined,
+  ClockCircleOutlined,
+  MessageOutlined,
+} from '@ant-design/icons'
 
 export interface NavLeaf {
   readonly id: string
@@ -15,6 +25,11 @@ export interface NavLeaf {
   readonly pending?: boolean
   /** hover 说明：pending 项必须给，避免"点了没反应"被当成坏入口。 */
   readonly hint?: string
+  /**
+   * 一级项的图标。**二级项不给图标**：缩进 26px 的子项再挂图标会把层级读平
+   * （workdsh 的二级项也是纯文字），图标只用来区分一级入口。
+   */
+  readonly icon?: ReactNode
 }
 
 export interface NavGroup {
@@ -22,6 +37,7 @@ export interface NavGroup {
   readonly label: string
   readonly to: string
   readonly order: number
+  readonly icon: ReactNode
   readonly children: readonly NavLeaf[]
 }
 
@@ -31,29 +47,31 @@ export type NavEntry = NavLeaf | NavGroup
 export const PENDING_HINT = '预设化 Agent（未实现）'
 
 export const NAV_ENTRIES: readonly NavEntry[] = [
-  { id: 'chat', label: '问答', to: '/conversations', order: 10 },
+  { id: 'chat', label: '问答', to: '/conversations', order: 10, icon: <MessageOutlined /> },
   {
     id: 'extensions',
     label: '扩展',
     to: '/extensions',
     order: 20,
+    icon: <AppstoreOutlined />,
     children: [
       { id: 'experts', label: '专家', to: '', order: 21, pending: true, hint: PENDING_HINT },
       { id: 'skills', label: '技能', to: '/extensions/skills', order: 22 },
       { id: 'connectors', label: '连接器', to: '/extensions/connectors', order: 23 },
     ],
   },
-  { id: 'agents', label: 'Agents', to: '/agents', order: 30 },
-  { id: 'usage', label: '用量', to: '/usage', order: 40 },
-  { id: 'automations', label: '定时任务', to: '/automations', order: 50 },
-  { id: 'settings', label: '设置', to: '/settings', order: 90 },
+  { id: 'usage', label: '用量', to: '/usage', order: 40, icon: <BarChartOutlined /> },
+  { id: 'automations', label: '定时任务', to: '/automations', order: 50, icon: <ClockCircleOutlined /> },
 ]
-
 export function isGroup(entry: NavEntry): entry is NavGroup {
   return 'children' in entry
 }
 
-/** 一级叶子：`/conversations` 用前缀匹配（保留原顶栏语义）；其余精确匹配。 */
+/**
+ * 命中判定：按**路径段前缀**——`/conversations/abc` 命中 `/conversations`，
+ * `/settings/agents` 命中 `/settings`（设置区内分节，左栏入口仍要高亮）。
+ * 用段边界而不是裸 `startsWith`：`/settings-x` 不该命中 `/settings`。
+ */
 export function isEntryActive(pathname: string, entry: NavEntry): boolean {
   if (isGroup(entry)) {
     if (isPathActive(pathname, entry.to)) return true
@@ -72,13 +90,12 @@ export function activeChildOf(pathname: string, group: NavGroup): NavLeaf | unde
 }
 
 function isPathActive(pathname: string, to: string): boolean {
-  if (to === '/conversations') return pathname.startsWith('/conversations')
-  return pathname === to
+  return pathname === to || pathname.startsWith(`${to}/`)
 }
 
 /**
- * 左栏上下文：决定是否渲染会话区。
- * 本期只有问答上下文渲染会话列表（设计 §关键逻辑：管理页不挂无关列表）。
+ * 左栏/页面上下文：**只**用于状态条上那句会话语义提示（"问答会话绑定唯一 Agent…"只在问答页有意义）。
+ * 会话区不由此判定——它常驻左栏（切页不跳版），不随路由出现或消失。
  */
 export function railContextOf(pathname: string): 'chat' | 'extensions' | 'manage' {
   if (pathname.startsWith('/conversations')) return 'chat'

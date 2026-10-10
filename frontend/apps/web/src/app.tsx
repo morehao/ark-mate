@@ -5,15 +5,15 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
 import { consoleStyleSheet } from './console.css'
 import { NavRail } from './components/NavRail'
+import { StatusBar } from './components/StatusBar'
+import { SettingsDialog } from './components/settings/SettingsDialog'
 import { NAV_ENTRIES, isEntryActive } from './console/navView'
 import { useMate } from './store'
 import { ChatPage } from './pages/ChatPage'
-import { AgentsPage } from './pages/AgentsPage'
 import { AutomationsPage } from './pages/AutomationsPage'
 import { OverviewPage } from './pages/extensions/OverviewPage'
 import { SkillsPage } from './pages/extensions/SkillsPage'
 import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
-import { SettingsPage } from './pages/SettingsPage'
 import { UsagePage } from './pages/UsagePage'
 
 function Manage({ children }: { children: ReactNode }) {
@@ -22,6 +22,21 @@ function Manage({ children }: { children: ReactNode }) {
       {children}
     </div>
   )
+}
+
+/**
+ * 设置深链接：设置已经不是页面了（左栏 footer 菜单 → 居中弹窗），但 `/settings`、`/settings/agents`、
+ * `/agents` 这些旧路径仍然可点。做法是**打开对应分节弹窗 + 落回问答页**——弹窗是覆盖层，底下总要有个页面，
+ * 而问答页是默认落点；旧书签因此不会静默落到问答页什么都不发生。
+ */
+function SettingsDeepLink({ section }: { section: string }) {
+  const openSettingsSection = useMate((s) => s.openSettingsSection)
+
+  useEffect(() => {
+    openSettingsSection(section)
+  }, [openSettingsSection, section])
+
+  return <Navigate to="/conversations" replace />
 }
 
 /** 窄屏顶条上的当前入口名（导航定义只有一份，这里不重复写别名）。 */
@@ -151,14 +166,6 @@ export function App() {
               }
             />
             <Route
-              path="/agents"
-              element={
-                <Manage>
-                  <AgentsPage />
-                </Manage>
-              }
-            />
-            <Route
               path="/usage"
               element={
                 <Manage>
@@ -174,18 +181,21 @@ export function App() {
                 </Manage>
               }
             />
-            <Route
-              path="/settings"
-              element={
-                <Manage>
-                  <SettingsPage />
-                </Manage>
-              }
-            />
+            {/* 设置已不是页面（左栏 footer 菜单 → 居中弹窗）。旧深链接仍然可用：
+                打开对应分节弹窗，然后落回问答页（弹窗是覆盖层，需要底下有个页面）。 */}
+            <Route path="/settings" element={<SettingsDeepLink section="general" />} />
+            <Route path="/settings/agents" element={<SettingsDeepLink section="agents" />} />
+            <Route path="/agents" element={<SettingsDeepLink section="agents" />} />
             <Route path="*" element={<Navigate to="/conversations" replace />} />
           </Routes>
         </div>
+
+        {/* 全局状态条：常驻每个页面（WS 状态在最右下角） */}
+        <StatusBar />
       </div>
+
+      {/* 设置分节的居中弹窗宿主（全局一份；开哪一节由 store.settingsSection 决定） */}
+      <SettingsDialog />
 
       {/* 全局 toast（错误/提示，轻量浮层） */}
       {toast && (

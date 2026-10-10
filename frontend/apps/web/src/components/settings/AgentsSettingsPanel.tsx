@@ -8,7 +8,7 @@ import {
   MedicineBoxOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
-import { agentStateMeta, Dot, PageContainer, Pill, tokens } from '@ark-mate/ui'
+import { agentStateMeta, Dot, Pill, tokens } from '@ark-mate/ui'
 import {
   agentDiagnostics,
   createAgent,
@@ -22,8 +22,8 @@ import {
   toErrorMessage,
 } from '@ark-mate/api'
 import type { Agent, AgentDiagnostics, NativePermissionMode, PermissionAction, Provider } from '@ark-mate/types'
-import { useMate } from '../store'
-import { parsePolicyTools, policyColor, policySummary } from '../console/policyView'
+import { useMate } from '../../store'
+import { parsePolicyTools, policyColor, policySummary } from '../../console/policyView'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 /** 种子判定：服务端权威字段（内置播种 dsh/opencode + 历史保留前缀 agent-）。 */
@@ -65,7 +65,7 @@ interface ProviderFormValues {
 }
 
 /** Agents 管理页（P2）：注册向导（definitions 持久化）+ 启停 + 热更新 + 删除 + provider 注入面。 */
-export function AgentsPage() {
+export function AgentsSettingsPanel() {
   const agents = useMate((s) => s.agents)
   const refreshAgents = useMate((s) => s.refreshAgents)
   const showToast = useMate((s) => s.showToast)
@@ -236,10 +236,12 @@ export function AgentsPage() {
   const providerOptions = providers.map((p) => p.id)
 
   return (
-    <PageContainer
-      title="Agents"
-      description="自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新 + 切换「当前 Agent」（新建会话与模型目录缺省都用它，选择落 definitions 目录 default.json）。下方 provider 档案供密钥注入（只写不读回）。"
-      extra={
+    <div className="fg-setsec">
+      <div className="fg-setsec-head">
+        <span className="fg-setsec-desc">
+          自定义 Agent 注册向导（不写代码新增，definitions 持久化）+ 启停/热更新 + 切换「当前 Agent」（新建会话与模型目录缺省都用它，选择落
+          definitions 目录 default.json）。下方 provider 档案供密钥注入（只写不读回）。
+        </span>
         <Space>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => { void refreshAgents(); void loadProviders() }}>
             刷新
@@ -248,8 +250,9 @@ export function AgentsPage() {
             注册 Agent
           </Button>
         </Space>
-      }
-    >
+      </div>
+
+      <div className="fg-setsec-card">
       {agents.length === 0 && (
         <div style={{ padding: 32, textAlign: 'center', color: tokens.textPlaceholder, fontSize: 13 }}>
           暂无 Agent（服务不可达或未播种）。检查后端 mate serve 是否在运行。
@@ -264,7 +267,10 @@ export function AgentsPage() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 12,
+              // 换行而非裁切：动作组（<Space>）是一个 flex item，放不下时整组折到第二行
+              flexWrap: 'wrap',
+              columnGap: 12,
+              rowGap: 8,
               padding: '12px 18px',
               borderBottom: i === agents.length - 1 ? 'none' : `1px solid ${tokens.border}`,
             }}
@@ -667,6 +673,7 @@ export function AgentsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </PageContainer>
+      </div>
+    </div>
   )
 }

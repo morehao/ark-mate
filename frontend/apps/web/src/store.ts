@@ -386,6 +386,10 @@ export interface MateState {
   drawerOpen: boolean
   /** 左栏「扩展」这类导航组的展开态（groupId → 是否展开；不落盘，刷新回默认）。 */
   navExpanded: Record<string, boolean>
+  /** 设置弹窗是否打开（设置既不是页面、也不再是左栏二级菜单：点一下直接开这一个弹窗）。 */
+  settingsOpen: boolean
+  /** 弹窗里当前选中的分节 id（不会为 null：关掉弹窗也保留，下次打开回到上次那一节）。 */
+  settingsSection: string
   /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
   railMode: 'active' | 'archived'
   /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
@@ -393,7 +397,6 @@ export interface MateState {
   /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
   token: string
   /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
-  tokenModalOpen: boolean
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
   /** 模型目录（当前 agent 的运行时会话配置项投影；null = 未加载）。 */
@@ -455,9 +458,13 @@ export interface MateActions {
   setDrawer: (open: boolean) => void
   /** 导航组展开/收起（左栏「扩展」）。 */
   setNavGroupExpanded: (groupId: string, expanded: boolean) => void
+  /** 打开设置弹窗（回到上次那一节；首次是「通用」）。 */
+  openSettings: () => void
+  /** 打开设置弹窗并直接切到某一节（深链接 / 401 自动弹出用）。id 见 console/settingsView.tsx。 */
+  openSettingsSection: (id: string) => void
+  closeSettings: () => void
   /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
   saveToken: (token: string) => void
-  setTokenModal: (open: boolean) => void
   /** C2：向服务端翻页加载更早的事件（before 游标），返回本页是否还有更早。 */
   loadOlder: (id: string) => Promise<boolean>
   /** P3 加载四态：hydration 超时兜底（仍无 snapshot/事件 → 退出加载态显示空态）。 */
@@ -481,9 +488,10 @@ export const initialState: MateState = {
   drawerOpen: false,
   // 空 = 没被用户切过：NavRail 按「当前路由是否命中该组」决定默认展开（见 navView.groupExpanded）
   navExpanded: {},
+  settingsOpen: false,
+  settingsSection: 'general',
   railMode: 'active',
   token: getToken(),
-  tokenModalOpen: false,
   historyStart: {},
   modelCatalog: null,
 }
@@ -494,11 +502,11 @@ const HISTORY_PAGE = 50
 let toastSeq = 0
 let transportRef: WsTransport | null = null
 
-// reportApiError：401（A6 令牌缺失/无效）时自动打开令牌弹窗，其余走 toast。
+// reportApiError：401（A6 令牌缺失/无效）时自动弹出「设置 → 访问令牌」那一节，其余走 toast。
 function reportApiError(err: unknown): void {
   if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
-    useMate.setState({ tokenModalOpen: true })
-    useMate.getState().showToast('需要访问令牌：请在顶栏「令牌」中填写 MATE_TOKEN')
+    useMate.getState().openSettingsSection('token')
+    useMate.getState().showToast('需要访问令牌：请在左栏「设置 → 访问令牌」中填写 MATE_TOKEN')
     return
   }
   useMate.getState().showToast(toErrorMessage(err))
@@ -626,6 +634,9 @@ export const useMate = create<MateStore>((set, get) => {
     setDrawer: (open) => set({ drawerOpen: open }),
 
     setNavGroupExpanded: (groupId, expanded) => set((s) => ({ navExpanded: setExpanded(s.navExpanded, groupId, expanded) })),
+    openSettings: () => set({ settingsOpen: true }),
+    openSettingsSection: (id) => set({ settingsOpen: true, settingsSection: id }),
+    closeSettings: () => set({ settingsOpen: false }),
 
     refreshAgents: async () => {
       try {
@@ -646,7 +657,7 @@ export const useMate = create<MateStore>((set, get) => {
     saveToken: (token) => {
       const v = token.trim()
       persistToken(v)
-      set({ token: v, tokenModalOpen: false })
+      set({ token: v })
       // 令牌变化必须重连 WS（凭据走带内首帧 attach，重连才会带上新值）并重新拉取数据。
       // 浏览器态的通道凭据就是它，因此要重解析一次载体配置再连。
       const t = ensureTransport()
@@ -656,9 +667,9 @@ export const useMate = create<MateStore>((set, get) => {
       })
       void get().refreshAgents()
       void get().refreshConversations()
+      get().closeSettings()
       get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
     },
-    setTokenModal: (open) => set({ tokenModalOpen: open }),
 
     boot: () => {
       // 载体接入（M1-8）：先问清"事件流打哪儿、通道凭据是什么"，再建常驻连接。

@@ -4,6 +4,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   InboxOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
   PushpinFilled,
@@ -18,7 +19,7 @@ import { automationIDFromOrigin, isAutomationOrigin } from '../console/automatio
 import type { MenuProps } from 'antd'
 import type { ConversationSearchHit, ConversationSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
 import { conversationSearch, exportConversations, messageSearch, toErrorMessage } from '@ark-mate/api'
-import { dedupeHits, exportDownloadName, exportSummary, roleLabel, sourceLabel } from '../console/searchView'
+import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
 import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
 import { agentNameOf, titleFor } from '../console/util'
@@ -185,34 +186,6 @@ export function ConversationPane({ onCreate }: Props) {
     setDrawer(false)
     jumpToAnchor(h.conversation_id, h.seq)
     navigate(`/conversations/${h.conversation_id}`)
-  }
-
-  // 导出当前视图全部会话（markdown）：多文件逐个下载（浏览器无目录写权限，逐个触发最稳）。
-  const exportVisible = async () => {
-    const ids = (railPage.visible ?? []).map((c) => c.id)
-    if (ids.length === 0) return
-    setExportBusy(true)
-    try {
-      const resp = await exportConversations(ids, 'markdown')
-      for (const f of resp.files) {
-        const blob = new Blob([f.content], { type: 'text/markdown;charset=utf-8' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = exportDownloadName(f.filename, f.conversation_id, f.format)
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        URL.revokeObjectURL(url)
-      }
-      showToast(
-        exportSummary(resp.exported, resp.total_bytes, resp.skipped ?? [], resp.files.filter((f) => f.truncated).length),
-      )
-    } catch (e) {
-      showToast(`导出失败：${toErrorMessage(e)}`)
-    } finally {
-      setExportBusy(false)
-    }
   }
 
   // 单会话导出（行内菜单）：markdown 单文件下载。
@@ -427,7 +400,8 @@ export function ConversationPane({ onCreate }: Props) {
         ? { key: 'restore', icon: <UndoOutlined />, label: '从归档恢复' }
         : { key: 'archive', icon: <InboxOutlined />, label: '归档' },
       { type: 'divider' },
-      { key: 'export', icon: <DownloadOutlined />, label: '导出 Markdown' },
+      // 单会话导出（批量导出已于 2026-10-10 按反馈撤掉：列表工具栏不再放导出）
+      { key: 'export', icon: exportBusy ? <LoadingOutlined /> : <DownloadOutlined />, label: '导出 Markdown', disabled: exportBusy },
     ]
     const onMenu: MenuProps['onClick'] = ({ key }) => {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
@@ -613,17 +587,6 @@ export function ConversationPane({ onCreate }: Props) {
             归档
           </ViewTab>
         </span>
-        <Button
-          size="small"
-          icon={<DownloadOutlined />}
-          loading={exportBusy}
-          disabled={railPage.visible.length === 0}
-          onClick={() => void exportVisible()}
-          title="导出当前列表全部会话（Markdown，逐个下载）"
-          style={{ borderRadius: 8 }}
-        >
-          导出
-        </Button>
         {!archivedView && (
           <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
             新建会话

@@ -56,11 +56,3 @@ export function exportDownloadName(filename: string, conversationId: string, for
   const ext = format === 'json' ? 'json' : format === 'text' ? 'txt' : 'md'
   return `${conversationId.slice(0, 8)}.${ext}`
 }
-
-/** 导出结果摘要文案（含 skipped 与截断提示，避免静默）。 */
-export function exportSummary(exported: number, totalBytes: number, skipped: string[], truncated: number): string {
-  const parts = [`已导出 ${exported} 个会话`, `${totalBytes} 字节`]
-  if (truncated > 0) parts.push(`${truncated} 个截断`)
-  if (skipped.length > 0) parts.push(`跳过 ${skipped.length} 个（无数据）`)
-  return parts.join(' · ')
-}

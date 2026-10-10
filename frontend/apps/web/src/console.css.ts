@@ -105,6 +105,14 @@ export const consoleStyleSheet = `
     gap: 8px;
     height: 32px;
     padding: 0 10px;
+    /* 导航项里既有 <NavLink>（a）也有 <button>（组行文字区 / footer 触发器）：
+       - 不重置背景，button 会带 UA 的 buttonface 底（#efefef），底部多出一块灰"区块"；
+       - 不重置 text-align，button 的 UA text-align:center 会把 flex:1 的 label 文字顶到该行中间，
+         图标与文字之间就出现一条大缝（2026-10-10 实测踩到）。 */
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
     border-radius: 8px;
     font-size: 13px;
     color: ${tokens.textSecondary};
@@ -115,6 +123,18 @@ export const consoleStyleSheet = `
   }
   .fg-navitem:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; font-weight: 600; }
+  /* 一级项图标：定宽 16 让所有文案左对齐；未选中比文案再弱一档，选中吃主色 */
+  .fg-navitem-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    font-size: 14.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-navitem:hover .fg-navitem-icon { color: ${tokens.textSecondary}; }
+  .fg-navitem.fg-on .fg-navitem-icon { color: ${tokens.primary}; }
   .fg-navitem-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fg-navitem-count { flex: none; font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textSecondary}; }
 
@@ -123,6 +143,9 @@ export const consoleStyleSheet = `
   .fg-navgroup-text {
     flex: 1;
     min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     height: 32px;
     padding: 0;
     border: 0;
@@ -187,43 +210,92 @@ export const consoleStyleSheet = `
     border-top: 1px solid ${tokens.border};
   }
 
-  /* 左栏 footer：WS 状态 + 令牌（原顶栏右侧的两个状态面） */
+  /* 左栏 footer：固定左下，点「设置」在**它上方**展开二级菜单（向上生长）。这一行只有「设置」一个入口
+     （令牌已收进设置菜单；WS 状态在窗口右下角的全局状态条，不重复一份）。
+     高度是 auto：菜单展开时 footer 变高、会话区（flex:1）相应让位，不需要浮层/portal。 */
   .fg-rail-foot {
     flex: none;
+    /* 兜底：会话区恒常驻（flex:1 已吃掉 free space），这里不产生位移；
+       万一某路由不渲染会话区，auto margin 仍会把 footer 顶到左栏底。 */
+    margin-top: auto;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 40px;
-    padding: 0 10px;
+    flex-direction: column;
     border-top: 1px solid ${tokens.border};
   }
-  .fg-rail-ws {
-    flex: 1;
-    min-width: 0;
-    display: inline-flex;
+  .fg-rail-footrow {
+    display: flex;
     align-items: center;
-    gap: 7px;
-    overflow: hidden;
-    white-space: nowrap;
-    font-family: ${tokens.fontMono};
-    font-size: 11.5px;
-    color: ${tokens.textSecondary};
+    justify-content: space-between;
+    gap: 8px;
+    height: 40px;
+    /* 与 .fg-nav-rail 同为 8px：设置图标与主导航图标同一条竖线 */
+    padding: 0 8px;
   }
-  .fg-rail-token {
+  .fg-rail-footrow .fg-navitem { flex: 1; min-width: 0; }
+
+  /* 设置弹窗（一体式）：左列分节列表 + 右列内容，各自滚动；换节时弹窗高矮不变。 */
+  .fg-setdlg {
+    display: flex;
+    height: min(64vh, 640px);
+  }
+  .fg-setdlg-nav {
+    flex: none;
+    width: 208px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 12px;
+    border-right: 1px solid ${tokens.border};
+    overflow-y: auto;
+  }
+  .fg-setdlg-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    color: ${tokens.textSecondary};
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-setdlg-item:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-setdlg-item.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-setdlg-icon {
     flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 4px 9px;
-    border: 1px solid ${tokens.border};
-    border-radius: 8px;
-    background: transparent;
+    justify-content: center;
+    width: 18px;
+    font-size: 15px;
     color: ${tokens.textPlaceholder};
-    font-size: 11.5px;
-    white-space: nowrap;
-    cursor: pointer;
   }
-  .fg-rail-token:hover { border-color: ${tokens.borderStrong}; color: ${tokens.text}; }
+  .fg-setdlg-item:hover .fg-setdlg-icon { color: ${tokens.textSecondary}; }
+  .fg-setdlg-item.fg-on .fg-setdlg-icon { color: ${tokens.primary}; }
+  .fg-setdlg-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .fg-setdlg-label { font-size: 13px; line-height: 1.4; }
+  .fg-setdlg-item.fg-on .fg-setdlg-label { font-weight: 600; }
+  .fg-setdlg-hint { font-size: 11px; line-height: 1.4; color: ${tokens.textPlaceholder}; }
+  .fg-setdlg-body { flex: 1; min-width: 0; padding-left: 20px; overflow-y: auto; }
+
+  /* 设置弹窗的内容体（每节共用）：顶部一句说明 + 右侧动作，下面一张白卡。 */
+  .fg-setsec { display: flex; flex-direction: column; gap: 12px; }
+  .fg-setsec-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .fg-setsec-desc { font-size: 12.5px; line-height: 1.6; color: ${tokens.textSecondary}; }
+  .fg-setsec-card {
+    border: 1px solid ${tokens.border};
+    border-radius: ${tokens.radiusMd};
+    background: ${tokens.surface};
+    overflow: hidden;
+  }
 
   .fg-visually-hidden {
     position: absolute;
@@ -253,6 +325,22 @@ export const consoleStyleSheet = `
 
   /* 移动端（≤920px）：左栏抽屉化（top 0——顶栏已撤，抽屉盖满全高） */
   @media (max-width: 920px) {
+    /* 窄屏设置弹窗：分节列表横过来当顶条，内容占满（hint 会折行把列表撑高，隐掉） */
+    .fg-setdlg { flex-direction: column; height: min(68vh, 560px); }
+    .fg-setdlg-nav {
+      width: auto;
+      flex-direction: row;
+      gap: 6px;
+      padding: 0 0 10px;
+      border-right: 0;
+      border-bottom: 1px solid ${tokens.border};
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    .fg-setdlg-item { flex: none; }
+    .fg-setdlg-hint { display: none; }
+    .fg-setdlg-body { padding: 12px 0 0; }
+
     .fg-burger { display: inline-flex; }
     .fg-mobilebar {
       display: flex;

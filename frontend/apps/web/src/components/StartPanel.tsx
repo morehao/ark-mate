@@ -29,7 +29,7 @@ const EXAMPLES = [
  * 新建会话面板（hero + 内嵌输入卡 + 示例指令）。
  * 未选中会话时的问答区就是这个面板——不再有独立的「开始问答」空态页，
  * 也不再单独占一条路由（`/conversations` 无 id 即新建）。新建固定用「当前 Agent」
- * （全局默认单例，可在 Agents 页切换——这里只如实标出身份 + 给出切换入口，不在此处做选择器）。
+ * （全局默认单例，可在「设置 · Agent 管理」切换——这里只如实标出身份 + 给出切换入口，不在此处做选择器）。
  */
 export function StartPanel() {
   const navigate = useNavigate()
@@ -153,7 +153,7 @@ export function StartPanel() {
 
         {/* Agent 列表已隐去：新建固定用「当前 Agent」，不在此展示可选 agent 选项卡。
             但「现在用的是哪个 agent」必须如实标出（否则面板上完全看不出身份），
-            并给出切换入口——切换本身在 Agents 页（这里是新建流程，不做 agent 选择器）。 */}
+            并给出切换入口——切换本身在设置区「Agent 管理」（新建流程不做 agent 选择器）。 */}
         {defaultAgent ? (
           <div
             style={{
@@ -169,7 +169,7 @@ export function StartPanel() {
             <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
               新建会话使用当前 Agent（会话与 Agent 一对一绑定）·
             </span>
-            <Link to="/agents" style={{ fontSize: 11.5, color: tokens.primary, textDecoration: 'none' }}>
+            <Link to="/settings/agents" style={{ fontSize: 11.5, color: tokens.primary, textDecoration: 'none' }}>
               切换 Agent
             </Link>
           </div>

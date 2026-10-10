@@ -11,7 +11,6 @@ import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
-import { StatusBar } from '../components/StatusBar'
 import { EntryView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
 import { agentOf, agentNameOf, titleFor } from '../console/util'
@@ -343,7 +342,7 @@ export function ChatPage() {
               }}
             >
               <InfoCircleOutlined />
-              该会话的 Agent「{activeSum.agent_id}」已不存在（历史仍可读，无法继续提问）：用同一 id 在 Agents 页重新注册即可继续，或导出历史另开新会话。
+              该会话的 Agent「{activeSum.agent_id}」已不存在（历史仍可读，无法继续提问）：用同一 id 在「设置 · Agent 管理」重新注册即可继续，或导出历史另开新会话。
             </div>
           )}
         </div>
@@ -617,7 +616,6 @@ export function ChatPage() {
           )}
         </section>
       </div>
-      <StatusBar />
       {activeId && (
         <ConversationDetailDrawer
           open={detailOpen}

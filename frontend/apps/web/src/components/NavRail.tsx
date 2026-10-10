@@ -1,7 +1,5 @@
-import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { DownOutlined, LockOutlined, RightOutlined, UnlockOutlined } from '@ant-design/icons'
-import { Button, Input, Modal } from 'antd'
+import { DownOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 import {
@@ -11,17 +9,19 @@ import {
   isChildActive,
   isEntryActive,
   isGroup,
-  railContextOf,
   type NavEntry,
   type NavGroup,
   type NavLeaf,
 } from '../console/navView'
+import { SETTINGS_MENU } from '../console/settingsView'
 import { ConversationPane } from './ConversationPane'
 
 /**
- * 常驻左栏（唯一导航面）：品牌 + 一级/二级导航 + 会话区 + 状态 footer。
+ * 常驻左栏（唯一导航面）：品牌 + 一级/二级导航 + 会话区 + footer。
+ * footer 只有「设置」一个入口：点一下直接开设置弹窗（分节在弹窗内切，含原来的「令牌」——
+ * 见 console/settingsView.tsx 与 components/settings/SettingsDialog.tsx）。
  *
- * 纪律：导航条目只在 `console/navView.ts` 定义；交互态（hover / 选中 / 展开）只在
+ * 纪律：导航条目只在 `console/navView.tsx` 定义；交互态（hover / 选中 / 展开）只在
  * `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类里；本组件不写新的样式单。
  */
 export function NavRail() {
@@ -34,20 +34,9 @@ export function NavRail() {
   const setNavGroupExpanded = useMate((s) => s.setNavGroupExpanded)
   const conversations = useMate((s) => s.conversations)
 
-  const wsState = useMate((s) => s.wsState)
-  const token = useMate((s) => s.token)
-  const tokenModalOpen = useMate((s) => s.tokenModalOpen)
-  const saveToken = useMate((s) => s.saveToken)
-  const setTokenModal = useMate((s) => s.setTokenModal)
-  const [draft, setDraft] = useState(token)
-
-  // 弹窗打开时同步当前令牌（外部清除后再次打开不应显示旧值）。
-  useEffect(() => {
-    if (tokenModalOpen) setDraft(token)
-  }, [tokenModalOpen, token])
+  const openSettings = useMate((s) => s.openSettings)
 
   const pathname = location.pathname
-  const showsConversations = railContextOf(pathname) === 'chat'
 
   // 左栏的「新建会话」：问答区落回新建面板（原 ConversationRail 的 onCreate 语义）。
   const openNew = () => {
@@ -104,7 +93,8 @@ export function NavRail() {
               leave()
             }}
           >
-            {group.label}
+            <span className="fg-navitem-icon">{group.icon}</span>
+            <span className="fg-navitem-label">{group.label}</span>
           </button>
           <button
             type="button"
@@ -138,6 +128,7 @@ export function NavRail() {
         aria-current={on ? 'page' : undefined}
         onClick={leave}
       >
+        <span className="fg-navitem-icon">{entry.icon}</span>
         <span className="fg-navitem-label">{entry.label}</span>
         {entry.id === 'chat' && conversations.length > 0 && (
           <span className="fg-navitem-count">{String(conversations.length).padStart(2, '0')}</span>
@@ -145,15 +136,6 @@ export function NavRail() {
       </NavLink>
     )
   }
-
-  const wsMeta =
-    wsState === 'open'
-      ? { color: tokens.success, text: 'WS 已连接' }
-      : wsState === 'connecting'
-        ? { color: tokens.primary, text: '连接中…', pulse: true }
-        : wsState === 'closed'
-          ? { color: tokens.error, text: 'WS 断开' }
-          : { color: tokens.textPlaceholder, text: 'WS 未连接', pulse: false }
 
   return (
     <aside className={`fg-rail${drawerOpen ? ' fg-open' : ''}`} aria-label="主导航">
@@ -165,57 +147,28 @@ export function NavRail() {
         {NAV_ENTRIES.map(renderEntry)}
       </nav>
 
-      {showsConversations && <ConversationPane onCreate={openNew} />}
+      {/* 会话区常驻：不随路由出现/消失（切页不跳版），点会话/新建会话自带跳转到问答页 */}
+      <ConversationPane onCreate={openNew} />
 
       <div className="fg-rail-foot">
-        <span className="fg-rail-ws">
-          <span
-            className={wsMeta.pulse ? 'fg-anim-pulse' : undefined}
-            style={{ flex: 'none', width: 7, height: 7, borderRadius: '50%', background: wsMeta.color, display: 'inline-block' }}
-          />
-          {wsMeta.text}
-        </span>
-
-        {/* A6 单操作员令牌：后端启用鉴权时此处设置；未设置时按钮呈灰色提示 */}
-        <button
-          type="button"
-          className="fg-rail-token"
-          onClick={() => setTokenModal(true)}
-          title={token ? '已配置访问令牌（点击修改/清除）' : '未配置访问令牌（后端启用 MATE_TOKEN 时必填）'}
-        >
-          {token ? <LockOutlined style={{ fontSize: 12 }} /> : <UnlockOutlined style={{ fontSize: 12 }} />}
-          令牌
-        </button>
+        {/* 固定左下：设置（全局配置，不跟内容导航抢位置，也不随窗口高度被挤走）。
+            点一下**直接**开设置弹窗——分节在弹窗内切（不再有左栏二级菜单那一跳）。 */}
+        <div className="fg-rail-footrow">
+          <button
+            type="button"
+            className="fg-navitem"
+            aria-haspopup="dialog"
+            aria-label={SETTINGS_MENU.label}
+            onClick={() => {
+              openSettings()
+              leave()
+            }}
+          >
+            <span className="fg-navitem-icon">{SETTINGS_MENU.icon}</span>
+            <span className="fg-navitem-label">{SETTINGS_MENU.label}</span>
+          </button>
+        </div>
       </div>
-
-      <Modal
-        title="访问令牌（单操作员）"
-        open={tokenModalOpen}
-        onCancel={() => setTokenModal(false)}
-        onOk={() => saveToken(draft)}
-        okText="保存并重连"
-        cancelText="取消"
-        width={460}
-      >
-        <div style={{ fontSize: 12.5, lineHeight: 1.8, color: tokens.textSecondary, marginBottom: 10 }}>
-          后端以 <code style={{ fontFamily: tokens.fontMono }}>MATE_TOKEN</code>（或
-          <code style={{ fontFamily: tokens.fontMono }}> .ark-mate/config</code> 的 <code>token</code>）启用鉴权后，
-          除 <code>/health</code> 外的所有接口都需要该令牌。令牌只保存在本浏览器（localStorage），
-          不会写入 URL 或日志。
-        </div>
-        <Input.Password
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPressEnter={() => saveToken(draft)}
-          placeholder="粘贴 MATE_TOKEN；留空 = 清除"
-          autoComplete="off"
-        />
-        <div style={{ marginTop: 10 }}>
-          <Button size="small" onClick={() => saveToken('')} disabled={!token && !draft}>
-            清除令牌
-          </Button>
-        </div>
-      </Modal>
     </aside>
   )
 }

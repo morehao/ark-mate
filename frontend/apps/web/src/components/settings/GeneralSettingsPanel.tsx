@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { DeleteOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { PageContainer, tokens } from '@ark-mate/ui'
+import { tokens } from '@ark-mate/ui'
 import { getWorkspaceSettings, toErrorMessage, updateWorkspaceSettings } from '@ark-mate/api'
 import type { WorkspaceSettings } from '@ark-mate/types'
-import { useMate } from '../store'
-import { WorkspaceBrowser } from '../components/WorkspaceBrowser'
+import { useMate } from '../../store'
+import { WorkspaceBrowser } from '../WorkspaceBrowser'
+import { CardHeader } from './CardHeader'
 
 /**
- * 设置页（Settings）——目前只有一节：**工作区目录白名单**。
+ * 设置 · 通用（工作区目录白名单）——**作为居中弹窗的内容体**渲染。
+ *
+ * 设置不是页面：左栏 footer 的「设置」点开二级菜单，菜单项点开这个居中的 Modal
+ * （见 `settings/SettingsModals.tsx`）。所以这里只出内容，不再自带 PageContainer 骨架。
  *
  * 这一节要解决的实际痛点不是"能不能改"，而是"改了到底算不算数"：白名单的最终来源可能是
  * `config.json`，也可能是优先级更高的 env 文件 / 进程 `MATE_*` / CLI flag。后者存在时写
@@ -18,7 +22,7 @@ import { WorkspaceBrowser } from '../components/WorkspaceBrowser'
  * 另一条容易误解的语义也在界面上说明：**平台代建目录恒在生效名单内**（`provision_included`），
  * 它不是用户配的、也删不掉；`configured` 才是这里可编辑的那一份。
  *
- * 自定义 Agent / provider 配置不在这里（那是「Agents」页的职责），避免同一个设置有两个入口。
+ * 自定义 Agent / provider 配置不在这里（那是同级「Agent 管理」的职责），避免同一个设置有两个入口。
  */
 
 /** 计划中的能力（本页曾以静态清单承载，保留以免信息丢失；权威清单见 docs/design-and-roadmap.md §5.3）。 */
@@ -40,22 +44,12 @@ const SOURCE_LABEL: Record<string, string> = {
 
 const mono = { fontFamily: tokens.fontMono, fontSize: 12.5 } as const
 
-function CardHeader({ title, hint, extra }: { title: string; hint: string; extra?: ReactNode }) {
-  return (
-    <header style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: `1px solid ${tokens.border}` }}>
-      <b style={{ fontSize: 13.5, fontWeight: 600 }}>{title}</b>
-      <span style={{ flex: 1, fontSize: 11.5, color: tokens.textPlaceholder }}>{hint}</span>
-      {extra}
-    </header>
-  )
-}
-
 /** 是否绝对路径（与 WorkspacePicker 同规则：POSIX / UNC / Windows 盘符）——只做本地预检，真校验在服务端。 */
 function isAbsolutePath(p: string): boolean {
   return p.startsWith('/') || p.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(p)
 }
 
-export function SettingsPage() {
+export function GeneralSettingsPanel() {
   const showToast = useMate((s) => s.showToast)
   const [snap, setSnap] = useState<WorkspaceSettings | null>(null)
   const [draft, setDraft] = useState<string[]>([])
@@ -120,15 +114,17 @@ export function SettingsPage() {
     : '平台代建已关闭（workspace_dir 为空）：新建会话必须显式指定工作目录'
 
   return (
-    <PageContainer
-      title="设置"
-      description="目录白名单决定「哪些目录能被当作工作空间」——它同时约束新建会话的 cwd 与面板里的目录浏览。自定义 Agent / provider 配置在「Agents」页。"
-      extra={
+    <div className="fg-setsec">
+      <div className="fg-setsec-head">
+        <span className="fg-setsec-desc">
+          目录白名单决定「哪些目录能被当作工作空间」——它同时约束新建会话的 cwd 与面板里的目录浏览。
+        </span>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
           刷新
         </Button>
-      }
-    >
+      </div>
+
+      <div className="fg-setsec-card">
       <CardHeader
         title="工作区目录白名单"
         hint={snap == null ? '读取中…' : snap.restricted ? '受限：只有名单内的目录可浏览、可作为工作空间' : '不限制：任意可读目录都可浏览与使用'}
@@ -269,6 +265,7 @@ export function SettingsPage() {
           />
         </Modal>
       )}
-    </PageContainer>
+      </div>
+    </div>
   )
 }
