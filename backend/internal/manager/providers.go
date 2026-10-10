@@ -45,6 +45,14 @@ type providerDef struct {
 	KeyRef string `json:"key_ref,omitempty"`
 	// keyErr 装载时解密失败的原因（CredentialProblem 据此给出可执行出路，不静默降级）。
 	keyErr error `json:"-"`
+	// Body 载体里读到的**原始键值**（除 `key` 与 `id` 外的全部键，含历史 `model` 与未知键）。
+	//
+	// sqlite 模式下它就是 `providers` 行的 body：写面把它原样提交回去，未知键因此不丢（P6）。
+	// memory 模式下它由文件内容重建——文件载体是定形结构体，未知键在那边**本来就丢**，
+	// 不在 v11 的语义变更范围里。
+	Body map[string]any `json:"-"`
+	// Revision 载体里的行版本（sqlite = `providers.revision`；memory = 0，文件载体没有版本号）。
+	Revision int64 `json:"-"`
 }
 
 // providerFile providers.json 的磁盘形状。
@@ -127,6 +135,15 @@ func (s *Service) loadProvidersFile(dir string) {
 			continue
 		}
 		p := &providerDef{ID: id, Type: d.Type, Model: d.Model}
+		// 文件载体的 body 由定形结构体**重建**（未知键在文件里本来就被丢掉了，P6）：这一步只为让
+		// sqlite 与 memory 两条路在内存里同形，**不改变文件载体的既有语义**。
+		p.Body = map[string]any{}
+		if d.Type != "" {
+			p.Body["type"] = d.Type
+		}
+		if d.Model != "" {
+			p.Body["model"] = d.Model
+		}
 		switch {
 		case d.Key != "":
 			// 旧明文档案 → 迁移（Put 幂等；覆盖写同一 ref）。
@@ -141,9 +158,11 @@ func (s *Service) loadProvidersFile(dir string) {
 				break
 			}
 			p.Key, p.KeyRef = d.Key, ref
+			p.Body["key_ref"] = ref
 			migrated++
 		case d.KeyRef != "":
 			p.KeyRef = d.KeyRef
+			p.Body["key_ref"] = d.KeyRef
 			if st == nil {
 				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", d.KeyRef, vaultUnavailable(verr))
 				slog.Warn("providers: 有密文但 vault 不可用", "provider", id, "ref", d.KeyRef, "err", p.keyErr)
@@ -228,7 +247,7 @@ func (s *Service) ListProviders() ([]dtoprovider.ProviderResp, error) {
 }
 
 // UpdateProvider upsert 档案：type/model 指针更新、key 非 nil 即覆盖/清除（空串 = 清除 ref + 密文）。
-func (s *Service) UpdateProvider(_ context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
+func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
 	if id == "" {
 		return nil, acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
 	}
@@ -296,7 +315,7 @@ func (s *Service) UpdateProvider(_ context.Context, id string, patch dtoprovider
 				"密钥密文删除失败: "+err.Error(), nil)
 		}
 	}
-	if err := s.persistProvidersFile(); err != nil {
+	if err := s.persistProviderDefinition(ctx, d); err != nil {
 		return nil, err
 	}
 	return &dtoprovider.ProviderResp{ID: id, Type: d.Type, Model: d.Model, HasKey: d.Key != "" || d.KeyRef != ""}, nil

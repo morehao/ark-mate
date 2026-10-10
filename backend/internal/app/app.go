@@ -235,6 +235,22 @@ func (a *App) Init(ctx context.Context) error {
 				"dir", imp.Dir, "automations", imp.Automations, "inserted", imp.Inserted,
 				"existing", imp.Existing, "invalid", imp.Invalid)
 		}
+		// provider 档案一次性导入（v11，设置 · 模型）：与上面三个域**同一次触发**（v11 之后 DB 才是
+		// 档案的事实源，而存量档案还在 `<AgentDir>/providers.json` 里），也要发生在 loadDefinitions
+		// 之前——**agent 装载要能引用到它**（`CredentialProblem` 的悬空引用判据在装载/拨号两条路上）。
+		//
+		// 与其余三个域的两处形态差异：① 幂等依据是**文件内容指纹**（整个域只有一个文件，而它的内容
+		// 就是全部事实）；② 迁移前**备份** `providers.json.bak-v11`（这是全篇唯一一个不可逆动作——
+		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
+		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.AgentDir,
+			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+			slog.Warn("serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
+				"err", iErr, "dir", cfg.AgentDir)
+		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
+			slog.Info("serve: 存量 provider 档案导入完成",
+				"dir", imp.Dir, "providers", imp.Providers, "inserted", imp.Inserted,
+				"existing", imp.Existing, "backup", imp.Backup, "plaintext_left", imp.Plaintext)
+		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
 			slog.Warn("serve: 从持久层恢复失败", "err", rErr)

@@ -56,6 +56,11 @@ const (
 	// 与 MetaKeyImportedCapabilities/MetaKeyImportedAgents 同构：装配期**一次性幂等**导入
 	// （文件时代 → providers 表）的判据，只跑一次。文件**不删也不回写**（设计「数据迁移与校验」）。
 	MetaKeyImportedProviders = "imported_providers"
+	// MetaKeyProvidersImportMismatch provider 导入**对账不一致**的事实（value = 逐行描述）。
+	//
+	// 对账不一致**不阻断启动**（档案数量是几十条，不一致应当被人看见，而不是被静默放过或
+	// 直接拒绝启动），所以它必须落成一个可被 `mate doctor` 读到的持久事实；一致时写空串清除。
+	MetaKeyProvidersImportMismatch = "providers_import_mismatch"
 	// MetaKeyRuntimeConfigDigest 运行时配置文件的物化摘要（T5）。
 	//
 	// value 是 JSON：`{"<runtime>": {"digest":..., "generated_at":..., "generator_version":...}}`。

@@ -94,7 +94,11 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 		slog.Info("agents: definitions 已加载", "count", loaded, "dir", dir)
 	}
 	// provider 档案（同目录 providers.json）随 definitions 一并装载。
-	s.loadProvidersFile(dir)
+	//
+	// 这条路按契约只在 memory 模式（无持久层）被调用，sqlite 模式走
+	// `LoadAgentDefinitionsFromStore`——所以这里给的 ctx 不会被用到（`loadProviders`
+	// 只在 `s.st != nil` 时才读它）。不把 ctx 加上函数签名是为了不动 5 处调用点。
+	s.loadProviders(context.Background(), dir)
 	// 「当前 Agent」的显式选择（同目录 default.json）在定义装载后解析（需先有 agent 才可校验）。
 	s.loadDefaultAgentFile(dir)
 	return loaded
@@ -174,9 +178,9 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 	if loaded > 0 {
 		slog.Log(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
 	}
-	// provider 档案与「当前 Agent」仍在文件/独立键上：前者是目录级配置（providers.json），
-	// 后者落 meta（计划 §7 P-8）。
-	s.loadProvidersFile(dir)
+	// provider 档案按持久层模式装载（sqlite = providers 表 / memory = 同目录 providers.json），
+	// 「当前 Agent」的显式选择落 meta（计划 §7 P-8）。
+	s.loadProviders(ctx, dir)
 	s.loadDefaultAgentFromStore(ctx)
 	return loaded
 }
