@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— agent 定义读写面的**载体**（M6-6） ———
@@ -216,7 +216,7 @@ func (s *Service) readDefaultAgent(ctx context.Context) string {
 	if s.st != nil {
 		id, ok, err := s.st.GetDefaultAgentID(ctx)
 		if err != nil {
-			slog.Warn("agents: 读 meta.default_agent 失败，回落内置默认", "err", err)
+			glog.Warnw(ctx, "agents: 读 meta.default_agent 失败，回落内置默认", "err", err)
 			return ""
 		}
 		if !ok {
@@ -239,7 +239,7 @@ func (s *Service) writeDefaultAgent(ctx context.Context, id string) error {
 func (s *Service) clearDefaultAgent(ctx context.Context) {
 	if s.st != nil {
 		if err := s.st.ClearDefaultAgentID(ctx); err != nil {
-			slog.Warn("agents: 清除 meta.default_agent 失败", "err", err)
+			glog.Warnw(ctx, "agents: 清除 meta.default_agent 失败", "err", err)
 		}
 		return
 	}
@@ -262,6 +262,6 @@ func (s *Service) loadDefaultAgentFromStore(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	if !ok {
-		slog.Warn("agents: 当前 Agent 指向未注册 agent，本次回落内置默认", "agent", id)
+		glog.Warnw(ctx, "agents: 当前 Agent 指向未注册 agent，本次回落内置默认", "agent", id)
 	}
 }

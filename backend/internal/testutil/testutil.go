@@ -18,6 +18,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	// 测试夹具在这里注册 glog 的 zap driver：本仓的日志出口归装配根
+	// （cmd/mate 的匿名引入），但 test 二进制不含 cmd/mate，任何打开 DB 的测试
+	// （store.Open → dbclient.Open → dbgorm.New → glog.NewLogger）都需要它，
+	// 否则会以 "unknown LoggerType zap" 失败。与 ark-go-starter 的 pkg/testsetup 同一分工。
+	_ "github.com/morehao/golib/glog/driver/zap"
+
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )

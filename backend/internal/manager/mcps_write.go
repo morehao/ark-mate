@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— M2-3：MCP server 定义的写面 ———
@@ -114,7 +114,7 @@ func (s *Service) writeMcp(ctx context.Context, pathID string, req dtocapability
 	}
 	// 提交成功后才入表：同一份定义刚过闸门（纯函数），这一次必然成功（详见 skills_write.go）。
 	if err := s.caps.RegisterMcpServer(&m); err != nil {
-		slog.Warn("capability: mcp 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
+		glog.Warnw(ctx, "capability: mcp 定义已提交但入表失败（内存视图可能落后）", "id", id, "err", err)
 	}
 
 	resp := &dtocapability.McpWriteResp{

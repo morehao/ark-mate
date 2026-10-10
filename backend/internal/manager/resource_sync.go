@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 同步编排（M4）：读资源 → 组 Set → 逐 runtime 调端口 → 记摘要 → 回带 Outcome ———
@@ -68,7 +68,7 @@ func (s *Service) loadRuntimeConfigDigests(ctx context.Context) {
 	}
 	raw, ok, err := s.st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest)
 	if err != nil {
-		slog.Warn("runtime sync: 读 meta.runtime_config_digest 失败", "err", err)
+		glog.Warnw(ctx, "runtime sync: 读 meta.runtime_config_digest 失败", "err", err)
 		return
 	}
 	digests := map[string]string{}
@@ -76,7 +76,7 @@ func (s *Service) loadRuntimeConfigDigests(ctx context.Context) {
 	if ok && raw != "" {
 		var m map[string]runtimeConfigDigestEntry
 		if err := json.Unmarshal([]byte(raw), &m); err != nil {
-			slog.Warn("runtime sync: meta.runtime_config_digest 解析失败（本次按未同步处理）", "err", err)
+			glog.Warnw(ctx, "runtime sync: meta.runtime_config_digest 解析失败（本次按未同步处理）", "err", err)
 		}
 		for rt, e := range m {
 			if e.GeneratorVersion != runtimeConfigGeneratorVersion {
@@ -338,7 +338,7 @@ func (s *Service) applyCredentialChannel(
 			// 原生通道：**平台不注入同名 env**（否则 env 会遮蔽文档，轮换静默失效）。
 			for _, p := range set.Providers {
 				if err := s.reg.DeliveryFor(spec.ID).SetEnv(p.Ref, ""); err != nil {
-					slog.Warn("runtime sync: 撤销凭据 env 失败", "runtime", spec.ID, "ref", p.Ref, "err", err)
+					glog.Warnw(context.Background(), "runtime sync: 撤销凭据 env 失败", "runtime", spec.ID, "ref", p.Ref, "err", err)
 				}
 			}
 			return credentialPlan{
@@ -558,7 +558,7 @@ func (s *Service) trySyncModels(ctx context.Context) string {
 	for _, id := range ids {
 		o, serr := s.SyncRuntime(ctx, id)
 		if serr != nil {
-			slog.Warn("runtime sync: 写面后的同步失败（资源已保存，交付未更新）", "runtime", id, "err", serr)
+			glog.Warnw(ctx, "runtime sync: 写面后的同步失败（资源已保存，交付未更新）", "runtime", id, "err", serr)
 			notes = append(notes, "⚠ 已保存，但同步失败（"+serr.Error()+"）：重试 POST /models/sync")
 			continue
 		}

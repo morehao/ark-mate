@@ -1,13 +1,15 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // 会话 wire transcript JSONL（M1 #5，对齐 codeg acp_transcript.rs，§5.3/§5.7）：
@@ -58,7 +60,6 @@ type wireTranscriptLine struct {
 // transcriptRecorder 按 conversation 维护打开的 JSONL 文件（单写者：publish 串行路径）。
 type transcriptRecorder struct {
 	dir string
-	log *slog.Logger
 
 	mu     sync.Mutex
 	open   map[string]*os.File
@@ -69,7 +70,6 @@ type transcriptRecorder struct {
 func newTranscriptRecorder(dir string) *transcriptRecorder {
 	return &transcriptRecorder{
 		dir:    dir,
-		log:    slog.Default(),
 		open:   make(map[string]*os.File),
 		failed: make(map[string]bool),
 	}
@@ -92,7 +92,7 @@ func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd strin
 	path := filepath.Join(r.dir, conversationID+".jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		r.log.Warn("transcript: open failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "transcript: open failed", "conversation", conversationID, "err", err)
 		r.markFailedLocked(conversationID)
 		return
 	}
@@ -112,7 +112,7 @@ func (r *transcriptRecorder) begin(conversationID, agentID, runtimeID, cwd strin
 	if stErr != nil || st.Size() == 0 {
 		if err := writeJSONLine(f, h); err != nil {
 			_ = f.Close()
-			r.log.Warn("transcript: header write failed", "conversation", conversationID, "err", err)
+			glog.Warnw(context.Background(), "transcript: header write failed", "conversation", conversationID, "err", err)
 			r.markFailedLocked(conversationID)
 			return
 		}
@@ -133,7 +133,7 @@ func (r *transcriptRecorder) appendLine(conversationID string, seq int64, typ st
 		return
 	}
 	if err := writeJSONLine(f, line); err != nil {
-		r.log.Warn("transcript: append failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "transcript: append failed", "conversation", conversationID, "err", err)
 		_ = f.Close()
 		delete(r.open, conversationID)
 		r.markFailedLocked(conversationID)

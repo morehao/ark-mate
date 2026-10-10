@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— M3-6：轮次边界的代际迁移（ADR-13） ———
@@ -163,7 +164,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 	case genActionKeep:
 		return as, nil
 	case genActionDefer:
-		o.logger.Info("代际迁移顺延", "conversation", as.ID, "from", plan.From, "to", plan.To, "reason", plan.Reason)
+		glog.Infow(ctx, "代际迁移顺延", "conversation", as.ID, "from", plan.From, "to", plan.To, "reason", plan.Reason)
 		return as, nil
 	}
 
@@ -183,7 +184,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 	switch plan.Action {
 	case genActionSwitch:
 	case genActionDefer:
-		o.logger.Info("代际迁移顺延", "conversation", as.ID, "reason", plan.Reason)
+		glog.Infow(ctx, "代际迁移顺延", "conversation", as.ID, "reason", plan.Reason)
 		return as, nil
 	default:
 		return as, nil
@@ -212,7 +213,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 	if err != nil {
 		if plan.PermChanged {
 			// 缩权面变化 + 建不起新代际 → **不回退**（旧进程 = 已被收回的权限面）。
-			o.logger.Warn("权限/能力面已收窄但新代际建不起来：本轮不发（不使用被收回的权限面继续跑）",
+			glog.Warnw(ctx, "权限/能力面已收窄但新代际建不起来：本轮不发（不使用被收回的权限面继续跑）",
 				"conversation", as.ID, "runtime", as.Runtime, "from", plan.From, "to", plan.To, "err", err)
 			return nil, acl.NewError(acl.ClassLimit, "generation_switch_required",
 				fmt.Sprintf("会话的权限或能力面已变更（%s），但新代际此刻无法建立：本轮未发出——不会用已经收回的权限面继续跑。请稍后重试（%s）",
@@ -222,7 +223,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 		o.noteGenerationFallback(as.AgentID, as.ID, as.Runtime, plan.From, plan.To, err)
 		return as, nil
 	}
-	o.logger.Info("代际迁移完成", "conversation", as.ID, "runtime", spec.ID,
+	glog.Infow(ctx, "代际迁移完成", "conversation", as.ID, "runtime", spec.ID,
 		"from", plan.From, "to", plan.To, "perm_changed", plan.PermChanged,
 		"provider_session", next.providerID)
 	o.attachConversation(next, "generation")
@@ -230,7 +231,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 	// 已经不该存在的权限/能力面，留着它既占内存又违反"缩权立刻生效"的直觉。
 	// 仍有别的会话引用时不动它（那些会话会在自己的下一个轮次边界迁走）。
 	if o.reclaimGeneration(oldRC) {
-		o.logger.Info("代际迁移后回收旧代际（已无人引用）", "key", plan.From)
+		glog.Infow(ctx, "代际迁移后回收旧代际（已无人引用）", "key", plan.From)
 	}
 	return next, nil
 }
@@ -240,7 +241,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 // 刻意**不**发事件、**不**改会话状态：用户这一轮照常发出去（可用性优先），"能力还没换过来"
 // 是运维/诊断层面的事实，不是会话的终态。
 func (o *Orchestrator) noteGenerationFallback(agentID, conversationID, runtimeID, from, to string, cause error) {
-	o.logger.Warn("代际迁移失败：回退旧代际继续跑",
+	glog.Warnw(context.Background(), "代际迁移失败：回退旧代际继续跑",
 		"conversation", conversationID, "runtime", runtimeID,
 		"from", from, "to", to, "err", cause)
 	ae := acl.NewError(acl.ClassConnection, "generation_switch_failed",

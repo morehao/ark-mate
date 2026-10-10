@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 远程 ACP 传输（A5）：把「一个远程 ACP server 端点」适配成 Transport ———
@@ -93,7 +93,6 @@ func NewRemoteTransport(spec RemoteSpec) (Transport, error) {
 		endpoint:   u.String(),
 		headers:    spec.Headers,
 		dialTimout: timeout,
-		logger:     slog.Default(),
 		outR:       nil,
 	}, nil
 }
@@ -104,7 +103,6 @@ type remoteTransport struct {
 	endpoint   string
 	headers    map[string]string
 	dialTimout time.Duration
-	logger     *slog.Logger
 
 	startOnce sync.Once
 	closeOnce sync.Once
@@ -132,13 +130,6 @@ type remoteTransport struct {
 }
 
 var _ Transport = (*remoteTransport)(nil)
-
-// SetLogger 设置诊断日志目标（默认 slog.Default）。
-func (t *remoteTransport) SetLogger(l *slog.Logger) {
-	if l != nil {
-		t.logger = l
-	}
-}
 
 // Start 建立远端连接并启动收发协程。ctx 仅用于建连与后续读循环的生命周期。
 func (t *remoteTransport) Start(ctx context.Context) error {
@@ -402,7 +393,8 @@ func (t *remoteTransport) recordTail(line string) {
 		t.tail = append(t.tail, line)
 	}
 	t.mu.Unlock()
-	t.logger.Info("remote transport", "kind", t.kind, "endpoint", t.endpoint, "line", line)
+	// 行可能来自读循环 goroutine，没有可用的请求 ctx。
+	glog.Infow(context.Background(), "remote transport", "kind", t.kind, "endpoint", t.endpoint, "line", line)
 }
 
 // Stdin 返回客户端写入端（Start 之后可用）。

@@ -16,7 +16,7 @@ import (
 // （`definition_changed`）在 DB 载体下的唯一判据来源：今天它由 mtime+size 承担，
 // 换成 `rowsAffected == 0` 之后，对外表现必须逐字不变。
 func TestCapabilityDefinitionCAS(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 
 	// —— 新建（expectedRev=0）——
@@ -174,7 +174,7 @@ func digestOf(body string) string {
 //
 // 所以这张表的列集合是**冻结形态**，不是"可以顺手再加列"的许可。
 func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	want := map[string][]string{
 		model.TableSkill:              {"id", "body", "revision", "updated_at"},
 		model.TableMcpServer:          {"id", "body", "revision", "updated_at"},
@@ -218,7 +218,7 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 // 被串行化——这正是它的部署形态。要验的不是"SQLite 能并发写"，而是"计数器与插行是同一个
 // 原子动作"：若有人把 seq 改成"先查 MAX 再插"（两步），这里就会看到重复或空洞。
 func TestCapabilityRevisionConcurrentAppend(t *testing.T) {
-	s := openMem(t)
+	s := openTestDB(t)
 	ctx := ctxT()
 
 	const n = 40

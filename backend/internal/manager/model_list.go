@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 应用层模型清单的写面（v12）：CRUD + **单一**默认模型 + 同步触发 ———
@@ -423,7 +423,7 @@ func (s *Service) defaultModelByRuntime(ctx context.Context) map[string]string {
 	}
 	row, ok, err := s.defaultModelRow(ctx)
 	if err != nil {
-		slog.Warn("models: 读默认模型失败（本次 /agents 的 default_model 为空）", "err", err)
+		glog.Warnw(ctx, "models: 读默认模型失败（本次 /agents 的 default_model 为空）", "err", err)
 		return nil
 	}
 	if !ok {

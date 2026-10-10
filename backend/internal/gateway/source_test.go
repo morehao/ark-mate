@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -173,10 +172,10 @@ func (f *fakeRemote) setCallFail(v bool) {
 
 // sourceRig 一套"真 store + 真数据面"的脚手架。
 type sourceRig struct {
-	t   *testing.T
-	st  *store.Store
-	cfg config.Config
-	log *strings.Builder
+	t    *testing.T
+	st   *store.Store
+	cfg  config.Config
+	logs func() string
 }
 
 func newSourceRig(t *testing.T) *sourceRig {
@@ -191,7 +190,7 @@ func newSourceRig(t *testing.T) *sourceRig {
 			StoreMode: config.StoreModeSQLite, DBPath: filepath.Join(dir, "mate.db"),
 			AgentDir: filepath.Join(dir, "agents"), CapabilityDir: filepath.Join(dir, "capabilities"),
 		},
-		log: &strings.Builder{},
+		logs: testutil.CaptureLogs(t),
 	}
 }
 
@@ -213,12 +212,11 @@ func (r *sourceRig) seedAgent(id, body string) {
 	}
 }
 
-// source 装配数据面（同一库句柄；Logger 收进 buffer 供断言"降级有留痕"）。
+// source 装配数据面（同一库句柄；日志由 testutil.CaptureLogs 收进临时文件供断言"降级有留痕"）。
 func (r *sourceRig) source(agentID string, pinned *[]string) *MateSource {
 	r.t.Helper()
 	src, err := NewSource(context.Background(), SourceOptions{
 		Cfg: r.cfg, AgentID: agentID, McpsPinned: pinned, Store: r.st,
-		Logger: slog.New(slog.NewTextHandler(r.log, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
 		r.t.Fatalf("装配数据面: %v", err)
@@ -271,10 +269,9 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 		t.Fatalf("写 agent: ok=%v err=%v", ok, err)
 	}
 
-	var buf strings.Builder
+	logs := testutil.CaptureLogs(t)
 	src, err := NewSource(context.Background(), SourceOptions{
 		Cfg: cfg, AgentID: "a1",
-		Logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
 		t.Fatalf("装配数据面（自开库）: %v", err)
@@ -285,7 +282,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 		t.Fatalf("取工具面: %v", err)
 	}
 	if got := toolNames(tools); strings.Join(got, ",") != "web__echo" {
-		t.Fatalf("两个句柄共用一个库时应看到同一份定义，got %v（日志：%s）", got, buf.String())
+		t.Fatalf("两个句柄共用一个库时应看到同一份定义，got %v（日志：%s）", got, logs())
 	}
 }
 
@@ -418,11 +415,11 @@ func TestSourceUnresolvableSecretDegrades(t *testing.T) {
 	if strings.Join(toolNames(tools), ",") != "gh__ok" {
 		t.Fatalf("坏 server 应被跳过、好的照常: %v", toolNames(tools))
 	}
-	if !strings.Contains(r.log.String(), "密钥引用解析失败") {
-		t.Fatalf("降级必须留痕（否则表现为工具莫名消失）: %s", r.log.String())
+	if !strings.Contains(r.logs(), "密钥引用解析失败") {
+		t.Fatalf("降级必须留痕（否则表现为工具莫名消失）: %s", r.logs())
 	}
-	if strings.Contains(r.log.String(), "tok-1") {
-		t.Fatalf("日志绝不能出现密钥值: %s", r.log.String())
+	if strings.Contains(r.logs(), "tok-1") {
+		t.Fatalf("日志绝不能出现密钥值: %s", r.logs())
 	}
 }
 
@@ -447,8 +444,8 @@ func TestSourceRemoteFailureIsContained(t *testing.T) {
 	if strings.Join(toolNames(tools), ",") != "ok__fine" {
 		t.Fatalf("坏远端不该贡献工具: %v", toolNames(tools))
 	}
-	if !strings.Contains(r.log.String(), "列举远端工具失败") {
-		t.Fatalf("远端故障必须留痕: %s", r.log.String())
+	if !strings.Contains(r.logs(), "列举远端工具失败") {
+		t.Fatalf("远端故障必须留痕: %s", r.logs())
 	}
 }
 
@@ -558,7 +555,6 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 
 	src, err := NewSource(ctx, SourceOptions{
 		Cfg: r.cfg, AgentID: "a1", Store: r.st, PerServerTimeout: 300 * time.Millisecond,
-		Logger: slog.New(slog.NewTextHandler(r.log, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)

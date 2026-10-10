@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/golib/glog"
 )
 
 // defWarnOnce 同一条定义问题在一个进程内只 WARN 一次（key 由调用方给，须含 id 与 revision）。
@@ -32,7 +32,7 @@ func (s *Service) defWarnOnce(key, msg string, args ...any) {
 	if seen {
 		return
 	}
-	slog.Warn(msg, args...)
+	glog.Warnw(context.Background(), msg, args...)
 }
 
 // LoadCapabilityDefinitions 加载能力数据面目录并合并（dir 为空 = 仅代码注入/空表）。
@@ -70,7 +70,7 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 //
 // `importDir` 只用于登记"导入/导出目录"（能力定义仍在文件里的那份存量）；空串 = 不登记。
 func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, importDir string) int {
-	n, _ := s.reloadCapabilityDefinitions(ctx, importDir, slog.LevelInfo)
+	n, _ := s.reloadCapabilityDefinitions(ctx, importDir, glog.InfoLevel)
 	return n
 }
 
@@ -80,11 +80,11 @@ func (s *Service) LoadCapabilityDefinitionsFromStore(ctx context.Context, import
 // 底座的**每次** tools/list / tools/call 都会触发一次装载，用 Info 档会把日志刷成噪声——而噪声
 // 的代价是"真出问题时没人看日志"。逐行的坏定义问题仍走 WARN（但**同一条只报一次**，见 defWarnOnce）。
 func (s *Service) ReloadCapabilityDefinitions(ctx context.Context) (int, error) {
-	return s.reloadCapabilityDefinitions(ctx, "", slog.LevelDebug)
+	return s.reloadCapabilityDefinitions(ctx, "", glog.DebugLevel)
 }
 
 // reloadCapabilityDefinitions 装载内核（公开入口与网关共用；level 只作用于汇总行）。
-func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir string, level slog.Level) (int, error) {
+func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir string, level glog.Level) (int, error) {
 	if s.caps == nil || s.st == nil {
 		return 0, fmt.Errorf("能力注册表或持久层未初始化")
 	}
@@ -155,7 +155,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 
 	// 一次换面：此后所有读者看到的是完整的新目录。
 	s.caps.ReplaceAll(fresh)
-	slog.Log(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	logAt(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
 	return total, nil
 }
 
@@ -485,7 +485,7 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *Capabili
 		if len(problems) > 0 {
 			// 解析不了就不注入这个 server：半配置的 MCP server 会让 agent 侧报一堆看不懂的连不上，
 			// 而少一个工具是"看得见的降级"（日志里有原因、有引用、有出路）。**不静默**：逐条 WARN。
-			slog.Warn("mcp 注入跳过：密钥引用解析失败", "server", m.ID, "problems", problems)
+			glog.Warnw(context.Background(), "mcp 注入跳过：密钥引用解析失败", "server", m.ID, "problems", problems)
 			continue
 		}
 		out = append(out, acl.McpServer{
@@ -498,7 +498,7 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *Capabili
 		// 网关条目天生无密钥（只有 scope），故直接追加；远程凭据留在网关进程里（§10.6-②）。
 		out = append(out, *plan.Gateway)
 		if len(plan.Remote) > 0 {
-			slog.Debug("mcp 注入：远程 server 经平台网关代连",
+			glog.Debugw(context.Background(), "mcp 注入：远程 server 经平台网关代连",
 				"agent", agentIDOf(agent), "runtime", runtimeID, "remote", len(plan.Remote))
 		}
 	}

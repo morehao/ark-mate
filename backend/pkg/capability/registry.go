@@ -1,15 +1,17 @@
 package capability
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/morehao/golib/glog"
 )
 
 // Registry 是能力数据面的进程内聚合（Skill/MCP/Tool 三表），供 Service 查询与未来注入。
@@ -191,7 +193,7 @@ func warnCredentialShapedPlaintext(m *McpServer) {
 		if _, inSecret := m.SecretHeaders[k]; inSecret {
 			continue
 		}
-		slog.Warn("capability mcp: 明文 header 的键名看起来像凭据，建议移到 secret_headers（值只接受 vault:/env: 引用）",
+		glog.Warnw(context.Background(), "capability mcp: 明文 header 的键名看起来像凭据，建议移到 secret_headers（值只接受 vault:/env: 引用）",
 			"server", m.ID, "header", k)
 	}
 }
@@ -510,25 +512,25 @@ func (r *Registry) loadToolsDir(dir string) int {
 func scanDir(dir, kind string, apply func(b []byte, key, path string) error) int {
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
-		slog.Warn("capability: 扫描目录失败", "kind", kind, "dir", dir, "err", err)
+		glog.Warnw(context.Background(), "capability: 扫描目录失败", "kind", kind, "dir", dir, "err", err)
 		return 0
 	}
 	loaded := 0
 	for _, p := range files {
 		b, err := os.ReadFile(p)
 		if err != nil {
-			slog.Warn("capability: 读取定义失败", "file", p, "err", err)
+			glog.Warnw(context.Background(), "capability: 读取定义失败", "file", p, "err", err)
 			continue
 		}
 		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
 		if err := apply(b, base, p); err != nil {
-			slog.Warn("capability: 定义未采纳", "kind", kind, "file", p, "err", err)
+			glog.Warnw(context.Background(), "capability: 定义未采纳", "kind", kind, "file", p, "err", err)
 			continue
 		}
 		loaded++
 	}
 	if loaded > 0 {
-		slog.Info("capability: 目录已加载", "kind", kind, "count", loaded, "dir", dir)
+		glog.Infow(context.Background(), "capability: 目录已加载", "kind", kind, "count", loaded, "dir", dir)
 	}
 	return loaded
 }

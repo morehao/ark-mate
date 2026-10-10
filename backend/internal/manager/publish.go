@@ -2,13 +2,13 @@ package manager
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/redact"
+	"github.com/morehao/golib/glog"
 )
 
 // publish 是**事件的唯一出口**，分两段：
@@ -55,7 +55,7 @@ func (s *Service) publishRaw(typ, conversationID string, payload any) eventbus.E
 	if st := s.st; st != nil {
 		got, err := st.AppendEvent(context.Background(), conversationID, typ, payload)
 		if err != nil {
-			slog.Default().Warn("store: append event failed（退化为进程内取号）",
+			glog.Warnw(context.Background(), "store: append event failed（退化为进程内取号）",
 				"conversation", conversationID, "type", typ, "err", err)
 		} else {
 			seq = got
@@ -102,7 +102,7 @@ func (s *Service) publishSideEffects(conversationID, typ string, m map[string]an
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if err := s.st.UpdateConversationMeta(ctx, conversationID, store.ConversationMetaPatch{Title: &derived}); err != nil {
-				slog.Default().Warn("store: derive title persist failed", "conversation", conversationID, "err", err)
+				glog.Warnw(context.Background(), "store: derive title persist failed", "conversation", conversationID, "err", err)
 			}
 		}
 	}

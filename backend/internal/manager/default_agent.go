@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 当前 Agent（全局默认）切换：<AgentDir>/default.json ———
@@ -42,7 +42,7 @@ func readDefaultAgentFile(dir string) string {
 	}
 	var d defaultAgentDoc
 	if err := json.Unmarshal(b, &d); err != nil {
-		slog.Warn("agents: default.json 非法，回落内置默认", "dir", dir, "err", err)
+		glog.Warnw(context.Background(), "agents: default.json 非法，回落内置默认", "dir", dir, "err", err)
 		return ""
 	}
 	return d.DefaultAgent
@@ -62,7 +62,7 @@ func (s *Service) loadDefaultAgentFile(dir string) {
 	}
 	s.mu.Unlock()
 	if !ok {
-		slog.Warn("agents: default.json 指向未注册 agent，本次回落内置默认", "agent", id)
+		glog.Warnw(context.Background(), "agents: default.json 指向未注册 agent，本次回落内置默认", "agent", id)
 	}
 }
 
@@ -91,7 +91,7 @@ func clearDefaultAgentFile(dir string) {
 		return
 	}
 	if err := os.Remove(filepath.Join(dir, defaultAgentFile)); err != nil && !os.IsNotExist(err) {
-		slog.Warn("agents: 清理 default.json 失败", "dir", dir, "err", err)
+		glog.Warnw(context.Background(), "agents: 清理 default.json 失败", "dir", dir, "err", err)
 	}
 }
 
@@ -109,6 +109,6 @@ func (s *Service) SetDefaultAgent(ctx context.Context, id string) (*dtoagent.Age
 	if err := s.writeDefaultAgent(ctx, id); err != nil {
 		return nil, err
 	}
-	slog.Info("agent default switched", "agent", id)
+	glog.Infow(ctx, "agent default switched", "agent", id)
 	return s.agentRespLocked(id), nil
 }

@@ -26,12 +26,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 const (
@@ -47,8 +48,6 @@ type PoolOptions struct {
 	IdleTimeout time.Duration
 	// Now 时钟注入（测试用；nil → time.Now）。空闲回收不靠 sleep 断言，靠它。
 	Now func() time.Time
-	// Logger 诊断出口（nil → slog.Default()）。只记 server id 与原因，不记任何凭据。
-	Logger *slog.Logger
 }
 
 // PoolStats 池的运行计数（诊断/测试用）。
@@ -104,9 +103,6 @@ func NewPool(opts PoolOptions) *Pool {
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
-	}
-	if opts.Logger == nil {
-		opts.Logger = slog.Default()
 	}
 	return &Pool{opts: opts, sessions: make(map[string]*pooledSession)}
 }
@@ -205,10 +201,10 @@ func (p *Pool) acquire(ctx context.Context, s Server) (*pooledSession, error) {
 		switch {
 		case ps.key != key:
 			// 定义或密钥变了：旧会话必须死——这是"密钥轮换对底座无感"的落点（语义 3）。
-			p.opts.Logger.Info("mcp pool: 定义已变化，作废旧会话", "server", s.ID)
+			glog.Infow(ctx, "mcp pool: 定义已变化，作废旧会话", "server", s.ID)
 			p.detachLocked(ps)
 		case p.idle(ps):
-			p.opts.Logger.Debug("mcp pool: 会话空闲超时，回收", "server", s.ID)
+			glog.Debugw(ctx, "mcp pool: 会话空闲超时，回收", "server", s.ID)
 			p.detachLocked(ps)
 		default:
 			p.stats.Reused++
@@ -240,7 +236,7 @@ func (p *Pool) acquire(ctx context.Context, s Server) (*pooledSession, error) {
 		exist.mu.Lock()
 		return exist, nil
 	}
-	p.evictForRoomLocked()
+	p.evictForRoomLocked(ctx)
 	p.sessions[s.ID] = ps
 	p.stats.Spawns++
 	p.mu.Unlock()
@@ -287,7 +283,7 @@ func (p *Pool) closeOrZombieLocked(ps *pooledSession) {
 }
 
 // evictForRoomLocked 腾一个位子（调用方持 p.mu）：优先回收最久未用的会话。
-func (p *Pool) evictForRoomLocked() {
+func (p *Pool) evictForRoomLocked(ctx context.Context) {
 	if len(p.sessions) < p.opts.MaxSessions {
 		return
 	}
@@ -300,7 +296,7 @@ func (p *Pool) evictForRoomLocked() {
 	if oldest == nil {
 		return
 	}
-	p.opts.Logger.Warn("mcp pool: 会话数达上限，回收最久未用的那条", "server", oldest.id, "max", p.opts.MaxSessions)
+	glog.Warnw(ctx, "mcp pool: 会话数达上限，回收最久未用的那条", "server", oldest.id, "max", p.opts.MaxSessions)
 	p.detachLocked(oldest)
 }
 

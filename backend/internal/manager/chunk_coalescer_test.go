@@ -48,7 +48,7 @@ func (f *fakeSink) n() int {
 // 事件类型/会话不变，payload 形状不变（msg_id 等原样），text 为拼接结果；入参不被就地改写。
 func TestChunkCoalescerMergesSameShape(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 
 	base := map[string]any{"session_id": "s1", "agent_id": "a1", "msg_id": "m1", "text": "a"}
@@ -77,7 +77,7 @@ func TestChunkCoalescerMergesSameShape(t *testing.T) {
 // 跨消息的原始顺序不被重排（A1,A2,B1,A3 → "a1a2","b1","a3"）。
 func TestChunkCoalescerFlushesOnShapeChange(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 
 	add := func(msgID, text string) {
@@ -98,7 +98,7 @@ func TestChunkCoalescerFlushesOnShapeChange(t *testing.T) {
 // （否则会丢信息：如 {i:1} 与 {i:2} 合成 {i:1}）。
 func TestChunkCoalescerShapeChangeIsNotOnlyMsgID(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 	c.add(BusMessage, "s-a", map[string]any{"i": 1})
 	c.add(BusMessage, "s-a", map[string]any{"i": 2})
@@ -115,7 +115,7 @@ func TestChunkCoalescerShapeChangeIsNotOnlyMsgID(t *testing.T) {
 func TestChunkCoalescerThresholds(t *testing.T) {
 	// 字节阈值：一条 4KB 增量立即发布。
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	c.add(BusMessage, "s1", map[string]any{"text": strings.Repeat("x", chunkFlushBytes)})
 	if got := sink.n(); got != 1 {
 		t.Fatalf("达字节阈值应立即发布: %d", got)
@@ -124,7 +124,7 @@ func TestChunkCoalescerThresholds(t *testing.T) {
 
 	// 条数阈值：第 64 条触发，且后续能继续攒下一批。
 	sink2 := &fakeSink{}
-	c2 := newChunkCoalescer(sink2.fn, nil)
+	c2 := newChunkCoalescer(sink2.fn)
 	defer c2.Close()
 	for i := 0; i < chunkFlushCount; i++ {
 		c2.add(BusMessage, "s1", map[string]any{"msg_id": "m1", "text": "x"})
@@ -144,7 +144,7 @@ func TestChunkCoalescerThresholds(t *testing.T) {
 // TestChunkCoalescerTimerFlush 定时窗口：无人 flush 时，25ms 窗口内自行落盘。
 func TestChunkCoalescerTimerFlush(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 	c.add(BusMessage, "s1", map[string]any{"text": "later"})
 	deadline := time.Now().Add(2 * time.Second)
@@ -159,7 +159,7 @@ func TestChunkCoalescerTimerFlush(t *testing.T) {
 // TestChunkCoalescerIsolatesTypesAndConversations 不同类型/不同会话各成一条（绝不混并）。
 func TestChunkCoalescerIsolatesTypesAndConversations(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 	c.add(BusMessage, "s1", map[string]any{"text": "m"})
 	c.add(BusThought, "s1", map[string]any{"text": "t"})
@@ -176,7 +176,7 @@ func TestChunkCoalescerIsolatesTypesAndConversations(t *testing.T) {
 // TestChunkCoalescerCloseFlushes Close 落掉尾部增量（停机不丢最后一段文本）。
 func TestChunkCoalescerCloseFlushes(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	c.add(BusMessage, "s1", map[string]any{"text": "tail"})
 	c.Close()
 	c.Close() // 幂等
@@ -189,7 +189,7 @@ func TestChunkCoalescerCloseFlushes(t *testing.T) {
 // （别的会话的增量继续攒批，不被无关事件反复打断）。
 func TestChunkCoalescerFlushIsPerConversation(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 	c.add(BusMessage, "s1", map[string]any{"text": "a"})
 	c.add(BusMessage, "s2", map[string]any{"text": "b"})
@@ -294,7 +294,7 @@ func TestCloseTranscriptsFlushesChunks(t *testing.T) {
 // TestChunkCoalescerNoGoroutineLeak Close 后定时窗口 goroutine 退出。
 func TestChunkCoalescerNoGoroutineLeak(t *testing.T) {
 	sink := &fakeSink{}
-	c := newChunkCoalescer(sink.fn, nil)
+	c := newChunkCoalescer(sink.fn)
 	c.add(BusMessage, "s1", map[string]any{"text": "x"})
 	done := make(chan struct{})
 	go func() { c.Close(); close(done) }()

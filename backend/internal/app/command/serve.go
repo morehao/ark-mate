@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/app"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/golib/glog"
 )
 
 // serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。
@@ -92,7 +92,7 @@ func serve(args []string) {
 		// 第一条日志就会把进程当场打死，优雅停机形同虚设（见 ignoreSIGPIPE 的注释）。
 		ignoreSIGPIPE()
 		go watchParentExit(ctx, os.Getppid, parentPollInterval, func() {
-			slog.Warn("serve: 父进程已消失（壳被强杀？），开始优雅停机")
+			glog.Warnw(context.Background(), "serve: 父进程已消失（壳被强杀？），开始优雅停机")
 			cancel()
 		})
 	}

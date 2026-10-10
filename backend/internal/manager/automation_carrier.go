@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"sort"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— automation 定义的载体（M6-7） ———
@@ -177,7 +177,7 @@ func automationRunsJSON(runs []automation.RunRecord) string {
 	b, err := json.Marshal(runs)
 	if err != nil {
 		// RunRecord 全是基本类型，编不出来只可能是内存里的脏值；如实报错而不是写半个 JSON。
-		slog.Warn("automation: 运行史序列化失败，本列不更新", "err", err)
+		glog.Warnw(context.Background(), "automation: 运行史序列化失败，本列不更新", "err", err)
 		return ""
 	}
 	return string(b)
@@ -250,12 +250,12 @@ func loadAutomationRow(row *store.AutomationDefinition, now time.Time) *automati
 func (s *Service) reloadAutomationFromStore(ctx context.Context, id string) {
 	row, found, err := s.st.GetAutomationDefinition(ctx, id)
 	if err != nil || !found {
-		slog.Warn("automation 写回后重载失败，保留原内存态", "automation", id, "err", err, "found", found)
+		glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", err, "found", found)
 		return
 	}
 	rec := loadAutomationRow(row, time.Now())
 	if rec.loadErr != "" {
-		slog.Warn("automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
+		glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
 		return
 	}
 	s.mu.Lock()
@@ -284,7 +284,7 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 		}
 		rec := loadAutomationFile(filepath.Join(dir, id+".json"), id, time.Now())
 		if rec.loadErr != "" {
-			slog.Warn("automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
+			glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
 			return nil
 		}
 		s.mu.Lock()

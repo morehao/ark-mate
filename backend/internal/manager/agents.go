@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— Agent Registry（P2）：definitions 目录 + 注册/编辑/删除/启停 ———
@@ -65,7 +65,7 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
-		slog.Warn("agents: 扫描 definitions 失败", "dir", dir, "err", err)
+		glog.Warnw(context.Background(), "agents: 扫描 definitions 失败", "dir", dir, "err", err)
 		return 0
 	}
 	loaded := 0
@@ -76,22 +76,22 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
-			slog.Warn("agents: 读取定义失败", "file", p, "err", err)
+			glog.Warnw(context.Background(), "agents: 读取定义失败", "file", p, "err", err)
 			continue
 		}
 		var d agentDefinitionFile
 		if err := json.Unmarshal(b, &d); err != nil {
-			slog.Warn("agents: 定义 JSON 非法", "file", p, "err", err)
+			glog.Warnw(context.Background(), "agents: 定义 JSON 非法", "file", p, "err", err)
 			continue
 		}
 		if err := s.applyDefinition(d, true); err != nil {
-			slog.Warn("agents: 定义未采纳", "file", p, "err", err)
+			glog.Warnw(context.Background(), "agents: 定义未采纳", "file", p, "err", err)
 			continue
 		}
 		loaded++
 	}
 	if loaded > 0 {
-		slog.Info("agents: definitions 已加载", "count", loaded, "dir", dir)
+		glog.Infow(context.Background(), "agents: definitions 已加载", "count", loaded, "dir", dir)
 	}
 	// provider 档案（同目录 providers.json）随 definitions 一并装载。
 	//
@@ -116,7 +116,7 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 //  3. `dir` 仍然要设：`providers.json` 与 vault 锚点（`<AgentDir>` 的父目录）都还在文件侧
 //     （计划 §7 P-9，目录不能被砍掉）。
 func (s *Service) LoadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
-	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelInfo)
+	return s.loadAgentDefinitionsFromStore(ctx, dir, glog.InfoLevel)
 }
 
 // ReloadAgentDefinitionsFromStore 重新装载 agent 定义（**网关每次取数前**调用；M7-2）。
@@ -124,11 +124,11 @@ func (s *Service) LoadAgentDefinitionsFromStore(ctx context.Context, dir string)
 // 与 `LoadAgentDefinitionsFromStore` 是同一份实现，只有汇总行的日志档位不同（理由同
 // `ReloadCapabilityDefinitions`：网关是个长命进程，每次 tools/list/call 都会重装）。
 func (s *Service) ReloadAgentDefinitionsFromStore(ctx context.Context, dir string) int {
-	return s.loadAgentDefinitionsFromStore(ctx, dir, slog.LevelDebug)
+	return s.loadAgentDefinitionsFromStore(ctx, dir, glog.DebugLevel)
 }
 
 // loadAgentDefinitionsFromStore 装载内核（公开入口与网关共用；level 只作用于汇总行）。
-func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string, level slog.Level) int {
+func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string, level glog.Level) int {
 	// 库读在锁外（别把一次 DB 读塞进临界区），但**清空 + 补齐种子 + 逐行铺上**必须在同一个
 	// 临界区里完成：拆成两段就会留出"非种子 agent 全没了、行还没铺上"的窗口，读者（网关每次
 	// 调用前都重装、核心侧并发请求）会看到"agent 不存在"——而库里的行一个字都没改。
@@ -176,7 +176,7 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 	s.mu.Unlock()
 
 	if loaded > 0 {
-		slog.Log(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
+		logAt(ctx, level, "agents: 定义已从持久层装载", "count", loaded)
 	}
 	// provider 档案按持久层模式装载（sqlite = providers 表 / memory = 同目录 providers.json），
 	// 「当前 Agent」的显式选择落 meta（计划 §7 P-8）。
@@ -434,9 +434,9 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDe
 	s.clearAgentLastError(id) // 最近失败快照清掉（同 id 重建后不回显旧错）
 	if wasDefault {
 		s.clearDefaultAgent(ctx)
-		slog.Info("agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
+		glog.Infow(ctx, "agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
 	}
-	slog.Info("agent deleted", "agent", id, "affected_conversations", affected,
+	glog.Infow(ctx, "agent deleted", "agent", id, "affected_conversations", affected,
 		"detached_conversations", detached, "was_default", wasDefault)
 	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedConversations: affected,
 		DetachedConversations: detached, WasDefault: wasDefault}, nil
@@ -463,7 +463,7 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 		return err
 	}
 	s.setAgentState(id, AgentStateRunning)
-	slog.Info("agent started", "agent", id, "runtime", spec.ID)
+	glog.Infow(ctx, "agent started", "agent", id, "runtime", spec.ID)
 	return nil
 }
 

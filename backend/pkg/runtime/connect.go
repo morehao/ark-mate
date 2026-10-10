@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -15,7 +14,6 @@ import (
 // 参数：
 //   - args：已解析启动参数（调用方先做 {config} 替换；现三投影参数均无该 token）；
 //   - env：调用方附加环境（如 provider 密钥注入），内部叠加在 spec.Launch.Env 之后；
-//   - opts.Logger：若设置，同源用于 stdio 传输日志（runtime/cmd 属性由调用方预置）。
 //
 // LaunchesLocally 报告该 runtime 是否由平台**在本机拉起子进程**（`Launch.Transport` 为空或
 // `stdio`）。判据与 `Connect` 的传输分派**同源**（同一个 switch 的两支）：凡是本机起进程的形态
@@ -35,11 +33,6 @@ func LaunchesLocally(spec Spec) bool {
 // 连接生命周期归调用方（编排器连接回收/Close），与任一请求 ctx 无关（拨号用脱离 ctx 的
 // 派生 context，语义同 orchestrator.acquire——请求返回不杀已起子进程）。
 func Connect(ctx context.Context, spec Spec, args []string, env []string, opts acl.ClientOptions) (*acl.Client, error) {
-	logger := opts.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-
 	var t acl.Transport
 	switch strings.ToLower(strings.TrimSpace(spec.Launch.Transport)) {
 	case "", "stdio":
@@ -50,9 +43,7 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		// 去重还有一个更硬的理由：同名两条在 POSIX `getenv`（取第一条）与 Node `process.env`（取最后一条）
 		// 下语义相反，留着就是"同一个环境在两种子进程里行为不同"。
 		all := connectEnv(spec, env)
-		st := acl.NewStdioTransport(spec.Launch.Command, args, all)
-		st.SetLogger(logger)
-		t = st
+		t = acl.NewStdioTransport(spec.Launch.Command, args, all)
 	case "http", "ws", "websocket", "streamable_http", "streamable-http":
 		// 远程 runtime：不拉子进程，直接连远端 ACP 端点（A5）。
 		rt, err := acl.NewRemoteTransport(acl.RemoteSpec{
@@ -62,9 +53,6 @@ func Connect(ctx context.Context, spec Spec, args []string, env []string, opts a
 		})
 		if err != nil {
 			return nil, err
-		}
-		if ls, ok := acl.Transport(rt).(acl.LoggerSetter); ok {
-			ls.SetLogger(logger)
 		}
 		t = rt
 	default:

@@ -1,11 +1,13 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/morehao/golib/glog"
 )
 
 // ——— M3 能力选定（会话级子集） ———
@@ -96,7 +98,7 @@ func ParseCapabilitySelection(raw string) *CapabilitySelection {
 	var sel CapabilitySelection
 	if err := json.Unmarshal([]byte(raw), &sel); err != nil {
 		// 不静默：这一列由平台自己写，读到坏值说明库被外部改过，日志里必须留痕。
-		slog.Warn("会话能力选定读取失败（按未声明处理，回落缺省能力集）", "raw", raw, "err", err)
+		glog.Warnw(context.Background(), "会话能力选定读取失败（按未声明处理，回落缺省能力集）", "raw", raw, "err", err)
 		return nil
 	}
 	if sel.Empty() {

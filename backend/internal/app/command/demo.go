@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
@@ -28,8 +27,8 @@ func demo(args []string) {
 		fmt.Fprintln(os.Stderr, "demo: --runtime 必填（opencode / deepseekharness）")
 		os.Exit(2)
 	}
-	// 冒烟输出含 runtime stderr（登录提示/诊断），提到 Debug 便于排查。
-	slog.SetLogLoggerLevel(slog.LevelDebug)
+	// 冒烟输出含 runtime stderr（登录提示/诊断），降到 Debug 便于排查。
+	raiseLogVerbosity()
 
 	reg := runtime.DefaultRegistry()
 	if _, err := reg.Require(*runtimeID); err != nil {

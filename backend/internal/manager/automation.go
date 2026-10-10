@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +15,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/gerror"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— Automation 定义注册表（M4-3）———
@@ -72,7 +72,7 @@ func (s *Service) LoadAutomationDefinitions(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Warn("automation 目录读取失败", "dir", dir, "err", err)
+			glog.Warnw(context.Background(), "automation 目录读取失败", "dir", dir, "err", err)
 		}
 		return 0
 	}
@@ -88,7 +88,7 @@ func (s *Service) LoadAutomationDefinitions(dir string) int {
 		if rec.loadErr == "" {
 			loaded++
 		} else {
-			slog.Warn("automation 定义装载失败（已留在列表里带 error，便于面板显示）", "id", id, "err", rec.loadErr)
+			glog.Warnw(context.Background(), "automation 定义装载失败（已留在列表里带 error，便于面板显示）", "id", id, "err", rec.loadErr)
 		}
 		s.mu.Lock()
 		if s.automations == nil {
@@ -138,7 +138,7 @@ func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir st
 	}
 	rows, err := s.st.ListAutomationDefinitions(ctx)
 	if err != nil {
-		slog.Warn("automation: 从持久层读定义失败", "err", err)
+		glog.Warnw(ctx, "automation: 从持久层读定义失败", "err", err)
 		return 0
 	}
 	now := time.Now()
@@ -148,7 +148,7 @@ func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir st
 		if rec.loadErr == "" {
 			loaded++
 		} else {
-			slog.Warn("automation 定义装载失败（已留在列表里带 error，便于面板显示）",
+			glog.Warnw(ctx, "automation 定义装载失败（已留在列表里带 error，便于面板显示）",
 				"id", rows[i].ID, "err", rec.loadErr)
 		}
 		s.mu.Lock()

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 存量 agent 定义的一次性导入与导出（M6-6 下半） ———
@@ -92,7 +92,7 @@ func importAgentDefaultSelection(ctx context.Context, st *store.Store, dir strin
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Warn("agent: 读 default.json 失败", "path", path, "err", err)
+			glog.Warnw(ctx, "agent: 读 default.json 失败", "path", path, "err", err)
 		}
 		return "", nil
 	}
@@ -100,7 +100,7 @@ func importAgentDefaultSelection(ctx context.Context, st *store.Store, dir strin
 		DefaultAgent string `json:"default_agent"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
-		slog.Warn("agent: default.json 不是合法 JSON，已跳过", "path", path, "err", err)
+		glog.Warnw(ctx, "agent: default.json 不是合法 JSON，已跳过", "path", path, "err", err)
 		return "", nil
 	}
 	id := strings.TrimSpace(doc.DefaultAgent)

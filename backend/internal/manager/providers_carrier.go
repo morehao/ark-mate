@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— provider 档案读写面的**载体**（v11） ———
@@ -58,7 +58,7 @@ func (s *Service) loadProviders(ctx context.Context, dir string) {
 func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 	rows, err := s.st.ListProviderDefinitions(ctx)
 	if err != nil {
-		slog.Warn("providers: 从持久层装载失败（档案面为空）", "err", err)
+		glog.Warnw(ctx, "providers: 从持久层装载失败（档案面为空）", "err", err)
 		return
 	}
 	st, verr := s.providerVault()
@@ -67,7 +67,7 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 		row := rows[i]
 		var body map[string]any
 		if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
-			slog.Warn("providers: 档案行 body 非法（忽略该行）", "provider", row.ID, "err", err)
+			glog.Warnw(ctx, "providers: 档案行 body 非法（忽略该行）", "provider", row.ID, "err", err)
 			continue
 		}
 		p := &providerDef{
@@ -85,13 +85,13 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 		case p.KeyRef != "":
 			if st == nil {
 				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", p.KeyRef, vaultUnavailable(verr))
-				slog.Warn("providers: 有密文但 vault 不可用", "provider", row.ID, "ref", p.KeyRef, "err", p.keyErr)
+				glog.Warnw(ctx, "providers: 有密文但 vault 不可用", "provider", row.ID, "ref", p.KeyRef, "err", p.keyErr)
 				break
 			}
 			pt, err := st.Get(p.KeyRef, vault.KindProviderKey)
 			if err != nil {
 				p.keyErr = err
-				slog.Warn("providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", row.ID, "err", err)
+				glog.Warnw(ctx, "providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", row.ID, "err", err)
 				break
 			}
 			p.Key = string(pt)

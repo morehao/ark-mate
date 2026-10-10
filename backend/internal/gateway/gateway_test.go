@@ -12,12 +12,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/mcp"
 )
 
@@ -57,21 +57,18 @@ func (f *fakeSource) Call(_ context.Context, tool string, args json.RawMessage) 
 
 // rig 把 Run 夹在两个 io.Pipe 之间当客户端用（与服务端用例同形）。
 type rig struct {
-	t   *testing.T
-	w   *bufio.Writer
-	r   *bufio.Reader
-	log *strings.Builder
-	seq int
+	t    *testing.T
+	w    *bufio.Writer
+	r    *bufio.Reader
+	logs func() string
+	seq  int
 }
 
 func startRig(t *testing.T, opts Options) *rig {
 	t.Helper()
 	testR, srvW := io.Pipe()
 	srvR, testW := io.Pipe()
-	log := &strings.Builder{}
-	if opts.Logger == nil {
-		opts.Logger = slog.New(slog.NewTextHandler(log, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	}
+	logs := testutil.CaptureLogs(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -84,7 +81,7 @@ func startRig(t *testing.T, opts Options) *rig {
 		_ = testR.Close()
 		<-done
 	})
-	return &rig{t: t, w: bufio.NewWriter(testW), r: bufio.NewReader(testR), log: log}
+	return &rig{t: t, w: bufio.NewWriter(testW), r: bufio.NewReader(testR), logs: logs}
 }
 
 func (g *rig) send(method string, params any) string {
@@ -182,8 +179,8 @@ func TestRunEmptySourceIsLoudButClean(t *testing.T) {
 	if call.Error == nil || call.Error.Code != -32602 {
 		t.Fatalf("骨架形态下调用应回未知工具（-32602）: %+v", call.Error)
 	}
-	if !strings.Contains(g.log.String(), "数据面未接线") {
-		t.Fatalf("空面必须响亮（stderr 要有 WARN）: %s", g.log.String())
+	if !strings.Contains(g.logs(), "数据面未接线") {
+		t.Fatalf("空面必须响亮（stderr 要有 WARN）: %s", g.logs())
 	}
 }
 
@@ -256,8 +253,8 @@ func TestRunToolListFailureIsDegradedNotFatal(t *testing.T) {
 	if !strings.Contains(string(list.Result), `"tools":[]`) {
 		t.Fatalf("应回空面: %s", list.Result)
 	}
-	if !strings.Contains(g.log.String(), "取工具面失败") {
-		t.Fatalf("降级必须留痕: %s", g.log.String())
+	if !strings.Contains(g.logs(), "取工具面失败") {
+		t.Fatalf("降级必须留痕: %s", g.logs())
 	}
 }
 
@@ -268,8 +265,7 @@ func TestRunExitsOnStdinEOF(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(context.Background(), srvR, srvW, Options{
-			Scope:  Scope{AgentID: "a1", RuntimeID: "r1"},
-			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Scope: Scope{AgentID: "a1", RuntimeID: "r1"},
 		})
 	}()
 	if err := testW.Close(); err != nil {
@@ -295,8 +291,7 @@ func TestRunCancelReturnsContextError(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, srvR, srvW, Options{
-			Scope:  Scope{AgentID: "a1", RuntimeID: "r1"},
-			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Scope: Scope{AgentID: "a1", RuntimeID: "r1"},
 		})
 	}()
 	cancel()

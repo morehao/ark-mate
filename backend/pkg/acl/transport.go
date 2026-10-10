@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // Transport 抽象「一个 ACP server 进程」的接入面：Start 拉起并接好 stdio，
@@ -46,7 +47,6 @@ type StdioTransport struct {
 
 	mu      sync.RWMutex
 	tail    []string
-	logger  *slog.Logger
 	started bool
 	// stderrDone 在 drainStderr 因 stderr 管道 EOF 退出时关闭。
 	// 存在的理由：drainStderr 是独立 goroutine，而子进程"写一行就退出"时，调用方可能
@@ -60,14 +60,8 @@ func NewStdioTransport(command string, args, env []string) *StdioTransport {
 		command:    command,
 		args:       args,
 		env:        env,
-		logger:     slog.Default(),
 		stderrDone: make(chan struct{}),
 	}
-}
-
-// LoggerSetter 由可设置诊断日志目标的传输实现（stdio 的 stderr 透出、远程传输的连接诊断）。
-type LoggerSetter interface {
-	SetLogger(*slog.Logger)
 }
 
 // PidInfo 子进程标识（进程注册表 / 孤儿回收用）。
@@ -93,13 +87,6 @@ func (t *StdioTransport) PidInfo() PidInfo {
 
 // SetDir 设置子进程工作目录（NewSession 的 cwd 在 ACP 层表达，dir 留给诊断场景）。
 func (t *StdioTransport) SetDir(dir string) { t.dir = dir }
-
-// SetLogger 设置 stderr 透出日志目标（默认 slog.Default）。
-func (t *StdioTransport) SetLogger(l *slog.Logger) {
-	if l != nil {
-		t.logger = l
-	}
-}
 
 func (t *StdioTransport) Start(ctx context.Context) error {
 	var err error
@@ -167,7 +154,8 @@ func (t *StdioTransport) drainStderr() {
 			t.tail = append(t.tail, line)
 		}
 		t.mu.Unlock()
-		t.logger.Info("runtime stderr", "cmd", t.command, "line", line)
+		// 独立 goroutine、随子进程整个生命周期：没有可用的请求 ctx。
+		glog.Infow(context.Background(), "runtime stderr", "cmd", t.command, "line", line)
 	}
 }
 

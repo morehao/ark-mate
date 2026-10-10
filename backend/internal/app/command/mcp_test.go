@@ -11,6 +11,7 @@ package command
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,21 +35,50 @@ func buildMateCLI(t *testing.T) string {
 	return bin
 }
 
+// readCLILogs 读某个私有数据目录下 glog 文件 writer 写出的全部日志。
+func readCLILogs(t *testing.T, home string) string {
+	t.Helper()
+	var sb strings.Builder
+	err := filepath.WalkDir(filepath.Join(home, "logs"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil // 没有 logs 目录 = 一条日志都没写，交由断言报错
+		}
+		b, rErr := os.ReadFile(path)
+		if rErr != nil {
+			return rErr
+		}
+		sb.Write(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("读网关日志目录: %v", err)
+	}
+	return sb.String()
+}
+
 // isolatedCLIEnv 子进程的私有环境：网关按与核心进程同一个解析器定位数据面，所以在用户默认
 // 环境里跑它就会去读（并 **Migrate**！）用户自己的 `~/.ark-mate/mate.db`。测试必须给私有
 // MATE_HOME/MATE_DB——否则用例的结果取决于"当前机器上恰好有没有库"，还会顺手改写它。
 func isolatedCLIEnv(t *testing.T) []string {
 	t.Helper()
+	env, _ := isolatedCLIEnvHome(t)
+	return env
+}
+
+// isolatedCLIEnvHome 同上，另外返回私有数据目录——需要读网关日志文件的用例用它
+// （网关的诊断出口是文件，见下）。
+func isolatedCLIEnvHome(t *testing.T) ([]string, string) {
+	t.Helper()
 	home := t.TempDir()
 	return append(os.Environ(),
 		"MATE_HOME="+home, "MATE_DB="+filepath.Join(home, "mate.db"),
-		"MATE_CONFIG_DIR="+filepath.Join(home, "config"))
+		"MATE_CONFIG_DIR="+filepath.Join(home, "config")), home
 }
 
 func TestMcpBridgeCLI(t *testing.T) {
 	bin := buildMateCLI(t)
 
-	isolated := isolatedCLIEnv(t)
+	isolated, home := isolatedCLIEnvHome(t)
 
 	frames := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"cli","version":"0"}}}`,
@@ -99,11 +129,20 @@ func TestMcpBridgeCLI(t *testing.T) {
 			t.Fatalf("缺少 id=%v 的响应：%s", want, stdout.String())
 		}
 	}
-	// 诊断在 stderr：网关启动、scope、数据面取数失败的原因都该在这里（空面必须响亮）。
-	for _, want := range []string{"mcp bridge", "agent=a1", "runtime=r1", "取工具面失败"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr 应含 %q：\n%s", want, stderr.String())
+	// 诊断写进日志出口（**不是 stdout**）：网关启动、scope、数据面取数失败的原因都在这里
+	// （空面必须响亮）。
+	//
+	// 出口自 2026-10-10 起是 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`：glog 的
+	// console writer 写的是 os.Stdout（golib 里硬编码），而这里的 stdout 是协议流（C10），
+	// 所以 mcp 子命令只能用文件 writer（见 internal/app/command/logging.go）。
+	logs := readCLILogs(t, home)
+	for _, want := range []string{"mcp bridge", `"agent":"a1"`, `"runtime":"r1"`, "取工具面失败"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("网关日志应含 %q：\n%s", want, logs)
 		}
+	}
+	if stderr.String() != "" {
+		t.Fatalf("诊断不该再走 stderr（那是 slog 时代的出口）：\n%s", stderr.String())
 	}
 
 	// 参数漂移必须当场失败，且**不得往 stdout 写任何东西**（那里是协议流）。

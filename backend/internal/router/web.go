@@ -1,11 +1,11 @@
 package router
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/golib/glog"
 )
 
 // 资产层（M2-1，设计 §6.1 / §6.2）：**唯一来源 = 调用方显式给的目录**。
@@ -148,14 +149,14 @@ func (a AssetInfo) CurrentBuildID() string {
 func readBuildID(fsys fs.FS) string {
 	b, err := fs.ReadFile(fsys, BuildIDFileName)
 	if err != nil {
-		slog.Warn("资产里没有 build-id.txt，前端与核心的版本一致性将无法校验（M2-4）"+
+		glog.Warnw(context.Background(), "资产里没有 build-id.txt，前端与核心的版本一致性将无法校验（M2-4）"+
 			"：若是自己拼的 dist，请由前端构建产出该文件", "file", BuildIDFileName, "err", err)
 		return BuildIDUnknown
 	}
 	if id := strings.TrimSpace(string(b)); id != "" {
 		return id
 	}
-	slog.Warn("build-id.txt 是空的，按 unknown 处理", "file", BuildIDFileName)
+	glog.Warnw(context.Background(), "build-id.txt 是空的，按 unknown 处理", "file", BuildIDFileName)
 	return BuildIDUnknown
 }
 

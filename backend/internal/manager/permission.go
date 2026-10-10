@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/golib/glog"
 )
 
 // 权限确认通道配置（AionUi F-PERM-01：F5.1 一致性）。
@@ -45,7 +45,6 @@ type PermissionManager struct {
 	pending    map[string]*pendingPermission     // key = callID
 	mem        map[string]map[string]memoryEntry // conversationID → action+identifier → 记忆（allow/reject 同键互斥）
 	timeout    time.Duration
-	logger     *slog.Logger
 	onResolved func(conversationID, callID, reason string, d acl.PermissionDecision)
 
 	// 会话级记忆持久化挂钩（sqlite 模式：写 permission_memories 表；nil = 不持久化）。
@@ -64,14 +63,6 @@ func NewPermissionManager(timeout time.Duration) *PermissionManager {
 		pending: make(map[string]*pendingPermission),
 		mem:     make(map[string]map[string]memoryEntry),
 		timeout: timeout,
-		logger:  slog.Default(),
-	}
-}
-
-// SetLogger 设置日志。
-func (m *PermissionManager) SetLogger(l *slog.Logger) {
-	if l != nil {
-		m.logger = l
 	}
 }
 
@@ -160,7 +151,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 	m.mu.Lock()
 	m.pending[callID] = p
 	m.mu.Unlock()
-	m.logger.Info("permission: request registered", "conversation", conversationID, "call_id", callID,
+	glog.Infow(ctx, "permission: request registered", "conversation", conversationID, "call_id", callID,
 		"title", req.ToolCall.Title, "wire_request_id", req.RequestID)
 
 	if publish != nil {
@@ -179,7 +170,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 		d = acl.PermissionDecision{} // 取消 → Cancelled
 		reason = "cancel"
 	case <-timer.C:
-		m.logger.Warn("permission: request timeout, auto-reject", "conversation", conversationID, "call_id", callID, "title", req.ToolCall.Title)
+		glog.Warnw(ctx, "permission: request timeout, auto-reject", "conversation", conversationID, "call_id", callID, "title", req.ToolCall.Title)
 		d = acl.PermissionDecision{}
 		reason = "timeout"
 	}
@@ -204,7 +195,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 	if onResolved != nil {
 		onResolved(conversationID, callID, reason, d)
 	}
-	m.logger.Info("permission: resolved", "conversation", conversationID, "call_id", callID,
+	glog.Infow(ctx, "permission: resolved", "conversation", conversationID, "call_id", callID,
 		"reason", reason, "allowed", d.Allowed, "rejected", d.Rejected, "always", d.Always, "option_id", d.OptionID)
 	return d
 }
@@ -253,7 +244,7 @@ func (m *PermissionManager) ResolveDecision(conversationID, callID string, d acl
 	if conversationID != "" && p.conversationID != conversationID {
 		owner := p.conversationID
 		m.mu.Unlock()
-		m.logger.Warn("permission: 决策会话与归属会话不符，拒绝（scope mismatch）",
+		glog.Warnw(context.Background(), "permission: 决策会话与归属会话不符，拒绝（scope mismatch）",
 			"call_id", callID, "owner", owner, "caller", conversationID)
 		return false, DecisionOutcome{}
 	}

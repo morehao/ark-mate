@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // connKey 计算**基础**连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
@@ -183,7 +184,7 @@ func (o *Orchestrator) admitGeneration(baseKey string) error {
 	}
 	// 达到上限：先淘汰该基础键下无人引用的代际，再复查。
 	if n := o.reclaimUnreferenced(baseKey); n > 0 {
-		o.logger.Info("代际上限：淘汰空闲代际", "base", baseKey, "reclaimed", n, "limit", limit)
+		glog.Infow(context.Background(), "代际上限：淘汰空闲代际", "base", baseKey, "reclaimed", n, "limit", limit)
 	}
 	keys := o.generationKeysFor(baseKey)
 	if len(keys) < limit {
@@ -327,7 +328,6 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	var env []string
 	env = append(env, keyEnv...)
 	env = append(env, nativeEnv...)
-	logger := o.logger.With("runtime", spec.ID, "cmd", spec.Launch.Command)
 
 	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 		if o.allowAll {
@@ -346,7 +346,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			// 既无 `_meta` scope 也无唯一在途 turn（空闲 / 会话外 request-scope / 多会话并发）→ 不猜。
 			// 仍按取消回应（不能把 agent 挂死），但置 ScopeAmbiguous 并留痕（agent 诊断 + 日志），
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
-			o.logger.Warn("elicitation: 无法归属会话（无 _meta scope 且连接上无唯一在途 turn），按取消处理",
+			glog.Warnw(ctx, "elicitation: 无法归属会话（无 _meta scope 且连接上无唯一在途 turn），按取消处理",
 				"scope_source", source)
 			o.svc.noteScopeAmbiguous(agent.ID,
 				"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）")
@@ -368,7 +368,6 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	dialCtx := context.WithoutCancel(ctx)
 	client, err := runtime.Connect(dialCtx, spec, args, env, acl.ClientOptions{
 		OnEvent:             o.eventSink(agent.ID, spec.ID),
-		Logger:              logger,
 		RequestPermission:   reqPerm,
 		CreateElicitation:   reqElic,
 		CompleteElicitation: completeElic,
@@ -382,7 +381,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// INFO 级：每 runtime 连接仅一次，serve 默认级别可见。
 	caps := client.Capabilities()
 	sc := caps.Raw.SessionCapabilities
-	o.logger.Info("runtime 握手能力",
+	glog.Infow(ctx, "runtime 握手能力",
 		"runtime", spec.ID,
 		"sessions_persistent", caps.SessionsPersistent,
 		"multi_session_concurrent", caps.MultiSessionConcurrent,
@@ -503,7 +502,7 @@ func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
 		// 原生 → 平台映射一并清除：迟到事件不再路由回已摘除的会话。
 		o.unregisterConversationProvider(as.ID)
 	}
-	o.logger.Info("agent 已删除：活跃会话已摘除（后续 prompt 报 agent_not_found）",
+	glog.Infow(context.Background(), "agent 已删除：活跃会话已摘除（后续 prompt 报 agent_not_found）",
 		"agent", agentID, "detached", detached)
 	return detached, nil
 }
@@ -544,7 +543,7 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 	}
 	if len(victims) > 0 {
-		o.logger.Info("连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
+		glog.Infow(context.Background(), "连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
 			"runtime", rc.spec.ID, "agent", rc.agentID,
 			"cause", connCauseLabel(intentional), "conversations", len(victims))
 	}
@@ -593,7 +592,7 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentiona
 		}
 		ae.StderrTail = tail
 		o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
-		o.logger.Warn("连接意外断开：空闲会话保持原状态（会话可续聊）",
+		glog.Warnw(context.Background(), "连接意外断开：空闲会话保持原状态（会话可续聊）",
 			"conversation", as.ID, "agent", as.AgentID, "runtime", as.Runtime)
 	}
 }
@@ -632,7 +631,7 @@ func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
 	if len(victims) > 0 {
 		// 可观测性：停机静默摘句柄最容易让人误判「重启把会话弄丢了」，日志里留一条事实——
 		// 作废的只是 runtime 执行句柄，会话与状态都在（重启后按需续聊）。
-		o.logger.Info("停机：会话句柄作废（会话与状态保留，重启后按需续聊）",
+		glog.Infow(context.Background(), "停机：会话句柄作废（会话与状态保留，重启后按需续聊）",
 			"runtime", rc.spec.ID, "cause", connCauseLabel(intentional), "conversations", len(victims))
 	}
 }
@@ -741,7 +740,7 @@ func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicte
 		evicted++
 	}
 	if evicted > 0 || deferred > 0 {
-		o.logger.Info("能力面变更：会话句柄将按当前定义重建",
+		glog.Infow(context.Background(), "能力面变更：会话句柄将按当前定义重建",
 			"agent", agentID, "field", field, "evicted", evicted, "deferred", deferred)
 	}
 	return evicted, deferred

@@ -2,22 +2,14 @@ package acl
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
 )
 
-// discardLogger 静默 stderr 透出日志（测试只断言尾巴缓冲）。
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 // TestDialErrorCarriesStderrTail 进程起不来/握手失败时，错误上应带 stderr 诊断尾巴（A3）。
 func TestDialErrorCarriesStderrTail(t *testing.T) {
 	tr := NewStdioTransport("sh", []string{"-c", "echo '[warn] runtime 启动即失败' >&2; echo 'second line' >&2; exit 7"}, nil)
-	tr.SetLogger(discardLogger())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -38,7 +38,7 @@ func TestToolsCollisionIsFailClosed(t *testing.T) {
 	if got := toolNames(tools); strings.Join(got, ",") != "a__safe_a,a__b__safe_b" {
 		t.Fatalf("冲突名 a__b__x 应整组丢弃、其余保留，got %v", got)
 	}
-	logs := r.log.String()
+	logs := r.logs()
 	if !strings.Contains(logs, "工具名跨 server 冲突") || !strings.Contains(logs, "a__b__x") {
 		t.Fatalf("冲突必须响亮留痕（否则用户只看到'工具少了'）: %s", logs)
 	}
@@ -142,10 +142,12 @@ func TestCallLeavesEvidence(t *testing.T) {
 		t.Fatal("未知来源应报错")
 	}
 
-	logs := r.log.String()
+	// 断言形态随日志出口变：slog 的 text handler 是 `server=gh`，glog（zap）是 JSON，
+	// 键值以 `"server":"gh"` 出现。断的是**字段在不在**，不是格式。
+	logs := r.logs()
 	for _, want := range []string{
-		"server=gh", "tool=echo", "outcome=ok", "outcome=error", "latency_ms=",
-		"tool=nope__echo", "outcome=deny",
+		`"server":"gh"`, `"tool":"echo"`, `"outcome":"ok"`, `"outcome":"error"`, `"latency_ms":`,
+		`"tool":"nope__echo"`, `"outcome":"deny"`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("调用留痕缺 %q：\n%s", want, logs)

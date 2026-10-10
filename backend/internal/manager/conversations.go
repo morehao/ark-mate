@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
+	"github.com/morehao/golib/glog"
 )
 
 // ListConversations 返回会话概要；archived=false 仅未归档（默认），true 仅归档。
@@ -153,7 +153,7 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch dtoco
 			return nil, code.FromError(err)
 		}
 		if !applied {
-			slog.Default().Debug("会话不在活跃集合，模型变更仅更新元数据", "conversation", id)
+			glog.Debugw(ctx, "会话不在活跃集合，模型变更仅更新元数据", "conversation", id)
 		}
 		s.mu.Lock()
 		r.Model = *patch.Model
@@ -166,7 +166,7 @@ func (s *Service) UpdateConversation(ctx context.Context, id string, patch dtoco
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateConversationMeta(ctx2, id, meta); err != nil {
-			slog.Default().Warn("store: update conversation meta failed", "conversation", id, "err", err)
+			glog.Warnw(ctx, "store: update conversation meta failed", "conversation", id, "err", err)
 		}
 	}
 	s.mu.Lock()

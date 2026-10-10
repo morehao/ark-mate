@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morehao/golib/glog"
 )
 
 // TestMain 复用测试二进制作为 stdio MCP 服务端（MATE_MCP_HELPER=1 时进入 helper 循环）。
@@ -28,6 +30,21 @@ func runHelper() {
 	if mode == "server" {
 		// mode=server：跑**本包真实的服务端实现**（server.go），用来做自研互测与 stdout 纯度
 		// 检查。这里不手写帧，手写的那套（下面）继续负责"故障注入"这类客户端侧用例。
+		//
+		// 日志出口按**真实 `mate mcp` 的形态**初始化：只能写文件。glog 的 console writer
+		// 写的是 os.Stdout（golib 里硬编码），而这里的 stdout 是 JSON-RPC 协议流（C10）。
+		if dir := os.Getenv("MATE_MCP_HELPER_LOG_DIR"); dir != "" {
+			if err := glog.InitLogger(&glog.LogConfig{
+				Service:    "mate-mcp-helper",
+				Level:      glog.DebugLevel,
+				LoggerType: glog.LoggerTypeZap,
+				Writers:    []glog.WriterConfig{{Type: glog.WriterFile, Level: glog.DebugLevel, Dir: dir}},
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "helper: 初始化日志失败: %v\n", err)
+			}
+			// 文件 writer 是缓冲的（256KB/5s），退出前必须刷出，否则父进程读到空文件。
+			defer func() { _ = glog.Close() }()
+		}
 		_ = Serve(context.Background(), os.Stdin, os.Stdout,
 			ServerInfo{Name: "test-gateway", Version: "9.9.9", Instructions: "测试网关"},
 			helperGatewayHandler(), ServerOptions{})

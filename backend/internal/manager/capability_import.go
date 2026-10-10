@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/golib/glog"
 )
 
 // ——— 存量能力定义的一次性导入与导出（M6-4） ———
@@ -219,7 +219,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 func globSorted(dir string) []string {
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
-		slog.Warn("capability: 扫描目录失败", "dir", dir, "err", err)
+		glog.Warnw(context.Background(), "capability: 扫描目录失败", "dir", dir, "err", err)
 		return nil
 	}
 	sort.Strings(files)
@@ -231,7 +231,7 @@ func globSorted(dir string) []string {
 // `kind` 是**定义的域**（skill / mcp / agent），它同时是日志与输出的分类依据——不写死
 // "capability"，否则 agent 的坏定义会以能力面的名义报出来（排查时先被误导一次）。
 func warnFile(out io.Writer, kind, path string, err error) {
-	slog.Warn("定义导入：跳过一条坏定义", "kind", kind, "file", path, "err", err)
+	glog.Warnw(context.Background(), "定义导入：跳过一条坏定义", "kind", kind, "file", path, "err", err)
 	if out != nil {
 		fmt.Fprintf(out, "  ✗ %s/%s: %v\n", kind, filepath.Base(path), err)
 	}
