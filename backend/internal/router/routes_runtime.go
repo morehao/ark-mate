@@ -24,4 +24,7 @@ func registerRuntime(v1 *gin.RouterGroup, ports Ports) {
 	v1.DELETE("/providers/:id", provider.Delete)
 	v1.POST("/providers/:id/probe", provider.Probe)
 	v1.GET("/models", model.List)
+	v1.POST("/models", model.Create)
+	v1.PATCH("/models/:id", model.Update)
+	v1.DELETE("/models/:id", model.Delete)
 }

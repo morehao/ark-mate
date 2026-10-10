@@ -22,6 +22,10 @@ type AgentCreateReq struct {
 	// （与定义文件/导入一致：写了不存在的 id 在注入时 WARN 跳过），校验只判类型。
 	Mcps             *[]string             `json:"mcps,omitempty"`
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
+	// DefaultModel **刻意保留一个字段只为显式拒绝**（E8）：它是 `models.is_default` 的派生投影，
+	// 没有写入方。不能靠"静默忽略"——agent 的 body 会原样保留未知键，静默收下会让它变成一个
+	// 「写了、存了、什么都不发生」的字段（业务风险 B1 要防的正是这种骗人）。带了就 40001 + 指路。
+	DefaultModel json.RawMessage `json:"default_model"`
 }
 
 // AgentUpdateReq PATCH agent 元数据（指针字段：nil 不更新；`null` = 清除该字段）。
@@ -34,4 +38,6 @@ type AgentUpdateReq struct {
 	// （清空白名单 = 回落未声明）。typed 指针会把两者都变成 nil，"恢复全量"就再也表达不出来。
 	// 取值域见文件头三态说明；解析在 manager 写面（`decodeAgentMcpsPatch`）。
 	Mcps json.RawMessage `json:"mcps"`
+	// DefaultModel 同 AgentCreateReq：**只用于显式拒绝**（40001 + 指路「去设置 · 模型 改」）。
+	DefaultModel json.RawMessage `json:"default_model"`
 }

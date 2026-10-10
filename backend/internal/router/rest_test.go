@@ -297,6 +297,30 @@ func (s *stubSvc) ProbeProvider(_ context.Context, id string, req dtoprovider.Pr
 	}
 	return &dtoprovider.ProviderProbeResp{ID: id, Upstream: req.Upstream, OK: true}, nil
 }
+func (s *stubSvc) ListModels(_ context.Context, runtimeID string) ([]dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return nil, nil
+}
+func (s *stubSvc) CreateModel(_ context.Context, req dtomodel.ModelCreateReq) (*dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelResp{ID: "m1", Runtime: req.Runtime, ProviderID: req.ProviderID, ModelID: req.ModelID}, nil
+}
+func (s *stubSvc) UpdateModel(_ context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelResp{ID: id}, nil
+}
+func (s *stubSvc) DeleteModel(_ context.Context, id string) (*dtomodel.ModelDeleteResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelDeleteResp{Deleted: true}, nil
+}
 func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr

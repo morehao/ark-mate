@@ -43,9 +43,6 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 	}
 
 	d := &providerDef{ID: req.ID, Type: req.Type, Body: map[string]any{}}
-	if req.Model != nil {
-		d.Model = *req.Model
-	}
 	if req.Note != nil {
 		d.Note = *req.Note
 	}
@@ -124,9 +121,6 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	next.Body = cloneAnyMap(snap.Body)
 	if patch.Type != nil {
 		next.Type = *patch.Type
-	}
-	if patch.Model != nil {
-		next.Model = *patch.Model
 	}
 	if patch.Note != nil {
 		next.Note = *patch.Note

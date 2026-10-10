@@ -6,15 +6,19 @@ package ctrmodel
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// ModelCtr 模型目录控制器（运行时派生的 ACP session config options 投影）。
+// ModelCtr 模型面控制器：运行时派生的目录（读）+ 平台清单的写面（CRUD）。
 type ModelCtr interface {
 	List(c *gin.Context)
+	Create(c *gin.Context)
+	Update(c *gin.Context)
+	Delete(c *gin.Context)
 }
 
 var _ ModelCtr = (*modelCtr)(nil)
@@ -42,6 +46,46 @@ func (h *modelCtr) List(c *gin.Context) {
 		agentID = h.agentSvc.DefaultAgentID()
 	}
 	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Create 新建一条模型条目（同三元组已存在 → 40901 `model_exists`）。
+func (h *modelCtr) Create(c *gin.Context) {
+	var req dtomodel.ModelCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateModel(c.Request.Context(), req)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Update 覆盖一条模型条目（指针更新；不存在 → 40401 `model_not_found`）。
+func (h *modelCtr) Update(c *gin.Context) {
+	var patch dtomodel.ModelPatchReq
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.UpdateModel(c.Request.Context(), c.Param("id"), patch)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Delete 删除一条模型条目（幂等；默认模型 → 40501 `model_is_default` + 可执行出路）。
+func (h *modelCtr) Delete(c *gin.Context) {
+	resp, err := h.svc.DeleteModel(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

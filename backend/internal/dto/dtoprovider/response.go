@@ -9,10 +9,9 @@ package dtoprovider
 type ProviderResp struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
-	// Model 历史字段（P3 的静默陷阱）：今天不驱动任何行为，**M5 删除**。
-	// 在此之前仍透出，是为了不改动既有前端调用点；迁移时它的值原样留在 body 里。
-	Model  string `json:"model,omitempty"`
-	HasKey bool   `json:"has_key"`
+	// **不再有 `model` 字段**（E4/D-1 的删除）：它今天不驱动任何行为（P3 的静默陷阱），
+	// 留着只会让用户以为设了默认模型。历史值仍在正文里（导出可见），但对外契约里没有它。
+	HasKey bool `json:"has_key"`
 	// Revision 载体版本（sqlite = 行 revision，写面 CAS 判据；memory = 0，文件载体没有版本号）。
 	Revision int64 `json:"revision"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano；memory 模式为空 = 由文件 mtime 承载）。

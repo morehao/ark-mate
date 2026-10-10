@@ -284,7 +284,7 @@ func (s *Service) ListProviders() ([]dtoprovider.ProviderResp, error) {
 // 让"引用面"与"档案本身"来自两个不同时刻（删 agent 与改档案并发时会看到不存在的引用）。
 func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.ProviderResp {
 	resp := dtoprovider.ProviderResp{
-		ID: id, Type: d.Type, Model: d.Model, Note: d.Note,
+		ID: id, Type: d.Type, Note: d.Note,
 		HasKey:   d.Key != "" || d.KeyRef != "",
 		Revision: d.Revision,
 		Refs:     dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},

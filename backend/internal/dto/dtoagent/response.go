@@ -20,6 +20,16 @@ type AgentResp struct {
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
 	// ConversationCount 绑定该 agent 的会话数（删除影响面：历史保留可读，删除后无法继续提问）。
 	ConversationCount int `json:"conversation_count"`
+	// DefaultModel 该 agent 在各 runtime 上的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
+	//
+	// 它**没有写入方**：`GET /agents` 按 `agent.runtimes[]` 与 `models.is_default` 求交算出来，
+	// 于是它随 `is_default` **自动变**，结构上不可能漂移（存一份就必然要配一条同步逻辑，
+	// 忘了同步就漂移）。每个 runtime 至多一个键；该 runtime 没有默认时不出现在里面。
+	//
+	// 为什么必须在 agent 上呈现：agent 管理页要能回答"这个 agent 会用哪个模型"，
+	// 否则用户只能在两个页面之间自己拼。而 `runtimes[]` 是**列表**，所以它必须按 runtime 索引，
+	// 任何单值字段都表达不了。
+	DefaultModel map[string]string `json:"default_model,omitempty"`
 }
 
 // AgentDeleteResp 删除 agent 的结果与影响面。

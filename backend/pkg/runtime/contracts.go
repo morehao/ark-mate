@@ -53,6 +53,12 @@ type Spec struct {
 	// Projections 该 runtime 承载各类能力的**原生形态**声明（投影契约，见 projection.go）。
 	// 空 = 该 runtime 不承载任何平台可投影的能力（远程端点即如此 → not_applicable）。
 	Projections []Projection
+	// ConfigProjection 该 runtime 的**模型配置文件**落点声明（T5 `config_write`，见 config_projection.go）。
+	// 空 Format = 该 runtime 不承载平台模型清单：条目写面按"未声明"拒绝（40501），
+	// `GET /models` 回落到"只读运行时目录"的旧形态。
+	//
+	// 与 Projections 分开的理由见 config_projection.go 文件头（一个能力一个目录 vs 一个 runtime 一个文件）。
+	ConfigProjection ConfigProjection
 	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
 	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
 	CapabilityScope string

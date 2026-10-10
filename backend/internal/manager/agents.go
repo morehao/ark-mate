@@ -276,6 +276,9 @@ func seedAgent(id string) bool {
 // CreateAgent 注册新 agent（非种子）：校验可启动（runtime 已注册 → 静态能力冻结于 runtime 侧）并持久化。
 // 返回注册后的对外表示。
 func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) (*dtoagent.AgentResp, error) {
+	if err := rejectDerivedDefaultModel(req.DefaultModel); err != nil {
+		return nil, err
+	}
 	if strings.HasPrefix(req.ID, reservedAgentPrefix) {
 		return nil, acl.NewError(acl.ClassRequest, "reserved_agent_id", fmt.Sprintf("%q 为种子保留前缀，自定义 agent 请用其它 id", reservedAgentPrefix), nil)
 	}
@@ -306,6 +309,9 @@ func (s *Service) CreateAgent(ctx context.Context, req dtoagent.AgentCreateReq) 
 // 顺序是"先校验 → 再提交载体 → 最后改内存"：载体提交失败时内存一个字段都不动
 // （M6 之前是"先改内存再写文件"，写失败会留下"内存里有、盘上没有"的半死态）。
 func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
+	if err := rejectDerivedDefaultModel(patch.DefaultModel); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	cur, ok := s.agents[id]
 	if !ok {
@@ -480,6 +486,8 @@ func (s *Service) StopAgent(ctx context.Context, id string) error {
 
 // agentRespLocked 取 agent 对外表示（须持锁外调用）。
 func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
+	// 派生的 default_model 同样在持锁之前读库（见 ListAgents 的注释）。
+	defaults := s.defaultModelByRuntime(context.Background())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.agents[id]
@@ -489,5 +497,6 @@ func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
 		Mcps: a.Mcps, PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
-		ConversationCount: s.conversationCountLocked(a.ID)}
+		ConversationCount: s.conversationCountLocked(a.ID),
+		DefaultModel:      derivedDefaultModels(a.Runtimes, defaults)}
 }

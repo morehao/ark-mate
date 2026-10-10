@@ -18,8 +18,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	key := "sk-secret-abc"
 	typ := "openai"
-	model := "gpt-4o"
-	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "default", Type: typ, Model: &model, Key: &key})
+	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "default", Type: typ, Key: &key})
 	if err != nil {
 		t.Fatalf("UpdateProvider: %v", err)
 	}

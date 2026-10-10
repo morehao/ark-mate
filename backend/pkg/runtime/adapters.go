@@ -37,6 +37,30 @@ func opencodeSpec() Spec {
 			"在底座内完成 provider 登录，或给该 agent 绑定 provider 档案以注入密钥 env",
 		},
 		Projections: []Projection{opencodeSkillProjection()},
+		// 模型清单的落点（T5/ADR-15）：主通道是**内联 content**（`OPENCODE_CONFIG_CONTENT`，
+		// 配置优先级 ⑥，压过项目级发现 ④⑤），文件仍写（对账的读回锚点 + 没有内联通道时的兜底）。
+		// 根取隔离表注入的 `OPENCODE_CONFIG_DIR`（平台独占；用户的 ~/.config/opencode 一个字节不碰）。
+		//
+		// Tested 的取值见下面的长注释。
+		ConfigProjection: ConfigProjection{
+			Format:          ConfigFormatOpencodeJSON,
+			Root:            "${OPENCODE_CONFIG_DIR}",
+			Filename:        "opencode.json",
+			Channel:         ConfigChannelEnvContent,
+			FileChannel:     ConfigChannelDirRead,
+			Tested:          false,
+			TestedOnVersion: "",
+			Effect:          ConfigEffectNextProcess,
+			Note: "本仓尚无「写清单 → 新模型出现在 ACP 候选里」的端到端实测（H6 的任务）：" +
+				"验收脚本证明过底座**真的读**这个文件（desktop-skill-projection-acceptance.mjs 写它并按其中的 " +
+				"settings.baseURL 发请求），但从未在一条探针里把「写完去读 ACP 目录」串起来过。" +
+				"实测通过后把 Tested 置 true 并把载荷版本填进 TestedOnVersion。" +
+				"已知边界：① 内联内容走 env，同机同用户 ps eww 可见（清单不是密钥，可接受；" +
+				"**因此绝不能把 apiKey 放进内联内容**，密钥仍走 T1 的 env 引用）；" +
+				"② 管理员面（managed 配置 / macOS MDM）仍然压过平台，受管机器上「平台清单 = 最终生效清单」不成立；" +
+				"③ 空清单会让 opencode 起不了会话（loadCatalog 重试 5s 后抛 No models are available）——" +
+				"所以生成器必须保证「有清单才写」。",
+		},
 		// 未实测：P-2 探针尚无结论 → 保守 process（EffectiveCapabilityScope 也会强制回落）。
 		CapabilityScope: CapabilityScopeProcess,
 		Tested:          false,
@@ -116,6 +140,29 @@ func deepseekharnessSpec() Spec {
 			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
 		},
 		Projections: []Projection{deepseekharnessSkillProjection()},
+		// 模型清单的落点（T5/ADR-14）：平台写**自己的** overlay，由 `--patch <绝对路径>` 递入。
+		//
+		// 为什么不用 `$DSH_HOME/cordis.patch.yml`（home 级 patch）：那份是 dsh 自己的持久层，
+		// 平台写它会把用户从底座设置界面里的权利挤掉，且写坏就是**拒启**、只能靠修复文件恢复。
+		// 平台的 overlay + 启动参数坏了把参数去掉即可（回到出厂配置），且归属干净（那个文件只有平台写）。
+		// 根取隔离表注入的 `DSH_HOME`（= <MATE_HOME>/runtime/dsh，平台独占）；文件名带 `mate-` 前缀
+		// 表明归属，且**不覆盖** dsh 自己的 `cordis.patch.yml`。
+		ConfigProjection: ConfigProjection{
+			Format:          ConfigFormatDshPatchYAML,
+			Root:            "${DSH_HOME}",
+			Filename:        "mate-models.patch.yml",
+			Channel:         ConfigChannelCLIPatchArg,
+			Tested:          false,
+			TestedOnVersion: "",
+			Effect:          ConfigEffectNextProcess,
+			Note: "H6 的 dsh 组尚未跑：机制上成立（`--patch` 是层序最高的一层、与 --dump-config 共用同一份 " +
+				"patch 算法），但本仓没有实测记录，故**只读不写**。" +
+				"三条已知坑：① 空 patch / 只有注释的文件会让 dsh **拒启**（README 逐字：「an empty or " +
+				"comments-only file fails boot — disable the layer with [] instead」）；" +
+				"② `--patch` 的路径必须是**绝对**路径（dsh 侧按调用目录解析，而平台拉底座的 cwd 是用户会话目录）；" +
+				"③ 目标条目是 `id: acp`（ACP 平面唯一消费模型的行），**不是** agent-default-model" +
+				"（ACP 平面不消费它，写它等于空操作）。",
+		},
 		// 未实测：P-2 探针尚无结论 → 保守 process。
 		CapabilityScope: CapabilityScopeProcess,
 		Tested:          false,

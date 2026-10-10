@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -119,7 +120,12 @@ func (s *Service) currentDefaultLocked() string {
 }
 
 // ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，conversation_count 为删除影响面）。
+//
+// `default_model` 是**派生只读**（E7）：每个 runtime 的默认模型取 `models.is_default`，
+// 按该 agent 的 `runtimes[]` 求交。读库在**持锁之前**完成一次（不是逐 agent 查）——
+// 在 s.mu 里做 IO 会让整个注册表面等服务层的数据库调用。
 func (s *Service) ListAgents() ([]dtoagent.AgentResp, error) {
+	defaults := s.defaultModelByRuntime(context.Background())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur := s.currentDefaultLocked()
@@ -127,8 +133,10 @@ func (s *Service) ListAgents() ([]dtoagent.AgentResp, error) {
 	for _, a := range s.agents {
 		out = append(out, dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 			IsDefault: a.ID == cur, Seed: seedAgent(a.ID), Runtimes: a.Runtimes,
-			PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
-			ConversationCount: s.conversationCountLocked(a.ID)})
+			PermissionPolicy:   toPermissionPolicyResp(a.PermissionPolicy),
+			ConversationCount:  s.conversationCountLocked(a.ID),
+			DefaultModel:       derivedDefaultModels(a.Runtimes, defaults),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

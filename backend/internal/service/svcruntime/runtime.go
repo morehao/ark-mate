@@ -34,6 +34,21 @@ type RuntimeSvc interface {
 	ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error)
 
 	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
-	// 平台不内置任何模型清单：source=session|resume|cache|none 标注取样来源。
+	// source=session|resume|cache|none 标注取样来源。它是**事实**（运行时广告什么）；
+	// 平台声明的那份是 `models` 表，读面见 ListModels。
 	ModelCatalog(ctx context.Context, agentID string) (*dtomodel.ModelCatalogResp, error)
+
+	// ListModels 列出**平台声明的模型清单**（runtimeID 为空 = 全部）。它是**意图**，
+	// 与 ModelCatalog 的「事实」在对账里相遇（declared vs advertised）。
+	ListModels(ctx context.Context, runtimeID string) ([]dtomodel.ModelResp, error)
+
+	// CreateModel 新建一条模型条目（runtime/provider_id/model_id 三元组唯一；
+	// runtime 未声明 ConfigProjection → 40501，provider 不存在 → 40401）。
+	CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) (*dtomodel.ModelResp, error)
+
+	// UpdateModel 覆盖一条模型条目（指针更新；`is_default:true` 同时清掉同 runtime 的旧默认）。
+	UpdateModel(ctx context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error)
+
+	// DeleteModel 删除一条模型条目（幂等；**是该 runtime 的默认模型 → 40501** `model_is_default`）。
+	DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDeleteResp, error)
 }

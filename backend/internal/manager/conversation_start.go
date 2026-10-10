@@ -111,6 +111,25 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveConversation{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: fingerprint,
 		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
+	// 模型回落链（E5/T2 快路径）：**会话显式 model > models.is_default[该 runtime] > 不下发**。
+	//
+	// 三条纪律：
+	//   1. 只读 `models` 表，**不读 agents**——agent 上是同一个值的派生投影，绕它走会多一个
+	//      可能不一致的源；
+	//   2. runtime 取「本次会话实际选中的 runtime」（就是这里的 spec.ID），不是 agent 的第一个；
+	//   3. 查不到默认就**不下发**（`opt.Model.Model` 保持空）——把"没有默认"与"默认是某个值"
+	//      分开，并允许底座自身的默认继续生效（零回归的那一支）。
+	//
+	// 为什么这条路径不可省：T5（写配置文件）要**新进程**才生效，且首版 dsh 侧 Tested=false
+	// 只读——只有 T5 的话，dsh 上"设为默认"点了等于没点。
+	if opt.Model.Model == "" {
+		if v, err := o.svc.DefaultModelValueFor(ctx, spec.ID); err != nil {
+			slog.Default().Warn("读取平台默认模型失败（本次不下发，交给底座自己的默认）",
+				"runtime", spec.ID, "err", err)
+		} else if v != "" {
+			opt.Model = runtime.ModelConfig{Model: v}
+		}
+	}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
 	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
