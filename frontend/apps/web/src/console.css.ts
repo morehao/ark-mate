@@ -65,7 +65,7 @@ export const consoleStyleSheet = `
     box-shadow: inset 0 0 0 1px ${tokens.primary};
   }
 
-  /* 会话侧栏（桌面静态分栏；≤920px 在下方媒体里抽屉化） */
+  /* 左栏（导航 + 会话区 + 状态）：桌面常驻 288px；≤920px 在下方媒体里抽屉化 */
   .fg-rail {
     width: 288px;
     flex: none;
@@ -76,15 +76,198 @@ export const consoleStyleSheet = `
     border-right: 1px solid ${tokens.border};
   }
 
-  /* 移动端（≤920px）：burger 出现、侧栏抽屉化、管理入口收纳 */
-  .fg-burger { display: none; }
+  /* 品牌区：48px（原顶栏 52px，省下的 4px 留给会话区） */
+  .fg-rail-brand {
+    flex: none;
+    display: flex;
+    align-items: center;
+    height: 48px;
+    padding: 0 14px;
+    font-size: 15px;
+    font-weight: 660;
+    letter-spacing: -0.02em;
+    color: ${tokens.text};
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  /* 导航区：一级 32px / 二级 30px，条目间距 1px */
+  .fg-nav-rail {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 8px 8px;
+  }
+  .fg-navitem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: ${tokens.textSecondary};
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-navitem:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-navitem.fg-on { background: ${tokens.softFill}; color: ${tokens.text}; font-weight: 600; }
+  .fg-navitem-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fg-navitem-count { flex: none; font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textSecondary}; }
+
+  /* 组行：文字区（进总览 + 展开）与箭头区分工，箭头的点击面独立 */
+  .fg-navgroup-row { padding-right: 4px; }
+  .fg-navgroup-text {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .fg-navgroup-caret {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: ${tokens.textPlaceholder};
+    cursor: pointer;
+  }
+  .fg-navgroup-caret:hover { background: ${tokens.border}; color: ${tokens.text}; }
+
+  /* 二级项：缩进 26px；命中态用主色文字 + 弱底 */
+  .fg-navsub-list { display: flex; flex-direction: column; gap: 1px; }
+  .fg-navsub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px 0 26px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: ${tokens.textSecondary};
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .fg-navsub:hover { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-navsub.fg-on { background: ${tokens.softFill}; color: ${tokens.primary}; font-weight: 600; }
+  .fg-navsub-label { flex: 1; min-width: 0; }
+  /* pending（待开发）：可读但不可点，右挂「待开发」标签 */
+  .fg-navsub.fg-pending { color: ${tokens.textPlaceholder}; cursor: default; }
+  .fg-navsub.fg-pending:hover { background: transparent; color: ${tokens.textPlaceholder}; }
+  .fg-navsub-tag {
+    flex: none;
+    padding: 0 5px;
+    border: 1px solid ${tokens.border};
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 15px;
+    color: ${tokens.textPlaceholder};
+  }
+
+  /* 会话区：占满品牌/导航/footer 之外的高度（滚动落在内部列表上）；上面一道 hairline 把「导航」与「会话」两段分开 */
+  .fg-rail-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid ${tokens.border};
+  }
+
+  /* 左栏 footer：WS 状态 + 令牌（原顶栏右侧的两个状态面） */
+  .fg-rail-foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 10px;
+    border-top: 1px solid ${tokens.border};
+  }
+  .fg-rail-ws {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    color: ${tokens.textSecondary};
+  }
+  .fg-rail-token {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: transparent;
+    color: ${tokens.textPlaceholder};
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .fg-rail-token:hover { border-color: ${tokens.borderStrong}; color: ${tokens.text}; }
+
+  .fg-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* 窄屏顶条（宽屏隐藏）：左栏收成抽屉后唯一的开启入口 */
+  .fg-burger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border: 1px solid ${tokens.border};
+    border-radius: 8px;
+    background: ${tokens.surface};
+    color: ${tokens.text};
+    cursor: pointer;
+  }
+  .fg-mobilebar { display: none; }
   .fg-scrim-mobile { display: none; }
+
+  /* 移动端（≤920px）：左栏抽屉化（top 0——顶栏已撤，抽屉盖满全高） */
   @media (max-width: 920px) {
     .fg-burger { display: inline-flex; }
-    .fg-nav { display: none; }
+    .fg-mobilebar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: none;
+      height: 52px;
+      padding: 0 12px;
+      background: ${tokens.surface};
+      border-bottom: 1px solid ${tokens.border};
+    }
+    .fg-mobilebar-title { font-size: 13.5px; font-weight: 600; color: ${tokens.text}; }
     .fg-rail {
       position: fixed;
-      top: 52px;
+      top: 0;
       bottom: 0;
       left: 0;
       z-index: 40;

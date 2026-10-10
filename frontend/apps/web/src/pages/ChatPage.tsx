@@ -7,7 +7,6 @@ import { Ev } from '@ark-mate/types'
 import { conversationHistory, conversationRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { AgentBadge } from '../components/AgentBadge'
-import { ConversationRail } from '../components/ConversationRail'
 import { ConversationDetailDrawer } from '../components/ConversationDetail'
 import { Composer } from '../components/Composer'
 import { QueuedInputs } from '../components/QueuedInputs'
@@ -30,7 +29,6 @@ export function ChatPage() {
   const conversations = useMate((s) => s.conversations)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
-  const drawerOpen = useMate((s) => s.drawerOpen)
   const activate = useMate((s) => s.activate)
   const expireHydration = useMate((s) => s.expireHydration)
   const sendPrompt = useMate((s) => s.sendPrompt)
@@ -38,7 +36,6 @@ export function ChatPage() {
   const cancel = useMate((s) => s.cancel)
   const archiveConversation = useMate((s) => s.archiveConversation)
   const showToast = useMate((s) => s.showToast)
-  const setDrawer = useMate((s) => s.setDrawer)
   const anchorSeq = useMate((s) => s.anchorSeq)
   const clearAnchor = useMate((s) => s.clearAnchor)
   const loadOlder = useMate((s) => s.loadOlder)
@@ -464,15 +461,6 @@ export function ChatPage() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: tokens.bg }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        <ConversationRail onCreate={openNew} />
-        {drawerOpen && (
-          <div
-            className="fg-scrim-mobile"
-            style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.34)', zIndex: 35 }}
-            onClick={() => setDrawer(false)}
-          />
-        )}
-
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
           {!activeId ? (
             // 未选中会话 = 新建会话面板（不再有独立的「开始问答」空态页）；

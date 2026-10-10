@@ -39,8 +39,12 @@ rounded:
 
 spacing:
   base: 4px
-  appbar-height: 52px
-  session-rail-width: 288px
+  rail-width: 288px
+  rail-brand-height: 48px
+  rail-foot-height: 40px
+  nav-item-height: 32px
+  nav-subitem-height: 30px
+  mobile-bar-height: 52px
   transcript-max-width: 840px
 ---
 
@@ -53,7 +57,7 @@ spacing:
 
 - **定位**：ark-mate Web 问答控制台（会话问答优先，Agent/Runtime 管理为次要入口）。
 - **基准**：`ark-mate-console.html`（~/Downloads 下的高保真原型，不入库；仅作设计基准）——modern-minimal 浅色应用壳（Linear / Vercel 语感）。
-- **画布**：页面底 `surface-layout`（冷白）；会话侧栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline` hairline 分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
+- **画布**：页面底 `surface-layout`（冷白）；左栏 / 卡片 / 输入区落在白色表面 `surface-card`，以 `1px solid border-hairline` hairline 分层、**无卡片阴影**（阴影仅 Modal / toast 浮层 / 移动端抽屉）。
 - **品牌**：靛蓝 `#4f6ef7` 是唯一强调色（主按钮 / 链接 / 选中态 / 焦点环 / 品牌点「ark·mate」的 ·）；会话选中态与 agent 选项卡用半透明 `primary-soft` / `selected-bg` 柔和底，主色不铺满页面。
 - **问答正文**：用户消息为中性软灰气泡（`soft-fill`），assistant 正文为纯文字 + 流式光标；思考用左侧竖线弱化区；工具调用为白卡 hairline 卡片；系统/meta 行居中 mono 弱字。
 - 全站 `tabular-nums`（由 `@ark-mate/ui` AppShell 根容器开启），seq / 计数等数字等宽。
@@ -62,20 +66,28 @@ spacing:
 
 ```
 AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
-└─ <div .app 100dvh flex-col>
-   ├─ TopBar（52px 白底 hairline 底）：burger / logo(→/conversations) / 视图 chip / 管理入口 / WS 状态
-   ├─ reconnecting 横幅（WS 非 open 时）
-   ├─ 路由区
-   │   ├─ /conversations[/:id]  ChatPage：
-   │   │   ├─ ConversationRail（288px 白侧栏：新建会话 + 会话列表 + 底座 foot）
-   │   │   ├─ 无 id（未选中会话）→ StartPanel 新建面板（hero + 当前 Agent 行 + 输入卡 + 示例指令）
-   │   │   ├─ 有 id → chat：ChatHead（标题 + 当前 Agent 胶囊）/ Transcript（840px 居中）/ Composer
-   │   │   └─ StatusBar（30px：WS + eventbus seq）
-   │   └─ /agents /capabilities /usage /settings  管理次要页（PageContainer 白卡列表）
+└─ <div .app 100dvh flex-row>
+   ├─ NavRail（左栏 288px 白底 + 右侧 hairline；常驻，唯一导航面）
+   │   ├─ 品牌区（48px）：ark·mate → /conversations
+   │   ├─ 导航区：一级 32px / 二级 30px；「扩展」是组（专家(待开发) · 技能 · 连接器），
+   │   │            组行文字区=进总览、箭头区=只切换展开
+   │   ├─ 会话区（仅 /conversations* 渲染）：视图切换 + 搜索 + 会话列表（ConversationPane）
+   │   └─ footer（40px）：WS 状态点 + 令牌入口
+   ├─ 右列（flex-1 flex-col）
+   │   ├─ 窄屏顶条（≤920px：burger + 当前入口名；宽屏隐藏）
+   │   ├─ reconnecting 横幅（WS 非 open 时）
+   │   ├─ 路由区
+   │   │   ├─ /conversations[/:id]  ChatPage：
+   │   │   │   ├─ 无 id（未选中会话）→ StartPanel 新建面板（hero + 当前 Agent 行 + 输入卡 + 示例指令）
+   │   │   │   ├─ 有 id → chat：ChatHead（标题 + 当前 Agent 胶囊）/ Transcript（840px 居中）/ Composer
+   │   │   │   └─ StatusBar（30px：WS + eventbus seq）
+   │   │   ├─ /extensions[/skills|/connectors]  扩展总览 / 技能 / 连接器（PageContainer 白卡列表）
+   │   │   └─ /agents /usage /automations /settings  管理页（PageContainer 白卡列表）
+   │   │       （历史路径 /capabilities 一行重定向到 /extensions）
    └─ toast（右上浮层，仅浮层可带阴影）
 ```
 
-移动端 ≤920px：burger 出现、会话侧栏抽屉化（fixed + translateX）、管理入口收纳。
+移动端 ≤920px：左栏抽屉化（fixed + translateX，top 0——顶栏已撤，抽屉盖满全高），窄屏顶条出现 burger（唯一开启入口），点导航项/遮罩即收起。
 
 ## 3. 组件规格
 
@@ -85,6 +97,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 - **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / hairline 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
 - **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 当前 Agent 标识行 + 内嵌输入卡（模型 pill / 主色圆形发送）+ 示例指令列表；新建固定用默认 Agent，不展示 agent 选项卡（也不提供跳转，只如实标出用哪个 Agent）。
 - **当前 Agent 标识（AgentBadge）**：**纯展示、不可点**——mono 胶囊 = 状态点（running 绿 / stopped 灰）+「Agent · 名称」（+ 默认 `primary-soft` 小标）；hover 出详情浮层（状态 / provider / runtime 候选 / id）。会话与 Agent 一对一绑定，故只在新建面板与 ChatHead 各标一处，不逐条消息重复。
+- **左栏导航（NavRail）**：条目只在 `apps/web/src/console/navView.ts` 定义（含 order），交互态（hover / 选中 / 展开）只在 `console.css.ts` 的 `.fg-rail*` / `.fg-nav*` 类。组的展开态是 `navExpanded[组] ?? 当前路由是否命中该组`：会话页不展开「扩展」（把左栏高度让给会话列表，1440×800 下会话列表可视 ≈7 条），扩展页自动展开以露出当前二级项；用户显式收起过的组不再自动展开。一级叶子 32px、二级 30px（缩进 26px）；选中 = `soft-fill` 底 + 主色（二级）；未实现的项（专家）**可读不可点**，右侧挂 mono「待开发」标签并给 hover 说明——不留占位页、不注册路由。
 - **管理页**：`PageContainer`（标题/描述/右上操作 + 白卡行列表），行间 hairline 分隔，ID 用 mono。
 
 ## 4. Do's and Don'ts

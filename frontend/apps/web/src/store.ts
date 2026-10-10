@@ -35,6 +35,7 @@ import { BizCode, Ev } from '@ark-mate/types'
 import { resolveStreamConfig, type StreamConfig } from './carrier'
 import { WsTransport } from './transport/ws'
 import { olderCursor, prependOlder } from './console/transcriptView'
+import { setExpanded } from './console/navView'
 import {
   cancelNotice,
   cancelTone,
@@ -383,6 +384,8 @@ export interface MateState {
   carrierError: string | null
   toast: Toast | null
   drawerOpen: boolean
+  /** 左栏「扩展」这类导航组的展开态（groupId → 是否展开；不落盘，刷新回默认）。 */
+  navExpanded: Record<string, boolean>
   /** 会话侧栏当前视图：active=未归档列表；archived=已归档列表（REST archived=true）。 */
   railMode: 'active' | 'archived'
   /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
@@ -450,6 +453,8 @@ export interface MateActions {
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
+  /** 导航组展开/收起（左栏「扩展」）。 */
+  setNavGroupExpanded: (groupId: string, expanded: boolean) => void
   /** A6：设置/清除单操作员令牌并重连 WS + 重新拉取数据。 */
   saveToken: (token: string) => void
   setTokenModal: (open: boolean) => void
@@ -474,6 +479,8 @@ export const initialState: MateState = {
   carrierError: null,
   toast: null,
   drawerOpen: false,
+  // 空 = 没被用户切过：NavRail 按「当前路由是否命中该组」决定默认展开（见 navView.groupExpanded）
+  navExpanded: {},
   railMode: 'active',
   token: getToken(),
   tokenModalOpen: false,
@@ -617,6 +624,8 @@ export const useMate = create<MateStore>((set, get) => {
     },
 
     setDrawer: (open) => set({ drawerOpen: open }),
+
+    setNavGroupExpanded: (groupId, expanded) => set((s) => ({ navExpanded: setExpanded(s.navExpanded, groupId, expanded) })),
 
     refreshAgents: async () => {
       try {

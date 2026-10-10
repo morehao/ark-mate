@@ -371,7 +371,12 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 ```
 
 compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/镜像站）都有默认值，模板见仓库根
-`.env.example`：`cp .env.example .env` 后放开需要的行即可。
+`.env.example`：`cp .env.example .env` 后放开需要的行即可。**但 `.env` 不只 compose 读——`dsh`
+底座自己也会读它**（真实运行时读「调用目录」的 `.env`），而 `DSH_VERSION` 属于它的保留键
+（`DSH_` 前缀，另有 49 个固定名单与 `XDG_`/`DYLD_`/`BASH_FUNC_` 四个前缀）：写进 `.env` 会让
+dsh **拒绝启动**（`export DSH_VERSION instead of putting it in a .env file`）。要钉底座版本请走
+shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -d --build`）——compose 的
+插值优先级本来就是 shell 环境 > `.env`，两边都生效。判据与完整名单见 README「前后端分离开发」。
 
 镜像内的既定行为（都可用 `-e` / compose 覆盖）：
 

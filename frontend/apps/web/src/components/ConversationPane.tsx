@@ -89,14 +89,16 @@ function ViewTab({
   )
 }
 
-/** 会话侧栏（console.html .side）：新建入口 + 会话/归档视图 + 会话列表（分组/置顶/行内更多操作）。 */
-export function ConversationRail({ onCreate }: Props) {
+/** 会话列表区（原会话侧栏 .side）：视图切换 + 搜索 + 会话列表（分组/置顶/行内更多操作）。
+ *
+ * 外壳（宽度 / 抽屉位移 / `.fg-rail` 类）已上移给 NavRail——本组件只负责"内容体"，
+ * 由 NavRail 提供左栏容器与窄屏抽屉态。 */
+export function ConversationPane({ onCreate }: Props) {
   const navigate = useNavigate()
   const conversations = useMate((s) => s.conversations)
   const agents = useMate((s) => s.agents)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
-  const drawerOpen = useMate((s) => s.drawerOpen)
   const railMode = useMate((s) => s.railMode)
   const setDrawer = useMate((s) => s.setDrawer)
   const togglePin = useMate((s) => s.togglePin)
@@ -593,7 +595,7 @@ export function ConversationRail({ onCreate }: Props) {
   }
 
   return (
-    <aside className={`fg-rail${drawerOpen ? ' fg-open' : ''}`} aria-label="会话列表">
+    <div className="fg-rail-pane" aria-label="会话列表">
       <div
         style={{
           display: 'flex',
@@ -764,6 +766,6 @@ export function ConversationRail({ onCreate }: Props) {
           maxLength={80}
         />
       </Modal>
-    </aside>
+    </div>
   )
 }
