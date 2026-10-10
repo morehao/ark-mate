@@ -58,6 +58,9 @@ type generationPlan struct {
 	PermChanged bool
 	// FingerprintChanged 能力指纹（能力集内容）是否变了。与 PermChanged 相互独立。
 	FingerprintChanged bool
+	// ConfigChanged T5 的平台模型配置指纹是否变了（清单改了 → 新进程才读得到新配置）。
+	// 它**不是缩权面**：迁移失败可以回退旧代际（旧配置不是"已被收回的权限"）。
+	ConfigChanged bool
 }
 
 // planGenerationSwitch 比较「会话**此刻挂着的代际**」与「现在该用的代际」，给出本轮该怎么办。
@@ -103,10 +106,13 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveConversation, rec *Convers
 			wantFP = fp
 		}
 	}
+	// T5：平台生成的模型配置指纹也是代际维度（配置文件在进程启动时读）。
+	wantCfg := o.svc.runtimeConfigDigest(spec.ID)
 	plan := generationPlan{
-		From: rc.key, To: generationKey(baseNow, wantFP),
+		From: rc.key, To: generationKey(baseNow, wantFP, wantCfg),
 		PermChanged:        baseNow != rc.baseKey,
 		FingerprintChanged: wantFP != as.Fingerprint,
+		ConfigChanged:      wantCfg != rc.configDigest,
 	}
 	if plan.To == plan.From {
 		plan.Action = genActionKeep
@@ -134,6 +140,9 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveConversation, rec *Convers
 		plan.Reason = "权限/provider 与能力定义都变了：本轮边界迁到新代际"
 	case plan.PermChanged:
 		plan.Reason = "权限/provider 变化（进程级能力面已变，缩权需立刻生效）：本轮边界迁到新代际"
+	case plan.ConfigChanged:
+		// 纯模型清单变化：**不是缩权**，所以迁移失败可以回退旧代际（ADR-13 的不对称只针对权限面）。
+		plan.Reason = "平台模型清单变化（新配置在进程启动时读）：本轮边界迁到新代际"
 	default:
 		plan.Reason = "能力定义变化：本轮边界迁到新代际"
 	}

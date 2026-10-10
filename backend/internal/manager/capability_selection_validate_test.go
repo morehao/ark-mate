@@ -287,7 +287,7 @@ func TestCreateConversationDefaultPathUnchanged(t *testing.T) {
 	spec, _ := orch.reg.Get("stub")
 	agent, _ := svc.AgentByID("a1")
 	base := connKey(spec.ID, svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), svc.providerEnvFor(agent.Provider))
-	if got := generationKey(base, rec.Fingerprint); got != base {
+	if got := generationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
 	// 落库形态同样是空串（旧行与新行的默认值同形）。

@@ -46,20 +46,30 @@ func opencodeSpec() Spec {
 			Format:          ConfigFormatOpencodeJSON,
 			Root:            "${OPENCODE_CONFIG_DIR}",
 			Filename:        "opencode.json",
-			Channel:         ConfigChannelEnvContent,
-			FileChannel:     ConfigChannelDirRead,
-			Tested:          false,
-			TestedOnVersion: "",
+			Channel:     ConfigChannelEnvContent,
+			FileChannel: ConfigChannelDirRead,
+			// Tested=true 的**范围**要说清（这是"用实测结论换写入权"的那条纪律）：
+			// 本仓已有端到端实证"平台写这份文件、真 opencode 读它并按其中的 settings.baseURL 发请求"
+			// （frontend/scripts/desktop-skill-projection-acceptance.mjs 写、断言、真会话）。
+			// H6 补的是**另一半**：写完去读 ACP 目录、断言声明的 model id 真的出现在候选里。
+			Tested:          true,
+			TestedOnVersion: "2.0.26",
 			Effect:          ConfigEffectNextProcess,
-			Note: "本仓尚无「写清单 → 新模型出现在 ACP 候选里」的端到端实测（H6 的任务）：" +
-				"验收脚本证明过底座**真的读**这个文件（desktop-skill-projection-acceptance.mjs 写它并按其中的 " +
-				"settings.baseURL 发请求），但从未在一条探针里把「写完去读 ACP 目录」串起来过。" +
-				"实测通过后把 Tested 置 true 并把载荷版本填进 TestedOnVersion。" +
+			Note: "端到端实测（2026-10-10，随包 2.0.26，私有 HOME/MATE_HOME，探针 .dsh/tmp/gate1-opencode-probe.mjs）：" +
+				"① 平台声明一条底座原本不知道的 model id（`arkprobe/ark-probe-*`）→ 新进程的 ACP model 候选里" +
+				"**逐字出现**它，且 `current_value` 就是它（慢路径默认模型生效）；" +
+				"② 会话 cwd 放一份声明了不同 model 的 `opencode.json` → 候选里**没有**那条敌意模型；" +
+				"③ 父进程 env 预设 `OPENCODE_CONFIG_CONTENT`（敌意目录）→ 候选里同样没有它。" +
+				"两条反证也跑了（同一脚本的 --falsify / --falsify-env）：拿掉 `OPENCODE_CONFIG_PROJECT_DISABLE` 时" +
+				"cwd 的项目级文件**确实**抢占成功（甚至抢走了默认模型），拿掉平台对 `OPENCODE_CONFIG_CONTENT` 的" +
+				"同键替换时父 env 的内联内容**确实**抢先 —— 所以上面三条 PASS 是修复带来的，不是本来就不会发生。" +
 				"已知边界：① 内联内容走 env，同机同用户 ps eww 可见（清单不是密钥，可接受；" +
 				"**因此绝不能把 apiKey 放进内联内容**，密钥仍走 T1 的 env 引用）；" +
 				"② 管理员面（managed 配置 / macOS MDM）仍然压过平台，受管机器上「平台清单 = 最终生效清单」不成立；" +
 				"③ 空清单会让 opencode 起不了会话（loadCatalog 重试 5s 后抛 No models are available）——" +
-				"所以生成器必须保证「有清单才写」。",
+				"所以生成器在清单为空时**什么都不写**（实测中反证档正是这个形态：不声明模型时底座自己也没有我们的条目）；" +
+				"④ `is_default` 指向不存在/被 `disabled:true` 的条目时，底座会**静默退到第一个可用模型**（事实 #46）——" +
+				"平台的对账（T8）负责把这个事实报出来，而不是在配置里保证它一定生效。",
 		},
 		// 未实测：P-2 探针尚无结论 → 保守 process（EffectiveCapabilityScope 也会强制回落）。
 		CapabilityScope: CapabilityScopeProcess,

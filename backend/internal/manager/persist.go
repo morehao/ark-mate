@@ -19,7 +19,12 @@ import (
 //   - transcript recorder 视为停写（serve 装配时不再 SetTranscriptDir）。
 //
 // 须在 RestoreFromStore 之前、任何会话动作之前调用。
-func (s *Service) EnableStore(st *store.Store) { s.st = st }
+func (s *Service) EnableStore(st *store.Store) {
+	s.st = st
+	// T5 的配置指纹随持久层一起装载（它并进代际键，重启后必须仍然生效——
+	// 否则重启会把"已物化的清单"当成"没有清单"，下一轮凭空重换代际）。
+	s.loadRuntimeConfigDigests(context.Background())
+}
 
 // RestoreFromStore 启动恢复（sqlite 模式）：从 DB 载入会话记录并把全部已落库事件
 // 注入 eventbus（seq 原样 PublishAt）——重启后 bus 与 DB 共用同一全局号序，

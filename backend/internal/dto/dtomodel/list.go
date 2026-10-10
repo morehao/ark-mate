@@ -91,3 +91,49 @@ type ModelDeleteResp struct {
 	// NextAction 被拒时的可执行出路（先指定另一个默认，再删这一条）。
 	NextAction string `json:"next_action,omitempty"`
 }
+
+// RuntimeConfigResp 某 runtime 的**模型配置物化状态**（T5）。
+//
+// 它是 `GET /models` 的 `config` 段与 `POST /models/apply` 的响应共用的形状——两处必须同形，
+// 否则"保存之后它到底写了什么"会有两套说法。
+//
+// `Pending` 是**诚实性字段**：平台已声明、配置文件已（或未）写出，但底座要**新进程**才读得到。
+// 所以它恒为 true 直到有新进程把内容读进去——界面不许把 `changed=true` 说成"已生效"。
+type RuntimeConfigResp struct {
+	Runtime string `json:"runtime"`
+	// Declared 该 runtime 是否声明了模型配置落点（false = T5 不可达）。
+	Declared bool `json:"declared"`
+	// Tested 落点是否经真实底座实测；false = **只读**（生成候选但不落盘）。
+	Tested bool `json:"tested"`
+	// Writable 现在能不能真的写（Declared && Tested）。
+	Writable bool `json:"writable"`
+	// Channel 交付通道（config_dir_read | cli_patch_arg | env_content）。
+	Channel string `json:"channel,omitempty"`
+	// Path 配置文件绝对路径（未声明时为空）。
+	Path string `json:"path,omitempty"`
+	// Digest 当前落盘（或候选）内容的摘要。
+	Digest string `json:"digest,omitempty"`
+	// GeneratedAt 最近一次物化的时刻（RFC3339Nano）。
+	GeneratedAt string `json:"generated_at,omitempty"`
+	// Changed 本次调用是否真的改变了落盘内容。
+	Changed bool `json:"changed"`
+	// Pending true = 要等新进程才生效（**不许把它说成"已生效"**）。
+	Pending bool `json:"pending"`
+	// ModelCount 本次生成用到的清单条数（0 = 平台没声明任何模型 → 不写任何东西）。
+	ModelCount int `json:"model_count"`
+	// Note 人话说明（含"未实测只读""空清单不写"这类如实措辞）。
+	Note string `json:"note,omitempty"`
+}
+
+// ModelApplyReq `POST /models/apply` 的请求体。
+type ModelApplyReq struct {
+	// Runtime 要重新物化的 runtime；空 = 全部已声明落点的 runtime。
+	Runtime string `json:"runtime"`
+}
+
+// ModelApplyResp `POST /models/apply` 的响应：逐 runtime 的物化结果。
+//
+// **成功路径里没有 `advertised`**：那要新进程才拿得到，此刻报它就是假装已生效。
+type ModelApplyResp struct {
+	Applied []RuntimeConfigResp `json:"applied"`
+}

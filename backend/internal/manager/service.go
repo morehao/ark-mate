@@ -87,6 +87,12 @@ type Service struct {
 	orch *Orchestrator
 	tx   *transcriptRecorder // 会话 wire transcript（nil = 未启用，见 SetTranscriptDir）
 	st   *store.Store        // SQLite 持久层（nil = 未启用；启用后见 EnableStore）
+	// runtimeCfgDigests 各 runtime 已物化的模型配置指纹（T5）。它**并进代际键**
+	// （见 connection.go 的 generationKey）：不并进键，暖进程会继续用旧清单而界面显示"已保存"。
+	runtimeCfgDigests map[string]string
+	// runtimeCfgCandidates 最近一次生成的候选内容（**未实测时也保留**）：
+	// H6 探针需要"平台会写成什么"的那份字节，而那时落点还是只读的。
+	runtimeCfgCandidates map[string]string
 
 	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
 	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）

@@ -70,6 +70,34 @@ func IsolationEnv(runtimeID, home string) []string {
 			"XDG_STATE_HOME="+filepath.Join(home, "runtime", "opencode", "state"),
 			"OPENCODE_CONFIG_DIR="+filepath.Join(home, "runtime", "opencode", "config", "opencode"),
 			"OPENCODE_DB="+filepath.Join(home, "runtime", "opencode", "data", "opencode.db"),
+
+			// ——— F3：模型清单（T5）的隔离前提 ———
+			//
+			// opencode 的配置优先级有八层，而**平台写的 global 层（②）是文件系统面里最低的一层**，
+			// 上面还有四层能被"用户的环境变量"或"用户仓库里的文件"顶掉。三个必堵：
+			//
+			//	层③ `OPENCODE_CONFIG`（显式文件，高于 global 文件）：用户设了它，平台那份就被顶掉。
+			//	层⑥ `OPENCODE_CONFIG_CONTENT`（内联内容，高于平台写的**任何**文件）：平台自己的
+			//	     T5 主通道就是它（物化时覆盖这一条），所以这里先**清空**，避免沿用用户 shell 里的值。
+			//	层④⑤ 项目级发现会**走到文件系统根**，而平台拉底座的 cwd 是用户自己的仓库——不关掉，
+			//	     一个 clone 下来的仓库就能改平台拉起的底座行为（模型 / 权限 / MCP / plugins / skills）。
+			//
+			// 空值语义：JS 侧 `process.env.X` 为 `''` 是 falsy，等价于"没设"——而"没设"正是我们要的
+			// （不覆盖、不回落到用户的值）。`true` 那一条是开关键。
+			//
+			// 两个可选（让 `advertised` 可复现：对账要求"同一份清单跑两次结果一样"）：
+			// 清掉用户对 models.dev 缓存路径与来源 URL 的覆盖，目录来源因此只由隔离后的
+			// `XDG_CACHE_HOME` 决定。
+			//
+			// **刻意不注 `OPENCODE_DISABLE_MODELS_FETCH`**（设计里列为可选）：关掉拉取后，若本地没有
+			// 缓存的 models.dev 目录、而平台又还没声明任何模型，opencode 的目录会**空**——而空目录不是
+			// "没模型"而是"起不了会话"（`loadCatalog` 重试 5s 后抛 `No models are available`，事实 #47）。
+			// 那比"advertised 不可复现"严重得多，所以这条开关留给"平台清单非空"之后再评估。
+			"OPENCODE_CONFIG=",
+			"OPENCODE_CONFIG_CONTENT=",
+			"OPENCODE_CONFIG_PROJECT_DISABLE=true",
+			"OPENCODE_MODELS_PATH=",
+			"OPENCODE_MODELS_URL=",
 		)
 	}
 	sort.Strings(env)

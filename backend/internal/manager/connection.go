@@ -32,21 +32,25 @@ func connKey(runtimeID string, envs ...[]string) string {
 	return runtimeID + "\x00" + strings.Join(parts, "\x00")
 }
 
-// generationKey 在基础连接键之上追加**代际维度**（能力指纹）：指纹相同 = 同一套能力 = 同一个
-// 代际 = 复用同一个暖进程；指纹不同 = 各起一个进程（能力集与投影根都是进程级的，混用等于把
-// A 会话的 skill 投给 B 会话）。
+// generationKey 在基础连接键之上追加**代际维度**：能力指纹 + 平台生成的模型配置指纹（T5）。
 //
-// **指纹为空 → 原样返回基础键**：这是 R11（缺省零回归）的落点——未声明能力选择的会话产生的键
-// 必须与代际机制之前**逐字相同**，同配置的两个会话才仍共享一个暖进程。
+// 两个维度缺一不可，而且它们**必须都在键里**：
+//   - 指纹相同 = 同一套能力 = 复用同一个暖进程；指纹不同 = 各起一个进程（能力集与投影根都是
+//     进程级的，混用等于把 A 会话的 skill 投给 B 会话）。
+//   - 配置指纹（T5）：配置文件是**进程启动时**读的。不把它并进键，改完清单文件已经变了、暖进程
+//     还活着，底座继续用旧清单，而界面显示"已保存"——那是本方案最坏的一种表现。
+//
+// **两者都为空 → 原样返回基础键**：这是 R11（缺省零回归）的落点——既未声明能力选择、
+// 该 runtime 又没有平台模型清单的会话，其键必须与代际机制之前**逐字相同**。
 //
 // 非空时用**带长度前缀**的形态而不是简单拼后缀：`connKey("r", envA)` 是
 // `connKey("r", envA, envB)` 的字符串前缀（env 组之间就是 `\x00` 分隔），拼后缀会让"某个基础键
 // 恰好是另一个基础键的前缀"与"代际后缀"互相串味。长度前缀让基础键自我定界。
-func generationKey(connKey, fingerprint string) string {
-	if fingerprint == "" {
+func generationKey(connKey, fingerprint, configDigest string) string {
+	if fingerprint == "" && configDigest == "" {
 		return connKey
 	}
-	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint
+	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint + ":" + configDigest
 }
 
 // baseKeyFor 该 agent 在当前配置下的**基础**连接键（runtime + 原生权限 env + provider env）。
@@ -298,7 +302,8 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// 权限开关是进程级，配置不同的 agent 不能复用同一子进程。模型不进 env/缓存键：
 	// 模型选择是**会话级**语义（session/set_config_option），同一连接可服务多个模型。
 	baseKey := o.baseKeyFor(agent, spec)
-	key := generationKey(baseKey, fingerprint)
+	cfgDigest := o.svc.runtimeConfigDigest(spec.ID)
+	key := generationKey(baseKey, fingerprint, cfgDigest)
 
 	o.mu.Lock()
 	rc := o.conns[key]
@@ -388,7 +393,8 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		"close", sc.Close != nil)
 
 	o.svc.setAgentState(agent.ID, AgentStateRunning)
-	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, baseKey: baseKey, started: time.Now()}
+	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, baseKey: baseKey,
+		configDigest: cfgDigest, started: time.Now()}
 	o.registerProc(rc)
 	o.mu.Lock()
 	o.conns[key] = rc

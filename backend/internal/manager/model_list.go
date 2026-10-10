@@ -97,6 +97,10 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 		return nil, err
 	}
 	resp.Effect = s.modelEffect(req.Runtime, derefBool(req.IsDefault))
+	// ② 清单已提交 → 立刻重新生成该 runtime 的配置（T5）。失败不回滚清单（见 tryMaterialize）。
+	if note := s.tryMaterialize(ctx, req.Runtime); note != "" {
+		resp.Effect.Note = note
+	}
 	return resp, nil
 }
 
@@ -153,6 +157,9 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 		return nil, err
 	}
 	resp.Effect = s.modelEffect(row.Runtime, patch.IsDefault != nil && *patch.IsDefault)
+	if note := s.tryMaterialize(ctx, row.Runtime); note != "" {
+		resp.Effect.Note = note
+	}
 	return resp, nil
 }
 
@@ -183,6 +190,8 @@ func (s *Service) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDe
 	if err != nil {
 		return nil, err
 	}
+	// 删掉一条也要重新物化：底座的配置里不能继续留着它。
+	s.tryMaterialize(ctx, row.Runtime)
 	return &dtomodel.ModelDeleteResp{Deleted: ok}, nil
 }
 

@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Registry 是 runtime adapter 注册表（map[string]Spec）。
@@ -35,6 +36,41 @@ func (r *Registry) Get(id string) (Spec, bool) {
 
 // Register 追加/覆盖一个 runtime。
 func (r *Registry) Register(s Spec) { r.specs[s.ID] = s }
+
+// SetLaunchEnv 覆盖/追加某 runtime 的一个启动环境键（**同键替换**，不追加第二条）。
+//
+// 为什么必须"同键替换"而\不是直接 append：`mergeEnv` 的语义是"先出现者胜"
+// （用户在 shell 里导出的键不能盖掉平台显式注入的值），所以把新值追加到末尾**不会生效**
+// ——隔离表里那条空的 `OPENCODE_CONFIG_CONTENT=` 会把我们的内容吃掉。
+//
+// 谁用它：T5 的 `env_content` 通道（opencode）在物化时把生成的 JSON 注入子进程 env。
+// 只影响**此后新拉起的进程**（这正是 T5 的"下一个进程生效"语义）。
+func (r *Registry) SetLaunchEnv(runtimeID, key, value string) error {
+	if r == nil {
+		return nil
+	}
+	spec, ok := r.specs[runtimeID]
+	if !ok {
+		return fmt.Errorf("runtime %q 未注册", runtimeID)
+	}
+	env := make([]string, 0, len(spec.Launch.Env)+1)
+	replaced := false
+	for _, kv := range spec.Launch.Env {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(strings.TrimSpace(name), key) {
+			env = append(env, key+"="+value)
+			replaced = true
+			continue
+		}
+		env = append(env, kv)
+	}
+	if !replaced {
+		env = append(env, key+"="+value)
+	}
+	spec.Launch.Env = env
+	r.specs[runtimeID] = spec
+	return nil
+}
 
 // List 返回全部 Spec（按 ID 排序，保证稳定输出）。
 func (r *Registry) List() []Spec {

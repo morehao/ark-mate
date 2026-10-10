@@ -55,9 +55,16 @@ func TestResolveConfigProjectionUsesIsolationEnv(t *testing.T) {
 		dshp.Filename != "mate-models.patch.yml" || dshp.Format != ConfigFormatDshPatchYAML {
 		t.Fatalf("dsh 的声明不符: %+v", dshp.ConfigProjection)
 	}
-	// 两个都没实测 → 只读（绝不因为"看起来对"就往里写）。
-	if ocp.Writable() || dshp.Writable() {
-		t.Fatalf("未实测的落点必须是只读：opencode=%v dsh=%v", ocp.Writable(), dshp.Writable())
+	// 写入权是**用实测结论换的**：opencode 已实测（见 adapter 的 Note 与 TestedOnVersion）→ 可写；
+	// dsh 尚未实测（H6 的 dsh 组）→ 只读。这条差异是本方案最要紧的一处纪律，别把它抹平。
+	if !ocp.Writable() {
+		t.Fatal("opencode 已实测通过，应可写")
+	}
+	if dshp.Writable() {
+		t.Fatal("dsh 尚未实测，必须只读（写坏 patch = 拒启）")
+	}
+	if dshp.TestedOnVersion != "" {
+		t.Fatalf("dsh 未实测时不该有实测版本号: %q", dshp.TestedOnVersion)
 	}
 	if ocp.EffectiveEffect() != ConfigEffectNextProcess || dshp.EffectiveEffect() != ConfigEffectNextProcess {
 		t.Fatalf("未声明 effect 时应取最保守的 next_process")

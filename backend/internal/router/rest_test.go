@@ -321,6 +321,12 @@ func (s *stubSvc) DeleteModel(_ context.Context, id string) (*dtomodel.ModelDele
 	}
 	return &dtomodel.ModelDeleteResp{Deleted: true}, nil
 }
+func (s *stubSvc) ApplyModels(_ context.Context, runtimeID string) (*dtomodel.ModelApplyResp, error) {
+	if s.providerErr != nil {
+		return nil, s.providerErr
+	}
+	return &dtomodel.ModelApplyResp{Applied: []dtomodel.RuntimeConfigResp{{Runtime: runtimeID, Pending: true}}}, nil
+}
 func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr

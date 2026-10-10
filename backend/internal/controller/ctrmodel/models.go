@@ -17,6 +17,7 @@ import (
 type ModelCtr interface {
 	List(c *gin.Context)
 	Create(c *gin.Context)
+	Apply(c *gin.Context)
 	Update(c *gin.Context)
 	Delete(c *gin.Context)
 }
@@ -46,6 +47,25 @@ func (h *modelCtr) List(c *gin.Context) {
 		agentID = h.agentSvc.DefaultAgentID()
 	}
 	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Apply 强制重新物化模型配置文件（`POST /models/apply`；`{runtime?}` 空 = 全部已声明落点）。
+//
+// 成功路径只回 `pending:true`——此刻拿不到 `advertised`，**不许假装已生效**。
+func (h *modelCtr) Apply(c *gin.Context) {
+	var req dtomodel.ModelApplyReq
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+			return
+		}
+	}
+	resp, err := h.svc.ApplyModels(c.Request.Context(), req.Runtime)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

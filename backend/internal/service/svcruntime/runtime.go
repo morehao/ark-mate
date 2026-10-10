@@ -51,4 +51,8 @@ type RuntimeSvc interface {
 
 	// DeleteModel 删除一条模型条目（幂等；**是该 runtime 的默认模型 → 40501** `model_is_default`）。
 	DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDeleteResp, error)
+
+	// ApplyModels 强制重新物化某 runtime（空 = 全部已声明落点的 runtime）的模型配置文件（T5）。
+	// 成功路径**不回带 advertised**（那要新进程才拿得到），只如实回 `pending:true`。
+	ApplyModels(ctx context.Context, runtimeID string) (*dtomodel.ModelApplyResp, error)
 }
