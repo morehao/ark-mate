@@ -14,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 	"github.com/morehao/ark-mate/pkg/redact"
 )
 
@@ -285,10 +286,12 @@ func (s *Service) ListProviders() ([]dtoprovider.ProviderResp, error) {
 func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.ProviderResp {
 	resp := dtoprovider.ProviderResp{
 		ID: id, Type: d.Type, Note: d.Note,
-		HasKey:   d.Key != "" || d.KeyRef != "",
-		Revision: d.Revision,
-		Refs:     dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},
-		Problems: providerProblems(d),
+		HasKey:        d.Key != "" || d.KeyRef != "",
+		Revision:      d.Revision,
+		Delivery:      providerDelivery(d),
+		Applicability: s.providerApplicabilityLocked(d),
+		Refs:          dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},
+		Problems:      providerProblems(d),
 	}
 	if !d.UpdatedAt.IsZero() {
 		resp.UpdatedAt = model.FormatTime(d.UpdatedAt)
@@ -309,6 +312,51 @@ func (s *Service) providerRespLocked(id string, d *providerDef) dtoprovider.Prov
 	sort.Strings(resp.Refs.Agents)
 	sort.Strings(resp.Refs.Runtimes)
 	return resp
+}
+
+// providerDelivery provider 凭据的交付声明（M6）。
+//
+// 通道与生效时刻取自静态表 `objdelivery.For`（**唯一事实源**：这张表按资源种类固定通道），
+// 只把 Note 按这条档案的**实际注入变量名**具体化——表里那句写的是 `<TYPE>_API_KEY` 占位，
+// 列表页该显示的是 `DEEPSEEK_API_KEY`。`For` 的 ok 被丢弃是安全的：`provider` 是
+// `CapabilityKind*` 之一，漏了它的声明会被 archtest 第 22 条 `TestDeliveryMatrixCoversKinds` 判红。
+func providerDelivery(d *providerDef) objdelivery.Delivery {
+	out, _ := objdelivery.For(model.CapabilityKindProvider)
+	if k := envKeyOf(d.Type); k != "" {
+		out.Note = "密钥以 " + k + " 注入 runtime 子进程 env；改它会让引用该档案的会话在下一轮重建连接" +
+			"（有在途轮次或有未应答权限/提问时顺延到再下一轮）"
+	}
+	return out
+}
+
+// providerApplicabilityLocked provider 凭据逐**已注册 runtime** 的可达性（M6；**调用方必须持 s.mu**）。
+//
+// 判据只有一条且可执行：这条档案的 type 推不推得出注入变量名（`envKeyOf`）。
+//
+//   - 推得出 → ok/`projected`，reason 里带**具体变量名**（用户能拿去核对子进程 env）；
+//   - 推不出（type 为空）→ not ok/`not_configured`，reason 给出可执行的下一步。
+//
+// 刻意**不**把"缺密钥"并进这里：密钥缺失是这条档案自身的问题（已由 `problems` 回答），
+// 与"哪个 runtime 能不能收到它"是两件事；混进来只会让同一条理由在 N 个 runtime 上重复 N 遍。
+func (s *Service) providerApplicabilityLocked(d *providerDef) []objdelivery.Applicability {
+	runtimes := s.registeredRuntimeIDs()
+	out := make([]objdelivery.Applicability, 0, len(runtimes))
+	envKey := envKeyOf(d.Type)
+	for _, rt := range runtimes {
+		if envKey == "" {
+			out = append(out, objdelivery.Applicability{
+				Runtime: rt, OK: false, Status: objdelivery.StatusNotConfigured,
+				Reason: "推不出注入变量名（type 为空）：在「设置 · 模型」里给它补一个上游类型，" +
+					"这条凭据才会以 <TYPE>_API_KEY 注入 " + rt + " 的子进程 env",
+			})
+			continue
+		}
+		out = append(out, objdelivery.Applicability{
+			Runtime: rt, OK: true, Status: objdelivery.StatusProjected,
+			Reason: "以 " + envKey + " 注入 " + rt + " 的子进程 env（agent 绑定该档案拨号时生效）",
+		})
+	}
+	return out
 }
 
 // providerProblems 本地段能回答的问题清单（零网络请求；**可执行的一句话**）。

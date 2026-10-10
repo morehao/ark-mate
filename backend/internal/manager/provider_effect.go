@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 )
 
 // ——— provider 写面的**生效面回执**（T4 的落地形态） ———
@@ -26,9 +27,12 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 	if o == nil {
 		return nil
 	}
+	// 通道/时刻**取自静态交付表**（`objdelivery`），不在这里再写一份字面量：
+	// 两处各写一遍迟早漂移，而漂移的表现是"回执说的通道与真实交付不一致"。
+	delivery, _ := objdelivery.For(objdelivery.KindProvider)
 	eff := &dtoprovider.ProviderEffect{
-		Channel:         "dial_env",
-		Effect:          "next_turn",
+		Channel:         delivery.Channel,
+		Effect:          delivery.Effect,
 		AppliesToAgents: []string{},
 	}
 

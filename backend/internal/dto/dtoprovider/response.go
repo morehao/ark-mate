@@ -1,11 +1,14 @@
 package dtoprovider
 
+import "github.com/morehao/ark-mate/pkg/object/objdelivery"
+
 // ProviderResp provider 档案对外表示（密钥只以 has_key 呈现，绝不读回）。
 //
 // 从 v11 起它承担三件事：身份与密钥状态（id/type/has_key）、**引用面**（refs：哪些 agent 在用它、
 // 它们可能落到哪些 runtime）、以及**载体版本**（revision/updated_at，写面的乐观锁依据）。
-// `delivery`/`applicability` 在 M6（交付矩阵）落地时补上——它们是逐 runtime 的可达性表示，
-// 与 skill/MCP 面共用同一套值对象。
+// 从 M6（交付矩阵）起再多两件：`delivery`（这类资源走哪条通道、什么时候生效）与
+// `applicability`（逐已注册 runtime 的"密钥能不能到达子进程 env"）——它们是逐 runtime 的
+// 可达性表示，与 skill/MCP 面共用 `pkg/object/objdelivery` 的同一套值对象。
 type ProviderResp struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
@@ -18,6 +21,15 @@ type ProviderResp struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 	// Note 备注（不驱动行为；写面可改，生效回执会如实回 effect=none）。
 	Note string `json:"note,omitempty"`
+	// Delivery 交付声明（M6）：provider 凭据恒为 `dial_env` / `next_turn`，Note 是
+	// 按这条档案的实际注入变量名具体化的那句人话。
+	Delivery objdelivery.Delivery `json:"delivery"`
+	// Applicability 逐**已注册** runtime 的可达性（M6）：推得出注入变量名 → ok/`projected`；
+	// 推不出（type 为空）→ not ok/`not_configured` 且 reason 给出可执行的下一步。
+	//
+	// 它是**读取时现算的派生值**，且刻意不给"合并结论"：同一份凭据在不同底座上的可达性
+	// 本来就是逐条的，"对 opencode 可用、对 dsh 不可用"是有用信息。
+	Applicability []objdelivery.Applicability `json:"applicability"`
 	// Refs 引用面：哪些 agent 用它，以及这些 agent 可能落在哪些 runtime。
 	//
 	// 它是**只读派生**（每次读取时按 agent 注册表现算），没有写入方——存一份就必然漂移。

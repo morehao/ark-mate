@@ -8,6 +8,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 )
 
 // ——— provider 凭据的**写面**（v11：POST / PATCH / DELETE） ———
@@ -191,7 +192,7 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 note 就如实回 none。
 	if !secretChanged && patch.Type == nil {
 		resp.Effect = &dtoprovider.ProviderEffect{
-			Channel: "dial_env", Effect: "none",
+			Channel: dialEnvChannel(), Effect: "none",
 			AppliesToAgents: []string{},
 			Note:            "只改了不驱动行为的字段（type/key 未变）：本轮与后续轮次的行为都不变",
 		}
@@ -278,6 +279,12 @@ func validateProviderID(id string) error {
 			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）: %v", id, err), nil)
 	}
 	return nil
+}
+
+// dialEnvChannel 凭据的交付通道（取自静态交付表，避免"一处声明"再多一个漂移点）。
+func dialEnvChannel() string {
+	d, _ := objdelivery.For(objdelivery.KindProvider)
+	return d.Channel
 }
 
 // providerExistsErr 新建撞上已存在的档案（与 skill_exists/mcp_exists 同形）。
