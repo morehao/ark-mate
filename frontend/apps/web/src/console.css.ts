@@ -969,8 +969,13 @@ export const consoleStyleSheet = `
   /* 左栏分组行上的行内动作（v14.1：「⋯」管理 + 「⊕」在此新建）：**一起**悬停浮现。
      未悬停时整行只剩"名字 + 会话数"，工作空间名不再被一排图标挤掉；
      触屏（≤920px 的抽屉态）没有 hover，所以那一档常显——否则这两个入口等于不存在。 */
-  .fg-ws-manage { flex: none; display: none; gap: 2px; }
-  .fg-wsgroup-row:hover .fg-ws-manage { display: inline-flex; }
+  /* 行内动作用 visibility 而不是 display 隐藏：**位置一直占着**，所以鼠标移上去
+     不会把名字挤窄、也不会让会话数消失——整行唯一的悬停变化就是这两颗按钮出现。
+     fg-menu-open 那条抄的是 dsh 的 .projectRow.menuOpen .rowActions：菜单打开时
+     鼠标往往已经移到浮层上，没有它的话锚点按钮会跟着消失（浮层还在，锚点却空了）。 */
+  .fg-ws-manage { flex: none; display: inline-flex; gap: 2px; visibility: hidden; }
+  .fg-wsgroup-row:hover .fg-ws-manage,
+  .fg-wsgroup-row.fg-menu-open .fg-ws-manage { visibility: visible; }
   .fg-wsgroup-row .fg-ws-icon-btn {
     width: 20px;
     height: 20px;
@@ -985,6 +990,115 @@ export const consoleStyleSheet = `
   }
   .fg-wsgroup-row .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-wsgroup-row .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
+  /* ——— 左栏「工作区」区头（v14.2） ———
+     几何与行为对齐 dsh 的 sectionHeader：高 36px、gap 4、overflow hidden；
+     **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
+     之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
+     不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
+  .fg-rail-sechead {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 36px;
+    padding: 0 8px 0 12px;
+    overflow: hidden;
+  }
+  .fg-rail-sechead-label {
+    flex: none;
+    max-width: 45%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 620;
+    letter-spacing: 0.02em;
+    color: ${tokens.textPlaceholder};
+    transition: max-width 0.18s ease, opacity 0.12s ease, margin-right 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-label { max-width: 0; opacity: 0; margin-right: -4px; }
+
+  /* 折叠搜索：始终占一个图标位（28px），展开后吃掉整条区头的剩余宽度。 */
+  .fg-rail-sesearch {
+    flex: 1;
+    max-width: 28px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    transition: max-width 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sesearch { max-width: 100%; }
+  .fg-rail-sesearch-box {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 28px;
+    border-radius: 8px;
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sesearch-box {
+    border: 1px solid ${tokens.border};
+    background: ${tokens.surface};
+    padding-right: 2px;
+  }
+  .fg-rail-seinput {
+    flex: 1;
+    width: 0;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    color: ${tokens.text};
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+  .fg-rail-seinput::placeholder { color: ${tokens.textPlaceholder}; }
+  .fg-rail-sechead.fg-searching .fg-rail-seinput { opacity: 1; pointer-events: auto; }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-icon.fg-searchbtn:hover { background: transparent; }
+
+  .fg-rail-sechead-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 64px;
+    overflow: hidden;
+    transition: max-width 0.18s ease, opacity 0.12s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-actions {
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .fg-rail-sechead-icon {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    color: ${tokens.textSecondary};
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .fg-rail-sechead-icon:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  /* 「清除搜索」只在展开态出现。
+     选择器**必须**带上 .fg-rail-sechead-icon：那个类也声明了 display，两者同权重时
+     由源码顺序决定谁赢——v14.2 初版就栽在这里，于是那个 ✕ 常驻在区头、从折叠的搜索框里
+     溢出来正好压在「视图选项」图标上，看起来像"分组图标上有个叉"。带上第二个类权重就
+     高于它，改顺序也不会再翻车。 */
+  .fg-rail-sechead-icon.fg-rail-seclear { display: none; }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-icon.fg-rail-seclear { display: inline-grid; }
+  /* 不可写（memory 持久层）时区头不渲染「添加工作区」——不留一个必然失败的按钮。 */
+  .fg-rail-sechead-icon:disabled { cursor: default; opacity: 0.35; }
+
   /* 左栏工作空间分组行（比会话行略重：它是分组的头）。 */
   .fg-wsgroup-row {
     display: flex;
@@ -998,14 +1112,23 @@ export const consoleStyleSheet = `
     color: ${tokens.text};
   }
   .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
-  .fg-wsgroup-caret {
+  /* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
+     上一版是"静止 folder、悬停换三角"（对齐 dsh 的 projectRow），用户复核后否掉了：
+     一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由三角自己旋转 90° 表达，
+     含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */
+  .fg-wsgroup-lead {
     flex: none;
-    width: 14px;
-    font-size: 9px;
+    width: 16px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
     color: ${tokens.textPlaceholder};
-    transition: transform 0.12s ease;
   }
-  .fg-wsgroup-row.fg-open .fg-wsgroup-caret { transform: rotate(90deg); }
+  .fg-wsgroup-lead.fg-current { color: ${tokens.primary}; }
+  .fg-wsgroup-lead .anticon { transition: transform 0.12s ease; }
+  .fg-wsgroup-row.fg-open .fg-wsgroup-lead .anticon { transform: rotate(90deg); }
   .fg-wsgroup-name {
     flex: 1;
     min-width: 0;
@@ -1014,14 +1137,38 @@ export const consoleStyleSheet = `
     white-space: nowrap;
   }
   .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
+  /* 会话数：**恒常显示**，悬停时不让位（v14.2 修订）。原先它在悬停时淡出让位给 ⋯ / ⊕，
+     于是"鼠标放不放上去是两个样子"；现在动作按钮的位置一直占着（见 .fg-ws-manage），
+     名字宽度与会话数在两种状态下逐像素相同。 */
   .fg-wsgroup-count {
     flex: none;
+    max-width: 40px;
+    overflow: hidden;
     font-size: 11px;
     font-weight: 500;
     color: ${tokens.textPlaceholder};
     font-variant-numeric: tabular-nums;
   }
   .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
+  /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
+  .fg-wsgroup-more {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: calc(100% - 36px);
+    margin: 1px 8px 3px 28px;
+    padding: 4px 8px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    color: ${tokens.textPlaceholder};
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .fg-wsgroup-more:hover { background: ${tokens.softFill}; color: ${tokens.textSecondary}; }
+  .fg-wsgroup-more .anticon { font-size: 10px; }
   /* 分组内提示（目录不可用 / 还没有会话）：只有一行字，不做成大块空态。 */
   .fg-wsgroup-note {
     padding: 2px 8px 6px 28px;
@@ -1036,6 +1183,7 @@ export const consoleStyleSheet = `
   .fg-sess-more.fg-keep { opacity: 1; }
   @media (max-width: 920px) {
     .fg-sess-more { opacity: 1; }
-    .fg-ws-manage { display: inline-flex; }
+    /* 触屏（抽屉态）没有 hover：动作按钮常显（位置本来就一直占着）。 */
+    .fg-ws-manage { visibility: visible; }
   }
 `

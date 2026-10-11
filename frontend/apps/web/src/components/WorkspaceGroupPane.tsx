@@ -1,9 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Input, Modal, Tooltip } from 'antd'
-import { DownOutlined, PlusCircleOutlined, RightOutlined, WarningOutlined } from '@ant-design/icons'
+import {
+  CaretRightOutlined,
+  DownOutlined,
+  PlusCircleOutlined,
+  UpOutlined,
+  WarningOutlined,
+} from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { ConversationSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
+import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
 
 /** 折叠态的前端本地持久键（**不进 db**：它是"这台机器的视图偏好"，不是跨设备的事实）。 */
@@ -68,10 +75,17 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed)
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null)
-  // 就地重命名（设计 §5.5）：预填**屏幕上显示的名字**（未命名项 = 末级目录名）——
-  // 确认一段没改过的文本 = 把自动名钉成一个显式标题，这是用户能预期到的结果。
+  // 重命名走**对话框**（v14.2，对齐 dsh）：初值 = 屏幕上显示的名字（未命名项 = 末级目录名），
+  // 确认一段没改过的初值 = 把自动名钉成一个显式标题。行内输入框下线的原因不是好看：
+  // 行内编辑要和"点行 = 折叠/展开"抢同一个点击区，还得为它一处特殊处理，而对话框天然
+  // 不改变列表的布局与高度。
   const [renaming, setRenaming] = useState<Workspace | null>(null)
   const [draft, setDraft] = useState('')
+  // 组内配额是否已展开（浏览器本地的视图偏好，不进 db，与折叠态同一口径）。
+  const [quotaOpen, setQuotaOpen] = useState<Record<string, boolean>>({})
+  // 哪一行的 `⋯` 菜单开着：菜单打开时鼠标往往已经移到浮层上、行不再 hover，
+  // 需要这条状态让锚点按钮保持可见（对齐 dsh 的 `.projectRow.menuOpen`）。
+  const [menuOpenID, setMenuOpenID] = useState<string | null>(null)
 
   const items = workspaces?.items ?? []
   const defaultID = workspaces?.default_id ?? ''
@@ -134,96 +148,130 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         const sessions = byWorkspace.get(ws.id) ?? []
         const broken = ws.dir_status !== 'ok'
         const unnamed = !ws.title
-        const editing = renaming?.id === ws.id
+        // 含当前会话的组：leading 的 folder 用主色——"你在哪"必须在**未悬停**时也看得见，
+        // 不能只存在于悬停态里（对齐 dsh 的 folderActive）。
+        const containsCurrent = sessions.some((c) => c.id === activeId)
+        // 组内配额：只对空闲会话计数，运行中与当前会话不占配额。
+        // 判定只有一份实现（`railView.quotaSessions`），组件不自己数。
+        const quota = quotaSessions(sessions, GROUP_IDLE_LIMIT, activeId)
+        const quotaExpanded = quotaOpen[ws.id] ?? false
+        const rows = quotaExpanded ? sessions : quota.rows
 
         return (
           <div key={ws.id}>
             <div
-              className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}`}
-              onClick={() => {
-                // 改名期间点行内任何地方都不该顺手折叠/展开（输入框那一层已各自 stopPropagation）。
-                if (!editing) toggle(ws.id)
-              }}
+              className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}${menuOpenID === ws.id ? ' fg-menu-open' : ''}`}
+              onClick={() => toggle(ws.id)}
               title={ws.path}
             >
-              <span className="fg-wsgroup-caret">{isOpen ? <DownOutlined /> : <RightOutlined />}</span>
-              {broken ? (
-                <WarningOutlined className="fg-wsgroup-warn" />
-              ) : (
-                <span style={{ flex: 'none', fontSize: 12, color: tokens.textPlaceholder }}>📁</span>
-              )}
-              {editing ? (
-                <Input
-                  size="small"
-                  autoFocus
-                  value={draft}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setDraft(e.target.value)}
-                  // 只有 `↵` 落库；`Esc` 与失焦都**放弃**（与收成菜单之前的语义逐字一致：
-                  // 点开一行、随手点走，不该把名字改成手滑打进去的那半截）。
-                  onPressEnter={submitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setRenaming(null)
+              {/* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
+                  上一版照 dsh 抄的是"静止 folder、悬停换三角"，用户复核后否掉了：
+                  一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由它自己旋转
+                  90° 表达（▶ → ▼），所以状态照样看得见，而且比开/合文件夹在 13px 下清楚得多。
+                  含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */}
+              <span className={`fg-wsgroup-lead${containsCurrent ? ' fg-current' : ''}`}>
+                <CaretRightOutlined />
+                {broken && <WarningOutlined className="fg-wsgroup-warn" />}
+              </span>
+              <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
+              <span className="fg-wsgroup-count">{ws.conversations || ''}</span>
+              {/* 行内动作（v14.1）：`⋯` = 管理（重命名 / 上移下移 / 删除），`⊕` = 在此工作空间
+                  新建会话。两者悬停浮现——但它们的位置**一直占着**（CSS 用 `visibility` 而不是
+                  `display`），所以鼠标移上去只有这两颗按钮出现，名字不会被挤、会话数不会消失。 */}
+              <span className="fg-ws-manage" onClick={(e) => e.stopPropagation()}>
+                <WorkspaceManageMenu
+                  ws={ws}
+                  canMoveUp={idx > 0}
+                  canMoveDown={idx < items.length - 1}
+                  onMoveUp={() => void moveWorkspace(ws.id, items[idx - 1]?.id)}
+                  onMoveDown={() => {
+                    // 「下移一位」= 插到"再下一个"之前；已在末尾时用 append（beforeId 缺省）。
+                    const after = items[idx + 2]?.id
+                    void moveWorkspace(ws.id, after)
                   }}
-                  onBlur={() => setRenaming(null)}
-                  style={{ flex: 1, minWidth: 0, height: 22, fontSize: 12 }}
+                  onRename={() => startRename(ws)}
+                  onDelete={() => setPendingDelete(ws)}
+                  onOpenChange={(o) => setMenuOpenID(o ? ws.id : null)}
                 />
-              ) : (
-                <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
-              )}
-              {!editing && (
-                <>
-                  <span className="fg-wsgroup-count">{ws.conversations || ''}</span>
-                  {/* 行内动作（v14.1）：`⋯` = 管理（重命名 / 移除 / 上移下移），`⊕` = 在此工作空间
-                      新建会话。两者**一起悬停浮现**（对齐 dsh 左栏的工作区行），未悬停时整行只剩
-                      "名字 + 会话数"——工作空间名不再被一排图标挤成省略号。 */}
-                  <span className="fg-ws-manage" onClick={(e) => e.stopPropagation()}>
-                    <WorkspaceManageMenu
-                      ws={ws}
-                      canMoveUp={idx > 0}
-                      canMoveDown={idx < items.length - 1}
-                      onMoveUp={() => void moveWorkspace(ws.id, items[idx - 1]?.id)}
-                      onMoveDown={() => {
-                        // 「下移一位」= 插到"再下一个"之前；已在末尾时用 append（beforeId 缺省）。
-                        const after = items[idx + 2]?.id
-                        void moveWorkspace(ws.id, after)
-                      }}
-                      onRename={() => startRename(ws)}
-                      onDelete={() => setPendingDelete(ws)}
-                    />
-                    {/* 「在此工作空间新建会话」：目录不可用时禁用并给出原因（点了必然被服务端拒，不如不给）。 */}
-                    <Tooltip title={broken ? '目录不可用，无法在此新建会话' : '在此工作空间新建会话'}>
-                      <button
-                        type="button"
-                        className="fg-ws-icon-btn"
-                        disabled={broken}
-                        onClick={() => onCreate(ws.id)}
-                      >
-                        <PlusCircleOutlined />
-                      </button>
-                    </Tooltip>
-                  </span>
-                </>
-              )}
+                {/* 「在此工作空间新建会话」：目录不可用时禁用并给出原因（点了必然被服务端拒，不如不给）。 */}
+                <Tooltip title={broken ? '目录不可用，无法在此新建会话' : '在此工作空间新建会话'}>
+                  <button
+                    type="button"
+                    className="fg-ws-icon-btn"
+                    disabled={broken}
+                    onClick={() => onCreate(ws.id)}
+                  >
+                    <PlusCircleOutlined />
+                  </button>
+                </Tooltip>
+              </span>
             </div>
 
             {isOpen && broken && (
               <div className="fg-wsgroup-note">
-                目录已不存在，登记仍然保留；可重命名或移除登记。
+                目录已不存在，登记仍然保留；可重命名或删除登记。
               </div>
             )}
             {isOpen && !broken && sessions.length === 0 && (
-              <div className="fg-wsgroup-note">{archived ? '此工作空间没有归档会话。' : '还没有会话。'}</div>
+              <div className="fg-wsgroup-note">{archived ? '暂无归档会话。' : '暂无会话。'}</div>
             )}
-            {isOpen && !broken && sessions.length > 0 && renderBody(sessions, archived)}
+            {isOpen && !broken && sessions.length > 0 && (
+              <>
+                {renderBody(rows, archived)}
+                {quota.hidden > 0 && (
+                  <button
+                    type="button"
+                    className="fg-wsgroup-more"
+                    onClick={() => setQuotaOpen((prev) => ({ ...prev, [ws.id]: !quotaExpanded }))}
+                  >
+                    {quotaExpanded ? <UpOutlined /> : <DownOutlined />}
+                    {quotaExpanded ? '收起' : `展开其余 ${quota.hidden} 个会话`}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )
       })}
 
+      {/* 重命名对话框（v14.2）：初值 = **屏幕上显示的名字**（未命名项 = 末级目录名）。
+          确认一段没改过的初值 = 把自动名钉成一个显式标题：这是用户能预期到的结果，
+          也是"改标题不改身份"（`workspace_id` 不变）在界面上的兑现。 */}
+      <Modal
+        open={renaming !== null}
+        title="重命名工作空间"
+        okText="保存"
+        cancelText="取消"
+        width={400}
+        onOk={submitRename}
+        onCancel={() => setRenaming(null)}
+        destroyOnHidden
+      >
+        {renaming && (
+          <div style={{ fontSize: 12.5 }}>
+            <div style={{ marginBottom: 5, color: tokens.textSecondary }}>工作空间名称</div>
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onPressEnter={submitRename}
+              placeholder="工作空间名称"
+              autoFocus
+              maxLength={80}
+            />
+            <div style={{ marginTop: 8, fontSize: 11.5, color: tokens.textPlaceholder, lineHeight: 1.7 }}>
+              直接确认一段没改过的话，就把这个名字钉住，此后不再跟随目录改名或界面语言。
+              改名不改身份：<code style={{ fontFamily: tokens.fontMono }}>workspace_id</code> 不变。
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 删除登记：措辞对齐 dsh 的「删除工作区」，但**保留边界必须写在确认框里**——
+          菜单项只有一个词的位置，说不清"删的是登记不是数据"，没人敢点。 */}
       <Modal
         open={pendingDelete !== null}
-        title="移除工作空间登记"
-        okText="移除登记"
+        title="删除工作空间"
+        okText="删除"
         cancelText="取消"
         okButtonProps={{ danger: true }}
         onCancel={() => setPendingDelete(null)}
@@ -236,14 +284,13 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         {pendingDelete && (
           <div style={{ fontSize: 12.5, lineHeight: 1.9 }}>
             <p style={{ margin: '0 0 8px' }}>
-              将移除「{workspaceLabel(pendingDelete)}」的登记，<b>不会</b>删除目录及其中的文件：
+              将把「{workspaceLabel(pendingDelete)}」从工作空间列表中移除。<b>目录与会话记录都会保留</b>：
             </p>
             <p style={{ margin: '0 0 8px', fontFamily: tokens.fontMono, fontSize: 11.5, wordBreak: 'break-all' }}>
               {pendingDelete.path}
             </p>
             <p style={{ margin: 0 }}>
-              该工作空间下的 <b>{pendingDelete.conversations}</b> 个会话将回到「默认工作空间」，
-              会话历史完整保留。
+              它的 <b>{pendingDelete.conversations}</b> 个会话将回到「默认工作空间」，会话历史完整保留。
             </p>
           </div>
         )}

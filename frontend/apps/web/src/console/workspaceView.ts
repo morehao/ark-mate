@@ -28,3 +28,46 @@ export function mostRecentlyUsedWorkspaceId(list: WorkspaceListResp | null): str
   }
   return bestId
 }
+
+// ——— 左栏「视图选项」的模型（v14.2） ———
+
+/**
+ * 分组方式：`workspace` = 按工作空间分组；`timeline` = 按创建日的平铺时间线。
+ *
+ * 两者都保留而不是二选一：分组视图回答"我在哪个项目里有哪些会话"，时间线回答
+ * "我最近干了什么"。它还有一条硬用途——**登记表不可用**（memory 持久层 / 老服务端）
+ * 时没有分组可挂，必须能退回时间线，否则会话列表会整个消失。
+ */
+export type RailGroupMode = 'workspace' | 'timeline'
+
+/** 视图选项里「会话筛选」的两态。 */
+export type RailArchivedFilter = 'hide' | 'only'
+
+export const RAIL_GROUP_MODES: readonly RailGroupMode[] = ['workspace', 'timeline']
+export const RAIL_ARCHIVED_FILTERS: readonly RailArchivedFilter[] = ['hide', 'only']
+
+export function railGroupModeLabel(mode: RailGroupMode): string {
+  return mode === 'workspace' ? '按工作空间' : '时间线'
+}
+
+/**
+ * 会话筛选**只有两态**，这是被接口定的，不是界面偷懒：`railMode` 直接决定服务端查询
+ * （`listConversations(archived)`），wire 上没有"两条都要"的第三态可表达。
+ *
+ * 照搬 dsh 的三态（隐藏已归档 / 全部对话 / 仅显示已归档）需要先给 `GET /conversations`
+ * 加一个三值过滤参数——那是一次对外契约改动（要同步 README 路由表与 `TestReadmeRoutesMatchRouter`），
+ * 不该混在一次界面调整里；更不该用一个"看着能选、选了什么都不变"的菜单项糊过去。
+ */
+export function railArchivedFilterLabel(filter: RailArchivedFilter): string {
+  return filter === 'only' ? '仅显示已归档' : '隐藏已归档'
+}
+
+/** 筛选 → `railMode`（store 的 `setRailMode` 是唯一写入口，这里只做映射，不持有状态）。 */
+export function archivedFilterToRailMode(filter: RailArchivedFilter): 'active' | 'archived' {
+  return filter === 'only' ? 'archived' : 'active'
+}
+
+/** `railMode` → 筛选（反向那份，供菜单打勾）。 */
+export function railModeToArchivedFilter(mode: 'active' | 'archived'): RailArchivedFilter {
+  return mode === 'archived' ? 'only' : 'hide'
+}

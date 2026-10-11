@@ -448,8 +448,11 @@ export interface MateActions {
    *
    * 这是「添加工作空间…」唯一的落点：选目录那一半在 `WorkspaceBrowser`（它只负责挑路径）。
    * 成功后刷新登记表——本地插入会让顺序与服务端不一致（新条目在尾部，那是服务端才知道的事）。
+   *
+   * **失败会抛**（不吞、也不自己弹提示）：调用方需要把原因就地显示在自己的弹层里
+   * （设计 §5.2 状态 E），一句话的全局 toast 撑不住"用户当前浏览位置还在、换个目录即可"这条交互。
    */
-  createWorkspace: (path: string, title?: string) => Promise<Workspace | undefined>
+  createWorkspace: (path: string, title?: string) => Promise<Workspace>
   /** 改名（不改身份）。 */
   renameWorkspace: (id: string, title: string) => Promise<void>
   /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
@@ -708,16 +711,15 @@ export const useMate = create<MateStore>((set, get) => {
     },
 
     createWorkspace: async (path, title) => {
-      try {
-        const ws = await apiCreateWorkspace(path, title)
-        // 刷新而不是本地插入：顺序与服务端的 list_order 只能由服务端决定（新条目在尾部），
-        // 本地插在中间或末尾都可能与服务端不一致，而那种不一致下次刷新会"跳一下"。
-        await get().loadWorkspaces()
-        return ws
-      } catch (err) {
-        showToast(toErrorMessage(err))
-        return undefined
-      }
+      // 失败**不吞**：登记失败的原因必须回到调用方。工作空间选择器要把它**就地**显示在弹层里
+      // （设计 §5.2 状态 E：弹层不关，原因用服务端 msg，不自己编文案）。这里原先把错误收成一句
+      // 会自己消失的全局 toast 并返回 undefined，于是调用方只能编一句"服务端未返回工作空间"，
+      // 真实原因（目录不存在 / 落在白名单外 / 不是目录）反而丢了。
+      const ws = await apiCreateWorkspace(path, title)
+      // 刷新而不是本地插入：顺序与服务端的 list_order 只能由服务端决定（新条目在尾部），
+      // 本地插在中间或末尾都可能与服务端不一致，而那种不一致下次刷新会"跳一下"。
+      await get().loadWorkspaces()
+      return ws
     },
 
     renameWorkspace: async (id, title) => {

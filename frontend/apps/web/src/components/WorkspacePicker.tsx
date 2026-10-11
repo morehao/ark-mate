@@ -14,7 +14,7 @@ import {
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { tokens } from '@ark-mate/ui'
-import { recentWorkspaces } from '@ark-mate/api'
+import { recentWorkspaces, toErrorMessage } from '@ark-mate/api'
 import type { Workspace, WorkspaceRecent } from '@ark-mate/types'
 import { useMate } from '../store'
 import { DirLabel, Label, WorkspaceBrowser, splitDirPath } from './WorkspaceBrowser'
@@ -131,10 +131,12 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
       // 用户敲的是一个**项目目录**，让它在左栏有个分组是符合预期的；
       // 不想登记的话，选目录那条路也不登记（见下面 browse 的注释）。
       const ws = await createWorkspace(p)
-      if (!ws) return
       setManual('')
       onChange({ id: ws.id, cwd: null })
       close()
+    } catch (err) {
+      // 失败**就地报错**（设计 §5.2 状态 E）：原因用服务端 msg，不自己编文案。
+      setBrowseErr(toErrorMessage(err))
     } finally {
       setManualLoading(false)
     }
@@ -146,14 +148,10 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
     setBrowseErr(null)
     try {
       const ws = await createWorkspace(path)
-      if (!ws) {
-        setBrowseErr('创建失败：服务端未返回工作空间')
-        return
-      }
       onChange({ id: ws.id, cwd: null })
       close()
     } catch (err) {
-      setBrowseErr(err instanceof Error ? err.message : String(err))
+      setBrowseErr(toErrorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -165,22 +163,27 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
     setBrowseErr(null)
     try {
       const ws = await createWorkspace(r.path)
-      if (!ws) return
       onChange({ id: ws.id, cwd: null })
       close()
+    } catch (err) {
+      setBrowseErr(toErrorMessage(err))
     } finally {
       setBusy(false)
     }
   }
 
+  // 就地报错那一行：**两种视图都要渲染**。它原先是挂在菜单里的，而浏览视图会整体替换掉菜单，
+  // 于是"选目录 → 点使用此目录 → 落库失败"这条最需要它的路径上，理由是看不见的
+  // （弹层确实没关，但用户只看到什么都没发生）。
+  const errLine = browseErr ? (
+    <div className="fg-ws-error" role="alert">
+      <WarningOutlined /> <span>{browseErr}</span>
+    </div>
+  ) : null
+
   const menu = (
     <div className="fg-ws-pop" style={{ width: 380 }}>
-      {/* 创建失败就地报错（§5.2 状态 E）：不关弹层，用户当前浏览位置还在 */}
-      {browseErr && (
-        <div className="fg-ws-error" role="alert">
-          <WarningOutlined /> <span>{browseErr}</span>
-        </div>
-      )}
+      {errLine}
 
       <Label>当前</Label>
       <div className="fg-ws-item fg-ws-item-static">
@@ -353,7 +356,12 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
       }}
       trigger="click"
       placement="topLeft"
-      content={browsing ? browseView : menu}
+      content={browsing ? (
+        <>
+          {errLine}
+          {browseView}
+        </>
+      ) : menu}
       arrow={false}
       styles={{ content: { padding: 6 } }}
     >
@@ -396,24 +404,33 @@ export function WorkspaceManageMenu({
   onMoveDown,
   onRename,
   onDelete,
+  onOpenChange,
 }: {
   ws: Workspace
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
   onMoveDown: () => void
-  /** 重命名由调用方接管（就地输入框需要整行的宽度与折叠态的配合，见 `WorkspaceGroupPane`）。 */
+  /** 重命名由调用方接管（要开一个对话框，见 `WorkspaceGroupPane`）。 */
   onRename: () => void
   onDelete: () => void
+  /**
+   * 菜单开合上报。调用方据此给所在行挂 `fg-menu-open`：鼠标移进浮层后行不再 hover，
+   * 没有这条锚点按钮会跟着隐形（浮层还在、锚点空了）。
+   */
+  onOpenChange?: (open: boolean) => void
 }) {
   const items: MenuProps['items'] = [
+    { key: 'rename', label: '重命名', icon: <EditOutlined /> },
+    { type: 'divider' },
     { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canMoveUp },
     { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canMoveDown },
-    { key: 'rename', label: '重命名', icon: <EditOutlined /> },
     { type: 'divider' },
     {
       key: 'delete',
-      label: '移除工作空间',
+      // 措辞对齐 dsh 的「删除工作区」（v14.2）。菜单项只有一个词的位置，说不清
+      // "删的是登记不是数据"——保留边界由 WorkspaceGroupPane 的确认框负责。
+      label: '删除工作区',
       icon: <DeleteOutlined />,
       danger: true,
       disabled: ws.is_default,
@@ -426,7 +443,7 @@ export function WorkspaceManageMenu({
     else if (key === 'delete') onDelete()
   }
   return (
-    <Dropdown menu={{ items, onClick }} trigger={['click']} placement="bottomRight">
+    <Dropdown menu={{ items, onClick }} trigger={['click']} placement="bottomRight" onOpenChange={onOpenChange}>
       <button
         type="button"
         className="fg-ws-icon-btn"

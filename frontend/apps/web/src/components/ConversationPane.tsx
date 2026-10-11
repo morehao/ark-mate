@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Dropdown, Input, Modal } from 'antd'
 import {
   DownloadOutlined,
@@ -8,7 +8,6 @@ import {
   MoreOutlined,
   PushpinFilled,
   PushpinOutlined,
-  SearchOutlined,
   UndoOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -21,6 +20,8 @@ import { conversationSearch, exportConversations, messageSearch, toErrorMessage 
 import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
 import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
+import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
+import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
 import { agentNameOf, titleFor } from '../console/util'
 
@@ -66,39 +67,8 @@ function dayLabel(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-/** 会话侧栏「会话 / 归档」视图切换小标签。 */
-function ViewTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        flex: 'none',
-        border: 0,
-        borderRadius: 8,
-        padding: '3px 11px',
-        fontSize: 12.5,
-        fontWeight: 620,
-        letterSpacing: '-0.005em',
-        background: active ? tokens.selectedBg : 'transparent',
-        color: active ? tokens.text : tokens.textSecondary,
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  )
-}
-
-/** 会话列表区（原会话侧栏 .side）：视图切换 + 搜索 + 会话列表（分组/置顶/行内更多操作）。
+/** 会话列表区（原会话侧栏 .side）：区头（视图选项 + 折叠搜索 + 添加工作区）+ 会话列表
+ * （分组/置顶/行内更多操作）。
  *
  * 外壳（宽度 / 抽屉位移 / `.fg-rail` 类）已上移给 NavRail——本组件只负责"内容体"，
  * 由 NavRail 提供左栏容器与窄屏抽屉态。 */
@@ -122,7 +92,9 @@ export function ConversationPane({ onCreate }: Props) {
   const [draft, setDraft] = useState('')
 
   // 会话搜索：后端扫 transcript（标题/Agent/用户消息正文；含归档），250ms 防抖。
+  // 搜索框在区头里是**折叠**的（v14.2，对齐 dsh）：没有它这条列表上方就少一行常驻控件。
   const [searchQ, setSearchQ] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [hits, setHits] = useState<ConversationSearchHit[] | null>(null) // null = 未搜索
   const [msgHits, setMsgHits] = useState<MessageSearchResp | null>(null) // M3 ②：消息级命中（带锚点）
   const [searchBusy, setSearchBusy] = useState(false)
@@ -161,7 +133,10 @@ export function ConversationPane({ onCreate }: Props) {
   const busy = activeId ? (views[activeId]?.streaming ?? false) : false
   const archivedView = railMode === 'archived'
 
-  // 列表分页（P3 余留）：默认渲染一页，超出的以「显示更早」增量展开；切视图/搜索时复位。
+  // 列表分页（P3 余留）：只在**时间线**视图生效。分组视图的条数由"每组 5 条空闲会话 +
+  // 展开其余"约束（`railView.quotaSessions`，在 WorkspaceGroupPane 里）。两套一起上会在同一个
+  // 列表里同时出现「展开其余 N 个会话」和「显示更早的 N 条」——两个语义不同的"还有更多"，
+  // 用户没法判断哪个才是真的还有。切视图时复位。
   const [shown, setShown] = useState(RAIL_PAGE)
   useEffect(() => setShown(RAIL_PAGE), [railMode])
   const railPage = pageConversations(conversations, shown, activeId)
@@ -195,9 +170,9 @@ export function ConversationPane({ onCreate }: Props) {
   }
 
   // 分组视图里没被任何登记覆盖的会话（登记被删/归属指向已不存在的行）：兜一个「其他」组，
-  // 而不是让它们从列表里凭空消失。
+  // 而不是让它们从列表里凭空消失。分组视图不分页（见上面的说明），所以这里看的是**全量**。
   const ungrouped = grouped
-    ? railPage.visible.filter((c) => {
+    ? conversations.filter((c) => {
         const id = c.workspace_id ?? ''
         return !(workspaces?.items ?? []).some((w) => w.id === id)
       })
@@ -218,6 +193,8 @@ export function ConversationPane({ onCreate }: Props) {
 
   const openHit = (h: ConversationSearchHit) => {
     setSearchQ('')
+    // 命中即收起搜索：区头回到"标题 + 动作"，浏览模式随之恢复（对齐 dsh：选择结果会清空并收起搜索）。
+    setSearchOpen(false)
     setHits(null)
     setMsgHits(null)
     openConversation(h.id)
@@ -226,6 +203,7 @@ export function ConversationPane({ onCreate }: Props) {
   // 消息命中点击：跳转到该会话并带上 seq 锚点（ChatPage 负责滚动定位与高亮）。
   const openMessageHit = (h: MessageSearchHit) => {
     setSearchQ('')
+    setSearchOpen(false)
     setHits(null)
     setMsgHits(null)
     setDrawer(false)
@@ -615,55 +593,20 @@ export function ConversationPane({ onCreate }: Props) {
 
   return (
     <div className="fg-rail-pane" aria-label="会话列表">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          padding: '12px 12px 8px',
-        }}
-      >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: 2, borderRadius: 10 }}>
-          <ViewTab active={!archivedView} onClick={() => setRailMode('active')}>
-            会话
-          </ViewTab>
-          <ViewTab active={archivedView} onClick={() => setRailMode('archived')}>
-            归档
-          </ViewTab>
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {grouped && (
-            <span style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 8 }}>
-              <ViewTab active={effectiveMode === 'workspace'} onClick={() => setMode('workspace')}>
-                工作空间
-              </ViewTab>
-              <ViewTab active={effectiveMode === 'timeline'} onClick={() => setMode('timeline')}>
-                时间线
-              </ViewTab>
-            </span>
-          )}
-        </span>
-      </div>
-
-      <div style={{ flex: 'none', padding: '0 10px 4px' }}>
-        <Input
-          allowClear
-          value={searchQ}
-          onChange={(e) => setSearchQ(e.target.value)}
-          prefix={<SearchOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />}
-          placeholder="搜索会话与消息（点消息命中可跳转定位）"
-          aria-label="搜索会话"
-          style={{
-            borderRadius: 8,
-            fontSize: 12.5,
-            background: tokens.softFill,
-            border: '1px solid transparent',
-            height: 30,
-          }}
-          variant="filled"
-        />
-      </div>
+      {/* 区头：`会话 / 归档` 与 `工作空间 / 时间线` 两组分段切换、以及那条常驻搜索框，
+          一起收进这里（v14.2，对齐 dsh 的工作区段头）。 */}
+      <RailSectionHeader
+        query={searchQ}
+        onQueryChange={setSearchQ}
+        searching={searchOpen}
+        onSearchingChange={setSearchOpen}
+        groupMode={effectiveMode}
+        onGroupModeChange={setMode}
+        canGroup={grouped}
+        archivedFilter={railModeToArchivedFilter(railMode)}
+        onArchivedFilterChange={(f) => setRailMode(archivedFilterToRailMode(f))}
+        writable={workspaces?.writable ?? false}
+      />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px 12px' }} role="list">
         {searchBusy ? (
@@ -711,7 +654,7 @@ export function ConversationPane({ onCreate }: Props) {
         ) : conversations.length === 0 ? (
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
             {archivedView
-              ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
+              ? '暂无归档会话。点会话行的 ⋯ →「归档」即可把会话移到这里（数据保留，可恢复）。'
               : '暂无会话。点左栏顶部「新建会话」，选好工作空间即可发起首轮问答。'}
           </div>
         ) : effectiveMode === 'workspace' && grouped ? (
