@@ -154,7 +154,7 @@ func TestAgentMcpsFileCarrier(t *testing.T) {
 //
 // 三条断言缺一不可（对应"读到的是新的 / 何时生效 / 代价多大"）：
 //
-//  1. 空闲句柄被作废（`conversation(id) == nil`）——不换这一下，下一轮只会复用旧句柄；
+//  1. 空闲句柄被作废（`session(id) == nil`）——不换这一下，下一轮只会复用旧句柄；
 //  2. 重建后底座真的收到新的 `mcpServers`（管理侧算得再对，下发的若是旧集合就等于没生效）；
 //  3. 缺省路径的指纹**仍是空**、连接数**仍是 1**——生效动作没有偷换代际键（R11），也没有多起进程。
 func TestAgentMcpsChangeTakesEffectNextTurn(t *testing.T) {
@@ -177,7 +177,7 @@ func TestAgentMcpsChangeTakesEffectNextTurn(t *testing.T) {
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Mcps: json.RawMessage(`["fs","git"]`)}); err != nil {
 		t.Fatalf("PATCH mcps: %v", err)
 	}
-	if r.orch.conversation(convID) != nil {
+	if r.orch.session(convID) != nil {
 		t.Fatal("空闲会话的句柄应在写面之后立刻作废（否则下一轮还会用旧注入集）")
 	}
 	if n := len(log()); n != 1 {
@@ -203,7 +203,7 @@ func TestAgentMcpsChangeTakesEffectNextTurn(t *testing.T) {
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Mcps: json.RawMessage(`["git","fs"]`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.orch.conversation(convID) != as2 {
+	if r.orch.session(convID) != as2 {
 		t.Fatal("等价集合（仅顺序不同）不得作废句柄")
 	}
 	if n := len(log()); n != 2 {
@@ -211,9 +211,9 @@ func TestAgentMcpsChangeTakesEffectNextTurn(t *testing.T) {
 	}
 }
 
-// TestAgentMcpsChangeDefersBusyConversation 忙则顺延（ADR-13 纪律③的同一条判据）：
+// TestAgentMcpsChangeDefersBusySession 忙则顺延（ADR-13 纪律③的同一条判据）：
 // 有在途轮次、或有未应答的权限卡时**不动**句柄——这一轮继续用旧面跑完，下一次重建才换。
-func TestAgentMcpsChangeDefersBusyConversation(t *testing.T) {
+func TestAgentMcpsChangeDefersBusySession(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
 	r.registerMcp(t, fsServer("v1"))
@@ -228,7 +228,7 @@ func TestAgentMcpsChangeDefersBusyConversation(t *testing.T) {
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Mcps: json.RawMessage(`["fs","git"]`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.orch.conversation(convID) != as1 {
+	if r.orch.session(convID) != as1 {
 		t.Fatal("有在途轮次时必须顺延（绝不打断跑着的一轮）")
 	}
 	as1.mu.Lock()
@@ -238,23 +238,23 @@ func TestAgentMcpsChangeDefersBusyConversation(t *testing.T) {
 	// ② 有未应答的权限卡：同样是"别动用户正盯着的会话"。
 	r.orch.perm.mu.Lock()
 	r.orch.perm.pending["perm-test"] = &pendingPermission{
-		callID: "perm-test", conversationID: convID, ch: make(chan acl.PermissionDecision, 1),
+		callID: "perm-test", sessionID: convID, ch: make(chan acl.PermissionDecision, 1),
 	}
 	r.orch.perm.mu.Unlock()
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Mcps: json.RawMessage(`["git"]`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.orch.conversation(convID) != as1 {
+	if r.orch.session(convID) != as1 {
 		t.Fatal("有未应答权限卡时必须顺延")
 	}
 
 	// ③ 权限卡收敛之后，再改一次就一定生效（顺延不是"永远不生效"）。换一个**真变了**的集合：
 	// 语义没变的 PATCH 本来就不该发通知（上面那两条已经把它写进内存了）。
-	r.orch.perm.CancelConversation(convID)
+	r.orch.perm.CancelSession(convID)
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Mcps: json.RawMessage(`["fs"]`)}); err != nil {
 		t.Fatal(err)
 	}
-	if r.orch.conversation(convID) != nil {
+	if r.orch.session(convID) != nil {
 		t.Fatal("权限卡收敛后应立刻作废句柄")
 	}
 }
@@ -269,7 +269,7 @@ func TestAgentWriteWithoutMcpsChangeKeepsHandles(t *testing.T) {
 	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{Name: ptrOf("A1 新名字")}); err != nil {
 		t.Fatal(err)
 	}
-	if r.orch.conversation(convID) != as1 {
+	if r.orch.session(convID) != as1 {
 		t.Fatal("只改名字不得作废会话句柄")
 	}
 }

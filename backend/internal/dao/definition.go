@@ -110,12 +110,12 @@ func (d *DefinitionDao[T, L]) DeleteCAS(ctx context.Context, id string, expected
 
 // SkillDao 访问 skills 表。
 type SkillDao struct {
-	*DefinitionDao[model.SkillDefinition, model.SkillDefinitionList]
+	*DefinitionDao[model.SkillEntity, model.SkillEntityList]
 }
 
 // NewSkillDao 构造 SkillDao。
 func NewSkillDao(getDB gormdao.DBGetter) *SkillDao {
-	return &SkillDao{DefinitionDao: newDefinitionDao[model.SkillDefinition, model.SkillDefinitionList]("SkillDao", getDB)}
+	return &SkillDao{DefinitionDao: newDefinitionDao[model.SkillEntity, model.SkillEntityList]("SkillDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -125,12 +125,12 @@ func (d *SkillDao) WithTx(tx *gorm.DB) *SkillDao {
 
 // McpServerDao 访问 mcp_servers 表。
 type McpServerDao struct {
-	*DefinitionDao[model.McpServerDefinition, model.McpServerDefinitionList]
+	*DefinitionDao[model.McpServerEntity, model.McpServerEntityList]
 }
 
 // NewMcpServerDao 构造 McpServerDao。
 func NewMcpServerDao(getDB gormdao.DBGetter) *McpServerDao {
-	return &McpServerDao{DefinitionDao: newDefinitionDao[model.McpServerDefinition, model.McpServerDefinitionList]("McpServerDao", getDB)}
+	return &McpServerDao{DefinitionDao: newDefinitionDao[model.McpServerEntity, model.McpServerEntityList]("McpServerDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -143,12 +143,12 @@ func (d *McpServerDao) WithTx(tx *gorm.DB) *McpServerDao {
 // 它比 skills/mcp_servers/agents 多两类方法（**运行态列**的读写）——但定义列的 CAS 仍然只有
 // 这一份实现：`UpdateCAS` 只碰 body/revision/updated_at，运行态列由本文件末尾的方法单独更新。
 type AutomationDao struct {
-	*DefinitionDao[model.AutomationDefinition, model.AutomationDefinitionList]
+	*DefinitionDao[model.AutomationEntity, model.AutomationEntityList]
 }
 
 // NewAutomationDao 构造 AutomationDao。
 func NewAutomationDao(getDB gormdao.DBGetter) *AutomationDao {
-	return &AutomationDao{DefinitionDao: newDefinitionDao[model.AutomationDefinition, model.AutomationDefinitionList]("AutomationDao", getDB)}
+	return &AutomationDao{DefinitionDao: newDefinitionDao[model.AutomationEntity, model.AutomationEntityList]("AutomationDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -158,12 +158,12 @@ func (d *AutomationDao) WithTx(tx *gorm.DB) *AutomationDao {
 
 // AgentDao 访问 agents 表。
 type AgentDao struct {
-	*DefinitionDao[model.AgentDefinition, model.AgentDefinitionList]
+	*DefinitionDao[model.AgentEntity, model.AgentEntityList]
 }
 
 // NewAgentDao 构造 AgentDao。
 func NewAgentDao(getDB gormdao.DBGetter) *AgentDao {
-	return &AgentDao{DefinitionDao: newDefinitionDao[model.AgentDefinition, model.AgentDefinitionList]("AgentDao", getDB)}
+	return &AgentDao{DefinitionDao: newDefinitionDao[model.AgentEntity, model.AgentEntityList]("AgentDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。

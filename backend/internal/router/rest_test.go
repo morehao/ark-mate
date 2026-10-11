@@ -12,12 +12,12 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/dto/dtosearch"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -31,14 +31,14 @@ import (
 // ——— stub Service（handler.Service 的测试替身，记录调用） ———
 
 type stubSvc struct {
-	agents        []dtoagent.AgentResp
-	conversations []dtoconversation.ConversationResp
+	agents   []dtoagent.AgentResp
+	sessions []dtosession.SessionResp
 
-	listAgentsErr        error
-	listConversationsErr error
-	listCwd              string // 最近一次 ListConversations 的工作空间过滤参数
-	listWorkspaceID      string // 最近一次 ListConversations 的归属过滤参数（v14）
-	listArchivedOnly     bool   // 最近一次 ListConversations 的 archived 参数
+	listAgentsErr    error
+	listSessionsErr  error
+	listCwd          string // 最近一次 ListSessions 的工作空间过滤参数
+	listWorkspaceID  string // 最近一次 ListSessions 的归属过滤参数（v14）
+	listArchivedOnly bool   // 最近一次 ListSessions 的 archived 参数
 
 	browsePath   string // 最近一次 BrowseWorkspace 的 path 参数
 	browseHidden bool   // 最近一次 BrowseWorkspace 的 hidden 参数
@@ -104,17 +104,17 @@ type stubSvc struct {
 	autoReq        dtoautomation.AutomationWriteReq
 	autoPreviewReq dtoautomation.AutomationPreviewReq
 
-	agentErr        error                                   // P2 管理面桩错误注入
-	resolvePermErr  *gerror.Error                           // 权限决策桩错误注入
-	resolvePermResp *dtoconversation.PermissionDecisionResp // 权限决策桩回执（nil = 默认构造）
-	agentAction     string                                  // 最近一次 delete/start/stop 动作（P2 桩）
+	agentErr        error                              // P2 管理面桩错误注入
+	resolvePermErr  *gerror.Error                      // 权限决策桩错误注入
+	resolvePermResp *dtosession.PermissionDecisionResp // 权限决策桩回执（nil = 默认构造）
+	agentAction     string                             // 最近一次 delete/start/stop 动作（P2 桩）
 
 	providerErr error // P2 provider 桩错误注入
 	providers   []dtoprovider.ProviderResp
 
 	createCalled bool
-	createReq    dtoconversation.ConversationCreateReq
-	createResp   *dtoconversation.ConversationCreateResp
+	createReq    dtosession.SessionCreateReq
+	createResp   *dtosession.SessionCreateResp
 	createErr    error
 
 	promptCalled    bool
@@ -126,7 +126,7 @@ type stubSvc struct {
 	inputDeleteConv string
 	inputsListed    bool
 	inputsListConv  string
-	promptResp      *dtoconversation.ConversationPromptResp
+	promptResp      *dtosession.SessionPromptResp
 	promptErr       error
 
 	cancelCalled bool
@@ -139,16 +139,16 @@ type stubSvc struct {
 	historyBefore    int64
 	historyHasBefore bool
 	historyLimit     int
-	historyResp      *dtoconversation.ConversationHistoryResp
+	historyResp      *dtosession.SessionHistoryResp
 	historyErr       error
 
-	memList     []dtoconversation.MemoryResp
+	memList     []dtosession.MemoryResp
 	revokeID    string
 	revokeTitle string
 	revokeKind  string
 	revokeErr   error
 
-	elicitations        []dtoconversation.ElicitationResp
+	elicitations        []dtosession.ElicitationResp
 	resolvedElicID      string
 	resolvedElicAction  string
 	resolvedElicContent map[string]any
@@ -223,7 +223,7 @@ func (s *stubSvc) RestErr(err error) error {
 		case acl.ClassService, acl.ClassConnection:
 			code = 50201
 		}
-		if ae.Code == "agent_not_found" || ae.Code == "conversation_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
+		if ae.Code == "agent_not_found" || ae.Code == "session_not_found" || ae.Code == "runtime_not_found" || ae.Code == "mcp_not_found" {
 			code = 40401
 		}
 		return gerror.Error{Code: code, Msg: ae.Details}
@@ -272,7 +272,7 @@ func (s *stubSvc) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDele
 		return nil, s.agentErr
 	}
 	s.agentAction = "delete:" + id
-	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedConversations: 2, DetachedConversations: 1, WasDefault: true}, nil
+	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedSessions: 2, DetachedSessions: 1, WasDefault: true}, nil
 }
 func (s *stubSvc) StartAgent(_ context.Context, id string) error {
 	if s.agentErr != nil {
@@ -522,12 +522,12 @@ func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*dtocapability.M
 	}
 	return &dtocapability.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
-func (s *stubSvc) ListConversations(archived bool, cwd, workspaceID string) ([]dtoconversation.ConversationResp, error) {
+func (s *stubSvc) ListSessions(archived bool, cwd, workspaceID string) ([]dtosession.SessionResp, error) {
 	s.listArchivedOnly, s.listCwd, s.listWorkspaceID = archived, cwd, workspaceID
-	if s.listConversationsErr != nil {
-		return nil, s.listConversationsErr
+	if s.listSessionsErr != nil {
+		return nil, s.listSessionsErr
 	}
-	return s.conversations, nil
+	return s.sessions, nil
 }
 func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	s.browsePath, s.browseHidden = path, includeHidden
@@ -638,7 +638,7 @@ func (s *stubSvc) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wo
 	return s.registryMove, nil
 }
 
-func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]dtoconversation.ConversationSearchHit, error) {
+func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]dtosession.SessionSearchHit, error) {
 	return nil, nil
 }
 
@@ -667,7 +667,7 @@ func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	return &dtosearch.MessageSearchResp{Query: q, Source: "sqlite", Hits: []dtosearch.MessageSearchHit{}}, nil
 }
 
-func (s *stubSvc) ExportConversations(_ context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
+func (s *stubSvc) ExportSessions(_ context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
 	s.exportReq = req
 	if s.exportErr != nil {
 		return nil, s.exportErr
@@ -677,14 +677,14 @@ func (s *stubSvc) ExportConversations(_ context.Context, req dtoexport.ExportReq
 	}
 	return &dtoexport.ExportResp{Format: "markdown", Files: []dtoexport.ExportFile{}}, nil
 }
-func (s *stubSvc) GetConversation(_ context.Context, id string) (*dtoconversation.ConversationDetailResp, error) {
-	return &dtoconversation.ConversationDetailResp{
-		ConversationResp: dtoconversation.ConversationResp{ID: id},
-		Memories:         s.memList,
+func (s *stubSvc) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
+	return &dtosession.SessionDetailResp{
+		SessionResp: dtosession.SessionResp{ID: id},
+		Memories:    s.memList,
 	}, nil
 }
-func (s *stubSvc) UpdateConversation(_ context.Context, id string, patch dtoconversation.ConversationPatch) (*dtoconversation.ConversationResp, error) {
-	resp := dtoconversation.ConversationResp{ID: id}
+func (s *stubSvc) UpdateSession(_ context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
+	resp := dtosession.SessionResp{ID: id}
 	if patch.Title != nil {
 		resp.Title = *patch.Title
 	}
@@ -696,19 +696,19 @@ func (s *stubSvc) UpdateConversation(_ context.Context, id string, patch dtoconv
 	}
 	return &resp, nil
 }
-func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]dtoconversation.PermissionResp, error) {
+func (s *stubSvc) ListPendingPermissions(_ context.Context, id string) ([]dtosession.PermissionResp, error) {
 	return nil, nil
 }
-func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtoconversation.PermissionDecisionResp, error) {
+func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error) {
 	if s.resolvePermErr != nil {
 		return nil, *s.resolvePermErr
 	}
-	return &dtoconversation.PermissionDecisionResp{
+	return &dtosession.PermissionDecisionResp{
 		CallID: callID, Allowed: allowed, Rejected: !allowed, Always: always,
 		OptionID: optionID, Outcome: "selected", SelectedOptionID: optionID,
 	}, nil
 }
-func (s *stubSvc) ListPermissionMemories(_ context.Context, id string) ([]dtoconversation.MemoryResp, error) {
+func (s *stubSvc) ListPermissionMemories(_ context.Context, id string) ([]dtosession.MemoryResp, error) {
 	return s.memList, nil
 }
 func (s *stubSvc) RevokeMemory(_ context.Context, id, title, kind string) error {
@@ -717,7 +717,7 @@ func (s *stubSvc) RevokeMemory(_ context.Context, id, title, kind string) error 
 	s.revokeKind = kind
 	return s.revokeErr
 }
-func (s *stubSvc) ListPendingElicitations(_ context.Context, id string) ([]dtoconversation.ElicitationResp, error) {
+func (s *stubSvc) ListPendingElicitations(_ context.Context, id string) ([]dtosession.ElicitationResp, error) {
 	return s.elicitations, nil
 }
 func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error {
@@ -726,7 +726,7 @@ func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, actio
 	s.resolvedElicContent = content
 	return s.resolveElicErr
 }
-func (s *stubSvc) CreateConversation(_ context.Context, req dtoconversation.ConversationCreateReq) (*dtoconversation.ConversationCreateResp, error) {
+func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error) {
 	s.createCalled = true
 	s.createReq = req
 	if s.createErr != nil {
@@ -735,11 +735,11 @@ func (s *stubSvc) CreateConversation(_ context.Context, req dtoconversation.Conv
 	if s.createResp != nil {
 		return s.createResp, nil
 	}
-	return &dtoconversation.ConversationCreateResp{ID: "s-new"}, nil
+	return &dtosession.SessionCreateResp{ID: "s-new"}, nil
 }
-func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtoconversation.QueuedInputResp, error) {
+func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtosession.QueuedInputResp, error) {
 	s.inputsListed, s.inputsListConv = true, id
-	return []dtoconversation.QueuedInputResp{
+	return []dtosession.QueuedInputResp{
 		{ID: "in-8", Text: "排队一", Delivery: "after_turn", TargetTurnID: "t1", Generation: 3},
 	}, nil
 }
@@ -749,7 +749,7 @@ func (s *stubSvc) DeleteQueuedInput(_ context.Context, id, inputID string) (bool
 	return true, nil
 }
 
-func (s *stubSvc) PromptConversation(_ context.Context, id string, req dtoconversation.PromptReq) (*dtoconversation.ConversationPromptResp, error) {
+func (s *stubSvc) PromptSession(_ context.Context, id string, req dtosession.PromptReq) (*dtosession.SessionPromptResp, error) {
 	s.promptCalled = true
 	s.promptID = id
 	s.promptText = req.Prompt
@@ -760,14 +760,14 @@ func (s *stubSvc) PromptConversation(_ context.Context, id string, req dtoconver
 	if s.promptResp != nil {
 		return s.promptResp, nil
 	}
-	return &dtoconversation.ConversationPromptResp{ID: id, EventSeq: 5}, nil
+	return &dtosession.SessionPromptResp{ID: id, EventSeq: 5}, nil
 }
 func (s *stubSvc) CancelTurn(_ context.Context, id string) error {
 	s.cancelCalled = true
 	s.cancelID = id
 	return s.cancelErr
 }
-func (s *stubSvc) ConversationHistory(_ context.Context, id string, q dtoconversation.HistoryQuery) (*dtoconversation.ConversationHistoryResp, error) {
+func (s *stubSvc) SessionHistory(_ context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error) {
 	s.historyCalled = true
 	s.historyID = id
 	s.historyAfter = q.After
@@ -780,12 +780,12 @@ func (s *stubSvc) ConversationHistory(_ context.Context, id string, q dtoconvers
 	if s.historyResp != nil {
 		return s.historyResp, nil
 	}
-	return &dtoconversation.ConversationHistoryResp{ID: id}, nil
+	return &dtosession.SessionHistoryResp{ID: id}, nil
 }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
-func (s *stubSvc) ListRuns(_ context.Context, id string) ([]dtoconversation.RunResp, error) {
-	return []dtoconversation.RunResp{}, nil
+func (s *stubSvc) ListRuns(_ context.Context, id string) ([]dtosession.RunResp, error) {
+	return []dtosession.RunResp{}, nil
 }
 
 // ——— 测试基建 ———
@@ -800,7 +800,7 @@ type envelope struct {
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
-		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}
 }
@@ -877,7 +877,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 	one := &dtoworkspace.WorkspaceResp{
 		ID: "wsp-1", Path: "/Users/me/work/ark-mate", Title: "ark-mate",
-		DirStatus: dtoworkspace.DirStatusOK, Conversations: 12, CreatedAt: "2026-10-11T00:00:00Z",
+		DirStatus: dtoworkspace.DirStatusOK, Sessions: 12, CreatedAt: "2026-10-11T00:00:00Z",
 	}
 	svc := &stubSvc{
 		registryOne:    one,
@@ -1069,11 +1069,11 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 
 // ——— 用例 ———
 
-// TestListEndpoints GET /agents /conversations 返回 code=0 + 真实列表载荷。
+// TestListEndpoints GET /agents /sessions 返回 code=0 + 真实列表载荷。
 func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
-		agents:        []dtoagent.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
-		conversations: []dtoconversation.ConversationResp{{ID: "s1", AgentID: "a", Status: "completed"}},
+		agents:   []dtoagent.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
+		sessions: []dtosession.SessionResp{{ID: "s1", AgentID: "a", Status: "completed"}},
 	}
 	r := newRestEngine(stubDeps(svc))
 
@@ -1101,10 +1101,10 @@ func TestListEndpoints(t *testing.T) {
 		t.Fatalf("agent 响应不应带 runtimes: %s", env.Data)
 	}
 
-	env, _ = do(t, r, "GET", "/v1/mate/conversations", "")
-	var sess []dtoconversation.ConversationResp
+	env, _ = do(t, r, "GET", "/v1/mate/sessions", "")
+	var sess []dtosession.SessionResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
-		t.Fatalf("conversations data 不符: %s", env.Data)
+		t.Fatalf("sessions data 不符: %s", env.Data)
 	}
 }
 
@@ -1117,25 +1117,25 @@ func TestRuntimesEndpointGone(t *testing.T) {
 	}
 }
 
-// TestListConversationsWorkspaceQuery GET /conversations 的 `cwd` 过滤：
+// TestListSessionsWorkspaceQuery GET /sessions 的 `cwd` 过滤：
 // 绝对路径透传给 service（含 workspace_temporary 回读），相对路径属参数错误直接 40000。
-func TestListConversationsWorkspaceQuery(t *testing.T) {
-	svc := &stubSvc{conversations: []dtoconversation.ConversationResp{{
+func TestListSessionsWorkspaceQuery(t *testing.T) {
+	svc := &stubSvc{sessions: []dtosession.SessionResp{{
 		ID: "c-1", AgentID: "agent-opencode", Status: "completed",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 	}}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/mate/conversations?cwd=/work/alpha", "")
+	env, code := do(t, r, "GET", "/v1/mate/sessions?cwd=/work/alpha", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
 	if svc.listCwd != "/work/alpha" || svc.listArchivedOnly {
 		t.Fatalf("cwd 未透传: cwd=%q archived=%v", svc.listCwd, svc.listArchivedOnly)
 	}
-	var list []dtoconversation.ConversationResp
+	var list []dtosession.SessionResp
 	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 1 {
-		t.Fatalf("conversations data 不符: %s", env.Data)
+		t.Fatalf("sessions data 不符: %s", env.Data)
 	}
 	if list[0].Cwd != "/work/alpha" || !list[0].WorkspaceTemporary {
 		t.Fatalf("工作空间字段未回读: %+v", list[0])
@@ -1143,7 +1143,7 @@ func TestListConversationsWorkspaceQuery(t *testing.T) {
 
 	// 未指定 cwd → 不过滤（空串透传）。
 	svc.listCwd = "sentinel"
-	if _, code := do(t, r, "GET", "/v1/mate/conversations", ""); code != 200 {
+	if _, code := do(t, r, "GET", "/v1/mate/sessions", ""); code != 200 {
 		t.Fatalf("无 cwd 应 200，got %d", code)
 	}
 	if svc.listCwd != "" {
@@ -1151,7 +1151,7 @@ func TestListConversationsWorkspaceQuery(t *testing.T) {
 	}
 
 	// 相对路径 → 40000（在 handler 层拦截，不进入 service）。
-	env, _ = do(t, r, "GET", "/v1/mate/conversations?cwd=relative/dir", "")
+	env, _ = do(t, r, "GET", "/v1/mate/sessions?cwd=relative/dir", "")
 	if env.Code != 40000 {
 		t.Fatalf("相对 cwd 应 40000，got %+v", env)
 	}
@@ -1247,11 +1247,11 @@ func TestListFailure(t *testing.T) {
 	}
 }
 
-// TestCreateConversation 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
-func TestCreateConversation(t *testing.T) {
-	svc := &stubSvc{createResp: &dtoconversation.ConversationCreateResp{ID: "s-abc", AgentID: "agent-opencode", Status: "in_progress", EventSeq: 9}}
+// TestCreateSession 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
+func TestCreateSession(t *testing.T) {
+	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", AgentID: "agent-opencode", Status: "in_progress", EventSeq: 9}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1267,20 +1267,20 @@ func TestCreateConversation(t *testing.T) {
 	}
 }
 
-// TestCreateConversationBadBody 非 JSON 请求体 → code 40000（agent_id 现为可选，不再校验缺失）。
-func TestCreateConversationBadBody(t *testing.T) {
+// TestCreateSessionBadBody 非 JSON 请求体 → code 40000（agent_id 现为可选，不再校验缺失）。
+func TestCreateSessionBadBody(t *testing.T) {
 	r := newRestEngine(stubDeps(&stubSvc{}))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations", `not-json{`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `not-json{`)
 	if env.Code != 40000 {
 		t.Fatalf("非 JSON 期望 40000，got %+v", env)
 	}
 }
 
-// TestCreateConversationOptionalAgent 省略 agent_id 应被接受并透传给 service（默认在 service 层解析）。
-func TestCreateConversationOptionalAgent(t *testing.T) {
+// TestCreateSessionOptionalAgent 省略 agent_id 应被接受并透传给 service（默认在 service 层解析）。
+func TestCreateSessionOptionalAgent(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi"}`)
 	if env.Code != 0 {
 		t.Fatalf("省略 agent_id 应被接受: %+v", env)
 	}
@@ -1289,11 +1289,11 @@ func TestCreateConversationOptionalAgent(t *testing.T) {
 	}
 }
 
-// TestCreateConversationServiceError svc 业务错误原样透出（40901 忙）。
-func TestCreateConversationServiceError(t *testing.T) {
+// TestCreateSessionServiceError svc 业务错误原样透出（40901 忙）。
+func TestCreateSessionServiceError(t *testing.T) {
 	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "turn in progress"}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations", `{"agent_id":"a","prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"a","prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "turn in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
 	}
@@ -1305,12 +1305,12 @@ func TestPromptAndCancel(t *testing.T) {
 	r := newRestEngine(stubDeps(svc))
 
 	// prompt 缺 prompt → 40000。
-	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{}`)
 	if env.Code != 40000 {
 		t.Fatalf("prompt 缺参期望 40000，got %+v", env)
 	}
 	// 正常 prompt。
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{"prompt":"再来一轮"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{"prompt":"再来一轮"}`)
 	if env.Code != 0 || !svc.promptCalled || svc.promptID != "s1" || svc.promptText != "再来一轮" {
 		t.Fatalf("prompt 调用不符: called=%v id=%s env=%+v", svc.promptCalled, svc.promptID, env)
 	}
@@ -1323,12 +1323,12 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// §6 投递模式透传到 service（delivery 不是路由层的事，路由只负责别把它吃掉）。
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
 	if env.Code != 0 || svc.promptDelivery != "after_turn" {
 		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
 	}
 	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
-	env, _ = do(t, r, "GET", "/v1/mate/conversations/s1/inputs", "")
+	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/inputs", "")
 	if env.Code != 0 || !svc.inputsListed || svc.inputsListConv != "s1" {
 		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
 	}
@@ -1347,13 +1347,13 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。
-	env, _ = do(t, r, "DELETE", "/v1/mate/conversations/s1/inputs/in-9", "")
+	env, _ = do(t, r, "DELETE", "/v1/mate/sessions/s1/inputs/in-9", "")
 	if env.Code != 0 || !svc.inputDeleted || svc.inputDeleteID != "in-9" {
 		t.Fatalf("撤下排队输入不符: env=%+v deleted=%v id=%q", env, svc.inputDeleted, svc.inputDeleteID)
 	}
 
 	// cancel。
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/cancel", "")
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/cancel", "")
 	if env.Code != 0 || !svc.cancelCalled || svc.cancelID != "s1" {
 		t.Fatalf("cancel 调用不符: env=%+v called=%v", env, svc.cancelCalled)
 	}
@@ -1372,61 +1372,61 @@ func TestHistoryParamParsing(t *testing.T) {
 	r := newRestEngine(stubDeps(svc))
 
 	// 默认 after=0 limit=200。
-	do(t, r, "GET", "/v1/mate/conversations/s1/history", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history", "")
 	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyBefore != 0 || svc.historyLimit != 200 {
 		t.Fatalf("默认参数不符: %+v %d/%d %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
 	}
 
 	// 显式 after/limit。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/conversations/s1/history?after=7&limit=50", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?after=7&limit=50", "")
 	if svc.historyAfter != 7 || svc.historyLimit != 50 {
 		t.Fatalf("显式参数不符: after=%d limit=%d", svc.historyAfter, svc.historyLimit)
 	}
 
 	// before 游标（C2：向前翻页）；after/before 同时给 → 40001（互斥）。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/conversations/s1/history?before=42&limit=5", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=42&limit=5", "")
 	if svc.historyBefore != 42 || svc.historyAfter != 0 || svc.historyLimit != 5 || !svc.historyHasBefore {
 		t.Fatalf("before 参数不符: before=%d after=%d limit=%d has=%v", svc.historyBefore, svc.historyAfter, svc.historyLimit, svc.historyHasBefore)
 	}
 	// before=0 显式给出 = 取末尾一页（HasBefore 区分「未给 before」与「before=0」）。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/conversations/s1/history?before=0", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=0", "")
 	if !svc.historyHasBefore || svc.historyBefore != 0 {
 		t.Fatalf("before=0 应置 HasBefore: %+v", svc)
 	}
 	svc.historyCalled = false
-	envBoth, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=1&before=2", "")
+	envBoth, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&before=2", "")
 	if envBoth.Code != 40001 {
 		t.Fatalf("after+before 期望 40001，got %+v", envBoth)
 	}
-	envBadBefore, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?before=-3", "")
+	envBadBefore, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?before=-3", "")
 	if envBadBefore.Code != 40000 {
 		t.Fatalf("负 before 期望 40000，got %+v", envBadBefore)
 	}
 
 	// limit 上限 1000 夹取。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/conversations/s1/history?limit=999999", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?limit=999999", "")
 	if svc.historyLimit != 1000 {
 		t.Fatalf("limit 应夹到 1000，got %d", svc.historyLimit)
 	}
 
 	// limit=0 → 1。
 	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/conversations/s1/history?limit=0", "")
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?limit=0", "")
 	if svc.historyLimit != 1 {
 		t.Fatalf("limit=0 应夹到 1，got %d", svc.historyLimit)
 	}
 
 	// 非法 after → 40000。
 	svc.historyCalled = false
-	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=-1", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=-1", "")
 	if env.Code != 40000 {
 		t.Fatalf("负 after 期望 40000，got %+v", env)
 	}
-	env, _ = do(t, r, "GET", "/v1/mate/conversations/s1/history?after=abc", "")
+	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/history?after=abc", "")
 	if env.Code != 40000 {
 		t.Fatalf("非数字 after 期望 40000，got %+v", env)
 	}
@@ -1439,7 +1439,7 @@ func TestHistoryParamParsing(t *testing.T) {
 func TestHistorySuccess(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/history?after=1&limit=10", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&limit=10", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1452,18 +1452,18 @@ func TestHistorySuccess(t *testing.T) {
 	}
 }
 
-// TestPermissionMemoriesList GET /conversations/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
+// TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。
 func TestPermissionMemoriesList(t *testing.T) {
-	svc := &stubSvc{memList: []dtoconversation.MemoryResp{
+	svc := &stubSvc{memList: []dtosession.MemoryResp{
 		{Title: "运行演示命令 echo hello", Kind: "execute", Decision: "allow", Since: "2026-01-02T03:04:05Z"},
 		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
 	}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/permissions/memories", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
-	var out []dtoconversation.MemoryResp
+	var out []dtosession.MemoryResp
 	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 2 ||
 		out[0].Title != "运行演示命令 echo hello" || out[0].Kind != "execute" || out[0].Decision != "allow" ||
 		out[1].Decision != "reject" {
@@ -1476,7 +1476,7 @@ func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/permissions/memories/revoke",
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1485,7 +1485,7 @@ func TestRevokeMemory(t *testing.T) {
 		t.Fatalf("撤销单条透传不符: %+v", svc)
 	}
 
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/permissions/memories/revoke", `{}`)
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/permissions/memories/revoke", `{}`)
 	if env.Code != 0 {
 		t.Fatalf("一键撤销信封不符: %+v", env)
 	}
@@ -1494,29 +1494,29 @@ func TestRevokeMemory(t *testing.T) {
 	}
 }
 
-// TestElicitationList GET /conversations/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
+// TestElicitationList GET /sessions/:id/elicitations 返回挂起结构化提问（表单 schema 透传）。
 func TestElicitationList(t *testing.T) {
-	svc := &stubSvc{elicitations: []dtoconversation.ElicitationResp{{
+	svc := &stubSvc{elicitations: []dtosession.ElicitationResp{{
 		ElicitationID: "el-abc", SessionID: "s1", Mode: "form",
 		Message: "请选择一个环境", TimeoutAt: "2026-01-02T03:04:05Z",
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/mate/conversations/s1/elicitations", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/elicitations", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
-	var out []dtoconversation.ElicitationResp
+	var out []dtosession.ElicitationResp
 	if err := json.Unmarshal(env.Data, &out); err != nil || len(out) != 1 || out[0].ElicitationID != "el-abc" || out[0].Mode != "form" {
 		t.Fatalf("elicitations data 不符: %s", env.Data)
 	}
 }
 
-// TestResolveElicitation POST /conversations/:id/elicitation 决策透传（accept + content）。
+// TestResolveElicitation POST /sessions/:id/elicitation 决策透传（accept + content）。
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/elicitation",
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1530,11 +1530,11 @@ func TestResolveElicitation(t *testing.T) {
 func TestResolveElicitationBadBody(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/conversations/s1/elicitation", `{"action":"accept"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation", `{"action":"accept"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 elicitation_id 应 40000: %+v", env)
 	}
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/elicitation", `{"elicitation_id":"el-abc"}`)
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/elicitation", `{"elicitation_id":"el-abc"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 action 应 40000: %+v", env)
 	}
@@ -1577,7 +1577,7 @@ func TestAgentManagementRoutes(t *testing.T) {
 	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
 	var del dtoagent.AgentDeleteResp
 	if err := json.Unmarshal(env.Data, &del); err != nil ||
-		del.Deleted != "alias-stub" || del.AffectedConversations != 2 || del.DetachedConversations != 1 || !del.WasDefault {
+		del.Deleted != "alias-stub" || del.AffectedSessions != 2 || del.DetachedSessions != 1 || !del.WasDefault {
 		t.Fatalf("delete 载荷不符: %s", env.Data)
 	}
 }
@@ -1825,7 +1825,7 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 func TestMessageSearchRoute(t *testing.T) {
 	svc := &stubSvc{searchMsgResp: &dtosearch.MessageSearchResp{
 		Query: "502", Source: "sqlite", Total: 1, HasMore: false,
-		Hits: []dtosearch.MessageSearchHit{{ConversationID: "c-1", Title: "部署", Role: "user", Seq: 7, Snippet: "网关 502"}},
+		Hits: []dtosearch.MessageSearchHit{{SessionID: "c-1", Title: "部署", Role: "user", Seq: 7, Snippet: "网关 502"}},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
@@ -1857,15 +1857,15 @@ func TestMessageSearchRoute(t *testing.T) {
 	}
 }
 
-// TestExportRoute POST /conversations/export：请求体校验 + 响应形状 + 错误映射。
+// TestExportRoute POST /sessions/export：请求体校验 + 响应形状 + 错误映射。
 func TestExportRoute(t *testing.T) {
 	svc := &stubSvc{exportResp: &dtoexport.ExportResp{
 		GeneratedAt: "2026-09-09T00:00:00Z", Format: "markdown", Exported: 1, TotalBytes: 12,
-		Files: []dtoexport.ExportFile{{ConversationID: "c-1", Filename: "部署-c-1.md", Format: "markdown", Bytes: 12, Content: "# 部署\n\nhi"}},
+		Files: []dtoexport.ExportFile{{SessionID: "c-1", Filename: "部署-c-1.md", Format: "markdown", Bytes: 12, Content: "# 部署\n\nhi"}},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, http := do(t, r, "POST", "/v1/mate/conversations/export", `{"ids":["c-1"],"format":"markdown"}`)
+	env, http := do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"markdown"}`)
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
@@ -1877,14 +1877,14 @@ func TestExportRoute(t *testing.T) {
 	}
 
 	// 缺 ids → 40000（参数绑定失败）。
-	env, http = do(t, r, "POST", "/v1/mate/conversations/export", `{"format":"text"}`)
+	env, http = do(t, r, "POST", "/v1/mate/sessions/export", `{"format":"text"}`)
 	if http != 200 || env.Code != 40000 {
 		t.Fatalf("缺 ids 校验不符: http=%d %+v", http, env)
 	}
 	// 服务错误映射（40001 非法格式）。
 	svc2 := &stubSvc{exportErr: gerror.Error{Code: 40001, Msg: "不支持的导出格式 [invalid_export_format]"}}
 	r2 := newRestEngine(stubDeps(svc2))
-	env, http = do(t, r2, "POST", "/v1/mate/conversations/export", `{"ids":["c-1"],"format":"pdf"}`)
+	env, http = do(t, r2, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"pdf"}`)
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_export_format") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
@@ -2062,18 +2062,18 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 	}
 }
 
-// TestResolvePermissionReceiptShape C5：POST /conversations/:id/permission 回执描述
+// TestResolvePermissionReceiptShape C5：POST /sessions/:id/permission 回执描述
 // **实际投递结果**（allowed/rejected/always/请求 option_id/outcome/selected_option_id），
 // 不再是 `{call_id, allowed}` 的请求参数回显。
 func TestResolvePermissionReceiptShape(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
-	env, code := do(t, r, "POST", "/v1/mate/conversations/s1/permission",
+	env, code := do(t, r, "POST", "/v1/mate/sessions/s1/permission",
 		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("决策信封不符: code=%d env=%+v", code, env)
 	}
-	var resp dtoconversation.PermissionDecisionResp
+	var resp dtosession.PermissionDecisionResp
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("回执解析失败: %v data=%s", err, env.Data)
 	}
@@ -2087,7 +2087,7 @@ func TestResolvePermissionReceiptShape(t *testing.T) {
 		}
 	}
 	// 拒绝决策：rejected=true、allowed=false（不再出现「allowed:false 但语义是拒绝」的含糊回执）。
-	env, _ = do(t, r, "POST", "/v1/mate/conversations/s1/permission",
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/permission",
 		`{"call_id":"tc2","option_id":"reject_once","allowed":false}`)
 	if err := json.Unmarshal(env.Data, &resp); err != nil {
 		t.Fatalf("拒绝回执解析失败: %v", err)

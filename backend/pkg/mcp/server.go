@@ -415,7 +415,7 @@ const GatewayServerName = "mate-gateway"
 type GatewayScope struct {
 	AgentID   string
 	RuntimeID string
-	// McpsPinned 会话钉住的 MCP 白名单（`conversations.capability_json` 的 `mcps`）：
+	// McpsPinned 会话钉住的 MCP 白名单（`sessions.capability_json` 的 `mcps`）：
 	//
 	//	nil    = 该会话**没有**钉（网关回落 agent 声明；缺省路径就是这一支）
 	//	非 nil = 以它为准（空切片 = 本会话一个远程 MCP 都不要）

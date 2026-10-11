@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/redact"
@@ -33,9 +33,9 @@ type automationRunOutcome struct {
 	scheduledFor time.Time
 	status       string
 	reason       string
-	// conversationID 本次产生的会话（非 claimed 为空）。
-	conversationID string
-	trigger        string
+	// sessionID 本次产生的会话（非 claimed 为空）。
+	sessionID string
+	trigger   string
 	// state 期望落到的状态；空 = 由 failure/成功与否推导。
 	state string
 	// advance 是否推进认领游标（scheduled/recovery = true；**manual = false**——
@@ -244,7 +244,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 	// 那份校验必然与真实创建路径漂移，而 ADR-10 真正要求的是"失败也推进游标"——那与校验
 	// 在哪一层无关。所以直接调真实路径，把它带码的错误落成 needs_attention 的**原因**，
 	// 用户在面板上看到的正是"为什么没跑成"。
-	resp, err := s.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+	resp, err := s.CreateSession(ctx, dtosession.SessionCreateReq{
 		AgentID: rec.def.Target.AgentID,
 		Prompt:  rec.def.Target.Prompt,
 		Cwd:     rec.def.Target.Cwd,
@@ -262,7 +262,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 	}
 	out = automationRunOutcome{
 		scheduledFor: scheduledFor, status: automation.RunClaimed, trigger: trigger,
-		conversationID: resp.ID,
+		sessionID: resp.ID,
 		// 手动触发不推进游标（见字段注释）。
 		advance: trigger != automation.TriggerManual, claimed: out.claimed,
 	}
@@ -300,7 +300,7 @@ func (s *Service) runAutomationNow(ctx context.Context, id string) (automationRu
 }
 
 // automationWatchdog 单次运行的外层超时：到点仍在本轮 → 走既有取消通道。
-func (s *Service) automationWatchdog(ctx context.Context, automationID, conversationID string, d time.Duration) {
+func (s *Service) automationWatchdog(ctx context.Context, automationID, sessionID string, d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -308,13 +308,13 @@ func (s *Service) automationWatchdog(ctx context.Context, automationID, conversa
 		return
 	case <-timer.C:
 	}
-	if !s.conversationRunning(conversationID) {
+	if !s.sessionRunning(sessionID) {
 		return
 	}
 	glog.Warnw(ctx, "automation 本轮超过 max_run_duration，自动取消",
-		"automation", automationID, "conversation", conversationID, "max_run_duration", d.String())
+		"automation", automationID, "session", sessionID, "max_run_duration", d.String())
 	// 取消的终态（run.cancelled）由 runTurn 依取消语义发布；这里只负责按下按钮。
-	_ = s.CancelTurn(context.WithoutCancel(ctx), conversationID)
+	_ = s.CancelTurn(context.WithoutCancel(ctx), sessionID)
 }
 
 // finishAutomationRun 把结果写回载体（定义文件 / 运行态列）并推事件，然后刷新内存调度态。
@@ -337,8 +337,8 @@ func (s *Service) finishAutomationRun(ctx context.Context, rec automationRec, ou
 	if out.advance {
 		overlay["last_fired_at"] = out.scheduledFor.UTC().Format(time.RFC3339Nano)
 	}
-	if out.conversationID != "" {
-		overlay["last_conversation_id"] = out.conversationID
+	if out.sessionID != "" {
+		overlay["last_session_id"] = out.sessionID
 	}
 	failures := rec.def.ConsecutiveFailures
 	switch {
@@ -362,7 +362,7 @@ func (s *Service) finishAutomationRun(ctx context.Context, rec automationRec, ou
 	runs := make([]automation.RunRecord, 0, len(rec.def.RecentRuns)+1)
 	runs = append(runs, automation.RunRecord{
 		ScheduledFor: out.scheduledFor.UTC(), FiredAt: now, Status: out.status,
-		Reason: out.reason, ConversationID: out.conversationID, Trigger: out.trigger,
+		Reason: out.reason, SessionID: out.sessionID, Trigger: out.trigger,
 	})
 	runs = append(runs, rec.def.RecentRuns...)
 	if len(runs) > automation.RecentRunsMax {
@@ -392,8 +392,8 @@ func (s *Service) finishAutomationRun(ctx context.Context, rec automationRec, ou
 
 // emitAutomationRun 推 `automation.run` 事件（**只进 bus，不落 events 表**）。
 //
-// 为什么不在 publishRaw 里走一遍：events 表的 `conversation_id` 是
-// `NOT NULL REFERENCES conversations(id)`（`foreign_keys(1)` 由 pkg/dbclient 的守卫钉着），
+// 为什么不在 publishRaw 里走一遍：events 表的 `session_id` 是
+// `NOT NULL REFERENCES sessions(id)`（`foreign_keys(1)` 由 pkg/dbclient 的守卫钉着），
 // 而 duplicate/overlap/触发失败这三类结果**没有会话可挂**——硬塞一个假 id 会直接撞外键。
 // 运行史（含这三类）落在定义文件的 `recent_runs` 里（见 `pkg/automation.RunRecord` 注释），
 // 这条事件只负责**实时推送**（面板不必等轮询）。
@@ -409,8 +409,8 @@ func (s *Service) emitAutomationRun(id string, out automationRunOutcome) {
 	if !out.scheduledFor.IsZero() {
 		payload["scheduled_for"] = out.scheduledFor.UTC().Format(time.RFC3339)
 	}
-	if out.conversationID != "" {
-		payload["conversation_id"] = out.conversationID
+	if out.sessionID != "" {
+		payload["session_id"] = out.sessionID
 	}
 	if out.reason != "" {
 		payload["reason"] = out.reason
@@ -453,21 +453,21 @@ func (s *Service) automationRecs() []automationRec {
 	return out
 }
 
-// conversationRunning 该会话是否仍在本轮（自动化的 overlap 判据与 max_run_duration 判据共用）。
-func (s *Service) conversationRunning(id string) bool {
+// sessionRunning 该会话是否仍在本轮（自动化的 overlap 判据与 max_run_duration 判据共用）。
+func (s *Service) sessionRunning(id string) bool {
 	if id == "" {
 		return false
 	}
-	// 状态**在锁内读出**：`markConversation` 归 runTurn 的 goroutine 所有，
+	// 状态**在锁内读出**：`markSession` 归 runTurn 的 goroutine 所有，
 	// 出锁后再读 rec.Status 就是数据竞争（-race 直接报）。
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	conv, ok := s.conversations[id]
+	conv, ok := s.sessions[id]
 	if !ok {
 		return false
 	}
-	return conv.Status == ConversationStatusInProgress
+	return conv.Status == SessionStatusInProgress
 }
 
-// automationOrigin 会话来源标记（`conversations.origin`）：`automation:<id>`。
+// automationOrigin 会话来源标记（`sessions.origin`）：`automation:<id>`。
 func automationOrigin(id string) string { return "automation:" + id }

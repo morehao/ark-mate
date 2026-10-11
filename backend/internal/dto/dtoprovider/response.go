@@ -53,7 +53,7 @@ type ProviderRefs struct {
 
 // ProviderEffect 写面的生效面回执（每一条写面都如实回带"生效到哪、什么时候"）。
 //
-// 判据与代际机制**同源**（`planGenerationSwitch` 的同一组输入）：`affected_conversations` 是
+// 判据与代际机制**同源**（`planGenerationSwitch` 的同一组输入）：`affected_sessions` 是
 // 引用该供应商的会话数，`deferred` 是其中"本轮不能就地换代际"的那部分（有在途轮次 /
 // 有未应答的权限或提问）。两处各算一遍迟早漂移，所以这里直接调那个只读裁决函数。
 type ProviderEffect struct {
@@ -64,8 +64,8 @@ type ProviderEffect struct {
 	Effect string `json:"effect"`
 	// AppliesToAgents 受影响 agent 的 id（升序）。
 	AppliesToAgents []string `json:"applies_to_agents"`
-	// AffectedConversations 引用该供应商的会话数。
-	AffectedConversations int `json:"affected_conversations"`
+	// AffectedSessions 引用该供应商的会话数。
+	AffectedSessions int `json:"affected_sessions"`
 	// Deferred 其中本轮会顺延的会话数（有在途轮次 / 有未应答权限或提问）。
 	Deferred int `json:"deferred"`
 	// Note 一句话人话说明（含顺延的理由）。

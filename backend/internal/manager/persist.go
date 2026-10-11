@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
-// registerConversation 登记一个新会话，返回记录指针。
+// registerSession 登记一个新会话，返回记录指针。
 // EnableStore 启用 SQLite 持久层（P1 live 接线）。启用后：
 //   - publish 以 store.AppendEvent 事务内分配的全局 seq 为权威，bus 用 PublishAt 镜像同一号序；
-//   - registerConversation/markConversation/UpdateConversation 同步写库（conversations 为 DB 权威元数据镜像）；
+//   - registerSession/markSession/UpdateSession 同步写库（sessions 为 DB 权威元数据镜像）；
 //   - transcript recorder 视为停写（serve 装配时不再 SetTranscriptDir）。
 //
 // 须在 RestoreFromStore 之前、任何会话动作之前调用。
@@ -44,9 +46,9 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	if s.st == nil {
 		return 0, 0, nil
 	}
-	list, err := s.st.ListConversations(ctx, nil)
+	list, err := s.st.ListSessions(ctx, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("restore: list conversations: %w", err)
+		return 0, 0, fmt.Errorf("restore: list sessions: %w", err)
 	}
 	s.mu.Lock()
 	s.restoring = true
@@ -57,11 +59,11 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		s.mu.Unlock()
 	}()
 
-	conversations, injected := 0, 0
+	sessions, injected := 0, 0
 	interrupted := 0
 	ver := map[string]int64{}
 	for _, sess := range list {
-		rec := &ConversationRec{
+		rec := &SessionRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
 			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
@@ -74,12 +76,12 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			Fingerprint: sess.CapabilityFingerprint,
 			CreatedAt:   sess.CreatedAt, UpdatedAt: sess.UpdatedAt,
 		}
-		s.registerConversation(rec) // restoring=true → 不重复回写 DB
-		conversations++
+		s.registerSession(rec) // restoring=true → 不重复回写 DB
+		sessions++
 		// interrupted 收敛：残留 in_progress（崩溃/重启中断，无终态）→ 可操作态（列表可停止/重发）。
 		// 事件保持原样：续聊时 materializeRun 以「上一 run 之后」窗口重建本轮，不受影响。
-		if rec.Status == ConversationStatusInProgress {
-			s.markConversation(rec.ID, ConversationStatusInterrupted)
+		if rec.Status == SessionStatusInProgress {
+			s.markSession(rec.ID, SessionStatusInterrupted)
 			interrupted++
 		}
 	}
@@ -94,8 +96,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 				break
 			}
 			for _, ev := range evs {
-				ver[ev.ConversationID]++
-				s.bus.PublishAt(ev.Seq, ev.Type, ev.ConversationID, ver[ev.ConversationID], decodePayload(ev.PayloadJSON))
+				ver[ev.SessionID]++
+				s.bus.PublishAt(ev.Seq, ev.Type, ev.SessionID, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
 				injected++
 				after = ev.Seq
 			}
@@ -107,8 +109,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	// §6：重启前排队未投递的输入一律作废——它们等的那一轮已随进程消失，自动重放等于替用户
 	// 按下发送（且上下文已断）。保留行仅作审计（见 inputqueue.go）。
 	s.staleQueuedInputsOnRestore(ctx)
-	glog.Infow(ctx, "store restored", "conversations", conversations, "events", injected)
-	return conversations, injected, nil
+	glog.Infow(ctx, "store restored", "sessions", sessions, "events", injected)
+	return sessions, injected, nil
 }
 
 // decodePayload 把 events.payload_json 解码回 map（历史/WS 载荷形态），坏 JSON 回落原文串。
@@ -123,14 +125,14 @@ func decodePayload(raw string) any {
 	return raw
 }
 
-// persistConversation 把会话记录同步写库（best-effort：失败告警不阻断会话流程）。
-func (s *Service) persistConversation(rec *ConversationRec) {
+// persistSession 把会话记录同步写库（best-effort：失败告警不阻断会话流程）。
+func (s *Service) persistSession(rec *SessionRec) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := s.st.UpsertConversation(ctx, store.Conversation{
+	err := s.st.UpsertSession(ctx, model.SessionEntity{
 		ID:                 rec.ID,
 		AgentID:            rec.AgentID,
 		Cwd:                rec.Cwd,
@@ -153,50 +155,51 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		UpdatedAt:             rec.UpdatedAt,
 	})
 	if err != nil {
-		glog.Warnw(context.Background(), "store: upsert conversation failed", "conversation", rec.ID, "err", err)
+		glog.Warnw(context.Background(), "store: upsert session failed", "session", rec.ID, "err", err)
 	}
 }
 
 // persistMemoryAdd 写一条权限记忆（permission_memories 表；同键覆盖，since 为授予时刻）。
-func (s *Service) persistMemoryAdd(conversationID, title, kind, decision string, since time.Time) {
+func (s *Service) persistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := s.st.AddMemory(ctx, store.Memory{
-		ConversationID: conversationID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
+	if err := s.st.AddMemory(ctx, model.PermissionMemoryEntity{
+		ID:        objid.New(objid.PermissionMemory),
+		SessionID: sessionID, Title: title, Kind: kind, Decision: decision, CreatedAt: since,
 	}); err != nil {
-		glog.Warnw(context.Background(), "store: add permission memory failed", "conversation", conversationID, "title", title, "err", err)
+		glog.Warnw(context.Background(), "store: add permission memory failed", "session", sessionID, "title", title, "err", err)
 	}
 }
 
 // persistMemoryDel 撤销一条权限记忆。
-func (s *Service) persistMemoryDel(conversationID, title, kind string) {
+func (s *Service) persistMemoryDel(sessionID, title, kind string) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := s.st.DeleteMemory(ctx, conversationID, title, kind); err != nil {
-		glog.Warnw(context.Background(), "store: delete permission memory failed", "conversation", conversationID, "title", title, "err", err)
+	if _, err := s.st.DeleteMemory(ctx, sessionID, title, kind); err != nil {
+		glog.Warnw(context.Background(), "store: delete permission memory failed", "session", sessionID, "title", title, "err", err)
 	}
 }
 
 // persistMemoryDelAll 一键撤销整会话权限记忆。
-func (s *Service) persistMemoryDelAll(conversationID string) {
+func (s *Service) persistMemoryDelAll(sessionID string) {
 	if s.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := s.st.DeleteConversationMemories(ctx, conversationID); err != nil {
-		glog.Warnw(context.Background(), "store: delete conversation memories failed", "conversation", conversationID, "err", err)
+	if err := s.st.DeleteSessionMemories(ctx, sessionID); err != nil {
+		glog.Warnw(context.Background(), "store: delete session memories failed", "session", sessionID, "err", err)
 	}
 }
 
 // memoryRows 读全库权限记忆（供 sqlite 启动恢复装载；无 store 时返回空）。
-func (s *Service) memoryRows(ctx context.Context) ([]store.Memory, error) {
+func (s *Service) memoryRows(ctx context.Context) ([]model.PermissionMemoryEntity, error) {
 	if s.st == nil {
 		return nil, nil
 	}
@@ -207,11 +210,11 @@ func (s *Service) memoryRows(ctx context.Context) ([]store.Memory, error) {
 func terminalRunStatus(typ string) string {
 	switch typ {
 	case BusTurnEnded:
-		return ConversationStatusCompleted
+		return SessionStatusCompleted
 	case BusTurnError:
-		return ConversationStatusFailed
+		return SessionStatusFailed
 	case BusRunCancelled:
-		return ConversationStatusCancelled
+		return SessionStatusCancelled
 	}
 	return ""
 }
@@ -219,7 +222,7 @@ func terminalRunStatus(typ string) string {
 // materializeRun 在 sqlite 模式下把「上一 run 之后到当前终态」的事件窗口物化为 runs 行：
 // user_text 取窗口首条用户消息；first/last_seq 记录窗口（失败轮输入/统计精确回溯）。
 // 幂等：窗口无新事件（重复调用/无 run）时直接返回。best-effort：失败仅告警。
-func (s *Service) materializeRun(conversationID, typ string, payload map[string]any) {
+func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) {
 	if s.st == nil {
 		return
 	}
@@ -230,24 +233,24 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	last, err := s.st.RunLastSeq(ctx, conversationID)
+	last, err := s.st.RunLastSeq(ctx, sessionID)
 	if err != nil {
-		glog.Warnw(context.Background(), "store: run last seq failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "store: run last seq failed", "session", sessionID, "err", err)
 		return
 	}
-	evs, more, err := s.st.EventsAfter(ctx, conversationID, last, 5000)
+	evs, more, err := s.st.EventsAfter(ctx, sessionID, last, 5000)
 	if err != nil {
-		glog.Warnw(context.Background(), "store: run window read failed", "conversation", conversationID, "err", err)
+		glog.Warnw(context.Background(), "store: run window read failed", "session", sessionID, "err", err)
 		return
 	}
 	if more {
-		glog.Warnw(context.Background(), "store: run window 超 5000 条被截断", "conversation", conversationID)
+		glog.Warnw(context.Background(), "store: run window 超 5000 条被截断", "session", sessionID)
 	}
 	if len(evs) == 0 {
 		return // 无新事件（重复终态调用等）→ 幂等跳过
 	}
 	firstSeq, lastSeq := evs[0].Seq, evs[len(evs)-1].Seq
-	runID := fmt.Sprintf("r-%s-%d", conversationID, firstSeq)
+	runID := fmt.Sprintf("r-%s-%d", sessionID, firstSeq)
 
 	userText, stopReason, errCode := "", "", ""
 	if payload != nil {
@@ -294,41 +297,41 @@ func (s *Service) materializeRun(conversationID, typ string, payload map[string]
 	// M3 用量统计：随 run 落库该会话最近一次 ACP 用量快照（无上报 → 空串，不臆造数值）。
 	usageJSON := ""
 	if s.orch != nil {
-		if u, ok := s.orch.LatestUsage(conversationID); ok {
+		if u, ok := s.orch.LatestUsage(sessionID); ok {
 			if b, err := json.Marshal(u); err == nil {
 				usageJSON = string(b)
 			}
 		}
 	}
-	r := store.Run{
-		ID: runID, ConversationID: conversationID, UserText: userText, Status: status,
+	r := model.RunEntity{
+		ID: runID, SessionID: sessionID, UserText: userText, Status: status,
 		ErrorCode: errCode, StopReason: stopReason, UsageJSON: usageJSON,
 		FirstSeq: firstSeq, LastSeq: lastSeq, FirstTokenMS: firstTokenMS,
 		StartedAt: started, EndedAt: ended,
 	}
 	if err := s.st.CreateRun(ctx, r); err != nil {
-		glog.Warnw(context.Background(), "store: create run failed", "conversation", conversationID, "run", runID, "err", err)
+		glog.Warnw(context.Background(), "store: create run failed", "session", sessionID, "run", runID, "err", err)
 		return
 	}
 	// 终态补齐（CreateRun 直接带终态写入，FinishRun 幂等再走一遍以统一 ended 口径）。
 	_ = s.st.FinishRun(ctx, runID, status, stopReason, errCode, usageJSON, ended)
 	// 消息物化：同窗口 events → messages 行（user 原文 + assistant 文本片段/时间线/工具最终态）。
-	s.materializeMessages(conversationID, runID, evs)
+	s.materializeMessages(sessionID, runID, evs)
 }
 
 // ListRuns 列出某会话的轮次明细（runs 表，started_at 升序；失败轮重试/统计用）。
 // 内存（无 store）模式下返回空列表（runs 是 sqlite 读模型）。
-func (s *Service) ListRuns(ctx context.Context, id string) ([]dtoconversation.RunResp, error) {
+func (s *Service) ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error) {
 	if s.st == nil {
-		return []dtoconversation.RunResp{}, nil
+		return []dtosession.RunResp{}, nil
 	}
 	rows, err := s.st.ListRuns(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]dtoconversation.RunResp, 0, len(rows))
+	out := make([]dtosession.RunResp, 0, len(rows))
 	for _, r := range rows {
-		resp := dtoconversation.RunResp{
+		resp := dtosession.RunResp{
 			ID: r.ID, UserText: r.UserText, Status: r.Status,
 			ErrorCode: r.ErrorCode, StopReason: r.StopReason,
 			FirstSeq: r.FirstSeq, LastSeq: r.LastSeq, FirstTokenMS: r.FirstTokenMS,
@@ -340,7 +343,7 @@ func (s *Service) ListRuns(ctx context.Context, id string) ([]dtoconversation.Ru
 		if r.UsageJSON != "" {
 			var u objusage.UsageInfo
 			if err := json.Unmarshal([]byte(r.UsageJSON), &u); err == nil && u.Reported() {
-				resp.Usage = &dtoconversation.RunUsageResp{
+				resp.Usage = &dtosession.RunUsageResp{
 					Used: u.Used, Size: u.Size, CostAmount: u.CostAmount, CostCurrency: u.CostCurrency,
 				}
 			}

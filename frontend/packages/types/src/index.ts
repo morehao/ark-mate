@@ -1,6 +1,6 @@
 export * from './response'
 export * from './agent'
-export * from './conversation'
+export * from './session'
 export * from './workspace'
 export * from './model'
 export * from './capability'

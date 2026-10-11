@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 )
 
-// SearchConversations 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。
+// SearchSessions 按关键词搜索会话（标题 / Agent / ID / 用户消息正文；含归档）。
 // 元数据命中计 1 次；正文命中逐条累计（片段取首条命中用户消息）。
 // 排序：updated_at 降序，截断 limit（调用方已校验 >0）。
 // 复杂度说明：本地工具态直接扫 transcript 文件（文件小、量级低）；不引入索引/DB（决策范围外）。
-func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([]dtoconversation.ConversationSearchHit, error) {
+func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return nil, nil
@@ -25,14 +25,14 @@ func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([
 	qLower := strings.ToLower(q)
 
 	s.mu.Lock()
-	recs := make([]*ConversationRec, 0, len(s.conversations))
-	for _, r := range s.conversations {
+	recs := make([]*SessionRec, 0, len(s.sessions))
+	for _, r := range s.sessions {
 		recs = append(recs, r)
 	}
 	s.mu.Unlock()
 
 	type cand struct {
-		rec     *ConversationRec
+		rec     *SessionRec
 		snippet string
 		matches int
 	}
@@ -78,11 +78,11 @@ func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([
 		out = out[:limit]
 	}
 
-	hits := make([]dtoconversation.ConversationSearchHit, 0, len(out))
+	hits := make([]dtosession.SessionSearchHit, 0, len(out))
 	for _, c := range out {
 		r := c.rec
-		hits = append(hits, dtoconversation.ConversationSearchHit{
-			ConversationResp: dtoconversation.ConversationResp{
+		hits = append(hits, dtosession.SessionSearchHit{
+			SessionResp: dtosession.SessionResp{
 				ID:        r.ID,
 				AgentID:   r.AgentID,
 				Status:    r.Status,
@@ -102,8 +102,8 @@ func (s *Service) SearchConversations(_ context.Context, q string, limit int) ([
 // scanTranscriptText 在单会话 transcript 文件中搜索 qLower（大小写不敏感、子串），
 // 返回（首条命中用户消息文本的折叠预览, 命中用户消息条数, 是否有正文命中）。
 // 文件缺失/不可读 → ok=false（调用方按「无正文命中」处理）。
-func scanTranscriptText(dir, conversationID, qLower string) (string, int, bool) {
-	f, err := os.Open(filepath.Join(dir, conversationID+".jsonl"))
+func scanTranscriptText(dir, sessionID, qLower string) (string, int, bool) {
+	f, err := os.Open(filepath.Join(dir, sessionID+".jsonl"))
 	if err != nil {
 		return "", 0, false
 	}

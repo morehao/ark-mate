@@ -120,11 +120,23 @@ function killOurTree() {
 
 let pass = 0
 let fail = 0
+const skipped = []
 const section = (t) => console.log(`\n—— ${t} ——`)
 const check = (label, ok, detail = '') => {
   if (ok) pass++
   else fail++
   console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`)
+}
+/**
+ * 显式跳过一条**本构建根本不具备条件**的断言，并写明理由。
+ *
+ * 口径与浏览器侧的 `ui:accept` 逐字相同（AGENTS.md「界面验收」）：**底座由构建期固定**，
+ * 验不了的场景要"显式跳过并写明理由"（打印在汇总里、**不计红**），而不是把红留成一个
+ * 每次都要人肉解释的噪声——也不接受"靠上一轮残留数据碰巧绿"。
+ */
+const skip = (label, reason) => {
+  skipped.push({ label, reason })
+  console.log(`⏭ ${label} — 跳过：${reason}`)
 }
 
 /** 读进程环境（`ps -E`；权限不足返回空对象，调用方按"读不到"处理）。 */
@@ -158,7 +170,7 @@ function rebuildCore() {
   try {
     execFileSync('go', ['build', '-o', out, './cmd/mate'], {
       cwd: join(REPO, 'backend'),
-      env: { ...process.env, CGO_ENABLED: '0' },
+      env: { ...process.env, CGO_ENABLED: '1' },
       stdio: 'ignore',
     })
     return { ok: existsSync(out) }
@@ -332,6 +344,17 @@ async function main() {
   const cdp = await connectCDP(shell.port)
   await waitFor(cdp, "return typeof window.__MATE_DESKTOP__ === 'object'", 20000)
 
+  // 在册底座（**服务端事实**，不猜构建参数）：底座由构建期固定，所以本脚本必须先问一句
+  // "这个构建里到底有哪些 agent"，而不是假定 `dsh` 与 `opencode` 都在。
+  // 同一份事实下面两处都用：物化体检的"双方"与 opencode 那一节要不要跑。
+  const agentsEnv = await cdp.evalJs(`
+    const r = await fetch('/v1/mate/agents')
+    return await r.json()
+  `)
+  const registeredAgents = (agentsEnv?.data ?? []).map((a) => a?.id).filter(Boolean)
+  const ocRegistered = registeredAgents.includes('opencode')
+  console.log(`   在册 agent：${registeredAgents.join(', ') || '（空）'}`)
+
   section('修复 B：全新 home 上第一条 skill 要落盘')
   const created = await cdp.evalJs(`
     const r = await fetch('/v1/mate/skills', {
@@ -360,23 +383,36 @@ async function main() {
   )
   check('核心日志没有物化失败的 WARN', !shell.logText().includes('skill 物化跳过'))
 
-  // 平台**自报**的物化体检：两个底座都在同一处 root 上投影，归属标记里应同时登记双方且状态 in_sync。
+  // 平台**自报**的物化体检：在册底座都在同一处 root 上投影，归属标记里应登记它们且状态 in_sync。
   // 这条是"平台侧"的说法，与下面两条"底座侧"的真请求体互为独立来源——两者不一致正是要抓的形态。
   const mat = await cdp.evalJs(`
     const r = await fetch('/v1/mate/skills/${SKILL_ID}/materialization')
     return await r.json()
   `)
   const matStates = mat?.data?.states ?? []
-  const ocState = matStates.find((s) => (s.owners ?? []).includes('opencode') || s.runtime === 'opencode')
+  const dshState = matStates.find((s) => (s.owners ?? []).includes('dsh') || s.runtime === 'dsh')
   check(
-    '平台自报的物化体检：opencode 那一处 in_sync（与 dsh 共享同一 root）',
-    ocState?.status === 'in_sync',
+    '平台自报的物化体检：dsh 那一处 in_sync',
+    dshState?.status === 'in_sync',
     JSON.stringify(matStates).slice(0, 240),
   )
+  if (ocRegistered) {
+    const ocState = matStates.find((s) => (s.owners ?? []).includes('opencode') || s.runtime === 'opencode')
+    check(
+      '平台自报的物化体检：opencode 那一处 in_sync（与 dsh 共享同一 root）',
+      ocState?.status === 'in_sync',
+      JSON.stringify(matStates).slice(0, 240),
+    )
+  } else {
+    skip(
+      '平台自报的物化体检：opencode 那一处 in_sync（与 dsh 共享同一 root）',
+      '本构建在册的底座里没有 opencode（`GET /agents` 是判据）；要验它需 `make dev RUNTIME=opencode` 重新构建',
+    )
+  }
 
   section('修复 A · 底座侧：平台拉起的 dsh 要能读到这条 skill')
   const conv = await cdp.evalJs(`
-    const r = await fetch('/v1/mate/conversations', {
+    const r = await fetch('/v1/mate/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'dsh', prompt: '报告你可见的 skill 名称。' }))},
@@ -423,10 +459,23 @@ async function main() {
   // v2 把 skill 放进**模型目录块**（`<skill><id>…</id>…</skill>`），不再作为斜杠命令通告；
   // 且 v2 的取证件（`debug skill`）与反证法（`OPENCODE_DISABLE_EXTERNAL_SKILLS`）都已失效，
   // 所以这条只能看真请求体。只看**本节新增**的那些请求，避免拿 dsh 那一轮的命中冒充。
+  //
+  // **先看在册事实**：底座由**构建期固定**（2026-10-10 产品约束「用户不能选 runtime」），
+  // 默认构建里 `opencode` 根本不是注册 agent——本节那 4 条断言在这种构建上**没有对象**。
+  // 判据取 `GET /agents`（服务端事实），不猜、不嗅探构建参数。
   section('修复 A · 底座侧：平台拉起的 opencode v2 也要能读到同一条 skill')
+  if (!ocRegistered) {
+    const why =
+      '本构建在册的底座由构建期固定、且没有 opencode agent（`GET /agents` 里没有它）；' +
+      '要验这一节需 `make dev RUNTIME=opencode` 重新构建后重跑（构建期固定底座是产品约束）'
+    skip('经壳反代起 opencode 会话成功', why)
+    skip('假 LLM 收到了 opencode v2 的真实模型请求（零额度）', why)
+    skip('opencode v2 请求体的 skill 目录块里出现 ' + SKILL_ID, why)
+    skip('opencode 子进程的 XDG_STATE_HOME 落在 MATE_HOME 内（v2 的服务发现面不碰本机）', why)
+  } else {
   const ocBefore = llm.captured.length
   const convOc = await cdp.evalJs(`
-    const r = await fetch('/v1/mate/conversations', {
+    const r = await fetch('/v1/mate/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'opencode', prompt: '报告你可见的 skill 名称。' }))},
@@ -468,6 +517,7 @@ async function main() {
       ? `XDG_STATE_HOME=${ocEnv.XDG_STATE_HOME ?? '（未注入）'} / XDG_CONFIG_HOME=${ocEnv.XDG_CONFIG_HOME ?? '（未注入）'}`
       : 'ps -E 读不到（隔离表另由 pkg/runtime/isolation_test.go 与启动器守卫钉住）',
   )
+  }
 
   section('收尾')
   // 打包态的壳不在 `SHELL_RE` 面上（它是 `Contents/MacOS/<productName>`），所以走 harness 那条
@@ -515,7 +565,11 @@ try {
 } finally {
   killOurTree()
   await sleep(300)
-  console.log(`\n结果：${pass} 通过 / ${fail} 失败（靶子：${MODE}）`)
+  console.log(
+    `\n结果：${pass} 通过 / ${fail} 失败（靶子：${MODE}）` +
+      (skipped.length ? `，另有 ${skipped.length} 条因本构建不具备条件而跳过` : ''),
+  )
+  for (const sk of skipped) console.log(`  ⏭ ${sk.label} — ${sk.reason}`)
   keepProbe = fail > 0
   if (fail) console.log(`失败，探针目录保留在 ${PROBE} 便于取证`)
   process.exit(fail ? 1 : 0)

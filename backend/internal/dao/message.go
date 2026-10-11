@@ -13,9 +13,9 @@ import (
 // MessageCond 消息查询条件。
 type MessageCond struct {
 	*gormdao.BaseCond
-	ConversationID string
-	RunID          string
-	Role           string
+	SessionID string
+	RunID     string
+	Role      string
 }
 
 // BuildCondition 实现 gormdao.Cond。
@@ -23,8 +23,8 @@ func (c *MessageCond) BuildCondition(db *gorm.DB, tableName string) {
 	if c.BaseCond != nil {
 		c.BaseCond.BuildCondition(db, tableName)
 	}
-	if c.ConversationID != "" {
-		db.Where(tableName+".conversation_id = ?", c.ConversationID)
+	if c.SessionID != "" {
+		db.Where(tableName+".session_id = ?", c.SessionID)
 	}
 	if c.RunID != "" {
 		db.Where(tableName+".run_id = ?", c.RunID)
@@ -36,12 +36,12 @@ func (c *MessageCond) BuildCondition(db *gorm.DB, tableName string) {
 
 // MessageDao 访问 messages 表（消息物化投影，可从 events 重建）。
 type MessageDao struct {
-	*gormdao.Dao[model.Message, model.MessageList, int64]
+	*gormdao.Dao[model.MessageEntity, model.MessageEntityList, string]
 }
 
 // NewMessageDao 构造 MessageDao（getDB 必填，见包注释）。
 func NewMessageDao(getDB gormdao.DBGetter) *MessageDao {
-	return &MessageDao{Dao: newDao[model.Message, model.MessageList, int64]("MessageDao", getDB)}
+	return &MessageDao{Dao: newDao[model.MessageEntity, model.MessageEntityList, string]("MessageDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -51,12 +51,12 @@ func (d *MessageDao) WithTx(tx *gorm.DB) *MessageDao {
 
 // ReplaceRunMessages 单事务替换某一轮的 messages（先按 run_id 删后插）。
 // 可重复调用：保证「从 events 重建」幂等。
-func (d *MessageDao) ReplaceRunMessages(ctx context.Context, msgs model.MessageList) error {
+func (d *MessageDao) ReplaceRunMessages(ctx context.Context, msgs model.MessageEntityList) error {
 	if len(msgs) == 0 {
 		return nil
 	}
 	return d.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("run_id = ?", msgs[0].RunID).Delete(&model.Message{}).Error; err != nil {
+		if err := tx.Where("run_id = ?", msgs[0].RunID).Delete(&model.MessageEntity{}).Error; err != nil {
 			return err
 		}
 		return tx.Create(&msgs).Error
@@ -64,26 +64,26 @@ func (d *MessageDao) ReplaceRunMessages(ctx context.Context, msgs model.MessageL
 }
 
 // List 列出某会话全部消息行（seq 升序，同 seq 按自增 id 升序）。
-func (d *MessageDao) List(ctx context.Context, conversationID string) (model.MessageList, error) {
+func (d *MessageDao) List(ctx context.Context, sessionID string) (model.MessageEntityList, error) {
 	return d.GetListByCond(ctx, &MessageCond{
-		BaseCond:       &gormdao.BaseCond{OrderField: "seq_lo ASC, id ASC"},
-		ConversationID: conversationID,
+		BaseCond:  &gormdao.BaseCond{OrderField: "seq_lo ASC, id ASC"},
+		SessionID: sessionID,
 	})
 }
 
 // TextHit 是一条正文命中（会话内检索用；时间/序号由调用方按需补齐）。
 type TextHit struct {
-	ConversationID string
-	Role           string
-	Text           string
+	SessionID string
+	Role      string
+	Text      string
 }
 
 // SearchUserText 在指定会话的 user 消息中做子串检索（大小写不敏感；LIKE 通配转义）。
-func (d *MessageDao) SearchUserText(ctx context.Context, conversationID, q string) ([]TextHit, error) {
+func (d *MessageDao) SearchUserText(ctx context.Context, sessionID, q string) ([]TextHit, error) {
 	var rows []TextHit
-	if err := d.DB(ctx).Model(&model.Message{}).
-		Select("conversation_id, role, text").
-		Where("conversation_id = ? AND role = ?", conversationID, model.RoleUser).
+	if err := d.DB(ctx).Model(&model.MessageEntity{}).
+		Select("session_id, role, text").
+		Where("session_id = ? AND role = ?", sessionID, model.RoleUser).
 		Where(`text LIKE ? ESCAPE '\'`, likePattern(q)).
 		Order("seq_lo ASC").
 		Scan(&rows).Error; err != nil {
@@ -97,16 +97,16 @@ func (d *MessageDao) SearchUserText(ctx context.Context, conversationID, q strin
 // CreatedAt 用 string 承载：列是 TEXT，scan 后由调用方经 model.ParseTime 转换，
 // 不依赖 gorm 对「字符串 → time.Time」的隐式解析。
 type Hit struct {
-	ConversationID    string
-	ConversationTitle string
-	AgentID           string
-	Role              string
-	MessageID         int64
-	RunID             string
-	Seq               int64
-	SeqHi             int64
-	Text              string
-	CreatedAt         string
+	SessionID    string
+	SessionTitle string
+	AgentID      string
+	Role         string
+	MessageID    string
+	RunID        string
+	Seq          int64
+	SeqHi        int64
+	Text         string
+	CreatedAt    string
 }
 
 // CreatedAtTime 返回解析后的创建时间（无法解析 → 零值）。
@@ -119,10 +119,10 @@ func (d *MessageDao) SearchText(ctx context.Context, q string, limit int) ([]Hit
 		return nil, nil
 	}
 	var rows []Hit
-	if err := d.DB(ctx).Table(model.TableMessage+" AS m").
-		Select(`m.conversation_id, COALESCE(c.title, '') AS conversation_title, COALESCE(c.agent_id, '') AS agent_id,
+	if err := d.DB(ctx).Table(model.TableNameMessage+" AS m").
+		Select(`m.session_id, COALESCE(c.title, '') AS session_title, COALESCE(c.agent_id, '') AS agent_id,
 		        m.role, m.id AS message_id, m.run_id, m.seq_lo AS seq, m.seq_hi, m.text, m.created_at`).
-		Joins("LEFT JOIN "+model.TableConversation+" AS c ON c.id = m.conversation_id").
+		Joins("LEFT JOIN "+model.TableNameSession+" AS c ON c.id = m.session_id").
 		Where(`m.text LIKE ? ESCAPE '\'`, likePattern(q)).
 		Order("m.created_at DESC, m.seq_lo DESC").
 		Limit(limit).

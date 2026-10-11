@@ -140,7 +140,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	svc.agents["a-x"] = &AgentRec{ID: "a-x", Name: "X"}
-	svc.registerConversation(&ConversationRec{ID: "c-x", AgentID: "a-x"})
+	svc.registerSession(&SessionRec{ID: "c-x", AgentID: "a-x"})
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
@@ -163,7 +163,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	}
 	// 同一失败也应进入 agent 诊断快照（会话 → agent 反查）。
 	le, ok := svc.agentLastError("a-x")
-	if !ok || le.ConversationID != "c-x" || len(le.StderrTail) != 2 {
+	if !ok || le.SessionID != "c-x" || len(le.StderrTail) != 2 {
 		t.Fatalf("诊断快照不符: %+v ok=%v", le, ok)
 	}
 }

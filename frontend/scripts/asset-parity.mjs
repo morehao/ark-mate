@@ -153,7 +153,7 @@ async function main() {
     )
 
     section('SPA 深链与回退归属（设计 §6.2）')
-    const deep = '/conversations/asset-parity-probe'
+    const deep = '/sessions/asset-parity-probe'
     const deepCore = await fetchViaCore(coreBase, deep)
     check(
       '核心对非资产深链回退 index.html（200 + HTML）',

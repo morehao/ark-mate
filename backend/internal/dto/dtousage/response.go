@@ -2,17 +2,17 @@ package dtousage
 
 // UsageBucketResp 一行用量聚合（group_by=agent → key=agent_id；=day → key=YYYY-MM-DD）。
 type UsageBucketResp struct {
-	Key           string `json:"key"`
-	AgentID       string `json:"agent_id,omitempty"`
-	Runs          int    `json:"runs"`
-	Completed     int    `json:"completed"`
-	Failed        int    `json:"failed"`
-	Cancelled     int    `json:"cancelled"`
-	Running       int    `json:"running"`
-	Conversations int    `json:"conversations"`
-	DurationMS    int64  `json:"duration_ms"`
-	ContextUsed   int64  `json:"context_used"`
-	ContextSize   int64  `json:"context_size"`
+	Key         string `json:"key"`
+	AgentID     string `json:"agent_id,omitempty"`
+	Runs        int    `json:"runs"`
+	Completed   int    `json:"completed"`
+	Failed      int    `json:"failed"`
+	Cancelled   int    `json:"cancelled"`
+	Running     int    `json:"running"`
+	Sessions    int    `json:"sessions"`
+	DurationMS  int64  `json:"duration_ms"`
+	ContextUsed int64  `json:"context_used"`
+	ContextSize int64  `json:"context_size"`
 	// UsageReported 上报过上下文的会话数；CostReported 上报过费用的会话数（两者分开，不可互相替代）。
 	UsageReported int `json:"usage_reported"`
 	CostReported  int `json:"cost_reported"`

@@ -210,7 +210,7 @@ func TestAutomationPortRunsAndRunNow(t *testing.T) {
 	r.writeDaily(t, "daily", "")
 	r.svc.LoadAutomationDefinitions(r.dir)
 	out, err := r.svc.RunAutomationNow(context.Background(), "daily")
-	if err != nil || out.Status != "claimed" || out.ConversationID == "" || out.Trigger != "manual" {
+	if err != nil || out.Status != "claimed" || out.SessionID == "" || out.Trigger != "manual" {
 		t.Fatalf("手动触发应 claimed 且带会话: %+v %v", out, err)
 	}
 	// 会话在跑 → 再触发一次是 overlap（手动不等于可以并发）

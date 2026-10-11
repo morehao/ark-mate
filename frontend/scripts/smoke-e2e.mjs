@@ -5,7 +5,7 @@
  * 验证对象：`make dev` 起的那个实例（默认 http://127.0.0.1:10001——**核心直接服务构建产物**，
  * 没有中间那层 vite dev server 了；2026-10-11 起 `:5173` 那条路已被 `apps/web/vite.config.ts` 拦住）。
  * 覆盖：
- *   1. REST 信封（health / agents / conversations）——@ark-mate/api 的 unwrap 语义前提；
+ *   1. REST 信封（health / agents / sessions）——@ark-mate/api 的 unwrap 语义前提；
  *      并断言 `/runtimes` 已下线、agent 不再带 runtimes（底座由构建期固定）；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent 列表字段）；
@@ -95,17 +95,27 @@ async function checkRest() {
   if ('runtimes' in a0) return bad('GET /agents 载荷', 'agent 不应再带 runtimes（构建期固定底座）')
   ok('GET /agents → 无 runtimes 字段（底座由构建期固定）')
 
-  const convs = await apiGet('/conversations')
-  if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /conversations', JSON.stringify(convs.env))
-  // 对外 id 展示策略前提（P3 F4）：会话 id 为平台 uuid（36 位），不再泄露底座 id 形状（ses_* 等）。
-  const badId = convs.env.data.find(
-    (c) => typeof c?.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.id),
+  const convs = await apiGet('/sessions')
+  if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /sessions', JSON.stringify(convs.env))
+  // 对外 id 展示策略前提（P3 F4 / v15 选项 D **写精确**，不是推翻）：
+  //   平台会话 id   = `ses_<26 位 Crockford Base32>`（平台单方面定义，底座用什么前缀都不影响）；
+  //   底座会话 id   = `rt_<底座原文>`（平台只加壳不解析主体）。
+  // 两条形状由**平台**定义，因此 `id` 与 `provider_session_id` 永远不可能相等——这是"形状即
+  // 类型"这条免费检查的载体（设计 §4.5.2 不变式 I1）。缺后者不算失败（新建会话起步阶段可能还没落壳）。
+  const PLATFORM_SESSION_ID = /^ses_[0-9A-HJKMNP-TV-Z]{26}$/
+  const PROVIDER_SESSION_ID = /^rt_.+$/
+  const badId = convs.env.data.find((c) => typeof c?.id !== 'string' || !PLATFORM_SESSION_ID.test(c.id))
+  if (badId) return bad('会话 id 形状', `应 ses_<26 位 ULID>，got ${JSON.stringify(badId.id)}`)
+  const badProvider = convs.env.data.find(
+    (c) => c?.provider_session_id !== undefined && c.provider_session_id !== null &&
+      (typeof c.provider_session_id !== 'string' || !PROVIDER_SESSION_ID.test(c.provider_session_id)),
   )
-  if (badId) return bad('会话 id 形状', `应平台 uuid，got ${JSON.stringify(badId.id)}`)
+  if (badProvider)
+    return bad('底座会话 id 形状', `应 rt_<底座原文>，got ${JSON.stringify(badProvider.provider_session_id)}`)
   // P3 余留（侧栏相对时间/排序）依赖 updated_at；缺字段会让列表退化成「空时间」。
   const noTime = convs.env.data.find((c) => typeof c?.updated_at !== 'string' || Number.isNaN(Date.parse(c.updated_at)))
   if (noTime) return bad('会话列表时间字段', `updated_at 应为可解析时间戳，got ${JSON.stringify(noTime.updated_at)}`)
-  ok(`GET /conversations → 数组信封（id 全为平台 uuid、updated_at 可解析；${convs.env.data.length} 条）`)
+  ok(`GET /sessions → 数组信封（id 全为 ses_<ULID>、provider_session_id 全为 rt_*、updated_at 可解析；${convs.env.data.length} 条）`)
 
   // P2 §8.1 能力卡数据源：Agent 统一能力目录（形状 + agent_id 一致）。
   const caps = await apiGet(`/agents/${encodeURIComponent(a0.id)}/capabilities`)
@@ -175,7 +185,7 @@ async function checkRest() {
   if (typeof m.source !== 'string' || !Array.isArray(m.hits) || typeof m.total !== 'number' || typeof m.has_more !== 'boolean')
     return bad('GET /search/messages 载荷', JSON.stringify(m))
   for (const h of m.hits) {
-    for (const key of ['conversation_id', 'role', 'seq', 'snippet', 'created_at']) {
+    for (const key of ['session_id', 'role', 'seq', 'snippet', 'created_at']) {
       if (!(key in h)) return bad('GET /search/messages 命中字段', `缺 ${key}: ${JSON.stringify(h).slice(0, 200)}`)
     }
     if (!(typeof h.seq === 'number' && h.seq > 0)) return bad('GET /search/messages 锚点', `seq 非法: ${JSON.stringify(h).slice(0, 200)}`)
@@ -186,31 +196,31 @@ async function checkRest() {
   ok('GET /search/messages 缺 q → HTTP 200 code=40001')
 
   // M3 ② 批量导出：未知会话进 skipped（不静默丢弃）+ 非法格式 40001。
-  const ex = await apiPost('/conversations/export', { ids: ['no-such-conversation'], format: 'markdown' })
-  if (ex.http !== 200 || ex.env.code !== 0) return bad('POST /conversations/export', `HTTP ${ex.http} code=${ex.env.code} msg=${ex.env.msg}`)
+  const ex = await apiPost('/sessions/export', { ids: ['no-such-session'], format: 'markdown' })
+  if (ex.http !== 200 || ex.env.code !== 0) return bad('POST /sessions/export', `HTTP ${ex.http} code=${ex.env.code} msg=${ex.env.msg}`)
   const e = ex.env.data
-  if (e.exported !== 0 || !Array.isArray(e.skipped) || e.skipped[0] !== 'no-such-conversation' || !Array.isArray(e.files))
-    return bad('POST /conversations/export 载荷', JSON.stringify(e))
-  ok('POST /conversations/export 未知会话 → exported=0 + skipped 明确列出')
-  const exBad = await apiPost('/conversations/export', { ids: ['x'], format: 'pdf' })
-  if (exBad.http !== 200 || exBad.env.code !== 40001) return bad('POST /conversations/export 非法格式', `HTTP ${exBad.http} code=${exBad.env.code}`)
-  ok('POST /conversations/export format=pdf → HTTP 200 code=40001')
+  if (e.exported !== 0 || !Array.isArray(e.skipped) || e.skipped[0] !== 'no-such-session' || !Array.isArray(e.files))
+    return bad('POST /sessions/export 载荷', JSON.stringify(e))
+  ok('POST /sessions/export 未知会话 → exported=0 + skipped 明确列出')
+  const exBad = await apiPost('/sessions/export', { ids: ['x'], format: 'pdf' })
+  if (exBad.http !== 200 || exBad.env.code !== 40001) return bad('POST /sessions/export 非法格式', `HTTP ${exBad.http} code=${exBad.env.code}`)
+  ok('POST /sessions/export format=pdf → HTTP 200 code=40001')
 }
 
 // ——— 2. REST 业务错误信封 ———
 
 async function checkBizError() {
   console.log('· REST 业务错误（HTTP 200 + 信封 code≠0，前端 HttpError 依据）')
-  const r = await fetch(API + '/conversations', {
+  const r = await fetch(API + '/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify({ agent_id: 'agent-no-such', prompt: 'hi' }),
   })
   const env = await r.json()
   if (r.status === 200 && env.code === 40401 && typeof env.msg === 'string') {
-    ok(`POST /conversations 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
+    ok(`POST /sessions 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
   } else {
-    bad('POST /conversations 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
+    bad('POST /sessions 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
   }
 
   // P2 §5.2 未知 MCP server 探测 → 40401（前端 HttpError 提示依据；不真的 spawn 任何进程）。

@@ -40,8 +40,8 @@ type ModelResp struct {
 type ModelEffect struct {
 	// Effect 生效时刻：next_session（下一次会话创建/换代际）| next_process（新底座进程读配置）。
 	Effect string `json:"effect"`
-	// AffectedConversations 由**可能落到任一已注册底座**的 agent 服务的会话数（换代际的影响面）。
-	AffectedConversations int `json:"affected_conversations"`
+	// AffectedSessions 由**可能落到任一已注册底座**的 agent 服务的会话数（换代际的影响面）。
+	AffectedSessions int `json:"affected_sessions"`
 	// Deferred 其中本轮不能就地换代际的会话数（有在途轮次 / 有未应答权限或提问）。
 	Deferred int `json:"deferred"`
 	// Note 一句话人话说明（含"什么时候生效"的如实措辞）。

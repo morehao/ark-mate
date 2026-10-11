@@ -10,7 +10,7 @@ import (
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
 //
-// 数据源：runs（每轮终态行，含 usage_json 的会话用量快照）+ conversations.agent_id。
+// 数据源：runs（每轮终态行，含 usage_json 的会话用量快照）+ sessions.agent_id。
 // 语义：
 //   - 计数/时长按「时间半开区间 [From, To)」内的 run 行聚合（started_at 落点）；
 //   - 上下文用量（ContextUsed/ContextSize）是**快照**语义：取每会话在区间内**最后**一条
@@ -47,7 +47,7 @@ type UsageBucket struct {
 	Failed        int    `json:"failed"`
 	Cancelled     int    `json:"cancelled"`
 	Running       int    `json:"running"`
-	Conversations int    `json:"conversations"`
+	Sessions      int    `json:"sessions"`
 	DurationMS    int64  `json:"duration_ms"`
 	ContextUsed   int64  `json:"context_used"`
 	ContextSize   int64  `json:"context_size"`
@@ -66,14 +66,14 @@ type UsageSummaryResult struct {
 	Buckets []UsageBucket `json:"buckets"`
 }
 
-// usageRow 聚合输入行（runs ⨝ conversations）。
+// usageRow 聚合输入行（runs ⨝ sessions）。
 type usageRow struct {
-	conversationID string
-	agentID        string
-	status         string
-	startedAt      time.Time
-	endedAt        time.Time
-	usage          objusage.UsageInfo
+	sessionID string
+	agentID   string
+	status    string
+	startedAt time.Time
+	endedAt   time.Time
+	usage     objusage.UsageInfo
 	// 字段级可用性：一次上报可能只带上下文或只带费用，聚合时按字段取「区间内最后一条」。
 	hasContext bool
 	hasCost    bool
@@ -132,11 +132,11 @@ func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error)
 	out := make([]usageRow, 0, len(rows))
 	for _, r := range rows {
 		row := usageRow{
-			conversationID: r.ConversationID,
-			agentID:        r.AgentID,
-			status:         r.Status,
-			startedAt:      r.StartedAt,
-			endedAt:        r.EndedAt,
+			sessionID: r.SessionID,
+			agentID:   r.AgentID,
+			status:    r.Status,
+			startedAt: r.StartedAt,
+			endedAt:   r.EndedAt,
 		}
 		if r.Reported {
 			row.usage = r.Usage
@@ -176,19 +176,19 @@ func aggregateUsage(rows []usageRow) UsageBucket {
 		}
 		// 行按 started_at 升序 → 后到覆盖先到；上下文与费用各自独立覆盖。
 		if r.hasContext {
-			if _, seen := lastCtx[r.conversationID]; !seen {
-				ctxOrder = append(ctxOrder, r.conversationID)
+			if _, seen := lastCtx[r.sessionID]; !seen {
+				ctxOrder = append(ctxOrder, r.sessionID)
 			}
-			lastCtx[r.conversationID] = r.usage
+			lastCtx[r.sessionID] = r.usage
 		}
 		if r.hasCost {
-			if _, seen := lastCost[r.conversationID]; !seen {
-				costOrder = append(costOrder, r.conversationID)
+			if _, seen := lastCost[r.sessionID]; !seen {
+				costOrder = append(costOrder, r.sessionID)
 			}
-			lastCost[r.conversationID] = r.usage
+			lastCost[r.sessionID] = r.usage
 		}
 	}
-	b.Conversations = countDistinct(rows)
+	b.Sessions = countDistinct(rows)
 	b.UsageReported = len(ctxOrder)
 	b.CostReported = len(costOrder)
 	for _, cid := range ctxOrder {
@@ -223,7 +223,7 @@ func aggregateUsage(rows []usageRow) UsageBucket {
 func countDistinct(rows []usageRow) int {
 	seen := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
-		seen[r.conversationID] = struct{}{}
+		seen[r.sessionID] = struct{}{}
 	}
 	return len(seen)
 }

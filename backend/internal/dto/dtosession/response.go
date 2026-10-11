@@ -1,15 +1,25 @@
-package dtoconversation
+package dtosession
 
 import "github.com/morehao/ark-mate/internal/eventbus"
 
-// ConversationResp 会话的对外表示（P0 起不含 runtime）。
-type ConversationResp struct {
-	ID       string `json:"id"`
-	AgentID  string `json:"agent_id"`
-	Status   string `json:"status"`
-	Title    string `json:"title"`
-	Pinned   bool   `json:"pinned"`
-	Archived bool   `json:"archived"`
+// SessionResp 会话的对外表示（P0 起不含 runtime）。
+type SessionResp struct {
+	// ID 平台会话 id（`ses_<26 位 ULID>`）。**它是唯一的对外会话标识**——URL 路径段、
+	// 事件载荷的 `session_id`、前端路由都用它。
+	ID string `json:"id"`
+	// ProviderSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
+	//
+	// v15 起它在**平台侧**一律带 `rt_` 壳（`pkg/object/objid`）：这既是"平台 id 与底座 id
+	// 形状可分"这条不变式的载体（`id` 匹配 `^ses_…$`、本字段匹配 `^rt_.+$`，两者永不可能
+	// 相等），也是排障时一眼看出"这是哪个底座用什么形状发的"的那一层信息。
+	//
+	// 它**只**用于诊断与关联底座日志：**不得**出现在 URL 路径段，也不得被当成会话标识传给任何写面。
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	AgentID           string `json:"agent_id"`
+	Status            string `json:"status"`
+	Title             string `json:"title"`
+	Pinned            bool   `json:"pinned"`
+	Archived          bool   `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
@@ -40,10 +50,10 @@ type ConversationResp struct {
 	//
 	// 回显的意义：用户要能看见"这个会话当初钉的是哪一套"，而不是靠推断。
 	// 指纹是不透明摘要（算法保证密钥值不进指纹），透出去只是为了让"是不是同一套"可判。
-	Capabilities *ConversationCapabilitiesResp `json:"capabilities,omitempty"`
+	Capabilities *SessionCapabilitiesResp `json:"capabilities,omitempty"`
 }
 
-// ConversationCapabilitiesResp 会话能力选定的对外表示。
+// SessionCapabilitiesResp 会话能力选定的对外表示。
 //
 // **形态与落库的 `capability_json` 逐键一致**（回显就是"当初钉住的那一份"），因此三个状态
 // 各有明确表示，不需要额外的布尔标志：
@@ -55,23 +65,23 @@ type ConversationResp struct {
 //
 // 用 `omitempty` 让"未声明"表现为**键缺失**而不是 `null`：`null` 与缺失在语义上无法区分，
 // 而这里恰恰要靠这个区分说话。前端取值一律 `capabilities?.mcps`（缺 key = 未声明）。
-type ConversationCapabilitiesResp struct {
+type SessionCapabilitiesResp struct {
 	Skills *[]string `json:"skills,omitempty"`
 	Mcps   *[]string `json:"mcps,omitempty"`
 	// Fingerprint 钉住的代际指纹（空 = 未声明能力选择）。
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
-// ConversationSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
-type ConversationSearchHit struct {
-	ConversationResp
+// SessionSearchHit 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中）。
+type SessionSearchHit struct {
+	SessionResp
 	Snippet string `json:"snippet"`
 	Matches int    `json:"matches"`
 }
 
-// ConversationDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
-type ConversationDetailResp struct {
-	ConversationResp
+// SessionDetailResp 单会话详情（元数据 + 挂起权限 + 会话级权限记忆）。
+type SessionDetailResp struct {
+	SessionResp
 	Pending  []PermissionResp `json:"pending"`
 	Memories []MemoryResp     `json:"memories"`
 }
@@ -84,8 +94,8 @@ type MemoryResp struct {
 	Since    string `json:"since"`    // RFC3339，授予时刻
 }
 
-// ConversationCreateResp 新建会话响应（P0 起不含 runtime）。
-type ConversationCreateResp struct {
+// SessionCreateResp 新建会话响应（P0 起不含 runtime）。
+type SessionCreateResp struct {
 	ID       string `json:"id"`
 	AgentID  string `json:"agent_id"`
 	Status   string `json:"status"`
@@ -97,13 +107,13 @@ type ConversationCreateResp struct {
 	WorkspaceTemporary bool   `json:"workspace_temporary"`
 }
 
-// ConversationPromptResp 追加 prompt 响应。
-type ConversationPromptResp struct {
+// SessionPromptResp 追加 prompt 响应。
+type SessionPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
 	// Queued/InputID 仅 delivery=after_turn|interrupt_then_prompt 且会话正忙时出现：
-	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /conversations/:id/inputs/:input_id 撤下）。
+	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /sessions/:id/inputs/:input_id 撤下）。
 	Queued  bool   `json:"queued,omitempty"`
 	InputID string `json:"input_id,omitempty"`
 }
@@ -124,8 +134,8 @@ type QueuedInputResp struct {
 	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
 }
 
-// ConversationHistoryResp 会话历史分页响应（事件按 seq 升序）。
-type ConversationHistoryResp struct {
+// SessionHistoryResp 会话历史分页响应（事件按 seq 升序）。
+type SessionHistoryResp struct {
 	ID     string           `json:"id"`
 	Events []eventbus.Event `json:"events"`
 	// HasMore 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。
@@ -195,9 +205,11 @@ type PermissionDecisionResp struct {
 // ElicitationResp 挂起结构化提问的对外表示。
 type ElicitationResp struct {
 	ElicitationID string `json:"elicitation_id"`
-	SessionID     string `json:"session_id"`
-	// ConversationID 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起）。
-	ConversationID string `json:"conversation_id"`
+	// SessionID 归属会话（C3 scope；决策必须由该会话发起）。
+	//
+	// v15 之前这里同时发 `session_id` 与 `conversation_id` 两个**同值**的键（一个东西两个
+	// 词），改名后收敛成一个键——两个词各写一遍只会在读的一侧留下一个永远取不到的字段。
+	SessionID string `json:"session_id"`
 	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）
 	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`

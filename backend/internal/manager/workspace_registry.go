@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域实现。
@@ -25,7 +29,7 @@ import (
 // 三条纪律（对应设计 ADR-1/ADR-5/ADR-6）：
 //   - 登记**不豁免白名单**：创建走的就是 ValidateWorkspace(path, roots)。否则"登记时能过、
 //     建会话被拒"就是一条死路——点了会得到一个必然失败的会话；
-//   - 归属只由 `conversations.workspace_id` 表达，这里不维护第二份成员账；
+//   - 归属只由 `sessions.workspace_id` 表达，这里不维护第二份成员账；
 //   - 删登记**只删登记**：目录、文件、会话历史一概不动，那些会话读面归默认工作空间。
 
 // WorkspaceRegistry 列出全部工作空间登记（按展示顺序）。
@@ -34,12 +38,22 @@ import (
 // 其余是事实的投影——存一份就多一份会与事实漂移的副本。
 func (s *Service) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 	if s.st == nil {
-		// memory 模式：登记表不存在。返回**空列表 + 不可写**，不是错误——
-		// 前端据 writable=false 不渲染创建入口（设计 ADR-11），而"没有登记"本身是合法状态。
-		return &dtoworkspace.WorkspaceListResp{
-			Items:    []dtoworkspace.WorkspaceResp{},
-			Writable: false,
-		}, nil
+		// memory 模式：**用户登记表**不存在（没有地方存"用户显式登记的东西"），所以
+		// `writable=false`（前端据此不渲染创建入口，设计 ADR-11）。
+		//
+		// 但**默认工作空间照常列出**：它是平台代建的那一条（见 EnsureDefaultWorkspace），
+		// 而不是用户登记项。把它藏起来会让左栏少一个分组、让"未指定 cwd 建的会话"在界面上
+		// 无处可挂——而它确实存在、确实可用。
+		out := &dtoworkspace.WorkspaceListResp{
+			Items:        []dtoworkspace.WorkspaceResp{},
+			Writable:     false,
+			ProvisionDir: s.WorkspaceDir(),
+		}
+		if def, ok, _ := s.DefaultWorkspace(); ok {
+			out.Items = append(out.Items, s.workspaceRespForMemDefault(def))
+			out.DefaultID = def.ID
+		}
+		return out, nil
 	}
 	ctx := context.Background()
 	rows, err := s.st.ListWorkspaces(ctx)
@@ -81,11 +95,11 @@ func (s *Service) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 			CreatedAt: r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: r.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
-		resp.Conversations = int(counts[r.ID])
+		resp.Sessions = int(counts[r.ID])
 		resp.LastUsedAt = lastUsed[r.ID]
 		if r.IsDefault {
 			// 归到默认工作空间的历史会话（workspace_id = ''）。
-			resp.Conversations += int(counts[""])
+			resp.Sessions += int(counts[""])
 			if v := lastUsed[""]; v > resp.LastUsedAt {
 				resp.LastUsedAt = v
 			}
@@ -164,7 +178,7 @@ func (s *Service) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceD
 	case err != nil:
 		return nil, err
 	}
-	// **同步内存镜像**：列表读的是 `s.conversations` 的内存记录，而 store 只改了库里的列。
+	// **同步内存镜像**：列表读的是 `s.sessions` 的内存记录，而 store 只改了库里的列。
 	// 不同步的后果是实测出来的——删完登记立刻按默认工作空间过滤，那几个会话**看不到**
 	// （内存里还挂着已经不存在的 id），要等重启才回来。库是对的、界面是空的，
 	// 而中间没有任何报错。
@@ -191,27 +205,100 @@ func (s *Service) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wo
 // EnsureDefaultWorkspace 装配期建立默认工作空间（幂等；代建关闭时什么也不做）。
 //
 // 它由装配根在**配置装载之后**调用，而不是由迁移调用——迁移发生在 `store.Open` 内部，
-// 那时拿不到 `workspace_dir`（见 store/migrate_v14.go 的说明）。只在登记表为空时创建：
-// 删掉默认工作空间之后不再自动重建（设计 ADR-4）。
+// 那时拿不到 `workspace_dir`（见 store/migrate_v14.go 的说明）。sqlite 模式下只在登记表为空时
+// 创建：删掉默认工作空间之后不再自动重建（设计 ADR-4）。
+//
+// **两种持久层模式都要有它**（2026-10-11 修）：默认工作空间是"未指定 cwd 时落在哪"的唯一落点，
+// 与"用户的登记表能不能持久化"是两件事。memory 模式下缺了它的表现是
+// `POST /sessions {"agent_id":"dsh","prompt":"hi"}` 直接 40001 `workspace_required`
+// ——最普通的一条路走不通，而用户什么都没做错。所以 memory 模式也在**装配期**建目录 +
+// 铸一个进程内的登记项（每次启动一个新 id：它本来就不跨进程存活）。
 func (s *Service) EnsureDefaultWorkspace() error {
-	if s.st == nil {
-		return nil
-	}
 	dir := s.WorkspaceDir()
 	if dir == "" {
+		// 显式关闭代建（`workspace_dir` 为空/off）：该类部署**要求**显式 cwd，这是配置意图。
 		return nil
 	}
+	provision := defaultWorkspaceDir(dir)
+	if s.st == nil {
+		return s.provisionMemoryDefaultWorkspace(provision)
+	}
 	if _, err := s.st.BootstrapDefaultWorkspace(context.Background(),
-		store.WorkspaceProvision{Dir: defaultWorkspaceDir(dir)}); err != nil {
+		store.WorkspaceProvision{Dir: provision}); err != nil {
 		return code.FromError(err)
 	}
 	return nil
 }
 
+// provisionMemoryDefaultWorkspace 在 memory 模式建出默认工作空间（目录 + 进程内登记项）。
+func (s *Service) provisionMemoryDefaultWorkspace(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return code.FromError(acl.NewError(acl.ClassService, "workspace_provision_failed",
+			fmt.Sprintf("建立默认工作空间目录失败 %s: %v", dir, err), nil))
+	}
+	canonical := dir
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		canonical = real
+	}
+	now := time.Now().UTC()
+	row := &model.WorkspaceEntity{
+		// 每次启动一个新 id：memory 模式的进程内登记项**本来就不跨进程存活**，
+		// 与 store 侧的 `BootstrapDefaultWorkspace` 用同一个铸造口径（`wsp_<ULID>`）。
+		ID:        objid.New(objid.Workspace),
+		Path:      canonical,
+		Title:     store.DefaultWorkspaceTitle,
+		IsDefault: true,
+		ListOrder: 0,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.mu.Lock()
+	s.memDefaultWorkspace = row
+	s.mu.Unlock()
+	return nil
+}
+
+// workspaceRespForMemDefault 把 memory 模式的默认工作空间投影成列表项。
+//
+// 计数与最近使用从**内存会话**现算（与 sqlite 分支逐字同一口径）：归到默认工作空间的历史会话
+// （`workspace_id = ”`）也算在它头上——否则界面上它会永远显示 0 个会话，而点进去却有。
+func (s *Service) workspaceRespForMemDefault(def model.WorkspaceEntity) dtoworkspace.WorkspaceResp {
+	resp := dtoworkspace.WorkspaceResp{
+		ID:        def.ID,
+		Path:      def.Path,
+		Title:     def.Title,
+		IsDefault: true,
+		ListOrder: def.ListOrder,
+		DirStatus: dirStatusOf(def.Path),
+		CreatedAt: def.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt: def.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rec := range s.sessions {
+		if rec.WorkspaceID == def.ID || rec.WorkspaceID == "" {
+			resp.Sessions++
+			if at := rec.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"); at > resp.LastUsedAt {
+				resp.LastUsedAt = at
+			}
+		}
+	}
+	return resp
+}
+
 // DefaultWorkspace 返回默认工作空间（不存在 → ok=false）。会话创建路径用它定 cwd。
-func (s *Service) DefaultWorkspace() (store.Workspace, bool, error) {
+//
+// memory 模式返回装配期铸的那一条（见 EnsureDefaultWorkspace）——"没有库"与"没有默认工作空间"
+// 是两件事，把它们混为一谈就是那条 40001 的成因。
+func (s *Service) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
 	if s.st == nil {
-		return store.Workspace{}, false, nil
+		s.mu.Lock()
+		def := s.memDefaultWorkspace
+		s.mu.Unlock()
+		if def == nil {
+			return model.WorkspaceEntity{}, false, nil
+		}
+		return *def, true, nil
 	}
 	return s.st.DefaultWorkspace(context.Background())
 }
@@ -286,7 +373,7 @@ func workspaceReadOnlyError() error {
 //
 // 为什么给了 workspace_id 就不用再看 req.Cwd 定目录：选择器选中一个登记项是更强的意图表达
 // （用户点的是一个有名字、有顺序的实体），而 cwd 是给"直接用绝对路径"这条老路的。
-// 两者同时给出且不一致时**拒绝**（见 CreateConversation）：猜错的后果是会话跑在用户没打算用的
+// 两者同时给出且不一致时**拒绝**（见 CreateSession）：猜错的后果是会话跑在用户没打算用的
 // 目录里（而那个目录正是 workspace-write 的沙箱边界）。
 func (s *Service) resolveTargetWorkspace(reqWorkspaceID string) (target *DefaultWorkspaceRef, assignment string, err error) {
 	id := strings.TrimSpace(reqWorkspaceID)
@@ -325,7 +412,7 @@ func (s *Service) clearWorkspaceAssignment(workspaceID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
-	for _, rec := range s.conversations {
+	for _, rec := range s.sessions {
 		if rec.WorkspaceID == workspaceID {
 			rec.WorkspaceID = ""
 			n++
@@ -356,6 +443,17 @@ func (s *Service) workspaceIDByPath(ctx context.Context, path string) string {
 // 服务端在建会话那一刻就定死归属，读面直出即可。
 func (s *Service) workspaceDisplayOf(workspaceID string) (string, string) {
 	id := strings.TrimSpace(workspaceID)
+
+	// memory 模式**必须在这里分流**：下面第一段会直接调 `s.st.GetWorkspace`，而 memory 模式的
+	// `s.st` 是 nil——2026-10-11 给 memory 模式补上默认工作空间之后，这条路上的 `id` 不再是空串，
+	// 于是它当场变成一次空指针解引用（测试抓到的就是这个）。
+	if s.st == nil {
+		if def, ok, err := s.DefaultWorkspace(); ok && err == nil {
+			return def.ID, defaultWorkspaceDisplayTitle(def.Title)
+		}
+		return id, ""
+	}
+
 	if id != "" {
 		row, ok, err := s.st.GetWorkspace(context.Background(), id)
 		if err == nil && ok {
@@ -368,9 +466,6 @@ func (s *Service) workspaceDisplayOf(workspaceID string) (string, string) {
 	//
 	// **只解析出 id 时也必须返回它**——前端按它渲染分组，返回空串会让那些会话在界面上
 	// 消失（没有分组可挂）。所以这里宁可回一个"只有 id"的结果（title 由前端回落渲染）。
-	if s.st == nil {
-		return id, ""
-	}
 	if def, ok, err := s.st.DefaultWorkspace(context.Background()); err == nil && ok {
 		return def.ID, defaultWorkspaceDisplayTitle(def.Title)
 	}

@@ -14,12 +14,12 @@ import (
 
 // MetaDao 访问 meta 表（任意键值：全局序号计数、导入标记等）。
 type MetaDao struct {
-	*gormdao.Dao[model.Meta, model.MetaList, string]
+	*gormdao.Dao[model.MetaEntity, model.MetaEntityList, string]
 }
 
 // NewMetaDao 构造 MetaDao（getDB 必填，见包注释）。
 func NewMetaDao(getDB gormdao.DBGetter) *MetaDao {
-	return &MetaDao{Dao: newDao[model.Meta, model.MetaList, string]("MetaDao", getDB)}
+	return &MetaDao{Dao: newDao[model.MetaEntity, model.MetaEntityList, string]("MetaDao", getDB)}
 }
 
 // Get 读取任意键；不存在返回 ("", false, nil)（不存在不是错误）。
@@ -28,8 +28,8 @@ func NewMetaDao(getDB gormdao.DBGetter) *MetaDao {
 // 泛型 Dao 中所有按主键操作的方法（GetByID/UpdateByID/UpdateMap/Delete）都有同样的假设，
 // 主键列不叫 id 的实体（meta.key、events.seq、schema_migrations.version）只能走自定义方法。
 func (d *MetaDao) Get(ctx context.Context, key string) (string, bool, error) {
-	var row model.Meta
-	err := d.DB(ctx).Model(&model.Meta{}).Where("key = ?", key).Take(&row).Error
+	var row model.MetaEntity
+	err := d.DB(ctx).Model(&model.MetaEntity{}).Where("key = ?", key).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", false, nil
 	}
@@ -44,7 +44,7 @@ func (d *MetaDao) Set(ctx context.Context, key, value string) error {
 	return d.DB(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&model.Meta{Key: key, Value: value}).Error
+	}).Create(&model.MetaEntity{Key: key, Value: value}).Error
 }
 
 // IncrSeq 在事务内把全局事件序号 +1 并返回新值（events.seq 的唯一分配源）。

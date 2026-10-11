@@ -15,8 +15,8 @@ func TestSessionIDFromMeta(t *testing.T) {
 	}{
 		{"sessionId", map[string]any{"sessionId": "s1"}, "s1"},
 		{"session_id 回退", map[string]any{"session_id": "s2"}, "s2"},
-		{"conversation_id 回退", map[string]any{"conversation_id": "s3"}, "s3"},
-		{"顺序优先 sessionId", map[string]any{"conversation_id": "s9", "sessionId": "s1"}, "s1"},
+		{"session_id 回退", map[string]any{"session_id": "s3"}, "s3"},
+		{"顺序优先 sessionId", map[string]any{"session_id": "s9", "sessionId": "s1"}, "s1"},
 		{"空串跳过", map[string]any{"sessionId": "", "session_id": "s2"}, "s2"},
 		{"非字符串不认", map[string]any{"sessionId": 42}, ""},
 		{"对象不认", map[string]any{"sessionId": map[string]any{"id": "s1"}}, ""},

@@ -9,6 +9,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -225,24 +226,38 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spe
 			"该 runtime 不支持 session/resume|session/load，无法在不新建会话的前提下读取目录", nil)
 	}
 
-	nativeID, cwd := "", ""
-	if rec := s.newestResumableConversation(agent.ID); rec != nil {
-		nativeID, cwd = rec.ProviderSessionID, rec.Cwd
+	// **两个名字，两种语义**（本文件最容易踩的一处）：同一个变量既"给底座用"又"比较/落库用"
+	// 时，谁把解包后的值写回 rec 就会把裸 id 落库，而这件事不响（守卫② 事后才发现）。
+	//   rawID     = 底座原文，**只**出现在 ACP 调用参数里；
+	//   wrappedID = 平台侧的值（`rt_` 壳），用于判空与（若将来落 rec）持久化。
+	var rawID, wrappedID, cwd string
+	if rec := s.newestResumableSession(agent.ID); rec != nil {
+		wrappedID, cwd = rec.ProviderSessionID, rec.Cwd
+		raw, uerr := objid.UnwrapProvider(wrappedID)
+		if uerr != nil {
+			return nil, uerr
+		}
+		rawID = raw
 	} else if items, err := rc.client.ListSessions(ctx, ""); err == nil {
 		if pick, ok := pickListedSession(items); ok {
-			nativeID, cwd = pick.ID, pick.Cwd
+			// W3：`session/list` 直出**底座原文**（第二个最容易漏的点），必须包装后才是平台侧的值。
+			wrapped, werr := objid.WrapProvider(pick.ID)
+			if werr != nil {
+				return nil, werr
+			}
+			rawID, wrappedID, cwd = pick.ID, wrapped, pick.Cwd
 		}
 	}
-	if nativeID == "" {
+	if wrappedID == "" {
 		return nil, acl.NewError(acl.ClassRequest, "no_resumable_session",
 			"该 agent 既无平台会话记录，runtime 也没有可列举的会话", nil)
 	}
 
 	var sess *acl.Session
 	if caps.Raw.LoadSession {
-		sess, err = rc.client.LoadSession(ctx, nativeID, acl.SessionOptions{Cwd: cwd})
+		sess, err = rc.client.LoadSession(ctx, rawID, acl.SessionOptions{Cwd: cwd})
 	} else {
-		sess, err = rc.client.ResumeSession(ctx, nativeID, acl.SessionOptions{Cwd: cwd})
+		sess, err = rc.client.ResumeSession(ctx, rawID, acl.SessionOptions{Cwd: cwd})
 	}
 	if err != nil {
 		return nil, err
@@ -267,12 +282,12 @@ func pickListedSession(items []acl.SessionInfo) (acl.SessionInfo, bool) {
 	return acl.SessionInfo{}, false
 }
 
-// newestResumableConversation 找该 agent 最近一条可用于 resume 的会话（有原生 id + cwd）。
+// newestResumableSession 找该 agent 最近一条可用于 resume 的会话（有原生 id + cwd）。
 // 内存集合优先（活跃/本进程可见），sqlite 兜底（重启后历史）。
-func (s *Service) newestResumableConversation(agentID string) *ConversationRec {
+func (s *Service) newestResumableSession(agentID string) *SessionRec {
 	s.mu.Lock()
-	var best *ConversationRec
-	for _, r := range s.conversations {
+	var best *SessionRec
+	for _, r := range s.sessions {
 		if r.AgentID != agentID || r.ProviderSessionID == "" || r.Cwd == "" {
 			continue
 		}
@@ -289,17 +304,17 @@ func (s *Service) newestResumableConversation(agentID string) *ConversationRec {
 		return nil
 	}
 	// sqlite 兜底：列出全部会话后挑该 agent 最近的（表量级小；失败即视为无可恢复会话）。
-	list, err := st.ListConversations(context.Background(), nil)
+	list, err := st.ListSessions(context.Background(), nil)
 	if err != nil {
 		return nil
 	}
-	var out *ConversationRec
+	var out *SessionRec
 	for i := range list {
 		c := list[i]
 		if c.AgentID != agentID || c.ProviderSessionID == "" || c.Cwd == "" {
 			continue
 		}
-		rec := &ConversationRec{ID: c.ID, AgentID: c.AgentID, Cwd: c.Cwd,
+		rec := &SessionRec{ID: c.ID, AgentID: c.AgentID, Cwd: c.Cwd,
 			ProviderSessionID: c.ProviderSessionID, UpdatedAt: c.UpdatedAt}
 		if out == nil || rec.UpdatedAt.After(out.UpdatedAt) {
 			out = rec

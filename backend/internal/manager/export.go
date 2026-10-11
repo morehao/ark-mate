@@ -20,9 +20,9 @@ const (
 	maxExportBytesEach = 4 << 20 // 单会话正文上限 4 MiB
 )
 
-// ExportConversations 批量导出会话（M3 ②）。事实源与前端渲染一致：事件序列（sqlite=events 表；
+// ExportSessions 批量导出会话（M3 ②）。事实源与前端渲染一致：事件序列（sqlite=events 表；
 // memory=eventbus/transcript 回放），因此两模式产物一致。未知/无事件会话进 skipped 明确列出。
-func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
+func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
 	format := strings.ToLower(strings.TrimSpace(req.Format))
 	if format == "" {
 		format = "markdown"
@@ -53,7 +53,7 @@ func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportR
 
 	resp := &dtoexport.ExportResp{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Format: format, Files: []dtoexport.ExportFile{}}
 	for _, id := range ids {
-		meta, ok := s.conversationMeta(id)
+		meta, ok := s.sessionMeta(id)
 		if !ok {
 			resp.Skipped = append(resp.Skipped, id)
 			continue
@@ -69,16 +69,16 @@ func (s *Service) ExportConversations(ctx context.Context, req dtoexport.ExportR
 			truncated = true
 		}
 		resp.Files = append(resp.Files, dtoexport.ExportFile{
-			ConversationID: id,
-			Title:          meta.title,
-			AgentID:        meta.agentID,
-			Status:         meta.status,
-			Filename:       exportFilename(id, meta.title, format),
-			Format:         format,
-			Events:         len(events),
-			Bytes:          len(content),
-			Truncated:      truncated,
-			Content:        content,
+			SessionID: id,
+			Title:     meta.title,
+			AgentID:   meta.agentID,
+			Status:    meta.status,
+			Filename:  exportFilename(id, meta.title, format),
+			Format:    format,
+			Events:    len(events),
+			Bytes:     len(content),
+			Truncated: truncated,
+			Content:   content,
 		})
 		resp.TotalBytes += len(content)
 	}
@@ -92,9 +92,9 @@ type exportMeta struct {
 	created, updated           time.Time
 }
 
-func (s *Service) conversationMeta(id string) (exportMeta, bool) {
+func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 	if s.st != nil {
-		c, ok, err := s.st.GetConversation(context.Background(), id)
+		c, ok, err := s.st.GetSession(context.Background(), id)
 		if err != nil || !ok {
 			return exportMeta{}, false
 		}
@@ -103,7 +103,7 @@ func (s *Service) conversationMeta(id string) (exportMeta, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.conversations[id]
+	r, ok := s.sessions[id]
 	if !ok {
 		return exportMeta{}, false
 	}
@@ -126,7 +126,7 @@ func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event
 					return out, true
 				}
 				out = append(out, eventbus.Event{
-					Type: e.Type, Seq: e.Seq, AggregID: e.ConversationID,
+					Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
 					Payload: decodePayload(e.PayloadJSON),
 				})
 				after = e.Seq
@@ -156,7 +156,7 @@ func exportFilename(id, title, format string) string {
 	ext := map[string]string{"markdown": "md", "text": "txt", "json": "json"}[format]
 	base := strings.TrimSpace(title)
 	if base == "" {
-		base = "conversation"
+		base = "session"
 	}
 	base = strings.Map(func(r rune) rune {
 		switch {
@@ -181,7 +181,7 @@ func exportFilename(id, title, format string) string {
 func renderExport(meta exportMeta, events []eventbus.Event, format string) string {
 	if format == "json" {
 		doc := map[string]any{
-			"conversation": map[string]any{
+			"session": map[string]any{
 				"id": meta.id, "title": meta.title, "agent_id": meta.agentID, "status": meta.status,
 				"created_at": meta.created.UTC().Format(time.RFC3339),
 				"updated_at": meta.updated.UTC().Format(time.RFC3339),

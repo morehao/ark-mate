@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"gorm.io/gorm"
 )
 
@@ -34,11 +34,6 @@ import (
 // 的字跟着变（前端按 `is_default` 渲染本地化的名字）。这跟 dsh 的
 // `DEFAULT_WORKSPACE_DIRECTORY = 'default-workspace'` 是同一手法。
 const DefaultWorkspaceTitle = "default-workspace"
-
-// DefaultWorkspaceID 默认工作空间在**测试夹具**里的固定 id 前缀（真实 id 是 uuid）。
-//
-// 生产路径不依赖它；它的存在只为"断言拿得到那一条"这类可读性。
-const DefaultWorkspaceIDPrefix = "wsp-default-"
 
 // ErrWorkspacePathTaken 并发创建时库级唯一索引拦下的信号（调用方据此重读既有行，
 // 把"输了竞态"变成"返回既有那一行"——get-or-create 的语义必须对并发也成立）。
@@ -65,7 +60,7 @@ type WorkspaceProvision struct {
 //
 // **建目录是文件系统副作用，事务回滚不了它**：目录先建、再写库；写库失败时目录留在磁盘上
 // （空目录，无害），由 v14 的迁移说明与 doctor 如实登记，不假装能回滚。
-func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, provision WorkspaceProvision) (*Workspace, error) {
+func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, provision WorkspaceProvision) (*model.WorkspaceEntity, error) {
 	dir := strings.TrimSpace(provision.Dir)
 	if dir == "" {
 		return nil, nil
@@ -83,7 +78,7 @@ func (s *Store) BootstrapDefaultWorkspace(ctx context.Context, provision Workspa
 }
 
 // createDefaultWorkspace 建目录并登记默认工作空间（只由 BootstrapDefaultWorkspace 调用）。
-func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*Workspace, error) {
+func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*model.WorkspaceEntity, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("store: 建立默认工作空间目录 %s: %w", dir, err)
 	}
@@ -92,8 +87,8 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*Worksp
 		canonical = real
 	}
 	now := time.Now().UTC()
-	row := Workspace{
-		ID:        DefaultWorkspaceIDPrefix + uuid.NewString(),
+	row := model.WorkspaceEntity{
+		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
 		Title:     DefaultWorkspaceTitle,
 		IsDefault: true,
@@ -114,16 +109,16 @@ func (s *Store) createDefaultWorkspace(ctx context.Context, dir string) (*Worksp
 }
 
 // DefaultWorkspace 取默认工作空间（不存在 → (nil, false, nil)）。
-func (s *Store) DefaultWorkspace(ctx context.Context) (Workspace, bool, error) {
+func (s *Store) DefaultWorkspace(ctx context.Context) (model.WorkspaceEntity, bool, error) {
 	row, err := s.workspaces.GetDefault(ctx)
 	if err != nil || row == nil {
-		return Workspace{}, false, err
+		return model.WorkspaceEntity{}, false, err
 	}
 	return *row, true, nil
 }
 
 // ListWorkspaces 按展示顺序列出全部登记。
-func (s *Store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
+func (s *Store) ListWorkspaces(ctx context.Context) ([]model.WorkspaceEntity, error) {
 	rows, err := s.workspaces.ListByOrder(ctx)
 	if err != nil {
 		return nil, err
@@ -132,19 +127,19 @@ func (s *Store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 // GetWorkspace 按 id 取一条登记（不存在 → (nil, false, nil)）。
-func (s *Store) GetWorkspace(ctx context.Context, id string) (Workspace, bool, error) {
+func (s *Store) GetWorkspace(ctx context.Context, id string) (model.WorkspaceEntity, bool, error) {
 	row, err := s.workspaces.GetByID(ctx, id)
 	if err != nil || row == nil {
-		return Workspace{}, false, err
+		return model.WorkspaceEntity{}, false, err
 	}
 	return *row, true, nil
 }
 
 // WorkspaceByPath 按规范化路径取一条登记（不存在 → (nil, false, nil)）。
-func (s *Store) WorkspaceByPath(ctx context.Context, path string) (Workspace, bool, error) {
+func (s *Store) WorkspaceByPath(ctx context.Context, path string) (model.WorkspaceEntity, bool, error) {
 	row, err := s.workspaces.GetByPath(ctx, path)
 	if err != nil || row == nil {
-		return Workspace{}, false, err
+		return model.WorkspaceEntity{}, false, err
 	}
 	return *row, true, nil
 }
@@ -154,23 +149,23 @@ func (s *Store) WorkspaceByPath(ctx context.Context, path string) (Workspace, bo
 // 为什么默认是 get-or-create 而不是报错：前端的"选一个目录建工作空间"这一步会被重复触发
 // （用户多按一次、或「最近使用（未登记）」那一栏点两下），报错会让一次幂等意图看起来像失败。
 // 需要"必须新建"的调用方传 distinctPath 检查（见 manager 的 strict 分支）。
-func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (Workspace, error) {
+func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (model.WorkspaceEntity, error) {
 	canonical := strings.TrimSpace(path)
 	if canonical == "" {
-		return Workspace{}, errors.New("store: 工作空间路径不能为空")
+		return model.WorkspaceEntity{}, errors.New("store: 工作空间路径不能为空")
 	}
 	if existing, err := s.workspaces.GetByPath(ctx, canonical); err != nil {
-		return Workspace{}, err
+		return model.WorkspaceEntity{}, err
 	} else if existing != nil {
 		return *existing, nil
 	}
 	max, err := s.workspaces.MaxOrder(ctx)
 	if err != nil {
-		return Workspace{}, err
+		return model.WorkspaceEntity{}, err
 	}
 	now := time.Now().UTC()
-	row := Workspace{
-		ID:        uuid.NewString(),
+	row := model.WorkspaceEntity{
+		ID:        objid.New(objid.Workspace),
 		Path:      canonical,
 		Title:     strings.TrimSpace(title),
 		IsDefault: false,
@@ -185,7 +180,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, path, title string) (Worksp
 				return *existing, nil
 			}
 		}
-		return Workspace{}, fmt.Errorf("store: 登记工作空间 %s: %w", canonical, err)
+		return model.WorkspaceEntity{}, fmt.Errorf("store: 登记工作空间 %s: %w", canonical, err)
 	}
 	return row, nil
 }
@@ -215,13 +210,13 @@ func (s *Store) DeleteWorkspace(ctx context.Context, id string) (int64, error) {
 		if row.IsDefault {
 			return errWorkspaceDefaultImmutable
 		}
-		res := tx.Model(&model.Conversation{}).Where("workspace_id = ?", id).
+		res := tx.Model(&model.SessionEntity{}).Where("workspace_id = ?", id).
 			Updates(map[string]any{"workspace_id": ""})
 		if res.Error != nil {
 			return res.Error
 		}
 		released = res.RowsAffected
-		return tx.Delete(&model.Workspace{}, "id = ?", id).Error
+		return tx.Delete(&model.WorkspaceEntity{}, "id = ?", id).Error
 	})
 	if err != nil {
 		return 0, err
@@ -321,15 +316,15 @@ func (s *Store) reconcileOrder(ctx context.Context, tx *gorm.DB, want []string) 
 
 // CountWorkspacesByID 返回各工作空间名下的会话数（含归档；id → 计数）。
 //
-// 不含默认工作空间的归属：`workspace_id = ''` 的历史会话在**读面**归默认工作空间
-// （设计 ADR-6），计数由 manager 那边把默认行加上 `''` 的桶得到——这里只给事实。
+// 不含默认工作空间的归属：`workspace_id = ”` 的历史会话在**读面**归默认工作空间
+// （设计 ADR-6），计数由 manager 那边把默认行加上 `”` 的桶得到——这里只给事实。
 func (s *Store) CountWorkspacesByID(ctx context.Context) (map[string]int64, error) {
 	type row struct {
 		WorkspaceID string `gorm:"column:workspace_id"`
 		N           int64  `gorm:"column:n"`
 	}
 	var rows []row
-	err := s.db.WithContext(ctx).Model(&model.Conversation{}).
+	err := s.db.WithContext(ctx).Model(&model.SessionEntity{}).
 		Select("workspace_id AS workspace_id, COUNT(*) AS n").
 		Group("workspace_id").Scan(&rows).Error
 	if err != nil {
@@ -349,7 +344,7 @@ func (s *Store) LastUsedByWorkspaceID(ctx context.Context) (map[string]string, e
 		Last        string `gorm:"column:last"`
 	}
 	var rows []row
-	err := s.db.WithContext(ctx).Model(&model.Conversation{}).
+	err := s.db.WithContext(ctx).Model(&model.SessionEntity{}).
 		Select("workspace_id AS workspace_id, MAX(updated_at) AS last").
 		Group("workspace_id").Scan(&rows).Error
 	if err != nil {
@@ -364,10 +359,10 @@ func (s *Store) LastUsedByWorkspaceID(ctx context.Context) (map[string]string, e
 	return out, nil
 }
 
-// AssignConversationWorkspace 设定一条会话的归属（建会话 / 迁移路径用）。
-func (s *Store) AssignConversationWorkspace(ctx context.Context, conversationID, workspaceID string) error {
-	return s.db.WithContext(ctx).Model(&model.Conversation{}).
-		Where("id = ?", conversationID).
+// AssignSessionWorkspace 设定一条会话的归属（建会话 / 迁移路径用）。
+func (s *Store) AssignSessionWorkspace(ctx context.Context, sessionID, workspaceID string) error {
+	return s.db.WithContext(ctx).Model(&model.SessionEntity{}).
+		Where("id = ?", sessionID).
 		Update("workspace_id", workspaceID).Error
 }
 
@@ -379,7 +374,7 @@ var errWorkspaceDefaultImmutable = errors.New("store: default workspace is immut
 
 // ErrWorkspaceNotFound / ErrWorkspaceDefaultImmutable 供 manager 判定（见上两条）。
 var (
-	ErrWorkspaceNotFound        = errWorkspaceNotFound
+	ErrWorkspaceNotFound         = errWorkspaceNotFound
 	ErrWorkspaceDefaultImmutable = errWorkspaceDefaultImmutable
 )
 

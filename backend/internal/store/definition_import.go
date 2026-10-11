@@ -87,7 +87,7 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
 				digest = it.Provider.digest()
 			}
-			if err := s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
+			if err := s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
 				Kind:         it.Kind,
 				CapabilityID: it.ID,
 				Action:       model.CapabilityActionImport,
@@ -113,15 +113,15 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it DefinitionImportItem, now time.Time) (bool, error) {
 	switch it.Kind {
 	case model.CapabilityKindSkill:
-		return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillDefinition{
+		return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
 	case model.CapabilityKindMcp:
-		return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerDefinition{
+		return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
 	case model.CapabilityKindAgent:
-		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentDefinition{
+		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
 	case model.CapabilityKindProvider:
@@ -131,14 +131,14 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 		}
 		return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(*it.Provider, 1, now, now))
 	case model.CapabilityKindAutomation:
-		row := &model.AutomationDefinition{
+		row := &model.AutomationEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",
 		}
 		if it.AutomationRuntime != nil {
 			row.LastFiredAt = it.AutomationRuntime.LastFiredAt
 			row.LastStatus = it.AutomationRuntime.LastStatus
 			row.LastReason = it.AutomationRuntime.LastReason
-			row.LastConversationID = it.AutomationRuntime.LastConversationID
+			row.LastSessionID = it.AutomationRuntime.LastSessionID
 			row.ConsecutiveFailures = it.AutomationRuntime.ConsecutiveFailures
 			if it.AutomationRuntime.RecentRuns != "" {
 				row.RecentRuns = it.AutomationRuntime.RecentRuns

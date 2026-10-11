@@ -14,7 +14,7 @@ import (
 
 // ExportCtr 会话导出控制器。
 type ExportCtr interface {
-	Conversations(c *gin.Context)
+	Sessions(c *gin.Context)
 }
 
 var _ ExportCtr = (*exportCtr)(nil)
@@ -29,15 +29,15 @@ func NewExportCtr(svc svcexport.ExportSvc) ExportCtr {
 	return &exportCtr{svc: svc}
 }
 
-// Conversations 批量导出：POST /conversations/export
+// Sessions 批量导出：POST /sessions/export
 // body {ids: [...], format?: "markdown"|"text"|"json"}（ids 上限 50）。
-func (h *exportCtr) Conversations(c *gin.Context) {
+func (h *exportCtr) Sessions(c *gin.Context) {
 	var req dtoexport.ExportReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.ExportConversations(c.Request.Context(), req)
+	resp, err := h.svc.ExportSessions(c.Request.Context(), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

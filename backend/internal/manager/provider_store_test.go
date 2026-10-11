@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -112,7 +111,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("providers 行数不符: n=%d err=%v", len(rows), err)
 	}
-	got := map[string]store.ProviderDefinition{}
+	got := map[string]model.ProviderEntity{}
 	for i := range rows {
 		got[rows[i].ID] = rows[i]
 	}

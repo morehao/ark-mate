@@ -52,9 +52,9 @@ export function railGroupModeLabel(mode: RailGroupMode): string {
 
 /**
  * 会话筛选**只有两态**，这是被接口定的，不是界面偷懒：`railMode` 直接决定服务端查询
- * （`listConversations(archived)`），wire 上没有"两条都要"的第三态可表达。
+ * （`listSessions(archived)`），wire 上没有"两条都要"的第三态可表达。
  *
- * 照搬 dsh 的三态（隐藏已归档 / 全部对话 / 仅显示已归档）需要先给 `GET /conversations`
+ * 照搬 dsh 的三态（隐藏已归档 / 全部对话 / 仅显示已归档）需要先给 `GET /sessions`
  * 加一个三值过滤参数——那是一次对外契约改动（要同步 README 路由表与 `TestReadmeRoutesMatchRouter`），
  * 不该混在一次界面调整里；更不该用一个"看着能选、选了什么都不变"的菜单项糊过去。
  */

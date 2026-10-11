@@ -30,7 +30,7 @@ interface Props {
   /**
    * 底座自报的可用斜杠命令（`session.commands` 全量事件的投影；ADR-17）。
    * `undefined` = 该底座不提供命令发现面（dsh 即如此）→ 不显示候选；
-   * `[]` = 通告了"当前没有命令" → 同样不显示候选，但两者语义不同（见 ConversationView.commands）。
+   * `[]` = 通告了"当前没有命令" → 同样不显示候选，但两者语义不同（见 SessionView.commands）。
    */
   commands?: CommandInfo[]
 }

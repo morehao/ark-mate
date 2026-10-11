@@ -12,17 +12,17 @@ import type {
   AutomationRunsResp,
   AutomationWriteBody,
   BusEvent,
-  CancelConversationResp,
+  CancelSessionResp,
   CancelQueuedInputResp,
   CapabilityWriteBody,
-  ConversationDetail,
-  ConversationPatch,
-  ConversationPromptResp,
-  ConversationRun,
-  ConversationSearchHit,
-  ConversationSummary,
-  CreateConversationReq,
-  CreateConversationResp,
+  SessionDetail,
+  SessionPatch,
+  SessionPromptResp,
+  SessionRun,
+  SessionSearchHit,
+  SessionSummary,
+  CreateSessionReq,
+  CreateSessionResp,
   ElicitationResp,
   ExportResp,
   McpDeleteResp,
@@ -128,13 +128,13 @@ export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
   http.get<AgentDiagnostics>(`/mate/agents/${encodeURIComponent(id)}/diagnostics`)
 
 /** 列出未归档会话（`archived=true` 列出已归档；`cwd` 非空 = 只列工作空间精确等于该路径的会话）。 */
-export const listConversations = (archived = false, cwd?: string, workspaceId?: string): Promise<ConversationSummary[]> => {
+export const listSessions = (archived = false, cwd?: string, workspaceId?: string): Promise<SessionSummary[]> => {
   const s = new URLSearchParams()
   if (archived) s.set('archived', 'true')
   if (cwd) s.set('cwd', cwd)
   if (workspaceId) s.set('workspace_id', workspaceId)
   const q = s.toString()
-  return http.get<ConversationSummary[]>(`/mate/conversations${q ? `?${q}` : ''}`)
+  return http.get<SessionSummary[]>(`/mate/sessions${q ? `?${q}` : ''}`)
 }
 
 /**
@@ -209,9 +209,9 @@ export const pickDirectoryHost = (): Promise<WorkspacePickResp> =>
 export const getCapabilities = (): Promise<Capabilities> => http.get<Capabilities>('/mate/capabilities')
 
 /** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
-export const conversationSearch = (q: string, limit = 30): Promise<ConversationSearchHit[]> => {
+export const sessionSearch = (q: string, limit = 30): Promise<SessionSearchHit[]> => {
   const s = new URLSearchParams({ q, limit: String(limit) })
-  return http.get<ConversationSearchHit[]>(`/mate/conversations/search?${s.toString()}`)
+  return http.get<SessionSearchHit[]>(`/mate/sessions/search?${s.toString()}`)
 }
 
 /** 跨会话消息级检索（M3 ②：返回 seq 锚点，用于跳转定位）。 */
@@ -221,56 +221,56 @@ export const messageSearch = (q: string, limit = 30): Promise<MessageSearchResp>
 }
 
 /** 批量导出会话（markdown|text|json；ids 上限 50）。 */
-export const exportConversations = (ids: string[], format: 'markdown' | 'text' | 'json' = 'markdown'): Promise<ExportResp> =>
-  http.post<ExportResp>('/mate/conversations/export', { ids, format })
+export const exportSessions = (ids: string[], format: 'markdown' | 'text' | 'json' = 'markdown'): Promise<ExportResp> =>
+  http.post<ExportResp>('/mate/sessions/export', { ids, format })
 
 /** 单会话详情（元数据 + 挂起权限）。 */
-export const getConversation = (id: string): Promise<ConversationDetail> =>
-  http.get<ConversationDetail>(`/mate/conversations/${encodeURIComponent(id)}`)
+export const getSession = (id: string): Promise<SessionDetail> =>
+  http.get<SessionDetail>(`/mate/sessions/${encodeURIComponent(id)}`)
 
 /** 某会话的轮次明细（runs 表读模型；含每轮用量快照。内存模式返回空数组）。 */
-export const conversationRuns = (id: string): Promise<{ id: string; runs: ConversationRun[] }> =>
-  http.get<{ id: string; runs: ConversationRun[] }>(`/mate/conversations/${encodeURIComponent(id)}/runs`)
+export const sessionRuns = (id: string): Promise<{ id: string; runs: SessionRun[] }> =>
+  http.get<{ id: string; runs: SessionRun[] }>(`/mate/sessions/${encodeURIComponent(id)}/runs`)
 
 /** 更新会话元数据（title/pinned/archived 子集，nil 不更新）。 */
-export const updateConversation = (id: string, patch: ConversationPatch): Promise<ConversationSummary> =>
-  http.patch<ConversationSummary>(`/mate/conversations/${encodeURIComponent(id)}`, patch)
+export const updateSession = (id: string, patch: SessionPatch): Promise<SessionSummary> =>
+  http.patch<SessionSummary>(`/mate/sessions/${encodeURIComponent(id)}`, patch)
 
 /** 新建会话：指定 agent + 首轮 prompt，后台即起真实会话；返回 attach 续传水位。 */
-export const createConversation = (req: CreateConversationReq): Promise<CreateConversationResp> =>
-  http.post<CreateConversationResp>('/mate/conversations', req)
+export const createSession = (req: CreateSessionReq): Promise<CreateSessionResp> =>
+  http.post<CreateSessionResp>('/mate/sessions', req)
 
-export const promptConversation = (id: string, req: PromptReq): Promise<ConversationPromptResp> =>
-  http.post<ConversationPromptResp>(`/mate/conversations/${encodeURIComponent(id)}/prompt`, req)
+export const promptSession = (id: string, req: PromptReq): Promise<SessionPromptResp> =>
+  http.post<SessionPromptResp>(`/mate/sessions/${encodeURIComponent(id)}/prompt`, req)
 
-export const cancelConversation = (id: string): Promise<CancelConversationResp> =>
-  http.post<CancelConversationResp>(`/mate/conversations/${encodeURIComponent(id)}/cancel`)
+export const cancelSession = (id: string): Promise<CancelSessionResp> =>
+  http.post<CancelSessionResp>(`/mate/sessions/${encodeURIComponent(id)}/cancel`)
 
 /** 列出会话的挂起权限请求。 */
 export const listPendingPermissions = (id: string): Promise<PermissionResp[]> =>
-  http.get<PermissionResp[]>(`/mate/conversations/${encodeURIComponent(id)}/permissions`)
+  http.get<PermissionResp[]>(`/mate/sessions/${encodeURIComponent(id)}/permissions`)
 
 /** 对挂起权限请求决策（allow/reject × once/always）。 */
 export const resolvePermission = (id: string, req: ResolvePermissionReq): Promise<ResolvePermissionResp> =>
-  http.post<ResolvePermissionResp>(`/mate/conversations/${encodeURIComponent(id)}/permission`, req)
+  http.post<ResolvePermissionResp>(`/mate/sessions/${encodeURIComponent(id)}/permission`, req)
 
 /** 撤销会话级权限记忆（始终允许/始终拒绝；title+kind 均空 = 一键撤销全部）。 */
 export const revokeMemory = (id: string, req: RevokeMemoryReq = {}): Promise<{ title: string; kind: string }> =>
   http.post<{ title: string; kind: string }>(
-    `/mate/conversations/${encodeURIComponent(id)}/permissions/memories/revoke`,
+    `/mate/sessions/${encodeURIComponent(id)}/permissions/memories/revoke`,
     req,
   )
 
 /** 列出会话的挂起结构化提问（elicitation 表单/URL 卡）。 */
 export const listPendingElicitations = (id: string): Promise<ElicitationResp[]> =>
-  http.get<ElicitationResp[]>(`/mate/conversations/${encodeURIComponent(id)}/elicitations`)
+  http.get<ElicitationResp[]>(`/mate/sessions/${encodeURIComponent(id)}/elicitations`)
 
 /** 对挂起结构化提问决策（accept/decline/cancel；accept 可带 content）。 */
 export const resolveElicitation = (id: string, req: ResolveElicitationReq): Promise<ResolveElicitationResp> =>
-  http.post<ResolveElicitationResp>(`/mate/conversations/${encodeURIComponent(id)}/elicitation`, req)
+  http.post<ResolveElicitationResp>(`/mate/sessions/${encodeURIComponent(id)}/elicitation`, req)
 
 /** 会话历史页（事件按 seq 升序）。 */
-export interface ConversationHistoryPage {
+export interface SessionHistoryPage {
   id: string
   events: BusEvent[]
   /** 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。 */
@@ -285,16 +285,16 @@ export interface ConversationHistoryPage {
  * 用于「加载更早」）——两者互斥（后端 40001）；默认 200/上限 1000。
  * sqlite 模式读 events 表（可一直翻到会话第一条）；内存模式回放 eventbus。
  */
-export const conversationHistory = (
+export const sessionHistory = (
   id: string,
   opts: { after?: number; before?: number; limit?: number } = {},
-): Promise<ConversationHistoryPage> => {
+): Promise<SessionHistoryPage> => {
   const q = new URLSearchParams()
   if (opts.after != null) q.set('after', String(opts.after))
   if (opts.before != null) q.set('before', String(opts.before))
   if (opts.limit != null) q.set('limit', String(opts.limit))
   const s = q.toString()
-  return http.get<ConversationHistoryPage>(`/mate/conversations/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
+  return http.get<SessionHistoryPage>(`/mate/sessions/${encodeURIComponent(id)}/history${s ? `?${s}` : ''}`)
 }
 
 /**
@@ -303,8 +303,8 @@ export const conversationHistory = (
  * 与事件的分工：`session.input_queued` 等三条事件讲「过程」，本接口给「此刻还在队里」。
  * 冷挂载（刷新/直达）时 WS 只发 snapshot 不回放历史，没有它队列会在刷新后凭空消失。
  */
-export const listQueuedInputs = (conversationId: string): Promise<QueuedInputResp[]> =>
-  http.get<QueuedInputResp[]>(`/mate/conversations/${encodeURIComponent(conversationId)}/inputs`)
+export const listQueuedInputs = (sessionId: string): Promise<QueuedInputResp[]> =>
+  http.get<QueuedInputResp[]>(`/mate/sessions/${encodeURIComponent(sessionId)}/inputs`)
 
 /**
  * §6：撤下一条**尚未投递**的排队输入。
@@ -312,9 +312,9 @@ export const listQueuedInputs = (conversationId: string): Promise<QueuedInputRes
  * 已投递/已作废是台账行、撤不动（回 `deleted:false`，幂等不报错）；真正的收敛以
  * `session.input_cancelled` 事件为准——这里返回的 `deleted` 只说明「确实从队列里拿掉了」。
  */
-export const cancelQueuedInput = (conversationId: string, inputId: string): Promise<CancelQueuedInputResp> =>
+export const cancelQueuedInput = (sessionId: string, inputId: string): Promise<CancelQueuedInputResp> =>
   http.delete<CancelQueuedInputResp>(
-    `/mate/conversations/${encodeURIComponent(conversationId)}/inputs/${encodeURIComponent(inputId)}`,
+    `/mate/sessions/${encodeURIComponent(sessionId)}/inputs/${encodeURIComponent(inputId)}`,
   )
 
 // ——— P1 能力数据面（Skill/MCP/Tool 目录，REST 列出能力） ———

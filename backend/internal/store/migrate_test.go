@@ -17,7 +17,7 @@ import (
 func applySchemaUpTo(t *testing.T, s *Store, version int) {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.db.Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableMigration + ` (
+	if err := s.db.Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableNameSchemaMigration + ` (
 		version    INTEGER PRIMARY KEY,
 		name       TEXT NOT NULL,
 		applied_at TEXT NOT NULL
@@ -39,12 +39,87 @@ func applySchemaUpTo(t *testing.T, s *Store, version int) {
 	}
 }
 
+// migrateUpTo 是 `Migrate` 的"只跑到某个版本"版本（测试专用，走**同一条** statements+apply 路径）。
+//
+// 为什么需要它：v15 是**一次性破坏性重建**（清空 7 张表），于是"vN 升级不丢既有数据"这类
+// 历史步骤的断言只有跑到 v15 **之前**才成立。把断言改成"数据没了"会让那些用例失去意义
+// ——它们要守的正是"历史上的增列/建表步骤不丢数据"这条性质。
+//
+// 刻意复用 `applyMigration`（而不是只跑 DDL）：否则测试造出的是"线上不会出现的中间态"。
+// 备份步骤与 `Migrate` 逐字一致（v12/v13 的 notes 里带它，用例也断言它）。
+func migrateUpTo(t *testing.T, s *Store, version int) {
+	t.Helper()
+	ctx := context.Background()
+	// 与 Migrate 一样先保底建版本表（空库上直接读 AppliedVersions 会 "no such table"）。
+	if err := s.db.Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableNameSchemaMigration + ` (
+		version    INTEGER PRIMARY KEY,
+		name       TEXT NOT NULL,
+		applied_at TEXT NOT NULL
+	)`).Error; err != nil {
+		t.Fatalf("建 schema_migrations: %v", err)
+	}
+	for _, m := range schemaMigrations {
+		if m.version > version {
+			break
+		}
+		applied, _, err := s.migrations.AppliedVersions(ctx)
+		if err != nil {
+			t.Fatalf("读已应用版本: %v", err)
+		}
+		if applied[m.version] {
+			continue
+		}
+		if m.backup != "" {
+			path, berr := s.backupBeforeMigration(m)
+			if berr != nil {
+				t.Fatalf("迁移 v%d 前备份失败: %v", m.version, berr)
+			}
+			s.migrationBackupPath = path
+		}
+		if err := s.applyMigration(ctx, m); err != nil {
+			t.Fatalf("迁移到 v%d（%s）失败: %v", m.version, m.name, err)
+		}
+	}
+}
+
+// legacyConversationRow 是 v14 及更早的 `conversations` 表的一行（**历史形状**）。
+//
+// 只有"停在 v15 之前"的迁移用例用它：DAO 认的是 v15 的 `sessions`，读不到历史表——
+// 这正是"实体改名不得跟随进历史迁移步"（守卫⑤）的另一面。
+type legacyConversationRow struct {
+	ID                    string
+	Title                 string
+	Provider              string
+	Model                 string
+	ProviderSessionID     string
+	LastSeq               int64
+	Pinned                int64
+	WorkspaceTemporary    int64
+	Origin                string
+	CapabilityJSON        string
+	CapabilityFingerprint string
+}
+
+// readLegacyConversation 用裸 SQL 读一行历史 `conversations`；读不到即失败。
+func readLegacyConversation(t *testing.T, s *Store, id string) legacyConversationRow {
+	t.Helper()
+	var row legacyConversationRow
+	if err := s.db.Raw(`SELECT id, title, provider, model, provider_session_id, last_seq,
+		pinned, workspace_temporary, origin, capability_json, capability_fingerprint
+		FROM conversations WHERE id = ?`, id).Scan(&row).Error; err != nil {
+		t.Fatalf("读历史会话行 %s: %v", id, err)
+	}
+	if row.ID == "" {
+		t.Fatalf("历史会话行 %s 不见了", id)
+	}
+	return row
+}
+
 // TestMigrateV6ToV7KeepsData v6 → v7 升级：三个新列纯增列（默认 `”`），既有数据一行不丢。
 //
 // 这一条是 M3-1 的验收核心：代际绑定把"会话钉住的能力"落进库，而**用户手上的库是 v6 的**。
 // 升级一旦丢数据或把旧行读成异常，损失不可逆（会话是平台的事实源）。
 func TestMigrateV6ToV7KeepsData(t *testing.T) {
-	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := dbclient.Open(path)
 	if err != nil {
@@ -66,20 +141,16 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 	}
 
 	// 升级（幂等：跑两次都应成功且不重复报错）。
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("v6 → v7 升级失败: %v", err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("重复迁移应幂等: %v", err)
-	}
+	//
+	// 只跑到 v7：本用例守的是"v7 的三个增列不丢既有数据"，而 v15 是**刻意的**破坏性重建
+	// （见 TestMigrateV15*），跑到最新会把这条断言变成"数据没了"这种没有信息量的结论。
+	migrateUpTo(t, s, 7)
+	migrateUpTo(t, s, 7)
 
-	// 旧行必须原样还在，新列为默认值。
-	got, ok, err := s.GetConversation(ctx, "c-old")
-	if err != nil || !ok {
-		t.Fatalf("升级后读旧会话: ok=%v err=%v", ok, err)
-	}
+	// 旧行必须原样还在，新列为默认值（裸 SQL：这条用例停在 v7，表名还是历史名）。
+	got := readLegacyConversation(t, s, "c-old")
 	if got.Title != "旧会话" || got.Provider != "p1" || got.Model != "m1" || got.LastSeq != 7 ||
-		got.ProviderSessionID != "ses_1" || !got.Pinned || got.WorkspaceTemporary != true {
+		got.ProviderSessionID != "ses_1" || got.Pinned != 1 || got.WorkspaceTemporary != 1 {
 		t.Fatalf("旧列在升级中失真: %+v", got)
 	}
 	if got.Origin != "" || got.CapabilityJSON != "" || got.CapabilityFingerprint != "" {
@@ -87,17 +158,15 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 			got.Origin, got.CapabilityJSON, got.CapabilityFingerprint)
 	}
 
-	// 新列可写可读（v7 的写路径真的落到了这两列上）。
-	if err := s.UpsertConversation(ctx, Conversation{
-		ID: "c-new", AgentID: "a1", Cwd: "/tmp/w", Status: "in_progress",
-		Origin: "automation:nightly", CapabilityJSON: `{"skills":["s1"]}`, CapabilityFingerprint: "fp123",
-	}); err != nil {
+	// 新列可写可读（v7 的三个增列真的落到了这张表上）。
+	if err := s.db.Exec(`INSERT INTO conversations
+		(id, agent_id, cwd, status, origin, capability_json, capability_fingerprint, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		"c-new", "a1", "/tmp/w", "in_progress", "automation:nightly", `{"skills":["s1"]}`, "fp123", at, at,
+	).Error; err != nil {
 		t.Fatalf("写 v7 会话行: %v", err)
 	}
-	got, ok, err = s.GetConversation(ctx, "c-new")
-	if err != nil || !ok {
-		t.Fatalf("读新会话: ok=%v err=%v", ok, err)
-	}
+	got = readLegacyConversation(t, s, "c-new")
 	if got.Origin != "automation:nightly" || got.CapabilityJSON != `{"skills":["s1"]}` || got.CapabilityFingerprint != "fp123" {
 		t.Fatalf("新列往返失真: %+v", got)
 	}
@@ -114,11 +183,11 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 
 	// 版本与"库高于二进制则拒绝启动"的既有语义不受影响。
 	var maxV int
-	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
+	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableNameSchemaMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() {
-		t.Fatalf("schema 版本应为 %d，got %d", latestSchemaVersion(), maxV)
+	if maxV != 7 {
+		t.Fatalf("本用例只跑到 v7，实际版本 %d", maxV)
 	}
 }
 
@@ -131,7 +200,7 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 func TestMigrateRefusesFutureSchema(t *testing.T) {
 	s := openTestDB(t)
 	ctx := context.Background()
-	if err := s.db.Exec(`INSERT INTO `+model.TableMigration+` (version, name, applied_at) VALUES (?,?,?)`,
+	if err := s.db.Exec(`INSERT INTO `+model.TableNameSchemaMigration+` (version, name, applied_at) VALUES (?,?,?)`,
 		latestSchemaVersion()+1, "future", model.NowTS()).Error; err != nil {
 		t.Fatalf("造未来版本行: %v", err)
 	}
@@ -140,14 +209,17 @@ func TestMigrateRefusesFutureSchema(t *testing.T) {
 	}
 }
 
-// TestMigrateV7ToLatestKeepsData v7 → 最新（v8 起）升级：v8 是**纯增表**（skills /
-// mcp_servers / capability_revisions），既有数据一行不丢，新表从空开始。
+// TestMigrateV7ToV14KeepsData v7 → v14 升级：v8 起都是**纯增表/纯增列**，既有数据一行不丢，
+// 新表从空开始。
+//
+// 上界钉在 v14（而不是"最新"）：v15 是**一次性破坏性重建**（用户 2026-10-11 拍板、仅此一次），
+// 跑到它上面会让本用例的"不丢数据"断言失去意义。
 //
 // 两个容易搞错的点，各自钉一条：
 //  1. 新表**必须是空的**。用户的存量能力眼下还在 `<CapabilityDir>` 的文件里，要由 M6-4 的
 //     导入器灌进来；升级时"顺手把什么默认值填进去"会让导入无法判断"库里到底有没有东西"。
 //  2. v8 的库能被二进制打开、能升到最新、且**重复迁移幂等**（用户每次启动都会跑一遍）。
-func TestMigrateV7ToLatestKeepsData(t *testing.T) {
+func TestMigrateV7ToV14KeepsData(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := dbclient.Open(path)
@@ -171,18 +243,11 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 		t.Fatalf("写 v7 会话行: %v", err)
 	}
 
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("v7 → v8 升级失败: %v", err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("重复迁移应幂等: %v", err)
-	}
+	migrateUpTo(t, s, 14)
+	migrateUpTo(t, s, 14)
 
-	// ① 旧行原样还在（含 v7 那三列）。
-	got, ok, err := s.GetConversation(ctx, "c-v7")
-	if err != nil || !ok {
-		t.Fatalf("升级后读旧会话: ok=%v err=%v", ok, err)
-	}
+	// ① 旧行原样还在（含 v7 那三列）；裸 SQL 读历史表名（见 legacyConversationRow）。
+	got := readLegacyConversation(t, s, "c-v7")
 	if got.Title != "旧会话" || got.LastSeq != 7 || got.Origin != "automation:nightly" ||
 		got.CapabilityJSON != `{"skills":["s1"]}` || got.CapabilityFingerprint != "fp-v7" {
 		t.Fatalf("旧行在升级中失真: %+v", got)
@@ -219,11 +284,11 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 
 	// ⑤ 版本到位。
 	var maxV int
-	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
+	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableNameSchemaMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 14 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 14 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != 14 {
+		t.Fatalf("本用例只跑到 v14（v15 是刻意的破坏性重建），got %d", maxV)
 	}
 }
 
@@ -361,7 +426,7 @@ func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
 		t.Fatalf("读回 automation: found=%v err=%v", found, err)
 	}
 	if row.LastFiredAt != "" || row.LastStatus != "" || row.LastReason != "" ||
-		row.LastConversationID != "" || row.ConsecutiveFailures != 0 || row.RecentRuns != "[]" {
+		row.LastSessionID != "" || row.ConsecutiveFailures != 0 || row.RecentRuns != "[]" {
 		t.Fatalf("未触发过的运行态默认值不符: %+v", row)
 	}
 

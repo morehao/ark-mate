@@ -22,8 +22,8 @@ import (
 // 「选择的和创建的都要落入 db」在 HTTP 面上走一遍：POST /workspaces 创建 → GET /workspaces
 // 能读回来 → 重启（重新打开同一个库）后**仍在**且顺序一致 → DELETE 只删登记不删数据。
 //
-// 刻意不走 `POST /conversations`（那需要拉起一个真的 ACP 子进程）：建会话与登记的接线由
-// manager 的 TestCreateConversation* 系列覆盖，这里只钉"登记这条线"。把两者混在一个测试里
+// 刻意不走 `POST /sessions`（那需要拉起一个真的 ACP 子进程）：建会话与登记的接线由
+// manager 的 TestCreateSession* 系列覆盖，这里只钉"登记这条线"。把两者混在一个测试里
 // 会让"底座拉不起来"这种环境问题把登记面的判据一起弄红。
 
 // registryApp 装配真路由 + 真 manager + 独立 sqlite 库（工作区白名单：不受限）。
@@ -274,7 +274,7 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(router.Ports{
-		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, eventbus.New())
 	var rd *strings.Reader

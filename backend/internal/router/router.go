@@ -19,11 +19,11 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svcconversation"
 	"github.com/morehao/ark-mate/internal/service/svcexport"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/internal/service/svcusage"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/golib/biz/gserver/ginserver"
@@ -37,16 +37,16 @@ const AppName = "mate"
 // 与"一个汇总大接口"的区别：这里只是装配点把实现分发给各控制器时的中转结构，
 // 控制器自身仍只持有自己那一片窄接口（见 internal/controller/ctr*）。
 type Ports struct {
-	Agent        svcagent.AgentSvc
-	Conversation svcconversation.ConversationSvc
-	Workspace    svcworkspace.WorkspaceSvc
-	Runtime      svcruntime.RuntimeSvc
-	Capability   svccapability.CapabilitySvc
-	Automation   svcautomation.AutomationSvc
-	Library      svclibrary.LibrarySvc
-	Usage        svcusage.UsageSvc
-	Search       svcsearch.SearchSvc
-	Export       svcexport.ExportSvc
+	Agent      svcagent.AgentSvc
+	Session    svcsession.SessionSvc
+	Workspace  svcworkspace.WorkspaceSvc
+	Runtime    svcruntime.RuntimeSvc
+	Capability svccapability.CapabilitySvc
+	Automation svcautomation.AutomationSvc
+	Library    svclibrary.LibrarySvc
+	Usage      svcusage.UsageSvc
+	Search     svcsearch.SearchSvc
+	Export     svcexport.ExportSvc
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。
@@ -146,7 +146,7 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 
 	registerAgent(rest, ports)
 	registerWorkspace(rest, ports)
-	registerConversation(rest, ports)
+	registerSession(rest, ports)
 	registerRuntime(rest, ports)
 	registerCapability(rest, ports)
 	registerAutomation(rest, ports)

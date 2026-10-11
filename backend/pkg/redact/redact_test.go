@@ -40,7 +40,7 @@ func TestStringKeepsBenignContent(t *testing.T) {
 		"sha256=5d41402abc4b2a76b9719d911017c592c1e5b8f0a3d2c7e9f4b6a8d0c2e4f6a8", // 纯 hex 摘要
 		"commit 550e8400e29b41d4a716446655440000",                                 // 短 hex（<40）
 		"uuid 550e8400-e29b-41d4-a716-446655440000",                               // 带分隔符，非候选 token
-		"函数名 runTestSuiteForConversationAttributionConsistency",                   // 长标识符（无数字）
+		"函数名 runTestSuiteForSessionAttributionConsistency",                        // 长标识符（无数字）
 		"短值 abc123", // 过短
 		// 回归（TestWorkspaceRoutesWithRoots 曾因此变红）：绝对路径、URL、带扩展名文件名——
 		// 密钥（base64url）不含 / \\ . : 这些分隔符，长路径绝不能被整条洗成 ***。

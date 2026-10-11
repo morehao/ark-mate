@@ -29,8 +29,8 @@ func TestUsageSummaryService(t *testing.T) {
 
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。
 	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub"}
-	svc.registerConversation(&ConversationRec{ID: "u1", AgentID: "agent-stub"})
-	svc.registerConversation(&ConversationRec{ID: "u2", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "u1", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "u2", AgentID: "agent-stub"})
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
@@ -54,7 +54,7 @@ func TestUsageSummaryService(t *testing.T) {
 	if resp.Totals.Runs != 3 || resp.Totals.Completed != 2 || resp.Totals.Failed != 1 {
 		t.Fatalf("总计计数不符: %+v", resp.Totals)
 	}
-	if resp.Totals.Conversations != 2 || resp.Totals.UsageReported != 1 {
+	if resp.Totals.Sessions != 2 || resp.Totals.UsageReported != 1 {
 		t.Fatalf("会话/上报数不符: %+v", resp.Totals)
 	}
 	if resp.Totals.CostReported != 1 {
@@ -134,7 +134,7 @@ func TestUsageSummaryService(t *testing.T) {
 // TestOrchestratorUsageEvent 用量事件载荷与最近快照记录（底座上报 → 域事件 → 落库取值）。
 func TestOrchestratorUsageEvent(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "c1", AgentID: "agent-stub"})
 	orch.byProvider["native-1"] = "c1"
 
 	sub := bus.Subscribe(0)

@@ -59,7 +59,7 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, cols.ID, actor,
 		model.CapabilityActionCreate, modelRowDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
-			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelDefinition{
+			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelEntity{
 				ID: cols.ID, ProviderID: cols.ProviderID, ModelID: cols.ModelID,
 				Name: cols.Name, Note: cols.Note, InputModalities: cols.InputModalities,
 				Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -117,7 +117,7 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 			}
 			cleared = true
 		}
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
+		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
 			Kind:         model.CapabilityKindModel,
 			CapabilityID: id,
 			Action:       model.CapabilityActionDelete,
@@ -133,25 +133,25 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 }
 
 // GetModelDefinition 读一条模型条目（不存在 → (nil, false, nil)）。
-func (s *Store) GetModelDefinition(ctx context.Context, id string) (*ModelDefinition, bool, error) {
+func (s *Store) GetModelDefinition(ctx context.Context, id string) (*model.ModelEntity, bool, error) {
 	return s.models.Get(ctx, id)
 }
 
 // ListModelDefinitions 列出全部模型条目（**`(provider_id, model_id)` 升序**，ADR-6）。
 //
 // v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
-func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelDefinitionList, error) {
+func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error) {
 	return s.models.ListAll(ctx)
 }
 
 // ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（**只读**：删除保护的判据
 // 已移进 `DeleteProviderDefinitionIfUnreferenced` 的同一事务，这里只服务文案与 doctor）。
-func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
+func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelEntityList, error) {
 	return s.models.ListByProvider(ctx, providerID)
 }
 
 // FindModelDefinition 按 `(provider_id, model_id)` 取一条（`model_exists` 判定）。
-func (s *Store) FindModelDefinition(ctx context.Context, providerID, modelID string) (*ModelDefinition, bool, error) {
+func (s *Store) FindModelDefinition(ctx context.Context, providerID, modelID string) (*model.ModelEntity, bool, error) {
 	return s.models.GetByProviderModel(ctx, providerID, modelID)
 }
 

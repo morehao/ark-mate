@@ -10,7 +10,7 @@ import "encoding/json"
 //
 // 能写的键：`id`（仅新建；与路径不一致 → 40000）、`name`、`enabled`、`schedule`、`target`、
 // `max_run_duration`、`state`（启用/停用/归档/从 needs_attention 恢复）。
-// **不能写**平台独占的运行态键（`last_fired_at`/`last_status`/`last_conversation_id`/
+// **不能写**平台独占的运行态键（`last_fired_at`/`last_status`/`last_session_id`/
 // `last_reason`/`consecutive_failures`/`recent_runs`）→ 40000：`last_fired_at` 就是认领判据，
 // 能写它就能让同一次触发重放，或者把一条 automation 永久卡住不跑。
 type AutomationWriteReq map[string]json.RawMessage

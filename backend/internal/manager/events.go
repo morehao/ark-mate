@@ -1,9 +1,9 @@
 package manager
 
-// 域事件类型（manager Publish 进 eventbus 的 type 判别词；agg_id = conversation id）。
+// 域事件类型（manager Publish 进 eventbus 的 type 判别词；agg_id = session id）。
 // 与设计文档 §4.1 事件模型对齐：token/thought/tool_call/message 归一为「消息类增量 + 终态」。
 const (
-	// BusSessionCreated 会话建立（含 conversation id）。
+	// BusSessionCreated 会话建立（含 session id）。
 	BusSessionCreated = "session.created"
 	// BusSessionResumed 进程重启后会话按需恢复（P3 F2：acquire → Load/Resume 原生会话 →
 	// 重建投影）。payload = {session_id, agent_id, runtime, reason}；reason=generation（M3-6
@@ -43,14 +43,14 @@ const (
 	// {session_id, agent_id, action(allow|deny), title, kind, allowed, rejected, option_id}。
 	BusPermissionPolicy = "session.permission_policy"
 	// BusPermissionResolved 挂起权限终局（用户决策 / 超时自动拒绝 / 会话取消）——前端收敛权限卡的
-	// 唯一事实（不依赖前端时钟）。payload = {conversation_id, call_id, outcome(selected|cancelled),
+	// 唯一事实（不依赖前端时钟）。payload = {session_id, call_id, outcome(selected|cancelled),
 	// reason(user|timeout|cancel), allowed, rejected, option_id, always}。
 	BusPermissionResolved = "session.permission_resolved"
 	// BusElicitationRequest 结构化提问请求（elicitation/create 挂起态：payload = 表单 schema /
-	// URL + message + id；前端据此渲染提问卡，用户提交/放弃经 POST /conversations/:id/elicitation 回传）。
+	// URL + message + id；前端据此渲染提问卡，用户提交/放弃经 POST /sessions/:id/elicitation 回传）。
 	BusElicitationRequest = "session.elicitation_request"
 	// BusElicitationResolved 挂起提问终局（accept/decline/cancel/超时/取消）——前端收敛提问卡的
-	// 唯一事实（不依赖前端时钟）。payload = {conversation_id, elicitation_id, action(accept|decline|cancel),
+	// 唯一事实（不依赖前端时钟）。payload = {session_id, elicitation_id, action(accept|decline|cancel),
 	// reason(user|timeout|cancel)}。
 	BusElicitationResolved = "session.elicitation_resolved"
 	// BusInputQueued §6：会话正忙，用户输入已入队等待投递（delivery=after_turn|interrupt_then_prompt）。
@@ -76,22 +76,22 @@ const (
 
 	// BusAutomationRun 一次 automation 触发的结果（ADR-12：**一个** type 承载全部结果，
 	// 含没产生会话的那些）。payload = {automation_id, trigger(scheduled|recovery|manual),
-	// scheduled_for, status(claimed|duplicate|overlap|failed|completed|skipped), reason?, conversation_id?}。
+	// scheduled_for, status(claimed|duplicate|overlap|failed|completed|skipped), reason?, session_id?}。
 	//
 	// 为什么不新建 `automation_runs` 表：events 表已具备持久化、按 agg_id 索引、since_seq 回放、
 	// WS 推送、transcript 归档的全套能力——新表是把同一套再实现一遍还要多一份保留期策略。
-	// 而 `conversations.origin` 列解决的是**反方向**查询（会话→是否自动化产物，逐行渲染不能
+	// 而 `sessions.origin` 列解决的是**反方向**查询（会话→是否自动化产物，逐行渲染不能
 	// 靠回放），故两者并存、互不可替代。
 	BusAutomationRun = "automation.run"
 )
 
 // 会话状态（进程内存储的展示值）。
 const (
-	ConversationStatusInProgress  = "in_progress"
-	ConversationStatusCompleted   = "completed"
-	ConversationStatusFailed      = "failed"
-	ConversationStatusCancelled   = "cancelled"
-	ConversationStatusInterrupted = "interrupted" // 恢复后残留 in_progress（崩溃/重启中断，无终态）
+	SessionStatusInProgress  = "in_progress"
+	SessionStatusCompleted   = "completed"
+	SessionStatusFailed      = "failed"
+	SessionStatusCancelled   = "cancelled"
+	SessionStatusInterrupted = "interrupted" // 恢复后残留 in_progress（崩溃/重启中断，无终态）
 )
 
 // AgentState 取值。

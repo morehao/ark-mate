@@ -154,7 +154,7 @@ func automationRuntimeOf(def automation.Automation) store.AutomationRuntimeState
 		LastFiredAt:         automationLastFiredText(def.LastFiredAt),
 		LastStatus:          def.LastStatus,
 		LastReason:          def.LastReason,
-		LastConversationID:  def.LastConversationID,
+		LastSessionID:       def.LastSessionID,
 		ConsecutiveFailures: int64(def.ConsecutiveFailures),
 	}
 }
@@ -184,7 +184,7 @@ func automationRunsJSON(runs []automation.RunRecord) string {
 }
 
 // automationDefFromRow 把一行还原成"完整定义"（body + 运行态列），与文件载体的解析入口同形。
-func automationDefFromRow(row *store.AutomationDefinition) (automation.Automation, error) {
+func automationDefFromRow(row *model.AutomationEntity) (automation.Automation, error) {
 	var def automation.Automation
 	if err := json.Unmarshal([]byte(row.Body), &def); err != nil {
 		return def, fmt.Errorf("不是合法 JSON：%v", err)
@@ -202,7 +202,7 @@ func automationDefFromRow(row *store.AutomationDefinition) (automation.Automatio
 	}
 	def.LastStatus = row.LastStatus
 	def.LastReason = row.LastReason
-	def.LastConversationID = row.LastConversationID
+	def.LastSessionID = row.LastSessionID
 	def.ConsecutiveFailures = int(row.ConsecutiveFailures)
 	if row.RecentRuns != "" && row.RecentRuns != "[]" {
 		if err := json.Unmarshal([]byte(row.RecentRuns), &def.RecentRuns); err != nil {
@@ -234,7 +234,7 @@ func buildAutomationRec(def automation.Automation, keyID string, now time.Time) 
 }
 
 // loadAutomationRow 从一行算出记录（JSON 坏 → 带 loadErr 的记录）。
-func loadAutomationRow(row *store.AutomationDefinition, now time.Time) *automationRec {
+func loadAutomationRow(row *model.AutomationEntity, now time.Time) *automationRec {
 	def, err := automationDefFromRow(row)
 	if err != nil {
 		return &automationRec{def: automation.Automation{ID: row.ID}, loadErr: err.Error()}
@@ -304,7 +304,7 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 		LastFiredAt:         stringOf(overlay, "last_fired_at", row.LastFiredAt),
 		LastStatus:          stringOf(overlay, "last_status", row.LastStatus),
 		LastReason:          stringOf(overlay, "last_reason", row.LastReason),
-		LastConversationID:  stringOf(overlay, "last_conversation_id", row.LastConversationID),
+		LastSessionID:       stringOf(overlay, "last_session_id", row.LastSessionID),
 		ConsecutiveFailures: int64Of(overlay, "consecutive_failures", row.ConsecutiveFailures),
 	}
 	if v, ok := overlay["recent_runs"]; ok {

@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/code"
 )
 
 // 本文件钉住 M3 的接线（设计 ADR-2/ADR-4/ADR-6/ADR-9）：会话到底跑在哪个目录、归属写没写进库、
-// 以及"未指定 cwd"这条路的落点。这些用例走的是**真实的建会话路径**（CreateConversation →
+// 以及"未指定 cwd"这条路的落点。这些用例走的是**真实的建会话路径**（CreateSession →
 // stub runtime 起会话 → 落库），因为它们要验的正是"两处来源会不会分叉"——只测纯函数
 // 证明不了接线。
 
@@ -40,22 +40,22 @@ func newConvRig(t *testing.T) *convRig {
 	return &convRig{svc: svc, orch: orch, st: st}
 }
 
-// TestCreateConversationUnspecifiedUsesDefaultWorkspace 未指定 cwd → 落在默认工作空间。
+// TestCreateSessionUnspecifiedUsesDefaultWorkspace 未指定 cwd → 落在默认工作空间。
 //
 // 这条是设计 ADR-4 的核心断言，同时钉住它的两个可观测后果：
 //   - 响应带 `workspace_temporary=true`（"这个目录不是你选的"）；
 //   - 归属写进了库（`workspace_id` = 默认那一条），而不是留空——留空要靠读面兜，
 //     而读面兜不住"用户取消默认登记"之后的形态。
-func TestCreateConversationUnspecifiedUsesDefaultWorkspace(t *testing.T) {
+func TestCreateSessionUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 	r := newConvRig(t)
 	def, ok, err := r.svc.DefaultWorkspace()
 	if err != nil || !ok {
 		t.Fatalf("默认工作空间: ok=%v err=%v", ok, err)
 	}
 
-	res, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "a1"})
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "a1"})
 	if err != nil {
-		t.Fatalf("CreateConversation: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if !res.WorkspaceTemporary {
 		t.Fatal("未指定 cwd 应标 workspace_temporary=true（= 平台给的默认工作空间）")
@@ -68,7 +68,7 @@ func TestCreateConversationUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 	}
 
 	// 库里必须带同一个归属（重启后不靠"读面兜"）。
-	row, ok, err := r.st.GetConversation(context.Background(), res.ID)
+	row, ok, err := r.st.GetSession(context.Background(), res.ID)
 	if err != nil || !ok {
 		t.Fatalf("读库: ok=%v err=%v", ok, err)
 	}
@@ -80,17 +80,17 @@ func TestCreateConversationUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 	}
 }
 
-// TestCreateConversationExplicitCwdKeepsEmptyAssignment 显式 cwd **不自动登记**。
+// TestCreateSessionExplicitCwdKeepsEmptyAssignment 显式 cwd **不自动登记**。
 //
 // 设计 §3.2 的处置：不把用户没主动选过的目录批量登记成工作空间。归属留空 = 读面归默认工作空间，
 // 所以显式 cwd 的会话照样有分组，只是不会在左栏凭空多出一个条目。
-func TestCreateConversationExplicitCwdKeepsEmptyAssignment(t *testing.T) {
+func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
 
-	res, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: dir})
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "a1", Cwd: dir})
 	if err != nil {
-		t.Fatalf("CreateConversation: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if res.WorkspaceTemporary {
 		t.Fatal("显式 cwd 不该标 temporary")
@@ -98,7 +98,7 @@ func TestCreateConversationExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 	if res.WorkspaceID != "" {
 		t.Fatalf("显式 cwd 未登记时归属应留空（读面归默认），实际 %q", res.WorkspaceID)
 	}
-	row, _, _ := r.st.GetConversation(context.Background(), res.ID)
+	row, _, _ := r.st.GetSession(context.Background(), res.ID)
 	if row.WorkspaceID != "" {
 		t.Fatalf("库里也不该替它登记: %q", row.WorkspaceID)
 	}
@@ -112,8 +112,8 @@ func TestCreateConversationExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 	}
 }
 
-// TestCreateConversationByWorkspaceID 选择器选中一个登记项：`workspace_id` 定 cwd，无需 `cwd`。
-func TestCreateConversationByWorkspaceID(t *testing.T) {
+// TestCreateSessionByWorkspaceID 选择器选中一个登记项：`workspace_id` 定 cwd，无需 `cwd`。
+func TestCreateSessionByWorkspaceID(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
 	ws, err := r.svc.CreateRegisteredWorkspace(dir, "我的项目", false)
@@ -121,11 +121,11 @@ func TestCreateConversationByWorkspaceID(t *testing.T) {
 		t.Fatalf("登记: %v", err)
 	}
 
-	res, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "a1", WorkspaceID: ws.ID,
 	})
 	if err != nil {
-		t.Fatalf("CreateConversation(by id): %v", err)
+		t.Fatalf("CreateSession(by id): %v", err)
 	}
 	if res.Cwd != ws.Path {
 		t.Fatalf("cwd 应取自登记路径 %q，实际 %q", ws.Path, res.Cwd)
@@ -138,18 +138,18 @@ func TestCreateConversationByWorkspaceID(t *testing.T) {
 	}
 
 	// 未知 id → 40401（前端据此刷新列表，而不是引导改路径）。
-	if _, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	if _, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "a1", WorkspaceID: "wsp-nope",
 	}); gerrCode(t, err) != code.NotFound {
 		t.Fatalf("未知 workspace_id 应 40401，实际 %d", gerrCode(t, err))
 	}
 }
 
-// TestCreateConversationWorkspaceConflict 同时给出 `workspace_id` 与不一致的 `cwd` → 拒绝。
+// TestCreateSessionWorkspaceConflict 同时给出 `workspace_id` 与不一致的 `cwd` → 拒绝。
 //
 // 拒绝而不猜：这一处猜错的后果是会话跑在用户没打算用的目录里——而那个目录正是原生权限
 // workspace-write 的沙箱边界。一致时（含 /tmp 与 /private/tmp 这类写法差异）必须放行。
-func TestCreateConversationWorkspaceConflict(t *testing.T) {
+func TestCreateSessionWorkspaceConflict(t *testing.T) {
 	r := newConvRig(t)
 	dirA := t.TempDir()
 	dirB := t.TempDir()
@@ -159,7 +159,7 @@ func TestCreateConversationWorkspaceConflict(t *testing.T) {
 	}
 
 	// 不一致 → workspace_conflict（40001），且**零副作用**（不建会话、不写库）。
-	_, err = r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	_, err = r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "a1", WorkspaceID: wsA.ID, Cwd: dirB,
 	})
 	if err == nil {
@@ -168,13 +168,13 @@ func TestCreateConversationWorkspaceConflict(t *testing.T) {
 	if c := gerrCode(t, err); c != code.InvalidRequest {
 		t.Fatalf("冲突应为 40001，实际 %d: %v", c, err)
 	}
-	list, _ := r.svc.ListConversations(false, "", "")
+	list, _ := r.svc.ListSessions(false, "", "")
 	if len(list) != 0 {
 		t.Fatalf("冲突请求不该建出会话: %+v", list)
 	}
 
 	// 一致 → 放行（两条来源指向同一目录时不该被拦）。
-	res, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "a1", WorkspaceID: wsA.ID, Cwd: dirA,
 	})
 	if err != nil {
@@ -185,10 +185,10 @@ func TestCreateConversationWorkspaceConflict(t *testing.T) {
 	}
 }
 
-// TestListConversationsByWorkspaceFilter 归属过滤把历史会话算进默认工作空间那一组。
+// TestListSessionsByWorkspaceFilter 归属过滤把历史会话算进默认工作空间那一组。
 //
 // 这条是"默认工作空间显示 N 个会话、点进去却是空的"这类不一致的唯一防线。
-func TestListConversationsByWorkspaceFilter(t *testing.T) {
+func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	r := newConvRig(t)
 	def, _, _ := r.svc.DefaultWorkspace()
 	dir := t.TempDir()
@@ -198,18 +198,18 @@ func TestListConversationsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 一条显式归属普通工作空间、一条归默认、一条**历史行**（workspace_id 留空）。
-	seedStoreConversation(t, r.st, "c-proj", dir, ws.ID)
-	seedStoreConversation(t, r.st, "c-default", def.Path, def.ID)
-	seedStoreConversation(t, r.st, "c-legacy", def.Path, "")
+	seedStoreSession(t, r.st, "c-proj", dir, ws.ID)
+	seedStoreSession(t, r.st, "c-default", def.Path, def.ID)
+	seedStoreSession(t, r.st, "c-legacy", def.Path, "")
 	// 内存镜像也要有（列表读的是内存镜像）。
 	// 内存镜像按**库里那一行的原样**登记：`c-legacy` 的归属刻意留空（v14 迁移留下的形态，
 	// 读面把它解析成默认工作空间）；真实系统里不会有"库里空、内存里有"的分叉。
-	r.svc.registerConversation(&ConversationRec{ID: "c-proj", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
-	r.svc.registerConversation(&ConversationRec{ID: "c-default", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
-	r.svc.registerConversation(&ConversationRec{ID: "c-legacy", AgentID: "a1", Cwd: def.Path})
+	r.svc.registerSession(&SessionRec{ID: "c-proj", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-default", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-legacy", AgentID: "a1", Cwd: def.Path})
 
 	// 按项目过滤 → 只有那一条。
-	proj, err := r.svc.ListConversations(false, "", ws.ID)
+	proj, err := r.svc.ListSessions(false, "", ws.ID)
 	if err != nil {
 		t.Fatalf("按项目过滤: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestListConversationsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 按默认工作空间过滤 → 显式归默认的 + 历史行都在。
-	dflt, err := r.svc.ListConversations(false, "", def.ID)
+	dflt, err := r.svc.ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestListConversationsByWorkspaceFilter(t *testing.T) {
 	}
 
 	// 无过滤 → 三条都在（参数为空 = 不过滤，与历史行为逐字相同）。
-	all, _ := r.svc.ListConversations(false, "", "")
+	all, _ := r.svc.ListSessions(false, "", "")
 	if len(all) != 3 {
 		t.Fatalf("无过滤应返回 3 条，实际 %d", len(all))
 	}
@@ -270,9 +270,9 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	// 刻意用 **规范化后**的路径登记（`mustEval`）：真实会话的 cwd 一律是
 	// `ValidateWorkspace` 规范化过的形态，而 `workspaceUsage` 按 cwd 聚合——
 	// 夹具里用未规范化的拼写会造出一个真实系统里不存在的形态（macOS 上 /var vs /private/var）。
-	r.svc.registerConversation(&ConversationRec{ID: "c-def", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
-	r.svc.registerConversation(&ConversationRec{ID: "c-reg", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
-	r.svc.registerConversation(&ConversationRec{ID: "c-loose", AgentID: "a1", Cwd: mustEval(t, looseDir)})
+	r.svc.registerSession(&SessionRec{ID: "c-def", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-reg", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-loose", AgentID: "a1", Cwd: mustEval(t, looseDir)})
 
 	recent, err := r.svc.RecentWorkspaces(10)
 	if err != nil {
@@ -313,11 +313,11 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 		t.Fatalf("登记: %v", err)
 	}
 
-	res, err := r.svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "a1", WorkspaceID: ws.ID,
 	})
 	if err != nil {
-		t.Fatalf("CreateConversation: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	if res.WorkspaceID != ws.ID {
 		t.Fatalf("前置不符: %+v", res)
@@ -333,7 +333,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// **立刻**按默认工作空间过滤：那条会话必须已经在这儿（内存镜像已同步）。
-	got, err := r.svc.ListConversations(false, "", def.ID)
+	got, err := r.svc.ListSessions(false, "", def.ID)
 	if err != nil {
 		t.Fatalf("按默认过滤: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	// 按被删的那个归属过滤 → 空（id 已不存在，不该再返回任何东西）。
-	if stale, _ := r.svc.ListConversations(false, "", ws.ID); len(stale) != 0 {
+	if stale, _ := r.svc.ListSessions(false, "", ws.ID); len(stale) != 0 {
 		t.Fatalf("已删登记不该再返回会话: %+v", stale)
 	}
 }

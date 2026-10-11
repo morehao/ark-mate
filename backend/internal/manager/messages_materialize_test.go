@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
@@ -23,7 +24,7 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-msg", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-msg", AgentID: "agent-stub"})
 
 	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第一问：关键词甲"})
 	svc.publish(BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
@@ -57,7 +58,7 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 		t.Fatalf("应 4 行: %+v", rows)
 	}
 	// 第一轮 assistant：同 msg_id=m1 的多条增量拼为一行，文本含两段、时间线含 thought/tool。
-	var a0, a1, u0 store.Message
+	var a0, a1, u0 model.MessageEntity
 	for _, r := range rows {
 		switch {
 		case r.Role == "user" && strings.Contains(r.Text, "第一问"):
@@ -93,17 +94,17 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 }
 
 // queryMessages 是 store 内部读（测试专用：messages 表全量）。
-func queryMessages(ctx context.Context, st *store.Store, conversationID string) ([]store.Message, error) {
-	rows, err := st.ListMessages(ctx, conversationID)
+func queryMessages(ctx context.Context, st *store.Store, sessionID string) ([]model.MessageEntity, error) {
+	rows, err := st.ListMessages(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-// TestSearchConversationsPrefersMessagesTable sqlite 模式：SearchConversations 正文命中走 messages 表
+// TestSearchSessionsPrefersMessagesTable sqlite 模式：SearchSessions 正文命中走 messages 表
 // （无 transcript 亦命中；片段为用户原文折叠预览）。
-func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
+func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
@@ -111,12 +112,12 @@ func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-s", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-s", AgentID: "agent-stub"})
 	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 mate 服务"})
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
 	svc.publish(BusTurnEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
 
-	hits, err := svc.SearchConversations(ctx, "部署", 5)
+	hits, err := svc.SearchSessions(ctx, "部署", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +128,7 @@ func TestSearchConversationsPrefersMessagesTable(t *testing.T) {
 		t.Fatalf("matches 应 ≥1: %+v", hits[0])
 	}
 	// 无关词不命中。
-	if h2, _ := svc.SearchConversations(ctx, "不存在词xyz", 5); len(h2) != 0 {
+	if h2, _ := svc.SearchSessions(ctx, "不存在词xyz", 5); len(h2) != 0 {
 		t.Fatalf("无关词不应命中: %+v", h2)
 	}
 }

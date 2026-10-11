@@ -1,4 +1,4 @@
-import type { ConversationSummary } from '@ark-mate/types'
+import type { SessionSummary } from '@ark-mate/types'
 
 // ——— 会话侧栏视图模型（P3 余留：列表分页 + active 提升 + 相对时间；纯函数，便于 Node 侧校验） ———
 
@@ -7,7 +7,7 @@ export const RAIL_PAGE = 40
 
 export interface RailPage {
   /** 本次渲染的会话（顺序沿用原列表：置顶/日期分组由调用方继续处理）。 */
-  visible: ConversationSummary[]
+  visible: SessionSummary[]
   /** 尚未渲染的条数（0 = 已全部展开）。 */
   remaining: number
   /**
@@ -21,8 +21,8 @@ export interface RailPage {
  * 按 `limit` 截断会话列表；若当前会话（activeId）不在页内则额外纳入并置页首，
  * 保证「打开任意会话时它在侧栏始终可见」（深链/搜索跳转/长列表）。
  */
-export function pageConversations(
-  all: ConversationSummary[],
+export function pageSessions(
+  all: SessionSummary[],
   limit: number = RAIL_PAGE,
   activeId?: string | null,
 ): RailPage {
@@ -46,7 +46,7 @@ export const GROUP_IDLE_LIMIT = 5
 
 export interface GroupQuota {
   /** 本次渲染的会话（原顺序不变：置顶在前、其余按时间，由调用方保证）。 */
-  rows: ConversationSummary[]
+  rows: SessionSummary[]
   /** 被收起的条数（0 = 全都在）。 */
   hidden: number
 }
@@ -56,19 +56,19 @@ export interface GroupQuota {
  *   - **运行中**的会话（`in_progress`）：把它藏起来等于用户看不到自己刚发起的活儿，
  *     而它恰恰是最需要被看见的那一条；
  *   - **当前打开的**会话（`activeId`）：侧栏必须始终能指出"你在哪"。配额一满就把它
- *     挤出列表的话，用户会以为会话丢了（与 P3 `pageConversations` 的提升同一条纪律）。
+ *     挤出列表的话，用户会以为会话丢了（与 P3 `pageSessions` 的提升同一条纪律）。
  *
  * 折叠/展开的状态由调用方持有（它是浏览器本地的视图偏好，不进 db）；本函数只回答
  * "这一页渲染哪些、还剩几条"。`limit <= 0` = 不设配额（调用方要全量时传 0）。
  */
 export function quotaSessions(
-  all: ConversationSummary[],
+  all: SessionSummary[],
   limit: number = GROUP_IDLE_LIMIT,
   activeId?: string | null,
 ): GroupQuota {
   if (limit <= 0) return { rows: all, hidden: 0 }
   let idle = 0
-  const rows: ConversationSummary[] = []
+  const rows: SessionSummary[] = []
   for (const c of all) {
     if (c.status === 'in_progress' || c.id === activeId) {
       rows.push(c)

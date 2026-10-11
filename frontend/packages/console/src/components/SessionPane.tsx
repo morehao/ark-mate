@@ -12,14 +12,14 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { tokens } from '@ark-mate/ui'
-import { Dot, conversationStatusMeta } from '@ark-mate/ui'
+import { Dot, sessionStatusMeta } from '@ark-mate/ui'
 import { automationIDFromOrigin, isAutomationOrigin } from '../console/automationView'
 import type { MenuProps } from 'antd'
-import type { ConversationSearchHit, ConversationSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
-import { conversationSearch, exportConversations, messageSearch, toErrorMessage } from '@ark-mate/api'
+import type { SessionSearchHit, SessionSummary, MessageSearchHit, MessageSearchResp } from '@ark-mate/types'
+import { sessionSearch, exportSessions, messageSearch, toErrorMessage } from '@ark-mate/api'
 import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
-import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
+import { RAIL_PAGE, pageSessions, relTime } from '../console/railView'
 import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
 import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
@@ -38,14 +38,14 @@ function setPreferredWorkspace(id: string): void {
 }
 
 /** 置顶组 + 按创建日分组的未置顶会话（轻量时间线管理面）。 */
-function groupConversations(
-  all: ConversationSummary[],
-): Array<{ label: string; items: ConversationSummary[]; pinned: boolean }> {
-  const groups: Array<{ label: string; items: ConversationSummary[]; pinned: boolean }> = []
+function groupSessions(
+  all: SessionSummary[],
+): Array<{ label: string; items: SessionSummary[]; pinned: boolean }> {
+  const groups: Array<{ label: string; items: SessionSummary[]; pinned: boolean }> = []
   const pinned = all.filter((s) => s.pinned)
   if (pinned.length > 0) groups.push({ label: '置顶', items: pinned, pinned: true })
   const rest = all.filter((s) => !s.pinned)
-  const byDay = new Map<string, ConversationSummary[]>()
+  const byDay = new Map<string, SessionSummary[]>()
   for (const s of rest) {
     const label = dayLabel(s.created_at)
     const arr = byDay.get(label)
@@ -72,17 +72,17 @@ function dayLabel(iso: string): string {
  *
  * 外壳（宽度 / 抽屉位移 / `.fg-rail` 类）已上移给 NavRail——本组件只负责"内容体"，
  * 由 NavRail 提供左栏容器与窄屏抽屉态。 */
-export function ConversationPane({ onCreate }: Props) {
+export function SessionPane({ onCreate }: Props) {
   const navigate = useNavigate()
-  const conversations = useMate((s) => s.conversations)
+  const sessions = useMate((s) => s.sessions)
   const agents = useMate((s) => s.agents)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const railMode = useMate((s) => s.railMode)
   const setDrawer = useMate((s) => s.setDrawer)
   const togglePin = useMate((s) => s.togglePin)
-  const archiveConversation = useMate((s) => s.archiveConversation)
-  const renameConversation = useMate((s) => s.renameConversation)
+  const archiveSession = useMate((s) => s.archiveSession)
+  const renameSession = useMate((s) => s.renameSession)
   const setRailMode = useMate((s) => s.setRailMode)
   const jumpToAnchor = useMate((s) => s.jumpToAnchor)
   const showToast = useMate((s) => s.showToast)
@@ -95,7 +95,7 @@ export function ConversationPane({ onCreate }: Props) {
   // 搜索框在区头里是**折叠**的（v14.2，对齐 dsh）：没有它这条列表上方就少一行常驻控件。
   const [searchQ, setSearchQ] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [hits, setHits] = useState<ConversationSearchHit[] | null>(null) // null = 未搜索
+  const [hits, setHits] = useState<SessionSearchHit[] | null>(null) // null = 未搜索
   const [msgHits, setMsgHits] = useState<MessageSearchResp | null>(null) // M3 ②：消息级命中（带锚点）
   const [searchBusy, setSearchBusy] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
@@ -112,7 +112,7 @@ export function ConversationPane({ onCreate }: Props) {
     const t = setTimeout(() => {
       setSearchBusy(true)
       // 会话命中（标题/正文聚合）与消息命中（带 seq 锚点）并发；任一失败都退化为空结果。
-      Promise.allSettled([conversationSearch(q), messageSearch(q)])
+      Promise.allSettled([sessionSearch(q), messageSearch(q)])
         .then(([conv, msgs]) => {
           if (!live) return
           setHits(conv.status === 'fulfilled' ? conv.value : [])
@@ -139,7 +139,7 @@ export function ConversationPane({ onCreate }: Props) {
   // 用户没法判断哪个才是真的还有。切视图时复位。
   const [shown, setShown] = useState(RAIL_PAGE)
   useEffect(() => setShown(RAIL_PAGE), [railMode])
-  const railPage = pageConversations(conversations, shown, activeId)
+  const railPage = pageSessions(sessions, shown, activeId)
 
   // 分组模式（v14）：`workspace` = 按工作空间分组（默认）；`timeline` = 按创建日的旧视图。
   //
@@ -172,15 +172,15 @@ export function ConversationPane({ onCreate }: Props) {
   // 分组视图里没被任何登记覆盖的会话（登记被删/归属指向已不存在的行）：兜一个「其他」组，
   // 而不是让它们从列表里凭空消失。分组视图不分页（见上面的说明），所以这里看的是**全量**。
   const ungrouped = grouped
-    ? conversations.filter((c) => {
+    ? sessions.filter((c) => {
         const id = c.workspace_id ?? ''
         return !(workspaces?.items ?? []).some((w) => w.id === id)
       })
     : []
 
-  const openConversation = (id: string) => {
+  const openSession = (id: string) => {
     setDrawer(false)
-    navigate(`/conversations/${id}`)
+    navigate(`/sessions/${id}`)
   }
 
   const submitRename = () => {
@@ -188,16 +188,16 @@ export function ConversationPane({ onCreate }: Props) {
     const t = draft.trim()
     const target = renaming
     setRenaming(null)
-    if (t && t !== target.init) void renameConversation(target.id, t)
+    if (t && t !== target.init) void renameSession(target.id, t)
   }
 
-  const openHit = (h: ConversationSearchHit) => {
+  const openHit = (h: SessionSearchHit) => {
     setSearchQ('')
     // 命中即收起搜索：区头回到"标题 + 动作"，浏览模式随之恢复（对齐 dsh：选择结果会清空并收起搜索）。
     setSearchOpen(false)
     setHits(null)
     setMsgHits(null)
-    openConversation(h.id)
+    openSession(h.id)
   }
 
   // 消息命中点击：跳转到该会话并带上 seq 锚点（ChatPage 负责滚动定位与高亮）。
@@ -207,15 +207,15 @@ export function ConversationPane({ onCreate }: Props) {
     setHits(null)
     setMsgHits(null)
     setDrawer(false)
-    jumpToAnchor(h.conversation_id, h.seq)
-    navigate(`/conversations/${h.conversation_id}`)
+    jumpToAnchor(h.session_id, h.seq)
+    navigate(`/sessions/${h.session_id}`)
   }
 
   // 单会话导出（行内菜单）：markdown 单文件下载。
   const exportOne = async (id: string, title: string) => {
     setExportBusy(true)
     try {
-      const resp = await exportConversations([id], 'markdown')
+      const resp = await exportSessions([id], 'markdown')
       const f = resp.files[0]
       if (!f) {
         showToast('该会话暂无可导出内容')
@@ -241,10 +241,10 @@ export function ConversationPane({ onCreate }: Props) {
   /** 消息命中行：角色徽标 + 片段 + 所属会话（点击跳转并定位到该条消息）。 */
   const renderMessageHit = (h: MessageSearchHit) => (
     <button
-      key={`${h.conversation_id}#${h.seq}`}
+      key={`${h.session_id}#${h.seq}`}
       type="button"
       onClick={() => openMessageHit(h)}
-      title={`${h.title || h.conversation_id} · seq ${h.seq}`}
+      title={`${h.title || h.session_id} · seq ${h.seq}`}
       style={{
         display: 'block',
         width: '100%',
@@ -281,7 +281,7 @@ export function ConversationPane({ onCreate }: Props) {
             color: tokens.textPlaceholder,
           }}
         >
-          {h.title || h.conversation_id}
+          {h.title || h.session_id}
         </span>
       </span>
       <span
@@ -301,7 +301,7 @@ export function ConversationPane({ onCreate }: Props) {
   )
 
   /** 搜索结果行：标题 + 命中片段 + Agent/归档/命中数。 */
-  const renderHit = (h: ConversationSearchHit) => (
+  const renderHit = (h: SessionSearchHit) => (
     <button
       key={h.id}
       type="button"
@@ -398,9 +398,9 @@ export function ConversationPane({ onCreate }: Props) {
     </button>
   )
 
-  const renderItem = (sm: ConversationSummary) => {
+  const renderItem = (sm: SessionSummary) => {
     const view = views[sm.id]
-    const meta = conversationStatusMeta(sm.status)
+    const meta = sessionStatusMeta(sm.status)
     const running = sm.status === 'in_progress'
     const on = sm.id === activeId
 
@@ -428,8 +428,8 @@ export function ConversationPane({ onCreate }: Props) {
     ]
     const onMenu: MenuProps['onClick'] = ({ key }) => {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
-      else if (key === 'archive') void archiveConversation(sm.id, true)
-      else if (key === 'restore') void archiveConversation(sm.id, false)
+      else if (key === 'archive') void archiveSession(sm.id, true)
+      else if (key === 'restore') void archiveSession(sm.id, false)
       else if (key === 'export') void exportOne(sm.id, sm.title || titleFor(sm, view, agents))
     }
 
@@ -453,7 +453,7 @@ export function ConversationPane({ onCreate }: Props) {
           type="button"
           role="listitem"
           disabled={busy && !on}
-          onClick={() => openConversation(sm.id)}
+          onClick={() => openSession(sm.id)}
           style={{
             flex: 1,
             minWidth: 0,
@@ -651,7 +651,7 @@ export function ConversationPane({ onCreate }: Props) {
               )}
             </>
           )
-        ) : conversations.length === 0 ? (
+        ) : sessions.length === 0 ? (
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
             {archivedView
               ? '暂无归档会话。点会话行的 ⋯ →「归档」即可把会话移到这里（数据保留，可恢复）。'
@@ -686,7 +686,7 @@ export function ConversationPane({ onCreate }: Props) {
           </>
         ) : (
           <>
-            {groupConversations(railPage.visible).map((g) => (
+            {groupSessions(railPage.visible).map((g) => (
             <div key={g.label} role="group" aria-label={g.label}>
               <div
                 style={{

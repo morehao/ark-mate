@@ -1,4 +1,4 @@
-package dtoconversation
+package dtosession
 
 // MemoryRevokeReq 撤销权限记忆请求体（title+kind 均空 = 一键撤销全部）。
 type MemoryRevokeReq struct {
@@ -6,15 +6,15 @@ type MemoryRevokeReq struct {
 	Kind  string `json:"kind"`
 }
 
-// ConversationPatch 会话元数据子集更新（nil/零值不更新）。
-type ConversationPatch struct {
+// SessionPatch 会话元数据子集更新（nil/零值不更新）。
+type SessionPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
 	Model    *string `json:"model"` // 会话级模型（opencode 仅创建时可选；dsh 会话内即时）
 }
 
-// PromptReq 追加 prompt 请求体（POST /conversations/:id/prompt）。
+// PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。
 type PromptReq struct {
 	Prompt string `json:"prompt" binding:"required"`
 	// Delivery 投递模式（可选）：空/reject = 忙时报 turn_in_progress（历史行为）；
@@ -23,8 +23,8 @@ type PromptReq struct {
 	Delivery string `json:"delivery,omitempty"`
 }
 
-// ConversationCreateReq 新建会话请求体。
-type ConversationCreateReq struct {
+// SessionCreateReq 新建会话请求体。
+type SessionCreateReq struct {
 	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
 	// Cwd 会话工作空间（绝对路径）。空 = 落在**默认工作空间**（响应 workspace_temporary=true）；
@@ -81,7 +81,7 @@ type CapabilitiesReq struct {
 	Mcps   *[]string `json:"mcps,omitempty"`
 }
 
-// HistoryQuery 会话历史分页参数（GET /conversations/:id/history）。
+// HistoryQuery 会话历史分页参数（GET /sessions/:id/history）。
 // After/Before 互斥：After 向后（seq > after，升序）；Before 向前（seq < before，仍升序返回，
 // 用于「加载更早」）。Limit 1..1000（0 → 默认 200）。
 type HistoryQuery struct {

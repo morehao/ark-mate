@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/morehao/ark-mate/internal/version"
 )
 
 // TestSystemRoutes 系统面（M1-7）：`/meta` 与 `/capabilities` 挂在真实装配路径上可取。
@@ -41,8 +43,10 @@ func TestSystemRoutes(t *testing.T) {
 	}
 
 	meta := getData("/v1/mate/meta", nil)
-	if meta["apiContract"] != "v1" {
-		t.Errorf("/meta 的 apiContract = %v，期望 v1", meta["apiContract"])
+	// 契约代数取 `version.APIContract` 的**当前值**（v15 起是 v2）：写死字面量会让这条断言
+	// 在每次提升契约时都要人肉同步，而它真正要守的是"/meta 把契约代数如实外露了"。
+	if meta["apiContract"] != version.APIContract {
+		t.Errorf("/meta 的 apiContract = %v，期望 %v", meta["apiContract"], version.APIContract)
 	}
 	if cv, _ := meta["coreVersion"].(string); cv == "" {
 		t.Error("/meta 的 coreVersion 不该为空（未注入 ldflags 时至少是 dev）")

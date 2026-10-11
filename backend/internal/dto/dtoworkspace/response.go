@@ -66,8 +66,8 @@ type WorkspaceRecentResp struct {
 	Name string `json:"name"` // 末级目录名（展示用）
 	// LastUsedAt 最近一次使用时间（该工作空间下最新会话的 updated_at）。
 	LastUsedAt string `json:"last_used_at"`
-	// Conversations 该工作空间下的会话数（含归档；不含代建的临时空间自身）。
-	Conversations int `json:"conversations"`
+	// Sessions 该工作空间下的会话数（含归档；不含代建的临时空间自身）。
+	Sessions int `json:"sessions"`
 }
 
 // WorkspaceFilesResp 目录内容清单（只读的"看资料"面，与浏览面分工见 manager.ListWorkspaceFiles）。
@@ -158,8 +158,8 @@ type WorkspaceResp struct {
 	// **每次读现算，不缓存**：外部进程随时可能删/移目录，缓存只会让界面显示一个过期的好状态。
 	// 它不是 ok 时这一行**仍然返回**——登记不会因为目录消失就凭空不见，用户得能看见并清理它。
 	DirStatus string `json:"dir_status"`
-	// Conversations 该工作空间名下的会话数（含归档）。
-	Conversations int `json:"conversations"`
+	// Sessions 该工作空间名下的会话数（含归档）。
+	Sessions int `json:"sessions"`
 	// LastUsedAt 该工作空间下最新会话的 updated_at（RFC3339；空 = 从未用过，不是 zero time）。
 	LastUsedAt string `json:"last_used_at,omitempty"`
 	// CreatedAt / UpdatedAt 登记时刻与最后一次改写时刻（RFC3339）。

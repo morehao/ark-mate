@@ -14,13 +14,13 @@ import (
 // 而言语义是 404：再改参数也不会有结果，得先把资源建好。故单独提档到 NotFound，
 // 让前端能按 40401 直接引导"去注册 agent / 去建 runtime"，而不是当成参数错误。
 var notFoundCodes = map[string]bool{
-	"agent_not_found":        true,
-	"conversation_not_found": true,
-	"runtime_not_found":      true,
-	"mcp_not_found":          true,
-	"skill_not_found":        true,
-	"provider_not_found":     true,
-	"automation_not_found":   true,
+	"agent_not_found":      true,
+	"session_not_found":    true,
+	"runtime_not_found":    true,
+	"mcp_not_found":        true,
+	"skill_not_found":      true,
+	"provider_not_found":   true,
+	"automation_not_found": true,
 	// 设置 · 模型（v11）：PATCH/DELETE 打到不存在的模型条目——与"打错 id 的新建"是两件事，
 	// 必须能被前端分辨（刷新列表 vs 改参数）。
 	"model_not_found": true,

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,13 +87,10 @@ func TestMigrateV13(t *testing.T) {
 
 	beforeProv, beforeModels := countRows(t, s, "providers"), countRows(t, s, "models")
 
-	// ④ v13。
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("v12 → v13 升级失败: %v", err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("重复迁移应幂等: %v", err)
-	}
+	// ④ v13。上界钉在 v13：v15 会重铸 `models.id`，而本用例的夹具是按 id 对账的
+	// （v15 自身的重铸断言在 TestMigrateV15RecastsModelIDs 里）。
+	migrateUpTo(t, s, 13)
+	migrateUpTo(t, s, 13)
 
 	// ⑤ 行数与内容：**逐行对账**（列化不该改变任何平台字段）。
 	if after := countRows(t, s, "providers"); after != beforeProv {
@@ -209,14 +205,14 @@ func TestMigrateV13(t *testing.T) {
 
 	// ⑧ A9：备份路径同时列 v13 与 v12，且**最新的在最前**。
 	//
-	// 断言的是不变量（"新的在前"）而不是某个版本的序位：v14 落地后最新的备份是 `.bak-v14-`，
-	// 把这里钉死成 v13 只会让每次追加迁移都改一遍测试，而真正要挡的（顺序反了）照样能挡。
+	// 本用例只跑到 v13（v15 会重铸 models.id），所以"最新"就是 v13——钉住它而不是
+	// `latestSchemaVersion()`：后者会随每次追加迁移漂移，把断言变成一句永远为真的话。
 	paths := s.MigrationBackupPaths()
 	if len(paths) < 2 {
 		t.Fatalf("应同时列出 v13 与 v12 的备份: %v", paths)
 	}
-	if !strings.Contains(paths[0], fmt.Sprintf(".bak-v%d-", latestSchemaVersion())) {
-		t.Fatalf("最新的备份应在最前（v%d 优先）: %v", latestSchemaVersion(), paths)
+	if !strings.Contains(paths[0], ".bak-v13-") {
+		t.Fatalf("最新的备份应在最前（v13 优先）: %v", paths)
 	}
 	foundOld := false
 	for _, p := range paths {

@@ -76,12 +76,12 @@ func TestPermissionMemoryBothSides(t *testing.T) {
 	}
 
 	// 整会话撤销（一键）清空。
-	pm.ForgetConversation("s1")
+	pm.ForgetSession("s1")
 	if got := len(pm.List("s1")); got != 0 {
-		t.Fatalf("ForgetConversation 后应为空，got %d", got)
+		t.Fatalf("ForgetSession 后应为空，got %d", got)
 	}
 	if _, ok := pm.AutoDecision("s1", req(other)); ok {
-		t.Fatal("ForgetConversation 后不应命中")
+		t.Fatal("ForgetSession 后不应命中")
 	}
 }
 
@@ -98,7 +98,7 @@ func TestRegisterAndWaitRemembersAlways(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForConversation("s1")
+		calls := pm.pendingForSession("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break
@@ -133,7 +133,7 @@ func TestRegisterAndWaitRemembersReject(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForConversation("s1")
+		calls := pm.pendingForSession("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break
@@ -171,7 +171,7 @@ func TestResolveRejectOnce(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	var callID string
 	for time.Now().Before(deadline) {
-		calls := pm.pendingForConversation("s1")
+		calls := pm.pendingForSession("s1")
 		if len(calls) == 1 {
 			callID = calls[0].callID
 			break
@@ -204,8 +204,8 @@ func TestPermissionMemoryListOrderIsDeterministic(t *testing.T) {
 	pm := NewPermissionManager(DefaultPermissionTimeout)
 	same := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 	pm.LoadMemories([]MemoryItem{
-		{conversationID: "s1", Title: "先写的", Kind: "execute", Decision: memDecisionAllow, Since: same},
-		{conversationID: "s1", Title: "后写的", Kind: "write", Decision: memDecisionReject, Since: same},
+		{sessionID: "s1", Title: "先写的", Kind: "execute", Decision: memDecisionAllow, Since: same},
+		{sessionID: "s1", Title: "后写的", Kind: "write", Decision: memDecisionReject, Since: same},
 	})
 
 	for i := 0; i < 50; i++ { // 重复取：顺序一旦依赖 map 迭代，这里会随机失败

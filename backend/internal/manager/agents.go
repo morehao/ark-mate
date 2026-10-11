@@ -149,7 +149,7 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 	// 临界区里完成：拆成两段就会留出"非种子 agent 全没了、行还没铺上"的窗口，读者（网关每次
 	// 调用前都重装、核心侧并发请求）会看到"agent 不存在"——而库里的行一个字都没改。
 	// M7-5 的并发用例就是这么撞上的。
-	var rows model.AgentDefinitionList
+	var rows model.AgentEntityList
 	if s.st != nil {
 		r, err := s.st.ListAgentDefinitions(ctx)
 		if err != nil {
@@ -401,7 +401,7 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDe
 		s.mu.Unlock()
 		return nil, acl.NewError(acl.ClassRequest, "agent_not_found", fmt.Sprintf("未知 agent %q", id), nil)
 	}
-	affected := s.conversationCountLocked(id)
+	affected := s.sessionCountLocked(id)
 	s.mu.Unlock()
 	// 先摘活跃会话（有在途 turn 则整体拒绝，此时定义未删、文件未动）。
 	detached := 0
@@ -430,10 +430,10 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDe
 		s.clearDefaultAgent(ctx)
 		glog.Infow(ctx, "agents: 当前 Agent 被删除，回落内置默认", "deleted", id)
 	}
-	glog.Infow(ctx, "agent deleted", "agent", id, "affected_conversations", affected,
-		"detached_conversations", detached, "was_default", wasDefault)
-	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedConversations: affected,
-		DetachedConversations: detached, WasDefault: wasDefault}, nil
+	glog.Infow(ctx, "agent deleted", "agent", id, "affected_sessions", affected,
+		"detached_sessions", detached, "was_default", wasDefault)
+	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedSessions: affected,
+		DetachedSessions: detached, WasDefault: wasDefault}, nil
 }
 
 // StartAgent 启动 agent 对应 runtime 连接（校验可启动：真实 Dial 成功才置 running）。
@@ -491,8 +491,8 @@ func (s *Service) agentRespLocked(id string) *dtoagent.AgentResp {
 	return &dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 		IsDefault: a.ID == s.currentDefaultLocked(), Seed: seedAgent(a.ID),
 		Mcps: a.Mcps, PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
-		ConversationCount: s.conversationCountLocked(a.ID),
-		DefaultModel:      derivedDefaultModels([]string{runtime.SelectedRuntime()}, defaults)}
+		SessionCount: s.sessionCountLocked(a.ID),
+		DefaultModel: derivedDefaultModels([]string{runtime.SelectedRuntime()}, defaults)}
 }
 
 // rejectRuntimeSelection 显式拒绝 agent 写面里的 `runtimes` / `routing_policy`。

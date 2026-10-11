@@ -480,7 +480,7 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 // `planMcpInjection`（唯一实现，指纹也用它——两处各写一遍会出现"指纹说含 X、注入里没有 X"）。
 //
 // `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
-// `conversations.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
+// `sessions.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
 // 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
 func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
 	plan := s.planMcpInjection(agent, runtimeID, sel)

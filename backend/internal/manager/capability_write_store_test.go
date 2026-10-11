@@ -388,7 +388,7 @@ func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 }
 
 // mustRevisions 读某条能力的变更记录（按 seq 升序）。
-func mustRevisions(t *testing.T, r *rig, kind, id string) model.CapabilityRevisionList {
+func mustRevisions(t *testing.T, r *rig, kind, id string) model.CapabilityRevisionEntityList {
 	t.Helper()
 	revs, err := r.St.ListCapabilityRevisions(context.Background(), kind, id)
 	if err != nil {

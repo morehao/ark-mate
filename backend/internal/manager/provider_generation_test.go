@@ -11,7 +11,7 @@ import (
 //
 // 设计里 A2 的原文是"建会话 → 发一轮 → PATCH 改 provider `type`（改变注入变量名）→ 再发一轮；
 // 断言新连接的 `connKey` 变化、旧代际被回收"。这条走 `genRig` 的**真实入口**
-// （`startConversationOn` / `acquireConversation`，也就是 Prompt 与排队投递走的那条路），
+// （`startSessionOn` / `acquireSession`，也就是 Prompt 与排队投递走的那条路），
 // 断言的是**可观察事实**：句柄换了、连接换了、旧代际被回收、注入真的按新类型走。
 //
 // 为什么不满足于"判定函数返回了 switch"：判定再对，句柄没换也等于没迁（那正是这条用例存在的理由，
@@ -51,7 +51,7 @@ func TestProviderKeyChangeSwitchesGenerationNextTurn(t *testing.T) {
 	if resp.Effect == nil || resp.Effect.Channel != "dial_env" || resp.Effect.Effect != "next_turn" {
 		t.Fatalf("生效面回执应为 dial_env/next_turn: %+v", resp.Effect)
 	}
-	if resp.Effect.AffectedConversations < 1 {
+	if resp.Effect.AffectedSessions < 1 {
 		t.Fatalf("应有会话受这条改动影响: %+v", resp.Effect)
 	}
 

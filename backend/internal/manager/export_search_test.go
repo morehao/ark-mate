@@ -12,24 +12,26 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/gerror"
 )
 
-// seedConversation 落一个会话 + 若干事件（含 messages 物化行）。
-func seedSearchConversation(t *testing.T, svc *Service, st *store.Store, id, title string, texts ...[2]string) {
+// seedSession 落一个会话 + 若干事件（含 messages 物化行）。
+func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title string, texts ...[2]string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := st.UpsertConversation(ctx, store.Conversation{
+	if err := st.UpsertSession(ctx, model.SessionEntity{
 		ID: id, AgentID: "a1", Title: title, Status: "completed", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+		t.Fatalf("UpsertSession: %v", err)
 	}
-	svc.registerConversation(&ConversationRec{ID: id, AgentID: "a1", Title: title, Status: "completed",
+	svc.registerSession(&SessionRec{ID: id, AgentID: "a1", Title: title, Status: "completed",
 		CreatedAt: now, UpdatedAt: now})
-	var msgs []store.Message
+	var msgs []model.MessageEntity
 	for i, pair := range texts {
 		role, text := pair[0], pair[1]
 		seq, err := st.AppendEvent(ctx, id, BusUserMessage, map[string]any{"text": text})
@@ -37,7 +39,8 @@ func seedSearchConversation(t *testing.T, svc *Service, st *store.Store, id, tit
 			t.Fatalf("AppendEvent: %v", err)
 		}
 		// 每行独立 run_id：CreateMessages 按 run_id 先删后插（同一 run 会被覆盖）。
-		msgs = append(msgs, store.Message{ConversationID: id, RunID: fmt.Sprintf("run-%s-%d", id, i), Role: role,
+		msgs = append(msgs, model.MessageEntity{ID: objid.New(objid.Message), SessionID: id,
+			RunID: fmt.Sprintf("run-%s-%d", id, i), Role: role,
 			Text: text, SeqLo: seq, SeqHi: seq, CreatedAt: now.Add(time.Duration(i) * time.Second)})
 	}
 	if err := st.CreateMessages(ctx, msgs); err != nil {
@@ -48,10 +51,10 @@ func seedSearchConversation(t *testing.T, svc *Service, st *store.Store, id, tit
 func TestSearchMessagesSQLite(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
-	seedSearchConversation(t, svc, st, "c-1", "部署排查",
+	seedSearchSession(t, svc, st, "c-1", "部署排查",
 		[2]string{"user", "网关 502 怎么排查"},
 		[2]string{"assistant", "先看 upstream 健康检查与超时配置"})
-	seedSearchConversation(t, svc, st, "c-2", "无关会话",
+	seedSearchSession(t, svc, st, "c-2", "无关会话",
 		[2]string{"user", "今天天气不错"})
 
 	resp, err := svc.SearchMessages(ctx, "502", 10)
@@ -62,7 +65,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 		t.Fatalf("命中不符: %+v", resp)
 	}
 	h := resp.Hits[0]
-	if h.ConversationID != "c-1" || h.Title != "部署排查" || h.Role != "user" || h.Seq <= 0 {
+	if h.SessionID != "c-1" || h.Title != "部署排查" || h.Role != "user" || h.Seq <= 0 {
 		t.Fatalf("命中字段不符: %+v", h)
 	}
 	if !strings.Contains(h.Snippet, "502") {
@@ -79,7 +82,7 @@ func TestSearchMessagesSQLite(t *testing.T) {
 	}
 
 	// 大小写不敏感 + limit 截断语义。
-	seedSearchConversation(t, svc, st, "c-3", "大写",
+	seedSearchSession(t, svc, st, "c-3", "大写",
 		[2]string{"user", "UPSTREAM 再问一次"})
 	resp3, err := svc.SearchMessages(ctx, "upstream", 1)
 	if err != nil {
@@ -106,7 +109,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	svc.registerConversation(&ConversationRec{ID: "t-1", AgentID: "a1", Title: "内存会话"})
+	svc.registerSession(&SessionRec{ID: "t-1", AgentID: "a1", Title: "内存会话"})
 	svc.beginTranscript("t-1", "a1", "stub", "/tmp", false)
 	defer svc.closeTranscripts()
 	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
@@ -122,16 +125,16 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 		t.Fatalf("transcript 命中不符: %+v", resp)
 	}
 	for _, h := range resp.Hits {
-		if h.ConversationID != "t-1" || h.Seq <= 0 {
+		if h.SessionID != "t-1" || h.Seq <= 0 {
 			t.Fatalf("命中锚点缺失: %+v", h)
 		}
 	}
 }
 
-func TestExportConversations(t *testing.T) {
+func TestExportSessions(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
-	seedSearchConversation(t, svc, st, "e-1", "导出用例",
+	seedSearchSession(t, svc, st, "e-1", "导出用例",
 		[2]string{"user", "第一问"},
 		[2]string{"assistant", "第一答"})
 	// 追加思考/工具/终态事件（导出渲染覆盖）。
@@ -141,15 +144,15 @@ func TestExportConversations(t *testing.T) {
 	svc.publish(BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
 
 	for _, format := range []string{"markdown", "text", "json"} {
-		resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})
+		resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})
 		if err != nil {
-			t.Fatalf("ExportConversations(%s): %v", format, err)
+			t.Fatalf("ExportSessions(%s): %v", format, err)
 		}
 		if resp.Exported != 1 || len(resp.Files) != 1 {
 			t.Fatalf("%s 导出数不符: %+v", format, resp)
 		}
 		f := resp.Files[0]
-		if f.ConversationID != "e-1" || f.Format != format || f.Bytes != len(f.Content) || f.Events == 0 {
+		if f.SessionID != "e-1" || f.Format != format || f.Bytes != len(f.Content) || f.Events == 0 {
 			t.Fatalf("%s 文件元信息不符: %+v", format, f)
 		}
 		if !strings.HasPrefix(f.Filename, "导出用例-") || !strings.HasSuffix(f.Filename, map[string]string{"markdown": ".md", "text": ".txt", "json": ".json"}[format]) {
@@ -167,39 +170,39 @@ func TestExportConversations(t *testing.T) {
 			}
 		case "json":
 			var doc struct {
-				Conversation map[string]any `json:"conversation"`
-				Events       []any          `json:"events"`
+				Session map[string]any `json:"session"`
+				Events  []any          `json:"events"`
 			}
 			if err := json.Unmarshal([]byte(f.Content), &doc); err != nil {
 				t.Fatalf("json 正文不可解析: %v", err)
 			}
-			if doc.Conversation["id"] != "e-1" || len(doc.Events) == 0 {
+			if doc.Session["id"] != "e-1" || len(doc.Events) == 0 {
 				t.Fatalf("json 正文不符: %+v", doc)
 			}
 		}
 	}
 
 	// 批量：未知会话进 skipped（不静默丢弃），格式校验与上限校验明确报错。
-	resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
+	resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1", "no-such"}, Format: "text"})
 	if err != nil {
 		t.Fatalf("批量导出: %v", err)
 	}
 	if resp.Exported != 1 || len(resp.Skipped) != 1 || resp.Skipped[0] != "no-such" {
 		t.Fatalf("skipped 语义不符: %+v", resp)
 	}
-	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
+	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: "pdf"}); err == nil {
 		t.Fatal("非法格式应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "invalid_export_format") {
 		t.Fatalf("格式错误码不符: %v", err)
 	}
-	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
+	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{}}); err == nil {
 		t.Fatal("空 ids 应报错")
 	}
 	ids := make([]string, maxExportIDs+1)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("x-%d", i) // 互不相同：去重后仍超上限
 	}
-	if _, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: ids}); err == nil {
+	if _, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: ids}); err == nil {
 		t.Fatal("超上限应报错")
 	} else if ge, ok := err.(gerror.Error); !ok || ge.Code != 40001 || !strings.Contains(ge.Msg, "export_too_many_ids") {
 		t.Fatalf("上限错误码不符: %v", err)
@@ -211,9 +214,9 @@ func TestExportMarkdownFileWritable(t *testing.T) {
 	ctx := context.Background()
 	svc, st := newSearchRig(t)
 	// 标题含路径分隔符与控制字符 → 文件名应被净化。
-	seedSearchConversation(t, svc, st, "e-9", "a/b:c\n标题",
+	seedSearchSession(t, svc, st, "e-9", "a/b:c\n标题",
 		[2]string{"user", "内容"})
-	resp, err := svc.ExportConversations(ctx, dtoexport.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
+	resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-9"}, Format: "markdown"})
 	if err != nil {
 		t.Fatal(err)
 	}

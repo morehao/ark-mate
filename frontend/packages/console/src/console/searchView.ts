@@ -41,7 +41,7 @@ export function dedupeHits(hits: MessageSearchHit[]): MessageSearchHit[] {
   const seen = new Set<string>()
   const out: MessageSearchHit[] = []
   for (const h of hits) {
-    const key = `${h.conversation_id}#${h.seq}`
+    const key = `${h.session_id}#${h.seq}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(h)
@@ -50,9 +50,9 @@ export function dedupeHits(hits: MessageSearchHit[]): MessageSearchHit[] {
 }
 
 /** 导出文件下载名（服务端已给安全名；空则回退会话 id）。 */
-export function exportDownloadName(filename: string, conversationId: string, format: string): string {
+export function exportDownloadName(filename: string, sessionId: string, format: string): string {
   const name = (filename ?? '').trim()
   if (name) return name
   const ext = format === 'json' ? 'json' : format === 'text' ? 'txt' : 'md'
-  return `${conversationId.slice(0, 8)}.${ext}`
+  return `${sessionId.slice(0, 8)}.${ext}`
 }

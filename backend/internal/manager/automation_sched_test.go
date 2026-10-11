@@ -111,13 +111,13 @@ func (r *schedRig) file(t *testing.T, id string) map[string]any {
 	return readDef(t, filepath.Join(r.dir, id+".json"))
 }
 
-// conversationsOf 按 origin 收集会话（"某 automation 历次生效运行"的快速路径）。
-func (r *schedRig) conversationsOf(t *testing.T, id string) []*ConversationRec {
+// sessionsOf 按 origin 收集会话（"某 automation 历次生效运行"的快速路径）。
+func (r *schedRig) sessionsOf(t *testing.T, id string) []*SessionRec {
 	t.Helper()
 	r.svc.mu.Lock()
 	defer r.svc.mu.Unlock()
-	var out []*ConversationRec
-	for _, c := range r.svc.conversations {
+	var out []*SessionRec
+	for _, c := range r.svc.sessions {
 		if c.Origin == automationOrigin(id) {
 			out = append(out, c)
 		}
@@ -142,7 +142,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	now := time.Now()
 	r.svc.automationTick(context.Background(), now)
 
-	convs := r.conversationsOf(t, "daily")
+	convs := r.sessionsOf(t, "daily")
 	if len(convs) != 1 {
 		t.Fatalf("一次触发应恰好产生 1 个会话，got %d", len(convs))
 	}
@@ -150,15 +150,15 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if convs[0].Origin != "automation:daily" {
 		t.Fatalf("origin 不符: %q", convs[0].Origin)
 	}
-	// 端口形态也要带上它：面板读的是 `GET /conversations` 的信封，不是内存记录。
+	// 端口形态也要带上它：面板读的是 `GET /sessions` 的信封，不是内存记录。
 	// 这里断言"标记真的走完了到客户端的那一段路"，否则面板只能靠时间去猜哪条是自动跑的。
-	resp := toConversationResp(convs[0])
+	resp := toSessionResp(convs[0])
 	if resp.Origin != "automation:daily" {
-		t.Fatalf("ConversationResp 应回带 origin: %q", resp.Origin)
+		t.Fatalf("SessionResp 应回带 origin: %q", resp.Origin)
 	}
-	listed, err := r.svc.ListConversations(false, "", "")
+	listed, err := r.svc.ListSessions(false, "", "")
 	if err != nil {
-		t.Fatalf("ListConversations: %v", err)
+		t.Fatalf("ListSessions: %v", err)
 	}
 	marked := 0
 	for _, c := range listed {
@@ -181,8 +181,8 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if h := fired.UTC().Hour(); h != 1 {
 		t.Fatalf("last_fired_at 应为该 occurrence（01:00Z），got %s", fired.UTC())
 	}
-	if got["last_conversation_id"] != convs[0].ID {
-		t.Fatalf("last_conversation_id 不符: %v vs %s", got["last_conversation_id"], convs[0].ID)
+	if got["last_session_id"] != convs[0].ID {
+		t.Fatalf("last_session_id 不符: %v vs %s", got["last_session_id"], convs[0].ID)
 	}
 	if n, _ := got["consecutive_failures"].(float64); n != 0 {
 		t.Fatalf("成功触发应清零连续失败，got %v", got["consecutive_failures"])
@@ -193,7 +193,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	}
 	first := runs[0].(map[string]any)
 	if first["status"] != automation.RunClaimed || first["trigger"] != automation.TriggerRecovery ||
-		first["conversation_id"] != convs[0].ID {
+		first["session_id"] != convs[0].ID {
 		t.Fatalf("留痕不符: %+v", first)
 	}
 	// next_due 推到下一个 occurrence（次日的 09:00 上海 = 次日 01:00Z）
@@ -207,13 +207,13 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	}
 	// 第二次 tick：同一 occurrence 不再触发（**一次触发一个会话**）
 	r.svc.automationTick(context.Background(), now)
-	if n := len(r.conversationsOf(t, "daily")); n != 1 {
+	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("第二次 tick 不该再建会话，got %d", n)
 	}
 	if n := len(mustRuns(t, r.file(t, "daily"))); n != 1 {
 		t.Fatalf("第二次 tick 不该追加留痕，got %d", n)
 	}
-	// 事件：automation.run 带 automation_id/status/trigger/conversation_id
+	// 事件：automation.run 带 automation_id/status/trigger/session_id
 	var ev eventbus.Event
 	deadline := time.After(2 * time.Second)
 	for ev.Type == "" {
@@ -231,7 +231,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	}
 	p := ev.Payload.(map[string]any)
 	if p["automation_id"] != "daily" || p["status"] != automation.RunClaimed ||
-		p["trigger"] != automation.TriggerRecovery || p["conversation_id"] != convs[0].ID {
+		p["trigger"] != automation.TriggerRecovery || p["session_id"] != convs[0].ID {
 		t.Fatalf("事件载荷不符: %+v", p)
 	}
 }
@@ -259,7 +259,7 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	r.svc.automations["daily"].nextDue = time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 	r.svc.mu.Unlock()
 	r.svc.automationTick(context.Background(), now)
-	if n := len(r.conversationsOf(t, "daily")); n != 1 {
+	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("首次触发应建 1 个会话，got %d", n)
 	}
 	// 制造"下一次 occurrence 也到期了，但上一次会话仍在跑"：把内存游标拨回过去
@@ -273,7 +273,7 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 
 	r.svc.automationTick(context.Background(), now)
 
-	if n := len(r.conversationsOf(t, "daily")); n != 1 {
+	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("overlap 不该建第二个会话（不排队），got %d", n)
 	}
 	got := r.file(t, "daily")
@@ -313,7 +313,7 @@ func TestAutomationTickFailureAdvancesAndNeedsAttention(t *testing.T) {
 
 	r.svc.automationTick(context.Background(), time.Now())
 
-	if n := len(r.conversationsOf(t, "daily")); n != 0 {
+	if n := len(r.sessionsOf(t, "daily")); n != 0 {
 		t.Fatalf("触发失败不该建会话，got %d", n)
 	}
 	after := r.file(t, "daily")
@@ -370,7 +370,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	}
 	// 不补跑：tick 也不该建会话
 	r.svc.automationTick(context.Background(), time.Now())
-	if n := len(r.conversationsOf(t, "mig")); n != 0 {
+	if n := len(r.sessionsOf(t, "mig")); n != 0 {
 		t.Fatalf("过期的 once 不该被 tick 补跑，got %d 个会话", n)
 	}
 	// 幂等：状态已是 inactive → 再跑启动 pass 不追加留痕（否则每次重启都留一条）
@@ -440,19 +440,19 @@ func TestAutomationSchedulerStartStop(t *testing.T) {
 	r.svc.StartAutomationScheduler(20 * time.Millisecond)
 	// 等第一跳（宽限 2s 防慢机器）
 	deadline := time.Now().Add(2 * time.Second)
-	for len(r.conversationsOf(t, "daily")) == 0 && time.Now().Before(deadline) {
+	for len(r.sessionsOf(t, "daily")) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if n := len(r.conversationsOf(t, "daily")); n != 1 {
+	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("调度循环应触发一次，got %d", n)
 	}
 	r.svc.StopAutomationScheduler()
 	// 停止只保证"不再有新触发起步"：已在途的那一次会照常收尾，故基线取在收尾之后。
 	time.Sleep(100 * time.Millisecond)
-	n := len(r.conversationsOf(t, "daily"))
+	n := len(r.sessionsOf(t, "daily"))
 	runs := len(mustRuns(t, r.file(t, "daily")))
 	time.Sleep(150 * time.Millisecond) // 7 个 tick 的时间
-	if got := len(r.conversationsOf(t, "daily")); got != n {
+	if got := len(r.sessionsOf(t, "daily")); got != n {
 		t.Fatalf("停止后不该再触发：%d → %d", n, got)
 	}
 	if got := len(mustRuns(t, r.file(t, "daily"))); got != runs {
@@ -488,7 +488,7 @@ func TestAutomationConcurrentTriggersOnlyRunOnce(t *testing.T) {
 	go func() { defer wg.Done(); _, _ = r.svc.runAutomationNow(context.Background(), "daily") }()
 	wg.Wait()
 
-	if n := len(r.conversationsOf(t, "daily")); n != 1 {
+	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("并发触发应恰好产生 1 个会话，got %d", n)
 	}
 	runs := mustRuns(t, r.file(t, "daily"))
@@ -511,7 +511,7 @@ func TestAutomationConcurrentTriggersOnlyRunOnce(t *testing.T) {
 func TestAutomationReservedKeysRejected(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "")
-	for _, k := range []string{"last_fired_at", "last_conversation_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
+	for _, k := range []string{"last_fired_at", "last_session_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
 		if _, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{k: "x"}, false); errCode(err) != "invalid_param" {
 			t.Fatalf("写 %s 应被拒（40000），got %v", k, err)
 		}
@@ -588,7 +588,7 @@ func TestAutomationReloadAfterRestart(t *testing.T) {
 	}
 	// 重启后不重复触发同一 occurrence
 	r2.svc.automationTick(context.Background(), time.Now())
-	if n := len(r2.conversationsOf(t, "daily")); n != 0 {
+	if n := len(r2.sessionsOf(t, "daily")); n != 0 {
 		t.Fatalf("重启后不该重跑已认领的 occurrence，got %d", n)
 	}
 }
@@ -605,10 +605,10 @@ func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 		t.Fatalf("手动触发: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for r.svc.conversationRunning(out.conversationID) && time.Now().Before(deadline) {
+	for r.svc.sessionRunning(out.sessionID) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if r.svc.conversationRunning(out.conversationID) {
+	if r.svc.sessionRunning(out.sessionID) {
 		t.Fatalf("超过 max_run_duration 后会话应被取消（仍在 in_progress）")
 	}
 	// 桩进程回收由夹具的 t.Cleanup(orch.Close) 负责（先停编排器再关库）。

@@ -79,7 +79,7 @@ type Automation struct {
 	// "这个 occurrence 是否已经触发过"的唯一判据）。名字沿用"fired"而不是"claimed"：
 	// 定义文件里对用户而言它读作"上次是什么时候跑的"，而 skipped/overlap 也是"跑过一趟"。
 	LastFiredAt         *time.Time `json:"last_fired_at,omitempty"`
-	LastConversationID  string     `json:"last_conversation_id,omitempty"`
+	LastSessionID       string     `json:"last_session_id,omitempty"`
 	LastStatus          string     `json:"last_status,omitempty"` // completed | failed | interrupted | skipped
 	LastReason          string     `json:"last_reason,omitempty"` // 最近一次没跑成/失败的原因（人话）
 	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
@@ -98,7 +98,7 @@ type Automation struct {
 // prompt），或者反过来把一条 automation 永久卡住不跑。`state` 不在此列——启用/停用/归档
 // 本来就是用户操作（`needs_attention` 由平台写，用户可把它改回 `active` 表示"我修好了"）。
 var ReservedKeys = []string{
-	"last_fired_at", "last_conversation_id", "last_status", "last_reason",
+	"last_fired_at", "last_session_id", "last_status", "last_reason",
 	"consecutive_failures", "recent_runs",
 }
 

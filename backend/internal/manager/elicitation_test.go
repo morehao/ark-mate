@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -124,21 +125,37 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 // TestResolveElicitationScope C3 归属判定三分支：wire（`_meta`）优先 → inferred_inflight（唯一在途
 // turn）→ ambiguous（都没有，返回空 id 由调用方按取消回应并留痕）。cli=nil 时无在途 turn，
 // 正好覆盖后两个分支（wire 分支不碰 cli）。
+//
+// v15（D-4 修复）之后 wire 分支的口径变了：`_meta` 里的 id 是**底座原文**，必须先按
+// `provider_session_id` 反查平台会话；查不到就退 ambiguous —— 这正是本用例现在要钉的东西
+// （改之前它会把 `wire-conv` 直接当成平台会话 id 用，把提问卡挂到一个不存在的会话上）。
 func TestResolveElicitationScope(t *testing.T) {
 	_, orch, _ := newTestRig(t)
 
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
-		SessionID: "wire-conv", ScopeSource: acl.ScopeWire,
-	}); sid != "wire-conv" || src != acl.ScopeWire {
-		t.Fatalf("wire 归属应直采: sid=%q src=%q", sid, src)
+	// 先登记一条会话，让它的 `provider_session_id` 是 `rt_wire-sess`。
+	orch.svc.registerSession(&SessionRec{
+		ID: "ses_platform", AgentID: "a1", Cwd: "/tmp",
+		ProviderSessionID: objid.ProviderShell + "wire-sess",
+	})
+
+	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		SessionID: "wire-sess", ScopeSource: acl.ScopeWire,
+	}); sid != "ses_platform" || src != acl.ScopeWire || note != "" {
+		t.Fatalf("wire 归属应按 provider_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
+	}
+	// **查不到**的 wire id（底座发了个我们不认识的会话）→ ambiguous + 留痕，**不猜**。
+	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		SessionID: "wire-unknown", ScopeSource: acl.ScopeWire,
+	}); sid != "" || src != acl.ScopeAmbiguous || note == "" {
+		t.Fatalf("查不到的 wire 归属应落 ambiguous 且留痕: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// ScopeSource=wire 但 SessionID 为空（脏数据）→ 不认，退到推断/歧义。
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		ScopeSource: acl.ScopeWire,
 	}); sid != "" || src != acl.ScopeAmbiguous {
 		t.Fatalf("空 wire 归属应落 ambiguous: sid=%q src=%q", sid, src)
 	}
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		Mode: "form", Message: "q",
 	}); sid != "" || src != acl.ScopeAmbiguous {
 		t.Fatalf("无 wire 且无在途 turn 应落 ambiguous: sid=%q src=%q", sid, src)
@@ -194,8 +211,8 @@ func TestElicitationResolveUnknown(t *testing.T) {
 	}
 }
 
-// TestElicitationCancelConversation conversation/cancel 把挂起提问按取消回馈并清空挂起表。
-func TestElicitationCancelConversation(t *testing.T) {
+// TestElicitationCancelSession session/cancel 把挂起提问按取消回馈并清空挂起表。
+func TestElicitationCancelSession(t *testing.T) {
 	m := NewElicitationManager(30 * time.Second)
 	registered := make(chan string, 1)
 	done := make(chan acl.ElicitationOutcome, 1)
@@ -206,7 +223,7 @@ func TestElicitationCancelConversation(t *testing.T) {
 		done <- out
 	}()
 	<-registered // 注册完成（发布事件）后再取消会话
-	m.CancelConversation("s1")
+	m.CancelSession("s1")
 	out := <-done
 	if out.Action != "cancel" {
 		t.Fatalf("取消会话后应按取消回馈: %+v", out)
@@ -234,7 +251,7 @@ func TestElicitationScopeMismatch(t *testing.T) {
 		}, func(it ElicitationItem) { published <- it })
 	}()
 	it := <-published
-	if it.ConversationID != "owner" || it.SessionID != "owner" {
+	if it.SessionID != "owner" {
 		t.Fatalf("载荷应带归属会话: %+v", it)
 	}
 	if it.ScopeSource != acl.ScopeInferred {
@@ -282,11 +299,11 @@ func TestElicitationScopeSourceWire(t *testing.T) {
 
 // TestServiceResolveElicitationScope C3：REST 面（service）跨会话决策按「不存在」处理——
 // 与既有「未知 elicitation_id」完全同码同文案（40001，不泄露他会话挂起项的存在）；
-// 归属会话决策成功；列出挂起项时带 conversation_id/scope_source。
+// 归属会话决策成功；列出挂起项时带 session_id/scope_source。
 func TestServiceResolveElicitationScope(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	svc.registerConversation(&ConversationRec{ID: "owner", AgentID: "agent-opencode"})
-	svc.registerConversation(&ConversationRec{ID: "intruder", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "owner", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "intruder", AgentID: "agent-opencode"})
 
 	published := make(chan ElicitationItem, 1)
 	done := make(chan struct{})
@@ -303,7 +320,7 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPendingElicitations: %v", err)
 	}
-	if len(list) != 1 || list[0].ConversationID != "owner" || list[0].ScopeSource == "" {
+	if len(list) != 1 || list[0].SessionID != "owner" || list[0].ScopeSource == "" {
 		t.Fatalf("挂起项应带 scope 归属: %+v", list)
 	}
 	if other, err := svc.ListPendingElicitations(context.Background(), "intruder"); err != nil || len(other) != 0 {

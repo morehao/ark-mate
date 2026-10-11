@@ -26,7 +26,7 @@ func TestFromErrorMapping(t *testing.T) {
 		want int
 	}{
 		{"agent_not_found", acl.NewError(acl.ClassRequest, "agent_not_found", "x", nil), code.NotFound},
-		{"conversation_not_found", acl.NewError(acl.ClassRequest, "conversation_not_found", "x", nil), code.NotFound},
+		{"session_not_found", acl.NewError(acl.ClassRequest, "session_not_found", "x", nil), code.NotFound},
 		{"runtime_not_found", acl.NewError(acl.ClassRequest, "runtime_not_found", "x", nil), code.NotFound},
 		{"mcp_not_found", acl.NewError(acl.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
 		{"provider_not_found", acl.NewError(acl.ClassRequest, "provider_not_found", "x", nil), code.NotFound},

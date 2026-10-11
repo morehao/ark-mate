@@ -46,7 +46,7 @@ function SettingsDeepLink({ section }: { section: string }) {
     openSettingsSection(section)
   }, [openSettingsSection, section])
 
-  return <Navigate to="/conversations" replace />
+  return <Navigate to="/sessions" replace />
 }
 
 /** 窄屏顶条上的当前入口名（导航定义只有一份，这里不重复写别名）。 */
@@ -55,7 +55,7 @@ function currentEntryLabel(pathname: string): string {
 }
 
 export function App() {
-  // 启动一次：常驻 WS 连接 + 拉取 agents/conversations（跨路由共享一份状态）
+  // 启动一次：常驻 WS 连接 + 拉取 agents/sessions（跨路由共享一份状态）
   useEffect(() => {
     useMate.getState().boot()
   }, [])
@@ -144,11 +144,11 @@ export function App() {
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <Routes>
-            <Route path="/" element={<Navigate to="/conversations" replace />} />
-            {/* 新建会话不再是独立页面：/conversations 无 id 时问答区即新建面板 */}
-            <Route path="/new" element={<Navigate to="/conversations" replace />} />
-            <Route path="/conversations" element={<ChatPage />} />
-            <Route path="/conversations/:id" element={<ChatPage />} />
+            <Route path="/" element={<Navigate to="/sessions" replace />} />
+            {/* 新建会话不再是独立页面：/sessions 无 id 时问答区即新建面板 */}
+            <Route path="/new" element={<Navigate to="/sessions" replace />} />
+            <Route path="/sessions" element={<ChatPage />} />
+            <Route path="/sessions/:id" element={<ChatPage />} />
             {/* 旧「能力」路径 → 扩展总览（一行重定向：书签/深链接不静默落到问答页） */}
             <Route path="/capabilities" element={<Navigate to="/extensions" replace />} />
             <Route
@@ -196,7 +196,7 @@ export function App() {
             <Route path="/settings" element={<SettingsDeepLink section="general" />} />
             <Route path="/settings/agents" element={<SettingsDeepLink section="agents" />} />
             <Route path="/agents" element={<SettingsDeepLink section="agents" />} />
-            <Route path="*" element={<Navigate to="/conversations" replace />} />
+            <Route path="*" element={<Navigate to="/sessions" replace />} />
           </Routes>
         </div>
 

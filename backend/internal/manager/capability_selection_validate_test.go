@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -168,9 +168,9 @@ func TestValidateSelectionVerdicts(t *testing.T) {
 	}
 }
 
-// TestCreateConversationRejectsUnreachableWithoutSideEffects M3-3 的验收核心：
+// TestCreateSessionRejectsUnreachableWithoutSideEffects M3-3 的验收核心：
 // 不可达 id → 报错**且不建会话**（不拉进程、不写库、不留代建目录）。
-func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
+func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	svc, orch, reg := validateRig(t)
 	ctx := context.Background()
 	_ = reg
@@ -190,9 +190,9 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
-	_, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+	_, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
 		AgentID:      "a1",
-		Capabilities: &dtoconversation.CapabilitiesReq{Skills: ptrOf([]string{"ghost"})},
+		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{"ghost"})},
 	})
 	if err == nil {
 		t.Fatal("不可达 id 应被拒")
@@ -203,11 +203,11 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if n := len(orch.conns); n != 0 {
 		t.Fatalf("校验失败不该建立任何连接，got %d", n)
 	}
-	list, _ := st.ListConversations(ctx, nil)
+	list, _ := st.ListSessions(ctx, nil)
 	if len(list) != 0 {
 		t.Fatalf("校验失败不该写库，got %+v", list)
 	}
-	if list, _ := svc.ListConversations(false, "", ""); len(list) != 0 {
+	if list, _ := svc.ListSessions(false, "", ""); len(list) != 0 {
 		t.Fatalf("校验失败不该登记会话，got %+v", list)
 	}
 	// 副作用面：工作空间目录下**只能有** default/（v14：未指定 cwd 落在共享的默认工作空间，
@@ -221,9 +221,9 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 
 	// 可达的选定则一切照常。
-	res, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
 		AgentID:      "a1",
-		Capabilities: &dtoconversation.CapabilitiesReq{Mcps: ptrOf([]string{"fs"})},
+		Capabilities: &dtosession.CapabilitiesReq{Mcps: ptrOf([]string{"fs"})},
 	})
 	if err != nil {
 		t.Fatalf("可达选定应建会话成功: %v", err)
@@ -231,9 +231,9 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if n := len(orch.conns); n != 1 {
 		t.Fatalf("应建立一个连接，got %d", n)
 	}
-	detail, err := svc.GetConversation(ctx, res.ID)
+	detail, err := svc.GetSession(ctx, res.ID)
 	if err != nil {
-		t.Fatalf("GetConversation: %v", err)
+		t.Fatalf("GetSession: %v", err)
 	}
 	if detail.Capabilities == nil {
 		t.Fatal("声明过的会话必须回显 capabilities")
@@ -257,22 +257,22 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 }
 
-// TestCreateConversationDefaultPathUnchanged M3-3 的第二条验收：**缺省路径逐字节等同今天**。
+// TestCreateSessionDefaultPathUnchanged M3-3 的第二条验收：**缺省路径逐字节等同今天**。
 //
 // "逐字节"落在两处可观测形态上：① 响应 JSON 里**没有** `capabilities` 键（omitempty）；
 // ② 不产生能力指纹（→ 代际键与引入代际之前逐字相同，不新起进程）。
-func TestCreateConversationDefaultPathUnchanged(t *testing.T) {
+func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	svc, orch, _ := validateRig(t)
 	ctx := context.Background()
 	// 带库：缺省路径的落库形态（v7 三列都该是空串）也是"逐字节等同今天"的一部分。
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	res, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
 	if err != nil {
-		t.Fatalf("CreateConversation: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
-	detail, err := svc.GetConversation(ctx, res.ID)
+	detail, err := svc.GetSession(ctx, res.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestCreateConversationDefaultPathUnchanged(t *testing.T) {
 		t.Fatalf("缺省路径的响应 JSON 里不该有 capabilities 键: %s", b)
 	}
 	// 记录的指纹为空 → 代际键与基础键逐字相同（同配置共享暖进程的既有规则不被破坏）。
-	rec := svc.conversationRec(res.ID)
+	rec := svc.sessionRec(res.ID)
 	if rec == nil || rec.Fingerprint != "" || rec.CapabilityJSON != "" {
 		t.Fatalf("缺省路径不该带能力绑定: %+v", rec)
 	}
@@ -298,7 +298,7 @@ func TestCreateConversationDefaultPathUnchanged(t *testing.T) {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
 	// 落库形态同样是空串（旧行与新行的默认值同形）。
-	row, ok, err := st.GetConversation(ctx, res.ID)
+	row, ok, err := st.GetSession(ctx, res.ID)
 	if err != nil || !ok {
 		t.Fatalf("读库: ok=%v err=%v", ok, err)
 	}
@@ -307,24 +307,24 @@ func TestCreateConversationDefaultPathUnchanged(t *testing.T) {
 	}
 }
 
-// TestCreateConversationDeclaredEmptySelectionWorks `capabilities: {}` 是"声明了但不限制"：
+// TestCreateSessionDeclaredEmptySelectionWorks `capabilities: {}` 是"声明了但不限制"：
 // 它必须照常建会话、回显空数组、并且**产生指纹**（因此与"未声明"是两个代际）。
-func TestCreateConversationDeclaredEmptySelectionWorks(t *testing.T) {
+func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	svc, orch, _ := validateRig(t)
 	ctx := context.Background()
 
-	declared, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
-		AgentID: "a1", Cwd: t.TempDir(), Capabilities: &dtoconversation.CapabilitiesReq{},
+	declared, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
+		AgentID: "a1", Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{},
 	})
 	if err != nil {
 		t.Fatalf("空选定应能建会话: %v", err)
 	}
-	plain, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	recD := svc.conversationRec(declared.ID)
-	recP := svc.conversationRec(plain.ID)
+	recD := svc.sessionRec(declared.ID)
+	recP := svc.sessionRec(plain.ID)
 	if recD.CapabilityJSON != "{}" {
 		t.Fatalf("声明的空选定落库应为 {}，got %q", recD.CapabilityJSON)
 	}
@@ -335,7 +335,7 @@ func TestCreateConversationDeclaredEmptySelectionWorks(t *testing.T) {
 	if n := len(orch.conns); n != 2 {
 		t.Fatalf("声明与未声明应是两个代际（2 条连接），got %d", n)
 	}
-	detail, err := svc.GetConversation(ctx, declared.ID)
+	detail, err := svc.GetSession(ctx, declared.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,21 +358,21 @@ func TestCreateConversationDeclaredEmptySelectionWorks(t *testing.T) {
 	}
 
 	// `{skills:[],mcps:[]}` = 明确一个都不要 → 回显两个空数组，且是**另一个代际**。
-	none, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+	none, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
 		AgentID: "a1", Cwd: t.TempDir(),
-		Capabilities: &dtoconversation.CapabilitiesReq{Skills: ptrOf([]string{}), Mcps: ptrOf([]string{})},
+		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{}), Mcps: ptrOf([]string{})},
 	})
 	if err != nil {
 		t.Fatalf("显式空数组应能建会话: %v", err)
 	}
-	recN := svc.conversationRec(none.ID)
+	recN := svc.sessionRec(none.ID)
 	if recN.CapabilityJSON != `{"skills":[],"mcps":[]}` {
 		t.Fatalf("显式空数组的落库形态: %q", recN.CapabilityJSON)
 	}
 	if recN.Fingerprint == recD.Fingerprint {
 		t.Fatal("「不限制」与「一个都不要」是不同的能力集，必须不同指纹")
 	}
-	detailNone, err := svc.GetConversation(ctx, none.ID)
+	detailNone, err := svc.GetSession(ctx, none.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

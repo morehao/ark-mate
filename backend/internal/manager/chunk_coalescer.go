@@ -34,8 +34,8 @@ const (
 
 // chunkKey 缓冲键：按 (会话, 事件类型) 分桶——不同会话/不同事件的增量绝不相邻合并。
 type chunkKey struct {
-	conversationID string
-	typ            string
+	sessionID string
+	typ       string
 }
 
 // chunkBuf 是一段待发布的文本增量（**除 text 外完全同形**的连续 delta 拼接）。
@@ -65,14 +65,14 @@ type chunkCoalescer struct {
 	mu      sync.Mutex
 	bufs    map[chunkKey]*chunkBuf
 	nextOrd int64
-	flushFn func(typ, conversationID string, payload any)
+	flushFn func(typ, sessionID string, payload any)
 	done    chan struct{}
 	once    sync.Once
 	wg      sync.WaitGroup
 }
 
 // newChunkCoalescer 构造合并器并启动定时窗口 goroutine（flushFn 必填，通常为 Service.publishRaw）。
-func newChunkCoalescer(flushFn func(typ, conversationID string, payload any)) *chunkCoalescer {
+func newChunkCoalescer(flushFn func(typ, sessionID string, payload any)) *chunkCoalescer {
 	c := &chunkCoalescer{
 		bufs:    make(map[chunkKey]*chunkBuf),
 		flushFn: flushFn,
@@ -89,12 +89,12 @@ func (c *chunkCoalescer) offers(typ string) bool {
 }
 
 // add 收下一段增量：同键同 msg_id 直接拼接；msg_id 变化先 flush 旧缓冲；达阈值同步 flush。
-func (c *chunkCoalescer) add(typ, conversationID string, payload map[string]any) {
+func (c *chunkCoalescer) add(typ, sessionID string, payload map[string]any) {
 	if c == nil {
 		return
 	}
 	text, _ := payload["text"].(string)
-	key := chunkKey{conversationID: conversationID, typ: typ}
+	key := chunkKey{sessionID: sessionID, typ: typ}
 
 	c.mu.Lock()
 	cur := c.bufs[key]
@@ -104,7 +104,7 @@ func (c *chunkCoalescer) add(typ, conversationID string, payload map[string]any)
 		prev := c.takeLocked(func(k chunkKey) bool { return k == key })
 		c.mu.Unlock()
 		for _, item := range prev {
-			c.emit(item.key.typ, item.key.conversationID, item.buf)
+			c.emit(item.key.typ, item.key.sessionID, item.buf)
 		}
 		c.mu.Lock()
 		cur = nil
@@ -127,20 +127,20 @@ func (c *chunkCoalescer) add(typ, conversationID string, payload map[string]any)
 	}
 	c.mu.Unlock()
 	for _, item := range hit {
-		c.emit(item.key.typ, item.key.conversationID, item.buf)
+		c.emit(item.key.typ, item.key.sessionID, item.buf)
 	}
 }
 
 // flush 落掉某会话的全部缓冲增量（非合并类型发布前调用，保证 seq 顺序）。
-func (c *chunkCoalescer) flush(conversationID string) {
+func (c *chunkCoalescer) flush(sessionID string) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	pending := c.takeLocked(func(k chunkKey) bool { return k.conversationID == conversationID })
+	pending := c.takeLocked(func(k chunkKey) bool { return k.sessionID == sessionID })
 	c.mu.Unlock()
 	for _, item := range pending {
-		c.emit(item.key.typ, item.key.conversationID, item.buf)
+		c.emit(item.key.typ, item.key.sessionID, item.buf)
 	}
 }
 
@@ -153,7 +153,7 @@ func (c *chunkCoalescer) flushAll() {
 	pending := c.takeLocked(func(chunkKey) bool { return true })
 	c.mu.Unlock()
 	for _, item := range pending {
-		c.emit(item.key.typ, item.key.conversationID, item.buf)
+		c.emit(item.key.typ, item.key.sessionID, item.buf)
 	}
 }
 
@@ -191,11 +191,11 @@ func (c *chunkCoalescer) takeLocked(match func(chunkKey) bool) []taken {
 //
 // 注意：**不跳过空文本**——`publish` 的契约是「发布这条事件」，静默丢弃比多写一行更糟
 // （除 text 外还带字段的载荷会被整条吃掉）。空 delta 合并后仍只多一行，不是问题。
-func (c *chunkCoalescer) emit(typ, conversationID string, b *chunkBuf) {
+func (c *chunkCoalescer) emit(typ, sessionID string, b *chunkBuf) {
 	if b == nil {
 		return
 	}
-	c.flushFn(typ, conversationID, b.payload())
+	c.flushFn(typ, sessionID, b.payload())
 }
 
 // sameShape 判断两块载荷是否除 text 外完全一致（同一条消息的连续增量）。
@@ -240,6 +240,6 @@ func (c *chunkCoalescer) flushExpired(now time.Time) {
 	})
 	c.mu.Unlock()
 	for _, item := range pending {
-		c.emit(item.key.typ, item.key.conversationID, item.buf)
+		c.emit(item.key.typ, item.key.sessionID, item.buf)
 	}
 }

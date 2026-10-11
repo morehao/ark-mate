@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/model"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,19 +111,19 @@ func TestWorkspaceDefaultNotRecreatedAfterDelete(t *testing.T) {
 	}
 }
 
-// TestWorkspaceDeleteKeepsConversations 删登记**不删会话**：目录、cwd、历史一律不动（设计 ADR-6）。
-func TestWorkspaceDeleteKeepsConversations(t *testing.T) {
+// TestWorkspaceDeleteKeepsSessions 删登记**不删会话**：目录、cwd、历史一律不动（设计 ADR-6）。
+func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 	s := openTestDB(t)
 	dir := t.TempDir()
 	ws, err := s.CreateWorkspace(ctxT(), dir, "要做掉的项目")
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	if err := s.UpsertConversation(ctxT(), Conversation{
+	if err := s.UpsertSession(ctxT(), model.SessionEntity{
 		ID: "c1", AgentID: "a1", Cwd: dir, WorkspaceID: ws.ID,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+		t.Fatalf("UpsertSession: %v", err)
 	}
 
 	released, err := s.DeleteWorkspace(ctxT(), ws.ID)
@@ -138,7 +139,7 @@ func TestWorkspaceDeleteKeepsConversations(t *testing.T) {
 		t.Fatalf("登记应已删除: ok=%v err=%v", ok, err)
 	}
 	// 会话还在，cwd 逐字不变，归属清空（读面归默认工作空间）。
-	conv, ok, err := s.GetConversation(ctxT(), "c1")
+	conv, ok, err := s.GetSession(ctxT(), "c1")
 	if err != nil || !ok {
 		t.Fatalf("会话不该被删: ok=%v err=%v", ok, err)
 	}
@@ -256,17 +257,17 @@ func TestWorkspaceMoveUnknown(t *testing.T) {
 	}
 }
 
-// TestWorkspaceConversationCounts 计数与最近使用按归属聚合（含 workspace_id='' 的桶）。
-func TestWorkspaceConversationCounts(t *testing.T) {
+// TestWorkspaceSessionCounts 计数与最近使用按归属聚合（含 workspace_id=” 的桶）。
+func TestWorkspaceSessionCounts(t *testing.T) {
 	s := openTestDB(t)
 	ws, _ := s.CreateWorkspace(ctxT(), t.TempDir(), "p")
 	now := time.Now().UTC()
 	mk := func(id, workspaceID string, updated time.Time) {
-		if err := s.UpsertConversation(ctxT(), Conversation{
+		if err := s.UpsertSession(ctxT(), model.SessionEntity{
 			ID: id, AgentID: "a1", Cwd: "/tmp/x", WorkspaceID: workspaceID,
 			Status: "in_progress", CreatedAt: now, UpdatedAt: updated,
 		}); err != nil {
-			t.Fatalf("UpsertConversation %s: %v", id, err)
+			t.Fatalf("UpsertSession %s: %v", id, err)
 		}
 	}
 	mk("c1", ws.ID, now.Add(-time.Hour))
@@ -296,19 +297,19 @@ func TestWorkspaceConversationCounts(t *testing.T) {
 	}
 }
 
-// TestMigrateV14LeavesExistingConversationsUnassigned v14 把既有会话的归属留空（设计 §3.2）。
+// TestMigrateV14LeavesExistingSessionsUnassigned v14 把既有会话的归属留空（设计 §3.2）。
 //
 // 这条是"存量会话不会掉进未分组"的机器判据：留空 = 读面归默认工作空间。
 // 刻意**不**把 DISTINCT cwd 批量登记成工作空间（那会产生用户从未选过的条目）。
-func TestMigrateV14LeavesExistingConversationsUnassigned(t *testing.T) {
+func TestMigrateV14LeavesExistingSessionsUnassigned(t *testing.T) {
 	s := openTestDB(t)
 	// 造一条 cwd 很明确、看起来"该被登记"的会话，确认迁移不拿它建登记。
 	dir := t.TempDir()
-	if err := s.UpsertConversation(ctxT(), Conversation{
+	if err := s.UpsertSession(ctxT(), model.SessionEntity{
 		ID: "legacy", AgentID: "a1", Cwd: dir, WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+		t.Fatalf("UpsertSession: %v", err)
 	}
 
 	list, err := s.ListWorkspaces(ctxT())
@@ -318,7 +319,7 @@ func TestMigrateV14LeavesExistingConversationsUnassigned(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("迁移不该凭空产生登记行，实际 %d 行", len(list))
 	}
-	conv, _, _ := s.GetConversation(ctxT(), "legacy")
+	conv, _, _ := s.GetSession(ctxT(), "legacy")
 	if conv.WorkspaceID != "" {
 		t.Fatalf("既有会话的归属应留空，实际 %q", conv.WorkspaceID)
 	}
@@ -355,7 +356,7 @@ func TestWorkspaceUniqueIndexEnforced(t *testing.T) {
 	}
 
 	// 绕过 get-or-create 的预检查，直接插一条同路径的行：必须被唯一索引拦下。
-	dup := Workspace{
+	dup := model.WorkspaceEntity{
 		ID: "wsp-dup", Path: dir, Title: "dup", ListOrder: 99,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
@@ -369,7 +370,7 @@ func TestWorkspaceUniqueIndexEnforced(t *testing.T) {
 	}
 
 	// 默认工作空间的部分唯一索引：第二条 is_default=1 也必须被拦下。
-	def := Workspace{
+	def := model.WorkspaceEntity{
 		ID: "wsp-d1", Path: t.TempDir(), Title: DefaultWorkspaceTitle, IsDefault: true, ListOrder: 100,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}

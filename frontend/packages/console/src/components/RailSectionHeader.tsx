@@ -40,7 +40,7 @@ function SlidersTwoIcon({ size = 16 }: { size?: number }) {
 }
 
 interface Props {
-  /** 搜索框里的草稿（受控；判定与请求在 `ConversationPane`）。 */
+  /** 搜索框里的草稿（受控；判定与请求在 `SessionPane`）。 */
   query: string
   onQueryChange: (value: string) => void
   /** 搜索是否展开。折叠时只占一枚图标，展开后**吃掉整条区头**。 */

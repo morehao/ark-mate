@@ -31,7 +31,7 @@ func (s *Store) UpsertAgentDefinition(ctx context.Context, id, body string, expe
 	return s.commitDefinitionChange(ctx, model.CapabilityKindAgent, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
-				return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentDefinition{
+				return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentEntity{
 					ID: id, Body: body, Revision: 1, UpdatedAt: now,
 				})
 			}
@@ -48,12 +48,12 @@ func (s *Store) DeleteAgentDefinition(ctx context.Context, id string, expectedRe
 }
 
 // GetAgentDefinition 读一条 agent 定义（不存在 → (nil, false, nil)）。
-func (s *Store) GetAgentDefinition(ctx context.Context, id string) (*AgentDefinition, bool, error) {
+func (s *Store) GetAgentDefinition(ctx context.Context, id string) (*model.AgentEntity, bool, error) {
 	return s.agents.Get(ctx, id)
 }
 
 // ListAgentDefinitions 列出全部 agent 定义（id 升序）。
-func (s *Store) ListAgentDefinitions(ctx context.Context) (model.AgentDefinitionList, error) {
+func (s *Store) ListAgentDefinitions(ctx context.Context) (model.AgentEntityList, error) {
 	return s.agents.List(ctx)
 }
 

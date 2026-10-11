@@ -7,18 +7,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
 // Prompt 向会话追加一轮 prompt（异步；事件经 bus/WS 出流）。
 // 返回 user_message 事件后的 bus 水位（客户端 attach 续传用）。会话正忙时返回 turn_in_progress。
-// 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → ensureConversation 走
-// native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 conversation_not_found。
-func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) (int64, error) {
-	as, err := o.acquireConversation(ctx, conversationID)
+// 会话无活句柄（进程刚起、或连接已断）时按需重建：持久层有记录 → ensureSession 走
+// native resume / handoff memo（ADR-4：执行可丢弃、会话平台拥有）；无记录才 session_not_found。
+func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int64, error) {
+	as, err := o.acquireSession(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -30,14 +30,14 @@ func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) 
 	memo := as.memo
 	as.memo = "" // 一次性消费：仅 fresh+handoff 会话首条 prompt 注入 memo
 	tctx, cancel := context.WithCancel(ctx)
-	t := &Turn{id: uuid.NewString(), done: make(chan struct{}), cancel: cancel, ctx: tctx}
+	t := &Turn{id: objid.New(objid.Run), done: make(chan struct{}), cancel: cancel, ctx: tctx}
 	as.turn = t
 	as.busy = true
 	client := as.client
 	as.mu.Unlock()
 	o.markBusy(client, as.ID)
 
-	o.svc.markConversation(as.ID, ConversationStatusInProgress)
+	o.svc.markSession(as.ID, SessionStatusInProgress)
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": as.AgentID, "text": text,
 	})
@@ -50,29 +50,29 @@ func (o *Orchestrator) Prompt(ctx context.Context, conversationID, text string) 
 	go o.runTurn(as, t, text)
 	// 看门狗：turnTimeout 内未收尾则自动取消（防 runtime 吞错/挂起导致 busy 永久占用）。
 	if o.turnTimeout > 0 {
-		go o.watchdogTurn(as, conversationID, t)
+		go o.watchdogTurn(as, sessionID, t)
 	}
 	return ue.Seq, nil
 }
 
-// acquireConversation 取（或重建）会话的活句柄。Prompt 与 §6 排队投递共用：
+// acquireSession 取（或重建）会话的活句柄。Prompt 与 §6 排队投递共用：
 // 两者都必须在「会话忙不忙」之前先把句柄拿到手——队列入队要记当前执行代际，
 // 代际只在活句柄存在时有意义（无句柄 = 需要重建，重建即换代）。
-func (o *Orchestrator) acquireConversation(ctx context.Context, conversationID string) (*ActiveConversation, error) {
-	as := o.conversation(conversationID)
+func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*ActiveSession, error) {
+	as := o.session(sessionID)
 	if as != nil {
 		as.mu.Lock()
 		dead := as.dead
 		as.mu.Unlock()
 		if dead {
 			// 连接已断的死句柄（拆连后理应已被摘除；这里兜住拿到旧指针的竞态）：摘除并按需重建。
-			o.evictConversation(as)
+			o.evictSession(as)
 			as = nil
 		}
 	}
 	if as == nil {
 		var err error
-		as, err = o.ensureConversation(ctx, conversationID)
+		as, err = o.ensureSession(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -92,16 +92,16 @@ func (o *Orchestrator) acquireConversation(ctx context.Context, conversationID s
 //     顺序是刻意的——反过来（先取消再入队）会在「取消已生效、runTurn 已收尾取队」与
 //     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
 //     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
-func (o *Orchestrator) PromptWithDelivery(ctx context.Context, conversationID, text, delivery string) (PromptOutcome, error) {
+func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (PromptOutcome, error) {
 	mode, err := NormalizeDelivery(delivery)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
 	if mode == DeliveryReject {
-		seq, err := o.Prompt(ctx, conversationID, text)
+		seq, err := o.Prompt(ctx, sessionID, text)
 		return PromptOutcome{EventSeq: seq}, err
 	}
-	as, err := o.acquireConversation(ctx, conversationID)
+	as, err := o.acquireSession(ctx, sessionID)
 	if err != nil {
 		return PromptOutcome{}, err
 	}
@@ -113,26 +113,26 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, conversationID, t
 	as.mu.Unlock()
 	if !busy {
 		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
-		seq, err := o.Prompt(ctx, conversationID, text)
+		seq, err := o.Prompt(ctx, sessionID, text)
 		return PromptOutcome{EventSeq: seq}, err
 	}
-	q, err := o.svc.enqueueInput(ctx, conversationID, text, mode, turnID, o.svc.conversationGeneration(conversationID))
+	q, err := o.svc.enqueueInput(ctx, sessionID, text, mode, turnID, o.svc.sessionGeneration(sessionID))
 	if err != nil {
 		return PromptOutcome{}, err
 	}
-	evt := o.svc.publish(BusInputQueued, conversationID, map[string]any{
-		"session_id": conversationID, "agent_id": as.AgentID, "input_id": q.ID, "text": q.Text,
+	evt := o.svc.publish(BusInputQueued, sessionID, map[string]any{
+		"session_id": sessionID, "agent_id": as.AgentID, "input_id": q.ID, "text": q.Text,
 		"delivery": q.Delivery, "target_turn_id": q.TargetTurnID, "generation": q.Generation,
 	})
 	if mode == DeliveryInterruptThenPrompt {
-		if cerr := o.CancelTurn(ctx, conversationID); cerr != nil {
+		if cerr := o.CancelTurn(ctx, sessionID); cerr != nil {
 			// 取消失败（会话/连接已变）：入队项留着没有意义——就地撤下，避免留下一条
 			// 「谁也不等」的孤儿队列项。
-			if _, derr := o.svc.deleteQueuedInput(ctx, conversationID, q.ID); derr != nil {
-				glog.Warnw(ctx, "取消当前轮失败且撤下排队项失败", "conversation", conversationID, "input_id", q.ID, "err", derr)
+			if _, derr := o.svc.deleteQueuedInput(ctx, sessionID, q.ID); derr != nil {
+				glog.Warnw(ctx, "取消当前轮失败且撤下排队项失败", "session", sessionID, "input_id", q.ID, "err", derr)
 			}
-			o.svc.publish(BusInputCancelled, conversationID, map[string]any{
-				"session_id": conversationID, "agent_id": as.AgentID, "input_id": q.ID,
+			o.svc.publish(BusInputCancelled, sessionID, map[string]any{
+				"session_id": sessionID, "agent_id": as.AgentID, "input_id": q.ID,
 				"delivery": q.Delivery, "reason": ReasonDeliverFail,
 			})
 			return PromptOutcome{}, cerr
@@ -145,21 +145,21 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, conversationID, t
 // watchdogTurn 单轮超时兜底：超时后走 CancelTurn 的有界取消路径（agent 无响应也本地解除），
 // 终态事件由 runTurn 依取消语义发布（run.cancelled）。与用户手动取消幂等共存：turn 已结束时
 // select 到 t.done 直接退出；已取消则 CancelTurn 对 nil turn 为 no-op。
-func (o *Orchestrator) watchdogTurn(as *ActiveConversation, conversationID string, t *Turn) {
+func (o *Orchestrator) watchdogTurn(as *ActiveSession, sessionID string, t *Turn) {
 	timer := time.NewTimer(o.turnTimeout)
 	defer timer.Stop()
 	select {
 	case <-t.done:
 	case <-timer.C:
-		glog.Warnw(context.Background(), "turn 超过看门狗时限，自动取消", "conversation", conversationID, "timeout", o.turnTimeout.String())
-		_ = o.CancelTurn(context.Background(), conversationID)
+		glog.Warnw(context.Background(), "turn 超过看门狗时限，自动取消", "session", sessionID, "timeout", o.turnTimeout.String())
+		_ = o.CancelTurn(context.Background(), sessionID)
 	}
 }
 
 // runTurn 执行一轮 prompt 并发布终态事件（单写者：仅本 goroutine 改动 turn 终态）。
-// Prompt 走 ActiveConversation.proj（Runtime 接口；§16 采用），proj 为 nil（测试假会话/
+// Prompt 走 ActiveSession.proj（Runtime 接口；§16 采用），proj 为 nil（测试假会话/
 // 未投影 runtime）时回退底层会话直连——两路径语义一致。
-func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
+func (o *Orchestrator) runTurn(as *ActiveSession, t *Turn, text string) {
 	var (
 		stop string
 		err  error
@@ -193,25 +193,25 @@ func (o *Orchestrator) runTurn(as *ActiveConversation, t *Turn, text string) {
 	switch {
 	case userCancel:
 		// 用户取消优先：与停机撞车时，取消是用户意图，不能改写成 interrupted。
-		o.svc.markConversation(as.ID, ConversationStatusCancelled)
+		o.svc.markSession(as.ID, SessionStatusCancelled)
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
 		deliverNext = true
 	case intentional:
 		// 主动拆除（daemon 停机 / 显式停 agent）打断的轮次：既不是用户取消也不是失败，
 		// 归 interrupted —— 无终态、可续聊重发（与崩溃恢复同义）。刻意不发 turn.error /
 		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
-		o.svc.markConversation(as.ID, ConversationStatusInterrupted)
+		o.svc.markSession(as.ID, SessionStatusInterrupted)
 		glog.Infow(context.Background(), "turn 因连接主动拆除而中断（会话保留，可续聊重发）",
-			"conversation", as.ID, "agent", as.AgentID)
+			"session", as.ID, "agent", as.AgentID)
 	case cancelled:
-		o.svc.markConversation(as.ID, ConversationStatusCancelled)
+		o.svc.markSession(as.ID, SessionStatusCancelled)
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
 		deliverNext = true
 	case err != nil:
-		o.svc.markConversation(as.ID, ConversationStatusFailed)
+		o.svc.markSession(as.ID, SessionStatusFailed)
 		o.publishError(as.ID, err, client)
 	default:
-		o.svc.markConversation(as.ID, ConversationStatusCompleted)
+		o.svc.markSession(as.ID, SessionStatusCompleted)
 		o.svc.publish(BusTurnEnded, as.ID, map[string]any{
 			"session_id": as.ID, "agent_id": as.AgentID, "stop_reason": stop,
 		})
@@ -239,10 +239,10 @@ func errLooksCancelled(err error) bool {
 }
 
 // CancelTurn 取消会话进行中的 turn（无 turn 时为幂等 no-op）。
-func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) error {
-	as := o.conversation(conversationID)
+func (o *Orchestrator) CancelTurn(ctx context.Context, sessionID string) error {
+	as := o.session(sessionID)
 	if as == nil {
-		return acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
+		return acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	as.mu.Lock()
 	t := as.turn
@@ -253,7 +253,7 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) er
 	if t == nil {
 		return nil
 	}
-	// agent 侧取消（conversation/cancel）有界执行：runtime 无响应时不阻塞本地解除。
+	// agent 侧取消（session/cancel）有界执行：runtime 无响应时不阻塞本地解除。
 	// 无论 RPC 是否送达，随后都 t.cancel() 让 Prompt 返回（runTurn 收尾不依赖 RPC）。
 	cctx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), agentCancelTimeout)
 	defer ccancel()
@@ -271,20 +271,20 @@ func (o *Orchestrator) CancelTurn(ctx context.Context, conversationID string) er
 	select {
 	case <-done:
 	case <-cctx.Done():
-		glog.Debugw(ctx, "conversation/cancel RPC 未在限期内响应，本地强制解除",
-			"conversation", conversationID, "timeout", agentCancelTimeout.String())
+		glog.Debugw(ctx, "session/cancel RPC 未在限期内响应，本地强制解除",
+			"session", sessionID, "timeout", agentCancelTimeout.String())
 	}
-	t.cancel()                                // 解除 SDK 阻塞
-	o.perm.CancelConversation(conversationID) // conversation/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
-	o.elic.CancelConversation(conversationID) // 挂起的结构化提问一并按取消回馈
+	t.cancel()                      // 解除 SDK 阻塞
+	o.perm.CancelSession(sessionID) // session/cancel 后按 ACP 规范回 Cancelled 全部挂起权限
+	o.elic.CancelSession(sessionID) // 挂起的结构化提问一并按取消回馈
 	return nil
 }
 
 // WaitTurn 阻塞至当前 turn 结束（demo/同步路径用）；无 turn 立即返回。
-func (o *Orchestrator) WaitTurn(ctx context.Context, conversationID string) (string, error) {
-	as := o.conversation(conversationID)
+func (o *Orchestrator) WaitTurn(ctx context.Context, sessionID string) (string, error) {
+	as := o.session(sessionID)
 	if as == nil {
-		return "", acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", conversationID), nil)
+		return "", acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", sessionID), nil)
 	}
 	as.mu.Lock()
 	t := as.turn
@@ -300,28 +300,28 @@ func (o *Orchestrator) WaitTurn(ctx context.Context, conversationID string) (str
 	return t.stop, t.err
 }
 
-// RunOnce 在**构建期选定的** runtime 上跑一次 fresh conversation + prompt 并等待结束（mate demo 用）。
+// RunOnce 在**构建期选定的** runtime 上跑一次 fresh session + prompt 并等待结束（mate demo 用）。
 func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult, error) {
 	agent, err := o.svc.requireDefaultAgent()
 	if err != nil {
 		return nil, err
 	}
-	res, err := o.startConversationOn(ctx, agent, StartOptions{Cwd: opt.Cwd})
+	res, err := o.startSessionOn(ctx, agent, StartOptions{Cwd: opt.Cwd})
 	if err != nil {
 		return nil, err
 	}
-	if _, err := o.Prompt(ctx, res.ConversationID, opt.Prompt); err != nil {
+	if _, err := o.Prompt(ctx, res.SessionID, opt.Prompt); err != nil {
 		return nil, err
 	}
-	stop, err := o.WaitTurn(ctx, res.ConversationID)
+	stop, err := o.WaitTurn(ctx, res.SessionID)
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID}, err
+		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID}, err
 	}
 	if err != nil {
 		// 父 ctx 超时/取消：runTurn 已按其 err 归为 failed/cancelled
-		return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID, StopReason: stop}, err
+		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, err
 	}
-	return &RunResult{ConversationID: res.ConversationID, AgentID: agent.ID, StopReason: stop}, nil
+	return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, nil
 }
 
 // resolveArgs 替换 Launch.Args 中的 {config} 占位（保留给自定义 adapter 模板；

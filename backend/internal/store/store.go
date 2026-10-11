@@ -10,6 +10,9 @@
 // 单表读写一律经 `internal/dao`（gormdao），实体定义在 `internal/model`；
 // 本包不自建 SQL 拼接，也不在 dao 之外碰 `*gorm.DB` 的裸查询。
 //
+// 实体类型用 `model.*Entity`（`SessionEntity` / `RunEntity` / …），本包**不再 re-export**
+// ——一个表行类型只能有一个名字（v15 的 Q8：别名块已删；别名与目标同名等于什么都没省）。
+//
 // 为什么还需要这一层（而不是让调用方直接用 dao）：这里承载的全是**跨表不变量**——
 // 全局序号分配与事件插入必须同事务、导入必须整体回滚、会话水位随事件推进。
 // 这些语义横跨多个 DAO，落进任何一个 DAO 都会让它变成「不是 DAO 的东西」。
@@ -26,43 +29,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// 实体类型别名：权威定义在 internal/model（gorm 映射 + 列与取值约定）。
-// 这里做别名而不是复制结构体，是为了让调用方继续写 `store.Conversation` 的同时
-// 不必在两层之间来回搬运字段——两套等价结构体迟早会漂移。
-type (
-	// Conversation 会话权威元数据行。
-	Conversation = model.Conversation
-	// Event 事件事实源行。
-	Event = model.Event
-	// Memory 会话级权限记忆行。
-	Memory = model.Memory
-	// Run 单轮 prompt 的物化行。
-	Run = model.Run
-	// Message 消息物化投影行。
-	Message = model.Message
-	// Input 待投递的用户输入队列行（§6 busy input 队列）。
-	Input = model.Input
-	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
-	AgentDefinition = model.AgentDefinition
-	// ProviderDefinition provider 档案行（v13：资源表 = 列 + revision CAS，无 body）。
-	ProviderDefinition = model.ProviderDefinition
-	// ModelDefinition 平台模型清单行（v13：资源表；比 ProviderDefinition 多 `provider_id`/
-	// `model_id`/`input_modalities` 三列）。
-	ModelDefinition = model.ModelDefinition
-	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
-	AutomationDefinition = model.AutomationDefinition
-	// ConversationMetaPatch 会话元数据子集更新（nil = 不更新）。
-	ConversationMetaPatch = model.ConversationMetaPatch
-	// SkillDefinition 能力定义行（M6-1：sqlite 模式下能力面的事实源）。
-	SkillDefinition = model.SkillDefinition
-	// McpServerDefinition MCP server 定义行。
-	McpServerDefinition = model.McpServerDefinition
-	// CapabilityRevision 能力定义变更审计行（seq 单调 = 代际 rev 的来源）。
-	CapabilityRevision = model.CapabilityRevision
-	// Workspace 工作空间登记行（v14；登记项 = 规范化目录 + 展示名 + 顺序）。
-	Workspace = model.Workspace
-)
-
 // 常见错误。
 var (
 	// ErrAlreadyImported 目录指纹与 meta.imported_transcripts 一致（已导入，幂等跳过）。
@@ -77,15 +43,21 @@ type Store struct {
 	path string
 	// migrationBackupPath 本次进程启动时那次迁移备份的路径（空 = 本次没迁移过）。
 	migrationBackupPath string
+	// destructiveRebuildNote 本进程真的执行过 v15 的**破坏性重建**时记一句话（否则空）。
+	//
+	// 它**不是**"给内核加能力"（§8.3.2 C1）：不改变任何迁移决策、不可配置、不可调用——只是一条
+	// "刚刚发生了什么"的观察值。§8.5 R2 要求启动时打一条 WARN 把这件事说出来，而"7 张表被清空"
+	// 绝不能只体现在那几句 `DROP TABLE` 里：用户看到的应当是**日志里的一句话**。
+	destructiveRebuildNote string
 
-	conversations *dao.ConversationDao
-	events        *dao.EventDao
-	runs          *dao.RunDao
-	messages      *dao.MessageDao
-	memories      *dao.MemoryDao
-	inputs        *dao.InputDao
-	meta          *dao.MetaDao
-	migrations    *dao.MigrationDao
+	sessions   *dao.SessionDao
+	events     *dao.EventDao
+	runs       *dao.RunDao
+	messages   *dao.MessageDao
+	memories   *dao.PermissionMemoryDao
+	inputs     *dao.InputDao
+	meta       *dao.MetaDao
+	migrations *dao.SchemaMigrationDao
 
 	// 能力定义事实源（M6-1）：两张定义表 + 一张只追加的变更审计。
 	skills             *dao.SkillDao
@@ -125,15 +97,15 @@ func Open(path string) (*Store, error) {
 func New(db *gorm.DB) *Store {
 	getDB := func(ctx context.Context) *gorm.DB { return db.WithContext(ctx) }
 	return &Store{
-		db:            db,
-		conversations: dao.NewConversationDao(getDB),
-		events:        dao.NewEventDao(getDB),
-		runs:          dao.NewRunDao(getDB),
-		messages:      dao.NewMessageDao(getDB),
-		memories:      dao.NewMemoryDao(getDB),
-		inputs:        dao.NewInputDao(getDB),
-		meta:          dao.NewMetaDao(getDB),
-		migrations:    dao.NewMigrationDao(getDB),
+		db:         db,
+		sessions:   dao.NewSessionDao(getDB),
+		events:     dao.NewEventDao(getDB),
+		runs:       dao.NewRunDao(getDB),
+		messages:   dao.NewMessageDao(getDB),
+		memories:   dao.NewMemoryDao(getDB),
+		inputs:     dao.NewInputDao(getDB),
+		meta:       dao.NewMetaDao(getDB),
+		migrations: dao.NewMigrationDao(getDB),
 
 		skills:             dao.NewSkillDao(getDB),
 		mcpServers:         dao.NewMcpServerDao(getDB),

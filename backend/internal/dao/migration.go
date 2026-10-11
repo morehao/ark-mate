@@ -9,27 +9,27 @@ import (
 	"gorm.io/gorm"
 )
 
-// MigrationDao 访问 schema_migrations 表。
+// SchemaMigrationDao 访问 schema_migrations 表。
 //
 // 表的创建与应用不在这里（见 internal/store 的迁移内核）：内核要保持
 // 「有序 + 单事务 DDL + 版本拒绝启动 + staging 回滚」这些 gorm AutoMigrate
 // 表达不了的语义，本 DAO 只负责内核自身的读写。
-type MigrationDao struct {
-	*gormdao.Dao[model.Migration, model.MigrationList, int64]
+type SchemaMigrationDao struct {
+	*gormdao.Dao[model.SchemaMigrationEntity, model.SchemaMigrationEntityList, int64]
 }
 
-// NewMigrationDao 构造 MigrationDao（getDB 必填，见包注释）。
-func NewMigrationDao(getDB gormdao.DBGetter) *MigrationDao {
-	return &MigrationDao{Dao: newDao[model.Migration, model.MigrationList, int64]("MigrationDao", getDB)}
+// NewMigrationDao 构造 SchemaMigrationDao（getDB 必填，见包注释）。
+func NewMigrationDao(getDB gormdao.DBGetter) *SchemaMigrationDao {
+	return &SchemaMigrationDao{Dao: newDao[model.SchemaMigrationEntity, model.SchemaMigrationEntityList, int64]("SchemaMigrationDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
-func (d *MigrationDao) WithTx(tx *gorm.DB) *MigrationDao {
-	return &MigrationDao{Dao: d.Dao.WithTx(tx)}
+func (d *SchemaMigrationDao) WithTx(tx *gorm.DB) *SchemaMigrationDao {
+	return &SchemaMigrationDao{Dao: d.Dao.WithTx(tx)}
 }
 
 // AppliedVersions 返回已应用的版本集合与最大版本（空库 → 空集合 + 0）。
-func (d *MigrationDao) AppliedVersions(ctx context.Context) (map[int]bool, int, error) {
+func (d *SchemaMigrationDao) AppliedVersions(ctx context.Context) (map[int]bool, int, error) {
 	list, err := d.GetListByCond(ctx, &gormdao.BaseCond{OrderField: "version ASC"})
 	if err != nil {
 		return nil, 0, err
@@ -46,6 +46,6 @@ func (d *MigrationDao) AppliedVersions(ctx context.Context) (map[int]bool, int, 
 }
 
 // Record 记录一个已应用的版本（在迁移事务内调用）。
-func (d *MigrationDao) Record(ctx context.Context, version int, name string) error {
-	return d.Insert(ctx, &model.Migration{Version: version, Name: name, AppliedAt: time.Now().UTC()})
+func (d *SchemaMigrationDao) Record(ctx context.Context, version int, name string) error {
+	return d.Insert(ctx, &model.SchemaMigrationEntity{Version: version, Name: name, AppliedAt: time.Now().UTC()})
 }

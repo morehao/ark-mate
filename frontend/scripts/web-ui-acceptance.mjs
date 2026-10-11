@@ -85,7 +85,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const globalPageErrors = []
 
 // 脚本自己造出来的会话（收尾统一归档：不留垃圾在本地开发实例里）
-const createdConversations = []
+const createdSessions = []
 
 // ——— 断言台账 ———
 const results = []
@@ -416,17 +416,17 @@ const q = (css) => `document.querySelector(${JSON.stringify(css)})`
  * 轮询一个会话直到离开 running/pending（返回终态；超时返回 'timeout'）。
  *
  * 为什么要它：自动化触发的会话，其来源标只在列表被刷新后才出现，而列表刷新由
- * "终态事件 → refreshConversations" 驱动——固定 sleep 等于把断言押在模型速度上。
+ * "终态事件 → refreshSessions" 驱动——固定 sleep 等于把断言押在模型速度上。
  */
-async function waitConversationTerminal(id, timeoutMs = 90000) {
-  // 终态闭集取自前端契约的 `ConversationStatus`（`in_progress` = 有轮次在跑，**不是**终态）。
+async function waitSessionTerminal(id, timeoutMs = 90000) {
+  // 终态闭集取自前端契约的 `SessionStatus`（`in_progress` = 有轮次在跑，**不是**终态）。
   const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'interrupted'])
   const t0 = Date.now()
   let last = 'unknown'
   while (Date.now() - t0 < timeoutMs) {
     try {
       // api() 返回的是 { status, json }（信封在 json 里）
-      const r = await api('GET', `/conversations/${id}`)
+      const r = await api('GET', `/sessions/${id}`)
       last = r?.json?.data?.status ?? last
       if (TERMINAL.has(last)) return last
     } catch {
@@ -592,8 +592,8 @@ async function seedSkills() {
 }
 
 async function cleanupCreated() {
-  for (const id of createdConversations) {
-    const r = await api('PATCH', `/conversations/${id}`, { archived: true }).catch(() => null)
+  for (const id of createdSessions) {
+    const r = await api('PATCH', `/sessions/${id}`, { archived: true }).catch(() => null)
     console.log(`  🧹 归档验收会话 ${id}: ${r ? r.json.code : 'n/a'}`)
   }
 }
@@ -617,7 +617,7 @@ async function setDefaultAgent(id) {
 
 // ————————————————————————————————————————————————————————————————
 // 场景一：M3-4 能力勾选面板
-// DoD（计划 §5）：勾选后建会话 → `GET /conversations/:id` 回显选定明细与钉住的指纹；
+// DoD（计划 §5）：勾选后建会话 → `GET /sessions/:id` 回显选定明细与钉住的指纹；
 //                不可达时前端给解释。
 // ————————————————————————————————————————————————————————————————
 async function scenarioCapability(browser) {
@@ -723,17 +723,17 @@ async function scenarioCapability(browser) {
   await page.shot('06-before-send')
   check('草稿已进入输入框（弹层没吃掉输入）', (await page.evaluate(`return document.querySelector('textarea').value`)).includes('ok'), '')
   await page.press('Enter')
-  await page.waitFor(`return /\\/conversations\\/[0-9a-zA-Z-]+/.test(location.pathname)`, { label: '会话创建并跳转', timeout: 40000 })
+  await page.waitFor(`return /\\/sessions\\/[0-9a-zA-Z-]+/.test(location.pathname)`, { label: '会话创建并跳转', timeout: 40000 })
   const convId = await page.evaluate('return location.pathname.split("/").pop()')
-  createdConversations.push(convId)
+  createdSessions.push(convId)
   await sleep(1500)
-  await page.shot('07-conversation-created')
+  await page.shot('07-session-created')
   console.log(`  → 会话 id = ${convId}`)
 
-  // DoD：GET /conversations/:id 回显选定明细与钉住的指纹
-  const detail = await api('GET', `/conversations/${convId}`)
+  // DoD：GET /sessions/:id 回显选定明细与钉住的指纹
+  const detail = await api('GET', `/sessions/${convId}`)
   const d = detail.json.data ?? {}
-  console.log(`  → GET /conversations/:id 关键字段: ${JSON.stringify({ capabilities: d.capabilities, capability_fingerprint: d.capability_fingerprint, agent_id: d.agent_id, runtime: d.runtime }).slice(0, 400)}`)
+  console.log(`  → GET /sessions/:id 关键字段: ${JSON.stringify({ capabilities: d.capabilities, capability_fingerprint: d.capability_fingerprint, agent_id: d.agent_id, runtime: d.runtime }).slice(0, 400)}`)
   check('会话详情回显能力选定明细', JSON.stringify(d.capabilities ?? null).includes(SKILLS.applicable), JSON.stringify(d.capabilities ?? null))
   const fp = d.capabilities?.fingerprint ?? d.capability_fingerprint
   check('会话详情回显钉住的能力指纹', typeof fp === 'string' && fp.length >= 8, `fingerprint=${String(fp).slice(0, 24)}`)
@@ -743,7 +743,7 @@ async function scenarioCapability(browser) {
   const openDetail = await page.click(`[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||b.getAttribute('title')||'') === '会话详情')`, { optional: true })
   if (openDetail) {
     await sleep(900)
-    await page.shot('08-conversation-detail')
+    await page.shot('08-session-detail')
     const drawer = await page.text()
     const capLine = drawer.split('\n').find((l) => l.includes('技能')) ?? ''
     check('会话详情抽屉的「能力」行回显选定 skill', drawer.includes('能力') && drawer.includes(SKILLS.applicable), capLine.slice(0, 160))
@@ -888,15 +888,15 @@ async function scenarioAutomation(browser) {
   const runBtn = byText('button', '立即运行')
   check('列表行有「立即运行」', !!(await page.evaluate(`return !!(${runBtn})`)), '')
   await clickJS(page, runBtn)
-  await page.waitFor(`return location.pathname.startsWith('/conversations/')`, { label: '手动运行后跳到会话', timeout: 90000 })
+  await page.waitFor(`return location.pathname.startsWith('/sessions/')`, { label: '手动运行后跳到会话', timeout: 90000 })
   const autoConv = await page.evaluate('return location.pathname.split("/").pop()')
-  createdConversations.push(autoConv)
-  // 等这一轮**真正结束**再断言来源标：侧栏的 `origin` 标由"终态 → refreshConversations"带出
+  createdSessions.push(autoConv)
+  // 等这一轮**真正结束**再断言来源标：侧栏的 `origin` 标由"终态 → refreshSessions"带出
   // （列表是轮询刷新的，而事件流里没有 origin），固定 sleep 会在模型慢时假红——
   // 实测同一次运行：断言时无标，+5s 后 status=completed 且标出现。
-  const st = await waitConversationTerminal(autoConv, 120000)
+  const st = await waitSessionTerminal(autoConv, 120000)
   check('自动化触发的会话跑到终态（等标的前提）', st !== 'timeout', `status=${st}`)
-  await page.shot('16-automation-conversation')
+  await page.shot('16-automation-session')
 
   // 会话带标：侧栏/会话页上有 `title="由定时任务 <id> 触发"`
   const originTag = `[...document.querySelectorAll('[title]')].find(e => (e.getAttribute('title')||'').includes('由定时任务') && (e.getAttribute('title')||'').includes(${JSON.stringify(AUTO_ID)}))`
@@ -910,7 +910,7 @@ async function scenarioAutomation(browser) {
   check('会话带自动化来源标（由定时任务 … 触发）', gotTag, await page.evaluate(`return (${originTag}||{}).getAttribute ? (${originTag}).getAttribute('title') : '无'`))
 
   // API 交叉验证：这条会话的 origin 就是 automation:<id>
-  const convDetail = await api('GET', `/conversations/${autoConv}`)
+  const convDetail = await api('GET', `/sessions/${autoConv}`)
   check('会话 origin 落在 automation:ui-verify-daily', (convDetail.json.data?.origin ?? '') === `automation:${AUTO_ID}`, `origin=${convDetail.json.data?.origin}`)
 
   // 运行史（跑之后）：有记录、标明是手动触发
@@ -924,7 +924,7 @@ async function scenarioAutomation(browser) {
   const runsApi = await api('GET', `/automations/${AUTO_ID}/runs`)
   const recs = runsApi.json.data?.runs ?? runsApi.json.data?.records ?? []
   check('运行史 API 有记录', recs.length >= 1, JSON.stringify(recs[0] ?? null).slice(0, 240))
-  check('运行史记录里有会话可回溯', recs.some((r) => r.conversation_id), (recs.map((r) => r.conversation_id).filter(Boolean)[0] ?? '无'))
+  check('运行史记录里有会话可回溯', recs.some((r) => r.session_id), (recs.map((r) => r.session_id).filter(Boolean)[0] ?? '无'))
 
   // 工作空间「手输绝对路径」那条路（v14.3 / #41 的形状）：它是**另一个页面**上验的——这一段会开关一个
   // 模态对话框，而 Esc/取消在嵌套模态下会连带关掉外层那个（实测：在自动化弹窗里试，表单当场被关掉，
@@ -990,9 +990,9 @@ async function scenarioCommands(browser) {
   section('M5′ 命令发现面（底座通告 → 输入框 `/` 候选 + 事件侧证据）')
   // **前置（P2-1b）**：这条场景需要"会通告命令的底座"= 一个 `opencode` agent（它建的会话才可能收到
   // `session.commands`）。底座现在由构建期固定，本构建在册的若不是它，这条**当场说清并跳过**：
-  // 2026-10-11 实测它此前一直是"靠残留数据变绿"——`ensureOpencodeConversation()` 找到的是**本脚本
+  // 2026-10-11 实测它此前一直是"靠残留数据变绿"——`ensureOpencodeSession()` 找到的是**本脚本
   // 早先几轮自己建的** opencode 会话，于是"验过了"其实什么也没验（而在干净实例上它会红在
-  // `POST /conversations {agent_id:'opencode'}` 上，因为那个 agent 根本没注册）。
+  // `POST /sessions {agent_id:'opencode'}` 上，因为那个 agent 根本没注册）。
   if (!AGENTS.some((a) => a.id === 'opencode')) {
     skip('cmd: 命令发现面',
       `本构建在册的底座是 ${RUNTIME}，没有 opencode agent；命令通告是 ACP 的运行时能力（ADR-17），` +
@@ -1003,19 +1003,19 @@ async function scenarioCommands(browser) {
   // 注意：历史会话（M5′ 之前建的）永远不会有 `session.commands`——那时平台还没接收这条通告，
   // 所以"列表里第一条 opencode 会话"是错的判据（第一版就这么挑，选中 09-16 的老会话后必然红）。
   // 判据只能是"这条会话的 history 里真有该事件"；一条都没有就自己造一条。
-  const oc = await ensureOpencodeConversation()
+  const oc = await ensureOpencodeSession()
   if (!oc) {
     check('存在一个通告过命令的 opencode 会话', false, '既没找到也没能造出来')
     return {}
   }
   console.log(`  → 用会话 ${oc.id}（${oc.mode === 'created' ? '本轮新建' : '历史已通告'}）`)
-  const page = await openPage(browser, `${WEB_URL}/conversations/${oc.id}`)
+  const page = await openPage(browser, `${WEB_URL}/sessions/${oc.id}`)
   await page.waitFor(`return !!document.querySelector('textarea')`, { label: '会话输入框就绪' })
   await sleep(2500) // 等 WS 全量回放把 session.commands 送进来
-  await page.shot('20-conversation-opencode')
+  await page.shot('20-session-opencode')
 
   // 事件侧证据（不依赖界面）：history 里应有 session.commands
-  const hist = await api('GET', `/conversations/${oc.id}/history?limit=500`)
+  const hist = await api('GET', `/sessions/${oc.id}/history?limit=500`)
   const events = hist.json.data?.events ?? hist.json.data?.Events ?? []
   const cmdEv = events.find((e) => (e.type ?? e.Type) === 'session.commands')
   const cmds = cmdEv ? (cmdEv.payload?.commands ?? cmdEv.Payload?.commands ?? []) : []
@@ -1062,22 +1062,22 @@ async function scenarioCommands(browser) {
 }
 
 /** 取一条 history 里真有 `session.commands` 的 opencode 会话；没有就现建一条并等通告到位。 */
-async function ensureOpencodeConversation() {
-  const convs = await api('GET', '/conversations?limit=30')
+async function ensureOpencodeSession() {
+  const convs = await api('GET', '/sessions?limit=30')
   for (const c of (convs.json.data ?? []).filter((c) => c.agent_id === 'opencode')) {
-    const h = await api('GET', `/conversations/${c.id}/history?limit=200`)
+    const h = await api('GET', `/sessions/${c.id}/history?limit=200`)
     const ev = h.json.data?.events ?? h.json.data?.Events ?? []
     if (ev.some((e) => (e.type ?? e.Type) === 'session.commands')) return { ...c, mode: 'found' }
   }
   // 没有现成的：建 + 发一句话（ACP 会话在首轮 prompt 时真正起来，opencode 随即通告命令）
-  const created = await api('POST', '/conversations', { agent_id: 'opencode' })
+  const created = await api('POST', '/sessions', { agent_id: 'opencode' })
   const id = created.json.data?.id
   if (!id) return null
-  createdConversations.push(id)
-  await api('POST', `/conversations/${id}/prompt`, { text: '只回复 ok。' })
+  createdSessions.push(id)
+  await api('POST', `/sessions/${id}/prompt`, { text: '只回复 ok。' })
   for (let i = 0; i < 60; i++) {
     await sleep(500)
-    const h = await api('GET', `/conversations/${id}/history?limit=200`)
+    const h = await api('GET', `/sessions/${id}/history?limit=200`)
     const ev = h.json.data?.events ?? h.json.data?.Events ?? []
     if (ev.some((e) => (e.type ?? e.Type) === 'session.commands')) return { id, mode: 'created' }
   }

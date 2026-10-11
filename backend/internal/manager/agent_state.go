@@ -89,7 +89,7 @@ func (s *Service) currentDefaultLocked() string {
 	return best
 }
 
-// ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，conversation_count 为删除影响面）。
+// ListAgents 返回播种的全部 Agent（is_default 标出「当前 Agent」，session_count 为删除影响面）。
 //
 // `default_model` 是**派生只读**（E7）：取 `models.is_default` 里**构建期底座**那一份。
 // 读库在**持锁之前**完成一次（不是逐 agent 查）——在 s.mu 里做 IO 会让整个注册表面等服务层的
@@ -105,23 +105,23 @@ func (s *Service) ListAgents() ([]dtoagent.AgentResp, error) {
 	for _, a := range s.agents {
 		out = append(out, dtoagent.AgentResp{ID: a.ID, Name: a.Name, Provider: a.Provider, State: a.State,
 			IsDefault: a.ID == cur, Seed: seedAgent(a.ID),
-			PermissionPolicy:  toPermissionPolicyResp(a.PermissionPolicy),
-			ConversationCount: s.conversationCountLocked(a.ID),
-			DefaultModel:      derivedDefaultModels(selected, defaults),
+			PermissionPolicy: toPermissionPolicyResp(a.PermissionPolicy),
+			SessionCount:     s.sessionCountLocked(a.ID),
+			DefaultModel:     derivedDefaultModels(selected, defaults),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-// conversationCountLocked 统计绑定该 agent 的会话数（调用方须持 s.mu）。
+// sessionCountLocked 统计绑定该 agent 的会话数（调用方须持 s.mu）。
 // 用于 /agents 列表与删除影响面：归属不可变 → 删除时这些会话都会失去执行者。
-func (s *Service) conversationCountLocked(agentID string) int {
+func (s *Service) sessionCountLocked(agentID string) int {
 	if agentID == "" {
 		return 0
 	}
 	n := 0
-	for _, rec := range s.conversations {
+	for _, rec := range s.sessions {
 		if rec != nil && rec.AgentID == agentID {
 			n++
 		}
@@ -155,8 +155,8 @@ func (s *Service) requireDefaultAgent() (*AgentRec, error) {
 	return a, nil
 }
 
-// resolveConversationAgent 归一新建会话的 agent_id：空 → 「当前 Agent」；非空 → 原样。
-func (s *Service) resolveConversationAgent(agentID string) (string, error) {
+// resolveSessionAgent 归一新建会话的 agent_id：空 → 「当前 Agent」；非空 → 原样。
+func (s *Service) resolveSessionAgent(agentID string) (string, error) {
 	if agentID != "" {
 		return agentID, nil
 	}
@@ -175,11 +175,11 @@ func (s *Service) AgentByID(id string) (*AgentRec, bool) {
 	return a, ok
 }
 
-// ConversationAgentID 返回会话归属的 agent id（无此会话 → 空串）。供权限策略等按 agent 判定。
-func (s *Service) ConversationAgentID(id string) string {
+// SessionAgentID 返回会话归属的 agent id（无此会话 → 空串）。供权限策略等按 agent 判定。
+func (s *Service) SessionAgentID(id string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if r, ok := s.conversations[id]; ok {
+	if r, ok := s.sessions[id]; ok {
 		return r.AgentID
 	}
 	return ""

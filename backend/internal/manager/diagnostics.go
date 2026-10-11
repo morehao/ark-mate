@@ -17,22 +17,22 @@ const maxDiagStderrLines = 20
 
 // agentLastErr 某 agent 最近一次失败（进程起不来/握手失败/轮次失败）的诊断快照。
 type agentLastErr struct {
-	At             time.Time
-	ConversationID string
-	Code           string
-	Class          string
-	Details        string
-	StderrTail     []string
+	At         time.Time
+	SessionID  string
+	Code       string
+	Class      string
+	Details    string
+	StderrTail []string
 }
 
 // recordAgentError 记录 agent 最近一次失败（含 stderr 诊断尾巴）。agentID 为空时按会话反查；
 // 反查不到则只记在会话维度（不影响外露的其余字段）。
-func (s *Service) recordAgentError(agentID, conversationID string, ae *acl.Error, tail []string) {
+func (s *Service) recordAgentError(agentID, sessionID string, ae *acl.Error, tail []string) {
 	if ae == nil {
 		return
 	}
-	if agentID == "" && conversationID != "" {
-		agentID = s.ConversationAgentID(conversationID)
+	if agentID == "" && sessionID != "" {
+		agentID = s.SessionAgentID(sessionID)
 	}
 	if agentID == "" {
 		return
@@ -43,12 +43,12 @@ func (s *Service) recordAgentError(agentID, conversationID string, ae *acl.Error
 		s.lastErrs = map[string]agentLastErr{}
 	}
 	s.lastErrs[agentID] = agentLastErr{
-		At:             time.Now().UTC(),
-		ConversationID: conversationID,
-		Code:           ae.Code,
-		Class:          string(ae.Class),
-		Details:        redact.String(ae.Details),
-		StderrTail:     acl.TailLines(tail, maxDiagStderrLines),
+		At:         time.Now().UTC(),
+		SessionID:  sessionID,
+		Code:       ae.Code,
+		Class:      string(ae.Class),
+		Details:    redact.String(ae.Details),
+		StderrTail: acl.TailLines(tail, maxDiagStderrLines),
 	}
 }
 
@@ -131,12 +131,12 @@ func (s *Service) AgentDiagnostics(_ context.Context, id string) (*dtoagent.Agen
 	}
 	if le, ok := s.agentLastError(id); ok {
 		resp.LastError = &dtoagent.AgentLastErrorResp{
-			At:             le.At.Format(time.RFC3339),
-			ConversationID: le.ConversationID,
-			Code:           le.Code,
-			Class:          le.Class,
-			Details:        le.Details,
-			StderrTail:     le.StderrTail,
+			At:         le.At.Format(time.RFC3339),
+			SessionID:  le.SessionID,
+			Code:       le.Code,
+			Class:      le.Class,
+			Details:    le.Details,
+			StderrTail: le.StderrTail,
 		}
 		if len(resp.StderrTail) == 0 && len(le.StderrTail) > 0 {
 			resp.StderrTail = le.StderrTail

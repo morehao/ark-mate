@@ -52,7 +52,7 @@ export interface AutomationRunRecord {
   status: AutomationRunStatus
   reason?: string
   /** status=claimed 时非空，可直接跳过去看那一轮。 */
-  conversation_id?: string
+  session_id?: string
   trigger?: AutomationRunTrigger
 }
 
@@ -67,7 +67,7 @@ export interface Automation {
   /** 内存态现算：空 = 没有下一次（跑完的 once / 归档 / 装载失败）。 */
   next_due_at?: string
   last_fired_at?: string
-  last_conversation_id?: string
+  last_session_id?: string
   last_status?: AutomationRunStatus
   last_reason?: string
   consecutive_failures?: number
@@ -107,7 +107,7 @@ export interface AutomationRunResp {
   id: string
   status: AutomationRunStatus
   trigger: AutomationRunTrigger
-  conversation_id?: string
+  session_id?: string
   reason?: string
   state?: AutomationState
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -33,9 +34,9 @@ type AgentRec struct {
 	State            string
 }
 
-// ConversationRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 conversations 行同源）。
+// SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源）。
 // P0 起不再记录 runtime 身份；RuntimeHint 仅为最近/首选 runtime 的执行提示（非身份，用户不可见）。
-type ConversationRec struct {
+type SessionRec struct {
 	ID      string
 	AgentID string
 	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
@@ -57,7 +58,7 @@ type ConversationRec struct {
 	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
 	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
 	Generation int64
-	// ProviderSessionID 原生底座会话 id（P3 双 id；conversation id = 平台 uuid，本字段存
+	// ProviderSessionID 原生底座会话 id（P3 双 id；session id = 平台 uuid，本字段存
 	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
 	ProviderSessionID string
 	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
@@ -139,13 +140,13 @@ type Service struct {
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
 	skillProjections []SkillProjection
 
-	mu            sync.Mutex
-	agents        map[string]*AgentRec
-	conversations map[string]*ConversationRec
+	mu       sync.Mutex
+	agents   map[string]*AgentRec
+	sessions map[string]*SessionRec
 	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
 	inputs    map[string][]QueuedInput
-	ver       map[string]int64 // 每 agg(conversation) 的版本计数（域事件递增）
-	restoring bool             // RestoreFromStore 进行中：registerConversation 跳过 DB 回写
+	ver       map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
+	restoring bool             // RestoreFromStore 进行中：registerSession 跳过 DB 回写
 
 	// MCP live 探测状态（P2 §5.2）：独立锁——探测可能耗时，不阻塞会话面。
 	mcpMu           sync.Mutex
@@ -157,6 +158,16 @@ type Service struct {
 	lastErrs map[string]agentLastErr
 	// scopeNotes 每 agent 最近一条「归属歧义」留痕（elicitation 无法归属会话时写入）。
 	scopeNotes map[string]scopeNote
+	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
+	//
+	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
+	// 库不存在时它就该由装配期现建一个），而登记表（用户显式产出的状态）在 memory 模式本来就
+	// 无处可存。少了它，"未指定 cwd 就发一条消息"这条最普通的路在 `MATE_STORE=memory` 下
+	// 直接报 `workspace_required` —— 用户什么都没做错。见 EnsureDefaultWorkspace。
+	//
+	// 由 s.mu 保护（与 sessions 同一把锁）。
+	memDefaultWorkspace *model.WorkspaceEntity
+
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *chunkCoalescer
 	// vaultStore §5 provider 密钥加密落盘句柄（惰性创建 + 缓存；见 providers.go providerVault）。
@@ -189,7 +200,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
 		agents:           make(map[string]*AgentRec),
-		conversations:    make(map[string]*ConversationRec),
+		sessions:         make(map[string]*SessionRec),
 		inputs:           make(map[string][]QueuedInput),
 		ver:              make(map[string]int64),
 		providers:        make(map[string]*providerDef),
@@ -206,8 +217,8 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
 	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
-	s.coalescer = newChunkCoalescer(func(typ, conversationID string, payload any) {
-		s.publishRaw(typ, conversationID, payload)
+	s.coalescer = newChunkCoalescer(func(typ, sessionID string, payload any) {
+		s.publishRaw(typ, sessionID, payload)
 	})
 	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
 	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
@@ -246,11 +257,11 @@ func (s *Service) SetTranscriptDir(dir string) {
 }
 
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
-func (s *Service) beginTranscript(conversationID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
+func (s *Service) beginTranscript(sessionID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
 	if s.tx == nil {
 		return
 	}
-	s.tx.begin(conversationID, agentID, runtimeID, cwd, workspaceTemporary)
+	s.tx.begin(sessionID, agentID, runtimeID, cwd, workspaceTemporary)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。
@@ -264,10 +275,10 @@ func (s *Service) closeTranscripts() {
 	s.tx = nil
 }
 
-// registerConversation 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
+// registerSession 登记一个新会话（已存在则覆盖）；未提供的时间落为当前 UTC。
 // loadTranscripts 回灌时保留原 created_at/updated_at。
 // sqlite 模式下（st != nil 且非恢复过程）同步写库。
-func (s *Service) registerConversation(rec *ConversationRec) {
+func (s *Service) registerSession(rec *SessionRec) {
 	s.mu.Lock()
 	now := time.Now().UTC()
 	if rec.CreatedAt.IsZero() {
@@ -276,19 +287,19 @@ func (s *Service) registerConversation(rec *ConversationRec) {
 	if rec.UpdatedAt.IsZero() {
 		rec.UpdatedAt = now
 	}
-	s.conversations[rec.ID] = rec
+	s.sessions[rec.ID] = rec
 	restoring := s.restoring
 	s.mu.Unlock()
 	if !restoring {
-		s.persistConversation(rec)
+		s.persistSession(rec)
 	}
 }
 
-// bumpGeneration 会话执行代际自增（执行上下文重建时调用；见 ConversationRec.Generation）。
+// bumpGeneration 会话执行代际自增（执行上下文重建时调用；见 SessionRec.Generation）。
 func (s *Service) bumpGeneration(id string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, ok := s.conversations[id]
+	rec, ok := s.sessions[id]
 	if !ok {
 		return 0
 	}
@@ -296,22 +307,22 @@ func (s *Service) bumpGeneration(id string) int64 {
 	return rec.Generation
 }
 
-// conversationGeneration 读会话当前执行代际（会话不存在 → 0，此时任何排队项都不匹配 → 作废）。
-func (s *Service) conversationGeneration(id string) int64 {
+// sessionGeneration 读会话当前执行代际（会话不存在 → 0，此时任何排队项都不匹配 → 作废）。
+func (s *Service) sessionGeneration(id string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, ok := s.conversations[id]
+	rec, ok := s.sessions[id]
 	if !ok {
 		return 0
 	}
 	return rec.Generation
 }
 
-// conversationRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
-func (s *Service) conversationRec(id string) *ConversationRec {
+// sessionRec 返回某会话的进程内记录副本（断点恢复/内部查询用；不存在返回 nil）。
+func (s *Service) sessionRec(id string) *SessionRec {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rec, ok := s.conversations[id]
+	rec, ok := s.sessions[id]
 	if !ok {
 		return nil
 	}
@@ -319,10 +330,10 @@ func (s *Service) conversationRec(id string) *ConversationRec {
 	return &cp
 }
 
-// markConversation 更新会话终态（sqlite 模式下同步写库 status）。
-func (s *Service) markConversation(id, status string) {
+// markSession 更新会话终态（sqlite 模式下同步写库 status）。
+func (s *Service) markSession(id, status string) {
 	s.mu.Lock()
-	if r, ok := s.conversations[id]; ok {
+	if r, ok := s.sessions[id]; ok {
 		r.Status = status
 		r.UpdatedAt = time.Now().UTC()
 	}
@@ -330,8 +341,8 @@ func (s *Service) markConversation(id, status string) {
 	if s.st != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := s.st.UpdateConversationMeta(ctx, id, store.ConversationMetaPatch{Status: &status}); err != nil {
-			glog.Warnw(context.Background(), "store: mark conversation failed", "conversation", id, "err", err)
+		if err := s.st.UpdateSessionMeta(ctx, id, model.SessionMetaPatch{Status: &status}); err != nil {
+			glog.Warnw(context.Background(), "store: mark session failed", "session", id, "err", err)
 		}
 	}
 }
@@ -339,10 +350,10 @@ func (s *Service) markConversation(id, status string) {
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
 func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
 
-// hasConversation 判断会话是否在本进程登记。
-func (s *Service) hasConversation(id string) bool {
+// hasSession 判断会话是否在本进程登记。
+func (s *Service) hasSession(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.conversations[id]
+	_, ok := s.sessions[id]
 	return ok
 }

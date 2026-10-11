@@ -1,10 +1,10 @@
-import type { Agent, ConversationSummary, StreamEntry } from '@ark-mate/types'
-import type { ConversationView } from '../store'
+import type { Agent, SessionSummary, StreamEntry } from '@ark-mate/types'
+import type { SessionView } from '../store'
 
 /** 会话标题：服务端已推导（sm.title，可被 PATCH 覆盖）优先；其次首条用户消息/正文；最后「新会话 · <agent>」。 */
 export function titleFor(
-  sm: ConversationSummary | undefined,
-  view: ConversationView | undefined,
+  sm: SessionSummary | undefined,
+  view: SessionView | undefined,
   agents: Agent[],
 ): string {
   if (sm && sm.title) return sm.title

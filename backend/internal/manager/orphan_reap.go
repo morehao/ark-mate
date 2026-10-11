@@ -90,14 +90,14 @@ func (o *Orchestrator) reapIdleOnce(now time.Time, idle time.Duration) int {
 		if o.inflight.Len(rc.client) > 0 {
 			continue // 有在途 turn，不回收
 		}
-		hasConversation := false
-		for _, as := range o.conversations {
+		hasSession := false
+		for _, as := range o.sessions {
 			if as.client == rc.client {
-				hasConversation = true
+				hasSession = true
 				break
 			}
 		}
-		if hasConversation {
+		if hasSession {
 			continue // 仍有会话引用（含已完成态），不回收（回收语义只覆盖暖进程）
 		}
 		victims = append(victims, rc)

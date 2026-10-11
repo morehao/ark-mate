@@ -1,9 +1,9 @@
-export type ConversationStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
-export interface ConversationSummary {
+export interface SessionSummary {
   id: string
   agent_id: string
-  status: ConversationStatus
+  status: SessionStatus
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
   archived: boolean
@@ -36,7 +36,7 @@ export interface ConversationSummary {
    * 钉住的能力选定（M3）。**整个字段缺失 = 未声明能力选择**（走 agent 白名单 /
    * 各自的 runtimes 声明），不是"没有能力"。
    */
-  capabilities?: ConversationCapabilities | null
+  capabilities?: SessionCapabilities | null
   /**
    * 会话来源（平台判定，非用户输入）：缺省 = 人工创建，`automation:<id>` = 该定时任务触发。
    * 面板据此给会话打标并可跳回任务页。
@@ -55,7 +55,7 @@ export interface ConversationSummary {
  *  - 某 kind `[]`   → **明确一个都不要**
  *  - 某 kind 非空   → 白名单
  */
-export interface ConversationCapabilities {
+export interface SessionCapabilities {
   skills?: string[]
   mcps?: string[]
   /** 钉住的代际指纹（解析后的能力集的摘要；同指纹 = 同一个进程代际）。 */
@@ -70,8 +70,8 @@ export interface RunUsage {
   cost_currency?: string
 }
 
-/** 轮次明细（GET /conversations/:id/runs；runs 表读模型，内存模式为空数组）。 */
-export interface ConversationRun {
+/** 轮次明细（GET /sessions/:id/runs；runs 表读模型，内存模式为空数组）。 */
+export interface SessionRun {
   id: string
   user_text: string
   status: string // running | completed | failed | cancelled
@@ -88,14 +88,14 @@ export interface ConversationRun {
 }
 
 /** 会话搜索结果 = 会话概要 + 命中片段/次数（Matches≥1：元数据或正文命中；含归档）。 */
-export interface ConversationSearchHit extends ConversationSummary {
+export interface SessionSearchHit extends SessionSummary {
   snippet: string
   matches: number
 }
 
 /** 跨会话消息级搜索命中（M3 ②：seq 为锚点，前端据此滚动定位）。 */
 export interface MessageSearchHit {
-  conversation_id: string
+  session_id: string
   title?: string
   agent_id?: string
   role: 'user' | 'assistant' | string
@@ -118,7 +118,7 @@ export interface MessageSearchResp {
 
 /** 批量导出产物（M3 ②：content 可直接落盘）。 */
 export interface ExportFile {
-  conversation_id: string
+  session_id: string
   title?: string
   agent_id?: string
   status?: string
@@ -139,7 +139,7 @@ export interface ExportResp {
   files: ExportFile[]
 }
 
-export interface ConversationDetail extends ConversationSummary {
+export interface SessionDetail extends SessionSummary {
   pending: PermissionResp[] // 挂起权限请求（确认通道待决项）
   memories?: PermissionMemory[] // 会话级权限记忆（allow/reject 双侧，可逐条/一键撤销）
 }
@@ -159,7 +159,7 @@ export interface RevokeMemoryReq {
 }
 
 /** 会话元数据子集更新（nil/零值不更新）。 */
-export interface ConversationPatch {
+export interface SessionPatch {
   title?: string
   pinned?: boolean
   archived?: boolean
@@ -255,9 +255,13 @@ export type ElicitationMode = 'form' | 'url'
 /** 挂起结构化提问（服务端 /elicitations 与 WS 事件共用载荷）。 */
 export interface ElicitationResp {
   elicitation_id: string
+  /**
+   * 归属会话（C3 scope；决策必须由该会话发起，跨会话按「不存在」处理）。
+   *
+   * v15 之前这里有两个**同值**字段（`session_id` + `conversation_id`），是「一个东西两个词」
+   * 的遗迹；改名后收敛成一个键。
+   */
   session_id: string
-  /** 归属会话（C3 scope：与 session_id 同值；决策必须由该会话发起，跨会话按「不存在」处理）。 */
-  conversation_id: string
   /** 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）| ambiguous（两者都无，不归属）。 */
   scope_source: string
   mode: ElicitationMode
@@ -281,7 +285,7 @@ export interface ResolveElicitationResp {
   action: ElicitationAction
 }
 
-export interface CreateConversationReq {
+export interface CreateSessionReq {
   /** 空 = 后端默认播种 Agent（dsh）。 */
   agent_id?: string
   prompt: string
@@ -312,10 +316,10 @@ export interface CreateConversationReq {
   capabilities?: { skills?: string[]; mcps?: string[] }
 }
 
-export interface CreateConversationResp {
+export interface CreateSessionResp {
   id: string
   agent_id: string
-  status: ConversationStatus
+  status: SessionStatus
   event_seq: number // 已发布事件水位：WS attach 续传起点
   /** 定稿后的工作空间（创建即回读，无需二次查询）。 */
   cwd?: string
@@ -334,17 +338,17 @@ export interface PromptReq {
   delivery?: DeliveryMode
 }
 
-export interface ConversationPromptResp {
+export interface SessionPromptResp {
   id: string
-  status: ConversationStatus
+  status: SessionStatus
   event_seq: number
   /** 本次输入已入队（delivery=after_turn|interrupt_then_prompt 且会话正忙）。 */
   queued?: boolean
-  /** 入队项的 id（可用 DELETE /v1/mate/conversations/:id/inputs/:input_id 撤下）。 */
+  /** 入队项的 id（可用 DELETE /v1/mate/sessions/:id/inputs/:input_id 撤下）。 */
   input_id?: string
 }
 
-/** §6 一条待投递的排队输入（GET /conversations/:id/inputs；当前态，投递/撤下后即消失）。 */
+/** §6 一条待投递的排队输入（GET /sessions/:id/inputs；当前态，投递/撤下后即消失）。 */
 export interface QueuedInputResp {
   input_id: string
   text: string
@@ -355,7 +359,7 @@ export interface QueuedInputResp {
   created_at?: string
 }
 
-/** §6 撤下排队输入的响应（DELETE /conversations/:id/inputs/:input_id）。 */
+/** §6 撤下排队输入的响应（DELETE /sessions/:id/inputs/:input_id）。 */
 export interface CancelQueuedInputResp {
   id: string
   input_id: string
@@ -363,7 +367,7 @@ export interface CancelQueuedInputResp {
   deleted: boolean
 }
 
-export interface CancelConversationResp {
+export interface CancelSessionResp {
   id: string
-  status: ConversationStatus
+  status: SessionStatus
 }

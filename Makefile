@@ -171,7 +171,13 @@ web:
 # apps/web/dist，核心从不内嵌副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
 core/desktop: web desktop/runtime-bin
-	cd backend && CGO_ENABLED=0 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/mate
+	@# CGO_ENABLED=1：持久层用的是 golib 的 SQLite driver（底层 mattn/go-sqlite3，**CGO**）。
+	@# 2026-10-10 起这里曾是 0，代价是桌面核的 SQLite 面**运行期不可用**（编得出、连库即
+	@# `go-sqlite3 requires cgo to work. This is a stub`）——桌面态一启动就撞墙，整条
+	@# `make verify/desktop-dod` 因此自那时起跑不通。2026-10-11 决策：**允许依赖 CGO**。
+	@# 代价如实记：桌面核变成动态链接（需要目标平台的 libc），本仓不做 Go 交叉编译，
+	@# 所以这条现在没有代价；将来若要交叉编译，得先解决 C 交叉工具链。
+	cd backend && CGO_ENABLED=1 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/mate
 	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
 	@# 只有一份 dist 是设计 §6.1 的红线——核心从不自带资产（2026-10-10 起连 `//go:embed`
 	@# 都删了），否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。

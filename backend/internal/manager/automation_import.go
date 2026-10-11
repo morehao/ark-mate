@@ -120,7 +120,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 // 运行态键按 `pkg/automation.Automation` 的 JSON 形态写回，值用**强类型**（`[]automation.RunRecord`、
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
-func automationFileBody(row *store.AutomationDefinition) (string, error) {
+func automationFileBody(row *model.AutomationEntity) (string, error) {
 	df, err := capability.DecodeDefinitionDoc(automationLocator(row.ID), []byte(row.Body))
 	if err != nil {
 		return "", err
@@ -140,12 +140,12 @@ func automationFileBody(row *store.AutomationDefinition) (string, error) {
 }
 
 // automationRuntimeStateOf 从一行取运行态（recent_runs 的 JSON 坏掉 → 报错，不静默丢运行史）。
-func automationRuntimeStateOf(row *store.AutomationDefinition) (store.AutomationRuntimeState, error) {
+func automationRuntimeStateOf(row *model.AutomationEntity) (store.AutomationRuntimeState, error) {
 	rt := store.AutomationRuntimeState{
 		LastFiredAt:         row.LastFiredAt,
 		LastStatus:          row.LastStatus,
 		LastReason:          row.LastReason,
-		LastConversationID:  row.LastConversationID,
+		LastSessionID:       row.LastSessionID,
 		ConsecutiveFailures: row.ConsecutiveFailures,
 		RecentRuns:          row.RecentRuns,
 	}
@@ -175,8 +175,8 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRu
 			return err
 		}
 	}
-	if rt.LastConversationID != "" {
-		if err := df.Set("last_conversation_id", rt.LastConversationID); err != nil {
+	if rt.LastSessionID != "" {
+		if err := df.Set("last_session_id", rt.LastSessionID); err != nil {
 			return err
 		}
 	}
@@ -308,7 +308,7 @@ func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.Automation
 			// 归一成**唯一格式**（UTC + RFC3339Nano）：它是认领 CAS 的比较值，两种写法会让
 			// "同一个 occurrence"比对不上（详见 automationLastFiredText）。
 			rt.LastFiredAt = t.UTC().Format(time.RFC3339Nano)
-		case "last_status", "last_reason", "last_conversation_id":
+		case "last_status", "last_reason", "last_session_id":
 			s, err := automationStringKey(k, raw)
 			if err != nil {
 				return nil, err
@@ -319,7 +319,7 @@ func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.Automation
 			case "last_reason":
 				rt.LastReason = s
 			default:
-				rt.LastConversationID = s
+				rt.LastSessionID = s
 			}
 		case "consecutive_failures":
 			if err := json.Unmarshal(raw, &rt.ConsecutiveFailures); err != nil {

@@ -18,12 +18,12 @@ type fakeSink struct {
 	pay  []map[string]any
 }
 
-func (f *fakeSink) fn(typ, conversationID string, payload any) {
+func (f *fakeSink) fn(typ, sessionID string, payload any) {
 	m, _ := payload.(map[string]any)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.typ = append(f.typ, typ)
-	f.conv = append(f.conv, conversationID)
+	f.conv = append(f.conv, sessionID)
 	f.pay = append(f.pay, m)
 }
 
@@ -156,8 +156,8 @@ func TestChunkCoalescerTimerFlush(t *testing.T) {
 	}
 }
 
-// TestChunkCoalescerIsolatesTypesAndConversations 不同类型/不同会话各成一条（绝不混并）。
-func TestChunkCoalescerIsolatesTypesAndConversations(t *testing.T) {
+// TestChunkCoalescerIsolatesTypesAndSessions 不同类型/不同会话各成一条（绝不混并）。
+func TestChunkCoalescerIsolatesTypesAndSessions(t *testing.T) {
 	sink := &fakeSink{}
 	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
@@ -185,9 +185,9 @@ func TestChunkCoalescerCloseFlushes(t *testing.T) {
 	}
 }
 
-// TestChunkCoalescerFlushIsPerConversation 非合并类型发布前的 flush 只落本会话
+// TestChunkCoalescerFlushIsPerSession 非合并类型发布前的 flush 只落本会话
 // （别的会话的增量继续攒批，不被无关事件反复打断）。
-func TestChunkCoalescerFlushIsPerConversation(t *testing.T) {
+func TestChunkCoalescerFlushIsPerSession(t *testing.T) {
 	sink := &fakeSink{}
 	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
@@ -207,7 +207,7 @@ func TestChunkCoalescerFlushIsPerConversation(t *testing.T) {
 // 工具卡（非合并类型）发布前先落文本 → events 表里「文本先于工具卡」，且文本已合并。
 func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 	svc, st := newSearchRig(t)
-	svc.registerConversation(&ConversationRec{ID: "cv-merge", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "cv-merge", AgentID: "a1"})
 
 	svc.publish(BusMessage, "cv-merge", map[string]any{"session_id": "cv-merge", "msg_id": "m1", "text": "你"})
 	svc.publish(BusMessage, "cv-merge", map[string]any{"session_id": "cv-merge", "msg_id": "m1", "text": "好"})
@@ -245,7 +245,7 @@ func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 // TestPublishFlushesDeltasOnTurnEnded 终态事件前必 flush：events 表里文本先于 turn.ended。
 func TestPublishFlushesDeltasOnTurnEnded(t *testing.T) {
 	svc, st := newSearchRig(t)
-	svc.registerConversation(&ConversationRec{ID: "cv-end", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "cv-end", AgentID: "a1"})
 	for _, chunk := range []string{"最", "后", "一段"} {
 		svc.publish(BusMessage, "cv-end", map[string]any{"session_id": "cv-end", "msg_id": "m1", "text": chunk})
 	}
@@ -273,7 +273,7 @@ func TestCloseTranscriptsFlushesChunks(t *testing.T) {
 	svc, st := newSearchRig(t)
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
-	svc.registerConversation(&ConversationRec{ID: "cv-close", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "cv-close", AgentID: "a1"})
 	svc.tx.begin("cv-close", "a1", "stub", "/tmp", false)
 	svc.publish(BusMessage, "cv-close", map[string]any{"session_id": "cv-close", "msg_id": "m1", "text": "尾巴"})
 

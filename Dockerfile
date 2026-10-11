@@ -71,8 +71,12 @@ ARG GO_PROXY
 # 构建期固定底座（默认 dsh）。取值只做词法校验：存在性交给核心启动时的 ProductRegistry
 # fail-closed——远程 runtime 的 id 由 runtimes.json 声明，这里写不出白名单。
 ARG MATE_RUNTIME=dsh
+# CGO_ENABLED=1：持久层的 SQLite driver 是 CGO 的（mattn/go-sqlite3），0 会编出一个**运行期
+# 连不上库**的 stub（2026-10-11 决策：允许依赖 CGO）。两个前提都在：构建阶段是
+# golang:*-bookworm（自带 gcc），运行阶段是 debian:*-slim（glibc 在位）。若把 RUNTIME_IMAGE
+# 换成 musl/scratch 基底，必须同时改回 0 或换纯 Go driver。
 ENV GOPROXY=${GO_PROXY} \
-    CGO_ENABLED=0
+    CGO_ENABLED=1
 WORKDIR /src/backend
 # 先只拷 go.mod/go.sum 拉依赖：改源码不会导致重新下载模块
 COPY backend/go.mod backend/go.sum ./

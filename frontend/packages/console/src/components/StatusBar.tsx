@@ -14,7 +14,7 @@ export function StatusBar() {
   const wsState = useMate((s) => s.wsState)
   const activeId = useMate((s) => s.activeId)
   const views = useMate((s) => s.views)
-  const conversations = useMate((s) => s.conversations)
+  const sessions = useMate((s) => s.sessions)
 
   const wsMeta =
     wsState === 'open'
@@ -28,7 +28,7 @@ export function StatusBar() {
   const seq = activeId ? (views[activeId]?.lastSeq ?? 0) : 0
   const seqText = activeId
     ? `eventbus seq ${seq} · 已 attach ${activeId.length > 16 ? `${activeId.slice(0, 16)}…` : activeId}`
-    : `eventbus seq ${seq} · 未 attach 会话（共 ${conversations.length} 个）`
+    : `eventbus seq ${seq} · 未 attach 会话（共 ${sessions.length} 个）`
 
   return (
     <footer

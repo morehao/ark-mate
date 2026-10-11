@@ -46,16 +46,16 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 		}
 		for _, h := range hits {
 			resp.Hits = append(resp.Hits, dtosearch.MessageSearchHit{
-				ConversationID: h.ConversationID,
-				Title:          h.ConversationTitle,
-				AgentID:        h.AgentID,
-				Role:           h.Role,
-				Seq:            h.Seq,
-				SeqHi:          h.SeqHi,
-				MessageID:      h.MessageID,
-				RunID:          h.RunID,
-				Snippet:        foldPreview(h.Text),
-				CreatedAt:      h.CreatedAt.UTC().Format(time.RFC3339),
+				SessionID: h.SessionID,
+				Title:     h.SessionTitle,
+				AgentID:   h.AgentID,
+				Role:      h.Role,
+				Seq:       h.Seq,
+				SeqHi:     h.SeqHi,
+				MessageID: h.MessageID,
+				RunID:     h.RunID,
+				Snippet:   foldPreview(h.Text),
+				CreatedAt: h.CreatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 		resp.Total = len(resp.Hits)
@@ -68,8 +68,8 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 		return resp, nil
 	}
 	s.mu.Lock()
-	recs := make([]*ConversationRec, 0, len(s.conversations))
-	for _, r := range s.conversations {
+	recs := make([]*SessionRec, 0, len(s.sessions))
+	for _, r := range s.sessions {
 		recs = append(recs, r)
 	}
 	s.mu.Unlock()
@@ -84,13 +84,13 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	for _, r := range recs {
 		for _, th := range scanTranscriptMessages(s.tx.dir, r.ID, qLower) {
 			all = append(all, hit{at: r.UpdatedAt, out: dtosearch.MessageSearchHit{
-				ConversationID: r.ID,
-				Title:          r.Title,
-				AgentID:        r.AgentID,
-				Role:           th.Role,
-				Seq:            th.Seq,
-				Snippet:        foldPreview(th.Text),
-				CreatedAt:      r.UpdatedAt.UTC().Format(time.RFC3339),
+				SessionID: r.ID,
+				Title:     r.Title,
+				AgentID:   r.AgentID,
+				Role:      th.Role,
+				Seq:       th.Seq,
+				Snippet:   foldPreview(th.Text),
+				CreatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
 			}})
 		}
 	}
@@ -112,8 +112,8 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 }
 
 // openTranscript 打开单会话 transcript 文件（路径约定 <dir>/<会话id>.jsonl）。
-func openTranscript(dir, conversationID string) (*os.File, error) {
-	return os.Open(filepath.Join(dir, conversationID+".jsonl"))
+func openTranscript(dir, sessionID string) (*os.File, error) {
+	return os.Open(filepath.Join(dir, sessionID+".jsonl"))
 }
 
 // readTranscriptEvents 解析 transcript 正文行（跳过 schema header；不可解析行跳过）。
@@ -152,8 +152,8 @@ type transcriptMessageHit struct {
 
 // scanTranscriptMessages 扫单会话 transcript 的 user_message / session.message 事件，
 // 返回命中（含 seq 锚点）。文件缺失/不可读 → 空结果。
-func scanTranscriptMessages(dir, conversationID, qLower string) []transcriptMessageHit {
-	f, err := openTranscript(dir, conversationID)
+func scanTranscriptMessages(dir, sessionID, qLower string) []transcriptMessageHit {
+	f, err := openTranscript(dir, sessionID)
 	if err != nil {
 		return nil
 	}

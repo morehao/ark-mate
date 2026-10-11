@@ -289,7 +289,7 @@ async function scenarioStream(cdp) {
   const attachFrame = sent.find((f) => f.includes('"action":"attach"'))
   check('首帧 attach 带 43 字符 streamToken', !!attachFrame && String(JSON.parse(attachFrame).token).length === 43, attachFrame?.slice(0, 60))
 
-  const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/conversations'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
+  const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/sessions'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
   if (!conv) {
     // **如实跳过，不判红**：这一条需要"库里已经有一条会话"这个环境前提（探针不替用户造会话——
     // 那会往他的库里写东西）。判红会让"新机器上第一次跑 DoD"永远红一次，而那不是产品缺陷；
@@ -299,7 +299,7 @@ async function scenarioStream(cdp) {
     return
   }
   cdp.events.length = 0
-  await cdp.evalJs(`history.pushState({}, '', '/conversations/${conv}'); window.dispatchEvent(new PopStateEvent('popstate')); return true`)
+  await cdp.evalJs(`history.pushState({}, '', '/sessions/${conv}'); window.dispatchEvent(new PopStateEvent('popstate')); return true`)
   await sleep(2500)
   const recv = cdp.events.filter((e) => e.method === 'Network.webSocketFrameReceived').map((e) => e.params.response?.payloadData ?? '')
   check('订阅后收到服务端帧（event/snapshot）', recv.some((f) => f.includes('"type":"event"') || f.includes('"type":"snapshot"')), recv[0]?.slice(0, 70) ?? '(无)')
@@ -320,7 +320,11 @@ async function scenarioGate(cdp) {
   check('webPath 指向运行时树里那一份', typeof meta.webPath === 'string' && meta.webPath.endsWith(join('resources', 'web')), String(meta.webPath))
   const fileId = existsSync(idFile) ? readFileSync(idFile, 'utf8').trim() : ''
   check('webBuildId 与产物里的 build-id.txt 一致', !!fileId && meta.webBuildId === fileId, `meta=${meta.webBuildId} file=${fileId}`)
-  check('coreVersion/apiContract 在位', !!meta.coreVersion && meta.apiContract === 'v1', `${meta.coreVersion}/${meta.apiContract}`)
+  // 契约代数**不写死字面量**：它每次提升（v1 → v2，2026-10-11 数据模型 v15）都会变，
+  // 而这条断言的意图是"核心把版本与契约如实外露了"。写死只会让每次提升都红一次，
+  // 然后被人顺手改成新字面量——那不是判据，是同步负担。
+  check('coreVersion/apiContract 在位', !!meta.coreVersion && /^v\d+$/.test(meta.apiContract || ''),
+    `${meta.coreVersion}/${meta.apiContract}`)
 
   // ② 一致 → 正常进界面（没有整屏状态页）
   await cdp.send('Page.navigate', { url: 'mate-app://app/' })
@@ -443,14 +447,19 @@ async function scenarioDirectParentGone() {
     await sleep(100)
   }
   check('父进程被 SIGKILL 后核心自退', alive && gone !== null, alive ? `${gone ?? '>5000'}ms` : '核心没起来')
-  const err = (() => {
+  // 两个流都要读：核心的日志出口（glog）当前写 **stdout**，而这条断言原先只读 stderr——
+  // 后果是"核心确实退了"绿、"原因行"恒红（脚本从来没在 CGO 可用的形态上跑通过，所以没人发现）。
+  // 判据是"日志里有那句话"，不是"它在哪个 fd 上"。
+  const readAll = (f) => {
     try {
-      return readFileSync(errFile, 'utf8')
+      return readFileSync(f, 'utf8')
     } catch {
       return ''
     }
-  })()
-  check('核心日志留下原因（父进程已消失）', err.includes('父进程已消失'), err.split('\n').filter((l) => l.includes('父进程')).slice(0, 1).join('') || '(无该行)')
+  }
+  const logs = readAll(outFile) + readAll(errFile)
+  check('核心日志留下原因（父进程已消失）', logs.includes('父进程已消失'),
+    logs.split('\n').filter((l) => l.includes('父进程')).slice(0, 1).join('') || '(无该行)')
 }
 
 // ————————————————————————————————— 主流程 —————————————————————————————————

@@ -73,12 +73,12 @@ type generationPlan struct {
 //
 // 只读、无副作用：四条纪律里的三条（键比较、忙/挂起、探针可读性）都能在不拉进程的前提下被
 // 单测逐条钉住。
-func (o *Orchestrator) planGenerationSwitch(as *ActiveConversation, rec *ConversationRec) generationPlan {
+func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) generationPlan {
 	if as == nil || rec == nil {
 		return generationPlan{Action: genActionKeep, Reason: "会话记录不可读：不动（保守）"}
 	}
 	// 探针：句柄状态。dead 的句柄不该在这里动——它已经作废，下一次 prompt 会走
-	// ensureConversation 的重建路径，那条路径本来就按**当前**配置重开。
+	// ensureSession 的重建路径，那条路径本来就按**当前**配置重开。
 	as.mu.Lock()
 	busy, dead := as.busy, as.dead
 	as.mu.Unlock()
@@ -95,7 +95,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveConversation, rec *Convers
 		return generationPlan{Action: genActionKeep, Reason: "runtime 未注册：不动"}
 	}
 	// ③ 探针不可读 → 保守当忙。连接反查不到（正在拆/已拆）时无法判断这条句柄挂在什么上面，
-	// 那就当它不可动——真正的重建由 ensureConversation 负责，不在这里猜。
+	// 那就当它不可动——真正的重建由 ensureSession 负责，不在这里猜。
 	rc := o.connOfClient(as.client)
 	if rc == nil {
 		return generationPlan{Action: genActionKeep, Reason: "连接不可读：不动（保守）"}
@@ -158,13 +158,13 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveConversation, rec *Convers
 //
 // 串行化：迁移是罕见操作（配置变更后的第一个轮次边界），用一把全局锁把并发的第二个调用挡在
 // 外面，让它直接拿换好的句柄——比在每个句柄上加状态机简单得多，也不会成为热点。
-func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveConversation) (*ActiveConversation, error) {
-	plan := o.planGenerationSwitch(as, o.svc.conversationRec(as.ID))
+func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSession) (*ActiveSession, error) {
+	plan := o.planGenerationSwitch(as, o.svc.sessionRec(as.ID))
 	switch plan.Action {
 	case genActionKeep:
 		return as, nil
 	case genActionDefer:
-		glog.Infow(ctx, "代际迁移顺延", "conversation", as.ID, "from", plan.From, "to", plan.To, "reason", plan.Reason)
+		glog.Infow(ctx, "代际迁移顺延", "session", as.ID, "from", plan.From, "to", plan.To, "reason", plan.Reason)
 		return as, nil
 	}
 
@@ -172,19 +172,19 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 	defer o.migMu.Unlock()
 	// 等锁期间句柄可能已被别的调用换掉（或已被拆连）：以活跃集合里的当前句柄为准，
 	// 不再迁一个已经不在用的句柄。
-	if cur := o.conversation(as.ID); cur != as {
+	if cur := o.session(as.ID); cur != as {
 		if cur == nil {
 			return as, nil
 		}
 		return cur, nil
 	}
 	// 重新读记录并重新裁决：等锁期间键可能又变了（用户连改两次定义），忙碌状态也可能变了。
-	rec := o.svc.conversationRec(as.ID)
+	rec := o.svc.sessionRec(as.ID)
 	plan = o.planGenerationSwitch(as, rec)
 	switch plan.Action {
 	case genActionSwitch:
 	case genActionDefer:
-		glog.Infow(ctx, "代际迁移顺延", "conversation", as.ID, "reason", plan.Reason)
+		glog.Infow(ctx, "代际迁移顺延", "session", as.ID, "reason", plan.Reason)
 		return as, nil
 	default:
 		return as, nil
@@ -207,14 +207,14 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 		}
 	}
 	oldRC := o.connOfClient(as.client)
-	// 预热新代际并按既有 resume 语义把会话挂上去（`connectConversation` 内完成，
+	// 预热新代际并按既有 resume 语义把会话挂上去（`connectSession` 内完成，
 	// 与"进程死掉重建"共用同一条路径——两条路径共用才不会出现"重启后能力集悄悄换一套"）。
-	next, _, err := o.connectConversation(ctx, rec, agent, spec, rec.Cwd, sel, targetFP)
+	next, _, err := o.connectSession(ctx, rec, agent, spec, rec.Cwd, sel, targetFP)
 	if err != nil {
 		if plan.PermChanged {
 			// 缩权面变化 + 建不起新代际 → **不回退**（旧进程 = 已被收回的权限面）。
 			glog.Warnw(ctx, "权限/能力面已收窄但新代际建不起来：本轮不发（不使用被收回的权限面继续跑）",
-				"conversation", as.ID, "runtime", as.Runtime, "from", plan.From, "to", plan.To, "err", err)
+				"session", as.ID, "runtime", as.Runtime, "from", plan.From, "to", plan.To, "err", err)
 			return nil, acl.NewError(acl.ClassLimit, "generation_switch_required",
 				fmt.Sprintf("会话的权限或能力面已变更（%s），但新代际此刻无法建立：本轮未发出——不会用已经收回的权限面继续跑。请稍后重试（%s）",
 					plan.Reason, err.Error()), nil)
@@ -223,10 +223,10 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 		o.noteGenerationFallback(as.AgentID, as.ID, as.Runtime, plan.From, plan.To, err)
 		return as, nil
 	}
-	glog.Infow(ctx, "代际迁移完成", "conversation", as.ID, "runtime", spec.ID,
+	glog.Infow(ctx, "代际迁移完成", "session", as.ID, "runtime", spec.ID,
 		"from", plan.From, "to", plan.To, "perm_changed", plan.PermChanged,
 		"provider_session", next.providerID)
-	o.attachConversation(next, "generation")
+	o.attachSession(next, "generation")
 	// 缩权/换代后立刻淘汰**已无人引用**的旧代际（不等空闲阈值）：旧进程代表的可能是一套
 	// 已经不该存在的权限/能力面，留着它既占内存又违反"缩权立刻生效"的直觉。
 	// 仍有别的会话引用时不动它（那些会话会在自己的下一个轮次边界迁走）。
@@ -240,11 +240,11 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveCon
 //
 // 刻意**不**发事件、**不**改会话状态：用户这一轮照常发出去（可用性优先），"能力还没换过来"
 // 是运维/诊断层面的事实，不是会话的终态。
-func (o *Orchestrator) noteGenerationFallback(agentID, conversationID, runtimeID, from, to string, cause error) {
+func (o *Orchestrator) noteGenerationFallback(agentID, sessionID, runtimeID, from, to string, cause error) {
 	glog.Warnw(context.Background(), "代际迁移失败：回退旧代际继续跑",
-		"conversation", conversationID, "runtime", runtimeID,
+		"session", sessionID, "runtime", runtimeID,
 		"from", from, "to", to, "err", cause)
 	ae := acl.NewError(acl.ClassConnection, "generation_switch_failed",
 		"迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
-	o.svc.recordAgentError(agentID, conversationID, ae, nil)
+	o.svc.recordAgentError(agentID, sessionID, ae, nil)
 }

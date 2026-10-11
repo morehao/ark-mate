@@ -13,7 +13,7 @@ import (
 
 // ——— M3 首项：用量统计（GET /usage/summary） ———
 //
-// 数据面：runs 表（每轮终态行）+ conversations.agent_id + runs.usage_json（ACP 会话用量快照）。
+// 数据面：runs 表（每轮终态行）+ sessions.agent_id + runs.usage_json（ACP 会话用量快照）。
 // 语义边界（不臆造）：
 //   - 计数/时长 = 区间内 run 行聚合；上下文/费用 = 每会话最近一次上报的**快照**（不累加历史）；
 //   - 无底座上报（usage_json 为空）→ usage_reported=0，上下文/费用为零值，不估算；
@@ -96,7 +96,7 @@ func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*
 func toUsageBucketResp(b store.UsageBucket) dtousage.UsageBucketResp {
 	return dtousage.UsageBucketResp{
 		Key: b.Key, AgentID: b.AgentID, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
-		Cancelled: b.Cancelled, Running: b.Running, Conversations: b.Conversations,
+		Cancelled: b.Cancelled, Running: b.Running, Sessions: b.Sessions,
 		DurationMS: b.DurationMS, ContextUsed: b.ContextUsed, ContextSize: b.ContextSize,
 		UsageReported: b.UsageReported, CostReported: b.CostReported,
 		CostAmount: b.CostAmount, CostCurrency: b.CostCurrency, CostByCurrency: b.CostByCurrency,

@@ -49,7 +49,7 @@ func dirAssetsEngine(t *testing.T) *gin.Engine {
 // TestUnknownNonAPIPathFallsBackWhenAssetsPresent 有资产 → 非 API 未知路径回落 index.html。
 func TestUnknownNonAPIPathFallsBackWhenAssetsPresent(t *testing.T) {
 	e := dirAssetsEngine(t)
-	for _, p := range []string{"/settings", "/conversations/abc", "/index.html"} {
+	for _, p := range []string{"/settings", "/sessions/abc", "/index.html"} {
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, httptest.NewRequest(http.MethodGet, p, nil))
 		if w.Code != 200 {

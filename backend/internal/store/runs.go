@@ -10,7 +10,7 @@ import (
 // ——— runs 表（一轮 prompt 的物化行；turn 收口时由 Service.materializeRun 写入） ———
 
 // CreateRun 插入一条 run（幂等：同 id 已存在返回 nil）。
-func (s *Store) CreateRun(ctx context.Context, r Run) error {
+func (s *Store) CreateRun(ctx context.Context, r model.RunEntity) error {
 	r.StartedAt = nonZeroTime(r.StartedAt)
 	return s.runs.CreateIfAbsent(ctx, &r)
 }
@@ -22,11 +22,11 @@ func (s *Store) FinishRun(ctx context.Context, id string, status, stopReason, er
 }
 
 // ListRuns 列出某会话全部 run（started_at 升序；失败轮重试/统计按此序回溯）。
-func (s *Store) ListRuns(ctx context.Context, conversationID string) ([]Run, error) {
-	return s.runs.List(ctx, conversationID)
+func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error) {
+	return s.runs.List(ctx, sessionID)
 }
 
 // RunLastSeq 返回某会话最后一条 run 的 last_seq（0 = 尚无 run；供下一 run 的事件窗口起点）。
-func (s *Store) RunLastSeq(ctx context.Context, conversationID string) (int64, error) {
-	return s.runs.LastSeq(ctx, conversationID)
+func (s *Store) RunLastSeq(ctx context.Context, sessionID string) (int64, error) {
+	return s.runs.LastSeq(ctx, sessionID)
 }

@@ -116,7 +116,7 @@ export interface ModelEffect {
   /** next_session（下一次会话创建/换代际）| next_process（新进程读配置）。 */
   effect: string
   /** 受影响（可能落到任一已注册底座）的会话数。 */
-  affected_conversations: number
+  affected_sessions: number
   /** 其中本轮不能就地换代际的会话数（有在途轮次 / 有未应答权限或提问）。 */
   deferred: number
   note?: string

@@ -1,8 +1,8 @@
-// Package ctrconversation 承载会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
+// Package ctrsession 承载会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
 //
 // 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
-package ctrconversation
+package ctrsession
 
 import (
 	"errors"
@@ -11,14 +11,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
-	"github.com/morehao/ark-mate/internal/service/svcconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// ConversationCtr 会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
-type ConversationCtr interface {
+// SessionCtr 会话面控制器（列表/详情/新建/提问/取消/历史/权限/提问决策）。
+type SessionCtr interface {
 	List(c *gin.Context)
 	Search(c *gin.Context)
 	Get(c *gin.Context)
@@ -38,16 +38,16 @@ type ConversationCtr interface {
 	Runs(c *gin.Context)
 }
 
-var _ ConversationCtr = (*conversationCtr)(nil)
+var _ SessionCtr = (*sessionCtr)(nil)
 
-// ConversationHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
-type conversationCtr struct {
-	svc svcconversation.ConversationSvc
+// SessionHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
+type sessionCtr struct {
+	svc svcsession.SessionSvc
 }
 
-// NewConversationCtr 构造 ConversationCtr。
-func NewConversationCtr(svc svcconversation.ConversationSvc) ConversationCtr {
-	return &conversationCtr{svc: svc}
+// NewSessionCtr 构造 SessionCtr。
+func NewSessionCtr(svc svcsession.SessionSvc) SessionCtr {
+	return &sessionCtr{svc: svc}
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
@@ -55,8 +55,8 @@ func NewConversationCtr(svc svcconversation.ConversationSvc) ConversationCtr {
 // 两个工作空间过滤参数口径不同，都可选：
 //   - `cwd`：工作空间**精确等于**该绝对路径的会话（历史行为）；
 //   - `workspace_id`：归属该工作空间登记的会话（v14 左栏分组用它；按默认工作空间过滤时
-//     同时包含 `workspace_id=''` 的历史会话——那些行读面归默认工作空间）。
-func (h *conversationCtr) List(c *gin.Context) {
+//     同时包含 `workspace_id=”` 的历史会话——那些行读面归默认工作空间）。
+func (h *sessionCtr) List(c *gin.Context) {
 	archived := c.Query("archived") == "true"
 	cwd := strings.TrimSpace(c.Query("cwd"))
 	if cwd != "" && !filepath.IsAbs(cwd) {
@@ -64,16 +64,16 @@ func (h *conversationCtr) List(c *gin.Context) {
 		return
 	}
 	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
-	conversations, err := h.svc.ListConversations(archived, cwd, workspaceID)
+	sessions, err := h.svc.ListSessions(archived, cwd, workspaceID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
-	gincontext.Success(c, conversations)
+	gincontext.Success(c, sessions)
 }
 
 // Search 搜索会话（query `q` 必填；`limit` 默认 30 上限 50；含归档；updated 降序）。
-func (h *conversationCtr) Search(c *gin.Context) {
+func (h *sessionCtr) Search(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: q 必填"))
@@ -85,7 +85,7 @@ func (h *conversationCtr) Search(c *gin.Context) {
 			limit = n
 		}
 	}
-	hits, err := h.svc.SearchConversations(c.Request.Context(), q, limit)
+	hits, err := h.svc.SearchSessions(c.Request.Context(), q, limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -94,8 +94,8 @@ func (h *conversationCtr) Search(c *gin.Context) {
 }
 
 // Get 返回单会话详情（元数据 + 挂起权限）。
-func (h *conversationCtr) Get(c *gin.Context) {
-	resp, err := h.svc.GetConversation(c.Request.Context(), c.Param("id"))
+func (h *sessionCtr) Get(c *gin.Context) {
+	resp, err := h.svc.GetSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -104,13 +104,13 @@ func (h *conversationCtr) Get(c *gin.Context) {
 }
 
 // Update 更新会话元数据（title/pinned/archived 子集）。
-func (h *conversationCtr) Update(c *gin.Context) {
-	var req dtoconversation.ConversationPatch
+func (h *sessionCtr) Update(c *gin.Context) {
+	var req dtosession.SessionPatch
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateConversation(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.svc.UpdateSession(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -119,7 +119,7 @@ func (h *conversationCtr) Update(c *gin.Context) {
 }
 
 // Permissions 列出会话的挂起权限请求。
-func (h *conversationCtr) Permissions(c *gin.Context) {
+func (h *sessionCtr) Permissions(c *gin.Context) {
 	resp, err := h.svc.ListPendingPermissions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
@@ -129,7 +129,7 @@ func (h *conversationCtr) Permissions(c *gin.Context) {
 }
 
 // PermissionMemories 列出会话级权限记忆（allow/reject 双侧，详情/撤销 UI 数据源）。
-func (h *conversationCtr) PermissionMemories(c *gin.Context) {
+func (h *sessionCtr) PermissionMemories(c *gin.Context) {
 	resp, err := h.svc.ListPermissionMemories(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
@@ -139,8 +139,8 @@ func (h *conversationCtr) PermissionMemories(c *gin.Context) {
 }
 
 // RevokeMemory 撤销会话级权限记忆（body title+kind 均空 = 一键撤销全部）。
-func (h *conversationCtr) RevokeMemory(c *gin.Context) {
-	var req dtoconversation.MemoryRevokeReq
+func (h *sessionCtr) RevokeMemory(c *gin.Context) {
+	var req dtosession.MemoryRevokeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
@@ -153,8 +153,8 @@ func (h *conversationCtr) RevokeMemory(c *gin.Context) {
 }
 
 // ResolvePermission 对挂起权限请求做出决策（allow/reject × once/always）。
-func (h *conversationCtr) ResolvePermission(c *gin.Context) {
-	var req dtoconversation.PermissionResolveReq
+func (h *sessionCtr) ResolvePermission(c *gin.Context) {
+	var req dtosession.PermissionResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
@@ -168,7 +168,7 @@ func (h *conversationCtr) ResolvePermission(c *gin.Context) {
 }
 
 // Elicitations 列出会话的挂起结构化提问（elicitation/create 表单/URL 卡）。
-func (h *conversationCtr) Elicitations(c *gin.Context) {
+func (h *sessionCtr) Elicitations(c *gin.Context) {
 	resp, err := h.svc.ListPendingElicitations(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
@@ -178,8 +178,8 @@ func (h *conversationCtr) Elicitations(c *gin.Context) {
 }
 
 // ResolveElicitation 对挂起结构化提问做出决策（accept/decline/cancel；accept 可带 content）。
-func (h *conversationCtr) ResolveElicitation(c *gin.Context) {
-	var req dtoconversation.ElicitationResolveReq
+func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
+	var req dtosession.ElicitationResolveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
@@ -192,15 +192,15 @@ func (h *conversationCtr) ResolveElicitation(c *gin.Context) {
 }
 
 // Create 建立会话（agent_id + 可选首轮 prompt）。
-// 返回 conversation id 与 event_seq 水位：前端 WS attach 传 since_seq=event_seq 即可
+// 返回 session id 与 event_seq 水位：前端 WS attach 传 since_seq=event_seq 即可
 // 续传首轮增量事件（§4.5 attach/续传语义；EventSeq=0 表示 bus 未启用，attach since=0 走快照）。
-func (h *conversationCtr) Create(c *gin.Context) {
-	var req dtoconversation.ConversationCreateReq
+func (h *sessionCtr) Create(c *gin.Context) {
+	var req dtosession.SessionCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateConversation(c.Request.Context(), req)
+	resp, err := h.svc.CreateSession(c.Request.Context(), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -210,14 +210,14 @@ func (h *conversationCtr) Create(c *gin.Context) {
 
 // Prompt 向既有会话追加一轮 prompt（后台执行，事件经 WS 出流）。
 // 会话正忙时按 body 的 delivery 决定：报错（缺省）/ 排队 / 取消当前轮后投递（§6）。
-func (h *conversationCtr) Prompt(c *gin.Context) {
+func (h *sessionCtr) Prompt(c *gin.Context) {
 	id := c.Param("id")
-	var req dtoconversation.PromptReq
+	var req dtosession.PromptReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.PromptConversation(c.Request.Context(), id, req)
+	resp, err := h.svc.PromptSession(c.Request.Context(), id, req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -226,7 +226,7 @@ func (h *conversationCtr) Prompt(c *gin.Context) {
 }
 
 // QueuedInputs 列出待投递的排队输入（§6 当前态；前端冷挂载/刷新后重建队列视图）。
-func (h *conversationCtr) QueuedInputs(c *gin.Context) {
+func (h *sessionCtr) QueuedInputs(c *gin.Context) {
 	resp, err := h.svc.ListQueuedInputs(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
@@ -236,7 +236,7 @@ func (h *conversationCtr) QueuedInputs(c *gin.Context) {
 }
 
 // DeleteQueuedInput 撤下一条尚未投递的排队输入（§6；已投递/已作废不可撤，幂等）。
-func (h *conversationCtr) DeleteQueuedInput(c *gin.Context) {
+func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 	id, inputID := c.Param("id"), c.Param("input_id")
 	ok, err := h.svc.DeleteQueuedInput(c.Request.Context(), id, inputID)
 	if err != nil {
@@ -247,7 +247,7 @@ func (h *conversationCtr) DeleteQueuedInput(c *gin.Context) {
 }
 
 // Cancel 取消进行中的 turn（幂等）。
-func (h *conversationCtr) Cancel(c *gin.Context) {
+func (h *sessionCtr) Cancel(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.CancelTurn(c.Request.Context(), id); err != nil {
 		gincontext.Fail(c, code.FromError(err))
@@ -258,9 +258,9 @@ func (h *conversationCtr) Cancel(c *gin.Context) {
 
 // History 返回会话事件历史（分页）：query `after`（起点 seq，含之后，默认 0）、
 // `limit`（默认 200，上限 1000）。事件按 seq 升序；翻页用末条 seq 作下页 after。
-func (h *conversationCtr) History(c *gin.Context) {
+func (h *sessionCtr) History(c *gin.Context) {
 	id := c.Param("id")
-	q := dtoconversation.HistoryQuery{Limit: 200}
+	q := dtosession.HistoryQuery{Limit: 200}
 	if v := c.Query("after"); v != "" {
 		n, err := parseNonNeg(v)
 		if err != nil {
@@ -296,7 +296,7 @@ func (h *conversationCtr) History(c *gin.Context) {
 	if q.Limit > 1000 {
 		q.Limit = 1000
 	}
-	resp, err := h.svc.ConversationHistory(c.Request.Context(), id, q)
+	resp, err := h.svc.SessionHistory(c.Request.Context(), id, q)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -305,7 +305,7 @@ func (h *conversationCtr) History(c *gin.Context) {
 }
 
 // Runs 列出某会话的轮次明细（runs 表读模型；内存模式返回空数组）。
-func (h *conversationCtr) Runs(c *gin.Context) {
+func (h *sessionCtr) Runs(c *gin.Context) {
 	id := c.Param("id")
 	runs, err := h.svc.ListRuns(c.Request.Context(), id)
 	if err != nil {

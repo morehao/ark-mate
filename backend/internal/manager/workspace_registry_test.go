@@ -4,11 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // 本文件是**工作空间登记表**（v14）的领域层测试（manager/workspace_registry.go）。
@@ -97,11 +100,11 @@ func TestWorkspaceRegistryNoProvisionNoDefault(t *testing.T) {
 	}
 }
 
-// TestWorkspaceRegistryCreateValidatesLikeConversation 「能登记」与「能建会话」必须同源。
+// TestWorkspaceRegistryCreateValidatesLikeSession 「能登记」与「能建会话」必须同源。
 //
 // 这条是设计里最要紧的一致性之一：登记时放过一个目录、建会话时被拒，就是一条死路
 // ——用户在界面上选了它，然后得到一个必然失败的会话。
-func TestWorkspaceRegistryCreateValidatesLikeConversation(t *testing.T) {
+func TestWorkspaceRegistryCreateValidatesLikeSession(t *testing.T) {
 	allowed := t.TempDir()
 	outside := t.TempDir()
 	r, _ := registryRig(t, []string{allowed})
@@ -173,9 +176,9 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("登记项目: %v", err)
 	}
-	seedStoreConversation(t, r.St, "legacy-1", def.Path, "")
-	seedStoreConversation(t, r.St, "legacy-2", def.Path, "")
-	seedStoreConversation(t, r.St, "member", userDir, ws.ID)
+	seedStoreSession(t, r.St, "legacy-1", def.Path, "")
+	seedStoreSession(t, r.St, "legacy-2", def.Path, "")
+	seedStoreSession(t, r.St, "member", userDir, ws.ID)
 
 	list, err := r.Svc.WorkspaceRegistry()
 	if err != nil {
@@ -183,7 +186,7 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	}
 	byID := map[string]int{}
 	for _, it := range list.Items {
-		byID[it.ID] = it.Conversations
+		byID[it.ID] = it.Sessions
 	}
 	if byID[def.ID] != 2 {
 		t.Fatalf("默认工作空间应含 2 条历史会话，实际 %d（整表 %+v）", byID[def.ID], list.Items)
@@ -258,7 +261,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
-	seedStoreConversation(t, r.St, "c-del", dir, ws.ID)
+	seedStoreSession(t, r.St, "c-del", dir, ws.ID)
 	del, err := r.Svc.DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("删登记: %v", err)
@@ -272,8 +275,13 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 //
 // 关键在于**明确**：memory 没有 workspaces 表是形态的确定限制（与 memory 下 /usage/summary
 // 40501 完全同形）。若这里回一个 50000，"平台坏了"与"换个持久层就好了"就分不开。
+// 口径（2026-10-11 写精确）：本用例验的是**代建关闭**（`workspace_dir` 为空）+ memory 模式
+// ——那时确实没有默认工作空间可列。而"memory + 有代建根"是**列出默认那一条**：
+// 默认工作空间是平台代建的东西，不是用户登记项，不该因为"登记表没处存"而消失
+// （见 TestWorkspaceRegistryDefaultIsProvisionedInMemory）。
 func TestWorkspaceRegistryMemoryIsExplicitlyUnsupported(t *testing.T) {
 	r := newRig(t) // 无库 = memory
+	mustWorkspacePolicy(t, r.Svc, "", nil)
 
 	list, err := r.Svc.WorkspaceRegistry()
 	if err != nil {
@@ -325,16 +333,16 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 	}
 }
 
-// seedStoreConversation 往库里写一条会话行（**只写库**，不进内存镜像）。
+// seedStoreSession 往库里写一条会话行（**只写库**，不进内存镜像）。
 //
 // 读面（WorkspaceRegistry）的计数取的是库里的聚合，所以夹具只需要库里有行——走
-// registerConversation 反而会带上编排器状态，而这些用例关心的是归属的聚合口径。
-func seedStoreConversation(t *testing.T, st *store.Store, id, cwd, workspaceID string) {
+// registerSession 反而会带上编排器状态，而这些用例关心的是归属的聚合口径。
+func seedStoreSession(t *testing.T, st *store.Store, id, cwd, workspaceID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := st.UpsertConversation(context.Background(), store.Conversation{
+	if err := st.UpsertSession(context.Background(), model.SessionEntity{
 		ID: id, AgentID: "agent-stub", Cwd: cwd, WorkspaceID: workspaceID,
-		Status: ConversationStatusCompleted, CreatedAt: now, UpdatedAt: now,
+		Status: SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("写会话行 %s: %v", id, err)
 	}
@@ -348,4 +356,100 @@ func writeFile(t *testing.T, dir string) string {
 		t.Fatalf("写文件: %v", err)
 	}
 	return p
+}
+
+// TestWorkspaceRegistryDefaultIsProvisionedInMemory memory 模式**也要**有默认工作空间。
+//
+// 2026-10-11 修：`EnsureDefaultWorkspace` 原先在 `s.st == nil` 时直接 return，于是
+// `MATE_STORE=memory`（以及 auto 在"还没有 mate.db"时的首次运行）下
+// `POST /sessions {"agent_id":"dsh","prompt":"hi"}` 报
+// `40001 未指定工作空间，且没有可用的默认工作空间…请显式传入 cwd`——**最普通的一条路走不通**，
+// 而用户什么都没做错。默认工作空间是"未指定 cwd 时落在哪"的唯一落点，与"用户登记表能不能持久化"
+// 是两件事，不该被同一个 `s.st == nil` 判掉。
+func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
+	r := newRig(t, func(c *rigConfig) { c.store = false }) // 无库 = memory 模式
+	provision := filepath.Join(t.TempDir(), "workspaces")
+	mustWorkspacePolicy(t, r.Svc, provision, nil)
+
+	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("memory 模式下 EnsureDefaultWorkspace 应建出默认工作空间: %v", err)
+	}
+	def, ok, err := r.Svc.DefaultWorkspace()
+	if err != nil || !ok {
+		t.Fatalf("memory 模式下装配后应有默认工作空间: ok=%v err=%v", ok, err)
+	}
+	want := filepath.Join(provision, "default")
+	if real, rerr := filepath.EvalSymlinks(want); rerr == nil {
+		want = real
+	}
+	if def.Path != want {
+		t.Fatalf("默认工作空间路径 = %q，期望 %q", def.Path, want)
+	}
+	if !def.IsDefault || def.Title != store.DefaultWorkspaceTitle {
+		t.Fatalf("memory 模式的默认项形状应与 sqlite 侧逐字一致: %+v", def)
+	}
+	if !strings.HasPrefix(def.ID, objid.Workspace) || !objid.IsPlatformID(def.ID) {
+		t.Fatalf("memory 模式的默认工作空间 id 也要是平台铸造形状（%s_<ULID>），实际 %q", objid.Workspace, def.ID)
+	}
+	if _, serr := os.Stat(def.Path); serr != nil {
+		t.Fatalf("目录应被建立: %v", serr)
+	}
+
+	// 读面：**要列出它**（否则左栏少一个分组、未指定 cwd 建的会话无处可挂），
+	// 但 `writable` 仍是 false（用户登记表在 memory 模式下无处可存，设计 ADR-11）。
+	list, err := r.Svc.WorkspaceRegistry()
+	if err != nil {
+		t.Fatalf("WorkspaceRegistry: %v", err)
+	}
+	if len(list.Items) != 1 || list.DefaultID != def.ID {
+		t.Fatalf("memory 模式应列出那一条默认工作空间: %+v", list)
+	}
+	if list.Writable {
+		t.Fatal("memory 模式的登记表不可写（writable=false）——那是 ADR-11 的口径，不该被这条改动带偏")
+	}
+	if list.Items[0].DirStatus != "ok" {
+		t.Fatalf("刚建出来的目录状态应为 ok: %+v", list.Items[0])
+	}
+
+	// 归属解析：建会话未指定 cwd 时，cwd 与 workspace_id 都落在这一条上。
+	target, assignment, err := r.Svc.resolveTargetWorkspace("")
+	if err != nil || target == nil {
+		t.Fatalf("未指定 cwd 时应解析到默认工作空间: target=%+v err=%v", target, err)
+	}
+	if target.ID != def.ID || target.Path != def.Path || assignment != "" {
+		t.Fatalf("解析目标应指向默认工作空间且不额外指定归属: target=%+v assignment=%q", target, assignment)
+	}
+	res, err := ResolveWorkspace("", target)
+	if err != nil {
+		t.Fatalf("ResolveWorkspace(空 spec, 默认工作空间) 应成功（这就是那条 40001 的判据）: %v", err)
+	}
+	if !res.Temporary || res.WorkspaceID != def.ID {
+		t.Fatalf("未指定 cwd 得到的应是\"平台代建\"归属: %+v", res)
+	}
+
+	// 展示面：归属 id → 展示名（库里存的是语言中立的 default-workspace）。
+	if id, title := r.Svc.workspaceDisplayOf(def.ID); id != def.ID || title != "默认工作空间" {
+		t.Fatalf("默认工作空间的展示名应是「默认工作空间」: id=%q title=%q", id, title)
+	}
+}
+
+// TestWorkspaceRegistryMemoryNoProvisionNoDefault 代建显式关闭时，memory 模式同样不建
+// （配置意图优先于持久层模式：说了不要代建就是不要）。
+func TestWorkspaceRegistryMemoryNoProvisionNoDefault(t *testing.T) {
+	r := newRig(t, func(c *rigConfig) { c.store = false })
+	mustWorkspacePolicy(t, r.Svc, "", nil)
+
+	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("代建关闭时 EnsureDefaultWorkspace 应静默通过: %v", err)
+	}
+	if _, ok, _ := r.Svc.DefaultWorkspace(); ok {
+		t.Fatal("代建关闭时不该有默认工作空间")
+	}
+	list, err := r.Svc.WorkspaceRegistry()
+	if err != nil {
+		t.Fatalf("WorkspaceRegistry: %v", err)
+	}
+	if len(list.Items) != 0 || list.DefaultID != "" {
+		t.Fatalf("代建关闭时应是空登记表: %+v", list)
+	}
 }

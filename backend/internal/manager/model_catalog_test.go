@@ -55,8 +55,8 @@ func TestModelCatalogLiveSession(t *testing.T) {
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
 	}}
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
-		sess: &stubConversation{options: opts}}
+	orch.sessions["c1"] = &ActiveSession{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
+		sess: &stubSession{options: opts}}
 
 	resp, err := svc.ModelCatalog(context.Background(), "agent-stub")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 	}
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
-	delete(orch.conversations, "c1")
+	delete(orch.sessions, "c1")
 	cached, err := svc.ModelCatalog(context.Background(), "agent-stub")
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
@@ -129,9 +129,9 @@ func TestModelCatalogUnknownAgent(t *testing.T) {
 	}
 }
 
-// TestApplyConversationModelSemantics 会话内改模型的三种结局：
+// TestApplySessionModelSemantics 会话内改模型的三种结局：
 // 成功（刷新目录缓存）/ 运行时拒绝（记不可用并上抛）/ 未广告模型项（model_not_supported）。
-func TestApplyConversationModelSemantics(t *testing.T) {
+func TestApplySessionModelSemantics(t *testing.T) {
 	svc, orch := catalogRig(t)
 
 	// 1) 成功：全量状态回填目录缓存，且曾失败的标记被清除。
@@ -140,10 +140,10 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 		CurrentValue: "test/other",
 		Values:       []acl.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
-		sess: &stubConversation{}, proj: proj}
+	orch.sessions["c1"] = &ActiveSession{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
+		sess: &stubSession{}, proj: proj}
 	svc.catalog.markRejected("agent-stub", "test/other", "旧失败")
-	applied, err := orch.ApplyConversationModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
+	applied, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
 		t.Fatalf("应用应成功: applied=%v err=%v", applied, err)
 	}
@@ -161,7 +161,7 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 
 	// 2) 运行时拒绝：上抛 + 标记不可用（目录里标灰）。
 	proj.err = acl.NewError(acl.ClassRequest, "invalid_params", "unknown model option: nope", nil)
-	if _, err := orch.ApplyConversationModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
+	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
 	if _, bad := svc.catalog.rejection("agent-stub", "nope"); !bad {
@@ -171,14 +171,14 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
 	unsupported := &fakeProjection{err: acl.NewError(acl.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
-	orch.conversations["c2"] = &ActiveConversation{ID: "c2", AgentID: "agent-stub", Runtime: "stub",
-		sess: &stubConversation{}, proj: unsupported}
-	_, err = orch.ApplyConversationModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
+	orch.sessions["c2"] = &ActiveSession{ID: "c2", AgentID: "agent-stub", Runtime: "stub",
+		sess: &stubSession{}, proj: unsupported}
+	_, err = orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
 	ae, ok := acl.As(err)
 	if !ok || ae.Code != "model_not_supported" {
 		t.Fatalf("未广告模型项应报 model_not_supported: %v", err)
 	}
-	if _, err := orch.ApplyConversationModel(context.Background(), "c2", runtime.ModelConfig{}); err != nil {
+	if _, err := orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{}); err != nil {
 		t.Fatalf("空模型应无操作: %v", err)
 	}
 	if len(unsupported.applied) != 1 {
@@ -186,7 +186,7 @@ func TestApplyConversationModelSemantics(t *testing.T) {
 	}
 
 	// 4) 会话不活跃 → (false, nil)：调用方只更新元数据。
-	appliedNow, err := orch.ApplyConversationModel(context.Background(), "ghost", runtime.ModelConfig{Model: "x"})
+	appliedNow, err := orch.ApplySessionModel(context.Background(), "ghost", runtime.ModelConfig{Model: "x"})
 	if err != nil || appliedNow {
 		t.Fatalf("非活跃会话应 (false,nil): applied=%v err=%v", appliedNow, err)
 	}

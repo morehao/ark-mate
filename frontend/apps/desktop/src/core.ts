@@ -218,7 +218,7 @@ export async function stopCoreGracefully(
 /**
  * 向核心询问"有没有在途轮次"（M1-6 退出前二次确认的依据）。
  *
- * 用既有读模型：`GET /v1/mate/conversations` 的 `status=running` 即"这一轮还没收尾"。
+ * 用既有读模型：`GET /v1/mate/sessions` 的 `status=running` 即"这一轮还没收尾"。
  * **不新增端点**——这个判断是"退出前问一句"，不值得为它改对外路由表。
  *
  * 超时/出错时返回 `known:false`：调用方按**有任务**保守处理（设计 §7.4），
@@ -232,7 +232,7 @@ export async function probeRunningTurns(
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeoutMs)
   try {
-    const r = await fetch(`http://${handle.addr}/v1/mate/conversations?limit=200`, {
+    const r = await fetch(`http://${handle.addr}/v1/mate/sessions?limit=200`, {
       headers: { authorization: `Bearer ${handle.restToken}` },
       signal: ctl.signal,
     })

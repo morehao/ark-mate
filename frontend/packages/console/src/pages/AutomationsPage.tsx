@@ -210,8 +210,8 @@ export function AutomationsPage() {
     try {
       const out = await runAutomationNow(a.id)
       if (out.status === 'claimed') {
-        showToast(`已触发 ${a.id}${out.conversation_id ? `（会话 ${out.conversation_id}）` : ''}`)
-        if (out.conversation_id) navigate(`/conversations/${out.conversation_id}`)
+        showToast(`已触发 ${a.id}${out.session_id ? `（会话 ${out.session_id}）` : ''}`)
+        if (out.session_id) navigate(`/sessions/${out.session_id}`)
       } else {
         showToast(`${a.id} 未触发：${RUN_STATUS_META[out.status].label}${out.reason ? ` —— ${out.reason}` : ''}`)
       }
@@ -527,17 +527,17 @@ export function AutomationsPage() {
                     {r.trigger && <Tag style={{ marginInlineEnd: 0 }}>{r.trigger}</Tag>}
                   </Space>
                   <span style={{ fontSize: 12.5, color: tokens.textSecondary }}>{runLine(r)}</span>
-                  {r.conversation_id && (
+                  {r.session_id && (
                     <Button
                       type="link"
                       size="small"
                       style={{ paddingInline: 0, alignSelf: 'flex-start' }}
                       onClick={() => {
                         setRuns(null)
-                        navigate(`/conversations/${r.conversation_id}`)
+                        navigate(`/sessions/${r.session_id}`)
                       }}
                     >
-                      查看会话 {r.conversation_id}
+                      查看会话 {r.session_id}
                     </Button>
                   )}
                 </div>

@@ -122,7 +122,7 @@ func (s *Service) RunAutomationNow(ctx context.Context, id string) (*dtoautomati
 	out, err := s.runAutomationNow(ctx, id)
 	resp := &dtoautomation.AutomationRunResp{
 		ID: id, Status: out.status, Trigger: out.trigger,
-		ConversationID: out.conversationID, Reason: out.reason, State: out.state,
+		SessionID: out.sessionID, Reason: out.reason, State: out.state,
 	}
 	if err != nil {
 		// 失败也要把结果回带（面板要显示"我点过、没跑成、为什么"）：用 detail 承载

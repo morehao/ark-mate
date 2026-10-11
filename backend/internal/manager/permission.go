@@ -27,13 +27,13 @@ const (
 
 // pendingPermission 是一条挂起中的权限请求：持有一个「待用户决策」的通道与超时。
 type pendingPermission struct {
-	callID         string // 稳定 call_id（决策回传锚点）
-	conversationID string
-	title          string
-	toolCall       acl.ToolCallInfo
-	options        []acl.PermissionOption
-	ch             chan acl.PermissionDecision
-	timeout        time.Time
+	callID    string // 稳定 call_id（决策回传锚点）
+	sessionID string
+	title     string
+	toolCall  acl.ToolCallInfo
+	options   []acl.PermissionOption
+	ch        chan acl.PermissionDecision
+	timeout   time.Time
 }
 
 // PermissionManager 管理挂起权限请求：注册 → 发布事件 → 等待决策 → 按 call_id 回馈；
@@ -43,15 +43,15 @@ type PermissionManager struct {
 	mu         sync.Mutex
 	seq        uint64                            // 权限记忆写入序号（见 memoryEntry.seq；只在持锁期间自增）
 	pending    map[string]*pendingPermission     // key = callID
-	mem        map[string]map[string]memoryEntry // conversationID → action+identifier → 记忆（allow/reject 同键互斥）
+	mem        map[string]map[string]memoryEntry // sessionID → action+identifier → 记忆（allow/reject 同键互斥）
 	timeout    time.Duration
-	onResolved func(conversationID, callID, reason string, d acl.PermissionDecision)
+	onResolved func(sessionID, callID, reason string, d acl.PermissionDecision)
 
 	// 会话级记忆持久化挂钩（sqlite 模式：写 permission_memories 表；nil = 不持久化）。
-	// 所有记忆变更（Remember/Revoke/ForgetConversation）都经此旁路，进程内存与 DB 保持一致。
-	memAdd    func(conversationID, title, kind, decision string, since time.Time)
-	memDel    func(conversationID, title, kind string)
-	memDelAll func(conversationID string)
+	// 所有记忆变更（Remember/Revoke/ForgetSession）都经此旁路，进程内存与 DB 保持一致。
+	memAdd    func(sessionID, title, kind, decision string, since time.Time)
+	memDel    func(sessionID, title, kind string)
+	memDelAll func(sessionID string)
 }
 
 // NewPermissionManager 构造权限管理器。
@@ -74,7 +74,7 @@ func (m *PermissionManager) SetTimeout(d time.Duration) {
 }
 
 // SetOnResolved 注入「挂起请求已决」回调（user/timeout/cancel 全路径，供发布收敛事件；可为 nil）。
-func (m *PermissionManager) SetOnResolved(fn func(conversationID, callID, reason string, d acl.PermissionDecision)) {
+func (m *PermissionManager) SetOnResolved(fn func(sessionID, callID, reason string, d acl.PermissionDecision)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onResolved = fn
@@ -87,12 +87,12 @@ func genCallID() string {
 	return "perm-" + hex.EncodeToString(b)
 }
 
-// CancelConversation 取消某会话的全部挂起权限请求（conversation/cancel 后按 ACP 规范回 Cancelled）。
-func (m *PermissionManager) CancelConversation(conversationID string) {
+// CancelSession 取消某会话的全部挂起权限请求（session/cancel 后按 ACP 规范回 Cancelled）。
+func (m *PermissionManager) CancelSession(sessionID string) {
 	m.mu.Lock()
 	var victims []*pendingPermission
 	for _, p := range m.pending {
-		if p.conversationID == conversationID {
+		if p.sessionID == sessionID {
 			victims = append(victims, p)
 			delete(m.pending, p.callID) // 立即不再挂起；消费方后续 delete 幂等
 		}
@@ -108,25 +108,25 @@ func (m *PermissionManager) CancelConversation(conversationID string) {
 }
 
 // pendingCount 返回某会话的挂起权限请求数（侧栏/聊天头角标）。
-func (m *PermissionManager) pendingCount(conversationID string) int {
+func (m *PermissionManager) pendingCount(sessionID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, p := range m.pending {
-		if p.conversationID == conversationID {
+		if p.sessionID == sessionID {
 			n++
 		}
 	}
 	return n
 }
 
-// pendingForConversation 列出某会话的全部挂起权限（按 call_id 稳定序）。
-func (m *PermissionManager) pendingForConversation(conversationID string) []*pendingPermission {
+// pendingForSession 列出某会话的全部挂起权限（按 call_id 稳定序）。
+func (m *PermissionManager) pendingForSession(sessionID string) []*pendingPermission {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*pendingPermission
 	for _, p := range m.pending {
-		if p.conversationID == conversationID {
+		if p.sessionID == sessionID {
 			out = append(out, p)
 		}
 	}
@@ -134,24 +134,24 @@ func (m *PermissionManager) pendingForConversation(conversationID string) []*pen
 }
 
 // RegisterAndWait 注册一条权限请求并阻塞等待决策（SDK 派发 goroutine 中调用）。
-// publish 副作用（发布 conversation.permission_request 事件）由调用方注入，避免 manager 依赖 bus；
+// publish 副作用（发布 session.permission_request 事件）由调用方注入，避免 manager 依赖 bus；
 // publisher 携带超时时刻（timeout），供 UI 端判断卡片展示。
 // 返回最终决策；超时/上下文取消时自动拒绝（Cancelled）。
-func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID string, req acl.PermissionRequest, publish func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time)) acl.PermissionDecision {
+func (m *PermissionManager) RegisterAndWait(ctx context.Context, sessionID string, req acl.PermissionRequest, publish func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time)) acl.PermissionDecision {
 	callID := genCallID()
 	p := &pendingPermission{
-		callID:         callID,
-		conversationID: conversationID,
-		title:          req.ToolCall.Title,
-		toolCall:       req.ToolCall,
-		options:        req.Options,
-		ch:             make(chan acl.PermissionDecision, 1),
-		timeout:        time.Now().Add(m.timeout),
+		callID:    callID,
+		sessionID: sessionID,
+		title:     req.ToolCall.Title,
+		toolCall:  req.ToolCall,
+		options:   req.Options,
+		ch:        make(chan acl.PermissionDecision, 1),
+		timeout:   time.Now().Add(m.timeout),
 	}
 	m.mu.Lock()
 	m.pending[callID] = p
 	m.mu.Unlock()
-	glog.Infow(ctx, "permission: request registered", "conversation", conversationID, "call_id", callID,
+	glog.Infow(ctx, "permission: request registered", "session", sessionID, "call_id", callID,
 		"title", req.ToolCall.Title, "wire_request_id", req.RequestID)
 
 	if publish != nil {
@@ -170,7 +170,7 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 		d = acl.PermissionDecision{} // 取消 → Cancelled
 		reason = "cancel"
 	case <-timer.C:
-		glog.Warnw(ctx, "permission: request timeout, auto-reject", "conversation", conversationID, "call_id", callID, "title", req.ToolCall.Title)
+		glog.Warnw(ctx, "permission: request timeout, auto-reject", "session", sessionID, "call_id", callID, "title", req.ToolCall.Title)
 		d = acl.PermissionDecision{}
 		reason = "timeout"
 	}
@@ -189,13 +189,13 @@ func (m *PermissionManager) RegisterAndWait(ctx context.Context, conversationID 
 			decision = memDecisionReject
 		}
 		if decision != "" {
-			m.Remember(conversationID, req.ToolCall, decision, d.OptionID)
+			m.Remember(sessionID, req.ToolCall, decision, d.OptionID)
 		}
 	}
 	if onResolved != nil {
-		onResolved(conversationID, callID, reason, d)
+		onResolved(sessionID, callID, reason, d)
 	}
-	glog.Infow(ctx, "permission: resolved", "conversation", conversationID, "call_id", callID,
+	glog.Infow(ctx, "permission: resolved", "session", sessionID, "call_id", callID,
 		"reason", reason, "allowed", d.Allowed, "rejected", d.Rejected, "always", d.Always, "option_id", d.OptionID)
 	return d
 }
@@ -227,11 +227,11 @@ type DecisionOutcome struct {
 // 见 acl.EffectivePermissionOutcome）：请求不存在/已过期时 found=false、回执为零值。
 // 这是 REST 回执的事实来源——不再回显请求参数（option_id 可能被兜底为第一个选项或降级 Cancelled）。
 //
-// conversationID 是决策发起方会话（C3 scope 归属，与 ElicitationManager.resolve 同一立场）：
+// sessionID 是决策发起方会话（C3 scope 归属，与 ElicitationManager.resolve 同一立场）：
 // 只有登记该请求的会话能决策——跨会话决策（陈旧标签页/串号调用）一律拒绝，既不投递也不删除
 // 挂起项，对外统一表现为「不存在」（found=false，不泄露他会话挂起项）。空串 = 跳过归属校验，
 // 仅供 ResolveAllow/ResolveReject 这类按 call_id 直投的内部入口使用。
-func (m *PermissionManager) ResolveDecision(conversationID, callID string, d acl.PermissionDecision) (found bool, out DecisionOutcome) {
+func (m *PermissionManager) ResolveDecision(sessionID, callID string, d acl.PermissionDecision) (found bool, out DecisionOutcome) {
 	if callID == "" {
 		return false, DecisionOutcome{}
 	}
@@ -241,11 +241,11 @@ func (m *PermissionManager) ResolveDecision(conversationID, callID string, d acl
 		m.mu.Unlock()
 		return false, DecisionOutcome{}
 	}
-	if conversationID != "" && p.conversationID != conversationID {
-		owner := p.conversationID
+	if sessionID != "" && p.sessionID != sessionID {
+		owner := p.sessionID
 		m.mu.Unlock()
 		glog.Warnw(context.Background(), "permission: 决策会话与归属会话不符，拒绝（scope mismatch）",
-			"call_id", callID, "owner", owner, "caller", conversationID)
+			"call_id", callID, "owner", owner, "caller", sessionID)
 		return false, DecisionOutcome{}
 	}
 	kind, oid := acl.EffectivePermissionOutcome(d, p.options)

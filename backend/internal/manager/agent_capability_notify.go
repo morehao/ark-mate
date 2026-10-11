@@ -13,12 +13,12 @@ import (
 // ——— M6-8 / P-13：agent 写面之后的能力面变更通知 ———
 //
 // 问题（P-13 的原话）：入 DB 只解决"读到的是新的"，不解决"**何时**生效"。会话的能力面是在
-// `connectConversation` 那一刻注入的（`McpServersFor(agent, spec, sel)`），此后一条活着的句柄
+// `connectSession` 那一刻注入的（`McpServersFor(agent, spec, sel)`），此后一条活着的句柄
 // 一直用着**它出生时**那一套；而钉住能力选择的会话靠代际机制在轮次边界自愈（`generation.go`），
 // **缺省路径**（未声明能力选择）的指纹恒为空、按 R11 不迁移（`capability_fingerprint.go:97-101`）。
 // 于是"改 agent 白名单"若什么都不做，只有**新建会话**看得见。
 //
-// 做法：写面提交成功后，把该 agent 的**空闲**会话句柄作废——下一轮 `ensureConversation` 按当前
+// 做法：写面提交成功后，把该 agent 的**空闲**会话句柄作废——下一轮 `ensureSession` 按当前
 // 定义重建（native resume / handoff memo 与"进程死后重建"是同一条路径），MCP 注入随之取到新值。
 //
 // 为什么是"作废句柄"而不是"关进程/换代际键"：
