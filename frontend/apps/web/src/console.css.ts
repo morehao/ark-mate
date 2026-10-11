@@ -91,6 +91,34 @@ export const consoleStyleSheet = `
     white-space: nowrap;
   }
 
+  /* 新建会话：品牌下方的全宽按钮（v14.1，对齐 dsh 左栏的首屏动作）。
+     它比导航项高一档（38px / 更实的底 / 描边）：这是"开始一件事"，不是"切一个视图"。 */
+  .fg-rail-new {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 38px;
+    margin: 2px 12px 12px;
+    border: 1px solid ${tokens.borderStrong};
+    border-radius: 10px;
+    background: ${tokens.softFill};
+    color: ${tokens.text};
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .fg-rail-new:hover {
+    background: ${tokens.primarySoft};
+    border-color: ${tokens.primary};
+  }
+  .fg-rail-new-icon { font-size: 14px; color: ${tokens.textSecondary}; }
+  .fg-rail-new:hover .fg-rail-new-icon { color: ${tokens.primary}; }
+
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
     flex: none;
@@ -938,7 +966,9 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
     line-height: 1.6;
   }
-  /* 左栏分组行上的管理入口：悬停浮现（与 .fg-sess-more 同一纪律）。 */
+  /* 左栏分组行上的行内动作（v14.1：「⋯」管理 + 「⊕」在此新建）：**一起**悬停浮现。
+     未悬停时整行只剩"名字 + 会话数"，工作空间名不再被一排图标挤掉；
+     触屏（≤920px 的抽屉态）没有 hover，所以那一档常显——否则这两个入口等于不存在。 */
   .fg-ws-manage { flex: none; display: none; gap: 2px; }
   .fg-wsgroup-row:hover .fg-ws-manage { display: inline-flex; }
   .fg-wsgroup-row .fg-ws-icon-btn {
@@ -1006,5 +1036,6 @@ export const consoleStyleSheet = `
   .fg-sess-more.fg-keep { opacity: 1; }
   @media (max-width: 920px) {
     .fg-sess-more { opacity: 1; }
+    .fg-ws-manage { display: inline-flex; }
   }
 `

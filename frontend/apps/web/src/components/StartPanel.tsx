@@ -8,6 +8,7 @@ import { useMate } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
 import { NO_WORKSPACE, WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
+import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
 import { CapabilityPicker } from './CapabilityPicker'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
@@ -48,11 +49,20 @@ export function StartPanel() {
   // 工作空间选择（v14）：`{id}` = 选中的登记项；`{cwd}` = 直接输入的绝对路径；两者皆空 = 未指定
   // （会话落在**默认工作空间**）。
   //
-  // 每次新建会话**都从未指定开始**，刻意不记住上一次的选择：工作空间是会话的沙箱边界，
-  // 复用上一次的目录等于让新会话继承上一个任务的上下文边界（新任务会读到、甚至改到上一个
-  // 任务的文件），且"我这次要处理哪里"本来就该每次明确一次。目录靠选择器的主列表
-  // （登记表）+「最近使用」一次点击就能选回来，不存在"每次都要重新翻目录树"的负担。
+  // v14.1 改口径：新建会话**默认预选「最近使用的工作空间」**（用户明确要求，取代 v14 的
+  // "每次都从未指定开始"）。理由不冲突——工作空间确实是会话的沙箱边界，所以这里只做**预选**：
+  // 选择器在面板上如实显示这个目录，用户看得见、发送前随时能改；不预选反而会出现
+  // "我上一轮就在 ark-mate 里干活，这一轮却又落回默认目录"这种需要用户自己重新翻一遍的默认值。
+  // 判定与优先级只有一份：`console/workspaceView.ts`；拿不到登记表就退回"未指定"。
   const [workspace, setWorkspace] = useState<WorkspaceChoice>(NO_WORKSPACE)
+  // 用户显式选过之后（含左栏「＋」预选、输入路径），默认值不再回写——否则一次列表刷新
+  // 就会把用户刚选好的目录顶掉，而那看起来像"我的选择没生效"。
+  const [workspacePicked, setWorkspacePicked] = useState(false)
+  const pickWorkspace = (next: WorkspaceChoice) => {
+    setWorkspacePicked(true)
+    setWorkspace(next)
+  }
+  const workspaces = useMate((s) => s.workspaces)
   const preferredWorkspaceId = useMate((s) => s.preferredWorkspaceId)
   const setPreferredWorkspace = useMate((s) => s.setPreferredWorkspace)
 
@@ -62,9 +72,18 @@ export function StartPanel() {
   // 会被旧值顶回去，而这看起来像"我的选择没生效"。
   useEffect(() => {
     if (!preferredWorkspaceId) return
+    setWorkspacePicked(true)
     setWorkspace({ id: preferredWorkspaceId, cwd: null })
     setPreferredWorkspace(null)
   }, [preferredWorkspaceId, setPreferredWorkspace])
+
+  // 默认值：登记表到达后（首帧它可能还在路上）预选最近使用的那一条。
+  useEffect(() => {
+    if (workspacePicked) return
+    const id = mostRecentlyUsedWorkspaceId(workspaces)
+    if (!id) return
+    setWorkspace({ id, cwd: null })
+  }, [workspaces, workspacePicked])
 
   // 能力选定（M3）：缺省 = 两个 kind 都不限制（请求体里不加 capabilities 键，逐字节等同旧行为）。
   //
@@ -278,7 +297,7 @@ export function StartPanel() {
                 >
                   在项目中工作
                 </span>
-                <WorkspacePicker value={workspace} onChange={setWorkspace} disabled={sending} />
+                <WorkspacePicker value={workspace} onChange={pickWorkspace} disabled={sending} />
               </span>
               {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。默认不限制，限了才占位显示明细：
                   与工作空间那栏同样的理由——不留白，但也不给未设置的状态编一个假值。 */}

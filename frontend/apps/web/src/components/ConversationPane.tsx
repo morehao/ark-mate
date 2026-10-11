@@ -1,12 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Button, Dropdown, Input, Modal } from 'antd'
+import { Dropdown, Input, Modal } from 'antd'
 import {
   DownloadOutlined,
   EditOutlined,
   InboxOutlined,
   LoadingOutlined,
   MoreOutlined,
-  PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
   SearchOutlined,
@@ -644,11 +643,6 @@ export function ConversationPane({ onCreate }: Props) {
               </ViewTab>
             </span>
           )}
-          {!archivedView && (
-            <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
-              新建会话
-            </Button>
-          )}
         </span>
       </div>
 
@@ -718,7 +712,7 @@ export function ConversationPane({ onCreate }: Props) {
           <div style={{ padding: '18px 12px', color: tokens.textPlaceholder, fontSize: 12.5, lineHeight: 1.7 }}>
             {archivedView
               ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
-              : '暂无会话。点击右上「新建会话」，选择 Agent 并发起首轮问答。'}
+              : '暂无会话。点左栏顶部「新建会话」，选好工作空间即可发起首轮问答。'}
           </div>
         ) : effectiveMode === 'workspace' && grouped ? (
           <>

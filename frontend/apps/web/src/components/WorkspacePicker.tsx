@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Input, Popover, Tooltip } from 'antd'
+import { Dropdown, Input, Popover, Tooltip } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -8,9 +8,11 @@ import {
   EditOutlined,
   FolderOpenOutlined,
   FolderOutlined,
+  MoreOutlined,
   PlusOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
 import { tokens } from '@ark-mate/ui'
 import { recentWorkspaces } from '@ark-mate/api'
 import type { Workspace, WorkspaceRecent } from '@ark-mate/types'
@@ -378,8 +380,13 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
  * 工作空间分组行上的管理入口（左栏用；**选择器里不做管理**，见设计 §5.1 的关键分线：
  * 左栏是浏览面、新建面板是选择面，两处共用同一份登记表但职责不重叠）。
  *
- * 顺序调整本期只做「上移/下移」两个方向（拖拽要处理"拖到后代上"这类兼容判定，
- * 成本与收益不匹配——设计 §5.5 与 ADR-12）。边界方向由调用方禁用，不给一个必然无效的按钮。
+ * v14.1：四个行内图标按钮收成一颗 `⋯` 菜单（对齐 dsh 左栏工作区行的右侧交互：
+ * `⋯` = 管理、`⊕` = 在此新建；两个动作**并排**但词与职责都不同）。收进菜单的另一个好处是
+ * 主行只剩"名字 + 会话数"，长工作空间名不再被四颗图标挤掉。
+ *
+ * 顺序调整本期仍只做「上移/下移」两个方向（拖拽要处理"拖到后代上"这类兼容判定，
+ * 成本与收益不匹配——设计 §5.5 与 ADR-12）。边界方向禁用，不给一个必然无效的菜单项；
+ * 默认工作空间不可移除（设计 ADR-4），同样以 disabled 表达而不是点了再报错。
  */
 export function WorkspaceManageMenu({
   ws,
@@ -395,61 +402,40 @@ export function WorkspaceManageMenu({
   canMoveDown: boolean
   onMoveUp: () => void
   onMoveDown: () => void
-  onRename: (title: string) => void
+  /** 重命名由调用方接管（就地输入框需要整行的宽度与折叠态的配合，见 `WorkspaceGroupPane`）。 */
+  onRename: () => void
   onDelete: () => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(ws.title)
-
-  if (editing) {
-    return (
-      <Input
-        size="small"
-        autoFocus
-        value={draft}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => setDraft(e.target.value)}
-        onPressEnter={() => {
-          setEditing(false)
-          onRename(draft.trim())
-        }}
-        onBlur={() => setEditing(false)}
-        style={{ height: 22, fontSize: 12 }}
-      />
-    )
+  const items: MenuProps['items'] = [
+    { key: 'up', label: '上移', icon: <ArrowUpOutlined />, disabled: !canMoveUp },
+    { key: 'down', label: '下移', icon: <ArrowDownOutlined />, disabled: !canMoveDown },
+    { key: 'rename', label: '重命名', icon: <EditOutlined /> },
+    { type: 'divider' },
+    {
+      key: 'delete',
+      label: '移除工作空间',
+      icon: <DeleteOutlined />,
+      danger: true,
+      disabled: ws.is_default,
+    },
+  ]
+  const onClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'up') onMoveUp()
+    else if (key === 'down') onMoveDown()
+    else if (key === 'rename') onRename()
+    else if (key === 'delete') onDelete()
   }
   return (
-    <span className="fg-ws-manage" onClick={(e) => e.stopPropagation()}>
+    <Dropdown menu={{ items, onClick }} trigger={['click']} placement="bottomRight">
       <button
         type="button"
         className="fg-ws-icon-btn"
-        title="上移"
-        disabled={!canMoveUp}
-        onClick={onMoveUp}
+        title="更多操作"
+        aria-label="更多操作"
+        onClick={(e) => e.stopPropagation()}
       >
-        <ArrowUpOutlined />
+        <MoreOutlined />
       </button>
-      <button
-        type="button"
-        className="fg-ws-icon-btn"
-        title="下移"
-        disabled={!canMoveDown}
-        onClick={onMoveDown}
-      >
-        <ArrowDownOutlined />
-      </button>
-      <button type="button" className="fg-ws-icon-btn" title="重命名" onClick={() => setEditing(true)}>
-        <EditOutlined />
-      </button>
-      <button
-        type="button"
-        className="fg-ws-icon-btn"
-        title={ws.is_default ? '默认工作空间不可移除' : '移除登记（不删除目录与会话）'}
-        disabled={ws.is_default}
-        onClick={onDelete}
-      >
-        <DeleteOutlined />
-      </button>
-    </span>
+    </Dropdown>
   )
 }

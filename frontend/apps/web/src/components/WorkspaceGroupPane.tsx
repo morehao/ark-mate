@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Modal, Tooltip } from 'antd'
-import { DownOutlined, PlusOutlined, RightOutlined, WarningOutlined } from '@ant-design/icons'
+import { Input, Modal, Tooltip } from 'antd'
+import { DownOutlined, PlusCircleOutlined, RightOutlined, WarningOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import type { ConversationSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
@@ -68,6 +68,10 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed)
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null)
+  // 就地重命名（设计 §5.5）：预填**屏幕上显示的名字**（未命名项 = 末级目录名）——
+  // 确认一段没改过的文本 = 把自动名钉成一个显式标题，这是用户能预期到的结果。
+  const [renaming, setRenaming] = useState<Workspace | null>(null)
+  const [draft, setDraft] = useState('')
 
   const items = workspaces?.items ?? []
   const defaultID = workspaces?.default_id ?? ''
@@ -108,6 +112,17 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
     })
   }
 
+  const startRename = (ws: Workspace) => {
+    setDraft(workspaceLabel(ws))
+    setRenaming(ws)
+  }
+
+  const submitRename = () => {
+    const ws = renaming
+    setRenaming(null)
+    if (ws) void renameWorkspace(ws.id, draft.trim())
+  }
+
   return (
     <>
       {items.map((ws, idx) => {
@@ -119,12 +134,16 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         const sessions = byWorkspace.get(ws.id) ?? []
         const broken = ws.dir_status !== 'ok'
         const unnamed = !ws.title
+        const editing = renaming?.id === ws.id
 
         return (
           <div key={ws.id}>
             <div
               className={`fg-wsgroup-row${isOpen ? ' fg-open' : ''}`}
-              onClick={() => toggle(ws.id)}
+              onClick={() => {
+                // 改名期间点行内任何地方都不该顺手折叠/展开（输入框那一层已各自 stopPropagation）。
+                if (!editing) toggle(ws.id)
+              }}
               title={ws.path}
             >
               <span className="fg-wsgroup-caret">{isOpen ? <DownOutlined /> : <RightOutlined />}</span>
@@ -133,36 +152,59 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
               ) : (
                 <span style={{ flex: 'none', fontSize: 12, color: tokens.textPlaceholder }}>📁</span>
               )}
-              <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
-              {/* 「在此工作空间新建会话」：悬停浮现；目录不可用时禁用并给出原因
-                  （点了必然被服务端拒，不如不给）。 */}
-              <Tooltip title={broken ? '目录不可用，无法在此新建会话' : '在此工作空间新建会话'}>
-                <button
-                  type="button"
-                  className="fg-ws-icon-btn"
-                  disabled={broken}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onCreate(ws.id)
+              {editing ? (
+                <Input
+                  size="small"
+                  autoFocus
+                  value={draft}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setDraft(e.target.value)}
+                  // 只有 `↵` 落库；`Esc` 与失焦都**放弃**（与收成菜单之前的语义逐字一致：
+                  // 点开一行、随手点走，不该把名字改成手滑打进去的那半截）。
+                  onPressEnter={submitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setRenaming(null)
                   }}
-                >
-                  <PlusOutlined />
-                </button>
-              </Tooltip>
-              <span className="fg-wsgroup-count">{ws.conversations || ''}</span>
-              <WorkspaceManageMenu
-                ws={ws}
-                canMoveUp={idx > 0}
-                canMoveDown={idx < items.length - 1}
-                onMoveUp={() => void moveWorkspace(ws.id, items[idx - 1]?.id)}
-                onMoveDown={() => {
-                  // 「下移一位」= 插到"再下一个"之前；已在末尾时用 append（beforeId 缺省）。
-                  const after = items[idx + 2]?.id
-                  void moveWorkspace(ws.id, after)
-                }}
-                onRename={(title) => void renameWorkspace(ws.id, title)}
-                onDelete={() => setPendingDelete(ws)}
-              />
+                  onBlur={() => setRenaming(null)}
+                  style={{ flex: 1, minWidth: 0, height: 22, fontSize: 12 }}
+                />
+              ) : (
+                <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
+              )}
+              {!editing && (
+                <>
+                  <span className="fg-wsgroup-count">{ws.conversations || ''}</span>
+                  {/* 行内动作（v14.1）：`⋯` = 管理（重命名 / 移除 / 上移下移），`⊕` = 在此工作空间
+                      新建会话。两者**一起悬停浮现**（对齐 dsh 左栏的工作区行），未悬停时整行只剩
+                      "名字 + 会话数"——工作空间名不再被一排图标挤成省略号。 */}
+                  <span className="fg-ws-manage" onClick={(e) => e.stopPropagation()}>
+                    <WorkspaceManageMenu
+                      ws={ws}
+                      canMoveUp={idx > 0}
+                      canMoveDown={idx < items.length - 1}
+                      onMoveUp={() => void moveWorkspace(ws.id, items[idx - 1]?.id)}
+                      onMoveDown={() => {
+                        // 「下移一位」= 插到"再下一个"之前；已在末尾时用 append（beforeId 缺省）。
+                        const after = items[idx + 2]?.id
+                        void moveWorkspace(ws.id, after)
+                      }}
+                      onRename={() => startRename(ws)}
+                      onDelete={() => setPendingDelete(ws)}
+                    />
+                    {/* 「在此工作空间新建会话」：目录不可用时禁用并给出原因（点了必然被服务端拒，不如不给）。 */}
+                    <Tooltip title={broken ? '目录不可用，无法在此新建会话' : '在此工作空间新建会话'}>
+                      <button
+                        type="button"
+                        className="fg-ws-icon-btn"
+                        disabled={broken}
+                        onClick={() => onCreate(ws.id)}
+                      >
+                        <PlusCircleOutlined />
+                      </button>
+                    </Tooltip>
+                  </span>
+                </>
+              )}
             </div>
 
             {isOpen && broken && (
