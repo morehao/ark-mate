@@ -167,14 +167,14 @@ func assertModelsResponseHasNoPerRuntimeDefault(t *testing.T) {
 // assertPanelHasSingleDefaultSelector A14 的前端半场：面板里**只有一个**默认模型选择器。
 //
 // 判据是结构标记（不是文案）：选择器上带唯一标记 `aria-label="默认模型"`，出现次数必须恰好 1。
-// 表格里的「默认」标签是**只读**状态标签、不带这个标记，所以不会被算进来；解析不到（0 个）即失败
+// 行卡上的「默认」标签是**只读**状态标签、不带这个标记，所以不会被算进来；解析不到（0 个）即失败
 // ——否则"删掉默认选择器"也会让守卫绿。
 func assertPanelHasSingleDefaultSelector(t *testing.T, src string) {
 	t.Helper()
 	const marker = `aria-label="默认模型"`
 	if n := strings.Count(src, marker); n != 1 {
 		t.Errorf("面板里 %q 出现 %d 次（期望恰好 1 次）：默认模型在用户面只有一个，"+
-			"且必须是唯一的那个选择器（表格里的「默认」标签是只读的、不带这个标记）", marker, n)
+			"且必须是唯一的那个选择器（行卡上的「默认」标签是只读的、不带这个标记）", marker, n)
 	}
 	// 逐 runtime 的默认映射不许在前端回流（哪怕只是类型名）。
 	if strings.Contains(src, "default_models") {

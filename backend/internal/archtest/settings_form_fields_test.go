@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// formInterfaceRE 抓「表单取值接口」的声明与成员体（设置 · 模型 的两个弹窗）。
+// formInterfaceRE 抓「表单取值接口」的声明与成员体（设置 · 模型 的两张就地展开的表单卡）。
 // 只认这两个名字：改名即失败（fail-closed），避免守卫静默空转。
 var formInterfaceRE = regexp.MustCompile(`interface\s+(ProviderFormValues|ModelFormValues)\s*\{([^}]*)\}`)
 
@@ -18,7 +18,7 @@ var formFieldRE = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\??\s*:`)
 // TestSettingsModelFormRendersEveryField 设置 · 模型的**表单字段**必须真的画出来。
 //
 // 它挡的是一类**静默**缺口：`interface XxxFormValues` 里声明了键、`submitXxx` 也读了它，
-// 但弹窗里没有对应的 `<Form.Item name="…">`。antd 的 `Form.validateFields()` **只返回已注册
+// 但卡片里没有对应的 `<Form.Item name="…">`。antd 的 `Form.validateFields()` **只返回已注册
 // 字段**，所以那个键恒为 `undefined`——"用户以为填了""用户以为没改"与"其实发的是默认值"
 // 看起来一模一样，编译、typecheck、别的守卫全绿。
 //

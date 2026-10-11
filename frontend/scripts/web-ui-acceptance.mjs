@@ -283,18 +283,22 @@ function btnExpr(text) {
 }
 
 /**
- * 取**包含某个字段**的那个弹窗里的按钮（按文本、忽略空白）。
+ * 取**包含某个字段**的那张就地展开的编辑卡里的提交按钮（按文本、忽略空白）。
  *
- * 为什么不能直接 `[...document.querySelectorAll('button')].find(...)`：antd 的**嵌套弹窗不会卸载**，
- * 关掉的那一层仍在 DOM 里——于是"第一个文本是「保存」的按钮"很可能是**上一层隐藏弹窗**里的那个。
- * 首次实跑就撞上：点「保存」把**供应商弹窗**又提交了一遍，而模型那条压根没发请求（表现是
- * "表单填得好好的、保存后什么都没有、toast 也是空的"）。按字段所在的弹窗限定作用域即可。
+ * 为什么不能直接 `[...document.querySelectorAll('button')].find(...)`：设置 · 模型的编辑
+ * 自 2026-10-11 起不再是弹窗，而是卡片里就地展开的一张 `.fg-editor`——而**同一时刻可能同时开着
+ * 两张**（供应商块一张、模型块一张）。"第一个文本是「保存」的按钮"会命中另一块里那个，
+ * 症状与当年一样：点「保存」什么都没发生，或者把另一张卡提交了一遍。
+ * 按字段所在的那张卡限定作用域即可。
+ *
+ * 文案随卡片角色不同（**新建**是「创建供应商 / 创建模型」，**编辑**是「保存」）——
+ * 判据是"这张卡里那个提交按钮"，不是某个固定字样，所以两种都收。
  */
 function saveBtnExpr(fieldID) {
   return `(() => {
-    const inp = document.querySelector('.ant-modal input#${fieldID}');
-    const modal = inp && inp.closest('.ant-modal');
-    return modal ? [...modal.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '保存') : null
+    const inp = document.querySelector('.fg-editor input#${fieldID}');
+    const card = inp && inp.closest('.fg-editor');
+    return card ? [...card.querySelectorAll('button')].find(b => /^(保存|创建供应商|创建模型)$/.test((b.innerText||'').replace(/\\s+/g,''))) : null
   })()`
 }
 
@@ -305,11 +309,14 @@ function saveBtnExpr(fieldID) {
  * 过滤后的首项即目标）；③ ↓ + 回车（把激活项挪到第一项）。
  *
  * 为什么要这三步：**首次实跑**里合成 `el.click()`、`.trim() === '保存'`、`.ant-modal .ant-select`
- * 三种"看起来显然"的写法全是坑——antd 会插空格、嵌套弹窗里 DOM 顺序会先命中外层控件、
+ * 三种"看起来显然"的写法全是坑——antd 会插空格、DOM 顺序会先命中外层控件、
  * 合成 click 对 Select 选项不稳。这里把踩过的坑收敛成一个助手，调用点只写"选哪一项"。
+ *
+ * 作用域 2026-10-11 随交互改造从 `.ant-modal` 换成 `.fg-editor`（就地展开的编辑卡）：
+ * 字段 id 在两块之间不重名，所以"按字段 id 找到那张卡"仍然唯一。
  */
 async function selectByFieldID(page, fieldID, text) {
-  const inputSel = `.ant-modal input#${fieldID}`
+  const inputSel = `.fg-editor input#${fieldID}`
   const shown = async () => page.evaluate(
     `return (document.querySelector(${JSON.stringify(inputSel)})?.closest('.ant-select')?.innerText || '').includes(${JSON.stringify(text)})`,
   )
@@ -881,11 +888,11 @@ async function scenarioSettingsModel(browser) {
 
     // ② 供应商：新建 → 自检（本地段）→ 留在列表里
     await page.click(btnExpr('新建供应商'))
-    await page.waitFor(`return !!document.querySelector('.ant-modal input#id')`, { label: '供应商表单打开' })
-    await page.type('document.querySelector(".ant-modal input#id")', provID)
-    check('供应商表单的 id 已填进去',
-      (await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)) === provID,
-      String(await page.evaluate(`return document.querySelector('.ant-modal input#id')?.value`)))
+    await page.waitFor(`return !!document.querySelector('.fg-editor input#id')`, { label: '供应商编辑卡展开' })
+    await page.type('document.querySelector(".fg-editor input#id")', provID)
+    check('供应商卡的 id 已填进去',
+      (await page.evaluate(`return document.querySelector('.fg-editor input#id')?.value`)) === provID,
+      String(await page.evaluate(`return document.querySelector('.fg-editor input#id')?.value`)))
     // 协议是 antd Select（不是裸 input）：**断言它开箱就是 openai**，不去手动选。
     //
     // 为什么改（2026-10-10）：手动走一遍 `selectByFieldID`（点开 → 输入 → 点选项）会在
@@ -893,9 +900,9 @@ async function scenarioSettingsModel(browser) {
     // 而"默认就是 openai"本来就是产品该有的形态——`Form` 的 `initialValues` 提供它。
     // 断言默认值比"能手动选"更强：它直接钉住那条初值链路。
     const protoShown = await page.evaluate(
-      `const i = document.querySelector('.ant-modal input#protocol'); return i ? (i.closest('.ant-select')?.innerText || '') : ''`,
+      `const i = document.querySelector('.fg-editor input#protocol'); return i ? (i.closest('.ant-select')?.innerText || '') : ''`,
     )
-    check('供应商表单的「协议」开箱即 openai（表单初值链路生效）',
+    check('供应商卡的「协议」开箱即 openai（表单初值链路生效）',
       String(protoShown).includes('openai'), JSON.stringify(protoShown))
     // 关掉 Select 的下拉浮层：它盖在表单上，会让随后的 `page.click(input)` 落到浮层上
     // （真实鼠标事件被遮住 = 输入框根本没聚焦，insertText 打进空气里）。
@@ -904,14 +911,14 @@ async function scenarioSettingsModel(browser) {
     // （实测：之后 form 填得好好的、点保存什么也不发生）。改成点一下弹窗标题这个中性区域。
     await page.click(`document.querySelector('.ant-modal .ant-modal-title')`, { optional: true })
     await sleep(250)
-    await page.type('document.querySelector(".ant-modal input#base_url")', 'https://api.deepseek.com/v1')
-    await page.type('document.querySelector(".ant-modal input#api_key")', 'sk-ui-verify')
+    await page.type('document.querySelector(".fg-editor input#base_url")', 'https://api.deepseek.com/v1')
+    await page.type('document.querySelector(".fg-editor input#api_key")', 'sk-ui-verify')
     const filled = await page.evaluate(`return JSON.stringify({
-      id: document.querySelector('.ant-modal input#id')?.value,
-      base_url: document.querySelector('.ant-modal input#base_url')?.value,
-      api_key: (document.querySelector('.ant-modal input#api_key')?.value || '').length,
+      id: document.querySelector('.fg-editor input#id')?.value,
+      base_url: document.querySelector('.fg-editor input#base_url')?.value,
+      api_key: (document.querySelector('.fg-editor input#api_key')?.value || '').length,
     })`)
-    check('供应商表单的端点与密钥已填进去', /"base_url":"https:\/\/api\.deepseek\.com\/v1"/.test(filled) && /"api_key":[1-9]/.test(filled), filled)
+    check('供应商卡的端点与密钥已填进去', /"base_url":"https:\/\/api\.deepseek\.com\/v1"/.test(filled) && /"api_key":[1-9]/.test(filled), filled)
     // 保存：按**完整鼠标序列**派发（mousedown → mouseup → click）。
     //
     // 为什么不用 `el.click()`：antd 的 Button 在受控弹窗里对合成 `click` 不总是响应（实测：
@@ -939,8 +946,8 @@ async function scenarioSettingsModel(browser) {
       const r = el.getBoundingClientRect()
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
     })()`)
-    if (!saveRect) throw new Error('找不到供应商表单的「保存」按钮：' + saveBtnExpr('base_url'))
-    if (saveRect.disabled) throw new Error('供应商表单的「保存」被禁用：' + saveRect.disabled)
+    if (!saveRect) throw new Error('找不到供应商卡里的提交按钮：' + saveBtnExpr('base_url'))
+    if (saveRect.disabled) throw new Error('供应商卡里的提交按钮被禁用：' + saveRect.disabled)
     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
       await send2(page, { type, x: saveRect.x, y: saveRect.y, button: 'left', clickCount: 1 })
     }
@@ -951,55 +958,113 @@ async function scenarioSettingsModel(browser) {
       const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
       const ids = (await api('GET', '/providers')).json.data ?? []
       const errs = await page.evaluate(
-        `return [...document.querySelectorAll('.ant-modal .ant-form-item-explain-error')].map(e => e.innerText).join(' | ')`,
+        `return [...document.querySelectorAll('.fg-editor .ant-form-item-explain-error')].map(e => e.innerText).join(' | ')`,
       )
       const btns = await page.evaluate(
-        `return [...document.querySelectorAll('.ant-modal button')].map(b => (b.innerText||'').trim()).filter(Boolean).join(',')`,
+        `return [...document.querySelectorAll('.fg-editor button')].map(b => (b.innerText||'').trim()).filter(Boolean).join(',')`,
       )
       throw new Error('供应商没出现在列表里：toast=' + toasts + ' 表单=' + filled +
         ' 校验错误=' + errs + ' 按钮=' + btns + ' 库里=' + JSON.stringify(ids.map((p) => p.id)) +
         ' 页面错误=' + (page.errors || []).join(' || '))
     }
-    check('供应商创建后出现在供应商表里', true, provID)
-    // 端点列有值（缺端点会显示「缺端点」Tag——那条路径由 providers 的 problems 单测覆盖）
-    const provRow = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
-    check('供应商表给出端点与密钥状态', /api\.deepseek\.com/.test(provRow) && /已存|未设置/.test(provRow),
-      provRow.split('\n').filter((l) => /deepseek|密钥|设置/.test(l)).join(' | ').slice(0, 200))
+    check('供应商创建后出现在列表里（行卡，不再是表格行）', true, provID)
+    // 行卡给的是**身份 + 密钥状态点**（改造后不再有"端点"这一列：端点只在编辑卡里）。
+    // 缺端点那条路径改由行卡上的「缺端点」标签承担，由 providers 的 problems 单测覆盖。
+    const rowInfo = await page.evaluate(`return (() => {
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="供应商"] .fg-rowcard')]
+        .find(x => (x.innerText||'').includes(${JSON.stringify(provID)}));
+      if (!li) return null;
+      const dot = li.querySelector('.fg-keydot');
+      return JSON.stringify({ text: (li.innerText||'').replace(/\\n/g,'|').slice(0, 200), key: dot ? dot.getAttribute('aria-label') : null });
+    })()`)
+    check('供应商行卡给出身份与密钥状态点', /API 密钥已配置/.test(rowInfo ?? ''), String(rowInfo).slice(0, 240))
+    // 保存成功那一行是 `role="status"`，且**只说已保存、不说已生效**（ADR-22）。
+    const savedLine = await page.evaluate(
+      `const el = document.querySelector('.fg-model-panel .fg-savedline'); return JSON.stringify({ role: el ? el.getAttribute('role') : null, text: el ? (el.innerText||'').trim() : '' })`,
+    )
+    check('保存成功留下 role=status 提示行（不是飘走的 toast）',
+      /"role":"status"/.test(savedLine) && /已保存/.test(savedLine) && !/已生效/.test(savedLine), savedLine)
     await page.shot('21-settings-provider-created')
 
-    // 自检：只跑本地段（**绝不点那条会出网的**）
-    const probeBtnExpr = `[...document.querySelectorAll('.fg-model-panel button')].find(b => (b.innerText||'').replace(/\\s+/g,'').includes('自检'))`
+    // 自检：只跑本地段（**绝不点那条会出网的**）。按钮与结果都限定在**这条供应商**的行卡里，
+    // 否则多供应商时"第一个自检按钮"点的是别人。
+    const probeRowExpr = `(() => {
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="供应商"] .fg-rowcard')]
+        .find(x => (x.innerText||'').includes(${JSON.stringify(provID)}));
+      return li || null })()`
+    const probeBtnExpr = `(() => {
+      const li = ${probeRowExpr};
+      return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '自检') : null })()`
     const clicked = await clickJS(page, probeBtnExpr)
-    const opened = await page.waitFor(`return !!document.querySelector('.fg-probe')`, { label: '自检结果展开', timeout: 40000 }).catch(() => false)
+    const opened = await page.waitFor(`return !!(${probeRowExpr})?.querySelector('.fg-probe')`, { label: '自检结果展开', timeout: 40000 }).catch(() => false)
     if (!opened) {
       const toasts = await page.evaluate(`return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`)
       throw new Error(`自检结果没展开：clicked=${clicked} toast=${toasts}`)
     }
     await sleep(500)
-    const probe = await page.evaluate(`return document.querySelector('.fg-probe').innerText`)
+    const probe = await page.evaluate(`return (${probeRowExpr}).querySelector('.fg-probe').innerText`)
     // v12 的本地段检查项：exists / protocol / base_url / secret / refs / delivery / catalog
     check('自检逐条给出结论（含端点与密钥两项）',
       /exists/.test(probe) && /base_url/.test(probe) && /secret/.test(probe),
       probe.split('\n').slice(0, 4).join(' | ').slice(0, 240))
     check('自检有「连一次上游」的显式入口（默认不出网）', /连一次上游/.test(probe), probe.slice(0, 160))
 
+    // ②′ 供应商编辑卡（就地展开）：打开时**把当前值写进表单** → 改备注 → 保存。
+    //
+    // 为什么这一步不能省：新建与编辑**共用同一张卡、同一个 Form 实例**（`useForm` 的 store 活在
+    // React 树之外）。新建时"写进去的值"与 `initialValues` 恰好一致，会把这条链路的毛病盖住；
+    // 只有**编辑**才真的依赖"打开时同步写值"那一段（2026-10-11 的三次实测都栽在这上面，
+    // 症状是编辑卡整个是空的，于是"改备注"要么什么都不发生、要么按空表单把声明改掉）。
+    const editProvBtnExpr = `(() => {
+      const li = ${probeRowExpr};
+      return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    await clickJS(page, editProvBtnExpr)
+    await page.waitFor(`return !!document.querySelector('.fg-editor input#id')`, { label: '供应商编辑卡展开', timeout: 8000 })
+    await sleep(300)
+    const prefilled = await page.evaluate(`return JSON.stringify({
+      id: document.querySelector('.fg-editor input#id')?.value,
+      base_url: document.querySelector('.fg-editor input#base_url')?.value,
+      idDisabled: !!document.querySelector('.fg-editor input#id')?.disabled,
+    })`)
+    check('编辑卡把当前值写进了表单（端点回填、id 只读）',
+      /"id":"ui-verify-prov"/.test(prefilled) && /api\.deepseek\.com/.test(prefilled) && /"idDisabled":true/.test(prefilled),
+      prefilled)
+    await page.type('document.querySelector(".fg-editor input#note")', '验收备注')
+    await page.click(saveBtnExpr('id'))
+    await sleep(600)
+    const patchedProv = ((await api('GET', '/providers')).json.data ?? []).find((p) => p.id === provID)
+    check('供应商编辑提交后读面回带新备注', patchedProv?.note === '验收备注', JSON.stringify(patchedProv?.note))
+
     // ③ 模型：新建 → 出现在清单里（v12 的表单字段是 vendor / model_id）
-    const openedModel = await clickJS(page, btnExpr('新建模型'))
-    const modelModalOpen = await page
-      .waitFor(`return !!document.querySelector('.ant-modal input#model_id')`, { label: '模型表单打开', timeout: 8000 })
+    //
+    // 改造后模型按**供应商分组**，每组头右侧一个「添加模型」入口。这里必须点**我们这个夹具供应商**
+    // 那一组的入口——否则新建卡预选的是别的供应商（选择器能改回来，但那就测不到"分组入口预选对了"）。
+    const groupExpr = `(() => {
+      const g = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-group')]
+        .find(x => (x.querySelector('.fg-grouphead')?.innerText || '').includes(${JSON.stringify(provID)}));
+      return g || null })()`
+    const groupAddExpr = `(() => {
+      const g = ${groupExpr};
+      return g ? [...g.querySelectorAll('.fg-grouphead button')].find(b => (b.innerText||'').replace(/\\s+/g,'').includes('添加模型')) : null })()`
+    const groupHeads = await page.evaluate(
+      `return [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-grouphead')].map(g => (g.innerText||'').replace(/\\n/g,' ').trim())`)
+    check('模型按供应商分组（组头带供应商名或 id）', groupHeads.some((g) => g.includes(provID)), JSON.stringify(groupHeads).slice(0, 240))
+    const openedModel = await clickJS(page, groupAddExpr)
+    const modelCardOpen = await page
+      .waitFor(`return !!document.querySelector('.fg-editor input#model_id')`, { label: '模型编辑卡展开', timeout: 8000 })
       .catch(() => false)
-    if (!modelModalOpen) {
-      throw new Error('新建模型没打开表单：clickJS=' + openedModel)
+    if (!modelCardOpen) {
+      throw new Error('模型编辑卡没展开：clickJS=' + openedModel + ' 组头=' + JSON.stringify(groupHeads))
     }
     const provPick = await selectByFieldID(page, 'vendor', provID)
-    check('模型表单的「供应商」已选中该供应商', provPick.ok, provPick.detail)
-    await page.type('document.querySelector(".ant-modal input#model_id")', modelID)
-    check('模型表单的 model_id 已填进去',
-      (await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`)) === modelID,
+    check('模型卡的「供应商」已选中该供应商', provPick.ok, provPick.detail)
+    await page.type('document.querySelector(".fg-editor input#model_id")', modelID)
+    check('模型卡的 model_id 已填进去',
+      (await page.evaluate(`return document.querySelector('.fg-editor input#model_id')?.value`)) === modelID,
       await page.evaluate(`return JSON.stringify({
-        v: document.querySelector('.ant-modal input#model_id')?.value,
-        html: document.querySelector('.ant-modal input#model_id')?.outerHTML.slice(0, 160),
-        ids: [...document.querySelectorAll('.ant-modal input')].map(i => i.id),
+        v: document.querySelector('.fg-editor input#model_id')?.value,
+        html: document.querySelector('.fg-editor input#model_id')?.outerHTML.slice(0, 160),
+        ids: [...document.querySelectorAll('.fg-editor input')].map(i => i.id),
       })`))
     await page.click(saveBtnExpr('model_id'))
     await sleep(350)
@@ -1012,75 +1077,77 @@ async function scenarioSettingsModel(browser) {
     if (!inList) {
       const list = (await api('GET', '/models')).json.data?.models ?? []
       throw new Error('模型没出现在清单里：toast=' + toast +
-        ' 表单里的 model_id=' + await page.evaluate(`return document.querySelector('.ant-modal input#model_id')?.value`) +
+        ' 表单里的 model_id=' + await page.evaluate(`return document.querySelector('.fg-editor input#model_id')?.value`) +
         ' 库里=' + JSON.stringify(list.map((m) => m.model_id)))
     }
     await sleep(400)
     await page.shot('22-settings-model-created')
 
     // ③′ 输入模态（v13 / M6，ADR-12）：默认只收文本，且**能一键改成图片**。
-    //     两处判据：界面上的「输入」列（用户看得见、改得动）+ REST 读面的 `input_modalities`（真的落库）。
-    //     为什么要断言"默认是文本"：默认 `text` 会**覆盖底座目录**（老模型里本来能看图的变成纯文本），
-    //     这是拍板接受的代价——代价可见、可改，是这条用例的全部意义。
-    const modalityCell = `
-      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
-        .find(tr => (tr.innerText || '').includes(${JSON.stringify(modelID)}));
-      const cell = row ? [...row.querySelectorAll('td')].find(td => /^(文本|文本\\+图片)$/.test((td.innerText||'').trim())) : null;
-      return cell ? cell.innerText.trim() : ''`
-    const modBefore = await page.evaluate(modalityCell)
-    check('「输入」列显示默认（文本 = 图片不会被接受）', modBefore === '文本', JSON.stringify(modBefore))
+    //     两处判据：行卡上那个可点的能力标签（用户看得见、一步改得动）+ REST 读面的
+    //     `input_modalities`（真的落库）。改造后它从"表格单元格里的 Tag"变成"行卡上的按钮"，
+    //     但**一键**这个性质被刻意保留（默认 `text` = 图片不会被接受，多两次点击会显著降低
+    //     用户改对它的概率；见 console 里的注释）。
+    const capTagExpr = `(() => {
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
+        .find(x => (x.innerText || '').includes(${JSON.stringify(modelID)}));
+      if (!li) return null;
+      const b = [...li.querySelectorAll('button.fg-rowtag')].find(t => /^(文本|文本\\+图片)$/.test((t.innerText||'').trim()));
+      return b || null })()`
+    const capTagText = `const b = ${capTagExpr}; return b ? (b.innerText||'').trim() : ''`
+    const modBefore = await page.evaluate(capTagText)
+    check('模型行卡默认显示「文本」（= 图片不会被接受）', modBefore === '文本', JSON.stringify(modBefore))
     // 注意 `clickJS` 的表达式必须**求值成元素**（它自己做 `el.click()`）：早先这里写成
     // 返回布尔的 IIFE，第一次真跑就抛 `el.click is not a function`——该场景 2026-10-11 才第一次被执行。
-    const tagClicked = await clickJS(page, `(() => {
-      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
-        .find(tr => (tr.innerText || '').includes(${JSON.stringify(modelID)}));
-      return row ? [...row.querySelectorAll('td .ant-tag')].find(t => (t.innerText||'').trim() === '文本') : null })()`)
-    if (!tagClicked) throw new Error('模型行「输入」列里找不到「文本」标签，点不动')
-    // 等界面跟上（写面提交后表格会重载，别用固定 sleep 赌它）。
+    const tagClicked = await clickJS(page, capTagExpr)
+    if (!tagClicked) throw new Error('模型行卡里找不到「文本」能力标签，点不动')
+    // 等界面跟上（写面提交后清单会重载，别用固定 sleep 赌它）。
     let modAfter = ''
     for (let i = 0; i < 25 && modAfter !== '文本+图片'; i++) {
       await sleep(150)
-      modAfter = await page.evaluate(modalityCell)
+      modAfter = await page.evaluate(capTagText)
     }
-    check('一键勾选后「输入」列变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
+    check('一键切换后能力标签变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
     const modRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
     check('REST 读面回带 input_modalities=["text","image"]',
       JSON.stringify(modRow?.input_modalities) === JSON.stringify(['text', 'image']),
       JSON.stringify(modRow?.input_modalities))
     await page.shot('22b-settings-model-modalities')
 
-    // ③″ 编辑弹窗**不许静默改掉**已声明的输入能力（2026-10-11 修的回归判据）。
-    //     故障形态：`ModelFormValues` 声明了能力键、`submitModel` 也读它，但弹窗里没有对应的
+    // ③″ 就地展开的编辑卡**不许静默改掉**已声明的输入能力（2026-10-11 修的回归判据）。
+    //     故障形态：`ModelFormValues` 声明了能力键、`submitModel` 也读它，但卡片里没有对应的
     //     `Form.Item` ⇒ `validateFields()` 不返回未注册字段 ⇒ 恒为 undefined ⇒ **只改备注**
-    //     也会把图片能力改回仅文本，而 toast 只说"模型已保存"。
+    //     也会把图片能力改回仅文本，而提示只说"已保存"。
     //     所以这里刻意只改备注，然后要求读面仍是 ["text","image"]。
-    // 弹窗作用域一律取**可见**的那一层：antd 关掉的那层不会立刻从 DOM 里消失，
-    // 而 `document.querySelector('.ant-modal input#model_id')` 会命中它——按字段限定作用域的
-    // `saveBtnExpr` 同样会点到**隐藏层**的「保存」，表现是"点了保存、什么都没发生"（本轮实测踩到）。
-    const visibleModelModal = (sel) => `(() => {
-      const m = [...document.querySelectorAll('.ant-modal')]
-        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
-      return m ? m.querySelector(${JSON.stringify(sel)}) : null })()`
-    const modelModalField = (id) => visibleModelModal(`input#${id}`)
-    const modelModalSave = `(() => {
-      const m = [...document.querySelectorAll('.ant-modal')]
-        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
-      return m ? [...m.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '保存') : null })()`
+    //
+    // 作用域一律按**字段所在的编辑卡**取（供应商卡与模型卡可能同时开着；而两块的角色不同，
+    // "第一个 保存 按钮"这种写法一定会在某次改版后点错——当年的实测就是这么撞上的）。
+    const cardExpr = (fieldID) => `(() => {
+      const inp = document.querySelector('.fg-editor input#${fieldID}');
+      return inp ? inp.closest('.fg-editor') : null })()`
+    const cardField = (fieldID, sel) => `(() => {
+      const c = ${cardExpr(fieldID)};
+      return c ? c.querySelector(${JSON.stringify(sel)}) : null })()`
+    const modelCardField = (id) => cardField('model_id', `input#${id}`)
+    const modelCardSave = `(() => {
+      const c = ${cardExpr('model_id')};
+      return c ? [...c.querySelectorAll('button')].find(b => /^(保存|创建模型)$/.test((b.innerText||'').replace(/\\s+/g,''))) : null })()`
     const capWrapperExpr = `(() => {
-      const m = [...document.querySelectorAll('.ant-modal')]
-        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
-      return m ? [...m.querySelectorAll('[class*="ant-checkbox-wrapper"]')].find(x => (x.innerText||'').trim() === '图片') : null })()`
+      const c = ${cardExpr('model_id')};
+      if (!c) return null;
+      return [...c.querySelectorAll('[class*="ant-checkbox-wrapper"]')]
+        .find(x => (x.innerText||'').trim() === '图片') || null })()`
     const editRowExpr = `(() => {
-      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
-        .find(tr => (tr.innerText||'').includes(${JSON.stringify(modelID)}));
-      return row ? [...row.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
+        .find(x => (x.innerText||'').includes(${JSON.stringify(modelID)}));
+      return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
     await clickJS(page, editRowExpr)
-    await page.waitFor(`return !!(${visibleModelModal('input#model_id')})`, { label: '编辑模型表单打开', timeout: 8000 })
+    await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '编辑模型卡片展开', timeout: 8000 })
     await sleep(400)
     const capChecked = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
     check('编辑模型时「图片」按当前声明回填（表单读得到能力）', capChecked === true, JSON.stringify(capChecked))
-    await page.type(modelModalField('note'), '备注改动')
-    await page.click(modelModalSave)
+    await page.type(modelCardField('note'), '备注改动')
+    await page.click(modelCardSave)
     await sleep(800)
     const afterEdit = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
     check('备注确实改到了（这次编辑真的提交了）', afterEdit?.note === '备注改动', JSON.stringify(afterEdit?.note))
@@ -1090,19 +1157,19 @@ async function scenarioSettingsModel(browser) {
 
     // ③‴ 新建时就能**声明**能力（用户要求：平台没法自动检测，只能让人填）。
     const modelID2 = `${modelID}-vision`
-    await clickJS(page, btnExpr('新建模型'))
-    await page.waitFor(`return !!(${visibleModelModal('input#model_id')})`, { label: '新建模型表单打开', timeout: 8000 })
+    await clickJS(page, groupAddExpr)
+    await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '新建模型卡片展开', timeout: 8000 })
     await sleep(400)
     await selectByFieldID(page, 'vendor', provID)
-    await page.type(modelModalField('model_id'), modelID2)
-    if (!(await page.box(capWrapperExpr))) throw new Error('新建模型弹窗里找不到「图片」输入能力勾选框')
+    await page.type(modelCardField('model_id'), modelID2)
+    if (!(await page.box(capWrapperExpr))) throw new Error('新建模型卡片里找不到「图片」输入能力勾选框')
     await page.click(capWrapperExpr)
     await sleep(250)
     const tickedNow = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
     check('新建模型时能勾上「图片」输入能力', tickedNow === true, JSON.stringify(tickedNow))
-    // 截图取在**保存前**：弹窗关掉之后再截就只剩清单，看不出"表单里真的有能力这一项"。
+    // 截图取在**保存前**：卡片收起之后再截就只剩清单，看不出"表单里真的有能力这一项"。
     await page.shot('22c-settings-model-capability-form')
-    await page.click(modelModalSave)
+    await page.click(modelCardSave)
     await sleep(800)
     const created2 = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID2)
     check('新建时勾的「图片」落库为 input_modalities=["text","image"]',
