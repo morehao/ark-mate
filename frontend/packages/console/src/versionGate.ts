@@ -6,14 +6,13 @@
  *   - 两侧都是已知值且不一致 → **整屏状态页**（不是白屏、不是零散接口报错），带刷新按钮。
  *
  * 取数走 `/v1/mate/meta`：桌面态由壳反代注入 restToken、浏览器态同源（独立部署时带用户令牌）。
+ *
+ * "编译进页面的构建 id"由**入口**传进来（`bootstrap({ webBuildId })`）：它是应用构建期注入的常量，
+ * 不是界面包的性质——包只做判定与渲染，不读 app 的全局（P5 迁包时的边界整理）。
  */
 import { getToken } from '@ark-mate/api'
 import { tokens } from '@ark-mate/ui'
-import { UNKNOWN_BUILD_ID, versionGate, type VersionGateResult } from '@ark-mate/desktop-contract'
-
-/** 编译期注入的构建 id（声明见 src/env.d.ts）。取不到就按 unknown——与核心同一口径。 */
-export const INJECTED_BUILD_ID: string =
-  typeof __MATE_WEB_BUILD_ID__ === 'string' ? __MATE_WEB_BUILD_ID__ : UNKNOWN_BUILD_ID
+import { versionGate, type VersionGateResult } from '@ark-mate/desktop-contract'
 
 /** 从核心取它实际服务的那份资产的构建 id。失败返回 null（调用方按"无法判定"处理）。 */
 async function fetchCoreBuildId(): Promise<string | null> {
@@ -34,17 +33,19 @@ async function fetchCoreBuildId(): Promise<string | null> {
 /**
  * 跑一次闸门。
  *
- * **vite dev 下直接放行**：dev 的页面由 vite 从源码现编译（`__MATE_WEB_BUILD_ID__` 是启动那刻
- * 的 HEAD），而 `make dev` 给核心的 `--web-dir` 指向的是上一次 `pnpm build` 的产物——两者本来
- * 就可能不是同一次构建，比对它们等于拿 A 的身份证核对 B 的档案。闸门的契约是"**被服务的产物**"
- * 前后一致，因此只对产物形态生效（内嵌 release、桌面壳的 dist、部署者的 dist）。
+ * **这里曾经有一段 `if (import.meta.env.DEV) return 放行`**（2026-10-11 之前）。当时 dev 的页面由
+ * vite dev server 从源码**现编译**，而核心拿到的 `--web-dir` 指向上一次 `pnpm build` 的产物——
+ * 比对它们等于拿 A 的身份证核对 B 的档案，所以只能放行。
+ *
+ * 那段分叉本身就是缺陷，现在**从结构上取消了**：开发态改为服务**同一份构建产物**
+ * （`scripts/dev-loop.mjs`：构建一次 → `vite build --watch` 重建 → 核心服务它；
+ * `apps/web/vite.config.ts` 在 `serve` 上直接报错兜住第二条路）。于是闸门在开发态与交付态
+ * 是**同一个判据**，不再有"只在产物形态才成立"的例外——`import.meta.env.DEV` 这个维度
+ * 在本仓已无消费者（由 archtest 守卫钉住）。
  */
-export async function runVersionGate(): Promise<VersionGateResult> {
-  if (import.meta.env.DEV) {
-    return { ok: true, mismatch: null, unverifiable: null }
-  }
+export async function runVersionGate(webBuildId: string): Promise<VersionGateResult> {
   const coreBuildId = await fetchCoreBuildId()
-  return versionGate(INJECTED_BUILD_ID, coreBuildId ?? '')
+  return versionGate(webBuildId, coreBuildId ?? '')
 }
 
 /**

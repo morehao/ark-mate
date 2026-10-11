@@ -41,24 +41,15 @@ importers:
 
   apps/web:
     devDependencies:
-      '@ant-design/icons':
-        specifier: ^6.3.4
-        version: 6.3.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@ark-mate/api':
+      '@ark-mate/console':
         specifier: workspace:*
-        version: link:../../packages/api
+        version: link:../../packages/console
       '@ark-mate/desktop-contract':
         specifier: workspace:*
         version: link:../../packages/desktop-contract
       '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
-      '@ark-mate/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      '@ark-mate/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -68,6 +59,52 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.1(vite@8.2.2(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0))
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.2.2
+        version: 8.2.2(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)
+
+  packages/api:
+    dependencies:
+      '@ark-mate/types':
+        specifier: workspace:*
+        version: link:../types
+      axios:
+        specifier: ^1.20.0
+        version: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+    devDependencies:
+      '@ark-mate/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/console:
+    dependencies:
+      '@ant-design/icons':
+        specifier: ^6.3.4
+        version: 6.3.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@ark-mate/api':
+        specifier: workspace:*
+        version: link:../api
+      '@ark-mate/desktop-contract':
+        specifier: workspace:*
+        version: link:../desktop-contract
+      '@ark-mate/types':
+        specifier: workspace:*
+        version: link:../types
+      '@ark-mate/ui':
+        specifier: workspace:*
+        version: link:../ui
       antd:
         specifier: ^6.6.2
         version: 6.6.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -83,28 +120,19 @@ importers:
       react-router-dom:
         specifier: ^7.18.3
         version: 7.18.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vite:
-        specifier: ^8.2.2
-        version: 8.2.2(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.2.18)(react@19.2.8)
-
-  packages/api:
-    dependencies:
-      '@ark-mate/types':
-        specifier: workspace:*
-        version: link:../types
-      axios:
-        specifier: ^1.20.0
-        version: 1.20.0(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
     devDependencies:
       '@ark-mate/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.5
+        version: 19.2.5(@types/react@19.2.18)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

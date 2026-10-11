@@ -195,7 +195,9 @@ func balancedBlock(s string) (string, bool) {
 //	c. 原生那半必须**打宿主端点**（`pickDirectoryHost`），而不是某个客户端桥；
 //	d. 判定与命令的宿主实现必须在 Go 里存在（`workspace_picker.go` 的牌价与三条判据）。
 func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
-	web := filepath.Join(frontendRoot(t), "apps", "web", "src")
+	// 界面已搬进 packages/console（P5）——这里**必须**跟着搬，否则下面每个 readSrc 都会
+	// "读不到文件就 fatal"，而这条守卫的对象（三个选目录入口）就换成了不存在的路径。
+	web := filepath.Join(frontendRoot(t), "packages", "console", "src")
 
 	readSrc := func(rel string) string {
 		t.Helper()
@@ -221,8 +223,14 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	if !strings.Contains(picker, "pickDirectoryHost(") {
 		t.Error("directoryPicker.ts 必须通过宿主端点 `pickDirectoryHost()` 抬面板（客户端桥那版已被证伪）")
 	}
-	if !strings.Contains(picker, "native-dialog") {
-		t.Error("directoryPicker.ts 必须从 `/capabilities` 的 `native-dialog` 读判定结果")
+	// 声明的读取点在 `capabilityFacts.ts`（2026-10-11：同一份声明还被设置面读来判入口形态，
+	// 两处各读一次会有两个真相）。这里钉两件事：事实来自 `native-dialog` 声明、且 picker 只消费事实。
+	facts := readSrc("capabilityFacts.ts")
+	if !strings.Contains(facts, "native-dialog") {
+		t.Error("capabilityFacts.ts 必须从 `/capabilities` 的 `native-dialog` 读判定结果")
+	}
+	if !strings.Contains(picker, "declaredFacts()") {
+		t.Error("directoryPicker.ts 必须消费 `capabilityFacts.ts` 读到的事实（自己再读一次声明就会有两个真相）")
 	}
 
 	// b. 三个入口都必须问解析，并调用原生那半。

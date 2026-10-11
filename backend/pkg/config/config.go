@@ -136,6 +136,19 @@ type Config struct {
 	// 空 = 用构建期内置资产；**非空即校验**（绝对路径 / 存在 / 目录 / 含 index.html），
 	// 不合法就拒绝启动——显式配置配错时静默回落到内嵌旧资产，是"用户看到旧界面还以为没生效"的根源。
 	WebDir string
+	// AssetWatch 开发期资产重建通知的轮询间隔（P6-A；MATE_ASSET_WATCH 覆盖，**默认 0 = 关闭**）。
+	//
+	// 它是什么：核心 stat-poll **自己正在服务的那份 dist**，内容真的变了就经
+	// `GET /dev/assets/events`（SSE）通知页面刷新。解决的疼只有开发态那一个：P1 取消"从源码现
+	// 编译"的 dev server 之后，改 UI 要等重建再**手动刷新**（失去 Fast Refresh）。
+	//
+	// 为什么默认关闭、且只吃显式配置：这条通道在交付形态下**没有意义**（桌面壳/容器里没有
+	// watcher 在重写资产），开着只是白跑一个轮询循环 + 多一条路由。与 DSH 的偏离在此：
+	// 它的 `/plugins/events` 是常挂的（还要带运行期图更新），本仓没有那种帧要带。
+	//
+	// 取值是 Go duration 文本（如 500ms/1s）；0 = 关闭。非法值启动即报错（不静默回落关闭——
+	// 那会让"我明明开了"变成无声的 no-op）。
+	AssetWatch time.Duration
 	// AllowedOrigins 额外允许的请求来源（M3-5；MATE_ALLOWED_ORIGINS，逗号分隔，config.json 可写 JSON 数组；
 	// 默认空 = 只用内置 Origin 矩阵）。
 	//
@@ -289,6 +302,7 @@ var knownKeys = map[string]string{
 	"capabilities":        "MATE_CAPABILITIES",
 	"automations":         "MATE_AUTOMATIONS",
 	"automation_tick":     "MATE_AUTOMATION_TICK",
+	"asset_watch":         "MATE_ASSET_WATCH",
 	"workspace_dir":       "MATE_WORKSPACE_DIR",
 	"workspace_roots":     "MATE_WORKSPACE_ROOTS",
 	"projection_dirs":     "MATE_PROJECTION_DIRS",
@@ -646,6 +660,7 @@ func materialize(r *resolver) (Config, error) {
 		{"elicitation_timeout", &c.ElicitationTimeout},
 		{"reap_grace", &c.ReapGrace},
 		{"automation_tick", &c.AutomationTick},
+		{"asset_watch", &c.AssetWatch},
 	} {
 		v, ok := r.get(item.key)
 		if !ok {

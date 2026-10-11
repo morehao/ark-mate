@@ -32,7 +32,7 @@ var formFieldRE = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\??\s*:`)
 //   - **解析不到即失败**：接口被改名/搬家、或某个接口的成员体读成空，都当场判失败——
 //     否则守卫会在一次重构之后安静地什么都不检查。
 func TestSettingsModelFormRendersEveryField(t *testing.T) {
-	panelPath := filepath.Join(frontendRoot(t), "apps", "web", "src", "components", "settings", "ModelSettingsPanel.tsx")
+	panelPath := filepath.Join(frontendRoot(t), "packages", "console", "src", "components", "settings", "ModelSettingsPanel.tsx")
 	raw, err := os.ReadFile(panelPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", panelPath, err)

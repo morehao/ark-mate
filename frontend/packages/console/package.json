@@ -1,0 +1,30 @@
+{
+  "name": "@ark-mate/console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "@ark-mate/api": "workspace:*",
+    "@ark-mate/desktop-contract": "workspace:*",
+    "@ark-mate/types": "workspace:*",
+    "@ark-mate/ui": "workspace:*",
+    "antd": "^6.6.2",
+    "axios": "^1.20.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@ark-mate/tsconfig": "workspace:*",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "typescript": "^7.0.2"
+  }
+}

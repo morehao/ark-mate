@@ -1,0 +1,4 @@
+{
+  "extends": "@ark-mate/tsconfig/app.json",
+  "include": ["src"]
+}

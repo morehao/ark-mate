@@ -216,19 +216,31 @@ const importPrefix = `(?:from\s+|import\s*\(\s*|import\s+|require\s*\(\s*)`
 // specifierImport 匹配一条模块引入并捕获其 specifier。
 var specifierImport = regexp.MustCompile(importPrefix + `['"]([^'"]+)['"]`)
 
-// TestDesktopMustNotImportWebSource 断言 `frontend/apps/desktop/src/**` **不**引 `@ark-mate/web`。
+// uiPackages 是"界面包"的名字。桌面侧引它们 = 把界面源码拉进桌面构建（只允许按路径读 dist 产物）。
+//
+// `@ark-mate/console` 与 `@ark-mate/ui` 是 P5（2026-10-11）之后才**变得可达**的：界面搬进
+// `packages/console` 之前，它只存在于 `apps/web/src` 里，桌面侧想引也没有包名可引。搬迁让"引界面源码"
+// 从"不可能"变成"一行 import"，所以这条判据必须同步扩大——否则新出现的这条路没人看着。
+var uiPackages = map[string]bool{
+	"@ark-mate/web":     true,
+	"@ark-mate/console": true,
+	"@ark-mate/ui":      true,
+}
+
+// TestDesktopMustNotImportWebSource 断言 `frontend/apps/desktop/src/**` **不**引任何界面包
+// （`@ark-mate/web` / `@ark-mate/console` / `@ark-mate/ui`）。
 //
 // 桌面产品依赖的是 `apps/web/dist` 这份**产物**（壳按路径读静态文件、核心按 `--web-dir` 读同一目录），
-// 一旦有人 `from '@ark-mate/web'`，就是把前端源码拉进桌面构建：产物与源码两份开始漂移，
+// 一旦有人 `from '@ark-mate/console'`，就是把界面源码拉进桌面构建：产物与源码两份开始漂移，
 // 而"两端同一份 UI"正是 R1 的实现方式。按路径读 dist 不在本断言范围（那是允许的）。
 func TestDesktopMustNotImportWebSource(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
 	files := listFrontendSources(t, filepath.Join(frontendRoot(t), "apps", "desktop", "src"))
 	vs := scanSources(t, repoRoot, files, specifierImport, func(line string) bool {
 		m := specifierImport.FindStringSubmatch(line)
-		return m == nil || m[1] != "@ark-mate/web"
+		return m == nil || !uiPackages[m[1]]
 	})
-	reportViolations(t, "apps/desktop 引了前端产品包 @ark-mate/web（只允许按路径读它的 dist 产物）", vs)
+	reportViolations(t, "apps/desktop 引了界面包（@ark-mate/web / @ark-mate/console / @ark-mate/ui）——只允许按路径读它的 dist 产物", vs)
 }
 
 // —— B3：桌面能力不得渗进共享 UI ——
@@ -252,7 +264,8 @@ func commentLine(line string) bool {
 	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*")
 }
 
-// TestWebUiMustNotReachDesktopApis 断言 `frontend/apps/web/src/**` 够不到桌面能力：
+// TestWebUiMustNotReachDesktopApis 断言**全部 UI 源码根**（`uiSrcRoots()`：apps/web + packages/console +
+// packages/ui）都够不到桌面能力：
 // 不引 `electron`、不引 `node:*` 内置模块、不引 `@ark-mate/desktop`、不嗅探 `window.electron`。
 //
 // 这条是"两端功能完全一致"的结构性保证：共享 UI 在**类型与依赖层面**就拿不到桌面 API，
@@ -260,10 +273,10 @@ func commentLine(line string) bool {
 // 与 `__MATE_DESKTOP__`（执行面，存在性探测降级）进入，且浏览器端必须有服务端等价路径（V3）。
 func TestWebUiMustNotReachDesktopApis(t *testing.T) {
 	repoRoot := filepath.Join(frontendRoot(t), "..")
-	files := listFrontendSources(t, filepath.Join(frontendRoot(t), "apps", "web", "src"))
+	files := listUISources(t) // 搬迁后必须靠 uiSrcRoots()：写死一个目录会让这条判据静默空转
 	vs := scanSources(t, repoRoot, files, webForbiddenImport, nil)
 	vs = append(vs, scanSources(t, repoRoot, files, windowElectron, commentLine)...)
-	reportViolations(t, "apps/web 出现桌面/Node 专属引用（共享 UI 只能走宿主能力面）", vs)
+	reportViolations(t, "界面源码出现桌面/Node 专属引用（共享 UI 只能走宿主能力面）", vs)
 }
 
 // —— B4：能力层不得反向依赖产品层 ——
@@ -302,4 +315,116 @@ func TestPackagesMustNotImportApps(t *testing.T) {
 		return m == nil || !strings.Contains(m[1], "apps/")
 	})
 	reportViolations(t, "能力层（packages/*）出现指向产品层（apps/）的相对引入", vs)
+}
+
+// uiSrcRoots 是**前端 UI 源码根的唯一事实源**（P5，2026-10-11）。
+//
+// 为什么要有它：界面原先全在 `apps/web/src` 里，六个守卫（这条的 B2/B3、能力消费者、`import.meta.env`、
+// 目录选择器、设置面两条、toast 层号）都把扫描根指到那一个目录。把界面搬进 `packages/console/src`
+// 之后，那些守卫会**静默失去检查对象**——`apps/web/src` 目录还在（只剩入口），"目录不存在即 fatal"
+// 那条兜底根本不会触发，于是"UI 够不到桌面 API"这类判据变成空转。所以扫描根收进这一个函数：
+// 搬迁只需改这里，各守卫不会各自漂移（`TestFrontendUiScanRootsCoverAllUi` 钉住"没有漏掉的 UI"）。
+func uiSrcRoots(t *testing.T) []string {
+	t.Helper()
+	root := frontendRoot(t)
+	rels := []string{
+		filepath.Join("apps", "web", "src"),
+		filepath.Join("packages", "console", "src"),
+		filepath.Join("packages", "ui", "src"),
+	}
+	out := make([]string, 0, len(rels))
+	for _, rel := range rels {
+		abs := filepath.Join(root, rel)
+		if _, err := os.Stat(abs); err != nil {
+			t.Fatalf("UI 源码根 %s 不存在（%v）——搬迁/改名后必须同步 uiSrcRoots，守卫不接受静默失去对象", rel, err)
+		}
+		out = append(out, abs)
+	}
+	return out
+}
+
+// listUISources 返回全部 UI 源码文件（每个声明根都要非空，见 listFrontendSources 的 fail-closed）。
+func listUISources(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, root := range uiSrcRoots(t) {
+		out = append(out, listFrontendSources(t, root)...)
+	}
+	if len(out) == 0 {
+		t.Fatal("UI 源码根里一个文件都没有——目录结构变了？守卫形同虚设")
+	}
+	return out
+}
+
+// uiishImport 命中"这个文件是界面代码"的引入（React / 共享 UI 包 / 状态库 / antd）。
+// 只看引入语句，不看裸词，避免把注释里提到 React 的纯工具文件误判成界面。
+var uiishImport = regexp.MustCompile(`(?:from\s+|import\s*\()` + `['"](?:react|react-dom[^'"]*|@ark-mate/ui|@ark-mate/console|zustand|antd[^'"]*)['"]`)
+
+// TestFrontendUiScanRootsCoverAllUi 断言**界面代码不会落在声明根之外**。
+//
+// 这条是 P5 的直接产物：搬迁把界面的位置变成了"可配置的东西"，而配置错了的表现是**别的守卫静默空转**
+// （不会红、只是不再检查任何界面文件）。判据：`frontend/{apps,packages}/*/src` 下每个 `.tsx`、
+// 或每个引入 React/共享 UI 包的 `.ts`，都必须落在 `uiSrcRoots()` 的某个根里；落在外面即红，
+// 并提示"把它的根加进 uiSrcRoots"。
+//
+// 反证：把 `packages/console/src` 从 uiSrcRoots 里删掉 → 红（列出上千个越界文件）；
+// 新建一个含 .tsx 的包而不登记 → 红。
+func TestFrontendUiScanRootsCoverAllUi(t *testing.T) {
+	root := frontendRoot(t)
+	declared := uiSrcRoots(t)
+	insideDeclared := func(path string) bool {
+		for _, r := range declared {
+			if path == r || strings.HasPrefix(path, r+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var checked, outside []string
+	for _, top := range []string{"apps", "packages"} {
+		entries, err := os.ReadDir(filepath.Join(root, top))
+		if err != nil {
+			t.Fatalf("读 %s 失败: %v", top, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			src := filepath.Join(root, top, e.Name(), "src")
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			for _, f := range listFrontendSources(t, src) {
+				ext := filepath.Ext(f)
+				isUI := ext == ".tsx" || ext == ".jsx"
+				if !isUI {
+					if raw, err := os.ReadFile(f); err == nil && uiishImport.MatchString(string(raw)) {
+						isUI = true
+					}
+				}
+				if !isUI {
+					continue
+				}
+				rel, _ := filepath.Rel(root, f)
+				checked = append(checked, rel)
+				if !insideDeclared(f) {
+					outside = append(outside, rel)
+				}
+			}
+		}
+	}
+	if len(checked) == 0 {
+		t.Fatal("没有扫到任何界面文件——判据本身失效了（目录结构变了？）")
+	}
+	if len(outside) > 0 {
+		show := outside
+		if len(show) > 10 {
+			show = show[:10]
+		}
+		t.Errorf("有 %d 个界面文件落在 uiSrcRoots() 之外（前 %d 个）：\n  %s\n"+
+			"这类漏登记的后果是**别的守卫静默空转**（不红、只是不再检查这些文件）。"+
+			"把它们的根加进 uiSrcRoots()。", len(outside), len(show), strings.Join(show, "\n  "))
+	}
+	t.Logf("界面文件覆盖检查：%d 个文件全部落在 %d 个声明根内", len(checked), len(declared))
 }

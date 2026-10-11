@@ -211,6 +211,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 `automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
 `idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
+`asset_watch`
 `native_permission` `mcp_gateway`；另可用 `MATE_*` 原名、`-` 写成分隔符，以及少量别名
 （`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
 

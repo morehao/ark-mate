@@ -28,7 +28,7 @@ import (
 const toastMinZ = 2000
 
 func TestGlobalToastSitsAboveModals(t *testing.T) {
-	appPath := filepath.Join(frontendRoot(t), "apps", "web", "src", "app.tsx")
+	appPath := filepath.Join(frontendRoot(t), "packages", "console", "src", "app.tsx") // 界面已搬进 packages/console（P5）
 	b, err := os.ReadFile(appPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", appPath, err)
