@@ -47,13 +47,7 @@ test('isDesktopCarrier：null / undefined 判否（不抛错）', () => {
 function goodCarrier(): unknown {
   return {
     boot: async () => ({ streamBaseUrl: 'ws://127.0.0.1:1', streamToken: 't' }),
-    native: {
-      pickDirectory: async () => null,
-      pathFor: () => '',
-      openPath: async () => {},
-      openExternal: async () => {},
-    },
-    platform: { setBounds: async () => {}, close: async () => {} },
+    native: { pickDirectory: async () => null },
   }
 }
 
@@ -65,13 +59,13 @@ test('assertMateDesktop：正例原样返回', () => {
 
 test('assertMateDesktop：六种坏形状全部抛错', () => {
   const missingField = goodCarrier() as { native: Record<string, unknown> }
-  delete missingField.native.openPath
+  delete missingField.native.pickDirectory
 
   const wrongType = goodCarrier() as Record<string, unknown>
   wrongType.boot = 'not-a-function'
 
   const cases: Array<[string, unknown]> = [
-    ['缺字段（native.openPath 被删）', missingField],
+    ['缺字段（native.pickDirectory 被删）', missingField],
     ['字段类型错（boot 是字符串）', wrongType],
     ['空对象', {}],
     ['null', null],
@@ -85,9 +79,9 @@ test('assertMateDesktop：六种坏形状全部抛错', () => {
 })
 
 test('assertMateDesktop：错误信息含出问题的字段名', () => {
-  const nestedMissing = goodCarrier() as { platform: Record<string, unknown> }
-  delete nestedMissing.platform.close
-  assert.throws(() => assertMateDesktop(nestedMissing), /platform\.close/)
+  const nestedMissing = goodCarrier() as { native: Record<string, unknown> }
+  delete nestedMissing.native.pickDirectory
+  assert.throws(() => assertMateDesktop(nestedMissing), /native\.pickDirectory/)
 
   const bootMissing = goodCarrier() as Record<string, unknown>
   delete bootMissing.boot
@@ -96,4 +90,13 @@ test('assertMateDesktop：错误信息含出问题的字段名', () => {
   const nativeWrong = goodCarrier() as Record<string, unknown>
   nativeWrong.native = null
   assert.throws(() => assertMateDesktop(nativeWrong), /native（类型 null）/)
+})
+
+test('assertMateDesktop：**多给**的键不算坏（收窄后的执行面不得反向要求旧方法）', () => {
+  // 反证：如果校验清单没跟着契约收窄，下面这个只多不少的对象会被判坏——那正是 preload 每次
+  // 启动都炸的形态。这里断言"少一个不行、多一个可以"，把收窄的方向钉住。
+  const extra = goodCarrier() as Record<string, unknown>
+  ;(extra.native as Record<string, unknown>).openPath = async () => {}
+  extra.platform = { setBounds: async () => {}, close: async () => {} }
+  assert.doesNotThrow(() => assertMateDesktop(extra))
 })

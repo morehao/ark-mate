@@ -9,14 +9,15 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AppShell } from '@ark-mate/ui'
 import { App } from './app'
-import { loadDirectoryPickerCapability } from './directoryPicker'
+import { loadCapabilityFacts } from './capabilityFacts'
+import { watchDevAssets } from './transport/assetWatch'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
 
-export async function bootstrap(): Promise<void> {
+export async function bootstrap(opts: { webBuildId: string }): Promise<void> {
   const root = document.getElementById('root')
   if (!root) throw new Error('缺少 #root 挂载点')
 
-  const gate = await runVersionGate()
+  const gate = await runVersionGate(opts.webBuildId)
   if (gate.unverifiable) {
     // 无法判定：放行 + 留痕（核心里没有 build-id.txt 是合法状态，不该把界面锁死）。
     console.warn(`[version-gate] 无法校验前端与核心版本是否一致：${gate.unverifiable}`)
@@ -28,10 +29,13 @@ export async function bootstrap(): Promise<void> {
     return
   }
 
-  // 目录选择器的形态是**服务端声明**的（宿主能不能抬系统面板），所以在挂载界面前读一次：
-  // 挂载后再读会让"第一次点选目录"落在错的那条路上（本机浏览器本该用系统面板却开了应用内对话框）。
-  // 失败不阻断：拉不到就按 browse（应用内浏览那半永远可用）。
-  await loadDirectoryPickerCapability()
+  // 能力声明（`/capabilities`）在挂载界面前读一次，两个消费面都靠它：
+  //   ① 目录选择器的形态是**服务端声明**的（宿主能不能抬系统面板）——挂载后再读会让"第一次点选目录"
+  //      落在错的那条路上（本机浏览器本该用系统面板却开了应用内对话框）；
+  //   ② 设置里"访问令牌"那一节在桌面壳里是**死 UI**（壳的反代会覆盖客户端带来的 Authorization），
+  //      按 `entries.desktop` 收起。
+  // 失败不阻断：拉不到就按 UNKNOWN 走（原生面板不可用 → 应用内浏览；入口按浏览器算 → 该节照常渲染）。
+  await loadCapabilityFacts()
 
   createRoot(root).render(
     <StrictMode>
@@ -42,4 +46,9 @@ export async function bootstrap(): Promise<void> {
       </AppShell>
     </StrictMode>,
   )
+
+  // 开发期资产重建通知（P6-A）：`make dev` 下改完 UI 自动刷新，省掉手动那一次。
+  // 放在挂载**之后**：通道不存在时它什么都不做（交付形态的每秒路径），存在时也只是等帧；
+  // 先订阅的话，一次"刚好在挂载时到达"的 rebuild 会让刷新与首次渲染打架。
+  watchDevAssets()
 }

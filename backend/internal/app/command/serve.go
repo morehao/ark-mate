@@ -15,6 +15,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/app"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/golib/glog"
 )
 
@@ -36,6 +37,11 @@ func serve(args []string) {
 	webDir := fs.String("web-dir", "",
 		"前端资产目录（绝对路径，须含 index.html；同 MATE_WEB_DIR）。不传则用构建期内置资产；"+
 			"两者都没有 → 拒绝启动（退出码 3）。显式给了目录就**只**用它，不回落内嵌")
+	assetWatch := fs.Duration("asset-watch", 0,
+		"开发期资产重建通知的轮询间隔（P6-A；同 MATE_ASSET_WATCH；**默认 0 = 关闭**）。"+
+			"开了以后核心会 stat-poll 自己正在服务的那份 --web-dir，内容真的变了就经 "+
+			router.AssetWatchPath+"（SSE）通知页面刷新，省掉「改完再手动刷新」。只在 `make dev` 这种"+
+			"开发形态下有意义：交付形态（桌面壳/容器）不传，该路由也就不存在")
 	exitWithParent := fs.Bool("exit-with-parent", false,
 		"父进程消失即自动退出（POSIX：父进程死后被 reparent，`Getppid` 随之变化）；"+
 			"桌面壳用 `kill -9` 强杀时靠它避免留下孤儿核心与 runtime 子进程。Windows 无 reparent 语义，那里要等 Job Object（M4-3）")
@@ -57,6 +63,10 @@ func serve(args []string) {
 	// CLI flag 优先级最高（与 --addr 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *webDir != "" {
 		cfg.WebDir = *webDir
+	}
+	// 同理：显式给了正值才覆盖（`--asset-watch=0` 与不传等价，都是关闭）。
+	if *assetWatch > 0 {
+		cfg.AssetWatch = *assetWatch
 	}
 
 	opts := []app.Option{}

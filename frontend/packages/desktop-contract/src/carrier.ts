@@ -42,8 +42,12 @@ function isFn(v: unknown): boolean {
 /**
  * 运行期形状守卫：字段缺失或类型不符即抛错，**错误信息里列出出问题的字段名**。
  *
- * 校验的是**结构化形状**（不 import 任何 Electron 类型）：`boot` 是函数、`native` / `platform`
- * 是对象且各自的方法是函数。通过则原样返回（便于 `const api = assertMateDesktop(shape)`）。
+ * 校验的是**结构化形状**（不 import 任何 Electron 类型）：`boot` 是函数、`native` 是对象且
+ * 里头的方法是函数。通过则原样返回（便于 `const api = assertMateDesktop(shape)`）。
+ *
+ * **2026-10-11 跟随执行面收窄**（P3/D5）：`platform` 整块与 `native` 的三个方法已删，校验清单
+ * 相应只剩 `boot` + `native.pickDirectory`——**校验清单必须与契约逐条同步**，多校验一个已经
+ * 不存在的方法会让 preload 每次启动都炸。
  */
 export function assertMateDesktop(value: unknown): MateDesktop {
   if (!isRecord(value)) {
@@ -64,13 +68,7 @@ export function assertMateDesktop(value: unknown): MateDesktop {
   if (!isRecord(value.native)) {
     bad.push(`native（${value.native === undefined ? '缺失' : `类型 ${typeName(value.native)}`}）`)
   } else {
-    requireFns('native', value.native, ['pickDirectory', 'pathFor', 'openPath', 'openExternal'])
-  }
-
-  if (!isRecord(value.platform)) {
-    bad.push(`platform（${value.platform === undefined ? '缺失' : `类型 ${typeName(value.platform)}`}）`)
-  } else {
-    requireFns('platform', value.platform, ['setBounds', 'close'])
+    requireFns('native', value.native, ['pickDirectory'])
   }
 
   if (bad.length > 0) {

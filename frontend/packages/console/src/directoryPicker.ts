@@ -18,7 +18,8 @@
  *      "没有系统面板"，而那正是 `dsh web` 能用上面板的场景。
  *   2. **拿不准就当 browse**：声明没到 / 请求失败 → 应用内浏览（那半永远可用）。
  */
-import { getCapabilities, pickDirectoryHost } from '@ark-mate/api'
+import { pickDirectoryHost } from '@ark-mate/api'
+import { declaredFacts } from './capabilityFacts'
 
 /** 本次交互走哪一套选目录实现（与 dsh 的 `DirectoryPickerBackendKind` 同义）。 */
 export type DirectoryPickerKind = 'native' | 'browse'
@@ -41,27 +42,12 @@ export function resolveDirectoryPicker(facts: DirectoryPickerFacts): DirectoryPi
   return facts.nativeDialog ? 'native' : 'browse'
 }
 
-/** 能力声明的**进程内缓存**（一次启动只会变一次；拿不到时保持 false = browse）。 */
-let nativeDialogAvailable = false
-
-/**
- * 读一次服务端能力声明并缓存（由 `bootstrap.tsx` 在挂载界面前调用一次）。
+/** 当前该用哪一套（读事实；`capabilityFacts.loadCapabilityFacts()` 之前恒为 browse）。
  *
- * 失败**不抛**：拉不到声明就当"没有原生选择器"，界面走应用内浏览——那半永远可用，
- * 而"因为拉不到能力声明所以选不了目录"是不可接受的。
- */
-export async function loadDirectoryPickerCapability(): Promise<void> {
-  try {
-    const caps = await getCapabilities()
-    nativeDialogAvailable = caps?.capabilities?.find((c) => c.id === 'native-dialog')?.available === true
-  } catch {
-    nativeDialogAvailable = false
-  }
-}
-
-/** 当前该用哪一套（读缓存；`loadDirectoryPickerCapability` 之前恒为 browse）。 */
+ * **读取点不在这里**：声明只由 `capabilityFacts.ts` 读一次（同一份声明还被设置面用来判
+ * "入口是不是桌面壳"，两处各读一次就会有两个真相）。本模块只做**策略**：拿事实解析两态。 */
 export function directoryPickerKind(): DirectoryPickerKind {
-  return resolveDirectoryPicker({ nativeDialog: nativeDialogAvailable })
+  return resolveDirectoryPicker({ nativeDialog: declaredFacts().nativeDialog })
 }
 
 /**

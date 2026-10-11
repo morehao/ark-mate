@@ -2,7 +2,8 @@
 /**
  * 前后端联调「通路」冒烟（无需浏览器、无需新依赖，Node ≥ 22）。
  *
- * 验证对象：运行中的 vite dev（默认 http://localhost:5173，/v1 代理到 mate serve 127.0.0.1:10001）。
+ * 验证对象：`make dev` 起的那个实例（默认 http://127.0.0.1:10001——**核心直接服务构建产物**，
+ * 没有中间那层 vite dev server 了；2026-10-11 起 `:5173` 那条路已被 `apps/web/vite.config.ts` 拦住）。
  * 覆盖：
  *   1. REST 信封（health / agents / conversations）——@ark-mate/api 的 unwrap 语义前提；
  *      并断言 `/runtimes` 已下线、agent 不再带 runtimes（底座由构建期固定）；
@@ -12,15 +13,15 @@
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
  *
- * 用法（先起 make dev，或后端 127.0.0.1:10001 + 前端 vite dev :5173）：
- *   E2E_BASE=http://localhost:5173 node scripts/smoke-e2e.mjs
+ * 用法（先起 `make dev`；也可以只起后端 `make server` + `--web-dir`，通路检查不需要界面）：
+ *   E2E_BASE=http://127.0.0.1:10001 node scripts/smoke-e2e.mjs
  *   pnpm smoke:e2e
  *
  * 退出码：0 = 全部通路 PASS；1 = 存在 FAIL。
  */
 import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
-const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
+const E2E_BASE = process.env.E2E_BASE || 'http://127.0.0.1:10001'
 const API = E2E_BASE + '/v1/mate'
 // 后端启用凭据时，同一套脚本带上令牌：REST 走 Authorization 头；
 // WS 走**带内首帧 attach**（M1-1 起令牌不进 URL —— 与 apps/web 的 transport 同一条规则，
@@ -68,7 +69,7 @@ function withTimeout(promise, ms, what) {
 // ——— 1. REST 信封 ———
 
 async function checkRest() {
-  console.log('· REST 信封与列表（经 vite proxy）')
+  console.log('· REST 信封与列表（同源直连核心；2026-10-11 起开发态不再有 vite 代理层）')
 
   const health = await apiGet('/health')
   if (health.http === 200 && health.env.code === 0 && health.env.msg === 'ok') ok('GET /health → {code:0}')
@@ -263,7 +264,7 @@ async function checkBizError() {
 // ——— 3. WS 帧契约 ———
 
 async function checkWs() {
-  console.log('· WS 实时通道帧契约（经 vite proxy ws:true）')
+  console.log('· WS 实时通道帧契约（同源直连核心的 /v1/mate/ws）')
   const wsUrl = E2E_BASE.replace(/^http/, 'ws') + '/v1/mate/ws/events'
   const ws = new WebSocket(wsUrl)
   const opened = new Promise((resolve, reject) => {
@@ -274,7 +275,7 @@ async function checkWs() {
   // 首帧必须是通道级 attach（携带 stream 面凭据）；它没有任何服务端响应帧，
   // 因此必须在断言 snapshot 之前发出，否则后续 attach 会被当成握手帧。
   ws.send(JSON.stringify(buildAttachFrame(TOKEN || null)))
-  ok(`WS 升级成功（proxy ws:true 生效${TOKEN ? '，凭据走带内首帧 attach' : ''}）`)
+  ok(`WS 升级成功（同源直连，无代理层${TOKEN ? '；凭据走带内首帧 attach' : ''}）`)
 
   const nextFrame = (what, ms = 8000) =>
     withTimeout(

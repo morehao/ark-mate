@@ -107,15 +107,22 @@ type capabilityDecl struct {
 // capabilityDecls 能力声明的**冻结顺序**（设计 §7.3 的表按此顺序；id 与前端契约的联合类型一一对应）。
 //
 // 顺序也冻结：前端可以按下标做稳定渲染，V18 的"两个入口同构"断言比的就是 id 序列。
+//
+// **2026-10-11 收窄（P3/D5）**：原来还有 `open-path` / `diagnostics-export` / `deep-link` / `update`
+// 四条，连同它们各自的 `browserFallback` 一并删除——**四条在两个入口里都没有任何消费者**：
+// 前端契约声明了 `native.openPath` / `native.openExternal`，preload 实现了、主进程也接了 IPC，
+// 而唯一界面（`apps/web/src`，2026-10-11 P5 起为 `packages/console/src`）一次都没调用（`pathFor` 只有桌面验收探针在用）。
+// 一份"声明了但没人执行"的能力面是最坏的一种：它让 `/capabilities` 看起来在描述产品，
+// 实际描述的是"曾经想做的东西"；而浏览器侧的等价路径（`ui:show-path-copy` 等）也从没实现过。
+// 判据由 `internal/archtest` 的守卫钉住：**声明的每条能力必须在界面源码（见 archtest 的 `uiSrcRoots()`）被真实引用**，
+// 确需保留的（如 `tray`）必须显式登记 + 写理由。
 var capabilityDecls = []capabilityDecl{
-	{"tray", "none", false}, // 纯增强：没有浏览器等价物，也不阻塞任何流程
+	// 纯增强：没有浏览器等价物，也不阻塞任何流程（壳真的装了托盘，见 `apps/desktop/src/tray.ts`）。
+	// 它是**唯一**允许 `browserFallback: none` 的能力，也是唯一"声明了但界面不读"的登记项。
+	{"tray", "none", false},
 	// 宿主原生目录选择器：**可用性看宿主**（绑回环 + 非 SSH + 有显示会话），不看入口形态；
 	// 宿主抬不起来时走服务端目录浏览（`browse` 那半永远可用）。
 	{"native-dialog", "server:directory-browse", true},
-	{"open-path", "ui:show-path-copy", false},      // 浏览器端显示路径 + 复制
-	{"diagnostics-export", "http:download", false}, // 浏览器端直接下载导出包
-	{"deep-link", "url:direct", false},             // 浏览器端 URL 直达
-	{"update", "deployer:replace-binary", false},   // 浏览器端由部署者替换二进制
 }
 
 // CapabilityFacts 能力声明要用的宿主事实（装配层注入，避免控制器去猜）。

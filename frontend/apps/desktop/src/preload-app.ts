@@ -7,15 +7,17 @@
  *      以及任意子框架拿到的都是 `undefined`；
  *   2. **形状自检**：暴露前用契约的 `assertMateDesktop` 过一遍，形状错了就在 preload 阶段炸，
  *      而不是让页面拿到半个对象、在某个业务路径上以"某方法是 undefined"晚炸；
- *   3. **只暴露执行面**：`boot()` + `native.*` + `platform.*`；**没有** `capabilities()`
- *      （能力声明走 `GET /v1/mate/capabilities`，两端同源同路径）。
+ *   3. **只暴露执行面**：`boot()` + `native.pickDirectory`；**没有** `capabilities()`
+ *      （能力声明走 `GET /v1/mate/capabilities`，两端同源同路径）。执行面已按「有没有人调用」
+ *      收窄过一次（2026-10-11，P3/D5）：`platform.{setBounds,close}` 与 `native.{pathFor,openPath,
+ *      openExternal}` 全部删除——它们实现完整，但界面（`apps/web/src`，现 `packages/console/src`）一次都没调过。
  *
  * 输出是 CommonJS（`dist/preload-app.cjs`）——preload 必须 CJS；`@ark-mate/desktop-contract`
  * 由 esbuild 打进同一份产物（纯 TS 源、零运行期依赖）。
  */
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
-import { DESKTOP_NAMESPACE, assertMateDesktop, isDesktopCarrier, type MateDesktop, type Rect } from '@ark-mate/desktop-contract'
+import { DESKTOP_NAMESPACE, assertMateDesktop, isDesktopCarrier, type MateDesktop } from '@ark-mate/desktop-contract'
 import { CH } from './channels'
 
 const carrier = isDesktopCarrier({ protocol: location.protocol, hostname: location.hostname }, process.isMainFrame)
@@ -30,29 +32,6 @@ if (carrier) {
 
     native: {
       pickDirectory: () => ipcRenderer.invoke(CH.directoryPick),
-      /**
-       * 拖入 / 粘贴文件的真实路径。**同步**走 webUtils（无 IPC）；
-       * 没有真实路径（粘贴字节）时返回空串——契约如此，调用方据此降级。
-       */
-      pathFor: (file: File): string => {
-        try {
-          return webUtils.getPathForFile(file) ?? ''
-        } catch {
-          return ''
-        }
-      },
-      openPath: (path: string) => ipcRenderer.invoke(CH.openPath, { kind: 'path', path }),
-      /**
-       * 用系统浏览器打开核心托管的页面。`bounds` 是定位锚点（系统浏览器用不上，留给
-       * 将来的应用内窗口）；**只传页面名**，URL 由主进程用核心地址拼——渲染进程不指定任意 URL。
-       */
-      openExternal: (page: 'usage' | 'top-up', _bounds: Rect) =>
-        ipcRenderer.invoke(CH.openPath, { kind: 'page', page }),
-    },
-
-    platform: {
-      setBounds: (b: Rect) => ipcRenderer.invoke(CH.platformBounds, b),
-      close: () => ipcRenderer.invoke(CH.platformClose),
     },
   }
 

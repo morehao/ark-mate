@@ -79,6 +79,15 @@ type Options struct {
 	// Web 已解析的前端资产（装配层用 ResolveAssets 得到）。零值 = 不挂前端（只有测试会这样）。
 	Web AssetInfo
 
+	// AssetWatch 开发期资产重建通知（P6-A）。**零值（nil）= 关闭**——交付形态（桌面壳/容器/
+	// 自建二进制）不传，于是 `/dev/assets/events` 这条路由根本不存在，该路径走 NoRoute 的
+	// SPA 回落（资产层的既有语义）。装配层只在 `MATE_ASSET_WATCH`/`--asset-watch` 显式给了
+	// 正时长时才构造它（见 internal/app）。
+	//
+	// 为什么把"开关"做成一个对象而不是 bool：对象非 nil 就是开着，注册点因此可以写成
+	// "有值才挂"（见下方 MountWeb 之后那段），不需要再加一个字段去描述"开着但没东西可挂"。
+	AssetWatch *AssetWatcher
+
 	// Origin 回环监听面的 Host 白名单 + Origin 矩阵（M3-5，internal/middleware）。
 	//
 	// nil / 未启用 = 不判定（测试路径与**非回环监听**：设计 §9.4 明确 Host/Origin 白名单属于
@@ -150,6 +159,11 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	registerSystem(rest, meta, o.Web, o.HostFacts)
 
 	MountWeb(r, o.Web)
+	// 开发期资产重建通知（P6-A）：**开关与注册点必须同处**（archtest 有静态守卫钉这条）——
+	// 分开放就会出现"开关忘了接"的形态：配置写着开了，路由却没挂，页面永远不刷新且无人报错。
+	if o.AssetWatch != nil {
+		o.AssetWatch.Mount(r)
+	}
 	return r
 }
 

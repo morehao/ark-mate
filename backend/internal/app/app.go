@@ -98,6 +98,10 @@ type App struct {
 	// assets 本次装配解析出的前端资产（M2-1；供 /meta 与诊断使用）。
 	assets router.AssetInfo
 
+	// assetWatch 开发期资产重建通知（P6-A）：只有 `MATE_ASSET_WATCH`/`--asset-watch` 给了
+	// 正时长时才非 nil。nil 时**不注册** `/dev/assets/events`（交付形态的默认）。
+	assetWatch *router.AssetWatcher
+
 	closeOnce sync.Once
 }
 
@@ -373,6 +377,15 @@ func (a *App) Init(ctx context.Context) error {
 	if assets.Has() {
 		glog.Infow(ctx, "serve: 前端资产已就绪", "dir", assets.Path)
 	}
+	// 开发期资产重建通知（P6-A）：**默认关闭**，只有显式给了正时长才起。
+	// 位置放在资产解析之后、监听之前：它盯的就是刚解析好的那份目录，而没有资产时不该起
+	// （没资产 = 页面都打不开，通知谁去刷新）。
+	if assets.Has() && cfg.AssetWatch > 0 {
+		a.assetWatch = router.NewAssetWatcher(assets, cfg.AssetWatch)
+		a.assetWatch.Start(ctx)
+		glog.Infow(ctx, "serve: 已开启开发期资产重建通知（P6-A）",
+			"endpoint", router.AssetWatchPath, "interval", cfg.AssetWatch, "dir", assets.Path)
+	}
 
 	// M3-5：先绑定监听器，再用**实际监听地址**构造 Host 白名单 + Origin 矩阵，最后装配路由。
 	// 顺序是被判据逼出来的：策略里"同源"的定义就是本进程的监听端口，而桌面态（`127.0.0.1:0`）
@@ -404,6 +417,7 @@ func (a *App) Init(ctx context.Context) error {
 		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(manager.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
+		AssetWatch:  a.assetWatch,
 		Origin:      originPolicy,
 	}))
 	if creds := a.credentials(); creds.Required() {
@@ -600,6 +614,11 @@ func (a *App) Run(ctx context.Context) error {
 // Close 释放装配的资源。顺序与改造前 defer 的 LIFO 一致：先关编排器（回收子进程），再关持久层。
 func (a *App) Close() {
 	a.closeOnce.Do(func() {
+		// 轮询循环先停：它只读资产目录，但让它在关停过程中继续推帧/打日志没有意义
+		// （Stop 幂等，且 ctx 也会兜住——这里是为了"不需要依赖 ctx 时序"）。
+		if a.assetWatch != nil {
+			a.assetWatch.Stop()
+		}
 		if a.svc != nil {
 			a.svc.StopAutomationScheduler()
 		}

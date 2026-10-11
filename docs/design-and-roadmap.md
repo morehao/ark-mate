@@ -120,7 +120,8 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    形态**，不列入交付面；服务端形态的界面按「自用 / 开发」对待，不承诺 UI 体验。形态清单与「维护态」的
 >    精确定义（含保留项、不做项、退出条件）见
 >    `.dsh/docs/specs/2026-10-10-positioning-v8-alignment-design.md` §3.1–§3.4。
-> ④ **口径统一（消歧）**——**一份 UI 产物（`apps/web/dist`），两种加载方式**：开发态（vite，含 HMR）与
+> ④ **口径统一（消歧）**——**一份 UI 产物（`apps/web/dist`），两种加载方式**：开发态（vite，含 HMR；**此处的
+>    "vite / 含 HMR" 已被 v10 取代——开发态同样只服务构建产物、没有 Fast Refresh**）与
 >    交付态（Electron 壳；资产由壳与核心两条路径服务，**深链回退归核心**）。文档不再出现「两个端 /
 >    两个并列产品」。删掉 `apps/web` 等于删掉整个控制台 UI（壳内只有 `welcome` / `boot-failed` 两张静态页），
 >    且核心资产层是桌面态的承重墙（`scheme.ts` 对非静态路径一律 `proxyToCore`）——**不做单端化**。
@@ -147,6 +148,53 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    恒为 `dir` 的 `webSource` 字段（`webPath`/`webDigest`/`webBuildId` 保留）。v3 三条红线、v2②、
 >    v7②、v8① 两层结构 / v8② 接边有界 / v8⑤ 逐条不变。证据与实测见
 >    `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。
+
+> **决策变更 v10（开发态的"从源码现编译"那条路取消：开发靶与交付靶共用同一份产物，2026-10-11）**：
+> ① **取消源码靶**——v9① 里那句「浏览器开发态（`make dev`，**唯一 HMR 循环**）不变」中**加粗那半句作废**：
+>    `make dev` 现在跑的是 `frontend/scripts/dev-loop.mjs`——**构建一次 → `tsc -b --watch` +
+>    `vite build --watch --no-emptyOutDir` 重建产物 → 核心 `--web-dir` 服务同一份 `apps/web/dist`**，
+>    浏览器开 `http://127.0.0.1:10001`。原来的 vite dev server（`:5173`，**从源码现编译**）被
+>    `apps/web/vite.config.ts` 在 `serve` 上**直接报错拦住**（照抄参照实现 DSH 的 `rejectStandaloneServe`）。
+> ② **为什么必须取消**（不是偏好，是纪律）——v9② 已经把"资产单源"从纪律变成结构，但**开发靶当时仍是第二
+>    份产物**：它现编译、无 CSP、无 `build-id.txt`、antd 多打 `css-dev-only-*` 类名、还会显示 React 的
+>    dev-only 警告。于是"**已验证过的功能从未在交付件形态上跑过**"——而这件事**不会让任何别的测试变红**
+>    （动态实测两轮、逐场景对照见 `.dsh/docs/notes/2026-10-11-dev-delivery-parity-baseline-notes.md`）。
+>    参照实现 DSH 在这一点上更彻底：它**没有**源码靶，两个入口与两条验收都打构建产物。
+> ③ **代价如实写**——**当时没有 Fast Refresh 了**：改完源码要等一次增量重建（实测约 0.4–0.5 s）再刷新浏览器。
+>    **2026-10-11 P6-A 把"再刷新浏览器"这一步去掉了**：`make dev` 的核心带 `--asset-watch`，盯着它自己
+>    正在服务的那份 dist，**内容真的变了**才经 `GET /dev/assets/events`（SSE）通知页面整页刷新；交付形态
+>    （桌面壳 / 容器 / 自建二进制）不传这个开关，那条路由根本不存在。**但"保状态的 Fast Refresh"仍未回来**
+>    ——那是整页刷新，页面状态会丢；要做到 DSH 那种 `entries.reload(id, rev)` 的模块级重载，需要**运行期
+>    客户端插件内核**（参照实现的 `client-hmr` 形态），仍作为长期项立项（见
+>    `docs/desktop-architecture-design-20260928.md`、`.dsh/docs/specs/2026-10-11-client-plugin-kernel-design.md`
+>    与 `.dsh/docs/plans/2026-10-11-dev-delivery-parity-plan.md` §4-D7）。
+> ④ **不变**——"一份 UI 产物、两种加载方式"（v8④）**更强**了：现在连开发态也只有这一份；桌面仍是唯一交付面
+>    （v8③）；v3 三条红线、v2②、v7②、v8①②⑤、v9②③④ 逐条不变。机器判据见
+>    `backend/internal/archtest/dev_parity_test.go`（`TestDevLoopServesBuiltArtifact`，第 36 条守卫）。
+
+> **决策变更 v11（能力面收窄到"有消费者"的集合：声明面与执行面都不再描述"曾经想做的东西"，2026-10-11）**：
+> ① **执行面删五个零调用成员**——`native.{pathFor,openPath,openExternal}` 与整块
+>    `platform.{setBounds,close}` 全部删除（契约 + preload + 主进程 IPC + 越权拒绝都实现得挺完整，
+>    但唯一的界面（`apps/web/src`，2026-10-11 P5 起为 `packages/console/src`）**一次都没调用**；`pathFor` 只有桌面验收探针在用）。**删的理由不是省代码**：
+>    一份"能跑但没人用"的执行面让 IPC 面看起来有人用，越权校验、载体判定这些代码都在为不存在的行为服务，
+>    而下一个读契约的人会以为产品支持"用系统程序打开路径"。要做这类功能**按功能单独立项**（连同浏览器侧
+>    的等价交互一起设计），不是从清单里往回捡。
+> ② **声明面同步收窄**——`GET /v1/mate/capabilities` 从六条（`tray`/`native-dialog`/`open-path`/
+>    `diagnostics-export`/`deep-link`/`update`）收窄到**两条**（`tray`/`native-dialog`），
+>    连带删掉四个从没实现过的 `browserFallback`（`ui:show-path-copy`/`http:download`/`url:direct`/
+>    `deployer:replace-binary`）。语义不变且更清楚：**托盘按入口形态**（桌面 `true` / 浏览器 `false`）、
+>    **原生对话框按宿主事实**（两端可能都为 `true`）。
+> ③ **一处死 UI 收起来**——桌面壳里「设置 → 访问令牌」不再渲染：壳的反代**覆盖**（而不是追加）客户端带来的
+>    `Authorization`，在那儿粘的令牌根本不会生效。判据取服务端声明 `entries.desktop`（**不嗅探客户端**），
+>    声明拉不到时照常渲染（少一块功能比多一块无效界面更糟）。
+> ④ **V3 从口径变成清单**——设计文档 §7.3 新增「桌面与浏览器的差异清单」（6 项：每项给出浏览器入口的等价
+>    路径 + 两侧靶），§12 的 V3 改为**清单驱动**。两份机器判据：声明的每条能力必须在界面源码（2026-10-11 P5 起为 `packages/console/src`，见 archtest 的 `uiSrcRoots()`）被真实
+>    引用（确需保留的必须登记 + 写理由，如 `tray`）、差异清单每项的桌面靶必须**逐字**出现在桌面靶脚本里
+>    （`capability_consumer_test.go` / `diff_list_test.go`，两条都做过反证）。
+> ⑤ **代价如实写**——原契约里"桌面能多给"的四个方向（打开文件/文件夹、导出诊断包、深链接、自更新）
+>    现在**明确不在产品面内**：它们从来没有实现过，收窄只是把这件事写实。要做得单独立项。
+> ⑥ **不变**——"一份 UI 产物、两种加载方式"（v8④）与 v10 逐条不变；`tray` 仍是唯一允许 `browserFallback: none`
+>    的纯增强能力。实测与收尾见 `.dsh/docs/notes/2026-10-11-dev-delivery-parity-baseline-notes.md` §8。
 
 ## 0. 为什么参考 codeg
 

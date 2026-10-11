@@ -305,7 +305,6 @@ if (!app.requestSingleInstanceLock()) {
     installIpcHandlers({
       streamEndpoint: () =>
         core ? { streamBaseUrl: `ws://${core.addr}`, streamToken: core.streamToken } : null,
-      coreBaseUrl: () => (core ? `http://${core.addr}` : null),
       window: () => win,
     })
 

@@ -20,7 +20,7 @@
 # `--web-dir` / `MATE_WEB_DIR` 指过去——桌面壳指包内那份、容器指镜像内那份、`make dev` 指工作区那份。
 # （2026-10-10 起 `//go:embed` 与 `-tags release` 已删除，详见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。）
 
-.PHONY: dev dev/opencode-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
+.PHONY: dev dev/opencode-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/ui-product verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
@@ -28,6 +28,8 @@ CORE_DESKTOP_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/mate-core
 
 # 桌面包里那一份前端产物的落点（M2-6；壳与核心读同一份，M4-1 把它固定进 extraResources）。
 DESKTOP_WEB_OUT := $(FRONTEND_ROOT)/apps/desktop/resources/web
+# 随包运行时载荷（生成物，`make desktop/payloads` 装配；dev 态**只读**它来判「命中是哪一代」）。
+PAYLOADS_ROOT := $(FRONTEND_ROOT)/apps/desktop/resources/payloads
 
 # 打好的包（`desktop/dist` 的产物）。electron-builder 按**宿主架构**分目录：arm64 → `mac-arm64`，
 # x64 → `mac`（`desktop/dist` 只传 `--mac`，所以这里按 `uname -m` 推是准的）。
@@ -52,7 +54,10 @@ RUNTIME ?= dsh
 ifneq ($(shell echo '$(RUNTIME)' | grep -Eq '^[a-z0-9][a-z0-9_-]*$$' && echo ok),ok)
 $(error RUNTIME 取值非法：$(RUNTIME)（须是 [a-z0-9][a-z0-9_-]*；不指定则默认 dsh）)
 endif
-CORE_LDFLAGS  = -ldflags "$(strip $(if $(CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION),) -X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=$(RUNTIME))"
+CORE_LDFLAG_ARGS = $(strip $(if $(CORE_VERSION),-X github.com/morehao/ark-mate/internal/version.Version=$(CORE_VERSION),) -X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=$(RUNTIME))
+# ldflags 的**内层**单独留一个变量：`dev` 把它作为单个 argv 交给 `scripts/dev-loop.mjs`（那里要
+# "一个元素一个空格"地把 -X 递给 `go run`，所以不能把 `-ldflags "..."` 这层壳一起传过去）。
+CORE_LDFLAGS  = -ldflags "$(CORE_LDFLAG_ARGS)"
 
 # 打包期下载缓存落仓库内（.cache/ 已 gitignore）：本机沙箱与 CI 都不该往 ~/Library/Caches 写。
 # 只认 ELECTRON_BUILDER_CACHE——它是 electron-builder 26 的**唯一**缓存根（Electron 发行包解到
@@ -83,10 +88,9 @@ NODE_VERSION_MAJOR := $(word 1,$(subst ., ,$(NODE_VERSION)))
 # 想要轻量纯内存可临时覆盖：MATE_STORE=memory make dev（环境变量优先于此处默认）。
 MATE_STORE ?= sqlite
 
-# 开发态跨源白名单（M3-5 的 Origin 矩阵）：vite :5173 与核心 :10001 **不同源**，浏览器会带上
-# `Origin: http://localhost:5173`，而默认矩阵只放行"核心自己的 origin"（以及 mate-app://app 与无 Origin）。
-# 所以这里显式登记；默认矩阵里没有它——验收 V16 正是要证明别的本地源（127.0.0.1:9999）仍被拒。
-DEV_ORIGINS ?= http://localhost:5173,http://127.0.0.1:5173
+# 这里原先有 `DEV_ORIGINS`（把 vite :5173 登记进 M3-5 的 Origin 矩阵）。2026-10-11 起 `make dev`
+# 的开发态**服务的就是构建产物**、页面与接口同源，不再有跨源请求，这个登记口随之删除。
+# 机制本身没动：跨源开发 / 自建反代仍用 `MATE_ALLOWED_ORIGINS` 显式登记（README「运行配置要点」）。
 
 # —— 开发态 opencode 底座用哪一份可执行文件（可选；`make dev` / `make server` 认它）——
 # 为什么需要这个入口：核心拉哪个底座是**写死的名字**（pkg/runtime/opencode/opencode.go 的
@@ -126,10 +130,27 @@ ENV_FILE ?= .env
 OPENCODE_BIN_FROM_FILE := $(shell awk 'match($$0, /^[[:space:]]*(export[[:space:]]+)?OPENCODE_BIN[[:space:]]*=/) { v = substr($$0, RLENGTH + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$$/, "", v); if (v ~ /^".*"$$/) { v = substr(v, 2, length(v) - 2) } else { sub(/[[:space:]]+\#.*$$/, "", v); sub(/[[:space:]]+$$/, "", v) }; out = v } END { print out }' $(ENV_FILE) 2>/dev/null)
 OPENCODE_BIN ?= $(OPENCODE_BIN_FROM_FILE)
 DEV_BIN_DIR  := $(CURDIR)/.cache/dev-bin
+# 绝对化：文档里的写法是**仓库根相对**（`OPENCODE_BIN=frontend/apps/...`），而开发循环的 cwd 是
+# `frontend/`——交给它相对路径会让"这个覆盖是不是随包那一份"判错（2026-10-11 实测：报成 external）。
+# 与 `dev/opencode-bin` 里给 shim 写的那条绝对路径同源（同一个 cwd，即 make 被调用的地方）。
+OPENCODE_BIN_ABS := $(if $(OPENCODE_BIN),$(abspath $(OPENCODE_BIN)),)
 # 来源的唯一取法：make 的 $(origin)（command line / environment / file / undefined）。
 OPENCODE_BIN_SOURCE := $(if $(OPENCODE_BIN),$(if $(filter command line,$(origin OPENCODE_BIN)),命令行,$(if $(filter environment,$(origin OPENCODE_BIN)),环境变量,$(if $(filter file,$(origin OPENCODE_BIN)),$(ENV_FILE),其它))),未指定)
 # 只有有值才前置 PATH（空值 = 连赋值都不做，保持"今天就是这样"）。
 DEV_PATH_PREFIX := $(if $(OPENCODE_BIN),$(DEV_BIN_DIR):,)
+
+# 回显「这次会拉起哪一份底座」的**原始事实**（路径 + 来源）。
+#
+# 解释与警告**不在这里**：`make dev` 由 `scripts/dev-loop.mjs` 统一报（它能读磁盘上的
+# `payload.json`，于是能说出「命中版本 / 随包版本 / 是否同代」，并把同一份事实交给核心的
+# `--payloads`）。这里只留原始事实，供 `make server`（不起开发循环）使用。
+#
+# 那个「未生效」分句挡的是一类**静默 no-op**：转发 shim 的名字写死是 `opencode`，所以
+# 本构建固定的是 `dsh` 时，`OPENCODE_BIN=…` 只是让 PATH 上多了一个没人调用的可执行文件——
+# 核心照旧拉 PATH 上的 dsh。此前这行回显会把那个路径当「底座」报出来，看的人以为换掉了。
+define runtime_hit_line
+$(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)]$(if $(filter opencode,$(RUNTIME)),, —— ⚠️ 未生效：本构建固定的是 $(RUNTIME)，转发 shim 只叫 opencode),PATH 上解析 [未指定 OPENCODE_BIN])
+endef
 
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
 define require-node
@@ -266,6 +287,18 @@ verify/asset-parity:
 	$(require-node)
 	cd $(FRONTEND_ROOT) && pnpm asset-parity
 
+# 产物靶界面验收（V-a，2026-10-11 起）：验的就是 `make dev` / 交付件形态服务的那**同一份产物**
+# （`frontend/apps/web/dist`）。**前置：`make dev` 已在跑**——脚本刻意不起服务，它验的是"人正在看的
+# 那个实例"；开跑前有一条启动断言逐字核对"这个靶给的 index.html 就是本地 dist 那份、哈希资产真取得
+# 到、`/meta.webPath` 指的就是它"，指到"从源码现编译"的靶上会**当场红**（那正是 2026-10-11 之前
+# 的老形态：验过的界面从未在交付件形态上跑过）。
+# 它**不并进 `verify/desktop-dod`**：那条要的是"源码态、自起壳、不依赖已在跑的服务"，与本条的
+# 前置互斥（真同时跑还会出现两个核心抢同一个 `~/.ark-mate/mate.db`）。桌面壳那条 lane 是
+# `pnpm ui:accept:desktop`（在 DoD 里）。
+verify/ui-product:
+	$(require-node)
+	cd $(FRONTEND_ROOT) && pnpm ui:accept
+
 # engines / ABI 打包期断言（M3-7）：桌面态的载荷 JS 跑在 **Electron 自带的 Node** 上
 # （`ELECTRON_RUN_AS_NODE=1`，见 M3-2 的私有 bin），所以要按 semver 比对载荷声明的
 # `engines.node` 与 Electron 的真实 Node 版本，并断言 `payload.json` 的 nodeAbi 与实际 ABI
@@ -394,41 +427,33 @@ dev/opencode-bin:
 
 # 后端开发起服（mate 无默认子命令，需显式 serve）
 server: web-assets dev/opencode-bin
-	@echo "==> 底座  runtime=$(RUNTIME) [构建期固定；改它要重新构建]"
-	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
+	@echo "==> 底座  $(RUNTIME) [构建期固定；改它要重新构建]"
+	@echo "==> 命中  $(runtime_hit_line)"
+	@echo "     （版本与「和随包是否同代」在 make dev 与验收里报：核心**不从本机探测**版本——底座连 --version 都写自己的 home）"
 	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) go run $(CORE_LDFLAGS) ./cmd/mate serve --web-dir $(WEB_DIR)
 
-# 前后端联调单命令：先起后端 go run serve（默认 127.0.0.1:10001），轮询
-# /v1/mate/health 通过后再起前端 vite dev（:5173，/v1 代理到后端含 ws），
-# 避免后端尚未 listen 时 vite ws 代理出现 ECONNREFUSED 的启动竞态。
-# 后端编译/启动失败会立即退出并报错；任一进程退出 / Ctrl-C 时把两个进程一起收掉。
+# 开发循环（2026-10-11 重做，对齐参照实现 DSH 的 `scripts/dev-web.ts`）：
+# **构建一次 → 两个常驻 watcher 重建 → 核心服务同一份构建产物**，浏览器开 http://127.0.0.1:10001。
+#
+# 这条目标里不再有 vite dev server，这是重做的**全部理由**：dev server 从源码现编译，与交付的
+# `apps/web/dist` 不是同一次构建——于是"人判断有没有问题时依据的资产"与"用户加载的资产"分叉
+# （CSP 三条限制不下发、`build-id.txt` 不存在所以版本闸门只能判"不可判定"、antd 会多打
+# `css-dev-only-*` 类名、React 的开发期警告还在）。人看的必须是产物；`apps/web/vite.config.ts`
+# 已在 `serve` 上直接报错兜住第二条路（照抄 DSH 的 `rejectStandaloneServe`）。
+#
+# 分工：Makefile 管**环境装配**（require-node / OPENCODE_BIN 转发目录与 PATH / MATE_STORE /
+# ldflags 的**内层**），`scripts/dev-loop.mjs` 管**进程编排**（阶段顺序、健康检查、阶段自死即回红、
+# 按进程组收尾）。各做一件，不把同一份环境判定实现两遍。
 dev: dev/opencode-bin
 	$(require-node)
 	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME))"
-	@echo "==> 底座  opencode: $(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)],PATH 上解析 [未指定 OPENCODE_BIN])"
-	@trap 'kill 0 2>/dev/null; exit' INT TERM; \
-	trap 'kill 0 2>/dev/null || true' EXIT; \
-	cd backend && PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) MATE_ALLOWED_ORIGINS=$(DEV_ORIGINS) go run $(CORE_LDFLAGS) ./cmd/mate serve --web-dir $(WEB_DIR) & \
-	BACKEND_PID=$$!; \
-	echo "==> 等待后端健康检查 http://127.0.0.1:10001/v1/mate/health ..."; \
-	HEALTHY=""; \
-	for i in $$(seq 1 300); do \
-	  if curl -sf http://127.0.0.1:10001/v1/mate/health >/dev/null 2>&1; then \
-	    HEALTHY=1; break; \
-	  fi; \
-	  if ! kill -0 $$BACKEND_PID 2>/dev/null; then \
-	    echo "==> 后端进程已退出（go run 编译或启动失败），请查看上方错误输出"; \
-	    exit 1; \
-	  fi; \
-	  sleep 0.3; \
-	done; \
-	if [ -z "$$HEALTHY" ]; then \
-	  echo "==> 等待后端健康检查超时（约 90s），请查看上方后端输出"; \
-	  exit 1; \
-	fi; \
-	echo "==> 后端就绪，启动前端 pnpm dev (vite :5173 -> /v1 proxy 127.0.0.1:10001)"; \
-	cd $(FRONTEND_ROOT) && pnpm dev & \
-	wait
+	cd $(FRONTEND_ROOT) && \
+	  PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) \
+	  MATE_DEV_WEB_DIR=$(WEB_DIR) MATE_DEV_CORE_DIR=$(CURDIR)/backend \
+	  MATE_DEV_CORE_LDFLAG_ARGS='$(CORE_LDFLAG_ARGS)' MATE_DEV_RUNTIME=$(RUNTIME) \
+	  MATE_DEV_RUNTIME_BIN='$(OPENCODE_BIN_ABS)' MATE_DEV_RUNTIME_BIN_SOURCE='$(OPENCODE_BIN_SOURCE)' \
+	  MATE_DEV_PAYLOADS_ROOT=$(CURDIR)/$(PAYLOADS_ROOT) \
+	  exec node scripts/dev-loop.mjs
 
 # 全仓只有这一个构建配置：不带任何构建标签，不依赖前端产物（核心从不自带资产）。
 #

@@ -37,7 +37,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 	root := frontendRoot(t)
 
 	// —— ① 弹窗左栏那一节（保留 v11 起的解析方式；解析不到即失败） ——
-	viewPath := filepath.Join(root, "apps", "web", "src", "console", "settingsView.tsx")
+	viewPath := filepath.Join(root, "packages", "console", "src", "console", "settingsView.tsx")
 	view, err := os.ReadFile(viewPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", viewPath, err)
@@ -51,7 +51,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 	assertNoBannedWord(t, "设置分节标题（settingsView.tsx）", m[1])
 
 	// —— ② 整节字符串字面量（标题 + 正文 + toast + tooltip + 空态 + 错误出路 + 状态标签） ——
-	panelPath := filepath.Join(root, "apps", "web", "src", "components", "settings", "ModelSettingsPanel.tsx")
+	panelPath := filepath.Join(root, "packages", "console", "src", "components", "settings", "ModelSettingsPanel.tsx")
 	panel, err := os.ReadFile(panelPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", panelPath, err)

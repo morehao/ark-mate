@@ -97,12 +97,11 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 	browser := get(t, eng, "/capabilities", nil)
 	desktop := get(t, eng, "/capabilities", map[string]string{"X-Mate-Carrier": "desktop"})
 
-	// 冻结顺序（设计 §7.3 的表序）。
-	wantIDs := []string{"tray", "native-dialog", "open-path", "diagnostics-export", "deep-link", "update"}
-	wantFallbacks := []string{
-		"none", "server:directory-browse", "ui:show-path-copy",
-		"http:download", "url:direct", "deployer:replace-binary",
-	}
+	// 冻结顺序（设计 §7.3 的表序）。2026-10-11 收窄到两条：`open-path`/`diagnostics-export`/
+	// `deep-link`/`update` 两个入口都没有消费者，连同它们的 fallback 一起删了（见 system.go 的注释）。
+	// 这里**刻意逐字写死**：这张表是冻结契约，改它必须同时改前端联合类型与这条断言。
+	wantIDs := []string{"tray", "native-dialog"}
+	wantFallbacks := []string{"none", "server:directory-browse"}
 
 	// wantAvailable 是"非宿主判定能力"的期望；native-dialog 单独按宿主事实断言。
 	check := func(name string, d map[string]any, wantAvailable bool, wantSource bool, nativeDialog bool) {

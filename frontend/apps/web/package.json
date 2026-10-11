@@ -14,25 +14,19 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:watch": "vite build --watch --no-emptyOutDir"
   },
   "devDependencies": {
-    "@ant-design/icons": "^6.3.4",
-    "@ark-mate/api": "workspace:*",
+    "@ark-mate/console": "workspace:*",
     "@ark-mate/desktop-contract": "workspace:*",
     "@ark-mate/tsconfig": "workspace:*",
-    "@ark-mate/types": "workspace:*",
-    "@ark-mate/ui": "workspace:*",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
-    "antd": "^6.6.2",
-    "axios": "^1.20.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2",
-    "zustand": "^5.0.15"
+    "vite": "^8.2.2"
   }
 }

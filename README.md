@@ -7,7 +7,7 @@
 **定位（两层，详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v8」）**：
 1. **底座层** = `mate` 内核：把「多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态」做成可复用的一层，面向「把控制面接到自己的 runtime / 自己的前端上」。**runtime 接边有界**：当前 `dsh` / `opencode` **两个一等适配**，**不追求数量、不承诺接入任意 ACP 生态**——接入成本在维护面（隔离表三份 / 投影实测 `Tested` / 能力粒度声明 / 随包载荷与 ABI 断言），不在 adapter。
 2. **产品层** = 底座之上的**个人 Agent 助手**：面向「我自己的助手」——建会话、跑起来、看见过程与结果，**聚焦桌面端**（macOS / Windows，随包运行时，用户机器不需要 Go / Node / 预装底座）。
-3. **一份 UI 产物，两种加载方式**：开发态（vite，含 HMR）与交付态（Electron 壳）。**浏览器入口只是开发过程使用的形态**，不是交付面。
+3. **一份 UI 产物，两种加载方式**：开发态（核心直接服务 `apps/web/dist`）与交付态（Electron 壳加载同一份产物）。**浏览器入口只是开发过程使用的形态**，不是交付面；**两个入口都没有 HMR**（决策变更 v10，2026-10-11）。
 4. **三条不变的红线**（沿用决策 v3）：**能力不重造**（skills / MCP / 推理等执行能力直接复用底层 runtime 原生实现，本项目不做运行时功能）；**数据管理是平台职责**（统一管理会话数据（wire transcript / 历史回放）、skill 数据、MCP 服务器数据）；**单机单操作员**（不做多人协作 / 多用户鉴权 / 远程聊天通道，跨 agent 协作亦不在定位内）。
 
 ## 三分钟跑起来
@@ -28,7 +28,7 @@ ACP 兼容底座（`opencode` 或 `dsh`）与模型 API key。数据默认落 `~
 > 一节的 `OPENCODE_BIN`。
 
 ```bash
-make dev           # 浏览器开发态：vite :5173（**HMR**）+ 后端 :10001，改 UI 走这条最快
+make dev           # 浏览器开发态：后端 :10001 **直接服务构建产物**，改 UI 走这条（无 HMR，见下）
 # 换底座：make dev RUNTIME=opencode（默认 dsh；未装配的 id 会**启动即失败**，不静默回落）
 make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native / 凭据 / 打包前行为
 ```
@@ -37,9 +37,12 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 > 用 `--web-dir` / `MATE_WEB_DIR` 指一份 `frontend/apps/web/dist`（加 `make web` 出这份产物），
 > 没给就**拒绝启动**（退出码 3）；容器镜像里已经带好那份并设了 `MATE_WEB_DIR`。
 
-> **改 UI 为什么走 `make dev`**：桌面态**没有 HMR**（壳加载的是构建产物），浏览器开发态才是唯一的热更新
-> 循环；两者跑的是**同一份** `apps/web/dist` 与**同一套** `/v1/mate` 契约。桌面态的调试路径（CDP 附渲染
-> 进程、`KEEP_SHELL=1`、主进程 `--inspect`）见 [docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
+> **改 UI 为什么走 `make dev`**：它跑的就是 `frontend/apps/web/dist`——**和交付态同一份产物、同一套
+> `/v1/mate` 契约**。核心直接服务这份产物，所以"你在界面上看到的"就是"要发出去的那份"；代价是**没有 Fast
+> Refresh 了**（改完等一次增量重建、刷新浏览器；2026-10-11 之前那条 vite `:5173` 源码现编译的路已删除，
+> 见 `docs/design-and-roadmap.md` 决策变更 v10 与守卫 `backend/internal/archtest/dev_parity_test.go`）。
+> 桌面态的调试路径（CDP 附渲染进程、`KEEP_SHELL=1`、主进程 `--inspect`）见
+> [docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
 > **别同时跑** `make dev` 与 `make desktop/dev`——两个核心共用 `~/.ark-mate/mate.db`。
 
 ## 底座边界（支持谁、不承诺什么）
@@ -155,10 +158,11 @@ cd backend && CGO_ENABLED=0 go build -o ../mate ./cmd/mate     # 产物在仓库
 > ——`Host` 的主机部分必须是 `127.0.0.1` / `[::1]` / `localhost`，且端口等于**实际监听端口**
 > （不匹配 → `421`）；`Origin` 只放行「无 Origin」（壳内反代 / curl / 页面导航）、`mate-app://app`
 > （桌面态事件流直连）与自身监听端口上的 http 同源（其余 → `403`，含 `Origin: null`）。
-> **跨源开发与自建反代需显式登记**：`MATE_ALLOWED_ORIGINS=http://localhost:5173,https://mate.example.com`
+> **跨源开发与自建反代需显式登记**：`MATE_ALLOWED_ORIGINS=https://mate.example.com,http://127.0.0.1:8080`
 > （逗号分隔，`config.json` 可写 JSON 数组；取值必须是纯 origin `scheme://host[:port]`，带路径/查询
-> 或未知 scheme 启动即报错）。这是**显式登记口，不是默认放开**——`make dev` 的 vite :5173 → 核心
-> :10001 正是靠它。绑非回环地址（如 `--addr 0.0.0.0:10001`）时这套判定**不启用**（设计 §9.4：
+> 或未知 scheme 启动即报错）。这是**显式登记口，不是默认放开**——跨源开发（自建反代 / 另一个端口上的
+> 前端）正是靠它；`make dev` 自 2026-10-11 起**同源**（核心直接服务产物），不再需要登记。
+> 绑非回环地址（如 `--addr 0.0.0.0:10001`）时这套判定**不启用**（设计 §9.4：
 > 对外产品化所需的 Host/Origin 白名单与令牌强制、TLS 终止、多操作员审计同属未完成项），
 > 启动日志会打一条 WARN 说明。
 
@@ -262,11 +266,23 @@ curl -s localhost:10001/v1/mate/conversations \
 make dev
 
 # 方式 B：分开两个终端（日志可分别看）
-# 终端 A：后端（默认 :10001）
-make server            # = cd backend && go run ./cmd/mate serve
-# 终端 B：前端（vite dev :5173，/v1 代理到 127.0.0.1:10001，含 ws）
-cd frontend && pnpm dev
+# 终端 A：后端（默认 :10001，服务 apps/web/dist）
+make server            # = cd backend && go run ./cmd/mate serve --web-dir frontend/apps/web/dist
+                       # 注：`make dev` 的核心额外带 `--asset-watch 500ms`（P6-A）。它让核心盯着
+                       # 自己正在服务的那份 dist，**内容真的变了**才经 `GET /dev/assets/events`
+                       # （SSE）通知页面整页刷新——开发时改完 UI 不必再手动按 F5。默认关闭：
+                       # `make server`/桌面壳/容器都不传，于是这条路由在交付形态下不存在
+                       # （该路径走 SPA 回落）。配置键 `asset_watch` / `MATE_ASSET_WATCH`，取值是
+                       # Go duration 文本（如 `500ms`/`1s`），`0` = 关闭。
+# 终端 B：前端产物重建（改 UI 时；核心会直接读到新产物——`make dev` 那条路还会自动刷新页面）
+cd frontend && pnpm build:watch
 ```
+
+> **`pnpm dev` 现在会直接报错**（不是"不推荐"，是拦住）：那份"从源码现编译"的 vite dev server 与交付的
+> `apps/web/dist` 不是同一次构建（无 CSP / 无 build id / antd 多打 `css-dev-only-*`），2026-10-11 起由
+> `apps/web/vite.config.ts` 在 `serve` 上抛错。
+> 方式 B 要热重建产物用 `pnpm build:watch`（= `vite build --watch --no-emptyOutDir`，与 `make dev` 的阶段 2
+> 逐字同形）——**它只重建产物、不做类型检查**；要连 `tsc -b --watch` 与阶段监督一起（推荐）就用 `make dev`。
 
 > **用量/会话统计需要 sqlite 持久层**：`make dev` / `make server` 默认 `MATE_STORE=sqlite`
 > （自动创建 `~/.ark-mate/mate.db`），这样才有 `runs` 读模型与每轮用量。若想轻量纯内存，
@@ -298,6 +314,11 @@ cd frontend && pnpm dev
 > 版本目录按 `resources/payloads/opencode/<version>/` 里实际那份填（`make desktop/payloads` 的产物，
 > 桌面态用的就是它）；也可以给任意绝对路径。**取值优先级：命令行 > 进程环境变量 > `.env` >
 > `PATH` 上解析**（dotenv 系工具的通行约定）——`.env` 写好后 `make dev OPENCODE_BIN=…` 仍能临时盖过它。
+> **⚠️ 只有构建期固定的底座就是 `opencode` 时它才生效**（`make dev RUNTIME=opencode …`）：转发 shim
+> 的名字写死是 `opencode`，默认构建（`dsh`）的核心拉的是 `dsh`——那一行 `.env` 只是让 `PATH` 上多了个
+> 没人调用的可执行文件。`make dev` 的启动横幅会**直接这么告诉你**（含命中版本与随包版本），
+> 验收也会在"底座命中"一节打印同一条事实；`/meta.payloads[]` 报的则是**实际生效**的那份。
+>
 > `.env` 的解析支持 `KEY=v` / `KEY = v` / `export KEY=v` / 双引号包裹 / 行尾 `# 注释`（单引号不支持）；
 > Makefile **只挑 `OPENCODE_BIN` 一个键**，不做整份 `-include`（那个文件是 compose 的 dotenv，
 > 引号/多行值/保留键整份交给 make 解析会串味甚至语法错）。
@@ -342,8 +363,8 @@ REST 前缀 `/v1/mate`；响应统一信封 `{code, requestID, msg, data}`，`co
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查（`{code:0,msg:"ok"}`） |
-| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webPath, webDigest, home, payloads[]}`。`webPath` 是核心实际读的那份资产目录的绝对路径（没接资产层时为 null）、`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串（`webSource` 字段已于 2026-10-10 删除：核心只有"调用方给的目录"一种来源）。`payloads[]` 是桌面壳经 `--payloads` 交来的**已解析**随包载荷清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）——清单真源是壳（只有它做三级解析，M3-4），非桌面态为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
-| GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Mate-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力） |
+| GET | `/meta` | **诊断面（M1-7）**：`{coreVersion, webBuildId, apiContract, webPath, webDigest, home, payloads[]}`。`webPath` 是核心实际读的那份资产目录的绝对路径（没接资产层时为 null）、`webDigest`/`webBuildId` 由资产层与版本闸门（M2-3/M2-4）接真值，未接时为 null/空串（`webSource` 字段已于 2026-10-10 删除：核心只有"调用方给的目录"一种来源）。`payloads[]` 是**已解析**的载荷命中清单（`{name,version,digest,source}`，恒为数组），`source` 是命中级别：`bundled`（随包）/`runtime-env`（显式覆盖）/`path`（PATH 上找到）。桌面态由壳交（只有它做三级解析，M3-4）；`make dev` **也交一份**——dev 的核心同样按写死的名字走 PATH，所以它报 `source: path`（或覆盖生效时的 `runtime-env`），版本在**能从路径证明**时给真值、否则 `unknown`（核心与本仓都不探测本机安装：底座连 `--version` 都写自己的 home）。真·非桌面形态（`make server` / 仅 API）仍为空数组。令牌不进这里（M1-1 起令牌只经 stdin） |
+| GET | `/capabilities` | **能力声明面（M1-7，设计 §7.3）**：`{entries:{browser,desktop}, capabilities:[{id,available,browserFallback}]}`。两个入口**同构**（id 集合与顺序一致），只有 `available` 随入口不同——壳的反代带 `X-Mate-Carrier: desktop`，浏览器入口的请求没有它。`browserFallback` 是 V3 单向一致性的机器判据（`tray` 是唯一允许 `none` 的纯增强能力）。**当前 id 集合 = `tray` + `native-dialog`**：2026-10-11 收窄（P3/D5）——`open-path` / `diagnostics-export` / `deep-link` / `update` 四条在两个入口都没有消费者，已删；差集与每项的靶见设计 §7.3，判据由 `internal/archtest` 的 `TestDeclaredCapabilitiesHaveConsumers` 钉住 |
 | GET | `/agents` | Agent 列表（含 `permission_policy` 只读面，含 `native_mode`；`is_default` 标出「当前 Agent」；`conversation_count` = 绑定它的会话数，即删除影响面） |
 | POST | `/agents` | 注册 Agent `{id, name?, provider?, mcps?, permission_policy?}`（落定义载体：memory 文件 / sqlite `agents` 行）；`mcps` 缺省 = 未声明（全量），`[]` = 本 agent 禁用 MCP 注入。**没有 `runtimes`**：底座由构建期固定（见「底座由构建期固定」一节），带 `runtimes`/`routing_policy` 的请求 → 40001 `runtime_selection_removed`（**显式拒绝**，不是静默忽略） |
 | PATCH | `/agents/:id` | 热更新 `{name?, provider?, mcps?, permission_policy?}`（指针字段，nil 不更新）。**`mcps` 是三态**：键缺失 = 不改、`null` = 清空白名单（回落"未声明"= 全量）、`[]` = 禁用全部、数组 = 白名单；改了白名单**且语义真的变了**（同集合换顺序不算）→ 立刻作废该 agent 的**空闲**会话句柄，下一轮按当前定义重建并按新白名单注入（有在途轮次或有未应答权限/提问的会话**顺延**到下一次重建——与代际迁移的"忙则顺延"同一条判据）。`runtimes`/`routing_policy` 同上：40001 显式拒绝 |
@@ -554,10 +575,10 @@ WS 帧契约（详见设计文档 §4.5）：客户端 `{action: attach|detach|p
 
 ## 开发
 
-**桌面是主线**（决策 v8③）——日常用 `make dev` 改 UI（**唯一 HMR 循环**），用 `make desktop/*` 验交付态：
+**桌面是主线**（决策 v8③）——日常用 `make dev` 改 UI（**服务构建产物的开发循环**，无 HMR），用 `make desktop/*` 验交付态：
 
 ```bash
-make dev            # 浏览器开发态：vite :5173（HMR）+ 后端 :10001，改 UI 走这条最快
+make dev            # 浏览器开发态：后端 :10001 服务 `apps/web/dist`，改 UI 走这条最快（改完刷新）
 make desktop/dev    # 桌面态：先出 mate-core + 装配随包载荷，再起 Electron 壳（脚本内的真核心）
 make desktop/accept # 真 Electron + 真核心的界面/契约验收（自起自清）
 make desktop/dist   # 出安装包（dmg / Windows 安装器）
@@ -583,22 +604,27 @@ make vet / test   # go vet / go test ./...
 cd frontend
 KEEP_SHELL=1 pnpm ui:accept:desktop shell   # 跑完不杀壳：窗口留着，可连 DevTools 慢慢看
 pnpm ui:accept:desktop stream               # 也可只跑一条场景（脚本里的 SCENARIOS 列表）
-# 附渲染进程调试端口（`pnpm dev` 默认不带）：
+# 附渲染进程调试端口（`make desktop/dev` 默认不带）：
 cd apps/desktop && node scripts/build.mjs && ../../node_modules/.bin/electron . --remote-debugging-port=9222
 #   然后 chrome://inspect 配 127.0.0.1:9222；主进程调试用 --inspect=9229
 ```
 
 > 起壳前清掉宿主 `ELECTRON_RUN_AS_NODE`（否则 Electron 以纯 Node 跑、没有窗口）；桌面态与 `make dev`
-> **别同时跑**（两个核心共用 `~/.ark-mate/mate.db`）。桌面态**没有 HMR**，改 UI 请走 `make dev`。
+> **别同时跑**（两个核心共用 `~/.ark-mate/mate.db`）。**两个入口都没有 HMR**：桌面态加载的是构建产物，
+> 开发态服务的也是构建产物（区别只在谁来服务它），改 UI 一律走 `make dev`。
 
-验收驱动（**浏览器靶 = 开发态**，先 `make dev` 起真服务，验的是**人正在看的那个实例**）：
+验收驱动（**浏览器靶 = 开发态，验的就是交付件那份产物**：先 `make dev` 起真服务，脚本验的是**人正在看的
+那个实例**；开跑前它会逐字核对"这个靶给的 `index.html` 就是本地 `apps/web/dist` 那份"）——一条命令：
+`make verify/ui-product`：
 
 ```bash
 cd frontend
-pnpm smoke:e2e            # REST/WS 冒烟（不需要真实底座）
+pnpm smoke:e2e            # REST/WS 冒烟（默认打 :10001，不需要真实底座）
 pnpm smoke:e2e:live dsh   # 真一轮对话（需要装好底座与凭据）
-pnpm ui:accept            # 开发态界面验收（真 Chrome + CDP）：能力勾选面板 / `/` 命令补全 / 自动化页
-                          # 可只跑一条：pnpm ui:accept cmd（cap | cmd | auto）
+pnpm ui:accept            # 界面验收（真 Chrome + CDP）：能力勾选面板 / `/` 命令补全 / 自动化页 / 设置 · 模型
+                          # 可只跑一条：pnpm ui:accept cap（cap | cmd | auto | model | wsdir）
+                          # 场景按 `GET /agents` 的**在册事实**驱动；本构建上验不了的那几条会**显式跳过**
+                          # 并写明理由（例如 `/` 命令补全需要会通告命令的 opencode 底座）
 ```
 
 桌面入口的靶子反过来——**脚本自己起壳、自己起核**，所以跑之前别让 `make dev` / `make desktop/dev`

@@ -5,7 +5,7 @@
  * 东西"只能经契约进入。契约分两半——**声明面**走 HTTP（`GET /v1/mate/capabilities`，两端同构），
  * **执行面**走壳注入的唯一命名空间 `__MATE_DESKTOP__`。本包把两半的形状、常量与判定函数收到一处：
  *
- *   - preload 侧（`apps/desktop/src/preload-app.ts`）与前端侧（`apps/web/src/carrier.ts`）
+ *   - preload 侧（`apps/desktop/src/preload-app.ts`）与前端侧（`packages/console/src/carrier.ts`，2026-10-11 P5 前在 `apps/web/src/carrier.ts`）
  *     引用**同一份**类型与**同一个**运行期守卫，字段不许各说各话；
  *   - 本包 **dependencies 为空、零 Electron 引用**——`apps/web` 要能安全消费它（引了 Electron 类型
  *     就会让共享 UI 的类型面依赖 Electron，违反设计 §2.1 的第 1 条依赖边界）。契约只描述**结构化形状**。
@@ -36,25 +36,10 @@ export const CSP_POLICY =
 /** WS 首帧 `attach` 的截止时限：连接建立后超时未 attach（或凭据不符）→ 服务端主动关闭（1008）。 */
 export const STREAM_ATTACH_DEADLINE_MS = 5000
 
-/** 屏幕/窗口矩形（`native.openExternal` 的定位锚点、`platform.setBounds` 的目标）。 */
-export type Rect = { x: number; y: number; width: number; height: number }
-
 /** 只能在渲染进程内完成、必须回主进程做的事。 */
 export type NativeBridge = {
   /** 原生目录选择器；用户取消 → `null`。 */
   pickDirectory(): Promise<string | null>
-  /** 拖入 / 粘贴文件的真实路径；**没有真实路径**（粘贴字节）时返回空串。同步：走 webUtils，无 IPC。 */
-  pathFor(file: File): string
-  /** 用系统默认程序打开路径（文件或目录）。 */
-  openPath(path: string): Promise<void>
-  /** 用系统浏览器打开核心托管的页面（用量 / 充值），`bounds` 给出锚点。 */
-  openExternal(page: 'usage' | 'top-up', bounds: Rect): Promise<void>
-}
-
-/** 窗口自身控制（非业务能力）。 */
-export type PlatformBridge = {
-  setBounds(bounds: Rect): Promise<void>
-  close(): Promise<void>
 }
 
 /**
@@ -62,33 +47,34 @@ export type PlatformBridge = {
  *
  * **只有"执行面"在这里**——能力**声明**走 HTTP（`CAPABILITIES_PATH`），两端同源同路径、结构同构，
  * 所以这里**没有** `capabilities()`（设计 §7.3 的声明面 / 执行面分工）。
+ *
+ * **2026-10-11 收窄（P3/D5）**：`platform.{setBounds,close}` 整个删除，`native.{pathFor,openPath,
+ * openExternal}` 也删除——执行面里**只留真的有人在调用的那一个**（`pickDirectory`）。
+ * 被删的五个方法原本相当完整（契约 + preload + 主进程 IPC + 越权拒绝），但界面（2026-10-11 P5 起在 `packages/console/src`）
+ * 一次都没调用过：一份"能跑但没人用"的执行面比少一个方法更糟——它让 IPC 面看起来有人用，
+ * 越权校验、载体判定这些代码都在为不存在的行为服务。将来要做"打开文件/文件夹"这类功能，
+ * 按功能单独立项（连同浏览器侧的等价交互一起设计），不是从这份清单里往回捡。
  */
 export type MateDesktop = {
   boot(): Promise<{ streamBaseUrl: string; streamToken: string }>
   native: NativeBridge
-  platform: PlatformBridge
 }
 
-/** 声明面里被依赖的能力 id（闭合集合：新增能力必须同时改这里、Go 侧与验收脚本）。 */
-export type CapabilityId =
-  | 'tray'
-  | 'native-dialog'
-  | 'open-path'
-  | 'diagnostics-export'
-  | 'deep-link'
-  | 'update'
+/**
+ * 声明面里被依赖的能力 id（闭合集合：新增能力必须同时改这里、Go 侧与验收脚本）。
+ *
+ * **收窄到两条**（2026-10-11，P3/D5）：`open-path`/`diagnostics-export`/`deep-link`/`update`
+ * 在两个入口都没有消费者，已从 Go 的 `capabilityDecls` 一起删除；这条联合类型与它**一一对应**。
+ * `tray` 是唯一"声明了但界面不读"的登记项（壳真的装了托盘，见 `apps/desktop/src/tray.ts`）——
+ * `internal/archtest` 的守卫要求其余每条都在界面源码（2026-10-11 P5 起为 `packages/console/src`，见 archtest 的 `uiSrcRoots()`）里被真实引用，不满足即红。
+ */
+export type CapabilityId = 'tray' | 'native-dialog'
 
 /**
  * 浏览器入口的等价路径（V3 单向一致性的机器判据）：桌面独有能力必须在浏览器端有可执行的服务端等价物。
  * `none` 只允许出现在**纯增强、不阻塞任何流程**的能力上（当前仅 `tray`）。
  */
-export type BrowserFallback =
-  | 'none'
-  | 'server:directory-browse'
-  | 'ui:show-path-copy'
-  | 'http:download'
-  | 'url:direct'
-  | 'deployer:replace-binary'
+export type BrowserFallback = 'none' | 'server:directory-browse'
 
 export type CapabilityEntry = {
   id: CapabilityId

@@ -14,6 +14,7 @@
  */
 import type { ReactNode } from 'react'
 import { ApiOutlined, ClusterOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
+import { isDesktopEntry } from '../capabilityFacts'
 
 export interface SettingsSection {
   readonly id: string
@@ -44,4 +45,19 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 
 export function settingsSectionOf(id: string): SettingsSection | undefined {
   return SETTINGS_SECTIONS.find((s) => s.id === id)
+}
+
+/**
+ * 本次入口**实际该显示的分节**。
+ *
+ * `token`（访问令牌）在**桌面壳里是死 UI**：壳的反代转发前会**覆盖**任何客户端带来的
+ * `Authorization`（`apps/desktop/src/scheme.ts`：`headers.set('authorization', ...)`），
+ * 所以用户在这一节里粘的令牌根本不会生效——留着它就是"看着能配、其实无效"的那种界面。
+ * 判据取服务端声明 `entries.desktop`（**不嗅探客户端**：UA / `window.electron` 一律不许当判据），
+ * 声明没拉到（`UNKNOWN`）时**照常渲染**——少一块功能比多一块无效界面更糟。
+ *
+ * 注意这**不是**"桌面就该少一块"的通用许可：只有"在这个入口里必然无效"的界面才允许这样收起来。
+ */
+export function settingsSections(): readonly SettingsSection[] {
+  return isDesktopEntry() ? SETTINGS_SECTIONS.filter((s) => s.id !== 'token') : SETTINGS_SECTIONS
 }

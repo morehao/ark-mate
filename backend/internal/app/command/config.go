@@ -47,6 +47,7 @@ func configCmd(args []string) {
 				"generation_limit":    cfg.GenerationLimit,
 				"automations":         cfg.AutomationDir,
 				"automation_tick":     cfg.AutomationTick.String(),
+				"asset_watch":         cfg.AssetWatch.String(),
 				"permission_timeout":  cfg.PermissionTimeout.String(),
 				"elicitation_timeout": cfg.ElicitationTimeout.String(),
 				"proc_registry":       cfg.ProcRegistryPath,
@@ -112,6 +113,9 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38d [%s]\n", "generation_limit", cfg.GenerationLimit, src("generation_limit"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "automations", cfg.AutomationDir, src("automations"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "automation_tick", cfg.AutomationTick.String(), src("automation_tick"))
+	// 开发期资产重建通知（P6-A）：0s = 关闭。这里**照原样打**（不打"关闭"这种好听的词）——
+	// 排障时"到底是没配还是配了 0"必须能看出来。
+	fmt.Printf("  %-22s %-38s [%s]\n", "asset_watch", cfg.AssetWatch.String(), src("asset_watch"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "permission_timeout", cfg.PermissionTimeout.String(), src("permission_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "elicitation_timeout", cfg.ElicitationTimeout.String(), src("elicitation_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "proc_registry", emptyLabel(cfg.ProcRegistryPath), src("proc_registry"))

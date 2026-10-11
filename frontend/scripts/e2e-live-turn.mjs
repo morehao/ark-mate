@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
  * 真会话端到端联调：REST 创建会话（真实 runtime 子进程）→ WS attach 续传 → 收流至终态。
- * 需要：vite dev（默认 :5173，/v1 代理 127.0.0.1:10001）、真实 runtime + 模型额度。
+ * 需要：`make dev`（默认打 http://127.0.0.1:10001，= 核心直接服务构建产物）、真实 runtime + 模型额度。
  *
  * 用法：
  *   node scripts/e2e-live-turn.mjs <agent_id> "<prompt>"
- *   E2E_BASE=http://localhost:5173 node scripts/e2e-live-turn.mjs agent-opencode "请只回复两个字：明白"
+ *   E2E_BASE=http://127.0.0.1:10001 node scripts/e2e-live-turn.mjs dsh "请只回复两个字：明白"
  *
  * 判定：收到终态帧（turn.ended / turn.error / run.cancelled）即 PASS；
  * 若在超时前未收尾则 POST /cancel 并继续等终态。退出码 0=通路可用。
  */
 import { buildAttachFrame } from '@ark-mate/desktop-contract'
 
-const E2E_BASE = process.env.E2E_BASE || 'http://localhost:5173'
+const E2E_BASE = process.env.E2E_BASE || 'http://127.0.0.1:10001'
 const API = E2E_BASE + '/v1/mate'
 // 后端启用凭据时用 MATE_SMOKE_TOKEN 传入：REST 走 Authorization 头，
 // WS 走带内首帧 attach（M1-1 起令牌不进 URL）。

@@ -161,18 +161,15 @@ async function scenarioContract(cdp) {
   section('M1-4 载体契约（__MATE_DESKTOP__）')
   const shape = await cdp.evalJs(`
     const d = window.__MATE_DESKTOP__
-    return { type: typeof d, top: d && Object.keys(d).sort(), native: d && Object.keys(d.native).sort(), platform: d && Object.keys(d.platform).sort() }
+    return { type: typeof d, top: d && Object.keys(d).sort(), native: d && Object.keys(d.native).sort() }
   `)
   check('typeof __MATE_DESKTOP__ = object', shape.type === 'object', shape.type)
-  check('顶层键 = boot/native/platform（无 capabilities）', JSON.stringify(shape.top) === JSON.stringify(['boot', 'native', 'platform']), JSON.stringify(shape.top))
-  check('native 键与契约一致', JSON.stringify(shape.native) === JSON.stringify(['openExternal', 'openPath', 'pathFor', 'pickDirectory']), JSON.stringify(shape.native))
-  check('platform 键与契约一致', JSON.stringify(shape.platform) === JSON.stringify(['close', 'setBounds']), JSON.stringify(shape.platform))
+  // 执行面**逐键写死**（2026-10-11 P3/D5 收窄后只剩这三个键）：多一个键意味着又有一条
+  // 没人调用的 IPC 路，少一个键意味着界面拿到半个对象。键集合是契约，不是实现细节。
+  check('顶层键 = boot/native（无 capabilities / 无 platform）', JSON.stringify(shape.top) === JSON.stringify(['boot', 'native']), JSON.stringify(shape.top))
+  check('native 键与契约一致（只剩 pickDirectory）', JSON.stringify(shape.native) === JSON.stringify(['pickDirectory']), JSON.stringify(shape.native))
 
-  const helper = await cdp.evalJs(`
-    const f = new File(['x'], 'pasted.txt')
-    return { path: window.__MATE_DESKTOP__.native.pathFor(f), sniff: 'electron' in window }
-  `)
-  check('pathFor(粘贴字节) 返回空串（无真实路径）', helper.path === '')
+  const helper = await cdp.evalJs(`return { sniff: 'electron' in window }`)
   check('页面没有 window.electron 嗅探面', helper.sniff === false)
 
   await cdp.send('Page.navigate', { url: 'mate-app://shell/welcome.html' })

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "pnpm --filter @ark-mate/web dev",
     "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
+    "build:watch": "pnpm --filter @ark-mate/web build:watch",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
     "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",

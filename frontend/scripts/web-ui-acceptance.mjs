@@ -15,15 +15,25 @@
  *
  * `model` 场景 2026-10-10 已在真 Chrome（headless）+ `make dev` 上跑绿（19/19），随后并进默认集合。
  *
- * 前置：后端（:10001）+ vite（:5173）已起（`make dev`）。脚本**不启动服务**——
+ * 前置：`make dev` 已起（后端 :10001，**它服务的是一份构建产物**）。脚本**不启动服务**——
  * 它验的是"人在看的那个界面"，偷偷另起一个服务就验错了对象。
  *
- * 环境写入（脚本自己造、自己清）：用 M2 写面建两个验收用 skill；把默认 agent 切到 opencode
- * （M3-4 与 M5′ 都要它）并在结束时切回。跑完用 `--cleanup-only` 也能单独清场。
+ * **靶就是产物（2026-10-11，P2）**：默认靶 `http://127.0.0.1:10001`（= `make dev` 的浏览器入口，它
+ * 服务 `frontend/apps/web/dist`）。开跑前有一条**启动断言**逐字核对"这个靶给的 index.html 就是本地
+ * dist 那份、它的哈希资产真的取得到"——指到 vite dev server（从源码现编译）上会**当场红**，因为那
+ * 正是 2026-10-11 之前的老形态：**验过的界面从未在交付件形态上跑过**。判据与守卫见
+ * `backend/internal/archtest/dev_parity_test.go` 与 `.dsh/docs/plans/2026-10-11-dev-delivery-parity-plan.md`。
+ *
+ * **场景按在册 runtime 驱动（同批改造）**：本构建固定了底座（用户不能选 runtime），所以"哪个 agent
+ * 在册、哪条 skill 适用"是**服务端事实**——脚本从 `GET /agents` 读，不写死 `opencode`（写死会把
+ * "脚本陈旧"演成"等待超时：页面渲染不出来"，2026-10-11 的 P0 实测就是这么误导了整整两轮）。
+ *
+ * 环境写入（脚本自己造、自己清）：用 M2 写面建两条验收用 skill（各钉一个 runtime）；若在册 agent
+ * 多于一个则切一次当前 agent（M3-4 的清单按 agent 视角取）并在结束时**切回原来的那个**。
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -32,12 +42,32 @@ import { fileURLToPath } from 'node:url'
 // 仓库根按脚本位置定位：`pnpm ui:accept` 的 cwd 是 frontend/，用相对路径会把截图写进 frontend/.dsh/
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
-const WEB_URL = process.env.WEB_URL ?? 'http://localhost:5173'
+const WEB_URL = process.env.WEB_URL ?? 'http://127.0.0.1:10001'
 const MATE_URL = process.env.MATE_URL ?? 'http://127.0.0.1:10001'
 const CHROME = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const SHOT_DIR = process.env.SHOT_DIR ?? join(REPO_ROOT, '.dsh/docs/notes/2026-09-24-panel-ui-acceptance')
 const PROFILE = join(tmpdir(), `mate-ui-accept-${process.pid}`)
-const SKILLS = { applicable: 'ui-verify-oc', inapplicable: 'ui-verify-dsh' }
+/** 产物目录：启动断言拿它核对"靶服务的确实是这一份"（与 `make dev` 的 `--web-dir` 同源）。 */
+const WEB_DIR = join(REPO_ROOT, 'frontend/apps/web/dist')
+/**
+ * 两条验收用 skill：各钉一个 runtime，脚本自建自清。
+ *
+ * 哪条是"适用"哪条是"不适用"**取决于本构建在册的 agent**，所以这里只声明两条定义，
+ * 角色由 `resolveRuntimeFacts()` 按 `GET /agents` 填进 `SKILLS`（P2 之前是写死 opencode 的）。
+ */
+const SKILL_DEFS = {
+  opencode: { id: 'ui-verify-oc', name: 'UI验收-仅opencode' },
+  dsh: { id: 'ui-verify-dsh', name: 'UI验收-仅dsh' },
+}
+/** 本构建在册的 runtime（= 它的 agent id）与另一个 adapter；由 resolveRuntimeFacts() 填。 */
+let RUNTIME = 'dsh'
+let OTHER_RUNTIME = 'opencode'
+/** `{ applicable, inapplicable }` 的 skill id（按 RUNTIME 定向）。 */
+let SKILLS = {}
+/** `GET /agents` 的最近一次事实（场景可能切换当前 agent，切完要重取）。 */
+let AGENTS = []
+/** 开跑时的当前 agent：收尾要切回**它**（不是写死的 dsh）。 */
+let INITIAL_DEFAULT_AGENT = null
 const AUTO_ID = 'ui-verify-daily'
 /**
  * 目录浏览对话框场景的夹具目录名（在 `mkdtempSync(tmpdir()/mate-wsdir-)` 下自建自清）。
@@ -59,6 +89,19 @@ const createdConversations = []
 
 // ——— 断言台账 ———
 const results = []
+/**
+ * 显式跳过：**不计入红**，但必须在汇总里单独列出来（含理由）。
+ *
+ * 为什么要有它：有些场景的前提是"某个底座在册"（例如 `/` 命令补全需要会通告命令的 runtime），
+ * 而底座现在由**构建期固定**——那种场景在本构建上根本验不了。此时只有两条诚实的出路：显式跳过
+ * 并写明理由，或者让它红。**绝不接受第三种**：靠上一次跑剩下的数据"碰巧绿"（2026-10-11 实测
+ * `cmd` 正是这种假绿——它找到的是一条早先由本脚本创建的 opencode 会话）。
+ */
+const skips = []
+function skip(name, why) {
+  skips.push({ name, why })
+  console.log(`  ⏭️  ${name} — 跳过：${why}`)
+}
 function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail })
   console.log(`${ok ? '  ✅' : '  ❌'} ${name}${detail ? ` — ${detail}` : ''}`)
@@ -408,21 +451,142 @@ async function api(method, path, body) {
   }
 }
 
+/**
+ * 按"当前 agent"定向适用/不适用两条 skill（切换当前 agent 之后必须再调一次——角色会跟着换）。
+ */
+function orientSkills(agents) {
+  const cur = agents.find((a) => a.is_default) ?? agents[0]
+  RUNTIME = cur.id
+  OTHER_RUNTIME = RUNTIME === 'dsh' ? 'opencode' : 'dsh'
+  SKILLS = { applicable: SKILL_DEFS[RUNTIME].id, inapplicable: SKILL_DEFS[OTHER_RUNTIME].id }
+  return cur
+}
+
+/**
+ * 把"本构建在册的 runtime"读成事实（P2）：`GET /agents` 里有什么，脚本就按什么跑。
+ *
+ * 为什么不从构建参数（`RUNTIME=`）读：验收要验的是**跑着的那个实例**，构建参数只是开发者的一面
+ * 之词；agent 是否在册是服务端实际装配的结果（选了未注册的底座会**启动失败**，见 `ProductRegistry`）。
+ */
+async function resolveRuntimeFacts() {
+  const res = await api('GET', '/agents')
+  AGENTS = res.json.data ?? []
+  if (!AGENTS.length) {
+    throw new Error(`GET /agents 为空（${JSON.stringify(res.json).slice(0, 200)}）——没有在册 agent，场景无从验起`)
+  }
+  const cur = orientSkills(AGENTS)
+  INITIAL_DEFAULT_AGENT = cur.id
+  console.log(`  ℹ️  在册 agent = ${AGENTS.map((a) => `${a.id}${a.is_default ? '(当前)' : ''}`).join(', ')}；` +
+    `本次靶上的适用 skill = ${SKILL_DEFS[RUNTIME].name}，不适用 = ${SKILL_DEFS[OTHER_RUNTIME].name}`)
+  return AGENTS
+}
+
+/**
+ * dev 态「跑的是哪一份底座」的如实报告（P4 / 设计 D6）。
+ *
+ * 判据来源只有一处：核心 `/meta.payloads[]`（dev 态由 `dev-loop.mjs` 用 `--payloads` 交进去，
+ * 与桌面态由壳交进去的是**同一个字段**）。随包那一份从磁盘上的 `payload.json` 读——**不执行**任何
+ * 底座（底座连 `--version` 都写自己的 home，探一下就是动用户环境）。
+ *
+ * **刻意不是判据**：D6 的口径是「不一致时打印两者并 WARN，**不判红**」。dev 跑本机装的那份是合法
+ * 选择，红在这里只会逼人把 `make dev` 关掉、把这个报告一起关掉。所以这段一律**不打 `check(...)`**：
+ * 只在汇总之外打 ℹ️/⚠️，退出码不受影响（这条性质由 archtest 的 `TestDevLoopReportsRuntimeHit` 钉住）。
+ */
+function reportRuntimeHit(payloads) {
+  const list = Array.isArray(payloads) ? payloads : []
+  const root = join(REPO_ROOT, 'frontend/apps/desktop/resources/payloads')
+  const bundledOf = (name) => {
+    const dir = join(root, name)
+    if (!existsSync(dir)) return []
+    return readdirSync(dir).filter((v) => existsSync(join(dir, v, 'payload.json'))).sort()
+  }
+
+  console.log('\n=== 底座命中（打印，不判红：dev 跑本机那份是合法选择）===')
+  if (list.length === 0) {
+    console.log('  ℹ️  核心没报命中（/meta.payloads[] 为空）：这份核不是由 `make dev` 起的，或它还没带 `--payloads`。本次无从比较。')
+    return
+  }
+  for (const p of list) {
+    const bundled = bundledOf(p.name)
+    const bundledTxt = bundled.length ? bundled.join(' / ') : '（仓库里没有这份载荷）'
+    console.log(`  命中  ${p.name} ${p.version}（source=${p.source}，digest=${p.digest}）`)
+    console.log(`  随包  ${p.name} ${bundledTxt}`)
+    if (p.source === 'path' || p.version === 'unknown' || p.version === 'external') {
+      console.log('  ℹ️  **无从判定是否同代**：命中来自 PATH / 仓库外，本仓刻意不探测版本' +
+        '（底座连 `--version` 都写自己的 home）。要跑随包那一代，见 `make dev` 横幅给出的做法。')
+    } else if (bundled.length && !bundled.includes(p.version)) {
+      console.log(`  ⚠️  **不是同一代**：dev 命中 ${p.version}，随包是 ${bundledTxt}——` +
+        'dev 上验过的行为不保证等于交付件上的行为。')
+    } else {
+      console.log('  ✅  与随包同一代。')
+    }
+  }
+}
+
+/**
+ * 启动断言：**这个靶服务的必须是本地 `apps/web/dist` 那一份产物**（P2）。
+ *
+ * 判据是"逐字对照 + 资产可取"，不是"HTTP 200"：vite dev server 也会给 200，但它给的是从源码现编译
+ * 的那一份（另有 `/@vite/client`、antd 的 `css-dev-only-*`、没有 build id）。所以：
+ *   ① `${WEB_URL}/` 的 HTML 必须与本地 `dist/index.html` 逐字一致（去掉行尾空白）；
+ *   ② 该 HTML 引用的哈希资产经 `${WEB_URL}` 取得到 200（证明它服务的就是这棵树，不只是长得像）；
+ *   ③ `/meta.webPath` 指的也必须是这一份目录（核心与靶说的是同一件事）。
+ * 任一条不成立即红——**不回落、不"退一步换个靶试试"**：靶错了，后面几十条断言验的都不是交付件。
+ */
+async function assertServingBuiltArtifact() {
+  const localIndex = join(WEB_DIR, 'index.html')
+  if (!existsSync(localIndex)) {
+    check('前置：本地产物 apps/web/dist 存在', false, `缺 ${localIndex}——先构建一次（\`make web\`，或直接 \`make dev\`）`)
+    return false
+  }
+  const want = readFileSync(localIndex, 'utf8').replace(/\s+$/, '')
+  // 靶不可达要说清"下一步做什么"：本脚本**刻意不自起服务**（它验的是"人正在看的那个实例"），
+  // 所以"连不上"的第一原因是 `make dev` 没在跑，而不是页面坏了。
+  let res
+  try {
+    res = await fetch(WEB_URL)
+  } catch (err) {
+    throw new Error(
+      `靶不可达：${WEB_URL}（${err?.cause?.code ?? err?.message ?? err}）。` +
+      `本目标验的是**人正在看的那个实例**、脚本不自己起服务——先在另一个终端起 \`make dev\`，` +
+      `或把 WEB_URL 指到别处（但那个靶给的必须是本地产物，否则下面的断言会红）。`)
+  }
+  const got = (await res.text()).replace(/\s+$/, '')
+  const same = res.status === 200 && got === want
+  check('靶服务的就是本地那份产物（index.html 逐字一致）', same,
+    `${WEB_URL} → HTTP ${res.status}；本地 ${want.length} 字节 vs 远端 ${got.length} 字节` +
+    (same ? '' : `；远端首行=${JSON.stringify(got.split('\n')[0]?.slice(0, 90))}`))
+
+  const asset = want.match(/\/assets\/[A-Za-z0-9._-]+\.js/)?.[0]
+  if (!asset) {
+    check('产物 index.html 里能找到哈希资产引用', false, '没匹配到 /assets/*.js')
+    return false
+  }
+  const assetRes = await fetch(`${WEB_URL}${asset}`)
+  check('该产物的哈希资产取得到', assetRes.status === 200, `${asset} → HTTP ${assetRes.status}`)
+
+  const meta = await api('GET', '/meta')
+  const webPath = meta.json.data?.webPath
+  check('/meta.webPath 指的就是这一份产物目录', String(webPath) === WEB_DIR, `webPath=${webPath}`)
+
+  // 底座命中报告（P4/D6）：**打印，不判红**——它回答的是「这次验的是哪一代底座」，
+  // 与「靶对不对」是两件事（后者红了才真的没意义）。
+  reportRuntimeHit(meta.json.data?.payloads)
+  return same && assetRes.status === 200
+}
+
 /** 造验收用 skill（幂等：40901 存在即算成功）。 */
 async function seedSkills() {
-  for (const [id, runtimes, name] of [
-    [SKILLS.applicable, ['opencode'], 'UI验收-仅opencode'],
-    [SKILLS.inapplicable, ['dsh'], 'UI验收-仅dsh'],
-  ]) {
+  for (const [runtime, def] of Object.entries(SKILL_DEFS)) {
     const r = await api('POST', '/skills', {
-      id,
-      name,
+      id: def.id,
+      name: def.name,
       description: '界面验收用（脚本自建自清）',
       body: '这是一条界面验收用的技能说明，不含任何危险指令。',
-      runtimes,
+      runtimes: [runtime],
     })
     if (r.json.code !== 0 && !String(r.json.msg ?? '').includes('已存在')) {
-      throw new Error(`建 skill ${id} 失败: ${JSON.stringify(r.json)}`)
+      throw new Error(`建 skill ${def.id} 失败: ${JSON.stringify(r.json)}`)
     }
   }
 }
@@ -459,23 +623,35 @@ async function setDefaultAgent(id) {
 async function scenarioCapability(browser) {
   section('M3-4 能力勾选面板（勾选 skill 子集 → 建会话 → 回显选定与指纹）')
   const page = await openPage(browser, `${WEB_URL}/agents`)
-  await page.waitFor(textExpr('设为当前'), { label: 'Agents 页渲染' })
+  await page.waitFor(textExpr('当前'), { label: 'Agents 页渲染（「当前」行标）' })
   await page.shot('01-agents')
-  // 切默认 agent 到 opencode（清单里有"仅 opencode 适用"与"仅 dsh 适用"两条，才能验不可达解释）
-  const setBtn = `[...document.querySelectorAll('button')].filter(b => (b.innerText||'').includes('设为当前'))`
-  const n = await page.evaluate(`return ${setBtn}.length`)
-  check('Agents 页有且仅有一个非默认 agent 的「设为当前」', n === 1, `按钮数=${n}`)
-  await page.click(`${setBtn}[0]`)
-  await page.waitFor(`return ${JSON.stringify(true)}`, { label: '等待切换落定', timeout: 3000 }).catch(() => {})
-  await sleep(1200)
-  const def = await api('GET', '/agents')
-  const opencodeDefault = (def.json.data ?? []).find((a) => a.id === 'opencode')?.is_default === true
-  check('默认 agent 已切到 opencode（界面操作生效）', opencodeDefault, `agents=${(def.json.data ?? []).map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
+
+  // 「界面切当前 agent」是**前提**（能力清单按 agent 视角取），不是被测对象本身：
+  // 在册 agent 只有一条时（本构建的常态——底座构建期固定）这一段没有对象，**跳过而非判红**。
+  const others = AGENTS.filter((a) => !a.is_default)
+  if (others.length) {
+    const setBtn = `[...document.querySelectorAll('button')].filter(b => (b.innerText||'').includes('设为当前'))`
+    const n = await page.evaluate(`return ${setBtn}.length`)
+    check('Agents 页有且仅有一个非默认 agent 的「设为当前」', n === 1, `按钮数=${n}（非默认 agent=${others.map((a) => a.id).join(',')}）`)
+    await page.click(`${setBtn}[0]`)
+    await page.waitFor(`return ${JSON.stringify(true)}`, { label: '等待切换落定', timeout: 3000 }).catch(() => {})
+    await sleep(1200)
+    const def = await api('GET', '/agents')
+    AGENTS = def.json.data ?? AGENTS
+    const target = others[0].id
+    check(`默认 agent 已切到 ${target}（界面操作生效）`,
+      AGENTS.find((a) => a.id === target)?.is_default === true,
+      `agents=${AGENTS.map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
+    orientSkills(AGENTS)
+  } else {
+    console.log(`  ℹ️  /agents 只有一条在册 agent（${AGENTS[0].id}）：「界面切当前 agent」没有对象，跳过；` +
+      `能力勾选面板照常验——适用/不适用两条 skill 的角色按它镜像（清单里"仅另一个 runtime 适用"那条正好充当不可达项）`)
+  }
 
   // 回新建页，打开「可用的能力」
   await page.goto(`${WEB_URL}/`, { waitText: '可用的能力' })
-  await page.waitFor(textExpr('opencode'), { label: '新建卡显示当前 Agent=opencode' })
-  await page.shot('02-start-with-opencode')
+  await page.waitFor(textExpr(RUNTIME), { label: `新建卡显示当前 Agent=${RUNTIME}` })
+  await page.shot(`02-start-with-${RUNTIME}`)
   const pill = byText('button', '能力 ·')
   await page.click(pill)
   await page.waitFor(`const el = document.querySelector('.fg-cap-pop'); return !!el && el.getClientRects().length > 0`, { label: '能力弹层打开' })
@@ -490,8 +666,8 @@ async function scenarioCapability(browser) {
   await page.shot('04-capability-custom')
   const custom = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
   check('切自定义后给出"只投勾选的 N 个"与全选/清空', /只投勾选的/.test(custom) && /全选/.test(custom), custom.split('\n').filter((l) => /只投|全选/.test(l)).join(' | '))
-  check('自定义列表列出适用 skill', custom.includes('UI验收-仅opencode'), custom.split('\n').filter((l) => l.includes('UI验收')).join(' | ').slice(0, 200))
-  check('不适用 skill 也列出来（不隐藏）', /UI验收-仅dsh/.test(custom), custom.split('\n').filter((l) => l.includes('dsh')).join(' | ').slice(0, 240))
+  check('自定义列表列出适用 skill', custom.includes(SKILL_DEFS[RUNTIME].name), custom.split('\n').filter((l) => l.includes('UI验收')).join(' | ').slice(0, 200))
+  check('不适用 skill 也列出来（不隐藏）', custom.includes(SKILL_DEFS[OTHER_RUNTIME].name), custom.split('\n').filter((l) => l.includes('UI验收')).join(' | ').slice(0, 240))
   check('不适用项标「不可选」且带 fg-off', (await page.count('.fg-cap-opt.fg-off')) >= 1 && custom.includes('不可选'), `fg-off 行数=${await page.count('.fg-cap-opt.fg-off')} 含不可选=${custom.includes('不可选')}`)
   // 原因在 tooltip 里：真的 hover 一次，确认"就地给原因"不是写着好看
   const whyExpr = `[...document.querySelectorAll('.fg-cap-opt.fg-off .fg-cap-opt-why')][0]`
@@ -513,18 +689,19 @@ async function scenarioCapability(browser) {
       console.log('  [debug] 可见 popover =', await page.evaluate(`return !!document.querySelector('.ant-popover:not(.ant-popover-hidden) .fg-cap-pop')`))
       console.log('  [debug] why 的 rect =', JSON.stringify(await page.box(whyExpr)))
     }
-    check('hover 不适用项给出原因（tooltip）', /runtimes|不相交|dsh/.test(tip), tip.slice(0, 200))
+    check('hover 不适用项给出原因（tooltip）', /runtimes|不相交/.test(tip) || tip.includes(OTHER_RUNTIME), tip.slice(0, 200))
   } else {
     check('hover 不适用项给出原因（tooltip）', false, '没有 .fg-cap-opt-why 元素')
   }
 
   // 真正勾一下（三态语义：一个都不勾 = 明确一个都不要；再勾回来 = 只剩它）
-  const ocCheckbox = `[...document.querySelectorAll('.fg-cap-opt')].find(o => (o.innerText||'').includes('UI验收-仅opencode'))`
-  await page.click(`${ocCheckbox}.querySelector('input[type=checkbox]')`)
+  // 勾的是**适用项**（它才会被投给会话；不适用项是 fg-off，点不动）
+  const appCheckbox = `[...document.querySelectorAll('.fg-cap-opt')].find(o => (o.innerText||'').includes(${JSON.stringify(SKILL_DEFS[RUNTIME].name)}))`
+  await page.click(`${appCheckbox}.querySelector('input[type=checkbox]')`)
   await sleep(350)
   const noneSel = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
   check('取消勾选 → 明确表达"一个都不要"', /一个都不要/.test(noneSel), noneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
-  await page.click(`${ocCheckbox}.querySelector('input[type=checkbox]')`)
+  await page.click(`${appCheckbox}.querySelector('input[type=checkbox]')`)
   await sleep(350)
   const oneSel = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
   check('重新勾选 → 只投勾选的 1 个', /只投勾选的 1 个/.test(oneSel), oneSel.split('\n').filter((l) => /只投/.test(l)).join(' | '))
@@ -560,7 +737,7 @@ async function scenarioCapability(browser) {
   check('会话详情回显能力选定明细', JSON.stringify(d.capabilities ?? null).includes(SKILLS.applicable), JSON.stringify(d.capabilities ?? null))
   const fp = d.capabilities?.fingerprint ?? d.capability_fingerprint
   check('会话详情回显钉住的能力指纹', typeof fp === 'string' && fp.length >= 8, `fingerprint=${String(fp).slice(0, 24)}`)
-  check('会话落在所选 agent 上', d.agent_id === 'opencode', `agent_id=${d.agent_id} runtime=${d.runtime}`)
+  check('会话落在所选 agent 上', d.agent_id === RUNTIME, `agent_id=${d.agent_id} runtime=${d.runtime}（期望 ${RUNTIME}）`)
 
   // 界面侧：会话详情「能力」行
   const openDetail = await page.click(`[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||b.getAttribute('title')||'') === '会话详情')`, { optional: true })
@@ -616,11 +793,15 @@ async function scenarioAutomation(browser) {
   await sleep(300)
   await page.shot('11b-automation-schedule')
 
-  // Agent：默认已选一个（dsh），显式切到 opencode（与其它场景同一个底座，便于交叉对照）
-  await page.pickSelect(`document.getElementById('agent_id').closest('.ant-select')`, 'opencode')
+  // Agent：按在册事实选（不写死某个底座——本构建的 agent 是构建期定好的那一个）
   const selText = (id) => page.evaluate(`return (document.getElementById(${JSON.stringify(id)}).closest('.ant-select').querySelector('.ant-select-content')||{}).innerText || ''`)
+  // 默认值可能已经是它：先看当前值，不是才切（切换本身会走一次下拉，值与值相同也白走）
+  const beforePick = await selText('agent_id')
+  if (!beforePick.includes(RUNTIME)) {
+    await page.pickSelect(`document.getElementById('agent_id').closest('.ant-select')`, RUNTIME)
+  }
   const agentText = await selText('agent_id')
-  check('Agent 已切到 opencode', agentText.includes('opencode'), `选中项=${agentText}`)
+  check(`Agent 已选到在册的那个（${RUNTIME}）`, agentText.includes(RUNTIME), `选中项=${agentText}`)
 
   // 工作空间：点药丸 → 取第一条候选目录（没有就手打绝对路径）→ 用药丸文案自证已选上
   const pillName = `(document.querySelector('.fg-ws-pill-name')||{}).innerText || ''`
@@ -629,7 +810,11 @@ async function scenarioAutomation(browser) {
   await sleep(600)
   const manualInput = `input[placeholder^="输入绝对路径"]`
   const wsItems = await page.count('.fg-ws-item')
-  check('工作空间选择器打开（有候选区与手输入口）', wsItems > 0 && (await page.box(q(manualInput))) !== null, `候选条目=${wsItems}`)
+  // 菜单里是**候选区**（当前 + 已登记的工作空间 + 添加工作空间…）。
+  // 手输绝对路径**不在这个菜单里**——v14.3 / #41 起它在目录浏览视图（`DirectoryBrowser` 的面包屑编辑态）。
+  // 老断言写的是"候选区与手输入口同屏"，于是它必然红；2026-10-11 之前 `auto` 在更早的 agent 那步就
+  // 超时中断了，**这条断言根本没机会跑**，所以这处过时直到脚本能跑完才暴露出来。
+  check('工作空间选择器打开（有候选区）', wsItems > 0, `候选条目=${wsItems}`)
   // 点一条**带 title 的候选**（资料库/最近目录；apply 直接落值并收起弹层）。
   // 不带 title 的那条是「选择目录…」，它进浏览视图、不落值。
   // 手输路径走服务端校验，必须落在 MATE_WORKSPACE_ROOTS 内——`/tmp` 会被正当拒掉
@@ -741,6 +926,58 @@ async function scenarioAutomation(browser) {
   check('运行史 API 有记录', recs.length >= 1, JSON.stringify(recs[0] ?? null).slice(0, 240))
   check('运行史记录里有会话可回溯', recs.some((r) => r.conversation_id), (recs.map((r) => r.conversation_id).filter(Boolean)[0] ?? '无'))
 
+  // 工作空间「手输绝对路径」那条路（v14.3 / #41 的形状）：它是**另一个页面**上验的——这一段会开关一个
+  // 模态对话框，而 Esc/取消在嵌套模态下会连带关掉外层那个（实测：在自动化弹窗里试，表单当场被关掉，
+  // 后面 6 条断言连环红）。所以另开一个 tab，验完就丢，碰不到上面这条主流程。
+  //
+  // **先读服务端声明再决定点不点**：本机核（绑回环 / 非 SSH / 有显示会话）会声明 `native-dialog` 可用，
+  // 于是「添加工作空间…」抬的是**系统面板**（`POST /workspaces/pick-directory` → 核心 spawn osascript），
+  // 不是应用内浏览——自动验收只能在 browse 那一态上跑，这种机型上**显式跳过**（同 `wsdir` 场景的
+  // 前置：给核的进程环境一个 `SSH_CONNECTION` 才能降到 browse）。硬点会弹出真人面板。
+  const capsRes = await api('GET', '/capabilities')
+  const nativeDialog = (capsRes.json.data?.capabilities ?? []).find((c) => c.id === 'native-dialog')?.available === true
+  if (nativeDialog) {
+    skip('工作空间手输路径（应用内浏览那一路）',
+      '本机核声明 native-dialog 可用 →「添加工作空间…」抬的是系统面板、要真人点；' +
+      '自动验收只能在 browse 态上跑：给核的进程环境一个 SSH_CONNECTION（见 `pnpm ui:accept wsdir`）')
+  } else {
+    const p2 = await openPage(browser, `${WEB_URL}/`)
+    await p2.waitFor(textExpr('可用的能力'), { label: '新建页就绪（工作空间药丸在那儿）' })
+    await p2.click(q('.fg-ws-pill'))
+    await sleep(700)
+    const addEntry = `[...document.querySelectorAll('.fg-ws-item')].find(o => (o.innerText||'').includes('添加工作空间'))`
+    if (await p2.box(addEntry)) {
+      await p2.click(addEntry)
+      await sleep(900)
+      await p2.shot('12a-workspace-browse')
+      const dlg = await p2.count('.fg-ws-dlg-body')
+      check('「添加工作空间…」进目录浏览视图', dlg === 1, `对话框体=${dlg}`)
+      // 手输框**不是**对话框一开就有的：它在面包屑的编辑态里（点铅笔 `.fg-ws-crumbedit` 才出现）。
+      // 老断言正是在菜单里找它、且假设与候选区同屏——两处都过时了，而它此前一直没机会跑到。
+      const crumbEdit = `document.querySelector('.fg-ws-crumbedit')`
+      if (await p2.box(crumbEdit)) await p2.click(crumbEdit)
+      await sleep(400)
+      const hasManual = (await p2.box(q(manualInput))) !== null
+      check('面包屑编辑态给出「输入绝对路径」框', hasManual, `手输入口=${hasManual}`)
+      if (hasManual) {
+        // 路径走服务端校验，必须落在 MATE_WORKSPACE_ROOTS 内（`/tmp` 会被正当拒掉）
+        const roots = await api('GET', `/workspaces/browse?path=${encodeURIComponent(process.env.HOME + '/.ark-mate/workspaces')}`)
+        const dir = roots.json.data?.path
+        if (dir) {
+          await p2.type(q(manualInput), dir)
+          await p2.press('Enter')
+          await sleep(1000)
+          // 编辑态收起 = 已经跳到那一层；路径非法时输入框会留着（并弹 toast）
+          const stillEditing = (await p2.box(q(manualInput))) !== null
+          check('手输绝对路径后跳到那一层（编辑态收起）', !stillEditing, `path=${dir} 编辑态仍在=${stillEditing}`)
+          await p2.shot('12b-workspace-browse-typed')
+        }
+      }
+    } else {
+      check('菜单里有「添加工作空间…」入口', false, '没找到（memory 持久层时该项整项不出现——本场景要求 sqlite）')
+    }
+  }
+
   return { page }
 }
 
@@ -750,7 +987,18 @@ async function scenarioAutomation(browser) {
 //       面板输入框打 `/` 给候选；事件侧证据 = history 里有 session.commands。
 // ————————————————————————————————————————————————————————————————
 async function scenarioCommands(browser) {
-  section('M5′ 命令发现面（opencode 通告 → 输入框 `/` 候选 + 事件侧证据）')
+  section('M5′ 命令发现面（底座通告 → 输入框 `/` 候选 + 事件侧证据）')
+  // **前置（P2-1b）**：这条场景需要"会通告命令的底座"= 一个 `opencode` agent（它建的会话才可能收到
+  // `session.commands`）。底座现在由构建期固定，本构建在册的若不是它，这条**当场说清并跳过**：
+  // 2026-10-11 实测它此前一直是"靠残留数据变绿"——`ensureOpencodeConversation()` 找到的是**本脚本
+  // 早先几轮自己建的** opencode 会话，于是"验过了"其实什么也没验（而在干净实例上它会红在
+  // `POST /conversations {agent_id:'opencode'}` 上，因为那个 agent 根本没注册）。
+  if (!AGENTS.some((a) => a.id === 'opencode')) {
+    skip('cmd: 命令发现面',
+      `本构建在册的底座是 ${RUNTIME}，没有 opencode agent；命令通告是 ACP 的运行时能力（ADR-17），` +
+      `要验它需在 opencode 构建上跑：\`make dev RUNTIME=opencode\` 后再跑本场景`)
+    return {}
+  }
   // 挑一个**真的通告过命令**的 opencode 会话。
   // 注意：历史会话（M5′ 之前建的）永远不会有 `session.commands`——那时平台还没接收这条通告，
   // 所以"列表里第一条 opencode 会话"是错的判据（第一版就这么挑，选中 09-16 的老会话后必然红）。
@@ -1386,13 +1634,25 @@ async function scenarioSettingsModel(browser) {
 // ————————————————————————————————————————————————————————————————
 async function main() {
   const only = process.argv.slice(2).filter((a) => !a.startsWith('-'))
-  const health = await api('GET', '/health')
+  // 连不上要说清"下一步做什么"：本脚本**刻意不自起服务**（它验的是"人正在看的那个实例"），
+  // 所以"连不上"的第一原因是 `make dev` 没在跑，而不是页面坏了——裸 `TypeError: fetch failed`
+  // 会让人去查前端。
+  const health = await api('GET', '/health').catch((err) => {
+    check('后端可达', false,
+      `${MATE_URL} 连不上（${err?.cause?.code ?? err?.message ?? err}）——先在另一个终端起 \`make dev\``)
+    return null
+  })
+  if (!health) {
+    throw new Error(`靶不可达：${MATE_URL}。先起 \`make dev\`（本目标验的是那个正在跑的实例，脚本不自起服务）。`)
+  }
   check('后端 health 可达', health.json.code === 0, `${MATE_URL} → ${JSON.stringify(health.json)}`)
-  const webRoot = await fetch(WEB_URL).then((r) => r.status)
-  check('前端入口可达（vite）', webRoot === 200, `${WEB_URL} → HTTP ${webRoot}`)
+  // 靶的正确性先于一切：靶不对，后面每条断言验的都不是交付件（P2 的启动断言）。
+  await assertServingBuiltArtifact()
+  // 场景按"在册事实"驱动（P2）：底座由构建期固定，写死某个 agent 会把脚本陈旧演成页面超时。
+  await resolveRuntimeFacts()
 
   await seedSkills()
-  check('验收用 skill 已就绪（M2 写面）', true, Object.values(SKILLS).join(', '))
+  check('验收用 skill 已就绪（M2 写面）', true, Object.values(SKILL_DEFS).map((d) => d.name).join(', '))
 
   const { child, port } = await launchChrome()
   const browser = await connectCDP(
@@ -1429,20 +1689,27 @@ async function main() {
     }
   }
 
-  // 收尾：默认 agent 切回 dsh（环境还原），并清理验收用 skill
-  await setDefaultAgent('dsh')
+  // 收尾：当前 agent 切回**开跑时那个**（环境还原），并清理验收用 skill
+  if (INITIAL_DEFAULT_AGENT) await setDefaultAgent(INITIAL_DEFAULT_AGENT)
   const after = await api('GET', '/agents')
-  check('默认 agent 已还原为 dsh', (after.json.data ?? []).find((a) => a.id === 'dsh')?.is_default === true, '')
+  check(`默认 agent 已还原为 ${INITIAL_DEFAULT_AGENT}`,
+    (after.json.data ?? []).find((a) => a.id === INITIAL_DEFAULT_AGENT)?.is_default === true,
+    `agents=${(after.json.data ?? []).map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
   await cleanupSkills()
   await cleanupCreated()
 
   if (!process.env.KEEP_CHROME) child.kill('SIGKILL')
   const failed = results.filter((r) => !r.ok)
-  console.log(`\n——— 汇总：${results.length - failed.length}/${results.length} 通过 ———`)
+  console.log(`\n——— 汇总：${results.length - failed.length}/${results.length} 通过` +
+    (skips.length ? `，${skips.length} 条显式跳过` : '') + ` ———`)
   if (failed.length) {
     for (const f of failed) console.log(`  ❌ ${f.name} — ${f.detail}`)
-    process.exitCode = 1
   }
+  if (skips.length) {
+    // 跳过必须**显式可见**：既不假装绿，也不假装红（本仓隔离纪律对"不可判定"的同一条要求）。
+    for (const s of skips) console.log(`  ⏭️  ${s.name} — 跳过：${s.why}`)
+  }
+  if (failed.length) process.exitCode = 1
 }
 
 main().catch((e) => {
