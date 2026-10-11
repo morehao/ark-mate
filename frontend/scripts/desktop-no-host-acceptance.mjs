@@ -182,12 +182,12 @@ const apiPost = (cdp, path, body) =>
     return await r.json()
   `)
 
-/** 会话终态闭集取自前端契约 `ConversationStatus`（`in_progress` = 有轮次在跑，不是终态）。 */
+/** 会话终态闭集取自前端契约 `SessionStatus`（`in_progress` = 有轮次在跑，不是终态）。 */
 const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'interrupted'])
 
-async function conversationStatus(cdp, id) {
+async function sessionStatus(cdp, id) {
   try {
-    const j = await apiGet(cdp, `/v1/mate/conversations/${id}`)
+    const j = await apiGet(cdp, `/v1/mate/sessions/${id}`)
     return j?.data?.status ?? 'unknown'
   } catch {
     return 'unknown'
@@ -199,7 +199,7 @@ async function waitTerminal(cdp, id, timeoutMs = 120000) {
   const t0 = Date.now()
   let last = 'unknown'
   while (Date.now() - t0 < timeoutMs) {
-    last = await conversationStatus(cdp, id)
+    last = await sessionStatus(cdp, id)
     if (TERMINAL.has(last)) return last
     await sleep(1000)
   }
@@ -208,7 +208,7 @@ async function waitTerminal(cdp, id, timeoutMs = 120000) {
 
 /** 会话历史里假 LLM 的回复出现了几次（两轮都落地 = 2）。 */
 async function replyEvidence(cdp, id) {
-  const j = await apiGet(cdp, `/v1/mate/conversations/${id}/history?limit=1000`)
+  const j = await apiGet(cdp, `/v1/mate/sessions/${id}/history?limit=1000`)
   const events = Array.isArray(j?.data?.events) ? j.data.events : []
   // wire 上事件负载字段叫 `payload`（`eventbus.Event`，与 transcript 落盘一致）；`data` 是旧名，
   // 两种都认一下以免契约改名时静默判成"没回复"。
@@ -305,7 +305,7 @@ async function main() {
     llm.captured.forEach((c, i) =>
       writeFileSync(join(PROBE, `llm-req-${String(i + 1).padStart(2, '0')}.json`), c.raw || ''),
     )
-  let conversationId = null
+  let sessionId = null
 
   // ————————————————————— 第一段：建会话 + 一轮 —————————————————————
   section('第一段：最小 PATH + 诱饵下，起壳 → 建会话 → 跑完一轮')
@@ -337,19 +337,19 @@ async function main() {
       envReadable ? `PATH=${coreEnv.PATH}` : 'ps -E 读不到（按"读不到"放过）',
     )
 
-    const conv = await apiPost(cdp, '/v1/mate/conversations', { agent_id: 'dsh', prompt: FIRST_PROMPT })
-    conversationId = conv?.data?.id ?? null
-    check('经壳反代建会话成功（agent=dsh）', conv?.code === 0 && !!conversationId, JSON.stringify(conv).slice(0, 200))
+    const conv = await apiPost(cdp, '/v1/mate/sessions', { agent_id: 'dsh', prompt: FIRST_PROMPT })
+    sessionId = conv?.data?.id ?? null
+    check('经壳反代建会话成功（agent=dsh）', conv?.code === 0 && !!sessionId, JSON.stringify(conv).slice(0, 200))
 
     // 第一轮的终态：不写死 sleep，轮询 status。
-    const firstStatus = conversationId ? await waitTerminal(cdp, conversationId) : 'no-conversation'
+    const firstStatus = sessionId ? await waitTerminal(cdp, sessionId) : 'no-session'
     check('第一轮终态 completed', firstStatus === 'completed', `status=${firstStatus}`)
     check(
       '假 LLM 收到了 dsh 的真实模型请求（零额度、零凭证）',
       llm.captured.some((c) => c.path.includes('/messages')),
       `收到 ${llm.captured.length} 个请求：${llm.captured.map((c) => c.path).join(', ') || '（一个都没有）'}`,
     )
-    const firstEvidence = conversationId ? await replyEvidence(cdp, conversationId) : { count: 0, events: 0, text: '' }
+    const firstEvidence = sessionId ? await replyEvidence(cdp, sessionId) : { count: 0, events: 0, text: '' }
     check(
       `会话历史里出现假 LLM 的回复（${FAKE_LLM_REPLY}）`,
       firstEvidence.count >= 1,
@@ -383,27 +383,27 @@ async function main() {
     ;({ shell: shell2, cdp: cdp2 } = await launchAndConnect(launchEnv))
     check('重开后壳与核心又起来了', shell2.logText().includes('core ready'), `shell=${shell2.shellPid} core=${shell2.corePid}`)
 
-    const again = conversationId ? await apiGet(cdp2, `/v1/mate/conversations/${conversationId}`) : { code: -1 }
+    const again = sessionId ? await apiGet(cdp2, `/v1/mate/sessions/${sessionId}`) : { code: -1 }
     check(
       '重开后会话仍在（同一个 id 可读）',
-      again?.code === 0 && again?.data?.id === conversationId,
-      `id=${conversationId} status=${again?.data?.status ?? '?'}`,
+      again?.code === 0 && again?.data?.id === sessionId,
+      `id=${sessionId} status=${again?.data?.status ?? '?'}`,
     )
 
     const before = llm.captured.length
-    const turn2 = conversationId
-      ? await apiPost(cdp2, `/v1/mate/conversations/${conversationId}/prompt`, { prompt: SECOND_PROMPT })
+    const turn2 = sessionId
+      ? await apiPost(cdp2, `/v1/mate/sessions/${sessionId}/prompt`, { prompt: SECOND_PROMPT })
       : { code: -1 }
-    check('续聊投递成功（POST /conversations/:id/prompt）', turn2?.code === 0, JSON.stringify(turn2).slice(0, 200))
+    check('续聊投递成功（POST /sessions/:id/prompt）', turn2?.code === 0, JSON.stringify(turn2).slice(0, 200))
 
-    const secondStatus = conversationId ? await waitTerminal(cdp2, conversationId) : 'no-conversation'
+    const secondStatus = sessionId ? await waitTerminal(cdp2, sessionId) : 'no-session'
     check('第二轮终态 completed', secondStatus === 'completed', `status=${secondStatus}`)
     check(
       '第二轮同样到了模型（新请求数 > 0）',
       llm.captured.length > before,
       `本轮新增 ${llm.captured.length - before} 个请求`,
     )
-    const finalEvidence = conversationId ? await replyEvidence(cdp2, conversationId) : { count: 0, events: 0, text: '' }
+    const finalEvidence = sessionId ? await replyEvidence(cdp2, sessionId) : { count: 0, events: 0, text: '' }
     check(
       '两轮回复都落在同一个会话的历史里（续聊真落地）',
       finalEvidence.count >= 2,

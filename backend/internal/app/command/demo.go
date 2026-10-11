@@ -82,7 +82,7 @@ func demo(args []string) {
 	}
 	// 让已入队的尾部事件被打印协程消费后退出。
 	time.Sleep(300 * time.Millisecond)
-	fmt.Printf("✔ demo 完成 conversation=%s agent=%s stop_reason=%q\n", res.ConversationID, res.AgentID, res.StopReason)
+	fmt.Printf("✔ demo 完成 session=%s agent=%s stop_reason=%q\n", res.SessionID, res.AgentID, res.StopReason)
 }
 
 // printEvent 把 bus 事件按类型打印为人类可读行（冒烟输出）。
@@ -92,7 +92,7 @@ func printEvent(evt eventbus.Event) {
 	sid, _ := p["session_id"].(string)
 	switch evt.Type {
 	case manager.BusSessionCreated:
-		fmt.Printf("🆕 conversation.created  id=%s\n", sid)
+		fmt.Printf("🆕 session.created  id=%s\n", sid)
 	case manager.BusMessage:
 		if text != "" {
 			fmt.Print(text)

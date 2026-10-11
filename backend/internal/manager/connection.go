@@ -95,7 +95,7 @@ func (o *Orchestrator) generationKeysHoldingAgent(agentID string) []string {
 	var out []string
 	for _, rc := range o.conns {
 		mine, theirs := false, false
-		for _, as := range o.conversations {
+		for _, as := range o.sessions {
 			if as.client != rc.client {
 				continue
 			}
@@ -130,7 +130,7 @@ func (o *Orchestrator) generationKeysWarmOwnedBy(agentID string) []string {
 			continue
 		}
 		referenced := false
-		for _, as := range o.conversations {
+		for _, as := range o.sessions {
 			if as.client == rc.client {
 				referenced = true
 				break
@@ -247,14 +247,14 @@ func (o *Orchestrator) reclaimConns(pick func(*runtimeConn) bool) int {
 			// 而那一轮的角色就是"在途 turn"——`RegisterAndWait` 由该轮的 RPC 派发调用。）
 			continue
 		}
-		hasConversation := false
-		for _, as := range o.conversations {
+		hasSession := false
+		for _, as := range o.sessions {
 			if as.client == rc.client {
-				hasConversation = true
+				hasSession = true
 				break
 			}
 		}
-		if hasConversation {
+		if hasSession {
 			continue // 仍有会话引用（含已完成态），不回收
 		}
 		victims = append(victims, rc)
@@ -359,7 +359,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 turn」校验（可判定时）；不可判定时不阻断
 	// ——该 id 由 agent 生成、不可猜，且 complete 只是收敛通知（重复/迟到都不该有副作用）。
 	completeElic := func(_ context.Context, elicitationID string) {
-		o.elic.CompleteByURLID(o.busyConversationForClient(cli), elicitationID)
+		o.elic.CompleteByURLID(o.busySessionForClient(cli), elicitationID)
 	}
 	// 拨号用「脱离调用方 ctx」的上下文：子进程以 exec.CommandContext 启动，若绑定请求 ctx，
 	// 请求返回即被杀（如 P2 StartAgent 暖启动后立刻断连）。WithoutCancel 后 Dial 自带的
@@ -404,16 +404,16 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 
 // markBusy / unmarkBusy 委托 inFlightTracker（§17 E1 显式化簿记；语义不变）。
 // client 为 nil（理论上不应出现）或未登记时均安全 no-op。
-func (o *Orchestrator) markBusy(client *acl.Client, conversationID string) {
-	o.inflight.Mark(client, conversationID)
+func (o *Orchestrator) markBusy(client *acl.Client, sessionID string) {
+	o.inflight.Mark(client, sessionID)
 }
 
-func (o *Orchestrator) unmarkBusy(client *acl.Client, conversationID string) {
-	o.inflight.Unmark(client, conversationID)
+func (o *Orchestrator) unmarkBusy(client *acl.Client, sessionID string) {
+	o.inflight.Unmark(client, sessionID)
 }
 
-// busyConversationForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
-func (o *Orchestrator) busyConversationForClient(client *acl.Client) string {
+// busySessionForClient 返回该连接上「唯一在途」的会话 id；无在途或多会话并发在途返回空串。
+func (o *Orchestrator) busySessionForClient(client *acl.Client) string {
 	return o.inflight.SoleOwner(client)
 }
 
@@ -443,12 +443,12 @@ func (o *Orchestrator) resolveProvider(providerID string) string {
 	return o.byProvider[providerID]
 }
 
-// unregisterConversationProvider 移除某会话的原生→平台映射（连接失活/会话清理时调用）。
-func (o *Orchestrator) unregisterConversationProvider(conversationID string) {
+// unregisterSessionProvider 移除某会话的原生→平台映射（连接失活/会话清理时调用）。
+func (o *Orchestrator) unregisterSessionProvider(sessionID string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for k, v := range o.byProvider {
-		if v == conversationID {
+		if v == sessionID {
 			delete(o.byProvider, k)
 		}
 	}
@@ -458,7 +458,7 @@ func (o *Orchestrator) unregisterConversationProvider(conversationID string) {
 //
 // 语义（P2 删除面）：归属不可变——平台不改写会话的 agent_id，也不静默改绑到别的 agent；
 // 但删除必须**立刻**生效：把内存里仍活着的会话摘出登记，使后续 prompt 走
-// ensureConversation → agent_not_found（并带上「同 id 重建 / 导出历史」的出路），而不是让它在
+// ensureSession → agent_not_found（并带上「同 id 重建 / 导出历史」的出路），而不是让它在
 // 半死连接上一直跑到进程重启。
 //
 // 有在途 turn 时整体拒绝（agent_busy，先 cancel/等收尾）：不删到一半的轮次，此时不动任何登记。
@@ -469,8 +469,8 @@ func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
 		return 0, nil
 	}
 	o.mu.Lock()
-	victims := make([]*ActiveConversation, 0, 4)
-	for _, as := range o.conversations {
+	victims := make([]*ActiveSession, 0, 4)
+	for _, as := range o.sessions {
 		if as.AgentID == agentID {
 			victims = append(victims, as)
 		}
@@ -492,15 +492,15 @@ func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
 	o.mu.Lock()
 	detached := 0
 	for _, as := range victims {
-		if o.conversations[as.ID] == as {
-			delete(o.conversations, as.ID)
+		if o.sessions[as.ID] == as {
+			delete(o.sessions, as.ID)
 			detached++
 		}
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
 		// 原生 → 平台映射一并清除：迟到事件不再路由回已摘除的会话。
-		o.unregisterConversationProvider(as.ID)
+		o.unregisterSessionProvider(as.ID)
 	}
 	glog.Infow(context.Background(), "agent 已删除：活跃会话已摘除（后续 prompt 报 agent_not_found）",
 		"agent", agentID, "detached", detached)
@@ -516,7 +516,7 @@ func (o *Orchestrator) watchConn(rc *runtimeConn) {
 func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	o.unregisterProc(rc)
 	// 拆除原因由拆除方在关闭连接前置位（Close/stopAgent/reapIdleOnce = 主动；watchConn 观察到
-	// 对端结束 = 意外）。它决定会话状态怎么收尾——见 disconnectConversation。
+	// 对端结束 = 意外）。它决定会话状态怎么收尾——见 disconnectSession。
 	intentional := rc.intentional.Load()
 	o.mu.Lock()
 	ownerBefore := o.conns[rc.key] == rc
@@ -524,18 +524,18 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		delete(o.conns, rc.key)
 	}
 	o.inflight.Clear(rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已清键为 no-op）
-	var victims []*ActiveConversation
-	for _, as := range o.conversations {
+	var victims []*ActiveSession
+	for _, as := range o.sessions {
 		if as.client == rc.client {
 			victims = append(victims, as)
 		}
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.unregisterConversationProvider(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
+		o.unregisterSessionProvider(as.ID) // 连接断开：原生→平台映射一并清除（迟到事件丢弃）
 	}
 	for _, as := range victims {
-		o.disconnectConversation(as, intentional)
+		o.disconnectSession(as, intentional)
 	}
 	// 状态回落仅当仍是该 runtime 的当前连接（旧连接收尾不得覆盖新连接的 running——
 	// 空闲回收后立刻被 StartAgent/会话按需重拨的场景）。
@@ -545,11 +545,11 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	if len(victims) > 0 {
 		glog.Infow(context.Background(), "连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
 			"runtime", rc.spec.ID, "agent", rc.agentID,
-			"cause", connCauseLabel(intentional), "conversations", len(victims))
+			"cause", connCauseLabel(intentional), "sessions", len(victims))
 	}
 }
 
-// disconnectConversation 把某断连连接上的会话句柄作废并摘出活跃集合。
+// disconnectSession 把某断连连接上的会话句柄作废并摘出活跃集合。
 //
 // 本函数是「连接生命周期」写会话状态的**唯一入口**，因此必须区分拆除原因——把停机当成故障，
 // 会让上一轮已 completed 的会话在每次重启后被改写成 failed（并往历史里追加假的 turn.error）：
@@ -559,9 +559,9 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 //   - 空闲会话：**不改写状态**。上一轮的终态是轮次结果的事实，连接掉了并不改变它；意外断开
 //     只落 agent 级诊断（last_error + stderr 尾巴）与日志，不伪造会话失败。
 //
-// 会话记录本身（svc/conversations 与 store）不动：执行可丢弃、会话平台拥有（ADR-4），
-// 下次 prompt 经 ensureConversation 走 native resume / handoff memo 重建句柄。
-func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentional bool) {
+// 会话记录本身（svc/sessions 与 store）不动：执行可丢弃、会话平台拥有（ADR-4），
+// 下次 prompt 经 ensureSession 走 native resume / handoff memo 重建句柄。
+func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 	as.mu.Lock()
 	if as.dead {
 		as.mu.Unlock()
@@ -573,11 +573,11 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentiona
 		t.intentional = true // 主动拆除：收尾归 interrupted，不按失败/用户取消处理
 	}
 	as.mu.Unlock()
-	o.evictConversation(as)
+	o.evictSession(as)
 
 	// 连接没了，挂起的权限/提问永远等不到决策：随拆除一并收敛，不留「待确认」幽灵卡。
-	o.perm.CancelConversation(as.ID)
-	o.elic.CancelConversation(as.ID)
+	o.perm.CancelSession(as.ID)
+	o.elic.CancelSession(as.ID)
 
 	if t != nil {
 		t.cancel()
@@ -593,16 +593,16 @@ func (o *Orchestrator) disconnectConversation(as *ActiveConversation, intentiona
 		ae.StderrTail = tail
 		o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
 		glog.Warnw(context.Background(), "连接意外断开：空闲会话保持原状态（会话可续聊）",
-			"conversation", as.ID, "agent", as.AgentID, "runtime", as.Runtime)
+			"session", as.ID, "agent", as.AgentID, "runtime", as.Runtime)
 	}
 }
 
-// evictConversation 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
+// evictSession 把句柄从活跃集合摘除（仅当仍是当前句柄；已被新句柄顶替时不动）。
 // 只为让下一次 prompt 能重建：会话记录（平台侧）不受影响。
-func (o *Orchestrator) evictConversation(as *ActiveConversation) {
+func (o *Orchestrator) evictSession(as *ActiveSession) {
 	o.mu.Lock()
-	if o.conversations[as.ID] == as {
-		delete(o.conversations, as.ID)
+	if o.sessions[as.ID] == as {
+		delete(o.sessions, as.ID)
 	}
 	o.mu.Unlock()
 }
@@ -615,24 +615,24 @@ func connCauseLabel(intentional bool) string {
 	return "unexpected" // 意外：对端或子进程断开
 }
 
-func (o *Orchestrator) disconnectConversationAll(rc *runtimeConn) {
+func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {
 	intentional := rc.intentional.Load()
 	o.mu.Lock()
-	var victims []*ActiveConversation
-	for _, as := range o.conversations {
+	var victims []*ActiveSession
+	for _, as := range o.sessions {
 		if as.client == rc.client {
 			victims = append(victims, as)
 		}
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.disconnectConversation(as, intentional)
+		o.disconnectSession(as, intentional)
 	}
 	if len(victims) > 0 {
 		// 可观测性：停机静默摘句柄最容易让人误判「重启把会话弄丢了」，日志里留一条事实——
 		// 作废的只是 runtime 执行句柄，会话与状态都在（重启后按需续聊）。
 		glog.Infow(context.Background(), "停机：会话句柄作废（会话与状态保留，重启后按需续聊）",
-			"runtime", rc.spec.ID, "cause", connCauseLabel(intentional), "conversations", len(victims))
+			"runtime", rc.spec.ID, "cause", connCauseLabel(intentional), "sessions", len(victims))
 	}
 }
 
@@ -713,14 +713,14 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 //
 // 返回（作废数, 顺延数）。顺延的判据与代际迁移纪律③**逐条相同**（有在途轮次 / 有未应答的权限或
 // 提问 → 不动）：同一条会话在两个机制下必须给出同样的裁决，否则"这一轮到底换没换面"会变成
-// 两处各说一套。探针读不到（句柄 `dead`）时不算顺延也不算作废（`disconnectConversation` 自己幂等）。
+// 两处各说一套。探针读不到（句柄 `dead`）时不算顺延也不算作废（`disconnectSession` 自己幂等）。
 func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicted, deferred int) {
 	if agentID == "" {
 		return 0, 0
 	}
 	o.mu.Lock()
-	victims := make([]*ActiveConversation, 0, 4)
-	for _, as := range o.conversations {
+	victims := make([]*ActiveSession, 0, 4)
+	for _, as := range o.sessions {
 		if as.AgentID == agentID {
 			victims = append(victims, as)
 		}
@@ -736,7 +736,7 @@ func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicte
 			continue
 		}
 		// 主动拆除：句柄作废、挂起的权限/提问一并收敛，会话记录与状态原样保留。
-		o.disconnectConversation(as, true)
+		o.disconnectSession(as, true)
 		evicted++
 	}
 	if evicted > 0 || deferred > 0 {
@@ -760,8 +760,8 @@ func (o *Orchestrator) evictAgentHandles(agentID string, closing []*runtimeConn)
 		}
 	}
 	o.mu.Lock()
-	var victims []*ActiveConversation
-	for _, as := range o.conversations {
+	var victims []*ActiveSession
+	for _, as := range o.sessions {
 		if as.AgentID != agentID || skip[as.client] {
 			continue
 		}
@@ -769,6 +769,6 @@ func (o *Orchestrator) evictAgentHandles(agentID string, closing []*runtimeConn)
 	}
 	o.mu.Unlock()
 	for _, as := range victims {
-		o.disconnectConversation(as, true) // 主动停机：句柄作废，会话与状态保留
+		o.disconnectSession(as, true) // 主动停机：句柄作废，会话与状态保留
 	}
 }

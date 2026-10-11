@@ -185,7 +185,7 @@ function hardenWindow(w: BrowserWindow): void {
  * `mate://…` 深链接（设计 §7.1：单实例转发）。
  *
  * 本轮只做**最小可用**：聚焦窗口，若 URL 带路径就转到同源的 app 路由
- * （`mate://conversations/abc` → `mate-app://app/conversations/abc`）。
+ * （`mate://sessions/abc` → `mate-app://app/sessions/abc`）。
  * 设计文档没有规定深链接的语义映射表（哪条路径开哪个视图），因此不在这里自造规则；
  * 定了之后（与 M5-1 一起）只改这一处。
  */

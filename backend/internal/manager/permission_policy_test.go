@@ -115,7 +115,7 @@ func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 	}
 
 	// allow：直接放行 + 审计事件。
-	svc.registerConversation(&ConversationRec{ID: "c-allow", AgentID: "a-allow"})
+	svc.registerSession(&SessionRec{ID: "c-allow", AgentID: "a-allow"})
 	sub := bus.Subscribe(0)
 	defer bus.Unsubscribe(sub)
 	d := orch.requestPermission(context.Background(), reqFor("c-allow"))
@@ -142,7 +142,7 @@ func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 	}
 
 	// deny：直接拒绝。
-	svc.registerConversation(&ConversationRec{ID: "c-deny", AgentID: "a-deny"})
+	svc.registerSession(&SessionRec{ID: "c-deny", AgentID: "a-deny"})
 	d = orch.requestPermission(context.Background(), reqFor("c-deny"))
 	if !d.Rejected || d.OptionID != "o-reject" {
 		t.Fatalf("策略 deny 应直接拒绝: %+v", d)
@@ -150,7 +150,7 @@ func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 
 	// ask：回落挂起（短超时 → 自动取消，决策为空；且发布了挂起请求事件）。
 	orch.perm.SetTimeout(30 * time.Millisecond)
-	svc.registerConversation(&ConversationRec{ID: "c-ask", AgentID: "a-ask"})
+	svc.registerSession(&SessionRec{ID: "c-ask", AgentID: "a-ask"})
 	subAsk := bus.Subscribe(0)
 	defer bus.Unsubscribe(subAsk)
 	d = orch.requestPermission(context.Background(), reqFor("c-ask"))
@@ -172,7 +172,7 @@ func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
 
 	// 无策略 agent（nil）→ 行为不变（挂起）。
 	svc.agents["a-none"] = &AgentRec{ID: "a-none"}
-	svc.registerConversation(&ConversationRec{ID: "c-none", AgentID: "a-none"})
+	svc.registerSession(&SessionRec{ID: "c-none", AgentID: "a-none"})
 	if d = orch.requestPermission(context.Background(), reqFor("c-none")); d.Allowed || d.Rejected {
 		t.Fatalf("无策略应回落征询: %+v", d)
 	}

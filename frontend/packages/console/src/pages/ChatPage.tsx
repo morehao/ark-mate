@@ -4,10 +4,10 @@ import { Button, Dropdown } from 'antd'
 import { InfoCircleOutlined, MoreOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { Ev } from '@ark-mate/types'
-import { conversationHistory, conversationRuns } from '@ark-mate/api'
+import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
 import { AgentBadge } from '../components/AgentBadge'
-import { ConversationDetailDrawer } from '../components/ConversationDetail'
+import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
@@ -25,7 +25,7 @@ export function ChatPage() {
   const paramId = params.id ?? null
 
   const agents = useMate((s) => s.agents)
-  const conversations = useMate((s) => s.conversations)
+  const sessions = useMate((s) => s.sessions)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const activate = useMate((s) => s.activate)
@@ -33,7 +33,7 @@ export function ChatPage() {
   const sendPrompt = useMate((s) => s.sendPrompt)
   const cancelQueuedInput = useMate((s) => s.cancelQueuedInput)
   const cancel = useMate((s) => s.cancel)
-  const archiveConversation = useMate((s) => s.archiveConversation)
+  const archiveSession = useMate((s) => s.archiveSession)
   const showToast = useMate((s) => s.showToast)
   const anchorSeq = useMate((s) => s.anchorSeq)
   const clearAnchor = useMate((s) => s.clearAnchor)
@@ -61,18 +61,18 @@ export function ChatPage() {
   // 每轮用量（run.last_seq → 展示行）：会话切换或轮次终态后重拉 runs 读模型。
   const [runsBySeq, setRunsBySeq] = useState<Map<number, { usageText: string; info: RunUsageInfo }>>(new Map())
 
-  // URL → 激活（刷新/直达 /conversations/:id 续看；参数不变不重复 attach）
+  // URL → 激活（刷新/直达 /sessions/:id 续看；参数不变不重复 attach）
   useEffect(() => {
     if (lastParamRef.current === paramId) return
     lastParamRef.current = paramId
-    // 无 id（/conversations）= 未选中会话 → 清空选中，问答区落回新建面板。
+    // 无 id（/sessions）= 未选中会话 → 清空选中，问答区落回新建面板。
     if (paramId) activate(paramId)
     else activate(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramId])
 
   const view = activeId ? views[activeId] : undefined
-  const activeSum = activeId ? conversations.find((x) => x.id === activeId) : undefined
+  const activeSum = activeId ? sessions.find((x) => x.id === activeId) : undefined
   const streaming = view?.streaming ?? false
   const hydrating = view?.hydrating ?? false
 
@@ -87,7 +87,7 @@ export function ChatPage() {
     let cancelled = false
     void (async () => {
       try {
-        const { runs } = await conversationRuns(activeId)
+        const { runs } = await sessionRuns(activeId)
         if (cancelled) return
         const m = new Map<number, { usageText: string; info: RunUsageInfo }>()
         const withData = runs
@@ -165,7 +165,7 @@ export function ChatPage() {
     void (async () => {
       let txt = ''
       try {
-        const page = await conversationHistory(id, { limit: 30 })
+        const page = await sessionHistory(id, { limit: 30 })
         const last = [...page.events].reverse().find((ev) => ev.type === Ev.UserMessage)
         if (last && typeof last.payload?.text === 'string') txt = last.payload.text
       } catch {
@@ -255,22 +255,22 @@ export function ChatPage() {
     void sendPrompt(text, delivery)
   }
 
-  // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /conversations。
+  // 新建会话：清空当前选中（无会话选中时问答区本身就是新建面板）→ 回到 /sessions。
   const openNew = () => {
     setDetailOpen(false)
     activate(null)
-    if (paramId) navigate('/conversations')
+    if (paramId) navigate('/sessions')
   }
 
   // 软清空：归档当前会话（数据保留，可在「归档」视图恢复）→ 清空选中，问答区落回新建面板。
   const softClear = async () => {
     if (!activeId) return
     try {
-      await archiveConversation(activeId, true)
+      await archiveSession(activeId, true)
       showToast('当前会话已归档，可随时从「归档」恢复')
       openNew()
     } catch {
-      /* archiveConversation 内部已 toast 错误 */
+      /* archiveSession 内部已 toast 错误 */
     }
   }
 
@@ -463,7 +463,7 @@ export function ChatPage() {
         <section style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: tokens.bg }}>
           {!activeId ? (
             // 未选中会话 = 新建会话面板（不再有独立的「开始问答」空态页）；
-            // 直达 /conversations/:id 的首帧（paramId 已就位、activate 未落地）留空，避免闪一下面板。
+            // 直达 /sessions/:id 的首帧（paramId 已就位、activate 未落地）留空，避免闪一下面板。
             paramId ? null : <StartPanel />
           ) : (
             <>
@@ -617,9 +617,9 @@ export function ChatPage() {
         </section>
       </div>
       {activeId && (
-        <ConversationDetailDrawer
+        <SessionDetailDrawer
           open={detailOpen}
-          conversationId={activeId}
+          sessionId={activeId}
           onClose={() => setDetailOpen(false)}
         />
       )}

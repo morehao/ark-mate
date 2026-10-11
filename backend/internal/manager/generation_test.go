@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -132,11 +132,11 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	cwd := t.TempDir()
 	mk := func() string {
 		t.Helper()
-		resp, err := r.Svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
+		resp, err := r.Svc.CreateSession(ctx, dtosession.SessionCreateReq{
 			AgentID: "a1", Cwd: cwd,
 		})
 		if err != nil {
-			t.Fatalf("CreateConversation: %v", err)
+			t.Fatalf("CreateSession: %v", err)
 		}
 		return resp.ID
 	}
@@ -145,8 +145,8 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	if n := connCount(r.Orch); n != 1 {
 		t.Fatalf("同配置的两个会话应共用 1 个暖进程，got %d", n)
 	}
-	c1 := r.Orch.conversation(first)
-	c2 := r.Orch.conversation(second)
+	c1 := r.Orch.session(first)
+	c2 := r.Orch.session(second)
 	if c1 == nil || c2 == nil {
 		t.Fatal("两个会话都应活跃")
 	}
@@ -157,7 +157,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 		t.Fatalf("未声明能力选择时应是空指纹: %q / %q", c1.Fingerprint, c2.Fingerprint)
 	}
 	// 会话记录也要如实记着"没有能力选择"（恢复路径据此回到同一代际）。
-	if rec := r.Svc.conversationRec(first); rec == nil || rec.Fingerprint != "" {
+	if rec := r.Svc.sessionRec(first); rec == nil || rec.Fingerprint != "" {
 		t.Fatalf("会话记录的能力指纹应为空: %+v", rec)
 	}
 }

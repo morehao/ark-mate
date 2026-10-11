@@ -20,13 +20,13 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 	if ver < 6 {
 		t.Fatalf("inputs 表要求 schema ≥ 6，得到 %d", ver)
 	}
-	seedConversation(t, st, "c1")
+	seedSession(t, st, "c1")
 
 	base := time.Now().UTC()
-	rows := []Input{
-		{ID: "i2", ConversationID: "c1", Text: "第二条", Delivery: model.InputDeliveryAfterTurn,
+	rows := []model.InputEntity{
+		{ID: "i2", SessionID: "c1", Text: "第二条", Delivery: model.InputDeliveryAfterTurn,
 			TargetTurnID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base.Add(time.Second)},
-		{ID: "i1", ConversationID: "c1", Text: "第一条", Delivery: model.InputDeliveryAfterTurn,
+		{ID: "i1", SessionID: "c1", Text: "第一条", Delivery: model.InputDeliveryAfterTurn,
 			TargetTurnID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base},
 	}
 	for _, r := range rows {
@@ -59,7 +59,7 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		t.Fatalf("待投递项应可删: %v/%v", ok, err)
 	}
 	// 跨会话删：同 id 不同会话不命中。
-	if err := st.CreateInput(ctx, Input{ID: "i3", ConversationID: "c1", Text: "第三条",
+	if err := st.CreateInput(ctx, model.InputEntity{ID: "i3", SessionID: "c1", Text: "第三条",
 		Delivery: model.InputDeliveryInterruptThenPrompt, Generation: 1,
 		Status: model.InputStatusQueued, CreatedAt: base.Add(2 * time.Second)}); err != nil {
 		t.Fatal(err)
@@ -68,13 +68,13 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		t.Fatalf("跨会话删必须不命中: %v/%v", ok, err)
 	}
 	// ListAllQueuedInputs 跨会话取快照（启动恢复靠它逐条发收敛事件，故不按会话过滤）。
-	if err := st.CreateInput(ctx, Input{ID: "i4", ConversationID: "c1", Text: "会话一的待投递",
+	if err := st.CreateInput(ctx, model.InputEntity{ID: "i4", SessionID: "c1", Text: "会话一的待投递",
 		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
 		Status: model.InputStatusQueued, CreatedAt: base.Add(3 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	seedConversation(t, st, "c2")
-	if err := st.CreateInput(ctx, Input{ID: "i5", ConversationID: "c2", Text: "会话二的待投递",
+	seedSession(t, st, "c2")
+	if err := st.CreateInput(ctx, model.InputEntity{ID: "i5", SessionID: "c2", Text: "会话二的待投递",
 		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
 		Status: model.InputStatusQueued, CreatedAt: base.Add(4 * time.Second)}); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 			t.Fatalf("第 %d 条应为 %s（创建时间升序）: %+v", i, id, all)
 		}
 	}
-	if all[2].ConversationID != "c2" {
+	if all[2].SessionID != "c2" {
 		t.Fatalf("跨会话快照应带 c2 的行: %+v", all[2])
 	}
 

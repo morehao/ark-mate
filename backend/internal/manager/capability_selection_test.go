@@ -170,14 +170,14 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 
 	// 会话 A 钉住"只要 web"（与 agent 默认不同，才验得出来）。
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"web"})}
-	agentA := &ConversationRec{ID: "convA", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(pinned)}
+	agentA := &SessionRec{ID: "convA", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(pinned)}
 	// 会话 B 什么都不要。
 	none := &CapabilitySelection{Mcps: ptrOf([]string{})}
-	agentB := &ConversationRec{ID: "convB", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(none)}
+	agentB := &SessionRec{ID: "convB", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(none)}
 	// 会话 C 未声明（旧会话：v7 迁移后 capability_json 为空串）。
-	legacy := &ConversationRec{ID: "convC", AgentID: "a"}
+	legacy := &SessionRec{ID: "convC", AgentID: "a"}
 
-	injectedFor := func(rec *ConversationRec) []string {
+	injectedFor := func(rec *SessionRec) []string {
 		t.Helper()
 		sel := ParseCapabilitySelection(rec.CapabilityJSON)
 		return names(svc.McpServersFor(agent, "opencode", sel))

@@ -145,7 +145,7 @@ func TestMountWebServesDirAssets(t *testing.T) {
 		t.Errorf("GET /favicon.svg 应回原文件：%d", w.Code)
 	}
 	// SPA 深链回落（M2-2 会补完整断言；这里先钉"目录形态也有回退"）。
-	if w := do("/conversations/abc"); w.Code != 200 || !strings.Contains(w.Body.String(), "probe-app") {
+	if w := do("/sessions/abc"); w.Code != 200 || !strings.Contains(w.Body.String(), "probe-app") {
 		t.Errorf("非 API 未知路径应回落 index.html：%d", w.Code)
 	}
 	// API 未注册路径**不**回落（把 API 404 变成 HTML 会让前端把 HTML 当 JSON 解析）。

@@ -1,26 +1,26 @@
 import { create } from 'zustand'
 import {
   HttpError,
-  cancelConversation,
+  cancelSession,
   cancelQueuedInput as apiCancelQueuedInput,
-  conversationHistory,
-  createConversation,
+  sessionHistory,
+  createSession,
   createWorkspace as apiCreateWorkspace,
   deleteWorkspace as apiDeleteWorkspace,
   listAgents,
-  listConversations,
+  listSessions,
   listModelCatalog,
   listQueuedInputs,
   listWorkspaces,
   moveWorkspace as apiMoveWorkspace,
   renameWorkspace as apiRenameWorkspace,
-  promptConversation,
+  promptSession,
   resolveElicitation,
   resolvePermission,
   setToken as persistToken,
   getToken,
   toErrorMessage,
-  updateConversation,
+  updateSession,
 } from '@ark-mate/api'
 import type {
   Agent,
@@ -29,7 +29,7 @@ import type {
   ElicitationFormSchema,
   PermissionOption,
   ConfigOption,
-  ConversationSummary,
+  SessionSummary,
   ModelCatalogResp,
   ModelRef,
   QueuedInput,
@@ -54,7 +54,7 @@ import {
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'closed'
 
-export interface ConversationView {
+export interface SessionView {
   entries: StreamEntry[]
   streaming: boolean
   lastSeq: number
@@ -79,7 +79,7 @@ export interface ConversationView {
   commands?: CommandInfo[]
 }
 
-const emptyView = (): ConversationView => ({
+const emptyView = (): SessionView => ({
   entries: [],
   streaming: false,
   lastSeq: 0,
@@ -121,7 +121,7 @@ const nextId = (): string => `e${++uid}`
 // 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
 const TERMINAL_TYPES = new Set<string>([Ev.TurnEnded, Ev.TurnError, Ev.RunCancelled])
 
-export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
+export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
   // 此守卫兜底重复 attach / 竞态下的重复投递，避免重连把同一段文本再拼一遍。
   if (e.seq <= v.lastSeq) return v
@@ -262,7 +262,7 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
       }
     case Ev.PermissionRequest: {
       // ACP 权限确认：agent 发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
-      // 用户点选 allow/reject × once/always 后经 POST /conversations/:id/permission 回传。
+      // 用户点选 allow/reject × once/always 后经 POST /sessions/:id/permission 回传。
       const callId = String(e.payload?.call_id ?? '')
       const title = String(e.payload?.title ?? '权限请求')
       const toolKind = String(e.payload?.kind ?? '')
@@ -305,7 +305,7 @@ export function applyEvent(v: ConversationView, e: BusEvent): ConversationView {
     }
     case Ev.ElicitationRequest: {
       // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
-      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /conversations/:id/elicitation 回传。
+      // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
       const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
       const message = String(e.payload?.message ?? '')
@@ -383,10 +383,10 @@ interface Toast {
 
 export interface MateState {
   agents: Agent[]
-  conversations: ConversationSummary[]
+  sessions: SessionSummary[]
   /** 工作空间登记（v14；左栏分组与选择器的事实源）。 */
   workspaces: WorkspaceListResp | null
-  views: Record<string, ConversationView>
+  views: Record<string, SessionView>
   activeId: string | null
   wsState: WsState
   /** 载体接入失败的原因（M1-8：桌面态 boot() 失败等）——有值就显示明确状态，不静默重连。 */
@@ -440,7 +440,7 @@ export interface ElicitationDecision {
 export interface MateActions {
   boot: () => void
   refreshAgents: () => Promise<void>
-  refreshConversations: () => Promise<void>
+  refreshSessions: () => Promise<void>
   /** 拉取工作空间登记表（左栏分组 + 选择器共用；失败保持 null = 未装载）。 */
   loadWorkspaces: () => Promise<void>
   /**
@@ -482,19 +482,19 @@ export interface MateActions {
   /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
   loadModelCatalog: (agentId?: string) => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
-  updateConversationModel: (id: string, model?: string) => Promise<void>
+  updateSessionModel: (id: string, model?: string) => Promise<void>
   /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
   sendPrompt: (text: string, delivery?: DeliveryChoice) => Promise<void>
   /** §6：撤下一条尚未投递的排队输入（收敛以 input_cancelled 事件为准）。 */
   cancelQueuedInput: (inputId: string) => Promise<void>
-  /** §6：用服务端当前态补齐队列（冷挂载/HISTORY 未覆盖时用；`anchorQueueSeq` 见 ConversationView.queueSeq）。 */
+  /** §6：用服务端当前态补齐队列（冷挂载/HISTORY 未覆盖时用；`anchorQueueSeq` 见 SessionView.queueSeq）。 */
   refreshQueue: (id: string, anchorQueueSeq: number) => Promise<void>
   cancel: () => Promise<void>
   respondPermission: (callId: string, decision: PermissionDecision) => Promise<void>
   respondElicitation: (elicitationId: string, decision: ElicitationDecision) => Promise<void>
-  renameConversation: (id: string, title: string) => Promise<void>
+  renameSession: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
-  archiveConversation: (id: string, archived: boolean) => Promise<void>
+  archiveSession: (id: string, archived: boolean) => Promise<void>
   setRailMode: (mode: 'active' | 'archived') => void
   /** 左栏「＋」：记下要预选的工作空间，交给新建面板消费（一次性）。 */
   setPreferredWorkspace: (id: string | null) => void
@@ -523,7 +523,7 @@ export type MateStore = MateState & MateActions
 
 export const initialState: MateState = {
   agents: [],
-  conversations: [],
+  sessions: [],
   workspaces: null,
   views: {},
   activeId: null,
@@ -605,7 +605,7 @@ export const useMate = create<MateStore>((set, get) => {
       const cur = get().views[id] ?? emptyView()
       const before = olderCursor(cur.entries)
       try {
-        const page = await conversationHistory(id, { before, limit: HISTORY_PAGE })
+        const page = await sessionHistory(id, { before, limit: HISTORY_PAGE })
         let older = emptyView()
         for (const e of page.events) older = applyEvent(older, e)
         set((s) => {
@@ -675,7 +675,7 @@ export const useMate = create<MateStore>((set, get) => {
       // 冷挂载：用服务端当前态补齐队列（锚点取重置后的 queueSeq=0；期间若有队列事件到达则让位事件）。
       if (seedQueue) void get().refreshQueue(seedQueue, 0)
       // 终态已到：会话列表 status 同步刷新（侧栏/服务端忙水位随之收敛）。
-      if (terminal) void get().refreshConversations()
+      if (terminal) void get().refreshSessions()
     },
 
     setDrawer: (open) => set({ drawerOpen: open }),
@@ -692,10 +692,10 @@ export const useMate = create<MateStore>((set, get) => {
         reportApiError(err)
       }
     },
-    refreshConversations: async () => {
+    refreshSessions: async () => {
       try {
         // 按侧栏当前视图拉取：active=未归档；archived=已归档。
-        set({ conversations: await listConversations(get().railMode === 'archived') })
+        set({ sessions: await listSessions(get().railMode === 'archived') })
       } catch (err) {
         reportApiError(err)
       }
@@ -729,7 +729,7 @@ export const useMate = create<MateStore>((set, get) => {
         await apiRenameWorkspace(id, title)
         await get().loadWorkspaces()
         // 会话行上的 workspace_title 也要跟着变（否则左栏分组改名了、会话详情还显示旧名）。
-        await get().refreshConversations()
+        await get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -740,7 +740,7 @@ export const useMate = create<MateStore>((set, get) => {
         const resp = await apiDeleteWorkspace(id)
         await get().loadWorkspaces()
         // 归属被清空（那些会话回到默认工作空间）→ 重拉列表拿到新的分组。
-        await get().refreshConversations()
+        await get().refreshSessions()
         showToast(
           resp.released_sessions > 0
             ? `已移除登记；${resp.released_sessions} 个会话回到「默认工作空间」，目录与文件未动`
@@ -774,7 +774,7 @@ export const useMate = create<MateStore>((set, get) => {
         t.connect()
       })
       void get().refreshAgents()
-      void get().refreshConversations()
+      void get().refreshSessions()
       get().closeSettings()
       get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
     },
@@ -797,7 +797,7 @@ export const useMate = create<MateStore>((set, get) => {
         // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
         t.connect()
         void get().refreshAgents()
-        void get().refreshConversations()
+        void get().refreshSessions()
         // 工作空间登记表：左栏分组与选择器共用（选择器每次打开也会刷一次，
         // 这里拉是为了"首帧就有分组"，而不是等用户点开选择器才出现）。
         void get().loadWorkspaces()
@@ -842,7 +842,7 @@ export const useMate = create<MateStore>((set, get) => {
 
     createAndRun: async (prompt, model, workspaceId, capabilities) => {
       try {
-        const resp = await createConversation({
+        const resp = await createSession({
           prompt,
           model: model?.modelID,
           // **不外发空串**：缺省才是「落在默认工作空间」语义（后端把空/缺省当作未指定）。
@@ -868,7 +868,7 @@ export const useMate = create<MateStore>((set, get) => {
         get().activate(resp.id, resp.event_seq)
         // 新建后回「会话」视图并刷新列表（避免停在归档视图看不到新会话）。
         if (get().railMode !== 'active') set({ railMode: 'active' })
-        void get().refreshConversations()
+        void get().refreshSessions()
         return resp.id
       } catch (err) {
         showToast(toErrorMessage(err))
@@ -890,10 +890,10 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
-    updateConversationModel: async (id, model) => {
+    updateSessionModel: async (id, model) => {
       try {
-        await updateConversation(id, { model })
-        await get().refreshConversations()
+        await updateSession(id, { model })
+        await get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -917,7 +917,7 @@ export const useMate = create<MateStore>((set, get) => {
           })
         }
         ensureTransport().connect()
-        const resp = await promptConversation(id, delivery ? { prompt: text, delivery } : { prompt: text })
+        const resp = await promptSession(id, delivery ? { prompt: text, delivery } : { prompt: text })
         if (resp.queued) {
           // 队项由 input_queued 事件建项（不靠这里乐观插入）：事件才是队列的唯一事实。
           showToast(`会话正忙，已入队（${deliveryLabel(delivery ?? '')}）——可随时撤下`)
@@ -969,7 +969,7 @@ export const useMate = create<MateStore>((set, get) => {
       const id = get().activeId
       if (!id) return
       try {
-        await cancelConversation(id)
+        await cancelSession(id)
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -1026,31 +1026,31 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
-    renameConversation: async (id, title) => {
+    renameSession: async (id, title) => {
       try {
-        await updateConversation(id, { title })
-        void get().refreshConversations()
+        await updateSession(id, { title })
+        void get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
     togglePin: async (id) => {
-      const cur = get().conversations.find((x) => x.id === id)
+      const cur = get().sessions.find((x) => x.id === id)
       if (!cur) return
       try {
-        await updateConversation(id, { pinned: !cur.pinned })
-        void get().refreshConversations()
+        await updateSession(id, { pinned: !cur.pinned })
+        void get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
     },
 
-    archiveConversation: async (id, archived) => {
+    archiveSession: async (id, archived) => {
       // 归档/恢复（软归档：archived 为真即从「会话」移入「归档」视图，数据不删）。
       try {
-        await updateConversation(id, { archived })
-        void get().refreshConversations()
+        await updateSession(id, { archived })
+        void get().refreshSessions()
       } catch (err) {
         showToast(toErrorMessage(err))
       }
@@ -1067,7 +1067,7 @@ export const useMate = create<MateStore>((set, get) => {
     setRailMode: (mode) => {
       if (get().railMode === mode) return
       set({ railMode: mode })
-      void get().refreshConversations()
+      void get().refreshSessions()
     },
 
     setPreferredWorkspace: (id) => set({ preferredWorkspaceId: id }),

@@ -51,7 +51,7 @@ func TestStaticCacheMatrix(t *testing.T) {
 	}{
 		{"/", "no-store", false},
 		{"/index.html", "no-store", false},
-		{"/conversations/deep-link", "no-store", false}, // SPA 回落出来的也是文档
+		{"/sessions/deep-link", "no-store", false}, // SPA 回落出来的也是文档
 		{"/assets/index-abc.js", "public, immutable, max-age=31536000", true},
 		{"/favicon.svg", "no-cache", true},
 	}

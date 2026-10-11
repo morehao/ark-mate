@@ -289,7 +289,7 @@ async function scenarioStream(cdp) {
   const attachFrame = sent.find((f) => f.includes('"action":"attach"'))
   check('首帧 attach 带 43 字符 streamToken', !!attachFrame && String(JSON.parse(attachFrame).token).length === 43, attachFrame?.slice(0, 60))
 
-  const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/conversations'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
+  const conv = await cdp.evalJs(`const r = await fetch('/v1/mate/sessions'); const j = await r.json(); return j.data?.[0]?.id ?? null`)
   if (!conv) {
     // **如实跳过，不判红**：这一条需要"库里已经有一条会话"这个环境前提（探针不替用户造会话——
     // 那会往他的库里写东西）。判红会让"新机器上第一次跑 DoD"永远红一次，而那不是产品缺陷；
@@ -299,7 +299,7 @@ async function scenarioStream(cdp) {
     return
   }
   cdp.events.length = 0
-  await cdp.evalJs(`history.pushState({}, '', '/conversations/${conv}'); window.dispatchEvent(new PopStateEvent('popstate')); return true`)
+  await cdp.evalJs(`history.pushState({}, '', '/sessions/${conv}'); window.dispatchEvent(new PopStateEvent('popstate')); return true`)
   await sleep(2500)
   const recv = cdp.events.filter((e) => e.method === 'Network.webSocketFrameReceived').map((e) => e.params.response?.payloadData ?? '')
   check('订阅后收到服务端帧（event/snapshot）', recv.some((f) => f.includes('"type":"event"') || f.includes('"type":"snapshot"')), recv[0]?.slice(0, 70) ?? '(无)')

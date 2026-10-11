@@ -21,7 +21,7 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
-	svc.registerConversation(&ConversationRec{ID: "conv-redact", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "conv-redact", AgentID: "a1"})
 	svc.tx.begin("conv-redact", "a1", "stub", "/tmp", false)
 	defer svc.tx.closeAll()
 

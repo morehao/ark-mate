@@ -53,7 +53,7 @@ type Options struct {
 }
 
 // wsCtr 是实时事件通道（WS）的协议薄适配层：
-// 订阅 eventbus → 按 attach 的聚合（conversation id）推送 event/snapshot 帧；
+// 订阅 eventbus → 按 attach 的聚合（session id）推送 event/snapshot 帧；
 // 客户端帧 action=attach/detach/ping；服务端帧 type=snapshot/event/detached/pong。
 //
 // 凭据模型（M1-1）：**握手不带凭据、连接后带内交付**——这是"令牌不进 URL"的代价与解法。
@@ -94,7 +94,7 @@ const (
 // wsClientFrame 客户端 → 服务端帧。
 type wsClientFrame struct {
 	Action string `json:"action"` // attach | detach | ping
-	AggID  string `json:"agg_id"` // attach/detach 目标聚合（conversation id）
+	AggID  string `json:"agg_id"` // attach/detach 目标聚合（session id）
 	// Token 首帧 attach 携带的 stream 面凭据（M1-1；桌面态必需，独立态可选）。
 	// 形状的唯一真源在前端 @ark-mate/desktop-contract 的 buildAttachFrame。
 	Token    string `json:"token"`

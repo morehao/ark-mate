@@ -42,14 +42,14 @@ func TestReapIdleOnceSkips(t *testing.T) {
 		return &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-time.Minute)}
 	}
 	busy := old()
-	withConversation := old()
+	withSession := old()
 	// 四种连接分四个 runtime 槽（避免互相干扰）。
 	o.mu.Lock()
 	o.conns["stub"] = fresh()
 	o.conns["opencode"] = busy
 	o.inflight.Mark(busy.client, "s1")
-	o.conns["dsh"] = withConversation
-	o.conversations["s-x"] = &ActiveConversation{client: withConversation.client}
+	o.conns["dsh"] = withSession
+	o.sessions["s-x"] = &ActiveSession{client: withSession.client}
 	o.mu.Unlock()
 
 	if n := o.reapIdleOnce(now, 5*time.Minute); n != 0 {

@@ -268,12 +268,12 @@ func (a *App) Init(ctx context.Context) error {
 				"dir", imp.Dir, "providers", imp.Providers, "inserted", imp.Inserted,
 				"existing", imp.Existing, "backup", imp.Backup, "skipped_keys", len(imp.SkippedKeys))
 		}
-		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
+		sessions, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
 			glog.Warnw(ctx, "serve: 从持久层恢复失败", "err", rErr)
 		}
 		// transcript 未迁移提示：DB 为空但 transcript 目录有文件 → 提示先 `mate migrate`。
-		if conversations == 0 && events == 0 {
+		if sessions == 0 && events == 0 {
 			if files, gErr := filepath.Glob(filepath.Join(cfg.TranscriptDir, "*.jsonl")); gErr == nil && len(files) > 0 {
 				fmt.Fprintf(os.Stderr, "serve: %s 下仍有 %d 个 transcript 未导入；运行 `mate migrate` 后重启即可在 sqlite 模式下看到旧会话\n", cfg.TranscriptDir, len(files))
 			}
@@ -364,7 +364,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
 	ports := router.Ports{
-		Agent: a.svc, Conversation: a.svc, Workspace: a.svc, Runtime: a.svc,
+		Agent: a.svc, Session: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），

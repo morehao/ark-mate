@@ -377,7 +377,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 }
 
 // TestDeleteAgentImpactDetachAndBusyRefusal 删除影响面（P2 删除面）：
-// 列表外露 conversation_count；删除回带影响面并**立刻摘除**该 agent 的活跃会话（后续 prompt 报
+// 列表外露 session_count；删除回带影响面并**立刻摘除**该 agent 的活跃会话（后续 prompt 报
 // agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 turn 时整体拒绝且无副作用。
 func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	ctx := context.Background()
@@ -390,9 +390,9 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 
 	svc.agents["alias-stub"] = &AgentRec{ID: "alias-stub", Name: "别名 echo"}
 	svc.agents["alias-idle"] = &AgentRec{ID: "alias-idle", Name: "空闲"}
-	svc.registerConversation(&ConversationRec{ID: "c1", AgentID: "alias-stub", Status: ConversationStatusInProgress})
-	svc.registerConversation(&ConversationRec{ID: "c2", AgentID: "alias-stub", Status: ConversationStatusInProgress})
-	svc.registerConversation(&ConversationRec{ID: "c3", AgentID: "dsh", Status: ConversationStatusInProgress})
+	svc.registerSession(&SessionRec{ID: "c1", AgentID: "alias-stub", Status: SessionStatusInProgress})
+	svc.registerSession(&SessionRec{ID: "c2", AgentID: "alias-stub", Status: SessionStatusInProgress})
+	svc.registerSession(&SessionRec{ID: "c3", AgentID: "dsh", Status: SessionStatusInProgress})
 
 	agents, err := svc.ListAgents()
 	if err != nil {
@@ -400,25 +400,25 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	}
 	counts := map[string]int{}
 	for _, a := range agents {
-		counts[a.ID] = a.ConversationCount
+		counts[a.ID] = a.SessionCount
 	}
 	if counts["alias-stub"] != 2 || counts["alias-idle"] != 0 {
-		t.Fatalf("conversation_count 不符（删除影响面）: %+v", counts)
+		t.Fatalf("session_count 不符（删除影响面）: %+v", counts)
 	}
 
 	// c1 是内存里仍活着的会话（连着底座）：删除必须立刻让它失效。
-	orch.conversations["c1"] = &ActiveConversation{ID: "c1", AgentID: "alias-stub", Runtime: "stub",
-		sess: &stubConversation{stop: "end_turn"}}
+	orch.sessions["c1"] = &ActiveSession{ID: "c1", AgentID: "alias-stub", Runtime: "stub",
+		sess: &stubSession{stop: "end_turn"}}
 	orch.byProvider["native-1"] = "c1"
 
 	resp, err := svc.DeleteAgent(ctx, "alias-stub")
 	if err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
-	if resp.Deleted != "alias-stub" || resp.AffectedConversations != 2 || resp.DetachedConversations != 1 || resp.WasDefault {
+	if resp.Deleted != "alias-stub" || resp.AffectedSessions != 2 || resp.DetachedSessions != 1 || resp.WasDefault {
 		t.Fatalf("影响面不符: %+v", resp)
 	}
-	if _, ok := orch.conversations["c1"]; ok {
+	if _, ok := orch.sessions["c1"]; ok {
 		t.Fatal("活跃会话应被摘除")
 	}
 	if _, ok := orch.byProvider["native-1"]; ok {
@@ -439,9 +439,9 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 
 	// 有在途 turn → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
 	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙"}
-	busy := &ActiveConversation{ID: "cb", AgentID: "alias-busy", Runtime: "stub", sess: &stubConversation{stop: "end_turn"}}
+	busy := &ActiveSession{ID: "cb", AgentID: "alias-busy", Runtime: "stub", sess: &stubSession{stop: "end_turn"}}
 	busy.busy = true
-	orch.conversations["cb"] = busy
+	orch.sessions["cb"] = busy
 	if _, err := svc.DeleteAgent(ctx, "alias-busy"); err == nil {
 		t.Fatal("有在途 turn 应拒绝删除")
 	} else if !errors.As(err, &ae) || ae.Code != "agent_busy" {
@@ -450,14 +450,14 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	if _, ok := svc.AgentByID("alias-busy"); !ok {
 		t.Fatal("拒绝时不得删除定义")
 	}
-	if _, ok := orch.conversations["cb"]; !ok {
+	if _, ok := orch.sessions["cb"]; !ok {
 		t.Fatal("拒绝时不得摘除活跃会话")
 	}
 }
 
-// TestCredentialMissingBlocksConversationStart agent 绑定悬空/无 key 的 provider 档案时显式失败
+// TestCredentialMissingBlocksSessionStart agent 绑定悬空/无 key 的 provider 档案时显式失败
 // （credential_missing + 出路），不静默以「无密钥」姿态起进程；补齐 key 后放行。
-func TestCredentialMissingBlocksConversationStart(t *testing.T) {
+func TestCredentialMissingBlocksSessionStart(t *testing.T) {
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub：底座必须与它一致

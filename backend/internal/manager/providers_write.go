@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
@@ -314,10 +313,10 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 }
 
 // stProviderRow 读一条 provider 行（memory 载体没有行 → (nil,false,nil) 由调用方处理）。
-func (s *Service) stProviderRow(ctx context.Context, id string) (*store.ProviderDefinition, bool, error) {
+func (s *Service) stProviderRow(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
 	if s.st == nil {
 		// 文件载体：没有"行"可读，revision 恒 0；删除由文件路径完成（见 removeProviderDefinition）。
-		return &store.ProviderDefinition{ID: id}, true, nil
+		return &model.ProviderEntity{ID: id}, true, nil
 	}
 	return s.st.GetProviderDefinition(ctx, id)
 }

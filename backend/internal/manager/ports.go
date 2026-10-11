@@ -3,11 +3,11 @@ package manager
 import (
 	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svcconversation"
 	"github.com/morehao/ark-mate/internal/service/svcexport"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/internal/service/svcusage"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 )
@@ -20,13 +20,13 @@ import (
 //
 // P4 把 Service 拆成多个领域实现后，这些断言随之改为各实现分别断言自己的端口。
 var (
-	_ svcagent.AgentSvc               = (*Service)(nil)
-	_ svcconversation.ConversationSvc = (*Service)(nil)
-	_ svcworkspace.WorkspaceSvc       = (*Service)(nil)
-	_ svcruntime.RuntimeSvc           = (*Service)(nil)
-	_ svccapability.CapabilitySvc     = (*Service)(nil)
-	_ svclibrary.LibrarySvc           = (*Service)(nil)
-	_ svcusage.UsageSvc               = (*Service)(nil)
-	_ svcsearch.SearchSvc             = (*Service)(nil)
-	_ svcexport.ExportSvc             = (*Service)(nil)
+	_ svcagent.AgentSvc           = (*Service)(nil)
+	_ svcsession.SessionSvc       = (*Service)(nil)
+	_ svcworkspace.WorkspaceSvc   = (*Service)(nil)
+	_ svcruntime.RuntimeSvc       = (*Service)(nil)
+	_ svccapability.CapabilitySvc = (*Service)(nil)
+	_ svclibrary.LibrarySvc       = (*Service)(nil)
+	_ svcusage.UsageSvc           = (*Service)(nil)
+	_ svcsearch.SearchSvc         = (*Service)(nil)
+	_ svcexport.ExportSvc         = (*Service)(nil)
 )

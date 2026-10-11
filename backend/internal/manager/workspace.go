@@ -46,7 +46,7 @@ type WorkspaceResolution struct {
 
 // DefaultWorkspaceRef 是"默认工作空间"在解析路径上的最小承载。
 //
-// 刻意不传整个 store.Workspace：`ResolveWorkspace` 是**纯函数**（可单测、无副作用），
+// 刻意不传整个 model.WorkspaceEntity：`ResolveWorkspace` 是**纯函数**（可单测、无副作用），
 // 让 store 类型渗进它的签名会把"解析"与"持久层"绑在一起——而这个函数的全部价值
 // 恰恰是它只认路径与两个判据。
 type DefaultWorkspaceRef struct {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoagent"
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -221,20 +221,20 @@ func workspaceTestSvc(t *testing.T) *Service {
 	return svc
 }
 
-// TestCreateConversationWorkspaceRejectedBeforeRuntime 非法 cwd 在建会话的第一步就被拒
+// TestCreateSessionWorkspaceRejectedBeforeRuntime 非法 cwd 在建会话的第一步就被拒
 // （校验先于拨号/建会话：错误码为请求拒绝而非连接/服务错误）。
-func TestCreateConversationWorkspaceRejectedBeforeRuntime(t *testing.T) {
+func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, t.TempDir(), nil)
 
-	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "ws-probe", Cwd: "relative/not-absolute",
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("相对路径应 40001（请求拒绝），got %d: %v", code, err)
 	}
 
-	_, err = svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "ws-probe", Cwd: filepath.Join(t.TempDir(), "nope"),
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -245,7 +245,7 @@ func TestCreateConversationWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	if werr := os.WriteFile(f, []byte("x"), 0o600); werr != nil {
 		t.Fatalf("write: %v", werr)
 	}
-	_, err = svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{
+	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
 		AgentID: "ws-probe", Cwd: f,
 	})
 	if code := gerrCode(t, err); code != 40001 {
@@ -253,25 +253,25 @@ func TestCreateConversationWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	}
 }
 
-// TestCreateConversationWorkspaceRequiredWhenDisabled 代建关闭 + 未指定 cwd →
+// TestCreateSessionWorkspaceRequiredWhenDisabled 代建关闭 + 未指定 cwd →
 // workspace_required（40001），且不得回落到 serve 进程目录。
-func TestCreateConversationWorkspaceRequiredWhenDisabled(t *testing.T) {
+func TestCreateSessionWorkspaceRequiredWhenDisabled(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, "", nil)
 
-	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "ws-probe"})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("代建关闭应 40001，got %d: %v", code, err)
 	}
 }
 
-// TestCreateConversationFailureLeavesNoPerConversationDir v14：建会话失败不再留"每会话一个目录"。
+// TestCreateSessionFailureLeavesNoPerSessionDir v14：建会话失败不再留"每会话一个目录"。
 //
 // 旧行为是"失败时清理刚代建的独占目录"。v14 起未指定 cwd 落在**共享的默认工作空间**，
 // 于是这条测试要守的变成两件事（都更严格）：
 //   - 失败后 `workspaces/` 下**只有** `default/`（不再有成排的会话目录）；
 //   - 默认工作空间**没被删掉**（DiscardWorkspace 若被误接到它上面，这里会红）。
-func TestCreateConversationFailureLeavesNoPerConversationDir(t *testing.T) {
+func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	root := t.TempDir()
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, root, nil)
@@ -285,7 +285,7 @@ func TestCreateConversationFailureLeavesNoPerConversationDir(t *testing.T) {
 	}
 
 	// echo spec 无启动命令 → acquire 失败。
-	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "ws-probe"})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
 	}
@@ -306,16 +306,16 @@ func TestCreateConversationFailureLeavesNoPerConversationDir(t *testing.T) {
 
 // ——— 回读与按工作空间过滤 ———
 
-// TestListConversationsWorkspaceFilter 响应回读 cwd/workspace_temporary + `?cwd=` 精确过滤。
-func TestListConversationsWorkspaceFilter(t *testing.T) {
+// TestListSessionsWorkspaceFilter 响应回读 cwd/workspace_temporary + `?cwd=` 精确过滤。
+func TestListSessionsWorkspaceFilter(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.registerConversation(&ConversationRec{ID: "c-a", AgentID: "a1", Cwd: "/work/alpha"})
-	svc.registerConversation(&ConversationRec{ID: "c-b", AgentID: "a1", Cwd: "/work/beta", WorkspaceTemporary: true})
-	svc.registerConversation(&ConversationRec{ID: "c-tmp-sub", AgentID: "a1", Cwd: "/work/alpha/sub"})
+	svc.registerSession(&SessionRec{ID: "c-a", AgentID: "a1", Cwd: "/work/alpha"})
+	svc.registerSession(&SessionRec{ID: "c-b", AgentID: "a1", Cwd: "/work/beta", WorkspaceTemporary: true})
+	svc.registerSession(&SessionRec{ID: "c-tmp-sub", AgentID: "a1", Cwd: "/work/alpha/sub"})
 
-	all, err := svc.ListConversations(false, "", "")
+	all, err := svc.ListSessions(false, "", "")
 	if err != nil {
-		t.Fatalf("ListConversations: %v", err)
+		t.Fatalf("ListSessions: %v", err)
 	}
 	if len(all) != 3 {
 		t.Fatalf("无过滤应返回 3，got %d", len(all))
@@ -331,15 +331,15 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 	}
 
 	// 精确匹配：子目录不算同一工作空间（避免"看起来像同一目录"的误归组）。
-	alpha, err := svc.ListConversations(false, "/work/alpha", "")
+	alpha, err := svc.ListSessions(false, "/work/alpha", "")
 	if err != nil {
-		t.Fatalf("ListConversations(cwd): %v", err)
+		t.Fatalf("ListSessions(cwd): %v", err)
 	}
 	if len(alpha) != 1 || alpha[0].ID != "c-a" {
 		t.Fatalf("cwd 过滤应精确命中 c-a，got %+v", alpha)
 	}
 
-	none, _ := svc.ListConversations(false, "/work/nowhere", "")
+	none, _ := svc.ListSessions(false, "/work/nowhere", "")
 	if len(none) != 0 {
 		t.Fatalf("未用过的工作空间应返回空，got %+v", none)
 	}
@@ -348,11 +348,11 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 	// 必须命中同一批会话——路径字符串不该决定身份。
 	rootDir := t.TempDir()
 	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
-	svc2.registerConversation(&ConversationRec{ID: "c-real", AgentID: "a1", Cwd: mustEval(t, rootDir)})
+	svc2.registerSession(&SessionRec{ID: "c-real", AgentID: "a1", Cwd: mustEval(t, rootDir)})
 	for _, spelling := range []string{rootDir, rootDir + "/", filepath.Join(rootDir, ".", "..", filepath.Base(rootDir))} {
-		got, err := svc2.ListConversations(false, spelling, "")
+		got, err := svc2.ListSessions(false, spelling, "")
 		if err != nil {
-			t.Fatalf("ListConversations(%q): %v", spelling, err)
+			t.Fatalf("ListSessions(%q): %v", spelling, err)
 		}
 		if len(got) != 1 || got[0].ID != "c-real" {
 			t.Fatalf("写法 %q 未归一到同一工作空间: %+v", spelling, got)
@@ -418,11 +418,11 @@ func TestBrowseWorkspace(t *testing.T) {
 func TestRecentWorkspaces(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	svc.registerConversation(&ConversationRec{ID: "r-1", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base})
-	svc.registerConversation(&ConversationRec{ID: "r-2", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base.Add(time.Hour)})
-	svc.registerConversation(&ConversationRec{ID: "r-3", AgentID: "a1", Cwd: "/work/beta", UpdatedAt: base.Add(2 * time.Hour)})
-	svc.registerConversation(&ConversationRec{ID: "r-4", AgentID: "a1", Cwd: "/work/tmp", WorkspaceTemporary: true, UpdatedAt: base.Add(3 * time.Hour)})
-	svc.registerConversation(&ConversationRec{ID: "r-5", AgentID: "a1", UpdatedAt: base.Add(4 * time.Hour)}) // 无 cwd（历史行）
+	svc.registerSession(&SessionRec{ID: "r-1", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base})
+	svc.registerSession(&SessionRec{ID: "r-2", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base.Add(time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-3", AgentID: "a1", Cwd: "/work/beta", UpdatedAt: base.Add(2 * time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-4", AgentID: "a1", Cwd: "/work/tmp", WorkspaceTemporary: true, UpdatedAt: base.Add(3 * time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-5", AgentID: "a1", UpdatedAt: base.Add(4 * time.Hour)}) // 无 cwd（历史行）
 
 	list, err := svc.RecentWorkspaces(10)
 	if err != nil {
@@ -431,10 +431,10 @@ func TestRecentWorkspaces(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("应返回 2 条（排除代建/空 cwd）: %+v", list)
 	}
-	if list[0].Path != "/work/beta" || list[0].Name != "beta" || list[0].Conversations != 1 {
+	if list[0].Path != "/work/beta" || list[0].Name != "beta" || list[0].Sessions != 1 {
 		t.Fatalf("最近使用应排在首位: %+v", list[0])
 	}
-	if list[1].Path != "/work/alpha" || list[1].Conversations != 2 {
+	if list[1].Path != "/work/alpha" || list[1].Sessions != 2 {
 		t.Fatalf("同目录应聚合计数: %+v", list[1])
 	}
 	if list[1].LastUsedAt != base.Add(time.Hour).Format(time.RFC3339) {
@@ -925,7 +925,7 @@ func TestListWorkspaceFiles(t *testing.T) {
 //
 // 为什么单独立一条：上面那些用例各自只钉一个函数（Validate / Browse / DirCreate / Register），
 // 而"选工作区是全系统"这句话的用户可见形态是**建会话能落在名录外**。这条走的是与
-// `POST /conversations` 同一条解析链（ResolveWorkspace → ValidateWorkspace），
+// `POST /sessions` 同一条解析链（ResolveWorkspace → ValidateWorkspace），
 // 所以它红了就意味着"用户在应用内选不到名录外的目录"。
 func TestSessionWorksOutsidePreferenceRoots(t *testing.T) {
 	base := t.TempDir()

@@ -100,7 +100,7 @@ func TestOpenMemoryIsProcessShared(t *testing.T) {
 //
 // 自注册 dialector 时代这里是：foreign_keys=1、busy_timeout=5000、文件库 WAL + synchronous=NORMAL。
 // 现在只剩 mattn 自己的默认值——**外键约束不再由库兜底**（events/runs/messages 仍以 FK
-// 引用 conversations，但违反时不会报错），文件库也不再是 WAL。
+// 引用 sessions，但违反时不会报错），文件库也不再是 WAL。
 func TestOpenConnectionPragmasAreGolibDefaults(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "mate.db"))
 	if err != nil {

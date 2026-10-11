@@ -23,7 +23,7 @@ import (
 
 // automationDBRig 一个"装配期已从 store 装载"的 Service + 其库（可直连断言行与审计）。
 //
-// 装 silent 桩 runtime 是因为调度用例要真的建会话（`CreateConversation` 需要 agent 与 runtime）；
+// 装 silent 桩 runtime 是因为调度用例要真的建会话（`CreateSession` 需要 agent 与 runtime）；
 // 纯写面/装载用例不用它，但共用一个夹具省得两套配置漂移。
 func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	t.Helper()
@@ -51,7 +51,7 @@ func dbDailyPatch(t *testing.T, id, hour string) map[string]any {
 }
 
 // mustSeedAutomationRow 直接往库里写一行（模拟"存量文件已导入"的落点；可带运行态列）。
-func mustSeedAutomationRow(t *testing.T, st *store.Store, row *store.AutomationDefinition) {
+func mustSeedAutomationRow(t *testing.T, st *store.Store, row *model.AutomationEntity) {
 	t.Helper()
 	if row.RecentRuns == "" {
 		row.RecentRuns = "[]"
@@ -61,7 +61,7 @@ func mustSeedAutomationRow(t *testing.T, st *store.Store, row *store.AutomationD
 	}
 	if rt := (store.AutomationRuntimeState{
 		LastFiredAt: row.LastFiredAt, LastStatus: row.LastStatus, LastReason: row.LastReason,
-		LastConversationID: row.LastConversationID, ConsecutiveFailures: row.ConsecutiveFailures,
+		LastSessionID: row.LastSessionID, ConsecutiveFailures: row.ConsecutiveFailures,
 		RecentRuns: row.RecentRuns,
 	}); rt != (store.AutomationRuntimeState{RecentRuns: "[]"}) {
 		if ok, err := st.SaveAutomationRuntime(context.Background(), row.ID, "", rt); err != nil || !ok {
@@ -70,14 +70,14 @@ func mustSeedAutomationRow(t *testing.T, st *store.Store, row *store.AutomationD
 	}
 }
 
-// automationConversations 按 origin 收集某条 automation 的会话（与 schedRig 的同名方法同源，
+// automationSessions 按 origin 收集某条 automation 的会话（与 schedRig 的同名方法同源，
 // 这里不收进夹具是因为 DB 用例不需要整个 schedRig）。
-func automationConversations(t *testing.T, svc *Service, id string) []*ConversationRec {
+func automationSessions(t *testing.T, svc *Service, id string) []*SessionRec {
 	t.Helper()
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
-	var out []*ConversationRec
-	for _, c := range svc.conversations {
+	var out []*SessionRec
+	for _, c := range svc.sessions {
 		if c.Origin == automationOrigin(id) {
 			out = append(out, c)
 		}
@@ -186,17 +186,17 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 	good := dbDailyPatch(t, "good", "9")
 	body, _ := json.Marshal(good)
 	fired := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
-	mustSeedAutomationRow(t, st, &store.AutomationDefinition{
+	mustSeedAutomationRow(t, st, &model.AutomationEntity{
 		ID: "good", Body: string(body),
 		LastFiredAt: fired.Format(time.RFC3339Nano), LastStatus: automation.RunCompleted,
 		RecentRuns: `[{"scheduled_for":"2026-10-09T01:00:00Z","fired_at":"2026-10-09T01:00:01Z","status":"completed","trigger":"scheduled"}]`,
 	})
 	// 坏定义：schedule 缺时区（Validate 会拒）——留列表带 loadErr，而不是从列表里消失。
-	mustSeedAutomationRow(t, st, &store.AutomationDefinition{
+	mustSeedAutomationRow(t, st, &model.AutomationEntity{
 		ID: "broken", Body: `{"id":"broken","name":"坏","schedule":{"kind":"daily","hour":9,"minute":0},"target":{"agent_id":"a1","cwd":"/tmp","prompt":"x"}}`,
 	})
 	// 行正文不是 JSON 对象（手工塞进去的）→ 同样如实留列表。
-	mustSeedAutomationRow(t, st, &store.AutomationDefinition{ID: "junk", Body: `[1,2,3]`})
+	mustSeedAutomationRow(t, st, &model.AutomationEntity{ID: "junk", Body: `[1,2,3]`})
 
 	// 返回值是**装载成功**的条数（与文件装载同一口径）；坏的两行仍进注册表，靠 loadErr 标识。
 	if n := svc.LoadAutomationDefinitionsFromStore(ctx, t.TempDir()); n != 1 {
@@ -314,7 +314,7 @@ func TestAutomationClaimIsAtMostOnce(t *testing.T) {
 	if second.status != automation.RunDuplicate || !second.noRecord {
 		t.Fatalf("同一 occurrence 的第二次触发必须判 duplicate: %+v", second)
 	}
-	if convs := automationConversations(t, svc, "daily"); len(convs) != 1 {
+	if convs := automationSessions(t, svc, "daily"); len(convs) != 1 {
 		t.Fatalf("应恰好 1 个会话（认领挡住了第二次），got %d", len(convs))
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "daily")
@@ -350,7 +350,7 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 	if !out.failure || out.status != automation.RunSkipped || !strings.Contains(out.reason, "认领失败") {
 		t.Fatalf("认领失败的结果不符: %+v", out)
 	}
-	if convs := automationConversations(t, svc, "daily"); len(convs) != 0 {
+	if convs := automationSessions(t, svc, "daily"); len(convs) != 0 {
 		t.Fatalf("认领失败不得建会话，got %d", len(convs))
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "daily")
@@ -370,7 +370,7 @@ func TestAutomationClaimFailureRetriesNextTick(t *testing.T) {
 	if retry.status != automation.RunClaimed {
 		t.Fatalf("修好后的重试应认领成功: %+v", retry)
 	}
-	if convs := automationConversations(t, svc, "daily"); len(convs) != 1 {
+	if convs := automationSessions(t, svc, "daily"); len(convs) != 1 {
 		t.Fatalf("重试应恰好建 1 个会话，got %d", len(convs))
 	}
 }

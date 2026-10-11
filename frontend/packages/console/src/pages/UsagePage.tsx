@@ -66,10 +66,10 @@ function BucketCells({ b }: { b: UsageBucket }) {
       <span style={{ color: b.cancelled > 0 ? tokens.warning : tokens.textPlaceholder }}>{b.cancelled}</span>
       <span style={{ color: rate == null ? tokens.textPlaceholder : tokens.text }}>{fmtPct(rate)}</span>
       <span style={{ fontFamily: tokens.fontMono }}>{fmtDuration(b.duration_ms)}</span>
-      <span style={{ fontFamily: tokens.fontMono }} title={`上下文为区间末快照 · ${reportedLabel(b.usage_reported, b.conversations)}`}>
+      <span style={{ fontFamily: tokens.fontMono }} title={`上下文为区间末快照 · ${reportedLabel(b.usage_reported, b.sessions)}`}>
         {fmtContext(b.context_used, b.context_size)}
       </span>
-      <span style={{ fontFamily: tokens.fontMono }} title={`会话累计费用快照 · ${reportedLabel(b.cost_reported, b.conversations)}`}>
+      <span style={{ fontFamily: tokens.fontMono }} title={`会话累计费用快照 · ${reportedLabel(b.cost_reported, b.sessions)}`}>
         {fmtCost(b.cost_amount, b.cost_currency, b.cost_by_currency)}
       </span>
     </>
@@ -216,7 +216,7 @@ export function UsagePage() {
                 valueStyle={{ fontSize: 20 }}
               />
             </Tooltip>
-            <Statistic title="会话数" value={data.totals.conversations} valueStyle={{ fontSize: 20 }} />
+            <Statistic title="会话数" value={data.totals.sessions} valueStyle={{ fontSize: 20 }} />
           </div>
 
           {rows.length === 0 ? (

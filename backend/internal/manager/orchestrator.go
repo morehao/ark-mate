@@ -13,7 +13,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// agentCancelTimeout conversation/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
+// agentCancelTimeout session/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
 // 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
 const agentCancelTimeout = 3 * time.Second
 
@@ -31,9 +31,9 @@ type acpSession interface {
 	ConfigOptions() []acl.ConfigOption
 }
 
-// ActiveConversation 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
-// 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = conversation id）。
-type ActiveConversation struct {
+// ActiveSession 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
+// 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = session id）。
+type ActiveSession struct {
 	ID      string
 	AgentID string
 	Runtime string
@@ -47,13 +47,13 @@ type ActiveConversation struct {
 	// 摘 `byProvider` 映射与关掉旧会话，而 `sess` 是接口（`acpSession` 上没有 ID()）。
 	providerID string
 	// proj 会话的可执行投影（§4.2 会话边界版；design doc §16 Orchestrator 采用 Runtime）。
-	// 由 startConversationOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
+	// 由 startSessionOn 依 spec 构造；测试注入的假会话为 nil → 走 sess 直连路径。
 	proj runtime.Runtime
 
 	mu   sync.Mutex
 	busy bool
 	turn *Turn
-	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureConversation 按需重建）
+	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureSession 按需重建）
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string
@@ -69,31 +69,31 @@ type Turn struct {
 	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）
 	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机 / 显式停 agent），
 	// 区别于对端或子进程意外断开：主动拆除不是故障，收尾归 interrupted（无终态、可续聊重发），
-	// 不能当失败处理（见 disconnectConversation 的状态语义）。受 as.mu 保护。
+	// 不能当失败处理（见 disconnectSession 的状态语义）。受 as.mu 保护。
 	intentional bool
 	ctx         context.Context
 	stop        string
 	err         error
 }
 
-// CreateResult 是 StartConversation 的结果。
+// CreateResult 是 StartSession 的结果。
 type CreateResult struct {
-	ConversationID string
-	AgentID        string
-	Runtime        string
-	Status         string
-	EventSeq       int64 // conversation.created 事件的 bus 水位（供 WS attach 续传）
+	SessionID string
+	AgentID   string
+	Runtime   string
+	Status    string
+	EventSeq  int64 // session.created 事件的 bus 水位（供 WS attach 续传）
 }
 
-// Orchestrator 编排 Agent 生命周期与会话执行（连接获取→conversation/new→多轮 prompt→cancel）。
+// Orchestrator 编排 Agent 生命周期与会话执行（连接获取→session/new→多轮 prompt→cancel）。
 type Orchestrator struct {
 	svc *Service
 	reg *runtime.Registry
 
-	mu            sync.Mutex
-	conns         map[string]*runtimeConn // key = connKey(runtime, 原生权限 env)；同配置共享暖进程
-	procReg       *procreg.Registry       // runtime 子进程注册表（孤儿回收；nil = 禁用）
-	conversations map[string]*ActiveConversation
+	mu       sync.Mutex
+	conns    map[string]*runtimeConn // key = connKey(runtime, 原生权限 env)；同配置共享暖进程
+	procReg  *procreg.Registry       // runtime 子进程注册表（孤儿回收；nil = 禁用）
+	sessions map[string]*ActiveSession
 	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
 	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此
 	// 解析为平台会话 id 再发布/键控；会话失活（dropConn）时随 victim 一并清除。
@@ -145,7 +145,7 @@ type runtimeConn struct {
 	pid          int       // 子进程 pid（进程注册表登记用；0 = 未登记）
 	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
 	// 而非对端或子进程意外断开。拆除方在 Close 之前置位，dropConn 据此判定拆除原因；
-	// 主动拆除不得把会话写成失败态（见 disconnectConversation 的状态语义）。
+	// 主动拆除不得把会话写成失败态（见 disconnectSession 的状态语义）。
 	intentional atomic.Bool
 }
 
@@ -159,15 +159,15 @@ type RunOptions struct {
 	ConfigPath string   // 自定义 adapter 的 {config} 占位替换（内置 runtime 无占位，预留扩展）
 }
 
-// StartOptions 一次 StartConversation 的入参。
+// StartOptions 一次 StartSession 的入参。
 //
 // Cwd 为空时回落当前工作目录，**仅为 demo/RunOnce 路径保留**：会话创建路径
-// （Service.CreateConversation）必须先经 ResolveWorkspace 定出工作空间再传进来，
+// （Service.CreateSession）必须先经 ResolveWorkspace 定出工作空间再传进来，
 // 绝不能让「平台站在哪」成为用户会话的沙箱边界（见 workspace.go）。
 type StartOptions struct {
-	// ConversationID 平台会话 uuid；空 = 由编排器生成。
+	// SessionID 平台会话 uuid；空 = 由编排器生成。
 	// 该 id 在 session/new **之前**定号，代建工作空间的目录名以它为准。
-	ConversationID string
+	SessionID string
 	// Cwd 会话工作空间（规范化后的绝对路径）；空 = 用当前工作目录（demo 语义）。
 	Cwd string
 	// WorkspaceTemporary 该 cwd 是否由**平台**给出（= 默认工作空间；随响应透出，
@@ -175,9 +175,9 @@ type StartOptions struct {
 	WorkspaceTemporary bool
 	// WorkspaceID 归属的工作空间登记 id（空 = 未登记 → 读面归默认工作空间）。
 	//
-	// 与 Cwd 的分工见 ConversationRec.WorkspaceID：Cwd 是执行事实（ACP cwd、沙箱边界），
+	// 与 Cwd 的分工见 SessionRec.WorkspaceID：Cwd 是执行事实（ACP cwd、沙箱边界），
 	// WorkspaceID 是归属事实（左栏分组）。这里两个字段一起传，是因为**定稿发生在同一处**
-	// （CreateConversation 解析出 ws 之后），分开传会让两条来源有机会不一致。
+	// （CreateSession 解析出 ws 之后），分开传会让两条来源有机会不一致。
 	WorkspaceID string
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
@@ -186,7 +186,7 @@ type StartOptions struct {
 	Origin string
 	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 回落 agent 声明）。
 	//
-	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startConversationOn 里由本字段
+	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startSessionOn 里由本字段
 	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
 	// 而那种分裂不会报错——只会让会话拿到与代际台账不符的能力集，且只在重启后显现。
 	Selection *CapabilitySelection
@@ -194,9 +194,9 @@ type StartOptions struct {
 
 // RunResult 一次 RunOnce（demo）的结果。
 type RunResult struct {
-	ConversationID string
-	AgentID        string
-	StopReason     string
+	SessionID  string
+	AgentID    string
+	StopReason string
 }
 
 // NewOrchestrator 构造编排器并回挂到 Service（Service 负责 bus/存储/REST 方法）。
@@ -205,7 +205,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		svc:             svc,
 		reg:             reg,
 		conns:           make(map[string]*runtimeConn),
-		conversations:   make(map[string]*ActiveConversation),
+		sessions:        make(map[string]*ActiveSession),
 		byProvider:      make(map[string]string),
 		inflight:        newInFlightTracker(),
 		perm:            NewPermissionManager(DefaultPermissionTimeout),
@@ -215,14 +215,14 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		generationLimit: DefaultGenerationLimit,
 	}
 	// 挂起权限一旦有终局（用户决策 / 超时自动拒绝 / 会话取消），发布收敛事件
-	// （conversation.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
-	o.perm.SetOnResolved(func(conversationID, callID, reason string, d acl.PermissionDecision) {
+	// （session.permission_resolved），前端据此收敛权限卡——服务端事件是唯一事实，不再依赖前端时钟。
+	o.perm.SetOnResolved(func(sessionID, callID, reason string, d acl.PermissionDecision) {
 		outcome := "cancelled"
 		if d.Allowed || (d.Rejected && d.OptionID != "") {
 			outcome = "selected"
 		}
-		o.svc.publish(BusPermissionResolved, conversationID, map[string]any{
-			"session_id": conversationID,
+		o.svc.publish(BusPermissionResolved, sessionID, map[string]any{
+			"session_id": sessionID,
 			"call_id":    callID,
 			"outcome":    outcome,
 			"reason":     reason,
@@ -235,10 +235,10 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	// 会话级记忆持久化挂钩（sqlite 模式写 permission_memories 表；st 为 nil 时 no-op）。
 	o.perm.SetMemoryHooks(o.svc.persistMemoryAdd, o.svc.persistMemoryDel, o.svc.persistMemoryDelAll)
 	// 挂起提问一旦有终局（accept/decline/cancel/超时自动取消/会话取消），发布收敛事件
-	// （conversation.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
-	o.elic.SetOnResolved(func(conversationID, id, reason string, d acl.ElicitationOutcome) {
-		o.svc.publish(BusElicitationResolved, conversationID, map[string]any{
-			"session_id":     conversationID,
+	// （session.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
+	o.elic.SetOnResolved(func(sessionID, id, reason string, d acl.ElicitationOutcome) {
+		o.svc.publish(BusElicitationResolved, sessionID, map[string]any{
+			"session_id":     sessionID,
 			"elicitation_id": id,
 			"action":         d.Action,
 			"reason":         reason,
@@ -261,7 +261,7 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 	items := make([]MemoryItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, MemoryItem{
-			conversationID: r.ConversationID, Title: r.Title, Kind: r.Kind,
+			sessionID: r.SessionID, Title: r.Title, Kind: r.Kind,
 			Decision: r.Decision, Since: r.CreatedAt,
 		})
 	}
@@ -279,7 +279,7 @@ func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeou
 // SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
 func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
 
-// SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureConversation。
+// SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }
 
 // SetGenerationLimit 设置同一配置下的能力代际上限（0 = 不限制）。见 admitGeneration。
@@ -302,11 +302,11 @@ func (o *Orchestrator) GenerationLimit() int {
 	return o.generationLimit
 }
 
-// conversation 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
-func (o *Orchestrator) conversation(id string) *ActiveConversation {
+// session 按 ID 取活跃会话（连接存活期内）。查找不存在（如进程重启后）按未找到处理。
+func (o *Orchestrator) session(id string) *ActiveSession {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.conversations[id]
+	return o.sessions[id]
 }
 
 // Close 关闭全部连接并清理（daemon 退出/测试收尾）。
@@ -327,7 +327,7 @@ func (o *Orchestrator) Close() {
 	for _, rc := range conns {
 		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
 		rc.intentional.Store(true)
-		o.disconnectConversationAll(rc)
+		o.disconnectSessionAll(rc)
 		o.svc.setAgentState(rc.agentID, AgentStateStopped)
 		o.unregisterProc(rc)
 		if rc.client != nil {

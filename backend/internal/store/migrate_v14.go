@@ -62,7 +62,7 @@ func migrateV14(ctx context.Context, tx *gorm.DB, s *Store) error {
 	// ① 既有会话数（DDL 里新列带 `DEFAULT ''`，所以历史行**天然**是"归默认工作空间"，
 	// 不需要 UPDATE 刷一遍——少一条全表写就少一次中断面）。
 	if err := tx.WithContext(ctx).Raw(
-		`SELECT COUNT(*) FROM ` + model.TableConversation).Scan(&notes.ExistingConversations).Error; err != nil {
+		`SELECT COUNT(*) FROM conversations` /* 历史表名，勿跟随实体改名 */).Scan(&notes.ExistingConversations).Error; err != nil {
 		return fmt.Errorf("统计既有会话数: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func migrateV14(ctx context.Context, tx *gorm.DB, s *Store) error {
 	// 那与"归属留空即默认"这条语义冲突（谁的默认？），当场报错比留个说不清的库好。
 	var n int64
 	if err := tx.WithContext(ctx).Raw(
-		`SELECT COUNT(*) FROM ` + model.TableWorkspace).Scan(&n).Error; err != nil {
+		`SELECT COUNT(*) FROM workspaces` /* 历史表名，勿跟随实体改名 */).Scan(&n).Error; err != nil {
 		return fmt.Errorf("统计工作空间登记: %w", err)
 	}
 	if n != 0 {

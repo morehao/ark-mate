@@ -231,7 +231,7 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 				return
 			}
 		}
-		// SPA 深链：前端路由（/settings、/conversations/<id>…）由页面自己解析。
+		// SPA 深链：前端路由（/settings、/sessions/<id>…）由页面自己解析。
 		indexResp(c)
 	})
 }

@@ -163,8 +163,8 @@ func autoPermissionDecision(action string, opts []acl.PermissionOption) (acl.Per
 
 // policyAction 返回该会话所属 agent 对本次权限请求的既定动作；
 // ok=false 表示无 agent/无策略/动作为 ask（调用方走既有征询路径）。
-func (o *Orchestrator) policyAction(conversationID string, req acl.PermissionRequest) (string, string, bool) {
-	agentID := o.svc.ConversationAgentID(conversationID)
+func (o *Orchestrator) policyAction(sessionID string, req acl.PermissionRequest) (string, string, bool) {
+	agentID := o.svc.SessionAgentID(sessionID)
 	if agentID == "" {
 		return "", "", false
 	}

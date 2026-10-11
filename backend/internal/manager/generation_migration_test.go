@@ -25,7 +25,7 @@ import (
 //
 // 判据全部落在**可观察的事实**上（句柄指针、`conns` 条数、库里的指纹、session/new 真的收到了
 // 什么、事件里的 reason、错误的码与文案），而不是"决策函数返回了什么"——决策再对，句柄没换
-// 也等于没迁；而且**取句柄一律走 `acquireConversation`**（Prompt 与排队投递的真实入口）：
+// 也等于没迁；而且**取句柄一律走 `acquireSession`**（Prompt 与排队投递的真实入口）：
 // 只测判定函数会漏掉"判定对但没接线"这一整类 bug。
 
 // genRig 迁移用例的架子：stub runtime + sqlite 库 + 一个名为 a1 的 agent。
@@ -108,31 +108,31 @@ func sessionNewLog(t *testing.T) func() []map[string]any {
 }
 
 // start 建一条钉住 sel 的 a1 会话。
-func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *ActiveConversation) {
+func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *ActiveSession) {
 	t.Helper()
 	return r.startAs(t, "a1", sel)
 }
 
 // startAs 给指定 agent 建一条会话，返回 id 与当时的句柄。
-func (r *genRig) startAs(t *testing.T, agentID string, sel *CapabilitySelection) (string, *ActiveConversation) {
+func (r *genRig) startAs(t *testing.T, agentID string, sel *CapabilitySelection) (string, *ActiveSession) {
 	t.Helper()
 	agent, _ := r.svc.AgentByID(agentID)
-	res, err := r.orch.startConversationOn(context.Background(), agent,
+	res, err := r.orch.startSessionOn(context.Background(), agent,
 		StartOptions{Cwd: t.TempDir(), Selection: sel})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
-	as := r.orch.conversation(res.ConversationID)
+	as := r.orch.session(res.SessionID)
 	if as == nil {
 		t.Fatal("建会话后应有活句柄")
 	}
-	return res.ConversationID, as
+	return res.SessionID, as
 }
 
 // boundary 走**真实入口**取这一轮的句柄（Prompt / 排队投递都经它）。
-func (r *genRig) boundary(t *testing.T, convID string) *ActiveConversation {
+func (r *genRig) boundary(t *testing.T, convID string) *ActiveSession {
 	t.Helper()
-	as, err := r.orch.acquireConversation(context.Background(), convID)
+	as, err := r.orch.acquireSession(context.Background(), convID)
 	if err != nil {
 		t.Fatalf("取句柄: %v", err)
 	}
@@ -142,7 +142,7 @@ func (r *genRig) boundary(t *testing.T, convID string) *ActiveConversation {
 // row 读库里那三个 M3 列里的指纹与选定明细。
 func (r *genRig) row(t *testing.T, convID string) (fingerprint, capJSON string) {
 	t.Helper()
-	row, ok, err := r.svc.st.GetConversation(context.Background(), convID)
+	row, ok, err := r.svc.st.GetSession(context.Background(), convID)
 	if err != nil || !ok {
 		t.Fatalf("读库: ok=%v err=%v", ok, err)
 	}
@@ -198,7 +198,7 @@ func TestGenerationMigration(t *testing.T) {
 	// ② 真的改了白名单内的定义（fs 的 args）→ 指纹变了 → 本轮切。
 	r.registerMcp(t, fsServer("v2"))
 	agent, _ := r.svc.AgentByID("a1")
-	sel := ParseCapabilitySelection(r.svc.conversationRec(convID).CapabilityJSON)
+	sel := ParseCapabilitySelection(r.svc.sessionRec(convID).CapabilityJSON)
 	want := r.svc.capabilityFingerprint(agent, r.runtme, sel)
 	if want == as1.Fingerprint {
 		t.Fatal("改了白名单内定义却没换指纹：迁移永远触发不了")
@@ -218,7 +218,7 @@ func TestGenerationMigration(t *testing.T) {
 	if n := r.conns(); n != 1 {
 		t.Fatalf("迁移后应只剩新代际（旧代际无人引用即回收），got %d", n)
 	}
-	if cur := r.orch.conversation(convID); cur != as2 {
+	if cur := r.orch.session(convID); cur != as2 {
 		t.Fatal("活跃集合应指向新句柄")
 	}
 	as1.mu.Lock()
@@ -319,11 +319,11 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 
 	// ②-b 未应答的权限/提问：同样顺延（别把用户正盯着的确认卡换到另一个进程去）。
 	r.registerMcp(t, fsServer("v3"))
-	if plan := r.orch.planGenerationSwitch(as2, r.svc.conversationRec(convID)); plan.Action != genActionSwitch {
+	if plan := r.orch.planGenerationSwitch(as2, r.svc.sessionRec(convID)); plan.Action != genActionSwitch {
 		t.Fatalf("空闲且键变化时应可切，got %s（%s）", plan.Action, plan.Reason)
 	}
-	r.orch.elic.pending["pending-1"] = &pendingElicitation{conversationID: convID}
-	if plan := r.orch.planGenerationSwitch(as2, r.svc.conversationRec(convID)); plan.Action != genActionDefer {
+	r.orch.elic.pending["pending-1"] = &pendingElicitation{sessionID: convID}
+	if plan := r.orch.planGenerationSwitch(as2, r.svc.sessionRec(convID)); plan.Action != genActionDefer {
 		t.Fatalf("有挂起提问时应顺延，got %s（%s）", plan.Action, plan.Reason)
 	}
 	if got := r.boundary(t, convID); got != as2 {
@@ -345,7 +345,7 @@ func TestGenerationMigrationKeepsDefaultPath(t *testing.T) {
 		t.Fatalf("未声明能力选择的会话指纹应为空，got %q", as1.Fingerprint)
 	}
 	r.registerMcp(t, fsServer("v2"))
-	if plan := r.orch.planGenerationSwitch(as1, r.svc.conversationRec(convID)); plan.Action != genActionKeep {
+	if plan := r.orch.planGenerationSwitch(as1, r.svc.sessionRec(convID)); plan.Action != genActionKeep {
 		t.Fatalf("缺省路径不因定义变化迁移，got %s（%s）", plan.Action, plan.Reason)
 	}
 	if got := r.boundary(t, convID); got != as1 {
@@ -360,7 +360,7 @@ func TestGenerationMigrationKeepsDefaultPath(t *testing.T) {
 // 不产生"会话不可用"。
 //
 // 构造失败的办法：把 memo 兜底关掉（`handoffMaxChars = 0`），于是新代际上既不能原生 resume
-// （桩不声明 load/resume）、又不能建 fresh（无 memo 兜底）→ connectConversation 报
+// （桩不声明 load/resume）、又不能建 fresh（无 memo 兜底）→ connectSession 报
 // resume_unavailable。此时会话必须继续挂在旧代际上，且**不向调用方报错**。
 func TestMigrationFallback(t *testing.T) {
 	r := newGenRig(t)
@@ -391,7 +391,7 @@ func TestMigrationFallback(t *testing.T) {
 	if last.Code != "generation_switch_failed" {
 		t.Fatalf("诊断码 = %q，期望 generation_switch_failed", last.Code)
 	}
-	if last.ConversationID != convID {
+	if last.SessionID != convID {
 		t.Fatalf("诊断应指认会话: %+v", last)
 	}
 }
@@ -416,7 +416,7 @@ func TestPermissionWithdrawalDoesNotFallBack(t *testing.T) {
 
 	// 收回权限：workspace-write → read-only。**定义一个字都没动**，变的只是权限面。
 	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}
-	plan := r.orch.planGenerationSwitch(as1, r.svc.conversationRec(convID))
+	plan := r.orch.planGenerationSwitch(as1, r.svc.sessionRec(convID))
 	if plan.Action != genActionSwitch || !plan.PermChanged {
 		t.Fatalf("收回权限应触发迁移且标为缩权面：%+v", plan)
 	}
@@ -425,7 +425,7 @@ func TestPermissionWithdrawalDoesNotFallBack(t *testing.T) {
 	}
 
 	r.orch.handoffMaxChars = 0 // 新代际建不起来
-	_, err := r.orch.acquireConversation(context.Background(), convID)
+	_, err := r.orch.acquireSession(context.Background(), convID)
 	if err == nil {
 		t.Fatal("缩权面变化 + 新代际建不起来时必须拒发这一轮（不许回退到被收回的权限面）")
 	}
@@ -438,7 +438,7 @@ func TestPermissionWithdrawalDoesNotFallBack(t *testing.T) {
 		t.Fatalf("文案应说明不会用已收回的权限面继续跑，got %v", err)
 	}
 	// 会话本身没被弄坏：句柄还在、配置修好后照常可用。
-	if cur := r.orch.conversation(convID); cur != as1 {
+	if cur := r.orch.session(convID); cur != as1 {
 		t.Fatal("拒发不得把会话句柄弄丢（修好配置后还要能继续）")
 	}
 	r.orch.handoffMaxChars = DefaultHandoffMaxChars
@@ -561,27 +561,27 @@ func TestMigrationReclaimsSharedGenerationOnlyWhenUnreferenced(t *testing.T) {
 	}
 }
 
-// TestEnsureConversationMigratesOnRebuild 进程死掉后重建 = 迁移（同一条路径的不同入口）。
+// TestEnsureSessionMigratesOnRebuild 进程死掉后重建 = 迁移（同一条路径的不同入口）。
 //
-// 这条路径不经过"活句柄"，而是 `ensureConversation` 重开会话——它必须按**当前定义**重算代际，
+// 这条路径不经过"活句柄"，而是 `ensureSession` 重开会话——它必须按**当前定义**重算代际，
 // 否则"改了定义 + 进程重启"这个最常见的组合永远吃不上新能力。
-func TestEnsureConversationMigratesOnRebuild(t *testing.T) {
+func TestEnsureSessionMigratesOnRebuild(t *testing.T) {
 	r := newGenRig(t)
 	r.registerMcp(t, fsServer("v1"))
 	convID, as1 := r.start(t, &CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
 	oldFP := as1.Fingerprint
 
 	// 模拟进程死掉：句柄作废并摘除（与拆连路径的收尾一致）。
-	r.orch.disconnectConversation(as1, true)
+	r.orch.disconnectSession(as1, true)
 
 	r.registerMcp(t, fsServer("v2"))
 	agent, _ := r.svc.AgentByID("a1")
-	sel := ParseCapabilitySelection(r.svc.conversationRec(convID).CapabilityJSON)
+	sel := ParseCapabilitySelection(r.svc.sessionRec(convID).CapabilityJSON)
 	want := r.svc.capabilityFingerprint(agent, r.runtme, sel)
 	if want == oldFP {
 		t.Fatal("改了定义就该算出新指纹")
 	}
-	as2, err := r.orch.ensureConversation(context.Background(), convID)
+	as2, err := r.orch.ensureSession(context.Background(), convID)
 	if err != nil {
 		t.Fatalf("重建: %v", err)
 	}
@@ -630,10 +630,10 @@ func TestStopAgentClosesDriftedGenerations(t *testing.T) {
 	if n := r.waitConns(t, 0); n != 0 {
 		t.Fatalf("停 agent 后不该留下任何属于它的代际，got %d", n)
 	}
-	if r.orch.conversation(convID) != nil {
+	if r.orch.session(convID) != nil {
 		t.Fatal("停 agent 后句柄应被摘除（会话记录保留，可续聊）")
 	}
-	if rec := r.svc.conversationRec(convID); rec == nil || rec.ID != convID {
+	if rec := r.svc.sessionRec(convID); rec == nil || rec.ID != convID {
 		t.Fatal("停 agent 不得删会话记录（可续聊性只看会话是否存在）")
 	}
 }
@@ -681,10 +681,10 @@ func TestStopAgentKeepsSharedGenerations(t *testing.T) {
 	if n := r.conns(); n != 1 {
 		t.Fatalf("共用代际不该因为停 a1 而被关，got %d", n)
 	}
-	if got := r.orch.conversation(a2.ID); got != a2 {
+	if got := r.orch.session(a2.ID); got != a2 {
 		t.Fatal("a2 的会话必须原样可用")
 	}
-	if r.orch.conversation(a1.ID) != nil {
+	if r.orch.session(a1.ID) != nil {
 		t.Fatal("a1 的会话句柄应被摘除")
 	}
 }

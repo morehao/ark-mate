@@ -11,13 +11,13 @@ import (
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
 //   - 会话级始终允许记忆命中 → 直接放行（快速路径）；
-//   - 否则发布 conversation.permission_request 事件（含 call_id/options）并阻塞等待
+//   - 否则发布 session.permission_request 事件（含 call_id/options）并阻塞等待
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
 // 事件发布（publish）注入的给 PermissionManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
-	// 均以平台会话 id 为键，与 conversations/events/permission_memories 一致）。
+	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
 	sid := o.resolveProvider(req.SessionID)
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
@@ -31,12 +31,12 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 				"title": req.ToolCall.Title, "kind": req.ToolCall.Kind,
 				"allowed": d.Allowed, "rejected": d.Rejected, "option_id": d.OptionID,
 			})
-			glog.Infow(ctx, "permission: auto-decided by agent policy", "conversation", sid,
+			glog.Infow(ctx, "permission: auto-decided by agent policy", "session", sid,
 				"agent", agentID, "action", action, "title", req.ToolCall.Title, "kind", req.ToolCall.Kind)
 			return d
 		}
 		glog.Warnw(ctx, "permission: agent policy action has no matching option, fallback to ask",
-			"conversation", sid, "agent", agentID, "action", action, "options", len(req.Options))
+			"session", sid, "agent", agentID, "action", action, "options", len(req.Options))
 	}
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
@@ -57,13 +57,13 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 }
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionItem {
-	ps := o.perm.pendingForConversation(conversationID)
+func (o *Orchestrator) PendingPermissions(sessionID string) []PermissionItem {
+	ps := o.perm.pendingForSession(sessionID)
 	out := make([]PermissionItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, PermissionItem{
 			CallID:    p.callID,
-			SessionID: p.conversationID,
+			SessionID: p.sessionID,
 			Title:     p.title,
 			ToolCall:  p.toolCall,
 			Options:   p.options,
@@ -78,14 +78,14 @@ func (o *Orchestrator) PendingPermissions(conversationID string) []PermissionIte
 // 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
 //
-// conversationID 为决策发起方会话（C3 scope 归属）：与挂起项归属不符时按「不存在」处理
+// sessionID 为决策发起方会话（C3 scope 归属）：与挂起项归属不符时按「不存在」处理
 // （ok=false，不投递、不删除挂起项，不泄露他会话挂起项）——与 elicitation 决策同一立场。
-func (o *Orchestrator) ResolvePermission(conversationID, callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
+func (o *Orchestrator) ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (PermissionDecisionOutcome, bool, error) {
 	if callID == "" {
 		return PermissionDecisionOutcome{}, false, acl.NewError(acl.ClassRequest, "call_id_required", "call_id 必填", nil)
 	}
 	d := acl.PermissionDecision{Allowed: allowed, Rejected: !allowed, OptionID: optionID, Always: always}
-	found, out := o.perm.ResolveDecision(conversationID, callID, d)
+	found, out := o.perm.ResolveDecision(sessionID, callID, d)
 	if !found {
 		return PermissionDecisionOutcome{}, false, nil
 	}
@@ -110,22 +110,22 @@ type PermissionDecisionOutcome struct {
 }
 
 // PermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧；供详情/撤销 UI）。
-func (o *Orchestrator) PermissionMemories(conversationID string) []MemoryItem {
-	return o.perm.List(conversationID)
+func (o *Orchestrator) PermissionMemories(sessionID string) []MemoryItem {
+	return o.perm.List(sessionID)
 }
 
 // RevokeMemory 撤销会话级权限记忆。
 //   - title、kind 均非空 → 撤销单条（精确匹配 action+identifier）；
-//   - 两者均为空 → 一键撤销整会话全部记忆（= ForgetConversation）。
-func (o *Orchestrator) RevokeMemory(conversationID, title, kind string) (bool, error) {
+//   - 两者均为空 → 一键撤销整会话全部记忆（= ForgetSession）。
+func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error) {
 	switch {
 	case title == "" && kind == "":
-		o.perm.ForgetConversation(conversationID)
+		o.perm.ForgetSession(sessionID)
 		return true, nil
 	case title == "" || kind == "":
 		return false, acl.NewError(acl.ClassRequest, "memory_revoke_params", "撤销单条需 title 与 kind 同时提供；两者都空则撤销全部", nil)
 	}
-	return o.perm.Revoke(conversationID, title, kind), nil
+	return o.perm.Revoke(sessionID, title, kind), nil
 }
 
 // resolveElicitationScope 判定一次 elicitation 的会话归属（C3），返回 (会话 id, 归属来源)：
@@ -137,14 +137,14 @@ func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.Elicitat
 	if req.ScopeSource == acl.ScopeWire && req.SessionID != "" {
 		return req.SessionID, acl.ScopeWire
 	}
-	if sid := o.busyConversationForClient(cli); sid != "" {
+	if sid := o.busySessionForClient(cli); sid != "" {
 		return sid, acl.ScopeInferred
 	}
 	return "", acl.ScopeAmbiguous
 }
 
 // requestElicitation 处理一次 ACP 结构化提问请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
-//   - 发布 conversation.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
+//   - 发布 session.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
 // 事件发布（publish）注入给 ElicitationManager，避免 manager 依赖 bus。
@@ -152,13 +152,12 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 	sid := req.SessionID // 断点恢复别名归一
 	publish := func(it ElicitationItem) {
 		payload := map[string]any{
-			"session_id":      sid,
-			"conversation_id": sid,
-			"scope_source":    it.ScopeSource,
-			"elicitation_id":  it.ID,
-			"mode":            it.Mode,
-			"message":         it.Message,
-			"timeout_at":      it.TimeoutAt.UTC().Format(time.RFC3339),
+			"session_id":     sid,
+			"scope_source":   it.ScopeSource,
+			"elicitation_id": it.ID,
+			"mode":           it.Mode,
+			"message":        it.Message,
+			"timeout_at":     it.TimeoutAt.UTC().Format(time.RFC3339),
 		}
 		if it.Mode == "form" {
 			payload["schema"] = it.Schema
@@ -171,39 +170,38 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 }
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingElicitations(conversationID string) []ElicitationItem {
-	ps := o.elic.pendingForConversation(conversationID)
+func (o *Orchestrator) PendingElicitations(sessionID string) []ElicitationItem {
+	ps := o.elic.pendingForSession(sessionID)
 	out := make([]ElicitationItem, 0, len(ps))
 	for _, p := range ps {
 		out = append(out, ElicitationItem{
-			ID:             p.id,
-			SessionID:      p.conversationID,
-			ConversationID: p.conversationID,
-			ScopeSource:    p.scopeSource,
-			Mode:           p.mode,
-			Message:        p.message,
-			Schema:         p.schema,
-			URL:            p.url,
-			TimeoutAt:      p.timeout,
+			ID:          p.id,
+			SessionID:   p.sessionID,
+			ScopeSource: p.scopeSource,
+			Mode:        p.mode,
+			Message:     p.message,
+			Schema:      p.schema,
+			URL:         p.url,
+			TimeoutAt:   p.timeout,
 		})
 	}
 	return out
 }
 
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。
-// conversationID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
-func (o *Orchestrator) ResolveElicitation(conversationID, elicitationID, action string, content map[string]any) (bool, error) {
+// sessionID 是决策发起方会话：C3 起做 scope 校验，只有归属会话能决策（跨会话 → not found）。
+func (o *Orchestrator) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
 	if elicitationID == "" {
 		return false, acl.NewError(acl.ClassRequest, "elicitation_id_required", "elicitation_id 必填", nil)
 	}
 	var found, mismatch bool
 	switch action {
 	case "accept":
-		found, mismatch = o.elic.ResolveAccept(conversationID, elicitationID, content)
+		found, mismatch = o.elic.ResolveAccept(sessionID, elicitationID, content)
 	case "decline":
-		found, mismatch = o.elic.ResolveDecline(conversationID, elicitationID)
+		found, mismatch = o.elic.ResolveDecline(sessionID, elicitationID)
 	case "cancel":
-		found, mismatch = o.elic.ResolveCancel(conversationID, elicitationID)
+		found, mismatch = o.elic.ResolveCancel(sessionID, elicitationID)
 	default:
 		return false, acl.NewError(acl.ClassRequest, "elicitation_action", "action 需为 accept/decline/cancel 之一", nil)
 	}

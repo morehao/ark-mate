@@ -24,7 +24,7 @@ func newInFlightTracker() *inFlightTracker {
 }
 
 // Mark 登记某会话在该连接上进入在途 turn。
-func (t *inFlightTracker) Mark(client *acl.Client, conversationID string) {
+func (t *inFlightTracker) Mark(client *acl.Client, sessionID string) {
 	if client == nil {
 		return
 	}
@@ -35,11 +35,11 @@ func (t *inFlightTracker) Mark(client *acl.Client, conversationID string) {
 		set = make(map[string]struct{})
 		t.byClient[client] = set
 	}
-	set[conversationID] = struct{}{}
+	set[sessionID] = struct{}{}
 }
 
 // Unmark 撤销登记（幂等：未登记/连接已清除均为 no-op）。
-func (t *inFlightTracker) Unmark(client *acl.Client, conversationID string) {
+func (t *inFlightTracker) Unmark(client *acl.Client, sessionID string) {
 	if client == nil {
 		return
 	}
@@ -49,7 +49,7 @@ func (t *inFlightTracker) Unmark(client *acl.Client, conversationID string) {
 	if set == nil {
 		return
 	}
-	delete(set, conversationID)
+	delete(set, sessionID)
 	if len(set) == 0 {
 		delete(t.byClient, client)
 	}

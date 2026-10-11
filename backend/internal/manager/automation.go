@@ -459,7 +459,7 @@ func (s *Service) automationRecByID(id string) (automationRec, bool) {
 func (s *Service) automationHasActiveRun(rec automationRec) bool {
 	// 判据只有一条：**会话状态是不是 in_progress**（不另写一份终态清单——两份清单必然漂移，
 	// 而漂移的后果是"卡住的会话"被当成已结束，于是同一 occurrence 反复重跑）。
-	return s.conversationRunning(rec.def.LastConversationID)
+	return s.sessionRunning(rec.def.LastSessionID)
 }
 
 // view 把记录投影成对外视图（时间一律 RFC3339 UTC 文本，与其余接口同格式）。
@@ -472,7 +472,7 @@ func (r *automationRec) view() dtoautomation.AutomationResp {
 		Schedule:            r.def.Schedule,
 		Target:              r.def.Target,
 		MaxRunDuration:      r.def.MaxRunDuration,
-		LastConversationID:  r.def.LastConversationID,
+		LastSessionID:       r.def.LastSessionID,
 		LastStatus:          r.def.LastStatus,
 		LastReason:          r.def.LastReason,
 		ConsecutiveFailures: r.def.ConsecutiveFailures,

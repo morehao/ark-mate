@@ -19,7 +19,7 @@ import (
 // 会话归属（过渡实现，决策见 docs/agent-interactions-acp-v1-design-20260907.md）：
 // SDK v0.13.5 的 UnstableCreateElicitationForm/Url 未建模规范 scope 字段，顶层 sessionId/
 // requestId 在 SDK 解码时被丢弃，但**变体里的 `_meta` 会被完整保留**。因此归属分两段：
-//  1. 本层先读 `_meta`（sessionId/session_id/conversationId/conversation_id，
+//  1. 本层先读 `_meta`（sessionId/session_id/sessionId/session_id，
 //     见 scope.go）→ 命中即填 SessionID 并置 ScopeSource=wire（零 fork 可用的 wire 归属）；
 //  2. 未命中才由宿主（manager/orchestrator 按「连接上唯一在途 turn」）注入 SessionID 并置
 //     ScopeSource=inferred_inflight；连接上无唯一在途 turn 时置 ScopeAmbiguous（不再无痕取消）。

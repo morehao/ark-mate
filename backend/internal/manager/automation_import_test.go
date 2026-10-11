@@ -42,7 +42,7 @@ func automationSeedDir(t *testing.T) string {
 	  "last_fired_at": "2026-10-08T01:00:00+08:00",
 	  "last_status": "completed",
 	  "last_reason": "上一次很顺利",
-	  "last_conversation_id": "c-1",
+	  "last_session_id": "c-1",
 	  "consecutive_failures": 2,
 	  "recent_runs": [
 	    {"scheduled_for": "2026-10-08T01:00:00Z", "fired_at": "2026-10-08T01:00:01Z", "status": "completed", "trigger": "scheduled"}
@@ -92,7 +92,7 @@ func TestImportAutomationDirSplitsRuntimeColumns(t *testing.T) {
 		t.Fatalf("last_fired_at 未归一为 UTC RFC3339Nano: %q", u1.LastFiredAt)
 	}
 	if u1.LastStatus != "completed" || u1.LastReason != "上一次很顺利" ||
-		u1.LastConversationID != "c-1" || u1.ConsecutiveFailures != 2 {
+		u1.LastSessionID != "c-1" || u1.ConsecutiveFailures != 2 {
 		t.Fatalf("运行态列不符: %+v", u1)
 	}
 	if !strings.Contains(u1.RecentRuns, `"completed"`) {

@@ -30,8 +30,8 @@ type AutomationRuntimeState struct {
 	LastStatus string
 	// LastReason 最近一次没跑成/失败的原因（人话）。
 	LastReason string
-	// LastConversationID 最近一次触发产生的会话 id。
-	LastConversationID string
+	// LastSessionID 最近一次触发产生的会话 id。
+	LastSessionID string
 	// ConsecutiveFailures 连续失败次数。
 	ConsecutiveFailures int64
 	// RecentRuns 最近若干次触发的留痕（JSON 数组文本；空 = 不改这一列）。
@@ -61,7 +61,7 @@ func (s *Store) UpsertAutomationDefinition(ctx context.Context, id, body string,
 	return s.commitDefinitionChange(ctx, model.CapabilityKindAutomation, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
-				return s.automations.WithTx(tx).CreateCAS(ctx, &model.AutomationDefinition{
+				return s.automations.WithTx(tx).CreateCAS(ctx, &model.AutomationEntity{
 					ID: id, Body: body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",
 				})
 			}
@@ -78,12 +78,12 @@ func (s *Store) DeleteAutomationDefinition(ctx context.Context, id string, expec
 }
 
 // GetAutomationDefinition 读一条定义（不存在 → (nil, false, nil)）。
-func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*AutomationDefinition, bool, error) {
+func (s *Store) GetAutomationDefinition(ctx context.Context, id string) (*model.AutomationEntity, bool, error) {
 	return s.automations.Get(ctx, id)
 }
 
 // ListAutomationDefinitions 列出全部定义（id 升序）。
-func (s *Store) ListAutomationDefinitions(ctx context.Context) (model.AutomationDefinitionList, error) {
+func (s *Store) ListAutomationDefinitions(ctx context.Context) (model.AutomationEntityList, error) {
 	return s.automations.List(ctx)
 }
 
@@ -98,7 +98,7 @@ func (s *Store) CountAutomationDefinitions(ctx context.Context) (int64, error) {
 // 这是"不重复触发"的唯一仲裁者：返回 false = 别人（另一个 tick / 另一个进程）先认领了，
 // 调用方**必须**放弃这次执行。`body`/`revision` 一概不碰（认领不是定义变更）。
 func (s *Store) ClaimAutomationOccurrence(ctx context.Context, id, expectedLastFired, claimedFor string) (bool, error) {
-	res := s.db.WithContext(ctx).Model(&model.AutomationDefinition{}).
+	res := s.db.WithContext(ctx).Model(&model.AutomationEntity{}).
 		Where("id = ? AND last_fired_at = ?", id, expectedLastFired).
 		Updates(map[string]any{"last_fired_at": claimedFor})
 	if res.Error != nil {
@@ -119,7 +119,7 @@ func (s *Store) SaveAutomationOverlay(ctx context.Context, id string, ov Automat
 	updates := map[string]any{
 		"last_status":          ov.Runtime.LastStatus,
 		"last_reason":          ov.Runtime.LastReason,
-		"last_conversation_id": ov.Runtime.LastConversationID,
+		"last_session_id":      ov.Runtime.LastSessionID,
 		"consecutive_failures": ov.Runtime.ConsecutiveFailures,
 		"last_fired_at":        ov.Runtime.LastFiredAt,
 	}
@@ -131,7 +131,7 @@ func (s *Store) SaveAutomationOverlay(ctx context.Context, id string, ov Automat
 		updates["revision"] = ov.ExpectedRev + 1
 		updates["updated_at"] = model.FormatTimeOrNow(time.Now())
 	}
-	q := s.db.WithContext(ctx).Model(&model.AutomationDefinition{}).
+	q := s.db.WithContext(ctx).Model(&model.AutomationEntity{}).
 		Where("id = ? AND last_fired_at = ?", id, ov.ExpectedLastFired)
 	if ov.Body != "" {
 		q = q.Where("revision = ?", ov.ExpectedRev)

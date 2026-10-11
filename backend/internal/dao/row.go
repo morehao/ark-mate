@@ -131,12 +131,12 @@ const (
 
 // ProviderDao 访问 providers 表（v13：列 + revision CAS）。
 type ProviderDao struct {
-	*RowDao[model.ProviderDefinition, model.ProviderDefinitionList]
+	*RowDao[model.ProviderEntity, model.ProviderEntityList]
 }
 
 // NewProviderDao 构造 ProviderDao。
 func NewProviderDao(getDB gormdao.DBGetter) *ProviderDao {
-	return &ProviderDao{RowDao: newRowDao[model.ProviderDefinition, model.ProviderDefinitionList]("ProviderDao", getDB)}
+	return &ProviderDao{RowDao: newRowDao[model.ProviderEntity, model.ProviderEntityList]("ProviderDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -145,18 +145,18 @@ func (d *ProviderDao) WithTx(tx *gorm.DB) *ProviderDao {
 }
 
 // List 列出全部供应商（id 升序）。
-func (d *ProviderDao) List(ctx context.Context) (model.ProviderDefinitionList, error) {
+func (d *ProviderDao) List(ctx context.Context) (model.ProviderEntityList, error) {
 	return d.RowDao.List(ctx, providerListOrder)
 }
 
 // ModelDao 访问 models 表（v13：列 + revision CAS；平台模型清单）。
 type ModelDao struct {
-	*RowDao[model.ModelDefinition, model.ModelDefinitionList]
+	*RowDao[model.ModelEntity, model.ModelEntityList]
 }
 
 // NewModelDao 构造 ModelDao。
 func NewModelDao(getDB gormdao.DBGetter) *ModelDao {
-	return &ModelDao{RowDao: newRowDao[model.ModelDefinition, model.ModelDefinitionList]("ModelDao", getDB)}
+	return &ModelDao{RowDao: newRowDao[model.ModelEntity, model.ModelEntityList]("ModelDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO。
@@ -168,7 +168,7 @@ func (d *ModelDao) WithTx(tx *gorm.DB) *ModelDao {
 //
 // v12 起模型**不带 runtime 维度**，所以"列某 runtime 的清单"不再是一个查询轴：
 // 同一份清单投给所有已注册底座，`ListAll` 就是同步时的那一次读取。
-func (d *ModelDao) ListAll(ctx context.Context) (model.ModelDefinitionList, error) {
+func (d *ModelDao) ListAll(ctx context.Context) (model.ModelEntityList, error) {
 	return d.RowDao.List(ctx, modelListOrder)
 }
 
@@ -176,8 +176,8 @@ func (d *ModelDao) ListAll(ctx context.Context) (model.ModelDefinitionList, erro
 //
 // **调用方必须持事务**（`s.db.Transaction` 内 `WithTx`）：v13 的引用完整性判据是
 // 「检查引用 + 删行在同一事务」，脱离事务的单独调用就退回了 TOCTOU（ADR-4）。
-func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
-	var rows model.ModelDefinitionList
+func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model.ModelEntityList, error) {
+	var rows model.ModelEntityList
 	err := d.DB(ctx).Where("provider_id = ?", providerID).Order("id ASC").Find(&rows).Error
 	return rows, err
 }
@@ -186,8 +186,8 @@ func (d *ModelDao) ListByProvider(ctx context.Context, providerID string) (model
 //
 // 它对应的就是唯一索引 `idx_models_provider_model`：**判据交由库级唯一性表达**，
 // 而不是"先查后写"（那中间有窗口）。
-func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, modelID string) (*model.ModelDefinition, bool, error) {
-	var row model.ModelDefinition
+func (d *ModelDao) GetByProviderModel(ctx context.Context, providerID, modelID string) (*model.ModelEntity, bool, error) {
+	var row model.ModelEntity
 	err := d.DB(ctx).Where("provider_id = ? AND model_id = ?", providerID, modelID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, nil

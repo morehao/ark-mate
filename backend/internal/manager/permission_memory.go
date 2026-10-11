@@ -30,19 +30,19 @@ type memoryEntry struct {
 }
 
 // MemoryItem 是一条会话级权限记忆的对外表示（REST/详情载荷；decision 区分始终允许/始终拒绝）。
-// conversationID 仅用于装载（sqlite 恢复），不进对外载荷。
+// sessionID 仅用于装载（sqlite 恢复），不进对外载荷。
 type MemoryItem struct {
-	conversationID string
-	Title          string    `json:"title"`
-	Kind           string    `json:"kind"`
-	Decision       string    `json:"decision"` // allow | reject
-	Since          time.Time `json:"since"`
+	sessionID string
+	Title     string    `json:"title"`
+	Kind      string    `json:"kind"`
+	Decision  string    `json:"decision"` // allow | reject
+	Since     time.Time `json:"since"`
 }
 
 // SetMemoryHooks 注入会话级记忆持久化挂钩（sqlite 模式；可为 nil 表示不持久化）。
 // 挂钩在锁外调用（DB 写是 best-effort，不入关键路径）。
-func (m *PermissionManager) SetMemoryHooks(add func(conversationID, title, kind, decision string, since time.Time),
-	del func(conversationID, title, kind string), delAll func(conversationID string)) {
+func (m *PermissionManager) SetMemoryHooks(add func(sessionID, title, kind, decision string, since time.Time),
+	del func(sessionID, title, kind string), delAll func(sessionID string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.memAdd = add
@@ -58,10 +58,10 @@ func alwaysKey(t acl.ToolCallInfo) string { return alwaysKeyOf(t.Title, t.Kind) 
 
 // AutoDecision 决定「无需征询」的快速路径：会话级记忆命中 → 直接放行/拒绝。
 // 返回 (decision, ok)：ok=false 表示需要真正挂起等待用户。
-func (m *PermissionManager) AutoDecision(conversationID string, req acl.PermissionRequest) (acl.PermissionDecision, bool) {
+func (m *PermissionManager) AutoDecision(sessionID string, req acl.PermissionRequest) (acl.PermissionDecision, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	e := m.lookupLocked(conversationID, req.ToolCall)
+	e := m.lookupLocked(sessionID, req.ToolCall)
 	if e == nil {
 		return acl.PermissionDecision{}, false
 	}
@@ -76,8 +76,8 @@ func (m *PermissionManager) AutoDecision(conversationID string, req acl.Permissi
 }
 
 // lookupLocked 查某会话对某工具的会话级记忆（须持锁）。
-func (m *PermissionManager) lookupLocked(conversationID string, t acl.ToolCallInfo) *memoryEntry {
-	set := m.mem[conversationID]
+func (m *PermissionManager) lookupLocked(sessionID string, t acl.ToolCallInfo) *memoryEntry {
+	set := m.mem[sessionID]
 	if set == nil {
 		return nil
 	}
@@ -91,12 +91,12 @@ func (m *PermissionManager) lookupLocked(conversationID string, t acl.ToolCallIn
 
 // Remember 记录（或覆盖）一条会话级权限记忆。decision ∈ allow|reject。
 // sqlite 模式下同步旁路持久化（permission_memories 表，同键覆盖）。
-func (m *PermissionManager) Remember(conversationID string, t acl.ToolCallInfo, decision, optionID string) {
+func (m *PermissionManager) Remember(sessionID string, t acl.ToolCallInfo, decision, optionID string) {
 	m.mu.Lock()
-	set := m.mem[conversationID]
+	set := m.mem[sessionID]
 	if set == nil {
 		set = make(map[string]memoryEntry)
-		m.mem[conversationID] = set
+		m.mem[sessionID] = set
 	}
 	k := alwaysKey(t)
 	prev, ok := set[k]
@@ -110,7 +110,7 @@ func (m *PermissionManager) Remember(conversationID string, t acl.ToolCallInfo, 
 	add := m.memAdd
 	m.mu.Unlock()
 	if add != nil {
-		add(conversationID, t.Title, t.Kind, decision, since)
+		add(sessionID, t.Title, t.Kind, decision, since)
 	}
 }
 
@@ -126,10 +126,10 @@ func (m *PermissionManager) LoadMemories(items []MemoryItem) {
 func (m *PermissionManager) memPut(it MemoryItem) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := m.mem[it.conversationID]
+	set := m.mem[it.sessionID]
 	if set == nil {
 		set = make(map[string]memoryEntry)
-		m.mem[it.conversationID] = set
+		m.mem[it.sessionID] = set
 	}
 	k := alwaysKeyOf(it.Title, it.Kind)
 	since := it.Since
@@ -139,23 +139,23 @@ func (m *PermissionManager) memPut(it MemoryItem) {
 	set[k] = memoryEntry{title: it.Title, kind: it.Kind, decision: it.Decision, since: since, seq: m.nextSeq()}
 }
 
-// ForgetConversation 清除整会话的权限记忆（会话结束/重置/一键撤销）。
+// ForgetSession 清除整会话的权限记忆（会话结束/重置/一键撤销）。
 // sqlite 模式下同步旁路删除（permission_memories 表整会话）。
-func (m *PermissionManager) ForgetConversation(conversationID string) {
+func (m *PermissionManager) ForgetSession(sessionID string) {
 	m.mu.Lock()
-	delete(m.mem, conversationID)
+	delete(m.mem, sessionID)
 	delAll := m.memDelAll
 	m.mu.Unlock()
 	if delAll != nil {
-		delAll(conversationID)
+		delAll(sessionID)
 	}
 }
 
 // Revoke 撤销一条会话级权限记忆（title+kind 精确匹配，不区分 decision）；返回该条是否存在。
 // sqlite 模式下同步旁路删除（permission_memories 表同键）。
-func (m *PermissionManager) Revoke(conversationID, title, kind string) bool {
+func (m *PermissionManager) Revoke(sessionID, title, kind string) bool {
 	m.mu.Lock()
-	set := m.mem[conversationID]
+	set := m.mem[sessionID]
 	if set == nil {
 		m.mu.Unlock()
 		return false
@@ -167,12 +167,12 @@ func (m *PermissionManager) Revoke(conversationID, title, kind string) bool {
 	}
 	delete(set, k)
 	if len(set) == 0 {
-		delete(m.mem, conversationID)
+		delete(m.mem, sessionID)
 	}
 	del := m.memDel
 	m.mu.Unlock()
 	if del != nil {
-		del(conversationID, title, kind)
+		del(sessionID, title, kind)
 	}
 	return true
 }
@@ -184,10 +184,10 @@ func (m *PermissionManager) nextSeq() uint64 {
 }
 
 // List 列出某会话的全部权限记忆（按授予时间升序，同一时刻按写入先后；decision 区分 allow/reject）。
-func (m *PermissionManager) List(conversationID string) []MemoryItem {
+func (m *PermissionManager) List(sessionID string) []MemoryItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set := m.mem[conversationID]
+	set := m.mem[sessionID]
 	// 排序键里带 seq（内部字段），所以先按"带序号的内部行"排，再投影成对外的 MemoryItem——
 	// seq 是实现细节，不进 REST 载荷。
 	type row struct {

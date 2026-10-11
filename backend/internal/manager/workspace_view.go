@@ -18,7 +18,7 @@ import (
 // 存在的理由：Web 面板没有原生目录选择器，用户需要一个"看到目录树再选"的入口；
 // 而工作空间是可复用的稳定身份（同一目录下可以有很多会话），所以"最近用过哪些目录"
 // 应当由既有会话派生，而不是另存一份状态（goose 维护 recent-dirs.json 是因为它没有
-// 会话↔目录的持久关联；ark-mate 有 conversations.cwd，派生即真相）。
+// 会话↔目录的持久关联；ark-mate 有 sessions.cwd，派生即真相）。
 
 // browseEntryLimit 单层下发的子目录上限。
 //
@@ -270,8 +270,8 @@ type wsUsage struct {
 func (s *Service) workspaceUsage() map[string]*wsUsage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byPath := make(map[string]*wsUsage, len(s.conversations))
-	for _, r := range s.conversations {
+	byPath := make(map[string]*wsUsage, len(s.sessions))
+	for _, r := range s.sessions {
 		if r.Cwd == "" || r.WorkspaceTemporary {
 			continue
 		}
@@ -323,10 +323,10 @@ func (s *Service) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentRes
 			continue
 		}
 		out = append(out, dtoworkspace.WorkspaceRecentResp{
-			Path:          path,
-			Name:          filepath.Base(path),
-			LastUsedAt:    a.latest,
-			Conversations: a.count,
+			Path:       path,
+			Name:       filepath.Base(path),
+			LastUsedAt: a.latest,
+			Sessions:   a.count,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

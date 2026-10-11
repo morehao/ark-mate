@@ -78,10 +78,10 @@ func TestProviderModelTablesAreColumnsNotCarriers(t *testing.T) {
 		t.Fatalf("models_v13 缺 input_modalities 列（它是 ADR-12 的载体）：%v", cols)
 	}
 
-	// 同一判据的实体侧：ProviderDefinition / ModelDefinition 的 gorm 标签里**不得**再出现
+	// 同一判据的实体侧：ProviderEntity / ModelEntity 的 gorm 标签里**不得**再出现
 	// `column:body`（四张「定义载体」表保留 body，判据不同，所以只看这两个结构体块）。
-	assertEntityHasNoBodyColumn(t, "ProviderDefinition")
-	assertEntityHasNoBodyColumn(t, "ModelDefinition")
+	assertEntityHasNoBodyColumn(t, "ProviderEntity")
+	assertEntityHasNoBodyColumn(t, "ModelEntity")
 }
 
 // createTableColumns 从剥掉注释的 Go 源码里取 `CREATE TABLE <name> (...)` 的列名（保持书写顺序）。
@@ -119,24 +119,38 @@ func createTableColumns(src, table string) ([]string, bool) {
 }
 
 // assertEntityHasNoBodyColumn 断言某个实体结构体的字段里没有 `column:body`（fail-closed：找不到结构体即失败）。
+//
+// v15 起 `internal/model` 是**一表一文件**（`entity.go` 已拆掉），所以这里必须 glob 整个目录
+// 而不是钉死一个文件名——钉死会在拆文件后**解析不到即失败**（fail-closed 是好的那一侧），
+// 而"读不到就跳过"那种写法会让守卫静默空转，本函数刻意不给自己留那条路。
 func assertEntityHasNoBodyColumn(t *testing.T, structName string) {
 	t.Helper()
-	path := filepath.Join(backendRoot(t), "internal", "model", "entity.go")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("读不到 %s: %v", path, err)
+	dir := filepath.Join(backendRoot(t), "internal", "model")
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("扫不到 %s/*.go: %v（本守卫是 fail-closed，找不到实体源码即失败）", dir, err)
 	}
-	src := stripLineComments(string(raw))
 	re := regexp.MustCompile(`(?s)type ` + regexp.QuoteMeta(structName) + ` struct \{(.*?)\n\}`)
-	m := re.FindStringSubmatch(src)
-	if m == nil {
-		t.Fatalf("在 %s 里找不到 `type %s struct`：结构体被改名/挪走了？"+
-			"（本守卫是 fail-closed）", path, structName)
+	found := false
+	for _, path := range paths {
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatalf("读不到 %s: %v", path, rerr)
+		}
+		m := re.FindStringSubmatch(stripLineComments(string(raw)))
+		if m == nil {
+			continue
+		}
+		found = true
+		if strings.Contains(m[1], "column:body") {
+			t.Fatalf("%s（%s）里又出现了 `column:body`：这两张表是**资源表**（平台字段全成列），"+
+				"body 的键集合封闭——它只留给「正文是用户自由文档」的四张定义载体表（ADR-1/ADR-2）",
+				structName, path)
+		}
 	}
-	if strings.Contains(m[1], "column:body") {
-		t.Fatalf("%s 里又出现了 `column:body`：这两张表是**资源表**（平台字段全成列），"+
-			"body 的键集合封闭——它只留给「正文是用户自由文档」的四张定义载体表（ADR-1/ADR-2）",
-			structName)
+	if !found {
+		t.Fatalf("在 %s/*.go 里找不到 `type %s struct`：结构体被改名/挪走了？"+
+			"（本守卫是 fail-closed）", dir, structName)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -25,7 +26,7 @@ import (
 // 三条纪律（对应设计 ADR-1/ADR-5/ADR-6）：
 //   - 登记**不豁免白名单**：创建走的就是 ValidateWorkspace(path, roots)。否则"登记时能过、
 //     建会话被拒"就是一条死路——点了会得到一个必然失败的会话；
-//   - 归属只由 `conversations.workspace_id` 表达，这里不维护第二份成员账；
+//   - 归属只由 `sessions.workspace_id` 表达，这里不维护第二份成员账；
 //   - 删登记**只删登记**：目录、文件、会话历史一概不动，那些会话读面归默认工作空间。
 
 // WorkspaceRegistry 列出全部工作空间登记（按展示顺序）。
@@ -81,11 +82,11 @@ func (s *Service) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
 			CreatedAt: r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: r.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
-		resp.Conversations = int(counts[r.ID])
+		resp.Sessions = int(counts[r.ID])
 		resp.LastUsedAt = lastUsed[r.ID]
 		if r.IsDefault {
 			// 归到默认工作空间的历史会话（workspace_id = ''）。
-			resp.Conversations += int(counts[""])
+			resp.Sessions += int(counts[""])
 			if v := lastUsed[""]; v > resp.LastUsedAt {
 				resp.LastUsedAt = v
 			}
@@ -164,7 +165,7 @@ func (s *Service) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceD
 	case err != nil:
 		return nil, err
 	}
-	// **同步内存镜像**：列表读的是 `s.conversations` 的内存记录，而 store 只改了库里的列。
+	// **同步内存镜像**：列表读的是 `s.sessions` 的内存记录，而 store 只改了库里的列。
 	// 不同步的后果是实测出来的——删完登记立刻按默认工作空间过滤，那几个会话**看不到**
 	// （内存里还挂着已经不存在的 id），要等重启才回来。库是对的、界面是空的，
 	// 而中间没有任何报错。
@@ -209,9 +210,9 @@ func (s *Service) EnsureDefaultWorkspace() error {
 }
 
 // DefaultWorkspace 返回默认工作空间（不存在 → ok=false）。会话创建路径用它定 cwd。
-func (s *Service) DefaultWorkspace() (store.Workspace, bool, error) {
+func (s *Service) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
 	if s.st == nil {
-		return store.Workspace{}, false, nil
+		return model.WorkspaceEntity{}, false, nil
 	}
 	return s.st.DefaultWorkspace(context.Background())
 }
@@ -286,7 +287,7 @@ func workspaceReadOnlyError() error {
 //
 // 为什么给了 workspace_id 就不用再看 req.Cwd 定目录：选择器选中一个登记项是更强的意图表达
 // （用户点的是一个有名字、有顺序的实体），而 cwd 是给"直接用绝对路径"这条老路的。
-// 两者同时给出且不一致时**拒绝**（见 CreateConversation）：猜错的后果是会话跑在用户没打算用的
+// 两者同时给出且不一致时**拒绝**（见 CreateSession）：猜错的后果是会话跑在用户没打算用的
 // 目录里（而那个目录正是 workspace-write 的沙箱边界）。
 func (s *Service) resolveTargetWorkspace(reqWorkspaceID string) (target *DefaultWorkspaceRef, assignment string, err error) {
 	id := strings.TrimSpace(reqWorkspaceID)
@@ -325,7 +326,7 @@ func (s *Service) clearWorkspaceAssignment(workspaceID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
-	for _, rec := range s.conversations {
+	for _, rec := range s.sessions {
 		if rec.WorkspaceID == workspaceID {
 			rec.WorkspaceID = ""
 			n++

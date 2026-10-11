@@ -37,12 +37,12 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	agent1, _ := svc1.AgentByID("a1")
 
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"git"})}
-	res, err := orch1.startConversationOn(ctx, agent1, StartOptions{Cwd: cwd, Selection: pinned})
+	res, err := orch1.startSessionOn(ctx, agent1, StartOptions{Cwd: cwd, Selection: pinned})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
-	convID := res.ConversationID
-	rec1 := svc1.conversationRec(convID)
+	convID := res.SessionID
+	rec1 := svc1.sessionRec(convID)
 	if rec1 == nil || rec1.Fingerprint == "" {
 		t.Fatalf("钉住选定的会话必须有非空指纹: %+v", rec1)
 	}
@@ -55,8 +55,8 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 		t.Fatalf("对照组（未声明）应注入 2 条直连，got %v", defInject)
 	}
 
-	// 落库形态：选定明细与指纹都要写进 conversations 行。
-	row, ok, err := st1.GetConversation(ctx, convID)
+	// 落库形态：选定明细与指纹都要写进 sessions 行。
+	row, ok, err := st1.GetSession(ctx, convID)
 	if err != nil || !ok {
 		t.Fatalf("读库: ok=%v err=%v", ok, err)
 	}
@@ -89,7 +89,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	svc2.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	agent2, _ := svc2.AgentByID("a1")
 
-	rec2 := svc2.conversationRec(convID)
+	rec2 := svc2.sessionRec(convID)
 	if rec2 == nil {
 		t.Fatal("重启后会话记录应有（库是权威元数据）")
 	}

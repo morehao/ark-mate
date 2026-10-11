@@ -387,6 +387,146 @@ var schemaMigrations = []migration{
 		},
 		apply: migrateV14,
 	},
+	{
+		version: 15,
+		name:    "破坏性重建（仅此一次，无行级迁移）：会话词汇统一 + 主键前缀化",
+		// 备份是这次唯一的回退窗口：7 张表的行会被清空（会话/事件/轮次/消息/排队输入/
+		// 权限记忆/工作空间登记），`mate doctor` 会打印 `<db>.bak-v15-*`。
+		backup: "v15",
+		// 语句**全是字面量**：表名在此处是历史命名，绝不引用 model.TableName* 常量
+		// （否则实体改名会把这条历史步骤一起改掉——守卫⑤ 钉着这条纪律）。
+		//
+		// `models` **刻意不在这张清单里**（2026-10-11 用户拍板）：它只换主键形态、列集合
+		// 不变，所以在 apply 里把旧行 id 重铸成 `mdl_<ULID>` 并同事务改指
+		// `meta.default_model`（R7）。保持表不动的直接好处：两个索引与全体模型行的内容
+		// 都不用重建。
+		statements: []string{
+			`DROP TABLE IF EXISTS conversations`,
+			`DROP TABLE IF EXISTS events`,
+			`DROP TABLE IF EXISTS runs`,
+			`DROP TABLE IF EXISTS messages`,
+			`DROP TABLE IF EXISTS permission_memories`,
+			`DROP TABLE IF EXISTS inputs`,
+			`DROP TABLE IF EXISTS workspaces`,
+
+			// `sessions` = v14 的 conversations 列集合（v2/v4/v5/v7/v14 加过的列全在），
+			// 只换表名与主键形态。
+			`CREATE TABLE sessions (
+				id                     TEXT PRIMARY KEY,
+				agent_id               TEXT NOT NULL,
+				cwd                    TEXT NOT NULL DEFAULT '',
+				workspace_id           TEXT NOT NULL DEFAULT '',
+				workspace_temporary    INTEGER NOT NULL DEFAULT 0,
+				provider               TEXT NOT NULL DEFAULT '',
+				model                  TEXT NOT NULL DEFAULT '',
+				runtime_hint           TEXT NOT NULL DEFAULT '',
+				provider_session_id    TEXT NOT NULL DEFAULT '',
+				title                  TEXT NOT NULL DEFAULT '',
+				pinned                 INTEGER NOT NULL DEFAULT 0,
+				archived               INTEGER NOT NULL DEFAULT 0,
+				status                 TEXT NOT NULL DEFAULT 'in_progress',
+				origin                 TEXT NOT NULL DEFAULT '',
+				capability_json        TEXT NOT NULL DEFAULT '',
+				capability_fingerprint TEXT NOT NULL DEFAULT '',
+				last_seq               INTEGER NOT NULL DEFAULT 0,
+				created_at             TEXT NOT NULL,
+				updated_at             TEXT NOT NULL
+			)`,
+			`CREATE INDEX idx_sessions_list ON sessions(archived, updated_at)`,
+			`CREATE INDEX idx_sessions_origin ON sessions(origin, updated_at)`,
+			`CREATE INDEX idx_sessions_fingerprint ON sessions(capability_fingerprint)`,
+			`CREATE INDEX idx_sessions_workspace ON sessions(archived, workspace_id, updated_at)`,
+
+			// events 的身份仍是 seq（历史回放分页用的就是它），**刻意不加 id 列**。
+			`CREATE TABLE events (
+				seq          INTEGER PRIMARY KEY,
+				session_id   TEXT NOT NULL REFERENCES sessions(id),
+				type         TEXT NOT NULL,
+				payload_json TEXT NOT NULL DEFAULT '',
+				created_at   TEXT NOT NULL
+			)`,
+			`CREATE INDEX idx_events_session ON events(session_id, seq)`,
+
+			`CREATE TABLE runs (
+				id             TEXT PRIMARY KEY,
+				session_id     TEXT NOT NULL REFERENCES sessions(id),
+				user_text      TEXT NOT NULL DEFAULT '',
+				status         TEXT NOT NULL DEFAULT 'running',
+				error_code     TEXT NOT NULL DEFAULT '',
+				stop_reason    TEXT NOT NULL DEFAULT '',
+				usage_json     TEXT NOT NULL DEFAULT '',
+				first_seq      INTEGER NOT NULL DEFAULT 0,
+				last_seq       INTEGER NOT NULL DEFAULT 0,
+				first_token_ms INTEGER NOT NULL DEFAULT 0,
+				started_at     TEXT NOT NULL,
+				ended_at       TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE INDEX idx_runs_session ON runs(session_id, started_at)`,
+
+			// `messages.id` 从 `INTEGER PRIMARY KEY AUTOINCREMENT` 换成 `TEXT PRIMARY KEY`
+			// （SQLite 不能 ALTER 主键类型，所以只能随这次重建一起换）。ULID 的字典序 =
+			// 铸造序，于是 `ORDER BY seq_lo ASC, id ASC` 的排序语义逐字不变（P3）。
+			`CREATE TABLE messages (
+				id                TEXT PRIMARY KEY,
+				session_id        TEXT NOT NULL REFERENCES sessions(id),
+				run_id            TEXT NOT NULL DEFAULT '',
+				role              TEXT NOT NULL,
+				text              TEXT NOT NULL DEFAULT '',
+				events_json       TEXT NOT NULL DEFAULT '',
+				tool_details_json TEXT NOT NULL DEFAULT '',
+				seq_lo            INTEGER NOT NULL DEFAULT 0,
+				seq_hi            INTEGER NOT NULL DEFAULT 0,
+				created_at        TEXT NOT NULL
+			)`,
+			`CREATE INDEX idx_messages_session ON messages(session_id, run_id)`,
+
+			// 真正的键是 `UNIQUE(session_id, title, kind)`；`id` 列保留只为 gormdao 的主键
+			// 泛型方法（登记为 D-1 技术债）。
+			`CREATE TABLE permission_memories (
+				id         TEXT PRIMARY KEY,
+				session_id TEXT NOT NULL REFERENCES sessions(id),
+				title      TEXT NOT NULL,
+				kind       TEXT NOT NULL DEFAULT '',
+				decision   TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				UNIQUE(session_id, title, kind)
+			)`,
+			`CREATE INDEX idx_memories_session ON permission_memories(session_id)`,
+
+			`CREATE TABLE inputs (
+				id              TEXT PRIMARY KEY,
+				session_id      TEXT NOT NULL REFERENCES sessions(id),
+				text            TEXT NOT NULL DEFAULT '',
+				delivery        TEXT NOT NULL DEFAULT 'after_turn',
+				target_turn_id  TEXT NOT NULL DEFAULT '',
+				generation      INTEGER NOT NULL DEFAULT 0,
+				status          TEXT NOT NULL DEFAULT 'queued',
+				created_at      TEXT NOT NULL,
+				claimed_at      TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE INDEX idx_inputs_queue ON inputs(session_id, status, created_at)`,
+
+			`CREATE TABLE workspaces (
+				id         TEXT PRIMARY KEY,
+				path       TEXT NOT NULL,
+				title      TEXT NOT NULL DEFAULT '',
+				is_default INTEGER NOT NULL DEFAULT 0,
+				list_order INTEGER NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX idx_workspaces_path ON workspaces(path)`,
+			`CREATE UNIQUE INDEX idx_workspaces_default ON workspaces(is_default) WHERE is_default = 1`,
+			`CREATE INDEX idx_workspaces_order ON workspaces(list_order)`,
+
+			// `automations` 本次**不重建**（它有文件来源，且运行态里的 `last_fired_at` 必须
+			// 保留，ADR-10），但它的运行态列名带着旧词汇：`last_conversation_id` 指向的是
+			// **平台会话 id**，所以随词汇统一改名。列改名而不是重建表，是为了不动
+			// `last_fired_at` 与全体定义行。
+			`ALTER TABLE automations RENAME COLUMN last_conversation_id TO last_session_id`,
+		},
+		apply: migrateV15,
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
@@ -397,7 +537,7 @@ func latestSchemaVersion() int {
 // Migrate 幂等应用未执行的迁移（自管 schema_migrations：单事务 DDL + 记录版本）。
 // 库版本高于本二进制（未知未来版本）→ 拒绝启动（对齐 zacp refuse-start）。
 func (s *Store) Migrate(ctx context.Context) error {
-	if err := s.db.WithContext(ctx).Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableMigration + ` (
+	if err := s.db.WithContext(ctx).Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableNameSchemaMigration + ` (
 		version    INTEGER PRIMARY KEY,
 		name       TEXT NOT NULL,
 		applied_at TEXT NOT NULL

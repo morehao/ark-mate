@@ -8,7 +8,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { ConversationSummary, Workspace } from '@ark-mate/types'
+import type { SessionSummary, Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
 import { GROUP_IDLE_LIMIT, quotaSessions } from '../console/railView'
 import { WorkspaceManageMenu, workspaceLabel } from './WorkspacePicker'
@@ -36,12 +36,12 @@ function writeCollapsed(v: Record<string, boolean>): void {
 }
 
 /**
- * 分组的内容渲染器：由 `ConversationPane` 注入（这样"会话行长什么样"只有一份实现）。
+ * 分组的内容渲染器：由 `SessionPane` 注入（这样"会话行长什么样"只有一份实现）。
  *
  * @param sessions 该分组下的会话（已按 pane 的口径过滤/排序/分页）
  * @param archived 是否处于归档视图（分组内的空态文案不同）
  */
-export type GroupBodyRenderer = (sessions: ConversationSummary[], archived: boolean) => ReactNode
+export type GroupBodyRenderer = (sessions: SessionSummary[], archived: boolean) => ReactNode
 
 interface Props {
   /** 当前视图（active/archived）：归档视图同样按工作空间分组（归档不该换一套信息架构）。 */
@@ -67,7 +67,7 @@ interface Props {
  */
 export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
   const workspaces = useMate((s) => s.workspaces)
-  const conversations = useMate((s) => s.conversations)
+  const sessions = useMate((s) => s.sessions)
   const activeId = useMate((s) => s.activeId)
   const renameWorkspace = useMate((s) => s.renameWorkspace)
   const deleteWorkspace = useMate((s) => s.deleteWorkspace)
@@ -92,8 +92,8 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
 
   // id → 会话列表（一次分桶，避免每个分组各扫一遍全表）。
   const byWorkspace = useMemo(() => {
-    const m = new Map<string, ConversationSummary[]>()
-    for (const c of conversations) {
+    const m = new Map<string, SessionSummary[]>()
+    for (const c of sessions) {
       // 归属由服务端下发（历史会话也带默认工作空间的 id）——这里**不**按 cwd 归组：
       // 路径写法差异（符号链接、尾斜杠）会让匹配静默失败，出现"会话明明在却不在任何分组里"。
       const key = c.workspace_id ?? ''
@@ -102,7 +102,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
       else m.set(key, [c])
     }
     return m
-  }, [conversations])
+  }, [sessions])
 
   if (workspaces === null) {
     // 登记表未装载（服务不可达 / 老版本服务端）：不渲染分组，也不报错——
@@ -143,19 +143,21 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
         // 默认工作空间**默认折叠**（除它下面就是当前会话）：它通常是杂项会话的落点，
         // 展开会把它上面真正在用的项目挤出视口。
         const isOpen = collapsed[ws.id] === undefined
-          ? ws.id !== defaultID || conversations.some((c) => c.id === activeId && c.workspace_id === ws.id)
+          ? ws.id !== defaultID || sessions.some((c) => c.id === activeId && c.workspace_id === ws.id)
           : !collapsed[ws.id]
-        const sessions = byWorkspace.get(ws.id) ?? []
+        // 分组内的会话（与上面那个 store 的 `sessions` 不是一回事——v15 前它叫 `sessions`，
+        // store 那份叫 `conversations`，两个词合并后才撞名）。
+        const groupSessions = byWorkspace.get(ws.id) ?? []
         const broken = ws.dir_status !== 'ok'
         const unnamed = !ws.title
         // 含当前会话的组：leading 的 folder 用主色——"你在哪"必须在**未悬停**时也看得见，
         // 不能只存在于悬停态里（对齐 dsh 的 folderActive）。
-        const containsCurrent = sessions.some((c) => c.id === activeId)
+        const containsCurrent = groupSessions.some((c) => c.id === activeId)
         // 组内配额：只对空闲会话计数，运行中与当前会话不占配额。
         // 判定只有一份实现（`railView.quotaSessions`），组件不自己数。
-        const quota = quotaSessions(sessions, GROUP_IDLE_LIMIT, activeId)
+        const quota = quotaSessions(groupSessions, GROUP_IDLE_LIMIT, activeId)
         const quotaExpanded = quotaOpen[ws.id] ?? false
-        const rows = quotaExpanded ? sessions : quota.rows
+        const rows = quotaExpanded ? groupSessions : quota.rows
 
         return (
           <div key={ws.id}>
@@ -174,7 +176,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
                 {broken && <WarningOutlined className="fg-wsgroup-warn" />}
               </span>
               <span className={`fg-wsgroup-name${unnamed ? ' fg-unnamed' : ''}`}>{workspaceLabel(ws)}</span>
-              <span className="fg-wsgroup-count">{ws.conversations || ''}</span>
+              <span className="fg-wsgroup-count">{ws.sessions || ''}</span>
               {/* 行内动作（v14.1）：`⋯` = 管理（重命名 / 上移下移 / 删除），`⊕` = 在此工作空间
                   新建会话。两者悬停浮现——但它们的位置**一直占着**（CSS 用 `visibility` 而不是
                   `display`），所以鼠标移上去只有这两颗按钮出现，名字不会被挤、会话数不会消失。 */}
@@ -212,10 +214,10 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
                 目录已不存在，登记仍然保留；可重命名或删除登记。
               </div>
             )}
-            {isOpen && !broken && sessions.length === 0 && (
+            {isOpen && !broken && groupSessions.length === 0 && (
               <div className="fg-wsgroup-note">{archived ? '暂无归档会话。' : '暂无会话。'}</div>
             )}
-            {isOpen && !broken && sessions.length > 0 && (
+            {isOpen && !broken && groupSessions.length > 0 && (
               <>
                 {renderBody(rows, archived)}
                 {quota.hidden > 0 && (
@@ -290,7 +292,7 @@ export function WorkspaceGroupPane({ archived, renderBody, onCreate }: Props) {
               {pendingDelete.path}
             </p>
             <p style={{ margin: 0 }}>
-              它的 <b>{pendingDelete.conversations}</b> 个会话将回到「默认工作空间」，会话历史完整保留。
+              它的 <b>{pendingDelete.sessions}</b> 个会话将回到「默认工作空间」，会话历史完整保留。
             </p>
           </div>
         )}

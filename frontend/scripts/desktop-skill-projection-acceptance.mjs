@@ -376,7 +376,7 @@ async function main() {
 
   section('修复 A · 底座侧：平台拉起的 dsh 要能读到这条 skill')
   const conv = await cdp.evalJs(`
-    const r = await fetch('/v1/mate/conversations', {
+    const r = await fetch('/v1/mate/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'dsh', prompt: '报告你可见的 skill 名称。' }))},
@@ -426,7 +426,7 @@ async function main() {
   section('修复 A · 底座侧：平台拉起的 opencode v2 也要能读到同一条 skill')
   const ocBefore = llm.captured.length
   const convOc = await cdp.evalJs(`
-    const r = await fetch('/v1/mate/conversations', {
+    const r = await fetch('/v1/mate/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: ${JSON.stringify(JSON.stringify({ agent_id: 'opencode', prompt: '报告你可见的 skill 名称。' }))},

@@ -39,8 +39,8 @@ func (c ProviderColumns) digest() string {
 }
 
 // newProviderRow 由列值构造实体行（`created_at` / `updated_at` 由调用方给）。
-func newProviderRow(c ProviderColumns, rev int64, createdAt, updatedAt time.Time) *model.ProviderDefinition {
-	return &model.ProviderDefinition{
+func newProviderRow(c ProviderColumns, rev int64, createdAt, updatedAt time.Time) *model.ProviderEntity {
+	return &model.ProviderEntity{
 		ID: c.ID, Name: c.Name, Protocol: c.Protocol, BaseURL: c.BaseURL, Note: c.Note,
 		Revision: rev, CreatedAt: createdAt, UpdatedAt: updatedAt,
 	}
@@ -122,7 +122,7 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 			return err
 		}
 		deleted = true
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
+		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
 			Kind:         model.CapabilityKindProvider,
 			CapabilityID: id,
 			Action:       model.CapabilityActionDelete,
@@ -138,12 +138,12 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 }
 
 // GetProviderDefinition 读一条 provider 档案（不存在 → (nil, false, nil)）。
-func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*ProviderDefinition, bool, error) {
+func (s *Store) GetProviderDefinition(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
 	return s.providers.Get(ctx, id)
 }
 
 // ListProviderDefinitions 列出全部 provider 档案（id 升序）。
-func (s *Store) ListProviderDefinitions(ctx context.Context) (model.ProviderDefinitionList, error) {
+func (s *Store) ListProviderDefinitions(ctx context.Context) (model.ProviderEntityList, error) {
 	return s.providers.List(ctx)
 }
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
@@ -23,7 +23,7 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-run", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-run", AgentID: "agent-stub"})
 
 	// 第一轮：成功。
 	u1 := svc.publish(BusUserMessage, "s-run", map[string]any{"text": "第一问"})
@@ -39,13 +39,13 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 		t.Fatalf("应 2 条 run: n=%d err=%v %+v", len(runs), err, runs)
 	}
 	r0, r1 := runs[0], runs[1]
-	if r0.Status != ConversationStatusCompleted || r0.UserText != "第一问" || r0.StopReason != "end_turn" {
+	if r0.Status != SessionStatusCompleted || r0.UserText != "第一问" || r0.StopReason != "end_turn" {
 		t.Fatalf("run0 不符: %+v", r0)
 	}
 	if r0.FirstSeq != u1.Seq || r0.LastSeq != end1.Seq {
 		t.Fatalf("run0 窗口不符: %+v (u1=%d end1=%d)", r0, u1.Seq, end1.Seq)
 	}
-	if r1.Status != ConversationStatusFailed || r1.UserText != "第二问（会失败）" || r1.ErrorCode != "agent_error" {
+	if r1.Status != SessionStatusFailed || r1.UserText != "第二问（会失败）" || r1.ErrorCode != "agent_error" {
 		t.Fatalf("run1 不符: %+v", r1)
 	}
 	if r1.FirstSeq != u2.Seq || r1.LastSeq != errEnd.Seq {
@@ -63,7 +63,7 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRuns: n=%d err=%v", len(items), err)
 	}
-	if items[1].ErrorCode != "agent_error" || items[0].Status != ConversationStatusCompleted {
+	if items[1].ErrorCode != "agent_error" || items[0].Status != SessionStatusCompleted {
 		t.Fatalf("ListRuns 内容不符: %+v", items)
 	}
 
@@ -84,13 +84,13 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerConversation(&ConversationRec{ID: "s-usage", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-usage", AgentID: "agent-stub"})
 
 	now := time.Now().UTC()
 	seed := func(id, status, usageJSON string, firstTokenMS int64) {
 		t.Helper()
-		if err := st.CreateRun(ctx, store.Run{
-			ID: id, ConversationID: "s-usage", Status: status, UsageJSON: usageJSON,
+		if err := st.CreateRun(ctx, model.RunEntity{
+			ID: id, SessionID: "s-usage", Status: status, UsageJSON: usageJSON,
 			FirstTokenMS: firstTokenMS,
 			StartedAt:    now.Add(-time.Minute), EndedAt: now,
 		}); err != nil {

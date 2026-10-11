@@ -194,8 +194,8 @@ func TestElicitationResolveUnknown(t *testing.T) {
 	}
 }
 
-// TestElicitationCancelConversation conversation/cancel 把挂起提问按取消回馈并清空挂起表。
-func TestElicitationCancelConversation(t *testing.T) {
+// TestElicitationCancelSession session/cancel 把挂起提问按取消回馈并清空挂起表。
+func TestElicitationCancelSession(t *testing.T) {
 	m := NewElicitationManager(30 * time.Second)
 	registered := make(chan string, 1)
 	done := make(chan acl.ElicitationOutcome, 1)
@@ -206,7 +206,7 @@ func TestElicitationCancelConversation(t *testing.T) {
 		done <- out
 	}()
 	<-registered // 注册完成（发布事件）后再取消会话
-	m.CancelConversation("s1")
+	m.CancelSession("s1")
 	out := <-done
 	if out.Action != "cancel" {
 		t.Fatalf("取消会话后应按取消回馈: %+v", out)
@@ -234,7 +234,7 @@ func TestElicitationScopeMismatch(t *testing.T) {
 		}, func(it ElicitationItem) { published <- it })
 	}()
 	it := <-published
-	if it.ConversationID != "owner" || it.SessionID != "owner" {
+	if it.SessionID != "owner" {
 		t.Fatalf("载荷应带归属会话: %+v", it)
 	}
 	if it.ScopeSource != acl.ScopeInferred {
@@ -282,11 +282,11 @@ func TestElicitationScopeSourceWire(t *testing.T) {
 
 // TestServiceResolveElicitationScope C3：REST 面（service）跨会话决策按「不存在」处理——
 // 与既有「未知 elicitation_id」完全同码同文案（40001，不泄露他会话挂起项的存在）；
-// 归属会话决策成功；列出挂起项时带 conversation_id/scope_source。
+// 归属会话决策成功；列出挂起项时带 session_id/scope_source。
 func TestServiceResolveElicitationScope(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	svc.registerConversation(&ConversationRec{ID: "owner", AgentID: "agent-opencode"})
-	svc.registerConversation(&ConversationRec{ID: "intruder", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "owner", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "intruder", AgentID: "agent-opencode"})
 
 	published := make(chan ElicitationItem, 1)
 	done := make(chan struct{})
@@ -303,7 +303,7 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPendingElicitations: %v", err)
 	}
-	if len(list) != 1 || list[0].ConversationID != "owner" || list[0].ScopeSource == "" {
+	if len(list) != 1 || list[0].SessionID != "owner" || list[0].ScopeSource == "" {
 		t.Fatalf("挂起项应带 scope 归属: %+v", list)
 	}
 	if other, err := svc.ListPendingElicitations(context.Background(), "intruder"); err != nil || len(other) != 0 {

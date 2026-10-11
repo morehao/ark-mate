@@ -47,7 +47,7 @@ export type NavEntry = NavLeaf | NavGroup
 export const PENDING_HINT = '预设化 Agent（未实现）'
 
 export const NAV_ENTRIES: readonly NavEntry[] = [
-  { id: 'chat', label: '问答', to: '/conversations', order: 10, icon: <MessageOutlined /> },
+  { id: 'chat', label: '问答', to: '/sessions', order: 10, icon: <MessageOutlined /> },
   {
     id: 'extensions',
     label: '扩展',
@@ -68,7 +68,7 @@ export function isGroup(entry: NavEntry): entry is NavGroup {
 }
 
 /**
- * 命中判定：按**路径段前缀**——`/conversations/abc` 命中 `/conversations`，
+ * 命中判定：按**路径段前缀**——`/sessions/abc` 命中 `/sessions`，
  * `/settings/agents` 命中 `/settings`（设置区内分节，左栏入口仍要高亮）。
  * 用段边界而不是裸 `startsWith`：`/settings-x` 不该命中 `/settings`。
  */
@@ -98,7 +98,7 @@ function isPathActive(pathname: string, to: string): boolean {
  * 会话区不由此判定——它常驻左栏（切页不跳版），不随路由出现或消失。
  */
 export function railContextOf(pathname: string): 'chat' | 'extensions' | 'manage' {
-  if (pathname.startsWith('/conversations')) return 'chat'
+  if (pathname.startsWith('/sessions')) return 'chat'
   if (pathname.startsWith('/extensions')) return 'extensions'
   return 'manage'
 }

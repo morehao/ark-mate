@@ -38,7 +38,7 @@ export const Ev = {
   TurnError: 'turn.error',
   RunCancelled: 'run.cancelled',
   // 一次 automation 触发的结果（含没产生会话的那些：duplicate/overlap/skipped）。
-  // payload = {automation_id, trigger, scheduled_for, status, reason?, conversation_id?}。
+  // payload = {automation_id, trigger, scheduled_for, status, reason?, session_id?}。
   AutomationRun: 'automation.run',
 } as const
 
@@ -54,7 +54,7 @@ export interface BusEvent {
 
 // ——— 会话运行视图（前端侧拼接的事件模型） ———
 
-import type { ElicitationFormSchema, PermissionOption } from './conversation'
+import type { ElicitationFormSchema, PermissionOption } from './session'
 
 export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | 'permission' | 'elicitation'
 
@@ -89,7 +89,7 @@ export interface StreamEntry {
   status?: string
   tone?: 'ok' | 'err' | 'cancel' | 'info'
   // —— 权限确认卡（kind='permission'）——
-  callId?: string // 决策回传锚点（POST /conversations/:id/permission）
+  callId?: string // 决策回传锚点（POST /sessions/:id/permission）
   optionKinds?: PermissionOption[] // ACP 可选项（allow/reject × once/always）
   toolKind?: string // 底层工具 kind（bash/read/write…）
   toolCallId?: string
@@ -97,7 +97,7 @@ export interface StreamEntry {
   decision?: string // resolved 时的决策摘要
   timeoutAt?: string // 服务端超时时刻（ISO）；仅做倒计时展示，收敛以 session.permission_resolved 事件为准
   // —— 结构化提问卡（kind='elicitation'）——
-  elicitationId?: string // 决策回传锚点（POST /conversations/:id/elicitation）
+  elicitationId?: string // 决策回传锚点（POST /sessions/:id/elicitation）
   mode?: 'form' | 'url' // form=表单渲染 schema；url=引导链接
   message?: string // agent 的提问引导文案
   schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）

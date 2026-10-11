@@ -226,7 +226,7 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spe
 	}
 
 	nativeID, cwd := "", ""
-	if rec := s.newestResumableConversation(agent.ID); rec != nil {
+	if rec := s.newestResumableSession(agent.ID); rec != nil {
 		nativeID, cwd = rec.ProviderSessionID, rec.Cwd
 	} else if items, err := rc.client.ListSessions(ctx, ""); err == nil {
 		if pick, ok := pickListedSession(items); ok {
@@ -267,12 +267,12 @@ func pickListedSession(items []acl.SessionInfo) (acl.SessionInfo, bool) {
 	return acl.SessionInfo{}, false
 }
 
-// newestResumableConversation 找该 agent 最近一条可用于 resume 的会话（有原生 id + cwd）。
+// newestResumableSession 找该 agent 最近一条可用于 resume 的会话（有原生 id + cwd）。
 // 内存集合优先（活跃/本进程可见），sqlite 兜底（重启后历史）。
-func (s *Service) newestResumableConversation(agentID string) *ConversationRec {
+func (s *Service) newestResumableSession(agentID string) *SessionRec {
 	s.mu.Lock()
-	var best *ConversationRec
-	for _, r := range s.conversations {
+	var best *SessionRec
+	for _, r := range s.sessions {
 		if r.AgentID != agentID || r.ProviderSessionID == "" || r.Cwd == "" {
 			continue
 		}
@@ -289,17 +289,17 @@ func (s *Service) newestResumableConversation(agentID string) *ConversationRec {
 		return nil
 	}
 	// sqlite 兜底：列出全部会话后挑该 agent 最近的（表量级小；失败即视为无可恢复会话）。
-	list, err := st.ListConversations(context.Background(), nil)
+	list, err := st.ListSessions(context.Background(), nil)
 	if err != nil {
 		return nil
 	}
-	var out *ConversationRec
+	var out *SessionRec
 	for i := range list {
 		c := list[i]
 		if c.AgentID != agentID || c.ProviderSessionID == "" || c.Cwd == "" {
 			continue
 		}
-		rec := &ConversationRec{ID: c.ID, AgentID: c.AgentID, Cwd: c.Cwd,
+		rec := &SessionRec{ID: c.ID, AgentID: c.AgentID, Cwd: c.Cwd,
 			ProviderSessionID: c.ProviderSessionID, UpdatedAt: c.UpdatedAt}
 		if out == nil || rec.UpdatedAt.After(out.UpdatedAt) {
 			out = rec

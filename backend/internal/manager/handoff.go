@@ -5,7 +5,7 @@ package manager
 // 无历史保留 → 空摘要（best-effort，不臆造内容）。
 // 压缩：用户输入原样收录、助手 message 增量按用户轮聚合、去掉 thought/tool/usage/权限噪音；
 // 预算 maxChars（字符）由 MATE_HANDOFF_MAX_CHARS 控制，超出时丢弃最旧轮次（保最新上下文）。
-func (s *Service) HandoffMemo(conversationID string, maxChars int) string {
+func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
 	}
@@ -18,7 +18,7 @@ func (s *Service) HandoffMemo(conversationID string, maxChars int) string {
 	var segs []seg
 	cur := -1
 	for _, evt := range all {
-		if evt.AggregID != conversationID {
+		if evt.AggregID != sessionID {
 			continue
 		}
 		m, ok := evt.Payload.(map[string]any)

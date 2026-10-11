@@ -9,6 +9,8 @@ import (
 
 	// 本包的测试要注册 glog 的 zap driver：日志出口归装配根（cmd/mate 的匿名引入），
 	// 而 test 二进制不含 cmd/mate，Open → dbclient.Open → glog.NewLogger 需要它。
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	_ "github.com/morehao/golib/glog/driver/zap"
 )
 
@@ -32,15 +34,15 @@ func openTestDB(t *testing.T) *Store {
 	return s
 }
 
-func seedConversation(t *testing.T, s *Store, id string) {
+func seedSession(t *testing.T, s *Store, id string) {
 	t.Helper()
-	sess := Conversation{
+	sess := model.SessionEntity{
 		ID: id, AgentID: "agent-opencode",
 		Title: "", Status: "in_progress",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	if err := s.UpsertConversation(ctxT(), sess); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+	if err := s.UpsertSession(ctxT(), sess); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
 	}
 }
 
@@ -57,11 +59,11 @@ func TestSchemaMigrated(t *testing.T) {
 	}
 }
 
-// TestAppendEventSeqMonotonic AppendEvent 全局 seq 单调递增、LastSeq 联动、conversation.last_seq 触顶。
+// TestAppendEventSeqMonotonic AppendEvent 全局 seq 单调递增、LastSeq 联动、session.last_seq 触顶。
 func TestAppendEventSeqMonotonic(t *testing.T) {
 	s := openTestDB(t)
-	seedConversation(t, s, "s1")
-	seedConversation(t, s, "s2")
+	seedSession(t, s, "s1")
+	seedSession(t, s, "s2")
 
 	s1, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"text": "hi"})
 	if err != nil {
@@ -83,37 +85,37 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 	}
 	// 会话水位：s1 应到 s1b；s2 到 s2a。
 	for id, want := range map[string]int64{"s1": s1b, "s2": s2a} {
-		sess, ok, err := s.GetConversation(ctxT(), id)
+		sess, ok, err := s.GetSession(ctxT(), id)
 		if err != nil || !ok {
-			t.Fatalf("GetConversation %s: ok=%v err=%v", id, ok, err)
+			t.Fatalf("GetSession %s: ok=%v err=%v", id, ok, err)
 		}
 		if sess.LastSeq != want {
-			t.Fatalf("conversation %s last_seq 应为 %d, got %d", id, want, sess.LastSeq)
+			t.Fatalf("session %s last_seq 应为 %d, got %d", id, want, sess.LastSeq)
 		}
 	}
 }
 
-// TestAppendEventUnknownConversation 未知会话的事件**不再被库拦住**——这是行为变更，不是笔误。
+// TestAppendEventUnknownSession 未知会话的事件**不再被库拦住**——这是行为变更，不是笔误。
 //
 // 这条守卫原来是反的：自注册的纯 Go dialector 在 DSN 里注入 `foreign_keys(1)`，events 的
-// conversation_id 外键由 SQLite 兜底，插未知会话必然报错。改用 golib 的
+// session_id 外键由 SQLite 兜底，插未知会话必然报错。改用 golib 的
 // `dbgorm/driver/sqlite` 之后不再注入 foreign_keys（SQLite 默认关闭），于是这次插入会**成功**：
 // "给不存在的会话追加事件"从"库拒绝"退化成"写进去一行孤儿数据"。
 //
-// 保留它（而不是删掉）是为了把新行为钉住：调用方必须自己保证 conversation 存在；
+// 保留它（而不是删掉）是为了把新行为钉住：调用方必须自己保证 session 存在；
 // 哪天 foreign_keys 回来了，这条会红，提醒把它改回"应报错"。
-func TestAppendEventUnknownConversation(t *testing.T) {
+func TestAppendEventUnknownSession(t *testing.T) {
 	s := openTestDB(t)
 	if _, err := s.AppendEvent(ctxT(), "ghost", "session.message", map[string]any{}); err != nil {
 		t.Fatalf("foreign_keys 已关（golib driver 不注入），插入未知会话的事件不应报错；若 FK 已恢复，把本测试改回断言报错: %v", err)
 	}
 }
 
-// TestEventsAfterReplay events 回放：按 conversation + after 分页、hasMore 正确。
+// TestEventsAfterReplay events 回放：按 session + after 分页、hasMore 正确。
 func TestEventsAfterReplay(t *testing.T) {
 	s := openTestDB(t)
-	seedConversation(t, s, "s1")
-	seedConversation(t, s, "s2")
+	seedSession(t, s, "s1")
+	seedSession(t, s, "s2")
 	var seqs []int64
 	for i := 0; i < 5; i++ {
 		seq, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"i": i})
@@ -143,40 +145,40 @@ func TestEventsAfterReplay(t *testing.T) {
 	}
 }
 
-// TestConversationCRUD upsert（last_seq 触顶不清零）、list 排序、meta 子集更新。
-func TestConversationCRUD(t *testing.T) {
+// TestSessionCRUD upsert（last_seq 触顶不清零）、list 排序、meta 子集更新。
+func TestSessionCRUD(t *testing.T) {
 	s := openTestDB(t)
-	base := Conversation{ID: "s1", AgentID: "a", Title: "t0",
+	base := model.SessionEntity{ID: "s1", AgentID: "a", Title: "t0",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	if err := s.UpsertConversation(ctxT(), base); err != nil {
+	if err := s.UpsertSession(ctxT(), base); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	// 覆盖 upsert 不能清零 last_seq。
-	seedConversation(t, s, "s1")
+	seedSession(t, s, "s1")
 	if _, err := s.AppendEvent(ctxT(), "s1", "x", map[string]any{}); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 	low := base
 	low.LastSeq = 0
-	if err := s.UpsertConversation(ctxT(), low); err != nil {
+	if err := s.UpsertSession(ctxT(), low); err != nil {
 		t.Fatalf("upsert-low: %v", err)
 	}
-	sess, _, _ := s.GetConversation(ctxT(), "s1")
+	sess, _, _ := s.GetSession(ctxT(), "s1")
 	if sess.LastSeq == 0 {
 		t.Fatal("覆盖 upsert 不应清零 last_seq")
 	}
 
 	pinned := true
 	title := "新标题"
-	if err := s.UpdateConversationMeta(ctxT(), "s1", ConversationMetaPatch{Pinned: &pinned, Title: &title}); err != nil {
+	if err := s.UpdateSessionMeta(ctxT(), "s1", model.SessionMetaPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("update meta: %v", err)
 	}
-	sess, ok, _ := s.GetConversation(ctxT(), "s1")
+	sess, ok, _ := s.GetSession(ctxT(), "s1")
 	if !ok || !sess.Pinned || sess.Title != "新标题" {
 		t.Fatalf("meta 更新未生效: %+v ok=%v", sess, ok)
 	}
 
-	list, err := s.ListConversations(ctxT(), nil)
+	list, err := s.ListSessions(ctxT(), nil)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: n=%d err=%v", len(list), err)
 	}
@@ -185,15 +187,15 @@ func TestConversationCRUD(t *testing.T) {
 // TestMemoriesCRUD allow/reject 双侧、同键覆盖、逐条/整会话撤销。
 func TestMemoriesCRUD(t *testing.T) {
 	s := openTestDB(t)
-	seedConversation(t, s, "s1")
-	if err := s.AddMemory(ctxT(), Memory{ConversationID: "s1", Title: "跑脚本", Kind: "execute", Decision: "allow"}); err != nil {
+	seedSession(t, s, "s1")
+	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "allow"}); err != nil {
 		t.Fatalf("add allow: %v", err)
 	}
 	// 同键异侧覆盖为 reject，不新增行。
-	if err := s.AddMemory(ctxT(), Memory{ConversationID: "s1", Title: "跑脚本", Kind: "execute", Decision: "reject"}); err != nil {
+	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "跑脚本", Kind: "execute", Decision: "reject"}); err != nil {
 		t.Fatalf("add reject: %v", err)
 	}
-	if err := s.AddMemory(ctxT(), Memory{ConversationID: "s1", Title: "写文件", Kind: "write", Decision: "allow"}); err != nil {
+	if err := s.AddMemory(ctxT(), model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "s1", Title: "写文件", Kind: "write", Decision: "allow"}); err != nil {
 		t.Fatalf("add allow2: %v", err)
 	}
 	list, err := s.ListMemories(ctxT(), "s1")
@@ -216,7 +218,7 @@ func TestMemoriesCRUD(t *testing.T) {
 	if n, _ := s.ListMemories(ctxT(), "s1"); len(n) != 1 {
 		t.Fatalf("删除后应剩 1: %+v", n)
 	}
-	if err := s.DeleteConversationMemories(ctxT(), "s1"); err != nil {
+	if err := s.DeleteSessionMemories(ctxT(), "s1"); err != nil {
 		t.Fatalf("一键撤销: %v", err)
 	}
 	if n, _ := s.ListMemories(ctxT(), "s1"); len(n) != 0 {
@@ -229,9 +231,9 @@ func TestImportBatch(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
 	item := ImportItem{
-		Conversation: Conversation{ID: "s-x", AgentID: "agent-opencode", Title: "迁移会话",
+		Session: model.SessionEntity{ID: "s-x", AgentID: "agent-opencode", Title: "迁移会话",
 			Status: "completed", CreatedAt: now, UpdatedAt: now},
-		Events: []Event{
+		Events: []model.EventEntity{
 			{Type: "session.user_message", PayloadJSON: `{"text":"hi"}`},
 			{Type: "session.message", PayloadJSON: `{"text":"yo"}`},
 			{Type: "turn.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
@@ -252,7 +254,7 @@ func TestImportBatch(t *testing.T) {
 	}
 	// 新 marker（不同目录）继续导入会追加（不同会话）。
 	item2 := item
-	item2.Conversation.ID = "s-y"
+	item2.Session.ID = "s-y"
 	ev2, _, err := s.ImportBatch(ctxT(), []ImportItem{item2}, "fp:test-dir-2", 1, 3)
 	if err != nil || ev2 != 3 {
 		t.Fatalf("二次导入: ev=%d err=%v", ev2, err)
@@ -277,14 +279,14 @@ func TestImportBatch(t *testing.T) {
 // LIKE 通配转义（%/_ 不应被当通配符）、limit 截断。
 func TestSearchMessages(t *testing.T) {
 	s := openTestDB(t)
-	seedConversation(t, s, "m1")
-	seedConversation(t, s, "m2")
+	seedSession(t, s, "m1")
+	seedSession(t, s, "m2")
 	ctx := ctxT()
 	now := time.Now().UTC()
-	msgs := []Message{
-		{ConversationID: "m1", RunID: "r1", Role: "user", Text: "网关 502 怎么排查", SeqLo: 1, SeqHi: 1, CreatedAt: now},
-		{ConversationID: "m1", RunID: "r2", Role: "assistant", Text: "先看 UPSTREAM 健康检查", SeqLo: 2, SeqHi: 2, CreatedAt: now.Add(time.Second)},
-		{ConversationID: "m2", RunID: "r3", Role: "user", Text: "100% 覆盖 _under_ 场景", SeqLo: 3, SeqHi: 3, CreatedAt: now.Add(2 * time.Second)},
+	msgs := []model.MessageEntity{
+		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r1", Role: "user", Text: "网关 502 怎么排查", SeqLo: 1, SeqHi: 1, CreatedAt: now},
+		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r2", Role: "assistant", Text: "先看 UPSTREAM 健康检查", SeqLo: 2, SeqHi: 2, CreatedAt: now.Add(time.Second)},
+		{ID: objid.New(objid.Message), SessionID: "m2", RunID: "r3", Role: "user", Text: "100% 覆盖 _under_ 场景", SeqLo: 3, SeqHi: 3, CreatedAt: now.Add(2 * time.Second)},
 	}
 	if err := s.CreateMessages(ctx, msgs); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
@@ -294,10 +296,10 @@ func TestSearchMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
-	if len(hits) != 1 || hits[0].ConversationID != "m1" || hits[0].Role != "user" || hits[0].Seq != 1 {
+	if len(hits) != 1 || hits[0].SessionID != "m1" || hits[0].Role != "user" || hits[0].Seq != 1 {
 		t.Fatalf("命中不符: %+v", hits)
 	}
-	if hits[0].MessageID == 0 || hits[0].RunID != "r1" || hits[0].CreatedAt.IsZero() {
+	if hits[0].MessageID == "" || hits[0].RunID != "r1" || hits[0].CreatedAt.IsZero() {
 		t.Fatalf("锚点字段缺失: %+v", hits[0])
 	}
 
@@ -308,7 +310,7 @@ func TestSearchMessages(t *testing.T) {
 	}
 
 	// LIKE 通配转义：% 与 _ 按字面匹配。
-	if hits, _ := s.SearchMessages(ctx, "%", 10); len(hits) != 1 || hits[0].ConversationID != "m2" {
+	if hits, _ := s.SearchMessages(ctx, "%", 10); len(hits) != 1 || hits[0].SessionID != "m2" {
 		t.Fatalf("百分号应按字面匹配: %+v", hits)
 	}
 	if hits, _ := s.SearchMessages(ctx, "_under_", 10); len(hits) != 1 {
@@ -326,8 +328,8 @@ func TestSearchMessages(t *testing.T) {
 // has_more 指向「更早还有」、before=0 取末尾、跨会话不混入。
 func TestEventsBefore(t *testing.T) {
 	s := openTestDB(t)
-	seedConversation(t, s, "s1")
-	seedConversation(t, s, "s2")
+	seedSession(t, s, "s1")
+	seedSession(t, s, "s2")
 	var seqs []int64
 	for i := 0; i < 5; i++ {
 		seq, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"i": i})
@@ -348,7 +350,7 @@ func TestEventsBefore(t *testing.T) {
 	if got[0].Seq != seqs[1] || got[1].Seq != seqs[2] {
 		t.Fatalf("应升序返回 [seq2,seq3]: %+v", got)
 	}
-	if got[0].ConversationID != "s1" || got[1].ConversationID != "s1" {
+	if got[0].SessionID != "s1" || got[1].SessionID != "s1" {
 		t.Fatalf("跨会话混入: %+v", got)
 	}
 
@@ -370,22 +372,22 @@ func TestEventsBefore(t *testing.T) {
 	}
 }
 
-// TestConversationWorkspaceRoundTrip 工作空间字段（cwd + workspace_temporary）落库往返。
+// TestSessionWorkspaceRoundTrip 工作空间字段（cwd + workspace_temporary）落库往返。
 // 权限标志必须是**权威断言**：前端/离线回放不得从路径形状推断"临时空间"。
-func TestConversationWorkspaceRoundTrip(t *testing.T) {
+func TestSessionWorkspaceRoundTrip(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
-	in := Conversation{
+	in := model.SessionEntity{
 		ID: "ws-1", AgentID: "agent-opencode",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.UpsertConversation(ctxT(), in); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+	if err := s.UpsertSession(ctxT(), in); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
 	}
-	got, ok, err := s.GetConversation(ctxT(), "ws-1")
+	got, ok, err := s.GetSession(ctxT(), "ws-1")
 	if err != nil || !ok {
-		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
 	if got.Cwd != "/work/alpha" || !got.WorkspaceTemporary {
 		t.Fatalf("工作空间字段未往返: %+v", got)
@@ -394,18 +396,18 @@ func TestConversationWorkspaceRoundTrip(t *testing.T) {
 	// 覆盖写：显式指定（非临时）的新值必须能覆盖旧值（不是只写一次的"创建期标志"）。
 	in.WorkspaceTemporary = false
 	in.Cwd = "/work/beta"
-	if err := s.UpsertConversation(ctxT(), in); err != nil {
-		t.Fatalf("UpsertConversation(覆盖): %v", err)
+	if err := s.UpsertSession(ctxT(), in); err != nil {
+		t.Fatalf("UpsertSession(覆盖): %v", err)
 	}
-	got, _, _ = s.GetConversation(ctxT(), "ws-1")
+	got, _, _ = s.GetSession(ctxT(), "ws-1")
 	if got.Cwd != "/work/beta" || got.WorkspaceTemporary {
 		t.Fatalf("覆盖写未生效: %+v", got)
 	}
 
-	// ListConversations 列表路径也带出该列（v5 迁移后的全列查询）。
-	list, err := s.ListConversations(ctxT(), nil)
+	// ListSessions 列表路径也带出该列（v5 迁移后的全列查询）。
+	list, err := s.ListSessions(ctxT(), nil)
 	if err != nil {
-		t.Fatalf("ListConversations: %v", err)
+		t.Fatalf("ListSessions: %v", err)
 	}
 	for _, c := range list {
 		if c.ID == "ws-1" && (c.Cwd != "/work/beta" || c.WorkspaceTemporary) {

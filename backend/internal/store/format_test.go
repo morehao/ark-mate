@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 )
 
 // TestOnDiskFormatContract 锁定落库的**字节形态**。
@@ -22,7 +23,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	// 取一个带纳秒的时间：RFC3339Nano 会裁掉末尾多余的 0，必须能原样往返。
 	at := time.Date(2026, 9, 10, 10, 42, 23, 123456789, time.UTC)
 
-	if err := s.UpsertConversation(ctx, Conversation{
+	if err := s.UpsertSession(ctx, model.SessionEntity{
 		ID: "c1", AgentID: "a1", Cwd: "/tmp/x", Status: "in_progress",
 		Pinned: true, Archived: false, WorkspaceTemporary: true,
 		// v7 三列（M3-1）：来源轴 + 钉住的能力明细与指纹。它们是**文本列**（不是布尔/时间），
@@ -30,48 +31,49 @@ func TestOnDiskFormatContract(t *testing.T) {
 		Origin: "automation:nightly", CapabilityJSON: `{"skills":["s1"]}`, CapabilityFingerprint: "fp-abc",
 		CreatedAt: at, UpdatedAt: at,
 	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+		t.Fatalf("UpsertSession: %v", err)
 	}
 	if _, err := s.AppendEvent(ctx, "c1", "assistant_message", map[string]any{"text": "hi"}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := s.CreateRun(ctx, Run{ID: "r1", ConversationID: "c1", Status: "running", StartedAt: at}); err != nil {
+	if err := s.CreateRun(ctx, model.RunEntity{ID: "r1", SessionID: "c1", Status: "running", StartedAt: at}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	// 未结束的 run：ended_at 落空串（不是零值时间戳）。
-	if err := s.CreateMessages(ctx, []Message{{
-		ConversationID: "c1", RunID: "r1", Role: "user", Text: "hi", SeqLo: 1, SeqHi: 1, CreatedAt: at,
+	if err := s.CreateMessages(ctx, []model.MessageEntity{{
+		ID:        objid.New(objid.Message),
+		SessionID: "c1", RunID: "r1", Role: "user", Text: "hi", SeqLo: 1, SeqHi: 1, CreatedAt: at,
 	}}); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
 	}
-	if err := s.AddMemory(ctx, Memory{ConversationID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
+	if err := s.AddMemory(ctx, model.PermissionMemoryEntity{ID: objid.New(objid.PermissionMemory), SessionID: "c1", Title: "t", Kind: "k", Decision: "allow", CreatedAt: at}); err != nil {
 		t.Fatalf("AddMemory: %v", err)
 	}
 	// v8 三张表（M6-1）：这里**直接调 dao**（而不是 store 门面），为的是钉住精确的落库文本
 	// ——门面内部取"此刻"，而这一层要断言的是"写入的纳秒原样存下来"。
-	if ok, err := s.skills.CreateCAS(ctx, &SkillDefinition{
+	if ok, err := s.skills.CreateCAS(ctx, &model.SkillEntity{
 		ID: "sk-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 skills 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.mcpServers.CreateCAS(ctx, &McpServerDefinition{
+	if ok, err := s.mcpServers.CreateCAS(ctx, &model.McpServerEntity{
 		ID: "mcp-1", Body: `{"transport":"stdio"}`, Revision: 1, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 mcp_servers 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.agents.CreateCAS(ctx, &AgentDefinition{
+	if ok, err := s.agents.CreateCAS(ctx, &model.AgentEntity{
 		ID: "ag-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 agents 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.automations.CreateCAS(ctx, &AutomationDefinition{
+	if ok, err := s.automations.CreateCAS(ctx, &model.AutomationEntity{
 		ID: "auto-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
 		LastFiredAt: at.Format(model.LayoutTS), LastStatus: "completed", ConsecutiveFailures: 2,
 		RecentRuns: `[{"status":"completed"}]`,
 	}); err != nil || !ok {
 		t.Fatalf("写 automations 行: ok=%v err=%v", ok, err)
 	}
-	if err := s.capabilityRevision.Append(ctx, &CapabilityRevision{
+	if err := s.capabilityRevision.Append(ctx, &model.CapabilityRevisionEntity{
 		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
 	}); err != nil {
 		t.Fatalf("写 capability_revisions 行: %v", err)
@@ -83,13 +85,13 @@ func TestOnDiskFormatContract(t *testing.T) {
 	// （多了两个时间列），所以这条用例里布尔列的样本仍由「会话置顶」承担——契约本身不变，
 	// 样本源换一个；而**新增的时间列必须走同一个 serializer**（`created_at` 纳秒原样往返，
 	// 见下面 cases 里的两行）。
-	if ok, err := s.providers.CreateCAS(ctx, &ProviderDefinition{
+	if ok, err := s.providers.CreateCAS(ctx, &model.ProviderEntity{
 		ID: "pv-1", Name: "DeepSeek", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
 		Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 providers 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.models.CreateCAS(ctx, &ModelDefinition{
+	if ok, err := s.models.CreateCAS(ctx, &model.ModelEntity{
 		ID: "md-1", ProviderID: "pv-1", ModelID: "deepseek-v4-flash",
 		Name: "Flash", InputModalities: "text", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
@@ -108,16 +110,16 @@ func TestOnDiskFormatContract(t *testing.T) {
 		wantValue  string
 		checkValue bool
 	}{
-		// 注意 updated_at：追加事件会顺带抬高会话水位并刷新它（touchConversationLastSeq
+		// 注意 updated_at：追加事件会顺带抬高会话水位并刷新它（touchSessionLastSeq
 		// 的既有语义，也是会话列表按 updated_at 排序的依据），故这里只校验形态不校验值。
-		{"conversations", "created_at", "text", at.Format(model.LayoutTS), true},
-		{"conversations", "updated_at", "text", "", false},
-		{"conversations", "pinned", "integer", "1", true},
-		{"conversations", "archived", "integer", "0", true},
-		{"conversations", "workspace_temporary", "integer", "1", true},
-		{"conversations", "origin", "text", "automation:nightly", true},
-		{"conversations", "capability_json", "text", `{"skills":["s1"]}`, true},
-		{"conversations", "capability_fingerprint", "text", "fp-abc", true},
+		{"sessions", "created_at", "text", at.Format(model.LayoutTS), true},
+		{"sessions", "updated_at", "text", "", false},
+		{"sessions", "pinned", "integer", "1", true},
+		{"sessions", "archived", "integer", "0", true},
+		{"sessions", "workspace_temporary", "integer", "1", true},
+		{"sessions", "origin", "text", "automation:nightly", true},
+		{"sessions", "capability_json", "text", `{"skills":["s1"]}`, true},
+		{"sessions", "capability_fingerprint", "text", "fp-abc", true},
 		// v13 列化新增的时间列：必须与既有时间列**同一形态**（TEXT + RFC3339Nano(UTC)），
 		// 纳秒原样往返——用别的 serializer 会写成空格分隔的本地时区串，区间比较整体错位。
 		{"providers", "created_at", "text", at.Format(model.LayoutTS), true},
@@ -152,7 +154,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 		//
 		// v12 把模型面的布尔列删掉了（`is_default` 换成 meta 的单一值），所以这里不再有
 		// "裸 SQL 维护的布尔列"这个样本——但**契约本身不变**（布尔列一律 INTEGER 0/1），
-		// 样本改由 `conversations.pinned` 承担（见上面的用例）。
+		// 样本改由 `sessions.pinned` 承担（见上面的用例）。
 		{"providers", "revision", "integer", "1", true},
 		{"providers", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"models", "provider_id", "text", "pv-1", true},
@@ -179,9 +181,9 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}
 
 	// 读回必须与写入逐纳秒相等（写入 → 文本 → 读回 的完整往返）。
-	conv, ok, err := s.GetConversation(ctx, "c1")
+	conv, ok, err := s.GetSession(ctx, "c1")
 	if err != nil || !ok {
-		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
 	if !conv.CreatedAt.Equal(at) {
 		t.Errorf("会话 created_at 往返失真: %s 期望 %s", conv.CreatedAt, at)
@@ -307,25 +309,25 @@ func TestOnDiskFormatContract(t *testing.T) {
 func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
-	if err := s.UpsertConversation(ctx, Conversation{
+	if err := s.UpsertSession(ctx, model.SessionEntity{
 		ID: "c1", AgentID: "a1", Status: "completed",
 		Provider: "p1", Model: "m1", RuntimeHint: "opencode", ProviderSessionID: "ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+		t.Fatalf("UpsertSession: %v", err)
 	}
 
 	// 模拟导入：header 只带标题等字段，模型选择相关字段为空。
 	if _, _, err := s.ImportBatch(ctx, []ImportItem{{
-		Conversation: Conversation{ID: "c1", AgentID: "a1", Title: "导入标题", Status: "completed"},
-		Events:       []Event{{Type: "assistant_message", PayloadJSON: `{"text":"x"}`}},
+		Session: model.SessionEntity{ID: "c1", AgentID: "a1", Title: "导入标题", Status: "completed"},
+		Events:  []model.EventEntity{{Type: "assistant_message", PayloadJSON: `{"text":"x"}`}},
 	}}, "", 0, 0); err != nil {
 		t.Fatalf("ImportBatch: %v", err)
 	}
 
-	got, ok, err := s.GetConversation(ctx, "c1")
+	got, ok, err := s.GetSession(ctx, "c1")
 	if err != nil || !ok {
-		t.Fatalf("GetConversation: ok=%v err=%v", ok, err)
+		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
 	if got.Provider != "p1" || got.Model != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "ses_1" {
 		t.Errorf("导入覆盖了会话级模型选择: provider=%q model=%q hint=%q session=%q",

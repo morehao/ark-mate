@@ -54,7 +54,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
-			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "conversation", ev.SessionID)
+			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "session", ev.SessionID)
 		case acl.KindUsage:
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
@@ -107,9 +107,9 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 
 // toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
 // （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
-func toolPayload(conversationID, agentID string, d acl.ToolCallInfo) map[string]any {
+func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
 	p := map[string]any{
-		"session_id": conversationID, "agent_id": agentID,
+		"session_id": sessionID, "agent_id": agentID,
 		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
 	}
 	if d.Kind != "" {
@@ -125,33 +125,33 @@ func toolPayload(conversationID, agentID string, d acl.ToolCallInfo) map[string]
 }
 
 // recordUsage 记录平台会话最近一次用量快照（同会话后到覆盖先到；空快照忽略）。
-func (o *Orchestrator) recordUsage(conversationID string, u objusage.UsageInfo) {
-	if conversationID == "" || !u.Reported() {
+func (o *Orchestrator) recordUsage(sessionID string, u objusage.UsageInfo) {
+	if sessionID == "" || !u.Reported() {
 		return
 	}
 	o.usageMu.Lock()
-	o.usage[conversationID] = u
+	o.usage[sessionID] = u
 	o.usageMu.Unlock()
 }
 
 // LatestUsage 取会话最近一次用量快照（无上报 → false）。turn 收口落库用。
-func (o *Orchestrator) LatestUsage(conversationID string) (objusage.UsageInfo, bool) {
+func (o *Orchestrator) LatestUsage(sessionID string) (objusage.UsageInfo, bool) {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
-	u, ok := o.usage[conversationID]
+	u, ok := o.usage[sessionID]
 	return u, ok
 }
 
 // publishError 把错误按 acl 分类发布为 turn.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
-func (o *Orchestrator) publishError(conversationID string, err error, cli *acl.Client) {
+func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client) {
 	ae := acl.Classify(err)
 	tail := ae.StderrTail
 	if len(tail) == 0 && cli != nil {
 		tail = acl.TailLines(cli.StderrTail(), maxDiagStderrLines)
 	}
-	o.svc.recordAgentError("", conversationID, ae, tail)
+	o.svc.recordAgentError("", sessionID, ae, tail)
 	payload := map[string]any{
-		"session_id": conversationID,
+		"session_id": sessionID,
 		"code":       ae.Code,
 		"class":      string(ae.Class),
 		"details":    ae.Details,
@@ -159,5 +159,5 @@ func (o *Orchestrator) publishError(conversationID string, err error, cli *acl.C
 	if len(tail) > 0 {
 		payload["stderr_tail"] = tail
 	}
-	o.svc.publish(BusTurnError, conversationID, payload)
+	o.svc.publish(BusTurnError, sessionID, payload)
 }

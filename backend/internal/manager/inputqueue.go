@@ -6,17 +6,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/glog"
 )
 
 // ——— §6 busy input 队列（排队 / 插话） ———
 //
-// 改造前：会话正忙时 POST /conversations/:id/prompt 直接报 turn_in_progress——用户敲下的字
+// 改造前：会话正忙时 POST /sessions/:id/prompt 直接报 turn_in_progress——用户敲下的字
 // 在 UI 上就地丢失（要么等，要么先取消，两条路都不是「我先把这句话交代了」）。现在
 // delivery 三值：
 //
@@ -74,13 +75,13 @@ func NormalizeDelivery(v string) (string, error) {
 
 // QueuedInput 队列项（事件载荷与 REST 形状）。
 type QueuedInput struct {
-	ID             string    `json:"input_id"`
-	ConversationID string    `json:"session_id"`
-	Text           string    `json:"text"`
-	Delivery       string    `json:"delivery"`
-	TargetTurnID   string    `json:"target_turn_id,omitempty"`
-	Generation     int64     `json:"generation"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID           string    `json:"input_id"`
+	SessionID    string    `json:"session_id"`
+	Text         string    `json:"text"`
+	Delivery     string    `json:"delivery"`
+	TargetTurnID string    `json:"target_turn_id,omitempty"`
+	Generation   int64     `json:"generation"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // PromptOutcome 投递结果（Queued=true 表示本次输入已入队，EventSeq = input_queued 的水位）。
@@ -95,12 +96,12 @@ type PromptOutcome struct {
 // enqueueInput 入队一条待投递输入。
 func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetTurn string, generation int64) (QueuedInput, error) {
 	in := QueuedInput{
-		ID: uuid.NewString(), ConversationID: convID, Text: text, Delivery: delivery,
+		ID: objid.New(objid.Input), SessionID: convID, Text: text, Delivery: delivery,
 		TargetTurnID: targetTurn, Generation: generation, CreatedAt: time.Now().UTC(),
 	}
 	if s.st != nil {
-		row := store.Input{
-			ID: in.ID, ConversationID: convID, Text: text, Delivery: delivery,
+		row := model.InputEntity{
+			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
 			TargetTurnID: targetTurn, Generation: generation,
 			Status: store.InputStatusQueued, CreatedAt: in.CreatedAt,
 		}
@@ -120,7 +121,7 @@ func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedI
 	if s.st != nil {
 		rows, err := s.st.ListQueuedInputs(ctx, convID)
 		if err != nil {
-			glog.Warnw(ctx, "读取待投递输入失败", "conversation", convID, "err", err)
+			glog.Warnw(ctx, "读取待投递输入失败", "session", convID, "err", err)
 			return nil
 		}
 		out := make([]QueuedInput, 0, len(rows))
@@ -138,14 +139,14 @@ func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedI
 //
 // 与事件的分工：事件负责「过程」（何时入队/投递/撤下），本读模型负责「当前态」——
 // 前端冷挂载时 WS 只给 snapshot 不回放历史，没有这个入口队列就会在刷新后凭空消失。
-func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtoconversation.QueuedInputResp, error) {
-	if !s.hasConversation(id) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "conversation_not_found", fmt.Sprintf("未知会话 %q", id), nil))
+func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
+	if !s.hasSession(id) {
+		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
 	queue := s.listQueuedInputs(ctx, id)
-	out := make([]dtoconversation.QueuedInputResp, 0, len(queue))
+	out := make([]dtosession.QueuedInputResp, 0, len(queue))
 	for _, q := range queue {
-		out = append(out, dtoconversation.QueuedInputResp{
+		out = append(out, dtosession.QueuedInputResp{
 			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
 			TargetTurnID: q.TargetTurnID, Generation: q.Generation,
 			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -161,7 +162,7 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 		for {
 			head, err := s.st.HeadQueuedInput(ctx, convID)
 			if err != nil {
-				glog.Warnw(ctx, "取队首输入失败", "conversation", convID, "err", err)
+				glog.Warnw(ctx, "取队首输入失败", "session", convID, "err", err)
 				return nil, false
 			}
 			if head == nil {
@@ -169,7 +170,7 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 			}
 			if head.Generation != generation {
 				glog.Warnw(ctx, "排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
-					"conversation", convID, "input_id", head.ID, "queued_gen", head.Generation, "now_gen", generation)
+					"session", convID, "input_id", head.ID, "queued_gen", head.Generation, "now_gen", generation)
 				if _, err := s.st.StaleQueuedInput(ctx, head.ID); err != nil {
 					glog.Warnw(ctx, "标记排队输入作废失败", "input_id", head.ID, "err", err)
 					return nil, false
@@ -196,7 +197,7 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 		list = list[1:]
 		if in.Generation != generation {
 			glog.Warnw(ctx, "排队输入作废：会话执行代际已变（等待的那一轮上下文已重建，请重发）",
-				"conversation", convID, "input_id", in.ID, "queued_gen", in.Generation, "now_gen", generation)
+				"session", convID, "input_id", in.ID, "queued_gen", in.Generation, "now_gen", generation)
 			continue
 		}
 		s.inputs[convID] = list
@@ -207,7 +208,7 @@ func (s *Service) claimNextInput(ctx context.Context, convID string, generation 
 }
 
 // deleteQueuedInput 撤下一条待投递输入（仅 queued 可撤；已投递/已作废是台账行，不删）。
-// 归属由 conversation_id + input_id 双条件钉住：跨会话删别人的队列项在 SQL 层就不可能。
+// 归属由 session_id + input_id 双条件钉住：跨会话删别人的队列项在 SQL 层就不可能。
 func (s *Service) deleteQueuedInput(ctx context.Context, convID, inputID string) (bool, error) {
 	if s.st != nil {
 		return s.st.DeleteQueuedInput(ctx, convID, inputID)
@@ -253,17 +254,17 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 	glog.Warnw(ctx, "重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
 	for _, r := range pending {
 		// agent_id 此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
-		s.publish(BusInputCancelled, r.ConversationID, map[string]any{
-			"session_id": r.ConversationID, "input_id": r.ID,
+		s.publish(BusInputCancelled, r.SessionID, map[string]any{
+			"session_id": r.SessionID, "input_id": r.ID,
 			"delivery": r.Delivery, "reason": ReasonStale,
 		})
 	}
 }
 
 // queuedFromStore 持久行 → 对外形状。
-func queuedFromStore(r store.Input) QueuedInput {
+func queuedFromStore(r model.InputEntity) QueuedInput {
 	return QueuedInput{
-		ID: r.ID, ConversationID: r.ConversationID, Text: r.Text, Delivery: r.Delivery,
+		ID: r.ID, SessionID: r.SessionID, Text: r.Text, Delivery: r.Delivery,
 		TargetTurnID: r.TargetTurnID, Generation: r.Generation, CreatedAt: r.CreatedAt,
 	}
 }
@@ -272,14 +273,14 @@ func queuedFromStore(r store.Input) QueuedInput {
 
 // deliverQueued 在会话空闲时投递队首排队输入（runTurn 收尾 / 入队后复查调用）。
 // 不投递：会话仍忙（下一轮自然会再触发）、句柄已死（重建后代际已变，队列项会作废）、队列空。
-func (o *Orchestrator) deliverQueued(as *ActiveConversation) {
+func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 	as.mu.Lock()
 	dead, busy := as.dead, as.busy
 	as.mu.Unlock()
 	if dead || busy {
 		return
 	}
-	gen := o.svc.conversationGeneration(as.ID)
+	gen := o.svc.sessionGeneration(as.ID)
 	q, ok := o.svc.claimNextInput(context.Background(), as.ID, gen)
 	if !ok {
 		return
@@ -287,7 +288,7 @@ func (o *Orchestrator) deliverQueued(as *ActiveConversation) {
 	// 先启动新一轮、再发布 delivered：反过来（先发 delivered 再 Prompt）一旦启动失败，
 	// 前端会看到队列项凭空消失而其文本从未作为 user_message 出现过。
 	if _, err := o.Prompt(context.Background(), as.ID, q.Text); err != nil {
-		glog.Warnw(context.Background(), "排队输入投递失败", "conversation", as.ID, "input_id", q.ID, "err", err)
+		glog.Warnw(context.Background(), "排队输入投递失败", "session", as.ID, "input_id", q.ID, "err", err)
 		o.svc.publish(BusInputCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "agent_id": as.AgentID, "input_id": q.ID,
 			"delivery": q.Delivery, "reason": ReasonDeliverFail,

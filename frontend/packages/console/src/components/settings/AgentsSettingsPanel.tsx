@@ -129,10 +129,10 @@ export function AgentsSettingsPanel() {
     const resp = await guard(deleteAgent(a.id))
     if (resp === undefined) return
     const parts = [`已删除 ${resp.deleted}`]
-    if (resp.affected_conversations > 0) {
-      parts.push(`${resp.affected_conversations} 条会话失去执行者（历史仍可读；用同一 id 重新注册可复活绑定）`)
+    if (resp.affected_sessions > 0) {
+      parts.push(`${resp.affected_sessions} 条会话失去执行者（历史仍可读；用同一 id 重新注册可复活绑定）`)
     }
-    if (resp.detached_conversations > 0) parts.push(`${resp.detached_conversations} 条活跃会话已作废`)
+    if (resp.detached_sessions > 0) parts.push(`${resp.detached_sessions} 条活跃会话已作废`)
     if (resp.was_default) parts.push('「当前 Agent」已回落内置默认')
     showToast(parts.join('；'))
     afterMutate()
@@ -329,9 +329,9 @@ export function AgentsSettingsPanel() {
               <span style={{ color: st.color }}>{st.label}</span>
               {seed && <span style={{ color: tokens.textPlaceholder }}>（种子）</span>}
             </span>
-            {(a.conversation_count ?? 0) > 0 && (
+            {(a.session_count ?? 0) > 0 && (
               <Tooltip title="绑定该 agent 的会话数（含归档）：删除后历史仍可读，但无法继续提问">
-                <span style={{ color: tokens.textPlaceholder, fontSize: 12 }}>{a.conversation_count} 会话</span>
+                <span style={{ color: tokens.textPlaceholder, fontSize: 12 }}>{a.session_count} 会话</span>
               </Tooltip>
             )}
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -369,9 +369,9 @@ export function AgentsSettingsPanel() {
                   description={
                     <div style={{ maxWidth: 320 }}>
                       仅删除自定义 agent 定义（不写 Go 代码、不影响运行进程）。
-                      {(a.conversation_count ?? 0) > 0 && (
+                      {(a.session_count ?? 0) > 0 && (
                         <div style={{ marginTop: 4 }}>
-                          有 {a.conversation_count} 条会话绑定它：删除后历史仍可读，但**无法继续提问**
+                          有 {a.session_count} 条会话绑定它：删除后历史仍可读，但**无法继续提问**
                           （用同一 id 重新注册可复活绑定）。
                         </div>
                       )}
@@ -532,9 +532,9 @@ export function AgentsSettingsPanel() {
                   最近失败 · {diag.data.last_error.at} · [{diag.data.last_error.class}/{diag.data.last_error.code}]
                 </div>
                 <div style={{ marginTop: 4 }}>{diag.data.last_error.details}</div>
-                {diag.data.last_error.conversation_id && (
+                {diag.data.last_error.session_id && (
                   <div style={{ marginTop: 4, fontFamily: tokens.fontMono, fontSize: 11, color: tokens.textSecondary }}>
-                    会话 {diag.data.last_error.conversation_id}
+                    会话 {diag.data.last_error.session_id}
                   </div>
                 )}
               </div>

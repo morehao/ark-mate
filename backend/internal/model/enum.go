@@ -2,10 +2,10 @@ package model
 
 // 本文件是**持久层内部**使用的具名常量，用于消掉 SQL 与判空里的裸字面量。
 //
-// 刻意不把这些列定义成具名类型（`type ConversationStatus string`）：会话/轮次状态的
+// 刻意不把这些列定义成具名类型（`type SessionStatus string`）：会话/轮次状态的
 // 权威定义在 `internal/manager/events.go`，那里是一组**无类型字符串常量**，
-// 且 manager 全程按 string 传参（`markConversation(id, status string)`、
-// `ConversationMetaPatch{Status: &status}`）。把列改成具名类型会连锁改动 manager 全包
+// 且 manager 全程按 string 传参（`markSession(id, status string)`、
+// `SessionMetaPatch{Status: &status}`）。把列改成具名类型会连锁改动 manager 全包
 // 与其测试，收益只是类型别名，故此处只统一取值、不改变类型身份。
 const (
 	// DecisionAllow 权限记忆的「允许」方向。

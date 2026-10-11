@@ -18,10 +18,10 @@ type AutomationResp struct {
 	// NextDueAt 下次到期（RFC3339 UTC；空 = 没有下一次：跑完的 once / 归档 / 装载失败）。
 	NextDueAt string `json:"next_due_at,omitempty"`
 	// LastFiredAt 最近一次**认领**的 occurrence（不论结果；ADR-10 的推进点）。
-	LastFiredAt        string `json:"last_fired_at,omitempty"`
-	LastConversationID string `json:"last_conversation_id,omitempty"`
-	LastStatus         string `json:"last_status,omitempty"`
-	LastReason         string `json:"last_reason,omitempty"`
+	LastFiredAt   string `json:"last_fired_at,omitempty"`
+	LastSessionID string `json:"last_session_id,omitempty"`
+	LastStatus    string `json:"last_status,omitempty"`
+	LastReason    string `json:"last_reason,omitempty"`
 	// ConsecutiveFailures 连续没跑成的次数（跑成一次即清零）。>0 时面板要显眼提示。
 	ConsecutiveFailures int `json:"consecutive_failures,omitempty"`
 	// Error 定义装载失败的原因（**坏定义也会出现在列表里**：写得不对却"列表里没有、
@@ -75,8 +75,8 @@ type AutomationRunResp struct {
 	Status string `json:"status"`
 	// Trigger 固定为 manual（同一次触发的其余可能值：scheduled/recovery）。
 	Trigger string `json:"trigger"`
-	// ConversationID 本次产生的会话（status=claimed 时非空）。
-	ConversationID string `json:"conversation_id,omitempty"`
+	// SessionID 本次产生的会话（status=claimed 时非空）。
+	SessionID string `json:"session_id,omitempty"`
 	// Reason 结果说明（人话；overlap/skipped 时说明为什么没跑）。
 	Reason string `json:"reason,omitempty"`
 	// State 触发后的状态（needs_attention = 没跑成，需要人看一眼）。

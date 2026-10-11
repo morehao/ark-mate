@@ -4,30 +4,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
 // seedRun 写入一条 run（含 agent 归属的会话与用量快照 JSON）。
 func seedRun(t *testing.T, s *Store, runID, convID, agentID, status string, started, ended time.Time, usageJSON string) {
 	t.Helper()
-	seedConversationAgent(t, s, convID, agentID)
-	if err := s.CreateRun(ctxT(), Run{
-		ID: runID, ConversationID: convID, Status: status, UsageJSON: usageJSON,
+	seedSessionAgent(t, s, convID, agentID)
+	if err := s.CreateRun(ctxT(), model.RunEntity{
+		ID: runID, SessionID: convID, Status: status, UsageJSON: usageJSON,
 		StartedAt: started, EndedAt: ended,
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
 }
 
-func seedConversationAgent(t *testing.T, s *Store, id, agentID string) {
+func seedSessionAgent(t *testing.T, s *Store, id, agentID string) {
 	t.Helper()
-	if _, ok, err := s.GetConversation(ctxT(), id); err == nil && ok {
+	if _, ok, err := s.GetSession(ctxT(), id); err == nil && ok {
 		return
 	}
-	sess := Conversation{ID: id, AgentID: agentID, Status: "completed",
+	sess := model.SessionEntity{ID: id, AgentID: agentID, Status: "completed",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	if err := s.UpsertConversation(ctxT(), sess); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
+	if err := s.UpsertSession(ctxT(), sess); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
 	}
 }
 
@@ -55,7 +56,7 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	if res.Totals.Runs != 4 || res.Totals.Completed != 2 || res.Totals.Failed != 1 || res.Totals.Cancelled != 1 {
 		t.Fatalf("总计计数不符: %+v", res.Totals)
 	}
-	if res.Totals.Conversations != 3 {
+	if res.Totals.Sessions != 3 {
 		t.Fatalf("会话数应为 3: %+v", res.Totals)
 	}
 	if res.Totals.DurationMS != 11000 {

@@ -28,7 +28,7 @@ const EXAMPLES = [
 /**
  * 新建会话面板（hero + 内嵌输入卡 + 示例指令）。
  * 未选中会话时的问答区就是这个面板——不再有独立的「开始问答」空态页，
- * 也不再单独占一条路由（`/conversations` 无 id 即新建）。新建固定用「当前 Agent」
+ * 也不再单独占一条路由（`/sessions` 无 id 即新建）。新建固定用「当前 Agent」
  * （全局默认单例，可在「设置 · Agent 管理」切换——这里只如实标出身份 + 给出切换入口，不在此处做选择器）。
  */
 export function StartPanel() {
@@ -141,7 +141,7 @@ export function StartPanel() {
         selectionPayload(capabilities),
       )
       if (model) localStorage.setItem(LAST_MODEL_KEY, model)
-      if (id) navigate(`/conversations/${id}`)
+      if (id) navigate(`/sessions/${id}`)
     } finally {
       setSending(false)
     }

@@ -42,7 +42,7 @@ func (s *Store) UpsertSkillDefinition(ctx context.Context, id, body string, expe
 	return s.commitDefinitionChange(ctx, model.CapabilityKindSkill, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
-				return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillDefinition{
+				return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillEntity{
 					ID: id, Body: body, Revision: 1, UpdatedAt: now,
 				})
 			}
@@ -61,12 +61,12 @@ func (s *Store) DeleteSkillDefinition(ctx context.Context, id string, expectedRe
 }
 
 // GetSkillDefinition 读一条 skill 定义（不存在 → (nil, false, nil)）。
-func (s *Store) GetSkillDefinition(ctx context.Context, id string) (*SkillDefinition, bool, error) {
+func (s *Store) GetSkillDefinition(ctx context.Context, id string) (*model.SkillEntity, bool, error) {
 	return s.skills.Get(ctx, id)
 }
 
 // ListSkillDefinitions 列出全部 skill 定义（id 升序）。
-func (s *Store) ListSkillDefinitions(ctx context.Context) (model.SkillDefinitionList, error) {
+func (s *Store) ListSkillDefinitions(ctx context.Context) (model.SkillEntityList, error) {
 	return s.skills.List(ctx)
 }
 
@@ -82,7 +82,7 @@ func (s *Store) UpsertMcpServerDefinition(ctx context.Context, id, body string, 
 	return s.commitDefinitionChange(ctx, model.CapabilityKindMcp, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
-				return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerDefinition{
+				return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerEntity{
 					ID: id, Body: body, Revision: 1, UpdatedAt: now,
 				})
 			}
@@ -99,12 +99,12 @@ func (s *Store) DeleteMcpServerDefinition(ctx context.Context, id string, expect
 }
 
 // GetMcpServerDefinition 读一条 MCP server 定义（不存在 → (nil, false, nil)）。
-func (s *Store) GetMcpServerDefinition(ctx context.Context, id string) (*McpServerDefinition, bool, error) {
+func (s *Store) GetMcpServerDefinition(ctx context.Context, id string) (*model.McpServerEntity, bool, error) {
 	return s.mcpServers.Get(ctx, id)
 }
 
 // ListMcpServerDefinitions 列出全部 MCP server 定义（id 升序）。
-func (s *Store) ListMcpServerDefinitions(ctx context.Context) (model.McpServerDefinitionList, error) {
+func (s *Store) ListMcpServerDefinitions(ctx context.Context) (model.McpServerEntityList, error) {
 	return s.mcpServers.List(ctx)
 }
 
@@ -114,12 +114,12 @@ func (s *Store) CountMcpServerDefinitions(ctx context.Context) (int64, error) {
 }
 
 // ListCapabilityRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
-func (s *Store) ListCapabilityRevisions(ctx context.Context, kind, capabilityID string) (model.CapabilityRevisionList, error) {
+func (s *Store) ListCapabilityRevisions(ctx context.Context, kind, capabilityID string) (model.CapabilityRevisionEntityList, error) {
 	return s.capabilityRevision.ListByCapability(ctx, kind, capabilityID)
 }
 
 // RecentCapabilityRevisions 列出最近 limit 条变更（seq 降序；limit <= 0 视为 50）。
-func (s *Store) RecentCapabilityRevisions(ctx context.Context, limit int) (model.CapabilityRevisionList, error) {
+func (s *Store) RecentCapabilityRevisions(ctx context.Context, limit int) (model.CapabilityRevisionEntityList, error) {
 	return s.capabilityRevision.ListRecent(ctx, limit)
 }
 
@@ -150,7 +150,7 @@ func (s *Store) commitDefinitionChange(
 			return err
 		}
 		applied = true
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
+		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
 			Kind:         kind,
 			CapabilityID: id,
 			Action:       action,

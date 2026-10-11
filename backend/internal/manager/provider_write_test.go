@@ -251,19 +251,19 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	if len(eff.AppliesToAgents) != 1 || eff.AppliesToAgents[0] != "a1" {
 		t.Fatalf("受影响 agent 不符: %+v", eff.AppliesToAgents)
 	}
-	if eff.AffectedConversations != 2 || eff.Deferred != 1 {
+	if eff.AffectedSessions != 2 || eff.Deferred != 1 {
 		t.Fatalf("受影响/顺延计数不符: %+v", eff)
 	}
 	// 同源：逐会话调 planGenerationSwitch，裁决必须与回执一致。
 	for _, tc := range []struct {
 		id   string
-		as   *ActiveConversation
+		as   *ActiveSession
 		want generationAction
 	}{
 		{idleID, idle, genActionSwitch},
 		{busyID, busy, genActionDefer},
 	} {
-		rec := r.svc.conversationRec(tc.id)
+		rec := r.svc.sessionRec(tc.id)
 		plan := r.orch.planGenerationSwitch(tc.as, rec)
 		if !plan.PermChanged {
 			t.Fatalf("%s: 改供应商端点必须让基础键变化（这正是'下一轮生效'的判据）", tc.id)
@@ -299,8 +299,8 @@ func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	}
 }
 
-// TestProviderProblemsSurfaceBeforeConversation G3：`problems[]` 让用户在开会话**之前**就看到问题。
-func TestProviderProblemsSurfaceBeforeConversation(t *testing.T) {
+// TestProviderProblemsSurfaceBeforeSession G3：`problems[]` 让用户在开会话**之前**就看到问题。
+func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))

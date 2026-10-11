@@ -434,7 +434,7 @@ func TestStateMachine(t *testing.T) {
 
 // TestReservedKeys 平台独占键：用户写面不得写（`last_fired_at` 就是认领判据，能写它就能重放）。
 func TestReservedKeys(t *testing.T) {
-	for _, k := range []string{"last_fired_at", "last_conversation_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
+	for _, k := range []string{"last_fired_at", "last_session_id", "last_status", "last_reason", "consecutive_failures", "recent_runs"} {
 		if !IsReservedKey(k) {
 			t.Errorf("%s 应是平台独占键", k)
 		}

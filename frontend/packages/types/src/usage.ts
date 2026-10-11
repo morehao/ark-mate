@@ -18,7 +18,7 @@ export interface UsageBucket {
   failed: number
   cancelled: number
   running: number
-  conversations: number
+  sessions: number
   duration_ms: number
   context_used: number
   context_size: number

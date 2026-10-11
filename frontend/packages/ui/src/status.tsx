@@ -6,8 +6,8 @@ export interface StateMeta {
   color: string
 }
 
-/** 会话状态 → 文案/语义色（backend ConversationStatus）。 */
-export function conversationStatusMeta(status: string): StateMeta {
+/** 会话状态 → 文案/语义色（backend SessionStatus）。 */
+export function sessionStatusMeta(status: string): StateMeta {
   switch (status) {
     case 'in_progress':
       return { label: '进行中', color: tokens.primary }

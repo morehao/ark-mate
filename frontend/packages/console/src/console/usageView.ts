@@ -1,4 +1,4 @@
-import type { ConversationRun, RunUsage, UsageBucket, UsageSummary } from '@ark-mate/types'
+import type { SessionRun, RunUsage, UsageBucket, UsageSummary } from '@ark-mate/types'
 
 // ——— 用量视图模型（M3 用量统计；纯函数，便于 Node 侧校验） ———
 
@@ -49,10 +49,10 @@ export function fmtCost(
 }
 
 /** 上报覆盖率文案（用于上下文/成本列 tooltip）：`上报 3/5 会话` / `无上报` / `无会话`。 */
-export function reportedLabel(reported: number, conversations: number): string {
-  if (conversations <= 0) return '无会话'
+export function reportedLabel(reported: number, sessions: number): string {
+  if (sessions <= 0) return '无会话'
   if (reported <= 0) return '无上报'
-  return `上报 ${reported}/${conversations} 会话`
+  return `上报 ${reported}/${sessions} 会话`
 }
 
 /** 上下文占用展示：`9.4k / 1.0M`；size 未知（0）→ 只显示 used。 */
@@ -139,7 +139,7 @@ export interface RunUsageInfo {
 }
 
 /** 从 run 时间戳计算总耗时（ended−started，ms）；未结束/无效 → 0。 */
-export function runDurationMS(run: ConversationRun): number {
+export function runDurationMS(run: SessionRun): number {
   if (!run?.started_at) return 0
   const s = Date.parse(run.started_at)
   const e = run.ended_at ? Date.parse(run.ended_at) : 0
@@ -148,8 +148,8 @@ export function runDurationMS(run: ConversationRun): number {
   return e - s
 }
 
-/** 把 ConversationRun 归一为展示模型；无任何可展示数据 → null。 */
-export function toRunUsageInfo(run: ConversationRun | null | undefined): RunUsageInfo | null {
+/** 把 SessionRun 归一为展示模型；无任何可展示数据 → null。 */
+export function toRunUsageInfo(run: SessionRun | null | undefined): RunUsageInfo | null {
   if (!run) return null
   const u = run.usage
   const first = run.first_token_ms ?? 0

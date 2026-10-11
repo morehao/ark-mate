@@ -50,7 +50,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
-		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
@@ -111,9 +111,9 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agent 响应不应再带 runtimes 字段（构建期固定底座）: %s", env.Data)
 	}
 
-	env = get(t, e, "/v1/mate/conversations")
+	env = get(t, e, "/v1/mate/sessions")
 	if env.Code != 0 {
-		t.Fatalf("conversations 信封不符: %+v", env)
+		t.Fatalf("sessions 信封不符: %+v", env)
 	}
 }
 
@@ -226,11 +226,11 @@ func TestRouterRoutesRegistered(t *testing.T) {
 		"GET /v1/mate/health",
 		"GET /v1/mate/agents",
 		"POST /v1/mate/agents/:id/default",
-		"GET /v1/mate/conversations",
-		"POST /v1/mate/conversations",
-		"GET /v1/mate/conversations/:id/history",
-		"POST /v1/mate/conversations/:id/prompt",
-		"POST /v1/mate/conversations/:id/cancel",
+		"GET /v1/mate/sessions",
+		"POST /v1/mate/sessions",
+		"GET /v1/mate/sessions/:id/history",
+		"POST /v1/mate/sessions/:id/prompt",
+		"POST /v1/mate/sessions/:id/cancel",
 		"GET /v1/mate/providers",
 		"GET /v1/mate/models",
 		"GET /v1/mate/skills",
@@ -263,7 +263,7 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 		path string
 	}{
 		{"未注册的 API 路径", "/v1/mate/nope"},
-		{"未注册的 API 深层路径", "/v1/mate/conversations/x/nope"},
+		{"未注册的 API 深层路径", "/v1/mate/sessions/x/nope"},
 	}
 	e := newEngine(t)
 	for _, tc := range cases {
@@ -339,7 +339,7 @@ func repoFile(t *testing.T, name string) string {
 // TestReadmeRoutesMatchRouter 文档一致性守卫：README「控制面接口摘要」与真实路由表**双向**一致。
 //
 //   - README → router：README 里出现的每条 `/v1/mate` 路由（表格与正文反引号内）都必须真实注册。
-//     抓得住改名/删除（P0 把 /sessions 改名为 /conversations 后曾长期漂移），也连带锁住 README
+//     抓得住改名/删除（P0 把 /sessions 改名为 /sessions 后曾长期漂移），也连带锁住 README
 //     不再引用历史名。
 //   - router → README：每条注册的 `/v1/mate` 路由都必须在 README 出现。**这一向曾经缺失**，
 //     后果是新增端点可以不带文档静默进主干（只有改名才红）。
@@ -367,7 +367,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	seen := map[string]bool{}
 	for _, m := range re.FindAllStringSubmatch(string(readme), -1) {
 		p := m[1]
-		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/conversations") &&
+		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/sessions") &&
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
 			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
@@ -403,9 +403,12 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	if len(seen) < 20 {
 		t.Fatalf("README 路由提取过少（%d），守卫失效", len(seen))
 	}
-	// 反向：/sessions 历史名不得再出现在 README 的路由语境里。
-	if strings.Contains(string(readme), "/sessions/") || strings.Contains(string(readme), "`/sessions`") {
-		t.Error("README 仍含历史路由 /sessions（应为 /conversations）")
+	// 反向：`conversation` 是 **v15 之前的历史名**，不得再出现在 README 的路由语境里。
+	//
+	// 方向在 2026-10-11 的 v15 改名里翻转：此前正名是 /conversations、历史名是 /sessions，
+	// 现在正好相反。留成"两边都不许出现"会让改名永远无法落地。
+	if strings.Contains(string(readme), "/conversations/") || strings.Contains(string(readme), "`/conversations`") {
+		t.Error("README 仍含历史路由 /conversations（v15 起正名为 /sessions）")
 	}
 	// 反向（router → README）：每条注册的 /v1/mate 路由都必须在 README 出现。
 	//
@@ -436,7 +439,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
-		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
+		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Credentials: creds})
 	return engine
@@ -476,7 +479,7 @@ func TestAuthToken(t *testing.T) {
 		{"正确 Bearer", "GET", "/v1/mate/agents", "Bearer " + token, 200, 0},
 		{"方案大小写不敏感", "GET", "/v1/mate/agents", "bearer " + token, 200, 0},
 		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/mate/agents?token=" + token, "", 401, 40101},
-		{"POST 也受保护", "POST", "/v1/mate/conversations/export", "", 401, 40101},
+		{"POST 也受保护", "POST", "/v1/mate/sessions/export", "", 401, 40101},
 		// WS 路由不挂 REST 凭据中间件（鉴权在带内首帧 attach）：非升级请求直接进入升级逻辑，
 		// 被升级库拒绝为 426 Upgrade Required。关键是「不再是 401」。
 		{"WS 不受 REST 中间件把守（鉴权在带内）", "GET", "/v1/mate/ws/events", "", 426, 0},

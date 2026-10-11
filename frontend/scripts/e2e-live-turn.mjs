@@ -33,8 +33,8 @@ async function main() {
   console.log(`真会话 e2e  agent=${AGENT_ID} prompt=${JSON.stringify(PROMPT)} base=${E2E_BASE}\n`)
 
   // 1) REST 创建（真实 dial + session/new；带 prompt → 首轮异步开跑）
-  console.log('· POST /v1/mate/conversations …')
-  const r = await fetch(API + '/conversations', {
+  console.log('· POST /v1/mate/sessions …')
+  const r = await fetch(API + '/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify({ agent_id: AGENT_ID, prompt: PROMPT }),

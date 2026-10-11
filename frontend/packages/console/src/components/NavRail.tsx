@@ -14,7 +14,7 @@ import {
   type NavLeaf,
 } from '../console/navView'
 import { SETTINGS_MENU } from '../console/settingsView'
-import { ConversationPane } from './ConversationPane'
+import { SessionPane } from './SessionPane'
 
 /**
  * 常驻左栏（唯一导航面）：品牌 + 一级/二级导航 + 会话区 + footer。
@@ -32,18 +32,18 @@ export function NavRail() {
   const drawerOpen = useMate((s) => s.drawerOpen)
   const navExpanded = useMate((s) => s.navExpanded)
   const setNavGroupExpanded = useMate((s) => s.setNavGroupExpanded)
-  const conversations = useMate((s) => s.conversations)
+  const sessions = useMate((s) => s.sessions)
 
   const openSettings = useMate((s) => s.openSettings)
 
   const pathname = location.pathname
 
-  // 左栏顶部的「新建会话」（v14.1）：问答区落回新建面板（原 ConversationRail 的 onCreate 语义）。
+  // 左栏顶部的「新建会话」（v14.1）：问答区落回新建面板（原 SessionRail 的 onCreate 语义）。
   // 它是**唯一的**新建入口——原先在会话面板头部还有一颗小按钮，两处并存的代价是
   // "新建"这件事看起来属于会话列表的一个筛选器，而不是这一栏的第一动作（对齐 dsh 的 sidebar）。
   const openNew = () => {
     activate(null)
-    if (pathname !== '/conversations') navigate('/conversations')
+    if (pathname !== '/sessions') navigate('/sessions')
     setDrawer(false)
   }
 
@@ -132,8 +132,8 @@ export function NavRail() {
       >
         <span className="fg-navitem-icon">{entry.icon}</span>
         <span className="fg-navitem-label">{entry.label}</span>
-        {entry.id === 'chat' && conversations.length > 0 && (
-          <span className="fg-navitem-count">{String(conversations.length).padStart(2, '0')}</span>
+        {entry.id === 'chat' && sessions.length > 0 && (
+          <span className="fg-navitem-count">{String(sessions.length).padStart(2, '0')}</span>
         )}
       </NavLink>
     )
@@ -141,7 +141,7 @@ export function NavRail() {
 
   return (
     <aside className={`fg-rail${drawerOpen ? ' fg-open' : ''}`} aria-label="主导航">
-      <NavLink to="/conversations" className="fg-rail-brand" title="ark-mate 问答控制台" onClick={leave}>
+      <NavLink to="/sessions" className="fg-rail-brand" title="ark-mate 问答控制台" onClick={leave}>
         ark<span style={{ color: tokens.primary }}>·</span>mate
       </NavLink>
 
@@ -157,7 +157,7 @@ export function NavRail() {
       </nav>
 
       {/* 会话区常驻：不随路由出现/消失（切页不跳版），点会话/新建会话自带跳转到问答页 */}
-      <ConversationPane onCreate={openNew} />
+      <SessionPane onCreate={openNew} />
 
       <div className="fg-rail-foot">
         {/* 固定左下：设置（全局配置，不跟内容导航抢位置，也不随窗口高度被挤走）。

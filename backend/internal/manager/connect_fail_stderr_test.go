@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -85,8 +85,8 @@ func TestConnectFailurePicksCauseLineOverTail(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	_, err := svc.CreateConversation(context.Background(),
-		dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	_, err := svc.CreateSession(context.Background(),
+		dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")
 	}
@@ -124,8 +124,8 @@ func TestConnectFailureSurfacesStderrTail(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	_, err := svc.CreateConversation(context.Background(),
-		dtoconversation.ConversationCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	_, err := svc.CreateSession(context.Background(),
+		dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
 	if err == nil {
 		t.Fatal("底座起不来时建会话必须失败")
 	}

@@ -9,10 +9,10 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { Dot, Pill, conversationStatusMeta } from '@ark-mate/ui'
-import type { PermissionMemory, PermissionOptionKind, PermissionResp, ConversationDetail } from '@ark-mate/types'
+import { Dot, Pill, sessionStatusMeta } from '@ark-mate/ui'
+import type { PermissionMemory, PermissionOptionKind, PermissionResp, SessionDetail } from '@ark-mate/types'
 import { modelValues } from '@ark-mate/types'
-import { getConversation, promptConversation, revokeMemory, conversationHistory, toErrorMessage } from '@ark-mate/api'
+import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage } from '@ark-mate/api'
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
@@ -32,28 +32,28 @@ function optionId(p: PermissionResp, kind: PermissionOptionKind): string | undef
   return p.options.find((o) => o.kind === kind)?.option_id
 }
 
-/** 会话详情面板（管理面）：元数据只读一瞥 + 挂起权限列表（可就地决策）。数据来自 GET /conversations/:id。 */
-export function ConversationDetailDrawer({
+/** 会话详情面板（管理面）：元数据只读一瞥 + 挂起权限列表（可就地决策）。数据来自 GET /sessions/:id。 */
+export function SessionDetailDrawer({
   open,
-  conversationId,
+  sessionId,
   onClose,
 }: {
   open: boolean
-  conversationId: string
+  sessionId: string
   onClose: () => void
 }) {
   const agents = useMate((s) => s.agents)
   const views = useMate((s) => s.views)
   const respond = useMate((s) => s.respondPermission)
-  const renameConversation = useMate((s) => s.renameConversation)
+  const renameSession = useMate((s) => s.renameSession)
   const togglePin = useMate((s) => s.togglePin)
-  const archiveConversation = useMate((s) => s.archiveConversation)
+  const archiveSession = useMate((s) => s.archiveSession)
   const showToast = useMate((s) => s.showToast)
   const modelCatalog = useMate((s) => s.modelCatalog)
   const loadModelCatalog = useMate((s) => s.loadModelCatalog)
-  const updateConversationModel = useMate((s) => s.updateConversationModel)
+  const updateSessionModel = useMate((s) => s.updateSessionModel)
 
-  const [detail, setDetail] = useState<ConversationDetail | null>(null)
+  const [detail, setDetail] = useState<SessionDetail | null>(null)
   const [run, setRun] = useState<RunSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -61,24 +61,24 @@ export function ConversationDetailDrawer({
   const [titleDraft, setTitleDraft] = useState('')
 
   const load = useCallback(async () => {
-    if (!conversationId) return
+    if (!sessionId) return
     setLoading(true)
     setErr(null)
     try {
-      setDetail(await getConversation(conversationId))
+      setDetail(await getSession(sessionId))
     } catch (e) {
       setErr(toErrorMessage(e))
     }
     // 运行统计/失败轮由历史推导；读不到不阻塞主数据。
     try {
-      const page = await conversationHistory(conversationId, { limit: 500 })
+      const page = await sessionHistory(sessionId, { limit: 500 })
       setRun(summarizeRun(page.events))
     } catch {
       setRun(null)
     } finally {
       setLoading(false)
     }
-  }, [conversationId])
+  }, [sessionId])
 
   useEffect(() => {
     if (open) {
@@ -86,7 +86,7 @@ export function ConversationDetailDrawer({
       void load()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, conversationId])
+  }, [open, sessionId])
 
   // 会话级模型目录：**按会话绑定的 agent 取样**（不是「当前 Agent」）——会话与 Agent 一对一绑定，
   // 模型候选只能来自该会话那个底座（dsh 会话级可改 / opencode 会话级 set_config_option），
@@ -98,19 +98,19 @@ export function ConversationDetailDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, detailAgentId])
 
-  const view = views[conversationId]
+  const view = views[sessionId]
   const viewTitle = detail?.title
   const smTitle =
     detail?.title ||
     view?.entries.find((e) => e.kind === 'user')?.text ||
     view?.entries.find((e) => e.kind === 'assistant')?.text ||
-    conversationId
-  const title = viewTitle || smTitle || conversationId
+    sessionId
+  const title = viewTitle || smTitle || sessionId
 
   const saveTitle = () => {
     const t = titleDraft.trim()
     setEditingTitle(false)
-    if (t && t !== title) void renameConversation(conversationId, t).then(() => load())
+    if (t && t !== title) void renameSession(sessionId, t).then(() => load())
   }
 
   const act = (p: PermissionResp, kind: 'allow' | 'allow_always' | 'reject') => {
@@ -125,12 +125,12 @@ export function ConversationDetailDrawer({
 
   // —— 会话级权限记忆（始终允许 / 始终拒绝，对称）：撤销（单条 / 全部）后刷新 ——
   const revokeOne = (item: PermissionMemory) => {
-    void revokeMemory(conversationId, { title: item.title, kind: item.kind })
+    void revokeMemory(sessionId, { title: item.title, kind: item.kind })
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
   const revokeAll = () => {
-    void revokeMemory(conversationId, {})
+    void revokeMemory(sessionId, {})
       .then(() => load())
       .catch((e) => setErr(toErrorMessage(e)))
   }
@@ -138,7 +138,7 @@ export function ConversationDetailDrawer({
   // —— 失败轮一键重试：重发该轮用户输入（事件经 WS 续流），随后刷新统计 ——
   const retryFailedTurn = (ft: FailedTurn) => {
     if (!ft.text) return
-    void promptConversation(conversationId, { prompt: ft.text })
+    void promptSession(sessionId, { prompt: ft.text })
       .then(() => {
         showToast('已重发该轮输入，结果将实时流出…')
         window.setTimeout(() => void load(), 1500)
@@ -147,7 +147,7 @@ export function ConversationDetailDrawer({
   }
 
   const s = detail
-  const meta = s ? conversationStatusMeta(s.status) : undefined
+  const meta = s ? sessionStatusMeta(s.status) : undefined
 
   const row = (label: string, value: ReactNode) => (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, lineHeight: 1.9 }}>
@@ -252,7 +252,7 @@ export function ConversationDetailDrawer({
               <Button size="small" onClick={() => void togglePin(s.id).then(() => load())} style={{ borderRadius: 8 }}>
                 {s.pinned ? '取消置顶' : '置顶'}
               </Button>
-              <Button size="small" onClick={() => void archiveConversation(s.id, !s.archived).then(() => load())} style={{ borderRadius: 8 }}>
+              <Button size="small" onClick={() => void archiveSession(s.id, !s.archived).then(() => load())} style={{ borderRadius: 8 }}>
                 {s.archived ? '从归档恢复' : '归档'}
               </Button>
             </div>
@@ -342,7 +342,7 @@ export function ConversationDetailDrawer({
                     defaultLabel="运行时默认"
                     onChange={(v) => {
                       if ((v ?? undefined) === s.model) return
-                      void updateConversationModel(s.id, v ?? undefined).then(() => void load())
+                      void updateSessionModel(s.id, v ?? undefined).then(() => void load())
                     }}
                   />,
                 )

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoconversation"
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -56,17 +56,17 @@ func (s *gatedSession) prompts() []string {
 
 // newQueueRig 队列测试架子：echo 注册表 + 总线 +（可选）临时库 + agent a1 + 一条**已登记
 // 且有活句柄**的会话 conv-1（句柄的 sess 由调用方给定，用于掌控轮次节奏）。
-func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *ActiveConversation) {
+func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *ActiveSession) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, withStore
 		c.agents = []*AgentRec{{ID: "a1", Name: "A1"}}
 	})
 	g := sess.(*gatedSession)
-	as := &ActiveConversation{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
-	r.Orch.conversations[as.ID] = as
-	r.Svc.registerConversation(&ConversationRec{
-		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: ConversationStatusInProgress, Generation: 1,
+	as := &ActiveSession{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
+	r.Orch.sessions[as.ID] = as
+	r.Svc.registerSession(&SessionRec{
+		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: SessionStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
 		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 runTurn 在写。
@@ -116,7 +116,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 				break
 			}
 		}
-		r.Orch.evictConversation(as)
+		r.Orch.evictSession(as)
 	})
 	return r.Svc, r.Orch, g, as
 }
@@ -198,8 +198,8 @@ func TestPromptAfterTurnQueuesWhenBusy(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstTurn(t, orch, g, "第一轮")
 
-	resp, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "排队的话", Delivery: DeliveryAfterTurn})
+	resp, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "排队的话", Delivery: DeliveryAfterTurn})
 	if err != nil {
 		t.Fatalf("after_turn 入队失败: %v", err)
 	}
@@ -239,12 +239,12 @@ func TestPromptAfterTurnQueuesWhenBusy(t *testing.T) {
 func TestQueuedInputDeliveredAfterTurnEnds(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstTurn(t, orch, g, "第一轮")
-	if _, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "排队一", Delivery: DeliveryAfterTurn}); err != nil {
+	if _, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "排队一", Delivery: DeliveryAfterTurn}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "排队二", Delivery: DeliveryAfterTurn}); err != nil {
+	if _, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "排队二", Delivery: DeliveryAfterTurn}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,11 +289,11 @@ func TestQueuedInputDeliveredAfterTurnEnds(t *testing.T) {
 func TestQueuedInputStaledWhenGenerationChanged(t *testing.T) {
 	svc, orch, g, as := newQueueRig(t, newGatedSession(), true)
 	startFirstTurn(t, orch, g, "第一轮")
-	if _, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "为旧上下文排的队", Delivery: DeliveryAfterTurn}); err != nil {
+	if _, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "为旧上下文排的队", Delivery: DeliveryAfterTurn}); err != nil {
 		t.Fatal(err)
 	}
-	// 模拟连接断开重连：执行代际自增（真实路径见 ensureConversation 里的 bumpGeneration）。
+	// 模拟连接断开重连：执行代际自增（真实路径见 ensureSession 里的 bumpGeneration）。
 	svc.bumpGeneration(as.ID)
 
 	g.release <- struct{}{}
@@ -325,8 +325,8 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstTurn(t, orch, g, "被打断的一轮")
 
-	resp, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "插话", Delivery: DeliveryInterruptThenPrompt})
+	resp, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "插话", Delivery: DeliveryInterruptThenPrompt})
 	if err != nil {
 		t.Fatalf("interrupt_then_prompt 失败: %v", err)
 	}
@@ -358,8 +358,8 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 func TestDeleteQueuedInput(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
 	startFirstTurn(t, orch, g, "第一轮")
-	resp, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "要撤下的", Delivery: DeliveryAfterTurn})
+	resp, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "要撤下的", Delivery: DeliveryAfterTurn})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,8 +414,8 @@ func TestPromptDeliveryValidation(t *testing.T) {
 		t.Fatalf("空值应归一为 reject: %q/%v", got, err)
 	}
 	// 服务出口：信封码是 acl 分类的投影（ClassRequest → 40001，ClassLimit → 40901）。
-	if _, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "x", Delivery: "whenever"}); err == nil {
+	if _, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "x", Delivery: "whenever"}); err == nil {
 		t.Fatal("非法 delivery 应报错")
 	} else {
 		var ge gerror.Error
@@ -423,8 +423,8 @@ func TestPromptDeliveryValidation(t *testing.T) {
 			t.Fatalf("应报 %d: %v", code.InvalidRequest, err)
 		}
 	}
-	if _, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "x", Delivery: DeliveryReject}); err == nil {
+	if _, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "x", Delivery: DeliveryReject}); err == nil {
 		t.Fatal("忙 + reject 应报错（历史行为）")
 	} else {
 		var ge gerror.Error
@@ -441,8 +441,8 @@ func TestPromptDeliveryValidation(t *testing.T) {
 // 直接执行，不留队列行（没有「等的那一轮」）。
 func TestPromptAfterTurnWhenIdleRunsImmediately(t *testing.T) {
 	svc, _, g, _ := newQueueRig(t, newGatedSession(), true)
-	resp, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "空闲时提交", Delivery: DeliveryAfterTurn})
+	resp, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "空闲时提交", Delivery: DeliveryAfterTurn})
 	if err != nil {
 		t.Fatalf("空闲投递失败: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
-	svc1.registerConversation(&ConversationRec{ID: "c1", AgentID: "a1", Generation: 1})
+	svc1.registerSession(&SessionRec{ID: "c1", AgentID: "a1", Generation: 1})
 	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterTurn, "turn-x", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -514,8 +514,8 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 func TestInputQueueMemoryMode(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), false)
 	startFirstTurn(t, orch, g, "第一轮")
-	resp, err := svc.PromptConversation(context.Background(), "conv-1",
-		dtoconversation.PromptReq{Prompt: "内存里的排队", Delivery: DeliveryAfterTurn})
+	resp, err := svc.PromptSession(context.Background(), "conv-1",
+		dtosession.PromptReq{Prompt: "内存里的排队", Delivery: DeliveryAfterTurn})
 	if err != nil || !resp.Queued {
 		t.Fatalf("内存模式应能入队: %v/%+v", err, resp)
 	}

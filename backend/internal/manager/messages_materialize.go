@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/glog"
 )
 
@@ -31,23 +32,23 @@ type msgRowBuilder struct {
 
 // materializeMessages 把一轮窗口事件物化为 messages 行（assistant 文本片段 + 时间线 + 工具最终态）。
 // best-effort：失败仅告警，不影响 events 事实源。
-func (s *Service) materializeMessages(conversationID, runID string, evs []store.Event) {
+func (s *Service) materializeMessages(sessionID, runID string, evs []model.EventEntity) {
 	if s.st == nil || len(evs) == 0 {
 		return
 	}
-	rows := buildMessageRows(conversationID, runID, evs)
+	rows := buildMessageRows(sessionID, runID, evs)
 	if len(rows) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.st.CreateMessages(ctx, rows); err != nil {
-		glog.Warnw(context.Background(), "store: create messages failed", "conversation", conversationID, "run", runID, "err", err)
+		glog.Warnw(context.Background(), "store: create messages failed", "session", sessionID, "run", runID, "err", err)
 	}
 }
 
-func buildMessageRows(conversationID, runID string, evs []store.Event) []store.Message {
-	var out []store.Message
+func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.MessageEntity {
+	var out []model.MessageEntity
 	var cur *msgRowBuilder
 	flush := func() {
 		if cur == nil {
@@ -65,8 +66,9 @@ func buildMessageRows(conversationID, runID string, evs []store.Event) []store.M
 		if at.IsZero() {
 			at = time.Now().UTC()
 		}
-		out = append(out, store.Message{
-			ConversationID: conversationID, RunID: runID, Role: cur.role, Text: cur.text,
+		out = append(out, model.MessageEntity{
+			ID:        objid.New(objid.Message),
+			SessionID: sessionID, RunID: runID, Role: cur.role, Text: cur.text,
 			EventsJSON: string(ej), ToolDetailsJSON: string(td),
 			SeqLo: cur.seqLo, SeqHi: cur.seqHi, CreatedAt: at,
 		})
@@ -84,8 +86,9 @@ func buildMessageRows(conversationID, runID string, evs []store.Event) []store.M
 		case BusUserMessage:
 			flush()
 			text, _ := m["text"].(string)
-			out = append(out, store.Message{
-				ConversationID: conversationID, RunID: runID, Role: "user", Text: text,
+			out = append(out, model.MessageEntity{
+				ID:        objid.New(objid.Message),
+				SessionID: sessionID, RunID: runID, Role: "user", Text: text,
 				EventsJSON: mustJSON([]map[string]any{evObj}),
 				SeqLo:      e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
 			})

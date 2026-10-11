@@ -45,7 +45,7 @@ export interface Agent {
    * 绑定该 agent 的会话数（删除影响面）：删除后这些会话历史仍可读，但**无法继续提问**
    * （归属不可变：平台不自动改绑；用同一个 id 重新注册可复活绑定）。
    */
-  conversation_count?: number
+  session_count?: number
   /**
    * 该 agent 的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
    *
@@ -59,9 +59,9 @@ export interface Agent {
 export interface AgentDeleteResp {
   deleted: string
   /** 绑定该 agent 的会话总数（含归档）。 */
-  affected_conversations: number
+  affected_sessions: number
   /** 本次被摘除的活跃会话数（内存里仍连着的会话立即失效）。 */
-  detached_conversations: number
+  detached_sessions: number
   /** 被删的是否为「当前 Agent」（是则回落内置默认）。 */
   was_default: boolean
 }
@@ -126,7 +126,7 @@ export interface ProviderEffect {
   /** next_turn（下一次轮次边界换代际）| none（只改了不驱动行为的字段，如 name/note）。 */
   effect: string
   applies_to_agents: string[]
-  affected_conversations: number
+  affected_sessions: number
   deferred: number
   note?: string
 }
@@ -182,7 +182,7 @@ export interface ProviderCheck {
 /** 某 agent 最近一次失败的诊断快照（A3）。 */
 export interface AgentLastError {
   at: string
-  conversation_id?: string
+  session_id?: string
   code: string
   class: string
   details: string

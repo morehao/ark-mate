@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/golib/glog"
 )
@@ -69,7 +69,7 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	if err != nil {
 		return nil, err
 	}
-	id := uuid.NewString()
+	id := objid.New(objid.Model)
 	ok, err := s.st.CreateModelDefinition(ctx, store.ModelColumns{
 		ID: id, ProviderID: req.ProviderID, ModelID: strings.TrimSpace(req.ModelID),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
@@ -235,7 +235,7 @@ func (s *Service) DefaultModelValueFor(ctx context.Context, runtimeID string) (s
 }
 
 // defaultModelRow 读出默认模型那一行（未设 / 指向已删模型 → (nil,false,nil)）。
-func (s *Service) defaultModelRow(ctx context.Context) (*store.ModelDefinition, bool, error) {
+func (s *Service) defaultModelRow(ctx context.Context) (*model.ModelEntity, bool, error) {
 	if s.st == nil {
 		return nil, false, nil
 	}
@@ -297,7 +297,7 @@ func normalizeInputModalities(in *[]string) (string, error) {
 //
 // v13 起是**纯列投影，不可能失败**：没有 JSON 可比坏，于是"一行坏 body 打不开整页"
 // （设计 P2 / 现象：整页 500）在结构上消失了。
-func modelRespFromRow(row *store.ModelDefinition) dtomodel.ModelResp {
+func modelRespFromRow(row *model.ModelEntity) dtomodel.ModelResp {
 	out := dtomodel.ModelResp{
 		ID: row.ID, ProviderID: row.ProviderID, ModelID: row.ModelID,
 		Name: row.Name, Note: row.Note,
@@ -350,8 +350,8 @@ func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	eff := &dtomodel.ModelEffect{Effect: "next_session"}
 	o := s.orch
 	s.mu.Lock()
-	recs := make([]ConversationRec, 0, len(s.conversations))
-	for _, rec := range s.conversations {
+	recs := make([]SessionRec, 0, len(s.sessions))
+	for _, rec := range s.sessions {
 		if rec != nil {
 			recs = append(recs, *rec)
 		}
@@ -361,11 +361,11 @@ func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 		if _, ok := s.AgentByID(recs[i].AgentID); !ok {
 			continue
 		}
-		eff.AffectedConversations++
+		eff.AffectedSessions++
 		if o == nil {
 			continue
 		}
-		as := o.conversation(recs[i].ID)
+		as := o.session(recs[i].ID)
 		if as == nil {
 			continue
 		}

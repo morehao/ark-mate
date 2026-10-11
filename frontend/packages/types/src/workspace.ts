@@ -85,7 +85,7 @@ export interface Workspace {
   /** 目录现状（**读时现算不缓存**）：ok | missing | not_dir | unreadable。 */
   dir_status: WorkspaceDirStatus
   /** 该工作空间名下的会话数（含归档；历史会话算进默认工作空间那一行）。 */
-  conversations: number
+  sessions: number
   /** 最近使用时间（RFC3339；缺省 = 从未用过）。 */
   last_used_at?: string
   created_at: string
@@ -143,7 +143,7 @@ export interface WorkspaceRecent {
   /** 该工作空间下最新会话的 updated_at（ISO RFC3339）。 */
   last_used_at: string
   /** 该工作空间下的会话数（含归档）。 */
-  conversations: number
+  sessions: number
 }
 
 /** 目录内容中的一项（文件或子目录）。 */

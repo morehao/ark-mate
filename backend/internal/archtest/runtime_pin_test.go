@@ -56,7 +56,7 @@ var (
 
 // selectionSurfaceTarget 一处扫描面：ban 哪些形状。
 //
-// 为什么按文件给不同的形状集（而不是一套扫全部）：`ConversationRec.RuntimeHint` 是**执行事实**
+// 为什么按文件给不同的形状集（而不是一套扫全部）：`SessionRec.RuntimeHint` 是**执行事实**
 // ——"这条会话上一次跑在哪个底座上"，恢复路径要靠它判 `sameRuntime`。它是读出来的账，不是用户
 // 能填的选择面，因此 service.go 只 ban 前两条。
 type selectionSurfaceTarget struct {
@@ -81,7 +81,7 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
 		{rel: filepath.Join("internal", "dto", "dtoagent", "response.go"),
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
-		{rel: filepath.Join("internal", "dto", "dtoconversation", "request.go"),
+		{rel: filepath.Join("internal", "dto", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
 		{rel: filepath.Join("pkg", "automation", "types.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},

@@ -20,7 +20,7 @@ func TestPermissionResolveOnce(t *testing.T) {
 	// 等注册就绪后投递「允许」。
 	waitRegistered(t, m, "s1")
 	if !m.ResolveAllow("", "o1", false) {
-		// 未知 call_id（空）应返回 false；这里我们从 pendingForConversation 取真实 call_id。
+		// 未知 call_id（空）应返回 false；这里我们从 pendingForSession 取真实 call_id。
 	}
 	callID := pendingCallID(t, m, "s1")
 	if !m.ResolveAllow(callID, "o1", false) {
@@ -88,8 +88,8 @@ func TestPermissionReject(t *testing.T) {
 	}
 }
 
-// TestPermissionCancelConversation verify conversation/cancel 后全部挂起被取消（ACP 规范）。
-func TestPermissionCancelConversation(t *testing.T) {
+// TestPermissionCancelSession verify session/cancel 后全部挂起被取消（ACP 规范）。
+func TestPermissionCancelSession(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
 	for i := 0; i < 2; i++ {
 		req := acl.PermissionRequest{ToolCall: acl.ToolCallInfo{ID: "tc", Title: "op", Kind: "bash"}}
@@ -105,7 +105,7 @@ func TestPermissionCancelConversation(t *testing.T) {
 	if m.pendingCount("s5") != 2 {
 		t.Fatalf("期望 2 条挂起，got %d", m.pendingCount("s5"))
 	}
-	m.CancelConversation("s5")
+	m.CancelSession("s5")
 	if m.pendingCount("s5") != 0 {
 		t.Fatalf("取消后应无挂起，got %d", m.pendingCount("s5"))
 	}
@@ -113,11 +113,11 @@ func TestPermissionCancelConversation(t *testing.T) {
 
 // ——— helpers ———
 
-func waitRegistered(t *testing.T, m *PermissionManager, conversationID string) {
+func waitRegistered(t *testing.T, m *PermissionManager, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(m.pendingForConversation(conversationID)) > 0 {
+		if len(m.pendingForSession(sessionID)) > 0 {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -125,9 +125,9 @@ func waitRegistered(t *testing.T, m *PermissionManager, conversationID string) {
 	t.Fatal("权限请求未在限期内注册")
 }
 
-func pendingCallID(t *testing.T, m *PermissionManager, conversationID string) string {
+func pendingCallID(t *testing.T, m *PermissionManager, sessionID string) string {
 	t.Helper()
-	ps := m.pendingForConversation(conversationID)
+	ps := m.pendingForSession(sessionID)
 	if len(ps) == 0 {
 		t.Fatal("无挂起请求")
 	}
@@ -180,10 +180,10 @@ func TestResolveDecisionReportsEffectiveOutcome(t *testing.T) {
 	}
 }
 
-// TestResolveDecisionRejectsCrossConversation verify C3 scope 归属：决策会话与挂起项归属不符时
+// TestResolveDecisionRejectsCrossSession verify C3 scope 归属：决策会话与挂起项归属不符时
 // 一律拒绝——found=false、既不投递也不删除挂起项，且随后由归属会话决策仍能正常命中
 // （这正是「陈旧标签页/串号请求」不能把别人的权限卡消掉的保证）。
-func TestResolveDecisionRejectsCrossConversation(t *testing.T) {
+func TestResolveDecisionRejectsCrossSession(t *testing.T) {
 	m := NewPermissionManager(5 * time.Second)
 	req := acl.PermissionRequest{
 		ToolCall: acl.ToolCallInfo{ID: "tc-scope", Title: "写文件", Kind: "write"},

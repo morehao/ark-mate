@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 )
@@ -97,11 +98,11 @@ func TestWorkspaceRegistryNoProvisionNoDefault(t *testing.T) {
 	}
 }
 
-// TestWorkspaceRegistryCreateValidatesLikeConversation 「能登记」与「能建会话」必须同源。
+// TestWorkspaceRegistryCreateValidatesLikeSession 「能登记」与「能建会话」必须同源。
 //
 // 这条是设计里最要紧的一致性之一：登记时放过一个目录、建会话时被拒，就是一条死路
 // ——用户在界面上选了它，然后得到一个必然失败的会话。
-func TestWorkspaceRegistryCreateValidatesLikeConversation(t *testing.T) {
+func TestWorkspaceRegistryCreateValidatesLikeSession(t *testing.T) {
 	allowed := t.TempDir()
 	outside := t.TempDir()
 	r, _ := registryRig(t, []string{allowed})
@@ -173,9 +174,9 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("登记项目: %v", err)
 	}
-	seedStoreConversation(t, r.St, "legacy-1", def.Path, "")
-	seedStoreConversation(t, r.St, "legacy-2", def.Path, "")
-	seedStoreConversation(t, r.St, "member", userDir, ws.ID)
+	seedStoreSession(t, r.St, "legacy-1", def.Path, "")
+	seedStoreSession(t, r.St, "legacy-2", def.Path, "")
+	seedStoreSession(t, r.St, "member", userDir, ws.ID)
 
 	list, err := r.Svc.WorkspaceRegistry()
 	if err != nil {
@@ -183,7 +184,7 @@ func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	}
 	byID := map[string]int{}
 	for _, it := range list.Items {
-		byID[it.ID] = it.Conversations
+		byID[it.ID] = it.Sessions
 	}
 	if byID[def.ID] != 2 {
 		t.Fatalf("默认工作空间应含 2 条历史会话，实际 %d（整表 %+v）", byID[def.ID], list.Items)
@@ -258,7 +259,7 @@ func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("登记: %v", err)
 	}
-	seedStoreConversation(t, r.St, "c-del", dir, ws.ID)
+	seedStoreSession(t, r.St, "c-del", dir, ws.ID)
 	del, err := r.Svc.DeleteRegisteredWorkspace(ws.ID)
 	if err != nil {
 		t.Fatalf("删登记: %v", err)
@@ -325,16 +326,16 @@ func TestWorkspaceRegistryRenameKeepsIdentity(t *testing.T) {
 	}
 }
 
-// seedStoreConversation 往库里写一条会话行（**只写库**，不进内存镜像）。
+// seedStoreSession 往库里写一条会话行（**只写库**，不进内存镜像）。
 //
 // 读面（WorkspaceRegistry）的计数取的是库里的聚合，所以夹具只需要库里有行——走
-// registerConversation 反而会带上编排器状态，而这些用例关心的是归属的聚合口径。
-func seedStoreConversation(t *testing.T, st *store.Store, id, cwd, workspaceID string) {
+// registerSession 反而会带上编排器状态，而这些用例关心的是归属的聚合口径。
+func seedStoreSession(t *testing.T, st *store.Store, id, cwd, workspaceID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := st.UpsertConversation(context.Background(), store.Conversation{
+	if err := st.UpsertSession(context.Background(), model.SessionEntity{
 		ID: id, AgentID: "agent-stub", Cwd: cwd, WorkspaceID: workspaceID,
-		Status: ConversationStatusCompleted, CreatedAt: now, UpdatedAt: now,
+		Status: SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("写会话行 %s: %v", id, err)
 	}

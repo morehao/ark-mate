@@ -19,8 +19,8 @@ type AgentResp struct {
 	Mcps *[]string `json:"mcps,omitempty"`
 	// PermissionPolicy 默认权限策略（M2 #7；缺省 = 全 ask，行为与历史一致）。
 	PermissionPolicy *PermissionPolicyResp `json:"permission_policy,omitempty"`
-	// ConversationCount 绑定该 agent 的会话数（删除影响面：历史保留可读，删除后无法继续提问）。
-	ConversationCount int `json:"conversation_count"`
+	// SessionCount 绑定该 agent 的会话数（删除影响面：历史保留可读，删除后无法继续提问）。
+	SessionCount int `json:"session_count"`
 	// DefaultModel 该 agent 的**派生只读**默认模型：`{"<runtime>": "<model_id>"}`。
 	//
 	// 它**没有写入方**：`GET /agents` 按**构建期底座**与 `models.is_default` 算出（v12 起
@@ -38,11 +38,11 @@ type AgentResp struct {
 // 用户要换 agent 只能在**新会话**里换。
 type AgentDeleteResp struct {
 	Deleted string `json:"deleted"`
-	// AffectedConversations 绑定该 agent 的会话总数（含归档：删除后均无法继续提问）。
-	AffectedConversations int `json:"affected_conversations"`
-	// DetachedConversations 本次被摘除的活跃会话数（内存里仍连着的会话立即失效，后续 prompt
+	// AffectedSessions 绑定该 agent 的会话总数（含归档：删除后均无法继续提问）。
+	AffectedSessions int `json:"affected_sessions"`
+	// DetachedSessions 本次被摘除的活跃会话数（内存里仍连着的会话立即失效，后续 prompt
 	// 报 agent_not_found，而不是「删了还能跑、重启后才失效」）。
-	DetachedConversations int `json:"detached_conversations"`
+	DetachedSessions int `json:"detached_sessions"`
 	// WasDefault 被删的是否为「当前 Agent」（是则回落内置默认并清除 default.json 的显式选择）。
 	WasDefault bool `json:"was_default"`
 }
@@ -60,12 +60,12 @@ type PermissionPolicyResp struct {
 
 // AgentLastErrorResp 某 agent 最近一次失败的诊断快照。
 type AgentLastErrorResp struct {
-	At             string   `json:"at"`
-	ConversationID string   `json:"conversation_id,omitempty"`
-	Code           string   `json:"code"`
-	Class          string   `json:"class"`
-	Details        string   `json:"details"`
-	StderrTail     []string `json:"stderr_tail,omitempty"`
+	At         string   `json:"at"`
+	SessionID  string   `json:"session_id,omitempty"`
+	Code       string   `json:"code"`
+	Class      string   `json:"class"`
+	Details    string   `json:"details"`
+	StderrTail []string `json:"stderr_tail,omitempty"`
 }
 
 // AgentDiagnosticsResp agent 诊断快照（A3）：连接态 + stderr 尾巴 + 最近失败。

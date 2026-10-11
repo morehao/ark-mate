@@ -19,7 +19,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// serve 启动控制面：REST（列表 + conversations create/prompt/cancel）+ WS /ws/events。
+// serve 启动控制面：REST（列表 + sessions create/prompt/cancel）+ WS /ws/events。
 // 会话动作由 Orchestrator 跑真实 ACP runtime；事件经 eventbus 出流。
 //
 // 本函数只做三件事：解析子命令参数、把配置交给 internal/app 装配、按退出码收尾。
