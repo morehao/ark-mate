@@ -129,6 +129,14 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
+	// W1：底座原文 → 平台侧的值（`rt_` 壳）。**失败即返回错误、不建 rec**——把裸 id 落库会让
+	// "平台 id 与底座 id 形状可分"这条不变式当场失效，而那是静默的（守卫② 事后才发现）。
+	// `as.providerID` 刻意保留**原文**：它是进程内映射 `byProvider` 的键，与 ACP 回调同源。
+	providerSessID, err := objid.WrapProvider(sess.ID())
+	if err != nil {
+		_ = sess.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
 	o.mu.Lock()
 	o.sessions[as.ID] = as
 	o.byProvider[sess.ID()] = as.ID
@@ -137,7 +145,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 	o.svc.registerSession(&SessionRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
 		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
-		ProviderSessionID: sess.ID(), Status: SessionStatusInProgress,
+		ProviderSessionID: providerSessID, Status: SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
 		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
@@ -256,8 +264,21 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID, sel)}
 	caps := rc.client.Capabilities()
 	sameRuntime := spec.ID == rec.RuntimeHint && rec.RuntimeHint != ""
+	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
+	//
+	// U1：`rt_ses_…` 底座认不出来 → `LoadSession` 失败 → 打一条 WARN 后走 handoff memo 兜底
+	// （ADR-4 明确允许的降级）——用户侧只看到"上下文丢了"，**不响**。所以这里严格解包，
+	// 失败即返回错误，不降级（"让错的那次在边界上当场失败"是这两条函数存在的全部理由）。
 	nativeID := rec.ProviderSessionID
-	resumeOK := sameRuntime && nativeID != "" &&
+	rawNativeID := ""
+	if nativeID != "" {
+		raw, uerr := objid.UnwrapProvider(nativeID)
+		if uerr != nil {
+			return nil, "", uerr
+		}
+		rawNativeID = raw
+	}
+	resumeOK := sameRuntime && rawNativeID != "" &&
 		(caps.Raw.LoadSession || caps.Raw.SessionCapabilities.Resume != nil)
 
 	var sess *acl.Session
@@ -266,9 +287,9 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 	switch {
 	case resumeOK:
 		if caps.Raw.LoadSession {
-			sess, err = rc.client.LoadSession(ctx, nativeID, opts)
+			sess, err = rc.client.LoadSession(ctx, rawNativeID, opts)
 		} else {
-			sess, err = rc.client.ResumeSession(ctx, nativeID, opts)
+			sess, err = rc.client.ResumeSession(ctx, rawNativeID, opts)
 		}
 		if err != nil {
 			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "session", rec.ID,
@@ -288,9 +309,15 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 		}
 		memo = o.svc.HandoffMemo(rec.ID, o.handoffMaxChars)
 		reason = "handoff"
+		// W2（最容易漏的一处：它在"原生恢复失败/迁移"分支里）：新会话的底座原文同样要加壳，
+		// 否则换底座/换会话之后 id 会退化成裸值——库里的形状就变成了两种。
+		wrappedNew, werr := objid.WrapProvider(sess.ID())
+		if werr != nil {
+			return nil, "", werr
+		}
 		// 迁移登记：fresh session 顶替原 provider id；跨 runtime 时同步 runtime_hint。
-		if nativeID != sess.ID() || spec.ID != rec.RuntimeHint {
-			rec.ProviderSessionID = sess.ID()
+		if nativeID != wrappedNew || spec.ID != rec.RuntimeHint {
+			rec.ProviderSessionID = wrappedNew
 			rec.RuntimeHint = spec.ID
 		}
 	}

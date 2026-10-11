@@ -18,7 +18,9 @@ import (
 // "已导入"然后空转，库里却空空如也，没有任何错误码。守卫⑥ 拿它跟 v15 的 `DROP TABLE` 清单
 // 逐张比对：少一张、多一张都红。没有元数据要清的表也要**显式写"无"**。
 var v15TablePlan = []v15TableEntry{
-	{Table: "conversations", Metadata: "无"}, // 会话行整体消失，没有指向它的 meta 键
+	// `imported_transcripts` 登记在会话表上：它是「transcript 已导入」的标记，而这条会话面
+	// 整体消失了——不清它，`mate migrate` 会认为"已导入"然后空转（§8.4 ①，静默失效）。
+	{Table: "conversations", Metadata: "meta.imported_transcripts"},
 	{Table: "events", Metadata: "meta.events_last_seq"},
 	{Table: "runs", Metadata: "无"},
 	{Table: "messages", Metadata: "无"}, // 可从 events 重建，而 events 也在本次清空之列

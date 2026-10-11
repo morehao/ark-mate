@@ -101,6 +101,7 @@ func toSessionResp(r *SessionRec) dtosession.SessionResp {
 	return dtosession.SessionResp{
 		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
+		ProviderSessionID:  r.ProviderSessionID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
 		Title:              r.Title,

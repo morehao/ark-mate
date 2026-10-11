@@ -162,6 +162,8 @@ type doctorOptions struct {
 	// StoreMode 解析后的持久层模式（sqlite|memory）：memory 形态下 DB 不是 provider 档案的
 	// 事实源，K2 那一段据此如实记"不适用"，而不是报 0 条（那会假绿）。
 	StoreMode string
+	// TranscriptDir 会话 wire transcript 落盘目录（R3：v15 起旧形状的文件名要被看见）。
+	TranscriptDir string
 }
 
 // doctor 子命令入口。退出码：0 = 没有失败项；1 = 有失败项；2 = 用法/配置错误。
@@ -196,6 +198,7 @@ func doctor(args []string) {
 		AgentDir:      cfg.AgentDir,
 		DBPath:        cfg.DBPath,
 		StoreMode:     cfg.ResolvedStoreMode(),
+		TranscriptDir: cfg.TranscriptDir,
 	}
 	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *home != "" {
@@ -304,6 +307,11 @@ func runDoctor(opts doctorOptions) doctorReport {
 	// provider（供应商凭据）与模型清单（K2）：全部只读，事实由 manager 构造（本文件只排版）。
 	providers, providerChecks := checkProviderSection(opts)
 	checks = append(checks, providerChecks...)
+
+	// transcript 目录的**形状体检**（R3）：v15 起平台会话 id 形如 `ses_<26 位 ULID>`，而目录里
+	// 旧形状的文件（裸 uuid）在装载期会被**跳过 + WARN**——那件事发生在启动日志里，而 doctor
+	// 要让它变成"随时可查的体检项"。
+	checks = append(checks, checkTranscriptShape(opts.TranscriptDir))
 
 	failed, warnings := 0, 0
 	for _, c := range checks {

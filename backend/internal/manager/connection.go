@@ -341,15 +341,14 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			// 调试/冒烟（--allow-all）：不征询，直接按空内容接受（agent 自行处理空内容）。
 			return acl.ElicitationOutcome{Action: "accept"}
 		}
-		sid, source := o.resolveElicitationScope(cli, req)
+		sid, source, note := o.resolveElicitationScope(cli, req)
 		if sid == "" {
-			// 既无 `_meta` scope 也无唯一在途 turn（空闲 / 会话外 request-scope / 多会话并发）→ 不猜。
+			// 既无 `_meta` scope 也无唯一在途 turn（空闲 / 会话外 request-scope / 多会话并发）、
+			// 或 `_meta` 给了一个**查不到平台会话**的底座 id（D-4）→ 不猜。
 			// 仍按取消回应（不能把 agent 挂死），但置 ScopeAmbiguous 并留痕（agent 诊断 + 日志），
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
-			glog.Warnw(ctx, "elicitation: 无法归属会话（无 _meta scope 且连接上无唯一在途 turn），按取消处理",
-				"scope_source", source)
-			o.svc.noteScopeAmbiguous(agent.ID,
-				"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）")
+			glog.Warnw(ctx, "elicitation: 无法归属会话，按取消处理", "scope_source", source, "note", note)
+			o.svc.noteScopeAmbiguous(agent.ID, note)
 			return acl.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID, req.ScopeSource = sid, source

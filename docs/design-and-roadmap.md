@@ -196,6 +196,43 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 > ⑥ **不变**——"一份 UI 产物、两种加载方式"（v8④）与 v10 逐条不变；`tray` 仍是唯一允许 `browserFallback: none`
 >    的纯增强能力。实测与收尾见 `.dsh/docs/notes/2026-10-11-dev-delivery-parity-baseline-notes.md` §8。
 
+> **决策变更 v12（数据模型 v15：会话词汇统一 + 主键前缀化 + 一次性的破坏性重建，2026-10-11）**：
+> ① **一个东西一个词**——平台聚合概念此前在**同一份代码**里有四个叫法（表名 `conversations`、
+>    REST `/conversations`、Go 类型 `Conversation`、wire `session`）。v15 起**只有一个词：`session`**
+>    （表名 `sessions`、路径 `/sessions`、Go 类型 `SessionEntity`、包名 `dtosession`/`svcsession`/`ctrsession`、
+>    前端 `packages/types/src/session.ts`）。收敛判据是机器判据：`internal/archtest` 的
+>    `TestNoConversationVocabulary` 在扫描面内对 `conversation` **零命中**（白名单逐条写明理由）。
+>    消歧规则见 `AGENTS.md`「一个东西一个词」一节。
+> ② **主键前缀化**——平台铸造的 7 类 id 从裸 uuid 统一成 `<前缀>_<26 位 ULID>`
+>    （`ses_`/`msg_`/`run_`/`inp_`/`wsp_`/`mdl_`/`pem_`，唯一实现 = `backend/pkg/object/objid`）。
+>    ULID 的字典序 = 铸造序，因此 `messages`/`inputs` 靠 `id ASC` 兜底的两处排序语义**逐字不变**；
+>    `messages`/`permission_memories` 同时消灭了 `AUTOINCREMENT`（主键 TEXT、由 Go 侧铸号）。
+>    **底座透传过来的会话 id 平台侧一律加固定壳 `rt_`**（`rt_ses_…`/`rt_<uuid>`）：平台不改底座、
+>    只加壳，于是"平台 id 与底座 id 形状可分"这条判据**由平台单方面定义**（底座换实现、换前缀、
+>    发裸 uuid 都不影响）。包装 4 处 / 解包 3 处，调用点白名单由守卫②钉住。
+> ③ **表行结构体对齐参照工程**——`internal/model` 从 583 行的单文件拆成**一表一文件**，
+>    结构体一律 `<域词>Entity` / `<域词>EntityList`、表名常量 `TableName<域词>` 随实体文件走
+>    （不做汇总 `table.go`）；同时删掉 `internal/store` 的 15 个实体类型别名（一个表行类型只留一个名字）。
+> ④ **v15 是一次性例外，不构成先例**（用户原话：「v15 重建吧，但只有这一次，而不是一个标准 sop」）——
+>    这次走**破坏性重建**（7 张表 DDL 重建 + 元数据清理，`<db>.bak-v15-<ts>` 是回退窗口），
+>    **不写逐行数据迁移**。四条约束把它钉成例外：**不给内核加能力**（`migration` 结构体字段集合不变、
+>    不加 `--rebuild` 之类的开关）、`DROP TABLE` 白名单、v15 的 name/backup 显式标注、
+>    本决策记录 + 发布说明（守卫⑥ `TestDestructiveRebuildIsOneShot`，含 R6 的
+>    「DROP 清单 ↔ 元数据清理清单一一对应」）。**下一次数据模型变更回到"有序追加 + 数据搬运"**；
+>    要再次重建必须 owner 单独拍板，不能援引 v15。
+> ⑤ **`models` 是唯一例外**：它不进 DROP 清单（模型定义含 `image_input` 能力声明、且**没有文件来源**，
+>    丢了只能人工重建），改为在同一事务里把旧行 id 重铸成 `mdl_<ULID>` 并改指**唯一存活的引用**
+>    `meta.default_model`（R7，单测 `TestMigrateV15RecastsModelIDs` 钉住，含反证）。
+>    **代价如实写**：外部握着的旧 `mdl_` id 会失效（脚本/书签/诊断包），这件事没有任何 Go 测试能发现，
+>    由 `APIContract` `v1 → v2` 与发布说明负责。
+> ⑥ **代价**：`~/.ark-mate/mate.db` 是 `make dev` 与桌面核**共用的同一个库**，所以这次破坏同时命中
+>    两种形态；既有的会话/事件/轮次/消息/排队输入/权限记忆/工作空间登记会被清空
+>    （`automations.last_fired_at` 刻意保留，ADR-10）。旧 transcript（文件名即旧会话 id）在装载期被
+>    **跳过 + WARN**，处置靠 `mate transcripts prune`（ADR-5 不自动删）——`mate doctor` 新增一条体检项
+>    把这件事变成随时可查（R3）。**不为旧数据写任何兼容或派生代码**（用户 2026-10-11 拍板）。
+> ⑦ **不变**——v3 三条红线、v2②、v7②、v8①②、v10、v11 逐条不变；wire 上的 `session.*` 事件与
+>    `session_id` 字段**冻结不动**（v15 只是让平台领域词追上它们）。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个

@@ -97,15 +97,25 @@ async function checkRest() {
 
   const convs = await apiGet('/sessions')
   if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /sessions', JSON.stringify(convs.env))
-  // 对外 id 展示策略前提（P3 F4）：会话 id 为平台 uuid（36 位），不再泄露底座 id 形状（ses_* 等）。
-  const badId = convs.env.data.find(
-    (c) => typeof c?.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(c.id),
+  // 对外 id 展示策略前提（P3 F4 / v15 选项 D **写精确**，不是推翻）：
+  //   平台会话 id   = `ses_<26 位 Crockford Base32>`（平台单方面定义，底座用什么前缀都不影响）；
+  //   底座会话 id   = `rt_<底座原文>`（平台只加壳不解析主体）。
+  // 两条形状由**平台**定义，因此 `id` 与 `provider_session_id` 永远不可能相等——这是"形状即
+  // 类型"这条免费检查的载体（设计 §4.5.2 不变式 I1）。缺后者不算失败（新建会话起步阶段可能还没落壳）。
+  const PLATFORM_SESSION_ID = /^ses_[0-9A-HJKMNP-TV-Z]{26}$/
+  const PROVIDER_SESSION_ID = /^rt_.+$/
+  const badId = convs.env.data.find((c) => typeof c?.id !== 'string' || !PLATFORM_SESSION_ID.test(c.id))
+  if (badId) return bad('会话 id 形状', `应 ses_<26 位 ULID>，got ${JSON.stringify(badId.id)}`)
+  const badProvider = convs.env.data.find(
+    (c) => c?.provider_session_id !== undefined && c.provider_session_id !== null &&
+      (typeof c.provider_session_id !== 'string' || !PROVIDER_SESSION_ID.test(c.provider_session_id)),
   )
-  if (badId) return bad('会话 id 形状', `应平台 uuid，got ${JSON.stringify(badId.id)}`)
+  if (badProvider)
+    return bad('底座会话 id 形状', `应 rt_<底座原文>，got ${JSON.stringify(badProvider.provider_session_id)}`)
   // P3 余留（侧栏相对时间/排序）依赖 updated_at；缺字段会让列表退化成「空时间」。
   const noTime = convs.env.data.find((c) => typeof c?.updated_at !== 'string' || Number.isNaN(Date.parse(c.updated_at)))
   if (noTime) return bad('会话列表时间字段', `updated_at 应为可解析时间戳，got ${JSON.stringify(noTime.updated_at)}`)
-  ok(`GET /sessions → 数组信封（id 全为平台 uuid、updated_at 可解析；${convs.env.data.length} 条）`)
+  ok(`GET /sessions → 数组信封（id 全为 ses_<ULID>、provider_session_id 全为 rt_*、updated_at 可解析；${convs.env.data.length} 条）`)
 
   // P2 §8.1 能力卡数据源：Agent 统一能力目录（形状 + agent_id 一致）。
   const caps = await apiGet(`/agents/${encodeURIComponent(a0.id)}/capabilities`)

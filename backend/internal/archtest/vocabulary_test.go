@@ -45,6 +45,11 @@ var conversationVocabularyWhitelist = []struct {
 			"（DAO 已改认 `sessions`，读不到历史表）。这是守卫⑤ 那条纪律的测试侧镜像",
 	},
 	{
+		path: "backend/internal/store/migrate_v15_test.go",
+		reason: "同一个理由的测试侧：v15 的用例要在 **v14 库**上写夹具，而那时列名还是" +
+			"`last_conversation_id` / 表名还是 `conversations`（v15 才 RENAME/重建）",
+	},
+	{
 		path: "backend/internal/store/migrate_v15.go",
 		reason: "`v15TablePlan` 里逐张登记「被重建的表」，`conversations` 正是**历史表名**——" +
 			"守卫⑥ 的 R6 判据（DROP 清单 ↔ 清理清单一一对应）就靠这个字面量",

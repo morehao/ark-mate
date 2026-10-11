@@ -206,6 +206,13 @@ func (a *App) Init(ctx context.Context) error {
 		}
 		a.st = st
 		a.svc.EnableStore(st)
+		// v15 破坏性重建的**启动 WARN**（§8.5 R2，强制项）：升级既有库时静默清空会话历史是
+		// 最坏的一种失败——用户只会觉得"我的会话没了"。所以这里必须说出来，并带上回退路径
+		// （`<db>.bak-v15-<ts>`）；全新库不会命中（没有任何东西被清空）。
+		if note := st.DestructiveRebuildNote(); note != "" {
+			glog.Warnw(ctx, "serve: 数据模型 v15 已执行一次性破坏性重建（仅此一次，不构成先例）",
+				"note", note, "backup", st.MigrationBackupPath())
+		}
 		// 能力定义一次性导入（M6-4）：v8 之后 DB 才是能力面的事实源，而存量定义还在
 		// `MATE_CAPABILITIES` 目录里。**必须发生在 loadDefinitions 之前**——装载只从 DB 读，
 		// 导入晚了这一轮启动的能力面就是空的（用户看到"我的技能全没了"，哪怕下一轮就回来）。

@@ -43,6 +43,12 @@ type Store struct {
 	path string
 	// migrationBackupPath 本次进程启动时那次迁移备份的路径（空 = 本次没迁移过）。
 	migrationBackupPath string
+	// destructiveRebuildNote 本进程真的执行过 v15 的**破坏性重建**时记一句话（否则空）。
+	//
+	// 它**不是**"给内核加能力"（§8.3.2 C1）：不改变任何迁移决策、不可配置、不可调用——只是一条
+	// "刚刚发生了什么"的观察值。§8.5 R2 要求启动时打一条 WARN 把这件事说出来，而"7 张表被清空"
+	// 绝不能只体现在那几句 `DROP TABLE` 里：用户看到的应当是**日志里的一句话**。
+	destructiveRebuildNote string
 
 	sessions   *dao.SessionDao
 	events     *dao.EventDao

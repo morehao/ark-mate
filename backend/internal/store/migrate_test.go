@@ -50,6 +50,14 @@ func applySchemaUpTo(t *testing.T, s *Store, version int) {
 func migrateUpTo(t *testing.T, s *Store, version int) {
 	t.Helper()
 	ctx := context.Background()
+	// 与 Migrate 一样先保底建版本表（空库上直接读 AppliedVersions 会 "no such table"）。
+	if err := s.db.Exec(`CREATE TABLE IF NOT EXISTS ` + model.TableNameSchemaMigration + ` (
+		version    INTEGER PRIMARY KEY,
+		name       TEXT NOT NULL,
+		applied_at TEXT NOT NULL
+	)`).Error; err != nil {
+		t.Fatalf("建 schema_migrations: %v", err)
+	}
 	for _, m := range schemaMigrations {
 		if m.version > version {
 			break

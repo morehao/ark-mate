@@ -311,7 +311,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	ctx := ctxT()
 	if err := s.UpsertSession(ctx, model.SessionEntity{
 		ID: "c1", AgentID: "a1", Status: "completed",
-		Provider: "p1", Model: "m1", RuntimeHint: "opencode", ProviderSessionID: "ses_1",
+		Provider: "p1", Model: "m1", RuntimeHint: "opencode", ProviderSessionID: "rt_ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
@@ -329,7 +329,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
-	if got.Provider != "p1" || got.Model != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "ses_1" {
+	if got.Provider != "p1" || got.Model != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "rt_ses_1" {
 		t.Errorf("导入覆盖了会话级模型选择: provider=%q model=%q hint=%q session=%q",
 			got.Provider, got.Model, got.RuntimeHint, got.ProviderSessionID)
 	}

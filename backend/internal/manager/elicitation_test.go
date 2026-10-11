@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -124,21 +125,37 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 // TestResolveElicitationScope C3 归属判定三分支：wire（`_meta`）优先 → inferred_inflight（唯一在途
 // turn）→ ambiguous（都没有，返回空 id 由调用方按取消回应并留痕）。cli=nil 时无在途 turn，
 // 正好覆盖后两个分支（wire 分支不碰 cli）。
+//
+// v15（D-4 修复）之后 wire 分支的口径变了：`_meta` 里的 id 是**底座原文**，必须先按
+// `provider_session_id` 反查平台会话；查不到就退 ambiguous —— 这正是本用例现在要钉的东西
+// （改之前它会把 `wire-conv` 直接当成平台会话 id 用，把提问卡挂到一个不存在的会话上）。
 func TestResolveElicitationScope(t *testing.T) {
 	_, orch, _ := newTestRig(t)
 
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
-		SessionID: "wire-conv", ScopeSource: acl.ScopeWire,
-	}); sid != "wire-conv" || src != acl.ScopeWire {
-		t.Fatalf("wire 归属应直采: sid=%q src=%q", sid, src)
+	// 先登记一条会话，让它的 `provider_session_id` 是 `rt_wire-sess`。
+	orch.svc.registerSession(&SessionRec{
+		ID: "ses_platform", AgentID: "a1", Cwd: "/tmp",
+		ProviderSessionID: objid.ProviderShell + "wire-sess",
+	})
+
+	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		SessionID: "wire-sess", ScopeSource: acl.ScopeWire,
+	}); sid != "ses_platform" || src != acl.ScopeWire || note != "" {
+		t.Fatalf("wire 归属应按 provider_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
+	}
+	// **查不到**的 wire id（底座发了个我们不认识的会话）→ ambiguous + 留痕，**不猜**。
+	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+		SessionID: "wire-unknown", ScopeSource: acl.ScopeWire,
+	}); sid != "" || src != acl.ScopeAmbiguous || note == "" {
+		t.Fatalf("查不到的 wire 归属应落 ambiguous 且留痕: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// ScopeSource=wire 但 SessionID 为空（脏数据）→ 不认，退到推断/歧义。
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		ScopeSource: acl.ScopeWire,
 	}); sid != "" || src != acl.ScopeAmbiguous {
 		t.Fatalf("空 wire 归属应落 ambiguous: sid=%q src=%q", sid, src)
 	}
-	if sid, src := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
+	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		Mode: "form", Message: "q",
 	}); sid != "" || src != acl.ScopeAmbiguous {
 		t.Fatalf("无 wire 且无在途 turn 应落 ambiguous: sid=%q src=%q", sid, src)

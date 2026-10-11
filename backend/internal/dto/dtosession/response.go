@@ -4,12 +4,22 @@ import "github.com/morehao/ark-mate/internal/eventbus"
 
 // SessionResp 会话的对外表示（P0 起不含 runtime）。
 type SessionResp struct {
-	ID       string `json:"id"`
-	AgentID  string `json:"agent_id"`
-	Status   string `json:"status"`
-	Title    string `json:"title"`
-	Pinned   bool   `json:"pinned"`
-	Archived bool   `json:"archived"`
+	// ID 平台会话 id（`ses_<26 位 ULID>`）。**它是唯一的对外会话标识**——URL 路径段、
+	// 事件载荷的 `session_id`、前端路由都用它。
+	ID string `json:"id"`
+	// ProviderSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
+	//
+	// v15 起它在**平台侧**一律带 `rt_` 壳（`pkg/object/objid`）：这既是"平台 id 与底座 id
+	// 形状可分"这条不变式的载体（`id` 匹配 `^ses_…$`、本字段匹配 `^rt_.+$`，两者永不可能
+	// 相等），也是排障时一眼看出"这是哪个底座用什么形状发的"的那一层信息。
+	//
+	// 它**只**用于诊断与关联底座日志：**不得**出现在 URL 路径段，也不得被当成会话标识传给任何写面。
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	AgentID           string `json:"agent_id"`
+	Status            string `json:"status"`
+	Title             string `json:"title"`
+	Pinned            bool   `json:"pinned"`
+	Archived          bool   `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`

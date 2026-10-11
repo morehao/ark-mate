@@ -84,13 +84,13 @@ func TestWorkspaceTableIsRegistrationNotCarrier(t *testing.T) {
 	}
 }
 
-// TestConversationWorkspaceColumnIsPlain v14 给 conversations 加的是**普通归属列**，不是外键。
+// TestSessionWorkspaceColumnIsPlain 归属列是**普通列**，不是外键（v14 的增列与 v15 的建表两处都判）。
 //
 // 为什么专门守这一条：加外键在别的项目里是"更规范"的写法，本仓却恰恰相反——
 //   - 本仓 SQLite driver 不注入 `foreign_keys`，写了**不生效**，于是它只提供一种虚假的安心；
 //   - 更要紧的是**语义错了**：删登记**不该**连带删会话（设计 ADR-6），级联恰恰是错的方向；
 //     而 RESTRICT 又会让"移除登记"在会话还挂着时直接失败——那是把数据保留做成了一次报错。
-func TestConversationWorkspaceColumnIsPlain(t *testing.T) {
+func TestSessionWorkspaceColumnIsPlain(t *testing.T) {
 	path := filepath.Join(backendRoot(t), "internal", "store", "migrate.go")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -98,18 +98,51 @@ func TestConversationWorkspaceColumnIsPlain(t *testing.T) {
 	}
 	src := stripLineComments(string(raw))
 
+	// ① v14 的历史增列（表名是历史名 —— 迁移步只写字面量，见守卫⑤）。
 	re := regexp.MustCompile(`ALTER TABLE conversations ADD COLUMN workspace_id[^\n]*`)
 	m := re.FindString(src)
 	if m == "" {
 		t.Fatal("在 migrate.go 里找不到 `ALTER TABLE conversations ADD COLUMN workspace_id`：" +
 			"归属列被改名/挪走了？（本守卫是 fail-closed）")
 	}
-	if strings.Contains(strings.ToUpper(m), "REFERENCES") {
-		t.Fatalf("workspace_id 列带了外键：%q\n"+
-			"本仓 driver 不注入 foreign_keys，写了不生效；而它的语义（级联/RESTRICT）与"+
-			"「删登记不删会话」正好相反（设计 ADR-6）", m)
+	assertPlainWorkspaceColumn(t, m, "v14 增列")
+
+	// ② v15 的建表语句（**当前形态**的权威来源）：`sessions.workspace_id` 同样是普通列。
+	//
+	// 只判 v14 那一处是不够的：v15 把 `conversations` 整表重建成了 `sessions`，而"建成什么样"
+	// 由这段 DDL 决定——在 CREATE TABLE 里写 `REFERENCES` 不会让 v14 那行变红。
+	blockRe := regexp.MustCompile(`(?s)CREATE TABLE sessions \((.*?)\n\s*\)`)
+	b := blockRe.FindStringSubmatch(src)
+	if b == nil {
+		t.Fatal("在 migrate.go 里找不到 `CREATE TABLE sessions (...)`（v15 的建表语句）——fail-closed")
 	}
-	if !strings.Contains(m, "DEFAULT ''") {
-		t.Fatalf("workspace_id 列应带 DEFAULT ''（历史行天然归默认工作空间，不需要一次全表 UPDATE）：%q", m)
+	line := ""
+	for _, ln := range strings.Split(b[1], "\n") {
+		if strings.Contains(ln, "workspace_id") {
+			line = strings.TrimSpace(ln)
+		}
+	}
+	if line == "" {
+		t.Fatal("v15 的 `CREATE TABLE sessions` 里没有 workspace_id 列——归属列丢了")
+	}
+	assertPlainWorkspaceColumn(t, line, "v15 建表")
+}
+
+// assertPlainWorkspaceColumn 断言归属列是**普通列**：无 REFERENCES、带 `DEFAULT ”`。
+//
+// 为什么专门守这一条：加外键在别的项目里是"更规范"的写法，本仓却恰恰相反——
+//   - 本仓 SQLite driver 不注入 `foreign_keys`，写了**不生效**，于是它只提供一种虚假的安心；
+//   - 更要紧的是**语义错了**：删登记**不该**连带删会话（设计 ADR-6），级联恰恰是错的方向；
+//     RESTRICT 又会让"移除登记"在会话还挂着时直接失败——那是把数据保留做成了一次报错。
+func assertPlainWorkspaceColumn(t *testing.T, col, where string) {
+	t.Helper()
+	if strings.Contains(strings.ToUpper(col), "REFERENCES") {
+		t.Fatalf("%s 的 workspace_id 带了外键：%q\n"+
+			"本仓 driver 不注入 foreign_keys，写了不生效；而它的语义（级联/RESTRICT）与"+
+			"「删登记不删会话」正好相反（设计 ADR-6）", where, col)
+	}
+	if !strings.Contains(col, "DEFAULT ''") {
+		t.Fatalf("%s 的 workspace_id 应带 DEFAULT ''（历史行天然归默认工作空间，不需要一次全表 UPDATE）：%q",
+			where, col)
 	}
 }

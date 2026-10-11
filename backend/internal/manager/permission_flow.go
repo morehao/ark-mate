@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/glog"
 )
 
@@ -133,14 +134,66 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 //   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 turn → 按它归属；
 //   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
-func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.ElicitationRequest) (sessionID, scopeSource string) {
+func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
+	// D-4（v15 顺手修的既有缺陷）：`req.SessionID` 来自 ACP `_meta`，那是**底座的会话 id**，
+	// 不是平台的会话 id。v15 之前两者同形（opencode 都发 `ses_…`），于是"把提问卡挂到一个
+	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
+	//
+	// 修法只有一条：先按 `provider_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，
+	// **不猜**（这个函数的既有口径就是"猜错比不投更坏"）。
 	if req.ScopeSource == acl.ScopeWire && req.SessionID != "" {
-		return req.SessionID, acl.ScopeWire
+		if sid := o.platformSessionIDForProvider(req.SessionID); sid != "" {
+			return sid, acl.ScopeWire, ""
+		}
+		return "", acl.ScopeAmbiguous,
+			"elicitation 的 wire `_meta` 带来了一个底座会话 id，但平台上没有会话登记它" +
+				"（跨会话 / 已删除 / 底座换了 id）：按不可归属处理，不猜测"
 	}
 	if sid := o.busySessionForClient(cli); sid != "" {
-		return sid, acl.ScopeInferred
+		return sid, acl.ScopeInferred, ""
 	}
-	return "", acl.ScopeAmbiguous
+	return "", acl.ScopeAmbiguous,
+		"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）"
+}
+
+// platformSessionIDForProvider 把**底座会话原文**反查成平台会话 id（D-4 的唯一实现）。
+//
+// 两级：① 进程内的 `byProvider`（活跃会话，与 ACP 回调同源）；② 持久层（进程重启后
+// `_meta` 里的 id 可能指向一条历史会话）。查不到返回空串——调用方退 `ScopeAmbiguous`，不猜。
+func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string {
+	if rawProviderID == "" {
+		return ""
+	}
+	if sid := o.resolveProvider(rawProviderID); sid != "" {
+		return sid
+	}
+	wrapped, err := objid.WrapProvider(rawProviderID)
+	if err != nil {
+		return ""
+	}
+	o.svc.mu.Lock()
+	for _, r := range o.svc.sessions {
+		if r.ProviderSessionID == wrapped {
+			sid := r.ID
+			o.svc.mu.Unlock()
+			return sid
+		}
+	}
+	st := o.svc.st
+	o.svc.mu.Unlock()
+	if st == nil {
+		return ""
+	}
+	list, err := st.ListSessions(context.Background(), nil)
+	if err != nil {
+		return ""
+	}
+	for i := range list {
+		if list[i].ProviderSessionID == wrapped {
+			return list[i].ID
+		}
+	}
+	return ""
 }
 
 // requestElicitation 处理一次 ACP 结构化提问请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：

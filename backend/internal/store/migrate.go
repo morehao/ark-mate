@@ -584,9 +584,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := s.applyMigration(ctx, m); err != nil {
 			return err
 		}
+		// v15 是唯一一次"清库重建"（守卫⑥ 钉着这条）。只有**升级既有库**才值得告警：
+		// 全新库（`applied` 为空）同样会跑 v15，但那没有任何东西被清空。
+		if m.version == 15 && len(applied) > 0 {
+			s.destructiveRebuildNote = "7 张表已清空（sessions/events/runs/messages/permission_memories/inputs/workspaces）；" +
+				"models 保留但主键已重铸为 mdl_<ULID>（外部握着的旧模型 id 已失效）；" +
+				"providers/skills/mcp_servers/agents/automations 与 vault 原样保留"
+		}
 	}
 	return nil
 }
+
+// DestructiveRebuildNote 返回本进程执行过的 v15 破坏性重建的处置说明（空 = 本次没发生）。
+//
+// `mate doctor` 与 serve 的启动 WARN 都读它（§8.5 R1/R2）。
+func (s *Store) DestructiveRebuildNote() string { return s.destructiveRebuildNote }
 
 // backupBeforeMigration 把库文件复制成 `<db>.bak-<tag>-<ts>`，返回该路径。
 //
