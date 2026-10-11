@@ -134,7 +134,7 @@ function rebuildCore() {
   try {
     execFileSync('go', ['build', '-o', out, './cmd/mate'], {
       cwd: join(REPO, 'backend'),
-      env: { ...process.env, CGO_ENABLED: '0' },
+      env: { ...process.env, CGO_ENABLED: '1' },
       stdio: 'ignore',
     })
     return { ok: existsSync(out) }

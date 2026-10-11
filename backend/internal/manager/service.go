@@ -158,6 +158,16 @@ type Service struct {
 	lastErrs map[string]agentLastErr
 	// scopeNotes 每 agent 最近一条「归属歧义」留痕（elicitation 无法归属会话时写入）。
 	scopeNotes map[string]scopeNote
+	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
+	//
+	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
+	// 库不存在时它就该由装配期现建一个），而登记表（用户显式产出的状态）在 memory 模式本来就
+	// 无处可存。少了它，"未指定 cwd 就发一条消息"这条最普通的路在 `MATE_STORE=memory` 下
+	// 直接报 `workspace_required` —— 用户什么都没做错。见 EnsureDefaultWorkspace。
+	//
+	// 由 s.mu 保护（与 sessions 同一把锁）。
+	memDefaultWorkspace *model.WorkspaceEntity
+
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *chunkCoalescer
 	// vaultStore §5 provider 密钥加密落盘句柄（惰性创建 + 缓存；见 providers.go providerVault）。
