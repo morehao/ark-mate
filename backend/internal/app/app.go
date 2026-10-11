@@ -176,6 +176,15 @@ func (a *App) Init(ctx context.Context) error {
 	a.svc = manager.NewService(reg, a.bus)
 	a.reg = reg
 
+	// definitions 目录**先行登记**（顺序敏感，2026-10-11 修）：它同时是 vault 的锚点
+	// （密钥 `<父目录>/vault.key`、provider 密文 `<父目录>/vault/`），而下面的
+	// `EnableStore` 会立刻做一次装配期 runtime 同步——那一次同步要读 provider 密钥。
+	// 不先登记（旧顺序：等 loadDefinitions 才登记）→ 同步按"本机没有 vault"处理：
+	// 已存密钥解不出来、模型清单被当成空的下发撤回，并把这份错结论写进 meta；
+	// providerVault 的缓存还会把它钉死到整个进程（表现为「已存密钥显示未设置」+ 补密钥一律
+	// `vault_unavailable`）。真实原因的取证见 `SetAgentDir` 的注释。
+	a.svc.SetAgentDir(cfg.AgentDir)
+
 	// 持久层装配（P1）：MATE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
 	mode := cfg.ResolvedStoreMode()
@@ -253,7 +262,7 @@ func (a *App) Init(ctx context.Context) error {
 		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
 			glog.Infow(ctx, "serve: 存量 provider 档案导入完成",
 				"dir", imp.Dir, "providers", imp.Providers, "inserted", imp.Inserted,
-				"existing", imp.Existing, "backup", imp.Backup, "plaintext_left", imp.Plaintext)
+				"existing", imp.Existing, "backup", imp.Backup, "skipped_keys", len(imp.SkippedKeys))
 		}
 		conversations, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {

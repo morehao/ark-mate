@@ -9,56 +9,127 @@ import (
 	"gorm.io/gorm"
 )
 
-// 本文件是**平台模型清单**事实源（v12）的门面。
+// 本文件是**平台模型清单**事实源（v13 起是**资源表**）的门面。
 //
-// 与 v11 的差别只有一处，但它是本次改造的核心：**模型不再带 runtime 维度**。
-// 身份从三元组 `(runtime, provider_id, model_id)` 塌成两元组 `(provider_id, model_id)`，
-// 后者由库级唯一索引真实表达（不是"提交事务里先查后写"那种约定）。
+// 与 v12 的差别只有存储形态（列化 + 删 body），语义逐字不变：
+//   - **没有 runtime 维度**：一份清单投给所有已注册底座（ADR-1/B3）；
+//   - **默认模型是单一值**（`meta.MetaKeyDefaultModel`，ADR-21）：它是**用户的偏好**，
+//     不是模型行的属性；
+//   - 列表顺序 = `(provider_id, model_id)` 升序（ADR-6，修 P1 的"UUID 字典序"）。
 //
-// 另外两个 v11 的"每 runtime"机制随之消失：
-//   - `is_default` 列 → `meta.MetaKeyDefaultModel` 的**单一值**（ADR-21：用户面只有一个默认）；
-//   - `model_id` 在 body 里 → `model_id` 是**列**（唯一索引要它）。
+// 定义行仍走 `commitDefinitionChange`（行 CAS + 同事务一条审计）：这是
+// "一次写面 = 一行 + 一条审计"的既有纪律，与 skills/mcp_servers/agents 同形。
 //
-// 定义行仍走 `commitDefinitionChange`（行 CAS + 同事务一条审计）：这是"一次写面 = 一行 + 一条审计"
-// 的既有纪律，与 skills/mcp_servers/agents 同形。
+// 清单需要 sqlite 持久层：memory 模式没有 `models` 表（写面在 manager 侧报 40501）。
+
+// ModelColumns 是模型行的**全部列**（含身份列）：新建时用。
+type ModelColumns struct {
+	ID              string
+	ProviderID      string
+	ModelID         string
+	Name            string
+	Note            string
+	InputModalities string
+}
+
+// ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model_id` 不在其中——
+// 改身份等于换一条资源，不在 PATCH 语义里）。
+type ModelContent struct {
+	Name            string
+	Note            string
+	InputModalities string
+}
+
+// digest 这条模型行的规范 JSON 摘要（ADR-10）。
+//
+// 身份两列**进摘要**（它们是这一版内容的一部分）；`revision` / 时间列不进（记账不是内容）。
+func modelRowDigest(cols ModelColumns) string {
+	return rowDigest(map[string]string{
+		"id": cols.ID, "provider_id": cols.ProviderID, "model_id": cols.ModelID,
+		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
+	})
+}
 
 // CreateModelDefinition 新建一条模型条目 + 一条审计，同事务。
 //
 // 返回 false 的两种情形都是"没写进去，也没有审计"：
 //   - 同 `(provider_id, model_id)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
 //   - 主键 `id` 已存在（并发新建抢先，同一个对外表现）。
-func (s *Store) CreateModelDefinition(
-	ctx context.Context, id, providerID, modelID, body, actor string,
-) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionCreate, body, 0,
+func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, actor string) (bool, error) {
+	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, cols.ID, actor,
+		model.CapabilityActionCreate, modelRowDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelDefinition{
-				ID: id, ProviderID: providerID, ModelID: modelID,
-				Body: body, Revision: 1, UpdatedAt: now,
+				ID: cols.ID, ProviderID: cols.ProviderID, ModelID: cols.ModelID,
+				Name: cols.Name, Note: cols.Note, InputModalities: cols.InputModalities,
+				Revision: 1, CreatedAt: now, UpdatedAt: now,
 			})
 		})
 }
 
-// UpsertModelDefinition 覆盖一条模型条目的正文 + 一条审计，同事务。
+// UpdateModelDefinition 覆盖一条模型条目的**内容列** + 一条审计，同事务。
 //
-// 只碰 `body/revision/updated_at`（`DefinitionDao.UpdateCAS` 的既有语义）——`provider_id` /
+// 只碰 `name` / `note` / `input_modalities` / `revision` / `updated_at`——`provider_id` /
 // `model_id` 是身份，改它们等于换一条资源，不在覆盖语义里。
-func (s *Store) UpsertModelDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionUpdate, body, expectedRev,
+func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content ModelContent, expectedRev int64, actor string) (bool, error) {
+	digest := rowDigest(map[string]string{
+		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
+	})
+	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor,
+		model.CapabilityActionUpdate, digest, expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
-			return s.models.WithTx(tx).UpdateCAS(ctx, id, body, expectedRev, now)
+			return s.models.WithTx(tx).UpdateColumnsCAS(ctx, id, map[string]any{
+				"name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
+			}, expectedRev, now)
 		})
 }
 
-// DeleteModelDefinition 删除一条模型条目 + 一条审计，同事务。
+// DeleteModelDefinitionAndClearDefault 删除一条模型条目 + 一条审计，**并在同一事务内**
+// 条件清空 `meta.default_model`。
 //
-// 它**不**负责清默认：清不清是业务判据（v12 的语义是"允许删 + 连带清空默认"），
-// 默认的落地由 manager 在同一请求里调 `ClearDefaultModelID`。
-func (s *Store) DeleteModelDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor, model.CapabilityActionDelete, "", expectedRev,
-		func(tx *gorm.DB, _ time.Time) (bool, error) {
-			return s.models.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
+// 为什么两件事必须同事务（v12 是两次独立调用）：中间那一小段里"默认指向一条已删除的行"
+// 是一个**悬挂态**——交付时被忽略、读面显示"默认模型：无"，而 meta 里还留着旧 id
+// （B6，修 bug 性质）。条件清空（仅当默认**正是这一行**）不变：删除是并发动作，
+// "删 A"不该把用户刚设的默认 B 一起清掉。
+//
+// 返回 (是否删掉, 是否清了默认)。
+func (s *Store) DeleteModelDefinitionAndClearDefault(
+	ctx context.Context, id string, expectedRev int64, actor string,
+) (bool, bool, error) {
+	now := time.Now().UTC()
+	deleted, cleared := false, false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ok, err := s.models.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil // 行不在 / CAS 未中：不写审计、也不动默认
+		}
+		deleted = true
+		cur, has, err := s.meta.WithTx(tx).Get(ctx, model.MetaKeyDefaultModel)
+		if err != nil {
+			return err
+		}
+		if has && cur == id {
+			if err := s.meta.WithTx(tx).Set(ctx, model.MetaKeyDefaultModel, ""); err != nil {
+				return err
+			}
+			cleared = true
+		}
+		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
+			Kind:         model.CapabilityKindModel,
+			CapabilityID: id,
+			Action:       model.CapabilityActionDelete,
+			Actor:        actor,
+			At:           now,
+			Digest:       "",
 		})
+	})
+	if err != nil {
+		return false, false, err
+	}
+	return deleted, cleared, nil
 }
 
 // GetModelDefinition 读一条模型条目（不存在 → (nil, false, nil)）。
@@ -66,14 +137,15 @@ func (s *Store) GetModelDefinition(ctx context.Context, id string) (*ModelDefini
 	return s.models.Get(ctx, id)
 }
 
-// ListModelDefinitions 列出全部模型条目（id 升序）。
+// ListModelDefinitions 列出全部模型条目（**`(provider_id, model_id)` 升序**，ADR-6）。
 //
 // v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
 func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelDefinitionList, error) {
 	return s.models.ListAll(ctx)
 }
 
-// ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（删除保护的引用判据）。
+// ListModelDefinitionsByProvider 列出挂靠在某条供应商下的条目（**只读**：删除保护的判据
+// 已移进 `DeleteProviderDefinitionIfUnreferenced` 的同一事务，这里只服务文案与 doctor）。
 func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID string) (model.ModelDefinitionList, error) {
 	return s.models.ListByProvider(ctx, providerID)
 }
@@ -103,9 +175,10 @@ func (s *Store) SetDefaultModelID(ctx context.Context, id string) error {
 	return s.meta.Set(ctx, model.MetaKeyDefaultModel, id)
 }
 
-// ClearDefaultModelID 清除默认模型——**仅当它当前正是 id**（删模型时的连带清空）。
+// ClearDefaultModelID 清除默认模型——**仅当它当前正是 id**（PATCH 里 `is_default:false` 的落地）。
 //
-// 为什么带条件：删除是并发动作，"删 A"不该把用户刚设的默认 B 一起清掉。返回是否真的清了。
+// 删模型那条路径**不用**它：那条要求"删行 + 清默认"同事务，走
+// `DeleteModelDefinitionAndClearDefault`。这里保留给"只改偏好、不动行"的写面。
 func (s *Store) ClearDefaultModelID(ctx context.Context, id string) (bool, error) {
 	cur, ok, err := s.DefaultModelID(ctx)
 	if err != nil || !ok || cur != id {
@@ -121,6 +194,22 @@ func (s *Store) MigrationNotesV12(ctx context.Context) (*MigrationNotes, bool, e
 		return nil, false, err
 	}
 	var notes MigrationNotes
+	if err := json.Unmarshal([]byte(raw), &notes); err != nil {
+		return nil, false, err
+	}
+	return &notes, true, nil
+}
+
+// MigrationNotesV13 读 v13 迁移留下的待处置事实（不存在 → (nil, false, nil)）。
+//
+// 与 `MigrationNotesV12` 分键读取是刻意的：v13 覆盖 v12 的键等于把 v12 那些尚未处置的
+// 事实静默抹掉（`MetaKeyMigrationNotesV13` 的注释）。
+func (s *Store) MigrationNotesV13(ctx context.Context) (*MigrationNotesV13, bool, error) {
+	raw, ok, err := s.meta.Get(ctx, model.MetaKeyMigrationNotesV13)
+	if err != nil || !ok || raw == "" {
+		return nil, false, err
+	}
+	var notes MigrationNotesV13
 	if err := json.Unmarshal([]byte(raw), &notes); err != nil {
 		return nil, false, err
 	}

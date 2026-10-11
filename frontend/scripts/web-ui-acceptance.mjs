@@ -1018,6 +1018,31 @@ async function scenarioSettingsModel(browser) {
     await sleep(400)
     await page.shot('22-settings-model-created')
 
+    // ③′ 输入模态（v13 / M6，ADR-12）：默认只收文本，且**能一键改成图片**。
+    //     两处判据：界面上的「输入」列（用户看得见、改得动）+ REST 读面的 `input_modalities`（真的落库）。
+    //     为什么要断言"默认是文本"：默认 `text` 会**覆盖底座目录**（老模型里本来能看图的变成纯文本），
+    //     这是拍板接受的代价——代价可见、可改，是这条用例的全部意义。
+    const modalityCell = `
+      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
+        .find(tr => (tr.innerText || '').includes(${JSON.stringify(modelID)}));
+      const cell = row ? [...row.querySelectorAll('td')].find(td => /^(文本|文本\\+图片)$/.test((td.innerText||'').trim())) : null;
+      return cell ? cell.innerText.trim() : ''`
+    const modBefore = await page.evaluate(modalityCell)
+    check('「输入」列显示默认（文本 = 图片不会被接受）', modBefore === '文本', JSON.stringify(modBefore))
+    await clickJS(page, `(() => {
+      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
+        .find(tr => (tr.innerText || '').includes(${JSON.stringify(modelID)}));
+      const tag = row ? [...row.querySelectorAll('td .ant-tag')].find(t => (t.innerText||'').trim() === '文本') : null;
+      if (!tag) return false; tag.click(); return true })()`)
+    await sleep(700)
+    const modAfter = await page.evaluate(modalityCell)
+    check('一键勾选后「输入」列变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
+    const modRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
+    check('REST 读面回带 input_modalities=["text","image"]',
+      JSON.stringify(modRow?.input_modalities) === JSON.stringify(['text', 'image']),
+      JSON.stringify(modRow?.input_modalities))
+    await page.shot('22b-settings-model-modalities')
+
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
     const lower = panelCopy.toLowerCase()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/golib/glog"
 )
 
@@ -65,12 +65,15 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	if err := s.requireProvider(ctx, req.ProviderID); err != nil {
 		return nil, err
 	}
-	id := uuid.NewString()
-	body, err := modelBody(req.Name, req.Note)
+	modalities, err := normalizeInputModalities(req.InputModalities)
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.st.CreateModelDefinition(ctx, id, req.ProviderID, strings.TrimSpace(req.ModelID), body, definitionWriteActor)
+	id := uuid.NewString()
+	ok, err := s.st.CreateModelDefinition(ctx, store.ModelColumns{
+		ID: id, ProviderID: req.ProviderID, ModelID: strings.TrimSpace(req.ModelID),
+		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
+	}, definitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
@@ -109,25 +112,28 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 	if !found {
 		return nil, modelNotFoundErr(id)
 	}
-	cur, err := modelRespFromRow(row)
-	if err != nil {
-		return nil, err
-	}
 	// 指针更新：只改 patch 里出现过的键。
-	name := cur.Name
+	content := store.ModelContent{
+		Name: row.Name, Note: row.Note,
+		// 列值归一：空列（只可能来自手写行，列默认值是 `text`）也要写成明确值——否则"只改名字"
+		// 这一步会把空串原样写回，让"默认 text"变成第三种落库形态。
+		InputModalities: resource.ModalitiesToColumn(resource.ModalitiesFromColumn(row.InputModalities)),
+	}
 	if patch.Name != nil {
-		name = *patch.Name
+		content.Name = *patch.Name
 	}
-	note := cur.Note
 	if patch.Note != nil {
-		note = *patch.Note
+		content.Note = *patch.Note
 	}
-	if patch.Name != nil || patch.Note != nil {
-		body, err := modelBody(&name, &note)
+	if patch.InputModalities != nil {
+		modalities, err := normalizeInputModalities(patch.InputModalities)
 		if err != nil {
 			return nil, err
 		}
-		ok, err := s.st.UpsertModelDefinition(ctx, id, body, row.Revision, definitionWriteActor)
+		content.InputModalities = modalities
+	}
+	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil {
+		ok, err := s.st.UpdateModelDefinition(ctx, id, content, row.Revision, definitionWriteActor)
 		if err != nil {
 			return nil, err
 		}
@@ -175,14 +181,13 @@ func (s *Service) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDe
 	if !found {
 		return &dtomodel.ModelDeleteResp{Deleted: false}, nil
 	}
-	ok, err := s.st.DeleteModelDefinition(ctx, id, row.Revision, definitionWriteActor)
+	// 删行 + 清默认**同一事务**（v12 是两次独立调用，中间有一个"默认指向已删行"的悬挂窗口）。
+	deleted, cleared, err := s.st.DeleteModelDefinitionAndClearDefault(ctx, id, row.Revision, definitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
-	resp := &dtomodel.ModelDeleteResp{Deleted: ok}
-	if cleared, cerr := s.st.ClearDefaultModelID(ctx, id); cerr != nil {
-		return nil, cerr
-	} else if cleared {
+	resp := &dtomodel.ModelDeleteResp{Deleted: deleted}
+	if cleared {
 		resp.DefaultCleared = true
 	}
 	// 删掉一条也要重新同步：底座的配置里不能继续留着它。
@@ -199,15 +204,12 @@ func (s *Service) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) 
 	if err != nil {
 		return nil, err
 	}
+	// **不再在 Go 侧排序**：顺序由 SQL 的 `ORDER BY provider_id, model_id` 给出（ADR-6）。
+	// 这里再排一次会让"库里的顺序"与"对外顺序"变成两份可能分叉的事实。
 	out := make([]dtomodel.ModelResp, 0, len(rows))
 	for i := range rows {
-		r, err := modelRespFromRow(&rows[i])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+		out = append(out, modelRespFromRow(&rows[i]))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
@@ -273,39 +275,39 @@ func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
 
 // ——— 内部工具 ———
 
-// modelBody 把一条清单条目编成正文 JSON（v12 只留 `name`/`note`）。
+// normalizeInputModalities 校验并归一请求里的输入模态（nil = 默认 `["text"]`）。
 //
-// `model_id` **不进正文**：它是列（唯一索引要它），双写必然漂移。
-func modelBody(name, note *string) (string, error) {
-	body := map[string]any{}
-	if name != nil && *name != "" {
-		body["name"] = *name
+// 枚举型键的既有纪律：不认识的取值 → 40501 并**列出合法取值**（不静默回落）。
+// 返回落库形态（逗号分隔；两态 `text` | `text,image`）。
+func normalizeInputModalities(in *[]string) (string, error) {
+	if in == nil {
+		return resource.ModalityText, nil
 	}
-	if note != nil && *note != "" {
-		body["note"] = *note
+	for _, v := range *in {
+		if !resource.ValidModalities[strings.TrimSpace(v)] {
+			return "", acl.NewError(acl.ClassUnsupported, "modality_unsupported",
+				fmt.Sprintf("不支持的输入模态 %q：合法取值是 `text`（默认）与 `image`。"+
+					"图片输入是在文本之上追加的能力，所以 `image` 会落成 `text,image`", v), nil)
+		}
 	}
-	b, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return resource.ModalitiesToColumn(*in), nil
 }
 
 // modelRespFromRow 把一行模型条目投影成对外表示（**不含任何 runtime 维度**）。
-func modelRespFromRow(row *store.ModelDefinition) (dtomodel.ModelResp, error) {
-	var body map[string]any
-	if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
-		return dtomodel.ModelResp{}, fmt.Errorf("manager: 模型条目 %s 的正文非法: %w", row.ID, err)
-	}
+//
+// v13 起是**纯列投影，不可能失败**：没有 JSON 可比坏，于是"一行坏 body 打不开整页"
+// （设计 P2 / 现象：整页 500）在结构上消失了。
+func modelRespFromRow(row *store.ModelDefinition) dtomodel.ModelResp {
 	out := dtomodel.ModelResp{
 		ID: row.ID, ProviderID: row.ProviderID, ModelID: row.ModelID,
-		Name: bodyString(body, "name"), Note: bodyString(body, "note"),
-		Revision: row.Revision,
+		Name: row.Name, Note: row.Note,
+		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),
+		Revision:        row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
 		out.UpdatedAt = model.FormatTime(row.UpdatedAt)
 	}
-	return out, nil
+	return out
 }
 
 // modelResp 读一条并投影（不存在 → model_not_found）。
@@ -317,10 +319,7 @@ func (s *Service) modelResp(ctx context.Context, id string) (*dtomodel.ModelResp
 	if !found {
 		return nil, modelNotFoundErr(id)
 	}
-	out, err := modelRespFromRow(row)
-	if err != nil {
-		return nil, err
-	}
+	out := modelRespFromRow(row)
 	return &out, nil
 }
 
@@ -390,6 +389,14 @@ func modelExistsErr(providerID, modelID string) error {
 
 func modelNotFoundErr(id string) error {
 	return acl.NewError(acl.ClassRequest, "model_not_found", fmt.Sprintf("未知模型条目 %q", id), nil)
+}
+
+// derefString 解引用可选字符串（nil → 空串）。
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func derefBool(p *bool) bool {

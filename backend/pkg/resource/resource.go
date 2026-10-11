@@ -37,6 +37,54 @@ const ProtocolOpenAI Protocol = "openai"
 // ValidProtocols 合法协议集合（写面与迁移共用）。
 var ValidProtocols = map[Protocol]bool{ProtocolOpenAI: true}
 
+// 输入模态取值（两态；ADR-12）。它是**平台拥有的封闭字段集**，所以枚举在端口层，
+// 由写面校验、由 adapter 生成底座声明。
+const (
+	// ModalityText 纯文本（**默认值**：未知/未设一律按它，平台不猜）。
+	ModalityText = "text"
+	// ModalityImage 图片输入（附带在文本之上：`["text","image"]`）。
+	ModalityImage = "image"
+)
+
+// ValidModalities 合法模态集合（写面校验用：非法取值报 40501 并列出合法取值）。
+var ValidModalities = map[string]bool{ModalityText: true, ModalityImage: true}
+
+// NormalizeModalities 把用户给的模态列表归一成**规范序**（**恒含 `text`**、按 `text,image` 排列、去重）。
+//
+// 两条不变量：① 两态取值只有 `text` 与 `text,image`（ADR-12），所以"只勾 image"也是
+// `["text","image"]`——图片输入是在文本之上追加的能力；② 规范序的理由与端口其它值对象一致：
+// 下游按"同输入同字节"生成配置（逐字节 golden 依赖它），用户勾选的顺序不该改变产物。
+func NormalizeModalities(in []string) []string {
+	hasImage := false
+	for _, v := range in {
+		switch strings.TrimSpace(v) {
+		case ModalityText:
+		case ModalityImage:
+			hasImage = true
+		}
+	}
+	out := make([]string, 0, 2)
+	out = append(out, ModalityText)
+	if hasImage {
+		out = append(out, ModalityImage)
+	}
+	return out
+}
+
+// ModalitiesFromColumn 把落库形态（逗号分隔）折成数组。
+//
+// 空列（不该出现，除非手写行）按默认 `["text"]`：读面永远不返回"不知道"，
+// 因为默认 `text` 是**明确值**（ADR-12）。
+func ModalitiesFromColumn(v string) []string {
+	parts := strings.Split(v, ",")
+	return NormalizeModalities(parts)
+}
+
+// ModalitiesToColumn 把数组折成落库形态（逗号分隔；`text` | `text,image`）。
+func ModalitiesToColumn(in []string) string {
+	return strings.Join(NormalizeModalities(in), ",")
+}
+
 // Provider 应用层的供应商声明：**一个 OpenAI 兼容端点 + 一把密钥**。
 //
 // `APIKey` 是**明文，只在内存里存在**（落库的永远是 vault 密文）。2026-10-10 拍板改口径：
@@ -68,6 +116,15 @@ type Model struct {
 	ModelID string
 	// Name 展示名（空 = 回落 ModelID）。
 	Name string
+	// InputModalities 该模型能接受的输入模态（**总是带值**，默认 `["text"]`）。
+	//
+	// 它是**意图载荷**：adapter 据此生成底座声明里的 `models[].input`（dsh），而不是平台去猜
+	// 底座目录里那条模型本来支持什么（ADR-12）。取值两态：`text` | `text,image`。
+	//
+	// 为什么"总是带值"：`text` 是用户的**明确选择**而不是"没设"，所以 adapter 必须显式写它
+	// ——代价是覆盖底座 catalog（底座目录里本来能收图的模型会变成纯文本，除非用户勾选图片）。
+	// 这条代价是拍板结果、不是 bug：界面必须让用户能看见并一键改。
+	InputModalities []string
 }
 
 // Set 某个 runtime 该拿到的**一整份**清单（整份替换语义，不是增量）。

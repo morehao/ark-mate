@@ -52,6 +52,21 @@ type agentDefinitionFile struct {
 	PermissionPolicy *PermissionPolicy `json:"permission_policy,omitempty"`
 }
 
+// SetAgentDir 登记 Agent definitions 目录（幂等；空串 = 不落盘）。
+//
+// 为什么装配期要**先行**登记一次（2026-10-11 修）：这个目录同时是 `providers.json` 的落点与
+// **vault 锚点**（密钥 `<父目录>/vault.key`、密文 `<父目录>/vault/`），而装配期的 runtime 同步
+// （`EnableStore` → `SyncRuntime` → `providerForSync`）发生在 `loadDefinitions` **之前**，
+// 那一次同步就要读 provider 密钥。不先登记 → 那一次同步按"本机没有 vault"处理：已存密钥解不出来、
+// 模型清单被当成空的下发撤回，而且这份错结论会写进 meta（界面与 doctor 之后都照着它说"密钥不可用"）。
+//
+// 装载仍按持久层模式分派（`LoadAgentDefinitions*` 会写同一个值），这里只提前告知"目录是什么"。
+func (s *Service) SetAgentDir(dir string) {
+	s.mu.Lock()
+	s.agentDir = dir
+	s.mu.Unlock()
+}
+
 // LoadAgentDefinitions 加载 definitions 目录并合并到 agents 表（启动时调用；
 // dir 为空 = 不使用 definitions）。返回加载数量；坏文件/未知 runtime 跳过并告警。
 //
@@ -59,9 +74,7 @@ type agentDefinitionFile struct {
 // `LoadAgentDefinitionsFromStore`——两条路的差别只有"定义从哪读"，合并语义（种子铺底 +
 // 非零字段覆盖）与 `seedAgent` 只读判定完全共用。
 func (s *Service) LoadAgentDefinitions(dir string) int {
-	s.mu.Lock()
-	s.agentDir = dir
-	s.mu.Unlock()
+	s.SetAgentDir(dir)
 	if dir == "" {
 		return 0
 	}
@@ -141,16 +154,14 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 		r, err := s.st.ListAgentDefinitions(ctx)
 		if err != nil {
 			s.defWarnOnce("agents:store", "agents: 从持久层读定义失败", "err", err)
-			s.mu.Lock()
-			s.agentDir = dir
-			s.mu.Unlock()
+			s.SetAgentDir(dir)
 			return 0
 		}
 		rows = r
 	}
 
+	s.SetAgentDir(dir)
 	s.mu.Lock()
-	s.agentDir = dir
 	for id := range s.agents {
 		if !seedAgent(id) {
 			delete(s.agents, id)

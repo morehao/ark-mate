@@ -76,19 +76,22 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("写 capability_revisions 行: %v", err)
 	}
-	// v12（设置 · 模型）：供应商行 + 应用层模型清单行。
+	// v12/v13（设置 · 模型）：供应商行 + 应用层模型清单行。
 	//
 	// **落库格式的硬契约仍然是两条**：时间列 TEXT + RFC3339Nano(UTC)、布尔列 INTEGER 0/1。
-	// v12 把模型面的**布尔列删掉了**（`is_default` 换成 meta 的单一值），所以这条用例里
-	// 布尔列的样本改由「会话置顶」承担——契约本身不变，样本源换一个。
+	// v12 把模型面的**布尔列删掉了**（`is_default` 换成 meta 的单一值）、v13 又把两张表列化
+	// （多了两个时间列），所以这条用例里布尔列的样本仍由「会话置顶」承担——契约本身不变，
+	// 样本源换一个；而**新增的时间列必须走同一个 serializer**（`created_at` 纳秒原样往返，
+	// 见下面 cases 里的两行）。
 	if ok, err := s.providers.CreateCAS(ctx, &ProviderDefinition{
-		ID: "pv-1", Body: `{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/pv-1"}`, Revision: 1, UpdatedAt: at,
+		ID: "pv-1", Name: "DeepSeek", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 providers 行: ok=%v err=%v", ok, err)
 	}
 	if ok, err := s.models.CreateCAS(ctx, &ModelDefinition{
 		ID: "md-1", ProviderID: "pv-1", ModelID: "deepseek-v4-flash",
-		Body: `{"name":"Flash"}`, Revision: 1, UpdatedAt: at,
+		Name: "Flash", InputModalities: "text", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 models 行: ok=%v err=%v", ok, err)
 	}
@@ -115,6 +118,12 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"conversations", "origin", "text", "automation:nightly", true},
 		{"conversations", "capability_json", "text", `{"skills":["s1"]}`, true},
 		{"conversations", "capability_fingerprint", "text", "fp-abc", true},
+		// v13 列化新增的时间列：必须与既有时间列**同一形态**（TEXT + RFC3339Nano(UTC)），
+		// 纳秒原样往返——用别的 serializer 会写成空格分隔的本地时区串，区间比较整体错位。
+		{"providers", "created_at", "text", at.Format(model.LayoutTS), true},
+		{"providers", "updated_at", "text", at.Format(model.LayoutTS), true},
+		{"models", "created_at", "text", at.Format(model.LayoutTS), true},
+		{"models", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"events", "created_at", "text", "", false},
 		{"runs", "started_at", "text", at.Format(model.LayoutTS), true},
 		{"runs", "ended_at", "text", "", true}, // 未结束 → 空串，而非零值时间
@@ -229,20 +238,22 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if auto.Revision != 1 || !auto.UpdatedAt.Equal(at) {
 		t.Errorf("automation 定义列往返失真: rev=%d at=%s", auto.Revision, auto.UpdatedAt)
 	}
-	// v11：provider 档案行与模型清单行的往返（时间列逐纳秒、身份列原样、默认位是布尔）。
+	// v12/v13：provider 资源行与模型清单行的往返（时间列逐纳秒、身份列原样、内容列原样）。
 	pv, found, err := s.GetProviderDefinition(ctx, "pv-1")
 	if err != nil || !found {
 		t.Fatalf("GetProviderDefinition: found=%v err=%v", found, err)
 	}
-	if pv.Revision != 1 || !pv.UpdatedAt.Equal(at) || pv.Body != `{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/pv-1"}` {
-		t.Errorf("provider 行往返失真: rev=%d at=%s body=%q", pv.Revision, pv.UpdatedAt, pv.Body)
+	if pv.Revision != 1 || !pv.UpdatedAt.Equal(at) || !pv.CreatedAt.Equal(at) ||
+		pv.Protocol != "openai" || pv.BaseURL != "https://api.deepseek.com/v1" || pv.Name != "DeepSeek" {
+		t.Errorf("provider 行往返失真: rev=%d created=%s updated=%s %+v", pv.Revision, pv.CreatedAt, pv.UpdatedAt, pv)
 	}
 	md, found, err := s.GetModelDefinition(ctx, "md-1")
 	if err != nil || !found {
 		t.Fatalf("GetModelDefinition: found=%v err=%v", found, err)
 	}
 	if md.ProviderID != "pv-1" || md.ModelID != "deepseek-v4-flash" ||
-		md.Revision != 1 || !md.UpdatedAt.Equal(at) {
+		md.Revision != 1 || !md.UpdatedAt.Equal(at) || !md.CreatedAt.Equal(at) ||
+		md.Name != "Flash" || md.InputModalities != "text" {
 		t.Errorf("model 行往返失真: %+v", md)
 	}
 

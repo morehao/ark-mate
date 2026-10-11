@@ -20,7 +20,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// ——— 存量 provider 档案的一次性导入与导出（v11 下半） ———
+// ——— 存量 provider 档案的一次性导入与导出（v11 下半；v13 改为列载荷） ———
 //
 // 与能力面（M6-4）/agent 面（M6-6）**同构**的三条路径，但目录形状不同：provider 档案是
 // `<AgentDir>` 下的**一个文件**（`providers.json`，`{id: {type, model?, key_ref?, key?}}`），
@@ -31,6 +31,12 @@ import (
 //	`mate provider export`：把 DB 里的行写回 `<AgentDir>/providers.json`（回退窗口的**唯一**回灌路径）。
 //
 // 三条都与其余三个域共用同一套纪律：**备份一次、只搬不删、不回写、对账不一致只告警不阻断**。
+//
+// v13 的两处变化（ADR-8）：
+//   - 导入的落库物从"body JSON"变成**列载荷**（`store.ProviderColumns`）：键集合封闭，未知键
+//     不再有寄存处（B2 的破坏性面，与迁移同一口径）；
+//   - vault 不可用时**跳过那条密钥**并在报告里逐条列出，**不再把明文留在库里**。导入是一次
+//     带报告的动作，"少了一支密钥且被列出"优于"明文留在可自由复制的 DB 里"。
 
 // providersBackupName 迁移前备份的文件名（同目录，0600；**已存在则不覆盖**——
 // 第二次启动不该把第一次的备份冲掉）。
@@ -50,9 +56,11 @@ type ProviderImportStats struct {
 	Providers int
 	// Backup 本次写下的备份文件路径（空 = 没有写，因为已存在或 DryRun）。
 	Backup string
-	// Plaintext 导入后正文里**仍留明文**的档案数（vault 不可用时的降级路径）。
-	// 它不是失败，但必须被看见——doctor 会据此报一条 warn。
-	Plaintext int
+	// SkippedKeys 因 vault 不可用而**被跳过的密钥**（`<id>（原因）`，升序）。
+	//
+	// 它不是失败，但必须被看见：档案的其余列照常导入，只是这把密钥没进来——
+	// 用户要照着这份清单重设（明文**不再有任何落点**）。
+	SkippedKeys []string
 	// Mismatch 导入后对账不一致的条目（人话描述；空 = 一致）。
 	Mismatch []string
 }
@@ -63,11 +71,11 @@ type ProviderImportStats struct {
 //
 //	① 幂等判据（`meta.imported_providers` == 文件内容指纹）→ 命中即整体跳过，一个字节都不写；
 //	② 备份 `providers.json.bak-v11`（已存在则不覆盖）；
-//	③ 逐条：旧明文走**既有**的 vault 加密路径（`vault.Put` + `key_ref`），body 保留除
-//	   `key`/`id` 外的**所有键**（含历史 `model`）——零丢失；
+//	③ 逐条：旧明文走**既有**的 vault 加密路径（`vault.Put`，引用由 id 派生）；vault 不可用则
+//	   跳过该密钥并逐条列入报告；v11 → v12 的字段映射（`type` → `protocol` + `base_url`）保留；
 //	④ 单事务插入（绝不覆盖） + 一条 `action=import` 审计；
-//	⑤ 对账：DB 行集合 == 文件档案集合（比 id / type / key_ref）→ 不一致只 WARN 并落
-//	   `meta.providers_import_mismatch`，**不阻断启动**；
+//	⑤ 对账：DB 行集合 == 文件档案集合（比 id / protocol / base_url，**key_ref 只作输入**）→
+//	   不一致只 WARN 并落 `meta.providers_import_mismatch`，**不阻断启动**；
 //	⑥ **不删、不回写**文件（sqlite 模式下它是导入/导出载体）。
 func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (ProviderImportStats, error) {
 	var stats ProviderImportStats
@@ -97,12 +105,12 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 		}
 	}
 
-	items, expected, plaintext, err := scanProviderFile(raw, path, dir, opts, out)
+	items, expected, skipped, err := scanProviderFile(raw, path, dir, opts, out)
 	if err != nil {
 		return stats, err
 	}
 	stats.Providers = len(items)
-	stats.Plaintext = plaintext
+	stats.SkippedKeys = skipped
 	if opts.DryRun {
 		return stats, countDryRun(ctx, st, items, &stats.DefinitionImportStats)
 	}
@@ -129,7 +137,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 	}
 
 	// ⑤ 对账：不一致只告警（档案数量是几十条，任何不一致都该被人看见，而不是被静默放过或直接拒绝启动）。
-	stats.Mismatch = reconcileProviderRows(ctx, st, expected)
+	stats.Mismatch = reconcileProviderRows(ctx, st, expected, dir)
 	if len(stats.Mismatch) > 0 {
 		glog.Warnw(ctx, "providers: 导入对账不一致（档案行与 providers.json 不等价；跑 `mate doctor --json` 查看）",
 			"dir", dir, "count", len(stats.Mismatch))
@@ -140,17 +148,19 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 		glog.Warnw(ctx, "providers: 清除对账不一致标记失败", "err", err)
 	}
 
-	// ⑥ 不删、不回写。若正文里仍有明文，明确说出来（它是降级路径的痕迹，不是失败）。
-	if stats.Plaintext > 0 {
-		glog.Warnw(ctx, "providers: 有档案的密钥仍是明文（vault 不可用）；修好 vault 后重跑 `mate provider import`",
-			"count", stats.Plaintext)
+	// ⑥ 不删、不回写。被跳过的密钥必须逐条说出来（它们是"少了一支密钥"的事实，不是失败）。
+	if len(stats.SkippedKeys) > 0 {
+		glog.Warnw(ctx, "providers: 有密钥未导入（vault 不可用，明文不再有任何落点）；修好 vault 后重跑 `mate provider import`",
+			"count", len(stats.SkippedKeys), "ids", strings.Join(stats.SkippedKeys, "、"))
 	}
 	return stats, nil
 }
 
 // providerExpected 一条"文件里应该有"的档案（对账字段）。
 //
-// v12 把 `type` 换成了 `protocol` + `base_url`：对账比的是**资源身份**，不是 v11 的凭据档案类型。
+// v12 把 `type` 换成了 `protocol` + `base_url`；v13 之后 DB 行里**没有 `key_ref` 列**，
+// 所以对账比的是**资源身份**（id / protocol / base_url），`key_ref` 只作输入：
+// 它用来回答另一个问题——"文件里有引用，但 vault 里没有对应密文"（那把密钥没进来）。
 type providerExpected struct {
 	ID       string
 	Protocol string
@@ -158,14 +168,16 @@ type providerExpected struct {
 	KeyRef   string
 }
 
-// scanProviderFile 解析 `providers.json`：逐条过闸门、把旧明文迁进 vault、拼出要写进 DB 的正文。
+// scanProviderFile 解析 `providers.json`：逐条过闸门、把旧明文迁进 vault、拼出要写进 DB 的列载荷。
 //
-// 保留未知键是这一步的重点（P6）：body = 文件里除 `key`/`id` 外的**所有**键，于是历史 `model`
-// 与用户手写的备注不会在迁移中消失（`mate provider export` 能把它们原样写回去）。
-func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions, out io.Writer) ([]store.DefinitionImportItem, []providerExpected, int, error) {
+// 返回 (列载荷, 对账期望, 被跳过的密钥, error)。
+//
+// **明文不再有任何落点**（ADR-8）：vault 不可用时那条密钥被跳过（记录在第三个返回值里），
+// 档案其余列照常导入——宁可少一支且说出来，也不把明文写进可自由复制的 DB。
+func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions, out io.Writer) ([]store.DefinitionImportItem, []providerExpected, []string, error) {
 	var file map[string]map[string]any
 	if err := json.Unmarshal(raw, &file); err != nil {
-		return nil, nil, 0, fmt.Errorf("manager: %s 解析失败: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("manager: %s 解析失败: %w", path, err)
 	}
 	// vault 句柄按需惰性打开：只有真有明文要迁移时才碰 keyfile（DryRun 也**不**写 vault）。
 	var vst *vault.Store
@@ -181,7 +193,7 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 		vaultTried = true
 		vst, verr = vault.Open(filepath.Dir(dir))
 		if verr != nil {
-			glog.Warnw(context.Background(), "providers: vault 不可用，旧明文将原样保留在正文里", "err", verr)
+			glog.Warnw(context.Background(), "providers: vault 不可用，旧明文密钥将被跳过（不再留明文）", "err", verr)
 		}
 		return vst
 	}
@@ -194,7 +206,7 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 
 	items := make([]store.DefinitionImportItem, 0, len(ids))
 	expected := make([]providerExpected, 0, len(ids))
-	plaintext := 0
+	var skipped []string
 	for _, id := range ids {
 		entry := file[id]
 		if id == "" || entry == nil {
@@ -205,94 +217,72 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 			fmt.Fprintf(os.Stderr, "provider import: 跳过 id %q（非法：%v）\n", id, err)
 			continue
 		}
-		body := make(map[string]any, len(entry)+1)
-		for k, v := range entry {
-			if k == "id" || k == "key" {
-				continue // id 是主键（权威在行上）；key 单独处理
-			}
-			body[k] = v
-		}
 		// **v11 → v12 字段映射**（迁移逃生门）：文件里可能还是旧 `type`（自由串）+ `projections`。
-		// 导入保留对它的识别并映射成 `protocol` + `base_url`，映射完就把旧键删掉——
+		// 导入保留对它的识别并映射成 `protocol` + `base_url`——映射完就不要再提旧键：
 		// 留着它们等于让"底座维度"从导入路径重新进库。
-		protocol := bodyString(body, "protocol")
-		baseURL := bodyString(body, "base_url")
+		protocol := bodyString(entry, "protocol")
 		if protocol == "" {
 			protocol = string(resource.ProtocolOpenAI)
 		}
+		baseURL := bodyString(entry, "base_url")
 		if baseURL == "" {
 			baseURL = v11FileBaseURL(&providerFile{
-				Type:        bodyString(body, "type"),
-				Projections: anyToProjections(body["projections"]),
+				Type:        bodyString(entry, "type"),
+				Projections: anyToProjections(entry["projections"]),
 			})
 		}
-		delete(body, "type")
-		delete(body, "projections")
-		delete(body, "model")
-		body["protocol"] = protocol
-		if baseURL != "" {
-			body["base_url"] = baseURL
-		}
-		keyRef := bodyString(body, "key_ref")
+		keyRef := bodyString(entry, "key_ref")
 		if k := bodyString(entry, "key"); k != "" {
 			// 旧明文档案 → 走既有 vault 加密路径（**不新写一套**）。
-			if opts.DryRun {
+			switch {
+			case opts.DryRun:
 				// DryRun 只读：不写 vault，也不声称迁移成功。
 				keyRef = providerRef(id)
-			} else if vst := openVault(); vst == nil {
-				// vault 不可用：保留明文（丢了比多留一会更糟，与文件载体同一条纪律）。
-				body["key"] = k
-				plaintext++
-			} else if err := vst.Put(providerRef(id), vault.KindProviderKey, []byte(k)); err != nil {
-				// 加密失败同样保留明文，并**让它可见**（导入不因此整体失败：其余档案照常搬）。
-				fmt.Fprintf(os.Stderr, "provider import: %s 的明文密钥加密失败（保留明文）: %v\n", id, err)
-				body["key"] = k
-				plaintext++
-			} else {
-				keyRef = providerRef(id)
+			case openVault() == nil:
+				// vault 不可用：**跳过这条密钥**并列入报告（v12 是"保留明文在 body 里"）。
+				skipped = append(skipped, id+"（密钥未导入：vault 不可用）")
+				keyRef = ""
+			default:
+				if err := vst.Put(providerRef(id), vault.KindProviderKey, []byte(k)); err != nil {
+					// 加密失败同样跳过并**让它可见**（导入不因此整体失败：其余档案照常搬）。
+					fmt.Fprintf(os.Stderr, "provider import: %s 的明文密钥加密失败（跳过该密钥）: %v\n", id, err)
+					skipped = append(skipped, id+"（密钥未导入："+err.Error()+"）")
+					keyRef = ""
+				} else {
+					keyRef = providerRef(id)
+				}
 			}
-		} else if keyRef != "" && opts.DryRun {
-			// 只读路径不校验密文可解性（那是装载期的事，且有 keyErr 承载）。
-			_ = keyRef
-		}
-		if keyRef != "" && bodyString(body, "key") == "" {
-			body["key_ref"] = keyRef
-		}
-		b, err := json.MarshalIndent(body, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "provider import: %s 正文编码失败: %v\n", id, err)
-			continue
 		}
 		items = append(items, store.DefinitionImportItem{
-			Kind: model.CapabilityKindProvider, ID: id, Body: string(b),
+			Kind: model.CapabilityKindProvider, ID: id,
+			Provider: &store.ProviderColumns{
+				ID: id, Name: bodyString(entry, "name"), Protocol: protocol,
+				BaseURL: baseURL, Note: bodyString(entry, "note"),
+			},
 		})
 		expected = append(expected, providerExpected{ID: id, Protocol: protocol, BaseURL: baseURL, KeyRef: keyRef})
 	}
 	if out != nil {
 		fmt.Fprintf(out, "provider import: 扫描 %s，%d 条档案\n", path, len(items))
 	}
-	return items, expected, plaintext, nil
+	return items, expected, skipped, nil
 }
 
-// reconcileProviderRows 对账：DB 行集合 == 文件档案集合（比 id / type / key_ref 三个字段）。
+// reconcileProviderRows 对账：DB 行集合 == 文件档案集合。
 //
 // 口径：**任一字段不一致即算不一致**——档案数量是几十条，这里没有抽样一说，全量逐条比。
-// note 与未知键的呈现顺序不参与比较（它们不是"等价"的判据）。
-func reconcileProviderRows(ctx context.Context, st *store.Store, want []providerExpected) []string {
+// 比的是 `protocol` / `base_url` 两列；`key_ref` 只作输入，用来发现"文件里有引用、
+// vault 里没有密文"（那把密钥没进来）。
+func reconcileProviderRows(ctx context.Context, st *store.Store, want []providerExpected, dir string) []string {
 	rows, err := st.ListProviderDefinitions(ctx)
 	if err != nil {
 		return []string{"读 providers 行失败: " + err.Error()}
 	}
+	vst := openVaultIfPresent(filepath.Dir(dir))
 	got := make(map[string]providerExpected, len(rows))
 	for i := range rows {
-		var body map[string]any
-		if err := json.Unmarshal([]byte(rows[i].Body), &body); err != nil {
-			got[rows[i].ID] = providerExpected{ID: rows[i].ID, Protocol: "<body 非法>"}
-			continue
-		}
 		got[rows[i].ID] = providerExpected{
-			ID: rows[i].ID, Protocol: bodyString(body, "protocol"),
-			BaseURL: bodyString(body, "base_url"), KeyRef: bodyString(body, "key_ref"),
+			ID: rows[i].ID, Protocol: rows[i].Protocol, BaseURL: rows[i].BaseURL,
 		}
 	}
 	var mismatch []string
@@ -308,8 +298,8 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 		if g.BaseURL != w.BaseURL {
 			mismatch = append(mismatch, fmt.Sprintf("%s: base_url 不一致（文件 %q / DB %q）", w.ID, w.BaseURL, g.BaseURL))
 		}
-		if g.KeyRef != w.KeyRef {
-			mismatch = append(mismatch, fmt.Sprintf("%s: key_ref 不一致（文件 %q / DB %q）", w.ID, w.KeyRef, g.KeyRef))
+		if w.KeyRef != "" && vst != nil && !vst.Has(w.KeyRef) {
+			mismatch = append(mismatch, fmt.Sprintf("%s: 文件里有密钥引用 %q，但 vault 里没有对应密文（密钥未导入）", w.ID, w.KeyRef))
 		}
 		delete(got, w.ID)
 	}
@@ -329,7 +319,8 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 // ExportProviderFile 把持久层里的档案写回 `<AgentDir>/providers.json`（回退窗口的**唯一**回灌路径）。
 //
 // 输出**确定性**（map 键排序 + 2 空格缩进 + 末尾换行）：导出两次逐字节相同，导出物可以 diff。
-// 只写 `key_ref`（明文只在"vault 不可用且正文里本来就是明文"的降级路径上才继续出现）。
+// **只写 `key_ref`**，而它只在该供应商确实有密文时才写：v13 的引用是 `providerRef(id)` 的纯函数
+// 副本，写一个"指向不存在密文"的引用会让下次导入的对账报一条假不一致。
 func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
 	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
@@ -342,20 +333,23 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 	if err != nil {
 		return stats, err
 	}
+	// vault 不可达 → 一律不写 key_ref（**绝不**退化成写明文）；而且**只在 vault 已经有主密钥时**
+	// 才打开它——`vault.Open` 缺 keyfile 会创建主密钥，导出不该有这个副作用。
+	vst := openVaultIfPresent(filepath.Dir(stats.Dir))
 	file := make(map[string]map[string]any, len(rows))
 	for i := range rows {
-		var body map[string]any
-		if err := json.Unmarshal([]byte(rows[i].Body), &body); err != nil {
-			stats.Failed++
-			fmt.Fprintf(os.Stderr, "provider export: %s 的正文非法，未导出: %v\n", rows[i].ID, err)
-			continue
+		entry := map[string]any{"protocol": rows[i].Protocol}
+		if rows[i].Name != "" {
+			entry["name"] = rows[i].Name
 		}
-		entry := make(map[string]any, len(body)+1)
-		for k, v := range body {
-			if k == "id" {
-				continue
-			}
-			entry[k] = v
+		if rows[i].BaseURL != "" {
+			entry["base_url"] = rows[i].BaseURL
+		}
+		if rows[i].Note != "" {
+			entry["note"] = rows[i].Note
+		}
+		if ref := providerRef(rows[i].ID); vst != nil && vst.Has(ref) {
+			entry["key_ref"] = ref
 		}
 		entry["id"] = rows[i].ID
 		file[rows[i].ID] = entry
@@ -381,6 +375,28 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 		fmt.Fprintf(out, "  ✓ %s（%d 条档案）\n", providersFileName, len(file))
 	}
 	return stats, nil
+}
+
+// openVaultIfPresent 只在该位置**已经有主密钥**时打开 vault（`MATE_VAULT_KEY` 或 `<home>/vault.key`）。
+//
+// 为什么要有这条判断：`vault.Open` 在缺 keyfile 时会**创建**主密钥（一次不可逆的落笔），
+// 而"导出"与"导入对账"都只是读——为了问一句"这条引用有没有密文"就把用户的 mate home 改掉，
+// 是那种「看起来无害、事后没人说得清是谁建的」的副作用。真正要写密文的路径（导入明文迁移）
+// 仍然直接用 `vault.Open`（它本来就要建）。
+func openVaultIfPresent(home string) *vault.Store {
+	if strings.TrimSpace(home) == "" {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv(vault.EnvKey)) == "" {
+		if _, err := os.Stat(filepath.Join(home, vault.KeyFileName)); err != nil {
+			return nil
+		}
+	}
+	st, err := vault.Open(home)
+	if err != nil {
+		return nil
+	}
+	return st
 }
 
 // backupProviderFile 把 providers.json 复制成 `providers.json.bak-v11`（**已存在则不覆盖**）。

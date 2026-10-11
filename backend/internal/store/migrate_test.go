@@ -222,8 +222,8 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 12 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 12 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 13 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 13 以提醒同步），got %d", latestSchemaVersion(), maxV)
 	}
 }
 
@@ -441,12 +441,15 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	}
 
 	// ③ 两张表都可写、可读，且审计按 kind 隔离（provider / model 各自一条）。
-	if ok, err := s.UpsertProviderDefinition(ctx, "deepseek-main",
-		`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/deepseek-main"}`, 0, "rest"); err != nil || !ok {
+	if ok, err := s.UpsertProviderDefinition(ctx, ProviderColumns{
+		ID: "deepseek-main", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+	}, 0, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写供应商: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, "md-1", "deepseek-main", "deepseek-v4-flash",
-		`{"name":"Flash"}`, "rest"); err != nil || !ok {
+	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+		ID: "md-1", ProviderID: "deepseek-main", ModelID: "deepseek-v4-flash",
+		Name: "Flash", InputModalities: "text",
+	}, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写模型条目: ok=%v err=%v", ok, err)
 	}
 	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "deepseek-main"); err != nil || len(revs) != 1 {
@@ -461,8 +464,9 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.ModelID != "deepseek-v4-flash" {
 		t.Fatalf("读回模型条目失真: found=%v err=%v row=%+v", found, err, md)
 	}
-	if ok, err := s.CreateModelDefinition(ctx, "md-2", "deepseek-main", "deepseek-v4-flash",
-		`{}`, "rest"); err != nil || ok {
+	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
+		ID: "md-2", ProviderID: "deepseek-main", ModelID: "deepseek-v4-flash",
+	}, "rest"); err != nil || ok {
 		t.Fatalf("同 (provider_id, model_id) 应被唯一索引拦下: ok=%v err=%v", ok, err)
 	}
 	var idx int64

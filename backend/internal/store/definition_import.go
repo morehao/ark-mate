@@ -28,7 +28,16 @@ type DefinitionImportItem struct {
 	Kind string
 	ID   string
 	// Body 定义正文（承载未知键的完整 JSON）。
+	//
+	// **kind=provider 时不用它**：v13 起 provider 是资源表（列 + 无 body），列载荷走 Provider。
+	// 留着这个字段是给四个「定义载体」表用的（它们的正文是用户自由文档）。
 	Body string
+	// Provider 仅 kind=provider 时有意义：列化后的内容列。
+	//
+	// 单独一个字段而不是把列塞进 `Body`：Body 是"正文 JSON"，而 provider 的键集合封闭且有
+	// 库级约束（`CHECK (protocol IN ('openai'))`）——把列值编码回 JSON 再在 store 里解回来，
+	// 只是把已经消失的 body 重新造一遍。
+	Provider *ProviderColumns
 	// AutomationRuntime 仅 kind=automation 时有意义：定时任务的运行态在 DB 载体里是**列**，
 	// 而存量文件里它是同文件的一部分（`last_fired_at`/`recent_runs`/…）。导入必须把两部分
 	// **同一事务**写进去，否则会出现"定义进来了、运行史没进来"的半截状态。
@@ -73,13 +82,18 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 				continue
 			}
 			res.Inserted++
+			digest := bodyDigest(it.Body)
+			if it.Kind == model.CapabilityKindProvider && it.Provider != nil {
+				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
+				digest = it.Provider.digest()
+			}
 			if err := s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevision{
 				Kind:         it.Kind,
 				CapabilityID: it.ID,
 				Action:       model.CapabilityActionImport,
 				Actor:        model.CapabilityActorImport,
 				At:           now,
-				Digest:       bodyDigest(it.Body),
+				Digest:       digest,
 			}); err != nil {
 				return err
 			}
@@ -111,9 +125,11 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
 	case model.CapabilityKindProvider:
-		return s.providers.WithTx(tx).CreateCAS(ctx, &model.ProviderDefinition{
-			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
-		})
+		if it.Provider == nil {
+			// 不可达（manager 侧构造 item 时必填）：宁可整体回滚也不要写一行空档案。
+			return false, fmt.Errorf("store: provider 导入缺少列载荷（%q）", it.ID)
+		}
+		return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(*it.Provider, 1, now, now))
 	case model.CapabilityKindAutomation:
 		row := &model.AutomationDefinition{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",

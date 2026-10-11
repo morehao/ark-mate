@@ -197,18 +197,19 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	if _, err := modelValueFor("some-third-runtime", "p", "m"); errCode(err) != "model_value_unsupported" {
 		t.Fatalf("未声明的 runtime 应拒绝猜模型值形状，got %q", errCode(err))
 	}
-	// 正文里不得出现生成的值（只存输入）。
+	// 行里不得出现**生成的值**（平台只存输入：provider_id + model_id）。
 	r := newModelRig(t)
 	resp := r.createModel(t, "p1", "v4-flash")
 	row, found, err := r.svc.st.GetModelDefinition(context.Background(), resp.ID)
 	if err != nil || !found {
 		t.Fatalf("读行: found=%v err=%v", found, err)
 	}
-	if strings.Contains(row.Body, "/") {
-		t.Fatalf("清单正文里不得出现生成的值（只存输入）: %s", row.Body)
-	}
 	if row.ModelID != "v4-flash" || row.ProviderID != "p1" {
 		t.Fatalf("身份列应逐字落库: %+v", row)
+	}
+	// v13 列化之后"生成的值"连落点都没有：整行字段是列，没有自由 JSON 可塞。
+	if row.Name != "" || row.Note != "" || row.InputModalities != "text" {
+		t.Fatalf("内容列应只有平台拥有的字段（name/note/input_modalities）: %+v", row)
 	}
 }
 
@@ -399,7 +400,7 @@ func TestClearDefaultModel(t *testing.T) {
 	if got.Revision < 2 {
 		t.Fatalf("改正文应推进一版 revision，实际 %d", got.Revision)
 	}
-	if got.Body != `{"name":"别名"}` {
-		t.Fatalf("正文应只有 name/note 两个口子: %s", got.Body)
+	if got.Name != "别名" {
+		t.Fatalf("改正文应落到 name 列: %+v", got)
 	}
 }

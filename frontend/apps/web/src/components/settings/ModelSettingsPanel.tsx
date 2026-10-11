@@ -14,10 +14,11 @@
  *     页面仍会说「下次启动应用生效」。这是拍板接受的代价，**不要"优化"掉它**，
  *     也不要在页面上解释差异（那必然要把后端名带回来）。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip,
 } from 'antd'
+import type { InputRef } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   ExperimentOutlined, PlusOutlined, ReloadOutlined, SyncOutlined,
@@ -65,6 +66,33 @@ interface ModelFormValues {
   model_id?: string
   name?: string
   note?: string
+  /** 勾上 = 这条模型可接收图片（落成 `['text','image']`；不勾 = 默认的 `['text']`）。 */
+  image_input?: boolean
+}
+
+/** 平台声明的输入模态 → 落库/上行的数组形态（两态：`['text']` | `['text','image']`）。 */
+function modalitiesOf(imageInput: boolean | undefined): string[] {
+  return imageInput ? ['text', 'image'] : ['text']
+}
+
+/** 反解：一条模型当前是否声明了图片输入。 */
+function hasImageInput(row: ModelRow): boolean {
+  return (row.input_modalities ?? []).includes('image')
+}
+
+/**
+ * 提交时以**框里真正显示的那一份**密钥为准（`domValue` 优先，表单值兜底）。
+ *
+ * 为什么不能只信表单值（2026-10-11 实测定位）：浏览器密码管理器与部分扩展会把
+ * 值**只写进 DOM**，React 的 `onChange` 不触发，于是表单里一直是空串——用户明明看见框里有一串
+ * 密钥、点「保存」却被判成"没有改动"，**一个请求都不发**（CDP 直接写 `input.value` 后点保存：
+ * 0 个请求、模态框不关；同一次真键入则照常发 PATCH）。密钥是只写不读回的字段，**"我以为我填了"
+ * 与"其实没填"看起来一模一样**，所以这里按用户的眼睛对齐：框里有什么就存什么。
+ *
+ * `autoComplete="new-password"` 是第一道防线（让浏览器别往这个框里塞东西），这里是第二道。
+ */
+function visibleProviderKey(domValue: string | undefined, formValue: string | undefined): string {
+  return domValue ?? formValue ?? ''
 }
 
 /** 聚合生效结论的展示映射（**只**用 `effective` / `effective_at`，不碰 `sync[]`）。 */
@@ -98,6 +126,8 @@ export function ModelSettingsPanel() {
   const [busy, setBusy] = useState(false)
   const [providerForm] = Form.useForm<ProviderFormValues>()
   const [modelForm] = Form.useForm<ModelFormValues>()
+  // 密钥框的原生 input（`submitProvider` 以"框里看见的那一份"为准，理由见 visibleProviderKey）。
+  const providerKeyRef = useRef<InputRef>(null)
 
   const loadProviders = useCallback(async () => {
     try {
@@ -172,6 +202,8 @@ export function ModelSettingsPanel() {
     // 但"页面无未捕获异常"这条验收判据会被它判红，而且真出问题时它会把真相淹掉。
     const v = await providerForm.validateFields().catch(() => undefined)
     if (!v) return
+    // 密钥取"框里真正显示的那一份"（浏览器/扩展只写 DOM 时表单值是空的，见函数注释）。
+    const apiKey = visibleProviderKey(providerKeyRef.current?.input?.value, v.api_key)
     if (providerModal?.mode === 'create') {
       if (!VENDOR_ID_RE.test(v.id ?? '')) {
         showToast('id 只能含字母数字与 . _ -（1-64 位）')
@@ -182,7 +214,7 @@ export function ModelSettingsPanel() {
         name: v.name || undefined,
         protocol: v.protocol ?? PROTOCOLS[0].value,
         base_url: v.base_url || undefined,
-        api_key: v.api_key || undefined,
+        api_key: apiKey || undefined,
         note: v.note || undefined,
       }))
       if (!created) return
@@ -194,10 +226,11 @@ export function ModelSettingsPanel() {
       if ((v.protocol ?? '') !== row.protocol) patch.protocol = v.protocol ?? ''
       if ((v.base_url ?? '') !== (row.base_url ?? '')) patch.base_url = v.base_url ?? ''
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
-      if (v.api_key) patch.api_key = v.api_key
+      if (apiKey) patch.api_key = apiKey
       else if (v.api_key_clear) patch.api_key = ''
       if (Object.keys(patch).length === 0) {
-        showToast('没有改动')
+        // 说清"为什么算没改动"：密钥框是空的（已存密钥不读回），所以留空 = 不改。
+        showToast('没有改动：密钥框为空（已存密钥不会读回；要更换就在框里填新密钥）')
         return
       }
       const updated = await guard(patchProvider(row.id, patch))
@@ -257,6 +290,7 @@ export function ModelSettingsPanel() {
         model_id: modelModal.row.model_id,
         name: modelModal.row.name ?? '',
         note: modelModal.row.note ?? '',
+        image_input: hasImageInput(modelModal.row),
       }
     : ({ vendor: vendorOptions[0]?.value } as ModelFormValues)
 
@@ -271,15 +305,17 @@ export function ModelSettingsPanel() {
         model_id: v.model_id ?? '',
         name: v.name || undefined,
         note: v.note || undefined,
+        input_modalities: modalitiesOf(v.image_input),
       }))
       if (!created) return
       // **文案纪律**：清单写面在下一进程生效，绝不说"已生效"。
       showToast('模型已保存，已提交同步：生效时刻见「模型」块顶部的状态')
     } else if (modelModal?.mode === 'edit') {
       const row = modelModal.row
-      const patch: { name?: string; note?: string } = {}
+      const patch: { name?: string; note?: string; input_modalities?: string[] } = {}
       if ((v.name ?? '') !== (row.name ?? '')) patch.name = v.name ?? ''
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
+      if (!!v.image_input !== hasImageInput(row)) patch.input_modalities = modalitiesOf(v.image_input)
       if (Object.keys(patch).length === 0) {
         showToast('没有改动')
         return
@@ -289,6 +325,14 @@ export function ModelSettingsPanel() {
       showToast('模型已保存，已提交同步：生效时刻见「模型」块顶部的状态')
     }
     setModelModal(null)
+    await loadModels()
+  }
+
+  /** 一键切换某条模型的图片输入声明（列表里那个「输入」标签）。 */
+  const setImageInput = async (row: ModelRow, on: boolean): Promise<void> => {
+    const updated = await guard(patchModel(row.id, { input_modalities: modalitiesOf(on) }))
+    if (!updated) return
+    showToast(on ? '已允许图片输入，已提交同步' : '已改回仅文本，已提交同步')
     await loadModels()
   }
 
@@ -400,6 +444,25 @@ export function ModelSettingsPanel() {
       ),
     },
     { title: '备注', dataIndex: 'note', key: 'note', width: 140, render: (v?: string) => v || <span style={{ color: tokens.textPlaceholder }}>—</span> },
+    {
+      title: '输入', key: 'modalities', width: 150,
+      // 默认 `text` = **图片不会被接受**（这是决定，不是缺陷）：所以这里必须看得见、改得动，
+      // 否则用户会在一个本来能收图的模型上莫名失败（而且失败形态取决于运行环境，更难排查）。
+      render: (_: unknown, row: ModelRow) => {
+        if (hasImageInput(row)) {
+          return (
+            <Tooltip title="已声明图片输入：可在会话里把工作区图片交给模型">
+              <Tag color="blue" style={{ cursor: 'pointer' }} onClick={() => void setImageInput(row, false)}>文本+图片</Tag>
+            </Tooltip>
+          )
+        }
+        return (
+          <Tooltip title="默认只收文本：图片不会被接受。要图片请点这里勾选">
+            <Tag style={{ cursor: 'pointer' }} onClick={() => void setImageInput(row, true)}>文本</Tag>
+          </Tooltip>
+        )
+      },
+    },
     {
       title: '操作', key: 'actions', width: 150,
       render: (_: unknown, row: ModelRow) => (
@@ -593,7 +656,10 @@ export function ModelSettingsPanel() {
             name="api_key"
             extra="密钥只写不读回；是否需要等下一轮由平台如实回带"
           >
-            <Input.Password placeholder="sk-…" autoComplete="off" />
+            {/* `autoComplete="new-password"`：页面里只有一个 password 框时，Chrome 会把**记住的
+                密码**填进来（`off` 它不认）——填进来的值不经过 React，用户以为"框里已经有密钥了"，
+                而表单里是空的（点保存被判成"没有改动"）。详见 visibleProviderKey。 */}
+            <Input.Password ref={providerKeyRef} placeholder="sk-…" autoComplete="new-password" />
           </Form.Item>
           {providerModal?.mode === 'edit' && (
             <Form.Item name="api_key_clear" valuePropName="checked">

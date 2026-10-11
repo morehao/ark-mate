@@ -81,8 +81,12 @@ func providerImport(args []string) {
 	if stats.Backup != "" {
 		fmt.Printf("  已备份迁移前的文件：%s\n", stats.Backup)
 	}
-	if stats.Plaintext > 0 {
-		fmt.Printf("  ⚠ %d 条档案的密钥仍是明文（vault 不可用）；修好 vault 后重跑本命令\n", stats.Plaintext)
+	if len(stats.SkippedKeys) > 0 {
+		fmt.Printf("  ⚠ %d 条密钥未导入（vault 不可用，明文**不再有任何落点**）：\n", len(stats.SkippedKeys))
+		for _, k := range stats.SkippedKeys {
+			fmt.Printf("      %s\n", k)
+		}
+		fmt.Printf("      修好 vault（MATE_VAULT_KEY 或 <mate home>/vault.key）后重跑本命令\n")
 	}
 	if len(stats.Mismatch) > 0 {
 		fmt.Printf("  ⚠ 导入对账不一致 %d 条（不阻断，`mate doctor --json` 可查）：\n", len(stats.Mismatch))

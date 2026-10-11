@@ -28,7 +28,7 @@ func (s *Store) UpsertAgentDefinition(ctx context.Context, id, body string, expe
 	if expectedRev == 0 {
 		action = model.CapabilityActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindAgent, id, actor, action, body, expectedRev,
+	return s.commitDefinitionChange(ctx, model.CapabilityKindAgent, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentDefinition{

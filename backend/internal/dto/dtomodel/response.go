@@ -49,6 +49,17 @@ type ModelCatalogResp struct {
 	Agent   string `json:"agent"`
 	Runtime string `json:"runtime"`
 	Source  string `json:"source"`
+	// ImageInput **当前这条路由能不能收图**——连接期事实（ACP initialize 的
+	// `promptCapabilities.image`），nil = 取不到（还没有连接）。
+	//
+	// 为什么必须是连接期事实（ADR-14）：静态能力基线（`dsh.Caps.Images=false`）是"按源码声明的
+	// 保守值"，真值取决于附件仓与**精确路由**；拿静态值当判据，用户会在一个其实能收图的底座上
+	// 被告知"不支持"。
+	//
+	// 注意它**不含模型信息**：opencode 恒 true（ACP 广告与模型无关，模型级闸门在底座内部），
+	// dsh 才是"路由声明里含 image 才 true"。所以它是"这条路由的收图能力"的上界，
+	// 逐条模型的事实仍是平台清单里的 `input_modalities`。
+	ImageInput *bool `json:"image_input,omitempty"`
 	// FetchedAt 取样时间（RFC3339；source=cache 时为首次取样时间）。
 	FetchedAt string `json:"fetched_at,omitempty"`
 	// Options 运行时配置项全量投影（模型目录为主；运行时若还给出别的选项，也一并原样透出，仅作展示）。

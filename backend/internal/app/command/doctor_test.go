@@ -484,8 +484,8 @@ func TestDoctorReportJSONShape(t *testing.T) {
 		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],` +
 		`"providers":{"carrier":"","providerRows":0,"providerIds":null,"modelRows":0,` +
 		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,"vaultHome":"",` +
-		`"vaultUsable":false,"vaultSource":"","ciphertextRefs":null,"ciphertextFiles":null,"vaultDirScan":"",` +
-		`"missingCiphertexts":null,"noKeyProviders":null,"danglingRefs":null,"importMismatch":null,` +
+		`"vaultUsable":false,"vaultSource":"","ciphertextFiles":null,"vaultDirScan":"",` +
+		`"noKeyProviders":null,"danglingRefs":null,"importMismatch":null,` +
 		`"importMismatchBenignOnly":false,"orphanCiphertexts":null,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
 		`"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {

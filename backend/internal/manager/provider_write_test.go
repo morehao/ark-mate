@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/resource"
@@ -142,7 +143,7 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	svc.LoadAgentDefinitionsFromStore(ctx, dir)
 
 	// 载体里先放一行（内存不知道）→ 写面读内存判定"不存在"，于是走新建 → CAS 未命中。
-	if ok, err := st.UpsertProviderDefinition(ctx, "ghost", `{"type":"openai"}`, 0, "rest"); err != nil || !ok {
+	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{ID: "ghost", Protocol: "openai"}, 0, "rest"); err != nil || !ok {
 		t.Fatalf("预置行: ok=%v err=%v", ok, err)
 	}
 	key := "sk-ghost"
@@ -163,7 +164,7 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	}
 	// 载体那一行保持原样（写面失败 = 一行一审计都不落）。
 	row, found, _ := st.GetProviderDefinition(ctx, "ghost")
-	if !found || row.Body != `{"type":"openai"}` || row.Revision != 1 {
+	if !found || row.Protocol != "openai" || row.BaseURL != "" || row.Revision != 1 {
 		t.Fatalf("失败不该改到载体: found=%v row=%+v", found, row)
 	}
 }
@@ -185,7 +186,7 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 让内存里的 revision 过期（模拟"有人在这中间改过载体"）：直接抬高库里的版本。
-	if ok, err := st.UpsertProviderDefinition(ctx, "p1", `{"type":"openai","key_ref":"vault:providers/p1"}`, 1, "rest"); err != nil || !ok {
+	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{ID: "p1", Protocol: "openai"}, 1, "rest"); err != nil || !ok {
 		t.Fatalf("抬高版本: ok=%v err=%v", ok, err)
 	}
 	neu := "sk-new"

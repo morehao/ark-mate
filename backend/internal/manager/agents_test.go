@@ -462,6 +462,9 @@ func TestCredentialMissingBlocksConversationStart(t *testing.T) {
 	reg := testutil.StubRegistry()
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub：底座必须与它一致
 	svc := NewService(reg, eventbus.New())
+	// v13：没有可用 vault 时**拒绝**存密钥（fail-closed），所以这条"补齐 key"的用例必须
+	// 有一个真实（且私有）的 mate home——目录在 t.TempDir 下，绝不碰用户环境。
+	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	svc.attachOrchestrator(orch)

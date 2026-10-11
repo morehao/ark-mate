@@ -24,8 +24,9 @@ import (
 )
 
 // newEngine 走真实装配路径：manager.Service + router.New（含 /v1/mate 分组与默认中间件）。
-func newEngine() *gin.Engine {
-	e, _ := newEngineWithService()
+func newEngine(t *testing.T) *gin.Engine {
+	t.Helper()
+	e, _ := newEngineWithService(t)
 	return e
 }
 
@@ -34,7 +35,8 @@ func newEngine() *gin.Engine {
 // 资产按**生产同一条路径**解析（M2-1）：release 构建内嵌 → 有资产（非 API 未知路径回落 SPA）；
 // 默认构建 → 没有（回落信封 404）。忽略解析错误是刻意的——"没有资产"对只测 API 的用例是合法状态，
 // 而生产入口（serve）走的是 app.Init，那里会按退出码 3 拒绝启动。
-func newEngineWithService() (*gin.Engine, *manager.Service) {
+func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	reg := runtime.AllBuiltinRegistry()
 	// 生产装配**总是**在构造 Service 之前注入隔离 env（`app.go`）；测试也照做，
@@ -42,6 +44,10 @@ func newEngineWithService() (*gin.Engine, *manager.Service) {
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
+	// v13：没有可用 vault 时**拒绝**存密钥（fail-closed）。这条路径上的端点（POST/PATCH
+	// providers 带 api_key）需要真实 vault，所以夹具给一个私有 agentDir——目录在 t.TempDir 下，
+	// 绝不碰用户环境（`~/.ark-mate`）。
+	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Agent: svc, Conversation: svc, Workspace: svc, Runtime: svc,
@@ -70,7 +76,7 @@ func get(t *testing.T, e *gin.Engine, path string) *respEnvelope {
 
 // TestRouterMountHealth /v1/mate/health 可达。
 func TestRouterMountHealth(t *testing.T) {
-	e := newEngine()
+	e := newEngine(t)
 	req := httptest.NewRequest("GET", "/v1/mate/health", nil)
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
@@ -87,7 +93,7 @@ func TestRouterMountHealth(t *testing.T) {
 // 夹具用 `AllBuiltinRegistry`（全部内置），因此两个种子都在——**产品装配只播构建期选中的那一个**
 // （见 internal/app 的 TestInitPinsBuildRuntime），这里测的是路由装配，不是构建期选择。
 func TestRouterListRealService(t *testing.T) {
-	e := newEngine()
+	e := newEngine(t)
 
 	env := get(t, e, "/v1/mate/agents")
 	if env.Code != 0 {
@@ -114,7 +120,7 @@ func TestRouterListRealService(t *testing.T) {
 // TestRouterCapabilitiesListRealService P1 能力数据面经真实 Service：未装配目录时
 // /skills /mcps /tools 返回空数组（REST 可列出能力的最小形态）。
 func TestRouterCapabilitiesListRealService(t *testing.T) {
-	e := newEngine()
+	e := newEngine(t)
 	for _, p := range []string{"/skills", "/mcps", "/tools"} {
 		env := get(t, e, "/v1/mate"+p)
 		if env.Code != 0 {
@@ -135,7 +141,7 @@ func TestRouterCapabilitiesListRealService(t *testing.T) {
 // options 的不透明值）。v11 把它们挤在一个响应里（`declared`/`advertised`/`diff`/`config`），
 // v12 拆开：意图面带上**聚合**结论，事实面单独一条路由。
 func TestRouterModelCatalog(t *testing.T) {
-	e := newEngine()
+	e := newEngine(t)
 
 	// —— ① `/models`：清单 + 聚合结论（用户面只有这四个字段）+ 机器面明细 ——
 	env := get(t, e, "/v1/mate/models")
@@ -209,7 +215,7 @@ func TestRouterModelCatalog(t *testing.T) {
 
 // TestRouterRoutesRegistered 关键路由（REST + WS）均已注册于 /v1/mate 前缀。
 func TestRouterRoutesRegistered(t *testing.T) {
-	e := newEngine()
+	e := newEngine(t)
 	routes := e.Routes()
 	found := map[string]bool{}
 	for _, rt := range routes {
@@ -259,7 +265,7 @@ func TestRouterUnknownAPINotSPA(t *testing.T) {
 		{"未注册的 API 路径", "/v1/mate/nope"},
 		{"未注册的 API 深层路径", "/v1/mate/conversations/x/nope"},
 	}
-	e := newEngine()
+	e := newEngine(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tc.path, nil)
@@ -340,7 +346,7 @@ func repoFile(t *testing.T, name string) string {
 //
 // 两个方向都指向同一条约定：README 的接口摘要是路由契约，改路由与改文档必须同一次提交。
 func TestReadmeRoutesMatchRouter(t *testing.T) {
-	engine := newEngine()
+	engine := newEngine(t)
 	registered := map[string]string{} // "METHOD /path" → 路径
 	for _, r := range engine.Routes() {
 		if !strings.HasPrefix(r.Path, "/v1/mate") {
@@ -596,7 +602,7 @@ func TestWorkspaceRoutes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "readme.md"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	e := newEngine()
+	e := newEngine(t)
 
 	env := get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(dir))
 	if env.Code != 0 {
@@ -647,7 +653,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	e, svc := newEngineWithService()
+	e, svc := newEngineWithService(t)
 	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
@@ -708,7 +714,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(`{"addr":"127.0.0.1:20001"}`), 0o600); err != nil {
 		t.Fatalf("写 config.json: %v", err)
 	}
-	e, svc := newEngineWithService()
+	e, svc := newEngineWithService(t)
 	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
@@ -834,7 +840,7 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(lib, "a.pdf"), []byte("pdf"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	e, svc := newEngineWithService()
+	e, svc := newEngineWithService(t)
 
 	// 未配白名单 → 资料库为空数组（不是错误：策展能力需要先画边界）。
 	env := get(t, e, "/v1/mate/workspaces/libraries")

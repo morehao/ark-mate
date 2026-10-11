@@ -266,11 +266,9 @@ func getDefinitionRow(ctx context.Context, st *store.Store, it store.DefinitionI
 		return row.Body, true, nil
 	}
 	if it.Kind == model.CapabilityKindProvider {
-		row, found, err := st.GetProviderDefinition(ctx, it.ID)
-		if err != nil || !found {
-			return "", found, err
-		}
-		return row.Body, true, nil
+		// provider 是资源表（没有正文）：这里只需要"在不在"这个事实。
+		_, found, err := st.GetProviderDefinition(ctx, it.ID)
+		return "", found, err
 	}
 	row, found, err := st.GetSkillDefinition(ctx, it.ID)
 	if err != nil || !found {
