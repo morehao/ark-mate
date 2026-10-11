@@ -1029,19 +1029,85 @@ async function scenarioSettingsModel(browser) {
       return cell ? cell.innerText.trim() : ''`
     const modBefore = await page.evaluate(modalityCell)
     check('「输入」列显示默认（文本 = 图片不会被接受）', modBefore === '文本', JSON.stringify(modBefore))
-    await clickJS(page, `(() => {
+    // 注意 `clickJS` 的表达式必须**求值成元素**（它自己做 `el.click()`）：早先这里写成
+    // 返回布尔的 IIFE，第一次真跑就抛 `el.click is not a function`——该场景 2026-10-11 才第一次被执行。
+    const tagClicked = await clickJS(page, `(() => {
       const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
         .find(tr => (tr.innerText || '').includes(${JSON.stringify(modelID)}));
-      const tag = row ? [...row.querySelectorAll('td .ant-tag')].find(t => (t.innerText||'').trim() === '文本') : null;
-      if (!tag) return false; tag.click(); return true })()`)
-    await sleep(700)
-    const modAfter = await page.evaluate(modalityCell)
+      return row ? [...row.querySelectorAll('td .ant-tag')].find(t => (t.innerText||'').trim() === '文本') : null })()`)
+    if (!tagClicked) throw new Error('模型行「输入」列里找不到「文本」标签，点不动')
+    // 等界面跟上（写面提交后表格会重载，别用固定 sleep 赌它）。
+    let modAfter = ''
+    for (let i = 0; i < 25 && modAfter !== '文本+图片'; i++) {
+      await sleep(150)
+      modAfter = await page.evaluate(modalityCell)
+    }
     check('一键勾选后「输入」列变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
     const modRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
     check('REST 读面回带 input_modalities=["text","image"]',
       JSON.stringify(modRow?.input_modalities) === JSON.stringify(['text', 'image']),
       JSON.stringify(modRow?.input_modalities))
     await page.shot('22b-settings-model-modalities')
+
+    // ③″ 编辑弹窗**不许静默改掉**已声明的输入能力（2026-10-11 修的回归判据）。
+    //     故障形态：`ModelFormValues` 声明了能力键、`submitModel` 也读它，但弹窗里没有对应的
+    //     `Form.Item` ⇒ `validateFields()` 不返回未注册字段 ⇒ 恒为 undefined ⇒ **只改备注**
+    //     也会把图片能力改回仅文本，而 toast 只说"模型已保存"。
+    //     所以这里刻意只改备注，然后要求读面仍是 ["text","image"]。
+    // 弹窗作用域一律取**可见**的那一层：antd 关掉的那层不会立刻从 DOM 里消失，
+    // 而 `document.querySelector('.ant-modal input#model_id')` 会命中它——按字段限定作用域的
+    // `saveBtnExpr` 同样会点到**隐藏层**的「保存」，表现是"点了保存、什么都没发生"（本轮实测踩到）。
+    const visibleModelModal = (sel) => `(() => {
+      const m = [...document.querySelectorAll('.ant-modal')]
+        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
+      return m ? m.querySelector(${JSON.stringify(sel)}) : null })()`
+    const modelModalField = (id) => visibleModelModal(`input#${id}`)
+    const modelModalSave = `(() => {
+      const m = [...document.querySelectorAll('.ant-modal')]
+        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
+      return m ? [...m.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '保存') : null })()`
+    const capWrapperExpr = `(() => {
+      const m = [...document.querySelectorAll('.ant-modal')]
+        .find(x => x.querySelector('input#model_id') && x.getClientRects().length > 0);
+      return m ? [...m.querySelectorAll('[class*="ant-checkbox-wrapper"]')].find(x => (x.innerText||'').trim() === '图片') : null })()`
+    const editRowExpr = `(() => {
+      const row = [...document.querySelectorAll('.fg-model-panel tbody tr')]
+        .find(tr => (tr.innerText||'').includes(${JSON.stringify(modelID)}));
+      return row ? [...row.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    await clickJS(page, editRowExpr)
+    await page.waitFor(`return !!(${visibleModelModal('input#model_id')})`, { label: '编辑模型表单打开', timeout: 8000 })
+    await sleep(400)
+    const capChecked = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
+    check('编辑模型时「图片」按当前声明回填（表单读得到能力）', capChecked === true, JSON.stringify(capChecked))
+    await page.type(modelModalField('note'), '备注改动')
+    await page.click(modelModalSave)
+    await sleep(800)
+    const afterEdit = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
+    check('备注确实改到了（这次编辑真的提交了）', afterEdit?.note === '备注改动', JSON.stringify(afterEdit?.note))
+    check('只改备注不动已声明的输入能力（不许静默降级为仅文本）',
+      JSON.stringify(afterEdit?.input_modalities) === JSON.stringify(['text', 'image']),
+      JSON.stringify(afterEdit?.input_modalities))
+
+    // ③‴ 新建时就能**声明**能力（用户要求：平台没法自动检测，只能让人填）。
+    const modelID2 = `${modelID}-vision`
+    await clickJS(page, btnExpr('新建模型'))
+    await page.waitFor(`return !!(${visibleModelModal('input#model_id')})`, { label: '新建模型表单打开', timeout: 8000 })
+    await sleep(400)
+    await selectByFieldID(page, 'vendor', provID)
+    await page.type(modelModalField('model_id'), modelID2)
+    if (!(await page.box(capWrapperExpr))) throw new Error('新建模型弹窗里找不到「图片」输入能力勾选框')
+    await page.click(capWrapperExpr)
+    await sleep(250)
+    const tickedNow = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
+    check('新建模型时能勾上「图片」输入能力', tickedNow === true, JSON.stringify(tickedNow))
+    // 截图取在**保存前**：弹窗关掉之后再截就只剩清单，看不出"表单里真的有能力这一项"。
+    await page.shot('22c-settings-model-capability-form')
+    await page.click(modelModalSave)
+    await sleep(800)
+    const created2 = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID2)
+    check('新建时勾的「图片」落库为 input_modalities=["text","image"]',
+      JSON.stringify(created2?.input_modalities) === JSON.stringify(['text', 'image']),
+      JSON.stringify(created2?.input_modalities))
 
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)

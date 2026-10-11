@@ -75,6 +75,14 @@ export interface ModelCatalogResp {
   auth_guidance?: AuthGuidance[]
   /** 空目录/降级说明（可直接展示给用户）。 */
   note?: string
+  /**
+   * **当前这条路由能不能收图** —— 连接期事实（握手时对方自报的能力），不是逐条模型的声明。
+   *
+   * 三态：`true` 能收 / `false` 明确不能 / **缺省 = 取不到（还没连上，无法校验）**。
+   * 缺省**不等于** `false`——把"没握手"说成"不支持"正是 ADR-14 要拦的错误结论，
+   * 所以消费方不得写成 `?? false`。
+   */
+  image_input?: boolean
 }
 
 /** 平台声明的一条模型条目（`GET /models` 的 `models[]`）。 */
