@@ -63,6 +63,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	for _, sess := range list {
 		rec := &ConversationRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
+			WorkspaceID:        sess.WorkspaceID,
 			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
 			Model: sess.Model, RuntimeHint: runtime.NormalizeID(sess.RuntimeHint),
 			ProviderSessionID: sess.ProviderSessionID,
@@ -133,6 +134,7 @@ func (s *Service) persistConversation(rec *ConversationRec) {
 		ID:                 rec.ID,
 		AgentID:            rec.AgentID,
 		Cwd:                rec.Cwd,
+		WorkspaceID:        rec.WorkspaceID,
 		WorkspaceTemporary: rec.WorkspaceTemporary,
 		Provider:           rec.Provider,
 		Model:              rec.Model,

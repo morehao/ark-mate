@@ -44,3 +44,11 @@ export interface HttpErrorShape {
   code: number
   msg: string
 }
+
+/** `POST /workspaces/pick-directory` 响应：宿主原生选择器的结果。 */
+export interface WorkspacePickResp {
+  /** 用户选定的绝对路径（取消时缺省）。 */
+  path?: string
+  /** 用户取消（或面板超时被收回）；**不是错误**。 */
+  cancelled?: boolean
+}

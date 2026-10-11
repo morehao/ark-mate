@@ -50,8 +50,12 @@ func NewConversationCtr(svc svcconversation.ConversationSvc) ConversationCtr {
 	return &conversationCtr{svc: svc}
 }
 
-// List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档；
-// `cwd` 可选，非空时只返回工作空间精确等于该绝对路径的会话）。
+// List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
+//
+// 两个工作空间过滤参数口径不同，都可选：
+//   - `cwd`：工作空间**精确等于**该绝对路径的会话（历史行为）；
+//   - `workspace_id`：归属该工作空间登记的会话（v14 左栏分组用它；按默认工作空间过滤时
+//     同时包含 `workspace_id=''` 的历史会话——那些行读面归默认工作空间）。
 func (h *conversationCtr) List(c *gin.Context) {
 	archived := c.Query("archived") == "true"
 	cwd := strings.TrimSpace(c.Query("cwd"))
@@ -59,7 +63,8 @@ func (h *conversationCtr) List(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: cwd 需为绝对路径"))
 		return
 	}
-	conversations, err := h.svc.ListConversations(archived, cwd)
+	workspaceID := strings.TrimSpace(c.Query("workspace_id"))
+	conversations, err := h.svc.ListConversations(archived, cwd, workspaceID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

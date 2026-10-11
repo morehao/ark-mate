@@ -156,7 +156,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if resp.Origin != "automation:daily" {
 		t.Fatalf("ConversationResp 应回带 origin: %q", resp.Origin)
 	}
-	listed, err := r.svc.ListConversations(false, "")
+	listed, err := r.svc.ListConversations(false, "", "")
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}

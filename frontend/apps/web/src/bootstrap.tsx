@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AppShell } from '@ark-mate/ui'
 import { App } from './app'
+import { loadDirectoryPickerCapability } from './directoryPicker'
 import { renderVersionMismatch, runVersionGate } from './versionGate'
 
 export async function bootstrap(): Promise<void> {
@@ -26,6 +27,11 @@ export async function bootstrap(): Promise<void> {
     renderVersionMismatch(root, gate.mismatch.web, gate.mismatch.core)
     return
   }
+
+  // 目录选择器的形态是**服务端声明**的（宿主能不能抬系统面板），所以在挂载界面前读一次：
+  // 挂载后再读会让"第一次点选目录"落在错的那条路上（本机浏览器本该用系统面板却开了应用内对话框）。
+  // 失败不阻断：拉不到就按 browse（应用内浏览那半永远可用）。
+  await loadDirectoryPickerCapability()
 
   createRoot(root).render(
     <StrictMode>

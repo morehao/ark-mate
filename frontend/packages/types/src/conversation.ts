@@ -14,8 +14,18 @@ export interface ConversationSummary {
    */
   cwd?: string
   /**
-   * 该工作空间是否由平台代建（未指定 cwd 时在服务端 `workspace_dir` 下按会话 id 建）。
-   * **权威标志**：判定「临时空间」只读它，不要从路径形状/前缀反推（前缀可配置）。
+   * 归属的工作空间登记 id（v14；**读面解析后**的值——历史会话（库里 `workspace_id=''`）
+   * 下发的是默认工作空间的 id，不是空串，所以前端可以直接拿它分组）。
+   */
+  workspace_id?: string
+  /** 归属工作空间的展示名（空标题已按末级目录名回落；默认工作空间读作「默认工作空间」）。 */
+  workspace_title?: string
+  /**
+   * 该工作空间是否由**平台**给出（= 落在默认工作空间上）。
+   *
+   * v14 起语义从「平台按会话 id 代建的一次性目录」变成「这是共享的默认工作空间」，
+   * 但字段名与 wire key 保留（换名是纯破坏且没有信息增益）。
+   * **权威标志**：判定「这个目录不是你选的」只读它，不要从路径形状/前缀反推（前缀可配置）。
    */
   workspace_temporary?: boolean
   /** provider 档案 id（会话级模型选择；空 = 跟随 agent）。 */
@@ -276,12 +286,22 @@ export interface CreateConversationReq {
   agent_id?: string
   prompt: string
   /**
-   * 会话工作空间（绝对路径）。空 = 平台代建临时空间（响应回 `workspace_temporary=true`；
+   * 会话工作空间（绝对路径）。空 = 落在**默认工作空间**（响应回 `workspace_temporary=true`；
    * 面板里的用户可见文案称「平台分配的目录」——同一件事，避免 UI 出现"代建"这类内部术语）。
    * 非空时服务端校验「绝对 / 存在 / 是目录」并按符号链接规范化——
-   * 建议直接提交 `WorkspaceBrowseResp.entries[].path` 或 `WorkspaceRecent.path` 的原文。
+   * 建议直接提交 `WorkspaceBrowseResp.entries[].path` 或 `Workspace.path` 的原文。
+   *
+   * v14 起**推荐改用 `workspace_id`**（选择器选中的是登记项而不是裸路径）；`cwd` 保留给
+   * "直接用绝对路径"这条老路。两者同时给出且指向不同目录 → 服务端回 40001 `workspace_conflict`。
    */
   cwd?: string
+  /**
+   * 选中的工作空间登记 id（v14；`GET /workspaces` 的 id）。
+   *
+   * 给了它就**可以不传 `cwd`**（服务端按登记路径定 cwd）。它与 `cwd` 是两种意图表达：
+   * 这个是"我选了那个有名字的项目"，那个是"就用这个路径"。
+   */
+  workspace_id?: string
   /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
   model?: string
   /**
@@ -299,7 +319,9 @@ export interface CreateConversationResp {
   event_seq: number // 已发布事件水位：WS attach 续传起点
   /** 定稿后的工作空间（创建即回读，无需二次查询）。 */
   cwd?: string
-  /** 该工作空间是否由平台代建（权威标志）。 */
+  /** 归属的工作空间登记 id（平台解析后的值）。 */
+  workspace_id?: string
+  /** 该工作空间是否由平台给出（权威标志）。 */
   workspace_temporary?: boolean
 }
 

@@ -5,7 +5,7 @@ import { tokens } from '@ark-mate/ui'
 import { getAgentCapabilities, listMcpServers } from '@ark-mate/api'
 import type { AgentCapabilities, McpServer } from '@ark-mate/types'
 import { useMate } from '../store'
-import { Label } from './WorkspaceBrowser'
+import { Label } from './dirPath'
 import {
   mcpOptionView,
   mcpRows,

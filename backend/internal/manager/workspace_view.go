@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,17 +20,27 @@ import (
 // 应当由既有会话派生，而不是另存一份状态（goose 维护 recent-dirs.json 是因为它没有
 // 会话↔目录的持久关联；ark-mate 有 conversations.cwd，派生即真相）。
 
-// BrowseWorkspace 列出某绝对路径下的子目录（只读）。
+// browseEntryLimit 单层下发的子目录上限。
 //
-// path 为空 → 从允许的工作区根（未配置白名单时退化为服务进程家目录）起步；
-// includeHidden=false → 跳过 "." 开头的目录。
+// 为什么要有上限：一个十万子目录的目录（下载目录、node_modules 的父级）会让 os.ReadDir 的结果、
+// JSON 响应与面板列表一起变慢，而用户真正要选的那几个目录在名字序的前部。截断时把 Truncated 置位，
+// 界面明说"还有未显示的子目录"——静默少几行是最坏的一种（用户以为目录就这些）。
+const browseEntryLimit = 1000
+
+// BrowseWorkspace 列出某绝对路径下的子目录（只读）。**全系统**——没有"可浏览范围"这回事。
+//
+// path 为空 → 从**起始点偏好**（`MATE_WORKSPACE_ROOTS` 的第一项）起步，没有偏好则从服务进程家目录起步；
+// includeHidden=false → 跳过 "." 开头的目录（下发的行带 Hidden 标记，供前端自己做开关）。
 // 返回的 Path/Parent 与建会话时的 cwd 同形态（ValidateWorkspace 规范化），
 // 前端把 entries[i].path 直接当 cwd 提交即可命中同一条会话分组。
 //
-// 配了 MATE_WORKSPACE_ROOTS 后这个接口**只有浏览窗口变窄，没有语义变化**：
-//   - path 越界 → workspace_outside_roots（与建会话同一条校验、同一个错）；
-//   - Parent 只到根为止（到根时留空）——否则"上级"按钮就是白名单的绕过入口；
-//   - home 不在白名单内时干脆不返回（前端据此隐藏"主目录"按钮，而不是给一个必然报错的入口）。
+// **v14.5：白名单从"可浏览范围"降级为"起始点偏好"**，因此这个接口不再有边界语义：
+//   - 任何已存在的目录都能浏览（越界不再是错——原来那条 workspace_outside_roots 已随门一起删除）；
+//   - Parent 一直给到文件系统根（盘符/根目录的 Dir 等于自身时才为空，前端据此禁用"上级"）；
+//   - Home 恒下发（它就是"主目录"按钮的目标）；
+//   - Crumbs 给**完整祖先链**（从文件系统根到当前目录），不再按名录裁剪。
+//
+// `Roots` 仍然下发，但语义变了：它是面板用来把偏好起点列成快捷入口的，不是"允许范围"。
 func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	roots := s.WorkspaceRoots()
 	home := ""
@@ -52,7 +64,7 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspac
 	}
 	// 复用建会话同一条校验（绝对 / 存在 / 是目录 + 符号链接规范化 + 根白名单）：
 	// 浏览与创建不许有两套语义，否则会出现"浏览得到、创建被拒"的死路。
-	dir, err := ValidateWorkspace(path, roots)
+	dir, err := ValidateWorkspace(path)
 	if err != nil {
 		return nil, err
 	}
@@ -62,108 +74,116 @@ func (s *Service) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspac
 			"目录不可读: "+dir, err)
 	}
 	out := make([]dtoworkspace.WorkspaceEntryResp, 0, len(entries))
+	truncated := false
 	for _, e := range entries {
 		// 只列目录（含符号链接指向的目录：DirEntry.IsDir 为 false 时再 Stat 一次消歧）。
 		if !isDirEntry(e, filepath.Join(dir, e.Name())) {
 			continue
 		}
-		if !includeHidden && strings.HasPrefix(e.Name(), ".") {
+		hidden := strings.HasPrefix(e.Name(), ".")
+		if !includeHidden && hidden {
 			continue
 		}
 		child := filepath.Join(dir, e.Name())
-		// 白名单内的符号链接子项若真身落在根外（/data/ws/link -> /etc），列出来就是死路一条：
-		// 用户点进去必被拒。不列它。
-		if len(roots) > 0 && !withinRoots(resolveRealPath(child), roots) {
-			continue
+		if len(out) >= browseEntryLimit {
+			truncated = true
+			break
 		}
-		out = append(out, dtoworkspace.WorkspaceEntryResp{Name: e.Name(), Path: child})
+		out = append(out, dtoworkspace.WorkspaceEntryResp{Name: e.Name(), Path: child, Hidden: hidden})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 
-	resp := &dtoworkspace.WorkspaceBrowseResp{Path: dir, Entries: out, Roots: roots}
-	if home != "" && withinRoots(home, roots) {
+	resp := &dtoworkspace.WorkspaceBrowseResp{
+		Path:      dir,
+		Entries:   out,
+		Roots:     roots,
+		Crumbs:    ancestryCrumbs(dir),
+		Truncated: truncated,
+	}
+	if home != "" {
 		resp.Home = home
 	}
-	// 上级目录：到根为止（根目录的 Dir 等于自身 → 留空，前端据此禁用"上级"）；
-	// 白名单下同样到根为止——越过根向上等于把用户带出允许范围。
-	if parent := filepath.Dir(dir); parent != dir && withinRoots(parent, roots) {
+	// 上级目录：到文件系统根为止（根目录的 Dir 等于自身 → 留空，前端据此禁用"上级"）。
+	// 全系统口径下这里不再有"不许越过某个根"的判定。
+	if parent := filepath.Dir(dir); parent != dir {
 		resp.Parent = parent
 	}
 	return resp, nil
 }
 
-// WorkspaceLibraries 返回**资料库**列表：工作区根下的一级子目录。
+// CreateWorkspaceDir 在某个**已存在**的目录下建一个子目录（`POST /workspaces/dirs`）。
 //
-// 为什么是"根的一级子目录"而不是一张登记表：配好 MATE_WORKSPACE_ROOTS 之后，运维挂进来的
-// 每个一级目录本来就是一堆资料的集合（/srv/docs/合同归档、/srv/docs/技术资料）。于是这一层
-// **零新状态**——不引入 projects.json 之类的登记表，也就没有"登记项与磁盘不一致"这类要维护的
-// 脏数据；目录名即资料库名，用户不必面对绝对路径（资料/文档场景的主要痛点）。
+// 为什么需要它：目录浏览面（对齐 dsh 的 DirectoryBrowser）自带「新建文件夹」——用户在选目录的
+// 那一刻就要能建出"新项目"那个目录，而不是先去别的工具建好再回来选。前端删掉手输路径那条路之后，
+// **这是建新目录的唯一入口**。
 //
-// 未配 roots 时返回空列表：资料库是"策展"能力，前提是先有人把边界画出来（否则只能靠浏览）。
-// 每个资料库带上该目录下的会话数与最近使用时间（与「最近目录」共用 workspaceUsage 一份口径），
-// 让"我在这儿聊过没"不必再点进去看。
+// 四条规则的顺序即实现顺序，每一条都不能省：
+//  1. 父目录走**与建会话同一条** ValidateWorkspace（绝对 / 存在 / 是目录 + 符号链接规范化 + 根白名单）：
+//     浏览面与写面共用一条判据，才不会出现"看得见但建不了"或"建在允许范围之外"；
+//  2. 名字必须是**单段**且不是 "." / ".."：多级（"a/b"）与相对（".."）会把判定摊到每一段上，
+//     而"父目录合法 + 结果就是父目录的子项"这一条判据对拼接串是推不出来的；
+//  3. 不覆盖、不递归：同名目录已存在 → workspace_exists(40901)，让用户改名而不是被静默复用
+//     （"我建的那个新目录"与"原来就有那个目录"是两件事，界面必须能分辨）。
 //
-// 平台代建根**及其下的一切**都不算资料库（见循环里的注释）：代建根本身恒在生效名单里，
-// 它下面又全是按会话 id 命名的沙箱目录，两者都是平台实现细节。反过来说，若运维只把
-// 代建根配成白名单，资料库列表就是空的——这是有意的：那一层从来不是"策展内容"。
-func (s *Service) WorkspaceLibraries() ([]dtoworkspace.WorkspaceLibraryResp, error) {
-	roots := s.WorkspaceRoots()
-	usage := s.workspaceUsage(roots)
-	provision := ""
-	if d := s.WorkspaceDir(); d != "" {
-		provision = resolveRealPath(d)
+// **v14.5：原来的第 4 条（建完再判真身是否在根内，越界则回滚）已删** —— 白名单不再是边界，
+// 建目录的落点由用户自己选（与 dsh 的原生选择器同口径）。
+func (s *Service) CreateWorkspaceDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error) {
+	dir, err := ValidateWorkspace(parent)
+	if err != nil {
+		return nil, err
 	}
+	// TrimSpace 只用来判定"是不是空的"，真正建的是用户原样给的名字：
+	// 目录名首尾含空白是合法的（"我的 项目"），替用户裁掉等于建了另一个名字。
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid", "目录名不能为空", nil)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			fmt.Sprintf("目录名不能包含路径分隔符: %q", name), nil)
+	}
+	if name == "." || name == ".." {
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			fmt.Sprintf("目录名不能是 %q", name), nil)
+	}
+	target := filepath.Join(dir, name)
+	if err := os.Mkdir(target, 0o755); err != nil {
+		if os.IsExist(err) {
+			return nil, acl.NewError(acl.ClassLimit, "workspace_exists",
+				fmt.Sprintf("目录已存在: %s", target), nil)
+		}
+		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
+			fmt.Sprintf("创建目录失败: %s", target), err)
+	}
+	return &dtoworkspace.WorkspaceDirCreateResp{Path: resolveRealPath(target)}, nil
+}
 
-	out := make([]dtoworkspace.WorkspaceLibraryResp, 0, len(roots))
-	seen := make(map[string]bool, len(roots))
-	for _, root := range roots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			// 某个根暂时不可读（挂载掉了/权限变了）不该让整个列表失败：其余根照常返回，
-			// 平台在这里的选择是"少显示一个"而不是"整页报错"。
-			continue
+// ancestryCrumbs 从**文件系统根**到 target（含自身）的祖先链，逐级可跳。
+//
+// 根那一项的 Name 用它自身的路径（POSIX 的 "/"、Windows 的 "C:\"）：根的 basename 是空串，
+// 编一个名字只会让面包屑的第一格没有意义。每一段的 Path 都是**绝对路径**，前端不拼。
+//
+// 输入应当是已规范化的绝对路径（BrowseWorkspace 传的就是 ValidateWorkspace 的结果），
+// 所以这里不再做符号链接解析——面包屑要与"当前目录"逐字一致，而不是另一个真身写法。
+func ancestryCrumbs(target string) []dtoworkspace.WorkspaceCrumbResp {
+	crumbs := make([]dtoworkspace.WorkspaceCrumbResp, 0, 8)
+	for cur := target; ; {
+		parent := filepath.Dir(cur)
+		name := filepath.Base(cur)
+		if parent == cur {
+			name = cur // 根：basename 为空（POSIX "/" 的 Base 是 "/"，Windows "C:\" 的 Base 是 "\."），用路径当名字
 		}
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			child := filepath.Join(root, e.Name())
-			if !isDirEntry(e, child) {
-				continue
-			}
-			real := resolveRealPath(child)
-			// 根内指向根外的符号链接不是资料库：点进去必被拒（与 BrowseWorkspace 同一判据）。
-			if !withinRoots(real, roots) {
-				continue
-			}
-			// 平台自己的代建根与其**下**的一级子目录都要排除，且必须按真身判定：
-			//   - 代建根自身：它现在恒在生效名单里（隐式并入），会作为某个根的一级子目录出现，
-			//     用户看到的第一个资料库会叫 "tmp"——那是平台的实现细节，不是他的资料；
-			//   - 代建根之下：那是**按会话 id 命名的沙箱目录**（ses_xxx），代建根自己成为根之后
-			//     它的第一层子目录就会被扫到，若不排除，资料库列表里会冒出一串平台内部命名。
-			if provision != "" && withinRoots(real, []string{provision}) {
-				continue
-			}
-			if seen[child] {
-				continue // 根的嵌套配置可能让同一个目录出现两次
-			}
-			seen[child] = true
-			item := dtoworkspace.WorkspaceLibraryResp{Name: e.Name(), Path: child, Root: root}
-			if u, ok := usage[child]; ok {
-				item.Conversations = u.count
-				item.LastUsedAt = u.latest
-			}
-			out = append(out, item)
+		crumbs = append(crumbs, dtoworkspace.WorkspaceCrumbResp{Name: name, Path: cur})
+		if parent == cur {
+			break
 		}
+		cur = parent
 	}
-	// 按名字排序：资料库是一份策展列表，稳定顺序比"最近"更可预期（最近有用次数/时间可读）。
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Name != out[j].Name {
-			return out[i].Name < out[j].Name
-		}
-		return out[i].Path < out[j].Path
-	})
-	return out, nil
+	// 反转：从根到当前目录（面包屑的阅读方向）。
+	for i, j := 0, len(crumbs)-1; i < j; i, j = i+1, j-1 {
+		crumbs[i], crumbs[j] = crumbs[j], crumbs[i]
+	}
+	return crumbs
 }
 
 // ListWorkspaceFiles 列出目录**内容**（文件 + 子目录，带大小与修改时间）——只读的"看资料"面。
@@ -174,14 +194,14 @@ func (s *Service) WorkspaceLibraries() ([]dtoworkspace.WorkspaceLibraryResp, err
 //
 // 把两者合成一个接口会破坏上面那条"entries[].path 可直接提交"的契约，所以宁可多一个只读接口。
 //
-// 边界与浏览面完全一致（ValidateWorkspace + withinRoots）：越界目录拒绝、根外真身的符号链接不列。
+// 边界与浏览面完全一致（只要"绝对 / 存在 / 是目录"）：**v14.5 起不再按名录过滤**——要看内容就能看。
 func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error) {
 	roots := s.WorkspaceRoots()
 	if strings.TrimSpace(path) == "" {
 		return nil, acl.NewError(acl.ClassRequest, "workspace_invalid",
 			"未指定 path：列目录内容必须给出要看的目录", nil)
 	}
-	dir, err := ValidateWorkspace(path, roots)
+	dir, err := ValidateWorkspace(path)
 	if err != nil {
 		return nil, err
 	}
@@ -195,9 +215,6 @@ func (s *Service) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworks
 			continue
 		}
 		child := filepath.Join(dir, e.Name())
-		if len(roots) > 0 && !withinRoots(resolveRealPath(child), roots) {
-			continue
-		}
 		// 跟随符号链接取真身的属性（-s 是用户要看的大小，不是链接本身那几个字节）。
 		st, serr := os.Stat(child)
 		if serr != nil {
@@ -247,19 +264,15 @@ type wsUsage struct {
 
 // workspaceUsage 按 cwd 聚合会话数与最近使用时间（"最近"与"资料库"共用这唯一一份口径）。
 //
-// 排除两类，依据都是会话上的**权威字段**而不是路径形状：
-//   - 平台**代建**的临时工作空间（WorkspaceTemporary）：某会话独占的一次性目录，复用无意义；
-//   - 白名单外的工作空间：允许列表是后配的，旧会话的 cwd 可能落在外面。旧会话仍可继续（cwd 不可变，
-//     平台不回头否决已建会话），但**不该**把它当成"可再次选用"的候选推给用户——点了必被拒。
-func (s *Service) workspaceUsage(roots []string) map[string]*wsUsage {
+// 只排除一类：平台**代建**的临时工作空间（WorkspaceTemporary）——某会话独占的一次性目录，复用无意义。
+// **v14.5 起不再排除"名录外"的目录**：名录已降级为起始点偏好，不再意味着"不可选用"，
+// 所以任何用户真正在里面工作过的目录都可以作为候选推回来。
+func (s *Service) workspaceUsage() map[string]*wsUsage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	byPath := make(map[string]*wsUsage, len(s.conversations))
 	for _, r := range s.conversations {
 		if r.Cwd == "" || r.WorkspaceTemporary {
-			continue
-		}
-		if !withinRoots(r.Cwd, roots) {
 			continue
 		}
 		a, ok := byPath[r.Cwd]
@@ -277,15 +290,38 @@ func (s *Service) workspaceUsage(roots []string) map[string]*wsUsage {
 }
 
 // RecentWorkspaces 返回最近使用过的工作空间（从既有会话派生，按最近使用倒序）。排除口径见 workspaceUsage。
+//
+// 排掉两类，否则用户会看到"已经是我的工作空间"的条目出现在"未登记"里：
+//   - **默认工作空间**（平台给的，不是用户选的，没有"登记"这一步可做）；
+//   - 任何**已登记**的路径（一次查登记表，而不是逐条比对）。
+//
+// v14.3 起面板已无消费者（选择面只剩登记项 + 「添加工作空间…」）；端点保留为可用的只读派生视图。
 func (s *Service) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	roots := s.WorkspaceRoots()
-	byPath := s.workspaceUsage(roots)
+	byPath := s.workspaceUsage()
+
+	// 已登记路径 + 默认工作空间路径：后者通常也在登记表里，但"登记表为空 + 代建关闭"
+	// 或"登记被删"的部署仍可能只剩默认工作空间，所以两个来源都要并。
+	registered := map[string]bool{}
+	if s.st != nil {
+		ctx := context.Background()
+		if rows, err := s.st.ListWorkspaces(ctx); err == nil {
+			for _, r := range rows {
+				registered[r.Path] = true
+			}
+		}
+		if def, ok, err := s.st.DefaultWorkspace(ctx); err == nil && ok {
+			registered[def.Path] = true
+		}
+	}
 
 	out := make([]dtoworkspace.WorkspaceRecentResp, 0, len(byPath))
 	for path, a := range byPath {
+		if registered[path] {
+			continue
+		}
 		out = append(out, dtoworkspace.WorkspaceRecentResp{
 			Path:          path,
 			Name:          filepath.Base(path),

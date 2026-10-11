@@ -24,6 +24,12 @@ var notFoundCodes = map[string]bool{
 	// 设置 · 模型（v11）：PATCH/DELETE 打到不存在的模型条目——与"打错 id 的新建"是两件事，
 	// 必须能被前端分辨（刷新列表 vs 改参数）。
 	"model_not_found": true,
+	// 工作空间登记（v14）：PATCH/DELETE/`:id/move` 打到不存在的登记。
+	//
+	// 与 `workspace_invalid` **刻意不同码**：那个是"你给的路径不能用"（改参数还有救），
+	// 而这一个是"这个 id 没有对象"（再改参数也不会有结果，得先刷新列表）——前端要据 40401
+	// 引导刷新，而不是引导改路径。
+	"workspace_not_found": true,
 }
 
 // classCodeOverrides 是"分类对、但对外码要换一个"的例外表（按稳定 code 名）。

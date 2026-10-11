@@ -49,8 +49,17 @@ type Ports struct {
 	Export       svcexport.ExportSvc
 }
 
+// CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。
+//
+// 定义在 router 而不是某个 svc 端口上：它是**装配期的事实查询**（一个纯读函数），
+// 与领域端口不是一类东西；实现方是 manager（判据见 manager/workspace_picker.go）。
+type CapabilityHostFacts func() bool
+
 // Options 控制面装配选项（M1-1：凭据表）。
 type Options struct {
+	// HostFacts 可选：宿主能力事实（nil = 未知，相关能力一律报 false）。
+	HostFacts CapabilityHostFacts
+
 	// Credentials 凭据表（见 internal/credential）。
 	//
 	// 空表 = 不鉴权（默认，仅绑定回环地址时的历史行为）。非空时：
@@ -138,7 +147,7 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	if meta == nil {
 		meta = defaultMeta
 	}
-	registerSystem(rest, meta, o.Web)
+	registerSystem(rest, meta, o.Web, o.HostFacts)
 
 	MountWeb(r, o.Web)
 	return r

@@ -616,7 +616,14 @@ sequenceDiagram
 
 | 能力 | 桌面 | web 等价路径 |
 | --- | --- | --- |
-| 原生目录选择器 | Electron dialog（IPC 只对主窗口主框架开放） | 服务端目录浏览 API |
+| 原生目录选择器 | **宿主能力**（v14.5 改口径，见下） | 同左 + 应用内目录浏览兜底 |
+
+> **口径修订（v14.5，2026-10-11）**：原生目录选择器**不再是桌面独有能力**。它由**核心进程**抬起
+> （macOS `osascript` 的 `choose folder`、Linux zenity/kdialog），判定看**宿主事实**——绑回环 / 非 SSH /
+> 有显示会话——所以**本机浏览器入口也能用系统面板**（参照实现的 `dsh web` 就是这样）。远程 / SSH /
+> 无显示会话才退化成服务端目录浏览。声明面把这件事说清：`GET /capabilities` 的 `native-dialog`。
+> 壳的那条 Electron `dialog.showOpenDialog` IPC 仍在（`native.pickDirectory`），但**控制面已不再经它**：
+> 一份实现胜过两套平台适配。
 | 托盘 / 通知 | 有 | 无（不影响功能可用性） |
 | 打开文件 / 文件夹 | `shell.openPath` | 显示路径 + 复制 |
 | 导出诊断包 | 原生保存对话框 | 浏览器下载 |

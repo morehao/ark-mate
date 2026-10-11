@@ -43,7 +43,7 @@ func TestWorkspaceSettingsWithoutStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WorkspaceSettings: %v", err)
 	}
-	if len(resp.Configured) != 1 || !resp.Restricted || resp.Writable {
+	if len(resp.Configured) != 1 || !resp.PreferRoots || resp.Writable {
 		t.Fatalf("快照不符: %+v", resp)
 	}
 	if resp.Source != "unavailable" {
@@ -67,17 +67,17 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 		}
 	}
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	mustWorkspacePolicy(t, svc, provision, nil) // 未配置白名单起步
+	mustWorkspacePolicy(t, svc, provision, nil) // 未配置偏好起点
 	store := &fakeRootsStore{src: "config.json"}
 	svc.SetWorkspaceSettingsStore(store)
 
-	// 起步快照：不限制（restricted=false，无名单可言，故 provision_included 为 false）。
+	// 起步快照：没有偏好起点（prefer_roots=false，无名单可言，故 provision_included 为 false）。
 	resp, err := svc.WorkspaceSettings()
 	if err != nil {
 		t.Fatalf("WorkspaceSettings: %v", err)
 	}
-	if resp.Restricted || len(resp.Configured) != 0 || len(resp.Roots) != 0 || resp.ProvisionIncluded {
-		t.Fatalf("未配置时应为「不限制」: %+v", resp)
+	if resp.PreferRoots || len(resp.Configured) != 0 || len(resp.Roots) != 0 || resp.ProvisionIncluded {
+		t.Fatalf("未配置时不该有偏好起点: %+v", resp)
 	}
 	if !resp.Writable || resp.LockedBy != "" || resp.Source != "config.json" {
 		t.Fatalf("可写态不符: %+v", resp)
@@ -91,30 +91,34 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if len(store.saved) != 1 || len(store.saved[0]) != 2 {
 		t.Fatalf("落盘内容不符（应为显式名单）: %+v", store.saved)
 	}
-	if !resp.Restricted || !resp.ProvisionIncluded || len(resp.Configured) != 2 {
+	if !resp.PreferRoots || !resp.ProvisionIncluded || len(resp.Configured) != 2 {
 		t.Fatalf("更新后快照不符: %+v", resp)
 	}
 	if len(resp.Roots) != 3 || resp.Roots[0] != mustEval(t, rootA) || resp.Roots[2] != filepath.Join(mustEval(t, base), "tmp") {
 		t.Fatalf("生效名单应为「配置的根 + 隐式代建根」: %+v", resp.Roots)
 	}
-	// 热更新立即生效：越界目录被拒、代建根自身放行（平台不产出越界会话）。
+	// 热更新立即生效：偏好起点变了，但**它不再是边界**——名录外目录照样可浏览。
 	outside := filepath.Join(base, "outside")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := svc.BrowseWorkspace(outside, false); aclCode(t, err) != "workspace_outside_roots" {
-		t.Fatalf("更新后根外目录应被拒: %v", err)
+	if _, err := svc.BrowseWorkspace(outside, false); err != nil {
+		t.Fatalf("更新偏好后名录外目录仍应可浏览（名录不是边界）: %v", err)
 	}
-	// 代建根也要放行——按真实顺序：平台先按会话 id 建出目录，用户才能浏览它。
-	if _, err := ResolveWorkspace("", provision, svc.WorkspaceRoots(), "conv-p"); err != nil {
-		t.Fatalf("代建根应始终可选（隐式并入）: %v", err)
+	// 代建根也要放行——默认工作空间就在它下面（未指定 cwd 的落点）。
+	defDir := filepath.Join(provision, "default")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatalf("mkdir default: %v", err)
+	}
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
+		t.Fatalf("默认工作空间应始终可选（代建根隐式并入）: %v", err)
 	}
 	if _, err := svc.BrowseWorkspace(provision, false); err != nil {
 		t.Fatalf("代建根应始终可浏览: %v", err)
 	}
 
-	// 影响面：白名单只约束**新**的显式 cwd 与浏览面；已建会话 cwd 创建即定稿，不回头否决，
-	// 但也不再作为"最近目录"候选推给用户（点了必被拒）。
+	// 影响面：偏好起点只影响"浏览从哪儿起步"；已建会话 cwd 创建即定稿、不回头否决，
+	// 而且**它仍然可以**作为"最近目录"候选被推回来（v14.5：名录外不再意味着"点了必被拒"）。
 	svc.registerConversation(&ConversationRec{
 		ID: "c-old", AgentID: "a1", Cwd: mustEval(t, outside), UpdatedAt: time.Now().UTC(),
 	})
@@ -122,10 +126,14 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
+	found := false
 	for _, r := range recent {
 		if r.Path == mustEval(t, outside) {
-			t.Fatalf("白名单外的旧会话不该作为候选: %+v", recent)
+			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("名录外的旧会话应仍可作为候选被推回来: %+v", recent)
 	}
 	svc.mu.Lock()
 	_, kept := svc.conversations["c-old"]
@@ -139,7 +147,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("清空: %v", err)
 	}
-	if resp.Restricted || len(resp.Roots) != 0 || len(store.saved) != 2 || len(store.saved[1]) != 0 {
+	if resp.PreferRoots || len(resp.Roots) != 0 || len(store.saved) != 2 || len(store.saved[1]) != 0 {
 		t.Fatalf("清空后应为不限制并落盘空名单: resp=%+v saved=%+v", resp, store.saved)
 	}
 }

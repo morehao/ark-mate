@@ -12,6 +12,29 @@ export interface WorkspaceEntry {
   name: string
   /** 绝对路径（可直接作为建会话的 cwd）。 */
   path: string
+  /**
+   * 宿主约定的隐藏项（POSIX 点前缀）。
+   *
+   * 服务端在 `hidden=false` 时**不下发**这些行；下发时带标记，供面板自己做「显示隐藏文件」
+   * 开关（切换开关不必重发请求——隐藏行已在手上）——对齐 dsh 的 `DirectoryEntry.hidden`。
+   */
+  hidden?: boolean
+}
+
+/**
+ * 面包屑的一项（v14.3）：一个祖先目录，逐级可跳。
+ *
+ * 服务端下发**从文件系统根到当前目录（含自身）**的完整链，前端不按路径字符串切分——
+ * 盘符 / UNC / 符号链接（macOS 的 `/var` → `/private/var`）三处都会切错。
+ * 配了白名单时链首是**离当前目录最近的那个根**（根外的祖先既不合法也只是噪音）。
+ */
+export interface WorkspaceCrumb {
+  /** 显示名（文件系统根用它自身的路径当名字，例如 `/`；盘符形如 `C:\`）。 */
+  name: string
+  /** 绝对路径（跳转目标）。 */
+  path: string
+  /** 恒为 false（祖先链上不区分隐藏与否——那是名字的宿主约定，不是位置的属性）。 */
+  hidden?: boolean
 }
 
 /** `GET /workspaces/browse` 响应。 */
@@ -23,17 +46,96 @@ export interface WorkspaceBrowseResp {
   /** 服务进程家目录（"回到主目录"用；不可得或不在工作区根内时缺省）。 */
   home?: string
   /**
-   * 生效的工作区根白名单（服务端 `MATE_WORKSPACE_ROOTS`；空 = 不限制）。
-   * 服务端会把 `cwd` 与浏览都收在根内，故前端应当把根列成入口——
-   * 既让"为什么上不去了"有解释，也让用户一进来就看到允许工作的位置。
+   * 面板配置的**起始点偏好**（服务端 `MATE_WORKSPACE_ROOTS`；空 = 没有偏好）。
+   *
+   * **它不是"允许范围"**：任何已存在的目录都能浏览、都能当工作空间（选工作区是全系统）。
+   * 面板把这几项列成快捷入口，省去"从家目录一层层点下去"。
    */
   roots?: string[]
+  /** 文件系统根 → 当前目录的祖先链（含自身），逐级可跳；始终非空。 */
+  crumbs?: WorkspaceCrumb[]
+  /** 单层子目录超过服务端上限时被截断（界面据此说"还有未显示的子目录"）。 */
+  truncated?: boolean
   entries: WorkspaceEntry[]
+}
+
+/** `POST /workspaces/dirs` 响应：新建目录的规范化绝对路径（可直接当 cwd / 加入白名单）。 */
+export interface WorkspaceDirCreateResp {
+  path: string
+}
+
+/**
+ * 一条**工作空间登记**（v14；`GET /workspaces` 的 items）。
+ *
+ * 与 `WorkspaceRecent` 的区别是本轮设计的核心：那一个是**派生的只读视图**（从既有会话算出来的），
+ * 这一条是**用户登记下来的持久实体**——
+ * 有 id、有标题、有顺序，可以被改写与删除。选择器的主列表取这一份。
+ */
+export interface Workspace {
+  /** 平台 uuid（对外稳定标识；改名/搬迁不改它）。会话的 `workspace_id` 指向它。 */
+  id: string
+  /** 规范化后的绝对路径（可直接作为建会话的 cwd）。 */
+  path: string
+  /** 展示名（'' = 未命名，按末级目录名渲染；默认工作空间读作「默认工作空间」）。 */
+  title: string
+  /** 是否平台默认工作空间（删不掉；「未指定 cwd 的建会话」落在它上面）。 */
+  is_default: boolean
+  /** 展示顺序（升序）。 */
+  list_order: number
+  /** 目录现状（**读时现算不缓存**）：ok | missing | not_dir | unreadable。 */
+  dir_status: WorkspaceDirStatus
+  /** 该工作空间名下的会话数（含归档；历史会话算进默认工作空间那一行）。 */
+  conversations: number
+  /** 最近使用时间（RFC3339；缺省 = 从未用过）。 */
+  last_used_at?: string
+  created_at: string
+  updated_at: string
+}
+
+/** 目录现状。非 `ok` 时这一行**仍然在下发**（登记不会因为目录消失就凭空不见），只是不能在其中建会话。 */
+export type WorkspaceDirStatus = 'ok' | 'missing' | 'not_dir' | 'unreadable'
+
+/** `GET /workspaces` 响应。 */
+export interface WorkspaceListResp {
+  items: Workspace[]
+  /** 默认工作空间 id（缺省 = 该部署没有默认工作空间，例如代建关闭）。 */
+  default_id?: string
+  /**
+   * 是否可创建/改名/删除（memory 持久层 = false）。
+   * false 时界面**不渲染**创建与管理入口——不给一个必然失败的按钮。
+   */
+  writable: boolean
+  /** 平台默认工作空间的所在目录（缺省 = 代建关闭）。 */
+  provision_dir?: string
+}
+
+/** `POST /workspaces` 请求体（登记一个已存在的目录）。 */
+export interface WorkspaceCreateReq {
+  path: string
+  /** 展示名（可选；空 = 未命名）。**不是身份**：改名不改 id、不改路径。 */
+  title?: string
+  /** true = 路径已登记时报错（40901）；缺省 = get-or-create 返回既有那一行。 */
+  strict?: boolean
+}
+
+/** `DELETE /workspaces/:id` 响应。 */
+export interface WorkspaceDeleteResp {
+  id: string
+  /** 归属被清空、读面归到默认工作空间的会话数（会话本身与 cwd 均未改动）。 */
+  released_sessions: number
+}
+
+/** `POST /workspaces/:id/move` 响应：重排后的**完整**顺序（客户端据此对齐本地顺序）。 */
+export interface WorkspaceMoveResp {
+  ids: string[]
 }
 
 /**
  * 最近使用过的工作空间（从既有会话派生）。
- * 排除平台代建的临时空间——那是某个会话独占的一次性目录，不具备复用价值。
+ *
+ * v14 时它是选择器的一栏；**v14.3 起面板已无消费者**（选择面只剩登记项 + 「添加工作空间…」，
+ * 对齐 dsh）。类型保留是因为 `GET /workspaces/recent` 仍在（README 的接口摘要里有它），
+ * 而契约类型应当跟着端点走——删类型不删端点会让下一个人以为那个端点没了。
  */
 export interface WorkspaceRecent {
   path: string
@@ -41,26 +143,6 @@ export interface WorkspaceRecent {
   /** 该工作空间下最新会话的 updated_at（ISO RFC3339）。 */
   last_used_at: string
   /** 该工作空间下的会话数（含归档）。 */
-  conversations: number
-}
-
-/**
- * 资料库 = 工作区根（`MATE_WORKSPACE_ROOTS`）下的一级子目录。
- *
- * 服务端**零新状态**：不存登记表，目录名即资料库名（`GET /workspaces/libraries`）。
- * 未配 `MATE_WORKSPACE_ROOTS` 时服务端返回空数组——资料库是"策展"能力，
- * 前提是运维先把允许的工作区画出来；此时面板只保留"浏览目录"入口。
- */
-export interface WorkspaceLibrary {
-  /** 绝对路径（可直接作为建会话的 cwd）。 */
-  path: string
-  /** 目录名即资料库名。 */
-  name: string
-  /** 所属工作区根。 */
-  root: string
-  /** 该资料库下最新会话的 updated_at；从未用过则缺省。 */
-  last_used_at?: string
-  /** 该资料库下的会话数（含归档）。 */
   conversations: number
 }
 
@@ -90,24 +172,27 @@ export interface WorkspaceFilesResp {
 }
 
 /**
- * `GET · PUT /settings/workspace` 的工作区根白名单快照。
+ * `GET · PUT /settings/workspace` 的**起始点偏好**快照。
  *
- * `configured` 与 `roots` 的区分是这份契约的核心：面板**编辑**的是 `configured`（显式配置），
+ * **它不是"允许范围"**（v14.5 起的名义与语义都已改）：任何已存在的目录都能浏览、都能当工作空间，
+ * 这份名单只决定"目录浏览从哪儿起步"与"面板里列哪些快捷入口"。
+ *
+ * `configured` 与 `roots` 的区分仍是这份契约的核心：面板**编辑**的是 `configured`（显式配置），
  * 而 `roots` 是**生效**名单（= configured ∪ 平台代建根）。代建根由平台自己并进来，
  * 用户在面板里删不掉它——所以后端必须把两份都给出来，否则前端无法表达"删掉这一条"。
  */
 export interface WorkspaceSettings {
-  /** 显式配置的白名单（面板可编辑的那一份）。 */
+  /** 显式配置的偏好起点（面板可编辑的那一份）。 */
   configured: string[]
-  /** 生效白名单（含隐式并入的代建根）；为空 = 不限制（可浏览任意可读目录）。 */
+  /** 生效偏好起点（含隐式并入的代建根）；为空 = 没有偏好（从服务进程家目录起步）。 */
   roots?: string[]
-  /** 是否处于受限模式（configured 非空）。false = 未画边界。 */
-  restricted: boolean
+  /** 是否配置了偏好起点（configured 非空）。名字从 `restricted` 改来：名单不再是边界。 */
+  prefer_roots: boolean
   /** 平台代建工作空间的根目录（空 = 代建关闭）。 */
   provision_dir?: string
   /** 代建根是否已隐式并入生效名单。 */
   provision_included: boolean
-  /** 白名单的最终来源：default | config.json | env | env(process) | flag | unavailable。 */
+  /** 偏好起点的最终来源：default | config.json | env | env(process) | flag | unavailable。 */
   source: string
   /** 非空 = 该键被更高优先级来源锁定（写入必被覆盖），面板应转只读并显示它。 */
   locked_by?: string

@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
-// 工作空间白名单的**设置面**：把"哪些目录能被当作工作空间"从"只能改环境变量"变成"面板也能改"。
+// 工作空间**起始点偏好**的设置面：把"目录浏览从哪儿起步"从"只能改环境变量"变成"面板也能改"。
 //
 // 三条边界（动这块前先读）：
 //   - 白名单只约束**新**的显式 cwd 与目录浏览；已建会话的 cwd 创建即定稿，平台不回头否决旧会话
@@ -42,7 +42,9 @@ func (s *Service) SetWorkspaceSettingsStore(st WorkspaceRootsStore) {
 	s.workspaceRootsStore = st
 }
 
-// WorkspaceSettings 返回白名单设置快照（生效名单 + 显式配置名单 + 来源/锁定态 + 可写性）。
+// WorkspaceSettings 返回**起始点偏好**的设置快照（生效名单 + 显式配置名单 + 来源/锁定态 + 可写性）。
+//
+// v14.5 起这份名单只影响"目录浏览从哪儿起步"与"面板里的快捷入口"，不再拒绝任何路径。
 //
 // Configured 与 Roots 必须分开给：面板编辑的是 Configured，而"代建根"是平台派生的、
 // 用户删不掉的那一条；只给生效名单，面板就永远无法表达"删掉这一条"。
@@ -53,7 +55,7 @@ func (s *Service) WorkspaceSettings() (*dtoworkspace.WorkspaceSettingsResp, erro
 	resp := &dtoworkspace.WorkspaceSettingsResp{
 		Configured:        append([]string{}, s.workspaceRoots...),
 		Roots:             s.effectiveWorkspaceRootsLocked(),
-		Restricted:        len(s.workspaceRoots) > 0,
+		PreferRoots:       len(s.workspaceRoots) > 0,
 		ProvisionDir:      s.workspaceDir,
 		ProvisionIncluded: len(s.workspaceRoots) > 0 && s.workspaceDir != "",
 		Source:            string(sourceUnavailable),

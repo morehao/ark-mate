@@ -91,6 +91,34 @@ export const consoleStyleSheet = `
     white-space: nowrap;
   }
 
+  /* 新建会话：品牌下方的全宽按钮（v14.1，对齐 dsh 左栏的首屏动作）。
+     它比导航项高一档（38px / 更实的底 / 描边）：这是"开始一件事"，不是"切一个视图"。 */
+  .fg-rail-new {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 38px;
+    margin: 2px 12px 12px;
+    border: 1px solid ${tokens.borderStrong};
+    border-radius: 10px;
+    background: ${tokens.softFill};
+    color: ${tokens.text};
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .fg-rail-new:hover {
+    background: ${tokens.primarySoft};
+    border-color: ${tokens.primary};
+  }
+  .fg-rail-new-icon { font-size: 14px; color: ${tokens.textSecondary}; }
+  .fg-rail-new:hover .fg-rail-new-icon { color: ${tokens.primary}; }
+
   /* 导航区：一级 32px / 二级 30px，条目间距 1px */
   .fg-nav-rail {
     flex: none;
@@ -880,8 +908,7 @@ export const consoleStyleSheet = `
   }
   .fg-ws-item-check { flex: none; color: ${tokens.text}; font-size: 12px; }
 
-  /* 浏览视图头：返回 / 上级 / 主目录 + 当前待选路径（尾段优先，长路径截前缀）。 */
-  .fg-ws-browse-head { display: flex; align-items: center; gap: 2px; }
+  /* 行内图标按钮（上级 / 主目录 / 左栏管理入口共用一套静息形态）。 */
   .fg-ws-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -899,21 +926,386 @@ export const consoleStyleSheet = `
   }
   .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
-  .fg-ws-cur {
-    padding: 0 8px 2px;
-    font-family: ${tokens.fontMono};
-    font-size: 10.5px;
-    color: ${tokens.textSecondary};
+
+  /* ——— 目录浏览对话框（v14.3，对齐 dsh 的 DirectoryBrowser） ———
+     680×500 的居中弹窗，头部=面包屑+路径编辑入口，主体=Miller 双栏，底部=动作条。
+     尺寸用固定档而不是百分比：双栏在窄容器里放不下（每栏下限 240px），
+     而这是"选一个目录"的专用对话框，占满整屏反而丢失上下文。 */
+  .fg-ws-dlg .ant-modal-content { padding: 0; }
+  .fg-ws-dlg .ant-modal-header { padding: 16px 24px 8px; margin: 0; border-bottom: none; }
+  .fg-ws-dlg .ant-modal-body { padding: 0 24px 0; }
+  .fg-ws-dlg .ant-modal-footer {
+    margin: 0;
+    padding: 12px 24px;
+    border-top: 1px solid ${tokens.border};
+  }
+  .fg-ws-dlg-body {
+    display: flex;
+    flex-direction: column;
+    height: 380px; /* 500 = 头部 + 主体 + 动作条；主体给双栏留够高度 */
+    min-height: 0;
+  }
+  /* 上级 / 主目录两颗图标与面包屑同排（右侧）；列表内容多寡都不影响它们的位置。 */
+  /* 面包屑条：链可横向滚动（深路径下保尾段在视野内），右端是编辑入口与两颗图标。 */
+  .fg-ws-crumbbar { display: flex; align-items: center; gap: 2px; flex: none; }
+  .fg-ws-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .fg-ws-crumbseat { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .fg-ws-crumb {
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    direction: rtl; /* 路径过长时保留尾段（"我在哪个目录"比"从哪来"重要） */
-    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    color: ${tokens.textSecondary};
   }
+  .fg-ws-crumb:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-ws-crumb:disabled { cursor: default; opacity: 0.5; }
+  .fg-ws-crumbchev { flex: none; font-size: 10px; color: ${tokens.textPlaceholder}; }
+  /* 铅笔区：一个**看得见**的入口（隐形热区是这里唯一能打字的路，不能靠猜）。 */
+  .fg-ws-crumbedit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: text;
+    font-size: 12px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-ws-crumbedit:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-ws-crumbedit:disabled { cursor: default; opacity: 0.35; }
+  .fg-ws-pathinput { flex: 1; font-family: ${tokens.fontMono}; font-size: 11.5px; }
+  /* 完整路径一行：面包屑会被长路径挤到只剩尾段，这里给一字不差的全文。 */
+  .fg-ws-dlg-path {
+    flex: none;
+    padding: 4px 0 6px;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  /* Miller 双栏：每栏下限 240px，放不下时整行横向滚动（而不是把两栏挤成一条缝）。
+     高度按内容自适应（内容多时列内滚动）；不足的那部分由下面的文件小节与"弹簧"吸收——
+     固定 flex:1 会让"只有两行目录"的空目录出现一大片空白。 */
+  .fg-ws-miller {
+    display: flex;
+    align-items: stretch;
+    flex: 0 1 auto;
+    min-height: 64px;
+    max-height: 220px;
+    gap: 10px;
+    overflow-x: auto;
+  }
+  .fg-ws-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 240px;
+    min-height: 24px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  /* 单栏且空时：让"此目录下没有子目录"就在列表的位置显示，而不是被推到容器底部。 */
+  .fg-ws-miller.fg-single {
+    flex-direction: column;
+    min-height: 0;
+    overflow-x: hidden;
+  }
+  /* 弹簧：把"上级/主目录"与动作条顶到最下沿——列表内容多寡都不改变它们的位置。 */
+  .fg-ws-grow { flex: 1 1 auto; min-height: 0; }
+  .fg-ws-divider { flex: none; width: 1px; background: ${tokens.border}; }
+  .fg-ws-rowseat { display: flex; flex: none; }
+  /* 选中态：柔性底 + 主色开文件夹图标（与 hover 区分得开——hover 是灰底，选中是主色底）。 */
+  .fg-ws-rowsel, .fg-ws-rowsel:hover:not(:disabled) { background: ${tokens.selectedBg}; }
+  .fg-ws-icon-btn.fg-ws-open, .fg-ws-open { color: ${tokens.primary}; }
+  .fg-ws-item-chev { flex: none; font-size: 10px; color: ${tokens.textPlaceholder}; }
+  .fg-ws-roots { display: flex; flex-direction: column; gap: 2px; flex: none; }
+  .fg-ws-files { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; flex: none; }
+  /* 错误行与"目录太多"提示贴着列表下沿，然后被 nav 的 margin-top:auto 推到动作条上方。 */
+  .fg-ws-note {
+    flex: none;
+    padding: 2px 0;
+    font-size: 11.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  /* 底部动作条：新建文件夹 / 显示隐藏文件在左，取消 / 确认在右（对齐 dsh 的 footerBar）。 */
+  .fg-ws-foot { display: flex; align-items: center; gap: 8px; }
+  .fg-ws-foot-gap { flex: 1; }
+  .fg-ws-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+  }
+  .fg-ws-toggle:hover:not(:disabled) { color: ${tokens.text}; }
+  .fg-ws-toggle:disabled { cursor: default; opacity: 0.5; }
+  .fg-ws-toggle.fg-on { color: ${tokens.text}; }
+  .fg-ws-create { display: flex; flex-direction: column; gap: 10px; }
+  .fg-ws-create-in { font-size: 12.5px; color: ${tokens.textSecondary}; }
   .fg-ws-empty {
     padding: 4px 8px;
     font-size: 11.5px;
     color: ${tokens.textPlaceholder};
+  }
+
+  /* v14：创建/登记失败**就地**报错（设计 §5.2 状态 E）——不关弹层，用户当前浏览位置还在。
+     不做成 toast 是因为那种提示会盖住目录树，而用户要做的正是"换一个目录"。 */
+  .fg-ws-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 4px 6px 6px;
+    padding: 6px 9px;
+    border-radius: 8px;
+    background: ${tokens.warningBg};
+    color: ${tokens.error};
+    font-size: 11.5px;
+    line-height: 1.5;
+    word-break: break-all;
+  }
+  /* 不可写时的一句原因（替代那个不出现的「添加工作空间…」按钮）。 */
+  .fg-ws-hint {
+    padding: 6px 9px 8px;
+    font-size: 11.5px;
+    color: ${tokens.textPlaceholder};
+    line-height: 1.6;
+  }
+  /* 左栏分组行上的行内动作（v14.1：「⋯」管理 + 「⊕」在此新建）：**一起**悬停浮现。
+     未悬停时整行只剩"名字 + 会话数"，工作空间名不再被一排图标挤掉；
+     触屏（≤920px 的抽屉态）没有 hover，所以那一档常显——否则这两个入口等于不存在。 */
+  /* 行内动作用 visibility 而不是 display 隐藏：**位置一直占着**，所以鼠标移上去
+     不会把名字挤窄、也不会让会话数消失——整行唯一的悬停变化就是这两颗按钮出现。
+     fg-menu-open 那条抄的是 dsh 的 .projectRow.menuOpen .rowActions：菜单打开时
+     鼠标往往已经移到浮层上，没有它的话锚点按钮会跟着消失（浮层还在，锚点却空了）。 */
+  .fg-ws-manage { flex: none; display: inline-flex; gap: 2px; visibility: hidden; }
+  .fg-wsgroup-row:hover .fg-ws-manage,
+  .fg-wsgroup-row.fg-menu-open .fg-ws-manage { visibility: visible; }
+  .fg-wsgroup-row .fg-ws-icon-btn {
+    width: 20px;
+    height: 20px;
+    border: 0;
+    background: transparent;
+    border-radius: 5px;
+    color: ${tokens.textSecondary};
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    font-size: 11.5px;
+  }
+  .fg-wsgroup-row .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-wsgroup-row .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
+  /* ——— 左栏「工作区」区头（v14.2） ———
+     几何与行为对齐 dsh 的 sectionHeader：高 36px、gap 4、overflow hidden；
+     **搜索展开时标题与动作两颗一起收起**，输入框占据整条区头。
+     之所以要 overflow:hidden：收起靠的是 max-width 过渡而不是卸载 DOM，
+     不裁掉溢出的话，宽度收缩期间图标会溢到右边压住列表。 */
+  .fg-rail-sechead {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 36px;
+    padding: 0 8px 0 12px;
+    overflow: hidden;
+  }
+  .fg-rail-sechead-label {
+    flex: none;
+    max-width: 45%;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 620;
+    letter-spacing: 0.02em;
+    color: ${tokens.textPlaceholder};
+    transition: max-width 0.18s ease, opacity 0.12s ease, margin-right 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-label { max-width: 0; opacity: 0; margin-right: -4px; }
+
+  /* 折叠搜索：始终占一个图标位（28px），展开后吃掉整条区头的剩余宽度。 */
+  .fg-rail-sesearch {
+    flex: 1;
+    max-width: 28px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    transition: max-width 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sesearch { max-width: 100%; }
+  .fg-rail-sesearch-box {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 28px;
+    border-radius: 8px;
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sesearch-box {
+    border: 1px solid ${tokens.border};
+    background: ${tokens.surface};
+    padding-right: 2px;
+  }
+  .fg-rail-seinput {
+    flex: 1;
+    width: 0;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font: inherit;
+    font-size: 12.5px;
+    color: ${tokens.text};
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+  .fg-rail-seinput::placeholder { color: ${tokens.textPlaceholder}; }
+  .fg-rail-sechead.fg-searching .fg-rail-seinput { opacity: 1; pointer-events: auto; }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-icon.fg-searchbtn:hover { background: transparent; }
+
+  .fg-rail-sechead-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 64px;
+    overflow: hidden;
+    transition: max-width 0.18s ease, opacity 0.12s ease;
+  }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-actions {
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .fg-rail-sechead-icon {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    color: ${tokens.textSecondary};
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .fg-rail-sechead-icon:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  /* 「清除搜索」只在展开态出现。
+     选择器**必须**带上 .fg-rail-sechead-icon：那个类也声明了 display，两者同权重时
+     由源码顺序决定谁赢——v14.2 初版就栽在这里，于是那个 ✕ 常驻在区头、从折叠的搜索框里
+     溢出来正好压在「视图选项」图标上，看起来像"分组图标上有个叉"。带上第二个类权重就
+     高于它，改顺序也不会再翻车。 */
+  .fg-rail-sechead-icon.fg-rail-seclear { display: none; }
+  .fg-rail-sechead.fg-searching .fg-rail-sechead-icon.fg-rail-seclear { display: inline-grid; }
+  /* 不可写（memory 持久层）时区头不渲染「添加工作区」——不留一个必然失败的按钮。 */
+  .fg-rail-sechead-icon:disabled { cursor: default; opacity: 0.35; }
+
+  /* 左栏工作空间分组行（比会话行略重：它是分组的头）。 */
+  .fg-wsgroup-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 5px 6px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: ${tokens.text};
+  }
+  .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
+  /* leading 槽：**一颗实心三角，鼠标放不放上去都是它**（v14.2 修订）。
+     上一版是"静止 folder、悬停换三角"（对齐 dsh 的 projectRow），用户复核后否掉了：
+     一个图标不该因为鼠标在不在一块儿就变成另一个东西。展开态由三角自己旋转 90° 表达，
+     含当前会话的组用主色——"你在哪"必须在未悬停时也看得见。 */
+  .fg-wsgroup-lead {
+    flex: none;
+    width: 16px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-wsgroup-lead.fg-current { color: ${tokens.primary}; }
+  .fg-wsgroup-lead .anticon { transition: transform 0.12s ease; }
+  .fg-wsgroup-row.fg-open .fg-wsgroup-lead .anticon { transform: rotate(90deg); }
+  .fg-wsgroup-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
+  /* 会话数：**恒常显示**，悬停时不让位（v14.2 修订）。原先它在悬停时淡出让位给 ⋯ / ⊕，
+     于是"鼠标放不放上去是两个样子"；现在动作按钮的位置一直占着（见 .fg-ws-manage），
+     名字宽度与会话数在两种状态下逐像素相同。 */
+  .fg-wsgroup-count {
+    flex: none;
+    max-width: 40px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 500;
+    color: ${tokens.textPlaceholder};
+    font-variant-numeric: tabular-nums;
+  }
+  .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
+  /* 组内配额：「展开其余 N 个会话」/「收起」——一行文字按钮，不做成大块空态。 */
+  .fg-wsgroup-more {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: calc(100% - 36px);
+    margin: 1px 8px 3px 28px;
+    padding: 4px 8px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    color: ${tokens.textPlaceholder};
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .fg-wsgroup-more:hover { background: ${tokens.softFill}; color: ${tokens.textSecondary}; }
+  .fg-wsgroup-more .anticon { font-size: 10px; }
+  /* 分组内提示（目录不可用 / 还没有会话）：只有一行字，不做成大块空态。 */
+  .fg-wsgroup-note {
+    padding: 2px 8px 6px 28px;
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+    line-height: 1.6;
   }
 
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
@@ -922,5 +1314,7 @@ export const consoleStyleSheet = `
   .fg-sess-more.fg-keep { opacity: 1; }
   @media (max-width: 920px) {
     .fg-sess-more { opacity: 1; }
+    /* 触屏（抽屉态）没有 hover：动作按钮常显（位置本来就一直占着）。 */
+    .fg-ws-manage { visibility: visible; }
   }
 `

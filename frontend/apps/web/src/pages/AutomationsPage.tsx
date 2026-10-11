@@ -552,7 +552,13 @@ export function AutomationsPage() {
 
 /**
  * 工作空间输入（Form.Item 会把 value/onChange 注进来，TS 从 props 上看不到，所以显式声明为可选）。
- * `null` ↔ `''` 的换算在这里做：WorkspacePicker 的"未指定"是 null，而写面要求 cwd 非空。
+ *
+ * 自动化定义里是 **`cwd` 绝对路径**（不是登记 id）：定时任务要能在一个"没人登记过"的目录里跑，
+ * 而且它的目标目录是**运行期**才用到的（`target.cwd` 随定义落库）。所以这里做一次映射：
+ * 选中登记项 → 取下它的 `path` 写进表单；未指定 → 空串（写面会按"必填"拒）。
+ *
+ * 映射方向刻意是"id → path"而不是把 id 存进定义：定义一旦落库就不能依赖登记表还在
+ * （用户删掉那条登记后，定时任务必须仍然知道该在哪个目录跑）。
  */
 function CwdPicker({
   value,
@@ -561,7 +567,24 @@ function CwdPicker({
   value?: string | null
   onChange?: (v: string | null) => void
 }) {
-  return <WorkspacePicker value={value ?? null} onChange={(v) => onChange?.(v ?? '')} />
+  const workspaces = useMate((s) => s.workspaces)
+  const root = /^\//.test(value ?? '') || /^[A-Za-z]:[\\/]/.test(value ?? '') ? value ?? '' : ''
+  const matched = root ? (workspaces?.items ?? []).find((w) => w.path === root) : undefined
+  return (
+    <WorkspacePicker
+      value={matched ? { id: matched.id } : { id: null, path: root || null }}
+      onChange={(v) => {
+        // 自动化存的是**路径字符串**（不落登记 id）：选中的登记项要换回它的路径，
+        // 未登记的值原样保留——那种情况只可能来自既有配置，不该被面板静默清空。
+        if (v.id) {
+          const ws = (workspaces?.items ?? []).find((w) => w.id === v.id)
+          onChange?.(ws?.path ?? '')
+          return
+        }
+        onChange?.(v.path ?? '')
+      }}
+    />
+  )
 }
 
 function isNeedsAttention(a: Automation): boolean {

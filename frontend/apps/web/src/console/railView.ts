@@ -39,6 +39,49 @@ export function pageConversations(
 }
 
 /**
+ * 一个工作空间分组默认渲染的**空闲**会话条数（对齐 dsh 的 `COLLAPSED_SESSION_LIMIT`）。
+ * 超出的部分收进「展开其余 N 个会话」，由用户按需展开。
+ */
+export const GROUP_IDLE_LIMIT = 5
+
+export interface GroupQuota {
+  /** 本次渲染的会话（原顺序不变：置顶在前、其余按时间，由调用方保证）。 */
+  rows: ConversationSummary[]
+  /** 被收起的条数（0 = 全都在）。 */
+  hidden: number
+}
+
+/**
+ * 组内配额：只对**空闲**会话计数。两类行永远不占配额、也不会被收起——
+ *   - **运行中**的会话（`in_progress`）：把它藏起来等于用户看不到自己刚发起的活儿，
+ *     而它恰恰是最需要被看见的那一条；
+ *   - **当前打开的**会话（`activeId`）：侧栏必须始终能指出"你在哪"。配额一满就把它
+ *     挤出列表的话，用户会以为会话丢了（与 P3 `pageConversations` 的提升同一条纪律）。
+ *
+ * 折叠/展开的状态由调用方持有（它是浏览器本地的视图偏好，不进 db）；本函数只回答
+ * "这一页渲染哪些、还剩几条"。`limit <= 0` = 不设配额（调用方要全量时传 0）。
+ */
+export function quotaSessions(
+  all: ConversationSummary[],
+  limit: number = GROUP_IDLE_LIMIT,
+  activeId?: string | null,
+): GroupQuota {
+  if (limit <= 0) return { rows: all, hidden: 0 }
+  let idle = 0
+  const rows: ConversationSummary[] = []
+  for (const c of all) {
+    if (c.status === 'in_progress' || c.id === activeId) {
+      rows.push(c)
+      continue
+    }
+    if (idle >= limit) continue
+    idle += 1
+    rows.push(c)
+  }
+  return { rows, hidden: all.length - rows.length }
+}
+
+/**
  * 相对时间标签（列表行用）：刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前 / MM-DD / YYYY-MM-DD。
  * `now` 可注入（测试稳定）；非法/空时间 → 空串（不显示噪声）。
  */

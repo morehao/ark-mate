@@ -5,10 +5,15 @@ import {
   cancelQueuedInput as apiCancelQueuedInput,
   conversationHistory,
   createConversation,
+  createWorkspace as apiCreateWorkspace,
+  deleteWorkspace as apiDeleteWorkspace,
   listAgents,
   listConversations,
   listModelCatalog,
   listQueuedInputs,
+  listWorkspaces,
+  moveWorkspace as apiMoveWorkspace,
+  renameWorkspace as apiRenameWorkspace,
   promptConversation,
   resolveElicitation,
   resolvePermission,
@@ -29,6 +34,8 @@ import type {
   ModelRef,
   QueuedInput,
   StreamEntry,
+  Workspace,
+  WorkspaceListResp,
   WsServerFrame,
 } from '@ark-mate/types'
 import { BizCode, Ev } from '@ark-mate/types'
@@ -377,6 +384,8 @@ interface Toast {
 export interface MateState {
   agents: Agent[]
   conversations: ConversationSummary[]
+  /** 工作空间登记（v14；左栏分组与选择器的事实源）。 */
+  workspaces: WorkspaceListResp | null
   views: Record<string, ConversationView>
   activeId: string | null
   wsState: WsState
@@ -394,6 +403,14 @@ export interface MateState {
   railMode: 'active' | 'archived'
   /** 搜索命中跳转锚点：目标会话的 seq（ChatPage 消费后清空；null = 无跳转请求）。 */
   anchorSeq: number | null
+  /**
+   * 新建面板要**预选**的工作空间 id（左栏分组行的「＋」设置；null = 未指定 → 用默认工作空间）。
+   *
+   * 它是两个面之间唯一的桥：左栏是浏览面（不负责建会话），新建面板才是选择面
+   * （设计 §5.1）。面板读取后**立即清空**（一次性意图），否则用户手动改选之后
+   * 再打开面板会被旧值顶掉。
+   */
+  preferredWorkspaceId: string | null
   /** A6 单操作员令牌是否已配置（true = 后端启用鉴权且本机已填令牌）。 */
   token: string
   /** 令牌设置弹窗开关（顶栏锁图标 / 收到 401 时自动打开）。 */
@@ -424,6 +441,24 @@ export interface MateActions {
   boot: () => void
   refreshAgents: () => Promise<void>
   refreshConversations: () => Promise<void>
+  /** 拉取工作空间登记表（左栏分组 + 选择器共用；失败保持 null = 未装载）。 */
+  loadWorkspaces: () => Promise<void>
+  /**
+   * 登记一个目录为工作空间（**get-or-create**：已登记则返回既有那一行并选中它）。
+   *
+   * 这是「添加工作空间…」唯一的落点：选目录那一半在 `DirectoryBrowser`（它只负责挑路径）。
+   * 成功后刷新登记表——本地插入会让顺序与服务端不一致（新条目在尾部，那是服务端才知道的事）。
+   *
+   * **失败会抛**（不吞、也不自己弹提示）：调用方需要把原因呈现给用户。v14.3 起目录对话框是**模态**的，
+   * 所以调用方用 toast（旧的内嵌弹层那种"留在原地换个目录"的交互已不存在）。
+   */
+  createWorkspace: (path: string, title?: string) => Promise<Workspace>
+  /** 改名（不改身份）。 */
+  renameWorkspace: (id: string, title: string) => Promise<void>
+  /** 删除登记（**不删目录、不删会话**）；其会话回到默认工作空间，页面随之刷新。 */
+  deleteWorkspace: (id: string) => Promise<void>
+  /** 重排（beforeId 缺省 = 追加到尾部）。 */
+  moveWorkspace: (id: string, beforeId?: string) => Promise<void>
   activate: (id: string | null, sinceSeq?: number) => void
   /** 跳转到某会话的锚点消息（搜索命中点击）；activate 后由 ChatPage 滚动定位并清空。 */
   jumpToAnchor: (id: string, seq: number) => void
@@ -431,13 +466,17 @@ export interface MateActions {
   clearAnchor: () => void
   /**
    * 新建会话并起首轮。
-   * `workspace` = 会话工作空间绝对路径（服务端规范化后的原文）；null/省略 = 由平台代建临时空间。
+   *
+   * `workspaceId` = 选中的工作空间登记 id（v14）；null/省略 = 落在**默认工作空间**。
    * 工作空间创建时定稿、之后不可变（它是底座 ACP session 的 cwd 与 workspace-write 的边界）。
+   *
+   * v14.3 起这里只收 id：面板的选择面收敛为"登记项 + 添加工作空间"之后，前端不再有"直接指定
+   * 绝对路径"的入口（接口层的 `cwd` 仍然有效，那是对外契约，不因面板收敛而改变）。
    */
   createAndRun: (
     prompt: string,
     model?: ModelRef,
-    workspace?: string | null,
+    workspaceId?: string | null,
     capabilities?: { skills?: string[]; mcps?: string[] },
   ) => Promise<string | undefined>
   /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
@@ -457,6 +496,8 @@ export interface MateActions {
   togglePin: (id: string) => Promise<void>
   archiveConversation: (id: string, archived: boolean) => Promise<void>
   setRailMode: (mode: 'active' | 'archived') => void
+  /** 左栏「＋」：记下要预选的工作空间，交给新建面板消费（一次性）。 */
+  setPreferredWorkspace: (id: string | null) => void
   showToast: (msg: string) => void
   hideToast: (id: number) => void
   setDrawer: (open: boolean) => void
@@ -483,9 +524,11 @@ export type MateStore = MateState & MateActions
 export const initialState: MateState = {
   agents: [],
   conversations: [],
+  workspaces: null,
   views: {},
   activeId: null,
   anchorSeq: null,
+  preferredWorkspaceId: null,
   wsState: 'idle',
   carrierError: null,
   toast: null,
@@ -658,6 +701,67 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
+    loadWorkspaces: async () => {
+      try {
+        set({ workspaces: await listWorkspaces() })
+      } catch (err) {
+        // 登记表取不到（服务不可达 / 老版本服务端）→ 保持 null。
+        // 界面据此退化为"只有输入路径"一条路，而不是给一堆空分组。
+        set({ workspaces: null })
+        reportApiError(err)
+      }
+    },
+
+    createWorkspace: async (path, title) => {
+      // 失败**不吞**：登记失败的原因必须回到调用方。工作空间选择器要把它**就地**显示在弹层里
+      // （设计 §5.2 状态 E：弹层不关，原因用服务端 msg，不自己编文案）。这里原先把错误收成一句
+      // 会自己消失的全局 toast 并返回 undefined，于是调用方只能编一句"服务端未返回工作空间"，
+      // 真实原因（目录不存在 / 落在白名单外 / 不是目录）反而丢了。
+      const ws = await apiCreateWorkspace(path, title)
+      // 刷新而不是本地插入：顺序与服务端的 list_order 只能由服务端决定（新条目在尾部），
+      // 本地插在中间或末尾都可能与服务端不一致，而那种不一致下次刷新会"跳一下"。
+      await get().loadWorkspaces()
+      return ws
+    },
+
+    renameWorkspace: async (id, title) => {
+      try {
+        await apiRenameWorkspace(id, title)
+        await get().loadWorkspaces()
+        // 会话行上的 workspace_title 也要跟着变（否则左栏分组改名了、会话详情还显示旧名）。
+        await get().refreshConversations()
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    deleteWorkspace: async (id) => {
+      try {
+        const resp = await apiDeleteWorkspace(id)
+        await get().loadWorkspaces()
+        // 归属被清空（那些会话回到默认工作空间）→ 重拉列表拿到新的分组。
+        await get().refreshConversations()
+        showToast(
+          resp.released_sessions > 0
+            ? `已移除登记；${resp.released_sessions} 个会话回到「默认工作空间」，目录与文件未动`
+            : '已移除登记；目录与文件未动',
+        )
+      } catch (err) {
+        showToast(toErrorMessage(err))
+      }
+    },
+
+    moveWorkspace: async (id, beforeId) => {
+      try {
+        await apiMoveWorkspace(id, beforeId)
+        await get().loadWorkspaces()
+      } catch (err) {
+        // 顺序没改成 → 重新拉一次（本地已经是乐观顺序的话，这次拉取会把它拉回事实）。
+        await get().loadWorkspaces()
+        showToast(toErrorMessage(err))
+      }
+    },
+
     saveToken: (token) => {
       const v = token.trim()
       persistToken(v)
@@ -694,6 +798,9 @@ export const useMate = create<MateStore>((set, get) => {
         t.connect()
         void get().refreshAgents()
         void get().refreshConversations()
+        // 工作空间登记表：左栏分组与选择器共用（选择器每次打开也会刷一次，
+        // 这里拉是为了"首帧就有分组"，而不是等用户点开选择器才出现）。
+        void get().loadWorkspaces()
       })()
     },
 
@@ -733,13 +840,13 @@ export const useMate = create<MateStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt, model, workspace, capabilities) => {
+    createAndRun: async (prompt, model, workspaceId, capabilities) => {
       try {
         const resp = await createConversation({
           prompt,
           model: model?.modelID,
-          // 不外发空串：cwd 缺省才是「平台代建临时空间」语义（后端把空/缺省当作未指定）。
-          cwd: workspace ?? undefined,
+          // **不外发空串**：缺省才是「落在默认工作空间」语义（后端把空/缺省当作未指定）。
+          workspace_id: workspaceId ?? undefined,
           // 能力选定：调用方（输入卡）已在"两个 kind 都没限制"时不传，这里不再判一次
           // ——缺省路径必须与 M3 之前逐字节相同，判据只留一处。传了就钉住代际；
           // 不可达的 id 由服务端拒（40001，msg 里逐条给原因）。
@@ -962,5 +1069,7 @@ export const useMate = create<MateStore>((set, get) => {
       set({ railMode: mode })
       void get().refreshConversations()
     },
+
+    setPreferredWorkspace: (id) => set({ preferredWorkspaceId: id }),
   }
 })

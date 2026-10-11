@@ -65,7 +65,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if n != 1 || injected != 2 {
 		t.Fatalf("恢复统计: conversations=%d events=%d", n, injected)
 	}
-	list, _ := svc2.ListConversations(false, "")
+	list, _ := svc2.ListConversations(false, "", "")
 	if len(list) != 1 || list[0].Status != ConversationStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}

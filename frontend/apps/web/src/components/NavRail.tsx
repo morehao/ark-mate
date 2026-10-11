@@ -1,5 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { DownOutlined, RightOutlined } from '@ant-design/icons'
+import { DownOutlined, PlusCircleOutlined, RightOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { useMate } from '../store'
 import {
@@ -38,7 +38,9 @@ export function NavRail() {
 
   const pathname = location.pathname
 
-  // 左栏的「新建会话」：问答区落回新建面板（原 ConversationRail 的 onCreate 语义）。
+  // 左栏顶部的「新建会话」（v14.1）：问答区落回新建面板（原 ConversationRail 的 onCreate 语义）。
+  // 它是**唯一的**新建入口——原先在会话面板头部还有一颗小按钮，两处并存的代价是
+  // "新建"这件事看起来属于会话列表的一个筛选器，而不是这一栏的第一动作（对齐 dsh 的 sidebar）。
   const openNew = () => {
     activate(null)
     if (pathname !== '/conversations') navigate('/conversations')
@@ -142,6 +144,13 @@ export function NavRail() {
       <NavLink to="/conversations" className="fg-rail-brand" title="ark-mate 问答控制台" onClick={leave}>
         ark<span style={{ color: tokens.primary }}>·</span>mate
       </NavLink>
+
+      {/* 新建会话：品牌下方常驻的全宽按钮（v14.1）。它是这一栏的**第一动作**——
+          从任何页面点一下都回到新建面板；样式只在这个类里（console.css.ts）。 */}
+      <button type="button" className="fg-rail-new" onClick={openNew}>
+        <PlusCircleOutlined className="fg-rail-new-icon" />
+        <span>新建会话</span>
+      </button>
 
       <nav className="fg-nav-rail" aria-label="视图切换">
         {NAV_ENTRIES.map(renderEntry)}

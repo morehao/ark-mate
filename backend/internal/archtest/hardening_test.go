@@ -179,3 +179,137 @@ func balancedBlock(s string) (string, bool) {
 	}
 	return "", false
 }
+
+// TestDirectoryPickerIsTwoStateHostResolved 目录选择器的**两态编排**（v14.5，对齐 dsh 的
+// `directory-picker-auto`）：由**宿主事实**决定用系统面板还是应用内浏览，且两态互斥。
+//
+// 为什么专门守：这条编排坏掉是静默的，而且已经坏过**两次**：
+//  1. V1 只做了应用内那半（`native.pickDirectory` 在整个 Web 控制台零调用点）——桌面态白丢系统面板；
+//  2. V2 把判据放在**客户端**（"有没有 Electron 桥 `__MATE_DESKTOP__`"）——于是**本机浏览器**
+//     被判成"没有面板"，而参照实现的 `dsh web` 恰恰在那种场景下用系统面板（面板是宿主进程抬的）。
+//
+// 所以这条守卫钉的是"判据在服务端、执行在宿主编译单元"这几个机械事实：
+//
+//	a. 解析必须是纯函数，唯一判据是服务端声明（禁 UA / Electron 桥 / 进程平台）；
+//	b. 三个选目录入口都必须先问解析，且必须调 `pickDirectoryNative()`（漏一处 = 那一处退回单态）；
+//	c. 原生那半必须**打宿主端点**（`pickDirectoryHost`），而不是某个客户端桥；
+//	d. 判定与命令的宿主实现必须在 Go 里存在（`workspace_picker.go` 的牌价与三条判据）。
+func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
+	web := filepath.Join(frontendRoot(t), "apps", "web", "src")
+
+	readSrc := func(rel string) string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(web, rel))
+		if err != nil {
+			t.Fatalf("读 %s 失败: %v（改名/移动了？守卫已失效）", rel, err)
+		}
+		return stripTSComments(string(raw))
+	}
+
+	// a. 解析：纯函数，唯一判据是服务端声明。
+	picker := readSrc("directoryPicker.ts")
+	if !regexp.MustCompile(`(?s)export function resolveDirectoryPicker\(facts: DirectoryPickerFacts\): DirectoryPickerKind \{\s*return facts\.nativeDialog \? 'native' : 'browse'`).MatchString(picker) {
+		t.Error("resolveDirectoryPicker 必须是纯函数 `facts.nativeDialog ? 'native' : 'browse'`（解析不到即失败）")
+	}
+	for _, forbidden := range []string{"navigator.userAgent", "window.electron", "__MATE_DESKTOP__", "process.platform"} {
+		if strings.Contains(picker, forbidden) {
+			t.Errorf("directoryPicker.ts 不得出现 %q：形态判据只认服务端声明（客户端嗅探会把本机浏览器误判成没有面板）", forbidden)
+		}
+	}
+
+	// c. 原生那半必须打**宿主端点**（服务端跑 osascript/zenity；不是某个客户端桥）。
+	if !strings.Contains(picker, "pickDirectoryHost(") {
+		t.Error("directoryPicker.ts 必须通过宿主端点 `pickDirectoryHost()` 抬面板（客户端桥那版已被证伪）")
+	}
+	if !strings.Contains(picker, "native-dialog") {
+		t.Error("directoryPicker.ts 必须从 `/capabilities` 的 `native-dialog` 读判定结果")
+	}
+
+	// b. 三个入口都必须问解析，并调用原生那半。
+	entrypoints := []string{
+		filepath.Join("components", "WorkspacePicker.tsx"),
+		filepath.Join("components", "AddWorkspaceButton.tsx"),
+		filepath.Join("components", "settings", "GeneralSettingsPanel.tsx"),
+	}
+	for _, rel := range entrypoints {
+		src := readSrc(rel)
+		if !strings.Contains(src, "directoryPickerKind() === 'native'") {
+			t.Errorf("%s 没有先问 directoryPickerKind()：这个入口在宿主能抬面板时不会用它", rel)
+		}
+		if !strings.Contains(src, "pickDirectoryNative(") {
+			t.Errorf("%s 的 native 分支没有调用 pickDirectoryNative(", rel)
+		}
+		// 取消必须是**非错误**路径：把它当失败报出来，用户每按一次 Esc 都会看到一个报错。
+		if !strings.Contains(src, "'cancelled' in picked") {
+			t.Errorf("%s 没有处理取消（`'cancelled' in picked`）：取消不是错误", rel)
+		}
+		for _, forbidden := range []string{"__MATE_DESKTOP__", "isDesktopCarrier()"} {
+			if strings.Contains(src, forbidden) {
+				t.Errorf("%s 不得用 %q 判形态：判据在服务端（宿主事实），客户端形态不能决定", rel, forbidden)
+			}
+		}
+	}
+
+	// d. 宿主实现必须在 Go 里存在，且三条判据逐条可查（对齐 dsh 的 resolveDirectoryPickerBackend）。
+	hostPath := filepath.Join(backendRoot(t), "internal", "manager", "workspace_picker.go")
+	raw, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatalf("读 %s 失败: %v（宿主实现被删/改名了？守卫失效）", hostPath, err)
+	}
+	host := stripGoComments(string(raw))
+	for _, want := range []string{
+		"func nativePickerMode(env pickEnv) NativePickerMode", // 判定是纯函数（注入宿主事实）
+		"env.ssh",                    // ① 非 SSH
+		"loopbackBind(env.bindAddr)", // ② 绑回环
+		`"osascript"`,                // ③ 命令配方：macOS
+		`"zenity"`,                   //    命令配方：Linux
+		"ErrNativePickUnsupported",   //  无可用选择器必须是可判定错误
+	} {
+		if !strings.Contains(host, want) {
+			t.Errorf("workspace_picker.go 缺少 %q（宿主判定/配方被改动了？）", want)
+		}
+	}
+	if strings.Contains(host, "exec.Command(") == false && strings.Contains(host, "exec.CommandContext(") == false {
+		t.Error("workspace_picker.go 最终必须真的 spawn 宿主命令（否则原生那半是空的）")
+	}
+}
+
+// stripGoComments 去掉 Go 源码的行注释与块注释（保持字节可忽略：只用于 contains 断言）。
+func stripGoComments(src string) string {
+	out := []byte(src)
+	const (
+		code = iota
+		lineComment
+		blockComment
+	)
+	state := code
+	for i := 0; i < len(out); i++ {
+		switch state {
+		case code:
+			if out[i] == '/' && i+1 < len(out) && out[i+1] == '/' {
+				out[i], out[i+1] = ' ', ' '
+				i++
+				state = lineComment
+			} else if out[i] == '/' && i+1 < len(out) && out[i+1] == '*' {
+				out[i], out[i+1] = ' ', ' '
+				i++
+				state = blockComment
+			}
+		case lineComment:
+			if out[i] == '\n' {
+				state = code
+			} else {
+				out[i] = ' '
+			}
+		case blockComment:
+			if out[i] == '*' && i+1 < len(out) && out[i+1] == '/' {
+				out[i], out[i+1] = ' ', ' '
+				i++
+				state = code
+			} else if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+	return string(out)
+}

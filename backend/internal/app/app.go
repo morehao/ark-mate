@@ -285,12 +285,19 @@ func (a *App) Init(ctx context.Context) error {
 		return fatalErr("serve: 内部错误：持久层模式 %q 未被处理（配置层校验与装机层取值集合不一致）", mode)
 	}
 
-	// 工作空间策略：未指定 cwd 的建会话请求在 <workspace_dir>/<会话id>/ 下代建临时空间
-	// （空 = 关闭代建，此时未指定即报 workspace_required，不回落 serve 进程目录）；
-	// workspace_roots 非空时把显式 cwd 与目录浏览收在白名单内，代建根**自动并入**生效名单
-	// （平台自己的目录本就该天然合法，不再要求运维成对配置）。
+	// 工作空间策略：未指定 cwd 的建会话请求落在**默认工作空间**（v14；一个落库的登记项，
+	// 目录是 <workspace_dir>/default；空 = 关闭代建，此时未指定即报 workspace_required，
+	// 不回落 serve 进程目录）；workspace_roots 非空时把显式 cwd、目录浏览与**工作空间登记**
+	// 收在白名单内，代建根**自动并入**生效名单（平台自己的目录本就该天然合法，
+	// 不再要求运维成对配置）。
 	if err := a.svc.SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
 		return usageErr("serve: 工作空间策略非法: %v", err)
+	}
+	// 默认工作空间的建立**必须在配置装载之后**（迁移里拿不到 workspace_dir，见
+	// store/migrate_v14.go）：幂等，且只在登记表为空时创建——删掉它之后不再自动重建
+	// （用户删了它、下次启动它又回来，而界面上没有任何东西解释这件事）。
+	if err := a.svc.EnsureDefaultWorkspace(); err != nil {
+		return usageErr("serve: 建立默认工作空间失败: %v", err)
 	}
 	// 白名单的持久化端口：面板 PUT /settings/workspace 经它写回配置目录（config.json）。
 	// 传入该键的**最终来源**：来源高于配置文件（进程 env / env 文件 / flag）时端口会报"锁定"，
@@ -375,6 +382,9 @@ func (a *App) Init(ctx context.Context) error {
 	if err != nil {
 		return usageErr("serve: %v", err)
 	}
+	// 宿主原生目录选择器的第一条判据就是"绑的是不是回环"，而真端口只有 Listen 之后才有
+	// （桌面态 `127.0.0.1:0`）——所以在这里把**实际监听地址**交给 manager（v14.5）。
+	a.svc.SetBindAddr(ln.Addr().String())
 	originPolicy := middleware.NewOriginPolicy(ln.Addr().String(), cfg.AllowedOrigins)
 	if originPolicy.Enabled() {
 		glog.Infow(ctx, "serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
@@ -391,6 +401,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
+		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(manager.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
 		Origin:      originPolicy,

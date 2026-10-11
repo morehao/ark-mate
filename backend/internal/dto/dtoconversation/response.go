@@ -13,8 +13,21 @@ type ConversationResp struct {
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
-	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
-	// **权威标志**：调用方据此判断"临时空间"，不得从路径形状反推（前缀可配置）。
+	// WorkspaceID 归属的工作空间登记 id（v14）。**总是有值**：未登记/登记已删的会话在
+	// 读面归默认工作空间，所以这里下发的是解析后的归属，不是库里的原始列。
+	//
+	// 由服务端下发而不是让前端按 cwd 匹配：默认工作空间的路径可配置（MATE_WORKSPACE_DIR），
+	// 前端拿 cwd 字符串去比登记表会因规范化差异（符号链接、尾斜杠）匹配不上，出现
+	// "会话明明在该目录下却不在分组里"（设计 §4.3）。
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// WorkspaceTitle 归属工作空间的展示名（v14；空标题已按末级目录名回落，
+	// 默认工作空间读作「默认工作空间」）。前端不必再查一次登记表就能渲染分组行。
+	WorkspaceTitle string `json:"workspace_title,omitempty"`
+	// WorkspaceTemporary 该工作空间是否由**平台**给出（= 默认工作空间）。
+	// **权威标志**：调用方据此判断"这个目录不是你选的"，不得从路径形状反推（前缀可配置）。
+	//
+	// v14 起语义从"平台按会话代建的一次性目录"变成"这是共享的默认工作空间"（设计 ADR-9）：
+	// wire key 与字段名保留是因为前端两处按它渲染，换名是纯破坏且没有信息增益。
 	WorkspaceTemporary bool   `json:"workspace_temporary"`
 	Provider           string `json:"provider,omitempty"` // provider 档案 id（会话级模型选择）
 	Model              string `json:"model,omitempty"`    // 会话级模型 id（空 = 底座默认）
@@ -77,9 +90,10 @@ type ConversationCreateResp struct {
 	AgentID  string `json:"agent_id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
-	// Cwd / WorkspaceTemporary 定稿后的工作空间与其"是否平台代建"权威标志；
-	// 创建即回读，前端无需二次查询即可显示「在哪里工作」。
+	// Cwd / WorkspaceID / WorkspaceTemporary 定稿后的工作空间、它的归属与"是否平台给的"权威标志；
+	// 创建即回读，前端无需二次查询即可显示「在哪里工作」并把会话挂到正确的分组下。
 	Cwd                string `json:"cwd,omitempty"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
 	WorkspaceTemporary bool   `json:"workspace_temporary"`
 }
 

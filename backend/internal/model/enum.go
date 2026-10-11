@@ -89,6 +89,12 @@ const (
 	// **刻意不复用 MetaKeyMigrationNotes**：v13 覆盖它等于把 v12 那些尚未处置的事实
 	// （无出口字段 / 缺端点推导 / 默认模型冲突）静默抹掉——「同一处债不再借第二次」。
 	MetaKeyMigrationNotesV13 = "migration_notes_v13"
+	// MetaKeyMigrationNotesV14 v14 迁移（工作空间登记表）留下的**需人工处置的事实**（value = JSON）。
+	//
+	// 与 V13 同一条理由：复用 MetaKeyMigrationNotes/V13 会把前面那些尚未处置的事实静默抹掉
+	// （「同一处债不再借第二次」）。v14 这里记的是"多少既有会话落在默认工作空间、代建临时
+	// 目录还在磁盘上"——它是可读事实，不是待修的错误。
+	MetaKeyMigrationNotesV14 = "migration_notes_v14"
 
 	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
 	CapabilityKindSkill = "skill"

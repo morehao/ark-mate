@@ -60,8 +60,8 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | 自动化定义 | `~/.ark-mate/automations/<id>.json` | `MATE_AUTOMATIONS` | 定时任务。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：定义与运行态存在 DB 的 `automations` 表里（**定义列** `body`+`revision` 与**运行态列** `last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 分列；`state` 属于定义，因为启用/停用是用户操作），本目录只作**导入/导出**位置（装配期自动导入一次、`mate automation import\|export` 手动搬运；导入会把文件里的运行态键切进运行态列，导出时再合成同一个文件）。memory 模式下 `<id>.json` 仍是唯一定义 + 运行态载体（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）——**备份它就是备份任务**（含运行史）。两种模式下手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
 | 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
-| 代建工作空间 | `~/.ark-mate/workspaces/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
-| 工作区根白名单 | 空（不限制） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
+| 默认工作空间 | `~/.ark-mate/workspaces/default/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时的落点（v14）。它是**一条落库的工作空间登记**（`workspaces` 表，`is_default=1`），不是"每会话一个目录"——同一台机器上所有未指定目录的会话共享它。目录由装配期建立（`<MATE_WORKSPACE_DIR>/default`），**只在登记表为空时**创建：删掉它之后不会自动重建 |
+| 工作区起始位置偏好 | 空（无偏好） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）。**它是"目录浏览从哪儿起步"的偏好，不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间）。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
 持久层开关：`MATE_STORE=sqlite|memory|auto`（空或 `auto` = 按库文件定：已存在且非空 → sqlite，
 否则 memory）。**非法值启动即报错**并列出合法取值——不静默回落 auto，否则一个错字就可能悄悄
@@ -72,31 +72,40 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 
 会话工作空间 = 该会话的 ACP `cwd`，**创建时定稿、之后不可变**（要换目录就新开会话）。
 
-- **默认行为**：`POST /conversations` 不带 `cwd` → 平台在 `MATE_WORKSPACE_DIR` 下按会话 id
-  代建 `<id>/`，响应回 `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——
-  那会让所有会话共用一个沙箱边界（旧行为，已移除）。
-- **关闭代建**：`MATE_WORKSPACE_DIR` 设为空 / `off` / `disable` / `none` → 不带 `cwd` 的建会话
-  请求报 `workspace_required`（40001）。适合"目录必须由调用方显式指定"的受控部署。
-- **代建目录不自动清理**：v1 只记录权威标志（`conversations.workspace_temporary`），不做
-  TTL/回收——清理留待显式的 prune 能力，避免误删用户内容。磁盘敏感场景请把
-  `MATE_WORKSPACE_DIR` 指到受管卷，或关闭代建 + 由调用方指定目录。
+- **默认行为（v14 变更）**：`POST /conversations` 不带 `cwd`/`workspace_id` → 会话落在
+  **默认工作空间**（`<MATE_WORKSPACE_DIR>/default`，一条落库的登记），响应回
+  `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——那会让所有会话共用
+  一个沙箱边界（旧行为，已移除）。
+  > **v14 之前是按会话 id 代建独占目录**（`<MATE_WORKSPACE_DIR>/<会话id>/`）。现在不再这么做：
+  > 两个未指定目录的会话会**共享**默认工作空间，因此**能读到对方的文件**。要隔离就在新建时
+  > 选一个自己的目录（或 `POST /conversations` 传 `cwd`/`workspace_id`）。旧版本留下的
+  > `<会话id>/` 目录**不会被删**（删除用户数据不是升级该做的事），新会话也不再新增这类目录。
+  > 注意平台**不登记**它们在哪：迁移发生在配置装载之前（拿不到 `MATE_WORKSPACE_DIR`），
+  > 所以这件事没有可靠的机器可读出口——磁盘敏感的场景请自行按目录形状清理那些空目录。
+  > `meta.migration_notes_v14` 只如实记录迁移时的会话数与"没有创建任何登记行"。
+- **关闭代建**：`MATE_WORKSPACE_DIR` 设为空 / `off` / `disable` / `none` → 不带
+  `cwd`/`workspace_id` 的建会话请求报 `workspace_required`（40001）。适合"目录必须由调用方
+  显式指定"的受控部署。此时也**没有**默认工作空间（`GET /workspaces` 的 `default_id` 为空）。
+- **工作空间登记表（v14）**：`GET /workspaces` 列出用户登记的工作空间（顺序、目录现状、
+  会话数），`POST` 登记一个已存在的目录（默认 get-or-create），`PATCH` 改名，`DELETE`
+  只删登记（**目录与会话一概不动**，其会话回到默认工作空间），`POST /workspaces/:id/move` 重排。
+  它要求 `MATE_STORE=sqlite`：memory 模式下读面返回空列表 + `writable:false`，写面 40501
+  `workspace_schema_read_only`（面板据此不渲染创建入口）。
+- **登记与建会话共用同一条校验**：`POST /workspaces` 走的是 `ValidateWorkspace`（绝对 / 存在 /
+  是目录 + 符号链接规范化），所以不会出现"能登记、建不了会话"。**这条校验里没有名录这道门**
+  （v14.5 起）：任何可用目录都能登记、都能当工作空间。
 - **目录浏览面**：`GET /workspaces/browse` 是 Web 端替代原生目录选择器的必要能力（只列目录，
-  不列文件）。**未配 `MATE_WORKSPACE_ROOTS` 时可枚举任意可读目录**——同机单操作员这样最省事，
-  但对外提供服务（反代/容器/多人）就等于开放整个文件系统的结构，务必做两件事：
-  1. 设 `MATE_TOKEN`（平台默认只绑回环，对外必须先鉴权）；
-  2. 配 `MATE_WORKSPACE_ROOTS`（如 `/workspaces`、`/srv/repos`），把可浏览与可创建的范围收在
-     挂载进来的工作区根上。白名单同时约束**显式 `cwd`** 与**目录浏览**（两者共用一条校验），
-     符号链接按真身判定，根内指向根外的链接不会被列出。**无需**把 `MATE_WORKSPACE_DIR` 写进
-     白名单：平台代建根由平台自己隐式并入生效名单（`GET /workspaces/browse` 回的 `roots` 里能看到它）。
-- **资料库 = 工作区根的一级子目录**（`GET /workspaces/libraries`）：把 `MATE_WORKSPACE_ROOTS`
-  指向资料挂载点（如 `/srv/docs`），其下的每个一级子目录就自动成为面板里的一个"资料库"——
-  **零新状态**（不存登记表，目录名即名字），用户选名字而不必面对绝对路径。两条附带规则：
-  平台自己的代建根（`workspace_dir`）**及其下的一切**会被排除——代建根恒在生效名单内，
-  它下面又全是按会话 id 命名的沙箱目录（`ses_xxx`），两者都是平台实现细节而非"策展内容"
-  （所以只把代建根配成白名单时，资料库列表是空的：那一层本来就不是资料）；
-  某个根暂时不可读（挂载掉了）只少显示一个，不让整页报错。
-  `GET /workspaces/files?path=` 提供"看资料"面（列文件 + 大小 + 修改时间），与只列目录的
-  `browse`（选工作空间）分工：**files 的条目不可作为 `cwd`**（文件不是合法工作空间）。
+  不列文件）。**它可以枚举任意可读目录**——这是产品口径（v14.5：选工作区是全系统），不是配置疏漏。
+  桌面入口更进一步：那个动作直接调**宿主原生选择器**（`__MATE_DESKTOP__.native.pickDirectory`），
+  与应用内浏览**互斥编排**（载体在走原生、不在走浏览；判定只有一份 `directoryPicker.ts`）。
+  对外提供服务（反代/容器/多人）时的实际防护只剩一层：
+  1. 设 `MATE_TOKEN`（平台默认只绑回环，对外必须先鉴权）——**这是唯一的一道闸**；
+  2. `MATE_WORKSPACE_ROOTS` 现在只影响"目录浏览从哪儿起步"，**不构成边界**：设了它，能选的目录也不会变少。
+     要真正限制可写范围，请用运行用户（容器 / 系统账号）的文件权限来收。
+  符号链接按真身判定（`entries` 与 `files` 都跟随真身取属性）。
+- **"看资料"面**：`GET /workspaces/files?path=` 列文件 + 大小 + 修改时间，与只列目录的 `browse`
+  （选工作空间）分工：**files 的条目不可作为 `cwd`**（文件不是合法工作空间）。
+  旧的 `GET /workspaces/libraries`（资料库 = 名录下的一级子目录）已随名录语义一并删除。
 - **容器化部署的两个硬要求**：① `MATE_WORKSPACE_DIR` 必须落在**可写挂载**上（默认
   `<数据目录>/workspaces`，即 `~/.ark-mate/workspaces`；容器里若 `HOME` 不在卷上，代建目录会写进
   可写层，容器重建即丢）；② 能选的工作空间只能是**容器挂载视图内**的目录——宿主机目录要当工作
@@ -105,13 +114,14 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 - **已知限制**：平台注册表 MCP 随 `session/new` 下发，其**相对路径参数仍以 agent 进程的 cwd
   解析**（serve 进程目录），而非会话工作空间。需要工作空间相对路径的 MCP 请写绝对路径。
 
-### 2.2.2 白名单的设置面（面板可改）与安全权衡
+### 2.2.2 起始位置偏好的设置面（面板可改）
 
-`GET · PUT /settings/workspace` 让面板直接查看/改写工作区根白名单，不必再登机器改环境变量。
+`GET · PUT /settings/workspace` 让面板直接查看/改写**工作区起始位置偏好**，不必再登机器改环境变量。
+**它不是安全边界**（见上一节）：这份名单只决定目录浏览从哪儿起步、以及面板里的快捷入口。
 
 - **写在哪**：`<配置目录>/config.json` 的 `workspace_roots` 键（默认 `~/.ark-mate/config/config.json`）。
   写回是 read-modify-write + 原子替换：文件里其它键原样保留，写的是 JSON 数组（含逗号的路径也能
-  原样往返），空名单 = 删掉该键（回到"不限制"）。**没有第二份 settings 文件**——白名单只应有一个事实源。
+  原样往返），空名单 = 删掉该键（回到"没有偏好"）。**没有第二份 settings 文件**——它只应有一个事实源。
 - **写不进去的时候**（这正是以前最容易踩的坑：面板显示保存成功、重启后被覆盖）：
   `config.json` 之上还有 env 文件、进程 `MATE_*`、CLI flag 三层，任一层设过该键，写配置文件都无效。
   所以接口**拒绝写**并回 `settings_locked`，同时 GET 回 `locked_by`（指出是哪个来源锁定：环境变量名 /
@@ -119,12 +129,12 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
   去掉。`settings_readonly` 则是另一种情况：该进程没有配置目录（如 `demo` 冒烟进程），不落盘。
 - **写入的校验比配置文件严**：面板设的每一条都要求「绝对路径 + 存在 + 是目录」（配置文件只校验绝对路径，
   允许挂载晚于进程出现）。交互式设置的反馈必须在当下给——否则保存成功、下次进面板就是错误页。
-- **影响面**：只约束**新**的显式 `cwd` 与目录浏览；已建会话的 `cwd` 创建即定稿，平台不回头否决旧会话
-  （旧会话仍可续聊，只是不再作为「最近目录/资料库」候选被推荐，因为点了必被拒）。
-- **安全权衡（务必读）**：这条接口让面板可以放宽自己的边界，所以对能调到它的人来说，白名单是
-  "默认视图"而不是"边界"——**防护等级 = `MATE_TOKEN`**。对外提供服务时：① 设 `MATE_TOKEN`；
-  ② 若要真正锁死，就在**进程环境变量**里设 `MATE_WORKSPACE_ROOTS`（接口随即变只读，
-  `mate config` 也会打印 `面板设置 只读（由该来源锁定）`）。
+- **影响面**：只影响"目录浏览从哪儿起步"与面板里的快捷入口列表。已建会话的 `cwd` 创建即定稿，
+  平台不回头否决；目录浏览与建会话都不因它被拒。
+- **防护等级（务必读）**：能调到这条接口的人可以改偏好，但那已经无关紧要——**真正的闸只有
+  `MATE_TOKEN`**（以及运行用户的文件权限）。对外提供服务时请设 `MATE_TOKEN`；
+  `MATE_WORKSPACE_ROOTS` 设在**进程环境变量**里仍会让面板变只读（`mate config` 会打印
+  `面板设置 只读（由该来源锁定）`），但那只锁住"改偏好"，不锁可访问的目录范围。
 
 ### 2.3 环境变量（全部来自 `backend/pkg/config/config.go`）
 
@@ -141,7 +151,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
 | `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`dsh:skill`（旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `MATE_WORKSPACE_DIR` | `~/.ark-mate/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
-| `MATE_WORKSPACE_ROOTS` | 空（不限制） | 允许作为工作空间的根目录白名单（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。非空时**显式 `cwd` 与目录浏览都只在根内**：越界报 `workspace_outside_roots`；浏览的「上级」到根为止；家目录不在根内则不返回该入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写（旧版本要求代建根必须在白名单内，否则启动失败——该约束已取消）。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
+| `MATE_WORKSPACE_ROOTS` | 空（无偏好） | **工作区起始位置偏好**（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。**它不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间，不再有 `workspace_outside_roots` 这类拒绝）：这份名单只决定目录浏览从哪儿起步、以及面板里列哪些快捷入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `MATE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
 | `MATE_PERMISSION_TIMEOUT` | `30m` | 挂起权限自动拒绝超时 |
 | `MATE_ELICITATION_TIMEOUT` | `30m` | 挂起结构化提问自动取消超时 |
@@ -189,7 +199,7 @@ curl -s -X POST http://127.0.0.1:10098/v1/mate/automations/preview \
 
 `config.json` 里多值键（`workspace_roots`、`projection_dirs`）可以写成 **JSON 数组**，
 也可以照旧写成逗号分隔字符串；单值键写数组会报错。数组不是语法糖：路径里含逗号时只有数组
-能表达，而面板保存白名单用的就是数组形式（见 §2.2.2）。
+能表达，而面板保存起始位置偏好用的就是数组形式（见 §2.2.2）。
 
 同目录可选 `runtimes.json`（A5）：远程 runtime 声明数组
 `[{"id","name","transport":"ws|http","endpoint","headers"}]`，启动时注册进 runtime 注册表，
@@ -348,7 +358,7 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   `--target mate-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。两个开关同时关也失败。
 - `MATE_RUNTIME` 只做**词法**校验（`[a-z0-9][a-z0-9_-]*`，取值拼错 → 构建即失败）；id 是否存在
   交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
-  构建期写不出白名单）。
+  构建期写不出起始位置偏好）。
 - 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
   模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
@@ -386,7 +396,7 @@ docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
 curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 ```
 
-compose 的全部可调变量（端口/令牌/工作区白名单/镜像形态/镜像站）都有默认值，模板见仓库根
+compose 的全部可调变量（端口/令牌/工作区起始位置/镜像形态/镜像站）都有默认值，模板见仓库根
 `.env.example`：`cp .env.example .env` 后放开需要的行即可。**但 `.env` 不只 compose 读——`dsh`
 底座自己也会读它**（真实运行时读「调用目录」的 `.env`），而 `DSH_VERSION` 属于它的保留键
 （`DSH_` 前缀，另有 49 个固定名单与 `XDG_`/`DYLD_`/`BASH_FUNC_` 四个前缀）：写进 `.env` 会让
@@ -429,10 +439,11 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
      ark-mate:local
    ```
 
-   `MATE_WORKSPACE_ROOTS`/`MATE_WORKSPACE_DIR` 一起给：白名单画的是**用户目录**的边界，
+   `MATE_WORKSPACE_ROOTS`/`MATE_WORKSPACE_DIR` 一起给：起始位置偏好指向**用户目录**（方便浏览），
    代建根（`/workspaces/.mate-tmp`）由平台自动并入生效名单，**不必**手写进去（§2.2.1）。
-   这两项都在进程 env 里给还有个副作用：面板「设置」页的白名单随之变只读（§2.2.2），
-   要在面板里维护白名单就别在 env 里设 `MATE_WORKSPACE_ROOTS`。
+   这两项都在进程 env 里给还有个副作用：面板「设置」页的起始位置随之变只读（§2.2.2），
+   要在面板里维护它就别在 env 里设 `MATE_WORKSPACE_ROOTS`。
+   注意它**不再是边界**：容器里能选到的目录由挂载视图与运行用户权限决定，不由这份名单决定。
    bind mount 的写权限按宿主 uid 判定，与容器内 10001 不一致时用 `--build-arg MATE_UID=$(id -u)` 重建。
    对外暴露端口（反代 / 跨机 / 多人）**先设 `MATE_TOKEN`**，否则等于把控制面与整个挂载视图开放出去（§2.1）。
 
@@ -596,7 +607,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
 | 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
 | 容器里 `-p` 映射了端口但面板打不开 | 容器内必须 `MATE_ADDR=0.0.0.0:10001`（镜像已默认）；`MATE_ADDR` 改了端口时 `-p` 与 HEALTHCHECK 一并跟（后者从该变量现取） |
-| 容器里建会话报 `workspace_outside_roots` | 工作空间只能是挂载视图内的路径：`-v 宿主机目录:容器内路径`，会话 `cwd` 用容器内路径；配了 `MATE_WORKSPACE_ROOTS` 时 `MATE_WORKSPACE_DIR` 也要落在白名单内（否则启动即失败） |
+| 容器里建会话报 `workspace_invalid`（路径不存在 / 不是目录） | 工作空间只能是挂载视图内的路径：`-v 宿主机目录:容器内路径`，会话 `cwd` 用**容器内路径**（agent 也在同一容器内，故这才是对 agent 正确的那个路径）。v14.5 起不再有"越界"这类拒绝，剩下的只有"这个路径在容器里根本不存在" |
 | 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含 dsh/opencode → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
 | `docker build` 卡在拉基础镜像 / `go mod download` 超时 | 受限网络用 §4.3 的 build-arg（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`）整组覆盖 |
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target mate-runtimes`（或 `make image/runtimes`），不做静默忽略 |

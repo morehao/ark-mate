@@ -59,6 +59,8 @@ type (
 	McpServerDefinition = model.McpServerDefinition
 	// CapabilityRevision 能力定义变更审计行（seq 单调 = 代际 rev 的来源）。
 	CapabilityRevision = model.CapabilityRevision
+	// Workspace 工作空间登记行（v14；登记项 = 规范化目录 + 展示名 + 顺序）。
+	Workspace = model.Workspace
 )
 
 // 常见错误。
@@ -95,6 +97,9 @@ type Store struct {
 	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
 	providers *dao.ProviderDao
 	models    *dao.ModelDao
+
+	// 工作空间登记（v14）：用户的工作目录这条线的持久身份。
+	workspaces *dao.WorkspaceDao
 }
 
 // Open 打开（必要时创建）SQLite 库并自动迁移到最新 schema。
@@ -138,6 +143,8 @@ func New(db *gorm.DB) *Store {
 
 		providers: dao.NewProviderDao(getDB),
 		models:    dao.NewModelDao(getDB),
+
+		workspaces: dao.NewWorkspaceDao(getDB),
 	}
 }
 
