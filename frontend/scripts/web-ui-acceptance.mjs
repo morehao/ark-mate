@@ -23,7 +23,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +39,14 @@ const SHOT_DIR = process.env.SHOT_DIR ?? join(REPO_ROOT, '.dsh/docs/notes/2026-0
 const PROFILE = join(tmpdir(), `mate-ui-accept-${process.pid}`)
 const SKILLS = { applicable: 'ui-verify-oc', inapplicable: 'ui-verify-dsh' }
 const AUTO_ID = 'ui-verify-daily'
+/**
+ * 目录浏览对话框场景的夹具目录名（在 `mkdtempSync(tmpdir()/mate-wsdir-)` 下自建自清）。
+ *
+ * 为什么夹具必须长在**临时目录**里：这个场景会经服务端真建一个目录（`POST /workspaces/dirs`），
+ * 而它是整个验收里唯一往磁盘写新文件的动作。临时目录保证"最坏情况也只弄脏自己造的那棵树"
+ * （本机隔离纪律：开发期脚本绝不碰用户自己的目录）。
+ */
+const WSDIR = { keep: 'ui-verify-keep', created: 'ui-verify-created', hidden: '.ui-verify-hidden', file: 'notes.md' }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -840,6 +849,154 @@ async function setDraft(page, text) {
 
 
 // ————————————————————————————————————————————————————————————————
+// v14.3 目录浏览对话框（对齐 dsh 的 DirectoryBrowser）——真 Chrome + 真核 + 真文件系统。
+//
+// 覆盖的判据（设计 §5 的 G1/G2/G3），逐条：
+//   ① 打开是**对话框**，头部是**面包屑**且白名单下从最近的根起（根外的祖先名字不该出现在界面上）；
+//   ② 路径一行给**绝对路径全文**（面包屑会被长路径挤到只剩尾段，全文才是"我在磁盘哪儿"的答案）；
+//   ③ 点一行 → **双栏**：该行高亮、右栏列出它的子目录（Miller 视图）；
+//   ④ 「显示隐藏文件」是开关：打开出现隐藏目录、关掉消失（服务端按 `hidden` 过滤）；
+//   ⑤ 「新建文件夹」经 `POST /workspaces/dirs` **真建出目录**，并落到该层选中它；
+//   ⑥ 确认动作（「加入白名单」）把**选中的那个目录**交给调用方，保存后服务端 configured 里真有它
+//      ——即"选目录"这条链路的写面闭环。
+//
+// 夹具（自建自清，全部在 `mkdtempSync(tmpdir())` 下）：场景开始时把 `MATE_WORKSPACE_ROOTS` 临时设成
+// 夹具根，结束时**还原**（先备份、finally 恢复）——白名单是这台机器上真核的配置，借了必须还。
+//
+// 为什么值得单列一个场景：这一节的价值全在"界面真的长出来了"——面包屑 / 双栏 / 开关 / 新建文件夹
+// 四样都是 REST 冒烟看不出的形态；而「新建文件夹」还是全仓唯一往磁盘写新文件的界面动作。
+//
+// **跑之前要在核的进程环境里给一个 `SSH_CONNECTION`**（如 `SSH_CONNECTION=1 pnpm ...`）：宿主选择器
+// 的判定是"绑回环 + 非 SSH + 有显示会话"，而验收要在**应用内浏览**那一态上跑（系统面板需要真人回答，
+// 自动跑不了）。给了这个键，判定确定性地落在 browse 上，第 ⑦ 步顺带把它钉住。
+async function scenarioWorkspaceDir(browser) {
+  section('v14.3 目录浏览对话框（面包屑 / Miller 双栏 / 隐藏开关 / 新建文件夹 / 白名单闭环）')
+
+  // realpath 一次：macOS 上 /var 与 /private/var 是同一目录，而服务端一律回**真身**路径——
+  // 不解析的话，下面每一条"路径相等"的断言都会因为写法差异而假红。
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'mate-wsdir-')))
+  for (const d of [WSDIR.keep, join(WSDIR.keep, 'src'), WSDIR.hidden]) {
+    mkdirSync(join(fixture, d), { recursive: true })
+  }
+  writeFileSync(join(fixture, WSDIR.file), 'ui-verify\n')
+
+  const before = await api('GET', '/settings/workspace')
+  const previousRoots = before.json.data?.configured ?? []
+  const previousLocked = before.json.data?.locked_by ?? ''
+  if (previousLocked) {
+    check('白名单未被 env/flag 锁定（否则本场景无处借位）', false, `locked_by=${previousLocked}`)
+    rmSync(fixture, { recursive: true, force: true })
+    return {}
+  }
+
+  let page
+  try {
+    await api('PUT', '/settings/workspace', { roots: [fixture] })
+
+    page = await openPage(browser, `${WEB_URL}/`)
+    await page.waitFor(textExpr('设置'), { label: '左栏渲染' })
+    await page.click(btnExpr('设置'))
+    await page.waitFor(`return !!document.querySelector('.fg-setdlg')`, { label: '设置弹窗打开' })
+    await page.click(`[...document.querySelectorAll('.fg-setdlg-item')].find(b => (b.innerText||'').includes('通用'))`)
+    await page.waitFor(textExpr('工作区目录白名单'), { label: '通用那一节渲染' })
+    await sleep(500)
+    await page.shot('60-settings-general')
+
+    // ① 打开对话框（设置页的「浏览…」与新建会话的选择器共用同一份实现）
+    await page.click(btnExpr('浏览…'))
+    await page.waitFor(`return !!document.querySelector('.fg-ws-dlg')`, { label: '目录对话框打开' })
+    await sleep(900)
+    await page.shot('61-directory-dialog')
+
+    const pathLine = await page.evaluate(`return (document.querySelector('.fg-ws-dlg-path')||{}).innerText || ''`)
+    const crumbs = await page.evaluate(`return [...document.querySelectorAll('.fg-ws-crumb')].map(c => (c.innerText||'').trim())`)
+    check('起于偏好起点（路径一行 = 绝对路径全文）', pathLine === fixture, pathLine)
+    // v14.5：名录降级为"起点偏好"，面包屑**不再裁前缀**——给到文件系统根的完整祖先链。
+    check('面包屑是完整祖先链（首项是文件系统根）',
+      crumbs.length === fixture.split('/').length - 1 + 1 && crumbs[0] === '/' && crumbs[crumbs.length - 1] === basename(fixture),
+      JSON.stringify(crumbs))
+
+    // ② 单栏 + 只列非隐藏目录；文件只读展示
+    const rows0 = await page.evaluate(`return [...document.querySelectorAll('.fg-ws-col .fg-ws-item')].map(b => (b.innerText||'').trim())`)
+    check('单栏起步且隐藏目录不在列表里',
+      (await page.count('.fg-ws-col')) === 1 && !rows0.includes(WSDIR.hidden), JSON.stringify(rows0))
+    check('文件只读展示（不进可进入的行）', (await page.text()).includes(WSDIR.file), '')
+    // v14.5：偏好起点不再是"不许上去的边界"，所以「上级」在起点处**可用**。
+    check('起点处「上级」可用（名录不再是边界）',
+      await page.evaluate(`const b = [...document.querySelectorAll('.fg-ws-icon-btn')].find(x => x.title === '上级目录'); return !!b && !b.disabled`), '')
+
+    // ③ 点一行 → 双栏（该行高亮 + 右栏 = 它的 children）
+    const keepRow = `[...document.querySelectorAll('.fg-ws-col .fg-ws-item')].find(b => (b.innerText||'').includes(${JSON.stringify(WSDIR.keep)}))`
+    await page.click(keepRow)
+    await sleep(1000)
+    const cols = await page.evaluate(`return document.querySelectorAll('.fg-ws-col').length`)
+    const rightRows = await page.evaluate(
+      `const cols = document.querySelectorAll('.fg-ws-col'); if (!cols[1]) return []; return [].map.call(cols[1].querySelectorAll('.fg-ws-item'), (b) => (b.innerText||'').trim())`,
+    )
+    check('点一行后变双栏且该行高亮',
+      cols === 2 && (await page.evaluate(`return !!document.querySelector('.fg-ws-rowsel')`)), `cols=${cols}`)
+    check('右栏列出选中项的子目录', JSON.stringify(rightRows) === JSON.stringify(['src']), JSON.stringify(rightRows))
+    await page.shot('62-two-pane')
+
+    // ④ 隐藏项开关（两向）
+    await page.click(q('.fg-ws-toggle'))
+    await sleep(1000)
+    check('打开「显示隐藏文件」后隐藏目录出现', (await page.text()).includes(WSDIR.hidden), '')
+    await page.shot('63-hidden-on')
+    await page.click(q('.fg-ws-toggle'))
+    await sleep(1000)
+    check('关掉后隐藏目录重新消失', !(await page.text()).includes(WSDIR.hidden), '')
+
+    // ⑤ 新建文件夹：建在**选中项**下，落点即它
+    await page.click(keepRow)
+    await sleep(900)
+    await page.click(btnExpr('新建文件夹'))
+    await page.waitFor(`return !!document.querySelector('.fg-ws-create input')`, { label: '新建文件夹对话框' })
+    await page.type(`document.querySelector('.fg-ws-create input')`, WSDIR.created)
+    await page.click(btnExpr('创建'))
+    await sleep(1600)
+    check('新建的目录出现在列表里（POST /workspaces/dirs 真的建出来了）',
+      (await page.text()).includes(WSDIR.created) && existsSync(join(fixture, WSDIR.keep, WSDIR.created)),
+      join(fixture, WSDIR.keep, WSDIR.created))
+    await page.shot('64-created')
+
+    // ⑥ 确认：加入起点偏好 → 保存 → 服务端 configured 里真有它
+    await page.click(btnExpr('加入起点'))
+    await sleep(1500)
+    check('「加入起点」把**选中的那个目录**放进待保存列表', (await page.text()).includes(WSDIR.created), '')
+    await page.shot('65-adopted')
+    // 重试是脚本对"切弹窗后首点可能落在未完成重渲染的那一帧"的容错，不是产品行为。
+    for (let i = 0; i < 3; i++) {
+      await page.click(btnExpr('保存起点'))
+      await sleep(1500)
+      const saved = await api('GET', '/settings/workspace')
+      if ((saved.json.data?.configured ?? []).some((p) => p.endsWith(WSDIR.created))) break
+    }
+    const saved = await api('GET', '/settings/workspace')
+    check('保存后服务端 configured 含新目录（设置面闭环）',
+      (saved.json.data?.configured ?? []).some((p) => p.endsWith(WSDIR.created)),
+      JSON.stringify(saved.json.data?.configured))
+    await page.shot('66-saved')
+    // ⑦ 两态编排的**判定源**（v14.5）：形态由服务端声明（`/capabilities` 的 `native-dialog`），
+    //    不是客户端嗅探。本场景的核是在 SSH 环境里起的（见文件头的 wsdir 说明），所以判定必然是
+    //    browse —— 上面六步走的正是"应用内浏览"那一态，这一步把"判定确实来自服务端"钉住。
+    const caps = (await api('GET', '/capabilities')).json.data
+    const nativeDialog = (caps?.capabilities ?? []).find((c) => c.id === 'native-dialog')
+    check('能力声明里 native-dialog 存在且有 browserFallback',
+      !!nativeDialog && nativeDialog.browserFallback === 'server:directory-browse',
+      JSON.stringify(nativeDialog))
+    check('SSH 会话下宿主判定为 browse（本机浏览器/桌面窗口之外不抬系统面板）',
+      nativeDialog?.available === false, `available=${nativeDialog?.available}`)
+
+  } finally {
+    // 环境还原 + 夹具清理：白名单先还回去（它是这台机器上真核的配置），再删临时树。
+    await api('PUT', '/settings/workspace', { roots: previousRoots })
+    rmSync(fixture, { recursive: true, force: true })
+  }
+  return { page }
+}
+
+// ————————————————————————————————————————————————————————————————
 // v11「设置 · 模型」那一节（A11）：两个平级的管理对象 + 生效状态列 + 文案纪律。
 //
 // 覆盖的判据（计划 A11，逐条）：
@@ -1243,7 +1400,14 @@ async function main() {
   )
 
   // `model` 是**可选场景**（默认不跑）：见文件头的用法注释——它还没在真 Chrome 上跑过一次。
-  const scenarios = { cap: scenarioCapability, auto: scenarioAutomation, cmd: scenarioCommands, model: scenarioSettingsModel }
+  const scenarios = {
+    cap: scenarioCapability,
+    auto: scenarioAutomation,
+    cmd: scenarioCommands,
+    wsdir: scenarioWorkspaceDir,
+    // `model` 是**可选场景**：见文件头用法注释与它自己的说明（选择器可能要按真实 DOM 微调）。
+    model: scenarioSettingsModel,
+  }
   const names = only.length ? only : ['cap', 'cmd', 'auto', 'model']
   for (const n of names) {
     if (!scenarios[n]) throw new Error(`未知场景: ${n}（可选 ${Object.keys(scenarios).join('/')}）`)

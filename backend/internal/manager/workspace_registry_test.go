@@ -115,15 +115,13 @@ func TestWorkspaceRegistryCreateValidatesLikeConversation(t *testing.T) {
 		t.Fatalf("登记结果应带规范化路径与 ok 状态: %+v", resp)
 	}
 
-	// 白名单外：拒绝，且**与建会话同一个 code 名**（workspace_outside_roots → 40001：
-	// ClassRequest 的默认落点，与 README 既有那一行的口径一致——它是"请求语义非法"，不是
-	// "参数形状错"）。
-	_, err = r.Svc.CreateRegisteredWorkspace(outside, "", false)
-	if err == nil {
-		t.Fatal("白名单外必须拒绝")
+	// 名录外：**照常登记**（v14.5：名录已降级为浏览起点偏好，不再拒绝任何可用目录）。
+	outsideResp, err := r.Svc.CreateRegisteredWorkspace(outside, "", false)
+	if err != nil {
+		t.Fatalf("名录外的可用目录应能登记（选工作区是全系统）: %v", err)
 	}
-	if c := gerrCode(t, err); c != code.InvalidRequest {
-		t.Fatalf("越界应为 40001，实际 %d", c)
+	if outsideResp.DirStatus != "ok" {
+		t.Fatalf("登记结果状态应为 ok: %+v", outsideResp)
 	}
 
 	// 相对路径 / 不存在 / 不是目录：三条都拒（与 ValidateWorkspace 同一套）。

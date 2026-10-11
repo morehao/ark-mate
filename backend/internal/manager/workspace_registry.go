@@ -103,7 +103,7 @@ func (s *Service) CreateRegisteredWorkspace(path, title string, strict bool) (*d
 	if s.st == nil {
 		return nil, workspaceReadOnlyError()
 	}
-	canonical, err := ValidateWorkspace(path, s.WorkspaceRoots())
+	canonical, err := ValidateWorkspace(path)
 	if err != nil {
 		return nil, code.FromError(err)
 	}

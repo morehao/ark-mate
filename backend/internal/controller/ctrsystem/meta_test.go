@@ -12,7 +12,7 @@ import (
 // rawMeta 取 `/meta` 的原始 JSON（要断言"字段在不在"，不能用 map 解完再查零值）。
 func rawMeta(t *testing.T, src ctrsystem.MetaSource) map[string]json.RawMessage {
 	t.Helper()
-	eng := newEngine(src)
+	eng := newEngine(src, false)
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/meta", nil))
 	if w.Code != 200 {

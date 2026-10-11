@@ -40,16 +40,25 @@ type stubSvc struct {
 	listWorkspaceID      string // 最近一次 ListConversations 的归属过滤参数（v14）
 	listArchivedOnly     bool   // 最近一次 ListConversations 的 archived 参数
 
-	browsePath    string // 最近一次 BrowseWorkspace 的 path 参数
-	browseHidden  bool   // 最近一次 BrowseWorkspace 的 hidden 参数
-	filesPath     string // 最近一次 ListWorkspaceFiles 的 path 参数
-	filesHidden   bool   // 最近一次 ListWorkspaceFiles 的 hidden 参数
-	librariesResp []dtoworkspace.WorkspaceLibraryResp
-	librariesErr  error
-	filesResp     *dtoworkspace.WorkspaceFilesResp
-	filesErr      error
-	browseResp    *dtoworkspace.WorkspaceBrowseResp
-	browseErr     error
+	browsePath   string // 最近一次 BrowseWorkspace 的 path 参数
+	browseHidden bool   // 最近一次 BrowseWorkspace 的 hidden 参数
+	filesPath    string // 最近一次 ListWorkspaceFiles 的 path 参数
+	filesHidden  bool   // 最近一次 ListWorkspaceFiles 的 hidden 参数
+	filesResp    *dtoworkspace.WorkspaceFilesResp
+	filesErr     error
+	browseResp   *dtoworkspace.WorkspaceBrowseResp
+	browseErr    error
+	// v14.3 目录浏览面的写面（「新建文件夹」）。
+	dirParent string // 最近一次 CreateWorkspaceDir 的 parent 参数
+	dirName   string // 最近一次 CreateWorkspaceDir 的 name 参数
+	dirResp   *dtoworkspace.WorkspaceDirCreateResp
+	dirErr    error
+	// v14.5 宿主原生目录选择器（桩只记参 + 透传；判定与 spawn 全在 manager）。
+	pickerMode    string
+	pickCalled    bool
+	pickPath      string
+	pickCancelled bool
+	pickErr       error
 	recentLimit   int // 最近一次 RecentWorkspaces 的 limit 参数
 	recentResp    []dtoworkspace.WorkspaceRecentResp
 	recentErr     error
@@ -528,19 +537,35 @@ func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspac
 	return s.browseResp, nil
 }
 
+func (s *stubSvc) NativePickerMode() string {
+	if s.pickerMode == "" {
+		return "browse"
+	}
+	return s.pickerMode
+}
+
+func (s *stubSvc) PickDirectoryHost(_ context.Context) (string, bool, error) {
+	s.pickCalled = true
+	if s.pickErr != nil {
+		return "", false, s.pickErr
+	}
+	return s.pickPath, s.pickCancelled, nil
+}
+
+func (s *stubSvc) CreateWorkspaceDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error) {
+	s.dirParent, s.dirName = parent, name
+	if s.dirErr != nil {
+		return nil, s.dirErr
+	}
+	return s.dirResp, nil
+}
+
 func (s *stubSvc) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
 	s.recentLimit = limit
 	if s.recentErr != nil {
 		return nil, s.recentErr
 	}
 	return s.recentResp, nil
-}
-
-func (s *stubSvc) WorkspaceLibraries() ([]dtoworkspace.WorkspaceLibraryResp, error) {
-	if s.librariesErr != nil {
-		return nil, s.librariesErr
-	}
-	return s.librariesResp, nil
 }
 
 func (s *stubSvc) ListWorkspaceFiles(path string, includeHidden bool) (*dtoworkspace.WorkspaceFilesResp, error) {
@@ -794,7 +819,7 @@ func newRestEngine(deps router.Ports) *gin.Engine {
 func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	snap := &dtoworkspace.WorkspaceSettingsResp{
 		Configured: []string{"/srv/docs"}, Roots: []string{"/srv/docs", "/home/u/.ark-mate/workspaces"},
-		Restricted: true, ProvisionDir: "/home/u/.ark-mate/workspaces", ProvisionIncluded: true,
+		PreferRoots: true, ProvisionDir: "/home/u/.ark-mate/workspaces", ProvisionIncluded: true,
 		Source: "config.json", Writable: true,
 	}
 	svc := &stubSvc{settingsResp: snap}
@@ -971,6 +996,53 @@ func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
 	}
 	if svc.registryID != "" {
 		t.Fatalf("Browse 不该走到带参 handler: registryID=%q", svc.registryID)
+	}
+}
+
+// TestWorkspaceCreateDirRoute 目录浏览面的写面（`POST /workspaces/dirs`，v14.3）。
+//
+// 两层守卫，缺一不可：
+//   - **路径不能被 `/workspaces/:id` 的写路由抢走**：本组同时有 `POST /workspaces/:id/move`，
+//     而 `dirs` 是静态段。抢走的坏法是静默的——「新建文件夹」突然报"未知工作空间"；
+//   - **参数原样到端口**：控制器在本轮没有任何领域判断（单段名 / 越界 / 已存在全在 manager），
+//     所以这里要证的只是透传；领域语义由 manager 的用例覆盖。
+func TestWorkspaceCreateDirRoute(t *testing.T) {
+	svc := &stubSvc{dirResp: &dtoworkspace.WorkspaceDirCreateResp{Path: "/Users/me/proj/新项目"}}
+	r := newRestEngine(stubDeps(svc))
+
+	env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/Users/me/proj","name":"新项目"}`)
+	if env.Code != 0 {
+		t.Fatalf("POST /workspaces/dirs 应成功: %+v", env)
+	}
+	if svc.dirParent != "/Users/me/proj" || svc.dirName != "新项目" {
+		t.Fatalf("CreateWorkspaceDir 未收到原样参数: parent=%q name=%q", svc.dirParent, svc.dirName)
+	}
+	if svc.registryID != "" {
+		t.Fatalf("不该走到带参 handler: registryID=%q", svc.registryID)
+	}
+}
+
+// TestWorkspaceCreateDirRejections 三种拒绝必须是三个不同的码：
+// 越界 40001 / 名字非法 40000 / 已存在 40901——它们的界面引导不同（改路径 vs 改名）。
+func TestWorkspaceCreateDirRejections(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code int
+	}{
+		{"名字非法", acl.NewError(acl.ClassRequest, "workspace_invalid", "目录名不能包含路径分隔符", nil), code.InvalidRequest},
+		{"名字非法", acl.NewError(acl.ClassRequest, "workspace_invalid", "名字非法", nil), code.InvalidRequest},
+		{"已存在", acl.NewError(acl.ClassLimit, "workspace_exists", "目录已存在", nil), code.Conflict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &stubSvc{dirErr: tc.err}
+			r := newRestEngine(stubDeps(svc))
+			env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/p","name":"x"}`)
+			if env.Code != tc.code {
+				t.Fatalf("期望 code=%d，得到 %+v", tc.code, env)
+			}
+		})
 	}
 }
 

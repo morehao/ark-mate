@@ -15,26 +15,35 @@ import (
 //   - POST   /workspaces/:id/move  重排（DOM insertBefore 语义，返回完整顺序）
 //
 // 派生视图（只读；Web 无原生目录选择器，故由控制面提供枚举）：
-//   - libraries = 根下的一级子目录（选名字）
-//   - browse    = 选工作空间（只列目录）
+//   - browse    = 选工作空间（只列目录，**全系统**）
 //   - files     = 看资料内容（列文件，条目不可当 cwd）
-//   - recent    = 最近用过但**还没登记**的目录（选择器的"最近使用（未登记）"一栏）
+//   - recent    = 最近用过但**还没登记**的目录（v14.3 起面板无消费者，保留为可用的只读视图）
+//
+// 选目录的**宿主能力**（v14.5，对齐 dsh 的 `directory-picker-native`）：
+//   - POST   /workspaces/pick-directory  抬一次宿主原生目录选择器（系统面板，核心进程 spawn）
+//     它让**本机浏览器入口**也能用上系统面板（面板由核心进程抬，与客户端形态无关）；
+//     宿主抬不起来时前端开应用内浏览（`/capabilities` 的 `native-dialog` 声明这件事）。
+//
+// 目录浏览面的写面（v14.3）：
+//   - POST   /workspaces/dirs   在已存在的目录下建子目录（目录选择器的「新建文件夹」）
+//     它也是写动作但**不落库**：只在磁盘上建一层目录。
 //
 // 设置面：GET 看生效名单/显式名单/来源与锁定态，PUT 全量替换（即"受限 ↔ 不限制"的开关）。
 // 被 env/flag 锁定或本进程无配置目录时 PUT 被拒（面板转只读）。
 //
 // 注意路由注册顺序：`/workspaces/:id` 这类带参路径与本组几条**固定字面量**路径
-// （libraries/browse/files/recent）在 gin 里可以共存（gin 的 radix 树对静态段优先），
+// （browse/files/recent/dirs）在 gin 里可以共存（gin 的 radix 树对静态段优先），
 // 但新增固定路径时要放在参数路径**之前**读一遍——顺序反了会让 `/workspaces/browse`
 // 被当成 id=browse 打到 Move/Rename 上。
 func registerWorkspace(v1 *gin.RouterGroup, ports Ports) {
 	ctr := ctrworkspace.NewWorkspaceCtr(ports.Workspace)
 
 	// 固定字面量路径（静态段）在前，参数路径在后。
-	v1.GET("/workspaces/libraries", ctr.Libraries)
 	v1.GET("/workspaces/browse", ctr.Browse)
 	v1.GET("/workspaces/files", ctr.Files)
 	v1.GET("/workspaces/recent", ctr.Recent)
+	v1.POST("/workspaces/dirs", ctr.CreateDir)
+	v1.POST("/workspaces/pick-directory", ctr.PickDirectory)
 
 	v1.GET("/workspaces", ctr.List)
 	v1.POST("/workspaces", ctr.Create)

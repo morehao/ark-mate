@@ -1,3 +1,4 @@
+import type { Capabilities } from '@ark-mate/desktop-contract'
 import { http } from '../request'
 import type {
   Agent,
@@ -67,11 +68,11 @@ import type {
   Workspace,
   WorkspaceBrowseResp,
   WorkspaceDeleteResp,
+  WorkspacePickResp,
+  WorkspaceDirCreateResp,
   WorkspaceFilesResp,
-  WorkspaceLibrary,
   WorkspaceListResp,
   WorkspaceMoveResp,
-  WorkspaceRecent,
   WorkspaceSettings,
 } from '@ark-mate/types'
 
@@ -139,6 +140,9 @@ export const listConversations = (archived = false, cwd?: string, workspaceId?: 
 /**
  * 浏览某绝对路径下的子目录（Web 无原生目录选择器，故由服务端提供只读枚举）。
  * `path` 缺省 = 服务进程家目录；只列目录，返回的 `entries[].path` 可直接作为建会话 cwd。
+ *
+ * v14.3：响应另带 `crumbs`（文件系统根 → 当前目录的祖先链，面板据此画面包屑，**不要**自己按
+ * 路径字符串切分）与 `truncated`（单层超上限时置位）。
  */
 export const browseWorkspaces = (path?: string, hidden = false): Promise<WorkspaceBrowseResp> => {
   const s = new URLSearchParams()
@@ -149,11 +153,13 @@ export const browseWorkspaces = (path?: string, hidden = false): Promise<Workspa
 }
 
 /**
- * 资料库列表（工作区根下的一级子目录，服务端零新状态）。
- * 未配 `MATE_WORKSPACE_ROOTS` 时返回空数组。
+ * 在某个**已存在**的目录下建一个子目录（目录浏览面的「新建文件夹」，v14.3）。
+ *
+ * `name` 必须是单段（服务端拒绝含 `/`、`\` 以及 `.` / `..`）；同名目录已存在 → 40901。
+ * 返回的是**规范化后**的新目录绝对路径，可直接当 cwd 或加入白名单——前端不要自己拼。
  */
-export const workspaceLibraries = (): Promise<WorkspaceLibrary[]> =>
-  http.get<WorkspaceLibrary[]>('/mate/workspaces/libraries')
+export const createWorkspaceDir = (parent: string, name: string): Promise<WorkspaceDirCreateResp> =>
+  http.post<WorkspaceDirCreateResp>('/mate/workspaces/dirs', { parent, name })
 
 /**
  * 列目录**内容**（文件 + 子目录，带大小/修改时间）——"看资料"面。
@@ -182,9 +188,25 @@ export const getWorkspaceSettings = (): Promise<WorkspaceSettings> =>
 export const updateWorkspaceSettings = (roots: string[]): Promise<WorkspaceSettings> =>
   http.put<WorkspaceSettings>('/mate/settings/workspace', { roots })
 
-/** 最近使用的工作空间（服务端从既有会话派生；排除平台代建的临时空间）。 */
-export const recentWorkspaces = (limit = 10): Promise<WorkspaceRecent[]> =>
-  http.get<WorkspaceRecent[]>(`/mate/workspaces/recent?limit=${limit}`)
+/**
+ * 抬一次**宿主原生**目录选择器（`POST /workspaces/pick-directory`）。
+ *
+ * 面板由**核心进程**抬起（macOS osascript / Linux zenity·kdialog），所以本机浏览器入口与桌面窗口
+ * 都能用到它。返回 `{cancelled:true}` 表示用户取消——**不是错误**，调用方静默收手。
+ * 宿主抬不起来时服务端回 `40501 native_pick_unsupported`（调用方应据能力声明提前分流，
+ * 这个错是兜底）。
+ */
+export const pickDirectoryHost = (): Promise<WorkspacePickResp> =>
+  http.post<WorkspacePickResp>('/mate/workspaces/pick-directory')
+
+/**
+ * 能力声明（`GET /capabilities`）：两个入口**同构**（id 集合与顺序一致），只有 `available` 不同。
+ *
+ * 形状取自 `@ark-mate/desktop-contract`（那份契约是声明面的**唯一真源**，前端类型不另抄一份）。
+ * 前端据此决定"这个部署有没有宿主原生选目录器"（`native-dialog`）——判定在宿主侧，不在客户端
+ * （本机浏览器也能用系统面板）。
+ */
+export const getCapabilities = (): Promise<Capabilities> => http.get<Capabilities>('/mate/capabilities')
 
 /** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
 export const conversationSearch = (q: string, limit = 30): Promise<ConversationSearchHit[]> => {

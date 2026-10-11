@@ -1,4 +1,4 @@
-// Package ctrworkspace 承载工作空间面控制器（目录枚举/最近使用/资料库/白名单设置）。
+// Package ctrworkspace 承载工作空间面控制器（目录枚举/建目录/最近使用/起始点偏好设置）。
 //
 // 控制器只依赖 internal/service/svc* 的窄端口，不感知领域实现；
 // 错误一律经 gincontext 落到统一响应信封（{code,requestID,msg,data}）。
@@ -15,11 +15,12 @@ import (
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
 
-// WorkspaceCtr 工作空间面控制器（目录枚举/最近使用/资料库/白名单设置）。
+// WorkspaceCtr 工作空间面控制器（目录枚举/建目录/最近使用/起始点偏好设置）。
 type WorkspaceCtr interface {
 	Browse(c *gin.Context)
+	CreateDir(c *gin.Context)
+	PickDirectory(c *gin.Context)
 	Recent(c *gin.Context)
-	Libraries(c *gin.Context)
 	Files(c *gin.Context)
 	Settings(c *gin.Context)
 	UpdateSettings(c *gin.Context)
@@ -34,7 +35,7 @@ type WorkspaceCtr interface {
 
 var _ WorkspaceCtr = (*workspaceCtr)(nil)
 
-// WorkspaceHandler 处理工作空间相关的只读 REST 请求（资料库 + 目录浏览 + 最近使用 + 目录内容）。
+// workspaceCtr 处理工作空间相关的只读 REST 请求（目录浏览 + 最近使用 + 目录内容）与目录创建。
 // 存在理由：Web 端没有 Electron 那样的原生目录选择器（AionUi 用 webFsPicker 替代），
 // 因此"选一个目录"必须由控制面提供枚举能力；且**只列目录**——工作空间必须是目录
 // （见 manager.ValidateWorkspace 的三条件）。
@@ -50,8 +51,9 @@ func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc) WorkspaceCtr {
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；
 // `hidden=true` 含隐藏目录）。
 //
-// 错误一律经 svc.RestErr 映射：越界的 path 必须回 `workspace_outside_roots`（40001），
-// 而不是一个笼统的 code=1——面板要据此告诉用户"这个目录不在允许范围内"，与"服务端坏了"是两种事。
+// 错误一律经 svc.RestErr 映射：路径不可用必须回 `workspace_invalid`（40001），
+// 而不是一个笼统的 code=1——面板要据此告诉用户"这个目录不存在/不是目录"，与"服务端坏了"是两种事。
+// v14.5 起不再有"越界"这一类拒绝（名录已降级为浏览起点偏好，选工作区是全系统）。
 func (h *workspaceCtr) Browse(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
@@ -61,6 +63,43 @@ func (h *workspaceCtr) Browse(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, resp)
+}
+
+// CreateDir 在某个已存在的目录下建一个子目录（`POST /workspaces/dirs`，目录浏览面的「新建文件夹」）。
+//
+// 两种拒绝要能分辨：名字非法（含分隔符 / "." / ".."）→ acl.ClassRequest 的既有投影(40001)；
+// 同名目录已存在 → workspace_exists(40901)。最后一种必须是 40901 而不是 40001：前者的处置是
+// "换个名字"，后者是"改参数"，界面上的引导（改名重试 vs 报错）不同。
+func (h *workspaceCtr) CreateDir(c *gin.Context) {
+	var req dtoworkspace.WorkspaceDirCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateWorkspaceDir(req.Parent, req.Name)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// PickDirectory 抬一次**宿主原生**目录选择器（`POST /workspaces/pick-directory`）。
+//
+// 为什么这个端点是 POST 而不是 GET：它有副作用（在用户屏幕上开一个系统面板），而且**不可缓存**。
+//
+// 三种结局各自可判定：选定 → `{path}`；取消 → `{cancelled:true}`（**不是错误**，前端静默收手）；
+// 宿主没有可用选择器 → `native_pick_unsupported`（前端回落应用内浏览）。
+//
+// 前端本不该在"能力声明说没有"时打到这里（`/capabilities` 的 `native-dialog` 就是干这个的），
+// 所以这个错是"声明与实际不一致"的兜底——按可判定错误回，而不是笼统 50000。
+func (h *workspaceCtr) PickDirectory(c *gin.Context) {
+	path, cancelled, err := h.svc.PickDirectoryHost(c.Request.Context())
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, dtoworkspace.WorkspacePickResp{Path: path, Cancelled: cancelled})
 }
 
 // Recent 返回最近使用过的工作空间（query `limit` 默认 10、上限 50）。
@@ -78,19 +117,6 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 		limit = n
 	}
 	list, err := h.svc.RecentWorkspaces(limit)
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	gincontext.Success(c, list)
-}
-
-// Libraries 返回资料库列表（工作区根下的一级子目录，只读）。
-//
-// 无参数：资料库的集合完全由 MATE_WORKSPACE_ROOTS + 磁盘决定，没有可调项——
-// 少一个参数就少一种"面板看到的和运维配的不一致"的可能。
-func (h *workspaceCtr) Libraries(c *gin.Context) {
-	list, err := h.svc.WorkspaceLibraries()
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -116,7 +142,7 @@ func (h *workspaceCtr) Files(c *gin.Context) {
 // Settings 返回工作区根白名单的设置快照（只读；面板「设置」页据此渲染可编辑列表）。
 //
 // 与 `/workspaces/browse` 返回的 roots 同源但**不同义**：browse 给的是生效名单（含平台代建根，
-// 供浏览面把根列成入口），这里额外区分"显式配置的"与"派生的"，否则面板无法表达"删掉这条"。
+// 供浏览面把它们列成快捷入口），这里额外区分"显式配置的"与"派生的"，否则面板无法表达"删掉这条"。
 func (h *workspaceCtr) Settings(c *gin.Context) {
 	resp, err := h.svc.WorkspaceSettings()
 	if err != nil {

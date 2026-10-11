@@ -62,9 +62,11 @@ type DefaultWorkspaceRef struct {
 // macOS 上 /var 与 /private/var 指向同一目录，不规范化就会把同一工作空间存成两个字符串，
 // 导致按工作空间分组与会话过滤出现重复项（AionUi 的 normalizeWatchPath 注释即此坑）。
 //
-// allowedRoots 非空时再收一道：路径必须落在某个允许的工作区根之内（见 withinRoots）。
-// 浏览面与创建面共用这个函数，所以白名单对两条路同时生效。
-func ValidateWorkspace(spec string, allowedRoots []string) (string, error) {
+// **v14.5 起这里没有"允许的工作区根"这道门了**（产品口径：选工作区是全系统）。`MATE_WORKSPACE_ROOTS`
+// 降级为**起始点偏好**——它只决定目录浏览从哪儿起步、以及面板里的根快捷入口，不再拒绝任何路径。
+// 于是"能登记/能建会话"只剩这三个与文件系统事实有关的条件；浏览面与创建面仍共用这一个函数
+// （"浏览得到、创建被拒"这类裂缝依然不会出现）。
+func ValidateWorkspace(spec string) (string, error) {
 	p := strings.TrimSpace(spec)
 	if p == "" {
 		return "", acl.NewError(acl.ClassRequest, "workspace_invalid", "工作空间路径不能为空", nil)
@@ -86,16 +88,12 @@ func ValidateWorkspace(spec string, allowedRoots []string) (string, error) {
 	if real, rerr := filepath.EvalSymlinks(p); rerr == nil {
 		resolved = real
 	}
-	// 白名单判定放在**规范化之后**：先解析真身再比较，否则根内一个指向外部的符号链接就是绕过通道。
-	if !withinRoots(resolved, allowedRoots) {
-		return "", workspaceOutsideRootsError(resolved, allowedRoots)
-	}
 	return resolved, nil
 }
 
 // ResolveWorkspace 解析建会话时应使用的 cwd。
 //
-//	spec 非空    → 校验后原样使用（Temporary=false；受 allowedRoots 约束）
+//	spec 非空    → 校验后原样使用（Temporary=false；v14.5 起只要路径可用，不受任何名单限制）
 //	spec 为空    → 落在**默认工作空间**（Temporary=true）
 //	spec 为空且没有默认工作空间 → 报 workspace_required
 //
@@ -110,9 +108,9 @@ func ValidateWorkspace(spec string, allowedRoots []string) (string, error) {
 // 默认工作空间的路径不再逐次校验 allowedRoots：传进来的就是**生效**名单
 // （`Service.WorkspaceRoots()`），而平台代建根已被隐式并入其中
 // （见 effectiveWorkspaceRootsLocked）——逐次重算只是重复劳动。
-func ResolveWorkspace(spec string, def *DefaultWorkspaceRef, allowedRoots []string) (WorkspaceResolution, error) {
+func ResolveWorkspace(spec string, def *DefaultWorkspaceRef) (WorkspaceResolution, error) {
 	if strings.TrimSpace(spec) != "" {
-		p, err := ValidateWorkspace(spec, allowedRoots)
+		p, err := ValidateWorkspace(spec)
 		if err != nil {
 			return WorkspaceResolution{}, err
 		}
@@ -129,14 +127,17 @@ func ResolveWorkspace(spec string, def *DefaultWorkspaceRef, allowedRoots []stri
 	return WorkspaceResolution{Path: dir, Temporary: true, WorkspaceID: def.ID}, nil
 }
 
-// withinRoots 判定 path 是否落在允许的工作区根之内（含根本身）。
+// withinRoots 判定 path 是否落在某个工作区根之内（含根本身）。
 //
-// 两道防线，缺一不可：
+// **v14.5 起它不再是"边界判定"**——选目录与建会话都不看它了。它现在只服务一处：
+// `WorkspaceLibraries` 的**策展过滤**（资料库 = 工作区根下的一级子目录，根外的东西不是资料库）。
+// 别把它当成"能不能用这个目录"的判据——那是 ValidateWorkspace 的事，而那里已经没有名录这道门。
+//
+// 两道防线，缺一不可（对一个**策展列表**同样重要）：
 //   - **逐段比较**（filepath.Rel）而不是字符串前缀：否则 /data/ws-evil 会被判成落在 /data/ws 之内；
-//   - **两侧都先解析真身**：path 由调用方规范化过，root 在这里解析一次，否则根内一个指向外部的
-//     符号链接（/data/ws/link -> /etc）就成了绕过白名单的通道。
+//   - **两侧都先解析真身**：否则根内一个指向外部的符号链接（/data/ws/link -> /etc）会被列成资料库。
 //
-// allowedRoots 为空 = 不限制（本机单操作员零配置的默认行为）。
+// allowedRoots 为空 = 没有策展面（本机单操作员零配置的默认行为）。
 func withinRoots(path string, allowedRoots []string) bool {
 	if len(allowedRoots) == 0 {
 		return true
@@ -178,17 +179,6 @@ func resolveRealPath(p string) string {
 		rest = filepath.Join(filepath.Base(cur), rest)
 		cur = parent
 	}
-}
-
-// workspaceOutsideRootsError 统一的越界错误（浏览面与创建面同一文案，运维一眼知道该改哪个配置）。
-//
-// 消息里带 `[workspace_outside_roots]` 是有意的（对齐 usage_stats_unsupported 的写法）：
-// restErr 只把 acl 的 Details 当消息透出，语义码本身不进信封，所以要让调用方能稳定识别这类
-// 拒绝（而不是去猜中文文案），就把码放进消息里。
-func workspaceOutsideRootsError(path string, allowedRoots []string) error {
-	return acl.NewError(acl.ClassRequest, "workspace_outside_roots",
-		fmt.Sprintf("[workspace_outside_roots] 工作空间 %s 不在允许的工作区根之内（MATE_WORKSPACE_ROOTS=%s）",
-			path, strings.Join(allowedRoots, ",")), nil)
 }
 
 // normalizeWorkspaceFilter 把「按工作空间过滤」的入参归一化到与会话 cwd 同一形态。

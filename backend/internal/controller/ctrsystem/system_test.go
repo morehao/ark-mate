@@ -11,15 +11,21 @@ import (
 )
 
 // newEngine 挂上系统面控制器（最小引擎：本包只关心传输形状）。
-func newEngine(meta ctrsystem.MetaSource) *gin.Engine {
+//
+// `nativeDialog` = 宿主能不能抬系统目录面板（v14.5 起由装配层注入的宿主事实给出）。
+func newEngine(meta ctrsystem.MetaSource, nativeDialog bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	eng := gin.New()
 	// 控制器吃的是 provider（每次都渲染当前状态）；测试里固定返回同一份值。
-	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource { return meta })
+	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource { return meta }, func() bool { return nativeDialog })
 	eng.GET("/meta", ctr.GetMeta)
 	eng.GET("/capabilities", ctr.GetCapabilities)
 	return eng
 }
+
+// hostResolvedCapability 该能力的可用性由**宿主事实**决定，而不是"客户端是不是桌面壳"。
+// 目前只有 native-dialog 一条（面板是核心进程抬的，本机浏览器也能用）。
+func hostResolvedCapability(id string) bool { return id == "native-dialog" }
 
 // get 发一次请求并解出信封里的 data。
 func get(t *testing.T, eng *gin.Engine, path string, headers map[string]string) map[string]any {
@@ -48,7 +54,7 @@ func get(t *testing.T, eng *gin.Engine, path string, headers map[string]string) 
 
 // TestMetaShape /meta 的字段契约（设计 §6.7 / 计划 §5 M1-7）。
 func TestMetaShape(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/mate-home"})
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "1.2.3", APIContract: "v1", Home: "/tmp/mate-home"}, false)
 	d := get(t, eng, "/meta", nil)
 
 	for _, k := range []string{"coreVersion", "webBuildId", "apiContract", "home", "payloads"} {
@@ -87,7 +93,7 @@ func TestMetaShape(t *testing.T) {
 //
 // 这是 V3/V18 的落点：声明面是两端的机器判据，因此"顺序"也在契约里（前端可以按下标渲染）。
 func TestCapabilitiesPerEntry(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"})
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, true)
 	browser := get(t, eng, "/capabilities", nil)
 	desktop := get(t, eng, "/capabilities", map[string]string{"X-Mate-Carrier": "desktop"})
 
@@ -98,7 +104,8 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 		"http:download", "url:direct", "deployer:replace-binary",
 	}
 
-	check := func(name string, d map[string]any, wantAvailable bool, wantSource bool) {
+	// wantAvailable 是"非宿主判定能力"的期望；native-dialog 单独按宿主事实断言。
+	check := func(name string, d map[string]any, wantAvailable bool, wantSource bool, nativeDialog bool) {
 		entries, _ := d["entries"].(map[string]any)
 		if entries["browser"] != true {
 			t.Errorf("%s：entries.browser 应为 true（核心始终提供同一套 REST 契约）", name)
@@ -115,8 +122,12 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 			if e["id"] != wantIDs[i] {
 				t.Errorf("%s：第 %d 条 id = %v，期望 %q（顺序也是契约）", name, i, e["id"], wantIDs[i])
 			}
-			if e["available"] != wantAvailable {
-				t.Errorf("%s：%s 的 available 应为 %v，实际 %v", name, wantIDs[i], wantAvailable, e["available"])
+			want := wantAvailable
+			if hostResolvedCapability(wantIDs[i]) {
+				want = nativeDialog
+			}
+			if e["available"] != want {
+				t.Errorf("%s：%s 的 available 应为 %v，实际 %v", name, wantIDs[i], want, e["available"])
 			}
 			if e["browserFallback"] != wantFallbacks[i] {
 				t.Errorf("%s：%s 的 browserFallback = %v，期望 %q", name, wantIDs[i], e["browserFallback"], wantFallbacks[i])
@@ -128,8 +139,16 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 		}
 	}
 
-	check("浏览器入口", browser, false, false)
-	check("桌面入口", desktop, true, true)
+	// 宿主**能**抬面板：native-dialog 两个入口都 true——这正是"本机浏览器也能用系统面板"，
+	// 也是与参照实现对齐的那一点（判定在宿主侧，不在客户端形态）。
+	check("浏览器入口（宿主可抬面板）", browser, false, false, true)
+	check("桌面入口（宿主可抬面板）", desktop, true, true, true)
+
+	// 宿主**抬不起来**（远程 / SSH / 无显示会话）：两个入口都退化成 browse，
+	// 其余能力仍按入口形态判——两类判据互不干扰。
+	engNo := newEngine(ctrsystem.MetaSource{CoreVersion: "test"}, false)
+	check("浏览器入口（宿主抬不起来）", get(t, engNo, "/capabilities", nil), false, false, false)
+	check("桌面入口（宿主抬不起来）", get(t, engNo, "/capabilities", map[string]string{"X-Mate-Carrier": "desktop"}), true, true, false)
 
 	// 同构断言：两次响应的 id 序列必须逐字相同。
 	idsOf := func(d map[string]any) []string {
@@ -154,7 +173,7 @@ func TestCapabilitiesPerEntry(t *testing.T) {
 
 // TestCarrierHeaderCaseInsensitive 入口标识大小写不敏感（HTTP 头值的大小写不该决定能力面）。
 func TestCarrierHeaderCaseInsensitive(t *testing.T) {
-	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"})
+	eng := newEngine(ctrsystem.MetaSource{CoreVersion: "dev", APIContract: "v1"}, false)
 	d := get(t, eng, "/capabilities", map[string]string{"X-Mate-Carrier": "Desktop"})
 	entries, _ := d["entries"].(map[string]any)
 	if entries["desktop"] != true {

@@ -26,9 +26,9 @@ var notFoundCodes = map[string]bool{
 	"model_not_found": true,
 	// 工作空间登记（v14）：PATCH/DELETE/`:id/move` 打到不存在的登记。
 	//
-	// 与 `workspace_invalid` / `workspace_outside_roots` **刻意不同码**：那两个是"你给的路径
-	// 不能用"（改参数还有救），而这一个是"这个 id 没有对象"（再改参数也不会有结果，得先刷新
-	// 列表）——前端要据 40401 引导刷新，而不是引导改路径。
+	// 与 `workspace_invalid` **刻意不同码**：那个是"你给的路径不能用"（改参数还有救），
+	// 而这一个是"这个 id 没有对象"（再改参数也不会有结果，得先刷新列表）——前端要据 40401
+	// 引导刷新，而不是引导改路径。
 	"workspace_not_found": true,
 }
 

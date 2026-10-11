@@ -1,8 +1,12 @@
-// Package svcworkspace 定义工作空间面的服务端口：目录枚举、
-// 最近使用派生、资料库与工作区根白名单的设置面。
+// Package svcworkspace 定义工作空间面的服务端口：目录枚举与创建、
+// 最近使用派生、以及**起始点偏好**的设置面。
 package svcworkspace
 
-import "github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+import (
+	"context"
+
+	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
+)
 
 // WorkspaceSvc 工作空间面的服务端口。
 //
@@ -12,13 +16,27 @@ type WorkspaceSvc interface {
 	// Web 端无原生目录选择器，故由控制面提供枚举能力。
 	BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error)
 
+	// NativePickerMode 宿主该用哪一套选目录交互：native（能抬系统面板）/ browse（应用内浏览）。
+	//
+	// 判据是宿主事实（绑回环 / 非 SSH / 有显示会话），**与客户端形态无关**——这是"完全参照
+	// 参照实现"的那条：本机浏览器打开控制台也能用上系统面板（见 internal/manager/workspace_picker.go）。
+	NativePickerMode() string
+
+	// PickDirectoryHost 抬一次**宿主原生**目录选择器（系统面板）。
+	//
+	// 返回 (path, false) = 选定；( "", true) = 取消（或超时收回，取消不是错误）；
+	// 宿主没有可用选择器 → `native_pick_unsupported`（可判定，前端据此回落应用内浏览）。
+	PickDirectoryHost(ctx context.Context) (string, bool, error)
+
+	// CreateWorkspaceDir 在某个已存在的目录下建一个子目录（目录浏览面的「新建文件夹」）。
+	//
+	// 父目录走与建会话同一条校验（ValidateWorkspace + 根白名单），名字限单段；
+	// 同名目录已存在 → workspace_exists(40901)，绝不静默复用。
+	CreateWorkspaceDir(parent, name string) (*dtoworkspace.WorkspaceDirCreateResp, error)
+
 	// RecentWorkspaces 返回最近使用过的工作空间（**从既有会话派生**，不额外维护状态：
 	// 排除平台代建的临时空间，按最近使用倒序去重，供选择器"最近"一栏）。
 	RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error)
-
-	// WorkspaceLibraries 返回资料库列表（工作区根下的一级子目录，零新状态：
-	// 目录名即资料库名，让资料/文档场景的用户不必面对绝对路径）。
-	WorkspaceLibraries() ([]dtoworkspace.WorkspaceLibraryResp, error)
 
 	// ListWorkspaceFiles 列出某目录的**内容**（文件 + 子目录，只读；与 BrowseWorkspace 分工：
 	// 那个用于"选工作空间"，这个用于"看资料"）。

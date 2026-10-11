@@ -50,9 +50,9 @@ type ConversationRec struct {
 	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
 	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
 	WorkspaceID string
-	Provider           string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
-	Model              string // 会话级模型 id（空 = 底座默认）
-	RuntimeHint        string // 最近/首选 runtime（执行提示，非身份）
+	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
+	Model       string // 会话级模型 id（空 = 底座默认）
+	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
 	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
 	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
 	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
@@ -104,6 +104,9 @@ type Service struct {
 	// 这里存的是**显式配置**的那一份；对外生效名单还要并上代建根（effectiveWorkspaceRootsLocked）。
 	// 见 SetWorkspacePolicy / withinRoots。
 	workspaceRoots []string
+	// bindAddr 本进程**实际监听**的地址（装配期 net.Listen 之后注入）。
+	// 用途只有一个：判定"宿主能不能抬起系统目录面板"（绑回环才可能，见 workspace_picker.go）。
+	bindAddr string
 	// workspaceRootsStore 白名单的持久化端口（面板 PUT 时写回配置目录；nil = 只读）。
 	// 端口而非直接实现：manager 不碰配置文件，优先级/锁定判定由 infra 报告（见 workspace_settings.go）。
 	workspaceRootsStore WorkspaceRootsStore

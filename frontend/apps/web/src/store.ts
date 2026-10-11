@@ -446,11 +446,11 @@ export interface MateActions {
   /**
    * 登记一个目录为工作空间（**get-or-create**：已登记则返回既有那一行并选中它）。
    *
-   * 这是「添加工作空间…」唯一的落点：选目录那一半在 `WorkspaceBrowser`（它只负责挑路径）。
+   * 这是「添加工作空间…」唯一的落点：选目录那一半在 `DirectoryBrowser`（它只负责挑路径）。
    * 成功后刷新登记表——本地插入会让顺序与服务端不一致（新条目在尾部，那是服务端才知道的事）。
    *
-   * **失败会抛**（不吞、也不自己弹提示）：调用方需要把原因就地显示在自己的弹层里
-   * （设计 §5.2 状态 E），一句话的全局 toast 撑不住"用户当前浏览位置还在、换个目录即可"这条交互。
+   * **失败会抛**（不吞、也不自己弹提示）：调用方需要把原因呈现给用户。v14.3 起目录对话框是**模态**的，
+   * 所以调用方用 toast（旧的内嵌弹层那种"留在原地换个目录"的交互已不存在）。
    */
   createWorkspace: (path: string, title?: string) => Promise<Workspace>
   /** 改名（不改身份）。 */
@@ -468,13 +468,15 @@ export interface MateActions {
    * 新建会话并起首轮。
    *
    * `workspaceId` = 选中的工作空间登记 id（v14）；null/省略 = 落在**默认工作空间**。
-   * 另可传 `cwd` 走"直接用绝对路径"这条老路（选择器里「输入路径…」用它，不落登记）。
    * 工作空间创建时定稿、之后不可变（它是底座 ACP session 的 cwd 与 workspace-write 的边界）。
+   *
+   * v14.3 起这里只收 id：面板的选择面收敛为"登记项 + 添加工作空间"之后，前端不再有"直接指定
+   * 绝对路径"的入口（接口层的 `cwd` 仍然有效，那是对外契约，不因面板收敛而改变）。
    */
   createAndRun: (
     prompt: string,
     model?: ModelRef,
-    workspace?: { id?: string | null; cwd?: string | null } | null,
+    workspaceId?: string | null,
     capabilities?: { skills?: string[]; mcps?: string[] },
   ) => Promise<string | undefined>
   /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
@@ -838,15 +840,13 @@ export const useMate = create<MateStore>((set, get) => {
 
     clearAnchor: () => set({ anchorSeq: null }),
 
-    createAndRun: async (prompt, model, workspace, capabilities) => {
+    createAndRun: async (prompt, model, workspaceId, capabilities) => {
       try {
         const resp = await createConversation({
           prompt,
           model: model?.modelID,
-          // 两个键都**不外发空串**：缺省才是「落在默认工作空间」语义（后端把空/缺省当作未指定）。
-          // 同时给出时后端会校验一致性（不一致 → 40001 workspace_conflict），这里不做判断。
-          workspace_id: workspace?.id ?? undefined,
-          cwd: workspace?.cwd ?? undefined,
+          // **不外发空串**：缺省才是「落在默认工作空间」语义（后端把空/缺省当作未指定）。
+          workspace_id: workspaceId ?? undefined,
           // 能力选定：调用方（输入卡）已在"两个 kind 都没限制"时不传，这里不再判一次
           // ——缺省路径必须与 M3 之前逐字节相同，判据只留一处。传了就钉住代际；
           // 不可达的 id 由服务端拒（40001，msg 里逐条给原因）。

@@ -10,7 +10,7 @@ import (
 //
 // 两者都挂在 **rest 面凭据**之后（只有 `/health` 免鉴权）：`/meta` 会回数据目录与载荷版本，
 // `/capabilities` 虽只描述能力，但"这份部署有没有托盘"这类信息不该对外网无凭据可读。
-func registerSystem(v1 *gin.RouterGroup, meta func() ctrsystem.MetaSource, assets AssetInfo) {
+func registerSystem(v1 *gin.RouterGroup, meta func() ctrsystem.MetaSource, assets AssetInfo, hostFacts CapabilityHostFacts) {
 	ctr := ctrsystem.NewSystemCtr(func() ctrsystem.MetaSource {
 		src := meta()
 		// 资产相关字段由本包按**已解析的资产**补全：webPath 是那份目录的绝对路径，再由 `/meta`
@@ -24,6 +24,11 @@ func registerSystem(v1 *gin.RouterGroup, meta func() ctrsystem.MetaSource, asset
 			}
 		}
 		return src
+	}, func() bool {
+		if hostFacts == nil {
+			return false // 装配没给事实：报"没有"，让前端走应用内浏览（不撒谎）
+		}
+		return hostFacts()
 	})
 	v1.GET("/meta", ctr.GetMeta)
 	v1.GET("/capabilities", ctr.GetCapabilities)

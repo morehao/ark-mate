@@ -658,7 +658,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 
-	// 缺省起点 = 首个工作区根；到根后不再给上级；roots 回读供面板解释边界。
+	// 缺省起点 = 偏好名录的第一项；上级给到真实父目录（名录不再是边界）；roots 回读供面板列快捷入口。
 	env := get(t, e, "/v1/mate/workspaces/browse")
 	if env.Code != 0 {
 		t.Fatalf("browse 失败: %+v", env)
@@ -668,10 +668,10 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		t.Fatalf("browse data 解析: %v", err)
 	}
 	if len(browse.Roots) != 1 || filepath.Base(browse.Path) != "ws" {
-		t.Fatalf("应从工作区根起步并回读 roots: %+v", browse)
+		t.Fatalf("应从偏好起点起步并回读 roots: %+v", browse)
 	}
-	if browse.Parent != "" {
-		t.Fatalf("到达工作区根后不应再给上级: %q", browse.Parent)
+	if browse.Parent != mustEvalPath(t, filepath.Dir(mustEvalPath(t, root))) {
+		t.Fatalf("上级应为真实父目录（名录不再是边界）: %q", browse.Parent)
 	}
 
 	// 根内子目录：上级 = 根（允许回去）。
@@ -687,13 +687,10 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		t.Fatalf("根内子目录的上级应为根: %+v", subResp)
 	}
 
-	// 越界：语义错误码 40001（RestErr 映射），且消息点明是哪个配置在限制。
+	// 名录外：**照常浏览**（v14.5 的产品口径：选工作区是全系统，名录只是浏览起点偏好）。
 	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside))
-	if env.Code != 40001 {
-		t.Fatalf("越界浏览应 40001（不是笼统的 1）: %+v", env)
-	}
-	if !strings.Contains(env.Msg, "workspace_outside_roots") || !strings.Contains(env.Msg, "MATE_WORKSPACE_ROOTS") {
-		t.Fatalf("越界错误应指明原因与配置键: %q", env.Msg)
+	if env.Code != 0 {
+		t.Fatalf("名录外目录应可浏览: %+v", env)
 	}
 }
 
@@ -720,7 +717,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, ""))
 
-	// 起步：不限制（restricted=false），可写，来源 = 默认值。
+	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
 	env := get(t, e, "/v1/mate/settings/workspace")
 	if env.Code != 0 {
 		t.Fatalf("settings GET 失败: %+v", env)
@@ -729,7 +726,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &st); err != nil {
 		t.Fatalf("settings data 解析: %v", err)
 	}
-	if st.Restricted || !st.Writable || st.Source != "default" || len(st.Roots) != 0 {
+	if st.PreferRoots || !st.Writable || st.Source != "default" || len(st.Roots) != 0 {
 		t.Fatalf("起步快照不符: %+v", st)
 	}
 
@@ -746,23 +743,23 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &st); err != nil {
 		t.Fatalf("PUT data 解析: %v", err)
 	}
-	if !st.Restricted || !st.ProvisionIncluded || len(st.Configured) != 1 || len(st.Roots) != 2 {
+	if !st.PreferRoots || !st.ProvisionIncluded || len(st.Configured) != 1 || len(st.Roots) != 2 {
 		t.Fatalf("更新后快照不符: %+v", st)
 	}
 	if st.Roots[0] != mustEvalPath(t, root) || filepath.Base(st.Roots[1]) != "tmp" {
 		t.Fatalf("生效名单应为「配置根 + 代建根」: %+v", st.Roots)
 	}
 
-	// 即时生效：根外被拒（语义码 + 配置键）、代建根本身放行（平台不产出越界会话）。
+	// 即时生效：偏好起点变了，但**不再是边界**——名录外照常可浏览。
 	env = get(t, e, "/v1/mate/workspaces/browse?path="+url.QueryEscape(outside))
-	if env.Code != 40001 || !strings.Contains(env.Msg, "workspace_outside_roots") {
-		t.Fatalf("画边界后根外应 40001: %+v", env)
+	if env.Code != 0 {
+		t.Fatalf("设了偏好起点后名录外仍应可浏览: %+v", env)
 	}
 	defDir := filepath.Join(provision, "default")
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	if _, err := manager.ResolveWorkspace("", &manager.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}, svc.WorkspaceRoots()); err != nil {
+	if _, err := manager.ResolveWorkspace("", &manager.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应仍可用（代建根隐式并入）: %v", err)
 	}
 
@@ -833,8 +830,8 @@ func mustEvalPath(t *testing.T, p string) string {
 	return out
 }
 
-// TestWorkspaceLibrariesAndFilesRoutes 资料库与"看资料"两个只读面在真实装配下的表现。
-func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
+// TestWorkspaceFilesRoute "看资料"这个只读面在真实装配下的表现（v14.5 起与名录无关）。
+func TestWorkspaceFilesRoute(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "docs")
 	lib := filepath.Join(root, "合同归档")
@@ -846,35 +843,13 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	}
 	e, svc := newEngineWithService(t)
 
-	// 未配白名单 → 资料库为空数组（不是错误：策展能力需要先画边界）。
-	env := get(t, e, "/v1/mate/workspaces/libraries")
-	if env.Code != 0 {
-		t.Fatalf("libraries 失败: %+v", env)
-	}
-	var libs []dtoworkspace.WorkspaceLibraryResp
-	if err := json.Unmarshal(env.Data, &libs); err != nil {
-		t.Fatalf("libraries data 解析: %v", err)
-	}
-	if len(libs) != 0 {
-		t.Fatalf("未配白名单应无资料库: %+v", libs)
-	}
-
+	// 即便配了"起始点偏好"，看资料也不受它限制（v14.5：名录不是边界）。
 	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	env = get(t, e, "/v1/mate/workspaces/libraries")
-	if env.Code != 0 {
-		t.Fatalf("libraries 失败: %+v", env)
-	}
-	if err := json.Unmarshal(env.Data, &libs); err != nil {
-		t.Fatalf("libraries data 解析: %v", err)
-	}
-	if len(libs) != 1 || libs[0].Name != "合同归档" || filepath.Base(libs[0].Root) != "docs" {
-		t.Fatalf("资料库应只有 合同归档（代建根 tmp 未创建、且即便创建也被排除）: %+v", libs)
-	}
 
 	// 目录内容：文件与目录都在，且带大小；文件条目**不可**当 cwd。
-	env = get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(lib))
+	env := get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(lib))
 	if env.Code != 0 {
 		t.Fatalf("files 失败: %+v", env)
 	}
@@ -892,8 +867,8 @@ func TestWorkspaceLibrariesAndFilesRoutes(t *testing.T) {
 	if env := get(t, e, "/v1/mate/workspaces/files"); env.Code != 40001 {
 		t.Fatalf("缺 path 应 40001: %+v", env)
 	}
-	// 越界 → 与建会话同一个错。
-	if env := get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(base)); env.Code != 40001 {
-		t.Fatalf("越界应 40001: %+v", env)
+	// 名录外照常可看（v14.5：不再按名录过滤）。
+	if env := get(t, e, "/v1/mate/workspaces/files?path="+url.QueryEscape(base)); env.Code != 0 {
+		t.Fatalf("名录外目录应可列出内容: %+v", env)
 	}
 }

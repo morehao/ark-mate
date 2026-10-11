@@ -382,6 +382,9 @@ func (a *App) Init(ctx context.Context) error {
 	if err != nil {
 		return usageErr("serve: %v", err)
 	}
+	// 宿主原生目录选择器的第一条判据就是"绑的是不是回环"，而真端口只有 Listen 之后才有
+	// （桌面态 `127.0.0.1:0`）——所以在这里把**实际监听地址**交给 manager（v14.5）。
+	a.svc.SetBindAddr(ln.Addr().String())
 	originPolicy := middleware.NewOriginPolicy(ln.Addr().String(), cfg.AllowedOrigins)
 	if originPolicy.Enabled() {
 		glog.Infow(ctx, "serve: 已启用回环 Host 白名单 + Origin 矩阵（M3-5）",
@@ -398,6 +401,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
+		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(manager.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
 		Origin:      originPolicy,

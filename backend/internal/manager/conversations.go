@@ -297,7 +297,7 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 		}
 		explicit := ""
 		if strings.TrimSpace(req.Cwd) != "" {
-			p, verr := ValidateWorkspace(req.Cwd, s.WorkspaceRoots())
+			p, verr := ValidateWorkspace(req.Cwd)
 			if verr != nil {
 				return nil, code.FromError(verr)
 			}
@@ -310,7 +310,7 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 		spec = row.Path
 	}
 	convID := uuid.NewString()
-	ws, err := ResolveWorkspace(spec, target, s.WorkspaceRoots())
+	ws, err := ResolveWorkspace(spec, target)
 	if err != nil {
 		return nil, code.FromError(err)
 	}

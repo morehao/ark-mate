@@ -572,14 +572,16 @@ function CwdPicker({
   const matched = root ? (workspaces?.items ?? []).find((w) => w.path === root) : undefined
   return (
     <WorkspacePicker
-      value={matched ? { id: matched.id, cwd: null } : { id: null, cwd: root || null }}
+      value={matched ? { id: matched.id } : { id: null, path: root || null }}
       onChange={(v) => {
+        // 自动化存的是**路径字符串**（不落登记 id）：选中的登记项要换回它的路径，
+        // 未登记的值原样保留——那种情况只可能来自既有配置，不该被面板静默清空。
         if (v.id) {
           const ws = (workspaces?.items ?? []).find((w) => w.id === v.id)
           onChange?.(ws?.path ?? '')
           return
         }
-        onChange?.(v.cwd ?? '')
+        onChange?.(v.path ?? '')
       }}
     />
   )

@@ -44,3 +44,14 @@ type WorkspaceMoveReq struct {
 	// BeforeID 锚点工作空间；空 = 追加到尾部。锚点是自身 = 空操作（不写库）。
 	BeforeID string `json:"before_id,omitempty"`
 }
+
+// WorkspaceDirCreateReq `POST /workspaces/dirs` 的请求体：在某个**已存在**的目录下建一个子目录。
+//
+// 刻意只有单段名（不含路径分隔符、不接受 "." / ".."）：多级创建与"相对父目录的路径"会把
+// 越界判定摊到每一段上，而这条接口的边界判据只有一条——父目录合法 + 建出来的真身仍在根内。
+type WorkspaceDirCreateReq struct {
+	// Parent 已存在的父目录绝对路径（按与建会话同一条校验处理，必须落在工作区根白名单内）。
+	Parent string `json:"parent" binding:"required"`
+	// Name 新目录名（单段；不含 "/" 与 "\"；不得为 "." 或 ".."）。
+	Name string `json:"name" binding:"required"`
+}

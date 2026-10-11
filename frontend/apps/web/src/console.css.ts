@@ -908,8 +908,7 @@ export const consoleStyleSheet = `
   }
   .fg-ws-item-check { flex: none; color: ${tokens.text}; font-size: 12px; }
 
-  /* 浏览视图头：返回 / 上级 / 主目录 + 当前待选路径（尾段优先，长路径截前缀）。 */
-  .fg-ws-browse-head { display: flex; align-items: center; gap: 2px; }
+  /* 行内图标按钮（上级 / 主目录 / 左栏管理入口共用一套静息形态）。 */
   .fg-ws-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -927,17 +926,149 @@ export const consoleStyleSheet = `
   }
   .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
   .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
-  .fg-ws-cur {
-    padding: 0 8px 2px;
-    font-family: ${tokens.fontMono};
-    font-size: 10.5px;
-    color: ${tokens.textSecondary};
+
+  /* ——— 目录浏览对话框（v14.3，对齐 dsh 的 DirectoryBrowser） ———
+     680×500 的居中弹窗，头部=面包屑+路径编辑入口，主体=Miller 双栏，底部=动作条。
+     尺寸用固定档而不是百分比：双栏在窄容器里放不下（每栏下限 240px），
+     而这是"选一个目录"的专用对话框，占满整屏反而丢失上下文。 */
+  .fg-ws-dlg .ant-modal-content { padding: 0; }
+  .fg-ws-dlg .ant-modal-header { padding: 16px 24px 8px; margin: 0; border-bottom: none; }
+  .fg-ws-dlg .ant-modal-body { padding: 0 24px 0; }
+  .fg-ws-dlg .ant-modal-footer {
+    margin: 0;
+    padding: 12px 24px;
+    border-top: 1px solid ${tokens.border};
+  }
+  .fg-ws-dlg-body {
+    display: flex;
+    flex-direction: column;
+    height: 380px; /* 500 = 头部 + 主体 + 动作条；主体给双栏留够高度 */
+    min-height: 0;
+  }
+  /* 上级 / 主目录两颗图标与面包屑同排（右侧）；列表内容多寡都不影响它们的位置。 */
+  /* 面包屑条：链可横向滚动（深路径下保尾段在视野内），右端是编辑入口与两颗图标。 */
+  .fg-ws-crumbbar { display: flex; align-items: center; gap: 2px; flex: none; }
+  .fg-ws-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .fg-ws-crumbseat { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .fg-ws-crumb {
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    direction: rtl; /* 路径过长时保留尾段（"我在哪个目录"比"从哪来"重要） */
-    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: ${tokens.fontMono};
+    font-size: 11.5px;
+    color: ${tokens.textSecondary};
   }
+  .fg-ws-crumb:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-ws-crumb:disabled { cursor: default; opacity: 0.5; }
+  .fg-ws-crumbchev { flex: none; font-size: 10px; color: ${tokens.textPlaceholder}; }
+  /* 铅笔区：一个**看得见**的入口（隐形热区是这里唯一能打字的路，不能靠猜）。 */
+  .fg-ws-crumbedit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: text;
+    font-size: 12px;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-ws-crumbedit:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-ws-crumbedit:disabled { cursor: default; opacity: 0.35; }
+  .fg-ws-pathinput { flex: 1; font-family: ${tokens.fontMono}; font-size: 11.5px; }
+  /* 完整路径一行：面包屑会被长路径挤到只剩尾段，这里给一字不差的全文。 */
+  .fg-ws-dlg-path {
+    flex: none;
+    padding: 4px 0 6px;
+    font-family: ${tokens.fontMono};
+    font-size: 10.5px;
+    color: ${tokens.textPlaceholder};
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  /* Miller 双栏：每栏下限 240px，放不下时整行横向滚动（而不是把两栏挤成一条缝）。
+     高度按内容自适应（内容多时列内滚动）；不足的那部分由下面的文件小节与"弹簧"吸收——
+     固定 flex:1 会让"只有两行目录"的空目录出现一大片空白。 */
+  .fg-ws-miller {
+    display: flex;
+    align-items: stretch;
+    flex: 0 1 auto;
+    min-height: 64px;
+    max-height: 220px;
+    gap: 10px;
+    overflow-x: auto;
+  }
+  .fg-ws-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 240px;
+    min-height: 24px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  /* 单栏且空时：让"此目录下没有子目录"就在列表的位置显示，而不是被推到容器底部。 */
+  .fg-ws-miller.fg-single {
+    flex-direction: column;
+    min-height: 0;
+    overflow-x: hidden;
+  }
+  /* 弹簧：把"上级/主目录"与动作条顶到最下沿——列表内容多寡都不改变它们的位置。 */
+  .fg-ws-grow { flex: 1 1 auto; min-height: 0; }
+  .fg-ws-divider { flex: none; width: 1px; background: ${tokens.border}; }
+  .fg-ws-rowseat { display: flex; flex: none; }
+  /* 选中态：柔性底 + 主色开文件夹图标（与 hover 区分得开——hover 是灰底，选中是主色底）。 */
+  .fg-ws-rowsel, .fg-ws-rowsel:hover:not(:disabled) { background: ${tokens.selectedBg}; }
+  .fg-ws-icon-btn.fg-ws-open, .fg-ws-open { color: ${tokens.primary}; }
+  .fg-ws-item-chev { flex: none; font-size: 10px; color: ${tokens.textPlaceholder}; }
+  .fg-ws-roots { display: flex; flex-direction: column; gap: 2px; flex: none; }
+  .fg-ws-files { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; flex: none; }
+  /* 错误行与"目录太多"提示贴着列表下沿，然后被 nav 的 margin-top:auto 推到动作条上方。 */
+  .fg-ws-note {
+    flex: none;
+    padding: 2px 0;
+    font-size: 11.5px;
+    color: ${tokens.textPlaceholder};
+  }
+  /* 底部动作条：新建文件夹 / 显示隐藏文件在左，取消 / 确认在右（对齐 dsh 的 footerBar）。 */
+  .fg-ws-foot { display: flex; align-items: center; gap: 8px; }
+  .fg-ws-foot-gap { flex: 1; }
+  .fg-ws-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: ${tokens.textSecondary};
+    white-space: nowrap;
+  }
+  .fg-ws-toggle:hover:not(:disabled) { color: ${tokens.text}; }
+  .fg-ws-toggle:disabled { cursor: default; opacity: 0.5; }
+  .fg-ws-toggle.fg-on { color: ${tokens.text}; }
+  .fg-ws-create { display: flex; flex-direction: column; gap: 10px; }
+  .fg-ws-create-in { font-size: 12.5px; color: ${tokens.textSecondary}; }
   .fg-ws-empty {
     padding: 4px 8px;
     font-size: 11.5px;

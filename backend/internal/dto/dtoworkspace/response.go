@@ -9,9 +9,20 @@ type WorkspaceBrowseResp struct {
 	Parent string `json:"parent,omitempty"`
 	// Home 服务进程家目录（前端"回到主目录"用；不可得或不在工作区根白名单内时为空）。
 	Home string `json:"home,omitempty"`
-	// Roots 生效的工作区根白名单（MATE_WORKSPACE_ROOTS；空 = 不限制）。
-	// 透出给面板是为了让"为什么上不去了"有解释，也让它能把根直接列成入口。
+	// Roots 面板配置的**起始点偏好**（MATE_WORKSPACE_ROOTS；空 = 没有偏好）。
+	//
+	// **v14.5 起它不是"允许范围"**：任何已存在的目录都能浏览、都能当工作空间（选工作区是全系统）。
+	// 透出给面板的用途只剩一个——把这些偏好位置列成快捷入口，省去"从家目录一层层点下去"。
 	Roots []string `json:"roots,omitempty"`
+	// Crumbs 从**文件系统根到当前目录（含自身）**的祖先链，逐级可跳（对齐 dsh 的 DirectoryListing.crumbs）。
+	//
+	// 为什么由服务端下发而不是前端按路径字符串切分：盘符 / UNC / 符号链接（macOS 的 /var → /private/var）
+	// 三处都会切错，而"位置显示错了"比"选不到"更让人困惑。
+	//
+	// **v14.5：恒给完整链**（全系统口径下没有"不许露出的前缀"），不再按名录裁剪。
+	Crumbs []WorkspaceCrumbResp `json:"crumbs,omitempty"`
+	// Truncated 是否因单层条目上限而截断（前端据此提示"还有未显示的子目录"，而不是静默少几行）。
+	Truncated bool `json:"truncated,omitempty"`
 	// Entries 子目录列表（按名称升序；默认隐藏 "." 开头的目录；
 	// 配了白名单时，真身落在根外的符号链接子项不会被列出——点了必被拒，不如不给）。
 	Entries []WorkspaceEntryResp `json:"entries"`
@@ -21,6 +32,32 @@ type WorkspaceBrowseResp struct {
 type WorkspaceEntryResp struct {
 	Name string `json:"name"` // 目录名（不含路径）
 	Path string `json:"path"` // 绝对路径（可直接作为建会话的 cwd）
+	// Hidden 是否按宿主平台约定隐藏（POSIX 的点前缀）。
+	//
+	// 服务端在 includeHidden=false 时**不下发**这些行；下发时带上标记，是为了让前端能自己
+	// 决定"显示隐藏项"这个开关（对齐 dsh：切换开关不重新请求，隐藏行已在手上）。
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// WorkspaceCrumbResp 面包屑的一项：一个祖先目录，逐级可跳。
+//
+// 与 WorkspaceEntryResp 字段形状相同但**语义不同**，故不合并：面包屑表达"位置"，
+// 条目表达"选项"。两者的契约注释各自成立，合并只会让后来者以为它们可以互换。
+type WorkspaceCrumbResp struct {
+	// Name 显示名（文件系统根用它自身的路径当名字，例如 "/"；盘符则形如 "C:\"）。
+	Name string `json:"name"`
+	// Path 绝对路径（跳转目标）。
+	Path string `json:"path"`
+	// Hidden 恒为 false（祖先链上不区分隐藏与否——那是名字的宿主约定，不是位置的属性）。
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// WorkspaceDirCreateResp `POST /workspaces/dirs` 响应：新建目录的绝对路径。
+//
+// 回**规范化后**的路径（而不是把 parent 与 name 拼回去给前端）：前端拿到它就是可以直接
+// 提交为 cwd / 加入白名单的那一个，不需要也不应该自己拼。
+type WorkspaceDirCreateResp struct {
+	Path string `json:"path"`
 }
 
 // WorkspaceRecentResp 最近使用过的工作空间（从既有会话派生）。
@@ -33,23 +70,11 @@ type WorkspaceRecentResp struct {
 	Conversations int `json:"conversations"`
 }
 
-// WorkspaceLibraryResp 资料库 = 工作区根下的一级子目录（给"选名字而不是选路径"用）。
-// 派生自 MATE_WORKSPACE_ROOTS + 文件系统，不另存登记表：见 manager.WorkspaceLibraries。
-type WorkspaceLibraryResp struct {
-	Path string `json:"path"` // 绝对路径（可直接作为建会话的 cwd）
-	Name string `json:"name"` // 目录名即资料库名
-	Root string `json:"root"` // 它属于哪个工作区根
-	// LastUsedAt 该资料库下最新会话的 updated_at（从未用过则为空，不是 zero time）。
-	LastUsedAt string `json:"last_used_at,omitempty"`
-	// Conversations 该资料库下的会话数（含归档）。
-	Conversations int `json:"conversations"`
-}
-
 // WorkspaceFilesResp 目录内容清单（只读的"看资料"面，与浏览面分工见 manager.ListWorkspaceFiles）。
 type WorkspaceFilesResp struct {
 	// Path 规范化后的目录绝对路径。
 	Path string `json:"path"`
-	// Roots 生效的工作区根白名单（空 = 不限制）。
+	// Roots 面板配置的起始点偏好（空 = 没有偏好；v14.5 起不是允许范围）。
 	Roots []string `json:"roots,omitempty"`
 	// Entries 目录内容（目录在前、文件在后，各自按名升序）。
 	// 注意：文件条目的 Path **不可**作为建会话 cwd（工作空间必须是目录）。
@@ -67,17 +92,38 @@ type WorkspaceFileEntryResp struct {
 	ModifiedAt string `json:"modified_at"`
 }
 
-// WorkspaceSettingsResp 工作区根白名单的设置快照（`GET /settings/workspace`）。
+// WorkspacePickResp `POST /workspaces/pick-directory` 响应：宿主原生选择器的结果。
+//
+// 只有两种结局，且**取消不是错误**（对齐参照实现的 `pickDirectory(): Promise<string | null>`）：
+//   - `{path}`  用户选定；
+//   - `{cancelled: true}` 用户取消（或面板超时被收回）。
+//
+// 刻意不回 `{path:""}` 表示取消：空串在 JSON 里与"没给这个键"看不出区别，
+// 而调用方要据此决定"静默收手"还是"报错"，两者必须能分辨。
+type WorkspacePickResp struct {
+	Path string `json:"path,omitempty"`
+	// Cancelled 用户取消（面板被 Esc / 关闭 / 超时收回）。
+	Cancelled bool `json:"cancelled,omitempty"`
+}
+
+// WorkspaceSettingsResp 工作区**起始点偏好**的设置快照（`GET /settings/workspace`）。
+//
+// **v14.5 起这份名单不再是"允许范围"**（产品口径：选工作区是全系统）。它只回答两件事：
+// 打开目录浏览时从哪儿起步、面板里把哪些位置列成快捷入口。名字保留 `roots` 是因为它一直是
+// 那个 wire key（前端与文档都按它写），换名是纯破坏而语义已经说清。
 //
 // 为什么要同时给 Configured 与 Roots：面板编辑的是**显式配置**那一份，而代建根是平台派生的
 // （恒在生效名单内、用户删不掉）。只给生效名单，面板就永远无法表达"删掉这一条"。
 type WorkspaceSettingsResp struct {
-	// Configured 显式配置的白名单（= 面板可编辑的那一份；不含隐式并入的代建根）。
+	// Configured 显式配置的偏好起点（= 面板可编辑的那一份；不含隐式并入的代建根）。
 	Configured []string `json:"configured"`
-	// Roots **生效**白名单 = Configured ∪ {ProvisionDir}（空 = 不限制：可浏览任意可读目录）。
+	// Roots **生效**偏好起点 = Configured ∪ {ProvisionDir}（空 = 没有偏好：从服务进程家目录起步）。
 	Roots []string `json:"roots,omitempty"`
-	// Restricted 是否处于受限模式（Configured 非空）。false = 未配白名单，目录浏览不受限。
-	Restricted bool `json:"restricted"`
+	// PreferRoots 是否配置了偏好起点（= Configured 非空）。
+	//
+	// 字段名从 `restricted` 改来（v14.5）：名单不再是边界，叫"受限"会继续暗示"外面的目录不能用"——
+	// 而那正是这次要消灭的误解。面板据此决定要不要显示「清空偏好」。
+	PreferRoots bool `json:"prefer_roots"`
 	// ProvisionDir 平台代建工作空间的根目录（空 = 代建关闭）。
 	ProvisionDir string `json:"provision_dir,omitempty"`
 	// ProvisionIncluded 代建根是否已隐式并入生效白名单（受限模式下恒 true；不受限时为 false——

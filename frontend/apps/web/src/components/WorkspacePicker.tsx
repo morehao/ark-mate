@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Dropdown, Input, Popover, Tooltip } from 'antd'
+import { Dropdown, Popover, Tooltip } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -14,30 +14,32 @@ import {
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { tokens } from '@ark-mate/ui'
-import { recentWorkspaces, toErrorMessage } from '@ark-mate/api'
-import type { Workspace, WorkspaceRecent } from '@ark-mate/types'
+import { toErrorMessage } from '@ark-mate/api'
+import type { Workspace } from '@ark-mate/types'
 import { useMate } from '../store'
-import { DirLabel, Label, WorkspaceBrowser, splitDirPath } from './WorkspaceBrowser'
+import { directoryPickerKind, pickDirectoryNative } from '../directoryPicker'
+import { DirectoryBrowser } from './DirectoryBrowser'
+import { DirLabel, Label, splitDirPath } from './dirPath'
 
-/** 当前选中：登记项 / 裸路径 / 未指定（落在默认工作空间）。 */
+/**
+ * 选择器的值。
+ *
+ * v14.3 起**面板只产生 `{id}`**（选择面收敛为"登记项 + 添加工作空间"，手输路径那条路已删）。
+ * 仍带一个 `path` 是因为**别的调用方**值本身就是一个路径字面量：新建会话的「工作目录」是登记 id，
+ * 而自动化的目标存的是**路径字符串**（见 `AutomationsPage` 的 `WorkspacePickField`）——它的配置
+ * 不该因为"那个目录今天没被登记"而被动清空，所以选择器要能把未登记的路径原样显示为"当前"。
+ */
 export interface WorkspaceChoice {
-  /** 选中的登记 id（为空 = 没选登记项）。 */
+  /** 选中的登记 id（null = 当前值不是登记项）。 */
   id: string | null
-  /** 裸绝对路径（「输入路径…」那条路；与 id 互斥）。 */
-  cwd: string | null
+  /** 未登记的绝对路径（与 id 互斥；只有自动化的路径字面量会走到这里）。 */
+  path?: string | null
 }
-
-export const NO_WORKSPACE: WorkspaceChoice = { id: null, cwd: null }
 
 interface Props {
   value: WorkspaceChoice
   onChange: (value: WorkspaceChoice) => void
   disabled?: boolean
-}
-
-/** 绝对路径判定（对齐 goose 的 isAbsolutePath：POSIX / UNC / Windows 盘符）。 */
-function isAbsolutePath(p: string): boolean {
-  return p.startsWith('/') || p.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(p)
 }
 
 /** 一条登记的展示名：'' = 未命名 → 末级目录名；默认工作空间由服务端已渲染好。 */
@@ -49,17 +51,20 @@ export function workspaceLabel(ws: Workspace): string {
 /**
  * 工作空间选择器（新建会话时指定「在哪里工作」）。
  *
- * v14 重写（设计 §5.2）：事实源从"从既有会话派生的最近目录 + 白名单资料库"换成**登记表**
- * （`GET /workspaces`）。三处结构性变化，都不是外观调整：
- *   - 主列表是**登记项**（有 id、有名字、有顺序），选中它提交的是 `workspace_id` 而不是路径
- *     ——路径匹配会因符号链接/尾斜杠的写法差异失配；
- *   - 新增**创建工作空间**（原来无处可落：平台没有可写对象）；
- *   - 「最近使用」降级为「**未登记**」一栏（服务端已排除已登记与默认工作空间），
- *     点一下 = 登记 + 选中，一步完成，不留"点两次才到位"的中间态。
+ * v14 重写：事实源从"从既有会话派生的最近目录 + 白名单资料库"换成**登记表**（`GET /workspaces`），
+ * 并新增**创建工作空间**（原来无处可落：平台没有可写对象）。
  *
- * 保留的既有裁剪（**没有做假的相似**，与 v13 之前逐字相同）：
- *  - **不做 Git 工作树小节**：平台没有这个集成，写一行「未找到工作树」会让人以为支持了；
- *  - **不做「在文件管理器中打开」**：服务端可能在远端，没有这个能力就不给入口。
+ * v14.3 按 dsh 的选择面收敛（设计 §2.4），菜单只剩三样东西：当前 / 工作空间登记 / 添加工作空间…。
+ * 删掉的两条各有理由，都不是"少写一点"：
+ *   - **「输入路径」**：手输绝对路径要求用户先知道白名单边界与规范化规则（本地只能预检
+ *     "是不是绝对路径"，真校验在服务端），失败率高；而它想解决的问题（"新项目还没建出来"）
+ *     已由目录对话框的**新建文件夹**覆盖——用户要的是"那里有个目录"，不是"证明我知道绝对路径"。
+ *   - **「最近使用（未登记）」**：v14 起登记表才是主列表，而这一栏剩下的恰恰是**没被登记**的目录；
+ *     点它 = 登记 + 选中，与「添加工作空间…」是同一个动作的两个入口，留着只多一层判断
+ *     （对齐 dsh：选择面只有登记项 + 一条添加）。
+ *
+ * 保留的既有裁剪（**没有做假的相似**）：**不做 Git 工作树小节**（平台没有这个集成，写一行
+ * 「未找到工作树」会让人以为支持了）；**不做「在文件管理器中打开」**（服务端可能在远端）。
  *
  * 语义要点：工作空间 = 会话的 ACP `cwd`，**创建时定稿、之后不可变**（它是底座会话身份的一部分，
  * 也是原生权限 `workspace-write` 的沙箱边界）——所以这个选择器只出现在新建流程，
@@ -73,25 +78,13 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
 
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
-  // 创建失败**就地报错**并留在浏览视图（设计 §5.2 状态 E）：关掉弹层意味着用户得把目录树
-  // 重新点到那一层；留在原地换一个目录即可。
-  const [browseErr, setBrowseErr] = useState<string | null>(null)
-  const [manual, setManual] = useState('')
-  const [manualLoading, setManualLoading] = useState(false)
-  const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [busy, setBusy] = useState(false)
 
   // 展开时装载数据（对齐既有行为：每次打开都刷新，不在关闭态空跑请求）。
   useEffect(() => {
     if (!open) return
     setBrowsing(false)
-    setBrowseErr(null)
-    setManual('')
     void loadWorkspaces()
-    recentWorkspaces(8)
-      .then(setRecent)
-      // 最近目录取不到不该挡住「登记表 + 添加工作空间 + 输入路径」三条主路径。
-      .catch(() => setRecent([]))
   }, [open, loadWorkspaces])
 
   const items = workspaces?.items ?? []
@@ -99,92 +92,60 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
   const defaultID = workspaces?.default_id ?? ''
   const defaultWS = items.find((w) => w.id === defaultID)
 
-  // 当前选中项（登记项优先；裸路径走 cwd）。
-  const current = value.id ? items.find((w) => w.id === value.id) : undefined
-  const currentPath = current?.path ?? value.cwd ?? ''
+  // 当前选中项（登记 id 优先；未登记的路径字面量只有自动化的目标会走到）。
+  const current = value?.id ? items.find((w) => w.id === value.id) : undefined
+  const currentPath = current?.path ?? value?.path ?? ''
   const currentName = current
     ? workspaceLabel(current)
-    : value.cwd
-      ? splitDirPath(value.cwd).name
+    : value?.path
+      ? splitDirPath(value.path).name
       : '选择目录'
 
   const close = () => setOpen(false)
 
   const applyWorkspace = (ws: Workspace) => {
-    onChange({ id: ws.id, cwd: null })
+    onChange({ id: ws.id })
     close()
   }
 
-  const applyManual = async () => {
-    const p = manual.trim()
-    if (!p) return
-    // 本地先挡一次明显错误（goose 同款提示），再交服务端校验 + 规范化：
-    // 面板不能自己判断"这个目录能不能用"，也拿不到符号链接的真身。
-    if (!isAbsolutePath(p)) {
-      showToast('工作目录必须是绝对路径')
+  /**
+   * 「添加工作空间…」：**一个动作、两态**（v14.4，对齐 dsh 的 `directory-picker-auto`）。
+   *
+   *  - 宿主能抬系统面板（本机浏览器与桌面窗口都算）→ 调宿主端点抬原生选目录器，拿到路径即登记；
+   *  - 否则（远程 / SSH / 无显示会话）→ 开应用内对话框。
+   *
+   * 菜单在这一步就要收起（原生选择器是**另开一个窗口**，菜单留在下面会显得点击没反应）。
+   */
+  const chooseDirectory = async () => {
+    close()
+    if (directoryPickerKind() === 'native') {
+      const picked = await pickDirectoryNative()
+      // 取消不是错误：静默收手（与 dsh 的 `path === null → onCancel` 同义）。
+      if ('cancelled' in picked) return
+      await adoptPicked(picked.path)
       return
     }
-    setManualLoading(true)
-    setBrowseErr(null)
-    try {
-      // 输入路径 = 登记 + 选中（同一个动作，与「最近使用（未登记）」一致）：
-      // 用户敲的是一个**项目目录**，让它在左栏有个分组是符合预期的；
-      // 不想登记的话，选目录那条路也不登记（见下面 browse 的注释）。
-      const ws = await createWorkspace(p)
-      setManual('')
-      onChange({ id: ws.id, cwd: null })
-      close()
-    } catch (err) {
-      // 失败**就地报错**（设计 §5.2 状态 E）：原因用服务端 msg，不自己编文案。
-      setBrowseErr(toErrorMessage(err))
-    } finally {
-      setManualLoading(false)
-    }
+    setBrowsing(true)
   }
 
-  /** 目录浏览里选定：**登记 + 选中**（与设计 ADR 的"添加工作空间只有一条路"一致）。 */
+  /** 目录对话框里选定：**登记 + 选中**（ADR：「添加工作空间只有一条路」）。 */
   const adoptPicked = async (path: string) => {
     setBusy(true)
-    setBrowseErr(null)
     try {
       const ws = await createWorkspace(path)
-      onChange({ id: ws.id, cwd: null })
+      onChange({ id: ws.id })
+      setBrowsing(false)
       close()
     } catch (err) {
-      setBrowseErr(toErrorMessage(err))
+      // 对话框是模态的：失败用 toast 报（它关闭后没有"留在原地"可谈），原因用服务端 msg。
+      showToast(toErrorMessage(err))
     } finally {
       setBusy(false)
     }
   }
-
-  /** 「最近使用（未登记）」：一步完成登记 + 选中。 */
-  const adoptRecent = async (r: WorkspaceRecent) => {
-    setBusy(true)
-    setBrowseErr(null)
-    try {
-      const ws = await createWorkspace(r.path)
-      onChange({ id: ws.id, cwd: null })
-      close()
-    } catch (err) {
-      setBrowseErr(toErrorMessage(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  // 就地报错那一行：**两种视图都要渲染**。它原先是挂在菜单里的，而浏览视图会整体替换掉菜单，
-  // 于是"选目录 → 点使用此目录 → 落库失败"这条最需要它的路径上，理由是看不见的
-  // （弹层确实没关，但用户只看到什么都没发生）。
-  const errLine = browseErr ? (
-    <div className="fg-ws-error" role="alert">
-      <WarningOutlined /> <span>{browseErr}</span>
-    </div>
-  ) : null
 
   const menu = (
     <div className="fg-ws-pop" style={{ width: 380 }}>
-      {errLine}
-
       <Label>当前</Label>
       <div className="fg-ws-item fg-ws-item-static">
         <FolderOpenOutlined className="fg-ws-item-icon" />
@@ -238,34 +199,12 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
               <span className="fg-ws-item-sub">{ws.path}</span>
             </span>
             {broken && <span className="fg-ws-item-meta">目录不可用</span>}
-            {ws.id === value.id && <CheckOutlined className="fg-ws-item-check" />}
+            {ws.id === value?.id && <CheckOutlined className="fg-ws-item-check" />}
           </button>
         )
       })}
 
-      {/* 最近使用（未登记）：服务端已排除已登记与默认工作空间，所以点它一定有"登记"可做 */}
-      {recent.length > 0 && (
-        <>
-          <div className="fg-ws-sep" />
-          <Label>最近使用（未登记）</Label>
-          {recent.map((r) => (
-            <button
-              key={r.path}
-              type="button"
-              className="fg-ws-item"
-              title={r.path}
-              disabled={busy}
-              onClick={() => void adoptRecent(r)}
-            >
-              <FolderOutlined className="fg-ws-item-icon" />
-              <DirLabel dir={r.path} />
-              <span className="fg-ws-item-meta">{r.conversations} 个会话</span>
-            </button>
-          ))}
-        </>
-      )}
-
-      {/* 添加工作空间 / 输入路径：writable=false（memory 持久层）时**整项不出现**（设计 ADR-11）
+      {/* 添加工作空间：writable=false（memory 持久层）时**整项不出现**（设计 ADR-11）
           ——不给一个必然失败的按钮，底下用一句原因说明为什么没有它。 */}
       {writable ? (
         <>
@@ -274,34 +213,17 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
             type="button"
             className="fg-ws-item"
             disabled={busy}
-            onClick={() => {
-              setBrowseErr(null)
-              setBrowsing(true)
-            }}
+            onClick={() => void chooseDirectory()}
           >
             <PlusOutlined className="fg-ws-item-icon" />
             <span className="fg-ws-item-label">
               <span className="fg-ws-item-name">添加工作空间…</span>
             </span>
           </button>
-          <Label>输入路径</Label>
-          <div style={{ padding: '4px 8px 6px' }}>
-            <Input
-              size="small"
-              value={manual}
-              placeholder="输入绝对路径（例如 /Users/me/workspace）"
-              onChange={(e) => setManual(e.target.value)}
-              onPressEnter={() => void applyManual()}
-              disabled={manualLoading}
-              style={{ fontFamily: tokens.fontMono, fontSize: 11.5 }}
-            />
-          </div>
         </>
       ) : (
         workspaces !== null && (
-          <div className="fg-ws-hint">
-            当前持久层为 memory，工作空间不可创建（登记表只读）。
-          </div>
+          <div className="fg-ws-hint">当前持久层为 memory，工作空间不可创建（登记表只读）。</div>
         )
       )}
 
@@ -314,7 +236,7 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
             type="button"
             className="fg-ws-item"
             onClick={() => {
-              onChange(NO_WORKSPACE)
+              onChange({ id: null })
               close()
             }}
           >
@@ -333,54 +255,46 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
     </div>
   )
 
-  // 浏览视图 = 共用实现（见 WorkspaceBrowser）：本组件只提供"选定后做什么"
-  // （落库 + 设选中 + 收起弹层；失败留在原地报错）。
-  const browseView = (
-    <WorkspaceBrowser
-      start={currentPath || undefined}
-      onPick={(path) => void adoptPicked(path)}
-      onBack={() => {
-        setBrowsing(false)
-        setBrowseErr(null)
-      }}
-      pickLabel={busy ? '登记中…' : '使用此目录'}
-    />
-  )
-
   return (
-    <Popover
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o)
-        if (!o) setBrowseErr(null)
-      }}
-      trigger="click"
-      placement="topLeft"
-      content={browsing ? (
-        <>
-          {errLine}
-          {browseView}
-        </>
-      ) : menu}
-      arrow={false}
-      styles={{ content: { padding: 6 } }}
-    >
-      <Tooltip
-        title={
-          currentPath
-            ? currentPath
-            : defaultWS
-              ? `未指定：会话落在「${workspaceLabel(defaultWS)}」（${defaultWS.path}）`
-              : '未指定：每个会话在创建时由平台分配一个独立工作目录'
-        }
-        placement="top"
+    <>
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger="click"
+        placement="topLeft"
+        content={menu}
+        arrow={false}
+        styles={{ content: { padding: 6 } }}
       >
-        <button type="button" className="fg-ws-pill" disabled={disabled}>
-          <FolderOpenOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />
-          <span className="fg-ws-pill-name">{currentName}</span>
-        </button>
-      </Tooltip>
-    </Popover>
+        <Tooltip
+          title={
+            currentPath
+              ? currentPath
+              : defaultWS
+                ? `未指定：会话落在「${workspaceLabel(defaultWS)}」（${defaultWS.path}）`
+                : '未指定：每个会话在创建时由平台分配一个独立工作目录'
+          }
+          placement="top"
+        >
+          <button type="button" className="fg-ws-pill" disabled={disabled}>
+            <FolderOpenOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />
+            <span className="fg-ws-pill-name">{currentName}</span>
+          </button>
+        </Tooltip>
+      </Popover>
+      {/* 目录对话框与菜单分开：菜单关闭后它仍在（选定失败要能继续挑别的目录）。
+          start 传当前选中目录：从"我上次选的那一层"开始，而不是每次都回到家目录。 */}
+      {browsing && (
+        <DirectoryBrowser
+          start={currentPath || undefined}
+          title="添加工作空间"
+          pickLabel={busy ? '登记中…' : '使用此目录'}
+          busy={busy}
+          onPick={(p) => void adoptPicked(p)}
+          onCancel={() => setBrowsing(false)}
+        />
+      )}
+    </>
   )
 }
 

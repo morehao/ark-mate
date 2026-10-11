@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func TestValidateWorkspace(t *testing.T) {
 	// 合法：目录（含尾斜杠 / 冗余片段）→ 规范化后的绝对路径。
 	want, _ := filepath.EvalSymlinks(dir)
 	for _, in := range []string{dir, dir + string(filepath.Separator), filepath.Join(dir, ".", "..", filepath.Base(dir))} {
-		got, err := ValidateWorkspace(in, nil)
+		got, err := ValidateWorkspace(in)
 		if err != nil {
 			t.Fatalf("ValidateWorkspace(%q) 应通过: %v", in, err)
 		}
@@ -79,7 +80,7 @@ func TestValidateWorkspace(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Skipf("环境不支持 symlink: %v", err)
 	}
-	got, err := ValidateWorkspace(link, nil)
+	got, err := ValidateWorkspace(link)
 	if err != nil {
 		t.Fatalf("symlink 应通过校验: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestValidateWorkspace(t *testing.T) {
 		"不存在": filepath.Join(dir, "nope"),
 		"是文件": file,
 	} {
-		if _, err := ValidateWorkspace(in, nil); err == nil {
+		if _, err := ValidateWorkspace(in); err == nil {
 			t.Fatalf("%s（%q）应被拒", name, in)
 		} else if code := aclCode(t, err); code != "workspace_invalid" {
 			t.Fatalf("%s 错误码=%q want workspace_invalid", name, code)
@@ -110,7 +111,7 @@ func TestResolveWorkspace(t *testing.T) {
 	explicit := t.TempDir()
 
 	// 显式指定 → 原样（规范）使用，非临时、无归属（归属由调用方按路径补）。
-	got, err := ResolveWorkspace(explicit, nil, nil)
+	got, err := ResolveWorkspace(explicit, nil)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace(显式): %v", err)
 	}
@@ -127,7 +128,7 @@ func TestResolveWorkspace(t *testing.T) {
 
 	// 未指定 → 落在默认工作空间（Temporary=true，归属 = 那条登记的 id）。
 	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
-	got, err = ResolveWorkspace("", def, nil)
+	got, err = ResolveWorkspace("", def)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace(默认工作空间): %v", err)
 	}
@@ -148,16 +149,16 @@ func TestResolveWorkspace(t *testing.T) {
 
 	// 没有默认工作空间（代建关闭，或默认被删）且未指定 → workspace_required；
 	// **不回落 os.Getwd()**（那条铁律不变）。
-	if _, err := ResolveWorkspace("", nil, nil); err == nil {
+	if _, err := ResolveWorkspace("", nil); err == nil {
 		t.Fatal("没有默认工作空间 + 未指定 应报错")
 	} else if code := aclCode(t, err); code != "workspace_required" {
 		t.Fatalf("错误码=%q want workspace_required", code)
 	}
 	// 半个默认工作空间（只有 id 没路径 / 反之）同样按"没有"处理，不半信半疑地用它。
-	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-x"}, nil); err == nil {
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-x"}); err == nil {
 		t.Fatal("默认工作空间缺路径应报错")
 	}
-	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{Path: t.TempDir()}, nil); err == nil {
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{Path: t.TempDir()}); err == nil {
 		t.Fatal("默认工作空间缺 id 应报错")
 	}
 }
@@ -169,7 +170,7 @@ func TestResolveWorkspace(t *testing.T) {
 // 会连带删掉别的会话正在用的文件——那是本设计最不能出的一类事故。
 func TestDiscardWorkspaceIsNoop(t *testing.T) {
 	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
-	res, err := ResolveWorkspace("", def, nil)
+	res, err := ResolveWorkspace("", def)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
@@ -185,7 +186,6 @@ func TestDiscardWorkspaceIsNoop(t *testing.T) {
 		t.Fatalf("显式目录不该被删: %v", err)
 	}
 }
-
 
 func mustEval(t *testing.T, p string) string {
 	t.Helper()
@@ -386,7 +386,7 @@ func TestBrowseWorkspace(t *testing.T) {
 		t.Fatalf("应只列 2 个非隐藏目录（按名排序）: %+v", resp.Entries)
 	}
 	// entries[].path 必须可直接当 cwd 提交（与 ValidateWorkspace 结果一致）。
-	if got, err := ValidateWorkspace(resp.Entries[0].Path, nil); err != nil || got != resp.Entries[0].Path {
+	if got, err := ValidateWorkspace(resp.Entries[0].Path); err != nil || got != resp.Entries[0].Path {
 		t.Fatalf("entry path 不是可直接使用的 cwd: %q err=%v", resp.Entries[0].Path, err)
 	}
 	if resp.Parent != filepath.Dir(resp.Path) {
@@ -490,8 +490,11 @@ func TestWithinRoots(t *testing.T) {
 	}
 }
 
-// TestValidateWorkspaceRoots 显式 cwd 越界即拒（浏览面与创建面共用这条校验）。
-func TestValidateWorkspaceRoots(t *testing.T) {
+// TestValidateWorkspaceIgnoresPreferenceRoots **名录不再是边界**（v14.5 的产品口径）。
+//
+// 这条替代了原来的 `TestValidateWorkspaceRoots`（那条断言"根外即拒"）。口径变了之后，
+// 唯一还该被拒的是"路径本身不能用"（不存在 / 不是目录 / 相对路径）；"不在偏好名录里"不再构成拒绝。
+func TestValidateWorkspaceIgnoresPreferenceRoots(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
 	inside := filepath.Join(root, "proj")
@@ -501,45 +504,52 @@ func TestValidateWorkspaceRoots(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	roots := []string{mustEval(t, root)}
 
-	if _, err := ValidateWorkspace(inside, roots); err != nil {
-		t.Fatalf("根内路径应通过: %v", err)
+	if _, err := ValidateWorkspace(inside); err != nil {
+		t.Fatalf("路径可用即应通过: %v", err)
 	}
-	err := func() error { _, e := ValidateWorkspace(outside, roots); return e }()
-	if code := aclCode(t, err); code != "workspace_outside_roots" {
-		t.Fatalf("根外路径应 workspace_outside_roots，得到 %s: %v", code, err)
+	// 偏好名录之外：**照样通过**（这正是这次要钉住的语义）。
+	if _, err := ValidateWorkspace(outside); err != nil {
+		t.Fatalf("名录外的可用目录不该被拒（选工作区是全系统）: %v", err)
 	}
-	// 错误信息要能指导运维改哪个配置（否则只会看到"被拒"）。
-	if !strings.Contains(err.Error(), "MATE_WORKSPACE_ROOTS") {
-		t.Fatalf("越界错误应点明配置键: %v", err)
+	// 仍然被拒的只有"路径本身不能用"。
+	if _, err := ValidateWorkspace(filepath.Join(base, "nope")); aclCode(t, err) != "workspace_invalid" {
+		t.Fatalf("不存在的路径应 workspace_invalid: %v", err)
+	}
+	if _, err := ValidateWorkspace("relative"); aclCode(t, err) != "workspace_invalid" {
+		t.Fatalf("相对路径应 workspace_invalid: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := ValidateWorkspace(filepath.Join(base, "a.txt")); aclCode(t, err) != "workspace_invalid" {
+		t.Fatalf("文件应 workspace_invalid: %v", err)
 	}
 }
 
-// TestResolveWorkspaceRoots 白名单只约束**显式** cwd；默认工作空间不逐次复检。
+// TestResolveWorkspacePreferenceRoots 显式 cwd 与偏好名录**无关**；未指定时用默认工作空间。
 //
-// 默认工作空间的合法性由装配时的代建根并入保证（见 effectiveWorkspaceRootsLocked）：
-// 它是平台自己的目录，逐次重算只是重复劳动。这条测试把那个分工钉住。
-func TestResolveWorkspaceRoots(t *testing.T) {
+// 口径：`MATE_WORKSPACE_ROOTS` 只是"目录浏览从哪起步"的偏好，不参与 cwd 解析。
+func TestResolveWorkspacePreferenceRoots(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	roots := []string{mustEval(t, root)}
-	// 越界目录必须先存在：不存在会被更早的 workspace_invalid 挡住，测不到边界这一层。
+	// 名录外的目录必须先存在：不存在会被更早的 workspace_invalid 挡住，
+	// 测不到"名录不参与 cwd 解析"这一层。
 	outside := filepath.Join(base, "other")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// 越界的显式 cwd → 拒。
-	if _, err := ResolveWorkspace(outside, nil, roots); aclCode(t, err) != "workspace_outside_roots" {
-		t.Fatalf("越界显式 cwd 应被拒: %v", err)
+	// 名录外的显式 cwd → 照常解析（不再是错）。
+	if res, err := ResolveWorkspace(outside, nil); err != nil || res.Path != mustEval(t, outside) {
+		t.Fatalf("名录外的显式 cwd 应照常解析: res=%+v err=%v", res, err)
 	}
 	// 未指定 → 用默认工作空间，结果带归属且标 Temporary。
 	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: root}
-	res, err := ResolveWorkspace("", def, roots)
+	res, err := ResolveWorkspace("", def)
 	if err != nil {
 		t.Fatalf("默认工作空间: %v", err)
 	}
@@ -591,7 +601,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	if err := os.MkdirAll(defDir, 0o755); err != nil {
 		t.Fatalf("mkdir default: %v", err)
 	}
-	res, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}, got)
+	res, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir})
 	if err != nil {
 		t.Fatalf("默认工作空间: %v", err)
 	}
@@ -615,13 +625,20 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	}
 }
 
-// TestBrowseWorkspaceClampedByRoots 浏览面被白名单收窄：越界拒绝、上级止步于根、家目录不在根内则不返回。
-func TestBrowseWorkspaceClampedByRoots(t *testing.T) {
+// TestBrowseWorkspacePreferenceOnly 名录**只是起始点偏好**：浏览面全系统、上级直到文件系统根。
+//
+// 这条替代了原来的 `TestBrowseWorkspaceClampedByRoots`（断言"越界拒绝、上级止步于根、根外符号链接不列"）。
+// 现在的语义是：
+//   - 空 path → 从偏好起点（第一个根）起步，这只是"从哪儿开始看"；
+//   - 名录外目录照样能浏览，越界不再是错；
+//   - `parent` 一直给到文件系统根（只有真到根才为空）；
+//   - `home` 恒下发（它是"主目录"按钮的目标）；
+//   - 根内指向根外的符号链接子项**照列**（它是个可进入的目录，能选它当工作空间）。
+func TestBrowseWorkspacePreferenceOnly(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
 	inside := filepath.Join(root, "proj")
 	outsideDir := filepath.Join(base, "outside")
-	// 根内指向根外的符号链接子项：列出来就是死路（点了必被拒），必须不列。
 	escape := filepath.Join(root, "escape")
 	for _, d := range []string{inside, outsideDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -635,178 +652,180 @@ func TestBrowseWorkspaceClampedByRoots(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
-	// 空 path → 从第一个根起步（不是家目录：白名单下"允许工作的目录"才是正确的着陆点）。
+	// 空 path → 从偏好起点起步（"从哪儿开始看"）。
 	resp, err := svc.BrowseWorkspace("", false)
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(\"\"): %v", err)
 	}
 	if resp.Path != mustEval(t, root) {
-		t.Fatalf("空 path 应从工作区根起步: %q", resp.Path)
+		t.Fatalf("空 path 应从偏好起点起步: %q", resp.Path)
 	}
 	if len(resp.Roots) != 1 || resp.Roots[0] != mustEval(t, root) {
-		t.Fatalf("应回读生效的白名单（面板据此解释为什么上不去）: %v", resp.Roots)
+		t.Fatalf("应回读偏好名录（面板据此列快捷入口）: %v", resp.Roots)
 	}
-	// 根：上级为空（不许越过根向上）。
-	if resp.Parent != "" {
-		t.Fatalf("到达工作区根后不应再给上级: %q", resp.Parent)
+	// 偏好起点不再是"不许上去的边界"：上级就是它的真实父目录。
+	if resp.Parent != mustEval(t, base) {
+		t.Fatalf("上级应为真实父目录（名录不再是边界）: %q", resp.Parent)
 	}
-	// 家目录不在根内 → 不返回（前端按钮自动消失，而不是给一个必然报错的入口）。
-	if resp.Home != "" {
-		t.Fatalf("家目录不在白名单内时不应返回 home: %q", resp.Home)
+	// 家目录恒下发。
+	if resp.Home == "" {
+		t.Fatal("home 应恒下发（全系统口径下不存在「不在范围内」这回事）")
 	}
-	// 符号链接逃逸的子项不列（只应有 proj，escape 真身在根外）。
+	// 根内指向根外的符号链接子项照列（它可进入、可被选为工作空间）。
+	names := map[string]bool{}
 	for _, e := range resp.Entries {
-		if e.Name == "escape" {
-			t.Fatalf("真身落在根外的符号链接子项不应列出: %+v", resp.Entries)
-		}
+		names[e.Name] = true
+	}
+	if !names["escape"] {
+		t.Fatalf("符号链接子项应照列（不再会「点了必被拒」）: %+v", resp.Entries)
 	}
 
-	// 根内子目录：上级 = 根（合法，允许回去）。
-	sub, err := svc.BrowseWorkspace(inside, false)
-	if err != nil {
-		t.Fatalf("BrowseWorkspace(根内): %v", err)
+	// 名录外的目录照样能浏览。
+	if _, err := svc.BrowseWorkspace(outsideDir, false); err != nil {
+		t.Fatalf("名录外的目录应可浏览: %v", err)
 	}
-	if sub.Parent != mustEval(t, root) {
-		t.Fatalf("根内子目录的上级应为根: %q", sub.Parent)
-	}
-	// 越界 path → 与建会话同一个错。
-	if _, err := svc.BrowseWorkspace(outsideDir, false); aclCode(t, err) != "workspace_outside_roots" {
-		t.Fatalf("越界浏览应 workspace_outside_roots: %v", err)
+	// 只有"路径本身不能用"才报错。
+	if _, err := svc.BrowseWorkspace(filepath.Join(base, "nope"), false); aclCode(t, err) != "workspace_invalid" {
+		t.Fatalf("不存在的目录应 workspace_invalid: %v", err)
 	}
 }
 
-// TestRecentWorkspacesFilteredByRoots 白名单外的历史工作空间不再作为"可再选用"的候选。
-func TestRecentWorkspacesFilteredByRoots(t *testing.T) {
+// TestBrowseWorkspaceCrumbs 面包屑（v14.3）：从文件系统根到当前目录（含自身），逐级可跳。
+//
+// 为什么由服务端算：前端按路径字符串切分会在盘符 / UNC / 符号链接（macOS 的 /var → /private/var）
+// 三处切错，而"位置显示错了"比"选不到"更让人困惑。
+func TestBrowseWorkspaceCrumbs(t *testing.T) {
+	base := t.TempDir()
+	deep := filepath.Join(base, "proj", "src")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	resp, err := svc.BrowseWorkspace(deep, false)
+	if err != nil {
+		t.Fatalf("BrowseWorkspace: %v", err)
+	}
+	if len(resp.Crumbs) < 3 {
+		t.Fatalf("面包屑至少含根/…/自身: %+v", resp.Crumbs)
+	}
+	// 链首是文件系统根，且根的 Name 用它自身的路径（basename 是空串，编名字没有意义）。
+	first := resp.Crumbs[0]
+	if first.Path != filepath.Dir(first.Path) || first.Name != first.Path {
+		t.Fatalf("面包屑首项应为文件系统根（名字=自身路径）: %+v", first)
+	}
+	// 尾项是当前目录，且与响应里的 path 逐字一致（前端据此显示"我在哪"）。
+	last := resp.Crumbs[len(resp.Crumbs)-1]
+	if last.Path != resp.Path {
+		t.Fatalf("面包屑尾项应为当前目录: %+v want %q", last, resp.Path)
+	}
+	// 逐级关系：每一项都是前一项的直接子目录。
+	for i := 1; i < len(resp.Crumbs); i++ {
+		if got := filepath.Dir(resp.Crumbs[i].Path); got != resp.Crumbs[i-1].Path {
+			t.Fatalf("面包屑不是逐级链: %q 的父不是 %q", resp.Crumbs[i].Path, resp.Crumbs[i-1].Path)
+		}
+	}
+}
+
+// TestBrowseWorkspaceMarksHiddenAndTruncates 隐藏标记与单层截断（v14.3）。
+//
+// 两条都是"界面要能说清"的事：hidden 标记让「显示隐藏文件」成为纯客户端开关（切换不重发请求），
+// truncated 让"还有未显示的子目录"被说出来——静默少几行是最坏的一种（用户以为目录就这些）。
+func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"visible", ".hidden"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	// hidden=false：隐藏行不下发（但 visible 行必须带 Hidden=false 这个零值语义）。
+	plain, err := svc.BrowseWorkspace(root, false)
+	if err != nil {
+		t.Fatalf("BrowseWorkspace: %v", err)
+	}
+	if len(plain.Entries) != 1 || plain.Entries[0].Name != "visible" || plain.Entries[0].Hidden {
+		t.Fatalf("hidden=false 应只列非隐藏目录且不带标记: %+v", plain.Entries)
+	}
+	if plain.Truncated {
+		t.Fatalf("小目录不该报截断: %+v", plain)
+	}
+	// hidden=true：隐藏行下发且带标记，供前端自己做显示开关。
+	withHidden, err := svc.BrowseWorkspace(root, true)
+	if err != nil {
+		t.Fatalf("BrowseWorkspace(hidden): %v", err)
+	}
+	if len(withHidden.Entries) != 2 {
+		t.Fatalf("hidden=true 应含隐藏目录: %+v", withHidden.Entries)
+	}
+	marked := false
+	for _, e := range withHidden.Entries {
+		if e.Name == ".hidden" && e.Hidden {
+			marked = true
+		}
+	}
+	if !marked {
+		t.Fatalf("隐藏目录应带 hidden 标记: %+v", withHidden.Entries)
+	}
+
+	// 截断：造出超过上限的子目录（上限是常量，这里只验"越界即置位 + 条数不超上限"）。
+	many := t.TempDir()
+	for i := 0; i <= browseEntryLimit; i++ {
+		if err := os.Mkdir(filepath.Join(many, fmt.Sprintf("d%05d", i)), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	big, err := svc.BrowseWorkspace(many, false)
+	if err != nil {
+		t.Fatalf("BrowseWorkspace(大目录): %v", err)
+	}
+	if len(big.Entries) != browseEntryLimit || !big.Truncated {
+		t.Fatalf("超上限应截断并置位: len=%d truncated=%v", len(big.Entries), big.Truncated)
+	}
+}
+
+// TestCreateWorkspaceDir 建目录的四条规则（v14.3；目录浏览面的「新建文件夹」）。
+func TestCreateWorkspaceDir(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
-	inside := filepath.Join(root, "proj")
-	outside := filepath.Join(base, "legacy")
-	for _, d := range []string{inside, outside} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+	proj := filepath.Join(root, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	base0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	// 白名单是后配的：旧的 legacy 会话仍在（且可继续），但不该被推荐为新的工作空间。
-	svc.registerConversation(&ConversationRec{ID: "n-1", AgentID: "a1", Cwd: mustEval(t, outside), UpdatedAt: base0})
-	svc.registerConversation(&ConversationRec{ID: "n-2", AgentID: "a1", Cwd: mustEval(t, inside), UpdatedAt: base0.Add(time.Hour)})
 	mustWorkspacePolicy(t, svc, filepath.Join(root, "tmp"), []string{mustEval(t, root)})
 
-	list, err := svc.RecentWorkspaces(10)
+	// 合法：建在根内子目录下，回**规范化后**的绝对路径（前端拿它直接当 cwd）。
+	resp, err := svc.CreateWorkspaceDir(proj, "新项目")
 	if err != nil {
-		t.Fatalf("RecentWorkspaces: %v", err)
+		t.Fatalf("CreateWorkspaceDir: %v", err)
 	}
-	if len(list) != 1 || list[0].Path != mustEval(t, inside) {
-		t.Fatalf("白名单外的历史工作空间不应出现在最近列表: %+v", list)
+	if resp.Path != filepath.Join(mustEval(t, proj), "新项目") {
+		t.Fatalf("应回规范化后的新目录路径: %q", resp.Path)
 	}
-}
+	if st, serr := os.Stat(resp.Path); serr != nil || !st.IsDir() {
+		t.Fatalf("目录应真的建出来了: %v", serr)
+	}
 
-// ——— 资料库（根的一级子目录）+ 目录内容（看资料） ———
-
-// TestWorkspaceLibraries 资料库 = 工作区根的一级子目录：零新状态、按名排序、带会话聚合。
-func TestWorkspaceLibraries(t *testing.T) {
-	base := t.TempDir()
-	rootA := filepath.Join(base, "docs")
-	rootB := filepath.Join(base, "repos")
-	// A 下两个资料库 + 一个隐藏目录 + 一个文件（都不算资料库）；
-	// A 下还有一个指向根外的符号链接（点进去必被拒 → 不列）。
-	for _, d := range []string{filepath.Join(rootA, "合同归档"), filepath.Join(rootA, ".private"), filepath.Join(rootB, "ark-mate")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
+	// 名字规则：单段、非 "." / ".."。
+	for _, bad := range []string{"", "  ", "a/b", `a\b`, ".", ".."} {
+		if _, err := svc.CreateWorkspaceDir(proj, bad); aclCode(t, err) != "workspace_invalid" {
+			t.Fatalf("名字 %q 应被拒: %v", bad, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(rootA, "readme.md"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
+	// 已存在 → 40901（不覆盖、不静默复用："我建的那个"与"原来就有那个"是两件事）。
+	if _, err := svc.CreateWorkspaceDir(proj, "新项目"); aclCode(t, err) != "workspace_exists" {
+		t.Fatalf("同名目录应 workspace_exists: %v", err)
 	}
-	outside := filepath.Join(base, "elsewhere")
-	if err := os.MkdirAll(outside, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	// 名录外照样能建（白名单不再是边界）：落点由用户自己选。
+	if _, err := svc.CreateWorkspaceDir(base, "outside-ok"); err != nil {
+		t.Fatalf("名录外的父目录应可建目录: %v", err)
 	}
-	if err := os.Symlink(outside, filepath.Join(rootA, "link")); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
-
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	// 未配 roots → 没有资料库（策展能力的前提是先画边界），且不报错。
-	if list, err := svc.WorkspaceLibraries(); err != nil || len(list) != 0 {
-		t.Fatalf("未配白名单应返回空列表: %v err=%v", list, err)
-	}
-
-	// 代建根刻意**建出来**并放在根内（roots 配置下它必然在某个根内）：
-	// 它绝不能作为一个"资料库"出现在列表里——那是平台的实现细节，不是用户的资料。
-	provision := filepath.Join(rootA, "tmp")
-	if err := os.MkdirAll(provision, 0o755); err != nil {
-		t.Fatalf("mkdir provision: %v", err)
-	}
-	mustWorkspacePolicy(t, svc, provision, []string{mustEval(t, rootA), mustEval(t, rootB)})
-	// 会话聚合：合同归档用过 2 次、ark-mate 用过 1 次。
-	base0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	svc.registerConversation(&ConversationRec{ID: "l-1", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootA, "合同归档")), UpdatedAt: base0})
-	svc.registerConversation(&ConversationRec{ID: "l-2", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootA, "合同归档")), UpdatedAt: base0.Add(time.Hour)})
-	svc.registerConversation(&ConversationRec{ID: "l-3", AgentID: "a1", Cwd: mustEval(t, filepath.Join(rootB, "ark-mate")), UpdatedAt: base0.Add(2 * time.Hour)})
-
-	list, err := svc.WorkspaceLibraries()
-	if err != nil {
-		t.Fatalf("WorkspaceLibraries: %v", err)
-	}
-	// 期望恰好 2 个：合同归档（A）、ark-mate（B）——隐藏目录/文件/根外符号链接/代建根 tmp 都不算。
-	// 排序按名（"ark-mate" < "合同归档"，ASCII 先于中文）。
-	if len(list) != 2 {
-		t.Fatalf("资料库数量不符（代建根 tmp 不该出现）: %+v", list)
-	}
-	if list[0].Name != "ark-mate" || list[0].Root != mustEval(t, rootB) || list[0].Conversations != 1 {
-		t.Fatalf("第一个资料库不符: %+v", list[0])
-	}
-	if list[1].Name != "合同归档" || list[1].Root != mustEval(t, rootA) {
-		t.Fatalf("第二个资料库不符: %+v", list[1])
-	}
-	if list[1].Conversations != 2 || list[1].LastUsedAt != base0.Add(time.Hour).Format(time.RFC3339) {
-		t.Fatalf("资料库应带会话数与最近使用时间: %+v", list[1])
-	}
-	// path 必须可直接当 cwd 用（与建会话同一条校验），否则"选了资料库却建不了会话"。
-	for _, l := range list {
-		if _, err := ValidateWorkspace(l.Path, svc.WorkspaceRoots()); err != nil {
-			t.Fatalf("资料库 path 不是可直接使用的 cwd: %q err=%v", l.Path, err)
-		}
-	}
-
-	// 代建根本身一旦（隐式）成为生效名单的一员，它**下面**的第一层子目录就是按会话 id 命名的
-	// 沙箱目录：它们同样不能进资料库列表——否则用户会看到一串 "ses_xxx" 被当成"资料库"。
-	if err := os.MkdirAll(filepath.Join(provision, "ses_ws_temp"), 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
-	}
-	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
-	mustWorkspacePolicy(t, svc2, provision, []string{mustEval(t, rootA)})
-	list2, err := svc2.WorkspaceLibraries()
-	if err != nil {
-		t.Fatalf("WorkspaceLibraries: %v", err)
-	}
-	for _, l := range list2 {
-		if l.Name == "tmp" || l.Name == "ses_ws_temp" {
-			t.Fatalf("代建根与其下的会话目录都不该是资料库: %+v", list2)
-		}
-	}
-}
-
-// TestWorkspaceLibrariesRootUnreadable 单个根不可读不该让整个列表失败（挂载掉了就少显示一个）。
-func TestWorkspaceLibrariesRootUnreadable(t *testing.T) {
-	readable := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(readable, "ok"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	missing := filepath.Join(t.TempDir(), "gone") // 不创建：ReadDir 会失败
-	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	// 策略设置只做形态校验（root 不存在不报错，挂载点可能晚于进程出现），故这里能配上。
-	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, readable), missing})
-
-	list, err := svc.WorkspaceLibraries()
-	if err != nil {
-		t.Fatalf("不可读的根不应让列表失败: %v", err)
-	}
-	if len(list) != 1 || list[0].Name != "ok" {
-		t.Fatalf("应只回可读根下的资料库: %+v", list)
+	// 父目录不存在 → workspace_invalid（与浏览面同一条校验）。
+	if _, err := svc.CreateWorkspaceDir(filepath.Join(proj, "nope"), "x"); aclCode(t, err) != "workspace_invalid" {
+		t.Fatalf("不存在的父目录应 workspace_invalid: %v", err)
 	}
 }
 
@@ -847,32 +866,42 @@ func TestListWorkspaceFiles(t *testing.T) {
 	if resp.Path != mustEval(t, root) || len(resp.Roots) != 1 {
 		t.Fatalf("path/roots 不符: %+v", resp)
 	}
-	if len(resp.Entries) != 2 {
-		t.Fatalf("应只列 合同/ + a.pdf（隐藏/根外链接/断链都不列）: %+v", resp.Entries)
+	// v14.5：只有"隐藏项"与"断链"不列——根外真身的符号链接照列（它可进入，也可能被选为工作空间）。
+	if len(resp.Entries) != 3 {
+		t.Fatalf("应列 合同/ + escape/ + a.pdf: %+v", resp.Entries)
 	}
-	if !resp.Entries[0].IsDir || resp.Entries[0].Name != "合同" {
-		t.Fatalf("目录应排在前: %+v", resp.Entries)
+	byName := map[string]int{}
+	for i, e := range resp.Entries {
+		byName[e.Name] = i
 	}
-	if got := resp.Entries[1]; got.IsDir || got.Name != "a.pdf" || got.Size != int64(len(body)) || got.ModifiedAt == "" {
+	if i, ok := byName["合同"]; !ok || !resp.Entries[i].IsDir {
+		t.Fatalf("目录应在前半段且标 is_dir: %+v", resp.Entries)
+	}
+	if i, ok := byName["a.pdf"]; !ok {
+		t.Fatalf("文件条目应列出: %+v", resp.Entries)
+	} else if got := resp.Entries[i]; got.IsDir || got.Size != int64(len(body)) || got.ModifiedAt == "" {
 		t.Fatalf("文件条目应带大小与修改时间: %+v", got)
 	}
+	if _, ok := byName["broken"]; ok {
+		t.Fatalf("断链不应列出: %+v", resp.Entries)
+	}
 
-	// hidden=true → 含隐藏项（仍不含根外符号链接）。
+	// hidden=true → 含隐藏项。
 	withHidden, err := svc.ListWorkspaceFiles(root, true)
 	if err != nil {
 		t.Fatalf("ListWorkspaceFiles(hidden): %v", err)
 	}
-	if len(withHidden.Entries) != 3 {
-		t.Fatalf("hidden=true 应含 .hidden: %+v", withHidden.Entries)
+	if len(withHidden.Entries) != 4 {
+		t.Fatalf("hidden=true 应含 .hidden（断链仍不列）: %+v", withHidden.Entries)
 	}
 
 	// path 必填：不给 path 是调用方的错，不是"回落到某个默认目录"——看资料必须明确看哪里。
 	if _, err := svc.ListWorkspaceFiles("", false); aclCode(t, err) != "workspace_invalid" {
 		t.Fatalf("空 path 应 workspace_invalid: %v", err)
 	}
-	// 越界与不存在同样是 workspace_invalid / workspace_outside_roots（与建会话同一套）。
-	if _, err := svc.ListWorkspaceFiles(outside, false); aclCode(t, err) != "workspace_outside_roots" {
-		t.Fatalf("越界目录应 workspace_outside_roots: %v", err)
+	// 名录外的目录照常可看（v14.5：不再按名录过滤）。
+	if _, err := svc.ListWorkspaceFiles(outside, false); err != nil {
+		t.Fatalf("名录外的目录应可列出内容: %v", err)
 	}
 	if _, err := svc.ListWorkspaceFiles(filepath.Join(root, "nope"), false); aclCode(t, err) != "workspace_invalid" {
 		t.Fatalf("不存在目录应 workspace_invalid: %v", err)
@@ -889,5 +918,38 @@ func TestListWorkspaceFiles(t *testing.T) {
 	}
 	if _, err := svc.ListWorkspaceFiles(linkIn, false); err != nil {
 		t.Fatalf("根内符号链接目录应可读: %v", err)
+	}
+}
+
+// TestSessionWorksOutsidePreferenceRoots 名录**不是边界**：名录外的目录照样能开会话（v14.5 的产品口径）。
+//
+// 为什么单独立一条：上面那些用例各自只钉一个函数（Validate / Browse / DirCreate / Register），
+// 而"选工作区是全系统"这句话的用户可见形态是**建会话能落在名录外**。这条走的是与
+// `POST /conversations` 同一条解析链（ResolveWorkspace → ValidateWorkspace），
+// 所以它红了就意味着"用户在应用内选不到名录外的目录"。
+func TestSessionWorksOutsidePreferenceRoots(t *testing.T) {
+	base := t.TempDir()
+	preferred := filepath.Join(base, "preferred")
+	other := filepath.Join(base, "somewhere-else")
+	for _, d := range []string{preferred, other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+
+	svc := NewService(runtime.NewRegistry(), eventbus.New())
+	mustWorkspacePolicy(t, svc, filepath.Join(base, "tmp"), []string{mustEval(t, preferred)})
+
+	res, err := ResolveWorkspace(other, nil)
+	if err != nil {
+		t.Fatalf("名录外的目录应能作为会话 cwd（选工作区是全系统）: %v", err)
+	}
+	if res.Path != mustEval(t, other) || res.Temporary {
+		t.Fatalf("显式 cwd 应原样生效且不标 Temporary: %+v", res)
+	}
+	// 未指定 cwd 时仍落默认工作空间（这条与名录无关，别被上一条改动带偏）。
+	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: preferred}
+	if got, err := ResolveWorkspace("", def); err != nil || !got.Temporary || got.WorkspaceID != "wsp-default" {
+		t.Fatalf("未指定 cwd 应落默认工作空间: %+v err=%v", got, err)
 	}
 }

@@ -7,12 +7,11 @@ import { modelValues } from '@ark-mate/types'
 import { useMate } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
-import { NO_WORKSPACE, WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
+import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
 import { CapabilityPicker } from './CapabilityPicker'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
-import { browseWorkspaces } from '@ark-mate/api'
 
 // 新建会话时记住的「上次所选模型」。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
@@ -46,16 +45,16 @@ export function StartPanel() {
     const v = localStorage.getItem(LAST_MODEL_KEY)
     return v && v.trim() ? v : null
   })
-  // 工作空间选择（v14）：`{id}` = 选中的登记项；`{cwd}` = 直接输入的绝对路径；两者皆空 = 未指定
-  // （会话落在**默认工作空间**）。
+  // 工作空间选择（v14）：`null` = 未指定（会话落在**默认工作空间**）；否则是选中的登记 id
+  // （v14.3 起这里只剩 id：选择面删掉「输入路径」后，前端不再产生裸绝对路径这种值）。
   //
   // v14.1 改口径：新建会话**默认预选「最近使用的工作空间」**（用户明确要求，取代 v14 的
   // "每次都从未指定开始"）。理由不冲突——工作空间确实是会话的沙箱边界，所以这里只做**预选**：
   // 选择器在面板上如实显示这个目录，用户看得见、发送前随时能改；不预选反而会出现
   // "我上一轮就在 ark-mate 里干活，这一轮却又落回默认目录"这种需要用户自己重新翻一遍的默认值。
   // 判定与优先级只有一份：`console/workspaceView.ts`；拿不到登记表就退回"未指定"。
-  const [workspace, setWorkspace] = useState<WorkspaceChoice>(NO_WORKSPACE)
-  // 用户显式选过之后（含左栏「＋」预选、输入路径），默认值不再回写——否则一次列表刷新
+  const [workspace, setWorkspace] = useState<WorkspaceChoice>({ id: null })
+  // 用户显式选过之后（含左栏「＋」预选），默认值不再回写——否则一次列表刷新
   // 就会把用户刚选好的目录顶掉，而那看起来像"我的选择没生效"。
   const [workspacePicked, setWorkspacePicked] = useState(false)
   const pickWorkspace = (next: WorkspaceChoice) => {
@@ -73,7 +72,7 @@ export function StartPanel() {
   useEffect(() => {
     if (!preferredWorkspaceId) return
     setWorkspacePicked(true)
-    setWorkspace({ id: preferredWorkspaceId, cwd: null })
+    setWorkspace({ id: preferredWorkspaceId })
     setPreferredWorkspace(null)
   }, [preferredWorkspaceId, setPreferredWorkspace])
 
@@ -82,7 +81,7 @@ export function StartPanel() {
     if (workspacePicked) return
     const id = mostRecentlyUsedWorkspaceId(workspaces)
     if (!id) return
-    setWorkspace({ id, cwd: null })
+    setWorkspace({ id })
   }, [workspaces, workspacePicked])
 
   // 能力选定（M3）：缺省 = 两个 kind 都不限制（请求体里不加 capabilities 键，逐字节等同旧行为）。
@@ -124,30 +123,10 @@ export function StartPanel() {
     }
   }, [model, modelOptions])
 
-  // 已选的**裸路径**若已不存在（目录被删/被移走），就地清掉：否则要等首轮发送才被服务端拒
-  // （40001），用户先看到的是一个失败气泡而不是一个可修的状态。
-  // 存在时顺带把值对齐成服务端形态（服务端做符号链接规范化），避免同一目录两种写法。
-  //
-  // v14：只对 `cwd`（输入路径那条路）校验。**登记项不在这里校验**——它的目录状态由
-  // `GET /workspaces` 的 `dir_status` 下发，选择器已经据此禁用了不可用的项；
-  // 而且拿 id 去 `browse` 是问错了接口。
-  useEffect(() => {
-    if (!workspace.cwd) return
-    let alive = true
-    const cwd = workspace.cwd
-    browseWorkspaces(cwd)
-      .then((resp) => {
-        if (!alive || resp.path === cwd) return
-        setWorkspace({ id: null, cwd: resp.path })
-      })
-      .catch(() => {
-        if (!alive) return
-        setWorkspace(NO_WORKSPACE)
-      })
-    return () => {
-      alive = false
-    }
-  }, [workspace])
+  // 选中的登记项**不在这里校验**目录是否存在：它的目录状态由 `GET /workspaces` 的 `dir_status`
+  // 下发，选择器已经据此禁用了不可用的那一行（拿 id 去 `browse` 是问错了接口）。
+  // v14.3 删掉了这里原先对"裸路径"的校验——选择面收敛后前端不再产生裸路径（`WorkspaceChoice`
+  // 只剩 id），留着那段等于维护一条走不到的路径。
 
   const send = async () => {
     if (!canSend) return
@@ -156,7 +135,7 @@ export function StartPanel() {
       const id = await createAndRun(
         draft.trim(),
         model ? { modelID: model } : undefined,
-        workspace,
+        workspace.id,
         // UI 三态（null = 未限制）→ wire 形态（键缺失 = 未限制）：两个 kind 都没限制时返回
         // undefined，请求体里连 capabilities 键都不出现。转换只此一处，别的层不再判。
         selectionPayload(capabilities),

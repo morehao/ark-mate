@@ -58,6 +58,8 @@ var _ SystemCtr = (*systemCtr)(nil)
 
 type systemCtr struct {
 	meta func() MetaSource
+	// hostFacts 报告"宿主能不能抬起系统目录面板"；nil = 未知（当 false，能力声明退化）。
+	hostFacts func() bool
 }
 
 // NewSystemCtr 构造系统面控制器。`meta` 由装配层凑齐（版本、数据目录、载荷、资产，
@@ -65,8 +67,8 @@ type systemCtr struct {
 //
 // 参数是**函数**而不是值：`/meta` 里的资产字段（尤其 build id）要反映"核心此刻服务的那份资产"，
 // 而不是进程启动瞬间的快照——版本闸门据此发现"dist 被换过"（M2-4）。
-func NewSystemCtr(meta func() MetaSource) SystemCtr {
-	return &systemCtr{meta: meta}
+func NewSystemCtr(meta func() MetaSource, hostFacts func() bool) SystemCtr {
+	return &systemCtr{meta: meta, hostFacts: hostFacts}
 }
 
 // GetMeta 诊断面：这份部署的版本、资产来源与数据目录。
@@ -75,11 +77,18 @@ func (h *systemCtr) GetMeta(c *gin.Context) {
 }
 
 // GetCapabilities 声明面：两个入口**同构**（id 集合与顺序完全一致），只有 available 随入口不同。
+//
+// v14.5 起多了一类：`native-dialog` 的可用性由**宿主事实**给出（`hostFacts` 由装配层注入），
+// 因为那个对话框是核心进程抬的——本机浏览器也能用，远程/SSH 才不行。
 func (h *systemCtr) GetCapabilities(c *gin.Context) {
 	desktop := strings.EqualFold(strings.TrimSpace(c.GetHeader(CarrierHeader)), CarrierDesktop)
+	facts := CapabilityFacts{Desktop: desktop}
+	if h.hostFacts != nil {
+		facts.NativeDialog = h.hostFacts()
+	}
 	gincontext.Success(c, Capabilities{
 		Entries:      Entries{Browser: true, Desktop: desktop},
-		Capabilities: capabilityList(desktop),
+		Capabilities: capabilityList(facts),
 	})
 }
 
@@ -87,25 +96,46 @@ func (h *systemCtr) GetCapabilities(c *gin.Context) {
 type capabilityDecl struct {
 	id              string
 	browserFallback string
+	// hostResolved 该能力的可用性由**宿主事实**决定，而不是"客户端是不是桌面壳"。
+	//
+	// v14.5 起 `native-dialog` 属于这一类：目录面板是**核心进程**抬起来的（macOS osascript /
+	// Linux zenity·kdialog），所以本机浏览器打开控制台也能用到它——这与参照实现把判定放在宿主侧
+	// 是同一条口径（远程/SSH/无显示会话才退化成应用内浏览）。
+	hostResolved bool
 }
 
 // capabilityDecls 能力声明的**冻结顺序**（设计 §7.3 的表按此顺序；id 与前端契约的联合类型一一对应）。
 //
 // 顺序也冻结：前端可以按下标做稳定渲染，V18 的"两个入口同构"断言比的就是 id 序列。
 var capabilityDecls = []capabilityDecl{
-	{"tray", "none"}, // 纯增强：没有浏览器等价物，也不阻塞任何流程
-	{"native-dialog", "server:directory-browse"}, // 浏览器端走服务端目录浏览 API
-	{"open-path", "ui:show-path-copy"},           // 浏览器端显示路径 + 复制
-	{"diagnostics-export", "http:download"},      // 浏览器端直接下载导出包
-	{"deep-link", "url:direct"},                  // 浏览器端 URL 直达
-	{"update", "deployer:replace-binary"},        // 浏览器端由部署者替换二进制
+	{"tray", "none", false}, // 纯增强：没有浏览器等价物，也不阻塞任何流程
+	// 宿主原生目录选择器：**可用性看宿主**（绑回环 + 非 SSH + 有显示会话），不看入口形态；
+	// 宿主抬不起来时走服务端目录浏览（`browse` 那半永远可用）。
+	{"native-dialog", "server:directory-browse", true},
+	{"open-path", "ui:show-path-copy", false},      // 浏览器端显示路径 + 复制
+	{"diagnostics-export", "http:download", false}, // 浏览器端直接下载导出包
+	{"deep-link", "url:direct", false},             // 浏览器端 URL 直达
+	{"update", "deployer:replace-binary", false},   // 浏览器端由部署者替换二进制
 }
 
-// capabilityList 按入口给出能力声明。`available` 是唯一的差异项。
-func capabilityList(desktop bool) []CapabilityEntry {
+// CapabilityFacts 能力声明要用的宿主事实（装配层注入，避免控制器去猜）。
+type CapabilityFacts struct {
+	// Desktop 本次请求来自桌面壳（`X-Mate-Carrier: desktop`）。
+	Desktop bool
+	// NativeDialog 宿主能不能抬起系统目录面板（`manager.NativePickerMode() == native`）。
+	NativeDialog bool
+}
+
+// capabilityList 按事实给出能力声明。`available` 是唯一的差异项：
+// 宿主判定的能力看宿主，其余看"客户端是不是桌面壳"。
+func capabilityList(f CapabilityFacts) []CapabilityEntry {
 	out := make([]CapabilityEntry, 0, len(capabilityDecls))
 	for _, d := range capabilityDecls {
-		out = append(out, CapabilityEntry{ID: d.id, Available: desktop, BrowserFallback: d.browserFallback})
+		available := f.Desktop
+		if d.hostResolved {
+			available = f.NativeDialog
+		}
+		out = append(out, CapabilityEntry{ID: d.id, Available: available, BrowserFallback: d.browserFallback})
 	}
 	return out
 }
