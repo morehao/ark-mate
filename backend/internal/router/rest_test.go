@@ -37,6 +37,7 @@ type stubSvc struct {
 	listAgentsErr        error
 	listConversationsErr error
 	listCwd              string // 最近一次 ListConversations 的工作空间过滤参数
+	listWorkspaceID      string // 最近一次 ListConversations 的归属过滤参数（v14）
 	listArchivedOnly     bool   // 最近一次 ListConversations 的 archived 参数
 
 	browsePath    string // 最近一次 BrowseWorkspace 的 path 参数
@@ -57,6 +58,20 @@ type stubSvc struct {
 	settingsErr    error
 	settingsCalled bool     // UpdateWorkspaceSettings 是否被调用（"传了空名单"与"没调用"必须能区分）
 	settingsRoots  []string // 最近一次 UpdateWorkspaceSettings 收到的 roots
+
+	// v14 工作空间登记表（桩只记参 + 透传；领域判断全在 manager）。
+	registryList         *dtoworkspace.WorkspaceListResp
+	registryOne          *dtoworkspace.WorkspaceResp
+	registryDelete       *dtoworkspace.WorkspaceDeleteResp
+	registryMove         *dtoworkspace.WorkspaceMoveResp
+	registryErr          error
+	registryListCalled   bool
+	registryCreatePath   string
+	registryCreateTitle  string
+	registryCreateStrict bool
+	registryRenameTitle  string
+	registryID           string
+	registryMoveBefore   string
 
 	diagID   string
 	diagResp *dtoagent.AgentDiagnosticsResp
@@ -498,8 +513,8 @@ func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*dtocapability.M
 	}
 	return &dtocapability.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
-func (s *stubSvc) ListConversations(archived bool, cwd string) ([]dtoconversation.ConversationResp, error) {
-	s.listArchivedOnly, s.listCwd = archived, cwd
+func (s *stubSvc) ListConversations(archived bool, cwd, workspaceID string) ([]dtoconversation.ConversationResp, error) {
+	s.listArchivedOnly, s.listCwd, s.listWorkspaceID = archived, cwd, workspaceID
 	if s.listConversationsErr != nil {
 		return nil, s.listConversationsErr
 	}
@@ -550,6 +565,52 @@ func (s *stubSvc) UpdateWorkspaceSettings(roots []string) (*dtoworkspace.Workspa
 		return nil, s.settingsErr
 	}
 	return s.settingsResp, nil
+}
+
+// ——— v14 工作空间登记表桩 ———
+//
+// 这一组桩只做**透传 + 记参**：控制器在本轮里没有任何领域判断（校验、默认工作空间、
+// 归属解析全在 manager），所以路由测试要证明的也只是"路径与参数原样到了端口、
+// 错误按带码信封出去"。领域语义由 manager 与 store 的测试覆盖。
+
+func (s *stubSvc) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error) {
+	s.registryListCalled = true
+	if s.registryErr != nil {
+		return nil, s.registryErr
+	}
+	return s.registryList, nil
+}
+
+func (s *stubSvc) CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error) {
+	s.registryCreatePath, s.registryCreateTitle, s.registryCreateStrict = path, title, strict
+	if s.registryErr != nil {
+		return nil, s.registryErr
+	}
+	return s.registryOne, nil
+}
+
+func (s *stubSvc) RenameRegisteredWorkspace(id, title string) (*dtoworkspace.WorkspaceResp, error) {
+	s.registryID, s.registryRenameTitle = id, title
+	if s.registryErr != nil {
+		return nil, s.registryErr
+	}
+	return s.registryOne, nil
+}
+
+func (s *stubSvc) DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDeleteResp, error) {
+	s.registryID = id
+	if s.registryErr != nil {
+		return nil, s.registryErr
+	}
+	return s.registryDelete, nil
+}
+
+func (s *stubSvc) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.WorkspaceMoveResp, error) {
+	s.registryID, s.registryMoveBefore = id, beforeID
+	if s.registryErr != nil {
+		return nil, s.registryErr
+	}
+	return s.registryMove, nil
 }
 
 func (s *stubSvc) SearchConversations(_ context.Context, _ string, _ int) ([]dtoconversation.ConversationSearchHit, error) {
@@ -779,6 +840,137 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 	env, _ = do(t, r, "PUT", "/v1/mate/settings/workspace", `{"roots":["/srv/docs"]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("领域错误应经 RestErr 透出: %+v", env)
+	}
+}
+
+// TestWorkspaceRegistryCtrPassThrough v14 登记表的控制器职责：路径参数与 body 原样到端口、
+// 领域错误经带码信封出去。
+//
+// 控制器在本轮里没有任何领域判断（校验、默认工作空间、归属解析全在 manager），所以这里
+// 要证明的就是这条透传链——尤其是**路径参数别被静态路由抢走**（`/workspaces/browse` 之类
+// 是与 `/workspaces/:id` 共存的静态段，顺序错了会把 `browse` 当成 id 打过来）。
+func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
+	one := &dtoworkspace.WorkspaceResp{
+		ID: "wsp-1", Path: "/Users/me/work/ark-mate", Title: "ark-mate",
+		DirStatus: dtoworkspace.DirStatusOK, Conversations: 12, CreatedAt: "2026-10-11T00:00:00Z",
+	}
+	svc := &stubSvc{
+		registryOne:    one,
+		registryList:   &dtoworkspace.WorkspaceListResp{Items: []dtoworkspace.WorkspaceResp{*one}, DefaultID: "wsp-default", Writable: true},
+		registryDelete: &dtoworkspace.WorkspaceDeleteResp{ID: "wsp-1", ReleasedSessions: 12},
+		registryMove:   &dtoworkspace.WorkspaceMoveResp{IDs: []string{"wsp-2", "wsp-1"}},
+	}
+	r := newRestEngine(stubDeps(svc))
+
+	// GET /workspaces：列表原样透出（含 default_id 与 writable——前端靠它们决定"未指定"归哪、
+	// 以及要不要渲染创建入口）。
+	env, _ := do(t, r, "GET", "/v1/mate/workspaces", "")
+	if env.Code != 0 {
+		t.Fatalf("GET /workspaces 应成功: %+v", env)
+	}
+	var list dtoworkspace.WorkspaceListResp
+	if err := json.Unmarshal(env.Data, &list); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if len(list.Items) != 1 || list.DefaultID != "wsp-default" || !list.Writable {
+		t.Fatalf("登记表应原样透出: %+v", list)
+	}
+
+	// POST /workspaces：path/title/strict 三个参数都要到端口（strict 决定重复登记是
+	// 返回既有行还是报错，漏传会让"必须新建"的调用方静默得到旧行）。
+	env, _ = do(t, r, "POST", "/v1/mate/workspaces", `{"path":"/Users/me/work/ark-mate","title":"昵称","strict":true}`)
+	if env.Code != 0 {
+		t.Fatalf("POST /workspaces 应成功: %+v", env)
+	}
+	if svc.registryCreatePath != "/Users/me/work/ark-mate" || svc.registryCreateTitle != "昵称" || !svc.registryCreateStrict {
+		t.Fatalf("创建参数未原样下发: path=%q title=%q strict=%v",
+			svc.registryCreatePath, svc.registryCreateTitle, svc.registryCreateStrict)
+	}
+
+	// PATCH /workspaces/:id：路径参数与 body 都要到端口。
+	env, _ = do(t, r, "PATCH", "/v1/mate/workspaces/wsp-1", `{"title":"新名字"}`)
+	if env.Code != 0 || svc.registryID != "wsp-1" || svc.registryRenameTitle != "新名字" {
+		t.Fatalf("改名参数未原样下发: code=%d id=%q title=%q", env.Code, svc.registryID, svc.registryRenameTitle)
+	}
+
+	// DELETE /workspaces/:id：released_sessions 必须回出来（界面那句"这 N 个会话回到默认
+	// 工作空间"要有事实支撑，不是前端自己猜的）。
+	env, _ = do(t, r, "DELETE", "/v1/mate/workspaces/wsp-1", "")
+	if env.Code != 0 || svc.registryID != "wsp-1" {
+		t.Fatalf("删除参数未原样下发: code=%d id=%q", env.Code, svc.registryID)
+	}
+	var del dtoworkspace.WorkspaceDeleteResp
+	if err := json.Unmarshal(env.Data, &del); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if del.ReleasedSessions != 12 {
+		t.Fatalf("released_sessions 应原样透出: %+v", del)
+	}
+
+	// POST /workspaces/:id/move：锚点原样下发；响应是**完整**顺序。
+	env, _ = do(t, r, "POST", "/v1/mate/workspaces/wsp-1/move", `{"before_id":"wsp-2"}`)
+	if env.Code != 0 || svc.registryID != "wsp-1" || svc.registryMoveBefore != "wsp-2" {
+		t.Fatalf("重排参数未原样下发: code=%d id=%q before=%q", env.Code, svc.registryID, svc.registryMoveBefore)
+	}
+	var mv dtoworkspace.WorkspaceMoveResp
+	if err := json.Unmarshal(env.Data, &mv); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if len(mv.IDs) != 2 || mv.IDs[0] != "wsp-2" {
+		t.Fatalf("重排应返回完整顺序: %+v", mv)
+	}
+
+	// **空 body 的 move 不是错误**（追加到尾部），所以缺省 body 也必须走通。
+	svc.registryMoveBefore = "sentinel"
+	if env, _ = do(t, r, "POST", "/v1/mate/workspaces/wsp-1/move", ""); env.Code != 0 {
+		t.Fatalf("空 body 的 move 应成功（= 追加到尾部）: %+v", env)
+	}
+	if svc.registryMoveBefore != "" {
+		t.Fatalf("空 body 时锚点应为空串（追加），实际 %q", svc.registryMoveBefore)
+	}
+
+	// 非法 body → 参数错误码（不是 1：面板要能区分"我传错了"与"服务端坏了"）。
+	if env, _ = do(t, r, "POST", "/v1/mate/workspaces", `{`); env.Code != 40000 {
+		t.Fatalf("非法 body 应 40000: %+v", env)
+	}
+
+	// 领域错误经带码信封出去（未知 id / 默认不可删 / memory 只读都要能被前端分辨）。
+	for _, c := range []struct {
+		code int
+		msg  string
+	}{
+		{40401, "[workspace_not_found] 未知工作空间"},
+		{40001, "[workspace_default_immutable] 默认工作空间不可删除"},
+		{40501, "[workspace_schema_read_only] 当前持久层为 memory"},
+	} {
+		svc.registryErr = gerror.Error{Code: c.code, Msg: c.msg}
+		env, _ = do(t, r, "DELETE", "/v1/mate/workspaces/wsp-x", "")
+		if env.Code != c.code || !strings.Contains(env.Msg, c.msg[:len("[")+len(strings.Fields(c.msg)[0])-1]) {
+			t.Fatalf("领域错误 %s 应经带码信封透出: %+v", c.msg, env)
+		}
+	}
+}
+
+// TestWorkspaceStaticRoutesBeatParamRoute `/workspaces/browse` 这类**静态段**不能被
+// `/workspaces/:id` 抢走。
+//
+// 为什么专门守：本组同时注册了 `GET /workspaces` 与 `GET /workspaces/browse`、以及
+// `PATCH/DELETE /workspaces/:id`。gin 的 radix 树对静态段优先，但这条性质**不是我们能控制的**
+// ——一旦它变了（或有人把路由挪到另一个 group 里重建），`browse` 会被当成 id 打进改名/删除。
+// 那种坏法是静默的：浏览目录突然报"未知工作空间"。
+func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
+	svc := &stubSvc{browseResp: &dtoworkspace.WorkspaceBrowseResp{Path: "/Users/me"}}
+	r := newRestEngine(stubDeps(svc))
+
+	env, _ := do(t, r, "GET", "/v1/mate/workspaces/browse?path=/Users/me", "")
+	if env.Code != 0 {
+		t.Fatalf("GET /workspaces/browse 应打到 Browse 而不是被 :id 抢走: %+v", env)
+	}
+	if svc.browsePath != "/Users/me" {
+		t.Fatalf("Browse 未收到 path（说明被当成 id 打到了别的 handler）: %q", svc.browsePath)
+	}
+	if svc.registryID != "" {
+		t.Fatalf("Browse 不该走到带参 handler: registryID=%q", svc.registryID)
 	}
 }
 

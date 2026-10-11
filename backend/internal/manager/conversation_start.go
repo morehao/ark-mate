@@ -135,7 +135,7 @@ func (o *Orchestrator) startConversationOn(ctx context.Context, agent *AgentRec,
 	o.mu.Unlock()
 
 	o.svc.registerConversation(&ConversationRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
-		WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
+		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
 		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
 		ProviderSessionID: sess.ID(), Status: ConversationStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径

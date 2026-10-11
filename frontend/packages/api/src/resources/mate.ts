@@ -3,70 +3,74 @@ import type {
   Agent,
   AgentCapabilities,
   AgentDeleteResp,
+  AgentDiagnostics,
   Automation,
   AutomationDeleteResp,
   AutomationPreviewResp,
-  AutomationRunsResp,
   AutomationRunResp,
+  AutomationRunsResp,
   AutomationWriteBody,
-  AgentDiagnostics,
-  PermissionPolicy,
-  Provider,
-  ProviderPatch,
   BusEvent,
   CancelConversationResp,
-  CapabilityWriteBody,
   CancelQueuedInputResp,
-  QueuedInputResp,
+  CapabilityWriteBody,
+  ConversationDetail,
+  ConversationPatch,
+  ConversationPromptResp,
+  ConversationRun,
+  ConversationSearchHit,
+  ConversationSummary,
   CreateConversationReq,
   CreateConversationResp,
   ElicitationResp,
-  McpServer,
+  ExportResp,
+  McpDeleteResp,
   McpProbeResult,
+  McpPromptGetResult,
+  McpPromptsResult,
+  McpResourceReadResult,
+  McpResourcesResult,
+  McpServer,
   McpToolCallReq,
   McpToolCallResult,
-  McpResourcesResult,
-  McpResourceReadResult,
-  McpPromptsResult,
-  McpPromptGetResult,
   McpWriteResp,
-  McpDeleteResp,
+  MessageSearchResp,
   ModelCatalogResp,
   ModelCreateReq,
   ModelDeleteResp,
   ModelPatchReq,
   ModelRow,
-  ModelsResp,
   ModelSyncResp,
-  ProviderCreateReq,
-  ProviderDeleteResp,
-  ProviderProbeResp,
+  ModelsResp,
+  PermissionPolicy,
   PermissionResp,
   PromptReq,
-  ConversationPromptResp,
+  Provider,
+  ProviderCreateReq,
+  ProviderDeleteResp,
+  ProviderPatch,
+  ProviderProbeResp,
+  QueuedInputResp,
   ResolveElicitationReq,
   ResolveElicitationResp,
   ResolvePermissionReq,
   ResolvePermissionResp,
   RevokeMemoryReq,
   Skill,
+  SkillDeleteResp,
   SkillMaterializationResp,
   SkillToggleResp,
   SkillWriteResp,
-  SkillDeleteResp,
   Tool,
-  ConversationDetail,
-  ConversationPatch,
-  ConversationRun,
-  ConversationSearchHit,
-  ConversationSummary,
-  MessageSearchResp,
-  ExportResp,
   UsageQuery,
   UsageSummary,
+  Workspace,
   WorkspaceBrowseResp,
+  WorkspaceDeleteResp,
   WorkspaceFilesResp,
   WorkspaceLibrary,
+  WorkspaceListResp,
+  WorkspaceMoveResp,
   WorkspaceRecent,
   WorkspaceSettings,
 } from '@ark-mate/types'
@@ -123,10 +127,11 @@ export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
   http.get<AgentDiagnostics>(`/mate/agents/${encodeURIComponent(id)}/diagnostics`)
 
 /** 列出未归档会话（`archived=true` 列出已归档；`cwd` 非空 = 只列工作空间精确等于该路径的会话）。 */
-export const listConversations = (archived = false, cwd?: string): Promise<ConversationSummary[]> => {
+export const listConversations = (archived = false, cwd?: string, workspaceId?: string): Promise<ConversationSummary[]> => {
   const s = new URLSearchParams()
   if (archived) s.set('archived', 'true')
   if (cwd) s.set('cwd', cwd)
+  if (workspaceId) s.set('workspace_id', workspaceId)
   const q = s.toString()
   return http.get<ConversationSummary[]>(`/mate/conversations${q ? `?${q}` : ''}`)
 }
@@ -534,3 +539,36 @@ export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
   const qs = p.toString()
   return http.get<UsageSummary>(`/mate/usage/summary${qs ? `?${qs}` : ''}`)
 }
+
+// ——— v14 工作空间**登记表**（选择器与左栏分组的事实源）———
+//
+// 与上面 `/workspaces/browse|libraries|files|recent` 的分工：那几条是**派生的只读视图**
+// （从磁盘或既有会话算出来的），这一组是**登记项**本身——有 id、可改写、可删除。
+
+/** 列出全部工作空间登记（按展示顺序；目录状态/会话数读时现算）。 */
+export const listWorkspaces = (): Promise<WorkspaceListResp> =>
+  http.get<WorkspaceListResp>('/mate/workspaces')
+
+/**
+ * 登记一个目录为工作空间。
+ *
+ * 默认 **get-or-create**（同路径已登记 → 返回既有那一行），所以「选中后落库」这一步天然幂等，
+ * 不会因为用户重复点一下就得到一个错。`strict: true` 时才把重复当冲突（40901）。
+ */
+export const createWorkspace = (path: string, title?: string, strict = false): Promise<Workspace> =>
+  http.post<Workspace>('/mate/workspaces', { path, title, strict })
+
+/** 改写展示名（**不改身份**：id 与 path 都不动）。空串 = 清空，界面按末级目录名渲染。 */
+export const renameWorkspace = (id: string, title: string): Promise<Workspace> =>
+  http.patch<Workspace>(`/mate/workspaces/${encodeURIComponent(id)}`, { title })
+
+/**
+ * 删除一条登记**而保留数据**：目录、文件、会话历史一概不动，其会话回到默认工作空间。
+ * 返回的 `released_sessions` 是给界面说清"这 N 个会话回到了默认工作空间"的事实。
+ */
+export const deleteWorkspace = (id: string): Promise<WorkspaceDeleteResp> =>
+  http.delete<WorkspaceDeleteResp>(`/mate/workspaces/${encodeURIComponent(id)}`)
+
+/** 重排：`beforeId` 缺省 = 追加到尾部；返回**完整**顺序（客户端据此对齐本地顺序）。 */
+export const moveWorkspace = (id: string, beforeId?: string): Promise<WorkspaceMoveResp> =>
+  http.post<WorkspaceMoveResp>(`/mate/workspaces/${encodeURIComponent(id)}/move`, { before_id: beforeId })

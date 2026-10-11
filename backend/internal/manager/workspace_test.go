@@ -102,13 +102,15 @@ func TestValidateWorkspace(t *testing.T) {
 	}
 }
 
-// TestResolveWorkspace 显式指定 / 代建 / 代建关闭三条路径。
+// TestResolveWorkspace 显式指定 / 默认工作空间 / 没有默认工作空间 三条路径。
+//
+// v14 起中间那条的含义变了（设计 ADR-4）：未指定 cwd **不再**按会话 id 代建独占目录，
+// 而是落在默认工作空间（一个落库的登记项，共享）。
 func TestResolveWorkspace(t *testing.T) {
-	root := t.TempDir()
 	explicit := t.TempDir()
 
-	// 显式指定 → 原样（规范）使用，非临时。
-	got, err := ResolveWorkspace(explicit, root, nil, "conv-1")
+	// 显式指定 → 原样（规范）使用，非临时、无归属（归属由调用方按路径补）。
+	got, err := ResolveWorkspace(explicit, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace(显式): %v", err)
 	}
@@ -119,56 +121,71 @@ func TestResolveWorkspace(t *testing.T) {
 	if got.Path != wantExplicit {
 		t.Fatalf("显式路径=%q want %q", got.Path, wantExplicit)
 	}
+	if got.WorkspaceID != "" {
+		t.Fatalf("显式 cwd 的归属由调用方补，这里不该有值: %q", got.WorkspaceID)
+	}
 
-	// 未指定 → 在 root 下按会话 id 代建（目录必须先于 session/new 存在）。
-	got, err = ResolveWorkspace("", root, nil, "conv-2")
+	// 未指定 → 落在默认工作空间（Temporary=true，归属 = 那条登记的 id）。
+	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
+	got, err = ResolveWorkspace("", def, nil)
 	if err != nil {
-		t.Fatalf("ResolveWorkspace(代建): %v", err)
+		t.Fatalf("ResolveWorkspace(默认工作空间): %v", err)
 	}
 	if !got.Temporary {
-		t.Fatalf("代建应标记为临时: %+v", got)
+		t.Fatalf("落在默认工作空间应标记为 Temporary: %+v", got)
 	}
-	if filepath.Base(got.Path) != "conv-2" || filepath.Dir(got.Path) != mustEval(t, root) {
-		t.Fatalf("代建目录不符: %q (root=%q)", got.Path, root)
+	if got.WorkspaceID != "wsp-default" {
+		t.Fatalf("归属应是默认工作空间 id，实际 %q", got.WorkspaceID)
 	}
-	if st, err := os.Stat(got.Path); err != nil || !st.IsDir() {
-		t.Fatalf("代建目录未创建: %v", err)
+	wantDef, _ := filepath.EvalSymlinks(def.Path)
+	if got.Path != wantDef {
+		t.Fatalf("默认工作空间路径=%q want %q", got.Path, wantDef)
+	}
+	// **不再创建任何会话独占目录**：这条路径不该有文件系统副作用。
+	if got.Path != wantDef {
+		t.Fatalf("解析不该改动默认工作空间路径")
 	}
 
-	// 代建关闭（root 为空）且未指定 → workspace_required；**不回落 os.Getwd()**。
-	if _, err := ResolveWorkspace("", "", nil, "conv-3"); err == nil {
-		t.Fatal("代建关闭 + 未指定 应报错")
+	// 没有默认工作空间（代建关闭，或默认被删）且未指定 → workspace_required；
+	// **不回落 os.Getwd()**（那条铁律不变）。
+	if _, err := ResolveWorkspace("", nil, nil); err == nil {
+		t.Fatal("没有默认工作空间 + 未指定 应报错")
 	} else if code := aclCode(t, err); code != "workspace_required" {
 		t.Fatalf("错误码=%q want workspace_required", code)
 	}
-
-	// 内部错误：缺会话 id 时无法定名代建目录。
-	if _, err := ResolveWorkspace("", root, nil, ""); err == nil {
-		t.Fatal("缺会话 id 应报错")
-	} else if code := aclCode(t, err); code != "workspace_unavailable" {
-		t.Fatalf("错误码=%q want workspace_unavailable", code)
+	// 半个默认工作空间（只有 id 没路径 / 反之）同样按"没有"处理，不半信半疑地用它。
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-x"}, nil); err == nil {
+		t.Fatal("默认工作空间缺路径应报错")
+	}
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{Path: t.TempDir()}, nil); err == nil {
+		t.Fatal("默认工作空间缺 id 应报错")
 	}
 }
 
-// TestDiscardWorkspace 只有平台代建的目录才会被清理。
-func TestDiscardWorkspace(t *testing.T) {
-	root := t.TempDir()
-	res, err := ResolveWorkspace("", root, nil, "conv-doomed")
+// TestDiscardWorkspaceIsNoop v14 起 DiscardWorkspace **恒为空操作**。
+//
+// 这条测试的存在意义是**把"它不再删东西"变成机器判据**：新建会话失败时清理刚建的目录这件事
+// 已经不再有对象（没有会话独占目录了），而如果它被误接到默认工作空间上，一次失败的建会话
+// 会连带删掉别的会话正在用的文件——那是本设计最不能出的一类事故。
+func TestDiscardWorkspaceIsNoop(t *testing.T) {
+	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: t.TempDir()}
+	res, err := ResolveWorkspace("", def, nil)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
 	DiscardWorkspace(res)
-	if _, err := os.Stat(res.Path); !os.IsNotExist(err) {
-		t.Fatalf("代建目录应被清理: %v", err)
+	if _, err := os.Stat(res.Path); err != nil {
+		t.Fatalf("默认工作空间绝不能被 DiscardWorkspace 删掉: %v", err)
 	}
 
-	// 非临时（用户显式指定）→ 绝不能删。
+	// 用户显式指定的目录同样不动（历史行为）。
 	keep := t.TempDir()
 	DiscardWorkspace(WorkspaceResolution{Path: keep})
 	if _, err := os.Stat(keep); err != nil {
-		t.Fatalf("非临时工作空间不应被清理: %v", err)
+		t.Fatalf("显式目录不该被删: %v", err)
 	}
 }
+
 
 func mustEval(t *testing.T, p string) string {
 	t.Helper()
@@ -248,14 +265,26 @@ func TestCreateConversationWorkspaceRequiredWhenDisabled(t *testing.T) {
 	}
 }
 
-// TestCreateConversationDiscardsTemporaryWorkspaceOnFailure 会话最终没建起来时，
-// 刚代建的目录必须被清理（否则每次失败都在 ~/.ark-mate/workspaces 下留垃圾）。
-func TestCreateConversationDiscardsTemporaryWorkspaceOnFailure(t *testing.T) {
+// TestCreateConversationFailureLeavesNoPerConversationDir v14：建会话失败不再留"每会话一个目录"。
+//
+// 旧行为是"失败时清理刚代建的独占目录"。v14 起未指定 cwd 落在**共享的默认工作空间**，
+// 于是这条测试要守的变成两件事（都更严格）：
+//   - 失败后 `workspaces/` 下**只有** `default/`（不再有成排的会话目录）；
+//   - 默认工作空间**没被删掉**（DiscardWorkspace 若被误接到它上面，这里会红）。
+func TestCreateConversationFailureLeavesNoPerConversationDir(t *testing.T) {
 	root := t.TempDir()
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, root, nil)
+	// 默认工作空间需要**库**才能登记（登记表在 sqlite 里）；memory 模式下它是空操作，
+	// 于是未指定 cwd 会停在 workspace_required，测不到这条路径。
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	t.Cleanup(func() { _ = st.Close() })
+	svc.EnableStore(st)
+	if err := svc.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("EnsureDefaultWorkspace: %v", err)
+	}
 
-	// echo spec 无启动命令 → acquire 失败；此时代建目录应已被回收。
+	// echo spec 无启动命令 → acquire 失败。
 	_, err := svc.CreateConversation(context.Background(), dtoconversation.ConversationCreateReq{AgentID: "ws-probe"})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
@@ -267,8 +296,11 @@ func TestCreateConversationDiscardsTemporaryWorkspaceOnFailure(t *testing.T) {
 	if rerr != nil {
 		t.Fatalf("ReadDir(%q): %v", root, rerr)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("失败的会话不应残留代建目录: %v", entries)
+	if len(entries) != 1 || entries[0].Name() != "default" {
+		t.Fatalf("失败后应只剩默认工作空间目录，实际: %v", entries)
+	}
+	if _, serr := os.Stat(filepath.Join(root, "default")); serr != nil {
+		t.Fatalf("默认工作空间不该被 DiscardWorkspace 删掉: %v", serr)
 	}
 }
 
@@ -281,7 +313,7 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 	svc.registerConversation(&ConversationRec{ID: "c-b", AgentID: "a1", Cwd: "/work/beta", WorkspaceTemporary: true})
 	svc.registerConversation(&ConversationRec{ID: "c-tmp-sub", AgentID: "a1", Cwd: "/work/alpha/sub"})
 
-	all, err := svc.ListConversations(false, "")
+	all, err := svc.ListConversations(false, "", "")
 	if err != nil {
 		t.Fatalf("ListConversations: %v", err)
 	}
@@ -299,7 +331,7 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 	}
 
 	// 精确匹配：子目录不算同一工作空间（避免"看起来像同一目录"的误归组）。
-	alpha, err := svc.ListConversations(false, "/work/alpha")
+	alpha, err := svc.ListConversations(false, "/work/alpha", "")
 	if err != nil {
 		t.Fatalf("ListConversations(cwd): %v", err)
 	}
@@ -307,7 +339,7 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 		t.Fatalf("cwd 过滤应精确命中 c-a，got %+v", alpha)
 	}
 
-	none, _ := svc.ListConversations(false, "/work/nowhere")
+	none, _ := svc.ListConversations(false, "/work/nowhere", "")
 	if len(none) != 0 {
 		t.Fatalf("未用过的工作空间应返回空，got %+v", none)
 	}
@@ -318,7 +350,7 @@ func TestListConversationsWorkspaceFilter(t *testing.T) {
 	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
 	svc2.registerConversation(&ConversationRec{ID: "c-real", AgentID: "a1", Cwd: mustEval(t, rootDir)})
 	for _, spelling := range []string{rootDir, rootDir + "/", filepath.Join(rootDir, ".", "..", filepath.Base(rootDir))} {
-		got, err := svc2.ListConversations(false, spelling)
+		got, err := svc2.ListConversations(false, spelling, "")
 		if err != nil {
 			t.Fatalf("ListConversations(%q): %v", spelling, err)
 		}
@@ -484,7 +516,10 @@ func TestValidateWorkspaceRoots(t *testing.T) {
 	}
 }
 
-// TestResolveWorkspaceRoots 白名单对代建无副作用（代建路径的合法性由装配时的策略检查保证）。
+// TestResolveWorkspaceRoots 白名单只约束**显式** cwd；默认工作空间不逐次复检。
+//
+// 默认工作空间的合法性由装配时的代建根并入保证（见 effectiveWorkspaceRootsLocked）：
+// 它是平台自己的目录，逐次重算只是重复劳动。这条测试把那个分工钉住。
 func TestResolveWorkspaceRoots(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "ws")
@@ -499,18 +534,18 @@ func TestResolveWorkspaceRoots(t *testing.T) {
 	}
 
 	// 越界的显式 cwd → 拒。
-	if _, err := ResolveWorkspace(outside, root, roots, "conv-x"); aclCode(t, err) != "workspace_outside_roots" {
+	if _, err := ResolveWorkspace(outside, nil, roots); aclCode(t, err) != "workspace_outside_roots" {
 		t.Fatalf("越界显式 cwd 应被拒: %v", err)
 	}
-	// 未指定 → 在根内代建，且结果落在白名单内（平台不产出越界会话）。
-	res, err := ResolveWorkspace("", root, roots, "conv-y")
+	// 未指定 → 用默认工作空间，结果带归属且标 Temporary。
+	def := &DefaultWorkspaceRef{ID: "wsp-default", Path: root}
+	res, err := ResolveWorkspace("", def, roots)
 	if err != nil {
-		t.Fatalf("代建: %v", err)
+		t.Fatalf("默认工作空间: %v", err)
 	}
-	if !res.Temporary || !withinRoots(res.Path, roots) {
-		t.Fatalf("代建结果应在白名单内: %+v", res)
+	if !res.Temporary || res.WorkspaceID != "wsp-default" {
+		t.Fatalf("默认工作空间结果不符: %+v", res)
 	}
-	discardTempWorkspace(t, res)
 }
 
 // TestSetWorkspacePolicyMergesProvisionDir 代建根落在白名单外**不再是**配置错误：自动并入生效名单。
@@ -550,15 +585,19 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	if want := filepath.Join(mustEval(t, outside), "tmp"); got[1] != want {
 		t.Fatalf("代建根应按真身并入，want %q got %q", want, got[1])
 	}
-	// 并入的代建根必须真的放行：否则平台自己代建的会话会被自己的白名单拒掉。
-	res, err := ResolveWorkspace("", provision, got, "conv-z")
+	// 并入的代建根必须真的放行：默认工作空间就在它下面，否则平台自己给出的落点
+	// 会被自己的白名单拒掉（"未指定 cwd"这条路直接不可用）。
+	defDir := filepath.Join(provision, "default")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatalf("mkdir default: %v", err)
+	}
+	res, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}, got)
 	if err != nil {
-		t.Fatalf("代建: %v", err)
+		t.Fatalf("默认工作空间: %v", err)
 	}
 	if !res.Temporary || !withinRoots(res.Path, got) {
-		t.Fatalf("代建结果应落在生效名单内: %+v roots=%v", res, got)
+		t.Fatalf("默认工作空间应落在生效名单内: %+v roots=%v", res, got)
 	}
-	discardTempWorkspace(t, res)
 
 	// 代建根已经落在某个配置根内时不再重复追加（避免 roots 里出现冗余项）。
 	nested := NewService(runtime.NewRegistry(), eventbus.New())

@@ -21,10 +21,26 @@ import (
 // cwd 非空 = 只返回工作空间精确等于该路径的会话（按工作空间过滤；路径须为绝对路径，
 // 会话 cwd 已规范化为 canonical 形式，调用方传同一个字符串即可命中）。
 // 按创建时间倒序（置顶优先）。
-func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversation.ConversationResp, error) {
+// ListConversations 列出会话（archived 过滤；cwd / workspaceID 非空则再收一道）。
+//
+// 两个过滤参数都是"按工作空间看"的入口，但口径不同（设计 ADR-2/ADR-5）：
+//   - `cwd`：**执行事实**的字符串相等（历史行为，兼容保留）；
+//   - `workspaceID`：**归属事实**（v14 起左栏分组用它，可索引，且不受路径写法差异影响）。
+//
+// 归属过滤会同时把"历史会话（workspace_id=”）"算进默认工作空间那一组：那些行在**读面**
+// 归默认工作空间（设计 ADR-6），所以按 default id 过滤时它们必须出现——否则界面上默认工作
+// 空间显示 N 个会话、点进去却是空的。
+func (s *Service) ListConversations(archived bool, cwd, workspaceID string) ([]dtoconversation.ConversationResp, error) {
 	cwd = normalizeWorkspaceFilter(cwd)
+	workspaceID = strings.TrimSpace(workspaceID)
+	// 归属过滤要先把"默认工作空间 id"和"目标 id 是否就是默认"问出来（读面语义的一部分）。
+	defaultID := ""
+	if s.st != nil {
+		if def, ok, err := s.st.DefaultWorkspace(context.Background()); err == nil && ok {
+			defaultID = def.ID
+		}
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	out := make([]dtoconversation.ConversationResp, 0, len(s.conversations))
 	for _, r := range s.conversations {
 		if r.Archived != archived {
@@ -33,8 +49,20 @@ func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversatio
 		if cwd != "" && r.Cwd != cwd {
 			continue
 		}
-		out = append(out, toConversationResp(r))
+		if workspaceID != "" && !workspaceMatches(r.WorkspaceID, workspaceID, defaultID) {
+			continue
+		}
+		resp := toConversationResp(r)
+		// 归属的**原始值**必须先落到响应上：`toConversationResp` 刻意不带它（那会持锁读库），
+		// 而下面的 fill 要靠它去解析展示名。漏这一步的表现是"所有会话都归到默认工作空间"
+		// ——一个看起来完全正常的错误分组。
+		resp.WorkspaceID = r.WorkspaceID
+		out = append(out, resp)
 	}
+	s.mu.Unlock()
+	// 展示字段（workspace_id / workspace_title）在**释放锁之后**补齐：它们要读库，
+	// 而持锁读库会与 registerConversation 的"先写内存再落库"顺序互相卡住。
+	s.fillWorkspaceDisplay(out)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
 			return out[i].Pinned
@@ -44,7 +72,31 @@ func (s *Service) ListConversations(archived bool, cwd string) ([]dtoconversatio
 	return out, nil
 }
 
+// workspaceMatches 归属过滤的判定（设计 ADR-6）：`rWorkspaceID == ”` 的行归默认工作空间。
+//
+// 单独成函数是为了让这条语义只有一处：把它内联进循环，那个 `== ""` 的特例迟早被漏掉一处，
+// 而漏掉的表现是"默认工作空间下面看不到历史会话"——一个没有解释余地的空列表。
+func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool {
+	if wantID == defaultID {
+		return recWorkspaceID == "" || recWorkspaceID == wantID
+	}
+	return recWorkspaceID == wantID
+}
+
+// fillWorkspaceDisplay 给一批响填补归属展示字段（v14；读面解析，见设计 §4.3）。
+func (s *Service) fillWorkspaceDisplay(items []dtoconversation.ConversationResp) {
+	for i := range items {
+		id, title := s.workspaceDisplayOf(items[i].WorkspaceID)
+		items[i].WorkspaceID = id
+		items[i].WorkspaceTitle = title
+	}
+}
+
 // toConversationResp 把 ConversationRec 折叠为 dtoconversation.ConversationResp。
+//
+// **不含归属展示字段**（workspace_id / workspace_title）：那两个要读库，而本函数在持 s.mu 的
+// 调用点里跑。需要它们的调用点用 `fillWorkspaceDisplay` 在释放锁之后补——这条分界必须显式，
+// 否则下一个人会顺手在这里加一次查库，而症状是偶发死锁。
 func toConversationResp(r *ConversationRec) dtoconversation.ConversationResp {
 	return dtoconversation.ConversationResp{
 		Capabilities:       toCapabilitiesResp(r),
@@ -199,11 +251,12 @@ func deriveTitle(text string) string {
 //
 // 工作空间（cwd）在此定稿并随响应回读：
 //   - req.Cwd 非空 → 校验（绝对/存在/是目录）+ 符号链接规范化 + 根白名单（workspaceRoots）；
-//   - req.Cwd 为空 → 平台在 workspaceDir 下按**会话 id**代建临时目录（WorkspaceTemporary=true）；
-//   - 代建关闭且未指定 → workspace_required（不回落 os.Getwd()）。
+//   - req.Cwd 为空 → 落在**默认工作空间**（一个落库的登记项；Temporary=true）；
+//   - 没有默认工作空间且未指定 → workspace_required（不回落 os.Getwd()）。
 //
-// 会话 id 在 session/new 之前定号：代建目录名以它为准，且目录必须先于 session/new 存在
-// （底座对 cwd 做存在性校验）。
+// 归属（workspace_id）与 cwd 是两件事（设计 ADR-2）：cwd 是执行事实、归属是分组事实。
+// 显式 cwd 命中已登记目录时按路径补上归属；命中不了就留空（读面归默认工作空间）
+// ——**不自动登记**用户没主动选过的目录（设计 §3.2 的处置）。
 func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.ConversationCreateReq) (*dtoconversation.ConversationCreateResp, error) {
 	if s.orch == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
@@ -215,16 +268,58 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 	if err != nil {
 		return nil, code.FromError(err)
 	}
-	// 先确认 agent 存在，再解析工作空间：解析可能**建目录**（代建），
-	// 不该为一个本来就无效的请求留下文件系统副作用。
+	// 先确认 agent 存在，再解析工作空间：解析可能触及文件系统（默认工作空间的符号链接解析），
+	// 不该为一个本来就无效的请求留下副作用。
 	if _, ok := s.AgentByID(agentID); !ok {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
 			fmt.Sprintf("未知 agent %q", agentID), nil))
 	}
-	convID := uuid.NewString()
-	ws, err := ResolveWorkspace(req.Cwd, s.WorkspaceDir(), s.WorkspaceRoots(), convID)
+	// 归属目标：显式 `workspace_id` 优先（选择器选中了某个登记项），否则用默认工作空间。
+	// 两者都给出且不一致 → 拒绝：猜用户的意图迟早猜错，而这一处猜错的后果是会话跑错目录
+	// （那个目录正是原生权限 workspace-write 的沙箱边界）。
+	target, assignment, err := s.resolveTargetWorkspace(req.WorkspaceID)
 	if err != nil {
 		return nil, code.FromError(err)
+	}
+	// 定出 cwd 的**规格**并校验：
+	//   - 用户显式选了登记项 → 规格取它的路径（此时 cwd 可有可无）；
+	//   - 否则用请求里的 cwd（空 = 交给 ResolveWorkspace 落默认工作空间）。
+	// 两条来源同时给出时必须一致（见 resolveTargetWorkspace）；比对走同一条规范化，否则
+	// /tmp 与 /private/tmp 会被判成冲突（macOS 上它们是同一个目录）。
+	spec := req.Cwd
+	if assignment != "" {
+		row, ok, gerr := s.st.GetWorkspace(ctx, assignment)
+		if gerr != nil {
+			return nil, code.FromError(gerr)
+		}
+		if !ok {
+			return nil, code.FromError(workspaceNotFoundError(assignment))
+		}
+		explicit := ""
+		if strings.TrimSpace(req.Cwd) != "" {
+			p, verr := ValidateWorkspace(req.Cwd, s.WorkspaceRoots())
+			if verr != nil {
+				return nil, code.FromError(verr)
+			}
+			explicit = p
+		}
+		if explicit != "" && explicit != row.Path {
+			return nil, code.FromError(acl.NewError(acl.ClassRequest, "workspace_conflict",
+				fmt.Sprintf("workspace_id 与 cwd 指向不同目录：%s ≠ %s", row.Path, explicit), nil))
+		}
+		spec = row.Path
+	}
+	convID := uuid.NewString()
+	ws, err := ResolveWorkspace(spec, target, s.WorkspaceRoots())
+	if err != nil {
+		return nil, code.FromError(err)
+	}
+	// 归属与 cwd 定稿：用户显式选中的登记项优先；否则按 cwd 查登记表补（查不到就留空，
+	// 读面归默认工作空间——**不自动登记**用户没主动选过的目录，设计 §3.2）。
+	if assignment != "" {
+		ws.WorkspaceID = assignment
+	} else if ws.WorkspaceID == "" {
+		ws.WorkspaceID = s.workspaceIDByPath(ctx, ws.Path)
 	}
 	// 能力选定（M3）：`capabilities` 未传 → nil，与引入本字段之前逐字节相同。
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。
@@ -235,18 +330,19 @@ func (s *Service) CreateConversation(ctx context.Context, req dtoconversation.Co
 		ConversationID:     convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
+		WorkspaceID:        ws.WorkspaceID,
 		Model:              runtime.ModelConfig{Model: req.Model},
 		Selection:          selection,
 		Origin:             req.Origin,
 	})
 	if err != nil {
-		// 会话未能建立 → 清理刚代建的目录（非临时工作空间与用户目录一律不动）。
+		// v14 起这是空操作（不再有会话独占目录要清理；默认工作空间是共享的，删不得）。
 		DiscardWorkspace(ws)
 		return nil, code.FromError(err)
 	}
 	resp := &dtoconversation.ConversationCreateResp{
 		ID: res.ConversationID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
-		Cwd: ws.Path, WorkspaceTemporary: ws.Temporary,
+		Cwd: ws.Path, WorkspaceID: ws.WorkspaceID, WorkspaceTemporary: ws.Temporary,
 	}
 	if req.Prompt != "" {
 		seq, err := s.orch.Prompt(runCtx, res.ConversationID, req.Prompt)

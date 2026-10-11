@@ -23,6 +23,13 @@ type WorkspaceCtr interface {
 	Files(c *gin.Context)
 	Settings(c *gin.Context)
 	UpdateSettings(c *gin.Context)
+
+	// v14：工作空间登记表（有 id、可改写与删除的持久实体）。
+	List(c *gin.Context)
+	Create(c *gin.Context)
+	Rename(c *gin.Context)
+	Delete(c *gin.Context)
+	Move(c *gin.Context)
 }
 
 var _ WorkspaceCtr = (*workspaceCtr)(nil)
@@ -130,6 +137,88 @@ func (h *workspaceCtr) UpdateSettings(c *gin.Context) {
 		return
 	}
 	resp, err := h.svc.UpdateWorkspaceSettings(req.Roots)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// ---- v14：工作空间登记表（用户产出的持久实体）----
+//
+// 与上面几个只读面的分工：browse/files/libraries/recent 是**派生视图**（从磁盘或从既有会话
+// 算出来的），下面这组是**登记项**本身——有 id、能被改写与删除。选择器的主列表取 List。
+
+// List 列出全部工作空间登记（`GET /workspaces`）。
+//
+// 无参数：顺序与集合都由库里的登记决定，没有可调项——少一个参数就少一种"面板看到的和库里
+// 不一致"的可能（与 Libraries 同一条理由）。
+func (h *workspaceCtr) List(c *gin.Context) {
+	resp, err := h.svc.WorkspaceRegistry()
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Create 登记一个目录为工作空间（`POST /workspaces`）。
+//
+// 默认 get-or-create（重复登记返回既有那一行）；`strict=true` 时才报 workspace_exists。
+// 目录不存在 / 不是目录 / 落在白名单外 → 40000（三种 code 名可分辨，见 manager.ValidateWorkspace）。
+func (h *workspaceCtr) Create(c *gin.Context) {
+	var req dtoworkspace.WorkspaceCreateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.CreateRegisteredWorkspace(req.Path, req.Title, req.Strict)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Rename 改写展示名（`PATCH /workspaces/:id`）。
+func (h *workspaceCtr) Rename(c *gin.Context) {
+	var req dtoworkspace.WorkspacePatchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+		return
+	}
+	resp, err := h.svc.RenameRegisteredWorkspace(c.Param("id"), req.Title)
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Delete 删除一条登记（`DELETE /workspaces/:id`）。
+//
+// **不删会话、不删目录**：目录与文件一概不动，其会话读面归到默认工作空间。响应回
+// released_sessions 让界面能把这件事说清楚（"这 12 个会话回到了默认工作空间"）。
+func (h *workspaceCtr) Delete(c *gin.Context) {
+	resp, err := h.svc.DeleteRegisteredWorkspace(c.Param("id"))
+	if err != nil {
+		gincontext.Fail(c, code.FromError(err))
+		return
+	}
+	gincontext.Success(c, resp)
+}
+
+// Move 重排（`POST /workspaces/:id/move`，body `{before_id?}`；空 = 追加到尾部）。
+func (h *workspaceCtr) Move(c *gin.Context) {
+	var req dtoworkspace.WorkspaceMoveReq
+	// body 可缺省（追加到尾部），所以空 body 不是错误：`{}` 与"没传 body"同义。
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
+			return
+		}
+	}
+	resp, err := h.svc.MoveRegisteredWorkspace(c.Param("id"), req.BeforeID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

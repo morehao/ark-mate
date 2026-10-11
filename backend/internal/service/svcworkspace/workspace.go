@@ -29,4 +29,26 @@ type WorkspaceSvc interface {
 
 	// UpdateWorkspaceSettings 全量替换工作区根白名单（落盘 + 热更新；被更高优先级来源锁定时拒绝）。
 	UpdateWorkspaceSettings(roots []string) (*dtoworkspace.WorkspaceSettingsResp, error)
+
+	// ---- v14：工作空间**登记表**（用户产出的持久实体，与上面几个派生视图分工见 manager/workspace_registry.go）----
+
+	// WorkspaceRegistry 列出全部工作空间登记（按展示顺序；目录状态/会话数/最近使用读时现算）。
+	//
+	// memory 持久层返回**空列表 + Writable=false**（不是错误）：没有登记是合法状态，
+	// 而"不可写"这件事必须让前端看见，否则它会渲染一个必然失败的创建入口（设计 ADR-11）。
+	WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)
+
+	// CreateRegisteredWorkspace 登记一个目录（get-or-create；strict=true 时重复报 workspace_exists）。
+	//
+	// 路径校验与建会话**共用同一条实现**（ValidateWorkspace），所以不会出现"能登记、建不了会话"。
+	CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error)
+
+	// RenameRegisteredWorkspace 改写展示名（不改 id、不改 path）。
+	RenameRegisteredWorkspace(id, title string) (*dtoworkspace.WorkspaceResp, error)
+
+	// DeleteRegisteredWorkspace 删除一条登记（**不删会话、不删目录**；默认工作空间拒绝）。
+	DeleteRegisteredWorkspace(id string) (*dtoworkspace.WorkspaceDeleteResp, error)
+
+	// MoveRegisteredWorkspace 重排（beforeID 为空 = 追加到尾部），返回重排后的完整顺序。
+	MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.WorkspaceMoveResp, error)
 }

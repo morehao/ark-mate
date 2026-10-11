@@ -53,6 +53,9 @@ func (d *ConversationDao) Upsert(ctx context.Context, c *model.Conversation) err
 		DoUpdates: clause.Assignments(map[string]any{
 			"agent_id":            c.AgentID,
 			"cwd":                 c.Cwd,
+			// 归属列跟着普通持久化走：会话记录一旦建立就不重新解析归属，所以这里传的与
+			// 记录里的值必然相同（与 capability_fingerprint 同一条理由）。
+			"workspace_id":        c.WorkspaceID,
 			"workspace_temporary": model.FlagValue(c.WorkspaceTemporary),
 			"provider":            c.Provider,
 			"model":               c.Model,

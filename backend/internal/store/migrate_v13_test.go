@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,13 +207,16 @@ func TestMigrateV13(t *testing.T) {
 	// ⑦ **明文密钥在 DB 里不可达**：新表、meta、notes 里都搜不到它。
 	assertNoPlaintextInDB(t, s, "sk-legacy-plaintext-probe")
 
-	// ⑧ A9：备份路径同时列 v12 与 v13，且新的（v13）在前。
+	// ⑧ A9：备份路径同时列 v13 与 v12，且**最新的在最前**。
+	//
+	// 断言的是不变量（"新的在前"）而不是某个版本的序位：v14 落地后最新的备份是 `.bak-v14-`，
+	// 把这里钉死成 v13 只会让每次追加迁移都改一遍测试，而真正要挡的（顺序反了）照样能挡。
 	paths := s.MigrationBackupPaths()
 	if len(paths) < 2 {
 		t.Fatalf("应同时列出 v13 与 v12 的备份: %v", paths)
 	}
-	if !strings.Contains(paths[0], ".bak-v13-") {
-		t.Fatalf("新的备份应在最前（v13 优先）: %v", paths)
+	if !strings.Contains(paths[0], fmt.Sprintf(".bak-v%d-", latestSchemaVersion())) {
+		t.Fatalf("最新的备份应在最前（v%d 优先）: %v", latestSchemaVersion(), paths)
 	}
 	foundOld := false
 	for _, p := range paths {

@@ -27,10 +27,17 @@ type PromptReq struct {
 type ConversationCreateReq struct {
 	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
 	Prompt  string `json:"prompt"`
-	// Cwd 会话工作空间（绝对路径）。空 = 平台代建临时空间（见响应 workspace_temporary）；
+	// Cwd 会话工作空间（绝对路径）。空 = 落在**默认工作空间**（响应 workspace_temporary=true）；
 	// 非空时校验「绝对 / 存在 / 是目录」，通过后按符号链接规范化落库。
 	// 工作空间建成后不可变——它是底座 ACP session 的 cwd，也是原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
+	// WorkspaceID 选中登记的哪个工作空间（v14；空 = 用默认工作空间）。
+	//
+	// 与 Cwd 的关系：它是选择器选中一个**有名字、有顺序的登记项**时用的；Cwd 是"直接用绝对
+	// 路径"这条老路的。两者同时给出且指向不同目录 → 40001 `workspace_conflict`（**拒绝而不猜**：
+	// 猜错的后果是会话跑在用户没打算用的目录里，而那个目录正是沙箱边界）。
+	// 给了 WorkspaceID 时 Cwd 可以省：平台按登记的路径定 cwd。
+	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Model 运行时目录（GET /models 的 options[category=model].values[].value）里的**不透明取值**，
 	// 原样回传（空 = 跟随运行时默认）。
 	Model string `json:"model,omitempty"`

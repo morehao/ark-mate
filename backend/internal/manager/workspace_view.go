@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -277,6 +278,11 @@ func (s *Service) workspaceUsage(roots []string) map[string]*wsUsage {
 }
 
 // RecentWorkspaces 返回最近使用过的工作空间（从既有会话派生，按最近使用倒序）。排除口径见 workspaceUsage。
+//
+// v14 起它的用途收窄为选择器的「最近使用（**未登记**）」一栏：登记表（WorkspaceRegistry）才是
+// 主列表。所以这里额外排掉两类，否则用户会看到"已经是我的工作空间"的条目出现在"未登记"里：
+//   - **默认工作空间**（平台给的，不是用户选的，没有"登记"这一步可做）；
+//   - 任何**已登记**的路径（一次查登记表，而不是逐条比对）。
 func (s *Service) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentResp, error) {
 	if limit <= 0 {
 		limit = 10
@@ -284,8 +290,26 @@ func (s *Service) RecentWorkspaces(limit int) ([]dtoworkspace.WorkspaceRecentRes
 	roots := s.WorkspaceRoots()
 	byPath := s.workspaceUsage(roots)
 
+	// 已登记路径 + 默认工作空间路径：后者通常也在登记表里，但"登记表为空 + 代建关闭"
+	// 或"登记被删"的部署仍可能只剩默认工作空间，所以两个来源都要并。
+	registered := map[string]bool{}
+	if s.st != nil {
+		ctx := context.Background()
+		if rows, err := s.st.ListWorkspaces(ctx); err == nil {
+			for _, r := range rows {
+				registered[r.Path] = true
+			}
+		}
+		if def, ok, err := s.st.DefaultWorkspace(ctx); err == nil && ok {
+			registered[def.Path] = true
+		}
+	}
+
 	out := make([]dtoworkspace.WorkspaceRecentResp, 0, len(byPath))
 	for path, a := range byPath {
+		if registered[path] {
+			continue
+		}
 		out = append(out, dtoworkspace.WorkspaceRecentResp{
 			Path:          path,
 			Name:          filepath.Base(path),

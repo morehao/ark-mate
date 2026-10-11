@@ -41,9 +41,15 @@ type ConversationRec struct {
 	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
 	// 原生权限 workspace-write 的边界（见 workspace.go）。
 	Cwd string
-	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspaceDir 下建）。
+	// WorkspaceTemporary 该工作空间是否由**平台**给出（= 默认工作空间）。
 	// 落库 + 写 transcript header：**权威标志**，前端与离线回放都不得从路径形状反推。
 	WorkspaceTemporary bool
+	// WorkspaceID 归属的工作空间登记 id（v14；'' = 未登记/登记已删 → 读面归默认工作空间）。
+	//
+	// 与 Cwd 的分工（设计 ADR-2，最容易踩的一处）：Cwd 是**执行事实**（底座 ACP session 的
+	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
+	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
+	WorkspaceID string
 	Provider           string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
 	Model              string // 会话级模型 id（空 = 底座默认）
 	RuntimeHint        string // 最近/首选 runtime（执行提示，非身份）

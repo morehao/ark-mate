@@ -32,8 +32,76 @@ export interface WorkspaceBrowseResp {
 }
 
 /**
+ * 一条**工作空间登记**（v14；`GET /workspaces` 的 items）。
+ *
+ * 与下面几个类型的区别是本轮设计的核心：`WorkspaceRecent` / `WorkspaceLibrary` 是**派生的
+ * 只读视图**（从既有会话或白名单目录算出来的），这一条是**用户登记下来的持久实体**——
+ * 有 id、有标题、有顺序，可以被改写与删除。选择器的主列表取这一份。
+ */
+export interface Workspace {
+  /** 平台 uuid（对外稳定标识；改名/搬迁不改它）。会话的 `workspace_id` 指向它。 */
+  id: string
+  /** 规范化后的绝对路径（可直接作为建会话的 cwd）。 */
+  path: string
+  /** 展示名（'' = 未命名，按末级目录名渲染；默认工作空间读作「默认工作空间」）。 */
+  title: string
+  /** 是否平台默认工作空间（删不掉；「未指定 cwd 的建会话」落在它上面）。 */
+  is_default: boolean
+  /** 展示顺序（升序）。 */
+  list_order: number
+  /** 目录现状（**读时现算不缓存**）：ok | missing | not_dir | unreadable。 */
+  dir_status: WorkspaceDirStatus
+  /** 该工作空间名下的会话数（含归档；历史会话算进默认工作空间那一行）。 */
+  conversations: number
+  /** 最近使用时间（RFC3339；缺省 = 从未用过）。 */
+  last_used_at?: string
+  created_at: string
+  updated_at: string
+}
+
+/** 目录现状。非 `ok` 时这一行**仍然在下发**（登记不会因为目录消失就凭空不见），只是不能在其中建会话。 */
+export type WorkspaceDirStatus = 'ok' | 'missing' | 'not_dir' | 'unreadable'
+
+/** `GET /workspaces` 响应。 */
+export interface WorkspaceListResp {
+  items: Workspace[]
+  /** 默认工作空间 id（缺省 = 该部署没有默认工作空间，例如代建关闭）。 */
+  default_id?: string
+  /**
+   * 是否可创建/改名/删除（memory 持久层 = false）。
+   * false 时界面**不渲染**创建与管理入口——不给一个必然失败的按钮。
+   */
+  writable: boolean
+  /** 平台默认工作空间的所在目录（缺省 = 代建关闭）。 */
+  provision_dir?: string
+}
+
+/** `POST /workspaces` 请求体（登记一个已存在的目录）。 */
+export interface WorkspaceCreateReq {
+  path: string
+  /** 展示名（可选；空 = 未命名）。**不是身份**：改名不改 id、不改路径。 */
+  title?: string
+  /** true = 路径已登记时报错（40901）；缺省 = get-or-create 返回既有那一行。 */
+  strict?: boolean
+}
+
+/** `DELETE /workspaces/:id` 响应。 */
+export interface WorkspaceDeleteResp {
+  id: string
+  /** 归属被清空、读面归到默认工作空间的会话数（会话本身与 cwd 均未改动）。 */
+  released_sessions: number
+}
+
+/** `POST /workspaces/:id/move` 响应：重排后的**完整**顺序（客户端据此对齐本地顺序）。 */
+export interface WorkspaceMoveResp {
+  ids: string[]
+}
+
+/**
  * 最近使用过的工作空间（从既有会话派生）。
- * 排除平台代建的临时空间——那是某个会话独占的一次性目录，不具备复用价值。
+ *
+ * v14 起用途收窄为选择器的「最近使用（**未登记**）」一栏：服务端已排除平台代建的临时空间、
+ * 默认工作空间与**任何已登记的路径**——所以出现在这里的目录一定有"登记"这一步可做。
  */
 export interface WorkspaceRecent {
   path: string

@@ -184,6 +184,11 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if err := svc.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
+	// 默认工作空间（v14）= "未指定 cwd"的落点。生产里由装配期建立；测试里必须显式建，
+	// 否则未指定 cwd 的请求会报 workspace_required 而不是走到它要验的那一步。
+	if err := svc.EnsureDefaultWorkspace(); err != nil {
+		t.Fatalf("EnsureDefaultWorkspace: %v", err)
+	}
 
 	_, err := svc.CreateConversation(ctx, dtoconversation.ConversationCreateReq{
 		AgentID:      "a1",
@@ -202,16 +207,17 @@ func TestCreateConversationRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	if len(list) != 0 {
 		t.Fatalf("校验失败不该写库，got %+v", list)
 	}
-	if list, _ := svc.ListConversations(false, ""); len(list) != 0 {
+	if list, _ := svc.ListConversations(false, "", ""); len(list) != 0 {
 		t.Fatalf("校验失败不该登记会话，got %+v", list)
 	}
-	// 代建目录必须被清掉（否则每被拒一次就多一个空目录）。
+	// 副作用面：工作空间目录下**只能有** default/（v14：未指定 cwd 落在共享的默认工作空间，
+	// 不再产生"每会话一个空目录"）。若这条红了，说明有人把按会话代建那条路又加回来了。
 	entries, err := os.ReadDir(wsDir)
 	if err != nil {
 		t.Fatalf("读工作空间目录: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("校验失败不该留下代建目录，got %v", entries)
+	if len(entries) != 1 || entries[0].Name() != "default" {
+		t.Fatalf("校验失败后应只剩默认工作空间目录，got %v", entries)
 	}
 
 	// 可达的选定则一切照常。

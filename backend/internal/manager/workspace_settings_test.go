@@ -105,9 +105,13 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if _, err := svc.BrowseWorkspace(outside, false); aclCode(t, err) != "workspace_outside_roots" {
 		t.Fatalf("更新后根外目录应被拒: %v", err)
 	}
-	// 代建根也要放行——按真实顺序：平台先按会话 id 建出目录，用户才能浏览它。
-	if _, err := ResolveWorkspace("", provision, svc.WorkspaceRoots(), "conv-p"); err != nil {
-		t.Fatalf("代建根应始终可选（隐式并入）: %v", err)
+	// 代建根也要放行——默认工作空间就在它下面（未指定 cwd 的落点）。
+	defDir := filepath.Join(provision, "default")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatalf("mkdir default: %v", err)
+	}
+	if _, err := ResolveWorkspace("", &DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}, svc.WorkspaceRoots()); err != nil {
+		t.Fatalf("默认工作空间应始终可选（代建根隐式并入）: %v", err)
 	}
 	if _, err := svc.BrowseWorkspace(provision, false); err != nil {
 		t.Fatalf("代建根应始终可浏览: %v", err)

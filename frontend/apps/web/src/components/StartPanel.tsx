@@ -7,7 +7,7 @@ import { modelValues } from '@ark-mate/types'
 import { useMate } from '../store'
 import { AgentBadge } from './AgentBadge'
 import { ModelSelect } from './ModelSelect'
-import { WorkspacePicker } from './WorkspacePicker'
+import { NO_WORKSPACE, WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { CapabilityPicker } from './CapabilityPicker'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
@@ -45,13 +45,26 @@ export function StartPanel() {
     const v = localStorage.getItem(LAST_MODEL_KEY)
     return v && v.trim() ? v : null
   })
-  // 工作空间：null = 不指定（平台在创建时按会话 id 代建一个独立目录）。
+  // 工作空间选择（v14）：`{id}` = 选中的登记项；`{cwd}` = 直接输入的绝对路径；两者皆空 = 未指定
+  // （会话落在**默认工作空间**）。
   //
   // 每次新建会话**都从未指定开始**，刻意不记住上一次的选择：工作空间是会话的沙箱边界，
   // 复用上一次的目录等于让新会话继承上一个任务的上下文边界（新任务会读到、甚至改到上一个
-  // 任务的文件），且"我这次要处理哪里"本来就该每次明确一次。目录靠选择器的「资料库 / 最近」
-  // 一栏一次点击就能选回来，不存在"每次都要重新翻目录树"的负担。
-  const [workspace, setWorkspace] = useState<string | null>(null)
+  // 任务的文件），且"我这次要处理哪里"本来就该每次明确一次。目录靠选择器的主列表
+  // （登记表）+「最近使用」一次点击就能选回来，不存在"每次都要重新翻目录树"的负担。
+  const [workspace, setWorkspace] = useState<WorkspaceChoice>(NO_WORKSPACE)
+  const preferredWorkspaceId = useMate((s) => s.preferredWorkspaceId)
+  const setPreferredWorkspace = useMate((s) => s.setPreferredWorkspace)
+
+  // 左栏分组行的「＋」把工作空间预选进来（设计 §5.1 两个面的唯一桥）。
+  //
+  // 消费后**立即清空**：它是一次性意图——不清的话，用户手动改成别的目录、再打开一次新建面板，
+  // 会被旧值顶回去，而这看起来像"我的选择没生效"。
+  useEffect(() => {
+    if (!preferredWorkspaceId) return
+    setWorkspace({ id: preferredWorkspaceId, cwd: null })
+    setPreferredWorkspace(null)
+  }, [preferredWorkspaceId, setPreferredWorkspace])
 
   // 能力选定（M3）：缺省 = 两个 kind 都不限制（请求体里不加 capabilities 键，逐字节等同旧行为）。
   //
@@ -92,20 +105,25 @@ export function StartPanel() {
     }
   }, [model, modelOptions])
 
-  // 已选工作空间若已不存在（目录被删/被移走），就地清掉：否则要等首轮发送才被服务端拒
+  // 已选的**裸路径**若已不存在（目录被删/被移走），就地清掉：否则要等首轮发送才被服务端拒
   // （40001），用户先看到的是一个失败气泡而不是一个可修的状态。
   // 存在时顺带把值对齐成服务端形态（服务端做符号链接规范化），避免同一目录两种写法。
+  //
+  // v14：只对 `cwd`（输入路径那条路）校验。**登记项不在这里校验**——它的目录状态由
+  // `GET /workspaces` 的 `dir_status` 下发，选择器已经据此禁用了不可用的项；
+  // 而且拿 id 去 `browse` 是问错了接口。
   useEffect(() => {
-    if (!workspace) return
+    if (!workspace.cwd) return
     let alive = true
-    browseWorkspaces(workspace)
+    const cwd = workspace.cwd
+    browseWorkspaces(cwd)
       .then((resp) => {
-        if (!alive || resp.path === workspace) return
-        setWorkspace(resp.path)
+        if (!alive || resp.path === cwd) return
+        setWorkspace({ id: null, cwd: resp.path })
       })
       .catch(() => {
         if (!alive) return
-        setWorkspace(null)
+        setWorkspace(NO_WORKSPACE)
       })
     return () => {
       alive = false

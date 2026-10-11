@@ -354,6 +354,39 @@ var schemaMigrations = []migration{
 		},
 		apply: migrateV13,
 	},
+	{
+		version: 14,
+		name:    "工作空间登记表（v14）：workspaces + conversations.workspace_id",
+		backup:  "v14",
+		statements: []string{
+			// 登记项：一个规范化目录一行（`path` 唯一索引是"一个目录一个工作空间"的唯一执行者，
+			// 设计 ADR-1）。**登记表里刻意没有成员账**（`session_ids` 之类）：成员关系由
+			// `conversations.workspace_id` 表达，见 model.Workspace 的注释。
+			`CREATE TABLE workspaces (
+				id         TEXT PRIMARY KEY,
+				path       TEXT NOT NULL,
+				title      TEXT NOT NULL DEFAULT '',
+				is_default INTEGER NOT NULL DEFAULT 0,
+				list_order INTEGER NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX idx_workspaces_path ON workspaces(path)`,
+			// 「有且只有一个默认工作空间」由**部分唯一索引**保证：普通唯一索引会把几十行
+			// `is_default = 0` 判成重复，而这条不变量恰恰只约束取值为 1 的那一行。
+			`CREATE UNIQUE INDEX idx_workspaces_default ON workspaces(is_default) WHERE is_default = 1`,
+			`CREATE INDEX idx_workspaces_order ON workspaces(list_order)`,
+			// 归属列：`DEFAULT ''` 让历史行**天然**落成"归默认工作空间"（读面解析），
+			// 于是不需要一次全表 UPDATE——少一条全表写就少一次中断面（见 migrate_v14.go）。
+			//
+			// **故意没有 REFERENCES**：本仓 SQLite driver 不注入 `foreign_keys`，写了也不生效；
+			// 且删登记**不该**连带删会话（设计 ADR-6），级联恰恰是错的语义。
+			`ALTER TABLE conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`,
+			// 左栏分组要按 (归档, 归属, 时间) 取数，索引照这个顺序建。
+			`CREATE INDEX idx_conversations_workspace ON conversations(archived, workspace_id, updated_at)`,
+		},
+		apply: migrateV14,
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

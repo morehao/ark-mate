@@ -222,8 +222,8 @@ func TestMigrateV7ToLatestKeepsData(t *testing.T) {
 	if err := s.db.Raw(`SELECT MAX(version) FROM ` + model.TableMigration).Row().Scan(&maxV); err != nil {
 		t.Fatalf("读版本: %v", err)
 	}
-	if maxV != latestSchemaVersion() || maxV != 13 {
-		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 13 以提醒同步），got %d", latestSchemaVersion(), maxV)
+	if maxV != latestSchemaVersion() || maxV != 14 {
+		t.Fatalf("schema 版本应为最新（latest=%d，本用例写死 14 以提醒同步），got %d", latestSchemaVersion(), maxV)
 	}
 }
 

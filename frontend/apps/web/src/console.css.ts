@@ -916,6 +916,90 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
   }
 
+  /* v14：创建/登记失败**就地**报错（设计 §5.2 状态 E）——不关弹层，用户当前浏览位置还在。
+     不做成 toast 是因为那种提示会盖住目录树，而用户要做的正是"换一个目录"。 */
+  .fg-ws-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 4px 6px 6px;
+    padding: 6px 9px;
+    border-radius: 8px;
+    background: ${tokens.warningBg};
+    color: ${tokens.error};
+    font-size: 11.5px;
+    line-height: 1.5;
+    word-break: break-all;
+  }
+  /* 不可写时的一句原因（替代那个不出现的「添加工作空间…」按钮）。 */
+  .fg-ws-hint {
+    padding: 6px 9px 8px;
+    font-size: 11.5px;
+    color: ${tokens.textPlaceholder};
+    line-height: 1.6;
+  }
+  /* 左栏分组行上的管理入口：悬停浮现（与 .fg-sess-more 同一纪律）。 */
+  .fg-ws-manage { flex: none; display: none; gap: 2px; }
+  .fg-wsgroup-row:hover .fg-ws-manage { display: inline-flex; }
+  .fg-wsgroup-row .fg-ws-icon-btn {
+    width: 20px;
+    height: 20px;
+    border: 0;
+    background: transparent;
+    border-radius: 5px;
+    color: ${tokens.textSecondary};
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    font-size: 11.5px;
+  }
+  .fg-wsgroup-row .fg-ws-icon-btn:hover:not(:disabled) { background: ${tokens.softFill}; color: ${tokens.text}; }
+  .fg-wsgroup-row .fg-ws-icon-btn:disabled { cursor: default; opacity: 0.35; }
+  /* 左栏工作空间分组行（比会话行略重：它是分组的头）。 */
+  .fg-wsgroup-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 5px 6px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: ${tokens.text};
+  }
+  .fg-wsgroup-row:hover { background: ${tokens.softFill}; }
+  .fg-wsgroup-caret {
+    flex: none;
+    width: 14px;
+    font-size: 9px;
+    color: ${tokens.textPlaceholder};
+    transition: transform 0.12s ease;
+  }
+  .fg-wsgroup-row.fg-open .fg-wsgroup-caret { transform: rotate(90deg); }
+  .fg-wsgroup-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fg-wsgroup-name.fg-unnamed { font-style: italic; font-weight: 500; color: ${tokens.textSecondary}; }
+  .fg-wsgroup-count {
+    flex: none;
+    font-size: 11px;
+    font-weight: 500;
+    color: ${tokens.textPlaceholder};
+    font-variant-numeric: tabular-nums;
+  }
+  .fg-wsgroup-warn { flex: none; color: ${tokens.warning}; font-size: 11.5px; }
+  /* 分组内提示（目录不可用 / 还没有会话）：只有一行字，不做成大块空态。 */
+  .fg-wsgroup-note {
+    padding: 2px 8px 6px 28px;
+    font-size: 11px;
+    color: ${tokens.textPlaceholder};
+    line-height: 1.6;
+  }
+
   /* 会话行「更多」按钮：悬停浮现；触屏（移动抽屉态）常显 */
   .fg-sess-more { opacity: 0; transition: opacity 0.12s ease; }
   .fg-sess-item:hover .fg-sess-more,

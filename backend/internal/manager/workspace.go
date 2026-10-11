@@ -17,18 +17,43 @@ import (
 //
 // 三个入口，全部收在同一条白名单判定内（多入口共用一条校验，避免"创建能过、浏览不能过"这类裂缝）：
 //   - ValidateWorkspace：客户端显式指定 → 绝对 + 存在 + 是目录 + EvalSymlinks 规范化 + 根白名单；
-//   - ResolveWorkspace：未指定 → 平台在 workspaceDir 下按会话 id 代建临时工作空间；
+//   - ResolveWorkspace：未指定 → 落在**默认工作空间**（一个落库的登记项，见 workspace_registry.go）；
 //   - BrowseWorkspace（workspace_view.go）：只读目录枚举，复用 ValidateWorkspace。
 //
-// 「临时」必须由调用方原样透出到响应（WorkspaceResolution.Temporary），
+// 「平台给的」必须由调用方原样透出到响应（WorkspaceResolution.Temporary），
 // 前端**不得**从路径形状反推——路径前缀是可配置的，靠形状猜必然失效。
+//
+// **v14 起不再按会话代建独占目录**（设计 ADR-4）：未指定 cwd 的会话共享默认工作空间。
+// 这条变更的代价与理由见设计文档那一节——最要紧的一句是：两个未指定目录的会话
+// **能读到对方的文件**（共享一个工作目录的必然结果）。
 
 // WorkspaceResolution 是一次工作空间解析的结果。
 type WorkspaceResolution struct {
 	// Path 规范化后的绝对路径（会话 cwd）。
 	Path string
-	// Temporary 是否由平台代建（客户端未指定）。
+	// Temporary 是否由**平台**给出（客户端未指定 → 落在默认工作空间）。
+	//
+	// 字段名沿用历史的 `Temporary`/`workspace_temporary`：它是既有 wire key（前端两处按它
+	// 渲染），换名是纯破坏且没有信息增益。语义已从"平台按会话代建的一次性目录"变成
+	// "这是默认工作空间（不是你选的）"（设计 ADR-9）。
 	Temporary bool
+	// WorkspaceID 归属的工作空间登记 id（空 = 该部署没有默认工作空间，或显式 cwd 未登记）。
+	//
+	// 它与 Path 是两件事（设计 ADR-2）：Path 是**执行事实**（ACP cwd、沙箱边界、不可变），
+	// WorkspaceID 是**归属事实**（左栏分组）。显式给 cwd 时归属由调用方按路径查登记表补上。
+	WorkspaceID string
+}
+
+// DefaultWorkspaceRef 是"默认工作空间"在解析路径上的最小承载。
+//
+// 刻意不传整个 store.Workspace：`ResolveWorkspace` 是**纯函数**（可单测、无副作用），
+// 让 store 类型渗进它的签名会把"解析"与"持久层"绑在一起——而这个函数的全部价值
+// 恰恰是它只认路径与两个判据。
+type DefaultWorkspaceRef struct {
+	// ID 登记 id（作为归属写进会话行）。
+	ID string
+	// Path 规范化后的目录。
+	Path string
 }
 
 // ValidateWorkspace 校验并规范化客户端显式指定的工作空间路径。
@@ -70,15 +95,22 @@ func ValidateWorkspace(spec string, allowedRoots []string) (string, error) {
 
 // ResolveWorkspace 解析建会话时应使用的 cwd。
 //
-//	spec 非空 → 校验后原样使用（Temporary=false；同时受 allowedRoots 约束）
-//	spec 为空 → 在 provisionDir 下建 <conversationID>/（Temporary=true）
-//	spec 为空且 provisionDir 为空 → 报错 workspace_required（**不回落 os.Getwd()**：
-//	  serve 进程目录是"平台的目录"而非"用户的目录"，全局共享会让沙箱边界失效；
-//	  运维若要强制显式指定，把 workspace_dir 设为空即可）
+//	spec 非空    → 校验后原样使用（Temporary=false；受 allowedRoots 约束）
+//	spec 为空    → 落在**默认工作空间**（Temporary=true）
+//	spec 为空且没有默认工作空间 → 报 workspace_required
 //
-// 代建路径不再逐次校验 allowedRoots：传进来的就是**生效**名单（`Service.WorkspaceRoots()`），
-// 而平台代建根已被隐式并入其中（见 effectiveWorkspaceRootsLocked）——逐次重算只是重复劳动。
-func ResolveWorkspace(spec, provisionDir string, allowedRoots []string, conversationID string) (WorkspaceResolution, error) {
+// 「没有默认工作空间」有两种成因，文案分开（它们的处置不同）：
+//   - 代建关闭（`workspace_dir` 为空）→ 该类部署**要求**显式 cwd，这是配置意图；
+//   - 有配置但默认工作空间不存在（被删过 / 首次启动还没 bootstrap / 目录被外部毁掉）
+//     → 运维该去看平台数据目录，而不是去改调用方。
+//
+// **不回落 os.Getwd()** 这条铁律不变：serve 进程目录是"平台的目录"而非"用户的目录"，
+// 全局共享会让沙箱边界失效。
+//
+// 默认工作空间的路径不再逐次校验 allowedRoots：传进来的就是**生效**名单
+// （`Service.WorkspaceRoots()`），而平台代建根已被隐式并入其中
+// （见 effectiveWorkspaceRootsLocked）——逐次重算只是重复劳动。
+func ResolveWorkspace(spec string, def *DefaultWorkspaceRef, allowedRoots []string) (WorkspaceResolution, error) {
 	if strings.TrimSpace(spec) != "" {
 		p, err := ValidateWorkspace(spec, allowedRoots)
 		if err != nil {
@@ -86,23 +118,15 @@ func ResolveWorkspace(spec, provisionDir string, allowedRoots []string, conversa
 		}
 		return WorkspaceResolution{Path: p}, nil
 	}
-	if strings.TrimSpace(provisionDir) == "" {
+	if def == nil || strings.TrimSpace(def.ID) == "" || strings.TrimSpace(def.Path) == "" {
 		return WorkspaceResolution{}, acl.NewError(acl.ClassRequest, "workspace_required",
-			"未指定工作空间，且平台代建已关闭（workspace_dir 为空）：请显式传入 cwd", nil)
+			"未指定工作空间，且没有可用的默认工作空间（未配置 workspace_dir，或默认工作空间已被移除）：请显式传入 cwd", nil)
 	}
-	if strings.TrimSpace(conversationID) == "" {
-		return WorkspaceResolution{}, acl.NewError(acl.ClassService, "workspace_unavailable",
-			"内部错误：缺少会话 id，无法代建工作空间", nil)
-	}
-	dir := filepath.Join(provisionDir, conversationID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return WorkspaceResolution{}, acl.NewError(acl.ClassService, "workspace_unavailable",
-			fmt.Sprintf("代建工作空间失败: %s", dir), err)
-	}
+	dir := def.Path
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
-	return WorkspaceResolution{Path: dir, Temporary: true}, nil
+	return WorkspaceResolution{Path: dir, Temporary: true, WorkspaceID: def.ID}, nil
 }
 
 // withinRoots 判定 path 是否落在允许的工作区根之内（含根本身）。
@@ -184,15 +208,20 @@ func normalizeWorkspaceFilter(cwd string) string {
 	return filepath.Clean(cwd)
 }
 
-// DiscardWorkspace 在会话最终建立失败时清理代建目录（best-effort）。
+// DiscardWorkspace 在会话最终建立失败时清理**会话独占**的工作空间目录（best-effort）。
 //
-// 只删自己代建的那一层（ResolveWorkspace 保证该层是本会话独占的），
-// 非临时工作空间与用户显式指定的目录一律不动。
+// **v14 起它恒为空操作**，且这件事必须写在这里而不是悄悄删掉函数：解析路径已经不再创建
+// 任何会话独占目录（未指定 cwd 的会话落在共享的默认工作空间，见设计 ADR-4），所以
+// "建会话失败 → 清理刚建的目录"这个动作**不再有对象**。
+//
+// 它为什么不能顺手改成"删掉默认工作空间"：那是**共享**目录——一次失败的建会话会连带
+// 删掉别的会话正在用的文件。这条注释就是防止将来有人"看着像死代码"而把它接到默认工作空间上，
+// 保留分支是为了让那个判断（`Temporary` 现在表示"平台给的默认工作空间"）显式可见。
 func DiscardWorkspace(res WorkspaceResolution) {
 	if !res.Temporary || res.Path == "" {
 		return
 	}
-	_ = os.Remove(res.Path) // 非空则不删：用户/agent 已写入内容时宁可留下，也不误删
+	// 刻意什么都不做：Temporary=true 现在指默认工作空间（共享），不是会话独占目录。
 }
 
 // SetWorkspacePolicy 设置工作空间的整体策略：代建根目录 + 允许的工作区根白名单。
@@ -264,6 +293,17 @@ func (s *Service) WorkspaceDir() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.workspaceDir
+}
+
+// defaultWorkspaceDir 是**默认工作空间**的目录：代建根下的 `default/` 子目录。
+//
+// 为什么不是代建根本身：根下面还会按需放别的东西（历史遗留的按会话代建目录就在那里），
+// 把根登记成一个工作空间会让"平台代建根恒在生效白名单内"这条规则与"用户的工作目录"
+// 混成同一个东西——那样用户删掉这个登记就等于把平台的代建根一起交出去。
+//
+// 名字固定为 `default`（语言中立）：一次安装跨语言切换时磁盘路径不变（设计 ADR-4）。
+func defaultWorkspaceDir(provisionDir string) string {
+	return filepath.Join(provisionDir, "default")
 }
 
 // WorkspaceRoots 返回**生效**的工作区根白名单（空 = 不限制；含隐式并入的代建根）。

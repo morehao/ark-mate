@@ -308,6 +308,16 @@ export function ConversationDetailDrawer({
                   '未记录（早于工作空间落库的会话）'
                 ),
               )}
+              {/* 所属工作空间（v14）：与"在工作目录"是两件事——那行是**执行事实**（cwd），
+                  这行是**归属事实**（左栏分组）。两者在正常情况下指向同一目录，但登记被删、
+                  或目录后来不可用时就会分叉；分开显示让"它归在哪个分组下"有答案。 */}
+              {s.workspace_title &&
+                row(
+                  '所属工作空间',
+                  <span style={{ fontSize: 12 }} title={s.workspace_id ?? ''}>
+                    {s.workspace_title}
+                  </span>,
+                )}
               {(() => {
                 // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
                 // （不再按 runtime 名硬编码——opencode 同样支持会话级 set_config_option）。

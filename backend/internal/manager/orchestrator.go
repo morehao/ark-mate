@@ -170,8 +170,15 @@ type StartOptions struct {
 	ConversationID string
 	// Cwd 会话工作空间（规范化后的绝对路径）；空 = 用当前工作目录（demo 语义）。
 	Cwd string
-	// WorkspaceTemporary 该 cwd 是否由平台代建（随响应透出；前端不得从路径形状反推）。
+	// WorkspaceTemporary 该 cwd 是否由**平台**给出（= 默认工作空间；随响应透出，
+	// 前端不得从路径形状反推）。v14 起语义从"平台按会话代建"变成"这是默认工作空间"。
 	WorkspaceTemporary bool
+	// WorkspaceID 归属的工作空间登记 id（空 = 未登记 → 读面归默认工作空间）。
+	//
+	// 与 Cwd 的分工见 ConversationRec.WorkspaceID：Cwd 是执行事实（ACP cwd、沙箱边界），
+	// WorkspaceID 是归属事实（左栏分组）。这里两个字段一起传，是因为**定稿发生在同一处**
+	// （CreateConversation 解析出 ws 之后），分开传会让两条来源有机会不一致。
+	WorkspaceID string
 	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
 	Model runtime.ModelConfig
 	// Origin 会话来源（平台判定，非用户输入）：'' = 人工，'automation:<id>' = 该 automation 触发。

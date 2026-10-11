@@ -758,8 +758,12 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if env.Code != 40001 || !strings.Contains(env.Msg, "workspace_outside_roots") {
 		t.Fatalf("画边界后根外应 40001: %+v", env)
 	}
-	if _, err := manager.ResolveWorkspace("", provision, svc.WorkspaceRoots(), "conv-s"); err != nil {
-		t.Fatalf("代建应仍可用（代建根隐式并入）: %v", err)
+	defDir := filepath.Join(provision, "default")
+	if err := os.MkdirAll(defDir, 0o755); err != nil {
+		t.Fatalf("mkdir default: %v", err)
+	}
+	if _, err := manager.ResolveWorkspace("", &manager.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}, svc.WorkspaceRoots()); err != nil {
+		t.Fatalf("默认工作空间应仍可用（代建根隐式并入）: %v", err)
 	}
 
 	// 落盘：非破坏性写（addr 保留）+ 数组形式（路径含逗号也能往返）。

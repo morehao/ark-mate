@@ -22,10 +22,19 @@ import { conversationSearch, exportConversations, messageSearch, toErrorMessage 
 import { dedupeHits, exportDownloadName, roleLabel, sourceLabel } from '../console/searchView'
 import { useMate } from '../store'
 import { RAIL_PAGE, pageConversations, relTime } from '../console/railView'
+import { WorkspaceGroupPane } from './WorkspaceGroupPane'
 import { agentNameOf, titleFor } from '../console/util'
 
 interface Props {
   onCreate: () => void
+}
+
+/** 分组模式的前端本地持久键（视图偏好，不进 db）。 */
+const LIST_MODE_KEY = 'mate.web.listMode'
+
+/** 左栏「＋」把要预选的工作空间交给新建面板的唯一入口。 */
+function setPreferredWorkspace(id: string): void {
+  useMate.getState().setPreferredWorkspace(id)
 }
 
 /** 置顶组 + 按创建日分组的未置顶会话（轻量时间线管理面）。 */
@@ -157,6 +166,43 @@ export function ConversationPane({ onCreate }: Props) {
   const [shown, setShown] = useState(RAIL_PAGE)
   useEffect(() => setShown(RAIL_PAGE), [railMode])
   const railPage = pageConversations(conversations, shown, activeId)
+
+  // 分组模式（v14）：`workspace` = 按工作空间分组（默认）；`timeline` = 按创建日的旧视图。
+  //
+  // 为什么保留旧视图：分组视图回答"我在哪个项目里有哪些会话"，而按时间回答"我最近干了什么"。
+  // 两者都常用，且**登记表不可用**（memory 持久层 / 老服务端）时必须能退回时间线——
+  // 那时没有分组可挂，硬渲染分组会让会话列表整个消失。
+  const workspaces = useMate((s) => s.workspaces)
+  const grouped = (workspaces?.items.length ?? 0) > 0
+  const [listMode, setListMode] = useState<'workspace' | 'timeline'>(() =>
+    localStorage.getItem(LIST_MODE_KEY) === 'timeline' ? 'timeline' : 'workspace',
+  )
+  // 登记表拿不到（null / 空）时**强制**走时间线：这不是用户选择，而是"没有分组可挂"的事实。
+  const effectiveMode: 'workspace' | 'timeline' = grouped ? listMode : 'timeline'
+  const setMode = (m: 'workspace' | 'timeline') => {
+    setListMode(m)
+    try {
+      localStorage.setItem(LIST_MODE_KEY, m)
+    } catch {
+      // 记不住偏好不影响功能，不打扰用户。
+    }
+  }
+
+  // 点分组行的「＋」＝在此工作空间新建会话：回到新建面板并把该工作空间预选上。
+  // 这是"左栏浏览面"与"新建选择面"之间唯一的桥（设计 §5.1）。
+  const createInWorkspace = (workspaceId: string) => {
+    setPreferredWorkspace(workspaceId)
+    onCreate()
+  }
+
+  // 分组视图里没被任何登记覆盖的会话（登记被删/归属指向已不存在的行）：兜一个「其他」组，
+  // 而不是让它们从列表里凭空消失。
+  const ungrouped = grouped
+    ? railPage.visible.filter((c) => {
+        const id = c.workspace_id ?? ''
+        return !(workspaces?.items ?? []).some((w) => w.id === id)
+      })
+    : []
 
   const openConversation = (id: string) => {
     setDrawer(false)
@@ -587,11 +633,23 @@ export function ConversationPane({ onCreate }: Props) {
             归档
           </ViewTab>
         </span>
-        {!archivedView && (
-          <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
-            新建会话
-          </Button>
-        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {grouped && (
+            <span style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 8 }}>
+              <ViewTab active={effectiveMode === 'workspace'} onClick={() => setMode('workspace')}>
+                工作空间
+              </ViewTab>
+              <ViewTab active={effectiveMode === 'timeline'} onClick={() => setMode('timeline')}>
+                时间线
+              </ViewTab>
+            </span>
+          )}
+          {!archivedView && (
+            <Button size="small" icon={<PlusOutlined />} onClick={onCreate} style={{ borderRadius: 8 }}>
+              新建会话
+            </Button>
+          )}
+        </span>
       </div>
 
       <div style={{ flex: 'none', padding: '0 10px 4px' }}>
@@ -662,6 +720,33 @@ export function ConversationPane({ onCreate }: Props) {
               ? '暂无归档会话。在「会话」里点会话行的 ⋯ →「归档」，即可把会话移到这里（数据保留，可恢复）。'
               : '暂无会话。点击右上「新建会话」，选择 Agent 并发起首轮问答。'}
           </div>
+        ) : effectiveMode === 'workspace' && grouped ? (
+          <>
+            <WorkspaceGroupPane
+              archived={archivedView}
+              onCreate={createInWorkspace}
+              renderBody={(sessions) => <>{sessions.map(renderItem)}</>}
+            />
+            {ungrouped.length > 0 && (
+              <div role="group" aria-label="其他">
+                {/* 「其他」= 归属指向已不存在的登记（或读到旧数据）。不隐藏它们：
+                    会话凭空消失是用户无法自行解释的状态。 */}
+                <div
+                  style={{
+                    padding: '10px 12px 5px',
+                    fontFamily: tokens.fontMono,
+                    fontSize: 10,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: tokens.textPlaceholder,
+                  }}
+                >
+                  其他
+                </div>
+                {ungrouped.map(renderItem)}
+              </div>
+            )}
+          </>
         ) : (
           <>
             {groupConversations(railPage.visible).map((g) => (

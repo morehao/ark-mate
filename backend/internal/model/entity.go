@@ -44,6 +44,11 @@ const (
 	// 它是**清单的唯一来源**，物化成各 runtime 的配置文件（T5 `config_write`）；
 	// 运行时实际广告的目录是「事实」，不落这张表（设计 D-6 / ADR-10）。
 	TableModel = "models"
+	// TableWorkspace 工作空间登记表（v14）：一条记录 = 一个规范化目录 + 展示名 + 顺序。
+	//
+	// 它是「用户的工作目录」这条线的**持久身份**（设计 ADR-1）：在这之前目录名只从会话
+	// 派生（`DISTINCT cwd`），没有可写对象、也就没有"创建工作空间"这件事可落。
+	TableWorkspace = "workspaces"
 )
 
 // 关于 autoCreateTime/autoUpdateTime：gorm 按字段名约定会把 CreatedAt/UpdatedAt
@@ -70,6 +75,18 @@ type Conversation struct {
 	// Cwd 会话工作空间（canonical 绝对路径；= 底座 ACP session 的 cwd，
 	// 也是原生权限 workspace-write 的边界）。
 	Cwd string `gorm:"column:cwd;not null"`
+	// WorkspaceID 归属的工作空间登记行（v14；'' = 未登记/登记已删 → 读面归到**默认工作空间**）。
+	//
+	// 与 Cwd 的分工是本表最容易踩的一处，刻意记在这里：
+	//   - **Cwd 是执行事实**：底座 ACP session 拿它当 cwd、原生权限按它画沙箱边界，
+	//     它是历史事实、不可变，重建/续聊要按它重放。它**不能**由 WorkspaceID 推导——
+	//     工作空间被删登记、或目录后来不可用时，历史会话的 cwd 必须仍然读得出来；
+	//   - **WorkspaceID 是归属事实**：只用于「这条会话属于哪个分组」。它与 Cwd 在大多数行上
+	//     指向同一目录，但两者不一致是**允许的**（设计 ADR-2/ADR-5），不是脏数据。
+	//
+	// 刻意**不加外键**：本仓 SQLite driver 不注入 `foreign_keys`（AGENTS.md 已登记该代价），
+	// 写了也不生效；且删登记**本来就不该**连带删会话（设计 ADR-6），级联语义恰恰是错的。
+	WorkspaceID string `gorm:"column:workspace_id;not null;default:''"`
 	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
 	// 权威标志：任何「临时空间」判定都必须读它，不得从路径形状反推。
 	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkmate_flag"`
@@ -492,3 +509,51 @@ func (CapabilityRevision) TableName() string { return TableCapabilityRevision }
 
 // CapabilityRevisionList 是 CapabilityRevision 切片类型（gormdao 泛型参数要求具名切片）。
 type CapabilityRevisionList []CapabilityRevision
+
+// Workspace 是 workspaces 表的一行（v14）：**工作空间登记项**。
+//
+// 它是「用户在哪个目录里工作」这条线的持久实体（设计 §3.3 / ADR-1）。三个不变量：
+//
+//   - **一个规范化目录至多一条登记**：`path` 上的唯一索引是唯一执行者。为什么不在 Go 侧
+//     判重：并发两次 POST 会各自读到"不存在"然后各插一行，库级唯一索引是唯一能挡住它的东西；
+//   - **有且只有一个默认工作空间**：`is_default = 1` 的部分唯一索引保证。它是「建会话未指定
+//     cwd」这条路的落点（设计 ADR-4），删掉它等于让那条路无路可走；
+//   - **顺序是这一列的整数**：`list_order` 升序即左栏展示顺序。设计 ADR-3 说明了为什么不用
+//     独立顺序表——规模是"用户手动登记的项目数"，区间 ±1 的代价可以忽略。
+//
+// **刻意没有的列**（每条都是判据，不是遗漏）：
+//   - `session_ids` / 任何成员账：成员关系由 `conversations.workspace_id` 表达（设计 ADR-5）。
+//     dsh 的登记行里有顺序化的 `sessionIds`，那是因为它的会话账独立于会话行、会漂移；
+//     本仓归属就在会话行自己身上，结构上不可能漂移，再存一份账只会多一条会不一致的路径；
+//   - 目录状态（是否存在/可读）：**不缓存**。外部进程随时可能删/移目录，缓存只会让界面
+//     显示一个过期的好状态；读面每次现算。
+type Workspace struct {
+	// ID 平台 uuid（对外稳定标识）。**不是路径**：改名/搬迁不该让 id 漂移。
+	ID string `gorm:"column:id;primaryKey"`
+	// Path 规范化后的绝对路径（EvalSymlinks + Clean 之后）。
+	// 唯一索引落在这一列上，"同一目录一个工作空间"由库保证。
+	Path string `gorm:"column:path;not null"`
+	// Title 展示名（'' = 未命名 → 前端按末级目录名回落渲染）。
+	//
+	// 服务端**不**在空标题时替前端编一个名字：那会把"未命名"这个状态永久写死成某个语言
+	// 的字符串（与默认工作空间的语言中立口径冲突，见 IsDefault）。
+	Title string `gorm:"column:title;not null;default:''"`
+	// IsDefault 是否平台默认工作空间（有且只有一个；删不掉、身份不可改）。
+	//
+	// 它的标题在库里存的是语言中立的 `default`，**展示时**才按界面语言渲染成「默认工作空间」
+	// ——与 dsh 的 workspaceDisplayTitle 同一手法：一次安装跨语言切换时磁盘路径与库里
+	// 的标题都不变，只有屏幕上的字跟着变。
+	IsDefault bool `gorm:"column:is_default;serializer:arkmate_flag"`
+	// ListOrder 左栏展示顺序（升序；新登记的追加到尾部）。
+	ListOrder int64 `gorm:"column:list_order;not null"`
+	// CreatedAt 登记时刻（RFC3339Nano(UTC)）。
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+	// UpdatedAt 最后一次改写时刻（改名/重排都会刷新它）。
+	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
+}
+
+// TableName 实现 gormdao.Entity。
+func (Workspace) TableName() string { return TableWorkspace }
+
+// WorkspaceList 是 Workspace 切片类型（gormdao 泛型参数要求具名切片）。
+type WorkspaceList []Workspace

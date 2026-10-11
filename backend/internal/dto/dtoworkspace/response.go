@@ -90,3 +90,82 @@ type WorkspaceSettingsResp struct {
 	// Writable 是否可经 `PUT /settings/workspace` 改写（LockedBy 为空且进程有持久化端口）。
 	Writable bool `json:"writable"`
 }
+
+// WorkspaceResp 一条**工作空间登记**（v14；左栏分组与选择器的唯一事实源）。
+//
+// 与 WorkspaceRecentResp / WorkspaceLibraryResp 的区别是本轮设计的核心：那两个是**派生的只读
+// 视图**（从既有会话或从白名单目录算出来的），这一条是**用户登记下来的持久实体**——它有 id、
+// 有标题、有顺序，可以被改写与删除。选择器的主列表取这一份，另外两个降级成辅助入口。
+type WorkspaceResp struct {
+	// ID 平台 uuid（对外稳定标识；改名/搬迁不改它）。会话的 workspace_id 指向它。
+	ID string `json:"id"`
+	// Path 规范化后的绝对路径（可直接作为建会话的 cwd）。
+	Path string `json:"path"`
+	// Title 展示名（'' = 未命名，前端按末级目录名渲染；默认工作空间读作本地化的「默认工作空间」）。
+	Title string `json:"title"`
+	// IsDefault 是否平台默认工作空间（删不掉；「未指定 cwd 的建会话」落在它上面）。
+	IsDefault bool `json:"is_default"`
+	// ListOrder 展示顺序（升序）。
+	ListOrder int64 `json:"list_order"`
+	// DirStatus 目录现状：ok | missing | not_dir | unreadable。
+	//
+	// **每次读现算，不缓存**：外部进程随时可能删/移目录，缓存只会让界面显示一个过期的好状态。
+	// 它不是 ok 时这一行**仍然返回**——登记不会因为目录消失就凭空不见，用户得能看见并清理它。
+	DirStatus string `json:"dir_status"`
+	// Conversations 该工作空间名下的会话数（含归档）。
+	Conversations int `json:"conversations"`
+	// LastUsedAt 该工作空间下最新会话的 updated_at（RFC3339；空 = 从未用过，不是 zero time）。
+	LastUsedAt string `json:"last_used_at,omitempty"`
+	// CreatedAt / UpdatedAt 登记时刻与最后一次改写时刻（RFC3339）。
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// WorkspaceListResp `GET /workspaces` 响应。
+type WorkspaceListResp struct {
+	// Items 按 list_order 升序的全部登记。
+	Items []WorkspaceResp `json:"items"`
+	// DefaultID 默认工作空间 id（空 = 该部署没有默认工作空间，例如代建关闭）。
+	//
+	// 前端要用它做两件事：把「未指定」的会话归到它下面、以及禁止删除它。
+	DefaultID string `json:"default_id,omitempty"`
+	// Writable 是否可创建/改名/删除（memory 持久层 = false）。
+	//
+	// 不可写时前端**不渲染**创建与管理入口（而不是给一个必然失败的按钮）——与
+	// WorkspaceSettingsResp.Writable 同一口径，不发明第二套（设计 ADR-11）。
+	Writable bool `json:"writable"`
+	// ProvisionDir 平台默认工作空间的所在目录（空 = 代建关闭）。透出是为了让"默认那个目录在哪"
+	// 有答案，也是排障时的第一个锚点。
+	ProvisionDir string `json:"provision_dir,omitempty"`
+}
+
+// WorkspaceDeleteResp `DELETE /workspaces/:id` 响应。
+//
+// 刻意把 ReleasedSessions 回出来：删除登记的文案要能说清"哪些会话被放回了默认工作空间"，
+// 而这句话必须由**事实**支撑，不是前端自己猜的。
+type WorkspaceDeleteResp struct {
+	ID string `json:"id"`
+	// ReleasedSessions 归属被清空、读面归到默认工作空间的会话数（会话本身与 cwd 均未改动）。
+	ReleasedSessions int64 `json:"released_sessions"`
+}
+
+// WorkspaceMoveResp `POST /workspaces/:id/move` 响应：重排后的**完整**顺序。
+//
+// 给完整顺序而不是只给目标行：客户端的本地顺序与库的对齐靠它比对（对齐 dsh 的
+// `insertBefore` 返回完整 committed order）。
+type WorkspaceMoveResp struct {
+	IDs []string `json:"ids"`
+}
+
+// 目录现状取值（WorkspaceResp.DirStatus）。
+const (
+	// DirStatusOK 目录存在、可读、且确实是目录。
+	DirStatusOK = "ok"
+	// DirStatusMissing 目录不存在（被删/被移走/挂载点不在）。
+	DirStatusMissing = "missing"
+	// DirStatusNotDir 路径存在但不是目录（被一个同名文件顶掉了）。
+	DirStatusNotDir = "not_dir"
+	// DirStatusUnreadable 存在但是目录，但读不了（权限/挂载故障）——与 missing 分开，
+	// 因为两者的处置不同：前者要去修权限，后者要去确认目录还在不在。
+	DirStatusUnreadable = "unreadable"
+)

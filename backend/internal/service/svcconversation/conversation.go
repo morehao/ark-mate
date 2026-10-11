@@ -12,9 +12,13 @@ import (
 //
 // 实现方（internal/manager）以编译期断言 var _ ConversationSvc = (*T)(nil) 保证一致性。
 type ConversationSvc interface {
-	// ListConversations 返回会话概要（可按 archived 过滤；cwd 非空 = 只返回工作空间
-	// **精确等于**该路径的会话，用于「按工作空间查看/分组」。路径须为绝对路径）。
-	ListConversations(archived bool, cwd string) ([]dtoconversation.ConversationResp, error)
+	// ListConversations 返回会话概要（可按 archived 过滤）。
+	//
+	// 两个工作空间过滤参数口径不同（设计 ADR-2/ADR-5），都为空则不过滤：
+	//   - cwd：**执行事实**的字符串相等（绝对路径；历史行为，兼容保留）；
+	//   - workspaceID：**归属事实**（v14 左栏分组用它，可索引）。按默认工作空间过滤时
+	//     **同时包含** `workspace_id=''` 的历史会话（那些行读面归默认工作空间）。
+	ListConversations(archived bool, cwd, workspaceID string) ([]dtoconversation.ConversationResp, error)
 
 	// SearchConversations 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
 	SearchConversations(ctx context.Context, q string, limit int) ([]dtoconversation.ConversationSearchHit, error)

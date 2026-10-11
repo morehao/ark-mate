@@ -60,7 +60,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | 自动化定义 | `~/.ark-mate/automations/<id>.json` | `MATE_AUTOMATIONS` | 定时任务。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：定义与运行态存在 DB 的 `automations` 表里（**定义列** `body`+`revision` 与**运行态列** `last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 分列；`state` 属于定义，因为启用/停用是用户操作），本目录只作**导入/导出**位置（装配期自动导入一次、`mate automation import\|export` 手动搬运；导入会把文件里的运行态键切进运行态列，导出时再合成同一个文件）。memory 模式下 `<id>.json` 仍是唯一定义 + 运行态载体（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）——**备份它就是备份任务**（含运行史）。两种模式下手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
 | 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
-| 代建工作空间 | `~/.ark-mate/workspaces/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时按**会话 id** 代建 `<id>/`（该目录即会话沙箱边界） |
+| 默认工作空间 | `~/.ark-mate/workspaces/default/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时的落点（v14）。它是**一条落库的工作空间登记**（`workspaces` 表，`is_default=1`），不是"每会话一个目录"——同一台机器上所有未指定目录的会话共享它。目录由装配期建立（`<MATE_WORKSPACE_DIR>/default`），**只在登记表为空时**创建：删掉它之后不会自动重建 |
 | 工作区根白名单 | 空（不限制） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）；非空时显式 `cwd` 与目录浏览都被收在根内。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
 持久层开关：`MATE_STORE=sqlite|memory|auto`（空或 `auto` = 按库文件定：已存在且非空 → sqlite，
@@ -72,14 +72,27 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 
 会话工作空间 = 该会话的 ACP `cwd`，**创建时定稿、之后不可变**（要换目录就新开会话）。
 
-- **默认行为**：`POST /conversations` 不带 `cwd` → 平台在 `MATE_WORKSPACE_DIR` 下按会话 id
-  代建 `<id>/`，响应回 `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——
-  那会让所有会话共用一个沙箱边界（旧行为，已移除）。
-- **关闭代建**：`MATE_WORKSPACE_DIR` 设为空 / `off` / `disable` / `none` → 不带 `cwd` 的建会话
-  请求报 `workspace_required`（40001）。适合"目录必须由调用方显式指定"的受控部署。
-- **代建目录不自动清理**：v1 只记录权威标志（`conversations.workspace_temporary`），不做
-  TTL/回收——清理留待显式的 prune 能力，避免误删用户内容。磁盘敏感场景请把
-  `MATE_WORKSPACE_DIR` 指到受管卷，或关闭代建 + 由调用方指定目录。
+- **默认行为（v14 变更）**：`POST /conversations` 不带 `cwd`/`workspace_id` → 会话落在
+  **默认工作空间**（`<MATE_WORKSPACE_DIR>/default`，一条落库的登记），响应回
+  `workspace_temporary=true`。**不会**回落 serve 进程的工作目录——那会让所有会话共用
+  一个沙箱边界（旧行为，已移除）。
+  > **v14 之前是按会话 id 代建独占目录**（`<MATE_WORKSPACE_DIR>/<会话id>/`）。现在不再这么做：
+  > 两个未指定目录的会话会**共享**默认工作空间，因此**能读到对方的文件**。要隔离就在新建时
+  > 选一个自己的目录（或 `POST /conversations` 传 `cwd`/`workspace_id`）。旧版本留下的
+  > `<会话id>/` 目录**不会被删**（删除用户数据不是升级该做的事），新会话也不再新增这类目录。
+  > 注意平台**不登记**它们在哪：迁移发生在配置装载之前（拿不到 `MATE_WORKSPACE_DIR`），
+  > 所以这件事没有可靠的机器可读出口——磁盘敏感的场景请自行按目录形状清理那些空目录。
+  > `meta.migration_notes_v14` 只如实记录迁移时的会话数与"没有创建任何登记行"。
+- **关闭代建**：`MATE_WORKSPACE_DIR` 设为空 / `off` / `disable` / `none` → 不带
+  `cwd`/`workspace_id` 的建会话请求报 `workspace_required`（40001）。适合"目录必须由调用方
+  显式指定"的受控部署。此时也**没有**默认工作空间（`GET /workspaces` 的 `default_id` 为空）。
+- **工作空间登记表（v14）**：`GET /workspaces` 列出用户登记的工作空间（顺序、目录现状、
+  会话数），`POST` 登记一个已存在的目录（默认 get-or-create），`PATCH` 改名，`DELETE`
+  只删登记（**目录与会话一概不动**，其会话回到默认工作空间），`POST /workspaces/:id/move` 重排。
+  它要求 `MATE_STORE=sqlite`：memory 模式下读面返回空列表 + `writable:false`，写面 40501
+  `workspace_schema_read_only`（面板据此不渲染创建入口）。
+- **登记不豁免白名单**：`POST /workspaces` 走的是**与建会话同一条校验**（绝对 / 存在 / 是目录 +
+  符号链接规范化 + `MATE_WORKSPACE_ROOTS`），所以不会出现"能登记、建不了会话"。
 - **目录浏览面**：`GET /workspaces/browse` 是 Web 端替代原生目录选择器的必要能力（只列目录，
   不列文件）。**未配 `MATE_WORKSPACE_ROOTS` 时可枚举任意可读目录**——同机单操作员这样最省事，
   但对外提供服务（反代/容器/多人）就等于开放整个文件系统的结构，务必做两件事：
