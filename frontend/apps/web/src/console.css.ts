@@ -330,6 +330,165 @@ export const consoleStyleSheet = `
   .fg-probe-detail { flex: 1; min-width: 0; }
   .fg-probe-remedy { flex: none; max-width: 46%; color: ${tokens.primary}; }
 
+  /* ——— 设置 · 模型（2026-10-11 交互改造）：行卡 + 就地展开的编辑卡 ———
+     语汇参照 deepseek-harness 的「自定义模型 API」卡片：表格换成行卡、弹窗换成原位展开，
+     依赖的仍是上面那几组既有类（.fg-card / .fg-cfgbar / .fg-probe / .fg-diffnote）。 */
+  .fg-model-panel .fg-card-body { gap: 10px; }
+
+  /* 保存成功（role=status）：只说「已保存」，绝不说「已生效」。 */
+  .fg-savedline {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #15803d;
+  }
+  .fg-savedline::before { content: '✓'; font-size: 12px; }
+
+  /* 行卡列表：身份 + 状态点在左，动作在右；不再是"每列一个字段"的表格。 */
+  .fg-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .fg-rowcard {
+    border: 1px solid ${tokens.border};
+    border-radius: ${tokens.radiusMd};
+    background: ${tokens.surface};
+    padding: 9px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .fg-rowhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .fg-rowname { font-size: 13.5px; font-weight: 600; }
+  .fg-rowid { font-family: ${tokens.fontMono}; font-size: 11px; color: ${tokens.textPlaceholder}; }
+  .fg-modelid { font-family: ${tokens.fontMono}; font-size: 12.5px; }
+  .fg-rowmeta { font-size: 11.5px; color: ${tokens.textPlaceholder}; }
+  .fg-rowtag {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    height: 19px;
+    padding: 0 6px;
+    border: 1px solid ${tokens.border};
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    color: ${tokens.textSecondary};
+  }
+  .fg-rowtag.fg-warn { border-color: ${tokens.warningBorder}; background: ${tokens.warningBg}; color: #b45309; }
+  .fg-rowtag.fg-info { border-color: ${tokens.primary}; background: ${tokens.primarySoft}; color: ${tokens.primary}; }
+  .fg-rowtag.fg-clickable { cursor: pointer; }
+  .fg-rowtag.fg-clickable:hover { border-color: ${tokens.primary}; color: ${tokens.primary}; }
+  .fg-rowactions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+  .fg-rowproblems { margin: 0; font-size: 11.5px; line-height: 1.5; color: ${tokens.warning}; }
+
+  /* 密钥状态点：绿 = 已配置、红 = 缺失。绝不回显密钥本身。 */
+  .fg-keydot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+  .fg-keydot.fg-key-on { background: ${tokens.success}; }
+  .fg-keydot.fg-key-off { background: ${tokens.error}; }
+
+  /* 就地展开的编辑卡：凹进面板的模块底（与白卡分层），字段竖排、底部右对齐动作。 */
+  .fg-editor {
+    border-radius: ${tokens.radiusMd};
+    background: ${tokens.softFill};
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .fg-editor-head { display: flex; align-items: baseline; gap: 8px; }
+  .fg-editor-title { font-size: 13.5px; font-weight: 600; }
+  .fg-editor-route { font-family: ${tokens.fontMono}; font-size: 11.5px; color: ${tokens.textPlaceholder}; }
+  .fg-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+  .fg-editor-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+  .fg-noopline { margin: 0 auto 0 0; font-size: 12px; color: ${tokens.textSecondary}; }
+  .fg-hint { margin: 4px 0 0; font-size: 11.5px; line-height: 1.5; color: ${tokens.textPlaceholder}; }
+
+  /* 编辑卡里的表单（antd）：标签 12px、提示贴在字段下方——参照稿的 .field 语汇。 */
+  .fg-model-panel .ant-form-item { margin-bottom: 10px; }
+  .fg-model-panel .ant-form-item-label { padding-bottom: 2px; }
+  .fg-model-panel .ant-form-item-label > label { height: auto; font-size: 12px; color: ${tokens.textSecondary}; }
+  .fg-model-panel .ant-form-item-extra {
+    min-height: 0;
+    padding-top: 3px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-model-panel .ant-form-item-explain-error { font-size: 11.5px; }
+
+  /* 「新建」是列表的最后一格：虚线整宽，读起来像"一个位置"而不是"一条命令"。 */
+  .fg-addbtn {
+    width: 100%;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px dashed ${tokens.borderStrong};
+    border-radius: ${tokens.radiusMd};
+    background: transparent;
+    color: ${tokens.text};
+    font: inherit;
+    font-size: 13.5px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .fg-addbtn:hover { background: ${tokens.softFill}; border-color: ${tokens.primary}; color: ${tokens.primary}; }
+
+  /* 分组头（模型块按供应商分组）：空组本身就是要说的事。 */
+  .fg-group { display: flex; flex-direction: column; gap: 8px; }
+  .fg-grouphead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid ${tokens.border};
+  }
+  .fg-groupname { font-size: 12.5px; font-weight: 600; }
+  .fg-linkbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: ${tokens.primary};
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .fg-linkbtn:hover:not(:disabled) { background: ${tokens.primarySoft}; }
+  .fg-linkbtn:disabled { opacity: 0.45; cursor: default; }
+
+  /* 空态：虚线框，并且说清"空 = 什么后果 / 下一步干什么"。 */
+  .fg-emptycard {
+    padding: 12px 14px;
+    border: 1px dashed ${tokens.borderStrong};
+    border-radius: ${tokens.radiusMd};
+    font-size: 12px;
+    line-height: 1.6;
+    color: ${tokens.textPlaceholder};
+  }
+  .fg-emptycard b { display: block; margin-bottom: 2px; font-size: 13px; font-weight: 600; color: ${tokens.textSecondary}; }
+  .fg-emptyline {
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px dashed ${tokens.border};
+    border-radius: ${tokens.radiusSm};
+    font-size: 12px;
+    color: ${tokens.textPlaceholder};
+    text-align: center;
+  }
+
+  @media (max-width: 760px) {
+    .fg-editor-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* 删除确认弹窗：只放一段"会连带发生什么"的说明，动作只有取消 / 删除。 */
+  .fg-confirm .ant-modal-body { font-size: 12.5px; line-height: 1.65; }
+
   /* 设置弹窗的内容体（每节共用）：顶部一句说明 + 右侧动作，下面一张白卡。 */
   .fg-setsec { display: flex; flex-direction: column; gap: 12px; }
   .fg-setsec-head {
