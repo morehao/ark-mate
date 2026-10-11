@@ -2,17 +2,17 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/golib/glog"
 )
 
-// ——— provider 档案读写面的**载体**（v11） ———
+// ——— provider 档案读写面的**载体**（v11；v13 起 sqlite 侧是资源表） ———
 //
 // 与 agent 面（`agents_carrier.go`）同源的分派判据（`s.st != nil`）：
 //
@@ -20,8 +20,12 @@ import (
 //	sqlite 模式：providers 表（事务 + 行 revision CAS + 同事务一条审计）
 //
 // 两条路对外承诺相同：未知档案 → `provider_not_found`；并发改同一条 → `definition_changed`(40901)；
-// **失败即无副作用**（内存与载体不会各改一半）。差别在 sqlite 这条路多两样东西——
-// **未知键原样保留在 body 里**（P6：文件载体的定形结构体会丢未知键）与**可追审计**（P7）。
+// **失败即无副作用**（内存与载体不会各改一半）。
+//
+// v13 把 sqlite 那侧从「定义载体」（body 唯一权威、未知键原样保留）改成「资源表」（平台字段成列）：
+// 于是"未知键保留"这件事整体消失——键集合是封闭的，"写了、存了、什么都不发生"的字段
+// 结构上进不来（设计 P7）。代价是不再有兼容层：列化后旧代码读不到 body，新代码写不出 body，
+// 所以本批必须同批合并（设计「既有行为变化」B2）。
 //
 // 与文件载体的第三处差别是**方向性的**：sqlite 模式下 `providers.json` 降级为导入/导出载体，
 // 写面**一个字节都不回写它**（B4）——"文件与 DB 谁是权威"这个问题因此在这条路上不存在。
@@ -52,9 +56,13 @@ func (s *Service) loadProviders(ctx context.Context, dir string) {
 
 // loadProvidersFromStore 从 `providers` 表装载（sqlite 模式）。
 //
-// 与 `loadProvidersFile` 的语义逐字对齐：密文解密失败**不静默降级**（记 keyErr，由
-// `CredentialProblem` 给出可执行出路），body 里残留的旧明文（vault 不可用时导入保留下来的那条）
-// 仍然被采纳为内存明文。
+// v13 起**密钥的"有没有"完全由 vault 派生**（`vault.Has(providerRef(id))`）：
+// 表里没有 `key_ref` 列（它是纯函数副本，ADR-7），所以"这一行有没有密文"这个问题
+// 只能问 vault——这也正是 `has_key` 的语义（**内存里解出了明文才算有**；密文解不开时
+// 也是 false，原因走 problems）。
+//
+// 装载期不再有"跳过坏行"的分支：行里没有 JSON 可比坏（设计 P2 的收尾）。列值异常
+// （protocol 不在 CHECK 白名单之类）在库级约束上就已经不可能落库。
 func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 	rows, err := s.st.ListProviderDefinitions(ctx)
 	if err != nil {
@@ -65,41 +73,31 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 	loaded := make(map[string]*providerDef, len(rows))
 	for i := range rows {
 		row := rows[i]
-		var body map[string]any
-		if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
-			glog.Warnw(ctx, "providers: 档案行 body 非法（忽略该行）", "provider", row.ID, "err", err)
-			continue
-		}
 		p := &providerDef{
-			ID:        row.ID,
+			ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL, Note: row.Note,
+			// KeyRef 是**派生量**（不再是载体字段）：装载时算一次，供诊断文案与 vault 读写复用。
+			KeyRef:    providerRef(row.ID),
 			Revision:  row.Revision,
 			UpdatedAt: row.UpdatedAt,
-			Body:      body,
-			Protocol:  bodyString(body, "protocol"),
-			BaseURL:   bodyString(body, "base_url"),
-			Name:      bodyString(body, "name"),
-			Note:      bodyString(body, "note"),
-			KeyRef:    bodyString(body, "key_ref"),
 		}
 		switch {
-		case p.KeyRef != "":
-			if st == nil {
-				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", p.KeyRef, vaultUnavailable(verr))
-				glog.Warnw(ctx, "providers: 有密文但 vault 不可用", "provider", row.ID, "ref", p.KeyRef, "err", p.keyErr)
-				break
+		case st != nil:
+			if st.Has(p.KeyRef) {
+				pt, err := st.Get(p.KeyRef, vault.KindProviderKey)
+				if err != nil {
+					p.keyErr = err
+					glog.Warnw(ctx, "providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", row.ID, "err", err)
+					break
+				}
+				p.Key = string(pt)
 			}
-			pt, err := st.Get(p.KeyRef, vault.KindProviderKey)
-			if err != nil {
-				p.keyErr = err
-				glog.Warnw(ctx, "providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", row.ID, "err", err)
-				break
-			}
-			p.Key = string(pt)
-		case bodyString(body, "key") != "":
-			// 导入时 vault 不可用 → 旧明文被保留在 body 里（与文件载体同一条降级纪律）：
-			// 采纳为内存明文，并标明它还没被加密。
-			p.Key = bodyString(body, "key")
-			p.keyErr = fmt.Errorf("vault 不可用，密钥仍为明文: %v", vaultUnavailable(verr))
+		case verr != nil:
+			// vault 不可达，而 v13 没有 `key_ref` 列可以告诉我们"这一行本来有没有密文"——
+			// 取**保守**口径：报"密钥不可用（vault 不可达）"，绝不让 `has_key` 撒谎说没有密钥。
+			p.keyErr = fmt.Errorf("vault 不可用，无法读取密钥密文: %v", vaultUnavailable(verr))
+			glog.Warnw(ctx, "providers: vault 不可用（该实例的密钥在修复前不可用）", "provider", row.ID, "err", p.keyErr)
+		default:
+			// 没有 vault 也没有报错（未配置 mate home）：密钥不可能存在，按"尚未设置"报。
 		}
 		loaded[row.ID] = p
 	}
@@ -109,58 +107,11 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 	_ = dir // 目录只在文件载体里参与拼路径；sqlite 模式下它仍被 agent 面用作 vault 锚点
 }
 
-// providerBodyJSON 把内存里的档案编成 body 字符串（sqlite 载体）。
-//
-// **保住未知键**是这条路的重点（P6）：`d.Body` 是装载时读到的原始键值，这里只覆盖平台自己
-// 拥有的三个键（`type` / `key_ref` / 降级时的 `key`），其余原样带走——历史 `model` 因此不会
-// 在"改一次密钥"之后消失。`id` 不进 body：主键才是它的权威，第二个副本迟早漂移。
-//
-// `json.MarshalIndent` 对 map 键排序，因此同一份档案两次导出逐字节相同（导出物可 diff）。
-func providerBodyJSON(d *providerDef) (string, error) {
-	body := make(map[string]any, len(d.Body)+3)
-	for k, v := range d.Body {
-		if k == "id" {
-			continue
-		}
-		body[k] = v
+// providerColumnsOf 把内存档案投影成 store 的列载荷（sqlite 载体的提交物）。
+func providerColumnsOf(d *providerDef) store.ProviderColumns {
+	return store.ProviderColumns{
+		ID: d.ID, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
 	}
-	// v12 的 owned 键：`protocol` / `base_url` / `name` / `note` / `key_ref`（+ 降级时的 `key`）。
-	// `type` 与 `projections` 是 v11 的遗留：写面主动删掉它们，避免"改了供应商还留着旧底座维度"。
-	delete(body, "type")
-	delete(body, "projections")
-	body["protocol"] = d.Protocol
-	if d.BaseURL != "" {
-		body["base_url"] = d.BaseURL
-	} else {
-		delete(body, "base_url")
-	}
-	if d.Name != "" {
-		body["name"] = d.Name
-	} else {
-		delete(body, "name")
-	}
-	if d.Note != "" {
-		body["note"] = d.Note
-	} else {
-		delete(body, "note")
-	}
-	if d.KeyRef != "" {
-		body["key_ref"] = d.KeyRef
-	} else {
-		delete(body, "key_ref")
-	}
-	// 明文只在"vault 不可用且文件里本来就是明文"这一种降级路径上继续留在载体里
-	// （与 `persistProvidersFile` 的既有纪律逐字相同：宁可多留一会明文，也不丢密钥）。
-	if d.KeyRef == "" && d.Key != "" {
-		body["key"] = d.Key
-	} else {
-		delete(body, "key")
-	}
-	b, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 // persistProviderDefinition 提交一条档案（新建或覆盖）。
@@ -172,21 +123,13 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 		// 文件载体：写"内存现状 + 这一条"（提交时它还没进内存，见 persistProvidersFileWith 的注释）。
 		return s.persistProvidersFileWith(d)
 	}
-	body, err := providerBodyJSON(d)
-	if err != nil {
-		return err
-	}
 	expected := d.Revision
-	ok, err := s.st.UpsertProviderDefinition(ctx, d.ID, body, expected, definitionWriteActor)
+	ok, err := s.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definitionWriteActor)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return definitionChangedErr(s.providerLocator(d.ID))
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(body), &parsed); err == nil {
-		d.Body = parsed
 	}
 	d.Revision = expected + 1
 	d.UpdatedAt = time.Now().UTC()
@@ -195,35 +138,17 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 
 // removeProviderDefinition 删除载体里的一条档案。
 //
-// 返回 false = 载体里本来就没有（行不存在 / 文件里没有这一条）——调用方据此保持"删除是幂等的"。
-func (s *Service) removeProviderDefinition(ctx context.Context, id string) (bool, error) {
+// 返回 `(deleted, refModelIDs, err)`：
+//   - sqlite：**引用检查与删行在同一事务**（`DeleteProviderDefinitionIfUnreferenced`）——
+//     v12 是"先查引用再删行"的两次独立调用，中间有窗口会让并发「删供应商」+「给它加模型」
+//     留下孤儿行（设计 P3）。所以删除判据不再由 manager 做。
+//   - memory：文件里没有"引用"可查（模型清单只在 sqlite 有），调用方已先摘内存，
+//     所以这里只把结果落盘一次，不再回内存里判"有没有"——那样会因为已经摘掉而误报 false。
+func (s *Service) removeProviderDefinition(ctx context.Context, id string, expectedRev int64) (bool, []string, error) {
 	if s.st == nil {
-		// 文件载体：**内存已由调用方摘除**（删除顺序是「先摘内存 → 再提交载体 → 最后删密文」），
-		// 所以这里只把结果落盘一次，不再回内存里判"有没有"——那样会因为已经摘掉而误报 false。
-		return true, s.persistProvidersFile()
+		return true, nil, s.persistProvidersFile()
 	}
-	row, found, err := s.st.GetProviderDefinition(ctx, id)
-	if err != nil || !found {
-		return false, err
-	}
-	ok, err := s.st.DeleteProviderDefinition(ctx, id, row.Revision, definitionWriteActor)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		return false, definitionChangedErr(s.providerLocator(id))
-	}
-	return true, nil
-}
-
-// bodyString 从 body map 里取一个字符串键（缺失/类型不符 → 空串）。
-func bodyString(body map[string]any, key string) string {
-	v, ok := body[key]
-	if !ok {
-		return ""
-	}
-	s, _ := v.(string)
-	return s
+	return s.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definitionWriteActor)
 }
 
 // providerFileExists `<AgentDir>/providers.json` 是否存在（doctor 与迁移提示用）。
@@ -233,4 +158,17 @@ func providerFileExists(dir string) bool {
 	}
 	_, err := os.Stat(filepath.Join(dir, providersFileName))
 	return err == nil
+}
+
+// bodyString 从已解析的 JSON 对象里取一个字符串键（缺失/类型不符 → 空串）。
+//
+// v13 之后它**只服务文件载体与导入路径**（`providers.json` 的条目仍是自由 JSON）；
+// DB 行是列，不经过这里。
+func bodyString(body map[string]any, key string) string {
+	v, ok := body[key]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }

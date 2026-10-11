@@ -75,6 +75,14 @@ export interface ModelCatalogResp {
   auth_guidance?: AuthGuidance[]
   /** 空目录/降级说明（可直接展示给用户）。 */
   note?: string
+  /**
+   * **当前这条路由能不能收图** —— 连接期事实（握手时对方自报的能力），不是逐条模型的声明。
+   *
+   * 三态：`true` 能收 / `false` 明确不能 / **缺省 = 取不到（还没连上，无法校验）**。
+   * 缺省**不等于** `false`——把"没握手"说成"不支持"正是 ADR-14 要拦的错误结论，
+   * 所以消费方不得写成 `?? false`。
+   */
+  image_input?: boolean
 }
 
 /** 平台声明的一条模型条目（`GET /models` 的 `models[]`）。 */
@@ -89,7 +97,14 @@ export interface ModelRow {
   name?: string
   /** 备注（不驱动行为）。 */
   note?: string
-  /** 载体版本（行 CAS 判据）。 */
+  /**
+   * 输入模态（**总是带值**，默认 `['text']`）：`['text']` | `['text','image']`。
+   *
+   * 它是**平台声明**（意图），不是当前环境里那条模型本来支持什么（事实）。默认 `text` 意味
+   * 「图片不会被接受」，要图片得逐条勾选——所以列表里必须让用户看得见、改得动。
+   */
+  input_modalities?: string[]
+  /** 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**（内容指纹在审计里）。 */
   revision: number
   updated_at?: string
   /** 写面回执（只在写面响应里出现；列表里为空）。 */
@@ -170,6 +185,8 @@ export interface ModelCreateReq {
   model_id: string
   name?: string
   note?: string
+  /** 输入模态：`['text']`（默认）| `['text','image']`；非法取值会被 40501 拒。 */
+  input_modalities?: string[]
   /** true = 把这条设为**唯一**默认模型。 */
   is_default?: boolean
 }
@@ -178,6 +195,8 @@ export interface ModelCreateReq {
 export interface ModelPatchReq {
   name?: string
   note?: string
+  /** 输入模态：`['text']` | `['text','image']`；省略 = 不改。 */
+  input_modalities?: string[]
   /** true = 设为唯一默认；false = 取消默认（幂等）。 */
   is_default?: boolean
 }

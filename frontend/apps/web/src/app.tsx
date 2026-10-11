@@ -16,6 +16,16 @@ import { SkillsPage } from './pages/extensions/SkillsPage'
 import { ConnectorsPage } from './pages/extensions/ConnectorsPage'
 import { UsagePage } from './pages/UsagePage'
 
+/** 全局 toast 的层级。
+ *
+ * 必须**高于 antd 的弹窗层**（Modal 基础 1000、嵌套一层 +200，本仓的"设置"+"供应商/模型"两层
+ * 实测就是 1000/1200；antd 自己的 message 用 2010）。旧值 90 看着"够高"，实际被弹窗遮罩压住：
+ * 2026-10-11 实测——设置弹窗里点保存，提示被两层遮罩叠加压到约 30% 亮度（toast 90、遮罩
+ * 1000/1200，`elementFromPoint` 命中的是 `.ant-modal-wrap`），用户看到的就是"点了保存什么都不
+ * 发生"。设置弹窗里**每一个**动作（供应商/模型/Agent/工作区/令牌）的成败提示都在这个坑里，
+ * 所以修在这里而不是各面板里。 */
+const TOAST_Z = 2010
+
 function Manage({ children }: { children: ReactNode }) {
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', background: tokens.bg }}>
@@ -205,7 +215,7 @@ export function App() {
             right: 16,
             top: 16,
             maxWidth: 420,
-            zIndex: 90,
+            zIndex: TOAST_Z,
             background: tokens.surface,
             border: `1px solid ${tokens.borderStrong}`,
             borderRadius: 12,

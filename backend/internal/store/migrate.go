@@ -313,6 +313,47 @@ var schemaMigrations = []migration{
 		},
 		apply: migrateV12,
 	},
+	{
+		version: 13,
+		name:    "providers/models 列化（v13）：平台字段提列 + 删 body/key_ref + input_modalities",
+		backup:  "v13",
+		statements: []string{
+			// 目标表：两表的**平台字段全部成列**，`body` 与 `key_ref` 消失（ADR-1/ADR-7）。
+			// 先建成临时名，Go 步骤把 v12 的 body 解析成列灌进去，最后 DROP 旧表 + RENAME
+			// ——整套在同一事务里，失败即回到 v12 的样子（与 migrate_v12 同一手法）。
+			//
+			// `CHECK (protocol IN ('openai'))` 是库级约束（ADR-3）：协议白名单是**安全相关**的
+			// （它决定把密钥发到哪种形态的端点），只靠 Go 侧一处校验时，裸 SQL / 导入 / 将来
+			// 迁移都能绕过去。本期只有一种取值，将来加协议本来就必须有一次表重建迁移。
+			`CREATE TABLE providers_v13 (
+				id         TEXT PRIMARY KEY,
+				name       TEXT NOT NULL DEFAULT '',
+				protocol   TEXT NOT NULL CHECK (protocol IN ('openai')),
+				base_url   TEXT NOT NULL DEFAULT '',
+				note       TEXT NOT NULL DEFAULT '',
+				revision   INTEGER NOT NULL DEFAULT 1,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			// `input_modalities` 两态（`text` | `text,image`）**默认 `text`**：平台总是写
+			// 底座声明里的 `models[].input`（ADR-12），所以"默认 text"是**明确值**而不是"没设"。
+			//
+			// 唯一约束刻意**不在建表语句里**而在换表后单独建索引：写成表内 UNIQUE 会留下
+			// 自动索引名（`sqlite_autoindex_*`），换名之后它与表名的对应关系没人看得懂。
+			`CREATE TABLE models_v13 (
+				id               TEXT PRIMARY KEY,
+				provider_id      TEXT NOT NULL,
+				model_id         TEXT NOT NULL,
+				name             TEXT NOT NULL DEFAULT '',
+				note             TEXT NOT NULL DEFAULT '',
+				input_modalities TEXT NOT NULL DEFAULT 'text',
+				revision         INTEGER NOT NULL DEFAULT 1,
+				created_at       TEXT NOT NULL,
+				updated_at       TEXT NOT NULL
+			)`,
+		},
+		apply: migrateV13,
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
@@ -416,17 +457,29 @@ func (s *Store) MigrationBackupPath() string { return s.migrationBackupPath }
 //
 // `mate doctor` 用它打印"回退到旧版本要恢复哪个文件"——体检常常跑在**另一次启动**里
 // （迁移已经发生过了，本次进程没有备份记录），所以它必须能从磁盘上找出来。
-func (s *Store) MigrationBackupPaths() []string { return s.findMigrationBackups("v12") }
+//
+// **按版本扫描而不是钉死一个 tag**（v12 时这里硬编码 `"v12"`）：库每前进一版，回退目标
+// 就换一个版本，钉死会让 doctor 在 v13 之后仍然只报 v12 的备份——而那份备份恢复回去
+// 得到的正是 v12，用户以为找到了退路，实际是退了一版后再被拒启。新的在前（`v13` > `v12`
+// 字典序成立，同版本内时间戳大的在前）。
+func (s *Store) MigrationBackupPaths() []string { return s.findMigrationBackups("") }
 
 // findMigrationBackups 列出库文件所在目录里 `<db>.bak-<tag>-*` 形式的备份（新的在前）。
 //
 // 用 glob 而不是只认内存里那一份：doctor 常常在**另一次**启动里跑（迁移已经发生过了，
 // 本次进程没有备份记录），而用户问的正是"我该恢复哪个文件"。
+//
+// `tag == ""` = 扫全部版本（`.bak-v*`）：调用方（doctor）要的是"这台机器上所有可用的退路"，
+// 而不是某一个版本。非空则只认那一个 tag。
 func (s *Store) findMigrationBackups(tag string) []string {
 	if s.path == "" || s.path == ":memory:" {
 		return nil
 	}
-	matches, err := filepath.Glob(s.path + ".bak-" + tag + "-*")
+	pattern := s.path + ".bak-v*"
+	if tag != "" {
+		pattern = s.path + ".bak-" + tag + "-*"
+	}
+	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil
 	}

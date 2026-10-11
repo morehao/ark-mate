@@ -33,6 +33,15 @@ type DeclaredCapabilities struct {
 }
 
 // Caps 依据 packages/acp/acp（dsh-acp bridge）源码声明的基线。
+//
+// **`Images: false` 是"按源码声明的保守基线"，不是 dsh 的能力事实，更不得当作门禁**
+// （ADR-14）：真值取决于两件这里看不到的东西——① 附件仓是否可用；② **当前路由**声明的
+// `models[].input` 是否含 image（桥在 initialize 里如实广告 `promptCapabilities.image`，
+// 未广告就送图会被拒）。拿这个静态值当判据，用户会在一个其实能收图的 dsh 上被告知"不支持"。
+//
+// 消费者：**零**。唯一的旧出口 `Registry.ListItems`（`/runtimes`）已随该端点一起删除，
+// 而"能不能收图"一律走连接期事实（`pkg/acl` 解析 initialize 得到的 `Capabilities.Images`）。
+// 由 archtest 的 `TestStaticCapsImagesHasNoConsumer` 钉住"没有新的读法"。
 var Caps = DeclaredCapabilities{
 	SessionsPersistent:     true, // list/resume/close 跨进程持久（同一 $DSH_HOME profile 持久化根）
 	MultiSessionConcurrent: true, // 同连接可并行多会话

@@ -73,6 +73,16 @@ type Spec struct {
 	// 与 ModelConfig 分开：清单与凭据是**两条通道**，生效时刻与失败半径都不同（ADR-4/ADR-14）。
 	// 零值 = 该 runtime 没声明凭据面。
 	Credential resource.CredentialSpec
+	// DeclaresModelInput 该 runtime 的清单交付面是否**声明**模型的输入模态（ADR-12）。
+	//
+	// true = 平台生成的配置里每个模型条目都带 `input`（dsh 的 `models[].input`）；
+	// false = 平台**不写**它，该底座自己知道模型能收什么（opencode：`capabilities` 是整块替换、
+	// 三字段必填，为声明 `input` 要用猜测连带声明 `tools`/`output` ⇒ 本期不写）。
+	//
+	// 它存在的唯一理由是**如实可读**：用户面与 `mate doctor` 要能区分"已在该底座上声明"与
+	// "仅平台记录"——否则用户会以为在 opencode 上勾了图片就生效了（ADR-12 的结论段）。
+	// **它不是门禁**：能不能收图一律走连接期事实（`pkg/acl.Capabilities.Images`，ADR-14）。
+	DeclaresModelInput bool
 	// CapabilityScope 该 runtime 的能力面（MCP 集、skill 目录扫描）在哪个粒度被确定：
 	// "process"（默认，最粗）| "directory" | "session"。**未实测一律 process**（P-2 的三条纪律）。
 	CapabilityScope string
@@ -80,12 +90,4 @@ type Spec struct {
 	Tested bool
 	// TestedOnVersion 实测时的底座版本；版本一变 Tested 失效（绑定范围可能随底座版本变）。
 	TestedOnVersion string
-}
-
-// ListItem 是 /runtimes 列表项的对外表示（由控制面 handler 消费）。
-type ListItem struct {
-	ID      string       `json:"id"`
-	Name    string       `json:"name"`
-	Version string       `json:"version"`
-	Caps    Capabilities `json:"capabilities"`
 }

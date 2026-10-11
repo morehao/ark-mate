@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -81,8 +83,8 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	if len(stats.Mismatch) != 0 {
 		t.Fatalf("对账不该有不一致: %v", stats.Mismatch)
 	}
-	if stats.Plaintext != 0 {
-		t.Fatalf("vault 可达时不该留明文: %d", stats.Plaintext)
+	if len(stats.SkippedKeys) != 0 {
+		t.Fatalf("vault 可达时不该跳过任何密钥: %v", stats.SkippedKeys)
 	}
 
 	// ① 备份存在，且内容是**迁移前**那份（含明文）。
@@ -105,61 +107,39 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 		t.Fatalf("providers.json 的 mtime 被改动了: %s → %s", beforeStat.ModTime(), afterStat.ModTime())
 	}
 
-	// ③ 逐字段等价：id / type / key_ref 三条都要对。
+	// ③ 逐字段等价：id / protocol / base_url / note 都要对（v13 起是**列**，没有 body 可比）。
 	rows, err := st.ListProviderDefinitions(ctx)
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("providers 行数不符: n=%d err=%v", len(rows), err)
 	}
-	got := map[string]map[string]any{}
+	got := map[string]store.ProviderDefinition{}
 	for i := range rows {
-		var body map[string]any
-		if err := json.Unmarshal([]byte(rows[i].Body), &body); err != nil {
-			t.Fatalf("行 %s 的 body 非法: %v", rows[i].ID, err)
-		}
-		got[rows[i].ID] = body
+		got[rows[i].ID] = rows[i]
 	}
 	// 已迁到 vault 的那条：**v11 → v12 的字段映射**逐条成立
 	//   `type: "deepseek"` → `protocol: "openai"` + `base_url: https://api.deepseek.com/v1`
 	//   （按冻结的已知端点表推导；这是 T6.1 的"导入保留对 v11 type 的识别"）
-	//   `key_ref` 原样；`note`（未知键）原样活下来。
-	//   `model` 是 v11 的历史静默陷阱键（写了不生效），v12 的映射**主动删掉它**。
-	if b := got["deepseek-main"]; b == nil {
+	//   `note`（平台拥有的列）原样活下来。
+	//   `model` 是 v11 的历史静默陷阱键（写了不生效），映射**主动丢掉它**。
+	dm, ok := got["deepseek-main"]
+	if !ok {
 		t.Fatal("deepseek-main 未导入")
-	} else {
-		if b["protocol"] != "openai" || b["base_url"] != "https://api.deepseek.com/v1" || b["key_ref"] != existingRef {
-			t.Fatalf("deepseek-main 身份字段不符: %+v", b)
-		}
-		if _, has := b["type"]; has {
-			t.Fatalf("v11 的 `type` 应被映射删掉（底座维度不得从导入路径重新进库）: %+v", b)
-		}
-		if _, has := b["model"]; has {
-			t.Fatalf("v11 的历史静默陷阱键 `model` 应被映射删掉: %+v", b)
-		}
-		if b["note"] != "主账号" {
-			t.Fatalf("deepseek-main 的未知键丢失: %+v", b)
-		}
 	}
-	// 明文那条：**只留引用**，明文既不进 DB body 也不在导出物里；密文可解出原值。
-	lb := got["legacy-openai"]
-	if lb == nil {
+	if dm.Protocol != "openai" || dm.BaseURL != "https://api.deepseek.com/v1" || dm.Note != "主账号" {
+		t.Fatalf("deepseek-main 的列值不符: %+v", dm)
+	}
+	// 明文那条：**只留密文**（引用由 id 派生），DB 行里没有任何一处能放明文。
+	lb, ok := got["legacy-openai"]
+	if !ok {
 		t.Fatal("legacy-openai 未导入")
 	}
-	// v11 → v12 映射：`type: "openai"` → `protocol: "openai"` + 冻结表推导的 `base_url`；
-	// `model` 是 v11 的历史静默陷阱键，映射主动删掉它。
-	if lb["protocol"] != "openai" || lb["base_url"] != "https://api.openai.com/v1" {
-		t.Fatalf("legacy-openai 身份字段不符: %+v", lb)
+	// v11 → v12 映射：`type: "openai"` → `protocol: "openai"` + 冻结表推导的 `base_url`。
+	if lb.Protocol != "openai" || lb.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("legacy-openai 的列值不符: %+v", lb)
 	}
-	if _, has := lb["model"]; has {
-		t.Fatalf("v11 的历史静默陷阱键 `model` 应被映射删掉: %+v", lb)
-	}
-	if lb["key_ref"] != providerRef("legacy-openai") {
-		t.Fatalf("legacy-openai 应只留 key_ref: %+v", lb)
-	}
-	if _, hasKey := lb["key"]; hasKey {
-		t.Fatal("明文密钥不得进 DB body")
-	}
-	if raw, _ := json.Marshal(lb); strings.Contains(string(raw), legacySecret) {
-		t.Fatal("DB body 里出现了明文密钥")
+	// v13 的**结构断言**：整行（含所有列名与取值）里搜不到明文。
+	if raw := fmt.Sprintf("%+v", lb); strings.Contains(raw, legacySecret) {
+		t.Fatal("DB 行里出现了明文密钥")
 	}
 	pt, err := vst.Get(providerRef("legacy-openai"), vault.KindProviderKey)
 	if err != nil || string(pt) != legacySecret {
@@ -253,12 +233,11 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("新档案应落 DB 行: found=%v err=%v", found, err)
 	}
-	var body map[string]any
-	if err := json.Unmarshal([]byte(row.Body), &body); err != nil {
-		t.Fatalf("新行 body 非法: %v", err)
+	if row.Protocol != "openai" || row.BaseURL == "" || row.Revision != 1 {
+		t.Fatalf("新行的列值不符: %+v", row)
 	}
-	if body["protocol"] != "openai" || body["base_url"] == "" || body["key_ref"] != providerRef("brand-new") {
-		t.Fatalf("新行 body 不符: %+v", body)
+	if !vstHasCiphertext(t, home, providerRef("brand-new")) {
+		t.Fatal("新建供应商的密文应落 vault（引用由 id 派生，不再是行上的 key_ref）")
 	}
 
 	// 文件：内容与 mtime 都没变。
@@ -288,6 +267,18 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	if !strings.Contains(raw, "key_ref") || !strings.Contains(raw, "providers/p1") {
 		t.Fatalf("文件应只留 key_ref: %s", raw)
 	}
+	// 删除必须**落盘**：文件载体是"先摘内存 → 再序列化"，顺序反了会把刚删的条目原样写回
+	// （界面上没了、文件里还在，重启后它又回来了——完全静默）。
+	if del, err := svc.DeleteProvider(ctx, "p1"); err != nil || !del.Deleted {
+		t.Fatalf("删除应成功: %+v err=%v", del, err)
+	}
+	if raw := readProvidersFile(t, dir); strings.Contains(raw, `"p1"`) {
+		t.Fatalf("删除后文件里仍留着该条目（先落盘后摘内存的顺序反了）: %s", raw)
+	}
+	if _, err := svc.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
+		t.Fatalf("重建用于重启断言: %v", err)
+	}
+
 	// 重启（新 Service，同一目录）→ 档案与注入都还在。
 	svc2 := agentTestSvc(t, dir)
 	items, _ := svc2.ListProviders(context.Background())
@@ -358,4 +349,14 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	if got := svcMemory.providerEnvFor("opencode", "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
 		t.Fatalf("回灌后注入不符: %v", got)
 	}
+}
+
+// vstHasCiphertext 探针：某引用在 vault 里是否有密文（v13 的 `has_key` 判据就是它）。
+func vstHasCiphertext(t *testing.T, home, ref string) bool {
+	t.Helper()
+	vst, err := vault.Open(home)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	return vst.Has(ref)
 }

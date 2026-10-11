@@ -351,6 +351,23 @@ func buildPatch(set resource.Set) ([]byte, error) {
 				if m.Name != "" {
 					b = append(b, fmt.Sprintf("            name: %s\n", yamlQuote(m.Name))...)
 				}
+				// **总是**写 `input`（ADR-12）：`text` 是用户的**明确选择**而不是"没设"。
+				//
+				// 为什么不省掉它去"问下一层"：`declaredInput()` 对"声明了 catalog 认识的 id 而
+				// 不写模态"会**保留 catalog 的**，而平台新造的 id 落到 `defaultInput: ["text"]`
+				// ——于是"平台声明的模型能不能收图"变成一件取决于底座目录版本的事，用户既改不动
+				// 也看不见。显式写它把这件事变成确定事实。
+				//
+				// 代价（必须可见，不得静默）：显式 `["text"]` 会**覆盖 catalog**，所以底座目录里
+				// 本来支持图片的模型也会变成纯文本，除非用户在「设置 · 模型」里勾上图片。
+				// 这是"默认 text"的直接后果，不是 bug（界面必须让用户能看见并一键改）。
+				modalities := m.InputModalities
+				if len(modalities) == 0 {
+					// 端口契约是"总是带值"；这里兜一个防御性默认，免得空数组落成 `input: []`
+					// （那在底座眼里是"没声明"，正好与我们想要的确定事实相反）。
+					modalities = []string{resource.ModalityText}
+				}
+				b = append(b, fmt.Sprintf("            input: [%s]\n", strings.Join(modalities, ", "))...)
 			}
 		}
 	}

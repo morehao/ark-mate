@@ -416,18 +416,15 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 	}
 	s.mu.Unlock()
 	if cp == nil {
-		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行。
+		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行（v13 起是纯列投影）。
 		if s.st != nil {
 			row, found, err := s.st.GetProviderDefinition(context.Background(), providerID)
 			if err != nil || !found {
 				return nil, "", err
 			}
-			var body map[string]any
-			_ = json.Unmarshal([]byte(row.Body), &body)
 			cp = &providerDef{
-				ID: providerID, Name: bodyString(body, "name"), Protocol: bodyString(body, "protocol"),
-				BaseURL: bodyString(body, "base_url"), Note: bodyString(body, "note"),
-				KeyRef: bodyString(body, "key_ref"), Body: body, Revision: row.Revision,
+				ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL,
+				Note: row.Note, KeyRef: providerRef(row.ID), Revision: row.Revision,
 			}
 		}
 	}
@@ -462,14 +459,15 @@ func (s *Service) declaredModels(ctx context.Context) ([]resource.Model, error) 
 	}
 	out := make([]resource.Model, 0, len(rows))
 	for i := range rows {
-		var body map[string]any
-		_ = json.Unmarshal([]byte(rows[i].Body), &body)
-		name := bodyString(body, "name")
+		name := rows[i].Name
 		if name == "" {
 			name = rows[i].ModelID
 		}
 		out = append(out, resource.Model{
 			ID: rows[i].ID, ProviderID: rows[i].ProviderID, ModelID: rows[i].ModelID, Name: name,
+			// **总是带值**（默认 `["text"]`）：adapter 据此总是写底座声明里的 `input`，
+			// 于是"默认 text"是明确值而不是"没设"（ADR-12）。
+			InputModalities: resource.ModalitiesFromColumn(rows[i].InputModalities),
 		})
 	}
 	return out, nil
@@ -508,7 +506,9 @@ func setFingerprint(set resource.Set) string {
 		}
 	}
 	for _, m := range set.Models {
-		write("M", m.ID, m.ProviderID, m.ModelID, m.Name)
+		// 模态并进指纹：它改变交付字节（dsh 的 `models[].input`），所以它变了代际必须翻——
+		// 否则用户改了"能不能收图"、界面说保存成功，而"下一轮生效"这件事不可观测。
+		write("M", m.ID, m.ProviderID, m.ModelID, m.Name, strings.Join(m.InputModalities, ","))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

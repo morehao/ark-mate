@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
@@ -38,7 +39,7 @@ func (s *Store) UpsertSkillDefinition(ctx context.Context, id, body string, expe
 	if expectedRev == 0 {
 		action = model.CapabilityActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindSkill, id, actor, action, body, expectedRev,
+	return s.commitDefinitionChange(ctx, model.CapabilityKindSkill, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillDefinition{
@@ -78,7 +79,7 @@ func (s *Store) UpsertMcpServerDefinition(ctx context.Context, id, body string, 
 	if expectedRev == 0 {
 		action = model.CapabilityActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindMcp, id, actor, action, body, expectedRev,
+	return s.commitDefinitionChange(ctx, model.CapabilityKindMcp, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerDefinition{
@@ -127,14 +128,17 @@ func (s *Store) MaxCapabilityRevisionSeq(ctx context.Context) (int64, error) {
 	return s.capabilityRevision.MaxSeq(ctx)
 }
 
-// commitDefinitionChange 是"定义行 + 审计"的唯一提交路径。
+// commitDefinitionChange 是"定义/资源行 + 审计"的唯一提交路径。
 //
 // write 返回 false 表示 CAS 没中（并发写抢先 / 行不存在）：**审计也不写**，两个表都不变。
 // 这条"要么都变、要么都不变"是测试里 `TestCapabilityDefinitionCAS` 钉住的核心。
+//
+// `digest` 由调用方算好（定义载体传 `bodyDigest(body)`，v13 的资源列传 `rowDigest(列)`）：
+// 两种行形态的"那一版到底是什么"不同，但"落审计的那一列与那次提交必须原子"这一条相同。
 func (s *Store) commitDefinitionChange(
 	ctx context.Context,
 	kind, id, actor, action string,
-	body string,
+	digest string,
 	expectedRev int64,
 	write func(tx *gorm.DB, now time.Time) (bool, error),
 ) (bool, error) {
@@ -152,7 +156,7 @@ func (s *Store) commitDefinitionChange(
 			Action:       action,
 			Actor:        actor,
 			At:           now,
-			Digest:       bodyDigest(body),
+			Digest:       digest,
 		})
 	})
 	if err != nil {
@@ -170,5 +174,29 @@ func bodyDigest(body string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+// rowDigest 是**列行**那一版的规范 JSON 摘要（ADR-10；与 `bodyDigest` 同一出口形状）。
+//
+// 列化把 body 拿掉之后，审计仍要能回答同一个问题，所以摘要的输入换成"行的规范 JSON"：
+// 键排序（`json.Marshal(map[string]string)` 天然按键排序）、**固定字段集**（由各资源的
+// helper 给出）、且**不含 `revision` / 时间列**——它们是记账，不是内容：
+//
+//	{"base_url":…,"id":…,"name":…,"note":…,"protocol":…}                        provider
+//	{"id":…,"input_modalities":…,"model_id":…,"name":…,"note":…,"provider_id":…}  model
+//
+// 于是"同一内容写两次 → digest 相同而 revision 变成 2"这条语义与 body 时代逐字相同。
+// 空字段集 → 空串（删除路径沿用 `bodyDigest("")` 的口径）。
+func rowDigest(fields map[string]string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(fields)
+	if err != nil {
+		// map[string]string 不可能 marshal 失败；真失败也不该把空摘要冒充成"那一版是空的"。
+		return ""
+	}
+	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

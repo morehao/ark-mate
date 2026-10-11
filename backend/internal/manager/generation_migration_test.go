@@ -60,6 +60,9 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc.EnableStore(st)
+	// v13：没有可用 vault 时**拒绝**存密钥（fail-closed），所以凡是要建带密钥的供应商的夹具，
+	// 都必须给一个真实（且私有）的 mate home——正是生产形态。目录在 t.TempDir 下，绝不碰用户环境。
+	svc.agentDir = filepath.Join(t.TempDir(), "agents")
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)

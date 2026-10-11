@@ -84,6 +84,11 @@ const (
 	// 这些**不阻断迁移**（B1：缺端点是一次性人工成本），但必须落成一个可被 `mate doctor`
 	// 读到的持久事实——否则"未迁移字段"就成了一句没人能验证的话。
 	MetaKeyMigrationNotes = "migration_notes"
+	// MetaKeyMigrationNotesV13 v13 迁移（providers/models 列化）留下的**需人工处置的事实**（value = JSON）。
+	//
+	// **刻意不复用 MetaKeyMigrationNotes**：v13 覆盖它等于把 v12 那些尚未处置的事实
+	// （无出口字段 / 缺端点推导 / 默认模型冲突）静默抹掉——「同一处债不再借第二次」。
+	MetaKeyMigrationNotesV13 = "migration_notes_v13"
 
 	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
 	CapabilityKindSkill = "skill"

@@ -18,8 +18,10 @@ import (
 //
 //	A 部分（未点名的一切）：供应商按键排序、缩进、尾换行、`- id: acp` / `- id: llm-pi-ai` 的条目形态、
 //	  `displayName`、`api`、`baseURL`、`models[]` 的顺序与 `name` 的 YAML 转义 —— **必须逐字节相同**；
-//	B 部分（本方案点名的偏差，以新形态为期望）：`apiKeyEnv` 由 `envKeyOf(type)`（每个 type 一个名字）
-//	  换成**逐供应商**的引用名（修 ADR-16 的真实缺陷）。
+//	B 部分（本方案点名的偏差，以新形态为期望）：
+//	  B1 `apiKeyEnv` 由 `envKeyOf(type)`（每个 type 一个名字）换成**逐供应商**的引用名（修 ADR-16 的真实缺陷）；
+//	  B2 每个模型条目**多一行** `input: [text]` / `[text, image]`（v13/M6 的 ADR-12：平台**总是**声明
+//	     输入模态，所以"默认 text"是明确值而不是"没设"——代价是覆盖底座 catalog，见 config.go 的注释）。
 //
 // A 部分的证明方式：把冻结的 v11 字节按**仅 B 部分**改写一遍，再与新 adapter 的输出逐字节比对。
 // 改写函数只允许做 B 部分那一件事——多做一件比对就红。
@@ -44,6 +46,9 @@ type goldenFixtureModel struct {
 	ModelID    string
 	Name       string
 	Default    bool
+	// Modalities 输入模态（nil = 默认 `[text]`）。夹具里**两类都要有**，否则 B2 的两种形态
+	// 只被覆盖到一种——而"显式 text 覆盖了 catalog"与"用户勾了图片"是两件必须分别可见的事。
+	Modalities []string
 }
 
 // ≥3 个供应商 × 每个 2 条模型（其中 1 条设默认），含 `name` 与多字节字符（覆盖 YAML 转义）。
@@ -55,7 +60,8 @@ var (
 		{ID: "zeta", Name: "Zeta 直连", Type: "deepseek", BaseURL: "https://zeta.example.com/v1"},
 	}
 	goldenFixtureModels = []goldenFixtureModel{
-		{ID: "m-alpha-1", ProviderID: "alpha-gw", ModelID: "gpt-4o-mini", Name: "小模型·中文"},
+		{ID: "m-alpha-1", ProviderID: "alpha-gw", ModelID: "gpt-4o-mini", Name: "小模型·中文",
+			Modalities: []string{"text", "image"}},
 		{ID: "m-alpha-2", ProviderID: "alpha-gw", ModelID: "gpt-4o", Name: `大模型 "A" \ 备用`},
 		{ID: "m-beta-1", ProviderID: "beta.gw", ModelID: "qwen:7b", Name: "qwen #7b", Default: true},
 		{ID: "m-beta-2", ProviderID: "beta.gw", ModelID: "llama/3-8b", Name: ""},
@@ -113,7 +119,11 @@ func goldenSet() resource.Set {
 	}
 	models := make([]resource.Model, 0, len(goldenFixtureModels))
 	for _, m := range goldenFixtureModels {
-		models = append(models, resource.Model{ID: m.ID, ProviderID: m.ProviderID, ModelID: m.ModelID, Name: m.Name})
+		models = append(models, resource.Model{
+			ID: m.ID, ProviderID: m.ProviderID, ModelID: m.ModelID, Name: m.Name,
+			// 端口契约是"总是带值"：nil 也要显式给 `[text]`（与编排层的行为一致）。
+			InputModalities: goldenModalities(m),
+		})
 	}
 	return resource.Set{
 		Runtime:      ID,
@@ -121,6 +131,14 @@ func goldenSet() resource.Set {
 		Models:       models,
 		DefaultModel: goldenFixtureDefaultModel,
 	}
+}
+
+// goldenModalities 夹具里一条模型的模态（nil = 默认 `[text]`）。
+func goldenModalities(m goldenFixtureModel) []string {
+	if len(m.Modalities) == 0 {
+		return []string{resource.ModalityText}
+	}
+	return resource.NormalizeModalities(m.Modalities)
 }
 
 // TestGoldenDsh A5：新 adapter 的产出 == golden，且 A 部分（把 v11 字节按**仅 B 部分**改写后）
@@ -199,6 +217,16 @@ func TestGoldenDshBPartPresent(t *testing.T) {
 		if want := resource.RefFor(goldenRefPattern, p.ID); !seen[want] {
 			t.Errorf("B 未落地：供应商 %s 的引用名应为 %q，实际 %v", p.ID, want, refs)
 		}
+	}
+	// B2：**每个**模型条目都有 `input`（不是"没设"），且两种形态都出现。
+	if got := strings.Count(got, "            input: [text]\n"); got != len(goldenFixtureModels)-1 {
+		t.Errorf("B2 未落地：应有 %d 条 `input: [text]`，实际 %d", len(goldenFixtureModels)-1, got)
+	}
+	if got := strings.Count(got, "            input: [text, image]\n"); got != 1 {
+		t.Errorf("B2 未落地：应恰好 1 条 `input: [text, image]`（勾了图片的那条），实际 %d", got)
+	}
+	if c := strings.Count(got, "            input: ["); c != len(goldenFixtureModels) {
+		t.Errorf("B2 未落地：每个模型条目都应写 input（实测 %d 处，应有 %d 处）", c, len(goldenFixtureModels))
 	}
 	// `api` 固定为 openai-completions，`baseURL` 来自资源字段（A 部分：与 v11 逐字相同）。
 	for _, p := range goldenFixtureProviders {
@@ -316,7 +344,53 @@ func rewriteDshV11ToV12(t *testing.T, old string) string {
 	if idx != len(routes) {
 		t.Fatalf("夹具覆盖不全：v11 产出里只有 %d 个 apiKeyEnv 行，应有 %d 个", idx, len(routes))
 	}
-	return strings.Join(lines, "\n")
+	// B2：给**每个**模型条目补一行 `input: [...]`（v11 没有这个字段，所以它只能"插入"）。
+	// 插入位置 = 该条目的末尾（下一个 `          - id: ` 之前，或文件末尾）——与 adapter
+	// 把 `input` 写在 `name` 之后一致。
+	return insertGoldenModelInputs(t, strings.Join(lines, "\n"))
+}
+
+// insertGoldenModelInputs 在每个模型条目末尾插入 `input:` 行（B2 的机械改写）。
+//
+// 只认缩进 10 空格的 `- id: "<上游模型 id>"`（`- id: acp` 在缩进 0，不会被误命中）。
+func insertGoldenModelInputs(t *testing.T, text string) string {
+	t.Helper()
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines)+len(goldenFixtureModels))
+	pending := ""
+	flush := func() {
+		if pending == "" {
+			return
+		}
+		out = append(out, "            input: ["+strings.Join(modalitiesOfUpstream(pending), ", ")+"]")
+		pending = ""
+	}
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "          - id: ") {
+			flush()
+			pending = strings.Trim(strings.TrimSpace(strings.TrimPrefix(ln, "          - id: ")), `"`)
+			out = append(out, ln)
+			continue
+		}
+		// 条目的内容行缩进 12 空格；出现缩进更浅的非空行 = 这个条目结束了
+		// （下一个 route 的键、下一条 `- id:`，或文件末尾）。
+		if pending != "" && !strings.HasPrefix(ln, "            ") {
+			flush()
+		}
+		out = append(out, ln)
+	}
+	flush()
+	return strings.Join(out, "\n")
+}
+
+// modalitiesOfUpstream 上游模型 id → 夹具里那条模型声明的模态（找不到就按默认 `[text]`）。
+func modalitiesOfUpstream(modelID string) []string {
+	for _, m := range goldenFixtureModels {
+		if m.ModelID == modelID {
+			return goldenModalities(m)
+		}
+	}
+	return []string{resource.ModalityText}
 }
 
 // dropYAMLLine 删掉含某个标记的行（用于把"未迁移字段"从基线里单独摘出来比对）。

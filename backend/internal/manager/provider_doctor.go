@@ -81,17 +81,19 @@ type ProviderDoctorFacts struct {
 	VaultSource string `json:"vaultSource"`
 	// VaultNote 人话原因（不可用时给出出路）。
 	VaultNote string `json:"vaultNote,omitempty"`
-	// CiphertextRefs 引用密文的档案 id（`body.key_ref` 非空者；升序）。
-	CiphertextRefs []string `json:"ciphertextRefs"`
 	// CiphertextFiles `<vault>/providers/` 下实际存在的密文（去 `.enc` 的 id；升序）。
+	//
+	// v13 里"哪些档案有密文"**不再由行上的字段声明**（没有 `key_ref` 列）：事实就是
+	// 这个目录清单 ∩ 档案 id。于是"声明了引用却没有密文"这个状态**结构上不存在**
+	// （v12 的 `MissingCiphertexts` 随之删除）——剩下的真问题是"这条档案还没设密钥"。
 	CiphertextFiles []string `json:"ciphertextFiles"`
 	// VaultDirScan 密文目录的扫描结论：ok / missing（还没有密文目录）/ unreadable: <原因>。
 	// 它是"上面两个列表可不可信"的判据：目录读不动时**不许**把"扫不到"当成"没有密文"。
 	VaultDirScan string `json:"vaultDirScan"`
-	// MissingCiphertexts 声明了 `key_ref` 却没有对应密文文件的档案（那条 provider 注不出密钥）。
-	MissingCiphertexts []string `json:"missingCiphertexts"`
-	// NoKeyProviders 既没有 `key_ref` 也没有明文 `key` 的档案（尚未设置密钥）。
+	// NoKeyProviders 在 vault 里**没有密文**的档案（尚未设置密钥）。
+	//
 	// 它不是故障（档案可以先建后补密钥），但"开会话时才发现没密钥"值得提前说。
+	// v13 起它的判据是 vault 目录清单（v12 是"body 里既没有 key_ref 也没有 key"）。
 	NoKeyProviders []string `json:"noKeyProviders"`
 
 	// DanglingRefs 悬空引用（agent 定义指向不存在的档案）。
@@ -113,6 +115,14 @@ type ProviderDoctorFacts struct {
 	// 迁移后**推不出来**就留空——那些供应商的模型一条也不会被交付给任何底座，
 	// 而界面上它看起来"就是一条供应商"。必须在体检里显式说出来，并给可执行的出路。
 	MissingBaseURL []string `json:"missingBaseUrl"`
+
+	// MigrationNotesV13 v13 迁移留下的**待人工处置事实**（`meta.migration_notes_v13`；不存在 → nil）。
+	//
+	// 与 v12 那份**分键**（不复用 `migration_notes`）：v13 覆盖 v12 的键等于把 v12 那些尚未
+	// 处置的事实静默抹掉。这一段回答"列化有没有悄悄改语义"：被丢弃的 body 未知键、正文里
+	// 曾有明文密钥的行（**只有 id，没有值**）、`created_at` 近似行、按默认 `text` 填的模态、
+	// v12 里就是孤儿的 model 行。
+	MigrationNotesV13 *store.MigrationNotesV13 `json:"migrationNotesV13,omitempty"`
 
 	// MigrationNotes v12 迁移留下的**待人工处置事实**（`meta.migration_notes`；不存在 → nil）。
 	//
@@ -175,6 +185,12 @@ type ProviderRuntimeFacts struct {
 	Pending bool `json:"pending"`
 	// ModelCount 平台声明的清单条数。
 	ModelCount int `json:"modelCount"`
+	// DeclaresModelInput 该底座的清单交付面是否声明模型的输入模态（ADR-12）。
+	//
+	// dsh=true（平台总是写 `models[].input`）、opencode=false（平台不写，底座自己知道）。
+	// 这一段存在的理由就是**如实区分两侧**：同一份平台清单在两个底座上的实际行为不同，
+	// 用户不该以为"勾了图片就生效"（在 opencode 上它只是平台记录）。
+	DeclaresModelInput bool `json:"declaresModelInput"`
 	// Note 人话说明（未同步过、未声明交付面、逐条 problem…）。
 	Note string `json:"note,omitempty"`
 
@@ -198,20 +214,18 @@ type ProviderRuntimeFacts struct {
 func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts ProviderDoctorOptions) ProviderDoctorFacts {
 	agentDir := strings.TrimSpace(opts.AgentDir)
 	facts := ProviderDoctorFacts{
-		Carrier:            "unknown",
-		CarrierNote:        "没有可读的持久层：provider 档案的行数、悬空引用与对账都无从校验",
-		DBPath:             strings.TrimSpace(opts.DBPath),
-		ProviderIDs:        []string{},
-		CiphertextRefs:     []string{},
-		CiphertextFiles:    []string{},
-		MissingCiphertexts: []string{},
-		NoKeyProviders:     []string{},
-		DanglingRefs:       []ProviderDanglingRef{},
-		ImportMismatch:     []string{},
-		OrphanCiphertexts:  []string{},
-		Runtimes:           []ProviderRuntimeFacts{},
-		MissingBaseURL:     []string{},
-		SensitiveFiles:     []SensitiveFileFacts{},
+		Carrier:           "unknown",
+		CarrierNote:       "没有可读的持久层：provider 档案的行数、悬空引用与对账都无从校验",
+		DBPath:            strings.TrimSpace(opts.DBPath),
+		ProviderIDs:       []string{},
+		CiphertextFiles:   []string{},
+		NoKeyProviders:    []string{},
+		DanglingRefs:      []ProviderDanglingRef{},
+		ImportMismatch:    []string{},
+		OrphanCiphertexts: []string{},
+		Runtimes:          []ProviderRuntimeFacts{},
+		MissingBaseURL:    []string{},
+		SensitiveFiles:    []SensitiveFileFacts{},
 	}
 	facts.VaultHome = providerVaultHome(opts.Home, agentDir)
 
@@ -233,31 +247,19 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		} else {
 			for i := range rows {
 				facts.ProviderIDs = append(facts.ProviderIDs, rows[i].ID)
-				var body map[string]any
-				if err := json.Unmarshal([]byte(rows[i].Body), &body); err != nil {
-					// 正文非法：既不声称它有密钥，也不声称它没有——只在 id 面上出现。
-					continue
-				}
-				if strings.TrimSpace(bodyString(body, "base_url")) == "" {
+				if strings.TrimSpace(rows[i].BaseURL) == "" {
 					facts.MissingBaseURL = append(facts.MissingBaseURL, rows[i].ID)
-				}
-				switch {
-				case bodyString(body, "key_ref") != "":
-					facts.CiphertextRefs = append(facts.CiphertextRefs, rows[i].ID)
-				case bodyString(body, "key") != "":
-					// vault 不可用时的降级路径：正文里还留着明文（写面会报 problem，这里不重复判）。
-				default:
-					facts.NoKeyProviders = append(facts.NoKeyProviders, rows[i].ID)
 				}
 			}
 			sort.Strings(facts.ProviderIDs)
-			sort.Strings(facts.CiphertextRefs)
-			sort.Strings(facts.NoKeyProviders)
 			sort.Strings(facts.MissingBaseURL)
 			facts.ProviderRows = len(facts.ProviderIDs)
 			// 迁移留下的待处置事实 + 回退依据（两者都读 meta，读不到只告警不影响其余事实）。
 			if notes, ok, err := st.MigrationNotesV12(ctx); err == nil && ok {
 				facts.MigrationNotes = notes
+			}
+			if notes, ok, err := st.MigrationNotesV13(ctx); err == nil && ok {
+				facts.MigrationNotesV13 = notes
 				if notes.BackupPath != "" {
 					facts.MigrationBackup = notes.BackupPath
 				}
@@ -290,12 +292,16 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 	facts.VaultUsable, facts.VaultSource, facts.VaultNote = probeVault(facts.VaultHome)
 	facts.CiphertextFiles, facts.VaultDirScan = scanProviderCiphertexts(facts.VaultHome)
 	facts.OrphanCiphertexts = orphanProviderCiphertexts(facts.CiphertextFiles, facts.ProviderIDs)
-	for _, id := range facts.CiphertextRefs {
-		if !containsString(facts.CiphertextFiles, id) {
-			facts.MissingCiphertexts = append(facts.MissingCiphertexts, id)
+	// 「这条档案有没有密文」只能问 vault（表里没有 `key_ref` 列）。目录扫描不可信时
+	// **不许**把"扫不到"当成"没有密文"——那时留空，由 `provider keys` 那一条记"无法校验"。
+	if strings.HasPrefix(facts.VaultDirScan, "ok") || strings.HasPrefix(facts.VaultDirScan, "missing") {
+		for _, id := range facts.ProviderIDs {
+			if !containsString(facts.CiphertextFiles, id) {
+				facts.NoKeyProviders = append(facts.NoKeyProviders, id)
+			}
 		}
+		sort.Strings(facts.NoKeyProviders)
 	}
-	sort.Strings(facts.MissingCiphertexts)
 
 	// ——— 模型清单：逐 runtime 的物化状态 + 对账 ———
 	facts.Runtimes = collectRuntimeModelFacts(ctx, st, opts.Home)
@@ -504,14 +510,16 @@ func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string)
 // 端到端跑到——`CollectProviderDoctorFacts` 里的 Service 天然没有编排器，永远走 unknown 分支。
 func (s *Service) runtimeModelFacts(ctx context.Context, runtimeID string, state RuntimeConfigState) ProviderRuntimeFacts {
 	facts := ProviderRuntimeFacts{
-		Runtime:           runtimeID,
-		Status:            state.Status,
-		Where:             state.Where,
-		Effect:            state.Effect,
-		CredentialChannel: state.Credential.Channel,
-		CredentialTested:  state.Credential.Tested,
-		Pending:           state.Pending,
-		Note:              strings.Join(state.Problems, "；"),
+		Runtime: runtimeID,
+		// 该底座声明不声明输入模态：取它自己的 Spec 字段（**不是**任何静态能力基线）。
+		DeclaresModelInput: declaresModelInput(s.reg, runtimeID),
+		Status:             state.Status,
+		Where:              state.Where,
+		Effect:             state.Effect,
+		CredentialChannel:  state.Credential.Channel,
+		CredentialTested:   state.Credential.Tested,
+		Pending:            state.Pending,
+		Note:               strings.Join(state.Problems, "；"),
 	}
 	if declared, err := s.ListModels(ctx); err != nil {
 		facts.DiffNote = "读平台清单失败：" + err.Error()
@@ -536,6 +544,20 @@ func (s *Service) runtimeModelFacts(ctx context.Context, runtimeID string, state
 		facts.Missing = missingDeclaredModels(ctx, s, sample)
 	}
 	return facts
+}
+
+// declaresModelInput 该 runtime 的 Spec 是否声明"平台总是写模型的输入模态"。
+//
+// 未注册的 runtime（远程端点没在这个二进制里）→ false：**不许**把"没见过"当成"会写"。
+func declaresModelInput(reg *goruntime.Registry, runtimeID string) bool {
+	if reg == nil {
+		return false
+	}
+	spec, ok := reg.Get(runtimeID)
+	if !ok {
+		return false
+	}
+	return spec.DeclaresModelInput
 }
 
 // missingDeclaredModels 声明了却没出现在运行时广告里的候选（机器面，人话化）。

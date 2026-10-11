@@ -14,7 +14,7 @@ import (
 //     资产面只剩 `webPath` / `webDigest` / `webBuildId`；本装配未接资产层 → webPath 为 null；
 //  2. `X-Mate-Carrier` 决定能力面的 available（壳的反代带这个头，浏览器入口没有）。
 func TestSystemRoutes(t *testing.T) {
-	eng := newEngine()
+	eng := newEngine(t)
 
 	getData := func(path string, headers map[string]string) map[string]any {
 		t.Helper()

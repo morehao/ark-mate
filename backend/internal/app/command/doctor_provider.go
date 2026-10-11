@@ -59,7 +59,9 @@ func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []do
 	checks = append(checks, checkProviderBaseURL(facts))
 	checks = append(checks, checkMigrationBackup(facts))
 	checks = append(checks, checkMigrationNotes(facts))
+	checks = append(checks, checkMigrationNotesV13(facts))
 	checks = append(checks, checkSensitiveFiles(facts)...)
+	checks = append(checks, checkModalityDeclaration(facts))
 	checks = append(checks, checkRuntimeModels(facts)...)
 	return facts, checks
 }
@@ -140,36 +142,34 @@ func checkProviderVault(facts manager.ProviderDoctorFacts) doctorCheck {
 		detail, len(facts.CiphertextFiles), bracketList(facts.CiphertextFiles))}
 }
 
-// checkProviderKeys 逐条档案的密钥可得性：声明了引用却找不到密文 → fail；尚未设密钥 → warn。
+// checkProviderKeys 逐条档案的密钥可得性：DB 行存在但在 vault 里找不到密文 → warn（尚未设密钥）。
 //
 // 这一条与 `vault` 的分工：vault 回答"主密钥在不在"，它回答"每一条档案此刻能不能注出密钥"。
-// 悬空的 `key_ref`（文件/行说有、vault 里没有）是**事实与声明不符**，必然表现为会话
-// `credential_missing`，所以判失败。
+//
+// v13 的形态变化：档案行**不再声明** `key_ref`（引用是 `providerRef(id)` 的纯函数副本），
+// 所以"声明了引用却没有密文"这个状态**结构上不可能**——唯一的真问题是"这条档案还没设密钥"
+// （v12 的 `missingCiphertexts` 那条失败项随之消失，判据换成 vault 目录清单）。
 func checkProviderKeys(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "provider keys"
 	if facts.Carrier != "db" {
-		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：密钥引用面无从校验"}
+		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：密钥面无从校验"}
 	}
 	if len(facts.ProviderIDs) == 0 {
 		return doctorCheck{name, doctorOK, "没有任何 provider 档案，密钥面为空"}
 	}
 	if !strings.HasPrefix(facts.VaultDirScan, "ok") && !strings.HasPrefix(facts.VaultDirScan, "missing") {
-		// 密文目录读不动：**不许**把"扫不到"当成"没有密文"（那会把读权限问题报成引用悬空）。
+		// 密文目录读不动：**不许**把"扫不到"当成"没有密文"（那会把读权限问题报成"全都缺密钥"）。
 		return doctorCheck{name, doctorWarn,
-			"密文目录的扫描结论不可信（" + facts.VaultDirScan + "）：密钥引用面无法校验"}
-	}
-	if len(facts.MissingCiphertexts) > 0 {
-		return doctorCheck{name, doctorFail, fmt.Sprintf(
-			"%d 条档案声明了密钥引用（key_ref）但 vault 里没有对应密文（这些 provider 此刻注不出密钥，建会话会报 credential_missing）：%s",
-			len(facts.MissingCiphertexts), bracketList(facts.MissingCiphertexts))}
+			"密文目录的扫描结论不可信（" + facts.VaultDirScan + "）：密钥面无法校验"}
 	}
 	if len(facts.NoKeyProviders) > 0 {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf(
-			"%d 条档案尚未设置密钥（%s）：引用它们的会话不会注入任何密钥变量——要么补密钥，要么清空 agent 的凭据选择（用它底座自身的登录态）",
+			"%d 条档案在 vault 里没有密文（尚未设置密钥）：%s。引用它们的会话不会注入任何密钥变量"+
+				"——要么补密钥，要么清空 agent 的凭据选择（用它底座自身的登录态）",
 			len(facts.NoKeyProviders), bracketList(facts.NoKeyProviders))}
 	}
 	return doctorCheck{name, doctorOK, fmt.Sprintf(
-		"%d 条档案的密钥引用都有对应密文（主密钥可用性见 vault 那一条）", len(facts.ProviderIDs))}
+		"%d 条档案在 vault 里都有对应密文（主密钥可用性见 vault 那一条）", len(facts.ProviderIDs))}
 }
 
 // checkProviderRefs 悬空引用：agent 定义里的 `provider` 指向不存在的档案。
@@ -231,6 +231,42 @@ func checkProviderOrphans(facts manager.ProviderDoctorFacts) doctorCheck {
 		len(facts.OrphanCiphertexts), sampleList(facts.OrphanCiphertexts))}
 }
 
+// checkModalityDeclaration 两侧差异如实可见（ADR-12/A11）：模型输入模态在 dsh 上是**已声明**的
+// 交付事实，在 opencode 上只是**平台记录**。
+//
+// 为什么要单列一条：同一份平台清单在两个底座上的实际行为不同，而"默认 text"会**覆盖** dsh 的
+// 底座目录（老模型里本来能看图的现在收不了图，除非用户逐条勾选）。这一条让用户不必等到某个
+// 会话失败才知道这件事——它回答的问题是"我勾的图片，到底有没有生效"。
+func checkModalityDeclaration(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "模型输入模态"
+	if facts.Carrier != "db" {
+		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：模态声明面无从校验"}
+	}
+	if len(facts.Runtimes) == 0 {
+		return doctorCheck{name, doctorWarn, "没有已注册的底座：无法校验模态声明面"}
+	}
+	declared, recorded := []string{}, []string{}
+	for _, rt := range facts.Runtimes {
+		if rt.DeclaresModelInput {
+			declared = append(declared, rt.Runtime)
+		} else {
+			recorded = append(recorded, rt.Runtime)
+		}
+	}
+	detail := "平台清单里的 `input_modalities`（默认 `text`）"
+	if len(declared) > 0 {
+		detail += "；**已写进底座声明**（会覆盖底座目录：老模型里本来能看图的要用户逐条勾上）：" + bracketList(declared)
+	}
+	if len(recorded) > 0 {
+		detail += "；**仅平台记录、未在该底座上声明**（该底座自己知道模型能力，平台不猜）：" + bracketList(recorded)
+	}
+	if len(recorded) > 0 {
+		// 有"仅记录"的一侧 ⇒ 界面上必须说清，否则用户以为勾了图片就生效。
+		return doctorCheck{name, doctorWarn, detail}
+	}
+	return doctorCheck{name, doctorOK, detail}
+}
+
 // checkRuntimeModels 逐 runtime 的清单物化状态与差集。
 func checkRuntimeModels(facts manager.ProviderDoctorFacts) []doctorCheck {
 	checks := []doctorCheck{{
@@ -257,9 +293,9 @@ func checkRuntimeModels(facts manager.ProviderDoctorFacts) []doctorCheck {
 // checkRuntimeModelState 单个 runtime 的**同步结论**（v12：交付结论由 adapter 回带，平台如实转述）。
 func checkRuntimeModelState(rt manager.ProviderRuntimeFacts) doctorCheck {
 	name := "models " + rt.Runtime
-	detail := fmt.Sprintf("status=%s effect=%s pending=%t credential=%s(tested=%t) where=%s model_count=%d",
+	detail := fmt.Sprintf("status=%s effect=%s pending=%t credential=%s(tested=%t) where=%s model_count=%d declares_input=%t",
 		orDash(rt.Status), orDash(rt.Effect), rt.Pending, orDash(rt.CredentialChannel), rt.CredentialTested,
-		orDash(rt.Where), rt.ModelCount)
+		orDash(rt.Where), rt.ModelCount, rt.DeclaresModelInput)
 	switch rt.Status {
 	case "failed":
 		return doctorCheck{name, doctorFail, detail + "：同步失败" + noteSuffix(rt.Note)}
@@ -367,14 +403,14 @@ func checkMigrationBackup(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "迁移备份"
 	if facts.MigrationBackup != "" {
 		return doctorCheck{name, doctorOK, "可回退依据：`" + facts.MigrationBackup +
-			"`（**只管 DB**：密钥不在其内，而 v12 不触碰 vault，所以回退不必恢复 vault）"}
+			"`（**只管 DB**：密钥不在其内，而本方案不触碰 vault，所以回退不必恢复 vault）"}
 	}
 	if facts.RuntimeConfigDigestWritten || facts.ProviderRows > 0 {
-		return doctorCheck{name, doctorWarn, "本机已有资源数据但没有找到 `mate.db.bak-v12-*`：" +
-			"若这个库是从 v11 升上来的，说明备份已被清理——**回退窗口已关闭**（v12 之后只能前滚；" +
+		return doctorCheck{name, doctorWarn, "本机已有资源数据但没有找到 `mate.db.bak-v12-*` / `mate.db.bak-v13-*`：" +
+			"若这个库是从旧版本升上来的，说明备份已被清理——**回退窗口已关闭**（schema 前进之后只能前滚；" +
 			"逃生门是 `mate provider export`）"}
 	}
-	return doctorCheck{name, doctorOK, "没有需要备份的迁移（这个库不是从 v11 升上来的）"}
+	return doctorCheck{name, doctorOK, "没有需要备份的迁移（这个库不是从旧版本升上来的）"}
 }
 
 // checkMigrationNotes 迁移留下的待人工处置事实（默认模型冲突 / 归并冲突 / 无出口字段）。
@@ -400,6 +436,61 @@ func checkMigrationNotes(facts manager.ProviderDoctorFacts) doctorCheck {
 		return doctorCheck{name, doctorOK, "v11 → v12 的逐组对账无冲突（没有丢字段、没有默认模型归并冲突）"}
 	}
 	return doctorCheck{name, doctorWarn, "迁移时留下了需要你看一眼的事实（**不阻塞**，也不假装迁移过）：" +
+		strings.Join(parts, "；")}
+}
+
+// checkMigrationNotesV13 v13（providers/models 列化）留下的待人工处置事实。
+//
+// 与 v12 那条**分键分项**（`meta.migration_notes_v13`）：列化不做静默改变语义的事，但这几类
+// 事实必须被人看见——被丢弃的 body 未知键、正文里**曾有明文密钥**的行（值只在备份库里）、
+// `created_at` 近似行、按默认 `text` 填的模态（它会覆盖底座 catalog）、v12 里就是孤儿的 model 行。
+//
+// 明文那一条**判 warn 而不是 fail**：库现在**不含**明文（这正是修复），代价是那些供应商
+// 此刻没有密钥（会报 credential_missing）——出路是重设一次，旧值可从备份库取回。
+// 文案指到具体备份文件，**绝不回显密钥值**。
+func checkMigrationNotesV13(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "迁移对账 v13"
+	n := facts.MigrationNotesV13
+	if n == nil {
+		return doctorCheck{name, doctorOK, "没有 v13 迁移留下的待处置事实"}
+	}
+	backup := n.BackupPath
+	if backup == "" {
+		backup = facts.MigrationBackup
+	}
+	parts := []string{}
+	if len(n.LegacyPlaintextKeys) > 0 {
+		where := "迁移前的备份库"
+		if backup != "" {
+			where = "`" + backup + "`"
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%d 条供应商的密钥原来是**明文存在库里的**（v13 不搬它，新表没有能放明文的列）：%s；"+
+				"它们此刻没有密钥（相关会话会报 credential_missing），旧值可从 %s 的 `providers.body.key` 取回，然后在「设置 · 模型」里重设一次",
+			len(n.LegacyPlaintextKeys), bracketList(n.LegacyPlaintextKeys), where))
+	}
+	if len(n.DroppedBodyKeys) > 0 {
+		parts = append(parts, "被丢弃的 body 未知键（值仍在备份库里）："+bracketList(n.DroppedBodyKeys))
+	}
+	if len(n.ModalityDefaulted) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"模型输入模态 %d 条按默认 `text` 填（这会**覆盖底座目录**：老模型里本来能看图的现在收不了图）：%s；"+
+				"要图片就到「设置 · 模型」里逐条勾上", len(n.ModalityDefaulted), bracketList(n.ModalityDefaulted)))
+	}
+	if len(n.OrphanModels) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"孤儿模型行 %d 条（`provider_id` 指向不存在的供应商，迁移**不阻断**但谁都交付不了）：%s",
+			len(n.OrphanModels), bracketList(n.OrphanModels)))
+	}
+	if len(n.CreatedAtApproximated) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"%d 行的 `created_at` 取的是 `updated_at` 近似值（v11/v12 没有插入时刻的留痕，如实登记）：%s",
+			len(n.CreatedAtApproximated), bracketList(n.CreatedAtApproximated)))
+	}
+	if len(parts) == 0 {
+		return doctorCheck{name, doctorOK, "v12 → v13 的逐行对账无冲突（没有丢字段、没有明文密钥、没有孤儿行）"}
+	}
+	return doctorCheck{name, doctorWarn, "v13 列化留下了需要你看一眼的事实（**不阻塞**，也不假装迁移过）：" +
 		strings.Join(parts, "；")}
 }
 

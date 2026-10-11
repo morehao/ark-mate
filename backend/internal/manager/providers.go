@@ -54,15 +54,17 @@ type providerDef struct {
 	BaseURL  string `json:"base_url,omitempty"`
 	// Note 备注（不驱动行为）。它是 body 里的一个普通键，这里提升成字段只为让写面读起来清楚。
 	Note string `json:"note,omitempty"`
-	// Key 内存明文（注入/判 has_key/进 adapter 的凭据文档用；落盘一律走 KeyRef）。
+	// Key 内存明文（注入/判 has_key/进 adapter 的凭据文档用；落盘一律走 vault）。
 	Key string `json:"-"`
-	// KeyRef 密文引用（落盘字段）。
+	// KeyRef 密文引用。
+	//
+	// v13 起它是**派生量**（`providerRef(id)`），不再是载体字段：表里没有 `key_ref` 列
+	// （纯函数副本 + AAD 已绑 `vault:providers/<id>`，两份值不一致时的表现是"凭据坏了"，
+	// 会误导排查，ADR-7）。文件载体仍然写/读它（那是 v11 的落盘形状，不改）。
 	KeyRef string `json:"key_ref,omitempty"`
-	// keyErr 装载时解密失败的原因（problems 据此给出可执行出路，不静默降级）。
+	// keyErr 密钥不可用的原因（vault 不可达 / 密文解不开）。problems 据此给出可执行出路，
+	// **不静默降级**：`has_key` 只看 `Key` 是否解出，不看它。
 	keyErr error `json:"-"`
-	// Body 载体里读到的**原始键值**（除 `key`/`id` 外的全部键，含未知键）。
-	// sqlite 模式下它就是 `providers` 行的 body：写面把它原样提交回去，未知键因此不丢。
-	Body map[string]any `json:"-"`
 	// Revision 载体里的行版本（sqlite = `providers.revision`；memory = 0）。
 	Revision int64 `json:"-"`
 	// UpdatedAt 最后一次成功提交的时刻（sqlite = 行上的 updated_at；memory = 零值）。
@@ -94,6 +96,14 @@ func providerRef(id string) string { return vault.RefPrefix + "providers/" + id 
 // home 取 agentDir 的父目录（默认 ~/.ark-mate/agents → ~/.ark-mate）：密钥 ~/.ark-mate/vault.key、
 // 密文 ~/.ark-mate/vault/。agentDir 为空（纯内存场景/未配置）→ (nil, nil) = 无 vault，
 // 此时密钥只在内存、绝不落盘。
+//
+// **"锚点还不知道"不是可缓存的结论**（2026-10-11 修）：`agentDir` 由 `loadDefinitions` 登记，
+// 而装配期的 runtime 同步（`EnableStore` → `SyncRuntime` → `providerForSync`）发生在它**之前**——
+// 旧实现在那一次调用上就把 `vaultTried` 置成 true 并缓下 (nil, nil)，于是整个进程此后都按
+// "本机没有 vault"处理：已存密钥解不出来（v13 的 `has_key` 口径是"内存里有明文"→ 界面显示
+// 「尚未设置密钥」，而密文其实好好的），补密钥被写面按 `vault_unavailable` **拒绝**——
+// 用户侧的表现是"密钥明明存过、界面说没有；再存一次直接失败"。所以锚点为空时**直接返回、
+// 不落缓存**，等 `loadDefinitions` 登记目录后下一次调用再真正打开。
 func (s *Service) providerVault() (*vault.Store, error) {
 	s.mu.Lock()
 	if s.vaultTried {
@@ -101,13 +111,13 @@ func (s *Service) providerVault() (*vault.Store, error) {
 		s.mu.Unlock()
 		return st, err
 	}
-	s.vaultTried = true
 	dir := s.agentDir
-	s.mu.Unlock()
-
 	if dir == "" {
+		s.mu.Unlock()
 		return nil, nil
 	}
+	s.vaultTried = true
+	s.mu.Unlock()
 	st, err := vault.Open(filepath.Dir(dir))
 	s.mu.Lock()
 	s.vaultStore, s.vaultErr = st, err
@@ -155,11 +165,9 @@ func (s *Service) loadProvidersFile(dir string) {
 				break
 			}
 			p.Key, p.KeyRef = d.Key, ref
-			p.Body["key_ref"] = ref
 			migrated++
 		case d.KeyRef != "":
 			p.KeyRef = d.KeyRef
-			p.Body["key_ref"] = d.KeyRef
 			if st == nil {
 				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", d.KeyRef, vaultUnavailable(verr))
 				glog.Warnw(context.Background(), "providers: 有密文但 vault 不可用", "provider", id, "ref", d.KeyRef, "err", p.keyErr)
@@ -198,17 +206,6 @@ func providerDefFromFile(id string, d *providerFile) *providerDef {
 	}
 	if p.BaseURL == "" {
 		p.BaseURL = v11FileBaseURL(d)
-	}
-	p.Body = map[string]any{}
-	if p.Name != "" {
-		p.Body["name"] = p.Name
-	}
-	p.Body["protocol"] = p.Protocol
-	if p.BaseURL != "" {
-		p.Body["base_url"] = p.BaseURL
-	}
-	if p.Note != "" {
-		p.Body["note"] = p.Note
 	}
 	return p
 }
@@ -328,7 +325,7 @@ func (s *Service) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp
 func (s *Service) providerRespLocked(ctx context.Context, id string, d *providerDef) dtoprovider.ProviderResp {
 	resp := dtoprovider.ProviderResp{
 		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
-		HasKey:        d.Key != "" || d.KeyRef != "",
+		HasKey:        d.Key != "", // 解出明文才算有密钥（密文解不开/不可达 → false，理由走 problems）
 		Revision:      d.Revision,
 		ModelCount:    s.providerModelCount(ctx, id),
 		Applicability: s.providerApplicabilityLocked(d),
@@ -417,16 +414,19 @@ func providerRefNameFor(spec runtime.Spec, providerID string) string {
 }
 
 // providerProblems 本地段能回答的问题清单（零网络请求；**可执行的一句话**）。
+//
+// v13 起"有没有密钥"完全由 vault 派生（表里没有 `key_ref` 列），所以这一段的判据是
+// **内存里有没有明文**：解出来了就没有问题，没解出来时区分"压根没设"与"设了但拿不到"。
 func providerProblems(d *providerDef) []string {
 	out := []string{}
 	switch {
-	case d.Key == "" && d.KeyRef != "" && d.keyErr != nil:
-		out = append(out, "密钥密文无法解密（"+d.KeyRef+"）："+d.keyErr.Error()+
+	case d.Key != "":
+		// 密钥可用：无问题。
+	case d.keyErr != nil:
+		out = append(out, "密钥不可用（"+d.KeyRef+"）："+d.keyErr.Error()+
 			"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），或重设密钥")
-	case d.Key == "" && d.KeyRef == "":
+	default:
 		out = append(out, "尚未设置密钥：在「设置 · 模型」的供应商块补一条密钥后才会交付")
-	case d.Key == "" && d.KeyRef != "":
-		out = append(out, "有密文引用但明文不可用（vault 不可达）：确认 mate home 下的 vault 可用")
 	}
 	if strings.TrimSpace(d.BaseURL) == "" {
 		out = append(out, "缺端点（`base_url` 为空）：它的模型不会被交付给任何会话进程——"+
@@ -459,8 +459,8 @@ func (s *Service) providerEnvFor(runtimeID, providerID string) []string {
 	d := s.providers[providerID]
 	s.mu.Unlock()
 	if d == nil || d.Key == "" {
-		if d != nil && d.KeyRef != "" {
-			glog.Warnw(context.Background(), "providers: 密钥不可用（密文未解密），不注入 env", "provider", providerID, "err", d.keyErr)
+		if d != nil && d.keyErr != nil {
+			glog.Warnw(context.Background(), "providers: 密钥不可用，不注入 env", "provider", providerID, "err", d.keyErr)
 		}
 		return nil
 	}
@@ -508,9 +508,9 @@ func (s *Service) CredentialProblem(agent *AgentRec) error {
 				"（改用它自身的登录态）", nil)
 	}
 	if d.Key == "" {
-		if d.KeyRef != "" && d.keyErr != nil {
+		if d.keyErr != nil {
 			return acl.NewError(acl.ClassRequest, "credential_missing",
-				ref+" 的密钥密文无法解密（"+d.KeyRef+"）："+d.keyErr.Error()+
+				ref+" 的密钥不可用（"+d.KeyRef+"）："+d.keyErr.Error()+
 					"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），"+
 					"或到「设置 · 模型」重设密钥", nil)
 		}

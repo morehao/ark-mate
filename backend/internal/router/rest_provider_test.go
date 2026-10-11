@@ -14,7 +14,7 @@ import (
 // 为什么不只用 manager 的进程内调用：契约守卫只保证"路由注册了、README 写了"，
 // 而"控制器把码映射对了、请求体绑定对了、路径参数取对了"只有走一遍引擎才看得见。
 func TestProviderWriteFaceREST(t *testing.T) {
-	e, _ := newEngineWithService()
+	e, _ := newEngineWithService(t)
 
 	// POST → 新建成功，密钥只以 has_key 呈现。
 	env, _ := do(t, e, "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai","base_url":"https://api.deepseek.com/v1","api_key":"sk-secret","note":"主账号"}`)

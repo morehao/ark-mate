@@ -44,9 +44,10 @@ type (
 	Input = model.Input
 	// AgentDefinition agent 定义行（M6-6；与 SkillDefinition 同形）。
 	AgentDefinition = model.AgentDefinition
-	// ProviderDefinition provider 档案行（v11；与 SkillDefinition 同形）。
+	// ProviderDefinition provider 档案行（v13：资源表 = 列 + revision CAS，无 body）。
 	ProviderDefinition = model.ProviderDefinition
-	// ModelDefinition 平台模型清单行（v11；比 ProviderDefinition 多 runtime/provider_id/is_default 三列）。
+	// ModelDefinition 平台模型清单行（v13：资源表；比 ProviderDefinition 多 `provider_id`/
+	// `model_id`/`input_modalities` 三列）。
 	ModelDefinition = model.ModelDefinition
 	// AutomationDefinition 定时任务行（M6-7：定义列 + 运行态列）。
 	AutomationDefinition = model.AutomationDefinition

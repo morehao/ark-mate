@@ -7,16 +7,20 @@ import (
 )
 
 // TestDefaultRegistry 内置 runtime 的注册与静态能力基线（M0 DoD：
-// GET /runtimes、/agents 返回真实数据的前提）。
+// `/agents` 返回真实数据的前提）。
+//
+// 注意它查的是 `List()`（全部 Spec），不是已删除的 `/runtimes` 出口：静态 `Caps` 只剩
+// "声明基线"这一个用途，**不得当作能力门禁**（ADR-14；由 archtest 的
+// `TestStaticCapsImagesHasNoConsumer` 钉住）。
 func TestDefaultRegistry(t *testing.T) {
 	reg := AllBuiltinRegistry()
-	items := reg.ListItems()
+	items := reg.List()
 
 	// 内置 runtime 收敛为两个：opencode / dsh（echo 演示底座已于 M0 删除）。
 	if len(items) != 2 {
 		t.Fatalf("期望 2 个 runtime，got %d: %+v", len(items), items)
 	}
-	// List/ListItems 按 ID 排序：dsh < opencode。
+	// List 按 ID 排序：dsh < opencode。
 	if items[0].ID != "dsh" || items[1].ID != "opencode" {
 		t.Fatalf("排序不符: %+v", items)
 	}
@@ -101,43 +105,10 @@ func TestRegistryCRUD(t *testing.T) {
 
 	// 空注册表。
 	empty := NewRegistry()
-	if len(empty.List()) != 0 || len(empty.ListItems()) != 0 {
+	if len(empty.List()) != 0 {
 		t.Fatal("空注册表应无条目")
 	}
 	if _, ok := empty.Get("x"); ok {
 		t.Fatal("空注册表 Get 应为 false")
-	}
-}
-
-// TestRegistryListItemsMapsSpec ListItem 正确映射 Spec（/runtimes 载荷）。
-func TestRegistryListItemsMapsSpec(t *testing.T) {
-	reg := NewRegistry(Spec{
-		ID:      "r1",
-		Name:    "Runtime 1",
-		Version: "v9",
-		Launch:  LaunchSpec{Command: "cmd"},
-		Caps:    Capabilities{SessionsPersistent: true},
-		Notes:   "note",
-	})
-	items := reg.ListItems()
-	if len(items) != 1 {
-		t.Fatalf("items: %+v", items)
-	}
-	it := items[0]
-	if it.ID != "r1" || it.Name != "Runtime 1" || it.Version != "v9" || !it.Caps.SessionsPersistent {
-		t.Fatalf("ListItem 映射不符: %+v", it)
-	}
-	if it.Caps != reg.List()[0].Caps {
-		t.Fatal("ListItem.Caps 应与 Spec.Caps 相等（值拷贝）")
-	}
-}
-
-// TestListItemsStableOrder 多次调用输出稳定（前端列表渲染确定性）。
-func TestListItemsStableOrder(t *testing.T) {
-	reg := AllBuiltinRegistry()
-	a := reg.ListItems()
-	b := reg.ListItems()
-	if !reflect.DeepEqual(a, b) {
-		t.Fatal("ListItems 两次输出不一致")
 	}
 }

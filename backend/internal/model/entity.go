@@ -373,18 +373,38 @@ func (AutomationDefinition) TableName() string { return TableAutomation }
 // AutomationDefinitionList 是 AutomationDefinition 切片类型（gormdao 泛型参数要求具名切片）。
 type AutomationDefinitionList []AutomationDefinition
 
-// ProviderDefinition 是一条 provider 档案行（列与语义同 SkillDefinition / McpServerDefinition /
-// AgentDefinition；v11 建成）。
+// ProviderDefinition 是一条 provider 档案行（**资源表**形态，v13 列化）。
 //
-// `Body` 是唯一权威：存 `{type, key_ref, note?}` 以及文件时代留下来的未知键（含历史 `model`，
-// 迁入时**原样保留**，保证零丢失）。**明文密钥绝不进 body**：只允许 `key_ref`；密文归 vault
-// （`KindProviderKey`，AAD 绑定 `vault:providers/<id>`）。
+// 它**不再是定义载体**：`skills` / `mcp_servers` / `agents` / `automations` 的 body 是
+// 「用户自由正文」，而 provider 的键集合 `{name, protocol, base_url, note}` 是平台拥有的
+// **封闭字段集**且每个键都在热路径上（`protocol` 决定适配、`base_url` 决定请求落点）——
+// 封闭 ⇒ 列化（ADR-1/ADR-2）。判据一句话：body 只留给「正文是用户自由文档」的资源。
+//
+// **刻意没有的两列**（每条都是判据，不是遗漏）：
+//   - `body`：键集合封闭，它的缺席由 archtest 守卫钉住；
+//   - `key_ref`：它是 `providerRef(id)` 的纯函数副本，且 vault 的 AAD 已绑定
+//     `vault:providers/<id>`；两份值不一致时的表现是「凭据坏了」，会误导排查（ADR-7）。
+//     `has_key` 一律由 `vault.Has(providerRef(id))` 现算。
+//
+// **明文密钥结构上进不来**：没有任何一列能容纳它（ADR-8/ADR-15）。
 type ProviderDefinition struct {
+	// ID 主键（词法受限：它会进 vault 引用段）。
 	ID string `gorm:"column:id;primaryKey"`
-	// Body 定义原始 JSON（含未知键）。
-	Body string `gorm:"column:body;not null"`
+	// Name 展示名（空 = 前端回落 id）。
+	Name string `gorm:"column:name;not null;default:''"`
+	// Protocol 协议（本期只有 openai；库级 CHECK 兜住裸 SQL 路径）。
+	Protocol string `gorm:"column:protocol;not null"`
+	// BaseURL 上游端点（空 = 缺端点，界面与 doctor 显式标出，且该供应商不进任何 Set）。
+	BaseURL string `gorm:"column:base_url;not null;default:''"`
+	// Note 备注（不驱动行为）。
+	Note string `gorm:"column:note;not null;default:''"`
 	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
+	// CreatedAt 创建时刻（RFC3339Nano(UTC)）。
+	//
+	// **存量行是近似值**：v11/v12 都没建这一列，v13 迁移只能取 `updated_at` 并登记
+	// （`migration_notes_v13.created_at_approximated`）——如实登记，不假装它是创建时间。
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }
@@ -395,31 +415,38 @@ func (ProviderDefinition) TableName() string { return TableProvider }
 // ProviderDefinitionList 是 ProviderDefinition 切片类型（gormdao 泛型参数要求具名切片）。
 type ProviderDefinitionList []ProviderDefinition
 
-// ModelDefinition 是平台声明的一条模型条目（v12 重建；**不带底座维度**）。
+// ModelDefinition 是平台声明的一条模型条目（v12 重建、v13 列化；**不带底座维度**）。
 //
 // 一条模型条目说清「挂在哪条供应商下、发给上游的是哪个模型 id」——它**不再**说"给哪个底座用"：
 // 一份清单同时投给所有已注册底座（ADR-1、B3）。v11 的身份三元组 `(runtime, provider_id, model_id)`
 // 因此塌成两列：`(provider_id, model_id)` **唯一**（库级唯一索引真表达得了，见 v12 迁移）。
 //
-// 为什么两列是**列**而不是 body 字段：它们是平台侧唯一的查询/约束轴
-// （「同步时按供应商取模型」= `WHERE provider_id=?`；「`model_exists` 判定」= 同一索引），
-// 都在热路径上。放进 body 就得全表扫 + 反序列化。
-//
-// `Body` 存 `{name?, note?}`（**不含 model_id**——它已是列，双写必然漂移；也不含 v11 的
-// `extra`/`hidden`/`pinned`：三者都删掉了，ADR-7）。
+// v13 把仅剩的两个平台字段（`name` / `note`）与新增的 `input_modalities` 提成列，
+// `body` 随之消失——理由与 provider 相同：键集合封闭、每次列表渲染都要用（ADR-1）。
+// 于是「一行坏 JSON 打不开整页」在结构上不可能（没有 JSON 可比坏，v12 的 P2 收尾）。
 //
 // 默认模型**不在这里**：它是**用户的偏好**、是单一值，住 `meta.MetaKeyDefaultModel`（ADR-21）。
-// v11 的 `is_default` 列（每 runtime 至多一条）随之删除——那是把底座维度从后门带回用户面的东西。
 type ModelDefinition struct {
 	ID string `gorm:"column:id;primaryKey"`
-	// ProviderID 挂靠的供应商 id（指向 providers.id）。
+	// ProviderID 挂靠的供应商 id（指向 providers.id）。引用完整性由 store 的**同一事务**保证
+	// （不依赖 FK：本仓 SQLite 的 `foreign_keys=0`，所有 REFERENCES 都是装饰，ADR-4）。
 	ProviderID string `gorm:"column:provider_id;not null"`
 	// ModelID 发给上游的模型 id（**不是**平台模型 id，那是 ID 列）。
 	ModelID string `gorm:"column:model_id;not null"`
-	// Body 平台声明正文 JSON（含未知键）：{name?, note?}。
-	Body string `gorm:"column:body;not null"`
+	// Name 展示名（空 = 界面回落 ModelID）。
+	Name string `gorm:"column:name;not null;default:''"`
+	// Note 备注（不驱动行为）。
+	Note string `gorm:"column:note;not null;default:''"`
+	// InputModalities 输入模态（两态：`text` | `text,image`；**默认 `text`**）。
+	//
+	// 它是平台生成的 route 声明里 `models[].input` 的来源，由**逗号分隔**存成一列
+	// （两态取值空间很小，第二张表/JSON 列都不划算）。**总是带值**：`text` 是明确值而不是
+	// "没设"，所以 dsh adapter 总是写 `input`（ADR-12 的代价段：会显式覆盖底座 catalog）。
+	InputModalities string `gorm:"column:input_modalities;not null;default:'text'"`
 	// Revision 写面 CAS 判据（同 SkillDefinition.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
+	// CreatedAt 创建时刻（RFC3339Nano(UTC)；存量行是 `updated_at` 近似值，见 ProviderDefinition.CreatedAt）。
+	CreatedAt time.Time `gorm:"column:created_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano(UTC)）。
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;serializer:arkmate_rfc3339;autoCreateTime:false;autoUpdateTime:false"`
 }

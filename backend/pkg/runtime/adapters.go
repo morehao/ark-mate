@@ -33,9 +33,12 @@ func opencodeSpec() Spec {
 			Images:                 opencode.Caps.Images,
 			EmbeddedContext:        opencode.Caps.EmbeddedContext,
 		},
-		Description:       "opencode（terminal AI）ACP 执行后端",
-		McpTransports:     []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
-		ManagesOwnContext: true,                             // §6.2：后端自管上下文/工具
+		Description: "opencode（terminal AI）ACP 执行后端",
+		// opencode 侧**不写**模型的输入模态（ADR-12）：v2 的 `capabilities` 是整块替换且
+		// `tools`/`input`/`output` 三字段必填，平台对前两者没有事实 ⇒ 用猜测换一个声明不划算。
+		DeclaresModelInput: false,
+		McpTransports:      []string{"stdio", "sse", "http"}, // §6.2：opencode 支持 http/sse/stdio
+		ManagesOwnContext:  true,                             // §6.2：后端自管上下文/工具
 		// Notes 里带上**清单通道**的实测结论（原先挂在已删除的 `ConfigProjection.Note` 上，
 		// 那些知识不能随字段一起消失——见 const 的注释）。
 		Notes: opencode.Notes + "\n\n" + opencodeModelConfigEvidence,
@@ -170,9 +173,13 @@ func dshSpec() Spec {
 			Images:                 dsh.Caps.Images,
 			EmbeddedContext:        dsh.Caps.EmbeddedContext,
 		},
-		Description:       "dsh（deepseek-harness）ACP 执行后端",
-		McpTransports:     []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
-		ManagesOwnContext: true,                                 // §6.2：后端自管上下文/工具
+		Description: "dsh（deepseek-harness）ACP 执行后端",
+		// dsh 侧**总是**写 `models[].input`（ADR-12）：不写时 `declaredInput()` 会"问下一层"
+		// （catalog 认识的 id 保留 catalog、平台新造 id 落到 defaultInput=["text"]），
+		// 于是"平台声明的模型能不能收图"变成一件取决于底座目录版本、用户改不动也看不见的事。
+		DeclaresModelInput: true,
+		McpTransports:      []string{"stdio", "streamable_http"}, // §6.2：dsh 拒 sse
+		ManagesOwnContext:  true,                                 // §6.2：后端自管上下文/工具
 		// 模型走 ACP 会话配置项（session/set_config_option，会话级、可共享连接）：
 		// 目录与取值全部由 dsh 自报（option id "model"、值 JSON.stringify([provider,model])），
 		// 平台只按 category 消费，不在此声明任何 id/格式。

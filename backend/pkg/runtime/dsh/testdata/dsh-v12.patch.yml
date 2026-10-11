@@ -15,8 +15,10 @@
         models:
           - id: "gpt-4o"
             name: "大模型 \"A\" \\ 备用"
+            input: [text]
           - id: "gpt-4o-mini"
             name: "小模型·中文"
+            input: [text, image]
 - id: llm-pi-ai
   config:
     providers:
@@ -27,8 +29,10 @@
         baseURL: "https://beta.example.com/openai/v1"
         models:
           - id: "llama/3-8b"
+            input: [text]
           - id: "qwen:7b"
             name: "qwen #7b"
+            input: [text]
 - id: llm-pi-ai
   config:
     providers:
@@ -40,5 +44,7 @@
         models:
           - id: "deepseek-chat"
             name: "DeepSeek 对话"
+            input: [text]
           - id: "deepseek-reasoner"
             name: "推理\t模型"
+            input: [text]

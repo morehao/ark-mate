@@ -216,20 +216,11 @@ func (r *Registry) List() []Spec {
 	return out
 }
 
-// ListItems 返回 /runtimes 列表项（控制面用）。
-func (r *Registry) ListItems() []ListItem {
-	specs := r.List()
-	out := make([]ListItem, 0, len(specs))
-	for _, s := range specs {
-		out = append(out, ListItem{
-			ID:      s.ID,
-			Name:    s.Name,
-			Version: s.Version,
-			Caps:    s.Caps,
-		})
-	}
-	return out
-}
+// 注意：`GET /runtimes` 已随「用户不能选 runtime」（2026-10-10 产品约束）删除，随它一起的
+// `ListItems() []ListItem` 出口也在这里删掉了——**这是刻意的**：静态 `Caps`（尤其
+// `Caps.Images`）唯一剩下的读法就是"把保守基线当能力门禁"，而那正是 ADR-14 判定为错误的那一侧
+// （真值只有连接期 initialize 的 `promptCapabilities` 知道）。没有出口 = 没有误用路径，
+// 由 archtest 的 `TestStaticCapsImagesHasNoConsumer` 钉住。
 
 // Require 返回 Spec；未知 ID 返回可读错误（供上层做参数校验）。
 func (r *Registry) Require(id string) (Spec, error) {

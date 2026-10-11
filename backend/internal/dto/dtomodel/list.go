@@ -17,7 +17,14 @@ type ModelResp struct {
 	Name string `json:"name,omitempty"`
 	// Note 备注（不驱动行为）。
 	Note string `json:"note,omitempty"`
-	// Revision 载体版本（行 CAS 判据）。
+	// InputModalities 该模型能接受的输入模态（**总是带值**，默认 `["text"]`）。
+	//
+	// 两态：`["text"]` | `["text","image"]`。它是**平台声明**（意图），不是底座目录里那条模型
+	// 本来支持什么（事实）——两者在 `input` 上会打架，而平台的声明**总是写进底座声明**
+	// （ADR-12 的代价：会覆盖 catalog，所以界面必须让用户能看见并一键改）。
+	InputModalities []string `json:"input_modalities,omitempty"`
+	// Revision 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**——同一内容写两次它照样前进，
+	// 而"那一版到底是什么"的内容指纹在审计 digest 里（ADR-13）。
 	Revision int64 `json:"revision"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano）。
 	UpdatedAt string `json:"updated_at,omitempty"`
@@ -50,6 +57,9 @@ type ModelCreateReq struct {
 	ModelID    string  `json:"model_id" binding:"required"`
 	Name       *string `json:"name"`
 	Note       *string `json:"note"`
+	// InputModalities 输入模态（`["text"]` | `["text","image"]`）；nil = 默认 `["text"]`。
+	// 非法取值 → 40501 并列出合法取值（枚举型键的既有纪律：不静默回落）。
+	InputModalities *[]string `json:"input_modalities"`
 	// IsDefault true = 把这条设为**唯一**默认模型（写进 meta 的单一值，ADR-21）。
 	IsDefault *bool `json:"is_default"`
 	// Runtime 仅为**显式拒收**而存在（A2）。它不是资源字段，任何非 nil 取值都报 40001。
@@ -58,9 +68,10 @@ type ModelCreateReq struct {
 
 // ModelPatchReq PATCH /models/:id：指针更新（nil = 不改）。
 type ModelPatchReq struct {
-	Name      *string `json:"name"`
-	Note      *string `json:"note"`
-	IsDefault *bool   `json:"is_default"`
+	Name            *string   `json:"name"`
+	Note            *string   `json:"note"`
+	InputModalities *[]string `json:"input_modalities"`
+	IsDefault       *bool     `json:"is_default"`
 	// Runtime 见 ModelCreateReq：显式拒收（A2）。
 	Runtime *string `json:"runtime"`
 }

@@ -50,7 +50,8 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	ctx := context.Background()
 	f := newProviderDoctorFixture(t)
 
-	// 三条档案：① 有真实密文 ② 声明了引用但密文不存在（悬空引用） ③ 没有密钥。
+	// 三条档案：① 有真实密文 ②③ 没有密钥（v13 里"有没有密文"只能问 vault：
+	// 表里没有 `key_ref` 列，所以"声明了引用却没有密文"这个状态**结构上不存在**）。
 	vst, err := vault.Open(f.home)
 	if err != nil {
 		t.Fatalf("vault.Open: %v", err)
@@ -58,13 +59,11 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	if err := vst.Put(providerRef("ok-key"), vault.KindProviderKey, []byte("sk-ok")); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []struct{ id, body string }{
-		{id: "ok-key", body: `{"type":"deepseek","key_ref":"vault:providers/ok-key"}`},
-		{id: "dangling-key", body: `{"type":"openai","key_ref":"vault:providers/dangling-key"}`},
-		{id: "no-key", body: `{"type":"anthropic"}`},
-	} {
-		if _, err := f.st.ImportProviderDefinition(ctx, row.id, row.body); err != nil {
-			t.Fatalf("导入档案 %s: %v", row.id, err)
+	for _, id := range []string{"ok-key", "other-key", "no-key"} {
+		if _, err := f.st.ImportProviderDefinition(ctx, store.ProviderColumns{
+			ID: id, Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
+			t.Fatalf("导入档案 %s: %v", id, err)
 		}
 	}
 	// 孤儿密文：没有任何行引用它（删除补偿失败的残留）。
@@ -90,20 +89,14 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	if got.Carrier != "db" || got.ProviderRows != 3 {
 		t.Fatalf("载体/行数不对：carrier=%s rows=%d（%+v）", got.Carrier, got.ProviderRows, got)
 	}
-	if strings.Join(got.ProviderIDs, ",") != "dangling-key,no-key,ok-key" {
+	if strings.Join(got.ProviderIDs, ",") != "no-key,ok-key,other-key" {
 		t.Fatalf("档案 id 应升序：%v", got.ProviderIDs)
-	}
-	if strings.Join(got.CiphertextRefs, ",") != "dangling-key,ok-key" {
-		t.Fatalf("引用密文的档案：%v", got.CiphertextRefs)
 	}
 	if strings.Join(got.CiphertextFiles, ",") != "deleted-row,ok-key" {
 		t.Fatalf("vault 里实际的密文：%v（scan=%s）", got.CiphertextFiles, got.VaultDirScan)
 	}
-	if strings.Join(got.MissingCiphertexts, ",") != "dangling-key" {
-		t.Fatalf("悬空的密钥引用应恰好是 dangling-key：%v", got.MissingCiphertexts)
-	}
-	if strings.Join(got.NoKeyProviders, ",") != "no-key" {
-		t.Fatalf("没有密钥的档案应恰好是 no-key：%v", got.NoKeyProviders)
+	if strings.Join(got.NoKeyProviders, ",") != "no-key,other-key" {
+		t.Fatalf("没有密文的档案应恰好是 no-key,other-key：%v", got.NoKeyProviders)
 	}
 	if strings.Join(got.OrphanCiphertexts, ",") != "deleted-row" {
 		t.Fatalf("孤儿密文应恰好是 deleted-row：%v", got.OrphanCiphertexts)

@@ -77,8 +77,9 @@ func TestDoctorProviderSectionClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), store.ProviderColumns{
+			ID: "p1", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := st.UpsertAgentDefinition(context.Background(), "a1",
@@ -107,7 +108,7 @@ func TestDoctorProviderSectionClean(t *testing.T) {
 	if by["provider refs"].Status != doctorOK || by["provider keys"].Status != doctorOK {
 		t.Fatalf("无悬空引用、密文齐全时应 ok：refs=%+v keys=%+v", by["provider refs"], by["provider keys"])
 	}
-	if len(facts.DanglingRefs) != 0 || len(facts.MissingCiphertexts) != 0 || len(facts.OrphanCiphertexts) != 0 {
+	if len(facts.DanglingRefs) != 0 || len(facts.NoKeyProviders) != 0 || len(facts.OrphanCiphertexts) != 0 {
 		t.Fatalf("干净现场的事实面不该有条目：%+v", facts)
 	}
 }
@@ -125,9 +126,11 @@ func TestDoctorProviderSectionFailures(t *testing.T) {
 	}
 	r.withStore(t, func(st *store.Store) {
 		ctx := context.Background()
-		// 声明了 key_ref 但密文不存在（悬空的密钥引用）。
-		if _, err := st.ImportProviderDefinition(ctx, "p-missing",
-			`{"type":"openai","key_ref":"vault:providers/p-missing"}`); err != nil {
+		// 行存在但 vault 里没有密文（v13 里"有没有密文"只能问 vault：表里没有 key_ref 列，
+		// 所以 v12 的"声明了引用却没有密文"这个状态**结构上不存在**了）。
+		if _, err := st.ImportProviderDefinition(ctx, store.ProviderColumns{
+			ID: "p-missing", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 		// 悬空引用：agent 指向不存在的档案。
@@ -146,8 +149,8 @@ func TestDoctorProviderSectionFailures(t *testing.T) {
 	if by["provider refs"].Status != doctorFail || !strings.Contains(by["provider refs"].Detail, "a-broken→zz") {
 		t.Fatalf("悬空引用必须 fail 且点名：%+v", by["provider refs"])
 	}
-	if by["provider keys"].Status != doctorFail || !strings.Contains(by["provider keys"].Detail, "p-missing") {
-		t.Fatalf("悬空的密钥引用必须 fail 且点名：%+v", by["provider keys"])
+	if by["provider keys"].Status != doctorWarn || !strings.Contains(by["provider keys"].Detail, "p-missing") {
+		t.Fatalf("没有密文的档案应 warn 且点名（它是「尚未设置密钥」，不是「引用悬空」）：%+v", by["provider keys"])
 	}
 	if by["providers import"].Status != doctorFail || !strings.Contains(by["providers import"].Detail, "文件里有、DB 里没有") {
 		t.Fatalf("真不一致必须 fail：%+v", by["providers import"])
@@ -230,7 +233,9 @@ func TestDoctorProviderSectionNoStore(t *testing.T) {
 func TestDoctorProviderSectionReadOnly(t *testing.T) {
 	r := newProviderDoctorRig(t)
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"protocol":"openai","base_url":"https://api.deepseek.com/v1"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), store.ProviderColumns{
+			ID: "p1", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -265,8 +270,9 @@ func TestRunDoctorProviderSectionNoFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), store.ProviderColumns{
+			ID: "p1", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -335,8 +341,9 @@ func TestDoctorProviderVaultFail(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1",
-			`{"protocol":"openai","base_url":"https://api.deepseek.com/v1","key_ref":"vault:providers/p1"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), store.ProviderColumns{
+			ID: "p1", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -359,7 +366,9 @@ func TestDoctorProviderVaultFail(t *testing.T) {
 func TestDoctorProviderVaultNotYetCreated(t *testing.T) {
 	r := newProviderDoctorRig(t)
 	r.withStore(t, func(st *store.Store) {
-		if _, err := st.ImportProviderDefinition(context.Background(), "p1", `{"protocol":"openai","base_url":"https://api.deepseek.com/v1"}`); err != nil {
+		if _, err := st.ImportProviderDefinition(context.Background(), store.ProviderColumns{
+			ID: "p1", Protocol: "openai", BaseURL: "https://api.deepseek.com/v1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	})

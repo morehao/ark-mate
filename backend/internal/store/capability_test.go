@@ -179,8 +179,12 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 		model.TableSkill:              {"id", "body", "revision", "updated_at"},
 		model.TableMcpServer:          {"id", "body", "revision", "updated_at"},
 		model.TableCapabilityRevision: {"seq", "kind", "capability_id", "action", "actor", "at", "digest"},
-		model.TableProvider:           {"id", "body", "revision", "updated_at"},
-		model.TableModel:              {"id", "provider_id", "model_id", "body", "revision", "updated_at"},
+		// v13：providers/models 不再是「定义载体」而是「资源表」——平台字段全部成列、
+		// 无 body（ADR-1/ADR-2）。它们的列集合由 `archtest` 的
+		// `TestProviderModelTablesAreColumnsNotCarriers` 按**白名单**钉住（这里只冻住
+		// 四张定义载体表，两者判据分工不同：那张表说的是"哪些列可以有"，这里说的是"不许再加列"）。
+		model.TableProvider: {"id", "name", "protocol", "base_url", "note", "revision", "created_at", "updated_at"},
+		model.TableModel: {"id", "provider_id", "model_id", "name", "note", "input_modalities", "revision", "created_at", "updated_at"},
 	}
 	for table, wantCols := range want {
 		rows, err := s.db.Raw(`PRAGMA table_info(` + table + `)`).Rows()

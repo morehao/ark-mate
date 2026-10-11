@@ -350,6 +350,9 @@ func (s *Service) catalogResp(agentID, runtimeID, source string, opts []acl.Conf
 	}
 	// 鉴权引导取自连接能力（需要握手过的连接；未连接时为空，面板按 Note 提示）。
 	resp.AuthGuidance = s.authGuidanceFor(agentID)
+	// 「当前这条路由能不能收图」同样取自连接期事实（ADR-14）：取不到就是 nil（**不是 false**）
+	// ——"没握手"与"握手了说不能"是两件事，前者只能记"无法校验"。
+	resp.ImageInput = s.promptImageSupported(agentID)
 	return resp
 }
 
@@ -377,6 +380,22 @@ func (s *Service) authGuidanceFor(agentID string) []dtomodel.AuthGuidanceResp {
 		})
 	}
 	return out
+}
+
+// promptImageSupported 「当前这条路由能不能收图」的**连接期**事实（nil = 取不到）。
+//
+// 取不到（没有活跃连接）时回 nil 而不是 false：ACP 的 `promptCapabilities.image` 只有握手过
+// 才知道，把"没握手"说成"不支持"正是 ADR-14 要拦的那类错误结论。
+func (s *Service) promptImageSupported(agentID string) *bool {
+	if s.orch == nil {
+		return nil
+	}
+	rc := s.orch.connForAgent(agentID)
+	if rc == nil {
+		return nil
+	}
+	v := rc.client.Capabilities().Images
+	return &v
 }
 
 // logCatalogFallback 目录降级留痕（resume 取样失败不阻塞接口：返回空目录由面板提示）。

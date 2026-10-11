@@ -20,7 +20,10 @@ type ProviderResp struct {
 	HasKey bool `json:"has_key"`
 	// Note 备注（不驱动行为；写面可改，生效回执会如实回 effect=none）。
 	Note string `json:"note,omitempty"`
-	// Revision 载体版本（sqlite = 行 revision，写面 CAS 判据；memory = 0）。
+	// Revision 写面乐观锁计数（sqlite = 行 revision，CAS 判据；memory = 0）。
+	//
+	// **不是内容版本**：同一内容写两次它照样前进，而"那一版到底是什么"的内容指纹在审计
+	// digest 里（ADR-13）。它今天零消费者，留着是给将来真要做 `If-Match` 的集成方一个现成判据。
 	Revision int64 `json:"revision"`
 	// UpdatedAt 最后一次成功提交的时刻（RFC3339Nano；memory 模式为空）。
 	UpdatedAt string `json:"updated_at,omitempty"`
