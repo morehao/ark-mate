@@ -363,7 +363,34 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    自己声明的形态、对未登记 id 报 `model_value_unsupported`，且这些 env 真的落到了子进程。
 >    **顺带说明**：`pkg/runtime` 的测试里另有一个自造的 `rt-alt`（`isolation_test.go` /
 >    `session_runtime_test.go`），因为 `pkg/` 不能 import `internal/`。
-> ⑨ **不变**——wire 契约与事件类型、数据 schema、REST 路由与错误码、`session.*` 词汇、v15/v16/v17
+> ⑨ **存量数据：读面宽容 + `mate doctor` 存量体检（删掉适配不会让存量消失）**。用户 2026-10-12
+>    拍板的口径是"**不做破坏性迁移**，但存量要能被看见"；这次补上的是后半句——在此之前它是
+>    **完全静默**的：`mate doctor` 里逐底座采事实的那两段（`collectRuntimeModelFacts` /
+>    `collectSensitiveFiles`）都按**注册表**枚举，适配一删，那个底座在报告里就整段消失
+>    （报告一切正常，而磁盘上的东西一个没少）。
+>    新增 `backend/internal/manager/retired_runtime.go`（采事实，只读）+$
+>    `backend/internal/app/command/doctor_retired.go`（排版）。判据是「**在不在册**」，不是
+>    「它是不是某某」——两条理由：内核不许认识任何具体底座（写死 id 会被 ④ 的
+>    `TestInternalHasNoRuntimeIDSpecialCase` 判红），而写死也只能看见**这一次**下线的那个、
+>    下一次下线又要回内核改一处。在册集合由**调用方**给出（`AllBuiltinSpecs()` ∪ `runtimes.json`
+>    的远程端点，见 `knownRuntimeIDs`）并**印在报告里**：于是"判据给错了"与"真的没有遗留"在
+>    报告上可分。
+>    四面事实：① 磁盘 `<MATE_HOME>/runtime/<不在册 id>/`（列出顶层条目——里面可能就是那个底座的
+>    **原生凭据文档**，即明文密钥，与 `mate.db` 同等看待；平台**不自动删**）；② `sessions.runtime_id`
+>    指向不在册 id 的会话（**读得到、发消息才报 `runtime_not_found`**——"表面正常、用到才炸"正是
+>    体检该提前说出来的形态）；③ skill 定义 `runtimes[]` 里的不在册候选（候选集为空 ⇒ 永不投放，
+>    而界面上它看起来只是一条普通技能）；④ 投影覆盖键（`<runtime>:<kind>`，形状合法所以配置解析
+>    不报错，但它永远匹配不上）。
+>    **一律 warn、绝不 fail**：存量是**事实**，不是"事实与声明不符"；判红会把用户逼向"删数据"这
+>    一个动作，而那正是明确不要的。三处"读不到"（没有可读的持久层 / 隔离根读不动 / 在册集合为空）
+>    各自如实记"无法校验"或"判据失效"，**不许**当成"没有"——那是这一段最坏的假绿形态。
+>    隔离根位置**从在册声明推**（每个 `Spec.Isolation` 里 `IsolationPath` 条目的父目录去重，换根时
+>    判据自动跟上）∪ 历史约定 `<MATE_HOME>/runtime` 兜底：已下线的那份声明已经不在了，它的落点
+>    推不出来，那一条是**约定**、改约定时要跟着改。
+>    端到端取证（2026-10-13 实跑）：私有 `MATE_HOME` 下放一份已下线底座的 `runtime/<id>/`（含原生
+>    凭据文档）+ 库里一条指向它的会话与一条 skill，`mate doctor --web-dir …` **退出码 0**
+>    （0 fail / 8 warn，四面条目逐条点名）；把这些痕迹删掉后四条全 `ok`。
+> ⑩ **不变**——wire 契约与事件类型、数据 schema、REST 路由与错误码、`session.*` 词汇、v15/v16/v17
 >    的会话与命名收口、**构建期固定 runtime**（用户不能选）这条产品约束、`ProductRegistry` 的
 >    fail-closed 语义，逐条不变；本次只**新增**上面这些端口与守卫、**删除** opencode 适配面、
 >    **改名**一个构建期覆盖键，没有别的改动。
