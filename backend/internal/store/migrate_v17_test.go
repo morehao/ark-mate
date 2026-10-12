@@ -201,6 +201,16 @@ func TestMigrateV17OnEmptyEvents(t *testing.T) {
 	ctx := context.Background()
 	s := openV16ForV17Test(t)
 
+	// events 表是空的，但**会话行必须在**：events.session_id 是 REFERENCES sessions(id)，
+	// 而 v1.32.22 起外键真的会咬人（ncruces 的 wasm 构建带 SQLITE_DEFAULT_FOREIGN_KEYS=1），
+	// 给不存在的会话追加事件会被库拒掉——那时候这条测试红的是夹具，不是迁移。
+	// 裸 SQL 的理由见 TestMigrateV17KeepsEveryEvent：v16 的列名与今天的实体不同。
+	at := "2026-03-04T10:00:00Z"
+	if err := s.db.Exec(`INSERT INTO sessions (id, agent_id, status, created_at, updated_at)
+		VALUES (?, 'a1', 'completed', ?, ?)`, v17SessionID, at, at).Error; err != nil {
+		t.Fatalf("写会话夹具: %v", err)
+	}
+
 	migrateUpTo(t, s, 17)
 	if n, err := s.EventCount(ctx, ""); err != nil || n != 0 {
 		t.Fatalf("空 events 迁移后仍应为 0 行：n=%d err=%v", n, err)

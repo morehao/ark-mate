@@ -3,6 +3,7 @@ package dbclient
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	// 本包的测试要注册 glog 的 zap driver：日志出口归装配根（cmd/mate 的匿名引入），
@@ -11,19 +12,23 @@ import (
 	_ "github.com/morehao/golib/glog/driver/zap"
 )
 
-// 本文件记录 SQLite 句柄的**真实**行为（2026-10-10 起 driver 由 golib 提供）。
+// 本文件记录 SQLite 句柄的**真实**行为。
 //
-// 原先本仓自注册了一个纯 Go dialector（glebarez/sqlite），它在 DSN 里注入
-// foreign_keys / busy_timeout / journal_mode(WAL) / synchronous，并用
-// `arkmate_mem_<n>` 保证内存库唯一命名。改用 golib 的 `dbgorm/driver/sqlite`
-// 之后这些都不再成立——下面几条守卫把新行为钉住，**红了就说明行为又变了**，
-// 不要默默放宽，先回来看这段注释。
+// 三次换驱动的历史：① 本仓自注册的纯 Go dialector（glebarez/sqlite，注入
+// foreign_keys / busy_timeout / journal_mode(WAL) / synchronous，并用 `arkmate_mem_<n>`
+// 保证内存库唯一命名）→ ② golib v1.32.21 的 mattn/go-sqlite3 方言（CGO，上面前三条全丢、
+// 内存库还变成固定名共享）→ ③ golib v1.32.22 的 ncruces/go-sqlite3 纯 Go 方言（本次）。
+//
+// 下面几条守卫把 ③ 的取值钉住，**红了就说明行为又变了**：不要默默放宽，先回来看这段注释，
+// 想清楚新事实是不是我们想要的，再连同 pkg/dbclient/gorm.go 的注释一起改。
 
 // TestOpenMemoryIsReallyInMemory 内存库必须真的是内存库。
 //
-// `file:name` 只表示「以 URI 形式给出文件名」，SQLite 会把它当成**磁盘上的相对路径**
-// 开库——只有 `:memory:` 这个名字或显式 `mode=memory` 才是内存库。一旦退化成相对
-// 路径文件，测试会跨运行读到上一次的数据（表现为「凭空多出来的历史行」）。
+// ncruces 方言把匿名内存库改写成 `file:/mem_<n>?vfs=memdb`，于是 `PRAGMA database_list`
+// 报出来的 main **不是空串**（旧 driver 是 `file::memory:?cache=shared`，同样是空 File 之外
+// 的写法）。所以判据不能再看"File 是否为空"，而是：名字在 memdb 的命名空间里、
+// 磁盘上既没有这个文件、临时目录也一个文件都没多——文件库一旦被静默当成内存库（或反过来），
+// 症状是跨运行读到上一次的数据，表现为"凭空多出来的历史行"。
 func TestOpenMemoryIsReallyInMemory(t *testing.T) {
 	dir := t.TempDir()
 	// 切到临时目录：若 DSN 退化成相对路径文件，就会在这里落地，从而被下面的检查抓到。
@@ -41,9 +46,15 @@ func TestOpenMemoryIsReallyInMemory(t *testing.T) {
 	if err := db.Raw("PRAGMA database_list").Scan(&dbs).Error; err != nil {
 		t.Fatalf("database_list: %v", err)
 	}
+	if len(dbs) == 0 {
+		t.Fatal("database_list 为空，判据本身失效")
+	}
 	for _, d := range dbs {
-		if d.File != "" {
-			t.Errorf("内存库的 main 竟然是磁盘文件 %q（DSN 缺 mode=memory）", d.File)
+		if !strings.HasPrefix(d.File, "/mem_") {
+			t.Errorf("内存库的 main 报成 %q，期望 memdb 命名空间里的 /mem_<n>", d.File)
+		}
+		if _, err := os.Stat(d.File); err == nil {
+			t.Errorf("内存库的 main 在磁盘上真实存在：%q", d.File)
 		}
 	}
 	entries, err := os.ReadDir(dir)
@@ -59,19 +70,17 @@ func TestOpenMemoryIsReallyInMemory(t *testing.T) {
 	}
 }
 
-// TestOpenMemoryIsProcessShared 记录 golib driver 的一个真实陷阱：**内存库是进程内共享的**。
+// TestOpenMemoryIsIndependent 同进程的两次匿名内存库**互不可见**。
 //
-// golib 把内存库统一改写成 `file::memory:?cache=shared`（固定名字），因此同进程内两次
-// `Open(":memory:")` 拿到的是**同一个库**，第二个句柄能看到第一个建的表。
+// 这条守卫原来的方向是反的：golib v1.32.21 把内存库统一改写成固定的
+// `file::memory:?cache=shared`，于是两个句柄落在**同一个**库上——"任何依赖 :memory:
+// 隔离的测试都会互相污染"是那时的既定代价（测试夹具因此一律走 t.TempDir() 下的文件库）。
+// v1.32.22 的方言每次 Open 都给匿名内存库分配新库名（`file:/mem_<n>?vfs=memdb`），
+// 共享缓存也不再被驱动编译进来，所以这个坑没了。
 //
-// 这不是我们想要的行为，是"照字面改用 golib driver"的既定代价（自注册 dialector 曾用
-// `arkmate_mem_<n>` 保证唯一命名）。实际后果：**任何依赖 ":memory:" 隔离的测试都会互相污染**，
-// 所以测试夹具一律走 t.TempDir() 下的文件库（见 internal/testutil.TempDBPath）；
-// internal/store 里沿用 `:memory:` 的夹具必须为每个测试打开独立文件库。
-//
-// 这条守卫的作用是反向的：它**故意钉住共享语义**。哪天 golib（或本仓）改成唯一命名，
-// 它会红——那时把上面那句结论一起改掉，而不是只改测试。
-func TestOpenMemoryIsProcessShared(t *testing.T) {
+// 反过来钉住它同样重要：若哪天又退回固定名，"两次 Open 互不可见"的假设会让
+// 依赖隔离的测试**静默**读到别的用例的数据。
+func TestOpenMemoryIsIndependent(t *testing.T) {
 	a, err := Open(":memory:")
 	if err != nil {
 		t.Fatalf("open a: %v", err)
@@ -83,25 +92,55 @@ func TestOpenMemoryIsProcessShared(t *testing.T) {
 	if err := a.Exec(`CREATE TABLE t(v TEXT)`).Error; err != nil {
 		t.Fatalf("create table on a: %v", err)
 	}
-	if err := a.Exec(`INSERT INTO t(v) VALUES('x')`).Error; err != nil {
-		t.Fatalf("insert on a: %v", err)
-	}
-	// b **能**看到 a 的表：两个句柄落在同一个共享缓存库上。
+	// b **看不到** a 的表：两个句柄是两个独立的空库。
 	var n int64
 	if err := b.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE name = 't'`).Scan(&n).Error; err != nil {
 		t.Fatalf("query b: %v", err)
 	}
-	if n == 0 {
-		t.Fatalf("内存库不再是进程内共享的（driver 改名了？见本测试注释）")
+	if n != 0 {
+		t.Fatalf("两次 Open(\":memory:\") 又落到同一个库上了（driver 改回固定名了？见本测试注释）")
 	}
 }
 
-// TestOpenConnectionPragmasAreGolibDefaults 钉住 golib driver 的连接级默认值。
+// TestOpenNamedMemoryIsShared 命名内存库仍然**按名字共享**（需要共享时的唯一正路）。
+//
+// 匿名内存库改成互相隔离之后，"跨句柄共享一个内存库"这件事没丢，只是要显式写名字：
+// `file:memdb1?mode=memory`（golib 的方言会把它改写到 memdb VFS 并按名字对齐）。
+// 不钉这条的话，下一个人只能靠翻 driver 源码判断"还能不能共享"。
+func TestOpenNamedMemoryIsShared(t *testing.T) {
+	a, err := Open("file:memdb1?mode=memory")
+	if err != nil {
+		t.Fatalf("open a: %v", err)
+	}
+	b, err := Open("file:memdb1?mode=memory")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	if err := a.Exec(`CREATE TABLE t(v TEXT)`).Error; err != nil {
+		t.Fatalf("create table on a: %v", err)
+	}
+	var n int64
+	if err := b.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE name = 't'`).Scan(&n).Error; err != nil {
+		t.Fatalf("query b: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("同名内存库应当共享；看到 %d 张表（driver 改写了命名内存库的语义？见本测试注释）", n)
+	}
+}
+
+// TestOpenConnectionPragmasFollowGolibAndDriver 钉住 golib v1.32.22 方言的连接级取值。
 //
 // 自注册 dialector 时代这里是：foreign_keys=1、busy_timeout=5000、文件库 WAL + synchronous=NORMAL。
-// 现在只剩 mattn 自己的默认值——**外键约束不再由库兜底**（events/runs/messages 仍以 FK
-// 引用 sessions，但违反时不会报错），文件库也不再是 WAL。
-func TestOpenConnectionPragmasAreGolibDefaults(t *testing.T) {
+// v1.32.21（mattn）时代是：foreign_keys=0、busy_timeout 是 mattn 的隐式 5000、非 WAL。
+// v1.32.22 是第三条组合，逐条钉住：
+//
+//   - `busy_timeout=5000` 由 golib 显式注入（它必须排在所有 PRAGMA 之前，否则并发写会直接
+//     退化成 SQLITE_BUSY）；
+//   - `foreign_keys=1` **不是 golib 注入的**，是 wasm 构建带的 `SQLITE_DEFAULT_FOREIGN_KEYS=1`
+//     ——即 DDL 里的 REFERENCES 从"写了也不生效"变回**真的会咬人**（孤儿行会被拒）；
+//   - `journal_mode` 仍是 SQLite 默认的 `delete`：我们不注入 WAL（要 WAL 得自己往 URL 上
+//     加 `_pragma=journal_mode(WAL)`，只影响那个句柄）。
+func TestOpenConnectionPragmasFollowGolibAndDriver(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "mate.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -120,15 +159,23 @@ func TestOpenConnectionPragmasAreGolibDefaults(t *testing.T) {
 	if err := conn.QueryRowContext(t.Context(), `PRAGMA foreign_keys`).Scan(&fk); err != nil {
 		t.Fatalf("read foreign_keys: %v", err)
 	}
-	if fk != 0 {
-		t.Errorf("foreign_keys=%d，期望 0（golib driver 不注入 foreign_keys；若已改为 1，请连同本文件顶部注释一起更新）", fk)
+	if fk != 1 {
+		t.Errorf("foreign_keys=%d，期望 1（ncruces 的 wasm 构建带 SQLITE_DEFAULT_FOREIGN_KEYS=1；"+
+			"若驱动换了，请连同本文件顶部注释一起更新）", fk)
 	}
 	var timeout int
 	if err := conn.QueryRowContext(t.Context(), `PRAGMA busy_timeout`).Scan(&timeout); err != nil {
 		t.Fatalf("read busy_timeout: %v", err)
 	}
 	if timeout != 5000 {
-		t.Errorf("busy_timeout=%d，期望 mattn 的默认 5000", timeout)
+		t.Errorf("busy_timeout=%d，期望 golib 注入的 5000", timeout)
+	}
+	var journal string
+	if err := conn.QueryRowContext(t.Context(), `PRAGMA journal_mode`).Scan(&journal); err != nil {
+		t.Fatalf("read journal_mode: %v", err)
+	}
+	if !strings.EqualFold(journal, "delete") {
+		t.Errorf("journal_mode=%q，期望 delete（golib 不注入 WAL；若已改成 WAL，请连同本文件顶部注释一起更新）", journal)
 	}
 }
 

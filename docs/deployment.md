@@ -14,7 +14,7 @@
 | 形态 | 命令 | 产物 | 说明 |
 | --- | --- | --- | --- |
 | **桌面应用（主线交付）** | `make desktop/dist` | dmg / Windows 安装器 | 随包运行时，用户机器不需要 Go / Node / 预装底座；**详见 [desktop 设计](./desktop-architecture-design-20260928.md)**，本文不复述 |
-| 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=1 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3）。**`CGO_ENABLED=1` 是必须的**（2026-10-11 决策）：SQLite driver 是 CGO 的，`0` 会编出运行期连不上库的 stub；代价是产物**动态链接** libc/glibc，不再是可塞进 scratch 的静态二进制 |
+| 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3）。**构建不需要 CGO**（2026-10-12 起）：SQLite dialect 随 golib v1.32.22 换成纯 Go 的 `ncruces/go-sqlite3`，`0` 可编可跑、编译不需要 C 工具链（实测 `CC=false` 也编得出）、`GOOS=linux` 交叉编译得到静态产物（`file` 报 `statically linked`，于是下面那条 `FROM scratch` 重新可用），`=1` 则要 C 交叉工具链（实测直接编不过）；代价是体积（golib 实测最小程序 +10.99 MiB）。2026-10-11 前后那版 driver 是 CGO 的，那时的 `0` 会编出运行期连不上库的 stub |
 | 仅后端内核 | `make build` | 无独立产物 | 任何构建都不带资产，`make build` 只编后端；面板要由 `--web-dir` / `MATE_WEB_DIR` 提供，没给即拒启（退出码 3） |
 | 前端产物独立托管 | `make web` | `frontend/apps/web/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
 | 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 并设 `MATE_WEB_DIR` 指过去 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
@@ -798,15 +798,21 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   空运行史返回 `[]` 且 `limit=20`、手动触发打不存在的 agent → **报错且留痕**
   （`runs[0].status=skipped` 带原因）、删除幂等（`deleted:true` → `deleted:false`）。
   **这条冒烟抓到一个真实漂移**：空运行史原先是 `"runs": null`，与前端声明的数组类型不符。
-- 容器时区（M4-7，本机实跑；**记录的是 2026-10-11 之前的静态构建口径**——当天起构建一律
-  `CGO_ENABLED=1`，产物动态链接 glibc，下面这条 `FROM scratch` 的路径**已不可用**，留档只为
-  说明 `time/tzdata` 内嵌是承重的）：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64` 构建后放进
+- 容器时区（M4-7，本机实跑，口径是 `CGO_ENABLED=0` 的**静态**构建）：`CGO_ENABLED=0 GOOS=linux
+  GOARCH=arm64` 构建后放进
   `FROM scratch`（镜像里只有二进制，`docker save | tar -t | grep -c zoneinfo` = **0**）→
   `preview` 与宿主机逐字一致（同上 `09:00 CST`）；**去掉 `import _ "time/tzdata"` 的同一份二进制
   在同一镜像里报 `40001 未知时区 Asia/Shanghai`**——对照证明这个 import 是承重的，而不是装饰。
   内嵌带来的体积增量实测 **+403 KB**（40,291,941 → 40,686,100 字节）。
   注：默认最小镜像 `debian:bookworm-slim` 自带 `/usr/share/zoneinfo`，所以"默认镜像里能跑"并不能
   证明这条；上面的验证特意用了零 zoneinfo 的镜像。
+  **口径沿革（别把这段读成"今天仍逐字如此"）**：2026-10-11 当天起构建一律 `CGO_ENABLED=1`
+  （那时的 SQLite driver 是 CGO 的），产物动态链接 glibc，这条 `FROM scratch` 的路径当天起不可用；
+  2026-10-12 随 golib v1.32.22 换回纯 Go 方言，`CGO_ENABLED=0` 的静态产物**重新成立**（§1 与
+  `AGENTS.md` 已同步）。但上面那组数字**没有在纯 Go 方言下重跑过**，重跑时以实测为准：引擎让二进制
+  明显变大——2026-10-12 实测 `mate` 在 darwin/arm64 下 **55,141,554 字节**、`GOOS=linux GOARCH=amd64`
+  静态构建 **56,963,717 字节**（golib 文档给的最小程序增量是 **+10.99 MiB**）；`time/tzdata` 那
+  **+403 KB** 的增量虽小，但"内嵌 tzdata 是承重的"这个结论与体积无关，不受影响。
 - 最小镜像本体（M4-7 补跑）：`GO_PROXY=https://goproxy.cn,direct make image` 成功产出
   `ark-mate:local`（**142 MB**）；`docker run --tmpfs /data -e MATE_STORE=memory
   -e MATE_TOKEN=... -p 127.0.0.1:10077:10001 ark-mate:local` 起得来且

@@ -164,13 +164,19 @@ function fingerprint(dir) {
   }
 }
 
-/** 桌面态核心：直接重建（Go 侧改动；不拖 make core/desktop 的 pnpm 与 runtime-bin）。 */
+/**
+ * 桌面态核心：直接重建（Go 侧改动；不拖 make core/desktop 的 pnpm 与 runtime-bin）。
+ *
+ * `CGO_ENABLED=0` 与 `make core/desktop` 一致：golib v1.32.22 起 SQLite dialect 是纯 Go 的，
+ * 不需要 C 工具链（2026-10-11 之前那版驱动是 CGO 的，0 会编出运行期连不上库的 stub——
+ * 本脚本当时正是为了避免它才写死 1）。
+ */
 function rebuildCore() {
   const out = join(DESKTOP, 'resources', 'mate-core')
   try {
     execFileSync('go', ['build', '-o', out, './cmd/mate'], {
       cwd: join(REPO, 'backend'),
-      env: { ...process.env, CGO_ENABLED: '1' },
+      env: { ...process.env, CGO_ENABLED: '0' },
       stdio: 'ignore',
     })
     return { ok: existsSync(out) }
