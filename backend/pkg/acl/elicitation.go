@@ -21,8 +21,8 @@ import (
 // requestId 在 SDK 解码时被丢弃，但**变体里的 `_meta` 会被完整保留**。因此归属分两段：
 //  1. 本层先读 `_meta`（sessionId/session_id/sessionId/session_id，
 //     见 scope.go）→ 命中即填 SessionID 并置 ScopeSource=wire（零 fork 可用的 wire 归属）；
-//  2. 未命中才由宿主（manager/orchestrator 按「连接上唯一在途 turn」）注入 SessionID 并置
-//     ScopeSource=inferred_inflight；连接上无唯一在途 turn 时置 ScopeAmbiguous（不再无痕取消）。
+//  2. 未命中才由宿主（manager/orchestrator 按「连接上唯一在途 run」）注入 SessionID 并置
+//     ScopeSource=inferred_inflight；连接上无唯一在途 run 时置 ScopeAmbiguous（不再无痕取消）。
 // 规范顶层 scope 仍需补 SDK（触发式预案见文档 §3.2），届时本层的读取点无需再改。
 
 // ElicitationSchema 是表单字段的 JSON Schema 表示（属性为原始 schema 对象，
@@ -38,9 +38,9 @@ type ElicitationSchema struct {
 const (
 	// ScopeWire：scope 由 wire（SDK 顶层 sessionId/_meta）提供——SDK 支持后启用。
 	ScopeWire = "wire"
-	// ScopeInferred：scope 由宿主按「连接上唯一在途 turn」推断（SDK 未建模时的过渡实现）。
+	// ScopeInferred：scope 由宿主按「连接上唯一在途 run」推断（SDK 未建模时的过渡实现）。
 	ScopeInferred = "inferred_inflight"
-	// ScopeAmbiguous：`_meta` 未给 scope 且连接上无唯一在途 turn（多会话并发在途 / 会话外
+	// ScopeAmbiguous：`_meta` 未给 scope 且连接上无唯一在途 run（多会话并发在途 / 会话外
 	// request-scope）→ 无法归属。宿主仍按取消回应（不能把 agent 挂住），但归属来源标为它并留痕，
 	// 使「为什么这张提问卡没出现」在诊断里可查，而不是无痕消失。
 	ScopeAmbiguous = "ambiguous"

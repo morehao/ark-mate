@@ -57,8 +57,8 @@ func (d *SessionDao) Upsert(ctx context.Context, c *model.SessionEntity) error {
 			// 记录里的值必然相同（与 capability_fingerprint 同一条理由）。
 			"workspace_id":        c.WorkspaceID,
 			"workspace_temporary": model.FlagValue(c.WorkspaceTemporary),
-			"provider":            c.Provider,
-			"model":               c.Model,
+			"provider_id":         c.ProviderID,
+			"model_id":            c.ModelID,
 			"runtime_hint":        c.RuntimeHint,
 			"provider_session_id": c.ProviderSessionID,
 			"title":               c.Title,
@@ -80,7 +80,7 @@ func (d *SessionDao) Upsert(ctx context.Context, c *model.SessionEntity) error {
 // UpsertForImport 是 transcript 导入专用的窄 upsert。
 //
 // 与 Upsert 的差异是**有意的**：冲突时只覆盖导入来源确实携带的列，
-// 不碰 provider / model / runtime_hint / provider_session_id ——
+// 不碰 provider_id / model_id / runtime_hint / provider_session_id ——
 // 这四个是会话级模型选择与底座恢复承载，transcript header 里没有，
 // 若按 Upsert 的全列覆盖语义写入零值，重复导入会把用户已选的模型清空。
 func (d *SessionDao) UpsertForImport(ctx context.Context, c *model.SessionEntity) error {
@@ -133,11 +133,11 @@ func (d *SessionDao) UpdateMeta(ctx context.Context, id string, patch model.Sess
 	if patch.Status != nil {
 		set["status"] = *patch.Status
 	}
-	if patch.Provider != nil {
-		set["provider"] = *patch.Provider
+	if patch.ProviderID != nil {
+		set["provider_id"] = *patch.ProviderID
 	}
-	if patch.Model != nil {
-		set["model"] = *patch.Model
+	if patch.ModelID != nil {
+		set["model_id"] = *patch.ModelID
 	}
 	return d.DB(ctx).Model(&model.SessionEntity{}).Where("id = ?", id).Updates(set).Error
 }

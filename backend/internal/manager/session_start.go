@@ -143,8 +143,8 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 	o.mu.Unlock()
 
 	o.svc.registerSession(&SessionRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
-		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary, Provider: agent.Provider,
-		Model: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
+		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary, ProviderID: agent.Provider,
+		ModelID: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
 		ProviderSessionID: providerSessID, Status: SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
@@ -338,13 +338,13 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 	if as.proj == nil {
 		return as, reason, nil
 	}
-	if rec.Model != "" {
-		if _, err := as.proj.ApplyModel(ctx, runtime.ModelConfig{Model: rec.Model}); err != nil {
+	if rec.ModelID != "" {
+		if _, err := as.proj.ApplyModel(ctx, runtime.ModelConfig{Model: rec.ModelID}); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
-				o.svc.catalog.markRejected(agent.ID, rec.Model, modelApplyReason(err))
+				o.svc.catalog.markRejected(agent.ID, rec.ModelID, modelApplyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
-				"session", rec.ID, "runtime", spec.ID, "model", rec.Model, "err", err)
+				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", err)
 		}
 	} else if len(as.proj.ConfigOptions()) > 0 {
 		o.svc.catalog.put(agent.ID, spec.ID, as.proj.ConfigOptions())

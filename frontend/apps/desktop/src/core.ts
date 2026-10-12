@@ -224,7 +224,7 @@ export async function stopCoreGracefully(
  * 超时/出错时返回 `known:false`：调用方按**有任务**保守处理（设计 §7.4），
  * 因为"以为没在跑"地退出会真的打断一轮对话。
  */
-export async function probeRunningTurns(
+export async function probeRunningRuns(
   handle: CoreHandle | null,
   timeoutMs = 2000,
 ): Promise<{ known: boolean; running: number }> {

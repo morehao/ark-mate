@@ -246,10 +246,10 @@ func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 	gincontext.Success(c, gin.H{"id": id, "input_id": inputID, "deleted": ok})
 }
 
-// Cancel 取消进行中的 turn（幂等）。
+// Cancel 取消进行中的 run（幂等）。
 func (h *sessionCtr) Cancel(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.svc.CancelTurn(c.Request.Context(), id); err != nil {
+	if err := h.svc.CancelRun(c.Request.Context(), id); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}

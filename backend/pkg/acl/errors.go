@@ -12,7 +12,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/redact"
 )
 
-// Class 是可操作错误分类（对齐 codeg feedback.rs / AIR 词汇表，随 turn.error 上抛，前端据此渲染动作）。
+// Class 是可操作错误分类（对齐 codeg feedback.rs / AIR 词汇表，随 run.error 上抛，前端据此渲染动作）。
 type Class string
 
 const (

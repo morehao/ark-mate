@@ -79,7 +79,7 @@ func TestPublishAt(t *testing.T) {
 	// 模拟重启恢复注入 DB 既有事件（seq 1..3，来自旧进程持久化）。
 	one := b.PublishAt(1, "session.message", "s1", 1, map[string]any{"text": "old1"})
 	two := b.PublishAt(2, "session.thought", "s1", 1, map[string]any{"text": "old2"})
-	three := b.PublishAt(3, "turn.ended", "s1", 2, map[string]any{})
+	three := b.PublishAt(3, "run.ended", "s1", 2, map[string]any{})
 	if one.Seq != 1 || two.Seq != 2 || three.Seq != 3 {
 		t.Fatalf("PublishAt 未按显式 seq: %d %d %d", one.Seq, two.Seq, three.Seq)
 	}

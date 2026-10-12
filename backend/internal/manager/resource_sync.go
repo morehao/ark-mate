@@ -346,7 +346,7 @@ func (s *Service) applyCredentialChannel(
 				providers: withKeys,
 				outcome: resource.CredentialOutcome{
 					Channel: resource.ChannelNativeDoc, Status: resource.StatusApplied,
-					Effect: resource.EffectNextTurn, Tested: true,
+					Effect: resource.EffectNextRun, Tested: true,
 					Where: "原生凭据文档（落盘 0600，改密钥下一轮生效）",
 				},
 			}, problems
@@ -370,7 +370,7 @@ func (s *Service) applyCredentialChannel(
 	tested := spec.Credential.Tested
 	effect := resource.EffectNextProcess
 	if tested {
-		effect = resource.EffectNextTurn
+		effect = resource.EffectNextRun
 	}
 	return credentialPlan{
 		outcome: resource.CredentialOutcome{

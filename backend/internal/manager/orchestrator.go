@@ -52,16 +52,16 @@ type ActiveSession struct {
 
 	mu   sync.Mutex
 	busy bool
-	turn *Turn
+	run *Run
 	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureSession 按需重建）
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
 	memo string
 }
 
-// Turn 一轮 prompt 的运行状态。
-type Turn struct {
-	// id 本轮标识（平台侧生成）。用途：§6 排队输入的 target_turn_id 台账（「排在哪一轮后面」），
+// Run 一轮 prompt 的运行状态。
+type Run struct {
+	// id 本轮标识（平台侧生成）。用途：§6 排队输入的 target_run_id 台账（「排在哪一轮后面」），
 	// 以及日志/事件里指认具体某轮——不做投递判据（那一轮必然先结束）。
 	id        string
 	done      chan struct{}
@@ -100,7 +100,7 @@ type Orchestrator struct {
 	byProvider map[string]string
 	reapStop   context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
-	// inflight 记录每连接上正在执行 turn 的会话（inFlightTracker：§17 E1 显式化簿记，
+	// inflight 记录每连接上正在执行 run 的会话（inFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
 	inflight *inFlightTracker
 	// migMu 串行化代际迁移（M3-6）：罕见操作，一把全局锁足够；不设它会两个并发轮次各迁一次。
@@ -112,13 +112,13 @@ type Orchestrator struct {
 	// elic 管理挂起结构化提问（elicitation/create：表单/URL + 超时自动取消）。
 	elic *ElicitationManager
 
-	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：turn 收口时
+	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：run 收口时
 	// 随 runs.usage_json 落库；底座不上报时无条目）。
 	usageMu sync.Mutex
 	usage   map[string]objusage.UsageInfo
 
-	// turnTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetTurnTimeout / MATE_TURN_TIMEOUT）。
-	turnTimeout time.Duration
+	// runTimeout 单轮 prompt 看门狗（0 = 关闭；见 SetRunTimeout / MATE_RUN_TIMEOUT）。
+	runTimeout time.Duration
 
 	// handoffMaxChars bounded handoff memo 字符预算（§5.6/§18 D-3；见 SetHandoffMaxChars /
 	// MATE_HANDOFF_MAX_CHARS）。0 = 关闭 memo 兜底。
@@ -276,8 +276,8 @@ func (o *Orchestrator) SetPermissionTimeout(d time.Duration) { o.perm.SetTimeout
 // SetElicitationTimeout 覆盖挂起结构化提问的自动取消超时（0 → 默认 30min）。
 func (o *Orchestrator) SetElicitationTimeout(d time.Duration) { o.elic.SetTimeout(d) }
 
-// SetTurnTimeout 设置单轮 turn 看门狗超时（0 = 关闭）。见 watchdogTurn。
-func (o *Orchestrator) SetTurnTimeout(d time.Duration) { o.turnTimeout = d }
+// SetRunTimeout 设置单轮 run 看门狗超时（0 = 关闭）。见 watchdogRun。
+func (o *Orchestrator) SetRunTimeout(d time.Duration) { o.runTimeout = d }
 
 // SetHandoffMaxChars 设置 bounded handoff memo 字符预算（0 = 关闭 memo 兜底）。见 ensureSession。
 func (o *Orchestrator) SetHandoffMaxChars(n int) { o.handoffMaxChars = n }

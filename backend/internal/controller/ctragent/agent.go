@@ -108,7 +108,7 @@ func (h *agentCtr) Start(c *gin.Context) {
 	gincontext.Success(c, gin.H{"id": c.Param("id"), "state": "running"})
 }
 
-// Stop 停止 agent runtime 进程（有在途 turn 时返回 agent_busy）。
+// Stop 停止 agent runtime 进程（有在途 run 时返回 agent_busy）。
 func (h *agentCtr) Stop(c *gin.Context) {
 	if err := h.svc.StopAgent(c.Request.Context(), c.Param("id")); err != nil {
 		gincontext.Fail(c, code.FromError(err))

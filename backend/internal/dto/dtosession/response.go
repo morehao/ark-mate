@@ -112,7 +112,7 @@ type SessionPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
-	// Queued/InputID 仅 delivery=after_turn|interrupt_then_prompt 且会话正忙时出现：
+	// Queued/InputID 仅 delivery=after_run|interrupt_then_prompt 且会话正忙时出现：
 	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /sessions/:id/inputs/:input_id 撤下）。
 	Queued  bool   `json:"queued,omitempty"`
 	InputID string `json:"input_id,omitempty"`
@@ -126,9 +126,9 @@ type SessionPromptResp struct {
 type QueuedInputResp struct {
 	ID       string `json:"input_id"`
 	Text     string `json:"text"`
-	Delivery string `json:"delivery"` // after_turn | interrupt_then_prompt
-	// TargetTurnID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
-	TargetTurnID string `json:"target_turn_id,omitempty"`
+	Delivery string `json:"delivery"` // after_run | interrupt_then_prompt
+	// TargetRunID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
+	TargetRunID string `json:"target_run_id,omitempty"`
 	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
 	Generation int64  `json:"generation,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
@@ -210,7 +210,7 @@ type ElicitationResp struct {
 	// v15 之前这里同时发 `session_id` 与 `conversation_id` 两个**同值**的键（一个东西两个
 	// 词），改名后收敛成一个键——两个词各写一遍只会在读的一侧留下一个永远取不到的字段。
 	SessionID string `json:"session_id"`
-	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）
+	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 run 推断）
 	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`

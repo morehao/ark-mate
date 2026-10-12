@@ -63,8 +63,8 @@ func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
 	return out
 }
 
-// TestPromptTurnEnded 正常 end_turn → turn.ended + completed。
-func TestPromptTurnEnded(t *testing.T) {
+// TestPromptRunEnded 正常 end_turn → run.ended + completed。
+func TestPromptRunEnded(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode", sess: &stubSession{stop: "end_turn"}}
 	orch.sessions["s1"] = as
@@ -75,9 +75,9 @@ func TestPromptTurnEnded(t *testing.T) {
 	}
 	evts := feed(bus, "s1", 2)
 	if len(evts) < 2 {
-		t.Fatalf("期望 user+turn.ended，got %d 事件", len(evts))
+		t.Fatalf("期望 user+run.ended，got %d 事件", len(evts))
 	}
-	if evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusTurnEnded {
+	if evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunEnded {
 		t.Fatalf("事件序列不符: %+v", evts)
 	}
 	rec, ok := svc.sessions["s1"]
@@ -86,7 +86,7 @@ func TestPromptTurnEnded(t *testing.T) {
 	}
 }
 
-// TestPromptBusy 忙时第二轮返回 turn_in_progress。
+// TestPromptBusy 忙时第二轮返回 run_in_progress。
 func TestPromptBusy(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
@@ -98,15 +98,15 @@ func TestPromptBusy(t *testing.T) {
 	}
 	_, err := orch.Prompt(context.Background(), "s1", "second")
 	var ae *acl.Error
-	if !errors.As(err, &ae) || ae.Code != "turn_in_progress" {
-		t.Fatalf("期望 turn_in_progress，got %v", err)
+	if !errors.As(err, &ae) || ae.Code != "run_in_progress" {
+		t.Fatalf("期望 run_in_progress，got %v", err)
 	}
-	// 结束第一个 turn（cancel 它）以免泄漏 goroutine
-	_ = orch.CancelTurn(context.Background(), "s1")
+	// 结束第一个 run（cancel 它）以免泄漏 goroutine
+	_ = orch.CancelRun(context.Background(), "s1")
 }
 
-// TestCancelTurn 取消 → run.cancelled + cancelled 状态。
-func TestCancelTurn(t *testing.T) {
+// TestCancelRun 取消 → run.cancelled + cancelled 状态。
+func TestCancelRun(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
 	orch.sessions["s1"] = as
@@ -115,8 +115,8 @@ func TestCancelTurn(t *testing.T) {
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
-		t.Fatalf("CancelTurn: %v", err)
+	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
 	}
 	evts := feed(bus, "s1", 2)
 	if evts[len(evts)-1].Type != BusRunCancelled {
@@ -135,8 +135,8 @@ func TestServiceRESTErrors(t *testing.T) {
 	if !errors.As(err, &ge) || ge.Code != 40401 {
 		t.Fatalf("期望 40401，got %v", err)
 	}
-	if err := svc.CancelTurn(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "40401") {
-		t.Fatalf("CancelTurn 期望 40401 错误，got %v", err)
+	if err := svc.CancelRun(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "40401") {
+		t.Fatalf("CancelRun 期望 40401 错误，got %v", err)
 	}
 }
 
@@ -164,9 +164,9 @@ func (s *stuckCancel) Cancel(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// TestCancelTurnAgentUnresponsive agent 无响应时 CancelTurn 有界返回并本地解除：
+// TestCancelRunAgentUnresponsive agent 无响应时 CancelRun 有界返回并本地解除：
 // 不依赖 session/cancel RPC，Prompt 总是被 ctx 取消打断 → run.cancelled。
-func TestCancelTurnAgentUnresponsive(t *testing.T) {
+func TestCancelRunAgentUnresponsive(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	as := &ActiveSession{
 		ID: "s1", AgentID: "a", Runtime: "r",
@@ -179,11 +179,11 @@ func TestCancelTurnAgentUnresponsive(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	start := time.Now()
-	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
-		t.Fatalf("CancelTurn: %v", err)
+	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
 	}
 	if el := time.Since(start); el > agentCancelTimeout+2*time.Second {
-		t.Fatalf("CancelTurn 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
+		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
 	}
 	evts := feed(bus, "s1", 2)
 	if len(evts) < 2 || evts[len(evts)-1].Type != BusRunCancelled {
@@ -239,7 +239,7 @@ func TestBusyAttributionHelpers(t *testing.T) {
 }
 
 // TestBusyAttributionLifecycle Prompt 到收尾的登记/撤销生命周期：
-// turn 进行中能唯一归属会话，取消收尾后归属清除。
+// run 进行中能唯一归属会话，取消收尾后归属清除。
 func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	c1 := &acl.Client{}
@@ -254,16 +254,16 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 		t.Fatalf("Prompt: %v", err)
 	}
 	if got := orch.busySessionForClient(c1); got != "s1" {
-		t.Fatalf("turn 进行中应归属 s1: %q", got)
+		t.Fatalf("run 进行中应归属 s1: %q", got)
 	}
-	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
-		t.Fatalf("CancelTurn: %v", err)
+	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
 	}
-	// runTurn 收尾后在途登记应清空（轮询等待，2s 防御）
+	// executeRun 收尾后在途登记应清空（轮询等待，2s 防御）
 	deadline := time.Now().Add(2 * time.Second)
 	for orch.busySessionForClient(c1) != "" {
 		if time.Now().After(deadline) {
-			t.Fatal("turn 收尾后在途登记未清除")
+			t.Fatal("run 收尾后在途登记未清除")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

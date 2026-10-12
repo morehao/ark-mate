@@ -55,7 +55,7 @@ const SkillFormat = "SKILL.md+frontmatter"
 // Notes 约束说明（给 README/文档位，暂不外露 REST）。
 //  1. 无鉴权：authenticate 立即成功（authMethods 为空）。
 //  2. 会话持久化：session/new 即持久；disconnect/close 走同一 quiescent teardown，
-//     结束后仍可 list/resume（「断连即失效」不成立；断连时进行中的 turn 被取消）。
+//     结束后仍可 list/resume（「断连即失效」不成立；断连时进行中的 run 被取消）。
 //  3. 不支持：session/load、fork/delete、additional directories、终端、客户端 FS、SSE/传输级 MCP。
 //  4. 需绝对路径 cwd 且先校验；provider/model 在 profile 行配置（默认 deepseek-official/deepseek-v4-flash），
 //     DEEPSEEK_API_KEY 由 provider 从其进程环境读取（无需额外注入，可随子进程环境透传）。

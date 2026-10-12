@@ -50,7 +50,7 @@ func (d *MetaDao) Set(ctx context.Context, key, value string) error {
 // IncrSeq 在事务内把全局事件序号 +1 并返回新值（events.seq 的唯一分配源）。
 //
 // 必须是事务（调用方持有 tx 并已用 WithTx 绑定）：本仓是单写者模型，
-// 序号分配与事件插入必须原子，否则并发 turn 会拿到重号。
+// 序号分配与事件插入必须原子，否则并发 run 会拿到重号。
 func (d *MetaDao) IncrSeq(ctx context.Context) (int64, error) {
 	cur, ok, err := d.Get(ctx, model.MetaKeyEventsLastSeq)
 	if err != nil {

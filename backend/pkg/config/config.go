@@ -63,9 +63,9 @@ type Config struct {
 	// 代际按能力指纹内容寻址，指纹不同 = 能力集不同 = 各自一个进程；上限是"猜粗了只是多花内存"
 	// 这一侧的护栏：超限**带码拒绝新建**，绝不静默复用错的能力集（那才是安全 bug）。
 	GenerationLimit int
-	// TurnTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
+	// RunTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
 	// 只记自己日志不上报）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
-	TurnTimeout time.Duration
+	RunTimeout time.Duration
 	// PermissionTimeout 挂起权限请求自动拒绝超时（默认 30min，对齐 AionUi F-PERM-01）。
 	PermissionTimeout time.Duration
 	// ElicitationTimeout 挂起结构化提问自动取消超时（默认 30min，对齐 AionUi）。
@@ -308,7 +308,7 @@ var knownKeys = map[string]string{
 	"projection_dirs":     "MATE_PROJECTION_DIRS",
 	"idle_timeout":        "MATE_IDLE_TIMEOUT",
 	"reap_interval":       "MATE_REAP_INTERVAL",
-	"turn_timeout":        "MATE_TURN_TIMEOUT",
+	"run_timeout":        "MATE_RUN_TIMEOUT",
 	"handoff_max_chars":   "MATE_HANDOFF_MAX_CHARS",
 	"generation_limit":    "MATE_GENERATION_LIMIT",
 	"permission_timeout":  "MATE_PERMISSION_TIMEOUT",
@@ -349,6 +349,11 @@ var renamedKeys = map[string]string{
 	"skills_materialize_dirs": "已改名为 MATE_PROJECTION_DIRS，等价写法 `projection_dirs=opencode:skill=/x`" +
 		"（原 `skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`；键多了 `:kind` 一段，" +
 		"目前 kind 只有 skill）",
+	// v16（2026-10-11）词汇统一：平台聚合的"一轮"只有一个词 `run`（`turn` 只留在**底座原文**里，
+	// 例如 ACP 的 `StopReasonEndTurn` 与 `"end_turn"`）。旧键必须被认出来——静默忽略的代价是
+	// "看门狗不生效"：挂死的会话照旧永久占用 busy，而 `mate config` 的输出里一切正常。
+	"turn_timeout": "已改名为 MATE_RUN_TIMEOUT：键 `turn_timeout` → `run_timeout`（平台侧一轮统一叫 run，" +
+		"turn 只保留在底座原文里：`StopReasonEndTurn` / `\"end_turn\"`）",
 }
 
 // checkRenamedKey 在「未知键报错」之前拦一层，把已改名/已移除的键翻译成可操作的文案。
@@ -365,6 +370,7 @@ func checkRenamedKey(key string) string {
 var renamedEnvNames = map[string]string{
 	"MATE_SKILLS_MATERIALIZE_DIR":  "skills_materialize_dir",
 	"MATE_SKILLS_MATERIALIZE_DIRS": "skills_materialize_dirs",
+	"MATE_TURN_TIMEOUT":            "turn_timeout",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -655,7 +661,7 @@ func materialize(r *resolver) (Config, error) {
 	}{
 		{"idle_timeout", &c.IdleTimeout},
 		{"reap_interval", &c.ReapInterval},
-		{"turn_timeout", &c.TurnTimeout},
+		{"run_timeout", &c.RunTimeout},
 		{"permission_timeout", &c.PermissionTimeout},
 		{"elicitation_timeout", &c.ElicitationTimeout},
 		{"reap_grace", &c.ReapGrace},

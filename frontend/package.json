@@ -12,7 +12,7 @@
     "build:watch": "pnpm --filter @ark-mate/web build:watch",
     "typecheck": "pnpm -r --filter './packages/*' --filter '!./packages/tsconfig' --filter './apps/*' exec tsc --noEmit -p tsconfig.json",
     "smoke:e2e": "node scripts/smoke-e2e.mjs",
-    "smoke:e2e:live": "node scripts/e2e-live-turn.mjs",
+    "smoke:e2e:live": "node scripts/e2e-live-run.mjs",
     "test:contract": "node --test \"packages/desktop-contract/tests/**/*.test.ts\"",
     "ui:accept": "node scripts/web-ui-acceptance.mjs",
     "ui:accept:desktop": "node scripts/desktop-ui-acceptance.mjs",

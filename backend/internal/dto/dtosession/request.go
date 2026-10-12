@@ -17,8 +17,8 @@ type SessionPatch struct {
 // PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。
 type PromptReq struct {
 	Prompt string `json:"prompt" binding:"required"`
-	// Delivery 投递模式（可选）：空/reject = 忙时报 turn_in_progress（历史行为）；
-	// after_turn = 排队，当前轮结束后自动投递；interrupt_then_prompt = 取消当前轮随后投递。
+	// Delivery 投递模式（可选）：空/reject = 忙时报 run_in_progress（历史行为）；
+	// after_run = 排队，当前轮结束后自动投递；interrupt_then_prompt = 取消当前轮随后投递。
 	// 非法值显式报 invalid_delivery（不静默回落：投递语义是用户意图，猜错等于丢输入）。
 	Delivery string `json:"delivery,omitempty"`
 }

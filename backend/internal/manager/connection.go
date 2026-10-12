@@ -162,7 +162,7 @@ func (o *Orchestrator) connOfClient(client *acl.Client) *runtimeConn {
 // admitGeneration 代际上限准入：在**拨号之前**判定"能不能再起一个代际"。
 //
 // 语义（风险表第 12 行）：上限是"猜粗了只是多花内存"这一侧的护栏，所以达到上限时**两步走**——
-//  1. 先显式淘汰「无在途 turn 且无任何会话引用」的代际（= 计划里的"显式淘汰空闲代际"，
+//  1. 先显式淘汰「无在途 run 且无任何会话引用」的代际（= 计划里的"显式淘汰空闲代际"，
 //     不等空闲阈值：那些进程此刻已经没有任何人在用，收掉它们不损失任何东西）；
 //  2. 淘汰后仍达上限 → **带码拒绝**（40901 `generation_limit_reached`），并在文案里给出出路
 //     （复用现有能力集 / 等空闲代际回收 / 调大 MATE_GENERATION_LIMIT）。
@@ -212,7 +212,7 @@ func shortGenerationKeys(keys []string) []string {
 	return out
 }
 
-// reclaimUnreferenced 回收该基础键下「无在途 turn 且无任何会话引用」的代际（`onlyBase` 空 = 全部），
+// reclaimUnreferenced 回收该基础键下「无在途 run 且无任何会话引用」的代际（`onlyBase` 空 = 全部），
 // **不等空闲阈值**——判据是"此刻没有任何人在用"，不是"闲了多久"。用于代际上限准入时腾位置。
 //
 // 与 reapIdleOnce 的分工：那个是**周期性**的暖进程回收（判据含 idle 阈值，服务于"StartAgent
@@ -234,7 +234,7 @@ func (o *Orchestrator) reclaimGeneration(target *runtimeConn) bool {
 	return o.reclaimConns(func(rc *runtimeConn) bool { return rc == target }) > 0
 }
 
-// reclaimConns 回收满足 pick 且「无在途 turn + 无任何会话引用」的连接。
+// reclaimConns 回收满足 pick 且「无在途 run + 无任何会话引用」的连接。
 func (o *Orchestrator) reclaimConns(pick func(*runtimeConn) bool) int {
 	o.mu.Lock()
 	var victims []*runtimeConn
@@ -243,8 +243,8 @@ func (o *Orchestrator) reclaimConns(pick func(*runtimeConn) bool) int {
 			continue
 		}
 		if o.inflight.Len(rc.client) > 0 {
-			// 有在途 turn：绝不打断。（挂起权限/提问不必另判：它们只在某一轮的执行期间存在，
-			// 而那一轮的角色就是"在途 turn"——`RegisterAndWait` 由该轮的 RPC 派发调用。）
+			// 有在途 run：绝不打断。（挂起权限/提问不必另判：它们只在某一轮的执行期间存在，
+			// 而那一轮的角色就是"在途 run"——`RegisterAndWait` 由该轮的 RPC 派发调用。）
 			continue
 		}
 		hasSession := false
@@ -343,7 +343,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		}
 		sid, source, note := o.resolveElicitationScope(cli, req)
 		if sid == "" {
-			// 既无 `_meta` scope 也无唯一在途 turn（空闲 / 会话外 request-scope / 多会话并发）、
+			// 既无 `_meta` scope 也无唯一在途 run（空闲 / 会话外 request-scope / 多会话并发）、
 			// 或 `_meta` 给了一个**查不到平台会话**的底座 id（D-4）→ 不猜。
 			// 仍按取消回应（不能把 agent 挂死），但置 ScopeAmbiguous 并留痕（agent 诊断 + 日志），
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
@@ -355,7 +355,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		return o.requestElicitation(ctx, req)
 	}
 	// elicitation/complete（URL 模式收尾通知）：agent 告知提问已在 agent 侧完成 → 宿主按 ACP 侧
-	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 turn」校验（可判定时）；不可判定时不阻断
+	// elicitationId 收敛挂起项。归属用「同连接的唯一在途 run」校验（可判定时）；不可判定时不阻断
 	// ——该 id 由 agent 生成、不可猜，且 complete 只是收敛通知（重复/迟到都不该有副作用）。
 	completeElic := func(_ context.Context, elicitationID string) {
 		o.elic.CompleteByURLID(o.busySessionForClient(cli), elicitationID)
@@ -460,7 +460,7 @@ func (o *Orchestrator) unregisterSessionProvider(sessionID string) {
 // ensureSession → agent_not_found（并带上「同 id 重建 / 导出历史」的出路），而不是让它在
 // 半死连接上一直跑到进程重启。
 //
-// 有在途 turn 时整体拒绝（agent_busy，先 cancel/等收尾）：不删到一半的轮次，此时不动任何登记。
+// 有在途 run 时整体拒绝（agent_busy，先 cancel/等收尾）：不删到一半的轮次，此时不动任何登记。
 // 返回被摘除的会话数；底层 ACP 会话不在此关闭（连接可能被同 runtime 的其他 agent 复用，
 // 会话生命周期归底座自身与空闲回收）。
 func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
@@ -481,11 +481,11 @@ func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
 	// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
 	for _, as := range victims {
 		as.mu.Lock()
-		busy := as.busy || as.turn != nil
+		busy := as.busy || as.run != nil
 		as.mu.Unlock()
 		if busy {
 			return 0, acl.NewError(acl.ClassLimit, "agent_busy",
-				fmt.Sprintf("agent %q 的会话 %q 有在途 turn，先取消/等待收尾再删除", agentID, as.ID), nil)
+				fmt.Sprintf("agent %q 的会话 %q 有在途 run，先取消/等待收尾再删除", agentID, as.ID), nil)
 		}
 	}
 	o.mu.Lock()
@@ -522,7 +522,7 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	if ownerBefore {
 		delete(o.conns, rc.key)
 	}
-	o.inflight.Clear(rc.client) // 连接断开：在途登记一并作废（runTurn 的 unmark 对已清键为 no-op）
+	o.inflight.Clear(rc.client) // 连接断开：在途登记一并作废（executeRun 的 unmark 对已清键为 no-op）
 	var victims []*ActiveSession
 	for _, as := range o.sessions {
 		if as.client == rc.client {
@@ -551,10 +551,10 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 // disconnectSession 把某断连连接上的会话句柄作废并摘出活跃集合。
 //
 // 本函数是「连接生命周期」写会话状态的**唯一入口**，因此必须区分拆除原因——把停机当成故障，
-// 会让上一轮已 completed 的会话在每次重启后被改写成 failed（并往历史里追加假的 turn.error）：
+// 会让上一轮已 completed 的会话在每次重启后被改写成 failed（并往历史里追加假的 run.error）：
 //
-//   - 在途 turn：主动拆除（daemon 停机 / 显式停 agent）→ 收尾归 interrupted（无终态、可续聊
-//     重发，与崩溃恢复同义，不发错误事件）；意外断开 → 解除阻塞，由 runTurn 按错误收尾。
+//   - 在途 run：主动拆除（daemon 停机 / 显式停 agent）→ 收尾归 interrupted（无终态、可续聊
+//     重发，与崩溃恢复同义，不发错误事件）；意外断开 → 解除阻塞，由 executeRun 按错误收尾。
 //   - 空闲会话：**不改写状态**。上一轮的终态是轮次结果的事实，连接掉了并不改变它；意外断开
 //     只落 agent 级诊断（last_error + stderr 尾巴）与日志，不伪造会话失败。
 //
@@ -567,7 +567,7 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 		return
 	}
 	as.dead = true
-	t := as.turn
+	t := as.run
 	if t != nil && intentional {
 		t.intentional = true // 主动拆除：收尾归 interrupted，不按失败/用户取消处理
 	}
@@ -636,7 +636,7 @@ func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {
 }
 
 // stopAgent 停止某 agent 对应 runtime 的进程（P2 启停）：
-// 无连接 → 幂等置 stopped；有在途 turn → agent_busy 拒绝（先 cancel/等收尾）；
+// 无连接 → 幂等置 stopped；有在途 run → agent_busy 拒绝（先 cancel/等收尾）；
 // 空闲 → 关连接（显式停机：会话句柄作废但状态如实保留；下次会话自动按需重拨）。
 func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
 	base := o.baseKeyFor(agent, spec)
@@ -660,7 +660,7 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 		return nil
 	}
 	// 该配置下**所有代际**都要关（代际是按能力指纹内容寻址的，同一 agent 的旧代际可能仍活着）；
-	// 任一代际上有在途 turn 就整体拒绝——显式停机不该把跑着的一轮打断，也不该"关一半留一半"。
+	// 任一代际上有在途 run 就整体拒绝——显式停机不该把跑着的一轮打断，也不该"关一半留一半"。
 	o.mu.Lock()
 	rcs := make([]*runtimeConn, 0, len(keys))
 	busy := 0
@@ -679,7 +679,7 @@ func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runt
 	}
 	if busy > 0 {
 		return acl.NewError(acl.ClassLimit, "agent_busy",
-			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 turn，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
+			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 run，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
 	}
 	for _, rc := range rcs {
 		// 用户显式停 agent：先置原因再关（watchConn→dropConn 据此判定，不把会话写成失败态）。
@@ -728,7 +728,7 @@ func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicte
 	for _, as := range victims {
 		// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
 		as.mu.Lock()
-		busy := as.busy || as.turn != nil
+		busy := as.busy || as.run != nil
 		as.mu.Unlock()
 		if busy || o.perm.pendingCount(as.ID) > 0 || o.elic.pendingCount(as.ID) > 0 {
 			deferred++

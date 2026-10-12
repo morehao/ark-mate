@@ -203,7 +203,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 	waitConnCount(t, r, 0)
 }
 
-// TestStopAgentBusyRejectsAcrossGenerations 任一代际上有在途 turn → 整体拒绝
+// TestStopAgentBusyRejectsAcrossGenerations 任一代际上有在途 run → 整体拒绝
 // （显式停机不该把跑着的一轮打断，也不该"关一半留一半"）。
 func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
 	r := acpRig(t)
@@ -223,7 +223,7 @@ func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
 
 	err = r.Svc.StopAgent(ctx, "a1")
 	if err == nil {
-		t.Fatal("有在途 turn 时应拒绝停机")
+		t.Fatal("有在途 run 时应拒绝停机")
 	}
 	if !strings.Contains(err.Error(), "在途") {
 		t.Fatalf("错误文案应说明原因: %v", err)

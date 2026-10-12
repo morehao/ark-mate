@@ -34,8 +34,8 @@ export const Ev = {
   Commands: 'session.commands',
   // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   Runtime: 'session.runtime',
-  TurnEnded: 'turn.ended',
-  TurnError: 'turn.error',
+  RunEnded: 'run.ended',
+  RunError: 'run.error',
   RunCancelled: 'run.cancelled',
   // 一次 automation 触发的结果（含没产生会话的那些：duplicate/overlap/skipped）。
   // payload = {automation_id, trigger, scheduled_for, status, reason?, session_id?}。
@@ -68,10 +68,10 @@ export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | '
 export interface QueuedInput {
   inputId: string
   text: string
-  /** after_turn | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
+  /** after_run | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
   delivery: string
   /** 入队时正在执行的那一轮（审计用；服务端投递判据是 generation）。 */
-  targetTurnId?: string
+  targetRunId?: string
   /** 入队时会话执行代际：服务端投递前比对，不等即作废（旧队项绝不灌进重建后的上下文）。 */
   generation?: number
   seq?: number

@@ -203,7 +203,7 @@ func scanAgentDir(dir string, out io.Writer) ([]store.DefinitionImportItem, Agen
 			warnFile(out, "agent", path, err)
 			continue
 		}
-		items = append(items, store.DefinitionImportItem{Kind: model.CapabilityKindAgent, ID: id, Body: body})
+		items = append(items, store.DefinitionImportItem{Kind: model.DefinitionKindAgent, ID: id, Body: body})
 		stats.Agents++
 	}
 	stats.Marker = fingerprintFiles(kept)

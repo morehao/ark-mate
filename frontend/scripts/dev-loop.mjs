@@ -95,27 +95,17 @@ function resolveRuntimeHit() {
   const base = { name: RUNTIME, bundled }
 
   if (RUNTIME_BIN === '') {
-    return { ...base, source: 'path', version: 'unknown', digest: 'unknown', inert: false, origin: 'PATH 上解析' }
+    return { ...base, source: 'path', version: 'unknown', digest: 'unknown', origin: 'PATH 上解析' }
   }
 
-  // 覆盖是否**真的会生效**：转发 shim 的名字写死是 `opencode`（Makefile 的 dev/opencode-bin），
-  // 所以本构建固定的是别的 runtime 时，这个覆盖只是让 PATH 上多了一个没人调用的文件。
+  // 覆盖**一定会生效**（2026-10-12 起）：转发 shim 按**构建期固定的 runtime** 命名（Makefile 的
+  // dev/runtime-bin 生成 `<DEV_BIN_DIR>/$(RUNTIME)`），而核心正是按那个写死的名字走 PATH 解析，
+  // 所以这里不再存在"填了但没人调用"那一态。
   //
-  // 不生效时**如实报成 `path`**（而不是那份被忽略的覆盖）：`/meta.payloads[]` 是机器读的事实面，
-  // 报 `runtime-env` 就等于把"我覆盖过了"写进诊断面，而核心实际拉的是 PATH 上那份——正是本项要消灭的
-  // 那类"回显骗人"。人的那一半由 `inert` 在横幅里单独说清。
+  // 此前 shim 名写死 `opencode`，固定 `dsh` 的构建上这个覆盖是个**死文件**，于是这里得绕开来报
+  // （报成 `path` + 横幅补一句"不会生效"）——那套分流（`inert`）随根因修复整体删除。现在
+  // `/meta.payloads[]` 报 `runtime-env` **就是**核心实际拉的那份，不存在"回显骗人"。
   const sourceTxt = RUNTIME_BIN_SOURCE === '' ? '显式覆盖' : `显式覆盖 [${RUNTIME_BIN_SOURCE}]`
-  const effective = RUNTIME === 'opencode'
-  if (!effective) {
-    return {
-      ...base,
-      source: 'path',
-      version: 'unknown',
-      digest: 'unknown',
-      inert: true,
-      origin: `${RUNTIME_BIN} [${sourceTxt}]`,
-    }
-  }
 
   // 路径落在随包载荷里 → 版本是**可证明的**（读那份清单，不猜、不执行）
   const abs = resolve(RUNTIME_BIN)
@@ -128,7 +118,6 @@ function resolveRuntimeHit() {
         source: 'runtime-env',
         version: m?.version ?? v,
         digest: m?.digest ?? 'unknown',
-        inert: false,
         origin: `${RUNTIME_BIN} [${sourceTxt}]`,
       }
     }
@@ -156,6 +145,23 @@ function bundledPayloadVersions(name) {
     .sort()
 }
 
+/**
+ * 随包载荷里**可直接当 `OPENCODE_BIN` 用**的那个入口（`<版本>` 位置让调用方按实际目录填）。
+ *
+ * 两个底座的入口形态不同，所以这里不是同一个模板：
+ *   - opencode 是**平台化二进制**（`bin/opencode`）；
+ *   - dsh 载荷里**没有**平台化二进制，入口是 npm 包的 `lib/bin.js`——它可执行、带 shebang
+ *     （`#!/usr/bin/env node`），所以能直接 exec。入口名**从清单读**（`payload.json` 的 `entry`），
+ *     不写死包路径：写死会在包改名那天悄悄给出一条走不通的路。
+ */
+function packagedBinHint(hit) {
+  const base = `frontend/apps/desktop/resources/payloads/${hit.name}/<版本>`
+  if (hit.name === 'opencode') return `${base}/bin/opencode`
+  const v = hit.bundled[hit.bundled.length - 1]
+  const entry = v ? readPayloadManifest(join(PAYLOADS_ROOT, hit.name, v))?.entry : null
+  return entry ? `${base}/${entry}` : `${base}/<入口见该版本 payload.json 的 entry>`
+}
+
 /** 把命中事实打成横幅（含「与随包是否同代」），返回同一份值的 `--payloads` 形状。 */
 function reportRuntimeHit(hit) {
   if (hit === null) return null
@@ -166,18 +172,13 @@ function reportRuntimeHit(hit) {
   log(`   命中  ${hit.origin}；版本 ${hit.version}`)
   log(`         ${bundledTxt}`)
 
-  if (hit.inert) {
-    log('   ⚠️  上面那个覆盖**不会生效**：转发 shim 只叫 `opencode`，而本构建固定的是 ' +
-      `${hit.name}——核心照旧拉 PATH 上的 ${hit.name}。`)
-  }
   if (hit.source === 'path') {
     log('   ℹ️  跑的是 **PATH 上本机安装的那份**，与随包是否同代**无从判定**——本仓刻意不探测' +
       '（底座连 `--version` 都写自己的 home）。')
-    // 这个提示只对 opencode 成立（`OPENCODE_BIN` 的转发 shim 名字写死是它）；dsh 今天**没有**等价的
-    // 显式覆盖口——如实说，别给一条走不通的路（那比不提示更糟，见 P4 记录）。
-    log('       要跑随包那一代：' + (hit.name === 'opencode'
-      ? `OPENCODE_BIN=frontend/apps/desktop/resources/payloads/${hit.name}/<版本>/bin/opencode`
-      : '`dsh` 今天没有等价的覆盖口（核心按写死的名字走 PATH）'))
+    // 两个底座现在都有**可用的**显式覆盖口（转发 shim 名随构建期 runtime，见 Makefile 的
+    // dev/runtime-bin）：opencode 是平台化二进制，dsh 是载荷里带 shebang 的包入口。
+    // 给具体路径，不给一句口号——指一条走不通的路比不提示更糟（P4 记录）。
+    log(`       要跑随包那一代：OPENCODE_BIN=${packagedBinHint(hit)}`)
   } else if (hit.version === 'external') {
     log('   ℹ️  显式指定的是**仓库外**那份：版本无从判定（不探测），与随包是否同代同样无从判定。')
   } else if (hit.bundled.length > 1) {

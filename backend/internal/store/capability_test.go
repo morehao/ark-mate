@@ -39,11 +39,11 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 	if ok, err := s.UpsertSkillDefinition(ctx, "s1", `{"name":"dup"}`, 0, "rest"); err != nil || ok {
 		t.Fatalf("重复新建应不命中: ok=%v err=%v", ok, err)
 	}
-	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "s1")
+	revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "s1")
 	if err != nil || len(revs) != 1 {
 		t.Fatalf("重复新建不应产生审计: n=%d err=%v", len(revs), err)
 	}
-	if revs[0].Action != model.CapabilityActionCreate || revs[0].Actor != "rest" {
+	if revs[0].Action != model.DefinitionActionCreate || revs[0].Actor != "rest" {
 		t.Fatalf("新建审计的 action/actor 不符: %+v", revs[0])
 	}
 	if want := digestOf(`{"name":"one"}`); revs[0].Digest != want {
@@ -58,7 +58,7 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 	if got.Revision != 1 || got.Body != `{"name":"one"}` {
 		t.Fatalf("CAS 未中却改到了行: rev=%d body=%q", got.Revision, got.Body)
 	}
-	if revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "s1"); len(revs) != 1 {
+	if revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "s1"); len(revs) != 1 {
 		t.Fatalf("CAS 未中却追了审计: n=%d", len(revs))
 	}
 
@@ -70,8 +70,8 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 	if got.Revision != 2 || got.Body != `{"name":"two"}` {
 		t.Fatalf("命中后形态不符: rev=%d body=%q", got.Revision, got.Body)
 	}
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "s1")
-	if len(revs) != 2 || revs[1].Action != model.CapabilityActionUpdate {
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "s1")
+	if len(revs) != 2 || revs[1].Action != model.DefinitionActionUpdate {
 		t.Fatalf("命中后审计应为 create+update: %+v", revs)
 	}
 	// 提升列守卫：revision 必须等于"非删除审计"的条数，updated_at 必须逐纳秒等于最后一条审计的 at。
@@ -97,8 +97,8 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 		t.Fatal("删除后仍读得到行")
 	}
 	// 审计必须在能力被删除后**仍然存在**（这正是不加外键的理由）。
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "s1")
-	if len(revs) != 3 || revs[2].Action != model.CapabilityActionDelete {
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "s1")
+	if len(revs) != 3 || revs[2].Action != model.DefinitionActionDelete {
 		t.Fatalf("删除后审计应留 3 条且末条为 delete: %+v", revs)
 	}
 	// 删除没有"提交后的 body"，digest 落空串（不是上一个版本的摘要——那会骗人）。
@@ -114,14 +114,14 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 	if !found || mcp.Revision != 1 {
 		t.Fatalf("mcp 定义形态不符: found=%v rev=%d", found, mcp.Revision)
 	}
-	if revs, _ := s.ListCapabilityRevisions(ctx, model.CapabilityKindMcp, "s1"); len(revs) != 1 {
+	if revs, _ := s.ListDefinitionRevisions(ctx, model.DefinitionKindMcp, "s1"); len(revs) != 1 {
 		t.Fatalf("mcp 的审计应按 kind 隔离: n=%d", len(revs))
 	}
 
 	// —— seq 单调不复用：删掉定义后再建，序号必须**严格更大**（AUTOINCREMENT 语义）——
-	seqBefore, err := s.MaxCapabilityRevisionSeq(ctx)
+	seqBefore, err := s.MaxDefinitionRevisionSeq(ctx)
 	if err != nil {
-		t.Fatalf("MaxCapabilityRevisionSeq: %v", err)
+		t.Fatalf("MaxDefinitionRevisionSeq: %v", err)
 	}
 	if seqBefore != 4 {
 		t.Fatalf("此时应为 4 条审计（create/update/delete/mcp-create），got %d", seqBefore)
@@ -132,7 +132,7 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 	if ok, _ := s.UpsertSkillDefinition(ctx, "s2", `{"name":"three"}`, 0, "cli"); !ok {
 		t.Fatal("删除后新建应命中")
 	}
-	seqAfter, _ := s.MaxCapabilityRevisionSeq(ctx)
+	seqAfter, _ := s.MaxDefinitionRevisionSeq(ctx)
 	if seqAfter != 6 {
 		t.Fatalf("序号不得复用：应为 6，got %d", seqAfter)
 	}
@@ -149,8 +149,8 @@ func TestCapabilityDefinitionCAS(t *testing.T) {
 		t.Fatalf("mcp 已删空，CountMcpServerDefinitions 应为 0，got %d", n)
 	}
 	// 审计是**只追加**的：删掉定义后全量历史仍在。
-	if recent, err := s.RecentCapabilityRevisions(ctx, 0); err != nil || len(recent) != 6 {
-		t.Fatalf("RecentCapabilityRevisions 应 6 条: n=%d err=%v", len(recent), err)
+	if recent, err := s.RecentDefinitionRevisions(ctx, 0); err != nil || len(recent) != 6 {
+		t.Fatalf("RecentDefinitionRevisions 应 6 条: n=%d err=%v", len(recent), err)
 	}
 }
 
@@ -178,7 +178,7 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 	want := map[string][]string{
 		model.TableNameSkill:              {"id", "body", "revision", "updated_at"},
 		model.TableNameMcpServer:          {"id", "body", "revision", "updated_at"},
-		model.TableNameCapabilityRevision: {"seq", "kind", "capability_id", "action", "actor", "at", "digest"},
+		model.TableNameDefinitionRevision: {"seq", "kind", "definition_id", "action", "actor", "at", "digest"},
 		// v13：providers/models 不再是「定义载体」而是「资源表」——平台字段全部成列、
 		// 无 body（ADR-1/ADR-2）。它们的列集合由 `archtest` 的
 		// `TestProviderModelTablesAreColumnsNotCarriers` 按**白名单**钉住（这里只冻住
@@ -216,12 +216,12 @@ func TestCapabilityDefinitionColumnsFrozen(t *testing.T) {
 	}
 }
 
-// TestCapabilityRevisionConcurrentAppend 多 goroutine 同时提交：序号唯一、单调、无空洞。
+// TestDefinitionRevisionConcurrentAppend 多 goroutine 同时提交：序号唯一、单调、无空洞。
 //
 // 本仓的库是 **MaxOpenConns=1**（单写者模型，见 `pkg/dbclient`），因此并发提交在连接池上
 // 被串行化——这正是它的部署形态。要验的不是"SQLite 能并发写"，而是"计数器与插行是同一个
 // 原子动作"：若有人把 seq 改成"先查 MAX 再插"（两步），这里就会看到重复或空洞。
-func TestCapabilityRevisionConcurrentAppend(t *testing.T) {
+func TestDefinitionRevisionConcurrentAppend(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
 
@@ -247,9 +247,9 @@ func TestCapabilityRevisionConcurrentAppend(t *testing.T) {
 		}
 	}
 
-	revs, err := s.RecentCapabilityRevisions(ctx, 0)
+	revs, err := s.RecentDefinitionRevisions(ctx, 0)
 	if err != nil {
-		t.Fatalf("RecentCapabilityRevisions: %v", err)
+		t.Fatalf("RecentDefinitionRevisions: %v", err)
 	}
 	if len(revs) != n {
 		t.Fatalf("应 %d 条审计，got %d", n, len(revs))
@@ -266,7 +266,7 @@ func TestCapabilityRevisionConcurrentAppend(t *testing.T) {
 			t.Fatalf("序号 %d 缺失（应为 1..%d 连续，无空洞）", want, n)
 		}
 	}
-	if max, _ := s.MaxCapabilityRevisionSeq(ctx); max != n {
-		t.Fatalf("MaxCapabilityRevisionSeq 应为 %d，got %d", n, max)
+	if max, _ := s.MaxDefinitionRevisionSeq(ctx); max != n {
+		t.Fatalf("MaxDefinitionRevisionSeq 应为 %d，got %d", n, max)
 	}
 }

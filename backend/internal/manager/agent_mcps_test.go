@@ -149,7 +149,7 @@ func TestAgentMcpsFileCarrier(t *testing.T) {
 	}
 }
 
-// TestAgentMcpsChangeTakesEffectNextTurn P-13 的正面用例：**缺省路径**（未声明能力选择的会话）
+// TestAgentMcpsChangeTakesEffectNextRun P-13 的正面用例：**缺省路径**（未声明能力选择的会话）
 // 在写面改白名单之后，**下一轮**用新的注入集。
 //
 // 三条断言缺一不可（对应"读到的是新的 / 何时生效 / 代价多大"）：
@@ -157,7 +157,7 @@ func TestAgentMcpsFileCarrier(t *testing.T) {
 //  1. 空闲句柄被作废（`session(id) == nil`）——不换这一下，下一轮只会复用旧句柄；
 //  2. 重建后底座真的收到新的 `mcpServers`（管理侧算得再对，下发的若是旧集合就等于没生效）；
 //  3. 缺省路径的指纹**仍是空**、连接数**仍是 1**——生效动作没有偷换代际键（R11），也没有多起进程。
-func TestAgentMcpsChangeTakesEffectNextTurn(t *testing.T) {
+func TestAgentMcpsChangeTakesEffectNextRun(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
 	log := sessionNewLog(t)
@@ -220,7 +220,7 @@ func TestAgentMcpsChangeDefersBusySession(t *testing.T) {
 	r.svc.agents["a1"].Mcps = ptrOf([]string{"fs"})
 	convID, as1 := r.start(t, nil)
 
-	// ① 有在途轮次。`as.busy` 由 runTurn 置位、unmarkBusy 清除；这里直接置位是有意的：
+	// ① 有在途轮次。`as.busy` 由 executeRun 置位、unmarkBusy 清除；这里直接置位是有意的：
 	//    本用例要钉的是"裁决读到 busy 会怎么办"，而不是"busy 怎么被置上"（后者由轮次用例管）。
 	as1.mu.Lock()
 	as1.busy = true

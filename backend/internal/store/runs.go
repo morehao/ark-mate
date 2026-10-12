@@ -7,7 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 )
 
-// ——— runs 表（一轮 prompt 的物化行；turn 收口时由 Service.materializeRun 写入） ———
+// ——— runs 表（一轮 prompt 的物化行；run 收口时由 Service.materializeRun 写入） ———
 
 // CreateRun 插入一条 run（幂等：同 id 已存在返回 nil）。
 func (s *Store) CreateRun(ctx context.Context, r model.RunEntity) error {

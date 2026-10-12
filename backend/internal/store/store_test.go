@@ -73,7 +73,7 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendEvent s2: %v", err)
 	}
-	s1b, err := s.AppendEvent(ctxT(), "s1", "turn.ended", map[string]any{})
+	s1b, err := s.AppendEvent(ctxT(), "s1", "run.ended", map[string]any{})
 	if err != nil {
 		t.Fatalf("AppendEvent s1b: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestImportBatch(t *testing.T) {
 		Events: []model.EventEntity{
 			{Type: "session.user_message", PayloadJSON: `{"text":"hi"}`},
 			{Type: "session.message", PayloadJSON: `{"text":"yo"}`},
-			{Type: "turn.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
+			{Type: "run.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
 		},
 	}
 	marker := "fp:test-dir-1"

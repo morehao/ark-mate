@@ -20,7 +20,7 @@
 # `--web-dir` / `MATE_WEB_DIR` 指过去——桌面壳指包内那份、容器指镜像内那份、`make dev` 指工作区那份。
 # （2026-10-10 起 `//go:embed` 与 `-tags release` 已删除，详见 `.dsh/docs/notes/2026-10-10-embed-removal-notes.md`。）
 
-.PHONY: dev dev/opencode-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/ui-product verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
+.PHONY: dev dev/runtime-bin web server web-assets desktop/dev desktop/accept desktop/payloads desktop/runtime-bin desktop/compliance core/desktop desktop/dist desktop/run desktop/dist-run verify/asset-parity verify/ui-product verify/engines verify/release-json verify/signature verify/hardened-runtime verify/compliance verify/desktop-dod build vet test clean image image/runtimes image/run
 
 FRONTEND_ROOT := frontend
 # 桌面随包核心的落点（apps/desktop/resources/ 已 gitignore；M4-1 的 electron-builder 从这里取）。
@@ -92,12 +92,17 @@ MATE_STORE ?= sqlite
 # 的开发态**服务的就是构建产物**、页面与接口同源，不再有跨源请求，这个登记口随之删除。
 # 机制本身没动：跨源开发 / 自建反代仍用 `MATE_ALLOWED_ORIGINS` 显式登记（README「运行配置要点」）。
 
-# —— 开发态 opencode 底座用哪一份可执行文件（可选；`make dev` / `make server` 认它）——
-# 为什么需要这个入口：核心拉哪个底座是**写死的名字**（pkg/runtime/opencode/opencode.go 的
-# `Command = "opencode"`），由 exec 走 PATH 解析。桌面态由壳把随包载荷注入私有 bin，而
+# —— 开发态底座用哪一份可执行文件（可选；`make dev` / `make server` 认它）——
+# 为什么需要这个入口：核心拉哪个底座是**写死的名字**（`pkg/runtime/<id>` 里的 `Command`，默认
+# `dsh`），由 exec 走 PATH 解析。桌面态由壳把随包载荷注入私有 bin，而
 # `make dev` / `make server` 这两条"核心自己从 PATH 找"的形态只会命中**本机装的那份**。
-# 于是当本机装的是 v1、而仓库的声明与取证以 v2 为准时（2026-10-10 实测：本机 1.18.35 /
+# 于是当本机装的是 v1、而仓库的声明与取证以 v2 为准时（2026-10-10 实测：本机 opencode 1.18.35 /
 # 随包 2.0.26），这个人就成了"只有他的开发循环跑在另一代底座上"。
+#
+# **键名 `OPENCODE_BIN` 是历史名**（2026-08 引入时只有 opencode）：它替换的是**构建期固定的那个
+# 底座**（`$(RUNTIME)`，默认 `dsh`），不限于 opencode。2026-10-12 之前转发 shim 的名字写死是
+# `opencode`，所以在默认（dsh）构建上填了它**根本不生效**——本机 `.env` 当时正是这种状态。
+# 现在 shim 按 `$(RUNTIME)` 命名（`dev/runtime-bin`），填了就在任何构建上生效。
 #
 #   make dev OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
 #
@@ -112,8 +117,8 @@ MATE_STORE ?= sqlite
 # `[命令行]` / `[环境变量]` / `[.env]` / `PATH 上解析 [未指定 OPENCODE_BIN]`。
 #
 # 语义是**显式覆盖、不探测**：都没有 = 完全维持现状（PATH 上那份，行为与今天逐字相同，不做任何
-# `which`/`command -v`）。有值就在**核心子进程**的 PATH 前置一个只含 `opencode` 一个名字的转发
-# 目录（`.cache/dev-bin/`，已 gitignore）——**刻意不复用桌面私有 bin**：那目录里还有
+# `which`/`command -v`）。有值就在**核心子进程**的 PATH 前置一个只含**构建期固定那个 runtime 名**
+# 一个名字的转发目录（`.cache/dev-bin/`，已 gitignore）——**刻意不复用桌面私有 bin**：那目录里还有
 # node/npx/dsh 三个启动器，整段前置会让 vite/pnpm 调到的 `node` 因 MATE_NODE_EXECUTABLE
 # 未设置直接以 127 失败。前端进程不拿这个 PATH。
 # 有值但不可执行 → 当场失败：静默忽略的症状是"以为换成了 v2、其实还在跑 v1"，那正是这里要消灭的。
@@ -125,14 +130,14 @@ MATE_STORE ?= sqlite
 # 里面的引号 / 多行值 / 保留键（PATH 之类）整份交给 make 解析，轻则串味重则让 make 直接语法错；
 # 这里只要 OPENCODE_BIN 一行，其余键归 compose，互不干扰。支持 `KEY=v` / `KEY = v` /
 # `export KEY=v` / 双引号包裹 / 行尾 `# 注释`；**单引号不支持**（会被当成值的一部分，随后在
-# dev/opencode-bin 的存在性校验里带着原样值响亮失败，不静默）。
+# dev/runtime-bin 的存在性校验里带着原样值响亮失败，不静默）。
 ENV_FILE ?= .env
 OPENCODE_BIN_FROM_FILE := $(shell awk 'match($$0, /^[[:space:]]*(export[[:space:]]+)?OPENCODE_BIN[[:space:]]*=/) { v = substr($$0, RLENGTH + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$$/, "", v); if (v ~ /^".*"$$/) { v = substr(v, 2, length(v) - 2) } else { sub(/[[:space:]]+\#.*$$/, "", v); sub(/[[:space:]]+$$/, "", v) }; out = v } END { print out }' $(ENV_FILE) 2>/dev/null)
 OPENCODE_BIN ?= $(OPENCODE_BIN_FROM_FILE)
 DEV_BIN_DIR  := $(CURDIR)/.cache/dev-bin
 # 绝对化：文档里的写法是**仓库根相对**（`OPENCODE_BIN=frontend/apps/...`），而开发循环的 cwd 是
 # `frontend/`——交给它相对路径会让"这个覆盖是不是随包那一份"判错（2026-10-11 实测：报成 external）。
-# 与 `dev/opencode-bin` 里给 shim 写的那条绝对路径同源（同一个 cwd，即 make 被调用的地方）。
+# 与 `dev/runtime-bin` 里给 shim 写的那条绝对路径同源（同一个 cwd，即 make 被调用的地方）。
 OPENCODE_BIN_ABS := $(if $(OPENCODE_BIN),$(abspath $(OPENCODE_BIN)),)
 # 来源的唯一取法：make 的 $(origin)（command line / environment / file / undefined）。
 OPENCODE_BIN_SOURCE := $(if $(OPENCODE_BIN),$(if $(filter command line,$(origin OPENCODE_BIN)),命令行,$(if $(filter environment,$(origin OPENCODE_BIN)),环境变量,$(if $(filter file,$(origin OPENCODE_BIN)),$(ENV_FILE),其它))),未指定)
@@ -145,11 +150,12 @@ DEV_PATH_PREFIX := $(if $(OPENCODE_BIN),$(DEV_BIN_DIR):,)
 # `payload.json`，于是能说出「命中版本 / 随包版本 / 是否同代」，并把同一份事实交给核心的
 # `--payloads`）。这里只留原始事实，供 `make server`（不起开发循环）使用。
 #
-# 那个「未生效」分句挡的是一类**静默 no-op**：转发 shim 的名字写死是 `opencode`，所以
-# 本构建固定的是 `dsh` 时，`OPENCODE_BIN=…` 只是让 PATH 上多了一个没人调用的可执行文件——
-# 核心照旧拉 PATH 上的 dsh。此前这行回显会把那个路径当「底座」报出来，看的人以为换掉了。
+# 那个「未生效」分句已于 2026-10-12 删除（根因已修）：shim 现在按 `$(RUNTIME)` 命名
+# （`dev/runtime-bin`），所以 `OPENCODE_BIN=…` 在**任何**构建上都生效，不再需要警告。
+# 它当时挡的是一类**静默 no-op**：shim 名写死 `opencode`，本构建固定 `dsh` 时那个覆盖只是让
+# PATH 上多了一个没人调用的可执行文件，而回显会把那个路径当「底座」报出来（看的人以为换掉了）。
 define runtime_hit_line
-$(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)]$(if $(filter opencode,$(RUNTIME)),, —— ⚠️ 未生效：本构建固定的是 $(RUNTIME)，转发 shim 只叫 opencode),PATH 上解析 [未指定 OPENCODE_BIN])
+$(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)] —— 转发 $(RUNTIME)（shim 名随构建期 runtime）,PATH 上解析 [未指定 OPENCODE_BIN])
 endef
 
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
@@ -419,20 +425,23 @@ $(WEB_DIR)/index.html:
 
 web-assets: $(WEB_DIR)/index.html
 
-# 开发态 opencode 转发（见上方 OPENCODE_BIN 一节）：校验 + 生成一个**只转发 opencode** 的 shim。
+# 开发态底座转发（见上方 OPENCODE_BIN 一节）：校验 + 生成一个**只转发 $(RUNTIME)** 的 shim。
+#
+# **shim 的名字必须是构建期固定的那个 runtime 名**（`$(RUNTIME)`）——核心拉底座用的是写死的名字
+# 经 `exec` 走 PATH 解析；名字对不上，这个覆盖就是个没人调用的文件（2026-10-12 之前的形态）。
 # 幂等；OPENCODE_BIN 为空时什么都不做（也不清理旧 shim——它不在 PATH 上，留着无害）。
-dev/opencode-bin:
+dev/runtime-bin:
 	@if [ -n "$(OPENCODE_BIN)" ]; then \
 	  if [ ! -f "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不是普通文件：$(OPENCODE_BIN)"; exit 1; fi; \
 	  if [ ! -x "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不可执行：$(OPENCODE_BIN)"; exit 1; fi; \
 	  abs=$$(cd "$$(dirname "$(OPENCODE_BIN)")" && pwd)/$$(basename "$(OPENCODE_BIN)"); \
 	  mkdir -p $(DEV_BIN_DIR); \
-	  printf '#!/bin/sh\n# 生成物（Makefile 的 dev/opencode-bin）——不要手改；改 OPENCODE_BIN 重新生成。\nexec "%s" "$$@"\n' "$$abs" > $(DEV_BIN_DIR)/opencode; \
-	  chmod +x $(DEV_BIN_DIR)/opencode; \
+	  printf '#!/bin/sh\n# 生成物（Makefile 的 dev/runtime-bin）——不要手改；改 OPENCODE_BIN 重新生成。\nexec "%s" "$$@"\n' "$$abs" > $(DEV_BIN_DIR)/$(RUNTIME); \
+	  chmod +x $(DEV_BIN_DIR)/$(RUNTIME); \
 	fi
 
 # 后端开发起服（mate 无默认子命令，需显式 serve）
-server: web-assets dev/opencode-bin
+server: web-assets dev/runtime-bin
 	@echo "==> 底座  $(RUNTIME) [构建期固定；改它要重新构建]"
 	@echo "==> 命中  $(runtime_hit_line)"
 	@echo "     （版本与「和随包是否同代」在 make dev 与验收里报：核心**不从本机探测**版本——底座连 --version 都写自己的 home）"
@@ -450,7 +459,7 @@ server: web-assets dev/opencode-bin
 # 分工：Makefile 管**环境装配**（require-node / OPENCODE_BIN 转发目录与 PATH / MATE_STORE /
 # ldflags 的**内层**），`scripts/dev-loop.mjs` 管**进程编排**（阶段顺序、健康检查、阶段自死即回红、
 # 按进程组收尾）。各做一件，不把同一份环境判定实现两遍。
-dev: dev/opencode-bin
+dev: dev/runtime-bin
 	$(require-node)
 	@echo "==> 后端  go run ./cmd/mate serve  (默认 127.0.0.1:10001, store=$(MATE_STORE), runtime=$(RUNTIME))"
 	cd $(FRONTEND_ROOT) && \

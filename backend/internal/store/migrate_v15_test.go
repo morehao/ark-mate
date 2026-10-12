@@ -210,7 +210,7 @@ func TestMigrateV15IsIdempotentOnFreshDB(t *testing.T) {
 	var n int64
 	if err := s.db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
 		('meta','sessions','events','runs','messages','permission_memories','inputs','workspaces',
-		 'skills','mcp_servers','agents','automations','providers','models','capability_revisions','schema_migrations')`).
+		 'skills','mcp_servers','agents','automations','providers','models','definition_revisions','schema_migrations')`).
 		Row().Scan(&n); err != nil || n != 16 {
 		t.Fatalf("新库应有 16 张表：n=%d err=%v", n, err)
 	}

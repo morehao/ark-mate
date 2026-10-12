@@ -14,7 +14,7 @@ import (
 // TestProviderRespCarriesApplicability `GET /providers` 的两块派生只读面：
 // **逐已注册 runtime 的可达性**（端点/凭据通道）与**本地段问题清单**。
 //
-// v12 删掉了 v11 的 `delivery` 字段（它描述的是"凭据恒为 dial_env / next_turn"这条静态事实，
+// v12 删掉了 v11 的 `delivery` 字段（它描述的是"凭据恒为 dial_env / next_run"这条静态事实，
 // 而 v12 的凭据通道**按 runtime 分面**：dsh 走原生文档可热生效、opencode 走 env 换代际——
 // 一条静态声明表达不了它，说了就是说谎）。逐 runtime 的通道由 `applicability[].reason` 回答。
 func TestProviderRespCarriesApplicability(t *testing.T) {

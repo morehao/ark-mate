@@ -225,11 +225,11 @@ var platformIDEntities = []primaryKeyEntity{
 }
 
 // monotonicCursorEntities 主键是**单调游标**、刻意**不**换前缀 id 的两个实体（§1.4 非目标）：
-// `events.seq` 是全局水位、`capability_revisions.seq` 直接当能力代际 rev，换 TEXT 会毁掉
+// `events.seq` 是全局水位、`definition_revisions.seq` 直接当能力代际 rev，换 TEXT 会毁掉
 // `MAX(seq)` 与索引序，收益为零。
 var monotonicCursorEntities = []primaryKeyEntity{
 	{"EventEntity", "event.go"},
-	{"CapabilityRevisionEntity", "capability_revision.go"},
+	{"DefinitionRevisionEntity", "definition_revision.go"},
 }
 
 // customIDEntities 主键是**用户自定义文件名**的定义类实体（§1.4：不加前缀）。
@@ -248,7 +248,7 @@ var customIDEntities = []primaryKeyEntity{
 //
 // 它挡的是三类"顺手改"（每一类的后果都是静默的）：
 //  1. 把某个平台铸造主键改回 `int64` / 去掉 `primaryKey`（库不再保证行身份）；
-//  2. 把 `events.seq` / `capability_revisions.seq`"统一成前缀 id"（毁掉 `MAX(seq)` 与代际 rev）；
+//  2. 把 `events.seq` / `definition_revisions.seq`"统一成前缀 id"（毁掉 `MAX(seq)` 与代际 rev）；
 //  3. 把定义类的 id 也登记进 `objid` 的前缀表（用户就不能给自己的 agent 起名了，
 //     而 provider 的 vault 密文会全部作废）；
 //  4. `transcript_load.go` 里"未经形状校验就把 header 的 id 当平台 id"（旧数据形状复活）。
@@ -280,7 +280,7 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 		re := regexp.MustCompile(`(?m)^\s*Seq\s+int64\s+` + "`" + `[^` + "`" + `]*column:seq;primaryKey`)
 		if !re.MatchString(body) {
 			t.Fatalf("`%s.Seq` 必须是 `int64`（单调游标）：换 TEXT 会毁掉 `MAX(seq)` 与索引序，"+
-				"而 `capability_revisions.seq` 直接就是能力代际 rev。\n实际成员体：\n%s", e.Name, body)
+				"而 `definition_revisions.seq` 直接就是能力代际 rev。\n实际成员体：\n%s", e.Name, body)
 		}
 	}
 

@@ -59,7 +59,7 @@ type ProviderRefs struct {
 type ProviderEffect struct {
 	// Channel 交付通道（`native_doc` | `env`，取自本供应商实际走的凭据面）。
 	Channel string `json:"channel"`
-	// Effect 生效时刻：`next_turn`（下一次轮次边界，键变了就地换代际）| `none`（只改了不驱动
+	// Effect 生效时刻：`next_run`（下一次轮次边界，键变了就地换代际）| `none`（只改了不驱动
 	// 行为的字段，如 name/note——这时不许说"将在下一轮生效"）。
 	Effect string `json:"effect"`
 	// AppliesToAgents 受影响 agent 的 id（升序）。

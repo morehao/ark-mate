@@ -11,7 +11,7 @@ import (
 // 本文件是定时任务事实源（M6-7）的门面。与能力/agent 面**共用一个 CAS 实现**
 // （`dao.DefinitionDao`），但多两类方法，因为 automation 的载体里住着两种东西：
 //
-//	定义（body + revision）——用户写面，CAS + 审计（复用 capability_revisions，kind=automation）；
+//	定义（body + revision）——用户写面，CAS + 审计（复用 definition_revisions，kind=automation）；
 //	运行态（last_* / consecutive_failures / recent_runs）——**平台**写，不参与定义 revision，
 //	也不进审计（它不是"谁改了定义"，而是一次调度的推进）。
 //
@@ -54,11 +54,11 @@ type AutomationOverlay struct {
 
 // UpsertAutomationDefinition 提交一次定义写入（新建或覆盖）+ 一条审计，同事务。
 func (s *Store) UpsertAutomationDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
-	action := model.CapabilityActionUpdate
+	action := model.DefinitionActionUpdate
 	if expectedRev == 0 {
-		action = model.CapabilityActionCreate
+		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindAutomation, id, actor, action, bodyDigest(body), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindAutomation, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.automations.WithTx(tx).CreateCAS(ctx, &model.AutomationEntity{
@@ -71,7 +71,7 @@ func (s *Store) UpsertAutomationDefinition(ctx context.Context, id, body string,
 
 // DeleteAutomationDefinition 删除一条定义 + 一条审计，同事务（语义同 DeleteSkillDefinition）。
 func (s *Store) DeleteAutomationDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindAutomation, id, actor, model.CapabilityActionDelete, "", expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindAutomation, id, actor, model.DefinitionActionDelete, "", expectedRev,
 		func(tx *gorm.DB, _ time.Time) (bool, error) {
 			return s.automations.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
 		})

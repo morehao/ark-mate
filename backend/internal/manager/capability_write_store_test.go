@@ -73,8 +73,8 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	if !materializedAt(t, root, id) {
 		t.Fatalf("应物化 %s/SKILL.md", id)
 	}
-	revs := mustRevisions(t, r, model.CapabilityKindSkill, id)
-	if len(revs) != 1 || revs[0].Action != model.CapabilityActionCreate || revs[0].Actor != "rest" {
+	revs := mustRevisions(t, r, model.DefinitionKindSkill, id)
+	if len(revs) != 1 || revs[0].Action != model.DefinitionActionCreate || revs[0].Actor != "rest" {
 		t.Fatalf("新建审计不符: %+v", revs)
 	}
 	if revs[0].Digest == "" {
@@ -98,9 +98,9 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 			t.Fatalf("覆盖写应保留 %s，got %s", want, row.Body)
 		}
 	}
-	if revs := mustRevisions(t, r, model.CapabilityKindSkill, id); len(revs) != 2 ||
-		revs[1].Action != model.CapabilityActionUpdate {
-		t.Fatalf("覆盖写审计不符: %+v", mustRevisions(t, r, model.CapabilityKindSkill, id))
+	if revs := mustRevisions(t, r, model.DefinitionKindSkill, id); len(revs) != 2 ||
+		revs[1].Action != model.DefinitionActionUpdate {
+		t.Fatalf("覆盖写审计不符: %+v", mustRevisions(t, r, model.DefinitionKindSkill, id))
 	}
 
 	// —— 删除：行没了、内存条目没了、物化副本撤回、审计仍在（删了也留痕） ——
@@ -120,8 +120,8 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	if materializedAt(t, root, id) {
 		t.Fatalf("删除后应撤回物化副本（%s/SKILL.md 仍在）", id)
 	}
-	revs = mustRevisions(t, r, model.CapabilityKindSkill, id)
-	if len(revs) != 3 || revs[2].Action != model.CapabilityActionDelete {
+	revs = mustRevisions(t, r, model.DefinitionKindSkill, id)
+	if len(revs) != 3 || revs[2].Action != model.DefinitionActionDelete {
 		t.Fatalf("删除审计不符: %+v", revs)
 	}
 	if revs[2].Digest != "" {
@@ -136,7 +136,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 	if del2.Deleted {
 		t.Fatalf("重复删除应 deleted=false: %+v", del2)
 	}
-	if revs := mustRevisions(t, r, model.CapabilityKindSkill, id); len(revs) != 3 {
+	if revs := mustRevisions(t, r, model.DefinitionKindSkill, id); len(revs) != 3 {
 		t.Fatalf("noop 删除不该追加审计: %+v", revs)
 	}
 }
@@ -233,7 +233,7 @@ func TestStoreWriteFaceGateRejectsWithoutWrite(t *testing.T) {
 	if _, ok := r.Svc.caps.SkillByID("bad-scope"); ok {
 		t.Fatal("被拒的定义不该进注册表")
 	}
-	if revs := mustRevisions(t, r, model.CapabilityKindSkill, "bad-scope"); len(revs) != 0 {
+	if revs := mustRevisions(t, r, model.DefinitionKindSkill, "bad-scope"); len(revs) != 0 {
 		t.Fatalf("被拒的写入不该留审计: %+v", revs)
 	}
 
@@ -286,7 +286,7 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 	if row.Revision != 2 {
 		t.Fatalf("启停应让 revision 递增到 2，got %d", row.Revision)
 	}
-	if revs := mustRevisions(t, r, model.CapabilityKindSkill, "toggle"); len(revs) != 2 {
+	if revs := mustRevisions(t, r, model.DefinitionKindSkill, "toggle"); len(revs) != 2 {
 		t.Fatalf("启停应留一条审计: %+v", revs)
 	}
 
@@ -340,12 +340,12 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 	if err != nil || !found || row.Revision != 1 {
 		t.Fatalf("DB 行不符: found=%v rev=%d err=%v", found, row.Revision, err)
 	}
-	if revs := mustRevisions(t, r, model.CapabilityKindMcp, "fs"); len(revs) != 1 ||
-		revs[0].Action != model.CapabilityActionCreate {
+	if revs := mustRevisions(t, r, model.DefinitionKindMcp, "fs"); len(revs) != 1 ||
+		revs[0].Action != model.DefinitionActionCreate {
 		t.Fatalf("mcp 新建审计不符: %+v", revs)
 	}
 	// skill 与 mcp 的审计**按 kind 隔离**（同一张表、两种能力，别互相串）。
-	if revs := mustRevisions(t, r, model.CapabilityKindSkill, "fs"); len(revs) != 0 {
+	if revs := mustRevisions(t, r, model.DefinitionKindSkill, "fs"); len(revs) != 0 {
 		t.Fatalf("kind 隔离失效: %+v", revs)
 	}
 
@@ -388,9 +388,9 @@ func TestStoreWriteFaceRequiresNoCapabilityDir(t *testing.T) {
 }
 
 // mustRevisions 读某条能力的变更记录（按 seq 升序）。
-func mustRevisions(t *testing.T, r *rig, kind, id string) model.CapabilityRevisionEntityList {
+func mustRevisions(t *testing.T, r *rig, kind, id string) model.DefinitionRevisionEntityList {
 	t.Helper()
-	revs, err := r.St.ListCapabilityRevisions(context.Background(), kind, id)
+	revs, err := r.St.ListDefinitionRevisions(context.Background(), kind, id)
 	if err != nil {
 		t.Fatalf("读变更记录: %v", err)
 	}

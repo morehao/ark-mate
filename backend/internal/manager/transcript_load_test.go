@@ -41,7 +41,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 		header,
 		`{"seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"列出当前目录文件"}}`,
 		`{"seq":3,"ts":"2026-09-07T03:12:42Z","type":"session.thought","payload":{"text":"thinking"}}`,
-		`{"seq":4,"ts":"2026-09-07T03:12:43Z","type":"turn.ended","payload":{"stop_reason":"end_turn"}}`,
+		`{"seq":4,"ts":"2026-09-07T03:12:43Z","type":"run.ended","payload":{"stop_reason":"end_turn"}}`,
 	}
 	writeTranscriptJSONL(t, dir, sesLegacyA+".jsonl", lines)
 
@@ -71,7 +71,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	if len(hist.Events) != 3 {
 		t.Fatalf("期望注入 3 条事件，got %d", len(hist.Events))
 	}
-	if hist.Events[0].AggregID != sesLegacyA || hist.Events[2].Type != BusTurnEnded {
+	if hist.Events[0].AggregID != sesLegacyA || hist.Events[2].Type != BusRunEnded {
 		t.Fatalf("注入事件不符: %+v", hist.Events)
 	}
 }

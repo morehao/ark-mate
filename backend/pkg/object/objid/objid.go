@@ -34,7 +34,7 @@ import (
 //   - 定义类（skill / mcp_server / agent / automation / provider）：id 是**用户自定义文件名**
 //     （`validDefinitionID` 要求 `filepath.Base(id)==id`），且 `providers.id` 参与 vault 的
 //     AAD（`vault:providers/<id>`）——改它会让她已加密的密钥全部解不开；
-//   - `events.seq` / `capability_revisions.seq`：它们是**单调游标**（后者直接当能力代际 rev），
+//   - `events.seq` / `definition_revisions.seq`：它们是**单调游标**（后者直接当能力代际 rev），
 //     换 TEXT 会毁掉 `MAX(seq)` 与索引序，收益为零。
 const (
 	// Session 会话（`sessions.id`）。

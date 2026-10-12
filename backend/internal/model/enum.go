@@ -25,8 +25,8 @@ const (
 	// InputStatusStale 队列项作废（进程重启 / 会话执行代际已变），保留行仅作审计。
 	InputStatusStale = "stale"
 
-	// InputDeliveryAfterTurn 排队，等当前轮结束再投递。
-	InputDeliveryAfterTurn = "after_turn"
+	// InputDeliveryAfterRun 排队，等当前轮结束再投递。
+	InputDeliveryAfterRun = "after_run"
 	// InputDeliveryInterruptThenPrompt 取消当前轮，随后投递（服务端原子化）。
 	InputDeliveryInterruptThenPrompt = "interrupt_then_prompt"
 
@@ -96,27 +96,31 @@ const (
 	// 目录还在磁盘上"——它是可读事实，不是待修的错误。
 	MetaKeyMigrationNotesV14 = "migration_notes_v14"
 
-	// CapabilityKindSkill 能力种类：skill（capability_revisions.kind）。
-	CapabilityKindSkill = "skill"
-	// CapabilityKindMcp 能力种类：mcp server（capability_revisions.kind）。
-	CapabilityKindMcp = "mcp"
-	// CapabilityKindAgent 定义种类：agent（M6-6；capability_revisions.kind）。
-	CapabilityKindAgent = "agent"
-	// CapabilityKindAutomation 定义种类：automation（M6-7；capability_revisions.kind）。
-	CapabilityKindAutomation = "automation"
-	// CapabilityKindProvider 定义种类：provider 档案（设置 · 模型；capability_revisions.kind）。
-	CapabilityKindProvider = "provider"
-	// CapabilityKindModel 定义种类：平台模型清单条目（设置 · 模型；capability_revisions.kind）。
-	CapabilityKindModel = "model"
+	// DefinitionKindSkill 定义种类：skill（definition_revisions.kind）。
+	//
+	// 这一族**记的是「用户可编辑定义」的种别**（v16 之前叫 CapabilityKind*）：它的范围与
+	// "能力面"（skill+mcp，见 `pkg/capability`）和"底座能力声明面"（`CapabilityScope`）都不同，
+	// 后两者各自占用了 capability 这个词——别再把本族叫回去（`TestDefinitionVocabulary`）。
+	DefinitionKindSkill = "skill"
+	// DefinitionKindMcp 定义种类：mcp server（definition_revisions.kind）。
+	DefinitionKindMcp = "mcp"
+	// DefinitionKindAgent 定义种类：agent（M6-6；definition_revisions.kind）。
+	DefinitionKindAgent = "agent"
+	// DefinitionKindAutomation 定义种类：automation（M6-7；definition_revisions.kind）。
+	DefinitionKindAutomation = "automation"
+	// DefinitionKindProvider 定义种类：provider 档案（设置 · 模型；definition_revisions.kind）。
+	DefinitionKindProvider = "provider"
+	// DefinitionKindModel 定义种类：平台模型清单条目（设置 · 模型；definition_revisions.kind）。
+	DefinitionKindModel = "model"
 
-	// CapabilityActionCreate 新建定义。
-	CapabilityActionCreate = "create"
-	// CapabilityActionUpdate 覆盖定义。
-	CapabilityActionUpdate = "update"
-	// CapabilityActionDelete 删除定义。
-	CapabilityActionDelete = "delete"
-	// CapabilityActionImport 由存量文件一次性导入（M6-4）。
-	CapabilityActionImport = "import"
-	// CapabilityActorImport 导入动作的执行者（写面是 "rest"，导入是运维动作，两者在审计里可分辨）。
-	CapabilityActorImport = "import"
+	// DefinitionActionCreate 新建定义。
+	DefinitionActionCreate = "create"
+	// DefinitionActionUpdate 覆盖定义。
+	DefinitionActionUpdate = "update"
+	// DefinitionActionDelete 删除定义。
+	DefinitionActionDelete = "delete"
+	// DefinitionActionImport 由存量文件一次性导入（M6-4）。
+	DefinitionActionImport = "import"
+	// DefinitionActorImport 导入动作的执行者（写面是 "rest"，导入是运维动作，两者在审计里可分辨）。
+	DefinitionActorImport = "import"
 )

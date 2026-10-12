@@ -31,7 +31,7 @@ func TestFromErrorMapping(t *testing.T) {
 		{"mcp_not_found", acl.NewError(acl.ClassRequest, "mcp_not_found", "x", nil), code.NotFound},
 		{"provider_not_found", acl.NewError(acl.ClassRequest, "provider_not_found", "x", nil), code.NotFound},
 		{"request_other", acl.NewError(acl.ClassRequest, "agent_required", "x", nil), code.InvalidRequest},
-		{"limit", acl.NewError(acl.ClassLimit, "turn_in_progress", "x", nil), code.Conflict},
+		{"limit", acl.NewError(acl.ClassLimit, "run_in_progress", "x", nil), code.Conflict},
 		{"access", acl.NewError(acl.ClassAccess, "auth_required", "x", nil), code.Unauthorized},
 		{"unsupported", acl.NewError(acl.ClassUnsupported, "resume_unsupported", "x", nil), code.NotSupported},
 		{"service", acl.NewError(acl.ClassService, "orchestrator_unavailable", "x", nil), code.BadGateway},

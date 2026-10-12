@@ -160,7 +160,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	}
 
 	// 审计：create → update（改 name）→ update（改 state）→ delete，逐条带 id。
-	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "daily")
+	revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindAutomation, "daily")
 	if err != nil {
 		t.Fatal(err)
 	}

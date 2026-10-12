@@ -180,11 +180,11 @@ func loadTranscriptFile(path string) *transcriptFile {
 // （可能是会话进行中或进程被中断，用户可经「停止」自愈，见 serverBusy 逻辑）。
 func statusFromLastEventType(ltype string) string {
 	switch ltype {
-	case BusTurnError:
+	case BusRunError:
 		return SessionStatusFailed
 	case BusRunCancelled:
 		return SessionStatusCancelled
-	case BusTurnEnded:
+	case BusRunEnded:
 		return SessionStatusCompleted
 	default:
 		return SessionStatusInProgress

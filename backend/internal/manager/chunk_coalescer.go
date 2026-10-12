@@ -17,7 +17,7 @@ import (
 // 只合并 `session.message` / `session.thought` 两类**文本增量**；其余类型（工具卡、权限卡、
 // 提问卡、用户消息、终态）一律**先 flush 本会话缓冲再发布**，因此：
 //
-//   - 「文本先于终态」的 seq 顺序不被越过（turn.ended/turn.error/run.cancelled 前必 flush）；
+//   - 「文本先于终态」的 seq 顺序不被越过（run.ended/run.error/run.cancelled 前必 flush）；
 //   - 工具卡/权限卡不会被文本增量越过（它们之间不合并，且发布前 flush）；
 //   - 同键内 msg_id 变化时先 flush 旧缓冲，**跨 msg_id 的原始顺序不被重排**。
 //

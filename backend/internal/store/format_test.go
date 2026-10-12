@@ -73,10 +73,10 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil || !ok {
 		t.Fatalf("写 automations 行: ok=%v err=%v", ok, err)
 	}
-	if err := s.capabilityRevision.Append(ctx, &model.CapabilityRevisionEntity{
-		Kind: "skill", CapabilityID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
+	if err := s.definitionRevision.Append(ctx, &model.DefinitionRevisionEntity{
+		Kind: "skill", DefinitionID: "sk-1", Action: "create", Actor: "test", At: at, Digest: "d",
 	}); err != nil {
-		t.Fatalf("写 capability_revisions 行: %v", err)
+		t.Fatalf("写 definition_revisions 行: %v", err)
 	}
 	// v12/v13（设置 · 模型）：供应商行 + 应用层模型清单行。
 	//
@@ -148,8 +148,8 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"automations", "last_status", "text", "completed", true},
 		{"automations", "consecutive_failures", "integer", "2", true},
 		{"automations", "recent_runs", "text", `[{"status":"completed"}]`, true},
-		{"capability_revisions", "seq", "integer", "1", true},
-		{"capability_revisions", "at", "text", at.Format(model.LayoutTS), true},
+		{"definition_revisions", "seq", "integer", "1", true},
+		{"definition_revisions", "at", "text", at.Format(model.LayoutTS), true},
 		// v12（设置 · 模型）：供应商行与**应用层**清单行。
 		//
 		// v12 把模型面的布尔列删掉了（`is_default` 换成 meta 的单一值），所以这里不再有
@@ -274,12 +274,12 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "ag-1" {
 		t.Errorf("GetDefaultAgentID: id=%q ok=%v err=%v", id, ok, err)
 	}
-	revs, err := s.ListCapabilityRevisions(ctx, "skill", "sk-1")
+	revs, err := s.ListDefinitionRevisions(ctx, "skill", "sk-1")
 	if err != nil || len(revs) != 1 {
-		t.Fatalf("ListCapabilityRevisions: n=%d err=%v", len(revs), err)
+		t.Fatalf("ListDefinitionRevisions: n=%d err=%v", len(revs), err)
 	}
 	if !revs[0].At.Equal(at) {
-		t.Errorf("capability_revisions.at 往返失真: %s 期望 %s", revs[0].At, at)
+		t.Errorf("definition_revisions.at 往返失真: %s 期望 %s", revs[0].At, at)
 	}
 
 	runs, err := s.ListRuns(ctx, "c1")
@@ -311,7 +311,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	ctx := ctxT()
 	if err := s.UpsertSession(ctx, model.SessionEntity{
 		ID: "c1", AgentID: "a1", Status: "completed",
-		Provider: "p1", Model: "m1", RuntimeHint: "opencode", ProviderSessionID: "rt_ses_1",
+		ProviderID: "p1", ModelID: "m1", RuntimeHint: "opencode", ProviderSessionID: "rt_ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
@@ -329,9 +329,9 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
-	if got.Provider != "p1" || got.Model != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "rt_ses_1" {
-		t.Errorf("导入覆盖了会话级模型选择: provider=%q model=%q hint=%q session=%q",
-			got.Provider, got.Model, got.RuntimeHint, got.ProviderSessionID)
+	if got.ProviderID != "p1" || got.ModelID != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "rt_ses_1" {
+		t.Errorf("导入覆盖了会话级模型选择: provider_id=%q model_id=%q hint=%q session=%q",
+			got.ProviderID, got.ModelID, got.RuntimeHint, got.ProviderSessionID)
 	}
 	if got.Title != "导入标题" {
 		t.Errorf("导入应更新标题，实际 %q", got.Title)

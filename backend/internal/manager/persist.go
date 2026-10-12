@@ -66,8 +66,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		rec := &SessionRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
-			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
-			Model: sess.Model, RuntimeHint: runtime.NormalizeID(sess.RuntimeHint),
+			WorkspaceTemporary: sess.WorkspaceTemporary, ProviderID: sess.ProviderID,
+			ModelID: sess.ModelID, RuntimeHint: runtime.NormalizeID(sess.RuntimeHint),
 			ProviderSessionID: sess.ProviderSessionID,
 			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, Origin: sess.Origin, CapabilityJSON: sess.CapabilityJSON,
@@ -138,8 +138,8 @@ func (s *Service) persistSession(rec *SessionRec) {
 		Cwd:                rec.Cwd,
 		WorkspaceID:        rec.WorkspaceID,
 		WorkspaceTemporary: rec.WorkspaceTemporary,
-		Provider:           rec.Provider,
-		Model:              rec.Model,
+		ProviderID:         rec.ProviderID,
+		ModelID:            rec.ModelID,
 		RuntimeHint:        rec.RuntimeHint,
 		ProviderSessionID:  rec.ProviderSessionID,
 		Title:              rec.Title,
@@ -209,9 +209,9 @@ func (s *Service) memoryRows(ctx context.Context) ([]model.PermissionMemoryEntit
 // terminalRunStatus 终态事件类型 → run 终态。
 func terminalRunStatus(typ string) string {
 	switch typ {
-	case BusTurnEnded:
+	case BusRunEnded:
 		return SessionStatusCompleted
-	case BusTurnError:
+	case BusRunError:
 		return SessionStatusFailed
 	case BusRunCancelled:
 		return SessionStatusCancelled

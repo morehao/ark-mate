@@ -107,13 +107,13 @@ func printEvent(evt eventbus.Event) {
 		title, _ := p["title"].(string)
 		status, _ := p["status"].(string)
 		fmt.Printf("\n🛠 %s %s [%s]\n", evt.Type, title, status)
-	case manager.BusTurnEnded:
+	case manager.BusRunEnded:
 		stop, _ := p["stop_reason"].(string)
-		fmt.Printf("\n✅ turn.ended  stop_reason=%q\n", stop)
-	case manager.BusTurnError:
+		fmt.Printf("\n✅ run.ended  stop_reason=%q\n", stop)
+	case manager.BusRunError:
 		code, _ := p["code"].(string)
 		cls, _ := p["class"].(string)
-		fmt.Printf("\n❌ turn.error  code=%s class=%s\n", code, cls)
+		fmt.Printf("\n❌ run.error  code=%s class=%s\n", code, cls)
 	case manager.BusRunCancelled:
 		fmt.Printf("\n⛔ run.cancelled\n")
 	}

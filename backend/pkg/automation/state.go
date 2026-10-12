@@ -51,7 +51,7 @@ func CanTransition(from, to string) bool {
 	return false
 }
 
-// RunStatus 一次触发的认领结果（与 `TurnStatus`/会话状态同词表，前端不必再学一套）。
+// RunStatus 一次触发的认领结果（与 `RunStatus`/会话状态同词表，前端不必再学一套）。
 //
 // `claimed` 与其余四个**不是同一层**：`claimed` = "会话已建、这轮跑起来了"，结果由**会话自身**
 // 的终态承载（ADR-4：不建第二套 run 状态机）；后四个是"这一轮没能跑成"的终态。

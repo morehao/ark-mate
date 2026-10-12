@@ -253,13 +253,13 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "· %s\n", line)
 			}
-		case BusTurnEnded:
+		case BusRunEnded:
 			if md {
 				fmt.Fprintf(&b, "\n*轮次结束*\n\n")
 			} else {
 				fmt.Fprintf(&b, "\n[轮次结束]\n\n")
 			}
-		case BusTurnError:
+		case BusRunError:
 			msg := payloadString(payload, "error")
 			if msg == "" {
 				msg = payloadString(payload, "msg")

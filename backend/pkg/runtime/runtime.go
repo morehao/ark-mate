@@ -58,7 +58,7 @@ type Runtime interface {
 	Capabilities() acl.Capabilities
 	// ProviderSessionID 返回底层 ACP 会话 id（多轮续跑与诊断定位用）。
 	ProviderSessionID() string
-	// Cancel 取消本会话进行中的 turn（会话级执行原语；best-effort，见 acl.Session.Cancel）。
+	// Cancel 取消本会话进行中的 run（会话级执行原语；best-effort，见 acl.Session.Cancel）。
 	// 连接生命周期仍归 Orchestrator（§4.2 偏差），本方法只作用于会话执行面。
 	Cancel(ctx context.Context) error
 	// Prompt 发送一条用户消息并驱动到一轮停点，返回 stop reason（如 "end_turn"）。

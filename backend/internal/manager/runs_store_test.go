@@ -10,12 +10,12 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
-// TestRunMaterializationAtTurnEnd 验证 P1 runs 物化不变量：
+// TestRunMaterializationAtRunEnd 验证 P1 runs 物化不变量：
 //   - 每轮（用户消息 → 终态事件）生成一条 run：user_text 取首条用户消息，
 //     first/last_seq 记录事件窗口，status/stop_reason/error_code 对齐终态；
 //   - 轮次窗口从上一 run 的 last_seq 之后起算（多轮不串）；
 //   - 无 store 时 ListRuns 返回空（读模型仅 sqlite 模式存在）。
-func TestRunMaterializationAtTurnEnd(t *testing.T) {
+func TestRunMaterializationAtRunEnd(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
@@ -28,11 +28,11 @@ func TestRunMaterializationAtTurnEnd(t *testing.T) {
 	// 第一轮：成功。
 	u1 := svc.publish(BusUserMessage, "s-run", map[string]any{"text": "第一问"})
 	svc.publish(BusMessage, "s-run", map[string]any{"text": "回答一"})
-	end1 := svc.publish(BusTurnEnded, "s-run", map[string]any{"stop_reason": "end_turn"})
+	end1 := svc.publish(BusRunEnded, "s-run", map[string]any{"stop_reason": "end_turn"})
 
 	// 第二轮：失败。
 	u2 := svc.publish(BusUserMessage, "s-run", map[string]any{"text": "第二问（会失败）"})
-	errEnd := svc.publish(BusTurnError, "s-run", map[string]any{"code": "agent_error", "class": "agent"})
+	errEnd := svc.publish(BusRunError, "s-run", map[string]any{"code": "agent_error", "class": "agent"})
 
 	runs, err := st.ListRuns(ctx, "s-run")
 	if err != nil || len(runs) != 2 {

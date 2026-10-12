@@ -123,7 +123,7 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 }
 
 // TestResolveElicitationScope C3 归属判定三分支：wire（`_meta`）优先 → inferred_inflight（唯一在途
-// turn）→ ambiguous（都没有，返回空 id 由调用方按取消回应并留痕）。cli=nil 时无在途 turn，
+// run）→ ambiguous（都没有，返回空 id 由调用方按取消回应并留痕）。cli=nil 时无在途 run，
 // 正好覆盖后两个分支（wire 分支不碰 cli）。
 //
 // v15（D-4 修复）之后 wire 分支的口径变了：`_meta` 里的 id 是**底座原文**，必须先按
@@ -158,7 +158,7 @@ func TestResolveElicitationScope(t *testing.T) {
 	if sid, src, _ := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		Mode: "form", Message: "q",
 	}); sid != "" || src != acl.ScopeAmbiguous {
-		t.Fatalf("无 wire 且无在途 turn 应落 ambiguous: sid=%q src=%q", sid, src)
+		t.Fatalf("无 wire 且无在途 run 应落 ambiguous: sid=%q src=%q", sid, src)
 	}
 }
 
@@ -167,7 +167,7 @@ func TestResolveElicitationScope(t *testing.T) {
 func TestAgentDiagnosticsShowsScopeAmbiguous(t *testing.T) {
 	// newSearchRig 预置 agent a1（AgentDiagnostics 需要真实存在的 agent）。
 	svc, _ := newSearchRig(t)
-	svc.noteScopeAmbiguous("a1", "elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）")
+	svc.noteScopeAmbiguous("a1", "elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
 
 	resp, err := svc.AgentDiagnostics(context.Background(), "a1")
 	if err != nil {

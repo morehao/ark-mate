@@ -51,8 +51,8 @@ type SessionRec struct {
 	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
 	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
 	WorkspaceID string
-	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
-	Model       string // 会话级模型 id（空 = 底座默认）
+	ProviderID  string // provider 档案 id（会话级模型选择；空 = 跟随 agent；v16 起列名带 `_id`）
+	ModelID     string // 会话级模型 id（空 = 底座默认；指向 models.model_id，v16 起列名带 `_id`）
 	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
 	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
 	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。

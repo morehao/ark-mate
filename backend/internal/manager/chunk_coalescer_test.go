@@ -242,20 +242,20 @@ func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 	}
 }
 
-// TestPublishFlushesDeltasOnTurnEnded 终态事件前必 flush：events 表里文本先于 turn.ended。
-func TestPublishFlushesDeltasOnTurnEnded(t *testing.T) {
+// TestPublishFlushesDeltasOnRunEnded 终态事件前必 flush：events 表里文本先于 run.ended。
+func TestPublishFlushesDeltasOnRunEnded(t *testing.T) {
 	svc, st := newSearchRig(t)
 	svc.registerSession(&SessionRec{ID: "cv-end", AgentID: "a1"})
 	for _, chunk := range []string{"最", "后", "一段"} {
 		svc.publish(BusMessage, "cv-end", map[string]any{"session_id": "cv-end", "msg_id": "m1", "text": chunk})
 	}
-	svc.publish(BusTurnEnded, "cv-end", map[string]any{"session_id": "cv-end", "stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "cv-end", map[string]any{"session_id": "cv-end", "stop_reason": "end_turn"})
 
 	rows, _, err := st.EventsAfter(context.Background(), "cv-end", 0, 10)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
 	}
-	if len(rows) != 2 || rows[0].Type != BusMessage || rows[1].Type != BusTurnEnded {
+	if len(rows) != 2 || rows[0].Type != BusMessage || rows[1].Type != BusRunEnded {
 		t.Fatalf("终态前应落文本: %+v", rows)
 	}
 	var m map[string]any

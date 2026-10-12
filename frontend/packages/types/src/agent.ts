@@ -123,7 +123,7 @@ export interface Applicability {
 export interface ProviderEffect {
   /** native_doc | env。 */
   channel: string
-  /** next_turn（下一次轮次边界换代际）| none（只改了不驱动行为的字段，如 name/note）。 */
+  /** next_run（下一次轮次边界换代际）| none（只改了不驱动行为的字段，如 name/note）。 */
   effect: string
   applies_to_agents: string[]
   affected_sessions: number

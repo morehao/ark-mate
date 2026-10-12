@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// TestTurnTimeoutWatchdog 看门狗超时自动取消挂起 turn：run.cancelled + 状态 cancelled + busy 释放。
-func TestTurnTimeoutWatchdog(t *testing.T) {
+// TestRunTimeoutWatchdog 看门狗超时自动取消挂起 run：run.cancelled + 状态 cancelled + busy 释放。
+func TestRunTimeoutWatchdog(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	orch.SetTurnTimeout(80 * time.Millisecond)
+	orch.SetRunTimeout(80 * time.Millisecond)
 	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
 	orch.sessions["s1"] = as
 	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
@@ -25,7 +25,7 @@ func TestTurnTimeoutWatchdog(t *testing.T) {
 	if !ok || rec.Status != SessionStatusCancelled {
 		t.Fatalf("会话状态应 cancelled: %+v", rec)
 	}
-	// busy 必须已释放（否则后续 prompt 仍报 turn_in_progress）。
+	// busy 必须已释放（否则后续 prompt 仍报 run_in_progress）。
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		as.mu.Lock()
@@ -41,8 +41,8 @@ func TestTurnTimeoutWatchdog(t *testing.T) {
 	}
 }
 
-// TestTurnTimeoutOff 看门狗关闭时挂起 turn 不自动取消（保持 busy，等外部 cancel）。
-func TestTurnTimeoutOff(t *testing.T) {
+// TestRunTimeoutOff 看门狗关闭时挂起 run 不自动取消（保持 busy，等外部 cancel）。
+func TestRunTimeoutOff(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
 	orch.sessions["s1"] = as
@@ -68,10 +68,10 @@ func TestTurnTimeoutOff(t *testing.T) {
 	busy := as.busy
 	as.mu.Unlock()
 	if !busy {
-		t.Fatalf("看门狗关闭时挂起 turn 应保持 busy")
+		t.Fatalf("看门狗关闭时挂起 run 应保持 busy")
 	}
 	// 手动取消仍可用。
-	if err := orch.CancelTurn(context.Background(), "s1"); err != nil {
-		t.Fatalf("CancelTurn: %v", err)
+	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
 	}
 }

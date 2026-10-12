@@ -6,7 +6,7 @@ import "testing"
 // `next_process`，以及它的 applicability 只可能是 written / untested。
 //
 // 它是 M6 的**具体承诺**（不是泛泛的"表里有 model"）：模型清单只有物化到配置文件才不是装饰，
-// 而配置文件在**进程启动时**被读——所以生效时刻必须是 next_process，不许被写成 next_turn
+// 而配置文件在**进程启动时**被读——所以生效时刻必须是 next_process，不许被写成 next_run
 // （那会让界面承诺"下一轮生效"，而底座其实要等重启）。
 func TestForModelIsT5ConfigWrite(t *testing.T) {
 	d, ok := For(KindModel)

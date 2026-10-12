@@ -131,7 +131,7 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 
 // resolveElicitationScope 判定一次 elicitation 的会话归属（C3），返回 (会话 id, 归属来源)：
 //   - wire：acl 层已从 `_meta` 读到会话（ScopeWire）→ 直接采用，不做推断；
-//   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 turn → 按它归属；
+//   - inferred_inflight：`_meta` 未给，但连接上恰有一个在途 run → 按它归属；
 //   - ambiguous：两者都不成立（空闲 / 会话外 request-scope / 多会话并发）→ 空 id，调用方按取消
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
 func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
@@ -153,7 +153,7 @@ func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.Elicitat
 		return sid, acl.ScopeInferred, ""
 	}
 	return "", acl.ScopeAmbiguous,
-		"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 turn）"
+		"elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）"
 }
 
 // platformSessionIDForProvider 把**底座会话原文**反查成平台会话 id（D-4 的唯一实现）。

@@ -14,7 +14,7 @@
 // 默认取最保守的 `next_process`；本表只声明**通道**与**默认生效时刻**。
 //
 // 「每个 kind 都必须有声明」由 `internal/archtest/delivery_matrix_test.go` 的
-// `TestDeliveryMatrixCoversKinds` 钉住：它从 `internal/model/enum.go` 的 `CapabilityKind*`
+// `TestDeliveryMatrixCoversKinds` 钉住：它从 `internal/model/enum.go` 的 `DefinitionKind*`
 // 常量读出「平台拥有的资源种类」，逐个断言 `For` 查得到声明，并断言未知 kind 必须返回 false。
 // 它挡的是「新增一种资源却漏了交付通道声明」这种静默缺口——那种缺口的表现是界面照常显示
 // 「已保存」，而用户永远等不到它生效，且没有任何一处会报错。
@@ -29,7 +29,7 @@ import "slices"
 type Delivery struct {
 	// Channel 交付通道（五条之一，或 ChannelNone）。
 	Channel string `json:"channel"`
-	// Effect 默认生效时刻（immediate/next_turn/next_session/next_process）。
+	// Effect 默认生效时刻（immediate/next_run/next_session/next_process）。
 	Effect string `json:"effect"`
 	// Note 可执行的一句话说明。
 	Note string `json:"note"`
@@ -89,8 +89,8 @@ const (
 const (
 	// EffectImmediate 立即（活会话的就地变更；automation 的写面在平台内立即生效）。
 	EffectImmediate = "immediate"
-	// EffectNextTurn 下一个轮次边界（代际迁移发生的地方；有在途轮次或有未应答权限/提问时顺延）。
-	EffectNextTurn = "next_turn"
+	// EffectNextRun 下一个轮次边界（代际迁移发生的地方；有在途轮次或有未应答权限/提问时顺延）。
+	EffectNextRun = "next_run"
 	// EffectNextSession 下一个新会话（已声明能力的会话在轮次边界迁移）。
 	EffectNextSession = "next_session"
 	// EffectNextProcess 下一个 runtime 进程（配置与读根都在进程启动时被读）。
@@ -99,9 +99,9 @@ const (
 
 // 资源 kind（本表覆盖的种类）。
 //
-// 与 `internal/model/enum.go` 的 `CapabilityKind*` 逐一对应（pkg 层不许 import internal，
+// 与 `internal/model/enum.go` 的 `DefinitionKind*` 逐一对应（pkg 层不许 import internal，
 // 故这里只能重述取值，由 `TestDeliveryMatrixCoversKinds` 断言两边对齐）；`KindTool` 是
-// **派生**种类（随所属 MCP server 每轮重建，只在内存），不在 `CapabilityKind*` 里。
+// **派生**种类（随所属 MCP server 每轮重建，只在内存），不在 `DefinitionKind*` 里。
 const (
 	// KindProvider provider 凭据档案（密钥 / 上游 type）。
 	KindProvider = "provider"
@@ -124,7 +124,7 @@ const (
 // 每一条都必须有可执行的人话 Note——守卫会断言它非空（空 Note 的声明等于没声明）。
 var table = map[string]Delivery{
 	KindProvider: {
-		Channel: ChannelDialEnv, Effect: EffectNextTurn,
+		Channel: ChannelDialEnv, Effect: EffectNextRun,
 		Note: "密钥以 <TYPE>_API_KEY 注入 runtime 子进程 env；改它会让引用该档案的会话在下一轮重建连接" +
 			"（有在途轮次或有未应答权限/提问时顺延到再下一轮）",
 	},
@@ -139,12 +139,12 @@ var table = map[string]Delivery{
 			"写面末尾重校后，已声明能力的会话在轮次边界迁移",
 	},
 	KindMcp: {
-		Channel: ChannelSessionInject, Effect: EffectNextTurn,
+		Channel: ChannelSessionInject, Effect: EffectNextRun,
 		Note: "把 MCP server 注入会话的能力集（启用 ∩ transport ∩ 白名单）；" +
 			"新会话立即带上，已声明能力的会话在下一个轮次边界迁移",
 	},
 	KindAgent: {
-		Channel: ChannelDialEnv, Effect: EffectNextTurn,
+		Channel: ChannelDialEnv, Effect: EffectNextRun,
 		Note: "agent 的权限策略与凭据选择随子进程 env 下发（nativePermissionEnvFor / <TYPE>_API_KEY）；" +
 			"改它会让引用它的会话在下一轮重建连接",
 	},
@@ -154,7 +154,7 @@ var table = map[string]Delivery{
 			"要改底座侧行为请改它引用的 agent 与凭据",
 	},
 	KindTool: {
-		Channel: ChannelSessionInject, Effect: EffectNextTurn,
+		Channel: ChannelSessionInject, Effect: EffectNextRun,
 		Note: "派生数据（随所属 MCP server 每轮重建，只在内存）：没有自己的交付动作，" +
 			"server 注入到哪它就到哪——改工具要去改那个 server 的定义",
 	},
@@ -172,7 +172,7 @@ func For(kind string) (Delivery, bool) {
 
 // Kinds 本表声明过的资源种类（升序）。
 //
-// 它**不是**「平台拥有的资源种类」的事实源——那是 `internal/model/enum.go` 的 `CapabilityKind*`
+// 它**不是**「平台拥有的资源种类」的事实源——那是 `internal/model/enum.go` 的 `DefinitionKind*`
 // （pkg 层不许 import internal，故不能在这里直接引用）。这里返回的是本表的覆盖面，
 // 由 `TestDeliveryMatrixCoversKinds` 负责断言两者对齐。
 func Kinds() []string {
@@ -194,7 +194,7 @@ func Channels() []string {
 
 // Effects 生效时刻的词表。
 func Effects() []string {
-	return []string{EffectImmediate, EffectNextTurn, EffectNextSession, EffectNextProcess}
+	return []string{EffectImmediate, EffectNextRun, EffectNextSession, EffectNextProcess}
 }
 
 // IsDeliveryChannel 是否是一条**交付**通道（ChannelNone 不算：它表示"不向底座交付"）。

@@ -7,7 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
-// TestProviderKeyChangeSwitchesGenerationNextTurn A2 的**端到端**判据：改密钥/类型在**下一轮**生效。
+// TestProviderKeyChangeSwitchesGenerationNextRun A2 的**端到端**判据：改密钥/类型在**下一轮**生效。
 //
 // 设计里 A2 的原文是"建会话 → 发一轮 → PATCH 改 provider `type`（改变注入变量名）→ 再发一轮；
 // 断言新连接的 `connKey` 变化、旧代际被回收"。这条走 `genRig` 的**真实入口**
@@ -16,7 +16,7 @@ import (
 //
 // 为什么不满足于"判定函数返回了 switch"：判定再对，句柄没换也等于没迁（那正是这条用例存在的理由，
 // 与 `generation_migration_test.go` 开头那段话同一个口径）。
-func TestProviderKeyChangeSwitchesGenerationNextTurn(t *testing.T) {
+func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
 	// 让 vault 可用：密钥要真落盘，拨号基键才会带上注入的那条 env。
@@ -48,8 +48,8 @@ func TestProviderKeyChangeSwitchesGenerationNextTurn(t *testing.T) {
 		t.Fatalf("改密钥: %v", err)
 	}
 	// 回执如实说明"下一轮生效"（C5：与代际裁决**同源**）。
-	if resp.Effect == nil || resp.Effect.Channel != "dial_env" || resp.Effect.Effect != "next_turn" {
-		t.Fatalf("生效面回执应为 dial_env/next_turn: %+v", resp.Effect)
+	if resp.Effect == nil || resp.Effect.Channel != "dial_env" || resp.Effect.Effect != "next_run" {
+		t.Fatalf("生效面回执应为 dial_env/next_run: %+v", resp.Effect)
 	}
 	if resp.Effect.AffectedSessions < 1 {
 		t.Fatalf("应有会话受这条改动影响: %+v", resp.Effect)

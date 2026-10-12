@@ -24,11 +24,11 @@ import (
 // expectedRev > 0  → 覆盖，且**仅当行的 revision 仍等于它**。
 // 返回 false = 该提交被并发写抢先（或行已不存在）→ 调用方翻成 `definition_changed`(40901)。
 func (s *Store) UpsertAgentDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
-	action := model.CapabilityActionUpdate
+	action := model.DefinitionActionUpdate
 	if expectedRev == 0 {
-		action = model.CapabilityActionCreate
+		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindAgent, id, actor, action, bodyDigest(body), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindAgent, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentEntity{
@@ -41,7 +41,7 @@ func (s *Store) UpsertAgentDefinition(ctx context.Context, id, body string, expe
 
 // DeleteAgentDefinition 删除一条 agent 定义 + 一条审计，同事务（语义同 DeleteSkillDefinition）。
 func (s *Store) DeleteAgentDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindAgent, id, actor, model.CapabilityActionDelete, "", expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindAgent, id, actor, model.DefinitionActionDelete, "", expectedRev,
 		func(tx *gorm.DB, _ time.Time) (bool, error) {
 			return s.agents.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
 		})

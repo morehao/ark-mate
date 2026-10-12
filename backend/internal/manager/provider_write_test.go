@@ -76,13 +76,13 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 		t.Fatalf("通道应为 dial_env: %+v", done.Effect)
 	}
 
-	// ⑥ PATCH 端点 → effect=next_turn（驱动行为的字段）。
+	// ⑥ PATCH 端点 → effect=next_run（驱动行为的字段）。
 	changed, err := svc.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
 	if err != nil {
 		t.Fatalf("PATCH base_url: %v", err)
 	}
-	if changed.Effect == nil || changed.Effect.Effect != "next_turn" {
-		t.Fatalf("改端点应回 effect=next_turn: %+v", changed.Effect)
+	if changed.Effect == nil || changed.Effect.Effect != "next_run" {
+		t.Fatalf("改端点应回 effect=next_run: %+v", changed.Effect)
 	}
 	// 引用名**只跟 id 有关**（逐供应商派生）——这正是 A12 要的不变量。
 	// 这里用纯函数断言（夹具的注册表是空的，`providerEnvFor` 需要一个声明了 `RefPattern`
@@ -245,7 +245,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	if eff == nil {
 		t.Fatal("写面必须回带生效面（effect）")
 	}
-	if eff.Channel != "dial_env" || eff.Effect != "next_turn" {
+	if eff.Channel != "dial_env" || eff.Effect != "next_run" {
 		t.Fatalf("通道/时刻不符: %+v", eff)
 	}
 	if len(eff.AppliesToAgents) != 1 || eff.AppliesToAgents[0] != "a1" {

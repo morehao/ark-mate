@@ -36,8 +36,8 @@ type SessionSvc interface {
 	// 排队 / 取消当前轮后投递）。
 	PromptSession(ctx context.Context, id string, req dtosession.PromptReq) (*dtosession.SessionPromptResp, error)
 
-	// CancelTurn 取消进行中的 turn（无 turn 时幂等 no-op）。
-	CancelTurn(ctx context.Context, id string) error
+	// CancelRun 取消进行中的 run（无 run 时幂等 no-op）。
+	CancelRun(ctx context.Context, id string) error
 
 	// ListQueuedInputs 列出某会话待投递的排队输入（§6；冷挂载/刷新后重建队列视图）。
 	ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error)

@@ -17,14 +17,14 @@ import (
 //     已有行一律保留并计数（Existing），需要覆盖就走写面；
 //  2. **一次导入一批**（写面是一次一条）：全部行 + 审计 + marker 在一个事务里，失败整体回滚
 //     ——部分导入比不导入更难排查（用户看到"一半技能回来了"）；
-//  3. **审计动作是 `import`**（写面是 create/update/delete）：逐条一行，`capability_id` 指向
-//     具体那条定义，于是 `ListCapabilityRevisions(kind, id)` 能回答"这一行是从哪个目录进来的"。
-//     不共用一条聚合行：`capability_id` 是这张表的主查询键，聚合行谁也查不到。
+//  3. **审计动作是 `import`**（写面是 create/update/delete）：逐条一行，`definition_id` 指向
+//     具体那条定义，于是 `ListDefinitionRevisions(kind, id)` 能回答"这一行是从哪个目录进来的"。
+//     不共用一条聚合行：`definition_id` 是这张表的主查询键，聚合行谁也查不到。
 
 // DefinitionImportItem 一条待导入的定义（调用方已逐条过闸门）。
 type DefinitionImportItem struct {
-	// Kind 见 model.CapabilityKindSkill / CapabilityKindMcp / CapabilityKindAgent /
-	// CapabilityKindAutomation。
+	// Kind 见 model.DefinitionKindSkill / DefinitionKindMcp / DefinitionKindAgent /
+	// DefinitionKindAutomation。
 	Kind string
 	ID   string
 	// Body 定义正文（承载未知键的完整 JSON）。
@@ -83,15 +83,15 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 			}
 			res.Inserted++
 			digest := bodyDigest(it.Body)
-			if it.Kind == model.CapabilityKindProvider && it.Provider != nil {
+			if it.Kind == model.DefinitionKindProvider && it.Provider != nil {
 				// provider 是资源表：审计摘要取**列行的规范 JSON**（ADR-10），不是已消失的 body。
 				digest = it.Provider.digest()
 			}
-			if err := s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
+			if err := s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
 				Kind:         it.Kind,
-				CapabilityID: it.ID,
-				Action:       model.CapabilityActionImport,
-				Actor:        model.CapabilityActorImport,
+				DefinitionID: it.ID,
+				Action:       model.DefinitionActionImport,
+				Actor:        model.DefinitionActorImport,
 				At:           now,
 				Digest:       digest,
 			}); err != nil {
@@ -112,25 +112,25 @@ func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImpo
 // createDefinitionTx 在事务里**只插入缺失的行**（CreateCAS：已存在 → false，不覆盖）。
 func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it DefinitionImportItem, now time.Time) (bool, error) {
 	switch it.Kind {
-	case model.CapabilityKindSkill:
+	case model.DefinitionKindSkill:
 		return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
-	case model.CapabilityKindMcp:
+	case model.DefinitionKindMcp:
 		return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
-	case model.CapabilityKindAgent:
+	case model.DefinitionKindAgent:
 		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
-	case model.CapabilityKindProvider:
+	case model.DefinitionKindProvider:
 		if it.Provider == nil {
 			// 不可达（manager 侧构造 item 时必填）：宁可整体回滚也不要写一行空档案。
 			return false, fmt.Errorf("store: provider 导入缺少列载荷（%q）", it.ID)
 		}
 		return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(*it.Provider, 1, now, now))
-	case model.CapabilityKindAutomation:
+	case model.DefinitionKindAutomation:
 		row := &model.AutomationEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now, RecentRuns: "[]",
 		}

@@ -215,7 +215,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 			continue
 		}
 		items = append(items, store.DefinitionImportItem{
-			Kind: model.CapabilityKindAutomation, ID: id, Body: body, AutomationRuntime: rt,
+			Kind: model.DefinitionKindAutomation, ID: id, Body: body, AutomationRuntime: rt,
 		})
 		stats.Automations++
 	}

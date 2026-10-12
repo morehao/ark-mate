@@ -150,8 +150,8 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 		t.Fatalf("meta.imported_providers 不符: ok=%v v=%q want=%q", ok, v, stats.Marker)
 	}
 	for _, id := range []string{"deepseek-main", "legacy-openai"} {
-		revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, id)
-		if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionImport {
+		revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, id)
+		if err != nil || len(revs) != 1 || revs[0].Action != model.DefinitionActionImport {
 			t.Fatalf("%s 的导入审计不符: %+v err=%v", id, revs, err)
 		}
 	}

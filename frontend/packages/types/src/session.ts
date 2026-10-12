@@ -262,7 +262,7 @@ export interface ElicitationResp {
    * 的遗迹；改名后收敛成一个键。
    */
   session_id: string
-  /** 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）| ambiguous（两者都无，不归属）。 */
+  /** 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 run 推断）| ambiguous（两者都无，不归属）。 */
   scope_source: string
   mode: ElicitationMode
   message: string
@@ -329,9 +329,9 @@ export interface CreateSessionResp {
   workspace_temporary?: boolean
 }
 
-/** §6 投递模式：会话正忙时怎么办。空/reject = 报错（历史行为）；after_turn = 排队；
+/** §6 投递模式：会话正忙时怎么办。空/reject = 报错（历史行为）；after_run = 排队；
  *  interrupt_then_prompt = 取消当前轮随后投递。 */
-export type DeliveryMode = 'reject' | 'after_turn' | 'interrupt_then_prompt'
+export type DeliveryMode = 'reject' | 'after_run' | 'interrupt_then_prompt'
 
 export interface PromptReq {
   prompt: string
@@ -342,7 +342,7 @@ export interface SessionPromptResp {
   id: string
   status: SessionStatus
   event_seq: number
-  /** 本次输入已入队（delivery=after_turn|interrupt_then_prompt 且会话正忙）。 */
+  /** 本次输入已入队（delivery=after_run|interrupt_then_prompt 且会话正忙）。 */
   queued?: boolean
   /** 入队项的 id（可用 DELETE /v1/mate/sessions/:id/inputs/:input_id 撤下）。 */
   input_id?: string
@@ -352,9 +352,9 @@ export interface SessionPromptResp {
 export interface QueuedInputResp {
   input_id: string
   text: string
-  /** after_turn | interrupt_then_prompt */
+  /** after_run | interrupt_then_prompt */
   delivery: string
-  target_turn_id?: string
+  target_run_id?: string
   generation?: number
   created_at?: string
 }

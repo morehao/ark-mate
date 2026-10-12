@@ -101,7 +101,7 @@ func TestSyncModelsWritesOverlayAndArg(t *testing.T) {
 		t.Fatalf("overlay 权限应为 0600，实际 %04o", fi.Mode().Perm())
 	}
 	// 凭据面：原生文档通道 + 热生效 + 已实测。
-	if out.Credential.Channel != resource.ChannelNativeDoc || out.Credential.Effect != resource.EffectNextTurn ||
+	if out.Credential.Channel != resource.ChannelNativeDoc || out.Credential.Effect != resource.EffectNextRun ||
 		!out.Credential.Tested || out.Credential.Status != resource.StatusApplied {
 		t.Fatalf("凭据结论不符：%+v", out.Credential)
 	}
