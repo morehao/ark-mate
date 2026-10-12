@@ -58,8 +58,8 @@ func (h *modelCtr) List(c *gin.Context) {
 // Catalog 返回某 agent 的**运行时派生**模型目录（会话级模型选择器的数据来源）。
 //
 // 它与 `List`（平台声明）刻意分开：这里返回的 `options[].values[].value` 是底座的
-// **不透明串**，必须原样回传（dsh 是 `JSON.stringify([provider,model])`、opencode 是
-// `provider/model`），前端不得解析或拼接。
+// **不透明串**，必须原样回传（形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`：
+// dsh 是 `JSON.stringify([provider,model])`，别的底座可能是 `provider/model`），前端不得解析或拼接。
 func (h *modelCtr) Catalog(c *gin.Context) {
 	agentID := c.Query("agent")
 	if agentID == "" {

@@ -3,12 +3,13 @@ package dtomodel
 // ConfigOptionValueResp 一个可选值（运行时配置项候选项，如模型）。
 //
 // Value 是**不透明字符串**：必须原样回传给创建/PATCH 接口，前端不得解析其内部结构
-// （dsh 为 JSON.stringify([provider, model])，opencode 为 "provider/model"）。
+// （形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`：dsh 是
+// `JSON.stringify([provider, model])`，别的底座可能是 `provider/model`）。
 type ConfigOptionValueResp struct {
 	Value       string `json:"value"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// Group/GroupName 分组（agent 以分组形态下发时才有；opencode 为扁平列表时两字段为空）。
+	// Group/GroupName 分组（**该底座**以分组形态下发时才有；它的广告是扁平列表时两字段为空）。
 	Group     string `json:"group,omitempty"`
 	GroupName string `json:"group_name,omitempty"`
 	// Unavailable 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅作提示，最终以运行时为准。
@@ -56,15 +57,15 @@ type ModelCatalogResp struct {
 	// 保守值"，真值取决于附件仓与**精确路由**；拿静态值当判据，用户会在一个其实能收图的底座上
 	// 被告知"不支持"。
 	//
-	// 注意它**不含模型信息**：opencode 恒 true（ACP 广告与模型无关，模型级闸门在底座内部），
-	// dsh 才是"路由声明里含 image 才 true"。所以它是"这条路由的收图能力"的上界，
-	// 逐条模型的事实仍是平台清单里的 `input_modalities`。
+	// 注意它**不含模型信息**：它由**该底座自己的路由声明**折算（dsh 是「声明里含 image 才 true」，
+	// 而有的底座恒 true——ACP 广告与模型无关、模型级闸门在底座内部）。所以它是"这条路由的收图
+	// 能力"的上界，逐条模型的事实仍是平台清单里的 `input_modalities`。
 	ImageInput *bool `json:"image_input,omitempty"`
 	// FetchedAt 取样时间（RFC3339；source=cache 时为首次取样时间）。
 	FetchedAt string `json:"fetched_at,omitempty"`
 	// Options 运行时配置项全量投影（模型目录为主；运行时若还给出别的选项，也一并原样透出，仅作展示）。
 	Options []ConfigOptionResp `json:"options"`
-	// AuthGuidance 运行时声明的鉴权方式（如 opencode 的终端登录命令）。
+	// AuthGuidance 运行时声明的鉴权方式（例如底座给出的终端登录命令）。
 	AuthGuidance []AuthGuidanceResp `json:"auth_guidance,omitempty"`
 	// Note 空目录/降级说明（人类可读，可直接展示给用户）。
 	Note string `json:"note,omitempty"`

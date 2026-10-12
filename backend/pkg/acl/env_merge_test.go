@@ -9,6 +9,7 @@ import "testing"
 // 语义相反，隔离就守不住了。合并后必须"每键一次 + 显式值胜出"。
 func TestMergeEnvExplicitWins(t *testing.T) {
 	base := []string{"PATH=/usr/bin", "XDG_CONFIG_HOME=/Users/me/.config", "LANG=zh_CN.UTF-8"}
+	// 夹具里的 runtime id 只是任意的目录名（模拟隔离表给某个底座注入的路径），不指向在册适配。
 	override := []string{"XDG_CONFIG_HOME=/home/mate/runtime/opencode/config", "DSH_HOME=/home/mate/runtime/dsh"}
 
 	got := mergeEnv(base, override)

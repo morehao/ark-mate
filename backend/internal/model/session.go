@@ -48,7 +48,7 @@ type SessionEntity struct {
 	// automation 定义里**已退休的选择面键** `target.runtime_hint`（写面 40001 显式拒绝）。
 	// 本列改成 `runtime_id` 后，`runtime_hint` 只剩"退休选择面"一个含义。
 	RuntimeID string `gorm:"column:runtime_id;not null"`
-	// RuntimeSessionID 原生底座会话 id（opencode ses_*/dsh uuid）。P3 双 id：
+	// RuntimeSessionID 原生底座会话 id（形态由各底座自己决定，平台只加 `rt_` 壳）。P3 双 id：
 	// sessions.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
 	//
 	// v17 前叫 `runtime_session_id`：`provider` 在本仓是**模型供应商**的词（`providers` 表、

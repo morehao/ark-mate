@@ -43,8 +43,10 @@ func newGenRig(t *testing.T) *genRig { return newGenRigOn(t, "stub") }
 
 // newGenRigOn 指定 spec/agent 的 runtime id。
 //
-// 用真 runtime id（如 `dsh`）+ 桩命令是有意的：原生权限映射按 runtime id 分派，
-// "收回权限 → 基础键变化"这条链路只有真 id 才走得通（自造 id 没有原生权限开关）。
+// 用真 runtime id（如 `dsh`）+ 桩命令是有意的，但**光有真 id 不够**：原生权限实现挂在注册表的
+// 第三张表上（ADR-2：`Spec` 只装纯数据、行为进执行表），所以自造注册表必须显式登记内置可执行半场
+// （`runtime.RegisterBuiltinPorts`）——不登记的表现是"这个底座没有原生权限开关"，
+// "收回权限 → 基础键变化"这条链路就静默走不通了。
 func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	t.Helper()
 	// 底座是构建期常量：夹具只用这一个 spec，就得把它设成构建期选中的那个，
@@ -55,6 +57,8 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	spec.Name = runtimeID
 	spec.McpTransports = []string{"stdio"} // 桩只承载 stdio（保守形态）
 	reg := runtime.NewRegistry(spec)
+	// 与产品装配同形：桩 Spec 保留自己的 Launch（桩命令），只把执行半场登记进来。
+	runtime.RegisterBuiltinPorts(reg)
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))

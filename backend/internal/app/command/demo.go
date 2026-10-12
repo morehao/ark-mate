@@ -15,7 +15,7 @@ import (
 // demo 在**构建期选定的** runtime 上跑一次真实会话（M0 DoD 的可执行验证路径）。
 //
 // 底座不再由命令行选择（产品约束：用户不能选择 runtime）——它是二进制的属性，见
-// pkg/runtime/build.go。要换底座就换构建（`make build RUNTIME=opencode`）。
+// pkg/runtime/build.go。要换底座就换构建（`make build RUNTIME=<id>`）。
 func demo(args []string) {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
 	prompt := fs.String("prompt", "你好，请用一句话介绍你自己。", "发送给 agent 的 prompt")
@@ -42,7 +42,7 @@ func demo(args []string) {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	// runtime 配置隔离（M3-3）：demo 也会真的拉起底座子进程，必须与 serve 走同一份隔离表
-	// （否则 demo 读的是用户自己的 ~/.dsh / ~/.config/opencode，与平台会话行为不一致）。
+	// （否则 demo 读的是用户自己的底座 home 目录，与平台会话行为不一致）。
 	reg.ApplyIsolationEnv(cfg.HomeDir)
 	svc.SetTranscriptDir(cfg.TranscriptDir) // demo 会话也落 transcript（wire 事实源）
 	orch := manager.NewOrchestrator(svc, reg)

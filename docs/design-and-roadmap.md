@@ -7,8 +7,10 @@
 >
 > 定位一句话（**以文首「决策变更 v8」为准**）：**ark-mate 分两层——底座层**（`mate` 内核：多 runtime 统一
 > 接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态）**与其上的产品层**（面向用户的**个人 Agent 助手**，
-> 聚焦桌面端）；单机、单操作员、开箱即用。底座支持多个 agent runtime 接入（当前 `dsh` / `opencode`
-> 两个一等适配，**不追求数量**）；浏览器入口只是**开发形态**。codeg 是同一 ACP Host 思路下「做深做厚成
+> 聚焦桌面端）；单机、单操作员、开箱即用。底座支持多个 agent runtime 接入（**当前内置适配只有 `dsh` 一个**——
+> 第二个适配已于**决策 v18** 下线，但 **adapter 层完整保留**：接一个新底座 = 新建
+> `pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂端口实现，**不动框架内核**；**不追求数量**）；
+> 浏览器入口只是**开发形态**。codeg 是同一 ACP Host 思路下「做深做厚成
 > 桌面 IDE」的产品天花板，二者是「应用 vs 平台」的关系，设计上借鉴 codeg 的**宿主内核**（连接管理、事件流、
 > 注册与生命周期）而非其桌面外壳。
 
@@ -108,7 +110,9 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    + REST/WS 契约 + 交付形态）与**产品层**（底座之上的**个人 Agent 助手**，面向用户、聚焦桌面端）。
 >    两层职责与承诺并列成立；**不再使用**「先是产品、其次底座 / 第二重身份 / 顺带提供」这类主次句式
 >    （v7① 的「主体换位」叙述由本条取代，改名与仓库结构仍从 v7②）。
-> ② **runtime 接边有界**——底座支持多个 agent runtime 接入，当前为 `dsh` 与 `opencode` **两个一等适配**；
+> ② **runtime 接边有界**——底座支持多个 agent runtime 接入，当前为 `dsh` 与 `opencode` **两个一等适配**
+   （**该口径已由决策 v18 修正**：内置适配收敛为 `dsh` 一个，**adapter 层完整保留**——本条其余部分
+   〔接边有界的理由与成本清单〕一字不变）；
 >    **不追求数量，不承诺接入任意 ACP 生态**。「不写代码注册新 agent / 远程 ACP 端点」作为**工程能力**
 >    留在功能清单里，但**不作定位卖点、不作里程碑出口**。原因如实写：接一个 runtime 要同时过隔离表三份
 >    （`backend/pkg/runtime/isolation.go`、`frontend/apps/desktop/scripts/gen-runtime-bin.mjs`、
@@ -285,11 +289,90 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    可选字段（`event` 帧 `{id?, type, seq, agg_id, version, payload}`），`session.*` 事件类型与
 >    `session_id` 字段**冻结不动**。
 
+> **决策变更 v18（底座接入面收口：第二个内置适配下线 + adapter 层补完，2026-10-12）**：
+> 两件事一次做完，因为它们服从同一条验收口径：**接一个新底座 = 新建 `pkg/runtime/<id>/` 目录 +
+> 一个 `<id>Spec()` + 挂端口实现，不需要改任何框架/内核文件**。这次把最后一个"回内核改代码"的
+> 入口堵掉，同时把已经能承载第二个实现的机制**补完**——而不是把 adapter 层一起删掉。
+> 编号说明：本条沿用本次收口在 `AGENTS.md`／archtest 守卫注释／前端验收脚本里**已经使用**的标号
+> **v18**；v14–v17 号已被数据模型 v15 / v17 与 v16 的命名收口占用（v16 未单独登记决策条目，见
+> `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`）。
+> ① **下线第二个内置适配**——`backend/pkg/runtime/opencode/`、`frontend/apps/desktop/runtime/opencode/`、
+>    桌面随包载荷里的 opencode，以及 `Dockerfile` / `docker-compose.yml` / `Makefile` / `.env.example`
+>    里的 opencode 选项全部删除。内置适配从两个收敛到一个（`dsh`），内置种子 agent 同步收敛为
+>    `dsh` 一个（`builtinAgents`，`backend/internal/manager/agent_state.go`：每个内置 runtime 一行）。
+>    判据见 ④ 的 `TestBuiltinAgentSeedsMatchBuiltinSpecs`。
+> ② **下线不等于把接入机制删掉：adapter 层是这次被补完的对象**。验收口径是上面那句（"新目录 +
+>    `<id>Spec()` + 端口实现，不动框架"），而它是在**下线之前**先按行为等价的抽取落实了两块——
+>    当时 opencode 还在、全绿，它正是证明"这套机制能承载第二个实现"的那一个：
+>    - **隔离表进声明**：`Spec.Isolation []IsolationVar`，三种取值 `IsolationPath` /
+>      `IsolationLiteral` / `IsolationEmpty` + `LauncherFallback`；`backend/pkg/runtime/isolation.go`
+>      不再认识任何具体底座，只做机械投影（`IsolationEnvFor` / `projectIsolation`）。
+>    - **原生权限进端口**：`NativePermissionAdapter`（`RegisterNativePermission` / `NativePermission(id)`，
+>      `backend/pkg/runtime/native_permission.go`），签名只收原语
+>      `Env(mode, def string, tools map[string]string) (env []string, desc string)`；内核
+>      `backend/internal/manager/native_permission.go` 只做"模式 → 取端口 → 转发"，动作取值与工具键
+>      一概不归一（那是该底座的词表）。
+> ③ **模型取值进端口（最后一块，也是这次收口最关键的一处）**：此前内核里活着一句 `modelValueFor` 的
+>    `switch runtimeID { case "dsh": …; case "opencode": …; default: 报错 }`——那是**内核认识具体底座**的
+>    教科书形态（它没有 import 任何 adapter 包，所以上一条 import 守卫抓不到它）。现在改成查注册表
+>    **第三张可执行端口表** `ModelValueAdapter`（`RegisterModelValue` / `ModelValue(id)`，
+>    `backend/pkg/runtime/model_value.go`）；未登记该形态的 id 如实返回 `model_value_unsupported`，
+>    **不替它猜形状**（`backend/internal/manager/model_list.go` 的 `modelValueFor` 只剩分发）。于是
+>    `Registry` 的形状固定为 `map[string]Spec`（**声明半场**）+ **三张可执行端口表**
+>    （`Syncer` / `NativePermissionAdapter` / `ModelValueAdapter`；ADR-2：可执行对象不进 `Spec`）。
+> ④ **新增守卫（这次收口的机器判据）**，三条挂在
+>    `backend/internal/archtest/knowledge_dependency_test.go`：
+>    `TestInternalDoesNotImportRuntimeAdapters`（`internal/**` 不得 import `pkg/runtime/<adapter>`）、
+>    `TestNativePermissionModeLiteralsMatchWire`（原生权限 `native_mode` 取值在内核 wire 契约与
+>    adapter 侧逐字一致）、**`TestInternalHasNoRuntimeIDSpecialCase`**（`internal/**` 剥注释后不得出现
+>    任何内置适配 id 的 `case "<id>"` / `== "<id>"` / `!= "<id>"`；判据的 id 集合取自
+>    `runtime.AllBuiltinSpecs()`，所以接新底座时不假红——它钉的正是 ③ 那个 `switch runtimeID`，
+>    而那段代码**活过了此前全部守卫**）。另有 `backend/internal/manager/agent_state_test.go` 的
+>    `TestBuiltinAgentSeedsMatchBuiltinSpecs`（内置种子 agent 与 `AllBuiltinSpecs()` 三方向比对，
+>    含 `id == runtime` 这条形态不变式）。
+> ⑤ **键名收口**：`OPENCODE_BIN` → `RUNTIME_BIN`（含 `Makefile` 内部的 `RUNTIME_BIN_FROM_FILE` /
+>    `RUNTIME_BIN_ABS` / `RUNTIME_BIN_SOURCE`），`Makefile` 与 `.env.example` 同改。**语义不变**：
+>    它是"显式覆盖**构建期固定的那个**底座的可执行文件"，**在任何构建上都生效**（转发 shim 名随
+>    `$(RUNTIME)`）。保留的**不是**兼容别名——旧键名 `OPENCODE_BIN` 不认。
+> ⑥ **`AllBuiltinRegistry()` / `AllBuiltinSpecs()` 的语义不变**（`backend/pkg/runtime/build.go`）：
+>    产品装配走 `ProductRegistry`——**只注册构建期选中的那一个**，未注册即**启动失败**（fail-closed）；
+>    `AllBuiltin*` 只服务测试与诊断（医生与能力矩阵守卫必须看到**全部**适配面，否则只注册一个会让
+>    别的适配的守卫**静默空转**）。
+> ⑦ **刻意保留的（不要读成"仓库里已零命中"）**：
+>    - **宿主环境面**：`frontend/scripts/lib/decoy-bin.mjs` 的 `DECOY_NAMES` 里**留着** `opencode`，
+>      `desktop-ui-acceptance.mjs`（`~/.config/opencode`）、`desktop-no-host-acceptance.mjs` 与
+>      `desktop-skill-projection-acceptance.mjs`（`~/.local/state/opencode`）保留"用户真实目录零变化"
+>      判据。理由：这些判据的语义是"**宿主机上装过什么与本产品无关**"，不是"本仓随包带哪些"。
+>    - **禁词表**：A9 的 `TestInternalHasNoRuntimeConfigLiterals`（`knowledge_boundary_test.go`）里
+>      `opencode.json` / `OPENCODE_CONFIG_CONTENT` / `opencode_json` **留着**，`settings_copy_test.go`
+>      的禁词表也留着 `opencode`。理由：它们拦的是"这类字面量出现在内核就是知识回流"，删掉等于
+>      **拆掉一层保护**。
+>    - `dev_parity_test.go` 里"不得出现写死底座名的回显"仍然**逐字**拦两个历史值（`底座  dsh` /
+>      `底座  opencode`）——它们拦的是同一类回归。
+>    - **`IsolationEmpty`（空值）不得被翻译成回落路径**：2026-10-10 有过 EISDIR 事故（把
+>      `$MATE_HOME/` 当一个目录传给配置变量，底座把它当文件读）。桌面启动器
+>      `frontend/apps/desktop/scripts/gen-runtime-bin.mjs` 的 `if (sub === '')` 空值分支与守卫
+>      （`isolation_parity_test.go` 里"空值分支不得出现 `MATE_HOME`"的断言）都留着；今天没有任何
+>      launcher 用到空值，但那是**机制**，不是为某个底座写的。
+> ⑧ **代价如实写**：内置适配只剩一个，意味着"第二个实现"提供的回归保护**弱了一层**。补法不是
+>    喊一句"adapter 层还在"，而是 ②③ 的端口表 + ④ 的三条守卫 + 一个**合成的第二适配**：
+>    `backend/internal/testutil/runtimetest`（id = `rtx`，刻意不在内置清单里）的
+>    `Register(reg, launch)` 把 `Spec` 与三张端口表一起登记上；manager 侧最重要的那条端到端判据
+>    `TestSyntheticAdapterIsFirstClass`（`backend/internal/manager/synthetic_adapter_test.go`）就挂在它
+>    上面——断言：不指定 runtime 的 agent 回落到构建期固定那个、`modelValueFor` 对合成底座返回它
+>    自己声明的形态、对未登记 id 报 `model_value_unsupported`，且这些 env 真的落到了子进程。
+>    **顺带说明**：`pkg/runtime` 的测试里另有一个自造的 `rt-alt`（`isolation_test.go` /
+>    `session_runtime_test.go`），因为 `pkg/` 不能 import `internal/`。
+> ⑨ **不变**——wire 契约与事件类型、数据 schema、REST 路由与错误码、`session.*` 词汇、v15/v16/v17
+>    的会话与命名收口、**构建期固定 runtime**（用户不能选）这条产品约束、`ProductRegistry` 的
+>    fail-closed 语义，逐条不变；本次只**新增**上面这些端口与守卫、**删除** opencode 适配面、
+>    **改名**一个构建期覆盖键，没有别的改动。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个
 核心命题：**作为 ACP Host，用统一控制面连接、运行、管理多个外部 Agent Runtime**（codeg 内置 15 个 agent，
-ark-mate 是 `opencode` + `deepseek-harness` **两个一等适配**——**有界**，见决策 v8②）。codeg 是这一命题下
+ark-mate 是 `dsh` **一个内置适配**——**有界**，见决策 v8② 与 v18）。codeg 是这一命题下
 **已到 0.30 版本、形态完整**的参考系，其宿主角色的实现分层可直接映射到 ark-mate 的
 `acl / runtime / manager / server`：
 
@@ -359,7 +442,7 @@ ark-mate 是 `opencode` + `deepseek-harness` **两个一等适配**——**有�
 6. **一次运行只指定一个 runtime（无跨 agent 协作）**：会话/运行在创建时绑定并固定一个 Agent（其下唯一
    Runtime）；「多 runtime」只表现为注册表与**按会话/运行选择切换**，不存在 @委托、子 agent、并行跨 runtime
    协作。所有编排语义（任务/自动化等，若未来引入）同样遵守「一次运行单 runtime」约束。
-   **数量有界（决策 v8②）**：当前 `dsh` / `opencode` 两个一等适配，**不追求数量、不承诺接入任意 ACP 生态**；
+   **数量有界（决策 v8②，2026-10-12 由 v18 修正为「内置 `dsh` 一个 + adapter 层保留」）**：**不追求数量、不承诺接入任意 ACP 生态**；
    「配置化注册新 agent」是工程能力，不是定位承诺。
 7. **能力不重造，平台只做数据/管理层（决策 v3①②）**：skills/MCP/推理等执行能力一律复用底层 runtime
    原生实现——ark-mate **不实现** skill 执行器、MCP 客户端等运行时功能；平台职责限定为管理这些能力
@@ -848,7 +931,8 @@ apps/panel/src/
 
 codeg 是「**个人/团队的 agent IDE**」——价值在桌面交互深度，甚至多 agent 同场协作；ark-mate 分两层：
 **底座层**是「**可自托管的 agent 内核**」——价值在**统一拉起、管理、切换指定** runtime（一次运行一个
-runtime，无跨 agent 协作；当前 `dsh` / `opencode` 两个一等适配，**不追求数量**，决策 v8②），并通过
+runtime，无跨 agent 协作；当前内置 `dsh` 一个适配（第二个适配已于 v18 下线、adapter 层保留），
+**不追求数量**，决策 v8②/v18），并通过
 REST + WS 把能力开放给任意前端；**产品层**是底座之上的**个人 Agent 助手**（**聚焦桌面端**，决策 v8①③）。
 凡 codeg 中「依赖本地桌面形态（IDE 外壳）」或「依赖多 agent 协作」的能力，ark-mate 一律降级或不做；
 凡「服务端/协议层」的纪律与机制，直接吸收并可能提前。

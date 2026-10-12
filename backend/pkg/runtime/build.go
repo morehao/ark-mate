@@ -23,7 +23,7 @@ const DefaultBuildRuntime = dsh.ID
 
 // BuildRuntime 构建期注入的底座 id（**不是配置、不是环境变量**）：
 //
-//	go build -ldflags "-X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=opencode"
+//	go build -ldflags "-X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=<adapter id>"
 //
 // 空 = 用 DefaultBuildRuntime。用户面（REST / 控制台）读不到它——这是"用户不能选择 runtime"
 // 那条产品约束的落点。
@@ -40,10 +40,14 @@ func SelectedRuntime() string {
 // AllBuiltinSpecs 全部内置 runtime 的静态描述（不注册、不含 syncer）。
 //
 // 它服务三件事：① 测试夹具；② 诊断与**能力矩阵守卫**——那些守卫必须看到全部适配面，
-// 否则"默认 dsh"的构建会让 opencode 的守卫静默放过（那正是本次改动最容易造成的假绿）；
-// ③ ProductRegistry 的内置候选集。
+// 否则"只装配构建期选中的那一个"会让**没被选中**的底座守卫静默放过（那正是本次改动最容易
+// 造成的假绿）；③ ProductRegistry 的内置候选集。
+//
+// 这里的清单**不是**"当前装了哪些底座"的唯一事实源：`ProductRegistry` 只装配 `SelectedRuntime()`
+// 那一个，而一个 `xxxSpec()` 出现在这张表里就意味着它进了产品。**接入下一个底座 = 在这里加一个
+// `xxxSpec()`**（外加它自己的目录与两条端口实现）——这是 adapter 层的验收口径在代码里的落点。
 func AllBuiltinSpecs() []Spec {
-	return []Spec{opencodeSpec(), dshSpec()}
+	return []Spec{dshSpec()}
 }
 
 // AllBuiltinRegistry 全部内置 runtime 的注册表（本文件引入之前 `DefaultRegistry` 的语义）。
@@ -52,7 +56,7 @@ func AllBuiltinSpecs() []Spec {
 // 测试、诊断与守卫能一次看到全部适配面。
 func AllBuiltinRegistry() *Registry {
 	r := NewRegistry(AllBuiltinSpecs()...)
-	registerBuiltinSyncers(r)
+	RegisterBuiltinPorts(r)
 	return r
 }
 
@@ -84,9 +88,10 @@ func ProductRegistry(remotes []Spec) (*Registry, error) {
 	for _, s := range builtins {
 		if s.ID == id {
 			r.Register(s)
-			// 注册 syncer 的时机与 AllBuiltinRegistry 一致：此刻隔离 env 还没注入，
-			// ResolveConfigLocation 大概率解析不了 → 不登记；随后 ApplyIsolationEnv 会再调一次。
-			registerBuiltinSyncers(r)
+			// 注册可执行半场的时机与 AllBuiltinRegistry 一致：此刻隔离 env 还没注入，
+			// ResolveConfigLocation 大概率解析不了 → syncer 不登记；随后 ApplyIsolationEnv 会再调一次
+			// （原生权限不受此影响，它只产出 env、不需要落点）。
+			RegisterBuiltinPorts(r)
 			return r, nil
 		}
 	}

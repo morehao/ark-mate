@@ -28,7 +28,7 @@
  * 扫描 `<payloads>/<name>/<version>/payload.json`（一个都没有 → 失败并提示先跑
  * `make desktop/payloads`）。每份载荷的 `engines.node` 按下列优先级解析：
  *   1. `payload.json` 的 `enginesNode`（M3-1 之后若补了这个字段，它最权威）；
- *   2. 载荷根的 `package.json`（opencode 这类把包内容铺在载荷根的形态）；
+ *   2. 载荷根的 `package.json`（平铺形态：包内容直接铺在载荷根）；
  *   3. 从 `entry` 向上找到的第一个 `package.json`（dsh 这类闭包载荷：entry 是
  *      `node_modules/@deepseek-ai/dsh/lib/bin.js`，声明包在闭包内部）。
  * 声明包里**没有** `engines.node` 时**不静默放行**：人话报告会逐份写明"看过哪些文件、
@@ -369,7 +369,7 @@ function checkDeclaredElectron(actual) {
 
 function findPayloads(root) {
   if (!existsSync(root)) {
-    fail(`载荷目录不存在：${root}`, '先跑 `make desktop/payloads`（M3-1：装配 dsh 闭包与 opencode 二进制）')
+    fail(`载荷目录不存在：${root}`, '先跑 `make desktop/payloads`（M3-1：装配随包载荷）')
   }
   const found = []
   for (const name of readdirSync(root).sort()) {

@@ -38,7 +38,7 @@ func openTestDB(t *testing.T) *Store {
 func seedSession(t *testing.T, s *Store, id string) {
 	t.Helper()
 	sess := model.SessionEntity{
-		ID: id, AgentID: "agent-opencode",
+		ID: id, AgentID: "agent-rtx",
 		Title: "", Status: "in_progress",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
@@ -245,7 +245,7 @@ func TestImportBatch(t *testing.T) {
 	}
 	mkItem := func(sessionID string, events []model.EventEntity) ImportItem {
 		return ImportItem{
-			Session: model.SessionEntity{ID: sessionID, AgentID: "agent-opencode", Title: "迁移会话",
+			Session: model.SessionEntity{ID: sessionID, AgentID: "agent-rtx", Title: "迁移会话",
 				Status: "completed", CreatedAt: now, UpdatedAt: now},
 			Events: events,
 		}
@@ -449,7 +449,7 @@ func TestSessionWorkspaceRoundTrip(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
 	in := model.SessionEntity{
-		ID: "ws-1", AgentID: "agent-opencode",
+		ID: "ws-1", AgentID: "agent-rtx",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: now, UpdatedAt: now,
 	}

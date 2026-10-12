@@ -16,36 +16,23 @@ func TestDefaultRegistry(t *testing.T) {
 	reg := AllBuiltinRegistry()
 	items := reg.List()
 
-	// 内置 runtime 收敛为两个：opencode / dsh（echo 演示底座已于 M0 删除）。
-	if len(items) != 2 {
-		t.Fatalf("期望 2 个 runtime，got %d: %+v", len(items), items)
+	// 内置 runtime 目前只有一个：dsh（演示底座 echo 与第二个一等适配 opencode 均已下线；
+	// **下线一个底座不该让这条判据变形**——它断言的是"注册表里就是 AllBuiltinSpecs() 那些"，
+	// 而不是"恰好有两个"）。
+	if len(items) != len(AllBuiltinSpecs()) {
+		t.Fatalf("注册表条目应与内置清单一致（%d），got %d: %+v", len(AllBuiltinSpecs()), len(items), items)
 	}
-	// List 按 ID 排序：dsh < opencode。
-	if items[0].ID != "dsh" || items[1].ID != "opencode" {
-		t.Fatalf("排序不符: %+v", items)
+	// List 按 ID 排序（稳定输出；`/agents` 与诊断面依赖它）。
+	for i := 1; i < len(items); i++ {
+		if items[i-1].ID >= items[i].ID {
+			t.Fatalf("List 未按 ID 升序: %+v", items)
+		}
 	}
-	// echo 必须彻底消失：既不在清单里，也不能靠别名复活。
-	if _, ok := reg.Get("echo"); ok {
-		t.Fatal("echo 演示底座已删除，不应仍在注册表里")
-	}
-
-	oc, ok := reg.Get("opencode")
-	if !ok {
-		t.Fatal("opencode 未注册")
-	}
-	if oc.Name != "opencode" || oc.Version != "opencode acp" {
-		t.Fatalf("opencode spec 不符: %+v", oc)
-	}
-	if !reflect.DeepEqual(oc.Launch.Args, []string{"acp"}) || oc.Launch.Command != "opencode" {
-		t.Fatalf("opencode launch 不符: %+v", oc.Launch)
-	}
-	// opencode 基线：会话能力完整 + image/embeddedContext。
-	if !oc.Caps.SessionsPersistent || !oc.Caps.MultiSessionConcurrent || !oc.Caps.Images || !oc.Caps.EmbeddedContext {
-		t.Fatalf("opencode 能力基线不符: %+v", oc.Caps)
-	}
-	// 与 adapter 声明一致（adapters.go 汇入不丢失字段）。
-	if oc.Caps.SessionsPersistent != true {
-		t.Fatal("opencode SessionsPersistent 应为 true")
+	// 已下线的 id 必须彻底消失：既不在清单里，也不能靠别名复活。
+	for _, gone := range []string{"echo", "opencode"} {
+		if _, ok := reg.Get(gone); ok {
+			t.Fatalf("%s 已下线，不应仍在注册表里", gone)
+		}
 	}
 
 	dh, ok := reg.Get("dsh")

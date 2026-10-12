@@ -136,7 +136,7 @@ func (o *Orchestrator) RevokeMemory(sessionID, title, kind string) (bool, error)
 //     回应并留痕，不猜测（猜错会把提问卡投到别的会话上，比不投更坏）。
 func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.ElicitationRequest) (sessionID, scopeSource, ambiguousNote string) {
 	// D-4（v15 顺手修的既有缺陷）：`req.SessionID` 来自 ACP `_meta`，那是**底座的会话 id**，
-	// 不是平台的会话 id。v15 之前两者同形（opencode 都发 `ses_…`），于是"把提问卡挂到一个
+	// 不是平台的会话 id。v15 之前两者同形（有些底座就发 `ses_…`），于是"把提问卡挂到一个
 	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
 	//
 	// 修法只有一条：先按 `runtime_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，

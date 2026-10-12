@@ -36,23 +36,30 @@ func dialTestSession(t *testing.T, r *testACPResponder) (*acl.Client, *acl.Sessi
 	return cl, sess
 }
 
-// TestTwoProjectionConstructors 验证 opencode / dsh 两投影各自携带
-// §6.2 Spec 身份（ID/ManagesOwnContext），共用同一「活会话」实现。
-func TestTwoProjectionConstructors(t *testing.T) {
+// TestSessionProjectionCarriesSpecIdentity 会话投影必须携带**传入那份 Spec** 的身份
+// （ID / ManagesOwnContext），而不是按 id 查表得来的身份。
+//
+// 为什么这条是"adapter 层"的一部分：投影构造若又去回查 id，那么**手搓 Spec 的调用方**
+// （测试夹具、下一个底座在进内置清单之前的形态）拿到的身份会与它手里那份 `Spec` 不一致，
+// 而这种不一致只会在很远的地方以"模型切不过去""取消没生效"的形式表现出来。
+func TestSessionProjectionCarriesSpecIdentity(t *testing.T) {
 	_, sess := dialTestSession(t, newTestACPResponder())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 两个投影共享同一活会话做身份断言（ID/自管上下文取自各自 Spec）。
+	// 刻意用**非内置 id**（`rt-alt`）：证明投影身份来自入参 Spec，而不是"认识这个 id"。
 	for _, tc := range []struct {
 		id     string
-		build  func(*acl.Session) Runtime
 		ownCtx bool
 	}{
-		{"opencode", func(s *acl.Session) Runtime { return NewOpencodeRuntime(s) }, true},
-		{"dsh", func(s *acl.Session) Runtime { return NewDeepseekHarnessRuntime(s) }, true},
+		{"rt-alt", true},
+		{"dsh", true},
+		{"rt-direct", false},
 	} {
-		rt := tc.build(sess)
+		rt := NewProjection(Spec{ID: tc.id, ManagesOwnContext: tc.ownCtx}, sess)
+		if rt == nil {
+			t.Fatalf("%s 应拿到会话投影（投影构造不按 id 分派）", tc.id)
+		}
 		if rt.ID() != tc.id {
 			t.Fatalf("%s 投影 ID 不符: %q", tc.id, rt.ID())
 		}
@@ -78,32 +85,20 @@ func TestTwoProjectionConstructors(t *testing.T) {
 	}
 }
 
-// TestNewProjectionDispatcher 分发器（Orchestrator 采用接缝）：两投影按 Spec.ID 路由、
-// 未知 id 返回 nil；构造不触碰会话（nil sess 亦返回非 nil 实例，方法调用方负责非 nil）。
-func TestNewProjectionDispatcher(t *testing.T) {
-	for _, tc := range []struct {
-		id   string
-		want bool
-	}{
-		{"opencode", true},
-		{"dsh", true},
-		{"unknown-rt", false},
-	} {
-		spec := Spec{ID: tc.id}
-		rt := NewProjection(spec, nil)
-		if tc.want {
-			if rt == nil || rt.ID() != tc.id {
-				t.Fatalf("%s 应分发到投影（ID=%s），got %+v", tc.id, tc.id, rt)
-			}
-			if !rt.ManagesOwnContext() {
-				t.Fatalf("%s 投影应自管上下文", tc.id)
-			}
-		} else if rt != nil {
-			t.Fatalf("未知 runtime %q 应返回 nil，got %+v", tc.id, rt)
+// TestNewProjectionNeedsNoDispatch 会话投影的构造**不得**按 id 分派。
+//
+// 这条判据钉的是"框架里不再有 `switch spec.ID`"这件事本身：投影是**按 Spec 参数化**的，
+// 所以任何 id——内置的、远程的、测试现造的——都必须拿到同样形态的实例。
+// 分派表一旦长回来（"只有这几个 id 才算投影"），表现是**新底座静默没有会话投影**：
+// 取消不生效、模型切不过去，而每一处都只退化成"回退底层直连"，看不出来。
+func TestNewProjectionNeedsNoDispatch(t *testing.T) {
+	for _, id := range []string{"dsh", "rt-alt", "unknown-rt", "echo", ""} {
+		rt := NewProjection(Spec{ID: id}, nil) // nil sess：构造不该触碰会话
+		if rt == nil {
+			t.Fatalf("id=%q 应拿到投影实例（构造不按 id 分派）", id)
 		}
-	}
-	// echo 已从内置清单与分发器移除（M0）：它的 ID 必须落到「未知」分支，而不是残留别名。
-	if rt := NewProjection(Spec{ID: "echo"}, nil); rt != nil {
-		t.Fatalf("echo 已删除，分发器不应再认识它: %+v", rt)
+		if rt.ID() != id {
+			t.Fatalf("id=%q 的投影身份应逐字来自入参 Spec，实际 %q", id, rt.ID())
+		}
 	}
 }

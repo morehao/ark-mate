@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 )
 
@@ -15,12 +16,12 @@ import (
 // **逐已注册 runtime 的可达性**（端点/凭据通道）与**本地段问题清单**。
 //
 // v12 删掉了 v11 的 `delivery` 字段（它描述的是"凭据恒为 dial_env / next_run"这条静态事实，
-// 而 v12 的凭据通道**按 runtime 分面**：dsh 走原生文档可热生效、opencode 走 env 换代际——
+// 而 v12 的凭据通道**按 runtime 分面**：dsh 走原生文档可热生效、合成夹具 rtx 走 env——
 // 一条静态声明表达不了它，说了就是说谎）。逐 runtime 的通道由 `applicability[].reason` 回答。
 func TestProviderRespCarriesApplicability(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
-	svc := agentTestSvc(t, dir) // 已注册 runtime：dsh / opencode / stub（升序）
+	svc := agentTestSvc(t, dir) // 已注册 runtime：dsh / rtx / stub（升序）
 
 	key := "sk-secret-abc"
 	if _, err := svc.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
@@ -33,7 +34,7 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 	resp := items[0]
 
 	// ① 逐已注册 runtime 一条，端点齐备 → ok/projected，reason 里带端点与该底座的凭据通道。
-	wantRuntimes := []string{"dsh", "opencode", "stub"}
+	wantRuntimes := []string{"dsh", runtimetest.ID, "stub"}
 	if len(resp.Applicability) != len(wantRuntimes) {
 		t.Fatalf("applicability 应覆盖 %d 个已注册 runtime，得到 %+v", len(wantRuntimes), resp.Applicability)
 	}
@@ -50,16 +51,16 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 		}
 	}
 	// ② 通道分面：同一个供应商在两个底座上走的通道**必须各自如实**——dsh 的原生凭据文档已实测
-	//    （Credential.Tested），opencode 的本期只有 env（它的原生面是自己的 SQLite 表）。
+	//    （Credential.Tested），合成夹具 rtx 只有 env 一条通道（它的声明里 NativeDoc 为空）。
 	for _, a := range resp.Applicability {
 		switch a.Runtime {
 		case "dsh":
 			if !strings.Contains(a.Reason, "凭据文档") {
 				t.Errorf("dsh 的凭据通道应报原生文档（已实测可热生效），得到 %q", a.Reason)
 			}
-		case "opencode":
+		case runtimetest.ID:
 			if !strings.Contains(a.Reason, "MATE_") {
-				t.Errorf("opencode 的凭据通道应报逐供应商的 env 引用名，得到 %q", a.Reason)
+				t.Errorf("%s 的凭据通道应报逐供应商的 env 引用名，得到 %q", runtimetest.ID, a.Reason)
 			}
 		}
 	}

@@ -17,7 +17,7 @@
  * 用法：
  *   const llm = await startFakeLLM({ port: 10078 })
  *   // dsh 侧：DEEPSEEK_BASE_URL=http://127.0.0.1:<port>（核心按 M2 的 provider 注入读它）
- *   // opencode 侧：隔离配置目录里的 providers.*.settings.baseURL 指向同一端口
+ *   // 原生配置目录侧：providers.*.settings.baseURL 指向同一端口
  *   llm.captured   // 收到的每个请求 { path, body, raw }（按到达顺序）
  *   llm.close()    // 收尾（关监听；进程退出前调用）
  */

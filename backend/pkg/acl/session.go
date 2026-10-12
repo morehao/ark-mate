@@ -96,7 +96,8 @@ func (s *Session) Close(ctx context.Context) error {
 //
 // configID/value 都是运行时自报的不透明标识：configID 取自 ConfigOption.ID，
 // value 取自 ConfigOptionValue.Value，**不得**自行构造或解析。
-// agent 拒绝该值时会返回错误（dsh: invalidParams + 文本；opencode: invalidParams + data），
+// agent 拒绝该值时会返回错误（历史实测：dsh 为 invalidParams + 文本，另一底座（已下线）
+// 为 invalidParams + data），
 // 该错误即「这个取值不可用」的权威判据。
 func (s *Session) SetConfigOption(ctx context.Context, configID, value string) ([]ConfigOption, error) {
 	resp, err := s.client.conn.SetSessionConfigOption(ctx, acpsdk.SetSessionConfigOptionRequest{

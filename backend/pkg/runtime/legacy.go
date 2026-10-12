@@ -62,7 +62,7 @@ func NormalizeIDs(ids []string) []string {
 // LegacyAliasesOf 返回某个 runtime id 的历史别名（当前只有 dsh 有一条）。
 //
 // 用途是**认领旧产物**：物化层要能在归属标记里认出"这条是我的旧名字"，写入时替换成新名字，
-// 删除联动时把旧名字一并摘掉。返回空切片 = 没有历史别名（opencode 与远程 runtime 都是这样）。
+// 删除联动时把旧名字一并摘掉。返回空切片 = 没有历史别名（远程声明的 runtime 就是这样）。
 func LegacyAliasesOf(id string) []string {
 	if id == dsh.ID {
 		return []string{LegacyDeepseekharnessID}

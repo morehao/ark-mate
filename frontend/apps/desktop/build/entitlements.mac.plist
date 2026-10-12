@@ -9,7 +9,7 @@
      不加它渲染进程/Node 侧起来就崩。Electron 官方文档的 hardened runtime 清单第一条。
   2. `com.apple.security.cs.disable-library-validation` —— 库校验要求"加载方与被加载方的 Team ID 一致"。
      本项目是 **ad-hoc 签名（无 Team ID）**，而包内原生件来自三套互不相干的签名者
-     （上游 Electron 发行包、dsh 的原生插件 `.node`、opencode 二进制），mach-o loader 会在加载
+     （上游 Electron 发行包、dsh 的原生插件 `.node`、随包载荷里的原生二进制），mach-o loader 会在加载
      第一个原生插件时才失败（症状是"起得来、握手发不出去"）。
      **这是长期形态**：本项目不上架、不买证书（计划 §12.27；M4-2b 不执行），不存在"哪天所有对象
      都由同一个 Team 重签"的场景——所以这一条**长期保留**，不要按"过渡手段"删掉它。

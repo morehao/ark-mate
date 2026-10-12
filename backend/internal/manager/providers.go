@@ -437,8 +437,8 @@ func providerProblems(d *providerDef) []string {
 
 // providerEnvFor 返回**某 runtime 上**给某供应商注入的 env（KEY=VALUE 列表；不适用 → nil）。
 //
-// 为什么必须带 runtimeID（v12 的关键改动）：凭据通道**按 runtime 分面**（ADR-4）——
-// dsh 走原生凭据文档（可热生效），opencode 走子进程 env。所以"要不要注入 env"不能由平台
+// 为什么必须带 runtimeID（v12 的关键改动）：凭据通道**按 runtime 分面**（ADR-4）——有的底座
+// 走原生凭据文档（可热生效），有的只能走子进程 env。所以"要不要注入 env"不能由平台
 // 一律决定，必须问该底座自己的声明：
 //
 //	`Credential.Tested && NativeDoc != ""` → 走原生文档，**平台不注入同名 env**

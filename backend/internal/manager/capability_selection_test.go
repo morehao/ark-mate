@@ -15,8 +15,8 @@ import (
 func selRig(t *testing.T) *Service {
 	t.Helper()
 	reg := runtime.NewRegistry(runtime.Spec{
-		ID: "opencode", McpTransports: []string{"stdio", "http"},
-		Projections: []runtime.Projection{opencodeSkillProjectionForTest()},
+		ID: "rtx", McpTransports: []string{"stdio", "http"},
+		Projections: []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := NewService(reg, eventbus.New())
 	// 本组钉的是**选择优先级**（会话选定 > agent 白名单 > 全量），与"远程是否折叠成网关条目"
@@ -32,8 +32,8 @@ func selRig(t *testing.T) *Service {
 		}
 	}
 	svc.SetSkillProjections([]SkillProjection{{
-		Runtime:    "opencode",
-		Projection: opencodeSkillProjectionForTest(),
+		Runtime:    "rtx",
+		Projection: rtxSkillProjectionForTest(),
 	}})
 	for _, id := range []string{"alpha", "beta"} {
 		sk := capability.Skill{ID: id, Body: "# " + id}
@@ -62,23 +62,23 @@ func TestCapabilitySelectionMcpPrecedence(t *testing.T) {
 	agentDefault := &AgentRec{ID: "a", Mcps: ptrOf([]string{"fs"})} // agent 层只允许 fs
 
 	// 未声明 → 回落 agent 白名单。
-	if got := names(svc.McpServersFor(agentDefault, "opencode", nil)); len(got) != 1 || got[0] != "fs" {
+	if got := names(svc.McpServersFor(agentDefault, "rtx", nil)); len(got) != 1 || got[0] != "fs" {
 		t.Fatalf("未声明会话选定应回落 agent 白名单，got %v", got)
 	}
 	// 声明了空数组 → 一个都不要（**不是**回落 agent）。
-	if got := svc.McpServersFor(agentDefault, "opencode", &CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
+	if got := svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
 		t.Fatalf("会话选定空数组应禁用注入，got %v", names(got))
 	}
 	// 声明了 web → **覆盖** agent 白名单（求交会让 web 永远选不上且无法解释）。
-	if got := names(svc.McpServersFor(agentDefault, "opencode", &CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
+	if got := names(svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
 		t.Fatalf("会话选定应覆盖 agent 白名单，got %v", got)
 	}
 	// 只声明 skill 侧 → MCP 仍回落 agent 白名单（两个 kind 互相独立）。
-	if got := names(svc.McpServersFor(agentDefault, "opencode", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 1 || got[0] != "fs" {
+	if got := names(svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 1 || got[0] != "fs" {
 		t.Fatalf("只声明 skill 时 MCP 应回落 agent 白名单，got %v", got)
 	}
 	// 空白名单（`capabilities: {}`）→ 也是回落 agent 白名单。
-	if got := names(svc.McpServersFor(agentDefault, "opencode", NewCapabilitySelection())); len(got) != 1 || got[0] != "fs" {
+	if got := names(svc.McpServersFor(agentDefault, "rtx", NewCapabilitySelection())); len(got) != 1 || got[0] != "fs" {
 		t.Fatalf("空选定对象应回落 agent 白名单，got %v", got)
 	}
 }
@@ -89,9 +89,9 @@ func TestCapabilitySelectionSkillSubsetInFingerprint(t *testing.T) {
 	svc := selRig(t)
 	agent := &AgentRec{ID: "a"}
 
-	all := svc.capabilityFingerprint(agent, "opencode", NewCapabilitySelection())
-	onlyAlpha := svc.capabilityFingerprint(agent, "opencode", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})
-	onlyBeta := svc.capabilityFingerprint(agent, "opencode", &CapabilitySelection{Skills: ptrOf([]string{"beta"})})
+	all := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection())
+	onlyAlpha := svc.capabilityFingerprint(agent, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})
+	onlyBeta := svc.capabilityFingerprint(agent, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"beta"})})
 	if all == "" || onlyAlpha == "" || onlyBeta == "" {
 		t.Fatal("声明了能力选择就必须有指纹")
 	}
@@ -99,14 +99,14 @@ func TestCapabilitySelectionSkillSubsetInFingerprint(t *testing.T) {
 		t.Fatalf("不同技能子集必须不同指纹: all=%s alpha=%s beta=%s", all, onlyAlpha, onlyBeta)
 	}
 	// 顺序/重复/空白字符不影响指纹（规范化在进指纹之前）。
-	same := svc.capabilityFingerprint(agent, "opencode",
+	same := svc.capabilityFingerprint(agent, "rtx",
 		&CapabilitySelection{Skills: ptrOf([]string{" beta", "beta", "alpha", ""})})
-	if same != svc.capabilityFingerprint(agent, "opencode",
+	if same != svc.capabilityFingerprint(agent, "rtx",
 		&CapabilitySelection{Skills: ptrOf([]string{"alpha", "beta"})}) {
 		t.Fatalf("顺序/重复/空白不该改变指纹: %s", same)
 	}
 	// 未声明 → 空指纹（R11：缺省路径的键必须与引入代际之前逐字相同）。
-	if got := svc.capabilityFingerprint(agent, "opencode", nil); got != "" {
+	if got := svc.capabilityFingerprint(agent, "rtx", nil); got != "" {
 		t.Fatalf("未声明必须得空指纹，got %q", got)
 	}
 }
@@ -180,7 +180,7 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 	injectedFor := func(rec *SessionRec) []string {
 		t.Helper()
 		sel := ParseCapabilitySelection(rec.CapabilityJSON)
-		return names(svc.McpServersFor(agent, "opencode", sel))
+		return names(svc.McpServersFor(agent, "rtx", sel))
 	}
 
 	// 恢复路径的注入集与会话钉住的选定一致。
@@ -195,8 +195,8 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 	}
 
 	// 同一份选定在"新建 → 落库 → 重启 → 恢复"后必须逐字一致（含指纹：代际不能漂）。
-	before := svc.capabilityFingerprint(agent, "opencode", pinned)
-	after := svc.capabilityFingerprint(agent, "opencode", ParseCapabilitySelection(MarshalCapabilitySelection(pinned)))
+	before := svc.capabilityFingerprint(agent, "rtx", pinned)
+	after := svc.capabilityFingerprint(agent, "rtx", ParseCapabilitySelection(MarshalCapabilitySelection(pinned)))
 	if before != after {
 		t.Fatalf("重启后指纹漂移：%s → %s（会话会被挂到另一个代际）", before, after)
 	}
@@ -204,7 +204,7 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 		t.Fatal("声明了选定就该有指纹")
 	}
 	// 反向：若恢复路径漏传选定（用 nil 算），指纹会变空——这正是要防的漂移。
-	if svc.capabilityFingerprint(agent, "opencode", nil) != "" {
+	if svc.capabilityFingerprint(agent, "rtx", nil) != "" {
 		t.Fatal("未声明应为空指纹")
 	}
 }

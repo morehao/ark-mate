@@ -231,12 +231,12 @@ func checkProviderOrphans(facts manager.ProviderDoctorFacts) doctorCheck {
 		len(facts.OrphanCiphertexts), sampleList(facts.OrphanCiphertexts))}
 }
 
-// checkModalityDeclaration 两侧差异如实可见（ADR-12/A11）：模型输入模态在 dsh 上是**已声明**的
-// 交付事实，在 opencode 上只是**平台记录**。
+// checkModalityDeclaration 两侧差异如实可见（ADR-12/A11）：模型输入模态在**声明了交付面**的
+// 底座上是已声明的交付事实，在没声明的那一侧只是**平台记录**。
 //
-// 为什么要单列一条：同一份平台清单在两个底座上的实际行为不同，而"默认 text"会**覆盖** dsh 的
-// 底座目录（老模型里本来能看图的现在收不了图，除非用户逐条勾选）。这一条让用户不必等到某个
-// 会话失败才知道这件事——它回答的问题是"我勾的图片，到底有没有生效"。
+// 为什么要单列一条：同一份平台清单在不同底座上的实际行为不同，而"默认 text"会把底座目录里
+// 原本的收图能力**覆盖掉**（老模型里本来能看图的现在收不了图，除非用户逐条勾选）。这一条让
+// 用户不必等到某个会话失败才知道这件事——它回答的问题是"我勾的图片，到底有没有生效"。
 func checkModalityDeclaration(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "模型输入模态"
 	if facts.Carrier != "db" {

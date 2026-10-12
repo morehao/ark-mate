@@ -1,12 +1,10 @@
 package runtime
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/morehao/ark-mate/pkg/runtime/dsh"
-	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // ——— runtime 子进程的配置隔离（M3-3；设计 §6.6 / §6.6.1）———
@@ -17,26 +15,37 @@ import (
 // 改写。隔离因此落在**配置面**而不是环境面（设计 §6.4）：只重定向这些 home / cache / prefix 变量，
 // 不重写 HOME / PATH，用户工具链（git / uv / 代理 / SSH_AUTH_SOCK）照旧可见。
 //
-// 变量名是**载荷实测值**，不是猜的（设计 §6.6.1 逐条记录了出处：dsh 读 JS 源码，opencode 对二进制
-// 做 `strings`）。也不"多注几个以防万一"：多注一个不存在的变量不会报错，只会静默失效，还会让
-// "已经隔离了"变成假象。底座换名时的正确做法是重新核对并更新这张表。
+// **本文件不认识任何具体底座**（本次收口）：变量名与落点是**载荷实测值**，属于该 adapter 的私有知识，
+// 由它在自己的 `Spec` 汇入点（`adapters.go` 里的 `xxxSpec()`，如 `dshSpec()`）以 `Spec.Isolation`
+// 声明，父包只做机械投影。新增一个 runtime 因此不需要动本文件。
+//
+// 也不"多注几个以防万一"：多注一个不存在的变量不会报错，只会静默失效，还会让"已经隔离了"变成假象。
+// 底座换名/升级时的正确做法是重新核对并更新**它自己那份声明**。
+
+// commonIsolationVars 所有**本地子进程** runtime 共用的隔离面。
+//
+// npm 面（npm_config_cache / npm_config_prefix）：MCP server 常经 npx 拉起，不隔离就会写用户自己的
+// ~/.npm。它对未知 id（远程端点、用户自定义 runtime）也照给——那正是下面 IsolationEnv 的兜底面。
+//
+// 两条 `LauncherFallback: false`：壳直接跑随包载荷时不经过 npx，所以私有启动器不必兜底
+// （登记在**声明里**而不是 archtest 的豁免表里——见 IsolationVar.LauncherFallback）。
+var commonIsolationVars = []IsolationVar{
+	{Key: "npm_config_cache", Kind: IsolationPath, Path: []string{"npm", "cache"}},
+	{Key: "npm_config_prefix", Kind: IsolationPath, Path: []string{"npm", "global"}},
+}
 
 // IsolationEnv 返回 runtimeID 的子进程要叠加的配置隔离环境（KEY=VALUE；语义同 LaunchSpec.Env：
 // 叠加在 os.Environ 之上）。**纯函数**：无 IO、无全局状态，取值只看入参——装机期与单测共用同一份定义。
 //
 // 规则：
-//   - 所有本地 runtime 都给 npm 面（npm_config_cache / npm_config_prefix）：MCP server 常经 npx 拉起，
-//     不隔离就会写用户自己的 ~/.npm；
-//   - dsh（dsh）：只给 DSH_HOME。**刻意不给 DSH_AGENTS_HOME**——dsh 的 skill
-//     provider 按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析 agents 根，
-//     而平台把 skill 投射到 `${HOME}/.agents/skills`（见 dshSkillProjection）。
-//     一旦注入 DSH_AGENTS_HOME，**读根就与写根分叉**，skill 静默不生效（2026-10-09 E5 实测：
-//     注入后 dsh 会话的 `<available_skills>` 里没有投影根下那条 skill，只有注入根下的）。
-//     历史：本表曾按"agents 面也要隔离"注入它，那是把"隔离用户既有配置"错用到了**平台自己的
-//     投放面**上——这条根是**用户全局共享**的（opencode 也读它），不是底座私有配置。
-//   - opencode：四个 XDG 变量 + OPENCODE_CONFIG_DIR + OPENCODE_DB（它没有 agents 根这类变量，
-//     故它与投影根天然一致——dsh 侧修完两侧才对称）；
+//   - 公共 npm 面永远给（`commonIsolationVars`）；
+//   - 内置 runtime 再加上**它自己声明的** `Spec.Isolation`（见 adapters.go 的汇入点）；
 //   - 其它 id（远程端点、用户自定义 runtime）：只给 npm 面，不臆造 runtime 专属变量。
+//
+// **按 id 而不是按传入的 Spec 取声明**（刻意的 fail-safe）：隔离的失败半径是"去读写用户真实目录"，
+// 所以只要 id 是已知底座就一律隔离，不因为某处**手搓了一个没带声明的 Spec**（测试与诊断里很常见、
+// 生产装配路径由 `ProductRegistry` 统一构造）而静默退化。远程端点与内置 id 的冲突已由
+// `ProductRegistry` 在装配期拒绝，不存在"外部声明冒用内置 id"这条路。
 //
 // home trim 后为空 → 返回 nil：宁可不注入，也不要给一堆 "/runtime/dsh" 这样的**半截路径**——
 // 那会落到进程 CWD 下，把状态散到不可预测的地方。
@@ -44,67 +53,158 @@ import (
 // 返回**已排序**：环境数组会被拼进启动路径、可能进日志/指纹，同参数必须逐字可复现
 // （Go 的 map 迭代顺序随机，那种不确定性在这里是不可接受的）。
 func IsolationEnv(runtimeID, home string) []string {
+	vars := commonIsolationVars
+	if spec, ok := builtinSpec(runtimeID); ok {
+		vars = append(append([]IsolationVar{}, commonIsolationVars...), spec.Isolation...)
+	}
+	return projectIsolation(vars, home)
+}
+
+// IsolationEnvFor 返回**这一份 Spec** 的子进程要叠加的配置隔离环境。
+//
+// 与 `IsolationEnv(runtimeID, home)` 只差"声明从哪来"：
+//   - 该 Spec **自己声明了** `Isolation` → 以它为准（∪ 公共 npm 面）；
+//   - 一条都没声明 → 回落成 `IsolationEnv(spec.ID, home)`（按 id 查内置清单）。
+//
+// 为什么需要这一档（2026-10-12，合成 adapter 夹具逼出来的）：`ApplyIsolationEnv` 是**遍历注册表**
+// 逐个底座注入的，它手上就有那份 Spec——再按 id 回查一次，等于把"注册表里这份 Spec 说了什么"丢掉。
+// 于是**任何不在 `AllBuiltinSpecs()` 里的 adapter**（测试夹具，以及下一个底座在进内置清单之前的形态）
+// 声明的隔离变量都会被**静默忽略**；而隔离的失败半径恰恰是"去读写用户真实目录"，
+// 这是这里最坏的一种失败方式（参见 §6.6 的 2026-10-09 实测）。
+//
+// 回落那一档刻意保留：`IsolationEnv` 的 fail-safe 语义不变——手搓一个没带声明的
+// `Spec{ID:"dsh"}`（测试与诊断里很常见）仍然按**内置 dsh** 隔离，不因为漏了声明就退化成"不隔离"。
+// 反过来，**显式声明了**就以这份 Spec 为准：那是调用方明说的事实，不该被回查覆盖
+// （合成底座声明的 `RTX_HOME` 与内置 id 无关，回查只会得到 npm 面）。
+func IsolationEnvFor(spec Spec, home string) []string {
+	if len(spec.Isolation) == 0 {
+		return IsolationEnv(spec.ID, home)
+	}
+	vars := append(append([]IsolationVar{}, commonIsolationVars...), spec.Isolation...)
+	return projectIsolation(vars, home)
+}
+
+// projectIsolation 把一组声明投影成 KEY=VALUE（已排序）。
+//
+// 同键**先出现者胜**：公共 npm 面在前，于是 adapter 若重复声明了 npm 面，以公共那份为准
+// （内置 adapter 的重复声明已由 `TestIsolationDeclarationsAreWellFormed` 在编译期挡掉；
+// 这一层是给不走那条判据的 Spec——测试夹具——兜底的，重复键会让子进程实际取哪个不可预期）。
+func projectIsolation(vars []IsolationVar, home string) []string {
 	home = strings.TrimSpace(home)
 	if home == "" {
 		return nil
 	}
-	env := make([]string, 0, 7)
-	env = append(env,
-		"npm_config_cache="+filepath.Join(home, "npm", "cache"),
-		"npm_config_prefix="+filepath.Join(home, "npm", "global"),
-	)
-	switch runtimeID {
-	case dsh.ID:
-		env = append(env, "DSH_HOME="+filepath.Join(home, "runtime", "dsh"))
-	case opencode.ID:
-		env = append(env,
-			"XDG_CONFIG_HOME="+filepath.Join(home, "runtime", "opencode", "config"),
-			"XDG_DATA_HOME="+filepath.Join(home, "runtime", "opencode", "data"),
-			"XDG_CACHE_HOME="+filepath.Join(home, "runtime", "opencode", "cache"),
-			// XDG_STATE_HOME 是 opencode v2 新增的**服务发现面**：后台服务的登记文件是
-			// `<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`（对 2.0.26 的二进制取
-			// strings：`process.env.XDG_STATE_HOME ?? join(homedir(),".local","state")`）。
-			// 不隔离它，平台拉起的 acp 会**读用户自己的 service.json**，命中同版本同 url 时直接
-			// 复用用户的服务，版本不符时更会走"替换"分支（SIGTERM 旧进程 + 删登记文件）——
-			// 那是"mate 动了本机"最直接的一种。隔离后平台得到自己的服务登记。
-			"XDG_STATE_HOME="+filepath.Join(home, "runtime", "opencode", "state"),
-			"OPENCODE_CONFIG_DIR="+filepath.Join(home, "runtime", "opencode", "config", "opencode"),
-			"OPENCODE_DB="+filepath.Join(home, "runtime", "opencode", "data", "opencode.db"),
-
-			// ——— F3：模型清单（T5）的隔离前提 ———
-			//
-			// opencode 的配置优先级有八层，而**平台写的 global 层（②）是文件系统面里最低的一层**，
-			// 上面还有四层能被"用户的环境变量"或"用户仓库里的文件"顶掉。三个必堵：
-			//
-			//	层③ `OPENCODE_CONFIG`（显式文件，高于 global 文件）：用户设了它，平台那份就被顶掉。
-			//	层⑥ `OPENCODE_CONFIG_CONTENT`（内联内容，高于平台写的**任何**文件）：平台自己的
-			//	     T5 主通道就是它（物化时覆盖这一条），所以这里先**清空**，避免沿用用户 shell 里的值。
-			//	层④⑤ 项目级发现会**走到文件系统根**，而平台拉底座的 cwd 是用户自己的仓库——不关掉，
-			//	     一个 clone 下来的仓库就能改平台拉起的底座行为（模型 / 权限 / MCP / plugins / skills）。
-			//
-			// 空值语义：JS 侧 `process.env.X` 为 `''` 是 falsy，等价于"没设"——而"没设"正是我们要的
-			// （不覆盖、不回落到用户的值）。`true` 那一条是开关键。
-			//
-			// 两个可选（让 `advertised` 可复现：对账要求"同一份清单跑两次结果一样"）：
-			// 清掉用户对 models.dev 缓存路径与来源 URL 的覆盖，目录来源因此只由隔离后的
-			// `XDG_CACHE_HOME` 决定。
-			//
-			// **刻意不注 `OPENCODE_DISABLE_MODELS_FETCH`**（设计里列为可选）：关掉拉取后，若本地没有
-			// 缓存的 models.dev 目录、而平台又还没声明任何模型，opencode 的目录会**空**——而空目录不是
-			// "没模型"而是"起不了会话"（`loadCatalog` 重试 5s 后抛 `No models are available`，事实 #47）。
-			// 那比"advertised 不可复现"严重得多，所以这条开关留给"平台清单非空"之后再评估。
-			"OPENCODE_CONFIG=",
-			"OPENCODE_CONFIG_CONTENT=",
-			"OPENCODE_CONFIG_PROJECT_DISABLE=true",
-			"OPENCODE_MODELS_PATH=",
-			"OPENCODE_MODELS_URL=",
-		)
+	env := make([]string, 0, len(vars))
+	seen := make(map[string]bool, len(vars))
+	for _, v := range vars {
+		key := strings.TrimSpace(v.Key)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		env = append(env, key+"="+v.value(home))
 	}
 	sort.Strings(env)
 	return env
 }
 
-// ApplyIsolationEnv 把 IsolationEnv 叠加到注册表内各 runtime 的 Launch.Env，返回**实际注入**的
+// value 该声明的取值（home 已 trim 且非空）。
+func (v IsolationVar) value(home string) string {
+	switch v.Kind {
+	case IsolationLiteral:
+		return v.Value
+	case IsolationEmpty:
+		return ""
+	default: // IsolationPath（含零值 Kind：声明必须显式写 Kind，由 TestIsolationDeclarationsAreWellFormed 钉住）
+		return filepath.Join(append([]string{home}, v.Path...)...)
+	}
+}
+
+// IsolationLauncherFallbackKeys 该 runtime 的隔离变量里**桌面私有启动器也必须兜底**的键（升序）。
+//
+// 它把"哪些变量归启动器兜底"从 archtest 的手抄豁免表变成**声明的投影**：
+// `TestDesktopLauncherIsolationMatchesCore` 因此可以判"启动器解析出的键集合 == 这份集合"（双向），
+// 而不是"子集 + 一张可能漏登记的豁免表"。核心新增一条隔离变量时，两侧必须一起决定它归哪一边。
+//
+// 未注册的 id 返回 nil（公共 npm 面两条都是核心专供）。
+func IsolationLauncherFallbackKeys(runtimeID string) []string {
+	spec, ok := builtinSpec(runtimeID)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(spec.Isolation))
+	for _, v := range spec.Isolation {
+		if v.LauncherFallback {
+			out = append(out, strings.TrimSpace(v.Key))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// builtinSpec 按 id 取内置 Spec（每次现构造：`AllBuiltinSpecs` 是纯函数，无全局状态）。
+func builtinSpec(id string) (Spec, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Spec{}, false
+	}
+	for _, s := range AllBuiltinSpecs() {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return Spec{}, false
+}
+
+// ValidateIsolation 校验一份隔离声明是否良构（装机期 fail-closed；由 TestIsolationDeclarationsAreWellFormed 对
+// 全部内置 adapter 跑一遍）。
+//
+// 为什么要有它：三字段形态下"Kind 忘了写"或"Path 与 Value 同时给了"编译期无感，运行期的表现是
+// **静默注错值**——`IsolationPath` 的零值会让一条 literal 声明被拼成 `<home>/true` 这样的怪路径，
+// 而底座拿到它只会安静地写到别处。宁可当场报错。
+func ValidateIsolation(runtimeID string, vars []IsolationVar) error {
+	seen := map[string]bool{}
+	for _, v := range vars {
+		key := strings.TrimSpace(v.Key)
+		if key == "" {
+			return fmt.Errorf("runtime %q: 隔离声明缺 Key", runtimeID)
+		}
+		if seen[key] {
+			return fmt.Errorf("runtime %q: 隔离变量 %s 重复声明（子进程实际取哪个不可预期）", runtimeID, key)
+		}
+		seen[key] = true
+		switch v.Kind {
+		case IsolationPath:
+			if len(v.Path) == 0 {
+				return fmt.Errorf("runtime %q: %s 的 Kind=path 但 Path 为空", runtimeID, key)
+			}
+			if strings.TrimSpace(v.Value) != "" {
+				return fmt.Errorf("runtime %q: %s 的 Kind=path 不该同时给 Value", runtimeID, key)
+			}
+			for _, seg := range v.Path {
+				if strings.TrimSpace(seg) == "" || filepath.IsAbs(seg) || strings.ContainsAny(seg, `/\`) {
+					return fmt.Errorf("runtime %q: %s 的 Path 段 %q 非法（须是非空相对段，不允许分隔符）", runtimeID, key, seg)
+				}
+			}
+		case IsolationLiteral:
+			if strings.TrimSpace(v.Value) == "" {
+				return fmt.Errorf("runtime %q: %s 的 Kind=literal 但 Value 为空（空值请用 Kind=empty）", runtimeID, key)
+			}
+			if len(v.Path) != 0 {
+				return fmt.Errorf("runtime %q: %s 的 Kind=literal 不该同时给 Path", runtimeID, key)
+			}
+		case IsolationEmpty:
+			if len(v.Path) != 0 || strings.TrimSpace(v.Value) != "" {
+				return fmt.Errorf("runtime %q: %s 的 Kind=empty 不该同时给 Path/Value", runtimeID, key)
+			}
+		default:
+			return fmt.Errorf("runtime %q: %s 的 Kind 取值非法（%q；须显式写 path|literal|empty）", runtimeID, key, v.Kind)
+		}
+	}
+	return nil
+}
+
+// ApplyIsolationEnv 把隔离声明投影后叠加到注册表内各 runtime 的 Launch.Env，返回**实际注入**的
 // runtime id（升序，供装机期日志说明隔离落在哪几个底座上）。
 //
 // 三个刻意的选择：
@@ -126,7 +226,10 @@ func (r *Registry) ApplyIsolationEnv(home string) []string {
 		if !isLocalLaunch(spec) {
 			continue
 		}
-		add := IsolationEnv(spec.ID, home)
+		// 用**注册表里这份 Spec** 自己的声明（`IsolationEnvFor`），不是按 id 回查：
+		// 回查会把"这份 Spec 说了什么"丢掉，于是不在内置清单里的 adapter 声明的隔离变量
+		// 被静默忽略——见 IsolationEnvFor 的注释。
+		add := IsolationEnvFor(spec, home)
 		if len(add) == 0 {
 			continue
 		}
@@ -145,12 +248,12 @@ func (r *Registry) ApplyIsolationEnv(home string) []string {
 	// **落点要等隔离 env 应用之后才可解析**，所以同步实现在这里再登记一次。
 	//
 	// 时序事实（`ProductRegistry` / `AllBuiltinRegistry` 都跑在装配最前面）：`Spec.ModelConfig.Root`
-	// 用的是 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}`，而这两个变量正是本函数注入的。构造注册表时
+	// 里的 `${VAR}` 占位符（如 dsh 的 `${DSH_HOME}`）认的正是本函数注入的那些变量。构造注册表时
 	// 那次登记因此**必然解析失败**（进程环境里没有它们，而解析刻意不回落进程环境——回落到用户
 	// 自己的 home 是隔离纪律的硬红线）。所以装机期调用本函数之后重跑一次登记：
-	// `registerBuiltinSyncers` 幂等（`RegisterSyncer` 同 ID 覆盖），解析不了只会 `continue`。
+	// `RegisterBuiltinPorts` 幂等（同 ID 覆盖），解析不了只会 `continue`。
 	// 少了这一步，`sync[]` 会永远如实报 `unsupported`——用户看到"保存成功"而底座永远拿不到清单。
-	registerBuiltinSyncers(r)
+	RegisterBuiltinPorts(r)
 	return applied
 }
 

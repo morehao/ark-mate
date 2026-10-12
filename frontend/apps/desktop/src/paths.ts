@@ -42,7 +42,7 @@ export function webDir(): string {
 
 /**
  * 私有 bin 目录（`resources/runtime/bin`，M3-2）：里面是**生成物**启动器
- * （`node` / `npx` / `dsh` / `opencode`，Windows 另有 `.cmd`），由 `scripts/gen-runtime-bin.mjs` 产出。
+ * （`node` / `npx` 加每个随包底座的入口，Windows 另有 `.cmd`），由 `scripts/gen-runtime-bin.mjs` 产出。
  *
  * 它只做一件事：被壳前置到子进程 `PATH` 的最前面（设计 §6.6），让核心与其子进程（MCP server、
  * 用户脚本、我们的载荷）在"机器上没有 node"时也能拿到 Electron 的 Node 与随包载荷。

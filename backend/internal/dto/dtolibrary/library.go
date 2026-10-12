@@ -27,7 +27,7 @@ type LibraryItem struct {
 	// SourceFile 事实源文件（代码注入/运行时探测的条目为空）。
 	SourceFile string `json:"source_file,omitempty"`
 	// Applicability **逐候选 runtime** 的可达性。刻意不给"合并结论"（对标 openwork：
-	// 诊断路径不合并）——"对 opencode 可用、对 dsh 不可用"是有用信息，压成一个 bool 就没了。
+	// 诊断路径不合并）——"对这个底座可用、对那个不可用"是有用信息，压成一个 bool 就没了。
 	Applicability []Applicability `json:"applicability"`
 	// Warnings 装载期/体检得到的非致命提醒（正文扫描告警、密钥引用解析不出、退役键残留…）。
 	Warnings []string `json:"warnings,omitempty"`

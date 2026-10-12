@@ -85,6 +85,10 @@ const MINIMAL_ENV = { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' }
  * 自己的名字追加到标记文件并打印 `FAKE-<NAME>-CALLED`。名单与生成逻辑在 `lib/decoy-bin.mjs`
  * （`desktop-no-host-acceptance.mjs` 共用同一份，避免"少一个名字 = 少一条判据"的静默漂移）。
  *
+ * **这是宿主环境面，不是本仓的适配面**：`opencode` 照样留在名单里，因为这条判据的语义是
+ * "宿主机上装过什么与本产品无关"（本仓随包底座只剩 dsh，见 `lib/decoy-bin.mjs` 的名单注释）——
+ * 壳只要去问本机就会撞上 PATH 上这些同名命令，而判据对每一个可能撞上的名字都成立。
+ *
  * 为什么要做成"会写标记文件"而不是只看日志：日志里没有 `FAKE-DSH-CALLED` 可能只是因为那段日志没被我们读到；
  * 标记文件不存在才是"真的没被调到"的硬证据（M3-8 会再用真会话复验一遍）。
  */
@@ -392,10 +396,13 @@ async function scenarioExit(shell) {
   await sleep(400)
   check('无 mate-core 残留', pidsMatching(CORE_RE).length === 0)
   check('无 electron 残留', pidsMatching(SHELL_RE).length === 0)
+  // 随包适配面只剩 dsh（opencode adapter 已从仓库删除），这里只扫本仓会拉起的那个——
+  // 再按 `opencode` 匹配只会命中宿主机上别人自己的进程，是假红。
+  // 标题沿用原措辞：断言标题字符串是被逐字比对的面，本次只改判据体。
   const dangling = psAll()
     .split('\n')
-    .filter((l) => /(opencode|dsh)\b.*(acp|--profile acp)/.test(l) && !/dsh web|grep/.test(l))
-  check('无 opencode/dsh 的 acp 子进程残留', dangling.length === 0, dangling.slice(0, 2).join(' | '))
+    .filter((l) => /\bdsh\b.*(acp|--profile acp)/.test(l) && !/dsh web|grep/.test(l))
+  check('无 dsh 的 acp 子进程残留', dangling.length === 0, dangling.slice(0, 2).join(' | '))
 
   // ① 有在途轮次退出 → 二次确认：需要真实在途轮次（会真跑模型），默认跳过。
   if (process.env.V13_LIVE === '1') {
@@ -502,7 +509,7 @@ async function scenarioNodeChannel(shell) {
   section('M3-2：Electron 作为 Node 的执行通道（设计 §6.6）')
 
   const binDir = join(DESKTOP, 'resources', 'runtime', 'bin')
-  const launchers = ['node', 'npx', 'dsh', 'opencode']
+  const launchers = ['node', 'npx', 'dsh']
   const missing = launchers.filter((l) => !existsSync(join(binDir, l)) || !existsSync(join(binDir, `${l}.cmd`)))
   check('私有 bin 启动器已生成（POSIX 与 .cmd 各一份）', missing.length === 0, missing.length ? `缺：${missing.join('/')}` : binDir)
 
@@ -616,6 +623,8 @@ function dirFingerprint(dir) {
  *  判据只看进程表：命令行里出现该目录对应的工具名，且**不属于本仓这条链**（探针路径都在仓库下）。
  *  走到这里时本仓的壳/核心/runtime 已全部回收，所以剩下的命中就是别人的进程。 */
 function externalWritersOf(dir) {
+  // **宿主环境面，不是本仓的适配面**：这里问的是"用户自己有没有在写他的目录"（`~/.dsh` 归 DSH 宿主会话，
+  // `~/.config/opencode` 归用户自己装的 opencode），与"本仓随包带哪些底座"无关。
   const tool = dir.includes('.dsh') ? /\bdsh\b|DeepSeek Harness/ : /opencode/i
   return psAll()
     .split('\n')
@@ -631,15 +640,21 @@ function externalWritersOf(dir) {
  *   ② 设计 §6.6.1 那张表的变量名**确实被载荷认**——用 dsh 自己的 `dsh-home-paths` 回答
  *      "我的 home 在哪"，而不是我们替它判断（文档写的变量名错了，这条会红）；
  *   ③ 用户既有的 `~/.dsh` / `~/.config/opencode` 在整轮验收（含其它场景真起的核心）前后**零变化**。
+ *      这一条是**宿主环境面，不是本仓的适配面**：本仓随包适配面只剩 dsh，但用户机器上可能既开着 DSH
+ *      宿主会话、也装过 opencode，两个目录都要验"我们没碰"。
  *
- * ③ 的分量随里程碑增加：M3-8 真起 dsh/opencode 之后，这条才真正承压（现在核心还不拉 runtime）。
+ * ③ 的分量随里程碑增加：M3-8 真起 dsh 之后，这条才真正承压——**历史口径**（写下这句时核心还不拉 runtime，
+ * 随包底座有 dsh 与 opencode 两个；此后随包适配面收窄到只剩 dsh）。
  */
 /**
  * M3-4（设计 §6.5）：载荷解析链与"不探测本机"。
  *
- * 三层证据：① 壳把**已解析**的清单交给核心（`/meta` 的 `payloads[]` 命中级别）；② 注入给子进程的三个
+ * 三层证据：① 壳把**已解析**的清单交给核心（`/meta` 的 `payloads[]` 命中级别）；② 注入给子进程的
  * 载荷入口确实指向随包载荷；③ 调用方 PATH 里的**假 dsh/opencode/node** 一次都没被调到，
  * 而且解析链在"没有随包载荷"时是**报错**而不是回落到 PATH。
+ *
+ * ③ 里的 `opencode` 是**宿主环境面，不是本仓的适配面**：判据的语义是"宿主机上装过什么与本产品无关"
+ * （本仓随包底座只剩 dsh），壳只要去问本机就会撞上 PATH 上这些同名命令。
  */
 async function scenarioPayload(cdp, shell) {
   section('M3-4：载荷解析链与不探测本机（设计 §6.5）')
@@ -652,22 +667,19 @@ async function scenarioPayload(cdp, shell) {
   )
   const list = Array.isArray(meta?.payloads) ? meta.payloads : []
   const dsh = list.find((p) => p.name === 'dsh')
-  const opencode = list.find((p) => p.name === 'opencode')
-  check('核心拿到了载荷清单（壳经 --payloads 交付）', list.length >= 2, JSON.stringify(list))
+  check('核心拿到了载荷清单（壳经 --payloads 交付）', list.length >= 1, JSON.stringify(list))
   check('dsh 命中随包载荷（source=bundled）', dsh?.source === 'bundled', JSON.stringify(dsh))
-  check('opencode 命中随包载荷（source=bundled）', opencode?.source === 'bundled', JSON.stringify(opencode))
   check(
     '载荷版本与摘要来自清单（不是空架子）',
     !!dsh && /^[0-9]/.test(dsh.version) && String(dsh.digest).startsWith('sha256:'),
     JSON.stringify(dsh),
   )
 
-  // ② 注入给核心（再传给 runtime/MCP）的三个载荷入口：都在随包载荷里，且文件真的在
+  // ② 注入给核心（再传给 runtime/MCP）的载荷入口：都在随包载荷里，且文件真的在
   const psEnv = sh('ps', ['-E', '-p', String(shell.corePid)])
   const payloadsRoot = join(DESKTOP, 'resources', 'payloads')
   for (const [key, expect] of [
     ['MATE_DSH_ENTRY', join('dsh')],
-    ['MATE_OPENCODE_BIN', join('opencode')],
     ['MATE_NPX_ENTRY', join('dsh')],
   ]) {
     const value = envValue(psEnv, key)
@@ -694,6 +706,8 @@ async function scenarioPayload(cdp, shell) {
   const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.trim()
   check('私有 dsh 跑的是随包载荷（版本来自清单）', !!dsh && out.includes(dsh.version), out.split('\n')[0] ?? '')
   check('输出里没有假底座的标记', !out.includes('FAKE-'), out.slice(0, 80))
+  // 假命令名单里的 `opencode` 是**宿主环境面，不是本仓的适配面**：宿主机上装过什么与本产品无关，
+  // 这条判据问的是"解析链有没有去咨询本机"。
   check('假 dsh/opencode/node 一次都没被调到（标记文件不存在）', !existsSync(FAKE_MARKER), FAKE_MARKER)
 
   // ④ 解析链本身：三级行为逐条钉住（注入依赖 → 不动机器状态）
@@ -881,6 +895,8 @@ async function scenarioIsolation(shell) {
   // 只有 KB 在变，于是"mate 碰没碰用户目录"被外部写者弄成假红。判据因此加一段：前后不等时
   // **查进程表里有没有这个目录的外部写者**（走到这里本仓的壳/核心/runtime 已全部回收）；
   // 有 → 本条**跳过**（不是放过：它此刻不可判定），没有 → 照旧判红。
+  // **宿主环境面，不是本仓的适配面**：`~/.dsh` 与 `~/.config/opencode` 是用户自己环境里的目录
+  // （他装过/开着什么与本产品无关），这里只验"整轮验收没碰过它们"。
   const userDirs = [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')].filter((d) => existsSync(d))
   if (!userDirs.length) {
     check('用户既有配置目录存在（否则隔离断言是空的）', false, '~/.dsh 与 ~/.config/opencode 都不存在')
@@ -915,6 +931,8 @@ async function main() {
   // 首版把它做成"只在显式选 guard 时跑"，于是单跑某个场景时用的是上一次的旧二进制——
   // 实测表现为"改了核心代码，场景却看不到改动"（查了半天才发现跑的是 13:23 的产物）。
   // 隔离断言（M3-3）的前置快照：必须早于任何会真起核心/跑会话的场景。
+  // 两个目录都是**宿主环境面，不是本仓的适配面**（用户自己的 `~/.dsh` 与他装的 opencode 的
+  // `~/.config/opencode`）；快照它们只为验"我们没写用户的目录"。
   for (const dir of [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')]) {
     if (existsSync(dir)) SNAPSHOT.set(dir, dirFingerprint(dir))
   }

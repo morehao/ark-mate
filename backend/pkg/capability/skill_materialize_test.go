@@ -15,7 +15,8 @@ func testSpec(root, owner, format string) MaterializeSpec {
 	return MaterializeSpec{Root: root, Layout: layoutIDToken + "/SKILL.md", Format: format, Owner: owner}
 }
 
-// ocSpec / dshSpec 两个底座的形态（当前 Format 语义等价，落点相同）。
+// ocSpec / dshSpec 两处投影形态的夹具（`opencode` 在这里只是**任意 fixture owner id**，
+// 不是今天的在册适配；当前两侧 Format 语义等价，落点相同）。
 func ocSpec(root string) MaterializeSpec { return testSpec(root, "opencode", FormatSkillMD) }
 func dshSpec(root string) MaterializeSpec {
 	return testSpec(root, "dsh", FormatSkillMDFrontmatter)

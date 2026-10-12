@@ -11,7 +11,7 @@ const parentPollInterval = time.Second
 // watchParentExit 轮询父进程 id，**父进程消失即回调**（默认行为：取消 serve 的 ctx → 优雅停机）。
 //
 // 为什么需要它（设计 §7.4）：桌面壳被 `kill -9` 时来不及发 SIGTERM，核心会变成孤儿——
-// 它自身还握着一堆 runtime 子进程（dsh / opencode）。POSIX 下父进程一死，子进程会被
+// 它自身还握着一堆 runtime 子进程（每个已建会话一个）。POSIX 下父进程一死，子进程会被
 // reparent 给 init/launchd，**`os.Getppid()` 随之变化**，据此即可自保退出。
 //
 // 平台口径：这条在 POSIX（macOS / Linux）成立；Windows 没有 reparent 语义，

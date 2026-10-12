@@ -10,7 +10,7 @@ const (
 
 // AgentEntity 是一条 agent 定义行（M6-6；列与语义同 SkillEntity）。
 //
-// **只存用户对种子的覆盖**：内置种子（`builtinAgents`：dsh/opencode）永不落行，装载时先铺种子
+// **只存用户对种子的覆盖**：内置种子（见 `manager.builtinAgents`）永不落行，装载时先铺种子
 // 再用行里的**非零字段**覆盖（`applyDefinition` 的部分合并语义逐字保留）。所以"DB 里有几行"
 // ≠ "平台有几个 agent"——`List` 出来的行里可能只有 `{"id":"x","name":"..."}`。
 //

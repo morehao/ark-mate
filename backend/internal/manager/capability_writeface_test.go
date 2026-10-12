@@ -144,7 +144,7 @@ func TestUpdateSkillOnlyTouchesPresentKeys(t *testing.T) {
 		t.Run(wf.name, func(t *testing.T) {
 			// 预置一份带未知键的定义（模拟"用户自己的字段"）。
 			wf.seed(t, model.DefinitionKindSkill, "demo",
-				`{"id":"demo","name":"原名","body":"# 原正文","my_note":"留着","runtimes":["opencode"]}`)
+				`{"id":"demo","name":"原名","body":"# 原正文","my_note":"留着","runtimes":["rtx"]}`)
 
 			if _, err := wf.svc.UpdateSkill(ctx, "demo", writeReq(t, `{"name":"新名"}`)); err != nil {
 				t.Fatalf("覆盖写失败: %v", err)
@@ -361,7 +361,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 // TestMcpServerDisabledNotInjected 禁用 = 不注入（overlay）：定义、密钥引用、探测结果都保留。
 func TestMcpServerDisabledNotInjected(t *testing.T) {
 	ctx := context.Background()
-	specs := []runtime.Spec{{ID: "opencode", Name: "opencode", McpTransports: []string{"stdio", "http"}}}
+	specs := []runtime.Spec{{ID: "rtx", Name: "rtx", McpTransports: []string{"stdio", "http"}}}
 	for _, wf := range writeFaces(t, specs...) {
 		t.Run(wf.name, func(t *testing.T) {
 			if _, err := wf.svc.CreateMcpServer(ctx, writeMcpReq(t,
@@ -369,13 +369,13 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 				t.Fatal(err)
 			}
 			agent := &AgentRec{ID: "a1"}
-			if got := directMcp(wf.svc.McpServersFor(agent, "opencode", nil)); len(got) != 1 {
+			if got := directMcp(wf.svc.McpServersFor(agent, "rtx", nil)); len(got) != 1 {
 				t.Fatalf("默认应注入，got %+v", got)
 			}
 			if _, err := wf.svc.UpdateMcpServer(ctx, "fs", writeMcpReq(t, `{"enabled":false}`)); err != nil {
 				t.Fatal(err)
 			}
-			if got := directMcp(wf.svc.McpServersFor(agent, "opencode", nil)); len(got) != 0 {
+			if got := directMcp(wf.svc.McpServersFor(agent, "rtx", nil)); len(got) != 0 {
 				t.Fatalf("禁用后不该注入，got %+v", got)
 			}
 			if _, ok := wf.svc.caps.GetMcpServer("fs"); !ok {
@@ -451,7 +451,7 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 	for _, wf := range writeFaces(t) {
 		t.Run(wf.name, func(t *testing.T) {
 			wf.seed(t, model.DefinitionKindSkill, "demo",
-				`{"id":"demo","name":"演示","body":"# 正文","my_note":"留着","runtimes":["opencode"]}`)
+				`{"id":"demo","name":"演示","body":"# 正文","my_note":"留着","runtimes":["rtx"]}`)
 
 			if _, err := wf.svc.SetSkillEnabled(ctx, "demo", false); err != nil {
 				t.Fatalf("禁用失败: %v", err)

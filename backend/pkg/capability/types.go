@@ -43,7 +43,7 @@ type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Body        string `json:"body,omitempty"`
-	// Runtimes 适用 runtime 白名单（如 ["opencode","dsh"]）；
+	// Runtimes 适用 runtime 白名单（如 ["dsh"]；取值就是你在册的那个底座 id）；
 	// **空 = 全部**支持 skill 投影的 runtime（未声明即不限制）。
 	Runtimes []string `json:"runtimes,omitempty"`
 	// Scope 作用域：global（默认，写到 runtime 全局目录）/ workspace（写到会话 cwd）。

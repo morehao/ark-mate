@@ -10,7 +10,7 @@ import (
 // TestParsePayloadsValid 合法清单被原样解析成结构化值：字段一一对应、顺序保持、entry 被忽略。
 func TestParsePayloadsValid(t *testing.T) {
 	raw := `[{"name":"dsh","version":"0.1.7-rc.2","digest":"sha256:aa","entry":"/abs/lib/bin.js","source":"bundled"},` +
-		`{"name":"opencode","version":"1.2.3","digest":"sha256:bb","source":"runtime-env"},` +
+		`{"name":"rtx","version":"1.2.3","digest":"sha256:bb","source":"runtime-env"},` +
 		`{"name":"dsh-extra","version":"","digest":"","source":"path"}]`
 	got, err := parsePayloads(raw)
 	if err != nil {
@@ -18,7 +18,7 @@ func TestParsePayloadsValid(t *testing.T) {
 	}
 	want := []ctrsystem.PayloadInfo{
 		{Name: "dsh", Version: "0.1.7-rc.2", Digest: "sha256:aa", Source: "bundled"},
-		{Name: "opencode", Version: "1.2.3", Digest: "sha256:bb", Source: "runtime-env"},
+		{Name: "rtx", Version: "1.2.3", Digest: "sha256:bb", Source: "runtime-env"},
 		{Name: "dsh-extra", Source: "path"}, // path 命中可能报不出版本与摘要（如实留空，不编）
 	}
 	if len(got) != len(want) {

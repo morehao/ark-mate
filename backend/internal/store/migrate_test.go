@@ -182,7 +182,7 @@ func TestMigrateV6ToV7KeepsData(t *testing.T) {
 		(id, agent_id, cwd, workspace_temporary, provider, model, runtime_hint, provider_session_id,
 		 title, pinned, archived, status, last_seq, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		"c-old", "a1", "/tmp/w", 1, "p1", "m1", "opencode", "ses_1", "旧会话", 1, 0, "completed", 7, at, at,
+		"c-old", "a1", "/tmp/w", 1, "p1", "m1", "rtx", "ses_1", "旧会话", 1, 0, "completed", 7, at, at,
 	).Error; err != nil {
 		t.Fatalf("写 v6 会话行: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestMigrateV7ToV14KeepsData(t *testing.T) {
 		 title, pinned, archived, status, last_seq, origin, capability_json, capability_fingerprint,
 		 created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		"c-v7", "a1", "/tmp/w", 1, "p1", "m1", "opencode", "ses_1", "旧会话", 1, 0, "completed", 7,
+		"c-v7", "a1", "/tmp/w", 1, "p1", "m1", "rtx", "ses_1", "旧会话", 1, 0, "completed", 7,
 		"automation:nightly", `{"skills":["s1"]}`, "fp-v7", at, at,
 	).Error; err != nil {
 		t.Fatalf("写 v7 会话行: %v", err)

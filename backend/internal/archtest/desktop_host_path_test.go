@@ -11,7 +11,9 @@ import (
 
 // 本文件是**桌面「不依赖宿主机环境」**的静态判据（2026-10-10，第 21 条）。
 //
-// 为什么值得一条静态守卫：桌面分发的承诺是"机器上不需要 Go / Node / pnpm，也没装过 dsh / opencode"。
+// 为什么值得一条静态守卫：桌面分发的承诺是"机器上不需要 Go / Node / pnpm，也没装过任何底座"。
+// 下面几条正则里的工具名是**宿主机器上可能装过什么**的清单（不是"本仓随包带哪些"），所以已下线
+// 底座的名字与新入行的包管理器同样留在里面——它的语义是"这些名字一个都不许被硬编码进包"。
 // 这件事有**两半证据**：
 //
 //  1. 动态（验收脚本）：诱饵目录 + 最小 `PATH` + 真 dsh 会话，证明**运行期没有咨询宿主**
@@ -30,7 +32,7 @@ import (
 //   - `frontend/apps/desktop/src/**`：壳的主进程/preload/渲染进程代码，**整棵目录**扫（不是白名单列表）
 //     ——新增一个 `host-detect.ts` 会立刻被扫到，不会因为"忘了登记"而漏。
 //   - `frontend/apps/desktop/scripts/gen-runtime-bin.mjs`：它**生成**随包私有启动器
-//     （`Resources/runtime/bin/{node,npx,dsh,opencode}`），生成物在包里被 shell 执行。宿主绑定若从这里
+//     （`Resources/runtime/bin/` 下是 `{node,npx}` + 随包底座各一个），生成物在包里被 shell 执行。宿主绑定若从这里
 //     漏进去，症状是"开发机上一切正常、干净机器上 exec 空命令"。
 //
 // **不扫**构建期脚本（`prepare-runtime.mjs` / `build.mjs` / `desktop-*.mjs` 验收脚本 / `Makefile`）：
@@ -137,7 +139,7 @@ func TestDesktopRuntimeMustNotBindHostToolPaths(t *testing.T) {
 			lines = append(lines, "  "+v.String())
 		}
 		t.Errorf("桌面运行期代码出现宿主工具绑定（%d 处）：\n%s\n"+
-			"桌面分发的承诺是「机器上没有 Node/pnpm，也没装过 dsh/opencode 也能跑」：\n"+
+			"桌面分发的承诺是「机器上没有 Node/pnpm，也没装过任何底座也能跑」：\n"+
 			"  · 要 Node → 用壳自己那份（`MATE_NODE_EXECUTABLE` / `process.execPath`），不要找宿主 PATH；\n"+
 			"  · 要底座 → 只认随包载荷（`payload.ts` 的显式解析链），不要引宿主安装目录；\n"+
 			"  · 生成启动器 → `#!/bin/sh` + 显式变量（`gen-runtime-bin.mjs` 现在就是这么写的）。\n"+

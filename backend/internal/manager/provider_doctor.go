@@ -187,9 +187,9 @@ type ProviderRuntimeFacts struct {
 	ModelCount int `json:"modelCount"`
 	// DeclaresModelInput 该底座的清单交付面是否声明模型的输入模态（ADR-12）。
 	//
-	// dsh=true（平台总是写 `models[].input`）、opencode=false（平台不写，底座自己知道）。
-	// 这一段存在的理由就是**如实区分两侧**：同一份平台清单在两个底座上的实际行为不同，
-	// 用户不该以为"勾了图片就生效"（在 opencode 上它只是平台记录）。
+	// 它由各 adapter 自己声明（例如 dsh=true：平台总是写 `models[].input`；有的底座 false：
+	// 平台不写、底座自己知道）。这一段存在的理由就是**如实区分两侧**：同一份平台清单在不同
+	// 底座上的实际行为不同，用户不该以为自己勾的能力一定生效（在 false 的那一侧它只是平台记录）。
 	DeclaresModelInput bool `json:"declaresModelInput"`
 	// Note 人话说明（未同步过、未声明交付面、逐条 problem…）。
 	Note string `json:"note,omitempty"`
@@ -428,7 +428,7 @@ func providerMismatchBenignOnly(entries []string) bool {
 //
 // 它与 `CredentialProblem` 是同一条事实的两个时点：那边在**拨号前**拦下来（会话报
 // credential_missing），这边在**体检时**提前把它摆出来（人还没建会话就能看见）。
-// 判据取自 DB 的 agent 行（sqlite 模式下它才是定义的权威）——种子 agent（dsh/opencode）
+// 判据取自 DB 的 agent 行（sqlite 模式下它才是定义的权威）——种子 agent（见 builtinAgents）
 // 不落行且 `provider` 恒为空，所以这里不需要再并一份种子表。
 func danglingProviderRefs(ctx context.Context, st *store.Store, knownIDs []string) []ProviderDanglingRef {
 	out := []ProviderDanglingRef{}
@@ -469,8 +469,8 @@ func danglingProviderRefs(ctx context.Context, st *store.Store, knownIDs []strin
 // `GET /models` 走同一条取值面——自己再拼一套 SQL 等于把"看到的状态不是真的"引回来。
 // 三处只为读而做的事，逐条写下理由：
 //
-//	`ApplyIsolationEnv(home)`：落点声明里的 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}` 只认
-//	  该 runtime 自己的 Launch.Env（fail-closed）。不注入的话 `ResolveConfigProjection` 会报错、
+//	`ApplyIsolationEnv(home)`：落点声明里的 `${...}` 占位符只认该 runtime 自己的 Launch.Env
+//	  （fail-closed）。不注入的话 `ResolveConfigProjection` 会报错、
 //	  于是所有 runtime 都从报告里**静默消失**——那是最坏的假绿形态。
 //	`EnableStore(st)`：把 `meta.runtime_config_digest` 读进内存（否则"已物化"会被报成"从未物化"）。
 //	  它只碰内存与注册表，不写盘。
@@ -575,7 +575,7 @@ func missingDeclaredModels(ctx context.Context, s *Service, sample advertisedSam
 	}
 	var out []string
 	for i := range declared {
-		v, err := modelValueFor(sample.Runtime, declared[i].ProviderID, declared[i].ModelID)
+		v, err := modelValueFor(s.reg, sample.Runtime, declared[i].ProviderID, declared[i].ModelID)
 		if err != nil || v == "" {
 			continue
 		}

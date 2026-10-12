@@ -14,6 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -181,7 +182,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 		t.Fatalf("legacy-openai 装载形态不符: %+v", it)
 	}
 	// 注入值就是迁移前那份（明文解出来了）。
-	if got := svc.providerEnvFor("opencode", "legacy-openai"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_LEGACY_OPENAI_") {
+	if got := svc.providerEnvFor(runtimetest.ID, "legacy-openai"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_LEGACY_OPENAI_") {
 		t.Fatalf("迁移后注入不符: %v", got)
 	}
 	// 引用它的 agent 不再被报悬空（B3 的装载顺序判据）。
@@ -284,7 +285,7 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "p1" || !items[0].HasKey {
 		t.Fatalf("memory 模式重启后档案丢失: %+v", items)
 	}
-	if got := svc2.providerEnvFor("opencode", "p1"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P1_") || !strings.HasSuffix(got[0], "_API_KEY=sk-memory-secret") {
+	if got := svc2.providerEnvFor(runtimetest.ID, "p1"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P1_") || !strings.HasSuffix(got[0], "_API_KEY=sk-memory-secret") {
 		t.Fatalf("memory 模式重启后注入不符: %v", got)
 	}
 }
@@ -345,7 +346,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("回灌后档案数不符: %+v", items)
 	}
-	if got := svcMemory.providerEnvFor("opencode", "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
+	if got := svcMemory.providerEnvFor(runtimetest.ID, "p-a"); len(got) != 1 || !strings.HasPrefix(got[0], "MATE_P_A_") || !strings.HasSuffix(got[0], "_API_KEY=sk-p-a") {
 		t.Fatalf("回灌后注入不符: %v", got)
 	}
 }

@@ -25,7 +25,7 @@ import { useMate } from '../../store'
 import { parsePolicyTools, policyColor, policySummary } from '../../console/policyView'
 
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
-/** 种子判定：服务端权威字段（内置播种 dsh/opencode + 历史保留前缀 agent-）。 */
+/** 种子判定：服务端权威字段（内置播种的 agent + 历史保留前缀 agent-）。 */
 const isSeed = (a: Pick<Agent, 'seed'>): boolean => a.seed === true
 /** 新建 id 校验：`agent-` 为种子保留前缀（服务端同规则）。 */
 const hasReservedPrefix = (id: string): boolean => id.startsWith('agent-')
@@ -619,7 +619,7 @@ export function AgentsSettingsPanel() {
               </Form.Item>
               <Form.Item
                 name="policy_native"
-                label="权限策略 · 原生模式（投影到底座开关：dsh DSH_PERMISSION_MODE / opencode permission）"
+                label="权限策略 · 原生模式（投影到构建期底座的开关；底座没有这一面时只留平台拦截面）"
               >
                 <Select options={POLICY_NATIVE_OPTIONS} />
               </Form.Item>

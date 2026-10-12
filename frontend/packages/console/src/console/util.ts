@@ -31,11 +31,17 @@ export function agentNameOf(agents: Agent[], id: string | undefined): string {
   return agentOf(agents, id)?.name ?? id ?? '未知 agent'
 }
 
-/** 由名称派生的短标识（新建会话选项卡的角标）：deepseek→DS / opencode→OC，其余取词首字母。 */
+/**
+ * 由名称派生的短标识（新建会话选项卡的角标）：deepseek→DS / dsh→DS（两者本就同源），
+ * 其余取词首字母。
+ *
+ * **不再按底座名分支**：这里曾有一条「某个底座 → 两个字母」的硬编码，那是"界面认识某个底座"
+ * 的形状——接一个新底座就得回来加一条，而漏加只会让角标变成词首字母（没人会注意到）。现在只保留一条
+ * 品牌口径（deepseek/dsh 同源），其余一律走通用派生。
+ */
 export function shortFor(label: string): string {
   const lower = label.toLowerCase()
   if (lower.includes('deepseek') || lower.includes('dsh')) return 'DS'
-  if (lower.includes('opencode') || lower.includes('open')) return 'OC'
   const words = label.split(/[-_\s]+/).filter(Boolean)
   const letters = words
     .slice(0, 2)

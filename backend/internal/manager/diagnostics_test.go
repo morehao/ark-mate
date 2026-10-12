@@ -175,12 +175,12 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 
 	// ① 已注册但启动命令不在 PATH + 悬空 provider 档案 + 声明了 SetupSteps（未连接）→ 三类步骤齐出。
 	reg := runtime.NewRegistry(runtime.Spec{
-		ID: "opencode", Name: "opencode",
+		ID: "rtx", Name: "rtx",
 		Launch:     runtime.LaunchSpec{Command: "definitely-not-installed-cmd"},
-		SetupSteps: []string{"安装 opencode CLI 并确认它在 PATH 中"},
+		SetupSteps: []string{"安装 rtx CLI 并确认它在 PATH 中"},
 	})
 	svc := NewService(reg, eventbus.New())
-	setBuildRuntime(t, "opencode") // 夹具注册表只有 opencode
+	setBuildRuntime(t, "rtx") // 夹具注册表只有 rtx
 	svc.agents["a-oc"] = &AgentRec{ID: "a-oc", Name: "OC", Provider: "gone"}
 
 	diag, err := svc.AgentDiagnostics(ctx, "a-oc")
@@ -188,7 +188,7 @@ func TestAgentDiagnosticsRemediation(t *testing.T) {
 		t.Fatalf("AgentDiagnostics: %v", err)
 	}
 	joined := strings.Join(diag.Remediation, "\n")
-	for _, want := range []string{"不可执行", "不存在", "安装 opencode CLI 并确认它在 PATH 中"} {
+	for _, want := range []string{"不可执行", "不存在", "安装 rtx CLI 并确认它在 PATH 中"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("remediation 应含 %q: %v", want, diag.Remediation)
 		}

@@ -100,7 +100,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		Version: firstNonEmpty(opts.ClientVersion, "dev-m0"),
 	}
 	// 宿主能力声明：本层实现了 elicitation（表单/URL）与 session/request_permission 等交互通道，
-	// 声明后 agent 才可能在初始化阶段得知可用交互（opencode/dsh 等不支持的 agent 会忽略，
+	// 声明后 agent 才可能在初始化阶段得知可用交互（不支持该能力的 agent 会忽略，
 	// 不影响既有流程；elicitation 为 unstable 能力，随 SDK 演进集中在此收敛）。
 	clientCaps := acpsdk.ClientCapabilities{
 		Elicitation: &acpsdk.ElicitationCapabilities{
@@ -108,8 +108,8 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			Url:  &acpsdk.ElicitationUrlCapabilities{},
 		},
 		// terminal-auth（unstable，ACP 扩展位）：声明后 agent 可在 authMethods 上附带
-		// 可执行的终端登录命令（opencode 即 `opencode auth login`），用于「运行时没有可用
-		// 模型（没配凭证）」时给用户一条确切的补救路径。仅声明意图，不代跑命令。
+		// 可执行的终端登录命令（历史实测里某底座返回 `<cli> auth login` 形态），用于「运行时
+		// 没有可用模型（没配凭证）」时给用户一条确切的补救路径。仅声明意图，不代跑命令。
 		Meta: map[string]any{"terminal-auth": true},
 	}
 	initResp, err := conn.Initialize(dctx, acpsdk.InitializeRequest{
@@ -138,8 +138,8 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 		return nil, ae
 	}
 	caps := capabilityFromAgent(initResp.AgentCapabilities, initResp.AuthMethods)
-	// M0 鉴权收敛：仅支持 agent 自托管方式（agent 自行完成登录，opencode 即此形态，methodId
-	// 取自 AuthMethodAgent.Id）。其余方式（env_var/terminal）返回 access/auth_required，
+	// M0 鉴权收敛：仅支持 agent 自托管方式（agent 自行完成登录，methodId 取自
+	// AuthMethodAgent.Id）。其余方式（env_var/terminal）返回 access/auth_required，
 	// M3 起补完整 Authenticate 流程。
 	if len(initResp.AuthMethods) > 0 {
 		var agentIDs []string

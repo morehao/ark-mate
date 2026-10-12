@@ -7,7 +7,7 @@ import type { CommandInfo } from '@ark-mate/types'
  * 一旦用户敲了空格，说明已进入参数区（`/review src/a.go`），此时补全必须让位——
  * 否则每敲一个参数都会弹候选，把输入框变成障碍。
  *
- * **命令名里可以有 `/`**：opencode 就把命名空间写进名字（实测通告里有 `git/branch`、`git/commit-push`）。
+ * **命令名里可以有 `/`**：有的底座把命名空间写进名字（实测通告里有 `git/branch`、`git/commit-push`）。
  * 所以判定边界只能是**空白**，不能是 `/`——第一版按 `/` 截断，结果用户手打 `/git/` 时弹层当场消失
  * （真机验收抓到的，见 `.dsh/docs/notes/2026-09-24-panel-ui-acceptance.md`）。
  */

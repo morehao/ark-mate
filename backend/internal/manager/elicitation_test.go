@@ -302,8 +302,8 @@ func TestElicitationScopeSourceWire(t *testing.T) {
 // 归属会话决策成功；列出挂起项时带 session_id/scope_source。
 func TestServiceResolveElicitationScope(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	svc.registerSession(&SessionRec{ID: "owner", AgentID: "agent-opencode"})
-	svc.registerSession(&SessionRec{ID: "intruder", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "owner", AgentID: "agent-rtx"})
+	svc.registerSession(&SessionRec{ID: "intruder", AgentID: "agent-rtx"})
 
 	published := make(chan ElicitationItem, 1)
 	done := make(chan struct{})

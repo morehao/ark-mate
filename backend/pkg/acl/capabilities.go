@@ -3,8 +3,8 @@ package acl
 import acpsdk "github.com/coder/acp-go-sdk"
 
 // Capabilities 是 initialize 阶段一次性冻结的能力断言（供上层裁剪接口，不随会话变化）。
-// 一律以协议自报为准：不按 runtime 名字硬编码行为差异（例如 opencode 支持 session/load、
-// deepseek-harness 不支持，这里各自体现在 LoadSession 上）。
+// 一律以协议自报为准：不按 runtime 名字硬编码行为差异（例如历史实测里有的底座支持
+// session/load、有的不支持，这里各自体现在 LoadSession 上）。
 type Capabilities struct {
 	// SessionsPersistent：支持 load/list/resume/fork 等持久会话能力（harness=false）。
 	SessionsPersistent bool
@@ -21,8 +21,9 @@ type Capabilities struct {
 
 	// —— sessionCapabilities.* 展开：供上层决定「能不能 load/resume/list/close/fork」——
 	//
-	// 关键区别（实测两家）：dsh 广告 {close,list,resume}、opencode 广告 {close,fork,list,resume}，
-	// **两家都不广告 delete** —— 因此不得把「建会话→close」当探针（close 不删持久记录）。
+	// 关键区别（历史实测两家）：dsh 广告 {close,list,resume}、另一底座（已下线）广告
+	// {close,fork,list,resume}，**两家都不广告 delete** —— 因此不得把「建会话→close」当
+	// 探针（close 不删持久记录）。
 	LoadSession   bool
 	SessionClose  bool
 	SessionList   bool
@@ -40,7 +41,8 @@ type AuthGuidance struct {
 	// MethodID 传给 ACP authenticate 的 methodId。
 	MethodID string
 	Name     string
-	// Description agent 给出的说明（如「Run `opencode auth login` in the terminal」）。
+	// Description agent 给出的说明（历史实测里某底座返回形如「Run <cli> auth login in the
+	// terminal」的英文原文）。
 	Description string
 	// Terminal 是否需要在终端交互完成登录。
 	Terminal bool

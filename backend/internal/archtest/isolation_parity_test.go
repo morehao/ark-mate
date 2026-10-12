@@ -9,14 +9,16 @@ import (
 
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/ark-mate/pkg/runtime/dsh"
-	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
 // launcherIsolationRE 从 `gen-runtime-bin.mjs` 的一个启动器条目里抠出 `isolation: { … }` 的键名。
 var (
 	launcherIsolationRE = regexp.MustCompile(`(?s)isolation:\s*\{([^}]*)\}`)
 	launcherEnvKeyRE    = regexp.MustCompile(`([A-Z][A-Z0-9_]*)\s*:`)
-	launcherRuntimeOf   = map[string]string{"dsh": dsh.ID, "opencode": opencode.ID}
+	// 启动器名 → runtime id。**启动器名（私有 bin 里的文件名）与 Spec.ID 是两个东西**：
+	// 它们今天恰好同名，但这层映射刻意留着不省——省掉之后"启动器叫什么"就只能靠两边猜。
+	// 新增一个随包底座时在这里登记，`len(parsed) != len(launcherRuntimeOf)` 那条 fail-closed 会逼你登记。
+	launcherRuntimeOf = map[string]string{"dsh": dsh.ID}
 )
 
 // smokeKeyRE 抠出 V9 探针隔离表里的变量名：字面量里的 `KEY: value` 与后续的 `isolation.KEY = value`。
@@ -25,34 +27,21 @@ var (
 	smokeLiteralRE = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:`)
 )
 
-// launcherCoreOnly 启动器**刻意**不兜底的变量（核心注入，启动器不兜底是有意的）。
-//
-// 为什么要有这张登记表而不是"核心有、启动器没有就放过"：那样核心一旦新增变量，JS 侧漏跟就是静默的
-// ——壳直接跑随包载荷的路径上没人再兜底它，去读写用户真实目录，而两侧的守卫都绿。登记在这里意味着
-// "这条路径不需要它，理由如下"，新增变量必须先二选一（补进启动器 / 在此登记），否则守卫红。
 // reDanglingAssign 抓"赋值右侧为空"这一形态（`isolation.KEY =` 后直接换行）。
 var reDanglingAssign = regexp.MustCompile(`isolation\.[A-Za-z_]+ *= *\n`)
 
-var launcherCoreOnly = map[string]map[string]bool{
-	// npm 面：MCP server 常经 npx 拉起，那是**核心**拉子进程时要隔离的东西；壳直接跑载荷不经过 npx。
-	dsh.ID: {"npm_config_cache": true, "npm_config_prefix": true},
-	opencode.ID: {
-		"npm_config_cache": true, "npm_config_prefix": true,
-		// 通用 XDG 三兄弟：改它们会连累用户其它工具，只在核心按 runtime 拉 ACP 时注入
-		// （`gen-runtime-bin.mjs` 里那条注释写了同样的理由）。opencode **专属**的
-		// `XDG_STATE_HOME`/`OPENCODE_CONFIG_DIR`/`OPENCODE_DB` 不在此列——那三条启动器必须兜底。
-		"XDG_CONFIG_HOME": true, "XDG_DATA_HOME": true, "XDG_CACHE_HOME": true,
-	},
-}
+// 注：这里曾有一张手工维护的 `launcherCoreOnly` 豁免表（"核心有、启动器刻意不兜底"的变量清单）。
+// 它已随"隔离声明进 Spec"删除：那张表是同一事实的**第二份手抄副本**，漏登记就是静默漏点。
+// 现在那份集合由 adapter 在 `Spec.Isolation` 里用 `LauncherFallback` 声明，
+// 本文件只消费 `runtime.IsolationLauncherFallbackKeys`——判据也从"子集 + 豁免"升级为**逐条相等**。
 
 // TestDesktopSmokeIsolationMatchesCore V9 桌面冒烟探针自带的隔离表必须与**核心隔离表逐条对齐**（两侧相等）。
 //
 // 同一张表在仓库里存在**三份**（Go 核心 `pkg/runtime/isolation.go`、桌面私有启动器
 // `apps/desktop/scripts/gen-runtime-bin.mjs`、桌面探针 `frontend/scripts/desktop-runtime-smoke.mjs`）。
 // 第三份此前没有守卫——而它恰恰是**最会碰本机**的那一份：探针直接以子进程拉起随包载荷，
-// 隔离表写漏一个变量的后果就是"验收脚本自己去读写用户的 `~/.dsh` / `~/.local/state/opencode`"，
-// 表现为用户环境被改动，而探针自报通过。2026-10-09 opencode v2 的 `XDG_STATE_HOME` 就是这么被
-// 找出来的（探针侧当时也漏了，同批补上）。
+// 隔离表写漏一个变量的后果就是"验收脚本自己去读写用户的 `~/.dsh`"，表现为用户环境被改动，
+// 而探针自报通过（2026-10-09 的 `XDG_STATE_HOME` 就是这么被找出来的，探针侧当时也漏了）。
 //
 // 方向与启动器那条**刻意不同**：探针自己就是注入者，所以两边**相等**才是对的口径——只查"探针 ⊆ 核心"
 // 会漏掉真正危险的那一向（核心新加了变量、探针没跟 ⇒ 探针去碰用户真实 home，而子集判定照样绿，
@@ -82,16 +71,24 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 			"而这类错只在**运行期**才现形", path)
 	}
 
-	// 以 runtime 分支切段：公共段（所有本地 runtime 都给）+ dsh 段 + opencode（else）段。
+	// 以 runtime 分支切段：公共段（所有本地 runtime 都给）+ dsh 段。
+	//
+	// 这里曾按 `if (runtimeId === 'dsh') … } else { … }` 切成三段（else = 当时那个第二底座）。
+	// 第二底座下线后 else 分支随之删除，探针只剩"公共面 + dsh 分支"。**刻意断言 else 不存在**：
+	// 下一节的两条判据靠"未知 id 只拿公共面"才能与核心的 fail-safe 对上，若有人把某个底座的
+	// 专属变量塞回一个 else 里，这里的结构断言会先红。
 	dshAt := strings.Index(block, "if (runtimeId === 'dsh')")
-	elseAt := strings.Index(block, "} else {")
-	if dshAt < 0 || elseAt <= dshAt {
-		t.Fatalf("探针隔离表的 runtime 分支结构变了（找不到 `if (runtimeId === 'dsh')` / `} else {`），"+
+	if dshAt < 0 {
+		t.Fatalf("探针隔离表的分支结构变了（找不到 `if (runtimeId === 'dsh')`），"+
 			"请修本守卫而不是放宽它：%s", path)
 	}
+	if strings.Contains(block, "} else {") {
+		t.Fatalf("探针隔离表长回了 `} else {` 分支：只有**声明过隔离面的** runtime 才配专属变量，"+
+			"未知 id 必须只拿公共面（与核心 IsolationEnv 的 fail-safe 逐条一致）。"+
+			"真加了第二个底座，就把它登记进本守卫的 launcherRuntimeOf/用例表，而不是塞一个 else：%s", path)
+	}
 	common := block[:dshAt]
-	dshPart := block[dshAt:elseAt]
-	ocPart := block[elseAt:]
+	dshPart := block[dshAt:]
 
 	keysOf := func(s string) []string {
 		seen := map[string]bool{}
@@ -119,18 +116,33 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 		}
 		return allowed
 	}
-	dshCore, ocCore := allowedOf(dsh.ID), allowedOf(opencode.ID)
+	dshCore := allowedOf(dsh.ID)
+	// 拿一个**没在任何地方声明过**的 id 当"未知 runtime"的样本：核心对它只给公共 npm 面。
+	// 用它而不是写死 npm 两个键名——核心那张公共表将来加一条，这里自动跟上。
+	unknownCore := allowedOf("rt-unregistered-probe")
 
 	// 探针的**有效**隔离表 = 公共面 ∪ 该 runtime 的分支（脚本里就是这两段合起来落进 env 的）。
 	commonKeys := keysOf(common)
 	if len(commonKeys) == 0 {
 		t.Fatalf("探针隔离表的公共面解析出 0 个变量（表格式变了，请修本守卫而不是放宽它）：%s", path)
 	}
-	// 公共面必须两边都认（npm 面是所有本地 runtime 共用的那一层）。
+	// 公共面必须与"核心给未知 runtime 的那一份"**逐条相等**：
+	// 少一条 = 探针在比生产更少隔离的环境里跑；多一条 = 探针凭空隔离了一个核心不管的变量，
+	// 于是"生产其实没隔离"这件事被盖住。
+	commonSet := map[string]bool{}
 	for _, k := range commonKeys {
-		if !dshCore[k] || !ocCore[k] {
-			t.Errorf("探针的公共面变量 %s 只在部分 runtime 的核心隔离表里（dsh=%v opencode=%v）："+
-				"公共面要么两边都给，要么挪进对应分支", k, dshCore[k], ocCore[k])
+		commonSet[k] = true
+	}
+	for _, k := range commonKeys {
+		if !unknownCore[k] {
+			t.Errorf("探针的公共面设了 %s，但核心对未知 runtime 不注入它——探针跑在比生产更隔离的环境里，"+
+				"会把「生产其实没隔离」这件事盖住。要么两侧一起加，要么两侧一起从公共面删", k)
+		}
+	}
+	for k := range unknownCore {
+		if !commonSet[k] {
+			t.Errorf("核心对未知 runtime 注入了 %s，但探针的公共面没有——公共面是**所有**本地 runtime 共用的那一层，"+
+				"漏掉它就等于探针在某些 runtime 上跑在更少隔离的环境里", k)
 		}
 	}
 	for _, c := range []struct {
@@ -140,7 +152,6 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 		runtimeID string
 	}{
 		{"dsh 分支", dshPart, dshCore, dsh.ID},
-		{"opencode 分支", ocPart, ocCore, opencode.ID},
 	} {
 		branchKeys := keysOf(c.part)
 		if len(branchKeys) == 0 {
@@ -164,7 +175,7 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 			k := strings.SplitN(kv, "=", 2)[0]
 			if !probe[k] {
 				t.Errorf("核心的隔离表（%s）注入了 %s，但 V9 探针的%s没有——探针直接以子进程拉起随包载荷，"+
-					"漏掉它就意味着**验收脚本自己去读写用户的真实 home**（`~/.dsh` / `~/.local/state/opencode` 这类），"+
+					"漏掉它就意味着**验收脚本自己去读写用户的真实 home**（`~/.dsh` 这类），"+
 					"而探针自报通过。探针侧必须逐条对齐 IsolationEnv", c.runtimeID, k, c.label)
 			}
 		}
@@ -184,9 +195,12 @@ func TestDesktopSmokeIsolationMatchesCore(t *testing.T) {
 // 桌面态验收拿真请求体才看见。
 //
 // 方向刻意是**单向**的（启动器 ⊆ 核心）：启动器只许兜底核心也认的变量。核心认而启动器不兜底是
-// 允许的（那些由核心显式注入，例如 XDG 那批"全局改会连累用户其它工具"的变量）——但**必须显式登记**
-// 在 `launcherCoreOnly` 里：核心新增变量时"启动器没跟"同样是静默漏点（壳直接跑载荷的路径没人兜底，
-// 去读写用户真实目录），所以新增变量要么补进启动器、要么登记豁免，没有第三条路。
+// 允许的（那些由核心显式注入，例如 XDG 那批"全局改会连累用户其它工具"的变量）——但**必须显式声明**
+// 在 `Spec.Isolation` 的 `LauncherFallback: false` 上（声明处写明理由）。
+//
+// 2026-10-12 收口：原先那半是手抄的 `launcherCoreOnly` 豁免表，方向是"子集 + 豁免"，漏登记即静默漏点。
+// 现在两侧都由 adapter 的 `LauncherFallback` 声明驱动，判据升级为**逐条相等**：
+// 启动器解析出的键集合必须恰好等于 `runtime.IsolationLauncherFallbackKeys(id)`。
 func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 	path := filepath.Join(frontendRoot(t), "apps", "desktop", "scripts", "gen-runtime-bin.mjs")
 	raw, err := os.ReadFile(path)
@@ -220,14 +234,14 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 	//
 	// 只比**键名**会漏掉一类很坏的错：把「清掉用户同名变量」（Go 侧那条的取值是**空串**）机械地
 	// 翻译成「未设置就兜底成 $MATE_HOME/」。产出的启动器照常 exec，底座才在内部报一个看不出因果的
-	// 错——`OPENCODE_CONFIG=$MATE_HOME/` 会让它把**一个目录**当配置文件读（EISDIR），桌面态的
+	// 错——当年那个底座把目录当配置文件读（`<变量>=$MATE_HOME/` 这种形态 → EISDIR），桌面态的
 	// skill 验收就是这么抓到的（真请求一个都没发出去）。
 	//
 	// 所以这里钉一条：生成器对空值必须走**单独一条分支**，且那条分支里不许出现 `MATE_HOME`。
 	src := string(raw)
 	if !strings.Contains(src, "if (sub === '')") {
 		t.Fatalf("生成器没有对「空值」单独分支：空的语义是**清除**用户同名变量，不是兜底成 `$MATE_HOME/…`。" +
-			"把它并进普通分支就会产出 `OPENCODE_CONFIG=$MATE_HOME/` 这种把目录当配置文件读的启动器（EISDIR）")
+			"把它并进普通分支就会产出「<变量>=$MATE_HOME/」这种把目录当配置文件读的启动器（EISDIR）")
 	}
 	emptyBranch := src[strings.Index(src, "if (sub === '')"):]
 	if cut := strings.Index(emptyBranch, "return style ==="); cut > 0 {
@@ -259,6 +273,7 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 		if !ok {
 			t.Fatalf("启动器 %q 未登记 runtime 归属：新增启动器必须在这里登记，否则无法判断它兜底的变量是否与核心一致", name)
 		}
+		// ① 启动器兜底的每一条都必须是核心也认的（没有"凭空多出来"的兜底）。
 		coreKeys := map[string]bool{}
 		for _, kv := range runtime.IsolationEnv(runtimeID, home) {
 			coreKeys[strings.SplitN(kv, "=", 2)[0]] = true
@@ -272,17 +287,34 @@ func TestDesktopLauncherIsolationMatchesCore(t *testing.T) {
 					"要么两侧一起加，要么两侧一起删", name, k, runtimeID)
 			}
 		}
-		// 反方向：核心新加了变量、JS 侧没跟。对启动器这条路径来说这一向同样是"动本机"（壳直接跑载荷时
-		// 没人再兜底它），所以核心新增的变量必须**显式二选一**：补进启动器，或在 launcherCoreOnly 里
-		// 登记"这条路径刻意不兜底"（登记处写清理由）。
-		for _, kv := range runtime.IsolationEnv(runtimeID, home) {
-			k := strings.SplitN(kv, "=", 2)[0]
-			if launcherKeys[k] || launcherCoreOnly[runtimeID][k] {
-				continue
+		// ② 双向相等：启动器的兜底集合必须**恰好**等于该 adapter 用 `LauncherFallback` 声明的那一份。
+		// 少一条 = 壳直接跑随包载荷时没人兜底它（去读写用户真实目录，而两侧守卫都绿）；
+		// 多一条 = 声明说"核心专供"、启动器却擅自兜底（通用 XDG 被改写会连累用户其它工具）。
+		wantFallback := runtime.IsolationLauncherFallbackKeys(runtimeID)
+		if len(wantFallback) == 0 {
+			t.Fatalf("adapter %q 没有声明任何 LauncherFallback 变量，但启动器 %s 兜底了 %d 条：两侧的事实源已经分叉",
+				runtimeID, name, len(launcherKeys))
+		}
+		for _, k := range wantFallback {
+			if !launcherKeys[k] {
+				t.Errorf("adapter %q 声明了 %s 应由桌面启动器兜底（LauncherFallback: true），但 %s 里没有它——"+
+					"壳直接跑随包载荷时这条变量就没人兜底（写漏 home 变量 = 去读写用户真实目录）",
+					runtimeID, k, name)
 			}
-			t.Errorf("核心的隔离表（%s）注入了 %s，但桌面启动器 %s 既没兜底、也没在 launcherCoreOnly 里登记豁免："+
-				"壳直接跑随包载荷时这条变量就没人兜底（写漏 home 变量 = 去读写用户真实目录）。"+
-				"要么补进启动器，要么在 launcherCoreOnly 里写明为什么这条路径不需要它", runtimeID, k, name)
+		}
+		for _, k := range keys {
+			found := false
+			for _, w := range wantFallback {
+				if w == k {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("桌面启动器 %s 兜底了 %s，但 adapter %q 没把它声明为 LauncherFallback（= 核心专供）——"+
+					"要么在声明里放开它（并写清为什么壳里兜底是安全的），要么从启动器里删掉",
+					name, k, runtimeID)
+			}
 		}
 	}
 }

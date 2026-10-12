@@ -48,34 +48,34 @@ func TestResolveProjectionChain(t *testing.T) {
 	}{
 		{
 			name:     "链2 声明根：展开 ${HOME}",
-			spec:     skillSpec("opencode", baseSkillProjection()),
+			spec:     skillSpec("rt-alt", baseSkillProjection()),
 			wantOK:   true,
 			wantRoot: "/home/u/.agents/skills",
 		},
 		{
 			name:     "链2 声明根：展开 ${XDG_CONFIG_HOME}",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "${XDG_CONFIG_HOME}/opencode/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "${XDG_CONFIG_HOME}/rt-alt/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantOK:   true,
-			wantRoot: "/home/u/.config/opencode/skills",
+			wantRoot: "/home/u/.config/rt-alt/skills",
 		},
 		{
 			name:      "链1 覆盖优先于声明",
-			spec:      skillSpec("opencode", baseSkillProjection()),
-			overrides: map[string]string{"opencode:skill": "/deploy/skills"},
+			spec:      skillSpec("rt-alt", baseSkillProjection()),
+			overrides: map[string]string{"rt-alt:skill": "/deploy/skills"},
 			wantOK:    true,
 			wantRoot:  "/deploy/skills",
 		},
 		{
 			name:      "链1 覆盖只作用于自己的键",
-			spec:      skillSpec("opencode", baseSkillProjection()),
+			spec:      skillSpec("rt-alt", baseSkillProjection()),
 			overrides: map[string]string{"dsh:skill": "/deploy/skills"},
 			wantOK:    true,
 			wantRoot:  "/home/u/.agents/skills",
 		},
 		{
 			name:      "链1 覆盖成空 → 报错（不静默关闭）",
-			spec:      skillSpec("opencode", baseSkillProjection()),
-			overrides: map[string]string{"opencode:skill": "  "},
+			spec:      skillSpec("rt-alt", baseSkillProjection()),
+			overrides: map[string]string{"rt-alt:skill": "  "},
 			wantErr:   "值为空",
 		},
 		{
@@ -93,76 +93,76 @@ func TestResolveProjectionChain(t *testing.T) {
 		},
 		{
 			name:    "链3 声明的 Root 为空 → 关闭（声明式不投影）",
-			spec:    skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:    skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantOK:  false,
 			wantErr: "",
 		},
 		{
 			name:     "非法：占位符变量未设置",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "${NOPE}/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "${NOPE}/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "环境变量 NOPE 未设置",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：${HOME} 存在但为空也算未设置",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "${WEIRD_VAR_UNSET2}/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "${WEIRD_VAR_UNSET2}/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "未设置",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：占位符未闭合",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "${HOME/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "${HOME/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "未闭合",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：展开后是相对路径",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "relative/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "relative/skills", Layout: LayoutIDToken + "/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "绝对路径",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：Layout 是绝对路径",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "/abs/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "/abs/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "落点",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：Layout 含 ..",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "../<id>/SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "../<id>/SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "落点",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：Layout 缺 <id>",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "SKILL.md", Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "/r", Layout: "SKILL.md", Format: "SKILL.md"}),
 			wantErr:  "<id>",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：Format 为空",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Root: "/r", Layout: LayoutToken("SKILL.md"), Format: ""}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Root: "/r", Layout: LayoutToken("SKILL.md"), Format: ""}),
 			wantErr:  "format",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "非法：Scope 取值不在枚举内",
-			spec:     skillSpec("opencode", Projection{Kind: ProjectionSkill, Scope: "globalx", Root: "/r", Layout: LayoutToken("SKILL.md"), Format: "SKILL.md"}),
+			spec:     skillSpec("rt-alt", Projection{Kind: ProjectionSkill, Scope: "globalx", Root: "/r", Layout: LayoutToken("SKILL.md"), Format: "SKILL.md"}),
 			wantErr:  "scope",
 			wantOK:   false,
 			wantRoot: "",
 		},
 		{
 			name:     "kind 不适用：声明了 skill、问 command",
-			spec:     skillSpec("opencode", baseSkillProjection()),
+			spec:     skillSpec("rt-alt", baseSkillProjection()),
 			wantOK:   false,
 			wantErr:  "",
 			wantRoot: "",
@@ -202,10 +202,10 @@ func TestResolveProjectionChain(t *testing.T) {
 // LayoutToken 便利函数：拼出含 <id> 的落点（避免测试里到处字符串拼接）。
 func LayoutToken(name string) string { return LayoutIDToken + "/" + name }
 
-// TestResolveRealAdapters M1-2 验收：两个 adapter 各 1 条 skill 投影，Format 非空；
+// TestResolveRealAdapters M1-2 验收：内置 adapter 与自造 adapter 各 1 条 skill 投影，Format 非空；
 // 远程端点 not_applicable（空 Projections）。
 func TestResolveRealAdapters(t *testing.T) {
-	for _, spec := range []Spec{opencodeSpec(), dshSpec()} {
+	for _, spec := range []Spec{dshSpec(), altSpec()} {
 		if n := len(spec.Projections); n != 1 {
 			t.Fatalf("%s 应恰好声明 1 条投影，got %d（%+v）", spec.ID, n, spec.Projections)
 		}
@@ -241,8 +241,8 @@ func TestResolveRealAdapters(t *testing.T) {
 
 // TestResolveAdapterOverride 覆盖链在真实 adapter 上的落点：只换根，形态不变。
 func TestResolveAdapterOverride(t *testing.T) {
-	spec := opencodeSpec()
-	p, ok, err := Resolve(spec, ProjectionSkill, map[string]string{"opencode:skill": "/deploy/oc-skills"}, testEnv)
+	spec := altSpec()
+	p, ok, err := Resolve(spec, ProjectionSkill, map[string]string{altID + ":skill": "/deploy/oc-skills"}, testEnv)
 	if err != nil || !ok {
 		t.Fatalf("应解析成功：ok=%v err=%v", ok, err)
 	}
@@ -310,8 +310,8 @@ func TestCapabilityScopeDefaults(t *testing.T) {
 			}
 		})
 	}
-	// 两个真实 adapter 当前都必须落在最保守的一档（P-2 无结论）。
-	for _, spec := range []Spec{opencodeSpec(), dshSpec(), RemoteSpec("r1", "R1", "ws", "ws://x/acp", nil)} {
+	// 内置与自造 adapter、以及远程端点当前都必须落在最保守的一档（P-2 无结论）。
+	for _, spec := range []Spec{dshSpec(), altSpec(), RemoteSpec("r1", "R1", "ws", "ws://x/acp", nil)} {
 		if got := spec.EffectiveCapabilityScope(); got != CapabilityScopeProcess {
 			t.Fatalf("%s 未实测应回落 process，got %q", spec.ID, got)
 		}

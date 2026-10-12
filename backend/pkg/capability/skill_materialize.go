@@ -30,10 +30,12 @@ const mateMarker = ".mate-managed"
 // 原样写入 body 的旧约定在两个底座都不会被加载，属实测证伪，不再保留。
 //
 // 2026-10-08 补测（**另一条命题，不在上面那段的覆盖范围内**）：「平台默认根下写进去、底座开箱即读到」。
-// opencode v1.18.35 通过 → `opencodeSkillProjection().Tested` 已置 true，取证与反证见
-// pkg/runtime/adapters.go 该函数上方注释；dsh 侧待补（其 `Tested` 仍为 false）。
+// opencode v1.18.35 实测通过（**实测结论与版本号保留**；当时这份投影声明由 `opencodeSkillProjection()`
+// 给出并据此把 `Tested` 置 true，该适配与那个符号均已下线），取证与反证见 pkg/runtime/adapters.go 中
+// 在册适配的投影声明（`dshSkillProjection`）自身的 `Note`；dsh 侧**同样已实测通过**（`dshSkillProjection().Tested = true`，2026-10-08 用 v0.2.0-rc.2 确认真实会话能读到该根下的 skill）。
 // 另：上面「name 含大写下划线仍加载」在 v1.18.35 上复现（`Probe_Bad.Id` 照常加载）——
-// 仍是**实现宽容而非契约**，平台未对 skill id 施加 opencode 文档要求的词法闸门。
+// 仍是**实现宽容而非契约**：平台侧的 skill id 词法闸门取自底座的硬契约（见 registry.go 的
+// `skillIDRE`），不把任何一家底座的文档宽容度当依据。
 const (
 	// FormatSkillMD 目录包 `<id>/SKILL.md`（保证 YAML frontmatter）。
 	FormatSkillMD = "SKILL.md"

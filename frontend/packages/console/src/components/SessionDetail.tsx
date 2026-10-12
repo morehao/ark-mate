@@ -89,8 +89,8 @@ export function SessionDetailDrawer({
   }, [open, sessionId])
 
   // 会话级模型目录：**按会话绑定的 agent 取样**（不是「当前 Agent」）——会话与 Agent 一对一绑定，
-  // 模型候选只能来自该会话那个底座（dsh 会话级可改 / opencode 会话级 set_config_option），
-  // 取错 agent 会列出别的底座的模型（实测 dsh 与 opencode 目录完全不同），选下去必被运行时拒绝；
+  // 模型候选只能来自该会话那个底座（会话级可改性由该底座的能力声明决定），
+  // 取错 agent 会列出别的底座的模型（不同底座的目录本就不同），选下去必被运行时拒绝；
   // 且目录的 agent 必须与会话一致，运行时推送的 session.config_options 才会被 store 认领刷新。
   const detailAgentId = detail?.agent_id
   useEffect(() => {
@@ -320,7 +320,7 @@ export function SessionDetailDrawer({
                 )}
               {(() => {
                 // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
-                // （不再按 runtime 名硬编码——opencode 同样支持会话级 set_config_option）。
+                // （不再按 runtime 名硬编码——这是能力面的事实，不是某个底座的特例）。
                 const modelOptions = modelValues(modelCatalog ?? undefined)
                 if (modelOptions.length === 0) {
                   // 运行时没给出目录（未启动/未登录）：只如实说明，不展示不透明取值串。

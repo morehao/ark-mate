@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -150,7 +151,7 @@ func TestProbeRedactsSecretInFailureText(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 先让 redact 登记这个真值（生产路径里 providerEnvFor 会做这件事）。
-	_ = svc.providerEnvFor("opencode", "p1")
+	_ = svc.providerEnvFor(runtimetest.ID, "p1")
 
 	// 一个会把密钥回显进错误里的假 transport（模拟某些库把 URL/头拼进错误）。
 	tr := &countingTransport{inner: roundTripFunc(func(r *http.Request) (*http.Response, error) {

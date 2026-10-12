@@ -28,7 +28,7 @@ func writeDef(t *testing.T, dir, name, body string) string {
 // 这里不是比对两段文本，而是比对**字节**：干跑打印出来的 JSON 必须与实跑写进文件的内容逐字节相同。
 func TestCapabilityMigrateDryRunMatchesApply(t *testing.T) {
 	rootDry, rootReal := t.TempDir(), t.TempDir()
-	body := `{"id":"demo","name":"Demo","body":"# d","sources":[{"runtime":"opencode","path":"/x/oc","format":"SKILL.md"},{"runtime":"dsh","path":"/x/dsh","format":"SKILL.md+frontmatter"}],"x-user-note":{"keep":true}}`
+	body := `{"id":"demo","name":"Demo","body":"# d","sources":[{"runtime":"rtx","path":"/x/oc","format":"SKILL.md"},{"runtime":"dsh","path":"/x/dsh","format":"SKILL.md+frontmatter"}],"x-user-note":{"keep":true}}`
 	writeDef(t, rootDry, "demo.json", body)
 	writeDef(t, rootReal, "demo.json", body)
 
@@ -80,7 +80,7 @@ func extractIndentedBlock(t *testing.T, out string) string {
 // TestCapabilityMigrateIdempotent 幂等：连跑两次结果一致，第二次零改动（连 mtime 都不动）。
 func TestCapabilityMigrateIdempotent(t *testing.T) {
 	root := t.TempDir()
-	writeDef(t, root, "demo.json", `{"id":"demo","sources":[{"runtime":"opencode","path":"p","format":"SKILL.md"}]}`)
+	writeDef(t, root, "demo.json", `{"id":"demo","sources":[{"runtime":"rtx","path":"p","format":"SKILL.md"}]}`)
 
 	var out1 bytes.Buffer
 	if st := migrateSkillsDir(root, false, &out1); st.Migrated != 1 || st.Skipped != 0 {
@@ -118,8 +118,8 @@ func TestCapabilityMigrateIdempotent(t *testing.T) {
 func TestCapabilityMigratePreservesUnknownKeysAndDedupes(t *testing.T) {
 	root := t.TempDir()
 	writeDef(t, root, "demo.json", `{"id":"demo","sources":[
-		{"runtime":"opencode","path":"a","format":"SKILL.md"},
-		{"runtime":"opencode","path":"b","format":"SKILL.md"},
+		{"runtime":"rtx","path":"a","format":"SKILL.md"},
+		{"runtime":"rtx","path":"b","format":"SKILL.md"},
 		{"runtime":"dsh","path":"c","format":"SKILL.md"},
 		{"runtime":"  ","path":"d","format":"SKILL.md"}],
 		"x-custom":{"nested":[1,{"deep":null}]},"enabled":false}`)
@@ -147,8 +147,8 @@ func TestCapabilityMigratePreservesUnknownKeysAndDedupes(t *testing.T) {
 	}
 	// runtimes = 去重升序、空项丢弃。
 	got, _ := doc["runtimes"].([]any)
-	if len(got) != 2 || got[0] != "dsh" || got[1] != "opencode" {
-		t.Fatalf("runtimes 应为去重升序 [dsh opencode]: %v", got)
+	if len(got) != 2 || got[0] != "dsh" || got[1] != "rtx" {
+		t.Fatalf("runtimes 应为去重升序 [dsh rtx]: %v", got)
 	}
 	// 未知键与其它已知键原样保留（含嵌套结构与 false）。
 	custom, ok := doc["x-custom"].(map[string]any)

@@ -90,7 +90,7 @@ func TestRegisterToolAndSort(t *testing.T) {
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "stub", McpTransports: []string{"stdio"}},
-		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
+		runtime.Spec{ID: "rtx", McpTransports: []string{"stdio", "sse", "http"}},
 		runtime.Spec{ID: "plain"}, // 未声明 → 保守仅 stdio
 	)
 	svc := NewService(reg, eventbus.New())
@@ -132,15 +132,15 @@ func TestMcpServersFor(t *testing.T) {
 		t.Fatalf("仅 stdio 的 runtime 应取「stdio 直连 + 网关」2 条，got %+v", got)
 	}
 	assertGatewayEntry(got)
-	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 2 {
-		t.Fatalf("opencode 未声明白名单应取「stdio 直连 + 网关」2 条（不再逐条直连远程），got %+v", got)
+	if got := svc.McpServersFor(noBind, "rtx", nil); len(got) != 2 {
+		t.Fatalf("rtx 未声明白名单应取「stdio 直连 + 网关」2 条（不再逐条直连远程），got %+v", got)
 	}
 	// 白名单只钉 stdio server：直连 1 条 + **网关条目照样在**（条目恒定，不跟定义集走）；
 	// 它的远程面会是空的（网关按同一份白名单取数），所以"钉了 stdio 就没网关条目"不是判据。
-	if got := svc.McpServersFor(onlyFS, "opencode", nil); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
+	if got := svc.McpServersFor(onlyFS, "rtx", nil); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
 		t.Fatalf("白名单 fs_stdio 应取「直连 1 条 + 恒定网关条目」，got %+v", got)
 	}
-	if got := svc.McpServersFor(denyAll, "opencode", nil); len(got) != 0 {
+	if got := svc.McpServersFor(denyAll, "rtx", nil); len(got) != 0 {
 		t.Fatalf("空白名单应禁用注入，got %+v", got)
 	}
 	if got := svc.McpServersFor(noBind, "ghost", nil); len(got) != 0 {
@@ -156,8 +156,8 @@ func TestMcpServersFor(t *testing.T) {
 	if got := svc.McpServersFor(noBind, "stub", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("网关关时应回到「仅承载得起的直连」，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "opencode", nil); len(got) != 3 {
-		t.Fatalf("网关关时 opencode 应逐条直连 3 台，got %+v", got)
+	if got := svc.McpServersFor(noBind, "rtx", nil); len(got) != 3 {
+		t.Fatalf("网关关时 rtx 应逐条直连 3 台，got %+v", got)
 	}
 	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 1 {
 		t.Fatalf("网关关时未声明传输的 runtime 应保守仅 stdio，got %+v", got)
@@ -168,13 +168,13 @@ func TestMcpServersFor(t *testing.T) {
 // MCP 全量 + enabled/runtimes 标注、tool 按归属 server 的启用×可承载过滤。
 func TestAgentCapabilities(t *testing.T) {
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "opencode", McpTransports: []string{"stdio", "sse", "http"}},
+		runtime.Spec{ID: "rtx", McpTransports: []string{"stdio", "sse", "http"}},
 	)
 	svc := NewService(reg, eventbus.New())
 	// 底座是构建期常量：把它设成注册表里唯一的那个，能力面才按它推导。
-	setBuildRuntime(t, "opencode")
-	// 本进程解析出 opencode 的 skill 投影。
-	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "opencode")})
+	setBuildRuntime(t, "rtx")
+	// 本进程解析出 rtx 的 skill 投影。
+	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "rtx")})
 	svc.agents["a1"] = &AgentRec{
 		ID: "a1", Name: "A1",
 		Mcps: ptrOf([]string{"fs"}), State: AgentStateStopped,
@@ -213,7 +213,7 @@ func TestAgentCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentCapabilities: %v", err)
 	}
-	if got.AgentID != "a1" || len(got.Runtimes) != 1 || got.Runtimes[0] != "opencode" {
+	if got.AgentID != "a1" || len(got.Runtimes) != 1 || got.Runtimes[0] != "rtx" {
 		t.Fatalf("agent/runtimes 不符（构建期底座只报一个）: %+v", got)
 	}
 	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出；适用性取决于
@@ -226,7 +226,7 @@ func TestAgentCapabilities(t *testing.T) {
 		skByID[sk.ID] = sk
 	}
 	if plan := skByID["plan"]; !plan.Applicable || !plan.Enabled ||
-		len(plan.Runtimes) != 1 || plan.Runtimes[0] != "opencode" || len(plan.Reasons) != 0 {
+		len(plan.Runtimes) != 1 || plan.Runtimes[0] != "rtx" || len(plan.Reasons) != 0 {
 		t.Fatalf("plan 应启用且适用、runtimes 裁到候选∩投影: %+v", plan)
 	}
 	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Runtimes) != 0 || len(noSrc.Reasons) == 0 {
@@ -240,11 +240,11 @@ func TestAgentCapabilities(t *testing.T) {
 	for _, m := range got.McpServers {
 		byID[m.ID] = m
 	}
-	if m := byID["fs"]; !m.Enabled || len(m.Runtimes) != 1 || m.Runtimes[0] != "opencode" {
-		t.Fatalf("fs 应 enabled+opencode 承载，got %+v", m)
+	if m := byID["fs"]; !m.Enabled || len(m.Runtimes) != 1 || m.Runtimes[0] != "rtx" {
+		t.Fatalf("fs 应 enabled+rtx 承载，got %+v", m)
 	}
 	if m := byID["sse_only"]; m.Enabled || len(m.Runtimes) != 1 {
-		t.Fatalf("sse_only 应未启用但 opencode 可承载，got %+v", m)
+		t.Fatalf("sse_only 应未启用但 rtx 可承载，got %+v", m)
 	}
 	if m := byID["http_ok"]; m.Enabled {
 		t.Fatalf("http_ok 应未启用（白名单只有 fs），got %+v", m)
@@ -471,12 +471,12 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := svc.caps.RegisterSkill(&capability.Skill{
-		ID: "plain", Name: "P", Body: "# p", Runtimes: []string{"dsh"}, // 不投放给 opencode → 跳过
+		ID: "plain", Name: "P", Body: "# p", Runtimes: []string{"dsh"}, // 不投放给 rtx → 跳过
 	}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	w, r, err := svc.ReconcileSkillProjection(skillProj(root, "opencode"))
+	w, r, err := svc.ReconcileSkillProjection(skillProj(root, "rtx"))
 	if err != nil {
 		t.Fatalf("ReconcileSkills: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestServiceReconcileSkills(t *testing.T) {
 		t.Fatalf("物化内容不符（应带 frontmatter）: %q", b)
 	}
 	// 幂等重跑：无写无删。
-	if w, r, err := svc.ReconcileSkillProjection(skillProj(root, "opencode")); err != nil || w != 0 || r != 0 {
+	if w, r, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil || w != 0 || r != 0 {
 		t.Fatalf("幂等重校应 0/0，got w=%d r=%d err=%v", w, r, err)
 	}
 }

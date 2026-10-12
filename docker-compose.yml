@@ -2,7 +2,7 @@
 #
 # 镜像形态由 build.target 与两个开关共同决定（与 Dockerfile 一致）：
 #   默认（不改任何变量）        → 最小镜像：只含 mate 本体
-#   MATE_BUILD_TARGET=mate-runtimes + WITH_DSH/WITH_OPENCODE → 额外内置 dsh / opencode
+#   MATE_BUILD_TARGET=mate-runtimes + WITH_DSH → 额外内置 dsh
 # 二者必须一起改：只打开关、不改 target，会被最小镜像的守卫明确拒绝（不静默忽略）。
 #
 # **另有一个正交的变量 `MATE_RUNTIME`**：核心**认哪一个**底座（构建期 `-X` 注入，默认
@@ -18,14 +18,12 @@ services:
       args:
         MATE_RUNTIME: ${MATE_RUNTIME:-dsh}
         WITH_DSH: ${WITH_DSH:-false}
-        WITH_OPENCODE: ${WITH_OPENCODE:-false}
         NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm}
         GO_IMAGE: ${GO_IMAGE:-golang:1.26-bookworm}
         RUNTIME_IMAGE: ${RUNTIME_IMAGE:-debian:bookworm-slim}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         GO_PROXY: ${GO_PROXY:-https://proxy.golang.org,direct}
         DSH_VERSION: ${DSH_VERSION:-latest}
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
     image: ${MATE_IMAGE:-ark-mate}:${MATE_TAG:-local}
     container_name: ${MATE_CONTAINER:-ark-mate}
     restart: unless-stopped
@@ -39,7 +37,7 @@ services:
       MATE_STORE: sqlite
       # 空值 = 保持平台默认（无鉴权 / 工作区不限制）；对外部署务必把 MATE_TOKEN 设上
       MATE_TOKEN: ${MATE_TOKEN:-}
-      # 模型密钥：daemon 原样透传给 runtime 子进程（dsh/opencode 从进程环境读）。
+      # 模型密钥：daemon 原样透传给 runtime 子进程（底座从进程环境读）。
       # 留空 = 容器内为空串（Node 侧 falsy，等同未设置）；也可改用面板「Provider 档案」注入（两者并存时以档案为准）。
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       MATE_WORKSPACE_ROOTS: ${MATE_WORKSPACE_ROOTS:-}

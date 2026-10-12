@@ -7,7 +7,9 @@
  *   node      → 用 Electron 的 Node 执行（`ELECTRON_RUN_AS_NODE=1` + `MATE_NODE_EXECUTABLE`）
  *   npx       → 同上，再执行载荷里 npm 的 `npx-cli.js`（`MATE_NPX_ENTRY`）
  *   dsh       → 同上，再执行随包载荷里的 dsh 入口（`MATE_DSH_ENTRY`）
- *   opencode  → 直接执行随包载荷里的平台化二进制（`MATE_OPENCODE_BIN`）
+ *
+ * **新增一个底座 = 在 LAUNCHERS 里加一条**（名字 + 转发目标变量 + 它自己的隔离兜底表）；
+ * 下面的生成逻辑与两个 shell 模板都不必改。这是 adapter 层在桌面这侧的落点。
  *
  * 为什么是**生成物**而不是手写文件：每个启动器都要同时有 POSIX 与 Windows 两个版本，
  * 且都要做同一件事——"目标没注入就大声失败"。手写的典型结局是两版行为悄悄分叉，
@@ -63,33 +65,6 @@ const LAUNCHERS = [
     // 必须二选一**：在这里兜底，或在那个守卫的 `launcherCoreOnly` 里登记"启动器刻意不兜底 + 理由"。
     isolation: { DSH_HOME: 'runtime/dsh' },
   },
-  {
-    name: 'opencode',
-    targetVar: 'MATE_OPENCODE_BIN',
-    targetLabel: '随包载荷里 opencode 的平台化二进制（壳按 payload 解析结果注入）',
-    // 原生二进制，不需要 Electron 的 Node 模式。
-    nodeMode: false,
-    passthroughOnly: true,
-    // opencode 侧只兜底它**专属**的两个变量 + `XDG_STATE_HOME`：前者是 opencode 自己的配置/库落点；
-    // 后者是 v2 的**服务发现面**（`<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`），
-    // 不兜底时这条"壳直接跑载荷"的路径会去读/替换**用户自己的**后台服务登记——那正是"动了本机"。
-    // 其余 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` / `XDG_CACHE_HOME` 是通用变量（全局改会连累用户其它
-    // 工具），只在核心拉 ACP runtime 时按 runtime 注入（Go 侧 IsolationEnv）。
-    // F3（模型清单 T5 的隔离前提）：三个必堵 + 两个可复现键。空串是**有意的取值**，
-    // 生成器对空值走 `unset` 分支（见 isolationLines 的注释）——语义是"清掉用户 shell 里的同名变量"，
-    // 正是"不覆盖、也不回落用户的值"。
-    // 理由逐条见 Go 侧 `pkg/runtime/isolation.go` 的同名注释（那是这张表的权威副本）。
-    isolation: {
-      XDG_STATE_HOME: 'runtime/opencode/state',
-      OPENCODE_CONFIG_DIR: 'runtime/opencode/config/opencode',
-      OPENCODE_DB: 'runtime/opencode/data/opencode.db',
-      OPENCODE_CONFIG: '',
-      OPENCODE_CONFIG_CONTENT: '',
-      OPENCODE_CONFIG_PROJECT_DISABLE: 'true',
-      OPENCODE_MODELS_PATH: '',
-      OPENCODE_MODELS_URL: '',
-    },
-  },
 ]
 
 /** 启动器运行前必须由壳注入的变量：Node 模式两个（转发目标 + Node），原生二进制一个。 */
@@ -105,16 +80,19 @@ function requiredVars(launcher) {
 /**
  * 兜底导出隔离变量（只在未设置时赋值，绝不覆盖核心/壳显式注入的值）。
  *
- * **空串是有语义的、不是"没写"**：`OPENCODE_CONFIG` 这类键在 Go 侧那张权威表里就是**空值**——
- * 含义是"清掉用户 shell 里可能存在的同名变量"（JS 侧 `''` 是 falsy，等价于"没设"）。
- * 所以这里必须按空值走**另一条分支**，绝不能拿 `$MATE_HOME/` 去兜底：
- * `OPENCODE_CONFIG=$MATE_HOME/` 会让底座把**一个目录**当成配置文件去读（实测 `EISDIR`，
- * 桌面态的 skill 验收就是这么抓到它的——2026-10-10），而 `OPENCODE_CONFIG_CONTENT=$MATE_HOME/`
- * 则是把路径当"内联配置内容"，比目录那条更隐蔽。
+ * **空串是有语义的、不是"没写"**：`isolation` 表里取值写成 `''` 的键，语义是"清掉用户 shell 里
+ * 可能存在的同名变量"（JS 侧 `''` 是 falsy，等价于"没设"）。所以这里必须按空值走**另一条分支**，
+ * 绝不能拿 `$MATE_HOME/` 去兜底：`<KEY>=$MATE_HOME/` 会让底座把**一个目录**当成配置文件去读
+ * （实测 `EISDIR`，桌面态的 skill 验收就是这么抓到它的——2026-10-10），而"内联配置内容"类的键
+ * 则是把路径当内容，比目录那条更隐蔽。
+ *
+ * 当前**没有**任何 launcher 用到空值（dsh 的隔离面全是路径）。这条分支与它下面那段判据刻意留着：
+ * 它是**机制**，不是为某个底座写的，删掉之后下一个需要清空变量的底座会把空值并进普通分支，
+ * 而那个错在静态守卫那侧只比键名、比不出来。
  *
  * 早先版本的 `: "${VAR:=$MATE_HOME/${sub}}"` 对所有键一视同仁，正是把"空的语义"机械地翻译成了
  * "兜底成 $MATE_HOME/"——这类错误的形态**很坏**：启动器照常 exec，底座才在内部报一个看不出
- * 因果的错（`Config.load` 里一句 EISDIR），而静态那半的一致性守卫只比**键名**，比不出这种错。
+ * 因果的错（`Config.load` 里一句 EISDIR）。
  */
 function isolationLines(launcher, style) {
   const entries = Object.entries(launcher.isolation ?? {})

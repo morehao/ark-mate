@@ -564,7 +564,7 @@ func checkPayloadManifests(manifests []payloadOnDisk, contract releaseContractDo
 // 签名/完整性要抓的形态**）。
 //
 // **fileList 的相对基准**（M4-5 修掉的一个真问题）：fileList 是装配脚本按"复制源根"记的，
-// 而两份载荷的落点形态不同（dsh 的闭包在 `node_modules/` 下、opencode 直接铺在载荷根），
+// 而不同载荷的落点形态不同（npm 闭包型铺在 `node_modules/` 下、直接铺开的型在载荷根），
 // 所以这个基准必须由清单里的 `fileListBase` 说明。缺失时**不静默回落**：只在两个已知形态
 // （载荷根 / `node_modules`）里按样例文件做"唯一命中"判定，并在结论里明说是推断的
 // ——推断错了会当场表现为摘要不符，而不会是"悄悄按错的基准算出个自洽值"。

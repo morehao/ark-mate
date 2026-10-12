@@ -10,7 +10,7 @@ import (
 // staticCapsImagesAllowedFiles 允许出现 `.Caps.Images` 的**唯一**地方：静态能力基线的汇入点。
 //
 // `pkg/runtime/adapters.go` 把各 adapter 自己声明的 `Caps` 值拷进 `Spec.Caps`——那是"声明"，
-// 不是判据。declaration 原地（`pkg/runtime/dsh/dsh.go`、`pkg/runtime/opencode/*.go`）写的是
+// 不是判据。declaration 原地（`pkg/runtime/<adapter>/*.go`，例如 `pkg/runtime/dsh/dsh.go`）写的是
 // 结构体字面量字段（`Images: false`），不含 `.Caps.Images` 这个取值表达式。
 var staticCapsImagesAllowedFiles = map[string]string{
 	"pkg/runtime/adapters.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",

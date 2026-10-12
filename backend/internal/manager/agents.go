@@ -125,8 +125,8 @@ func (s *Service) LoadAgentDefinitions(dir string) int {
 // 与 `LoadAgentDefinitions` 的三点差异，各自有理由：
 //
 //  1. **整体替换式**：先把内存里的非种子 agent 清掉，再逐行铺上——库里删掉的行不能以幽灵
-//     agent 留在内存里（与能力面 `LoadCapabilityDefinitionsFromStore` 同源）。种子（dsh/opencode）
-//     不落行，故这里是"清掉非种子 + 补齐种子"而不是清空整表；
+//     agent 留在内存里（与能力面 `LoadCapabilityDefinitionsFromStore` 同源）。种子（见
+//     builtinAgents）不落行，故这里是"清掉非种子 + 补齐种子"而不是清空整表；
 //  2. **行里的 body 是 typed marshal**：解析成 `agentDefinitionFile` 后按 `applyDefinition(silent)`
 //     合并，**非零字段才覆盖**——这正是"整行 update 会把种子字段抹空"那条坑的护栏（计划 §7 P-7）；
 //  3. `dir` 仍然要设：`providers.json` 与 vault 锚点（`<AgentDir>` 的父目录）都还在文件侧
@@ -200,7 +200,7 @@ func (s *Service) loadAgentDefinitionsFromStore(ctx context.Context, dir string,
 	return loaded
 }
 
-// seedBuiltinAgents 播种内置 Agent（dsh / opencode；仅当对应 runtime 已注册）。
+// seedBuiltinAgents 播种内置 Agent（**每个内置 adapter 一个**，见 builtinAgents；仅当对应 runtime 已注册）。
 // 幂等：调用方持锁或处于构造期。
 func (s *Service) seedBuiltinAgents() {
 	for _, b := range builtinAgents {
@@ -259,7 +259,7 @@ func (s *Service) applyDefinitionLocked(d agentDefinitionFile, silent bool) erro
 	return nil
 }
 
-// isBuiltinAgent 是否为内置播种 agent（dsh/opencode；随 builtinAgents 单一事实源）。
+// isBuiltinAgent 是否为内置播种 agent（随 builtinAgents 单一事实源）。
 func isBuiltinAgent(id string) bool {
 	for _, b := range builtinAgents {
 		if b.id == id {
@@ -270,8 +270,8 @@ func isBuiltinAgent(id string) bool {
 }
 
 // seedAgent 种子判定（对外只读）：内置播种 agent 或历史保留前缀 agent-。
-// 修复：内置播种 id 由 agent-<runtime> 改为 dsh/opencode 后，仅按前缀判定的守卫失效，
-// 导致种子可被 DELETE、runtime 可被 PATCH 改（README 与代码注释均声明只读）。
+// 修复：内置播种 id 曾用 `agent-<runtime>` 形态、后改为与 runtime id 同形，那时仅按前缀判定的
+// 守卫失效，导致种子可被 DELETE、runtime 可被 PATCH 改（README 与代码注释均声明只读）。
 func seedAgent(id string) bool {
 	return isBuiltinAgent(id) || strings.HasPrefix(id, reservedAgentPrefix)
 }

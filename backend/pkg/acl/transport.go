@@ -102,7 +102,7 @@ func (t *StdioTransport) start(ctx context.Context) error {
 	// 环境合并**必须去重**（M3-3 实测发现的坑）：直接 `append(os.Environ(), t.env...)` 会留下同名两条，
 	// 而"谁生效"取决于读法——POSIX `getenv` 取**第一条**（用户环境赢），Node 的 `process.env` 取**最后一条**
 	// （我们的值赢）。同一份进程环境在 Go 子进程与 JS 子进程里语义相反，隔离（设计 §6.6）就守不住了：
-	// 用户在 shell 里导出的 `XDG_CONFIG_HOME` 会悄悄盖掉我们给 opencode 的隔离值。
+	// 用户在 shell 里导出的 `XDG_CONFIG_HOME` 会悄悄盖掉我们给底座注入的隔离值。
 	// 这里统一成"显式传入的 t.env 赢、且每个键只出现一次"。
 	cmd.Env = mergeEnv(os.Environ(), t.env)
 	setupProcAttr(cmd) // unix: 新进程组，Close 时杀整棵进程树

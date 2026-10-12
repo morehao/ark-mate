@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -225,7 +226,7 @@ func (s *Service) DefaultModelValueFor(ctx context.Context, runtimeID string) (s
 	if err != nil || !ok {
 		return "", err
 	}
-	v, verr := modelValueFor(runtimeID, row.ProviderID, row.ModelID)
+	v, verr := modelValueFor(s.reg, runtimeID, row.ProviderID, row.ModelID)
 	if verr != nil {
 		// 该 runtime 没有声明模型值形态 = **它不消费平台默认模型**（不是失败）：
 		// 回空串表示"不下发"，与会话侧"没有默认"逐字同一形态。
@@ -250,27 +251,25 @@ func (s *Service) defaultModelRow(ctx context.Context) (*model.ModelEntity, bool
 	return row, true, nil
 }
 
-// modelValueFor 平台清单 → 运行时认得的不透明值（**两条算法必须共用它**）。
+// modelValueFor 平台清单 → 运行时认得的不透明值（**下发与物化必须共用它**）。
 //
-//	dsh（dsh）：`JSON.stringify([provider, model])`（ACP 的 modelValue()）
-//	opencode：`<provider>/<model>`
+// 生成规则**不属于内核**：它挂在注册表的第四张表上（`runtime.ModelValueAdapter`，见
+// `pkg/runtime/model_value.go`）——dsh 是 `["<provider>","<model>"]` 这个 JSON 数组，别的底座
+// 可能是 `<provider>/<model>` 这一串。内核只做分发，一个内建底座名都不认识。
 //
-// 为什么不解析运行时的值反推：那是把"事实"当"意图"。平台只存生成 value 的输入，
-// 生成规则在这里唯一一份——下发与物化因此不可能分叉。
-func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
-	switch runtimeID {
-	case "dsh":
-		b, err := json.Marshal([]string{providerID, modelID})
-		if err != nil {
-			return "", err
-		}
-		return string(b), nil
-	case "opencode":
-		return providerID + "/" + modelID, nil
-	default:
+// 这里曾经是一段 `switch runtimeID { case "dsh": …; case "opencode": …; default: 报错 }`：
+// 接第三个底座的人会在 `default` 撞墙，然后**回内核加一个 case**。收口后由 archtest 的
+// `TestInternalHasNoRuntimeIDSpecialCase` 钉住这一类特判。
+//
+// `ok=false`（该 id 没有登记实现）= 这个底座不消费平台的模型清单，**不是失败**；调用方按语义
+// 选"回空串（不下发）"或"跳过这条"，所以这里返回的是可判别的错误而不是一个空值。
+func modelValueFor(reg *runtime.Registry, runtimeID, providerID, modelID string) (string, error) {
+	a, ok := reg.ModelValue(runtimeID)
+	if !ok {
 		return "", acl.NewError(acl.ClassUnsupported, "model_value_unsupported",
 			fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
 	}
+	return a.Value(providerID, modelID)
 }
 
 // ——— 内部工具 ———

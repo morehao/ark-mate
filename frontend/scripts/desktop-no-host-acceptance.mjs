@@ -65,7 +65,7 @@ import {
   waitFor,
 } from './lib/desktop-harness.mjs'
 // 诱饵目录与假 LLM 都抽在 lib 里（与 ui / skills 两条验收共用同一份，避免静默漂移）。
-import { installDecoyBin } from './lib/decoy-bin.mjs'
+import { DECOY_NAMES, installDecoyBin } from './lib/decoy-bin.mjs'
 import { FAKE_LLM_REPLY, startFakeLLM } from './lib/fake-llm.mjs'
 
 const PROBE = join(REPO, '.dsh', 'tmp', 'desktop-no-host-accept')
@@ -91,6 +91,8 @@ const runningCores = () => pidsMatching(coreRe)
 /** 用户真实目录（隔离断言用）：本脚本全程不该碰它们。 */
 const realAgentsRoot = join(homedir(), '.agents', 'skills')
 const realMateRoot = join(homedir(), '.ark-mate')
+// 宿主上"另一个底座"的状态目录：**本脚本与产品都不该碰它**（哪怕本仓已不再随包那个底座——
+// 用户自己的安装仍然是用户的环境，这正是"平台不写用户目录"这条硬约束的独立证据面）。
 const realOpencodeState = join(homedir(), '.local', 'state', 'opencode')
 
 // ——— 断言台账 ———
@@ -254,8 +256,8 @@ async function main() {
     return
   }
 
-  const payloadsReady =
-    existsSync(join(PAYLOADS_DIR, 'dsh')) && existsSync(join(PAYLOADS_DIR, 'opencode'))
+  // 只判**本仓随包的那几份**载荷：宿主上有没有别的底座与本脚本无关。
+  const payloadsReady = existsSync(join(PAYLOADS_DIR, 'dsh'))
   check(
     `随包载荷在位（${PAYLOADS_DIR}）`,
     payloadsReady,
@@ -426,7 +428,7 @@ async function main() {
   section('收尾：从未咨询宿主 + 用户目录零变化')
   const called = decoy.calledNames()
   check(
-    '诱饵一次都没被调到（= 从未咨询宿主 dsh/opencode/node/npx）',
+    '诱饵一次都没被调到（= 从未咨询宿主命令：' + DECOY_NAMES.join('/') + '）',
     called.length === 0,
     called.length ? `被调到的：${called.join(', ')}（标记文件 ${decoy.marker}）` : `诱饵目录 ${decoy.binDir}`,
   )

@@ -41,7 +41,7 @@ func TestToAcpMcpServers(t *testing.T) {
 		t.Fatalf("streamable_http 应归一 http 子对象: %+v", out[3])
 	}
 	// 无 args 的 stdio：Args 必须是**空切片而非 nil**。nil 会被 SDK 序列化成 `"args": null`，
-	// opencode 的 zod 校验会因此拒掉整个 session/new（实测；对外只剩一句无上下文的 "Invalid params"）。
+	// 某些底座的 zod 校验会因此拒掉整个 session/new（历史实测；对外只剩一句无上下文的 "Invalid params"）。
 	if s := out[4].Stdio; s == nil || s.Args == nil || len(s.Args) != 0 {
 		t.Fatalf("无 args 的 stdio 应落成空数组（非 nil）: %+v", out[4])
 	}

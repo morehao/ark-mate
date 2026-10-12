@@ -72,8 +72,8 @@ type McpPart struct {
 
 // RuntimePart 参与指纹的一个 runtime 的形态。
 //
-// 调用方决定纳入哪些 runtime：M1-10 的 `connKey` 只纳入**当前这一个**——dsh 的投影形态变了
-// 不该让 opencode 的代际换进程。
+// 调用方决定纳入哪些 runtime：M1-10 的 `connKey` 只纳入**当前这一个**——一个底座的投影形态变了
+// 不该让别的底座的代际跟着换进程。
 type RuntimePart struct {
 	ID string
 	// Version 底座版本声明（`Spec.Version`）。
@@ -81,7 +81,7 @@ type RuntimePart struct {
 	// **已知边界（如实记录，不假装）**：这是 adapter **声明**的版本串，不是 ACP 握手**观测**到的
 	// 底座版本——握手只在建连之后发生，而指纹必须在那之前算出来（它就是用来决定复用哪个连接的）。
 	// 所以底座升级要产生新代际，得由 adapter 在升级适配时同步改声明（`pkg/runtime/adapters.go`
-	// 里 `Version: opencode.Version` 这类常量）。P-2 顺带记录 `initialize` 能否读到真实版本，
+	// 里 `Version: <adapter 包>.<常量>` 这种写法）。P-2 顺带记录 `initialize` 能否读到真实版本，
 	// 若能，M3 之后可以换成观测值（那是"指纹更准"，不是"指纹不对"）。
 	Version string
 	// Scope 能力面的绑定粒度（CapabilityScope；空 = process）。

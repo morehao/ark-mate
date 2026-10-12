@@ -83,7 +83,7 @@ func TestDoctorProviderSectionClean(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := st.UpsertAgentDefinition(context.Background(), "a1",
-			`{"id":"a1","name":"A1","runtimes":["opencode"],"provider":"p1"}`, 0, "t"); err != nil {
+			`{"id":"a1","name":"A1","runtimes":["rtx"],"provider":"p1"}`, 0, "t"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -135,7 +135,7 @@ func TestDoctorProviderSectionFailures(t *testing.T) {
 		}
 		// 悬空引用：agent 指向不存在的档案。
 		if _, err := st.UpsertAgentDefinition(ctx, "a-broken",
-			`{"id":"a-broken","name":"broken","runtimes":["opencode"],"provider":"zz"}`, 0, "t"); err != nil {
+			`{"id":"a-broken","name":"broken","runtimes":["rtx"],"provider":"zz"}`, 0, "t"); err != nil {
 			t.Fatal(err)
 		}
 		// 导入对账：真不一致（文件里有、库里没有）→ fail。

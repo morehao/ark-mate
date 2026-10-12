@@ -26,7 +26,7 @@ const (
 	// ACP 不承载 skill（设计文档 ADR-3），故这条链完全在平台侧：物化 = 投影同步，执行 = runtime 原生。
 	ProjectionSkill ProjectionKind = "skill"
 	// ProjectionCommand 是斜杠命令投影（M5 起点）。**当前没有任何 adapter 声明它**——
-	// opencode / dsh 的命令目录约定尚未实测（假设 B），在结论落地前不落代码、不落配置。
+	// 各底座的命令目录约定尚未实测（假设 B），在结论落地前不落代码、不落配置。
 	ProjectionCommand ProjectionKind = "command"
 )
 
@@ -91,7 +91,7 @@ type Projection struct {
 	Kind ProjectionKind
 	// Scope global | workspace。空 = global。
 	// 注意：M1 只把 workspace 表达出来（数据面语义），**消费面（会话 cwd 下的投影）留到 M3**，
-	// 因为它的落点取决于假设 B（底座原生 `.opencode/` 还是平台自有 `.ark-mate/`），尚未实测。
+	// 因为它的落点取决于假设 B（底座原生目录还是平台自有 `.ark-mate/`），尚未实测。
 	Scope string
 	// Root 默认根；支持 `${HOME}` / `${XDG_CONFIG_HOME}` 占位（此处**不展开**，展开归 Resolve）。
 	// 空 = 该 kind 不投影。

@@ -25,11 +25,13 @@
  * `backend/internal/archtest/dev_parity_test.go` 与 `.dsh/docs/plans/2026-10-11-dev-delivery-parity-plan.md`。
  *
  * **场景按在册 runtime 驱动（同批改造）**：本构建固定了底座（用户不能选 runtime），所以"哪个 agent
- * 在册、哪条 skill 适用"是**服务端事实**——脚本从 `GET /agents` 读，不写死 `opencode`（写死会把
- * "脚本陈旧"演成"等待超时：页面渲染不出来"，2026-10-11 的 P0 实测就是这么误导了整整两轮）。
+ * 在册、哪条 skill 适用"是**服务端事实**——脚本从 `GET /agents` 读，不写死任何具体底座名（历史实测
+ * 2026-10-11 的 P0：写死会把"脚本陈旧"演成"等待超时：页面渲染不出来"，误导了整整两轮）；验不了的
+ * 场景**显式跳过并写明理由**，不靠上一轮残留数据"碰巧绿"。
  *
- * 环境写入（脚本自己造、自己清）：用 M2 写面建两条验收用 skill（各钉一个 runtime）；若在册 agent
- * 多于一个则切一次当前 agent（M3-4 的清单按 agent 视角取）并在结束时**切回原来的那个**。
+ * 环境写入（脚本自己造、自己清）：用 M2 写面给**每个在册 agent** 各建一条验收用 skill（钉它自己的
+ * runtime），另加一条钉"不在册 runtime"的不可达项；若在册 agent 多于一个则切一次当前 agent
+ * （M3-4 的清单按 agent 视角取）并在结束时**切回原来的那个**。
  */
 
 import { spawn } from 'node:child_process'
@@ -50,23 +52,27 @@ const PROFILE = join(tmpdir(), `mate-ui-accept-${process.pid}`)
 /** 产物目录：启动断言拿它核对"靶服务的确实是这一份"（与 `make dev` 的 `--web-dir` 同源）。 */
 const WEB_DIR = join(REPO_ROOT, 'frontend/apps/web/dist')
 /**
- * 两条验收用 skill：各钉一个 runtime，脚本自建自清。
+ * 验收用 skill 定义：**每个在册 agent 一条**（钉它自己的 runtime），外加一条钉"不在册 runtime"的
+ * 不可达项——脚本自建自清。
  *
- * 哪条是"适用"哪条是"不适用"**取决于本构建在册的 agent**，所以这里只声明两条定义，
- * 角色由 `resolveRuntimeFacts()` 按 `GET /agents` 填进 `SKILLS`（P2 之前是写死 opencode 的）。
+ * 这不是一张写死的 id 表：定义由 `orientSkills()` 按 `GET /agents` 的**在册事实**现算
+ * （多 agent 时切换当前 agent，适用/不适用两个角色跟着换）。
  */
-const SKILL_DEFS = {
-  opencode: { id: 'ui-verify-oc', name: 'UI验收-仅opencode' },
-  dsh: { id: 'ui-verify-dsh', name: 'UI验收-仅dsh' },
-}
-/** 本构建在册的 runtime（= 它的 agent id）与另一个 adapter；由 resolveRuntimeFacts() 填。 */
-let RUNTIME = 'dsh'
-let OTHER_RUNTIME = 'opencode'
+let SKILL_DEFS = {}
+/**
+ * 单 agent 构建下"不适用"那条 skill 钉的占位 runtime 标识：它刻意**不在任何在册 agent 的候选
+ * runtime 里**，所以清单里必须有它、且必须标"不可选"。这条判据验的是"不适用也列出来、不隐藏"，
+ * 不需要真的存在第二个底座（本构建只装配一个 adapter，用户也不能选 runtime）。
+ */
+const ABSENT_RUNTIME = 'not-registered'
+/** 当前在册的 runtime（= 当前 agent 的 id）与"另一个"：多 agent 时是另一条在册 agent，否则是占位标识。 */
+let RUNTIME = ''
+let OTHER_RUNTIME = ''
 /** `{ applicable, inapplicable }` 的 skill id（按 RUNTIME 定向）。 */
 let SKILLS = {}
 /** `GET /agents` 的最近一次事实（场景可能切换当前 agent，切完要重取）。 */
 let AGENTS = []
-/** 开跑时的当前 agent：收尾要切回**它**（不是写死的 dsh）。 */
+/** 开跑时的当前 agent：收尾要切回**它**（按 `GET /agents` 的事实取，不是写死某个底座名）。 */
 let INITIAL_DEFAULT_AGENT = null
 const AUTO_ID = 'ui-verify-daily'
 /**
@@ -94,8 +100,9 @@ const results = []
  *
  * 为什么要有它：有些场景的前提是"某个底座在册"（例如 `/` 命令补全需要会通告命令的 runtime），
  * 而底座现在由**构建期固定**——那种场景在本构建上根本验不了。此时只有两条诚实的出路：显式跳过
- * 并写明理由，或者让它红。**绝不接受第三种**：靠上一次跑剩下的数据"碰巧绿"（2026-10-11 实测
- * `cmd` 正是这种假绿——它找到的是一条早先由本脚本创建的 opencode 会话）。
+ * 并写明理由，或者让它红。**绝不接受第三种**：靠上一次跑剩下的数据"碰巧绿"（历史实测 2026-10-11
+ * `cmd` 正是这种假绿——它找到的是一条早先由本脚本创建的、属于某个**当时在册、如今已不在仓库**的
+ * adapter 的会话，于是"验过了"其实什么也没验）。
  */
 const skips = []
 function skip(name, why) {
@@ -453,13 +460,32 @@ async function api(method, path, body) {
 
 /**
  * 按"当前 agent"定向适用/不适用两条 skill（切换当前 agent 之后必须再调一次——角色会跟着换）。
+ *
+ * 定义**现算**：每个在册 agent 一条 `ui-verify-<id>`（钉它自己的 runtime）；"不适用"优先取另一个
+ * **在册** agent，没有第二个时取 `ABSENT_RUNTIME` 占位（它同样要出现在清单里、要标"不可选"）。
+ * 整张表里没有任何"本仓随包哪个底座"的假设，只有 `GET /agents` 的事实。
  */
 function orientSkills(agents) {
   const cur = agents.find((a) => a.is_default) ?? agents[0]
   RUNTIME = cur.id
-  OTHER_RUNTIME = RUNTIME === 'dsh' ? 'opencode' : 'dsh'
+  OTHER_RUNTIME = agents.find((a) => a.id !== cur.id)?.id ?? ABSENT_RUNTIME
+  const defFor = (rt) => ({ id: `ui-verify-${rt}`, name: `UI验收-仅${rt}`, runtimes: [rt] })
+  SKILL_DEFS = {}
+  for (const a of agents) SKILL_DEFS[a.id] = defFor(a.id)
+  for (const rt of [RUNTIME, OTHER_RUNTIME]) if (!SKILL_DEFS[rt]) SKILL_DEFS[rt] = defFor(rt)
   SKILLS = { applicable: SKILL_DEFS[RUNTIME].id, inapplicable: SKILL_DEFS[OTHER_RUNTIME].id }
   return cur
+}
+
+/**
+ * 「底座词汇」正则：**在册 agent 的 id** 全部算代码词（ADR-22 的文案纪律——设置 · 模型那一节的
+ * 正文只许出现用户词「供应商」「模型」），外加 provider/mcp/skill/runtime 这几个代码词。
+ * 按在册事实现算，不写死某个底座名。
+ */
+function runtimeWordRe() {
+  const ids = AGENTS.map((a) => String(a.id ?? '')).filter(Boolean)
+    .map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp([...ids, 'provider', 'mcp', 'skill', 'runtime'].join('|'), 'i')
 }
 
 /**
@@ -487,6 +513,10 @@ async function resolveRuntimeFacts() {
  * 判据来源只有一处：核心 `/meta.payloads[]`（dev 态由 `dev-loop.mjs` 用 `--payloads` 交进去，
  * 与桌面态由壳交进去的是**同一个字段**）。随包那一份从磁盘上的 `payload.json` 读——**不执行**任何
  * 底座（底座连 `--version` 都写自己的 home，探一下就是动用户环境）。
+ *
+ * **宿主环境面**：这里刻意不去读宿主机上装了什么（用户的底座状态目录、PATH 上那个命令、`--version`
+ * 一律不碰）。语义是"**宿主机上装过什么与本产品无关**"——宿主那份既不进判据，也不是本仓的交付物；
+ * 本报告只回答"这次跑的是哪一份"，回答不了就说"无从判定"。
  *
  * **刻意不是判据**：D6 的口径是「不一致时打印两者并 WARN，**不判红**」。dev 跑本机装的那份是合法
  * 选择，红在这里只会逼人把 `make dev` 关掉、把这个报告一起关掉。所以这段一律**不打 `check(...)`**：
@@ -575,15 +605,15 @@ async function assertServingBuiltArtifact() {
   return same && assetRes.status === 200
 }
 
-/** 造验收用 skill（幂等：40901 存在即算成功）。 */
+/** 造验收用 skill（幂等：40901 存在即算成功）：每个在册 agent 一条 + 一条不在册的不可达项。 */
 async function seedSkills() {
-  for (const [runtime, def] of Object.entries(SKILL_DEFS)) {
+  for (const def of Object.values(SKILL_DEFS)) {
     const r = await api('POST', '/skills', {
       id: def.id,
       name: def.name,
       description: '界面验收用（脚本自建自清）',
       body: '这是一条界面验收用的技能说明，不含任何危险指令。',
-      runtimes: [runtime],
+      runtimes: def.runtimes,
     })
     if (r.json.code !== 0 && !String(r.json.msg ?? '').includes('已存在')) {
       throw new Error(`建 skill ${def.id} 失败: ${JSON.stringify(r.json)}`)
@@ -599,9 +629,10 @@ async function cleanupCreated() {
 }
 
 async function cleanupSkills() {
-  for (const id of Object.values(SKILLS)) {
-    const r = await api('DELETE', `/skills/${id}`).catch(() => null)
-    console.log(`  🧹 清理 skill ${id}: ${r ? r.json.code : 'n/a'}`)
+  // 按 SKILL_DEFS 清：seedSkills 造的就是这些（多 agent 时不止两条），自建自清不漏。
+  for (const def of Object.values(SKILL_DEFS)) {
+    const r = await api('DELETE', `/skills/${def.id}`).catch(() => null)
+    console.log(`  🧹 清理 skill ${def.id}: ${r ? r.json.code : 'n/a'}`)
   }
   await api('DELETE', `/automations/${AUTO_ID}`).catch(() => null)
 }
@@ -645,7 +676,8 @@ async function scenarioCapability(browser) {
     orientSkills(AGENTS)
   } else {
     console.log(`  ℹ️  /agents 只有一条在册 agent（${AGENTS[0].id}）：「界面切当前 agent」没有对象，跳过；` +
-      `能力勾选面板照常验——适用/不适用两条 skill 的角色按它镜像（清单里"仅另一个 runtime 适用"那条正好充当不可达项）`)
+      `能力勾选面板照常验——不适用那条 skill 钉的是**不在册**的占位 runtime（${ABSENT_RUNTIME}），` +
+      `它照样进清单并标"不可选"（这条判据验的是"不适用也列出来、不隐藏"，不需要第二个底座存在）`)
   }
 
   // 回新建页，打开「可用的能力」
@@ -982,106 +1014,24 @@ async function scenarioAutomation(browser) {
 }
 
 // ————————————————————————————————————————————————————————————————
-// 场景三：M5′ 命令发现面
-// 依据：ADR-17 / README。opencode 会通告命令（含 `~/.agents/skills` 里的 skill），
-//       面板输入框打 `/` 给候选；事件侧证据 = history 里有 session.commands。
+// 场景三：M5′ 命令发现面（**本构建跳过**）
+// 依据：ADR-17 / README。命令通告是 ACP 的**运行时能力**：只有会通告命令的 adapter 建出的会话才
+//       可能收到 `session.commands`，面板输入框打 `/` 才给候选；事件侧证据 = history 里有该事件。
+//
+// 历史实测（2026-10-11）：这条场景此前一直"靠残留数据变绿"——它从历史会话里挑一条本脚本早先几轮
+// 自己创建、属于某个**当时在册、如今已不在仓库**的 adapter 的会话，于是"验过了"其实什么也没验；
+// 而在干净实例上它会红在 `POST /sessions {agent_id:'<那个 adapter>'}` 上（那个 agent 根本没注册）。
+//
+// 本仓现在只装配一个 adapter（`AllBuiltinSpecs()` 只返回它），`GET /agents` 的在册事实里没有任何
+// adapter 以"通告命令"为已实测能力，所以这条场景**无从验起**：显式跳过并写明理由——既不拿历史
+// 残留数据充当绿，也不把"本构建没有这个能力"判成红。
 // ————————————————————————————————————————————————————————————————
-async function scenarioCommands(browser) {
+async function scenarioCommands() {
   section('M5′ 命令发现面（底座通告 → 输入框 `/` 候选 + 事件侧证据）')
-  // **前置（P2-1b）**：这条场景需要"会通告命令的底座"= 一个 `opencode` agent（它建的会话才可能收到
-  // `session.commands`）。底座现在由构建期固定，本构建在册的若不是它，这条**当场说清并跳过**：
-  // 2026-10-11 实测它此前一直是"靠残留数据变绿"——`ensureOpencodeSession()` 找到的是**本脚本
-  // 早先几轮自己建的** opencode 会话，于是"验过了"其实什么也没验（而在干净实例上它会红在
-  // `POST /sessions {agent_id:'opencode'}` 上，因为那个 agent 根本没注册）。
-  if (!AGENTS.some((a) => a.id === 'opencode')) {
-    skip('cmd: 命令发现面',
-      `本构建在册的底座是 ${RUNTIME}，没有 opencode agent；命令通告是 ACP 的运行时能力（ADR-17），` +
-      `要验它需在 opencode 构建上跑：\`make dev RUNTIME=opencode\` 后再跑本场景`)
-    return {}
-  }
-  // 挑一个**真的通告过命令**的 opencode 会话。
-  // 注意：历史会话（M5′ 之前建的）永远不会有 `session.commands`——那时平台还没接收这条通告，
-  // 所以"列表里第一条 opencode 会话"是错的判据（第一版就这么挑，选中 09-16 的老会话后必然红）。
-  // 判据只能是"这条会话的 history 里真有该事件"；一条都没有就自己造一条。
-  const oc = await ensureOpencodeSession()
-  if (!oc) {
-    check('存在一个通告过命令的 opencode 会话', false, '既没找到也没能造出来')
-    return {}
-  }
-  console.log(`  → 用会话 ${oc.id}（${oc.mode === 'created' ? '本轮新建' : '历史已通告'}）`)
-  const page = await openPage(browser, `${WEB_URL}/sessions/${oc.id}`)
-  await page.waitFor(`return !!document.querySelector('textarea')`, { label: '会话输入框就绪' })
-  await sleep(2500) // 等 WS 全量回放把 session.commands 送进来
-  await page.shot('20-session-opencode')
-
-  // 事件侧证据（不依赖界面）：history 里应有 session.commands
-  const hist = await api('GET', `/sessions/${oc.id}/history?limit=500`)
-  const events = hist.json.data?.events ?? hist.json.data?.Events ?? []
-  const cmdEv = events.find((e) => (e.type ?? e.Type) === 'session.commands')
-  const cmds = cmdEv ? (cmdEv.payload?.commands ?? cmdEv.Payload?.commands ?? []) : []
-  check('history 里有 session.commands 事件（底座确实通告）', !!cmdEv, cmdEv ? `commands=${cmds.length} 条：${cmds.slice(0, 5).map((c) => c.name).join(',')}` : `事件数=${events.length}`)
-  if (cmds.length && cmds.some((c) => c.hint)) check('命令带 hint（入参提示）透传', true, cmds.filter((c) => c.hint).slice(0, 3).map((c) => `${c.name}:${c.hint}`).join(' | '))
-
-  // 界面：输入 `/` → 候选弹层
-  await page.type(q('textarea'), '/')
-  await sleep(600)
-  await page.shot('21-slash-hints')
-  const open = await page.count('.fg-cmd-pop')
-  const items = await page.evaluate(`return [...document.querySelectorAll('.fg-cmd-item')].map(b => b.innerText.trim().replace(/\\n/g,' ')).slice(0, 8)`)
-  check('输入框打 `/` 弹出候选（.fg-cmd-pop）', open === 1, `弹层数=${open}`)
-  check('候选来自底座通告（与事件列表一致）', items.length > 0 && (cmds.length === 0 || items.some((t) => cmds.some((c) => t.startsWith('/' + c.name)))), `候选=${items.join(' | ').slice(0, 240)}`)
-  check('弹层写明「命令由底座提供，平台只做回显」', (await page.evaluate(`return document.querySelector('.fg-cmd-pop').innerText`)).includes('由底座提供'), '')
-  // 候选多时页脚不能被滚走：它必须在滚动区（.fg-cmd-list）之外
-  check('页脚说明常驻（不在 .fg-cmd-list 滚动区内）', await page.evaluate(`return !document.querySelector('.fg-cmd-list').contains(document.querySelector('.fg-cmd-foot'))`), '')
-
-  // 键盘选中第一条 → 填入草稿（Enter 是"填入"而不是"发送"）
-  if (items.length) {
-    await page.press('ArrowDown')
-    await page.press('Enter')
-    const draft = await page.evaluate(`return document.querySelector('textarea').value`)
-    check('Enter 把选中命令填入草稿（不是直接发送）', /^\/\S+ $/.test(draft), `草稿=${JSON.stringify(draft)}`)
-    await page.shot('22-command-inserted')
-
-    // 命令名里可以带 `/`（opencode 的 `git/branch` 就是这么通告的）：手打命名空间前缀时
-    // 弹层不能消失。第一版按 `/` 截断，正是被这一步抓出来的。
-    const ns = cmds.find((c) => c.name.includes('/'))
-    if (ns) {
-      const prefix = ns.name.split('/')[0]
-      await setDraft(page, `/${prefix}/`)
-      await sleep(500)
-      await page.shot('23-namespaced-hints')
-      const nsItems = await page.evaluate(`return [...document.querySelectorAll('.fg-cmd-item')].map(b => b.innerText.trim().split(/\s+/)[0])`)
-      check(
-        `手打命名空间前缀（/${prefix}/）时弹层仍在且候选为 ${prefix}/ 下的命令`,
-        nsItems.length > 0 && nsItems.every((t) => t.startsWith(`/${prefix}/`)),
-        `候选=${nsItems.slice(0, 6).join(' ')}`,
-      )
-    }
-  }
-  return { page }
-}
-
-/** 取一条 history 里真有 `session.commands` 的 opencode 会话；没有就现建一条并等通告到位。 */
-async function ensureOpencodeSession() {
-  const convs = await api('GET', '/sessions?limit=30')
-  for (const c of (convs.json.data ?? []).filter((c) => c.agent_id === 'opencode')) {
-    const h = await api('GET', `/sessions/${c.id}/history?limit=200`)
-    const ev = h.json.data?.events ?? h.json.data?.Events ?? []
-    if (ev.some((e) => (e.type ?? e.Type) === 'session.commands')) return { ...c, mode: 'found' }
-  }
-  // 没有现成的：建 + 发一句话（ACP 会话在首轮 prompt 时真正起来，opencode 随即通告命令）
-  const created = await api('POST', '/sessions', { agent_id: 'opencode' })
-  const id = created.json.data?.id
-  if (!id) return null
-  createdSessions.push(id)
-  await api('POST', `/sessions/${id}/prompt`, { text: '只回复 ok。' })
-  for (let i = 0; i < 60; i++) {
-    await sleep(500)
-    const h = await api('GET', `/sessions/${id}/history?limit=200`)
-    const ev = h.json.data?.events ?? h.json.data?.Events ?? []
-    if (ev.some((e) => (e.type ?? e.Type) === 'session.commands')) return { id, mode: 'created' }
-  }
-  return { id, mode: 'created' } // 就算没等到也让后续断言如实报红
+  skip('cmd: 命令发现面',
+    `本构建在册的 runtime = ${AGENTS.map((a) => a.id).join('/')}；在册 adapter 没有任何一条以` +
+    '"通告命令"（`session.commands`，ADR-17 的 ACP 运行时能力）为已实测能力，这条场景无从验起')
+  return {}
 }
 
 /** 直接改写 textarea 的 value 并派发 input（React 受控组件认这个）。 */
@@ -1250,7 +1200,7 @@ async function scenarioWorkspaceDir(browser) {
 // 覆盖的判据（计划 A11，逐条）：
 //   ① 开设置 → 切到「模型」→ 两块标题是「供应商」「模型」，且**不出现 `provider` 做标题**；
 //   ② 供应商：新建凭据 → 填密钥 → 自检（只跑本地段，零出网）→ 删除；
-//   ③ 模型：切底座 → 改显示名 / 隐藏 / 置顶 → 点星号设默认 → 生效状态列有值 → 删除；
+//   ③ 模型：新建 → 改显示名 / 隐藏 / 置顶 → 点星号设默认 → 生效状态列有值 → 删除；
 //   ④ **文案纪律**：保存成功的提示只能说「已保存，将在下一个会话进程生效」，不许说「已生效」。
 //
 // 全部用 REST 收尾（`finally`），跑完不留夹具。
@@ -1289,7 +1239,7 @@ async function scenarioSettingsModel(browser) {
     const titles = await page.evaluate(
       `return [...document.querySelectorAll('.fg-model-panel header b')].map(b => (b.innerText||'').trim())`,
     )
-    check('表头标题不含代码词', titles.length >= 2 && !titles.some((t) => /provider|mcp|skill|runtime|dsh|opencode/i.test(t)), JSON.stringify(titles))
+    check('表头标题不含代码词', titles.length >= 2 && !titles.some((t) => runtimeWordRe().test(t)), JSON.stringify(titles))
 
     // ② 供应商：新建 → 自检（本地段）→ 留在列表里
     await page.click(btnExpr('新建供应商'))
@@ -1582,14 +1532,15 @@ async function scenarioSettingsModel(browser) {
       JSON.stringify(created2?.input_modalities))
 
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
+    //    词汇表按**在册 agent 的 id** 现算（见 runtimeWordRe），不写死具体底座名。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
     const lower = panelCopy.toLowerCase()
-    const banned = ['dsh', 'opencode', 'dsh', 'runtime', '底座', 'provider']
+    const banned = [...AGENTS.map((a) => String(a.id ?? '').toLowerCase()).filter(Boolean), 'runtime', '底座', 'provider']
     const hit = banned.filter((w) => lower.includes(w))
     check('面板正文零底座词汇（ADR-22）', hit.length === 0,
       hit.length ? `命中 ${JSON.stringify(hit)}；行=${JSON.stringify(panelCopy.split('\n').filter((l) => hit.some((w) => l.toLowerCase().includes(w))))}` : '干净')
     check('逐后端的机器面明细没有被渲染（sync[] 属诊断面）',
-      !/dsh|opencode/.test(panelCopy), panelCopy.slice(0, 160))
+      !runtimeWordRe().test(panelCopy), panelCopy.slice(0, 160))
 
     // 生效结论：三态之一 + 生效说明说清「保存成功 ≠ 已生效」。
     check('生效结论是三态之一（已生效/待生效/同步失败）',

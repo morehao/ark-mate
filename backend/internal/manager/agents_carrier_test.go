@@ -30,7 +30,7 @@ func agentDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "dsh", Name: "dsh"},
-		runtime.Spec{ID: "opencode", Name: "opencode"},
+		runtime.Spec{ID: "rtx", Name: "rtx"},
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
 	svc := NewService(reg, eventbus.New())

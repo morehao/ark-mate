@@ -15,14 +15,16 @@ import (
 // 静默跳过（退出码不变）与字段被静默改名（`schemastery` 默认 strict=false）——对账是唯一出口。
 //
 // v12 起差集不再是一等 DTO：它折进 `GET /models` 的 `sync[].advertised` / `sync[].missing`
-// （机器面）与 `mate doctor` 的 facts（`Missing`）。**两个底座上的默认期望仍然不同**，这条
-// 非对称必须先写下来，否则对账上线第一天就会被当成 bug：
+// （机器面）与 `mate doctor` 的 facts（`Missing`）。**不同底座对同一份声明的默认期望不同**，
+// 这条非对称必须先写下来，否则对账上线第一天就会被当成 bug：
 //
-//	dsh：平台声明的 `models` **整体替换**该路由的目录 ⇒ 声明了却没出现是真问题；
-//	opencode：声明是**追加（upsert）**，内置 models.dev 目录也在候选里 ⇒ 候选比声明多是常态。
+//	整体替换型：平台声明的 `models` 直接换掉该路由的目录 ⇒ 声明了却没出现是**真问题**；
+//	追加（upsert）型：平台的声明是**追加**，底座自带的目录也在候选里 ⇒ 候选比声明多是常态。
 //
-// 判据始终是"**平台声明 → 该 runtime 认得的不透明值**"（`modelValueFor`），不是 `model_id`
-// 字符串比对——运行时的目录里只有它自己的不透明串。
+// 本文件**不判断某个底座属于哪一类**（那是各 adapter 自己的事），只如实报两侧。
+// 判据始终是"**平台声明 → 该 runtime 认得的不透明值**"（`modelValueFor`，形态由该 adapter
+// 声明，见 `pkg/runtime/model_value.go`），不是 `model_id` 字符串比对——运行时的目录里
+// 只有它自己的不透明串。
 
 // advertisedSample 一次运行时目录取样（**事实一侧**），并带上"这份取样到底可不可信"的来源。
 //
@@ -92,8 +94,8 @@ func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomo
 
 // agentForRuntime 取一个"服务该 runtime"的 agent id（对账要借它的目录读数）。
 //
-// 每个 agent 都服务**同一个**底座（构建期固定），所以判据先看"请求的是不是那一个"：不是 → 借不到
-// （空的 agent id 会让对账如实报 unknown，而不是拿 dsh 的 agent 去读 opencode 的目录）。
+// 产品里每个 agent 都服务**同一个**底座（构建期固定），所以判据先看"请求的是不是那一个"：
+// 不是 → 借不到（空的 agent id 会让对账如实报 unknown，而不是拿 A 底座的 agent 去读 B 底座的目录）。
 // 是 → 优先「当前 Agent」，否则 id 升序首个——对账是只读的，借哪个 agent 读目录不影响
 // "平台清单 vs 底座事实"这个比对本身。
 func (s *Service) agentForRuntime(runtimeID string) string {

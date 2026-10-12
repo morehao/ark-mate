@@ -13,43 +13,79 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// agentTestSvc 播 dsh/opencode/echo（内置 agent 播种 + echo 自定义；不拨真实子进程）。
+// secondAgentID 夹具里的"第二个 agent"（用户建的自定义 agent，**不是**种子）。
+//
+// 产品里的内置清单只有一条（`builtinAgents` = dsh；一个内置适配一条记录，且它与
+// `runtime.AllBuiltinSpecs()` 逐条对齐）。所以"两个 agent"这件事在夹具里必须走**用户路径**
+// 造出来——这恰好就是这些用例真正要验的形态：内置那条只读、用户那条可改，以及「当前 Agent」
+// 在两者之间怎么切、当前那条被删掉之后怎么回落。
+const secondAgentID = "custom-1"
+
+// writeUserAgentDefinition 往 definitions 目录里写一条普通（非种子）agent 定义。
+func writeUserAgentDefinition(t *testing.T, dir, id, name string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建 definitions 目录: %v", err)
+	}
+	body, err := agentBody(agentDefinitionFile{ID: id, Name: name})
+	if err != nil {
+		t.Fatalf("编码 agent 定义: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("写 agent 定义: %v", err)
+	}
+}
+
+// agentTestSvc 建一个三 spec 的注册表（dsh + 合成底座 rtx + 无凭据声明的 stub）、
+// 播种内置 agent（dsh）并造出第二个（`secondAgentID`，自定义）。不拨真实子进程。
+//
+// 第二个 spec 由 `internal/testutil/runtimetest` **合成**（见那里的包注释）：它带着"走 env
+// 通道交付密钥"的凭据声明与"`<provider>/<model>` 形态"的模型值实现——这两条链路在真实 adapter
+// 里原本由第二个真实 adapter 承担，它下线后**只由这个夹具覆盖**。借一份真实声明听起来更真，
+// 但它会让这些用例的覆盖面随适配面的增减静默变化（那条 adapter 下线时就是这样）。
 func agentTestSvc(t *testing.T, agentDir string) *Service {
 	t.Helper()
 	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
 	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
-	// 这里给 opencode 声明 env 通道（与真实 adapter 同形），dsh 声明原生文档
-	// （与真实 adapter 同形：dsh 的密钥走 .credentials.yaml，平台不重复注入 env）。
-	// 夹具的 spec 要带上**凭据交付面声明**（v12）：`providerEnvFor` 按各底座自己的
-	// `Credential` 决定"走原生文档还是注入 env"，没有声明的底座它一律不注入。
 	//
-	// 两个声明都**直接取真实 adapter 的那一份**（不在这里手抄路径/模板）——手抄会把底座的
-	// 私有知识（凭据文档路径）带进平台内核，`TestInternalHasNoRuntimeConfigLiterals` 会判红，
-	// 而且抄出来的那份迟早与 adapter 漂移。
+	// dsh 那一份**直接取真实 adapter 的**（不在这里手抄路径/模板）——手抄会把底座的私有知识
+	// （凭据文档路径）带进平台内核，`TestInternalHasNoRuntimeConfigLiterals` 会判红，而且抄出来的
+	// 那份迟早与 adapter 漂移。走 env 通道的那一份见上面的 runtimetest。
 	real := runtime.AllBuiltinRegistry()
-	dhSpec, dshOK := real.Get("dsh")
-	ocSpec, ocOK := real.Get("opencode")
-	if !dshOK || !ocOK {
-		t.Fatal("默认注册表里应有 dsh 与 opencode")
+	dshSpec, ok := real.Get("dsh")
+	if !ok {
+		t.Fatal("默认注册表里应有 dsh")
 	}
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "dsh", Name: "dsh", Credential: dhSpec.Credential},
-		runtime.Spec{ID: "opencode", Name: "opencode", Credential: ocSpec.Credential},
+		runtime.Spec{ID: "dsh", Name: "dsh", Credential: dshSpec.Credential},
+		runtimetest.Spec(runtime.LaunchSpec{}),
 		runtime.Spec{ID: "stub", Name: "Stub"},
 	)
 	svc := NewService(reg, eventbus.New())
-	if agentDir != "" {
-		svc.LoadAgentDefinitions(agentDir)
+	if agentDir == "" {
+		// 没有 definitions 目录 → 直接登记进内存。它仍然是"用户建的那条"：`isBuiltinAgent`
+		// 只看 `builtinAgents`，与登记路径无关。
+		if err := svc.applyDefinition(agentDefinitionFile{ID: secondAgentID, Name: "自定义"}, true); err != nil {
+			t.Fatalf("登记第二个 agent: %v", err)
+		}
+		return svc
 	}
+	// 有目录时走**完整的用户路径**：先落一份定义文件，再让 `LoadAgentDefinitions` 装载它。
+	// 为什么不直接写内存：装载过程是"清空非种子 + 重铺"，内存里塞的那条会被删掉；
+	// 而且 `default.json` 指向它时，必须**同一次装载里**先有定义再解析那个选择
+	// （顺序反了会让"重启后当前 Agent 仍生效"静默回落成内置那条）。
+	writeUserAgentDefinition(t, agentDir, secondAgentID, "自定义")
+	svc.LoadAgentDefinitions(agentDir)
 	return svc
 }
 
 // TestAgentRegistryDefinitionsCRUD P2 definitions：注册持久化 + 重启（新 Service）加载 +
-// PATCH 热更新 + 删除；内置 agent dsh/opencode 由播种提供（dsh 默认）。
+// PATCH 热更新 + 删除；内置 agent 只有 dsh（由播种提供，也是默认），第二个是用户建的那条。
 func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
@@ -88,8 +124,8 @@ func TestAgentRegistryDefinitionsCRUD(t *testing.T) {
 	if a, ok := svc2.AgentByID("dsh"); !ok || a == nil {
 		t.Fatalf("默认 agent dsh 应播种: %+v ok=%v", a, ok)
 	}
-	if a, ok := svc2.AgentByID("opencode"); !ok || a == nil {
-		t.Fatalf("内置 agent opencode 应播种: %+v ok=%v", a, ok)
+	if a, ok := svc2.AgentByID(secondAgentID); !ok || a == nil {
+		t.Fatalf("第二个 agent（用户建的那条）应在册: %+v ok=%v", a, ok)
 	}
 	if got := svc2.DefaultAgentID(); got != "dsh" {
 		t.Fatalf("未切换前当前 Agent 应为 dsh: %s", got)
@@ -127,8 +163,8 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	if got := svc.DefaultAgentID(); got != "dsh" {
 		t.Fatalf("缺省当前 Agent 应为 dsh: %s", got)
 	}
-	resp, err := svc.SetDefaultAgent(ctx, "opencode")
-	if err != nil || resp.ID != "opencode" || !resp.IsDefault {
+	resp, err := svc.SetDefaultAgent(ctx, secondAgentID)
+	if err != nil || resp.ID != secondAgentID || !resp.IsDefault {
 		t.Fatalf("SetDefaultAgent: %v %+v", err, resp)
 	}
 	// ListAgents 是权威面（面板按钮显隐与新建会话预选都读它）。
@@ -137,12 +173,12 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 		t.Fatalf("ListAgents: %v %+v", err, agents)
 	}
 	for _, a := range agents {
-		if want := a.ID == "opencode"; a.IsDefault != want {
+		if want := a.ID == secondAgentID; a.IsDefault != want {
 			t.Fatalf("is_default 未跟随切换: %+v", a)
 		}
 	}
 	// 幂等：重复切换同一 agent 不报错、状态不变。
-	if again, err := svc.SetDefaultAgent(ctx, "opencode"); err != nil || !again.IsDefault {
+	if again, err := svc.SetDefaultAgent(ctx, secondAgentID); err != nil || !again.IsDefault {
 		t.Fatalf("重复切换应幂等: %v %+v", err, again)
 	}
 
@@ -151,13 +187,13 @@ func TestSetDefaultAgentSwitchAndPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default.json 未落盘: %v", err)
 	}
-	if !strings.Contains(string(b), `"default_agent": "opencode"`) {
+	if !strings.Contains(string(b), `"default_agent": "`+secondAgentID+`"`) {
 		t.Fatalf("default.json 内容不符: %s", b)
 	}
 	// 重启（新 Service + 同目录）→ 选择仍生效，且 agents 数不变（default.json 非定义）。
 	svc2 := agentTestSvc(t, dir)
-	if got := svc2.DefaultAgentID(); got != "opencode" {
-		t.Fatalf("重启后当前 Agent 应为 opencode: %s", got)
+	if got := svc2.DefaultAgentID(); got != secondAgentID {
+		t.Fatalf("重启后当前 Agent 应为 %s: %s", secondAgentID, got)
 	}
 	if list, _ := svc2.ListAgents(); len(list) != 2 {
 		t.Fatalf("default.json 被误当定义加载: %+v", list)
@@ -310,7 +346,7 @@ func TestAgentPermissionPolicyPersist(t *testing.T) {
 }
 
 // TestSeedAgentReadonly 种子 agent 只读不变量（修复：内置播种 id 由 agent-<runtime> 改为
-// dsh/opencode 后，仅按前缀判定的守卫失效 → 种子可删）。
+// dsh 后，仅按前缀判定的守卫失效 → 种子可删）。
 //
 // v12 起"种子 runtime 不可改"这条随字段一起下线：agent 没有 runtime 可选，改它一律是
 // `runtime_selection_removed`（对所有 agent 一视同仁，不是"种子特权"）。
@@ -328,12 +364,16 @@ func TestSeedAgentReadonly(t *testing.T) {
 	for _, a := range list {
 		seeds[a.ID] = a.Seed
 	}
-	if !seeds["dsh"] || !seeds["opencode"] {
+	if !seeds["dsh"] {
 		t.Fatalf("内置播种应标记 seed: %+v", seeds)
+	}
+	// 用户建的那条**不是**种子：它可改可删（下面就是这条边界）。
+	if seeds[secondAgentID] {
+		t.Fatalf("用户建的 agent 不该被标记为 seed: %+v", seeds)
 	}
 
 	// 内置种子不可删（此前会成功删除，导致默认 agent 缺失、新建会话失败）。
-	for _, id := range []string{"dsh", "opencode"} {
+	for _, id := range []string{"dsh"} {
 		var ae *acl.Error
 		if _, err := svc.DeleteAgent(ctx, id); err == nil {
 			t.Fatalf("种子 %q 应不可删除", id)
@@ -351,7 +391,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 
 	// 底座不可选：带 `runtimes` 的 PATCH 被显式拒绝（种子也不例外）。
 	var ae *acl.Error
-	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["opencode"]`)}); err == nil {
+	if _, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["stub"]`)}); err == nil {
 		t.Fatal("带 runtimes 的 PATCH 应被拒（底座由构建期固定）")
 	} else if !errors.As(err, &ae) || ae.Code != "runtime_selection_removed" {
 		t.Fatalf("带 runtimes 应 runtime_selection_removed，got %v", err)
@@ -530,7 +570,7 @@ func TestCreateAgentRejectsRuntimeSelection(t *testing.T) {
 		}
 	}
 	bad("CreateAgent 带 runtimes", func() error {
-		_, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "a-deny-rt", Runtimes: json.RawMessage(`["opencode"]`)})
+		_, err := svc.CreateAgent(ctx, dtoagent.AgentCreateReq{ID: "a-deny-rt", Runtimes: json.RawMessage(`["stub"]`)})
 		return err
 	}())
 	bad("CreateAgent 带 routing_policy", func() error {
@@ -538,7 +578,7 @@ func TestCreateAgentRejectsRuntimeSelection(t *testing.T) {
 		return err
 	}())
 	bad("UpdateAgent 带 runtimes", func() error {
-		_, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["opencode"]`)})
+		_, err := svc.UpdateAgent(ctx, "dsh", dtoagent.AgentUpdateReq{Runtimes: json.RawMessage(`["stub"]`)})
 		return err
 	}())
 	bad("UpdateAgent 带 routing_policy", func() error {

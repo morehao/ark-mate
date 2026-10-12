@@ -23,7 +23,7 @@ func TestForModelIsT5ConfigWrite(t *testing.T) {
 		t.Error("model 的声明必须有可执行的人话 Note")
 	}
 
-	written := ConfigApplicability("opencode", "<MATE_HOME>/runtime/opencode/opencode.json", true)
+	written := ConfigApplicability("rtx", "<MATE_HOME>/runtime/rtx/config.json", true)
 	if written.Status != StatusWritten || !written.OK {
 		t.Errorf("written=true 应得到 ok/written，得到 %+v", written)
 	}

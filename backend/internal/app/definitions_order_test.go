@@ -40,9 +40,9 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	}
 	cwd := t.TempDir()
 	mustWrite(t, filepath.Join(caps, "skills", "hello.json"),
-		`{"id":"hello","name":"Hello","description":"d","body":"# Hello\n","runtimes":["opencode"]}`)
+		`{"id":"hello","name":"Hello","description":"d","body":"# Hello\n","runtimes":["rtx"]}`)
 	mustWrite(t, filepath.Join(agents, "a1.json"),
-		`{"id":"a1","name":"存量 Agent","runtimes":["opencode"]}`)
+		`{"id":"a1","name":"存量 Agent","runtimes":["rtx"]}`)
 	// 过期的 once：startup pass 会把它置 inactive 并留一条 skipped 痕迹——它是"调度确实在
 	// 装载**之后**起了"的唯一可观察证据（先起调度的话它扫到的是空表）。
 	mustWrite(t, filepath.Join(autos, "stale.json"),
@@ -67,8 +67,8 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	cfg.Addr = "127.0.0.1:0"
 	cfg.WebDir = web
 	cfg.ProjectionDirs = map[string]string{
-		"opencode:skill": filepath.Join(home, "proj-opencode"),
-		"dsh:skill":      filepath.Join(home, "proj-dsh"),
+		"rtx:skill": filepath.Join(home, "proj-rtx"),
+		"dsh:skill": filepath.Join(home, "proj-dsh"),
 	}
 
 	a := New(cfg, nil)
