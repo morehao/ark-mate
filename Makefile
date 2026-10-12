@@ -177,13 +177,15 @@ web:
 # apps/web/dist，核心从不内嵌副本）。
 # 落后端产物路径 `apps/desktop/resources/` 已 gitignore（生成物）。
 core/desktop: web desktop/runtime-bin
-	@# CGO_ENABLED=1：持久层用的是 golib 的 SQLite driver（底层 mattn/go-sqlite3，**CGO**）。
-	@# 2026-10-10 起这里曾是 0，代价是桌面核的 SQLite 面**运行期不可用**（编得出、连库即
-	@# `go-sqlite3 requires cgo to work. This is a stub`）——桌面态一启动就撞墙，整条
-	@# `make verify/desktop-dod` 因此自那时起跑不通。2026-10-11 决策：**允许依赖 CGO**。
-	@# 代价如实记：桌面核变成动态链接（需要目标平台的 libc），本仓不做 Go 交叉编译，
-	@# 所以这条现在没有代价；将来若要交叉编译，得先解决 C 交叉工具链。
-	cd backend && CGO_ENABLED=1 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/mate
+	@# CGO_ENABLED=0：持久层用的是 golib 的 SQLite dialect，v1.32.22 起是**纯 Go** 的
+	@# ncruces/go-sqlite3（SQLite 编成 wasm 再翻译回 Go），所以不需要 C 工具链（桌面核在
+	@# macOS 上本来就只有系统库，收益体现在 linux 目标：静态产物、交叉编译不必先有 C 交叉
+	@# 工具链）。历史别记错：2026-10-10 这里的 0 曾经**编得出、连库即死**（那时的 dialect 是 CGO 的
+	@# mattn/go-sqlite3，0 会注册 stub，运行期报 `go-sqlite3 requires cgo to work`），
+	@# 于是 2026-10-11 一律改成 1 并接受动态链接。驱动换成纯 Go 之后，0 重新是**正确**取值
+	@# ——但"0 安全"这件事的前提是依赖图里没有 CGO 驱动，所以两侧都由
+	@# internal/archtest 的 TestSqliteDriverStaysPureGo 钉着（谁把 golib 降级回去，它会红）。
+	cd backend && CGO_ENABLED=0 go build $(CORE_LDFLAGS) -o ../$(CORE_DESKTOP_OUT) ./cmd/mate
 	@# 运行时树里那一份前端产物（M2-6）：壳服务它、核心用 --web-dir 读**同一份**。
 	@# 只有一份 dist 是设计 §6.1 的红线——核心从不自带资产（2026-10-10 起连 `//go:embed`
 	@# 都删了），否则桌面态会出现两份资产，版本闸门（M2-4）也就无从判定混搭。

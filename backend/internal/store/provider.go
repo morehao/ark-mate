@@ -87,8 +87,10 @@ func (s *Store) ImportProviderDefinition(ctx context.Context, cols ProviderColum
 }
 
 // DeleteProviderDefinitionIfUnreferenced 删除一条 provider 档案 + 一条审计，**引用检查与删除
-// 在同一事务内**（ADR-4：不依赖 FK，因为本仓 SQLite 的 `foreign_keys=0`，所有 REFERENCES
-// 都只是装饰）。
+// 在同一事务内**（ADR-4：不依赖 FK——`models.provider_id` 上是 REFERENCES 不假，但把正确性
+// 押在库的约束上就要求"所有写面都走同一条 DSN"，而本仓的只读句柄、导入路径与测试库都各自
+// 开库；v1.32.22 起外键确实会咬人（ncruces 的 wasm 构建带 SQLITE_DEFAULT_FOREIGN_KEYS=1），
+// 那也只是多一道兜底，不是这条同事务检查的替代）。
 //
 // 返回：
 //   - deleted=false + refModelIDs 为空：行不存在 / revision CAS 未中（调用方翻 40901 或幂等 false）；

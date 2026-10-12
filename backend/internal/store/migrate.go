@@ -379,8 +379,11 @@ var schemaMigrations = []migration{
 			// 归属列：`DEFAULT ''` 让历史行**天然**落成"归默认工作空间"（读面解析），
 			// 于是不需要一次全表 UPDATE——少一条全表写就少一次中断面（见 migrate_v14.go）。
 			//
-			// **故意没有 REFERENCES**：本仓 SQLite driver 不注入 `foreign_keys`，写了也不生效；
-			// 且删登记**不该**连带删会话（设计 ADR-6），级联恰恰是错的语义。
+			// **故意没有 REFERENCES**：删工作空间登记**不该**连带删会话（设计 ADR-6），
+			// 级联恰恰是错的语义；归属的解析放在读面（空串 = 默认工作空间）。
+			// 这条在 v1.32.22 之后是**承重的**：那时候起外键真的生效（ncruces 的 wasm 构建带
+			// SQLITE_DEFAULT_FOREIGN_KEYS=1），补一个 REFERENCES 进来就会真的咬人——
+			// 而它当年（mattn 方言，foreign_keys=0）只是装饰。
 			`ALTER TABLE conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`,
 			// 左栏分组要按 (归档, 归属, 时间) 取数，索引照这个顺序建。
 			`CREATE INDEX idx_conversations_workspace ON conversations(archived, workspace_id, updated_at)`,

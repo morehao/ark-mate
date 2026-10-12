@@ -134,12 +134,17 @@ dsh --profile acp --help           # 验证可用（首用会自动初始化 pro
 > **主线交付是桌面**（`make desktop/dist`）；这一节是"自己起一个带面板的守护进程"的形态，属维护态。
 > 核心**不自带**面板资产（2026-10-10 起 `go:embed` 已删除）：面板资产只有 `frontend/apps/web/dist`
 > 一份，起服务时用 `--web-dir` / `MATE_WEB_DIR` 指过去，没给就**拒绝启动**（退出码 3）。
-> **构建须 `CGO_ENABLED=1`**：持久层的 SQLite driver 是 CGO 的（mattn/go-sqlite3），`0` 照样能编译，
-> 但注册的是 stub，**运行期连库才报错**（2026-10-11 决策，见 `AGENTS.md`「运行配置要点」）。
+> **构建不依赖 CGO**（`CGO_ENABLED=0`，2026-10-12 起）：持久层的 SQLite dialect 随 golib
+> v1.32.22 换成纯 Go 的 `ncruces/go-sqlite3`（SQLite 编成 wasm 再翻译回 Go），所以编译**不需要 C
+> 工具链**（实测 `CC=false` 也能编）、`GOOS=linux` 交叉编译不必先有 C 交叉工具链（实测 `file`
+> 报 statically linked；反过来 `CGO_ENABLED=1` 交叉编译直接编不过）。**别退回旧写法**：2026-10-11
+> 前后那版 driver 是 CGO 的（mattn/go-sqlite3），`0` 之下编译照样过、注册的却是 stub，
+> **运行期连库才报错**——四个构建面一律取 0 这件事由 archtest 的 `TestSqliteDriverStaysPureGo`
+> 与依赖图一起钉着（见 `AGENTS.md`「运行配置要点」）。代价是体积：golib 实测最小程序 **+10.99 MiB**。
 
 ```bash
 make web                                                      # 构建前端产物 → frontend/apps/web/dist
-cd backend && CGO_ENABLED=1 go build -o ../mate ./cmd/mate     # 产物在仓库根 ./mate（CGO=1 必须，见上）
+cd backend && CGO_ENABLED=0 go build -o ../mate ./cmd/mate     # 产物在仓库根 ./mate（CGO 关掉，见上）
 # 换底座（构建期固定，默认 dsh）：
 #   go build -ldflags "-X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=opencode" -o ../mate ./cmd/mate
 ```
@@ -610,7 +615,7 @@ make build    # 内核编译（全仓只有一个构建配置：不带任何构�
               # 认 RUNTIME=<id>：底座由构建期固定（默认 dsh），见「底座由构建期固定」
 make vet / test   # go vet / go test ./...
 # 前端：cd frontend && pnpm typecheck / pnpm build
-# 起带面板的服务：cd backend && CGO_ENABLED=1 go build \
+# 起带面板的服务：cd backend && CGO_ENABLED=0 go build \
 #                   -ldflags "-X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=dsh" \
 #                   -o ../mate ./cmd/mate && \
 #                 ./mate serve --web-dir "$PWD/frontend/apps/web/dist"
@@ -737,7 +742,7 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     routing             路由引擎 FirstAvailable 切片
     config              进程配置（flag + MATE_* 环境变量 + .ark-mate/config 目录化）
     procreg             进程注册表（孤儿 runtime 子进程回收）
-    dbclient             gorm 句柄装配 + golib SQLite dialector（**依赖 CGO**，构建须 CGO_ENABLED=1）
+    dbclient             gorm 句柄装配 + golib SQLite dialector（v1.32.22 起纯 Go，构建 `CGO_ENABLED=0`）
     object/objusage     跨层共享值对象（会话用量快照）
   internal/             应用专属逻辑
     app                 装配 + 启停生命周期（Init/Run/Close）

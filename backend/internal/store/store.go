@@ -1,4 +1,4 @@
-// Package store 是 ark-mate 的 SQLite 持久层门面（gorm + golib 的 SQLite dialector，**依赖 CGO**）。
+// Package store 是 ark-mate 的 SQLite 持久层门面（gorm + golib 的 SQLite dialector；v1.32.22 起是纯 Go 的 ncruces 方言，不依赖 CGO）。
 //
 // 设计约束：
 //   - schema_migrations 自管迁移（对齐 zacp store.go 经验：事务 + 幂等 + 版本拒绝启动）；

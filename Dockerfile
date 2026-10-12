@@ -71,12 +71,15 @@ ARG GO_PROXY
 # 构建期固定底座（默认 dsh）。取值只做词法校验：存在性交给核心启动时的 ProductRegistry
 # fail-closed——远程 runtime 的 id 由 runtimes.json 声明，这里写不出白名单。
 ARG MATE_RUNTIME=dsh
-# CGO_ENABLED=1：持久层的 SQLite driver 是 CGO 的（mattn/go-sqlite3），0 会编出一个**运行期
-# 连不上库**的 stub（2026-10-11 决策：允许依赖 CGO）。两个前提都在：构建阶段是
-# golang:*-bookworm（自带 gcc），运行阶段是 debian:*-slim（glibc 在位）。若把 RUNTIME_IMAGE
-# 换成 musl/scratch 基底，必须同时改回 0 或换纯 Go driver。
+# CGO_ENABLED=0：持久层的 SQLite dialect 自 golib v1.32.22 起是**纯 Go** 的
+# ncruces/go-sqlite3（SQLite 编成 wasm 再翻译回 Go），于是镜像不再需要 C 工具链，
+# 产物是静态二进制（`RUNTIME_IMAGE` 也不再受 glibc 约束，换 musl/scratch 基底的前提
+# 重新成立）。历史：2026-10-11 之前这里写 0，但那时 dialect 是 CGO 的 mattn/go-sqlite3，
+# 0 编出的 stub 在**运行期**连不上库；2026-10-11 起改成 1 并接受动态链接。谁把 golib
+# 降级回去而这里仍是 0，就会复现那个「编得出、连库即死」的故障，所以依赖侧由
+# internal/archtest 的 TestSqliteDriverStaysPureGo 钉着。
 ENV GOPROXY=${GO_PROXY} \
-    CGO_ENABLED=1
+    CGO_ENABLED=0
 WORKDIR /src/backend
 # 先只拷 go.mod/go.sum 拉依赖：改源码不会导致重新下载模块
 COPY backend/go.mod backend/go.sum ./

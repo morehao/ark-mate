@@ -18,12 +18,13 @@ func ctxT() context.Context { return context.Background() }
 
 // openTestDB 给当前测试一个**独立**的 sqlite 库（t.TempDir() 下的文件库）。
 //
-// 为什么不再是 ":memory:"：golib 的 SQLite driver 把内存库统一改写成
-// `file::memory:?cache=shared`（**固定名字**），同进程内多次 `Open(":memory:")` 会落到
-// 同一个共享缓存库上 → 同包测试互相污染。实测症状是 usage 汇总把别的用例的行一起算进去
-// （`CostCurrency: MIXED`、Runs 多出来）。自注册 dialector 时代用 `arkmate_mem_<n>`
-// 保证过唯一命名，那个保证随 driver 一起没了（见 pkg/dbclient 的
-// TestOpenMemoryIsProcessShared）。
+// 为什么是文件库而不是 ":memory:"：① 生产就是文件库（迁移备份、只读句柄、重启恢复这些
+// 路径只有文件库才走得到）；② 夹具要的是"每个测试一个空库"，而历史上 golib 的 dialect
+// 把内存库统一改写成固定名 `file::memory:?cache=shared`，同进程两次 `Open(":memory:")`
+// 会落到同一个库上（实测症状：usage 汇总把别的用例的行一起算进去，`CostCurrency: MIXED`、
+// Runs 多出来）。v1.32.22 的纯 Go dialect 已改成每次 Open 分配新库名，`":memory:"` 重新
+// 变得安全（见 pkg/dbclient 的 TestOpenMemoryIsIndependent），但第 ① 条理由与驱动无关，
+// 所以夹具继续用文件库。
 func openTestDB(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(filepath.Join(t.TempDir(), "mate.db"))
@@ -95,19 +96,22 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 	}
 }
 
-// TestAppendEventUnknownSession 未知会话的事件**不再被库拦住**——这是行为变更，不是笔误。
+// TestAppendEventUnknownSession 未知会话的事件**被库拦住**——外键又回来了（v1.32.22 起）。
 //
-// 这条守卫原来是反的：自注册的纯 Go dialector 在 DSN 里注入 `foreign_keys(1)`，events 的
-// session_id 外键由 SQLite 兜底，插未知会话必然报错。改用 golib 的
-// `dbgorm/driver/sqlite` 之后不再注入 foreign_keys（SQLite 默认关闭），于是这次插入会**成功**：
-// "给不存在的会话追加事件"从"库拒绝"退化成"写进去一行孤儿数据"。
+// 这条守卫的方向是历史翻转的，值得记一笔：自注册的纯 Go dialector 在 DSN 里注入
+// `foreign_keys(1)`，events 的 session_id 外键由 SQLite 兜底，插未知会话必然报错；
+// 换到 golib v1.32.21 的 mattn 方言后不再注入（SQLite 默认关闭），这次插入会**成功**
+// ——"给不存在的会话追加事件"从"库拒绝"退化成"写进去一行孤儿数据"，当时的守卫因此
+// 反过来断言"不该报错"，并留了话："哪天 foreign_keys 回来了，把它改回'应报错'"。
+// v1.32.22 的 ncruces 方言带 `SQLITE_DEFAULT_FOREIGN_KEYS=1`（wasm 构建项），话应验了。
 //
-// 保留它（而不是删掉）是为了把新行为钉住：调用方必须自己保证 session 存在；
-// 哪天 foreign_keys 回来了，这条会红，提醒把它改回"应报错"。
+// 它守的仍然是同一件事：**调用方必须自己保证 session 存在**，只是现在库也帮着拦一道。
+// 哪天它又变绿了（插入成功），说明外键又被关掉——那时先把本注释与
+// pkg/dbclient 的 TestOpenConnectionPragmasFollowGolibAndDriver 对齐，别只改断言。
 func TestAppendEventUnknownSession(t *testing.T) {
 	s := openTestDB(t)
-	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "ghost", "session.message", map[string]any{}); err != nil {
-		t.Fatalf("foreign_keys 已关（golib driver 不注入），插入未知会话的事件不应报错；若 FK 已恢复，把本测试改回断言报错: %v", err)
+	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "ghost", "session.message", map[string]any{}); err == nil {
+		t.Fatalf("插入未知会话的事件竟然成功了：外键又被关掉了？（见本测试注释）")
 	}
 }
 

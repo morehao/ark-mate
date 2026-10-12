@@ -380,7 +380,8 @@ var (
 
 // isUniqueViolation 判定错误是否为唯一索引冲突。
 //
-// 不按驱动错误码判（golib 的 SQLite driver 是 CGO mattn/go-sqlite3，错误文本随版本变），
+// 不按驱动错误码判（golib 的 SQLite driver 换过三代：mattn/go-sqlite3 的 CGO 方言 →
+// v1.32.22 起的 ncruces 纯 Go 方言，错误码与文本都随版本变），
 // 按"文本里出现 UNIQUE"判：本仓只用它做**重读既有行**这一个动作，判错的代价是丢掉一次
 // 优化（重读仍然会走一遍），不是写坏数据——所以宁可宽一点。
 //
