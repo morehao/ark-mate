@@ -127,21 +127,21 @@ func TestElicitationCompleteByURLID(t *testing.T) {
 // 正好覆盖后两个分支（wire 分支不碰 cli）。
 //
 // v15（D-4 修复）之后 wire 分支的口径变了：`_meta` 里的 id 是**底座原文**，必须先按
-// `provider_session_id` 反查平台会话；查不到就退 ambiguous —— 这正是本用例现在要钉的东西
+// `runtime_session_id` 反查平台会话；查不到就退 ambiguous —— 这正是本用例现在要钉的东西
 // （改之前它会把 `wire-conv` 直接当成平台会话 id 用，把提问卡挂到一个不存在的会话上）。
 func TestResolveElicitationScope(t *testing.T) {
 	_, orch, _ := newTestRig(t)
 
-	// 先登记一条会话，让它的 `provider_session_id` 是 `rt_wire-sess`。
+	// 先登记一条会话，让它的 `runtime_session_id` 是 `rt_wire-sess`。
 	orch.svc.registerSession(&SessionRec{
 		ID: "ses_platform", AgentID: "a1", Cwd: "/tmp",
-		ProviderSessionID: objid.ProviderShell + "wire-sess",
+		RuntimeSessionID: objid.RuntimeShell + "wire-sess",
 	})
 
 	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{
 		SessionID: "wire-sess", ScopeSource: acl.ScopeWire,
 	}); sid != "ses_platform" || src != acl.ScopeWire || note != "" {
-		t.Fatalf("wire 归属应按 provider_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
+		t.Fatalf("wire 归属应按 runtime_session_id 反查成平台会话: sid=%q src=%q note=%q", sid, src, note)
 	}
 	// **查不到**的 wire id（底座发了个我们不认识的会话）→ ambiguous + 留痕，**不猜**。
 	if sid, src, note := orch.resolveElicitationScope(nil, acl.ElicitationRequest{

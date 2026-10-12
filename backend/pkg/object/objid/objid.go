@@ -35,7 +35,8 @@ import (
 //     （`validDefinitionID` 要求 `filepath.Base(id)==id`），且 `providers.id` 参与 vault 的
 //     AAD（`vault:providers/<id>`）——改它会让她已加密的密钥全部解不开；
 //   - `events.seq` / `definition_revisions.seq`：它们是**单调游标**（后者直接当能力代际 rev），
-//     换 TEXT 会毁掉 `MAX(seq)` 与索引序，收益为零。
+//     换 TEXT 会毁掉 `MAX(seq)` 与索引序，收益为零。**v17 起 `events` 另有登记的 `id`**——
+//     登记的是**行身份**，两列各司其职（身份 `evt_…` / 位次 `seq`），不是把 seq 换成 id。
 const (
 	// Session 会话（`sessions.id`）。
 	Session = "ses_"
@@ -51,14 +52,23 @@ const (
 	Model = "mdl_"
 	// PermissionMemory 会话级权限记忆（`permission_memories.id`）。
 	PermissionMemory = "pem_"
+	// Event 事件事实行（`events.id`，v17）。
+	//
+	// 它回答的是"**是哪一条事件**"（诊断包引用某一帧、`mate migrate` 按 id 判重与分叉检测、
+	// memory 模式重启后同一条事件的身份不变）；位次仍由 `events.seq` 承担，`id` 永不当游标
+	// （守卫 G1 钉住这条）。
+	Event = "evt_"
 )
 
-// ProviderShell 透传壳前缀（= runtime）。
+// RuntimeShell 透传壳前缀（= runtime）。
 //
 // 它解决的是"平台 id 与底座 id 同形"：opencode 原生发 `ses_…`，与平台铸造的 `ses_…`
 // 长得一模一样；dsh 发裸 uuid。加壳之后**两个形状都由平台单方面定义**，底座换实现、
 // 换前缀、发裸 uuid 都不影响这条判据（设计 §4.5，选项 D）。
-const ProviderShell = "rt_"
+//
+// v17 起名字里的 `provider` 已收口成 `runtime`（会话列 `runtime_session_id`）：`provider`
+// 在本仓是**模型供应商**的词，而这里装的是**底座会话**。
+const RuntimeShell = "rt_"
 
 // Crockford Base32 字母表：刻意去掉 I/L/O/U（避免与 1/0 混淆），且 **ASCII 序 = 字母表序**，
 // 因此 `ORDER BY id ASC`（SQLite TEXT 默认 BINARY 比较）就是铸造序 —— 这是 `messages`
@@ -158,7 +168,7 @@ func increment() {
 //
 // 只做**前缀**匹配，不校验主体形状——形状判据是 IsPlatformID。
 func Prefix(id string) (string, bool) {
-	for _, p := range []string{Session, Message, Run, Input, Workspace, Model, PermissionMemory} {
+	for _, p := range []string{Session, Message, Run, Input, Workspace, Model, PermissionMemory, Event} {
 		if strings.HasPrefix(id, p) {
 			return p, true
 		}
@@ -191,30 +201,30 @@ func validBody(s string) bool {
 	return true
 }
 
-// ErrProviderID 是包装/解包失败时的哨兵错误（errors.Is 可用）。
-var ErrProviderID = errors.New("objid: 非法底座会话 id")
+// ErrRuntimeID 是包装/解包失败时的哨兵错误（errors.Is 可用）。
+var ErrRuntimeID = errors.New("objid: 非法底座会话 id")
 
-// WrapProvider 给底座原文加壳：`raw` → `rt_<raw>`。
+// WrapRuntime 给底座原文加壳：`raw` → `rt_<raw>`。
 //
 // **严格**，因为"忘了包装"的后果不响：DB 里会落一列与平台 id 同形的裸值，两代形状混在
 // 一起而没有任何运行时信号。三条拒绝路径：
 //   - raw 为空 → 上游没拿到会话 id，包装一个 `rt_` 只会把错误推迟到 load/resume；
 //   - raw 已带 `rt_` → 双包（`rt_rt_…`），解包时解不干净；
 //   - raw 含空白字符 → 协议标识符不可能是这样，多半是上游把别的字段传错了。
-func WrapProvider(raw string) (string, error) {
+func WrapRuntime(raw string) (string, error) {
 	if raw == "" {
-		return "", fmt.Errorf("%w: 原文为空", ErrProviderID)
+		return "", fmt.Errorf("%w: 原文为空", ErrRuntimeID)
 	}
-	if strings.HasPrefix(raw, ProviderShell) {
-		return "", fmt.Errorf("%w: 原文已带 %q 壳（防双包）: %q", ErrProviderID, ProviderShell, raw)
+	if strings.HasPrefix(raw, RuntimeShell) {
+		return "", fmt.Errorf("%w: 原文已带 %q 壳（防双包）: %q", ErrRuntimeID, RuntimeShell, raw)
 	}
 	if strings.ContainsAny(raw, " \t\r\n") {
-		return "", fmt.Errorf("%w: 原文含空白字符: %q", ErrProviderID, raw)
+		return "", fmt.Errorf("%w: 原文含空白字符: %q", ErrRuntimeID, raw)
 	}
-	return ProviderShell + raw, nil
+	return RuntimeShell + raw, nil
 }
 
-// UnwrapProvider 解出底座原文：`rt_<raw>` → `raw`。
+// UnwrapRuntime 解出底座原文：`rt_<raw>` → `raw`。
 //
 // **严格**，因为"忘了解包"的后果不响：底座收到 `rt_ses_…` 找不到会话 → 打一条 WARN 后
 // 走 handoff memo 兜底（ADR-4 明确允许的降级），用户侧只看到"上下文丢了"。让错的那次在
@@ -222,16 +232,16 @@ func WrapProvider(raw string) (string, error) {
 //   - 无 `rt_` 前缀 → 说明调用方拿的是平台 id 或旧形状值；
 //   - 解出后为空；
 //   - 解出后仍带 `rt_` → 双包。
-func UnwrapProvider(s string) (string, error) {
-	if !strings.HasPrefix(s, ProviderShell) {
-		return "", fmt.Errorf("%w: 缺 %q 壳: %q", ErrProviderID, ProviderShell, s)
+func UnwrapRuntime(s string) (string, error) {
+	if !strings.HasPrefix(s, RuntimeShell) {
+		return "", fmt.Errorf("%w: 缺 %q 壳: %q", ErrRuntimeID, RuntimeShell, s)
 	}
-	raw := strings.TrimPrefix(s, ProviderShell)
+	raw := strings.TrimPrefix(s, RuntimeShell)
 	if raw == "" {
-		return "", fmt.Errorf("%w: 壳内为空", ErrProviderID)
+		return "", fmt.Errorf("%w: 壳内为空", ErrRuntimeID)
 	}
-	if strings.HasPrefix(raw, ProviderShell) {
-		return "", fmt.Errorf("%w: 壳内有壳（双包）: %q", ErrProviderID, s)
+	if strings.HasPrefix(raw, RuntimeShell) {
+		return "", fmt.Errorf("%w: 壳内有壳（双包）: %q", ErrRuntimeID, s)
 	}
 	return raw, nil
 }

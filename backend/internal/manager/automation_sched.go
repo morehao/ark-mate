@@ -424,7 +424,10 @@ func (s *Service) emitAutomationRun(id string, out automationRunOutcome) {
 	s.ver[automationOrigin(id)]++
 	v := s.ver[automationOrigin(id)]
 	s.mu.Unlock()
-	s.bus.Publish(BusAutomationRun, automationOrigin(id), v, payload)
+	// 刻意**不带事件 id**（第一参数空串）：`automation.run` 只走实时通道、**不落 events 表**
+	// 也不进 transcript，所以它没有 durable 身份——于是"帧上有 id ⟺ 它在 durable 日志里查得到"
+	// 这条不变式成立（见 eventbus.Event.ID 的注释）。
+	s.bus.Publish("", BusAutomationRun, automationOrigin(id), v, payload)
 }
 
 // refreshAutomationSchedule 按当前定义重算内存调度态（duplicate 分支用；不写盘）。

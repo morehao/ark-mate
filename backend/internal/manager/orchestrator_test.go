@@ -282,11 +282,11 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", State: AgentStateStopped}
 	svc.mu.Unlock()
 	svc.registerSession(&SessionRec{
-		ID: "c-stub", AgentID: "no-such-agent", RuntimeHint: "stub", Status: SessionStatusInterrupted, // 无 ProviderSessionID → memo 兜底候选
+		ID: "c-stub", AgentID: "no-such-agent", RuntimeID: "stub", Status: SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
 	})
 	svc.registerSession(&SessionRec{
-		ID: "c-term", AgentID: "ghost", RuntimeHint: "no-such-runtime", Status: SessionStatusCompleted,
-		ProviderSessionID: "x-1",
+		ID: "c-term", AgentID: "ghost", RuntimeID: "no-such-runtime", Status: SessionStatusCompleted,
+		RuntimeSessionID: "x-1",
 	})
 
 	if _, err := orch.Prompt(ctx, "c-stub", "hi"); err == nil {

@@ -33,7 +33,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
 	}
-	if _, err := s.AppendEvent(ctx, "c1", "assistant_message", map[string]any{"text": "hi"}); err != nil {
+	if _, err := s.AppendEvent(ctx, objid.New(objid.Event), "c1", "assistant_message", map[string]any{"text": "hi"}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := s.CreateRun(ctx, model.RunEntity{ID: "r1", SessionID: "c1", Status: "running", StartedAt: at}); err != nil {
@@ -304,23 +304,26 @@ func TestOnDiskFormatContract(t *testing.T) {
 
 // TestUpsertForImportKeepsModelSelection transcript 导入不得覆盖会话级模型选择。
 //
-// transcript header 里没有 provider/model/runtime_hint/provider_session_id 四个字段，
+// transcript header 里没有 provider_id/model_id/runtime_id/runtime_session_id 四个字段，
 // 若导入沿用全列 upsert 语义，会把它们按零值覆盖——用户选过的模型在重复导入后消失。
 func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
 	if err := s.UpsertSession(ctx, model.SessionEntity{
 		ID: "c1", AgentID: "a1", Status: "completed",
-		ProviderID: "p1", ModelID: "m1", RuntimeHint: "opencode", ProviderSessionID: "rt_ses_1",
+		ProviderID: "p1", ModelID: "m1", RuntimeID: "opencode", RuntimeSessionID: "rt_ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
 	}
 
 	// 模拟导入：header 只带标题等字段，模型选择相关字段为空。
+	// 事件行带身份（v17 起导入按 id 判重，缺 id 整批回滚）。
 	if _, _, err := s.ImportBatch(ctx, []ImportItem{{
 		Session: model.SessionEntity{ID: "c1", AgentID: "a1", Title: "导入标题", Status: "completed"},
-		Events:  []model.EventEntity{{Type: "assistant_message", PayloadJSON: `{"text":"x"}`}},
+		Events: []model.EventEntity{
+			{ID: objid.New(objid.Event), Type: "assistant_message", PayloadJSON: `{"text":"x"}`},
+		},
 	}}, "", 0, 0); err != nil {
 		t.Fatalf("ImportBatch: %v", err)
 	}
@@ -329,9 +332,9 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetSession: ok=%v err=%v", ok, err)
 	}
-	if got.ProviderID != "p1" || got.ModelID != "m1" || got.RuntimeHint != "opencode" || got.ProviderSessionID != "rt_ses_1" {
-		t.Errorf("导入覆盖了会话级模型选择: provider_id=%q model_id=%q hint=%q session=%q",
-			got.ProviderID, got.ModelID, got.RuntimeHint, got.ProviderSessionID)
+	if got.ProviderID != "p1" || got.ModelID != "m1" || got.RuntimeID != "opencode" || got.RuntimeSessionID != "rt_ses_1" {
+		t.Errorf("导入覆盖了会话级模型选择: provider_id=%q model_id=%q runtime_id=%q session=%q",
+			got.ProviderID, got.ModelID, got.RuntimeID, got.RuntimeSessionID)
 	}
 	if got.Title != "导入标题" {
 		t.Errorf("导入应更新标题，实际 %q", got.Title)

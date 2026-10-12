@@ -101,7 +101,7 @@ func toSessionResp(r *SessionRec) dtosession.SessionResp {
 	return dtosession.SessionResp{
 		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
-		ProviderSessionID:  r.ProviderSessionID,
+		RuntimeSessionID:   r.RuntimeSessionID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
 		Title:              r.Title,
@@ -465,7 +465,7 @@ func (s *Service) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 		events = make([]eventbus.Event, 0, len(batch))
 		for _, e := range batch {
 			events = append(events, eventbus.Event{
-				Type: e.Type, Seq: e.Seq, AggregID: e.SessionID, Payload: decodePayload(e.PayloadJSON),
+				ID: e.ID, Type: e.Type, Seq: e.Seq, AggregID: e.SessionID, Payload: decodePayload(e.PayloadJSON),
 			})
 		}
 	} else {

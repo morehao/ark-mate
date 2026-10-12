@@ -59,8 +59,8 @@ func TestTwoProjectionConstructors(t *testing.T) {
 		if rt.ManagesOwnContext() != tc.ownCtx {
 			t.Fatalf("%s 投影 ManagesOwnContext 不符: %v", tc.id, rt.ManagesOwnContext())
 		}
-		if rt.ProviderSessionID() != sess.ID() {
-			t.Fatalf("%s 投影 ProviderSessionID 不符", tc.id)
+		if rt.RuntimeSessionID() != sess.ID() {
+			t.Fatalf("%s 投影 RuntimeSessionID 不符", tc.id)
 		}
 		// 模型切换行为：两投影共用同一实现，按**会话自报的配置项**（category=model）判定。
 		// 该会话未广告任何配置项 → 一律 unsupported_model（不臆造 env/provider 回落路径）。

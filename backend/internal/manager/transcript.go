@@ -20,9 +20,16 @@ import (
 // 文件：<dir>/<sessionID>.jsonl
 // 首行 header，之后每行一个事件原语：
 //
-//	{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"...","agent_id":"...",
+//	{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"...","agent_id":"...",
 //	 "runtime":"...","cwd":"...","created_at":"..."}
-//	{"seq":2,"ts":"...","type":"session.user_message","payload":{...}}
+//	{"id":"evt_...","seq":2,"ts":"...","type":"session.user_message","payload":{...}}
+//
+// **v2 = 事件行多一支 `id`（身份），`seq` 保留（位次）**（2026-10-12，设计
+// `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`）：v1 的 `seq` 在装载时被丢掉、按行号
+// 重铸，于是同一个事件**每次重启换一个位次**（客户端书签里的 since_seq 随之失效）。v2 让身份与
+// 位次都随数据落盘：装载用 `PublishAt` 恢复两者，`mate migrate` 按 `id` 判重。
+// **v1 文件不再被回读**（旧文件的 seq 只是"文件内位次"，与库里的水位没有可比性）——装载面
+// 传 WARN + 计数跳过，`mate transcripts prune --older-than 1s` 是它的处置出口（不自动删）。
 //
 // 记录在 Service.publish 统一汇口挂载（域事件 = prompt/update 原语），
 // 写入失败只告警不阻断会话（transcript 是尽力而为的旁路事实源）。
@@ -32,8 +39,15 @@ import (
 // 用户消息/终态事件不受合并影响，仍是一条事件一行。故"每轮 prompt/update 原语"应读作
 // "每轮事件原语（文本增量已攒批）"，前端/导入侧按 msg_id 拼接的语义不变。
 
-// wireTranscriptSchema transcript 文件 schema 名。
-const wireTranscriptSchema = "ark-mate.wire-transcript.v1"
+// wireTranscriptSchema transcript 文件 schema 名（v2：事件行带 `id`，见文件头注释）。
+const wireTranscriptSchema = "ark-mate.wire-transcript.v2"
+
+// legacyWireTranscriptSchemaV1 是 v17 之前的 schema 名。
+//
+// 它必须**被写出来**才能被认出来：装载面见到它就整份跳过 + WARN（v1 的 `seq` 只是文件内位次，
+// 拿它当全局水位就是把两套语义混起来）。处置出口是 `mate transcripts prune --older-than 1s`
+// ——**不自动删**（ADR-5：transcript 是 memory 模式的事实源，自动删不可逆）。
+const legacyWireTranscriptSchemaV1 = "ark-mate.wire-transcript.v1"
 
 // wireTranscriptHeader 文件首行（header）。
 type wireTranscriptHeader struct {
@@ -51,6 +65,9 @@ type wireTranscriptHeader struct {
 
 // wireTranscriptLine 事件原语行。
 type wireTranscriptLine struct {
+	// ID 事件身份（`evt_<26 位 ULID>`，v2 起必填）。它与 `seq` 一起落盘、一起被装载面恢复：
+	// 身份回答"是哪一条"（导入判重、诊断引用），seq 回答"在哪"（回放顺序与续传水位）。
+	ID      string         `json:"id"`
 	Seq     int64          `json:"seq"`
 	TS      string         `json:"ts"`
 	Type    string         `json:"type"`
@@ -98,7 +115,7 @@ func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string, wo
 	}
 	h := wireTranscriptHeader{
 		Schema:             wireTranscriptSchema,
-		Version:            1,
+		Version:            2,
 		SessionID:          sessionID,
 		AgentID:            agentID,
 		Runtime:            runtimeID,
@@ -120,12 +137,12 @@ func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string, wo
 	r.open[sessionID] = f
 }
 
-// appendLine 追加一个事件原语行。
-func (r *transcriptRecorder) appendLine(sessionID string, seq int64, typ string, payload map[string]any) {
+// appendLine 追加一个事件原语行（`id` 与 `seq` 都由上游 `publishRaw` 传下来，这里绝不重铸）。
+func (r *transcriptRecorder) appendLine(sessionID, eventID string, seq int64, typ string, payload map[string]any) {
 	if r == nil || r.dir == "" {
 		return
 	}
-	line := wireTranscriptLine{Seq: seq, TS: time.Now().UTC().Format(time.RFC3339Nano), Type: typ, Payload: payload}
+	line := wireTranscriptLine{ID: eventID, Seq: seq, TS: time.Now().UTC().Format(time.RFC3339Nano), Type: typ, Payload: payload}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f, ok := r.open[sessionID]

@@ -438,6 +438,9 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_sessions_workspace ON sessions(archived, workspace_id, updated_at)`,
 
 			// events 的身份仍是 seq（历史回放分页用的就是它），**刻意不加 id 列**。
+			// 〔v17 推翻了这一条：events 的主键换成平台铸造的 `evt_…`，`seq` 降为唯一游标——
+			// 见本文件 version 17 与 `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`。
+			// 这里保持当时的语句与理由不动（迁移纪律：历史步骤不回改）。〕
 			`CREATE TABLE events (
 				seq          INTEGER PRIMARY KEY,
 				session_id   TEXT NOT NULL REFERENCES sessions(id),
@@ -600,6 +603,50 @@ var schemaMigrations = []migration{
 			`DROP INDEX idx_memories_session`,
 			`CREATE INDEX idx_permission_memories_session ON permission_memories(session_id)`,
 		},
+	},
+	{
+		version: 17,
+		name:    "事件身份：events 主键换成平台铸造 id（evt_）+ 就地重建；sessions 两列收口到 runtime 词",
+		// 备份：本步**就地重建 `events`**（逐行铸 `evt_` 身份，主键从 seq 换成 id）——它是
+		// "就地改写既有数据"，与 v12/v13/v16 同一档。旧二进制对 v17 库是**拒绝启动**，所以备份
+		// 是唯一的回退窗口，`mate doctor` 会打印 `<db>.bak-v17-*`。
+		//
+		// 与 v15 相反的一处（很容易照抄错）：v15 重建 events 时**清空**了
+		// `meta.events_last_seq`（因为行被清掉了）；v17 **行照搬、一行不丢**，所以那一行 meta
+		// 必须原样留着——清掉它会让新事件从 1 重新起跳、与既有行撞号，而 `idx_events_seq` 的
+		// UNIQUE 会当场把这次迁移判红。
+		backup: "v17",
+		// 两条改动（设计 `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`）：
+		//   1. 事件的身份与位次分开：`id`（`evt_<26 位 ULID>`，平台铸造）当主键，`seq` 降为
+		//      带唯一索引的普通列；transcript 升 v2 让两者一起随数据流动；
+		//   2. `sessions.provider_session_id` → `runtime_session_id`、
+		//      `sessions.runtime_hint` → `runtime_id`（`provider` 在本仓是"模型供应商"的词）。
+		//
+		// **语句全是字面量**（与 v15/v16 同一条纪律）：这里出现的 `provider_session_id` /
+		// `runtime_hint` 是**被改掉的那一版的名字**，绝不引用 `model.TableName*` 或 Go 字段名
+		// ——引用会让"实体改名"把这条历史步骤一起改掉，老库（真的叫旧名）与新库走出两条路
+		// （守卫⑤ 钉着这条纪律）。
+		statements: []string{
+			// 目标表：`id` 主键 + `seq` 普通列。唯一约束刻意**不在建表语句里**（表内 UNIQUE 会
+			// 留下 `sqlite_autoindex_*`，换名后没人看得懂它属于谁——与 v13 同一条理由），
+			// 换表之后单独 `CREATE UNIQUE INDEX idx_events_seq`。
+			`CREATE TABLE events_v17 (
+				id           TEXT PRIMARY KEY,
+				seq          INTEGER NOT NULL,
+				session_id   TEXT NOT NULL REFERENCES sessions(id),
+				type         TEXT NOT NULL,
+				payload_json TEXT NOT NULL DEFAULT '',
+				created_at   TEXT NOT NULL
+			)`,
+
+			// ——— 2. 两列收口 ———
+			//
+			// 纯改名（不搬行）：`RENAME COLUMN` 会改写引用该列的索引定义，而 sessions 的 4 条
+			// 索引都不引用这两列，所以本步没有索引要重建。
+			`ALTER TABLE sessions RENAME COLUMN provider_session_id TO runtime_session_id`,
+			`ALTER TABLE sessions RENAME COLUMN runtime_hint TO runtime_id`,
+		},
+		apply: migrateV17,
 	},
 }
 

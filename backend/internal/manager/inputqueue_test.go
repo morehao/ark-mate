@@ -66,7 +66,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 	as := &ActiveSession{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
 	r.Orch.sessions[as.ID] = as
 	r.Svc.registerSession(&SessionRec{
-		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: SessionStatusInProgress, Generation: 1,
+		ID: as.ID, AgentID: "a1", RuntimeID: "stub", Status: SessionStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
 		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 executeRun 在写。

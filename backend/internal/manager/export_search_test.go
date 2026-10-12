@@ -34,7 +34,7 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	var msgs []model.MessageEntity
 	for i, pair := range texts {
 		role, text := pair[0], pair[1]
-		seq, err := st.AppendEvent(ctx, id, BusUserMessage, map[string]any{"text": text})
+		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, BusUserMessage, map[string]any{"text": text})
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}

@@ -98,7 +98,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 	}
 
 	// P3 双 id（D-1，用户已授权破坏性变更）：会话对外 id = 平台铸造的 `ses_<ULID>`（隐藏底座 id 形状、
-	// 跨重启稳定定位）；原生 provider id 存 sess/ProviderSessionID 列，供恢复承载（load/resume）。
+	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveSession{ID: convID, AgentID: agent.ID, Runtime: spec.ID, Fingerprint: fingerprint,
 		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
 	// 模型回落链（E5/T2 快路径）：**会话显式 model > models.is_default[该 runtime] > 不下发**。
@@ -132,7 +132,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 	// W1：底座原文 → 平台侧的值（`rt_` 壳）。**失败即返回错误、不建 rec**——把裸 id 落库会让
 	// "平台 id 与底座 id 形状可分"这条不变式当场失效，而那是静默的（守卫② 事后才发现）。
 	// `as.providerID` 刻意保留**原文**：它是进程内映射 `byProvider` 的键，与 ACP 回调同源。
-	providerSessID, err := objid.WrapProvider(sess.ID())
+	providerSessID, err := objid.WrapRuntime(sess.ID())
 	if err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
@@ -144,8 +144,8 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 
 	o.svc.registerSession(&SessionRec{ID: as.ID, AgentID: agent.ID, Cwd: cwd,
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary, ProviderID: agent.Provider,
-		ModelID: opt.Model.Model, RuntimeHint: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
-		ProviderSessionID: providerSessID, Status: SessionStatusInProgress,
+		ModelID: opt.Model.Model, RuntimeID: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
+		RuntimeSessionID: providerSessID, Status: SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
 		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
@@ -163,7 +163,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 //  2. handoff memo 兜底（原生不可用时）：底座未声明 load/resume 能力、无 provider session
 //     （旧数据）、agent 现路由 runtime ≠ 会话原 runtime（跨 runtime 续聊）、或原生恢复失败 →
 //     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
-//     并更新 rec 的 provider_session_id / runtime_hint（记忆与 sqlite 同步）。
+//     并更新 rec 的 runtime_session_id / runtime_id（记忆与 sqlite 同步）。
 //
 // **可续聊性只看会话是否还存在**（ADR-4：执行可丢弃、会话平台拥有）：上一轮的终态
 // （completed / failed / cancelled）是轮次结果的事实，不是「会话作废」的判据——旧语义把终态会话
@@ -195,7 +195,7 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 	}
 	// runtime 选择：**构建期选定的那一个**。
 	//
-	// 历史：这里曾在「会话原 runtime（`rec.RuntimeHint`）」与「agent 现路由首选」之间做迁移判定
+	// 历史：这里曾在「会话原 runtime（`rec.RuntimeID`）」与「agent 现路由首选」之间做迁移判定
 	// （跨 runtime 续聊，§18 F3）。产品钉在单一底座之后没有第二个候选——若会话记录里的原生 runtime
 	// 与当前不同（改过构建 / 老数据），下面 `connectSession` 的 `sameRuntime` 判据自然为 false，
 	// 走 fresh + handoff memo 重灌，会话照样能续。**这条路径要有真实用例**（M5 验收项）。
@@ -263,16 +263,16 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 	// 而且没有任何报错——用户只会发现"昨天能用的 MCP 今天不见了"。
 	opts := acl.SessionOptions{Cwd: cwd, McpServers: o.svc.McpServersFor(agent, spec.ID, sel)}
 	caps := rc.client.Capabilities()
-	sameRuntime := spec.ID == rec.RuntimeHint && rec.RuntimeHint != ""
+	sameRuntime := spec.ID == rec.RuntimeID && rec.RuntimeID != ""
 	// `nativeID` 是**平台侧的值**（`rt_` 壳）；给底座的必须是**原文**。
 	//
 	// U1：`rt_ses_…` 底座认不出来 → `LoadSession` 失败 → 打一条 WARN 后走 handoff memo 兜底
 	// （ADR-4 明确允许的降级）——用户侧只看到"上下文丢了"，**不响**。所以这里严格解包，
 	// 失败即返回错误，不降级（"让错的那次在边界上当场失败"是这两条函数存在的全部理由）。
-	nativeID := rec.ProviderSessionID
+	nativeID := rec.RuntimeSessionID
 	rawNativeID := ""
 	if nativeID != "" {
-		raw, uerr := objid.UnwrapProvider(nativeID)
+		raw, uerr := objid.UnwrapRuntime(nativeID)
 		if uerr != nil {
 			return nil, "", uerr
 		}
@@ -293,7 +293,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 		}
 		if err != nil {
 			glog.Warnw(ctx, "原生恢复失败，转 handoff memo 兜底", "session", rec.ID,
-				"runtime", spec.ID, "provider_session", nativeID, "err", err)
+				"runtime", spec.ID, "runtime_session", nativeID, "err", err)
 			resumeOK = false
 		}
 	}
@@ -311,14 +311,14 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec, ag
 		reason = "handoff"
 		// W2（最容易漏的一处：它在"原生恢复失败/迁移"分支里）：新会话的底座原文同样要加壳，
 		// 否则换底座/换会话之后 id 会退化成裸值——库里的形状就变成了两种。
-		wrappedNew, werr := objid.WrapProvider(sess.ID())
+		wrappedNew, werr := objid.WrapRuntime(sess.ID())
 		if werr != nil {
 			return nil, "", werr
 		}
-		// 迁移登记：fresh session 顶替原 provider id；跨 runtime 时同步 runtime_hint。
-		if nativeID != wrappedNew || spec.ID != rec.RuntimeHint {
-			rec.ProviderSessionID = wrappedNew
-			rec.RuntimeHint = spec.ID
+		// 迁移登记：fresh session 顶替原 provider id；跨 runtime 时同步 runtime_id。
+		if nativeID != wrappedNew || spec.ID != rec.RuntimeID {
+			rec.RuntimeSessionID = wrappedNew
+			rec.RuntimeID = spec.ID
 		}
 	}
 	// 代际落账：**实际挂上的**指纹写回记录（迁移后这里就是新值；回退时是旧值）。

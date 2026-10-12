@@ -9,6 +9,11 @@ import "sync"
 
 // Event 是总线上的单一事件载荷（type 为判别字段）。
 type Event struct {
+	// ID 行身份（`evt_<26 位 ULID>`；v17）。**只有 durable 事件有它**——落 events 表 / 进
+	// transcript 的那些；automation 触发结果这类"只走实时通道"的事件（见 README 的
+	// `automation.run`）刻意留空，于是 `omitempty` 让"帧上有 id ⟺ 它在 durable 日志里查得到"
+	// 成为一条免费的不变式。
+	ID       string `json:"id,omitempty"`
 	Type     string `json:"type"`    // 事件类型（token/thought/tool_call/message/终态等）
 	Seq      int64  `json:"seq"`     // 全局单调递增序号，用于断线续传
 	AggregID string `json:"agg_id"`  // 聚合 ID（如 session id），对应 durable.aggregateID
@@ -69,30 +74,36 @@ func NewWithLimit(n int) *Bus {
 // Publish 向总线发布一个事件：分配 seq、写入历史缓冲并广播给全部订阅者。
 // 缓冲超限时淘汰最旧事件，并把其 seq 记为对应聚合的淘汰水位。
 // 订阅者消费不及时则丢弃该事件，由断线后以 after 续传兜底。
-func (b *Bus) Publish(typ, aggID string, version int64, payload any) Event {
+//
+// id 是事件的行身份（可空：只走实时通道的事件没有 durable 身份）——它不参与任何判据，
+// 只跟着事件流到帧/历史/导出，让"某一帧"可被单独引用。
+func (b *Bus) Publish(id, typ, aggID string, version int64, payload any) Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.publishLocked(typ, aggID, version, payload, b.nextSeq)
+	return b.publishLocked(id, typ, aggID, version, payload, b.nextSeq)
 }
 
 // PublishAt 以显式 seq 发布事件（P1 SQLite 模式下 DB 为全局 seq 权威：
 // 调用方已从事务内取号，bus 仅镜像——重启恢复注入既有事件与 live 新事件共用同一条号序）。
 // seq ≤0 或小于当前 nextSeq 时回落为进程内取号（防取号异常导致重复/倒退）。
-func (b *Bus) PublishAt(seq int64, typ, aggID string, version int64, payload any) Event {
+//
+// id 同 Publish：`PublishAt` 的调用点都握着 durable 事件（DB 行 / transcript 行），
+// 所以它必须把同一支 id 一起恢复——这是 v17「身份与位置一起随数据流动」的落点。
+func (b *Bus) PublishAt(seq int64, id, typ, aggID string, version int64, payload any) Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if seq < b.nextSeq {
 		seq = b.nextSeq
 	}
-	return b.publishLocked(typ, aggID, version, payload, seq)
+	return b.publishLocked(id, typ, aggID, version, payload, seq)
 }
 
 // publishLocked 以给定 seq 完成「写入缓冲 → 淘汰 → 广播」并推进 nextSeq（须持 b.mu）。
-func (b *Bus) publishLocked(typ, aggID string, version int64, payload any, seq int64) Event {
+func (b *Bus) publishLocked(id, typ, aggID string, version int64, payload any, seq int64) Event {
 	if seq < b.nextSeq {
 		seq = b.nextSeq
 	}
-	evt := Event{Type: typ, Seq: seq, AggregID: aggID, Version: version, Payload: payload}
+	evt := Event{ID: id, Type: typ, Seq: seq, AggregID: aggID, Version: version, Payload: payload}
 	b.nextSeq = seq + 1
 	b.history = append(b.history, evt)
 	for len(b.history) > b.limit {

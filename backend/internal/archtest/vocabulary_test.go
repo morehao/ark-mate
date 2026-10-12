@@ -307,6 +307,109 @@ func allowedByCapabilityRevisionWhitelist(t *testing.T, rel string) bool {
 	return false
 }
 
+// providerSessionVocabularyWhitelist 是**允许**出现 `provider_session` 旧词的扫描点。
+//
+// 只有两个：历史迁移语句与它的历史夹具（同 conversation / capability_revision 的理由）。
+var providerSessionVocabularyWhitelist = []struct {
+	path   string
+	reason string
+}{
+	{
+		path: "backend/internal/store/migrate.go",
+		reason: "v9 的建列语句与 v17 的 `RENAME COLUMN provider_session_id TO runtime_session_id`" +
+			"必须写**当时那一版**的列名（迁移内核纪律：追加迁移 = 在尾部新增，绝不回改历史；" +
+			"而 v17 正是把老名字改成新名字的那一步——它当然得写出老名字）",
+	},
+	{
+		path: "backend/internal/store/migrate_test.go",
+		reason: "「停在 v15 之前」的历史迁移用例要用裸 SQL 造/读 `conversations.provider_session_id`" +
+			"（DAO 已改认 `runtime_session_id`，读不到历史列）。这是守卫⑤ 那条纪律的测试侧镜像",
+	},
+}
+
+// legacyProviderSessionVocabulary 是 v17 起禁止的旧词（**小写化后**做子串匹配）。
+//
+// 两项覆盖两种写法：`provider_session`（列名 / json 键 / 日志键 / 路径段）与 `providersession`
+// （驼峰 `ProviderSessionID`，小写化后命中）。**刻意不含** `provider` 单独一词——它是本仓
+// 的「模型供应商」（`providers` 表、`ProviderID`），与底座会话无关，误伤面极大。
+var legacyProviderSessionVocabulary = []string{"provider_session", "providersession"}
+
+// TestNoProviderSessionVocabulary 词汇收口（v17 / 设计 J1 的机器判据）。
+//
+// v17 把「runtime 侧的 ACP 会话」这个概念的落点从 `provider_session_id` 改成
+// `runtime_session_id`（连带 `SessionRec.ProviderSessionID` → `RuntimeSessionID`、DTO 的
+// `provider_session_id` → `runtime_session_id`、日志键 `provider_session` → `runtime_session`）。
+// 理由：`provider` 在本仓的主流含义是**模型供应商**（providers 表 / ProviderID / provider 档案），
+// 而这一列存的是"底座那边的会话 id"——同一个词指两个东西，正是「一个东西一个词」要消灭的。
+//
+// 判据是**零命中**（剥注释后，小写化子串匹配），因为一次机械改名漏一处的表现全是静默的：
+// 前端读 `c.provider_session_id` 拿到 `undefined`、日志键对不上、路由段成了路径参数。
+//
+// 剥注释是有意的——注释里写"v17 之前它叫 provider_session_id"是**解释**，不是残留词汇。
+//
+// fail-closed：扫描面解析不到（文件数为 0）即失败。
+func TestNoProviderSessionVocabulary(t *testing.T) {
+	root, files := vocabularyScanFace(t)
+	if len(files) < 100 {
+		t.Fatalf("扫描面只拿到 %d 个文件——路径写错了？（fail-closed：解析不到即失败）", len(files))
+	}
+
+	scanned := 0
+	var hits []string
+	for _, path := range files {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatalf("相对路径: %v", err)
+		}
+		relSlash := filepath.ToSlash(rel)
+		if allowedByProviderSessionWhitelist(t, relSlash) {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", rel, err)
+		}
+		src := string(raw)
+		if strings.HasSuffix(path, ".go") {
+			src = stripLineComments(src)
+		} else {
+			src = stripTSComments(src)
+		}
+		scanned++
+		lower := strings.ToLower(src)
+		for _, banned := range legacyProviderSessionVocabulary {
+			if idx := strings.Index(lower, banned); idx >= 0 {
+				line := 1 + strings.Count(src[:idx], "\n")
+				hits = append(hits, relSlash+":"+itoa(line)+" 命中 "+banned)
+				break
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("一个文件都没扫到（fail-closed）")
+	}
+	if len(hits) > 0 {
+		sort.Strings(hits)
+		t.Fatalf("v17 起「runtime 侧的 ACP 会话」只有一个词：`runtime_session_id`。\n"+
+			"以下位置剥注释后仍出现旧词（确需保留的，登记进 providerSessionVocabularyWhitelist"+
+			" **并写明理由**；空理由同样红）\n  %s", strings.Join(hits, "\n  "))
+	}
+}
+
+// allowedByProviderSessionWhitelist 命中白名单即跳过（前缀匹配，便于豁免整棵目录）。
+func allowedByProviderSessionWhitelist(t *testing.T, rel string) bool {
+	t.Helper()
+	for _, w := range providerSessionVocabularyWhitelist {
+		if strings.TrimSpace(w.reason) == "" {
+			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.path)
+		}
+		if strings.HasPrefix(rel, w.path) {
+			return true
+		}
+	}
+	return false
+}
+
 // itoa 极简整数转字符串（避免为一行日志引入 strconv 之外的东西——这里用 strconv 也行，
 // 但保持本文件的依赖面最小）。
 func itoa(n int) string {

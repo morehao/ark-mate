@@ -16,18 +16,38 @@ const (
 )
 
 // EventDao 访问 events 表（facts 的唯一事实源）。
+//
+// 泛型 ID 自 v17 起是 `string`（行身份 `evt_…`）。**注意：游标仍然只有 `seq`**——`After`/
+// `AllAfter`/`Before` 一律按 seq 比较与排序，id 只用于"按身份取一行"（导入判重）。
+// 守卫 G1 钉着这条（`Order("id` / `seq` 之外的主键比较都会红）。
 type EventDao struct {
-	*gormdao.Dao[model.EventEntity, model.EventEntityList, int64]
+	*gormdao.Dao[model.EventEntity, model.EventEntityList, string]
 }
 
 // NewEventDao 构造 EventDao（getDB 必填，见包注释）。
 func NewEventDao(getDB gormdao.DBGetter) *EventDao {
-	return &EventDao{Dao: newDao[model.EventEntity, model.EventEntityList, int64]("EventDao", getDB)}
+	return &EventDao{Dao: newDao[model.EventEntity, model.EventEntityList, string]("EventDao", getDB)}
 }
 
 // WithTx 返回绑定事务的新 DAO（序号分配与事件插入必须同事务）。
 func (d *EventDao) WithTx(tx *gorm.DB) *EventDao {
 	return &EventDao{Dao: d.Dao.WithTx(tx)}
+}
+
+// FindByID 按行身份取一条事件（导入判重与分叉检测用；找不到返回 ok=false）。
+//
+// 刻意**不**用 gormdao 的 `GetByID`（虽然 v17 起 events 的主键列真的叫 id 了）：这里要的是
+// 「在**给定事务**里查、且区分"没有这一行"与"查询失败"」这两条语义，写成自定义方法就一目了然。
+func (d *EventDao) FindByID(ctx context.Context, id string) (*model.EventEntity, bool, error) {
+	var ev model.EventEntity
+	err := d.DB(ctx).Where("id = ?", id).Take(&ev).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &ev, true, nil
 }
 
 // After 返回某会话 seq > after 的事件（升序）。

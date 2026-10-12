@@ -59,8 +59,8 @@ func (d *SessionDao) Upsert(ctx context.Context, c *model.SessionEntity) error {
 			"workspace_temporary": model.FlagValue(c.WorkspaceTemporary),
 			"provider_id":         c.ProviderID,
 			"model_id":            c.ModelID,
-			"runtime_hint":        c.RuntimeHint,
-			"provider_session_id": c.ProviderSessionID,
+			"runtime_id":          c.RuntimeID,
+			"runtime_session_id":  c.RuntimeSessionID,
 			"title":               c.Title,
 			"pinned":              model.FlagValue(c.Pinned),
 			"archived":            model.FlagValue(c.Archived),
@@ -80,7 +80,7 @@ func (d *SessionDao) Upsert(ctx context.Context, c *model.SessionEntity) error {
 // UpsertForImport 是 transcript 导入专用的窄 upsert。
 //
 // 与 Upsert 的差异是**有意的**：冲突时只覆盖导入来源确实携带的列，
-// 不碰 provider_id / model_id / runtime_hint / provider_session_id ——
+// 不碰 provider_id / model_id / runtime_id / runtime_session_id ——
 // 这四个是会话级模型选择与底座恢复承载，transcript header 里没有，
 // 若按 Upsert 的全列覆盖语义写入零值，重复导入会把用户已选的模型清空。
 func (d *SessionDao) UpsertForImport(ctx context.Context, c *model.SessionEntity) error {

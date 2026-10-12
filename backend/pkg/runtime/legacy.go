@@ -15,7 +15,7 @@ import (
 //
 // 别名只会出现在**老数据**里，新写入的任何地方都不会再有它：
 //
-//	sessions.runtime_hint（sqlite 列）           → RestoreFromStore 读回时归一
+//	sessions.runtime_id（sqlite 列）           → RestoreFromStore 读回时归一
 //	transcript header 的 runtime 字段（append-only）  → 读时归一（历史文件按历史对待，不重写）
 //	skill 定义里的 runtimes[]（文件 / DB 行）          → 装载与写面归一（否则技能**不再投放**）
 //	config 的 projection_dirs 键（`<runtime>:<kind>`） → 解析时归一（否则自定义投影根**静默失效**）

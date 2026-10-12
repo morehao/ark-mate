@@ -45,6 +45,12 @@ export const Ev = {
 export type EvType = (typeof Ev)[keyof typeof Ev]
 
 export interface BusEvent {
+  // id 事件行身份（`evt_<26 位 ULID>`，v17 起）。
+  //
+  // **可选**是有语义的，不是"还没补上"：只有**落库/进 transcript 的**事件才有身份，而
+  // `automation.run` 这类只走实时通道的事件没有——于是"帧上有 id ⟺ 它在 durable 日志里查得到"
+  // 这条不变式成立，客户端拿它去引用某一条事件（书签/诊断）才是安全的。
+  id?: string
   type: string
   seq: number
   agg_id: string

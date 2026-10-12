@@ -233,6 +233,58 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 > ⑦ **不变**——v3 三条红线、v2②、v7②、v8①②、v10、v11 逐条不变；wire 上的 `session.*` 事件与
 >    `session_id` 字段**冻结不动**（v15 只是让平台领域词追上它们）。
 
+> **决策变更 v13（数据模型 v17：事件身份与位次分离 + runtime 词汇收口，2026-10-12）**：
+> 设计全文见 `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`。两件事一次做完，因为它们
+> 服从同一条判据（J4：**身份与位次必须随数据走到每一个载体**）。
+> （v16 的表/列/索引命名收口没有单独登记决策条目，见
+> `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`；本条目只记 v17。）
+> ① **`events` 的身份与位次分开**——新增主键 `id`（`evt_<26 位 ULID>`，`backend/pkg/object/objid` 铸造），
+>    `seq` 从主键**降为全局唯一游标**（`UNIQUE(seq)`，`idx_events_session` 仍是
+>    `(session_id, seq)`）。理由：事件的**位次**会被重排（重建、压实、换库），而**身份**不能——
+>    把 `seq` 当身份等于承认"同一个事件换个号就变成另一个东西"，书签与对账随之失效。
+>    机器判据 = 守卫 G1（`TestEventSeqStaysTheCursor`：实体/索引/DAO 三层，含"`id` 不得参与排序"）。
+> ② **两个参照实现给的是相反答案，我们取交集**：DSH 的会话事件是 JSONL `{type, seq, time, data}`，
+>    **没有 per-event id**；opencode 的 `EventTable` 有 `id` 主键（`evt_` + 26 字符），但它的 `seq`
+>    是 **per-aggregate 稠密序号**（`uniqueIndex(aggregate_id, seq)`，另有独立序号分配表）。
+>    v17 = opencode 的**身份** + 我们自己的**全局位次**（跨会话回放、`MAX(seq)` 水位都靠它）。
+>    **刻意不抄**：per-aggregate 稠密 seq、opencode 的索引命名形态。
+> ③ **判据 J4 逐载体落地**（守卫 G2 `TestEventIdentityTravelsWithData`）：运行时**只有一个铸号点**
+>    （`manager.publishRaw`），同一支 id 交给 store 落库、交给 bus 进帧、交给 transcript 落盘；
+>    memory 装载与 sqlite 恢复都**原样**注入 bus（不再是"按行号重推 seq + `Publish` 现取号"）；
+>    REST/WS 两条出口都带 `e.ID`；`mate migrate` 把 transcript 的 id 交给 store（不重铸，
+>    缺 id 直接 fail-loud）；**只走实时通道的事件刻意不铸号**（`automation.run`）——于是
+>    "帧上有 `id` ⟺ 它在 durable 日志里查得到"这条不变式成立。
+>    修掉的是**真实缺陷**：memory 模式重启后事件身份丢失、位次被重编（transcript 写了 `seq`
+>    却在装载时丢弃，且逐文件 `Publish` 让跨会话顺序由**文件名字典序**决定）——端到端判据 =
+>    `TestMemoryModeRestartKeepsEventIdentity`（两个会话交错的位次，重启后逐条不变）。
+> ④ **词汇收口**：`provider_session_id` → `runtime_session_id`、`runtime_hint` → `runtime_id`
+>    （Go 侧 `ProviderSessionID` → `RuntimeSessionID`、`RuntimeHint` → `RuntimeID`；`objid` 的
+>    `ProviderShell`/`WrapProvider` → `RuntimeShell`/`WrapRuntime`；日志键 `provider_session` →
+>    `runtime_session`；前端 smoke 脚本同改）。理由：`provider` 在本仓的主流含义是**模型供应商**
+>    （`providers` 表 / `ProviderID` / provider 档案），而这一列存的是"底座那边的会话 id"——
+>    同一个词指两个东西。判据 = 守卫 G3（`TestNoProviderSessionVocabulary`，零命中，
+>    白名单只有历史 DDL 与停在 v16 之前的夹具）。**automation 的 `target.runtime_hint`
+>    刻意不改**：那是 v8 已删除的选择面留下的**拒绝键名**（`runtime_selection_removed`），
+>    改名会让旧请求从"显式 40001"退化成静默忽略。
+> ⑤ **transcript 格式 v2**（`ark-mate.wire-transcript.v2`：事件行新增 `id`）：v1 文件**不再可读**，
+>    装载期**跳过 + WARN**，处置靠 `mate transcripts prune`（ADR-5：不自动删）；
+>    跳过计数与"旧会话 id 形状"分开统计（`legacySchemaSkips` vs `legacyTranscriptSkips`）。
+> ⑥ **迁移是"有序追加 + 数据搬运"**（回到 v15 立下的常态）：`migrate_v17.go` 是本仓**第一个
+>    O(全部事件行) 的 Go 迁移步骤**——keyset 分页（`WHERE seq > ? ORDER BY seq LIMIT n`）逐行铸号、
+>    对账（行数 / 最大 seq / id 去重）后才 `DROP TABLE events` + 换名 + 建索引，全在**一个事务**里；
+>    **`meta.events_last_seq` 必须保留**（清掉它 → 下一条新事件从 1 起跳、撞 `UNIQUE(seq)`；
+>    这是照抄 v15 清空动作的人一定会踩的一脚），由 `TestMigrateV17KeepsEveryEvent` 钉住。
+> ⑦ **明确不做**：不给 `definition_revisions`/`meta`/`schema_migrations` 加平台 id（它们是
+>    **审计/游标/版本**三张表，身份就是它们的自然键——`definition_revisions` 的位次由
+>    `monotonicCursorEntities` 守卫单独钉）；不加 `GET /events/:id`（没有消费者之前不加端点）；
+>    memory 模式的 `version` 仍由行序派生（显式非目标）。
+> ⑧ **代价如实写**：事件行多一个 30 字节的 id 列 + 一条唯一索引；迁移期峰值内存为"一页 2000 行"
+>    加事务内页面缓存（DB 变大时备份窗口相应变长）；`mate migrate` 导入保留 transcript 的 id，
+>    但 `evt_` id 是**安装局部**的引用身份，**不保证跨机器一致**（跨库稳定的键仍是 `(session_id, seq)`）。
+> ⑨ **不变**——v15 的会话词汇与主键前缀、v16 的表/列/索引命名逐条不变；wire 契约只**新增**一个
+>    可选字段（`event` 帧 `{id?, type, seq, agg_id, version, payload}`），`session.*` 事件类型与
+>    `session_id` 字段**冻结不动**。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个

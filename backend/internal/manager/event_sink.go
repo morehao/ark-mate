@@ -17,7 +17,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		// 断连后迟到事件（映射已清）不再落入孤儿聚合，丢弃并留 debug。
 		cid := o.resolveProvider(ev.SessionID)
 		if cid == "" {
-			glog.Debugw(context.Background(), "event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
+			glog.Debugw(context.Background(), "event 无对应平台会话（映射已清，丢弃迟到事件）", "runtime_session", ev.SessionID)
 			return
 		}
 		ev.SessionID = cid

@@ -126,7 +126,7 @@ func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event
 					return out, true
 				}
 				out = append(out, eventbus.Event{
-					Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
+					ID: e.ID, Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
 					Payload: decodePayload(e.PayloadJSON),
 				})
 				after = e.Seq

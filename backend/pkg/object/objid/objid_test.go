@@ -98,8 +98,8 @@ func TestNewEntropyOverflowAdvancesMillisecond(t *testing.T) {
 	}
 }
 
-func TestWrapProvider(t *testing.T) {
-	ok, err := WrapProvider("ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD")
+func TestWrapRuntime(t *testing.T) {
+	ok, err := WrapRuntime("ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD")
 	if err != nil {
 		t.Fatalf("正常原文不该失败: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestWrapProvider(t *testing.T) {
 		t.Fatalf("壳值不对: %q", ok)
 	}
 	// dsh 的裸 uuid 同样加壳（底座形状不影响这条判据）。
-	if got, err := WrapProvider("9f3c2b8e-4c1a-4d3b-9f2e-1a2b3c4d5e6f"); err != nil ||
+	if got, err := WrapRuntime("9f3c2b8e-4c1a-4d3b-9f2e-1a2b3c4d5e6f"); err != nil ||
 		got != "rt_9f3c2b8e-4c1a-4d3b-9f2e-1a2b3c4d5e6f" {
 		t.Fatalf("裸 uuid 加壳不对: (%q,%v)", got, err)
 	}
@@ -122,19 +122,19 @@ func TestWrapProvider(t *testing.T) {
 		{"含空白字符", "ses_01J9Z6Q0M7X2V8K4B3N5TRW1P D"},
 	}
 	for _, tc := range cases {
-		if _, err := WrapProvider(tc.raw); !errors.Is(err, ErrProviderID) {
-			t.Fatalf("%s：期望 ErrProviderID，得到 %v", tc.name, err)
+		if _, err := WrapRuntime(tc.raw); !errors.Is(err, ErrRuntimeID) {
+			t.Fatalf("%s：期望 ErrRuntimeID，得到 %v", tc.name, err)
 		}
 	}
 }
 
-func TestUnwrapProvider(t *testing.T) {
+func TestUnwrapRuntime(t *testing.T) {
 	raw := "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD"
-	shelled, err := WrapProvider(raw)
+	shelled, err := WrapRuntime(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := UnwrapProvider(shelled)
+	got, err := UnwrapRuntime(shelled)
 	if err != nil {
 		t.Fatalf("正常壳值不该失败: %v", err)
 	}
@@ -152,8 +152,8 @@ func TestUnwrapProvider(t *testing.T) {
 		{"壳内有壳（双包）", "rt_rt_ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD"},
 	}
 	for _, tc := range cases {
-		if _, err := UnwrapProvider(tc.in); !errors.Is(err, ErrProviderID) {
-			t.Fatalf("%s：期望 ErrProviderID，得到 %v", tc.name, err)
+		if _, err := UnwrapRuntime(tc.in); !errors.Is(err, ErrRuntimeID) {
+			t.Fatalf("%s：期望 ErrRuntimeID，得到 %v", tc.name, err)
 		}
 	}
 }
@@ -161,6 +161,7 @@ func TestUnwrapProvider(t *testing.T) {
 func TestPrefixAndIsPlatformID(t *testing.T) {
 	positive := []string{
 		New(Session), New(Message), New(Run), New(Input), New(Workspace), New(Model), New(PermissionMemory),
+		New(Event),
 	}
 	for _, id := range positive {
 		if !IsPlatformID(id) {

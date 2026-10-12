@@ -7,6 +7,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/golib/glog"
 )
@@ -50,10 +51,15 @@ func (s *Service) publishRaw(typ, sessionID string, payload any) eventbus.Event 
 	v := s.ver[sessionID]
 	s.mu.Unlock()
 
+	// v17：事件的**身份在这里铸、且只在这里铸**（live 路径），随后同一支 id 交给 store 落库、
+	// 交给 bus 进帧、交给 transcript 落盘——三种载体上是同一支值（"身份随数据流动"）。
+	// 存量回填是迁移的事（store/migrate_v17.go），不是第二条运行时铸号点。
+	evtID := objid.New(objid.Event)
+
 	bus := s.bus
 	seq := int64(0)
 	if st := s.st; st != nil {
-		got, err := st.AppendEvent(context.Background(), sessionID, typ, payload)
+		got, err := st.AppendEvent(context.Background(), evtID, sessionID, typ, payload)
 		if err != nil {
 			glog.Warnw(context.Background(), "store: append event failed（退化为进程内取号）",
 				"session", sessionID, "type", typ, "err", err)
@@ -63,14 +69,14 @@ func (s *Service) publishRaw(typ, sessionID string, payload any) eventbus.Event 
 	}
 	var evt eventbus.Event
 	if bus == nil {
-		evt = eventbus.Event{Type: typ, AggregID: sessionID, Version: v, Seq: seq}
+		evt = eventbus.Event{ID: evtID, Type: typ, AggregID: sessionID, Version: v, Seq: seq}
 	} else if seq > 0 {
-		evt = bus.PublishAt(seq, typ, sessionID, v, payload)
+		evt = bus.PublishAt(seq, evtID, typ, sessionID, v, payload)
 	} else {
-		evt = bus.Publish(typ, sessionID, v, payload)
+		evt = bus.Publish(evtID, typ, sessionID, v, payload)
 	}
 	if m, ok := payload.(map[string]any); ok {
-		s.publishSideEffects(sessionID, typ, m, evt.Seq)
+		s.publishSideEffects(sessionID, evt.ID, typ, m, evt.Seq)
 	}
 	// 终态事件 → runs 物化（sqlite 模式；窗口无新事件时幂等跳过）。
 	if s.st != nil && terminalRunStatus(typ) != "" {
@@ -83,8 +89,11 @@ func (s *Service) publishRaw(typ, sessionID string, payload any) eventbus.Event 
 
 // publishSideEffects 非 map 载荷不触发的旁路副作用：
 // wire transcript 追加 + 会话标题自动推导（首个用户消息；PATCH 可覆盖）。
-func (s *Service) publishSideEffects(sessionID, typ string, m map[string]any, seq int64) {
-	s.tx.appendLine(sessionID, seq, typ, m)
+//
+// v17 起 transcript 行同时写 `id` 与 `seq`（身份 + 位次）：两者都是**上游传进来的同一支值**，
+// 这里不重铸任何一个。
+func (s *Service) publishSideEffects(sessionID, eventID, typ string, m map[string]any, seq int64) {
+	s.tx.appendLine(sessionID, eventID, seq, typ, m)
 	// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateSession）。
 	// 须持 s.mu 写 Title（与 UpdateSession/sessionResp 并发读写作同步，避免数据竞争）。
 	if typ == BusUserMessage {

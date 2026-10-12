@@ -8,7 +8,7 @@ import (
 
 // sessionRuntime 是 Runtime 接口（§4.2 会话边界版）在「一条活着的 ACP 会话」上的通用实现：
 // ID/ManagesOwnContext/… 均取自该 runtime 的投影 Spec（§6.1/§6.2），Prompt/Capabilities/
-// ProviderSessionID 透传底层 acl.Session。
+// RuntimeSessionID 透传底层 acl.Session。
 //
 // opencode / dsh 两投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
 // ApplyMode/ApplyModel/Resume 需底座侧原生支持或映射实测，当前统一显式返回 unsupported_*
@@ -37,7 +37,7 @@ func (r *sessionRuntime) ManagesOwnContext() bool { return r.spec.ManagesOwnCont
 func (r *sessionRuntime) Capabilities() acl.Capabilities {
 	return r.sess.Client().Capabilities()
 }
-func (r *sessionRuntime) ProviderSessionID() string { return r.sess.ID() }
+func (r *sessionRuntime) RuntimeSessionID() string { return r.sess.ID() }
 
 // Cancel 取消本会话进行中的 run（透传底层会话取消；best-effort，错误由调用方决定是否吞）。
 func (r *sessionRuntime) Cancel(ctx context.Context) error {

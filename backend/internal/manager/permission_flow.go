@@ -139,7 +139,7 @@ func (o *Orchestrator) resolveElicitationScope(cli *acl.Client, req acl.Elicitat
 	// 不是平台的会话 id。v15 之前两者同形（opencode 都发 `ses_…`），于是"把提问卡挂到一个
 	// 不存在的会话上"在任何测试与人工核对里都看不出来；加了 `rt_` 壳之后形状不同了，**不查就错**。
 	//
-	// 修法只有一条：先按 `provider_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，
+	// 修法只有一条：先按 `runtime_session_id` 反查平台会话，查不到退 `ScopeAmbiguous` + 留痕，
 	// **不猜**（这个函数的既有口径就是"猜错比不投更坏"）。
 	if req.ScopeSource == acl.ScopeWire && req.SessionID != "" {
 		if sid := o.platformSessionIDForProvider(req.SessionID); sid != "" {
@@ -167,13 +167,13 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 	if sid := o.resolveProvider(rawProviderID); sid != "" {
 		return sid
 	}
-	wrapped, err := objid.WrapProvider(rawProviderID)
+	wrapped, err := objid.WrapRuntime(rawProviderID)
 	if err != nil {
 		return ""
 	}
 	o.svc.mu.Lock()
 	for _, r := range o.svc.sessions {
-		if r.ProviderSessionID == wrapped {
+		if r.RuntimeSessionID == wrapped {
 			sid := r.ID
 			o.svc.mu.Unlock()
 			return sid
@@ -189,7 +189,7 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 		return ""
 	}
 	for i := range list {
-		if list[i].ProviderSessionID == wrapped {
+		if list[i].RuntimeSessionID == wrapped {
 			return list[i].ID
 		}
 	}

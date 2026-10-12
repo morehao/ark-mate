@@ -95,10 +95,15 @@ type migrationDrop struct {
 // v15InPlaceDrops v12/v13 的「建临时表 → 灌数 → DROP → RENAME」是**同一张表的就地重建**，
 // 与 v15 的"清库重建"是两件事。逐条登记（而不是给个白名单集合），是为了让"新增一处 DROP TABLE"
 // 必须**显式**写一行理由。
+//
+// v17 起这条判据按 **(文件, 表)** 而不是只按表名匹配——此前只按表名，于是 `migrate_v17.go` 里的
+// `DROP TABLE events` 因为 v15 也重建过 `events` 而**静默通过**（2026-10-12 实测）。这正是这条
+// 守卫最容易腐化的方式：新加的重建只要复用一个历史表名，就再也无人需要拍板。
 var v15InPlaceDrops = []migrationDrop{
 	{File: "migrate_v12.go", Table: "models", Reason: "v11 的 models 表 → models_v12（同表就地重写，无数据丢失）"},
 	{File: "migrate_v13.go", Table: "providers", Reason: "v12 的 providers → providers_v13（同表就地列化，无数据丢失）"},
 	{File: "migrate_v13.go", Table: "models", Reason: "v12 的 models → models_v13（同表就地列化，无数据丢失）"},
+	{File: "migrate_v17.go", Table: "events", Reason: "v16 的 events → events_v17（同表就地重铸身份：行数与 seq 逐行保留，**不清空任何数据**）"},
 }
 
 // migrationStructFields 是 `migration` 结构体**允许**的字段全集（C1：不给内核加能力）。
@@ -110,7 +115,8 @@ var migrationStructFields = []string{"version", "name", "statements", "apply", "
 //
 // 四段判据（对应设计 §8.3.2 的 C1/C2/C3 + §8.5 的 R6）：
 //  1. `migration` 结构体字段集合 == 白名单（内核本身零改动）；
-//  2. `DROP TABLE` 只允许出现在登记过的地方（v15 的 7 张表 + v12/v13 的就地重建）；
+//  2. `DROP TABLE` 只允许出现在登记过的地方（v15 自己那 7 张 + v12/v13/v17 的就地重建）；
+//     匹配按 **(文件, 表)**——只按表名匹配时，新迁移复用历史表名即可静默通过（v17 实测）。
 //  3. v15 的 `name` 写明"破坏性重建（仅此一次）"、`backup == "v15"`；
 //  4. R6：v15 的 DROP 清单 ↔ 元数据清理清单**一一对应**（`v15TablePlan`），
 //     且"未被 DROP 但重铸主键"的表（`v15IDRecastPlan`）与 DROP 清单不相交、引用清单非空。
@@ -149,22 +155,24 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 			"会把一次性例外变成可复用机制（设计 §8.3.2 C1）。", gotFields, wantFields)
 	}
 
-	// ② DROP TABLE 白名单。
+	// ② DROP TABLE 白名单（按 (文件, 表) 归属：v15 的清单只豁免 **migrate.go 自己**那些，
+	//    别处复用一个历史表名不构成豁免——见 v15InPlaceDrops 的注释）。
 	v15Drops := v15DropTables(t, migrateSrc)
 	if len(v15Drops) == 0 {
 		t.Fatal("v15 的 statements 里解析不到 `DROP TABLE`（fail-closed）：v15 被改名/挪走了？")
 	}
 	allDrops := collectDropTables(t, storeDir)
 	for _, d := range allDrops {
-		if containsStr(v15Drops, d.Table) {
+		if d.File == "migrate.go" && containsStr(v15Drops, d.Table) {
 			continue
 		}
 		if isRegisteredInPlaceDrop(d) {
 			continue
 		}
 		t.Fatalf("%s 里的 `DROP TABLE %s` 不在白名单里：\n"+
-			"  · v15 的清单 = %v（只有它允许\"清库重建\"）\n"+
-			"  · v12/v13 的\"建临时表 → 灌数 → DROP → RENAME\"必须登记进 v15InPlaceDrops（写明理由）\n"+
+			"  · v15 自己（migrate.go）的清单 = %v（只有它允许\"清库重建\"）\n"+
+			"  · v12/v13/v17 的\"建临时表 → 灌数 → DROP → RENAME\"必须登记进 v15InPlaceDrops（写明理由），\n"+
+			"    且判据按 (文件, 表) 匹配——**换个文件写同一个表名不算豁免**\n"+
 			"新增一处 `DROP TABLE` = 又一次静默清空用户历史，必须 owner 单独拍板（设计 §8.3.2 C2）。",
 			d.File, d.Table, v15Drops)
 	}

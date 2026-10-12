@@ -52,28 +52,38 @@ func migrate(args []string) {
 	for _, path := range files {
 		data, ok := manager.ReadTranscriptFile(path)
 		if !ok {
-			fmt.Printf("migrate: 跳过坏文件 %s\n", filepath.Base(path))
+			// v1 格式（事件行没有 id/seq 身份）与损坏文件走同一条出口，但 v1 是**可预期**的那种：
+			// 它的处置出口是 `mate transcripts prune --older-than 1s`（装载面已打 WARN + 提示）。
+			fmt.Printf("migrate: 跳过不可读文件 %s（损坏或 v1 格式；后者见 `mate transcripts prune`）\n", filepath.Base(path))
 			skipped++
 			continue
 		}
 		events := make([]model.EventEntity, 0, len(data.Lines))
-		for _, l := range data.Lines {
+		for i, l := range data.Lines {
+			// 身份必须随数据来（v17）：**不代铸**——代铸出来的 id 与用户手里那份文件对不上，
+			// 而"同一支 id 指向同一条事件"正是导入判重与诊断引用的前提。
+			if l.ID == "" {
+				fmt.Fprintf(os.Stderr,
+					"migrate: %s 第 %d 条事件缺 id（v17 起 transcript 事件行必须带 `evt_…` 身份）——"+
+						"旧格式请用 `mate transcripts prune --older-than 1s` 处置\n", filepath.Base(path), i+1)
+				os.Exit(1)
+			}
 			b, mErr := json.Marshal(l.Payload)
 			if mErr != nil {
 				continue
 			}
-			events = append(events, model.EventEntity{Type: l.Type, PayloadJSON: string(b)})
+			events = append(events, model.EventEntity{ID: l.ID, Type: l.Type, PayloadJSON: string(b)})
 		}
 		lineCount += len(events)
 		items = append(items, store.ImportItem{
 			Session: model.SessionEntity{
-				ID:          data.SessionID,
-				AgentID:     data.AgentID,
-				RuntimeHint: data.RuntimeHint,
-				Title:       data.Title,
-				Status:      data.Status,
-				CreatedAt:   data.CreatedAt,
-				UpdatedAt:   data.UpdatedAt,
+				ID:        data.SessionID,
+				AgentID:   data.AgentID,
+				RuntimeID: data.RuntimeID,
+				Title:     data.Title,
+				Status:    data.Status,
+				CreatedAt: data.CreatedAt,
+				UpdatedAt: data.UpdatedAt,
 			},
 			Events: events,
 		})

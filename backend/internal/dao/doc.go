@@ -8,8 +8,9 @@
 // 的失败模式。因此这里把 `gormdao.DBGetter` 定为**必填参数**，DAO 永远绑定在明确的库上。
 //
 // 主键列名假设：gormdao 的泛型方法（GetByID/UpdateByID/UpdateMap/Delete）把主键列硬编码为
-// `id`。本仓的 `meta.key`、`events.seq`、`schema_migrations.version` 都不叫 id，
+// `id`。本仓的 `meta.key`、`schema_migrations.version` 都不叫 id，
 // 因此这些实体只用 Insert/自定义方法，**不要**对其调用上述四个方法（会报 "no such column: id"）。
+// （`events` 自 v17 起主键列就叫 `id`，但它只用 Insert 与自定义游标方法，见 event.go。）
 //
 // 软删除：本仓所有表都没有 `deleted_at` 列，故每个 DAO 都以
 // `gormdao.WithoutSoftDelete()` 构建——不这样做，gormdao 会给每条查询附加
