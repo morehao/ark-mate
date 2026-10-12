@@ -119,7 +119,7 @@ const nextId = (): string => `e${++uid}`
  * 语义与旧 useReducer 版一致（M1 DoD 验收过），原样迁移到 zustand。
  */
 // 终态事件：到达后服务端会话不再 busy，触发一次会话列表刷新，让「服务端忙水位」状态收敛。
-const TERMINAL_TYPES = new Set<string>([Ev.TurnEnded, Ev.TurnError, Ev.RunCancelled])
+const TERMINAL_TYPES = new Set<string>([Ev.RunEnded, Ev.RunError, Ev.RunCancelled])
 
 export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   // seq 幂等去重：事件只前进不回退（§4.5「按 seq 去重」）。快照/重放为开区间、服务端不重发，
@@ -220,7 +220,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         lastSeq,
       }
     }
-    case Ev.TurnEnded:
+    case Ev.RunEnded:
       return {
         ...v,
         entries: settleCards(
@@ -233,7 +233,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         streaming: false,
         lastSeq,
       }
-    case Ev.TurnError: {
+    case Ev.RunError: {
       // A3：失败事件可能携带 runtime stderr 诊断尾巴（数组；非数组/空则忽略）。
       const rawTail = e.payload?.stderr_tail
       const stderrTail = Array.isArray(rawTail) ? rawTail.map((l) => String(l)) : undefined
@@ -904,13 +904,13 @@ export const useMate = create<MateStore>((set, get) => {
       if (!id) return
       // 忙时是否放行取决于投递模式（§6）：排队/插话是允许的，缺省/reject 仍然是「防重入拒绝」。
       const busy = get().views[id]?.streaming ?? false
-      const queueing = delivery === 'after_turn' || delivery === 'interrupt_then_prompt'
+      const queueing = delivery === 'after_run' || delivery === 'interrupt_then_prompt'
       if (busy && !queueing) return // 已有一轮在跑，防重入（连点/并发）
       try {
         if (!busy) {
           // 乐观置忙：在 POST 返回前就把 Composer 置为禁用，消除「请求在途仍可再发」的竞态窗口，
-          // 避免第二次 send 打到后端 turn_in_progress（决策 v5 前修复）。
-          // 入队时**不置忙**：这一轮本来就还在跑，忙碌水位由 turn 事件收敛。
+          // 避免第二次 send 打到后端 run_in_progress（决策 v5 前修复）。
+          // 入队时**不置忙**：这一轮本来就还在跑，忙碌水位由 run 事件收敛。
           set((s) => {
             const view = s.views[id] ?? emptyView()
             return { views: { ...s.views, [id]: { ...view, streaming: true } } }
@@ -924,7 +924,7 @@ export const useMate = create<MateStore>((set, get) => {
         }
       } catch (err) {
         // 失败恢复忙态（若无终态事件，回退为非忙以便重试）。入队失败时不要动 streaming：
-        // 那一轮的忙碌水位归它的 turn 事件管，这里改掉会让「停止」按钮凭空消失。
+        // 那一轮的忙碌水位归它的 run 事件管，这里改掉会让「停止」按钮凭空消失。
         if (!busy) {
           set((s) => {
             const view = s.views[id]

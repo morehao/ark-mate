@@ -66,10 +66,10 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		rec := &SessionRec{
 			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
-			WorkspaceTemporary: sess.WorkspaceTemporary, Provider: sess.Provider,
-			Model: sess.Model, RuntimeHint: runtime.NormalizeID(sess.RuntimeHint),
-			ProviderSessionID: sess.ProviderSessionID,
-			Title:             sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
+			WorkspaceTemporary: sess.WorkspaceTemporary, ProviderID: sess.ProviderID,
+			ModelID: sess.ModelID, RuntimeID: runtime.NormalizeID(sess.RuntimeID),
+			RuntimeSessionID: sess.RuntimeSessionID,
+			Title:            sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, Origin: sess.Origin, CapabilityJSON: sess.CapabilityJSON,
 			// **恢复会话钉住的指纹**：漏了这一段，重启后 rec.Fingerprint 就是空的 →
 			// 代际键退回"未声明"形态，会话悄悄换到默认能力集（正是 M3 要防的漂移）。
@@ -97,7 +97,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			}
 			for _, ev := range evs {
 				ver[ev.SessionID]++
-				s.bus.PublishAt(ev.Seq, ev.Type, ev.SessionID, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
+				s.bus.PublishAt(ev.Seq, ev.ID, ev.Type, ev.SessionID, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
 				injected++
 				after = ev.Seq
 			}
@@ -138,10 +138,10 @@ func (s *Service) persistSession(rec *SessionRec) {
 		Cwd:                rec.Cwd,
 		WorkspaceID:        rec.WorkspaceID,
 		WorkspaceTemporary: rec.WorkspaceTemporary,
-		Provider:           rec.Provider,
-		Model:              rec.Model,
-		RuntimeHint:        rec.RuntimeHint,
-		ProviderSessionID:  rec.ProviderSessionID,
+		ProviderID:         rec.ProviderID,
+		ModelID:            rec.ModelID,
+		RuntimeID:          rec.RuntimeID,
+		RuntimeSessionID:   rec.RuntimeSessionID,
 		Title:              rec.Title,
 		Pinned:             rec.Pinned,
 		Archived:           rec.Archived,
@@ -209,9 +209,9 @@ func (s *Service) memoryRows(ctx context.Context) ([]model.PermissionMemoryEntit
 // terminalRunStatus 终态事件类型 → run 终态。
 func terminalRunStatus(typ string) string {
 	switch typ {
-	case BusTurnEnded:
+	case BusRunEnded:
 		return SessionStatusCompleted
-	case BusTurnError:
+	case BusRunError:
 		return SessionStatusFailed
 	case BusRunCancelled:
 		return SessionStatusCancelled

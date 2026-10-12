@@ -108,9 +108,9 @@ func TestImportAutomationDirSplitsRuntimeColumns(t *testing.T) {
 		t.Fatalf("state 是定义键，应留在正文里: %s", u1.Body)
 	}
 	// 导入动作留痕（actor=import，action=import），逐条一行。
-	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "u1")
-	if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionImport ||
-		revs[0].Actor != model.CapabilityActorImport {
+	revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindAutomation, "u1")
+	if err != nil || len(revs) != 1 || revs[0].Action != model.DefinitionActionImport ||
+		revs[0].Actor != model.DefinitionActorImport {
 		t.Fatalf("导入审计不符: %+v err=%v", revs, err)
 	}
 }
@@ -209,7 +209,7 @@ func TestImportAutomationDirNeverOverwrites(t *testing.T) {
 	if !strings.Contains(after.Body, "面板上改过的") || after.LastFiredAt != "2026-10-09T01:00:00Z" {
 		t.Fatalf("导入绝不覆盖：面板那一版（含运行态）必须原样留着: %+v", after)
 	}
-	if revs, _ := st.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "u1"); len(revs) != 2 {
+	if revs, _ := st.ListDefinitionRevisions(ctx, model.DefinitionKindAutomation, "u1"); len(revs) != 2 {
 		t.Fatalf("被跳过的行不该产生审计: %+v", revs)
 	}
 }

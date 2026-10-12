@@ -175,7 +175,7 @@ type ProviderRuntimeFacts struct {
 	Status string `json:"status"`
 	// Where 人话落点（"同步到哪了"）。
 	Where string `json:"where,omitempty"`
-	// Effect 清单通道的生效时刻（immediate | next_turn | next_session | next_process）。
+	// Effect 清单通道的生效时刻（immediate | next_run | next_session | next_process）。
 	Effect string `json:"effect,omitempty"`
 	// CredentialChannel native_doc | env | none（凭据通道与清单分开报，ADR-14）。
 	CredentialChannel string `json:"credentialChannel,omitempty"`

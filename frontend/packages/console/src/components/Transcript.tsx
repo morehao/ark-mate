@@ -591,7 +591,7 @@ export function EntryView({
 }: {
   e: StreamEntry
   onRetry?: () => void
-  /** 该轮用量展示行（如 `上下文 30.0k / 128.0k · Δ +3.2k`；仅终态轮的 turn-end 条目有值）。 */
+  /** 该轮用量展示行（如 `上下文 30.0k / 128.0k · Δ +3.2k`；仅终态轮的 run-end 条目有值）。 */
   usageText?: string
   /** 该轮用量的结构化数据（含首令牌/总耗时/成本），供 goose 风格 popover；无则仅显示 usageText。 */
   runInfo?: RunUsageInfo

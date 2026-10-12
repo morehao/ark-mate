@@ -5,11 +5,35 @@ import (
 	"time"
 )
 
+// testEventID 测试用的事件行身份。
+//
+// bus **不校验也不解释** id（它只是跟着事件走的一支值），所以这里用一个固定字面量就够；
+// 真实形状由 objid 铸（`evt_<26 位 ULID>`），那部分的判据在 `pkg/object/objid` 与 archtest。
+const testEventID = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1PD"
+
+// TestPublishCarriesEventID 身份必须**原样**跟着事件走（Publish 与 PublishAt 两条路）。
+//
+// 这条是 v17「身份随数据流动」在 bus 这一层的最小判据：只要有一处把 id 忘了传（或落成空串），
+// 帧上就没有 id，客户端就无法把"某一帧"引用出来，而这件事在其他任何测试里都不会红。
+func TestPublishCarriesEventID(t *testing.T) {
+	b := New()
+	if got := b.Publish(testEventID, "session.message", "s1", 1, nil); got.ID != testEventID {
+		t.Fatalf("Publish 丢了事件 id：got %q want %q", got.ID, testEventID)
+	}
+	if got := b.PublishAt(7, testEventID, "session.message", "s1", 1, nil); got.ID != testEventID {
+		t.Fatalf("PublishAt 丢了事件 id：got %q want %q", got.ID, testEventID)
+	}
+	// 只走实时通道的事件（automation.run 那类）刻意没有身份：空串**不算**丢。
+	if got := b.Publish("", "automation.run", "a1", 1, nil); got.ID != "" {
+		t.Fatalf("无身份事件不该凭空长出一个 id：got %q", got.ID)
+	}
+}
+
 // TestPublishSeqAndReplay 验证全局 seq 单调、Subscribe(after) 回放历史 + live 增量。
 func TestPublishSeqAndReplay(t *testing.T) {
 	b := New()
-	e1 := b.Publish("session.message", "s1", 1, map[string]any{"text": "a"})
-	e2 := b.Publish("session.thought", "s1", 1, map[string]any{"text": "b"})
+	e1 := b.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "a"})
+	e2 := b.Publish(testEventID, "session.thought", "s1", 1, map[string]any{"text": "b"})
 
 	if e2.Seq != e1.Seq+1 {
 		t.Fatalf("seq 不单调: e1=%d e2=%d", e1.Seq, e2.Seq)
@@ -22,7 +46,7 @@ func TestPublishSeqAndReplay(t *testing.T) {
 		t.Fatalf("回放顺序错误: %v", got)
 	}
 
-	e3 := b.Publish("session.message", "s1", 2, map[string]any{"text": "live"})
+	e3 := b.Publish(testEventID, "session.message", "s1", 2, map[string]any{"text": "live"})
 	if gotLive := <-sub.C; gotLive.Seq != e3.Seq {
 		t.Fatalf("live 增量缺失: got seq=%d want %d", gotLive.Seq, e3.Seq)
 	}
@@ -31,9 +55,9 @@ func TestPublishSeqAndReplay(t *testing.T) {
 // TestEventsAfter 验证快照式取历史（供 WS attach 重放）。
 func TestEventsAfter(t *testing.T) {
 	b := New()
-	b.Publish("session.message", "s1", 1, nil) // seq 1
-	b.Publish("session.thought", "s1", 1, nil) // seq 2
-	b.Publish("session.message", "s2", 1, nil) // seq 3
+	b.Publish(testEventID, "session.message", "s1", 1, nil) // seq 1
+	b.Publish(testEventID, "session.thought", "s1", 1, nil) // seq 2
+	b.Publish(testEventID, "session.message", "s2", 1, nil) // seq 3
 
 	after := b.EventsAfter(1) // >1：seq 2、3
 	if len(after) != 2 || after[0].Seq != 2 || after[1].Seq != 3 {
@@ -47,17 +71,17 @@ func TestEventsAfter(t *testing.T) {
 // TestEvictionWatermark 验证 per-agg 淘汰与低水位（EvictedThrough）：
 // 缓冲超限淘汰最旧事件并抬高对应聚合水位；重放只能覆盖水位之后。
 func TestEvictionWatermark(t *testing.T) {
-	b := NewWithLimit(2)                       // 保留上限 2 条
-	b.Publish("session.message", "s1", 1, nil) // seq 1
-	b.Publish("session.message", "s1", 1, nil) // seq 2
+	b := NewWithLimit(2)                                    // 保留上限 2 条
+	b.Publish(testEventID, "session.message", "s1", 1, nil) // seq 1
+	b.Publish(testEventID, "session.message", "s1", 1, nil) // seq 2
 	if b.EvictedThrough("s1") != 0 {
 		t.Fatalf("前两条不应淘汰: %d", b.EvictedThrough("s1"))
 	}
-	b.Publish("session.message", "s1", 1, nil) // seq 3 → 淘汰 seq1
+	b.Publish(testEventID, "session.message", "s1", 1, nil) // seq 3 → 淘汰 seq1
 	if w := b.EvictedThrough("s1"); w != 1 {
 		t.Fatalf("EvictedThrough(s1)=%d want 1", w)
 	}
-	b.Publish("session.message", "s2", 1, nil) // seq 4 → 淘汰 seq2（s1 水位 → 2）
+	b.Publish(testEventID, "session.message", "s2", 1, nil) // seq 4 → 淘汰 seq2（s1 水位 → 2）
 	if w := b.EvictedThrough("s1"); w != 2 {
 		t.Fatalf("EvictedThrough(s1)=%d want 2", w)
 	}
@@ -77,9 +101,9 @@ func TestEvictionWatermark(t *testing.T) {
 func TestPublishAt(t *testing.T) {
 	b := New()
 	// 模拟重启恢复注入 DB 既有事件（seq 1..3，来自旧进程持久化）。
-	one := b.PublishAt(1, "session.message", "s1", 1, map[string]any{"text": "old1"})
-	two := b.PublishAt(2, "session.thought", "s1", 1, map[string]any{"text": "old2"})
-	three := b.PublishAt(3, "turn.ended", "s1", 2, map[string]any{})
+	one := b.PublishAt(1, testEventID, "session.message", "s1", 1, map[string]any{"text": "old1"})
+	two := b.PublishAt(2, testEventID, "session.thought", "s1", 1, map[string]any{"text": "old2"})
+	three := b.PublishAt(3, testEventID, "run.ended", "s1", 2, map[string]any{})
 	if one.Seq != 1 || two.Seq != 2 || three.Seq != 3 {
 		t.Fatalf("PublishAt 未按显式 seq: %d %d %d", one.Seq, two.Seq, three.Seq)
 	}
@@ -87,15 +111,15 @@ func TestPublishAt(t *testing.T) {
 		t.Fatalf("LastSeq=%d want 3", b.LastSeq())
 	}
 	// 后续进程内发布（DB 取号一致时也用 PublishAt；此处验证 nextSeq 接续）。
-	four := b.PublishAt(4, "session.user_message", "s1", 3, map[string]any{"text": "again"})
+	four := b.PublishAt(4, testEventID, "session.user_message", "s1", 3, map[string]any{"text": "again"})
 	if four.Seq != 4 {
 		t.Fatalf("接续 seq 错误: %d", four.Seq)
 	}
-	if five := b.Publish("session.message", "s1", 3, nil); five.Seq != 5 {
+	if five := b.Publish(testEventID, "session.message", "s1", 3, nil); five.Seq != 5 {
 		t.Fatalf("Publish 应与 PublishAt 共享号序: %d", five.Seq)
 	}
 	// 乱序/重复取号防倒退：显式 seq 小于 nextSeq 时回落 nextSeq。
-	six := b.PublishAt(1, "session.message", "s2", 1, nil)
+	six := b.PublishAt(1, testEventID, "session.message", "s2", 1, nil)
 	if six.Seq != 6 {
 		t.Fatalf("重复取号应回落 nextSeq: %d", six.Seq)
 	}
@@ -116,7 +140,7 @@ func TestSlowSubscriberGapNotice(t *testing.T) {
 	// 不消费 live：缓冲 256 满后开始丢帧并出 gap。
 	const total = 300
 	for i := 1; i <= total; i++ {
-		b.Publish("session.message", "s1", int64(i), map[string]any{"i": i})
+		b.Publish(testEventID, "session.message", "s1", int64(i), map[string]any{"i": i})
 	}
 	got, ok := <-sub.Gap()
 	if !ok {
@@ -134,7 +158,7 @@ func TestSlowSubscriberGapNotice(t *testing.T) {
 		}
 		break
 	}
-	if e := b.Publish("session.message", "s1", 301, nil); e.Seq != 301 {
+	if e := b.Publish(testEventID, "session.message", "s1", 301, nil); e.Seq != 301 {
 		t.Fatalf("seq 推进异常: %d", e.Seq)
 	}
 	select {
@@ -167,7 +191,7 @@ func TestNoGapOnPromptConsumer(t *testing.T) {
 	sub := b.Subscribe(0)
 	defer b.Unsubscribe(sub)
 	for i := 1; i <= 20; i++ {
-		b.Publish("session.message", "s1", 1, nil)
+		b.Publish(testEventID, "session.message", "s1", 1, nil)
 		select {
 		case ev := <-sub.C:
 			if ev.Seq != int64(i) {
@@ -191,7 +215,7 @@ func TestSubscribeReplayBeyondBuffer(t *testing.T) {
 	b := New()
 	const n = 1000
 	for i := 0; i < n; i++ {
-		b.Publish("token", "agg", int64(i+1), map[string]any{"i": i})
+		b.Publish(testEventID, "token", "agg", int64(i+1), map[string]any{"i": i})
 	}
 	done := make(chan *Subscription, 1)
 	go func() { done <- b.Subscribe(0) }()

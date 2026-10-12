@@ -740,7 +740,7 @@ func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateR
 func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtosession.QueuedInputResp, error) {
 	s.inputsListed, s.inputsListConv = true, id
 	return []dtosession.QueuedInputResp{
-		{ID: "in-8", Text: "排队一", Delivery: "after_turn", TargetTurnID: "t1", Generation: 3},
+		{ID: "in-8", Text: "排队一", Delivery: "after_run", TargetRunID: "t1", Generation: 3},
 	}, nil
 }
 
@@ -762,7 +762,7 @@ func (s *stubSvc) PromptSession(_ context.Context, id string, req dtosession.Pro
 	}
 	return &dtosession.SessionPromptResp{ID: id, EventSeq: 5}, nil
 }
-func (s *stubSvc) CancelTurn(_ context.Context, id string) error {
+func (s *stubSvc) CancelRun(_ context.Context, id string) error {
 	s.cancelCalled = true
 	s.cancelID = id
 	return s.cancelErr
@@ -1291,10 +1291,10 @@ func TestCreateSessionOptionalAgent(t *testing.T) {
 
 // TestCreateSessionServiceError svc 业务错误原样透出（40901 忙）。
 func TestCreateSessionServiceError(t *testing.T) {
-	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "turn in progress"}}
+	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "run in progress"}}
 	r := newRestEngine(stubDeps(svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"a","prompt":"hi"}`)
-	if env.Code != 40901 || !strings.Contains(env.Msg, "turn in progress") {
+	if env.Code != 40901 || !strings.Contains(env.Msg, "run in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
 	}
 }
@@ -1323,8 +1323,8 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 
 	// §6 投递模式透传到 service（delivery 不是路由层的事，路由只负责别把它吃掉）。
-	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{"prompt":"排队","delivery":"after_turn"}`)
-	if env.Code != 0 || svc.promptDelivery != "after_turn" {
+	env, _ = do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{"prompt":"排队","delivery":"after_run"}`)
+	if env.Code != 0 || svc.promptDelivery != "after_run" {
 		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
 	}
 	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
@@ -1336,13 +1336,13 @@ func TestPromptAndCancel(t *testing.T) {
 		InputID      string `json:"input_id"`
 		Text         string `json:"text"`
 		Delivery     string `json:"delivery"`
-		TargetTurnID string `json:"target_turn_id"`
+		TargetRunID string `json:"target_run_id"`
 		Generation   int64  `json:"generation"`
 	}
 	if err := json.Unmarshal(env.Data, &qdata); err != nil || len(qdata) != 1 {
 		t.Fatalf("排队列表 data 不符: %s", env.Data)
 	}
-	if qdata[0].InputID != "in-8" || qdata[0].Delivery != "after_turn" || qdata[0].Generation != 3 {
+	if qdata[0].InputID != "in-8" || qdata[0].Delivery != "after_run" || qdata[0].Generation != 3 {
 		t.Fatalf("排队列表字段不符: %+v", qdata[0])
 	}
 
@@ -1794,7 +1794,7 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 		{"start_unknown", "POST", "/v1/mate/agents/nope/start", "",
 			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
 		{"stop_busy", "POST", "/v1/mate/agents/dsh/stop", "",
-			acl.NewError(acl.ClassLimit, "agent_busy", "有在途 turn", nil), 40901},
+			acl.NewError(acl.ClassLimit, "agent_busy", "有在途 run", nil), 40901},
 		{"start_unavailable", "POST", "/v1/mate/agents/dsh/start", "",
 			acl.NewError(acl.ClassUnsupported, "runtime_unavailable", "命令不可执行", nil), 40501},
 	}

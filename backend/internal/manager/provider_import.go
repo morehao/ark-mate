@@ -254,7 +254,7 @@ func scanProviderFile(raw []byte, path, dir string, opts DefinitionImportOptions
 			}
 		}
 		items = append(items, store.DefinitionImportItem{
-			Kind: model.CapabilityKindProvider, ID: id,
+			Kind: model.DefinitionKindProvider, ID: id,
 			Provider: &store.ProviderColumns{
 				ID: id, Name: bodyString(entry, "name"), Protocol: protocol,
 				BaseURL: baseURL, Note: bodyString(entry, "note"),

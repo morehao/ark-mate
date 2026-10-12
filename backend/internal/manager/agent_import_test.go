@@ -104,8 +104,8 @@ func TestImportAgentDirCountsAndDefaultSelection(t *testing.T) {
 		t.Fatalf("u2 正文应保留 name 并由文件名回填 id: %s", u2.Body)
 	}
 	// 导入动作留痕（actor=import，action=import）。
-	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "u1")
-	if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionImport || revs[0].Actor != model.CapabilityActorImport {
+	revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "u1")
+	if err != nil || len(revs) != 1 || revs[0].Action != model.DefinitionActionImport || revs[0].Actor != model.DefinitionActorImport {
 		t.Fatalf("导入审计不符: %+v err=%v", revs, err)
 	}
 }
@@ -164,7 +164,7 @@ func TestImportAgentDirNeverOverwrites(t *testing.T) {
 	if !strings.Contains(row.Body, "面板上改过的 v2") || row.Revision != 2 {
 		t.Fatalf("导入绝不覆盖：面板那一版必须原样留着: rev=%d body=%s", row.Revision, row.Body)
 	}
-	if revs, _ := st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "u1"); len(revs) != 2 {
+	if revs, _ := st.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "u1"); len(revs) != 2 {
 		t.Fatalf("被跳过的行不该产生审计: %+v", revs)
 	}
 }

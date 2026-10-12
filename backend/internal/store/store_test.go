@@ -65,15 +65,15 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 	seedSession(t, s, "s1")
 	seedSession(t, s, "s2")
 
-	s1, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"text": "hi"})
+	s1, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.message", map[string]any{"text": "hi"})
 	if err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	s2a, err := s.AppendEvent(ctxT(), "s2", "session.user_message", map[string]any{"text": "yo"})
+	s2a, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s2", "session.user_message", map[string]any{"text": "yo"})
 	if err != nil {
 		t.Fatalf("AppendEvent s2: %v", err)
 	}
-	s1b, err := s.AppendEvent(ctxT(), "s1", "turn.ended", map[string]any{})
+	s1b, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "run.ended", map[string]any{})
 	if err != nil {
 		t.Fatalf("AppendEvent s1b: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 // 哪天 foreign_keys 回来了，这条会红，提醒把它改回"应报错"。
 func TestAppendEventUnknownSession(t *testing.T) {
 	s := openTestDB(t)
-	if _, err := s.AppendEvent(ctxT(), "ghost", "session.message", map[string]any{}); err != nil {
+	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "ghost", "session.message", map[string]any{}); err != nil {
 		t.Fatalf("foreign_keys 已关（golib driver 不注入），插入未知会话的事件不应报错；若 FK 已恢复，把本测试改回断言报错: %v", err)
 	}
 }
@@ -118,13 +118,13 @@ func TestEventsAfterReplay(t *testing.T) {
 	seedSession(t, s, "s2")
 	var seqs []int64
 	for i := 0; i < 5; i++ {
-		seq, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"i": i})
+		seq, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.message", map[string]any{"i": i})
 		if err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		seqs = append(seqs, seq)
 	}
-	_, _ = s.AppendEvent(ctxT(), "s2", "session.message", map[string]any{}) // 其它会话不混入
+	_, _ = s.AppendEvent(ctxT(), objid.New(objid.Event), "s2", "session.message", map[string]any{}) // 其它会话不混入
 
 	got, more, err := s.EventsAfter(ctxT(), "s1", seqs[0], 3)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestSessionCRUD(t *testing.T) {
 	}
 	// 覆盖 upsert 不能清零 last_seq。
 	seedSession(t, s, "s1")
-	if _, err := s.AppendEvent(ctxT(), "s1", "x", map[string]any{}); err != nil {
+	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "x", map[string]any{}); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 	low := base
@@ -230,15 +230,23 @@ func TestMemoriesCRUD(t *testing.T) {
 func TestImportBatch(t *testing.T) {
 	s := openTestDB(t)
 	now := time.Now().UTC()
-	item := ImportItem{
-		Session: model.SessionEntity{ID: "s-x", AgentID: "agent-opencode", Title: "迁移会话",
-			Status: "completed", CreatedAt: now, UpdatedAt: now},
-		Events: []model.EventEntity{
-			{Type: "session.user_message", PayloadJSON: `{"text":"hi"}`},
-			{Type: "session.message", PayloadJSON: `{"text":"yo"}`},
-			{Type: "turn.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
-		},
+	// v17：导入的事件行必须带**身份**（`evt_…`），所以每次造夹具都现铸——
+	// 固定字面量会在"同一支 id 落在两个会话上"那里撞成"分叉"（那正是另一个用例要测的）。
+	newEvents := func() []model.EventEntity {
+		return []model.EventEntity{
+			{ID: objid.New(objid.Event), Type: "session.user_message", PayloadJSON: `{"text":"hi"}`},
+			{ID: objid.New(objid.Event), Type: "session.message", PayloadJSON: `{"text":"yo"}`},
+			{ID: objid.New(objid.Event), Type: "run.ended", PayloadJSON: `{"stop_reason":"end_turn"}`},
+		}
 	}
+	mkItem := func(sessionID string, events []model.EventEntity) ImportItem {
+		return ImportItem{
+			Session: model.SessionEntity{ID: sessionID, AgentID: "agent-opencode", Title: "迁移会话",
+				Status: "completed", CreatedAt: now, UpdatedAt: now},
+			Events: events,
+		}
+	}
+	item := mkItem("s-x", newEvents())
 	marker := "fp:test-dir-1"
 
 	ev, files, err := s.ImportBatch(ctxT(), []ImportItem{item}, marker, 1, 3)
@@ -252,9 +260,8 @@ func TestImportBatch(t *testing.T) {
 	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{item}, marker, 1, 3); !errors.Is(err, ErrAlreadyImported) {
 		t.Fatalf("同 marker 应幂等跳过: %v", err)
 	}
-	// 新 marker（不同目录）继续导入会追加（不同会话）。
-	item2 := item
-	item2.Session.ID = "s-y"
+	// 新 marker（不同目录）继续导入会追加（不同会话、**另一批身份**）。
+	item2 := mkItem("s-y", newEvents())
 	ev2, _, err := s.ImportBatch(ctxT(), []ImportItem{item2}, "fp:test-dir-2", 1, 3)
 	if err != nil || ev2 != 3 {
 		t.Fatalf("二次导入: ev=%d err=%v", ev2, err)
@@ -263,7 +270,7 @@ func TestImportBatch(t *testing.T) {
 	// 错配校验 → 整体回滚（事件数与全局 seq 均不变）。
 	before, _ := s.EventCount(ctxT(), "")
 	lastBefore, _ := s.LastSeq(ctxT())
-	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{item}, "fp:test-dir-3", 1, 999); err == nil {
+	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mkItem("s-z", newEvents())}, "fp:test-dir-3", 1, 999); err == nil {
 		t.Fatal("错配计数应报错")
 	}
 	after, _ := s.EventCount(ctxT(), "")
@@ -272,6 +279,66 @@ func TestImportBatch(t *testing.T) {
 	}
 	if got, _ := s.LastSeq(ctxT()); got != lastBefore {
 		t.Fatalf("回滚后 seq 不应前进: got=%d want=%d", got, lastBefore)
+	}
+}
+
+// TestImportBatchEventIdentity 导入的事件级身份判据（v17 / D2）：
+//
+//	① 同 id + 同内容 → **跳过**（幂等，不写第二份，也不报错）；
+//	② 同 id + 不同内容 → **报错**（分叉：同一支身份不可能有两份内容）；
+//	③ 缺 id / id 形状非法 → 报错（导入面不代铸身份）。
+//
+// 为什么这三条必须分开测：①与②的分界正是"幂等"与"静默篡改"的分界——合并成一条，实现里
+// 把②也当①处理（直接跳过）不会让任何测试变红，而库里会留下两份同 id 不同内容的行。
+func TestImportBatchEventIdentity(t *testing.T) {
+	s := openTestDB(t)
+	now := time.Now().UTC()
+	mk := func(events []model.EventEntity) ImportItem {
+		return ImportItem{
+			Session: model.SessionEntity{ID: "s-idem", AgentID: "a1", Status: "completed",
+				CreatedAt: now, UpdatedAt: now},
+			Events: events,
+		}
+	}
+	first := model.EventEntity{ID: objid.New(objid.Event), Type: "session.user_message", PayloadJSON: `{"text":"hi"}`}
+	if ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{first})}, "fp-a", 1, 1); err != nil || ev != 1 {
+		t.Fatalf("首次导入: ev=%d err=%v", ev, err)
+	}
+	countBefore, _ := s.EventCount(ctxT(), "")
+	seqBefore, _ := s.LastSeq(ctxT())
+
+	// ① 同 id 同内容（不同 marker，模拟"清掉 marker 再导一次"）→ 跳过，不新增行，也不报错。
+	ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{first})}, "fp-b", 1, 1)
+	if err != nil {
+		t.Fatalf("同 id 同内容应幂等跳过，实际报错: %v", err)
+	}
+	if ev != 1 {
+		t.Fatalf("在场事件数应为 1（跳过也算在场），实际 %d", ev)
+	}
+	if n, _ := s.EventCount(ctxT(), ""); n != countBefore {
+		t.Fatalf("幂等导入不该新增行: before=%d after=%d", countBefore, n)
+	}
+	if got, _ := s.LastSeq(ctxT()); got != seqBefore {
+		t.Fatalf("全部跳过时不该取号: got=%d want=%d", got, seqBefore)
+	}
+
+	// ② 同 id 不同内容 → 报错 + 整批回滚。
+	diverged := first
+	diverged.PayloadJSON = `{"text":"改过了"}`
+	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{diverged})}, "fp-c", 1, 1); err == nil {
+		t.Fatal("同 id 不同内容必须报错（分叉），不能静默跳过")
+	}
+	if n, _ := s.EventCount(ctxT(), ""); n != countBefore {
+		t.Fatalf("分叉导入应整体回滚: before=%d after=%d", countBefore, n)
+	}
+
+	// ③ 缺 id / 形状非法 → 报错。
+	for _, bad := range []string{"", "evt_short", "ses_01J9Z6Q0M7X2V8K4B3N5TRW1PD"} {
+		if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{
+			{ID: bad, Type: "session.message", PayloadJSON: `{"text":"x"}`},
+		})}, "fp-d-"+bad, 1, 1); err == nil {
+			t.Fatalf("id=%q 应被拒绝", bad)
+		}
 	}
 }
 
@@ -332,13 +399,13 @@ func TestEventsBefore(t *testing.T) {
 	seedSession(t, s, "s2")
 	var seqs []int64
 	for i := 0; i < 5; i++ {
-		seq, err := s.AppendEvent(ctxT(), "s1", "session.message", map[string]any{"i": i})
+		seq, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.message", map[string]any{"i": i})
 		if err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		seqs = append(seqs, seq)
 	}
-	_, _ = s.AppendEvent(ctxT(), "s2", "session.message", map[string]any{"other": true})
+	_, _ = s.AppendEvent(ctxT(), objid.New(objid.Event), "s2", "session.message", map[string]any{"other": true})
 
 	got, more, err := s.EventsBefore(ctxT(), "s1", seqs[3], 2)
 	if err != nil {

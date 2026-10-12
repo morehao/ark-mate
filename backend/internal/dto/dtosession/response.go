@@ -7,19 +7,19 @@ type SessionResp struct {
 	// ID 平台会话 id（`ses_<26 位 ULID>`）。**它是唯一的对外会话标识**——URL 路径段、
 	// 事件载荷的 `session_id`、前端路由都用它。
 	ID string `json:"id"`
-	// ProviderSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
+	// RuntimeSessionID 原生底座会话 id（`rt_<底座原文>`；'' = 尚未起底座会话）。
 	//
 	// v15 起它在**平台侧**一律带 `rt_` 壳（`pkg/object/objid`）：这既是"平台 id 与底座 id
 	// 形状可分"这条不变式的载体（`id` 匹配 `^ses_…$`、本字段匹配 `^rt_.+$`，两者永不可能
 	// 相等），也是排障时一眼看出"这是哪个底座用什么形状发的"的那一层信息。
 	//
 	// 它**只**用于诊断与关联底座日志：**不得**出现在 URL 路径段，也不得被当成会话标识传给任何写面。
-	ProviderSessionID string `json:"provider_session_id,omitempty"`
-	AgentID           string `json:"agent_id"`
-	Status            string `json:"status"`
-	Title             string `json:"title"`
-	Pinned            bool   `json:"pinned"`
-	Archived          bool   `json:"archived"`
+	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
+	AgentID          string `json:"agent_id"`
+	Status           string `json:"status"`
+	Title            string `json:"title"`
+	Pinned           bool   `json:"pinned"`
+	Archived         bool   `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
@@ -112,7 +112,7 @@ type SessionPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
-	// Queued/InputID 仅 delivery=after_turn|interrupt_then_prompt 且会话正忙时出现：
+	// Queued/InputID 仅 delivery=after_run|interrupt_then_prompt 且会话正忙时出现：
 	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /sessions/:id/inputs/:input_id 撤下）。
 	Queued  bool   `json:"queued,omitempty"`
 	InputID string `json:"input_id,omitempty"`
@@ -126,9 +126,9 @@ type SessionPromptResp struct {
 type QueuedInputResp struct {
 	ID       string `json:"input_id"`
 	Text     string `json:"text"`
-	Delivery string `json:"delivery"` // after_turn | interrupt_then_prompt
-	// TargetTurnID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
-	TargetTurnID string `json:"target_turn_id,omitempty"`
+	Delivery string `json:"delivery"` // after_run | interrupt_then_prompt
+	// TargetRunID 入队时正在执行的那一轮（审计：用户排在哪一轮后面）。
+	TargetRunID string `json:"target_run_id,omitempty"`
 	// Generation 入队时会话执行代际（服务端投递前比对，不等即作废）。
 	Generation int64  `json:"generation,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"` // RFC3339Nano(UTC)
@@ -210,7 +210,7 @@ type ElicitationResp struct {
 	// v15 之前这里同时发 `session_id` 与 `conversation_id` 两个**同值**的键（一个东西两个
 	// 词），改名后收敛成一个键——两个词各写一遍只会在读的一侧留下一个永远取不到的字段。
 	SessionID string `json:"session_id"`
-	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 turn 推断）
+	// ScopeSource 归属来源：wire（`_meta` 提供）| inferred_inflight（宿主按唯一在途 run 推断）
 	// | ambiguous（两者都无，不归属；见 pkg/acl/scope.go 与 manager/diagnostics.go 的留痕）。
 	ScopeSource string         `json:"scope_source"`
 	Mode        string         `json:"mode"`

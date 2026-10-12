@@ -98,8 +98,8 @@ func TestAgentDefinitionsStoreRoundTrip(t *testing.T) {
 		!strings.Contains(row.Body, "openai:gpt-4o") {
 		t.Fatalf("覆盖写后的行不符: rev=%d body=%s", row.Revision, row.Body)
 	}
-	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "alias-stub")
-	if err != nil || len(revs) != 2 || revs[0].Action != model.CapabilityActionCreate || revs[1].Action != model.CapabilityActionUpdate {
+	revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "alias-stub")
+	if err != nil || len(revs) != 2 || revs[0].Action != model.DefinitionActionCreate || revs[1].Action != model.DefinitionActionUpdate {
 		t.Fatalf("agent 审计不符: %+v err=%v", revs, err)
 	}
 	if revs[1].Actor != definitionWriteActor {
@@ -131,8 +131,8 @@ func TestAgentDefinitionsStoreRoundTrip(t *testing.T) {
 	if _, ok := svc.AgentByID("alias-stub"); ok {
 		t.Fatal("删除后内存里不该还有")
 	}
-	revs, _ = st.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "alias-stub")
-	if len(revs) != 3 || revs[2].Action != model.CapabilityActionDelete || revs[2].Digest != "" {
+	revs, _ = st.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "alias-stub")
+	if len(revs) != 3 || revs[2].Action != model.DefinitionActionDelete || revs[2].Digest != "" {
 		t.Fatalf("删除审计不符（删定义也留痕且 digest 为空）: %+v", revs)
 	}
 	if got := svc.DefaultAgentID(); got != "dsh" {

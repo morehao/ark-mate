@@ -129,7 +129,7 @@ export interface RuntimeSyncResp {
   status: string
   /** 人话落点（给排障看的「同步到哪了」）。 */
   where: string
-  /** immediate | next_turn | next_session | next_process（清单通道的生效时刻）。 */
+  /** immediate | next_run | next_session | next_process（清单通道的生效时刻）。 */
   effect: string
   /** true = 平台已交付但底座还没读到（新进程才读）——**不许把它说成"已生效"**。 */
   pending: boolean

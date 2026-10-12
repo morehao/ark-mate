@@ -14,7 +14,7 @@
 | 形态 | 命令 | 产物 | 说明 |
 | --- | --- | --- | --- |
 | **桌面应用（主线交付）** | `make desktop/dist` | dmg / Windows 安装器 | 随包运行时，用户机器不需要 Go / Node / 预装底座；**详见 [desktop 设计](./desktop-architecture-design-20260928.md)**，本文不复述 |
-| 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3） |
+| 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=1 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3）。**`CGO_ENABLED=1` 是必须的**（2026-10-11 决策）：SQLite driver 是 CGO 的，`0` 会编出运行期连不上库的 stub；代价是产物**动态链接** libc/glibc，不再是可塞进 scratch 的静态二进制 |
 | 仅后端内核 | `make build` | 无独立产物 | 任何构建都不带资产，`make build` 只编后端；面板要由 `--web-dir` / `MATE_WEB_DIR` 提供，没给即拒启（退出码 3） |
 | 前端产物独立托管 | `make web` | `frontend/apps/web/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
 | 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 并设 `MATE_WEB_DIR` 指过去 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
@@ -152,7 +152,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`dsh:skill`（旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `MATE_WORKSPACE_DIR` | `~/.ark-mate/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `MATE_WORKSPACE_ROOTS` | 空（无偏好） | **工作区起始位置偏好**（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。**它不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间，不再有 `workspace_outside_roots` 这类拒绝）：这份名单只决定目录浏览从哪儿起步、以及面板里列哪些快捷入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
-| `MATE_TURN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
+| `MATE_RUN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
 | `MATE_PERMISSION_TIMEOUT` | `30m` | 挂起权限自动拒绝超时 |
 | `MATE_ELICITATION_TIMEOUT` | `30m` | 挂起结构化提问自动取消超时 |
 | `MATE_IDLE_TIMEOUT` | `5m` | 暖进程空闲回收（0 = 关闭） |
@@ -209,7 +209,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 
 支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
 `automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
-`idle_timeout` `reap_interval` `turn_timeout` `handoff_max_chars` `generation_limit`
+`idle_timeout` `reap_interval` `run_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `asset_watch`
 `native_permission` `mcp_gateway`；另可用 `MATE_*` 原名、`-` 写成分隔符，以及少量别名
@@ -593,7 +593,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | 面板打不开 / `GET /` 404 | 核心没拿到资产（没给 `--web-dir`/`MATE_WEB_DIR`）会**拒绝启动**并打印它要的那份路径，能起服说明资产已就位 → 那 404 通常是访问了错的端口，或给的目录里没有 `index.html`（SPA 回退无处可回） |
 | 启动即退出（退出码 3）「没有前端资产」 | 没给 `--web-dir`/`MATE_WEB_DIR`，或给的路径不是目录 / 里面没有 `index.html`；刻意**不回落**任何来源——"配错却照常跑起来"会让人看着旧界面以为新版本已经生效 |
 | 会话建不了、`agent_not_found` | agent 被删或 definitions 目录不可写；内置种子 `dsh`/`opencode` 只读不可删 |
-| 轮次一直转、无输出 | 底座进程未起（`opencode acp` / `dsh --profile acp` 不在 PATH）；设 `MATE_TURN_TIMEOUT` 让看门狗兜底 |
+| 轮次一直转、无输出 | 底座进程未起（`opencode acp` / `dsh --profile acp` 不在 PATH）；设 `MATE_RUN_TIMEOUT` 让看门狗兜底 |
 | 权限卡不出现 | agent 配了 `permission_policy: allow|deny` → 已自动决策（看 `session.permission_policy` 事件与日志） |
 | `GET /usage/summary` 40501 | 跑在 memory 模式（无 runs 读模型）→ `MATE_STORE=sqlite` |
 | 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(MATE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`MATE_PROC_REGISTRY=off` 可关闭 |
@@ -737,7 +737,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   容器部署里 `docker restart` / `compose up -d` 是常规操作，影响面很大）。根因是「连接生命周期」与
   「轮次结果」共用一条写状态的路径，把**主动停机**当成了**连接故障**。现按拆除原因分流：
   主动拆除（daemon 停机 / `POST /agents/:id/stop` / 空闲回收）在途轮次归 `interrupted`（无终态、可续聊
-  重发），空闲会话**保持原状态**、不发 `turn.error`；只有对端/子进程意外断开才可能把在途轮次收成
+  重发），空闲会话**保持原状态**、不发 `run.error`；只有对端/子进程意外断开才可能把在途轮次收成
   失败，且空闲会话同样不被改写（只落 agent 诊断 `last_error.code=connection_lost`）。会话句柄在断连时
   作废但**会话本身归平台所有**（ADR-4：执行可丢弃）→ 下一次 prompt 经 native resume / handoff memo
   重建，因此重启后历史会话可继续提问。
@@ -758,13 +758,13 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   `events`）；未知会话进 `skipped` 且 `exported=0`；`format=pdf` → `code=40001
   [invalid_export_format]`；缺 `q` → `code=40001 [invalid_search_query]`。memory 模式
   （`MATE_STORE=memory`）实测 `source=transcript` 且导出正常（无 DB 时回扫 transcript 的明确
-  降级面）。`pnpm smoke:e2e` 新增 4 项断言全 PASS；真会话 `e2e-live-turn.mjs dsh` 收到
-  `turn.ended`。前端 `typecheck` + `build` 通过；`console/searchView.ts` 纯函数用 Node 24 原生
+  降级面）。`pnpm smoke:e2e` 新增 4 项断言全 PASS；真会话 `e2e-live-run.mjs dsh` 收到
+  `run.ended`。前端 `typecheck` + `build` 通过；`console/searchView.ts` 纯函数用 Node 24 原生
   类型擦除加载实跑 17 条断言（锚点定位/去重/导出摘要）。
 
 - agent 诊断面（A3）：`GET /agents/:id/diagnostics` 实测——未启动 `dsh` → `connected=false
   stderr_source=none stderr_tail=[]`；`POST /agents/dsh/start` → `connected=true pid=91586`；
-  `kill -9 91586` → 历史出现 `turn.error connection_lost`，`last_error` 记录 `code/class/
+  `kill -9 91586` → 历史出现 `run.error connection_lost`，`last_error` 记录 `code/class/
   conversation_id`。`GET /agents/nope/diagnostics` → `code=40401`。真实 dsh/opencode **不写
   stderr**（`stderr_source=none`，0 行），非空尾巴的证据来自真实子进程单测（python ACP 桩 /
   `sh` 失败进程）。`pnpm smoke:e2e` 新增 2 项断言全 PASS。
@@ -783,7 +783,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   `mate serve` 注册成功（日志 `注册远程 runtime`），`GET /runtimes` 返回 5 个（3 内置 + 2 远程）。
   两个远程 agent 各建一次会话：事件链 `session.created → user_message → thought → message →
   permission_request`，`POST /conversations/:id/permission`（`allowed=true, option_id=allow-all`）
-  → `permission_resolved → permission → tool_call → tool_update → message → usage → turn.ended`
+  → `permission_resolved → permission → tool_call → tool_update → message → usage → run.ended`
   （echo 远端底座回显「已授权（始终允许）。模拟执行完成」）。`GET /agents/:id/diagnostics`
   显示远程 agent `connected=true, pid=None`（无子进程）。把远端 `acp-serve` 杀掉后重建会话 →
   `code=50201`「连接远程 ACP 端点失败（ws: ws://127.0.0.1:10020/acp）」，诊断 `connected=false,
@@ -798,7 +798,9 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   空运行史返回 `[]` 且 `limit=20`、手动触发打不存在的 agent → **报错且留痕**
   （`runs[0].status=skipped` 带原因）、删除幂等（`deleted:true` → `deleted:false`）。
   **这条冒烟抓到一个真实漂移**：空运行史原先是 `"runs": null`，与前端声明的数组类型不符。
-- 容器时区（M4-7，本机实跑）：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64` 构建后放进
+- 容器时区（M4-7，本机实跑；**记录的是 2026-10-11 之前的静态构建口径**——当天起构建一律
+  `CGO_ENABLED=1`，产物动态链接 glibc，下面这条 `FROM scratch` 的路径**已不可用**，留档只为
+  说明 `time/tzdata` 内嵌是承重的）：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64` 构建后放进
   `FROM scratch`（镜像里只有二进制，`docker save | tar -t | grep -c zoneinfo` = **0**）→
   `preview` 与宿主机逐字一致（同上 `09:00 CST`）；**去掉 `import _ "time/tzdata"` 的同一份二进制
   在同一镜像里报 `40001 未知时区 Asia/Shanghai`**——对照证明这个 import 是承重的，而不是装饰。
@@ -820,7 +822,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
   `POST /conversations/export` 无令牌 401、带令牌 200。WS 探针（Node 24 内置 WebSocket）：
   无令牌 `ERROR → CLOSE 1006`、错令牌同样被拒、带 `?token=` `OPEN → {"type":"pong"}`。
   `MATE_SMOKE_TOKEN=… pnpm smoke:e2e` 全 PASS（含 WS 带令牌升级）；`MATE_SMOKE_TOKEN=…
-  node scripts/e2e-live-turn.mjs dsh …` 收到 `turn.ended`（REST+WS 均带令牌的真实 dsh 轮次）。
+  node scripts/e2e-live-run.mjs dsh …` 收到 `run.ended`（REST+WS 均带令牌的真实 dsh 轮次）。
 
 - MCP 工具调用（B1）：真实 stdio MCP server（`/tmp/b1/mcp_pyecho.py`，`MATE_CAPABILITIES` 指向
   含 `pyecho.json` 的目录）→ `POST /mcps/pyecho/probe` `added=3`（echo/boom/slow）；

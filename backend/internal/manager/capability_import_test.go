@@ -89,12 +89,12 @@ func TestImportCapabilityDirCountsAndAudit(t *testing.T) {
 		t.Fatal("过不了闸门的定义不该被导入")
 	}
 	// 审计：每条导入一行（action=import，actor=import），而不是一条聚合行——
-	// 否则 `ListCapabilityRevisions(kind, id)` 查不到"这一行是哪来的"。
-	revs, err := st.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "alpha")
+	// 否则 `ListDefinitionRevisions(kind, id)` 查不到"这一行是哪来的"。
+	revs, err := st.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(revs) != 1 || revs[0].Action != model.CapabilityActionImport || revs[0].Actor != model.CapabilityActorImport {
+	if len(revs) != 1 || revs[0].Action != model.DefinitionActionImport || revs[0].Actor != model.DefinitionActorImport {
 		t.Fatalf("导入审计不符: %+v", revs)
 	}
 	if revs[0].Digest == "" {

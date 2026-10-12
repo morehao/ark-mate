@@ -24,10 +24,10 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 
 	base := time.Now().UTC()
 	rows := []model.InputEntity{
-		{ID: "i2", SessionID: "c1", Text: "第二条", Delivery: model.InputDeliveryAfterTurn,
-			TargetTurnID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base.Add(time.Second)},
-		{ID: "i1", SessionID: "c1", Text: "第一条", Delivery: model.InputDeliveryAfterTurn,
-			TargetTurnID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base},
+		{ID: "i2", SessionID: "c1", Text: "第二条", Delivery: model.InputDeliveryAfterRun,
+			TargetRunID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base.Add(time.Second)},
+		{ID: "i1", SessionID: "c1", Text: "第一条", Delivery: model.InputDeliveryAfterRun,
+			TargetRunID: "t1", Generation: 1, Status: model.InputStatusQueued, CreatedAt: base},
 	}
 	for _, r := range rows {
 		if err := st.CreateInput(ctx, r); err != nil {
@@ -69,13 +69,13 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 	}
 	// ListAllQueuedInputs 跨会话取快照（启动恢复靠它逐条发收敛事件，故不按会话过滤）。
 	if err := st.CreateInput(ctx, model.InputEntity{ID: "i4", SessionID: "c1", Text: "会话一的待投递",
-		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
+		Delivery: model.InputDeliveryAfterRun, Generation: 1,
 		Status: model.InputStatusQueued, CreatedAt: base.Add(3 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	seedSession(t, st, "c2")
 	if err := st.CreateInput(ctx, model.InputEntity{ID: "i5", SessionID: "c2", Text: "会话二的待投递",
-		Delivery: model.InputDeliveryAfterTurn, Generation: 1,
+		Delivery: model.InputDeliveryAfterRun, Generation: 1,
 		Status: model.InputStatusQueued, CreatedAt: base.Add(4 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}

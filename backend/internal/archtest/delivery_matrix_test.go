@@ -23,17 +23,17 @@ import (
 // 它挡的是一种**静默缺口**：新增一种资源（比如再加一类可投给底座的定义）却忘了给它声明交付
 // 通道。那种缺口不会让任何东西报错——写面照常成功、界面照常显示「已保存」，而用户永远等不到
 // 它生效；排查时也会被读成"底座不认"或"投放写错了"。所以判据必须独立于实现：本测试从
-// `internal/model/enum.go` 的 `CapabilityKind*` 常量（「平台拥有哪些资源种类」的唯一事实源）
+// `internal/model/enum.go` 的 `DefinitionKind*` 常量（「平台拥有哪些资源种类」的唯一事实源）
 // 读出全部 kind，逐个断言 `objdelivery.For` 查得到声明；并断言**未知 kind 必须返回 false**，
 // 把这个查询本身也钉死（一条永远返回 true 的假实现不能蒙混过去）。
 //
 // 故意的红：往 `pkg/object/objdelivery` 的表里删掉任意一个 kind 的声明 →
 // `TestDeliveryMatrixCoversKinds` 必须红（`missingDeliveryKinds` 的负例分支就是它的自证）。
 
-// capabilityKindConstants 从 internal/model/enum.go 读出 `CapabilityKind*` 常量（常量名 → 取值）。
+// capabilityKindConstants 从 internal/model/enum.go 读出 `DefinitionKind*` 常量（常量名 → 取值）。
 //
 // 用 go/parser 而不是正则：常量块、多行声明、注释里的同名文字都不该被误读。读不到任何
-// `CapabilityKind*` 常量（文件被改名/常量被整体搬走）时直接用 t.Fatalf 判红——守卫的前提
+// `DefinitionKind*` 常量（文件被改名/常量被整体搬走）时直接用 t.Fatalf 判红——守卫的前提
 // 消失时必须 **fail-closed**，否则它会变成一条永远绿的装饰。
 func capabilityKindConstants(t *testing.T) map[string]string {
 	t.Helper()
@@ -56,7 +56,7 @@ func capabilityKindConstants(t *testing.T) map[string]string {
 				continue
 			}
 			for i, name := range vs.Names {
-				if !strings.HasPrefix(name.Name, "CapabilityKind") {
+				if !strings.HasPrefix(name.Name, "DefinitionKind") {
 					continue
 				}
 				if i >= len(vs.Values) {
@@ -80,7 +80,7 @@ func capabilityKindConstants(t *testing.T) map[string]string {
 		}
 	}
 	if len(out) == 0 {
-		t.Fatalf("%s 里没有 CapabilityKind* 常量：交付矩阵守卫的事实源已消失，"+
+		t.Fatalf("%s 里没有 DefinitionKind* 常量：交付矩阵守卫的事实源已消失，"+
 			"守卫必须随之更新而不能默认放行", rel(root, path))
 	}
 	return out
@@ -126,7 +126,7 @@ func TestDeliveryMatrixCoversKinds(t *testing.T) {
 		t.Fatalf("交付矩阵有缺口（新增资源种类却漏了交付通道声明）：\n%s", joinLines(bad))
 	}
 	// 2) 负例（**故意的红**）：删掉任意一条声明都必须被这条路径抓到。
-	if bad := missingDeliveryKinds(map[string]string{"CapabilityKindX": "__undeclared_kind__"}); len(bad) == 0 {
+	if bad := missingDeliveryKinds(map[string]string{"DefinitionKindX": "__undeclared_kind__"}); len(bad) == 0 {
 		t.Fatal("未声明的 kind 应被判违规（守卫没牙齿）")
 	}
 	// 3) 未知 kind 必须返回 false：调用方据此把缺口报出来，而不是拿零值 Delivery 渲染出一条

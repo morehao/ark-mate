@@ -26,7 +26,7 @@ func NewMetaDao(getDB gormdao.DBGetter) *MetaDao {
 //
 // 不用 gormdao 的 GetByID：它把主键列硬编码成 `id`，而 meta 表的主键列是 `key`。
 // 泛型 Dao 中所有按主键操作的方法（GetByID/UpdateByID/UpdateMap/Delete）都有同样的假设，
-// 主键列不叫 id 的实体（meta.key、events.seq、schema_migrations.version）只能走自定义方法。
+// 主键列不叫 id 的实体（meta.key、schema_migrations.version）只能走自定义方法。
 func (d *MetaDao) Get(ctx context.Context, key string) (string, bool, error) {
 	var row model.MetaEntity
 	err := d.DB(ctx).Model(&model.MetaEntity{}).Where("key = ?", key).Take(&row).Error
@@ -50,7 +50,7 @@ func (d *MetaDao) Set(ctx context.Context, key, value string) error {
 // IncrSeq 在事务内把全局事件序号 +1 并返回新值（events.seq 的唯一分配源）。
 //
 // 必须是事务（调用方持有 tx 并已用 WithTx 绑定）：本仓是单写者模型，
-// 序号分配与事件插入必须原子，否则并发 turn 会拿到重号。
+// 序号分配与事件插入必须原子，否则并发 run 会拿到重号。
 func (d *MetaDao) IncrSeq(ctx context.Context) (int64, error) {
 	cur, ok, err := d.Get(ctx, model.MetaKeyEventsLastSeq)
 	if err != nil {

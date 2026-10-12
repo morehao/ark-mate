@@ -17,7 +17,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		// 断连后迟到事件（映射已清）不再落入孤儿聚合，丢弃并留 debug。
 		cid := o.resolveProvider(ev.SessionID)
 		if cid == "" {
-			glog.Debugw(context.Background(), "event 无对应平台会话（映射已清，丢弃迟到事件）", "provider_session", ev.SessionID)
+			glog.Debugw(context.Background(), "event 无对应平台会话（映射已清，丢弃迟到事件）", "runtime_session", ev.SessionID)
 			return
 		}
 		ev.SessionID = cid
@@ -134,7 +134,7 @@ func (o *Orchestrator) recordUsage(sessionID string, u objusage.UsageInfo) {
 	o.usageMu.Unlock()
 }
 
-// LatestUsage 取会话最近一次用量快照（无上报 → false）。turn 收口落库用。
+// LatestUsage 取会话最近一次用量快照（无上报 → false）。run 收口落库用。
 func (o *Orchestrator) LatestUsage(sessionID string) (objusage.UsageInfo, bool) {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
@@ -142,7 +142,7 @@ func (o *Orchestrator) LatestUsage(sessionID string) (objusage.UsageInfo, bool) 
 	return u, ok
 }
 
-// publishError 把错误按 acl 分类发布为 turn.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
+// publishError 把错误按 acl 分类发布为 run.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
 func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client) {
 	ae := acl.Classify(err)
 	tail := ae.StderrTail
@@ -159,5 +159,5 @@ func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client
 	if len(tail) > 0 {
 		payload["stderr_tail"] = tail
 	}
-	o.svc.publish(BusTurnError, sessionID, payload)
+	o.svc.publish(BusRunError, sessionID, payload)
 }

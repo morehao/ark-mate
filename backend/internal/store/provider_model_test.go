@@ -40,11 +40,11 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if ok, err := s.UpsertProviderDefinition(ctx, ProviderColumns{ID: "p1", Protocol: "openai"}, 0, "rest"); err != nil || ok {
 		t.Fatalf("重复新建应不命中: ok=%v err=%v", ok, err)
 	}
-	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1")
+	revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1")
 	if err != nil || len(revs) != 1 {
 		t.Fatalf("重复新建不应产生审计: n=%d err=%v", len(revs), err)
 	}
-	if revs[0].Action != model.CapabilityActionCreate || revs[0].Actor != "rest" {
+	if revs[0].Action != model.DefinitionActionCreate || revs[0].Actor != "rest" {
 		t.Fatalf("新建审计的 action/actor 不符: %+v", revs[0])
 	}
 
@@ -56,7 +56,7 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if got.Revision != 1 || got.BaseURL != "" {
 		t.Fatalf("CAS 未中却改到了行: rev=%d base_url=%q", got.Revision, got.BaseURL)
 	}
-	if revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1"); len(revs) != 1 {
+	if revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1"); len(revs) != 1 {
 		t.Fatalf("CAS 未中却追了审计: n=%d", len(revs))
 	}
 
@@ -68,8 +68,8 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if got.Revision != 2 || got.Note != "主账号" {
 		t.Fatalf("命中后形态不符: rev=%d note=%q", got.Revision, got.Note)
 	}
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1")
-	if len(revs) != 2 || revs[1].Action != model.CapabilityActionUpdate {
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1")
+	if len(revs) != 2 || revs[1].Action != model.DefinitionActionUpdate {
 		t.Fatalf("命中后审计应为 create+update: %+v", revs)
 	}
 	if want := digestOf(`{"base_url":"","id":"p1","name":"","note":"主账号","protocol":"openai"}`); revs[1].Digest != want {
@@ -79,7 +79,7 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if ok, err := s.UpsertProviderDefinition(ctx, ProviderColumns{ID: "p1", Protocol: "openai", Note: "主账号"}, 2, "rest"); err != nil || !ok {
 		t.Fatalf("同内容再提交应命中: ok=%v err=%v", ok, err)
 	}
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1")
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1")
 	if len(revs) != 3 || revs[2].Digest != revs[1].Digest {
 		t.Fatalf("同内容两次提交的 digest 应相同（revision 只是记账）: %+v", revs)
 	}
@@ -91,8 +91,8 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if ok, err := s.ImportProviderDefinition(ctx, ProviderColumns{ID: "p2", Protocol: "openai"}); err != nil || !ok {
 		t.Fatalf("导入应新建: ok=%v err=%v", ok, err)
 	}
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p2")
-	if len(revs) != 1 || revs[0].Action != model.CapabilityActionImport || revs[0].Actor != model.CapabilityActorImport {
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p2")
+	if len(revs) != 1 || revs[0].Action != model.DefinitionActionImport || revs[0].Actor != model.DefinitionActorImport {
 		t.Fatalf("导入审计应为单条 action=import: %+v", revs)
 	}
 
@@ -106,7 +106,7 @@ func TestProviderDefinitionCAS(t *testing.T) {
 	if _, found, _ := s.GetProviderDefinition(ctx, "p1"); found {
 		t.Fatal("删除后仍读得到行")
 	}
-	revs, _ = s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1")
+	revs, _ = s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1")
 	if len(revs) != 4 || revs[3].Digest != "" {
 		t.Fatalf("删除审计应留 4 条且 digest 为空串: %+v", revs)
 	}
@@ -145,7 +145,7 @@ func TestDeleteProviderDefinitionIfUnreferenced(t *testing.T) {
 	if _, found, _ := s.GetProviderDefinition(ctx, "p1"); !found {
 		t.Fatal("被引用时行不该消失")
 	}
-	if revs, _ := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1"); len(revs) != 1 {
+	if revs, _ := s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1"); len(revs) != 1 {
 		t.Fatalf("被引用时不该追审计: %+v", revs)
 	}
 
@@ -158,7 +158,7 @@ func TestDeleteProviderDefinitionIfUnreferenced(t *testing.T) {
 	if err != nil || !deleted || len(refs) != 0 {
 		t.Fatalf("引用解开后应删掉: deleted=%v refs=%v err=%v", deleted, refs, err)
 	}
-	if revs, _ := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "p1"); len(revs) != 2 || revs[1].Action != model.CapabilityActionDelete {
+	if revs, _ := s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "p1"); len(revs) != 2 || revs[1].Action != model.DefinitionActionDelete {
 		t.Fatalf("删除应留一条 action=delete 审计: %+v", revs)
 	}
 
@@ -276,7 +276,7 @@ func TestModelDefinitionPairUnique(t *testing.T) {
 		t.Fatalf("清单顺序应为 (provider_id, model_id) 升序: %s, %s", rows[0].ID, rows[1].ID)
 	}
 	// 被拒的那次不能留下痕迹。
-	if revs, _ := s.ListCapabilityRevisions(ctx, model.CapabilityKindModel, "m2"); len(revs) != 0 {
+	if revs, _ := s.ListDefinitionRevisions(ctx, model.DefinitionKindModel, "m2"); len(revs) != 0 {
 		t.Fatalf("被拒的重复创建不该留审计: %+v", revs)
 	}
 	if n, err := s.ListModelDefinitionsByProvider(ctx, "p1"); err != nil || len(n) != 1 {

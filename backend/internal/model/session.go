@@ -31,18 +31,32 @@ type SessionEntity struct {
 	// WorkspaceTemporary 该工作空间是否由平台代建（未指定 cwd 时在 workspace_dir 下建）。
 	// 权威标志：任何「临时空间」判定都必须读它，不得从路径形状反推。
 	WorkspaceTemporary bool `gorm:"column:workspace_temporary;serializer:arkmate_flag"`
-	// Provider provider 档案 id（会话级模型选择；空 = 跟随 agent）。
-	Provider string `gorm:"column:provider;not null"`
-	// Model 会话级模型 id（空 = 底座默认）。
-	Model string `gorm:"column:model;not null"`
-	// RuntimeHint 最近/首选 runtime（执行提示，非身份，用户不可见）。
-	RuntimeHint string `gorm:"column:runtime_hint;not null"`
-	// ProviderSessionID 原生底座会话 id（opencode ses_*/dsh uuid）。P3 双 id：
+	// ProviderID provider 档案 id（会话级模型选择；空 = 跟随 agent）。
+	//
+	// v16 起列名带 `_id`（原 `provider`）：**库里这一列是引用**（指向 `providers.id`），
+	// 于是它与 `models.provider_id` 同名同义；而 wire 上的 `provider` 是**选择器**
+	// （"选哪个供应商"），所以 DTO/前端字段名不变（设计 D5：库里的列是引用 → `_id` 结尾，
+	// 线上的字段是选择器 → 原名）。
+	ProviderID string `gorm:"column:provider_id;not null"`
+	// ModelID 会话级模型 id（空 = 底座默认）。指向 `models.model_id`，**不是** `models.id`——
+	// 后者是平台铸造的 `mdl_<ULID>` 行身份，前者才是底座认的模型名。v16 前叫 `model`。
+	ModelID string `gorm:"column:model_id;not null"`
+	// RuntimeID 最近/首选 runtime（执行事实，非身份，用户不可见）。v17 前叫 `runtime_hint`。
+	//
+	// 改名的理由（与列同批）：`runtime_hint` 这个名字在本仓同时指过**两个不同的东西**——
+	// 本列（这条会话上次是哪个底座跑的，`session_start.go` 用它判 `sameRuntime`）与
+	// automation 定义里**已退休的选择面键** `target.runtime_hint`（写面 40001 显式拒绝）。
+	// 本列改成 `runtime_id` 后，`runtime_hint` 只剩"退休选择面"一个含义。
+	RuntimeID string `gorm:"column:runtime_id;not null"`
+	// RuntimeSessionID 原生底座会话 id（opencode ses_*/dsh uuid）。P3 双 id：
 	// sessions.id = 平台 uuid（对外稳定、隐藏底座），本列为恢复承载（load/resume）。
-	ProviderSessionID string `gorm:"column:provider_session_id;not null"`
-	Title             string `gorm:"column:title;not null"`
-	Pinned            bool   `gorm:"column:pinned;serializer:arkmate_flag"`
-	Archived          bool   `gorm:"column:archived;serializer:arkmate_flag"`
+	//
+	// v17 前叫 `runtime_session_id`：`provider` 在本仓是**模型供应商**的词（`providers` 表、
+	// `provider_id` 列、`provider_not_found`），而本列装的是**底座会话**——一个东西一个词。
+	RuntimeSessionID string `gorm:"column:runtime_session_id;not null"`
+	Title            string `gorm:"column:title;not null"`
+	Pinned           bool   `gorm:"column:pinned;serializer:arkmate_flag"`
+	Archived         bool   `gorm:"column:archived;serializer:arkmate_flag"`
 	// Status 会话状态。取值权威定义在 internal/manager/events.go（SessionStatus*）。
 	Status string `gorm:"column:status;not null"`
 	// Origin 会话来源（M3；'' = 人工创建，'automation:<id>' = 该 automation 触发产生）。
@@ -69,16 +83,16 @@ type SessionEntityList []SessionEntity
 
 // SessionMetaPatch 会话元数据子集更新（nil = 不更新；updated_at 恒刷新）。
 type SessionMetaPatch struct {
-	Title    *string
-	Pinned   *bool
-	Archived *bool
-	Status   *string
-	Provider *string
-	Model    *string
+	Title      *string
+	Pinned     *bool
+	Archived   *bool
+	Status     *string
+	ProviderID *string
+	ModelID    *string
 }
 
 // Empty 判断补丁是否为空（空补丁不产生 SQL）。
 func (p SessionMetaPatch) Empty() bool {
 	return p.Title == nil && p.Pinned == nil && p.Archived == nil &&
-		p.Status == nil && p.Provider == nil && p.Model == nil
+		p.Status == nil && p.ProviderID == nil && p.ModelID == nil
 }

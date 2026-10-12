@@ -9,9 +9,35 @@ const (
 )
 
 // EventEntity 是 events 表的一行（facts 的唯一事实源）。
+//
+// **两列各司其职**（v17 / D1，2026-10-12；它推翻了 v16 / D6 的"刻意不加 id"）：
+//
+//   - `ID` 回答"**是哪一条事件**"（身份）：`evt_<26 位 ULID>`，平台铸造，永不当游标；
+//   - `Seq` 回答"**它在哪**"（位次）：全局单调，`meta.events_last_seq` 是唯一分配源。
+//
+// v16 的判据是"会被单独引用 → 给 id；只被按序消费 → 用游标"，结论是 events 只被按序消费。
+// 那条判据本身没错，错的是事实前提：**memory 模式下身份与位次都没随数据流动**——transcript
+// 行里写了 seq，回读时却被丢掉、按行号重铸（`transcript_load.go`），于是同一个事件每次重启
+// 换一个 seq，客户端书签里的 `since_seq` 随之失效。所以 v17 补齐的是 J4「身份与位置都必须
+// 随数据流动到每一个载体」：transcript 升 v2 带 `id`，装载用 `PublishAt` 恢复 `id`+`seq`，
+// 导入按 `id` 判重与分叉检测。
+//
+// id 的消费者（三条，都在已有面上）：① 帧 / `GET /sessions/:id/history` / 导出带上 `id`，
+// 于是"某一帧"可被单独引用（诊断包、报障定位）；② `mate migrate` 的事件级判重（同 id 同行
+// → 跳过，同 id 不同内容 → 报错，不静默写第二份）；③ memory 模式重启后同一事件的身份不变。
+// **没有** `GET /events/:id`（无消费者，明确不做）。
+//
+// 代价如实记：seq 是**全局**的，所以单个会话内的 seq **有洞**（会话 A 可能是 1、5、9…）。
+// 所有消费者都按 `> since_seq` 比较、不要求稠密，因此无害；将来真要"会话内稠密序号"，正确
+// 做法是加 `(session_id, seq)` 复合身份或另立会话内序号列，**不是**拿 `id` 当序号。
 type EventEntity struct {
+	// ID 行身份（`evt_<26 位 ULID>`，objid.Event）。
+	ID string `gorm:"column:id;primaryKey"`
 	// Seq 全局单调序号（meta.events_last_seq 是唯一分配源，见 store 的分配事务）。
-	Seq       int64  `gorm:"column:seq;primaryKey"`
+	//
+	// 它**不再是主键**：位次由一个权威分配（唯一索引 `idx_events_seq` 保证不重号），
+	// 而行的身份是 `ID`。排序、比较、水位一律用它（守卫 G1 禁止按 id 游标）。
+	Seq       int64  `gorm:"column:seq;not null"`
 	SessionID string `gorm:"column:session_id;not null"`
 	// Type 事件类型。取值权威定义在 internal/manager/events.go。
 	Type string `gorm:"column:type;not null"`

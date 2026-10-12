@@ -64,7 +64,7 @@ func writeFaceFile(t *testing.T, specs ...runtime.Spec) *writeFace {
 
 // sub 把能力种类映射成目录名（文件载体的目录名 = DB 载体的写面分区名）。
 func subOf(kind string) string {
-	if kind == model.CapabilityKindMcp {
+	if kind == model.DefinitionKindMcp {
 		return capSubMcps
 	}
 	return capSubSkills
@@ -90,7 +90,7 @@ func (w *writeFace) readDef(t *testing.T, kind, id string) map[string]any {
 	var raw string
 	if w.st != nil {
 		ctx := context.Background()
-		if kind == model.CapabilityKindMcp {
+		if kind == model.DefinitionKindMcp {
 			row, found, err := w.st.GetMcpServerDefinition(ctx, id)
 			if err != nil || !found {
 				t.Fatalf("读 DB 里的 mcp %s: found=%v err=%v", id, found, err)
@@ -122,7 +122,7 @@ func (w *writeFace) hasDef(t *testing.T, kind, id string) bool {
 	t.Helper()
 	if w.st != nil {
 		ctx := context.Background()
-		if kind == model.CapabilityKindMcp {
+		if kind == model.DefinitionKindMcp {
 			_, found, err := w.st.GetMcpServerDefinition(ctx, id)
 			if err != nil {
 				t.Fatalf("查 mcp %s: %v", id, err)
@@ -144,7 +144,7 @@ func (w *writeFace) countDefs(t *testing.T, kind string) int {
 	t.Helper()
 	if w.st != nil {
 		ctx := context.Background()
-		if kind == model.CapabilityKindMcp {
+		if kind == model.DefinitionKindMcp {
 			list, err := w.st.ListMcpServerDefinitions(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -178,7 +178,7 @@ func (w *writeFace) seed(t *testing.T, kind, id, raw string) {
 	t.Helper()
 	ctx := context.Background()
 	if w.st != nil {
-		if kind == model.CapabilityKindMcp {
+		if kind == model.DefinitionKindMcp {
 			if _, err := w.st.UpsertMcpServerDefinition(ctx, id, raw, 0, "test"); err != nil {
 				t.Fatal(err)
 			}

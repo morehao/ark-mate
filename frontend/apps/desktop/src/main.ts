@@ -18,7 +18,7 @@ import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
 
 import { APP_ORIGIN, SHELL_ORIGIN } from '@ark-mate/desktop-contract'
-import { probeRunningTurns, startCore, stopCoreGracefully, type CoreHandle } from './core'
+import { probeRunningRuns, startCore, stopCoreGracefully, type CoreHandle } from './core'
 import { installIpcHandlers } from './ipc'
 import { coreExecutable, rendererDir, webDir } from './paths'
 import { readPrefs, writePrefs } from './prefs'
@@ -214,12 +214,12 @@ function deepLinkFromArgv(argv: string[]): string | null {
 /**
  * 退出流程（设计 §7.4）：问在途轮次 → 必要时二次确认 → SIGTERM → 宽限 3s → 进程组 SIGKILL。
  *
- * `probeRunningTurns` 超时/失败时按"有任务"保守处理：宁可多问一句，
+ * `probeRunningRuns` 超时/失败时按"有任务"保守处理：宁可多问一句，
  * 也不要静默打断一轮正在跑的对话（会话本身可续聊，但用户会莫名其妙）。
  */
 async function requestQuit(): Promise<void> {
   if (quitting) return
-  const { known, running } = await probeRunningTurns(core)
+  const { known, running } = await probeRunningRuns(core)
   const hasTasks = !known || running > 0
   if (hasTasks) {
     const detail = known

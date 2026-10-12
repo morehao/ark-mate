@@ -15,6 +15,55 @@ import (
 // 而"漏一处"的表现几乎全是**静默**的——某条 REST 路径 404、某个 json 键悄悄消失让前端拿到
 // `undefined`、某张表的实体少配一个表名常量。逐处 review 挡不住这类漏，机器判据能。
 
+// vocabularyScanFace 返回"词汇收口"类守卫共用的扫描面，并给出仓库根。
+//
+// 扫描面：backend 全部 Go 源码（`internal/**` + `pkg/**`，**跳过 `internal/archtest` 自身**——
+// 禁词表就写着那些词）、前端**界面源码根**（`uiSrcRoots()`，搬迁后界面在 `packages/console/src`）
+// + `packages/{types,api}/src`、以及 `README.md`。
+//
+// 为什么抽成一个函数：词汇类判据"少扫一半"是**静默**的（守卫照样绿，只是不再管那一半），
+// 两条词汇守卫（conversation / capability_revision）共用一处就不会各自漂。
+func vocabularyScanFace(t *testing.T) (string, []string) {
+	t.Helper()
+	root := filepath.Dir(backendRoot(t)) // 仓库根
+	for _, must := range []string{
+		filepath.Join(root, "backend", "internal"),
+		filepath.Join(root, "backend", "pkg"),
+		filepath.Join(root, "README.md"),
+	} {
+		if _, err := os.Stat(must); err != nil {
+			t.Fatalf("扫描面成员不存在：%s（%v）——守卫失去对象", must, err)
+		}
+	}
+
+	var files []string
+	for _, dir := range []string{
+		filepath.Join(root, "backend", "internal"),
+		filepath.Join(root, "backend", "pkg"),
+	} {
+		for _, p := range goFilesUnder(t, dir) {
+			rel, _ := filepath.Rel(root, p)
+			if strings.HasPrefix(filepath.ToSlash(rel), "backend/internal/archtest/") {
+				// 本类守卫自己的禁词表就写着这些词（与 knowledge_boundary_test.go、
+				// logging_boundary_test.go 同一手法：只豁免这一个目录）。
+				continue
+			}
+			files = append(files, p)
+		}
+	}
+	for _, dir := range uiSrcRoots(t) {
+		files = append(files, listFrontendSources(t, dir)...)
+	}
+	for _, rel := range []string{
+		filepath.Join("packages", "types", "src"),
+		filepath.Join("packages", "api", "src"),
+	} {
+		files = append(files, listFrontendSources(t, filepath.Join(frontendRoot(t), rel))...)
+	}
+	files = append(files, filepath.Join(root, "README.md"))
+	return root, files
+}
+
 // conversationVocabularyWhitelist 是**允许**出现 `conversation` 的扫描点（相对仓库根路径前缀）。
 //
 // 白名单必须逐条写明理由（空理由同样判红）：白名单是"这次确实改不了/不该改"的登记簿，
@@ -85,45 +134,7 @@ const readmeThirdPartyMetaKeys = "`sessionId`/`session_id`/`conversationId`/`con
 // fail-closed：扫描面解析不到（目录/文件缺失、命中的文件数为 0）即失败——否则改名结束后
 // 这条守卫会静默空转，而"空转的守卫"比没有守卫更坏（它给出虚假的安心）。
 func TestNoConversationVocabulary(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", "..", "..")) // 仓库根
-	if err != nil {
-		t.Fatalf("解析仓库根失败: %v", err)
-	}
-	for _, must := range []string{
-		filepath.Join(root, "backend", "internal"),
-		filepath.Join(root, "backend", "pkg"),
-		filepath.Join(root, "README.md"),
-	} {
-		if _, err := os.Stat(must); err != nil {
-			t.Fatalf("扫描面成员不存在：%s（%v）——守卫失去对象", must, err)
-		}
-	}
-
-	var files []string
-	for _, dir := range []string{
-		filepath.Join(root, "backend", "internal"),
-		filepath.Join(root, "backend", "pkg"),
-	} {
-		for _, p := range goFilesUnder(t, dir) {
-			rel, _ := filepath.Rel(root, p)
-			if strings.HasPrefix(filepath.ToSlash(rel), "backend/internal/archtest/") {
-				// 本守卫自己的禁词表就写着这个词（与 knowledge_boundary_test.go、
-				// logging_boundary_test.go 同一手法：只豁免这一个目录）。
-				continue
-			}
-			files = append(files, p)
-		}
-	}
-	for _, dir := range uiSrcRoots(t) {
-		files = append(files, listFrontendSources(t, dir)...)
-	}
-	for _, rel := range []string{
-		filepath.Join("packages", "types", "src"),
-		filepath.Join("packages", "api", "src"),
-	} {
-		files = append(files, listFrontendSources(t, filepath.Join(frontendRoot(t), rel))...)
-	}
-	files = append(files, filepath.Join(root, "README.md"))
+	root, files := vocabularyScanFace(t)
 
 	if len(files) < 100 {
 		t.Fatalf("扫描面只拿到 %d 个文件——路径写错了？（fail-closed：解析不到即失败）", len(files))
@@ -178,6 +189,217 @@ func TestNoConversationVocabulary(t *testing.T) {
 func allowedByVocabularyWhitelist(t *testing.T, rel string) bool {
 	t.Helper()
 	for _, w := range conversationVocabularyWhitelist {
+		if strings.TrimSpace(w.reason) == "" {
+			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.path)
+		}
+		if strings.HasPrefix(rel, w.path) {
+			return true
+		}
+	}
+	return false
+}
+
+// capabilityRevisionVocabularyWhitelist 是**允许**出现旧能力审计词汇的扫描点（相对仓库根前缀）。
+//
+// 与 conversation 的白名单同一纪律：逐条写明理由，空理由同样红。
+var capabilityRevisionVocabularyWhitelist = []struct {
+	path   string
+	reason string
+}{
+	{
+		path: "backend/internal/store/migrate.go",
+		reason: "v8 的建表语句与 v16 的 `RENAME TO`/`RENAME COLUMN` 必须写**当时那一版**的名字" +
+			"（`capability_revisions` / `capability_id` / `idx_capability_revisions_capability`）：" +
+			"迁移内核纪律是「追加迁移 = 在尾部新增，绝不回改历史」，而 v16 正是把老名字改成新名字的那一步" +
+			"——它当然得写出老名字（v15 的 `conversations` 同理，见 conversation 白名单）",
+	},
+	{
+		path: "backend/internal/store/migrate_test.go",
+		reason: "「停在 v16 之前」的历史迁移用例要用裸 SQL 造/读 `capability_revisions` 表" +
+			"（DAO 已改认 `definition_revisions`，读不到历史表）。这是守卫⑤ 那条纪律的测试侧镜像" +
+			"（同 `readLegacyConversation`）",
+	},
+	{
+		path: "backend/internal/store/migrate_v16_test.go",
+		reason: "v16 自己的迁移用例：夹具必须按**当时那一版**（v15）的表名与列名写裸 SQL" +
+			"（`capability_revisions.capability_id`），再断言 v16 之后它们变成了新名字且**行没被改坏**" +
+			"——改用新名字写夹具的话，这条用例就只是在验证「新表能存东西」，对迁移本身零覆盖",
+	},
+}
+
+// legacyCapabilityVocabulary 是 v16 起禁止的旧词（**小写化后**做子串匹配）。
+//
+// 三项分别对应三种漏法：`capability_revision`（表名与 Go 类型前缀）、`capability_id`（列名，
+// 只在这里带下划线——`CapabilityID` 是**另一个东西**：运行期能力绑定 id，见
+// `capability_selection.go`，刻意不误伤）、`capabilityrevision`（驼峰写法）。
+var legacyCapabilityVocabulary = []string{"capability_revision", "capability_id", "capabilityrevision"}
+
+// TestNoCapabilityRevisionVocabulary 词汇收口（v16 / 设计 D3 的机器判据）。
+//
+// v16 把「定义变更审计」的表名与列名从 `capability_revisions` / `capability_id` 改成了
+// `definition_revisions` / `definition_id`，理由是**`capability` 在本仓是重载词**：它既指
+// 运行期声明的能力集（`capability_json`、`CapabilityScope`、`pkg/capability` = skill + mcp），
+// 又指这张审计表覆盖的**六种定义**（skill / mcp / agent / automation / provider / model，
+// 后四者与"运行期能力"无关）。判据与 v15 的 conversation 同形：**零命中**是可以机器判据的。
+//
+// 剥注释是有意的——注释里写"v16 之前它叫 `capability_revisions`"是**解释**，不是残留词汇。
+//
+// fail-closed：扫描面解析不到（文件数为 0）即失败，否则改名结束后这条守卫会静默空转。
+func TestNoCapabilityRevisionVocabulary(t *testing.T) {
+	root, files := vocabularyScanFace(t)
+	if len(files) < 100 {
+		t.Fatalf("扫描面只拿到 %d 个文件——路径写错了？（fail-closed：解析不到即失败）", len(files))
+	}
+
+	scanned := 0
+	var hits []string
+	for _, path := range files {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatalf("相对路径: %v", err)
+		}
+		relSlash := filepath.ToSlash(rel)
+		if allowedByCapabilityRevisionWhitelist(t, relSlash) {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", rel, err)
+		}
+		src := string(raw)
+		if strings.HasSuffix(path, ".go") {
+			src = stripLineComments(src)
+		} else {
+			src = stripTSComments(src)
+		}
+		scanned++
+		lower := strings.ToLower(src)
+		for _, banned := range legacyCapabilityVocabulary {
+			if idx := strings.Index(lower, banned); idx >= 0 {
+				line := 1 + strings.Count(src[:idx], "\n")
+				hits = append(hits, relSlash+":"+itoa(line)+" 命中 "+banned)
+				break
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("一个文件都没扫到（fail-closed）")
+	}
+	if len(hits) > 0 {
+		sort.Strings(hits)
+		t.Fatalf("v16 起定义变更审计只有一个词：`definition_revisions` / `definition_id`。\n"+
+			"以下位置剥注释后仍出现旧词（确需保留的，登记进 capabilityRevisionVocabularyWhitelist"+
+			" **并写明理由**；空理由同样红）\n  %s", strings.Join(hits, "\n  "))
+	}
+}
+
+// allowedByCapabilityRevisionWhitelist 命中白名单即跳过（前缀匹配，便于豁免整棵目录）。
+func allowedByCapabilityRevisionWhitelist(t *testing.T, rel string) bool {
+	t.Helper()
+	for _, w := range capabilityRevisionVocabularyWhitelist {
+		if strings.TrimSpace(w.reason) == "" {
+			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.path)
+		}
+		if strings.HasPrefix(rel, w.path) {
+			return true
+		}
+	}
+	return false
+}
+
+// providerSessionVocabularyWhitelist 是**允许**出现 `provider_session` 旧词的扫描点。
+//
+// 只有两个：历史迁移语句与它的历史夹具（同 conversation / capability_revision 的理由）。
+var providerSessionVocabularyWhitelist = []struct {
+	path   string
+	reason string
+}{
+	{
+		path: "backend/internal/store/migrate.go",
+		reason: "v9 的建列语句与 v17 的 `RENAME COLUMN provider_session_id TO runtime_session_id`" +
+			"必须写**当时那一版**的列名（迁移内核纪律：追加迁移 = 在尾部新增，绝不回改历史；" +
+			"而 v17 正是把老名字改成新名字的那一步——它当然得写出老名字）",
+	},
+	{
+		path: "backend/internal/store/migrate_test.go",
+		reason: "「停在 v15 之前」的历史迁移用例要用裸 SQL 造/读 `conversations.provider_session_id`" +
+			"（DAO 已改认 `runtime_session_id`，读不到历史列）。这是守卫⑤ 那条纪律的测试侧镜像",
+	},
+}
+
+// legacyProviderSessionVocabulary 是 v17 起禁止的旧词（**小写化后**做子串匹配）。
+//
+// 两项覆盖两种写法：`provider_session`（列名 / json 键 / 日志键 / 路径段）与 `providersession`
+// （驼峰 `ProviderSessionID`，小写化后命中）。**刻意不含** `provider` 单独一词——它是本仓
+// 的「模型供应商」（`providers` 表、`ProviderID`），与底座会话无关，误伤面极大。
+var legacyProviderSessionVocabulary = []string{"provider_session", "providersession"}
+
+// TestNoProviderSessionVocabulary 词汇收口（v17 / 设计 J1 的机器判据）。
+//
+// v17 把「runtime 侧的 ACP 会话」这个概念的落点从 `provider_session_id` 改成
+// `runtime_session_id`（连带 `SessionRec.ProviderSessionID` → `RuntimeSessionID`、DTO 的
+// `provider_session_id` → `runtime_session_id`、日志键 `provider_session` → `runtime_session`）。
+// 理由：`provider` 在本仓的主流含义是**模型供应商**（providers 表 / ProviderID / provider 档案），
+// 而这一列存的是"底座那边的会话 id"——同一个词指两个东西，正是「一个东西一个词」要消灭的。
+//
+// 判据是**零命中**（剥注释后，小写化子串匹配），因为一次机械改名漏一处的表现全是静默的：
+// 前端读 `c.provider_session_id` 拿到 `undefined`、日志键对不上、路由段成了路径参数。
+//
+// 剥注释是有意的——注释里写"v17 之前它叫 provider_session_id"是**解释**，不是残留词汇。
+//
+// fail-closed：扫描面解析不到（文件数为 0）即失败。
+func TestNoProviderSessionVocabulary(t *testing.T) {
+	root, files := vocabularyScanFace(t)
+	if len(files) < 100 {
+		t.Fatalf("扫描面只拿到 %d 个文件——路径写错了？（fail-closed：解析不到即失败）", len(files))
+	}
+
+	scanned := 0
+	var hits []string
+	for _, path := range files {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatalf("相对路径: %v", err)
+		}
+		relSlash := filepath.ToSlash(rel)
+		if allowedByProviderSessionWhitelist(t, relSlash) {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", rel, err)
+		}
+		src := string(raw)
+		if strings.HasSuffix(path, ".go") {
+			src = stripLineComments(src)
+		} else {
+			src = stripTSComments(src)
+		}
+		scanned++
+		lower := strings.ToLower(src)
+		for _, banned := range legacyProviderSessionVocabulary {
+			if idx := strings.Index(lower, banned); idx >= 0 {
+				line := 1 + strings.Count(src[:idx], "\n")
+				hits = append(hits, relSlash+":"+itoa(line)+" 命中 "+banned)
+				break
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("一个文件都没扫到（fail-closed）")
+	}
+	if len(hits) > 0 {
+		sort.Strings(hits)
+		t.Fatalf("v17 起「runtime 侧的 ACP 会话」只有一个词：`runtime_session_id`。\n"+
+			"以下位置剥注释后仍出现旧词（确需保留的，登记进 providerSessionVocabularyWhitelist"+
+			" **并写明理由**；空理由同样红）\n  %s", strings.Join(hits, "\n  "))
+	}
+}
+
+// allowedByProviderSessionWhitelist 命中白名单即跳过（前缀匹配，便于豁免整棵目录）。
+func allowedByProviderSessionWhitelist(t *testing.T, rel string) bool {
+	t.Helper()
+	for _, w := range providerSessionVocabularyWhitelist {
 		if strings.TrimSpace(w.reason) == "" {
 			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.path)
 		}

@@ -56,9 +56,11 @@ var (
 
 // selectionSurfaceTarget 一处扫描面：ban 哪些形状。
 //
-// 为什么按文件给不同的形状集（而不是一套扫全部）：`SessionRec.RuntimeHint` 是**执行事实**
-// ——"这条会话上一次跑在哪个底座上"，恢复路径要靠它判 `sameRuntime`。它是读出来的账，不是用户
-// 能填的选择面，因此 service.go 只 ban 前两条。
+// 为什么按文件给不同的形状集（而不是一套扫全部）：`SessionRec` 上"这条会话上一次跑在哪个
+// 底座上"是**执行事实**（该字段 v17 前叫 `RuntimeHint`，现在叫 `RuntimeID`），恢复路径要靠它
+// 判 `sameRuntime`。它是读出来的账，不是用户能填的选择面，因此 service.go 只 ban 前两条。
+// 禁词形状本身仍是 `RuntimeHint string`——那是**已删除**的选择面字段名，改名之后（v17）
+// 它不再是一条"放行豁免"，而只是一句历史说明：这个名字出现即红。
 type selectionSurfaceTarget struct {
 	rel      string
 	patterns []*regexp.Regexp

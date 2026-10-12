@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 // 元数据（标题/状态/时间），并把历史事件注入 eventbus——从而把「M1 内存态重启即失」放宽为
 // 「transcript 落盘 → 重启重放」，让管理面在重启后仍有会话可见、旧会话可经 WS/history 回看。
 // 这是轻量的「会话重启存活」，不引入 DB（落库属 M2）。加载为尽力而为：坏文件告警跳过，不阻断启动。
+//
+// **v17（transcript v2）**：事件行自带 `id`（身份）与 `seq`（位次），装载面**原样恢复两者**
+// （`PublishAt`），不再按行号重铸 `seq`。于是"同一个事件在两次启动里位次不同"这件事被消掉，
+// 客户端书签里的 `since_seq` 跨重启仍然指向同一条事件。
 func (s *Service) loadTranscripts() {
 	if s.tx == nil || s.tx.dir == "" {
 		return
@@ -28,17 +33,31 @@ func (s *Service) loadTranscripts() {
 		return
 	}
 	sort.Strings(files)
+	// 先把全部文件读进内存、再按 `seq` **全局归并**注入（理由见下）。
+	var pending []pendingTranscriptEvent
+	loaded := 0
 	for _, path := range files {
 		rec := loadTranscriptFile(path)
 		if rec == nil {
 			continue
 		}
 		s.registerSession(rec.session)
-		// 注入历史事件到 bus（agg=sessionID），使 history/WS 可对旧会话回放。
-		if s.bus != nil {
-			for _, line := range rec.lines {
-				s.bus.Publish(line.typ, rec.session.ID, line.version, line.payload)
-			}
+		loaded++
+		for _, line := range rec.lines {
+			pending = append(pending, pendingTranscriptEvent{sessionID: rec.session.ID, line: line})
+		}
+	}
+	// 按 `seq` 全局升序（**不是**按文件名、也不是按逐文件顺序）注入：
+	//   · 文件名字典序与会话的事件 seq 无关。逐文件注入时，先读到的那个会话会把 bus 的
+	//     nextSeq 抬高，后面会话的 PublishAt 只能走"取号回落"往上顶——位次被**改写**，
+	//     于是"恢复出来的 seq"与"transcript 里写的 seq"又不一致了；
+	//   · 全局归并之后送进 PublishAt 的 seq 严格升序，bus 纯镜像，一个号都不改。
+	// 同一个 seq 只可能来自两份互相冲突的文件（seq 全局唯一），用 sort.SliceStable + 文件名序
+	// 定型，保证可复现。
+	if s.bus != nil {
+		sort.SliceStable(pending, func(i, j int) bool { return pending[i].line.seq < pending[j].line.seq })
+		for _, p := range pending {
+			s.bus.PublishAt(p.line.seq, p.line.id, p.line.typ, p.sessionID, p.line.version, p.line.payload)
 		}
 	}
 	if n := legacyTranscriptSkips.Load(); n > 0 {
@@ -48,7 +67,20 @@ func (s *Service) loadTranscripts() {
 			"transcripts: 有旧形状会话 id 的文件被跳过（平台会话 id 只由 objid 铸：ses_<26 位 ULID>）",
 			"skipped", n, "scanned", len(files), "dispose", legacyTranscriptDisposeHint)
 	}
-	glog.Debugw(context.Background(), "transcripts loaded", "count", len(files))
+	if n := legacySchemaSkips.Load(); n > 0 {
+		glog.Warnw(context.Background(),
+			"transcripts: 有 v1 格式（事件行没有 id/seq 身份）的文件被跳过——v17 起事件身份随数据落盘，v1 的 seq 只是文件内位次，回读会把它当成全局水位",
+			"skipped", n, "scanned", len(files), "dispose", legacyTranscriptDisposeHint)
+	}
+	glog.Debugw(context.Background(), "transcripts loaded", "loaded", loaded, "scanned", len(files), "events", len(pending))
+}
+
+// pendingTranscriptEvent 是"待注入 bus 的一条事件"（会话 id + 文件内读出的原语）。
+//
+// 存在的理由是把"读文件"与"注入 bus"分成两步：注入必须按 seq 全局有序（见 loadTranscripts）。
+type pendingTranscriptEvent struct {
+	sessionID string
+	line      transcriptLine
 }
 
 // legacyTranscriptDisposeHint 旧 transcript 的**显式**处置命令。
@@ -63,8 +95,19 @@ var legacyTranscriptSkips atomic.Int64
 // LegacyTranscriptSkips 返回被跳过的旧形状 transcript 数（诊断与测试用）。
 func LegacyTranscriptSkips() int64 { return legacyTranscriptSkips.Load() }
 
-// transcriptLine 是回读时保留的事件原语（type + 聚合版本 + 载荷），用于注入 bus。
+// legacySchemaSkips 本次进程启动时因"v1 文件格式"被跳过的 transcript 文件数（v17 起）。
+var legacySchemaSkips atomic.Int64
+
+// LegacySchemaSkips 返回被跳过的 v1 格式 transcript 数（诊断与测试用）。
+func LegacySchemaSkips() int64 { return legacySchemaSkips.Load() }
+
+// transcriptLine 是回读时保留的事件原语（**身份 + 位次 + 聚合版本 + 载荷**），用于注入 bus。
+//
+// `id`/`seq` 都是文件里写着的值，装载面一个都不重铸（v17）：`version` 仍按**该文件内的行序**
+// 推导（重启稳定，且它只是聚合版本、不跨会话比较）。
 type transcriptLine struct {
+	id      string
+	seq     int64
 	typ     string
 	version int64
 	payload map[string]any
@@ -99,9 +142,11 @@ func loadTranscriptFile(path string) *transcriptFile {
 	var lastTS string
 	var firstUserText string
 	var titleSet bool
+	lineNo := 0
 
 	for sc.Scan() {
 		line := sc.Bytes()
+		lineNo++
 		if len(line) == 0 {
 			continue
 		}
@@ -126,12 +171,32 @@ func loadTranscriptFile(path string) *transcriptFile {
 				hdr = &h
 				continue
 			}
+			// v1 格式：schema 名是 v17 之前那一版 → 跳过整份 + WARN（**不能**回读：v1 的 seq
+			// 只是文件内位次，而装载面现在会把它当全局水位注入 bus，两套语义混起来就是
+			// "位次看起来对、跨重启却对不上"）。
+			if err := json.Unmarshal(line, &h); err == nil && h.Schema == legacyWireTranscriptSchemaV1 {
+				legacySchemaSkips.Add(1)
+				glog.Warnw(context.Background(),
+					"transcript: 跳过 v1 格式文件（v17 起事件行带 id/seq 身份；v1 的 seq 只是文件内位次，不是全局水位）",
+					"path", path, "dispose", legacyTranscriptDisposeHint)
+				return nil
+			}
 			// 非 header（异常）→ 该文件视为不可回读。
 			return nil
 		}
 		var ev wireTranscriptLine
 		if err := json.Unmarshal(line, &ev); err != nil || ev.Type == "" {
 			continue // 跳过脏行（如误写的 header 行）
+		}
+		// v2 事件行必须带**合法身份 + 合法位次**。缺任何一样都说明这份文件不是 v2 写的
+		// （手工改动 / 半截写入），整份跳过而不"补一个"——补出来的身份与位次是装载面自己
+		// 发明的，与用户手里那份文件对不上，而这正是 v17 要消灭的东西。
+		if !strings.HasPrefix(ev.ID, objid.Event) || !objid.IsPlatformID(ev.ID) || ev.Seq <= 0 {
+			legacySchemaSkips.Add(1)
+			glog.Warnw(context.Background(),
+				"transcript: 事件行缺 v2 身份（id 形如 evt_<26 位 ULID> 且 seq > 0），整份跳过",
+				"path", path, "line", lineNo, "id", ev.ID, "seq", ev.Seq, "dispose", legacyTranscriptDisposeHint)
+			return nil
 		}
 		lastType = ev.Type
 		if ev.TS != "" {
@@ -143,7 +208,10 @@ func loadTranscriptFile(path string) *transcriptFile {
 				titleSet = true
 			}
 		}
-		lines = append(lines, transcriptLine{typ: ev.Type, version: int64(len(lines)) + 1, payload: ev.Payload})
+		lines = append(lines, transcriptLine{
+			id: ev.ID, seq: ev.Seq, typ: ev.Type,
+			version: int64(len(lines)) + 1, payload: ev.Payload,
+		})
 	}
 	if err := sc.Err(); err != nil {
 		glog.Warnw(context.Background(), "transcript: load scan failed", "path", path, "err", err)
@@ -166,7 +234,7 @@ func loadTranscriptFile(path string) *transcriptFile {
 			// （旧文件缺 workspace_temporary → false，历史会话本就不是代建的）。
 			Cwd:                hdr.Cwd,
 			WorkspaceTemporary: hdr.WorkspaceTemporary,
-			RuntimeHint:        runtime.NormalizeID(hdr.Runtime),
+			RuntimeID:          runtime.NormalizeID(hdr.Runtime),
 			Status:             statusFromLastEventType(lastType),
 			Title:              firstUserText,
 			CreatedAt:          createdAt,
@@ -180,11 +248,11 @@ func loadTranscriptFile(path string) *transcriptFile {
 // （可能是会话进行中或进程被中断，用户可经「停止」自愈，见 serverBusy 逻辑）。
 func statusFromLastEventType(ltype string) string {
 	switch ltype {
-	case BusTurnError:
+	case BusRunError:
 		return SessionStatusFailed
 	case BusRunCancelled:
 		return SessionStatusCancelled
-	case BusTurnEnded:
+	case BusRunEnded:
 		return SessionStatusCompleted
 	default:
 		return SessionStatusInProgress
@@ -207,43 +275,48 @@ func parseRFC3339(s string) time.Time {
 
 // ——— 导出面（供 `mate migrate` 等外部命令复读 transcript，避免重复解析） ———
 
-// TranscriptEvent 是一条可复读的事件原语（type + payload）。
+// TranscriptEvent 是一条可复读的事件原语（身份 + 位次 + type + payload）。
+//
+// v17 起带上 `ID`/`Seq`：`mate migrate` 按 `ID` 判重（同 id 同行 → 跳过、不同 → 报错），
+// 而 `Seq` 只做诊断输出（落库时**由 DB 重新分配**全局位次——位次的权威是 DB 那一列）。
 type TranscriptEvent struct {
+	ID      string
+	Seq     int64
 	Type    string
 	Payload map[string]any
 }
 
 // TranscriptData 是单个 transcript 文件的复读结果（会话元数据 + 事件原语）。
 type TranscriptData struct {
-	SessionID   string
-	AgentID     string
-	RuntimeHint string
-	Title       string
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Lines       []TranscriptEvent
+	SessionID string
+	AgentID   string
+	RuntimeID string
+	Title     string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Lines     []TranscriptEvent
 }
 
 // ReadTranscriptFile 复读一个 JSONL transcript 文件（首行 header + 事件行）。
-// 坏文件/非本仓库 schema 返回 (nil, false)。
+// 坏文件/非本仓库 schema/v1 格式返回 (nil, false)。
 func ReadTranscriptFile(path string) (*TranscriptData, bool) {
 	rec := loadTranscriptFile(path)
 	if rec == nil {
 		return nil, false
 	}
 	data := &TranscriptData{
-		SessionID:   rec.session.ID,
-		AgentID:     rec.session.AgentID,
-		RuntimeHint: runtime.NormalizeID(rec.session.RuntimeHint),
-		Title:       rec.session.Title,
-		Status:      rec.session.Status,
-		CreatedAt:   rec.session.CreatedAt,
-		UpdatedAt:   rec.session.UpdatedAt,
-		Lines:       make([]TranscriptEvent, 0, len(rec.lines)),
+		SessionID: rec.session.ID,
+		AgentID:   rec.session.AgentID,
+		RuntimeID: runtime.NormalizeID(rec.session.RuntimeID),
+		Title:     rec.session.Title,
+		Status:    rec.session.Status,
+		CreatedAt: rec.session.CreatedAt,
+		UpdatedAt: rec.session.UpdatedAt,
+		Lines:     make([]TranscriptEvent, 0, len(rec.lines)),
 	}
 	for _, l := range rec.lines {
-		data.Lines = append(data.Lines, TranscriptEvent{Type: l.typ, Payload: l.payload})
+		data.Lines = append(data.Lines, TranscriptEvent{ID: l.id, Seq: l.seq, Type: l.typ, Payload: l.payload})
 	}
 	return data, true
 }

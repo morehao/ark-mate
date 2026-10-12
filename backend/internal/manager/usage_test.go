@@ -35,14 +35,14 @@ func TestUsageSummaryService(t *testing.T) {
 
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
 	svc.publish(BusMessage, "u1", map[string]any{"text": "答一"})
-	svc.publish(BusTurnEnded, "u1", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "u1", map[string]any{"stop_reason": "end_turn"})
 
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第二问"})
-	svc.publish(BusTurnEnded, "u1", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "u1", map[string]any{"stop_reason": "end_turn"})
 
 	svc.publish(BusUserMessage, "u2", map[string]any{"text": "第三问"})
-	svc.publish(BusTurnError, "u2", map[string]any{"code": "agent_error", "class": "agent"})
+	svc.publish(BusRunError, "u2", map[string]any{"code": "agent_error", "class": "agent"})
 
 	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {

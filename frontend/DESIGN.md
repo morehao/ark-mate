@@ -95,7 +95,7 @@ AppShell（antd ConfigProvider zhCN + themeConfig + tabular-nums）
 
 - **会话条目**：标题两行截断；meta 行 mono 10.5：agent 名胶囊 + 状态点/文案 + 右侧 `seq N`；选中态 = `selected-bg` 柔和底 + 左侧 2.5px 靛蓝竖条（CSS ::before）。
 - **消息条目**：role 标签 mono 10 大写弱字（user / assistant / assistant · thinking / assistant · tool）；用户气泡右对齐 `14px 14px 4px 14px`；工具卡 header `tool_call · <name>` mono + 状态行（ok 绿勾 / running 脉冲点 / failed 红）。
-- **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝 ring（3px `primary-soft`）；textarea 自动增高 ≤180px；底部 mono 提示 + 主色发送按钮（Enter 发送 / Shift+Enter 换行；流式期间显示「单飞 turn 门控」+ 忙碌态）。
+- **Composer**：白卡 16px 圆角 hairline 边 + focus-within 靛蓝 ring（3px `primary-soft`）；textarea 自动增高 ≤180px；底部 mono 提示 + 主色发送按钮（Enter 发送 / Shift+Enter 换行；流式期间显示「单飞 run 门控」+ 忙碌态）。
 - **模型选择器（ModelSelect）**：关闭态是**药丸**不是表单框——`.fg-model-pill`（h=28 / 999 圆角 / hairline 边 / mono 11.5 值文案 / 10px 灰箭头），静息贴合文案（min 132、max 240），聚焦展开到 216 并出靛蓝环，hover 抬边+软底；下拉浮层 `.fg-model-pop`（hairline + 12 圆角 + 投影，仅浮层可有阴影）宽约 340，选项为**两行行**（名称 12.5 + 描述 11 灰字单行截断，hover 出全文），分组标题 mono 10.5 弱字。
 - **新建会话面板（StartPanel）**：未选中会话时问答区即为该面板（不再有独立「开始问答」空态页，也无 `/new` 独立路由）——hero 标题 + 当前 Agent 标识行 + 内嵌输入卡（模型 pill / 主色圆形发送）+ 示例指令列表；新建固定用默认 Agent，不展示 agent 选项卡（也不提供跳转，只如实标出用哪个 Agent）。
 - **当前 Agent 标识（AgentBadge）**：**纯展示、不可点**——mono 胶囊 = 状态点（running 绿 / stopped 灰）+「Agent · 名称」（+ 默认 `primary-soft` 小标）；hover 出详情浮层（状态 / provider / runtime 候选 / id）。会话与 Agent 一对一绑定，故只在新建面板与 ChatHead 各标一处，不逐条消息重复。

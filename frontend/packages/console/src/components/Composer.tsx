@@ -49,7 +49,7 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
   const [draft, setDraft] = useState('')
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
   // 投递模式是「这次怎么送」的选择，默认排队——打断当前轮是有代价的动作，不该是默认值。
-  const [delivery, setDelivery] = useState<DeliveryChoice>('after_turn')
+  const [delivery, setDelivery] = useState<DeliveryChoice>('after_run')
   // 候选高亮下标；`hintOff` 记录用户按 Esc 主动关掉弹层（继续打字即恢复）。
   const [hintIndex, setHintIndex] = useState(0)
   const [hintOff, setHintOff] = useState(false)
@@ -263,7 +263,7 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
                 value={delivery}
                 onChange={(v) => setDelivery(v)}
                 style={{ minWidth: 118 }}
-                options={(['after_turn', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
+                options={(['after_run', 'interrupt_then_prompt'] as DeliveryChoice[]).map((d) => ({
                   value: d,
                   label: DELIVERY_LABEL[d],
                   title: DELIVERY_HINT[d],

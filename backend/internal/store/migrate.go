@@ -438,6 +438,9 @@ var schemaMigrations = []migration{
 			`CREATE INDEX idx_sessions_workspace ON sessions(archived, workspace_id, updated_at)`,
 
 			// events 的身份仍是 seq（历史回放分页用的就是它），**刻意不加 id 列**。
+			// 〔v17 推翻了这一条：events 的主键换成平台铸造的 `evt_…`，`seq` 降为唯一游标——
+			// 见本文件 version 17 与 `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`。
+			// 这里保持当时的语句与理由不动（迁移纪律：历史步骤不回改）。〕
 			`CREATE TABLE events (
 				seq          INTEGER PRIMARY KEY,
 				session_id   TEXT NOT NULL REFERENCES sessions(id),
@@ -526,6 +529,124 @@ var schemaMigrations = []migration{
 			`ALTER TABLE automations RENAME COLUMN last_conversation_id TO last_session_id`,
 		},
 		apply: migrateV15,
+	},
+	{
+		version: 16,
+		name:    "命名收口：定义变更审计改名 + 轮次词汇统一到 run（一张表重建，其余纯改列/改索引）",
+		// 备份：本步**重建 `inputs`**（把 `delivery='after_turn'` 的存货行改写成
+		// `'after_run'`）——它是"就地改写既有数据"，与 v12/v15 同一档。旧二进制对 v16 库是
+		// **拒绝启动**，所以备份是唯一的回退窗口，`mate doctor` 会打印 `<db>.bak-v16-*`。
+		//
+		// 与 v15 的区别：v15 清空了 7 张表的行，本步**一行不丢**（`INSERT INTO … SELECT`
+		// 把行搬过去，失败即整体回滚）。备份在这里买的是"改错了能退"，不是"数据本来就要没了"。
+		backup: "v16",
+		// 三条命名收口（设计 `.dsh/docs/specs/2026-10-11-data-model-v16-design.md`）：
+		//   1. `capability_revisions` → `definition_revisions`，`capability_id` → `definition_id`；
+		//   2. `turn` → `run`（`inputs.target_turn_id` → `target_run_id`、
+		//      `inputs.delivery` 的 `after_turn` → `after_run`）；
+		//   3. 索引名一律 `idx_<表名>_<用途>`（`idx_memories_session` 的表名段漏了）。
+		//
+		// **语句全是字面量**（与 v15 同一条纪律）：这里出现的 `capability_revisions`、
+		// `capability_id`、`target_turn_id`、`after_turn`、`idx_memories_session` 都是
+		// **被改掉的那一版的名字**，绝不引用 `model.TableName*` 常量或 `model.DefinitionKind*`
+		// ——引用常量会让"实体改名"把这条历史步骤一起改掉，于是老库（真的是旧列名）与
+		// 新库（被改成了新列名）走出两条不同的路（守卫⑤/⑥ 钉着这条纪律）。
+		statements: []string{
+			// ——— 1. 定义变更审计 ———
+			//
+			// SQLite 的 `ALTER TABLE … RENAME TO` **不会顺手改索引名**（索引名与表名是两个
+			// 独立的名字空间条目），所以下面必须显式 DROP 旧索引 / CREATE 新索引；而
+			// `RENAME COLUMN` **会**改写引用该列的索引定义，所以先改名再重建索引。
+			`ALTER TABLE capability_revisions RENAME TO definition_revisions`,
+			`ALTER TABLE definition_revisions RENAME COLUMN capability_id TO definition_id`,
+			`DROP INDEX idx_capability_revisions_capability`,
+			`CREATE INDEX idx_definition_revisions_history ON definition_revisions(kind, definition_id, seq)`,
+
+			// ——— 2. 会话级模型选择的两个引用列 ———
+			//
+			// 库里这两列是**引用**（`providers.id` / `models.model_id`），所以按"引用列 `_id` 结尾"
+			// 改名；wire（DTO/前端）上的 `provider` / `model` 是**选择器**，保持原名（设计 D5）。
+			`ALTER TABLE sessions RENAME COLUMN provider TO provider_id`,
+			`ALTER TABLE sessions RENAME COLUMN model TO model_id`,
+
+			// ——— 3. inputs：列名与取值一起改，只能重建 ———
+			//
+			// `delivery` 的**列默认值**也是 `'after_turn'`，而 SQLite 改不了列默认值
+			// （没有 `ALTER COLUMN`），`RENAME COLUMN` 又只解决列名。留着默认值不改是
+			// 最坏的一种收口：schema 文本里继续写着 `after_turn`，下一个读 schema 的人
+			// 会以为这个取值还活着。故整表重建（行照搬，`delivery` 就值改写）。
+			`CREATE TABLE inputs_v16 (
+				id            TEXT PRIMARY KEY,
+				session_id    TEXT NOT NULL REFERENCES sessions(id),
+				text          TEXT NOT NULL DEFAULT '',
+				delivery      TEXT NOT NULL DEFAULT 'after_run',
+				target_run_id TEXT NOT NULL DEFAULT '',
+				generation    INTEGER NOT NULL DEFAULT 0,
+				status        TEXT NOT NULL DEFAULT 'queued',
+				created_at    TEXT NOT NULL,
+				claimed_at    TEXT NOT NULL DEFAULT ''
+			)`,
+			`INSERT INTO inputs_v16 (id, session_id, text, delivery, target_run_id, generation, status, created_at, claimed_at)
+				SELECT id, session_id, text,
+				       CASE WHEN delivery = 'after_turn' THEN 'after_run' ELSE delivery END,
+				       target_turn_id, generation, status, created_at, claimed_at
+				FROM inputs`,
+			`DROP TABLE inputs`,
+			`ALTER TABLE inputs_v16 RENAME TO inputs`,
+			`CREATE INDEX idx_inputs_queue ON inputs(session_id, status, created_at)`,
+
+			// ——— 4. 索引名补上表名段 ———
+			//
+			// `permission_memories` 的表名段曾被缩写成 `memories`，于是"这条索引属于哪张表"
+			// 只能靠人记（`events`/`runs` 早就有 `idx_<表>_session` 了）。判据是
+			// `TestIndexNamesFollowTablePrefix`。
+			`DROP INDEX idx_memories_session`,
+			`CREATE INDEX idx_permission_memories_session ON permission_memories(session_id)`,
+		},
+	},
+	{
+		version: 17,
+		name:    "事件身份：events 主键换成平台铸造 id（evt_）+ 就地重建；sessions 两列收口到 runtime 词",
+		// 备份：本步**就地重建 `events`**（逐行铸 `evt_` 身份，主键从 seq 换成 id）——它是
+		// "就地改写既有数据"，与 v12/v13/v16 同一档。旧二进制对 v17 库是**拒绝启动**，所以备份
+		// 是唯一的回退窗口，`mate doctor` 会打印 `<db>.bak-v17-*`。
+		//
+		// 与 v15 相反的一处（很容易照抄错）：v15 重建 events 时**清空**了
+		// `meta.events_last_seq`（因为行被清掉了）；v17 **行照搬、一行不丢**，所以那一行 meta
+		// 必须原样留着——清掉它会让新事件从 1 重新起跳、与既有行撞号，而 `idx_events_seq` 的
+		// UNIQUE 会当场把这次迁移判红。
+		backup: "v17",
+		// 两条改动（设计 `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`）：
+		//   1. 事件的身份与位次分开：`id`（`evt_<26 位 ULID>`，平台铸造）当主键，`seq` 降为
+		//      带唯一索引的普通列；transcript 升 v2 让两者一起随数据流动；
+		//   2. `sessions.provider_session_id` → `runtime_session_id`、
+		//      `sessions.runtime_hint` → `runtime_id`（`provider` 在本仓是"模型供应商"的词）。
+		//
+		// **语句全是字面量**（与 v15/v16 同一条纪律）：这里出现的 `provider_session_id` /
+		// `runtime_hint` 是**被改掉的那一版的名字**，绝不引用 `model.TableName*` 或 Go 字段名
+		// ——引用会让"实体改名"把这条历史步骤一起改掉，老库（真的叫旧名）与新库走出两条路
+		// （守卫⑤ 钉着这条纪律）。
+		statements: []string{
+			// 目标表：`id` 主键 + `seq` 普通列。唯一约束刻意**不在建表语句里**（表内 UNIQUE 会
+			// 留下 `sqlite_autoindex_*`，换名后没人看得懂它属于谁——与 v13 同一条理由），
+			// 换表之后单独 `CREATE UNIQUE INDEX idx_events_seq`。
+			`CREATE TABLE events_v17 (
+				id           TEXT PRIMARY KEY,
+				seq          INTEGER NOT NULL,
+				session_id   TEXT NOT NULL REFERENCES sessions(id),
+				type         TEXT NOT NULL,
+				payload_json TEXT NOT NULL DEFAULT '',
+				created_at   TEXT NOT NULL
+			)`,
+
+			// ——— 2. 两列收口 ———
+			//
+			// 纯改名（不搬行）：`RENAME COLUMN` 会改写引用该列的索引定义，而 sessions 的 4 条
+			// 索引都不引用这两列，所以本步没有索引要重建。
+			`ALTER TABLE sessions RENAME COLUMN provider_session_id TO runtime_session_id`,
+			`ALTER TABLE sessions RENAME COLUMN runtime_hint TO runtime_id`,
+		},
+		apply: migrateV17,
 	},
 }
 

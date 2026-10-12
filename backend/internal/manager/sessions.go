@@ -101,14 +101,14 @@ func toSessionResp(r *SessionRec) dtosession.SessionResp {
 	return dtosession.SessionResp{
 		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
-		ProviderSessionID:  r.ProviderSessionID,
+		RuntimeSessionID:   r.RuntimeSessionID,
 		AgentID:            r.AgentID,
 		Status:             r.Status,
 		Title:              r.Title,
 		Pinned:             r.Pinned,
 		Archived:           r.Archived,
-		Provider:           r.Provider,
-		Model:              r.Model,
+		Provider:           r.ProviderID,
+		Model:              r.ModelID,
 		Cwd:                r.Cwd,
 		WorkspaceTemporary: r.WorkspaceTemporary,
 		Origin:             r.Origin,
@@ -209,13 +209,13 @@ func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession
 			glog.Debugw(ctx, "会话不在活跃集合，模型变更仅更新元数据", "session", id)
 		}
 		s.mu.Lock()
-		r.Model = *patch.Model
+		r.ModelID = *patch.Model
 		r.UpdatedAt = time.Now().UTC()
 		s.mu.Unlock()
 	}
 
 	if s.st != nil {
-		meta := model.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, Model: patch.Model}
+		meta := model.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: patch.Model}
 		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if err := s.st.UpdateSessionMeta(ctx2, id, meta); err != nil {
@@ -262,8 +262,8 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	if s.orch == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	// 会话与 turn 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
-	//（turn 由 Orchestrator 持有，取消走 POST /sessions/:id/cancel）。
+	// 会话与 run 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
+	//（run 由 Orchestrator 持有，取消走 POST /sessions/:id/cancel）。
 	runCtx := context.WithoutCancel(ctx)
 	agentID, err := s.resolveSessionAgent(req.AgentID)
 	if err != nil {
@@ -363,7 +363,7 @@ func (s *Service) startSession(ctx context.Context, agentID string, opt StartOpt
 }
 
 // PromptSession 向既有会话追加一轮 prompt（后台执行）。
-// turn 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
+// run 生命周期同样脱离 HTTP 请求（WithoutCancel），结束/取消只由 agent 或
 // POST /sessions/:id/cancel 决定。
 func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.PromptReq) (*dtosession.SessionPromptResp, error) {
 	if s.orch == nil {
@@ -408,12 +408,12 @@ func (s *Service) DeleteQueuedInput(ctx context.Context, id, inputID string) (bo
 	return ok, nil
 }
 
-// CancelTurn 取消会话进行中的 turn（无 turn 时幂等 no-op）。
-func (s *Service) CancelTurn(ctx context.Context, id string) error {
+// CancelRun 取消会话进行中的 run（无 run 时幂等 no-op）。
+func (s *Service) CancelRun(ctx context.Context, id string) error {
 	if s.orch == nil {
 		return code.FromError(acl.NewError(acl.ClassService, "orchestrator_unavailable", "服务尚未装配编排器", nil))
 	}
-	if err := s.orch.CancelTurn(ctx, id); err != nil {
+	if err := s.orch.CancelRun(ctx, id); err != nil {
 		return code.FromError(err)
 	}
 	return nil
@@ -465,7 +465,7 @@ func (s *Service) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 		events = make([]eventbus.Event, 0, len(batch))
 		for _, e := range batch {
 			events = append(events, eventbus.Event{
-				Type: e.Type, Seq: e.Seq, AggregID: e.SessionID, Payload: decodePayload(e.PayloadJSON),
+				ID: e.ID, Type: e.Type, Seq: e.Seq, AggregID: e.SessionID, Payload: decodePayload(e.PayloadJSON),
 			})
 		}
 	} else {

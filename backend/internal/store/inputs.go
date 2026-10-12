@@ -17,8 +17,8 @@ const (
 	// InputStatusStale 已作废（进程重启 / 会话执行代际已变）。
 	InputStatusStale = model.InputStatusStale
 
-	// InputDeliveryAfterTurn 排队，等当前轮结束再投递。
-	InputDeliveryAfterTurn = model.InputDeliveryAfterTurn
+	// InputDeliveryAfterRun 排队，等当前轮结束再投递。
+	InputDeliveryAfterRun = model.InputDeliveryAfterRun
 	// InputDeliveryInterruptThenPrompt 取消当前轮，随后投递。
 	InputDeliveryInterruptThenPrompt = model.InputDeliveryInterruptThenPrompt
 )

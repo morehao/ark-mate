@@ -60,11 +60,11 @@ func providerContentUpdates(c ProviderColumns) map[string]any {
 // 返回 false = 该提交被并发写抢先（或行已不存在）→ 调用方翻成 `definition_changed`(40901)，
 // 而与"publish 语义收紧后的 PATCH 打到不存在的档案"区分开（后者在 manager 侧先查行 → 40401）。
 func (s *Store) UpsertProviderDefinition(ctx context.Context, cols ProviderColumns, expectedRev int64, actor string) (bool, error) {
-	action := model.CapabilityActionUpdate
+	action := model.DefinitionActionUpdate
 	if expectedRev == 0 {
-		action = model.CapabilityActionCreate
+		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindProvider, cols.ID, actor, action, cols.digest(), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindProvider, cols.ID, actor, action, cols.digest(), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(cols, 1, now, now))
@@ -79,8 +79,8 @@ func (s *Store) UpsertProviderDefinition(ctx context.Context, cols ProviderColum
 // 与 `UpsertProviderDefinition(…, 0, …)` 的差别只有一个字段（action 是 `import` 而不是
 // `create`）——但那正是审计要能回答的问题："这一行是用户建的，还是升级时从文件搬过来的"。
 func (s *Store) ImportProviderDefinition(ctx context.Context, cols ProviderColumns) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindProvider, cols.ID, model.CapabilityActorImport,
-		model.CapabilityActionImport, cols.digest(), 0,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindProvider, cols.ID, model.DefinitionActorImport,
+		model.DefinitionActionImport, cols.digest(), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.providers.WithTx(tx).CreateCAS(ctx, newProviderRow(cols, 1, now, now))
 		})
@@ -122,10 +122,10 @@ func (s *Store) DeleteProviderDefinitionIfUnreferenced(
 			return err
 		}
 		deleted = true
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
-			Kind:         model.CapabilityKindProvider,
-			CapabilityID: id,
-			Action:       model.CapabilityActionDelete,
+		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+			Kind:         model.DefinitionKindProvider,
+			DefinitionID: id,
+			Action:       model.DefinitionActionDelete,
 			Actor:        actor,
 			At:           now,
 			Digest:       "", // 删除没有"提交后的那一版"，沿用 bodyDigest("") 的口径

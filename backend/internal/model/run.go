@@ -8,7 +8,7 @@ const (
 	TableNameRun = "runs"
 )
 
-// RunEntity 是 runs 表的一行（一轮 prompt 的物化行，turn 收口处写入）。
+// RunEntity 是 runs 表的一行（一轮 prompt 的物化行，run 收口处写入）。
 type RunEntity struct {
 	ID        string `gorm:"column:id;primaryKey"`
 	SessionID string `gorm:"column:session_id;not null"`

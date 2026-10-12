@@ -17,12 +17,12 @@ import (
 
 // ——— §6 busy input 队列（排队 / 插话） ———
 //
-// 改造前：会话正忙时 POST /sessions/:id/prompt 直接报 turn_in_progress——用户敲下的字
+// 改造前：会话正忙时 POST /sessions/:id/prompt 直接报 run_in_progress——用户敲下的字
 // 在 UI 上就地丢失（要么等，要么先取消，两条路都不是「我先把这句话交代了」）。现在
 // delivery 三值：
 //
 //	reject（缺省）          忙时报错。历史行为，不产生队列行。
-//	after_turn             入队；当前轮结束后自动投递。
+//	after_run             入队；当前轮结束后自动投递。
 //	interrupt_then_prompt  入队 + 取消当前轮 → 随后自动投递（服务端原子化：前端「先 cancel
 //	                       再 prompt」两步之间会丢窗口——cancel 落地前旧轮可能已自然结束）。
 //
@@ -34,24 +34,24 @@ import (
 // 三次「插话」会以逆序执行。投递前校验 Generation（入队时的会话执行代际）：不等 = 该项依赖的
 // 那一轮上下文已被重建（连接断开重连 / 会话重开），该项**作废**而不是投进用户没见过的上下文。
 //
-// 不自动续投的两种收尾：turn 失败（避免把队列变成「连续失败重放」）与进程主动停机
+// 不自动续投的两种收尾：run 失败（避免把队列变成「连续失败重放」）与进程主动停机
 // （intentional；重启时全库 queued 行统一置作废——等待的那一轮已随进程消失）。
 
 const (
 	// DeliveryReject 忙时直接报错（缺省；不排队）。
 	DeliveryReject = "reject"
-	// DeliveryAfterTurn 排队，等当前轮结束再投递。
-	DeliveryAfterTurn = store.InputDeliveryAfterTurn
+	// DeliveryAfterRun 排队，等当前轮结束再投递。
+	DeliveryAfterRun = store.InputDeliveryAfterRun
 	// DeliveryInterruptThenPrompt 取消当前轮，随后投递。
 	DeliveryInterruptThenPrompt = store.InputDeliveryInterruptThenPrompt
 )
 
 // ValidDeliveries 合法投递模式（报错提示与校验共用，顺序即文档顺序）。
-var ValidDeliveries = []string{DeliveryReject, DeliveryAfterTurn, DeliveryInterruptThenPrompt}
+var ValidDeliveries = []string{DeliveryReject, DeliveryAfterRun, DeliveryInterruptThenPrompt}
 
 // 队列项终态（事件收敛用；与 store.InputStatus* 同值）。
 const (
-	ReasonTurnFinished = "turn_finished"  // 队列项因上一轮结束而投递
+	ReasonRunFinished = "run_finished"  // 队列项因上一轮结束而投递
 	ReasonUserCancel   = "user_cancel"    // 用户显式撤下
 	ReasonDeliverFail  = "deliver_failed" // 投递时启动新一轮失败（文本保留在台账行里，不静默丢弃）
 	ReasonStale        = "stale"          // 进程重启：等待的那一轮已随进程消失，统一作废
@@ -63,8 +63,8 @@ func NormalizeDelivery(v string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", DeliveryReject:
 		return DeliveryReject, nil
-	case DeliveryAfterTurn:
-		return DeliveryAfterTurn, nil
+	case DeliveryAfterRun:
+		return DeliveryAfterRun, nil
 	case DeliveryInterruptThenPrompt:
 		return DeliveryInterruptThenPrompt, nil
 	default:
@@ -79,7 +79,7 @@ type QueuedInput struct {
 	SessionID    string    `json:"session_id"`
 	Text         string    `json:"text"`
 	Delivery     string    `json:"delivery"`
-	TargetTurnID string    `json:"target_turn_id,omitempty"`
+	TargetRunID string    `json:"target_run_id,omitempty"`
 	Generation   int64     `json:"generation"`
 	CreatedAt    time.Time `json:"created_at"`
 }
@@ -94,15 +94,15 @@ type PromptOutcome struct {
 // ——— Service 侧队列读写（唯一入口；DB / 内存两实现） ———
 
 // enqueueInput 入队一条待投递输入。
-func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetTurn string, generation int64) (QueuedInput, error) {
+func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (QueuedInput, error) {
 	in := QueuedInput{
 		ID: objid.New(objid.Input), SessionID: convID, Text: text, Delivery: delivery,
-		TargetTurnID: targetTurn, Generation: generation, CreatedAt: time.Now().UTC(),
+		TargetRunID: targetRun, Generation: generation, CreatedAt: time.Now().UTC(),
 	}
 	if s.st != nil {
 		row := model.InputEntity{
 			ID: in.ID, SessionID: convID, Text: text, Delivery: delivery,
-			TargetTurnID: targetTurn, Generation: generation,
+			TargetRunID: targetRun, Generation: generation,
 			Status: store.InputStatusQueued, CreatedAt: in.CreatedAt,
 		}
 		if err := s.st.CreateInput(ctx, row); err != nil {
@@ -148,7 +148,7 @@ func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtosession
 	for _, q := range queue {
 		out = append(out, dtosession.QueuedInputResp{
 			ID: q.ID, Text: q.Text, Delivery: q.Delivery,
-			TargetTurnID: q.TargetTurnID, Generation: q.Generation,
+			TargetRunID: q.TargetRunID, Generation: q.Generation,
 			CreatedAt: q.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
@@ -265,13 +265,13 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 func queuedFromStore(r model.InputEntity) QueuedInput {
 	return QueuedInput{
 		ID: r.ID, SessionID: r.SessionID, Text: r.Text, Delivery: r.Delivery,
-		TargetTurnID: r.TargetTurnID, Generation: r.Generation, CreatedAt: r.CreatedAt,
+		TargetRunID: r.TargetRunID, Generation: r.Generation, CreatedAt: r.CreatedAt,
 	}
 }
 
 // ——— Orchestrator 侧：投递 ———
 
-// deliverQueued 在会话空闲时投递队首排队输入（runTurn 收尾 / 入队后复查调用）。
+// deliverQueued 在会话空闲时投递队首排队输入（executeRun 收尾 / 入队后复查调用）。
 // 不投递：会话仍忙（下一轮自然会再触发）、句柄已死（重建后代际已变，队列项会作废）、队列空。
 func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 	as.mu.Lock()
@@ -297,6 +297,6 @@ func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 	}
 	o.svc.publish(BusInputDelivered, as.ID, map[string]any{
 		"session_id": as.ID, "agent_id": as.AgentID, "input_id": q.ID,
-		"delivery": q.Delivery, "reason": ReasonTurnFinished,
+		"delivery": q.Delivery, "reason": ReasonRunFinished,
 	})
 }

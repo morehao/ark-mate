@@ -9,18 +9,18 @@ import type { BusEvent, QueuedInput, QueuedInputResp } from '@ark-mate/types'
 // 会留下永远投不出、也撤不掉的幻影队项）。
 
 /** 可在输入区选择的投递模式（`reject` 不是「选择」而是「不排队直接报错」的历史行为，不在选项里）。 */
-export type DeliveryChoice = 'after_turn' | 'interrupt_then_prompt'
+export type DeliveryChoice = 'after_run' | 'interrupt_then_prompt'
 
 /** 投递模式 → 短文案（按钮/标签用）。 */
 export const DELIVERY_LABEL: Record<string, string> = {
-  after_turn: '排队',
+  after_run: '排队',
   interrupt_then_prompt: '打断并发送',
   reject: '直接报错',
 }
 
 /** 投递模式 → 一句话解释（下拉选项副标题/tooltip 用）。 */
 export const DELIVERY_HINT: Record<string, string> = {
-  after_turn: '当前轮跑完后，作为新的一轮自动发出',
+  after_run: '当前轮跑完后，作为新的一轮自动发出',
   interrupt_then_prompt: '先取消当前轮，再立刻发出这条',
   reject: '不做队列，会话忙时直接报错（历史行为）',
 }
@@ -103,7 +103,7 @@ export function transitionQueue(queue: QueuedInput[], e: BusEvent): QueueTransit
 /** 服务端当前态（GET /inputs）→ 队列视图（冷挂载重建用）。 */
 export function queuedFromResp(r: QueuedInputResp): QueuedInput {
   const q: QueuedInput = { inputId: r.input_id, text: r.text, delivery: r.delivery }
-  if (r.target_turn_id) q.targetTurnId = r.target_turn_id
+  if (r.target_run_id) q.targetRunId = r.target_run_id
   if (typeof r.generation === 'number') q.generation = r.generation
   return q
 }
@@ -128,8 +128,8 @@ function applyQueuedEvent(queue: QueuedInput[], e: BusEvent, inputId: string): Q
     delivery: String(p.delivery ?? ''),
     seq: e.seq,
   }
-  if (p.target_turn_id !== undefined && p.target_turn_id !== null && String(p.target_turn_id) !== '') {
-    next.targetTurnId = String(p.target_turn_id)
+  if (p.target_run_id !== undefined && p.target_run_id !== null && String(p.target_run_id) !== '') {
+    next.targetRunId = String(p.target_run_id)
   }
   if (typeof p.generation === 'number') next.generation = p.generation
 

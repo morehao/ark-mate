@@ -48,7 +48,7 @@ import (
 // ——空集时 `Set` 里没有供应商，编排层可能不再给出路径，而"平台删光供应商"这件事恰恰必须把
 // 平台自己写过的 refs 条目清掉。
 //
-// 返回的 `CredentialOutcome` 与清单结论**分开报**（ADR-14）：凭据可热生效（next_turn），
+// 返回的 `CredentialOutcome` 与清单结论**分开报**（ADR-14）：凭据可热生效（next_run），
 // 清单要新进程（next_process）——合并成一个 effect 必然说谎。
 func (s *syncer) syncCredentials(set resource.Set) (resource.CredentialOutcome, error) {
 	path := s.credDocPath
@@ -86,7 +86,7 @@ func (s *syncer) syncCredentials(set resource.Set) (resource.CredentialOutcome, 
 		Channel: resource.ChannelNativeDoc,
 		Status:  status,
 		Where:   path + "（底座私有凭据文档，权限 0600；dsh 的 watch 默认热重载）",
-		Effect:  resource.EffectNextTurn,
+		Effect:  resource.EffectNextRun,
 		// dsh 的原生凭据文档通道在 **0.2.0-rc.2** 上实测 7/7 PASS（H6 探针，见设计 §实测事实）。
 		// 版本绑定：载荷升级时由 `Spec.Credential.Tested` 先置回 false，编排层据此**不再走 native_doc**
 		// （不给路径、不给明文），这条路径自然就不会被走到。

@@ -169,7 +169,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 			continue
 		}
 		items = append(items, store.DefinitionImportItem{
-			Kind: model.CapabilityKindSkill, ID: sk.ID, Body: string(body),
+			Kind: model.DefinitionKindSkill, ID: sk.ID, Body: string(body),
 		})
 		stats.Skills++
 	}
@@ -203,7 +203,7 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 			continue
 		}
 		items = append(items, store.DefinitionImportItem{
-			Kind: model.CapabilityKindMcp, ID: m.ID, Body: string(body),
+			Kind: model.DefinitionKindMcp, ID: m.ID, Body: string(body),
 		})
 		stats.Mcps++
 	}
@@ -251,21 +251,21 @@ func indentJSONBlock(s string) string {
 
 // getDefinitionRow 读一条定义行是否存在（DryRun 统计用）。
 func getDefinitionRow(ctx context.Context, st *store.Store, it store.DefinitionImportItem) (string, bool, error) {
-	if it.Kind == model.CapabilityKindMcp {
+	if it.Kind == model.DefinitionKindMcp {
 		row, found, err := st.GetMcpServerDefinition(ctx, it.ID)
 		if err != nil || !found {
 			return "", found, err
 		}
 		return row.Body, true, nil
 	}
-	if it.Kind == model.CapabilityKindAgent {
+	if it.Kind == model.DefinitionKindAgent {
 		row, found, err := st.GetAgentDefinition(ctx, it.ID)
 		if err != nil || !found {
 			return "", found, err
 		}
 		return row.Body, true, nil
 	}
-	if it.Kind == model.CapabilityKindProvider {
+	if it.Kind == model.DefinitionKindProvider {
 		// provider 是资源表（没有正文）：这里只需要"在不在"这个事实。
 		_, found, err := st.GetProviderDefinition(ctx, it.ID)
 		return "", found, err

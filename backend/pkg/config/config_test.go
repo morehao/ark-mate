@@ -539,6 +539,9 @@ func TestRenamedKeysRejectedWithHint(t *testing.T) {
 	for _, old := range []struct{ key, env, wantHint string }{
 		{"skills_materialize_dir", "MATE_SKILLS_MATERIALIZE_DIR", "MATE_PROJECTION_DIRS"},
 		{"skills_materialize_dirs", "MATE_SKILLS_MATERIALIZE_DIRS", "MATE_PROJECTION_DIRS"},
+		// v16 词汇统一（`turn` → `run`）：静默忽略的代价是**看门狗不生效**——挂死的会话照旧
+		// 永久占用 busy，而 `mate config` 的输出里一切正常。
+		{"turn_timeout", "MATE_TURN_TIMEOUT", "MATE_RUN_TIMEOUT"},
 	} {
 		// 进程环境变量：只按 knownKeys 读取，故旧变量名必须显式检查（否则设了也不生效且无声）。
 		t.Setenv(old.env, "/tmp/whatever")

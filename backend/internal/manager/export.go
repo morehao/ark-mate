@@ -126,7 +126,7 @@ func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event
 					return out, true
 				}
 				out = append(out, eventbus.Event{
-					Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
+					ID: e.ID, Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
 					Payload: decodePayload(e.PayloadJSON),
 				})
 				after = e.Seq
@@ -253,13 +253,13 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "· %s\n", line)
 			}
-		case BusTurnEnded:
+		case BusRunEnded:
 			if md {
 				fmt.Fprintf(&b, "\n*轮次结束*\n\n")
 			} else {
 				fmt.Fprintf(&b, "\n[轮次结束]\n\n")
 			}
-		case BusTurnError:
+		case BusRunError:
 			msg := payloadString(payload, "error")
 			if msg == "" {
 				msg = payloadString(payload, "msg")

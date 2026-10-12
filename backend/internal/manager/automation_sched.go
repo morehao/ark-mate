@@ -267,7 +267,7 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 		advance: trigger != automation.TriggerManual, claimed: out.claimed,
 	}
 	res := s.finishAutomationRun(ctx, rec, out)
-	// max_run_duration：可选的**收紧**（默认只靠既有 MATE_TURN_TIMEOUT 看门狗），
+	// max_run_duration：可选的**收紧**（默认只靠既有 MATE_RUN_TIMEOUT 看门狗），
 	// 走同一条取消通道，不引入第二套超时机制。
 	if d, err := rec.def.RunDuration(); err == nil && d > 0 {
 		go s.automationWatchdog(ctx, rec.def.ID, resp.ID, d)
@@ -313,8 +313,8 @@ func (s *Service) automationWatchdog(ctx context.Context, automationID, sessionI
 	}
 	glog.Warnw(ctx, "automation 本轮超过 max_run_duration，自动取消",
 		"automation", automationID, "session", sessionID, "max_run_duration", d.String())
-	// 取消的终态（run.cancelled）由 runTurn 依取消语义发布；这里只负责按下按钮。
-	_ = s.CancelTurn(context.WithoutCancel(ctx), sessionID)
+	// 取消的终态（run.cancelled）由 executeRun 依取消语义发布；这里只负责按下按钮。
+	_ = s.CancelRun(context.WithoutCancel(ctx), sessionID)
 }
 
 // finishAutomationRun 把结果写回载体（定义文件 / 运行态列）并推事件，然后刷新内存调度态。
@@ -424,7 +424,10 @@ func (s *Service) emitAutomationRun(id string, out automationRunOutcome) {
 	s.ver[automationOrigin(id)]++
 	v := s.ver[automationOrigin(id)]
 	s.mu.Unlock()
-	s.bus.Publish(BusAutomationRun, automationOrigin(id), v, payload)
+	// 刻意**不带事件 id**（第一参数空串）：`automation.run` 只走实时通道、**不落 events 表**
+	// 也不进 transcript，所以它没有 durable 身份——于是"帧上有 id ⟺ 它在 durable 日志里查得到"
+	// 这条不变式成立（见 eventbus.Event.ID 的注释）。
+	s.bus.Publish("", BusAutomationRun, automationOrigin(id), v, payload)
 }
 
 // refreshAutomationSchedule 按当前定义重算内存调度态（duplicate 分支用；不写盘）。
@@ -458,7 +461,7 @@ func (s *Service) sessionRunning(id string) bool {
 	if id == "" {
 		return false
 	}
-	// 状态**在锁内读出**：`markSession` 归 runTurn 的 goroutine 所有，
+	// 状态**在锁内读出**：`markSession` 归 executeRun 的 goroutine 所有，
 	// 出锁后再读 rec.Status 就是数据竞争（-race 直接报）。
 	s.mu.Lock()
 	defer s.mu.Unlock()

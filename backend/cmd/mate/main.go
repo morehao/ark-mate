@@ -17,7 +17,7 @@ import (
 	// 内嵌 IANA 时区库（约 +450KB 二进制）。
 	//
 	// 定时任务（M4）**必须**能把 `Asia/Shanghai` 这类时区名解析成一个真实时刻，而
-	// `CGO_ENABLED=0` 的容器镜像里可能根本没有 `/usr/share/zoneinfo`（scratch/distroless 尤其）。
+	// 精简镜像里可能根本没有 `/usr/share/zoneinfo`（scratch/distroless 尤其）。
 	// 没有它，`time.LoadLocation` 会失败，表现是"预览/调度在一台机器上对、在容器里错"——
 	// 这是最不该靠"部署时记得挂 zoneinfo"来兜的一类问题：时区错了，任务就会在错误的时间
 	// 干有副作用的事。内嵌一份，行为与宿主机无关。

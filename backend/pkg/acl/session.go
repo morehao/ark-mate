@@ -56,7 +56,7 @@ func (s *Session) setConfigOptions(opts []ConfigOption) {
 	s.mu.Unlock()
 }
 
-// Prompt 发起一次 prompt（阻塞至本 turn 结束），返回 stop reason。
+// Prompt 发起一次 prompt（阻塞至本 run 结束），返回 stop reason。
 // 流式输出经 ClientOptions.OnEvent（SessionUpdate → 归一化事件）到达上层。
 func (s *Session) Prompt(ctx context.Context, text string) (string, error) {
 	resp, err := s.client.conn.Prompt(ctx, acpsdk.PromptRequest{
@@ -69,7 +69,7 @@ func (s *Session) Prompt(ctx context.Context, text string) (string, error) {
 	return string(resp.StopReason), nil
 }
 
-// Cancel 取消当前 turn（session/cancel notification，非阻塞）。
+// Cancel 取消当前 run（session/cancel notification，非阻塞）。
 func (s *Session) Cancel(ctx context.Context) error {
 	if err := s.client.conn.Cancel(ctx, acpsdk.CancelNotification{SessionId: s.id}); err != nil {
 		return Classify(err)

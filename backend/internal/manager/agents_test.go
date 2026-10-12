@@ -378,7 +378,7 @@ func TestSeedAgentReadonly(t *testing.T) {
 
 // TestDeleteAgentImpactDetachAndBusyRefusal 删除影响面（P2 删除面）：
 // 列表外露 session_count；删除回带影响面并**立刻摘除**该 agent 的活跃会话（后续 prompt 报
-// agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 turn 时整体拒绝且无副作用。
+// agent_not_found 且文案给出路），而不是「删了还能跑、重启后才失效」；有在途 run 时整体拒绝且无副作用。
 func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
@@ -437,13 +437,13 @@ func TestDeleteAgentImpactDetachAndBusyRefusal(t *testing.T) {
 		t.Fatalf("错误文案应给出恢复出路: %s", ae.Details)
 	}
 
-	// 有在途 turn → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
+	// 有在途 run → 整体拒绝，且不删定义、不摘会话（失败即无副作用）。
 	svc.agents["alias-busy"] = &AgentRec{ID: "alias-busy", Name: "忙"}
 	busy := &ActiveSession{ID: "cb", AgentID: "alias-busy", Runtime: "stub", sess: &stubSession{stop: "end_turn"}}
 	busy.busy = true
 	orch.sessions["cb"] = busy
 	if _, err := svc.DeleteAgent(ctx, "alias-busy"); err == nil {
-		t.Fatal("有在途 turn 应拒绝删除")
+		t.Fatal("有在途 run 应拒绝删除")
 	} else if !errors.As(err, &ae) || ae.Code != "agent_busy" {
 		t.Fatalf("应报 agent_busy，got %v", err)
 	}

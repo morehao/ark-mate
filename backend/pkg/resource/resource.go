@@ -162,7 +162,7 @@ const (
 // 生效时刻取值域（用户能理解的时间点）。
 const (
 	EffectImmediate   = "immediate"
-	EffectNextTurn    = "next_turn"
+	EffectNextRun    = "next_run"
 	EffectNextSession = "next_session"
 	EffectNextProcess = "next_process"
 )
@@ -194,7 +194,7 @@ func EffectRank(e string) int {
 	switch e {
 	case EffectImmediate:
 		return 0
-	case EffectNextTurn:
+	case EffectNextRun:
 		return 1
 	case EffectNextSession:
 		return 2
@@ -226,7 +226,7 @@ type Outcome struct {
 	Status string
 	// Where 人话落点（给用户看的「同步到哪了」）。
 	Where string
-	// Effect immediate | next_turn | next_session | next_process。
+	// Effect immediate | next_run | next_session | next_process。
 	Effect string
 	// Credential 凭据交付面的结论，与清单**分开报**（ADR-14）。
 	Credential CredentialOutcome

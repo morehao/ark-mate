@@ -81,7 +81,7 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 	unregister := redact.RegisterDynamicSecret(key)
 	defer unregister()
 
-	evt := svc.publish(BusTurnError, "conv-dyn", map[string]any{
+	evt := svc.publish(BusRunError, "conv-dyn", map[string]any{
 		"session_id": "conv-dyn",
 		"details":    "上游拒绝：key=" + key,
 	})
@@ -90,12 +90,12 @@ func TestPublishRedactsDynamicProviderKey(t *testing.T) {
 	}
 }
 
-// TestTurnErrorPayloadRedactsStderrTail turn.error 的 stderr_tail 走 acl.TailLines 出口，
+// TestRunErrorPayloadRedactsStderrTail run.error 的 stderr_tail 走 acl.TailLines 出口，
 // 已在那一步过闸（此处验证装配后的效果：事件里看不到密钥）。
-func TestTurnErrorPayloadRedactsStderrTail(t *testing.T) {
+func TestRunErrorPayloadRedactsStderrTail(t *testing.T) {
 	svc, _ := newSearchRig(t)
 	const secret = "sk-abcdefghijklmnop1234"
-	evt := svc.publish(BusTurnError, "conv-tail", map[string]any{
+	evt := svc.publish(BusRunError, "conv-tail", map[string]any{
 		"session_id":  "conv-tail",
 		"details":     "进程退出",
 		"stderr_tail": []string{"OPENAI_API_KEY=" + secret, "listening on :8080"},

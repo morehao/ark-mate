@@ -10,7 +10,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// ——— messages 物化（turn 收口，随 materializeRun 同窗口执行） ———
+// ——— messages 物化（run 收口，随 materializeRun 同窗口执行） ———
 //
 // 语义（读模型，从 events 可重建；doc §数据模型/表说明）：
 //   - 一条消息行 = 一个可寻址文本片段：role=user 一行（输入原文）；role=assistant 为一段连续 prose

@@ -116,7 +116,7 @@ export function ChatPage() {
   const pendingPerms =
     activeId && view ? view.entries.filter((en) => (en.kind === 'permission' || en.kind === 'elicitation') && !en.resolved).length : 0
   // 服务端忙水位：本地无流（streaming=false）但会话在服务端仍 in_progress 且本地视图没有终态条目
-  // （如刷新/重启后该 turn 仍在跑或已卡住）→ 视为 busy：展示「停止」以自愈（后端 cancel 幂等解 busy）。
+  // （如刷新/重启后该 run 仍在跑或已卡住）→ 视为 busy：展示「停止」以自愈（后端 cancel 幂等解 busy）。
   // 一旦本地已收到终态条目（tone ok/err/cancel 的 system 尾条），即使列表 status 还没刷新也不当 busy。
   const lastSettledTone = (() => {
     if (!view) return undefined
@@ -132,7 +132,7 @@ export function ChatPage() {
   const busy = streaming || serverBusy
   const agent = agentOf(agents, activeSum?.agent_id)
   const title = activeId ? titleFor(activeSum, view, agents) : ''
-  // 失败 turn 一键重试：仅当最新一条为 turn.error（无流/非 busy）时，取其所属轮的用户输入重发。
+  // 失败 run 一键重试：仅当最新一条为 run.error（无流/非 busy）时，取其所属轮的用户输入重发。
   // 视图可能是服务端快照的部分重放（该轮 user 气泡不在本地条目里），此时回退到历史事件取输入。
   const entries = view?.entries ?? []
   const lastEntry = entries[entries.length - 1]
@@ -584,7 +584,7 @@ export function ChatPage() {
                     }
                     busyNote={
                       streaming
-                        ? `turn 进行中 · ${agent ? agent.name : ''}`
+                        ? `run 进行中 · ${agent ? agent.name : ''}`
                         : serverBusy
                           ? '会话在服务端仍处运行中 — 可点「停止」解除'
                           : undefined

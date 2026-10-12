@@ -225,7 +225,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	}
 	glog.Infow(ctx, "代际迁移完成", "session", as.ID, "runtime", spec.ID,
 		"from", plan.From, "to", plan.To, "perm_changed", plan.PermChanged,
-		"provider_session", next.providerID)
+		"runtime_session", next.providerID)
 	o.attachSession(next, "generation")
 	// 缩权/换代后立刻淘汰**已无人引用**的旧代际（不等空闲阈值）：旧进程代表的可能是一套
 	// 已经不该存在的权限/能力面，留着它既占内存又违反"缩权立刻生效"的直觉。

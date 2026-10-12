@@ -321,7 +321,7 @@ type ElicitationItem struct {
 	// v15 之前这里有两个**同值**字段（`SessionID` + `ConversationID`），是"一个东西两个词"
 	// 的遗迹；改名后收敛成一个。
 	SessionID string
-	// ScopeSource 归属来源：wire（wire 提供）| inferred_inflight（宿主按唯一在途 turn 推断）。
+	// ScopeSource 归属来源：wire（wire 提供）| inferred_inflight（宿主按唯一在途 run 推断）。
 	ScopeSource string
 	Mode        string
 	Message     string

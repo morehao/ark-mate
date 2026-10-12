@@ -126,13 +126,13 @@ func TestDevLoopServesBuiltArtifact(t *testing.T) {
 			t.Error("剥注释把真正的代码也吃掉了：守卫会全绿（这比红更糟）")
 		}
 
-		// recipe 提取：必须只取 `dev:` 目标，不能被 `dev/opencode-bin:` 或后续目标串进来。
+		// recipe 提取：必须只取 `dev:` 目标，不能被 `dev/runtime-bin:` 或后续目标串进来。
 		fake := "# dev: 注释\n" +
 			"dev: dep\n" +
 			"\t@echo hi\n" +
 			"\tnode scripts/dev-loop.mjs\n" +
 			"\n" +
-			"dev/opencode-bin:\n" +
+			"dev/runtime-bin:\n" +
 			"\t@echo 不该被取到\n" +
 			"other:\n" +
 			"\tpnpm dev\n"
@@ -143,38 +143,77 @@ func TestDevLoopServesBuiltArtifact(t *testing.T) {
 	})
 }
 
-// devTargetRecipe 返回 Makefile 里 `dev:` 目标的 recipe 行（制表符开头的行，拼成一段文本）。
+// devTargetRecipe 返回 Makefile 里 `dev:` 目标的 recipe 行。
 //
-// 只认行首精确的 `dev:`：同名的 `dev/opencode-bin:`、`desktop/dev:` 都必须被排除——
+// 只认行首精确的 `dev:`：同名的 `dev/runtime-bin:`、`desktop/dev:` 都必须被排除——
 // 把它们的 recipe 算进来会让"dev 目标里没有 vite"这条判据假绿。
 func devTargetRecipe(t *testing.T, makefile string) string {
 	t.Helper()
+	return targetRecipe(t, makefile, "dev:", "`dev:` 目标")
+}
+
+// runtimeBinRecipe 返回 `dev/runtime-bin:` 目标的 recipe 行（生成转发 shim 的那一段）。
+//
+// 2026-10-12（T7）加：这段 recipe 里 shim 的**名字**必须是 `$(RUNTIME)` 派生——写死成某个具体
+// runtime 时，构建期固定为另一个的构建上这个覆盖就成了没人调用的死文件（静默 no-op）。
+func runtimeBinRecipe(t *testing.T, makefile string) string {
+	t.Helper()
+	return targetRecipe(t, makefile, "dev/runtime-bin:", "`dev/runtime-bin:` 目标")
+}
+
+// targetRecipe 取某个目标的 recipe 行（制表符开头），拼成一段文本。
+func targetRecipe(t *testing.T, makefile, target, label string) string {
+	t.Helper()
 	var (
 		out       []string
-		inDev     bool
+		inTarget  bool
 		sawTarget bool
 	)
 	for _, line := range strings.Split(makefile, "\n") {
 		switch {
-		case strings.HasPrefix(line, "dev:"):
-			inDev, sawTarget = true, true
+		case strings.HasPrefix(line, target):
+			inTarget, sawTarget = true, true
 			continue
-		case inDev && strings.HasPrefix(line, "\t"):
+		case inTarget && strings.HasPrefix(line, "\t"):
 			out = append(out, line)
 			continue
-		case inDev && strings.TrimSpace(line) == "":
+		case inTarget && strings.TrimSpace(line) == "":
 			continue // recipe 之间的空行：继续往下看（也可能已经走出该目标）
-		case inDev:
-			inDev = false // 撞到下一个目标或普通注释行
+		case inTarget:
+			inTarget = false // 撞到下一个目标或普通注释行
 		}
 	}
 	if !sawTarget {
-		t.Fatal("Makefile 里找不到 `dev:` 目标——它被改名/删除了？这条守卫不能静默失效")
+		t.Fatalf("Makefile 里找不到 %s——它被改名/删除了？这条守卫不能静默失效", label)
 	}
 	if len(out) == 0 {
-		t.Fatal("`dev:` 目标看起来没有 recipe（判据失去对象）")
+		t.Fatalf("%s 看起来没有 recipe（判据失去对象）", label)
 	}
 	return strings.Join(out, "\n")
+}
+
+// targetHeader 返回某个目标的**声明行**（含 `\` 续行），例如 `dev: web-assets dev/runtime-bin`。
+//
+// recipe 行里看不到"这个目标依赖了谁"，而依赖丢了是**静默**的：PATH 前置目录照样在，只是里面没有
+// 那份 shim，于是核心回落去 PATH 上找——又变回"跑本机那份"。
+func targetHeader(t *testing.T, makefile, target, label string) string {
+	t.Helper()
+	lines := strings.Split(makefile, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, target) {
+			continue
+		}
+		var out []string
+		for j := i; j < len(lines); j++ {
+			out = append(out, lines[j])
+			if !strings.HasSuffix(strings.TrimSpace(lines[j]), "\\") {
+				break
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	t.Fatalf("Makefile 里找不到 %s 的目标声明行——它被改名/删除了？这条守卫不能静默失效", label)
+	return ""
 }
 
 // TestDevLoopReportsRuntimeHit 钉住第二条边界（2026-10-11，P4/D6）：**dev 态必须说清它跑的是哪一份底座**。
@@ -184,7 +223,7 @@ func devTargetRecipe(t *testing.T, makefile string) string {
 // 而这件事此前**完全静默**——`make dev` 的回显里连运行时名字都写死成 `opencode`，可构建期固定的
 // runtime 早就是 `dsh` 了（于是那行回显还在替一个不会被调用的覆盖做宣传）。
 //
-// 三段判据，全部 fail-closed（读不到 / 解析不到即失败）：
+// 四段判据，全部 fail-closed（读不到 / 解析不到即失败）：
 //
 //	① `scripts/dev-loop.mjs` 必须把命中事实**交给核心**（`--payloads`）——否则 `/meta.payloads[]` 在 dev 态
 //	   恒为空，"这次跑的是哪份"又只剩一句可能过期的横幅；同时它必须带**来源判定的两个输入**
@@ -193,6 +232,12 @@ func devTargetRecipe(t *testing.T, makefile string) string {
 //	③ 验收里的比较必须是**报告**而不是判据：`web-ui-acceptance.mjs` 的 `reportRuntimeHit` 函数体里
 //	   不得出现 `check(` / `fail(` / `results.push(`——D6 的口径是"不一致时打印两者并 WARN，不判红"。
 //	   这条不写成"注释里说别判红"，因为那种约定没人执行；函数体是能被解析的。
+//	④ **覆盖口必须真的生效**（2026-10-12 加，T7）：转发 shim 的名字必须与核心被编译成调用的名字
+//	   **同源**（都用 `$(RUNTIME)`），且 `make dev` / `make server` 都得依赖那个生成目标。
+//	   ④ 挡的是**静默 no-op**：此前 shim 名写死 `opencode`，于是构建期固定 `dsh` 时
+//	   `OPENCODE_BIN=…` 只是让 PATH 上多了个没人调用的文件——用户以为换了底座，核心照旧拉本机那份。
+//	   当时的处置是"回显里如实说不会生效"（横幅 + `inert` 分流）；根因修掉后那套绕道整体删除，
+//	   于是这条判据只能钉根因——否则同一个坑会以"没人看横幅"的形式复发。
 func TestDevLoopReportsRuntimeHit(t *testing.T) {
 	root := frontendRoot(t)
 
@@ -227,6 +272,31 @@ func TestDevLoopReportsRuntimeHit(t *testing.T) {
 	if strings.Contains(recipe, "底座  opencode") {
 		t.Error("`make dev` 的 recipe 里又出现了写死「opencode」的底座回显——" +
 			"它替一个不会被调用的覆盖做宣传（构建期固定的 runtime 默认是 dsh），这正是 D3 的静默缺口")
+	}
+
+	// ④ 覆盖口必须真的生效：shim 名与核心调用的名字同源（都用 `$(RUNTIME)`），且 dev/server 都依赖生成目标。
+	bin := runtimeBinRecipe(t, makefile)
+	if !strings.Contains(bin, "$(DEV_BIN_DIR)/$(RUNTIME)") {
+		t.Error("`dev/runtime-bin` 没有按 `$(RUNTIME)` 命名转发 shim：构建期固定为别的底座时，" +
+			"`OPENCODE_BIN=…` 会退回**静默 no-op**（PATH 上多了个没人调用的文件，核心照旧拉本机那份）")
+	}
+	// 「同源」的另一半：核心必须是被编译成调用 `$(RUNTIME)` 的。少了这条，上面那句会假绿——
+	// 把 BuildRuntime 写死成 dsh 时 shim 名跟着 RUNTIME 变，可核心永远只找 dsh。
+	if !strings.Contains(makefile, "BuildRuntime=$(RUNTIME)") {
+		t.Error("Makefile 不再把 `$(RUNTIME)` 注入核心的 BuildRuntime：shim 名与核心实际调用的名字" +
+			"失去同源关系，「shim 按 $(RUNTIME) 命名」这条判据会假绿")
+	}
+	for _, dep := range []struct{ Target, Label string }{
+		{"dev:", "`dev:`"}, {"server:", "`server:`"},
+	} {
+		if !strings.Contains(targetHeader(t, makefile, dep.Target, dep.Label), "dev/runtime-bin") {
+			t.Errorf("%s 不再依赖 `dev/runtime-bin`：转发 shim 不会被生成，而 PATH 前置目录**照样在**——"+
+				"核心会静默回落到 PATH 上本机那份（正是这个覆盖口要消灭的形态）", dep.Label)
+		}
+	}
+	if strings.Contains(strippedLoop, "RUNTIME === 'opencode'") {
+		t.Error("dev-loop.mjs 里又出现了「按构建期 runtime 决定覆盖是否生效」的分支" +
+			"（`RUNTIME === 'opencode'`）——那等于承认 shim 名又写死了，覆盖重新变回静默 no-op")
 	}
 
 	acc := stripTSComments(readFrontendFile(t, filepath.Join(root, "scripts", "web-ui-acceptance.mjs")))

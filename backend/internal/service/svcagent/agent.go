@@ -26,13 +26,13 @@ type AgentSvc interface {
 	SetDefaultAgent(ctx context.Context, id string) (*dtoagent.AgentResp, error)
 
 	// DeleteAgent 删除自定义 agent（种子不可删）：返回影响面（绑定会话数 / 已摘除的活跃会话数 /
-	// 是否「当前 Agent」）。历史会话保留可读但无法继续提问；有在途 turn 时拒绝。
+	// 是否「当前 Agent」）。历史会话保留可读但无法继续提问；有在途 run 时拒绝。
 	DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDeleteResp, error)
 
 	// StartAgent 启动 agent 对应 runtime 连接（校验可启动）。
 	StartAgent(ctx context.Context, id string) error
 
-	// StopAgent 停止 agent 对应 runtime 进程（有在途 turn 时拒绝）。
+	// StopAgent 停止 agent 对应 runtime 进程（有在途 run 时拒绝）。
 	StopAgent(ctx context.Context, id string) error
 
 	// DefaultAgentID 返回默认 agent（面板未显式指定 agent 时，用它取模型目录）。

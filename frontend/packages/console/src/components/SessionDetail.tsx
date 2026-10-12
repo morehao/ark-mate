@@ -18,7 +18,7 @@ import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
 import { agentNameOf, shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
-import { summarizeRun, type FailedTurn, type RunSummary } from '../console/runSummary'
+import { summarizeRun, type FailedRun, type RunSummary } from '../console/runSummary'
 
 function fmtLocal(iso?: string): string {
   if (!iso) return '—'
@@ -136,7 +136,7 @@ export function SessionDetailDrawer({
   }
 
   // —— 失败轮一键重试：重发该轮用户输入（事件经 WS 续流），随后刷新统计 ——
-  const retryFailedTurn = (ft: FailedTurn) => {
+  const retryFailedRun = (ft: FailedRun) => {
     if (!ft.text) return
     void promptSession(sessionId, { prompt: ft.text })
       .then(() => {
@@ -481,9 +481,9 @@ export function SessionDetailDrawer({
                         </span>
                       ))}
                     </div>
-                    {run.failedTurns.length > 0 ? (
+                    {run.failedRuns.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {run.failedTurns.map((ft) => (
+                        {run.failedRuns.map((ft) => (
                           <div
                             key={ft.seq}
                             style={{
@@ -539,7 +539,7 @@ export function SessionDetailDrawer({
                               icon={<ReloadOutlined />}
                               disabled={!ft.text}
                               title={ft.text ? '重新发送该轮输入' : '该轮无输入可重试'}
-                              onClick={() => retryFailedTurn(ft)}
+                              onClick={() => retryFailedRun(ft)}
                               style={{ borderRadius: 8, flex: 'none' }}
                             >
                               重试

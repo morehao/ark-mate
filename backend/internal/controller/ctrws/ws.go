@@ -107,7 +107,7 @@ type wsServerFrame struct {
 	AggID    string          `json:"agg_id,omitempty"`    // 归属聚合
 	EventSeq int64           `json:"event_seq,omitempty"` // snapshot 水位 / event 的 seq / gap 的首丢 seq
 	FromSeq  int64           `json:"from_seq,omitempty"`  // gap：重挂起点（= 首丢 seq）
-	Event    *eventbus.Event `json:"event,omitempty"`     // event 帧载荷（type/seq/agg_id/version/payload）
+	Event    *eventbus.Event `json:"event,omitempty"`     // event 帧载荷（id/type/seq/agg_id/version/payload；`id` 只对 durable 事件存在）
 	Reason   string          `json:"reason,omitempty"`    // detached 原因
 	State    json.RawMessage `json:"state,omitempty"`     // snapshot 终态视图（M0 空对象）
 }

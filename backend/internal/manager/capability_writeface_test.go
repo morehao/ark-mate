@@ -53,10 +53,10 @@ func TestCreateSkillWritesDefinitionAndRegistry(t *testing.T) {
 			if !resp.Created || resp.ID != "demo" {
 				t.Fatalf("新建结果不符: %+v", resp)
 			}
-			if want := wf.expectPath(t, model.CapabilityKindSkill, "demo"); resp.Path != want {
+			if want := wf.expectPath(t, model.DefinitionKindSkill, "demo"); resp.Path != want {
 				t.Fatalf("定位串不符: got %q want %q", resp.Path, want)
 			}
-			got := wf.readDef(t, model.CapabilityKindSkill, "demo")
+			got := wf.readDef(t, model.DefinitionKindSkill, "demo")
 			if got["id"] != "demo" || got["name"] != "演示" || !strings.Contains(got["body"].(string), "# demo") {
 				t.Fatalf("定义内容不符: %+v", got)
 			}
@@ -70,7 +70,7 @@ func TestCreateSkillWritesDefinitionAndRegistry(t *testing.T) {
 			} else if numericCode(err) != code.Conflict {
 				t.Fatalf("skill_exists 应是 40901，got %d（%v）", numericCode(err), err)
 			}
-			if got := wf.readDef(t, model.CapabilityKindSkill, "demo"); got["name"] != "演示" {
+			if got := wf.readDef(t, model.DefinitionKindSkill, "demo"); got["name"] != "演示" {
 				t.Fatalf("冲突时不该覆盖定义: %+v", got)
 			}
 		})
@@ -91,7 +91,7 @@ func TestCreateSkillCriticalBodyRejectedWithZeroBytes(t *testing.T) {
 			if numericCode(err) != code.InvalidRequest {
 				t.Fatalf("应报 40001 definition_invalid，got %d（%v）", numericCode(err), err)
 			}
-			if wf.hasDef(t, model.CapabilityKindSkill, "evil") {
+			if wf.hasDef(t, model.DefinitionKindSkill, "evil") {
 				t.Fatal("被拒的定义不得落载体（零写入）")
 			}
 			if _, ok := wf.svc.caps.SkillByID("evil"); ok {
@@ -117,7 +117,7 @@ func TestCreateSkillInvalidIDRejectedWithZeroBytes(t *testing.T) {
 				if numericCode(err) != code.InvalidRequest {
 					t.Fatalf("id %q 应报 40001 definition_invalid，got %d（%v）", id, numericCode(err), err)
 				}
-				if wf.hasDef(t, model.CapabilityKindSkill, id) {
+				if wf.hasDef(t, model.DefinitionKindSkill, id) {
 					t.Fatalf("被拒的定义不得落载体（零写入）：%s", id)
 				}
 				if _, ok := wf.svc.caps.SkillByID(id); ok {
@@ -129,7 +129,7 @@ func TestCreateSkillInvalidIDRejectedWithZeroBytes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("合规 id 应放行：%v", err)
 			}
-			if !wf.hasDef(t, model.CapabilityKindSkill, "my-skill-2") {
+			if !wf.hasDef(t, model.DefinitionKindSkill, "my-skill-2") {
 				t.Fatalf("合规 id 应落载体：%s", resp.Path)
 			}
 		})
@@ -143,13 +143,13 @@ func TestUpdateSkillOnlyTouchesPresentKeys(t *testing.T) {
 	for _, wf := range writeFaces(t) {
 		t.Run(wf.name, func(t *testing.T) {
 			// 预置一份带未知键的定义（模拟"用户自己的字段"）。
-			wf.seed(t, model.CapabilityKindSkill, "demo",
+			wf.seed(t, model.DefinitionKindSkill, "demo",
 				`{"id":"demo","name":"原名","body":"# 原正文","my_note":"留着","runtimes":["opencode"]}`)
 
 			if _, err := wf.svc.UpdateSkill(ctx, "demo", writeReq(t, `{"name":"新名"}`)); err != nil {
 				t.Fatalf("覆盖写失败: %v", err)
 			}
-			got := wf.readDef(t, model.CapabilityKindSkill, "demo")
+			got := wf.readDef(t, model.DefinitionKindSkill, "demo")
 			if got["name"] != "新名" {
 				t.Fatalf("目标键没改: %+v", got)
 			}
@@ -168,7 +168,7 @@ func TestUpdateSkillOnlyTouchesPresentKeys(t *testing.T) {
 			if _, err := wf.svc.UpdateSkill(ctx, "demo", writeReq(t, `{"my_note":null}`)); err != nil {
 				t.Fatalf("删键失败: %v", err)
 			}
-			if got := wf.readDef(t, model.CapabilityKindSkill, "demo"); got["my_note"] != nil {
+			if got := wf.readDef(t, model.DefinitionKindSkill, "demo"); got["my_note"] != nil {
 				t.Fatalf("null 应删键: %+v", got)
 			}
 		})
@@ -202,7 +202,7 @@ func TestUpdateSkillIDMismatchAndNotFound(t *testing.T) {
 			if numericCode(err) != code.NotFound {
 				t.Fatalf("不存在应是 40401，got %d（%v）", numericCode(err), err)
 			}
-			if wf.hasDef(t, model.CapabilityKindSkill, "nope") {
+			if wf.hasDef(t, model.DefinitionKindSkill, "nope") {
 				t.Fatal("不存在的目标不得被静默新建")
 			}
 		})
@@ -221,7 +221,7 @@ func TestDeleteSkillWithdrawsDefinition(t *testing.T) {
 			if err != nil || !resp.Deleted {
 				t.Fatalf("删除失败: %+v err=%v", resp, err)
 			}
-			if wf.hasDef(t, model.CapabilityKindSkill, "demo") {
+			if wf.hasDef(t, model.DefinitionKindSkill, "demo") {
 				t.Fatal("定义应已删除")
 			}
 			if _, ok := wf.svc.caps.SkillByID("demo"); ok {
@@ -284,7 +284,7 @@ func TestCreateMcpServerGates(t *testing.T) {
 					if len(wf.svc.caps.ListMcpServers()) != 0 {
 						t.Fatal("被拒的定义不得进注册表")
 					}
-					if n := wf.countDefs(t, model.CapabilityKindMcp); n != 0 {
+					if n := wf.countDefs(t, model.DefinitionKindMcp); n != 0 {
 						t.Fatalf("被拒的定义不得落载体，却有 %d 条", n)
 					}
 				})
@@ -307,10 +307,10 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 			if !resp.Created {
 				t.Fatalf("应标记为新建: %+v", resp)
 			}
-			if want := wf.expectPath(t, model.CapabilityKindMcp, "fs"); resp.Path != want {
+			if want := wf.expectPath(t, model.DefinitionKindMcp, "fs"); resp.Path != want {
 				t.Fatalf("定位串不符: got %q want %q", resp.Path, want)
 			}
-			if got := wf.readDef(t, model.CapabilityKindMcp, "fs"); got["my_note"] != "留着" {
+			if got := wf.readDef(t, model.DefinitionKindMcp, "fs"); got["my_note"] != "留着" {
 				t.Fatalf("定义内容不符: %+v", got)
 			}
 
@@ -351,7 +351,7 @@ func TestMcpServerWriteReadDelete(t *testing.T) {
 			if tools, _ := wf.svc.ListTools(); len(tools) != 0 {
 				t.Fatalf("归属该 server 的工具应一并摘除，仍剩 %+v", tools)
 			}
-			if wf.hasDef(t, model.CapabilityKindMcp, "fs") {
+			if wf.hasDef(t, model.DefinitionKindMcp, "fs") {
 				t.Fatal("定义应已删除")
 			}
 		})
@@ -428,7 +428,7 @@ func TestWriteFaceModeDispatchIsExplicit(t *testing.T) {
 	if _, err := db.svc.CreateSkill(ctx, writeReq(t, `{"id":"demo","body":"# d"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(db.defPath(model.CapabilityKindSkill, "demo")); !os.IsNotExist(err) {
+	if _, err := os.Stat(db.defPath(model.DefinitionKindSkill, "demo")); !os.IsNotExist(err) {
 		t.Fatalf("sqlite 模式的写面不该在磁盘上留下定义文件: %v", err)
 	}
 
@@ -436,7 +436,7 @@ func TestWriteFaceModeDispatchIsExplicit(t *testing.T) {
 	if _, err := file.svc.CreateSkill(ctx, writeReq(t, `{"id":"demo","body":"# d"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(file.defPath(model.CapabilityKindSkill, "demo")); err != nil {
+	if _, err := os.Stat(file.defPath(model.DefinitionKindSkill, "demo")); err != nil {
 		t.Fatalf("memory 模式的写面必须落盘: %v", err)
 	}
 }
@@ -450,13 +450,13 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 	ctx := context.Background()
 	for _, wf := range writeFaces(t) {
 		t.Run(wf.name, func(t *testing.T) {
-			wf.seed(t, model.CapabilityKindSkill, "demo",
+			wf.seed(t, model.DefinitionKindSkill, "demo",
 				`{"id":"demo","name":"演示","body":"# 正文","my_note":"留着","runtimes":["opencode"]}`)
 
 			if _, err := wf.svc.SetSkillEnabled(ctx, "demo", false); err != nil {
 				t.Fatalf("禁用失败: %v", err)
 			}
-			got := wf.readDef(t, model.CapabilityKindSkill, "demo")
+			got := wf.readDef(t, model.DefinitionKindSkill, "demo")
 			if got["enabled"] != false {
 				t.Fatalf("enabled 应写成 false: %+v", got)
 			}
@@ -480,11 +480,11 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 				if row.Revision != 2 {
 					t.Fatalf("启停应把 revision 从 1 抬到 2，got %d", row.Revision)
 				}
-				revs, err := wf.st.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "demo")
+				revs, err := wf.st.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "demo")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(revs) != 2 || revs[1].Action != model.CapabilityActionUpdate {
+				if len(revs) != 2 || revs[1].Action != model.DefinitionActionUpdate {
 					t.Fatalf("启停应留一条 update 审计: %+v", revs)
 				}
 			}
@@ -492,7 +492,7 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 			if _, err := wf.svc.SetSkillEnabled(ctx, "demo", true); err != nil {
 				t.Fatalf("启用失败: %v", err)
 			}
-			got = wf.readDef(t, model.CapabilityKindSkill, "demo")
+			got = wf.readDef(t, model.DefinitionKindSkill, "demo")
 			if got["enabled"] == false {
 				t.Fatalf("启用后不该还是 false: %+v", got)
 			}

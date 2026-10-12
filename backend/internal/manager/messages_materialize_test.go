@@ -12,11 +12,11 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 )
 
-// TestMessagesMaterializedAtTurnEnd 验证 turn 收口 messages 物化：
+// TestMessagesMaterializedAtRunEnd 验证 run 收口 messages 物化：
 // 窗口内 user 输入成行（原文）；assistant 文本片段跨多条 message 增量拼接（同 msg_id 合并、
 // 换 msg_id 分段）；thought/tool 交错事件进 assistant 行时间线；工具最终态抽入 tool_details；
 // 同 run 重建幂等（重复收口不产生重复行）。
-func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
+func TestMessagesMaterializedAtRunEnd(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
 	reg := testutil.StubRegistry()
@@ -34,12 +34,12 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 	svc.publish(BusToolUpdate, "s-msg", map[string]any{
 		"tool_call_id": "tc1", "kind": "bash", "output": "a.txt", "ok": true, "text": "done"})
 	svc.publish(BusMessage, "s-msg", map[string]any{"text": "关键词乙", "msg_id": "m1"})
-	svc.publish(BusTurnEnded, "s-msg", map[string]any{"stop_reason": "end_turn", "session_id": "s-msg"})
+	svc.publish(BusRunEnded, "s-msg", map[string]any{"stop_reason": "end_turn", "session_id": "s-msg"})
 
 	// 第二段（另一轮）换 msg_id → 应拆出新 assistant 行。
 	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第二问"})
 	svc.publish(BusMessage, "s-msg", map[string]any{"text": "另一条回答", "msg_id": "m2"})
-	svc.publish(BusTurnEnded, "s-msg", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "s-msg", map[string]any{"stop_reason": "end_turn"})
 
 	// 直接读 messages 表断言（读模型查询）。
 	hits, err := st.SearchUserMessages(ctx, "s-msg", "关键词")
@@ -89,7 +89,7 @@ func TestMessagesMaterializedAtTurnEnd(t *testing.T) {
 		t.Fatalf("tool_details 内容不符: %+v", tds)
 	}
 	if a0.SeqHi-a0.SeqLo < 4 {
-		t.Fatalf("assistant1 窗口应覆盖 whole turn: %d..%d", a0.SeqLo, a0.SeqHi)
+		t.Fatalf("assistant1 窗口应覆盖 whole run: %d..%d", a0.SeqLo, a0.SeqHi)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "s-s", AgentID: "agent-stub"})
 	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 mate 服务"})
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
-	svc.publish(BusTurnEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
 
 	hits, err := svc.SearchSessions(ctx, "部署", 5)
 	if err != nil {

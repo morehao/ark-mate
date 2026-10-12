@@ -18,6 +18,9 @@ import (
 	"github.com/morehao/golib/biz/gmiddleware/ginmiddleware"
 )
 
+// testEventID 测试用的事件行身份（bus 不校验形状；真实形状由 objid 铸）。
+const testEventID = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1PD"
+
 // frame 是测试用 WS 帧（松散解析关键字段）。
 type frame struct {
 	Type  string          `json:"type"`
@@ -124,7 +127,7 @@ func TestWSHandlerAttachSnapshotLivePong(t *testing.T) {
 	}
 
 	// bus 发布 → event 帧（按聚合过滤）
-	pub := bus.Publish("session.message", "s1", 1, map[string]any{"text": "hi"})
+	pub := bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "hi"})
 	var evt frame
 	wsRead(t, conn, &evt)
 	if evt.Type != "event" || evt.AggID != "s1" || evt.Event == nil ||
@@ -134,7 +137,7 @@ func TestWSHandlerAttachSnapshotLivePong(t *testing.T) {
 
 	// 未 attach 的聚合不推送（此处不发帧验证：发布给 s2 不会产生本连接可见帧，
 	// 直接进入 ping 流程，避免盲等；过滤逻辑由 replay 测试的仅 s1 回放间接覆盖）
-	bus.Publish("session.thought", "s2", 1, map[string]any{"text": "other"})
+	bus.Publish(testEventID, "session.thought", "s2", 1, map[string]any{"text": "other"})
 
 	// ping → pong
 	wsWrite(t, conn, map[string]any{"action": "ping"})
@@ -156,9 +159,9 @@ func TestWSHandlerAttachSnapshotLivePong(t *testing.T) {
 // TestWSHandlerReplayAfterSince 验证带 since_seq 的 attach 走历史重放（仅该聚合）。
 func TestWSHandlerReplayAfterSince(t *testing.T) {
 	bus := eventbus.New()
-	e1 := bus.Publish("session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
-	e2 := bus.Publish("session.message", "s1", 1, map[string]any{"text": "two"}) // seq 2
-	bus.Publish("session.message", "s2", 1, map[string]any{"text": "other"})     // seq 3
+	e1 := bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
+	e2 := bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "two"}) // seq 2
+	bus.Publish(testEventID, "session.message", "s2", 1, map[string]any{"text": "other"})     // seq 3
 
 	conn := startWS(t, bus)
 
@@ -175,9 +178,9 @@ func TestWSHandlerReplayAfterSince(t *testing.T) {
 // TestWSHandlerFullReplaySinceZero 验证 since_seq=0 → 全量回放（UI 冷开启既有会话重建视图）。
 func TestWSHandlerFullReplaySinceZero(t *testing.T) {
 	bus := eventbus.New()
-	bus.Publish("session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
-	bus.Publish("session.thought", "s1", 1, map[string]any{"text": "t"})   // seq 2
-	bus.Publish("session.message", "s2", 1, map[string]any{"text": "no"})  // seq 3
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
+	bus.Publish(testEventID, "session.thought", "s1", 1, map[string]any{"text": "t"})   // seq 2
+	bus.Publish(testEventID, "session.message", "s2", 1, map[string]any{"text": "no"})  // seq 3
 
 	conn := startWS(t, bus)
 
@@ -204,10 +207,10 @@ func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
 	conn := startWS(t, bus)
 
 	// 同聚合发布 4 条：limit=2，seq1-3 时淘汰水位到 2（seq1/seq2 出缓冲）
-	bus.Publish("session.message", "s1", 1, map[string]any{"text": "a"}) // seq 1
-	bus.Publish("session.message", "s1", 1, map[string]any{"text": "b"}) // seq 2
-	bus.Publish("session.message", "s1", 1, map[string]any{"text": "c"}) // seq 3
-	bus.Publish("session.message", "s1", 1, map[string]any{"text": "d"}) // seq 4
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "a"}) // seq 1
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "b"}) // seq 2
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "c"}) // seq 3
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "d"}) // seq 4
 
 	// since=1 < 水位 2 → snapshot
 	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(1)})
@@ -279,7 +282,7 @@ func TestWSAttachHandshakeToken(t *testing.T) {
 		if snap.Type != "snapshot" || snap.AggID != "s1" {
 			t.Fatalf("握手后应能正常订阅，got %+v", snap)
 		}
-		bus.Publish("session.message", "s1", 1, map[string]any{"text": "hi"})
+		bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "hi"})
 		var evt frame
 		wsRead(t, conn, &evt)
 		if evt.Type != "event" || evt.AggID != "s1" {

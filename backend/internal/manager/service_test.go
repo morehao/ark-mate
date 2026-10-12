@@ -169,7 +169,7 @@ func TestEventSinkCommands(t *testing.T) {
 }
 
 // TestDisconnectIdleSession 连接**意外**断开 + 会话空闲：不改写上一轮的终态、不伪造
-// turn.error（轮次结果只由轮次写）；只落 agent 级诊断（连接确实断了）并作废句柄（可重建）。
+// run.error（轮次结果只由轮次写）；只落 agent 级诊断（连接确实断了）并作废句柄（可重建）。
 func TestDisconnectIdleSession(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
 	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
@@ -184,7 +184,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got)
 	}
 	if bus.LastSeq() != before {
-		t.Fatalf("断连不应伪造会话事件（turn.error 等）: last=%d want %d", bus.LastSeq(), before)
+		t.Fatalf("断连不应伪造会话事件（run.error 等）: last=%d want %d", bus.LastSeq(), before)
 	}
 	if a, _ := svc.AgentByID("opencode"); a.State != AgentStateStopped {
 		t.Fatalf("agent 应 stopped: %s", a.State)
@@ -232,9 +232,9 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	}
 }
 
-// TestIntentionalTeardownInterruptsInFlightTurn 主动拆除 + 在途 turn：归 interrupted（无终态、
-// 可续聊重发），既不算失败也不算用户取消 —— 不发布 turn.error / run.cancelled。
-func TestIntentionalTeardownInterruptsInFlightTurn(t *testing.T) {
+// TestIntentionalTeardownInterruptsInFlightRun 主动拆除 + 在途 run：归 interrupted（无终态、
+// 可续聊重发），既不算失败也不算用户取消 —— 不发布 run.error / run.cancelled。
+func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
 	as := &ActiveSession{
 		ID: "s1", AgentID: "agent-opencode", Runtime: "opencode",
@@ -251,7 +251,7 @@ func TestIntentionalTeardownInterruptsInFlightTurn(t *testing.T) {
 
 	rc.intentional.Store(true)
 	orch.dropConn(rc)
-	// 等 runTurn 收尾（t.cancel 解除阻塞 → 写 interrupted）：轮询平台记录，避免裸读 as.turn。
+	// 等 executeRun 收尾（t.cancel 解除阻塞 → 写 interrupted）：轮询平台记录，避免裸读 as.run。
 	got := ""
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -266,7 +266,7 @@ func TestIntentionalTeardownInterruptsInFlightTurn(t *testing.T) {
 	if got != SessionStatusInterrupted {
 		t.Fatalf("主动拆除打断的轮次应归 interrupted: %s", got)
 	}
-	// 停机期间只应新增 user_message（Prompt 时发布）；不得有 turn.error / run.cancelled。
+	// 停机期间只应新增 user_message（Prompt 时发布）；不得有 run.error / run.cancelled。
 	sub := bus.Subscribe(before)
 	defer bus.Unsubscribe(sub)
 	select {

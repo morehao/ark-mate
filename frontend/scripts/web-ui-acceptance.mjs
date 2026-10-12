@@ -3,7 +3,7 @@
  * Web 界面验收（T-4：M3-4 能力勾选面板 / M4-6 自动化页 / M5′ 命令补全 / v11「设置 · 模型」一节）——**真 Chrome + 真服务**。
  *
  * 为什么这里才出现浏览器驱动代码：本仓前端零测试依赖（无 vitest/jest/playwright/puppeteer），
- * 既有 `smoke-e2e.mjs` / `e2e-live-turn.mjs` 只走 REST/WS。而 M3-4 与 M4-6 的 DoD 是**手工界面
+ * 既有 `smoke-e2e.mjs` / `e2e-live-run.mjs` 只走 REST/WS。而 M3-4 与 M4-6 的 DoD 是**手工界面
  * 验收**（勾选后建会话、preview 对照、手动 run、会话带标跳转），REST 冒烟替不了"界面真的长出来了"。
  * 于是用 Node 24 自带的全局 WebSocket 直连 CDP——**不引入任何新依赖**。
  *

@@ -1,4 +1,4 @@
-// Package store 是 ark-mate 的 SQLite 持久层门面（gorm + 纯 Go dialector）。
+// Package store 是 ark-mate 的 SQLite 持久层门面（gorm + golib 的 SQLite dialector，**依赖 CGO**）。
 //
 // 设计约束：
 //   - schema_migrations 自管迁移（对齐 zacp store.go 经验：事务 + 幂等 + 版本拒绝启动）；
@@ -64,7 +64,7 @@ type Store struct {
 	mcpServers         *dao.McpServerDao
 	agents             *dao.AgentDao
 	automations        *dao.AutomationDao
-	capabilityRevision *dao.CapabilityRevisionDao
+	definitionRevision *dao.DefinitionRevisionDao
 
 	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
 	providers *dao.ProviderDao
@@ -111,7 +111,7 @@ func New(db *gorm.DB) *Store {
 		mcpServers:         dao.NewMcpServerDao(getDB),
 		agents:             dao.NewAgentDao(getDB),
 		automations:        dao.NewAutomationDao(getDB),
-		capabilityRevision: dao.NewCapabilityRevisionDao(getDB),
+		definitionRevision: dao.NewDefinitionRevisionDao(getDB),
 
 		providers: dao.NewProviderDao(getDB),
 		models:    dao.NewModelDao(getDB),

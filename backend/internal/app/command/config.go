@@ -42,7 +42,7 @@ func configCmd(args []string) {
 				"projection_dirs":     formatProjectionDirs(cfg.ProjectionDirs),
 				"idle_timeout":        cfg.IdleTimeout.String(),
 				"reap_interval":       cfg.ReapInterval.String(),
-				"turn_timeout":        cfg.TurnTimeout.String(),
+				"run_timeout":        cfg.RunTimeout.String(),
 				"handoff_max_chars":   cfg.HandoffMaxChars,
 				"generation_limit":    cfg.GenerationLimit,
 				"automations":         cfg.AutomationDir,
@@ -108,7 +108,7 @@ func configCmd(args []string) {
 	fmt.Printf("  %-22s %-38s [%s]\n", "projection_dirs", emptyLabel(formatProjectionDirs(cfg.ProjectionDirs)), src("projection_dirs"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "idle_timeout", cfg.IdleTimeout.String(), src("idle_timeout"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "reap_interval", cfg.ReapInterval.String(), src("reap_interval"))
-	fmt.Printf("  %-22s %-38s [%s]\n", "turn_timeout", cfg.TurnTimeout.String(), src("turn_timeout"))
+	fmt.Printf("  %-22s %-38s [%s]\n", "run_timeout", cfg.RunTimeout.String(), src("run_timeout"))
 	fmt.Printf("  %-22s %-38d [%s]\n", "handoff_max_chars", cfg.HandoffMaxChars, src("handoff_max_chars"))
 	fmt.Printf("  %-22s %-38d [%s]\n", "generation_limit", cfg.GenerationLimit, src("generation_limit"))
 	fmt.Printf("  %-22s %-38s [%s]\n", "automations", cfg.AutomationDir, src("automations"))

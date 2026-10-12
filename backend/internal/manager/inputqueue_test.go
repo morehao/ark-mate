@@ -66,13 +66,13 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 	as := &ActiveSession{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
 	r.Orch.sessions[as.ID] = as
 	r.Svc.registerSession(&SessionRec{
-		ID: as.ID, AgentID: "a1", RuntimeHint: "stub", Status: SessionStatusInProgress, Generation: 1,
+		ID: as.ID, AgentID: "a1", RuntimeID: "stub", Status: SessionStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
-		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 runTurn 在写。
+		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 executeRun 在写。
 		//
-		// 判据**不能**是 `as.busy == false`：`runTurn` 的收尾顺序是
-		// 「先置 `as.busy = false` / `as.turn = nil` → 再发布终态事件、落库（events/runs/transcript）
+		// 判据**不能**是 `as.busy == false`：`executeRun` 的收尾顺序是
+		// 「先置 `as.busy = false` / `as.run = nil` → 再发布终态事件、落库（events/runs/transcript）
 		// → 最后 `close(t.done)`」。用 busy 判据会在"还没写完库"时就返回，紧随其后的关库与
 		// `t.TempDir()` 清理便与那次写入赛跑：SQLite 在失败**之前**会先建出 `-journal`，
 		// 于是 `RemoveAll` 的 `unlinkat` 撞上这个瞬态文件 → 偶发
@@ -80,16 +80,16 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 		//
 		// 这里**只等、绝不写**（不 flush、不关合并器）：任何在清理期额外触发的写都只会把
 		// `-journal` 的瞬态窗口撑得更大——实测把 `coalescer.Close()` 挂进清理链会把概率从
-		// 约 3% 抬到约 40%。等 `t.done`（收尾写完才关闭）才是与 `runTurn` 同步的正确信号。
+		// 约 3% 抬到约 40%。等 `t.done`（收尾写完才关闭）才是与 `executeRun` 同步的正确信号。
 		for i := 0; i < 8; i++ {
 			select {
 			case g.release <- struct{}{}:
 			default:
 			}
 		}
-		drainTurn := func() bool { // true = 已无在途轮次
+		drainRun := func() bool { // true = 已无在途轮次
 			as.mu.Lock()
-			t := as.turn
+			t := as.run
 			as.mu.Unlock()
 			if t == nil {
 				return true
@@ -103,14 +103,14 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 		}
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
-			if !drainTurn() {
+			if !drainRun() {
 				continue
 			}
-			// `as.turn = nil` 早于 `close(t.done)`，所以"看到 nil"仍有可能是收尾窗口：
+			// `as.run = nil` 早于 `close(t.done)`，所以"看到 nil"仍有可能是收尾窗口：
 			// 给一个静默窗口再确认一次确实没有新轮次，才摘句柄。
 			time.Sleep(5 * time.Millisecond)
 			as.mu.Lock()
-			still := as.turn
+			still := as.run
 			as.mu.Unlock()
 			if still == nil {
 				break
@@ -132,7 +132,7 @@ func payloadOf(ev eventbus.Event) map[string]any {
 	return map[string]any{}
 }
 
-// waitQueueDrain 等队列排空（投递发生在 runTurn 的 goroutine 里，断言前必须等它落地）。
+// waitQueueDrain 等队列排空（投递发生在 executeRun 的 goroutine 里，断言前必须等它落地）。
 func waitQueueDrain(t *testing.T, svc *Service, convID string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -179,8 +179,8 @@ func awaitPrompt(t *testing.T, g *gatedSession) string {
 	}
 }
 
-// startFirstTurn 起一轮并等它真的进入执行（此后会话处于 busy）。
-func startFirstTurn(t *testing.T, orch *Orchestrator, g *gatedSession, text string) {
+// startFirstRun 起一轮并等它真的进入执行（此后会话处于 busy）。
+func startFirstRun(t *testing.T, orch *Orchestrator, g *gatedSession, text string) {
 	t.Helper()
 	if _, err := orch.Prompt(context.Background(), "conv-1", text); err != nil {
 		t.Fatalf("首轮 prompt 失败: %v", err)
@@ -192,29 +192,29 @@ func startFirstTurn(t *testing.T, orch *Orchestrator, g *gatedSession, text stri
 
 // ——— 用例 ———
 
-// TestPromptAfterTurnQueuesWhenBusy 会话忙 + after_turn = 入队（不报错、不发 user_message），
+// TestPromptAfterRunQueuesWhenBusy 会话忙 + after_run = 入队（不报错、不发 user_message），
 // 响应带 queued/input_id，事件发 session.input_queued。
-func TestPromptAfterTurnQueuesWhenBusy(t *testing.T) {
+func TestPromptAfterRunQueuesWhenBusy(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 
 	resp, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "排队的话", Delivery: DeliveryAfterTurn})
+		dtosession.PromptReq{Prompt: "排队的话", Delivery: DeliveryAfterRun})
 	if err != nil {
-		t.Fatalf("after_turn 入队失败: %v", err)
+		t.Fatalf("after_run 入队失败: %v", err)
 	}
 	if !resp.Queued || resp.InputID == "" {
 		t.Fatalf("响应应带 queued+input_id: %+v", resp)
 	}
 	// 队列里确实有它，且**没有**被当成新轮次执行。
 	queued := svc.listQueuedInputs(context.Background(), "conv-1")
-	if len(queued) != 1 || queued[0].Text != "排队的话" || queued[0].Delivery != DeliveryAfterTurn {
+	if len(queued) != 1 || queued[0].Text != "排队的话" || queued[0].Delivery != DeliveryAfterRun {
 		t.Fatalf("队列内容不符: %+v", queued)
 	}
 	if got := g.prompts(); len(got) != 1 {
 		t.Fatalf("排队不应立刻消费: %v", got)
 	}
-	if queued[0].TargetTurnID == "" {
+	if queued[0].TargetRunID == "" {
 		t.Fatal("应记下入队时正在执行的那一轮")
 	}
 	// 事件：input_queued（含文本与投递模式——前端队列靠它建项）。
@@ -225,7 +225,7 @@ func TestPromptAfterTurnQueuesWhenBusy(t *testing.T) {
 		}
 		found = true
 		if p := payloadOf(ev); p["input_id"] != resp.InputID || p["text"] != "排队的话" ||
-			p["delivery"] != DeliveryAfterTurn {
+			p["delivery"] != DeliveryAfterRun {
 			t.Fatalf("input_queued 载荷不符: %+v", ev.Payload)
 		}
 	}
@@ -234,21 +234,21 @@ func TestPromptAfterTurnQueuesWhenBusy(t *testing.T) {
 	}
 }
 
-// TestQueuedInputDeliveredAfterTurnEnds 轮次正常收尾 → 队首自动投递为新一轮（FIFO），
+// TestQueuedInputDeliveredAfterRunEnds 轮次正常收尾 → 队首自动投递为新一轮（FIFO），
 // 并发布 input_delivered + 该轮的 user_message。
-func TestQueuedInputDeliveredAfterTurnEnds(t *testing.T) {
+func TestQueuedInputDeliveredAfterRunEnds(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 	if _, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "排队一", Delivery: DeliveryAfterTurn}); err != nil {
+		dtosession.PromptReq{Prompt: "排队一", Delivery: DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "排队二", Delivery: DeliveryAfterTurn}); err != nil {
+		dtosession.PromptReq{Prompt: "排队二", Delivery: DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
 
-	g.release <- struct{}{} // 放行第一轮 → runTurn 收尾 → 投递「排队一」
+	g.release <- struct{}{} // 放行第一轮 → executeRun 收尾 → 投递「排队一」
 	if got := awaitPrompt(t, g); got != "排队一" {
 		t.Fatalf("应投递队首「排队一」，得到 %q", got)
 	}
@@ -272,8 +272,8 @@ func TestQueuedInputDeliveredAfterTurnEnds(t *testing.T) {
 		switch ev.Type {
 		case BusInputDelivered:
 			delivered++
-			if payloadOf(ev)["reason"] != ReasonTurnFinished {
-				t.Fatalf("delivered 应带 reason=turn_finished: %+v", ev.Payload)
+			if payloadOf(ev)["reason"] != ReasonRunFinished {
+				t.Fatalf("delivered 应带 reason=run_finished: %+v", ev.Payload)
 			}
 		case BusInputCancelled:
 			cancelled++
@@ -288,9 +288,9 @@ func TestQueuedInputDeliveredAfterTurnEnds(t *testing.T) {
 // 不投递（旧上下文里的排队不该灌进新会话），且轮次照常收尾。
 func TestQueuedInputStaledWhenGenerationChanged(t *testing.T) {
 	svc, orch, g, as := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 	if _, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "为旧上下文排的队", Delivery: DeliveryAfterTurn}); err != nil {
+		dtosession.PromptReq{Prompt: "为旧上下文排的队", Delivery: DeliveryAfterRun}); err != nil {
 		t.Fatal(err)
 	}
 	// 模拟连接断开重连：执行代际自增（真实路径见 ensureSession 里的 bumpGeneration）。
@@ -323,7 +323,7 @@ func TestQueuedInputStaledWhenGenerationChanged(t *testing.T) {
 // TestQueuedInputInterruptThenPrompt 忙 + interrupt_then_prompt = 取消当前轮后投递本项。
 func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "被打断的一轮")
+	startFirstRun(t, orch, g, "被打断的一轮")
 
 	resp, err := svc.PromptSession(context.Background(), "conv-1",
 		dtosession.PromptReq{Prompt: "插话", Delivery: DeliveryInterruptThenPrompt})
@@ -357,9 +357,9 @@ func TestQueuedInputInterruptThenPrompt(t *testing.T) {
 // 已投递的项不可撤（台账行不可删）。
 func TestDeleteQueuedInput(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 	resp, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "要撤下的", Delivery: DeliveryAfterTurn})
+		dtosession.PromptReq{Prompt: "要撤下的", Delivery: DeliveryAfterRun})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestDeleteQueuedInput(t *testing.T) {
 // TestPromptDeliveryValidation 非法 delivery 显式报错（不静默回落 reject）；reject 保持历史行为。
 func TestPromptDeliveryValidation(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), true)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 
 	// 领域层：稳定 code 在 acl 错误上（`delivery_*` 这类码由 acl.As 读出，不进文案）。
 	if _, err := NormalizeDelivery("whenever"); err == nil {
@@ -437,12 +437,12 @@ func TestPromptDeliveryValidation(t *testing.T) {
 	}
 }
 
-// TestPromptAfterTurnWhenIdleRunsImmediately 会话空闲时 after_turn 与 reject 同路径：
+// TestPromptAfterRunWhenIdleRunsImmediately 会话空闲时 after_run 与 reject 同路径：
 // 直接执行，不留队列行（没有「等的那一轮」）。
-func TestPromptAfterTurnWhenIdleRunsImmediately(t *testing.T) {
+func TestPromptAfterRunWhenIdleRunsImmediately(t *testing.T) {
 	svc, _, g, _ := newQueueRig(t, newGatedSession(), true)
 	resp, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "空闲时提交", Delivery: DeliveryAfterTurn})
+		dtosession.PromptReq{Prompt: "空闲时提交", Delivery: DeliveryAfterRun})
 	if err != nil {
 		t.Fatalf("空闲投递失败: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
 	svc1.registerSession(&SessionRec{ID: "c1", AgentID: "a1", Generation: 1})
-	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterTurn, "turn-x", 1)
+	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterRun, "run-x", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +500,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 			continue
 		}
 		p, _ := decodePayload(e.PayloadJSON).(map[string]any)
-		if p["input_id"] != queued.ID || p["reason"] != ReasonStale || p["delivery"] != DeliveryAfterTurn {
+		if p["input_id"] != queued.ID || p["reason"] != ReasonStale || p["delivery"] != DeliveryAfterRun {
 			t.Fatalf("作废事件载荷不符: %+v", p)
 		}
 		found = true
@@ -513,9 +513,9 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 // TestInputQueueMemoryMode memory 模式（无库）：入队/撤下/投递全在进程内，进程结束即消失。
 func TestInputQueueMemoryMode(t *testing.T) {
 	svc, orch, g, _ := newQueueRig(t, newGatedSession(), false)
-	startFirstTurn(t, orch, g, "第一轮")
+	startFirstRun(t, orch, g, "第一轮")
 	resp, err := svc.PromptSession(context.Background(), "conv-1",
-		dtosession.PromptReq{Prompt: "内存里的排队", Delivery: DeliveryAfterTurn})
+		dtosession.PromptReq{Prompt: "内存里的排队", Delivery: DeliveryAfterRun})
 	if err != nil || !resp.Queued {
 		t.Fatalf("内存模式应能入队: %v/%+v", err, resp)
 	}

@@ -471,7 +471,7 @@ export const setDefaultAgent = (id: string): Promise<Agent> =>
 export const startAgent = (id: string): Promise<{ id: string; state: string }> =>
   http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/start`)
 
-/** 停止 agent 对应 runtime 进程（有在途 turn 报 agent_busy）。 */
+/** 停止 agent 对应 runtime 进程（有在途 run 报 agent_busy）。 */
 export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
   http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/stop`)
 

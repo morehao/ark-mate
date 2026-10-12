@@ -35,7 +35,8 @@ type AgentRec struct {
 }
 
 // SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源）。
-// P0 起不再记录 runtime 身份；RuntimeHint 仅为最近/首选 runtime 的执行提示（非身份，用户不可见）。
+// P0 起不再记录 runtime 身份；RuntimeID 仅为最近/首选 runtime 的**执行事实**（非身份，用户不可见；
+// v17 起与 DB 列 `sessions.runtime_id` 同名同义，此前叫 RuntimeHint/runtime_hint）。
 type SessionRec struct {
 	ID      string
 	AgentID string
@@ -51,16 +52,17 @@ type SessionRec struct {
 	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
 	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
 	WorkspaceID string
-	Provider    string // provider 档案 id（会话级模型选择；空 = 跟随 agent）
-	Model       string // 会话级模型 id（空 = 底座默认）
-	RuntimeHint string // 最近/首选 runtime（执行提示，非身份）
+	ProviderID  string // provider 档案 id（会话级模型选择；空 = 跟随 agent；v16 起列名带 `_id`）
+	ModelID     string // 会话级模型 id（空 = 底座默认；指向 models.model_id，v16 起列名带 `_id`）
+	RuntimeID   string // 最近/首选 runtime（执行事实，非身份；v17 起列 runtime_id）
 	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
 	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
 	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
 	Generation int64
-	// ProviderSessionID 原生底座会话 id（P3 双 id；session id = 平台 uuid，本字段存
-	// 原生 id 供 load/resume 恢复承载。memory 模式下仅在活跃集合期间可用）。
-	ProviderSessionID string
+	// RuntimeSessionID 原生底座会话 id（P3 双 id；session id = 平台 uuid，本字段存
+	// 原生 id 供 load/resume 恢复承载，v17 前叫 ProviderSessionID / `provider_session_id`。
+	// memory 模式下仅在活跃集合期间可用）。
+	RuntimeSessionID string
 	// Fingerprint 该会话钉住的**能力指纹**（代际；空 = 未声明能力选择）。
 	// 恢复路径据此回到同一代际。M3-1 起落库列 `capability_fingerprint`（v7），
 	// RestoreFromStore 原样读回——否则重启后指纹变空、会话悄悄换到默认能力集。

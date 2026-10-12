@@ -115,6 +115,53 @@ func readLegacyConversation(t *testing.T, s *Store, id string) legacyConversatio
 	return row
 }
 
+// insertLegacyDefinition 按**停在 v16 之前**那一版的表名，手写"定义行 + create 审计"。
+//
+// 为什么不能用 `UpsertXxxDefinition`：它们把审计写进 v16 的 `definition_revisions`，而
+// v8–v14 的库里那张表还叫 `capability_revisions`（v16 才 `RENAME TO`）——DAO 认的永远是
+// **最终**表名，所以"停在历史版本的用例"必须自己说那一版的话。理由与
+// `legacyConversationRow`/`readLegacyConversation` 逐字相同：**实体改名不得跟随进历史迁移步**
+// （守卫⑤/⑥），这一对助手是它在测试侧的两半。
+//
+// `table` 是那一版的定义表名（`skills` / `agents` / `automations`——三者在 v16 都没改名，
+// 本次只改了审计表与 `sessions`/`inputs` 的列）。四张定义表同形：id / body / revision / updated_at。
+func insertLegacyDefinition(t *testing.T, s *Store, table, kind, id, body string) {
+	t.Helper()
+	at := model.NowTS()
+	if err := s.db.Exec(`INSERT INTO `+table+` (id, body, revision, updated_at) VALUES (?, ?, 1, ?)`,
+		id, body, at).Error; err != nil {
+		t.Fatalf("写历史定义行 %s(%s): %v", table, id, err)
+	}
+	// digest 用**当时那条**写路径的算法（`bodyDigest`），这样"审计能回答那一版到底是什么"
+	// 这条性质在用例里也是真的，而不是随便填一个占位串。
+	if err := s.db.Exec(`INSERT INTO capability_revisions (kind, capability_id, action, actor, at, digest)
+		VALUES (?, ?, 'create', 'test', ?, ?)`, kind, id, at, bodyDigest(body)).Error; err != nil {
+		t.Fatalf("写历史审计行 %s(%s): %v", kind, id, err)
+	}
+}
+
+// legacyRevisionSeq 读历史审计表的最大 seq（表名是那一版的 `capability_revisions`）。
+func legacyRevisionSeq(t *testing.T, s *Store) int64 {
+	t.Helper()
+	var seq int64
+	if err := s.db.Raw(`SELECT COALESCE(MAX(seq), 0) FROM capability_revisions`).Scan(&seq).Error; err != nil {
+		t.Fatalf("读历史审计表水位: %v", err)
+	}
+	return seq
+}
+
+// legacySkillRevision 读历史审计表里某条 skill 的（审计条数，首条 seq）。
+func legacySkillRevision(t *testing.T, s *Store, id string) (int, int64) {
+	t.Helper()
+	var n int
+	var first int64
+	if err := s.db.Raw(`SELECT COUNT(*), COALESCE(MIN(seq), 0) FROM capability_revisions
+		WHERE kind = 'skill' AND capability_id = ?`, id).Row().Scan(&n, &first); err != nil {
+		t.Fatalf("读历史审计行 skill(%s): %v", id, err)
+	}
+	return n, first
+}
+
 // TestMigrateV6ToV7KeepsData v6 → v7 升级：三个新列纯增列（默认 `”`），既有数据一行不丢。
 //
 // 这一条是 M3-1 的验收核心：代际绑定把"会话钉住的能力"落进库，而**用户手上的库是 v6 的**。
@@ -260,21 +307,20 @@ func TestMigrateV7ToV14KeepsData(t *testing.T) {
 	if n, err := s.CountMcpServerDefinitions(ctx); err != nil || n != 0 {
 		t.Fatalf("升级后 mcp_servers 应为空: n=%d err=%v", n, err)
 	}
-	if seq, err := s.MaxCapabilityRevisionSeq(ctx); err != nil || seq != 0 {
-		t.Fatalf("升级后 capability_revisions 应为空: seq=%d err=%v", seq, err)
+	if seq := legacyRevisionSeq(t, s); seq != 0 {
+		t.Fatalf("升级后 capability_revisions 应为空: seq=%d", seq)
 	}
 
 	// ③ 新表可写（v8 的写路径真的落到了这三张表上）。
-	if ok, err := s.UpsertSkillDefinition(ctx, "s1", `{"name":"升级后新建"}`, 0, "cli"); err != nil || !ok {
-		t.Fatalf("升级后写 skill 定义: ok=%v err=%v", ok, err)
-	}
-	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "s1")
-	if err != nil || len(revs) != 1 || revs[0].Seq != 1 {
-		t.Fatalf("升级后的审计应从 seq=1 开始: %+v err=%v", revs, err)
+	//
+	// 审计那一半走裸 SQL + **历史表名**：`definition_revisions` 是 v16 才有的名字。
+	insertLegacyDefinition(t, s, "skills", "skill", "s1", `{"name":"升级后新建"}`)
+	if n, first := legacySkillRevision(t, s, "s1"); n != 1 || first != 1 {
+		t.Fatalf("升级后的审计应从 seq=1 开始: n=%d first=%d", n, first)
 	}
 
 	// ④ 索引要真的建出来（"这条能力的变更历史"查询靠它；建不出来时查询照样能跑，
-	// 只是退化成全表扫——静默的性能回归，测试必须钉住）。
+	// 只是退化成全表扫——静默的性能回归，测试必须钉住）。索引名同样是**那一版**的。
 	var name string
 	row := s.db.Raw(`SELECT name FROM sqlite_master WHERE type='index' AND name = ?`,
 		"idx_capability_revisions_capability").Row()
@@ -304,11 +350,9 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	s := New(db)
 	defer func() { _ = s.Close() }()
 
-	// 造一个**真实的 v8 库**并写一行 skill 定义 + 一条审计。
+	// 造一个**真实的 v8 库**并写一行 skill 定义 + 一条审计（历史表名，见 insertLegacyDefinition）。
 	applySchemaUpTo(t, s, 8)
-	if ok, err := s.UpsertSkillDefinition(ctx, "sk-old", `{"name":"v8 存量"}`, 0, "test"); err != nil || !ok {
-		t.Fatalf("写 v8 skill 行: ok=%v err=%v", ok, err)
-	}
+	insertLegacyDefinition(t, s, "skills", "skill", "sk-old", `{"name":"v8 存量"}`)
 
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("v8 → v9 升级失败: %v", err)
@@ -322,7 +366,7 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	if err != nil || !found || sk.Body != `{"name":"v8 存量"}` || sk.Revision != 1 {
 		t.Fatalf("升级后 v8 skill 行失真: found=%v err=%v row=%+v", found, err, sk)
 	}
-	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindSkill, "sk-old"); err != nil || len(revs) != 1 {
+	if revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "sk-old"); err != nil || len(revs) != 1 {
 		t.Fatalf("升级后 v8 审计应保留: n=%d err=%v", len(revs), err)
 	}
 
@@ -349,7 +393,7 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	if err != nil || !found || ag.Revision != 2 || ag.Body != `{"id":"my-agent","name":"改名"}` {
 		t.Fatalf("agent 行不符: found=%v err=%v row=%+v", found, err, ag)
 	}
-	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "my-agent")
+	revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "my-agent")
 	if err != nil || len(revs) != 2 || revs[0].Action != "create" || revs[1].Action != "update" {
 		t.Fatalf("agent 审计不符: %+v err=%v", revs, err)
 	}
@@ -375,7 +419,7 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	if _, found, _ := s.GetAgentDefinition(ctx, "my-agent"); found {
 		t.Fatal("删除后不该还读到行")
 	}
-	revs, err = s.ListCapabilityRevisions(ctx, model.CapabilityKindAgent, "my-agent")
+	revs, err = s.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "my-agent")
 	if err != nil || len(revs) != 3 || revs[2].Action != "delete" || revs[2].Digest != "" {
 		t.Fatalf("删除审计不符（删定义也留痕且 digest 为空）: %+v err=%v", revs, err)
 	}
@@ -397,9 +441,7 @@ func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	applySchemaUpTo(t, s, 9)
-	if ok, err := s.UpsertAgentDefinition(ctx, "ag-old", `{"id":"ag-old","name":"v9 存量"}`, 0, "test"); err != nil || !ok {
-		t.Fatalf("写 v9 agent 行: ok=%v err=%v", ok, err)
-	}
+	insertLegacyDefinition(t, s, "agents", "agent", "ag-old", `{"id":"ag-old","name":"v9 存量"}`)
 
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("v9 → v10 升级失败: %v", err)
@@ -459,8 +501,8 @@ func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
 		t.Fatalf("运行态列未落库: %+v", after)
 	}
 	// 审计只记定义变更（运行态推进不产生审计行）。
-	revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindAutomation, "nightly")
-	if err != nil || len(revs) != 1 || revs[0].Action != model.CapabilityActionCreate {
+	revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindAutomation, "nightly")
+	if err != nil || len(revs) != 1 || revs[0].Action != model.DefinitionActionCreate {
 		t.Fatalf("automation 审计应只有建定义那一条: %+v err=%v", revs, err)
 	}
 }
@@ -482,9 +524,7 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	applySchemaUpTo(t, s, 10)
-	if ok, err := s.UpsertAgentDefinition(ctx, "ag-old", `{"id":"ag-old","name":"v10 存量"}`, 0, "test"); err != nil || !ok {
-		t.Fatalf("写 v10 agent 行: ok=%v err=%v", ok, err)
-	}
+	insertLegacyDefinition(t, s, "agents", "agent", "ag-old", `{"id":"ag-old","name":"v10 存量"}`)
 
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("v10 → v11 升级失败: %v", err)
@@ -517,10 +557,10 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写模型条目: ok=%v err=%v", ok, err)
 	}
-	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindProvider, "deepseek-main"); err != nil || len(revs) != 1 {
+	if revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindProvider, "deepseek-main"); err != nil || len(revs) != 1 {
 		t.Fatalf("provider 审计应为 1 条: n=%d err=%v", len(revs), err)
 	}
-	if revs, err := s.ListCapabilityRevisions(ctx, model.CapabilityKindModel, "md-1"); err != nil || len(revs) != 1 {
+	if revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindModel, "md-1"); err != nil || len(revs) != 1 {
 		t.Fatalf("model 审计应为 1 条: n=%d err=%v", len(revs), err)
 	}
 

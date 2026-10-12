@@ -369,7 +369,7 @@ func vaultUnavailableErr(cause error) error {
 
 // dialEnvChannel 凭据的交付通道（env 注入那一档；取自静态交付表，避免"一处声明"再多一个漂移点）。
 func dialEnvChannel() string {
-	d, _ := objdelivery.For(model.CapabilityKindProvider)
+	d, _ := objdelivery.For(model.DefinitionKindProvider)
 	return d.Channel
 }
 

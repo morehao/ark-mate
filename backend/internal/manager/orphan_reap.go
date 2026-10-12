@@ -76,7 +76,7 @@ func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
 	}
 }
 
-// reapIdleOnce 空闲回收单轮：扫全部连接，回收「无在途 turn、无任何会话引用、且自建立起空闲
+// reapIdleOnce 空闲回收单轮：扫全部连接，回收「无在途 run、无任何会话引用、且自建立起空闲
 // 超过 idle」的暖进程（P2 StartAgent 常驻类）；锁内判定 + dropConn 原子摘除 → 锁外停进程，
 // 下次会话/StartAgent 经 acquire 按需拉起（与 P1 断点恢复合流：连接丢失后 prompt 自动重建）。
 // 返回回收数量。
@@ -88,7 +88,7 @@ func (o *Orchestrator) reapIdleOnce(now time.Time, idle time.Duration) int {
 			continue
 		}
 		if o.inflight.Len(rc.client) > 0 {
-			continue // 有在途 turn，不回收
+			continue // 有在途 run，不回收
 		}
 		hasSession := false
 		for _, as := range o.sessions {

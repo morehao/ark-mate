@@ -20,11 +20,14 @@ import (
 	// "no registered dialector matches url"。它属于本包自己的依赖，因此匿名引入
 	// 留在这里（与 ark-go-starter 的 pkg/dbclient 一致）；日志出口的 driver 才归装配根。
 	//
-	// 已知代价（2026-10-10 决策，用户明确选择"照字面用 golib 的 driver"）：
-	//   - 底层是 **CGO** 的 mattn/go-sqlite3。`CGO_ENABLED=0`（桌面核 Makefile
-	//     `core/desktop`、容器镜像 Dockerfile）也能编译，但注册的是 stub，
-	//     **连库时**才报 "Binary was compiled with 'CGO_ENABLED=0', go-sqlite3
-	//     requires cgo to work"——编译期无感、运行期致命。
+	// 已知代价（2026-10-10 决策：用户明确选择"照字面用 golib 的 driver"；
+	// 2026-10-11 决策：**允许依赖 CGO**，桌面核 `Makefile` 的 `core/desktop`、容器
+	// `Dockerfile` 的 build 阶段、两份桌面验收脚本的 `rebuildCore` 共四处一律
+	// `CGO_ENABLED=1`）：
+	//   - 底层是 **CGO** 的 mattn/go-sqlite3。若不慎编成 `CGO_ENABLED=0`（2026-10-11 之前
+	//     桌面核与容器镜像正是如此），编译照样过，注册的却是 stub，**连库时**才报
+	//     "Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work"
+	//     ——编译期无感、运行期致命。
 	//   - 相比原先自注册的纯 Go dialector，连接级行为由 golib 决定：不注入
 	//     journal_mode(WAL)/synchronous、不固定 busy_timeout、不开启 foreign_keys，
 	//     且内存库统一命名 `file::memory:?cache=shared`（同进程多次 Open(":memory:")

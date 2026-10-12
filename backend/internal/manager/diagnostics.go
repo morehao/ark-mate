@@ -59,7 +59,7 @@ type scopeNote struct {
 }
 
 // noteScopeAmbiguous 记一条「归属歧义」留痕（elicitation 无法归属会话：wire `_meta` 未给 scope
-// 且连接上无唯一在途 turn）。按 agent 覆盖最近一条（重复事件不堆积），随 AgentDiagnostics 的
+// 且连接上无唯一在途 run）。按 agent 覆盖最近一条（重复事件不堆积），随 AgentDiagnostics 的
 // remediation 外露——这是「提问卡为什么没出现」的用户可见入口。
 func (s *Service) noteScopeAmbiguous(agentID, detail string) {
 	if agentID == "" {

@@ -14,7 +14,7 @@ import (
 // 本文件是能力定义事实源（M6-1）的门面：**一次写面 = 一行 + 一条审计**。
 //
 // 为什么跨表不变量必须落在 store 而不是 dao：`skills.revision` 与
-// `capability_revisions.seq` 是同一个提交动作的两半——只写前一半，写面就失去了"改过没有"
+// `definition_revisions.seq` 是同一个提交动作的两半——只写前一半，写面就失去了"改过没有"
 // 的判据；只写后一半，审计会指向一个没有发生过的变更。两者同事务是这一层的存在理由
 // （同 events.seq 的分配与插入、transcript 导入的整体回滚）。
 //
@@ -35,11 +35,11 @@ import (
 // 返回 false = 该提交被并发写抢先（或行已不存在）：调用方翻成同一个
 // `definition_changed`(40901)——名字与码都与今天不变。
 func (s *Store) UpsertSkillDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
-	action := model.CapabilityActionUpdate
+	action := model.DefinitionActionUpdate
 	if expectedRev == 0 {
-		action = model.CapabilityActionCreate
+		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindSkill, id, actor, action, bodyDigest(body), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindSkill, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.skills.WithTx(tx).CreateCAS(ctx, &model.SkillEntity{
@@ -54,7 +54,7 @@ func (s *Store) UpsertSkillDefinition(ctx context.Context, id, body string, expe
 //
 // 按 revision CAS：**"删掉别人刚改过的那一版"是必须被挡住的动作**——它的后果比覆盖更不可逆。
 func (s *Store) DeleteSkillDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindSkill, id, actor, model.CapabilityActionDelete, "", expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindSkill, id, actor, model.DefinitionActionDelete, "", expectedRev,
 		func(tx *gorm.DB, _ time.Time) (bool, error) {
 			return s.skills.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
 		})
@@ -75,11 +75,11 @@ func (s *Store) CountSkillDefinitions(ctx context.Context) (int64, error) { retu
 
 // UpsertMcpServerDefinition 提交一次 MCP server 定义写入（语义逐字同 UpsertSkillDefinition）。
 func (s *Store) UpsertMcpServerDefinition(ctx context.Context, id, body string, expectedRev int64, actor string) (bool, error) {
-	action := model.CapabilityActionUpdate
+	action := model.DefinitionActionUpdate
 	if expectedRev == 0 {
-		action = model.CapabilityActionCreate
+		action = model.DefinitionActionCreate
 	}
-	return s.commitDefinitionChange(ctx, model.CapabilityKindMcp, id, actor, action, bodyDigest(body), expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindMcp, id, actor, action, bodyDigest(body), expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			if expectedRev == 0 {
 				return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerEntity{
@@ -92,7 +92,7 @@ func (s *Store) UpsertMcpServerDefinition(ctx context.Context, id, body string, 
 
 // DeleteMcpServerDefinition 删除一条 MCP server 定义 + 一条审计，同事务（语义同 DeleteSkillDefinition）。
 func (s *Store) DeleteMcpServerDefinition(ctx context.Context, id string, expectedRev int64, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindMcp, id, actor, model.CapabilityActionDelete, "", expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindMcp, id, actor, model.DefinitionActionDelete, "", expectedRev,
 		func(tx *gorm.DB, _ time.Time) (bool, error) {
 			return s.mcpServers.WithTx(tx).DeleteCAS(ctx, id, expectedRev)
 		})
@@ -113,19 +113,19 @@ func (s *Store) CountMcpServerDefinitions(ctx context.Context) (int64, error) {
 	return s.mcpServers.Count(ctx)
 }
 
-// ListCapabilityRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
-func (s *Store) ListCapabilityRevisions(ctx context.Context, kind, capabilityID string) (model.CapabilityRevisionEntityList, error) {
-	return s.capabilityRevision.ListByCapability(ctx, kind, capabilityID)
+// ListDefinitionRevisions 列出某条能力的变更历史（seq 升序，含已删除的能力）。
+func (s *Store) ListDefinitionRevisions(ctx context.Context, kind, definitionID string) (model.DefinitionRevisionEntityList, error) {
+	return s.definitionRevision.ListByDefinition(ctx, kind, definitionID)
 }
 
-// RecentCapabilityRevisions 列出最近 limit 条变更（seq 降序；limit <= 0 视为 50）。
-func (s *Store) RecentCapabilityRevisions(ctx context.Context, limit int) (model.CapabilityRevisionEntityList, error) {
-	return s.capabilityRevision.ListRecent(ctx, limit)
+// RecentDefinitionRevisions 列出最近 limit 条变更（seq 降序；limit <= 0 视为 50）。
+func (s *Store) RecentDefinitionRevisions(ctx context.Context, limit int) (model.DefinitionRevisionEntityList, error) {
+	return s.definitionRevision.ListRecent(ctx, limit)
 }
 
-// MaxCapabilityRevisionSeq 返回当前代际 rev（= 变更审计的最大 seq；空表 → 0）。
-func (s *Store) MaxCapabilityRevisionSeq(ctx context.Context) (int64, error) {
-	return s.capabilityRevision.MaxSeq(ctx)
+// MaxDefinitionRevisionSeq 返回当前代际 rev（= 变更审计的最大 seq；空表 → 0）。
+func (s *Store) MaxDefinitionRevisionSeq(ctx context.Context) (int64, error) {
+	return s.definitionRevision.MaxSeq(ctx)
 }
 
 // commitDefinitionChange 是"定义/资源行 + 审计"的唯一提交路径。
@@ -150,9 +150,9 @@ func (s *Store) commitDefinitionChange(
 			return err
 		}
 		applied = true
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
+		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
 			Kind:         kind,
-			CapabilityID: id,
+			DefinitionID: id,
 			Action:       action,
 			Actor:        actor,
 			At:           now,

@@ -389,7 +389,7 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, patch dtoagent.Age
 //     权限面/MCP 白名单/原生上下文），但其上继续提问将报 agent_not_found（文案给出「同 id 重建 /
 //     导出历史」两条出路）；
 //   - 内存里仍活跃的会话在此刻被摘除，避免「删了还能跑、重启后才失效」的半死态；
-//   - 有在途 turn 时整体拒绝（agent_busy）：失败即无副作用，不删一半。
+//   - 有在途 run 时整体拒绝（agent_busy）：失败即无副作用，不删一半。
 func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDeleteResp, error) {
 	if seedAgent(id) {
 		return nil, acl.NewError(acl.ClassRequest, "seed_agent_readonly",
@@ -403,7 +403,7 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) (*dtoagent.AgentDe
 	}
 	affected := s.sessionCountLocked(id)
 	s.mu.Unlock()
-	// 先摘活跃会话（有在途 turn 则整体拒绝，此时定义未删、文件未动）。
+	// 先摘活跃会话（有在途 run 则整体拒绝，此时定义未删、文件未动）。
 	detached := 0
 	if s.orch != nil {
 		n, err := s.orch.DetachAgent(id)
@@ -461,7 +461,7 @@ func (s *Service) StartAgent(ctx context.Context, id string) error {
 	return nil
 }
 
-// StopAgent 停止 agent 对应 runtime 进程：有在途 turn 时拒绝（先 cancel/等收尾）。
+// StopAgent 停止 agent 对应 runtime 进程：有在途 run 时拒绝（先 cancel/等收尾）。
 // 空闲/无连接时幂等置 stopped。
 func (s *Service) StopAgent(ctx context.Context, id string) error {
 	if s.orch == nil {

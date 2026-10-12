@@ -56,8 +56,8 @@ func modelRowDigest(cols ModelColumns) string {
 //   - 同 `(provider_id, model_id)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
 //   - 主键 `id` 已存在（并发新建抢先，同一个对外表现）。
 func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, actor string) (bool, error) {
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, cols.ID, actor,
-		model.CapabilityActionCreate, modelRowDigest(cols), 0,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, cols.ID, actor,
+		model.DefinitionActionCreate, modelRowDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelEntity{
 				ID: cols.ID, ProviderID: cols.ProviderID, ModelID: cols.ModelID,
@@ -75,8 +75,8 @@ func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content Mo
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
 	})
-	return s.commitDefinitionChange(ctx, model.CapabilityKindModel, id, actor,
-		model.CapabilityActionUpdate, digest, expectedRev,
+	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, id, actor,
+		model.DefinitionActionUpdate, digest, expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.models.WithTx(tx).UpdateColumnsCAS(ctx, id, map[string]any{
 				"name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
@@ -117,10 +117,10 @@ func (s *Store) DeleteModelDefinitionAndClearDefault(
 			}
 			cleared = true
 		}
-		return s.capabilityRevision.WithTx(tx).Append(ctx, &model.CapabilityRevisionEntity{
-			Kind:         model.CapabilityKindModel,
-			CapabilityID: id,
-			Action:       model.CapabilityActionDelete,
+		return s.definitionRevision.WithTx(tx).Append(ctx, &model.DefinitionRevisionEntity{
+			Kind:         model.DefinitionKindModel,
+			DefinitionID: id,
+			Action:       model.DefinitionActionDelete,
 			Actor:        actor,
 			At:           now,
 			Digest:       "",

@@ -150,12 +150,12 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 
 	var got map[string]any
 	for _, e := range bus.EventsAfter(0) {
-		if e.Type == BusTurnError && e.AggregID == "c-x" {
+		if e.Type == BusRunError && e.AggregID == "c-x" {
 			got, _ = e.Payload.(map[string]any)
 		}
 	}
 	if got == nil {
-		t.Fatal("未发布 turn.error")
+		t.Fatal("未发布 run.error")
 	}
 	tail, _ := got["stderr_tail"].([]string)
 	if len(tail) != 2 || tail[1] != "line-2" {

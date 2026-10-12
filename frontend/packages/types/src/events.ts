@@ -34,8 +34,8 @@ export const Ev = {
   Commands: 'session.commands',
   // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
   Runtime: 'session.runtime',
-  TurnEnded: 'turn.ended',
-  TurnError: 'turn.error',
+  RunEnded: 'run.ended',
+  RunError: 'run.error',
   RunCancelled: 'run.cancelled',
   // 一次 automation 触发的结果（含没产生会话的那些：duplicate/overlap/skipped）。
   // payload = {automation_id, trigger, scheduled_for, status, reason?, session_id?}。
@@ -45,6 +45,12 @@ export const Ev = {
 export type EvType = (typeof Ev)[keyof typeof Ev]
 
 export interface BusEvent {
+  // id 事件行身份（`evt_<26 位 ULID>`，v17 起）。
+  //
+  // **可选**是有语义的，不是"还没补上"：只有**落库/进 transcript 的**事件才有身份，而
+  // `automation.run` 这类只走实时通道的事件没有——于是"帧上有 id ⟺ 它在 durable 日志里查得到"
+  // 这条不变式成立，客户端拿它去引用某一条事件（书签/诊断）才是安全的。
+  id?: string
   type: string
   seq: number
   agg_id: string
@@ -68,10 +74,10 @@ export type EntryKind = 'user' | 'assistant' | 'thought' | 'tool' | 'system' | '
 export interface QueuedInput {
   inputId: string
   text: string
-  /** after_turn | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
+  /** after_run | interrupt_then_prompt（入队时不会出现 reject：那是「不排队、直接报错」）。 */
   delivery: string
   /** 入队时正在执行的那一轮（审计用；服务端投递判据是 generation）。 */
-  targetTurnId?: string
+  targetRunId?: string
   /** 入队时会话执行代际：服务端投递前比对，不等即作废（旧队项绝不灌进重建后的上下文）。 */
   generation?: number
   seq?: number

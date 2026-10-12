@@ -211,7 +211,7 @@ func TestSyncCredentialsEmptySetOnlyTouchesPlatformRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("空集撤回失败：%v", err)
 	}
-	if out.Channel != resource.ChannelNativeDoc || out.Effect != resource.EffectNextTurn || !out.Tested {
+	if out.Channel != resource.ChannelNativeDoc || out.Effect != resource.EffectNextRun || !out.Tested {
 		t.Fatalf("凭据结论不符：%+v", out)
 	}
 	got := readFile(t, doc)

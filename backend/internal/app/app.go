@@ -343,8 +343,8 @@ func (a *App) Init(ctx context.Context) error {
 			glog.Warnw(ctx, "serve: 恢复权限记忆失败", "err", err)
 		}
 	}
-	if cfg.TurnTimeout > 0 {
-		a.orch.SetTurnTimeout(cfg.TurnTimeout)
+	if cfg.RunTimeout > 0 {
+		a.orch.SetRunTimeout(cfg.RunTimeout)
 	}
 	// handoff memo 字符预算（P3 F3；MATE_HANDOFF_MAX_CHARS 覆盖，默认 6000）。
 	a.orch.SetHandoffMaxChars(cfg.HandoffMaxChars)

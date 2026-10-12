@@ -27,7 +27,7 @@ import (
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", "", "监听地址（默认读 MATE_ADDR/`127.0.0.1:10001`；对外暴露请显式指定并自担无鉴权风险）")
-	turnTimeout := fs.Duration("turn-timeout", 0, "单轮 turn 看门狗超时（0=关闭；默认读 MATE_TURN_TIMEOUT）")
+	runTimeout := fs.Duration("run-timeout", 0, "单轮 run 看门狗超时（0=关闭；默认读 MATE_RUN_TIMEOUT）")
 	authStdin := fs.Bool("auth-stdin", false,
 		"从 stdin 首行读取桌面态双凭据（JSON {\"restToken\":\"…\",\"streamToken\":\"…\"}，各 32 字节随机 base64url）；"+
 			"令牌因此不进 argv/env/文件/URL。解析失败或两者之一为空 → 退出码 2")
@@ -57,8 +57,8 @@ func serve(args []string) {
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
-	if *turnTimeout > 0 {
-		cfg.TurnTimeout = *turnTimeout
+	if *runTimeout > 0 {
+		cfg.RunTimeout = *runTimeout
 	}
 	// CLI flag 优先级最高（与 --addr 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *webDir != "" {

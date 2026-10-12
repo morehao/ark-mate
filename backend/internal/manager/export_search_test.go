@@ -34,7 +34,7 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	var msgs []model.MessageEntity
 	for i, pair := range texts {
 		role, text := pair[0], pair[1]
-		seq, err := st.AppendEvent(ctx, id, BusUserMessage, map[string]any{"text": text})
+		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, BusUserMessage, map[string]any{"text": text})
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
@@ -140,7 +140,7 @@ func TestExportSessions(t *testing.T) {
 	// 追加思考/工具/终态事件（导出渲染覆盖）。
 	svc.publish(BusThought, "e-1", map[string]any{"text": "先想一下"})
 	svc.publish(BusToolCall, "e-1", map[string]any{"title": "运行 ls", "kind": "execute", "status": "in_progress"})
-	svc.publish(BusTurnEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(BusRunEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
 	svc.publish(BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
 
 	for _, format := range []string{"markdown", "text", "json"} {

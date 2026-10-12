@@ -4,10 +4,10 @@
  * 需要：`make dev`（默认打 http://127.0.0.1:10001，= 核心直接服务构建产物）、真实 runtime + 模型额度。
  *
  * 用法：
- *   node scripts/e2e-live-turn.mjs <agent_id> "<prompt>"
- *   E2E_BASE=http://127.0.0.1:10001 node scripts/e2e-live-turn.mjs dsh "请只回复两个字：明白"
+ *   node scripts/e2e-live-run.mjs <agent_id> "<prompt>"
+ *   E2E_BASE=http://127.0.0.1:10001 node scripts/e2e-live-run.mjs dsh "请只回复两个字：明白"
  *
- * 判定：收到终态帧（turn.ended / turn.error / run.cancelled）即 PASS；
+ * 判定：收到终态帧（run.ended / run.error / run.cancelled）即 PASS；
  * 若在超时前未收尾则 POST /cancel 并继续等终态。退出码 0=通路可用。
  */
 import { buildAttachFrame } from '@ark-mate/desktop-contract'
@@ -21,10 +21,10 @@ const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
 
 const [, , AGENT_ID = '', PROMPT = ''] = process.argv
 if (!AGENT_ID || !PROMPT) {
-  console.error('用法: node scripts/e2e-live-turn.mjs <agent_id> "<prompt>"')
+  console.error('用法: node scripts/e2e-live-run.mjs <agent_id> "<prompt>"')
   process.exit(2)
 }
-const WAIT_TERMINAL_MS = Number(process.env.E2E_TURN_TIMEOUT_MS || 90_000)
+const WAIT_TERMINAL_MS = Number(process.env.E2E_RUN_TIMEOUT_MS || 90_000)
 const TAIL_MS = 2000 // 终态帧后多收一小段，观察是否有后继事件
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -59,7 +59,7 @@ async function main() {
   console.log('· WS 已连接，attach …')
   ws.send(JSON.stringify({ action: 'attach', agg_id: id, since_seq: event_seq }))
 
-  const terminal = new Set(['turn.ended', 'turn.error', 'run.cancelled'])
+  const terminal = new Set(['run.ended', 'run.error', 'run.cancelled'])
   const frames = []
   let termFrame = null
   let snapshotSeq = null
@@ -109,8 +109,8 @@ async function main() {
     )
     const seqs = frames.filter((f) => f.type === 'event').map((f) => f.event.seq)
     console.log(`✔ 事件 ${seqs.length} 帧 seq=${seqs.join(',')}${snapshotSeq != null ? `（snapshot水位=${snapshotSeq}）` : ''}`)
-    if (termFrame.t === 'turn.error') {
-      console.log('ℹ turn.error 收尾：通路本身可用，但 runtime 侧未产出正常回答')
+    if (termFrame.t === 'run.error') {
+      console.log('ℹ run.error 收尾：通路本身可用，但 runtime 侧未产出正常回答')
     } else if (!gotMid) {
       console.log('ℹ 终态前无流式中段事件（可能瞬时完成/取消）')
     }

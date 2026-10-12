@@ -232,8 +232,8 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spe
 	//   wrappedID = 平台侧的值（`rt_` 壳），用于判空与（若将来落 rec）持久化。
 	var rawID, wrappedID, cwd string
 	if rec := s.newestResumableSession(agent.ID); rec != nil {
-		wrappedID, cwd = rec.ProviderSessionID, rec.Cwd
-		raw, uerr := objid.UnwrapProvider(wrappedID)
+		wrappedID, cwd = rec.RuntimeSessionID, rec.Cwd
+		raw, uerr := objid.UnwrapRuntime(wrappedID)
 		if uerr != nil {
 			return nil, uerr
 		}
@@ -241,7 +241,7 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, agent *AgentRec, spe
 	} else if items, err := rc.client.ListSessions(ctx, ""); err == nil {
 		if pick, ok := pickListedSession(items); ok {
 			// W3：`session/list` 直出**底座原文**（第二个最容易漏的点），必须包装后才是平台侧的值。
-			wrapped, werr := objid.WrapProvider(pick.ID)
+			wrapped, werr := objid.WrapRuntime(pick.ID)
 			if werr != nil {
 				return nil, werr
 			}
@@ -288,7 +288,7 @@ func (s *Service) newestResumableSession(agentID string) *SessionRec {
 	s.mu.Lock()
 	var best *SessionRec
 	for _, r := range s.sessions {
-		if r.AgentID != agentID || r.ProviderSessionID == "" || r.Cwd == "" {
+		if r.AgentID != agentID || r.RuntimeSessionID == "" || r.Cwd == "" {
 			continue
 		}
 		if best == nil || r.UpdatedAt.After(best.UpdatedAt) || (r.UpdatedAt.Equal(best.UpdatedAt) && r.ID > best.ID) {
@@ -311,11 +311,11 @@ func (s *Service) newestResumableSession(agentID string) *SessionRec {
 	var out *SessionRec
 	for i := range list {
 		c := list[i]
-		if c.AgentID != agentID || c.ProviderSessionID == "" || c.Cwd == "" {
+		if c.AgentID != agentID || c.RuntimeSessionID == "" || c.Cwd == "" {
 			continue
 		}
 		rec := &SessionRec{ID: c.ID, AgentID: c.AgentID, Cwd: c.Cwd,
-			ProviderSessionID: c.ProviderSessionID, UpdatedAt: c.UpdatedAt}
+			RuntimeSessionID: c.RuntimeSessionID, UpdatedAt: c.UpdatedAt}
 		if out == nil || rec.UpdatedAt.After(out.UpdatedAt) {
 			out = rec
 		}
