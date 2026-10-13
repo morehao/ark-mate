@@ -367,9 +367,13 @@ async function main() {
     // （设计 §6.5 的解析链是显式的；静态守卫 `desktop_payload_test.go` 只管"代码里没有探测"）。
     const meta = await apiGet(cdp, '/v1/mate/meta')
     const payloads = Array.isArray(meta?.data?.payloads) ? meta.data.payloads : []
+    // **数量不写死**：这条原本写的是 `>= 2`（当时随包两份载荷），opencode 下线后随包只剩 dsh 一份，
+    // 于是"清单全部命中随包"永远不成立（2026-10-13 实测：清单里只有 `dsh=bundled`，断言却要两条）。
+    // 本意是"清单**非空**、且每条都真的来自随包"——"够不够"由上面那条「随包载荷在位」按构建期那个
+    // 底座判，接第二个底座时两边都不必回来改这一行。
     check(
       '载荷清单全部命中随包（source=bundled）',
-      payloads.length >= 2 && payloads.every((p) => p.source === 'bundled'),
+      payloads.length >= 1 && payloads.every((p) => p.source === 'bundled'),
       payloads.length ? payloads.map((p) => `${p.name}=${p.source}`).join(' ') : '（没有载荷清单）',
     )
   } finally {
