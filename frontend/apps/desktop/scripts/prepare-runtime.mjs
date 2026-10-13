@@ -114,8 +114,16 @@ function installPayload(payloadDir, target, { offline }) {
     '--frozen-lockfile',
     '--reporter=append-only',
     // 目标平台从命令行下发：镜像里同时存在多平台原生包，不指定就会把全平台都装进来。
-    `--config.supportedArchitectures.os=${target.platform}`,
-    `--config.supportedArchitectures.cpu=${target.arch}`,
+    //
+    // **必须写成对象形态**（2026-10-13 实测）：pnpm 11.24 **不认**
+    // `--config.supportedArchitectures.cpu=x64` 这种点号写法——它不报错、也不生效，直接回落到
+    // `runtime/*/pnpm-workspace.yaml` 里那份**按 arm64 写的**平台表。后果在 x64 机器上是硬失败：
+    // 装出来的是 `@koromix/koffi-darwin-arm64`，koffi 的 `require` 抛
+    // 「Cannot find the native Koffi module」→ cnoke 回落去源码重建 → 机器上没有 cmake →
+    // 整个载荷装配中止。**为什么以前没现形**：arm64 机器上两种写法结果逐字相同（点号那份即使
+    // 被忽略，回落到的平台表也正好是 arm64）；只有 x64（或交叉构建 linux 载荷）才看得出。
+    // 反证（同一条命令只换这一处）：对象形态装出来的是 `@koromix/koffi-darwin-x64`。
+    `--config.supportedArchitectures=${JSON.stringify({ os: [target.platform], cpu: [target.arch] })}`,
     // 模块目录与当前配置不符时（`.modules.yaml` 里记着上次用的 storeDir / nodeLinker，这次解析出来的
     // 不一样）pnpm 会先把 `runtime/<name>/node_modules` 整个删掉重装，并且**默认要人在 TTY 上确认**——
     // 构建步骤没有 TTY，于是直接 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止（2026-10-09 实测：
