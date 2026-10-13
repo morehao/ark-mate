@@ -1,17 +1,14 @@
 # ark-mate 容器镜像（多阶段：Node 构建前端 → Go 编译 → 镜像内 COPY 一份 dist → 精简运行时）
 #
 # 两个最终 target（文件最后一段 = 默认 target = 最小镜像）：
-#   mate           只含 mate 本体（+ echo 底座自检）；接 opencode/dsh 需自行挂载可执行文件
-#   mate-runtimes  额外内置 agent 底座 dsh / opencode，可用 build-arg 分别开关
+#   mate           只含 mate 本体；接 agent 底座需自行挂载可执行文件
+#   mate-runtimes  额外内置 agent 底座 dsh，可用 build-arg 开关
 #
 # 构建 · 最小镜像：
 #   docker build -t ark-mate:local .
-# 构建 · 含底座（dsh + opencode 都要）：
+# 构建 · 含底座（dsh）：
 #   docker build -t ark-mate:runtimes --target mate-runtimes \
-#     --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
-# 构建 · 只要 opencode：
-#   docker build -t ark-mate:oc --target mate-runtimes \
-#     --build-arg WITH_DSH=false --build-arg WITH_OPENCODE=true .
+#     --build-arg WITH_DSH=true .
 #
 # 运行（数据全落具名卷 /data；要映射出去必须监听 0.0.0.0）：
 #   docker run -d --name ark-mate -p 127.0.0.1:10001:10001 \
@@ -24,11 +21,14 @@
 #     --build-arg RUNTIME_IMAGE=docker.m.daocloud.io/library/debian:bookworm-slim \
 #     --build-arg GO_PROXY=https://goproxy.cn,direct .
 #
-# 注意：WITH_DSH / WITH_OPENCODE 属于 mate-runtimes target。传给默认（最小）target 会**明确报错**
+# 注意：WITH_DSH 属于 mate-runtimes target。传给默认（最小）target 会**明确报错**
 # 而不是静默忽略——静默忽略会让人以为镜像里有底座。
 #
+# **新增一个内置底座 = 在 `runtimes-pkg` 阶段加一段 npm 安装 + 在这里加一个 WITH_<ID> 开关**
+# （外加 `backend/pkg/runtime/<id>/` 的 adapter）。开关一律"只认 true/false、拼错即失败"。
+#
 # MATE_RUNTIME（**所有 target**，默认 dsh）：核心**认哪一个**底座，走 `-X` 编译期注入
-# （见 backend/pkg/runtime/build.go）。它与 WITH_DSH / WITH_OPENCODE 是**两件事**：后者决定镜像里
+# （见 backend/pkg/runtime/build.go）。它与 WITH_DSH 是**两件事**：后者决定镜像里
 # 装哪几份底座二进制，前者决定核心认哪一份。两者不一致是允许的（最小镜像不装任何底座时核心照样
 # 认 dsh，只是拉不起来，诊断面会说清）；选了一个镜像里没装的底座，同样在会话建立时才暴露成
 # `runtime_unavailable`。用户面（REST / 控制台）改不了它——换底座要重新构建。选中的 id 若不存在，
@@ -41,7 +41,6 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG GO_PROXY=https://proxy.golang.org,direct
 # 底座版本（默认 latest；dsh 需含 acp profile 模板，即 >= 0.1.2-rc.1，见 pkg/runtime/adapters.go）
 ARG DSH_VERSION=latest
-ARG OPENCODE_VERSION=latest
 
 # —— 阶段 1：前端产物（Node 主版本对齐 frontend/.nvmrc；pnpm 版本取 package.json 的 packageManager）——
 FROM ${NODE_IMAGE} AS web
@@ -96,7 +95,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,id=gomod \
       -o /out/mate ./cmd/mate
 
 # —— 阶段 3：运行时基线（两个最终镜像共用：非 root + 数据卷 /data + tini 收孤儿）——
-# tini 作为 PID 1：daemon 会派生 opencode/dsh 子进程，容器里的孤儿进程需要有 init 回收。
+# tini 作为 PID 1：daemon 会派生底座子进程，容器里的孤儿进程需要有 init 回收。
 FROM ${RUNTIME_IMAGE} AS runtime-base
 ARG MATE_UID=10001
 ARG MATE_GID=10001
@@ -137,38 +136,27 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/mate"]
 CMD ["serve"]
 
 # —— 阶段 4：agent 底座（只产出 /opt/runtimes；node 本体也从这里取）——
-# dsh（@deepseek-ai/dsh）与 opencode（opencode-ai，平台二进制随 optionalDependencies 下来）
-# 都走 npm；装到 /opt/runtimes 而非 /usr/local，方便最终镜像整目录按需拷入。
+# dsh（@deepseek-ai/dsh）走 npm；装到 /opt/runtimes 而非 /usr/local，方便最终镜像整目录按需拷入。
 FROM ${NODE_IMAGE} AS runtimes-pkg
 ARG NPM_REGISTRY
 ARG WITH_DSH=true
-ARG WITH_OPENCODE=true
 ARG DSH_VERSION=latest
-ARG OPENCODE_VERSION=latest
 ENV npm_config_registry=${NPM_REGISTRY}
 RUN --mount=type=cache,target=/root/.npm,id=npm-cache \
     set -eux; \
     # 开关只认 true/false（1/0 亦可）：拼错直接失败，不静默变成「没装」
     case "${WITH_DSH}" in true|1) DSH=on ;; false|0|"") DSH=off ;; \
       *) echo "构建参数 WITH_DSH 取值非法：${WITH_DSH}（只接受 true|false）" >&2; exit 1 ;; esac; \
-    case "${WITH_OPENCODE}" in true|1) OC=on ;; false|0|"") OC=off ;; \
-      *) echo "构建参数 WITH_OPENCODE 取值非法：${WITH_OPENCODE}（只接受 true|false）" >&2; exit 1 ;; esac; \
-    if [ "${DSH}" = off ] && [ "${OC}" = off ]; then \
-      echo "WITH_DSH 与 WITH_OPENCODE 不能同时关闭：请改用 --target mate（最小镜像）" >&2; exit 1; \
+    if [ "${DSH}" = off ]; then \
+      echo "WITH_DSH 关闭后本 target 不含任何底座：请改用 --target mate（最小镜像）" >&2; exit 1; \
     fi; \
     mkdir -p /opt/runtimes; \
-    if [ "${DSH}" = on ]; then \
-      npm install --global --prefix /opt/runtimes --no-audit --no-fund "@deepseek-ai/dsh@${DSH_VERSION}"; \
-      test -e /opt/runtimes/bin/dsh; \
-    fi; \
-    if [ "${OC}" = on ]; then \
-      npm install --global --prefix /opt/runtimes --no-audit --no-fund "opencode-ai@${OPENCODE_VERSION}"; \
-      test -e /opt/runtimes/bin/opencode; \
-    fi
+    npm install --global --prefix /opt/runtimes --no-audit --no-fund "@deepseek-ai/dsh@${DSH_VERSION}"; \
+    test -e /opt/runtimes/bin/dsh
 
 # —— 阶段 5：最终镜像 · 含 agent 底座（--target mate-runtimes）——
 FROM runtime-base AS mate-runtimes
-# node 本体（dsh / opencode 的 JS 入口都靠它；基础镜像不带 node，故从构建阶段拷入）
+# node 本体（dsh 的 JS 入口靠它；基础镜像不带 node，故从构建阶段拷入）
 COPY --from=runtimes-pkg /usr/local/bin/node /usr/local/bin/node
 COPY --from=runtimes-pkg /opt/runtimes /opt/runtimes
 ENV PATH=/opt/runtimes/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -179,10 +167,7 @@ COPY --from=build /out/mate /usr/local/bin/mate
 FROM runtime-base AS mate
 # 本 target 不含底座：开关传成「开」时明确报错并给出正确命令，不静默忽略
 ARG WITH_DSH=false
-ARG WITH_OPENCODE=false
 RUN set -eux; \
     case "${WITH_DSH}" in false|0|"") ;; \
-      *) echo "--build-arg WITH_DSH=${WITH_DSH} 需要底座 target：请加 --target mate-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac; \
-    case "${WITH_OPENCODE}" in false|0|"") ;; \
-      *) echo "--build-arg WITH_OPENCODE=${WITH_OPENCODE} 需要底座 target：请加 --target mate-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac
+      *) echo "--build-arg WITH_DSH=${WITH_DSH} 需要底座 target：请加 --target mate-runtimes（或改用 make image/runtimes）" >&2; exit 1 ;; esac
 COPY --from=build /out/mate /usr/local/bin/mate

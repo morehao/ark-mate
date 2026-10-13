@@ -273,7 +273,7 @@ func TestGoldenDshCompatHasNoV12Exit(t *testing.T) {
 }
 
 // TestGoldenDshProjectsRouteIDAsDisplayName 记录一条**刻意的**选择：`displayName` 取路由 id，
-// 不取供应商展示名（理由同 opencode 的 `name`：它属于 A 部分，v11 写的就是路由 id）。
+// 不取供应商展示名（理由同**历史实测**里另一底座（已下线）的 `name`：它属于 A 部分，v11 写的就是路由 id）。
 func TestGoldenDshProjectsRouteIDAsDisplayName(t *testing.T) {
 	b, err := buildPatch(goldenSet())
 	if err != nil {

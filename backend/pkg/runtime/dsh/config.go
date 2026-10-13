@@ -329,7 +329,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 		for _, route := range routes {
 			p := byID[route]
 			b = append(b, []byte("- id: llm-pi-ai\n  config:\n    providers:\n")...)
-			// `displayName` 取**路由 id**，与 v11 逐字相同（理由同 opencode 的 `name`：
+			// `displayName` 取**路由 id**，与 v11 逐字相同（理由同另一个底座当初对 `name` 的处理：
 			// 供应商展示名是平台侧的用户词，改它会让等价性 golden 的 A 部分出现差异）。
 			b = append(b, fmt.Sprintf("      %s:\n        displayName: %s\n", yamlQuote(route), yamlQuote(route))...)
 			// `api` 由 adapter 内置（ADR-3：协议只支持 openai，不再让用户为它付一个自由串的代价）。

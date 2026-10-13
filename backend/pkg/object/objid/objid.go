@@ -62,8 +62,8 @@ const (
 
 // RuntimeShell 透传壳前缀（= runtime）。
 //
-// 它解决的是"平台 id 与底座 id 同形"：opencode 原生发 `ses_…`，与平台铸造的 `ses_…`
-// 长得一模一样；dsh 发裸 uuid。加壳之后**两个形状都由平台单方面定义**，底座换实现、
+// 它解决的是"平台 id 与底座 id 可能同形"：有的底座原生就发 `ses_…`，与平台铸造的 `ses_…`
+// 长得一模一样；有的发裸 uuid。加壳之后**两个形状都由平台单方面定义**，底座换实现、
 // 换前缀、发裸 uuid 都不影响这条判据（设计 §4.5，选项 D）。
 //
 // v17 起名字里的 `provider` 已收口成 `runtime`（会话列 `runtime_session_id`）：`provider`

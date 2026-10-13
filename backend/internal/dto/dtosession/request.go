@@ -11,7 +11,7 @@ type SessionPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
-	Model    *string `json:"model"` // 会话级模型（opencode 仅创建时可选；dsh 会话内即时）
+	Model    *string `json:"model"` // 会话级模型（能改的时机由该底座的能力声明决定）
 }
 
 // PromptReq 追加 prompt 请求体（POST /sessions/:id/prompt）。

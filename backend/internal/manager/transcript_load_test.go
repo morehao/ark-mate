@@ -48,7 +48,7 @@ func writeTranscriptJSONL(t *testing.T, dir, filename string, lines []string) {
 // TestLoadTranscriptsReseed 回读 transcript → 会话列表重建（标题/状态/时间）+ 事件注入 bus。
 func TestLoadTranscriptsReseed(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyA + `","agent_id":"agent-opencode","runtime":"opencode","cwd":"/tmp","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyA + `","agent_id":"agent-rtx","runtime":"rtx","cwd":"/tmp","created_at":"2026-09-07T03:12:40Z"}`
 	lines := []string{
 		header,
 		`{"id":"` + evtA1 + `","seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"列出当前目录文件"}}`,
@@ -121,9 +121,9 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	bus1 := eventbus.New()
 	svc1 := NewService(reg, bus1)
 	svc1.SetTranscriptDir(dir)
-	svc1.beginTranscript(sesLegacyA, "agent-opencode", "opencode", "/tmp", false)
+	svc1.beginTranscript(sesLegacyA, "agent-rtx", "rtx", "/tmp", false)
 	svc1.publish(BusUserMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a1"})
-	svc1.beginTranscript(sesLegacyB, "agent-opencode", "opencode", "/tmp", false)
+	svc1.beginTranscript(sesLegacyB, "agent-rtx", "rtx", "/tmp", false)
 	svc1.publish(BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
 	svc1.publish(BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
 	svc1.closeTranscripts()
@@ -173,8 +173,8 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 // 这里让两个会话的 seq 交错（A=1,5；B=2,6），只要实现退回逐文件顺序，B 的两条就会变成 6、7。
 func TestLoadTranscriptsKeepsGlobalSeqOrder(t *testing.T) {
 	dir := t.TempDir()
-	headerA := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyA + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
-	headerB := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyB + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	headerA := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyA + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
+	headerB := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyB + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyA+".jsonl", []string{
 		headerA,
 		`{"id":"` + evtA1 + `","seq":1,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"a1"}}`,
@@ -219,7 +219,7 @@ func TestLoadTranscriptsKeepsGlobalSeqOrder(t *testing.T) {
 // bus——两套语义混起来，结果是"位次看起来对、跨重启却对不上"，正是 v17 要消灭的那件事。
 func TestLoadTranscriptsSkipsV1Schema(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"` + sesLegacyC + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v1","version":1,"session_id":"` + sesLegacyC + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyC+".jsonl", []string{
 		header,
 		`{"seq":1,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
@@ -245,7 +245,7 @@ func TestLoadTranscriptsSkipsV1Schema(t *testing.T) {
 // 手工改动）→ 整份跳过，而不是"补一个"。补出来的身份是装载面自己发明的。
 func TestLoadTranscriptsRejectsLineWithoutIdentity(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyC + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyC + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyC+".jsonl", []string{
 		header,
 		`{"seq":1,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
@@ -268,7 +268,7 @@ func TestLoadTranscriptsRejectsLineWithoutIdentity(t *testing.T) {
 // `ses_…` 与裸 uuid 两种平台会话 id —— 形状不变式只写在代码里，数据里的形状没有任何守卫看得见。
 func TestLoadTranscriptsSkipsLegacyShapeID(t *testing.T) {
 	dir := t.TempDir()
-	legacy := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"c-6f1e-legacy","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	legacy := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"c-6f1e-legacy","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, "legacy.jsonl", []string{
 		legacy,
 		`{"id":"` + evtC1 + `","seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
@@ -289,7 +289,7 @@ func TestLoadTranscriptsSkipsLegacyShapeID(t *testing.T) {
 // TestLoadTranscriptsNoTerminal 无终态事件 → 状态 in_progress（供 UI 停止自愈）。
 func TestLoadTranscriptsNoTerminal(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyB + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyB + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyB+".jsonl", []string{
 		header,
 		`{"id":"` + evtB1 + `","seq":2,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"hi"}}`,
@@ -305,7 +305,7 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 // TestLoadTranscriptsIdempotent 对同一会话重复回灌不重复注册。
 func TestLoadTranscriptsIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyC + `","agent_id":"agent-opencode","runtime":"opencode","created_at":"2026-09-07T03:12:40Z"}`
+	header := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyC + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesLegacyC+".jsonl", []string{header})
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
@@ -320,8 +320,8 @@ func TestLoadTranscriptsIdempotent(t *testing.T) {
 // 「是否平台代建」权威标志都从 header 回灌；旧文件缺该字段 → 非临时（历史会话语义正确）。
 func TestLoadTranscriptsWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	temporaryHeader := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesWsTemp + `","agent_id":"agent-opencode","runtime":"opencode","cwd":"/home/u/.ark-mate/workspaces/` + sesWsTemp + `","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
-	legacyHeader := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesWsLegacy + `","agent_id":"agent-opencode","runtime":"opencode","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
+	temporaryHeader := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesWsTemp + `","agent_id":"agent-rtx","runtime":"rtx","cwd":"/home/u/.ark-mate/workspaces/` + sesWsTemp + `","workspace_temporary":true,"created_at":"2026-09-07T03:12:40Z"}`
+	legacyHeader := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesWsLegacy + `","agent_id":"agent-rtx","runtime":"rtx","cwd":"/work/alpha","created_at":"2026-09-07T03:12:40Z"}`
 	writeTranscriptJSONL(t, dir, sesWsTemp+".jsonl", []string{temporaryHeader})
 	writeTranscriptJSONL(t, dir, sesWsLegacy+".jsonl", []string{legacyHeader})
 

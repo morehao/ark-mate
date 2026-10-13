@@ -48,7 +48,7 @@ const CORE_LDFLAG_ARGS = (process.env.MATE_DEV_CORE_LDFLAG_ARGS ?? '').trim()
 const HEALTH_URL = process.env.MATE_DEV_HEALTH_URL ?? 'http://127.0.0.1:10001/v1/mate/health'
 const APP_URL = process.env.MATE_DEV_APP_URL ?? 'http://127.0.0.1:10001'
 const RUNTIME = process.env.MATE_DEV_RUNTIME ?? ''
-/** 显式覆盖那份底座可执行文件（Makefile 的 `OPENCODE_BIN`；空串 = 未指定）。 */
+/** 显式覆盖那份底座可执行文件（Makefile 的 `RUNTIME_BIN`；空串 = 未指定）。 */
 const RUNTIME_BIN = (process.env.MATE_DEV_RUNTIME_BIN ?? '').trim()
 /** 上面那个值的来源：`命令行` / `环境变量` / `.env` / `未指定`（Makefile 的 `$(origin)` 取得）。 */
 const RUNTIME_BIN_SOURCE = (process.env.MATE_DEV_RUNTIME_BIN_SOURCE ?? '').trim()
@@ -71,15 +71,15 @@ let requested = null
 /**
  * dev 态「命中哪一份底座」的唯一判定（P4 / 设计 D3，2026-08-11 起的最初缺口）。
  *
- * 为什么这件事必须有：dev 态的核心是按**写死的名字**（`opencode` / `dsh`）经 `exec` 走 PATH 解析，
- * 所以默认命中的是**本机装的那份**；交付态（桌面壳）用的是随包载荷。两者完全可以不同代
- * （2026-10-10 实测：本机 opencode 1.18.35 / 随包 2.0.26）——而此前这件事**完全静默**：回显里的
- * 底座名字写死成 `opencode`，可构建期固定的 runtime 早就是 `dsh` 了。
+ * 为什么这件事必须有：dev 态的核心是按**写死的名字**（构建期固定的那个 runtime 的 `Command`）
+ * 经 `exec` 走 PATH 解析，所以默认命中的是**本机装的那份**；交付态（桌面壳）用的是随包载荷。
+ * 两者完全可以不同代（2026-10-10 实测：dsh 本机那份与随包那份不是一代）——而此前这件事
+ * **完全静默**：回显里的底座名字写死成某个具体底座，可构建期固定的 runtime 是另一个。
  *
  * 三条纪律（都是既有的，别在这里破）：
  *   ① **不探测 PATH**（`which` / `command -v`）：与 `apps/desktop/src/payload.ts` 同一条口径——
  *      探测会让「机器上恰好装过这个底座」静默顶掉你以为在跑的那份。未指定就是「PATH 上解析」。
- *   ② **不跑 `<底座> --version`**：底座连 `--version` 都写自己的 home（dsh / opencode 都实测过），
+ *   ② **不跑 `<底座> --version`**：底座连 `--version` 都写自己的 home（dsh 实测过），
  *      而 dev 态那份是**用户本机**的安装——探一下就是动用户的环境（本机隔离纪律）。
  *      于是版本**只在能从路径证明时**给出：路径落在 `resources/payloads/<name>/<ver>/` 内，
  *      就报那份 `payload.json` 的版本；落在别处如实报「外部指定（版本未知）」。
@@ -102,8 +102,8 @@ function resolveRuntimeHit() {
   // dev/runtime-bin 生成 `<DEV_BIN_DIR>/$(RUNTIME)`），而核心正是按那个写死的名字走 PATH 解析，
   // 所以这里不再存在"填了但没人调用"那一态。
   //
-  // 此前 shim 名写死 `opencode`，固定 `dsh` 的构建上这个覆盖是个**死文件**，于是这里得绕开来报
-  // （报成 `path` + 横幅补一句"不会生效"）——那套分流（`inert`）随根因修复整体删除。现在
+  // 此前 shim 名写死某个具体底座名，固定成另一个的构建上这个覆盖是个**死文件**，于是这里得
+  // 绕开来报（报成 `path` + 横幅补一句"不会生效"）——那套分流（`inert`）随根因修复整体删除。现在
   // `/meta.payloads[]` 报 `runtime-env` **就是**核心实际拉的那份，不存在"回显骗人"。
   const sourceTxt = RUNTIME_BIN_SOURCE === '' ? '显式覆盖' : `显式覆盖 [${RUNTIME_BIN_SOURCE}]`
 
@@ -146,17 +146,15 @@ function bundledPayloadVersions(name) {
 }
 
 /**
- * 随包载荷里**可直接当 `OPENCODE_BIN` 用**的那个入口（`<版本>` 位置让调用方按实际目录填）。
+ * 随包载荷里**可直接当 `RUNTIME_BIN` 用**的那个入口（`<版本>` 位置让调用方按实际目录填）。
  *
- * 两个底座的入口形态不同，所以这里不是同一个模板：
- *   - opencode 是**平台化二进制**（`bin/opencode`）；
- *   - dsh 载荷里**没有**平台化二进制，入口是 npm 包的 `lib/bin.js`——它可执行、带 shebang
- *     （`#!/usr/bin/env node`），所以能直接 exec。入口名**从清单读**（`payload.json` 的 `entry`），
- *     不写死包路径：写死会在包改名那天悄悄给出一条走不通的路。
+ * 入口名**一律从清单读**（`payload.json` 的 `entry`），不按底座名分支、也不写死包路径：
+ * 这里曾经有一个 `if (hit.name === 'opencode') return base + '/bin/opencode'` 的分支——那是
+ * "dev 循环认识某个底座"的形状，接一个新底座就得回来加一条，而漏加只会给出一条指向不存在
+ * 文件的提示（比不给提示更糟）。清单本来就是载荷形态的唯一事实源。
  */
 function packagedBinHint(hit) {
   const base = `frontend/apps/desktop/resources/payloads/${hit.name}/<版本>`
-  if (hit.name === 'opencode') return `${base}/bin/opencode`
   const v = hit.bundled[hit.bundled.length - 1]
   const entry = v ? readPayloadManifest(join(PAYLOADS_ROOT, hit.name, v))?.entry : null
   return entry ? `${base}/${entry}` : `${base}/<入口见该版本 payload.json 的 entry>`
@@ -175,10 +173,9 @@ function reportRuntimeHit(hit) {
   if (hit.source === 'path') {
     log('   ℹ️  跑的是 **PATH 上本机安装的那份**，与随包是否同代**无从判定**——本仓刻意不探测' +
       '（底座连 `--version` 都写自己的 home）。')
-    // 两个底座现在都有**可用的**显式覆盖口（转发 shim 名随构建期 runtime，见 Makefile 的
-    // dev/runtime-bin）：opencode 是平台化二进制，dsh 是载荷里带 shebang 的包入口。
+    // 显式覆盖口是**可用的**（转发 shim 名随构建期 runtime，见 Makefile 的 dev/runtime-bin）。
     // 给具体路径，不给一句口号——指一条走不通的路比不提示更糟（P4 记录）。
-    log(`       要跑随包那一代：OPENCODE_BIN=${packagedBinHint(hit)}`)
+    log(`       要跑随包那一代：RUNTIME_BIN=${packagedBinHint(hit)}`)
   } else if (hit.version === 'external') {
     log('   ℹ️  显式指定的是**仓库外**那份：版本无从判定（不探测），与随包是否同代同样无从判定。')
   } else if (hit.bundled.length > 1) {

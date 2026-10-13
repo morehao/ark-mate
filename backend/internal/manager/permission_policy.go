@@ -34,8 +34,8 @@ type PermissionPolicy struct {
 	Tools map[string]string `json:"tools,omitempty"`
 	// NativeMode 原生权限模式（B5）：""/"auto" = 按 Default 推导；"off" = 不注入；
 	// "read-only"|"workspace-write"|"danger-full-access" = 显式指定。
-	// 仅对声明了原生开关的 runtime 生效（当前 dsh 的 DSH_PERMISSION_MODE；
-	// opencode 用本策略的 default/tools 生成 permission 表，mode 只认 off）。
+	// 仅对声明了原生开关的 runtime 生效（各底座的开关形态与认哪些取值，见它自己的 adapter：
+	// `pkg/runtime/<id>/native_permission.go`；没声明原生面的底座收不到任何注入）。
 	NativeMode string `json:"native_mode,omitempty"`
 }
 

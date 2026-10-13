@@ -21,11 +21,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * 诱饵名单：两个底座 + Node 本体 + 包管理器转发器。
+ * 诱饵名单：**宿主环境**里可能恰好存在的命令名 + Node 本体 + 包管理器转发器。
  *
  * 这四样正是"宿主开发者环境"的判据面：桌面壳若去问本机（`which` / `command -v` / PATH 搜索），
  * 撞上的就是它们。名单变了要同步 `backend/internal/archtest/desktop_host_path_test.go` 的静态面
  * （那条守卫禁的是"写死宿主路径"，与本表配对）。
+ *
+ * **`opencode` 刻意留着**（哪怕它已不是本仓的一等适配）：本表的语义是"宿主机上装过什么"，
+ * 不是"我们随包带什么"。用户在开发机上装过它就一定会落在 PATH 上，而"壳绝不咨询宿主"这条判据
+ * 对**每一个**可能撞上的名字都成立——从名单里删掉一个名字是**减少**一条判据，且是静默的。
  */
 export const DECOY_NAMES = ['dsh', 'opencode', 'node', 'npx']
 

@@ -61,8 +61,8 @@ func makePayload(t *testing.T, spec payloadSpec) payloadManifestDoc {
 		fileList = append(fileList, hexSum+"  "+rel)
 		bytes += int64(len(content))
 	}
-	// entry 一律**相对于载荷根**（与 prepare-runtime 的口径一致）：dsh 的入口在闭包那一层里，
-	// opencode 的直接在载荷根——两者正好各覆盖一种形态。
+	// entry 一律**相对于载荷根**（与 prepare-runtime 的口径一致）：闭包型载荷的入口在那一层
+	// 目录里，直接铺开的型就在载荷根——两者正好各覆盖一种形态。
 	entry := "bin/tool"
 	if spec.Base != "" {
 		entry = spec.Base + "/bin/tool"
@@ -337,8 +337,8 @@ func TestScanPayloadManifests(t *testing.T) {
 
 	t.Run("正例：按 name 排序返回", func(t *testing.T) {
 		root := t.TempDir()
-		writeManifest(t, root, "opencode", "2.0.0", payloadManifestDoc{
-			Name: "opencode", Version: "2.0.0", NodeABI: "149", Entry: "bin/opencode",
+		writeManifest(t, root, "rtx", "2.0.0", payloadManifestDoc{
+			Name: "rtx", Version: "2.0.0", NodeABI: "149", Entry: "bin/rtx",
 			Digest: "sha256:" + strings.Repeat("b", 64), FileList: []string{},
 		})
 		writeManifest(t, root, "dsh", "1.0.0", full)
@@ -346,7 +346,7 @@ func TestScanPayloadManifests(t *testing.T) {
 		if err != nil {
 			t.Fatalf("扫描失败：%v", err)
 		}
-		if len(got) != 2 || got[0].Manifest.Name != "dsh" || got[1].Manifest.Name != "opencode" {
+		if len(got) != 2 || got[0].Manifest.Name != "dsh" || got[1].Manifest.Name != "rtx" {
 			t.Fatalf("期望按 name 排序的两份载荷，得到 %+v", got)
 		}
 	})

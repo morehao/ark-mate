@@ -265,7 +265,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	t.Setenv("MCP_SHARED_DB_TOKEN", "tok-shared") // 密钥能解析，才谈得上"看得到工具面"
 	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
 	if ok, err := core.UpsertAgentDefinition(context.Background(), "a1",
-		`{"id":"a1","name":"A1","runtimes":["opencode"]}`, 0, "test"); err != nil || !ok {
+		`{"id":"a1","name":"A1","runtimes":["rtx"]}`, 0, "test"); err != nil || !ok {
 		t.Fatalf("写 agent: ok=%v err=%v", ok, err)
 	}
 
@@ -292,7 +292,7 @@ func TestSourceToolsNamespacesAndCalls(t *testing.T) {
 	remote := newFakeRemote(t, "search", "fetch")
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
 	src := r.source("a1", nil)
 	tools, err := src.Tools(ctx)
@@ -337,7 +337,7 @@ func TestSourceTakesEffectWithoutGenerationSwitch(t *testing.T) {
 	remote := newFakeRemote(t, "search")
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 	src := r.source("a1", nil)
 
 	if tools, err := src.Tools(ctx); err != nil || len(tools) != 1 {
@@ -380,7 +380,7 @@ func TestSourceSecretRotation(t *testing.T) {
 	remote := newFakeRemote(t, "search")
 	t.Setenv("MCP_TOKEN_PG", "old-token")
 	r.seedMcp("pg", httpDef("pg", remote.srv.URL, "MCP_TOKEN_PG"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 	src := r.source("a1", nil)
 
 	if _, err := src.Call(ctx, "pg__search", nil); err != nil {
@@ -405,7 +405,7 @@ func TestSourceUnresolvableSecretDegrades(t *testing.T) {
 	r.seedMcp("gh", httpDef("gh", good.srv.URL, "MCP_TOKEN_GH"), 0)
 	// 引用一个不存在的环境变量：解析必失败。
 	r.seedMcp("bad", httpDef("bad", good.srv.URL, "MCP_TOKEN_ABSENT"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 	src := r.source("a1", nil)
 
 	tools, err := src.Tools(ctx)
@@ -434,7 +434,7 @@ func TestSourceRemoteFailureIsContained(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("broken", httpDef("broken", broken.srv.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 	src := r.source("a1", nil)
 
 	tools, err := src.Tools(ctx)
@@ -461,7 +461,7 @@ func TestSourcePinnedWhitelist(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", gh.srv.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("pg", httpDef("pg", pg.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
 	// 缺省（会话没钉）：agent 未声明白名单 → 全量远程面。
 	all, err := r.source("a1", nil).Tools(ctx)
@@ -499,7 +499,7 @@ func TestSourceUnknownAgentFailsClosed(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
 	// 有活着的 agent，但网关的 scope 指向一个不存在的：不能"查不到就给全部"。
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 	src := r.source("ghost", nil)
 
 	if _, err := src.Tools(ctx); err == nil {
@@ -521,7 +521,7 @@ func TestSourceAgentWhitelistApplies(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", gh.srv.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("pg", httpDef("pg", pg.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"],"mcps":["pg"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"],"mcps":["pg"]}`)
 	src := r.source("a1", nil)
 
 	tools, err := src.Tools(ctx)
@@ -551,7 +551,7 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("hang", httpDef("hang", hang.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["opencode"]}`)
+	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
 	src, err := NewSource(ctx, SourceOptions{
 		Cfg: r.cfg, AgentID: "a1", Store: r.st, PerServerTimeout: 300 * time.Millisecond,

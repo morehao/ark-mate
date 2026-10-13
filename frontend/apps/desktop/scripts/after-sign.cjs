@@ -12,8 +12,8 @@
  * ## 实际的做法（三态）
  *
  * osx-sign（electron-builder 的签名实现）在签外层 bundle 之前会**先**逐对象签包内的 Mach-O
- * （实测：`payloads/**` 里的 `opencode` 二进制与 dsh 的 `.node` 都是它签的，identifier 形如
- * `opencode-<uuid>`）。因此本钩子的职责不是"重签一遍"，而是**把漏掉的补齐、并把结果说出来**：
+ * （实测：`payloads/**` 里的原生二进制与 dsh 的 `.node` 都是它签的，identifier 由上游包名派生）。
+ * 因此本钩子的职责不是"重签一遍"，而是**把漏掉的补齐、并把结果说出来**：
  *
  *   1. 扫包里每个 Mach-O，读它的签名状态（是否有签名、是否带 hardened runtime 标记）；
  *   2. **一个都不缺** → 什么都不改，打印"osx-sign 已覆盖 N 个对象"（这是正常路径）；

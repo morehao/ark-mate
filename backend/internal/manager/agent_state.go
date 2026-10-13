@@ -12,9 +12,10 @@ import (
 
 // defaultAgentID 未显式切换「当前 Agent」时的回落种子 id。
 //
-// 它**由构建期选定的底座派生**：`dsh` → 种子 agent `dsh`，`opencode` → `opencode`。
-// 为什么不做成常量（历史实现恒为 `"dsh"`）：opencode 构建下把 `dsh` 当回落值会指向一个不存在的
-// agent，`requireDefaultAgent` 会报"无可用 Agent"——那是个假错误（分明确实有一个可用的 agent）。
+// 它**由构建期选定的底座派生**（种子 agent 的 id 与它服务的 runtime id 同形，见 builtinAgents）。
+// 为什么不做成常量（历史实现恒为 `"dsh"`）：底座不是 dsh 的构建下把 `dsh` 当回落值会指向一个
+// 不存在的 agent，`requireDefaultAgent` 会报「无可用 Agent」——那是个假错误（分明确实有一个
+// 可用的 agent）。
 func defaultAgentID() string {
 	sel := runtime.SelectedRuntime()
 	for _, b := range builtinAgents {
@@ -27,15 +28,17 @@ func defaultAgentID() string {
 
 // builtinAgents 内置 Agent 播种表：每个内置 runtime 一个 Agent。
 //
-// 表里保留两条**不等于本次会播种两条**：装配时只注册构建期选中的那一个底座，而
-// `seedBuiltinAgents` 按注册表过滤。表是"内置清单"，播种结果是它的子集。
+// **它必须与 `runtime.AllBuiltinSpecs()` 逐条对齐**——"内置清单"只有一个事实源，多一条会播出一个
+// 指向未装配底座的 agent（建会话时才报 runtime_not_found），少一条会让一个内置底座没有可用 agent、
+// 而 `defaultAgentID()` 回落成那个 id 之后 `requireDefaultAgent` 报「无可用 Agent」。
+// `TestBuiltinAgentSeedsMatchBuiltinSpecs` 钉住这条对齐（含"id 与 runtime 同形"这一点——
+// `defaultAgentID()` 直接返回 runtime id，两者不同形时它会返回一个不存在的 agent id）。
 var builtinAgents = []struct {
 	id      string
 	name    string
 	runtime string
 }{
 	{id: "dsh", name: "dsh", runtime: "dsh"},
-	{id: "opencode", name: "opencode", runtime: "opencode"},
 }
 
 // ResolveRuntime 返回**构建期选定的**底座 id，并校验它确实已装配。

@@ -43,7 +43,8 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // 而平台物化时是把 id 原样写成 frontmatter 的 name（`MaterializedContent`），于是 id 不合规 =
 // 平台自报 `in_sync`、底座永远不加载——是最难排查的一类"生效失败"。
 //
-// opencode 宽容（`**/SKILL.md` 递归 + 只验 name 的存在性），dsh 不宽容，**取交集**即这条。
+// 底座之间宽容度不同（历史实测：某底座递归扫 `**/SKILL.md` 且只验 name 的存在性；dsh 不宽容），
+// **取最严者（即交集）**便是这条判据。
 // `nameRE` 仍是 MCP/tool 的规则（那些名字不喂给底座的 skill 校验，且历史上更宽）；
 // 路径安全那道判据在 `manager.validDefinitionID`，与此处正交。
 var skillIDRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -94,7 +95,7 @@ func ValidateSkill(s *Skill) error {
 	if s.Scope != "" && !ValidSkillScopes[s.Scope] {
 		return fmt.Errorf("capability skill %q: scope %q 非法（合法：global|workspace）", s.ID, s.Scope)
 	}
-	// Runtimes：去空白、去重，并拒绝重复声明（"我列了两次 opencode"通常意味着想表达别的）。
+	// Runtimes：去空白、去重，并拒绝重复声明（"我列了两次同一个 runtime id"通常意味着想表达别的）。
 	seen := make(map[string]bool, len(s.Runtimes))
 	cleaned := make([]string, 0, len(s.Runtimes))
 	for _, r := range s.Runtimes {
@@ -455,7 +456,7 @@ func (r *Registry) loadSkillsDir(dir string, normalizeSkill func(*Skill)) int {
 			return err
 		}
 		// 旧键 `sources` 已被忽略（M1 起条目侧只声明 runtimes），而 encoding/json 丢未知键
-		// 是**静默**的：后果是技能从「只给 opencode」悄悄变成「给所有 runtime」——投放面被放宽，
+		// 是**静默**的：后果是技能从「只给某一个 runtime」悄悄变成「给所有 runtime」——投放面被放宽，
 		// 用户看不到任何迹象。所以装载时显式挂一条告警，把人引到 `mate capability migrate`。
 		if hasLegacySourcesKey(b) {
 			r.appendSkillWarning(d.ID, Warning{

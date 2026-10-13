@@ -10,7 +10,7 @@ import (
 // ID/ManagesOwnContext/… 均取自该 runtime 的投影 Spec（§6.1/§6.2），Prompt/Capabilities/
 // RuntimeSessionID 透传底层 acl.Session。
 //
-// opencode / dsh 两投影共用本实现（New*Runtime 各以对应 Spec 实例化）。
+// 各底座的会话投影共用本实现（各自以对应 Spec 实例化，见 NewProjection）。
 // ApplyMode/ApplyModel/Resume 需底座侧原生支持或映射实测，当前统一显式返回 unsupported_*
 // 错误（§6.2 ModeMapping / §5.5 模型面为文档开放项），不静默吞掉。
 type sessionRuntime struct {
@@ -95,35 +95,20 @@ func (r *sessionRuntime) Resume(_ context.Context, _ string) error {
 		"runtime "+r.spec.ID+" 不支持投影内 Resume：恢复走 acl.Client.ResumeSession，需重建投影")
 }
 
-// ——— 两投影公开形态（§6.2） ———
+// ——— 会话投影的公开形态（§6.2） ———
 
-// OpencodeRuntime / DeepseekHarnessRuntime 为两个投影的命名别名（均指
-// sessionRuntime），New*Runtime 各以对应 Spec 实例化。
-type (
-	OpencodeRuntime        = sessionRuntime
-	DeepseekHarnessRuntime = sessionRuntime
-)
-
-// NewOpencodeRuntime 包装已建立的 opencode 会话（后端自管上下文，§6.2）。
-func NewOpencodeRuntime(sess *acl.Session) *OpencodeRuntime {
-	return newSessionRuntime(opencodeSpec(), sess)
-}
-
-// NewDeepseekHarnessRuntime 包装已建立的 deepseek-harness（dsh）会话（后端自管上下文，§6.2）。
-func NewDeepseekHarnessRuntime(sess *acl.Session) *DeepseekHarnessRuntime {
-	return newSessionRuntime(dshSpec(), sess)
-}
-
-// NewProjection 依 Spec 分发到对应投影构造器（Orchestrator 采用 Runtime 的单一接缝，
-// design doc §16）。未知/未投影 runtime id 返回 nil（调用方保持原直连路径）。
-// sess 为 nil 时已知投影仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
+// NewProjection 取该 Spec 的**会话级投影**（Orchestrator 采用的单一接缝，design doc §16）。
+//
+// 这里曾经是一个 `switch spec.ID`（`case "opencode"` / `case "dsh"`），而两个分支返回的是
+// **同一个类型**——`sessionRuntime` 是完全按 Spec 参数化的（ID / ManagesOwnContext 取自 Spec，
+// Prompt / Cancel / ConfigOptions 透传底层会话）。于是那个 switch 不携带任何信息，
+// 唯一的后果是**接一个新底座要回父包加一个 case**：正是"没有 adapter 层"的形状。
+// 今天它只是一句构造，任何 Spec 都能拿到投影。
+//
+// `nil` 只剩一种来源：调用方**自己注入**的假会话（测试夹具）。那是一条真实分支，
+// `run.go` / `session_start.go` 都有显式判空。
+//
+// sess 为 nil 时仍返回非 nil 实例（构造不触碰会话；方法调用方负责非 nil）。
 func NewProjection(spec Spec, sess *acl.Session) Runtime {
-	switch spec.ID {
-	case "opencode":
-		return NewOpencodeRuntime(sess)
-	case "dsh":
-		return NewDeepseekHarnessRuntime(sess)
-	default:
-		return nil
-	}
+	return newSessionRuntime(spec, sess)
 }

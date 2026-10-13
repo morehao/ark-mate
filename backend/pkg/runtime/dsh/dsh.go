@@ -49,7 +49,10 @@ var Caps = DeclaredCapabilities{
 	EmbeddedContext:        false,
 }
 
-// SkillFormat 该 runtime 消费的 skill 内容格式（投影 Projection.Format 的取值；语义同 opencode.SkillFormat）。
+// SkillFormat 该 runtime 消费的 skill 内容格式（投影 Projection.Format 的取值）。
+//
+// 这是一个**字符串契约**（不是类型）：每个 adapter 自带一份自己的常量，取值必须与平台
+// 物化出来的正文形态一致（`capability.FormatSkillMDFrontmatter`）。新增底座时照抄形态即可。
 const SkillFormat = "SKILL.md+frontmatter"
 
 // Notes 约束说明（给 README/文档位，暂不外露 REST）。

@@ -8,28 +8,43 @@ import (
 	"github.com/morehao/ark-mate/pkg/resource"
 )
 
-// Registry 是 runtime adapter 注册表（map[string]Spec + 第二张表 syncer）。
+// Registry 是 runtime adapter 注册表（`map[string]Spec` = **声明表**，加**三张可执行端口表**：
+// ① 清单同步 `syncers` ② 原生权限 `nativePermissions` ③ 模型值投影 `modelValues`）。
 //
-// **为什么 syncer 不进 `Spec`**（ADR-2）：`Spec` 是**声明式半场**——纯数据，会被打印、
+// **下文说「第 N 张表」一律指这三张可执行表**（不含 `Spec`）——它是这套 adapter 层唯一的接口面。
+//
+// **为什么可执行半场不进 `Spec`**（ADR-2）：`Spec` 是**声明式半场**——纯数据，会被打印、
 // 被 `/meta` 与诊断读出、被测试断言。混入可执行对象会让「描述」与「行为」同源。
 // 另外两条理由：注册时机不同（`Spec` 在 `AllBuiltinSpecs()` / `ProductRegistry()` 里静态构造，
-// `Syncer` 要按 runtime 实例与配置构造），以及**测试要能只注册 stub**
+// `Syncer` / `NativePermissionAdapter` 要按 runtime 实例与配置构造），以及**测试要能只注册 stub**
 // （`TestSyncerContractEmptySet` 就靠这张表，否则每个用例都得伪造一份完整 `Spec`）。
+//
+// **每加一张表都要问一次"这张表能不能只有两三个键"**：表的形状与数量就是这套 adapter 层的
+// 全部接口面，一份新底座要挂几张表、每张表的签名是什么，直接决定"接一个底座要动几处"。
 type Registry struct {
 	specs   map[string]Spec
 	syncers map[string]resource.Syncer
+	// nativePermissions 第二张可执行端口表：该底座的「原生权限投影」实现（见 native_permission.go）。
+	nativePermissions map[string]NativePermissionAdapter
+	// modelValues 第三张可执行端口表：该底座的「模型值生成」实现（见 model_value.go）。
+	modelValues map[string]ModelValueAdapter
 }
 
 // NewRegistry 从一组 Spec 构建注册表（按 ID 去重，后注册覆盖）。
 func NewRegistry(specs ...Spec) *Registry {
-	r := &Registry{specs: make(map[string]Spec, len(specs)), syncers: map[string]resource.Syncer{}}
+	r := &Registry{
+		specs:             make(map[string]Spec, len(specs)),
+		syncers:           map[string]resource.Syncer{},
+		nativePermissions: map[string]NativePermissionAdapter{},
+		modelValues:       map[string]ModelValueAdapter{},
+	}
 	for _, s := range specs {
 		r.specs[s.ID] = s
 	}
 	return r
 }
 
-// RegisterSyncer 登记某 runtime 的同步实现（第二张表；同 ID 后注册覆盖）。
+// RegisterSyncer 登记某 runtime 的同步实现（第一张可执行端口表；同 ID 后注册覆盖）。
 func (r *Registry) RegisterSyncer(id string, s resource.Syncer) {
 	if r == nil {
 		return
@@ -114,7 +129,7 @@ func replaceArg(args []string, flag, value string) []string {
 // 分别见 build.go 的 `ProductRegistry`（产品装配：只注册构建期选中的那一个）与
 // `AllBuiltinRegistry`（全部内置：测试 / 诊断 / 能力矩阵守卫用）。
 // adapter 子包只提供纯数据与端口实现，父包汇入统一 Spec（避免父子 import 环）；
-// **Syncer 的登记在 `registerBuiltinSyncers`**（它引用各 adapter 的 `NewSyncer`）。
+// **两张可执行表的登记在 `registerBuiltinPorts`**（它引用各 adapter 的 `NewSyncer` 与原生权限实现）。
 
 // Get 按 ID 取 Spec。
 func (r *Registry) Get(id string) (Spec, bool) {
@@ -129,9 +144,10 @@ func (r *Registry) Register(s Spec) { r.specs[s.ID] = s }
 //
 // 为什么必须"同键替换"而\不是直接 append：`mergeEnv` 的语义是"先出现者胜"
 // （用户在 shell 里导出的键不能盖掉平台显式注入的值），所以把新值追加到末尾**不会生效**
-// ——隔离表里那条空的 `OPENCODE_CONFIG_CONTENT=` 会把我们的内容吃掉。
+// ——隔离表里那条**同名的空值**（`<变量>=`）会把我们后追加的内容吃掉。
 //
-// 谁用它：T5 的 `env_content` 通道（opencode）在物化时把生成的 JSON 注入子进程 env。
+// 谁用它：T5 的 `env_content` 通道（把生成的配置正文经子进程 env 交给底座，dsh 走的是
+// 文件通道，见各 adapter 的凭据/清单落点声明）在物化时把生成的字节注入子进程 env。
 // 只影响**此后新拉起的进程**（这正是 T5 的"下一个进程生效"语义）。
 func (r *Registry) SetLaunchEnv(runtimeID, key, value string) error {
 	if r == nil {

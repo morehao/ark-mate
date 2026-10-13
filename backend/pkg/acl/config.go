@@ -9,7 +9,8 @@ import (
 // ACP session config option 的语义分类（protocol: ConfigOptionCategory）。
 // 仅作 UX 提示，**不得**作为正确性依赖：agent 可以不提供 category，也可能不提供该选项。
 // 取值由消费方按 category 匹配（而非硬编码 option id —— 各家 id 不同：dsh 的思考档位叫
-// "reasoning_effort"、opencode 叫 "effort"，模型项则都叫 "model"，但平台不依赖这个巧合）。
+// "reasoning_effort"，历史实测里另一底座（已下线）叫 "effort"，模型项则都叫 "model"，
+// 但平台不依赖这个巧合）。
 const (
 	CategoryModel        = "model"
 	CategoryThoughtLevel = "thought_level"
@@ -24,8 +25,8 @@ const (
 )
 
 // ConfigOptionValue 一个可选值。Value 是**不透明字符串**，必须原样回传
-// （dsh 为 JSON.stringify([provider, model])，opencode 为 "provider/model"），
-// 展示一律用 Name，不得解析 Value 结构。
+// （历史实测：dsh 为 JSON.stringify([provider, model])，另一底座（已下线）为
+// "provider/model"），展示一律用 Name，不得解析 Value 结构。
 type ConfigOptionValue struct {
 	Value       string `json:"value"`
 	Name        string `json:"name"`

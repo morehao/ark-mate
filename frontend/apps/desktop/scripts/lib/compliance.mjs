@@ -45,21 +45,19 @@ export const UPSTREAM = {
   electron: 'https://github.com/electron/electron',
   node: 'https://nodejs.org/',
   '@deepseek-ai/dsh': 'https://www.npmjs.com/package/@deepseek-ai/dsh',
-  '@opencode/cli-darwin-arm64': 'https://github.com/anomalyco/opencode',
 }
 
 /**
  * 载荷名 → 它在 npm 上的**真实包名**。
  *
- * 为什么需要这张表：`release.json` 里的载荷名是**平台侧的叫法**（`dsh` / `opencode`，
+ * 为什么需要这张表：`release.json` 里的载荷名是**平台侧的叫法**（例如 `dsh`，
  * 也是 `MATE_RUNTIME_<NAME>` 与 `payloads/<name>/` 的键），而许可证义务挂在**真实包**上
- * （`@deepseek-ai/dsh` / `@opencode/cli-darwin-arm64`）。两者的绑定不能靠"看起来像"来猜：
+ * （`@deepseek-ai/dsh`）。两者的绑定不能靠"看起来像"来猜：
  * 这里是**声明**，生成期硬校验"载荷树里确实有这个名字的包、版本也一致"，对不上就失败
  * （包改名/换发行包时当场红，而不是让 NOTICES 里出现一个不存在的组件名）。
  */
 export const PAYLOAD_PACKAGES = {
   dsh: '@deepseek-ai/dsh',
-  opencode: '@opencode/cli-darwin-arm64',
 }
 
 /**
@@ -68,14 +66,10 @@ export const PAYLOAD_PACKAGES = {
  * 为什么不用"找不到就当 unknown"：那会让 NOTICES 从此少一个组件而没人发现——而许可证义务
  * 恰恰是"漏一个就违约"的东西。缺字段就报错，逼人来这里登记（登记时去看上游仓库的 LICENSE）。
  *
- * v2 的 `@opencode/cli-*` 包自带 `"license": "MIT"`，这里的条目是别的平台包漏字段时的兜底。
+ * 当前为空：随包的 dsh 闭包在每个包上都自带 `license` 字段。留空不是"没配"，而是"暂无需要兜底的包"
+ * ——一旦有包缺字段，生成期会失败并要求在这里登记，而不是静默降级成"许可证未知"。
  */
-export const LICENSE_FALLBACKS = {
-  '@opencode/cli-darwin-arm64': {
-    license: 'MIT',
-    source: 'https://github.com/anomalyco/opencode/blob/dev/LICENSE',
-  },
-}
+export const LICENSE_FALLBACKS = {}
 
 /** 包管理器元数据（不属于载荷内容，也不是"包"）。 */
 const IGNORED_DIRS = new Set(['.bin', '.pnpm', '.modules.yaml'])
@@ -165,7 +159,7 @@ export function lockfilePins(lockPath) {
  * 走查一份载荷树，收集所有第三方包的 `{name, version, license}`。
  *
  * **什么算"一个组件"**：`node_modules` 目录下的一级条目（作用域包算到 `@scope/name` 那一层），
- * 或者载荷根自身（opencode 形态：包内容直接铺在载荷根）。
+ * 或者载荷根自身（平铺形态：包内容直接铺在载荷根、入口就在根上）。
  *
  * 为什么**不**按"任何含 package.json 的目录"来算：载荷里有大量**不是依赖**的 package.json——
  * dsh 的 skill 模板就带着 `@local/my-decoration` 这种示例工程的清单（装配期 fail-closed 当场
@@ -243,7 +237,7 @@ export function collectPackagesFromTree(payloadRoot, payloadName) {
     }
   }
 
-  // 载荷根自身可能就是那个包（opencode：入口 `bin/opencode` 与 package.json 都在根上）。
+  // 载荷根自身可能就是那个包（平铺形态：入口与 package.json 都在载荷根上）。
   record(payloadRoot, '')
   const rootNodeModules = join(payloadRoot, 'node_modules')
   if (existsSync(rootNodeModules)) walkNodeModules(rootNodeModules, 0, '')
@@ -465,7 +459,7 @@ export function renderSbom(model) {
         { name: 'mate:nodeAbi', value: String(model.nodeAbi) },
       ]),
     ...model.packages.map((pkg) => {
-      // 载荷根那份包（`@deepseek-ai/dsh` / `opencode-darwin-arm64`）就在这里，带上
+      // 载荷根那份包（`@deepseek-ai/dsh`，平铺形态则是那个平台包）就在这里，带上
       // `mate:payloadRoot` 与载荷 digest——**不另造一个"载荷"组件**（同一份软件出现两次
       // 只会让清单看起来更全，实际是同名不同物，机器消费方没法用）。
       const props = [{ name: 'mate:payload', value: pkg.payloads.join('+') }]

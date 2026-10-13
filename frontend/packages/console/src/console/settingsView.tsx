@@ -33,7 +33,7 @@ export const SETTINGS_MENU = {
 
 /**
  * 分节的**命名纪律**（A13 守卫钉住）：这一节面向用户的标题里不出现 `provider`/`mcp`/`skill`
- * 这类代码词，也不出现任何底座名（`dsh`/`opencode`/`runtime`/`底座`）。「模型」这一节的标题与
+ * 这类代码词，也不出现任何底座名（`dsh`/`runtime`/`底座`）。「模型」这一节的标题与
  * 两块小标题只说「供应商」「模型」——用户视角的词，而不是资源层的词。
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [

@@ -171,7 +171,7 @@ const (
 const (
 	// ChannelNativeDoc 该底座的原生凭据文档（dsh 的 `.credentials.yaml`，可热生效）。
 	ChannelNativeDoc = "native_doc"
-	// ChannelEnv 平台经子进程 env 注入（opencode 的官方 `env` 字段 + 平台 env）。
+	// ChannelEnv 平台经子进程 env 注入（平台 env；某些底座还有自己那份官方 env 面）。
 	ChannelEnv = "env"
 	// ChannelNone 两条都不满足（无密钥 / 未声明）。
 	ChannelNone = "none"
@@ -254,7 +254,7 @@ type Delivery interface {
 // Syncer 端口：把应用层声明交付给本底座。
 //
 // 实现方（`pkg/runtime/<adapter>`）自己知道写哪个文件、什么格式、怎么校验、怎么撤回。
-// 装配形态：`reg.RegisterSyncer("opencode", opencode.NewSyncer(delivery))`——Delivery 从构造函数
+// 装配形态：`reg.RegisterSyncer("<id>", <id>pkg.NewSyncer(delivery))`——Delivery 从构造函数
 // 进来，SyncModels 保持最小签名。
 //
 // 契约（五条，缺一条实现方即违约）：
@@ -299,7 +299,8 @@ type CredentialSpec struct {
 	// 为什么不用 `OPENAI_API_KEY` 这类"知名"名：① 逐供应商必须唯一（见上）；
 	// ② 实测 env 优先于文档，而知名名很容易出现在用户的 shell 里 → 静默遮蔽。
 	RefPattern string
-	// FallbackEnv 是否允许把同一名字当 env 通道用（opencode=true；dsh 实测后=false）。
+	// FallbackEnv 是否允许把同一名字当 env 通道用（dsh 实测后=false：它的原生文档优先于
+	// 继承环境，同时启用会让已存文档被陈旧 env 永久遮蔽。详见该 adapter 的 Credential 声明）。
 	FallbackEnv bool
 	// Tested 原生通道是否已端到端实测；false → 必须走 env 并如实报 untested。
 	Tested bool

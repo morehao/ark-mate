@@ -29,7 +29,7 @@ func Installed(spec Spec) bool {
 
 // CommandExecutable 报告某启动命令当前可执行：
 //   - 含路径分隔符 → 直接 stat（如远程/自带底座的绝对路径）；
-//   - 否则按 PATH 查找（opencode/dsh 等须在 PATH 中的 CLI）。
+//   - 否则按 PATH 查找（声明成"裸命令名"的底座就是在 PATH 里找的那个 CLI）。
 //
 // 与 Installed 同源；**显式、不探测**：只看声明的那一个命令，找不到就返回 false，
 // 绝不去猜别的位置（猜的后果是"机器上恰好装过这个底座"静默顶掉随包那份）。

@@ -23,12 +23,12 @@ export type ConfigOptionCategory = 'model' | 'thought_level' | 'mode' | 'model_c
 
 /** 一个可选值。value 是**不透明字符串**：原样回传（创建/切换会话），前端不得解析其内部结构。 */
 export interface ConfigOptionValue {
-  /** 不透明取值（dsh: JSON.stringify([provider, model])；opencode: provider/model）。 */
+  /** 不透明取值（形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`）。 */
   value: string
   /** 展示名（唯一可展示字段）。 */
   name: string
   description?: string
-  /** agent 以分组形态下发时的分组标识与标题（opencode 为扁平列表，两字段为空）。 */
+  /** agent 以分组形态下发时的分组标识与标题（该底座的广告是扁平列表时两字段为空）。 */
   group?: string
   group_name?: string
   /** 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅提示，最终以运行时为准。 */
@@ -50,7 +50,7 @@ export interface ConfigOption {
   values: ConfigOptionValue[]
 }
 
-/** 运行时声明的鉴权方式（空目录时给用户确切的补救路径，如 opencode 的终端登录命令）。 */
+/** 运行时声明的鉴权方式（空目录时给用户确切的补救路径，例如底座给出的终端登录命令）。 */
 export interface AuthGuidance {
   method_id: string
   name: string

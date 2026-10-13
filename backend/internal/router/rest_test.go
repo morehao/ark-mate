@@ -436,7 +436,7 @@ func (s *stubSvc) SkillMaterialization(id string) (*dtocapability.SkillMateriali
 	return &dtocapability.SkillMaterializationResp{
 		ID: id, Enabled: true,
 		States: []dtocapability.SkillMaterializationState{
-			{Root: "/tmp/skills", Runtime: "opencode", Dir: "/tmp/skills/" + id,
+			{Root: "/tmp/skills", Runtime: "rtx", Dir: "/tmp/skills/" + id,
 				Status: "in_sync", Hash: "abc", ActualHash: "abc"},
 		},
 	}, nil
@@ -1121,7 +1121,7 @@ func TestRuntimesEndpointGone(t *testing.T) {
 // 绝对路径透传给 service（含 workspace_temporary 回读），相对路径属参数错误直接 40000。
 func TestListSessionsWorkspaceQuery(t *testing.T) {
 	svc := &stubSvc{sessions: []dtosession.SessionResp{{
-		ID: "c-1", AgentID: "agent-opencode", Status: "completed",
+		ID: "c-1", AgentID: "agent-rtx", Status: "completed",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 	}}}
 	r := newRestEngine(stubDeps(svc))
@@ -1249,9 +1249,9 @@ func TestListFailure(t *testing.T) {
 
 // TestCreateSession 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
 func TestCreateSession(t *testing.T) {
-	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", AgentID: "agent-opencode", Status: "in_progress", EventSeq: 9}}
+	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", AgentID: "agent-rtx", Status: "in_progress", EventSeq: 9}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"agent-opencode","prompt":"hi","cwd":"/tmp"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"agent-rtx","prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1262,7 +1262,7 @@ func TestCreateSession(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &resp); err != nil || resp.ID != "s-abc" || resp.EventSeq != 9 {
 		t.Fatalf("create data 不符: %s", env.Data)
 	}
-	if !svc.createCalled || svc.createReq.AgentID != "agent-opencode" || svc.createReq.Prompt != "hi" || svc.createReq.Cwd != "/tmp" {
+	if !svc.createCalled || svc.createReq.AgentID != "agent-rtx" || svc.createReq.Prompt != "hi" || svc.createReq.Cwd != "/tmp" {
 		t.Fatalf("create 未正确透传: %+v", svc.createReq)
 	}
 }
@@ -1695,10 +1695,10 @@ func TestAgentCapabilitiesRoute(t *testing.T) {
 	svc := &stubSvc{
 		agentCapResp: &dtocapability.AgentCapabilitiesResp{
 			AgentID:  "a1",
-			Runtimes: []string{"opencode"},
+			Runtimes: []string{"rtx"},
 			Skills:   []dtocapability.AgentSkillResp{{ID: "plan", Name: "plan"}},
 			McpServers: []dtocapability.AgentMcpServerResp{
-				{ID: "fs", Transport: "stdio", Enabled: true, Runtimes: []string{"opencode"}},
+				{ID: "fs", Transport: "stdio", Enabled: true, Runtimes: []string{"rtx"}},
 			},
 			Tools: []dtocapability.ToolResp{{Name: "web_search", Source: "builtin"}},
 			Notes: []string{"候选 runtime \"ghost\" 未注册（按声明过滤，不推导其能力）"},
@@ -2107,7 +2107,7 @@ func (s *stubSvc) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, err
 		ID: "demo", Kind: dtolibrary.KindSkill, Name: "演示", Origin: dtolibrary.OriginLocal,
 		Scope: "global", Enabled: true, SourceFile: "/tmp/skills/demo.json",
 		Applicability: []dtolibrary.Applicability{
-			{Runtime: "opencode", OK: true, Status: dtolibrary.StatusProjected, Reason: "投放到 /tmp/skills"},
+			{Runtime: "rtx", OK: true, Status: dtolibrary.StatusProjected, Reason: "投放到 /tmp/skills"},
 		},
 	}}, nil
 }

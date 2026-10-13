@@ -6,8 +6,9 @@
 // 反向依赖该层；而 `pkg/` 不得 import `internal/`（`internal/archtest` 守卫），所以它只能待在
 // `pkg/object` 下，三方都只依赖值对象。
 //
-// 本包里的交付矩阵是**静态事实表**：**通道按资源种类固定，不随 runtime 变**——dsh 与 opencode
-// 的 provider 密钥都走子进程 env、会话级模型都走会话配置项、模型清单都走「写配置文件」。
+// 本包里的交付矩阵是**静态事实表**：**通道按资源种类固定，不随 runtime 变**——provider 密钥走
+// 子进程 env（或该底座的原生文档，见 `resource.CredentialSpec`）、会话级模型走会话配置项、
+// 模型清单走「写配置文件」。
 // 把**通道**做成 per-runtime 声明会创造一个今天不存在的自由度。唯一 per-runtime 的是 T5
 // （`config_write`）的**落点**——写哪个文件、什么 schema、是否支持热更——那由
 // `pkg/runtime.Spec.ConfigProjection`（`Root`/`Filename`/`Format`/`Effect`）细化，

@@ -27,7 +27,7 @@ func capSeedDir(t *testing.T) string {
   "id": "alpha",
   "name": "Alpha",
   "body": "# Alpha",
-  "runtimes": ["opencode"],
+  "runtimes": ["rtx"],
   "my_note": "手写字段"
 }`)
 	writeSkill(t, dir, "beta", `{"id":"beta","name":"Beta","scope":"workspace"}`)

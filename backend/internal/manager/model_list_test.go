@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,9 +12,9 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/dsh"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -54,20 +53,35 @@ func newModelRig(t *testing.T) *modelRig {
 	// **隔离纪律（硬约束）**：`ModelCatalog` 在没有活会话/缓存时会走 resume 分支**真的 spawn
 	// 底座**。夹具必须同时做两件事：① 注入隔离 env（home 全落在 t.TempDir 下）；② 把 Command
 	// 换成一个**不存在**的桩名——真到 spawn 那一步只会失败，绝不落到用户装的那份。
-	real := runtime.AllBuiltinRegistry()
 	home := t.TempDir()
-	for _, id := range []string{"opencode", dsh.ID} {
-		sp, ok := real.Get(id)
-		if !ok {
-			t.Fatalf("默认注册表里应有 %s", id)
-		}
-		sp.Launch.Command = "mate-test-" + id + "-stub-not-on-path"
-		sp.Launch.Env = append(sp.Launch.Env, "OPENCODE_CONFIG_DIR="+filepath.Join(home, "opencode-config"),
-			"DSH_HOME="+filepath.Join(home, "dsh-home"))
-		r.svc.reg.Register(sp)
-	}
+	// 内置那一份：Spec + `RegisterBuiltinPorts` 的三张执行表（缺了后者，这些底座会**静默**少掉
+	// 原生权限 / 清单交付 / 模型值三面，表现为一堆看起来像"平台侧没实现"的假症状）。
+	dsh := builtinSpec(t, runtime.DefaultBuildRuntime)
+	dsh.Launch.Command = "mate-test-" + dsh.ID + "-stub-not-on-path"
+	r.svc.reg.Register(dsh)
+	runtime.RegisterBuiltinPorts(r.svc.reg)
+	// 合成那一份：同样 Spec 与端口同批登记（`runtimetest.Register` 就是夹具侧的 `RegisterBuiltinPorts`）。
+	runtimetest.Register(r.svc.reg, runtime.LaunchSpec{Command: "mate-test-" + runtimetest.ID + "-stub-not-on-path"})
+	// 隔离面由各 spec 自己声明（dsh 的 `DSH_HOME` / 合成底座的 `RTX_HOME`），内核只做机械投影。
 	r.svc.reg.ApplyIsolationEnv(home)
+	// 对账要借"服务该 runtime 的 agent"读目录：内置那条由播种给出，合成那条由夹具显式登记
+	// ——产品里第二个 agent 也是这么来的（内置清单只有一条）。
+	r.svc.agents[runtimetest.ID] = &AgentRec{ID: runtimetest.ID, Name: "RTX"}
 	return &modelRig{genRig: r}
+}
+
+// builtinSpec 取一份内置适配的**真实声明**（注册表副本，改它不影响默认注册表）。
+//
+// 夹具借真实声明是为了"对账读的落点就是产品会写的那一个"，但**第二个底座不再借**：
+// 随第二个真实 adapter 下线，仓库里已没有别的真实 adapter 可借，而 synthesize 一份反而是更诚实的
+// 形态（runtimetest 的声明是合成的，所以它随适配面增减不会静默改变这些用例的覆盖面）。
+func builtinSpec(t *testing.T, id string) runtime.Spec {
+	t.Helper()
+	sp, ok := runtime.AllBuiltinRegistry().Get(id)
+	if !ok {
+		t.Fatalf("内置注册表里应有 %s", id)
+	}
+	return sp
 }
 
 // createModel 走真实写面建一条条目（供应商不存在时先建）。
@@ -98,11 +112,11 @@ func TestModelListFailureFaces(t *testing.T) {
 	r := newModelRig(t)
 
 	// ① 请求体里带 `runtime` → 40001（A2）：模型不再分底座，静默收下等于承认它有意义。
-	_, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", ModelID: "m", Runtime: ptr("opencode")})
+	_, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{ProviderID: "p1", ModelID: "m", Runtime: ptr(runtimetest.ID)})
 	if errCode(err) != "invalid_param" || codeOf(err) != 40001 {
 		t.Fatalf("带 runtime 应 40001 invalid_param，got %q/%d（%v）", errCode(err), codeOf(err), err)
 	}
-	if _, err := r.svc.UpdateModel(ctx, "x", dtomodel.ModelPatchReq{Runtime: ptr("opencode")}); errCode(err) != "invalid_param" {
+	if _, err := r.svc.UpdateModel(ctx, "x", dtomodel.ModelPatchReq{Runtime: ptr(runtimetest.ID)}); errCode(err) != "invalid_param" {
 		t.Fatalf("PATCH 带 runtime 也应被拒，got %q", errCode(err))
 	}
 
@@ -152,7 +166,7 @@ func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
 		t.Fatalf("首条设为默认后应是唯一默认: id=%q found=%v", id, found)
 	}
 	b := r.createModel(t, "p1", "m-b", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	// 单一值：设 b 之后默认就是 b，而不是"opencode 一条、dsh 一条"。
+	// 单一值：设 b 之后默认就是 b，而不是"每个底座各一条"。
 	if id, _, _ := r.svc.st.DefaultModelID(ctx); id != b.ID {
 		t.Fatalf("默认应是最后设置的那条（单一值），实际 %q", id)
 	}
@@ -171,31 +185,48 @@ func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
 	}
 }
 
-// TestModelValueForTwoAlgorithmsAgree 下发（T2）与交付（adapter）**共用同一个生成规则**。
+// TestModelValueForTwoAlgorithmsAgree 下发（T2）与交付（T5）**共用同一个生成规则**，
+// 而那条规则由**各底座自己声明**（注册表第四张表），内核只做分发。
 //
-// 判据是"同一输入产出逐字节相同的值"——两个底座各一条。清单里**不存** value：它只存生成
-// value 的输入（这正是本方案最容易写错的一处：把运行时给的 value 存回清单就是把"事实"当"意图"）。
+// 判据是"同一输入产出逐字节相同的值"——本测试用两个**形态不同**的实现把"内核没有内建形态"
+// 这件事钉住：
+//
+//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["<provider>","<model>"]`（JSON 数组）
+//	rtx（合成夹具，走 internal/testutil/runtimetest）：`<provider>/<model>`
+//
+// 两者形态**刻意不同**：如果内核还留着一个 `switch runtimeID`，它就必然挑中其中一个形态、
+// 让另一条断言红。清单里**不存** value：它只存生成 value 的输入（这正是本方案最容易写错的一处：
+// 把运行时给的 value 存回清单就是把"事实"当"意图"）。
 func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
-	v, err := modelValueFor("dsh", "deepseek-main", "deepseek-v4-flash")
+	builtin := runtime.AllBuiltinRegistry()
+	v, err := modelValueFor(builtin, runtime.DefaultBuildRuntime, "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v != `["deepseek-main","deepseek-v4-flash"]` {
-		t.Fatalf("dsh 的模型值形态不符: %q", v)
+		t.Fatalf("内置底座的模型值形态不符: %q", v)
 	}
 	var arr []string
 	if err := json.Unmarshal([]byte(v), &arr); err != nil || len(arr) != 2 {
-		t.Fatalf("dsh 的值应是合法 JSON 数组: %q err=%v", v, err)
+		t.Fatalf("内置底座的值应是合法 JSON 数组: %q err=%v", v, err)
 	}
-	v, err = modelValueFor("opencode", "deepseek-main", "deepseek-v4-flash")
+	// 合成底座的形态来自**它自己登记的实现**（内核从未听说过 `<provider>/<model>`）。
+	synthetic, _ := runtimetest.NewRegistry(runtime.LaunchSpec{})
+	v, err = modelValueFor(synthetic, runtimetest.ID, "deepseek-main", "deepseek-v4-flash")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v != "deepseek-main/deepseek-v4-flash" {
-		t.Fatalf("opencode 的模型值形态不符: %q", v)
+		t.Fatalf("合成底座的模型值形态不符: %q", v)
 	}
-	if _, err := modelValueFor("some-third-runtime", "p", "m"); errCode(err) != "model_value_unsupported" {
-		t.Fatalf("未声明的 runtime 应拒绝猜模型值形状，got %q", errCode(err))
+	// 两个形态**必须不同**：相同的话，"内核按 id 挑形态"这条失效方式就测不出来了。
+	builtinV, _ := modelValueFor(builtin, runtime.DefaultBuildRuntime, "p", "m")
+	syntheticV, _ := modelValueFor(synthetic, runtimetest.ID, "p", "m")
+	if builtinV == syntheticV {
+		t.Fatalf("两条形态退化成同一个（%q）：本判据失去区分度，内核里的 id 特判会假绿", builtinV)
+	}
+	if _, err := modelValueFor(builtin, "some-third-runtime", "p", "m"); errCode(err) != "model_value_unsupported" {
+		t.Fatalf("未登记形态的 runtime 应拒绝猜模型值形状，got %q", errCode(err))
 	}
 	// 行里不得出现**生成的值**（平台只存输入：provider_id + model_id）。
 	r := newModelRig(t)
@@ -307,12 +338,12 @@ func TestModelListRequiresSQLite(t *testing.T) {
 func TestResolveDefaultModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
-	v, err := r.svc.DefaultModelValueFor(ctx, "opencode")
+	v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "" {
 		t.Fatalf("无默认应回空串（不下发）: %q err=%v", v, err)
 	}
 	r.createModel(t, "p1", "m-a", func(req *dtomodel.ModelCreateReq) { req.IsDefault = ptr(true) })
-	v, err = r.svc.DefaultModelValueFor(ctx, "opencode")
+	v, err = r.svc.DefaultModelValueFor(ctx, runtimetest.ID)
 	if err != nil || v != "p1/m-a" {
 		t.Fatalf("有默认应回生成的值: %q err=%v", v, err)
 	}
@@ -353,7 +384,7 @@ func TestDefaultModelReasoningEffortNotSent(t *testing.T) {
 	// dsh 必须**声明凭据交付面**（原 v11 断言的是"已声明模型配置落点"，v12 的那个概念换成
 	// 落点 + 凭据两条声明；这里断言后者，因为它是新链路的关键）。
 	reg := runtime.AllBuiltinRegistry()
-	sp, ok := reg.Get(dsh.ID)
+	sp, ok := reg.Get(runtime.DefaultBuildRuntime)
 	if !ok {
 		t.Fatal("dsh 应已注册")
 	}
@@ -375,13 +406,13 @@ func TestClearDefaultModel(t *testing.T) {
 	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{IsDefault: boolPtr(true)}); err != nil {
 		t.Fatalf("置默认: %v", err)
 	}
-	if v, err := r.svc.DefaultModelValueFor(ctx, "opencode"); err != nil || v == "" {
+	if v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID); err != nil || v == "" {
 		t.Fatalf("置默认后应有默认值: %q %v", v, err)
 	}
 	if _, err := r.svc.UpdateModel(ctx, created.ID, dtomodel.ModelPatchReq{IsDefault: boolPtr(false)}); err != nil {
 		t.Fatalf("清默认: %v", err)
 	}
-	if v, err := r.svc.DefaultModelValueFor(ctx, "opencode"); err != nil || v != "" {
+	if v, err := r.svc.DefaultModelValueFor(ctx, runtimetest.ID); err != nil || v != "" {
 		t.Fatalf("清默认后不该再有默认值: %q %v", v, err)
 	}
 	// 幂等：本来就不是默认 → 仍然成功。

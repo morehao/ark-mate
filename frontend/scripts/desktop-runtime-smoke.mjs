@@ -8,7 +8,7 @@
  * Node**（Electron 的 Node），机器上装没装 node 与它无关"。M1–M3 的其余验收都停在"启动器能转发、
  * `--version` 能打出来"这一层（M3-2 的 `scenarioNodeChannel`）；本脚本往下走一步：
  * 在**真壳 + 真核心**的前提下，用核心进程**实际拿到的那份环境**（`ps -E` 读出来的，不是我们猜的）
- * 经私有 bin 启动器把两份随包载荷的 ACP 模式真拉起来，各走一遍最小握手
+ * 经私有 bin 启动器把随包载荷的 ACP 模式真拉起来，各走一遍最小握手
  * （`initialize` → `session/new`）——**不需要任何模型凭据**。
  *
  * ## 与计划 §M3-8 的对应
@@ -39,7 +39,7 @@
  *
  * 口径为什么够用：写入必然表现为①新增/删除文件（计数与摘要都变）或②改写文件（size 或 mtime 变）；
  * 反过来**读取不会动其中任何一项**（读不更新 mtime）。全量内容 hash 也能发现写入，但要把 ~490MB
- * 读两遍/次且收益为零。载荷规模：dsh 15164 文件 / ~345MB，opencode 3 文件 / ~145MB；
+ * 读两遍/次且收益为零。载荷规模：dsh 15164 文件 / ~345MB；
  * 一次元数据扫描实测 <1s。（`payload.json` 里的 `files` 是**闭包自身**的计数、不含那份清单；
  * 所以指纹的文件数会比它多 1——这不是不一致。）
  *
@@ -50,7 +50,6 @@
  *
  * ## 当前实测状态（2026-09-28，本机 Electron 44.4.5）
  *
- * - **opencode**：握手绿（`initialize` + `session/new`），载荷目录指纹零变化 → 触发条件 ① 对它是**已验**。
  * - **dsh**：**握手红**，原因**不在本脚本也不在环境**——dsh 的 profile boot 依赖原生插件
  *   `node-addon-require-builtin@0.1.6`，它对 Electron 做 **V8 版本精确指纹**匹配，只接受
  *   43.0.0 / 44.0.0 / 45.0.0-alpha.6；本仓 pin 的 **44.4.5**（V8 15.2.124.28）不在表里 → 直接抛错。
@@ -77,8 +76,7 @@
  * 场景：
  *   guard        前置（**总是**跑）：单实例检查、`make core/desktop` 级重建、载荷与私有 bin 在位
  *   dsh          dsh 的 ACP 握手（私有 bin → Electron 的 Node → 随包载荷）
- *   opencode     opencode 的 ACP 握手（私有 bin → 随包原生二进制）
- *   fingerprint  触发条件 ①：两份载荷目录指纹在整轮前后零变化
+ *   fingerprint  触发条件 ①：载荷目录指纹在整轮前后零变化
  *   live         可选 LIVE 档：真发一次 `session/prompt`（要凭据，**不进 CI**）
  *   dsh-diag     诊断：同一份 dsh 载荷换**本机 Node** 起（定位阻塞点；不计入判据）
  *   dsh-alt-node 候选修复验证：换 `MATE_SMOKE_ALT_NODE` 指的 Electron 再起 dsh（不计入判据）
@@ -87,7 +85,6 @@
  *   KEEP_SHELL=1                 跑完不杀壳（人工接管用；下次跑会被 guard 挡下）
  *   RUNTIME_SMOKE_LIVE=1         开启 LIVE 档
  *   MATE_SMOKE_DSH_API_KEY      LIVE 档 dsh 的凭据（透传成子进程的 DEEPSEEK_API_KEY）
- *   MATE_SMOKE_OPENCODE_API_KEY LIVE 档 opencode 的凭据（透传成子进程的 OPENCODE_API_KEY）
  *   MATE_SMOKE_ALT_NODE         `dsh-alt-node` 用的候选 Node/Electron 可执行文件绝对路径
  *   MATE_SMOKE_APP              打包态：`.app` 的绝对路径（起包内的壳与核心；缺省的源码态不判条件 ②）
  *
@@ -162,19 +159,23 @@ const PROC_RES = PACKAGED_APP ? packagedProcessRes(PACKAGED_APP) : { shell: SHEL
 /** 展示用：把绝对路径缩成可读（打包态缩 `.app` 之前那一段）。 */
 const ELIDE_FROM = PACKAGED_APP ?? DESKTOP
 
-/** 两份随包载荷。runtime id 与 `backend/pkg/runtime/{dsh,opencode}` 的 ID 一致。 */
+/**
+ * 随包载荷。runtime id 与 `backend/pkg/runtime/dsh` 的 ID 一致。
+ *
+ * **新增一个随包底座 = 在这张表里加一条**（外加 `backend/pkg/runtime/<id>/` 的 adapter、
+ * `apps/desktop/runtime/<id>/` 的装配脚本、`prepare-runtime.mjs` 的 PAYLOADS 与
+ * `gen-runtime-bin.mjs` 的 LAUNCHERS 各一条）。下面所有场景都**遍历这张表**，不写死 id 清单——
+ * 否则新底座接进来时，探针会静默地不测它（"验收覆盖不到新底座"正是本仓最贵的那种假绿）。
+ */
 const RUNTIMES = {
   dsh: {
     label: 'dsh（dsh）',
     // 形态来自 backend/pkg/runtime/dsh：Command="dsh"，Args=["--profile","acp"]。
     args: ['--profile', 'acp'],
   },
-  opencode: {
-    label: 'opencode',
-    // 形态来自 backend/pkg/runtime/opencode：Command="opencode"，Args=["acp"]。
-    args: ['acp'],
-  },
 }
+/** 探针要遍历的 runtime id（由 RUNTIMES 派生，不写死）。 */
+const RUNTIME_IDS = Object.keys(RUNTIMES)
 
 // ——— 断言台账（与 desktop-ui-acceptance.mjs 同风格）———
 const results = []
@@ -387,14 +388,14 @@ const INITIALIZE_PARAMS = {
  * 三条纪律：
  *  1. **PATH 前置私有 bin**（宁可重复校准也不假设）：设计 §6.6 的私有 bin 必须是 PATH 首段，
  *     否则机器上恰好装过的同名命令会顶掉随包那份；
- *  2. **载荷入口来自核心环境**（`MATE_DSH_ENTRY` / `MATE_OPENCODE_BIN` / `MATE_NODE_EXECUTABLE`
- *     / `MATE_HOME`）——本脚本不自己拼这几条路径，拼了就等于在验"我记住的那个常量"；
+ *  2. **载荷入口来自核心环境**（`MATE_DSH_ENTRY` / `MATE_NODE_EXECUTABLE` / `MATE_HOME`）
+ *     ——本脚本不自己拼这几条路径，拼了就等于在验"我记住的那个常量"；
  *  3. **配置隔离按 runtime 叠加**（`backend/pkg/runtime/isolation.go` 的 `IsolationEnv` 逐条对齐）。
  *     为什么要在这里补：核心进程自己的环境里**没有**这些变量——它们是核心在 `Connect` 时按
- *     runtime 注入子进程的。不补的话 dsh/opencode 会去写用户的 `~/.dsh`、`~/.config/opencode`。
+ *     runtime 注入子进程的。不补的话底座会去写用户的 `~/.dsh` 这类真实目录。
  */
 /**
- * 探针 runtime 的**可写面**（dsh / opencode 的 home 与 npm 面都挂在它下面）。
+ * 探针 runtime 的**可写面**（各底座的 home 与公共 npm 面都挂在它下面）。
  *
  * 刻意**不**沿用 `coreEnv.MATE_HOME`：那是壳按默认注入的**用户真实** `~/.ark-mate`，拿它当可写面
  * 会让探针往用户真实数据目录里写——2026-10-09 实测 `~/.ark-mate/runtime/dsh/sessions/` 里留下一批
@@ -427,25 +428,11 @@ function runtimeEnvOf(coreEnv, runtimeId) {
     // 而 dsh 按 `config.agentsHome ?? $DSH_AGENTS_HOME ?? ~/.agents` 解析它——注入了就把 dsh 的读根
     // 从平台写根上撬走、skill 静默不投放（2026-10-09 桌面态验收实测）。核心侧（isolation.go）与
     // 桌面私有启动器（apps/desktop/scripts/gen-runtime-bin.mjs）同批修掉。
-  } else {
-    isolation.XDG_CONFIG_HOME = join(home, 'runtime', 'opencode', 'config')
-    isolation.XDG_DATA_HOME = join(home, 'runtime', 'opencode', 'data')
-    isolation.XDG_CACHE_HOME = join(home, 'runtime', 'opencode', 'cache')
-    // v2 的服务发现面（`<XDG_STATE_HOME 或 ~/.local/state>/opencode/service.json`）：探针不隔离它就会
-    // **读/替换用户自己的后台服务登记**——那正是"探针动了本机"（本脚本 2026-10-09 起把可写面收进临时
-    // home，这一条必须跟着核心 isolation.go 的表走）。
-    isolation.XDG_STATE_HOME = join(home, 'runtime', 'opencode', 'state')
-    isolation.OPENCODE_CONFIG_DIR = join(home, 'runtime', 'opencode', 'config', 'opencode')
-    isolation.OPENCODE_DB = join(home, 'runtime', 'opencode', 'data', 'opencode.db')
-    // F3（模型清单 T5 的隔离前提）：与核心逐条对齐（本表三份副本，改一处就得改三处）。
-    // 空串是有意的取值：清掉用户 shell 里的同名变量（层③ `OPENCODE_CONFIG` 高于平台写的 global 文件、
-    // 层⑥ `OPENCODE_CONFIG_CONTENT` 高于平台写的任何文件），并关掉会走到文件系统根的项目级发现（层④⑤）。
-    isolation.OPENCODE_CONFIG = ''
-    isolation.OPENCODE_CONFIG_CONTENT = ''
-    isolation.OPENCODE_CONFIG_PROJECT_DISABLE = 'true'
-    isolation.OPENCODE_MODELS_PATH = ''
-    isolation.OPENCODE_MODELS_URL = ''
   }
+  // **刻意没有 `else`**：别的 id 只拿公共 npm 面——这与核心 `IsolationEnv` 的 fail-safe 逐条一致
+  // （未知 id 只给公共面，绝不臆造某个底座的专属变量）。守卫
+  // `TestDesktopSmokeIsolationMatchesCore` 两侧都判：公共面 == 核心给未知 id 的那一份，
+  // dsh 分支 == 核心给 dsh 的那一份。
   // "已有键不覆盖"（isolation.go 的 ApplyIsolationEnv 语义）：显式配置优先。
   for (const [k, v] of Object.entries(isolation)) if (env[k] === undefined) env[k] = v
   return env
@@ -535,7 +522,7 @@ function scenarioGuard() {
     for (const [name, ok, detail] of rebuildAll()) check(name, ok, detail)
   }
 
-  for (const name of ['dsh', 'opencode']) {
+  for (const name of RUNTIME_IDS) {
     const payload = readPayload(name)
     check(
       `载荷 ${name} 在位（payloads/*/*/payload.json）`,
@@ -548,18 +535,18 @@ function scenarioGuard() {
     )
   }
 
-  const launchers = ['node', 'npx', 'dsh', 'opencode']
+  const launchers = ['node', 'npx', ...RUNTIME_IDS]
   const missing = launchers.filter((l) => !existsSync(join(BIN_DIR, l)) || !existsSync(join(BIN_DIR, `${l}.cmd`)))
   check('私有 bin 启动器已生成（POSIX 与 .cmd 各一份）', missing.length === 0, missing.length ? `缺：${missing.join('/')}` : BIN_DIR.replace(REPO, '.'))
 }
 
 /**
- * 一份载荷的 ACP 握手用例（dsh / opencode 共用）。
+ * 一份载荷的 ACP 握手用例（按 RUNTIMES 表逐份跑）。
  *
  * 断言的分工：
  *  1. 载荷入口在位、注入变量在场（启动器只转发，目标缺失就 127 大声失败）；
  *  2. 进程**经私有 bin** 起来了；
- *  3. 运行它的那份解释器**就是壳注入的那份**（dsh：Electron 的 Node；opencode：随包原生二进制）——
+ *  3. 运行它的那份解释器**就是壳注入的那份**（dsh：Electron 的 Node）——
  *     见下面"跑在哪份解释器上"的三条证据；
  *  4. `initialize` / `session/new` 握手成功（不需要模型凭据）；
  *  5. （可选）LIVE 档真发一次 prompt。
@@ -576,20 +563,24 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
   check(`${runtimeId} 载荷入口在位`, true, `${payload.version} → ${payload.entry.replace(ELIDE_FROM, '…')}`)
 
   const env = runtimeEnvOf(coreEnv, runtimeId)
-  // 工作区给临时目录：session/new 要求绝对 cwd，且**不能污染仓库**（opencode 会在 cwd 下落状态）。
+  // 工作区给临时目录：session/new 要求绝对 cwd，且**不能污染仓库**（底座可能在 cwd 下落状态）。
   const workspace = makeTemp(`mate-smoke-${runtimeId}-ws-`)
 
-  // 私有 bin 的 dsh/opencode 启动器只做转发；目标没注入就 127。先静态核对要交出去的那几件套。
+  // 私有 bin 的启动器只做转发；目标没注入就 127。先静态核对要交出去的那几件套。
+  // 每份载荷的必需变量由**它自己的 launcher 定义**决定（dsh 是 Node 模式：Node + 入口 + MATE_HOME）。
   const launcher = join(BIN_DIR, runtimeId)
-  const needed = runtimeId === 'dsh' ? ['MATE_NODE_EXECUTABLE', 'MATE_HOME', 'MATE_DSH_ENTRY'] : ['MATE_HOME', 'MATE_OPENCODE_BIN']
+  const LAUNCHER_ENV = {
+    dsh: ['MATE_NODE_EXECUTABLE', 'MATE_HOME', 'MATE_DSH_ENTRY'],
+  }
+  const needed = LAUNCHER_ENV[runtimeId] ?? ['MATE_NODE_EXECUTABLE', 'MATE_HOME', ...[`MATE_${runtimeId.toUpperCase()}_ENTRY`]]
   for (const key of needed) {
     check(`注入变量在场：${key}`, !!env[key], env[key] ? env[key].replace(DESKTOP, '…') : '(空)')
   }
 
   // ——— "跑在哪份解释器上"的三条证据 ———
   //
-  // ① 启动器脚本的 exec 目标（生成物，逐字节确定）：dsh 是 `ELECTRON_RUN_AS_NODE=1 exec "$MATE_NODE_EXECUTABLE" "$MATE_DSH_ENTRY"`，
-  //    opencode 是 `exec "$MATE_OPENCODE_BIN"`（原生二进制，不经 Node）。
+  // ① 启动器脚本的 exec 目标（生成物，逐字节确定）：dsh 是
+  //    `ELECTRON_RUN_AS_NODE=1 exec "$MATE_NODE_EXECUTABLE" "$MATE_DSH_ENTRY"`。
   // ② 私有 bin 的 `node` 报的 `process.versions`：与 dsh 走同一个 exec 目标，所以它报的版本
   //    就是 dsh 拿到的版本。**本机自己的 node 是另一个版本**（互为反证：24.21.0 不可能是本机那份）。
   // ③ 进程内自述（dsh 特有）：它的 boot 会打印 `native runtime fingerprint: Node x.y.z, V8 …`；
@@ -609,12 +600,6 @@ async function scenarioHandshake(coreEnv, runtimeId, { live }) {
       // 硬编码立刻变成一条假红——断言"我记住的那个常量"没有价值）。
       versions.electron === declaredElectronVersion() && /^24\./.test(versions.node ?? '') && versions.node !== localNode,
       `electron=${versions.electron ?? '(无)'} node=${versions.node ?? '?'} abi=${versions.modules ?? '?'}（本机 node=${localNode}）`,
-    )
-  } else {
-    check(
-      '私有 bin 的 opencode 启动器直接 exec 随包原生二进制（不经 Node）',
-      /exec "\$MATE_OPENCODE_BIN" "\$@"$/.test(launcherScript.trim()),
-      `launcher=${launcher.replace(DESKTOP, '…')}`,
     )
   }
 
@@ -729,14 +714,14 @@ function printDshBlockerDiagnosis(versions) {
  * 可选 LIVE 档：真发一次 `session/prompt`（要凭据、要联网、**不进 CI**）。
  *
  * 默认档（不设 RUNTIME_SMOKE_LIVE）**完全不联网、不跑模型**：本函数不会被调用。
- * 凭据只经环境透传（`DEEPSEEK_API_KEY` / `OPENCODE_API_KEY`），不进 argv、不落盘。
+ * 凭据只经环境透传（`DEEPSEEK_API_KEY`），不进 argv、不落盘。
  */
 async function scenarioLive(runtimeId, { srv, handshakeOk, sessionId, env }) {
   if (!handshakeOk || !sessionId) {
     check(`${runtimeId} LIVE：真发一次 prompt`, false, '握手未成功，跳过（LIVE 档以握手为前提）')
     return
   }
-  const credential = runtimeId === 'dsh' ? env.DEEPSEEK_API_KEY : env.OPENCODE_API_KEY
+  const credential = runtimeId === 'dsh' ? env.DEEPSEEK_API_KEY : env[`${runtimeId.toUpperCase()}_API_KEY`]
   if (!credential) {
     check(`${runtimeId} LIVE：真发一次 prompt`, false, '凭据缺失')
     return
@@ -760,11 +745,11 @@ async function scenarioLive(runtimeId, { srv, handshakeOk, sessionId, env }) {
   )
 }
 
-/** 触发条件 ①：两份载荷目录的指纹在整轮前后零变化。 */
+/** 触发条件 ①：每份载荷目录的指纹在整轮前后零变化。 */
 function scenarioFingerprint(before) {
   section('触发条件 ①（设计 §6.3）：runtime 不写自己所在的载荷目录')
   note('口径：文件数 + 总字节 + (路径,size,mtime) 的 sha256 摘要 + 目录自身 mtime（不读文件内容）')
-  for (const name of ['dsh', 'opencode']) {
+  for (const name of RUNTIME_IDS) {
     const dir = before[name]?.dir
     if (!dir) {
       check(`载荷 ${name} 目录指纹零变化`, false, '前置没取到目录（载荷缺失？）')
@@ -932,17 +917,16 @@ function printLiveGate() {
   const on = process.env.RUNTIME_SMOKE_LIVE === '1'
   const creds = {
     dsh: !!process.env.MATE_SMOKE_DSH_API_KEY,
-    opencode: !!process.env.MATE_SMOKE_OPENCODE_API_KEY,
   }
   if (!on) {
     console.log('  ⏭ 跳过：未设 RUNTIME_SMOKE_LIVE=1（默认档不联网、不跑模型、不需要任何凭据）')
-    console.log('     要跑：RUNTIME_SMOKE_LIVE=1 MATE_SMOKE_DSH_API_KEY=… MATE_SMOKE_OPENCODE_API_KEY=… \\')
+    console.log('     要跑：RUNTIME_SMOKE_LIVE=1 MATE_SMOKE_DSH_API_KEY=… \\')
     console.log('           node scripts/desktop-runtime-smoke.mjs live')
     console.log('     ⚠ 它**不进 CI**（要凭据 + 真模型 + 真出网）；本机从未用凭据验过这条路径——')
     console.log('       本轮的 LIVE 档只做了形状实现与门禁，**没有**真跑过。')
     return
   }
-  console.log(`  ▶ 已开启：凭据 dsh=${creds.dsh ? '有' : '无'} opencode=${creds.opencode ? '有' : '无'}`)
+  console.log(`  ▶ 已开启：凭据 dsh=${creds.dsh ? '有' : '无'}`)
   console.log('     ⚠ 不进 CI；凭据只经环境透传（不进 argv、不落盘）。')
 }
 
@@ -952,7 +936,7 @@ async function scenarioResidue() {
   await sleep(300)
   check('无 mate-core 残留', pidsMatching(PROC_RES.core).length === 0)
   check('无桌面壳残留', pidsMatching(PROC_RES.shell).length === 0)
-  // 只认"命令行里带我们载荷目录"的进程：用户自己开的 `dsh web` / 全局 `opencode` 不在此列
+  // 只认"命令行里带我们载荷目录"的进程：用户自己开的 `dsh web` / 全局同名命令不在此列
   // （这正是不能用 `pkill -f dsh` 的原因——那会误杀别人的会话）。
   const ours = psAll()
     .split('\n')
@@ -980,18 +964,17 @@ function printHelp() {
   console.log('  场景（默认全部，guard 总是跑）：')
   console.log('    guard       前置：单实例检查、make core/desktop 重建、载荷与私有 bin 在位')
   console.log('    dsh         dsh 的 ACP 握手（私有 bin → Electron 的 Node → 随包载荷）')
-  console.log('    opencode    opencode 的 ACP 握手（私有 bin → 随包原生二进制）')
-  console.log('    fingerprint 触发条件 ①：两份载荷目录指纹整轮前后零变化')
+  console.log('    fingerprint 触发条件 ①：载荷目录指纹整轮前后零变化')
   console.log('    live        可选 LIVE 档：真发一次 session/prompt（要凭据，**不进 CI**）')
   console.log('    dsh-diag    诊断（**不计入** V9 判据）：同一份 dsh 载荷换本机 Node 起，用于定位阻塞点')
   console.log('    dsh-alt-node 候选修复验证（**不计入** V9 判据）：换 MATE_SMOKE_ALT_NODE 指的 Electron 再起 dsh')
   console.log('  环境变量：KEEP_SHELL=1 跑完不杀壳；RUNTIME_SMOKE_LIVE=1 开 LIVE 档；')
-  console.log('           MATE_SMOKE_DSH_API_KEY / MATE_SMOKE_OPENCODE_API_KEY 为 LIVE 档凭据；')
+  console.log('           MATE_SMOKE_DSH_API_KEY 为 LIVE 档凭据；')
   console.log('           MATE_SMOKE_ALT_NODE 为 dsh-alt-node 的候选 Node/Electron 可执行文件绝对路径')
 }
 
 /** 默认场景集（不含 `dsh-diag` / `dsh-alt-node`：它们是定位工具，不是退出判据）。 */
-const SCENARIOS = ['dsh', 'opencode', 'fingerprint', 'live']
+const SCENARIOS = [...RUNTIME_IDS, 'fingerprint', 'live']
 /** 全部可指定的场景（含两个诊断/验证工具）。 */
 const ALL_SCENARIOS = [...SCENARIOS, 'dsh-diag', 'dsh-alt-node']
 const argv = process.argv.slice(2)
@@ -1024,7 +1007,7 @@ async function main() {
   // 触发条件 ① 的"跑前"快照：必须**早于任何 runtime 进程**（连探针都不跑）。
   const before = {}
   if (!DIAGNOSTIC_ONLY) {
-    for (const name of ['dsh', 'opencode']) {
+    for (const name of RUNTIME_IDS) {
       const payload = readPayload(name)
       if (payload) before[name] = { dir: payload.dir, fingerprint: payloadFingerprint(payload.dir) }
     }
@@ -1082,16 +1065,15 @@ async function main() {
       )
 
       // 壳给核心的三个载荷入口：都指向随包载荷，且文件真的在。
-      for (const key of ['MATE_DSH_ENTRY', 'MATE_OPENCODE_BIN', 'MATE_NPX_ENTRY']) {
+      for (const key of ['MATE_DSH_ENTRY', 'MATE_NPX_ENTRY']) {
         const v = coreEnv[key] ?? ''
         check(`${key} 指向随包载荷`, v.startsWith(`${PAYLOAD_ROOT}/`) && existsSync(v), v.replace(DESKTOP, '…') || '(未注入)')
       }
 
       // LIVE 档的凭据注入（默认档完全不碰）
       if (process.env.MATE_SMOKE_DSH_API_KEY) coreEnv.DEEPSEEK_API_KEY = process.env.MATE_SMOKE_DSH_API_KEY
-      if (process.env.MATE_SMOKE_OPENCODE_API_KEY) coreEnv.OPENCODE_API_KEY = process.env.MATE_SMOKE_OPENCODE_API_KEY
 
-      for (const id of ['dsh', 'opencode']) {
+      for (const id of RUNTIME_IDS) {
         if (!selected.includes(id)) continue
         // eslint-disable-next-line no-await-in-loop -- 两个 runtime 串行：日志可读、且避免两条 ACP 互相盖住现场
         await scenarioHandshake(coreEnv, id, { live: liveWanted })

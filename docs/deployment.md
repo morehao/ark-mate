@@ -17,7 +17,7 @@
 | 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3）。**构建不需要 CGO**（2026-10-12 起）：SQLite dialect 随 golib v1.32.22 换成纯 Go 的 `ncruces/go-sqlite3`，`0` 可编可跑、编译不需要 C 工具链（实测 `CC=false` 也编得出）、`GOOS=linux` 交叉编译得到静态产物（`file` 报 `statically linked`，于是下面那条 `FROM scratch` 重新可用），`=1` 则要 C 交叉工具链（实测直接编不过）；代价是体积（golib 实测最小程序 +10.99 MiB）。2026-10-11 前后那版 driver 是 CGO 的，那时的 `0` 会编出运行期连不上库的 stub |
 | 仅后端内核 | `make build` | 无独立产物 | 任何构建都不带资产，`make build` 只编后端；面板要由 `--web-dir` / `MATE_WEB_DIR` 提供，没给即拒启（退出码 3） |
 | 前端产物独立托管 | `make web` | `frontend/apps/web/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |
-| 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 并设 `MATE_WEB_DIR` 指过去 → 精简运行时；两个 target，可选内置 dsh/opencode（见 §4） |
+| 容器 | `make image` / `docker build -t ark-mate .` | 镜像（约 140 MB） | 多阶段：Node 构建前端 → Go 编译 → 镜像内 `COPY` 一份 dist 并设 `MATE_WEB_DIR` 指过去 → 精简运行时；两个 target，可选内置 dsh（见 §4） |
 
 > 服务端形态的界面走浏览器（**开发 / 自用**路径）：前端开发态是 `make dev`（vite :5173 + 代理 `/v1`，
 > 唯一 HMR 循环）；这条路径**不构成交付承诺**。
@@ -55,11 +55,11 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | --- | --- | --- | --- |
 | SQLite 库 | `~/.ark-mate/mate.db` | `MATE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） + capability/agent/automation 定义 + **v11 起 provider 档案（`providers` 表）与平台模型清单（`models` 表）**。**v11 起它是 provider 档案的权威**——所以它必须在备份清单里（见 §6），"只备 `providers.json`"从这一版起不再等价 |
 | transcript | `~/.ark-mate/transcripts/` | `MATE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
-| Agent 定义 | `~/.ark-mate/agents/<id>.json` | `MATE_AGENTS` | 自定义 agent（含 `permission_policy`）。**`MATE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh`/`opencode` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`mate agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。目录里的 `providers.json` 同属**目录级配置**且**v11 起也只是导入/导出载体**（档案的权威在 DB；写面一个字节都不回写它，回退旧二进制前要 `mate provider export` 回灌，见 §6），迁移前的快照是 `providers.json.bak-v11`（**建议一起备份**，它是回退窗口里唯一那份"迁移前真相"）；vault 锚点（本目录的父目录）两种模式下都在这里 |
+| Agent 定义 | `~/.ark-mate/agents/<id>.json` | `MATE_AGENTS` | 自定义 agent（含 `permission_policy`）。**`MATE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`mate agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。目录里的 `providers.json` 同属**目录级配置**且**v11 起也只是导入/导出载体**（档案的权威在 DB；写面一个字节都不回写它，回退旧二进制前要 `mate provider export` 回灌，见 §6），迁移前的快照是 `providers.json.bak-v11`（**建议一起备份**，它是回退窗口里唯一那份"迁移前真相"）；vault 锚点（本目录的父目录）两种模式下都在这里 |
 | 密钥库（vault） | `~/.ark-mate/vault.key` + `~/.ark-mate/vault/` | `MATE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
 | 自动化定义 | `~/.ark-mate/automations/<id>.json` | `MATE_AUTOMATIONS` | 定时任务。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：定义与运行态存在 DB 的 `automations` 表里（**定义列** `body`+`revision` 与**运行态列** `last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 分列；`state` 属于定义，因为启用/停用是用户操作），本目录只作**导入/导出**位置（装配期自动导入一次、`mate automation import\|export` 手动搬运；导入会把文件里的运行态键切进运行态列，导出时再合成同一个文件）。memory 模式下 `<id>.json` 仍是唯一定义 + 运行态载体（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）——**备份它就是备份任务**（含运行史）。两种模式下手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
 | 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
-| 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `opencode:skill=/data/agents/skills`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（当前两个底座都是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
+| 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `myrt:skill=/data/agents/skills`；`myrt` = 在册的那个底座 id，内置的是 `dsh`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（内置 `dsh` 的原生根是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 默认工作空间 | `~/.ark-mate/workspaces/default/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时的落点（v14）。它是**一条落库的工作空间登记**（`workspaces` 表，`is_default=1`），不是"每会话一个目录"——同一台机器上所有未指定目录的会话共享它。目录由装配期建立（`<MATE_WORKSPACE_DIR>/default`），**只在登记表为空时**创建：删掉它之后不会自动重建 |
 | 工作区起始位置偏好 | 空（无偏好） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）。**它是"目录浏览从哪儿起步"的偏好，不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间）。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
 
@@ -149,7 +149,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_CAPABILITIES` | `~/.ark-mate/capabilities` | 能力定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 里） |
 | `MATE_AUTOMATIONS` | `~/.ark-mate/automations` | 自动化定义目录：memory 模式是装载源（`<id>.json`，定义与运行态 overlay 同文件，手工可读），sqlite 模式是**导入/导出目录**（定义与运行态在 DB 的 `automations` 表里） |
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
-| `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `opencode:skill`、`dsh:skill`（旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
+| `MATE_PROJECTION_DIRS` | 空 | 投影根覆盖：`runtime:kind=dir` 逗号列表（`config.json` 可写 JSON 数组），键如 `dsh:skill`（`<id>` = 在册的那个底座 id；旧写法 `deepseekharness:skill` 会被归一，见下）；值是**绝对**目录。空 = 用 adapter 声明的默认根。只覆盖根，Layout/Format 仍由 runtime 声明。旧键 `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已改名：仍报错，但报错含新键与等价写法 |
 | `MATE_WORKSPACE_DIR` | `~/.ark-mate/workspaces` | 代建工作空间根目录；**空/off/disable/none = 关闭代建**（建会话未指定 `cwd` 时报 `workspace_required`，不回落 serve 进程目录） |
 | `MATE_WORKSPACE_ROOTS` | 空（无偏好） | **工作区起始位置偏好**（逗号分隔绝对路径；`config.json` 里可写 JSON 数组，含逗号的路径只有数组能表达）。**它不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间，不再有 `workspace_outside_roots` 这类拒绝）：这份名单只决定目录浏览从哪儿起步、以及面板里列哪些快捷入口。**平台代建根（`MATE_WORKSPACE_DIR`）恒被隐式并入生效名单**，无需手写。在**进程 env** 里设本变量会把面板设置面锁成只读（见 §2.2.2） |
 | `MATE_RUN_TIMEOUT` | 0（关闭） | 单轮看门狗（如 `30m`），超时自动 cancel 并发终态事件 |
@@ -223,7 +223,7 @@ agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形�
 
 已改名的键仍会让启动失败（"非法键名即报错"这条规则不软化），但报错会**认出它**并给出新键与
 等价写法：`skills_materialize_dir` / `skills_materialize_dirs` → `projection_dirs`
-（`skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`）。升级动作就是改
+（`skills_materialize_dirs=myrt=/x` ≡ `projection_dirs=myrt:skill=/x`，`myrt` = 在册的那个底座 id）。升级动作就是改
 这一行——不做静默等价，否则用户会以为已经改完。
 
 `workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
@@ -263,18 +263,17 @@ curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/agent
 
 ### 2.4 底座前置条件
 
-- `opencode`：需本机可执行 `opencode acp`。
 - `dsh`：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
 
-内置播种 agent 为 `dsh`（默认）与 `opencode`——**两个都要求本机装有对应底座并完成 provider 登录**。
+内置播种 agent 为 `dsh`（默认）——**要求本机装有对应底座并完成 provider 登录**。
 
 > **`echo` 演示底座已删除（M0）**：此前 daemon 会自派生 `mate acp-demo` 子进程充当免安装、免模型
 > key 的 ACP 对端（用于冒烟与权限/提问演示），`mate acp-serve` 还能把它暴露成远程端点。这两条
-> 路径已随 echo **彻底移除**，内置 runtime 收敛为 `opencode` / `dsh`。远程传输**功能**
+> 路径已随 echo **彻底移除**，内置 runtime 收敛为唯一内置的 `dsh`。远程传输**功能**
 > 不受影响（`.ark-mate/config/runtimes.json` 声明远程端点照常工作），失去的只是开箱演示；覆盖缺口
 > 台账见仓库 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`。
 
-> 种子 agent（内置 `dsh`/`opencode` 与保留前缀 `agent-`）**只读**：不可删、runtime 不可改
+> 种子 agent（内置 `dsh` 与保留前缀 `agent-`）**只读**：不可删、runtime 不可改
 > （报 40001 `seed_agent_readonly`）；name/provider/`permission_policy` 可改。
 
 ## 3. systemd（裸机/VM）
@@ -321,7 +320,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now ark-mate
 systemctl status ark-mate --no-pager
 ```
 
-> 注意：底座子进程（opencode/dsh）由 daemon 拉起，需对 `mate` 用户可见（PATH 与配置）。
+> 注意：底座子进程（`dsh`）由 daemon 拉起，需对 `mate` 用户可见（PATH 与配置）。
 > `ProtectHome=read-only` 下默认 `~/.ark-mate` 不可写，故示例把数据目录改到 `/var/lib/ark-mate`。
 
 ## 4. 容器
@@ -331,43 +330,48 @@ systemctl status ark-mate --no-pager
 | target | 内容 | 体积（本机实测） | 适用 |
 | --- | --- | --- | --- |
 | `mate`（默认） | 只含 `mate` 本体 + `curl`/`tini` + 非 root 运行时 | 141 MB | **不含任何底座**：底座由宿主机挂载、派生镜像或远程 runtime 端点提供；容器内**无法自检**（自检须挂真实底座，见 §4.2） |
-| `mate-runtimes` | 额外内置 `dsh`（npm `@deepseek-ai/dsh`）与 `opencode`（npm `opencode-ai` 平台二进制） | 671 MB | 想让容器开箱就能跑真实 agent |
+| `mate-runtimes` | 额外内置 `dsh`（npm `@deepseek-ai/dsh`） | 671 MB | 想让容器开箱就能跑真实 agent |
 
 ```bash
 # 最小镜像
 docker build -t ark-mate:local .
-# 含底座（两个都装；只装一个把另一个置 false）
+# 含底座（内置 dsh）
 docker build -t ark-mate:runtimes --target mate-runtimes \
-  --build-arg WITH_DSH=true --build-arg WITH_OPENCODE=true .
+  --build-arg WITH_DSH=true .
 # 等价的 make 封装
 make image                                             # 最小
-make image/runtimes WITH_DSH=true WITH_OPENCODE=true   # 含底座
-make image RUNTIME=opencode                            # 核心认哪一个底座（构建期固定）
+make image/runtimes WITH_DSH=true                      # 含底座
+make image RUNTIME=<id>                                # 核心认哪一个底座（构建期固定，默认 dsh）
 make image/run IMAGE_TAG=runtimes                      # 起容器
 ```
 
-`MATE_RUNTIME`（默认 `dsh`）与 `WITH_DSH` / `WITH_OPENCODE` 是**两件事**：
-后者决定镜像里**装**哪几份底座二进制，前者决定**核心认哪一个 id**（编译期 `-X` 注入）。用户面
+`MATE_RUNTIME`（默认 `dsh`）与 `WITH_DSH` 是**两件事**：
+后者决定镜像里**装不装**内置底座二进制，前者决定**核心认哪一个 id**（编译期 `-X` 注入）。用户面
 （REST / 控制台）改不了它——换底座要重新构建。两者不一致是允许的（最小镜像不装任何底座时核心照样
 认 dsh，只是拉不起来，诊断面会说清）；选中的 id 谁都不是则**核心启动即失败**（fail-closed，
 不给"能启动但没底座"的进程）。
 
 开关语义（刻意 fail closed，不静默降级）：
 
-- `WITH_DSH` / `WITH_OPENCODE` 只认 `true|false`（`1|0` 亦可）；取值拼错 → **构建即失败**并列出合法取值。
+- `WITH_DSH` 只认 `true|false`（`1|0` 亦可）；取值拼错 → **构建即失败**并列出合法取值。
 - 开关必须与 target 配套：`--build-arg WITH_DSH=true` 传给默认（最小）target → 构建失败并提示改用
-  `--target mate-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。两个开关同时关也失败。
+  `--target mate-runtimes`（否则会得到一个「以为有底座、其实没有」的镜像）。`WITH_DSH=false` 传给
+  `mate-runtimes` 同样失败（该 target 不含任何底座时没有存在意义）。
 - `MATE_RUNTIME` 只做**词法**校验（`[a-z0-9][a-z0-9_-]*`，取值拼错 → 构建即失败）；id 是否存在
   交给核心启动时的 `runtime.ProductRegistry` 判定（远程 runtime 的 id 由 `runtimes.json` 声明，
   构建期写不出起始位置偏好）。
-- 版本可用 `--build-arg DSH_VERSION=… / OPENCODE_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
+- 版本可用 `--build-arg DSH_VERSION=…` 钉住，默认 `latest`。**dsh 需含 acp profile
   模板**（`>= 0.1.2-rc.1`，见 `pkg/runtime/adapters.go` 的能力说明），`latest` 满足。
 - 镜像只装 mate 与所选底座；agent 真要用的工具（git / ripgrep / 语言 SDK 等）请在派生镜像里补：
   `FROM ark-mate:runtimes` + `USER root` + `apt-get install -y …`。
 - **容器里给底座模型凭据**（不内置、也不该内置）：容器以 `uid=10001(mate)`、`HOME=/data` 运行，
-  凭据要落在 `/data` 下且对 `mate` 可读。**注意 bind mount 通常不行**——宿主机上
-  `~/.local/share/opencode/auth.json` 是 `600` 且属主为宿主用户，容器里的 `mate` 读不到（实测踩到）；
-  用 `docker cp` + `chown` 才稳，也可自行用 secret / 初始化脚本实现等价效果：
+  凭据要落在 `/data` 下且对 `mate` 可读。**注意 bind mount 通常不行**——宿主机上的凭据文件常是
+  `600` 且属主为宿主用户，容器里的 `mate` 读不到（实测踩到）；用 `docker cp` + `chown` 才稳，
+  也可自行用 secret / 初始化脚本实现等价效果。
+
+  **下面用「某个走配置文件的底座」举例**（`~/.config/<id>/` + `~/.local/share/<id>/` 这种布局，
+  这里按 `opencode` 的路径写——它是**用户自己装的那个**，不在本仓随包清单里；换成你实际用的底座时
+  把路径换成它自己的读根即可，**别把示例路径当成本仓会随包带的东西**）：
 
   ```bash
   docker exec -u root <容器> mkdir -p /data/.config/opencode /data/.local/share/opencode
@@ -376,7 +380,9 @@ make image/run IMAGE_TAG=runtimes                      # 起容器
   docker exec -u root <容器> sh -c 'chown -R mate:mate /data/.config /data/.local && chmod 600 /data/.config/opencode/opencode.json /data/.local/share/opencode/auth.json'
   ```
 
-  dsh 侧的 provider 凭据同样走**环境变量**（平台把 `provider` 档案的密钥以 `<TYPE>_API_KEY`
+  本仓当前随包只带 `dsh`，而它**不走这条路**——它的 provider 凭据走环境变量，见下：
+
+  dsh 侧的 provider 凭据走**环境变量**（平台把 `provider` 档案的密钥以 `<TYPE>_API_KEY`
   注入子进程；容器里用 `-e` 传同名变量即可）。**平台不写 dsh 自己的 home patch**（`~/.dsh/settings.yaml`
   那些 profile/plugin 层仍是用户与 dsh 自己的事）：dsh 侧的**模型清单**走平台自有的 overlay
   `<MATE_HOME>/runtime/dsh/mate-models.patch.yml`（容器里 `/data/runtime/dsh/mate-models.patch.yml`），
@@ -413,17 +419,17 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
 | `HOME`、`MATE_CONFIG_DIR` | `/data`、`/data/config` | 库 / transcript / agents / capabilities / 配置 / 代建工作空间全在 `/data` 一个卷里（§2.2 的默认路径被显式改到卷上） |
 | `MATE_STORE` | `sqlite` | 才有 runs 读模型与 `/usage/summary`（§2.2） |
 | `MATE_WORKSPACE_DIR` | `/data/workspaces` | 代建工作空间必须落在可写挂载上，否则容器重建即丢（§2.2.1） |
-| PID 1 | `tini` | daemon 会派生 opencode/dsh，容器里需要 init 回收孤儿进程 |
+| PID 1 | `tini` | daemon 会派生底座子进程（`dsh`），容器里需要 init 回收孤儿进程 |
 | 运行用户 | `mate`（uid/gid 10001，`--build-arg MATE_UID/MATE_GID` 可改） | 非 root；bind mount 的属主需与之一致 |
 | `HEALTHCHECK` | `curl` 打 `/v1/mate/health` | 端口从 `MATE_ADDR` 现取；`/health` 免鉴权，配了 `MATE_TOKEN` 也通（§2.3.2） |
 
 ### 4.2 容器里的底座与工作空间（两个硬要求）
 
 1. **底座**：最小镜像**不含任何底座**，因此容器内**没有免 key 自检手段**（此前靠内置 `echo` 自检，
-   它已随 M0 删除）。要跑真实 agent，三选一——用 `mate-runtimes` 镜像（`dsh`/`opencode` 已在 `PATH`
+   它已随 M0 删除）。要跑真实 agent，三选一——用 `mate-runtimes` 镜像（`dsh` 已在 `PATH`
    上，容器内自检即在此形态下做）、自建派生镜像（`FROM ark-mate:local` + 自己装），或 **Linux 宿主机**
    下把本机可执行文件 bind mount 进最小镜像
-   （`-v /usr/local/bin/opencode:/usr/local/bin/opencode:ro`，agent 需要的配置/密钥也要一并进来）。
+   （`-v /usr/local/bin/dsh:/usr/local/bin/dsh:ro`，agent 需要的配置/密钥也要一并进来）。
    注意 macOS/Windows 上的可执行文件**不能**塞进 Linux 容器（平台/架构/glibc 都不匹配），这类机器请走前两条。
    模型密钥经 `-e DEEPSEEK_API_KEY=…` 由 daemon 透传给 runtime 子进程；dsh 的 profile 根固定在
    `DSH_HOME=/data/dsh`（落在卷上，重启不重装）。
@@ -464,7 +470,7 @@ make image \
 ```
 
 compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`
-/`DSH_VERSION`/`OPENCODE_VERSION`）。`GO_PROXY` 走 `goproxy.cn` 时不依赖 `sum.golang.org`
+/`DSH_VERSION`）。`GO_PROXY` 走 `goproxy.cn` 时不依赖 `sum.golang.org`
 （`GONOSUMDB`/`GOSUMDB` 无需改动，`go.sum` 校验仍在本地完成）。
 
 
@@ -524,7 +530,7 @@ sudo systemctl restart ark-mate
 重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
 被中断的轮次（无终态 → 可续聊重发），而**已完成的轮次保持 `completed`**——停机是运维动作，不是故障，
 不会改写会话状态（见 §8 连接拆除语义）。所有已存在的会话（不论上一轮终态）在重启后都可继续提问：
-`dsh`/`opencode` 走原生 resume，未声明原生恢复能力的底座走 handoff memo。transcript 模式（memory）
+`dsh` 走原生 resume，未声明原生恢复能力的底座走 handoff memo。transcript 模式（memory）
 启动时回读 JSONL 重建会话列表。
 
 ### 6.1 供应商档案换事实源（v11）：不可逆动作、执行前检查项、回退
@@ -592,8 +598,8 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | --- | --- |
 | 面板打不开 / `GET /` 404 | 核心没拿到资产（没给 `--web-dir`/`MATE_WEB_DIR`）会**拒绝启动**并打印它要的那份路径，能起服说明资产已就位 → 那 404 通常是访问了错的端口，或给的目录里没有 `index.html`（SPA 回退无处可回） |
 | 启动即退出（退出码 3）「没有前端资产」 | 没给 `--web-dir`/`MATE_WEB_DIR`，或给的路径不是目录 / 里面没有 `index.html`；刻意**不回落**任何来源——"配错却照常跑起来"会让人看着旧界面以为新版本已经生效 |
-| 会话建不了、`agent_not_found` | agent 被删或 definitions 目录不可写；内置种子 `dsh`/`opencode` 只读不可删 |
-| 轮次一直转、无输出 | 底座进程未起（`opencode acp` / `dsh --profile acp` 不在 PATH）；设 `MATE_RUN_TIMEOUT` 让看门狗兜底 |
+| 会话建不了、`agent_not_found` | agent 被删或 definitions 目录不可写；内置种子 `dsh` 只读不可删 |
+| 轮次一直转、无输出 | 底座进程未起（`dsh --profile acp` 不在 PATH）；设 `MATE_RUN_TIMEOUT` 让看门狗兜底 |
 | 权限卡不出现 | agent 配了 `permission_policy: allow|deny` → 已自动决策（看 `session.permission_policy` 事件与日志） |
 | `GET /usage/summary` 40501 | 跑在 memory 模式（无 runs 读模型）→ `MATE_STORE=sqlite` |
 | 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(MATE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`MATE_PROC_REGISTRY=off` 可关闭 |
@@ -603,13 +609,13 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | 定时任务在预期之外的时间跑 / 预览与预期不符 | 先对 `POST /automations/preview` 核对墙钟；DST 空档（不存在的本地时刻）会被**向后顺移**并在 `warnings` 里说明，回拨（重复时刻）取**第一次**。`schedule.timezone` 必须是 IANA 名，不能写 `CST`/`GMT+8` 这类别名 |
 | 定时任务重跑/卡住不跑 | `last_fired_at` 是认领游标（**平台写回，写面拒收**）；改它是手工干预手段：置空可让下一次 tick 重新认领该 occurrence，置成未来会让它一直不跑（memory 模式改定义文件、sqlite 模式改 `automations.last_fired_at` 列）。别在调度运行中改定义——用 `PUT /automations/:id`（并发改动由 mtime / 行 `revision` 挡住） |
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `MATE_DB` |
-| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh/opencode 走原生 `resume`，其余走 handoff memo） |
+| `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh 走原生 `resume`，其余走 handoff memo） |
 | 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
 | 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
 | 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
 | 容器里 `-p` 映射了端口但面板打不开 | 容器内必须 `MATE_ADDR=0.0.0.0:10001`（镜像已默认）；`MATE_ADDR` 改了端口时 `-p` 与 HEALTHCHECK 一并跟（后者从该变量现取） |
 | 容器里建会话报 `workspace_invalid`（路径不存在 / 不是目录） | 工作空间只能是挂载视图内的路径：`-v 宿主机目录:容器内路径`，会话 `cwd` 用**容器内路径**（agent 也在同一容器内，故这才是对 agent 正确的那个路径）。v14.5 起不再有"越界"这类拒绝，剩下的只有"这个路径在容器里根本不存在" |
-| 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含 dsh/opencode → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
+| 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含任何底座 → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
 | `docker build` 卡在拉基础镜像 / `go mod download` 超时 | 受限网络用 §4.3 的 build-arg（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`）整组覆盖 |
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target mate-runtimes`（或 `make image/runtimes`），不做静默忽略 |
 
@@ -644,13 +650,21 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 > `echo` 演示底座为对端（`mate acp-demo` / `mate acp-serve`）。`echo` 已随 M0 彻底删除，
 > **这些记录不再可原样复现**，保留在此仅作历史证据（与 `docs/` 下历史设计文档同一口径）。
 > 仍可复现的部分（`make all`、种子只读、重启恢复、检索导出、MCP 调用等）不受影响，只是把
-> `echo` agent 换成 `dsh`/`opencode` 或任意自定义 agent 即可。当前契约以 README 与源码为准。
+> `echo` agent 换成 `dsh` 或任意自定义 agent 即可。当前契约以 README 与源码为准。
 >
 > **配置键也已变（M1 后阅读）**：下面 C4/C6 两条例子里用的
 > `MATE_SKILLS_MATERIALIZE_DIR`/`_DIRS` 已被 `MATE_PROJECTION_DIRS` 取代（旧键现在会让启动
 > 失败并给出等价写法），单 root 的"兼容路径"也已不存在——物化落点只由各 runtime 的投影声明
 > 决定，配置只能覆盖根。当时记录里"归属标记 / 共享 root 只摘自己 / 空归属即残留清理"这些**不变式**
 > 仍成立，由 `pkg/capability/skill_materialize_test.go` 与 `internal/manager/skills_test.go` 覆盖。
+>
+> **底座面也已变（2026-10 后阅读）**：本节 C4/C6/C7 与容器那几条里出现的 `opencode`，指的是
+> **当时在册的第二个一等适配**——它已下线（决策 v18），随包载荷、`Dockerfile` 的 `WITH_OPENCODE`
+> 与 `OPENCODE_VERSION` 一并删除，今天的随包清单只有 `dsh`。因此这些记录里"两个底座各自…"的
+> 对照结论**不再可原样复现**，只作当时的取证；而**机制那半仍然成立**（隔离表、投影声明、原生
+> 权限端口、模型值端口、能力粒度声明都是**按 adapter 声明**驱动的，接回一个底座不需要改内核），
+> 由 `internal/archtest` 的 v18 三条守卫与 `internal/testutil/runtimetest` 的合成适配钉住。
+> 本节里 `~/.config/opencode`、`~/.local/share/opencode` 这类**用户自己机器上的目录**照旧不许碰。
 
 环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
 基础镜像，见 §4.3）。

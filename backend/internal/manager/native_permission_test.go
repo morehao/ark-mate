@@ -1,112 +1,62 @@
 package manager
 
 import (
-	"encoding/json"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/ark-mate/pkg/runtime/opencode"
 )
 
-// TestNativePermissionDSH B5：dsh 原生权限模式推导（auto/显式/off/未知）。
-func TestNativePermissionDSH(t *testing.T) {
-	cases := []struct {
-		name  string
-		pol   *PermissionPolicy
-		want  string
-		empty bool
-	}{
-		{"nil 策略不注入", nil, "", true},
-		{"default=ask 与 dsh 默认一致 → 不注入", &PermissionPolicy{Default: "ask"}, "", true},
-		{"空 default → 不注入", &PermissionPolicy{}, "", true},
-		{"default=allow 不自动升级完全访问 → 不注入", &PermissionPolicy{Default: "allow"}, "", true},
-		{"default=deny → read-only", &PermissionPolicy{Default: "deny"}, "read-only", false},
-		{"default=DENY 大小写不敏感", &PermissionPolicy{Default: " DENY "}, "read-only", false},
-		{"显式 read-only", &PermissionPolicy{Default: "allow", NativeMode: "read-only"}, "read-only", false},
-		{"显式 workspace-write", &PermissionPolicy{Default: "deny", NativeMode: "workspace-write"}, "workspace-write", false},
-		{"显式 danger-full-access", &PermissionPolicy{Default: "deny", NativeMode: "danger-full-access"}, "danger-full-access", false},
-		{"native_mode=off 不注入", &PermissionPolicy{Default: "deny", NativeMode: "off"}, "", true},
-		{"native_mode=OFF 大小写不敏感", &PermissionPolicy{NativeMode: "OFF"}, "", true},
-		{"未知 mode 不注入", &PermissionPolicy{NativeMode: "yolo"}, "", true},
+// portRegistry 一张**带可执行半场**的注册表（含各内置 adapter 的端口）。
+//
+// 为什么不用 `runtime.NewRegistry()`（空表）：原生权限的实现挂在注册表的第三张表上
+// （ADR-2：`Spec` 只装纯数据、行为进执行表），空表上"没有端口"与"这个底座没有原生机制"
+// 是同一种表现——用它当夹具会把"内核只做转发"这件事掩盖掉。
+func portRegistry() *runtime.Registry { return runtime.AllBuiltinRegistry() }
+
+// TestNativePermissionDispatch 内核只做三件事：nil 短路、`off` 短路、按 runtime 取端口转发。
+// 具体映射的词表与算法在 adapter 侧（每个 adapter 自己的包与它的测试）。
+func TestNativePermissionDispatch(t *testing.T) {
+	reg := portRegistry()
+
+	// ① nil 策略：行为与历史一致（不注入、无说明）。
+	if env, desc := nativePermissionEnv(reg, "dsh", nil); len(env) != 0 || desc != "" {
+		t.Fatalf("nil 策略应静默不注入，got env=%v desc=%q", env, desc)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			env, desc := nativePermissionEnv("dsh", c.pol)
-			if c.empty {
-				if len(env) != 0 {
-					t.Fatalf("应不注入，got %v", env)
-				}
-				return
-			}
-			want := []string{"DSH_PERMISSION_MODE=" + c.want}
-			if !reflect.DeepEqual(env, want) {
-				t.Fatalf("env=%v want=%v", env, want)
-			}
-			if !strings.Contains(desc, c.want) {
-				t.Fatalf("说明应含模式：%q", desc)
-			}
-		})
+
+	// ② native_mode=off 是**平台级开关**：任何底座、任何其它取值都不注入口。
+	for _, id := range []string{"dsh", "rtx", "no-such-runtime"} {
+		env, desc := nativePermissionEnv(reg, id, &PermissionPolicy{Default: "deny", NativeMode: "off"})
+		if len(env) != 0 {
+			t.Fatalf("%s: off 应不注入，got %v", id, env)
+		}
+		if !strings.Contains(desc, "native_mode=off") {
+			t.Fatalf("%s: off 应说明原因，got %q", id, desc)
+		}
+	}
+	// 大小写不敏感（wire 上允许大写）。
+	if env, _ := nativePermissionEnv(reg, "dsh", &PermissionPolicy{NativeMode: "OFF"}); len(env) != 0 {
+		t.Fatalf("OFF 应不注入，got %v", env)
+	}
+
+	// ③ 端口转发：内核不解析词表，拿到什么就是什么。
+	env, desc := nativePermissionEnv(reg, "dsh", &PermissionPolicy{Default: "deny"})
+	if want := []string{"DSH_PERMISSION_MODE=read-only"}; !reflect.DeepEqual(env, want) {
+		t.Fatalf("dsh 应注入 %v，got %v（desc=%q）", want, env, desc)
+	}
+	// 模式在**调用端口之前**被归一（小写+去空白）——adapter 拿到的是规范取值。
+	if env, _ := nativePermissionEnv(reg, "dsh", &PermissionPolicy{Default: "deny", NativeMode: " DANGER-FULL-ACCESS "}); !reflect.DeepEqual(env, []string{"DSH_PERMISSION_MODE=danger-full-access"}) {
+		t.Fatalf("显式模式应被归一后转发，got %v", env)
 	}
 }
 
-// TestNativePermissionOpencode B5：opencode permission 表生成（默认项/别名/更严者胜/未映射键）。
-func TestNativePermissionOpencode(t *testing.T) {
-	// 默认 ask + 别名映射。
-	env, desc := nativePermissionEnv("opencode", &PermissionPolicy{
-		Default: "ask",
-		Tools: map[string]string{
-			"bash":    "allow",
-			"execute": "deny",  // 与 bash 同映射 → deny 更严者胜
-			"write":   "deny",  // → edit
-			"fetch":   "allow", // → webfetch
-			"mystery": "allow", // 未映射 → 跳过
-		},
-	})
-	if len(env) != 1 || !strings.HasPrefix(env[0], opencode.EnvConfigContent+"=") {
-		t.Fatalf("应注入 %s，got %v", opencode.EnvConfigContent, env)
-	}
-	var cfg struct {
-		Permission map[string]string `json:"permission"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(env[0], opencode.EnvConfigContent+"=")), &cfg); err != nil {
-		t.Fatalf("注入内容应为合法 JSON: %v", err)
-	}
-	want := map[string]string{"*": "ask", "bash": "deny", "edit": "deny", "webfetch": "allow"}
-	if !reflect.DeepEqual(cfg.Permission, want) {
-		t.Fatalf("permission=%v want=%v", cfg.Permission, want)
-	}
-	if !strings.Contains(desc, "未映射键 mystery") {
-		t.Fatalf("说明应提示未映射键：%q", desc)
-	}
-
-	// 空策略 → 不注入。
-	if env, _ := nativePermissionEnv("opencode", &PermissionPolicy{}); len(env) != 0 {
-		t.Fatalf("空策略应不注入，got %v", env)
-	}
-	// native_mode=off → 不注入。
-	if env, _ := nativePermissionEnv("opencode", &PermissionPolicy{Default: "allow", NativeMode: "off"}); len(env) != 0 {
-		t.Fatalf("off 应不注入，got %v", env)
-	}
-	// 仅全 ask：与 opencode 默认等价 → 不注入。
-	if env, desc := nativePermissionEnv("opencode", &PermissionPolicy{Default: "ask"}); len(env) != 0 {
-		t.Fatalf("全 ask 应不注入，got %v", env)
-	} else if !strings.Contains(desc, "等价 opencode 默认") {
-		t.Fatalf("应说明不注入原因：%q", desc)
-	}
-	// 只有未映射键 → 不注入（不生成空配置）。
-	if env, _ := nativePermissionEnv("opencode", &PermissionPolicy{Tools: map[string]string{"weird": "deny"}}); len(env) != 0 {
-		t.Fatalf("仅未映射键应不注入，got %v", env)
-	}
-}
-
-// TestNativePermissionEcho B5：无原生开关的 runtime 不注入。
-func TestNativePermissionEcho(t *testing.T) {
-	env, desc := nativePermissionEnv("stub", &PermissionPolicy{Default: "deny"})
+// TestNativePermissionNoMechanism 未登记原生机制的 runtime：如实报"无原生权限开关（仅平台拦截面）"，
+// 而不是静默什么都不做——静默会让操作员以为策略已经投影到底座了。
+func TestNativePermissionNoMechanism(t *testing.T) {
+	env, desc := nativePermissionEnv(portRegistry(), "stub", &PermissionPolicy{Default: "deny"})
 	if len(env) != 0 {
-		t.Fatalf("echo 应不注入，got %v", env)
+		t.Fatalf("无机制的 runtime 应不注入，got %v", env)
 	}
 	if !strings.Contains(desc, "无原生权限开关") {
 		t.Fatalf("说明应写明降级原因：%q", desc)
@@ -140,34 +90,6 @@ func TestNativePermissionEnabledSwitch(t *testing.T) {
 	}
 }
 
-// TestOpencodePermissionConfigStable B5：同一策略生成稳定结果（map 迭代序不影响输出）。
-func TestOpencodePermissionConfigStable(t *testing.T) {
-	pol := &PermissionPolicy{Default: "ask", Tools: map[string]string{
-		"bash": "allow", "edit": "deny", "read": "allow", "webfetch": "ask", "glob": "deny", "list": "allow",
-	}}
-	var first string
-	for i := 0; i < 20; i++ {
-		cfg, _ := opencodePermissionConfig(pol)
-		keys := make([]string, 0, len(cfg))
-		for k := range cfg {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		cur := compactJSON(cfg)
-		if i == 0 {
-			first = cur
-			continue
-		}
-		if cur != first {
-			t.Fatalf("输出不稳定: %q vs %q", cur, first)
-		}
-		// read/grep/glob/list 都映射到 read：deny 更严者胜。
-		if cfg["read"] != "deny" {
-			t.Fatalf("read 应取更严者 deny: %v", cfg)
-		}
-	}
-}
-
 // TestConnKeyIsolatesNativePermission B5：连接缓存键含原生权限签名——配置不同不得共享子进程。
 func TestConnKeyIsolatesNativePermission(t *testing.T) {
 	ro := []string{"DSH_PERMISSION_MODE=read-only"}
@@ -190,13 +112,13 @@ func TestConnKeyIsolatesNativePermission(t *testing.T) {
 
 func mustEnv(t *testing.T, p *PermissionPolicy) []string {
 	t.Helper()
-	env, _ := nativePermissionEnv("dsh", p)
+	env, _ := nativePermissionEnv(portRegistry(), "dsh", p)
 	return env
 }
 
 // TestNativePermissionEnvForSwitch B5：Service 开关关闭后不注入。
 func TestNativePermissionEnvForSwitch(t *testing.T) {
-	svc := NewService(runtime.NewRegistry(), nil)
+	svc := NewService(portRegistry(), nil)
 	if env := svc.nativePermissionEnvFor("dsh", &PermissionPolicy{Default: "deny"}); len(env) != 1 {
 		t.Fatalf("默认应注入，got %v", env)
 	}

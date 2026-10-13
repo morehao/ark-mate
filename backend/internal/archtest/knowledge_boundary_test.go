@@ -21,13 +21,19 @@ import (
 // runtimeConfigLiterals 底座的配置格式与机制字面量（T1：`internal/` 下零命中）。
 //
 // 每一个都是**底座私有知识**：它属于 `pkg/runtime/<adapter>`，不属于平台内核。
-//   - `opencode.json` / `OPENCODE_CONFIG_CONTENT`：opencode 的配置文件与内联通道；
+//
+// **已下线底座的字面量刻意留在表里**（`opencode.json` / `OPENCODE_CONFIG_CONTENT` /
+// `opencode_json`）：它们的语义是"这类字面量出现在内核就是知识回流"，而不是"这个底座还在仓库里"。
+// 删掉它们等于**拆掉一层保护**——哪天有人照着旧实现把内联通道搬回内核，没有任何东西会响。
+// 表里的每一个值都要能回答"它是谁的私有知识"，下线的那些也一样。
+//
+//   - `opencode.json` / `OPENCODE_CONFIG_CONTENT`：某个底座的配置文件与内联通道（历史值，见上）；
 //   - `mate-models.patch.yml`：平台给 dsh 的 overlay 文件名；
 //   - `.credentials.yaml`：dsh 的原生凭据文档（凭据文档的格式与路径同属适配器知识）；
 //   - `--dump-config`：dsh 的配置转储子命令（两级校验门的一半）；
 //   - `llm-pi-ai`：dsh 的 provider 路由条目 id；
 //   - `opencode_json` / `dsh_patch_yaml`：v11 的格式枚举值（格式由 adapter 自己认，
-//     内核不再按字符串 switch）。
+//     内核不再按字符串 switch；前者同属上面的历史值）。
 var runtimeConfigLiterals = []string{
 	"opencode.json",
 	"OPENCODE_CONFIG_CONTENT",

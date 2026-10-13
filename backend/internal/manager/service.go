@@ -222,7 +222,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.coalescer = newChunkCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
 	})
-	// 播种内置 Agent：dsh（默认）/ opencode，仅当其 runtime 已注册时播种。
+	// 播种内置 Agent：**每个内置 adapter 一个**（形状见 builtinAgents），仅当其 runtime 已注册时播种。
 	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
 	s.seedBuiltinAgents()
 	return s

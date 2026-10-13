@@ -66,9 +66,9 @@ func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
 // TestPromptRunEnded 正常 end_turn → run.ended + completed。
 func TestPromptRunEnded(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode", sess: &stubSession{stop: "end_turn"}}
+	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx", sess: &stubSession{stop: "end_turn"}}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -348,17 +348,17 @@ func TestHandoffMemoBudget(t *testing.T) {
 func TestConnKeyModelScoping(t *testing.T) {
 	native := []string{"DSH_PERMISSION_MODE=default"}
 	keyE := []string{"OPENAI_API_KEY=sk-x"}
-	modelE := []string{"OPENCODE_MODEL=gpt-5"}
+	modelE := []string{"RTX_MODEL=gpt-5"}
 
-	base := connKey("opencode", native)
-	if base == connKey("opencode", native, keyE) {
+	base := connKey("rtx", native)
+	if base == connKey("rtx", native, keyE) {
 		t.Fatalf("provider 密钥 env 应并入连接键（B5 修复）")
 	}
-	if connKey("opencode", native, keyE) != connKey("opencode", native, keyE) {
+	if connKey("rtx", native, keyE) != connKey("rtx", native, keyE) {
 		t.Fatalf("同 env 组应得同键")
 	}
-	if connKey("opencode", native, keyE) == connKey("opencode", native, keyE, modelE) {
-		t.Fatalf("opencode（进程级模型）模型 env 应并入连接键（改模型 = 换连接）")
+	if connKey("rtx", native, keyE) == connKey("rtx", native, keyE, modelE) {
+		t.Fatalf("rtx（进程级模型）模型 env 应并入连接键（改模型 = 换连接）")
 	}
 	if connKey("dsh", native, keyE) != connKey("dsh", native, keyE, nil) {
 		t.Fatalf("dsh（会话级模型）不应因不含模型 env 而改变键")

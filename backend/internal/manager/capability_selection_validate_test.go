@@ -35,13 +35,13 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	svc.SetSkillProjections([]SkillProjection{{
 		Runtime:    "stub",
-		Projection: opencodeSkillProjectionForTest(),
+		Projection: rtxSkillProjectionForTest(),
 	}})
 	// skill：一条正常、一条禁用、一条 runtimes 白名单不含 stub。
 	for _, sk := range []capability.Skill{
 		{ID: "ok-skill", Body: "# ok"},
 		{ID: "off-skill", Body: "# off", Enabled: boolPtr(false)},
-		{ID: "other-skill", Body: "# other", Runtimes: []string{"opencode"}},
+		{ID: "other-skill", Body: "# other", Runtimes: []string{"rtx"}},
 	} {
 		sk := sk
 		if err := svc.caps.RegisterSkill(&sk); err != nil {
@@ -144,7 +144,7 @@ func TestValidateSelectionVerdicts(t *testing.T) {
 			continue
 		}
 		if it.Kind == "skill" && it.ID == "other-skill" {
-			continue // 它在 opencode 上可达、在 stub 上不可达；Library 是逐 runtime 报的
+			continue // 它在 rtx 上可达、在 stub 上不可达；Library 是逐 runtime 报的
 		}
 		reachable := false
 		for _, a := range it.Applicability {

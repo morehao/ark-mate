@@ -16,12 +16,12 @@ import (
 // 所以这里**逐字**比对序列化结果，而不是比对结构体字段。
 func TestApplicabilityWireShapeUnchanged(t *testing.T) {
 	got, err := json.Marshal(Applicability{
-		Runtime: "opencode", OK: true, Status: StatusProjected, Reason: "投放到 /tmp/skills（skill）",
+		Runtime: "rtx", OK: true, Status: StatusProjected, Reason: "投放到 /tmp/skills（skill）",
 	})
 	if err != nil {
 		t.Fatalf("序列化失败: %v", err)
 	}
-	want := `{"runtime":"opencode","ok":true,"status":"projected","reason":"投放到 /tmp/skills（skill）"}`
+	want := `{"runtime":"rtx","ok":true,"status":"projected","reason":"投放到 /tmp/skills（skill）"}`
 	if string(got) != want {
 		t.Fatalf("Applicability 的 wire 形状变了（前端零改的前提被破坏）:\n got %s\nwant %s", got, want)
 	}
@@ -39,9 +39,9 @@ func TestApplicabilityWireShapeUnchanged(t *testing.T) {
 // TestApplicabilityIsAliasOfObjdelivery 别名必须在**类型身份**上就是同一个（迁移期间两处并存
 // 时最容易出的错是"看起来同名、其实是两个结构体"，那会让 /library 与 /providers 的 JSON 悄悄分叉）。
 func TestApplicabilityIsAliasOfObjdelivery(t *testing.T) {
-	var a Applicability = objdelivery.Applicability{Runtime: "opencode", OK: true, Status: StatusProjected}
+	var a Applicability = objdelivery.Applicability{Runtime: "rtx", OK: true, Status: StatusProjected}
 	var b objdelivery.Applicability = a
-	if b.Runtime != "opencode" || b.Status != objdelivery.StatusProjected {
+	if b.Runtime != "rtx" || b.Status != objdelivery.StatusProjected {
 		t.Fatalf("别名不是同一类型: %+v", b)
 	}
 }

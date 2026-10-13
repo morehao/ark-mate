@@ -46,7 +46,7 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	// 四种连接分四个 runtime 槽（避免互相干扰）。
 	o.mu.Lock()
 	o.conns["stub"] = fresh()
-	o.conns["opencode"] = busy
+	o.conns["rtx"] = busy
 	o.inflight.Mark(busy.client, "s1")
 	o.conns["dsh"] = withSession
 	o.sessions["s-x"] = &ActiveSession{client: withSession.client}
@@ -57,11 +57,11 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	}
 	o.mu.Lock()
 	_, a := o.conns["stub"]
-	_, b := o.conns["opencode"]
+	_, b := o.conns["rtx"]
 	_, c := o.conns["dsh"]
 	o.mu.Unlock()
 	if !a || !b || !c {
-		t.Fatalf("连接不应被摘除: echo=%v opencode=%v dsh=%v", a, b, c)
+		t.Fatalf("连接不应被摘除: stub=%v rtx=%v dsh=%v", a, b, c)
 	}
 	_ = svc
 }

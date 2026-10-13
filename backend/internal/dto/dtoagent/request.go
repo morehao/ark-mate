@@ -20,7 +20,7 @@ type AgentCreateReq struct {
 	// Runtimes / RoutingPolicy **只用于显式拒绝**（40001）。
 	//
 	// 平台不再按 agent 选底座（构建期固定，见 pkg/runtime/build.go），而 JSON 绑定默认**忽略未知键**
-	// ——直接删掉这两个字段会让 `{"runtimes":["opencode"]}` 被收下然后什么都不发生。那正是本仓
+	// ——直接删掉这两个字段会让 `{"runtimes":["<某个底座>"]}` 被收下然后什么都不发生。那正是本仓
 	// 明令要防的骗人字段（`default_model` 就是这个先例）。因此保留同名 raw 字段，出现即报错 + 指路。
 	Runtimes      json.RawMessage `json:"runtimes"`
 	RoutingPolicy json.RawMessage `json:"routing_policy"`

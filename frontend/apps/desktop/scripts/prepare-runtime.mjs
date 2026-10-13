@@ -4,7 +4,9 @@
  *
  * 产出：`apps/desktop/resources/payloads/<name>/<version>/`
  *   - `dsh/<version>/`      dsh 的**生产依赖闭包**（含 npm/npx 等 JS 部分，见设计 §6.3）
- *   - `opencode/<version>/` 平台化二进制
+ *
+ * **新增一个随包底座 = 在下面 `PAYLOADS` 里加一条**（外加 `runtime/<dir>/` 的 package.json
+ * 与锁文件）。装配、确定性、清单写入这些逻辑都不认识任何具体底座。
  * 每份载荷旁 `payload.json`：`{name, version, platform, arch, nodeAbi, entry, digest, files, bytes, fileList, fileListBase}`。
  *   `fileListBase` 说明 fileList 的相对路径相对于载荷根下的哪一层（M4-5 起写入；`""` = 载荷根本身）。
  *
@@ -21,7 +23,7 @@
  *
  * 用法：
  *   node scripts/prepare-runtime.mjs [--platform darwin|win32|linux] [--arch arm64|x64]
- *                                    [--payload dsh|opencode] [--skip-install] [--offline] [--abi <n>]
+ *                                    [--payload <name>] [--skip-install] [--offline] [--abi <n>]
  *
  *   `--skip-install --abi <n>` 是**离线重放**：不碰 pnpm store，只从 `runtime/<name>/node_modules`
  *   已装好的树重新产出清单（用于复算/核对，或改了清单字段后重建）。重放**必须**显式给 --abi，
@@ -45,9 +47,6 @@ const DESKTOP = resolve(SCRIPT_DIR, '..')
 const RUNTIME_ROOT = join(DESKTOP, 'runtime')
 const PAYLOAD_OUT = join(DESKTOP, 'resources', 'payloads')
 
-/** 平台名到 opencode 平台包名的映射（`win32` 在包里叫 `windows`）。 */
-const EXOTIC = { win32: 'windows' }
-
 /**
  * 载荷表：每份载荷对应 `runtime/<dir>` 下一个独立的工作区（自带 package.json + lockfile）。
  *
@@ -65,17 +64,6 @@ const PAYLOADS = [
     // 载荷根下必须留一层 `node_modules/`：Node 的模块解析是"向上找 node_modules 目录"，
     // 把闭包平铺在载荷根上（没有这一层）会让包内的 `require('commander')` 全部找不到。
     destSubdir: 'node_modules',
-  },
-  {
-    name: 'opencode',
-    dir: 'opencode',
-    // opencode 是平台化二进制：v2 起包名是 `@opencode/cli-<os>-<arch>`（v1 是 `opencode-<os>-<arch>`），
-    // 平台段与上游安装脚本的 target 口径一致（`windows` 而非 `win32`）。
-    dependency: (target) => `@opencode/cli-${EXOTIC[target.platform] ?? target.platform}-${target.arch}`,
-    entry: (dep, target) => (target.platform === 'win32' ? 'bin/opencode.exe' : 'bin/opencode'),
-    source: (dep) => `node_modules/${dep}`,
-    // opencode 是原生二进制，不参与 Node 模块解析，包内容直接铺在载荷根（入口就是 bin/opencode）。
-    destSubdir: '',
   },
 ]
 
@@ -126,8 +114,16 @@ function installPayload(payloadDir, target, { offline }) {
     '--frozen-lockfile',
     '--reporter=append-only',
     // 目标平台从命令行下发：镜像里同时存在多平台原生包，不指定就会把全平台都装进来。
-    `--config.supportedArchitectures.os=${target.platform}`,
-    `--config.supportedArchitectures.cpu=${target.arch}`,
+    //
+    // **必须写成对象形态**（2026-10-13 实测）：pnpm 11.24 **不认**
+    // `--config.supportedArchitectures.cpu=x64` 这种点号写法——它不报错、也不生效，直接回落到
+    // `runtime/*/pnpm-workspace.yaml` 里那份**按 arm64 写的**平台表。后果在 x64 机器上是硬失败：
+    // 装出来的是 `@koromix/koffi-darwin-arm64`，koffi 的 `require` 抛
+    // 「Cannot find the native Koffi module」→ cnoke 回落去源码重建 → 机器上没有 cmake →
+    // 整个载荷装配中止。**为什么以前没现形**：arm64 机器上两种写法结果逐字相同（点号那份即使
+    // 被忽略，回落到的平台表也正好是 arm64）；只有 x64（或交叉构建 linux 载荷）才看得出。
+    // 反证（同一条命令只换这一处）：对象形态装出来的是 `@koromix/koffi-darwin-x64`。
+    `--config.supportedArchitectures=${JSON.stringify({ os: [target.platform], cpu: [target.arch] })}`,
     // 模块目录与当前配置不符时（`.modules.yaml` 里记着上次用的 storeDir / nodeLinker，这次解析出来的
     // 不一样）pnpm 会先把 `runtime/<name>/node_modules` 整个删掉重装，并且**默认要人在 TTY 上确认**——
     // 构建步骤没有 TTY，于是直接 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止（2026-10-09 实测：
@@ -204,9 +200,9 @@ function assemble(payload, target, { skipInstall, offline, abi }) {
       fileList: result.fileList,
       // fileList 里的相对路径**相对于哪一层**（= 复制源根在载荷里的落点）。
       //
-      // 为什么必须记下来（M4-5 补）：fileList 是 `copyTreeFiltered` 按**复制源根**记的，而
-      // 两份载荷的落点形态不同——dsh 的闭包在 `node_modules/` 下（源根 = 那份 node_modules），
-      // opencode 的包内容直接铺在载荷根（源根 = 包目录）。于是同一个 fileList 在两份载荷里
+      // 为什么必须记下来（M4-5 补）：fileList 是 `copyTreeFiltered` 按**复制源根**记的，而各载荷的
+      // 落点形态可以不同——闭包型落在 `node_modules/` 下（源根 = 那份 node_modules），平铺型
+      // （原生二进制的包）直接铺在载荷根（源根 = 包目录）。于是同一个 fileList 在两种形态里
       // 指向的层级不一样，而此前清单里**没有任何字段**说明这件事：消费方（`mate doctor
       // --verify-payload` 是第一个）只能靠猜。路径算错必须明确失败，不能靠回落搜索
       // （src/paths.ts 的同一纪律）——所以把这个事实写进清单。

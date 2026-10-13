@@ -19,7 +19,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	ctx := context.Background()
 
 	// 两条 skill + 一条 mcp，外加**一条过不了闸门的坏定义**（scope 非法）。
-	mustUpsertSkill(t, r, "a-skill", `{"name":"A","description":"aa","runtimes":["opencode"]}`)
+	mustUpsertSkill(t, r, "a-skill", `{"name":"A","description":"aa","runtimes":["rtx"]}`)
 	mustUpsertSkill(t, r, "b-skill", `{"name":"B"}`)
 	mustUpsertSkill(t, r, "bad-skill", `{"name":"坏","scope":"bogus"}`)
 	if ok, err := r.St.UpsertMcpServerDefinition(ctx, "m1", `{"transport":"sse","url":"http://localhost:9999"}`, 0, "test"); err != nil || !ok {
@@ -34,7 +34,7 @@ func TestLoadCapabilityDefinitionsFromStore(t *testing.T) {
 	if len(skills) != 2 || skills[0].ID != "a-skill" || skills[1].ID != "b-skill" {
 		t.Fatalf("skill 装载不符: %+v", skills)
 	}
-	if skills[0].Name != "A" || len(skills[0].Runtimes) != 1 || skills[0].Runtimes[0] != "opencode" {
+	if skills[0].Name != "A" || len(skills[0].Runtimes) != 1 || skills[0].Runtimes[0] != "rtx" {
 		t.Fatalf("skill 字段未从 body 还原: %+v", skills[0])
 	}
 	mcps := r.Svc.caps.ListMcpServers()

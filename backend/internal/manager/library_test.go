@@ -24,15 +24,15 @@ func libraryRig(t *testing.T) *Service {
 	t.Helper()
 	dir := t.TempDir()
 	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "opencode", Name: "opencode", McpTransports: []string{"stdio"},
-			Projections: []runtime.Projection{opencodeSkillProjectionForTest()}},
+		runtime.Spec{ID: "rtx", Name: "rtx", McpTransports: []string{"stdio"},
+			Projections: []runtime.Projection{rtxSkillProjectionForTest()}},
 		// dsh 没有投影解析（未配 MATE_PROJECTION_DIRS）→ not_configured 分支。
 		runtime.Spec{ID: "dsh", Name: "dsh", McpTransports: []string{"stdio"}},
 	)
 	svc := NewService(reg, eventbus.New())
 	svc.LoadCapabilityDefinitions(dir)
 	svc.SetSkillProjections([]SkillProjection{{
-		Runtime: "opencode",
+		Runtime: "rtx",
 		Projection: runtime.Projection{Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: false},
@@ -172,8 +172,8 @@ func TestLibrarySkillApplicability(t *testing.T) {
 		return dtolibrary.Applicability{}
 	}
 
-	// opencode 已解析投影但 Tested=false → untested，且 OK=true（照常投放）。
-	if a := statusFor("demo", "opencode"); a.Status != dtolibrary.StatusUntested || !a.OK {
+	// rtx 已解析投影但 Tested=false → untested，且 OK=true（照常投放）。
+	if a := statusFor("demo", "rtx"); a.Status != dtolibrary.StatusUntested || !a.OK {
 		t.Fatalf("未实测的投影应是 untested 且 OK=true：%+v", a)
 	}
 	// dsh 声明了投影但本进程没解析出来 → not_configured（它压根不在投影列表里，
@@ -181,7 +181,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	// 落点说明：投影列表来自 adapter 声明 + 配置解析，未解析的 runtime 不会出现在列表里；
 	// not_configured 由**声明了但解析失败**的投影产生（p.Err != ""）。
 	svc.SetSkillProjections([]SkillProjection{
-		{Runtime: "opencode", Projection: runtime.Projection{Kind: runtime.ProjectionSkill,
+		{Runtime: "rtx", Projection: runtime.Projection{Kind: runtime.ProjectionSkill,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: true}},
 		{Runtime: "dsh", Err: "未配置投影根"},
@@ -189,12 +189,12 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	if a := statusFor("demo", "dsh"); a.Status != dtolibrary.StatusNotConfigured || a.OK {
 		t.Fatalf("解析失败的投影应是 not_configured 且 OK=false：%+v", a)
 	}
-	if a := statusFor("demo", "opencode"); a.Status != dtolibrary.StatusProjected {
+	if a := statusFor("demo", "rtx"); a.Status != dtolibrary.StatusProjected {
 		t.Fatalf("Tested=true 后应是 projected：%+v", a)
 	}
 
 	// 白名单不含某 runtime → not_applicable（并说清怎么改）。
-	if _, err := svc.UpdateSkill(ctx, "demo", writeReq(t, `{"runtimes":["opencode"]}`)); err != nil {
+	if _, err := svc.UpdateSkill(ctx, "demo", writeReq(t, `{"runtimes":["rtx"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if sk, ok := svc.caps.SkillByID("demo"); !ok || len(sk.Runtimes) != 1 {
@@ -208,7 +208,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	if _, err := svc.UpdateSkill(ctx, "demo", writeReq(t, `{"enabled":false}`)); err != nil {
 		t.Fatal(err)
 	}
-	if a := statusFor("demo", "opencode"); a.Status != dtolibrary.StatusDisabled {
+	if a := statusFor("demo", "rtx"); a.Status != dtolibrary.StatusDisabled {
 		t.Fatalf("禁用应是 disabled：%+v", a)
 	}
 }
@@ -333,8 +333,8 @@ func TestLibraryScale(t *testing.T) {
 // BenchmarkLibraryList 基准（`go test -bench=BenchmarkLibraryList`；不做缓存是刻意的，见 library.go 顶部注释）。
 func BenchmarkLibraryList(b *testing.B) {
 	dir := b.TempDir()
-	reg := runtime.NewRegistry(runtime.Spec{ID: "opencode", McpTransports: []string{"stdio"},
-		Projections: []runtime.Projection{opencodeSkillProjectionForTest()}})
+	reg := runtime.NewRegistry(runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"},
+		Projections: []runtime.Projection{rtxSkillProjectionForTest()}})
 	svc := NewService(reg, eventbus.New())
 	svc.LoadCapabilityDefinitions(dir)
 	for i := 0; i < 300; i++ {

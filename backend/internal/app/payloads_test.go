@@ -38,8 +38,8 @@ func payloadTestConfig(t *testing.T) config.Config {
 	cfg.Addr = "127.0.0.1:0"
 	cfg.WebDir = web
 	cfg.ProjectionDirs = map[string]string{
-		"opencode:skill": filepath.Join(home, "proj-opencode"),
-		"dsh:skill":      filepath.Join(home, "proj-dsh"),
+		"rtx:skill": filepath.Join(home, "proj-rtx"),
+		"dsh:skill": filepath.Join(home, "proj-dsh"),
 	}
 	return cfg
 }
@@ -106,13 +106,13 @@ func getMetaPayloadsRaw(t *testing.T, a *App) string {
 func TestMetaPayloadsWiredThroughAssembly(t *testing.T) {
 	payloads := []ctrsystem.PayloadInfo{
 		{Name: "dsh", Version: "0.1.7-rc.2", Digest: "sha256:aa", Source: "bundled"},
-		{Name: "opencode", Version: "1.2.3", Digest: "sha256:bb", Source: "runtime-env"},
+		{Name: "rtx", Version: "1.2.3", Digest: "sha256:bb", Source: "runtime-env"},
 		{Name: "dsh-user", Version: "", Digest: "", Source: "path"},
 	}
 	a := initPayloadTestApp(t, WithPayloads(payloads))
 
 	want := `[{"name":"dsh","version":"0.1.7-rc.2","digest":"sha256:aa","source":"bundled"},` +
-		`{"name":"opencode","version":"1.2.3","digest":"sha256:bb","source":"runtime-env"},` +
+		`{"name":"rtx","version":"1.2.3","digest":"sha256:bb","source":"runtime-env"},` +
 		`{"name":"dsh-user","version":"","digest":"","source":"path"}]`
 	if got := getMetaPayloadsRaw(t, a); got != want {
 		t.Errorf("payloads 未原样透出：\n got %s\nwant %s", got, want)

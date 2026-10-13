@@ -163,7 +163,7 @@ export interface SessionPatch {
   title?: string
   pinned?: boolean
   archived?: boolean
-  /** 会话级模型（opencode 仅创建时可选；dsh 会话内即时生效）。 */
+  /** 会话级模型（能改的时机由该底座的能力声明决定）。 */
   model?: string
 }
 
@@ -306,7 +306,7 @@ export interface CreateSessionReq {
    * 这个是"我选了那个有名字的项目"，那个是"就用这个路径"。
    */
   workspace_id?: string
-  /** 会话级模型 id（空 = 底座默认；opencode 走拨号 env，dsh 走 set_config_option）。 */
+  /** 会话级模型 id（空 = 底座默认；下发通道由该底座自己声明）。 */
   model?: string
   /**
    * 能力选定（M3）：只传**用户真的限制了的** kind。缺键 = 该 kind 不限制；

@@ -89,9 +89,13 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：内置 agent dsh/opencode 两个（dsh 默认）。
-// 夹具用 `AllBuiltinRegistry`（全部内置），因此两个种子都在——**产品装配只播构建期选中的那一个**
-// （见 internal/app 的 TestInitPinsBuildRuntime），这里测的是路由装配，不是构建期选择。
+// TestRouterListRealService 经真实 Service 的列表端点：**每个内置 adapter 各一个种子 agent**，
+// 其中构建期选中的那个是默认。夹具用 `AllBuiltinRegistry`（全部内置），因此每个内置底座都播种
+// ——**产品装配只播构建期选中的那一个**（见 internal/app 的 TestInitPinsBuildRuntime），
+// 这里测的是路由装配，不是构建期选择。
+//
+// 期望数量按 `AllBuiltinSpecs()` **现算**，不写死数字：写死两个的那一版在第二个内置底座下线后
+// 会变成"数量恰好对上"的空断言（而且它一旦被改宽到 `>= 1`，就再也抓不到"漏播一个种子"）。
 func TestRouterListRealService(t *testing.T) {
 	e := newEngine(t)
 
@@ -100,11 +104,33 @@ func TestRouterListRealService(t *testing.T) {
 		t.Fatalf("agents 信封不符: %+v", env)
 	}
 	var agents []map[string]any
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 2 || agents[0]["id"] != "dsh" {
-		t.Fatalf("agents data 不符: %s", env.Data)
+	if err := json.Unmarshal(env.Data, &agents); err != nil {
+		t.Fatalf("agents data 反序列化失败: %s", env.Data)
 	}
-	if agents[0]["is_default"] != true || agents[1]["id"] != "opencode" || agents[1]["is_default"] != false {
-		t.Fatalf("agents 默认标记不符: %s", env.Data)
+	wantIDs := make([]string, 0, len(runtime.AllBuiltinSpecs()))
+	for _, sp := range runtime.AllBuiltinSpecs() {
+		wantIDs = append(wantIDs, sp.ID)
+	}
+	sort.Strings(wantIDs)
+	gotIDs := make([]string, 0, len(agents))
+	defaults := 0
+	for _, a := range agents {
+		id, _ := a["id"].(string)
+		gotIDs = append(gotIDs, id)
+		if a["seed"] != true {
+			t.Errorf("内置播种出来的 agent 必须自报 seed=true: %v", a)
+		}
+		if a["is_default"] == true {
+			defaults++
+		}
+	}
+	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("种子 agent 应逐条对应内置 adapter（升序）：got %v want %v（body=%s）",
+			gotIDs, wantIDs, env.Data)
+	}
+	if defaults != 1 || gotIDs[0] != runtime.SelectedRuntime() {
+		t.Fatalf("应恰好一个默认且是构建期选中的那个（%s）: %s",
+			runtime.SelectedRuntime(), env.Data)
 	}
 	// agent 的对外表示里**不该再有 runtimes**：底座由构建期固定，用户面没有这个读面。
 	if _, has := agents[0]["runtimes"]; has {

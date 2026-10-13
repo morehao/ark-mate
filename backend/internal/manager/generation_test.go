@@ -50,7 +50,7 @@ func waitConnCount(t *testing.T, r *rig, want int) {
 // 同配置的两个会话就会各起一个进程（"配置相同共享暖进程"这条既有规则被静默破坏，代价是进程数
 // 与内存翻倍，而且没人会立刻发现）。
 func TestGenerationKeyZeroRegression(t *testing.T) {
-	base := connKey("opencode", []string{"A=1"}, []string{"B=2"})
+	base := connKey("rtx", []string{"A=1"}, []string{"B=2"})
 	if got := generationKey(base, "", ""); got != base {
 		t.Fatalf("空指纹必须原样返回基础键（R11）：\n%s\n%s", base, got)
 	}

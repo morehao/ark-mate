@@ -373,7 +373,7 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 	rebuilt := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v17.go")))
 	if !strings.Contains(rebuilt, "CREATE UNIQUE INDEX idx_events_seq ON events(seq)") {
 		t.Fatal("`migrate_v17.go` 里找不到 `CREATE UNIQUE INDEX idx_events_seq ON events(seq)`：" +
-			"`seq` 是**全局**位次（不是 opencode 那种 per-aggregate 稠密序号），唯一约束就是这条不变式的落点")
+			"`seq` 是**全局**位次（不是某些底座那种 per-aggregate 稠密序号），唯一约束就是这条不变式的落点")
 	}
 	if !strings.Contains(rebuilt, "CREATE INDEX idx_events_session ON events(session_id, seq)") {
 		t.Fatal("`migrate_v17.go` 里找不到 `CREATE INDEX idx_events_session ON events(session_id, seq)`：" +

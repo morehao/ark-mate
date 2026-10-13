@@ -218,10 +218,10 @@ func targetHeader(t *testing.T, makefile, target, label string) string {
 
 // TestDevLoopReportsRuntimeHit 钉住第二条边界（2026-10-11，P4/D6）：**dev 态必须说清它跑的是哪一份底座**。
 //
-// 背景：dev 的核心按**写死的名字**（`opencode` / `dsh`）经 `exec` 走 PATH 解析，默认命中的是本机装的
-// 那份；交付态（桌面壳）用的是随包载荷。两者可以不同代（2026-10-10 实测：本机 1.18.35 / 随包 2.0.26），
-// 而这件事此前**完全静默**——`make dev` 的回显里连运行时名字都写死成 `opencode`，可构建期固定的
-// runtime 早就是 `dsh` 了（于是那行回显还在替一个不会被调用的覆盖做宣传）。
+// 背景：dev 的核心按**写死的名字**（构建期固定的那个 runtime 的 `Command`）经 `exec` 走 PATH 解析，
+// 默认命中的是本机装的那份；交付态（桌面壳）用的是随包载荷。两者可以不同代（2026-10-10 实测：
+// dsh 本机那份与随包那份不是一代），而这件事此前**完全静默**——`make dev` 的回显里连运行时名字
+// 都写死成某个底座，可构建期固定的 runtime 是另一个（于是那行回显还在替一个不会被调用的覆盖做宣传）。
 //
 // 四段判据，全部 fail-closed（读不到 / 解析不到即失败）：
 //
@@ -234,8 +234,8 @@ func targetHeader(t *testing.T, makefile, target, label string) string {
 //	   这条不写成"注释里说别判红"，因为那种约定没人执行；函数体是能被解析的。
 //	④ **覆盖口必须真的生效**（2026-10-12 加，T7）：转发 shim 的名字必须与核心被编译成调用的名字
 //	   **同源**（都用 `$(RUNTIME)`），且 `make dev` / `make server` 都得依赖那个生成目标。
-//	   ④ 挡的是**静默 no-op**：此前 shim 名写死 `opencode`，于是构建期固定 `dsh` 时
-//	   `OPENCODE_BIN=…` 只是让 PATH 上多了个没人调用的文件——用户以为换了底座，核心照旧拉本机那份。
+//	   ④ 挡的是**静默 no-op**：此前 shim 名写死某个具体底座名，于是构建期固定成另一个时
+//	   `RUNTIME_BIN=…` 只是让 PATH 上多了个没人调用的文件——用户以为换了底座，核心照旧拉本机那份。
 //	   当时的处置是"回显里如实说不会生效"（横幅 + `inert` 分流）；根因修掉后那套绕道整体删除，
 //	   于是这条判据只能钉根因——否则同一个坑会以"没人看横幅"的形式复发。
 func TestDevLoopReportsRuntimeHit(t *testing.T) {
@@ -269,16 +269,20 @@ func TestDevLoopReportsRuntimeHit(t *testing.T) {
 			t.Errorf("`make dev` 的 recipe 里找不到 %q：%s", want.Text, want.Why)
 		}
 	}
-	if strings.Contains(recipe, "底座  opencode") {
-		t.Error("`make dev` 的 recipe 里又出现了写死「opencode」的底座回显——" +
-			"它替一个不会被调用的覆盖做宣传（构建期固定的 runtime 默认是 dsh），这正是 D3 的静默缺口")
+	// 回显里的底座名必须来自 `$(RUNTIME)`，不得写死某个具体底座：写死之后，构建期固定成别的
+	// runtime 时那行回显就在替一个不会被调用的覆盖做宣传（D3 的静默缺口）。
+	// 表里两个值都是**历史上真被写死过的**那两行回显（一有第二个底座就要各写一行），
+	// 所以这里逐字拦两个——只拦当前那个会让"加回旧写法"这条路留着。
+	if strings.Contains(recipe, "底座  opencode") || strings.Contains(recipe, "底座  dsh") {
+		t.Error("`make dev` 的 recipe 里又出现了写死底座名的回显——那行必须用 `$(RUNTIME)`，" +
+			"否则构建期固定成别的 runtime 时它在替一个不会被调用的覆盖做宣传（D3 的静默缺口）")
 	}
 
 	// ④ 覆盖口必须真的生效：shim 名与核心调用的名字同源（都用 `$(RUNTIME)`），且 dev/server 都依赖生成目标。
 	bin := runtimeBinRecipe(t, makefile)
 	if !strings.Contains(bin, "$(DEV_BIN_DIR)/$(RUNTIME)") {
 		t.Error("`dev/runtime-bin` 没有按 `$(RUNTIME)` 命名转发 shim：构建期固定为别的底座时，" +
-			"`OPENCODE_BIN=…` 会退回**静默 no-op**（PATH 上多了个没人调用的文件，核心照旧拉本机那份）")
+			"`RUNTIME_BIN=…` 会退回**静默 no-op**（PATH 上多了个没人调用的文件，核心照旧拉本机那份）")
 	}
 	// 「同源」的另一半：核心必须是被编译成调用 `$(RUNTIME)` 的。少了这条，上面那句会假绿——
 	// 把 BuildRuntime 写死成 dsh 时 shim 名跟着 RUNTIME 变，可核心永远只找 dsh。
@@ -294,9 +298,9 @@ func TestDevLoopReportsRuntimeHit(t *testing.T) {
 				"核心会静默回落到 PATH 上本机那份（正是这个覆盖口要消灭的形态）", dep.Label)
 		}
 	}
-	if strings.Contains(strippedLoop, "RUNTIME === 'opencode'") {
+	if strings.Contains(strippedLoop, "RUNTIME === 'opencode'") || strings.Contains(strippedLoop, "RUNTIME === 'dsh'") {
 		t.Error("dev-loop.mjs 里又出现了「按构建期 runtime 决定覆盖是否生效」的分支" +
-			"（`RUNTIME === 'opencode'`）——那等于承认 shim 名又写死了，覆盖重新变回静默 no-op")
+			"（`RUNTIME === '<某个底座名>'`）——那等于承认 shim 名又写死了，覆盖重新变回静默 no-op")
 	}
 
 	acc := stripTSComments(readFrontendFile(t, filepath.Join(root, "scripts", "web-ui-acceptance.mjs")))

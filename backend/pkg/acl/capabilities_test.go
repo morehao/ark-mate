@@ -38,6 +38,9 @@ func capsResponse(load bool, list, resume, fork, close bool, image, embedded boo
 //   - 指针型 sessionCapabilities 为空结构体即视为支持
 //   - AuthMethods 独立收集为可读标签
 func TestCapabilityFromAgent(t *testing.T) {
+	// 形参样本取自历史实测的全能力底座（该底座已下线）：load/list/resume/fork/close 与
+	// 图/嵌入全为真。子测试名保留当初的样本名（测试内字符串一律不改名），它只描述能力
+	// 形态、不指向任何在册适配。
 	t.Run("opencode_like_full", func(t *testing.T) {
 		auth := []acpsdk.AuthMethod{
 			{Agent: &acpsdk.AuthMethodAgent{Id: "google.com"}},

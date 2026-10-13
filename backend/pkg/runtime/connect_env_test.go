@@ -11,9 +11,9 @@ import (
 // 而症状在真跑会话时表现为"桌面态莫名读了用户 ~/.config/opencode"——很难反查到 env 合并顺序。
 func TestConnectEnvPlatformDeclarationWins(t *testing.T) {
 	spec := Spec{
-		ID: "opencode",
+		ID: "rt-alt",
 		Launch: LaunchSpec{
-			Env: []string{"XDG_CONFIG_HOME=/home/mate/runtime/opencode/config", "OPENCODE_DB=/home/mate/x.db"},
+			Env: []string{"XDG_CONFIG_HOME=/home/mate/runtime/rt-alt/config", "RT_ALT_DB=/home/mate/x.db"},
 		},
 	}
 	got := connectEnv(spec, []string{"XDG_CONFIG_HOME=/home/user/.config", "OPENAI_API_KEY=sk-1"})
@@ -27,7 +27,7 @@ func TestConnectEnvPlatformDeclarationWins(t *testing.T) {
 			t.Fatalf("环境里 %s 出现了 %d 次（同名两条在 POSIX getenv 与 Node process.env 下语义相反）：%v", key, n, got)
 		}
 	}
-	if !containsEnv(got, "XDG_CONFIG_HOME=/home/mate/runtime/opencode/config") {
+	if !containsEnv(got, "XDG_CONFIG_HOME=/home/mate/runtime/rt-alt/config") {
 		t.Fatalf("隔离值被调用方增量覆盖了：%v", got)
 	}
 	if containsEnv(got, "XDG_CONFIG_HOME=/home/user/.config") {

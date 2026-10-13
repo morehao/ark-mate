@@ -34,9 +34,9 @@ func rigWithRuntime(t *testing.T, specs ...runtime.Spec) (*Service, *Orchestrato
 func TestEventSinkMapping(t *testing.T) {
 	_, orch, bus := newTestRig(t)
 	orch.mu.Lock()
-	orch.byProvider["s1"] = "conv-1" // 原生 echo/opencode session id → 平台会话 uuid
+	orch.byProvider["s1"] = "conv-1" // 原生底座 session id → 平台会话 uuid
 	orch.mu.Unlock()
-	sink := orch.eventSink("agent-opencode", "opencode")
+	sink := orch.eventSink("agent-rtx", "rtx")
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
@@ -77,7 +77,7 @@ func TestEventSinkMapping(t *testing.T) {
 	}
 	// 载荷字段（message 的 text、tool_call 的 id/title）。
 	m, _ := evs[0].Payload.(map[string]any)
-	if m["text"] != "hi" || m["agent_id"] != "agent-opencode" {
+	if m["text"] != "hi" || m["agent_id"] != "agent-rtx" {
 		t.Fatalf("message payload 不符: %+v", evs[0].Payload)
 	}
 	tc, _ := evs[2].Payload.(map[string]any)
@@ -110,7 +110,7 @@ func TestEventSinkCommands(t *testing.T) {
 	orch.mu.Lock()
 	orch.byProvider["s1"] = "conv-1"
 	orch.mu.Unlock()
-	sink := orch.eventSink("agent-opencode", "opencode")
+	sink := orch.eventSink("agent-rtx", "rtx")
 	sub := bus.Subscribe(0)
 	defer bus.Unsubscribe(sub)
 
@@ -135,7 +135,7 @@ func TestEventSinkCommands(t *testing.T) {
 		t.Fatalf("agg 应为平台会话 uuid: %+v", ev)
 	}
 	p, _ := ev.Payload.(map[string]any)
-	if p["session_id"] != "conv-1" || p["agent_id"] != "agent-opencode" || p["runtime"] != "opencode" {
+	if p["session_id"] != "conv-1" || p["agent_id"] != "agent-rtx" || p["runtime"] != "rtx" {
 		t.Fatalf("载荷基础字段不符: %+v", p)
 	}
 	cmds, ok := p["commands"].([]acl.CommandInfo)
@@ -171,11 +171,16 @@ func TestEventSinkCommands(t *testing.T) {
 // TestDisconnectIdleSession 连接**意外**断开 + 会话空闲：不改写上一轮的终态、不伪造
 // run.error（轮次结果只由轮次写）；只落 agent 级诊断（连接确实断了）并作废句柄（可重建）。
 func TestDisconnectIdleSession(t *testing.T) {
-	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
-	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"} // client nil
-	rc := &runtimeConn{agentID: "opencode", client: nil}                           // client 亦 nil → 相等匹配
+	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
+	// 种子 agent 由**内置清单**播种，而这份注册表里只有一个非内置 id（它只是本用例的一个普通
+	// 字符串，不是本仓内置清单成员），所以服务该 runtime 的 agent 由夹具显式登记——
+	// 字段与 `seedBuiltinAgents` 播出来的那条逐字同形（尤其是 `State: stopped`：后面那条断言
+	// 验的是"断连不把 agent 状态改坏"，起点错成空串就变成一句空话）。
+	svc.agents["rtx"] = &AgentRec{ID: "rtx", Name: "rtx", State: AgentStateStopped}
+	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx"} // client nil
+	rc := &runtimeConn{agentID: "rtx", client: nil}                      // client 亦 nil → 相等匹配
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx", Status: SessionStatusCompleted})
 	before := bus.LastSeq()
 
 	orch.dropConn(rc)
@@ -186,7 +191,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if bus.LastSeq() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: last=%d want %d", bus.LastSeq(), before)
 	}
-	if a, _ := svc.AgentByID("opencode"); a.State != AgentStateStopped {
+	if a, _ := svc.AgentByID("rtx"); a.State != AgentStateStopped {
 		t.Fatalf("agent 应 stopped: %s", a.State)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
@@ -197,7 +202,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 		t.Fatal("平台侧会话记录必须保留（会话归平台所有）")
 	}
 	// agent 诊断仍是连接事实的来源（键为会话绑定的 agent id）。
-	if le, ok := svc.agentLastError("agent-opencode"); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
+	if le, ok := svc.agentLastError("agent-rtx"); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
 		t.Fatalf("agent 诊断应记录 connection_lost: %+v", le)
 	}
 
@@ -211,12 +216,12 @@ func TestDisconnectIdleSession(t *testing.T) {
 // TestIntentionalTeardownKeepsIdleSession 主动拆除（daemon 停机 / 显式停 agent）+ 空闲会话：
 // 停机不是故障 —— 状态如实保留、不发 connection_lost（容器 `docker restart` 的每次重启都会走这条）。
 func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
-	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
-	as := &ActiveSession{ID: "s1", AgentID: "agent-opencode", Runtime: "opencode"}
-	rc := &runtimeConn{agentID: "opencode", client: nil}
+	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
+	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx"}
+	rc := &runtimeConn{agentID: "rtx", client: nil}
 	rc.intentional.Store(true)
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx", Status: SessionStatusCompleted})
 	before := bus.LastSeq()
 
 	orch.dropConn(rc)
@@ -235,14 +240,14 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 // TestIntentionalTeardownInterruptsInFlightRun 主动拆除 + 在途 run：归 interrupted（无终态、
 // 可续聊重发），既不算失败也不算用户取消 —— 不发布 run.error / run.cancelled。
 func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
-	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "opencode", Name: "opencode"})
+	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
 	as := &ActiveSession{
-		ID: "s1", AgentID: "agent-opencode", Runtime: "opencode",
+		ID: "s1", AgentID: "agent-rtx", Runtime: "rtx",
 		sess: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
 	}
-	rc := &runtimeConn{agentID: "opencode", client: nil}
+	rc := &runtimeConn{agentID: "rtx", client: nil}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "生成中"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -399,7 +404,7 @@ func TestResolveSessionAgent(t *testing.T) {
 	if id, err := svc.resolveSessionAgent(""); err != nil || id != "dsh" {
 		t.Fatalf("空 agent_id 应落到默认 dsh: id=%q err=%v", id, err)
 	}
-	if id, err := svc.resolveSessionAgent("opencode"); err != nil || id != "opencode" {
+	if id, err := svc.resolveSessionAgent("rtx"); err != nil || id != "rtx" {
 		t.Fatalf("非空 agent_id 应原样返回: id=%q err=%v", id, err)
 	}
 }
@@ -442,7 +447,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
 	svc.mu.Lock()
-	svc.sessions[id] = &SessionRec{ID: id, AgentID: "agent-opencode", Status: SessionStatusInProgress}
+	svc.sessions[id] = &SessionRec{ID: id, AgentID: "agent-rtx", Status: SessionStatusInProgress}
 	svc.ver[id] = 0
 	svc.mu.Unlock()
 
@@ -459,7 +464,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				_ = svc.publish(BusUserMessage, id, map[string]any{
-					"session_id": id, "agent_id": "agent-opencode", "text": fmt.Sprintf("消息 %d-%d", n, j),
+					"session_id": id, "agent_id": "agent-rtx", "text": fmt.Sprintf("消息 %d-%d", n, j),
 				})
 			}
 		}(i)

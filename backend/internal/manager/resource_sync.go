@@ -21,7 +21,7 @@ import (
 
 // ——— 同步编排（M4）：读资源 → 组 Set → 逐 runtime 调端口 → 记摘要 → 回带 Outcome ———
 //
-// 这一层是「谁懂底座」这件事的分界线：它**不解析任何底座格式**，只说"把这份声明交给 opencode"。
+// 这一层是「谁懂底座」这件事的分界线：它**不解析任何底座格式**，只说"把这份声明交给该 runtime"。
 // 底座知识全在 adapter；本文件之上（DTO / 路由 / 前端）不知道底座的配置长什么样。
 //
 // 三条不变量：
@@ -690,7 +690,7 @@ func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string,
 	}
 	out := []string{}
 	for i := range declared {
-		v, verr := modelValueFor(runtimeID, declared[i].ProviderID, declared[i].ModelID)
+		v, verr := modelValueFor(s.reg, runtimeID, declared[i].ProviderID, declared[i].ModelID)
 		if verr != nil || v == "" {
 			continue
 		}

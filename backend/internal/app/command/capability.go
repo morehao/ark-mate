@@ -164,8 +164,8 @@ func (m *skillMigration) apply() error { return m.file.Save() }
 // capabilityMigrate 把 skill 定义里的旧 `sources[]` 迁移成 `runtimes[]`。
 //
 // 为什么必须手跑一次：M1 起条目侧只声明「给谁用」（`runtimes`），而 `sources` 是个**未知键**
-// ——`encoding/json` 会静默丢掉它。丢掉的后果不是报错，而是**投放面被放宽**：原本「只给
-// opencode」的技能变成「给所有支持 skill 投影的 runtime」。所以这不是清理性迁移，而是
+// ——`encoding/json` 会静默丢掉它。丢掉的后果不是报错，而是**投放面被放宽**：原本「只给某一个
+// 底座」的技能变成「给所有支持 skill 投影的 runtime」。所以这不是清理性迁移，而是
 // **保持语义不变**的一次改写；不迁移也能跑，但行为与迁移前不同（装载期会为这类文件挂一条
 // `legacy_sources_key` 告警，把人引到这里）。
 func capabilityMigrate(args []string) {

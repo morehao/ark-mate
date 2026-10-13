@@ -28,7 +28,7 @@ const (
 	// （options = acl.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
 	BusConfigOptions = "session.config_options"
 	// BusCommands 会话可用命令**全量**列表（ACP session/available_commands_update；
-	// 如 opencode 会通告它的斜杠命令，dsh 的 ACP 面不含命令故永不产生本事件）。
+	// 这是**可选能力**：会通告命令的底座才推，别的底座的 ACP 面不含命令、故永不产生本事件）。
 	// payload = {session_id, agent_id, runtime, commands}
 	// （commands = acl.CommandInfo 切片 {name, description?, hint?}，顺序由底座给出、平台不重排）。
 	//

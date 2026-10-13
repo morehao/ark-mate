@@ -16,7 +16,7 @@ import (
 // newIsolationRig 装配一台真实 App（内存持久层 + 假资产目录 + 一个远程 runtime 声明）。
 //
 // 为什么走真实 Init 而不是直接构造注册表：接线被删掉时**没有任何东西会报错**——底座只是又回去
-// 读写用户自己的 ~/.dsh / ~/.config/opencode，表现为"平台会话能看到我手装底座的配置"；而
+// 读写用户自己的底座 home 目录，表现为"平台会话能看到我手装底座的配置"；而
 // "装配的是哪一个底座"同理：换成 ProductRegistry 之后，漏改某个装配点不会有编译错误。
 func newIsolationRig(t *testing.T) (*App, string) {
 	t.Helper()
@@ -43,7 +43,7 @@ func newIsolationRig(t *testing.T) (*App, string) {
 	// 投影根也收进临时目录：默认根是 ~/.agents/skills，测试不该往开发机家目录写东西
 	// （skill 物化重校会建根目录，哪怕本轮一条 skill 都没有）。
 	cfg.ProjectionDirs = map[string]string{
-		"opencode:skill": filepath.Join(home, "proj-opencode"),
+		"rtx:skill":      filepath.Join(home, "proj-rtx"),
 		"dsh:skill":      filepath.Join(home, "proj-dsh"),
 		"remote-x:skill": filepath.Join(home, "proj-remote-x"),
 	}
@@ -81,7 +81,7 @@ func TestInitPinsBuildRuntime(t *testing.T) {
 	if _, ok := a.reg.Get("dsh"); !ok {
 		t.Fatal("构建期选中的 dsh 未装配")
 	}
-	for _, id := range []string{"opencode", "remote-x"} {
+	for _, id := range []string{"rtx", "remote-x"} {
 		if _, ok := a.reg.Get(id); ok {
 			t.Fatalf("%s 不该出现在装配结果里（构建期固定在 dsh）", id)
 		}
@@ -111,7 +111,7 @@ func TestInitPinsSelectedRemoteRuntime(t *testing.T) {
 	if len(spec.Launch.Env) != 0 {
 		t.Fatalf("远程端点不应注入 env: %v", spec.Launch.Env)
 	}
-	for _, id := range []string{"opencode", "dsh"} {
+	for _, id := range []string{"rtx", "dsh"} {
 		if _, ok := a.reg.Get(id); ok {
 			t.Fatalf("%s 不该出现在装配结果里（构建期固定在 remote-x）", id)
 		}

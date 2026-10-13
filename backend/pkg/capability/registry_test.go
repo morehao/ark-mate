@@ -166,7 +166,7 @@ func TestRegisterSkillRuntimesAndScope(t *testing.T) {
 
 // TestLoadLegacySourcesWarns 旧 `sources` 键被忽略这件事**必须可见**。
 //
-// `encoding/json` 丢未知键是静默的，而这里丢掉的后果是投放面被放宽（「只给 opencode」变成
+// `encoding/json` 丢未知键是静默的，而这里丢掉的后果是投放面被放宽（「只给某一个 runtime」变成
 // 「给所有 runtime」）。装载期为这类文件挂一条 info 告警，把人引到 `mate capability migrate`。
 func TestLoadLegacySourcesWarns(t *testing.T) {
 	dir := t.TempDir()

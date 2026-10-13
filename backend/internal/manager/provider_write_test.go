@@ -12,6 +12,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/resource"
 )
@@ -207,7 +208,7 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 		t.Fatalf("补偿应写回旧密文，got %q（期望 %q）", string(got), old)
 	}
 	// 内存也没被改脏（写面的承诺：载体提交成功之前内存一个字段都不动）。
-	if env := svc.providerEnvFor("opencode", "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
+	if env := svc.providerEnvFor(runtimetest.ID, "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
 		t.Fatalf("失败的写面不该改内存: %v", env)
 	}
 }
@@ -320,11 +321,11 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 		t.Fatalf("问题文案应指向设置 · 模型: %+v", items[0].Problems)
 	}
 	// 引用面是只读派生：agent 一引用就出现。底座维度只有**构建期那一个**（不再是逐 agent 收集候选）。
-	setBuildRuntime(t, "opencode") // v12ProviderRegistry 只注册了 opencode
+	setBuildRuntime(t, runtimetest.ID) // v12ProviderRegistry 只注册了合成底座
 	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Provider: "no-key"}
 	items, _ = svc.ListProviders(context.Background())
 	if len(items[0].Refs.Agents) != 1 || items[0].Refs.Agents[0] != "a1" ||
-		len(items[0].Refs.Runtimes) != 1 || items[0].Refs.Runtimes[0] != "opencode" {
+		len(items[0].Refs.Runtimes) != 1 || items[0].Refs.Runtimes[0] != runtimetest.ID {
 		t.Fatalf("引用面不符: %+v", items[0].Refs)
 	}
 }

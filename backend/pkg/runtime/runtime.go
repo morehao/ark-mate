@@ -6,8 +6,8 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
-// Mode 平台统一权限模式（§5.5 词汇）。opencode/dsh 的原生 mode 映射见 §6.2 ModeMapping
-// （待实测回填）。
+// Mode 平台统一权限模式（§5.5 词汇）。各底座的原生 mode 映射见 §6.2 ModeMapping（待实测回填），
+// 实现落在各 adapter 自己的包里（`pkg/runtime/<id>/native_permission.go`）。
 type Mode string
 
 const (
@@ -20,8 +20,9 @@ const (
 // ModelConfig 平台侧模型选择（只含模型这一项）。
 //
 // 重要：Model 是**运行时的不透明值**，必须原样取自运行时广告的会话配置项（category=model）的
-// ConfigOptionValue.Value —— dsh 是 `JSON.stringify([provider, model])`，opencode 是
-// `provider/model`。平台不得拼接或解析该串，也不得自行编造候选：可用性以运行时
+// ConfigOptionValue.Value —— 形态由该 adapter 自己声明（见 `model_value.go`：dsh 是
+// `JSON.stringify([provider, model])`，别的底座可能是 `provider/model`）。平台不得拼接或解析该串，
+// 也不得自行编造候选：可用性以运行时
 // set_config_option 的成败为唯一判据。
 //
 // 平台**不提供**思考档位（thought_level）选择面：运行时若给出该选项，只作为运行时状态原样
@@ -50,7 +51,7 @@ type PromptRequest struct {
 // 契约：实现方须使 ID/ManagesOwnContext/Capabilities 与底层会话自洽；对不支持的操作（如某
 // runtime 无 Resume/ApplyMode/ApplyModel）返回明确错误，不得静默吞掉。
 type Runtime interface {
-	// ID 返回投影 id（对应 Spec.ID：opencode/dsh）。
+	// ID 返回投影 id（对应 Spec.ID，= 该 adapter 在注册表里的键）。
 	ID() string
 	// ManagesOwnContext 后端自管上下文/工具（§6.2 三投影均 true）。
 	ManagesOwnContext() bool

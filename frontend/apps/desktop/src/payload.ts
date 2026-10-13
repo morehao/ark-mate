@@ -3,14 +3,14 @@
  *
  * ## 解析链与"我们自己的载荷"的规矩
  *
- * 设计 §6.5 的链是三级：**显式配置 → 随包载荷 → PATH**。对本模块负责的三份载荷（dsh / opencode /
- * npm 的 npx 入口）只有前两级是合法的：
+ * 设计 §6.5 的链是三级：**显式配置 → 随包载荷 → PATH**。对本模块负责的载荷（当前是 dsh，
+ * 以及从它内部派生出来的 npm `npx` 入口）只有前两级是合法的：
  *
  *   - 命中**显式配置**（`MATE_RUNTIME_<NAME>`）→ `runtime-env`：用户明确指名用哪一份，我们就用它；
  *   - 命中**随包载荷** → `bundled`：这是桌面态的常态；
  *   - 都没命中 → **启动期错误**，不回落 PATH。
  *
- * 为什么不回落：机器上装的 dsh/opencode 是**另一个版本、另一套配置、另一份能力声明**。静默回落的症状是
+ * 为什么不回落：机器上装的同名命令是**另一个版本、另一套配置、另一份能力声明**。静默回落的症状是
  * "在我机器上好好的"——那种 bug 最难查，而且违反设计 §6.5 的红线（"两件事不能混为一谈"：**随包运行时**
  * 与**用户自己装的 runtime** 是两件不同的事）。所以这里宁可让壳起不来（走既有的 `boot-failed` 恢复页），
  * 也不猜。`path` 这个来源取值因此在本模块**只作为词表存在**：它描述的是"核心在非桌面形态下从 PATH 找
@@ -59,10 +59,15 @@ export type PayloadResolutionDeps = {
   env: Record<string, string | undefined>
 }
 
-/** 本模块认识的载荷：名字 → 显式覆盖的环境变量。 */
+/**
+ * 本模块认识的载荷：名字 → 显式覆盖的环境变量。
+ *
+ * **新增一个随包底座 = 这里加一行 + `resolveRuntimePayloads` 里加一次 `resolvePayload` 调用**
+ * （外加 `apps/desktop/runtime/<name>/` 的装配脚本与 `gen-runtime-bin.mjs` 里的一条启动器）。
+ * `resolvePayload` 本身不认识任何具体底座。
+ */
 const PAYLOAD_ENV_VARS: Record<string, string> = {
   dsh: 'MATE_RUNTIME_DSH',
-  opencode: 'MATE_RUNTIME_OPENCODE',
 }
 
 /** 随包载荷清单里读出来的元数据（`payload.json` 的子集）。 */
@@ -105,8 +110,8 @@ function readManifest(dir: string): PayloadManifest {
 /**
  * 解析一份随包载荷。
  *
- * `entryRel` 是载荷内的入口相对路径（dsh = `node_modules/@deepseek-ai/dsh/lib/bin.js`，
- * opencode = `bin/opencode`）。入口**不由运行期猜**：清单里写死了 `entry`，这里只按它拼绝对路径，
+ * `entryRel` 是载荷内的入口相对路径（dsh = `node_modules/@deepseek-ai/dsh/lib/bin.js`）。
+ * 入口**不由运行期猜**：清单里写死了 `entry`，这里只按它拼绝对路径，
  * 并在拼完后核一次存在性——"装上了但入口不在"必须在启动期报出来，而不是等 ACP 握手超时。
  */
 export function resolvePayload(name: string, entryRel: string | undefined, deps: PayloadResolutionDeps): ResolvedPayload {
@@ -164,28 +169,26 @@ export function resolvePayload(name: string, entryRel: string | undefined, deps:
  */
 export function resolveRuntimePayloads(deps: PayloadResolutionDeps): {
   dsh: ResolvedPayload
-  opencode: ResolvedPayload
   npxEntry?: string
   all: ResolvedPayload[]
 } {
   const dsh = resolvePayload('dsh', 'node_modules/@deepseek-ai/dsh/lib/bin.js', deps)
-  const opencode = resolvePayload('opencode', 'bin/opencode', deps)
   // npm 的入口在 **dsh 载荷内部**（`<载荷>/node_modules/npm/bin/npx-cli.js`，M3-1 的分装结果）。
   const npxCandidate = dsh.payloadRoot ? join(dsh.payloadRoot, 'node_modules', 'npm', 'bin', 'npx-cli.js') : undefined
   const npxEntry = npxCandidate && existsSync(npxCandidate) ? npxCandidate : undefined
-  return { dsh, opencode, npxEntry, all: [dsh, opencode] }
+  return { dsh, npxEntry, all: [dsh] }
 }
 
 /**
  * 注入给核心（再经它继承给 runtime / MCP 子进程）的载荷路径变量。
  *
- * 三个变量对应私有 bin 里三个启动器的目标（design §6.6 / M3-2）：启动器只做转发，
+ * 每个变量对应私有 bin 里一个启动器的目标（design §6.6 / M3-2）：启动器只做转发，
  * "名字 → 具体哪一份载荷"的翻译全部发生在启动期、写进环境——这是"不探测本机"能成立的关键。
+ * 变量名与 `gen-runtime-bin.mjs` 里各 launcher 的 `targetVar` **逐字对应**，改一处就得改另一处。
  */
 export function payloadEnvironmentExtras(payloads: ReturnType<typeof resolveRuntimePayloads>): Record<string, string> {
   const extras: Record<string, string> = {
     MATE_DSH_ENTRY: payloads.dsh.entry,
-    MATE_OPENCODE_BIN: payloads.opencode.entry,
   }
   if (payloads.npxEntry) extras.MATE_NPX_ENTRY = payloads.npxEntry
   return extras

@@ -35,7 +35,7 @@ func TestTranscriptJSONL(t *testing.T) {
 	svc.SetTranscriptDir(dir)
 	defer svc.closeTranscripts()
 
-	svc.beginTranscript("s1", "agent-opencode", "opencode", "/tmp", false)
+	svc.beginTranscript("s1", "agent-rtx", "rtx", "/tmp", false)
 	svc.publish(BusUserMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a", "text": "hi"})
 	svc.publish(BusMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a", "text": "hello"})
 	svc.closeTranscripts()
@@ -53,7 +53,7 @@ func TestTranscriptJSONL(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &h); err != nil {
 		t.Fatalf("header 解析失败: %v", err)
 	}
-	if h.Schema != wireTranscriptSchema || h.Version != 2 || h.SessionID != "s1" || h.Runtime != "opencode" {
+	if h.Schema != wireTranscriptSchema || h.Version != 2 || h.SessionID != "s1" || h.Runtime != "rtx" {
 		t.Fatalf("header 不符: %+v", h)
 	}
 	var l1 wireTranscriptLine
@@ -91,7 +91,7 @@ func TestSessionHistoryPaging(t *testing.T) {
 	reg := runtime.NewRegistry()
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
 
 	// ③ 文本增量合并：不同 msg_id = 不同消息，5 条各自成事件（断言前 flush 落盘）。
 	for i := 0; i < 5; i++ {
@@ -180,14 +180,14 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
 	if err := st.UpsertSession(context.Background(), model.SessionEntity{
-		ID: "s1", AgentID: "agent-opencode", Status: "in_progress", CreatedAt: now, UpdatedAt: now,
+		ID: "s1", AgentID: "agent-rtx", Status: "in_progress", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
 	}
 
 	svc, _, _ := newTestRig(t)
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-opencode"})
+	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
 	for i := 0; i < 5; i++ {
 		svc.publish(BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": fmt.Sprintf("m%d", i)})
 	}

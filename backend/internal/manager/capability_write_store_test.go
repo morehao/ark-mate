@@ -27,7 +27,7 @@ func storeCapRig(t *testing.T) (*rig, string) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) { c.store = true })
 	root := t.TempDir()
-	r.Svc.SetSkillProjections([]SkillProjection{skillProj(root, "opencode")})
+	r.Svc.SetSkillProjections([]SkillProjection{skillProj(root, "rtx")})
 	return r, root
 }
 
@@ -48,7 +48,7 @@ func TestStoreSkillWriteFaceRoundTrip(t *testing.T) {
 
 	// —— 新建：落行 + 入表 + 审计 + 物化 ——
 	resp, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t,
-		"id", `"db-skill"`, "name", `"DB Skill"`, "body", `"# DB"`, "runtimes", `["opencode"]`,
+		"id", `"db-skill"`, "name", `"DB Skill"`, "body", `"# DB"`, "runtimes", `["rtx"]`,
 		"my_note", `"手写字段"`)))
 	if err != nil {
 		t.Fatalf("CreateSkill: %v", err)

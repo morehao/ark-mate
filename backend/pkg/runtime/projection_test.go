@@ -3,7 +3,7 @@ package runtime
 import "testing"
 
 // TestAdapterProjectionDeclarations §6.2 投影声明值守门：传输能力集合、ManagesOwnContext、
-// Description 非空；ModeMapping 本轮留空（opencode/dsh 精确映射待实测，见 §12）。
+// Description 非空；ModeMapping 本轮留空（精确映射待实测，见 §12）。
 func TestAdapterProjectionDeclarations(t *testing.T) {
 	cases := []struct {
 		id     string
@@ -11,7 +11,7 @@ func TestAdapterProjectionDeclarations(t *testing.T) {
 		has    []string
 		notHas []string
 	}{
-		{id: "opencode", spec: opencodeSpec(), has: []string{"stdio", "sse", "http"}, notHas: []string{"streamable_http"}},
+		{id: altID, spec: altSpec(), has: []string{"stdio", "sse", "http"}, notHas: []string{"streamable_http"}},
 		{id: "dsh", spec: dshSpec(), has: []string{"stdio", "streamable_http"}, notHas: []string{"sse", "http"}},
 	}
 	for _, c := range cases {

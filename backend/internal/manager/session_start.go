@@ -158,8 +158,8 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, agent *AgentRec, opt 
 
 // ensureSession 返回活跃会话；不在活跃集合但平台有记录时按需重建。
 // 恢复次序（P3 F2/F3，§5.6）：
-//  1. 原生 resume（首选）：acquire conn → 按能力 LoadSession（opencode load=true）或
-//     ResumeSession（dsh resume=true）恢复同一 provider session → reason=restart。
+//  1. 原生 resume（首选）：acquire conn → 按该底座声明的能力走 LoadSession（load=true）或
+//     ResumeSession（resume=true）恢复同一 provider session → reason=restart。
 //  2. handoff memo 兜底（原生不可用时）：底座未声明 load/resume 能力、无 provider session
 //     （旧数据）、agent 现路由 runtime ≠ 会话原 runtime（跨 runtime 续聊）、或原生恢复失败 →
 //     在该 runtime 建 fresh session + 把历史压成 bounded memo 挂到首条 prompt（reason=handoff），
@@ -397,7 +397,7 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 // applyModelOnSession 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。
 //
 // 语义（决策记录）：**用户显式指定的取值，运行时要么接受、要么报错**——绝不静默回落默认模型：
-//   - 运行时未广告模型项（未配置 provider 的 opencode 等）→ model_not_supported；
+//   - 运行时未广告模型项（该底座未配置任何 provider 等）→ model_not_supported；
 //   - 运行时拒绝该取值（协议要求值必须来自广告列表）→ 原样上抛并记入「不可用」反馈；
 //   - 成功 → 用返回的全量状态刷新平台目录缓存。
 //

@@ -11,21 +11,21 @@ import (
 
 // TestResolveConfigLocationUsesIsolationEnv 落点解析必须**先看该 runtime 的隔离 env**。
 //
-// 这条是隔离纪律在模型清单落点上的落点：`OPENCODE_CONFIG_DIR` / `DSH_HOME` 是平台注入**子进程**的
+// 这条是隔离纪律在模型清单落点上的落点：`RT_ALT_HOME` / `DSH_HOME` 是平台注入**子进程**的
 // 私有值，进程环境里通常没有它们。只看进程环境会解析失败——更糟的是会命中用户在 shell 里设的同名
 // 变量，于是平台去写**用户真实目录**（这正是 AGENTS.md 的硬约束禁止的事）。
 func TestResolveConfigLocationUsesIsolationEnv(t *testing.T) {
 	home := t.TempDir()
 	// 诱饵：进程环境里放一个同名变量，指向"用户自己的目录"。
-	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(home, "user-owned-opencode"))
+	t.Setenv("RT_ALT_HOME", filepath.Join(home, "user-owned-rt-alt"))
 	t.Setenv("DSH_HOME", filepath.Join(home, "user-owned-dsh"))
 
-	reg := NewRegistry(opencodeSpec(), dshSpec())
+	reg := NewRegistry(altSpec(), dshSpec())
 	applied := reg.ApplyIsolationEnv(home)
 	if len(applied) != 2 {
 		t.Fatalf("两个本地 runtime 都应被注入隔离 env: %v", applied)
 	}
-	for _, id := range []string{"opencode", "dsh"} {
+	for _, id := range []string{altID, "dsh"} {
 		spec, ok := reg.Get(id)
 		if !ok {
 			t.Fatalf("%s 未注册", id)
@@ -46,10 +46,11 @@ func TestResolveConfigLocationUsesIsolationEnv(t *testing.T) {
 	}
 
 	// 逐 runtime 的落点形态（文件名与凭据文档面是平台内核对 adapter 的唯一约定）。
-	oc, _ := reg.Get("opencode")
-	ocp, _, _ := ResolveConfigLocation(oc)
-	if filepath.Base(ocp.Path) != "opencode.json" || ocp.CredentialDocPath != "" {
-		t.Fatalf("opencode 的声明不符: %+v", ocp)
+	alt, _ := reg.Get(altID)
+	altp, _, _ := ResolveConfigLocation(alt)
+	if filepath.Base(altp.Path) != "rt-alt-models.json" ||
+		filepath.Base(altp.CredentialDocPath) != ".rt-alt-credentials.json" {
+		t.Fatalf("%s 的声明不符: %+v", altID, altp)
 	}
 	dsh, _ := reg.Get("dsh")
 	dshp, _, _ := ResolveConfigLocation(dsh)
@@ -114,7 +115,7 @@ func TestResolveConfigLocationRejectsBadDeclarations(t *testing.T) {
 
 // TestSpecModelConfigIsSeparateFromProjections 清单落点与 skill 投影是两种声明，不能互相顶替。
 func TestSpecModelConfigIsSeparateFromProjections(t *testing.T) {
-	spec := opencodeSpec()
+	spec := altSpec()
 	if _, ok := spec.ProjectionFor(ProjectionSkill); !ok {
 		t.Fatal("skill 投影应仍在 Projections 里")
 	}
@@ -130,24 +131,33 @@ func TestSpecModelConfigIsSeparateFromProjections(t *testing.T) {
 
 // TestBuiltinSyncersRegisteredAfterIsolation 同步实现的登记**必须发生在隔离 env 应用之后**。
 //
-// 时序事实：`Spec.ModelConfig.Root` 里的 `${OPENCODE_CONFIG_DIR}` / `${DSH_HOME}` 正是
+// 时序事实：`Spec.ModelConfig.Root` 里的 `${DSH_HOME}` / `${RT_ALT_HOME}` 正是
 // `ApplyIsolationEnv` 注入的；而构造注册表跑在装配最前面。所以构造时那次登记**必然解析失败**
 // （解析刻意不回落进程环境——回落到用户自己的 home 是隔离纪律的红线）。
 // 少了"隔离后再登记一次"，`sync[]` 会永远报 `unsupported`：界面说保存成功、底座永远拿不到清单。
 //
-// 夹具用 `t.TempDir()` 当 home：真正的落点全部落在临时目录里，**绝不碰真 `~/.dsh` / `~/.config/opencode`**。
+// 夹具用 `t.TempDir()` 当 home：真正的落点全部落在临时目录里，**绝不碰真 `~/.dsh`**。
+//
+// 遍历的是 `AllBuiltinSpecs()` 而不是写死的 id 清单：新增一个内置 adapter 时自动被覆盖，
+// 而"清单里恰好有一个底座"这件事不该让判据退化成对某个名字的断言。
 func TestBuiltinSyncersRegisteredAfterIsolation(t *testing.T) {
 	reg := AllBuiltinRegistry()
-	for _, id := range []string{"opencode", "dsh"} {
+	specs := AllBuiltinSpecs()
+	if len(specs) == 0 {
+		t.Fatal("内置 adapter 一个都没扫到：本判据已失效（fail-closed）")
+	}
+	for _, spec := range specs {
+		id := spec.ID
 		if _, ok := reg.Syncer(id); ok {
 			t.Fatalf("%s：隔离 env 未应用时落点解析不出来，不该有 syncer（拿到就说明解析回落了进程环境）", id)
 		}
 	}
 	home := t.TempDir()
-	if ids := reg.ApplyIsolationEnv(home); len(ids) != 2 {
-		t.Fatalf("两个本地 runtime 都应被注入隔离 env: %v", ids)
+	if ids := reg.ApplyIsolationEnv(home); len(ids) != len(specs) {
+		t.Fatalf("全部内置本地 runtime 都应被注入隔离 env（期望 %d 个）: %v", len(specs), ids)
 	}
-	for _, id := range []string{"opencode", "dsh"} {
+	for _, spec := range specs {
+		id := spec.ID
 		s, ok := reg.Syncer(id)
 		if !ok || s == nil {
 			t.Fatalf("%s：隔离 env 应用后应登记同步实现", id)

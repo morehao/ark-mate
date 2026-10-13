@@ -10,8 +10,10 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— K2：`mate doctor` 的 provider / 模型清单只读体检 ———
@@ -110,9 +112,12 @@ func TestCollectProviderDoctorFactsReadsEverything(t *testing.T) {
 	if !got.VaultUsable || got.VaultSource != "keyfile" {
 		t.Fatalf("有真实 keyfile 时应报可用：usable=%t source=%s note=%s", got.VaultUsable, got.VaultSource, got.VaultNote)
 	}
-	// 模型清单段：两个内置 runtime 都在，且**离线**（无编排器）→ advertised 必须记 unknown。
-	if len(got.Runtimes) != 2 {
-		t.Fatalf("应有两个 runtime 的物化状态：%+v", got.Runtimes)
+	// 模型清单段：**每个内置 runtime** 各一条物化状态（按 `AllBuiltinSpecs()` 现算，而不是写死
+	// 一个数字——写死 2 的那一版在第二个内置底座下线后就变成了"数量恰好对上"的空断言），
+	// 且**离线**（无编排器）→ advertised 必须记 unknown。
+	wantRuntimes := len(runtime.AllBuiltinSpecs())
+	if len(got.Runtimes) != wantRuntimes {
+		t.Fatalf("应对每个内置 runtime 各报一条物化状态（%d 条）：%+v", wantRuntimes, got.Runtimes)
 	}
 	for _, rt := range got.Runtimes {
 		if rt.AdvertisedKnown || rt.HighRisk {
@@ -188,24 +193,24 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
 	// 对账借读的判据是"这个 agent 跑在哪个底座"——底座是构建期常量，所以这里把它设成要体检的
-	// 那个（`newModelRig` 默认是 stub；opencode 的声明它也已经注册进来了）。
-	setBuildRuntime(t, "opencode")
-	agentID := r.svc.agentForRuntime("opencode")
+	// 那个（`newModelRig` 把合成底座 rtx 的声明也注册进来了，它就是"第二个底座"）。
+	setBuildRuntime(t, runtimetest.ID)
+	agentID := r.svc.agentForRuntime(runtimetest.ID)
 	if agentID == "" {
-		t.Fatal("夹具里应有一个服务 opencode 的 agent")
+		t.Fatalf("夹具里应有一个服务 %s 的 agent", runtimetest.ID)
 	}
-	state := r.svc.RuntimeConfigStates(ctx)["opencode"]
+	state := r.svc.RuntimeConfigStates(ctx)[runtimetest.ID]
 
 	// ① 平台声明一条、底座却什么都没广告（这里用"有目录条目但零候选"造出 advertised=0 的事实）：
 	//    这正是"写了完全没生效"的形态 → 高危。
 	m := r.createModel(t, "p1", "m-1")
 	// 运行时目录里的取值是**不透明串**，由平台的同一份生成规则折出来（v12 起清单行不再回带它）。
-	value, err := modelValueFor("opencode", m.ProviderID, m.ModelID)
+	value, err := modelValueFor(r.svc.reg, runtimetest.ID, m.ProviderID, m.ModelID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedCatalog(r.svc, agentID, "opencode")
-	facts := r.svc.runtimeModelFacts(ctx, "opencode", state)
+	seedCatalog(r.svc, agentID, runtimetest.ID)
+	facts := r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.AdvertisedCount != 0 {
 		t.Fatalf("应取到「目录为空」这个事实：%+v", facts)
 	}
@@ -217,8 +222,8 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	}
 
 	// ② 底座广告了它 → 不高危、差集为空。
-	seedCatalog(r.svc, agentID, "opencode", aclValue(value))
-	facts = r.svc.runtimeModelFacts(ctx, "opencode", state)
+	seedCatalog(r.svc, agentID, runtimetest.ID, aclValue(value))
+	facts = r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
 	if !facts.AdvertisedKnown || facts.HighRisk || facts.AdvertisedCount != 1 {
 		t.Fatalf("两侧一致时不该高危：%+v", facts)
 	}
@@ -228,12 +233,12 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 
 	// ③ 完全没有取样来源 → **无法校验**，不是高危、也不是一致。
 	//
-	// 这里把编排器摘掉来制造"没有来源"（`source=none`），而不是清缓存：夹具注册的是**真实
-	// opencode 的声明**，清掉缓存会让 `ModelCatalog` 去 resume 历史会话——那会真的拉起本机的
-	// opencode（测试不得碰用户装的那个底座）。摘掉编排器走的正是 CLI 离线那条路。
+	// 这里把编排器摘掉来制造"没有来源"（`source=none`），而不是清缓存：清掉缓存会让
+	// `ModelCatalog` 去 resume 历史会话——那是一条会**真的拉起底座**的路（测试不得碰用户装的那份）。
+	// 摘掉编排器走的正是 CLI 离线那条路。
 	r.svc.orch = nil
 	r.svc.catalog.drop(agentID)
-	facts = r.svc.runtimeModelFacts(ctx, "opencode", state)
+	facts = r.svc.runtimeModelFacts(ctx, runtimetest.ID, state)
 	if facts.AdvertisedKnown || facts.HighRisk {
 		t.Fatalf("取不到广告时不许判定：%+v", facts)
 	}

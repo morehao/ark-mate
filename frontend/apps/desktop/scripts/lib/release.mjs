@@ -50,8 +50,13 @@ export const RELEASE_FIELDS = [
 /** payloads[] 里一条的字段与顺序。 */
 export const PAYLOAD_FIELDS = ['name', 'version', 'digest']
 
-/** 打包必须随包的两份载荷（M3-1）：缺任何一份都不是"零依赖首启"（R2/V1）。 */
-export const REQUIRED_PAYLOADS = ['dsh', 'opencode']
+/**
+ * 打包必须随包的载荷（M3-1）：缺任何一份都不是"零依赖首启"（R2/V1）。
+ *
+ * 这是**唯一事实源**：`compliance.mjs` 与 `verify-release-json.mjs` 都从这里取。
+ * 新增一个随包底座时，加进它与 `prepare-runtime.mjs` 的 `PAYLOADS` 两处。
+ */
+export const REQUIRED_PAYLOADS = ['dsh']
 
 export function readJson(abs) {
   return JSON.parse(readFileSync(abs, 'utf8'))
@@ -157,7 +162,7 @@ export function shortDigest(digest) {
  */
 export function readPayloadManifests(rootDir) {
   if (!existsSync(rootDir)) {
-    throw new Error(`载荷目录不存在：${rootDir}\n  先跑 \`make desktop/payloads\`（M3-1 装配 dsh 闭包与 opencode 二进制）`)
+    throw new Error(`载荷目录不存在：${rootDir}\n  先跑 \`make desktop/payloads\`（M3-1 装配随包载荷）`)
   }
   const found = []
   for (const name of readdirSync(rootDir).sort()) {
@@ -190,7 +195,7 @@ export function readPayloadManifests(rootDir) {
   const missing = REQUIRED_PAYLOADS.filter((name) => !names.includes(name))
   if (missing.length > 0) {
     throw new Error(
-      `随包载荷缺 ${missing.join('、')}（现有 ${names.join('、')}）：桌面包必须自带这两份载荷，` +
+      `随包载荷缺 ${missing.join('、')}（现有 ${names.join('、')}）：桌面包必须自带清单里的每一份载荷，` +
         '否则 R2/V1 的"零依赖首启"不成立',
     )
   }

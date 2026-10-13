@@ -27,8 +27,8 @@ export const Ev = {
   // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
   // 拓扑变化时推）：payload = {session_id, agent_id, runtime, options: ConfigOption[]}。
   ConfigOptions: 'session.config_options',
-  // 底座自报的会话可用命令**全量**列表（ACP session/available_commands_update，目前只有 opencode
-  // 通告；dsh 的 ACP 面不含命令，故它永远收不到本事件——那是底座事实，文案不得说成"你还没配命令"）。
+  // 底座自报的会话可用命令**全量**列表（ACP session/available_commands_update；**这是可选能力**：
+  // ACP 面不含命令的底座永远收不到本事件——那是底座事实，文案不得说成"你还没配命令"）。
   // payload = {session_id, agent_id, runtime, commands: CommandInfo[]}；空数组表示"通告了当前没有命令"。
   // 语义边界：这是**发现面**，不是平台声明的能力——执行只是把命令行当普通提示词发出去（ADR-17）。
   Commands: 'session.commands',

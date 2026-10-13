@@ -2,13 +2,13 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -43,12 +43,12 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	// env 注入：**逐供应商派生的引用名**（v11 的 `<TYPE>_API_KEY` 已删，ADR-16）。
 	// 判据不是"名字长什么样"而是"两条供应商拿到两个不同的名字"——同一把密钥命中两条 route
 	// 正是 v11 的真实缺陷（A12 的回归点）。
-	envs := svc.providerEnvFor("opencode", "default")
+	envs := svc.providerEnvFor(runtimetest.ID, "default")
 	if len(envs) != 1 || !strings.HasPrefix(envs[0], "MATE_DEFAULT_") || !strings.HasSuffix(envs[0], "_API_KEY=sk-secret-abc") {
 		t.Fatalf("env 注入不符（应为逐供应商派生名）: %+v", envs)
 	}
 	_, _ = svc.CreateProvider(ctx, providerReq("ds", &key))
-	got := svc.providerEnvFor("opencode", "ds")
+	got := svc.providerEnvFor(runtimetest.ID, "ds")
 	if len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") {
 		t.Fatalf("第二条供应商也该有自己的引用名: %+v", got)
 	}
@@ -59,7 +59,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	// 清除：key 空串 → has_key=false、env nil。
 	clear := ""
 	_, _ = svc.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &clear})
-	if svc.providerEnvFor("opencode", "default") != nil {
+	if svc.providerEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("清除后不应注入 env")
 	}
 	items, _ = svc.ListProviders(context.Background())
@@ -71,10 +71,10 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	// 重启（新 Service 同目录）→ 档案装载（含 ds 仍有 key、default 无 key）。
 	svc2 := agentTestSvc(t, dir)
-	if svc2.providerEnvFor("opencode", "ds") == nil {
+	if svc2.providerEnvFor(runtimetest.ID, "ds") == nil {
 		t.Fatal("重启后 ds key 应仍在")
 	}
-	if svc2.providerEnvFor("opencode", "default") != nil {
+	if svc2.providerEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("重启后 default 清除应保持")
 	}
 }
@@ -90,12 +90,13 @@ func providerReq(id string, key *string) dtoprovider.ProviderCreateReq {
 
 // v12ProviderRegistry 一个带**凭据交付面声明**的最小注册表。
 //
-// v12 起"要不要把密钥注入子进程 env"由**各底座自己的声明**决定（ADR-4：dsh 走原生凭据文档、
-// opencode 走 env），所以凡是要验 env 注入的用例都必须先有一个声明了 `RefPattern` 的 runtime。
-// 用一个最小 `.Spec` 而不是真实 adapter：这里要钉的是平台侧的派生与注入逻辑，不是底座形态。
+// v12 起"要不要把密钥注入子进程 env"由**各底座自己的声明**决定（ADR-4：走原生凭据文档的底座
+// 由平台写文档、走 env 的底座由平台注入环境），所以凡是要验 env 注入的用例都必须先有一个声明了
+// `RefPattern` 且**没声明原生文档**的 runtime。
+//
+// 它直接取 `internal/testutil/runtimetest` 的合成底座：那份声明**就是**"走 env 通道"的形态，
+// 而且带完整的三张执行表（自己再手写一份最小 `.Spec` 会漏掉端口，让这些用例只验到声明的一半）。
 func v12ProviderRegistry() *runtime.Registry {
-	return runtime.NewRegistry(runtime.Spec{
-		ID: "opencode", Name: "opencode",
-		Credential: resource.CredentialSpec{RefPattern: "MATE_%s_API_KEY", FallbackEnv: true},
-	})
+	reg, _ := runtimetest.NewRegistry(runtime.LaunchSpec{})
+	return reg
 }

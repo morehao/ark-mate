@@ -22,7 +22,7 @@ allowBuilds:
   "@google/genai": true
   protobufjs: true
 
-# 只装**目标平台**的原生包（opencode/ripgrep/libreoffice/sherpa 这些都有多平台副本，
+# 只装**目标平台**的原生包（ripgrep/libreoffice/sherpa 这类依赖都有多平台副本，
 # 全平台一起装会让载荷凭空多出几百 MB）。真正的目标平台由 prepare-runtime.mjs 在命令行上覆盖。
 supportedArchitectures:
   os:

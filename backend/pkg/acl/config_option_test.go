@@ -32,7 +32,7 @@ func modelOptionGrouped(current string) acpsdk.SessionConfigOption {
 	}}
 }
 
-// modelOptionFlat 构造 opencode 形态：扁平下拉，值为 "provider/model"。
+// modelOptionFlat 构造扁平形态：扁平下拉，值为 "provider/model"（历史实测里某底座如此下发）。
 func modelOptionFlat(current string) acpsdk.SessionConfigOption {
 	flat := acpsdk.SessionConfigSelectOptionsUngrouped{
 		{Value: "test/test-model", Name: "Test/Test Model"},

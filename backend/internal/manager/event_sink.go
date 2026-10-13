@@ -86,7 +86,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 				}
 			}
 		case acl.KindCommands:
-			// 运行时主动通告它的可用命令（目前只有 opencode 会推，dsh 的 ACP 面不含命令）。
+			// 运行时主动通告它的可用命令（**这是可选能力**：有的底座的 ACP 面根本不含命令，故永不产生本事件）。
 			// 纯转发：平台不缓存、不合并、不做会话快照——会话重开时本事件经 since_seq
 			// 全量回放即可重建，故无需 REST 读端点（ADR-17）。
 			if d, ok := ev.Payload.(acl.CommandsInfo); ok {

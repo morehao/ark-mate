@@ -164,6 +164,14 @@ type doctorOptions struct {
 	StoreMode string
 	// TranscriptDir 会话 wire transcript 落盘目录（R3：v15 起旧形状的文件名要被看见）。
 	TranscriptDir string
+	// KnownRuntimeIDs **在册**的 runtime id 全集（v18 存量体检的判据输入）：全部内置适配 ∪
+	// `runtimes.json` 的远程端点。**为什么由这里给**：判据必须落在注册表与配置这两处事实源上，
+	// 而"哪些底座在册"是装配知识——采集侧（`manager`）连一个底座名都不许有（见
+	// `manager/retired_runtime.go` 的文件头）。空集合 = 判据失效，那一段会响亮地说出来。
+	KnownRuntimeIDs []string
+	// ProjectionDirs 解析后的投影覆盖（`<runtime>:<kind>` → 目录）：用来认出"配给不在册底座的
+	// 覆盖"（键形状合法、所以解析不报错，但它永远不会生效）。
+	ProjectionDirs map[string]string
 }
 
 // doctor 子命令入口。退出码：0 = 没有失败项；1 = 有失败项；2 = 用法/配置错误。
@@ -199,6 +207,11 @@ func doctor(args []string) {
 		DBPath:        cfg.DBPath,
 		StoreMode:     cfg.ResolvedStoreMode(),
 		TranscriptDir: cfg.TranscriptDir,
+		// v18 存量体检的判据输入：**全部**内置适配（不是产品装配的那一个——与逐底座采事实同口径：
+		// 构建期钉在哪一个上，不代表磁盘上没有别的底座的遗留）∪ `runtimes.json` 的远程端点
+		// （它们是这台机器上被声明为可用的 id，留着它们的目录不算遗留）。
+		KnownRuntimeIDs: knownRuntimeIDs(cfg),
+		ProjectionDirs:  cfg.ProjectionDirs,
 	}
 	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *home != "" {
@@ -312,6 +325,11 @@ func runDoctor(opts doctorOptions) doctorReport {
 	// 旧形状的文件（裸 uuid）在装载期会被**跳过 + WARN**——那件事发生在启动日志里，而 doctor
 	// 要让它变成"随时可查的体检项"。
 	checks = append(checks, checkTranscriptShape(opts.TranscriptDir))
+
+	// 存量体检（v18）：删掉一个适配不会让磁盘与库里的存量消失。逐底座采事实的那两段都按
+	// **注册表**枚举，适配一删那个底座就整段消失（报告一切正常、盘上东西一个没少），所以这里
+	// 改判"**在不在册**"。
+	checks = append(checks, checkRetiredSection(opts)...)
 
 	failed, warnings := 0, 0
 	for _, c := range checks {
@@ -564,7 +582,7 @@ func checkPayloadManifests(manifests []payloadOnDisk, contract releaseContractDo
 // 签名/完整性要抓的形态**）。
 //
 // **fileList 的相对基准**（M4-5 修掉的一个真问题）：fileList 是装配脚本按"复制源根"记的，
-// 而两份载荷的落点形态不同（dsh 的闭包在 `node_modules/` 下、opencode 直接铺在载荷根），
+// 而不同载荷的落点形态不同（npm 闭包型铺在 `node_modules/` 下、直接铺开的型在载荷根），
 // 所以这个基准必须由清单里的 `fileListBase` 说明。缺失时**不静默回落**：只在两个已知形态
 // （载荷根 / `node_modules`）里按样例文件做"唯一命中"判定，并在结论里明说是推断的
 // ——推断错了会当场表现为摘要不符，而不会是"悄悄按错的基准算出个自洽值"。

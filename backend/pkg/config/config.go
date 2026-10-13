@@ -63,8 +63,8 @@ type Config struct {
 	// 代际按能力指纹内容寻址，指纹不同 = 能力集不同 = 各自一个进程；上限是"猜粗了只是多花内存"
 	// 这一侧的护栏：超限**带码拒绝新建**，绝不静默复用错的能力集（那才是安全 bug）。
 	GenerationLimit int
-	// RunTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如 opencode 模型限流
-	// 只记自己日志不上报）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
+	// RunTimeout 单轮 prompt 看门狗超时（0 = 关闭）。runtime 吞错/挂起（如把上游模型限流
+	// 只记进自己的日志、不上报给平台）时，超时自动 cancel 并发终态事件，避免 busy 永久占用。
 	RunTimeout time.Duration
 	// PermissionTimeout 挂起权限请求自动拒绝超时（默认 30min，对齐 AionUi F-PERM-01）。
 	PermissionTimeout time.Duration
@@ -308,7 +308,7 @@ var knownKeys = map[string]string{
 	"projection_dirs":     "MATE_PROJECTION_DIRS",
 	"idle_timeout":        "MATE_IDLE_TIMEOUT",
 	"reap_interval":       "MATE_REAP_INTERVAL",
-	"run_timeout":        "MATE_RUN_TIMEOUT",
+	"run_timeout":         "MATE_RUN_TIMEOUT",
 	"handoff_max_chars":   "MATE_HANDOFF_MAX_CHARS",
 	"generation_limit":    "MATE_GENERATION_LIMIT",
 	"permission_timeout":  "MATE_PERMISSION_TIMEOUT",
@@ -344,10 +344,10 @@ var knownListKeys = map[string]bool{
 // 新名字；而静默忽略更糟——物化会悄悄不发生，表现为「技能怎么不生效了」。
 var renamedKeys = map[string]string{
 	"skills_materialize_dir": "已改名为 MATE_PROJECTION_DIRS。投影形态（放哪、什么格式）现在由 runtime 声明，" +
-		"配置只能**覆盖根**，且必须指名是哪个 runtime 的哪类投影：`projection_dirs=opencode:skill=/x`" +
-		"（原 `skills_materialize_dir=/x` 那种「不分 runtime」的兼容路径已不存在——因为两个底座的落点与格式本就不同）",
-	"skills_materialize_dirs": "已改名为 MATE_PROJECTION_DIRS，等价写法 `projection_dirs=opencode:skill=/x`" +
-		"（原 `skills_materialize_dirs=opencode=/x` ≡ `projection_dirs=opencode:skill=/x`；键多了 `:kind` 一段，" +
+		"配置只能**覆盖根**，且必须指名是哪个 runtime 的哪类投影：`projection_dirs=myrt:skill=/x`" +
+		"（`myrt` 就是你在册的那个底座 id；原 `skills_materialize_dir=/x` 那种「不分 runtime」的兼容路径已不存在——因为两个底座的落点与格式本就不同）",
+	"skills_materialize_dirs": "已改名为 MATE_PROJECTION_DIRS，等价写法 `projection_dirs=myrt:skill=/x`" +
+		"（`myrt` 就是你在册的那个底座 id；原 `skills_materialize_dirs=<底座 id>=/x` ≡ `projection_dirs=<底座 id>:skill=/x`；键多了 `:kind` 一段，" +
 		"目前 kind 只有 skill）",
 	// v16（2026-10-11）词汇统一：平台聚合的"一轮"只有一个词 `run`（`turn` 只留在**底座原文**里，
 	// 例如 ACP 的 `StopReasonEndTurn` 与 `"end_turn"`）。旧键必须被认出来——静默忽略的代价是
@@ -1006,13 +1006,13 @@ func normalizeProjectionDirs(items []string) (map[string]string, error) {
 		key = strings.TrimSpace(key)
 		dir = strings.TrimSpace(dir)
 		if !hasEq {
-			return nil, fmt.Errorf("需为 `<runtime>:<kind>=<绝对目录>` 列表（如 opencode:skill=/tmp/oc），得到 %q", item)
+			return nil, fmt.Errorf("需为 `<runtime>:<kind>=<绝对目录>` 列表（如 myrt:skill=/tmp/oc，myrt 即你在册的那个底座 id），得到 %q", item)
 		}
 		runtimeID, kind, hasColon := strings.Cut(key, ":")
 		runtimeID = strings.TrimSpace(runtimeID)
 		kind = strings.TrimSpace(kind)
 		if !hasColon || runtimeID == "" || kind == "" {
-			return nil, fmt.Errorf("条目 %q 的键需为 `<runtime>:<kind>`（如 opencode:skill），得到 %q", item, key)
+			return nil, fmt.Errorf("条目 %q 的键需为 `<runtime>:<kind>`（如 myrt:skill，myrt 即你在册的那个底座 id），得到 %q", item, key)
 		}
 		// 标识归一（历史别名，见 runtime.NormalizeID）：老配置写的是 `deepseekharness:skill`，
 		// 而平台现在拿 `dsh` 去查这张表——不归一，用户自定义的投影根会**静默失效**（回落到

@@ -24,10 +24,10 @@ func fpInput() FingerprintInput {
 			{ID: "web", Transport: "http", URL: "https://example.invalid/mcp"},
 		},
 		Runtimes: []RuntimePart{{
-			ID: "opencode", Version: "opencode acp", Scope: CapabilityScopeProcess,
+			ID: altID, Version: "rt-alt synthetic acp", Scope: CapabilityScopeProcess,
 			Projections: []Projection{
-				opencodeSkillProjection(),
-				{Kind: ProjectionCommand, Scope: ScopeGlobal, Root: "${HOME}/.config/opencode/command", Layout: "<id>.md", Format: "markdown"},
+				altSkillProjection(),
+				{Kind: ProjectionCommand, Scope: ScopeGlobal, Root: "${HOME}/.config/rt-alt/command", Layout: "<id>.md", Format: "markdown"},
 			},
 		}},
 	}
@@ -89,7 +89,7 @@ func TestCapabilityFingerprintSensitive(t *testing.T) {
 		{"MCP env 键名变", func(in *FingerprintInput) { in.Mcps[0].EnvKeys = []string{"TOKEN", "DEBUG"} }},
 		{"MCP 密钥引用名变", func(in *FingerprintInput) { in.Mcps[0].SecretRefs = []string{"vault:ns/other"} }},
 		{"runtime id 变", func(in *FingerprintInput) { in.Runtimes[0].ID = "dsh" }},
-		{"runtime 版本变", func(in *FingerprintInput) { in.Runtimes[0].Version = "opencode acp v2" }},
+		{"runtime 版本变", func(in *FingerprintInput) { in.Runtimes[0].Version = "合成底座 v2" }},
 		{"CapabilityScope 变", func(in *FingerprintInput) { in.Runtimes[0].Scope = CapabilityScopeSession }},
 		{"投影 root 变", func(in *FingerprintInput) { in.Runtimes[0].Projections[0].Root = "/elsewhere" }},
 		{"投影 layout 变", func(in *FingerprintInput) { in.Runtimes[0].Projections[0].Layout = "<id>/OTHER.md" }},

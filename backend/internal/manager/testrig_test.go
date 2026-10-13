@@ -117,6 +117,17 @@ func stubACPSpec(t *testing.T) runtime.Spec {
 	script := filepath.Join(dir, "acp_stub.py")
 	code := `import json, os, sys
 n = 0
+# STUB_ACP_ENV_LOG（可选）：进程一进来就把平台注入的 RTX_/MATE_/DSH_ 前缀 env 落成一行 JSON。
+# 断言"平台把哪些 env 真的交给了子进程"只能看这里——进程是平台拉起的，隔离表与原生权限投影
+# 的作用点都在子进程 env 上；只在管理侧断言等于没验（env 名字写错不会让任何东西变红）。
+envlog = os.environ.get("STUB_ACP_ENV_LOG")
+if envlog:
+    try:
+        with open(envlog, "a") as fh:
+            keys = sorted(k for k in os.environ if k.startswith(("RTX_", "MATE_", "DSH_", "npm_config_")))
+            fh.write(json.dumps({k: os.environ[k] for k in keys}) + "\n")
+    except Exception:
+        pass
 # STUB_ACP_LOG（可选）：把每次 session/new 收到的参数按行追加成 JSONL。
 # 断言"底座到底收到了哪套 MCP/能力"只能看这里——管理侧算得再对，下发的若是旧集合，
 # 用户拿到的就是旧能力（M3 要消灭的正是这类静默失败）。

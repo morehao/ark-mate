@@ -337,7 +337,7 @@ export const consoleStyleSheet = `
   .fg-sev.fg-degrade { background: ${tokens.warningBg}; color: ${tokens.warning}; }
   .fg-sev.fg-info { background: ${tokens.softFill}; color: ${tokens.textPlaceholder}; }
 
-  /* 「底座独有」折叠区：默认非空（opencode 的内置目录），所以它不该长得像报错。 */
+  /* 「底座独有」折叠区：默认非空（底座自带的内置目录），所以它不该长得像报错。 */
   .fg-advertised { border-top: 1px dashed ${tokens.border}; padding-top: 8px; }
   .fg-advertised-head { font-size: 12px; color: ${tokens.textSecondary}; display: flex; align-items: center; }
   .fg-advertised-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-height: 96px; overflow-y: auto; }
@@ -699,7 +699,7 @@ export const consoleStyleSheet = `
     box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
   }
   /* 只有候选列表滚动，页脚（"命令由底座提供，平台只做回显"）常驻可见——
-     候选多时（opencode 实测 23 条）它是用户判断"这些命令从哪来"的唯一线索。 */
+     候选多时（实测通告过 20 余条）它是用户判断"这些命令从哪来"的唯一线索。 */
   .fg-cmd-list {
     display: flex;
     flex-direction: column;

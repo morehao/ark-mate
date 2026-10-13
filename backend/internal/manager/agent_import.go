@@ -224,8 +224,8 @@ func readAgentDefinitionFile(path string) (string, string, error) {
 		d.ID = strings.TrimSuffix(filepath.Base(path), ".json")
 	}
 	// 保留前缀（`agent-`）与内置种子 id 都**不能**作为行进来：`seedAgent` 只看 id 就判定只读，
-	// 一行 `agent-x` 会变成"删不掉、也改不了 runtime"的幽灵定义。`dsh`/`opencode` 同理属于种子
-	// 身份——想覆盖它们就在**文件里**写同名定义（那条路径的语义是"对种子的覆盖"），不要绕过
+	// 一行 `agent-x` 会变成"删不掉、也改不了 runtime"的幽灵定义。内置种子的 id（见 builtinAgents）
+	// 同理属于种子身份——想覆盖它们就在**文件里**写同名定义（那条路径的语义是"对种子的覆盖"），不要绕过
 	// 写面直接塞一行。
 	if !validDefinitionID(d.ID) || strings.HasPrefix(d.ID, reservedAgentPrefix) || isBuiltinAgent(d.ID) {
 		return "", "", fmt.Errorf("agent id %q 不能作为定义行（不得是保留前缀 %q 或内置种子名）",

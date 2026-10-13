@@ -9,10 +9,10 @@
 # 交付形态：
 #   make desktop/dist —— 桌面安装包（**主线交付**，决策 v8③）
 #   make web   —— 只构建前端产物（apps/web/dist）
-#   make dev   —— 前后端联调单命令：先起后端 go run（127.0.0.1:10001），等 health 通过再起 vite dev（:5173），Ctrl-C 一起收
-#   make server —— 仅后端开发起服（不起前端，前端经 vite dev proxy 联调）
-#                  以上两条都认 `OPENCODE_BIN=<可执行文件>`：显式指定核心拉哪一份 opencode
-#                  （本机装的是 v1、想跑随包 v2 时用；见下文「开发态 opencode 底座用哪一份」）
+#   make dev   —— 开发循环：构建一次产物 → 重建 watcher → 核心服务**同一份产物**，Ctrl-C 一起收
+#   make server —— 仅后端开发起服（不起前端产物；前端改走 `make dev` 服务同一份 dist）
+#                  以上两条都认 `RUNTIME_BIN=<可执行文件>`：显式指定核心拉**哪一份**底座
+#                  （本机装的那份与随包那份不同代时用；见下文「开发态底座用哪一份可执行文件」）
 #   make desktop/dev —— 起桌面壳（Electron；M1 起壳会自己 spawn mate-core）
 #   make image —— 容器镜像（Dockerfile 两个 target，默认最小镜像；见文件末尾「容器镜像」段）
 #
@@ -96,25 +96,29 @@ MATE_STORE ?= sqlite
 # 为什么需要这个入口：核心拉哪个底座是**写死的名字**（`pkg/runtime/<id>` 里的 `Command`，默认
 # `dsh`），由 exec 走 PATH 解析。桌面态由壳把随包载荷注入私有 bin，而
 # `make dev` / `make server` 这两条"核心自己从 PATH 找"的形态只会命中**本机装的那份**。
-# 于是当本机装的是 v1、而仓库的声明与取证以 v2 为准时（2026-10-10 实测：本机 opencode 1.18.35 /
-# 随包 2.0.26），这个人就成了"只有他的开发循环跑在另一代底座上"。
+# 于是本机装的那份与仓库的声明/取证不是同一代时，这个人就成了"只有他的开发循环跑在另一代底座上"。
 #
-# **键名 `OPENCODE_BIN` 是历史名**（2026-08 引入时只有 opencode）：它替换的是**构建期固定的那个
-# 底座**（`$(RUNTIME)`，默认 `dsh`），不限于 opencode。2026-10-12 之前转发 shim 的名字写死是
-# `opencode`，所以在默认（dsh）构建上填了它**根本不生效**——本机 `.env` 当时正是这种状态。
-# 现在 shim 按 `$(RUNTIME)` 命名（`dev/runtime-bin`），填了就在任何构建上生效。
+# **键名是 `RUNTIME_BIN`**（2026-08 引入时叫 `OPENCODE_BIN`——那会儿仓库里只有 opencode 那一个
+# 一等底座；它下线后改回中性名，因为这个名字从一开始指的就是"构建期固定的那个底座"）：它替换的是**构建期固定的那个底座**（`$(RUNTIME)`，
+# 默认 `dsh`），与具体是哪个底座无关。转发 shim 按 `$(RUNTIME)` 命名（`dev/runtime-bin`），
+# 所以填了在**任何** `RUNTIME` 上都生效（这条曾经不成立：shim 名写死 `opencode`，构建期固定
+# `dsh` 时填了它只是让 PATH 上多一个没人调用的文件——一个彻底的静默 no-op）。
 #
-#   make dev OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+#   make dev RUNTIME_BIN=/abs/path/to/<可直接执行的底座>
+#
+# **「可直接执行」是硬要求**（`dev/runtime-bin` 当场校验 `-x`）：随包载荷里如果是原生二进制形态，
+# 直接指它即可；而**纯 JS 形态**的载荷（dsh 的入口是 `<载荷>/node_modules/@deepseek-ai/dsh/lib/bin.js`）
+# 不能直接指——内核 exec 一个 `.js` 会 ENOEXEC，那种底座要走它自己的启动器。
 #
 # 也可以写进仓库根的 `.env`（本仓既有的本地配置文件：docker compose 读它、模板是 `.env.example`、
-# 已在 .gitignore 里），这样不必每次手敲——**本次就按这条走**：
+# 已在 .gitignore 里），这样不必每次手敲：
 #
-#   OPENCODE_BIN=frontend/apps/desktop/resources/payloads/opencode/2.0.26/bin/opencode
+#   RUNTIME_BIN=/abs/path/to/<可直接执行的底座>
 #
 # 取值优先级：**命令行 > 进程环境变量 > `.env` > PATH 上解析**（与 dotenv 系工具的通行约定一致：
-# `make dev OPENCODE_BIN=…` 临时盖过 `.env`，`.env` 里的值被同名环境变量盖过）。三种来源的症状
+# `make dev RUNTIME_BIN=…` 临时盖过 `.env`，`.env` 里的值被同名环境变量盖过）。三种来源的症状
 # 完全一样（都只是"某个路径生效了"），所以 `make dev`/`make server` 会**回显来源**：
-# `[命令行]` / `[环境变量]` / `[.env]` / `PATH 上解析 [未指定 OPENCODE_BIN]`。
+# `[命令行]` / `[环境变量]` / `[.env]` / `PATH 上解析 [未指定 RUNTIME_BIN]`。
 #
 # 语义是**显式覆盖、不探测**：都没有 = 完全维持现状（PATH 上那份，行为与今天逐字相同，不做任何
 # `which`/`command -v`）。有值就在**核心子进程**的 PATH 前置一个只含**构建期固定那个 runtime 名**
@@ -122,27 +126,27 @@ MATE_STORE ?= sqlite
 # node/npx/dsh 三个启动器，整段前置会让 vite/pnpm 调到的 `node` 因 MATE_NODE_EXECUTABLE
 # 未设置直接以 127 失败。前端进程不拿这个 PATH。
 # 有值但不可执行 → 当场失败：静默忽略的症状是"以为换成了 v2、其实还在跑 v1"，那正是这里要消灭的。
-# 隔离不受影响：核心拉底座时按 pkg/runtime/isolation.go 注入 XDG/OPENCODE_* 隔离变量，这份
-# opencode 的 home 落 MATE_HOME 下，不碰用户自己的安装。也因此这里**不替用户探测版本**——
-# v2 连 `--version` 都会写 config/cache/state/share 四个面（2026-10-10 实测），探一下就是动本机。
+# 隔离不受影响：核心拉底座时按 pkg/runtime/isolation.go 注入**该 adapter 自己声明**的隔离变量，
+# 它的 home 落在 MATE_HOME 下，不碰用户自己的安装。也因此这里**不替用户探测版本**——
+# 有的底座连 `--version` 都会写自己的 home（2026-10-10 dsh 实测），探一下就是动本机。
 #
 # `.env` 为什么是**只挑一个键**、而不是 `-include .env`：那个文件是 docker compose 的 dotenv，
 # 里面的引号 / 多行值 / 保留键（PATH 之类）整份交给 make 解析，轻则串味重则让 make 直接语法错；
-# 这里只要 OPENCODE_BIN 一行，其余键归 compose，互不干扰。支持 `KEY=v` / `KEY = v` /
+# 这里只要 RUNTIME_BIN 一行，其余键归 compose，互不干扰。支持 `KEY=v` / `KEY = v` /
 # `export KEY=v` / 双引号包裹 / 行尾 `# 注释`；**单引号不支持**（会被当成值的一部分，随后在
 # dev/runtime-bin 的存在性校验里带着原样值响亮失败，不静默）。
 ENV_FILE ?= .env
-OPENCODE_BIN_FROM_FILE := $(shell awk 'match($$0, /^[[:space:]]*(export[[:space:]]+)?OPENCODE_BIN[[:space:]]*=/) { v = substr($$0, RLENGTH + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$$/, "", v); if (v ~ /^".*"$$/) { v = substr(v, 2, length(v) - 2) } else { sub(/[[:space:]]+\#.*$$/, "", v); sub(/[[:space:]]+$$/, "", v) }; out = v } END { print out }' $(ENV_FILE) 2>/dev/null)
-OPENCODE_BIN ?= $(OPENCODE_BIN_FROM_FILE)
+RUNTIME_BIN_FROM_FILE := $(shell awk 'match($$0, /^[[:space:]]*(export[[:space:]]+)?RUNTIME_BIN[[:space:]]*=/) { v = substr($$0, RLENGTH + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$$/, "", v); if (v ~ /^".*"$$/) { v = substr(v, 2, length(v) - 2) } else { sub(/[[:space:]]+\#.*$$/, "", v); sub(/[[:space:]]+$$/, "", v) }; out = v } END { print out }' $(ENV_FILE) 2>/dev/null)
+RUNTIME_BIN ?= $(RUNTIME_BIN_FROM_FILE)
 DEV_BIN_DIR  := $(CURDIR)/.cache/dev-bin
-# 绝对化：文档里的写法是**仓库根相对**（`OPENCODE_BIN=frontend/apps/...`），而开发循环的 cwd 是
+# 绝对化：文档里的写法是**仓库根相对**（`RUNTIME_BIN=frontend/apps/...`），而开发循环的 cwd 是
 # `frontend/`——交给它相对路径会让"这个覆盖是不是随包那一份"判错（2026-10-11 实测：报成 external）。
 # 与 `dev/runtime-bin` 里给 shim 写的那条绝对路径同源（同一个 cwd，即 make 被调用的地方）。
-OPENCODE_BIN_ABS := $(if $(OPENCODE_BIN),$(abspath $(OPENCODE_BIN)),)
+RUNTIME_BIN_ABS := $(if $(RUNTIME_BIN),$(abspath $(RUNTIME_BIN)),)
 # 来源的唯一取法：make 的 $(origin)（command line / environment / file / undefined）。
-OPENCODE_BIN_SOURCE := $(if $(OPENCODE_BIN),$(if $(filter command line,$(origin OPENCODE_BIN)),命令行,$(if $(filter environment,$(origin OPENCODE_BIN)),环境变量,$(if $(filter file,$(origin OPENCODE_BIN)),$(ENV_FILE),其它))),未指定)
+RUNTIME_BIN_SOURCE := $(if $(RUNTIME_BIN),$(if $(filter command line,$(origin RUNTIME_BIN)),命令行,$(if $(filter environment,$(origin RUNTIME_BIN)),环境变量,$(if $(filter file,$(origin RUNTIME_BIN)),$(ENV_FILE),其它))),未指定)
 # 只有有值才前置 PATH（空值 = 连赋值都不做，保持"今天就是这样"）。
-DEV_PATH_PREFIX := $(if $(OPENCODE_BIN),$(DEV_BIN_DIR):,)
+DEV_PATH_PREFIX := $(if $(RUNTIME_BIN),$(DEV_BIN_DIR):,)
 
 # 回显「这次会拉起哪一份底座」的**原始事实**（路径 + 来源）。
 #
@@ -151,11 +155,11 @@ DEV_PATH_PREFIX := $(if $(OPENCODE_BIN),$(DEV_BIN_DIR):,)
 # `--payloads`）。这里只留原始事实，供 `make server`（不起开发循环）使用。
 #
 # 那个「未生效」分句已于 2026-10-12 删除（根因已修）：shim 现在按 `$(RUNTIME)` 命名
-# （`dev/runtime-bin`），所以 `OPENCODE_BIN=…` 在**任何**构建上都生效，不再需要警告。
+# （`dev/runtime-bin`），所以 `RUNTIME_BIN=…` 在**任何**构建上都生效，不再需要警告。
 # 它当时挡的是一类**静默 no-op**：shim 名写死 `opencode`，本构建固定 `dsh` 时那个覆盖只是让
 # PATH 上多了一个没人调用的可执行文件，而回显会把那个路径当「底座」报出来（看的人以为换掉了）。
 define runtime_hit_line
-$(if $(OPENCODE_BIN),$(OPENCODE_BIN) [$(OPENCODE_BIN_SOURCE)] —— 转发 $(RUNTIME)（shim 名随构建期 runtime）,PATH 上解析 [未指定 OPENCODE_BIN])
+$(if $(RUNTIME_BIN),$(RUNTIME_BIN) [$(RUNTIME_BIN_SOURCE)] —— 转发 $(RUNTIME)（shim 名随构建期 runtime）,PATH 上解析 [未指定 RUNTIME_BIN])
 endef
 
 # 运行前守卫（单行 shell，供 dev/web 作为独立 recipe 行调用）
@@ -193,14 +197,14 @@ core/desktop: web desktop/runtime-bin
 	mkdir -p $(DESKTOP_WEB_OUT)
 	cp -R $(FRONTEND_ROOT)/apps/web/dist/. $(DESKTOP_WEB_OUT)/
 
-# 私有 bin 启动器（M3-2）：生成 resources/runtime/bin/{node,npx,dsh,opencode}（各含 POSIX 与 .cmd 两版）。
+# 私有 bin 启动器（M3-2）：生成 resources/runtime/bin/{node,npx} 加每个随包底座的入口（各含 POSIX 与 .cmd 两版）。
 # 幂等、瞬时（内容逐字节确定，写完即静默），所以挂在 core/desktop 上——桌面态一旦缺它，
 # 子进程 PATH 首段就是一条不存在的路径，症状会退化成"运行时莫名起不来"。
 desktop/runtime-bin:
 	$(require-node)
 	cd $(FRONTEND_ROOT)/apps/desktop && node scripts/gen-runtime-bin.mjs
 
-# 运行时载荷装配（M3-1）：把 dsh 的生产依赖闭包与 opencode 的平台化二进制装到
+# 运行时载荷装配（M3-1）：把 dsh 的生产依赖闭包装到
 # apps/desktop/resources/payloads/（本仓 .gitignore 的生成物面）。
 #
 # **故意不进 `core/desktop`**：载荷是几百 MB 的磁盘 + 冷缓存下要联网，而日常开发
@@ -267,7 +271,7 @@ desktop/dist: core/desktop desktop/payloads
 	@echo "==> 包内合规文件复核（M4-5 / V14：包内 NOTICES 与 SBOM 与源文件逐字节相同）"
 	cd $(FRONTEND_ROOT) && node apps/desktop/scripts/verify-compliance.mjs --require-artifacts
 	@# 最后一条：**包内载荷真起一次**（M4-2a 的 ②）：判的是签名 + hardened runtime 之后包里的
-	@# dsh / opencode 还能不能被核心拉着走完 ACP 握手。它是"verify-release-json --launch"的加强版
+	@# 随包底座还能不能被核心拉着走完 ACP 握手。它是"verify-release-json --launch"的加强版
 	@# （那条只到"界面渲染出来 + 核心可达"）。
 	cd $(FRONTEND_ROOT) && pnpm smoke:desktop:packaged
 
@@ -355,7 +359,7 @@ verify/signature:
 
 # 加固运行时下的**包内执行**（M4-2a）：设计 §6.3 回退条件 ② 的判据。
 # 与 `pnpm smoke:desktop` 的唯一区别：壳从**打出来的包**里起（`.app/Contents/MacOS/ark-mate`，
-# ad-hoc 签名 + `--options runtime`），核心与其下的 dsh / opencode 也全部来自包内。
+# ad-hoc 签名 + `--options runtime`），核心与其下的随包底座也全部来自包内。
 # 需要先有包（`make desktop/dist`）；签名形态本身由 `verify/signature` 判，这条判"能不能跑"。
 # 2026-10-09 起再加一条：**包内能力投放**（`ui:accept:desktop-skills:packaged`）——"能不能跑"之后
 # 还要问"跑起来有没有把该给底座的给到"（skill 到底进没进包内 dsh 的模型请求体）。
@@ -380,7 +384,7 @@ verify/hardened-runtime:
 #   - 静态那一半：`internal/archtest` 的 `TestDesktopRuntimeMustNotBindHostToolPaths`（进包且运行期
 #     生效的代码里不得出现宿主工具绑定）。它管"**有没有**这条路"；下面的动态那一半管"**今天这条路
 #     有没有被走到**"。少了任何一半结论都不成立。
-#   - 动态那一半：最小 PATH（诱饵目录 + `/usr/bin:/bin`；诱饵是会写标记文件的假 dsh/opencode/node/npx）
+#   - 动态那一半：最小 PATH（诱饵目录 + `/usr/bin:/bin`；诱饵是会写标记文件的假 dsh/node/npx）
 #     + 私有 HOME/MATE_HOME 下起真壳 + 真核心 + **真 dsh 子进程**，跑完「建会话 → 一轮 → 退出 →
 #     重开 → 续聊一轮」，并断言诱饵一次都没被调到。
 #   - 与 2026-10-10 之前的 `make verify/clean-vm`（干净 VM 首启）的关系：判据改成"打包态 + 最小 PATH"
@@ -427,18 +431,18 @@ $(WEB_DIR)/index.html:
 
 web-assets: $(WEB_DIR)/index.html
 
-# 开发态底座转发（见上方 OPENCODE_BIN 一节）：校验 + 生成一个**只转发 $(RUNTIME)** 的 shim。
+# 开发态底座转发（见上方 RUNTIME_BIN 一节）：校验 + 生成一个**只转发 $(RUNTIME)** 的 shim。
 #
 # **shim 的名字必须是构建期固定的那个 runtime 名**（`$(RUNTIME)`）——核心拉底座用的是写死的名字
 # 经 `exec` 走 PATH 解析；名字对不上，这个覆盖就是个没人调用的文件（2026-10-12 之前的形态）。
-# 幂等；OPENCODE_BIN 为空时什么都不做（也不清理旧 shim——它不在 PATH 上，留着无害）。
+# 幂等；RUNTIME_BIN 为空时什么都不做（也不清理旧 shim——它不在 PATH 上，留着无害）。
 dev/runtime-bin:
-	@if [ -n "$(OPENCODE_BIN)" ]; then \
-	  if [ ! -f "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不是普通文件：$(OPENCODE_BIN)"; exit 1; fi; \
-	  if [ ! -x "$(OPENCODE_BIN)" ]; then echo "==> OPENCODE_BIN 不可执行：$(OPENCODE_BIN)"; exit 1; fi; \
-	  abs=$$(cd "$$(dirname "$(OPENCODE_BIN)")" && pwd)/$$(basename "$(OPENCODE_BIN)"); \
+	@if [ -n "$(RUNTIME_BIN)" ]; then \
+	  if [ ! -f "$(RUNTIME_BIN)" ]; then echo "==> RUNTIME_BIN 不是普通文件：$(RUNTIME_BIN)"; exit 1; fi; \
+	  if [ ! -x "$(RUNTIME_BIN)" ]; then echo "==> RUNTIME_BIN 不可执行：$(RUNTIME_BIN)"; exit 1; fi; \
+	  abs=$$(cd "$$(dirname "$(RUNTIME_BIN)")" && pwd)/$$(basename "$(RUNTIME_BIN)"); \
 	  mkdir -p $(DEV_BIN_DIR); \
-	  printf '#!/bin/sh\n# 生成物（Makefile 的 dev/runtime-bin）——不要手改；改 OPENCODE_BIN 重新生成。\nexec "%s" "$$@"\n' "$$abs" > $(DEV_BIN_DIR)/$(RUNTIME); \
+	  printf '#!/bin/sh\n# 生成物（Makefile 的 dev/runtime-bin）——不要手改；改 RUNTIME_BIN 重新生成。\nexec "%s" "$$@"\n' "$$abs" > $(DEV_BIN_DIR)/$(RUNTIME); \
 	  chmod +x $(DEV_BIN_DIR)/$(RUNTIME); \
 	fi
 
@@ -458,7 +462,7 @@ server: web-assets dev/runtime-bin
 # `css-dev-only-*` 类名、React 的开发期警告还在）。人看的必须是产物；`apps/web/vite.config.ts`
 # 已在 `serve` 上直接报错兜住第二条路（照抄 DSH 的 `rejectStandaloneServe`）。
 #
-# 分工：Makefile 管**环境装配**（require-node / OPENCODE_BIN 转发目录与 PATH / MATE_STORE /
+# 分工：Makefile 管**环境装配**（require-node / RUNTIME_BIN 转发目录与 PATH / MATE_STORE /
 # ldflags 的**内层**），`scripts/dev-loop.mjs` 管**进程编排**（阶段顺序、健康检查、阶段自死即回红、
 # 按进程组收尾）。各做一件，不把同一份环境判定实现两遍。
 dev: dev/runtime-bin
@@ -468,13 +472,13 @@ dev: dev/runtime-bin
 	  PATH=$(DEV_PATH_PREFIX)$$PATH MATE_STORE=$(MATE_STORE) \
 	  MATE_DEV_WEB_DIR=$(WEB_DIR) MATE_DEV_CORE_DIR=$(CURDIR)/backend \
 	  MATE_DEV_CORE_LDFLAG_ARGS='$(CORE_LDFLAG_ARGS)' MATE_DEV_RUNTIME=$(RUNTIME) \
-	  MATE_DEV_RUNTIME_BIN='$(OPENCODE_BIN_ABS)' MATE_DEV_RUNTIME_BIN_SOURCE='$(OPENCODE_BIN_SOURCE)' \
+	  MATE_DEV_RUNTIME_BIN='$(RUNTIME_BIN_ABS)' MATE_DEV_RUNTIME_BIN_SOURCE='$(RUNTIME_BIN_SOURCE)' \
 	  MATE_DEV_PAYLOADS_ROOT=$(CURDIR)/$(PAYLOADS_ROOT) \
 	  exec node scripts/dev-loop.mjs
 
 # 全仓只有这一个构建配置：不带任何构建标签，不依赖前端产物（核心从不自带资产）。
 #
-# 它也认 `RUNTIME`（注入 CORE_LDFLAGS）：不然 `make build RUNTIME=opencode` 会**静默什么都不做**
+# 它也认 `RUNTIME`（注入 CORE_LDFLAGS）：不然 `make build RUNTIME=<未注册 id>` 会**静默什么都不做**
 # ——那正是本仓明令要防的"写了、跑了、没效果"。取值是否存在由核心启动时的 ProductRegistry 判定。
 build:
 	cd backend && go build $(CORE_LDFLAGS) ./...
@@ -492,16 +496,13 @@ clean:
 
 # —— 容器镜像（Dockerfile 多阶段：前端 → Go 编译 → 精简运行时）——
 #   make image                                    —— 最小镜像（只含 mate 本体）
-#   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
-#                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
+#   make image/runtimes WITH_DSH=true
+#                                                 —— 额外内置 dsh（开关可置 false）
 #                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-mate:runtimes）
 #   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
 # 前端资产由镜像内的 web 阶段构建后 COPY 进镜像（`MATE_WEB_DIR=/usr/local/share/mate/web`），
 # 二进制本身不带资产（2026-10-10 起）。
-#   make image                                    —— 最小镜像（只含 mate 本体 + echo 自检底座）
-#   make image/runtimes WITH_DSH=true WITH_OPENCODE=true
-#                                                 —— 额外内置 dsh / opencode（开关可分别置 false）
-#                                                     产物 tag 由 RUNTIMES_TAG 决定（默认 ark-mate:runtimes）
+#   make image                                    —— 最小镜像（只含 mate 本体）
 #   IMAGE_TAG=runtimes make image/run             —— 起容器（数据落具名卷，端口只绑回环）
 # 受限网络（镜像站 / Go 代理 / npm 镜像）直接覆盖下面的变量，例如：
 #   make image NODE_IMAGE=docker.m.daocloud.io/library/node:24-bookworm \
@@ -514,7 +515,6 @@ RUNTIME_IMAGE    ?= debian:bookworm-slim
 NPM_REGISTRY     ?= https://registry.npmjs.org
 GO_PROXY         ?= https://proxy.golang.org,direct
 DSH_VERSION      ?= latest
-OPENCODE_VERSION ?= latest
 IMAGE            ?= ark-mate
 IMAGE_TAG        ?= local
 # 含底座镜像的 tag 单独一个变量：`make image/runtimes` 与 `make image/run IMAGE_TAG=runtimes`
@@ -523,14 +523,12 @@ IMAGE_TAG        ?= local
 RUNTIMES_TAG     ?= runtimes
 MATE_PORT       ?= 10001
 WITH_DSH         ?= false
-WITH_OPENCODE    ?= false
 
 # `MATE_RUNTIME` 走全局的 $(RUNTIME)（默认 dsh）——镜像里**核心认哪一个底座**；
-# WITH_DSH / WITH_OPENCODE 决定镜像里**装哪几份底座二进制**，两者是两件事（见 Dockerfile 头注释）。
+# WITH_DSH 决定镜像里**装哪几份底座二进制**，两者是两件事（见 Dockerfile 头注释）。
 IMAGE_ARGS := --build-arg NODE_IMAGE=$(NODE_IMAGE) --build-arg GO_IMAGE=$(GO_IMAGE) \
               --build-arg RUNTIME_IMAGE=$(RUNTIME_IMAGE) --build-arg NPM_REGISTRY=$(NPM_REGISTRY) \
               --build-arg GO_PROXY=$(GO_PROXY) --build-arg DSH_VERSION=$(DSH_VERSION) \
-              --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION) \
               --build-arg MATE_RUNTIME=$(RUNTIME)
 
 image:
@@ -539,7 +537,7 @@ image:
 # 含底座镜像：target 与开关必须一起给（只给开关会被最小镜像的守卫拒绝）
 image/runtimes:
 	docker build -t $(IMAGE):$(RUNTIMES_TAG) --target mate-runtimes $(IMAGE_ARGS) \
-	  --build-arg WITH_DSH=$(WITH_DSH) --build-arg WITH_OPENCODE=$(WITH_OPENCODE) .
+	  --build-arg WITH_DSH=$(WITH_DSH) .
 
 image/run:
 	docker run -d --name $(IMAGE)-$(IMAGE_TAG) \
