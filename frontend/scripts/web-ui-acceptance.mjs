@@ -328,6 +328,19 @@ async function openPage(browser, url) {
 const clickJS = (page, expr) =>
   page.evaluate(`const el = ${expr}; if (!el) return false; el.click(); return true`)
 
+/**
+ * 等编辑卡**收起**（= 这张卡的写面已返回、表单已卸载）。
+ *
+ * 为什么必须有它（2026-10-13 实测，连着两次假红）：保存期间面板 `busy`，而开新卡的那些按钮
+ * 带着 `disabled={busy}`——上一张卡还没收起时点「添加模型」，这一下**被 disabled 吃掉**、
+ * 什么也不发生（不报错）；而随后那条"等新卡展开"会被**上一张还没收起的卡**满足（两者都是
+ * `.fg-editor` 里的 `input#model_id`）。于是脚本以为新卡开了、其实在往旧卡里填，等旧卡的写面
+ * 返回把它收起，现场就变成"元素凭空消失"（dump 实测：`editors: []`、行卡还在、面板还在）。
+ * 固定 `sleep(800)` 赌不赢这件事——写面可能同步拉起底座（实测 `/models/catalog` 单次 3.1s）。
+ */
+const waitEditorGone = (page, label = '编辑卡收起') =>
+  page.waitFor('return !document.querySelector(".fg-editor")', { label, timeout: 20000 })
+
 /** 直接发一条 CDP 输入事件（hover 等）。 */
 const send2 = (page, params) => page.send('Input.dispatchMouseEvent', params)
 
@@ -1205,10 +1218,19 @@ async function scenarioWorkspaceDir(browser) {
 //
 // 全部用 REST 收尾（`finally`），跑完不留夹具。
 //
-// **本场景尚未在真 Chrome 上跑过**（写成时所在的环境起不了 GUI 浏览器，见文件头用法注释）：
-// 首次 `pnpm ui:accept model` 很可能需要按真实 DOM 微调选择器——这正是它默认不进默认集合的原因。
+// **本场景 2026-10-10 已在真 Chrome（headless）+ `make dev` 上跑绿，随后并进默认四场景**（见文件头）：
+// 仍保留可单独执行的一条（`pnpm ui:accept model`），只改这一节时用它快速回归。
+// 2026-10-13 修掉它自己的一处时序竞态：原来用固定 `sleep` 赌"上一张卡的写面已返回"，赌不赢就会
+// 去开下一张卡而按钮还是 `disabled`——红的样子（元素凭空消失）与页面本身毫无关系，见 `waitEditorGone`。
 async function scenarioSettingsModel(browser) {
   section('v12 设置 · 模型（供应商 + 模型两块 / 单一默认 / 聚合生效结论 / 零底座词汇）')
+  // 这一节的点击分两类，依据是**哪条路真的走得通**（2026-10-13 实测）：
+  //  - "开卡 / 切卡"这类（新建供应商、编辑、添加模型、切设置分节、勾能力）：JS 触发（`clickJS`）。
+  //    它们在入场动画 / 重排期间按坐标点会落在动画中的位置或浮层上——不报错、也永不生效，
+  //    随后以「等某个元素超时」或「标签没变」的样子出现（一次假红，原因完全看不见）。
+  //  - "保存"：保留 CDP 真实鼠标。合成 `el.click()` 对受控弹窗里的 antd Button **不总响应**
+  //    （下面供应商创建那段有三条失败路径的完整记录），而那正是本场景要验的写面入口。
+  // 两类都不削弱判据：断言读的始终是**点完之后的状态**（DOM 读面 + REST 读面双重断言）。
   const provID = 'ui-verify-prov'
   const modelID = `ui-verify-${Date.now().toString(36)}`
   const page = await openPage(browser, `${WEB_URL}/`)
@@ -1227,7 +1249,13 @@ async function scenarioSettingsModel(browser) {
     await page.waitFor(textExpr('设置'), { label: '左栏渲染' })
     await page.click(btnExpr('设置'))
     await page.waitFor(`const el = document.querySelector('.fg-setdlg'); return !!el && el.getClientRects().length > 0`, { label: '设置弹窗打开' })
-    await page.click(`[...document.querySelectorAll('.fg-setdlg-item')].find(b => (b.innerText||'').includes('模型'))`)
+    // **用 JS 触发，不按坐标点**（2026-10-13 实测）：弹窗刚出现时还在 antd 的入场动画里——
+    // 上面那条 `waitFor` 只断言"有 client rect"，动画第一帧就通过，此时按坐标点很可能落在
+    // 动画中的位置或浮层上，**点了等于没点**。表现不是"点不到元素"（坐标是能算出来的），而是
+    // "设置弹窗开着、右侧一直是别的那一节"，随后等 `.fg-model-panel` 超时——一次假红，
+    // 且原因完全看不见。JS 触发不过命中测试，动画/浮层都影响不到它，所以这里刻意换掉。
+    const navSwitched = await clickJS(page, `[...document.querySelectorAll('.fg-setdlg-item')].find(b => (b.innerText||'').includes('模型'))`)
+    check('设置弹窗里切到「模型」那一节（JS 触发，菜单项真的被按下）', navSwitched === true, String(navSwitched))
     await page.waitFor(`return !!document.querySelector('.fg-model-panel')`, { label: '模型那一节渲染' })
     await sleep(600)
     await page.shot('20-settings-model')
@@ -1242,7 +1270,7 @@ async function scenarioSettingsModel(browser) {
     check('表头标题不含代码词', titles.length >= 2 && !titles.some((t) => runtimeWordRe().test(t)), JSON.stringify(titles))
 
     // ② 供应商：新建 → 自检（本地段）→ 留在列表里
-    await page.click(btnExpr('新建供应商'))
+    await clickJS(page, btnExpr('新建供应商'))
     await page.waitFor(`return !!document.querySelector('.fg-editor input#id')`, { label: '供应商编辑卡展开' })
     await page.type('document.querySelector(".fg-editor input#id")', provID)
     check('供应商卡的 id 已填进去',
@@ -1373,6 +1401,7 @@ async function scenarioSettingsModel(browser) {
     const editProvBtnExpr = `(() => {
       const li = ${probeRowExpr};
       return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    await waitEditorGone(page, '供应商新建卡收起')
     await clickJS(page, editProvBtnExpr)
     await page.waitFor(`return !!document.querySelector('.fg-editor input#id')`, { label: '供应商编辑卡展开', timeout: 8000 })
     await sleep(300)
@@ -1404,6 +1433,7 @@ async function scenarioSettingsModel(browser) {
     const groupHeads = await page.evaluate(
       `return [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-grouphead')].map(g => (g.innerText||'').replace(/\\n/g,' ').trim())`)
     check('模型按供应商分组（组头带供应商名或 id）', groupHeads.some((g) => g.includes(provID)), JSON.stringify(groupHeads).slice(0, 240))
+    await waitEditorGone(page, '供应商编辑卡收起')
     const openedModel = await clickJS(page, groupAddExpr)
     const modelCardOpen = await page
       .waitFor(`return !!document.querySelector('.fg-editor input#model_id')`, { label: '模型编辑卡展开', timeout: 8000 })
@@ -1458,8 +1488,10 @@ async function scenarioSettingsModel(browser) {
     if (!tagClicked) throw new Error('模型行卡里找不到「文本」能力标签，点不动')
     // 等界面跟上（写面提交后清单会重载，别用固定 sleep 赌它）。
     let modAfter = ''
-    for (let i = 0; i < 25 && modAfter !== '文本+图片'; i++) {
-      await sleep(150)
+    // 预算 15s：写面提交后清单会重载，而这一节的重载可能**拉起底座**（2026-10-13 实测
+    // `/models/catalog` 单次 3.1s），原来 3.75s 的预算在这种机器上会把「慢」判成「没生效」。
+    for (let i = 0; i < 60 && modAfter !== '文本+图片'; i++) {
+      await sleep(250)
       modAfter = await page.evaluate(capTagText)
     }
     check('一键切换后能力标签变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
@@ -1496,6 +1528,7 @@ async function scenarioSettingsModel(browser) {
       const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
         .find(x => (x.innerText||'').includes(${JSON.stringify(modelID)}));
       return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    await waitEditorGone(page, '模型新建卡收起')
     await clickJS(page, editRowExpr)
     await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '编辑模型卡片展开', timeout: 8000 })
     await sleep(400)
@@ -1503,7 +1536,7 @@ async function scenarioSettingsModel(browser) {
     check('编辑模型时「图片」按当前声明回填（表单读得到能力）', capChecked === true, JSON.stringify(capChecked))
     await page.type(modelCardField('note'), '备注改动')
     await page.click(modelCardSave)
-    await sleep(800)
+    await waitEditorGone(page, '编辑卡收起（这条编辑的写面已返回）')
     const afterEdit = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
     check('备注确实改到了（这次编辑真的提交了）', afterEdit?.note === '备注改动', JSON.stringify(afterEdit?.note))
     check('只改备注不动已声明的输入能力（不许静默降级为仅文本）',
@@ -1512,20 +1545,29 @@ async function scenarioSettingsModel(browser) {
 
     // ③‴ 新建时就能**声明**能力（用户要求：平台没法自动检测，只能让人填）。
     const modelID2 = `${modelID}-vision`
+    await waitEditorGone(page, '模型编辑卡收起')
     await clickJS(page, groupAddExpr)
     await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '新建模型卡片展开', timeout: 8000 })
     await sleep(400)
     await selectByFieldID(page, 'vendor', provID)
     await page.type(modelCardField('model_id'), modelID2)
     if (!(await page.box(capWrapperExpr))) throw new Error('新建模型卡片里找不到「图片」输入能力勾选框')
-    await page.click(capWrapperExpr)
-    await sleep(250)
-    const tickedNow = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
+    // 落到 wrapper **里面那个真实 `input`** 上（不是按坐标点 wrapper）：antd 把这颗 input 藏成
+    // 透明 + 绝对定位，按坐标点在实测里出现过「点了、`checked` 仍是 false」（打在了 wrapper 的
+    // 文字/padding 上），而这一下是后面两条断言的唯一入口。判据不变：下面读的仍是 DOM 里的
+    // `checked` 与 REST 回带的 `input_modalities`。
+    const tickedByJS = await clickJS(page, `${capWrapperExpr}?.querySelector('input')`)
+    check('新建模型时「图片」勾选框点得到（落到真实 input）', tickedByJS === true, String(tickedByJS))
+    let tickedNow = null
+    for (let i = 0; i < 20 && tickedNow !== true; i++) {
+      await sleep(100)
+      tickedNow = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
+    }
     check('新建模型时能勾上「图片」输入能力', tickedNow === true, JSON.stringify(tickedNow))
     // 截图取在**保存前**：卡片收起之后再截就只剩清单，看不出"表单里真的有能力这一项"。
     await page.shot('22c-settings-model-capability-form')
     await page.click(modelCardSave)
-    await sleep(800)
+    await waitEditorGone(page, '新建卡收起（这条新建的写面已返回）')
     const created2 = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID2)
     check('新建时勾的「图片」落库为 input_modalities=["text","image"]',
       JSON.stringify(created2?.input_modalities) === JSON.stringify(['text', 'image']),
@@ -1610,13 +1652,13 @@ async function main() {
     (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl,
   )
 
-  // `model` 是**可选场景**（默认不跑）：见文件头的用法注释——它还没在真 Chrome 上跑过一次。
+  // `model`：真 Chrome 上跑绿过、并已进默认集合；2026-10-13 修掉它的时序竞态（见 `waitEditorGone`）。
   const scenarios = {
     cap: scenarioCapability,
     auto: scenarioAutomation,
     cmd: scenarioCommands,
     wsdir: scenarioWorkspaceDir,
-    // `model` 是**可选场景**：见文件头用法注释与它自己的说明（选择器可能要按真实 DOM 微调）。
+    // `model` 同样进默认集合；要单独回归就 `pnpm ui:accept model`。
     model: scenarioSettingsModel,
   }
   const names = only.length ? only : ['cap', 'cmd', 'auto', 'model']
