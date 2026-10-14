@@ -174,6 +174,9 @@ type doctorOptions struct {
 	// ProjectionDirs 解析后的投影覆盖（`<runtime>:<kind>` → 目录）：用来认出"配给不在册底座的
 	// 覆盖"（键形状合法、所以解析不报错，但它永远不会生效）。
 	ProjectionDirs map[string]string
+	// RebuildReadModels `--rebuild-read-models`：体检**之前**用 events 重建全部会话的读模型
+	// （v21–v23）。默认 false = 只读体检一个字节都不写；true 是用户显式要求的写动作。
+	RebuildReadModels bool
 }
 
 // doctor 子命令入口。退出码：0 = 没有失败项；1 = 有失败项；2 = 用法/配置错误。
@@ -195,6 +198,9 @@ func doctor(args []string) {
 		"对 --payloads-dir 下的每份载荷做**全量复算**（逐个文件 sha256 + 合成摘要 + 文件数/字节数，"+
 			"与 payload.json 逐项比对；几百 MB 需要数秒）。需要 --payloads-dir")
 	asJSON := fset.Bool("json", false, "以 JSON 输出（键序固定，供 CI/诊断包消费）")
+	rebuildReadModels := fset.Bool("rebuild-read-models", false,
+		"**显式 opt-in 的写动作**：用 events 重建全部会话的读模型（runs/messages）后再体检。"+
+			"默认路径仍然只读——它只在体检报出 read-models 漂移之后当出路用")
 	_ = fset.Parse(args)
 
 	cfg, _ := mustConfig()
@@ -214,6 +220,8 @@ func doctor(args []string) {
 		// （它们是这台机器上被声明为可用的 id，留着它们的目录不算遗留）。
 		KnownRuntimeIDs: knownRuntimeIDs(cfg),
 		ProjectionDirs:  cfg.ProjectionDirs,
+
+		RebuildReadModels: *rebuildReadModels,
 	}
 	// CLI flag 优先级最高（与 serve 同一条规则：默认 < config.json < env < MATE_* < flag）。
 	if *home != "" {
@@ -323,8 +331,15 @@ func runDoctor(opts doctorOptions) doctorReport {
 	providers, providerChecks := checkProviderSection(opts)
 	checks = append(checks, providerChecks...)
 
+	// 读模型重建（`--rebuild-read-models`，显式 opt-in 的写动作）：**排在体检之前**，
+	// 这样报出来的 `read-models` 是"修完之后"的状态（否则用户会先看到一条红、再看到修好了，
+	// 而两次结论对同一件事）。
+	if opts.RebuildReadModels {
+		checks = append(checks, checkReadModelRebuild(opts)...)
+	}
+
 	// 读模型漂移（v21–v23）：`messages`/`runs` 是 `events` 的投影（J7），投影错了不会报错——
-	// 所以它需要一条**可判定**的体检项，而不是"看起来对不对"。同样只读。
+	// 所以它需要一条**可判定**的体检项，而不是"看起来对不对"。默认路径仍然只读。
 	checks = append(checks, checkReadModels(opts)...)
 
 	// transcript 目录的**形状体检**（R3）：v15 起平台会话 id 形如 `ses_<26 位 ULID>`，而目录里

@@ -6,12 +6,17 @@ import (
 	"sort"
 
 	"github.com/morehao/ark-mate/internal/store"
+	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— `mate doctor` 的 **读模型**体检（v21–v23） ———
 //
 // 分工与 provider 段逐条同形：本文件是**事实的构造函数**（只读），`internal/app/command/
 // doctor_readmodels.go` 只负责排版与三档结论。
+//
+// 本文件尾部另有**一个写路径**（`RebuildAllReadModels`）——它不是体检的一部分，而是体检给出的
+// 那条出路（`mate doctor --rebuild-read-models`，显式 opt-in）。放在同一处是因为两者读的是
+// 同一套事实："报告说什么坏了"与"怎么修"必须能对照着看。
 //
 // 为什么读模型值得一段独立的体检：`messages`/`runs` 是 `events` 的**投影**（J7），投影错了
 // 不会让任何东西报错——检索少命中一条、界面上少一条消息/"第几条"错位，全都发生在用户侧，
@@ -129,4 +134,24 @@ func CollectReadModelDoctorFacts(ctx context.Context, st *store.Store) ReadModel
 	f.Drift = f.OrphanMessages + f.EmptyBodies + f.BadOrdinalSessions + f.BadEventSeqSessions +
 		int64(len(f.ForeignSources))
 	return f
+}
+
+// RebuildAllReadModels 用 events 重建**全部会话**的读模型（J7 的字面操作）。
+//
+// 消费面两处（**只有这两处**，守卫 G7 钉住）：启动钩子 `rebuildStaleReadModels`（标记驱动——
+// 迁移改了位次/投影口径就是脏）与 `mate doctor --rebuild-read-models`（人工显式触发——
+// 体检报了漂移之后的**出路**；这也是 model/enum.go 里 `MetaKeyReadModelsRebuild` 那段注释
+// 承诺过的两个消费面）。返回会话总数与失败数；`failed > 0` 时调用方应**保留**重建标记。
+//
+// 与 provider 体检同一手法构造一个 Service（`collectRuntimeModelFacts`）：**刻意不调
+// `EnableStore`**——它会顺带做装配期同步（`SyncRuntime`，写 runtime 配置落点），而重建读模型
+// 是纯读模型的写动作。副作用面越小，"doctor 说重建好了"越等于"读模型真被重铺了"。
+func RebuildAllReadModels(ctx context.Context, st *store.Store) (int, int, error) {
+	if st == nil {
+		return 0, 0, fmt.Errorf("没有可读写的库句柄")
+	}
+	svc := NewService(goruntime.AllBuiltinRegistry(), nil)
+	defer svc.coalescer.Close()
+	svc.st = st
+	return svc.rebuildAllReadModels(ctx)
 }

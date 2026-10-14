@@ -321,3 +321,87 @@ func TestDoctorReadModelsIsReadOnly(t *testing.T) {
 		t.Fatalf("体检改了库文件：size %d→%d mtime %s→%s", before.Size(), after.Size(), before.ModTime(), after.ModTime())
 	}
 }
+
+// TestDoctorReadModelsRebuildFixesDrift `--rebuild-read-models` 是体检报红之后的**出路**：
+// 它在体检之前跑，于是同一次报告里的 `read-models` 是"修完之后"的状态。
+//
+// 这条用例同时钉住了三件事：① 漂移确实会被重建修掉（而不是"重建了但没变化"）；
+// ② 重建之后 `read-models` 判绿（判据之间不自相矛盾）；③ 待处理的**重建标记被清掉**
+// （否则下一次启动会再全量重建一遍）。
+func TestDoctorReadModelsRebuildFixesDrift(t *testing.T) {
+	r := newReadModelRig(t)
+	r.seed(t, func(st *store.Store) {
+		seedCleanReadModel(t, st)
+		// 三种漂移一起来：孤儿行（指向不存在的 run）、序号有洞、以及一条投影**不会**产出的行。
+		insertMessageRow(t, st, "msg_orphan", rmSession, "run_missing", "孤儿", 3, 3, "")
+		if err := st.DB().Exec(`UPDATE messages SET ordinal = 4
+			WHERE id = 'msg_01J9Z6Q0M7X2V8K4B3N5TRW2QM'`).Error; err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// 修之前必须判红——否则这条用例证明不了"重建是那条出路"。
+	if c := checkByName(t, checkReadModels(r.opts()))["read-models"]; c.Status != doctorFail {
+		t.Fatalf("重建之前应判红：%+v", c)
+	}
+
+	opts := r.opts()
+	opts.RebuildReadModels = true
+	c := checkByName(t, checkReadModelRebuild(opts))["read-models-rebuild"]
+	if c.Status != doctorOK {
+		t.Fatalf("重建应成功：%+v", c)
+	}
+	if !strings.Contains(c.Detail, "重建了 1 个会话") {
+		t.Fatalf("人话应报出重建规模：%s", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "已清重建标记") {
+		t.Fatalf("应报出清了重建标记（v23 迁移留下的那个）：%s", c.Detail)
+	}
+
+	// 修之后必须绿（读模型是从 events 重建的，所以孤儿与洞都该消失）。
+	after := checkByName(t, checkReadModels(r.opts()))["read-models"]
+	if after.Status != doctorOK {
+		t.Fatalf("重建之后应判绿：%+v", after)
+	}
+	// 标记确实清了（不能只信人话）。
+	r.seed(t, func(st *store.Store) {
+		if v, ok, err := st.GetMeta(context.Background(), model.MetaKeyReadModelsRebuild); err != nil {
+			t.Fatalf("读重建标记: %v", err)
+		} else if ok && v != "" {
+			t.Fatalf("重建标记应被清掉，实际 %q", v)
+		}
+	})
+}
+
+// TestDoctorReadModelsRebuildRequiresFlag 默认路径**一个字节都不写**：同一个漂移库，
+// 没有那个开关时重建函数必须拒绝（记 warn），库文件保持不变。
+func TestDoctorReadModelsRebuildRequiresFlag(t *testing.T) {
+	r := newReadModelRig(t)
+	r.seed(t, func(st *store.Store) {
+		seedCleanReadModel(t, st)
+		if err := st.DB().Exec(`UPDATE messages SET ordinal = 4
+			WHERE id = 'msg_01J9Z6Q0M7X2V8K4B3N5TRW2QM'`).Error; err != nil {
+			t.Fatal(err)
+		}
+	})
+	before, err := os.Stat(r.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checkByName(t, checkReadModelRebuild(r.opts()))["read-models-rebuild"]
+	if c.Status != doctorWarn || !strings.Contains(c.Detail, "--rebuild-read-models") {
+		t.Fatalf("没有显式开关时应拒绝并给出开关名：%+v", c)
+	}
+	after, err := os.Stat(r.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("默认路径改了库文件：size %d→%d mtime %s→%s",
+			before.Size(), after.Size(), before.ModTime(), after.ModTime())
+	}
+	// 漂移还在（没有被"顺手修一下"）。
+	if c := checkByName(t, checkReadModels(r.opts()))["read-models"]; c.Status != doctorFail {
+		t.Fatalf("没给开关时不该发生任何写入，漂移应仍然在：%+v", c)
+	}
+}

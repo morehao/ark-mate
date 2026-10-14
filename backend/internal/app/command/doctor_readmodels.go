@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -58,6 +59,61 @@ func checkReadModels(opts doctorOptions) []doctorCheck {
 		return []doctorCheck{{name, doctorFail, "无法校验读模型：" + facts.Note}}
 	}
 	return []doctorCheck{readModelCheck(name, facts)}
+}
+
+// checkReadModelRebuild 是 `mate doctor --rebuild-read-models` 的执行面（**显式 opt-in**）。
+//
+// 它为什么可以存在（"doctor 是只读体检"这条口径没有破）：默认路径一个字节都不写，写只在用户
+// 显式给了那个开关时发生；而且它**不是**体检判据的一部分——它只是体检给出漂移结论之后的
+// **出路**（报告里 `read-models` 判红时，人需要一条"现在修"的命令，而不是"去起一次 serve"）。
+// 反过来，把重建塞进默认路径会让"体检"变成"每次跑都改库"，那是另一件事了（守卫 G7 钉住
+// "只能在开关后面"）。
+//
+// 为什么用 `store.Open`（会跑迁移）而不是只开读写句柄：重建读模型的前提是"schema 已经是这一版"，
+// 而用户跑这条命令的典型时机正是"刚升级完、还没起 serve"。
+func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
+	const name = "read-models-rebuild"
+
+	// 保险栓：调用点也在开关后面（见 `runDoctor`），这里再判一次是为了"被误接线到默认路径"时
+	// **拒绝写**而不是写——体检变成"每次跑都改库"是另一件事。
+	if !opts.RebuildReadModels {
+		return []doctorCheck{{name, doctorWarn, "未显式要求重建（--rebuild-read-models）：跳过（体检默认只读）"}}
+	}
+	if opts.StoreMode == config.StoreModeMemory {
+		return []doctorCheck{{name, doctorWarn, "memory 模式：读模型只在进程内，没有可重建的落点"}}
+	}
+	if strings.TrimSpace(opts.DBPath) == "" {
+		return []doctorCheck{{name, doctorWarn, "未配置库文件路径（MATE_DB）：没有可重建的落点"}}
+	}
+	st, err := store.Open(opts.DBPath)
+	if err != nil {
+		return []doctorCheck{{name, doctorFail, "打开库（读写）失败：" + err.Error()}}
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+	// 先记下标记：重建成功后要把它清掉（否则下一次启动会**再**全量重建一遍——结果一样，
+	// 但白花一次启动时间，而"标记"这件事本身就变成噪声）。
+	pending, hadPending, _ := st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
+	total, failed, err := manager.RebuildAllReadModels(ctx, st)
+	if err != nil {
+		return []doctorCheck{{name, doctorFail, "重建读模型失败：" + err.Error()}}
+	}
+	if failed > 0 {
+		// 标记刻意**留着**（下次启动重试）：与启动钩子同一条处置。
+		return []doctorCheck{{name, doctorFail,
+			fmt.Sprintf("重建了 %d 个会话，其中 %d 个失败（重建标记保留，下次启动会重试；"+
+				"失败原因见日志）", total, failed)}}
+	}
+	tail := "；没有待处理的重建标记"
+	if hadPending && pending != "" {
+		if derr := st.DeleteMeta(ctx, model.MetaKeyReadModelsRebuild); derr != nil {
+			return []doctorCheck{{name, doctorWarn,
+				fmt.Sprintf("重建了 %d 个会话，但清重建标记失败：%v（重建本身已完成）", total, derr)}}
+		}
+		tail = fmt.Sprintf("；已清重建标记（原值 %s）", pending)
+	}
+	return []doctorCheck{{name, doctorOK, fmt.Sprintf("重建了 %d 个会话的读模型%s", total, tail)}}
 }
 
 // readModelCheck 把事实翻成人话与三档结论。
