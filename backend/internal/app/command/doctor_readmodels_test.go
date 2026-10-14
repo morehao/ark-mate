@@ -405,3 +405,47 @@ func TestDoctorReadModelsRebuildRequiresFlag(t *testing.T) {
 		t.Fatalf("没给开关时不该发生任何写入，漂移应仍然在：%+v", c)
 	}
 }
+
+// TestDoctorReadModelsUnverifiableIsWarnNotFail v21 之前的库在这段判据下必然采集不到
+// （没有 `messages.ordinal`），而那正是"刚换上新二进制、还没起 serve"的**正常状态**——
+// 升级后第一次体检在这里判红，红的原因却与读模型无关，人话还写着"无法校验"（判档与文案矛盾）。
+//
+// 这条用例钉两件事：① 采集不到 → **warn**（退出码只由"事实与声明不符"驱动）；
+// ② 能看出库比判据旧时，人话里要**直接给那条出路**（而不是丢一句 `no such column: ordinal`）。
+func TestDoctorReadModelsUnverifiableIsWarnNotFail(t *testing.T) {
+	r := newReadModelRig(t)
+	r.seed(t, func(st *store.Store) {
+		seedCleanReadModel(t, st)
+		// 造出"老库"的两种特征：判据要的列没了（采集必然失败）+ 版本停在 v20 之前。
+		if err := st.DB().Exec(`DROP TABLE messages`).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DB().Exec(`DELETE FROM schema_migrations WHERE version >= 21`).Error; err != nil {
+			t.Fatal(err)
+		}
+	})
+	c := checkByName(t, checkReadModels(r.opts()))["read-models"]
+	if c.Status != doctorWarn {
+		t.Fatalf("采集不到应记 warn（无法校验不参与退出码）：%+v", c)
+	}
+	if !strings.Contains(c.Detail, "--rebuild-read-models") || !strings.Contains(c.Detail, "v20") {
+		t.Fatalf("应点名出路与实际库版本：%s", c.Detail)
+	}
+}
+
+// TestDoctorReadModelsUnreadableFileIsWarn 库文件坏了/不是 SQLite 也归"无法校验"（warn），
+// 同样是"判档只由事实驱动"这一条的另一面。
+func TestDoctorReadModelsUnreadableFileIsWarn(t *testing.T) {
+	r := newReadModelRig(t)
+	r.seed(t, func(st *store.Store) { seedCleanReadModel(t, st) })
+	if err := os.WriteFile(r.dbPath, []byte("这不是一个 SQLite 库"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := checkByName(t, checkReadModels(r.opts()))["read-models"]
+	if c.Status != doctorWarn {
+		t.Fatalf("打不开应记 warn：%+v", c)
+	}
+	if !strings.Contains(c.Detail, "无法校验读模型") {
+		t.Fatalf("人话应说清是「无法校验」而不是判红：%s", c.Detail)
+	}
+}

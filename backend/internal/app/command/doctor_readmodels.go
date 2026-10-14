@@ -19,10 +19,14 @@ import (
 //
 // 分档口径（`doctor.go` 的既有三档，逐条对应，避免下一个人凭感觉调档）：
 //
-//	memory 模式 / 没有库文件   → warn（**无法校验**：读模型不落库，或还没跑过 serve/migrate）
-//	库文件在、打不开 / 采集失败 → fail（事实坏了）
+//	memory 模式 / 没有库文件 / 打不开 / 采集失败 → warn（**无法校验**：读模型不落库，或还没跑过 serve/migrate）
 //	五条漂移判据全 0           → ok
 //	任意一条非 0               → fail（**事实与声明不符**：投影说得出"第几条"，而库里对不上）
+//
+// "打不开 / 采集失败" 归 warn **不是**降档（2026-10-14 实测改）：本条判据的退出码只该由
+// "事实与声明不符"驱动，而"库还是 v20、还没有 ordinal 列"恰恰是**刚换上新二进制、还没起 serve**
+// 的正常状态（`mate doctor` 本来就是升级后第一个要跑的命令）。此前它落进 fail，于是升级后第一次
+// 体检无条件红、人话却写着"无法校验"——判档与文案自相矛盾，而红的原因与读模型毫无关系。
 //
 // `meta.read_models_rebuild` 非空只写进人话（"下一次启动会重建"），**不参与分档**：正要重建时
 // 序号当然可能还没铺好，把它判红只会让"升级后第一次 doctor"永远红——而那条命令恰恰是升级后
@@ -45,18 +49,19 @@ func checkReadModels(opts doctorOptions) []doctorCheck {
 			return []doctorCheck{{name, doctorWarn,
 				fmt.Sprintf("库文件 %s 不存在：还没跑过 serve/migrate，读模型漂移无从校验", opts.DBPath)}}
 		}
-		return []doctorCheck{{name, doctorFail,
-			fmt.Sprintf("库文件 %s 不可读：%v", opts.DBPath, err)}}
+		return []doctorCheck{{name, doctorWarn,
+			fmt.Sprintf("无法校验读模型：库文件 %s 读不到（%v）", opts.DBPath, err)}}
 	}
 	st, err := store.OpenReadOnly(opts.DBPath)
 	if err != nil {
-		return []doctorCheck{{name, doctorFail, "无法校验读模型：" + err.Error()}}
+		return []doctorCheck{{name, doctorWarn, "无法校验读模型：" + err.Error()}}
 	}
 	defer func() { _ = st.Close() }()
 
-	facts := manager.CollectReadModelDoctorFacts(context.Background(), st)
+	ctx := context.Background()
+	facts := manager.CollectReadModelDoctorFacts(ctx, st)
 	if facts.Note != "" {
-		return []doctorCheck{{name, doctorFail, "无法校验读模型：" + facts.Note}}
+		return []doctorCheck{{name, doctorWarn, readModelUnverifiableDetail(ctx, st, facts.Note)}}
 	}
 	return []doctorCheck{readModelCheck(name, facts)}
 }
@@ -114,6 +119,24 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 		tail = fmt.Sprintf("；已清重建标记（原值 %s）", pending)
 	}
 	return []doctorCheck{{name, doctorOK, fmt.Sprintf("重建了 %d 个会话的读模型%s", total, tail)}}
+}
+
+// readModelMinSchemaVersion 读模型判据要求的最低 schema 版本（v23 才有 `messages.ordinal`/`kind`）。
+//
+// 刻意写成"这条判据的要求"而不是"当前最新版"：未来 v24 再加别的列时，这段判据的最低要求
+// 仍然是 v23——跟着最新版一起涨只会让老库被判成"无法校验"。
+const readModelMinSchemaVersion = 23
+
+// readModelUnverifiableDetail 把"采集不到"翻成人话：能看出库比判据旧时**直接给那条出路**，
+// 而不是把 `no such column: ordinal` 这种底层文案丢给用户。
+func readModelUnverifiableDetail(ctx context.Context, st *store.Store, note string) string {
+	ver, _ := st.SchemaVersion(ctx)
+	if ver > 0 && ver < readModelMinSchemaVersion {
+		return fmt.Sprintf("库结构还是 v%d（读模型判据需要 v%d）：跑一次 `mate serve`，"+
+			"或 `mate doctor --rebuild-read-models` 一步把迁移与重建都跑掉；原始错误：%s",
+			ver, readModelMinSchemaVersion, note)
+	}
+	return "无法校验读模型（采集不到事实；库结构被改动过？）：" + note
 }
 
 // readModelCheck 把事实翻成人话与三档结论。
