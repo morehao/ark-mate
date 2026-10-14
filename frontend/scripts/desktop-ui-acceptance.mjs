@@ -12,6 +12,7 @@
  *   node scripts/desktop-ui-acceptance.mjs                # 全部场景（exit 场景会杀掉壳，放最后）
  *   node scripts/desktop-ui-acceptance.mjs shell contract # 只跑指定场景
  *   KEEP_SHELL=1 ...                                      # 跑完不杀壳，便于人工接管
+ *   MATE_DESKTOP_HOME=/tmp/xxx ...                        # 数据目录隔离态：整轮不碰 ~/.ark-mate
  *
  * 场景：
  *   guard        前置：不能有别的桌面壳/核心在跑（两个核心共用 ~/.ark-mate/mate.db 会让断言读到别人的内存态）
@@ -23,6 +24,8 @@
  *   exit         M1-10（V13）：kill -9 壳后核心 3s 内自退、无残留、令牌不进 argv/env
  *
  * 前置：`make core/desktop`（脚本会自己跑）与 `pnpm -C frontend build`（apps/web/dist 必须已存在）。
+ * **默认跑在用户真实的数据目录上**（`$HOME/.ark-mate`）：那正是 DoD 要验的形态，所以跑之前要**独占**
+ * 那份库；想隔离（不碰用户目录）就显式给 `MATE_DESKTOP_HOME` 或 `MATE_HOME`，见 `MINIMAL_ENV` 的注释。
  * **不进 CI**：要真浏览器内核 + 真底座。
  */
 import { spawn, spawnSync } from 'node:child_process'
@@ -81,6 +84,25 @@ installCleanupHooks()
 const MINIMAL_ENV = { PATH: '/usr/bin:/bin', HOME: process.env.HOME ?? '' }
 
 /**
+ * 数据目录的显式覆盖（`apps/desktop/src/env.ts` 的解析顺序：`MATE_DESKTOP_HOME` > `MATE_HOME` >
+ * `$HOME/.ark-mate`）。`MINIMAL_ENV` 是"Node 从哪来"这条判据的载体，但它此前把数据目录的覆盖**一起丢掉了**
+ * ——于是"给桌面验收一份隔离库"这条路实际不存在，壳只能落回用户真实的 `~/.ark-mate`
+ * （2026-10-14 实测：一次 DoD 就把用户 v20 的库迁到了 v23）。语义照旧是**显式覆盖、不探测**：
+ * 不传 = 与今天逐字相同（跑真实库，DoD 的前提是独占那份库）；传了就整条链（壳 → 核心 → runtime 与载荷
+ * 的 home/config 变量）都落在那个目录里，`M3-3` 正面断言核心的 `MATE_HOME` 在其内。
+ *
+ * 注：Electron 自己的 userData（`~/Library/Application Support/@ark-mate/desktop`）由系统家目录决定，
+ * 不随这个覆盖走——它只是壳的本地 profile，不是平台数据面。
+ */
+const HOME_OVERRIDE_KEY = process.env.MATE_DESKTOP_HOME?.trim()
+  ? 'MATE_DESKTOP_HOME'
+  : process.env.MATE_HOME?.trim()
+    ? 'MATE_HOME'
+    : ''
+const HOME_OVERRIDE = HOME_OVERRIDE_KEY ? process.env[HOME_OVERRIDE_KEY].trim() : ''
+if (HOME_OVERRIDE_KEY) MINIMAL_ENV[HOME_OVERRIDE_KEY] = HOME_OVERRIDE
+
+/**
  * 调用方 PATH 里的**假底座**（M3-4 / V10 ③）：`dsh` / `opencode` / `node` / `npx` 各一个，被调到就把
  * 自己的名字追加到标记文件并打印 `FAKE-<NAME>-CALLED`。名单与生成逻辑在 `lib/decoy-bin.mjs`
  * （`desktop-no-host-acceptance.mjs` 共用同一份，避免"少一个名字 = 少一条判据"的静默漂移）。
@@ -106,6 +128,16 @@ function setupFakeRuntimes() {
 /** guard：起壳前确认没有别的核心在跑（两个核心共用 ~/.ark-mate 会让断言读到别人的内存态）。 */
 function scenarioGuard() {
   section('前置：环境干净（同一份 ~/.ark-mate 只能有一个核心）')
+  // 数据目录是本轮验收的**写入面**（库、transcript、runtime home、npm 面都在这棵树下），
+  // 所以第一件事就是把"到底跑在哪一份"打印出来——跑错库是这一路验收最贵的坑
+  // （2026-10-14：默认态那次把用户真实的 v20 库迁到了 v23）。
+  console.log(
+    `  🏠 数据目录 = ${
+      HOME_OVERRIDE_KEY
+        ? `${HOME_OVERRIDE}（来源 ${HOME_OVERRIDE_KEY}，隔离态：不碰 ${join(HOME, '.ark-mate')}）`
+        : `${join(HOME, '.ark-mate')}（默认 = 用户真实那份，本轮要独占它）`
+    }`,
+  )
   const others = pidsMatching(new RegExp(`${CORE_RE.source}|${SHELL_RE.source}`))
   check('没有别的桌面壳/核心在跑', others.length === 0, others.length ? `pid=${others.join(',')}（请先关掉；本机 make dev 只跑浏览器入口，不冲突）` : '')
   check('apps/web/dist 已构建（壳要服务它）', existsSync(join(FRONTEND, 'apps', 'web', 'dist', 'index.html')), '缺则先 `cd frontend && pnpm build`')
@@ -862,6 +894,14 @@ async function scenarioIsolation(shell) {
   const home = envValue(psEnv, 'MATE_HOME')
   check('核心环境里有 MATE_HOME（三端共用一份数据目录）', !!home && home.startsWith('/'), home)
   check('MATE_HOME 是绝对路径且指向 .ark-mate 或其显式覆盖', !!home && home.includes('.ark-mate') || !!process.env.MATE_DESKTOP_HOME, home)
+  // 隔离态的正面判据：覆盖给了就必须**真的落在覆盖里**（而不是只写进了环境变量、壳却仍用默认那份）。
+  if (HOME_OVERRIDE_KEY) {
+    check(
+      `核心的数据目录落在 ${HOME_OVERRIDE_KEY} 的覆盖里（隔离真的生效）`,
+      !!home && home === HOME_OVERRIDE,
+      `MATE_HOME=${home} 覆盖=${HOME_OVERRIDE}`,
+    )
+  }
   const cache = envValue(psEnv, 'npm_config_cache')
   const prefix = envValue(psEnv, 'npm_config_prefix')
   check('npm_config_cache 落在 MATE_HOME 内（不污染 ~/.npm）', !!cache && !!home && cache.startsWith(`${home}/`), cache)
@@ -905,7 +945,14 @@ async function scenarioIsolation(shell) {
   // （他装过/开着什么与本产品无关），这里只验"整轮验收没碰过它们"。
   const userDirs = [join(HOME, '.dsh'), join(HOME, '.config', 'opencode')].filter((d) => existsSync(d))
   if (!userDirs.length) {
-    check('用户既有配置目录存在（否则隔离断言是空的）', false, '~/.dsh 与 ~/.config/opencode 都不存在')
+    if (HOME_OVERRIDE_KEY) {
+      // 隔离态下这两个目录本来就不在写入面内（覆盖把整棵数据树挪走了），"零变化"是空的但**不是放过**：
+      // 真正的判据已经上移成"核心的 MATE_HOME 落在覆盖里"，这里如实报跳过并写明理由。
+      skipped++
+      console.log(`  ⏭ 用户既有配置目录存在（否则隔离断言是空的）：跳过 — 本轮跑在隔离态（${HOME_OVERRIDE_KEY}=${HOME_OVERRIDE}），${HOME} 下没有用户目录可碰`)
+    } else {
+      check('用户既有配置目录存在（否则隔离断言是空的）', false, '~/.dsh 与 ~/.config/opencode 都不存在')
+    }
   }
   for (const dir of userDirs) {
     const before = SNAPSHOT.get(dir)

@@ -648,7 +648,11 @@ pnpm ui:accept            # 界面验收（真 Chrome + CDP）：能力勾选面
 
 桌面入口的靶子反过来——**脚本自己起壳、自己起核**，所以跑之前别让 `make dev` / `make desktop/dev`
 的核同时活着（两个核心共用 `~/.ark-mate/mate.db`）；前置是 `make desktop/payloads` 已在场
-（壳在启动期就解析随包载荷，缺了直接拒启、不回落 PATH）：
+（壳在启动期就解析随包载荷，缺了直接拒启、不回落 PATH）。它**默认跑在用户真实的数据目录上**
+（那也是 DoD 要验的形态，所以要独占那份库）；想不碰 `~/.ark-mate`，显式给一个数据目录覆盖即可
+（`MATE_DESKTOP_HOME=<dir>`，或 `MATE_HOME=<dir>`，解析顺序见 `apps/desktop/src/env.ts`）——脚本把它
+原样交给壳，核心、runtime 与载荷的 home/config 面都跟着落进那个目录，`M3-3` 会正面断言核心的
+`MATE_HOME` 就在其中：
 
 ```bash
 cd frontend
