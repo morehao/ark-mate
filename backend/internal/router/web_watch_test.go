@@ -179,6 +179,40 @@ func TestAssetWatchStopsWithContext(t *testing.T) {
 	}
 }
 
+// TestReloadServesFreshIndexAfterRebuild 「自动刷新」必须真的刷到**新产物**（2026-10-14）。
+//
+// 为什么这条值得一条判据：P6-A 那半（推帧）绿着**不代表**页面能刷到新代码——`/` 曾把启动那一刻
+// 的 index.html 捕获进闭包，而 `vite build --watch --no-emptyOutDir` 让旧 bundle 一直留在盘上，
+// 于是"推帧 → 整页刷新 → 又是旧界面"三步全都成功，只是刷的仍是同一份旧产物（实测：dist 已重建
+// 5 分钟，`GET /` 仍指向 5 分钟前那个 hash，页面照旧跑旧代码——**改 UI 的人会以为自己的改动没生效**）。
+//
+// 判据落在 HTTP 面上：重建之后 `/` 与 SPA 深链回落都必须给出盘上**这一份** index.html。
+func TestReloadServesFreshIndexAfterRebuild(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "dist")
+	engine := watchEngine(t, root, true)
+
+	if body := getDoc(t, engine, "/"); !strings.Contains(body, "probe-app") {
+		t.Fatalf("初始 `/` 没给出夹具文档：%q", body)
+	}
+
+	// 模拟一次真重建：index.html 指向新 hash 的 bundle（旧 bundle 按 --no-emptyOutDir 留在盘上）。
+	const newAsset = "assets/index-def.js"
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(newAsset)), []byte("console.log('v2')"), 0o644); err != nil {
+		t.Fatalf("写新产物: %v", err)
+	}
+	fresh := `<!doctype html><html><body>probe-app-v2<script src="/` + newAsset + `"></script></body></html>`
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte(fresh), 0o644); err != nil {
+		t.Fatalf("重建 index.html: %v", err)
+	}
+
+	if body := getDoc(t, engine, "/"); !strings.Contains(body, "probe-app-v2") {
+		t.Fatalf("重建后 `/` 给的还是旧文档（%q）——刷新会一直刷回旧产物，P6-A 的通知成了空转", body)
+	}
+	if body := getDoc(t, engine, "/sessions/ses_probe"); !strings.Contains(body, "probe-app-v2") {
+		t.Errorf("重建后深链回落给的还是旧文档：%q", body)
+	}
+}
+
 // --- 夹具 ---
 
 func head(t *testing.T, e *gin.Engine, path string) *httptest.ResponseRecorder {
@@ -187,6 +221,17 @@ func head(t *testing.T, e *gin.Engine, path string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	return w
+}
+
+func getDoc(t *testing.T, e *gin.Engine, path string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d，期望 200", path, w.Code)
+	}
+	return w.Body.String()
 }
 
 type sseFrame struct {

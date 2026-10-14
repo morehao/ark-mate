@@ -569,6 +569,13 @@ const HISTORY_PAGE = 50
 let toastSeq = 0
 let transportRef: WsTransport | null = null
 
+/**
+ * C2「加载更早」的**冷挂载待裁决**集合：activate 冷挂载（since_seq=0 全量回放）时登记，
+ * 由该会话到达的**首个帧**裁决——回事件 = 服务端从会话第一条起全给了（已到最早）；
+ * 回快照 = 起点已被缓冲淘汰、更早的历史还在（未到最早）。见 applyFrame 两个分支。
+ */
+const coldFullReplay = new Set<string>()
+
 // reportApiError：401（A6 令牌缺失/无效）时自动弹出「设置 → 访问令牌」那一节，其余走 toast。
 function reportApiError(err: unknown): void {
   if (err instanceof HttpError && err.code === BizCode.Unauthorized) {
@@ -659,9 +666,14 @@ export const useMate = create<MateStore>((set, get) => {
             // M0/M1 state 为空对象，客户端重置本会话视图并以 event_seq 初始化游标。
             // 重置会连带清掉队列投影，而 snapshot 不回放历史 → 立刻用 GET /inputs 把当前态查回来
             // （否则刷新后「已排队但还没发出去的话」在界面上凭空消失）。
+            //
+            // 对「加载更早」的裁决：回快照 = 服务端**没有**从起点重放（请求起点已被缓冲淘汰），
+            // 更早的历史仍在 → 该会话明确「未到最早」，按钮该显示。
             seedQueue = f.agg_id
+            coldFullReplay.delete(f.agg_id)
             return {
               ...s,
+              historyStart: { ...s.historyStart, [f.agg_id]: false },
               views: {
                 ...s.views,
                 [f.agg_id]: {
@@ -676,6 +688,10 @@ export const useMate = create<MateStore>((set, get) => {
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
             // 首个事件即证明已就绪（配合 snapshot 与 hydration 超时兜底）
             if (view.hydrating) view.hydrating = false
+            // 冷挂载（since_seq=0）收到的是**重放**而不是快照 → 服务端把该会话在缓冲里的历史
+            // 全给了（缓冲按聚合淘汰，淘汰过就会回快照）——这就是「已到最早」的事实。
+            // 记下来，免得只问了一个问题的会话也一直挂着「加载更早的消息」。
+            const atStart = coldFullReplay.delete(f.agg_id)
             // 运行时推送的配置项更新（全量语义）→ 就地刷新模型目录（**同一个底座**的才生效）：
             // 模型下拉与「当前模型」无需轮询即可跟随运行时的真实状态。
             //
@@ -690,7 +706,12 @@ export const useMate = create<MateStore>((set, get) => {
                 catalog = { ...catalog, source: 'session', options }
               }
             }
-            return { ...s, modelCatalog: catalog, views: { ...s.views, [f.agg_id]: view } }
+            return {
+              ...s,
+              modelCatalog: catalog,
+              historyStart: atStart ? { ...s.historyStart, [f.agg_id]: true } : s.historyStart,
+              views: { ...s.views, [f.agg_id]: view },
+            }
           }
           default:
             return s
@@ -851,6 +872,11 @@ export const useMate = create<MateStore>((set, get) => {
           // snapshot（或首个事件）置回就绪；带 since_seq 的增量续传（createAndRun
           // 本地气泡续流）不视为冷挂载。
           const cold = sinceSeq === undefined
+          if (cold) {
+            // 冷挂载一律 since_seq=0（全量回放）→ 登记待裁决，由该会话首个帧给出
+            // 「已到最早 / 还有更早」的事实（applyFrame）。
+            coldFullReplay.add(id)
+          }
           if (cold && (!cur || cur.entries.length === 0)) {
             set((st) => ({
               views: { ...st.views, [id]: { ...emptyView(), hydrating: true } },
@@ -889,7 +915,12 @@ export const useMate = create<MateStore>((set, get) => {
         })
         // 本地先落用户气泡（echo 事件 seq 与返回水位相等，重放 seq>水位 会跳过它）。
         // attach since_seq=event_seq（exclusive）续传首轮后续事件。
+        // 这个会话是**此刻由本端创建**的：返回的 event_seq 已经覆盖「建会话 + 首条提问」那一批
+        // 事件的最后一个（`session.created` 与这条 user_message 回显都在其中），之前**没有任何**
+        // 属于它的事件 → 直接记为「已到最早」，不必等回放裁决（否则刚建好、只问了一个问题的
+        // 会话也会挂着「加载更早的消息」，而点它只取回一条不渲染的 `session.created`）。
         set((s) => ({
+          historyStart: { ...s.historyStart, [resp.id]: true },
           views: {
             ...s.views,
             [resp.id]: {

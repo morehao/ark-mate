@@ -219,7 +219,9 @@ func terminalRunStatus(typ string) string {
 }
 
 // materializeRun 在 sqlite 模式下把「上一 run 之后到当前终态」的事件窗口物化为 runs 行：
-// user_text 取窗口首条用户消息；first/last_seq 记录窗口（失败轮输入/统计精确回溯）。
+// 窗口**从本轮首条用户消息起算**（一轮 = 一次用户输入；窗口起点与本轮输入之间夹着的会话级
+// 事件不属本轮，见下方轮界裁剪）；user_text 取窗口首条用户消息；first/last_seq 记录窗口
+// （失败轮输入/统计精确回溯）。
 // 幂等：窗口无新事件（重复调用/无 run）时直接返回。best-effort：失败仅告警。
 func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) {
 	if s.st == nil {
@@ -248,6 +250,19 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 	if len(evs) == 0 {
 		return // 无新事件（重复终态调用等）→ 幂等跳过
 	}
+	// 轮界裁剪：窗口起点是「上一 run 的 last_seq」，它与本轮首条用户消息之间可能夹着**会话级**
+	// 事件（session.created / session.resumed / config_options 等）——它们不属于这一轮。不裁掉
+	// 有两个实测后果（2026-10-14 用户报「一问却有三条 messages」）：
+	//  ① messages 物化把 session.created 当成一条 assistant 时间线 → 落出一条正文为空的行；
+	//  ② runID 取裁剪前的首事件 seq，与随后按「首条用户消息」写下的 first_seq 错位
+	//     （id 是 r-…-27 而 first_seq=28），本轮时长/首令牌耗时也把会话前置算进了这一轮。
+	// 找不到用户消息（异常路径：没有 prompt 的终态）则保持原窗口——宁可多算，也不丢一轮。
+	for i, e := range evs {
+		if e.Type == BusUserMessage {
+			evs = evs[i:]
+			break
+		}
+	}
 	firstSeq, lastSeq := evs[0].Seq, evs[len(evs)-1].Seq
 	runID := fmt.Sprintf("r-%s-%d", sessionID, firstSeq)
 
@@ -263,7 +278,7 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 			errCode = cd
 		}
 	}
-	// user_text 优先取窗口内首条用户消息。
+	// user_text 优先取窗口内首条用户消息（覆盖 payload 里的原始文本）。
 	for _, e := range evs {
 		if e.Type == BusUserMessage {
 			var m map[string]any
@@ -275,17 +290,11 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 			}
 		}
 	}
-	// 首条用户消息 seq 作为 run 起点的 first_seq（更贴近「轮」语义：一轮 = 一次用户输入）。
-	for _, e := range evs {
-		if e.Type == BusUserMessage {
-			firstSeq = e.Seq
-			break
-		}
-	}
 
 	started := evs[0].CreatedAt
 	ended := evs[len(evs)-1].CreatedAt
-	// 首令牌耗时：首个 assistant 输出（文本/思考/工具）事件相对窗口起点的时刻；无输出则为 0。
+	// 首令牌耗时：首个 assistant 输出（文本/思考/工具）事件相对**本轮起点（首条用户消息）**的
+	// 时刻；无输出则为 0（与 dto 里 first_token_ms 的口径一致）。
 	var firstTokenMS int64
 	for _, e := range evs {
 		if e.Type == BusMessage || e.Type == BusThought || e.Type == BusToolCall {

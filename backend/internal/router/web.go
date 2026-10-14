@@ -185,6 +185,23 @@ func CompositeDigest(digests map[string]string) string {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
+// indexHTML 取**当前**这一份 index.html（盘上读不到时退回启动那一刻的 boot）。
+//
+// 为什么不是闭包捕获一份常量（2026-10-14 实测出来的静默缺口）：dev 态（`--asset-watch`）下产物
+// 会被反复重建，而 `vite build --watch --no-emptyOutDir` 让**旧 bundle 仍在盘上**——捕获旧那份的
+// 表现是"资产监视器推了刷新、页面刷回来还是旧界面"：不报错、不白屏，也没有任何测试会红
+// （实测 dist 已重建 5 分钟，`GET /` 仍指向 5 分钟前那个 hash，页面照旧跑旧代码）。
+//
+// 口径与本包 `CurrentBuildID` 同源：**"资产被换了"这类事实不该被启动瞬间的快照钉死**。
+// 读盘失败就退回 boot——`GET /` 永远给得出一份能跑的文档，不会因为目录正在重建而白屏。
+func indexHTML(assets AssetInfo, boot []byte) []byte {
+	b, err := fs.ReadFile(assets.FS, "index.html")
+	if err != nil || len(b) == 0 {
+		return boot
+	}
+	return b
+}
+
 // MountWeb 把已解析的资产挂到引擎上（设计 §6.2）。
 //
 // 路由分工：
@@ -200,7 +217,8 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 		r.NoRoute(writeNotFound)
 		return
 	}
-	index, err := fs.ReadFile(assets.FS, "index.html")
+	// 启动那一刻的 index.html：它**只**作为"盘上读不到"时的兜底（见 indexHTML）。
+	boot, err := fs.ReadFile(assets.FS, "index.html")
 	if err != nil {
 		// ResolveAssets 已经校验过 index.html 存在；这里再兜一次是因为 FS 也可能被换掉。
 		panic(fmt.Sprintf("资产里读不到 index.html（目录 %s）：%v", assets.Path, err))
@@ -212,7 +230,7 @@ func MountWeb(r *gin.Engine, assets AssetInfo) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.Header("Cache-Control", cacheControlFor("/index.html"))
 		c.Status(http.StatusOK)
-		_, _ = c.Writer.Write(index)
+		_, _ = c.Writer.Write(indexHTML(assets, boot))
 	}
 	r.GET("/", indexResp)
 	r.NoRoute(func(c *gin.Context) {
