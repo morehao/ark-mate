@@ -46,7 +46,7 @@ func newRetiredFixture(t *testing.T) *retiredFixture {
 	at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 	for id, rt := range map[string]string{"ses_gone": f.gone, "ses_live": f.inService} {
 		if err := f.st.UpsertSession(context.Background(), model.SessionEntity{
-			ID: id, AgentID: "a1", Cwd: f.home, ProviderID: "p1", ModelID: "m1",
+			ID: id, Cwd: f.home, ProviderID: "p1", ModelID: "m1",
 			RuntimeID: rt, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,
 		}); err != nil {

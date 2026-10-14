@@ -120,7 +120,7 @@ func TestWorkspaceDeleteKeepsSessions(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	if err := s.UpsertSession(ctxT(), model.SessionEntity{
-		ID: "c1", AgentID: "a1", Cwd: dir, WorkspaceID: ws.ID,
+		ID: "c1", Cwd: dir, WorkspaceID: ws.ID,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
@@ -264,7 +264,7 @@ func TestWorkspaceSessionCounts(t *testing.T) {
 	now := time.Now().UTC()
 	mk := func(id, workspaceID string, updated time.Time) {
 		if err := s.UpsertSession(ctxT(), model.SessionEntity{
-			ID: id, AgentID: "a1", Cwd: "/tmp/x", WorkspaceID: workspaceID,
+			ID: id, Cwd: "/tmp/x", WorkspaceID: workspaceID,
 			Status: "in_progress", CreatedAt: now, UpdatedAt: updated,
 		}); err != nil {
 			t.Fatalf("UpsertSession %s: %v", id, err)
@@ -306,7 +306,7 @@ func TestMigrateV14LeavesExistingSessionsUnassigned(t *testing.T) {
 	// 造一条 cwd 很明确、看起来"该被登记"的会话，确认迁移不拿它建登记。
 	dir := t.TempDir()
 	if err := s.UpsertSession(ctxT(), model.SessionEntity{
-		ID: "legacy", AgentID: "a1", Cwd: dir, WorkspaceTemporary: true,
+		ID: "legacy", Cwd: dir, WorkspaceTemporary: true,
 		Status: "in_progress", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)

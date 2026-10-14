@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svcexport"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
@@ -20,7 +19,6 @@ import (
 //
 // P4 把 Service 拆成多个领域实现后，这些断言随之改为各实现分别断言自己的端口。
 var (
-	_ svcagent.AgentSvc           = (*Service)(nil)
 	_ svcsession.SessionSvc       = (*Service)(nil)
 	_ svcworkspace.WorkspaceSvc   = (*Service)(nil)
 	_ svcruntime.RuntimeSvc       = (*Service)(nil)

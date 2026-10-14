@@ -8,24 +8,24 @@ import (
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
-// seedRun 写入一条 run（含 agent 归属的会话与用量快照 JSON）。
-func seedRun(t *testing.T, s *Store, runID, convID, agentID, status string, started, ended time.Time, usageJSON string) {
+// seedRun 写入一条 run（连带把会话补齐：run 挂在会话上，用量快照也按会话取最后一条）。
+func seedRun(t *testing.T, s *Store, runID, sessionID, status string, started, ended time.Time, usageJSON string) {
 	t.Helper()
-	seedSessionAgent(t, s, convID, agentID)
+	seedCompletedSession(t, s, sessionID)
 	if err := s.CreateRun(ctxT(), model.RunEntity{
-		ID: runID, SessionID: convID, Status: status, UsageJSON: usageJSON,
+		ID: runID, SessionID: sessionID, Status: status, UsageJSON: usageJSON,
 		StartedAt: started, EndedAt: ended,
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
 }
 
-func seedSessionAgent(t *testing.T, s *Store, id, agentID string) {
+func seedCompletedSession(t *testing.T, s *Store, id string) {
 	t.Helper()
 	if _, ok, err := s.GetSession(ctxT(), id); err == nil && ok {
 		return
 	}
-	sess := model.SessionEntity{ID: id, AgentID: agentID, Status: "completed",
+	sess := model.SessionEntity{ID: id, Status: "completed",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.UpsertSession(ctxT(), sess); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
@@ -33,7 +33,7 @@ func seedSessionAgent(t *testing.T, s *Store, id, agentID string) {
 }
 
 // TestUsageSummaryAggregate 用量聚合：计数/时长全量累加；上下文/费用按会话取最后快照；
-// 区间半开、agent 过滤、group_by=day 的 UTC 日期分桶。
+// 区间半开、UTC 日期分桶（v19 起分组只有 day 一类——agent 维度随概念一并撤销）。
 func TestUsageSummaryAggregate(t *testing.T) {
 	s := openTestDB(t)
 	day := func(d int, h int) time.Time {
@@ -42,14 +42,14 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	usageA1 := `{"used":100,"size":1000}`
 	usageA2 := `{"used":250,"size":1000,"cost_amount":0.5,"cost_currency":"USD"}`
 
-	// agent-a：会话 c1 两轮（第二轮的快照覆盖第一轮）；会话 c2 一轮无用量。
-	seedRun(t, s, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(2*time.Second), usageA1)
-	seedRun(t, s, "r2", "c1", "agent-a", "completed", day(2, 10), day(2, 10).Add(3*time.Second), usageA2)
-	seedRun(t, s, "r3", "c2", "agent-a", "failed", day(2, 11), day(2, 11).Add(time.Second), "")
-	// agent-b：一轮 cancelled。
-	seedRun(t, s, "r4", "c3", "agent-b", "cancelled", day(3, 9), day(3, 9).Add(5*time.Second), `{"used":10,"size":100}`)
+	// 会话 c1 两轮（第二轮的快照覆盖第一轮）；会话 c2 一轮无用量。
+	seedRun(t, s, "r1", "c1", "completed", day(1, 10), day(1, 10).Add(2*time.Second), usageA1)
+	seedRun(t, s, "r2", "c1", "completed", day(2, 10), day(2, 10).Add(3*time.Second), usageA2)
+	seedRun(t, s, "r3", "c2", "failed", day(2, 11), day(2, 11).Add(time.Second), "")
+	// 会话 c3：一轮 cancelled。
+	seedRun(t, s, "r4", "c3", "cancelled", day(3, 9), day(3, 9).Add(5*time.Second), `{"used":10,"size":100}`)
 
-	res, err := s.UsageSummary(ctxT(), UsageQuery{GroupBy: "agent"})
+	res, err := s.UsageSummary(ctxT(), UsageQuery{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -72,27 +72,20 @@ func TestUsageSummaryAggregate(t *testing.T) {
 	if res.Totals.CostReported != 1 {
 		t.Fatalf("费用上报会话数应单独统计（仅 c1）: %+v", res.Totals)
 	}
-	if len(res.Buckets) != 2 || res.Buckets[0].Key != "agent-a" || res.Buckets[1].Key != "agent-b" {
-		t.Fatalf("agent 分桶不符: %+v", res.Buckets)
+	// 日期分桶：键是 started_at 的 UTC 日期（day1/2/3），桶里只有计数与快照，没有身份维度。
+	if len(res.Buckets) != 3 || res.Buckets[0].Key != "2026-09-01" || res.Buckets[2].Key != "2026-09-03" {
+		t.Fatalf("日期分桶不符: %+v", res.Buckets)
 	}
-	if res.Buckets[0].Runs != 3 || res.Buckets[0].AgentID != "agent-a" || res.Buckets[0].ContextUsed != 250 {
-		t.Fatalf("agent-a 桶不符: %+v", res.Buckets[0])
+	if res.Buckets[0].Runs != 1 || res.Buckets[1].Runs != 2 || res.Buckets[2].Runs != 1 {
+		t.Fatalf("逐日轮次不符: %+v", res.Buckets)
 	}
-	if res.Buckets[0].UsageReported != 1 {
-		t.Fatalf("agent-a 应只有 1 个会话有上报: %+v", res.Buckets[0])
-	}
-
-	// agent 过滤。
-	res, err = s.UsageSummary(ctxT(), UsageQuery{AgentID: "agent-b", GroupBy: "agent"})
-	if err != nil {
-		t.Fatalf("UsageSummary(agent-b): %v", err)
-	}
-	if res.Totals.Runs != 1 || len(res.Buckets) != 1 || res.Buckets[0].Key != "agent-b" {
-		t.Fatalf("agent 过滤不符: %+v", res)
+	// 桶内快照按会话取最后一条（r2 覆盖 r1）：桶级口径与总计一致。
+	if res.Buckets[1].ContextUsed != 250 || res.Buckets[1].UsageReported != 1 {
+		t.Fatalf("day 桶快照应取桶内最后一条: %+v", res.Buckets[1])
 	}
 
 	// 区间半开 [day2 00:00, day3 00:00)：只含 r2/r3。
-	res, err = s.UsageSummary(ctxT(), UsageQuery{From: day(2, 0), To: day(3, 0), GroupBy: "agent"})
+	res, err = s.UsageSummary(ctxT(), UsageQuery{From: day(2, 0), To: day(3, 0)})
 	if err != nil {
 		t.Fatalf("UsageSummary(range): %v", err)
 	}
@@ -100,29 +93,13 @@ func TestUsageSummaryAggregate(t *testing.T) {
 		t.Fatalf("区间过滤不符: %+v", res.Totals)
 	}
 	// 半开：to 当日 00:00 不含该日 run。
-	res, _ = s.UsageSummary(ctxT(), UsageQuery{To: day(2, 0), GroupBy: "agent"})
+	res, _ = s.UsageSummary(ctxT(), UsageQuery{To: day(2, 0)})
 	if res.Totals.Runs != 1 {
 		t.Fatalf("to 应为开区间: %+v", res.Totals)
 	}
 
-	// group_by=day：UTC 日期分桶（day1/2/3）。
-	res, err = s.UsageSummary(ctxT(), UsageQuery{GroupBy: "day"})
-	if err != nil {
-		t.Fatalf("UsageSummary(day): %v", err)
-	}
-	if len(res.Buckets) != 3 || res.Buckets[0].Key != "2026-09-01" || res.Buckets[2].Key != "2026-09-03" {
-		t.Fatalf("日期分桶不符: %+v", res.Buckets)
-	}
-	if res.Buckets[1].Runs != 2 || res.Buckets[1].AgentID != "" {
-		t.Fatalf("day 桶不应带 agent_id: %+v", res.Buckets[1])
-	}
-	// day 桶内快照按会话取最后一条（r2 覆盖 r1）。
-	if res.Buckets[1].ContextUsed != 250 {
-		t.Fatalf("day 桶快照应取桶内最后一条: %+v", res.Buckets[1])
-	}
-
 	// 空区间 → 零值总计 + 空桶（不报错）。
-	res, err = s.UsageSummary(ctxT(), UsageQuery{From: day(10, 0), To: day(11, 0), GroupBy: "agent"})
+	res, err = s.UsageSummary(ctxT(), UsageQuery{From: day(10, 0), To: day(11, 0)})
 	if err != nil || res.Totals.Runs != 0 || len(res.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", res, err)
 	}
@@ -162,18 +139,18 @@ func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
 		return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC)
 	}
 	// c1：r1 带上下文 + USD 费用；r2 只带上下文（费用应保留 r1）。
-	seedRun(t, s, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(time.Second),
+	seedRun(t, s, "r1", "c1", "completed", day(1, 10), day(1, 10).Add(time.Second),
 		`{"used":100,"size":1000,"cost_amount":0.5,"cost_currency":"USD"}`)
-	seedRun(t, s, "r2", "c1", "agent-a", "completed", day(1, 11), day(1, 11).Add(time.Second),
+	seedRun(t, s, "r2", "c1", "completed", day(1, 11), day(1, 11).Add(time.Second),
 		`{"used":250,"size":1000}`)
 	// c2：只报 EUR 费用（无上下文）。
-	seedRun(t, s, "r3", "c2", "agent-a", "completed", day(1, 12), day(1, 12).Add(time.Second),
+	seedRun(t, s, "r3", "c2", "completed", day(1, 12), day(1, 12).Add(time.Second),
 		`{"cost_amount":0.2,"cost_currency":"EUR"}`)
 	// c3：带上下文 + 未给币种的费用（空币种 → USD）。
-	seedRun(t, s, "r4", "c3", "agent-a", "completed", day(1, 13), day(1, 13).Add(time.Second),
+	seedRun(t, s, "r4", "c3", "completed", day(1, 13), day(1, 13).Add(time.Second),
 		`{"used":30,"size":300,"cost_amount":0.1}`)
 
-	res, err := s.UsageSummary(ctxT(), UsageQuery{GroupBy: "agent"})
+	res, err := s.UsageSummary(ctxT(), UsageQuery{})
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
@@ -194,11 +171,11 @@ func TestUsageSummaryFieldWiseSnapshotAndCurrency(t *testing.T) {
 
 	// 单币种（含空币种归一）→ 正常求和。
 	s2 := openTestDB(t)
-	seedRun(t, s2, "r1", "c1", "agent-a", "completed", day(1, 10), day(1, 10).Add(time.Second),
+	seedRun(t, s2, "r1", "c1", "completed", day(1, 10), day(1, 10).Add(time.Second),
 		`{"used":10,"size":100,"cost_amount":0.5,"cost_currency":"USD"}`)
-	seedRun(t, s2, "r2", "c2", "agent-a", "completed", day(1, 11), day(1, 11).Add(time.Second),
+	seedRun(t, s2, "r2", "c2", "completed", day(1, 11), day(1, 11).Add(time.Second),
 		`{"used":10,"size":100,"cost_amount":0.1}`)
-	res2, err := s2.UsageSummary(ctxT(), UsageQuery{GroupBy: "agent"})
+	res2, err := s2.UsageSummary(ctxT(), UsageQuery{})
 	if err != nil {
 		t.Fatalf("UsageSummary(single currency): %v", err)
 	}

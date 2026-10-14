@@ -86,7 +86,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ghost__tool","arguments":{}}}`,
 	}
-	cmd := exec.Command(bin, "mcp", "bridge", "--agent", "a1", "--runtime", "r1")
+	cmd := exec.Command(bin, "mcp", "bridge", "--runtime", "r1")
 	cmd.Env = isolated
 	cmd.Stdin = strings.NewReader(strings.Join(frames, "\n") + "\n")
 	var stdout, stderr strings.Builder
@@ -136,7 +136,9 @@ func TestMcpBridgeCLI(t *testing.T) {
 	// console writer 写的是 os.Stdout（golib 里硬编码），而这里的 stdout 是协议流（C10），
 	// 所以 mcp 子命令只能用文件 writer（见 internal/app/command/logging.go）。
 	logs := readCLILogs(t, home)
-	for _, want := range []string{"mcp bridge", `"agent":"a1"`, `"runtime":"r1"`, "取工具面失败"} {
+	// 空工具面**不再**走"取数失败"那条（v19 起 scope 只有 runtime，数据面就绪即空面）：
+	// 那条失败出口由 `internal/gateway/gateway_test.go` 的单测负责。
+	for _, want := range []string{"mcp bridge", `"runtime":"r1"`, `"pinned":false`, "数据面就绪"} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("网关日志应含 %q：\n%s", want, logs)
 		}
@@ -146,6 +148,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 	}
 
 	// 参数漂移必须当场失败，且**不得往 stdout 写任何东西**（那里是协议流）。
+	// `--agent` 正是 v19 撤销的那个参数：它必须与 `--servers` 一样落进"未知参数"（而不是被静默忽略）。
 	bad := exec.Command(bin, "mcp", "bridge", "--agent", "a1", "--runtime", "r1", "--servers", "a,b")
 	bad.Env = isolated
 	bad.Stdin = strings.NewReader("")
@@ -173,7 +176,7 @@ func TestMcpBridgeCLI(t *testing.T) {
 	if err := help.Run(); err != nil {
 		t.Fatalf("-h 应正常退出: %v", err)
 	}
-	if helpOut.String() != "" || !strings.Contains(helpErr.String(), "--agent") {
+	if helpOut.String() != "" || !strings.Contains(helpErr.String(), "--runtime") {
 		t.Fatalf("-h 的说明也走 stderr（stdout 是协议流）：stdout=%q stderr=%q", helpOut.String(), helpErr.String())
 	}
 

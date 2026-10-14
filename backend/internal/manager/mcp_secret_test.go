@@ -3,48 +3,32 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// TestSecretRefLexiconMatchesVault §13.3 M1 的一致性守卫：能力数据面（pkg/capability）与
-// vault（internal/vault）对"什么算合法引用"必须同判——同一个引用不能出现"数据面放行、vault 拒绝"。
-// 放在 manager 里测是因为只有这里同时 import 得动两边（pkg/ 不得 import internal/）。
-func TestSecretRefLexiconMatchesVault(t *testing.T) {
-	samples := []string{
-		"vault:providers/default", "vault:mcp/fs-token", "vault:a/B", "vault:a.b-c_d/e",
-		"vault:", "vault:onlyns", "vault:ns/", "vault:/name", "vault:../x", "vault:ns/..",
-		"vault:ns/na me", "vault:" + strings.Repeat("a", 65) + "/x",
-	}
-	for _, ref := range samples {
-		_, vaultErr := vault.ValidateRef(ref)
-		capErr := capability.ValidateSecretRef(ref)
-		if (vaultErr == nil) != (capErr == nil) {
-			t.Fatalf("引用 %q 判定不一致：vault=%v capability=%v", ref, vaultErr, capErr)
-		}
-	}
-}
-
 // TestMcpSecretResolution §13.3 M1/M6：定义文件里只有引用，注入时才解析成明文；
-// vault 密文缺失/环境变量未设 → **不注入该 server**（不静默塞空密钥）。
+// 库里的密钥缺失 / 环境变量未设 → **不注入该 server**（不静默塞空密钥）。
+//
+// v20 起 `store:<ns>/<name>` 指向库里的 `mcp_secrets` 一张表（memory 模式是托管文档），
+// 引用串本身就是库的主键（**整串存**，不剥前缀）。
 func TestMcpSecretResolution(t *testing.T) {
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
-	svc := agentTestSvc(t, dir) // 经 LoadAgentDefinitions 设定 agentDir → vault 落在 <home>
+	dir := filepath.Join(home, "providers")
+	svc := providerTestSvc(t, dir)
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st.Close() }()
+	svc.EnableStore(st)
 
-	st, err := vault.Open(home)
-	if err != nil {
-		t.Fatalf("vault.Open: %v", err)
-	}
+	const ref = "store:mcp/fs-token"
 	const token = "sk-mcp-secret-xyz"
-	if err := st.Put("vault:mcp/fs-token", vault.KindMcpSecret, []byte(token)); err != nil {
+	if err := st.SetMcpSecret(context.Background(), ref, token); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("FS_AUTH_HEADER", "Bearer from-env")
@@ -52,7 +36,7 @@ func TestMcpSecretResolution(t *testing.T) {
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Name: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		Env:           map[string]string{"FS_ROOT": "/tmp/root"},
-		SecretEnv:     map[string]string{"FS_TOKEN": "vault:mcp/fs-token"},
+		SecretEnv:     map[string]string{"FS_TOKEN": ref},
 		Headers:       map[string]string{"X-Client": "mate"},
 		SecretHeaders: map[string]string{"Authorization": "env:FS_AUTH_HEADER"},
 	}); err != nil {
@@ -60,13 +44,13 @@ func TestMcpSecretResolution(t *testing.T) {
 	}
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "broken", Name: "broken", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
-		SecretEnv: map[string]string{"FS_TOKEN": "vault:mcp/not-there"},
+		SecretEnv: map[string]string{"FS_TOKEN": "store:mcp/not-there"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// 注入：引用解析成明文，且明文/密钥两路合并到同一字典。
-	got := directMcp(svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil))
+	got := directMcp(svc.McpServersFor("stub", nil))
 	if len(got) != 1 || got[0].Name != "fs" {
 		t.Fatalf("解析失败的 server 不该注入，应只剩 fs: %+v", got)
 	}
@@ -104,12 +88,12 @@ func TestMcpSecretResolution(t *testing.T) {
 		t.Fatalf("fs 的引用都能解析，不该有 unresolved: %+v", fs.unresolved)
 	}
 	if broken := byID["broken"]; len(broken.unresolved) != 1 || broken.unresolved[0] != "FS_TOKEN" {
-		t.Fatalf("缺密文的引用应报 unresolved: %+v", broken.unresolved)
+		t.Fatalf("库里没有那条密钥时应报 unresolved: %+v", broken.unresolved)
 	}
 
 	// 读模型里绝不能出现密钥值/引用体（守住"只回 key"）：序列化整个响应体来查。
 	raw := dumpMcpServers(t, svc)
-	for _, leak := range []string{token, "vault:mcp/fs-token", "Bearer from-env", "from-env"} {
+	for _, leak := range []string{token, ref, "Bearer from-env", "from-env"} {
 		if strings.Contains(raw, leak) {
 			t.Fatalf("读模型泄漏 %q：%s", leak, raw)
 		}
@@ -130,70 +114,124 @@ func dumpMcpServers(t *testing.T, svc *Service) string {
 	return string(b)
 }
 
-// TestMcpSecretResolutionFailures 三类解析失败都给得出原因（env 未设 / vault 不可用 / 引用非法），
+// TestMcpSecretResolutionFailures 三类解析失败都给得出原因（env 未设 / 没有库那一层 / 引用非法），
 // 且都不注入——不静默塞空密钥让 server 带着空凭证跑。
 func TestMcpSecretResolutionFailures(t *testing.T) {
 	// 1) env 引用未设。
-	svc := agentTestSvc(t, filepath.Join(t.TempDir(), "agents"))
+	svc := providerTestSvc(t, filepath.Join(t.TempDir(), "providers"))
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "s1", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 		SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := directMcp(svc.McpServersFor(&AgentRec{ID: "a"}, "stub", nil)); len(got) != 0 {
+	if got := directMcp(svc.McpServersFor("stub", nil)); len(got) != 0 {
 		t.Fatalf("env 未设时不该注入: %+v", got)
 	}
 	if keys := svc.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "env:MATE_TEST_UNSET_VAR"}}); len(keys) != 1 {
 		t.Fatalf("应报 unresolved: %+v", keys)
 	}
 
-	// 2) vault 不可用（agentDir 为空 = 没有 ~/.ark-mate）：明确指出"无 vault"，而不是当成"密钥为空"。
-	noVault := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
-	if err := noVault.caps.RegisterMcpServer(&capability.McpServer{
+	// 2) 没有库（也没有托管文档）：明确指出"库里没有这条密钥"，而不是当成"密钥为空"。
+	noStore := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), nil)
+	if err := noStore.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "s2", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
-		SecretEnv: map[string]string{"TOKEN": "vault:mcp/x"},
+		SecretEnv: map[string]string{"TOKEN": "store:mcp/x"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, problems := noVault.resolveMcpSecrets(capability.McpServer{
-		SecretEnv: map[string]string{"TOKEN": "vault:mcp/x"},
+	_, _, problems := noStore.resolveMcpSecrets(capability.McpServer{
+		SecretEnv: map[string]string{"TOKEN": "store:mcp/x"},
 	})
-	if len(problems) != 1 || !strings.Contains(problems[0], "vault 不可用") {
-		t.Fatalf("应报 vault 不可用: %+v", problems)
+	if len(problems) != 1 || !strings.Contains(problems[0], "托管文档") {
+		t.Fatalf("应报「找不到这条密钥」并说明落点: %+v", problems)
 	}
-	if len(noVault.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "vault:mcp/x"}})) != 1 {
-		t.Fatal("vault 不可用时该键应报 unresolved")
+	if len(noStore.unresolvedSecretKeys(capability.McpServer{SecretEnv: map[string]string{"TOKEN": "store:mcp/x"}})) != 1 {
+		t.Fatal("没有库与托管文档时该键应报 unresolved")
 	}
 
-	// 3) 失败原因里不得含密钥值（日志不该成为泄漏面）。
+	// 3) 失败原因里不得含密钥值（日志不该成为泄漏面）：库里那一条在解析失败时**不出现**。
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
-	svc3 := agentTestSvc(t, dir)
+	st3 := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st3.Close() }()
+	svc3 := providerTestSvc(t, filepath.Join(home, "providers"))
+	svc3.EnableStore(st3)
 	const leaked = "sk-should-never-appear"
-	if err := os.Setenv("MATE_TEST_WRONG_KIND", leaked); err != nil {
+	if err := st3.SetMcpSecret(context.Background(), "store:mcp/present", leaked); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Unsetenv("MATE_TEST_WRONG_KIND") })
-	st, err := vault.Open(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 用错 kind 存密文 → 解密失败（AAD 带 kind）。
-	if err := st.Put("vault:mcp/wrong", vault.KindProviderKey, []byte(leaked)); err != nil {
-		t.Fatal(err)
-	}
+	// 引用另一条**不存在**的：失败原因只含键名与引用，绝不含任何密钥值。
 	_, _, problems = svc3.resolveMcpSecrets(capability.McpServer{
-		SecretEnv: map[string]string{"TOKEN": "vault:mcp/wrong"},
+		SecretEnv: map[string]string{"TOKEN": "store:mcp/wrong"},
 	})
 	if len(problems) != 1 {
-		t.Fatalf("kind 不符应解析失败: %+v", problems)
+		t.Fatalf("库里没有的引用应解析失败: %+v", problems)
 	}
 	if strings.Contains(problems[0], leaked) {
 		t.Fatalf("失败原因泄漏了密钥值: %v", problems[0])
 	}
-	if !strings.Contains(problems[0], "TOKEN") || !strings.Contains(problems[0], "vault:mcp/wrong") {
+	if !strings.Contains(problems[0], "TOKEN") || !strings.Contains(problems[0], "store:mcp/wrong") {
 		t.Fatalf("失败原因应含键名与引用: %v", problems[0])
+	}
+	// 出路必须是用户**今天真能做到**的那一条：库里 `mcp_secrets` 的值这一批还没有写入口
+	// （REST/CLI/面板都没有），所以"把值写进库"不是出路——写了等于让用户去找一个不存在的入口。
+	if !strings.Contains(problems[0], "env:<ENV_NAME>") {
+		t.Fatalf("失败原因必须给出可执行的那条出路（改引用为 env:）: %v", problems[0])
+	}
+	for _, banned := range []string{"把值写进库", "mcp_secrets"} {
+		if strings.Contains(problems[0], banned) {
+			t.Fatalf("出路不得指向不存在的入口（%q）: %v", banned, problems[0])
+		}
+	}
+	// 旧前缀在**运行时**读到就是坏数据：它既不是 `store:` 也不是 `env:`，词法层就拒了
+	// （翻译只发生在导入档案文件那一步，判据见 `pkg/capability` 的翻译点用例；这里不写字面量，
+	// 免得把已退役的词带回 manager 的源码里）。
+	if err := capability.ValidateSecretRef("storex:mcp/legacy"); err == nil {
+		t.Fatal("认不出的前缀应在词法层被拒")
+	}
+}
+
+// TestSecretRefLexiconMatchesStore v20 的一致性命中面：**定义体里写的引用串 = 库里那一行的主键**。
+//
+// 为什么这条还在（v19 之前它比的是"能力数据面的词法"对"密文层的词法"）：v20 把密钥搬进
+// `mcp_secrets` 之后，"引用"不再是某个机制内部的路径，而是**库的主键本身**——剥前缀、改写、
+// 归一化都会让写进去的那一条与注入时查的那一条对不上，而那种分叉**不会让任何一条用例变红**
+// （两边各自自洽）。所以判据横跨两层：词法层放行的串，经库存一遍再读出来必须**逐字节相同**，
+// 且真能解析出值。
+func TestSecretRefLexiconMatchesStore(t *testing.T) {
+	ctx := context.Background()
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st.Close() }()
+
+	for _, ref := range []string{
+		"store:providers/default", "store:mcp/fs-token", "store:a/B", "store:a.b-c_d/e",
+	} {
+		if err := capability.ValidateSecretRef(ref); err != nil {
+			t.Fatalf("词法层应放行 %q: %v", ref, err)
+		}
+		if err := st.SetMcpSecret(ctx, ref, "v-"+ref); err != nil {
+			t.Fatalf("写库 %q: %v", ref, err)
+		}
+		v, ok, err := st.McpSecret(ctx, ref)
+		if err != nil || !ok || v != "v-"+ref {
+			t.Fatalf("引用串必须整串存取（不得剥前缀）：v=%q ok=%v err=%v", v, ok, err)
+		}
+	}
+	// 词法层拒的串也不该能"绕过"：写进去读出来是两个不同的键（对照面，说明整串就是身份）。
+	if err := st.SetMcpSecret(ctx, "store:", "weird"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.McpSecret(ctx, "store:"); !ok {
+		t.Fatal("库不判词法，只认整串；词法拒绝发生在写面前一层")
+	}
+	refs, err := st.ListMcpSecrets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range refs {
+		if r.Ref != capability.SecretRefStorePrefix+strings.TrimPrefix(r.Ref, capability.SecretRefStorePrefix) {
+			t.Fatalf("库里的引用串被改写过: %q", r.Ref)
+		}
 	}
 }
 
@@ -205,20 +243,20 @@ func TestMcpSecretResolutionFailures(t *testing.T) {
 // 进程环境截然相反：探测路径 `core_pid=""`、ACP 注入路径 `core_pid="46579"`。
 func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	home := t.TempDir()
-	svc := agentTestSvc(t, filepath.Join(home, "agents"))
-	st, err := vault.Open(home)
-	if err != nil {
-		t.Fatalf("vault.Open: %v", err)
-	}
+	svc := providerTestSvc(t, filepath.Join(home, "providers"))
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st.Close() }()
+	svc.EnableStore(st)
+	const ref = "store:mcp/live"
 	const token = "sk-live-secret"
-	if err := st.Put("vault:mcp/live", vault.KindMcpSecret, []byte(token)); err != nil {
+	if err := st.SetMcpSecret(context.Background(), ref, token); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("LIVE_HDR", "Bearer live")
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "live", Name: "live", Transport: capability.TransportStdio, Command: "/usr/bin/env",
 		Env:           map[string]string{"PLAIN": "p"},
-		SecretEnv:     map[string]string{"TOKEN": "vault:mcp/live"},
+		SecretEnv:     map[string]string{"TOKEN": ref},
 		SecretHeaders: map[string]string{"Authorization": "env:LIVE_HDR"},
 	}); err != nil {
 		t.Fatal(err)
@@ -239,7 +277,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	// 2) 解析不了 → 当场报错（不拿空凭证去探），且是 40001（配置问题）而不是 50001。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "broken", Name: "broken", Transport: capability.TransportStdio, Command: "/usr/bin/env",
-		SecretEnv: map[string]string{"TOKEN": "vault:mcp/not-there"},
+		SecretEnv: map[string]string{"TOKEN": "store:mcp/not-there"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -271,5 +309,33 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}
 	if !recorded {
 		t.Fatal("解析失败也要记 last_probe_error")
+	}
+}
+
+// TestMcpSecretStaleMirrorNotAdopted 库里没有、镜像里有的那条 MCP 密钥**不采用**（同 provider 的判据）。
+func TestMcpSecretStaleMirrorNotAdopted(t *testing.T) {
+	home := t.TempDir()
+	svc := providerTestSvc(t, filepath.Join(home, "providers"))
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st.Close() }()
+	svc.EnableStore(st)
+	doc := svc.credentialDoc()
+	if doc == nil {
+		t.Fatal("夹具应装配出托管文档")
+	}
+	if err := doc.Set("store:mcp/stale", "sk-stale"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.resolveSecretRef("store:mcp/stale"); err == nil {
+		t.Fatal("库里没有这条密钥时不许采用镜像里那一份")
+	} else if !strings.Contains(err.Error(), "不采用") {
+		t.Fatalf("失败原因应说清为什么不采用镜像那份: %v", err)
+	}
+	// 同一引用在库里真有值时照常解析（对照面）。
+	if err := st.SetMcpSecret(context.Background(), "store:mcp/stale", "sk-real"); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := svc.resolveSecretRef("store:mcp/stale"); err != nil || v != "sk-real" {
+		t.Fatalf("库里那条才是权威: v=%q err=%v", v, err)
 	}
 }

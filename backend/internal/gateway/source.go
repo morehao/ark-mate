@@ -1,6 +1,6 @@
 package gateway
 
-// ——— 数据面：网关自己读平台的库与 vault（M7-2）———
+// ——— 数据面：网关自己读平台的库与凭据文档（M7-2）———
 //
 // 网关是**独立进程**（底座按 stdio server 拉起），所以它必须自己拿到两样东西：
 //  1. **定义与白名单**：走与核心进程同一个装载入口（`manager` 的 `Load…FromStore` / `Load…`），
@@ -19,13 +19,14 @@ package gateway
 //   - **绝不把密钥写进日志**：只记 server id、键名、引用名与失败原因（与 `resolveMcpSecrets`
 //     同一纪律）。
 //
-// `Source` 的**会话归属**：本文件不关心"网关进程被谁拉起"，只认 `AgentID` + 会话钉住的
+// `Source` 的**会话归属**：本文件不关心"网关进程被谁拉起"，只认 scope 的 runtime + 会话钉住的
 // 白名单；stdio server 不在面里（底座直连，见 `capability.RemoteMcpTransports` 的注释）。
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -39,12 +40,10 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// SourceOptions 数据面参数（`AgentID` 必填）。
+// SourceOptions 数据面参数。
 type SourceOptions struct {
 	Cfg config.Config
-	// AgentID 网关条目的 scope（注入时由平台拼出）。
-	AgentID string
-	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 回落 agent 声明）。
+	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 全量）。
 	McpsPinned *[]string
 
 	// Store 注入已打开的持久层（测试用；nil → 按 Cfg 打开）。非 nil 时由调用方负责关闭。
@@ -61,21 +60,65 @@ type SourceOptions struct {
 	ReloadMinInterval time.Duration
 	// Now 时钟注入（测试用）。
 	Now func() time.Time
+
+	// CredCwd **凭据 cwd**（v20）：`<cwd>/.env` 那一层的 cwd，即"用户启动 `mate serve` 的目录"。
+	//
+	// 常规路径下留空——核心会把它经 `mcp.GatewayCredCwdEnv` 放在网关条目的 `env` 里（见
+	// `resolveCredCwd` 的优先级：显式入参 > 环境变量 > 网关自己的 cwd）。留出这个字段是为了让
+	// 调用方与测试能**显式**给一个值，而不必去摆布进程环境。
+	CredCwd string
+}
+
+// 凭据 cwd 的来源（日志与测试共用同一组取值；`source` 进日志，判据落在"回落到自己那份"）。
+const (
+	credCwdSourceOption   = "core-option" // 调用方显式传入
+	credCwdSourceEnv      = "core-env"    // 核心经网关条目的 env 传入
+	credCwdSourceOwnGetwd = "own-getwd"   // 谁都没给 → 网关自己的 cwd（**必须 WARN**）
+)
+
+// resolveCredCwd 决定凭据 cwd：**显式入参 > 环境变量 > 网关自己的 cwd**。
+//
+// 为什么这一层这么较真：`<cwd>/.env` 是四层回落里的第三层，而网关是**底座 spawn 的子进程**——
+// 它的 cwd（通常是会话工作区）是用户没选过的目录。核心与网关各自 `os.Getwd()` 时，同一个引用
+// 会在两个进程里解析出不同的值（面板说"取不到"而网关注解得出来，或反过来），而两边各自的测试
+// 都是绿的。所以：核心**显式交下来**（`mcp.GatewayCredCwdEnv`），网关只在确实没拿到时才回落，
+// 并把回落这件事交给调用方 WARN。
+//
+// 纯函数（`getenv` 注入）：判据可测，不必摆布进程环境。
+func resolveCredCwd(explicit string, getenv func(string) string) (cwd, source string) {
+	if v := strings.TrimSpace(explicit); v != "" {
+		return v, credCwdSourceOption
+	}
+	if getenv != nil {
+		if v := strings.TrimSpace(getenv(mcp.GatewayCredCwdEnv)); v != "" {
+			return v, credCwdSourceEnv
+		}
+	}
+	own, err := os.Getwd()
+	if err != nil {
+		// 取不到自己的 cwd 也不能让网关起不来：空 cwd 交给 `pkg/credentials`（那一层读不到
+		// 就是"没有这一层"，不留半截路径——与 `IsolationEnv` 对空 home 的处置同一条纪律）。
+		return "", credCwdSourceOwnGetwd
+	}
+	return own, credCwdSourceOwnGetwd
 }
 
 // MateSource 从平台持久层取数并代理远程 MCP 的 `Source` 实现。
 type MateSource struct {
-	svc       *manager.Service
-	pool      *mcp.Pool
-	ownPool   bool
-	st        *store.Store
-	ownStore  bool
-	agentDir  string
-	agentID   string
-	pinned    *[]string
-	perServer time.Duration
-	reloadMin time.Duration
-	now       func() time.Time
+	svc         *manager.Service
+	pool        *mcp.Pool
+	ownPool     bool
+	st          *store.Store
+	ownStore    bool
+	providerDir string
+	pinned      *[]string
+	perServer   time.Duration
+	reloadMin   time.Duration
+	now         func() time.Time
+	// credCwd / credCwdSource 本次装配实际用的凭据 cwd 与它的来源（见 resolveCredCwd；
+	// 留在结构体上是为了让日志与测试看的是**同一个已决定的值**，不是各算一遍）。
+	credCwd       string
+	credCwdSource string
 
 	mu         sync.Mutex
 	lastReload time.Time
@@ -87,9 +130,6 @@ type MateSource struct {
 // NewSource 打开数据面（按 `Cfg.ResolvedStoreMode()` 分派 sqlite / memory 两条装载路径，
 // 与核心进程 `internal/app.loadDefinitions` 同一判据），返回可交给 `Run` 的 Source。
 func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
-	if opts.AgentID == "" {
-		return nil, fmt.Errorf("网关数据面缺少 agent id")
-	}
 	if opts.PerServerTimeout <= 0 {
 		opts.PerServerTimeout = 8 * time.Second
 	}
@@ -97,8 +137,7 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		opts.Now = time.Now
 	}
 	s := &MateSource{
-		agentDir:     opts.Cfg.AgentDir,
-		agentID:      opts.AgentID,
+		providerDir:  opts.Cfg.ProviderDir,
 		pinned:       opts.McpsPinned,
 		perServer:    opts.PerServerTimeout,
 		reloadMin:    opts.ReloadMinInterval,
@@ -124,8 +163,32 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 		s.ownPool = true
 	}
 
-	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `AgentDir`
-	// （providers.json 与 vault 锚点仍在文件侧，见 internal/app 的同款注释）。
+	// 凭据面**先行装配**（v20）：下面 `EnableStore`/装载之后才会解析密钥（`resolveMcpSecrets`
+	// 在网关每次取工具面时都会走），而"密钥从哪来"由这一层回答（四层回落的唯一实现）。
+	// 网关与核心进程**同一套装配**——两处各写一遍必然分叉，而分叉的表现是
+	// "核心能注入的服务器，网关注入不了"（用户只会看到工具少了一半）。
+	//
+	// **cwd 由核心传入**（`mcp.GatewayCredCwdEnv`，见 `resolveCredCwd`）：`<cwd>/.env` 那一层的
+	// 语义是"用户启动 `mate serve` 的目录"，而网关的 cwd 是**底座给的**（会话工作区）——
+	// 各自 `os.Getwd()` 会让同一个引用在这里和核心解析出不同的值。
+	credCwd, credCwdSource := resolveCredCwd(opts.CredCwd, os.Getenv)
+	s.credCwd, s.credCwdSource = credCwd, credCwdSource
+	if credCwdSource == credCwdSourceOwnGetwd {
+		// 这一条 WARN 就是本裁决的判据：核心没把 cwd 交下来时，"两个进程用了不同的 cwd"
+		// 必须看得见，而不是静默地各解析各的。
+		glog.Warnw(ctx, "mcp 网关: 核心没有传凭据 cwd，本次用网关自己的 cwd（与核心可能不同）",
+			"cwd", credCwd, "env", mcp.GatewayCredCwdEnv)
+	} else {
+		glog.Infow(ctx, "mcp 网关: 凭据 cwd 已确定", "cwd", credCwd, "source", credCwdSource)
+	}
+	if layered, _, cErr := manager.OpenCredentialSource(opts.Cfg.HomeDir, credCwd); cErr != nil {
+		glog.Warnw(ctx, "mcp 网关: 凭据分层未装配（只有库里的那一份可用）", "err", cErr)
+	} else {
+		s.svc.SetCredentials(layered)
+	}
+
+	// 持久层：sqlite 走 DB（事实源），memory 走文件目录——两侧都必须拿到 `ProviderDir`
+	// （providers.json 仍在文件侧，见 internal/app 的同款注释）。
 	if st := opts.Store; st != nil {
 		s.st, s.ownStore = st, false
 	} else if opts.Cfg.ResolvedStoreMode() == config.StoreModeSQLite {
@@ -137,16 +200,16 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	}
 	if s.st != nil {
 		s.svc.EnableStore(s.st)
-		s.svc.LoadAgentDefinitionsFromStore(ctx, opts.Cfg.AgentDir)
+		s.svc.LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
 	} else {
 		// memory 模式没有持久层：文件是唯一事实源（与核心进程逐条一致）。
-		s.svc.LoadAgentDefinitions(opts.Cfg.AgentDir)
+		s.svc.LoadProviderDefinitions(opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
 	glog.Infow(ctx, "mcp 网关数据面就绪",
-		"agent", s.agentID, "store", opts.Cfg.ResolvedStoreMode(), "db", opts.Cfg.DBPath,
+		"store", opts.Cfg.ResolvedStoreMode(), "db", opts.Cfg.DBPath,
 		"pinned", s.pinned != nil)
 	return s, nil
 }
@@ -298,7 +361,7 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
-	defs, err := s.svc.GatewayMcpFace(s.agentID, s.pinned)
+	defs, err := s.svc.GatewayMcpFace(runtime.SelectedRuntime(), s.pinned)
 	if err != nil {
 		return nil, err
 	}
@@ -345,10 +408,10 @@ func (s *MateSource) reload(ctx context.Context) error {
 	if _, err := s.svc.ReloadCapabilityDefinitions(ctx); err != nil {
 		return fmt.Errorf("网关重读能力定义失败: %w", err)
 	}
-	// agent 面也要重读：白名单（agent.Mcps）与"agent 是否还在"都在它上面。
-	// `agentDir` 必须原样传回：它是 vault 锚点（`providers.json` 在文件侧），传空会静默
+	// provider 面也要重读：密钥引用解析与"这条档案还在不在"都在它上面。
+	// `providerDir` 必须原样传回：`providers.json` 在文件侧（locator 的取值来源），传空会静默
 	// 把密钥解析面砍掉（症状是"所有引用都解析不了"，而不是报错）。
-	s.svc.ReloadAgentDefinitionsFromStore(ctx, s.agentDir)
+	s.svc.ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
 	return nil
 }
 

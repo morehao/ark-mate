@@ -28,7 +28,6 @@ type CapabilityCtr interface {
 	UpdateMcpServer(c *gin.Context)
 	DeleteMcpServer(c *gin.Context)
 	ListTools(c *gin.Context)
-	AgentCapabilities(c *gin.Context)
 	CallMcpTool(c *gin.Context)
 	ListMcpResources(c *gin.Context)
 	ReadMcpResource(c *gin.Context)
@@ -188,17 +187,6 @@ func (h *capabilityCtr) ListTools(c *gin.Context) {
 		return
 	}
 	gincontext.Success(c, items)
-}
-
-// AgentCapabilities 返回某 Agent 的统一能力目录（§8.1）：按候选 runtime 聚合 skill/MCP/tool
-// 的可见面。未知 agent → 40401（gincontext.Fail 透传 gerror 码）。
-func (h *capabilityCtr) AgentCapabilities(c *gin.Context) {
-	resp, err := h.svc.AgentCapabilities(c.Param("id"))
-	if err != nil {
-		gincontext.Fail(c, code.FromError(err))
-		return
-	}
-	gincontext.Success(c, resp)
 }
 
 // ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并

@@ -7,7 +7,6 @@ import (
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
-	"github.com/morehao/golib/glog"
 )
 
 // requestPermission 处理一次 ACP 权限请求（在 SDK 派发的 goroutine 中阻塞等待用户决策）：
@@ -23,22 +22,9 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 	if sid == "" {
 		sid = req.SessionID // 兜底回落原生（理论上不应出现；保留事件不丢）
 	}
-	// M2 #7 per-agent 默认权限策略：运维护栏优先于会话级记忆（策略 allow/deny 直接决策，
-	// 不经用户；审计事件 session.permission_policy 留痕）。ask/未声明 → 回落既有路径。
-	if action, agentID, ok := o.policyAction(sid, req); ok {
-		if d, dok := autoPermissionDecision(action, req.Options); dok {
-			o.svc.publish(BusPermissionPolicy, sid, map[string]any{
-				"session_id": sid, "agent_id": agentID, "action": action,
-				"title": req.ToolCall.Title, "kind": req.ToolCall.Kind,
-				"allowed": d.Allowed, "rejected": d.Rejected, "option_id": d.OptionID,
-			})
-			glog.Infow(ctx, "permission: auto-decided by agent policy", "session", sid,
-				"agent", agentID, "action", action, "title", req.ToolCall.Title, "kind", req.ToolCall.Kind)
-			return d
-		}
-		glog.Warnw(ctx, "permission: agent policy action has no matching option, fallback to ask",
-			"session", sid, "agent", agentID, "action", action, "options", len(req.Options))
-	}
+	// v19 起没有 per-agent 默认权限策略这一层（agent 面删除）：裁决只剩**会话级记忆**
+	// （用户"始终允许"过的）与会话级征询。`session.permission_policy` 事件常量仍冻结在
+	// events.go（对外契约），但已经没有生产者。
 	if d, ok := o.perm.AutoDecision(sid, req); ok {
 		return d
 	}

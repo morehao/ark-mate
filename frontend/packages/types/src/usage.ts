@@ -4,15 +4,20 @@
 export interface UsageQuery {
   from?: string
   to?: string
-  agent_id?: string
-  /** agent（默认）| day（UTC 日期）。 */
-  group_by?: 'agent' | 'day'
+  /**
+   * 分组维度：只有 day（UTC 日期，key = `YYYY-MM-DD`）。
+   *
+   * v19 起没有 agent 分组（连同 `?agent_id=` 过滤一起撤掉）：底座由构建期固定，
+   * 按它分组只会得到"一个桶装着全部"——那不是分组，是给同一个答案多画一列。
+   */
+  group_by?: 'day'
 }
 
-/** 一行用量聚合（group_by=agent → key=agent_id；=day → key=YYYY-MM-DD）。 */
+/** 一行用量聚合（key=YYYY-MM-DD）。 */
 export interface UsageBucket {
   key: string
-  agent_id?: string
+  /** 桶归属的底座 id（构建期固定的那个；作为事实回带，不作分组维度）。 */
+  runtime_id?: string
   runs: number
   completed: number
   failed: number
@@ -37,7 +42,7 @@ export interface UsageBucket {
 export interface UsageSummary {
   from?: string
   to?: string
-  agent_id?: string
+  runtime_id?: string
   group_by: string
   /** sqlite | memory（memory 模式无统计）。 */
   source: string
@@ -45,7 +50,7 @@ export interface UsageSummary {
   context_semantics: string
   /** 费用口径：`session_cumulative_end_of_window`（会话累计快照，非增量）。 */
   cost_semantics: string
-  /** 桶之间能否相加：agent 分组 true；day 分组 false（跨天会话的累计快照会重复出现）。 */
+  /** 桶之间能否相加：day 分组 false（跨天会话的累计快照会重复出现）。 */
   buckets_additive: boolean
   totals: UsageBucket
   buckets: UsageBucket[]

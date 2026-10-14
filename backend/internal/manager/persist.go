@@ -64,7 +64,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	ver := map[string]int64{}
 	for _, sess := range list {
 		rec := &SessionRec{
-			ID: sess.ID, AgentID: sess.AgentID, Cwd: sess.Cwd,
+			ID: sess.ID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
 			WorkspaceTemporary: sess.WorkspaceTemporary, ProviderID: sess.ProviderID,
 			ModelID: sess.ModelID, RuntimeID: runtime.NormalizeID(sess.RuntimeID),
@@ -134,7 +134,6 @@ func (s *Service) persistSession(rec *SessionRec) {
 	defer cancel()
 	err := s.st.UpsertSession(ctx, model.SessionEntity{
 		ID:                 rec.ID,
-		AgentID:            rec.AgentID,
 		Cwd:                rec.Cwd,
 		WorkspaceID:        rec.WorkspaceID,
 		WorkspaceTemporary: rec.WorkspaceTemporary,

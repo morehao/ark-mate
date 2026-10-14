@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
@@ -205,7 +204,9 @@ func discardTempWorkspace(t *testing.T, res WorkspaceResolution) {
 
 // ——— 建会话路径的接线（解析先于任何 ACP 动作） ———
 
-// workspaceTestSvc 播一个 echo runtime 上的 agent（不拨真实子进程：本轮只验证解析与校验顺序）。
+// workspaceTestSvc 一个挂在 stub 底座上的 Service（不拨真实子进程：本轮只验证解析与校验顺序）。
+//
+// v19 起建会话没有"agent 必须先存在"这道前置：底座由构建期固定，夹具把它设成 stub 即可。
 func workspaceTestSvc(t *testing.T) *Service {
 	t.Helper()
 	reg := testutil.StubRegistry()
@@ -213,11 +214,6 @@ func workspaceTestSvc(t *testing.T) *Service {
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	if _, err := svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "ws-probe", Name: "工作空间测试",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
 	return svc
 }
 
@@ -228,14 +224,14 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 	mustWorkspacePolicy(t, svc, t.TempDir(), nil)
 
 	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "ws-probe", Cwd: "relative/not-absolute",
+		Cwd: "relative/not-absolute",
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("相对路径应 40001（请求拒绝），got %d: %v", code, err)
 	}
 
 	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "ws-probe", Cwd: filepath.Join(t.TempDir(), "nope"),
+		Cwd: filepath.Join(t.TempDir(), "nope"),
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("不存在的路径应 40001，got %d: %v", code, err)
@@ -246,7 +242,7 @@ func TestCreateSessionWorkspaceRejectedBeforeRuntime(t *testing.T) {
 		t.Fatalf("write: %v", werr)
 	}
 	_, err = svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "ws-probe", Cwd: f,
+		Cwd: f,
 	})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("文件路径应 40001，got %d: %v", code, err)
@@ -259,7 +255,7 @@ func TestCreateSessionWorkspaceRequiredWhenDisabled(t *testing.T) {
 	svc := workspaceTestSvc(t)
 	mustWorkspacePolicy(t, svc, "", nil)
 
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if code := gerrCode(t, err); code != 40001 {
 		t.Fatalf("代建关闭应 40001，got %d: %v", code, err)
 	}
@@ -285,7 +281,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	}
 
 	// echo spec 无启动命令 → acquire 失败。
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "ws-probe"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if err == nil {
 		t.Fatal("无命令的 runtime 应建会话失败")
 	}
@@ -309,9 +305,9 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 // TestListSessionsWorkspaceFilter 响应回读 cwd/workspace_temporary + `?cwd=` 精确过滤。
 func TestListSessionsWorkspaceFilter(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.registerSession(&SessionRec{ID: "c-a", AgentID: "a1", Cwd: "/work/alpha"})
-	svc.registerSession(&SessionRec{ID: "c-b", AgentID: "a1", Cwd: "/work/beta", WorkspaceTemporary: true})
-	svc.registerSession(&SessionRec{ID: "c-tmp-sub", AgentID: "a1", Cwd: "/work/alpha/sub"})
+	svc.registerSession(&SessionRec{ID: "c-a", Cwd: "/work/alpha"})
+	svc.registerSession(&SessionRec{ID: "c-b", Cwd: "/work/beta", WorkspaceTemporary: true})
+	svc.registerSession(&SessionRec{ID: "c-tmp-sub", Cwd: "/work/alpha/sub"})
 
 	all, err := svc.ListSessions(false, "", "")
 	if err != nil {
@@ -348,7 +344,7 @@ func TestListSessionsWorkspaceFilter(t *testing.T) {
 	// 必须命中同一批会话——路径字符串不该决定身份。
 	rootDir := t.TempDir()
 	svc2 := NewService(runtime.NewRegistry(), eventbus.New())
-	svc2.registerSession(&SessionRec{ID: "c-real", AgentID: "a1", Cwd: mustEval(t, rootDir)})
+	svc2.registerSession(&SessionRec{ID: "c-real", Cwd: mustEval(t, rootDir)})
 	for _, spelling := range []string{rootDir, rootDir + "/", filepath.Join(rootDir, ".", "..", filepath.Base(rootDir))} {
 		got, err := svc2.ListSessions(false, spelling, "")
 		if err != nil {
@@ -418,11 +414,11 @@ func TestBrowseWorkspace(t *testing.T) {
 func TestRecentWorkspaces(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	svc.registerSession(&SessionRec{ID: "r-1", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base})
-	svc.registerSession(&SessionRec{ID: "r-2", AgentID: "a1", Cwd: "/work/alpha", UpdatedAt: base.Add(time.Hour)})
-	svc.registerSession(&SessionRec{ID: "r-3", AgentID: "a1", Cwd: "/work/beta", UpdatedAt: base.Add(2 * time.Hour)})
-	svc.registerSession(&SessionRec{ID: "r-4", AgentID: "a1", Cwd: "/work/tmp", WorkspaceTemporary: true, UpdatedAt: base.Add(3 * time.Hour)})
-	svc.registerSession(&SessionRec{ID: "r-5", AgentID: "a1", UpdatedAt: base.Add(4 * time.Hour)}) // 无 cwd（历史行）
+	svc.registerSession(&SessionRec{ID: "r-1", Cwd: "/work/alpha", UpdatedAt: base})
+	svc.registerSession(&SessionRec{ID: "r-2", Cwd: "/work/alpha", UpdatedAt: base.Add(time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-3", Cwd: "/work/beta", UpdatedAt: base.Add(2 * time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-4", Cwd: "/work/tmp", WorkspaceTemporary: true, UpdatedAt: base.Add(3 * time.Hour)})
+	svc.registerSession(&SessionRec{ID: "r-5", UpdatedAt: base.Add(4 * time.Hour)}) // 无 cwd（历史行）
 
 	list, err := svc.RecentWorkspaces(10)
 	if err != nil {

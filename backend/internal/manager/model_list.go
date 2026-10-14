@@ -357,9 +357,6 @@ func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	}
 	s.mu.Unlock()
 	for i := range recs {
-		if _, ok := s.AgentByID(recs[i].AgentID); !ok {
-			continue
-		}
 		eff.AffectedSessions++
 		if o == nil {
 			continue

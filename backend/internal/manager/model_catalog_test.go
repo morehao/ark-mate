@@ -22,7 +22,6 @@ func catalogRig(t *testing.T) (*Service, *Orchestrator) {
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub", State: AgentStateStopped}
 	return svc, orch
 }
 
@@ -55,10 +54,10 @@ func TestModelCatalogLiveSession(t *testing.T) {
 			{Value: `["anthropic","claude-sonnet"]`, Name: "Claude Sonnet", Group: "anthropic", GroupName: "Anthropic"},
 		},
 	}}
-	orch.sessions["c1"] = &ActiveSession{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
+	orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: "stub",
 		sess: &stubSession{options: opts}}
 
-	resp, err := svc.ModelCatalog(context.Background(), "agent-stub")
+	resp, err := svc.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -80,7 +79,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 
 	// 活会话消失后仍可从缓存取（避免每次查询都 resume）。
 	delete(orch.sessions, "c1")
-	cached, err := svc.ModelCatalog(context.Background(), "agent-stub")
+	cached, err := svc.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog(cache): %v", err)
 	}
@@ -96,7 +95,7 @@ func TestModelCatalogLiveSession(t *testing.T) {
 // （**不新建探测会话**：此处若为拿到目录而 session/new，会留下无法删除的持久记录）。
 func TestModelCatalogNoSource(t *testing.T) {
 	svc, _ := catalogRig(t)
-	resp, err := svc.ModelCatalog(context.Background(), "agent-stub")
+	resp, err := svc.ModelCatalog(context.Background())
 	if err != nil {
 		t.Fatalf("ModelCatalog: %v", err)
 	}
@@ -111,18 +110,14 @@ func TestModelCatalogNoSource(t *testing.T) {
 	}
 }
 
-// TestModelCatalogUnknownAgent 未知 agent → agent_not_found；构建期底座未装配 →
-// runtime_not_registered（历史断言「agent 声明了未注册的候选」随候选面一起下线）。
-func TestModelCatalogUnknownAgent(t *testing.T) {
+// TestModelCatalogRuntimeNotRegistered 构建期底座未装配 → runtime_not_registered
+// （历史的「未知 agent → agent_not_found」随 agent 面一起下线：目录本来就只问底座）。
+func TestModelCatalogRuntimeNotRegistered(t *testing.T) {
 	svc, _ := catalogRig(t)
-	if _, err := svc.ModelCatalog(context.Background(), "nope"); err == nil {
-		t.Fatal("未知 agent 应报错")
-	}
-	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost"}
 	setBuildRuntime(t, "ghost") // 换一个不在注册表里的构建期底座
 	// 注意：这条错误在 ModelCatalog 里已被 `code.FromError` 归一（`runtime_not_registered` 只留在
 	// 文案里），所以判据是信封码 + 文案，而不是 acl 的稳定 code。
-	if _, err := svc.ModelCatalog(context.Background(), "agent-ghost"); err == nil {
+	if _, err := svc.ModelCatalog(context.Background()); err == nil {
 		t.Fatal("构建期底座未装配应报错")
 	} else if numericCode(err) != 40001 || !strings.Contains(err.Error(), "runtime_not_registered") {
 		t.Fatalf("应是 40001 runtime_not_registered，got %d（%v）", numericCode(err), err)
@@ -140,9 +135,9 @@ func TestApplySessionModelSemantics(t *testing.T) {
 		CurrentValue: "test/other",
 		Values:       []acl.ConfigOptionValue{{Value: "test/other", Name: "Other"}},
 	}}}
-	orch.sessions["c1"] = &ActiveSession{ID: "c1", AgentID: "agent-stub", Runtime: "stub",
+	orch.sessions["c1"] = &ActiveSession{ID: "c1", Runtime: "stub",
 		sess: &stubSession{}, proj: proj}
-	svc.catalog.markRejected("agent-stub", "test/other", "旧失败")
+	svc.catalog.markRejected("stub", "test/other", "旧失败")
 	applied, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "test/other"})
 	if err != nil || !applied {
 		t.Fatalf("应用应成功: applied=%v err=%v", applied, err)
@@ -150,11 +145,11 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if len(proj.applied) != 1 || proj.applied[0].Model != "test/other" {
 		t.Fatalf("下发值应原样透传: %+v", proj.applied)
 	}
-	if reason, bad := svc.catalog.rejection("agent-stub", "test/other"); bad {
+	if reason, bad := svc.catalog.rejection("stub", "test/other"); bad {
 		t.Fatalf("成功后应清除不可用标记: %s", reason)
 	}
 	// 缓存被成功状态刷新（活会话优先级更高，故直接查缓存）。
-	entry, ok := svc.catalog.get("agent-stub", defaultCatalogTTL)
+	entry, ok := svc.catalog.get("stub", defaultCatalogTTL)
 	if !ok || acl.CurrentConfigValue(entry.options, acl.CategoryModel) != "test/other" {
 		t.Fatalf("目录缓存应被成功状态刷新: %+v", entry)
 	}
@@ -164,14 +159,14 @@ func TestApplySessionModelSemantics(t *testing.T) {
 	if _, err := orch.ApplySessionModel(context.Background(), "c1", runtime.ModelConfig{Model: "nope"}); err == nil {
 		t.Fatal("运行时拒绝应上抛")
 	}
-	if _, bad := svc.catalog.rejection("agent-stub", "nope"); !bad {
+	if _, bad := svc.catalog.rejection("stub", "nope"); !bad {
 		t.Fatal("拒绝的取值应记入不可用反馈")
 	}
 
 	// 3) 运行时未广告模型项（echo 语义）：显式指定模型 → model_not_supported；
 	//    未指定（空）→ 无操作。
 	unsupported := &fakeProjection{err: acl.NewError(acl.ClassUnsupported, "unsupported_model", "未广告模型配置项", nil)}
-	orch.sessions["c2"] = &ActiveSession{ID: "c2", AgentID: "agent-stub", Runtime: "stub",
+	orch.sessions["c2"] = &ActiveSession{ID: "c2", Runtime: "stub",
 		sess: &stubSession{}, proj: unsupported}
 	_, err = orch.ApplySessionModel(context.Background(), "c2", runtime.ModelConfig{Model: "x"})
 	ae, ok := acl.As(err)

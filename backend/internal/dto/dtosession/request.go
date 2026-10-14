@@ -1,5 +1,7 @@
 package dtosession
 
+import "encoding/json"
+
 // MemoryRevokeReq 撤销权限记忆请求体（title+kind 均空 = 一键撤销全部）。
 type MemoryRevokeReq struct {
 	Title string `json:"title"`
@@ -25,8 +27,14 @@ type PromptReq struct {
 
 // SessionCreateReq 新建会话请求体。
 type SessionCreateReq struct {
-	AgentID string `json:"agent_id"` // 空 = 默认播种 Agent（dsh）
-	Prompt  string `json:"prompt"`
+	Prompt string `json:"prompt"`
+	// AgentID **只用于显式拒绝**（JSON `agent_id`）：agent 概念整个并入 runtime（底座构建期
+	// 固定，`pkg/runtime/build.go`），"这个会话归哪个 agent"已不是一个可选的东西。
+	//
+	// 为什么留着这个同名 raw 字段而不是直接删：JSON 绑定默认**丢弃未知键**——删掉它会让
+	// `{"agent_id":"x"}` 被静默收下然后什么都不发生，用户以为"我指定了 agent"而实际没生效。
+	// 出现即 40001 + 指路（`rejectRemovedAgentSelection`，与 `runtimes`/`default_model` 同一条纪律）。
+	AgentID json.RawMessage `json:"agent_id"`
 	// Cwd 会话工作空间（绝对路径）。空 = 落在**默认工作空间**（响应 workspace_temporary=true）；
 	// 非空时校验「绝对 / 存在 / 是目录」，通过后按符号链接规范化落库。
 	// 工作空间建成后不可变——它是底座 ACP session 的 cwd，也是原生权限 workspace-write 的边界。
@@ -42,7 +50,7 @@ type SessionCreateReq struct {
 	// 原样回传（空 = 跟随运行时默认）。
 	Model string `json:"model,omitempty"`
 	// Capabilities 会话级能力选定（M3）。**缺省 = 与引入本字段之前逐字节相同**：
-	// MCP 走 agent 白名单、skill 走各自的 runtimes 声明，且不产生能力指纹（不新起代际）。
+	// MCP 全量（按 runtime transport 过滤）、skill 走各自的 runtimes 声明，且不产生能力指纹。
 	// 显式传入时逐个校验 id 存在且对该 runtime 可达，不可达即报错并列出原因（不静默丢弃）。
 	Capabilities *CapabilitiesReq `json:"capabilities,omitempty"`
 	// Origin 会话来源，**内部字段**（`json:"-"`，不从 wire 读）：'' = 人工，'automation:<id>' = 该

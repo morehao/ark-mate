@@ -79,6 +79,10 @@ func TestNativeModeValidate(t *testing.T) {
 }
 
 // TestNativePermissionEnabledSwitch B5：Service 开关（默认开 / 可关）。
+//
+// v19：agent 面撤销后平台**没有**权限策略来源（策略曾随 agent 定义一起加载），所以这个开关
+// 现在不改变任何注入结果——它保留是因为它是对外装配面（`MATE_NATIVE_PERMISSION=off`）与
+// `nativePermissionEnv` 这条**端口契约**的存在证明：接入方仍可自行调用它。见 service.go 的注释。
 func TestNativePermissionEnabledSwitch(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil)
 	if !svc.NativePermissionEnabled() {
@@ -114,16 +118,4 @@ func mustEnv(t *testing.T, p *PermissionPolicy) []string {
 	t.Helper()
 	env, _ := nativePermissionEnv(portRegistry(), "dsh", p)
 	return env
-}
-
-// TestNativePermissionEnvForSwitch B5：Service 开关关闭后不注入。
-func TestNativePermissionEnvForSwitch(t *testing.T) {
-	svc := NewService(portRegistry(), nil)
-	if env := svc.nativePermissionEnvFor("dsh", &PermissionPolicy{Default: "deny"}); len(env) != 1 {
-		t.Fatalf("默认应注入，got %v", env)
-	}
-	svc.SetNativePermission(false)
-	if env := svc.nativePermissionEnvFor("dsh", &PermissionPolicy{Default: "deny"}); len(env) != 0 {
-		t.Fatalf("关闭后应不注入，got %v", env)
-	}
 }

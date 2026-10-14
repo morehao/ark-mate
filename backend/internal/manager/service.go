@@ -9,37 +9,21 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
-// AgentRec 是进程内 Agent 定义。
-//
-// **没有 runtime 维度**：agent 是"对当前底座的命名配置"（provider 档案 / 权限策略 / MCP 白名单 /
-// skill 可用面），跑在哪个底座上是**构建期固定**的（pkg/runtime/build.go）。曾经的 `Runtimes`
-// 候选列表与 `RoutingPolicy` 随之下线——留着它们只会让下一个人以为"平台还能按候选试探"。
-type AgentRec struct {
-	ID       string
-	Name     string
-	Provider string // provider 档案 id（P2 provider 注入面）；空 = 默认
-	// Mcps 启用的 MCP server id 白名单（P2 §5.2）。nil = 未声明（默认：注册表全量按
-	// runtime 传输过滤注入）；非 nil（可为空数组）= 白名单（空 = 本 agent 禁用 MCP 注入）。
-	Mcps *[]string
-	// PermissionPolicy 默认权限策略（M2 #7）：nil = 全 ask（历史行为）。
-	// 注：B5 起该策略还会投影到底座原生权限开关（见 native_permission.go）。
-	PermissionPolicy *PermissionPolicy
-	State            string
-}
-
 // SessionRec 是进程内会话终态记录（内存镜像；sqlite 模式下与 sessions 行同源）。
-// P0 起不再记录 runtime 身份；RuntimeID 仅为最近/首选 runtime 的**执行事实**（非身份，用户不可见；
-// v17 起与 DB 列 `sessions.runtime_id` 同名同义，此前叫 RuntimeHint/runtime_hint）。
+//
+// **身份只有 runtime**（v19）：v17 时这里写着"P0 起不再记录 runtime 身份"，本轮反过来——
+// 底座由构建期固定、用户不可自定义，所以 `runtime_id` 就是唯一身份事实（它同时是 DB 列
+// `sessions.runtime_id`、事件 payload 的 `runtime`、诊断面的 `runtime`）。v19 之前那半个
+// `agent_id` 与它指向同一个东西，收成一个。
 type SessionRec struct {
-	ID      string
-	AgentID string
+	ID string
 	// Cwd 会话工作空间（canonical 绝对路径）。它同时是 ACP session/new 的 cwd 与
 	// 原生权限 workspace-write 的边界（见 workspace.go）。
 	Cwd string
@@ -52,9 +36,10 @@ type SessionRec struct {
 	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
 	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
 	WorkspaceID string
-	ProviderID  string // provider 档案 id（会话级模型选择；空 = 跟随 agent；v16 起列名带 `_id`）
+	ProviderID  string // provider 档案 id（会话级模型选择；空 = 跟随默认模型；v16 起列名带 `_id`）
 	ModelID     string // 会话级模型 id（空 = 底座默认；指向 models.model_id，v16 起列名带 `_id`）
-	RuntimeID   string // 最近/首选 runtime（执行事实，非身份；v17 起列 runtime_id）
+	// RuntimeID 本会话的 runtime 身份（v17 起列 `runtime_id`；v19 起它是**唯一的**身份事实）。
+	RuntimeID string
 	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。
 	// §6 排队输入据此判断「排队时依赖的那一轮上下文还在不在」——不等即作废（见 inputqueue.go）。
 	// 只在内存：重启本身就让所有排队行作废，没有跨重启比对的语义。
@@ -69,7 +54,7 @@ type SessionRec struct {
 	Fingerprint string
 	// Origin 会话来源（'' = 人工；'automation:<id>' = 该 automation 触发产生）。M4 写入，M3 只落列。
 	Origin string
-	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 回落 agent 白名单）。
+	// CapabilityJSON 创建时解析出的**能力选定明细**（JSON；'' = 未声明 → 全量按 runtime 过滤）。
 	// 与 Fingerprint 的分工：指纹回答"是不是同一套"（比较/回收用），明细回答"到底是哪几个"
 	// （回显、诊断、以及指纹算法变化后的一次性迁移判据）。
 	CapabilityJSON string
@@ -82,7 +67,7 @@ type SessionRec struct {
 }
 
 // Service 实现 handler.Service（替换 mock），为控制面提供「真实」数据与动作：
-// runtime 来自注册表；agent 为每 runtime 的默认播种；会话来自本进程内存存储；
+// runtime 来自注册表（构建期固定，见 runtime_binding.go）；会话来自本进程内存存储；
 // 会话动作（create/prompt/cancel）委托 Orchestrator（其内部持真实 ACP 连接）。
 type Service struct {
 	reg  *runtime.Registry
@@ -96,8 +81,10 @@ type Service struct {
 	// runtimeSyncOutcomes 各 runtime **最后一次同步的结论**（v12：读面直接读它，不在读路径上重跑同步）。
 	runtimeSyncOutcomes map[string]resource.Outcome
 
-	agentDir  string                  // Agent definitions 目录（P2；空 = 不落盘，仅内存）
-	providers map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
+	// providerDir 定义目录（v19 起只装 `providers.json`；空 = 不落盘，仅内存）。
+	// v20 起它与凭据面无关：密钥在库里，托管文档锚在 `MATE_HOME`（见 SetProviderDir）。
+	providerDir string
+	providers   map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
 	// workspaceDir 代建工作空间的根目录（未指定 cwd 时在 <root>/<会话id>/ 建）。
 	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
 	// 见 SetWorkspacePolicy / ResolveWorkspace。
@@ -113,11 +100,8 @@ type Service struct {
 	// workspaceRootsStore 白名单的持久化端口（面板 PUT 时写回配置目录；nil = 只读）。
 	// 端口而非直接实现：manager 不碰配置文件，优先级/锁定判定由 infra 报告（见 workspace_settings.go）。
 	workspaceRootsStore WorkspaceRootsStore
-	// currentAgent 「当前 Agent」的显式选择（P2 起可切换；空 = 未设置，走回落链）。
-	// 落盘 <AgentDir>/default.json（见 default_agent.go）；读写一律持 s.mu。
-	currentAgent string
-	catalog      *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
-	caps         *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
+	catalog             *catalogStore        // 运行时派生模型目录缓存 + 拒绝值反馈（见 model_catalog.go）
+	caps                *capability.Registry // 能力数据面（P1：Skill/MCP/Tool 三表；LoadCapabilityDefinitions 装载）
 	// capabilityDir 能力定义目录。**语义按持久层模式分叉**（M6-2）：
 	//   - memory 模式：装载源 + 启停写回位置（文件是唯一持久形态）；
 	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
@@ -142,8 +126,9 @@ type Service struct {
 	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
 	skillProjections []SkillProjection
 
-	mu       sync.Mutex
-	agents   map[string]*AgentRec
+	mu sync.Mutex
+	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
+	binding  *runtimeBinding
 	sessions map[string]*SessionRec
 	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
 	inputs    map[string][]QueuedInput
@@ -155,11 +140,11 @@ type Service struct {
 	mcpProbes       map[string]mcpProbeStatus
 	mcpProbeTimeout time.Duration
 
-	// A3 诊断：每 agent 最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
-	diagMu   sync.Mutex
-	lastErrs map[string]agentLastErr
-	// scopeNotes 每 agent 最近一条「归属歧义」留痕（elicitation 无法归属会话时写入）。
-	scopeNotes map[string]scopeNote
+	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
+	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
+	diagMu    sync.Mutex
+	lastErr   *runtimeLastErr
+	ambiguous *ambiguityNote
 	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
 	//
 	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
@@ -172,10 +157,26 @@ type Service struct {
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *chunkCoalescer
-	// vaultStore §5 provider 密钥加密落盘句柄（惰性创建 + 缓存；见 providers.go providerVault）。
-	vaultStore *vault.Store
-	vaultTried bool
-	vaultErr   error
+	// creds 四层凭据面（v20；见 credentials.go 与 SetCredentials）：provider 拨号密钥的**唯一**
+	// 解析入口 = 继承环境 > 托管文档（`<MATE_HOME>/credentials.json`）> `<cwd>/.env` > `<home>/.env`
+	// （顺序实现只有 `pkg/credentials` 一份）。
+	//
+	// nil = 未装配（网关/测试的某些路径）：此时只有库里的那一份可用，读面会在 problems 里明说。
+	// **装配期写一次、之后只读**——所以它和 `st` 一样不加锁访问（解析路径会被反复走到，
+	// 而持 `s.mu` 的读模型也要用它）。
+	creds *credentials.Layered
+
+	// credCwd **凭据 cwd**（v20）：`<cwd>/.env` 那一层的 cwd = **用户启动 `mate serve` 的那个
+	// 目录**，由装配期经 `SetCredentialCwd` 显式登记（不是用到时 `os.Getwd()`）。
+	//
+	// 它存在的唯一理由是**要交下去**：网关条目把同一个值经 `mcp.GatewayCredCwdEnv` 交给网关
+	// 子进程，否则底座 spawn 的网关会拿自己的 cwd（会话工作区）去解析同一个引用——两个进程给出
+	// 两个答案，且完全静默。空 = 装配时没登记：条目不带它，网关侧 WARN 后回落（这条 WARN 就是
+	// "两个进程可能不同"的可见性）。
+	//
+	// **装配期写一次、之后只读**（同 `creds`：读它的 `gatewayEntry` 在请求路径上被并发走到，
+	// 加锁反而会让持 `s.mu` 的调用点死锁）。
+	credCwd string
 
 	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
 	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
@@ -201,7 +202,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		bus: bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		agents:           make(map[string]*AgentRec),
 		sessions:         make(map[string]*SessionRec),
 		inputs:           make(map[string][]QueuedInput),
 		ver:              make(map[string]int64),
@@ -210,8 +210,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		caps:             capability.NewRegistry(),
 		mcpProbes:        make(map[string]mcpProbeStatus),
 		mcpProbeTimeout:  defaultMCPProbeTimeout,
-		lastErrs:         make(map[string]agentLastErr),
-		scopeNotes:       make(map[string]scopeNote),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
@@ -222,9 +220,10 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.coalescer = newChunkCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
 	})
-	// 播种内置 Agent：**每个内置 adapter 一个**（形状见 builtinAgents），仅当其 runtime 已注册时播种。
-	// 与 `LoadAgentDefinitionsFromStore` 共用同一份播种逻辑（那里整体替换时要补齐种子）。
-	s.seedBuiltinAgents()
+	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
+	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
+	spec, specOK := reg.Get(runtime.SelectedRuntime())
+	s.binding = newRuntimeBinding(spec, specOK)
 	return s
 }
 
@@ -259,11 +258,11 @@ func (s *Service) SetTranscriptDir(dir string) {
 }
 
 // beginTranscript 为会话写 transcript header（首行）；失败只告警不阻断。
-func (s *Service) beginTranscript(sessionID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
+func (s *Service) beginTranscript(sessionID, runtimeID, cwd string, workspaceTemporary bool) {
 	if s.tx == nil {
 		return
 	}
-	s.tx.begin(sessionID, agentID, runtimeID, cwd, workspaceTemporary)
+	s.tx.begin(sessionID, runtimeID, cwd, workspaceTemporary)
 }
 
 // closeTranscripts 关闭全部 transcript 文件（daemon 退出/orchestrator.Close 收尾）。

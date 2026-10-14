@@ -99,7 +99,7 @@ func (d *MessageDao) SearchUserText(ctx context.Context, sessionID, q string) ([
 type Hit struct {
 	SessionID    string
 	SessionTitle string
-	AgentID      string
+	RuntimeID    string
 	Role         string
 	MessageID    string
 	RunID        string
@@ -120,7 +120,7 @@ func (d *MessageDao) SearchText(ctx context.Context, q string, limit int) ([]Hit
 	}
 	var rows []Hit
 	if err := d.DB(ctx).Table(model.TableNameMessage+" AS m").
-		Select(`m.session_id, COALESCE(c.title, '') AS session_title, COALESCE(c.agent_id, '') AS agent_id,
+		Select(`m.session_id, COALESCE(c.title, '') AS session_title, COALESCE(c.runtime_id, '') AS runtime_id,
 		        m.role, m.id AS message_id, m.run_id, m.seq_lo AS seq, m.seq_hi, m.text, m.created_at`).
 		Joins("LEFT JOIN "+model.TableNameSession+" AS c ON c.id = m.session_id").
 		Where(`m.text LIKE ? ESCAPE '\'`, likePattern(q)).

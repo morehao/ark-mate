@@ -13,7 +13,7 @@
  * 含义不同的手风琴。一体式弹窗还有个直接好处：从任何页面都能就地改设置，且分节之间一步切换。
  */
 import type { ReactNode } from 'react'
-import { ApiOutlined, ClusterOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
+import { ApiOutlined, KeyOutlined, SettingOutlined } from '@ant-design/icons'
 import { isDesktopEntry } from '../capabilityFacts'
 
 export interface SettingsSection {
@@ -36,10 +36,12 @@ export const SETTINGS_MENU = {
  * 这类代码词，也不出现任何底座名（`dsh`/`runtime`/`底座`）。「模型」这一节的标题与
  * 两块小标题只说「供应商」「模型」——用户视角的词，而不是资源层的词。
  */
+// v19 删掉的是「Agent 管理」那一节（注册 / 启停 / 凭据引用）：底座由构建期固定、用户不可自定义，
+// 那一节里的每个动作都没有接收方。**「模型」那一节的两个标题一个字都没动**——
+// 它的文案由守卫 `TestSettingsModelCopyAvoidsProvider` 钉着（用户词是「供应商」「模型」）。
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'general', label: '通用', hint: '工作区目录白名单', icon: <SettingOutlined />, order: 10 },
   { id: 'model', label: '模型', hint: '供应商 / 模型清单 / 默认模型 / 生效结论', icon: <ApiOutlined />, order: 15 },
-  { id: 'agents', label: 'Agent 管理', hint: '注册 / 启停 / 凭据引用', icon: <ClusterOutlined />, order: 20 },
   { id: 'token', label: '访问令牌', hint: '后端启用 MATE_TOKEN 时必填', icon: <KeyOutlined />, order: 30 },
 ]
 

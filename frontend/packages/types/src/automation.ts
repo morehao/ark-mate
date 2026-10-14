@@ -30,8 +30,12 @@ export interface AutomationSchedule {
  * `target.runtime_hint`，写面会被服务端 40001 拒绝（`runtime_selection_removed`），不会静默忽略。
  */
 export interface AutomationTarget {
-  agent_id: string
-  /** 工作空间（**创建时钉住**；必须非空绝对路径）。 */
+  /**
+   * 工作空间（**创建时钉住**；必须非空绝对路径）。
+   *
+   * v19 起没有 `agent_id`：定时任务触发时建的那个会话落在构建期固定的底座上，
+   * 没有"由哪个 agent 执行"这个选择面（老定义里若还留着它，写面会被服务端拒绝，不静默忽略）。
+   */
   cwd: string
   model?: string
   prompt: string

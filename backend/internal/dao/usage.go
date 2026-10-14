@@ -9,10 +9,9 @@ import (
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
 
-// UsageRow 是一条用量聚合输入行（runs ⨝ sessions，usage_json 已解析）。
+// UsageRow 是一条用量聚合输入行（runs，usage_json 已解析）。
 type UsageRow struct {
 	SessionID string
-	AgentID   string
 	Status    string
 	StartedAt time.Time
 	EndedAt   time.Time
@@ -26,29 +25,26 @@ type UsageRow struct {
 // 「TEXT → time.Time」的隐式解析。
 type usageRawRow struct {
 	SessionID string
-	AgentID   string
 	Status    string
 	StartedAt string
 	EndedAt   string
 	UsageJSON string
 }
 
-// UsageRows 读取区间 [from, to) 内的 run 行（含 agent 归属与用量快照），按 started_at 升序。
+// UsageRows 读取区间 [from, to) 内的 run 行（含用量快照），按 started_at 升序。
+//
+// v19 起**不再 join sessions**：那一次 join 只为取 `agent_id`，而 agent 维度已整体取消。
 //
 // 边界必须以落库布局格式化后再比较：时间列是 RFC3339Nano **文本**，
 // 直接绑 time.Time 会被驱动按自己的布局写成空格分隔，区间比较随即错位。
-func (d *RunDao) UsageRows(ctx context.Context, from, to time.Time, agentID string) ([]UsageRow, error) {
+func (d *RunDao) UsageRows(ctx context.Context, from, to time.Time) ([]UsageRow, error) {
 	q := d.DB(ctx).Table(model.TableNameRun + " AS r").
-		Select("r.session_id, c.agent_id, r.status, r.started_at, r.ended_at, r.usage_json").
-		Joins("JOIN " + model.TableNameSession + " AS c ON c.id = r.session_id")
+		Select("r.session_id, r.status, r.started_at, r.ended_at, r.usage_json")
 	if !from.IsZero() {
 		q = q.Where("r.started_at >= ?", model.FormatTime(from))
 	}
 	if !to.IsZero() {
 		q = q.Where("r.started_at < ?", model.FormatTime(to))
-	}
-	if agentID != "" {
-		q = q.Where("c.agent_id = ?", agentID)
 	}
 
 	var raw []usageRawRow
@@ -59,7 +55,6 @@ func (d *RunDao) UsageRows(ctx context.Context, from, to time.Time, agentID stri
 	for _, r := range raw {
 		row := UsageRow{
 			SessionID: r.SessionID,
-			AgentID:   r.AgentID,
 			Status:    r.Status,
 			StartedAt: model.ParseTime(r.StartedAt),
 			EndedAt:   model.ParseTime(r.EndedAt),

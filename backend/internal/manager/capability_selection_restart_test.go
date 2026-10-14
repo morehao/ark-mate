@@ -27,17 +27,15 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	reg := runtime.NewRegistry(spec)
 	cwd := t.TempDir()
 
-	// —— 进程一：建会话并钉住 "只要 git"（agent 层未声明白名单 = 默认全量，才有区分度）——
+	// —— 进程一：建会话并钉住 "只要 git"（未钉的对照组 = 全量，才有区分度）——
 	st1 := testutil.OpenStore(t, dbPath)
 	svc1 := NewService(reg, eventbus.New())
 	svc1.EnableStore(st1)
 	registerStdioMcps(t, svc1)
-	svc1.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch1 := NewOrchestrator(svc1, reg)
-	agent1, _ := svc1.AgentByID("a1")
 
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"git"})}
-	res, err := orch1.startSessionOn(ctx, agent1, StartOptions{Cwd: cwd, Selection: pinned})
+	res, err := orch1.startSessionOn(ctx, StartOptions{Cwd: cwd, Selection: pinned})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
 	}
@@ -47,10 +45,10 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 		t.Fatalf("钉住选定的会话必须有非空指纹: %+v", rec1)
 	}
 	// 未声明选定时指纹为空（缺省路径零回归）——对照组。
-	if fp0 := svc1.capabilityFingerprint(agent1, "stub", nil); fp0 != "" {
+	if fp0 := svc1.capabilityFingerprint("stub", nil); fp0 != "" {
 		t.Fatalf("未声明应为空指纹，got %q", fp0)
 	}
-	defInject := names(directMcp(svc1.McpServersFor(agent1, "stub", nil)))
+	defInject := names(directMcp(svc1.McpServersFor("stub", nil)))
 	if len(defInject) != 2 {
 		t.Fatalf("对照组（未声明）应注入 2 条直连，got %v", defInject)
 	}
@@ -86,9 +84,6 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	if _, _, err := svc2.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
-	svc2.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
-	agent2, _ := svc2.AgentByID("a1")
-
 	rec2 := svc2.sessionRec(convID)
 	if rec2 == nil {
 		t.Fatal("重启后会话记录应有（库是权威元数据）")
@@ -105,7 +100,7 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 		t.Fatalf("重启后代际键漂移:\n%s\n%s", genKey1, genKey2)
 	}
 	// ③ 恢复路径算出的注入集 = 会话钉住的那一份（不是"现在的默认"）。
-	restored := names(directMcp(svc2.McpServersFor(agent2, "stub", ParseCapabilitySelection(rec2.CapabilityJSON))))
+	restored := names(directMcp(svc2.McpServersFor("stub", ParseCapabilitySelection(rec2.CapabilityJSON))))
 	if !sameSet(restored, []string{"git"}) {
 		t.Fatalf("重启后注入集应等于钉住的选定，got %v", restored)
 	}
@@ -114,8 +109,8 @@ func TestCapabilitySelectionSurvivesRestart(t *testing.T) {
 	}
 	// 恒定的网关条目在重启前后**逐字**相同（args 里的 scope 与会话钉住的白名单都来自会话记录，
 	// 与进程无关）——它一旦漂移，重启就会换代际。
-	gw1 := gatewayMcp(svc1.McpServersFor(agent1, "stub", ParseCapabilitySelection(rec1.CapabilityJSON)))
-	gw2 := gatewayMcp(svc2.McpServersFor(agent2, "stub", ParseCapabilitySelection(rec2.CapabilityJSON)))
+	gw1 := gatewayMcp(svc1.McpServersFor("stub", ParseCapabilitySelection(rec1.CapabilityJSON)))
+	gw2 := gatewayMcp(svc2.McpServersFor("stub", ParseCapabilitySelection(rec2.CapabilityJSON)))
 	if gw1 == nil || gw2 == nil {
 		t.Fatal("两侧都应有恒定的网关条目")
 	}

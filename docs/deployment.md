@@ -47,18 +47,19 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
     安全组限制来源；**不要**无令牌直接暴露到公网。容器场景需显式 `MATE_ADDR=0.0.0.0:10001`（见 §4）。
 - 生产建议 `GIN_MODE=release`（否则每次启动打印 debug 模式告警）。
 - 会话 wire transcript（`~/.ark-mate/transcripts/*.jsonl`）与 SQLite 库含**完整对话原文**，按敏感数据
-  对待（文件权限、备份加密）。
+  对待（文件权限）；**v20 起库里还有明文密钥**，所以 `backups/` 目录 0700 / 备份文件 0600 是硬要求（§6），
+  且**共享 / 多用户机器上不再安全**。
 
 ### 2.2 数据目录与持久层
 
 | 路径 | 默认 | 覆盖 | 内容 |
 | --- | --- | --- | --- |
-| SQLite 库 | `~/.ark-mate/mate.db` | `MATE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） + capability/agent/automation 定义 + **v11 起 provider 档案（`providers` 表）与平台模型清单（`models` 表）**。**v11 起它是 provider 档案的权威**——所以它必须在备份清单里（见 §6），"只备 `providers.json`"从这一版起不再等价 |
+| SQLite 库 | `~/.ark-mate/mate.db` | `MATE_DB` | 会话/事件/runs/messages/权限记忆（读模型与事实源） + capability/automation 定义 + **v11 起 provider 档案（`providers` 表）与平台模型清单（`models` 表）**。**v11 起它是 provider 档案的权威**——所以它必须在备份清单里（见 §6），"只备 `providers.json`"从这一版起不再等价 |
 | transcript | `~/.ark-mate/transcripts/` | `MATE_TRANSCRIPTS` | 每会话一个 `<id>.jsonl`（schema v1，append-only） |
-| Agent 定义 | `~/.ark-mate/agents/<id>.json` | `MATE_AGENTS` | 自定义 agent（含 `permission_policy`）。**`MATE_STORE=sqlite`（默认）时这个目录不是定义的事实源**：定义存在 DB 的 `agents` 表里（内置种子 `dsh` 仍在代码中，行只存"对种子的覆盖"），本目录只作**导入/导出**位置（装配期自动导入一次、`mate agent import\|export` 手动搬运）；「当前 Agent」的显式选择落 `meta.default_agent`。目录里的 `providers.json` 同属**目录级配置**且**v11 起也只是导入/导出载体**（档案的权威在 DB；写面一个字节都不回写它，回退旧二进制前要 `mate provider export` 回灌，见 §6），迁移前的快照是 `providers.json.bak-v11`（**建议一起备份**，它是回退窗口里唯一那份"迁移前真相"）；vault 锚点（本目录的父目录）两种模式下都在这里 |
-| 密钥库（vault） | `~/.ark-mate/vault.key` + `~/.ark-mate/vault/` | `MATE_VAULT_KEY`（覆盖主密钥） | provider 密钥与 **MCP 密钥**的**主密钥**与密文（AES-256-GCM，AAD 带 kind：`provider_key` / `mcp_secret`，两者不可互换）；`providers.json` 的 `key_ref: vault:providers/<id>` → `vault/providers/<id>.enc`，MCP 的 `vault:<ns>/<name>` → `vault/<ns>/<name>.enc` |
+| provider 档案（导入/导出） | `~/.ark-mate/providers/providers.json` | `MATE_PROVIDERS` | **v11 起它就不是档案的事实源**（权威在 DB 的 `providers`/`models` 两表）；v19 起这个目录**只剩这一件事**（此前叫 `agents/`，因为当时还装 agent 定义——agent 概念已整体并入 runtime，见设计「决策变更 v19」）。旧目录里的 `providers.json` 会被装配期**一次性导入**并打 WARN 指向新路径，**旧文件不删**。写面一个字节都不回写它，回退旧二进制前要 `mate provider export` 回灌，见 §6；迁移前的快照是 `providers.json.bak-v11`（**建议一起备份**，它是回退窗口里唯一那份"迁移前真相"）；v20 的凭据镜像 `<MATE_HOME>/credentials.json` 是**另一份落点**（默认 `~/.ark-mate/credentials.json`，见下一行），不再从本目录派生 |
+| 凭据镜像（v20） | `~/.ark-mate/credentials.json` | 无（**没有环境变量覆盖项**） | provider 密钥与 MCP 托管密钥的**严格 `ref → value` 映射**（`providers/<id>` 与 `store:<ns>/<name>` 两类引用装在同一份文件里），权限 **0600** 且**不合即失败**（fail-loud），写入用临时文件 + rename 的原子替换。**事实源是库**（`providers.key` 列 + `mcp_secrets` 表）：写路径先落库、再双写它，镜像写失败只 WARN 并记进 `problems[]`（删掉它不丢任何东西）；memory 模式没有库，那时文件即事实源、写失败就是整笔失败。**库里没有而文件里有 → 不自动回灌**：`mate doctor` 报出差异并指路显式导入。读值走**四层回落**：**继承环境（只读，最高）> 托管文件 > `<cwd>/.env` > `<MATE_HOME>/.env`**（只作用于 provider 拨号密钥；MCP 的 `env:<NAME>` 是用户在定义里显式点名，不再套四层）。`<cwd>` = **用户启动 `mate serve` 的那个目录**（不是各进程各自的 cwd）：MCP 网关是底座 spawn 的子进程、cwd 常常是会话工作区，所以核心在生成网关条目时把凭据 cwd 显式交下去（`MATE_MCP_CRED_CWD`），网关拿不到时回落到自己的 cwd 并**打一条 WARN**（落在 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`，网关诊断不走 stderr）。**它取代了 v13 的主密钥文件 + `vault/` 密文面**（两者在 v20 迁移后整体删除） |
 | 自动化定义 | `~/.ark-mate/automations/<id>.json` | `MATE_AUTOMATIONS` | 定时任务。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：定义与运行态存在 DB 的 `automations` 表里（**定义列** `body`+`revision` 与**运行态列** `last_fired_at`/`last_status`/`last_reason`/`last_conversation_id`/`consecutive_failures`/`recent_runs` 分列；`state` 属于定义，因为启用/停用是用户操作），本目录只作**导入/导出**位置（装配期自动导入一次、`mate automation import\|export` 手动搬运；导入会把文件里的运行态键切进运行态列，导出时再合成同一个文件）。memory 模式下 `<id>.json` 仍是唯一定义 + 运行态载体（`schedule`/`target` 是用户写的，`last_*`/`recent_runs` 是平台写回的）——**备份它就是备份任务**（含运行史）。两种模式下手工编辑后用 `GET /automations` 确认装载成功（坏定义会出现在列表里并带 `error`，不会静默消失） |
-| 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `vault:<ns>/<name>` 或 `env:<ENV_NAME>`（§13.3 M1） |
+| 能力定义 | `~/.ark-mate/capabilities/` | `MATE_CAPABILITIES` | `skills/`、`mcp/`、`tools/` 目录。**`MATE_STORE=sqlite`（默认）时这个目录不是事实源**：能力定义存在 DB 的 `skills`/`mcp_servers` 表里，本目录只作**导入/导出**位置（装配期自动导入一次、`mate capability import\|export` 手动搬运；`tools/` 不参与持久化）。skill 定义可带 `enabled:false`（**禁用 = overlay**：正文与 `runtimes` 保留，只停止投放；`PATCH /skills/:id` 写回此键）。skill 的投放对象是 `runtimes: []`（空 = 全部 runtime；旧的 `sources[]` 已退役，定义里还有它会在装载期挂 `legacy_sources_key` 告警并提示 `mate capability migrate`）。MCP 定义里 `env`/`headers` 是明文，密钥放 `secret_env`/`secret_headers` 且值只能是 `store:<ns>/<name>`（v20 起；托管密钥在库的 `mcp_secrets` 表，旧前缀 `vault:` 指的是已删除的机制，导入时会被显式翻译成 `store:` 并 WARN）或 `env:<ENV_NAME>`（§13.3 M1） |
 | 投影根覆盖 | 空（用 runtime 声明的默认根） | `MATE_PROJECTION_DIRS` | `runtime:kind=dir` 列表（如 `myrt:skill=/data/agents/skills`；`myrt` = 在册的那个底座 id，内置的是 `dsh`）。**只覆盖根、不改形态**：落到哪个文件名、写成哪种格式由 runtime 的投影声明决定。空 = 全用 adapter 声明的原生根（内置 `dsh` 的原生根是 `~/.agents/skills` + `<id>/SKILL.md`）。**取代**了旧的 `MATE_SKILLS_MATERIALIZE_DIR` / `_DIRS`（旧键仍报错，但报错会认出它并给出新键与等价写法） |
 | 默认工作空间 | `~/.ark-mate/workspaces/default/` | `MATE_WORKSPACE_DIR` | 建会话未指定 `cwd` 时的落点（v14）。它是**一条落库的工作空间登记**（`workspaces` 表，`is_default=1`），不是"每会话一个目录"——同一台机器上所有未指定目录的会话共享它。目录由装配期建立（`<MATE_WORKSPACE_DIR>/default`），**只在登记表为空时**创建：删掉它之后不会自动重建 |
 | 工作区起始位置偏好 | 空（无偏好） | `MATE_WORKSPACE_ROOTS` | 逗号分隔绝对路径（config.json 亦可写 JSON 数组）。**它是"目录浏览从哪儿起步"的偏好，不是允许范围**（v14.5 起：选工作区是全系统，任何已存在的目录都能浏览、都能当工作空间）。**代建根由平台隐式并入**，无需手写进来；面板「设置」页可改（落盘到 `<配置目录>/config.json`） |
@@ -144,8 +145,7 @@ curl -s http://127.0.0.1:10001/v1/mate/health     # {"code":0,"msg":"ok"}
 | `MATE_STORE` | auto | `auto` / `sqlite` / `memory`（空同 `auto`）；非法值报错 |
 | `MATE_DB` | `~/.ark-mate/mate.db` | SQLite 路径 |
 | `MATE_TRANSCRIPTS` | `~/.ark-mate/transcripts` | wire transcript 目录 |
-| `MATE_AGENTS` | `~/.ark-mate/agents` | Agent 定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 的 `agents` 表里）。两种模式下 vault 的 home 都取它的父目录（`~/.ark-mate`），`providers.json` 也仍在它里面 |
-| `MATE_VAULT_KEY` | 空 | 主密钥覆盖（32 字节 base64/hex）；**非空时不读不建 `vault.key`**（容器/CI 用）；密钥丢失 = 已有密文不可恢复 |
+| `MATE_PROVIDERS` | `~/.ark-mate/providers` | provider 档案的**导入/导出目录**（权威在 DB 的 `providers` 表；只在 sqlite 模式当载体，memory 模式下文件仍是事实源）；v19 起它只装 `providers.json` 一件事（旧目录名 `agents/` 里的那份会被启动时**一次性导入**并 WARN，旧文件不删）。v20 的凭据镜像落在 `<MATE_HOME>/credentials.json`（默认 `~/.ark-mate/credentials.json`），**没有配套的环境变量覆盖项** |
 | `MATE_CAPABILITIES` | `~/.ark-mate/capabilities` | 能力定义目录：memory 模式是装载源，sqlite 模式是**导入/导出目录**（定义在 DB 里） |
 | `MATE_AUTOMATIONS` | `~/.ark-mate/automations` | 自动化定义目录：memory 模式是装载源（`<id>.json`，定义与运行态 overlay 同文件，手工可读），sqlite 模式是**导入/导出目录**（定义与运行态在 DB 的 `automations` 表里） |
 | `MATE_AUTOMATION_TICK` | `30s` | 调度循环 tick 间隔；**`0` = 关闭整个 automation 调度**（维护窗口用，不是"最快跑"） |
@@ -203,28 +203,29 @@ curl -s -X POST http://127.0.0.1:10098/v1/mate/automations/preview \
 
 同目录可选 `runtimes.json`（A5）：远程 runtime 声明数组
 `[{"id","name","transport":"ws|http","endpoint","headers"}]`，启动时注册进 runtime 注册表，
-agent 的 `runtimes` 字段即可引用；与内置 id 冲突、传输/URL 形态非法都会让 `mate serve`
+skill 定义的 `runtimes[]` 候选集即可引用它；与内置 id 冲突、传输/URL 形态非法都会让 `mate serve`
 启动即退出（退出码 2）。远程 runtime 无本地命令，可用性判定只看端点是否声明，可达性在拨号
 阶段判定（失败为 `50201` 连接类错误，端点地址出现在错误信息里）。
 
-支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `agents` `capabilities`
+支持的键（与 §2.3 表一一对应）：`addr` `transcripts` `db` `store` `providers` `capabilities`
 `automations` `automation_tick` `workspace_dir` `workspace_roots` `projection_dirs`
 `idle_timeout` `reap_interval` `run_timeout` `handoff_max_chars` `generation_limit`
 `permission_timeout` `elicitation_timeout` `proc_registry` `reap_grace` `token` `mcp_auto_probe`
 `asset_watch`
 `native_permission` `mcp_gateway`；另可用 `MATE_*` 原名、`-` 写成分隔符，以及少量别名
-（`transcript`/`db_path`/`agent_dir`/`capability_dir`）。
+（`transcript`/`db_path`/`provider_dir`/`capability_dir`）。
 
 `mcp_gateway`（`auto` 默认 | `off`）控制**远程 MCP 是否经平台侧网关**：`auto` 时远程传输
 （`sse`/`http`/`streamable_http`）的 MCP 由平台代连——底座只看见一条 stdio 条目
-（`mate-gateway` = `<平台可执行文件> mcp bridge --agent <id> --runtime <id>`），凭据不进底座可见面，
+（`mate-gateway` = `<平台可执行文件> mcp bridge --runtime <id>`），凭据不进底座可见面，
 且条目**恒定**（不随"有几台远程 server"变化）⇒ 增删改远程 server 都不换代际，网关下一次取数即生效；
 `off` 回退到"远程按底座声明的承载能力直连注入"的老路。stdio server 两种模式下都由底座直连。
 
 已改名的键仍会让启动失败（"非法键名即报错"这条规则不软化），但报错会**认出它**并给出新键与
 等价写法：`skills_materialize_dir` / `skills_materialize_dirs` → `projection_dirs`
-（`skills_materialize_dirs=myrt=/x` ≡ `projection_dirs=myrt:skill=/x`，`myrt` = 在册的那个底座 id）。升级动作就是改
-这一行——不做静默等价，否则用户会以为已经改完。
+（`skills_materialize_dirs=myrt=/x` ≡ `projection_dirs=myrt:skill=/x`，`myrt` = 在册的那个底座 id）；
+`agents` 与旧的 agent 目录键（`agent` 前缀那几个别名）→ `providers` / `provider_dir`（v19：那个目录里只剩 `providers.json` 一件事）。
+升级动作就是改这一行——不做静默等价，否则用户会以为已经改完。
 
 `workspace_roots` 键**可能被面板改写**（`PUT /settings/workspace`，原子写 + read-modify-write，
 保留文件里其它键），所以手工编辑时留意别和面板同时改；被更高优先级来源锁定时面板只会拒绝写。
@@ -245,7 +246,7 @@ systemd 场景可直接用同一目录：`EnvironmentFile=-%h/.ark-mate/config/e
 
 ```
 MATE_TOKEN=$(openssl rand -hex 24) ./mate serve --addr 0.0.0.0:10001
-curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/agents
+curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/sessions
 ```
 
 - REST：`Authorization: Bearer <token>`（大小写不敏感，允许多余空白）；失败返回 HTTP 401 +
@@ -265,7 +266,7 @@ curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/agent
 
 - `dsh`：需本机可执行 `dsh --profile acp`（同 `$DSH_HOME` 持久化根）。
 
-内置播种 agent 为 `dsh`（默认）——**要求本机装有对应底座并完成 provider 登录**。
+构建期固定的底座为 `dsh`（默认）——**要求本机装有对应底座并完成 provider 登录**。
 
 > **`echo` 演示底座已删除（M0）**：此前 daemon 会自派生 `mate acp-demo` 子进程充当免安装、免模型
 > key 的 ACP 对端（用于冒烟与权限/提问演示），`mate acp-serve` 还能把它暴露成远程端点。这两条
@@ -273,8 +274,9 @@ curl -H "Authorization: Bearer $MATE_TOKEN" http://127.0.0.1:10001/v1/mate/agent
 > 不受影响（`.ark-mate/config/runtimes.json` 声明远程端点照常工作），失去的只是开箱演示；覆盖缺口
 > 台账见仓库 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`。
 
-> 种子 agent（内置 `dsh` 与保留前缀 `agent-`）**只读**：不可删、runtime 不可改
-> （报 40001 `seed_agent_readonly`）；name/provider/`permission_policy` 可改。
+> **没有 agent 定义面（v19）**：agent 概念已整体并入 runtime（底座由**构建期固定**、用户不可自定义），
+> 所以此前那条"内置 agent 只读"的约束随表 `agents` 与 `/agents/*` 一并消失——没有可编辑的 agent
+> 资源，也就没有"只读与否"这个问题。会话身份只剩 `runtime_id`，诊断见 `GET /v1/mate/runtime/diagnostics`。
 
 ## 3. systemd（裸机/VM）
 
@@ -293,9 +295,13 @@ Group=mate
 WorkingDirectory=/opt/ark-mate
 Environment=GIN_MODE=release
 Environment=MATE_ADDR=127.0.0.1:10001
+# 数据根显式给死：ProtectHome=read-only 会把家目录变成只读，而 v20 的凭据镜像
+# 落在 <MATE_HOME>/credentials.json —— 不设它就会落到 `~/.ark-mate` 下写不进去。
+# ReadWritePaths=/var/lib/ark-mate 正好覆盖它（库、transcript、providers、镜像同根）。
+Environment=MATE_HOME=/var/lib/ark-mate
 Environment=MATE_DB=/var/lib/ark-mate/mate.db
 Environment=MATE_TRANSCRIPTS=/var/lib/ark-mate/transcripts
-Environment=MATE_AGENTS=/var/lib/ark-mate/agents
+Environment=MATE_PROVIDERS=/var/lib/ark-mate/providers
 Environment=MATE_CAPABILITIES=/var/lib/ark-mate/capabilities
 ExecStart=/opt/ark-mate/mate serve
 Restart=on-failure
@@ -416,7 +422,7 @@ shell 环境（`export DSH_VERSION=…` 或 `DSH_VERSION=… docker compose up -
 | 项 | 值 | 原因 |
 | --- | --- | --- |
 | `MATE_ADDR` | `0.0.0.0:10001` | 二进制默认只绑回环，容器里不改就 `-p` 不进来 |
-| `HOME`、`MATE_CONFIG_DIR` | `/data`、`/data/config` | 库 / transcript / agents / capabilities / 配置 / 代建工作空间全在 `/data` 一个卷里（§2.2 的默认路径被显式改到卷上） |
+| `HOME`、`MATE_CONFIG_DIR` | `/data`、`/data/config` | 库 / transcript / providers / capabilities / 配置 / 代建工作空间全在 `/data` 一个卷里（§2.2 的默认路径被显式改到卷上） |
 | `MATE_STORE` | `sqlite` | 才有 runs 读模型与 `/usage/summary`（§2.2） |
 | `MATE_WORKSPACE_DIR` | `/data/workspaces` | 代建工作空间必须落在可写挂载上，否则容器重建即丢（§2.2.1） |
 | PID 1 | `tini` | daemon 会派生底座子进程（`dsh`），容器里需要 init 回收孤儿进程 |
@@ -477,9 +483,9 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 ## 5. 健康检查与可观测
 
 - 存活探针：`GET /v1/mate/health`（`code:0`）。
-- 就绪判据（无独立 readiness 端点，按下列信号组合）：health 通 + `GET /v1/mate/agents` 返回非空
-  + `GET /v1/mate/agents/<id>/diagnostics` 的 `runtime` 等于构建期注入的那个 id（`GET /runtimes`
-  已随「底座由构建期固定」一并删除）。
+- 就绪判据（无独立 readiness 端点，按下列信号组合）：health 通 + `GET /v1/mate/meta` 的 `runtime.id`
+  等于构建期注入的那个 id 且 `runtime.version` 非空（v19 起底座身份由构建期固定，`GET /runtimes`
+  与 `GET /agents` 两条"在册面"都已删除；会话诊断走 `GET /v1/mate/runtime/diagnostics`）。
 - 日志：stdout（zap 编码的 JSON 行，由 golib 的 `glog` 输出，级别固定 info）。例外两条：
   `mate mcp` 的 stdout 是 JSON-RPC 协议流，日志改落 `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`；
   `mate --json` 系子命令不装日志出口（保住 stdout 的机器可读性）。
@@ -490,15 +496,23 @@ compose 路径把同名变量写进 `.env` 即可（`NODE_IMAGE`/`GO_IMAGE`/`RUN
 ## 6. 备份 / 升级 / 回滚
 
 ```bash
-# 备份（停服或在线 SQLite 备份均可；transcript/agents/capabilities/vault 是纯文件）
+# 备份（停服或在线 SQLite 备份均可；transcript/providers/capabilities/credentials.json 是纯文件）
 # ⚠️ 必须备份 MATE_DB（默认 ~/.ark-mate/mate.db）：**v11 起 provider 档案的权威在这里**
 #     （providers 表），会话/事件/各域定义也都在这里——"只备 providers.json"从这一版起不再等价。
-# ⚠️ 必须一起备份 ~/.ark-mate/vault.key（provider 密钥的主密钥）：丢了 = 所有 provider 密文不可恢复
-#     （表现为 credential_missing「密钥密文无法解密」），只能重设各 provider 的 key。
-#     ~/.ark-mate/vault/ 是密文目录，同样要带（缺了等于密钥没了）。
-#     vault.key 是**列在 DB 之外的**，所以"只备库"同样不等价——两样都要。
-# ◯ 建议一起备份 <AgentDir>/providers.json 与它的 providers.json.bak-v11（v11 的迁移前快照）：
-#     前者是导入/导出载体（导出确认、对账、跨机搬迁都用它），后者是回退窗口里唯一那份"迁移前真相"。
+# ⚠️ **v20 起这份库与它的每一份备份里都有明文密钥**（`providers.key` 列 + `mcp_secrets` 表）：
+#     "库被读走也拿不到密钥"这条保护随 v20 消失，**共享 / 多用户机器上不再安全**
+#     （本机单用户桌面形态下可接受）。因此 **`backups/` 目录 0700、备份文件 0600 是硬要求**，
+#     不是整洁偏好：迁移备份落 `<db 目录>/backups/`（v19 起的布局），它和诊断包一样按密钥面看待。
+# ◯ 必须一起收进备份清单的：库（含 `backups/` 里的迁移前快照）、`~/.ark-mate/credentials.json`
+#   · v20 起这些文件都含**明文密钥**，权限是硬要求：库与备份 0600、`backups/` 0700。
+#     平台在**打开库时**会自动收口到 0600（`pkg/dbclient` 的 tightenFilePerms，含首次建库），
+#     收口过会打一条 WARN；`mate doctor` 的敏感文件清单把库与备份一并按密钥面报出（宽权限 = fail）。
+#     拷贝/同步整个数据目录 = 连密钥一起带走，所以权限收口之后还要注意**同步目标**的权限
+#     凭据镜像、`<ProviderDir>/providers.json` 与它的 providers.json.bak-v11（v11 的迁移前快照）、
+#     `~/.ark-mate/transcripts/`（对话原文）。
+# ◯ `credentials.json`（严格 ref → value、0600）是**可重建的镜像**：只备库也能恢复密钥（写路径
+#     先落库再写镜像）；反过来"库没了、只剩镜像"要按 `mate doctor` 指路的**显式导入**回灌，
+#     **不自动回灌**（否则会被一份陈旧文件悄悄撤销你在面板上做过的清除）。它权限不合即 fail-loud。
 sudo systemctl stop ark-mate
 tar czf ark-mate-$(date +%F).tgz -C /var/lib ark-mate
 sudo systemctl start ark-mate
@@ -514,17 +528,21 @@ sudo systemctl restart ark-mate
 
 # 回滚：换回旧二进制重启。**但只要新版本已经把库迁移到更高 schema 版本，旧二进制会拒绝启动**
 # （store.migrate: schema vN 高于本二进制支持的 vM），此时唯一的回滚路径是"恢复库备份 + 换回旧二进制"。
-# 本仓当前最新 schema = **v11**（v11 = 设置 · 模型的 providers/models 两张表 + 索引）。
-# v11 与前十个版本的区别值得单独记住：**它这一次带了不可逆动作**——provider 档案的事实源从
-# `<AgentDir>/providers.json` 搬进了库，升级后旧二进制读到的是**导入时刻的快照**。所以 v11 的
-# 回退除了换二进制，还要先 `mate provider export` 把库回灌成文件（步骤与检查项见 §6.1）。所以：
-#   · v10 二进制 → v11 库：停服 → `mate provider export --dir <AgentDir>` 回灌文件 →
-#     `tar xzf <升级前的备份>` 覆盖 `MATE_DB`（v11 两张表没了，provider 档案回到文件侧，这是备份点的
-#     状态，不是数据损坏）→ 换回 v10 二进制 → 起服
-#   · 跨过 v11 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
-#     升级重放 v11（两张表重新建一遍），而中间版本的任何数据改造都不会被撤销
-#   · 只想"临时退一版"而不动库：保持 v11 库、换回**仍然支持 v11** 的二进制（v11 之后的修复版本都属于这一类）
-# 备忘：`MATE_DB` 默认 `~/.ark-mate/mate.db`；备份命令见本节开头（vault.key 与 vault/ 必须一起备）。
+# 本仓当前最新 schema = **v20**（v11 = 设置 · 模型的 providers/models 两张表 + 索引；v20 = 给 `providers`
+# 加 `key` 列 + 建 `mcp_secrets` 表）。
+# v11 与 v20 各带一次不可逆动作，都值得单独记住：
+#   · v11：provider 档案的事实源从 `<ProviderDir>/providers.json` 搬进了库，升级后旧二进制读到的是
+#     **导入时刻的快照**。所以 v11 的回退除了换二进制，还要先 `mate provider export` 把库回灌成文件
+#     （步骤与检查项见 §6.1）。所以：
+#     - v10 二进制 → v11 库：停服 → `mate provider export --dir <ProviderDir>` 回灌文件 →
+#       `tar xzf <升级前的备份>` 覆盖 `MATE_DB`（v11 两张表没了，provider 档案回到文件侧，这是备份点的
+#       状态，不是数据损坏）→ 换回 v10 二进制 → 起服
+#     - 跨过 v11 的回滚**不要**试图手工改 `schema_migrations` 表：迁移是有序的，抹掉版本号会让下一次
+#       升级重放 v11（两张表重新建一遍），而中间版本的任何数据改造都不会被撤销
+#     - 只想"临时退一版"而不动库：保持 v11 库、换回**仍然支持 v11** 的二进制（v11 之后的修复版本都属于这一类）
+#   · v20：旧 `vault/` 密文被解密后写进 `providers.key` / `mcp_secrets` 与凭据镜像，`vault/` 与
+#     它的主密钥文件整体删除——**不留两个事实源**，回退靠升级前那份库备份（`backups/` 里就有）。
+# 备忘：`MATE_DB` 默认 `~/.ark-mate/mate.db`；备份命令见本节开头（库 + 镜像 + providers.json + transcript）。
 ```
 
 重启恢复语义：SQLite 模式从 `conversations`/`events` 恢复会话与历史；`interrupted` 状态表示重启前
@@ -535,7 +553,7 @@ sudo systemctl restart ark-mate
 
 ### 6.1 供应商档案换事实源（v11）：不可逆动作、执行前检查项、回退
 
-**为什么这一段单独写**：v11 之前，provider 档案的事实源是 `<AgentDir>/providers.json` 这个**文件**；
+**为什么这一段单独写**：v11 之前，provider 档案的事实源是 `<ProviderDir>/providers.json` 这个**文件**；
 v11 之后 sqlite 模式下换成了 `mate.db` 的 `providers` 表，文件降级为**导入/导出载体**——
 于是"回退旧二进制"这件事多了一个前提：**旧版本读的是那份文件，不是库**。
 切换与 `mate provider export` 之外没有第二条回灌路径，所以它是一个**不可逆动作**（在文件被导出覆盖
@@ -545,10 +563,10 @@ v11 之后 sqlite 模式下换成了 `mate.db` 的 `providers` 表，文件降�
 
 | # | 检查 | 命令 / 判据 | 不满足时说明什么 |
 | --- | --- | --- | --- |
-| ① | 备份存在且可读 | `test -r <AgentDir>/providers.json.bak-v11 && wc -c < <AgentDir>/providers.json.bak-v11`（能读出来、非空） | 没有备份就没有回退路径：先跑一次导入（或手工复制 `providers.json`）再继续 |
+| ① | 备份存在且可读 | `test -r <ProviderDir>/providers.json.bak-v11 && wc -c < <ProviderDir>/providers.json.bak-v11`（能读出来、非空） | 没有备份就没有回退路径：先跑一次导入（或手工复制 `providers.json`）再继续 |
 | ② | 模型清单为空 | `models` 表行数 == 0（`mate doctor --json` 的 `providers.modelRows`） | 非空说明这台机器已经在用 v11 的模型清单：这时候回退旧二进制会连它一起丢，先确认不需要 |
 | ③ | 无待物化配置 | `mate doctor --json` 的 `providers.runtimeConfigDigestWritten == false`（`meta.runtime_config_digest` 未被写过） | 已物化过说明模型清单的落盘/注入路径已经在跑：回退前先记下 `<MATE_HOME>/runtime/<id>/…` 里那几份文件的状态 |
-| ④ | vault 可达 | `mate doctor --json` 的 `checks[]` 里 **`vault` 无 `fail`** | `fail` 意味着密文已经在而主密钥不可用：先把 `vault.key` 找回来/修好，否则迁移会只搬 `key_ref`、迁移后一条密钥也解不开 |
+| ④ | 凭据镜像合规 | `mate doctor --json` 的 `providers.credentialsPermOk == true`（逐字字段：`credentialsPath` / `credentialsExists` / `credentialsPerm` / `credentialsPermOk` / `credentialsNote` / `credentialsRefs`），且 `providers.sensitiveFiles[]` 里 `credentials.json` 那条 `ok == true`（`expected` = `0600`） | 三个字段各答一件事：`credentialsExists=false` = 还没生成（**不算问题**：平台第一次写密钥时会建，库里那份不受它影响）；`credentialsPermOk=false` = 权限过宽/形状坏 ⇒ doctor **判 fail**（v20 起权限不合是 fail-loud，平台拒绝读它，修法 `chmod 600`）；`credentialsRefs` = 镜像里能数出几条引用（形状是否可解析的旁证）。注意"**库里没有而镜像里有**"（`providers.missingInStore` 非空）只**报出并指路**，既不算 `fail`、也**不自动回灌**——库才是事实源，回灌要用显式导入 |
 | ⑤ | 对账干净 | `mate doctor --json` 的 `providers.importMismatch` 为空（`meta.providers_import_mismatch` 无值） | 有值说明库与文件已经不等价：按 doctor 逐条报出的内容处理（`mate provider export` 同步文件，或查为什么文件里有而库里没有） |
 | ⑥ | 导出可用 | `mate provider export --dry-run` 成功（打印将要写出的内容，不改文件） | 导出失败 = 回退路径本身不通：先修它（DB 不可写/目录不可写）再切 |
 
@@ -558,9 +576,9 @@ v11 之后 sqlite 模式下换成了 `mate.db` 的 `providers` 表，文件降�
 # 1) 把 DB 回灌成 providers.json——这是回退窗口的**唯一**回灌路径。
 #    旧二进制只读这个文件；不做这一步，它读到的就是"导入那一刻的快照"，
 #    此后在面板/REST 里改过的凭据、新建的档案、改过的 type 全部会丢。
-mate provider export --dir <AgentDir>          # 先 --dry-run 看一眼也行（它只打印不落盘）
-# 2) 确认导出物对：条数与库一致、key_ref 都在（明文密钥不会出现在导出物里）。
-# 3) 换回旧二进制重启。若库已经被新版本迁到更高 schema（本仓 v11），
+mate provider export --dir <ProviderDir>       # 先 --dry-run 看一眼也行（它只打印不落盘）
+# 2) 确认导出物对：条数与库一致，且**导出物里没有任何明文密钥**（"导出不回写明文"是硬不变量）。
+# 3) 换回旧二进制重启。若库已经被新版本迁到更高 schema（本仓 v20），
 #    旧二进制会拒绝启动（store.migrate 的拒绝启动保护）——那时唯一的路径是
 #    "恢复升级前的库备份（§6 开头那份 tar）+ 换回旧二进制"；v11 之前的库本身没有
 #    providers/models 两张表，旧二进制读 providers.json 照常工作。
@@ -598,9 +616,9 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | --- | --- |
 | 面板打不开 / `GET /` 404 | 核心没拿到资产（没给 `--web-dir`/`MATE_WEB_DIR`）会**拒绝启动**并打印它要的那份路径，能起服说明资产已就位 → 那 404 通常是访问了错的端口，或给的目录里没有 `index.html`（SPA 回退无处可回） |
 | 启动即退出（退出码 3）「没有前端资产」 | 没给 `--web-dir`/`MATE_WEB_DIR`，或给的路径不是目录 / 里面没有 `index.html`；刻意**不回落**任何来源——"配错却照常跑起来"会让人看着旧界面以为新版本已经生效 |
-| 会话建不了、`agent_not_found` | agent 被删或 definitions 目录不可写；内置种子 `dsh` 只读不可删 |
+| 会话建不了、`runtime_not_found` | 构建期固定的那个底座没有注册（`runtimes.json` 里同 id 的远程端点缺失，或本机没装那个底座）——v19 起没有 agent 定义这层中间物，会话直接落在 runtime 身份上 |
 | 轮次一直转、无输出 | 底座进程未起（`dsh --profile acp` 不在 PATH）；设 `MATE_RUN_TIMEOUT` 让看门狗兜底 |
-| 权限卡不出现 | agent 配了 `permission_policy: allow|deny` → 已自动决策（看 `session.permission_policy` 事件与日志） |
+| 权限卡不出现 | v19 起平台侧**不再有策略来源**（per-agent `permission_policy` 随 agent 面删除）：会话级「征询 + 记忆」就是全部拦截面——命中了该会话的「始终允许」记忆就直接放行、不弹卡（`session.permission_policy` 事件常量仍在冻结契约里，但已无生产者）；另确认没设 `MATE_NATIVE_PERMISSION=off`（它关掉原生权限投影——平台不再向底座注入原生权限开关） |
 | `GET /usage/summary` 40501 | 跑在 memory 模式（无 runs 读模型）→ `MATE_STORE=sqlite` |
 | 上一 daemon 被 `kill -9` 后疑似残留 runtime 进程 | 启动日志看 `procreg: 启动孤儿回收完成`；注册表在 `<dir(MATE_DB)>/processes.json`（含 pid/pgid/runtime/agent），可人工核对；`MATE_PROC_REGISTRY=off` 可关闭 |
 | 启动日志 `跳过疑似 PID 复用的登记` | 正常保护：登记条目的 pgid 与当前进程不一致（PID 被复用）→ 只清账不杀进程 |
@@ -611,11 +629,11 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 | 数据库锁/写入失败 | 单实例语义（未实测多实例并发）；勿让两个 daemon 共用同一 `MATE_DB` |
 | `docker restart` / `compose up -d` 后会话是否还在 | 在。停机只作废 runtime 执行句柄（日志 `停机：会话句柄作废（会话与状态保留…）`）：已完成的轮次保持 `completed`，被停机打断的在途轮次为 `interrupted`，重启后同一会话可直接继续提问（`session.resumed`；dsh 走原生 `resume`，其余走 handoff memo） |
 | 重启后某会话仍是 `in_progress`（未收敛为 `interrupted`） | 极少数时序：进程在在途轮次收尾前退出。下次启动的恢复会把残留 `in_progress` 收敛为 `interrupted`（可续聊），见 §7 上一条 |
-| 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。若 agent 被删则报 `agent_not_found`（同 id 重新注册即可复活绑定） |
+| 会话继续提问报 `40401 未知或不可恢复会话` | 只可能是会话 id 不存在（历史 id 打错 / 库换过卷）；已存在的会话（含 `completed`/`failed`/`cancelled`）都可续聊。 |
 | 重启后 runtime 子进程没了 / `connected=false` | 预期：连接不在卷上，重启后按需重拨（暖进程空闲回收同理）。会话数据在卷里，不受影响 |
 | 容器里 `-p` 映射了端口但面板打不开 | 容器内必须 `MATE_ADDR=0.0.0.0:10001`（镜像已默认）；`MATE_ADDR` 改了端口时 `-p` 与 HEALTHCHECK 一并跟（后者从该变量现取） |
 | 容器里建会话报 `workspace_invalid`（路径不存在 / 不是目录） | 工作空间只能是挂载视图内的路径：`-v 宿主机目录:容器内路径`，会话 `cwd` 用**容器内路径**（agent 也在同一容器内，故这才是对 agent 正确的那个路径）。v14.5 起不再有"越界"这类拒绝，剩下的只有"这个路径在容器里根本不存在" |
-| 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含任何底座 → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /agents/:id/diagnostics` 的 `stderr_tail` |
+| 容器里 agent 起不来 / diagnostic `connected=false` | 最小镜像不含任何底座 → 用 `--target mate-runtimes` 重建，或把可执行文件 + 配置 bind mount 进容器；看 `GET /v1/mate/runtime/diagnostics` 的 `stderr_tail` |
 | `docker build` 卡在拉基础镜像 / `go mod download` 超时 | 受限网络用 §4.3 的 build-arg（`NODE_IMAGE`/`GO_IMAGE`/`RUNTIME_IMAGE`/`GO_PROXY`/`NPM_REGISTRY`）整组覆盖 |
 | 把 `WITH_DSH=true` 传给默认 target 构建失败 | 预期行为：开关必须配 `--target mate-runtimes`（或 `make image/runtimes`），不做静默忽略 |
 
@@ -623,7 +641,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 
 2026-10-11 起注册表键统一为 **`dsh`**（Go 包 `pkg/runtime/dsh`、展示名 `dsh`）——它本来就是同一个
 东西在其余六个面上的名字：二进制 `dsh`、隔离根 `<MATE_HOME>/runtime/dsh`、随包载荷 `payloads/dsh/`、
-桌面启动器分支 `runtimeId === 'dsh'`、环境变量前缀 `DSH_`、种子 agent id `dsh`。构建参数随之变成
+桌面启动器分支 `runtimeId === 'dsh'`、环境变量前缀 `DSH_`、构建期固定的 runtime id `dsh`。构建参数随之变成
 `RUNTIME=dsh` / `--build-arg MATE_RUNTIME=dsh`（不指定时的默认值）。
 
 **升级到本版之后，老数据不需要任何手工动作**——5 处持久化面在读时归一、并在**原有的写路径**上自愈：
@@ -665,6 +683,13 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 > 权限端口、模型值端口、能力粒度声明都是**按 adapter 声明**驱动的，接回一个底座不需要改内核），
 > 由 `internal/archtest` 的 v18 三条守卫与 `internal/testutil/runtimetest` 的合成适配钉住。
 > 本节里 `~/.config/opencode`、`~/.local/share/opencode` 这类**用户自己机器上的目录**照旧不许碰。
+>
+> **agent 面也已变（2026-10 后阅读）**：下面记录里成批出现的 `/agents`、`/agents/dsh/start`、
+> `/agents/<id>/diagnostics`、`seed_agent_readonly`、`agents/echo.json` 等，指的是**当时还在的
+> agent 概念**——它已整体并入 runtime（决策 v19）：底座的**身份**就是构建期固定的那个 runtime，
+> 会话直接落在 `runtime_id` 上。所以这些记录只作当时的取证；现行的对应面是 `GET /meta` 的
+> `runtime{id,name,version}`、`GET /runtime/diagnostics`、以及 README 路由表里的现行路由。
+> 记录里的 `/conversations` 同理（v15 起统一为 `/sessions`）。
 
 环境：macOS（无 systemd）、Go 1.26、Docker 守护进程可用（Docker Hub 直连受限，容器验证经镜像站覆盖
 基础镜像，见 §4.3）。
@@ -685,7 +710,7 @@ curl -X PATCH "$MATE/v1/mate/models/<id>" -H 'content-type: application/json' -d
 - 自动守卫：`go test -race ./...` 全绿；`TestReadmeRoutesMatchRouter` 校验 README 引用的 29 条
   路由全部命中注册表（反向注入错误路径会红）。
 - systemd 单元：**未执行**（macOS 无 systemd）——仅 Python INI 解析校验语法与关键指令齐备
-  （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`MATE_ADDR` 收在本机）。上线前请在
+  （3 个 section、6 条 `Environment=`、`ExecStart` 绝对路径、`MATE_ADDR` 收在本机；**v20 后该单元另有 `MATE_HOME`**，故"6 条"是当时快照）。上线前请在
   目标机 `systemd-analyze verify` 并实测。
 - 容器镜像（§4）：`registry-1.docker.io`/`auth.docker.io` 在本机持续超时，故基础镜像改用镜像站覆盖
   （`docker.m.daocloud.io/library/{node:24-bookworm,golang:1.26-bookworm,debian:bookworm-slim}` +

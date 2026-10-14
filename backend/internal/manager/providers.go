@@ -12,8 +12,9 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
@@ -30,21 +31,22 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// providersFileName provider 档案文件名（**目录级配置**：AgentDir 下的保留文件，不是 agent 定义）。
+// providersFileName provider 档案文件名（**目录级配置**：ProviderDir 下的保留文件）。
 //
 // 它留在文件侧：档案是"这台机器上有哪些上游凭据"，与 agent 定义的生命周期不同。
 const providersFileName = "providers.json"
 
 // ——— 供应商（v12）：**一个 OpenAI 兼容端点 + 一把密钥** ———
 //
-// 档案存于 <AgentDir>/providers.json（memory 载体）或 `providers` 表（sqlite 载体）。
+// 档案存于 <ProviderDir>/providers.json（memory 载体）或 `providers` 表（sqlite 载体）。
 // REST 语义：GET 只回 {id,name,protocol,base_url,has_key,…}（密钥**绝不读回**）；
 // PATCH 幂等更新（指针语义）；启动注入由**编排层**按各底座声明的凭据面二选一
 // （原生凭据文档 or 子进程 env，见 `resource.CredentialSpec`）。
 //
-// 落盘形态：文件里**只留引用** `key_ref: "vault:providers/<id>"`，密文单独落
-// `<mate_home>/vault/providers/<id>.enc`（AES-256-GCM，AAD 绑定 {kind, ref}）。
-// 明文只存在于内存、adapter 的凭据文档与子进程 env 三处，绝不写进 body。
+// **v20 的密钥面**：权威是库里的 `providers.key` 一列（sqlite 载体）或托管文档
+// `<MATE_HOME>/credentials.json`（memory 载体就是事实源）。档案文件里只剩**派生**的
+// `key_ref`（= `providers/<id>`，托管文档里的键）；解析顺序的唯一实现是 `pkg/credentials`。
+// 明文只存在于内存、adapter 的原生凭据文档与子进程 env 三处，绝不写进档案文件。
 
 // providerDef 磁盘/内存中的供应商。
 type providerDef struct {
@@ -54,27 +56,48 @@ type providerDef struct {
 	BaseURL  string `json:"base_url,omitempty"`
 	// Note 备注（不驱动行为）。它是 body 里的一个普通键，这里提升成字段只为让写面读起来清楚。
 	Note string `json:"note,omitempty"`
-	// Key 内存明文（注入/判 has_key/进 adapter 的凭据文档用；落盘一律走 vault）。
-	Key string `json:"-"`
-	// KeyRef 密文引用。
+	// Key **生效的**明文（注入/判 has_key/进 adapter 的凭据文档用；绝不落档案文件）。
 	//
-	// v13 起它是**派生量**（`providerRef(id)`），不再是载体字段：表里没有 `key_ref` 列
-	// （纯函数副本 + AAD 已绑 `vault:providers/<id>`，两份值不一致时的表现是"凭据坏了"，
-	// 会误导排查，ADR-7）。文件载体仍然写/读它（那是 v11 的落盘形状，不改）。
+	// v20 起它是解析结果而不是落盘物：权威在库（无库时在托管文档），装载与写面各解析一次。
+	Key string `json:"-"`
+	// KeySource 这把密钥是从哪一层来的（空 = 没有密钥）。
+	//
+	// 它必须摆到读面上：`继承的进程环境 > 托管` 这个顺序意味着**进程环境里的同名变量会遮住
+	// 面板里保存的那一条**——用户轮换了密钥却毫无变化，且没有任何报错（2026-10-10 实测）。
+	KeySource credentials.Source `json:"-"`
+	// KeyEnvKey 生效值来自哪个环境变量名（仅 `KeySource == env` 时有值；诊断面展示用）。
+	KeyEnvKey string `json:"-"`
+	// KeyRef 托管文档里的键（**派生量**，= `providers/<id>`）。
+	//
+	// 它不再是载体字段：库里没有 `key_ref` 列（纯函数副本 + 两份值不一致时的表现是"凭据坏了"，
+	// ADR-7）。档案文件与导出物里仍然写它（那是 v11 的落盘形状，也是"这条密钥落在哪"的线索）。
 	KeyRef string `json:"key_ref,omitempty"`
-	// keyErr 密钥不可用的原因（vault 不可达 / 密文解不开）。problems 据此给出可执行出路，
-	// **不静默降级**：`has_key` 只看 `Key` 是否解出，不看它。
-	keyErr error `json:"-"`
+	// keyProblems 密钥面读不了/对不上的原因（分层的问题、库里没有等）。problems 据此给出可执行
+	// 出路，**不静默降级**：`has_key` 只看 `Key` 是否为空，不看它。
+	keyProblems []string `json:"-"`
 	// Revision 载体里的行版本（sqlite = `providers.revision`；memory = 0）。
 	Revision int64 `json:"-"`
 	// UpdatedAt 最后一次成功提交的时刻（sqlite = 行上的 updated_at；memory = 零值）。
 	UpdatedAt time.Time `json:"-"`
 }
 
+// applyResolution 把一次凭据解析的结果落到档案上（三个字段同进同出，避免半更新）。
+//
+// 顺带把**解析出来的值**登记进脱敏闸门的动态表：这是 v20 之后唯一可靠的"真值来源"
+// （`pkg/redact` 的第 1 档：按值替换、零误报）。放在这里而不是各通道的注入点上，是因为
+// 密钥现在可能走**原生凭据文档**那条路（`Credential.Tested && NativeDoc != ""`，dsh 就是），
+// 那条路不经过 `providerEnvFor`——只在那里登记会让"平台上唯一真实存在的那把密钥"漏出闸门。
+func (d *providerDef) applyResolution(k providerKey) {
+	d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = k.Value, k.Source, k.EnvKey, k.Problems
+	if d.Key != "" {
+		redact.RegisterDynamicSecret(d.Key)
+	}
+}
+
 // providerFile providers.json 的磁盘形状。
 //
-// Key 字段**只读**：用于把旧版本的明文档案迁移进 vault；除「vault 不可用」这一种情况外
-// 一律不再写出。
+// Key 字段**只读**：用于把 v20 之前的明文档案搬进托管文档；之后一律不再写出（写它等于把
+// 明文放回一个可被复制/备份的文件里，而那正是 v20 想去掉的那份重复）。
 type providerFile struct {
 	ID       string `json:"id"`
 	Name     string `json:"name,omitempty"`
@@ -88,63 +111,34 @@ type providerFile struct {
 	Projections map[string]any `json:"projections,omitempty"`
 }
 
-// providerRef provider id → vault 引用（namespace 只有 providers）。
-func providerRef(id string) string { return vault.RefPrefix + "providers/" + id }
-
-// providerVault 返回 vault 句柄（惰性创建 + 缓存）。
+// ProviderMirrorRefPrefix 托管镜像里 provider 密钥的键前缀（完整键 = 它 + provider id）。
 //
-// home 取 agentDir 的父目录（默认 ~/.ark-mate/agents → ~/.ark-mate）：密钥 ~/.ark-mate/vault.key、
-// 密文 ~/.ark-mate/vault/。agentDir 为空（纯内存场景/未配置）→ (nil, nil) = 无 vault，
-// 此时密钥只在内存、绝不落盘。
-//
-// **"锚点还不知道"不是可缓存的结论**（2026-10-11 修）：`agentDir` 由 `loadDefinitions` 登记，
-// 而装配期的 runtime 同步（`EnableStore` → `SyncRuntime` → `providerForSync`）发生在它**之前**——
-// 旧实现在那一次调用上就把 `vaultTried` 置成 true 并缓下 (nil, nil)，于是整个进程此后都按
-// "本机没有 vault"处理：已存密钥解不出来（v13 的 `has_key` 口径是"内存里有明文"→ 界面显示
-// 「尚未设置密钥」，而密文其实好好的），补密钥被写面按 `vault_unavailable` **拒绝**——
-// 用户侧的表现是"密钥明明存过、界面说没有；再存一次直接失败"。所以锚点为空时**直接返回、
-// 不落缓存**，等 `loadDefinitions` 登记目录后下一次调用再真正打开。
-func (s *Service) providerVault() (*vault.Store, error) {
-	s.mu.Lock()
-	if s.vaultTried {
-		st, err := s.vaultStore, s.vaultErr
-		s.mu.Unlock()
-		return st, err
-	}
-	dir := s.agentDir
-	if dir == "" {
-		s.mu.Unlock()
-		return nil, nil
-	}
-	s.vaultTried = true
-	s.mu.Unlock()
-	st, err := vault.Open(filepath.Dir(dir))
-	s.mu.Lock()
-	s.vaultStore, s.vaultErr = st, err
-	s.mu.Unlock()
-	if err != nil {
-		glog.Warnw(context.Background(), "vault: 初始化失败（provider 密钥暂无法加密落盘）", "err", err)
-	}
-	return st, err
-}
+// 单独导出是因为**诊断面要按它分类**：镜像里有而库里没有时，两类引用的出路完全不同——provider
+// 密钥在「设置 · 模型」里有写入口（重填即对齐），而 MCP 密钥的值这一批**没有**写入口（只能把
+// 定义里的引用改成 `env:`）。两边各写一遍 `"providers/"` 字面量，迟早有一边改了另一边还用旧分类。
+const ProviderMirrorRefPrefix = "providers/"
 
-// loadProvidersFile 从 <agentDir>/providers.json 装载（文件缺失 → 空表）；
-// 发现旧明文 `key` → 加密写入 vault + 写回 key_ref（幂等：迁移后再读走 key_ref 分支）。
+// providerRef provider id → 托管文档里的键（namespace 只有 providers）。
+func providerRef(id string) string { return ProviderMirrorRefPrefix + id }
+
+// loadProvidersFile 从 <providerDir>/providers.json 装载（文件缺失 → 空表；memory 载体）。
+//
+// 两条历史形态在这里收口：旧前缀 `key_ref` 被**显式翻译**（档案文件不在库里，迁移改不到它们，
+// 见 `capability.TranslateLegacySecretRef`），旧明文 `key` 搬进托管文档后从档案里去掉。
 func (s *Service) loadProvidersFile(dir string) {
 	if dir == "" {
 		return
 	}
+	ctx := context.Background()
 	b, err := os.ReadFile(filepath.Join(dir, providersFileName))
 	if err != nil {
 		return // 首次/未建 → 空表
 	}
 	var m map[string]*providerFile
 	if err := json.Unmarshal(b, &m); err != nil {
-		glog.Warnw(context.Background(), "providers: providers.json 解析失败（忽略）", "err", err)
+		glog.Warnw(ctx, "providers: providers.json 解析失败（忽略）", "err", err)
 		return
 	}
-	// vault 句柄必须在持锁外取（providerVault 自己要拿 s.mu）。
-	st, verr := s.providerVault()
 	loaded := make(map[string]*providerDef, len(m))
 	migrated := 0
 	for id, d := range m {
@@ -152,34 +146,29 @@ func (s *Service) loadProvidersFile(dir string) {
 			continue
 		}
 		p := providerDefFromFile(id, d)
-		switch {
-		case d.Key != "":
-			if st == nil {
-				p.Key, p.keyErr = d.Key, fmt.Errorf("vault 不可用，密钥仍为明文: %v", vaultUnavailable(verr))
-				break
+		p.KeyRef = providerRef(id)
+		if legacy := d.KeyRef; legacy != "" {
+			if translated, ok := capability.TranslateLegacySecretRef(legacy); ok {
+				warnLegacySecretRef(ctx, legacy, "providers.json 的 key_ref")
+				d.KeyRef = translated
 			}
-			ref := providerRef(id)
-			if err := st.Put(ref, vault.KindProviderKey, []byte(d.Key)); err != nil {
-				p.Key, p.keyErr = d.Key, err
-				glog.Warnw(context.Background(), "providers: 密钥加密迁移失败（保留明文，不丢密钥）", "provider", id, "err", err)
-				break
+		}
+		plain := d.Key
+		if plain != "" {
+			// 旧明文：搬进托管文档（memory 模式它就是事实源），随后把文件里的那份抹掉。
+			if err := s.mirrorSet(p.KeyRef, plain); err != nil {
+				p.Key, p.keyProblems = plain, []string{
+					"明文密钥搬进托管文档失败：" + err.Error() +
+						"；档案里那份暂时继续生效（不要手工删它）"}
+			} else {
+				migrated++
 			}
-			p.Key, p.KeyRef = d.Key, ref
-			migrated++
-		case d.KeyRef != "":
-			p.KeyRef = d.KeyRef
-			if st == nil {
-				p.keyErr = fmt.Errorf("vault 不可用，无法解密 %s: %v", d.KeyRef, vaultUnavailable(verr))
-				glog.Warnw(context.Background(), "providers: 有密文但 vault 不可用", "provider", id, "ref", d.KeyRef, "err", p.keyErr)
-				break
-			}
-			pt, err := st.Get(d.KeyRef, vault.KindProviderKey)
-			if err != nil {
-				p.keyErr = err
-				glog.Warnw(context.Background(), "providers: 密钥密文解密失败（该 provider 在修复前不可用）", "provider", id, "err", err)
-				break
-			}
-			p.Key = string(pt)
+		}
+		res := s.resolveProviderKey(ctx, p)
+		p.applyResolution(res)
+		if plain != "" && p.Key == "" {
+			// 搬运失败时档案里那份仍然是唯一的密钥来源：不丢密钥，如实报问题。
+			p.Key, p.KeySource = plain, ""
 		}
 		loaded[id] = p
 	}
@@ -188,10 +177,10 @@ func (s *Service) loadProvidersFile(dir string) {
 	s.mu.Unlock()
 	if migrated > 0 {
 		if err := s.persistProvidersFile(); err != nil {
-			glog.Warnw(context.Background(), "providers: 迁移写回失败", "migrated", migrated, "err", err)
+			glog.Warnw(ctx, "providers: 搬运后重写 providers.json 失败（明文仍在文件里）", "migrated", migrated, "err", err)
 			return
 		}
-		glog.Infow(context.Background(), "providers: 明文密钥已迁移进 vault", "count", migrated)
+		glog.Infow(ctx, "providers: 明文密钥已搬进托管文档", "count", migrated)
 	}
 }
 
@@ -241,12 +230,10 @@ var v11KnownProviderEndpoints = map[string]string{
 	"groq":       "https://api.groq.com/openai/v1",
 }
 
-// vaultUnavailable 把「没有 vault」与「vault 初始化失败」统一成可读原因。
-func vaultUnavailable(err error) string {
-	if err == nil {
-		return "agentDir 未配置（无 mate home）"
-	}
-	return err.Error()
+// warnLegacySecretRef 旧前缀被显式翻译时的 WARN（**唯一的翻译点在 `pkg/capability`**，
+// 文案也由它给：把字面量与判据收在一处，别处只负责说"是在哪儿翻的"）。
+func warnLegacySecretRef(ctx context.Context, ref, where string) {
+	glog.Warnw(ctx, capability.LegacySecretRefWarning(ref), "ref", ref, "where", where)
 }
 
 // persistProvidersFile 原子写 providers.json（内存现状）。
@@ -259,7 +246,7 @@ func (s *Service) persistProvidersFile() error { return s.persistProvidersFileWi
 // **空文件**——一个只会在文件载体上出现、且完全静默的失败。
 func (s *Service) persistProvidersFileWith(override *providerDef) error {
 	s.mu.Lock()
-	dir := s.agentDir
+	dir := s.providerDir
 	cp := make(map[string]*providerFile, len(s.providers)+1)
 	for id, d := range s.providers {
 		cp[id] = providerFileOf(id, d)
@@ -285,25 +272,25 @@ func (s *Service) persistProvidersFileWith(override *providerDef) error {
 	return os.Rename(tmp, filepath.Join(dir, providersFileName))
 }
 
-// providerFileOf 把内存档案投影成文件载体的一行（只写引用；仅"vault 不可用且确有明文"时写 key）。
+// providerFileOf 把内存档案投影成文件载体的一行（**只写引用，绝不写明文**）。
+//
+// v20 之前这里有一条"旧机制不可用且确有明文"的降级分支：把明文写回档案，从而让档案成为
+// 第二份密钥副本。托管文档现在**必然**可写（它是 memory 载体的事实源），所以那条分支连同
+// 它带来的"同一个值两处落盘"一起删除。
 func providerFileOf(id string, d *providerDef) *providerFile {
 	if d == nil {
 		return &providerFile{ID: id}
 	}
-	f := &providerFile{
-		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note, KeyRef: d.KeyRef,
+	return &providerFile{
+		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
+		KeyRef: providerRef(id),
 	}
-	if d.KeyRef == "" && d.Key != "" {
-		// vault 不可用的降级路径：明文已在内存里，写回时必须保留（否则等于删密钥）。
-		f.Key = d.Key
-	}
-	return f
 }
 
 // ListProviders 列出供应商概要（密钥只以 has_key 呈现，绝不读回）。
 //
-// 每一条都带**引用面**（哪些 agent 在用它、它们可能落到哪些 runtime）、**模型条数**与
-// **问题清单**（缺端点/密钥缺失/密文解不开）：这些都是**读取时现算的派生值**——存一份必然漂移。
+// 每一条都带**引用面**（哪些模型挂靠它、它们可能落到哪些 runtime）、**模型条数**与
+// **问题清单**（缺端点/密钥缺失/凭据分层读不了）：这些都是**读取时现算的派生值**——存一份必然漂移。
 func (s *Service) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error) {
 	s.mu.Lock()
 	out := make([]dtoprovider.ProviderResp, 0, len(s.providers))
@@ -320,34 +307,40 @@ func (s *Service) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp
 
 // providerRespLocked 把一条档案投影成对外表示（**调用方必须持 s.mu**）。
 //
-// 为什么引用面也要在持锁时算：`s.agents` 与 `s.providers` 同属这一个锁的保护区，分成两段读会
-// 让"引用面"与"档案本身"来自两个不同时刻（删 agent 与改档案并发时会看到不存在的引用）。
+// 密钥面**读时现解析**（`resolveProviderKey`）：解析顺序的唯一实现是 `pkg/credentials`，
+// 而它要读的四处（进程环境、托管文档、两份 `.env`、库）都可能在本进程之外被改动。顺手把结果
+// 回写到档案上，让读面与注入面（`providerForSync`）看到同一份事实。
+//
+// 引用面（谁挂靠它）读的是模型表（v19 起供应商的唯一引用者是模型条目），读库时不再持锁解析：
+// 与"档案本身"来自不同时刻的差异只会体现在引用名单上，而名单是**只读展示**、不参与任何判据
+// （删除判据在 store 的同一事务里，见 `DeleteProvider`）。
 func (s *Service) providerRespLocked(ctx context.Context, id string, d *providerDef) dtoprovider.ProviderResp {
+	d.applyResolution(s.resolveProviderKey(ctx, d))
 	resp := dtoprovider.ProviderResp{
-		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
-		HasKey:        d.Key != "", // 解出明文才算有密钥（密文解不开/不可达 → false，理由走 problems）
+		ID:            d.ID,
+		Name:          d.Name,
+		Protocol:      d.Protocol,
+		BaseURL:       d.BaseURL,
+		Note:          d.Note,
+		HasKey:        d.Key != "",
+		KeySource:     string(d.KeySource),
+		KeyRef:        d.KeyRef,
 		Revision:      d.Revision,
 		ModelCount:    s.providerModelCount(ctx, id),
 		Applicability: s.providerApplicabilityLocked(d),
-		Refs:          dtoprovider.ProviderRefs{Agents: []string{}, Runtimes: []string{}},
+		Refs:          dtoprovider.ProviderRefs{Models: []string{}, Runtimes: []string{}},
 		Problems:      providerProblems(d),
 	}
 	if !d.UpdatedAt.IsZero() {
 		resp.UpdatedAt = model.FormatTime(d.UpdatedAt)
 	}
-	seenRT := map[string]bool{}
-	for agentID, a := range s.agents {
-		if a == nil || a.Provider != id {
-			continue
-		}
-		resp.Refs.Agents = append(resp.Refs.Agents, agentID)
-		// 底座是构建期常量：引用它的 agent 都跑在同一个 runtime 上（v12 之前逐个 agent 收集候选）。
-		if rt := runtime.SelectedRuntime(); !seenRT[rt] {
-			seenRT[rt] = true
-			resp.Refs.Runtimes = append(resp.Refs.Runtimes, rt)
-		}
+	// 引用者 = 挂靠在该供应商下的模型条目；有模型挂靠才谈得上"哪个底座拿得到它"
+	// （底座是构建期常量，所以至多一个 runtime）。
+	if models := s.providerModelRefsReadOnly(ctx, id); len(models) > 0 {
+		resp.Refs.Models = models
+		resp.Refs.Runtimes = []string{runtime.SelectedRuntime()}
 	}
-	sort.Strings(resp.Refs.Agents)
+	sort.Strings(resp.Refs.Models)
 	sort.Strings(resp.Refs.Runtimes)
 	return resp
 }
@@ -415,17 +408,22 @@ func providerRefNameFor(spec runtime.Spec, providerID string) string {
 
 // providerProblems 本地段能回答的问题清单（零网络请求；**可执行的一句话**）。
 //
-// v13 起"有没有密钥"完全由 vault 派生（表里没有 `key_ref` 列），所以这一段的判据是
-// **内存里有没有明文**：解出来了就没有问题，没解出来时区分"压根没设"与"设了但拿不到"。
+// v20 起"有没有密钥"的判据是**内存里有没有生效的明文**（它来自库或托管文档的解析结果）。
+// 有密钥时另有一类必须说出来的事实：生效值来自**继承的进程环境**——按层序它会遮住面板里
+// 保存的那一条，于是"我改了密钥却没生效"会发生且没有任何报错。
 func providerProblems(d *providerDef) []string {
 	out := []string{}
+	for _, p := range d.keyProblems {
+		out = append(out, "凭据分层："+p)
+	}
 	switch {
+	case d.Key != "" && d.KeySource == credentials.SourceEnv:
+		out = append(out, "当前生效的密钥来自**继承的进程环境**"+
+			oneKeyInParens(d.KeyEnvKey)+"：它按层序遮住面板里保存的那一条——"+
+			"在面板里轮换密钥不会生效，除非先清掉这个环境变量")
 	case d.Key != "":
 		// 密钥可用：无问题。
-	case d.keyErr != nil:
-		out = append(out, "密钥不可用（"+d.KeyRef+"）："+d.keyErr.Error()+
-			"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），或重设密钥")
-	default:
+	case len(d.keyProblems) == 0:
 		out = append(out, "尚未设置密钥：在「设置 · 模型」的供应商块补一条密钥后才会交付")
 	}
 	if strings.TrimSpace(d.BaseURL) == "" {
@@ -459,8 +457,9 @@ func (s *Service) providerEnvFor(runtimeID, providerID string) []string {
 	d := s.providers[providerID]
 	s.mu.Unlock()
 	if d == nil || d.Key == "" {
-		if d != nil && d.keyErr != nil {
-			glog.Warnw(context.Background(), "providers: 密钥不可用，不注入 env", "provider", providerID, "err", d.keyErr)
+		if d != nil && len(d.keyProblems) > 0 {
+			glog.Warnw(context.Background(), "providers: 密钥不可用，不注入 env",
+				"provider", providerID, "problems", d.keyProblems)
 		}
 		return nil
 	}
@@ -488,34 +487,54 @@ func (s *Service) providerRefName(providerID string) string {
 	return ""
 }
 
-// CredentialProblem 校验 agent 绑定的供应商当前是否可用；不可用即 credential_missing
-// 并带上可执行出路。
+// injectedProviderID 平台当前要给底座注入密钥的供应商 id（无 → "" = 不注入）。
 //
-// 语义：agent.provider 为空 = 不注入密钥、用底座自身登录态（合法 → nil）；非空则必须指向一个
-// **存在且带 key** 的档案。悬空引用会让「本该注入的密钥静默缺失」，属配置错误——宁可显式失败，
-// 也不让会话在半配置状态下启动。密钥密文解不开（vault.key 丢失/被更换）同样走这里。
-func (s *Service) CredentialProblem(agent *AgentRec) error {
-	if agent == nil || agent.Provider == "" {
+// v19 起它不是"某个 agent 选的"：底座构建期固定、会话不再有 `agent_id`，所以决定注入哪把
+// 密钥的只剩**平台声明的默认模型**——默认模型落在哪条供应商上就注入哪把（与下发给底座的
+// `resource.Set.DefaultModel` 同源）。没有默认模型 = 平台不注入密钥、用底座自身登录态。
+func (s *Service) injectedProviderID(ctx context.Context) string {
+	row, ok, err := s.defaultModelRow(ctx)
+	if err != nil {
+		glog.Warnw(ctx, "providers: 读默认模型失败（按不注入密钥处理）", "err", err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(row.ProviderID)
+}
+
+// CredentialProblem 校验**默认模型所在的那条供应商档案**当前是否可用；不可用即
+// credential_missing 并带上可执行出路。
+//
+// 语义：没有默认模型（或它没绑供应商）= 不注入密钥、用底座自身登录态（合法 → nil）；有则必须
+// 指向一个**存在且带 key** 的档案。悬空引用会让「本该注入的密钥静默缺失」，属配置错误——
+// 宁可显式失败，也不让会话在半配置状态下启动。凭据分层读不了（托管文档权限不合/`.env` 写坏）
+// 同样走这里。
+func (s *Service) CredentialProblem(ctx context.Context) error {
+	providerID := s.injectedProviderID(ctx)
+	if providerID == "" {
 		return nil
 	}
 	s.mu.Lock()
-	d := s.providers[agent.Provider]
+	d := s.providers[providerID]
+	if d != nil {
+		d.applyResolution(s.resolveProviderKey(ctx, d))
+	}
 	s.mu.Unlock()
-	ref := fmt.Sprintf("agent %q 绑定的供应商 %q", agent.ID, agent.Provider)
+	ref := fmt.Sprintf("默认模型所在的供应商 %q", providerID)
 	if d == nil {
 		return acl.NewError(acl.ClassRequest, "credential_missing",
-			ref+" 不存在：在「设置 · 模型」的供应商块里新建这条供应商，或清空该 agent 的凭据选择"+
-				"（改用它自身的登录态）", nil)
+			ref+" 不存在：在「设置 · 模型」的供应商块里新建这条供应商，或把默认模型换到另一条", nil)
 	}
 	if d.Key == "" {
-		if d.keyErr != nil {
+		if len(d.keyProblems) > 0 {
 			return acl.NewError(acl.ClassRequest, "credential_missing",
-				ref+" 的密钥不可用（"+d.KeyRef+"）："+d.keyErr.Error()+
-					"；确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），"+
-					"或到「设置 · 模型」重设密钥", nil)
+				ref+" 的密钥不可用（"+d.KeyRef+"）："+strings.Join(d.keyProblems, "；")+
+					"；到「设置 · 模型」重设密钥，或把定义里的引用改成 env:<ENV_NAME>", nil)
 		}
 		return acl.NewError(acl.ClassRequest, "credential_missing",
-			ref+" 没有密钥：到「设置 · 模型」的供应商块补密钥，或清空该 agent 的凭据选择", nil)
+			ref+" 没有密钥：到「设置 · 模型」的供应商块补密钥", nil)
 	}
 	return nil
 }

@@ -29,11 +29,14 @@ func mcpCmd(args []string) {
 }
 
 const mcpUsage = `mcp 用法：
-  mate mcp bridge --agent <agentID> --runtime <runtimeID> [--mcps '<JSON 数组>']
+  mate mcp bridge --runtime <runtimeID> [--mcps '<JSON 数组>']
       平台侧 MCP stdio 网关：以 stdio 上的 MCP 服务端形态暴露该 scope 下的远程 MCP 工具
       （底座经 ACP 的 mcpServers 把这条命令拉起来；参数只带 scope 与**会话钉住的白名单**，
-      不带 server 定义集——后者会让增删一个 server 就换代际）
+      不带 server 定义集——后者会让增删一个 server 就换代际。
+      v19 起 scope 里没有 agent：会话不再有 agent 身份，底座由构建期固定）
       协议流走 stdout，**一切诊断走 stderr**（stdout 混进一行日志就会毁掉整条会话）
+      凭据 cwd（<cwd>/.env 那一层）由核心经 env MATE_MCP_CRED_CWD 传入；没有它时用网关
+      自己的 cwd 并 WARN（网关的 cwd 是底座给的，可能与核心不同）
 `
 
 // mcpBridge `mate mcp bridge`：平台侧 MCP stdio 网关的进程入口。
@@ -79,13 +82,12 @@ func mcpBridge(args []string) {
 		cancel()
 	})
 
-	// 数据面（M7-2）：自己读平台的库与 vault。取数失败**不**让网关起不来——起不来的症状是
+	// 数据面（M7-2）：自己读平台的库（定义 + `mcp_secrets`）。取数失败**不**让网关起不来——起不来的症状是
 	// 底座那边"这个 MCP server 没起来"（连工具面都看不到），而"起来了但这一轮没有工具"是
 	// 看得见的降级，且日志里有原因。
 	cfg, _ := mustConfig()
 	src, sErr := gateway.NewSource(ctx, gateway.SourceOptions{
 		Cfg:        cfg,
-		AgentID:    scope.AgentID,
 		McpsPinned: scope.McpsPinned,
 	})
 	if sErr != nil {
@@ -103,7 +105,7 @@ func mcpBridge(args []string) {
 		face = src
 	}
 	err = gateway.Run(ctx, os.Stdin, os.Stdout, gateway.Options{
-		Scope:  gateway.Scope{AgentID: scope.AgentID, RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
+		Scope:  gateway.Scope{RuntimeID: scope.RuntimeID, McpsPinned: scope.McpsPinned},
 		Source: face,
 	})
 	switch {

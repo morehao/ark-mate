@@ -52,7 +52,7 @@ func TestGatewayRemoteMcpEntersFaceWithoutGenerationSwitch(t *testing.T) {
 	//    这是"改一个凭据就换会话"那一类缺陷的正面对照：凭据轮换与 URL 变更由网关下一次取数生效。
 	r.registerMcp(t, webServer("web", "https://b.invalid/mcp"))
 	r.registerMcp(t, capability.McpServer{ID: "web2", Name: "web2", Transport: capability.TransportHTTP,
-		URL: "https://c.invalid/mcp", SecretHeaders: map[string]string{"Authorization": "vault:web2/token"}})
+		URL: "https://c.invalid/mcp", SecretHeaders: map[string]string{"Authorization": "store:web2/token"}})
 	if got := r.boundary(t, convID); got != as1 {
 		t.Fatalf("远程定义/密钥引用变化不得换代际（got %s，want %s）", got.Fingerprint, as1.Fingerprint)
 	}
@@ -67,13 +67,18 @@ func TestGatewayRemoteMcpEntersFaceWithoutGenerationSwitch(t *testing.T) {
 		t.Fatalf("应只注入一条网关条目（远程全被折叠），got %v", servers)
 	}
 	entry := string(servers[0])
-	for _, want := range []string{mcp.GatewayServerName, "bridge", "--agent"} {
+	// v19：scope 只剩 `--runtime`（会话没有 agent 身份，底座构建期固定）——
+	// 这里同时**反向**钉住 `--agent` 不再进条目。
+	for _, want := range []string{mcp.GatewayServerName, "bridge", "--runtime"} {
 		if !strings.Contains(entry, want) {
 			t.Fatalf("网关条目应含 %q：%s", want, entry)
 		}
 	}
-	// 凭据与远端细节**不进底座可见面**（§10.6-②）：URL 与 vault 引用都不该出现在条目里。
-	for _, leak := range []string{"invalid", "vault:", "Authorization"} {
+	if strings.Contains(entry, "--agent") {
+		t.Fatalf("v19 起网关条目不得再带 --agent：%s", entry)
+	}
+	// 凭据与远端细节**不进底座可见面**（§10.6-②）：URL 与库里的引用都不该出现在条目里。
+	for _, leak := range []string{"invalid", "store:", "Authorization"} {
 		if strings.Contains(entry, leak) {
 			t.Fatalf("网关条目泄漏了远程定义/凭据（%q）：%s", leak, entry)
 		}
@@ -113,11 +118,9 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	agent := &AgentRec{ID: "a"}
-
 	entryFor := func(sel *CapabilitySelection) string {
 		t.Helper()
-		entries := svc.McpServersFor(agent, "stub", sel)
+		entries := svc.McpServersFor("stub", sel)
 		var gw *acl.McpServer
 		for i := range entries {
 			if entries[i].Name == mcp.GatewayServerName {
@@ -130,10 +133,10 @@ func TestGatewayEntryCarriesPinnedSelectionOnly(t *testing.T) {
 		return strings.Join(gw.Args, " ")
 	}
 
-	// 未声明 → 回落 agent 全量（nil 白名单 = 全量）⇒ 有网关条目，且条目里**不带** --mcps。
+	// 未声明 → 全量（nil 白名单 = 全量）⇒ 有网关条目，且条目里**不带** --mcps。
 	open := entryFor(NewCapabilitySelection())
 	if open == "" || strings.Contains(open, "--mcps") {
-		t.Fatalf("未声明白名单时不该带 --mcps（否则 agent 白名单的任何改动都会换代际）：%q", open)
+		t.Fatalf("未声明选区时不该带 --mcps（未钉住就没有要转达的白名单）：%q", open)
 	}
 	// 数组 → 逐字进 args（顺序/重复由 normalized 之外的原样传入：这里是用户给定顺序）。
 	pinned := entryFor(&CapabilitySelection{Mcps: ptrOf([]string{"web2", "web"})})
@@ -161,30 +164,29 @@ func TestGatewayFoldingKeepsSecretValuesOutOfFingerprint(t *testing.T) {
 	reg := stubACPSpec(t)
 	reg.McpTransports = []string{"stdio"}
 	svc := NewService(runtime.NewRegistry(reg), nil)
-	agent := &AgentRec{ID: "a"}
 	sel := NewCapabilitySelection()
 
 	// 远程密钥引用：值不进指纹（连引用都不进——远程定义完全不在指纹里）。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "web", Name: "web",
 		Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp",
-		SecretHeaders: map[string]string{"Authorization": "vault:web/sekret-value"}}); err != nil {
+		SecretHeaders: map[string]string{"Authorization": "store:web/sekret-value"}}); err != nil {
 		t.Fatal(err)
 	}
-	fp := svc.capabilityFingerprint(agent, "stub", sel)
-	if strings.Contains(fp, "sekret-value") || strings.Contains(fp, "vault:") {
+	fp := svc.capabilityFingerprint("stub", sel)
+	if strings.Contains(fp, "sekret-value") || strings.Contains(fp, "store:") {
 		t.Fatalf("指纹不得含密钥值/引用：%s", fp)
 	}
 	// stdio 的密钥引用：引用名入指纹（换引用 = 换能力面），值仍然不入。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "fs", Name: "fs",
 		Transport: capability.TransportStdio, Command: "/bin/echo",
-		SecretEnv: map[string]string{"TOKEN": "vault:fs/tok"}}); err != nil {
+		SecretEnv: map[string]string{"TOKEN": "store:fs/tok"}}); err != nil {
 		t.Fatal(err)
 	}
-	fp2 := svc.capabilityFingerprint(agent, "stub", sel)
+	fp2 := svc.capabilityFingerprint("stub", sel)
 	if fp2 == fp {
 		t.Fatal("新增一台 stdio server 必须改变指纹")
 	}
-	if strings.Contains(fp2, "vault:fs/tok") {
+	if strings.Contains(fp2, "store:fs/tok") {
 		t.Fatalf("指纹只能含引用名而非引用值：%s", fp2)
 	}
 }
@@ -234,7 +236,7 @@ func TestGatewayEntryNotInjectedIntoRemoteAcpRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := svc.McpServersFor(&AgentRec{ID: "a"}, "remote", nil)
+	got := svc.McpServersFor("remote", nil)
 	if gw := gatewayMcp(got); gw != nil {
 		t.Fatalf("远程端点不该拿到网关条目（本机路径对它无意义）：%+v", gw)
 	}
@@ -263,4 +265,74 @@ func mcpServersOf(t *testing.T, rec map[string]any) []json.RawMessage {
 		t.Fatalf("mcpServers 不是数组: %s", b)
 	}
 	return out
+}
+
+// ——— v20 裁决：网关条目的**凭据 cwd** ———
+//
+// 网关是**底座 spawn 的子进程**，它的 cwd（会话工作区）是用户没选过的目录；而 `<cwd>/.env` 那一层
+// 的语义是"用户启动 `mate serve` 的目录"。核心必须把这个值**交给**它——否则同一个引用会在两个
+// 进程里解析出不同的值，而两边各自的测试都是绿的（完全静默）。
+
+// TestGatewayEntryCarriesCredentialCwd 条目带不带、带什么，按"装配期登记了什么"决定。
+func TestGatewayEntryCarriesCredentialCwd(t *testing.T) {
+	svc, _ := newSearchRig(t)
+
+	// ① 登记过（= 用户在某个目录下启动了 mate serve）→ 条目把这个值交下去。
+	svc.SetCredentialCwd("/tmp/serve-cwd")
+	entry, err := svc.gatewayEntry("stub", nil)
+	if err != nil {
+		t.Fatalf("合成网关条目: %v", err)
+	}
+	if got := entry.Env[mcp.GatewayCredCwdEnv]; got != "/tmp/serve-cwd" {
+		t.Fatalf("网关条目应把凭据 cwd 交给网关（key=%s），got %q（env=%v）",
+			mcp.GatewayCredCwdEnv, got, entry.Env)
+	}
+
+	// ② 没登记（`mate demo`、测试这类不经装配的入口）→ **不带**这个键：网关侧据此 WARN 并回落，
+	//    而不是收到一个被 `os.Getwd()` 冒充成"核心的答案"的值。
+	for _, v := range []string{"", "   "} {
+		svc.SetCredentialCwd(v)
+		entry, err := svc.gatewayEntry("stub", nil)
+		if err != nil {
+			t.Fatalf("合成网关条目: %v", err)
+		}
+		if _, ok := entry.Env[mcp.GatewayCredCwdEnv]; ok {
+			t.Fatalf("未登记 cwd（%q）时不得带 %s：%v", v, mcp.GatewayCredCwdEnv, entry.Env)
+		}
+	}
+}
+
+// TestGatewayCredentialCwdDoesNotChangeFingerprint 凭据 cwd 是**值**，不是注入面的一部分：
+// 换个目录启动 `mate serve` 不该让所有会话换一次底座进程（"改指向不换代际"）。
+//
+// 反面同样钉住：条目里**确实**带着这个变量（否则"不换代际"会被"它根本没进条目"蒙过去）。
+func TestGatewayCredentialCwdDoesNotChangeFingerprint(t *testing.T) {
+	r := newGenRig(t)
+	log := sessionNewLog(t)
+
+	r.svc.SetCredentialCwd("/tmp/cwd-a")
+	convID, as1 := r.start(t, NewCapabilitySelection())
+	if as1.Fingerprint == "" {
+		t.Fatal("这条用例需要真实指纹（否则证明不了「值不入指纹」）")
+	}
+
+	// 注入的条目里带着 cwd（键名 + 取值都在底座可见面上）。
+	news := log()
+	if len(news) == 0 {
+		t.Fatal("应有 session/new 记录")
+	}
+	servers := mcpServersOf(t, news[len(news)-1])
+	if len(servers) == 0 {
+		t.Fatal("应有网关条目")
+	}
+	entry := string(servers[0])
+	if !strings.Contains(entry, mcp.GatewayCredCwdEnv) || !strings.Contains(entry, "/tmp/cwd-a") {
+		t.Fatalf("网关条目应带凭据 cwd（%s=/tmp/cwd-a）：%s", mcp.GatewayCredCwdEnv, entry)
+	}
+
+	// 换一个 cwd 值 → 同一代际（值不进指纹）。
+	r.svc.SetCredentialCwd("/tmp/cwd-b-other")
+	if got := r.boundary(t, convID); got != as1 {
+		t.Fatalf("凭据 cwd 的**取值**不得换代际（它是值；换了目录启动不该重启底座进程）")
+	}
 }

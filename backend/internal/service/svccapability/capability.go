@@ -51,9 +51,6 @@ type CapabilitySvc interface {
 	// ListTools 返回 Tool 目录（P1；静态/平台/观察条目）。
 	ListTools() ([]dtocapability.ToolResp, error)
 
-	// AgentCapabilities 返回某 Agent 的统一能力目录（P2 §8.1：按候选 runtime 聚合 skill/MCP/tool）。
-	AgentCapabilities(agentID string) (*dtocapability.AgentCapabilitiesResp, error)
-
 	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
 	ProbeMcpServer(ctx context.Context, id string) (*dtocapability.McpProbeResp, error)
 

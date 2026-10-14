@@ -228,8 +228,7 @@ func loadTranscriptFile(path string) *transcriptFile {
 
 	return &transcriptFile{
 		session: &SessionRec{
-			ID:      sessionID,
-			AgentID: hdr.AgentID,
+			ID: sessionID,
 			// memory 模式以 transcript 为事实源：工作空间与其"是否代建"标志都从 header 回灌
 			// （旧文件缺 workspace_temporary → false，历史会话本就不是代建的）。
 			Cwd:                hdr.Cwd,
@@ -289,7 +288,6 @@ type TranscriptEvent struct {
 // TranscriptData 是单个 transcript 文件的复读结果（会话元数据 + 事件原语）。
 type TranscriptData struct {
 	SessionID string
-	AgentID   string
 	RuntimeID string
 	Title     string
 	Status    string
@@ -307,7 +305,6 @@ func ReadTranscriptFile(path string) (*TranscriptData, bool) {
 	}
 	data := &TranscriptData{
 		SessionID: rec.session.ID,
-		AgentID:   rec.session.AgentID,
 		RuntimeID: runtime.NormalizeID(rec.session.RuntimeID),
 		Title:     rec.session.Title,
 		Status:    rec.session.Status,

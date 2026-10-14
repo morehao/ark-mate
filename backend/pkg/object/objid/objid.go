@@ -31,9 +31,10 @@ import (
 // 铸造前缀登记表：**只有平台自己铸号的实体**才登记在这里。
 //
 // 刻意不登记的（登记即意味着"平台铸造"，是判据不是遗漏）：
-//   - 定义类（skill / mcp_server / agent / automation / provider）：id 是**用户自定义文件名**
-//     （`validDefinitionID` 要求 `filepath.Base(id)==id`），且 `providers.id` 参与 vault 的
-//     AAD（`vault:providers/<id>`）——改它会让她已加密的密钥全部解不开；
+//   - 定义类（skill / mcp_server / automation / provider）：id 是**用户自定义文件名**
+//     （`validDefinitionID` 要求 `filepath.Base(id)==id`），且 `providers.id` 是**库里的主键**
+//     （`providers.key` 与 `definition_revisions` 都按它索引）——改它等于把这条档案的密钥与
+//     历史一起丢掉；
 //   - `events.seq` / `definition_revisions.seq`：它们是**单调游标**（后者直接当能力代际 rev），
 //     换 TEXT 会毁掉 `MAX(seq)` 与索引序，收益为零。**v17 起 `events` 另有登记的 `id`**——
 //     登记的是**行身份**，两列各司其职（身份 `evt_…` / 位次 `seq`），不是把 seq 换成 id。

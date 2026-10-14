@@ -16,7 +16,7 @@ import { getSession, promptSession, revokeMemory, sessionHistory, toErrorMessage
 import { useMate } from '../store'
 import { pinnedCapabilitiesView } from '../console/capabilityView'
 import { ModelSelect } from './ModelSelect'
-import { agentNameOf, shortId } from '../console/util'
+import { runtimeLabelOf, shortId } from '../console/util'
 import { copyText } from '../console/clipboard'
 import { summarizeRun, type FailedRun, type RunSummary } from '../console/runSummary'
 
@@ -42,7 +42,7 @@ export function SessionDetailDrawer({
   sessionId: string
   onClose: () => void
 }) {
-  const agents = useMate((s) => s.agents)
+  const runtime = useMate((s) => s.runtime)
   const views = useMate((s) => s.views)
   const respond = useMate((s) => s.respondPermission)
   const renameSession = useMate((s) => s.renameSession)
@@ -88,15 +88,15 @@ export function SessionDetailDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId])
 
-  // 会话级模型目录：**按会话绑定的 agent 取样**（不是「当前 Agent」）——会话与 Agent 一对一绑定，
-  // 模型候选只能来自该会话那个底座（会话级可改性由该底座的能力声明决定），
-  // 取错 agent 会列出别的底座的模型（不同底座的目录本就不同），选下去必被运行时拒绝；
-  // 且目录的 agent 必须与会话一致，运行时推送的 session.config_options 才会被 store 认领刷新。
-  const detailAgentId = detail?.agent_id
+  // 会话级模型目录（v19 起这条读面**无参**）。
+  //
+  // 原来它要带 `?agent=<会话绑定的那个>`：模型候选只能来自该会话那个底座，取错会列出别的底座的
+  // 模型（不同底座的目录本就不同），选下去必被运行时拒绝。现在底座构建期固定、读面自己按它取样，
+  // 于是"取错"这条路不再存在——但**打开详情才拉**这条时序仍然保留（不打开就不打这次请求）。
   useEffect(() => {
-    if (open && detailAgentId) void loadModelCatalog(detailAgentId)
+    if (open) void loadModelCatalog()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, detailAgentId])
+  }, [open])
 
   const view = views[sessionId]
   const viewTitle = detail?.title
@@ -269,7 +269,7 @@ export function SessionDetailDrawer({
                 gap: 2,
               }}
             >
-              {row('Agent', agentNameOf(agents, s.agent_id))}
+              {row('底座', runtimeLabelOf(runtime, s.runtime_id))}
               {/* 工作空间（= 会话的 ACP cwd，也是原生权限 workspace-write 的沙箱边界）：
                   创建后不可变，故这里只读展示。「平台分配」标记来自服务端权威标志
                   workspace_temporary，不从路径形状猜。路径过长时中间省略，全文走 title。 */}
@@ -393,7 +393,7 @@ export function SessionDetailDrawer({
                 if (!pinned) {
                   return row(
                     '能力',
-                    <span style={{ color: tokens.textPlaceholder }} title="未声明会话级能力选定：按当前 Agent 的声明投放">
+                    <span style={{ color: tokens.textPlaceholder }} title="未声明会话级能力选定：按平台默认投放">
                       跟随默认
                     </span>,
                   )
@@ -549,7 +549,7 @@ export function SessionDetailDrawer({
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, color: tokens.textPlaceholder, lineHeight: 1.6 }}>
-                        无失败轮次。agent 运行出错时，可在此一键重试该轮。
+                        无失败轮次。底座运行出错时，可在此一键重试该轮。
                       </div>
                     )}
                   </>
@@ -588,7 +588,7 @@ export function SessionDetailDrawer({
                     lineHeight: 1.6,
                   }}
                 >
-                  无待确认的权限请求。agent 发起工具权限确认时会实时出现在这里与聊天流中。
+                  无待确认的权限请求。底座发起工具权限确认时会实时出现在这里与聊天流中。
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

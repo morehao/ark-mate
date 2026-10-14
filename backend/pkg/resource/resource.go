@@ -87,7 +87,8 @@ func ModalitiesToColumn(in []string) string {
 
 // Provider 应用层的供应商声明：**一个 OpenAI 兼容端点 + 一把密钥**。
 //
-// `APIKey` 是**明文，只在内存里存在**（落库的永远是 vault 密文）。2026-10-10 拍板改口径：
+// `APIKey` 是**明文，只在内存里存在**（v20 起库里的 `providers.key` 列是权威，
+// `<MATE_HOME>/credentials.json` 只是它的 0600 可重建镜像）。2026-10-10 拍板改口径：
 // 明文**进 adapter**——因为「写进底座的凭据文档」这件事只有 adapter 知道怎么写（dsh 的
 // `refs:` 分节、0600 权限、版本字段）。adapter 对它的去向受 `Syncer` 契约⑤约束：
 // 只许落到底座私有凭据文档或子进程 env 两处之一，绝不进日志/错误文案/事件/返回值。
@@ -162,7 +163,7 @@ const (
 // 生效时刻取值域（用户能理解的时间点）。
 const (
 	EffectImmediate   = "immediate"
-	EffectNextRun    = "next_run"
+	EffectNextRun     = "next_run"
 	EffectNextSession = "next_session"
 	EffectNextProcess = "next_process"
 )

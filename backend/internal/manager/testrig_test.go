@@ -16,18 +16,74 @@ package manager
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
+	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
+	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
+
+// providerTestSvc 建一个三 spec 的注册表（dsh + 合成的 rtx + 无凭据声明的 stub），并把
+// provider 目录设到 providerDir。不拨真实子进程。
+//
+// 第二、三个 spec 里，rtx 由 `internal/testutil/runtimetest` **合成**（见那里的包注释）：它带着
+// "走 env 通道交付密钥"的凭据声明与"`<provider>/<model>` 形态"的模型值实现——这两条链路在真实
+// adapter 里原本由第二个真实 adapter 承担，它下线后**只由这个夹具覆盖**。dsh 那一份**直接取真实
+// adapter 的**（不手抄路径/模板：手抄会把底座的私有知识带进内核，守卫会判红，而且迟早漂移）。
+//
+// v19 起它只做"注册表 + provider 目录"两件事：agent 定义面撤销后，没有定义要播种了。
+func providerTestSvc(t *testing.T, providerDir string) *Service {
+	t.Helper()
+	real := runtime.AllBuiltinRegistry()
+	dshSpec, ok := real.Get("dsh")
+	if !ok {
+		t.Fatal("默认注册表里应有 dsh")
+	}
+	reg := runtime.NewRegistry(
+		runtime.Spec{ID: "dsh", Name: "dsh", Credential: dshSpec.Credential},
+		runtimetest.Spec(runtime.LaunchSpec{}),
+		runtime.Spec{ID: "stub", Name: "Stub"},
+	)
+	svc := NewService(reg, eventbus.New())
+	if providerDir != "" {
+		// 与装配期同一条路径：先装配凭据分层（镜像落在 provider 目录的父目录下，即"mate home"），
+		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
+		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
+		svc.SetCredentials(newTestCredentials(t, filepath.Dir(providerDir)))
+		svc.LoadProviderDefinitions(providerDir)
+	}
+	return svc
+}
+
+// newTestCredentials 装配一份**密闭**的四层凭据面：镜像落在 home 下，"继承环境"那一层
+// 恒空（不读测试机自己的环境变量——真实装配读 `os.Getenv`，那会让断言随开发机的环境漂移）。
+//
+// 想验"继承环境遮住面板里那条"的用例自己给 `Env` 换一个取值函数（见 providers_key_test.go）。
+func newTestCredentials(t *testing.T, home string) *credentials.Layered {
+	t.Helper()
+	cwd := filepath.Join(home, "cwd")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, _, err := OpenCredentialSource(home, cwd)
+	if err != nil {
+		t.Fatalf("装配凭据面: %v", err)
+	}
+	l.Env = func(string) string { return "" }
+	return l
+}
+
+// ptrOf 取指针的通用小工具（白名单/名字这类"可选字段"在夹具里到处要）。
+//
+// 它原本住在已被删除的 agent 夹具里；形状与 `provider_store_test.go` 的 `ptr[T]` 相同，
+// 但那个名字是本包既有用例的自留地，不合并以免动到无关文件。
+func ptrOf[T any](v T) *T { return &v }
 
 // setBuildRuntime 把构建期底座设成 id，用例结束自动还原。
 //
@@ -40,12 +96,11 @@ func setBuildRuntime(t *testing.T, id string) {
 	t.Cleanup(func() { runtime.BuildRuntime = old })
 }
 
-// rigConfig 夹具的差异面（零值即"最裸的架子"：空注册表、无总线、无库、无 agent）。
+// rigConfig 夹具的差异面（零值即"最裸的架子"：空注册表、无总线、无库）。
 type rigConfig struct {
-	stub   bool        // 注册表装测试专用 stub runtime（false = 空注册表）
-	bus    bool        // 建事件总线（false = 传 nil，纯列表/纯状态用例不需要它）
-	store  bool        // 开临时 sqlite 库并 EnableStore
-	agents []*AgentRec // 直接注入的 agent 记录（绕过 CreateAgent 的门槛校验）
+	stub  bool // 注册表装测试专用 stub runtime（false = 空注册表）
+	bus   bool // 建事件总线（false = 传 nil，纯列表/纯状态用例不需要它）
+	store bool // 开临时 sqlite 库并 EnableStore
 }
 
 // rig 一次夹具建造的全部产物。用结构体而不是多返回值：预设各自只取需要的字段，
@@ -89,12 +144,6 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 		svc.EnableStore(st)
 		t.Cleanup(func() { _ = st.Close() })
 	}
-	for _, a := range cfg.agents {
-		svc.agents[a.ID] = a
-	}
-
-	// NewOrchestrator 不读 svc.agents（只存 svc/reg、建管理器和挂回调），
-	// 故 agent 在它之前注入与之后注入等价。
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
@@ -182,31 +231,23 @@ func newTestRig(t *testing.T) (*Service, *Orchestrator, *eventbus.Bus) {
 	return r.Svc, r.Orch, r.Bus
 }
 
-// testReapHarness 跑孤儿回收/空闲回收的架子：stub 注册表 + 一个名为 alias-stub 的 agent。
-// 无事件总线（回收路径不上报事件，只落 agent 诊断）。
+// testReapHarness 跑孤儿回收/空闲回收的架子：stub 注册表（构建期底座 = stub）。
+// 无事件总线（回收路径不上报事件，只落运行时诊断）。
 //
-// CreateAgent 的失败此前被 `_, _ =` 吞掉：那样一旦创建因任何原因失败，回收测试会退化成
-// 在"没有 agent"的空架子上跑，还可能因为路径没变而照样绿。这里改为失败即终止。
+// v19 起没有"先造一个 agent 才能回收"这回事：进程归属就是 runtime，登记与回收只看它。
 func testReapHarness(t *testing.T) (*Orchestrator, *Service) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) { c.stub = true })
-	if _, err := r.Svc.CreateAgent(context.Background(), dtoagent.AgentCreateReq{
-		ID: "alias-stub",
-	}); err != nil {
-		t.Fatalf("reaper 架子创建 alias-stub 失败: %v", err)
-	}
 	return r.Orch, r.Svc
 }
 
-// newSearchRig 跑跨会话检索/导出的架子：stub 注册表 + 事件总线 + 临时 sqlite 库
-// + 预置 agent a1（直接注入 svc.agents，跳过 CreateAgent）。
+// newSearchRig 跑跨会话检索/导出的架子：stub 注册表 + 事件总线 + 临时 sqlite 库。
 //
 // 总线与库都要：消息读模型的物化是「域事件 → store」这条链的产物，缺任一端都验不到真东西。
 func newSearchRig(t *testing.T) (*Service, *store.Store) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, true
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1"}}
 	})
 	return r.Svc, r.St
 }

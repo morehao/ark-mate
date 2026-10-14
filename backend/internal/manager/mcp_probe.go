@@ -79,7 +79,7 @@ func mcpProbeClass(err error) acl.Class {
 	case "mcp_transport_unsupported":
 		return acl.ClassUnsupported
 	case "mcp_command_invalid", "mcp_url_invalid", "mcp_secret_unresolved":
-		// 密钥引用解析不了是**配置问题**（改引用或补 vault/env），不是服务端故障 ⇒ 40001。
+		// 密钥引用解析不了是**配置问题**（改引用或补齐库/环境），不是服务端故障 ⇒ 40001。
 		return acl.ClassRequest
 	default:
 		return acl.ClassService

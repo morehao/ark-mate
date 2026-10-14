@@ -296,7 +296,8 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 				fmt.Sprintf("路径 id %q 与 body id %q 不一致", id, s), nil)
 		}
 	}
-	// `target.runtime_hint` 是**已下线的选择面**（底座由构建期固定）。两条路分开处理，
+	// `target.runtime_hint` / `target.agent_id` 是**已下线的选择面**（底座构建期固定；
+	// v19 起 agent 面整体撤销）。两条路分开处理，
 	// 因为正确出路不同：
 	//   ① 本次请求**带了这个键**（有人在试着设它）→ 40001 + 指路。静默忽略会让它变成
 	//      "写了、存了、什么都不发生"的骗人字段（同 dtoagent 的 default_model / runtimes）；
@@ -304,6 +305,9 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 	//      否则任何带该键的存量 automation 会**永远存不回去**，而界面已经没有这个字段可让
 	//      用户删——那等于把一个历史遗留键变成资源锁死。
 	if err := rejectRuntimeHintInPatch(id, patch); err != nil {
+		return dtoautomation.AutomationResp{}, err
+	}
+	if err := rejectAgentIDInPatch(id, patch); err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
 	patch["id"] = id
@@ -331,7 +335,7 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 		return dtoautomation.AutomationResp{}, err
 	}
 	if droppedLegacy {
-		glog.Warnw(ctx, "automation 定义里已下线的 target.runtime_hint 已清除（底座由构建期固定）",
+		glog.Warnw(ctx, "automation 定义里已下线的 target.runtime_hint / target.agent_id 已清除",
 			"automation", id, "runtime", runtime.SelectedRuntime())
 	}
 	var def automation.Automation
@@ -506,10 +510,28 @@ func rejectRuntimeHintInPatch(id string, patch map[string]any) error {
 			"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
 }
 
-// dropLegacyRuntimeHint 把**合并结果**里残留的 `target.runtime_hint` 删掉（自愈），返回新字节与
-// 是否真的删了一个键。
+// rejectAgentIDInPatch 本次请求若显式带了 `target.agent_id`（非 null）→ 40001。
 //
-// 只删这一个键：`target` 下用户自加的别的键原样保留（C9 的"只改必要的键"在这里同样成立，
+// 与 rejectRuntimeHintInPatch 同形同由（v19 撤销 agent 面）：会话不再有 agent 身份，
+// automation 的目标只剩"cwd + 模型 + prompt"。静默忽略会让用户以为"我指定了用哪个 agent"。
+func rejectAgentIDInPatch(id string, patch map[string]any) error {
+	tgt, ok := patch["target"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	v, ok := tgt["agent_id"]
+	if !ok || v == nil {
+		return nil
+	}
+	return acl.NewError(acl.ClassRequest, "agent_selection_removed",
+		fmt.Sprintf("target.agent_id 已下线：agent 概念已并入 runtime（本机为 %s），会话不再有 agent 身份；"+
+			"请从请求体里去掉这个键（automation %s）", runtime.SelectedRuntime(), id), nil)
+}
+
+// dropLegacyRuntimeHint 把**合并结果**里残留的 `target.runtime_hint` / `target.agent_id`
+// 删掉（自愈），返回新字节与是否真的删了键。
+//
+// 只删这两个键：`target` 下用户自加的别的键原样保留（C9 的"只改必要的键"在这里同样成立，
 // 所以走 map 删除而不是用强类型 `def.Target` 整体覆盖）。
 func dropLegacyRuntimeHint(df *capability.DefinitionFile, merged []byte, id string) ([]byte, bool, error) {
 	var doc map[string]any
@@ -520,10 +542,18 @@ func dropLegacyRuntimeHint(df *capability.DefinitionFile, merged []byte, id stri
 	if !ok {
 		return merged, false, nil
 	}
-	if _, has := tgt["runtime_hint"]; !has {
+	// 两个键都是**已下线的选择面**（底座构建期固定 + agent 面撤销），删法相同故同一处自愈。
+	dropped := false
+	for _, k := range []string{"runtime_hint", "agent_id"} {
+		if _, has := tgt[k]; !has {
+			continue
+		}
+		delete(tgt, k)
+		dropped = true
+	}
+	if !dropped {
 		return merged, false, nil
 	}
-	delete(tgt, "runtime_hint")
 	if err := df.Set("target", tgt); err != nil {
 		return merged, false, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("automation %s 的 target 无法序列化：%v", id, err), err)

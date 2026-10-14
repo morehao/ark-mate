@@ -48,7 +48,7 @@ func TestAutomationPortWriteFaceCreate(t *testing.T) {
 	resp, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{
 		"id": "daily", "name": "巡检", "enabled": true,
 		"schedule":  map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
-		"target":    map[string]any{"agent_id": "a1", "cwd": "/tmp/ws", "prompt": "x"},
+		"target":    map[string]any{"cwd": "/tmp/ws", "prompt": "x"},
 		"my_custom": map[string]any{"note": "用户自己的字段"},
 	}))
 	if err != nil {
@@ -84,7 +84,7 @@ func TestAutomationPortWriteFaceUpdate(t *testing.T) {
 	if _, err := svc.CreateAutomation(ctx, rawReq(t, map[string]any{
 		"id": "daily", "name": "旧名", "enabled": true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
-		"target":   map[string]any{"agent_id": "a1", "cwd": "/tmp/ws", "prompt": "x"},
+		"target":   map[string]any{"cwd": "/tmp/ws", "prompt": "x"},
 	})); err != nil {
 		t.Fatalf("准备: %v", err)
 	}

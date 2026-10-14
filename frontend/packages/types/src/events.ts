@@ -12,24 +12,24 @@ export const Ev = {
   Usage: 'session.usage',
   Permission: 'session.permission',
   PermissionRequest: 'session.permission_request',
-  // per-agent 默认权限策略自动决策留痕（审计事件）：payload = 决策依据与结论。控制台目前
-  // 不渲染它（策略本身走 REST 展示），但它是真实发布的事件，枚举必须与后端 events.go 对齐——
+  // 默认权限策略自动决策留痕（审计事件）：payload = 决策依据与结论。控制台目前
+  // 不渲染它（策略本身不加限定），但它是真实发布的事件，枚举必须与后端 events.go 对齐——
   // 此前漏了这一条，由 archtest 的 TestFrontendEventTypesMatchRegistry 抓出。
   PermissionPolicy: 'session.permission_policy',
   PermissionResolved: 'session.permission_resolved', // 挂起权限终局（用户决策/超时/取消）——前端收敛权限卡的唯一事实
   ElicitationRequest: 'session.elicitation_request',
-  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消/agent 收尾 complete）
+  ElicitationResolved: 'session.elicitation_resolved', // 挂起提问终局（accept/decline/cancel/超时/取消/底座收尾 complete）
   // §6 busy input 队列：会话正忙时用户输入入队 / 投递 / 撤下。队列视图只认这三条事件
   // （queued 建项、delivered|cancelled 收敛），不做本地推断。
   InputQueued: 'session.input_queued',
   InputDelivered: 'session.input_delivered',
   InputCancelled: 'session.input_cancelled',
   // 运行时主动推送的会话配置项全量更新（ACP session/config_option_update，如 dsh 在 provider
-  // 拓扑变化时推）：payload = {session_id, agent_id, runtime, options: ConfigOption[]}。
+  // 拓扑变化时推）：payload = {session_id, runtime, options: ConfigOption[]}。
   ConfigOptions: 'session.config_options',
   // 底座自报的会话可用命令**全量**列表（ACP session/available_commands_update；**这是可选能力**：
   // ACP 面不含命令的底座永远收不到本事件——那是底座事实，文案不得说成"你还没配命令"）。
-  // payload = {session_id, agent_id, runtime, commands: CommandInfo[]}；空数组表示"通告了当前没有命令"。
+  // payload = {session_id, runtime, commands: CommandInfo[]}；空数组表示"通告了当前没有命令"。
   // 语义边界：这是**发现面**，不是平台声明的能力——执行只是把命令行当普通提示词发出去（ADR-17）。
   Commands: 'session.commands',
   // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
@@ -105,7 +105,7 @@ export interface StreamEntry {
   // —— 结构化提问卡（kind='elicitation'）——
   elicitationId?: string // 决策回传锚点（POST /sessions/:id/elicitation）
   mode?: 'form' | 'url' // form=表单渲染 schema；url=引导链接
-  message?: string // agent 的提问引导文案
+  message?: string // 底座的提问引导文案
   schema?: ElicitationFormSchema // form 模式字段 schema（UI 据此渲染控件）
   url?: string // url 模式链接
   content?: Record<string, unknown> // accept 时用户提交的内容（结果展示）

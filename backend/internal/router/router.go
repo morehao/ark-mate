@@ -11,12 +11,14 @@
 package router
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
-	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svcexport"
@@ -37,7 +39,6 @@ const AppName = "mate"
 // 与"一个汇总大接口"的区别：这里只是装配点把实现分发给各控制器时的中转结构，
 // 控制器自身仍只持有自己那一片窄接口（见 internal/controller/ctr*）。
 type Ports struct {
-	Agent      svcagent.AgentSvc
 	Session    svcsession.SessionSvc
 	Workspace  svcworkspace.WorkspaceSvc
 	Runtime    svcruntime.RuntimeSvc
@@ -144,7 +145,6 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	rest := v1.Group("")
 	rest.Use(middleware.Credential(creds, credential.ScopeREST))
 
-	registerAgent(rest, ports)
 	registerWorkspace(rest, ports)
 	registerSession(rest, ports)
 	registerRuntime(rest, ports)
@@ -156,7 +156,12 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	if meta == nil {
 		meta = defaultMeta
 	}
-	registerSystem(rest, meta, o.Web, o.HostFacts)
+	registerSystem(rest, meta, o.Web, o.HostFacts, func() dtoruntime.IdentityResp {
+		if ports.Runtime == nil {
+			return dtoruntime.IdentityResp{}
+		}
+		return ports.Runtime.RuntimeIdentity(context.Background())
+	})
 
 	MountWeb(r, o.Web)
 	// 开发期资产重建通知（P6-A）：**开关与注册点必须同处**（archtest 有静态守卫钉这条）——

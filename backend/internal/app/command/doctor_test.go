@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // writeFiles 在 root 下写一组文件（rel → 内容），自动建父目录。
@@ -459,6 +460,52 @@ func TestRenderDoctorReport(t *testing.T) {
 	}
 }
 
+// TestDoctorHomeDisplayForm（v19）钉显示名的**两半**（人话换、`--json` 不换）。
+//
+// 失效方式都是静默的：人话那半漏了 → 绝对机器路径继续随截图/问题单外流（没人会因此被拦下）；
+// `--json` 那半跟着换 → 诊断包与 CI 拿到 `~/…`，在**另一个人的机器上**指向别处（原本逐字可比
+// 的绝对路径没了）。所以两半各断言一次，且都要断言"另一种形态**不**出现"。
+func TestDoctorHomeDisplayForm(t *testing.T) {
+	// 默认数据目录：测试里清掉 MATE_HOME，让解析退回家目录默认值（DisplayHome 只换这一种）。
+	t.Setenv("MATE_HOME", "")
+	def := config.HomeDirFromEnv()
+	if !filepath.IsAbs(def) {
+		t.Skip("本机取不到家目录，显示名不适用")
+	}
+	report := doctorReport{
+		Version:     "0.1.0",
+		APIContract: "v1",
+		Home:        def,
+		Checks: []doctorCheck{
+			{"home", doctorOK, filepath.Join(def, "mate.db") + " 可写"},
+			{"备份布局", doctorWarn, "老布局遗留 1 个：" + filepath.Join(def, "mate.db.bak-v15-x")},
+		},
+		Passed: true,
+	}
+
+	human := renderDoctorReport(report)
+	if !strings.Contains(human, "数据目录 ~/.ark-mate") {
+		t.Fatalf("人话输出应把默认数据目录渲染成 `~/.ark-mate`：\n%s", human)
+	}
+	if !strings.Contains(human, "~/.ark-mate/mate.db 可写") || !strings.Contains(human, "~/.ark-mate/mate.db.bak-v15-x") {
+		t.Fatalf("检查项里的路径也要换（含子目录与文件名）：\n%s", human)
+	}
+	if strings.Contains(human, def) {
+		t.Fatalf("人话输出里不该再出现绝对数据目录 %q：\n%s", def, human)
+	}
+
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), def) {
+		t.Fatalf("`--json` 必须保留绝对路径（诊断包/CI 要逐字可比）：%s", raw)
+	}
+	if strings.Contains(string(raw), "~/.ark-mate") {
+		t.Fatalf("`--json` 不该出现人类显示形态：%s", raw)
+	}
+}
+
 // TestDoctorReportJSONShape 冻结 `mate doctor --json` 的形状（键序 = 结构体字段序）。
 //
 // 与 `TestVersionOutput` 同一条纪律：机器消费方（CI、诊断包、将来的面板）读的是**字节**，
@@ -480,13 +527,18 @@ func TestDoctorReportJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// v20 起凭据面的字段换成：旧机制的**遗留物**（legacySecret*）+ 托管文档（credentials*）
+	// + 库里那两份（providerKeysWithKey / mcpSecretRefs）与三方对账（missing* / orphanMcpSecrets）。
 	const want = `{"version":"0.1.0","apiContract":"v1","home":"/tmp/mate","addr":"127.0.0.1:10001",` +
 		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],` +
 		`"providers":{"carrier":"","providerRows":0,"providerIds":null,"modelRows":0,` +
-		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,"vaultHome":"",` +
-		`"vaultUsable":false,"vaultSource":"","ciphertextFiles":null,"vaultDirScan":"",` +
-		`"noKeyProviders":null,"danglingRefs":null,"importMismatch":null,` +
-		`"importMismatchBenignOnly":false,"orphanCiphertexts":null,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
+		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,` +
+		`"legacySecretDir":false,"legacySecretKeyFile":false,"legacySecretCount":0,` +
+		`"credentialsExists":false,"credentialsPermOk":false,"credentialsRefs":0,` +
+		`"providerKeysWithKey":null,"mcpSecretRefs":null,"missingInCredentials":null,` +
+		`"missingInStore":null,"orphanMcpSecrets":null,` +
+		`"noKeyProviders":null,"importMismatch":null,` +
+		`"importMismatchBenignOnly":false,"runtimes":null,"missingBaseUrl":null,"sensitiveFiles":null},` +
 		`"failed":0,"warnings":0,"passed":true}`
 	if string(b) != want {
 		t.Fatalf("--json 形状变了：\n got %s\nwant %s", b, want)

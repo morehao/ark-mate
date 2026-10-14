@@ -1,5 +1,8 @@
 export * from './response'
-export * from './agent'
+// v19：agent 概念整个并入 runtime，原 `./agent` 的导出随之消失——
+// 供应商面搬去 `./provider`，底座身份/诊断面新开 `./runtime`。
+export * from './provider'
+export * from './runtime'
 export * from './session'
 export * from './workspace'
 export * from './model'

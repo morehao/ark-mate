@@ -7,7 +7,6 @@ import {
   createSession,
   createWorkspace as apiCreateWorkspace,
   deleteWorkspace as apiDeleteWorkspace,
-  listAgents,
   listSessions,
   listModelCatalog,
   listQueuedInputs,
@@ -19,11 +18,12 @@ import {
   resolvePermission,
   setToken as persistToken,
   getToken,
+  getMeta,
+  getRuntimeDiagnostics,
   toErrorMessage,
   updateSession,
 } from '@ark-mate/api'
 import type {
-  Agent,
   BusEvent,
   CommandInfo,
   ElicitationFormSchema,
@@ -33,6 +33,8 @@ import type {
   ModelCatalogResp,
   ModelRef,
   QueuedInput,
+  RuntimeDiagnostics,
+  RuntimeInfo,
   StreamEntry,
   Workspace,
   WorkspaceListResp,
@@ -103,7 +105,7 @@ function permissionResolvedLabel(p: Record<string, unknown> | undefined): string
 function elicitationResolvedLabel(p: Record<string, unknown> | undefined): string {
   const reason = String(p?.reason ?? '')
   const action = String(p?.action ?? '')
-  // agent 告知 URL 模式提问已在 agent 侧完成（elicitation/complete）→ 不是「用户提交了内容」。
+  // 底座告知 URL 模式提问已在它那侧完成（elicitation/complete）→ 不是「用户提交了内容」。
   if (reason === 'complete') return '链接流程已完成'
   if (action === 'accept') return '已提交'
   if (action === 'decline') return '已拒绝'
@@ -144,7 +146,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
   }
 
   // 终态/取消收敛：把未决的交互卡（权限/结构化提问）标记为已结束（不再显示待决按钮）。
-  // 覆盖「会话被取消/结束但仍挂着卡」的边缘（如超时后端已收敛、agent 继续产生末尾终态）。
+  // 覆盖「会话被取消/结束但仍挂着卡」的边缘（如超时后端已收敛、底座继续产生末尾终态）。
   const settleCards = (list: StreamEntry[], label: string): StreamEntry[] =>
     list.map((en): StreamEntry => {
       if (en.resolved) return en
@@ -261,7 +263,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
         lastSeq,
       }
     case Ev.PermissionRequest: {
-      // ACP 权限确认：agent 发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
+      // ACP 权限确认：底座发起请求 → 服务端发布 session.permission_request → 前端渲染卡片，
       // 用户点选 allow/reject × once/always 后经 POST /sessions/:id/permission 回传。
       const callId = String(e.payload?.call_id ?? '')
       const title = String(e.payload?.title ?? '权限请求')
@@ -304,7 +306,7 @@ export function applyEvent(v: SessionView, e: BusEvent): SessionView {
       }
     }
     case Ev.ElicitationRequest: {
-      // ACP 结构化提问（elicitation/create）：agent 请求 → 服务端发布 session.elicitation_request
+      // ACP 结构化提问（elicitation/create）：底座请求 → 服务端发布 session.elicitation_request
       // → 前端渲染表单/URL 提问卡；用户提交/放弃经 POST /sessions/:id/elicitation 回传。
       const elicitationId = String(e.payload?.elicitation_id ?? '')
       const mode = String(e.payload?.mode ?? 'form') === 'url' ? 'url' : 'form'
@@ -382,7 +384,22 @@ interface Toast {
 }
 
 export interface MateState {
-  agents: Agent[]
+  /**
+   * 构建期固定的底座身份（`GET /meta` 的 `runtime{}`；null = 还没取到）。
+   *
+   * v19 起界面要说"当前用的是哪个底座"只有这一处事实来源：底座不由用户选，
+   * 所以它只能从服务端的装配事实出口读，不能从会话或本地配置推。
+   */
+  runtime: RuntimeInfo | null
+  /**
+   * 底座诊断快照（`GET /runtime/diagnostics`；null = 还没取到）。
+   *
+   * 它是"底座进程此刻在不在、上一次为什么没起来"的唯一读面。v19 前这份快照挂在 agent 上
+   * （`/agents/:id/diagnostics`，面板在设置 · Agent 管理里）；那个面板整体撤掉之后，
+   * 事实改由**状态条**（常驻）与**底座徽标**（hover）如实标出——不新开一个设置分节，
+   * 因为这里没有任何可写的东西：底座由构建期固定，启停也不该是用户的常规动作。
+   */
+  runtimeDiagnostics: RuntimeDiagnostics | null
   sessions: SessionSummary[]
   /** 工作空间登记（v14；左栏分组与选择器的事实源）。 */
   workspaces: WorkspaceListResp | null
@@ -417,9 +434,10 @@ export interface MateState {
   /** C2：该会话是否已翻到最早（false/缺省 = 可能还有更早，ChatPage 显示「加载更早」）。 */
   historyStart: Record<string, boolean>
   /**
-   * 运行时目录读面（当前 agent 的 ACP 会话配置项投影；null = 未加载）。
+   * 运行时目录读面（当前底座的 ACP 会话配置项投影；null = 未加载）。
    *
-   * v12 起它来自独立的 `GET /models/catalog?agent=`——与设置 · 模型的平台清单是两个读面。
+   * v12 起它来自独立的 `GET /models/catalog`——与设置 · 模型的平台清单是两个读面。
+   * v19 起这条读面**无参**（原来要带 `?agent=<id>`，而底座只有一个）。
    */
   modelCatalog: ModelCatalogResp | null
 }
@@ -439,7 +457,8 @@ export interface ElicitationDecision {
 
 export interface MateActions {
   boot: () => void
-  refreshAgents: () => Promise<void>
+  /** 拉一次装配事实（`GET /meta`）与底座诊断快照（`GET /runtime/diagnostics`）。 */
+  loadMeta: () => Promise<void>
   refreshSessions: () => Promise<void>
   /** 拉取工作空间登记表（左栏分组 + 选择器共用；失败保持 null = 未装载）。 */
   loadWorkspaces: () => Promise<void>
@@ -479,8 +498,8 @@ export interface MateActions {
     workspaceId?: string | null,
     capabilities?: { skills?: string[]; mcps?: string[] },
   ) => Promise<string | undefined>
-  /** 拉取模型目录（`?agent=<id>`；来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
-  loadModelCatalog: (agentId?: string) => Promise<void>
+  /** 拉取模型目录（来源 session|resume|cache|none，失败 → 空目录 + 提示）。 */
+  loadModelCatalog: () => Promise<void>
   /** 会话级模型变更（经运行时 set_config_option 立即生效；运行时拒绝 → 报错且不改元数据）。 */
   updateSessionModel: (id: string, model?: string) => Promise<void>
   /** 发送一轮 prompt；`delivery` 仅在会话正忙时有意义（§6 排队/插话）。 */
@@ -522,7 +541,8 @@ export interface MateActions {
 export type MateStore = MateState & MateActions
 
 export const initialState: MateState = {
-  agents: [],
+  runtime: null,
+  runtimeDiagnostics: null,
   sessions: [],
   workspaces: null,
   views: {},
@@ -656,13 +676,17 @@ export const useMate = create<MateStore>((set, get) => {
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
             // 首个事件即证明已就绪（配合 snapshot 与 hydration 超时兜底）
             if (view.hydrating) view.hydrating = false
-            // 运行时推送的配置项更新（全量语义）→ 就地刷新模型目录（同一 agent 才生效）：
+            // 运行时推送的配置项更新（全量语义）→ 就地刷新模型目录（**同一个底座**的才生效）：
             // 模型下拉与「当前模型」无需轮询即可跟随运行时的真实状态。
+            //
+            // v19 前这里比的是 `payload.agent_id === catalog.agent`；两个字段都已不存在，
+            // 判据换成底座 id（`payload.runtime` ↔ `catalog.runtime`）——语义不变：跨底座的
+            // 配置项不能套到当前目录上，否则会显示另一套模型的选项。
             let catalog = s.modelCatalog
             if (f.event.type === Ev.ConfigOptions && catalog) {
               const payload = f.event.payload ?? {}
               const options = payload.options as ConfigOption[] | undefined
-              if (options && String(payload.agent_id ?? '') === catalog.agent) {
+              if (options && String(payload.runtime ?? '') === catalog.runtime) {
                 catalog = { ...catalog, source: 'session', options }
               }
             }
@@ -685,9 +709,19 @@ export const useMate = create<MateStore>((set, get) => {
     openSettingsSection: (id) => set({ settingsOpen: true, settingsSection: id }),
     closeSettings: () => set({ settingsOpen: false }),
 
-    refreshAgents: async () => {
+    loadMeta: async () => {
+      // 两个请求各自收敛：装配事实答"是哪个底座"，诊断快照答"它此刻在不在"——
+      // 一条失败不该把另一条也吞掉（装配事实取不到时状态条仍要能报"底座未知"）。
       try {
-        set({ agents: await listAgents() })
+        const meta = await getMeta()
+        set({ runtime: meta.runtime })
+      } catch (err) {
+        // 取不到装配事实不该挡住界面：底座身份是**展示事实**，缺它只是少一行字，
+        // 会话/能力那些面各有各的失败出路，不该被这里连坐。
+        reportApiError(err)
+      }
+      try {
+        set({ runtimeDiagnostics: await getRuntimeDiagnostics() })
       } catch (err) {
         reportApiError(err)
       }
@@ -773,7 +807,7 @@ export const useMate = create<MateStore>((set, get) => {
         t.configure(cfg)
         t.connect()
       })
-      void get().refreshAgents()
+      void get().loadMeta()
       void get().refreshSessions()
       get().closeSettings()
       get().showToast(v ? '已保存访问令牌，正在重连…' : '已清除访问令牌')
@@ -796,7 +830,8 @@ export const useMate = create<MateStore>((set, get) => {
         t.configure(cfg)
         // 常驻连接：console 首帧即反映真实 WS 状态（appbar/状态条），attach 免等待
         t.connect()
-        void get().refreshAgents()
+        // 装配事实（底座身份）与在册会话：都与事件流并行拉，首帧就有东西可画。
+        void get().loadMeta()
         void get().refreshSessions()
         // 工作空间登记表：左栏分组与选择器共用（选择器每次打开也会刷一次，
         // 这里拉是为了"首帧就有分组"，而不是等用户点开选择器才出现）。
@@ -876,11 +911,11 @@ export const useMate = create<MateStore>((set, get) => {
       }
     },
 
-    loadModelCatalog: async (agentId) => {
+    loadModelCatalog: async () => {
       try {
-        // v12：走独立的运行时目录读面（`GET /models/catalog?agent=`）——不再复用 `GET /models`，
+        // v12：走独立的运行时目录读面（`GET /models/catalog`）——不再复用 `GET /models`，
         // 后者已改成平台清单面。
-        const resp = await listModelCatalog(agentId || undefined)
+        const resp = await listModelCatalog()
         set({ modelCatalog: resp })
       } catch (err) {
         // 取不到目录 = 运行时没有可用来源（未启动/未登录）：保持空目录（面板显示空态 + 提示），
@@ -985,7 +1020,7 @@ export const useMate = create<MateStore>((set, get) => {
           always: decision.always,
           allowed: decision.allowed,
         })
-        // 本地就地标记该权限卡已决策（按钮禁用 + 展示决策），agent 随后经 WS 续流。
+        // 本地就地标记该权限卡已决策（按钮禁用 + 展示决策），底座随后经 WS 续流。
         set((s) => {
           const view = s.views[id]
           if (!view) return {}
@@ -1010,7 +1045,7 @@ export const useMate = create<MateStore>((set, get) => {
           action: decision.action,
           content: decision.content,
         })
-        // 本地就地标记该提问卡已决策（按钮禁用 + 展示结果），agent 随后经 WS 续流。
+        // 本地就地标记该提问卡已决策（按钮禁用 + 展示结果），底座随后经 WS 续流。
         set((s) => {
           const view = s.views[id]
           if (!view) return {}

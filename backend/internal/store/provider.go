@@ -15,9 +15,13 @@ import (
 // 载体分派（sqlite = 本表 / memory = `providers.json`）在 manager 侧（`providers_carrier.go`）：
 // 本包只回答"库里那一行"，不回答"这台机器上有哪些上游凭据"。
 //
-// **不碰 vault**：密钥不是定义，而 v13 的两张表**结构上没有能放明文的列**（ADR-8）。
-// vault 与 SQLite 无法同事务，所以写面顺序由 manager 固定为
-// 「① 校验 → ② vault 写入/删除 → ③ 本行 CAS + 审计 → ④ 更新内存」，③ 失败时回滚 ②。
+// **密钥现在也在库里**（v20）：`providers.key` 一列与内容列同表同行，ADR-8 的"结构上没有能放明文的列"
+// 已被 v20 推翻（理由与代价见 `docs/design-and-roadmap.md`「决策变更 v20」）。但**本包仍不碰它**：
+// `SetProviderKey` / `ProviderKey` 是单独一对方法（`credentials.go`），因为密钥与内容有**两条不同的
+// 写路径**——内容走 CAS + 审计（`commitDefinitionChange`），密钥只 bump revision、不落审计行。
+// 于是 manager 的写面顺序是「① 校验 → ② 本行内容 CAS + 审计 → ③ `key` 列 → ④ 更新内存 → ⑤ 双写镜像」，
+// ③ 失败时**不回滚** ②（回执的 `problems` 会说明）；要关掉这个窗口需要一个"内容 + 密钥同事务"的
+// 门面方法，本版刻意没做（残留已记进 v20 笔记）。
 
 // ProviderColumns 是 provider 行的**内容列**（身份列是 `ID`，记账列由 CAS 语义决定）。
 //

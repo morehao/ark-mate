@@ -31,7 +31,7 @@ type SkillWarningResp struct {
 // McpServerResp MCP 注册表条目。§13.3 M1/M6：**明文与密钥分开读回**——
 // 明文 `env_keys` 给得出（非密钥），密钥侧一律**只给键名**（`secret_env_keys`/`secret_header_keys`），
 // 连引用都不回（引用能反推"这台机器上有没有那个密钥"，没必要给）。header 明文键仍不读回（保持原立场）。
-// `unresolved_secret_keys` 是"引用绑了但解析不了"（vault 里没这条密文 / env 变量没设）——
+// `unresolved_secret_keys` 是"引用绑了但解析不了"（库里没有 `mcp_secrets` 那一行 / env 变量没设）——
 // 这类半配置以前只能在会话启动的日志里撞见，现在列表就能看出来。
 type McpServerResp struct {
 	ID        string   `json:"id"`
@@ -50,7 +50,7 @@ type McpServerResp struct {
 	SecretEnvKeys []string `json:"secret_env_keys,omitempty"`
 	// SecretHeaderKeys 密钥型 header 的键（**只有键名**）。
 	SecretHeaderKeys []string `json:"secret_header_keys,omitempty"`
-	// UnresolvedSecretKeys 已绑定但当前解析不了的密钥键（vault 缺密文 / env 未设）。
+	// UnresolvedSecretKeys 已绑定但当前解析不了的密钥键（库里缺那一行 / env 未设）。
 	UnresolvedSecretKeys []string `json:"unresolved_secret_keys,omitempty"`
 	// 以下为 live 探测状态（P2 §5.2；从未探测则零值/空）。
 	ToolCount    int    `json:"tool_count"`                 // 该 server 当前归属的 Tool 条目数
@@ -174,41 +174,6 @@ type ToolResp struct {
 	Schema      json.RawMessage `json:"schema,omitempty"`     // 参数 JSON Schema（原样保真）
 }
 
-// AgentCapabilitiesResp 某 Agent 视角的统一能力目录：按该 Agent 的候选 runtime 聚合
-// 「可投影 / 可注入 / 可目录化」的能力面（管理面只读视图；runtimes 仅作可用性依据，
-// 不构成对外路由承诺）。可见性规则（§5.2/§5.4）：
-//   - skills：全量列出，每条给 runtimes（实际投放目标，已裁剪到候选）+ applicable/reasons；
-//   - mcp_servers：注册表全量 + 每条的 enabled（agent 白名单）与 runtimes（候选里支持该传输的）；
-//   - tools：builtin/observed 恒可见；mcp 条目须其归属 server 对该 agent 启用且至少一个候选可承载。
-type AgentCapabilitiesResp struct {
-	AgentID    string               `json:"agent_id"`
-	Name       string               `json:"name,omitempty"`
-	Runtimes   []string             `json:"runtimes"`
-	Skills     []AgentSkillResp     `json:"skills"`
-	McpServers []AgentMcpServerResp `json:"mcp_servers"`
-	Tools      []ToolResp           `json:"tools"`
-	Notes      []string             `json:"notes,omitempty"` // 裁剪/降级原因（空 = 无特殊情况）
-}
-
-// AgentSkillResp 某 Agent 视角的 skill（sources 只保留该 Agent 候选 runtime 的目标）。
-//
-// §13.4 S5：**不适用不等于不列出**——启停（Enabled）与适用（Applicable）正交，两者都要能解释。
-// 不适用时 `reasons` 给「为什么 + 怎么改」，而不是让条目静默消失（技能"凭空不见"最难排查）。
-type AgentSkillResp struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	// Runtimes 本 agent 视角下的**实际投放目标** = 候选 runtime ∩ 技能声明的白名单 ∩ 本进程
-	// 已解析出投影的 runtime（空 = 这个 agent 用不上，配合 reasons 解释）。旧 sources 已退役。
-	Runtimes []string `json:"runtimes,omitempty"`
-	// Enabled 平台是否投放（false = 已被禁用，可恢复）。
-	Enabled bool `json:"enabled"`
-	// Applicable 该 agent 现在能不能真的用上（Runtimes 非空且未被禁用）。
-	Applicable bool `json:"applicable"`
-	// Reasons 不适用的原因（人话；Applicable=true 时为空）。
-	Reasons []string `json:"reasons,omitempty"`
-}
-
 // SkillMaterializationResp 一个 skill 的物化体检（§13.4 S2：审计/复现面）。
 // 只读：看每一处物化目标上"应该是什么、实际是什么"，不写盘也不修复（修复交给重校/启停）。
 type SkillMaterializationResp struct {
@@ -263,17 +228,6 @@ type SkillToggleResp struct {
 	MaterializeErrors []string `json:"materialize_errors,omitempty"`
 	// NextAction 这一步之后该知道的事（如「已物化副本已撤回」）。
 	NextAction string `json:"next_action,omitempty"`
-}
-
-// AgentMcpServerResp 某 Agent 视角的 MCP server。
-// Enabled = agent 白名单语义（nil 未声明 → true；显式白名单 → 命中；空数组 → false）。
-// Runtimes = 该 Agent 候选中支持此传输的 runtime 子集（空 = 当前无可承载者，不会被注入）。
-type AgentMcpServerResp struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name,omitempty"`
-	Transport string   `json:"transport"`
-	Enabled   bool     `json:"enabled"`
-	Runtimes  []string `json:"runtimes"`
 }
 
 // ——— 写面结果（M2） ———

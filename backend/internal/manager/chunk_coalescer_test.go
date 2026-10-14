@@ -51,10 +51,10 @@ func TestChunkCoalescerMergesSameShape(t *testing.T) {
 	c := newChunkCoalescer(sink.fn)
 	defer c.Close()
 
-	base := map[string]any{"session_id": "s1", "agent_id": "a1", "msg_id": "m1", "text": "a"}
+	base := map[string]any{"session_id": "s1", "runtime": "rtx", "msg_id": "m1", "text": "a"}
 	c.add(BusMessage, "s1", base)
-	c.add(BusMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a1", "msg_id": "m1", "text": "b"})
-	c.add(BusMessage, "s1", map[string]any{"session_id": "s1", "agent_id": "a1", "msg_id": "m1", "text": "c"})
+	c.add(BusMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "msg_id": "m1", "text": "b"})
+	c.add(BusMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "msg_id": "m1", "text": "c"})
 	if got := sink.n(); got != 0 {
 		t.Fatalf("未达阈值不应发布: %d", got)
 	}
@@ -65,7 +65,7 @@ func TestChunkCoalescerMergesSameShape(t *testing.T) {
 	if sink.typ[0] != BusMessage || sink.conv[0] != "s1" {
 		t.Fatalf("类型/会话不符: %s %s", sink.typ[0], sink.conv[0])
 	}
-	if sink.pay[0]["msg_id"] != "m1" || sink.pay[0]["agent_id"] != "a1" {
+	if sink.pay[0]["msg_id"] != "m1" || sink.pay[0]["runtime"] != "rtx" {
 		t.Fatalf("形状字段应保留: %+v", sink.pay[0])
 	}
 	if base["text"] != "a" {
@@ -207,7 +207,7 @@ func TestChunkCoalescerFlushIsPerSession(t *testing.T) {
 // 工具卡（非合并类型）发布前先落文本 → events 表里「文本先于工具卡」，且文本已合并。
 func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 	svc, st := newSearchRig(t)
-	svc.registerSession(&SessionRec{ID: "cv-merge", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "cv-merge"})
 
 	svc.publish(BusMessage, "cv-merge", map[string]any{"session_id": "cv-merge", "msg_id": "m1", "text": "你"})
 	svc.publish(BusMessage, "cv-merge", map[string]any{"session_id": "cv-merge", "msg_id": "m1", "text": "好"})
@@ -245,7 +245,7 @@ func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 // TestPublishFlushesDeltasOnRunEnded 终态事件前必 flush：events 表里文本先于 run.ended。
 func TestPublishFlushesDeltasOnRunEnded(t *testing.T) {
 	svc, st := newSearchRig(t)
-	svc.registerSession(&SessionRec{ID: "cv-end", AgentID: "a1"})
+	svc.registerSession(&SessionRec{ID: "cv-end"})
 	for _, chunk := range []string{"最", "后", "一段"} {
 		svc.publish(BusMessage, "cv-end", map[string]any{"session_id": "cv-end", "msg_id": "m1", "text": chunk})
 	}
@@ -273,8 +273,8 @@ func TestCloseTranscriptsFlushesChunks(t *testing.T) {
 	svc, st := newSearchRig(t)
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
-	svc.registerSession(&SessionRec{ID: "cv-close", AgentID: "a1"})
-	svc.tx.begin("cv-close", "a1", "stub", "/tmp", false)
+	svc.registerSession(&SessionRec{ID: "cv-close"})
+	svc.tx.begin("cv-close", "stub", "/tmp", false)
 	svc.publish(BusMessage, "cv-close", map[string]any{"session_id": "cv-close", "msg_id": "m1", "text": "尾巴"})
 
 	svc.closeTranscripts()

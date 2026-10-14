@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/redact"
 )
 
@@ -21,8 +23,8 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 
 	dir := t.TempDir()
 	svc.SetTranscriptDir(dir)
-	svc.registerSession(&SessionRec{ID: "conv-redact", AgentID: "a1"})
-	svc.tx.begin("conv-redact", "a1", "stub", "/tmp", false)
+	svc.registerSession(&SessionRec{ID: "conv-redact"})
+	svc.tx.begin("conv-redact", "stub", "/tmp", false)
 	defer svc.tx.closeAll()
 
 	payload := map[string]any{
@@ -106,5 +108,131 @@ func TestRunErrorPayloadRedactsStderrTail(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "listening on :8080") {
 		t.Fatalf("正常 stderr 行应保留: %s", b)
+	}
+}
+
+// ——— v20 的动态那半（设计 §8.3-①）：**经写面/解析面进来的真值必须自动进闸门** ———
+//
+// 为什么不能只靠形状正则：真实密钥常常没有任何可辨识形状（自建网关的 token、随机短串），
+// 而 v20 把密钥的权威搬进库之后，平台是**唯一**知道这些值的地方——不在这里登记，
+// 一把无形状的密钥就会原样出现在事件/transcript/报错里，且不会有任何断言变红。
+
+// TestProviderKeyValueIsRedactedAfterWriteFace 通过写面存一把**无形状**的密钥 → 三个落点零命中。
+func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
+	ctx := context.Background()
+	svc, st := newSearchRig(t)
+	home := t.TempDir()
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.SetProviderDir(filepath.Join(home, "providers"))
+
+	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
+	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+		ID: "dyn", Protocol: "openai", APIKey: &key,
+	}); err != nil {
+		t.Fatalf("写面存密钥: %v", err)
+	}
+	// 写面回执本身不得回显明文（另一条判据，但放在同一现场里更省事）。
+	items, err := svc.ListProviders(ctx)
+	if err != nil || len(items) != 1 || !items[0].HasKey {
+		t.Fatalf("装回读面: n=%d err=%v", len(items), err)
+	}
+	if strings.Contains(strings.Join(items[0].Problems, " "), key) {
+		t.Fatal("读面 problems 不该含明文")
+	}
+
+	dir := t.TempDir()
+	svc.SetTranscriptDir(dir)
+	svc.registerSession(&SessionRec{ID: "conv-dyn-v20"})
+	svc.tx.begin("conv-dyn-v20", "stub", "/tmp", false)
+	defer svc.tx.closeAll()
+	svc.publish(BusMessage, "conv-dyn-v20", map[string]any{
+		"session_id": "conv-dyn-v20",
+		"msg_id":     "m1",
+		"text":       "底座报错原文：" + key,
+	})
+	svc.flushChunks()
+
+	// 1) WS 帧 2) events 表 3) transcript 文件
+	var frame eventbus.Event
+	for _, e := range svc.bus.EventsAfter(0) {
+		if e.Type == BusMessage && e.AggregID == "conv-dyn-v20" {
+			frame = e
+		}
+	}
+	if b, _ := json.Marshal(frame); strings.Contains(string(b), key) {
+		t.Fatalf("WS 帧未脱敏（写面/解析面进来的真值必须自动登记）: %s", b)
+	}
+	rows, _, err := st.EventsAfter(ctx, "conv-dyn-v20", 0, 10)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("事件未落库: n=%d err=%v", len(rows), err)
+	}
+	if b, _ := json.Marshal(rows); strings.Contains(string(b), key) {
+		t.Fatalf("events 表未脱敏: %s", b)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "conv-dyn-v20.jsonl"))
+	if err != nil {
+		t.Fatalf("读 transcript: %v", err)
+	}
+	if strings.Contains(string(raw), key) {
+		t.Fatalf("transcript 未脱敏: %s", raw)
+	}
+}
+
+// TestMcpSecretValueIsRedactedAfterResolution 库里那把 MCP 密钥被解析出来之后同样进闸门。
+//
+// 这条对应一个真实的泄漏形态：stdio MCP server 把凭据打进 stderr（"401 token=…"），
+// 那串经 `run.error.stderr_tail` 外露。v20 之前平台不知道 MCP 密钥的值（那是密文），
+// 现在它就在我们库里——登记它是平台自己的责任。
+func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
+	ctx := context.Background()
+	svc, st := newSearchRig(t)
+	home := t.TempDir()
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.EnableStore(st)
+
+	const ref = "store:mcp/dyn-token"
+	const val = "mcp-7f-not-a-known-shape" // 无形状：只能靠登记值那一档
+	if err := st.SetMcpSecret(ctx, ref, val); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
+		ID: "dyn", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
+		SecretEnv: map[string]string{"TOKEN": ref},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := directMcp(svc.McpServersFor("stub", nil))
+	if len(got) != 1 || got[0].Env["TOKEN"] != val {
+		t.Fatalf("注入侧应解析出明文: %+v", got)
+	}
+
+	dir := t.TempDir()
+	svc.SetTranscriptDir(dir)
+	svc.registerSession(&SessionRec{ID: "conv-mcp-dyn"})
+	svc.tx.begin("conv-mcp-dyn", "stub", "/tmp", false)
+	defer svc.tx.closeAll()
+	svc.publish(BusRunError, "conv-mcp-dyn", map[string]any{
+		"session_id":  "conv-mcp-dyn",
+		"details":     "子进程退出",
+		"stderr_tail": []string{"401 Unauthorized: token=" + val},
+	})
+	svc.flushChunks()
+
+	var frame eventbus.Event
+	for _, e := range svc.bus.EventsAfter(0) {
+		if e.Type == BusRunError && e.AggregID == "conv-mcp-dyn" {
+			frame = e
+		}
+	}
+	if b, _ := json.Marshal(frame); strings.Contains(string(b), val) {
+		t.Fatalf("run.error 的 stderr_tail 未脱敏: %s", b)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "conv-mcp-dyn.jsonl"))
+	if err != nil {
+		t.Fatalf("读 transcript: %v", err)
+	}
+	if strings.Contains(string(raw), val) {
+		t.Fatalf("transcript 未脱敏: %s", raw)
 	}
 }

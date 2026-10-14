@@ -158,7 +158,7 @@ func (g *rig) handshake() mcpFrame {
 // TestRunEmptySourceIsLoudButClean 骨架形态（Source == nil）：工具面是**空数组**（不是 null）、
 // 调用回"未知工具"，且 stderr 上有一条响亮的 WARN——静默的空面将来会表现成"工具莫名不见了"。
 func TestRunEmptySourceIsLoudButClean(t *testing.T) {
-	g := startRig(t, Options{Scope: Scope{AgentID: "a1", RuntimeID: "r1"}})
+	g := startRig(t, Options{Scope: Scope{RuntimeID: "r1"}})
 	g.handshake()
 
 	list := g.await(g.send("tools/list", nil))
@@ -190,7 +190,7 @@ func TestRunWithSourceProxiesTools(t *testing.T) {
 		{Name: "alpha__echo", Description: "回显"},
 		{Name: "beta__add", Description: "加法"},
 	}}
-	g := startRig(t, Options{Scope: Scope{AgentID: "a1", RuntimeID: "r1"}, Source: src})
+	g := startRig(t, Options{Scope: Scope{RuntimeID: "r1"}, Source: src})
 	g.handshake()
 
 	list := g.await(g.send("tools/list", nil))
@@ -243,7 +243,7 @@ func TestRunWithSourceProxiesTools(t *testing.T) {
 // 炸会话：网关是单点，炸掉整条会话的代价远大于"这一轮没有工具"；错误必须进日志。
 func TestRunToolListFailureIsDegradedNotFatal(t *testing.T) {
 	src := &fakeSource{listErr: errors.New("store 打不开")}
-	g := startRig(t, Options{Scope: Scope{AgentID: "a1", RuntimeID: "r1"}, Source: src})
+	g := startRig(t, Options{Scope: Scope{RuntimeID: "r1"}, Source: src})
 	g.handshake()
 
 	list := g.await(g.send("tools/list", nil))
@@ -265,7 +265,7 @@ func TestRunExitsOnStdinEOF(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(context.Background(), srvR, srvW, Options{
-			Scope: Scope{AgentID: "a1", RuntimeID: "r1"},
+			Scope: Scope{RuntimeID: "r1"},
 		})
 	}()
 	if err := testW.Close(); err != nil {
@@ -291,7 +291,7 @@ func TestRunCancelReturnsContextError(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, srvR, srvW, Options{
-			Scope: Scope{AgentID: "a1", RuntimeID: "r1"},
+			Scope: Scope{RuntimeID: "r1"},
 		})
 	}()
 	cancel()

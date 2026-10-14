@@ -50,11 +50,12 @@ const wireTranscriptSchema = "ark-mate.wire-transcript.v2"
 const legacyWireTranscriptSchemaV1 = "ark-mate.wire-transcript.v1"
 
 // wireTranscriptHeader 文件首行（header）。
+// v19 起没有 `agent_id`：会话身份只剩 `runtime`。老文件首行里若还留着 `agent_id`，
+// `json.Unmarshal` 会忽略它（读面宽容，不需要迁移）。
 type wireTranscriptHeader struct {
 	Schema    string `json:"schema"`
 	Version   int    `json:"version"`
 	SessionID string `json:"session_id"`
-	AgentID   string `json:"agent_id"`
 	Runtime   string `json:"runtime"`
 	Cwd       string `json:"cwd,omitempty"`
 	// WorkspaceTemporary 该工作空间是否由平台代建。**memory 模式以 transcript 为事实源**，
@@ -93,7 +94,7 @@ func newTranscriptRecorder(dir string) *transcriptRecorder {
 }
 
 // begin 为会话创建/打开 JSONL 并写 header（幂等：已开则忽略）。
-func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string, workspaceTemporary bool) {
+func (r *transcriptRecorder) begin(sessionID, runtimeID, cwd string, workspaceTemporary bool) {
 	if r == nil || r.dir == "" || sessionID == "" {
 		return
 	}
@@ -117,7 +118,6 @@ func (r *transcriptRecorder) begin(sessionID, agentID, runtimeID, cwd string, wo
 		Schema:             wireTranscriptSchema,
 		Version:            2,
 		SessionID:          sessionID,
-		AgentID:            agentID,
 		Runtime:            runtimeID,
 		Cwd:                cwd,
 		WorkspaceTemporary: workspaceTemporary,

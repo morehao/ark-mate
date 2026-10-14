@@ -126,8 +126,11 @@ async function scenarioShell(cdp) {
   const health = await cdp.evalJs(`const r = await fetch('/v1/mate/health'); return { s: r.status, b: (await r.text()).slice(0, 40) }`)
   check('fetch /v1/mate/health 经壳反代 200（页面不带凭据）', health.s === 200 && health.b.includes('ok'), JSON.stringify(health))
 
-  const agents = await cdp.evalJs(`const r = await fetch('/v1/mate/agents'); const j = await r.json(); return { s: r.status, code: j.code, n: (j.data ?? []).length }`)
-  check('fetch /v1/mate/agents 经壳反代（restToken 由主进程注入）', agents.s === 200 && agents.code === 0, JSON.stringify(agents))
+  // v19：探针路径从 `/v1/mate/agents`（一族已删的路由）换成 `/v1/mate/meta`——它仍是
+  // **需要凭据**的读面，所以"壳反代替页面带上 restToken"这条性质一点没变；同时它顺带把
+  // 新契约里那条底座事实（`runtime`）也读回来了。
+  const meta = await cdp.evalJs(`const r = await fetch('/v1/mate/meta'); const j = await r.json(); return { s: r.status, code: j.code, runtime: j.data?.runtime?.id ?? null }`)
+  check('fetch /v1/mate/meta 经壳反代（restToken 由主进程注入）', meta.s === 200 && meta.code === 0, JSON.stringify(meta))
 
   const asset = await cdp.evalJs(`
     const src = [...document.querySelectorAll('script[src],link[href]')].map(e => e.getAttribute('src') || e.getAttribute('href')).find(p => p && p.startsWith('/assets/'))
@@ -235,14 +238,14 @@ async function scenarioCredentials(cdp) {
   // ② streamToken 调 REST → 401。**在 Node 侧发**：页面里根本打不到核心的 REST 面
   //    （CSP 的 connect-src 只放开 `'self'` 与 `ws://127.0.0.1:*`），这本身就是要断言的性质。
   const origin = boot.base.replace('ws://', 'http://')
-  const rest = await fetch(`${origin}/v1/mate/agents`, { headers: { authorization: `Bearer ${boot.stream}` } })
+  const rest = await fetch(`${origin}/v1/mate/meta`, { headers: { authorization: `Bearer ${boot.stream}` } })
   const restBody = await rest.json().catch(() => ({}))
   check('streamToken 调 REST → 401（V15 互斥）', rest.status === 401, `${rest.status} code=${restBody.code}`)
 
   // ②b 反向断言：页面**不能**直连核心 REST（CSP connect-src 不给 http 回环；REST 只能走壳反代）
   const direct = await cdp.evalJs(`
     try {
-      const r = await fetch(${JSON.stringify(origin)} + '/v1/mate/agents')
+      const r = await fetch(${JSON.stringify(origin)} + '/v1/mate/meta')
       return { blocked: false, status: r.status }
     } catch (e) { return { blocked: true, err: String(e).slice(0, 60) } }
   `)

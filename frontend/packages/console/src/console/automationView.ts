@@ -282,12 +282,16 @@ export function toLocalInput(iso: string | undefined, timezone: string): string 
   }
 }
 
-/** 定义 → 编辑器表单值。 */
+/**
+ * 定义 → 编辑器表单值。
+ *
+ * v19：表单里没有 `agent_id` 了（原来那一格是"由哪个 agent 执行"的选择面）。定时任务触发时建的
+ * 会话落在构建期固定的底座上；`target` 里剩 cwd / model / prompt 三件事，都是任务自己的事实。
+ */
 export function formFromAutomation(a: Automation): ScheduleFormValues & {
   id: string
   name: string
   enabled: boolean
-  agent_id: string
   cwd: string
   model?: string
   prompt: string
@@ -303,7 +307,6 @@ export function formFromAutomation(a: Automation): ScheduleFormValues & {
     hour: a.schedule.hour ?? 9,
     minute: a.schedule.minute ?? 0,
     days_of_week: a.schedule.days_of_week ?? [],
-    agent_id: a.target.agent_id,
     cwd: a.target.cwd,
     model: a.target.model,
     prompt: a.target.prompt,
@@ -324,7 +327,6 @@ export function writeBody(
     id?: string
     name: string
     enabled: boolean
-    agent_id: string
     cwd: string
     model?: string
     prompt: string
@@ -337,7 +339,6 @@ export function writeBody(
     enabled: v.enabled,
     schedule: scheduleFromForm(v),
     target: {
-      agent_id: v.agent_id,
       cwd: v.cwd,
       prompt: v.prompt,
     },

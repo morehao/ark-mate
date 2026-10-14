@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -241,7 +241,8 @@ func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set
 				reason = "密钥不可用：" + kerr.Error()
 			}
 			problems = append(problems, fmt.Sprintf(
-				"供应商 %q %s，它的 %d 条模型不会被交付：在「设置 · 模型」里补一条密钥（或修好 vault）",
+				"供应商 %q %s，它的 %d 条模型不会被交付：在「设置 · 模型」里补一条密钥"+
+					"（或把环境变量设好——进程环境按层序优先于面板里保存的那条）",
 				pid, reason, len(byProvider[pid])))
 			continue
 		}
@@ -405,8 +406,12 @@ func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 	return out, nil
 }
 
-// providerForSync 取某供应商的在册定义 + 明文密钥（不存在 → (nil,"",nil)）。
+// providerForSync 取某供应商的在册定义 + 生效明文密钥（不存在 → (nil,"",nil)）。
+//
+// 密钥走 `resolveProviderKey`（四层回落的唯一入口）：内存里那条与库里的那一列都是它的输入，
+// 所以这里不再有"两条取密钥的路"（v13–v19 的 `Key` / `KeyRef + 密文句柄` 二选一就是那种分叉）。
 func (s *Service) providerForSync(providerID string) (*providerDef, string, error) {
+	ctx := context.Background()
 	s.mu.Lock()
 	d := s.providers[providerID]
 	var cp *providerDef
@@ -418,7 +423,7 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 	if cp == nil {
 		// sqlite 载体可能比内存先有（导入/并发装配）：回落到行（v13 起是纯列投影）。
 		if s.st != nil {
-			row, found, err := s.st.GetProviderDefinition(context.Background(), providerID)
+			row, found, err := s.st.GetProviderDefinition(ctx, providerID)
 			if err != nil || !found {
 				return nil, "", err
 			}
@@ -431,21 +436,11 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 	if cp == nil {
 		return nil, "", nil
 	}
-	if cp.Key != "" {
-		return cp, cp.Key, nil
+	res := s.resolveProviderKey(ctx, cp)
+	if res.Value == "" && len(res.Problems) > 0 {
+		return cp, "", errors.New(strings.Join(res.Problems, "；"))
 	}
-	if cp.KeyRef != "" {
-		st, verr := s.providerVault()
-		if verr != nil || st == nil {
-			return cp, "", fmt.Errorf("vault 不可用，密钥不可解")
-		}
-		pt, err := st.Get(cp.KeyRef, vault.KindProviderKey)
-		if err != nil {
-			return cp, "", err
-		}
-		return cp, string(pt), nil
-	}
-	return cp, "", nil
+	return cp, res.Value, nil
 }
 
 // declaredModels 读全部平台清单并折成端口值对象。
@@ -628,7 +623,7 @@ func outcomeToDTO(runtimeID string, o resource.Outcome) dtomodel.RuntimeSyncResp
 //
 // `runtimeID` 非空 = 只看那一个 runtime 的明细；`effective`/`effective_at` 恒为**聚合**值
 // （ADR-22：用户面只有一个结论）。
-func (s *Service) ModelsView(ctx context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error) {
+func (s *Service) ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
 	models, err := s.ListModels(ctx)
 	if err != nil {
 		return nil, err
@@ -653,11 +648,12 @@ func (s *Service) ModelsView(ctx context.Context, runtimeID, agentID string, ref
 		st := states[id]
 		// **尽力采样**底座事实（`advertised`/`missing` 是机器面）：取不到就留空，
 		// 绝不把"没取到"当成"底座一条都没有"（那是假红），也不当成"两侧一致"（那是假绿）。
-		probeAgent := agentID
-		if probeAgent == "" {
-			probeAgent = s.agentForRuntime(id)
+		// 采样面只有**构建期固定那个底座**有执行面；别的 runtime 如实留空（unknown）。
+		if id != runtime.SelectedRuntime() {
+			resp.Sync = append(resp.Sync, st)
+			continue
 		}
-		if sample, serr := s.advertisedSample(ctx, probeAgent); serr == nil && sample.Known() {
+		if sample, serr := s.advertisedSample(ctx); serr == nil && sample.Known() {
 			values := make([]string, 0, len(sample.Models))
 			for _, m := range sample.Models {
 				values = append(values, m.Value)

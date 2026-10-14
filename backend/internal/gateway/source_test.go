@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/mcp"
+	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // fakeRemote 一个最小的远端 MCP 服务端（http 传输；JSON 应答而非 SSE）。
@@ -188,7 +191,7 @@ func newSourceRig(t *testing.T) *sourceRig {
 		st: st,
 		cfg: config.Config{
 			StoreMode: config.StoreModeSQLite, DBPath: filepath.Join(dir, "mate.db"),
-			AgentDir: filepath.Join(dir, "agents"), CapabilityDir: filepath.Join(dir, "capabilities"),
+			ProviderDir: filepath.Join(dir, "providers"), CapabilityDir: filepath.Join(dir, "capabilities"),
 		},
 		logs: testutil.CaptureLogs(t),
 	}
@@ -203,20 +206,13 @@ func (r *sourceRig) seedMcp(id, body string, expectedRev int64) {
 	}
 }
 
-// seedAgent 往库里写一条 agent 定义。
-func (r *sourceRig) seedAgent(id, body string) {
-	r.t.Helper()
-	ok, err := r.st.UpsertAgentDefinition(context.Background(), id, body, 0, "test")
-	if err != nil || !ok {
-		r.t.Fatalf("写 agent 定义 %s: ok=%v err=%v", id, ok, err)
-	}
-}
-
 // source 装配数据面（同一库句柄；日志由 testutil.CaptureLogs 收进临时文件供断言"降级有留痕"）。
-func (r *sourceRig) source(agentID string, pinned *[]string) *MateSource {
+//
+// v19：网关的 scope 只有"哪个底座 + 会话钉住的 MCP 白名单"两项（agent 面已撤销）。
+func (r *sourceRig) source(pinned *[]string) *MateSource {
 	r.t.Helper()
 	src, err := NewSource(context.Background(), SourceOptions{
-		Cfg: r.cfg, AgentID: agentID, McpsPinned: pinned, Store: r.st,
+		Cfg: r.cfg, McpsPinned: pinned, Store: r.st,
 	})
 	if err != nil {
 		r.t.Fatalf("装配数据面: %v", err)
@@ -240,6 +236,138 @@ func toolNames(tools []mcp.Tool) []string {
 	return out
 }
 
+// ——— v20 裁决：凭据 cwd 由核心传入（`<cwd>/.env` 那一层） ———
+
+// TestResolveCredCwd 优先级：**显式入参 > 环境变量 > 网关自己的 cwd**。
+//
+// 最后那一支不是"随便兜一个"：它是唯一会让两个进程对同一个引用给出不同答案的一支，所以它必须
+// 可被识别（来源常量）——调用方据此打 WARN，而不是让它静默发生。
+func TestResolveCredCwd(t *testing.T) {
+	const envValue = "/from/core-env"
+
+	// ① 显式入参最优先（常规生产路径留空，但调用方与测试可以显式给）。
+	if cwd, src := resolveCredCwd("/from/option", func(string) string { return envValue }); cwd != "/from/option" || src != credCwdSourceOption {
+		t.Fatalf("显式入参应最优先：cwd=%q src=%q", cwd, src)
+	}
+	// ② 环境变量（核心经网关条目的 env 交下来的那一条）。
+	cwd, src := resolveCredCwd("", func(k string) string {
+		if k == mcp.GatewayCredCwdEnv {
+			return envValue
+		}
+		return ""
+	})
+	if cwd != envValue || src != credCwdSourceEnv {
+		t.Fatalf("环境变量应生效：cwd=%q src=%q", cwd, src)
+	}
+	// ③ 谁都没给 → 网关自己的 cwd，且来源必须是可识别的"回落"值。
+	own, err := os.Getwd()
+	if err != nil {
+		t.Skipf("取不到本进程 cwd，跳过回落分支: %v", err)
+	}
+	cwd, src = resolveCredCwd("", func(string) string { return "" })
+	if cwd != own || src != credCwdSourceOwnGetwd {
+		t.Fatalf("应回落到自己的 cwd：cwd=%q（want %q）src=%q", cwd, own, src)
+	}
+	// ④ 空白值不算"给了"：核心传一个空串/空格不能把回落变成静默。
+	cwd, src = resolveCredCwd("   ", func(string) string { return "  " })
+	if cwd != own || src != credCwdSourceOwnGetwd {
+		t.Fatalf("空白值不得算作有效输入：cwd=%q src=%q", cwd, src)
+	}
+}
+
+// TestSourceUsesCoreCredCwd 装配层证据：核心交下来的 cwd **真的**是凭据分层里那一层的 cwd。
+//
+// 判据落在行为上（不是"字段被赋值了"）：同一个 provider 引用，只有 cwd 里那份 `.env` 提供了值——
+// 换成另一个目录装配就必须取不到。它正是"两个进程对同一个引用给同一个答案"的含义。
+func TestSourceUsesCoreCredCwd(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	cwdWithEnv := filepath.Join(dir, "proj")
+	cwdWithout := filepath.Join(dir, "elsewhere")
+	for _, d := range []string{home, cwdWithEnv, cwdWithout} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := testutil.OpenStore(t, filepath.Join(home, "mate.db"))
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+
+	// 一条 provider 档案（值**只**放在 cwd 的 `.env` 里，库/托管/继承环境都没有）。
+	const id = "cwd-cand"
+	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{
+		ID: id, Protocol: "openai", BaseURL: "https://cwd.invalid/v1",
+	}, 0, "test"); err != nil || !ok {
+		t.Fatalf("写 provider 行: ok=%v err=%v", ok, err)
+	}
+	// 平台注入/解析用的变量名逐供应商派生（`resource.RefFor`，与 manager 侧同一份算法）。
+	reg, err := runtime.ProductRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := reg.Get(runtime.SelectedRuntime())
+	if !ok || spec.Credential.RefPattern == "" {
+		t.Skipf("构建期底座没有凭据引用模板，跳过: ok=%v", ok)
+	}
+	envName := resource.RefFor(spec.Credential.RefPattern, id)
+	if envName == "" {
+		t.Skip("派生不出环境变量名，跳过")
+	}
+	const secret = "sk-cwd-layer-fixture-0123"
+	if err := os.WriteFile(filepath.Join(cwdWithEnv, ".env"), []byte(envName+"="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{
+		StoreMode: config.StoreModeSQLite, DBPath: filepath.Join(home, "mate.db"),
+		HomeDir: home, ProviderDir: filepath.Join(dir, "providers"),
+		CapabilityDir: filepath.Join(dir, "capabilities"),
+	}
+	hasKey := func(credCwd string) bool {
+		t.Helper()
+		src, err := NewSource(ctx, SourceOptions{Cfg: cfg, Store: st, CredCwd: credCwd})
+		if err != nil {
+			t.Fatalf("装配数据面: %v", err)
+		}
+		t.Cleanup(func() { _ = src.Close() })
+		if src.credCwd != credCwd {
+			t.Fatalf("凭据 cwd 未按显式入参生效：%q（want %q）", src.credCwd, credCwd)
+		}
+		items, err := src.svc.ListProviders(ctx)
+		if err != nil {
+			t.Fatalf("读 provider 面: %v", err)
+		}
+		for _, it := range items {
+			if it.ID == id {
+				return it.HasKey
+			}
+		}
+		t.Fatalf("库里应有 %s：%+v", id, items)
+		return false
+	}
+
+	if !hasKey(cwdWithEnv) {
+		t.Fatal("核心交下来的 cwd 里有 .env ⇒ 这一层必须解析出密钥（has_key=true）")
+	}
+	if hasKey(cwdWithout) {
+		t.Fatal("换一个没有 .env 的 cwd ⇒ 不得再解析出密钥（否则说明用的不是交下来的那个目录）")
+	}
+	// 密钥值**不得**出现在任何对外表示里（回归面）。
+	src, err := NewSource(ctx, SourceOptions{Cfg: cfg, Store: st, CredCwd: cwdWithEnv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	items, err := src.svc.ListProviders(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, _ := json.Marshal(items)
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("密钥明文不得出现在读面：%s", blob)
+	}
+}
+
 // TestSourceToolsNamespacesAndCalls 取数 + 命名空间化 + 代理调用（含密钥由网关就地解析）。
 // TestSourceSharesDBWithCore 网关与核心各自持有**同一个库**的句柄时必须能共存：
 // 生产形态就是这样（核心常驻持有 store，网关是它拉起的另一个进程/句柄），而两个 SQLite 连接
@@ -252,7 +380,7 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	t.Cleanup(func() { _ = core.Close() })
 	cfg := config.Config{
 		StoreMode: config.StoreModeSQLite, DBPath: dbPath,
-		AgentDir: filepath.Join(dir, "agents"), CapabilityDir: filepath.Join(dir, "capabilities"),
+		ProviderDir: filepath.Join(dir, "providers"), CapabilityDir: filepath.Join(dir, "capabilities"),
 	}
 	// 用核心句柄写入定义（真实写入路径），再让网关自己开库读。
 	seedVia := func(id, body string) {
@@ -264,14 +392,10 @@ func TestSourceSharesDBWithCore(t *testing.T) {
 	remote := newFakeRemote(t, "echo")
 	t.Setenv("MCP_SHARED_DB_TOKEN", "tok-shared") // 密钥能解析，才谈得上"看得到工具面"
 	seedVia("web", httpDef("web", remote.srv.URL, "MCP_SHARED_DB_TOKEN"))
-	if ok, err := core.UpsertAgentDefinition(context.Background(), "a1",
-		`{"id":"a1","name":"A1","runtimes":["rtx"]}`, 0, "test"); err != nil || !ok {
-		t.Fatalf("写 agent: ok=%v err=%v", ok, err)
-	}
 
 	logs := testutil.CaptureLogs(t)
 	src, err := NewSource(context.Background(), SourceOptions{
-		Cfg: cfg, AgentID: "a1",
+		Cfg: cfg,
 	})
 	if err != nil {
 		t.Fatalf("装配数据面（自开库）: %v", err)
@@ -292,9 +416,8 @@ func TestSourceToolsNamespacesAndCalls(t *testing.T) {
 	remote := newFakeRemote(t, "search", "fetch")
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
-	src := r.source("a1", nil)
+	src := r.source(nil)
 	tools, err := src.Tools(ctx)
 	if err != nil {
 		t.Fatalf("Tools: %v", err)
@@ -337,8 +460,7 @@ func TestSourceTakesEffectWithoutGenerationSwitch(t *testing.T) {
 	remote := newFakeRemote(t, "search")
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	if tools, err := src.Tools(ctx); err != nil || len(tools) != 1 {
 		t.Fatalf("前置：应有 1 个工具: %v %v", toolNames(tools), err)
@@ -380,8 +502,7 @@ func TestSourceSecretRotation(t *testing.T) {
 	remote := newFakeRemote(t, "search")
 	t.Setenv("MCP_TOKEN_PG", "old-token")
 	r.seedMcp("pg", httpDef("pg", remote.srv.URL, "MCP_TOKEN_PG"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	if _, err := src.Call(ctx, "pg__search", nil); err != nil {
 		t.Fatal(err)
@@ -405,8 +526,7 @@ func TestSourceUnresolvableSecretDegrades(t *testing.T) {
 	r.seedMcp("gh", httpDef("gh", good.srv.URL, "MCP_TOKEN_GH"), 0)
 	// 引用一个不存在的环境变量：解析必失败。
 	r.seedMcp("bad", httpDef("bad", good.srv.URL, "MCP_TOKEN_ABSENT"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	tools, err := src.Tools(ctx)
 	if err != nil {
@@ -434,8 +554,7 @@ func TestSourceRemoteFailureIsContained(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("broken", httpDef("broken", broken.srv.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	tools, err := src.Tools(ctx)
 	if err != nil {
@@ -449,10 +568,10 @@ func TestSourceRemoteFailureIsContained(t *testing.T) {
 	}
 }
 
-// TestSourcePinnedWhitelist 会话钉住的白名单**覆盖** agent 声明（含显式空集 = 一个都不要）。
+// TestSourcePinnedWhitelist 会话钉住的白名单决定网关给出哪些远程 server（含显式空集 = 一个都不要）。
 //
-// 这是"网关不能只认 agent"的证据：不带钉住项时网关会把 agent 的全量远程面给出去，
-// 而钉过 `["gh"]` 的会话必须只看到 gh。
+// v19：没有"agent 声明"这一层了——未钉（`McpsPinned == nil`）= 全量，钉过 `["gh"]` 只看到 gh，
+// 钉过 `[]` 一个都不要。
 func TestSourcePinnedWhitelist(t *testing.T) {
 	ctx := context.Background()
 	r := newSourceRig(t)
@@ -461,75 +580,32 @@ func TestSourcePinnedWhitelist(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("gh", httpDef("gh", gh.srv.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("pg", httpDef("pg", pg.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
-	// 缺省（会话没钉）：agent 未声明白名单 → 全量远程面。
-	all, err := r.source("a1", nil).Tools(ctx)
+	// 缺省（会话没钉）→ 全量远程面。
+	all, err := r.source(nil).Tools(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(toolNames(all), ",") != "gh__search,pg__query" {
-		t.Fatalf("未钉应回落 agent 声明（此处为全量）: %v", toolNames(all))
+		t.Fatalf("未钉住时应给全量远程面: %v", toolNames(all))
 	}
 
 	pinned := []string{"gh"}
-	only, err := r.source("a1", &pinned).Tools(ctx)
+	only, err := r.source(&pinned).Tools(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(toolNames(only), ",") != "gh__search" {
-		t.Fatalf("钉住的白名单应覆盖 agent 声明: %v", toolNames(only))
+		t.Fatalf("钉住的白名单应生效: %v", toolNames(only))
 	}
 
 	empty := []string{}
-	none, err := r.source("a1", &empty).Tools(ctx)
+	none, err := r.source(&empty).Tools(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(none) != 0 {
 		t.Fatalf("显式空集 = 本会话一个远程 MCP 都不要: %v", toolNames(none))
-	}
-}
-
-// TestSourceUnknownAgentFailsClosed agent 查不到（条目与库不一致）→ **错误**，不回落成全量。
-func TestSourceUnknownAgentFailsClosed(t *testing.T) {
-	ctx := context.Background()
-	r := newSourceRig(t)
-	remote := newFakeRemote(t, "search")
-	t.Setenv("MCP_TOKEN_GH", "tok-1")
-	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_GH"), 0)
-	// 有活着的 agent，但网关的 scope 指向一个不存在的：不能"查不到就给全部"。
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("ghost", nil)
-
-	if _, err := src.Tools(ctx); err == nil {
-		t.Fatal("未知 agent 必须失败（授权判据不能反着用）")
-	} else if !strings.Contains(err.Error(), "不存在") {
-		t.Fatalf("错误应说清楚原因: %v", err)
-	}
-	if _, err := src.Call(ctx, "gh__search", nil); err == nil {
-		t.Fatal("未知 agent 的调用同样必须失败")
-	}
-}
-
-// TestSourceAgentWhitelistApplies agent 声明的白名单在网关侧同样生效（与注入面同一语义）。
-func TestSourceAgentWhitelistApplies(t *testing.T) {
-	ctx := context.Background()
-	r := newSourceRig(t)
-	gh := newFakeRemote(t, "search")
-	pg := newFakeRemote(t, "query")
-	t.Setenv("MCP_TOKEN_GH", "tok-1")
-	r.seedMcp("gh", httpDef("gh", gh.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedMcp("pg", httpDef("pg", pg.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"],"mcps":["pg"]}`)
-	src := r.source("a1", nil)
-
-	tools, err := src.Tools(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(toolNames(tools), ",") != "pg__query" {
-		t.Fatalf("agent 白名单应生效: %v", toolNames(tools))
 	}
 }
 
@@ -551,10 +627,9 @@ func TestSourceServerTimeoutIsBounded(t *testing.T) {
 	t.Setenv("MCP_TOKEN_GH", "tok-1")
 	r.seedMcp("hang", httpDef("hang", hang.URL, "MCP_TOKEN_GH"), 0)
 	r.seedMcp("ok", httpDef("ok", ok.srv.URL, "MCP_TOKEN_GH"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
 	src, err := NewSource(ctx, SourceOptions{
-		Cfg: r.cfg, AgentID: "a1", Store: r.st, PerServerTimeout: 300 * time.Millisecond,
+		Cfg: r.cfg, Store: r.st, PerServerTimeout: 300 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -87,7 +87,7 @@ export interface McpServer {
   command?: string
   args?: string[]
   url?: string
-  /** 定义级投放开关（`/mcps` 回，未声明 = true）：关掉则任何 agent 都拿不到。 */
+  /** 定义级投放开关（`/mcps` 回，未声明 = true）：关掉则谁都拿不到（没有更上层的白名单）。 */
   enabled?: boolean
   /** 明文环境变量的键（§13.3 M1；值不回）。 */
   env_keys?: string[]
@@ -95,7 +95,7 @@ export interface McpServer {
   secret_env_keys?: string[]
   /** 密钥型 header 的键（**只有键名**）。 */
   secret_header_keys?: string[]
-  /** 已绑定但当前解析不了的密钥键（vault 缺密文 / env 未设）。 */
+  /** 已绑定但当前解析不了的密钥键（`store:` 引用在库里没有值 / `env:` 未设）。 */
   unresolved_secret_keys?: string[]
   /** —— P2 §5.2 live 探测状态（从未探测 → 0/空） —— */
   tool_count: number
@@ -110,7 +110,7 @@ export interface Tool {
   description?: string
   /** builtin | mcp | observed */
   source: string
-  /** source=mcp 时的归属 MCP server id（按 agent 可见性过滤依据）。 */
+  /** source=mcp 时的归属 MCP server id（按该 server 的启用位过滤的依据）。 */
   mcp_server?: string
   /** 参数 JSON Schema（原样保真）。 */
   schema?: unknown
@@ -226,44 +226,13 @@ export interface McpPromptGetResult {
   messages: McpPromptMessage[]
 }
 
-// ——— P2 §8.1 统一能力目录（GET /agents/:id/capabilities） ———
-
-/** 某 Agent 视角的 skill（runtimes 已裁到「候选 ∩ 技能声明 ∩ 本进程已解析投影」）。
- *  §13.4 S5：不适用**不等于**不列出——启用与适用正交，两者都要能解释。 */
-export interface AgentSkill {
-  id: string
-  name: string
-  description?: string
-  /** 该 Agent 的候选中真的会投放到的 runtime（空 = 这个 agent 用不上，reasons 里有为什么）。 */
-  runtimes?: string[]
-  /** 平台是否投放（false = 已被禁用，可恢复）。 */
-  enabled?: boolean
-  /** 该 agent 现在能不能真的用上（启用 ⟂ 适用）。 */
-  applicable?: boolean
-  /** 不适用的原因（人话；applicable=true 时为空）。 */
-  reasons?: string[]
-}
-
-/** 某 Agent 视角的 MCP server：enabled=白名单是否启用；runtimes=候选中可承载此传输的底座。 */
-export interface AgentMcpServer {
-  id: string
-  name?: string
-  transport: string
-  enabled: boolean
-  runtimes: string[]
-}
-
-export interface AgentCapabilities {
-  agent_id: string
-  name?: string
-  /** 该 Agent 的候选 runtime（能力可用性依据，非对外路由承诺）。 */
-  runtimes: string[]
-  skills: AgentSkill[]
-  mcp_servers: AgentMcpServer[]
-  tools: Tool[]
-  /** 裁剪/降级原因（未注册候选 runtime、mcps: [] 禁用等）。 */
-  notes?: string[]
-}
+// ——— P2 §8.1「某 Agent 视角的统一能力目录」（`GET /agents/:id/capabilities`）已撤 ———
+//
+// v19：那张读面的每一个字段都在回答"**按这个 agent 裁剪之后**还剩下什么"——候选 runtime、
+// 白名单启用位、逐技能的适用性与原因。agent 并入构建期固定的 runtime 之后，"按谁裁剪"只剩一个答案，
+// 裁剪本身也就没有信息量了：这张响应会退化成"把 /library 原样抄一遍"。
+// 所以它连同 `AgentCapabilities`/`AgentSkill`/`AgentMcpServer` 三个类型一起删除，
+// 能力面折回既有的无参读面（`/library` 给逐 runtime 的可达性 + 人话原因，`/skills`·`/mcps`·`/tools` 给定义）。
 
 /** 一次 MCP live 探测结果（POST /mcps/:id/probe）。 */
 export interface McpProbeResult {
@@ -354,10 +323,10 @@ export interface LibraryApplicability {
   reason?: string
 }
 
-/** Library 统一能力条目（GET /library；skill | mcp | agent | tool）。 */
+/** Library 统一能力条目（GET /library；skill | mcp | tool）。 */
 export interface LibraryItem {
   id: string
-  /** skill | mcp | agent | tool */
+  /** skill | mcp | tool（v19 起没有 agent：它不是一种可投放的能力，而是一个已撤掉的概念） */
   kind: string
   name: string
   description?: string

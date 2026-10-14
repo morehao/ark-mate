@@ -53,7 +53,7 @@ func TestCreateSessionUnspecifiedUsesDefaultWorkspace(t *testing.T) {
 		t.Fatalf("默认工作空间: ok=%v err=%v", ok, err)
 	}
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "a1"})
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestCreateSessionExplicitCwdKeepsEmptyAssignment(t *testing.T) {
 	r := newConvRig(t)
 	dir := t.TempDir()
 
-	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "a1", Cwd: dir})
+	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Cwd: dir})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestCreateSessionByWorkspaceID(t *testing.T) {
 	}
 
 	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "a1", WorkspaceID: ws.ID,
+		WorkspaceID: ws.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateSession(by id): %v", err)
@@ -139,7 +139,7 @@ func TestCreateSessionByWorkspaceID(t *testing.T) {
 
 	// 未知 id → 40401（前端据此刷新列表，而不是引导改路径）。
 	if _, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "a1", WorkspaceID: "wsp-nope",
+		WorkspaceID: "wsp-nope",
 	}); gerrCode(t, err) != code.NotFound {
 		t.Fatalf("未知 workspace_id 应 40401，实际 %d", gerrCode(t, err))
 	}
@@ -160,7 +160,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 
 	// 不一致 → workspace_conflict（40001），且**零副作用**（不建会话、不写库）。
 	_, err = r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "a1", WorkspaceID: wsA.ID, Cwd: dirB,
+		WorkspaceID: wsA.ID, Cwd: dirB,
 	})
 	if err == nil {
 		t.Fatal("workspace_id 与 cwd 指向不同目录必须拒绝")
@@ -175,7 +175,7 @@ func TestCreateSessionWorkspaceConflict(t *testing.T) {
 
 	// 一致 → 放行（两条来源指向同一目录时不该被拦）。
 	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "a1", WorkspaceID: wsA.ID, Cwd: dirA,
+		WorkspaceID: wsA.ID, Cwd: dirA,
 	})
 	if err != nil {
 		t.Fatalf("一致时应放行: %v", err)
@@ -204,9 +204,9 @@ func TestListSessionsByWorkspaceFilter(t *testing.T) {
 	// 内存镜像也要有（列表读的是内存镜像）。
 	// 内存镜像按**库里那一行的原样**登记：`c-legacy` 的归属刻意留空（v14 迁移留下的形态，
 	// 读面把它解析成默认工作空间）；真实系统里不会有"库里空、内存里有"的分叉。
-	r.svc.registerSession(&SessionRec{ID: "c-proj", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
-	r.svc.registerSession(&SessionRec{ID: "c-default", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
-	r.svc.registerSession(&SessionRec{ID: "c-legacy", AgentID: "a1", Cwd: def.Path})
+	r.svc.registerSession(&SessionRec{ID: "c-proj", Cwd: ws.Path, WorkspaceID: ws.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-default", Cwd: def.Path, WorkspaceID: def.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-legacy", Cwd: def.Path})
 
 	// 按项目过滤 → 只有那一条。
 	proj, err := r.svc.ListSessions(false, "", ws.ID)
@@ -270,9 +270,9 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	// 刻意用 **规范化后**的路径登记（`mustEval`）：真实会话的 cwd 一律是
 	// `ValidateWorkspace` 规范化过的形态，而 `workspaceUsage` 按 cwd 聚合——
 	// 夹具里用未规范化的拼写会造出一个真实系统里不存在的形态（macOS 上 /var vs /private/var）。
-	r.svc.registerSession(&SessionRec{ID: "c-def", AgentID: "a1", Cwd: def.Path, WorkspaceID: def.ID})
-	r.svc.registerSession(&SessionRec{ID: "c-reg", AgentID: "a1", Cwd: ws.Path, WorkspaceID: ws.ID})
-	r.svc.registerSession(&SessionRec{ID: "c-loose", AgentID: "a1", Cwd: mustEval(t, looseDir)})
+	r.svc.registerSession(&SessionRec{ID: "c-def", Cwd: def.Path, WorkspaceID: def.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-reg", Cwd: ws.Path, WorkspaceID: ws.ID})
+	r.svc.registerSession(&SessionRec{ID: "c-loose", Cwd: mustEval(t, looseDir)})
 
 	recent, err := r.svc.RecentWorkspaces(10)
 	if err != nil {
@@ -314,7 +314,7 @@ func TestDeleteWorkspaceReleasesSessionsImmediately(t *testing.T) {
 	}
 
 	res, err := r.svc.CreateSession(context.Background(), dtosession.SessionCreateReq{
-		AgentID: "a1", WorkspaceID: ws.ID,
+		WorkspaceID: ws.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)

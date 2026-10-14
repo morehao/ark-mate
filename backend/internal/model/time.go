@@ -31,6 +31,9 @@ func FormatTimeOrNow(t time.Time) string {
 // NowTS 返回当前时刻的落库文本。
 func NowTS() string { return time.Now().UTC().Format(LayoutTS) }
 
+// NowTSTime 与 NowTS 同一时刻的 time.Time 形态（走 gorm 列序列化的写路径用它）。
+func NowTSTime() time.Time { return time.Now().UTC() }
+
 // ParseTime 解析落库文本；空串或不可解析 → 零值（读路径容错，不因单行异常中断查询）。
 func ParseTime(s string) time.Time {
 	if s == "" {

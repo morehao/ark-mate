@@ -219,7 +219,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 		})
 		stats.Automations++
 	}
-	stats.Marker = fingerprintFiles(kept)
+	stats.Marker = fingerprintPaths(kept)
 	return items, stats
 }
 

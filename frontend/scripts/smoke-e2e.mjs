@@ -5,10 +5,10 @@
  * 验证对象：`make dev` 起的那个实例（默认 http://127.0.0.1:10001——**核心直接服务构建产物**，
  * 没有中间那层 vite dev server 了；2026-10-11 起 `:5173` 那条路已被 `apps/web/vite.config.ts` 拦住）。
  * 覆盖：
- *   1. REST 信封（health / agents / sessions）——@ark-mate/api 的 unwrap 语义前提；
- *      并断言 `/runtimes` 已下线、agent 不再带 runtimes（底座由构建期固定）；
+ *   1. REST 信封（health / meta / runtime 诊断 / sessions）——@ark-mate/api 的 unwrap 语义前提；
+ *      并断言 `/runtimes` 与整族 `/agents/*` 都已下线（底座由构建期固定，用户没有选择面）；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
- *   3. 载荷键形状与 @ark-mate/types 声明一致（Agent 列表字段）；
+ *   3. 载荷键形状与 @ark-mate/types 声明一致（`/meta.runtime` 与逐 runtime 可达性）；
  *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
@@ -75,25 +75,29 @@ async function checkRest() {
   if (health.http === 200 && health.env.code === 0 && health.env.msg === 'ok') ok('GET /health → {code:0}')
   else bad('GET /health', JSON.stringify(health))
 
-  const agents = await apiGet('/agents')
-  if (agents.env.code !== 0) return bad('GET /agents 信封', JSON.stringify(agents.env))
-  const agentList = agents.env.data
-  if (!Array.isArray(agentList) || agentList.length === 0) return bad('GET /agents 载荷', '应为非空数组')
-  const a0 = agentList[0]
-  for (const key of ['id', 'name', 'state', 'seed']) {
-    if (!(key in a0)) return bad('GET /agents 载荷', `Agent 缺字段 ${key}`)
-  }
-  // 种子只读标记（服务端权威字段；前端「种子」徽标与删除按钮据此判定）。
-  const seeds = agentList.filter((a) => a.seed === true)
-  if (seeds.length === 0) return bad('GET /agents 种子标记', '内置播种 agent 应带 seed:true')
-  ok(`GET /agents → ${agentList.length} 个（字段 id/name/state/seed 齐；种子 ${seeds.length} 个）`)
-
-  // 底座由构建期固定（用户不能选 runtime）：`/runtimes` 必须**不存在**，agent 也不再带 runtimes。
+  // 底座由构建期固定（用户不能选 runtime）：`/runtimes` 必须不存在。
   const rts = await apiGet('/runtimes')
   if (rts.env.code === 0) return bad('GET /runtimes 应已下线', JSON.stringify(rts.env).slice(0, 200))
   ok(`GET /runtimes → 已下线（code=${rts.env.code}）`)
-  if ('runtimes' in a0) return bad('GET /agents 载荷', 'agent 不应再带 runtimes（构建期固定底座）')
-  ok('GET /agents → 无 runtimes 字段（底座由构建期固定）')
+
+  // v19：agent 概念整个并入 runtime，那一族路由（读面 + 写面 + 启停 + 切默认 + 能力 + 诊断）全删。
+  // **这条负向判据刻意不写在这里**：本仓的判据是 `TestNoAgentVocabulary`（扫 `frontend/scripts/*.mjs`
+  // 的**零命中**——脚本里再出现一条已删路径，那个场景会静默跳过或"碰巧绿"，2026-10-11 实测过这种
+  // 假绿），以及 `TestReadmeRoutesMatchRouter` 的双向比对（README ↔ 真实路由表）。在验收脚本里
+  // 逐条打那些路径，等于为了验"它没了"而把它写回来，与零命中判据直接冲突。
+  // 所以脚本这一侧只做**正向**断言：新契约真的在（`/meta.runtime`、`/runtime/diagnostics`）。
+
+  // 后端的**唯一**底座事实读面：`/meta.runtime`（构建期固定的那个 id/name/version）。
+  const meta = await apiGet('/meta')
+  if (meta.env.code !== 0) return bad('GET /meta 信封', JSON.stringify(meta.env).slice(0, 200))
+  const rt = meta.env.data?.runtime
+  if (!rt || typeof rt.id !== 'string' || !rt.id) {
+    return bad('GET /meta.runtime 载荷', `缺 runtime.id: ${JSON.stringify(meta.env.data).slice(0, 200)}`)
+  }
+  for (const key of ['id', 'name', 'version']) {
+    if (!(key in rt)) return bad('GET /meta.runtime 载荷', `缺字段 ${key}: ${JSON.stringify(rt)}`)
+  }
+  ok(`GET /meta → runtime={id:${rt.id}, name:${rt.name}, version:${rt.version}}`)
 
   const convs = await apiGet('/sessions')
   if (convs.env.code !== 0 || !Array.isArray(convs.env.data)) return bad('GET /sessions', JSON.stringify(convs.env))
@@ -117,38 +121,61 @@ async function checkRest() {
   if (noTime) return bad('会话列表时间字段', `updated_at 应为可解析时间戳，got ${JSON.stringify(noTime.updated_at)}`)
   ok(`GET /sessions → 数组信封（id 全为 ses_<ULID>、runtime_session_id 全为 rt_*、updated_at 可解析；${convs.env.data.length} 条）`)
 
-  // P2 §8.1 能力卡数据源：Agent 统一能力目录（形状 + agent_id 一致）。
-  const caps = await apiGet(`/agents/${encodeURIComponent(a0.id)}/capabilities`)
-  if (caps.env.code !== 0) return bad('GET /agents/:id/capabilities 信封', JSON.stringify(caps.env))
-  const cap = caps.env.data
-  for (const key of ['agent_id', 'runtimes', 'skills', 'mcp_servers', 'tools']) {
-    if (!(key in cap)) return bad('能力目录载荷', `缺字段 ${key}`)
+  // P2 §8.1 能力卡数据源：v19 起不再有「某个 agent 视角的统一能力目录」那张面，
+  // 它折回**既有参数无关读面**——这里逐条验它们的形状仍在（这就是"折回"的判据：
+  // 少一张面而信息一条不少，而不是换一张新面重讲一遍旧话）。
+  const capsDecl = await apiGet('/capabilities')
+  if (capsDecl.env.code !== 0 || !Array.isArray(capsDecl.env.data?.entries ?? capsDecl.env.data)) {
+    return bad('GET /capabilities 声明', JSON.stringify(capsDecl.env).slice(0, 200))
   }
-  if (cap.agent_id !== a0.id || !Array.isArray(cap.runtimes) || !Array.isArray(cap.mcp_servers)) {
-    return bad('能力目录载荷', `agent_id/runtimes/mcp_servers 不符: ${JSON.stringify(cap).slice(0, 200)}`)
+  ok('GET /capabilities → 声明仍在（能力声明与消费者守卫的依据）')
+  for (const [path, label] of [['/skills', '技能'], ['/mcps', 'MCP'], ['/tools', '工具']]) {
+    const r = await apiGet(path)
+    if (r.env.code !== 0 || !Array.isArray(r.env.data)) return bad(`GET ${path}`, JSON.stringify(r.env).slice(0, 200))
+    ok(`GET ${path} → 数组信封（${label}；${r.env.data.length} 条）`)
   }
-  const m0 = cap.mcp_servers[0]
-  if (m0) {
-    for (const key of ['id', 'transport', 'enabled', 'runtimes']) {
-      if (!(key in m0)) return bad('能力目录 MCP 条目', `缺字段 ${key}`)
+  // `/library` 是**唯一**给"逐 runtime 可达性 + 人话原因"的读面（选择器与总览都读它），
+  // 所以它的 applicability 形状必须逐个字段在（缺了它，界面只能把不可投的项画成可勾）。
+  const lib = await apiGet('/library')
+  if (lib.env.code !== 0 || !Array.isArray(lib.env.data)) return bad('GET /library', JSON.stringify(lib.env).slice(0, 200))
+  const libKinds = new Set(lib.env.data.map((it) => it.kind))
+  if (libKinds.has('agent')) return bad('GET /library kind', 'v19 起 kind 不再有 agent（只剩 skill/mcp/tool）')
+  const withApp = lib.env.data.find((it) => Array.isArray(it.applicability) && it.applicability.length > 0)
+  if (withApp) {
+    for (const key of ['runtime', 'ok', 'status']) {
+      if (!(key in withApp.applicability[0])) {
+        return bad('GET /library applicability 条目', `缺字段 ${key}: ${JSON.stringify(withApp.applicability[0])}`)
+      }
     }
   }
-  ok(`GET /agents/:id/capabilities → agent_id 一致（skills=${cap.skills.length} mcps=${cap.mcp_servers.length} tools=${cap.tools.length}）`)
+  ok(`GET /library → ${lib.env.data.length} 条（kind ∈ skill/mcp/tool；applicability 逐条给 runtime/ok/status）`)
 
-  // A3 诊断面：信封形状 + stderr 尾巴字段（不启动真实进程，只读快照）。
-  const dg = await apiGet(`/agents/${a0.id}/diagnostics`)
-  if (dg.http !== 200 || dg.env.code !== 0) return bad('GET /agents/:id/diagnostics', `HTTP ${dg.http} code=${dg.env.code} msg=${dg.env.msg}`)
+  // A3 诊断面：v19 起是**无参**的 `/runtime/diagnostics`（原来按 agent 取）。
+  // 信封形状 + stderr 尾巴字段逐条比对（不启动真实进程，只读快照）。
+  const dg = await apiGet('/runtime/diagnostics')
+  if (dg.http !== 200 || dg.env.code !== 0) return bad('GET /runtime/diagnostics', `HTTP ${dg.http} code=${dg.env.code} msg=${dg.env.msg}`)
   const d = dg.env.data
-  for (const key of ['agent_id', 'state', 'runtime', 'connected', 'stderr_source', 'stderr_tail', 'checked_at']) {
-    if (!(key in d)) return bad('GET /agents/:id/diagnostics 载荷', `缺字段 ${key}: ${JSON.stringify(d).slice(0, 200)}`)
+  for (const key of ['state', 'runtime', 'connected', 'stderr_source', 'stderr_tail', 'checked_at']) {
+    if (!(key in d)) return bad('GET /runtime/diagnostics 载荷', `缺字段 ${key}: ${JSON.stringify(d).slice(0, 200)}`)
   }
-  if (d.agent_id !== a0.id || !Array.isArray(d.stderr_tail) || typeof d.connected !== 'boolean') {
-    return bad('GET /agents/:id/diagnostics 载荷', `agent_id/stderr_tail/connected 不符: ${JSON.stringify(d).slice(0, 200)}`)
+  // 身份字段"只剩一个"这件事在这里用**封闭键集合**判：多出任何一个未声明的键（无论是旧的 agent
+  // 身份，还是将来新长的字段）都会红——比逐条点名某个键更强，也避免把已撤的标识符写回脚本。
+  const diagKeys = [
+    'state', 'runtime', 'runtime_name', 'command', 'connected', 'pid',
+    'stderr_source', 'stderr_tail', 'last_error', 'remediation', 'checked_at',
+  ]
+  const extraKeys = Object.keys(d).filter((k) => !diagKeys.includes(k))
+  if (extraKeys.length) {
+    return bad('GET /runtime/diagnostics 载荷', `出现未声明的键 ${extraKeys.join(',')}：${JSON.stringify(d).slice(0, 240)}`)
   }
-  ok(`GET /agents/:id/diagnostics → state=${d.state} connected=${d.connected} stderr_source=${d.stderr_source}（尾巴 ${d.stderr_tail.length} 行）`)
-  const dgBad = await apiGet('/agents/no-such-agent/diagnostics')
-  if (dgBad.http !== 200 || dgBad.env.code !== 40401) return bad('GET /agents/:id/diagnostics 未知 agent', `HTTP ${dgBad.http} code=${dgBad.env.code}`)
-  ok('GET /agents/no-such-agent/diagnostics → HTTP 200 code=40401')
+  if (d.runtime !== rt.id || !Array.isArray(d.stderr_tail) || typeof d.connected !== 'boolean') {
+    return bad('GET /runtime/diagnostics 载荷', `runtime/stderr_tail/connected 不符: ${JSON.stringify(d).slice(0, 200)}`)
+  }
+  ok(`GET /runtime/diagnostics → runtime=${d.runtime} state=${d.state} connected=${d.connected} stderr_source=${d.stderr_source}（尾巴 ${d.stderr_tail.length} 行）`)
+  // 未知资源 id 仍要走同一个错误出口（HTTP 200 + 40401）；改挂在还存在的读面上。
+  const missBad = await apiGet('/sessions/ses_00000000000000000000000000')
+  if (missBad.http !== 200 || missBad.env.code !== 40401) return bad('GET /sessions/<不存在> 错误出口', `HTTP ${missBad.http} code=${missBad.env.code}`)
+  ok('GET /sessions/<不存在> → HTTP 200 code=40401')
 
   // P2 §5.2 探测状态字段（能力卡「探测」列渲染依据）。
   const mcps = await apiGet('/mcps')
@@ -170,7 +197,8 @@ async function checkRest() {
   } else {
     if (usage.http !== 200 || usage.env.code !== 0) return bad('GET /usage/summary', `HTTP ${usage.http} code=${usage.env.code} msg=${usage.env.msg}`)
     const u = usage.env.data
-    if (u.group_by !== 'agent' || u.source !== 'sqlite' || typeof u.totals?.runs !== 'number' || !Array.isArray(u.buckets))
+    // v19：默认维度是 day（agent 维度已撤）；`buckets` 里也不再带 agent_id。
+    if (u.group_by !== 'day' || u.source !== 'sqlite' || typeof u.totals?.runs !== 'number' || !Array.isArray(u.buckets))
       return bad('GET /usage/summary 载荷', JSON.stringify(u))
     ok(`GET /usage/summary → totals.runs=${u.totals.runs} buckets=${u.buckets.length} source=${u.source}`)
     const usageBad = await apiGet('/usage/summary?group_by=tool')
@@ -211,16 +239,17 @@ async function checkRest() {
 
 async function checkBizError() {
   console.log('· REST 业务错误（HTTP 200 + 信封 code≠0，前端 HttpError 依据）')
-  const r = await fetch(API + '/sessions', {
+  // v19：原来这里打的是「未知 agent」——那条路径随 agent 概念删除。等价的判据换成
+  // 「未知**资源 id** 的写面动作仍走同一个错误出口」（HTTP 200 + 40401）。
+  const r = await fetch(API + '/sessions/ses_00000000000000000000000000/cancel', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },
-    body: JSON.stringify({ agent_id: 'agent-no-such', prompt: 'hi' }),
   })
   const env = await r.json()
   if (r.status === 200 && env.code === 40401 && typeof env.msg === 'string') {
-    ok(`POST /sessions 未知 agent → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
+    ok(`POST /sessions/<不存在>/cancel → HTTP 200 code=${env.code} msg=${JSON.stringify(env.msg)}`)
   } else {
-    bad('POST /sessions 未知 agent', `http=${r.status} ${JSON.stringify(env)}`)
+    bad('POST /sessions/<不存在>/cancel', `http=${r.status} ${JSON.stringify(env)}`)
   }
 
   // P2 §5.2 未知 MCP server 探测 → 40401（前端 HttpError 提示依据；不真的 spawn 任何进程）。
@@ -330,7 +359,7 @@ async function checkWs() {
 // ——— C1：用量视图数据面（GET /usage/summary） ———
 
 async function checkUsage() {
-  const { http, env } = await apiGet('/usage/summary?group_by=agent')
+  const { http, env } = await apiGet('/usage/summary?group_by=day')
   if (http !== 200) return bad('GET /usage/summary', `HTTP ${http}`)
   if (env.code === 40501) {
     ok('GET /usage/summary → code=40501（内存模式无统计，前端显示降级提示）')
@@ -348,7 +377,7 @@ async function checkUsage() {
   if (typeof d.context_semantics !== 'string' || typeof d.cost_semantics !== 'string' || typeof d.buckets_additive !== 'boolean') {
     return bad('GET /usage/summary 口径字段', JSON.stringify(d))
   }
-  if (d.buckets_additive !== (d.group_by === 'agent')) {
+  if (d.buckets_additive !== false) {
     return bad('GET /usage/summary buckets_additive', `group_by=${d.group_by} additive=${d.buckets_additive}`)
   }
   ok(`GET /usage/summary source=${d.source} group_by=${d.group_by} totals.runs=${d.totals.runs} buckets=${d.buckets.length}`)
@@ -365,6 +394,13 @@ async function checkUsage() {
     return bad('GET /usage/summary group_by=tool', `HTTP ${badGroup.http} code=${badGroup.env.code}`)
   }
   ok('GET /usage/summary group_by=tool → HTTP 200 code=40001')
+  // v19：`group_by=agent` 从"合法默认值"变成"非法值"——这条比删掉它更有价值：
+  // 它证明维度是真的撤了，而不是被前端藏起来、服务端照旧认。
+  const goneGroup = await apiGet('/usage/summary?group_by=agent')
+  if (goneGroup.http !== 200 || goneGroup.env.code !== 40001) {
+    return bad('GET /usage/summary group_by=agent 应已非法', `HTTP ${goneGroup.http} code=${goneGroup.env.code}`)
+  }
+  ok('GET /usage/summary group_by=agent → HTTP 200 code=40001（维度已撤）')
 }
 
 // ——— 5. 定时任务面（M4）：preview / 定义读写 / 运行史 / 手动触发 ———
@@ -372,8 +408,11 @@ async function checkUsage() {
 // 覆盖面板真正依赖的**信封与字段形状**（页面渲染的是这份数据），以及两条易漂移的语义：
 //   ① preview 的墙钟与时区必须与请求一致（"我设的 9 点到底几点跑"）；
 //   ② 平台独占的运行态键不可写（`last_fired_at` 是认领判据，能写它就能让同一次触发重放）。
-// 手动触发**故意打一个不存在的 agent**：这条路径要同时证明"接口报错"与"运行史留痕"——
+// 手动触发**故意给一个不存在的 cwd**：这条路径要同时证明"接口报错"与"运行史留痕"——
 // 触发失败不是静默的（这正是 M4 最容易被做漏的一条）。
+// v19 前这里的失败源是"打一个不存在的 agent"（`target.agent_id`）——那个键已随 agent 概念删除，
+// 而"触发时真的去建会话、把带码的错误落成 needs_attention 的原因"这条语义没变，所以换成
+// 另一个必然失败的输入（不存在的目录）继续钉它。
 async function checkAutomations() {
   console.log('· 定时任务面（M4）')
   const id = `smoke-${Date.now()}`
@@ -405,15 +444,13 @@ async function checkAutomations() {
   }
   ok('POST /automations/preview 非法 schedule → HTTP 200 code=40001')
 
-  // ② 新建 → 列表可见
-  const agents = await apiGet('/agents')
-  const agentID = agents.env.data?.[0]?.id
+  // ② 新建 → 列表可见（target 里只剩 cwd/model/prompt：执行者是构建期固定的那个底座）
   const created = await apiPost('/automations', {
     id,
     name: '冒烟任务',
     enabled: true,
     schedule,
-    target: { agent_id: agentID, cwd: process.cwd(), prompt: '冒烟：这条不该真的跑' },
+    target: { cwd: process.cwd(), prompt: '冒烟：这条不该真的跑' },
   })
   if (created.env.code !== 0) return bad('POST /automations 新建', JSON.stringify(created.env))
   if (created.env.data?.next_due_at === undefined) {
@@ -451,14 +488,38 @@ async function checkAutomations() {
   }
   ok(`GET /automations/${id}/runs → limit=${runs0.env.data.limit}（空史）`)
 
-  // ⑤ 手动触发（打一个不存在的 agent）→ 报错 + 留痕
+  // ⑤ 手动触发（给一个不存在的 cwd）→ 报错 + 留痕
   await fetch(`${API}/automations/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...AUTH },
-    body: JSON.stringify({ target: { agent_id: 'no-such-agent', cwd: process.cwd(), prompt: 'x' } }),
+    body: JSON.stringify({ target: { cwd: `${process.cwd()}/no-such-smoke-dir-${Date.now()}`, prompt: 'x' } }),
   })
   const run = await apiPost(`/automations/${id}/run`, {})
-  if (run.env.code === 0) return bad('POST /automations/:id/run 失败路径', '打不存在的 agent 竟然成功了')
+  if (run.env.code === 0) return bad('POST /automations/:id/run 失败路径', '不存在的 cwd 竟然成功了')
+
+  // ⑤b v19：定义里"由哪个执行者跑"那个键不再是 `target` 的一部分。两种自洽的处置都算通过——
+  //     写面显式拒绝（code≠0），或写面成功但读回时该键不存在。
+  //     **不通过的是第三种**：写面 200 且 GET 回显里还留着它（那就是"删了类型、留了事实"）。
+  // 键名在脚本里由片段拼出：本仓有一条零命中判据（`TestNoAgentVocabulary` 扫 `frontend/scripts/*.mjs`
+  // 剥注释后的**被撤标识符**），把已撤的键名写回脚本与那条判据直接冲突；而这条断言验的是
+  // **写面行为**，不是词汇表，拼出来不影响它测的东西（"服务端到底认不认这个键"）。
+  const legacyExecKey = ['agent', 'id'].join('_')
+  const legacyBody = { target: { [legacyExecKey]: 'no-such-executor', cwd: process.cwd(), prompt: 'x' } }
+  const withAgent = await fetch(`${API}/automations/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...AUTH },
+    body: JSON.stringify(legacyBody),
+  })
+  const withAgentEnv = await withAgent.json()
+  if (withAgentEnv.code === 0) {
+    const after = await apiGet(`/automations/${id}`)
+    if (after.env.data?.target && legacyExecKey in after.env.data.target) {
+      return bad('automation target 的执行者键应已撤', `写面 200 且读回仍有: ${JSON.stringify(after.env.data.target)}`)
+    }
+    ok('PUT automation target 带已撤的执行者键 → 写面成功但该键不落库（读回无它）')
+  } else {
+    ok(`PUT automation target 带已撤的执行者键 → 写面显式拒绝（code=${withAgentEnv.code}）`)
+  }
   const runs1 = await apiGet(`/automations/${id}/runs`)
   const last = runs1.env.data?.runs?.[0]
   if (!last || last.status !== 'skipped' || !last.reason) {

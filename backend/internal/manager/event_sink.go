@@ -8,7 +8,7 @@ import (
 )
 
 // eventSink 把 acl 归一化事件转为域事件进 eventbus（agg = 平台会话 uuid）。
-func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
+func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 	return func(ev acl.Event) {
 		if ev.SessionID == "" {
 			return
@@ -27,7 +27,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		case acl.KindMessage:
 			typ = BusMessage
 			if d, ok := ev.Payload.(acl.MessageDelta); ok {
-				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
@@ -35,7 +35,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		case acl.KindThought:
 			typ = BusThought
 			if d, ok := ev.Payload.(acl.ThoughtDelta); ok {
-				payload = map[string]any{"session_id": ev.SessionID, "agent_id": agentID, "text": d.Text}
+				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
 					payload.(map[string]any)["msg_id"] = d.MessageID
 				}
@@ -43,12 +43,12 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		case acl.KindToolCall:
 			typ = BusToolCall
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
-				payload = toolPayload(ev.SessionID, agentID, d)
+				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
 		case acl.KindToolUpdate:
 			typ = BusToolUpdate
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
-				payload = toolPayload(ev.SessionID, agentID, d)
+				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
 		case acl.KindUserMessage:
 			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
@@ -58,7 +58,7 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 		case acl.KindUsage:
 			typ = BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
-			p := map[string]any{"session_id": ev.SessionID, "agent_id": agentID}
+			p := map[string]any{"session_id": ev.SessionID, "runtime": runtimeID}
 			if d, ok := ev.Payload.(objusage.UsageInfo); ok {
 				p["used"], p["size"] = d.Used, d.Size
 				if d.CostAmount > 0 {
@@ -75,12 +75,11 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 			// 刷新平台目录缓存并转发给前端，模型下拉与「当前模型」无需轮询即可保持一致。
 			if d, ok := ev.Payload.(acl.ConfigOptionsInfo); ok {
 				if d.SessionID != "" {
-					o.svc.catalog.put(agentID, runtimeID, d.Options)
+					o.svc.catalog.put(runtimeID, d.Options)
 				}
 				typ = BusConfigOptions
 				payload = map[string]any{
 					"session_id": ev.SessionID,
-					"agent_id":   agentID,
 					"runtime":    runtimeID,
 					"options":    d.Options,
 				}
@@ -93,7 +92,6 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 				typ = BusCommands
 				payload = map[string]any{
 					"session_id": ev.SessionID,
-					"agent_id":   agentID,
 					"runtime":    runtimeID,
 					"commands":   d.Commands,
 				}
@@ -107,9 +105,9 @@ func (o *Orchestrator) eventSink(agentID, runtimeID string) func(acl.Event) {
 
 // toolPayload 构造工具事件载荷：稳定键 tool_call_id/title/status，可选透传 kind/input/output
 // （ACP ToolKind/rawInput/rawOutput，决策 v5②；字段为空/缺省时不出现在载荷中）。
-func toolPayload(sessionID, agentID string, d acl.ToolCallInfo) map[string]any {
+func toolPayload(sessionID, runtimeID string, d acl.ToolCallInfo) map[string]any {
 	p := map[string]any{
-		"session_id": sessionID, "agent_id": agentID,
+		"session_id": sessionID, "runtime": runtimeID,
 		"tool_call_id": d.ID, "title": d.Title, "status": d.Status,
 	}
 	if d.Kind != "" {
@@ -149,7 +147,7 @@ func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client
 	if len(tail) == 0 && cli != nil {
 		tail = acl.TailLines(cli.StderrTail(), maxDiagStderrLines)
 	}
-	o.svc.recordAgentError("", sessionID, ae, tail)
+	o.svc.recordRuntimeError(sessionID, ae, tail)
 	payload := map[string]any{
 		"session_id": sessionID,
 		"code":       ae.Code,

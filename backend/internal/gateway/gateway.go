@@ -3,7 +3,7 @@
 // 形态（计划的 P-1/P-2，先认清否则会照抄错模板）：底座按 ACP 规范在
 // `session/new` 里收到一条 **stdio** MCP 条目，条目指向平台自己的可执行文件
 // （`mate mcp bridge --agent <id> --runtime <id>`）；网关进程**只带 scope、不带 server 列表**，
-// 自己打开本机 store 读该 scope 的能力定义、自己从 vault 解密钥、再把工具面暴露给底座。
+// 自己打开本机 store 读该 scope 的能力定义、自己从库/凭据文档取密钥、再把工具面暴露给底座。
 //
 // 为什么这样切（三条都是硬理由，不是偏好）：
 //  1. **密钥不出平台**：远程 MCP 的凭据只在网关进程内存里，不进底座可见面（env/argv/配置）；
@@ -12,7 +12,7 @@
 //  3. **调用期策略**：每次 `tools/call` 按**当下**定义重查 —— 停用/删除一个 server 或一个
 //     工具后调用立即失败，不等换代际、不等下一轮（"收窄即时生效"，P-4）。
 //
-// 分层：本包落 `internal/`（要读 `internal/store` 与 `internal/vault`），协议面在 `pkg/mcp`
+// 分层：本包落 `internal/`（要读 `internal/store` 与凭据面），协议面在 `pkg/mcp`
 // 的**服务端方向**（`mcp.Serve`）——C8 的 `pkg/` 不得 import `internal/` 是那条边界的由来。
 //
 // **C10（stdout 纯度）**：本包只往 `out` 写 JSON-RPC 帧，一切诊断走 Logger（网关的 Logger
@@ -35,9 +35,8 @@ import (
 // 那些都会随定义变化，从而改变注入项、触发代际迁移。（唯一多出来的一项是会话**钉住的**
 // 白名单 `McpsPinned`，它是用户的选定而不是定义集，见 `mcp.GatewayScope` 的注释。）
 type Scope struct {
-	AgentID   string
 	RuntimeID string
-	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 回落 agent 声明）。
+	// McpsPinned 会话钉住的 MCP 白名单（nil = 未钉 → 全量）。
 	McpsPinned *[]string
 }
 
@@ -68,11 +67,11 @@ type Options struct {
 func Run(ctx context.Context, in io.Reader, out io.Writer, opts Options) error {
 	if opts.Source == nil {
 		glog.Warnw(ctx, "mcp bridge: 数据面未接线（M7-1 骨架形态）：工具面恒为空、调用一律未知工具",
-			"agent", opts.Scope.AgentID, "runtime", opts.Scope.RuntimeID)
+			"runtime", opts.Scope.RuntimeID)
 	}
 	h := &handler{src: opts.Source, scope: opts.Scope}
-	glog.Infow(ctx, "mcp bridge: 网关启动（scope 只由 agent+runtime 决定 ⇒ 条目恒定、不换代际）",
-		"agent", opts.Scope.AgentID, "runtime", opts.Scope.RuntimeID, "pid", pidOf())
+	glog.Infow(ctx, "mcp bridge: 网关启动（scope 只由 runtime 决定 ⇒ 条目恒定、不换代际）",
+		"runtime", opts.Scope.RuntimeID, "pid", pidOf())
 
 	return mcp.Serve(ctx, in, out, mcp.ServerInfo{
 		Name:         mcp.GatewayServerName,
@@ -120,7 +119,7 @@ func (h *handler) CallTool(ctx context.Context, tool string, args json.RawMessag
 // 名字带 `<serverID>__` 前缀是**唯一**能分辨来源的地方（P-3 的命名空间）。
 func instructions(s Scope) string {
 	// 不用尖括号：`json.Marshal` 会把 `<` `>` 转义成 `\u003c`，模型读起来反而更差。
-	return "本 server 是 ark-mate 平台的 MCP 网关：它把该 agent/runtime 作用域下的远程 MCP server " +
+	return "本 server 是 ark-mate 平台的 MCP 网关：它把该 runtime 作用域下的远程 MCP server " +
 		"汇聚成一条 stdio 连接。工具名形如 serverID__toolName（分隔符是两个下划线），前缀即来源 server。" +
-		"作用域：agent=" + s.AgentID + " runtime=" + s.RuntimeID + "。"
+		"作用域：runtime=" + s.RuntimeID + "。"
 }

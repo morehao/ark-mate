@@ -21,7 +21,7 @@ import (
 func TestProviderRespCarriesApplicability(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
-	svc := agentTestSvc(t, dir) // 已注册 runtime：dsh / rtx / stub（升序）
+	svc := providerTestSvc(t, dir) // 已注册 runtime：dsh / rtx / stub（升序）
 
 	key := "sk-secret-abc"
 	if _, err := svc.CreateProvider(ctx, providerReq("ds", &key)); err != nil {
@@ -101,7 +101,7 @@ func TestProviderRespCarriesApplicability(t *testing.T) {
 func TestProviderApplicabilityNotConfiguredWhenBaseURLEmpty(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
-	svc := agentTestSvc(t, dir)
+	svc := providerTestSvc(t, dir)
 
 	key := "sk-secret-abc"
 	if _, err := svc.CreateProvider(ctx, providerReq("legacy", &key)); err != nil {

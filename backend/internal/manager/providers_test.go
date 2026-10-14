@@ -17,7 +17,7 @@ import (
 func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "agents")
-	svc := agentTestSvc(t, dir)
+	svc := providerTestSvc(t, dir)
 
 	key := "sk-secret-abc"
 	resp, err := svc.CreateProvider(ctx, providerReq("default", &key))
@@ -70,7 +70,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	}
 
 	// 重启（新 Service 同目录）→ 档案装载（含 ds 仍有 key、default 无 key）。
-	svc2 := agentTestSvc(t, dir)
+	svc2 := providerTestSvc(t, dir)
 	if svc2.providerEnvFor(runtimetest.ID, "ds") == nil {
 		t.Fatal("重启后 ds key 应仍在")
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 // DefinitionDao 是"定义行 + revision CAS"的**共用**实现（M6-1 的 skills/mcp_servers，
-// M6-6 的 agents；M6-7 的 automations 也复用它）。
+// M6-7 的 automations 也复用它）。
 //
 // 为什么用泛型而不是每张表各写一遍的 DAO：这些表的**定义列**语义逐字相同
 // （计划 §1 P-2 把它们定义为同一形态），而 CAS 的**判据**只有一份——`rowsAffected == 0`
@@ -140,7 +140,7 @@ func (d *McpServerDao) WithTx(tx *gorm.DB) *McpServerDao {
 
 // AutomationDao 访问 automations 表。
 //
-// 它比 skills/mcp_servers/agents 多两类方法（**运行态列**的读写）——但定义列的 CAS 仍然只有
+// 它比 skills/mcp_servers 多两类方法（**运行态列**的读写）——但定义列的 CAS 仍然只有
 // 这一份实现：`UpdateCAS` 只碰 body/revision/updated_at，运行态列由本文件末尾的方法单独更新。
 type AutomationDao struct {
 	*DefinitionDao[model.AutomationEntity, model.AutomationEntityList]
@@ -156,20 +156,6 @@ func (d *AutomationDao) WithTx(tx *gorm.DB) *AutomationDao {
 	return &AutomationDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
 }
 
-// AgentDao 访问 agents 表。
-type AgentDao struct {
-	*DefinitionDao[model.AgentEntity, model.AgentEntityList]
-}
-
-// NewAgentDao 构造 AgentDao。
-func NewAgentDao(getDB gormdao.DBGetter) *AgentDao {
-	return &AgentDao{DefinitionDao: newDefinitionDao[model.AgentEntity, model.AgentEntityList]("AgentDao", getDB)}
-}
-
-// WithTx 返回绑定事务的新 DAO。
-func (d *AgentDao) WithTx(tx *gorm.DB) *AgentDao {
-	return &AgentDao{DefinitionDao: d.DefinitionDao.WithTx(tx)}
-}
 
 // providers / models 的 DAO 在 `row.go`：v13 起它们是**资源表**（列 + revision CAS），
-// 与这里四个「定义载体」的表不是同一种行形态（ADR-2）。
+// 与这里三个「定义载体」的表不是同一种行形态（ADR-2）。

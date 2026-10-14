@@ -112,14 +112,16 @@ RUN set -eux; \
 # .dockerignore 排除了 frontend/**/dist，这里取的只能是镜像内 web 阶段刚构建的那份）。
 COPY --from=web /src/frontend/apps/web/dist /usr/local/share/mate/web
 # 容器里必须显式 0.0.0.0:10001 才能被 -p 映射出去（二进制默认只绑回环）；
-# 数据/配置全部收在 /data 一个卷里，HOME 也指到卷上（内存/transcript/agents 目录都按它派生）。
+# 数据/配置全部收在 /data 一个卷里，HOME 也指到卷上（内存/transcript/providers 目录都按它派生）。
+# 注意 v19 起 `MATE_AGENTS`/`agent_dir` 这类旧键是**启动硬错**（改名提示，不静默等价）：
+# 数据目录名已按 v19 改成 providers/，凭据镜像（v20）落在 $HOME/.ark-mate/credentials.json，同在该卷内。
 ENV HOME=/data \
     GIN_MODE=release \
     MATE_ADDR=0.0.0.0:10001 \
     MATE_STORE=sqlite \
     MATE_DB=/data/mate.db \
     MATE_TRANSCRIPTS=/data/transcripts \
-    MATE_AGENTS=/data/agents \
+    MATE_PROVIDERS=/data/providers \
     MATE_CAPABILITIES=/data/capabilities \
     MATE_WORKSPACE_DIR=/data/workspaces \
     MATE_CONFIG_DIR=/data/config \

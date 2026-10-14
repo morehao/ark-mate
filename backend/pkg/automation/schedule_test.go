@@ -453,7 +453,7 @@ func TestAutomationValidate(t *testing.T) {
 		return &Automation{
 			ID: "a1", Name: "每日巡检", Enabled: true,
 			Schedule: daily("Asia/Shanghai", 9, 0),
-			Target:   Target{AgentID: "ag1", Cwd: "/tmp/ws", Prompt: "跑一遍依赖巡检"},
+			Target:   Target{Cwd: "/tmp/ws", Prompt: "跑一遍依赖巡检"},
 		}
 	}
 	if err := base().Validate(); err != nil {
@@ -464,7 +464,6 @@ func TestAutomationValidate(t *testing.T) {
 		modify func(*Automation)
 	}{
 		{"缺 id", func(a *Automation) { a.ID = "" }},
-		{"缺 agent_id", func(a *Automation) { a.Target.AgentID = "" }},
 		{"缺 prompt", func(a *Automation) { a.Target.Prompt = "" }},
 		{"缺 cwd", func(a *Automation) { a.Target.Cwd = "" }},
 		{"cwd 非绝对路径", func(a *Automation) { a.Target.Cwd = "ws/相对" }},

@@ -12,7 +12,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	o.mu.Lock()
-	o.conns["stub"] = &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
+	o.conns["stub"] = &runtimeConn{spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
 	o.mu.Unlock()
 
 	n := o.reapIdleOnce(now, 5*time.Minute)
@@ -25,9 +25,8 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	if ok {
 		t.Fatal("连接应已摘除")
 	}
-	rec, _ := svc.AgentByID("alias-stub")
-	if rec.State != AgentStateStopped {
-		t.Fatalf("回收后状态应 stopped: %s", rec.State)
+	if st := svc.runtimeBindingSnapshot().State; st != AgentStateStopped {
+		t.Fatalf("回收后状态应 stopped: %s", st)
 	}
 }
 
@@ -36,10 +35,10 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	o, svc := testReapHarness(t)
 	now := time.Now()
 	old := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
+		return &runtimeConn{spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
 	}
 	fresh := func() *runtimeConn {
-		return &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-time.Minute)}
+		return &runtimeConn{spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-time.Minute)}
 	}
 	busy := old()
 	withSession := old()
@@ -66,21 +65,22 @@ func TestReapIdleOnceSkips(t *testing.T) {
 	_ = svc
 }
 
-// TestReapThenReacquireState 回收后立刻重拨（StartAgent 幂等）不把新连接状态误置 stopped：
+// TestReapThenReacquireState 回收后立刻按需重拨不把新连接状态误置 stopped：
 // 模拟新 rc 已入 map（ownerBefore=false 分支）后旧连接 dropConn 收尾不再回落。
+//
+// v19：状态只有**一份**（底座进程），不再按 agent 分桶。
 func TestReapThenReacquireState(t *testing.T) {
-	o, _ := testReapHarness(t)
+	o, svc := testReapHarness(t)
 	now := time.Now()
-	old := &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
-	newer := &runtimeConn{agentID: "alias-stub", spec: runtime.Spec{ID: "stub"}, key: "stub", started: now}
+	old := &runtimeConn{spec: runtime.Spec{ID: "stub"}, key: "stub", started: now.Add(-10 * time.Minute)}
+	newer := &runtimeConn{spec: runtime.Spec{ID: "stub"}, key: "stub", started: now}
 	o.mu.Lock()
 	o.conns["stub"] = newer
 	o.mu.Unlock()
-	o.svc.setAgentState("alias-stub", AgentStateRunning)
+	svc.setRuntimeState(AgentStateRunning)
 	// 旧连接收尾 dropConn：ownerBefore=false → 状态不回落（仍 running）。
 	o.dropConn(old)
-	rec, _ := o.svc.AgentByID("alias-stub")
-	if rec.State == AgentStateStopped {
+	if st := svc.runtimeBindingSnapshot().State; st == AgentStateStopped {
 		t.Fatal("旧连接收尾不应把新连接 running 置 stopped")
 	}
 }

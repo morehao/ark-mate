@@ -9,7 +9,6 @@ import {
   createSkill,
   deleteMcpServer,
   deleteSkill,
-  getAgentCapabilities,
   getMcpPrompt,
   getSkillMaterialization,
   listMcpPrompts,
@@ -26,7 +25,6 @@ import {
   updateSkill,
 } from '@ark-mate/api'
 import type {
-  AgentCapabilities,
   CapabilityWriteBody,
   LibraryItem,
   McpPrompt,
@@ -58,10 +56,10 @@ export type CapScope = 'overview' | 'skills' | 'connectors'
 
 export function useCapabilityData(scope: CapScope) {
   const showToast = useMate((s) => s.showToast)
-  const agents = useMate((s) => s.agents)
-  const [agentId, setAgentId] = useState<string>('')
-  const [caps, setCaps] = useState<AgentCapabilities | null>(null)
-  const [capsErr, setCapsErr] = useState<string | null>(null)
+  // v19：这里原来按 agent 拉一份「某 Agent 视角的统一能力目录」（`GET /agents/:id/capabilities`），
+  // 于是页面上多了一个 Agent 下拉 + 一整套候选底座/白名单投影。agent 并入构建期固定的 runtime 之后
+  // 那张读面撤掉了，能力面直接读**无参**的既有读面（library / skills / mcps / tools）——
+  // 少了一层"按谁裁剪"的中间态，下面几个 load* 各自的事实源都没变。
   const [skills, setSkills] = useState<Skill[]>([])
   const [mcps, setMcps] = useState<McpServer[]>([])
   const [tools, setTools] = useState<Tool[]>([])
@@ -101,11 +99,6 @@ export function useCapabilityData(scope: CapScope) {
   const [promptArgs, setPromptArgs] = useState<Record<string, string>>({})
   const [promptGot, setPromptGot] = useState<{ name: string; data?: McpPromptGetResult; err?: string } | null>(null)
 
-  // 默认选中第一个 Agent（Agent 列表由 store 统一维护）。
-  useEffect(() => {
-    if (!agentId && agents.length > 0) setAgentId(agents[0].id)
-  }, [agents, agentId])
-
   const loadSkills = async (): Promise<void> => {
     try {
       setSkills(await listSkills())
@@ -134,27 +127,9 @@ export function useCapabilityData(scope: CapScope) {
       showToast(toErrorMessage(err))
     }
   }
-  const loadCaps = useCallback(async (id: string): Promise<void> => {
-    if (!id) {
-      setCaps(null)
-      return
-    }
-    setBusy('caps')
-    setCapsErr(null)
-    try {
-      setCaps(await getAgentCapabilities(id))
-    } catch (err) {
-      setCaps(null)
-      setCapsErr(toErrorMessage(err))
-    } finally {
-      setBusy(null)
-    }
-  }, [])
-
   /**
    * 按页加载（设计 §关键逻辑）：只拉本页真正要用的数据源。
-   *   总览 = Library + 该 Agent 的能力投影 + MCP 行（caps 里已含 skills/tools）；
-   *   技能 = skills；连接器 = mcp + tools。
+   *   总览 = Library + MCP 行；技能 = skills；连接器 = mcp + tools。
    */
   const loadAll = useCallback(async (): Promise<void> => {
     if (scope === 'skills') {
@@ -165,16 +140,16 @@ export function useCapabilityData(scope: CapScope) {
       await Promise.all([loadMcps(), loadTools()])
       return
     }
-    await Promise.all([loadLibrary(), loadCaps(agentId), loadMcps()])
+    await Promise.all([loadLibrary(), loadMcps()])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, agentId])
+  }, [scope])
 
   useEffect(() => {
     void loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, agentId])
+  }, [scope])
 
-  const refresh = (key: 'skills' | 'mcps' | 'tools' | 'caps' | 'library'): void => {
+  const refresh = (key: 'skills' | 'mcps' | 'tools' | 'library'): void => {
     setBusy(key)
     const p =
       key === 'skills'
@@ -183,23 +158,20 @@ export function useCapabilityData(scope: CapScope) {
           ? loadMcps()
           : key === 'tools'
             ? loadTools()
-            : key === 'library'
-              ? loadLibrary()
-              : loadCaps(agentId)
+            : loadLibrary()
     void p.finally(() => setBusy((cur) => (cur === key ? null : cur)))
   }
 
-  // Agent 视角 MCP 行（合并全局探测状态）；全局视图用同一套行模型（caps=null）。
-  const agentMcpRows = useMemo(() => mcpRows(caps, mcps), [caps, mcps])
-  const globalMcpRows = useMemo(() => mcpRows(null, mcps), [mcps])
+  // MCP 行模型（合并定义级开关、逐 runtime 可达性与全局探测状态）。
+  const globalMcpRows = useMemo(() => mcpRows(mcps), [mcps])
 
   const doProbe = async (id: string): Promise<void> => {
     setProbing(id)
     try {
       const res = await probeMcpServer(id)
       showToast(`探测 ${id}：${probeSummary(res)}`)
-      // 探测会改写 Tool 目录与 MCP 状态 → 刷新全局表与当前 Agent 视图。
-      await Promise.all([loadTools(), loadMcps(), loadCaps(agentId)])
+      // 探测会改写 Tool 目录与 MCP 状态 → 刷新全局表。
+      await Promise.all([loadTools(), loadMcps()])
     } catch (err) {
       showToast(`探测 ${id} 失败：${toErrorMessage(err)}`)
       void loadMcps() // 失败原因落 last_probe_error，刷新可读回
@@ -325,7 +297,7 @@ export function useCapabilityData(scope: CapScope) {
         showToast(`${res.created ? '已新建' : '已覆盖写'} MCP server ${res.id}${unresolved}`)
       }
       setEdit(null)
-      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary(), loadCaps(agentId)])
+      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary()])
     } catch (err) {
       // 错误留在模态里（不关窗）：用户刚写的内容还在，改一处就能重试。
       setEditErr(writeErrorText(err))
@@ -348,7 +320,7 @@ export function useCapabilityData(scope: CapScope) {
             : `MCP server ${id} 本就不存在（已同步列表）`,
         )
       }
-      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary(), loadCaps(agentId)])
+      await Promise.all([loadSkills(), loadMcps(), loadTools(), loadLibrary()])
     } catch (err) {
       showToast(`删除 ${id} 失败：${writeErrorText(err)}`)
     } finally {
@@ -365,7 +337,7 @@ export function useCapabilityData(scope: CapScope) {
       const errs = res.materialize_errors?.length ? `；重校失败：${res.materialize_errors.join('；')}` : ''
       const action = res.next_action ? ` · ${res.next_action}` : ''
       showToast(`${next ? '已启用' : '已禁用'} ${s.id}（写入 ${res.written} / 撤回 ${res.removed}）${errs}${action}`)
-      await Promise.all([loadSkills(), loadCaps(agentId)])
+      await loadSkills()
     } catch (err) {
       showToast(`切换 ${s.id} 失败：${toErrorMessage(err)}`)
     } finally {
@@ -516,7 +488,7 @@ export function useCapabilityData(scope: CapScope) {
         )}
         {m.unresolvedSecretKeys.length > 0 && (
           <Tooltip
-            title={`引用已绑定但当前解析不了：${m.unresolvedSecretKeys.join('、')}。检查 vault 密文是否存在（或 vault.key 是否被换过）、env 变量是否设置——注入时解析不了这个 server 会被跳过。`}
+            title={`引用已绑定但当前解析不了：${m.unresolvedSecretKeys.join('、')}。检查这个引用在库里有没有值（store: 引用看 mcp_secrets 那一行，env: 看进程环境变量）——注入时解析不了这个 server 会被跳过。`}
           >
             <Tag color="red" style={smallTag}>
               密钥未就绪 {m.unresolvedSecretKeys.length}
@@ -557,12 +529,6 @@ export function useCapabilityData(scope: CapScope) {
     </>
   )
   return {
-    agentId,
-    setAgentId,
-    caps,
-    setCaps,
-    capsErr,
-    setCapsErr,
     skills,
     setSkills,
     mcps,
@@ -626,15 +592,12 @@ export function useCapabilityData(scope: CapScope) {
     promptGot,
     setPromptGot,
     showToast,
-    agents,
     loadSkills,
     loadMcps,
     loadLibrary,
     loadTools,
-    loadCaps,
     loadAll,
     refresh,
-    agentMcpRows,
     globalMcpRows,
     doProbe,
     probeButton,

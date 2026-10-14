@@ -1,7 +1,6 @@
 import { Modal } from 'antd'
 import { SETTINGS_MENU, settingsSectionOf, settingsSections } from '../../console/settingsView'
 import { useMate } from '../../store'
-import { AgentsSettingsPanel } from './AgentsSettingsPanel'
 import { GeneralSettingsPanel } from './GeneralSettingsPanel'
 import { ModelSettingsPanel } from './ModelSettingsPanel'
 import { TokenSettingsPanel } from './TokenSettingsPanel'
@@ -11,9 +10,9 @@ import { TokenSettingsPanel } from './TokenSettingsPanel'
  *
  * 形态口径（对参照图）：点左栏「设置」**直接**开这一个弹窗，分节在弹窗内切换——不是"先展开左栏二级菜单、
  * 再按节各开一个小窗"。所以：
- *  - `destroyOnHidden`：关掉即卸载，下次打开重新拉数据（Agent 列表/白名单都是实时面）；
- *  - 宽 1120 / 高 `min(64vh, 640px)` 写死：Agent 管理一行按钮最宽的那节放得下，换节时弹窗也不跳高矮；
- *  - `footer={null}`：动作在内容体里（保存 / 注册 / 启停），弹窗自己不造"确定/取消"假动作。
+ *  - `destroyOnHidden`：关掉即卸载，下次打开重新拉数据（供应商/模型清单都是实时面）；
+ *  - 宽 1120 / 高 `min(64vh, 640px)` 写死：模型那一节的一行按钮最宽，换节时弹窗也不跳高矮；
+ *  - `footer={null}`：动作在内容体里（保存 / 探测 / 同步），弹窗自己不造"确定/取消"假动作。
  */
 export function SettingsDialog() {
   const open = useMate((s) => s.settingsOpen)
@@ -62,7 +61,6 @@ export function SettingsDialog() {
         <div className="fg-setdlg-body">
           {active?.id === 'general' && <GeneralSettingsPanel />}
           {active?.id === 'model' && <ModelSettingsPanel />}
-          {active?.id === 'agents' && <AgentsSettingsPanel />}
           {active?.id === 'token' && <TokenSettingsPanel />}
         </div>
       </div>

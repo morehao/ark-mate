@@ -2,18 +2,17 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/resource"
 )
 
@@ -23,16 +22,18 @@ import (
 //
 //	已存在          → 40901 provider_exists
 //	不存在（PATCH） → 40401 provider_not_found
-//	被引用（DELETE）→ 40901 provider_in_use + referenced_by_agents[]
+//	被引用（DELETE）→ 40901 provider_in_use + referenced_by_models[]（见 model_list_test.go）
 //	id 非法         → 40001 invalid_provider_id
 
 func TestProviderWriteFaceCRUD(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
+	dir := filepath.Join(home, "providers")
 	r := newRig(t) // 带编排器（生效面回执需要它）
 	svc := r.Svc
-	svc.LoadAgentDefinitions(dir) // 设 agentDir（= vault 锚点）
+	// 凭据面：memory 模式下托管文档就是密钥的事实源（与装配期同一条路径）。
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.SetProviderDir(dir)
 
 	key := "sk-abc"
 	// ① POST 成功。
@@ -105,43 +106,38 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	if err != nil || again.Deleted {
 		t.Fatalf("重复删除应幂等（deleted=false, code=0）: %+v err=%v", again, err)
 	}
-	// ⑧ 密文随之删除（不留孤儿）。
-	if _, err := os.Stat(filepath.Join(home, vault.DirName, "providers", "deepseek-main.enc")); !os.IsNotExist(err) {
-		t.Fatalf("删除档案应删掉密文: %v", err)
+	// ⑧ 删除**顺带清掉密钥面那一条**（v20：不留"库/文档里有值、档案没了"的半截状态）。
+	//    内存模式的事实源是托管文档，所以断言它；残留会由回执的 `credentials_left` 说明，
+	//    并由 `mate doctor` 的镜像对账段列出来。
+	if _, ok := readMirrorValues(t, home)["providers/deepseek-main"]; ok {
+		t.Fatal("删除档案应清掉托管文档里那一条")
 	}
-	// ⑨ 删被引用的档案 → provider_in_use(40901) + referenced_by_agents[]。
-	if _, err := svc.CreateProvider(ctx, providerReq("inuse", nil)); err != nil {
-		t.Fatal(err)
+	if del.CredentialsLeft != "" {
+		t.Fatalf("清干净了就不该报残留: %q", del.CredentialsLeft)
 	}
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Provider: "inuse"}
-	err = nil
-	if _, err = svc.DeleteProvider(ctx, "inuse"); errCode(err) != "provider_in_use" {
-		t.Fatalf("被引用的档案应 provider_in_use，got %q（%v）", errCode(err), err)
-	}
-	if !strings.Contains(err.Error(), "a1") {
-		t.Fatalf("文案应交出引用名单: %v", err)
-	}
-	// 解绑后即可删。
-	svc.agents["a1"].Provider = ""
-	if del, err := svc.DeleteProvider(ctx, "inuse"); err != nil || !del.Deleted {
-		t.Fatalf("解绑后应可删: %+v err=%v", del, err)
-	}
+	// ⑨ 「被引用 → provider_in_use」不在这里测：引用者是**模型条目**，而模型清单需要 sqlite
+	// 载体（memory 模式下结构上不存在任何引用者）。该分支由 `model_list_test.go` 的
+	// `TestModelListDeleteProviderInUse` 在真库上钉住。
+	//
+	// v19 之前这里靠"agent 上的 provider 字段"造引用；agent 面撤销后那条路径没有了。
 }
 
-// TestProviderCreateCompensatesVaultOnCarrierFailure H4 故障注入（新建路径）：
-// 让载体提交失败 → **刚写进 vault 的密文必须被删掉**，不留孤儿。
+// TestProviderCreateDoesNotWriteKeyWhenRowExists H4 的 v20 形态（新建路径）：
+// 载体里已经有同 id 的行 → `provider_exists`，且**一个字节的密钥都没写下去**。
 //
-// 注入手法：直接在载体里放一行同 id 的档案（内存里没有）——写面的 `CreateCAS` 因此未命中，
-// 走的正是"密文已写、载体没提交"那条补偿分支，且不需要任何 mock。
-func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
+// v19 的失败面比这小得多：那时密钥先落盘上密文、再提交载体，于是必须有一条补偿分支去删刚写的密文。
+// v20 的顺序是「先建行、再写密钥列」，所以"载体没提交"根本走不到密钥写入那一步——这条用例钉的
+// 正是这个结构性质（不是"补偿写得好"，而是"没有补偿要跑"）。
+func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
+	dir := filepath.Join(home, "providers")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.LoadAgentDefinitionsFromStore(ctx, dir)
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 载体里先放一行（内存不知道）→ 写面读内存判定"不存在"，于是走新建 → CAS 未命中。
 	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{ID: "ghost", Protocol: "openai"}, 0, "rest"); err != nil || !ok {
@@ -152,16 +148,15 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	if errCode(err) != "provider_exists" {
 		t.Fatalf("CAS 未命中应翻成 provider_exists，got %q（%v）", errCode(err), err)
 	}
-	// 关键断言：密文被补偿删掉（否则每次失败的写面都留一份孤儿密文）。
-	vst, verr := vault.Open(home)
-	if verr != nil {
-		t.Fatalf("vault.Open: %v", verr)
+	// 关键断言：密钥列**一次都没被写过**（也没有任何孤儿残留）。
+	if v, found, kErr := st.ProviderKey(ctx, "ghost"); kErr != nil || !found || v != "" {
+		t.Fatalf("载体没提交时不该写密钥列: v=%q found=%v err=%v", v, found, kErr)
 	}
-	if _, gerr := vst.Get(providerRef("ghost"), vault.KindProviderKey); !errors.Is(gerr, vault.ErrNotFound) {
-		t.Fatalf("补偿应删掉刚写入的密文，got err=%v", gerr)
-	}
-	if _, err := os.Stat(filepath.Join(home, vault.DirName, "providers", "ghost.enc")); !os.IsNotExist(err) {
-		t.Fatalf("密文文件不该残留: %v", err)
+	// 托管文档：要么根本还没建（这条路径一次都没走到），要么建了但不含这条引用。
+	if _, err := os.Lstat(CredentialsPath(home)); err == nil {
+		if values := readMirrorValues(t, home); len(values) != 0 {
+			t.Fatalf("托管文档不该有残留: %+v", values)
+		}
 	}
 	// 载体那一行保持原样（写面失败 = 一行一审计都不落）。
 	row, found, _ := st.GetProviderDefinition(ctx, "ghost")
@@ -170,42 +165,50 @@ func TestProviderCreateCompensatesVaultOnCarrierFailure(t *testing.T) {
 	}
 }
 
-// TestProviderUpdateCompensatesVaultOnCarrierFailure H4 故障注入（覆盖路径）：
-// 载体 CAS 失败 → vault 被**补偿回旧密文**（绝不出现"行是旧的、密钥是新的"）。
-func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
+// TestProviderUpdateKeepsKeyWhenContentCasFails H4 的 v20 形态（覆盖路径）：
+// 内容 CAS 失败 → 整笔 PATCH 失败，且**密钥列一个字节都没动**（绝不出现"内容旧的、密钥新的"）。
+//
+// v20 的写面顺序是「内容列 CAS → 密钥列」：内容 CAS 先失败就返回，密钥写入根本没被走到。
+// 这条判据比"密钥先写再补偿"更强——它不依赖补偿逻辑正确，而是**结构上没有半截状态**。
+func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
+	dir := filepath.Join(home, "providers")
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
-	svc.LoadAgentDefinitionsFromStore(ctx, dir)
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	old := "sk-old"
 	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &old}); err != nil {
 		t.Fatal(err)
 	}
-	// 让内存里的 revision 过期（模拟"有人在这中间改过载体"）：直接抬高库里的版本。
-	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{ID: "p1", Protocol: "openai"}, 1, "rest"); err != nil || !ok {
+	// 让内存里的 revision 过期（模拟"有人在这中间改过载体"）：直接按当前版本再写一次载体。
+	row, found, kErr := st.GetProviderDefinition(ctx, "p1")
+	if kErr != nil || !found {
+		t.Fatalf("读行: found=%v err=%v", found, kErr)
+	}
+	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{
+		ID: "p1", Protocol: "openai", BaseURL: row.BaseURL,
+	}, row.Revision, "rest"); err != nil || !ok {
 		t.Fatalf("抬高版本: ok=%v err=%v", ok, err)
 	}
 	neu := "sk-new"
-	_, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &neu})
+	// 一次 PATCH 同时改端点与密钥：内容 CAS 先失败，所以密钥写入不该发生。
+	_, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{
+		BaseURL: ptr("https://api.other.example/v1"), APIKey: &neu,
+	})
 	if errCode(err) != "definition_changed" {
 		t.Fatalf("CAS 未命中应 definition_changed，got %q（%v）", errCode(err), err)
 	}
-	// vault 必须回到旧密文（补偿），而不是留着新的。
-	vst, verr := vault.Open(home)
-	if verr != nil {
-		t.Fatalf("vault.Open: %v", verr)
+	if v, _, kErr := st.ProviderKey(ctx, "p1"); kErr != nil || v != old {
+		t.Fatalf("内容 CAS 失败时密钥列必须原样（got %q err=%v）", v, kErr)
 	}
-	got, gerr := vst.Get(providerRef("p1"), vault.KindProviderKey)
-	if gerr != nil {
-		t.Fatalf("补偿后密文应可解: %v", gerr)
-	}
-	if string(got) != old {
-		t.Fatalf("补偿应写回旧密文，got %q（期望 %q）", string(got), old)
+	// 托管文档里也还是旧值。
+	if got := readMirrorValues(t, home)["providers/p1"]; got != old {
+		t.Fatalf("镜像里也应是旧值，得到 %q", got)
 	}
 	// 内存也没被改脏（写面的承诺：载体提交成功之前内存一个字段都不动）。
 	if env := svc.providerEnvFor(runtimetest.ID, "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
@@ -221,12 +224,17 @@ func TestProviderUpdateCompensatesVaultOnCarrierFailure(t *testing.T) {
 //	② 忙会话的裁决就是 `planGenerationSwitch` 给出的 `defer`（回执里的 deferred 与它逐条一致）。
 func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	ctx := context.Background()
-	r := newGenRig(t) // stub ACP（真子进程）+ 真库 + agent a1
+	r := newGenRig(t) // stub ACP（真子进程）+ 真库
 	key := "sk-old"
 	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &key}); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
-	r.svc.agents["a1"].Provider = "p1"
+	// 注入哪条档案由**默认模型**那条清单决定（v19：agent 上的 provider 字段已撤销）。
+	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
+		ProviderID: "p1", ModelID: "m-1", IsDefault: ptr(true),
+	}); err != nil {
+		t.Fatalf("建默认模型: %v", err)
+	}
 
 	idleID, idle := r.start(t, nil)
 	busyID, busy := r.start(t, nil)
@@ -249,8 +257,10 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	if eff.Channel != "dial_env" || eff.Effect != "next_run" {
 		t.Fatalf("通道/时刻不符: %+v", eff)
 	}
-	if len(eff.AppliesToAgents) != 1 || eff.AppliesToAgents[0] != "a1" {
-		t.Fatalf("受影响 agent 不符: %+v", eff.AppliesToAgents)
+	// v19：生效面只按**会话**计数（旧回执里的 applies_to_agents 随 agent 面撤销——
+	// 引用者现在是挂靠在该供应商下的模型条目，见 `Refs.Models`）。
+	if eff.AffectedSessions == 0 {
+		t.Fatalf("应有受影响的会话: %+v", eff)
 	}
 	if eff.AffectedSessions != 2 || eff.Deferred != 1 {
 		t.Fatalf("受影响/顺延计数不符: %+v", eff)
@@ -287,7 +297,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
+	svc.SetProviderDir(filepath.Join(t.TempDir(), "providers"))
 	if _, err := svc.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
 		t.Fatal(err)
 	}
@@ -303,8 +313,10 @@ func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 // TestProviderProblemsSurfaceBeforeSession G3：`problems[]` 让用户在开会话**之前**就看到问题。
 func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	ctx := context.Background()
+	home := t.TempDir()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
+	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.SetCredentials(newTestCredentials(t, home))
 	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
@@ -320,24 +332,44 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	if !strings.Contains(strings.Join(items[0].Problems, " "), "设置 · 模型") {
 		t.Fatalf("问题文案应指向设置 · 模型: %+v", items[0].Problems)
 	}
-	// 引用面是只读派生：agent 一引用就出现。底座维度只有**构建期那一个**（不再是逐 agent 收集候选）。
+	// 引用面是只读派生：**模型条目**一挂靠就出现；底座维度只有构建期那一个（引用者出现的
+	// 前提下才谈得上"哪个底座拿得到它"）。memory 模式没有清单载体 → 结构上不可能有引用者
+	//（`providerModelRefsReadOnly` 无库即空），所以显式断言这一条，而不是拿 agent 凑引用。
 	setBuildRuntime(t, runtimetest.ID) // v12ProviderRegistry 只注册了合成底座
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", Provider: "no-key"}
 	items, _ = svc.ListProviders(context.Background())
-	if len(items[0].Refs.Agents) != 1 || items[0].Refs.Agents[0] != "a1" ||
-		len(items[0].Refs.Runtimes) != 1 || items[0].Refs.Runtimes[0] != runtimetest.ID {
-		t.Fatalf("引用面不符: %+v", items[0].Refs)
+	if len(items[0].Refs.Models) != 0 || len(items[0].Refs.Runtimes) != 0 {
+		t.Fatalf("memory 模式不该声称有引用者: %+v", items[0].Refs)
 	}
 }
 
-// TestCredentialProblemPointsAtModelSettings C6：三条文案的出路都指向「设置 · 模型」。
+// TestCredentialProblemPointsAtModelSettings C6：两条文案的出路都指向「设置 · 模型」。
+//
+// v19：校验对象是**默认模型挂靠的那条档案**（agent 面撤销后，注入的来源只剩这一条链）。
 func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	ctx := context.Background()
+	home := t.TempDir()
+	st := testutil.OpenStore(t, filepath.Join(home, "mate.db"))
+	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
+	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.EnableStore(st)
 
-	// ① 悬空引用。
-	err := svc.CredentialProblem(&AgentRec{ID: "a1", Provider: "gone"})
+	defaultModel := func(t *testing.T, id, providerID string) {
+		t.Helper()
+		created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
+			ID: id, ProviderID: providerID, ModelID: "m-" + id, InputModalities: "text",
+		}, "t")
+		if err != nil || !created {
+			t.Fatalf("造模型行: created=%v err=%v", created, err)
+		}
+		if err := st.SetDefaultModelID(ctx, id); err != nil {
+			t.Fatalf("置默认模型: %v", err)
+		}
+	}
+
+	// ① 悬空引用：默认模型挂到一条不存在的档案上。
+	defaultModel(t, "mdl_gone", "gone")
+	err := svc.CredentialProblem(ctx)
 	if errCode(err) != "credential_missing" || !strings.Contains(err.Error(), "设置 · 模型") {
 		t.Fatalf("悬空引用应报 credential_missing 并指向设置 · 模型: %v", err)
 	}
@@ -345,7 +377,8 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "nokey", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
-	err = svc.CredentialProblem(&AgentRec{ID: "a1", Provider: "nokey"})
+	defaultModel(t, "mdl_nokey", "nokey")
+	err = svc.CredentialProblem(ctx)
 	if errCode(err) != "credential_missing" || !strings.Contains(err.Error(), "设置 · 模型") ||
 		!strings.Contains(err.Error(), "nokey") {
 		t.Fatalf("无密钥应报 credential_missing（指明是哪条供应商）并指向设置 · 模型: %v", err)

@@ -48,7 +48,6 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 			resp.Hits = append(resp.Hits, dtosearch.MessageSearchHit{
 				SessionID: h.SessionID,
 				Title:     h.SessionTitle,
-				AgentID:   h.AgentID,
 				Role:      h.Role,
 				Seq:       h.Seq,
 				SeqHi:     h.SeqHi,
@@ -86,7 +85,7 @@ func (s *Service) SearchMessages(_ context.Context, q string, limit int) (*dtose
 			all = append(all, hit{at: r.UpdatedAt, out: dtosearch.MessageSearchHit{
 				SessionID: r.ID,
 				Title:     r.Title,
-				AgentID:   r.AgentID,
+				RuntimeID: r.RuntimeID,
 				Role:      th.Role,
 				Seq:       th.Seq,
 				Snippet:   foldPreview(th.Text),

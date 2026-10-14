@@ -39,7 +39,7 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtos
 	var out []cand
 	for _, r := range recs {
 		metaHit := strings.Contains(strings.ToLower(r.ID), qLower) ||
-			strings.Contains(strings.ToLower(r.AgentID), qLower) ||
+			strings.Contains(strings.ToLower(r.RuntimeID), qLower) ||
 			(r.Title != "" && strings.Contains(strings.ToLower(r.Title), qLower))
 		snippet, bodyMatches := "", 0
 		if s.st != nil {
@@ -84,7 +84,7 @@ func (s *Service) SearchSessions(_ context.Context, q string, limit int) ([]dtos
 		hits = append(hits, dtosession.SessionSearchHit{
 			SessionResp: dtosession.SessionResp{
 				ID:        r.ID,
-				AgentID:   r.AgentID,
+				RuntimeID: r.RuntimeID,
 				Status:    r.Status,
 				Title:     r.Title,
 				Pinned:    r.Pinned,

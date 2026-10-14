@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
+	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -194,125 +195,40 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 	}
 }
 
-// TestSkillActivationReasons 激活判定（§13.4 S5）：适用与否都与「启用」正交，且每条都有原因。
-func TestSkillActivationReasons(t *testing.T) {
-	inAgent := map[string]bool{"rtx": true}
-	// 本进程登记了 rtx 的投影；stub 没登记（用户没配 / 该 runtime 不承载 skill）。
-	projected := map[string]bool{"rtx": true}
-	cases := []struct {
-		name       string
-		sk         capability.Skill
-		applicable bool
-		reasonHas  string
-	}{
-		{
-			name:       "applicable（未声明 runtimes = 全部）",
-			sk:         capability.Skill{ID: "a"},
-			applicable: true,
-		},
-		{
-			name:       "applicable（显式声明 rtx）",
-			sk:         capability.Skill{ID: "a2", Runtimes: []string{"rtx"}},
-			applicable: true,
-		},
-		{
-			name:      "disabled-but-would-apply",
-			sk:        capability.Skill{ID: "b", Enabled: boolPtr(false)},
-			reasonHas: "已被禁用",
-		},
-		{
-			name:      "只声明 stub，与候选不相交",
-			sk:        capability.Skill{ID: "c", Runtimes: []string{"stub"}},
-			reasonHas: "不相交",
-		},
-		{
-			name:      "候选 runtime 没有登记投影",
-			sk:        capability.Skill{ID: "d", Runtimes: []string{"ghost"}},
-			reasonHas: "不相交",
-		},
-		{
-			name:      "候选未被本技能声明",
-			sk:        capability.Skill{ID: "e", Runtimes: []string{"dsh"}},
-			reasonHas: "不相交",
-		},
+// TestSkillRuntimeVerdictReasons 可达性判定（§13.4 S5）：每个 status 都可判定、都给人话原因。
+//
+// v19：判定入口 `SkillActivationFor(sk, 候选 runtime, inAgent, projected)` 随 agent 候选面撤销，
+// 收口成 `skillRuntimeVerdict(sk, 投影)`——**唯一实现**（Library 清单与建会话的选定校验共用它）。
+// 于是这里的输入从"agent 的候选列表"变成"本进程解析出的那一条投影"。
+func TestSkillRuntimeVerdictReasons(t *testing.T) {
+	proj := func(rt string, tested bool, errText string) SkillProjection {
+		return SkillProjection{Runtime: rt, Err: errText, Projection: runtime.Projection{
+			Kind: runtime.ProjectionSkill, Root: "/root/" + rt,
+			Layout: runtime.LayoutIDToken + "/SKILL.md", Tested: tested,
+		}}
 	}
-	for _, c := range cases {
-		act := SkillActivationFor(c.sk, []string{"rtx"}, inAgent, projected)
-		if act.Applicable != c.applicable {
-			t.Fatalf("%s: applicable=%v want %v（reasons=%v）", c.name, act.Applicable, c.applicable, act.Reasons)
-		}
-		if c.applicable {
-			if len(act.Reasons) != 0 {
-				t.Fatalf("%s: 适用不该有原因: %v", c.name, act.Reasons)
-			}
-			continue
-		}
-		if len(act.Reasons) == 0 {
-			t.Fatalf("%s: 不适用必须给人话原因", c.name)
-		}
-		joined := strings.Join(act.Reasons, " | ")
-		if !strings.Contains(joined, c.reasonHas) {
-			t.Fatalf("%s: 原因不含 %q: %s", c.name, c.reasonHas, joined)
-		}
-	}
-	// 「声明了但本进程没解析出投影」要给**改法**（去配 MATE_PROJECTION_DIRS），而不是只说不可用。
-	act := SkillActivationFor(capability.Skill{ID: "f"}, []string{"rtx"}, inAgent, map[string]bool{})
-	if act.Applicable || !strings.Contains(strings.Join(act.Reasons, " | "), "MATE_PROJECTION_DIRS") {
-		t.Fatalf("未登记投影应给出配置出路: applicable=%v reasons=%v", act.Applicable, act.Reasons)
-	}
-	// 禁用的 skill 命中原因里要给出恢复动作（不然用户只看到「不可用」）。
-	act = SkillActivationFor(capability.Skill{ID: "g", Enabled: boolPtr(false)}, []string{"rtx"}, inAgent, projected)
-	if !strings.Contains(strings.Join(act.Reasons, " | "), "enabled:true") {
-		t.Fatalf("禁用原因应给出恢复动作: %v", act.Reasons)
-	}
-}
 
-// TestAgentCapabilitiesListsInapplicableSkills §13.4 S5：agent 能力目录**不再静默过滤**不适用技能。
-func TestAgentCapabilitiesListsInapplicableSkills(t *testing.T) {
-	svc, _, _ := rigWithRuntime(t, runtime.Spec{ID: "rtx", McpTransports: []string{"stdio"}})
-	setBuildRuntime(t, "rtx") // 夹具注册表只有 rtx
-	svc.agents["ag-1"] = &AgentRec{ID: "ag-1", Name: "A1", State: AgentStateStopped}
-	// 适用（rtx 源）、不适用（只有 stub 源）、禁用但本来适用。
-	must := func(s capability.Skill) {
-		t.Helper()
-		if err := svc.caps.RegisterSkill(&s); err != nil {
-			t.Fatal(err)
-		}
+	// 适用（未声明 runtimes = 全部）+ 实测过 → projected。
+	if got := skillRuntimeVerdict(capability.Skill{ID: "a", Runtimes: []string{"rtx"}}, proj("rtx", true, "")); got.Status != dtolibrary.StatusProjected || !got.OK {
+		t.Fatalf("适用且实测过应 projected: %+v", got)
 	}
-	// 本进程只解析出 rtx 的投影（stub 没登记）→ stub-only 不适用。
-	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "rtx")})
-	must(capability.Skill{ID: "ok", Runtimes: []string{"rtx"}})
-	must(capability.Skill{ID: "stub-only", Runtimes: []string{"stub"}})
-	must(capability.Skill{ID: "off", Enabled: boolPtr(false), Runtimes: []string{"rtx"}})
-
-	resp, err := svc.AgentCapabilities("ag-1")
-	if err != nil {
-		t.Fatal(err)
+	// 未实测 → untested，但**照常投放**（OK=true：不担保不等于不投放）。
+	if got := skillRuntimeVerdict(capability.Skill{ID: "a"}, proj("rtx", false, "")); got.Status != dtolibrary.StatusUntested || !got.OK {
+		t.Fatalf("未实测应 untested 且 OK=true: %+v", got)
 	}
-	byID := map[string]bool{}
-	for _, s := range resp.Skills {
-		byID[s.ID] = true
+	// 白名单不含它 → not_applicable，并给出改法。
+	if got := skillRuntimeVerdict(capability.Skill{ID: "c", Runtimes: []string{"stub"}}, proj("rtx", true, "")); got.Status != dtolibrary.StatusNotApplicable || !strings.Contains(got.Reason, "runtimes") {
+		t.Fatalf("白名单不相交应 not_applicable 并给出改法: %+v", got)
 	}
-	for _, id := range []string{"ok", "stub-only", "off"} {
-		if !byID[id] {
-			t.Fatalf("不适用/禁用技能也必须列出（否则「技能凭空不见」）: 缺 %s（%+v）", id, resp.Skills)
-		}
+	// 声明了投影但本进程没解析出落点 → not_configured，给出**配置出路**（不是只说不可用）。
+	if got := skillRuntimeVerdict(capability.Skill{ID: "f"}, proj("rtx", false, "没有投影根")); got.Status != dtolibrary.StatusNotConfigured ||
+		!strings.Contains(got.Reason, "MATE_PROJECTION_DIRS") {
+		t.Fatalf("未解析出落点应 not_configured 且指向配置项: %+v", got)
 	}
-	for _, s := range resp.Skills {
-		switch s.ID {
-		case "ok":
-			if !s.Enabled || !s.Applicable || len(s.Reasons) != 0 {
-				t.Fatalf("ok 应启用且适用: %+v", s)
-			}
-		case "stub-only":
-			if !s.Enabled || s.Applicable || len(s.Reasons) == 0 {
-				t.Fatalf("stub-only 应启用但不适用 + 有原因: %+v", s)
-			}
-		case "off":
-			if s.Enabled || s.Applicable {
-				t.Fatalf("off 应禁用且不适用: %+v", s)
-			}
-		}
+	// 禁用优先于一切，且原因里给出恢复动作。
+	if got := skillRuntimeVerdict(capability.Skill{ID: "g", Enabled: boolPtr(false)}, proj("rtx", true, "")); got.Status != dtolibrary.StatusDisabled ||
+		!strings.Contains(got.Reason, "enabled:true") {
+		t.Fatalf("禁用应最先判且给出恢复动作: %+v", got)
 	}
 }
 

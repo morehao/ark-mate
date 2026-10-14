@@ -70,9 +70,13 @@ type Config struct {
 	PermissionTimeout time.Duration
 	// ElicitationTimeout 挂起结构化提问自动取消超时（默认 30min，对齐 AionUi）。
 	ElicitationTimeout time.Duration
-	// AgentDir Agent definitions 目录（P2：<id>.json 文件定义自定义 agent；MATE_AGENTS 覆盖，
-	// 默认 ~/.ark-mate/agents；空 = 不启用 definitions 落盘，仅内存注册）。
-	AgentDir string
+	// ProviderDir 定义目录（v19 起只装 `providers.json`；MATE_PROVIDERS 覆盖，
+	// 默认 ~/.ark-mate/providers；空 = 不启用 definitions 落盘，仅内存注册）。
+	//
+	// 它是 v19 的**目录改名**落点：v19 之前叫 `agents/`（`MATE_AGENTS`），而那时的目录里同时装着
+	// agent 定义与 `providers.json` 两件事——agent 概念并入 runtime 之后只剩后者，目录名随之改成
+	// 一词一目录。旧目录里的 `providers.json` 由 `ImportLegacyProviderDir` **一次性导入**（不删旧文件）。
+	ProviderDir string
 	// CapabilityDir 能力数据面目录（P1：skills|mcp|tools/*.json → Skill/MCP/Tool 目录；
 	// MATE_CAPABILITIES 覆盖，默认 ~/.ark-mate/capabilities；空 = 不启用文件数据面）。
 	CapabilityDir string
@@ -170,7 +174,8 @@ type Config struct {
 	// 桌面态不使用它：那两个面互斥的凭据由壳经 --auth-stdin 下发。
 	Token string
 	// NativePermission 原生权限映射开关（B5；MATE_NATIVE_PERMISSION 覆盖，默认 auto）：
-	//   auto = 把 agent 的 permission_policy 投影到底座原生权限开关；
+	//   auto = 走底座的原生权限端口——上游有策略就投影，没有就如实不注入（v19 起平台侧
+	//          **没有** per-agent 策略来源，所以今天的实际结果是不注入；注入点原样留给会话级策略）；
 	//   off  = 不注入（底座走自身默认，平台拦截面照常生效）。
 	NativePermission string
 	// McpAutoProbe MCP 自动探测模式（B4；MATE_MCP_AUTO_PROBE 覆盖，默认 off）：
@@ -298,7 +303,7 @@ var knownKeys = map[string]string{
 	"transcripts":         "MATE_TRANSCRIPTS",
 	"db":                  "MATE_DB",
 	"store":               "MATE_STORE",
-	"agents":              "MATE_AGENTS",
+	"providers":           "MATE_PROVIDERS",
 	"capabilities":        "MATE_CAPABILITIES",
 	"automations":         "MATE_AUTOMATIONS",
 	"automation_tick":     "MATE_AUTOMATION_TICK",
@@ -352,6 +357,10 @@ var renamedKeys = map[string]string{
 	// v16（2026-10-11）词汇统一：平台聚合的"一轮"只有一个词 `run`（`turn` 只留在**底座原文**里，
 	// 例如 ACP 的 `StopReasonEndTurn` 与 `"end_turn"`）。旧键必须被认出来——静默忽略的代价是
 	// "看门狗不生效"：挂死的会话照旧永久占用 busy，而 `mate config` 的输出里一切正常。
+	"agents": "已改名为 MATE_PROVIDERS。v19 把 agent 概念整个并入 runtime（底座构建期固定、用户不可自定义），" +
+		"那个目录里剩下的唯一一件事是 `providers.json`，所以目录名从 `agents/` 改成 `providers/`：" +
+		"`MATE_AGENTS=/x` → `MATE_PROVIDERS=/x`、`~/.ark-mate/agents/` → `~/.ark-mate/providers/`。" +
+		"旧目录里的 `providers.json` 会在启动时**一次性导入**新目录（旧文件不删，可自行留存）",
 	"turn_timeout": "已改名为 MATE_RUN_TIMEOUT：键 `turn_timeout` → `run_timeout`（平台侧一轮统一叫 run，" +
 		"turn 只保留在底座原文里：`StopReasonEndTurn` / `\"end_turn\"`）",
 }
@@ -371,6 +380,7 @@ var renamedEnvNames = map[string]string{
 	"MATE_SKILLS_MATERIALIZE_DIR":  "skills_materialize_dir",
 	"MATE_SKILLS_MATERIALIZE_DIRS": "skills_materialize_dirs",
 	"MATE_TURN_TIMEOUT":            "turn_timeout",
+	"MATE_AGENTS":                  "agents",
 }
 
 // knownKeyList 稳定顺序的键名列表（错误信息用）。
@@ -393,7 +403,11 @@ func normalizeKey(k string) string {
 		return "transcripts"
 	case "db_path", "database":
 		return "db"
+	case "provider", "provider_dir", "providers_dir":
+		return "providers"
 	case "agent", "agent_dir", "agents_dir":
+		// v19：agent 面已撤，这三个旧键**不兼容**——归一到旧规范名 "agents" 只为命中
+		// renamedKeys 里那条"已改名为 MATE_PROVIDERS"的可操作文案（否则用户只会看到"未知配置键"）。
 		return "agents"
 	case "capability", "capability_dir", "capabilities_dir":
 		return "capabilities"
@@ -479,6 +493,85 @@ func defaultMateHome() string {
 		return filepath.Join(home, ".ark-mate")
 	}
 	return ".ark-mate"
+}
+
+// DisplayHome 把**默认数据目录**渲染成 `~/.ark-mate` 形态，供**人类可读输出**使用（v19）。
+//
+// 换的是**文本里每一处**该目录（不只是开头那一次）：体检的检查项常常把路径嵌在句中
+// （「老布局遗留 1 个：/Users/x/.ark-mate/…」），只在串首匹配等于漏掉绝大多数落点——
+// 2026-10-14 的第一版就是这么写的，用例当场证明它只换掉了"整串就是路径"的那一条。
+//
+// 边界规则：命中处**前后都不能是路径字符**。后半段防的是 `.ark-mate2`/`.ark-mate-extra`
+// 被误伤成 `~/.ark-mate2`；前半段防的是"别的路径里恰好包含同一段"被改写
+// （`/tmp/backup/Users/x/.ark-mate/mate.db` 里的这一段不是数据目录）。
+//
+// 为什么换掉不损失可用性、以及为什么只换默认那一种：
+//
+//   - `~` 在 shell 里可直接粘贴，而绝对机器路径会随截图、问题单与诊断包外流（用户名与
+//     目录结构都是别人的事）。参照实现 DSH 的口径同源：`dshHomeDisplay` 对默认 home
+//     只返回 `~/.dsh`。
+//   - **自定义 `MATE_HOME` 原样保留**：这里是本地终端工具，读者要的是"文件在哪"；换成
+//     `$MATE_HOME` 反而无法定位。DSH 在产品界面显示 `$DSH_HOME` 是因为那里由用户自己
+//     配置那个变量——场景不同，取舍不同（刻意偏离，记在此处）。
+//   - 家目录不可得时 `defaultMateHome()` 是**相对**路径（`.ark-mate`），那时不做替换：
+//     我们并不知道真实家目录在哪，写成 `~/…` 就是编造。
+//
+// 判据做成单一函数而不是在每个调用点拼字符串：散着写必然漏一处，而漏掉的那一处就是泄露点。
+func DisplayHome(text string) string {
+	def := defaultMateHome()
+	if text == "" || !filepath.IsAbs(def) || !strings.Contains(text, def) {
+		return text
+	}
+	display := filepath.Join("~", filepath.Base(def))
+	var b strings.Builder
+	for {
+		i := strings.Index(text, def)
+		if i < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		end := i + len(def)
+		if boundaryBefore(text, i) && boundaryAfter(text, end) {
+			b.WriteString(text[:i])
+			b.WriteString(display)
+		} else {
+			// 命中但不是一处路径：原样保留这一段，继续往后找。
+			b.WriteString(text[:end])
+		}
+		text = text[end:]
+	}
+}
+
+// boundaryBefore 命中处**前一个**字符不是路径字符（i == 0 也算：串首是边界）。
+//
+// 这里把分隔符也算路径字符：`/tmp/backup/Users/x/.ark-mate` 里的那一段不是数据目录
+// （它只是某个更长的路径恰好包含同一段文本）。
+func boundaryBefore(text string, i int) bool {
+	return i <= 0 || !isPathChar(text[i-1])
+}
+
+// boundaryAfter 命中处**后一个**字符不是"名字字符"（越界 = 串尾，算边界）。
+//
+// 刻意**允许分隔符**：`<def>/mate.db` 是"数据目录下的文件"，正是要换的那一种。
+// 要挡的是后一段把目录名接长的形态：`<def>2` / `<def>-extra` / `<def>.bak` 都是**别的**目录。
+func boundaryAfter(text string, end int) bool {
+	return end >= len(text) || !isNameChar(text[end])
+}
+
+// isPathChar 该字节能否是路径的一部分（字母数字与 `-_.~/~\`）。
+func isPathChar(c byte) bool {
+	return isNameChar(c) || c == '/' || c == '~' || c == '\\'
+}
+
+// isNameChar 该字节能否是路径**一段名字**的一部分（字母数字与 `-_.`）——不含分隔符。
+func isNameChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '-', c == '_', c == '.':
+		return true
+	}
+	return false
 }
 
 // LoadResolved 解析默认值 + 配置目录（config.json/env）+ 进程环境变量。
@@ -779,10 +872,10 @@ func materialize(r *resolver) (Config, error) {
 	} else {
 		c.DBPath = filepath.Join(home, "mate.db")
 	}
-	if v, ok := r.get("agents"); ok {
-		c.AgentDir = v
+	if v, ok := r.get("providers"); ok {
+		c.ProviderDir = v
 	} else {
-		c.AgentDir = filepath.Join(home, "agents")
+		c.ProviderDir = filepath.Join(home, "providers")
 	}
 	if v, ok := r.get("capabilities"); ok {
 		c.CapabilityDir = v

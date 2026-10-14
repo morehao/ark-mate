@@ -23,7 +23,7 @@ export const BizCode = {
   InvalidRequest: 40001,
   /** 单操作员令牌缺失/无效（A6；HTTP 状态同时为 401）。 */
   Unauthorized: 40101,
-  /** 资源不存在（会话 / agent / runtime / provider / MCP server）。 */
+  /** 资源不存在（会话 / runtime / provider / MCP server）。 */
   NotFound: 40401,
   /** 当前形态明确不支持（典型：memory 模式下的 `/usage/summary`）。 */
   NotSupported: 40501,

@@ -268,7 +268,7 @@ func TestCreateMcpServerGates(t *testing.T) {
 				{"transport 枚举", `{"id":"m1","transport":"carrier-pigeon"}`},
 				{"stdio 相对路径", `{"id":"m1","transport":"stdio","command":"npx"}`},
 				{"明文密钥值不合法(密钥键写了明文)", `{"id":"m1","transport":"http","url":"http://x","secret_env":{"TOKEN":"plaintext"}}`},
-				{"密钥引用词法", `{"id":"m1","transport":"http","url":"http://x","secret_env":{"TOKEN":"vault:"}}`},
+				{"密钥引用词法", `{"id":"m1","transport":"http","url":"http://x","secret_env":{"TOKEN":"store:"}}`},
 				{"明文与密钥键重复", `{"id":"m1","transport":"http","url":"http://x","env":{"TOKEN":"v"},"secret_env":{"TOKEN":"env:TOKEN"}}`},
 				{"id 非法", `{"id":"../evil","transport":"http","url":"http://x"}`},
 			}
@@ -368,14 +368,13 @@ func TestMcpServerDisabledNotInjected(t *testing.T) {
 				`{"id":"fs","transport":"stdio","command":"/usr/local/bin/npx"}`)); err != nil {
 				t.Fatal(err)
 			}
-			agent := &AgentRec{ID: "a1"}
-			if got := directMcp(wf.svc.McpServersFor(agent, "rtx", nil)); len(got) != 1 {
+			if got := directMcp(wf.svc.McpServersFor("rtx", nil)); len(got) != 1 {
 				t.Fatalf("默认应注入，got %+v", got)
 			}
 			if _, err := wf.svc.UpdateMcpServer(ctx, "fs", writeMcpReq(t, `{"enabled":false}`)); err != nil {
 				t.Fatal(err)
 			}
-			if got := directMcp(wf.svc.McpServersFor(agent, "rtx", nil)); len(got) != 0 {
+			if got := directMcp(wf.svc.McpServersFor("rtx", nil)); len(got) != 0 {
 				t.Fatalf("禁用后不该注入，got %+v", got)
 			}
 			if _, ok := wf.svc.caps.GetMcpServer("fs"); !ok {

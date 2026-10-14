@@ -326,7 +326,7 @@ func TestStoreMcpWriteFaceRoundTrip(t *testing.T) {
 
 	resp, err := r.Svc.CreateMcpServer(ctx, dtocapability.McpWriteReq(rawObj(t,
 		"id", `"fs"`, "transport", `"stdio"`, "command", `"/usr/bin/env"`, "args", `["node"]`,
-		"secret_env", `{"TOKEN":"vault:fs/token"}`)))
+		"secret_env", `{"TOKEN":"store:fs/token"}`)))
 	if err != nil {
 		t.Fatalf("CreateMcpServer: %v", err)
 	}

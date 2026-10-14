@@ -212,7 +212,7 @@ func TestConfigDirFilePriority(t *testing.T) {
 # dotenv 风格：注释与空行忽略
 MATE_ADDR=127.0.0.1:20002
 export MATE_REAP_GRACE=7s
-agents = /tmp/from-envfile/agents
+providers = /tmp/from-envfile/providers
 `), 0o600); err != nil {
 		t.Fatalf("写 env: %v", err)
 	}
@@ -242,8 +242,8 @@ agents = /tmp/from-envfile/agents
 	if c.ReapGrace.String() != "7s" || src["reap_grace"] != SourceEnvFile {
 		t.Fatalf("export 前缀/别名键未生效: %v %v", c.ReapGrace, src["reap_grace"])
 	}
-	if c.AgentDir != "/tmp/from-envfile/agents" {
-		t.Fatalf("含空格键值未生效: %q", c.AgentDir)
+	if c.ProviderDir != "/tmp/from-envfile/providers" {
+		t.Fatalf("含空格键值未生效: %q", c.ProviderDir)
 	}
 	// proc_registry 未显式设置 → 派生自 db 目录。
 	if c.ProcRegistryPath != "/tmp/from-config/processes.json" {
@@ -732,6 +732,40 @@ func TestSettingsStoreStatus(t *testing.T) {
 		src, locked := NewSettingsStore(dir, tc.src).Status()
 		if src != tc.wantSrc || locked != tc.wantLocked {
 			t.Fatalf("src=%q: got (%q,%q) want (%q,%q)", tc.src, src, locked, tc.wantSrc, tc.wantLocked)
+		}
+	}
+}
+
+// TestDisplayHomeRewritesOnlyDefaultHome（v19）钉显示名的两半：
+//
+//	默认数据目录下的路径 → `~/.ark-mate/…`（可粘贴、不泄露机器路径）
+//	自定义 MATE_HOME / 别的绝对路径 / 相对路径 → 原样（这里不知道"家"在哪，编造一个更糟）
+//
+// 两半都要钉：只钉替换那半，有人把"任何绝对路径都换成 `~`"写进来（于是 `/tmp/x` 变成
+// `~/x`，指向一个不存在的文件）；只钉保留那半，则默认目录的机器路径会重新流进截图与诊断包。
+func TestDisplayHomeRewritesOnlyDefaultHome(t *testing.T) {
+	def := defaultMateHome()
+	if !filepath.IsAbs(def) {
+		t.Skip("本机取不到家目录（defaultMateHome 退回相对路径），显示名不适用")
+	}
+	other := filepath.Join(t.TempDir(), "mate.db")
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{def, "~/.ark-mate"},
+		{filepath.Join(def, "mate.db"), "~/.ark-mate/mate.db"},
+		{filepath.Join(def, "backups", "mate.db.bak-v19-x"), "~/.ark-mate/backups/mate.db.bak-v19-x"},
+		// 嵌在句中（体检的检查项就是这么写的）：**每一处**都要换。
+		{"老布局遗留 1 个：" + filepath.Join(def, "mate.db.bak-v15-x") + "；另有 `" + def + "` 可写",
+			"老布局遗留 1 个：~/.ark-mate/mate.db.bak-v15-x；另有 `~/.ark-mate` 可写"},
+		{other, other}, // 别的绝对路径（自定义 MATE_HOME 同形）
+		{"/tmp/other/mate.db", "/tmp/other/mate.db"},                         // 与家目录无关的绝对路径
+		{"relative/mate.db", "relative/mate.db"},                             // 相对路径（家目录不可得那种形态）
+		{def + "-not-ours/mate.db", def + "-not-ours/mate.db"},               // 后一段相邻但不同目录：不得误伤
+		{"/tmp/backup" + def + "/mate.db", "/tmp/backup" + def + "/mate.db"}, // 前一段相邻：同样不得误伤
+	}
+	for _, tc := range cases {
+		if got := DisplayHome(tc.in); got != tc.want {
+			t.Fatalf("DisplayHome(%q) = %q，期望 %q", tc.in, got, tc.want)
 		}
 	}
 }

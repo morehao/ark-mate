@@ -13,11 +13,13 @@ import (
 
 // ——— M3 首项：用量统计（GET /usage/summary） ———
 //
-// 数据面：runs 表（每轮终态行）+ sessions.agent_id + runs.usage_json（ACP 会话用量快照）。
+// 数据面：runs 表（每轮终态行）+ runs.usage_json（ACP 会话用量快照）。
 // 语义边界（不臆造）：
 //   - 计数/时长 = 区间内 run 行聚合；上下文/费用 = 每会话最近一次上报的**快照**（不累加历史）；
 //   - 无底座上报（usage_json 为空）→ usage_reported=0，上下文/费用为零值，不估算；
 //   - 内存模式（无 store）无 runs 读模型 → 明确 40501 usage_stats_unsupported（不返回假零值）。
+//
+// v19：随 agent 概念整体取消，本面没有 agent 维度——`?agent_id=` 显式拒绝、分组只有 day。
 
 // 口径常量（随响应回显，供前端如实标注，避免把快照当区间增量使用）。
 const (
@@ -47,36 +49,33 @@ func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_range",
 			"[invalid_usage_range] from 必须早于 to（半开区间 [from, to)）", nil))
 	}
+	// 已下线的查询键：非空即显式拒绝（静默忽略会让用户以为"筛选生效了"）。
+	//
+	// 判据本体在 `reject_removed_keys.go`（本文件属「会话身份只剩 runtime_id」那条结构判据的
+	// 扫描面，零命中判据要求它连一个被撤掉的标识符都不写；显式拒绝面统一收口在那一处）。
+	if err := rejectRemovedUsageDimension(q); err != nil {
+		return nil, code.FromError(err)
+	}
 	groupBy := q.GroupBy
 	if groupBy == "" {
-		groupBy = "agent"
+		groupBy = "day"
 	}
-	if groupBy != "agent" && groupBy != "day" {
+	if groupBy != "day" {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_group_by",
-			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 agent|day：%q", q.GroupBy), nil))
+			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 day：%q", q.GroupBy), nil))
 	}
-	if q.AgentID != "" {
-		if _, ok := s.AgentByID(q.AgentID); !ok {
-			return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
-				fmt.Sprintf("[agent_not_found] 未知 agent %q", q.AgentID), nil))
-		}
-	}
-	res, err := s.st.UsageSummary(ctx, store.UsageQuery{
-		From: from, To: to, AgentID: q.AgentID, GroupBy: groupBy,
-	})
+	res, err := s.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to})
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))
 	}
 	out := &dtousage.UsageSummaryResp{
-		AgentID:          q.AgentID,
 		GroupBy:          groupBy,
 		Source:           "sqlite",
 		ContextSemantics: usageContextSemantics,
 		CostSemantics:    usageCostSemantics,
-		// agent 分组：每会话唯一归属一个 agent → 桶可加；day 分组：跨天会话的累计快照会在
-		// 多个日期桶重复出现 → 不可加（前端据此如实标注合计）。
-		BucketsAdditive: groupBy == "agent",
+		// day 分组：跨天会话的累计快照会在多个日期桶重复出现 → 桶之间不可加（前端据此如实标注）。
+		BucketsAdditive: false,
 		Totals:          toUsageBucketResp(res.Totals),
 		Buckets:         make([]dtousage.UsageBucketResp, 0, len(res.Buckets)),
 	}
@@ -95,7 +94,7 @@ func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*
 // toUsageBucketResp 读模型 → REST DTO。
 func toUsageBucketResp(b store.UsageBucket) dtousage.UsageBucketResp {
 	return dtousage.UsageBucketResp{
-		Key: b.Key, AgentID: b.AgentID, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
+		Key: b.Key, Runs: b.Runs, Completed: b.Completed, Failed: b.Failed,
 		Cancelled: b.Cancelled, Running: b.Running, Sessions: b.Sessions,
 		DurationMS: b.DurationMS, ContextUsed: b.ContextUsed, ContextSize: b.ContextSize,
 		UsageReported: b.UsageReported, CostReported: b.CostReported,

@@ -28,8 +28,7 @@ func TestToolsCollisionIsFailClosed(t *testing.T) {
 	srvB := newFakeRemote(t, "x", "safe_b")
 	r.seedMcp("a", httpDef("a", srvA.srv.URL, "MCP_TOKEN_A"), 0)
 	r.seedMcp("a__b", httpDef("a__b", srvB.srv.URL, "MCP_TOKEN_B"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	tools, err := src.Tools(ctx)
 	if err != nil {
@@ -73,7 +72,6 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	t.Setenv("MCP_TOKEN_PARITY", "tok-parity")
 	remote := newFakeRemote(t, "search", "fetch")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_PARITY"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
 
 	// 探测面：管理器装载同一份定义后探测（真实入口，走真远端）。
 	svc := manager.NewService(runtime.AllBuiltinRegistry(), nil)
@@ -93,7 +91,7 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	}
 
 	// 真实面：网关同一 scope 的 tools/list。
-	src := r.source("a1", nil)
+	src := r.source(nil)
 	tools, err := src.Tools(ctx)
 	if err != nil {
 		t.Fatalf("取工具面: %v", err)
@@ -127,8 +125,7 @@ func TestCallLeavesEvidence(t *testing.T) {
 	t.Setenv("MCP_TOKEN_EV", "tok-ev")
 	remote := newFakeRemote(t, "echo")
 	r.seedMcp("gh", httpDef("gh", remote.srv.URL, "MCP_TOKEN_EV"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	if _, err := src.Call(ctx, "gh__echo", nil); err != nil {
 		t.Fatalf("正常调用应成功: %v", err)
@@ -179,8 +176,7 @@ func TestCallsSerializePerServerAndParallelizeAcrossServers(t *testing.T) {
 
 	r.seedMcp("gh", httpDef("gh", srvA.srv.URL, "MCP_TOKEN_PA"), 0)
 	r.seedMcp("gh2", httpDef("gh2", srvB.srv.URL, "MCP_TOKEN_PB"), 0)
-	r.seedAgent("a1", `{"id":"a1","name":"A1","runtimes":["rtx"]}`)
-	src := r.source("a1", nil)
+	src := r.source(nil)
 
 	const perServer = 4
 	errs := make([]error, perServer*2)

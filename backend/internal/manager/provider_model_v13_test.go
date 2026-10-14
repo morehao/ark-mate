@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -13,101 +14,115 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/internal/vault"
 )
 
-// ——— v13 的三条新判据（设计 A2/A3/A4） ———
+// ——— v13 的三条判据（设计 A2/A3/A4）在 v20 之下的形态 ———
 //
 // 它们必须**真连库**跑（`PRAGMA table_info` 动态取列、真实写面与导入路径），所以留在包内
 // 而不是 archtest：archtest 的静态那条问的是"DDL 长什么样"，这里问的是"实际写下去的是什么"。
+// v20 把 A4 那一条反转了（明文现在**有**落点：`providers.key`），所以它换的是判据而不是退休。
 
-// TestProviderRowsContainNoPlaintextSecret A4：vault 不可用时，**写面与导入两条路径都不把明文
-// 写进任何一列**。
+// TestProviderKeyHasExactlyOneColumnInStore v20 的明文落点纪律：**只有 `providers.key` 一列**
+// （外加可重建的托管文档）。别的表、别的列都不许出现。
 //
-// v13 之前的形态是"宁可多留一会明文"：写面在 vault 不可用时把 key 写进 `body`，导入路径同理。
-// 那条纪律属于**文件载体**（文件本来就在用户的 home 里），而 DB 被 ADR-15 判为"必须保持可自由
-// 复制"，于是同一句话在 DB 上变成了安全债（P5）。v13 的修复是结构性的：
+// 为什么这条仍然要留着（v13 的 A4 换了判据而不是退休）：v20 把密钥搬进库，等于把"库必须保持
+// 可自由复制"这条裁决**反转**了（设计 §2 的代价），于是更需要一条机器判据钉住"搬进来的只有
+// 那一列"——否则某天有人顺手把 key 抄进 `body`（或塞进 meta、审计行、事件载荷），外观上
+// 什么都看不出来，而库的备份里会多出一份没人预期的明文。
 //
-//	写面：拒绝写入（`vault_unavailable` + 出路）—— 目标本来就是"把密钥存下来"，而 v13 没有能存它的地方；
-//	导入：跳过那条密钥并逐条列入报告 —— 档案其余列照常导入。
-//
-// 判据不是"实现调了哪个分支"，而是**把全库所有表的所有列值都扫一遍**：探针密钥一次都不许出现。
-// 列由 `PRAGMA table_info` 动态取——所以将来加列也不会让这条断言悄悄少扫一列。
-func TestProviderRowsContainNoPlaintextSecret(t *testing.T) {
-	const secret = "sk-plaintext-probe-DO-NOT-PERSIST"
-	// 让 vault.Open 必然失败（`MATE_VAULT_KEY` 非法）：这是"vault 不可用"最可控的造法，
-	// 且不需要碰任何真实目录（离线的 `vault.Open("")` 反而会回落到"没有 home"的另一条分支）。
-	t.Setenv(vault.EnvKey, "not-a-valid-key")
-
+// 判据是把**全库所有表的所有列值**扫一遍（列由 `PRAGMA table_info` 动态取），命中位置必须
+// 恰好是 `providers.key` 一处；另外两条出口（写面回执、读面列表）也不许回显明文。
+func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
+	const secret = "sk-plaintext-probe-ONLY-KEY-COLUMN"
 	ctx := context.Background()
 	home := t.TempDir()
-	dir := filepath.Join(home, "agents")
+	dir := filepath.Join(home, "providers")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
-	svc.LoadAgentDefinitionsFromStore(ctx, dir)
+	svc.SetCredentials(newTestCredentials(t, home))
+	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 
-	// ① 写面（新建）：带密钥 → 拒绝，且**一行都不落**。
+	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
-	}); errCode(err) != "vault_unavailable" {
-		t.Fatalf("vault 不可用时写面应 vault_unavailable，got %q（%v）", errCode(err), err)
+	})
+	if err != nil {
+		t.Fatalf("带密钥新建应成功（v20 起密钥有落点了）: %v", err)
 	}
-	if _, found, _ := st.GetProviderDefinition(ctx, "write-face"); found {
-		t.Fatal("被拒的写入不该落行")
+	if !resp.HasKey || resp.KeyRef != "providers/write-face" {
+		t.Fatalf("回执应是 has_key=true + 派生引用：%+v", resp)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", resp), secret) {
+		t.Fatal("写面回执不该回显明文")
+	}
+	if v, found, _ := st.ProviderKey(ctx, "write-face"); !found || v != secret {
+		t.Fatalf("密钥应落在 providers.key 那一列: found=%v len=%d", found, len(v))
 	}
 
-	// ② 写面（覆盖）：先建一条无密钥的，再补密钥 → 同样被拒。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "patch-face", Protocol: "openai"}); err != nil {
-		t.Fatalf("无密钥建档案应成功: %v", err)
+	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
+	key2 := "sk-rotated-value"
+	if _, err := svc.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := svc.UpdateProvider(ctx, "patch-face", dtoprovider.ProviderPatchReq{APIKey: &key}); errCode(err) != "vault_unavailable" {
-		t.Fatalf("vault 不可用时补密钥应 vault_unavailable，got %q（%v）", errCode(err), err)
+	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
+		t.Fatalf("覆盖写之后旧值不该留在任何列里: %v", hits)
 	}
 
-	// ③ 导入：文件里带明文 → 跳过该密钥并**逐条列入报告**（明文不进任何列）。
+	// ③ 导入：档案里的历史明文进**同一列**（明文不再"跳过"，因为它有落点了）。
 	legacy := `{"legacy":{"id":"legacy","type":"openai","key":"` + secret + `"}}`
 	if err := os.WriteFile(filepath.Join(dir, providersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stats, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
-	if err != nil {
+	if _, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("ImportProviderFile: %v", err)
-	}
-	if len(stats.SkippedKeys) != 1 || !strings.Contains(stats.SkippedKeys[0], "legacy") {
-		t.Fatalf("被跳过的密钥应逐条列出并点名: %+v", stats.SkippedKeys)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")
 	if !found {
-		t.Fatal("档案的其余列照常导入（跳过的是密钥，不是整条档案）")
+		t.Fatal("档案的其余列应照常导入")
 	}
 	if row.Protocol != "openai" || row.BaseURL == "" {
 		t.Fatalf("档案列值应照常导入: %+v", row)
 	}
-	// 装载面也不该"假装有密钥"。
+	if v, _, _ := st.ProviderKey(ctx, "legacy"); v != secret {
+		t.Fatalf("导入的历史明文应进 key 列: %q", v)
+	}
+	// 装载面如实报"有密钥"。
 	svc.mu.Lock()
-	delete(svc.providers, "legacy") // 重新装载一次，确认 has_key 的判据是 vault 派生
+	delete(svc.providers, "legacy")
 	svc.mu.Unlock()
-	svc.LoadAgentDefinitionsFromStore(ctx, dir)
+	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 	items, _ := svc.ListProviders(ctx)
 	for _, it := range items {
-		if it.ID == "legacy" && it.HasKey {
-			t.Fatalf("vault 里没有密文时 has_key 必须为 false: %+v", it)
+		if it.ID == "legacy" && !it.HasKey {
+			t.Fatalf("库里那一列有值 → has_key 应为 true: %+v", it)
 		}
 	}
+	// 读面列表也不得回显明文。
+	if raw := fmt.Sprintf("%+v", items); strings.Contains(raw, secret) {
+		t.Fatal("读面列表不该回显明文")
+	}
 
-	// ④ 判据：全库（每一张表的每一列）都搜不到明文。
-	assertNoSecretAnywhere(t, st, secret)
+	// ④ 判据：命中的位置**只能是**那一列（几条命中都可以，但一条都不许落在别处）。
+	hits := secretHitsAnywhere(t, st, secret)
+	if len(hits) == 0 {
+		t.Fatal("库里该有这条明文（判据本身失效：探针没被写进去）")
+	}
+	for _, h := range hits {
+		if h != "providers.key" {
+			t.Fatalf("明文只许出现在 providers.key 一列，却出现在 %s: %v", h, hits)
+		}
+	}
 }
 
-// assertNoSecretAnywhere 扫全库所有表的所有列值，断言探针密钥一次都不出现。
+// secretHitsAnywhere 扫全库所有表的所有列值，返回出现探针密钥的 `表.列` 位置（升序、可重复）。
 //
 // 列清单由 `PRAGMA table_info` 动态取（不写死列名）：新增一列不会让这条断言"少扫一列"。
-func assertNoSecretAnywhere(t *testing.T, st *store.Store, secret string) {
+func secretHitsAnywhere(t *testing.T, st *store.Store, secret string) []string {
 	t.Helper()
 	var tables []string
 	if err := st.DB().Raw(`SELECT name FROM sqlite_master WHERE type='table'`).Scan(&tables).Error; err != nil {
@@ -116,6 +131,7 @@ func assertNoSecretAnywhere(t *testing.T, st *store.Store, secret string) {
 	if len(tables) == 0 {
 		t.Fatal("扫不到任何表（守卫会静默变绿）")
 	}
+	hits := []string{}
 	scanned := 0
 	for _, table := range tables {
 		rows, err := st.DB().Raw(`SELECT * FROM ` + table).Rows()
@@ -151,9 +167,7 @@ func assertNoSecretAnywhere(t *testing.T, st *store.Store, secret string) {
 					text = fmt.Sprintf("%v", tv)
 				}
 				if strings.Contains(text, secret) {
-					_ = rows.Close()
-					t.Fatalf("明文密钥出现在 %s.%s 里：%q——v13 起它结构上不该有任何落点（ADR-8）",
-						table, cols[i], text)
+					hits = append(hits, table+"."+cols[i])
 				}
 			}
 		}
@@ -162,6 +176,8 @@ func assertNoSecretAnywhere(t *testing.T, st *store.Store, secret string) {
 	if scanned == 0 {
 		t.Fatal("一列都没扫到（守卫会静默变绿）")
 	}
+	sort.Strings(hits)
+	return hits
 }
 
 // TestModelListOrderIsProviderThenModelID A2：`GET /models` 的顺序是 `(provider_id, model_id)` 升序。

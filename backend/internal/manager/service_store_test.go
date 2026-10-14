@@ -26,7 +26,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1 := NewService(reg, bus1)
 	svc1.EnableStore(st1)
 
-	svc1.registerSession(&SessionRec{ID: "s-live", AgentID: "agent-stub"})
+	svc1.registerSession(&SessionRec{ID: "s-live"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
 	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
 	// ③ 文本增量合并：publish 进缓冲并返回零值事件，号序在 flush 落库时才分配。
@@ -99,8 +99,8 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil)
 	svc.EnableStore(st)
 	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListSessions 按 updated_at 降序可能先 s-a 后 s-b）。
-	svc.registerSession(&SessionRec{ID: "s-a", AgentID: "a"})
-	svc.registerSession(&SessionRec{ID: "s-b", AgentID: "b"})
+	svc.registerSession(&SessionRec{ID: "s-a"})
+	svc.registerSession(&SessionRec{ID: "s-b"})
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-b", map[string]any{"i": 1})
 	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})

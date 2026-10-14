@@ -18,7 +18,7 @@ import (
 //
 //  1. 该 runtime 下**解析后**的 skill 列表：id + 正文摘要；
 //  2. 该 runtime 下**解析后**的 MCP 定义：id + transport + command/args/url + env **键名**
-//     （密钥只记 `vault:`/`env:` **引用名**，**绝不记密钥值**——指纹会进日志/事件/DB 列，
+//     （密钥只记 `store:`/`env:` **引用名**，**绝不记密钥值**——指纹会进日志/事件/DB 列，
 //     记了值就等于把密钥泄漏出去）；
 //  3. 投影形态：`Projection{Kind,Scope,Root,Layout,Format}`；
 //  4. 底座版本（见 `RuntimePart.Version` 的边界说明）。
@@ -64,7 +64,7 @@ type McpPart struct {
 	// EnvKeys 明文 env 的**键名**（值不进指纹：值变了底座行为会变，但那是"同一套能力的另一个
 	// 运行参数"，而且值可能带凭据）。
 	EnvKeys []string
-	// SecretRefs 密钥型 env/header 的**引用名**（`vault:<ns>/<name>` / `env:<NAME>`），
+	// SecretRefs 密钥型 env/header 的**引用名**（`store:<ns>/<name>` / `env:<NAME>`），
 	// **不是**解析后的值。改引用名（换一把钥匙）要产生新代际，改引用的**指向**（轮换密钥）
 	// 不产生——轮换密钥不该让所有会话换底座进程。
 	SecretRefs []string

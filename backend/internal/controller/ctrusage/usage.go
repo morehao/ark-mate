@@ -29,13 +29,16 @@ func NewUsageCtr(svc svcusage.UsageSvc) UsageCtr {
 	return &usageCtr{svc: svc}
 }
 
-// Summary 聚合用量统计：query from/to（RFC3339 或 YYYY-MM-DD，半开区间）、agent_id、group_by。
+// Summary 聚合用量统计：query from/to（RFC3339 或 YYYY-MM-DD，半开区间）、group_by。
+//
+// `agent_id` 照读不误（已下线，见 `dtousage.UsageQueryReq.AgentID`）：拦下它的判据在
+// manager 侧与 `group_by` 同一处，控制器只做搬运。
 func (h *usageCtr) Summary(c *gin.Context) {
 	q := dtousage.UsageQueryReq{
 		From:    c.Query("from"),
 		To:      c.Query("to"),
-		AgentID: c.Query("agent_id"),
 		GroupBy: c.Query("group_by"),
+		AgentID: c.Query("agent_id"),
 	}
 	resp, err := h.svc.UsageSummary(c.Request.Context(), q)
 	if err != nil {

@@ -22,7 +22,7 @@ import (
 // 判定用的是 Library 的同一批函数（`skillRuntimeVerdict`/`mcpRuntimeVerdict`），
 // 所以"面板上显示不可达"与"建会话被拒"永远同向。
 //
-// **刻意不校验密钥引用能不能解析**：那是**环境事实**（`vault:` 后端未配置、`env:` 变量没设），
+// **刻意不校验密钥引用能不能解析**：那是**环境事实**（`store:` 那条在库里没有、`env:` 变量没设），
 // 不是这次请求的错，用户可能稍后就补上；且它会让"钉住的代际"随环境抖动。注入期已逐条 WARN 跳过，
 // Library 的 warnings 里也会呈现（`unresolvedSecretKeys`）。
 

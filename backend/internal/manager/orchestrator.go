@@ -13,7 +13,7 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// agentCancelTimeout session/cancel RPC 的上限等待：agent 无响应（如模型限流重试挂起）时
+// agentCancelTimeout session/cancel RPC 的上限等待：底座无响应（如模型限流重试挂起）时
 // 不阻塞本地解除，Prompt 的 ctx 取消总是会立刻返回。
 const agentCancelTimeout = 3 * time.Second
 
@@ -34,8 +34,8 @@ type acpSession interface {
 // ActiveSession 是 manager 层持久会话句柄：绑定一条 ACP 会话与其所属连接，
 // 支持多轮 prompt（每轮单飞）。事件经 eventSink 入 eventbus（agg = session id）。
 type ActiveSession struct {
-	ID      string
-	AgentID string
+	ID string
+	// Runtime 本句柄所属的 runtime（= 构建期固定的那个；v19 起它是唯一身份）。
 	Runtime string
 	// Fingerprint 该会话钉住的能力指纹（代际）。空 = 未声明能力选择。恢复路径据此回到**同一代际**
 	// （漏了它就会在重启后悄悄换一套能力集）。
@@ -52,7 +52,7 @@ type ActiveSession struct {
 
 	mu   sync.Mutex
 	busy bool
-	run *Run
+	run  *Run
 	dead bool // 连接已断开，本句柄作废（下次 prompt 经 ensureSession 按需重建）
 	// memo bounded handoff memo（P3 F3）：跨 runtime / 无原生 resume 兜底建的 fresh session
 	// 首条 prompt 注入（Prompt 消费后清空，仅生效一次）。
@@ -67,7 +67,7 @@ type Run struct {
 	done      chan struct{}
 	cancel    context.CancelFunc
 	cancelReq bool // 用户主动 cancel（区别于父 ctx 超时/外部取消）
-	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机 / 显式停 agent），
+	// intentional 本轮所属连接是被**我方主动拆除**的（daemon 停机），
 	// 区别于对端或子进程意外断开：主动拆除不是故障，收尾归 interrupted（无终态、可续聊重发），
 	// 不能当失败处理（见 disconnectSession 的状态语义）。受 as.mu 保护。
 	intentional bool
@@ -79,13 +79,12 @@ type Run struct {
 // CreateResult 是 StartSession 的结果。
 type CreateResult struct {
 	SessionID string
-	AgentID   string
 	Runtime   string
 	Status    string
 	EventSeq  int64 // session.created 事件的 bus 水位（供 WS attach 续传）
 }
 
-// Orchestrator 编排 Agent 生命周期与会话执行（连接获取→session/new→多轮 prompt→cancel）。
+// Orchestrator 编排 runtime 连接生命周期与会话执行（连接获取→session/new→多轮 prompt→cancel）。
 type Orchestrator struct {
 	svc *Service
 	reg *runtime.Registry
@@ -130,20 +129,19 @@ type Orchestrator struct {
 }
 
 type runtimeConn struct {
-	client  *acl.Client
-	agentID string
-	spec    runtime.Spec
+	client *acl.Client
+	spec   runtime.Spec
 	// key 连接缓存键（B5：runtime ID + 原生权限 env 签名 + 代际维度）。同一 runtime 但原生权限
-	// 配置不同的 agent 必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
+	// 配置不同的会话必须各自独立进程（权限开关是进程级），配置相同则共享暖进程。
 	key string
-	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机/停 agent 用它一次性找到**该配置的
+	// baseKey 该连接的基础键（= 不含代际维度的 key）。停机用它一次性找到**该配置的
 	// 全部代际**——只按 key 找的话，代际机制一旦真的产生多代际就会漏关。
 	baseKey string
 	// configDigest 该连接建立时的平台模型配置指纹（T5）。代际裁决用它判断"清单变了没有"。
 	configDigest string
-	started      time.Time // 连接建立时刻（空闲回收计时起点；仅 StartAgent 类无会话暖进程可回收）
+	started      time.Time // 连接建立时刻（空闲回收计时起点）
 	pid          int       // 子进程 pid（进程注册表登记用；0 = 未登记）
-	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 显式停 agent / 空闲回收），
+	// intentional 该连接是**我方主动关闭**的（daemon 停机 / 空闲回收），
 	// 而非对端或子进程意外断开。拆除方在 Close 之前置位，dropConn 据此判定拆除原因；
 	// 主动拆除不得把会话写成失败态（见 disconnectSession 的状态语义）。
 	intentional atomic.Bool
@@ -184,7 +182,7 @@ type StartOptions struct {
 	// Origin 会话来源（平台判定，非用户输入）：'' = 人工，'automation:<id>' = 该 automation 触发。
 	// 只用它给会话列表打标与做"某 automation 历次生效运行"的快速路径；不参与任何鉴权判断。
 	Origin string
-	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 回落 agent 声明）。
+	// Selection 该会话声明的能力选定（M3；nil = 未声明 → 全量按 runtime 过滤）。
 	//
 	// **这里刻意没有独立的 `Fingerprint` 字段**：指纹在 startSessionOn 里由本字段
 	// 现算（`capabilityFingerprint`）。两者分开传的后果是"指纹按 A 算、注入按 B 做"，
@@ -195,7 +193,7 @@ type StartOptions struct {
 // RunResult 一次 RunOnce（demo）的结果。
 type RunResult struct {
 	SessionID  string
-	AgentID    string
+	Runtime    string
 	StopReason string
 }
 
@@ -328,7 +326,7 @@ func (o *Orchestrator) Close() {
 		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
 		rc.intentional.Store(true)
 		o.disconnectSessionAll(rc)
-		o.svc.setAgentState(rc.agentID, AgentStateStopped)
+		o.svc.setRuntimeState(AgentStateStopped)
 		o.unregisterProc(rc)
 		if rc.client != nil {
 			_ = rc.client.Close()

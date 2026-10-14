@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Checkbox, Popover, Spin, Tooltip } from 'antd'
 import { ApiOutlined, ExperimentOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { getAgentCapabilities, listMcpServers } from '@ark-mate/api'
-import type { AgentCapabilities, McpServer } from '@ark-mate/types'
+import { listLibrary, listMcpServers } from '@ark-mate/api'
+import type { LibraryItem, McpServer } from '@ark-mate/types'
 import { useMate } from '../store'
 import { Label } from './dirPath'
 import {
@@ -17,8 +17,6 @@ import {
 } from '../console/capabilityView'
 
 interface Props {
-  /** 当前 Agent（新建会话固定用它；能力清单也按它的视角取）。 */
-  agentId?: string
   value: CapabilityChoice
   onChange: (value: CapabilityChoice) => void
   disabled?: boolean
@@ -48,7 +46,7 @@ interface OptionRow {
  *
  * ## 三态，不糊成两态
  * 每个 kind 先是「跟随默认 / 自定义」二选一，**不是**"勾选框全都不勾 = 不要"：
- *  - 跟随默认 → 请求体里那个键**不出现**（走 agent 白名单 / 技能自己的 runtimes 声明）；
+ *  - 跟随默认 → 请求体里那个键**不出现**（走平台默认投放 / 技能自己的 runtimes 声明）；
  *  - 自定义 → 那个键出现，勾了哪些就是哪些（一个都不勾 = 明确一个都不要）。
  * 这两种"空"在服务端是两个不同的代际，UI 上就不能画成同一个样子。
  *
@@ -56,35 +54,39 @@ interface OptionRow {
  * 若恰好等于默认集，服务端算出的指纹与"跟随默认"相同 → 不会白起一个进程。
  *
  * ## 不可达的项：列出来并说明原因，不隐藏
- * 列出来但不可勾 + 就地给原因（被禁用 / runtimes 没放行 / 没有投影落点 / 底座不承载该传输）。
- * 判据与服务端校验同源（都取 agent 视角的适用性），前端先挡只是省一次往返、把原因写清；
+ * 列出来但不可勾 + 就地给原因（被禁用 / 没有候选底座 / 某条底座的投影落点不可用 / 底座不承载该传输）。
+ * 判据与服务端校验同源（都取 `/library` 的逐 runtime 可达性），前端先挡只是省一次往返、把原因写清；
  * **权威判定仍在服务端**——清单可能是旧快照（定义刚被改/删），那时服务端会拒并给出原因。
  */
-export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) {
+export function CapabilityPicker({ value, onChange, disabled }: Props) {
   const showToast = useMate((s) => s.showToast)
+  const runtime = useMate((s) => s.runtime)
   const [open, setOpen] = useState(false)
-  const [caps, setCaps] = useState<AgentCapabilities | null>(null)
+  const [library, setLibrary] = useState<LibraryItem[] | null>(null)
   const [servers, setServers] = useState<McpServer[]>([])
   const [loading, setLoading] = useState(false)
 
   // 展开时装载（每次打开都取最新：能力清单是"现在有什么"，缓存一份旧快照只会让原因文案过期）。
   //
-  // 两个请求都必要，且与能力页同款组合：`agent/capabilities` 给「这个 Agent 的候选底座 +
-  // 白名单 + 技能适用性」，`/mcps` 给**定义级**开关（关掉的 MCP 谁都拿不到，而 agent 视角里
-  // 看不到这个字段）。少取一个就会把"服务端一定会拒"的选项画成可勾选。
+  // 两个请求都必要：`/library` 给**逐 runtime 的可达性 + 人话原因**（勾选判据的唯一来源），
+  // `/mcps` 给**定义级**开关与传输方式（`/library` 的 mcp 条目里没有这两个字段）。
+  // 少取一个就会把"服务端一定会拒"的选项画成可勾选。
+  //
+  // v19 前这里取的是 `GET /agents/:id/capabilities`（按 agent 裁剪过的视角）；那张读面撤掉后
+  // 改用无参的 `/library`——可达性反而是**逐候选底座各一条**，判据比原来更细。
   useEffect(() => {
-    if (!open || !agentId) return
+    if (!open) return
     let alive = true
     setLoading(true)
-    Promise.all([getAgentCapabilities(agentId), listMcpServers()])
-      .then(([c, ss]) => {
+    Promise.all([listLibrary(), listMcpServers()])
+      .then(([lib, ss]) => {
         if (!alive) return
-        setCaps(c)
+        setLibrary(lib)
         setServers(ss)
       })
       .catch((err) => {
         if (!alive) return
-        setCaps(null)
+        setLibrary(null)
         setServers([])
         showToast(err instanceof Error ? err.message : String(err))
       })
@@ -94,18 +96,26 @@ export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) 
     return () => {
       alive = false
     }
-  }, [open, agentId, showToast])
+  }, [open, showToast])
 
-  const skills = caps?.skills ?? []
-  const mcps = mcpRows(caps, servers)
+  const skills = (library ?? []).filter((it) => it.kind === 'skill')
+  const mcps = mcpRows(servers, library ?? [])
+  // 「缺省路径本来就会投」的集合：定义没被禁用 + **每条候选底座都可达**。
+  // 这是切到「自定义」时预填的依据——预填的若含不可投的项，用户会以为"默认就是这么投的"。
+  const inDefaultOf = (applicability: LibraryItem['applicability'], enabled: boolean): boolean =>
+    enabled !== false && applicability.length > 0 && applicability.every((a) => a.ok)
   // 两个 kind 的行模型在这里合流（下面渲染只有一套）：能不能勾 + 原因 + 是否属于"缺省就该投"的集合。
-  // `inDefault` = 与服务端**缺省路径**的投放集合一致（MCP 还要过 agent 白名单这一层）。
   const optionRows = (kind: Kind): OptionRow[] =>
     kind === 'skill'
-      ? skills.map((s) => ({ id: s.id, name: s.name, inDefault: s.applicable === true, ...skillOptionView(s) }))
+      ? skills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          inDefault: inDefaultOf(s.applicability, s.enabled),
+          ...skillOptionView(s),
+        }))
       : mcps.map((m) => {
           const view = mcpOptionView(m)
-          return { id: m.id, name: m.name, inDefault: view.selectable && m.enabled, ...view }
+          return { id: m.id, name: m.name, inDefault: view.selectable && inDefaultOf(m.applicability, m.defEnabled), ...view }
         })
 
   const setKind = (kind: Kind, v: string[] | null) => {
@@ -150,7 +160,7 @@ export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) 
         </div>
         {!custom ? (
           <div className="fg-cap-note">
-            {def.length === 0 ? `当前 Agent 没有可用的${title}` : `按 Agent 声明投放（当前 ${def.length} 个）`}
+            {def.length === 0 ? `当前没有可用的${title}` : `按平台默认投放（当前 ${def.length} 个）`}
           </div>
         ) : (
           <>
@@ -183,9 +193,9 @@ export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) 
                     </Checkbox>
                     {row.note && (
                       // 不可勾的项：原因就在 tooltip 里（与服务端拒它的那句同源）；
-                      // 可勾但有提醒的项（不在白名单）也走这里，用户 hover 就能看到代价。
+                      // 可勾但有提醒的项（部分底座投不出来）也走这里，用户 hover 就能看到代价。
                       <Tooltip title={row.note}>
-                        <span className="fg-cap-opt-why">{row.selectable ? '不在白名单' : '不可选'}</span>
+                        <span className="fg-cap-opt-why">{row.selectable ? '部分底座不可用' : '不可选'}</span>
                       </Tooltip>
                     )}
                   </div>
@@ -200,7 +210,7 @@ export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) 
 
   const menu = (
     <div className="fg-cap-pop">
-      {loading && !caps ? (
+      {loading && !library ? (
         <div className="fg-cap-loading">
           <Spin size="small" /> 正在取能力清单…
         </div>
@@ -215,12 +225,12 @@ export function CapabilityPicker({ agentId, value, onChange, disabled }: Props) 
           <div className="fg-cap-note">
             <ThunderboltOutlined /> 不同的选定会各自起一个底座进程（互不干扰）；会话中途改能力要等下一轮生效。
           </div>
-          {caps && caps.runtimes.length > 0 && (
+          {runtime && (
             <div className="fg-cap-note">
-              <ApiOutlined /> 可用性按当前 Agent 的底座判定：{caps.runtimes.join('、')}
+              <ApiOutlined /> 可用性按构建期固定的底座判定：{runtime.name || runtime.id}
             </div>
           )}
-          {!caps && <div className="fg-cap-note">取不到能力清单（服务端不可达）：只能按默认投放。</div>}
+          {!library && <div className="fg-cap-note">取不到能力清单（服务端不可达）：只能按默认投放。</div>}
         </>
       )}
     </div>

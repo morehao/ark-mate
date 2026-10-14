@@ -22,7 +22,7 @@ import { UsagePage } from './pages/UsagePage'
  * 实测就是 1000/1200；antd 自己的 message 用 2010）。旧值 90 看着"够高"，实际被弹窗遮罩压住：
  * 2026-10-11 实测——设置弹窗里点保存，提示被两层遮罩叠加压到约 30% 亮度（toast 90、遮罩
  * 1000/1200，`elementFromPoint` 命中的是 `.ant-modal-wrap`），用户看到的就是"点了保存什么都不
- * 发生"。设置弹窗里**每一个**动作（供应商/模型/Agent/工作区/令牌）的成败提示都在这个坑里，
+ * 发生"。设置弹窗里**每一个**动作（供应商/模型/工作区/令牌）的成败提示都在这个坑里，
  * 所以修在这里而不是各面板里。 */
 const TOAST_Z = 2010
 
@@ -35,9 +35,12 @@ function Manage({ children }: { children: ReactNode }) {
 }
 
 /**
- * 设置深链接：设置已经不是页面了（左栏 footer 菜单 → 居中弹窗），但 `/settings`、`/settings/agents`、
- * `/agents` 这些旧路径仍然可点。做法是**打开对应分节弹窗 + 落回问答页**——弹窗是覆盖层，底下总要有个页面，
- * 而问答页是默认落点；旧书签因此不会静默落到问答页什么都不发生。
+ * 设置深链接：设置已经不是页面了（左栏 footer 菜单 → 居中弹窗），但 `/settings` 这类旧路径仍然可点。
+ * 做法是**打开对应分节弹窗 + 落回问答页**——弹窗是覆盖层，底下总要有个页面，而问答页是默认落点；
+ * 旧书签因此不会静默落到问答页什么都不发生。
+ *
+ * v19：`/settings/agents` 与 `/agents` 两条深链接随「Agent 管理」那一节删除。**刻意不改成别的分节**：
+ * 旧书签指的那个设置面已经不存在了，硬把它接到「通用」上会让用户以为自己点对了地方。
  */
 function SettingsDeepLink({ section }: { section: string }) {
   const openSettingsSection = useMate((s) => s.openSettingsSection)
@@ -55,7 +58,7 @@ function currentEntryLabel(pathname: string): string {
 }
 
 export function App() {
-  // 启动一次：常驻 WS 连接 + 拉取 agents/sessions（跨路由共享一份状态）
+  // 启动一次：常驻 WS 连接 + 拉取 meta/runtime 诊断与 sessions（跨路由共享一份状态）
   useEffect(() => {
     useMate.getState().boot()
   }, [])
@@ -194,8 +197,6 @@ export function App() {
             {/* 设置已不是页面（左栏 footer 菜单 → 居中弹窗）。旧深链接仍然可用：
                 打开对应分节弹窗，然后落回问答页（弹窗是覆盖层，需要底下有个页面）。 */}
             <Route path="/settings" element={<SettingsDeepLink section="general" />} />
-            <Route path="/settings/agents" element={<SettingsDeepLink section="agents" />} />
-            <Route path="/agents" element={<SettingsDeepLink section="agents" />} />
             <Route path="*" element={<Navigate to="/sessions" replace />} />
           </Routes>
         </div>

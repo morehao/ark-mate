@@ -16,33 +16,42 @@ import (
 // 分开之后规矩才立得住：`Env`/`Headers` 是**明文**（可读回、可展示、可 diff），
 // `SecretEnv`/`SecretHeaders` 的**值只能是引用**，永远不接受明文。引用两种：
 //
-//	vault:<namespace>/<name>  平台托管密文（AES-256-GCM，见 §5）；定义文件里只有引用，
-//	                          密钥本体在 `<mate_home>/vault/<ns>/<name>.enc`
+//	store:<namespace>/<name>  平台托管（v20 起事实源是库里的 `mcp_secrets`；
+//	                          `<MATE_HOME>/credentials.json` 是它的 0600 可重建镜像）；
+//	                          定义文件里只有引用，密钥本体不在定义文件里
 //	env:<ENV_NAME>            进程环境变量（容器/CI 注入；盘上什么都没有）
 //
 // 这一层只做**词法**校验（纯字符串，不碰磁盘/不碰密钥材料），解析成明文发生在注入前一刻，
-// 由 internal/manager 调 vault 完成——`pkg/` 不认识 `internal/vault`，"谁能解密"这件事
+// 由 internal/manager 查库完成——`pkg/` 不认识 `internal/store`，"密钥从哪来"这件事
 // 留在应用层，能力数据面只负责"什么算合法的引用"。
 
 // 引用前缀。
 const (
-	SecretRefVaultPrefix = "vault:"
-	SecretRefEnvPrefix   = "env:"
+	// SecretRefStorePrefix 平台托管引用的前缀（v20 起）。
+	SecretRefStorePrefix = "store:"
+	// SecretRefEnvPrefix 进程环境变量引用的前缀。
+	SecretRefEnvPrefix = "env:"
+	// SecretRefLegacyVaultPrefix v20 **之前**的前缀，指向已被删除的那套机制（密文文件 + 主密钥）。
+	//
+	// 它只被下面的 `TranslateLegacySecretRef` 使用，且**这是全仓唯一一处翻译点**：
+	// 库里的 `mcp_servers.body` 由 v20 迁移改写前缀，但**档案文件**（`providers.json`、
+	// 能力目录里的 `mcp/*.json`）不在库里、迁移改不到，只能在导入它们时显式翻译并告警。
+	SecretRefLegacyVaultPrefix = "vault:"
 )
 
-// secretRefNameRE 引用的 ns/name 词法：与 `internal/vault.ValidateRef` 同一套规则
-// （`^[A-Za-z0-9._-]{1,64}$`，且 `.`/`..` 非法）。两处一致性由 manager 侧的
-// TestSecretRefLexiconMatchesVault 断言——同一个引用不能出现"数据面说合法、vault 说非法"。
+// secretRefNameRE 引用的 ns/name 词法：`^[A-Za-z0-9._-]{1,64}$`，且 `.`/`..` 非法。
+// 两处一致性由 manager 侧的 TestSecretRefLexiconMatchesStore 断言——同一个引用不能出现
+// "数据面说合法、存储层说非法"。
 var secretRefNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
 // envNameRE 环境变量名（POSIX 风格：字母/下划线开头）。
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// SecretRefKind 报告引用类型："vault" / "env" / ""（既不是前者也不是后者）。
+// SecretRefKind 报告引用类型："store" / "env" / ""（既不是前者也不是后者）。
 func SecretRefKind(ref string) string {
 	switch {
-	case strings.HasPrefix(strings.TrimSpace(ref), SecretRefVaultPrefix):
-		return "vault"
+	case strings.HasPrefix(strings.TrimSpace(ref), SecretRefStorePrefix):
+		return "store"
 	case strings.HasPrefix(strings.TrimSpace(ref), SecretRefEnvPrefix):
 		return "env"
 	default:
@@ -50,23 +59,50 @@ func SecretRefKind(ref string) string {
 	}
 }
 
+// TranslateLegacySecretRef 把 v20 之前的旧前缀显式翻成 `store:`，返回 (新引用, 是否翻过)。
+//
+// **它是全仓唯一一处翻译点**（导入路径的两个调用方都必须经它，见 `manager` 侧的导入器）：
+// 旧前缀指的是一个已被删除的机制，留着它等于让定义文件指向不存在的东西；而"翻译"必须
+// 是显式的——静默当合法会让下一个人以为那套机制还在。
+//
+// 只在**导入档案文件**时用：库里的引用已由迁移改写，运行时读到旧前缀就是坏数据（应当报错）。
+func TranslateLegacySecretRef(ref string) (string, bool) {
+	r := strings.TrimSpace(ref)
+	if !strings.HasPrefix(r, SecretRefLegacyVaultPrefix) {
+		return ref, false
+	}
+	return SecretRefStorePrefix + strings.TrimPrefix(r, SecretRefLegacyVaultPrefix), true
+}
+
+// LegacySecretRefWarning 旧前缀被翻译时该说的那句话（**文案与字面量收在同一处**：
+// 调用方只负责说"是在哪个文件/哪条定义上翻的"，不重复写前缀）。
+//
+// 它刻意说清三件事，而不是只说"已翻译"：旧前缀指的是**一个已被删除的机制**；档案文件不在
+// 库里、迁移改不到它们；翻译只发生在这条导入路径上。
+func LegacySecretRefWarning(ref string) string {
+	return fmt.Sprintf("密钥引用 %q 用的是 v20 之前的前缀 %q：那套机制（密文文件 + 主密钥）已在 v20 删除。"+
+		"档案文件不在库里、迁移改不到它，所以这里**就地翻成** %q（磁盘上的那一份这次不改——"+
+		"下一次导出/重写会带上新前缀）",
+		ref, SecretRefLegacyVaultPrefix, SecretRefStorePrefix)
+}
+
 // ValidateSecretRef 校验一条引用的词法（不检查密钥是否真的存在——那是注入前的事）。
 func ValidateSecretRef(ref string) error {
 	r := strings.TrimSpace(ref)
 	if r == "" {
 		return fmt.Errorf("密钥引用为空（值只能是 %s<namespace>/<name> 或 %s<ENV_NAME>）",
-			SecretRefVaultPrefix, SecretRefEnvPrefix)
+			SecretRefStorePrefix, SecretRefEnvPrefix)
 	}
 	switch SecretRefKind(r) {
-	case "vault":
-		body := strings.TrimPrefix(r, SecretRefVaultPrefix)
+	case "store":
+		body := strings.TrimPrefix(r, SecretRefStorePrefix)
 		ns, name, ok := strings.Cut(body, "/")
 		if !ok || ns == "" || name == "" {
-			return fmt.Errorf("vault 引用 %q 需为 %s<namespace>/<name>", r, SecretRefVaultPrefix)
+			return fmt.Errorf("store 引用 %q 需为 %s<namespace>/<name>", r, SecretRefStorePrefix)
 		}
 		for _, part := range []string{ns, name} {
 			if !secretRefNameRE.MatchString(part) || part == "." || part == ".." {
-				return fmt.Errorf("vault 引用 %q 的 %q 非法（允许字母数字 . _ -，1–64 位，且不得为 . / ..）", r, part)
+				return fmt.Errorf("store 引用 %q 的 %q 非法（允许字母数字 . _ -，1–64 位，且不得为 . / ..）", r, part)
 			}
 		}
 		return nil
@@ -79,7 +115,7 @@ func ValidateSecretRef(ref string) error {
 	default:
 		return fmt.Errorf("密钥引用 %q 非法：值只能是 %s<namespace>/<name> 或 %s<ENV_NAME>，"+
 			"**不接受明文密钥**（明文写在定义文件里等着落盘就是这条规则要防的事）",
-			r, SecretRefVaultPrefix, SecretRefEnvPrefix)
+			r, SecretRefStorePrefix, SecretRefEnvPrefix)
 	}
 }
 

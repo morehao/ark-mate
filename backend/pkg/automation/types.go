@@ -49,13 +49,13 @@ type Schedule struct {
 // （`automations.ts:124-130` 的注释：切换活跃工作空间会静默改掉所有 automation 的目标）
 // 是同一类缺陷，不该复现（ADR-6）。
 //
-// **没有 runtime_hint**：底座由构建期固定（backend/pkg/runtime/build.go）。老定义里若还留着
-// `target.runtime_hint`：读面宽容（本结构丢弃它），写面显式拒绝（manager 的闸门 → 40001）。
+// **没有 runtime_hint、也没有 agent_id**：底座由构建期固定（backend/pkg/runtime/build.go），
+// 会话不再有 agent 身份（v19）。老定义里若还留着这两个键：读面宽容（本结构丢弃它），
+// 写面显式拒绝（manager 的闸门 → 40001 + 指路），存量残留由写面自愈清除。
 type Target struct {
-	AgentID string `json:"agent_id"`
-	Cwd     string `json:"cwd"`
-	Model   string `json:"model,omitempty"`
-	Prompt  string `json:"prompt"`
+	Cwd    string `json:"cwd"`
+	Model  string `json:"model,omitempty"`
+	Prompt string `json:"prompt"`
 }
 
 // Automation 定义文件（`<AutomationDir>/<id>.json`）的完整形态。
@@ -123,9 +123,6 @@ func (a *Automation) Validate() error {
 	}
 	if err := a.Schedule.Validate(); err != nil {
 		return err
-	}
-	if a.Target.AgentID == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_param", "automation 缺少 target.agent_id（触发时要建哪个 agent 的会话）", nil)
 	}
 	if a.Target.Prompt == "" {
 		return acl.NewError(acl.ClassRequest, "invalid_param", "automation 缺少 target.prompt（触发时没有可执行的内容）", nil)

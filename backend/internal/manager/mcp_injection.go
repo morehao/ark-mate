@@ -11,13 +11,13 @@ package manager
 // 为什么是同一个值对象而不是两个函数：指纹必须**覆盖真正会被注入的东西**，否则会出现
 // "指纹说这套能力含 X，实际没注入 X"（或反之）——两种都是"改了定义却不换代际/白换代际"。
 // 而指纹又**绝不能**拿到解析后的明文密钥（那是 §13.4 的边界①，会进日志/事件/DB 列）。
-// 所以计划里只放**定义**（含 `vault:`/`env:` 引用）与**网关条目**（只有 scope，天生无密钥），
+// 所以计划里只放**定义**（含 `store:`/`env:` 引用）与**网关条目**（只有 scope，天生无密钥），
 // 明文解析留给真正拼注入条目的那一刻。
 //
 // 网关分派（P-2/P-3 的落点）：
 //
 //	stdio → 原样直连（C-5：stdio 子进程仍归底座自建自管；S2 是另案）
-//	远程  → 合成**一条** stdio 条目 `mate-gateway = <平台可执行文件> mcp bridge --agent … --runtime …`
+//	远程  → 合成**一条** stdio 条目 `mate-gateway = <平台可执行文件> mcp bridge --runtime …`
 //
 // 条目里**不含任何每台 server 的信息**——于是"加一个远程 server"不改变注入项、也就不换代际
 // （网关的头号收益）。唯一会让条目变的是 scope 本身与会话钉住的 `mcps`（用户的选定）。
@@ -51,12 +51,12 @@ func (p mcpInjectionPlan) empty() bool {
 	return len(p.Direct) == 0 && p.Gateway == nil
 }
 
-// planMcpInjection 算出该 agent×runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
+// planMcpInjection 算出该 runtime 的 MCP 注入计划（唯一实现：注入面与指纹共用）。
 //
 // 与 `mcpSelectionFor`（白名单优先级那一段）的关系：选择语义在 `pkg/capability.SelectMcpServers`，
 // 这里负责**按传输分派**——直连那一支只收 stdio，远程那一支收远程三种。开关关掉（`mcp_gateway=off`）
 // 时回到老路：远程 server 按该 runtime 声明的承载能力直连注入（能承载才注入，承载不了就跳过）。
-func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *CapabilitySelection) mcpInjectionPlan {
+func (s *Service) planMcpInjection(runtimeID string, sel *CapabilitySelection) mcpInjectionPlan {
 	var plan mcpInjectionPlan
 	if s.caps == nil {
 		return plan
@@ -65,11 +65,11 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 	if !ok {
 		return plan // 未知 runtime → 不下发（维持现状）
 	}
+	// 白名单只有**会话钉住的选定**这一个来源（含空数组 = 本会话一个 MCP 都不要）；
+	// v19 之前这里还有一层 agent 的 `mcps` 声明，agent 面删除后那一层随之消失。
 	allowIDs := (*[]string)(nil)
 	if sel != nil && sel.Mcps != nil {
-		allowIDs = sel.Mcps // 会话选定优先（含空数组 = 本会话一个 MCP 都不要）
-	} else if agent != nil {
-		allowIDs = agent.Mcps
+		allowIDs = sel.Mcps
 	}
 	all := s.caps.ListMcpServers()
 
@@ -100,11 +100,11 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 	// 代价如实记在配置项注释里：没有远程 server 的用户也会多一个空闲的 `mate mcp bridge` 子进程；
 	// 不接受这笔开销就用 `MATE_MCP_GATEWAY=off` 回退（那时远程返回直连注入，条目也不再存在）。
 	if allowIDs != nil && len(*allowIDs) == 0 {
-		// 显式"一个 MCP 都不要"（agent 的 `mcps: []` 或会话钉的 `[]`）：这是用户把整个 MCP 面
+		// 显式"一个 MCP 都不要"（会话钉的 `[]`）：这是用户把整个 MCP 面
 		// 关掉了。此时连网关条目都不该出现——它的存在本身就是"这个面还在"，与声明相悖。
 		return plan
 	}
-	entry, err := s.gatewayEntry(agent, runtimeID, sel)
+	entry, err := s.gatewayEntry(runtimeID, sel)
 	if err != nil {
 		// 拼不出网关条目（取不到自身可执行文件路径）→ 远程 server 这轮**没有出路**。
 		// 响亮降级：宁可少工具，也不要注入一条指向不存在命令的 stdio 条目（底座会反复拉起失败）。
@@ -122,25 +122,33 @@ func (s *Service) planMcpInjection(agent *AgentRec, runtimeID string, sel *Capab
 // 把它拉起来时不需要知道平台装在哪（也不该依赖 PATH 里有 `mate`）。
 // 已知代价（写下来免得被当成 bug）：`go run` 起的开发进程路径是临时目录、每次重启都不同，
 // 于是**钉住会话**的指纹会随之变化（缺省路径指纹恒空，不受影响）；打包/安装形态下路径稳定。
-func (s *Service) gatewayEntry(agent *AgentRec, runtimeID string, sel *CapabilitySelection) (acl.McpServer, error) {
+//
+// `Env` 里带的是**凭据 cwd**（`mcp.GatewayCredCwdEnv`，不是密钥）：网关是底座 spawn 的子进程，
+// 它的 cwd 是底座给的（会话工作区），而 `<cwd>/.env` 那一层的语义是"用户启动 `mate serve` 的
+// 目录"——没有这个变量，同一个引用会在两个进程里解析出不同的值。放 `Env` 而不是 `Args`：`Args`
+// 整体进指纹（换个目录启动就换代际），而 `Env` 只把**键名**入指纹（键名恒定、值不入）。
+func (s *Service) gatewayEntry(runtimeID string, sel *CapabilitySelection) (acl.McpServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return acl.McpServer{}, fmt.Errorf("取自身可执行文件路径失败：%w", err)
 	}
 	scope := mcp.GatewayScope{RuntimeID: runtimeID}
-	if agent != nil {
-		scope.AgentID = agent.ID
-	}
 	if sel != nil {
-		// 三态原样传递：nil = 该会话没钉（网关回落 agent 声明）；`[]` = 一个远程都不要。
+		// 三态原样传递：nil = 该会话没钉（网关按全量）；`[]` = 一个远程都不要。
 		scope.McpsPinned = sel.Mcps
 	}
-	return acl.McpServer{
+	entry := acl.McpServer{
 		Name:      mcp.GatewayServerName,
 		Transport: capability.TransportStdio,
 		Command:   exe,
 		Args:      mcp.GatewayBridgeArgs(scope),
-	}, nil
+	}
+	// 空 = 装配期没登记（测试、`mate demo` 这类不经装配的入口）：**不带这个键**，让网关侧
+	// 明确知道"核心没交 cwd"，回落并 WARN——不臆造一个 `os.Getwd()` 冒充核心的答案。
+	if cwd := s.credentialCwd(); cwd != "" {
+		entry.Env = map[string]string{mcp.GatewayCredCwdEnv: cwd}
+	}
+	return entry, nil
 }
 
 // SetMcpGatewayEnabled 开关平台侧 MCP 网关（M7-3；`MATE_MCP_GATEWAY=off` 回退）。

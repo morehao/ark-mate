@@ -2,7 +2,14 @@ export type SessionStatus = 'in_progress' | 'completed' | 'cancelled' | 'failed'
 
 export interface SessionSummary {
   id: string
-  agent_id: string
+  /**
+   * 会话归属的底座 id（v19 前这里是 `agent_id`）。
+   *
+   * 底座由构建期固定，所以它在**今天**恒等于 `GET /meta` 的 `runtime.id`——但它是**会话侧的执行事实**
+   * （历史会话可能停在别的底座上），所以照读不照推：界面上要显示"这个会话跑在哪个底座上"就用它去
+   * 对 `meta.runtime`，对不上时如实显示这个 id，不要拿构建期的那个去覆盖它。
+   */
+  runtime_id: string
   status: SessionStatus
   title: string // 会话标题（服务端由首条用户消息推导；可 PATCH 覆盖）
   pinned: boolean
@@ -28,13 +35,13 @@ export interface SessionSummary {
    * **权威标志**：判定「这个目录不是你选的」只读它，不要从路径形状/前缀反推（前缀可配置）。
    */
   workspace_temporary?: boolean
-  /** provider 档案 id（会话级模型选择；空 = 跟随 agent）。 */
+  /** provider 档案 id（会话级模型选择；空 = 跟随平台默认）。 */
   provider?: string
   /** 会话级模型 id（空 = 底座默认）。 */
   model?: string
   /**
-   * 钉住的能力选定（M3）。**整个字段缺失 = 未声明能力选择**（走 agent 白名单 /
-   * 各自的 runtimes 声明），不是"没有能力"。
+   * 钉住的能力选定（M3）。**整个字段缺失 = 未声明能力选择**（按平台默认投放 +
+   * 各技能自己的 runtimes 声明），不是"没有能力"。
    */
   capabilities?: SessionCapabilities | null
   /**
@@ -50,7 +57,7 @@ export interface SessionSummary {
  * 会话的能力选定快照（与落库的 `capability_json` 逐键一致）。
  *
  * 每个 kind 三态，**缺键与空数组语义相反**，不要用 `?? []` 抹平：
- *  - 整个对象缺失 → 未声明能力选择（回落 agent 白名单）
+ *  - 整个对象缺失 → 未声明能力选择（回落平台默认）
  *  - 某 kind 缺键   → 该 kind 未声明（回落上一层）
  *  - 某 kind `[]`   → **明确一个都不要**
  *  - 某 kind 非空   → 白名单
@@ -97,7 +104,7 @@ export interface SessionSearchHit extends SessionSummary {
 export interface MessageSearchHit {
   session_id: string
   title?: string
-  agent_id?: string
+  runtime_id?: string
   role: 'user' | 'assistant' | string
   seq: number
   seq_hi?: number
@@ -120,7 +127,7 @@ export interface MessageSearchResp {
 export interface ExportFile {
   session_id: string
   title?: string
-  agent_id?: string
+  runtime_id?: string
   status?: string
   filename: string
   format: 'markdown' | 'text' | 'json' | string
@@ -197,7 +204,7 @@ export interface ResolvePermissionReq {
 }
 
 /**
- * 决策回执：描述**实际投递给 agent** 的结果（不是请求参数回显）。
+ * 决策回执：描述**实际投递给底座**的结果（不是请求参数回显）。
  * `option_id` 可能被兜底为第一个选项，或显式拒绝因无 deny 选项降级 `cancelled`——
  * 以 `outcome`/`selected_option_id` 为准。
  */
@@ -286,8 +293,6 @@ export interface ResolveElicitationResp {
 }
 
 export interface CreateSessionReq {
-  /** 空 = 后端默认播种 Agent（dsh）。 */
-  agent_id?: string
   prompt: string
   /**
    * 会话工作空间（绝对路径）。空 = 落在**默认工作空间**（响应回 `workspace_temporary=true`；
@@ -318,7 +323,8 @@ export interface CreateSessionReq {
 
 export interface CreateSessionResp {
   id: string
-  agent_id: string
+  /** 本次会话落在哪个底座上（构建期固定；回带是为了让客户端不必去拼）。 */
+  runtime_id: string
   status: SessionStatus
   event_seq: number // 已发布事件水位：WS attach 续传起点
   /** 定稿后的工作空间（创建即回读，无需二次查询）。 */

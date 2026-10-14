@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +87,7 @@ func TestGenerationKeyNoPrefixAmbiguity(t *testing.T) {
 	}
 }
 
-// TestGenerationKeyFindsAllGenerations 停机/停 agent 必须能找到**该配置的全部代际**。
+// TestGenerationKeyFindsAllGenerations 代际池必须能找到**该配置的全部代际**。
 func TestGenerationKeyFindsAllGenerations(t *testing.T) {
 	base := connKey("stub", nil)
 	o := &Orchestrator{conns: map[string]*runtimeConn{}}
@@ -118,7 +117,6 @@ func acpRig(t *testing.T) *rig {
 	reg := runtime.NewRegistry(stubACPSpec(t))
 	svc := NewService(reg, eventbus.New())
 	setBuildRuntime(t, "stub") // 夹具注册表只有 stub
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return &rig{Svc: svc, Orch: orch}
@@ -133,7 +131,7 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 	mk := func() string {
 		t.Helper()
 		resp, err := r.Svc.CreateSession(ctx, dtosession.SessionCreateReq{
-			AgentID: "a1", Cwd: cwd,
+			Cwd: cwd,
 		})
 		if err != nil {
 			t.Fatalf("CreateSession: %v", err)
@@ -168,13 +166,12 @@ func TestWarmProcessSharingWithoutCapabilitySelection(t *testing.T) {
 func TestGenerationPerFingerprint(t *testing.T) {
 	r := acpRig(t)
 	ctx := context.Background()
-	agent, _ := r.Svc.AgentByID("a1")
 	spec, ok := r.Orch.reg.Get("stub")
 	if !ok {
 		t.Fatal("stub runtime 未注册")
 	}
 	for _, fp := range []string{"", "fp-a", "fp-b"} {
-		if _, err := r.Orch.acquire(ctx, agent, spec, fp); err != nil {
+		if _, err := r.Orch.acquire(ctx, spec, fp); err != nil {
 			t.Fatalf("acquire(fp=%q): %v", fp, err)
 		}
 	}
@@ -183,56 +180,23 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("三个不同指纹应各有一条连接，got %d", n)
 	}
 	// 重复取同一个指纹必须复用，不新增。
-	if _, err := r.Orch.acquire(ctx, agent, spec, "fp-a"); err != nil {
+	if _, err := r.Orch.acquire(ctx, spec, "fp-a"); err != nil {
 		t.Fatal(err)
 	}
 	if n := connCount(r.Orch); n != 3 {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
-	// 全部代际都在同一个基础键下（停机时一次性关掉）。
-	base := connKey(spec.ID, r.Svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), r.Svc.providerEnvFor(spec.ID, agent.Provider))
+	// 全部代际都在同一个基础键下：代际**池上限**正是按这个数判的（超了要淘汰无人引用的那条）。
+	base := connKey(spec.ID, r.Svc.providerEnvFor(spec.ID, r.Svc.injectedProviderID(ctx)))
 	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}
-	// 显式停 agent：三条连接全关（不是只关查表查到的第一个）。
-	if err := r.Svc.StopAgent(ctx, "a1"); err != nil {
-		t.Fatalf("StopAgent: %v", err)
-	}
+	// v19 撤销了"显式停某个 agent"那一面（用户不能选底座 → 也没有按底座停的入口），
+	// 停机只剩整进程 Close 一条路：三条连接全关。
+	r.Orch.Close()
 	// 等**最终**一致：连接已被关掉（Close + Done）是同步保证的；表里那条登记由
 	// watchConn→dropConn 异步摘除（见 waitConnCount 的注释）。
 	waitConnCount(t, r, 0)
-}
-
-// TestStopAgentBusyRejectsAcrossGenerations 任一代际上有在途 run → 整体拒绝
-// （显式停机不该把跑着的一轮打断，也不该"关一半留一半"）。
-func TestStopAgentBusyRejectsAcrossGenerations(t *testing.T) {
-	r := acpRig(t)
-	ctx := context.Background()
-	agent, _ := r.Svc.AgentByID("a1")
-	spec, _ := r.Orch.reg.Get("stub")
-	idle, err := r.Orch.acquire(ctx, agent, spec, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	busy, err := r.Orch.acquire(ctx, agent, spec, "fp-busy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.Orch.markBusy(busy.client, "cv-x") // 只有"忙"的那一代上有在途
-	defer r.Orch.unmarkBusy(busy.client, "cv-x")
-
-	err = r.Svc.StopAgent(ctx, "a1")
-	if err == nil {
-		t.Fatal("有在途 run 时应拒绝停机")
-	}
-	if !strings.Contains(err.Error(), "在途") {
-		t.Fatalf("错误文案应说明原因: %v", err)
-	}
-	// 两条连接都必须还在（拒绝 = 什么都不做，不是"关掉空闲那条"）。
-	if n := connCount(r.Orch); n != 2 {
-		t.Fatalf("拒绝停机时不该关掉任何一代，剩 %d 条", n)
-	}
-	_ = idle
 }
 
 // TestAdaptersDeclareProcessScope M1-2 的验收面落在 archtest（第 10 条守卫），这里补一条

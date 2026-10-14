@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -338,9 +339,17 @@ func TestMigrateV7ToV14KeepsData(t *testing.T) {
 	}
 }
 
-// TestMigrateV8ToV9AddsAgents v8 → v9 升级：v9 同样是**纯增表**（agents），既有定义行一行不丢，
-// 新表从空开始（存量 agent 还在 `<AgentDir>/*.json` 里，等 M6-6 的导入器灌进来）。
-func TestMigrateV8ToV9AddsAgents(t *testing.T) {
+// TestMigrateV8ToLatestKeepsDataAndDropsAgents v8 → 最新：v8 的存量行与审计原样保留，而 v19 把
+// agent 面从库里彻底撤掉（表没了、`kind='agent'` 的审计行删了、meta 的两个键清了）。
+//
+// v19 之前这条用例叫 TestMigrateV8ToV9AddsAgents，判据是"agents 表建出来了、agent 写路径可用"。
+// v9 那一步今天照旧成立，但它已被 v19 整体推翻，而 `Migrate` 一路推到最新——所以本用例分两段：
+// 先重放到 v9 钉住**历史步骤**（agents 表真被建出来，且当时那套表与键能写进去），再推到最新钉
+// **撤除**的结果。两段合起来才是今天的事实。
+//
+// 历史夹具一律走**当时那一版**的表名与裸 SQL（typed DAO 已随 v19 删除）：这正是"实体改名不得
+// 跟随进历史迁移步"的另一面——夹具也不许依赖今天的 API，否则历史步骤一被重写就没人发现。
+func TestMigrateV8ToLatestKeepsDataAndDropsAgents(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "v8.db")
 	db, err := dbclient.Open(path)
@@ -350,78 +359,52 @@ func TestMigrateV8ToV9AddsAgents(t *testing.T) {
 	s := New(db)
 	defer func() { _ = s.Close() }()
 
-	// 造一个**真实的 v8 库**并写一行 skill 定义 + 一条审计（历史表名，见 insertLegacyDefinition）。
-	applySchemaUpTo(t, s, 8)
-	insertLegacyDefinition(t, s, "skills", "skill", "sk-old", `{"name":"v8 存量"}`)
+	// 造一个**真实的 v9 库**（`applySchemaUpTo` 只重放 v1..v9 的 DDL 并记版本，v10 起的
+	// statements + Go 数据迁移由下面的 `Migrate` 真实跑完）。写一行 v9 的 skill 定义 + 审计，
+	// 再写一行 agent 定义 + 审计与两个 meta 键——这些就是 v19 要撤掉的东西，夹具必须带真数据。
+	//
+	// 顺带钉住"v9 那一步的 DDL 是冻结的历史"：真删掉 v9 的建表语句，下面这行写 agent 定义
+	// 会直接报 `no such table: agents`。
+	applySchemaUpTo(t, s, 9)
+	insertLegacyDefinition(t, s, "skills", "skill", "sk-old", `{"name":"v9 存量"}`)
+	insertLegacyDefinition(t, s, "agents", "agent", "ag-legacy", `{"id":"ag-legacy","name":"v9 存量"}`)
+	if err := s.db.Exec(`INSERT INTO meta (key, value) VALUES ('default_agent', 'ag-legacy'), ('imported_agents', 'stale')`).Error; err != nil {
+		t.Fatalf("写历史 meta 键: %v", err)
+	}
 
 	if err := s.Migrate(ctx); err != nil {
-		t.Fatalf("v8 → v9 升级失败: %v", err)
+		t.Fatalf("v10 → 最新 升级失败: %v", err)
 	}
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("重复迁移应幂等: %v", err)
 	}
 
-	// ① v8 的行与审计原样还在。
+	// ① v8 的行与审计原样还在（v19 只动 agent 那一类，别的定义一行不碰）。
 	sk, found, err := s.GetSkillDefinition(ctx, "sk-old")
-	if err != nil || !found || sk.Body != `{"name":"v8 存量"}` || sk.Revision != 1 {
-		t.Fatalf("升级后 v8 skill 行失真: found=%v err=%v row=%+v", found, err, sk)
+	if err != nil || !found || sk.Body != `{"name":"v9 存量"}` || sk.Revision != 1 {
+		t.Fatalf("升级后 v9 的 skill 行失真: found=%v err=%v row=%+v", found, err, sk)
 	}
 	if revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindSkill, "sk-old"); err != nil || len(revs) != 1 {
-		t.Fatalf("升级后 v8 审计应保留: n=%d err=%v", len(revs), err)
+		t.Fatalf("升级后 v9 的审计应保留: n=%d err=%v", len(revs), err)
 	}
 
-	// ② agents 表建出来了且**从空开始**（种子不落行；存量定义等导入器）。
-	if n, err := s.CountAgentDefinitions(ctx); err != nil || n != 0 {
-		t.Fatalf("升级后 agents 应为空: n=%d err=%v", n, err)
+	// ② v19 的撤除：表没了、agent 那类审计行没了、meta 的两个键清了。
+	count := func(sql, what string) int64 {
+		t.Helper()
+		var got int64
+		if err := s.db.Raw(sql).Row().Scan(&got); err != nil {
+			t.Fatalf("查 %s: %v", what, err)
+		}
+		return got
 	}
-	if _, ok, err := s.GetDefaultAgentID(ctx); err != nil || ok {
-		t.Fatalf("升级后 default_agent 应未设置: ok=%v err=%v", ok, err)
+	if n := count(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='agents'`, "agents 表"); n != 0 {
+		t.Fatalf("最终形态不该还有 agents 表: n=%d", n)
 	}
-
-	// ③ agent 写路径真的落到新表上（行 + 审计，且审计 seq 从 v8 的那条之后继续）。
-	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent","name":"升级后新建"}`, 0, "rest"); err != nil || !ok {
-		t.Fatalf("升级后写 agent 定义: ok=%v err=%v", ok, err)
+	if n := count(`SELECT count(*) FROM definition_revisions WHERE kind = 'agent'`, "agent 审计行"); n != 0 {
+		t.Fatalf("agent 审计行必须随 v19 删除（否则库里留着已撤概念的审计）: n=%d", n)
 	}
-	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent","name":"改名"}`, 1, "rest"); err != nil || !ok {
-		t.Fatalf("升级后覆盖写 agent 定义: ok=%v err=%v", ok, err)
-	}
-	// CAS 没中 → 行与审计都不变（与能力面同一条不变量）。
-	if ok, err := s.UpsertAgentDefinition(ctx, "my-agent", `{"id":"my-agent"}`, 1, "rest"); err != nil || ok {
-		t.Fatalf("过期 revision 应被拒: ok=%v err=%v", ok, err)
-	}
-	ag, found, err := s.GetAgentDefinition(ctx, "my-agent")
-	if err != nil || !found || ag.Revision != 2 || ag.Body != `{"id":"my-agent","name":"改名"}` {
-		t.Fatalf("agent 行不符: found=%v err=%v row=%+v", found, err, ag)
-	}
-	revs, err := s.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "my-agent")
-	if err != nil || len(revs) != 2 || revs[0].Action != "create" || revs[1].Action != "update" {
-		t.Fatalf("agent 审计不符: %+v err=%v", revs, err)
-	}
-
-	// ④ 「当前 Agent」落 meta，且能被清除（被删 agent 的连带清理）。
-	if err := s.SetDefaultAgentID(ctx, "my-agent"); err != nil {
-		t.Fatal(err)
-	}
-	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "my-agent" {
-		t.Fatalf("读 default_agent: id=%q ok=%v err=%v", id, ok, err)
-	}
-	if err := s.ClearDefaultAgentID(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, err := s.GetDefaultAgentID(ctx); err != nil || ok {
-		t.Fatalf("清除后应报未设置: ok=%v err=%v", ok, err)
-	}
-
-	// ⑤ 删除也留痕（审计在行消失后仍可查）。
-	if ok, err := s.DeleteAgentDefinition(ctx, "my-agent", 2, "rest"); err != nil || !ok {
-		t.Fatalf("删 agent 行: ok=%v err=%v", ok, err)
-	}
-	if _, found, _ := s.GetAgentDefinition(ctx, "my-agent"); found {
-		t.Fatal("删除后不该还读到行")
-	}
-	revs, err = s.ListDefinitionRevisions(ctx, model.DefinitionKindAgent, "my-agent")
-	if err != nil || len(revs) != 3 || revs[2].Action != "delete" || revs[2].Digest != "" {
-		t.Fatalf("删除审计不符（删定义也留痕且 digest 为空）: %+v err=%v", revs, err)
+	if n := count(`SELECT count(*) FROM meta WHERE key IN ('default_agent','imported_agents')`, "agent meta 键"); n != 0 {
+		t.Fatalf("两个 agent meta 键必须随 v19 清掉: n=%d", n)
 	}
 }
 
@@ -450,10 +433,9 @@ func TestMigrateV9ToV10AddsAutomations(t *testing.T) {
 		t.Fatalf("重复迁移应幂等: %v", err)
 	}
 
-	// ① v9 的行原样还在。
-	if ag, found, err := s.GetAgentDefinition(ctx, "ag-old"); err != nil || !found || ag.Revision != 1 {
-		t.Fatalf("升级后 v9 agent 行失真: found=%v err=%v row=%+v", found, err, ag)
-	}
+	// ① v9 的存量行**不得让升级中断**（历史夹具就是要带一行真数据走完整条链），但它本身在
+	// 最终形态里必须不存在：agents 表被 v19 整表删掉。历史步骤与 v19 的撤除分别由
+	// TestMigrateV8ToLatestKeepsDataAndDropsAgents 钉住。
 	// ② automations 从空开始。
 	if n, err := s.CountAutomationDefinitions(ctx); err != nil || n != 0 {
 		t.Fatalf("升级后 automations 应为空: n=%d err=%v", n, err)
@@ -533,10 +515,7 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 		t.Fatalf("重复迁移应幂等: %v", err)
 	}
 
-	// ① v10 的行原样还在。
-	if ag, found, err := s.GetAgentDefinition(ctx, "ag-old"); err != nil || !found || ag.Revision != 1 {
-		t.Fatalf("升级后 v10 agent 行失真: found=%v err=%v row=%+v", found, err, ag)
-	}
+	// ① v10 的存量行同上：只需不中断升级，最终形态里 agents 表已不存在（见 v8 那条用例）。
 	// ② 两张新表从空开始。
 	if n, err := s.CountProviderDefinitions(ctx); err != nil || n != 0 {
 		t.Fatalf("升级后 providers 应为空: n=%d err=%v", n, err)
@@ -578,5 +557,190 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 	if err := s.db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_models_provider_model'`).
 		Row().Scan(&idx); err != nil || idx != 1 {
 		t.Fatalf("v12 应建唯一索引 idx_models_provider_model: n=%d err=%v", idx, err)
+	}
+}
+
+// TestMigrationBackupLayoutV19 钉 v19 的备份布局：新备份落 `<db 目录>/backups/`，而**老布局的
+// 备份照旧被当成有效退路列出来**（新的在前）。
+//
+// 两侧都要钉，因为两种失效方式都是静默的：
+//
+//	只钉新位置  —— 有人把老备份从扫描里删掉（"根下不该有东西"），于是本机明明有回退窗口，
+//	               `mate doctor` 报"回退窗口已关闭"（假红，且会把用户推向不必要的重设）
+//	只钉老位置  —— 新备份又落回根下，7 个文件重新堆起来（本次要消灭的形态）
+func TestMigrationBackupLayoutV19(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "mate.db")
+	db, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开库: %v", err)
+	}
+	s := New(db)
+	s.path = path
+	defer func() { _ = s.Close() }()
+
+	// 先落一次写：库文件是**惰性创建**的（`dbclient.Open` 只建句柄），而备份要的是"能回退的那个
+	// 库文件"——空库没有可回退的东西，`backupBeforeMigration` 会如实跳过（见它的注释）。
+	if err := s.db.Exec(`CREATE TABLE IF NOT EXISTS backup_probe (k TEXT)`).Error; err != nil {
+		t.Fatalf("造出库文件: %v", err)
+	}
+
+	// 老布局遗留：与库文件同级（v19 之前的形态），它**必须**仍被发现。
+	legacy := path + ".bak-v12-20260101T000000Z"
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// ① 新备份落 backups/ 子目录（文件名保持 `<db 文件名>.bak-<tag>-<ts>`，恢复说明不用换形状）。
+	got, err := s.backupBeforeMigration(migration{version: 99, name: "布局用例", backup: "v99"})
+	if err != nil {
+		t.Fatalf("备份失败: %v", err)
+	}
+	wantDir := filepath.Join(home, backupDirName)
+	if filepath.Dir(got) != wantDir {
+		t.Fatalf("新备份应落在 %s，实际 %s", wantDir, got)
+	}
+	if filepath.Base(got) == filepath.Base(path) {
+		t.Fatalf("备份文件名不该与库文件同名: %s", got)
+	}
+	// 判据是"能打开的库快照 + 完整性通过"，**不是**与库文件逐字节相同：快照由 SQLite 自己产出
+	// （`VACUUM INTO`），会并入 `-wal` 里已提交的内容并整理页——逐字节相同这条判据恰好会奖励
+	// 那个错误的实现（拷文件），见 TestMigrationBackupIncludesUncheckpointedWAL。
+	assertOpenableSnapshot(t, got)
+
+	// ② 两个布局一起列，且**新的在前**（按文件名倒序：tag 与时间戳都在文件名里）。
+	all := s.MigrationBackupPaths()
+	if len(all) != 2 {
+		t.Fatalf("应同时列出新老布局各一份: %v", all)
+	}
+	if all[0] != got || all[1] != legacy {
+		t.Fatalf("最新的应排最前（新布局 v99 > 老布局 v12）: %v", all)
+	}
+
+	// ③ 遗留清单只含老布局那一份（doctor 用它报"根下还有 N 个"）。
+	le := s.MigrationBackupPathsLegacy()
+	if len(le) != 1 || le[0] != legacy {
+		t.Fatalf("遗留清单应只含老布局备份: %v", le)
+	}
+
+	// ④ 扫描**只读**：遗留文件仍原样在盘上（医生不搬不移）。
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("遗留备份不得被搬移或删除: %v", err)
+	}
+}
+
+// readAllOrFail 读一个测试夹具文件（失败即 fatal）。
+func readAllOrFail(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("读 %s: %v", p, err)
+	}
+	return b
+}
+
+// assertOpenableSnapshot 断言某个备份**确实是一个可用的库文件**（能打开、完整性通过）。
+func assertOpenableSnapshot(t *testing.T, path string) {
+	t.Helper()
+	db, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("备份必须是一个能打开的库文件: %v", err)
+	}
+	sqlDB, derr := db.DB()
+	if derr != nil {
+		t.Fatalf("取底层句柄: %v", derr)
+	}
+	defer func() { _ = sqlDB.Close() }()
+	var check string
+	if err := db.Raw(`PRAGMA integrity_check`).Row().Scan(&check); err != nil {
+		t.Fatalf("备份完整性检查查询失败: %v", err)
+	}
+	if check != "ok" {
+		t.Fatalf("备份完整性检查未通过: %q", check)
+	}
+}
+
+// 迁移备份必须含 `-wal` 里**已提交但未 checkpoint** 的行。
+//
+// 这条用例钉的是"为什么备份不能拷文件"：`journal_mode` 是库的持久属性，本机用户库头部就是 WAL
+// （平台自己开的新库是 `delete`，见 pkg/dbclient），WAL 下已提交的事务先落 `-wal`。纯拷主文件
+// 会静默漏掉它们（反向断言就在本用例里：同一时刻的主文件副本查不到那一行），而文件名写着
+// `bak-v19-<ts>`——回退窗口在真正需要它的那天才发现是缺的。修复 = 用 `VACUUM INTO` 取快照。
+func TestMigrationBackupIncludesUncheckpointedWAL(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "mate.db")
+
+	// 连接 A：先在建库默认模式下落一行（它进主文件），再切 WAL 提交第二行（它只进 `-wal`）。
+	// **保持打开**：一关就会 checkpoint，`-wal` 被清掉，这条用例就测不到东西了。
+	writer, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开写连接: %v", err)
+	}
+	wsql, werr := writer.DB()
+	if werr != nil {
+		t.Fatalf("取写连接句柄: %v", werr)
+	}
+	defer func() { _ = wsql.Close() }()
+	if err := writer.Exec(`CREATE TABLE IF NOT EXISTS probe (k TEXT)`).Error; err != nil {
+		t.Fatalf("建表: %v", err)
+	}
+	if err := writer.Exec(`INSERT INTO probe (k) VALUES ('before-wal')`).Error; err != nil {
+		t.Fatalf("写入切换前的行: %v", err)
+	}
+	if err := writer.Exec(`PRAGMA journal_mode=WAL`).Error; err != nil {
+		t.Fatalf("切 WAL: %v", err)
+	}
+	if err := writer.Exec(`INSERT INTO probe (k) VALUES ('in-wal')`).Error; err != nil {
+		t.Fatalf("写入 WAL 里的行: %v", err)
+	}
+	if _, err := os.Stat(path + "-wal"); err != nil {
+		t.Fatalf("前置条件不成立（应当有 -wal 文件）: %v", err)
+	}
+
+	// 连接 B（store 自己那条）产快照。
+	reader, err := dbclient.Open(path)
+	if err != nil {
+		t.Fatalf("开读连接: %v", err)
+	}
+	s := New(reader)
+	s.path = path
+	defer func() { _ = s.Close() }()
+	got, err := s.backupBeforeMigration(migration{version: 99, name: "WAL 快照用例", backup: "v99"})
+	if err != nil {
+		t.Fatalf("产快照失败: %v", err)
+	}
+	assertOpenableSnapshot(t, got)
+
+	db, err := dbclient.Open(got)
+	if err != nil {
+		t.Fatalf("开快照: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	defer func() { _ = sqlDB.Close() }()
+	var inWAL int64
+	if err := db.Raw(`SELECT count(*) FROM probe WHERE k = 'in-wal'`).Scan(&inWAL).Error; err != nil {
+		t.Fatalf("查快照: %v", err)
+	}
+	if inWAL != 1 {
+		t.Fatalf("快照必须含 -wal 里已提交的那一行，实际 count=%d（旧实现拷主文件时这里就是 0）", inWAL)
+	}
+
+	// 反向断言：同一时刻的**主文件副本**确实缺那一行——这正是被替换掉的实现，写在这里当判据的理由。
+	plain := filepath.Join(home, "plain-copy.db")
+	if err := os.WriteFile(plain, readAllOrFail(t, path), 0o600); err != nil {
+		t.Fatalf("造主文件副本: %v", err)
+	}
+	pdb, err := dbclient.Open(plain)
+	if err != nil {
+		t.Fatalf("开主文件副本: %v", err)
+	}
+	psql, _ := pdb.DB()
+	defer func() { _ = psql.Close() }()
+	var plainRows int64
+	if err := pdb.Raw(`SELECT count(*) FROM probe WHERE k = 'in-wal'`).Scan(&plainRows).Error; err != nil {
+		t.Fatalf("查主文件副本: %v", err)
+	}
+	if plainRows != 0 {
+		t.Fatalf("反向断言不成立：主文件副本本不该含 WAL 里的行，实际 count=%d（前提变了，请重审这条用例）", plainRows)
 	}
 }

@@ -78,7 +78,6 @@ func migrate(args []string) {
 		items = append(items, store.ImportItem{
 			Session: model.SessionEntity{
 				ID:        data.SessionID,
-				AgentID:   data.AgentID,
 				RuntimeID: data.RuntimeID,
 				Title:     data.Title,
 				Status:    data.Status,

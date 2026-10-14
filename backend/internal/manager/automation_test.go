@@ -55,7 +55,7 @@ func dailyPatch(id, hour string) map[string]any {
 			"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0,
 		},
 		"target": map[string]any{
-			"agent_id": "a1", "cwd": "/tmp/ws", "prompt": "跑一遍依赖巡检",
+			"cwd": "/tmp/ws", "prompt": "跑一遍依赖巡检",
 		},
 	}
 }
@@ -93,7 +93,7 @@ func TestAutomationCreateUpdateDelete(t *testing.T) {
 	}
 	got := readDef(t, path)
 	if got["name"] != "改名了" || got["schedule"].(map[string]any)["hour"].(float64) != 9 ||
-		got["target"].(map[string]any)["agent_id"] != "a1" {
+		got["target"].(map[string]any)["cwd"] != "/tmp/ws" {
 		t.Fatalf("局部更新应保留未提及的键: %+v", got)
 	}
 
@@ -134,22 +134,22 @@ func TestAutomationValidationZeroBytes(t *testing.T) {
 		{"时区未知", map[string]any{
 			"id": "bad", "enabled": true,
 			"schedule": map[string]any{"kind": "daily", "timezone": "Mars/Olympus", "hour": 9, "minute": 0},
-			"target":   map[string]any{"agent_id": "a1", "prompt": "x"},
+			"target":   map[string]any{"prompt": "x"},
 		}, "invalid_timezone"},
 		{"缺 target.prompt", map[string]any{
 			"id": "bad", "enabled": true,
 			"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-			"target":   map[string]any{"agent_id": "a1"},
+			"target":   map[string]any{"cwd": "/tmp"},
 		}, "invalid_param"},
 		{"duration 超上限", map[string]any{
 			"id": "bad", "enabled": true, "max_run_duration": "90m",
 			"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-			"target":   map[string]any{"agent_id": "a1", "prompt": "x"},
+			"target":   map[string]any{"prompt": "x"},
 		}, "invalid_param"},
 		{"路径 id 与 body id 不一致", map[string]any{
 			"id": "other", "enabled": true,
 			"schedule": map[string]any{"kind": "daily", "timezone": "UTC", "hour": 9, "minute": 0},
-			"target":   map[string]any{"agent_id": "a1", "prompt": "x"},
+			"target":   map[string]any{"prompt": "x"},
 		}, "invalid_param"},
 	}
 	for _, c := range cases {
@@ -178,7 +178,7 @@ func TestAutomationPreservesUnknownKeys(t *testing.T) {
 	writeAutomationFile(t, path, `{
 	  "id": "daily", "name": "巡检", "enabled": true,
 	  "schedule": {"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target": {"agent_id":"a1","cwd":"/tmp/ws","prompt":"跑一遍"},
+	  "target": {"cwd":"/tmp/ws","prompt":"跑一遍"},
 	  "_comment": "这是我手写的备注，平台不许动",
 	  "owner_team": "infra"
 	}`)
@@ -266,18 +266,18 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	writeAutomationFile(t, filepath.Join(dir, "ok.json"), `{
 	  "id":"ok","name":"好定义","enabled":true,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"agent_id":"a1","cwd":"/tmp/ws","prompt":"跑"}
+	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
 	}`)
 	writeAutomationFile(t, filepath.Join(dir, "broken.json"), `{not json`)
 	writeAutomationFile(t, filepath.Join(dir, "mismatch.json"), `{
 	  "id":"other","enabled":true,
 	  "schedule":{"kind":"daily","timezone":"UTC","hour":9,"minute":0},
-	  "target":{"agent_id":"a1","prompt":"跑"}
+	  "target":{"prompt":"跑"}
 	}`)
 	writeAutomationFile(t, filepath.Join(dir, "disabled.json"), `{
 	  "id":"disabled","name":"关着的","enabled":false,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"agent_id":"a1","cwd":"/tmp/ws","prompt":"跑"}
+	  "target":{"cwd":"/tmp/ws","prompt":"跑"}
 	}`)
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	if n := svc.LoadAutomationDefinitions(dir); n != 2 {
@@ -316,20 +316,20 @@ func TestAutomationDueSnapshot(t *testing.T) {
 	// a1：昨天 09:00 跑过 → 现在已到期（recover）
 	mk("a1", `{"id":"a1","enabled":true,
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"agent_id":"ag","cwd":"/tmp","prompt":"p"},
+	  "target":{"cwd":"/tmp","prompt":"p"},
 	  "last_fired_at":"2020-01-01T01:00:00Z"}`)
 	// b2：未到期（未来的一次 once）
 	mk("b2", `{"id":"b2","enabled":true,
 	  "schedule":{"kind":"once","timezone":"UTC","at":"2099-01-01T00:00:00Z"},
-	  "target":{"agent_id":"ag","cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p"}}`)
 	// c3：归档 → 不参与
 	mk("c3", `{"id":"c3","enabled":true,"state":"archived",
 	  "schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},
-	  "target":{"agent_id":"ag","cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p"}}`)
 	// d4：once 已过期且从未跑 → expire（nextDue 为零，不排进 due）
 	mk("d4", `{"id":"d4","enabled":true,
 	  "schedule":{"kind":"once","timezone":"UTC","at":"2020-01-01T00:00:00Z"},
-	  "target":{"agent_id":"ag","cwd":"/tmp","prompt":"p"}}`)
+	  "target":{"cwd":"/tmp","prompt":"p"}}`)
 	if n := svc.LoadAutomationDefinitions(dir); n != 4 {
 		t.Fatalf("装载应为 4，got %d", n)
 	}
@@ -371,7 +371,7 @@ func TestAutomationCreateWritesNormalizedSchedule(t *testing.T) {
 			"kind": "weekly", "timezone": "UTC", "hour": 9, "minute": 0,
 			"days_of_week": []any{3, 1, 3, 0},
 		},
-		"target": map[string]any{"agent_id": "a1", "cwd": "/tmp", "prompt": "p"},
+		"target": map[string]any{"cwd": "/tmp", "prompt": "p"},
 	}, true); err != nil {
 		t.Fatalf("新建: %v", err)
 	}

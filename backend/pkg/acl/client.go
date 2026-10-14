@@ -139,20 +139,22 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 	}
 	caps := capabilityFromAgent(initResp.AgentCapabilities, initResp.AuthMethods)
 	// M0 鉴权收敛：仅支持 agent 自托管方式（agent 自行完成登录，methodId 取自
+	// ACP 的 `agent` 指**底座进程**，不是 ark-mate 的 agent 概念——v19 撤掉的是后者，
+	// 这个文件里的 `agent` 是别人的原文，照写；只有**我们自己起的**局部变量名不沿用该词
 	// AuthMethodAgent.Id）。其余方式（env_var/terminal）返回 access/auth_required，
 	// M3 起补完整 Authenticate 流程。
 	if len(initResp.AuthMethods) > 0 {
-		var agentIDs []string
+		var selfHostedIDs []string
 		for _, m := range initResp.AuthMethods {
 			if m.Agent != nil {
 				id := m.Agent.Id
 				if id == "" {
 					id = "agent"
 				}
-				agentIDs = append(agentIDs, id)
+				selfHostedIDs = append(selfHostedIDs, id)
 			}
 		}
-		if len(agentIDs) == 0 {
+		if len(selfHostedIDs) == 0 {
 			tail := snapshotStderr(t)
 			_ = t.Close()
 			ae := NewError(ClassAccess, "auth_required",
@@ -160,7 +162,7 @@ func Dial(ctx context.Context, t Transport, opts ClientOptions) (*Client, error)
 			ae.StderrTail = tail
 			return nil, ae
 		}
-		if _, err := conn.Authenticate(dctx, acpsdk.AuthenticateRequest{MethodId: agentIDs[0]}); err != nil {
+		if _, err := conn.Authenticate(dctx, acpsdk.AuthenticateRequest{MethodId: selfHostedIDs[0]}); err != nil {
 			tail := snapshotStderr(t)
 			_ = t.Close()
 			if errors.Is(dctx.Err(), context.DeadlineExceeded) {

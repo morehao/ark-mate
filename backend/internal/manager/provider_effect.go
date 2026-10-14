@@ -1,8 +1,8 @@
 package manager
 
 import (
+	"context"
 	"fmt"
-	"sort"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
@@ -31,13 +31,18 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 	// 两处各写一遍迟早漂移，而漂移的表现是"回执说的通道与真实交付不一致"。
 	delivery, _ := objdelivery.For(objdelivery.KindProvider)
 	eff := &dtoprovider.ProviderEffect{
-		Channel:         delivery.Channel,
-		Effect:          delivery.Effect,
-		AppliesToAgents: []string{},
+		Channel: delivery.Channel,
+		Effect:  delivery.Effect,
 	}
 
-	// 受影响 agent：声明了这条凭据的那些（与 GET /providers 的 refs.agents 同一判据）。
-	agentSet := map[string]bool{}
+	// 受影响面：v19 起一条供应商"在不在环上"只由它有没有模型条目挂靠决定（agent 面撤销后
+	// 没有"某个 agent 选了它"这回事）；不在环上，下发给底座的声明里就没有它，改了什么都不会发生。
+	if len(s.providerModelRefsReadOnly(context.Background(), providerID)) == 0 {
+		eff.Note = "当前没有模型条目挂靠在这条供应商上：改动不会下发给底座（先在「设置 · 模型」里让它承载模型条目）"
+		return eff
+	}
+
+	// 在环上 → 这份声明变了，本机所有会话下一条命轮都会按新声明重开连接（逐会话判是否顺延）。
 	s.mu.Lock()
 	recs := make([]SessionRec, 0, len(s.sessions))
 	for _, rec := range s.sessions {
@@ -49,11 +54,6 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 
 	for i := range recs {
 		rec := &recs[i]
-		agent, ok := s.AgentByID(rec.AgentID)
-		if !ok || agent.Provider != providerID {
-			continue
-		}
-		agentSet[agent.ID] = true
 		eff.AffectedSessions++
 		// 同源判据：有在途轮次 / 有未应答权限或提问 → 顺延到再下一轮。
 		// 没有活句柄的会话不算顺延——它下一次 prompt 本来就会按当前配置重开（拿到新密钥）。
@@ -65,14 +65,10 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 			eff.Deferred++
 		}
 	}
-	for id := range agentSet {
-		eff.AppliesToAgents = append(eff.AppliesToAgents, id)
-	}
-	sort.Strings(eff.AppliesToAgents)
 
 	switch {
 	case eff.AffectedSessions == 0:
-		eff.Note = "当前没有会话引用这条凭据：改动会在下一次使用它的会话里生效"
+		eff.Note = "当前没有会话：改动会在下一次建会话时生效"
 	case eff.Deferred > 0:
 		eff.Note = fmt.Sprintf("有 %d 条会话当前有在途轮次或有未应答权限/提问，将顺延到再下一轮；本轮行为不变",
 			eff.Deferred)

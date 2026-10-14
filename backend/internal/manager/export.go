@@ -71,7 +71,7 @@ func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (
 		resp.Files = append(resp.Files, dtoexport.ExportFile{
 			SessionID: id,
 			Title:     meta.title,
-			AgentID:   meta.agentID,
+			RuntimeID: meta.runtimeID,
 			Status:    meta.status,
 			Filename:  exportFilename(id, meta.title, format),
 			Format:    format,
@@ -88,8 +88,8 @@ func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (
 
 // exportMeta 导出用会话元数据（sqlite 走库，memory 走内存镜像）。
 type exportMeta struct {
-	id, title, agentID, status string
-	created, updated           time.Time
+	id, title, runtimeID, status string
+	created, updated             time.Time
 }
 
 func (s *Service) sessionMeta(id string) (exportMeta, bool) {
@@ -98,7 +98,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 		if err != nil || !ok {
 			return exportMeta{}, false
 		}
-		return exportMeta{id: c.ID, title: c.Title, agentID: c.AgentID, status: c.Status,
+		return exportMeta{id: c.ID, title: c.Title, runtimeID: c.RuntimeID, status: c.Status,
 			created: c.CreatedAt, updated: c.UpdatedAt}, true
 	}
 	s.mu.Lock()
@@ -107,7 +107,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 	if !ok {
 		return exportMeta{}, false
 	}
-	return exportMeta{id: r.ID, title: r.Title, agentID: r.AgentID, status: r.Status,
+	return exportMeta{id: r.ID, title: r.Title, runtimeID: r.RuntimeID, status: r.Status,
 		created: r.CreatedAt, updated: r.UpdatedAt}, true
 }
 
@@ -182,7 +182,7 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 	if format == "json" {
 		doc := map[string]any{
 			"session": map[string]any{
-				"id": meta.id, "title": meta.title, "agent_id": meta.agentID, "status": meta.status,
+				"id": meta.id, "title": meta.title, "runtime_id": meta.runtimeID, "status": meta.status,
 				"created_at": meta.created.UTC().Format(time.RFC3339),
 				"updated_at": meta.updated.UTC().Format(time.RFC3339),
 			},
@@ -203,12 +203,12 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 	}
 	if md {
 		fmt.Fprintf(&b, "# %s\n\n", title)
-		fmt.Fprintf(&b, "- 会话：`%s`\n- Agent：`%s`\n- 状态：`%s`\n- 创建：%s\n- 更新：%s\n- 事件数：%d\n\n---\n\n",
-			meta.id, meta.agentID, meta.status,
+		fmt.Fprintf(&b, "- 会话：`%s`\n- 底座：`%s`\n- 状态：`%s`\n- 创建：%s\n- 更新：%s\n- 事件数：%d\n\n---\n\n",
+			meta.id, meta.runtimeID, meta.status,
 			meta.created.UTC().Format(time.RFC3339), meta.updated.UTC().Format(time.RFC3339), len(events))
 	} else {
-		fmt.Fprintf(&b, "%s\n会话: %s\nAgent: %s\n状态: %s\n创建: %s\n更新: %s\n事件数: %d\n%s\n\n",
-			title, meta.id, meta.agentID, meta.status,
+		fmt.Fprintf(&b, "%s\n会话: %s\n底座: %s\n状态: %s\n创建: %s\n更新: %s\n事件数: %d\n%s\n\n",
+			title, meta.id, meta.runtimeID, meta.status,
 			meta.created.UTC().Format(time.RFC3339), meta.updated.UTC().Format(time.RFC3339), len(events),
 			strings.Repeat("-", 60))
 	}

@@ -7,7 +7,6 @@ package ctrmodel
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/service/svcagent"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
@@ -25,29 +24,24 @@ type ModelCtr interface {
 
 var _ ModelCtr = (*modelCtr)(nil)
 
-// ModelsHandler 处理模型目录 REST（GET /models?agent=<id>）。
-// 同时依赖两个端口：模型目录来自底座面（svcruntime），而"未指定 agent 时取哪个"
-// 属于 Agent 管理面的知识（svcagent.DefaultAgentID）——窄接口让这层依赖显式可见。
+// modelCtr 处理模型目录 REST（GET /models）。
+//
+// 只依赖一个端口（svcruntime）：底座由构建期固定（v19），"问哪个底座"不再是一个参数。
 type modelCtr struct {
-	svc      svcruntime.RuntimeSvc
-	agentSvc svcagent.AgentSvc
+	svc svcruntime.RuntimeSvc
 }
 
 // NewModelCtr 构造 ModelCtr。
-func NewModelCtr(svc svcruntime.RuntimeSvc, agentSvc svcagent.AgentSvc) ModelCtr {
-	return &modelCtr{svc: svc, agentSvc: agentSvc}
+func NewModelCtr(svc svcruntime.RuntimeSvc) ModelCtr {
+	return &modelCtr{svc: svc}
 }
 
 // List 返回模型读面：**平台清单 + 聚合生效结论 + 逐 runtime 机器面明细（sync[]）**。
 //
-// 参数：`?runtime=<id>`（只看那一个 runtime 的机器面明细）、`?agent=<id>`（缺省当前 Agent）、
+// 参数：`?runtime=<id>`（只看那一个 runtime 的机器面明细）、
 // `?refresh=1`（保留参数以兼容既有调用；读面本身**无副作用**，不重跑同步）。
 func (h *modelCtr) List(c *gin.Context) {
-	agentID := c.Query("agent")
-	if agentID == "" {
-		agentID = h.agentSvc.DefaultAgentID()
-	}
-	resp, err := h.svc.ModelsView(c.Request.Context(), c.Query("runtime"), agentID, c.Query("refresh") == "1")
+	resp, err := h.svc.ModelsView(c.Request.Context(), c.Query("runtime"), c.Query("refresh") == "1")
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -55,17 +49,13 @@ func (h *modelCtr) List(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
-// Catalog 返回某 agent 的**运行时派生**模型目录（会话级模型选择器的数据来源）。
+// Catalog 返回**运行时派生**的模型目录（会话级模型选择器的数据来源）。
 //
 // 它与 `List`（平台声明）刻意分开：这里返回的 `options[].values[].value` 是底座的
 // **不透明串**，必须原样回传（形态由各 adapter 自己声明，见 `pkg/runtime/model_value.go`：
 // dsh 是 `JSON.stringify([provider,model])`，别的底座可能是 `provider/model`），前端不得解析或拼接。
 func (h *modelCtr) Catalog(c *gin.Context) {
-	agentID := c.Query("agent")
-	if agentID == "" {
-		agentID = h.agentSvc.DefaultAgentID()
-	}
-	resp, err := h.svc.ModelCatalog(c.Request.Context(), agentID)
+	resp, err := h.svc.ModelCatalog(c.Request.Context())
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

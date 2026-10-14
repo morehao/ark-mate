@@ -2,11 +2,7 @@ import { type CSSProperties, type ReactNode, type Dispatch, type SetStateAction 
 import { Alert, Button, Input, Modal, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import type { AgentSkill } from '@ark-mate/types'
-import {
-  skillActivationView,
-  skillRuntimesView,
-} from '../../console/capabilityView'
+import { skillRuntimesView } from '../../console/capabilityView'
 
 /** 定义编辑器的状态（hook 与面板共用的类型）。 */
 export interface CapabilityEditState { kind: 'skill' | 'mcp'; id: string; text: string; created: boolean }
@@ -82,38 +78,10 @@ export function Row({ children }: { children: ReactNode }) {
 /** 行内小标签统一样式（新增代码用；既有行内样式保持不动，避免无关联改动）。 */
 export const smallTag: CSSProperties = { marginInlineEnd: 0, fontSize: 10.5 }
 
-/**
- * Agent 视角 skill 的投放标签（§13.4 S5：启用 ⟂ 适用，二者正交）。
- *
- * 「已禁用」是平台侧状态（可恢复），「不适用」是这个 Agent 用不上（原因给成人话，不做静默），
- * 两者可能同时成立——所以是并列标签而不是二选一。
- */
-export function SkillActivationTags({ skill }: { skill: AgentSkill }) {
-  const a = skillActivationView(skill)
-  return (
-    <>
-      {!a.enabled && (
-        <Tooltip title="已在平台侧禁用（定义与正文保留，可随时恢复）">
-          <Tag color="default" style={smallTag}>
-            已禁用
-          </Tag>
-        </Tooltip>
-      )}
-      {!a.applicable && (
-        <Tooltip title={a.reasons.length > 0 ? a.reasons.join('；') : '该 Agent 的候选底座用不上这个 skill'}>
-          <Tag color="orange" style={smallTag}>
-            不适用
-          </Tag>
-        </Tooltip>
-      )}
-      {a.enabled && a.applicable && (
-        <Tag color="green" style={smallTag}>
-          可用
-        </Tag>
-      )}
-    </>
-  )
-}
+// v19：这里原来有 `SkillActivationTags`（「已禁用 / 不适用 / 可用」三个并列标签），
+// 输入是 agent 视角的 `AgentSkill`。那张视角没了，而这层语义在 `/library` 的行里本来就有
+// （`enabled` 出「已禁用」，逐 runtime 的 applicability 出「可用/未实测/未配置/不适用/已禁用」
+// 且原因进 tooltip），所以直接删掉而不是换个输入再抄一遍。
 
 /**
  * 投放对象标签（M1：取代旧的 `runtime·format` 标签）。
@@ -231,7 +199,7 @@ export function CapabilityEditorModal({
             {edit?.kind === 'mcp' && !edit.created && (
               <>
                 MCP 的明文 env 与密钥引用**后端从不读回**（界面只知道键名），所以这里不预填——
-                不动它们就别写，写了就会覆盖。密钥引用写成 <code>vault:路径</code> 或 <code>env:变量名</code>。
+                不动它们就别写，写了就会覆盖。密钥引用写成 <code>store:路径</code>（值在库的 <code>mcp_secrets</code> 里）或 <code>env:变量名</code>。
                 <br />
               </>
             )}

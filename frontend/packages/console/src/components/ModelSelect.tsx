@@ -69,8 +69,8 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
 /**
  * 模型选择器（会话级模型：值取自运行时目录，经 session/set_config_option 应用）。
  *
- *  - 全部候选来自运行时（agent 自报的 config option），平台不内置任何清单；
- *  - 按 agent 下发的分组（values[].group/group_name）分组展示，未分组则扁平；
+ *  - 全部候选来自运行时（底座自报的 config option），平台不内置任何清单；
+ *  - 按底座下发的分组（values[].group/group_name）分组展示，未分组则扁平；
  *  - value 是不透明串：只展示 name，绝不解析内部结构；
  *  - null = 跟随运行时默认；allowClear 可清回默认；
  *  - **关闭态只显示名称**：antd 把 option.label 原样渲染进选择器，若把描述塞进 label，
@@ -90,7 +90,7 @@ export function ModelSelect({
   defaultLabel = '跟随默认',
   emptyNote,
 }: ModelSelectProps) {
-  // 分组键：agent 未下发分组时统一落到空串组（antd 的 options 平铺 + OptGroup 混用需分开处理）。
+  // 分组键：底座未下发分组时统一落到空串组（antd 的 options 平铺 + OptGroup 混用需分开处理）。
   const groups = new Map<string, { name: string; items: ConfigOptionValue[] }>()
   for (const v of values) {
     const key = v.group ?? ''

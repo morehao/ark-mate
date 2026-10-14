@@ -32,7 +32,6 @@ func validateRig(t *testing.T) (*Service, *Orchestrator, *runtime.Registry) {
 	// server 对每个已注册 runtime 都可达，故"不承载 http"这条不再成立——那条新语义由
 	// `TestSelectionValidationRemoteReachableViaGateway` 负责。
 	svc.SetMcpGatewayEnabled(false)
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	svc.SetSkillProjections([]SkillProjection{{
 		Runtime:    "stub",
 		Projection: rtxSkillProjectionForTest(),
@@ -191,7 +190,6 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 
 	_, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
-		AgentID:      "a1",
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{"ghost"})},
 	})
 	if err == nil {
@@ -222,7 +220,6 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 
 	// 可达的选定则一切照常。
 	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
-		AgentID:      "a1",
 		Capabilities: &dtosession.CapabilitiesReq{Mcps: ptrOf([]string{"fs"})},
 	})
 	if err != nil {
@@ -268,7 +265,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
-	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	res, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -292,8 +289,8 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 		t.Fatalf("缺省路径不该带能力绑定: %+v", rec)
 	}
 	spec, _ := orch.reg.Get("stub")
-	agent, _ := svc.AgentByID("a1")
-	base := connKey(spec.ID, svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy), svc.providerEnvFor(spec.ID, agent.Provider))
+	// v19：基础键只剩"构建期底座 + 声明默认模型的供应商 env"（原生权限面没有策略来源）。
+	base := connKey(spec.ID, svc.providerEnvFor(spec.ID, svc.injectedProviderID(context.Background())))
 	if got := generationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}
@@ -314,12 +311,12 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 	ctx := context.Background()
 
 	declared, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
-		AgentID: "a1", Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{},
+		Cwd: t.TempDir(), Capabilities: &dtosession.CapabilitiesReq{},
 	})
 	if err != nil {
 		t.Fatalf("空选定应能建会话: %v", err)
 	}
-	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{AgentID: "a1", Cwd: t.TempDir()})
+	plain, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +356,7 @@ func TestCreateSessionDeclaredEmptySelectionWorks(t *testing.T) {
 
 	// `{skills:[],mcps:[]}` = 明确一个都不要 → 回显两个空数组，且是**另一个代际**。
 	none, err := svc.CreateSession(ctx, dtosession.SessionCreateReq{
-		AgentID: "a1", Cwd: t.TempDir(),
+		Cwd:          t.TempDir(),
 		Capabilities: &dtosession.CapabilitiesReq{Skills: ptrOf([]string{}), Mcps: ptrOf([]string{})},
 	})
 	if err != nil {

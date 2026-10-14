@@ -411,13 +411,28 @@ func (s *server) write(msg rpcMessage) {
 // （instructions/日志）也要用；两份字面量迟早漂移。
 const GatewayServerName = "mate-gateway"
 
+// GatewayCredCwdEnv 核心经网关条目的 `env` 下发的**凭据 cwd**（平台装配值，不是密钥）。
+//
+// 语义：`<cwd>/.env` 那一层的 `cwd` = **用户启动 `mate serve` 的那个目录**。
+//
+// 为什么必须由核心显式交下去，而不是网关自己 `os.Getwd()`：网关是**底座 spawn 的子进程**，
+// 它的 cwd（通常是会话工作区）是用户没选过的目录；两个进程各自取自己的 cwd，同一个引用就会
+// 解析出不同的值——而这件事**完全静默**（两边各自的测试都绿）。同一个引用必须给同一个答案。
+//
+// 为什么走条目的 `env` 而不是命令行参数：`Args` 整体进能力指纹（`mcpFingerprintParts` 逐字带上
+// `Command`/`Args`），而 cwd 是**值**——换个目录启动 `mate serve` 不该让所有会话换一次底座进程；
+// `Env` 只把**键名**入指纹（`EnvKeys`），键名恒定、取值不入，正好是"改指向不换代际"这条语义。
+//
+// 刻意**不进** `pkg/runtime/isolation.go` 的隔离表：那张表管的是"别让底座的子进程去读写用户
+// 自己的 home"，而这是我们自己的装配值，随条目一对一携带（也因此不依赖进程环境继承是否完整）。
+const GatewayCredCwdEnv = "MATE_MCP_CRED_CWD"
+
 // GatewayScope 网关条目的 scope：注入端拼参数、网关端解参数，**两侧共用这一个类型**。
 type GatewayScope struct {
-	AgentID   string
 	RuntimeID string
 	// McpsPinned 会话钉住的 MCP 白名单（`sessions.capability_json` 的 `mcps`）：
 	//
-	//	nil    = 该会话**没有**钉（网关回落 agent 声明；缺省路径就是这一支）
+	//	nil    = 该会话**没有**钉（全量；缺省路径就是这一支）
 	//	非 nil = 以它为准（空切片 = 本会话一个远程 MCP 都不要）
 	//
 	// 为什么要带上它：会话钉住的白名单是一条**用户约束**（可能比 agent 声明更窄，也可能更宽）。
@@ -430,11 +445,13 @@ type GatewayScope struct {
 
 // GatewayBridgeArgs 拼网关子命令的参数（不含可执行文件名）。
 //
-// **不含定义集**——这是本计划最关键的一条（P-2）：条目一旦只由 scope（agent + runtime [+ 会话
-// 钉住的白名单]）决定，"加一个远程 MCP server"就不改变条目、也就不换代际。反例 `--servers a,b,c`
+// **不含定义集**——这是本计划最关键的一条（P-2）：条目一旦只由 scope（runtime [+ 会话钉住的
+// 白名单]）决定，"加一个远程 MCP server"就不改变条目、也就不换代际。反例 `--servers a,b,c`
 // 会让每次增删都换一次代际，直接毁掉网关的头号收益。
+//
+// v19 起 scope 里没有 `--agent`：会话不再有 agent 身份，底座由构建期固定（`--runtime` 就是它）。
 func GatewayBridgeArgs(sc GatewayScope) []string {
-	args := []string{"mcp", "bridge", "--agent", sc.AgentID, "--runtime", sc.RuntimeID}
+	args := []string{"mcp", "bridge", "--runtime", sc.RuntimeID}
 	if sc.McpsPinned != nil {
 		// JSON 数组：能**无歧义**表达"显式空"（`[]` = 一个都不要）与任意 id 词法
 		// （server id 允许空格等字符，逗号分隔会歧义）。这里不走 shell，故无需转义。
@@ -457,15 +474,13 @@ func ParseScopeArgs(args []string) (GatewayScope, error) {
 	var sc GatewayScope
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--agent", "--runtime", "--mcps":
+		case "--runtime", "--mcps":
 			if i+1 >= len(args) {
 				return GatewayScope{}, fmt.Errorf("%s 缺少取值", args[i])
 			}
 			v := args[i+1]
 			i++
 			switch args[i-1] {
-			case "--agent":
-				sc.AgentID = v
 			case "--runtime":
 				sc.RuntimeID = v
 			case "--mcps":
@@ -481,9 +496,6 @@ func ParseScopeArgs(args []string) (GatewayScope, error) {
 		default:
 			return GatewayScope{}, fmt.Errorf("未知参数 %q", args[i])
 		}
-	}
-	if sc.AgentID == "" {
-		return GatewayScope{}, errors.New("--agent 必填（网关条目的 scope：注入时由平台拼出）")
 	}
 	if sc.RuntimeID == "" {
 		return GatewayScope{}, errors.New("--runtime 必填（网关条目的 scope：注入时由平台拼出）")

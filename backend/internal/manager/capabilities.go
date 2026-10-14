@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -245,133 +244,10 @@ func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
 	return spec.McpTransports, true
 }
 
-// AgentCapabilities 组装某 Agent 的统一能力目录（§8.1；可见性规则见 dtocapability.AgentCapabilitiesResp）。
-// 只读聚合：不触发物化/注入/探测，全部依据注册表 + 候选 runtime 声明推导。未知 agent → agent_not_found。
-func (s *Service) AgentCapabilities(agentID string) (*dtocapability.AgentCapabilitiesResp, error) {
-	a, ok := s.AgentByID(agentID)
-	if !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
-			fmt.Sprintf("未知 agent %q", agentID), nil))
-	}
-	// 底座是构建期常量：能力面按**这一个** runtime 推导（v12 之前是 agent 声明的候选列表）。
-	runtimes := []string{runtime.SelectedRuntime()}
-	inAgent := make(map[string]bool, len(runtimes))
-	for _, r := range runtimes {
-		inAgent[r] = true
-	}
-	notes := make([]string, 0, 2)
-	// agent 白名单语义：nil = 未声明（全启用）；非 nil = 命中制（空数组 = 禁用 MCP 注入）。
-	enabled := func(id string) bool {
-		if a.Mcps == nil {
-			return true
-		}
-		for _, x := range *a.Mcps {
-			if x == id {
-				return true
-			}
-		}
-		return false
-	}
-	if a.Mcps != nil && len(*a.Mcps) == 0 {
-		notes = append(notes, "该 agent 声明 mcps: []（禁用 MCP 注入）")
-	}
-
-	// 候选 runtime → 支持的 MCP 传输（未知 runtime 记降级说明，不臆造能力）。
-	transports := make(map[string][]string, len(runtimes))
-	for _, r := range runtimes {
-		ts, known := s.supportedMcpTransports(r)
-		if !known {
-			notes = append(notes, fmt.Sprintf("候选 runtime %q 未注册（按声明过滤，不推导其能力）", r))
-			continue
-		}
-		transports[r] = ts
-	}
-
-	// MCP：注册表全量 + 每条的 enabled/runtimes（候选里支持该传输的子集，保持候选声明顺序）。
-	//
-	// **M7-3 的语义变化**：网关在环时，远程传输（sse/http/streamable_http）对**每个**候选 runtime
-	// 都可承载——底座只看见一条 stdio 条目，平台替它连远端（§10.6-①）。这正是"逐 runtime 的传输
-	// 承载矩阵消失"在**读面**的体现：以前 dsh 声明的 `streamable_http` 到不了、面板会标"不承载"，
-	// 现在不该再标。开关关掉（mcp_gateway=off）时回到老口径，读面与注入面始终同源。
-	servers := s.caps.ListMcpServers()
-	mcpOut := make([]dtocapability.AgentMcpServerResp, 0, len(servers))
-	carried := make(map[string]bool, len(servers)) // server id → 至少一个候选可承载
-	carries := func(m capability.McpServer, r string) bool {
-		if _, known := transports[r]; !known {
-			return false // 未注册的候选 runtime：不推导它的承载能力（与 notes 的口径一致）
-		}
-		if s.McpGatewayEnabled() && capability.IsRemoteTransport(m.Transport) {
-			// 网关代连：对底座而言它就是一条 stdio 条目 ⇒ 已注册的 runtime 都承载。
-			return true
-		}
-		for _, t := range transports[r] {
-			if t == m.Transport {
-				return true
-			}
-		}
-		return false
-	}
-	for _, m := range servers {
-		carriers := make([]string, 0, len(runtimes))
-		for _, r := range runtimes {
-			if carries(m, r) {
-				carriers = append(carriers, r)
-			}
-		}
-		if len(carriers) > 0 {
-			carried[m.ID] = true
-		}
-		mcpOut = append(mcpOut, dtocapability.AgentMcpServerResp{
-			ID: m.ID, Name: m.Name, Transport: m.Transport,
-			Enabled: enabled(m.ID), Runtimes: carriers,
-		})
-	}
-
-	// Skill：全量列出 + 每条给「启用/适用」两个正交判断（§13.4 S5）。
-	// carrierRuntimes 是**本 agent 视角下的实际投放目标**（候选 ∩ 技能声明 ∩ 已解析投影），
-	// 空 + reasons 就是「这个 agent 用不上」。
-	projected := s.projectedRuntimeSet()
-	skills := s.caps.ListSkills()
-	skillOut := make([]dtocapability.AgentSkillResp, 0, len(skills))
-	for _, sk := range skills {
-		carriers := make([]string, 0, len(runtimes))
-		for _, rt := range runtimes {
-			if inAgent[rt] && sk.AppliesToRuntime(rt) && projected[rt] {
-				carriers = append(carriers, rt)
-			}
-		}
-		act := SkillActivationFor(sk, runtimes, inAgent, projected)
-		skillOut = append(skillOut, dtocapability.AgentSkillResp{
-			ID: sk.ID, Name: sk.Name, Description: sk.Description, Runtimes: carriers,
-			Enabled: sk.IsEnabled(), Applicable: act.Applicable, Reasons: act.Reasons,
-		})
-	}
-
-	// Tool：builtin/observed 恒可见；mcp 条目须归属 server 对该 agent 启用且至少一个候选可承载。
-	tools := s.caps.ListTools()
-	toolOut := make([]dtocapability.ToolResp, 0, len(tools))
-	for _, t := range tools {
-		if t.Source == capability.ToolSourceMCP && t.McpServer != "" {
-			if !enabled(t.McpServer) || !carried[t.McpServer] {
-				continue
-			}
-		}
-		toolOut = append(toolOut, dtocapability.ToolResp{
-			Name: t.Name, Description: t.Description, Source: t.Source,
-			McpServer: t.McpServer, Schema: t.Schema,
-		})
-	}
-
-	return &dtocapability.AgentCapabilitiesResp{
-		AgentID: a.ID, Name: a.Name, Runtimes: runtimes,
-		Skills: skillOut, McpServers: mcpOut, Tools: toolOut, Notes: notes,
-	}, nil
-}
-
-// unresolvedSecretKeys 列出"绑了引用但当前解析不出来"的密钥键（只读体检，不解密出值）。
+// unresolvedSecretKeys 列出"绑了引用但当前解析不出来"的密钥键（只读体检，不取回值）。
 //
-// vault 引用用 `Store.Has`（只看密文文件在不在，不解密）——列表端点不该为了体检去解密，
-// 而且"密文在但解不开"（vault.key 换了）属于另一个更严重的问题，会在注入时报出来。
+// `store:` 引用用 `McpSecret` 判存在（**读回一个值只为判空**，但那条路上本来就要读它：
+// 列表端点不该造第二套"存在性"判据，否则"列表说能解析、注入时说不行"会分叉）。
 func (s *Service) unresolvedSecretKeys(m capability.McpServer) []string {
 	var out []string
 	for _, k := range capability.KeysOf(m.SecretEnv) {
@@ -390,12 +266,9 @@ func (s *Service) unresolvedSecretKeys(m capability.McpServer) []string {
 // secretRefResolvable 报告一条引用当前是否"看起来能解析"（词法已在校验期保证，这里只看存在性）。
 func (s *Service) secretRefResolvable(ref string) bool {
 	switch capability.SecretRefKind(ref) {
-	case "vault":
-		st, err := s.providerVault()
-		if err != nil || st == nil {
-			return false
-		}
-		return st.Has(ref)
+	case "store":
+		_, err := s.resolveStoreSecret(context.Background(), strings.TrimSpace(ref))
+		return err == nil
 	case "env":
 		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
 		return os.Getenv(name) != ""
@@ -406,7 +279,7 @@ func (s *Service) secretRefResolvable(ref string) bool {
 
 // resolveMcpSecrets 把 server 的明文绑定与密钥引用合成**最终注入值**：
 //
-//	Env（明文）+ SecretEnv（vault:/env: 引用解析后）→ 环境变量
+//	Env（明文）+ SecretEnv（store:/env: 引用解析后）→ 环境变量
 //	Headers（明文）+ SecretHeaders（解析后）        → header
 //
 // 任一引用解析失败 → 返回全部失败原因（调用方据此跳过注入 + 告警）。失败原因**只含键名与引用**，
@@ -438,41 +311,51 @@ func (s *Service) resolveMcpSecrets(m capability.McpServer) (env, headers map[st
 
 // resolveSecretRef 解析一条密钥引用：
 //
-//	vault:<ns>/<name>  → vault 密文解密（AAD 带 kind=mcp_secret，与 provider 密钥不通用）
-//	env:<NAME>         → 进程环境变量（容器/CI 注入；盘上不留痕）
+//	store:<ns>/<name>  查库里的 `mcp_secrets`（v20 起密钥的权威；没有库时查托管文档）
+//	env:<NAME>         进程环境变量（容器/CI 注入；盘上不留痕）
 //
-// vault 不可用（未配置 agentDir / 密钥丢失）不是"静默跳过"，而是明确失败——理由同 §5：
-// 让 MCP server 带着空密钥跑起来，问题会以"tools/list 返回 401"的面目出现在很远的地方。
+// 解析不出来**不是"静默跳过"**，而是明确失败：让 MCP server 带着空密钥跑起来，问题会以
+// "tools/list 返回 401"的面目出现在很远的地方。
+//
+// 旧前缀（v20 之前那套密文机制）在这里**不翻译**：库里的引用已由迁移改写，运行时读到它
+// 就是坏数据，翻译只会掩盖它。档案文件里的旧前缀由导入路径显式翻译（见 `TranslateLegacySecretRef`）。
 func (s *Service) resolveSecretRef(ref string) (string, error) {
 	if err := capability.ValidateSecretRef(ref); err != nil {
 		return "", err
 	}
+	var (
+		val string
+		err error
+	)
 	switch capability.SecretRefKind(ref) {
-	case "vault":
-		st, err := s.providerVault()
-		if err != nil {
-			return "", fmt.Errorf("vault 不可用：%w", err)
-		}
-		if st == nil {
-			return "", fmt.Errorf("vault 不可用：本进程未配置能力/agent 目录（无 ~/.ark-mate 可放密文）")
-		}
-		b, err := st.Get(ref, vault.KindMcpSecret)
-		if err != nil {
-			return "", err
-		}
-		return string(b), nil
+	case "store":
+		val, err = s.resolveStoreSecret(context.Background(), strings.TrimSpace(ref))
 	case "env":
 		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
 		if v := os.Getenv(name); v != "" {
-			return v, nil
+			val = v
+		} else {
+			err = fmt.Errorf("环境变量 %s 未设置或为空", name)
 		}
-		return "", fmt.Errorf("环境变量 %s 未设置或为空", name)
 	default:
-		return "", fmt.Errorf("不支持的引用 %q", ref)
+		return "", fmt.Errorf("不支持的引用 %q（本期只有 %s<namespace>/<name> 与 %s<ENV_NAME>）",
+			ref, capability.SecretRefStorePrefix, capability.SecretRefEnvPrefix)
 	}
+	if err != nil {
+		return "", err
+	}
+	// 解析出来的明文登记进脱敏闸门的动态表（`pkg/redact` 的第 1 档：按值替换、零误报）。
+	//
+	// 为什么 MCP 密钥也要登记（v19 及更早只有 provider key 登记）：这些值会被塞进 stdio
+	// 子进程的环境变量/请求头，而子进程把凭据打进 stderr 是最常见的形态（"401，token=…"）。
+	// 那串会经 `run.error` 的 `stderr_tail` 与事件载荷外露——不登记就只能靠形状正则，
+	// 而真实密钥往往没有任何可辨识形状。这里是全仓唯一把引用变成明文的地方，登记放在这里
+	// 意味着"凡是被解析过的密钥值，离开进程前必被替换"。
+	redact.RegisterDynamicSecret(val)
+	return val, nil
 }
 
-// McpServersFor 选出可注入某 agent×runtime 的 MCP server 子集（P2 §5.2/§5.3）：
+// McpServersFor 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
 // **stdio 直连** + （有远程 server 时）**一条平台网关条目**（M7-3 的分派）。
 //
 // 老口径（M7 之前）是"注册表全量 → 该 runtime 的 McpTransports 过滤 → 白名单"，远程 server 由
@@ -481,9 +364,11 @@ func (s *Service) resolveSecretRef(ref string) (string, error) {
 //
 // `sel` 是**会话钉住的能力选定**：新建会话时来自本次请求，恢复会话时来自
 // `sessions.capability_json`。两处调用点都必须传它——恢复路径漏传的后果是
-// 会话重启后注入集悄悄变回 agent 默认（用户看不到任何提示）。
-func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *CapabilitySelection) []acl.McpServer {
-	plan := s.planMcpInjection(agent, runtimeID, sel)
+// 会话重启后注入集悄悄变回全量默认（用户看不到任何提示）。
+//
+// v19 起没有"agent 白名单"这一层：会话没钉就是全量（按 runtime transport 过滤）。
+func (s *Service) McpServersFor(runtimeID string, sel *CapabilitySelection) []acl.McpServer {
+	plan := s.planMcpInjection(runtimeID, sel)
 	out := make([]acl.McpServer, 0, len(plan.Direct)+1)
 	for _, m := range plan.Direct {
 		name := m.Name
@@ -509,27 +394,7 @@ func (s *Service) McpServersFor(agent *AgentRec, runtimeID string, sel *Capabili
 		out = append(out, *plan.Gateway)
 		if len(plan.Remote) > 0 {
 			glog.Debugw(context.Background(), "mcp 注入：远程 server 经平台网关代连",
-				"agent", agentIDOf(agent), "runtime", runtimeID, "remote", len(plan.Remote))
-		}
-	}
-	return out
-}
-
-// agentIDOf 空安全取 agent id（日志/诊断用）。
-func agentIDOf(a *AgentRec) string {
-	if a == nil {
-		return ""
-	}
-	return a.ID
-}
-
-// projectedRuntimeSet 本进程已解析出 skill 投影的 runtime 集合（激活判定与投放集共用）。
-func (s *Service) projectedRuntimeSet() map[string]bool {
-	ps := s.skillProjectionsSnapshot()
-	out := make(map[string]bool, len(ps))
-	for _, p := range ps {
-		if p.Err == "" {
-			out[p.Runtime] = true
+				"runtime", runtimeID, "remote", len(plan.Remote))
 		}
 	}
 	return out

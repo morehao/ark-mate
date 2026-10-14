@@ -77,7 +77,6 @@ func newSchedRig(t *testing.T) *schedRig {
 	bus := eventbus.New()
 	svc := NewService(reg, bus)
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	dir := t.TempDir()
@@ -94,7 +93,7 @@ func (r *schedRig) writeDaily(t *testing.T, id, lastFired string) {
 	body := map[string]any{
 		"id": id, "name": "每日巡检", "enabled": true,
 		"schedule": map[string]any{"kind": "daily", "timezone": "Asia/Shanghai", "hour": 9, "minute": 0},
-		"target":   map[string]any{"agent_id": "a1", "cwd": r.cwd, "prompt": "跑一遍依赖巡检"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一遍依赖巡检"},
 	}
 	if lastFired != "" {
 		body["last_fired_at"] = lastFired
@@ -296,20 +295,15 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	}
 }
 
-// TestAutomationTickFailureAdvancesAndNeedsAttention 触发失败（agent 没注册）：
+// TestAutomationTickFailureAdvancesAndNeedsAttention 触发失败（底座未装配）：
 // **推进游标**（ADR-10）+ 落 needs_attention + 不重试 + 下一次 occurrence 照常。
 func TestAutomationTickFailureAdvancesAndNeedsAttention(t *testing.T) {
 	r := newSchedRig(t)
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
-	// 把目标 agent 改成一个不存在的：模拟"定义还在、agent 被删了"
-	path := filepath.Join(r.dir, "daily.json")
-	got := r.file(t, "daily")
-	got["target"].(map[string]any)["agent_id"] = "gone"
-	raw, _ := json.Marshal(got)
-	writeAutomationFile(t, path, string(raw))
-	if n := r.svc.LoadAutomationDefinitions(r.dir); n != 1 {
-		t.Fatalf("装载应为 1，got %d", n)
-	}
+	// 让构建期固定的那个底座在本进程里查不到（夹具注册表只有 silent）：模拟"定义还在、
+	// 它依赖的东西没了"。v19 之前这里是把 `target.agent_id` 指到一个不存在的 agent——
+	// agent 面撤销后，同一类"环境里的目标不见了"只能来自底座未装配。
+	setBuildRuntime(t, "ghost")
 
 	r.svc.automationTick(context.Background(), time.Now())
 
@@ -326,8 +320,8 @@ func TestAutomationTickFailureAdvancesAndNeedsAttention(t *testing.T) {
 	if after["last_status"] != automation.RunSkipped {
 		t.Fatalf("last_status 应为 skipped，got %v", after["last_status"])
 	}
-	if !strings.Contains(after["last_reason"].(string), "agent") {
-		t.Fatalf("理由应指出是 agent 的问题：%v", after["last_reason"])
+	if !strings.Contains(after["last_reason"].(string), "runtime") {
+		t.Fatalf("理由应指出是底座（runtime）的问题：%v", after["last_reason"])
 	}
 	if n, _ := after["consecutive_failures"].(float64); n != 1 {
 		t.Fatalf("连续失败应记 1，got %v", after["consecutive_failures"])
@@ -349,7 +343,7 @@ func TestAutomationStartupPassExpireOnceOnce(t *testing.T) {
 	body := map[string]any{
 		"id": "mig", "enabled": true,
 		"schedule": map[string]any{"kind": "once", "timezone": "UTC", "at": "2020-01-01T00:00:00Z"},
-		"target":   map[string]any{"agent_id": "a1", "cwd": r.cwd, "prompt": "跑一次迁移"},
+		"target":   map[string]any{"cwd": r.cwd, "prompt": "跑一次迁移"},
 	}
 	raw, _ := json.Marshal(body)
 	writeAutomationFile(t, filepath.Join(r.dir, "mig.json"), string(raw))
@@ -539,7 +533,7 @@ func TestAutomationRejectsRuntimeHint(t *testing.T) {
 
 	// ① 请求体里带它 → 显式拒绝。
 	_, err := r.svc.writeAutomation(context.Background(), "daily", map[string]any{
-		"target": map[string]any{"agent_id": "a1", "cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
+		"target": map[string]any{"cwd": r.cwd, "prompt": "x", "runtime_hint": "silent"},
 	}, false)
 	if err == nil {
 		t.Fatal("写面带 target.runtime_hint 应被拒")

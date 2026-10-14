@@ -28,9 +28,8 @@ func TestUsageSummaryService(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	// 两个会话：a1（echo，两轮，用量快照 250/1000）与 a2（echo，一轮无上报）。
-	svc.agents["agent-stub"] = &AgentRec{ID: "agent-stub", Name: "Stub"}
-	svc.registerSession(&SessionRec{ID: "u1", AgentID: "agent-stub"})
-	svc.registerSession(&SessionRec{ID: "u2", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "u1"})
+	svc.registerSession(&SessionRec{ID: "u2"})
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
 	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
@@ -48,8 +47,8 @@ func TestUsageSummaryService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UsageSummary: %v", err)
 	}
-	if resp.Source != "sqlite" || resp.GroupBy != "agent" {
-		t.Fatalf("响应元信息不符: %+v", resp)
+	if resp.Source != "sqlite" || resp.GroupBy != "day" {
+		t.Fatalf("响应元信息不符（默认分组是 day）: %+v", resp)
 	}
 	if resp.Totals.Runs != 3 || resp.Totals.Completed != 2 || resp.Totals.Failed != 1 {
 		t.Fatalf("总计计数不符: %+v", resp.Totals)
@@ -60,19 +59,19 @@ func TestUsageSummaryService(t *testing.T) {
 	if resp.Totals.CostReported != 1 {
 		t.Fatalf("费用上报数应单独统计: %+v", resp.Totals)
 	}
-	// 口径回显：上下文/费用均为区间末快照；agent 分组桶可加。
+	// 口径回显：上下文/费用均为区间末快照；`group_by=day` 的桶**不可加**。
 	if resp.ContextSemantics != "end_of_window_snapshot_sum" || resp.CostSemantics != "session_cumulative_end_of_window" {
 		t.Fatalf("口径字段不符: %+v", resp)
 	}
-	if !resp.BucketsAdditive {
-		t.Fatalf("agent 分组桶应可加: %+v", resp)
+	if resp.BucketsAdditive {
+		t.Fatalf("day 分组桶不可相加（跨天会话的快照会在多个日期桶重复出现）: %+v", resp)
 	}
 	// 快照语义：u1 取最后一轮 250/1000，u2 无上报 → 总计 250/1000。
 	if resp.Totals.ContextUsed != 250 || resp.Totals.ContextSize != 1000 || resp.Totals.CostAmount != 0.5 {
 		t.Fatalf("用量快照不符: %+v", resp.Totals)
 	}
-	if len(resp.Buckets) != 1 || resp.Buckets[0].Key != "agent-stub" {
-		t.Fatalf("agent 分桶不符: %+v", resp.Buckets)
+	if len(resp.Buckets) != 1 || len(resp.Buckets[0].Key) != 10 {
+		t.Fatalf("默认应按 UTC 日期分桶: %+v", resp.Buckets)
 	}
 
 	// group_by=day：UTC 日期桶（今日 1 个桶）；快照口径下日桶不可相加（前端据此标注）。
@@ -93,7 +92,9 @@ func TestUsageSummaryService(t *testing.T) {
 		t.Fatalf("日期参数解析/区间不符: %+v", r2)
 	}
 
-	// 参数校验：非法时间 / from ≥ to / 非法 group_by / 未知 agent（REST 面 code + msg 内稳定码）。
+	// 参数校验：非法时间 / from ≥ to / 非法 group_by（REST 面 code + msg 内稳定码）。
+	// 已下线的查询键那一条单列在 `usage_removed_dimension_test.go`：它必须写出历史键的名字，
+	// 而本文件属「会话身份只剩 runtime_id」结构判据的近邻面，保持零命中更干净。
 	cases := []struct {
 		name  string
 		q     dtousage.UsageQueryReq
@@ -104,7 +105,6 @@ func TestUsageSummaryService(t *testing.T) {
 		{"bad_to", dtousage.UsageQueryReq{To: "yesterday"}, 40001, "[invalid_usage_range]"},
 		{"from_after_to", dtousage.UsageQueryReq{From: "2026-09-10T00:00:00Z", To: "2026-09-09T00:00:00Z"}, 40001, "[invalid_usage_range]"},
 		{"bad_group", dtousage.UsageQueryReq{GroupBy: "tool"}, 40001, "[invalid_usage_group_by]"},
-		{"unknown_agent", dtousage.UsageQueryReq{AgentID: "agent-nope"}, 40401, "[agent_not_found]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,8 +116,8 @@ func TestUsageSummaryService(t *testing.T) {
 		})
 	}
 
-	// 未知 agent（已注册）过滤到空结果（不报错）。
-	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{AgentID: "agent-stub", From: "2000-01-01", To: "2000-01-02"})
+	// 空区间（没有落在窗口里的轮次）→ 零值，不报错。
+	resp, err = svc.UsageSummary(ctx, dtousage.UsageQueryReq{From: "2000-01-01", To: "2000-01-02"})
 	if err != nil || resp.Totals.Runs != 0 || len(resp.Buckets) != 0 {
 		t.Fatalf("空区间应为零值: %+v err=%v", resp, err)
 	}
@@ -134,12 +134,12 @@ func TestUsageSummaryService(t *testing.T) {
 // TestOrchestratorUsageEvent 用量事件载荷与最近快照记录（底座上报 → 域事件 → 落库取值）。
 func TestOrchestratorUsageEvent(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	svc.registerSession(&SessionRec{ID: "c1", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "c1"})
 	orch.byProvider["native-1"] = "c1"
 
 	sub := bus.Subscribe(0)
 	defer bus.Unsubscribe(sub)
-	sink := orch.eventSink("agent-stub", "stub")
+	sink := orch.eventSink("stub")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",
 		Payload: objusage.UsageInfo{Used: 42, Size: 200, CostAmount: 0.25, CostCurrency: "USD"}})
 
@@ -149,7 +149,7 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 			t.Fatalf("期望 %s/c1，got %s/%s", BusUsage, e.Type, e.AggregID)
 		}
 		p, _ := e.Payload.(map[string]any)
-		if p["session_id"] != "c1" || p["agent_id"] != "agent-stub" ||
+		if p["session_id"] != "c1" || p["runtime"] != "stub" ||
 			p["used"] != int64(42) || p["size"] != int64(200) ||
 			p["cost_amount"] != 0.25 || p["cost_currency"] != "USD" {
 			t.Fatalf("用量载荷不符: %+v", p)

@@ -19,7 +19,7 @@ func selRig(t *testing.T) *Service {
 		Projections: []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := NewService(reg, eventbus.New())
-	// 本组钉的是**选择优先级**（会话选定 > agent 白名单 > 全量），与"远程是否折叠成网关条目"
+	// 本组钉的是**选择优先级**（会话选定 > 未声明时的全量），与"远程是否折叠成网关条目"
 	// 无关：网关开着时远程会被折叠成一条常量条目，断言里的 id 就看不出来了。故显式关掉网关，
 	// 让这组用例继续逐条断言被选中的定义；折叠语义由 gateway_folding 那组用例负责。
 	svc.SetMcpGatewayEnabled(false)
@@ -53,33 +53,34 @@ func names(servers []acl.McpServer) []string {
 	return out
 }
 
-// TestCapabilitySelectionMcpPrecedence 会话选定 > agent 白名单 > 全量；空数组 = 一个都不要。
+// TestCapabilitySelectionMcpPrecedence 会话选定 > 未声明时的全量；空数组 = 一个都不要。
 //
 // 三态的每一态都对应一种用户表达，缺一态用户就没法说清自己的意图：
-// 不传（回落 agent）/ 传 []（这个会话什么都不要）/ 传 [id...]（只要这些）。
+// 不传（全量）/ 传 []（这个会话什么都不要）/ 传 [id...]（只要这些）。
+//
+// v19 撤销 agent 面后"回落 agent 白名单"这一态不存在了：选区只有会话自己钉住的那一份。
 func TestCapabilitySelectionMcpPrecedence(t *testing.T) {
 	svc := selRig(t)
-	agentDefault := &AgentRec{ID: "a", Mcps: ptrOf([]string{"fs"})} // agent 层只允许 fs
 
-	// 未声明 → 回落 agent 白名单。
-	if got := names(svc.McpServersFor(agentDefault, "rtx", nil)); len(got) != 1 || got[0] != "fs" {
-		t.Fatalf("未声明会话选定应回落 agent 白名单，got %v", got)
+	// 未声明 → 全量（该 runtime 承载得起的全部）。
+	if got := names(svc.McpServersFor("rtx", nil)); len(got) != 2 {
+		t.Fatalf("未声明会话选定应取全量，got %v", got)
 	}
-	// 声明了空数组 → 一个都不要（**不是**回落 agent）。
-	if got := svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
+	// 声明了空数组 → 一个都不要（**不是**回落全量）。
+	if got := svc.McpServersFor("rtx", &CapabilitySelection{Mcps: ptrOf([]string{})}); len(got) != 0 {
 		t.Fatalf("会话选定空数组应禁用注入，got %v", names(got))
 	}
-	// 声明了 web → **覆盖** agent 白名单（求交会让 web 永远选不上且无法解释）。
-	if got := names(svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
-		t.Fatalf("会话选定应覆盖 agent 白名单，got %v", got)
+	// 声明了 web → 只要 web（求交/并集都说不清意图，命中制只有这一种读法）。
+	if got := names(svc.McpServersFor("rtx", &CapabilitySelection{Mcps: ptrOf([]string{"web"})})); len(got) != 1 || got[0] != "web" {
+		t.Fatalf("会话选定应逐条命中，got %v", got)
 	}
-	// 只声明 skill 侧 → MCP 仍回落 agent 白名单（两个 kind 互相独立）。
-	if got := names(svc.McpServersFor(agentDefault, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 1 || got[0] != "fs" {
-		t.Fatalf("只声明 skill 时 MCP 应回落 agent 白名单，got %v", got)
+	// 只声明 skill 侧 → MCP 仍是全量（两个 kind 互相独立）。
+	if got := names(svc.McpServersFor("rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})); len(got) != 2 {
+		t.Fatalf("只声明 skill 时 MCP 应保持全量，got %v", got)
 	}
-	// 空白名单（`capabilities: {}`）→ 也是回落 agent 白名单。
-	if got := names(svc.McpServersFor(agentDefault, "rtx", NewCapabilitySelection())); len(got) != 1 || got[0] != "fs" {
-		t.Fatalf("空选定对象应回落 agent 白名单，got %v", got)
+	// 空选定对象（`capabilities: {}`）→ 与未声明同义：全量。
+	if got := names(svc.McpServersFor("rtx", NewCapabilitySelection())); len(got) != 2 {
+		t.Fatalf("空选定对象应取全量，got %v", got)
 	}
 }
 
@@ -87,11 +88,10 @@ func TestCapabilitySelectionMcpPrecedence(t *testing.T) {
 // 不同代际；顺序不同/重复项 → **同一代际**（否则用户换个勾选顺序就白起一个进程）。
 func TestCapabilitySelectionSkillSubsetInFingerprint(t *testing.T) {
 	svc := selRig(t)
-	agent := &AgentRec{ID: "a"}
 
-	all := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection())
-	onlyAlpha := svc.capabilityFingerprint(agent, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})
-	onlyBeta := svc.capabilityFingerprint(agent, "rtx", &CapabilitySelection{Skills: ptrOf([]string{"beta"})})
+	all := svc.capabilityFingerprint("rtx", NewCapabilitySelection())
+	onlyAlpha := svc.capabilityFingerprint("rtx", &CapabilitySelection{Skills: ptrOf([]string{"alpha"})})
+	onlyBeta := svc.capabilityFingerprint("rtx", &CapabilitySelection{Skills: ptrOf([]string{"beta"})})
 	if all == "" || onlyAlpha == "" || onlyBeta == "" {
 		t.Fatal("声明了能力选择就必须有指纹")
 	}
@@ -99,14 +99,14 @@ func TestCapabilitySelectionSkillSubsetInFingerprint(t *testing.T) {
 		t.Fatalf("不同技能子集必须不同指纹: all=%s alpha=%s beta=%s", all, onlyAlpha, onlyBeta)
 	}
 	// 顺序/重复/空白字符不影响指纹（规范化在进指纹之前）。
-	same := svc.capabilityFingerprint(agent, "rtx",
+	same := svc.capabilityFingerprint("rtx",
 		&CapabilitySelection{Skills: ptrOf([]string{" beta", "beta", "alpha", ""})})
-	if same != svc.capabilityFingerprint(agent, "rtx",
+	if same != svc.capabilityFingerprint("rtx",
 		&CapabilitySelection{Skills: ptrOf([]string{"alpha", "beta"})}) {
 		t.Fatalf("顺序/重复/空白不该改变指纹: %s", same)
 	}
 	// 未声明 → 空指纹（R11：缺省路径的键必须与引入代际之前逐字相同）。
-	if got := svc.capabilityFingerprint(agent, "rtx", nil); got != "" {
+	if got := svc.capabilityFingerprint("rtx", nil); got != "" {
 		t.Fatalf("未声明必须得空指纹，got %q", got)
 	}
 }
@@ -163,24 +163,23 @@ func TestCapabilitySelectionJSONRoundTrip(t *testing.T) {
 // **恢复路径的注入集必须与会话钉住的那一份一致**。
 //
 // 场景是重启：进程内存全丢，会话记录（含 capability_json）从库里读回。漏掉这一处传参，
-// 会话就会退回 agent 默认能力集——不报错、不留痕，用户只看到"昨天能用的 MCP 今天不见了"。
+// 会话就会退回全量能力集——不报错、不留痕，用户只看到"我钉住的那一份没生效"。
 func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 	svc := selRig(t)
-	agent := &AgentRec{ID: "a", Mcps: ptrOf([]string{"fs"})} // agent 默认可注入 fs
 
-	// 会话 A 钉住"只要 web"（与 agent 默认不同，才验得出来）。
+	// 会话 A 钉住"只要 web"（与全量不同，才验得出来）。
 	pinned := &CapabilitySelection{Mcps: ptrOf([]string{"web"})}
-	agentA := &SessionRec{ID: "convA", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(pinned)}
+	agentA := &SessionRec{ID: "convA", CapabilityJSON: MarshalCapabilitySelection(pinned)}
 	// 会话 B 什么都不要。
 	none := &CapabilitySelection{Mcps: ptrOf([]string{})}
-	agentB := &SessionRec{ID: "convB", AgentID: "a", CapabilityJSON: MarshalCapabilitySelection(none)}
-	// 会话 C 未声明（旧会话：v7 迁移后 capability_json 为空串）。
-	legacy := &SessionRec{ID: "convC", AgentID: "a"}
+	agentB := &SessionRec{ID: "convB", CapabilityJSON: MarshalCapabilitySelection(none)}
+	// 会话 C 未声明（旧会话：v7 迁移后 capability_json 为空串）→ 全量。
+	legacy := &SessionRec{ID: "convC"}
 
 	injectedFor := func(rec *SessionRec) []string {
 		t.Helper()
 		sel := ParseCapabilitySelection(rec.CapabilityJSON)
-		return names(svc.McpServersFor(agent, "rtx", sel))
+		return names(svc.McpServersFor("rtx", sel))
 	}
 
 	// 恢复路径的注入集与会话钉住的选定一致。
@@ -190,13 +189,13 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 	if got := injectedFor(agentB); len(got) != 0 {
 		t.Fatalf("会话 B 恢复后应一个都不注入，got %v", got)
 	}
-	if got := injectedFor(legacy); len(got) != 1 || got[0] != "fs" {
-		t.Fatalf("未声明选定的旧会话应回落 agent 默认，got %v", got)
+	if got := injectedFor(legacy); len(got) != 2 {
+		t.Fatalf("未声明选定的旧会话应取全量，got %v", got)
 	}
 
 	// 同一份选定在"新建 → 落库 → 重启 → 恢复"后必须逐字一致（含指纹：代际不能漂）。
-	before := svc.capabilityFingerprint(agent, "rtx", pinned)
-	after := svc.capabilityFingerprint(agent, "rtx", ParseCapabilitySelection(MarshalCapabilitySelection(pinned)))
+	before := svc.capabilityFingerprint("rtx", pinned)
+	after := svc.capabilityFingerprint("rtx", ParseCapabilitySelection(MarshalCapabilitySelection(pinned)))
 	if before != after {
 		t.Fatalf("重启后指纹漂移：%s → %s（会话会被挂到另一个代际）", before, after)
 	}
@@ -204,7 +203,7 @@ func TestMcpInjectionRestorePathMatchesPinnedSelection(t *testing.T) {
 		t.Fatal("声明了选定就该有指纹")
 	}
 	// 反向：若恢复路径漏传选定（用 nil 算），指纹会变空——这正是要防的漂移。
-	if svc.capabilityFingerprint(agent, "rtx", nil) != "" {
+	if svc.capabilityFingerprint("rtx", nil) != "" {
 		t.Fatal("未声明应为空指纹")
 	}
 }

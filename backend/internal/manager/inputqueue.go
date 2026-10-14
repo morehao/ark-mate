@@ -51,10 +51,10 @@ var ValidDeliveries = []string{DeliveryReject, DeliveryAfterRun, DeliveryInterru
 
 // 队列项终态（事件收敛用；与 store.InputStatus* 同值）。
 const (
-	ReasonRunFinished = "run_finished"  // 队列项因上一轮结束而投递
-	ReasonUserCancel   = "user_cancel"    // 用户显式撤下
-	ReasonDeliverFail  = "deliver_failed" // 投递时启动新一轮失败（文本保留在台账行里，不静默丢弃）
-	ReasonStale        = "stale"          // 进程重启：等待的那一轮已随进程消失，统一作废
+	ReasonRunFinished = "run_finished"   // 队列项因上一轮结束而投递
+	ReasonUserCancel  = "user_cancel"    // 用户显式撤下
+	ReasonDeliverFail = "deliver_failed" // 投递时启动新一轮失败（文本保留在台账行里，不静默丢弃）
+	ReasonStale       = "stale"          // 进程重启：等待的那一轮已随进程消失，统一作废
 )
 
 // NormalizeDelivery 归一并校验投递模式（空 = reject，即历史行为）。
@@ -75,13 +75,13 @@ func NormalizeDelivery(v string) (string, error) {
 
 // QueuedInput 队列项（事件载荷与 REST 形状）。
 type QueuedInput struct {
-	ID           string    `json:"input_id"`
-	SessionID    string    `json:"session_id"`
-	Text         string    `json:"text"`
-	Delivery     string    `json:"delivery"`
+	ID          string    `json:"input_id"`
+	SessionID   string    `json:"session_id"`
+	Text        string    `json:"text"`
+	Delivery    string    `json:"delivery"`
 	TargetRunID string    `json:"target_run_id,omitempty"`
-	Generation   int64     `json:"generation"`
-	CreatedAt    time.Time `json:"created_at"`
+	Generation  int64     `json:"generation"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // PromptOutcome 投递结果（Queued=true 表示本次输入已入队，EventSeq = input_queued 的水位）。
@@ -253,7 +253,7 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 	}
 	glog.Warnw(ctx, "重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
 	for _, r := range pending {
-		// agent_id 此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
+		// 会话身份此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
 		s.publish(BusInputCancelled, r.SessionID, map[string]any{
 			"session_id": r.SessionID, "input_id": r.ID,
 			"delivery": r.Delivery, "reason": ReasonStale,
@@ -290,13 +290,13 @@ func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 	if _, err := o.Prompt(context.Background(), as.ID, q.Text); err != nil {
 		glog.Warnw(context.Background(), "排队输入投递失败", "session", as.ID, "input_id", q.ID, "err", err)
 		o.svc.publish(BusInputCancelled, as.ID, map[string]any{
-			"session_id": as.ID, "agent_id": as.AgentID, "input_id": q.ID,
+			"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
 			"delivery": q.Delivery, "reason": ReasonDeliverFail,
 		})
 		return
 	}
 	o.svc.publish(BusInputDelivered, as.ID, map[string]any{
-		"session_id": as.ID, "agent_id": as.AgentID, "input_id": q.ID,
+		"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
 		"delivery": q.Delivery, "reason": ReasonRunFinished,
 	})
 }

@@ -4,8 +4,11 @@
  * 需要：`make dev`（默认打 http://127.0.0.1:10001，= 核心直接服务构建产物）、真实 runtime + 模型额度。
  *
  * 用法：
- *   node scripts/e2e-live-run.mjs <agent_id> "<prompt>"
- *   E2E_BASE=http://127.0.0.1:10001 node scripts/e2e-live-run.mjs dsh "请只回复两个字：明白"
+ *   node scripts/e2e-live-run.mjs "<prompt>"
+ *   E2E_BASE=http://127.0.0.1:10001 node scripts/e2e-live-run.mjs "请只回复两个字：明白"
+ *
+ * v19：不再收 `<agent_id>` 参数。会话落在构建期固定的那个底座上（用户不可自定义），
+ * 请求体里也没有 `agent_id` 这个键了——服务端对带它的写面请求是显式拒绝（不是静默忽略）。
  *
  * 判定：收到终态帧（run.ended / run.error / run.cancelled）即 PASS；
  * 若在超时前未收尾则 POST /cancel 并继续等终态。退出码 0=通路可用。
@@ -19,9 +22,9 @@ const API = E2E_BASE + '/v1/mate'
 const TOKEN = process.env.MATE_SMOKE_TOKEN || ''
 const AUTH = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}
 
-const [, , AGENT_ID = '', PROMPT = ''] = process.argv
-if (!AGENT_ID || !PROMPT) {
-  console.error('用法: node scripts/e2e-live-run.mjs <agent_id> "<prompt>"')
+const [, , PROMPT = ''] = process.argv
+if (!PROMPT) {
+  console.error('用法: node scripts/e2e-live-run.mjs "<prompt>"')
   process.exit(2)
 }
 const WAIT_TERMINAL_MS = Number(process.env.E2E_RUN_TIMEOUT_MS || 90_000)
@@ -30,14 +33,14 @@ const TAIL_MS = 2000 // 终态帧后多收一小段，观察是否有后继事�
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function main() {
-  console.log(`真会话 e2e  agent=${AGENT_ID} prompt=${JSON.stringify(PROMPT)} base=${E2E_BASE}\n`)
+  console.log(`真会话 e2e  prompt=${JSON.stringify(PROMPT)} base=${E2E_BASE}\n`)
 
   // 1) REST 创建（真实 dial + session/new；带 prompt → 首轮异步开跑）
   console.log('· POST /v1/mate/sessions …')
   const r = await fetch(API + '/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...AUTH },
-    body: JSON.stringify({ agent_id: AGENT_ID, prompt: PROMPT }),
+    body: JSON.stringify({ prompt: PROMPT }),
   })
   const env = await r.json()
   if (env.code !== 0) {

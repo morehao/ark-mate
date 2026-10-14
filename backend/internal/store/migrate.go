@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,11 +26,14 @@ type migration struct {
 	//
 	// 失败即整体回滚（事务由 applyMigration 持有），不存在"迁移了一半"。
 	apply func(ctx context.Context, tx *gorm.DB, s *Store) error
-	// backup 非空 = 执行本迁移**之前**先把库文件复制成 `<db>.bak-<backup>-<ts>`。
+	// backup 非空 = 执行本迁移**之前**先把库文件复制成
+	// `<db 目录>/backups/<db 文件名>.bak-<backup>-<ts>`（v19 起的布局；此前落在库文件同级）。
 	//
 	// 只有"就地改写既有数据"的迁移需要它（v12），纯 DDL 不需要。备份只管 DB 文件：
-	// vault（密文与主密钥）不在其内，而 v12 也不触碰 vault，所以回退时不必恢复 vault
-	// （§安全：完整备份是三件套 mate.db + vault/ + vault.key）。
+	// v20 起 `providers.key` 进库，所以这份备份与 `mate.db` 同级敏感（备份目录 0700、文件 0600）。
+	//
+	// 历史迁移注里写的 `<db>.bak-v15-*` 一类是**文件名**形状（目录从 v19 起是 `backups/`），
+	// doctor 打印的是完整路径；老布局的备份仍被扫描与列出（见 MigrationBackupPathsLegacy）。
 	backup string
 }
 
@@ -225,7 +227,7 @@ var schemaMigrations = []migration{
 			// 变更审计复用 v8 的 capability_revisions（kind='agent'）——"定义变更审计"只有一份。
 			//
 			// 「当前 Agent」（原 `<AgentDir>/default.json`）不在这里：它是目录级配置，
-			// 落 meta（model.MetaKeyDefaultAgent，计划 §7 P-8）。
+			// 落 meta 的 `default_agent` 键（**该键与这张表都在 v19 一并删除**，见 v19 那一步）。
 			`CREATE TABLE agents (
 				id         TEXT PRIMARY KEY,
 				body       TEXT NOT NULL,
@@ -651,6 +653,73 @@ var schemaMigrations = []migration{
 		},
 		apply: migrateV17,
 	},
+	{
+		version: 19,
+		name: "agent 概念并入 runtime：DROP agents + 清 default_agent/imported_agents 与 kind='agent' 审计" +
+			" + sessions.agent_id 出列",
+		// 备份：本步**删列**（`sessions.agent_id`）并就地删掉既有行——它改写了既有数据，与
+		// v12/v13/v15/v16/v17 同一档。旧二进制对 v19 库是**拒绝启动**（`latestSchemaVersion`
+		// 前进），所以备份是唯一的回退窗口，`mate doctor` 会打印 `<db>.bak-v19-*`。
+		//
+		// v19 的口径（`docs/design-and-roadmap.md`「决策变更 v19」）：agent 与 runtime 是**同一个
+		// 东西**（底座由构建期固定、用户不可自定义），所以 agent 这个身份整体取消，会话身份只留
+		// `runtime_id`。本步一次到位，**不留兼容层、不要求旧数据可读**。
+		backup: "v19",
+		// 语句全是**字面量**（与 v15–v17 同一条纪律）：`agents` / `agent_id` / `default_agent` /
+		// `imported_agents` / `kind = 'agent'` 都是**当时那一版**的名字，绝不引用
+		// `model.TableName*` 常量或 Go 字段名——引用会让实体改名把这条历史步骤一起改掉。
+		statements: []string{
+			// 1. agent 定义表整体出列：它的行只是"用户对种子的覆盖"，而种子随概念一起消失。
+			`DROP TABLE IF EXISTS agents`,
+
+			// 2. 定义变更审计里 `kind = 'agent'` 的行：这个 kind 以后不存在了，留着它会让
+			//    `definition_revisions` 里出现一种查不到定义、也没人能处置的孤儿记录。
+			`DELETE FROM definition_revisions WHERE kind = 'agent'`,
+
+			// 3. meta 里两个 agent 面键：「当前 Agent」的显式选择与 agent 定义导入标记。
+			`DELETE FROM meta WHERE key IN ('default_agent', 'imported_agents')`,
+
+			// 4. `sessions.agent_id` 出列。
+			//
+			//    用 `DROP COLUMN` 而不是重建表：本仓已实测该列上**没有**索引/约束/生成列/视图
+			//    引用它（sessions 的 4 条索引是 list/origin/fingerprint/workspace，都不含它），
+			//    而 SQLite 3.35+ 的 DROP COLUMN 会原子地重写表定义——重建表要连那 4 条索引与
+			//    别的表里指向 `sessions(id)` 的外键子句一起搬，出错面更大且会动到无关的行。
+			`ALTER TABLE sessions DROP COLUMN agent_id`,
+		},
+	},
+	{
+		version: 20,
+		name:    "凭据去 vault 化：providers.key 进库 + mcp_secrets 表 + MCP 定义体 vault: → store: 前缀重写",
+		// 备份：本步**加列 + 建表 + 就地改写既有行**（MCP 定义体的引用前缀）——改写了既有数据，
+		// 与 v12/v13/v15/v16/v17/v19 同一档。旧二进制对 v20 库**拒绝启动**（`latestSchemaVersion`
+		// 前进），所以备份是唯一的回退窗口。
+		backup: "v20",
+		// 语句全是**字面量**（同一条纪律）：`key` / `mcp_secrets` / `vault:` 都是**当时那一版**
+		// 的名字，绝不引用 `model` 常量或 Go 字段名。
+		statements: []string{
+			// 1. 供应商明文密钥进库（空串 = 没有密钥；"有没有"从此只剩 `key != ''` 一个判据）。
+			//
+			//    用 ALTER 而不是重建表：v13 那张表的列集合是**封闭**的（A1 判据读的就是它的
+			//    建表语句），重建会把"当时那一版"的列集合改写掉，让那条历史判据失去参照。
+			`ALTER TABLE providers ADD COLUMN key TEXT NOT NULL DEFAULT ''`,
+
+			// 2. MCP 密钥独立成表（一列装不下多个引用，且绝不能进 `mcp_servers.body`——body 会进
+			//    `definition_revisions` 与导入导出载体）。键是**引用串本身**：同一个引用可以被多个
+			//    server 共用，"谁引用了它"由定义体决定（与旧 vault 的引用语义逐字相同，纯搬运）。
+			`CREATE TABLE mcp_secrets (
+				ref        TEXT PRIMARY KEY,
+				value      TEXT NOT NULL DEFAULT '',
+				revision   INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
+
+			// 3. 引用词表收口：`vault:` → `store:`（只改前缀，值一个字不动）。一次性就地改写既有
+			//    定义体——留着旧前缀等于在库里留一个指向已删机制的引用，而它的失效方式是**静默**的
+			//    （定义照常读出来，只是运行时再也解析不到那把钥匙）。
+			`UPDATE mcp_servers SET body = replace(body, 'vault:', 'store:')`,
+		},
+	},
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
@@ -713,7 +782,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if m.version == 15 && len(applied) > 0 {
 			s.destructiveRebuildNote = "7 张表已清空（sessions/events/runs/messages/permission_memories/inputs/workspaces）；" +
 				"models 保留但主键已重铸为 mdl_<ULID>（外部握着的旧模型 id 已失效）；" +
-				"providers/skills/mcp_servers/agents/automations 与 vault 原样保留"
+				"providers/skills/mcp_servers/automations 与 vault 原样保留（agents 表由 v19 删除）"
 		}
 	}
 	return nil
@@ -724,35 +793,57 @@ func (s *Store) Migrate(ctx context.Context) error {
 // `mate doctor` 与 serve 的启动 WARN 都读它（§8.5 R1/R2）。
 func (s *Store) DestructiveRebuildNote() string { return s.destructiveRebuildNote }
 
-// backupBeforeMigration 把库文件复制成 `<db>.bak-<tag>-<ts>`，返回该路径。
+// backupBeforeMigration 把库文件复制成 `<db 目录>/backups/<db 文件名>.bak-<tag>-<ts>`，返回该路径。
 //
 // 就地改写既有数据的迁移（v12）在用户库上是**不可逆点**：一旦 v12 落地，旧二进制会因为
 // `latestSchemaVersion` 前进而拒绝启动，唯一的退路就是这份文件（§回退窗口）。
 // 所以它必须是"复制成功才算数"：复制失败 → **不迁移**（留在旧版本上，如实报错），
 // 而不是"先迁了再说"。
 //
+// **落点为什么收进 `backups/` 子目录（v19）**：数据目录根下只放"当前事实"（`mate.db`、
+// 配置、各域的载体目录），而迁移备份是**可丢的历史**——每前进一版就多一个文件，堆在根下
+// 会让"哪个文件是活的"看起来需要判断（本机实测：根下曾累积 7 个 `mate.db.bak-v12…v17`）。
+// 与 `cache/` 的思路同源：可再生的/一次性的东西不跟事实源抢位置。
+//
+// **老布局不搬移**：本次之前的备份仍留在库文件同级，`findMigrationBackups` 照样发现它们
+// （它们是**有效的回退目标**，搬移或删除都得由用户点头）；`mate doctor` 把这类"遗留"如实
+// 报出来并给出处置建议，**绝不自动删**。
+//
 // 内存库（path 为空）不备份：没有文件可复制，而它也不承载用户数据（测试/演示形态）。
 func (s *Store) backupBeforeMigration(m migration) (string, error) {
 	if s.path == "" || s.path == ":memory:" {
 		return "", nil
 	}
-	src, err := os.Open(s.path)
+	// 空库（首次安装）没有可回退的东西：文件还没建出来、或还没有 SQLite 头。
+	if fi, statErr := os.Stat(s.path); statErr != nil || fi.Size() == 0 {
+		return "", nil
+	}
+	dir := s.backupDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("store: 迁移 v%d 前无法创建备份目录 %s（拒绝迁移）: %w", m.version, dir, err)
+	}
+	dst := filepath.Join(dir, fmt.Sprintf("%s.bak-%s-%s",
+		filepath.Base(s.path), m.backup, time.Now().UTC().Format("20060102T150405Z")))
+	abs, err := filepath.Abs(dst)
 	if err != nil {
-		return "", fmt.Errorf("store: 迁移 v%d 前无法打开库文件备份（拒绝迁移）: %w", m.version, err)
+		return "", fmt.Errorf("store: 迁移 v%d 前无法解析备份路径 %s（拒绝迁移）: %w", m.version, dst, err)
 	}
-	defer src.Close()
-	dst := fmt.Sprintf("%s.bak-%s-%s", s.path, m.backup, time.Now().UTC().Format("20060102T150405Z"))
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return "", fmt.Errorf("store: 迁移 v%d 前无法创建备份 %s（拒绝迁移）: %w", m.version, dst, err)
+	// **用 SQLite 自己产快照（`VACUUM INTO`），而不是拷主库文件**（2026-10-14 实测后改）。
+	//
+	// 为什么拷文件是错的：`journal_mode` 是库的**持久属性**（写在文件头里），而 WAL 下已提交的
+	// 事务先落 `-wal`、不立刻回写主文件——本机实测用户库头部就是 WAL（`2 2`），平台自己开的
+	// 新库才是 `delete`，所以"平台不注入 pragma"并不保证打开的是回滚日志模式。此时纯拷主文件
+	// 会**静默**漏掉 `-wal` 里已提交的内容（实测：主文件副本查不到那条已提交的 INSERT，带
+	// `-wal` 的源库查得到）。它不报错，而文件名写着 `bak-v19-<ts>`——用户以为自己握住了
+	// "迁移前那个库"，实际拿到的是更旧的一份，回退窗口在需要它的那天才发现是缺的。
+	// `VACUUM INTO` 取一致性读快照并把 `-wal` 的内容并进去（同一实验里快照**含**那一行）。
+	if err := s.db.Exec(`VACUUM INTO ?`, abs).Error; err != nil {
+		return "", fmt.Errorf("store: 迁移 v%d 前无法产出库快照备份（拒绝迁移）: %w", m.version, err)
 	}
-	if _, err := io.Copy(out, src); err != nil {
-		_ = out.Close()
-		_ = os.Remove(dst)
-		return "", fmt.Errorf("store: 迁移 v%d 的备份写入失败（拒绝迁移）: %w", m.version, err)
-	}
-	if err := out.Close(); err != nil {
-		return "", fmt.Errorf("store: 迁移 v%d 的备份收尾失败（拒绝迁移）: %w", m.version, err)
+	// `VACUUM INTO` 按 umask 建文件，权限要收口到 0600（备份与库文件同权：它装的是同一批数据）。
+	if err := os.Chmod(abs, 0o600); err != nil {
+		_ = os.Remove(abs)
+		return "", fmt.Errorf("store: 迁移 v%d 的备份权限收口失败（拒绝迁移）: %w", m.version, err)
 	}
 	return dst, nil
 }
@@ -771,9 +862,60 @@ func (s *Store) MigrationBackupPath() string { return s.migrationBackupPath }
 // 就换一个版本，钉死会让 doctor 在 v13 之后仍然只报 v12 的备份——而那份备份恢复回去
 // 得到的正是 v12，用户以为找到了退路，实际是退了一版后再被拒启。新的在前（`v13` > `v12`
 // 字典序成立，同版本内时间戳大的在前）。
+//
+// v19 起**新老两个布局都列**（`backups/` 与库文件同级）：老备份仍是有效退路，把它们藏起来
+// 等于让用户以为"没有回退窗口"。
 func (s *Store) MigrationBackupPaths() []string { return s.findMigrationBackups("") }
 
-// findMigrationBackups 列出库文件所在目录里 `<db>.bak-<tag>-*` 形式的备份（新的在前）。
+// MigrationBackupPathsLegacy 只列**老布局**（库文件同级）上的迁移备份（新的在前）。
+//
+// 消费面是 `mate doctor` 的遗留处置提示：这些文件**不是无效的**（照旧可作回退目标），只是
+// 不再按新布局落盘。所以这里只报事实与建议，不做任何自动搬移/删除——回退窗口的处置权在用户。
+func (s *Store) MigrationBackupPathsLegacy() []string {
+	if s.path == "" || s.path == ":memory:" {
+		return nil
+	}
+	matches, err := filepath.Glob(s.legacyBackupGlob(""))
+	if err != nil {
+		return nil
+	}
+	return sortBackupsNewestFirst(matches)
+}
+
+// backupDirName 迁移备份子目录名（v19 起；位于库文件同级）。
+const backupDirName = "backups"
+
+// backupDir 迁移备份目录（v19 起 = `<db 目录>/backups`）。
+func (s *Store) backupDir() string { return filepath.Join(filepath.Dir(s.path), backupDirName) }
+
+// backupGlob 新布局的备份匹配式（`<db 目录>/backups/<db 文件名>.bak-<tag>-*`；tag 空 = 全版本）。
+func (s *Store) backupGlob(tag string) string {
+	return filepath.Join(s.backupDir(), backupGlobPattern(filepath.Base(s.path), tag))
+}
+
+// legacyBackupGlob 老布局（v19 之前）的备份匹配式：`<db 文件>.bak-<tag>-*`，与库文件同级。
+func (s *Store) legacyBackupGlob(tag string) string { return backupGlobPattern(s.path, tag) }
+
+// backupGlobPattern 拼出 `<prefix>.bak-<tag>-*` / `<prefix>.bak-v*`。
+func backupGlobPattern(prefix, tag string) string {
+	if tag != "" {
+		return prefix + ".bak-" + tag + "-*"
+	}
+	return prefix + ".bak-v*"
+}
+
+// sortBackupsNewestFirst 把备份路径按**文件名**倒序（tag 与时间戳都在文件名里 ⇒ 最新在最前）。
+//
+// 刻意不按整串排：v19 起新老布局分处两个目录，整串排序会先按目录名分组，于是"最新"排不到
+// 最前——doctor 报出的回退目标就成了老布局里那个更旧的文件（假信息，且不报错）。
+func sortBackupsNewestFirst(paths []string) []string {
+	out := append([]string{}, paths...)
+	sort.Slice(out, func(i, j int) bool { return filepath.Base(out[i]) > filepath.Base(out[j]) })
+	return out
+}
+
+// findMigrationBackups 列出库文件所在目录（含 `backups/` 子目录）里 `<db>.bak-<tag>-*` 形式的
+// 备份（新的在前）。
 //
 // 用 glob 而不是只认内存里那一份：doctor 常常在**另一次**启动里跑（迁移已经发生过了，
 // 本次进程没有备份记录），而用户问的正是"我该恢复哪个文件"。
@@ -784,16 +926,15 @@ func (s *Store) findMigrationBackups(tag string) []string {
 	if s.path == "" || s.path == ":memory:" {
 		return nil
 	}
-	pattern := s.path + ".bak-v*"
-	if tag != "" {
-		pattern = s.path + ".bak-" + tag + "-*"
+	var out []string
+	for _, pattern := range []string{s.backupGlob(tag), s.legacyBackupGlob(tag)} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		out = append(out, matches...)
 	}
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
-	return matches
+	return sortBackupsNewestFirst(out)
 }
 
 // applyMigration 在单个事务内执行一次迁移的语句与数据步骤，并记录版本。

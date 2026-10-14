@@ -54,15 +54,18 @@ func generationKey(connKey, fingerprint, configDigest string) string {
 	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint + ":" + configDigest
 }
 
-// baseKeyFor 该 agent 在当前配置下的**基础**连接键（runtime + 原生权限 env + provider env）。
+// baseKeyFor 当前配置下的**基础**连接键（runtime + provider env）。
 //
 // 单独成函数是因为它有第二个消费者：代际迁移要判断"这一轮的进程级能力面变了没有"
-// （权限被收回 = 基础键变），而"变没变"的判据只允许有一个实现——两处各算一遍，
+// （权限面变了 = 基础键变），而"变没变"的判据只允许有一个实现——两处各算一遍，
 // 迟早会漂移成"迁移判据说没变、acquire 却换了进程"。
-func (o *Orchestrator) baseKeyFor(agent *AgentRec, spec runtime.Spec) string {
-	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	keyEnv := o.svc.providerEnvFor(spec.ID, agent.Provider)
-	return connKey(spec.ID, nativeEnv, keyEnv)
+//
+// v19 起不再有 per-agent 的权限策略与 provider 绑定：注入面的事实源是**声明的默认模型**的
+// 供应商（见 providerEnvFor / CredentialProblem），所以这个键与"哪个会话在跑"无关——
+// 单底座下它就是"这台机器上的这一份配置"。
+func (o *Orchestrator) baseKeyFor(spec runtime.Spec) string {
+	keyEnv := o.svc.providerEnvFor(spec.ID, o.svc.injectedProviderID(context.Background()))
+	return connKey(spec.ID, keyEnv)
 }
 
 // dedupeStrings 保序去重（小切片，线性扫足够）。
@@ -75,70 +78,6 @@ func dedupeStrings(in []string) []string {
 		}
 		seen[v] = true
 		out = append(out, v)
-	}
-	return out
-}
-
-// generationKeysHoldingAgent 那些**装着该 agent 会话**、且没有别的 agent 会话的代际键。
-//
-// 存在的理由：代际键里含进程级能力面（原生权限 / provider），所以"agent 的会话"与
-// "agent 当前配置的代际键"会随配置漂移而分家——`stopAgent` 只按当前键扫会漏掉旧键下的代际。
-// 判据只看**会话归属**（句柄上的 AgentID），与配置无关，因此不受漂移影响。
-// 与别的 agent 共用的代际不返回（停一个 agent 不该关掉另一个 agent 正在用的进程）。
-func (o *Orchestrator) generationKeysHoldingAgent(agentID string) []string {
-	if agentID == "" {
-		return nil
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	seen := map[string]bool{}
-	var out []string
-	for _, rc := range o.conns {
-		mine, theirs := false, false
-		for _, as := range o.sessions {
-			if as.client != rc.client {
-				continue
-			}
-			if as.AgentID == agentID {
-				mine = true
-			} else {
-				theirs = true
-			}
-		}
-		if mine && !theirs && !seen[rc.key] {
-			seen[rc.key] = true
-			out = append(out, rc.key)
-		}
-	}
-	return out
-}
-
-// generationKeysWarmOwnedBy 该 agent 创建、且**没有任何会话引用**的代际键（暖进程池）。
-//
-// 归属用 `runtimeConn.agentID`（创建者）：无人引用的进程没有别的归属线索，创建者是唯一可用的
-// 那份事实。安全性来自"无人引用"这个前置条件——只要还有任何会话挂在上面（哪怕是别的 agent 的），
-// 这条代际就不在返回集里，停 agent 不会把别人正在用的进程关掉。
-func (o *Orchestrator) generationKeysWarmOwnedBy(agentID string) []string {
-	if agentID == "" {
-		return nil
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	var out []string
-	for _, rc := range o.conns {
-		if rc.agentID != agentID {
-			continue
-		}
-		referenced := false
-		for _, as := range o.sessions {
-			if as.client == rc.client {
-				referenced = true
-				break
-			}
-		}
-		if !referenced {
-			out = append(out, rc.key)
-		}
 	}
 	return out
 }
@@ -292,17 +231,17 @@ func (o *Orchestrator) generationKeysFor(base string) []string {
 //
 // fingerprint = 该会话钉住的能力指纹（M1 恒为空：显式能力选择是 M3 的面）。空值走的是
 // generationKey 的原样返回分支，所以缺省路径与"代际机制之前"完全等价。
-func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtime.Spec, fingerprint string) (*runtimeConn, error) {
-	// 凭据面先校验（P2）：agent 绑定了 provider 档案而档案缺失/无 key 属配置错误 → 显式
+func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerprint string) (*runtimeConn, error) {
+	// 凭据面先校验（P2）：**默认模型所在的那条档案**缺失/无 key 属配置错误 → 显式
 	// credential_missing（文案含出路），不静默以「无密钥」姿态起进程。放 acquire 内可一处
-	// 覆盖三条入口：新建会话、按需恢复、StartAgent 暖启动。
-	if err := o.svc.CredentialProblem(agent); err != nil {
+	// 覆盖两条入口：新建会话、按需恢复。
+	if err := o.svc.CredentialProblem(ctx); err != nil {
 		return nil, err
 	}
-	// 基础键（进程级能力面：原生权限开关 + provider 注入面）——先算 env 再定缓存键：
-	// 权限开关是进程级，配置不同的 agent 不能复用同一子进程。模型不进 env/缓存键：
-	// 模型选择是**会话级**语义（session/set_config_option），同一连接可服务多个模型。
-	baseKey := o.baseKeyFor(agent, spec)
+	// 基础键（进程级能力面：provider 注入面）——先算 env 再定缓存键：注入面变了就不能复用
+	// 同一子进程。模型不进 env/缓存键：模型选择是**会话级**语义
+	//（session/set_config_option），同一连接可服务多个模型。
+	baseKey := o.baseKeyFor(spec)
 	cfgDigest := o.svc.runtimeConfigDigest(spec.ID)
 	key := generationKey(baseKey, fingerprint, cfgDigest)
 
@@ -321,13 +260,11 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	if err := o.admitGeneration(baseKey); err != nil {
 		return nil, err
 	}
-	nativeEnv := o.svc.nativePermissionEnvFor(spec.ID, agent.PermissionPolicy)
-	keyEnv := o.svc.providerEnvFor(spec.ID, agent.Provider)
+	keyEnv := o.svc.providerEnvFor(spec.ID, o.svc.injectedProviderID(ctx))
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
 	var env []string
 	env = append(env, keyEnv...)
-	env = append(env, nativeEnv...)
 
 	reqPerm := func(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 		if o.allowAll {
@@ -348,7 +285,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 			// 仍按取消回应（不能把 agent 挂死），但置 ScopeAmbiguous 并留痕（agent 诊断 + 日志），
 			// 让「提问卡为什么没出现」可查，而不是无痕消失。
 			glog.Warnw(ctx, "elicitation: 无法归属会话，按取消处理", "scope_source", source, "note", note)
-			o.svc.noteScopeAmbiguous(agent.ID, note)
+			o.svc.noteScopeAmbiguous(note)
 			return acl.ElicitationOutcome{Action: "cancel"}
 		}
 		req.SessionID, req.ScopeSource = sid, source
@@ -366,7 +303,7 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 	// spawn + 握手由 runtime.Connect 承载（可执行投影的拨号底座，语义与此前内联实现一致）。
 	dialCtx := context.WithoutCancel(ctx)
 	client, err := runtime.Connect(dialCtx, spec, args, env, acl.ClientOptions{
-		OnEvent:             o.eventSink(agent.ID, spec.ID),
+		OnEvent:             o.eventSink(spec.ID),
 		RequestPermission:   reqPerm,
 		CreateElicitation:   reqElic,
 		CompleteElicitation: completeElic,
@@ -390,8 +327,8 @@ func (o *Orchestrator) acquire(ctx context.Context, agent *AgentRec, spec runtim
 		"fork", sc.Fork != nil,
 		"close", sc.Close != nil)
 
-	o.svc.setAgentState(agent.ID, AgentStateRunning)
-	rc = &runtimeConn{client: client, agentID: agent.ID, spec: spec, key: key, baseKey: baseKey,
+	o.svc.setRuntimeState(AgentStateRunning)
+	rc = &runtimeConn{client: client, spec: spec, key: key, baseKey: baseKey,
 		configDigest: cfgDigest, started: time.Now()}
 	o.registerProc(rc)
 	o.mu.Lock()
@@ -416,19 +353,20 @@ func (o *Orchestrator) busySessionForClient(client *acl.Client) string {
 	return o.inflight.SoleOwner(client)
 }
 
-// connForAgent 返回该 agent 已建立的 runtime 连接（无 → nil）。用于读取握手上冻结的能力
-// 断言（如鉴权引导）：不主动拨号，避免「查一次目录就起一个进程」。
-func (o *Orchestrator) connForAgent(agentID string) *runtimeConn {
+// connForRuntime 返回该 runtime 已建立的连接（无 → nil；runtimeID 空 = 任一条）。
+// 用于读取握手上冻结的能力断言（如鉴权引导）：不主动拨号，避免「查一次目录就起一个进程」。
+func (o *Orchestrator) connForRuntime(runtimeID string) *runtimeConn {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, rc := range o.conns {
-		if rc.agentID == agentID {
-			select {
-			case <-rc.client.Done():
-				continue // 已断开：视为无连接
-			default:
-				return rc
-			}
+		if runtimeID != "" && rc.spec.ID != runtimeID {
+			continue
+		}
+		select {
+		case <-rc.client.Done():
+			continue // 已断开：视为无连接
+		default:
+			return rc
 		}
 	}
 	return nil
@@ -453,60 +391,7 @@ func (o *Orchestrator) unregisterSessionProvider(sessionID string) {
 	}
 }
 
-// DetachAgent 摘除某 agent 的全部活跃会话（agent 被删除时由 Service.DeleteAgent 调用）。
-//
-// 语义（P2 删除面）：归属不可变——平台不改写会话的 agent_id，也不静默改绑到别的 agent；
-// 但删除必须**立刻**生效：把内存里仍活着的会话摘出登记，使后续 prompt 走
-// ensureSession → agent_not_found（并带上「同 id 重建 / 导出历史」的出路），而不是让它在
-// 半死连接上一直跑到进程重启。
-//
-// 有在途 run 时整体拒绝（agent_busy，先 cancel/等收尾）：不删到一半的轮次，此时不动任何登记。
-// 返回被摘除的会话数；底层 ACP 会话不在此关闭（连接可能被同 runtime 的其他 agent 复用，
-// 会话生命周期归底座自身与空闲回收）。
-func (o *Orchestrator) DetachAgent(agentID string) (int, error) {
-	if agentID == "" {
-		return 0, nil
-	}
-	o.mu.Lock()
-	victims := make([]*ActiveSession, 0, 4)
-	for _, as := range o.sessions {
-		if as.AgentID == agentID {
-			victims = append(victims, as)
-		}
-	}
-	o.mu.Unlock()
-	if len(victims) == 0 {
-		return 0, nil
-	}
-	// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
-	for _, as := range victims {
-		as.mu.Lock()
-		busy := as.busy || as.run != nil
-		as.mu.Unlock()
-		if busy {
-			return 0, acl.NewError(acl.ClassLimit, "agent_busy",
-				fmt.Sprintf("agent %q 的会话 %q 有在途 run，先取消/等待收尾再删除", agentID, as.ID), nil)
-		}
-	}
-	o.mu.Lock()
-	detached := 0
-	for _, as := range victims {
-		if o.sessions[as.ID] == as {
-			delete(o.sessions, as.ID)
-			detached++
-		}
-	}
-	o.mu.Unlock()
-	for _, as := range victims {
-		// 原生 → 平台映射一并清除：迟到事件不再路由回已摘除的会话。
-		o.unregisterSessionProvider(as.ID)
-	}
-	glog.Infow(context.Background(), "agent 已删除：活跃会话已摘除（后续 prompt 报 agent_not_found）",
-		"agent", agentID, "detached", detached)
-	return detached, nil
-}
-
-// watchConn 监听连接断开：清理注册、失活其上会话、标记 agent stopped。
+// watchConn 监听连接断开：清理注册、失活其上会话、标记 runtime stopped。
 func (o *Orchestrator) watchConn(rc *runtimeConn) {
 	<-rc.client.Done()
 	o.dropConn(rc)
@@ -514,7 +399,7 @@ func (o *Orchestrator) watchConn(rc *runtimeConn) {
 
 func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	o.unregisterProc(rc)
-	// 拆除原因由拆除方在关闭连接前置位（Close/stopAgent/reapIdleOnce = 主动；watchConn 观察到
+	// 拆除原因由拆除方在关闭连接前置位（Close/reapIdleOnce = 主动；watchConn 观察到
 	// 对端结束 = 意外）。它决定会话状态怎么收尾——见 disconnectSession。
 	intentional := rc.intentional.Load()
 	o.mu.Lock()
@@ -537,13 +422,13 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 		o.disconnectSession(as, intentional)
 	}
 	// 状态回落仅当仍是该 runtime 的当前连接（旧连接收尾不得覆盖新连接的 running——
-	// 空闲回收后立刻被 StartAgent/会话按需重拨的场景）。
+	// 空闲回收后立刻被会话按需重拨的场景）。
 	if ownerBefore {
-		o.svc.setAgentState(rc.agentID, AgentStateStopped)
+		o.svc.setRuntimeState(AgentStateStopped)
 	}
 	if len(victims) > 0 {
 		glog.Infow(context.Background(), "连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",
-			"runtime", rc.spec.ID, "agent", rc.agentID,
+			"runtime", rc.spec.ID,
 			"cause", connCauseLabel(intentional), "sessions", len(victims))
 	}
 }
@@ -584,15 +469,15 @@ func (o *Orchestrator) disconnectSession(as *ActiveSession, intentional bool) {
 	}
 	if !intentional {
 		ae := acl.NewError(acl.ClassConnection, "connection_lost",
-			"agent 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
+			"runtime 连接断开（会话句柄已作废；下次 prompt 按需重建）", nil)
 		var tail []string
 		if as.client != nil {
 			tail = acl.TailLines(as.client.StderrTail(), maxDiagStderrLines)
 		}
 		ae.StderrTail = tail
-		o.svc.recordAgentError(as.AgentID, as.ID, ae, tail)
+		o.svc.recordRuntimeError(as.ID, ae, tail)
 		glog.Warnw(context.Background(), "连接意外断开：空闲会话保持原状态（会话可续聊）",
-			"session", as.ID, "agent", as.AgentID, "runtime", as.Runtime)
+			"session", as.ID, "runtime", as.Runtime)
 	}
 }
 
@@ -632,142 +517,5 @@ func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {
 		// 作废的只是 runtime 执行句柄，会话与状态都在（重启后按需续聊）。
 		glog.Infow(context.Background(), "停机：会话句柄作废（会话与状态保留，重启后按需续聊）",
 			"runtime", rc.spec.ID, "cause", connCauseLabel(intentional), "sessions", len(victims))
-	}
-}
-
-// stopAgent 停止某 agent 对应 runtime 的进程（P2 启停）：
-// 无连接 → 幂等置 stopped；有在途 run → agent_busy 拒绝（先 cancel/等收尾）；
-// 空闲 → 关连接（显式停机：会话句柄作废但状态如实保留；下次会话自动按需重拨）。
-func (o *Orchestrator) stopAgent(ctx context.Context, agent *AgentRec, spec runtime.Spec) error {
-	base := o.baseKeyFor(agent, spec)
-	keys := o.generationKeysFor(base)
-	// 基础键漂移（权限被收窄过 / provider 档案换过）时，旧基础键下的代际不在 `keys` 里，
-	// 但它们装的仍是**这个 agent 的会话**——只按"当前配置"扫会漏掉它们，表现是
-	// "agent 已停，旧权限面的进程还活着，直到空闲回收才走"（代际机制引入后新出现的一类漏）。
-	// 补扫规则刻意保守：只收「这条代际上没有别的 agent 的会话」的那些，
-	// 绝不因为停 A 而关掉 A、B 共用的暖进程（那是 B 正在用的东西）。
-	keys = append(keys, o.generationKeysHoldingAgent(agent.ID)...)
-	// 还有第三类：本 agent 创建、当前**无人引用**的代际（StartAgent 暖进程）。基础键漂移后
-	// 它们落在旧键下，前两类都扫不到（没有会话可归属）——不补这一扫，表现是"agent 已停，
-	// 旧权限面的暖进程还在跑到空闲回收"。判据（创建者 + 无人引用）保守：有会话挂着的都不动。
-	keys = append(keys, o.generationKeysWarmOwnedBy(agent.ID)...)
-	keys = dedupeStrings(keys) // 三个来源可能重叠；重复项会让下面同一连接被关两次
-	if len(keys) == 0 {
-		// 没有可关的代际 ≠ 没有事要做：本 agent 的会话可能正挂在**与别的 agent 共用**的代际上
-		// （同 runtime + 同权限 + 同 provider），那些进程要留给别人，但"停"对本 agent 的句柄同样生效。
-		o.evictAgentHandles(agent.ID, nil)
-		o.svc.setAgentState(agent.ID, AgentStateStopped)
-		return nil
-	}
-	// 该配置下**所有代际**都要关（代际是按能力指纹内容寻址的，同一 agent 的旧代际可能仍活着）；
-	// 任一代际上有在途 run 就整体拒绝——显式停机不该把跑着的一轮打断，也不该"关一半留一半"。
-	o.mu.Lock()
-	rcs := make([]*runtimeConn, 0, len(keys))
-	busy := 0
-	for _, k := range keys {
-		rc := o.conns[k]
-		if rc == nil {
-			continue
-		}
-		rcs = append(rcs, rc)
-		busy += o.inflight.Len(rc.client)
-	}
-	o.mu.Unlock()
-	if len(rcs) == 0 {
-		o.svc.setAgentState(agent.ID, AgentStateStopped)
-		return nil
-	}
-	if busy > 0 {
-		return acl.NewError(acl.ClassLimit, "agent_busy",
-			fmt.Sprintf("agent %q 的 runtime %q 有 %d 个在途 run，先取消/等待收尾", agent.ID, spec.ID, busy), nil)
-	}
-	for _, rc := range rcs {
-		// 用户显式停 agent：先置原因再关（watchConn→dropConn 据此判定，不把会话写成失败态）。
-		rc.intentional.Store(true)
-		if err := rc.client.Close(); err != nil {
-			return err
-		}
-	}
-	// watchConn → dropConn 会作废会话句柄并置 stopped；这里等它们跑完再返回。
-	for _, rc := range rcs {
-		select {
-		case <-rc.client.Done():
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	// 共用代际上的本 agent 句柄：那些进程没关（留给别的 agent），但句柄不能继续挂在上面——
-	// 否则"停 agent"对它们形同没停（下一次 prompt 会以为会话还活着，继续用旧权限面的进程）。
-	o.evictAgentHandles(agent.ID, rcs)
-	o.svc.setAgentState(agent.ID, AgentStateStopped)
-	return nil
-}
-
-// evictIdleCapabilityHandles 作废该 agent **空闲**会话的句柄，让下一次 prompt 按**当前**定义
-// 重建会话（M6-8 / P-13，判据说明见 `agent_capability_notify.go` 文件头）。
-//
-// 与 `stopAgent`/`DetachAgent` 的分工：那两条是"用户显式停了 agent/删了 agent"，要关进程或摘登记；
-// 这条只是"定义换了，让活着的句柄在下一次重建时取到新值"，**不关进程、不删登记、不动会话记录**
-// （会话可续聊是 ADR-4 的承诺）。
-//
-// 返回（作废数, 顺延数）。顺延的判据与代际迁移纪律③**逐条相同**（有在途轮次 / 有未应答的权限或
-// 提问 → 不动）：同一条会话在两个机制下必须给出同样的裁决，否则"这一轮到底换没换面"会变成
-// 两处各说一套。探针读不到（句柄 `dead`）时不算顺延也不算作废（`disconnectSession` 自己幂等）。
-func (o *Orchestrator) evictIdleCapabilityHandles(agentID, field string) (evicted, deferred int) {
-	if agentID == "" {
-		return 0, 0
-	}
-	o.mu.Lock()
-	victims := make([]*ActiveSession, 0, 4)
-	for _, as := range o.sessions {
-		if as.AgentID == agentID {
-			victims = append(victims, as)
-		}
-	}
-	o.mu.Unlock()
-	for _, as := range victims {
-		// 在途判定在 o.mu 之外做（as.mu 与 o.mu 不同级，避免交错持锁）。
-		as.mu.Lock()
-		busy := as.busy || as.run != nil
-		as.mu.Unlock()
-		if busy || o.perm.pendingCount(as.ID) > 0 || o.elic.pendingCount(as.ID) > 0 {
-			deferred++
-			continue
-		}
-		// 主动拆除：句柄作废、挂起的权限/提问一并收敛，会话记录与状态原样保留。
-		o.disconnectSession(as, true)
-		evicted++
-	}
-	if evicted > 0 || deferred > 0 {
-		glog.Infow(context.Background(), "能力面变更：会话句柄将按当前定义重建",
-			"agent", agentID, "field", field, "evicted", evicted, "deferred", deferred)
-	}
-	return evicted, deferred
-}
-
-// evictAgentHandles 作废该 agent 在**未关闭**连接上的会话句柄（`closing` 里的连接由 dropConn 收尾，
-// 这里跳过以免重复处理）。刻意不关进程、不删会话记录：会话可续聊（下次 prompt 重建），
-// 共用该进程的别的 agent 不受影响。
-func (o *Orchestrator) evictAgentHandles(agentID string, closing []*runtimeConn) {
-	if agentID == "" {
-		return
-	}
-	skip := make(map[*acl.Client]bool, len(closing))
-	for _, rc := range closing {
-		if rc.client != nil {
-			skip[rc.client] = true
-		}
-	}
-	o.mu.Lock()
-	var victims []*ActiveSession
-	for _, as := range o.sessions {
-		if as.AgentID != agentID || skip[as.client] {
-			continue
-		}
-		victims = append(victims, as)
-	}
-	o.mu.Unlock()
-	for _, as := range victims {
-		o.disconnectSession(as, true) // 主动停机：句柄作废，会话与状态保留
 	}
 }

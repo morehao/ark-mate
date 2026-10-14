@@ -19,7 +19,7 @@ func fpInput() FingerprintInput {
 				Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
 				// 故意乱序：这两个切片由调用方从 map 展开，顺序随机。
 				EnvKeys:    []string{"TOKEN", "DEBUG", "HOME"},
-				SecretRefs: []string{"vault:ns/fs-key", "env:FS_TOKEN"},
+				SecretRefs: []string{"store:ns/fs-key", "env:FS_TOKEN"},
 			},
 			{ID: "web", Transport: "http", URL: "https://example.invalid/mcp"},
 		},
@@ -87,7 +87,7 @@ func TestCapabilityFingerprintSensitive(t *testing.T) {
 		}},
 		{"MCP url 变", func(in *FingerprintInput) { in.Mcps[1].URL = "https://other.invalid/mcp" }},
 		{"MCP env 键名变", func(in *FingerprintInput) { in.Mcps[0].EnvKeys = []string{"TOKEN", "DEBUG"} }},
-		{"MCP 密钥引用名变", func(in *FingerprintInput) { in.Mcps[0].SecretRefs = []string{"vault:ns/other"} }},
+		{"MCP 密钥引用名变", func(in *FingerprintInput) { in.Mcps[0].SecretRefs = []string{"store:ns/other"} }},
 		{"runtime id 变", func(in *FingerprintInput) { in.Runtimes[0].ID = "dsh" }},
 		{"runtime 版本变", func(in *FingerprintInput) { in.Runtimes[0].Version = "合成底座 v2" }},
 		{"CapabilityScope 变", func(in *FingerprintInput) { in.Runtimes[0].Scope = CapabilityScopeSession }},
