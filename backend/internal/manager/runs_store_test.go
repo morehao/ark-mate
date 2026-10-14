@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -71,6 +72,66 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	memSvc := NewService(reg, nil)
 	if empty, err := memSvc.ListRuns(ctx, "s-run"); err != nil || len(empty) != 0 {
 		t.Fatalf("内存模式 ListRuns 应为空: %+v err=%v", empty, err)
+	}
+}
+
+// TestRunWindowStartsAtUserMessage 轮界裁剪：一轮从**首条用户消息**起算，窗口起点与本轮输入之间
+// 夹着的**会话级**事件（session.created / session.resumed）不属于这一轮。
+//
+// 不裁掉它们的两个实测后果（2026-10-14 用户报「只问一个问题，messages 里却有三条」）：
+//   - messages 物化把 session.created 当成一条 assistant 时间线 → 落出一条正文为空的行；
+//   - runID 取裁剪前的首事件 seq，与 first_seq（首条用户消息）错位。
+func TestRunWindowStartsAtUserMessage(t *testing.T) {
+	dbPath := testutil.TempDBPath(t)
+	ctx := context.Background()
+	reg := testutil.StubRegistry()
+	st := testutil.OpenStore(t, dbPath)
+	defer st.Close()
+	svc := NewService(reg, eventbus.New())
+	svc.EnableStore(st)
+	svc.registerSession(&SessionRec{ID: "s-win"})
+
+	// 会话前置事件（真实路径由 session_start / ensureSession 发出，先于本轮 user_message）。
+	svc.publish(BusSessionCreated, "s-win", map[string]any{"session_id": "s-win", "runtime": "stub"})
+	svc.publish(BusSessionResumed, "s-win", map[string]any{"session_id": "s-win", "reason": "restart"})
+	u := svc.publish(BusUserMessage, "s-win", map[string]any{"text": "你好"})
+	svc.publish(BusMessage, "s-win", map[string]any{"msg_id": "m1", "text": "你好呀"})
+	end := svc.publish(BusRunEnded, "s-win", map[string]any{"stop_reason": "end_turn"})
+
+	runs, err := st.ListRuns(ctx, "s-win")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("应 1 条 run: n=%d err=%v", len(runs), err)
+	}
+	r := runs[0]
+	if r.FirstSeq != u.Seq || r.LastSeq != end.Seq {
+		t.Fatalf("run 窗口应为「首条用户消息 → 终态」: %+v (u=%d end=%d)", r, u.Seq, end.Seq)
+	}
+	if want := fmt.Sprintf("r-s-win-%d", u.Seq); r.ID != want {
+		t.Fatalf("runID 应与 first_seq 同源 %q，got %q", want, r.ID)
+	}
+	// 轮起点 = 首条用户消息的时刻（会话前置那两条不算进本轮时长/首令牌耗时）。
+	evs, _, err := st.EventsAfter(ctx, "s-win", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userEv model.EventEntity
+	for _, e := range evs {
+		if e.Seq == u.Seq {
+			userEv = e
+		}
+	}
+	if userEv.Seq == 0 || !r.StartedAt.Equal(userEv.CreatedAt) {
+		t.Fatalf("run 起点应为用户消息时刻 %s，got %s", userEv.CreatedAt, r.StartedAt)
+	}
+	rows, err := st.ListMessages(ctx, "s-win")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Role != "user" || rows[1].Role != "assistant" {
+		t.Fatalf("messages 应只有 user + assistant 两行（无空 assistant 前置行）: %+v", rows)
+	}
+	if rows[1].Text != "你好呀" {
+		t.Fatalf("assistant 行正文不符: %q", rows[1].Text)
 	}
 }
 

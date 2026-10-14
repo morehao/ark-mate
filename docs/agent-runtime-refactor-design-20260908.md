@@ -1895,6 +1895,17 @@ typecheck/build/bundle 断言 + 数据面 e2e 覆盖，未做真实浏览器像�
 50 条/页，无虚拟滚动（长会话靠既有尾部窗口折叠）；③ 空视图点击「加载更早」等价于取末尾一页（冷挂载兜底），
 不做「首次进入自动加载最早页」；④ 未做 `before` + `after` 组合区间查询。
 
+**补记（2026-10-14）：按钮的判据此前只有 `loadOlder` 会写。** `historyStart[id]` 的唯一写入点是
+「翻到最早」（`loadOlder` 拿到 `has_more=false`），于是**任何**有内容的会话在被人点一次之前都会挂着
+「加载更早的消息」——包括只有一条提问的新会话（点一下才消失，且那次请求只会取回一条
+`session.created`，界面上看起来什么都没发生）。现在按**冷挂载的事实**判定：`activate` 冷挂载一律
+`since_seq=0` 全量回放，因此服务端回**事件**（而不是 `snapshot`）就等于「该会话在缓冲里的历史已经
+全给了」→ 置 `historyStart[id]=true`；回 `snapshot`（起点已被淘汰）→ 置 `false`（更早的仍在，按钮该显示），
+两个分支都写在 `store.applyFrame` 里，且顺序无关（后到的 snapshot 覆盖先前误判）。新建会话
+（`createAndRun`）直接置 `true`：返回的 `event_seq` 已覆盖「建会话 + 首条提问」那一批事件的最后一个
+（`session.created` 与 user_message 回显都在其中），之前没有任何属于这个会话的事件。
+真 Chrome + 真核实测：4 个存量会话冷开均不再出现该按钮；反证（去掉事件分支那行）当场复现按钮。
+布局：`session.created` 在前端没有 `applyEvent` 分支、不渲染任何东西，所以「已到最早」与「看不见更早的内容」并不矛盾。
 #### 19.23 切片 C3：elicitation scope 归属（完成）
 
 **动机**：结构化提问的「归属会话」此前只用于**发布**事件（`session.elicitation_request` 的 agg），
