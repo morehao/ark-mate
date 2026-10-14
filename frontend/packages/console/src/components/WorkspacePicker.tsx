@@ -5,6 +5,7 @@ import {
   ArrowUpOutlined,
   CheckOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   FolderOpenOutlined,
   FolderOutlined,
@@ -40,6 +41,20 @@ interface Props {
   value: WorkspaceChoice
   onChange: (value: WorkspaceChoice) => void
   disabled?: boolean
+  /**
+   * 触发形态（v21）：
+   *  - `chip`（默认在对话框页面）＝ 贴在输入卡上沿左上角的**事实** chip（目录图标 + 名字 + ⌄），
+   *    静息无边框、hover 才出软底（对齐 DSH 的 `WorkspaceChip`）；
+   *  - `pill` ＝ 底栏表单控件形态的药丸（自动化目标字段这类"填一个值"的地方仍用它）。
+   */
+  variant?: 'pill' | 'chip'
+  /**
+   * 是否允许**新建**工作空间（弹层里那条「＋ 添加工作空间…」，它会抬宿主目录面板 / 开应用内浏览框）。
+   *
+   * 对话框页面（新建会话面板）传 `false`：那里只允许在**既有**登记项之间切换——建目录要抬系统面板，
+   * 属于左栏「＋」与设置的事，不该从输入区伸手到宿主文件系统。默认 `true`（其它调用方面不改）。
+   */
+  allowCreate?: boolean
 }
 
 /** 一条登记的展示名：'' = 未命名 → 末级目录名；默认工作空间由服务端已渲染好。 */
@@ -70,12 +85,13 @@ export function workspaceLabel(ws: Workspace): string {
  * 也是原生权限 `workspace-write` 的沙箱边界）——所以这个选择器只出现在新建流程，
  * 已建会话里只做只读展示（见 Composer 的 workspace 药丸）。
  */
-export function WorkspacePicker({ value, onChange, disabled }: Props) {
+export function WorkspacePicker({ value, onChange, disabled, variant = 'pill', allowCreate = true }: Props) {
   const showToast = useMate((s) => s.showToast)
   const workspaces = useMate((s) => s.workspaces)
   const loadWorkspaces = useMate((s) => s.loadWorkspaces)
   const createWorkspace = useMate((s) => s.createWorkspace)
 
+  const chip = variant === 'chip'
   const [open, setOpen] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -95,11 +111,14 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
   // 当前选中项（登记 id 优先；未登记的路径字面量只有自动化的目标会走到）。
   const current = value?.id ? items.find((w) => w.id === value.id) : undefined
   const currentPath = current?.path ?? value?.path ?? ''
-  const currentName = current
-    ? workspaceLabel(current)
-    : value?.path
-      ? splitDirPath(value.path).name
-      : '选择目录'
+  const currentName = (() => {
+    if (current) return workspaceLabel(current)
+    if (value?.path) return splitDirPath(value.path).name
+    // 未显式选中 = 会话落在**默认工作空间**（不是"什么都没选"）：chip 与弹层「当前」那一节
+    // 读法一致，不给它留一个"选择工作空间"的空态去假装它不是个值；药丸形态保持原样。
+    if (!chip) return '选择目录'
+    return defaultWS ? workspaceLabel(defaultWS) : '平台分配的目录'
+  })()
 
   const close = () => setOpen(false)
 
@@ -172,7 +191,8 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
         <div className="fg-ws-empty">
           还没有工作空间。
           <br />
-          选一个目录作为你的第一个工作空间。
+          {/* 能不能建由这一面说了算：对话框页面只切换既有项，所以指路到左栏，不在这里假装有入口。 */}
+          {allowCreate ? '选一个目录作为你的第一个工作空间。' : '可在左栏工作空间标题的「＋」添加。'}
         </div>
       )}
       {items.map((ws) => {
@@ -204,9 +224,10 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
         )
       })}
 
-      {/* 添加工作空间：writable=false（memory 持久层）时**整项不出现**（设计 ADR-11）
-          ——不给一个必然失败的按钮，底下用一句原因说明为什么没有它。 */}
-      {writable ? (
+      {/* 添加工作空间：**由调用方决定这一面有没有创建权**（对话框页面没有），
+          其次 writable=false（memory 持久层）时也整项不出现（设计 ADR-11）——两处都不给
+          一个必然失败的按钮，后者底下用一句原因说明为什么没有它。 */}
+      {allowCreate && writable && (
         <>
           <div className="fg-ws-sep" />
           <button
@@ -221,10 +242,9 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
             </span>
           </button>
         </>
-      ) : (
-        workspaces !== null && (
-          <div className="fg-ws-hint">当前持久层为 memory，工作空间不可创建（登记表只读）。</div>
-        )
+      )}
+      {allowCreate && !writable && workspaces !== null && (
+        <div className="fg-ws-hint">当前持久层为 memory，工作空间不可创建（登记表只读）。</div>
       )}
 
       {/* 未指定也是有工作目录的（默认工作空间），必须给回这条路，
@@ -261,7 +281,8 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
         open={open}
         onOpenChange={setOpen}
         trigger="click"
-        placement="topLeft"
+        // chip 在输入卡**上沿**，弹层必须朝下开；药丸在底栏，朝上开（各自贴着自己那侧）。
+        placement={chip ? 'bottomLeft' : 'topLeft'}
         content={menu}
         arrow={false}
         styles={{ content: { padding: 6 } }}
@@ -274,17 +295,29 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
                 ? `未指定：会话落在「${workspaceLabel(defaultWS)}」（${defaultWS.path}）`
                 : '未指定：每个会话在创建时由平台分配一个独立工作目录'
           }
-          placement="top"
+          // chip 的弹层朝下，tooltip 朝上会被挡；两者错开。
+          placement={chip ? 'bottom' : 'top'}
         >
-          <button type="button" className="fg-ws-pill" disabled={disabled}>
-            <FolderOpenOutlined style={{ fontSize: 12, color: tokens.textPlaceholder }} />
-            <span className="fg-ws-pill-name">{currentName}</span>
+          <button
+            type="button"
+            className={chip ? 'fg-ws-chip' : 'fg-ws-pill'}
+            disabled={disabled}
+            aria-expanded={open}
+            aria-haspopup="menu"
+          >
+            {currentPath ? (
+              <FolderOpenOutlined style={{ fontSize: chip ? 16 : 12, color: chip ? tokens.textSecondary : tokens.textPlaceholder }} />
+            ) : (
+              <FolderOutlined style={{ fontSize: chip ? 16 : 12, color: chip ? tokens.textSecondary : tokens.textPlaceholder }} />
+            )}
+            <span className={chip ? 'fg-ws-chip-name' : 'fg-ws-pill-name'}>{currentName}</span>
+            {chip && <DownOutlined style={{ fontSize: 11, color: tokens.textPlaceholder }} />}
           </button>
         </Tooltip>
       </Popover>
       {/* 目录对话框与菜单分开：菜单关闭后它仍在（选定失败要能继续挑别的目录）。
           start 传当前选中目录：从"我上次选的那一层"开始，而不是每次都回到家目录。 */}
-      {browsing && (
+      {allowCreate && browsing && (
         <DirectoryBrowser
           start={currentPath || undefined}
           title="添加工作空间"
@@ -295,6 +328,41 @@ export function WorkspacePicker({ value, onChange, disabled }: Props) {
         />
       )}
     </>
+  )
+}
+
+/**
+ * 只读的工作空间 chip（会话页输入卡左上角）。
+ *
+ * 与 `WorkspacePicker` 的 chip 形态**同一个类**（`.fg-ws-chip`），但它是**事实回声**而不是控件：
+ * 已建会话的工作空间在创建时定稿、之后不可变（它是底座 ACP session 的 cwd，也是原生权限
+ * `workspace-write` 的沙箱边界），所以这里没有下拉、没有 hover 反馈——要换目录就新开一个会话。
+ *
+ * 形态对齐 DSH：它的工作空间 chip 在首条消息之后也是锁定的静态回声（`.workspace:disabled`）。
+ */
+export function WorkspaceChipStatic({ path, temporary, title }: { path: string; temporary?: boolean; title?: string }) {
+  return (
+    <Tooltip
+      title={
+        <span style={{ fontFamily: tokens.fontMono, fontSize: 11 }}>
+          {title ?? path}
+          {temporary && (
+            <>
+              <br />
+              <span style={{ fontFamily: tokens.fontFamily, color: tokens.textPlaceholder }}>
+                平台分配：会话创建时自动分配，创建后不可更改
+              </span>
+            </>
+          )}
+        </span>
+      }
+      placement="top"
+    >
+      <span className="fg-ws-chip fg-ws-chip-static">
+        <FolderOpenOutlined style={{ fontSize: 16, color: tokens.textSecondary }} />
+        <span className="fg-ws-chip-name">{temporary ? '平台分配的目录' : splitDirPath(path).name || path}</span>
+      </span>
+    </Tooltip>
   )
 }
 

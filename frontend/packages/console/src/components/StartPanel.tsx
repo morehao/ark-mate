@@ -5,7 +5,6 @@ import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { modelValues } from '@ark-mate/types'
 import { useMate } from '../store'
-import { RuntimeBadge } from './RuntimeBadge'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
@@ -30,9 +29,11 @@ const EXAMPLES = [
  * 未选中会话时的问答区就是这个面板——不再有独立的「开始问答」空态页，
  * 也不再单独占一条路由（`/sessions` 无 id 即新建）。
  *
- * v19：这里原来标"当前 Agent"并给一个「切换 Agent」入口（切到设置 · Agent 管理）。
- * 底座构建期固定、用户不可自定义之后，那句话与那个入口都没有接收方了，同一个位置改成
- * 如实标出**底座身份**——面板上仍然看得出"这条会话跑在哪个底座上"，但没有任何可切的东西。
+ * v21：形制对齐 DSH 的 composerStack——**工作空间 chip 贴在输入卡上沿左上角**（不再是底栏里的
+ * 一颗药丸 + 一个「在项目中工作」标签），卡片内部只剩输入与底栏。同一版删掉了这里原来那行底座
+ * 信息：底座由构建期固定、用户没有可选项，对话框页面就不必常驻报它（底座事实在会话详情与会话头
+ * 仍可见）。工作空间这一面**只切换既有登记项**（`allowCreate={false}`）——建目录要抬宿主目录面板，
+ * 那是左栏「＋」与设置的事。
  */
 export function StartPanel() {
   const navigate = useNavigate()
@@ -167,163 +168,136 @@ export function StartPanel() {
           Hi，今天有什么安排？
         </h1>
 
-        {/* 新建会话落在哪个底座上：如实标出，但**没有**选择器（底座由构建期固定）。
-            取不到装配事实时不另开一条空态分支——徽标自己会说"未知"，
-            而"服务不可达"与"没有底座"是两件事，用同一句话盖掉会把排查方向带偏。 */}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 10,
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            marginTop: -8,
-          }}
-        >
-          <RuntimeBadge />
-          <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>新建会话使用构建期固定的底座（不可切换）</span>
-        </div>
+        {/* 输入区：工作空间 chip 贴在卡片**上沿左上角**，卡片本体只装输入与底栏。
+            v21 删掉了这里原来那一行底座信息（RuntimeBadge + "新建会话使用构建期固定的底座
+            （不可切换）"）：底座由构建期固定、用户无事可做，对话框页面就不必常驻报它——
+            底座事实仍在会话详情与会话头可见。 */}
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* 工作空间 = 这次会话的沙箱边界（底座 ACP session 的 cwd）。这里**只允许在既有登记项
+              之间切换**：`allowCreate={false}` 收掉「＋ 添加工作空间…」——建目录要抬宿主目录面板或
+              开应用内浏览框，那是左栏「＋」与设置的事，不该从输入区伸手到宿主的文件系统。 */}
+          <div className="fg-ws-chiprow">
+            <WorkspacePicker
+              variant="chip"
+              allowCreate={false}
+              value={workspace}
+              onChange={pickWorkspace}
+              disabled={sending}
+            />
+          </div>
 
-        {/* 内嵌输入卡 */}
-        <div
-          className="fg-composer"
-          style={{
-            width: '100%',
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 16,
-            background: tokens.surface,
-            padding: '14px 16px 10px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            boxSizing: 'border-box',
-          }}
-        >
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (shouldSendKey(e, sendMode)) {
-                e.preventDefault()
-                void send()
-              }
-            }}
-            onPaste={(e) => {
-              if (!e.clipboardData || !e.clipboardData.types.includes('text/html')) return
-              const plain = e.clipboardData.getData('text/plain')
-              e.preventDefault()
-              const ta = e.currentTarget
-              const s = ta.selectionStart
-              const en = ta.selectionEnd
-              setDraft(draft.slice(0, s) + plain + draft.slice(en))
-              requestAnimationFrame(() => {
-                const p = s + plain.length
-                ta.setSelectionRange(p, p)
-              })
-            }}
-            rows={2}
-            placeholder={'输入你的问题，或点下方示例…'}
+          {/* 内嵌输入卡 */}
+          <div
+            className="fg-composer"
             style={{
               width: '100%',
+              border: `1px solid ${tokens.border}`,
+              borderRadius: 16,
+              background: tokens.surface,
+              padding: '14px 16px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
               boxSizing: 'border-box',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              background: 'transparent',
-              color: tokens.text,
-              fontSize: 15,
-              lineHeight: 1.7,
-              fontFamily: 'inherit',
-              minHeight: 56,
             }}
-          />
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            {/* 左栏必须可裁剪：窄容器下压到很窄时，nowrap 文案要省略号收起，
-                而不是溢出到右栏下面被选择器白底盖住（那会渲染成「文字重影」）。 */}
-            <span
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 3,
-                flex: '1 1 auto',
-                minWidth: 0,
-                overflow: 'hidden',
+          >
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (shouldSendKey(e, sendMode)) {
+                  e.preventDefault()
+                  void send()
+                }
               }}
-            >
-              {/* 「在项目中工作」= 会话工作空间（对应 goose 底栏的 DirSwitcher 位置）。
-                  它是这次会话的沙箱边界，所以未选时也不留白：药丸显示动作「选择目录」，
-                  hover 说明未指定时由平台分配，不让用户以为这个设置没生效。 */}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%' }}>
-                <span
-                  style={{
-                    flex: 'none',
-                    fontFamily: tokens.fontMono,
-                    fontSize: 11.5,
-                    color: tokens.textSecondary,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  在项目中工作
-                </span>
-                <WorkspacePicker value={workspace} onChange={pickWorkspace} disabled={sending} />
-              </span>
-              {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。默认不限制，限了才占位显示明细：
-                  与工作空间那栏同样的理由——不留白，但也不给未设置的状态编一个假值。 */}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%' }}>
-                <span
-                  style={{
-                    flex: 'none',
-                    fontFamily: tokens.fontMono,
-                    fontSize: 11.5,
-                    color: tokens.textSecondary,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  可用的能力
-                </span>
+              onPaste={(e) => {
+                if (!e.clipboardData || !e.clipboardData.types.includes('text/html')) return
+                const plain = e.clipboardData.getData('text/plain')
+                e.preventDefault()
+                const ta = e.currentTarget
+                const s = ta.selectionStart
+                const en = ta.selectionEnd
+                setDraft(draft.slice(0, s) + plain + draft.slice(en))
+                requestAnimationFrame(() => {
+                  const p = s + plain.length
+                  ta.setSelectionRange(p, p)
+                })
+              }}
+              rows={2}
+              placeholder={'输入你的问题，或点下方示例…'}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                background: 'transparent',
+                color: tokens.text,
+                fontSize: 15,
+                lineHeight: 1.7,
+                fontFamily: 'inherit',
+                minHeight: 56,
+              }}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              {/* 左栏必须可裁剪：窄容器下压到很窄时，nowrap 文案要省略号收起，
+                  而不是溢出到右栏下面被选择器白底盖住（那会渲染成「文字重影」）。
+                  v21：工作空间已上移到卡片上沿的 chip，这里只剩「这个会话用哪些能力」与发送键提示，
+                  于是底栏回到单行——不再需要三行堆叠的左列。 */}
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                {/* 「这个会话用哪些能力」= 会话级能力选定（M3）。默认不限制，限了才占位显示明细：
+                    不给未设置的状态编一个假值。 */}
                 <CapabilityPicker
                   value={capabilities}
                   onChange={setCapabilities}
                   disabled={sending}
                 />
+                <button
+                  type="button"
+                  title="点击切换发送键：Enter 发送 / Enter 换行"
+                  onClick={() => setSendMode((m) => toggleSendKey(m))}
+                  className="fg-hint-kbd"
+                  style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}
+                >
+                  {sendKeyHint(sendMode)} ⇄
+                </button>
               </span>
-              <button
-                type="button"
-                title="点击切换发送键：Enter 发送 / Enter 换行"
-                onClick={() => setSendMode((m) => toggleSendKey(m))}
-                className="fg-hint-kbd"
-                style={{ fontFamily: tokens.fontMono, fontSize: 10.5, color: tokens.textPlaceholder }}
-              >
-                {sendKeyHint(sendMode)} ⇄
-              </button>
-            </span>
 
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              {/* 会话级模型选择器：关闭态只显示名称；候选、描述与空目录提示都在下拉里
-                  （下拉即「浏览全部」，不再单独开弹窗）。创建时经 set_config_option 应用。
-                  宽度由 .fg-model-pill 管（静息贴合文案、聚焦展开），这里不再固定 240px。 */}
-              <ModelSelect
-                values={modelOptions}
-                value={model}
-                onChange={(v) => setModel(v)}
-                allowClear
-                size="small"
-                placeholder={modelOptions.length === 0 ? '运行时无可用模型' : '模型 · 跟随默认'}
-                emptyNote={[catalogNote, authHint].filter(Boolean).join(' ｜ ') || '运行时未提供模型目录'}
-              />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                {/* 会话级模型选择器：关闭态只显示名称；候选、描述与空目录提示都在下拉里
+                    （下拉即「浏览全部」，不再单独开弹窗）。创建时经 set_config_option 应用。
+                    宽度由 .fg-model-pill 管（静息贴合文案、聚焦展开），这里不再固定 240px。 */}
+                <ModelSelect
+                  values={modelOptions}
+                  value={model}
+                  onChange={(v) => setModel(v)}
+                  allowClear
+                  size="small"
+                  placeholder={modelOptions.length === 0 ? '运行时无可用模型' : '模型 · 跟随默认'}
+                  emptyNote={[catalogNote, authHint].filter(Boolean).join(' ｜ ') || '运行时未提供模型目录'}
+                />
 
-              <Button
-                type="primary"
-                shape="circle"
-                icon={<ArrowUpOutlined />}
-                disabled={!canSend}
-                loading={sending}
-                onClick={() => void send()}
-                style={{ width: 38, height: 38, boxSizing: 'border-box', flex: 'none' }}
-              />
-            </span>
+                <Button
+                  type="primary"
+                  shape="circle"
+                  icon={<ArrowUpOutlined />}
+                  disabled={!canSend}
+                  loading={sending}
+                  onClick={() => void send()}
+                  style={{ width: 38, height: 38, boxSizing: 'border-box', flex: 'none' }}
+                />
+              </span>
+            </div>
           </div>
         </div>
 

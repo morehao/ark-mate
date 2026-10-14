@@ -6,7 +6,6 @@ import { tokens } from '@ark-mate/ui'
 import { Ev } from '@ark-mate/types'
 import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
-import { RuntimeBadge } from '../components/RuntimeBadge'
 import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
 import { QueuedInputs } from '../components/QueuedInputs'
@@ -130,7 +129,10 @@ export function ChatPage() {
   const serverBusy =
     activeSum?.status === 'in_progress' && !streaming && lastSettledTone !== 'ok' && lastSettledTone !== 'err' && lastSettledTone !== 'cancel'
   const busy = streaming || serverBusy
-  const title = activeId ? titleFor(activeSum, view, runtime?.name) : ''
+  // v21：会话头标题走 `plain` 兜底——没命名、也没发过言的会话就叫「新会话」，
+  // 不再拼成「新会话 · dsh」（底座信息不进对话框页面），也不摊一串 id 冒充名字。
+  // 左栏那行仍走带底座/带短 id 的口径（那是浏览面，本轮不动）。
+  const title = activeId ? titleFor(activeSum, view, undefined, 'plain') : ''
   // 会话的**执行事实**与构建期固定的那个不同 = 这条历史会话跑在别的底座上。
   // v19 前这里判的是"会话绑定的 agent 已不存在"（被删除/未注册）；agent 并入 runtime 后
   // 判据换成同一形状的底座事实：id 对不上就是"当前这个构建续不了它"，照样要如实说明并给出路。
@@ -321,9 +323,9 @@ export function ChatPage() {
               color: tokens.textSecondary,
             }}
           >
-            {/* 会话跑在哪个底座上：如实标出（状态点 + 名称，详情看 hover 浮层）。
-                这里传的是**会话自己的** runtime_id，不是构建期那个——历史会话可能停在别的底座上。 */}
-            <RuntimeBadge runtimeId={activeSum?.runtime_id} />
+            {/* v21：这里原来有一枚底座徽标（RuntimeBadge）。底座由构建期固定、用户没有可选项，
+                对话框页面不该常驻报它——底座事实仍在「会话详情」抽屉与管理面可见；
+                真正需要用户知道的那一种情况（会话跑在别的底座上、无法继续提问）见下方 foreignRuntime。 */}
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>
@@ -418,7 +420,6 @@ export function ChatPage() {
   }
 
   const renderEmptyTranscript = () => {
-    const who = runtime?.name || runtime?.id || activeId || '该会话'
     return (
       <div
         style={{
@@ -447,10 +448,10 @@ export function ChatPage() {
           </svg>
         </div>
         <h1 style={{ margin: '4px 0 0', fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>问点什么？</h1>
+        {/* v21：这里原来报"当前会话跑在底座 X 上"——底座信息不进对话框页面（见 renderChatHead）。
+            换成只讲用户能感知的行为：在下方输入，回复怎么出现。 */}
         <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
-          当前会话跑在底座{' '}
-          <b style={{ fontFamily: tokens.fontMono, fontWeight: 600, color: tokens.text }}>{who}</b>
-          {' '}上。在下方输入问题，回复将以流式事件渲染：思考、工具调用与正文实时出现，可随时停止。
+          在下方输入问题，回复将以流式事件渲染：思考、工具调用与正文实时出现，可随时停止。
         </p>
       </div>
     )
@@ -583,7 +584,9 @@ export function ChatPage() {
                     }
                     busyNote={
                       streaming
-                        ? `run 进行中 · ${runtime?.name ?? ''}`
+                        ? // v21：原来还缀着底座名（`run 进行中 · dsh`）——底座信息不进对话框页面，
+                          // 底栏只讲用户能感知的状态。
+                          'run 进行中'
                         : serverBusy
                           ? '会话在服务端仍处运行中 — 可点「停止」解除'
                           : undefined
