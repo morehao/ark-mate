@@ -401,10 +401,11 @@ func TestSearchMessages(t *testing.T) {
 	seedSession(t, s, "m2")
 	ctx := ctxT()
 	now := time.Now().UTC()
+	// `ordinal` 是**会话内**序号（v23 的 `UNIQUE(session_id, ordinal)`）：两个会话各自从 1 起。
 	msgs := []model.MessageEntity{
-		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r1", Role: "user", Text: "网关 502 怎么排查", SeqLo: 1, SeqHi: 1, CreatedAt: now},
-		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r2", Role: "assistant", Text: "先看 UPSTREAM 健康检查", SeqLo: 2, SeqHi: 2, CreatedAt: now.Add(time.Second)},
-		{ID: objid.New(objid.Message), SessionID: "m2", RunID: "r3", Role: "user", Text: "100% 覆盖 _under_ 场景", SeqLo: 3, SeqHi: 3, CreatedAt: now.Add(2 * time.Second)},
+		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r1", Role: "user", Text: "网关 502 怎么排查", Ordinal: 1, SeqLo: 1, SeqHi: 1, CreatedAt: now},
+		{ID: objid.New(objid.Message), SessionID: "m1", RunID: "r2", Role: "assistant", Text: "先看 UPSTREAM 健康检查", Ordinal: 2, SeqLo: 2, SeqHi: 2, CreatedAt: now.Add(time.Second)},
+		{ID: objid.New(objid.Message), SessionID: "m2", RunID: "r3", Role: "user", Text: "100% 覆盖 _under_ 场景", Ordinal: 1, SeqLo: 3, SeqHi: 3, CreatedAt: now.Add(2 * time.Second)},
 	}
 	if err := s.CreateMessages(ctx, msgs); err != nil {
 		t.Fatalf("CreateMessages: %v", err)

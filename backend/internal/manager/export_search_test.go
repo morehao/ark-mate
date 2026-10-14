@@ -38,10 +38,12 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
-		// 每行独立 run_id：CreateMessages 按 run_id 先删后插（同一 run 会被覆盖）。
+		// 直插的读模型行：`ordinal` 是**会话内**序号（`UNIQUE(session_id, ordinal)` 会咬重号），
+		// run_id 只是这一行的来源标记（这里没建 runs 行，本用例验的是搜索/导出而非轮次明细）。
 		msgs = append(msgs, model.MessageEntity{ID: objid.New(objid.Message), SessionID: id,
 			RunID: fmt.Sprintf("run-%s-%d", id, i), Role: role,
-			Text: text, SeqLo: seq, SeqHi: seq, CreatedAt: now.Add(time.Duration(i) * time.Second)})
+			Text: text, Ordinal: int64(i) + 1, SeqLo: seq, SeqHi: seq,
+			CreatedAt: now.Add(time.Duration(i) * time.Second)})
 	}
 	if err := st.CreateMessages(ctx, msgs); err != nil {
 		t.Fatalf("CreateMessages: %v", err)

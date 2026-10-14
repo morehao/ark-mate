@@ -172,17 +172,16 @@ func (s *Service) rebuildStaleReadModels(ctx context.Context) {
 // ①② 只认事件、不认内存：这一轮结束没有，看的是它自己的终态事件在不在日志里。因此
 // `openRun`/`FinishRun` 这两条 best-effort 路径失败留下的洞都能被下一次重建补上（J7 的字面意思）。
 //
-// 做法：读该会话全部事件（会话内位次升序，一次读完）→ 按每个 run 的 `[first_seq, last_seq]`
-// 窗口切片 → **先清该 run 的旧行再插新行**。清是必须的：位次口径换了之后，某个窗口在新口径下
-// 可能一行都不产出，而"空的批次"在插入路径里是 no-op，会把上一代的旧行留在库里。
+// 做法：读该会话全部事件（会话内位次升序，一次读完）与 runs（按窗口起点排）→ 交给
+// `replaceSessionMessages` **整会话重铺**（一个事务里先删该会话全部 messages 再插入）。
+// 与 live 路径共用同一段构建代码（`buildSessionMessageRows`）——"运行时"与"重建"分叉过一次，
+// 代价是读模型里有两套规则，而两套规则的分歧只会在"重建之后看起来不一样"时暴露。
 //
-// **进行中的轮次（`last_seq = -1`）的窗口在本函数里被夹住**：右端 = 下一轮的 `first_seq - 1`
-// （没有下一轮 = 会话末尾）。不夹的话，一次重启后的重建会把"中断那一轮"之后所有轮次的事件都
-// 算进它——重建出来的 messages 张冠李戴，而这是**只有重建通道**才会暴露的错（live 路径的右端
-// 是终态位次，权威）。
+// 整会话重铺而不是逐轮重铺（E4）：`ordinal` 是"会话内第几条"，只有整会话重排才能保证它稠密；
+// 顺带把"没有归属 run 的孤儿行"（旧口径留下的）一起清掉，而不是永远留在库里当幽灵消息。
 //
-// 幂等：同一份 events 反复跑得到同一组行（`objid.New` 会铸新 id，但 rows 的**内容**等价；
-// 读模型的身份不承担外部引用——`messages.id` 不出现在任何 wire 契约里）。
+// 幂等：同一份 events 反复跑得到**内容相同**的行集合（`objid.New` 会铸新 id，但读模型的身份不
+// 承担外部引用——搜索的锚点是 `seq`，`messages.id` 不出现在任何 wire 契约里）。
 func (s *Service) RebuildSessionReadModels(ctx context.Context, sessionID string) error {
 	if s.st == nil {
 		return nil
@@ -198,42 +197,34 @@ func (s *Service) RebuildSessionReadModels(ctx context.Context, sessionID string
 	} else if added {
 		glog.Infow(ctx, "read models: 从 run.started 补出缺失的 runs 行", "session", sessionID)
 	}
-	runs, err := s.st.ListRuns(ctx, sessionID)
+	runs, err := s.sessionRuns(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("read models: list runs: %w", err)
 	}
+	// ② 用日志里的终态把还停在 running 的行收口。收口会改 `last_seq`，而窗口夹取要用新值，
+	// 所以改完必须重读一次。
 	if closed := s.closeRunsWithTerminal(sessionID, all, runs); closed {
 		glog.Infow(ctx, "read models: 用日志里的终态事件收口了停在 running 的行", "session", sessionID)
-		runs, err = s.st.ListRuns(ctx, sessionID)
-		if err != nil {
+		if runs, err = s.sessionRuns(ctx, sessionID); err != nil {
 			return fmt.Errorf("read models: list runs: %w", err)
 		}
 	}
+	// ③ 整会话重铺 messages（"按窗口切片 + 序号跨轮连续 + 空正文丢弃"全在
+	// `buildSessionMessageRows` 里；进行中的轮窗口也在那里夹）。
+	return s.replaceSessionMessages(ctx, sessionID, all, runs)
+}
+
+// sessionRuns 读某会话的 runs 并**按窗口起点排序**。
+//
+// 为什么不用 `ListRuns` 自己的顺序：它按 `started_at` 排（那是给人看的"第几轮"），而窗口夹取
+// 只能按位次来——时钟回拨时 `started_at` 的顺序说了不算，`first_seq` 说了算。
+func (s *Service) sessionRuns(ctx context.Context, sessionID string) ([]model.RunEntity, error) {
+	runs, err := s.st.ListRuns(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("read models: list runs: %w", err)
+		return nil, err
 	}
-	// 窗口是**按起点排**的（`ListRuns` 按 `started_at` 排，两者在正常情况下同序，但夹取窗口这件事
-	// 只能按位次来——时钟回拨时 started_at 的顺序说了不算）。
 	sort.SliceStable(runs, func(i, j int) bool { return runs[i].FirstSeq < runs[j].FirstSeq })
-	// 整会话先清空再按 run 重铺：这样"没有归属 run 的孤儿行"（旧口径留下的）也会一起消失，
-	// 而不是永远留在库里当幽灵消息。
-	if err := s.st.DeleteMessagesBySession(ctx, sessionID); err != nil {
-		return fmt.Errorf("read models: clear messages: %w", err)
-	}
-	for i, r := range runs {
-		hi := r.LastSeq
-		if hi < 0 {
-			// 进行中的轮：右端夹到下一轮的起点之前（没有下一轮 → 会话末尾，hi 保持开区间）。
-			if i+1 < len(runs) {
-				hi = runs[i+1].FirstSeq - 1
-			}
-		}
-		window := eventsInWindow(all, r.FirstSeq, hi)
-		if err := s.rebuildRunMessages(ctx, sessionID, r.ID, window); err != nil {
-			return fmt.Errorf("read models: rebuild run %s: %w", r.ID, err)
-		}
-	}
-	return nil
+	return runs, nil
 }
 
 // reconcileRunRows 用 `run.started` 事件补齐**缺失的** run 行（J7：runs 也是投影）。
@@ -635,8 +626,10 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any, 
 		glog.Warnw(context.Background(), "store: finish run failed", "session", sessionID, "run", runID, "err", err)
 		return
 	}
-	// 消息物化：同窗口 events → messages 行（user 原文 + assistant 文本片段/时间线/工具最终态）。
-	s.materializeMessages(sessionID, runID, evs)
+	// 消息物化：**整会话**重铺（E4）。不在这里传本轮窗口——`ordinal` 是"会话内第几条"，
+	// 只重铺本轮等于让序号在每轮里从 1 重新数；而且白名单投影只认 `user_message`/`message`
+	// 两类事件，"只重铺那一轮"省下的代价远小于它引入的第二套规则。
+	s.materializeMessages(sessionID)
 }
 
 // runStartTime 取行里的起点时刻；零值（老数据没写 / 行是手工种的）才回落到窗口首事件时刻。

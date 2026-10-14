@@ -323,6 +323,10 @@ func runDoctor(opts doctorOptions) doctorReport {
 	providers, providerChecks := checkProviderSection(opts)
 	checks = append(checks, providerChecks...)
 
+	// 读模型漂移（v21–v23）：`messages`/`runs` 是 `events` 的投影（J7），投影错了不会报错——
+	// 所以它需要一条**可判定**的体检项，而不是"看起来对不对"。同样只读。
+	checks = append(checks, checkReadModels(opts)...)
+
 	// transcript 目录的**形状体检**（R3）：v15 起平台会话 id 形如 `ses_<26 位 ULID>`，而目录里
 	// 旧形状的文件（裸 uuid）在装载期会被**跳过 + WARN**——那件事发生在启动日志里，而 doctor
 	// 要让它变成"随时可查的体检项"。

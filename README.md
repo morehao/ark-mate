@@ -95,7 +95,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 - **P3 收口**：传输保险丝/resync、hydration 四态均完成；会话侧栏（置顶 + 按日分组 + 近底跟随滚动）与工具/思考内联卡片为 M1 既有覆盖项，无需改动。
 - **P3 加载四态（前端）**：会话视图加 hydration 态——冷挂载/切回置 `hydrating`，服务端 snapshot 或首个事件置回就绪，空转 12s（保险丝重连前）自动回空态不再永久 loading；聊天页在 hydration 中显示「连接会话…」而非空态问候。
 - **P3 传输可靠性（前端）**：WS 传输增 **stalled 保险丝**（OPEN 后 70s 无任何服务端帧——半开/黑洞连接——主动断开并重连，健康连接每 25s ping→pong 计入活跃度不会误熔断）与**重连 resync 裁决**（重连后按各 agg 已确认水位重新 attach，服务端 EventsAfter 开区间 → 增量续传不重复、权威收尾）。
-- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `definition_revisions` + `schema_migrations` 自管迁移），`mate migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`MATE_STORE=sqlite|memory|auto`）；messages 逐轮物化（user 原文 + assistant 文本片段按 msg_id 拼接 + 交错时间线 + 工具最终态），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
+- **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `definition_revisions` + `schema_migrations` 自管迁移），`mate migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`MATE_STORE=sqlite|memory|auto`）；messages 是**整会话重铺的白名单投影**（v23：只有 user 原文与 assistant 正文片段成行——按 `msg_id` 分段、`ordinal` 会话内 1..N 连续；思考/工具/用量等非对话事件**不产行**，时间线由事件读面渲染；空正文行同样不落库），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
 
 里程碑与后续规划见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/agent-runtime-refactor-design-20260908.md](docs/agent-runtime-refactor-design-20260908.md) §20；harness adapter 的源码级适配核实记录见 [docs/dsh-acp-adaptation.md](docs/dsh-acp-adaptation.md)。
 
@@ -711,7 +711,13 @@ sqlite 模式下自动跑一次 `import`，幂等靠指纹 `meta.imported_automa
 哪些只是平台记录）、逐 runtime 的模型配置物化状态（path/digest/pending/writable/tested）与
 "清单 vs 运行时广告"的差集，`declared` 非空而 `advertised` 一条都没有的形态**单独判高危**；
 这一段读库走 `mode=ro`（不跑迁移）、镜像只读不创建，判据仍是"无法校验记警告、
-事实与声明不符才退出 1"——**离线命令取不到运行时广告时如实记 unknown**，既不假绿也不假红）；
+事实与声明不符才退出 1"——**离线命令取不到运行时广告时如实记 unknown**，既不假绿也不假红）。
+**v23 起还有「读模型」一段**（`read-models`）：`messages`/`runs` 是 `events` 的投影（可从事件重建），
+投影错了不会让任何东西报错（检索少命中、界面少一条、"第几条"错位都发生在用户侧），所以它按**可判定的
+不变量**体检——孤儿消息（`messages.run_id` 指不到 `runs`）、空正文行、每会话 `messages.ordinal` 是否
+1..N 连续、每会话 `events.seq` 是否 0..N-1 连续、以及 `messages.events_json` 里的来源事件类型是否
+只在白名单内（挡"新事件类型偷偷进 messages"）；**任意一条非 0 即 fail**（事实与声明不符），
+`meta.read_models_rebuild` 非空只写进人话不参与判档（升级后第一次体检恰好在重建之前跑）；
 **v18 起还有"不在册底座"的存量体检一段**——删掉一个适配不会让磁盘与库里的存量消失，而逐底座采事实
 的那两段此前都按**注册表**枚举，适配一删那个底座就从报告里整段消失（报告一切正常、盘上东西一个没少）。
 判据是「**在不在册**」（在册集合 = 全部内置适配 ∪ `runtimes.json` 的远程端点，并**印在报告里**供核对），

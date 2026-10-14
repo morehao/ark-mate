@@ -336,7 +336,7 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 	if err := st.DB().Exec(`DELETE FROM runs WHERE id = ?`, runID).Error; err != nil {
 		t.Fatalf("伪造缺失的 run 行: %v", err)
 	}
-	if err := st.DeleteMessagesBySession(ctx, "s-repair"); err != nil {
+	if err := st.DB().Exec(`DELETE FROM messages WHERE session_id = ?`, "s-repair").Error; err != nil {
 		t.Fatalf("清 messages: %v", err)
 	}
 

@@ -42,7 +42,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	// 未结束的 run：ended_at 落空串（不是零值时间戳）。
 	if err := s.CreateMessages(ctx, []model.MessageEntity{{
 		ID:        objid.New(objid.Message),
-		SessionID: "c1", RunID: "r1", Role: "user", Text: "hi", SeqLo: 1, SeqHi: 1, CreatedAt: at,
+		SessionID: "c1", RunID: "r1", Role: "user", Text: "hi", Ordinal: 1, SeqLo: 1, SeqHi: 1, CreatedAt: at,
 	}}); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
 	}

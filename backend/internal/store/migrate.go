@@ -728,6 +728,10 @@ var schemaMigrations = []migration{
 	// v22 的版本步本体在 `migrate_v22.go`（自带一段 Go 数据迁移：`runs.id` 从派生串重铸成
 	// `run_<ULID>`，并在同一事务里改指 `messages.run_id`——主键重铸 ⇒ 引用必须一起改）。
 	migrationV22,
+
+	// v23 的版本步本体在 `migrate_v23.go`（`messages` 补会话内序号 `ordinal` 与种类 `kind`，
+	// 并把索引按"整会话读"重排——序号是"投影完不完整"这条不变式的载体）。
+	migrationV23,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。
