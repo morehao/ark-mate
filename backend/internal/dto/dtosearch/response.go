@@ -4,7 +4,7 @@ package dtosearch
 type MessageSearchHit struct {
 	SessionID string `json:"session_id"`
 	Title     string `json:"title,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	RuntimeID string `json:"runtime_id,omitempty"`
 	Role      string `json:"role"` // user | assistant
 	Seq       int64  `json:"seq"`
 	SeqHi     int64  `json:"seq_hi,omitempty"`

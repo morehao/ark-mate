@@ -36,7 +36,7 @@ func TestEventSinkMapping(t *testing.T) {
 	orch.mu.Lock()
 	orch.byProvider["s1"] = "conv-1" // 原生底座 session id → 平台会话 uuid
 	orch.mu.Unlock()
-	sink := orch.eventSink("agent-rtx", "rtx")
+	sink := orch.eventSink("rtx")
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
@@ -77,7 +77,7 @@ func TestEventSinkMapping(t *testing.T) {
 	}
 	// 载荷字段（message 的 text、tool_call 的 id/title）。
 	m, _ := evs[0].Payload.(map[string]any)
-	if m["text"] != "hi" || m["agent_id"] != "agent-rtx" {
+	if m["text"] != "hi" || m["runtime"] != "rtx" {
 		t.Fatalf("message payload 不符: %+v", evs[0].Payload)
 	}
 	tc, _ := evs[2].Payload.(map[string]any)
@@ -93,7 +93,7 @@ func TestEventSinkMapping(t *testing.T) {
 // TestEventSinkWrongPayloadType 载荷类型不匹配 → 事件被跳过（不 panic、不发布）。
 func TestEventSinkWrongPayloadType(t *testing.T) {
 	_, orch, bus := newTestRig(t)
-	sink := orch.eventSink("a", "r")
+	sink := orch.eventSink("rtx")
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: "not a delta"})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: nil})
 	if bus.LastSeq() != 0 {
@@ -110,7 +110,7 @@ func TestEventSinkCommands(t *testing.T) {
 	orch.mu.Lock()
 	orch.byProvider["s1"] = "conv-1"
 	orch.mu.Unlock()
-	sink := orch.eventSink("agent-rtx", "rtx")
+	sink := orch.eventSink("rtx")
 	sub := bus.Subscribe(0)
 	defer bus.Unsubscribe(sub)
 
@@ -135,7 +135,7 @@ func TestEventSinkCommands(t *testing.T) {
 		t.Fatalf("agg 应为平台会话 uuid: %+v", ev)
 	}
 	p, _ := ev.Payload.(map[string]any)
-	if p["session_id"] != "conv-1" || p["agent_id"] != "agent-rtx" || p["runtime"] != "rtx" {
+	if p["session_id"] != "conv-1" || p["runtime"] != "rtx" {
 		t.Fatalf("载荷基础字段不符: %+v", p)
 	}
 	cmds, ok := p["commands"].([]acl.CommandInfo)
@@ -176,11 +176,10 @@ func TestDisconnectIdleSession(t *testing.T) {
 	// 字符串，不是本仓内置清单成员），所以服务该 runtime 的 agent 由夹具显式登记——
 	// 字段与 `seedBuiltinAgents` 播出来的那条逐字同形（尤其是 `State: stopped`：后面那条断言
 	// 验的是"断连不把 agent 状态改坏"，起点错成空串就变成一句空话）。
-	svc.agents["rtx"] = &AgentRec{ID: "rtx", Name: "rtx", State: AgentStateStopped}
-	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx"} // client nil
-	rc := &runtimeConn{agentID: "rtx", client: nil}                      // client 亦 nil → 相等匹配
+	as := &ActiveSession{ID: "s1", Runtime: "rtx"} // client nil
+	rc := &runtimeConn{client: nil}                // client 亦 nil → 相等匹配
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", Status: SessionStatusCompleted})
 	before := bus.LastSeq()
 
 	orch.dropConn(rc)
@@ -191,8 +190,8 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if bus.LastSeq() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: last=%d want %d", bus.LastSeq(), before)
 	}
-	if a, _ := svc.AgentByID("rtx"); a.State != AgentStateStopped {
-		t.Fatalf("agent 应 stopped: %s", a.State)
+	if st := svc.runtimeBindingSnapshot().State; st != AgentStateStopped {
+		t.Fatalf("底座状态应 stopped: %s", st)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
 	if _, ok := orch.sessions["s1"]; ok {
@@ -201,9 +200,9 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if rec := svc.sessionRec("s1"); rec == nil {
 		t.Fatal("平台侧会话记录必须保留（会话归平台所有）")
 	}
-	// agent 诊断仍是连接事实的来源（键为会话绑定的 agent id）。
-	if le, ok := svc.agentLastError("agent-rtx"); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
-		t.Fatalf("agent 诊断应记录 connection_lost: %+v", le)
+	// 连接诊断仍是连接事实的来源（v19：单底座，留痕只有一份）。
+	if le, ok := svc.runtimeLastError(); !ok || le.Code != "connection_lost" || le.SessionID != "s1" {
+		t.Fatalf("底座诊断应记录 connection_lost: %+v", le)
 	}
 
 	// 二次 dropConn：句柄已 dead → 幂等。
@@ -213,15 +212,15 @@ func TestDisconnectIdleSession(t *testing.T) {
 	}
 }
 
-// TestIntentionalTeardownKeepsIdleSession 主动拆除（daemon 停机 / 显式停 agent）+ 空闲会话：
+// TestIntentionalTeardownKeepsIdleSession 主动拆除（daemon 停机 / 空闲回收）+ 空闲会话：
 // 停机不是故障 —— 状态如实保留、不发 connection_lost（容器 `docker restart` 的每次重启都会走这条）。
 func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
-	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx"}
-	rc := &runtimeConn{agentID: "rtx", client: nil}
+	as := &ActiveSession{ID: "s1", Runtime: "rtx"}
+	rc := &runtimeConn{client: nil}
 	rc.intentional.Store(true)
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", Status: SessionStatusCompleted})
 	before := bus.LastSeq()
 
 	orch.dropConn(rc)
@@ -242,12 +241,12 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	svc, orch, bus := rigWithRuntime(t, runtime.Spec{ID: "rtx", Name: "rtx"})
 	as := &ActiveSession{
-		ID: "s1", AgentID: "agent-rtx", Runtime: "rtx",
+		ID: "s1", Runtime: "rtx",
 		sess: &stubSession{cancelOnCtx: true}, // 阻塞到 ctx 取消，模拟生成中的轮次
 	}
-	rc := &runtimeConn{agentID: "rtx", client: nil}
+	rc := &runtimeConn{client: nil}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "生成中"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -315,7 +314,7 @@ func TestPublishVersionAndBusNil(t *testing.T) {
 // TestSessionHistoryClamp service 层参数夹取：after<0→0、limit<1→1。
 func TestSessionHistoryClamp(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 	// 两条不同消息（msg_id 不同 → 形状不同 → 不合并），分页断言才成立。
 	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m1", "text": "one"})
 	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m2", "text": "two"})
@@ -337,7 +336,7 @@ func TestSessionHistoryClamp(t *testing.T) {
 func TestCreateSessionWithoutOrchestrator(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, eventbus.New()) // 无 orch
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "agent-x", Prompt: "hi"})
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
 	var ge gerror.Error
 	if !errors.As(err, &ge) || ge.Code != 50201 {
 		t.Fatalf("期望 50201，got %v", err)
@@ -370,42 +369,17 @@ func TestServiceRESTValidation(t *testing.T) {
 	}
 }
 
-// TestStartSessionUnknownAgent 未知 agent → agent_not_found（拨号前拦截，不发网络）。
-func TestStartSessionUnknownAgent(t *testing.T) {
-	_, orch, _ := newTestRig(t)
-	_, err := orch.StartSession(context.Background(), "ghost-agent", StartOptions{Cwd: "/tmp"})
-	var ae *acl.Error
-	if !errors.As(err, &ae) || ae.Code != "agent_not_found" {
-		t.Fatalf("期望 agent_not_found，got %v", err)
-	}
-}
-
 // TestStartSessionUnknownRuntime 构建期底座未装配 → runtime_not_found（拨号前拦截）。
 //
-// 历史：这里种的是一个"指向未注册 runtime 的 agent"（agent 可声明候选的年代）。候选面下线后
-// 唯一能让底座解析失败的形态只剩"构建期选定的那个不在注册表里"。
+// 历史：这里曾种一个"指向未注册 runtime 的 agent"（agent 可声明候选的年代），以及"未知 agent →
+// agent_not_found"那条用例。两处都随 agent 面一起下线：v19 里唯一能让底座解析失败的形态只剩
+// "构建期选定的那个不在注册表里"。
 func TestStartSessionUnknownRuntime(t *testing.T) {
-	svc, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
-	// 手工种一个指向未注册 runtime 的 agent（真实场景来自配置漂移）。
-	svc.mu.Lock()
-	svc.agents["agent-ghost"] = &AgentRec{ID: "agent-ghost", Name: "ghost"}
-	svc.mu.Unlock()
-	_, err := orch.StartSession(context.Background(), "agent-ghost", StartOptions{Cwd: "/tmp"})
+	_, orch, _ := newTestRig(t) // 空注册表 → 构建期底座（默认 dsh）必然未装配
+	_, err := orch.StartSession(context.Background(), StartOptions{Cwd: "/tmp"})
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("期望 runtime_not_found，got %v", err)
-	}
-}
-
-// TestResolveSessionAgent 空 agent_id → 默认播种 Agent（dsh）；非空原样返回。
-func TestResolveSessionAgent(t *testing.T) {
-	reg := runtime.NewRegistry(runtime.Spec{ID: "dsh", Name: "dsh"})
-	svc := NewService(reg, nil) // 默认 agent dsh 已播种
-	if id, err := svc.resolveSessionAgent(""); err != nil || id != "dsh" {
-		t.Fatalf("空 agent_id 应落到默认 dsh: id=%q err=%v", id, err)
-	}
-	if id, err := svc.resolveSessionAgent("rtx"); err != nil || id != "rtx" {
-		t.Fatalf("非空 agent_id 应原样返回: id=%q err=%v", id, err)
 	}
 }
 
@@ -447,7 +421,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
 	svc.mu.Lock()
-	svc.sessions[id] = &SessionRec{ID: id, AgentID: "agent-rtx", Status: SessionStatusInProgress}
+	svc.sessions[id] = &SessionRec{ID: id, Status: SessionStatusInProgress}
 	svc.ver[id] = 0
 	svc.mu.Unlock()
 
@@ -464,7 +438,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				_ = svc.publish(BusUserMessage, id, map[string]any{
-					"session_id": id, "agent_id": "agent-rtx", "text": fmt.Sprintf("消息 %d-%d", n, j),
+					"session_id": id, "runtime": "rtx", "text": fmt.Sprintf("消息 %d-%d", n, j),
 				})
 			}
 		}(i)

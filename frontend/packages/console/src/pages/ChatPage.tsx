@@ -6,14 +6,14 @@ import { tokens } from '@ark-mate/ui'
 import { Ev } from '@ark-mate/types'
 import { sessionHistory, sessionRuns } from '@ark-mate/api'
 import { useMate } from '../store'
-import { AgentBadge } from '../components/AgentBadge'
+import { RuntimeBadge } from '../components/RuntimeBadge'
 import { SessionDetailDrawer } from '../components/SessionDetail'
 import { Composer } from '../components/Composer'
 import { QueuedInputs } from '../components/QueuedInputs'
 import { StartPanel } from '../components/StartPanel'
 import { EntryView } from '../components/Transcript'
 import { anchorIndex } from '../console/searchView'
-import { agentOf, agentNameOf, titleFor } from '../console/util'
+import { titleFor } from '../console/util'
 import { fmtRunDockLine, fmtRunUsageLine, toRunUsageInfo, type RunUsageInfo } from '../console/usageView'
 import { TRANSCRIPT_WINDOW, stickToBottom, windowEntries } from '../console/transcriptView'
 import type { DeliveryChoice } from '../console/queueView'
@@ -24,7 +24,7 @@ export function ChatPage() {
   const params = useParams<{ id: string }>()
   const paramId = params.id ?? null
 
-  const agents = useMate((s) => s.agents)
+  const runtime = useMate((s) => s.runtime)
   const sessions = useMate((s) => s.sessions)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
@@ -130,8 +130,11 @@ export function ChatPage() {
   const serverBusy =
     activeSum?.status === 'in_progress' && !streaming && lastSettledTone !== 'ok' && lastSettledTone !== 'err' && lastSettledTone !== 'cancel'
   const busy = streaming || serverBusy
-  const agent = agentOf(agents, activeSum?.agent_id)
-  const title = activeId ? titleFor(activeSum, view, agents) : ''
+  const title = activeId ? titleFor(activeSum, view, runtime?.name) : ''
+  // 会话的**执行事实**与构建期固定的那个不同 = 这条历史会话跑在别的底座上。
+  // v19 前这里判的是"会话绑定的 agent 已不存在"（被删除/未注册）；agent 并入 runtime 后
+  // 判据换成同一形状的底座事实：id 对不上就是"当前这个构建续不了它"，照样要如实说明并给出路。
+  const foreignRuntime = !!activeSum?.runtime_id && !!runtime && activeSum.runtime_id !== runtime.id
   // 失败 run 一键重试：仅当最新一条为 run.error（无流/非 busy）时，取其所属轮的用户输入重发。
   // 视图可能是服务端快照的部分重放（该轮 user 气泡不在本地条目里），此时回退到历史事件取输入。
   const entries = view?.entries ?? []
@@ -318,19 +321,16 @@ export function ChatPage() {
               color: tokens.textSecondary,
             }}
           >
-            {/* 会话与 Agent 一对一绑定：这里如实标出当前用的是哪个 Agent
-                （状态点 + 名称 + 默认标记，详情看 hover 浮层）。 */}
-            <AgentBadge
-              agent={agent}
-              agentId={activeSum?.agent_id}
-              fallbackName={agentNameOf(agents, activeSum?.agent_id)}
-            />
+            {/* 会话跑在哪个底座上：如实标出（状态点 + 名称，详情看 hover 浮层）。
+                这里传的是**会话自己的** runtime_id，不是构建期那个——历史会话可能停在别的底座上。 */}
+            <RuntimeBadge runtimeId={activeSum?.runtime_id} />
             <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeId}>
               {activeId}
             </span>
           </div>
-          {/* 绑定 agent 已不存在（被删除/未注册）：如实说明，并给出出路（归属不可变 → 平台不会自动改绑）。 */}
-          {activeSum?.agent_id && agents.length > 0 && !agent && (
+          {/* 会话跑在别的底座上（历史会话 / 换过构建）：如实说明并给出路——
+              归属是执行事实、构建期固定不可改，所以平台不会"自动改绑"，只能导出历史另开会话。 */}
+          {foreignRuntime && (
             <div
               style={{
                 marginTop: 4,
@@ -342,7 +342,7 @@ export function ChatPage() {
               }}
             >
               <InfoCircleOutlined />
-              该会话的 Agent「{activeSum.agent_id}」已不存在（历史仍可读，无法继续提问）：用同一 id 在「设置 · Agent 管理」重新注册即可继续，或导出历史另开新会话。
+              该会话的底座是「{activeSum?.runtime_id}」，而当前构建固定的是「{runtime?.id}」（历史仍可读，无法继续提问）：导出历史另开新会话即可继续。
             </div>
           )}
         </div>
@@ -418,8 +418,7 @@ export function ChatPage() {
   }
 
   const renderEmptyTranscript = () => {
-    const a = agent
-    const agentDesc = a ? `${a.name}` : activeId ?? '该会话'
+    const who = runtime?.name || runtime?.id || activeId || '该会话'
     return (
       <div
         style={{
@@ -449,9 +448,9 @@ export function ChatPage() {
         </div>
         <h1 style={{ margin: '4px 0 0', fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' }}>问点什么？</h1>
         <p style={{ margin: 0, maxWidth: '46ch', color: tokens.textSecondary, fontSize: 13.5, lineHeight: 1.7 }}>
-          当前会话绑定{' '}
-          <b style={{ fontFamily: tokens.fontMono, fontWeight: 600, color: tokens.text }}>{agentDesc}</b>
-          。在下方输入问题，回复将以流式事件渲染：思考、工具调用与正文实时出现，可随时停止。
+          当前会话跑在底座{' '}
+          <b style={{ fontFamily: tokens.fontMono, fontWeight: 600, color: tokens.text }}>{who}</b>
+          {' '}上。在下方输入问题，回复将以流式事件渲染：思考、工具调用与正文实时出现，可随时停止。
         </p>
       </div>
     )
@@ -584,14 +583,12 @@ export function ChatPage() {
                     }
                     busyNote={
                       streaming
-                        ? `run 进行中 · ${agent ? agent.name : ''}`
+                        ? `run 进行中 · ${runtime?.name ?? ''}`
                         : serverBusy
                           ? '会话在服务端仍处运行中 — 可点「停止」解除'
                           : undefined
                     }
-                    placeholder={
-                      busy ? 'agent 正在回复…' : `向 ${agent ? agent.name : '当前 Agent'} 提问…（Enter 发送）`
-                    }
+                    placeholder={busy ? '正在回复…' : '向助手提问…（Enter 发送）'}
                     onSend={onSend}
                     // 命令发现面（ADR-17）：底座自报的斜杠命令，undefined = 该底座不提供发现面
                     // （dsh 的 ACP 面不含命令）。输入框里打 `/` 时据此给候选，平台不声明这些命令。

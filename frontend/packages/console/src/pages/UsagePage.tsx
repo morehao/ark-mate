@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Segmented, Select, Space, Spin, Statistic, Tag, Tooltip } from 'antd'
+import { Alert, Button, Empty, Input, Segmented, Space, Spin, Statistic, Tag, Tooltip } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { PageContainer, tokens } from '@ark-mate/ui'
 import { toErrorMessage, usageSummary } from '@ark-mate/api'
-import type { Agent, UsageBucket, UsageSummary } from '@ark-mate/types'
+import type { UsageBucket, UsageSummary } from '@ark-mate/types'
 import { useMate } from '../store'
 import { fmtContext, fmtCost, fmtDuration, reportedLabel, successRate, usageRows, type UsageRow } from '../console/usageView'
 
 // ——— 用量视图（M3 GET /usage/summary；sqlite 模式才有数据） ———
-// 维度：agent（默认，按轮次降序）/ day（按日期升序）；筛选：时间区间（半开）+ agent。
+// 维度：day（按日期升序，v19 起是唯一维度）；筛选：时间区间（半开）。
+//
+// v19 撤掉了 `group_by=agent` 与 `?agent_id=` 两个维度/筛选：底座由构建期固定，
+// 按它分组只会得到一个装满全部会话的桶、按它筛选就是把全部行再筛一遍同样全部——
+// 那不是"少一个选项"，是把同一个答案多画两遍。
 // 诚实降级：内存模式（MATE_STORE=memory）后端返回 40501，此处显示后端原文，不臆造数字。
 // 口径（后端回显 context_semantics/cost_semantics/buckets_additive）：上下文与成本都是
 // **区间末快照**（各会话取区间内最后一次上报后求和），不是区间增量；day 分组不可相加。
@@ -80,15 +84,11 @@ const CELL: React.CSSProperties = { fontSize: 12.5, textAlign: 'right', whiteSpa
 
 /** 用量页（M3 首项的可视化面）。 */
 export function UsagePage() {
-  const agents = useMate((s) => s.agents)
-  const refreshAgents = useMate((s) => s.refreshAgents)
   const showToast = useMate((s) => s.showToast)
 
   const [mode, setMode] = useState<RangeMode>('7d')
   const [fromDay, setFromDay] = useState<string>(isoDay(new Date(Date.now() - 7 * 86_400_000)))
   const [toDay, setToDay] = useState<string>(isoDay(new Date()))
-  const [agentId, setAgentId] = useState<string>('')
-  const [groupBy, setGroupBy] = useState<'agent' | 'day'>('agent')
   const [data, setData] = useState<UsageSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -98,7 +98,9 @@ export function UsagePage() {
     setErr(null)
     try {
       const { from, to } = rangeToQuery(mode, fromDay, toDay)
-      setData(await usageSummary({ from, to, agent_id: agentId || undefined, group_by: groupBy }))
+      // v19：`group_by` 只有 day 一个取值，写死它而不是留个 state——
+      // 留 state 就得留一个改它的控件，而那个控件没有第二个选项可给。
+      setData(await usageSummary({ from, to, group_by: 'day' }))
     } catch (e) {
       setData(null)
       setErr(toErrorMessage(e))
@@ -106,19 +108,13 @@ export function UsagePage() {
     } finally {
       setLoading(false)
     }
-  }, [mode, fromDay, toDay, agentId, groupBy, showToast])
-
-  useEffect(() => {
-    void refreshAgents()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [mode, fromDay, toDay, showToast])
 
   useEffect(() => {
     void load()
   }, [load])
 
   const rows = usageRows(data)
-  const agentName = (id?: string): string => (id ? (agents.find((a: Agent) => a.id === id)?.name ?? id) : '')
 
   const head = (label: string, key: string) => (
     <th key={key} style={{ ...CELL, color: tokens.textSecondary, fontWeight: 500, padding: '8px 10px', borderBottom: `1px solid ${tokens.border}` }}>
@@ -128,18 +124,9 @@ export function UsagePage() {
   return (
     <PageContainer
       title="用量"
-      description="按 agent / 日期聚合的轮次、时长、上下文与成本（数据来自 SQLite 读模型；内存模式无统计）。上下文与成本为区间末快照，非区间增量。"
+      description="按日期聚合的轮次、时长、上下文与成本（数据来自 SQLite 读模型；内存模式无统计）。上下文与成本为区间末快照，非区间增量。"
       extra={
         <Space>
-          <Segmented
-            size="small"
-            value={groupBy}
-            onChange={(v) => setGroupBy(v as 'agent' | 'day')}
-            options={[
-              { label: '按 agent', value: 'agent' },
-              { label: '按日期', value: 'day' },
-            ]}
-          />
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
             刷新
           </Button>
@@ -161,15 +148,6 @@ export function UsagePage() {
             <span style={{ color: tokens.textPlaceholder, fontSize: 11.5 }}>（含当天）</span>
           </Space>
         )}
-        <Select
-          size="small"
-          allowClear
-          placeholder="全部 agent"
-          value={agentId || undefined}
-          onChange={(v) => setAgentId(v ?? '')}
-          style={{ width: 180 }}
-          options={agents.map((a) => ({ label: a.name, value: a.id }))}
-        />
         {data && (
           <span style={{ marginLeft: 'auto', fontSize: 12, color: tokens.textSecondary }}>
             区间 {fmtDay(data.from)} ~ {data.to ? fmtDay(data.to) : '至今'}
@@ -229,7 +207,7 @@ export function UsagePage() {
                 <thead>
                   <tr>
                     <th style={{ ...CELL, textAlign: 'left', color: tokens.textSecondary, fontWeight: 500, padding: '8px 10px', borderBottom: `1px solid ${tokens.border}` }}>
-                      {data.group_by === 'day' ? '日期' : 'Agent'}
+                      日期
                     </th>
                     {['轮次', '完成', '失败', '取消', '成功率', '时长', '上下文', '成本'].map((h) => head(h, h))}
                   </tr>
@@ -238,13 +216,7 @@ export function UsagePage() {
                   {rows.map((r: UsageRow) => (
                     <tr key={r.key}>
                       <td style={{ ...CELL, textAlign: 'left', padding: '8px 10px', borderBottom: `1px solid ${tokens.border}` }}>
-                        {data.group_by === 'day' ? (
-                          r.label
-                        ) : (
-                          <Tooltip title={r.bucket.agent_id || r.key}>
-                            <span>{agentName(r.bucket.agent_id) || r.label}</span>
-                          </Tooltip>
-                        )}
+                        {r.label}
                       </td>
                       <BucketCells b={r.bucket} />
                     </tr>
@@ -272,8 +244,8 @@ export function UsagePage() {
               </table>
               {!data.buckets_additive && (
                 <div style={{ padding: '10px 12px', color: tokens.textSecondary, fontSize: 11.5 }}>
-                  按日期分组时，每一行是「当日末各会话的累计快照」；同一会话跨天会在多天各出现一次，
-                  因此成本/上下文相加会重复。要看区间总量请切到「按 agent」。
+                  每一行是「当日末各会话的累计快照」；同一会话跨天会在多天各出现一次，
+                  因此成本/上下文相加会重复（看区间总量读最下面那行的合计口径）。
                 </div>
               )}
             </div>

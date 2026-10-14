@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,23 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/automation"
 )
+
+// sameJSONObject 逐键比对两份 JSON 正文（顺序无关；任一份不是 JSON → 立刻失败）。
+// 从已删除的 agent 导入用例里搬来：它是通用的比对工具，不依赖任何被撤掉的定义域。
+func sameJSONObject(t *testing.T, a, b string) bool {
+	t.Helper()
+	var (
+		ma map[string]any
+		mb map[string]any
+	)
+	if err := json.Unmarshal([]byte(a), &ma); err != nil {
+		t.Fatalf("正文不是 JSON: %v", err)
+	}
+	if err := json.Unmarshal([]byte(b), &mb); err != nil {
+		t.Fatalf("正文不是 JSON: %v", err)
+	}
+	return reflect.DeepEqual(ma, mb)
+}
 
 // ——— M6-7：定时任务的存量搬家（导入 / 导出） ———
 //

@@ -134,7 +134,7 @@ func TestResolveElicitationScope(t *testing.T) {
 
 	// 先登记一条会话，让它的 `runtime_session_id` 是 `rt_wire-sess`。
 	orch.svc.registerSession(&SessionRec{
-		ID: "ses_platform", AgentID: "a1", Cwd: "/tmp",
+		ID: "ses_platform", Cwd: "/tmp",
 		RuntimeSessionID: objid.RuntimeShell + "wire-sess",
 	})
 
@@ -162,16 +162,15 @@ func TestResolveElicitationScope(t *testing.T) {
 	}
 }
 
-// TestAgentDiagnosticsShowsScopeAmbiguous verify 归属歧义不再无痕：留痕随 agent 诊断的
+// TestRuntimeDiagnosticsShowsScopeAmbiguous verify 归属歧义不再无痕：留痕随底座诊断的
 // remediation 外露，给出事实 + 可执行动作（否则用户只觉得「提问卡没出现」）。
-func TestAgentDiagnosticsShowsScopeAmbiguous(t *testing.T) {
-	// newSearchRig 预置 agent a1（AgentDiagnostics 需要真实存在的 agent）。
+func TestRuntimeDiagnosticsShowsScopeAmbiguous(t *testing.T) {
 	svc, _ := newSearchRig(t)
-	svc.noteScopeAmbiguous("a1", "elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
+	svc.noteScopeAmbiguous("elicitation 无法归属会话（wire `_meta` 未给 sessionId，且连接上无唯一在途 run）")
 
-	resp, err := svc.AgentDiagnostics(context.Background(), "a1")
+	resp, err := svc.RuntimeDiagnostics(context.Background())
 	if err != nil {
-		t.Fatalf("AgentDiagnostics: %v", err)
+		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
 	joined := strings.Join(resp.Remediation, "\n")
 	if !strings.Contains(joined, "无法归属会话") {
@@ -302,8 +301,8 @@ func TestElicitationScopeSourceWire(t *testing.T) {
 // 归属会话决策成功；列出挂起项时带 session_id/scope_source。
 func TestServiceResolveElicitationScope(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	svc.registerSession(&SessionRec{ID: "owner", AgentID: "agent-rtx"})
-	svc.registerSession(&SessionRec{ID: "intruder", AgentID: "agent-rtx"})
+	svc.registerSession(&SessionRec{ID: "owner"})
+	svc.registerSession(&SessionRec{ID: "intruder"})
 
 	published := make(chan ElicitationItem, 1)
 	done := make(chan struct{})

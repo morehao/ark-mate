@@ -1,7 +1,7 @@
 /**
  * 模型面（v12）：**两个读面分得很开**，改这个文件前先认清哪一个是哪一个。
  *
- *  - ① **运行时目录面**（`ModelCatalogResp`，`GET /models/catalog?agent=`）：运行时（ACP server）
+ *  - ① **运行时目录面**（`ModelCatalogResp`，`GET /models/catalog`）：运行时（ACP server）
  *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它。
  *  - ② **平台清单面**（`ModelsResp`，`GET /models`）：用户登记的应用层资源（供应商下的模型），
  *    外加**聚合**生效结论。设置 · 模型 那一节用它。
@@ -28,7 +28,7 @@ export interface ConfigOptionValue {
   /** 展示名（唯一可展示字段）。 */
   name: string
   description?: string
-  /** agent 以分组形态下发时的分组标识与标题（该底座的广告是扁平列表时两字段为空）。 */
+  /** 底座以分组形态下发时的分组标识与标题（该底座的广告是扁平列表时两字段为空）。 */
   group?: string
   group_name?: string
   /** 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅提示，最终以运行时为准。 */
@@ -60,12 +60,17 @@ export interface AuthGuidance {
 }
 
 /**
- * 运行时目录响应（`GET /models/catalog?agent=`，v12 拆出的独立读面）。
+ * 运行时目录响应（`GET /models/catalog`，v12 拆出的独立读面）。
  *
  * 它是**事实**（运行时广告什么、会话能选什么），`value` 是不透明串；平台声明的那份是 `ModelsResp`。
  */
 export interface ModelCatalogResp {
-  agent: string
+  /**
+   * 采样自哪个底座（构建期固定的那一个）。
+   *
+   * v19 前这里还有 `agent: string`（目录是**按 agent** 取样的，请求还要带 `?agent=`）；
+   * agent 并入 runtime 后，取样对象只剩底座一个，两个指向同一个东西的字段收成一个。
+   */
   runtime: string
   /** 取样来源（session|resume|cache|none）。 */
   source: ModelCatalogSource

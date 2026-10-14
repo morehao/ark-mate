@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
 import { modelValues } from '@ark-mate/types'
 import { useMate } from '../store'
-import { AgentBadge } from './AgentBadge'
+import { RuntimeBadge } from './RuntimeBadge'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
 import { mostRecentlyUsedWorkspaceId } from '../console/workspaceView'
@@ -28,12 +28,14 @@ const EXAMPLES = [
 /**
  * 新建会话面板（hero + 内嵌输入卡 + 示例指令）。
  * 未选中会话时的问答区就是这个面板——不再有独立的「开始问答」空态页，
- * 也不再单独占一条路由（`/sessions` 无 id 即新建）。新建固定用「当前 Agent」
- * （全局默认单例，可在「设置 · Agent 管理」切换——这里只如实标出身份 + 给出切换入口，不在此处做选择器）。
+ * 也不再单独占一条路由（`/sessions` 无 id 即新建）。
+ *
+ * v19：这里原来标"当前 Agent"并给一个「切换 Agent」入口（切到设置 · Agent 管理）。
+ * 底座构建期固定、用户不可自定义之后，那句话与那个入口都没有接收方了，同一个位置改成
+ * 如实标出**底座身份**——面板上仍然看得出"这条会话跑在哪个底座上"，但没有任何可切的东西。
  */
 export function StartPanel() {
   const navigate = useNavigate()
-  const agents = useMate((s) => s.agents)
   const createAndRun = useMate((s) => s.createAndRun)
   const modelCatalog = useMate((s) => s.modelCatalog)
   const loadModelCatalog = useMate((s) => s.loadModelCatalog)
@@ -91,11 +93,11 @@ export function StartPanel() {
   // 复用不会造成"静默继承上一个任务的边界"那类问题。不想要了就点回「跟随默认」。
   const [capabilities, setCapabilities] = useState<CapabilityChoice>(FOLLOW_DEFAULT)
 
-  // 新建固定用「当前 Agent」（后端 agent_id 缺省时取它；缺省回落内置种子 dsh），前端无需再传 agent。
-  const defaultAgent = agents.find((a) => a.is_default) ?? agents[0]
-  const hasAgent = agents.length > 0
+  // v19：建会话不再需要客户端知道任何底座事实（原来要在缺省时挑出"当前 Agent"并传 agent_id，
+  // 现在后端按构建期固定的那个底座自己填）。因此这里也不再拿"agents 列表是否为空"当发送门禁——
+  // 那条门禁当初只是为了让"必然失败的提交"点不下去，而现在提交不依赖任何取不到的前置事实。
   const empty = draft.trim().length === 0
-  const canSend = hasAgent && !empty && !sending
+  const canSend = !empty && !sending
 
   // 候选全部来自运行时自报的配置项（平台无内置清单）：category=model 的候选值；
   // 为空 = 运行时没有可切换的模型（空态提示 + note/登录引导）。
@@ -105,13 +107,11 @@ export function StartPanel() {
     .map((g) => (g.terminal && g.command?.length ? `${g.name}：${g.command.join(' ')}` : g.name))
     .join(' ｜ ')
 
-  // 拉取「当前 Agent」的模型目录（后端按 agent 从运行时会话/缓存/resume 取样）。
+  // 拉取模型目录（v19 起这条读面无参：取样对象就是构建期固定的那个底座，
+  // 后端按运行时会话/缓存/resume 取样）。
   useEffect(() => {
-    if (!defaultAgent) return
-    void loadModelCatalog(defaultAgent.id)
-    // defaultAgent 引用随 agents 每次刷新变化，仅以 id 判定触发。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultAgent?.id, loadModelCatalog])
+    void loadModelCatalog()
+  }, [loadModelCatalog])
 
   // 本地记住的模型若已不在运行时候选里（换了底座/换了已配置的 provider），就地清掉：
   // 否则会把运行时不再广告的值发出去 → 建会话被拒（宁可回到「跟随默认」，不留死状态）。
@@ -167,31 +167,22 @@ export function StartPanel() {
           Hi，今天有什么安排？
         </h1>
 
-        {/* Agent 列表已隐去：新建固定用「当前 Agent」，不在此展示可选 agent 选项卡。
-            但「现在用的是哪个 agent」必须如实标出（否则面板上完全看不出身份），
-            并给出切换入口——切换本身在设置区「Agent 管理」（新建流程不做 agent 选择器）。 */}
-        {defaultAgent ? (
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 10,
-              flexWrap: 'wrap',
-              justifyContent: 'center',
-              marginTop: -8,
-            }}
-          >
-            <AgentBadge agent={defaultAgent} prefix="当前 Agent" />
-            <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>
-              新建会话使用当前 Agent（会话与 Agent 一对一绑定）·
-            </span>
-            <Link to="/settings/agents" style={{ fontSize: 11.5, color: tokens.primary, textDecoration: 'none' }}>
-              切换 Agent
-            </Link>
-          </div>
-        ) : (
-          <div style={{ color: tokens.textPlaceholder, fontSize: 12.5 }}>暂无可用 Agent（服务不可达或未播种）</div>
-        )}
+        {/* 新建会话落在哪个底座上：如实标出，但**没有**选择器（底座由构建期固定）。
+            取不到装配事实时不另开一条空态分支——徽标自己会说"未知"，
+            而"服务不可达"与"没有底座"是两件事，用同一句话盖掉会把排查方向带偏。 */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            marginTop: -8,
+          }}
+        >
+          <RuntimeBadge />
+          <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>新建会话使用构建期固定的底座（不可切换）</span>
+        </div>
 
         {/* 内嵌输入卡 */}
         <div
@@ -293,7 +284,6 @@ export function StartPanel() {
                   可用的能力
                 </span>
                 <CapabilityPicker
-                  agentId={defaultAgent?.id}
                   value={capabilities}
                   onChange={setCapabilities}
                   disabled={sending}

@@ -25,11 +25,11 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	ctx := context.Background()
 	now := time.Now()
 	if err := st.UpsertSession(ctx, model.SessionEntity{
-		ID: id, AgentID: "a1", Title: title, Status: "completed", CreatedAt: now, UpdatedAt: now,
+		ID: id, Title: title, Status: "completed", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("UpsertSession: %v", err)
 	}
-	svc.registerSession(&SessionRec{ID: id, AgentID: "a1", Title: title, Status: "completed",
+	svc.registerSession(&SessionRec{ID: id, Title: title, Status: "completed",
 		CreatedAt: now, UpdatedAt: now})
 	var msgs []model.MessageEntity
 	for i, pair := range texts {
@@ -109,8 +109,8 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 
-	svc.registerSession(&SessionRec{ID: "t-1", AgentID: "a1", Title: "内存会话"})
-	svc.beginTranscript("t-1", "a1", "stub", "/tmp", false)
+	svc.registerSession(&SessionRec{ID: "t-1", Title: "内存会话"})
+	svc.beginTranscript("t-1", "stub", "/tmp", false)
 	defer svc.closeTranscripts()
 	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
 	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})

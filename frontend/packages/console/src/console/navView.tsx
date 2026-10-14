@@ -43,8 +43,8 @@ export interface NavGroup {
 
 export type NavEntry = NavLeaf | NavGroup
 
-/** pending（待开发）条目的统一说明。 */
-export const PENDING_HINT = '预设化 Agent（未实现）'
+/** pending（待开发）条目的统一说明（v19 前这句写的是「预设化 Agent（未实现）」——那个概念已撤）。 */
+export const PENDING_HINT = '预设化助手（未实现）'
 
 export const NAV_ENTRIES: readonly NavEntry[] = [
   { id: 'chat', label: '问答', to: '/sessions', order: 10, icon: <MessageOutlined /> },
@@ -69,7 +69,7 @@ export function isGroup(entry: NavEntry): entry is NavGroup {
 
 /**
  * 命中判定：按**路径段前缀**——`/sessions/abc` 命中 `/sessions`，
- * `/settings/agents` 命中 `/settings`（设置区内分节，左栏入口仍要高亮）。
+ * `/settings/model` 命中 `/settings`（设置区内分节，左栏入口仍要高亮）。
  * 用段边界而不是裸 `startsWith`：`/settings-x` 不该命中 `/settings`。
  */
 export function isEntryActive(pathname: string, entry: NavEntry): boolean {
@@ -94,7 +94,7 @@ function isPathActive(pathname: string, to: string): boolean {
 }
 
 /**
- * 左栏/页面上下文：**只**用于状态条上那句会话语义提示（"问答会话绑定唯一 Agent…"只在问答页有意义）。
+ * 左栏/页面上下文：**只**用于状态条上那句底部事实提示（"会话跑在哪个底座上…"只在问答页有意义）。
  * 会话区不由此判定——它常驻左栏（切页不跳版），不随路由出现或消失。
  */
 export function railContextOf(pathname: string): 'chat' | 'extensions' | 'manage' {

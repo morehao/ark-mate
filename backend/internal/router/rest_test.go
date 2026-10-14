@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
@@ -31,10 +31,8 @@ import (
 // ——— stub Service（handler.Service 的测试替身，记录调用） ———
 
 type stubSvc struct {
-	agents   []dtoagent.AgentResp
 	sessions []dtosession.SessionResp
 
-	listAgentsErr    error
 	listSessionsErr  error
 	listCwd          string // 最近一次 ListSessions 的工作空间过滤参数
 	listWorkspaceID  string // 最近一次 ListSessions 的归属过滤参数（v14）
@@ -82,8 +80,7 @@ type stubSvc struct {
 	registryID           string
 	registryMoveBefore   string
 
-	diagID   string
-	diagResp *dtoagent.AgentDiagnosticsResp
+	diagResp *dtoruntime.DiagnosticsResp
 	diagErr  error
 
 	searchMsgQuery string
@@ -104,10 +101,9 @@ type stubSvc struct {
 	autoReq        dtoautomation.AutomationWriteReq
 	autoPreviewReq dtoautomation.AutomationPreviewReq
 
-	agentErr        error                              // P2 管理面桩错误注入
+	aclErr          error                              // 任意端点的裸 acl 错误注入（信封映射用）
 	resolvePermErr  *gerror.Error                      // 权限决策桩错误注入
 	resolvePermResp *dtosession.PermissionDecisionResp // 权限决策桩回执（nil = 默认构造）
-	agentAction     string                             // 最近一次 delete/start/stop 动作（P2 桩）
 
 	providerErr error // P2 provider 桩错误注入
 	providers   []dtoprovider.ProviderResp
@@ -175,16 +171,9 @@ type stubSvc struct {
 	// M2-4 Library 桩
 	libraryQueried svclibrary.Query
 
-	agentCapResp *dtocapability.AgentCapabilitiesResp // P2 §8.1 统一能力目录桩
-	agentCapErr  error
-	agentCapID   string
-
-	updateAgentResp *dtoagent.AgentResp     // PATCH /agents/:id 桩
-	updateAgentReq  dtoagent.AgentUpdateReq // 捕获 PATCH 入参（策略透传断言）
-	updateAgentErr  error
-	probeResp       *dtocapability.McpProbeResp // P2 §5.2 MCP live 探测桩
-	probeErr        error
-	probeID         string
+	probeResp *dtocapability.McpProbeResp // P2 §5.2 MCP live 探测桩
+	probeErr  error
+	probeID   string
 
 	callMcpResp *dtocapability.McpToolCallResp // B1 tools/call 桩
 	callMcpErr  error
@@ -231,63 +220,6 @@ func (s *stubSvc) RestErr(err error) error {
 	return gerror.Error{Code: 50000, Msg: err.Error()}
 }
 
-func (s *stubSvc) ListAgents() ([]dtoagent.AgentResp, error) {
-	if s.listAgentsErr != nil {
-		return nil, s.listAgentsErr
-	}
-	return s.agents, nil
-}
-
-// ——— P2 Agent 管理面桩（Create/Update/Delete/Start/Stop） ———
-func (s *stubSvc) CreateAgent(_ context.Context, req dtoagent.AgentCreateReq) (*dtoagent.AgentResp, error) {
-	if s.agentErr != nil {
-		return nil, s.agentErr
-	}
-	resp := &dtoagent.AgentResp{ID: req.ID, Name: req.Name, Provider: req.Provider, State: "stopped"}
-	s.agents = append(s.agents, *resp)
-	return resp, nil
-}
-func (s *stubSvc) UpdateAgent(_ context.Context, id string, patch dtoagent.AgentUpdateReq) (*dtoagent.AgentResp, error) {
-	s.updateAgentReq = patch
-	if s.agentErr != nil {
-		return nil, s.agentErr
-	}
-	if s.updateAgentErr != nil {
-		return nil, s.updateAgentErr
-	}
-	if s.updateAgentResp != nil {
-		return s.updateAgentResp, nil
-	}
-	return &dtoagent.AgentResp{ID: id, State: "stopped"}, nil
-}
-func (s *stubSvc) SetDefaultAgent(_ context.Context, id string) (*dtoagent.AgentResp, error) {
-	if s.agentErr != nil {
-		return nil, s.agentErr
-	}
-	s.agentAction = "default:" + id
-	return &dtoagent.AgentResp{ID: id, State: "stopped", IsDefault: true}, nil
-}
-func (s *stubSvc) DeleteAgent(_ context.Context, id string) (*dtoagent.AgentDeleteResp, error) {
-	if s.agentErr != nil {
-		return nil, s.agentErr
-	}
-	s.agentAction = "delete:" + id
-	return &dtoagent.AgentDeleteResp{Deleted: id, AffectedSessions: 2, DetachedSessions: 1, WasDefault: true}, nil
-}
-func (s *stubSvc) StartAgent(_ context.Context, id string) error {
-	if s.agentErr != nil {
-		return s.agentErr
-	}
-	s.agentAction = "start:" + id
-	return nil
-}
-func (s *stubSvc) StopAgent(_ context.Context, id string) error {
-	if s.agentErr != nil {
-		return s.agentErr
-	}
-	s.agentAction = "stop:" + id
-	return nil
-}
 func (s *stubSvc) ListProviders(context.Context) ([]dtoprovider.ProviderResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
@@ -348,19 +280,18 @@ func (s *stubSvc) SyncModels(_ context.Context, runtimeID string) (*dtomodel.Mod
 	}
 	return &dtomodel.ModelSyncResp{Applied: []dtomodel.RuntimeSyncResp{{Runtime: runtimeID, Pending: true}}}, nil
 }
-func (s *stubSvc) ModelsView(_ context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error) {
+func (s *stubSvc) ModelsView(_ context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
 	return &dtomodel.ModelsResp{}, nil
 }
-func (s *stubSvc) ModelCatalog(_ context.Context, agentID string) (*dtomodel.ModelCatalogResp, error) {
+func (s *stubSvc) ModelCatalog(_ context.Context) (*dtomodel.ModelCatalogResp, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
-	return &dtomodel.ModelCatalogResp{Agent: agentID, Source: "none"}, nil
+	return &dtomodel.ModelCatalogResp{Runtime: "stub", Source: "none"}, nil
 }
-func (s *stubSvc) DefaultAgentID() string { return "dsh" }
 
 // ——— P1 能力数据面桩（ListSkills/ListMcpServers/ListTools） ———
 func (s *stubSvc) ListSkills() ([]dtocapability.SkillResp, error) {
@@ -453,16 +384,6 @@ func (s *stubSvc) ListTools() ([]dtocapability.ToolResp, error) {
 		return nil, s.capErr
 	}
 	return s.tools, nil
-}
-func (s *stubSvc) AgentCapabilities(id string) (*dtocapability.AgentCapabilitiesResp, error) {
-	s.agentCapID = id
-	if s.agentCapErr != nil {
-		return nil, s.agentCapErr
-	}
-	if s.agentCapResp != nil {
-		return s.agentCapResp, nil
-	}
-	return &dtocapability.AgentCapabilitiesResp{AgentID: id}, nil
 }
 func (s *stubSvc) UsageSummary(_ context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
 	s.usageQuery = q
@@ -642,16 +563,20 @@ func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]dtosessi
 	return nil, nil
 }
 
-// ——— A3 agent 诊断桩 ———
-func (s *stubSvc) AgentDiagnostics(_ context.Context, id string) (*dtoagent.AgentDiagnosticsResp, error) {
-	s.diagID = id
+// RuntimeIdentity 底座身份桩：`/meta` 的 runtime 段（id/name/version）由路由层从本方法取。
+func (s *stubSvc) RuntimeIdentity(_ context.Context) dtoruntime.IdentityResp {
+	return dtoruntime.IdentityResp{ID: "stub", Name: "Stub", Version: "0.0-stub"}
+}
+
+// RuntimeDiagnostics 底座诊断桩（v19：原 AgentDiagnostics，路径不带 id）。
+func (s *stubSvc) RuntimeDiagnostics(_ context.Context) (*dtoruntime.DiagnosticsResp, error) {
 	if s.diagErr != nil {
 		return nil, s.diagErr
 	}
 	if s.diagResp != nil {
 		return s.diagResp, nil
 	}
-	return &dtoagent.AgentDiagnosticsResp{AgentID: id, State: "stopped", StderrSource: "none",
+	return &dtoruntime.DiagnosticsResp{State: "stopped", Runtime: "stub", StderrSource: "none",
 		StderrTail: []string{}, CheckedAt: "2026-09-09T00:00:00Z"}, nil
 }
 
@@ -800,7 +725,7 @@ type envelope struct {
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
-		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}
 }
@@ -1069,51 +994,25 @@ func do(t *testing.T, r *gin.Engine, method, path, body string) (*envelope, int)
 
 // ——— 用例 ———
 
-// TestListEndpoints GET /agents /sessions 返回 code=0 + 真实列表载荷。
+// TestListEndpoints GET /sessions 返回 code=0 + 真实列表载荷。
+//
+// v19：agent 列表那一半随 `/agents` 路由整体删除——会话身份只剩 `runtime_id`（构建期固定）。
 func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
-		agents:   []dtoagent.AgentResp{{ID: "dsh", Name: "dsh", State: "stopped", IsDefault: true, Seed: true}},
-		sessions: []dtosession.SessionResp{{ID: "s1", AgentID: "a", Status: "completed"}},
+		sessions: []dtosession.SessionResp{{ID: "s1", RuntimeID: "rtx", Status: "completed"}},
 	}
 	r := newRestEngine(stubDeps(svc))
 
-	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != 0 || env.Msg != "success" {
-		t.Fatalf("agents 信封不符: %+v", env)
+		t.Fatalf("sessions 信封不符: %+v", env)
 	}
-	var agents []dtoagent.AgentResp
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 || agents[0].ID != "dsh" {
-		t.Fatalf("agents data 不符: %s", env.Data)
-	}
-	// 种子只读标记必须落在 JSON 契约里（前端按 a.seed 判定，而非 id 前缀猜测）。
-	if !agents[0].Seed || !agents[0].IsDefault {
-		t.Fatalf("seed/is_default 未暴露: %+v", agents[0])
-	}
-	if !strings.Contains(string(env.Data), `"seed":true`) {
-		t.Fatalf("seed 字段名不符: %s", env.Data)
-	}
-	// 底座由构建期固定：agent 响应里**不该再有 runtimes** 这个选择面字段。
-	var rawAgents []map[string]any
-	if err := json.Unmarshal(env.Data, &rawAgents); err != nil {
-		t.Fatalf("agents 原始载荷解析失败: %s", env.Data)
-	}
-	if _, has := rawAgents[0]["runtimes"]; has {
-		t.Fatalf("agent 响应不应带 runtimes: %s", env.Data)
-	}
-
-	env, _ = do(t, r, "GET", "/v1/mate/sessions", "")
 	var sess []dtosession.SessionResp
 	if err := json.Unmarshal(env.Data, &sess); err != nil || len(sess) != 1 || sess[0].Status != "completed" {
 		t.Fatalf("sessions data 不符: %s", env.Data)
 	}
-}
-
-// TestRuntimesEndpointGone `GET /runtimes` 必须**不存在**（用户面零 runtime 选择入口）。
-func TestRuntimesEndpointGone(t *testing.T) {
-	r := newRestEngine(stubDeps(&stubSvc{}))
-	_, code := do(t, r, "GET", "/v1/mate/runtimes", "")
-	if code == 0 {
-		t.Fatal("GET /v1/mate/runtimes 不该再可用：底座由构建期固定")
+	if sess[0].RuntimeID != "rtx" || !strings.Contains(string(env.Data), `"runtime_id":"rtx"`) {
+		t.Fatalf("会话身份应只有 runtime_id: %s", env.Data)
 	}
 }
 
@@ -1121,7 +1020,7 @@ func TestRuntimesEndpointGone(t *testing.T) {
 // 绝对路径透传给 service（含 workspace_temporary 回读），相对路径属参数错误直接 40000。
 func TestListSessionsWorkspaceQuery(t *testing.T) {
 	svc := &stubSvc{sessions: []dtosession.SessionResp{{
-		ID: "c-1", AgentID: "agent-rtx", Status: "completed",
+		ID: "c-1", RuntimeID: "rtx", Status: "completed",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 	}}}
 	r := newRestEngine(stubDeps(svc))
@@ -1157,57 +1056,22 @@ func TestListSessionsWorkspaceQuery(t *testing.T) {
 	}
 }
 
-// TestAgentPermissionPolicyRoute M2 #7：GET /agents 暴露只读 permission_policy；
-// PATCH /agents/:id 透传策略入参（handler 只做绑定/透传，校验在 manager）。
-func TestAgentPermissionPolicyRoute(t *testing.T) {
-	svc := &stubSvc{agents: []dtoagent.AgentResp{{
-		ID: "pol", Name: "策略", State: "stopped",
-		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "deny", Tools: map[string]string{"bash": "allow"}},
-	}}}
-	r := newRestEngine(stubDeps(svc))
-
-	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
-	var agents []dtoagent.AgentResp
-	if err := json.Unmarshal(env.Data, &agents); err != nil || len(agents) != 1 {
-		t.Fatalf("agents data 不符: %s", env.Data)
-	}
-	if agents[0].PermissionPolicy == nil || agents[0].PermissionPolicy.Default != "deny" ||
-		agents[0].PermissionPolicy.Tools["bash"] != "allow" {
-		t.Fatalf("permission_policy 未透传: %+v", agents[0])
-	}
-
-	svc.updateAgentResp = &dtoagent.AgentResp{ID: "pol", Name: "策略", State: "stopped",
-		PermissionPolicy: &dtoagent.PermissionPolicyResp{Default: "allow"}}
-	env, code := do(t, r, "PATCH", "/v1/mate/agents/pol", `{"permission_policy":{"default":"allow"}}`)
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("PATCH 失败: http=%d env=%+v", code, env)
-	}
-	if svc.updateAgentReq.PermissionPolicy == nil || svc.updateAgentReq.PermissionPolicy.Default != "allow" {
-		t.Fatalf("策略未透传到 service: %+v", svc.updateAgentReq)
-	}
-	// 非法策略由 manager 返回 request 类错误 → 信封透传（HTTP 200 + code≠0）。
-	svc.updateAgentErr = gerror.Error{Code: 40001, Msg: `permission_policy.default: 动作 "sometimes" 非法`}
-	if env, code := do(t, r, "PATCH", "/v1/mate/agents/pol", `{"permission_policy":{"default":"sometimes"}}`); code != 200 || env.Code != 40001 {
-		t.Fatalf("非法策略应 40001，got http=%d code=%d", code, env.Code)
-	}
-}
-
 // TestUsageSummaryRoute M3：GET /usage/summary 参数绑定/透传 + 信封形态 + 业务错误透传。
 func TestUsageSummaryRoute(t *testing.T) {
 	svc := &stubSvc{usageResp: &dtousage.UsageSummaryResp{
-		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z", AgentID: "agent-stub",
+		From: "2026-09-01T00:00:00Z", To: "2026-09-09T00:00:00Z",
 		GroupBy: "day", Source: "sqlite",
 		Totals:  dtousage.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
 		Buckets: []dtousage.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&agent_id=agent-stub&group_by=day", "")
+	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d env=%+v", code, env)
 	}
 	if svc.usageQuery.From != "2026-09-01" || svc.usageQuery.To != "2026-09-09" ||
-		svc.usageQuery.AgentID != "agent-stub" || svc.usageQuery.GroupBy != "day" {
+		svc.usageQuery.GroupBy != "day" {
 		t.Fatalf("查询参数未透传: %+v", svc.usageQuery)
 	}
 	var resp dtousage.UsageSummaryResp
@@ -1220,7 +1084,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 	}
 
 	// 业务错误（40001/40501）→ HTTP 200 + code≠0 透传。
-	svc.usageErr = gerror.Error{Code: 40001, Msg: `[invalid_usage_group_by] group_by 仅支持 agent|day："tool"`}
+	svc.usageErr = gerror.Error{Code: 40001, Msg: `[invalid_usage_group_by] group_by 仅支持 day："tool"`}
 	if env, code := do(t, r, "GET", "/v1/mate/usage/summary?group_by=tool", ""); code != 200 || env.Code != 40001 {
 		t.Fatalf("非法 group_by 应 40001: http=%d env=%+v", code, env)
 	}
@@ -1236,9 +1100,9 @@ func TestUsageSummaryRoute(t *testing.T) {
 // 与领域层的 50000 并存，同一个"未归类内部错误"有两个码。P5 收敛到
 // code.Internal(50000) 一个兜底码，且 msg 仍原样带出（不失诊断信息）。
 func TestListFailure(t *testing.T) {
-	svc := &stubSvc{listAgentsErr: errors.New("boom")}
+	svc := &stubSvc{listSessionsErr: errors.New("boom")}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/mate/agents", "")
+	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != code.Internal {
 		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
 	}
@@ -1249,9 +1113,9 @@ func TestListFailure(t *testing.T) {
 
 // TestCreateSession 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
 func TestCreateSession(t *testing.T) {
-	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", AgentID: "agent-rtx", Status: "in_progress", EventSeq: 9}}
+	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", RuntimeID: "rtx", Status: "in_progress", EventSeq: 9}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"agent-rtx","prompt":"hi","cwd":"/tmp"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
 	}
@@ -1262,12 +1126,12 @@ func TestCreateSession(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &resp); err != nil || resp.ID != "s-abc" || resp.EventSeq != 9 {
 		t.Fatalf("create data 不符: %s", env.Data)
 	}
-	if !svc.createCalled || svc.createReq.AgentID != "agent-rtx" || svc.createReq.Prompt != "hi" || svc.createReq.Cwd != "/tmp" {
+	if !svc.createCalled || svc.createReq.Prompt != "hi" || svc.createReq.Cwd != "/tmp" {
 		t.Fatalf("create 未正确透传: %+v", svc.createReq)
 	}
 }
 
-// TestCreateSessionBadBody 非 JSON 请求体 → code 40000（agent_id 现为可选，不再校验缺失）。
+// TestCreateSessionBadBody 非 JSON 请求体 → code 40000。
 func TestCreateSessionBadBody(t *testing.T) {
 	r := newRestEngine(stubDeps(&stubSvc{}))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `not-json{`)
@@ -1276,24 +1140,11 @@ func TestCreateSessionBadBody(t *testing.T) {
 	}
 }
 
-// TestCreateSessionOptionalAgent 省略 agent_id 应被接受并透传给 service（默认在 service 层解析）。
-func TestCreateSessionOptionalAgent(t *testing.T) {
-	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi"}`)
-	if env.Code != 0 {
-		t.Fatalf("省略 agent_id 应被接受: %+v", env)
-	}
-	if !svc.createCalled || svc.createReq.AgentID != "" || svc.createReq.Prompt != "hi" {
-		t.Fatalf("create 未正确透传（agent_id 应为空）: %+v", svc.createReq)
-	}
-}
-
 // TestCreateSessionServiceError svc 业务错误原样透出（40901 忙）。
 func TestCreateSessionServiceError(t *testing.T) {
 	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "run in progress"}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"a","prompt":"hi"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "run in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
 	}
@@ -1333,11 +1184,11 @@ func TestPromptAndCancel(t *testing.T) {
 		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
 	}
 	var qdata []struct {
-		InputID      string `json:"input_id"`
-		Text         string `json:"text"`
-		Delivery     string `json:"delivery"`
+		InputID     string `json:"input_id"`
+		Text        string `json:"text"`
+		Delivery    string `json:"delivery"`
 		TargetRunID string `json:"target_run_id"`
-		Generation   int64  `json:"generation"`
+		Generation  int64  `json:"generation"`
 	}
 	if err := json.Unmarshal(env.Data, &qdata); err != nil || len(qdata) != 1 {
 		t.Fatalf("排队列表 data 不符: %s", env.Data)
@@ -1540,48 +1391,6 @@ func TestResolveElicitationBadBody(t *testing.T) {
 	}
 }
 
-// TestAgentManagementRoutes P2 管理面路由：注册/启停/热更新/删除经 stub 桩往返。
-func TestAgentManagementRoutes(t *testing.T) {
-	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
-
-	env, code := do(t, r, "POST", "/v1/mate/agents", `{"id":"alias-stub","name":"别名stub"}`)
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("注册失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
-	}
-	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/start", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "start:alias-stub" {
-		t.Fatalf("start 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
-	}
-	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/stop", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "stop:alias-stub" {
-		t.Fatalf("stop 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
-	}
-	env, code = do(t, r, "PATCH", "/v1/mate/agents/alias-stub", `{"name":"别名stub v2"}`)
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("PATCH 失败 code=%d env=%d", code, env.Code)
-	}
-	// 切换「当前 Agent」：路径参数透传到服务并回带 is_default 表示。
-	env, code = do(t, r, "POST", "/v1/mate/agents/alias-stub/default", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "default:alias-stub" {
-		t.Fatalf("set default 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
-	}
-	var def dtoagent.AgentResp
-	if err := json.Unmarshal(env.Data, &def); err != nil || def.ID != "alias-stub" || !def.IsDefault {
-		t.Fatalf("set default 载荷不符: %s", env.Data)
-	}
-	env, code = do(t, r, "DELETE", "/v1/mate/agents/alias-stub", "")
-	if code != 200 || env.Code != 0 || svc.agentAction != "delete:alias-stub" {
-		t.Fatalf("delete 失败 code=%d env=%d action=%s", code, env.Code, svc.agentAction)
-	}
-	// 删除回带影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）：面板据此如实告知后果。
-	var del dtoagent.AgentDeleteResp
-	if err := json.Unmarshal(env.Data, &del); err != nil ||
-		del.Deleted != "alias-stub" || del.AffectedSessions != 2 || del.DetachedSessions != 1 || !del.WasDefault {
-		t.Fatalf("delete 载荷不符: %s", env.Data)
-	}
-}
-
 // TestProviderRoutes provider 注入面路由：GET 列表 + PATCH upsert（密钥只写不读回）。
 func TestProviderRoutes(t *testing.T) {
 	svc := &stubSvc{}
@@ -1689,49 +1498,6 @@ func TestSkillMaterializationRoute(t *testing.T) {
 	}
 }
 
-// TestAgentCapabilitiesRoute P2 §8.1 统一能力目录路由：GET /agents/:id/capabilities 返回
-// 聚合视图（信封 data 对象）；未知 agent 透传 40401。
-func TestAgentCapabilitiesRoute(t *testing.T) {
-	svc := &stubSvc{
-		agentCapResp: &dtocapability.AgentCapabilitiesResp{
-			AgentID:  "a1",
-			Runtimes: []string{"rtx"},
-			Skills:   []dtocapability.AgentSkillResp{{ID: "plan", Name: "plan"}},
-			McpServers: []dtocapability.AgentMcpServerResp{
-				{ID: "fs", Transport: "stdio", Enabled: true, Runtimes: []string{"rtx"}},
-			},
-			Tools: []dtocapability.ToolResp{{Name: "web_search", Source: "builtin"}},
-			Notes: []string{"候选 runtime \"ghost\" 未注册（按声明过滤，不推导其能力）"},
-		},
-	}
-	r := newRestEngine(stubDeps(svc))
-
-	env, code := do(t, r, "GET", "/v1/mate/agents/a1/capabilities", "")
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("GET agent capabilities 失败 code=%d env=%d", code, env.Code)
-	}
-	var got dtocapability.AgentCapabilitiesResp
-	if err := json.Unmarshal(env.Data, &got); err != nil {
-		t.Fatalf("data 反序列化失败: %v (%s)", err, env.Data)
-	}
-	if got.AgentID != "a1" || svc.agentCapID != "a1" {
-		t.Fatalf("agent id 不符: %+v stub=%q", got, svc.agentCapID)
-	}
-	if len(got.Skills) != 1 || len(got.McpServers) != 1 || !got.McpServers[0].Enabled || len(got.Tools) != 1 {
-		t.Fatalf("聚合视图不符: %+v", got)
-	}
-	if len(got.Notes) != 1 {
-		t.Fatalf("notes 不符: %+v", got.Notes)
-	}
-
-	// 未知 agent：Service 返回 40401 → 信封透传（HTTP 200 + code≠0）。
-	svc.agentCapErr = gerror.Error{Code: 40401, Msg: `未知 agent "nope"`}
-	env, code = do(t, r, "GET", "/v1/mate/agents/nope/capabilities", "")
-	if code != 200 || env.Code != 40401 {
-		t.Fatalf("未知 agent 应 40401，got http=%d code=%d", code, env.Code)
-	}
-}
-
 // TestProbeMcpServerRoute P2 §5.2 MCP live 探测路由：POST /mcps/:id/probe 返回探测结果；
 // 未知 server 透传 40401；未知传输透传 40501。
 func TestProbeMcpServerRoute(t *testing.T) {
@@ -1769,9 +1535,12 @@ func TestProbeMcpServerRoute(t *testing.T) {
 	}
 }
 
-// TestAgentErrorEnvelopeMapping agent 端点错误必须经信封映射（修复：此前裸 acl 错误漏成 code=-1，
+// TestErrorEnvelopeMapping 端点错误必须经信封映射（修复：此前裸 acl 错误漏成 code=-1，
 // 与 README「非 0 为业务错误（40001/40401/…）」契约不符）。
-func TestAgentErrorEnvelopeMapping(t *testing.T) {
+//
+// v19：这些用例原挂在 agent 端点上（已随 agent 面删除）；映射表本身与端点无关，
+// 现在用**供应商面**（唯一还带完整 acl 分类的写面）钉住四条分类 → 四个码。
+func TestErrorEnvelopeMapping(t *testing.T) {
 	cases := []struct {
 		name   string
 		method string
@@ -1780,27 +1549,20 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 		err    error
 		code   int
 	}{
-		{"delete_seed", "DELETE", "/v1/mate/agents/dsh", "",
-			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 不可删除", nil), 40001},
-		{"delete_unknown", "DELETE", "/v1/mate/agents/nope", "",
-			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"update_seed", "PATCH", "/v1/mate/agents/dsh", `{"name":"x"}`,
-			acl.NewError(acl.ClassRequest, "seed_agent_readonly", "种子 agent 只读", nil), 40001},
-		{"create_reserved", "POST", "/v1/mate/agents", `{"id":"agent-x"}`,
-			acl.NewError(acl.ClassRequest, "reserved_agent_id", "保留前缀", nil), 40001},
-		// 已下线的选择面：`runtimes` / `routing_policy` 一律 40001（**不是**静默忽略）。
-		{"create_with_runtimes", "POST", "/v1/mate/agents", `{"id":"x","runtimes":["stub"]}`,
-			acl.NewError(acl.ClassRequest, "runtime_selection_removed", "底座由构建期固定", nil), 40001},
-		{"start_unknown", "POST", "/v1/mate/agents/nope/start", "",
-			acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil), 40401},
-		{"stop_busy", "POST", "/v1/mate/agents/dsh/stop", "",
-			acl.NewError(acl.ClassLimit, "agent_busy", "有在途 run", nil), 40901},
-		{"start_unavailable", "POST", "/v1/mate/agents/dsh/start", "",
-			acl.NewError(acl.ClassUnsupported, "runtime_unavailable", "命令不可执行", nil), 40501},
+		{"not_found", "GET", "/v1/mate/providers", "",
+			acl.NewError(acl.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
+		{"request", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
+			acl.NewError(acl.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
+		{"conflict", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
+			acl.NewError(acl.ClassLimit, "provider_exists", "已存在", nil), 40901},
+		{"unsupported", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai","api_key":"sk-x"}`,
+			acl.NewError(acl.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
+		{"upstream", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
+			acl.NewError(acl.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &stubSvc{agentErr: tc.err}
+			svc := &stubSvc{providerErr: tc.err}
 			r := newRestEngine(stubDeps(svc))
 			env, http := do(t, r, tc.method, tc.path, tc.body)
 			if http != 200 || env.Code != tc.code {
@@ -1812,9 +1574,9 @@ func TestAgentErrorEnvelopeMapping(t *testing.T) {
 		})
 	}
 	// 已映射错误不得被二次映射（restErr 幂等）。
-	svc := &stubSvc{agentErr: gerror.Error{Code: 40001, Msg: "已映射"}}
+	svc := &stubSvc{providerErr: gerror.Error{Code: 40001, Msg: "已映射"}}
 	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "DELETE", "/v1/mate/agents/nope", "")
+	env, _ := do(t, r, "GET", "/v1/mate/providers", "")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
 	}
@@ -1890,35 +1652,40 @@ func TestExportRoute(t *testing.T) {
 	}
 }
 
-// TestAgentDiagnosticsRoute GET /agents/:id/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
-func TestAgentDiagnosticsRoute(t *testing.T) {
-	svc := &stubSvc{diagResp: &dtoagent.AgentDiagnosticsResp{
-		AgentID: "a1", Name: "A1", State: "stopped", Runtime: "stub", Command: "sh",
+// TestRuntimeDiagnosticsRoute GET /runtime/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
+//
+// v19：路径不带 id（原 `GET /agents/:id/diagnostics`）——底座由构建期固定，身份由响应里的
+// `runtime` 回答，不再有"哪个 agent 的诊断"这一问。
+func TestRuntimeDiagnosticsRoute(t *testing.T) {
+	svc := &stubSvc{diagResp: &dtoruntime.DiagnosticsResp{
+		State: "stopped", Runtime: "stub", RuntimeName: "Stub", Command: "sh",
 		Connected: false, StderrSource: "last_error", CheckedAt: "2026-09-09T00:00:00Z",
 		StderrTail: []string{"[warn] boom"},
-		LastError:  &dtoagent.AgentLastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
+		LastError:  &dtoruntime.LastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
 	}}
 	r := newRestEngine(stubDeps(svc))
 
-	env, http := do(t, r, "GET", "/v1/mate/agents/a1/diagnostics", "")
+	env, http := do(t, r, "GET", "/v1/mate/runtime/diagnostics", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
-	if svc.diagID != "a1" {
-		t.Fatalf("id 透传不符: %q", svc.diagID)
-	}
 	body := string(env.Data)
-	for _, want := range []string{`"stderr_source":"last_error"`, `"[warn] boom"`, `"code":"timeout"`, `"connected":false`} {
+	for _, want := range []string{`"runtime":"stub"`, `"runtime_name":"Stub"`, `"stderr_source":"last_error"`, `"[warn] boom"`, `"code":"timeout"`, `"connected":false`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("响应缺 %s: %s", want, body)
 		}
 	}
+	// 身份面不许回带 agent 相关的选择面字段（被撤掉的概念不许从别的字段缝回来）——
+	// 判据落在响应形状上（`rest_removed_agent_key_test.go` 有逐字的那一条）。
+	if strings.Contains(body, `"runtimes"`) {
+		t.Fatalf("诊断面不该出现 runtimes: %s", body)
+	}
 
-	// 未知 agent → 40401（handler 经 svc.RestErr 映射）。
-	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "agent_not_found", "未知 agent", nil)}
+	// 底层错误 → 信封映射（handler 经 code.FromError）。
+	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "runtime_not_found", "底座未装配", nil)}
 	r2 := newRestEngine(stubDeps(svc2))
-	env, http = do(t, r2, "GET", "/v1/mate/agents/nope/diagnostics", "")
-	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "未知 agent") {
+	env, http = do(t, r2, "GET", "/v1/mate/runtime/diagnostics", "")
+	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "底座未装配") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
 }

@@ -24,14 +24,16 @@
  * 正是 2026-10-11 之前的老形态：**验过的界面从未在交付件形态上跑过**。判据与守卫见
  * `backend/internal/archtest/dev_parity_test.go` 与 `.dsh/docs/plans/2026-10-11-dev-delivery-parity-plan.md`。
  *
- * **场景按在册 runtime 驱动（同批改造）**：本构建固定了底座（用户不能选 runtime），所以"哪个 agent
- * 在册、哪条 skill 适用"是**服务端事实**——脚本从 `GET /agents` 读，不写死任何具体底座名（历史实测
- * 2026-10-11 的 P0：写死会把"脚本陈旧"演成"等待超时：页面渲染不出来"，误导了整整两轮）；验不了的
- * 场景**显式跳过并写明理由**，不靠上一轮残留数据"碰巧绿"。
+ * **场景按构建期固定的底座驱动（同批改造）**：本构建固定了底座（用户不能选 runtime），所以"跑的是
+ * 哪个底座、哪条 skill 适用"是**服务端事实**——脚本从 `GET /meta` 的 `runtime` 读，不写死任何具体
+ * 底座名（历史实测 2026-10-11 的 P0：写死会把"脚本陈旧"演成"等待超时：页面渲染不出来"，误导了整整
+ * 两轮）；验不了的场景**显式跳过并写明理由**，不靠上一轮残留数据"碰巧绿"。
  *
- * 环境写入（脚本自己造、自己清）：用 M2 写面给**每个在册 agent** 各建一条验收用 skill（钉它自己的
- * runtime），另加一条钉"不在册 runtime"的不可达项；若在册 agent 多于一个则切一次当前 agent
- * （M3-4 的清单按 agent 视角取）并在结束时**切回原来的那个**。
+ * 环境写入（脚本自己造、自己清）：用 M2 写面给**那个底座**建一条验收用 skill（钉它自己的 runtime），
+ * 另加一条钉"不在册 runtime"的不可达项。
+ *
+ * v19：原来这里还有"每个在册 agent 一条 skill + 多 agent 时切一次当前 agent"那一整套——agent 概念
+ * 删除后底座只有一个，"切当前 agent"没有对象了，整段随之消失（连同 `POST /agents/:id/default`）。
  */
 
 import { spawn } from 'node:child_process'
@@ -52,28 +54,26 @@ const PROFILE = join(tmpdir(), `mate-ui-accept-${process.pid}`)
 /** 产物目录：启动断言拿它核对"靶服务的确实是这一份"（与 `make dev` 的 `--web-dir` 同源）。 */
 const WEB_DIR = join(REPO_ROOT, 'frontend/apps/web/dist')
 /**
- * 验收用 skill 定义：**每个在册 agent 一条**（钉它自己的 runtime），外加一条钉"不在册 runtime"的
- * 不可达项——脚本自建自清。
+ * 验收用 skill 定义：**构建期固定的那个底座一条**（钉它自己的 runtime），外加一条钉"不在册
+ * runtime"的不可达项——脚本自建自清。
  *
- * 这不是一张写死的 id 表：定义由 `orientSkills()` 按 `GET /agents` 的**在册事实**现算
- * （多 agent 时切换当前 agent，适用/不适用两个角色跟着换）。
+ * 这不是一张写死的 id 表：定义由 `orientSkills()` 按 `GET /meta.runtime` 的**装配事实**现算。
  */
 let SKILL_DEFS = {}
 /**
- * 单 agent 构建下"不适用"那条 skill 钉的占位 runtime 标识：它刻意**不在任何在册 agent 的候选
- * runtime 里**，所以清单里必须有它、且必须标"不可选"。这条判据验的是"不适用也列出来、不隐藏"，
- * 不需要真的存在第二个底座（本构建只装配一个 adapter，用户也不能选 runtime）。
+ * "不适用"那条 skill 钉的占位 runtime 标识：它刻意**不在候选 runtime 里**，所以清单里必须有它、
+ * 且必须标"不可选"。这条判据验的是"不适用也列出来、不隐藏"，不需要真的存在第二个底座
+ * （本构建只装配一个 adapter，用户也不能选 runtime）。
  */
 const ABSENT_RUNTIME = 'not-registered'
-/** 当前在册的 runtime（= 当前 agent 的 id）与"另一个"：多 agent 时是另一条在册 agent，否则是占位标识。 */
+/** 构建期固定的那个底座 id。 */
 let RUNTIME = ''
-let OTHER_RUNTIME = ''
+/** "另一个" runtime：v19 起恒为 `ABSENT_RUNTIME` 占位（底座只有一个，"另一个在册底座"不存在了）。 */
+let OTHER_RUNTIME = ABSENT_RUNTIME
 /** `{ applicable, inapplicable }` 的 skill id（按 RUNTIME 定向）。 */
 let SKILLS = {}
-/** `GET /agents` 的最近一次事实（场景可能切换当前 agent，切完要重取）。 */
-let AGENTS = []
-/** 开跑时的当前 agent：收尾要切回**它**（按 `GET /agents` 的事实取，不是写死某个底座名）。 */
-let INITIAL_DEFAULT_AGENT = null
+/** `GET /meta` 的最近一次事实（底座 id 与版本）。 */
+let META = null
 const AUTO_ID = 'ui-verify-daily'
 /**
  * 目录浏览对话框场景的夹具目录名（在 `mkdtempSync(tmpdir()/mate-wsdir-)` 下自建自清）。
@@ -472,52 +472,57 @@ async function api(method, path, body) {
 }
 
 /**
- * 按"当前 agent"定向适用/不适用两条 skill（切换当前 agent 之后必须再调一次——角色会跟着换）。
+ * 定向适用/不适用两条 skill（定义**现算**，不写死 id 表）。
  *
- * 定义**现算**：每个在册 agent 一条 `ui-verify-<id>`（钉它自己的 runtime）；"不适用"优先取另一个
- * **在册** agent，没有第二个时取 `ABSENT_RUNTIME` 占位（它同样要出现在清单里、要标"不可选"）。
- * 整张表里没有任何"本仓随包哪个底座"的假设，只有 `GET /agents` 的事实。
+ * 适用那条钉 `runtime_id`（构建期固定的那个底座）；不适用那条钉 `ABSENT_RUNTIME` 占位——
+ * 它同样要出现在清单里、要标"不可选"（§13.4 S5：不适用也列出来并说明原因，不静默过滤）。
+ * 整张表里没有任何"本仓随包哪个底座"的假设，只有 `GET /meta.runtime` 的事实。
  */
-function orientSkills(agents) {
-  const cur = agents.find((a) => a.is_default) ?? agents[0]
-  RUNTIME = cur.id
-  OTHER_RUNTIME = agents.find((a) => a.id !== cur.id)?.id ?? ABSENT_RUNTIME
+function orientSkills(runtimeId) {
+  RUNTIME = runtimeId
+  OTHER_RUNTIME = ABSENT_RUNTIME
   const defFor = (rt) => ({ id: `ui-verify-${rt}`, name: `UI验收-仅${rt}`, runtimes: [rt] })
   SKILL_DEFS = {}
-  for (const a of agents) SKILL_DEFS[a.id] = defFor(a.id)
-  for (const rt of [RUNTIME, OTHER_RUNTIME]) if (!SKILL_DEFS[rt]) SKILL_DEFS[rt] = defFor(rt)
+  for (const rt of [RUNTIME, OTHER_RUNTIME]) SKILL_DEFS[rt] = defFor(rt)
   SKILLS = { applicable: SKILL_DEFS[RUNTIME].id, inapplicable: SKILL_DEFS[OTHER_RUNTIME].id }
-  return cur
+  return RUNTIME
 }
 
 /**
- * 「底座词汇」正则：**在册 agent 的 id** 全部算代码词（ADR-22 的文案纪律——设置 · 模型那一节的
+ * 「底座词汇」正则：**构建期固定的那个底座 id** 算代码词（ADR-22 的文案纪律——设置 · 模型那一节的
  * 正文只许出现用户词「供应商」「模型」），外加 provider/mcp/skill/runtime 这几个代码词。
- * 按在册事实现算，不写死某个底座名。
+ * 按装配事实现算，不写死某个底座名。
  */
 function runtimeWordRe() {
-  const ids = AGENTS.map((a) => String(a.id ?? '')).filter(Boolean)
+  const ids = [String(META?.runtime?.id ?? '')].filter(Boolean)
     .map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   return new RegExp([...ids, 'provider', 'mcp', 'skill', 'runtime'].join('|'), 'i')
 }
 
 /**
- * 把"本构建在册的 runtime"读成事实（P2）：`GET /agents` 里有什么，脚本就按什么跑。
+ * 把"本构建跑的是哪个底座"读成事实（P2/P3）：`GET /meta.runtime` 说什么，脚本就按什么跑。
  *
  * 为什么不从构建参数（`RUNTIME=`）读：验收要验的是**跑着的那个实例**，构建参数只是开发者的一面
- * 之词；agent 是否在册是服务端实际装配的结果（选了未注册的底座会**启动失败**，见 `ProductRegistry`）。
+ * 之词；跑的是哪个底座是服务端实际装配的结果（选了未注册的底座会**启动失败**，见 `ProductRegistry`）。
+ *
+ * v19：读面从 `GET /agents`（一族已删的路由）换成 `GET /meta` 的 `runtime{id,name,version}`。
+ * 判据强度不变——仍然是"跟服务端要一句装配事实"，仍然不写死底座名；顺带断言它的**形状**
+ * （id/name/version 三件都在，缺一件后面所有出现底座名的地方都会退化成空白）。
  */
 async function resolveRuntimeFacts() {
-  const res = await api('GET', '/agents')
-  AGENTS = res.json.data ?? []
-  if (!AGENTS.length) {
-    throw new Error(`GET /agents 为空（${JSON.stringify(res.json).slice(0, 200)}）——没有在册 agent，场景无从验起`)
+  const res = await api('GET', '/meta')
+  META = res.json.data ?? null
+  const rt = META?.runtime
+  if (!rt || typeof rt.id !== 'string' || !rt.id) {
+    throw new Error(`GET /meta 没有 runtime.id（${JSON.stringify(res.json).slice(0, 200)}）——装配事实取不到，场景无从验起`)
   }
-  const cur = orientSkills(AGENTS)
-  INITIAL_DEFAULT_AGENT = cur.id
-  console.log(`  ℹ️  在册 agent = ${AGENTS.map((a) => `${a.id}${a.is_default ? '(当前)' : ''}`).join(', ')}；` +
+  for (const key of ['id', 'name', 'version']) {
+    if (!(key in rt)) throw new Error(`GET /meta.runtime 缺字段 ${key}：${JSON.stringify(rt)}`)
+  }
+  orientSkills(rt.id)
+  console.log(`  ℹ️  构建期固定的底座 = ${rt.id}（${rt.name} ${rt.version}）；` +
     `本次靶上的适用 skill = ${SKILL_DEFS[RUNTIME].name}，不适用 = ${SKILL_DEFS[OTHER_RUNTIME].name}`)
-  return AGENTS
+  return META
 }
 
 /**
@@ -618,7 +623,7 @@ async function assertServingBuiltArtifact() {
   return same && assetRes.status === 200
 }
 
-/** 造验收用 skill（幂等：40901 存在即算成功）：每个在册 agent 一条 + 一条不在册的不可达项。 */
+/** 造验收用 skill（幂等：40901 存在即算成功）：构建期固定的底座一条 + 一条不在册的不可达项。 */
 async function seedSkills() {
   for (const def of Object.values(SKILL_DEFS)) {
     const r = await api('POST', '/skills', {
@@ -642,7 +647,7 @@ async function cleanupCreated() {
 }
 
 async function cleanupSkills() {
-  // 按 SKILL_DEFS 清：seedSkills 造的就是这些（多 agent 时不止两条），自建自清不漏。
+  // 按 SKILL_DEFS 清：seedSkills 造的就是这些（适用 + 不可达各一条），自建自清不漏。
   for (const def of Object.values(SKILL_DEFS)) {
     const r = await api('DELETE', `/skills/${def.id}`).catch(() => null)
     console.log(`  🧹 清理 skill ${def.id}: ${r ? r.json.code : 'n/a'}`)
@@ -650,14 +655,9 @@ async function cleanupSkills() {
   await api('DELETE', `/automations/${AUTO_ID}`).catch(() => null)
 }
 
-/** 切默认 agent（M3-4 的清单按 agent 视角取；结束时切回）。 */
-async function setDefaultAgent(id) {
-  const r = await api('POST', `/agents/${id}/default`)
-  if (r.json.code !== 0 && !String(r.json.msg ?? '').includes('已')) {
-    // 端点形态兜底：改 config 的 default_agent
-    console.log(`  (set default via /agents/${id}/default → ${JSON.stringify(r.json).slice(0, 120)})`)
-  }
-}
+// v19：这里原有 `setDefaultAgent()`（`POST /agents/:id/default`）——那是"能力清单按
+// **当前 agent** 视角取"这套语义的配套写面。视角与写面一起删除后，它没有调用对象了；
+// 收尾也不再需要"切回开跑时那个"（只有一个底座，没有可切的东西）。
 
 // ————————————————————————————————————————————————————————————————
 // 场景一：M3-4 能力勾选面板
@@ -666,44 +666,37 @@ async function setDefaultAgent(id) {
 // ————————————————————————————————————————————————————————————————
 async function scenarioCapability(browser) {
   section('M3-4 能力勾选面板（勾选 skill 子集 → 建会话 → 回显选定与指纹）')
+  // v19：原来第一站是 `/agents`（Agent 管理页），用来"切当前 agent"——页、路由与那族接口一起撤了。
+  // 等价的判据换成**两条负向 + 一条正向**，强度不低于原来那一段：
+  //   ① 路由层真的没有了（不是"界面藏起来、服务端照旧认"）；
+  //   ② 旧 `/agents` 深链接不再落到任何设置节（落到问答页而不是某个别的分节）；
+  //   ③ 装配事实改由 `/meta.runtime` 提供，并且**界面真的把它显示出来了**（能力勾选面板的判据
+  //      依赖它，所以这一步是后面所有断言的前提）。
+  const goneRead = await api('GET', '/agents')
+  check('GET /agents 已下线（路由不存在，不是界面藏起来）', goneRead.json?.code !== 0,
+    `HTTP code=${goneRead.json?.code} msg=${JSON.stringify(goneRead.json?.msg ?? '')}`)
   const page = await openPage(browser, `${WEB_URL}/agents`)
-  await page.waitFor(textExpr('当前'), { label: 'Agents 页渲染（「当前」行标）' })
-  await page.shot('01-agents')
+  await page.waitFor(textExpr('可用的能力'), { label: '旧 /agents 路径落回问答页' })
+  const landedAt = await page.evaluate('return location.pathname')
+  check('旧 /agents 深链接落回问答页（不落进一个已删的设置节）', landedAt === '/sessions', `pathname=${landedAt}`)
+  await page.shot('01-agents-path-gone')
 
-  // 「界面切当前 agent」是**前提**（能力清单按 agent 视角取），不是被测对象本身：
-  // 在册 agent 只有一条时（本构建的常态——底座构建期固定）这一段没有对象，**跳过而非判红**。
-  const others = AGENTS.filter((a) => !a.is_default)
-  if (others.length) {
-    const setBtn = `[...document.querySelectorAll('button')].filter(b => (b.innerText||'').includes('设为当前'))`
-    const n = await page.evaluate(`return ${setBtn}.length`)
-    check('Agents 页有且仅有一个非默认 agent 的「设为当前」', n === 1, `按钮数=${n}（非默认 agent=${others.map((a) => a.id).join(',')}）`)
-    await page.click(`${setBtn}[0]`)
-    await page.waitFor(`return ${JSON.stringify(true)}`, { label: '等待切换落定', timeout: 3000 }).catch(() => {})
-    await sleep(1200)
-    const def = await api('GET', '/agents')
-    AGENTS = def.json.data ?? AGENTS
-    const target = others[0].id
-    check(`默认 agent 已切到 ${target}（界面操作生效）`,
-      AGENTS.find((a) => a.id === target)?.is_default === true,
-      `agents=${AGENTS.map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
-    orientSkills(AGENTS)
-  } else {
-    console.log(`  ℹ️  /agents 只有一条在册 agent（${AGENTS[0].id}）：「界面切当前 agent」没有对象，跳过；` +
-      `能力勾选面板照常验——不适用那条 skill 钉的是**不在册**的占位 runtime（${ABSENT_RUNTIME}），` +
-      `它照样进清单并标"不可选"（这条判据验的是"不适用也列出来、不隐藏"，不需要第二个底座存在）`)
-  }
-
-  // 回新建页，打开「可用的能力」
+  // 打开「可用的能力」（新建卡）
   await page.goto(`${WEB_URL}/`, { waitText: '可用的能力' })
-  await page.waitFor(textExpr(RUNTIME), { label: `新建卡显示当前 Agent=${RUNTIME}` })
+  const runtimeName = META?.runtime?.name || RUNTIME
+  await page.waitFor(textExpr(runtimeName), { label: `新建卡显示构建期固定的底座=${runtimeName}` })
   await page.shot(`02-start-with-${RUNTIME}`)
+  const startText = await page.text()
+  check(`新建卡标出构建期固定的底座（${runtimeName}，纯展示不可切换）`,
+    startText.includes(runtimeName) && /底座/.test(startText) && !/切换\s*底座|切换\s*Agent/.test(startText),
+    startText.split('\n').filter((l) => l.includes(runtimeName) || /底座|Agent/.test(l)).join(' | ').slice(0, 240))
   const pill = byText('button', '能力 ·')
   await page.click(pill)
   await page.waitFor(`const el = document.querySelector('.fg-cap-pop'); return !!el && el.getClientRects().length > 0`, { label: '能力弹层打开' })
   await sleep(500)
   await page.shot('03-capability-popover')
   const popDefault = await page.evaluate(`return document.querySelector('.fg-cap-pop').innerText`)
-  check('缺省态不展开清单，只写"按 Agent 声明投放（当前 N 个）"', /按 Agent 声明投放（当前 \d+ 个）/.test(popDefault), popDefault.split('\n').slice(0, 5).join(' | '))
+  check('缺省态不展开清单，只写"按平台默认投放（当前 N 个）"', /按平台默认投放（当前 \d+ 个）/.test(popDefault), popDefault.split('\n').slice(0, 5).join(' | '))
 
   // 技能区切「自定义」→ 预填默认集 → 列表才展开（三态里的"自定义"分支）
   await page.click(`[...document.querySelectorAll('.fg-cap-mode-btn')].find(b => b.innerText.trim() === '自定义')`)
@@ -778,11 +771,18 @@ async function scenarioCapability(browser) {
   // DoD：GET /sessions/:id 回显选定明细与钉住的指纹
   const detail = await api('GET', `/sessions/${convId}`)
   const d = detail.json.data ?? {}
-  console.log(`  → GET /sessions/:id 关键字段: ${JSON.stringify({ capabilities: d.capabilities, capability_fingerprint: d.capability_fingerprint, agent_id: d.agent_id, runtime: d.runtime }).slice(0, 400)}`)
+  console.log(`  → GET /sessions/:id 关键字段: ${JSON.stringify({ capabilities: d.capabilities, capability_fingerprint: d.capability_fingerprint, runtime_id: d.runtime_id, runtime: d.runtime }).slice(0, 400)}`)
   check('会话详情回显能力选定明细', JSON.stringify(d.capabilities ?? null).includes(SKILLS.applicable), JSON.stringify(d.capabilities ?? null))
   const fp = d.capabilities?.fingerprint ?? d.capability_fingerprint
   check('会话详情回显钉住的能力指纹', typeof fp === 'string' && fp.length >= 8, `fingerprint=${String(fp).slice(0, 24)}`)
-  check('会话落在所选 agent 上', d.agent_id === RUNTIME, `agent_id=${d.agent_id} runtime=${d.runtime}（期望 ${RUNTIME}）`)
+  // v19：会话上的身份只有一个 `runtime_id`（旧的第二个同义字段已删）。这条断言同时验两件事：
+  // 身份字段就是构建期固定的那个底座，且**键集合里没有第二个身份键**——用封闭键集合判，比逐条
+  // 点名某个已撤的键更强（将来多长一个字段也会红），也不把已撤标识符写回脚本（`TestNoAgentVocabulary`
+  // 对 `frontend/scripts/*.mjs` 要求剥注释后零命中）。
+  const legacyIdKeys = Object.keys(d).filter((k) => k.includes('agent'))
+  check('会话身份只有 runtime_id（= 构建期固定的底座，且没有第二个身份键）',
+    d.runtime_id === RUNTIME && legacyIdKeys.length === 0,
+    `runtime_id=${d.runtime_id} runtime=${d.runtime}（期望 ${RUNTIME}）；多出的身份键=${legacyIdKeys.join(',') || '无'}`)
 
   // 界面侧：会话详情「能力」行
   const openDetail = await page.click(`[...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label')||b.getAttribute('title')||'') === '会话详情')`, { optional: true })
@@ -817,7 +817,7 @@ async function scenarioAutomation(browser) {
   await sleep(500)
   await page.shot('11-automation-editor')
 
-  // 表单：id / 名称 / 调度三态 / agent / 工作空间 / prompt
+  // 表单：id / 名称 / 调度三态 / 工作空间 / prompt（v19 起没有"由哪个 agent 执行"那一格）
   await page.type(q('input[placeholder="daily-deps-check"]'), AUTO_ID)
   await page.type(q('input[placeholder="每日依赖巡检"]'), '界面验收每日任务')
 
@@ -838,15 +838,16 @@ async function scenarioAutomation(browser) {
   await sleep(300)
   await page.shot('11b-automation-schedule')
 
-  // Agent：按在册事实选（不写死某个底座——本构建的 agent 是构建期定好的那一个）
-  const selText = (id) => page.evaluate(`return (document.getElementById(${JSON.stringify(id)}).closest('.ant-select').querySelector('.ant-select-content')||{}).innerText || ''`)
-  // 默认值可能已经是它：先看当前值，不是才切（切换本身会走一次下拉，值与值相同也白走）
-  const beforePick = await selText('agent_id')
-  if (!beforePick.includes(RUNTIME)) {
-    await page.pickSelect(`document.getElementById('agent_id').closest('.ant-select')`, RUNTIME)
-  }
-  const agentText = await selText('agent_id')
-  check(`Agent 已选到在册的那个（${RUNTIME}）`, agentText.includes(RUNTIME), `选中项=${agentText}`)
+  // v19：这一格（"由哪个执行者跑"）随 `target` 里那个键一起删除——定时任务触发时建的会话落在
+  // 构建期固定的底座上，没有第二个候选可选。**负向断言**：表单标签里不该再有那一格
+  // （留着它就是"看着能选、其实没第二个选项"的死 UI）。
+  // 按**标签文本**判，不按字段名判：字段名属已撤标识符，`TestNoAgentVocabulary` 对
+  // `frontend/scripts/*.mjs` 要求剥注释后零命中，写回脚本与那条判据冲突。
+  const formLabels = await page.evaluate(
+    `return [...document.querySelectorAll('.ant-modal .ant-form-item-label')].map((e) => (e.innerText || '').trim())`)
+  check('定时任务表单里没有「由哪个执行者执行」那一格（选择面已撤）',
+    !formLabels.includes('Agent') && !formLabels.some((l) => /执行者|由哪个/.test(l)),
+    `表单标签=${JSON.stringify(formLabels)}`)
 
   // 工作空间：点药丸 → 取第一条候选目录（没有就手打绝对路径）→ 用药丸文案自证已选上
   const pillName = `(document.querySelector('.fg-ws-pill-name')||{}).innerText || ''`
@@ -887,9 +888,9 @@ async function scenarioAutomation(browser) {
   }
   const cwdPicked = await page.evaluate(`return ${pillName}`)
   check('工作空间已选定（药丸显示目录名）', cwdPicked !== '选择目录' && cwdPicked.length > 0, `pill=${cwdPicked}`)
-  await page.type(q('textarea[placeholder="每次触发时发给 agent 的话"]'), '只回复 ok。')
+  await page.type(q('textarea[placeholder="每次触发时发给助手的话"]'), '只回复 ok。')
   await sleep(300)
-  check('prompt 已填（保存按钮的前置）', (await page.evaluate(`return (document.querySelector('textarea[placeholder="每次触发时发给 agent 的话"]')||{}).value || ''`)).includes('ok'), '')
+  check('prompt 已填（保存按钮的前置）', (await page.evaluate(`return (document.querySelector('textarea[placeholder="每次触发时发给助手的话"]')||{}).value || ''`)).includes('ok'), '')
   await page.shot('12-automation-filled')
 
   // preview：保存之前就能看到"接下来 5 次"
@@ -1033,16 +1034,17 @@ async function scenarioAutomation(browser) {
 //
 // 历史实测（2026-10-11）：这条场景此前一直"靠残留数据变绿"——它从历史会话里挑一条本脚本早先几轮
 // 自己创建、属于某个**当时在册、如今已不在仓库**的 adapter 的会话，于是"验过了"其实什么也没验；
-// 而在干净实例上它会红在 `POST /sessions {agent_id:'<那个 adapter>'}` 上（那个 agent 根本没注册）。
+// 而在干净实例上它会红在"按那个 adapter 建会话"那一步（它根本没注册）。
 //
-// 本仓现在只装配一个 adapter（`AllBuiltinSpecs()` 只返回它），`GET /agents` 的在册事实里没有任何
-// adapter 以"通告命令"为已实测能力，所以这条场景**无从验起**：显式跳过并写明理由——既不拿历史
-// 残留数据充当绿，也不把"本构建没有这个能力"判成红。
+// 本仓现在只装配一个 adapter（`AllBuiltinSpecs()` 只返回它），而它没有任何一条以"通告命令"为已实测
+// 能力，所以这条场景**无从验起**：显式跳过并写明理由——既不拿历史残留数据充当绿，也不把
+// "本构建没有这个能力"判成红。v19 去掉的只是"按在册 agent 列表报出候选"那半（没有列表了，
+// 装配事实就是 `/meta.runtime` 一个 id）。
 // ————————————————————————————————————————————————————————————————
 async function scenarioCommands() {
   section('M5′ 命令发现面（底座通告 → 输入框 `/` 候选 + 事件侧证据）')
   skip('cmd: 命令发现面',
-    `本构建在册的 runtime = ${AGENTS.map((a) => a.id).join('/')}；在册 adapter 没有任何一条以` +
+    `本构建固定的底座 = ${RUNTIME}；它没有任何一条以` +
     '"通告命令"（`session.commands`，ADR-17 的 ACP 运行时能力）为已实测能力，这条场景无从验起')
   return {}
 }
@@ -1574,10 +1576,10 @@ async function scenarioSettingsModel(browser) {
       JSON.stringify(created2?.input_modalities))
 
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
-    //    词汇表按**在册 agent 的 id** 现算（见 runtimeWordRe），不写死具体底座名。
+    //    词汇表按**构建期固定的那个底座 id** 现算（见 runtimeWordRe），不写死具体底座名。
     const panelCopy = await page.evaluate(`return document.querySelector('.fg-model-panel').innerText`)
     const lower = panelCopy.toLowerCase()
-    const banned = [...AGENTS.map((a) => String(a.id ?? '').toLowerCase()).filter(Boolean), 'runtime', '底座', 'provider']
+    const banned = [String(META?.runtime?.id ?? '').toLowerCase(), 'runtime', '底座', 'provider'].filter(Boolean)
     const hit = banned.filter((w) => lower.includes(w))
     check('面板正文零底座词汇（ADR-22）', hit.length === 0,
       hit.length ? `命中 ${JSON.stringify(hit)}；行=${JSON.stringify(panelCopy.split('\n').filter((l) => hit.some((w) => l.toLowerCase().includes(w))))}` : '干净')
@@ -1641,7 +1643,7 @@ async function main() {
   check('后端 health 可达', health.json.code === 0, `${MATE_URL} → ${JSON.stringify(health.json)}`)
   // 靶的正确性先于一切：靶不对，后面每条断言验的都不是交付件（P2 的启动断言）。
   await assertServingBuiltArtifact()
-  // 场景按"在册事实"驱动（P2）：底座由构建期固定，写死某个 agent 会把脚本陈旧演成页面超时。
+  // 场景按"装配事实"驱动（P2/P3）：底座由构建期固定，写死某个底座名会把脚本陈旧演成页面超时。
   await resolveRuntimeFacts()
 
   await seedSkills()
@@ -1682,12 +1684,11 @@ async function main() {
     }
   }
 
-  // 收尾：当前 agent 切回**开跑时那个**（环境还原），并清理验收用 skill
-  if (INITIAL_DEFAULT_AGENT) await setDefaultAgent(INITIAL_DEFAULT_AGENT)
-  const after = await api('GET', '/agents')
-  check(`默认 agent 已还原为 ${INITIAL_DEFAULT_AGENT}`,
-    (after.json.data ?? []).find((a) => a.id === INITIAL_DEFAULT_AGENT)?.is_default === true,
-    `agents=${(after.json.data ?? []).map((a) => `${a.id}:${a.is_default}`).join(' ')}`)
+  // 收尾：v19 起没有"切当前 agent"要还原（只有一个底座），只清理脚本自建的 skill/自动化。
+  const afterMeta = await api('GET', '/meta')
+  check(`装配事实在收尾时未变（底座仍为 ${RUNTIME}）`,
+    afterMeta.json.data?.runtime?.id === RUNTIME,
+    `runtime=${JSON.stringify(afterMeta.json.data?.runtime ?? null)}`)
   await cleanupSkills()
   await cleanupCreated()
 

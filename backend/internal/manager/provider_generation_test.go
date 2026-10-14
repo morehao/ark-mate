@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
@@ -19,17 +20,21 @@ import (
 func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t)
-	// 让 vault 可用：密钥要真落盘，拨号基键才会带上注入的那条 env。
+	// 让密钥面可用：密钥要真写进库，拨号基键才会带上注入的那条 env。
 	r.svc.mu.Lock()
-	r.svc.agentDir = t.TempDir()
+	r.svc.providerDir = t.TempDir()
 	r.svc.mu.Unlock()
 
 	const secret = "sk-a2-secret"
 	if _, err := r.svc.CreateProvider(ctx, providerReq("p1", ptrOf(secret))); err != nil {
 		t.Fatalf("建档案: %v", err)
 	}
-	agent, _ := r.svc.AgentByID("a1")
-	agent.Provider = "p1"
+	// v19：注入哪条档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
+	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
+		ProviderID: "p1", ModelID: "m-1", IsDefault: ptrOf(true),
+	}); err != nil {
+		t.Fatalf("建默认模型: %v", err)
+	}
 
 	convID, as1 := r.start(t, nil)
 	// 先立住"没变就不切"这一半：否则下面那次切换可能只是"每轮都换"。

@@ -30,7 +30,7 @@ import (
 //
 // 为什么要把来源一起带出来：空目录有**两种完全不同的含义**，只看长度分不开——
 //
-//	source=none    没有来源（离线进程没有编排器 / 该 agent 还没有会话）→ **无法校验**；
+//	source=none    没有来源（离线进程没有编排器 / 还没有活跃会话）→ **无法校验**；
 //	source=session|cache|resume  真的读到了目录，它就是"底座此刻广告了什么"。
 //
 // 把两者混成一个"空"会在对账上造出两个方向的谎：对 `mate doctor` 是**假红**
@@ -40,7 +40,7 @@ type advertisedSample struct {
 	Runtime string
 	// Models 运行时不透明值（category=model 的全量候选，按 value 升序）。
 	Models []dtomodel.AdvertisedModel
-	// Source 取样来源（session|cache|resume|none）；空 = 本次没有取样（无 agent / 无执行面）。
+	// Source 取样来源（session|cache|resume|none）；空 = 本次没有取样（无执行面 / 未注册底座）。
 	Source string
 	// Note 取样面给的人话说明（source=none 时就是"为什么没有"）。
 	Note string
@@ -55,12 +55,14 @@ func (a advertisedSample) Known() bool {
 	return false
 }
 
-// advertisedSample 取某 agent 的运行时目录（读 `GET /models` 的同一实现），带上来源与说明。
-func (s *Service) advertisedSample(ctx context.Context, agentID string) (advertisedSample, error) {
-	if agentID == "" || s.orch == nil {
-		return advertisedSample{Runtime: s.runtimeOfAgent(agentID), Models: []dtomodel.AdvertisedModel{}}, nil
+// advertisedSample 取**构建期固定那个底座**的运行时目录（读 `GET /models` 的同一实现），带上来源与说明。
+//
+// v19 起取样不再经 agent：目录只有一个来源面（`ModelCatalog` 按选中 runtime 读数）。
+func (s *Service) advertisedSample(ctx context.Context) (advertisedSample, error) {
+	if s.orch == nil {
+		return advertisedSample{Runtime: runtime.SelectedRuntime(), Models: []dtomodel.AdvertisedModel{}}, nil
 	}
-	resp, err := s.ModelCatalog(ctx, agentID)
+	resp, err := s.ModelCatalog(ctx)
 	if err != nil {
 		return advertisedSample{}, err
 	}
@@ -80,51 +82,14 @@ func (s *Service) advertisedSample(ctx context.Context, agentID string) (adverti
 	return advertisedSample{Runtime: resp.Runtime, Models: out, Source: resp.Source, Note: resp.Note}, nil
 }
 
-// advertisedModels 取某 agent 的运行时目录里的模型候选（读 `GET /models` 的同一实现）。
+// advertisedModels 取运行时目录里的模型候选（读 `GET /models` 的同一实现）。
 //
 // 只要候选、不要来源的调用方用它；**要判"这份事实可不可信"的调用方必须走 `advertisedSample`**
 // （差集与体检都属后者，见 `advertisedSample` 的注释）。
-func (s *Service) advertisedModels(ctx context.Context, agentID string) ([]dtomodel.AdvertisedModel, error) {
-	sample, err := s.advertisedSample(ctx, agentID)
+func (s *Service) advertisedModels(ctx context.Context) ([]dtomodel.AdvertisedModel, error) {
+	sample, err := s.advertisedSample(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return sample.Models, nil
-}
-
-// agentForRuntime 取一个"服务该 runtime"的 agent id（对账要借它的目录读数）。
-//
-// 产品里每个 agent 都服务**同一个**底座（构建期固定），所以判据先看"请求的是不是那一个"：
-// 不是 → 借不到（空的 agent id 会让对账如实报 unknown，而不是拿 A 底座的 agent 去读 B 底座的目录）。
-// 是 → 优先「当前 Agent」，否则 id 升序首个——对账是只读的，借哪个 agent 读目录不影响
-// "平台清单 vs 底座事实"这个比对本身。
-func (s *Service) agentForRuntime(runtimeID string) string {
-	if runtimeID != runtime.SelectedRuntime() {
-		return ""
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if cur := s.currentDefaultLocked(); cur != "" {
-		return cur
-	}
-	ids := make([]string, 0, len(s.agents))
-	for id := range s.agents {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	if len(ids) == 0 {
-		return ""
-	}
-	return ids[0]
-}
-
-// runtimeOfAgent 某 agent 实际跑的底座。底座是构建期常量：agent 存在即返回它。
-func (s *Service) runtimeOfAgent(agentID string) string {
-	if agentID == "" {
-		return ""
-	}
-	if _, ok := s.AgentByID(agentID); !ok {
-		return ""
-	}
-	return runtime.SelectedRuntime()
 }

@@ -42,12 +42,11 @@ type AuthGuidanceResp struct {
 
 // ModelCatalogResp 模型目录响应：**全部来自运行时自报**（ACP session config options），
 // 平台不内置任何模型清单。Source 标注取样来源：
-//   - session：直接读该 agent 的活跃会话；
-//   - resume：恢复该 agent 最近一条历史会话读取（读完即 close，不新建会话）；
+//   - session：直接读活跃会话；
+//   - resume：恢复最近一条历史会话读取（读完即 close，不新建会话）；
 //   - cache：内存缓存（TTL 内）；
 //   - none：运行时没有可用来源（Options 为空，带 Note/鉴权引导）。
 type ModelCatalogResp struct {
-	Agent   string `json:"agent"`
 	Runtime string `json:"runtime"`
 	Source  string `json:"source"`
 	// ImageInput **当前这条路由能不能收图**——连接期事实（ACP initialize 的

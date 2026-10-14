@@ -24,8 +24,13 @@ export function sessionStatusMeta(status: string): StateMeta {
   }
 }
 
-/** Agent 状态 → 文案/语义色。 */
-export function agentStateMeta(state: string): StateMeta {
+/**
+ * 底座进程状态 → 文案/语义色（v19 前叫 `agentStateMeta`）。
+ *
+ * 语义没变——它一直是"那个跑会话的进程在不在"，只是那个进程的归属从 agent 收回了 runtime；
+ * 取值域仍是 `GET /runtime/diagnostics` 的 `state`（running | stopped）。
+ */
+export function runtimeStateMeta(state: string): StateMeta {
   return state === 'running' ? { label: '运行中', color: tokens.success } : { label: '已停止', color: tokens.textSecondary }
 }
 
@@ -38,7 +43,7 @@ export function Dot({ color, pulse, size = 7 }: { color: string; pulse?: boolean
   )
 }
 
-/** 等宽小胶囊（agent 名 / runtime / 能力 chips；状态语义色通过 color 传入）。 */
+/** 等宽小胶囊（底座名 / 能力 chips；状态语义色通过 color 传入）。 */
 export function Pill({
   children,
   color,

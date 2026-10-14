@@ -54,19 +54,18 @@ func (s *gatedSession) prompts() []string {
 	return append([]string(nil), s.all...)
 }
 
-// newQueueRig 队列测试架子：echo 注册表 + 总线 +（可选）临时库 + agent a1 + 一条**已登记
+// newQueueRig 队列测试架子：echo 注册表 + 总线 +（可选）临时库 + 一条**已登记
 // 且有活句柄**的会话 conv-1（句柄的 sess 由调用方给定，用于掌控轮次节奏）。
 func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orchestrator, *gatedSession, *ActiveSession) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) {
 		c.stub, c.bus, c.store = true, true, withStore
-		c.agents = []*AgentRec{{ID: "a1", Name: "A1"}}
 	})
 	g := sess.(*gatedSession)
-	as := &ActiveSession{ID: "conv-1", AgentID: "a1", Runtime: "stub", sess: sess}
+	as := &ActiveSession{ID: "conv-1", Runtime: "stub", sess: sess}
 	r.Orch.sessions[as.ID] = as
 	r.Svc.registerSession(&SessionRec{
-		ID: as.ID, AgentID: "a1", RuntimeID: "stub", Status: SessionStatusInProgress, Generation: 1,
+		ID: as.ID, RuntimeID: "stub", Status: SessionStatusInProgress, Generation: 1,
 	})
 	t.Cleanup(func() {
 		// 放行所有阻塞中的轮次，**等到在途轮次真正收尾**，最后才摘句柄——否则清库时还有 executeRun 在写。
@@ -466,7 +465,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	svc1 := NewService(runtime.NewRegistry(), nil)
 	svc1.EnableStore(st)
-	svc1.registerSession(&SessionRec{ID: "c1", AgentID: "a1", Generation: 1})
+	svc1.registerSession(&SessionRec{ID: "c1", Generation: 1})
 	queued, err := svc1.enqueueInput(context.Background(), "c1", "重启前的排队", DeliveryAfterRun, "run-x", 1)
 	if err != nil {
 		t.Fatal(err)

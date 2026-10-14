@@ -173,21 +173,48 @@ func (a *App) Init(ctx context.Context) error {
 	// 只作用于**本地子进程** runtime（远程端点不拉进程，Launch.Env 不会被读），已有键不覆盖——
 	// 适配器或 provider 档案显式给的取值优先（见 runtime.Registry.ApplyIsolationEnv）。
 	if ids := reg.ApplyIsolationEnv(cfg.HomeDir); len(ids) > 0 {
-		glog.Infow(ctx, "serve: 已注入 runtime 配置隔离环境", "home", cfg.HomeDir, "runtimes", ids)
+		// 日志是**用户面**（界面里就有日志页），所以数据目录按显示名记（v19，`~/.ark-mate`）：
+		// 绝对机器路径会随截图/日志导出外流，而 `~` 一样能定位。机器消费面（`/meta`、`--json`）
+		// 保留绝对路径——那两条是"事实"，不是给人看的叙述。
+		glog.Infow(ctx, "serve: 已注入 runtime 配置隔离环境", "home", config.DisplayHome(cfg.HomeDir), "runtimes", ids)
 	}
 
 	a.bus = eventbus.New()
 	a.svc = manager.NewService(reg, a.bus)
 	a.reg = reg
 
-	// definitions 目录**先行登记**（顺序敏感，2026-10-11 修）：它同时是 vault 的锚点
-	// （密钥 `<父目录>/vault.key`、provider 密文 `<父目录>/vault/`），而下面的
-	// `EnableStore` 会立刻做一次装配期 runtime 同步——那一次同步要读 provider 密钥。
-	// 不先登记（旧顺序：等 loadDefinitions 才登记）→ 同步按"本机没有 vault"处理：
-	// 已存密钥解不出来、模型清单被当成空的下发撤回，并把这份错结论写进 meta；
-	// providerVault 的缓存还会把它钉死到整个进程（表现为「已存密钥显示未设置」+ 补密钥一律
-	// `vault_unavailable`）。真实原因的取证见 `SetAgentDir` 的注释。
-	a.svc.SetAgentDir(cfg.AgentDir)
+	// v19 的目录改名一次性导入（`agents/providers.json` → `providers/providers.json`）：
+	// 必须在任何读 `ProviderDir` 的动作之前——包括下面 `ImportProviderFile` 的存量导入
+	// 与 memory 模式的装载。它只在默认目录上做（自定义 `MATE_PROVIDERS` 时静默返回），
+	// **不删旧文件**，新文件已存在就不动（详情见 `pkg/config.ImportLegacyProviderDir`）。
+	if imported, warn, iErr := config.ImportLegacyProviderDir(cfg.ProviderDir, cfg.HomeDir); iErr != nil {
+		glog.Warnw(ctx, "serve: 导入旧定义目录失败（照常启动；自定义目录的用户请自行搬运 providers.json）",
+			"err", iErr, "dir", cfg.ProviderDir)
+	} else if imported {
+		glog.Warnw(ctx, "serve: "+warn, "dir", cfg.ProviderDir)
+	}
+
+	// 凭据面**先行装配**（v20，顺序敏感）：下面 sqlite 分支里的第一次 runtime 同步
+	// （`EnableStore`）就要读 provider 密钥，而"密钥从哪来"由这一层回答（四层回落的唯一实现）。
+	// 晚装配 → 那一次同步按"没有任何密钥"处理：模型清单被当成空的下发撤回，而这份错结论会
+	// 写进 meta（界面与 doctor 之后都照着它说"密钥不可用"）。
+	//
+	// 打开托管文档**不读内容**（权限过宽在读的那一刻硬失败，见 `pkg/credentials`），
+	// 所以这里失败只可能来自"数据目录解析不出来"；那时如实 WARN，并让解析退化成
+	// "只有库里的那一份可用"（`resolveProviderKey` 的未装配分支）。
+	// 第三层是**调用目录**的 `.env`：与底座自己读 `.env` 的位置一致（它读的是调用目录）。
+	cwd, _ := os.Getwd()
+	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
+	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
+	a.svc.SetCredentialCwd(cwd)
+	if layered, mirrorPath, cErr := manager.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
+		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", cErr,
+			"home", config.DisplayHome(cfg.HomeDir))
+	} else {
+		a.svc.SetCredentials(layered)
+		glog.Infow(ctx, "serve: 凭据面已装配（层序：继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env）",
+			"credentials", mirrorPath)
+	}
 
 	// 持久层装配（P1）：MATE_STORE=sqlite → SQLite（DB 为事实源，transcript 停写保留只读）；
 	// =memory → 维持 transcript 落盘 + 启动回读；auto（默认）→ DB 文件已存在则 sqlite，否则 memory。
@@ -204,7 +231,34 @@ func (a *App) Init(ctx context.Context) error {
 		if err != nil {
 			return fatalErr("serve: 打开持久层 %s: %v", cfg.DBPath, err)
 		}
-		a.st = st
+		// 定义目录**先行登记**（顺序敏感，2026-10-11 修）：下面 `EnableStore` 会立刻做一次
+		// 装配期 runtime 同步，那一刻 `providerLocator` 已经要有确定值（否则报错文案指向空路径）。
+		// v20 起它与密钥无关——密钥面在库与托管文档里，都不依赖这个目录（见 `SetProviderDir`）。
+		a.svc.SetProviderDir(cfg.ProviderDir)
+
+		// 旧密钥的一次性搬运（v20 迁移的第二步）：**必须在 EnableStore 之前**——那一次同步就要
+		// 读 provider 密钥，而此刻库里的密钥可能还只在旧密文里。搬完再同步，"哪些供应商有密钥"
+		// 从头就是对的（否则第一次同步会按"没有密钥"下发，并把这份错结论写进 meta）。
+		//
+		// 三条性质（由 `store.ImportLegacyVault` 保证）：幂等（库里有值就不覆盖，所以每次启动
+		// 都能跑，主密钥晚点修好也能补上）、单条失败进 Problems 不拖垮整批、**只读不删**
+		// （旧密文目录与主密钥原样留着，删除由用户确认后自己做，`mate doctor` 报"可删"）。
+		// 日志只带引用与条数，**绝不含密钥值**。
+		if anchor := manager.LegacySecretAnchor(cfg.HomeDir, cfg.ProviderDir); anchor != "" {
+			if move, mErr := st.ImportLegacyVault(ctx, anchor); mErr != nil {
+				glog.Warnw(ctx, "serve: 旧密钥搬运未执行（库里的密钥不受影响；跑 `mate doctor` 看遗留物）",
+					"err", mErr, "anchor", anchor)
+			} else if !move.Empty() {
+				glog.Infow(ctx, "serve: 旧密钥搬运完成（只读不删；旧密文与主密钥仍在原处）",
+					"ciphertexts", move.Ciphertexts, "provider_keys", move.ProviderKeys,
+					"mcp_secrets", move.McpSecrets, "already_moved", move.AlreadyMoved)
+				for _, p := range move.Problems {
+					glog.Warnw(ctx, "serve: 有一条旧密钥没搬进库（其余照常；修好后重启即会重跑）",
+						"ref", p.Ref, "reason", p.Reason)
+				}
+			}
+		}
+
 		a.svc.EnableStore(st)
 		// v15 破坏性重建的**启动 WARN**（§8.5 R2，强制项）：升级既有库时静默清空会话历史是
 		// 最坏的一种失败——用户只会觉得"我的会话没了"。所以这里必须说出来，并带上回退路径
@@ -230,26 +284,12 @@ func (a *App) Init(ctx context.Context) error {
 				"inserted", imp.Inserted, "existing", imp.Existing,
 				"invalid", imp.Invalid, "tools_files_skipped", imp.Tools)
 		}
-		// agent 定义一次性导入（M6-6）：与上面能力面**同一次触发、同一个理由**（v9 之后 DB 才是
-		// agent 定义的事实源，而存量定义还在 `MATE_AGENTS` 里），也必须发生在 loadDefinitions 之前。
-		// 目录里的 `providers.json`（档案留在文件侧）与 `default.json`（显式选择进 meta）不参与导入。
-		//
-		// 两个域各自记指纹（`meta.imported_agents`）：只改 agent 目录不该让能力面的导入重跑一遍。
-		if imp, iErr := manager.ImportAgentDir(ctx, st, cfg.AgentDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
-			glog.Warnw(ctx, "serve: 导入存量 agent 定义失败（agent 面可能只剩内置种子；可跑 `mate agent import` 重试）",
-				"err", iErr, "dir", cfg.AgentDir)
-		} else if !imp.Already && imp.Agents+imp.Inserted+imp.Existing+imp.Invalid > 0 {
-			glog.Infow(ctx, "serve: 存量 agent 定义导入完成",
-				"dir", imp.Dir, "agents", imp.Agents, "inserted", imp.Inserted,
-				"existing", imp.Existing, "invalid", imp.Invalid, "default_agent", imp.DefaultAgent)
-		}
 		// automation 定义一次性导入（M6-7）：与上面两个域**同一次触发、同一个理由**（v10 之后
 		// DB 才是定时任务的事实源，而存量定义还在 `MATE_AUTOMATIONS` 里）。automation 的定义
 		// 文件里还住着运行态（`last_fired_at`/`recent_runs`），导入会按保留键把它们切进**运行态列**
 		// ——所以搬运是"一个文件 → 一行里的两类列"，同一事务，不出现半截状态。
 		//
-		// 三个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让另外两个域重跑。
+		// 两个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让能力面重跑。
 		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
@@ -260,20 +300,35 @@ func (a *App) Init(ctx context.Context) error {
 				"existing", imp.Existing, "invalid", imp.Invalid)
 		}
 		// provider 档案一次性导入（v11，设置 · 模型）：与上面三个域**同一次触发**（v11 之后 DB 才是
-		// 档案的事实源，而存量档案还在 `<AgentDir>/providers.json` 里），也要发生在 loadDefinitions
-		// 之前——**agent 装载要能引用到它**（`CredentialProblem` 的悬空引用判据在装载/拨号两条路上）。
+		// 档案的事实源，而存量档案还在 `<ProviderDir>/providers.json` 里），也要发生在 loadDefinitions
+		// 之前——**模型与默认模型都要能引用到它**（`CredentialProblem` 的悬空引用判据在装载/拨号两条路上）。
 		//
 		// 与其余三个域的两处形态差异：① 幂等依据是**文件内容指纹**（整个域只有一个文件，而它的内容
 		// 就是全部事实）；② 迁移前**备份** `providers.json.bak-v11`（这是全篇唯一一个不可逆动作——
 		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
-		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.AgentDir,
+		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.ProviderDir,
 			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
-				"err", iErr, "dir", cfg.AgentDir)
+				"err", iErr, "dir", cfg.ProviderDir)
 		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
 			glog.Infow(ctx, "serve: 存量 provider 档案导入完成",
 				"dir", imp.Dir, "providers", imp.Providers, "inserted", imp.Inserted,
-				"existing", imp.Existing, "backup", imp.Backup, "skipped_keys", len(imp.SkippedKeys))
+				"existing", imp.Existing, "backup", imp.Backup, "key_problems", len(imp.KeyProblems))
+			for _, p := range imp.KeyProblems {
+				glog.Warnw(ctx, "serve: 有密钥没搬进库（清单见上；档案里的明文不会再被读）", "item", p)
+			}
+		}
+
+		// 托管镜像按库对账（v20）：把这次启动搬进库的一切（旧密文、档案里的明文）并进
+		// `<MATE_HOME>/credentials.json`。**合并、非破坏**：库里有值的那几条被补齐，
+		// 镜像里的其它键**不动**（"镜像有而库里没有"是 doctor 要报的事实，装配期顺手删掉它
+		// 那条判据就永远看不到东西了）。失败只 WARN：镜像是可重建副本，不阻断启动。
+		if changed, sErr := a.svc.SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
+			glog.Warnw(ctx, "serve: 托管凭据文档未能按库对账（库是权威，键不受影响；`mate doctor` 会列出差异）",
+				"err", sErr, "path", manager.CredentialsPath(cfg.HomeDir))
+		} else if changed > 0 {
+			glog.Infow(ctx, "serve: 托管凭据文档已按库对账",
+				"changed", changed, "path", manager.CredentialsPath(cfg.HomeDir))
 		}
 		sessions, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
@@ -354,6 +409,10 @@ func (a *App) Init(ctx context.Context) error {
 	a.orch.SetPermissionTimeout(cfg.PermissionTimeout)
 	a.orch.SetElicitationTimeout(cfg.ElicitationTimeout)
 	// 原生权限映射（B5）：MATE_NATIVE_PERMISSION=off 时关闭（默认 auto）。
+	//
+	// v19 起平台**没有策略来源**（per-agent 默认权限策略随 agent 面撤销），这条开关因此不改变
+	// 任何注入结果。保留接线点而不是删掉它，是因为 `pkg/config` 的键仍在（部署脚本会设它）：
+	// 静默失效比"读一次并如实说出当前没有策略来源"更糟。
 	// 平台侧 MCP 网关开关（M7-3）：默认 auto（开），只有显式 off 才回退到"远程直连注入"。
 	a.svc.SetMcpGatewayEnabled(cfg.McpGatewayEnabled())
 	if !cfg.McpGatewayEnabled() {
@@ -361,7 +420,7 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	if cfg.NativePermission == config.NativePermissionOff {
 		a.svc.SetNativePermission(false)
-		glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off）")
+		glog.Infow(ctx, "serve: 原生权限映射已关闭（MATE_NATIVE_PERMISSION=off；当前平台无策略来源，该开关不改变注入结果）")
 	}
 	// 空闲回收（P2）：StartAgent 暖进程闲置超阈值自动停（MATE_IDLE_TIMEOUT，默认 5m；0 = 关闭）。
 	a.orch.StartIdleReaper(cfg.ReapInterval, cfg.IdleTimeout)
@@ -371,7 +430,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
 	ports := router.Ports{
-		Agent: a.svc, Session: a.svc, Workspace: a.svc, Runtime: a.svc,
+		Session: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
@@ -487,13 +546,14 @@ func (a *App) metaInfo() ctrsystem.MetaSource {
 // 失败只告警不阻断（用户目录缺文件是常态），但必须发生在路由起来之前。
 func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	cfg := a.cfg
-	// Agent definitions（P2 / M6-6）：**按持久层模式分派**——sqlite 模式下定义在 `agents` 表里
-	// （种子仍在代码中，行只存"对种子的覆盖"），memory 模式仍是 MATE_AGENTS 目录下的 <id>.json。
-	// 两种模式都要拿到 `cfg.AgentDir`：providers.json 与 vault 锚点仍在文件侧（计划 §7 P-9）。
+	// provider 档案（P2 / v11）：**按持久层模式分派**——sqlite 模式下档案在 `providers` 表里，
+	// memory 模式仍是 `<ProviderDir>/providers.json`。两种模式都要拿到 `cfg.ProviderDir`：
+	// providers.json 仍在文件侧（计划 §7 P-9）：memory 模式下它是事实源，sqlite 模式下它是
+	// 导入/导出载体（v20 起它**不再是任何密钥的锚点**——密钥在库与 `<MATE_HOME>/credentials.json`）。
 	if mode == config.StoreModeSQLite {
-		a.svc.LoadAgentDefinitionsFromStore(ctx, cfg.AgentDir)
+		a.svc.LoadProviderDefinitionsFromStore(ctx, cfg.ProviderDir)
 	} else {
-		a.svc.LoadAgentDefinitions(cfg.AgentDir)
+		a.svc.LoadProviderDefinitions(cfg.ProviderDir)
 	}
 	// 能力数据面（P1 / M6-2）：**按持久层模式分派**——sqlite 模式下 DB 是事实源（v8 的
 	// skills/mcp_servers），memory 模式下文件仍是装载源。

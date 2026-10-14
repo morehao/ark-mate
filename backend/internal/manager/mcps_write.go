@@ -16,7 +16,7 @@ import (
 //
 // 与 skill 写面同形（先校验 → 再提交 → 最后入表，见 skills_write.go），差别全在**闸门**上：
 // MCP 定义能指定拉起什么进程、塞什么环境变量，所以 `ValidateMcpServer` 的门比 skill 多得多
-// ——transport 枚举、stdio 命令必须绝对路径、`vault:`/`env:` 引用词法、明文与密钥键不得重复、
+// ——transport 枚举、stdio 命令必须绝对路径、`store:`/`env:` 引用词法、明文与密钥键不得重复、
 // 明文值不得为空。写面**一个门都不新开也不放行**：定义怎么进注册表，走的是同一条路。
 
 // CreateMcpServer 新建一个 MCP server 定义（POST /mcps）：id 必填，已存在 → `mcp_exists`(40901)。

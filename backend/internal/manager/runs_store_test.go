@@ -23,7 +23,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-run", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-run"})
 
 	// 第一轮：成功。
 	u1 := svc.publish(BusUserMessage, "s-run", map[string]any{"text": "第一问"})
@@ -84,7 +84,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-usage", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-usage"})
 
 	now := time.Now().UTC()
 	seed := func(id, status, usageJSON string, firstTokenMS int64) {

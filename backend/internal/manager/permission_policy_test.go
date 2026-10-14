@@ -1,9 +1,7 @@
 package manager
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
 )
@@ -90,90 +88,5 @@ func TestAutoPermissionDecision(t *testing.T) {
 	}
 	if _, ok := autoPermissionDecision(PermissionAsk, opts); ok {
 		t.Fatal("ask 不应自动决策")
-	}
-}
-
-// TestOrchestratorPermissionPolicyAutoDecide per-agent 策略在编排层生效：
-// allow → 直接放行（不挂起、不写记忆）；deny → 直接拒绝；ask → 回落挂起征询。
-func TestOrchestratorPermissionPolicyAutoDecide(t *testing.T) {
-	svc, orch, bus := newTestRig(t)
-	svc.agents["a-allow"] = &AgentRec{ID: "a-allow",
-		PermissionPolicy: &PermissionPolicy{Tools: map[string]string{"bash": "allow"}}}
-	svc.agents["a-deny"] = &AgentRec{ID: "a-deny",
-		PermissionPolicy: &PermissionPolicy{Default: "deny"}}
-	svc.agents["a-ask"] = &AgentRec{ID: "a-ask",
-		PermissionPolicy: &PermissionPolicy{Default: "ask"}}
-
-	opts := []acl.PermissionOption{
-		{OptionID: "o-allow", Kind: permKindAllowOnce},
-		{OptionID: "o-reject", Kind: permKindRejectOnce},
-	}
-	// 会话 id 直接作为原生 session id（无 byProvider 映射时 sid 回落原生 = 平台 id）。
-	reqFor := func(sid string) acl.PermissionRequest {
-		return acl.PermissionRequest{SessionID: sid,
-			ToolCall: acl.ToolCallInfo{ID: "tc1", Title: "bash", Kind: "execute"}, Options: opts}
-	}
-
-	// allow：直接放行 + 审计事件。
-	svc.registerSession(&SessionRec{ID: "c-allow", AgentID: "a-allow"})
-	sub := bus.Subscribe(0)
-	defer bus.Unsubscribe(sub)
-	d := orch.requestPermission(context.Background(), reqFor("c-allow"))
-	if !d.Allowed || d.OptionID != "o-allow" || d.Always {
-		t.Fatalf("策略 allow 应直接放行: %+v", d)
-	}
-	if orch.perm.pendingCount("c-allow") != 0 {
-		t.Fatal("策略决策不应产生挂起")
-	}
-	select {
-	case e := <-sub.C:
-		if e.Type != BusPermissionPolicy || e.AggregID != "c-allow" {
-			t.Fatalf("期望 %s 审计事件，got %s", BusPermissionPolicy, e.Type)
-		}
-		p := e.Payload.(map[string]any)
-		if p["action"] != PermissionAllow || p["agent_id"] != "a-allow" || p["title"] != "bash" {
-			t.Fatalf("审计载荷不符: %+v", p)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("未收到策略审计事件")
-	}
-	if len(orch.perm.List("c-allow")) != 0 {
-		t.Fatal("策略决策不应写会话级记忆")
-	}
-
-	// deny：直接拒绝。
-	svc.registerSession(&SessionRec{ID: "c-deny", AgentID: "a-deny"})
-	d = orch.requestPermission(context.Background(), reqFor("c-deny"))
-	if !d.Rejected || d.OptionID != "o-reject" {
-		t.Fatalf("策略 deny 应直接拒绝: %+v", d)
-	}
-
-	// ask：回落挂起（短超时 → 自动取消，决策为空；且发布了挂起请求事件）。
-	orch.perm.SetTimeout(30 * time.Millisecond)
-	svc.registerSession(&SessionRec{ID: "c-ask", AgentID: "a-ask"})
-	subAsk := bus.Subscribe(0)
-	defer bus.Unsubscribe(subAsk)
-	d = orch.requestPermission(context.Background(), reqFor("c-ask"))
-	if d.Allowed || d.Rejected {
-		t.Fatalf("ask 应回落征询（超时取消）: %+v", d)
-	}
-	// 订阅会重放历史事件 → 扫描到目标类型（挂起请求）。
-	deadline := time.After(time.Second)
-	for pending := true; pending; {
-		select {
-		case e := <-subAsk.C:
-			if e.Type == BusPermissionRequest && e.AggregID == "c-ask" {
-				pending = false
-			}
-		case <-deadline:
-			t.Fatal("未收到挂起权限请求事件")
-		}
-	}
-
-	// 无策略 agent（nil）→ 行为不变（挂起）。
-	svc.agents["a-none"] = &AgentRec{ID: "a-none"}
-	svc.registerSession(&SessionRec{ID: "c-none", AgentID: "a-none"})
-	if d = orch.requestPermission(context.Background(), reqFor("c-none")); d.Allowed || d.Rejected {
-		t.Fatalf("无策略应回落征询: %+v", d)
 	}
 }

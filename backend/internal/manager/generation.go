@@ -22,12 +22,12 @@ import (
 //	   后者是"别把用户正盯着的确认卡换到另一个进程去"。
 //	③ **探针不可读时保守当忙**：读不到会话状态就不切。宁可多用一个旧代际（多占一点内存），
 //	   也不要在不确定的状态下动一个可能正在跑的会话。
-//	④ **迁移失败回退旧代际继续跑**：迁代际是**尽力而为**的优化，失败只留痕（日志 + agent 诊断），
+//	④ **迁移失败回退旧代际继续跑**：迁代际是**尽力而为**的优化，失败只留痕（日志 + runtime 诊断），
 //	   绝不让会话变成不可用——与 openwork 刻意不把超时升级为重启是同一个道理。
 //
 // 缺省路径（会话未声明能力选择）**不因能力定义变化而迁移**：那种会话的指纹恒为空、代际键与
 // 引入代际之前逐字相同（R11），"改了定义下一轮生效"对它们本来就不是承诺。这是记得住的边界，
-// 不是疏漏。但它**会因进程级能力面变化而迁移**（收回权限 / 换 provider 档案）：那两件东西在
+// 不是疏漏。但它**会因进程级能力面变化而迁移**（原生权限面 / provider 注入面变化）：那些东西在
 // 基础键里、不在指纹里，且"缩权立刻生效"说的正是它们（M3-7）。
 //
 // **缩权与扩权不对称**（ADR-13）：基础键变化（权限被收回）时，旧代际代表的是一套**已经被收回的
@@ -85,11 +85,6 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 	if dead {
 		return generationPlan{Action: genActionKeep, Reason: "句柄已作废：交给重建路径按当前配置重开"}
 	}
-	agent, ok := o.svc.AgentByID(rec.AgentID)
-	if !ok {
-		// 归属不可变：agent 被删是"会话不能打开"的事实，不是迁移问题（重开路径会给 agent_not_found）。
-		return generationPlan{Action: genActionKeep, Reason: "agent 已不存在：不动"}
-	}
 	spec, ok := o.reg.Get(as.Runtime)
 	if !ok {
 		return generationPlan{Action: genActionKeep, Reason: "runtime 未注册：不动"}
@@ -100,10 +95,10 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 	if rc == nil {
 		return generationPlan{Action: genActionKeep, Reason: "连接不可读：不动（保守）"}
 	}
-	baseNow := o.baseKeyFor(agent, spec)
+	baseNow := o.baseKeyFor(spec)
 	wantFP := as.Fingerprint
 	if sel := ParseCapabilitySelection(rec.CapabilityJSON); sel != nil {
-		if fp := o.svc.capabilityFingerprint(agent, spec.ID, sel); fp != "" {
+		if fp := o.svc.capabilityFingerprint(spec.ID, sel); fp != "" {
 			wantFP = fp
 		}
 	}
@@ -189,10 +184,6 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	default:
 		return as, nil
 	}
-	agent, ok := o.svc.AgentByID(rec.AgentID)
-	if !ok {
-		return as, nil
-	}
 	spec, ok := o.reg.Get(as.Runtime)
 	if !ok {
 		return as, nil
@@ -202,14 +193,14 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	// （不必重算：重算还可能因为定义又变了而算出第三个值，那不是"缩权迁移"该管的事）。
 	targetFP := as.Fingerprint
 	if sel != nil {
-		if fp := o.svc.capabilityFingerprint(agent, spec.ID, sel); fp != "" {
+		if fp := o.svc.capabilityFingerprint(spec.ID, sel); fp != "" {
 			targetFP = fp
 		}
 	}
 	oldRC := o.connOfClient(as.client)
 	// 预热新代际并按既有 resume 语义把会话挂上去（`connectSession` 内完成，
 	// 与"进程死掉重建"共用同一条路径——两条路径共用才不会出现"重启后能力集悄悄换一套"）。
-	next, _, err := o.connectSession(ctx, rec, agent, spec, rec.Cwd, sel, targetFP)
+	next, _, err := o.connectSession(ctx, rec, spec, rec.Cwd, sel, targetFP)
 	if err != nil {
 		if plan.PermChanged {
 			// 缩权面变化 + 建不起新代际 → **不回退**（旧进程 = 已被收回的权限面）。
@@ -220,7 +211,7 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 					plan.Reason, err.Error()), nil)
 		}
 		// ④ 回退：旧代际继续跑。诊断留痕（与 `connection_lost` 同一类事实），但不改会话状态。
-		o.noteGenerationFallback(as.AgentID, as.ID, as.Runtime, plan.From, plan.To, err)
+		o.noteGenerationFallback(as.ID, as.Runtime, plan.From, plan.To, err)
 		return as, nil
 	}
 	glog.Infow(ctx, "代际迁移完成", "session", as.ID, "runtime", spec.ID,
@@ -236,15 +227,15 @@ func (o *Orchestrator) maybeMigrateGeneration(ctx context.Context, as *ActiveSes
 	return next, nil
 }
 
-// noteGenerationFallback 迁移失败的留痕：一条 WARN + 一条 agent 诊断。
+// noteGenerationFallback 迁移失败的留痕：一条 WARN + 一条 runtime 诊断。
 //
 // 刻意**不**发事件、**不**改会话状态：用户这一轮照常发出去（可用性优先），"能力还没换过来"
 // 是运维/诊断层面的事实，不是会话的终态。
-func (o *Orchestrator) noteGenerationFallback(agentID, sessionID, runtimeID, from, to string, cause error) {
+func (o *Orchestrator) noteGenerationFallback(sessionID, runtimeID, from, to string, cause error) {
 	glog.Warnw(context.Background(), "代际迁移失败：回退旧代际继续跑",
 		"session", sessionID, "runtime", runtimeID,
 		"from", from, "to", to, "err", cause)
 	ae := acl.NewError(acl.ClassConnection, "generation_switch_failed",
 		"迁移到新能力集失败（已回退到旧代际继续会话）："+cause.Error(), nil)
-	o.svc.recordAgentError(agentID, sessionID, ae, nil)
+	o.svc.recordRuntimeError(sessionID, ae, nil)
 }

@@ -30,8 +30,11 @@ func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func probeSvc(t *testing.T) *Service {
 	t.Helper()
+	home := t.TempDir()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
+	svc.SetProviderDir(filepath.Join(home, "providers"))
+	// 凭据面：memory 模式下密钥的落点是托管文档，探测面要有一条真能写进去的密钥。
+	svc.SetCredentials(newTestCredentials(t, home))
 	return svc
 }
 

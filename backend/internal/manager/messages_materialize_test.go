@@ -24,7 +24,7 @@ func TestMessagesMaterializedAtRunEnd(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-msg", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-msg"})
 
 	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第一问：关键词甲"})
 	svc.publish(BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
@@ -112,7 +112,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	defer st.Close()
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
-	svc.registerSession(&SessionRec{ID: "s-s", AgentID: "agent-stub"})
+	svc.registerSession(&SessionRec{ID: "s-s"})
 	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 mate 服务"})
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
 	svc.publish(BusRunEnded, "s-s", map[string]any{"stop_reason": "end_turn"})

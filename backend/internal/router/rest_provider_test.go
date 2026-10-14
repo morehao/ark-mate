@@ -53,7 +53,7 @@ func TestProviderWriteFaceREST(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &list); err != nil || len(list) != 1 {
 		t.Fatalf("列表面不符: n=%d err=%v body=%s", len(list), err, env.Data)
 	}
-	if list[0].Refs.Agents == nil || list[0].Problems == nil {
+	if list[0].Refs.Models == nil || list[0].Problems == nil {
 		t.Fatalf("refs/problems 必须是数组（空也要是 []，前端不必判 null）: %+v", list[0])
 	}
 

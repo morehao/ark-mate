@@ -23,7 +23,7 @@ import { RAIL_PAGE, pageSessions, relTime } from '../console/railView'
 import { archivedFilterToRailMode, railModeToArchivedFilter } from '../console/workspaceView'
 import { RailSectionHeader } from './RailSectionHeader'
 import { WorkspaceGroupPane } from './WorkspaceGroupPane'
-import { agentNameOf, titleFor } from '../console/util'
+import { runtimeLabelOf, titleFor } from '../console/util'
 
 interface Props {
   onCreate: () => void
@@ -75,7 +75,7 @@ function dayLabel(iso: string): string {
 export function SessionPane({ onCreate }: Props) {
   const navigate = useNavigate()
   const sessions = useMate((s) => s.sessions)
-  const agents = useMate((s) => s.agents)
+  const runtime = useMate((s) => s.runtime)
   const views = useMate((s) => s.views)
   const activeId = useMate((s) => s.activeId)
   const railMode = useMate((s) => s.railMode)
@@ -91,7 +91,7 @@ export function SessionPane({ onCreate }: Props) {
   const [renaming, setRenaming] = useState<{ id: string; init: string } | null>(null)
   const [draft, setDraft] = useState('')
 
-  // 会话搜索：后端扫 transcript（标题/Agent/用户消息正文；含归档），250ms 防抖。
+  // 会话搜索：后端扫 transcript（标题/底座/用户消息正文；含归档），250ms 防抖。
   // 搜索框在区头里是**折叠**的（v14.2，对齐 dsh）：没有它这条列表上方就少一行常驻控件。
   const [searchQ, setSearchQ] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -300,7 +300,7 @@ export function SessionPane({ onCreate }: Props) {
     </button>
   )
 
-  /** 搜索结果行：标题 + 命中片段 + Agent/归档/命中数。 */
+  /** 搜索结果行：标题 + 命中片段 + 底座/归档/命中数。 */
   const renderHit = (h: SessionSearchHit) => (
     <button
       key={h.id}
@@ -331,7 +331,7 @@ export function SessionPane({ onCreate }: Props) {
           color: h.archived ? tokens.textSecondary : tokens.text,
         }}
       >
-        {h.title || h.agent_id}
+        {h.title || runtimeLabelOf(runtime, h.runtime_id)}
       </span>
       {h.snippet ? (
         <span
@@ -375,7 +375,7 @@ export function SessionPane({ onCreate }: Props) {
             color: tokens.text,
           }}
         >
-          {agentNameOf(agents, h.agent_id)}
+          {runtimeLabelOf(runtime, h.runtime_id)}
         </span>
         {h.archived && (
           <span
@@ -411,8 +411,8 @@ export function SessionPane({ onCreate }: Props) {
         icon: <EditOutlined />,
         label: '重命名',
         onClick: () => {
-          setDraft(sm.title || titleFor(sm, view, agents))
-          setRenaming({ id: sm.id, init: sm.title || titleFor(sm, view, agents) })
+          setDraft(sm.title || titleFor(sm, view, runtime?.name))
+          setRenaming({ id: sm.id, init: sm.title || titleFor(sm, view, runtime?.name) })
         },
       },
       { type: 'divider' },
@@ -430,7 +430,7 @@ export function SessionPane({ onCreate }: Props) {
       if (key === 'pin' || key === 'unpin') void togglePin(sm.id)
       else if (key === 'archive') void archiveSession(sm.id, true)
       else if (key === 'restore') void archiveSession(sm.id, false)
-      else if (key === 'export') void exportOne(sm.id, sm.title || titleFor(sm, view, agents))
+      else if (key === 'export') void exportOne(sm.id, sm.title || titleFor(sm, view, runtime?.name))
     }
 
     return (
@@ -478,7 +478,7 @@ export function SessionPane({ onCreate }: Props) {
               color: sm.archived ? tokens.textSecondary : tokens.text,
             }}
           >
-            {titleFor(sm, view, agents)}
+            {titleFor(sm, view, runtime?.name)}
           </span>
           <span
             style={{
@@ -493,7 +493,7 @@ export function SessionPane({ onCreate }: Props) {
             }}
           >
             <span
-              title={sm.agent_id}
+              title={sm.runtime_id}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -509,7 +509,7 @@ export function SessionPane({ onCreate }: Props) {
                 textOverflow: 'ellipsis',
               }}
             >
-              {agentNameOf(agents, sm.agent_id)}
+              {runtimeLabelOf(runtime, sm.runtime_id)}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
               <Dot color={meta.color} pulse={running} size={6} />

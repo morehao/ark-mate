@@ -75,7 +75,7 @@ func mcpCallClass(err error) acl.Class {
 	}
 }
 
-// mcpLiveServer 取条目并解析成 mcp 包输入：**密钥型绑定（`env:`/`vault:`）在这里解析成明文**，
+// mcpLiveServer 取条目并解析成 mcp 包输入：**密钥型绑定（`env:`/`store:`）在这里解析成明文**，
 // 与注入面（McpServersFor）共用同一个 resolveMcpSecrets——两处各写一遍的后果就是今天这个缺陷：
 // 注入面带 env、探测/调用面不带，靠 env 拿凭据的 stdio server 于是"会话里能用、探测必失败"
 // （2026-10-09 实测）。

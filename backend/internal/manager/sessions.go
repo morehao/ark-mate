@@ -102,7 +102,7 @@ func toSessionResp(r *SessionRec) dtosession.SessionResp {
 		Capabilities:       toCapabilitiesResp(r),
 		ID:                 r.ID,
 		RuntimeSessionID:   r.RuntimeSessionID,
-		AgentID:            r.AgentID,
+		RuntimeID:          r.RuntimeID,
 		Status:             r.Status,
 		Title:              r.Title,
 		Pinned:             r.Pinned,
@@ -265,15 +265,11 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 会话与 run 生命周期不随 HTTP 请求结束：WithoutCancel 继承 values 但脱离取消
 	//（run 由 Orchestrator 持有，取消走 POST /sessions/:id/cancel）。
 	runCtx := context.WithoutCancel(ctx)
-	agentID, err := s.resolveSessionAgent(req.AgentID)
-	if err != nil {
+	// 写面显式拒绝 `agent_id`（v19：agent 概念整个并入 runtime）：底座构建期固定，收下这个键
+	// 只会让用户以为"我给这个会话指定了 agent"。**在解析工作空间之前**判定——工作空间解析会
+	// 触及文件系统，不该为一个本来就无效的请求留下痕迹。
+	if err := rejectRemovedAgentSelection(req.AgentID); err != nil {
 		return nil, code.FromError(err)
-	}
-	// 先确认 agent 存在，再解析工作空间：解析可能触及文件系统（默认工作空间的符号链接解析），
-	// 不该为一个本来就无效的请求留下副作用。
-	if _, ok := s.AgentByID(agentID); !ok {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "agent_not_found",
-			fmt.Sprintf("未知 agent %q", agentID), nil))
 	}
 	// 归属目标：显式 `workspace_id` 优先（选择器选中了某个登记项），否则用默认工作空间。
 	// 两者都给出且不一致 → 拒绝：猜用户的意图迟早猜错，而这一处猜错的后果是会话跑错目录
@@ -327,7 +323,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 可达性校验在编排器内、**建连之前**做（校验不过一个副作用都不留：不建会话/不拉进程/不写库）。
 	selection := capabilitySelectionFromReq(req.Capabilities)
 	// 底座不由请求指定（构建期固定，见 pkg/runtime/build.go）：这里没有 runtime 参数要校验。
-	res, err := s.startSession(runCtx, agentID, StartOptions{
+	res, err := s.startSession(runCtx, StartOptions{
 		SessionID:          convID,
 		Cwd:                ws.Path,
 		WorkspaceTemporary: ws.Temporary,
@@ -342,7 +338,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 		return nil, code.FromError(err)
 	}
 	resp := &dtosession.SessionCreateResp{
-		ID: res.SessionID, AgentID: res.AgentID, Status: res.Status, EventSeq: res.EventSeq,
+		ID: res.SessionID, RuntimeID: res.Runtime, Status: res.Status, EventSeq: res.EventSeq,
 		Cwd: ws.Path, WorkspaceID: ws.WorkspaceID, WorkspaceTemporary: ws.Temporary,
 	}
 	if req.Prompt != "" {
@@ -358,8 +354,8 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 
 // startSession 建会话。**底座不由调用方指定**：编排器内部取构建期选定的那一个
 // （见 pkg/runtime/build.go 与 Orchestrator.StartSession）。
-func (s *Service) startSession(ctx context.Context, agentID string, opt StartOptions) (*CreateResult, error) {
-	return s.orch.StartSession(ctx, agentID, opt)
+func (s *Service) startSession(ctx context.Context, opt StartOptions) (*CreateResult, error) {
+	return s.orch.StartSession(ctx, opt)
 }
 
 // PromptSession 向既有会话追加一轮 prompt（后台执行）。
@@ -397,12 +393,12 @@ func (s *Service) DeleteQueuedInput(ctx context.Context, id, inputID string) (bo
 		return false, code.FromError(err)
 	}
 	if ok {
-		agentID := ""
+		runtimeID := ""
 		if rec := s.sessionRec(id); rec != nil {
-			agentID = rec.AgentID
+			runtimeID = rec.RuntimeID
 		}
 		s.publish(BusInputCancelled, id, map[string]any{
-			"session_id": id, "agent_id": agentID, "input_id": inputID, "reason": ReasonUserCancel,
+			"session_id": id, "runtime": runtimeID, "input_id": inputID, "reason": ReasonUserCancel,
 		})
 	}
 	return ok, nil

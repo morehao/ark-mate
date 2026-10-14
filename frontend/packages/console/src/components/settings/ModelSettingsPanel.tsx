@@ -387,8 +387,9 @@ export function ModelSettingsPanel() {
    * 三态而不是布尔：`false` 是"连上了、它自报不支持"，`null` 是"没连上/取不到"——把后者说成
    * "不支持"正是 ADR-14 要拦的错误结论，所以这里绝不 `?? false`。
    *
-   * 为什么就地取一份而不是复用 store 里的 `modelCatalog`：那个槽位会被「会话详情」按**别的
-   * agent** 覆盖，而这一节说的必须是「当前 Agent」，拿别人的事实做断言就是撒谎。
+   * 为什么就地取一份而不是复用 store 里的 `modelCatalog`：那个槽位会被「会话详情」按**它那条
+   * 会话**的取样覆盖，而这一节说的是**这份部署的装配事实**（构建期固定的那个底座），
+   * 拿别的取样做断言就是撒谎。
    */
   const [imageInput, setRouteImageInput] = useState<boolean | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -570,9 +571,8 @@ export function ModelSettingsPanel() {
     if (!resp) return
     if (!resp.deleted) {
       showToast('这条供应商已经不存在')
-    } else if (resp.vault_ciphertext_left) {
-      showToast(`供应商已删除，但密文残留：${resp.vault_ciphertext_left}`)
     } else {
+      // v20：密钥是 providers 表上的 `key` 列，随行一起消失——不再有「密文残留」这个半成功态。
       showToast('供应商已删除')
     }
     await reloadAll()
@@ -751,7 +751,7 @@ export function ModelSettingsPanel() {
       // 后端**不会**连带删模型：被模型引用时删除会被拒（`provider_in_use`）。这里是预先把话说清，
       // 而不是等后端拒绝之后再解释。
       ? `它名下还有 ${deleteModelCount} 条模型：先到下面「模型」块里删掉它们，这条才会被允许删除。`
-      : '删除这条供应商会移除它的端点与密钥；被 Agent 引用时会被拒绝——那是为了避免静默换掉凭据来源。')
+      : '删除这条供应商会移除它的端点与密钥；被模型引用时会被拒绝——那是为了避免静默换掉凭据来源。')
     : deleteModelRow !== null
       ? (deleteModelRow.id === (view?.default_model ?? '')
         ? '它正好是默认模型：删除会一并清空默认。既有会话不受影响。'

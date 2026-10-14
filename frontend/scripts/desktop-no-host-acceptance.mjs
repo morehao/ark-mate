@@ -345,9 +345,12 @@ async function main() {
       envReadable ? `PATH=${coreEnv.PATH}` : 'ps -E 读不到（按"读不到"放过）',
     )
 
-    const conv = await apiPost(cdp, '/v1/mate/sessions', { agent_id: 'dsh', prompt: FIRST_PROMPT })
+    // v19：请求体里不再有 `agent_id`——会话落在构建期固定的那个底座上（`/meta.runtime` 是
+    // 它的事实读面）。这里**刻意不带任何底座字段**：带了会被显式拒绝，而不带能建成功，
+    // 这本身就是"选择面已撤"的正向证据。
+    const conv = await apiPost(cdp, '/v1/mate/sessions', { prompt: FIRST_PROMPT })
     sessionId = conv?.data?.id ?? null
-    check('经壳反代建会话成功（agent=dsh）', conv?.code === 0 && !!sessionId, JSON.stringify(conv).slice(0, 200))
+    check('经壳反代建会话成功（不带任何底座字段）', conv?.code === 0 && !!sessionId, JSON.stringify(conv).slice(0, 200))
 
     // 第一轮的终态：不写死 sleep，轮询 status。
     const firstStatus = sessionId ? await waitTerminal(cdp, sessionId) : 'no-session'

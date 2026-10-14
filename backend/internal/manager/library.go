@@ -9,13 +9,12 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— M2-4：Library 统一读模型 ———
 //
-// Library **不拥有任何数据**（选型 E1）：一次调用内 join 五张表（skill/mcp/tool 注册表 +
-// agent 表 + runtime 注册表），返回派生视图。**不做缓存**：350 条 × 一次子串匹配是几十微秒的量级，
+// Library **不拥有任何数据**（选型 E1）：一次调用内 join 三张表（skill/mcp/tool 注册表 +
+// runtime 注册表），返回派生视图。**不做缓存**：几百条 × 一次子串匹配是几十微秒的量级，
 // 而缓存要在五个写面（含手工改文件后重启装载）上各挂一次失效，收益微秒、代价是一个新的错误来源。
 //
 // 两件事在这里刻意**不做**：
@@ -30,14 +29,13 @@ func (s *Service) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, err
 	if q.Kind != "" && !dtolibrary.ValidKinds[q.Kind] {
 		// 未知 kind 报 40000 而不是静默返回空表：静默会让"筛了但没有"与"我拼错了"长得一样。
 		return nil, code.Error(code.InvalidParam,
-			fmt.Sprintf("未知 kind %q（合法：skill|mcp|agent|tool）", q.Kind))
+			fmt.Sprintf("未知 kind %q（合法：skill|mcp|tool）", q.Kind))
 	}
 	needle := strings.ToLower(strings.TrimSpace(q.Q))
 
 	items := make([]dtolibrary.LibraryItem, 0, 64)
 	items = append(items, s.librarySkills()...)
 	items = append(items, s.libraryMcps()...)
-	items = append(items, s.libraryAgents()...)
 	items = append(items, s.libraryTools()...)
 
 	out := items[:0]
@@ -205,44 +203,6 @@ func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary
 			Status: dtolibrary.StatusProjected,
 			Reason: fmt.Sprintf("以 %s 传输注入（会话的 mcps 选定与 agent 白名单都未声明时默认全量）", m.Transport)}
 	}
-}
-
-// libraryAgents agent 条目 + 逐候选 runtime 可达性。
-//
-// 候选 runtime 取**该 agent 自己声明的**（不是全部 runtime）：agent 的候选集就是它的使用边界，
-// 拿全部 runtime 去问"这个 agent 能不能跑"是在答另一个问题。
-func (s *Service) libraryAgents() []dtolibrary.LibraryItem {
-	s.mu.Lock()
-	agents := make([]*AgentRec, 0, len(s.agents))
-	for _, a := range s.agents {
-		agents = append(agents, a)
-	}
-	s.mu.Unlock()
-
-	out := make([]dtolibrary.LibraryItem, 0, len(agents))
-	for _, a := range agents {
-		src := s.agentSourceFile(a.ID)
-		it := dtolibrary.LibraryItem{
-			ID: a.ID, Kind: dtolibrary.KindAgent, Name: libraryName(a.Name, a.ID),
-			Origin: libraryOrigin(src), Scope: capability.SkillScopeGlobal,
-			// 平台没有"禁用某个 agent"的开关，硬造一个只会让人以为它有用：State 是运行态（stopped/running），
-			// 不是可用性。可用性由逐 runtime 可达性回答。
-			Enabled: true, SourceFile: src,
-		}
-		// 底座是构建期常量：agent 条目只报**这一个** runtime 的可达性（v12 之前按 agent 的
-		// 候选列表逐条报）。
-		rt := runtime.SelectedRuntime()
-		if _, ok := s.reg.Get(rt); ok {
-			it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: true,
-				Status: dtolibrary.StatusProjected, Reason: "底座已装配（构建期固定）"})
-		} else {
-			it.Applicability = append(it.Applicability, dtolibrary.Applicability{Runtime: rt, OK: false,
-				Status: dtolibrary.StatusNotApplicable,
-				Reason: fmt.Sprintf("底座 %q 未装配：检查构建期注入（-X pkg/runtime.BuildRuntime）与 runtimes.json", rt)})
-		}
-		out = append(out, it)
-	}
-	return out
 }
 
 // libraryTools Tool 条目 + 归属 server 的可承载 runtime（builtin/observed 对所有 runtime 可达）。

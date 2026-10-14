@@ -12,7 +12,7 @@ import "github.com/morehao/ark-mate/pkg/object/objdelivery"
 // 结构，避免"面板显示可用、输入卡里选不到"这类两套读模型漂移。
 type LibraryItem struct {
 	ID          string `json:"id"`
-	Kind        string `json:"kind"` // skill | mcp | agent | tool
+	Kind        string `json:"kind"` // skill | mcp | tool
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	// Origin 血缘：`local`（本机的定义文件——用户自己写的）/ `imported`（随平台来的或运行时探测出来的：
@@ -55,14 +55,13 @@ const (
 const (
 	KindSkill = "skill"
 	KindMcp   = "mcp"
-	KindAgent = "agent"
 	KindTool  = "tool"
 )
 
 // ValidKinds 合法 kind 集合（`?kind=` 校验用；未知值报 invalid_param 而不是静默返回空表——
 // 静默会让"我筛了但没有"和"我拼错了"看起来一样）。
 var ValidKinds = map[string]bool{
-	KindSkill: true, KindMcp: true, KindAgent: true, KindTool: true,
+	KindSkill: true, KindMcp: true, KindTool: true,
 }
 
 // Origin 取值。

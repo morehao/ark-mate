@@ -4,7 +4,7 @@ package dtoexport
 type ExportFile struct {
 	SessionID string `json:"session_id"`
 	Title     string `json:"title,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	RuntimeID string `json:"runtime_id,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Filename  string `json:"filename"`
 	Format    string `json:"format"`

@@ -50,20 +50,10 @@ export const consoleStyleSheet = `
   .fg-sess-item:disabled { opacity: 0.6; cursor: not-allowed; }
   .fg-sess-item:disabled:hover { background: transparent; }
 
-  /* 新建会话：agent 选项卡（基础边框/底色由类承载，hover/选中才能覆盖） */
-  .fg-agent-opt {
-    border: 1px solid ${tokens.border};
-    border-radius: 13px;
-    background: ${tokens.surface};
-    transition: box-shadow 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-    cursor: pointer;
-  }
-  .fg-agent-opt:hover { box-shadow: inset 0 0 0 1px ${tokens.borderStrong}; }
-  .fg-agent-opt.fg-sel {
-    border-color: ${tokens.primary};
-    background: ${tokens.primarySoft};
-    box-shadow: inset 0 0 0 1px ${tokens.primary};
-  }
+  /* v19：这里原有「新建会话：agent 选项卡」的三条 fg-agent-opt 规则。
+     选项卡本身早已隐去（新建固定用当前 agent），agent 概念删除后它更不可能回来——
+     留着一份没有渲染点的样式，下一个人只会去猜"哪还在用它"。
+     （本文件是模板字符串，注释里不能出现反引号——那会直接闭合模板。） */
 
   /* 左栏（导航 + 会话区 + 状态）：桌面常驻 288px；≤920px 在下方媒体里抽屉化 */
   .fg-rail {

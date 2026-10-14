@@ -26,7 +26,7 @@ var providerModelColumnWhitelist = map[string][]string{
 var forbiddenProviderModelColumns = []string{
 	"body",                                      // 键集合封闭 ⇒ 列（A1 的判据）
 	"key_ref",                                   // providerRef(id) 的纯函数副本 + AAD 已绑 vault:providers/<id>（ADR-7）
-	"key",                                       // 明文密钥不得进 DB（ADR-8/A4）
+	"key",                                       // v13 当时刻意不给密钥留列（v20 才用 ALTER 加进 providers，历史建表语句里仍然没有）
 	"is_default",                                // 默认是用户的偏好、单一值，住 meta.MetaKeyDefaultModel（ADR-21）
 	"runtime",                                   // v12 ADR-1 已删，不回填
 	"pinned", "hidden", "sort_order", "enabled", // 无需求证据（ADR-7）

@@ -36,19 +36,17 @@ const usageText = `mate — ark-mate 控制面 daemon（release 单二进制内�
   mate capability migrate      skill 定义迁移（旧 sources[] → runtimes[]；--dry-run 可预览）
   mate capability import       ▲ 能力目录 → SQLite 导入（M6：sqlite 模式下 DB 是事实源；按行判重不覆盖）
   mate capability export       把 SQLite 里的能力定义写回能力目录（此后文件是导出物）
-  mate agent import            Agent 定义目录 → SQLite 导入（M6-6：sqlite 模式下 DB 是事实源；按行判重不覆盖）
-  mate agent export            把 SQLite 里的 Agent 定义写回定义目录（此后文件是导出物）
   mate automation import       定时任务目录 → SQLite 导入（M6-7：定义与运行态一并搬；按行判重不覆盖）
   mate automation export       把 SQLite 里的定时任务写回目录（定义与运行态合成同一个文件）
-  mate provider import         Agent 目录下的 providers.json → SQLite 导入（v11：sqlite 模式下 DB 是事实源）
+  mate provider import         provider 目录下的 providers.json → SQLite 导入（v11：sqlite 模式下 DB 是事实源）
   mate provider export         把 SQLite 里的供应商档案写回 providers.json（回退旧二进制的唯一回灌路径）
-  mate mcp bridge --agent <id> --runtime <id>
+  mate mcp bridge --runtime <id>
                                 平台侧 MCP stdio 网关（底座经 ACP 拉起；远程 MCP 经它代理）
   mate doctor [flags]          只读体检：资产来源与摘要、随包载荷清单与全量复算、数据目录可写性、端口占用
   mate --version [--json]      打印核心版本与 API 契约版本（--json 供机器读）
 
 子命令帮助：mate serve -h / mate demo -h / mate migrate -h / mate transcripts prune -h / mate config -h
-            mate capability {migrate,import,export} -h / mate agent {import,export} -h
+            mate capability {migrate,import,export} -h
             mate automation {import,export} -h / mate provider {import,export} -h
             mate mcp bridge -h / mate doctor -h
 `
@@ -121,8 +119,6 @@ func Run(args []string) int {
 		configCmd(args[1:])
 	case "capability":
 		capabilityCmd(args[1:])
-	case "agent":
-		agentCmd(args[1:])
 	case "automation":
 		automationCmd(args[1:])
 	case "provider":

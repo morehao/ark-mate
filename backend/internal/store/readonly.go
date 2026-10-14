@@ -44,5 +44,14 @@ func OpenReadOnly(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: 只读打开 %s 失败（不跑迁移、也不会替你修它）：%w", path, err)
 	}
-	return New(db), nil
+	s := New(db)
+	// path 必须留在句柄上：只读句柄也要能回答"库文件在哪"——`MigrationBackupPaths*`（备份扫描）
+	// 与 doctor 的「迁移备份」那一条都按它拼路径。
+	//
+	// 不设它的后果是**静默**的（2026-10-14 实测）：扫描函数开头就是 `s.path == "" → nil`，
+	// 于是 `mate doctor` 在本机明明有备份时也会说"没有找到备份"，把用户推向"回退窗口已关闭"
+	// 的结论（那会让人去做一次本来不必要的密钥重设）。修在这里而不是给扫描函数加豁免：
+	// 空路径的语义是"内存库"，不该被当成"不知道库文件在哪"。
+	s.path = path
+	return s, nil
 }

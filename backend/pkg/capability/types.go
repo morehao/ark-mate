@@ -108,11 +108,11 @@ func (s Skill) AppliesToRuntime(runtime string) bool {
 // 不靠读值猜：
 //
 //	Env           明文环境变量（stdio 子进程注入；可展示、可 diff）
-//	SecretEnv     密钥型环境变量：**值只能是引用**（vault:… / env:…）
+//	SecretEnv     密钥型环境变量：**值只能是引用**（store:… / env:…）
 //	Headers       明文 header（非密钥）
 //	SecretHeaders 密钥型 header：值只能是引用
 //
-// 引用在注入前一刻才解析成明文（internal/manager 调 vault），所以定义文件里永远没有密钥本体。
+// 引用在注入前一刻才解析成明文（internal/manager 查库），所以定义文件里永远没有密钥本体。
 type McpServer struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name,omitempty"`
@@ -122,11 +122,11 @@ type McpServer struct {
 	URL       string   `json:"url,omitempty"` // http/sse 时
 	// Env 明文环境变量（stdio 注入）。
 	Env map[string]string `json:"env,omitempty"`
-	// SecretEnv 密钥型环境变量：值必须是 vault:<ns>/<name> 或 env:<NAME>。
+	// SecretEnv 密钥型环境变量：值必须是 store:<ns>/<name> 或 env:<NAME>。
 	SecretEnv map[string]string `json:"secret_env,omitempty"`
 	// Headers 明文 header（非密钥）。
 	Headers map[string]string `json:"headers,omitempty"`
-	// SecretHeaders 密钥型 header：值必须是 vault:<ns>/<name> 或 env:<NAME>。
+	// SecretHeaders 密钥型 header：值必须是 store:<ns>/<name> 或 env:<NAME>。
 	SecretHeaders map[string]string `json:"secret_headers,omitempty"`
 	// Scope 作用域：global（默认）/ workspace。与 Skill.Scope 同一语义、同一限制：
 	// M1–M4 只落数据面，platform 侧不因它改注入路径（底座的 MCP 目录约定未实测前不猜）。

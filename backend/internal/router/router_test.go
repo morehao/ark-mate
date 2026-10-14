@@ -44,13 +44,23 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	reg.ApplyIsolationEnv(filepath.Join(os.TempDir(), "mate-router-test-home"))
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
-	// v13：没有可用 vault 时**拒绝**存密钥（fail-closed）。这条路径上的端点（POST/PATCH
-	// providers 带 api_key）需要真实 vault，所以夹具给一个私有 agentDir——目录在 t.TempDir 下，
-	// 绝不碰用户环境（`~/.ark-mate`）。
-	svc.LoadAgentDefinitions(filepath.Join(t.TempDir(), "agents"))
+	// v20：这条夹具是 **memory 模式**（没有 sqlite 层），所以密钥的落点是托管文档
+	// `<MATE_HOME>/credentials.json`——`POST/PATCH providers` 带 `api_key` 时它就是事实源，
+	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
+	// home 与 providerDir 都在 `t.TempDir()` 下，绝不碰用户环境（`~/.ark-mate`）。
+	home := t.TempDir()
+	creds, _, err := manager.OpenCredentialSource(home, home)
+	if err != nil {
+		t.Fatalf("装配凭据分层: %v", err)
+	}
+	// 继承环境那一层置空：这条夹具不该被跑测试的机器上恰好存在的同名变量影响
+	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
+	creds.Env = func(string) string { return "" }
+	svc.SetCredentials(creds)
+	svc.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
-		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
@@ -89,153 +99,48 @@ func TestRouterMountHealth(t *testing.T) {
 	}
 }
 
-// TestRouterListRealService 经真实 Service 的列表端点：**每个内置 adapter 各一个种子 agent**，
-// 其中构建期选中的那个是默认。夹具用 `AllBuiltinRegistry`（全部内置），因此每个内置底座都播种
-// ——**产品装配只播构建期选中的那一个**（见 internal/app 的 TestInitPinsBuildRuntime），
-// 这里测的是路由装配，不是构建期选择。
+// TestRouterRuntimeIdentityRealService 经真实 Service 的**运行时身份**读面。
 //
-// 期望数量按 `AllBuiltinSpecs()` **现算**，不写死数字：写死两个的那一版在第二个内置底座下线后
-// 会变成"数量恰好对上"的空断言（而且它一旦被改宽到 `>= 1`，就再也抓不到"漏播一个种子"）。
-func TestRouterListRealService(t *testing.T) {
+// v19：这里原本逐条核对"每个内置底座各播一个种子 agent、其中构建期选中的那个是默认"。agent 面
+// 撤销后，同一件事只剩两个事实出口：`GET /meta` 的 `runtime`（构建期固定的 id/name/version）
+// 与 `GET /runtime/diagnostics`（此刻的进程态）。两者都不带可选语义——是事实，不是选项。
+func TestRouterRuntimeIdentityRealService(t *testing.T) {
 	e := newEngine(t)
 
-	env := get(t, e, "/v1/mate/agents")
+	env := get(t, e, "/v1/mate/meta")
 	if env.Code != 0 {
-		t.Fatalf("agents 信封不符: %+v", env)
+		t.Fatalf("meta 信封不符: %+v", env)
 	}
-	var agents []map[string]any
-	if err := json.Unmarshal(env.Data, &agents); err != nil {
-		t.Fatalf("agents data 反序列化失败: %s", env.Data)
+	var meta struct {
+		Runtime struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"runtime"`
 	}
-	wantIDs := make([]string, 0, len(runtime.AllBuiltinSpecs()))
-	for _, sp := range runtime.AllBuiltinSpecs() {
-		wantIDs = append(wantIDs, sp.ID)
+	if err := json.Unmarshal(env.Data, &meta); err != nil {
+		t.Fatalf("meta data 反序列化失败: %s", env.Data)
 	}
-	sort.Strings(wantIDs)
-	gotIDs := make([]string, 0, len(agents))
-	defaults := 0
-	for _, a := range agents {
-		id, _ := a["id"].(string)
-		gotIDs = append(gotIDs, id)
-		if a["seed"] != true {
-			t.Errorf("内置播种出来的 agent 必须自报 seed=true: %v", a)
+	if meta.Runtime.ID != runtime.SelectedRuntime() || meta.Runtime.Name == "" {
+		t.Fatalf("meta.runtime 应如实报构建期选中的底座（%s）: %s", runtime.SelectedRuntime(), env.Data)
+	}
+
+	env = get(t, e, "/v1/mate/runtime/diagnostics")
+	if env.Code != 0 {
+		t.Fatalf("runtime/diagnostics 信封不符: %+v", env)
+	}
+	if !strings.Contains(string(env.Data), `"runtime":"`+runtime.SelectedRuntime()+`"`) {
+		t.Fatalf("诊断面应带底座 id: %s", env.Data)
+	}
+	// 身份面不许回带 agent 选择面（被撤掉的概念不许从别的字段缝回来）。
+	for _, banned := range []string{`"agent_id"`, `"runtimes"`} {
+		if strings.Contains(string(env.Data), banned) {
+			t.Fatalf("诊断面不该出现 %s: %s", banned, env.Data)
 		}
-		if a["is_default"] == true {
-			defaults++
-		}
-	}
-	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
-		t.Fatalf("种子 agent 应逐条对应内置 adapter（升序）：got %v want %v（body=%s）",
-			gotIDs, wantIDs, env.Data)
-	}
-	if defaults != 1 || gotIDs[0] != runtime.SelectedRuntime() {
-		t.Fatalf("应恰好一个默认且是构建期选中的那个（%s）: %s",
-			runtime.SelectedRuntime(), env.Data)
-	}
-	// agent 的对外表示里**不该再有 runtimes**：底座由构建期固定，用户面没有这个读面。
-	if _, has := agents[0]["runtimes"]; has {
-		t.Fatalf("agent 响应不应再带 runtimes 字段（构建期固定底座）: %s", env.Data)
 	}
 
 	env = get(t, e, "/v1/mate/sessions")
 	if env.Code != 0 {
 		t.Fatalf("sessions 信封不符: %+v", env)
-	}
-}
-
-// TestRouterCapabilitiesListRealService P1 能力数据面经真实 Service：未装配目录时
-// /skills /mcps /tools 返回空数组（REST 可列出能力的最小形态）。
-func TestRouterCapabilitiesListRealService(t *testing.T) {
-	e := newEngine(t)
-	for _, p := range []string{"/skills", "/mcps", "/tools"} {
-		env := get(t, e, "/v1/mate"+p)
-		if env.Code != 0 {
-			t.Fatalf("%s 信封不符: %+v", p, env)
-		}
-		var items []map[string]any
-		if err := json.Unmarshal(env.Data, &items); err != nil || len(items) != 0 {
-			t.Fatalf("%s 应为空数组: %s", p, env.Data)
-		}
-	}
-}
-
-// TestRouterModelCatalog `GET /models`（应用层清单 + 聚合生效结论）与 `GET /models/catalog`
-// （运行时目录）经真实 Service（无执行面装配）的形状与语义。
-//
-// 两条不同的读面必须在同一个用例里被区分开，否则很容易被"合成一个端点"的冲动改坏：
-// `/models` 是**平台声明**（意图），`/models/catalog` 是**运行时事实**（ACP session config
-// options 的不透明值）。v11 把它们挤在一个响应里（`declared`/`advertised`/`diff`/`config`），
-// v12 拆开：意图面带上**聚合**结论，事实面单独一条路由。
-func TestRouterModelCatalog(t *testing.T) {
-	e := newEngine(t)
-
-	// —— ① `/models`：清单 + 聚合结论（用户面只有这四个字段）+ 机器面明细 ——
-	env := get(t, e, "/v1/mate/models")
-	if env.Code != 0 {
-		t.Fatalf("/models 信封不符: %+v", env)
-	}
-	var resp struct {
-		Models       []map[string]any `json:"models"`
-		DefaultModel string           `json:"default_model"`
-		Effective    string           `json:"effective"`
-		EffectiveAt  string           `json:"effective_at"`
-		Sync         []struct {
-			Runtime    string   `json:"runtime"`
-			Status     string   `json:"status"`
-			Pending    bool     `json:"pending"`
-			Problems   []string `json:"problems"`
-			Credential struct {
-				Channel string `json:"channel"`
-				Tested  bool   `json:"tested"`
-			} `json:"credential"`
-		} `json:"sync"`
-		Note string `json:"note"`
-	}
-	if err := json.Unmarshal(env.Data, &resp); err != nil {
-		t.Fatalf("/models data 解析: %v", err)
-	}
-	// 数组/字符串字段不许缺席（空也要是 []/有效取值，前端不必判 null）。
-	if resp.Models == nil {
-		t.Fatalf("models 必须是数组（空也要是 []）: %s", env.Data)
-	}
-	if resp.Effective == "" || resp.EffectiveAt == "" {
-		t.Fatalf("effective/effective_at 是用户面的聚合结论，不许缺席: %s", env.Data)
-	}
-	if len(resp.Sync) == 0 {
-		t.Fatalf("sync[] 应逐已注册 runtime 各一条（机器面）: %s", env.Data)
-	}
-	for _, s := range resp.Sync {
-		if s.Runtime == "" || s.Status == "" || s.Problems == nil {
-			t.Fatalf("sync[] 的每条都要有 runtime/status/problems([]): %+v", s)
-		}
-	}
-	// 用户面零底座词汇的结构保证（A14）：响应里**没有**逐 runtime 的默认映射。
-	if strings.Contains(string(env.Data), "default_models") {
-		t.Fatalf("用户面不许有逐 runtime 的默认映射: %s", env.Data)
-	}
-
-	// —— ② `/models/catalog`：运行时目录（无编排器 → 空目录 + source=none + 说明） ——
-	env = get(t, e, "/v1/mate/models/catalog?agent=dsh")
-	if env.Code != 0 {
-		t.Fatalf("/models/catalog 信封不符: %+v", env)
-	}
-	var cat struct {
-		Agent   string `json:"agent"`
-		Runtime string `json:"runtime"`
-		Source  string `json:"source"`
-		Options []any  `json:"options"`
-		Note    string `json:"note"`
-	}
-	if err := json.Unmarshal(env.Data, &cat); err != nil {
-		t.Fatalf("/models/catalog data 解析: %v", err)
-	}
-	if cat.Agent != "dsh" || cat.Source != "none" || cat.Options == nil {
-		t.Fatalf("无执行面时目录应为空 + source=none（options 仍须是 []）: %s", env.Data)
-	}
-	// 未知 agent → 40401（agent_not_found）。
-	env = get(t, e, "/v1/mate/models/catalog?agent=nope")
-	if env.Code != 40401 {
-		t.Fatalf("未知 agent 应 40401: %+v", env)
 	}
 }
 
@@ -250,8 +155,7 @@ func TestRouterRoutesRegistered(t *testing.T) {
 	}
 	for _, want := range []string{
 		"GET /v1/mate/health",
-		"GET /v1/mate/agents",
-		"POST /v1/mate/agents/:id/default",
+		"GET /v1/mate/runtime/diagnostics",
 		"GET /v1/mate/sessions",
 		"POST /v1/mate/sessions",
 		"GET /v1/mate/sessions/:id/history",
@@ -393,7 +297,7 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	seen := map[string]bool{}
 	for _, m := range re.FindAllStringSubmatch(string(readme), -1) {
 		p := m[1]
-		if !strings.HasPrefix(p, "/agents") && !strings.HasPrefix(p, "/sessions") &&
+		if !strings.HasPrefix(p, "/runtime") && !strings.HasPrefix(p, "/sessions") &&
 			!strings.HasPrefix(p, "/runtimes") && !strings.HasPrefix(p, "/providers") &&
 			!strings.HasPrefix(p, "/models") && !strings.HasPrefix(p, "/workspaces") &&
 			!strings.HasPrefix(p, "/skills") && !strings.HasPrefix(p, "/mcps") &&
@@ -428,6 +332,11 @@ func TestReadmeRoutesMatchRouter(t *testing.T) {
 	}
 	if len(seen) < 20 {
 		t.Fatalf("README 路由提取过少（%d），守卫失效", len(seen))
+	}
+	// 反向：`/agents*` 是 **v19 之前的历史名**（agent 概念整个并入 runtime），不得再出现在
+	// README 的路由语境里——与 `conversation` 同形：历史名留在文档里会让下一个人以为它还在册。
+	if strings.Contains(string(readme), "`/agents") {
+		t.Error("README 仍含历史路由 /agents*（v19 起 agent 面并入 runtime）")
 	}
 	// 反向：`conversation` 是 **v15 之前的历史名**，不得再出现在 README 的路由语境里。
 	//
@@ -465,7 +374,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
-		Agent: svc, Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc, Runtime: svc,
 		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
 	}, bus, router.Options{Credentials: creds})
 	return engine
@@ -499,12 +408,12 @@ func TestAuthToken(t *testing.T) {
 	}
 	cases := []probe{
 		{"health 免鉴权", "GET", "/v1/mate/health", "", 200, 0},
-		{"缺令牌", "GET", "/v1/mate/agents", "", 401, 40101},
-		{"错令牌", "GET", "/v1/mate/agents", "Bearer wrong", 401, 40101},
-		{"非 Bearer 方案", "GET", "/v1/mate/agents", "Basic s3cret-token", 401, 40101},
-		{"正确 Bearer", "GET", "/v1/mate/agents", "Bearer " + token, 200, 0},
-		{"方案大小写不敏感", "GET", "/v1/mate/agents", "bearer " + token, 200, 0},
-		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/mate/agents?token=" + token, "", 401, 40101},
+		{"缺令牌", "GET", "/v1/mate/sessions", "", 401, 40101},
+		{"错令牌", "GET", "/v1/mate/sessions", "Bearer wrong", 401, 40101},
+		{"非 Bearer 方案", "GET", "/v1/mate/sessions", "Basic s3cret-token", 401, 40101},
+		{"正确 Bearer", "GET", "/v1/mate/sessions", "Bearer " + token, 200, 0},
+		{"方案大小写不敏感", "GET", "/v1/mate/sessions", "bearer " + token, 200, 0},
+		{"查询参数令牌已失效（M1-1 删除 ?token=）", "GET", "/v1/mate/sessions?token=" + token, "", 401, 40101},
 		{"POST 也受保护", "POST", "/v1/mate/sessions/export", "", 401, 40101},
 		// WS 路由不挂 REST 凭据中间件（鉴权在带内首帧 attach）：非升级请求直接进入升级逻辑，
 		// 被升级库拒绝为 426 Upgrade Required。关键是「不再是 401」。
@@ -556,10 +465,10 @@ func TestCredentialsScopeSeparation(t *testing.T) {
 		header string
 		want   int
 	}{
-		{"restToken → REST 放行", "/v1/mate/agents", "Bearer " + rest, 200},
-		{"streamToken → REST 被拒（V15）", "/v1/mate/agents", "Bearer " + stream, 401},
-		{"无令牌 → REST 被拒", "/v1/mate/agents", "", 401},
-		{"restToken 也不能走查询参数", "/v1/mate/agents?token=" + rest, "", 401},
+		{"restToken → REST 放行", "/v1/mate/sessions", "Bearer " + rest, 200},
+		{"streamToken → REST 被拒（V15）", "/v1/mate/sessions", "Bearer " + stream, 401},
+		{"无令牌 → REST 被拒", "/v1/mate/sessions", "", 401},
+		{"restToken 也不能走查询参数", "/v1/mate/sessions?token=" + rest, "", 401},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -613,7 +522,7 @@ func TestCredentialCoversAllRestRoutes(t *testing.T) {
 // TestAuthTokenDisabled 未配置凭据 = 历史行为（不鉴权）。
 func TestAuthTokenDisabled(t *testing.T) {
 	eng := newAuthEngine(nil)
-	req := httptest.NewRequest("GET", "/v1/mate/agents", nil)
+	req := httptest.NewRequest("GET", "/v1/mate/sessions", nil)
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)
 	if w.Code != 200 {

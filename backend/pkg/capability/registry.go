@@ -199,7 +199,7 @@ func warnCredentialShapedPlaintext(m *McpServer) {
 		if _, inSecret := m.SecretHeaders[k]; inSecret {
 			continue
 		}
-		glog.Warnw(context.Background(), "capability mcp: 明文 header 的键名看起来像凭据，建议移到 secret_headers（值只接受 vault:/env: 引用）",
+		glog.Warnw(context.Background(), "capability mcp: 明文 header 的键名看起来像凭据，建议移到 secret_headers（值只接受 store:/env: 引用）",
 			"server", m.ID, "header", k)
 	}
 }

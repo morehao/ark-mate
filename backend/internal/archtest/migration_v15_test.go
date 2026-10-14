@@ -106,6 +106,21 @@ var v15InPlaceDrops = []migrationDrop{
 	{File: "migrate_v17.go", Table: "events", Reason: "v16 的 events → events_v17（同表就地重铸身份：行数与 seq 逐行保留，**不清空任何数据**）"},
 }
 
+// v19WholeTableDrops 是**整表撤概念**的登记簿（与 v15InPlaceDrops 的「同表就地重写」是两回事）。
+//
+// 为什么单列一张表：就地重写不改行数（v12/v13/v17 都是「建新表 → 灌数 → DROP 旧表 → RENAME」），
+// 而整表撤概念**确实丢行**——`agents` 的定义行不会搬到别处。它必须 owner 单独拍板，
+// 判据同样按 (文件, 表) 匹配（换个文件写同一个表名不算豁免）。
+//
+// v19（2026-10-14，决策 v19）：agent 概念整个并入 runtime，底座由构建期固定、用户不可自定义，
+// 于是 `agents` 表被 DROP。依据是「这个域没有独立身份」——agent 的每个字段要么是派生事实
+// （`is_default`/`session_count`/`default_model`）、要么是平台事实（`permission_policy`/`provider`），
+// 撤掉写面后没有剩余字段可写。全文见 docs/design-and-roadmap.md「决策变更 v19」。
+var v19WholeTableDrops = []migrationDrop{
+	{File: "migrate.go", Table: "agents", Reason: "v19：agent 概念并入 runtime，定义面整体删除（决策 v19 拍板）——" +
+		"行**确实**丢弃（定义行 + `default_agent`/`imported_agents` 两个 meta 键），所以它登记在这里而不是 v15InPlaceDrops"},
+}
+
 // migrationStructFields 是 `migration` 结构体**允许**的字段全集（C1：不给内核加能力）。
 //
 // 加 `destructive`/`rebuild`/`drop` 这类字段就是"把一次性例外变成可复用机制"的第一步。
@@ -167,6 +182,9 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 			continue
 		}
 		if isRegisteredInPlaceDrop(d) {
+			continue
+		}
+		if isRegisteredWholeTableDrop(d) {
 			continue
 		}
 		t.Fatalf("%s 里的 `DROP TABLE %s` 不在白名单里：\n"+
@@ -319,6 +337,19 @@ func collectDropTables(t *testing.T, storeDir string) []migrationDrop {
 // isRegisteredInPlaceDrop 判断一处 DROP 是否登记为"同一张表的就地重建"。
 func isRegisteredInPlaceDrop(d migrationDrop) bool {
 	for _, w := range v15InPlaceDrops {
+		if strings.TrimSpace(w.Reason) == "" {
+			continue
+		}
+		if w.File == d.File && w.Table == d.Table {
+			return true
+		}
+	}
+	return false
+}
+
+// isRegisteredWholeTableDrop 判断一处 DROP 是否登记为"整表撤概念"（v19 的那一类）。
+func isRegisteredWholeTableDrop(d migrationDrop) bool {
+	for _, w := range v19WholeTableDrops {
 		if strings.TrimSpace(w.Reason) == "" {
 			continue
 		}

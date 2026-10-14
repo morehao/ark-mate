@@ -31,7 +31,6 @@ func automationDBRig(t *testing.T, dir string) (*Service, *store.Store) {
 	reg := runtime.NewRegistry(spec)
 	svc := NewService(reg, eventbus.New())
 	setBuildRuntime(t, "silent") // 夹具注册表只有 silent
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
@@ -193,7 +192,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 	})
 	// 坏定义：schedule 缺时区（Validate 会拒）——留列表带 loadErr，而不是从列表里消失。
 	mustSeedAutomationRow(t, st, &model.AutomationEntity{
-		ID: "broken", Body: `{"id":"broken","name":"坏","schedule":{"kind":"daily","hour":9,"minute":0},"target":{"agent_id":"a1","cwd":"/tmp","prompt":"x"}}`,
+		ID: "broken", Body: `{"id":"broken","name":"坏","schedule":{"kind":"daily","hour":9,"minute":0},"target":{"cwd":"/tmp","prompt":"x"}}`,
 	})
 	// 行正文不是 JSON 对象（手工塞进去的）→ 同样如实留列表。
 	mustSeedAutomationRow(t, st, &model.AutomationEntity{ID: "junk", Body: `[1,2,3]`})

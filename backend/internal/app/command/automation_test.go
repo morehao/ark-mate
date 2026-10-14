@@ -24,11 +24,11 @@ func TestAutomationImportExportCLI(t *testing.T) {
 	cwd := t.TempDir()
 	body := `{"id":"nightly","name":"夜跑","enabled":true,` +
 		`"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},` +
-		`"target":{"agent_id":"a1","cwd":"` + cwd + `","prompt":"跑一遍巡检"},` +
+		`"target":{"cwd":"` + cwd + `","prompt":"跑一遍巡检"},` +
 		`"state":"inactive","last_fired_at":"2026-10-08T01:00:00Z","last_status":"completed"}`
-	writeAgentDef(t, autoDir, "nightly.json", body)
+	writeAutomationDef(t, autoDir, "nightly.json", body)
 	// 坏定义逐条报出、其余照常导入（退出码不整体失败）。
-	writeAgentDef(t, autoDir, "broken.json", `{"id":"broken",`)
+	writeAutomationDef(t, autoDir, "broken.json", `{"id":"broken",`)
 
 	automationImport(nil)
 
@@ -62,7 +62,7 @@ func TestAutomationImportExportCLI(t *testing.T) {
 	if ok, err := st.UpsertAutomationDefinition(ctx, "nightly",
 		`{"id":"nightly","name":"面板改的","enabled":true,`+
 			`"schedule":{"kind":"daily","timezone":"Asia/Shanghai","hour":9,"minute":0},`+
-			`"target":{"agent_id":"a1","cwd":"`+cwd+`","prompt":"面板改的 prompt"}}`,
+			`"target":{"cwd":"`+cwd+`","prompt":"面板改的 prompt"}}`,
 		row.Revision, "rest"); err != nil || !ok {
 		t.Fatal(err)
 	}
@@ -80,5 +80,17 @@ func TestAutomationImportExportCLI(t *testing.T) {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("导出物缺少运行态键 %s:\n%s", want, got)
 		}
+	}
+}
+
+// writeAutomationDef 往 automation 目录写一个定义文件（v19 之前这里的夹具还兼写 agent 定义，
+// 与能力域共用同一个 helper；agent 面撤销后 helper 只服务 automation，故收口改名）。
+func writeAutomationDef(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

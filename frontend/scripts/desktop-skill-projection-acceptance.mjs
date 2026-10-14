@@ -290,15 +290,23 @@ async function main() {
   const cdp = await connectCDP(shell.port)
   await waitFor(cdp, "return typeof window.__MATE_DESKTOP__ === 'object'", 20000)
 
-  // 在册底座（**服务端事实**，不猜构建参数）：底座由构建期固定，所以本脚本必须先问一句
-  // "这个构建里到底有哪些 agent"，而不是假定都有谁在。这份事实只用在一个地方——下面建 skill 时
-  // 声明的 `runtimes`（投放到本构建在册的底座，而不是写死某个 id 列表），并在这里如实回显。
-  const agentsEnv = await cdp.evalJs(`
-    const r = await fetch('/v1/mate/agents')
+  // 构建期固定的底座（**服务端事实**，不猜构建参数）：底座由构建期固定，所以本脚本必须先问一句
+  // "这个构建跑的是哪个底座"，而不是假定某个 id。这份事实只用在一个地方——下面建 skill 时声明的
+  // `runtimes`（投放到本构建的那个底座，而不是写死 id 字符串），并在这里如实回显。
+  //
+  // v19：读面从 `GET /agents`（一族路由，已删）换成 `GET /meta` 的 `runtime` 字段。
+  // 判据强度不变：仍然是"跟服务端要一句事实"，仍然不写死任何底座名。
+  const metaEnv = await cdp.evalJs(`
+    const r = await fetch('/v1/mate/meta')
     return await r.json()
   `)
-  const registeredAgents = (agentsEnv?.data ?? []).map((a) => a?.id).filter(Boolean)
-  console.log(`   在册 agent：${registeredAgents.join(', ') || '（空）'}`)
+  const runtimeID = metaEnv?.data?.runtime?.id
+  const registeredRuntimes = runtimeID ? [runtimeID] : []
+  if (!runtimeID) {
+    check('GET /meta.runtime 给出了构建期固定的底座 id', false, JSON.stringify(metaEnv).slice(0, 200))
+  } else {
+    console.log(`   构建期固定的底座：${runtimeID}（${metaEnv?.data?.runtime?.version ?? '版本未知'}）`)
+  }
 
   section('修复 B：全新 home 上第一条 skill 要落盘')
   const created = await cdp.evalJs(`
@@ -310,8 +318,8 @@ async function main() {
           id: SKILL_ID,
           name: SKILL_ID,
           description: '桌面态投放探针',
-          // 投放到**本构建在册**的底座（取自上面 `GET /agents` 的事实，不写死 id 列表）。
-          runtimes: registeredAgents,
+          // 投放到**本构建固定**的那个底座（取自上面 `GET /meta.runtime` 的事实，不写死 id）。
+          runtimes: registeredRuntimes,
           body: `# ${SKILL_ID}\n\n正文标记：${BODY_MARK}\n`,
         }),
       )},
@@ -348,7 +356,7 @@ async function main() {
     const r = await fetch('/v1/mate/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: ${JSON.stringify(JSON.stringify({ agent_id: 'dsh', prompt: '报告你可见的 skill 名称。' }))},
+      body: ${JSON.stringify(JSON.stringify({ prompt: '报告你可见的 skill 名称。' }))},
     })
     return await r.json()
   `)

@@ -240,16 +240,15 @@ func (s *Service) automationRunOnce(ctx context.Context, rec automationRec, sche
 
 	// claimed：真的建会话。
 	//
-	// **不在这里做第二份"前置校验"**（agent 是否存在 / runtime 是否可用 / cwd 是否还在）：
+	// **不在这里做第二份"前置校验"**（runtime 是否可用 / cwd 是否还在）：
 	// 那份校验必然与真实创建路径漂移，而 ADR-10 真正要求的是"失败也推进游标"——那与校验
 	// 在哪一层无关。所以直接调真实路径，把它带码的错误落成 needs_attention 的**原因**，
 	// 用户在面板上看到的正是"为什么没跑成"。
 	resp, err := s.CreateSession(ctx, dtosession.SessionCreateReq{
-		AgentID: rec.def.Target.AgentID,
-		Prompt:  rec.def.Target.Prompt,
-		Cwd:     rec.def.Target.Cwd,
-		Model:   rec.def.Target.Model,
-		Origin:  automationOrigin(rec.def.ID),
+		Prompt: rec.def.Target.Prompt,
+		Cwd:    rec.def.Target.Cwd,
+		Model:  rec.def.Target.Model,
+		Origin: automationOrigin(rec.def.ID),
 	})
 	if err != nil {
 		out := automationRunOutcome{

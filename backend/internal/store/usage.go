@@ -10,7 +10,7 @@ import (
 
 // ——— 用量统计聚合（M3 首项：GET /usage/summary 的数据面） ———
 //
-// 数据源：runs（每轮终态行，含 usage_json 的会话用量快照）+ sessions.agent_id。
+// 数据源：runs（每轮终态行，含 usage_json 的会话用量快照）。
 // 语义：
 //   - 计数/时长按「时间半开区间 [From, To)」内的 run 行聚合（started_at 落点）；
 //   - 上下文用量（ContextUsed/ContextSize）是**快照**语义：取每会话在区间内**最后**一条
@@ -19,13 +19,14 @@ import (
 //     多币种不混加：金额置零 + CostCurrency=MIXED + CostByCurrency 明细；
 //   - 上报率分两个计数：UsageReported（上下文）/ CostReported（费用），二者不可互相替代；
 //   - group_by=day 时日期键取 started_at 的 UTC 日期（确定性，不受服务器时区影响）。
+//
+// v19：随 agent 概念整体取消，本面不再有 `agent` 维度（不选 `agent_id`、不按它分组、
+// 也不再有 `?agent_id=` 过滤）——分组只剩 day 一类。
 
-// UsageQuery 用量聚合查询条件。
+// UsageQuery 用量聚合查询条件（只有时间区间；分组恒为 day）。
 type UsageQuery struct {
-	From    time.Time // 零值 = 不限起点
-	To      time.Time // 零值 = 不限终点（半开区间）
-	AgentID string    // 空 = 全部 agent
-	GroupBy string    // "agent"（默认）| "day"
+	From time.Time // 零值 = 不限起点
+	To   time.Time // 零值 = 不限终点（半开区间）
 }
 
 // 费用币种约定：
@@ -38,10 +39,9 @@ const (
 	CostCurrencyMixed = "MIXED"
 )
 
-// UsageBucket 一行聚合结果（group_by=agent → Key=agent_id；=day → Key=YYYY-MM-DD，AgentID 空）。
+// UsageBucket 一行聚合结果（group_by=day → Key=YYYY-MM-DD）。
 type UsageBucket struct {
 	Key           string `json:"key"`
-	AgentID       string `json:"agent_id,omitempty"`
 	Runs          int    `json:"runs"`
 	Completed     int    `json:"completed"`
 	Failed        int    `json:"failed"`
@@ -60,16 +60,15 @@ type UsageBucket struct {
 	CostByCurrency map[string]float64 `json:"cost_by_currency,omitempty"`
 }
 
-// UsageSummaryResult 聚合结果：全区间总计 + 分组桶（agent 键升序 / day 键升序）。
+// UsageSummaryResult 聚合结果：全区间总计 + 分组桶（day 键升序）。
 type UsageSummaryResult struct {
 	Totals  UsageBucket   `json:"totals"`
 	Buckets []UsageBucket `json:"buckets"`
 }
 
-// usageRow 聚合输入行（runs ⨝ sessions）。
+// usageRow 聚合输入行（runs）。
 type usageRow struct {
 	sessionID string
-	agentID   string
 	status    string
 	startedAt time.Time
 	endedAt   time.Time
@@ -86,18 +85,9 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 		return nil, err
 	}
 	res := &UsageSummaryResult{Totals: aggregateUsage(rows)}
-	groupBy := q.GroupBy
-	if groupBy == "" {
-		groupBy = "agent"
-	}
 	byKey := make(map[string][]usageRow)
 	for _, r := range rows {
-		var key string
-		if groupBy == "day" {
-			key = r.startedAt.UTC().Format("2006-01-02")
-		} else {
-			key = r.agentID
-		}
+		key := r.startedAt.UTC().Format("2006-01-02")
 		byKey[key] = append(byKey[key], r)
 	}
 	keys := make([]string, 0, len(byKey))
@@ -108,9 +98,6 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 	for _, k := range keys {
 		b := aggregateUsage(byKey[k])
 		b.Key = k
-		if groupBy != "day" {
-			b.AgentID = k
-		}
 		res.Buckets = append(res.Buckets, b)
 	}
 	if res.Buckets == nil {
@@ -120,12 +107,12 @@ func (s *Store) UsageSummary(ctx context.Context, q UsageQuery) (*UsageSummaryRe
 	return res, nil
 }
 
-// usageRows 读取区间内的 run 行（含 agent 归属与用量快照），转成本包聚合用的行结构。
+// usageRows 读取区间内的 run 行（含用量快照），转成本包聚合用的行结构。
 //
 // 半开区间 [From, To) 的边界比较由 dao 负责（必须以落库布局格式化后再比，
 // 时间列是 RFC3339Nano 文本）。
 func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error) {
-	rows, err := s.runs.UsageRows(ctx, q.From, q.To, q.AgentID)
+	rows, err := s.runs.UsageRows(ctx, q.From, q.To)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +120,6 @@ func (s *Store) usageRows(ctx context.Context, q UsageQuery) ([]usageRow, error)
 	for _, r := range rows {
 		row := usageRow{
 			sessionID: r.SessionID,
-			agentID:   r.AgentID,
 			status:    r.Status,
 			startedAt: r.StartedAt,
 			endedAt:   r.EndedAt,

@@ -341,7 +341,7 @@ func seedStoreSession(t *testing.T, st *store.Store, id, cwd, workspaceID string
 	t.Helper()
 	now := time.Now().UTC()
 	if err := st.UpsertSession(context.Background(), model.SessionEntity{
-		ID: id, AgentID: "agent-stub", Cwd: cwd, WorkspaceID: workspaceID,
+		ID: id, Cwd: cwd, WorkspaceID: workspaceID,
 		Status: SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("写会话行 %s: %v", id, err)
@@ -362,7 +362,7 @@ func writeFile(t *testing.T, dir string) string {
 //
 // 2026-10-11 修：`EnsureDefaultWorkspace` 原先在 `s.st == nil` 时直接 return，于是
 // `MATE_STORE=memory`（以及 auto 在"还没有 mate.db"时的首次运行）下
-// `POST /sessions {"agent_id":"dsh","prompt":"hi"}` 报
+// `POST /sessions {"prompt":"hi"}`（默认工作空间不存在时）报
 // `40001 未指定工作空间，且没有可用的默认工作空间…请显式传入 cwd`——**最普通的一条路走不通**，
 // 而用户什么都没做错。默认工作空间是"未指定 cwd 时落在哪"的唯一落点，与"用户登记表能不能持久化"
 // 是两件事，不该被同一个 `s.st == nil` 判掉。

@@ -34,6 +34,11 @@ type CapabilityImportStats struct {
 	// Skills / Mcps 目录里**过了闸门**的条数。
 	Skills int
 	Mcps   int
+	// MigratedRefs 被显式翻译成 `store:` 的**旧前缀**引用条数（v20；>0 时导入路径已逐条 WARN）。
+	//
+	// 它单独计数而不是并进某条统计：这说明"这台机器上还有指向前一套机制的档案文件"，
+	// 用户可能还想删掉那套遗留物（`mate doctor` 会报出遗留目录与主密钥文件的位置）。
+	MigratedRefs int
 }
 
 // ImportCapabilityDir 从目录导入存量能力定义到持久层（sqlite 模式专用）。
@@ -182,6 +187,11 @@ func scanCapabilityDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 			warnFile(out, "mcp", path, err)
 			continue
 		}
+		// 旧前缀的**唯一翻译点**：档案文件不在库里，v20 迁移改不到它们。改的是内存里的文档
+		// （**不写回用户文件**），所以写进库的正文是翻译后的形态，而用户文件一个字节不变。
+		if translateLegacyMcpRefs(context.Background(), doc, path) > 0 {
+			stats.MigratedRefs++
+		}
 		body, err := doc.Marshal()
 		if err != nil {
 			stats.Invalid++
@@ -228,8 +238,8 @@ func globSorted(dir string) []string {
 
 // warnFile 一条坏定义：WARN 日志 + （有人看输出时）一行人话。
 //
-// `kind` 是**定义的域**（skill / mcp / agent），它同时是日志与输出的分类依据——不写死
-// "capability"，否则 agent 的坏定义会以能力面的名义报出来（排查时先被误导一次）。
+// `kind` 是**定义的域**（skill / mcp / automation / provider），它同时是日志与输出的分类依据
+// ——不写死 "capability"，否则别的域的坏定义会以能力面的名义报出来（排查时先被误导一次）。
 func warnFile(out io.Writer, kind, path string, err error) {
 	glog.Warnw(context.Background(), "定义导入：跳过一条坏定义", "kind", kind, "file", path, "err", err)
 	if out != nil {
@@ -253,13 +263,6 @@ func indentJSONBlock(s string) string {
 func getDefinitionRow(ctx context.Context, st *store.Store, it store.DefinitionImportItem) (string, bool, error) {
 	if it.Kind == model.DefinitionKindMcp {
 		row, found, err := st.GetMcpServerDefinition(ctx, it.ID)
-		if err != nil || !found {
-			return "", found, err
-		}
-		return row.Body, true, nil
-	}
-	if it.Kind == model.DefinitionKindAgent {
-		row, found, err := st.GetAgentDefinition(ctx, it.ID)
 		if err != nil || !found {
 			return "", found, err
 		}

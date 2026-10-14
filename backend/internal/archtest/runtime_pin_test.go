@@ -68,20 +68,15 @@ type selectionSurfaceTarget struct {
 
 // TestNoAgentRuntimeSelectionSurface 用户面不得再有"按 agent / 会话选底座"的字段声明。
 //
-// 扫描面是**定义与 DTO 的承载处**（agent 定义/请求/响应、automation 目标、会话请求）
-// 加上前端 `Agent` 类型；每一条都是"用户能不能选"的直接落点。
-// 刻意用**目录级清单**而不是全仓扫描：`capability.Skill.Runtimes` 等**投放声明**仍然合法，
-// 全仓扫会误伤，而误伤的守卫迟早被人放宽到失效。
+// 扫描面是**还活着的那些承载处**（v19 起 agent 定义整个没了，所以原来的
+// `manager/agents.go` 与 `dto/dtoagent/*` 三处随之删除——把它们留在清单里会让这条守卫
+// 一上来就"读不到文件"而红，而不是静默空转）：会话请求、automation 目标、manager 的会话记录。
+// 刻意用**目录级清单**而不是全仓扫描：`capability.Skill.Runtimes` 等**投放声明**仍然合法
+// （`runtimes` 在 v19 之后依然是 skill 的正经字段），全仓扫会误伤，而误伤的守卫迟早被人放宽到失效。
 func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 	root := backendRoot(t)
 	targets := []selectionSurfaceTarget{
-		{rel: filepath.Join("internal", "manager", "agents.go"),
-			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy, reRuntimeHintStr}},
 		{rel: filepath.Join("internal", "manager", "service.go"),
-			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
-		{rel: filepath.Join("internal", "dto", "dtoagent", "request.go"),
-			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
-		{rel: filepath.Join("internal", "dto", "dtoagent", "response.go"),
 			patterns: []*regexp.Regexp{reRuntimesList, reRoutingPolicy}},
 		{rel: filepath.Join("internal", "dto", "dtosession", "request.go"),
 			patterns: []*regexp.Regexp{reRuntimeHintStr}},
@@ -98,62 +93,89 @@ func TestNoAgentRuntimeSelectionSurface(t *testing.T) {
 		for _, re := range tgt.patterns {
 			if m := re.FindString(clean); m != "" {
 				t.Errorf("%s 里出现了选择面字段声明 %q：底座由构建期固定，"+
-					"用户面不得再有按 agent/会话选底座的字段（要拒绝请求请用 json.RawMessage，见 dtoagent）",
+					"用户面不得再有按 agent/会话选底座的字段（要拒绝请求请用 json.RawMessage，"+
+					"见 `dtosession.Request.AgentID` 与 `manager/reject_removed_keys.go`）",
 					tgt.rel, strings.TrimSpace(m))
 			}
 		}
 	}
 
-	// 前端消费侧：`Agent` 类型不得再声明 runtimes（后端已经不给这个字段）。
-	front := filepath.Join(frontendRoot(t), "packages", "types", "src", "agent.ts")
-	src, err := os.ReadFile(front)
-	if err != nil {
-		t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", front, err)
-	}
-	if m := regexp.MustCompile(`(?m)^\s*runtimes\?:`).FindString(stripTSComments(string(src))); m != "" {
-		t.Errorf("%s 的 Agent 类型又声明了 %q：后端已不再下发 runtimes，"+
-			"前端声明它等于许诺一个永远为空的字段", front, strings.TrimSpace(m))
+	// 前端消费侧：这三个类型文件是"用户能不能选"的唯一落点，不得再声明被撤掉的字段。
+	// v19 之前这里扫的是 `packages/types/src/agent.ts`（该文件已随 agent 面删除）——
+	// 名字换了而扫描面没跟，最常见的结果是**扫一个不存在的路径**（红）或**扫一个空目录**（静默绿），
+	// 所以下面每个文件读不到都当场判失败（fail-closed）。
+	frontFaces := []string{"automation.ts", "session.ts", "usage.ts"}
+	for _, name := range frontFaces {
+		front := filepath.Join(frontendRoot(t), "packages", "types", "src", name)
+		src, err := os.ReadFile(front)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v（路径改了请同步本守卫）", front, err)
+		}
+		clean := stripTSComments(string(src))
+		for _, banned := range []string{`runtimes?:`, "routing_policy", "runtime_hint", "agent_id"} {
+			if idx := strings.Index(clean, banned); idx >= 0 {
+				line := 1 + strings.Count(clean[:idx], "\n")
+				t.Errorf("%s:%d 仍声明/使用了被撤掉的字段 %q：后端已经不给这些字段，"+
+					"前端声明它等于许诺一个永远为空的东西（注释里解释历史是允许的——本判据已剥注释）",
+					name, line, banned)
+			}
+		}
 	}
 }
 
 // TestRuntimeSelectionRejectionsExist 写面的**显式拒绝**必须真的存在。
 //
 // 为什么单独立一条：拒绝逻辑是可以被"顺手删掉"的，而删掉之后请求照样返回 200——只是
-// `runtimes` / `routing_policy` / `target.runtime_hint` 被 JSON 绑定悄悄丢掉，
-// 用户以为"我改了底座"，实际什么都没发生。这类静默 no-op 是本仓的 B1 类风险。
+// 那个键被 JSON 绑定悄悄丢掉，用户以为"我改了底座/我指定了 agent"，实际什么都没发生。
+// 这类静默 no-op 是本仓的 B1 类风险，而它**不会让任何别的测试变红**。
+//
+// v19 的面：会话写面（`agent_id`）与用量读面（`?agent_id=`）走 `reject_removed_keys.go` 里的
+// 两个函数，automation 补丁里的 `target.runtime_hint` 走 `automation.go` 的那一对
+// （拒绝 + 老键自愈）。三处各自的"定义"与"调用"都要在，缺一处就是一条写路径静默忽略。
 func TestRuntimeSelectionRejectionsExist(t *testing.T) {
 	root := backendRoot(t)
 
 	// ① DTO 必须保留**只为拒绝**的原始 JSON 字段（类型是 json.RawMessage）。
-	dto := filepath.Join(root, "internal", "dto", "dtoagent", "request.go")
+	dto := filepath.Join(root, "internal", "dto", "dtosession", "request.go")
 	src, err := os.ReadFile(dto)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v", dto, err)
 	}
 	clean := stripTSComments(string(src))
-	for _, re := range []*regexp.Regexp{
-		regexp.MustCompile(`\bRuntimes\s+json\.RawMessage\b`),
-		regexp.MustCompile(`\bRoutingPolicy\s+json\.RawMessage\b`),
-	} {
-		if !re.MatchString(clean) {
-			t.Errorf("%s 里找不到 %q：写面必须能用 40001 显式拒绝这个键"+
-				"（删掉它 = 请求静默成功、什么都不发生）", dto, re.String())
+	if !regexp.MustCompile(`\bAgentID\s+json\.RawMessage\b`).MatchString(clean) {
+		t.Errorf("%s 里找不到 `AgentID json.RawMessage`：会话写面必须能接住这个已下线的键"+
+			"才能 40001 显式拒绝（删掉它 = 请求静默成功、什么都不发生）", dto)
+	}
+
+	// ② 拒绝的**实现**必须存在（两个函数各一处定义）。
+	rej := filepath.Join(root, "internal", "manager", "reject_removed_keys.go")
+	src, err = os.ReadFile(rej)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v", rej, err)
+	}
+	clean = stripTSComments(string(src))
+	for _, want := range []string{"func rejectRemovedAgentSelection(", "func rejectRemovedUsageDimension("} {
+		if !strings.Contains(clean, want) {
+			t.Errorf("%s 里找不到 %q：被撤掉的键的显式拒绝实现没了（写面会静默成功）", rej, want)
 		}
 	}
 
-	// ② agent 写面必须调用拒绝函数（创建 + 更新两条路各一次）。
-	agents := filepath.Join(root, "internal", "manager", "agents.go")
-	src, err = os.ReadFile(agents)
-	if err != nil {
-		t.Fatalf("读不到 %s: %v", agents, err)
-	}
-	clean = stripTSComments(string(src))
-	if !strings.Contains(clean, "func rejectRuntimeSelection(") {
-		t.Errorf("%s 里找不到 `func rejectRuntimeSelection(`：agent 写面的显式拒绝实现没了", agents)
-	}
-	if n := strings.Count(clean, "rejectRuntimeSelection("); n < 3 { // 1 处定义 + 2 处调用
-		t.Errorf("%s 里 rejectRuntimeSelection 只出现 %d 次（期望 1 处定义 + Create/Update 各 1 处调用）："+
-			"少一处就意味着那条写路径会静默忽略", agents, n)
+	// ②' 拒绝必须被**调用**——只有定义没有调用等于一条没人执行的规矩。
+	for _, site := range []struct {
+		rel  string
+		call string
+	}{
+		{filepath.Join("internal", "manager", "sessions.go"), "rejectRemovedAgentSelection("},
+		{filepath.Join("internal", "manager", "usage.go"), "rejectRemovedUsageDimension("},
+	} {
+		path := filepath.Join(root, site.rel)
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", path, err)
+		}
+		if !strings.Contains(stripTSComments(string(src)), site.call) {
+			t.Errorf("%s 里找不到 %q：这条写/读路径会静默忽略被撤掉的键", site.rel, site.call)
+		}
 	}
 
 	// ③ automation 写面必须有 runtime_hint 的拒绝 + 老键自愈。

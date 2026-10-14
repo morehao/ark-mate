@@ -179,7 +179,7 @@ export function Composer({ busy, busyNote, placeholder, onSend, autoFocus, works
           value={draft}
           autoFocus={autoFocus}
           placeholder={
-            busy ? `agent 正在回复…（可${DELIVERY_LABEL[delivery]}：Enter 送入队列）` : placeholder ?? '向当前 Agent 提问…'
+            busy ? `正在回复…（可${DELIVERY_LABEL[delivery]}：Enter 送入队列）` : placeholder ?? '向助手提问…'
           }
           onChange={(e) => {
             setDraft(e.target.value)

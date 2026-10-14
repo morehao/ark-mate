@@ -39,7 +39,7 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 
 	o.svc.markSession(as.ID, SessionStatusInProgress)
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
-		"session_id": as.ID, "agent_id": as.AgentID, "text": text,
+		"session_id": as.ID, "runtime": as.Runtime, "text": text,
 	})
 	// P3 F3 memo 注入：摘要仅作为发给 runtime 的首条 prompt 引导（user_message 事件保持用户
 	// 原文，不含摘要）。SDK v0.13.5 无 provider handoff 通道 → 文本前缀承载；provider 侧拒绝
@@ -121,7 +121,7 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, 
 		return PromptOutcome{}, err
 	}
 	evt := o.svc.publish(BusInputQueued, sessionID, map[string]any{
-		"session_id": sessionID, "agent_id": as.AgentID, "input_id": q.ID, "text": q.Text,
+		"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID, "text": q.Text,
 		"delivery": q.Delivery, "target_run_id": q.TargetRunID, "generation": q.Generation,
 	})
 	if mode == DeliveryInterruptThenPrompt {
@@ -132,7 +132,7 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, 
 				glog.Warnw(ctx, "取消当前轮失败且撤下排队项失败", "session", sessionID, "input_id", q.ID, "err", derr)
 			}
 			o.svc.publish(BusInputCancelled, sessionID, map[string]any{
-				"session_id": sessionID, "agent_id": as.AgentID, "input_id": q.ID,
+				"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID,
 				"delivery": q.Delivery, "reason": ReasonDeliverFail,
 			})
 			return PromptOutcome{}, cerr
@@ -202,7 +202,7 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 		// run.cancelled：伪终态会污染历史、失败轮列表与重试入口。
 		o.svc.markSession(as.ID, SessionStatusInterrupted)
 		glog.Infow(context.Background(), "run 因连接主动拆除而中断（会话保留，可续聊重发）",
-			"session", as.ID, "agent", as.AgentID)
+			"session", as.ID, "runtime", as.Runtime)
 	case cancelled:
 		o.svc.markSession(as.ID, SessionStatusCancelled)
 		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
@@ -213,7 +213,7 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 	default:
 		o.svc.markSession(as.ID, SessionStatusCompleted)
 		o.svc.publish(BusRunEnded, as.ID, map[string]any{
-			"session_id": as.ID, "agent_id": as.AgentID, "stop_reason": stop,
+			"session_id": as.ID, "runtime": as.Runtime, "stop_reason": stop,
 		})
 		deliverNext = true
 	}
@@ -302,11 +302,7 @@ func (o *Orchestrator) WaitRun(ctx context.Context, sessionID string) (string, e
 
 // RunOnce 在**构建期选定的** runtime 上跑一次 fresh session + prompt 并等待结束（mate demo 用）。
 func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult, error) {
-	agent, err := o.svc.requireDefaultAgent()
-	if err != nil {
-		return nil, err
-	}
-	res, err := o.startSessionOn(ctx, agent, StartOptions{Cwd: opt.Cwd})
+	res, err := o.startSessionOn(ctx, StartOptions{Cwd: opt.Cwd})
 	if err != nil {
 		return nil, err
 	}
@@ -315,13 +311,13 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opt RunOptions) (*RunResult,
 	}
 	stop, err := o.WaitRun(ctx, res.SessionID)
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID}, err
+		return &RunResult{SessionID: res.SessionID, Runtime: res.Runtime}, err
 	}
 	if err != nil {
 		// 父 ctx 超时/取消：executeRun 已按其 err 归为 failed/cancelled
-		return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, err
+		return &RunResult{SessionID: res.SessionID, Runtime: res.Runtime, StopReason: stop}, err
 	}
-	return &RunResult{SessionID: res.SessionID, AgentID: agent.ID, StopReason: stop}, nil
+	return &RunResult{SessionID: res.SessionID, Runtime: res.Runtime, StopReason: stop}, nil
 }
 
 // resolveArgs 替换 Launch.Args 中的 {config} 占位（保留给自定义 adapter 模板；

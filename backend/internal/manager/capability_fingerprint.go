@@ -13,7 +13,7 @@ import (
 // 三条边界，每条都有对应的测试：
 //
 //  1. **密钥值绝不进指纹**：只用定义里的 `env`/`secret_env`/`secret_headers` 的**键名**与
-//     引用名（`vault:`/`env:`），解析成明文的动作发生在注入前一刻（`resolveMcpSecrets`），
+//     引用名（`store:`/`env:`），解析成明文的动作发生在注入前一刻（`resolveMcpSecrets`），
 //     在那之前和之后都不参与指纹。指纹会进日志、事件载荷与 DB 列，进去就等于泄漏。
 //  2. **正文摘要复用物化 sidecar 的同一算法**（`capability.PayloadHash`）：不另造一套摘要，
 //     这样"指纹变了"与"物化摘要变了"永远同向，不会出现"指纹说没变、磁盘产物却该重写"。
@@ -107,12 +107,12 @@ func runtimeFingerprintPart(sp runtime.Spec) runtime.RuntimePart {
 	}
 }
 
-// capabilityFingerprint 某 runtime 上「按会话选定 + agent 声明解析出的整套能力」的指纹。
+// capabilityFingerprint 某 runtime 上「按会话选定解析出的整套能力」的指纹。
 //
 // **缺省路径（会话没有声明能力选择）必须拿到空指纹**：`sel == nil` 时直接返回 "",
 // 从而让 `connKey` 与引入代际之前逐字相同（R11 缺省零回归）。这里刻意不提供
 // "总是算一套"的入口——那正是会让默认路径悄悄换键的写法。
-func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, sel *CapabilitySelection) string {
+func (s *Service) capabilityFingerprint(runtimeID string, sel *CapabilitySelection) string {
 	if sel == nil {
 		return ""
 	}
@@ -122,7 +122,7 @@ func (s *Service) capabilityFingerprint(agent *AgentRec, runtimeID string, sel *
 	}
 	in.Skills = s.projectedSkillParts(runtimeID, sel)
 	// 计划是**唯一**的注入真相：指纹拿它、注入也拿它（两处各算一遍必然漂移，见 planMcpInjection）。
-	in.Mcps = mcpFingerprintParts(s.planMcpInjection(agent, runtimeID, sel))
+	in.Mcps = mcpFingerprintParts(s.planMcpInjection(runtimeID, sel))
 	return runtime.Fingerprint(in)
 }
 

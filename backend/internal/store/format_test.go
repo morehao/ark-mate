@@ -24,7 +24,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	at := time.Date(2026, 9, 10, 10, 42, 23, 123456789, time.UTC)
 
 	if err := s.UpsertSession(ctx, model.SessionEntity{
-		ID: "c1", AgentID: "a1", Cwd: "/tmp/x", Status: "in_progress",
+		ID: "c1", Cwd: "/tmp/x", Status: "in_progress",
 		Pinned: true, Archived: false, WorkspaceTemporary: true,
 		// v7 三列（M3-1）：来源轴 + 钉住的能力明细与指纹。它们是**文本列**（不是布尔/时间），
 		// 但仍要在这里露一次脸：JSON 明细将来若被改成 BLOB/结构化列，落库形态一变就再也读不回来。
@@ -61,11 +61,6 @@ func TestOnDiskFormatContract(t *testing.T) {
 	}); err != nil || !ok {
 		t.Fatalf("写 mcp_servers 行: ok=%v err=%v", ok, err)
 	}
-	if ok, err := s.agents.CreateCAS(ctx, &model.AgentEntity{
-		ID: "ag-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
-	}); err != nil || !ok {
-		t.Fatalf("写 agents 行: ok=%v err=%v", ok, err)
-	}
 	if ok, err := s.automations.CreateCAS(ctx, &model.AutomationEntity{
 		ID: "auto-1", Body: `{"name":"格式探针"}`, Revision: 1, UpdatedAt: at,
 		LastFiredAt: at.Format(model.LayoutTS), LastStatus: "completed", ConsecutiveFailures: 2,
@@ -96,10 +91,6 @@ func TestOnDiskFormatContract(t *testing.T) {
 		Name: "Flash", InputModalities: "text", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 models 行: ok=%v err=%v", ok, err)
-	}
-	// 「当前 Agent」的显式选择（M6-6 落 meta）：值就是 agent id 本身，落库是 TEXT。
-	if err := s.SetDefaultAgentID(ctx, "ag-1"); err != nil {
-		t.Fatalf("写 default_agent meta: %v", err)
 	}
 
 	// 每项：表、列、期望的 typeof、期望的文本值（"" = 只校验类型不校验值）。
@@ -138,8 +129,6 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"skills", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"mcp_servers", "revision", "integer", "1", true},
 		{"mcp_servers", "updated_at", "text", at.Format(model.LayoutTS), true},
-		{"agents", "revision", "integer", "1", true},
-		{"agents", "updated_at", "text", at.Format(model.LayoutTS), true},
 		// v10（M6-7）：定义列与运行态列。运行态列全是**非空**的（未触发过 = 空串 / 0 / '[]'），
 		// 不给 NULL 留第二种表示；`last_fired_at` 与其它时间列同一布局。
 		{"automations", "revision", "integer", "1", true},
@@ -221,13 +210,6 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if !mcp.UpdatedAt.Equal(at) {
 		t.Errorf("mcp.updated_at 往返失真: %s 期望 %s", mcp.UpdatedAt, at)
 	}
-	agent, found, err := s.GetAgentDefinition(ctx, "ag-1")
-	if err != nil || !found {
-		t.Fatalf("GetAgentDefinition: found=%v err=%v", found, err)
-	}
-	if !agent.UpdatedAt.Equal(at) || agent.Revision != 1 || agent.Body != `{"name":"格式探针"}` {
-		t.Errorf("agent 行往返失真: rev=%d at=%s body=%q", agent.Revision, agent.UpdatedAt, agent.Body)
-	}
 	// v10：运行态列的往返（时间列逐纳秒、失败计数是整数、运行史原样）。
 	auto, found, err := s.GetAutomationDefinition(ctx, "auto-1")
 	if err != nil || !found {
@@ -259,21 +241,6 @@ func TestOnDiskFormatContract(t *testing.T) {
 		t.Errorf("model 行往返失真: %+v", md)
 	}
 
-	// meta 的「当前 Agent」：这张表里既有计数行也有配置行，所以**不能**用 LIMIT 1 取样
-	// （第一行可能是 events_last_seq），要按键查。
-	var (
-		metaType, metaValue string
-	)
-	if err := s.db.Raw("SELECT typeof(value), CAST(value AS TEXT) FROM meta WHERE key = ?",
-		model.MetaKeyDefaultAgent).Row().Scan(&metaType, &metaValue); err != nil {
-		t.Fatalf("读 meta.default_agent: %v", err)
-	}
-	if metaType != "text" || metaValue != "ag-1" {
-		t.Errorf("meta.default_agent 落库形态不符: typeof=%q value=%q", metaType, metaValue)
-	}
-	if id, ok, err := s.GetDefaultAgentID(ctx); err != nil || !ok || id != "ag-1" {
-		t.Errorf("GetDefaultAgentID: id=%q ok=%v err=%v", id, ok, err)
-	}
 	revs, err := s.ListDefinitionRevisions(ctx, "skill", "sk-1")
 	if err != nil || len(revs) != 1 {
 		t.Fatalf("ListDefinitionRevisions: n=%d err=%v", len(revs), err)
@@ -310,7 +277,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	s := openTestDB(t)
 	ctx := ctxT()
 	if err := s.UpsertSession(ctx, model.SessionEntity{
-		ID: "c1", AgentID: "a1", Status: "completed",
+		ID: "c1", Status: "completed",
 		ProviderID: "p1", ModelID: "m1", RuntimeID: "rtx", RuntimeSessionID: "rt_ses_1",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -320,7 +287,7 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	// 模拟导入：header 只带标题等字段，模型选择相关字段为空。
 	// 事件行带身份（v17 起导入按 id 判重，缺 id 整批回滚）。
 	if _, _, err := s.ImportBatch(ctx, []ImportItem{{
-		Session: model.SessionEntity{ID: "c1", AgentID: "a1", Title: "导入标题", Status: "completed"},
+		Session: model.SessionEntity{ID: "c1", Title: "导入标题", Status: "completed"},
 		Events: []model.EventEntity{
 			{ID: objid.New(objid.Event), Type: "assistant_message", PayloadJSON: `{"text":"x"}`},
 		},

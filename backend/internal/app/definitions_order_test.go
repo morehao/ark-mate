@@ -16,8 +16,8 @@ import (
 // "启动恢复没发生"：
 //
 //  1. store 打开 / EnableStore 在装载之前：装载只从 DB 读，库没开就没得读（sqlite 模式下面为空）；
-//  2. 三域存量导入在装载之前：导入晚一步，这一轮启动的**面**就是空的（用户看到"我的技能/
-//     agent/定时任务全没了"，哪怕下一轮启动就回来）；
+//  2. 存量导入在装载之前：导入晚一步，这一轮启动的**面**就是空的（用户看到"我的技能/
+//     定时任务/供应商档案全没了"，哪怕下一轮启动就回来）；
 //  3. automation 调度启动（含同步 startup pass）在装载之后：pass 扫的是内存注册表，
 //     先起调度就会对着空表收敛一次——过期的 `once` 不会被置 inactive，而且**没有任何后续动作
 //     会补做**（它只在启动时跑一次），表现为"任务永远停在 active 却再也不触发"。
@@ -31,9 +31,9 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 		t.Fatalf("写假资产: %v", err)
 	}
 	caps := filepath.Join(home, "capabilities")
-	agents := filepath.Join(home, "agents")
+	providers := filepath.Join(home, "providers")
 	autos := filepath.Join(home, "automations")
-	for _, d := range []string{filepath.Join(caps, "skills"), filepath.Join(caps, "mcp"), agents, autos} {
+	for _, d := range []string{filepath.Join(caps, "skills"), filepath.Join(caps, "mcp"), providers, autos} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -41,14 +41,12 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	cwd := t.TempDir()
 	mustWrite(t, filepath.Join(caps, "skills", "hello.json"),
 		`{"id":"hello","name":"Hello","description":"d","body":"# Hello\n","runtimes":["rtx"]}`)
-	mustWrite(t, filepath.Join(agents, "a1.json"),
-		`{"id":"a1","name":"存量 Agent","runtimes":["rtx"]}`)
 	// 过期的 once：startup pass 会把它置 inactive 并留一条 skipped 痕迹——它是"调度确实在
 	// 装载**之后**起了"的唯一可观察证据（先起调度的话它扫到的是空表）。
 	mustWrite(t, filepath.Join(autos, "stale.json"),
 		`{"id":"stale","name":"过期闹钟","enabled":true,`+
 			`"schedule":{"kind":"once","timezone":"UTC","at":"2020-01-01T00:00:00Z"},`+
-			`"target":{"agent_id":"a1","cwd":"`+cwd+`","prompt":"x"}}`)
+			`"target":{"cwd":"`+cwd+`","prompt":"x"}}`)
 
 	cfg := config.Default()
 	cfg.HomeDir = home
@@ -57,7 +55,7 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	cfg.DBPath = filepath.Join(home, "mate.db")
 	cfg.StoreMode = config.StoreModeSQLite
 	cfg.CapabilityDir = caps
-	cfg.AgentDir = agents
+	cfg.ProviderDir = providers
 	cfg.AutomationDir = autos
 	cfg.WorkspaceDir = ""
 	cfg.ProcRegistryPath = ""
@@ -97,10 +95,6 @@ func TestInitOrderingImportLoadSchedule(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("存量 skill 应在本轮启动就可见（导入必须先于装载）: %+v", skills)
-	}
-	// ② agent 面：存量 agent 定义进了库、也进了内存。
-	if _, ok := a.svc.AgentByID("a1"); !ok {
-		t.Fatal("存量 agent 应在本轮启动就可见（导入必须先于装载）")
 	}
 	// ③ 调度：startup pass 已经对**装载进来的**定义收敛过（过期 once → inactive + skipped）。
 	resp, ok := a.svc.AutomationByID("stale")

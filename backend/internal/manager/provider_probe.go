@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -19,8 +20,8 @@ import (
 //
 // 两段，边界是**有意的**：
 //
-//	本地段（无条件，零出网）：档案存在 → type 能否推出注入变量名 → 密钥能否解出来 →
-//	  被哪些 agent 引用 → 注入变量名与是否并入代际基础键 → 引用它的 agent 的模型目录能不能读到。
+//	本地段（无条件，零出网）：档案存在 → 端点 → 密钥面（四层回落能不能读到、生效值来自哪一层）→
+//	  被哪些模型条目挂靠 → 注入变量名与是否并入代际基础键 → 挂靠它的模型条目能不能读到。
 //	上游段（**仅当请求体带 `{"upstream": true}`**）：对该 type 已登记的上游端点发**一次**最小请求，
 //	  判断"能不能连上 / 鉴权是否通过 / 响应里有几条模型"——只计数，**不落清单、不写缓存、不进 /models**。
 //
@@ -141,22 +142,30 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 		})
 	}
 
-	// ③ secret：有 key_ref 且能解出来。
+	// ③ secret：密钥面（v20：生效值来自四层回落；权威是库那一列）。
+	//
+	// 三种情形分开报，因为出路完全不同：库里没有（去设一条）／分层读不了（去修那一层）／
+	// 生效值来自 `env`（**不是错误**，但必须说出来——用户会以为面板里那条在生效）。
 	switch {
-	case snap.Key != "" && snap.KeyRef != "":
+	case snap.Key != "" && snap.KeySource == credentials.SourceEnv:
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "secret", Status: probePass, Detail: "密钥可解密（密文在 vault 里）",
+			Name: "secret", Status: probePass,
+			Detail: "密钥生效值来自进程环境变量 " + snap.KeyEnvKey + "（层序：继承环境优先于托管文档），" +
+				"本应注入 " + refName,
+			Remedy: "若面板里保存的那条不是你想用的值，请清掉这个环境变量（或改用它）——" +
+				"环境变量在层序中优先，面板里保存的那条会被它遮住",
 		})
 	case snap.Key != "":
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "secret", Status: probeWarn, Detail: "密钥只在内存（vault 不可用）：进程重启后会丢失",
-			Remedy: "确认 mate home 下能创建 vault.key（或设 MATE_VAULT_KEY），然后重设一次密钥",
+			Name: "secret", Status: probePass,
+			Detail: "密钥可用（来源 " + string(snap.KeySource) + "），本应注入 " + refName,
 		})
-	case snap.KeyRef != "" && snap.keyErr != nil:
+	case len(snap.keyProblems) > 0:
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "secret", Status: probeFail,
-			Detail: "密钥密文无法解密（" + snap.KeyRef + "）：" + snap.keyErr.Error(),
-			Remedy: "确认 vault.key 未丢失/未被更换（备份清单见 docs/deployment.md），或重设密钥",
+			Detail: "密钥读不出来：" + strings.Join(snap.keyProblems, "；"),
+			Remedy: "修掉上面那条（层序是 继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env；" +
+				"某一层存在但读不动时解析会停下），或在面板里重设一次密钥",
 		})
 	default:
 		out = append(out, dtoprovider.ProviderCheckResp{
@@ -165,35 +174,20 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 		})
 	}
 
-	// ④ refs：被哪些 agent 引用 + 这些 agent 的底座（构建期常量，所有 agent 同一个）。
-	s.mu.Lock()
-	agentIDs := make([]string, 0, 4)
-	rtSet := map[string]bool{}
-	for agentID, a := range s.agents {
-		if a == nil || a.Provider != id {
-			continue
-		}
-		agentIDs = append(agentIDs, agentID)
-	}
-	if len(agentIDs) > 0 {
-		rtSet[runtime.SelectedRuntime()] = true
-	}
-	s.mu.Unlock()
-	sort.Strings(agentIDs)
-	runtimes := make([]string, 0, len(rtSet))
-	for rt := range rtSet {
-		runtimes = append(runtimes, rt)
-	}
-	sort.Strings(runtimes)
-	if len(agentIDs) == 0 {
+	// ④ refs：被哪些模型条目挂靠；以及这份凭据有没有真的在环上（v19 起引用者只有模型条目）。
+	modelIDs := s.providerModelRefsReadOnly(ctx, id)
+	sort.Strings(modelIDs)
+	inPlay := len(modelIDs) > 0
+	if len(modelIDs) == 0 {
 		out = append(out, dtoprovider.ProviderCheckResp{
-			Name: "refs", Status: probeWarn, Detail: "当前没有 Agent 使用这条档案（事实，不是错误）",
-			Remedy: "在「设置 · Agent 管理」里把某个 Agent 的凭据指向它，或在「设置 · 模型」里让它承载模型条目",
+			Name: "refs", Status: probeWarn, Detail: "当前没有模型条目挂靠在这条档案上（事实，不是错误）",
+			Remedy: "在「设置 · 模型」里让它承载模型条目；没有被挂靠的档案不会被下发给底座",
 		})
 	} else {
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "refs", Status: probePass,
-			Detail: fmt.Sprintf("被 %d 个 Agent 引用：%v（runtime %v）", len(agentIDs), agentIDs, runtimes),
+			Detail: fmt.Sprintf("承载 %d 个模型条目：%v（runtime %v）", len(modelIDs), modelIDs,
+				[]string{runtime.SelectedRuntime()}),
 		})
 	}
 
@@ -208,17 +202,15 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 
 	// ⑥ catalog：引用它的 agent 的模型目录能不能读到、有没有被运行时标成不可用的取值。
 	// 只读现有取样（会话/缓存/resume），**不新建会话**——与 `GET /models` 同一条路径。
-	out = append(out, s.probeLocalCatalog(ctx, agentIDs, refName)...)
+	_ = inPlay
+	out = append(out, s.probeLocalCatalog(ctx, refName)...)
 	return out
 }
 
-// probeLocalCatalog 对每个引用它的 agent 读一次模型目录（`GET /models` 的同一实现）。
-func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, refName string) []dtoprovider.ProviderCheckResp {
-	if len(agentIDs) == 0 {
-		return []dtoprovider.ProviderCheckResp{{
-			Name: "catalog", Status: probeSkip, Detail: "没有引用它的 Agent：没有目录可查",
-		}}
-	}
+// probeLocalCatalog 读一次运行时模型目录（`GET /models` 的同一实现）。
+//
+// 只有**一个**底座有执行面（构建期固定），所以这里没有"逐个 agent 查一次"这回事。
+func (s *Service) probeLocalCatalog(ctx context.Context, refName string) []dtoprovider.ProviderCheckResp {
 	if s.orch == nil {
 		return []dtoprovider.ProviderCheckResp{{
 			Name: "catalog", Status: probeUnknown,
@@ -226,46 +218,41 @@ func (s *Service) probeLocalCatalog(ctx context.Context, agentIDs []string, refN
 			Remedy: "在 serve 形态下重跑自检",
 		}}
 	}
-	out := make([]dtoprovider.ProviderCheckResp, 0, len(agentIDs))
-	for _, agentID := range agentIDs {
-		resp, err := s.ModelCatalog(ctx, agentID)
-		if err != nil {
-			out = append(out, dtoprovider.ProviderCheckResp{
-				Name: "catalog", Status: probeUnknown,
-				Detail: fmt.Sprintf("agent %s 的模型目录不可读：%v", agentID, err),
-				Remedy: "确认该 Agent 的 runtime 已注册且可启动（见该 Agent 的诊断快照）",
-			})
-			continue
-		}
-		unavailable := make([]string, 0, 2)
-		for _, opt := range resp.Options {
-			for _, v := range opt.Values {
-				if v.Unavailable {
-					unavailable = append(unavailable, v.Name+"/"+opt.Name)
-				}
+	resp, err := s.ModelCatalog(ctx)
+	if err != nil {
+		return []dtoprovider.ProviderCheckResp{{
+			Name: "catalog", Status: probeUnknown,
+			Detail: fmt.Sprintf("运行时模型目录不可读：%v", err),
+			Remedy: "确认构建期固定的那个底座已注册且可启动（见 GET /runtime/diagnostics）",
+		}}
+	}
+	unavailable := make([]string, 0, 2)
+	for _, opt := range resp.Options {
+		for _, v := range opt.Values {
+			if v.Unavailable {
+				unavailable = append(unavailable, v.Name+"/"+opt.Name)
 			}
 		}
-		switch {
-		case resp.Source == "none" || len(resp.Options) == 0:
-			out = append(out, dtoprovider.ProviderCheckResp{
-				Name: "catalog", Status: probeUnknown,
-				Detail: fmt.Sprintf("agent %s 的模型目录暂不可读（source=%s）：%s", agentID, resp.Source, resp.Note),
-				Remedy: "先在该 Agent 上发一条消息，让会话进程报出目录后重跑自检",
-			})
-		case len(unavailable) > 0:
-			out = append(out, dtoprovider.ProviderCheckResp{
-				Name: "catalog", Status: probeWarn,
-				Detail: fmt.Sprintf("agent %s 的目录可读，但有条目被运行时标为不可用：%v", agentID, unavailable),
-				Remedy: "在会话进程内完成登录（按下面返回的 auth_guidance 执行），或检查 " + refName + " 是否正确",
-			})
-		default:
-			out = append(out, dtoprovider.ProviderCheckResp{
-				Name: "catalog", Status: probePass,
-				Detail: fmt.Sprintf("agent %s 的模型目录可读（source=%s，%d 个配置项）", agentID, resp.Source, len(resp.Options)),
-			})
-		}
 	}
-	return out
+	switch {
+	case resp.Source == "none" || len(resp.Options) == 0:
+		return []dtoprovider.ProviderCheckResp{{
+			Name: "catalog", Status: probeUnknown,
+			Detail: fmt.Sprintf("模型目录暂不可读（source=%s）：%s", resp.Source, resp.Note),
+			Remedy: "先在任一会话上发一条消息，让会话进程报出目录后重跑自检",
+		}}
+	case len(unavailable) > 0:
+		return []dtoprovider.ProviderCheckResp{{
+			Name: "catalog", Status: probeWarn,
+			Detail: fmt.Sprintf("目录可读，但有条目被运行时标为不可用：%v", unavailable),
+			Remedy: "在会话进程内完成登录（按下面返回的 auth_guidance 执行），或检查 " + refName + " 是否正确",
+		}}
+	default:
+		return []dtoprovider.ProviderCheckResp{{
+			Name: "catalog", Status: probePass,
+			Detail: fmt.Sprintf("模型目录可读（source=%s，%d 个配置项）", resp.Source, len(resp.Options)),
+		}}
+	}
 }
 
 // probeUpstream 上游段：对已登记的端点发**一次**最小请求（5s 超时，不重试，不落库不写缓存）。

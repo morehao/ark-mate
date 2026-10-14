@@ -11,8 +11,6 @@ const (
 // SessionEntity 是 sessions 表的一行（DB 权威元数据；字段对齐 manager.SessionRec + transcript header）。
 type SessionEntity struct {
 	ID string `gorm:"column:id;primaryKey"`
-	// AgentID 归属 agent。
-	AgentID string `gorm:"column:agent_id;not null"`
 	// Cwd 会话工作空间（canonical 绝对路径；= 底座 ACP session 的 cwd，
 	// 也是原生权限 workspace-write 的边界）。
 	Cwd string `gorm:"column:cwd;not null"`

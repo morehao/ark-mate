@@ -20,8 +20,8 @@ func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
 	// 第一次进程：登记一个中断中 + 一个已完成会话（写库）。
 	s1 := NewService(reg, eventbus.New())
 	s1.EnableStore(st)
-	s1.registerSession(&SessionRec{ID: "s-int", AgentID: "agent-stub", Status: SessionStatusInProgress})
-	s1.registerSession(&SessionRec{ID: "s-done", AgentID: "agent-stub", Status: SessionStatusCompleted})
+	s1.registerSession(&SessionRec{ID: "s-int", Status: SessionStatusInProgress})
+	s1.registerSession(&SessionRec{ID: "s-done", Status: SessionStatusCompleted})
 
 	// 第二次进程（重启）：恢复后 in_progress → interrupted，completed 原样保留。
 	s2 := NewService(reg, eventbus.New())

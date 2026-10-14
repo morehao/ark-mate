@@ -2,7 +2,7 @@ package dtosession
 
 import "github.com/morehao/ark-mate/internal/eventbus"
 
-// SessionResp 会话的对外表示（P0 起不含 runtime）。
+// SessionResp 会话的对外表示（含 runtime 身份）。
 type SessionResp struct {
 	// ID 平台会话 id（`ses_<26 位 ULID>`）。**它是唯一的对外会话标识**——URL 路径段、
 	// 事件载荷的 `session_id`、前端路由都用它。
@@ -15,11 +15,15 @@ type SessionResp struct {
 	//
 	// 它**只**用于诊断与关联底座日志：**不得**出现在 URL 路径段，也不得被当成会话标识传给任何写面。
 	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
-	AgentID          string `json:"agent_id"`
-	Status           string `json:"status"`
-	Title            string `json:"title"`
-	Pinned           bool   `json:"pinned"`
-	Archived         bool   `json:"archived"`
+	// RuntimeID 会话归属的底座 id（v19 前这里是 `agent_id`）。
+	//
+	// 底座由构建期固定，所以它在**今天**恒等于 `GET /meta` 的 `runtime.id`；但它是**会话侧的
+	// 执行事实**（历史会话可能停在别的底座上），读面照读不照推。
+	RuntimeID string `json:"runtime_id"`
+	Status    string `json:"status"`
+	Title     string `json:"title"`
+	Pinned    bool   `json:"pinned"`
+	Archived  bool   `json:"archived"`
 	// Cwd 会话工作空间（canonical 绝对路径；已随会话创建定稿，之后不可变）。
 	// 同时是底座 session 的 cwd 与原生权限 workspace-write 的边界。
 	Cwd string `json:"cwd,omitempty"`
@@ -46,7 +50,7 @@ type SessionResp struct {
 	// Origin 会话来源（平台判定，非用户输入）：空 = 人工创建，`automation:<id>` = 该定时任务触发。
 	// 回显的意义与 capabilities 同一条：用户要能看见"这条会话是谁开的"，而不是靠时间去猜。
 	Origin string `json:"origin,omitempty"`
-	// Capabilities 该会话**钉住的**能力选定 + 指纹（M3）。nil = 未声明 → 走 agent 白名单。
+	// Capabilities 该会话**钉住的**能力选定 + 指纹（M3）。nil = 未声明 → 全量按 runtime 过滤。
 	//
 	// 回显的意义：用户要能看见"这个会话当初钉的是哪一套"，而不是靠推断。
 	// 指纹是不透明摘要（算法保证密钥值不进指纹），透出去只是为了让"是不是同一套"可判。
@@ -58,8 +62,8 @@ type SessionResp struct {
 // **形态与落库的 `capability_json` 逐键一致**（回显就是"当初钉住的那一份"），因此三个状态
 // 各有明确表示，不需要额外的布尔标志：
 //
-//	整个对象缺失  未声明能力选择 → 走 agent 白名单 / 各自的 runtimes 声明
-//	某个 kind 缺键 该 kind 未声明 → 回落上一层（MCP 走 agent.Mcps）
+//	整个对象缺失  未声明能力选择 → 全量按 runtime 过滤 / 各自的 runtimes 声明
+//	某个 kind 缺键 该 kind 未声明 → 回落上一层（全量）
 //	某个 kind 为 [] **明确一个都不要**（不是"全部"）
 //	某个 kind 非空  白名单
 //
@@ -94,12 +98,13 @@ type MemoryResp struct {
 	Since    string `json:"since"`    // RFC3339，授予时刻
 }
 
-// SessionCreateResp 新建会话响应（P0 起不含 runtime）。
+// SessionCreateResp 新建会话响应。
 type SessionCreateResp struct {
-	ID       string `json:"id"`
-	AgentID  string `json:"agent_id"`
-	Status   string `json:"status"`
-	EventSeq int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
+	ID string `json:"id"`
+	// RuntimeID 本次会话落在哪个底座上（构建期固定；回带是为了让客户端不必去拼）。
+	RuntimeID string `json:"runtime_id"`
+	Status    string `json:"status"`
+	EventSeq  int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
 	// Cwd / WorkspaceID / WorkspaceTemporary 定稿后的工作空间、它的归属与"是否平台给的"权威标志；
 	// 创建即回读，前端无需二次查询即可显示「在哪里工作」并把会话挂到正确的分组下。
 	Cwd                string `json:"cwd,omitempty"`

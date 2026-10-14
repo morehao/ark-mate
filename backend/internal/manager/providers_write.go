@@ -8,31 +8,32 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
-	"github.com/morehao/ark-mate/internal/vault"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objdelivery"
 	"github.com/morehao/ark-mate/pkg/resource"
+	"github.com/morehao/golib/glog"
 )
 
-// ——— 供应商的**写面**（v12 形状，v13 列化） ———
+// ——— 供应商的**写面**（v12 形状，v13 列化，v20 换密钥面） ———
 //
 // 写面顺序是固定的，且不是实现细节而是**语义**：
 //
 //	① 校验（id 词法、协议、端点）
-//	② vault 写入/删除（密文）
-//	③ 载体提交（sqlite = 行 CAS + 审计；memory = 原子替换文件）
-//	④ 更新内存
+//	② 库（sqlite = 行 CAS + 审计 + `providers.key` 列；memory = 原子替换 providers.json
+//	   + 托管文档）
+//	③ 更新内存
+//	④ 托管镜像双写（**失败只 WARN**，绝不因此回滚一次已提交的库写入）
 //
-// 为什么 ③ 在 ② 之后：vault（文件 + AES-GCM）与 SQLite 无法同事务，所以只能选一个"谁先谁后"，
-// 并在 ③ 失败时**补偿** ②。
+// v20 删掉了整条**两阶段写 + 补偿**：v13–v19 里密钥在盘上（文件 + AES-GCM）、档案在 SQLite，
+// 两者无法同事务，于是写密钥要先落密文、载体失败再补偿删掉它——"补偿"本身就是承认这段窗口
+// 存在，而它在崩溃/断电时照样留下孤儿密文。v20 把密钥搬进**同一行**（`providers.key`），
+// 一笔 UPDATE 就是全部事实；镜像由库重建，所以它不需要参与任何一致性论证。
 //
-// ④ 在最后是 ③ 的自然推论：**在载体提交成功之前，内存里一个字段都不动**。
-//
-// v13 的两条**结构收紧**（ADR-8）：
-//   - vault 不可用时**拒绝**存密钥（`vault_unavailable` + 可执行出路）。理由：这条路径上用户的
-//     目标是"把密钥存下来"，而 v13 的两张表**没有能放明文的列**——假装存了才是欺骗。
-//   - 密钥的"有没有"不再由行上的字段表达（没有 `key_ref` 列）：`has_key` 一律看内存里
-//     是否解出了明文，引用由 `providerRef(id)` 派生。
+// 三条结构判据：
+//   - `has_key` 只由 `providers.key` 是否非空回答（读面则是"内存里有没有生效的明文"，
+//     它同样来自那一列或托管文档的解析结果）；
+//   - `key_ref` 是**派生量**（托管文档里的键 `providers/<id>`），没有对应列；
+//   - 密钥写入缺 store 侧的独立审计出口（`SetProviderKey` 只 bump revision），见汇报。
 
 // CreateProvider 新建一条供应商（POST /providers）。
 func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
@@ -43,7 +44,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 	if err != nil {
 		return nil, err
 	}
-	// ① 已存在？——先看内存（快路径），再让载体自己兜并发（CreateCAS 未命中 → provider_exists）。
+	// ① 已存在？——先看内存（快路径），再让载体自己兜并发（CAS 未命中 → provider_exists）。
 	s.mu.Lock()
 	_, exists := s.providers[req.ID]
 	s.mu.Unlock()
@@ -51,7 +52,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		return nil, providerExistsErr(req.ID)
 	}
 
-	d := &providerDef{ID: req.ID, Protocol: protocol}
+	d := &providerDef{ID: req.ID, Protocol: protocol, KeyRef: providerRef(req.ID)}
 	if req.Name != nil {
 		d.Name = *req.Name
 	}
@@ -62,37 +63,22 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		d.Note = *req.Note
 	}
 
-	// ② vault：新建时"清空密钥"没有意义（还没有密文），只在给了非空 key 时写。
-	var st *vault.Store
-	if req.APIKey != nil && *req.APIKey != "" {
-		var verr error
-		st, verr = s.providerVault()
-		if st == nil {
-			return nil, vaultUnavailableErr(verr)
-		}
-		if err := st.Put(providerRef(req.ID), vault.KindProviderKey, []byte(*req.APIKey)); err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "vault_write_failed",
-				"密钥加密写入失败: "+err.Error(), nil)
-		}
-		d.Key, d.KeyRef = *req.APIKey, providerRef(req.ID)
-	}
-
-	// ③ 载体（sqlite = INSERT + 审计；memory = 原子替换文件）。
+	// ② 载体：新建只 INSERT 行（内容列），密钥随后的 `SetProviderKey` 落在同一行上。
 	if err := s.persistProviderDefinition(ctx, d); err != nil {
-		// 补偿 ②：密文刚写进去而载体没提交 → 删掉它，避免留下孤儿密文。
-		if d.KeyRef != "" && st != nil {
-			if derr := st.Delete(d.KeyRef); derr != nil {
-				return nil, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-					"供应商未创建（载体提交失败: "+err.Error()+"），且刚写入的密文删除失败（残留于 "+d.KeyRef+"）: "+derr.Error(), nil)
-			}
-		}
 		if isDuplicateDefinition(err) {
 			return nil, providerExistsErr(req.ID)
 		}
 		return nil, err
 	}
 
-	// ④ 内存。
+	// ②b 密钥（与行同库同表；失败即整笔失败——没有第二处要清理）。
+	if req.APIKey != nil && *req.APIKey != "" {
+		if err := s.writeProviderKey(ctx, d, *req.APIKey); err != nil {
+			return nil, err
+		}
+	}
+
+	// ③ 内存。
 	s.mu.Lock()
 	s.providers[d.ID] = d
 	resp := s.providerRespLocked(ctx, d.ID, d)
@@ -103,8 +89,11 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 
 // UpdateProvider 覆盖一条已存在的供应商（**只更新，不再 upsert**；不存在 → `provider_not_found`）。
 //
-// api_key 语义：`nil` = 不动；`""` = 清除（删密文，引用由 id 派生所以没有第二个副本要清）；
-// 非空 = 覆盖。
+// api_key 语义：`nil` = 不动；`""` = 清除；非空 = 覆盖：
+//
+//   - 写：`providers.key` 一列，一笔 UPDATE；写成功即整笔成功（没有第二处副本要同步）。
+//   - 清：同一列写空串。**内存与镜像都必须跟着变**——留在托管文档里的那条会在下一次解析时
+//     被"库是权威"的判据否掉（见 `resolveProviderKey`），但把它删干净才是收尾。
 func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
 	if err := validateProviderID(id); err != nil {
 		return nil, err
@@ -125,21 +114,21 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 
 	// 目标状态：只改 patch 里出现过的键。
 	next := snap
-	behaviorChanged := false
+	contentChanged := false
 	if patch.Protocol != nil {
 		protocol, err := normalizeProtocol(*patch.Protocol)
 		if err != nil {
 			return nil, err
 		}
 		if next.Protocol != protocol {
-			behaviorChanged = true
+			contentChanged = true
 		}
 		next.Protocol = protocol
 	}
 	if patch.BaseURL != nil {
 		v := strings.TrimSpace(*patch.BaseURL)
 		if next.BaseURL != v {
-			behaviorChanged = true
+			contentChanged = true
 		}
 		next.BaseURL = v
 	}
@@ -150,65 +139,33 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 		next.Note = *patch.Note
 	}
 
-	// ② vault：写入新密文或删除旧密文（失败即中止，载体与内存都没动过）。
-	oldKey := next.Key
-	var st *vault.Store
-	needsVault := patch.APIKey != nil
-	if needsVault {
-		var verr error
-		st, verr = s.providerVault()
-		if st == nil {
-			// 两种情形都要拒绝：设新密钥没地方放（v13 无明文列）；清密钥要求真的把密文删掉
-			// （否则下次装载 `vault.Has` 会把它找回来，"清了"就成了假的）。
-			return nil, vaultUnavailableErr(verr)
+	// ② 内容列：只有真的改了内容字段才提交（否则会写一条"内容更新"的审计，而内容没变）。
+	if contentChanged {
+		if err := s.persistProviderDefinition(ctx, &next); err != nil {
+			return nil, err
 		}
 	}
+
+	// ②b 密钥列：nil = 不动；"" = 清；非空 = 覆盖。
 	secretChanged := false
-	switch {
-	case patch.APIKey != nil && *patch.APIKey != "":
-		if err := st.Put(providerRef(id), vault.KindProviderKey, []byte(*patch.APIKey)); err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "vault_write_failed",
-				"密钥加密写入失败: "+err.Error(), nil)
+	if patch.APIKey != nil {
+		if err := s.writeProviderKey(ctx, &next, *patch.APIKey); err != nil {
+			return nil, err
 		}
-		next.Key, next.KeyRef, next.keyErr = *patch.APIKey, providerRef(id), nil
-		secretChanged = true
-	case patch.APIKey != nil && *patch.APIKey == "":
-		// 清除：删密文。删不掉就**不继续**（否则会留下一条"界面说清了、密文还在"的档案，
-		// 而下次装载它会被重新解出来）。
-		if err := st.Delete(providerRef(id)); err != nil {
-			return nil, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-				"密钥密文删除失败: "+err.Error(), nil)
-		}
-		next.Key, next.KeyRef, next.keyErr = "", "", nil
 		secretChanged = true
 	}
 
-	// ③ 载体提交（行 CAS + 审计）。
-	if err := s.persistProviderDefinition(ctx, &next); err != nil {
-		// 补偿 ②：把 vault 恢复到刚才那一份，避免"行说改过了、密钥却是新的/没了"。
-		if secretChanged && st != nil {
-			switch {
-			case oldKey != "":
-				_ = st.Put(providerRef(id), vault.KindProviderKey, []byte(oldKey))
-			case patch.APIKey != nil && *patch.APIKey != "":
-				_ = st.Delete(providerRef(id))
-			}
-		}
-		return nil, err
-	}
-
-	// ④ 内存。
+	// ③ 内存。
 	s.mu.Lock()
 	s.providers[id] = &next
 	resp := s.providerRespLocked(ctx, id, &next)
 	s.mu.Unlock()
 
 	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 name/note 就如实回 none。
-	if !secretChanged && !behaviorChanged {
+	if !secretChanged && !contentChanged {
 		resp.Effect = &dtoprovider.ProviderEffect{
 			Channel: dialEnvChannel(), Effect: "none",
-			AppliesToAgents: []string{},
-			Note:            "只改了不驱动行为的字段（协议/端点/密钥都未变）：本轮与后续轮次的行为都不变",
+			Note: "只改了不驱动行为的字段（协议/端点/密钥都未变）：本轮与后续轮次的行为都不变",
 		}
 		return &resp, nil
 	}
@@ -216,11 +173,68 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	return &resp, nil
 }
 
+// writeProviderKey 写/清一条供应商的密钥（**唯一**的密钥写入点，sqlite 与 memory 两条载体都在这里）。
+//
+// 顺序：库 → 内存 → 镜像。**镜像写失败不回滚库、也不让这笔写失败**（它是可重建副本，
+// 为它回滚一次已提交的库写入是本末倒置）；失败进 WARN + 这条回执的 `problems`，
+// 并由 `mate doctor` 的镜像对账段列出来。
+func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key string) error {
+	key = strings.TrimSpace(key)
+	if s.st == nil {
+		// memory 载体：托管文档就是事实源，写不进去就是**真的没写进去**（拒绝，不假装成功）。
+		// 文档都没装配（数据目录没解析出来）时必须在这里拒绝：否则这条密钥只活在内存里，
+		// 面板回 `has_key=true`、重启后消失——那是本仓最忌讳的一类静默谎报。
+		if s.credentialDoc() == nil {
+			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
+				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+CredentialsFileName+
+					"就是密钥的事实源，这里拒绝一次只在内存里成功的写入", nil)
+		}
+		if key == "" {
+			if err := s.mirrorDelete(d.KeyRef); err != nil {
+				return acl.NewError(acl.ClassRequest, "credentials_write_failed",
+					"清除密钥失败（托管文档 "+CredentialsFileName+" 写不动）: "+err.Error(), nil)
+			}
+		} else if err := s.mirrorSet(d.KeyRef, key); err != nil {
+			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
+				"保存密钥失败（托管文档 "+CredentialsFileName+" 写不动）: "+err.Error(), nil)
+		}
+		d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = key, "", "", nil
+		return nil
+	}
+	written, err := s.st.SetProviderKey(ctx, d.ID, key)
+	if err != nil {
+		return acl.NewError(acl.ClassRequest, "credentials_write_failed",
+			"密钥写入失败: "+err.Error(), nil)
+	}
+	if !written {
+		return acl.NewError(acl.ClassRequest, "provider_not_found",
+			fmt.Sprintf("供应商 %q 不存在（写密钥时行已不在）：刷新后重试", d.ID), nil)
+	}
+	// 密钥写入会 bump 行版本（"生效时刻"要可解释）：把最新版本读回来，别让内存里的 revision 落后。
+	if row, found, rerr := s.st.GetProviderDefinition(ctx, d.ID); rerr == nil && found {
+		d.Revision, d.UpdatedAt = row.Revision, row.UpdatedAt
+	}
+	d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = key, "", "", nil
+	// ④ 镜像双写（失败只 WARN + 进 problems）。
+	if key == "" {
+		if err := s.mirrorDelete(d.KeyRef); err != nil {
+			d.keyProblems = []string{"库里的密钥已清除，但托管文档里那一份删不掉：" + err.Error() +
+				"；镜像可由库重建，`mate doctor` 会列出这条差异"}
+		}
+		return nil
+	}
+	if err := s.mirrorSet(d.KeyRef, key); err != nil {
+		d.keyProblems = []string{"库里的密钥已写成功，但托管文档没跟上：" + err.Error() +
+			"；镜像可由库重建，`mate doctor` 会列出这条差异"}
+	}
+	return nil
+}
+
 // DeleteProvider 删除一条供应商（幂等；被引用 → `provider_in_use`(40901) + 引用名单）。
 //
-// 顺序刻意与写面**相反**：**先删行 + 审计 → 再摘内存 → 最后删密文**。
-// 理由：反过来（先删密文再删行）会留下一个"行在、密钥没了"的档案，那会让 `has_key` 撒谎；
-// 而"行已删、密文残留"是一个**如实可报**的状态（响应里说明，doctor 里列进孤儿密文）。
+// 顺序刻意与写面**相反**：**先删行 + 审计 → 再摘内存 → 最后删镜像条目**。
+// 理由：反过来会留下一个"行在、密钥没了"的档案，那会让 `has_key` 撒谎；而"行已删、镜像条目
+// 残留"是一个**如实可报**的状态（响应里说明，doctor 的镜像对账段列出）。
 //
 // **引用判据在 store 的同一事务里**（v13）：v12 是"manager 先查引用名单、再单独删行"，
 // 中间有窗口——并发「删供应商」+「给它加模型」会留下孤儿 model 行（P3）。
@@ -230,25 +244,22 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		return nil, err
 	}
 
-	// agent 引用面仍读内存（它不是 DB 引用，且写面已有显式拒绝）。
+	// v19 起引用面只有"模型条目"（agent 面撤销）：判据在 store 的同一事务里（见下），
+	// 这里只保留"内存里到底有没有这一条"这个幂等判据。
 	s.mu.Lock()
-	refAgents := make([]string, 0, 4)
-	for agentID, a := range s.agents {
-		if a != nil && a.Provider == id {
-			refAgents = append(refAgents, agentID)
-		}
-	}
-	sort.Strings(refAgents)
 	_, exists := s.providers[id]
 	s.mu.Unlock()
 	if !exists {
 		// 幂等：不存在（或本来就没这一条）→ deleted:false 且 code=0。
 		return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
 	}
-	if len(refAgents) > 0 {
-		// agent 引用已经足以拒绝，**不进入删除事务**；模型名单只为文案完整而读（只读，不参与判据）。
-		return nil, acl.NewError(acl.ClassLimit, "provider_in_use",
-			providerInUseMsg(id, refAgents, s.providerModelRefsReadOnly(ctx, id)), nil)
+	// 文件载体没有事务，引用判据只能先读一次（sqlite 载体在同一事务里判，见下）。
+	// 两种载体的对外承诺相同：被引用 → `provider_in_use` + 名单，绝不级联清空。
+	if s.st == nil {
+		if refs := s.providerModelRefsReadOnly(ctx, id); len(refs) > 0 {
+			return nil, acl.NewError(acl.ClassLimit, "provider_in_use",
+				providerInUseMsg(id, refs), nil)
+		}
 	}
 
 	s.mu.Lock()
@@ -270,6 +281,7 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		}
 	} else {
 		// **sqlite 载体**：读行取 revision（CAS 判据）→ 同一事务内查引用 + 删行 + 审计。
+		// 密钥是**同一行上的一列**，所以删行即删密钥——没有"行已删而密钥还在"这回事。
 		row, found, err := s.stProviderRow(ctx, id)
 		if err != nil {
 			return nil, err
@@ -285,7 +297,7 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		}
 		if len(refModels) > 0 {
 			return nil, acl.NewError(acl.ClassLimit, "provider_in_use",
-				providerInUseMsg(id, refAgents, refModels), nil)
+				providerInUseMsg(id, refModels), nil)
 		}
 		if !removed {
 			return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
@@ -296,17 +308,13 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 		s.mu.Unlock()
 	}
 
-	// 最后删密文。失败**如实回带**（行已删、密文残留），并交给 doctor 的孤儿密文段。
+	// 最后删镜像条目。失败**如实回带**（行已删、镜像里还留着），并交给 doctor 的对账段。
 	resp := &dtoprovider.ProviderDeleteResp{Deleted: true}
 	if d != nil && d.KeyRef != "" {
-		if st, verr := s.providerVault(); verr == nil && st != nil {
-			if derr := st.Delete(d.KeyRef); derr != nil {
-				resp.VaultCiphertextLeft = d.KeyRef
-				return resp, acl.NewError(acl.ClassRequest, "vault_delete_failed",
-					fmt.Sprintf("供应商 %q 已删除，但密钥密文删除失败（残留于 %s）: %v；"+
-						"该残留不会造成误用（AAD 绑定引用，且已无行指向它），`mate doctor` 的孤儿密文段会列出它",
-						id, d.KeyRef, derr), nil)
-			}
+		if derr := s.mirrorDelete(d.KeyRef); derr != nil {
+			resp.CredentialsLeft = d.KeyRef
+			glog.Warnw(ctx, "credentials: 供应商已删除，但托管文档里那一份删不掉（镜像可由库重建）",
+				"provider", id, "ref", d.KeyRef, "err", derr)
 		}
 	}
 	return resp, nil
@@ -341,30 +349,30 @@ func normalizeProtocol(v string) (string, error) {
 	return string(p), nil
 }
 
-// validateProviderID id 词法校验（它会进 vault 文件名 → 必须过引用校验，防路径穿越）。
+// validateProviderID id 词法校验（它进托管文档的键 `providers/<id>` → 必须过引用校验，
+// 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
 func validateProviderID(id string) error {
 	if id == "" {
 		return acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
 	}
-	if _, err := vault.ValidateRef(providerRef(id)); err != nil {
+	if strings.TrimSpace(id) != id || len(id) > 64 {
 		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）: %v", id, err), nil)
+			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
+		}
+	}
+	if id == "." || id == ".." {
+		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
 	}
 	return nil
-}
-
-// vaultUnavailableErr 「没有可用的 vault」的统一出路文案（fail-closed 的唯一出口）。
-//
-// cause 为 nil = agentDir 未配置（没有 mate home，vault 根本无从打开）。
-func vaultUnavailableErr(cause error) error {
-	msg := "无法加密保存密钥：本机没有可用的 vault。" +
-		"v13 起 providers/models 是**没有明文列**的资源表，密钥只以密文落盘（`<mate home>/vault/`），" +
-		"所以这里宁可拒绝也不假装存下来了。" +
-		"出路：设置 MATE_VAULT_KEY（32 字节 base64 或 64 位 hex），或修好 `<mate home>/vault.key`，或让 agentDir 指向一个真实目录后重试"
-	if cause != nil {
-		msg += "；原因：" + cause.Error()
-	}
-	return acl.NewError(acl.ClassRequest, "vault_unavailable", msg, nil)
 }
 
 // dialEnvChannel 凭据的交付通道（env 注入那一档；取自静态交付表，避免"一处声明"再多一个漂移点）。
@@ -380,22 +388,18 @@ func providerExistsErr(id string) error {
 }
 
 // providerInUseMsg 删除被拒时的文案：把两类引用都摆出来，并给出可执行的下一步。
-func providerInUseMsg(id string, agents, models []string) string {
-	msg := fmt.Sprintf("供应商 %q 正在被引用，删除会静默换掉这些引用的凭据来源：", id)
-	if len(agents) > 0 {
-		msg += fmt.Sprintf(" agent %v", agents)
-	}
+func providerInUseMsg(id string, models []string) string {
+	msg := fmt.Sprintf("供应商 %q 正在被引用，删除会静默换掉这些模型条目的凭据来源：", id)
 	if len(models) > 0 {
-		msg += fmt.Sprintf("；模型条目 %v 挂靠在它下面", models)
+		msg += fmt.Sprintf(" 模型条目 %v 挂靠在它下面", models)
 	}
-	return msg + "。先解开这些引用（在 设置 · Agent 管理 里换掉 agent 的凭据选择，或在 设置 · 模型 里删掉/改挂那些模型条目），再删除。"
+	return msg + "。先解开这些引用（在 设置 · 模型 里删掉/改挂那些模型条目），再删除。"
 }
 
 // providerModelRefsReadOnly 挂靠在该 provider 下的模型条目 id（**只读**）。
 //
-// 删除判据**不在**这里：v13 起「检查引用 + 删行」在 store 的同一事务里
-// （`DeleteProviderDefinitionIfUnreferenced`）。这个函数只服务一种情形——agent 引用已经
-// 足以拒绝删除时，错误文案里仍要如实列出模型引用（"引用名单不变"是对外承诺）。
+// 判据口径：文件载体用它当**唯一**引用判据（没有事务可借）；sqlite 载体的判据仍在 store 的
+// 同一事务里（`DeleteProviderDefinitionIfUnreferenced`），这里只在需要给文案列名单时读它。
 func (s *Service) providerModelRefsReadOnly(ctx context.Context, providerID string) []string {
 	if s.st == nil {
 		return nil
@@ -414,7 +418,7 @@ func (s *Service) providerModelRefsReadOnly(ctx context.Context, providerID stri
 
 // isDuplicateDefinition 判定载体提交失败是否源于"主键/唯一性冲突"。
 //
-// memory 与 sqlite 两条路在这里的表现不同：sqlite 侧 `CreateCAS` 未命中会返回 `definition_changed`
+// memory 与 sqlite 两条路在这里的表现不同：sqlite 侧 CAS 未命中会返回 `definition_changed`
 // （它同时表达"并发新建抢先"与"有人改过"两件事），而新建路径上后者不可能发生——所以
 // **新建场景下的 CAS 未命中就是 provider_exists**。文件载体没有 CAS，冲突表现为"文件里已经有"。
 func isDuplicateDefinition(err error) bool {

@@ -1,11 +1,9 @@
 package manager
 
 import (
-	"context"
 	"strings"
 
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
 )
 
 // ——— B5：原生权限映射（platform permission_policy → runtime 原生权限开关） ———
@@ -52,6 +50,12 @@ var ValidNativeModes = []string{NativeModeAuto, NativeModeOff, NativeModeReadOnl
 // nativePermissionEnv 计算该 runtime + 策略下的原生权限环境变量。
 // 返回 nil = 不注入；desc 为人类可读说明（日志/诊断用）。
 //
+// v19 起**平台不再有策略来源**（per-agent 默认权限策略随 agent 面删除）：本函数因此没有被
+// 生产调用点，只作为端口契约的实现与词表锚点保留——`native_mode` 的取值仍是对外 wire 契约
+// （由 `TestNativePermissionModeLiteralsMatchWire` 与 adapter 侧逐字钉住），把它一起删掉
+// 等于把"这里曾经有过一个原生权限面"这件事也删掉，下一个人要接会话级策略时会从零重猜一遍。
+// 上游若有策略（未来的会话级 runtime 配置），注入点仍是这里。
+//
 // reg 是**产品装配的那张注册表**：端口在那里（`ProductRegistry` 只装配构建期选中的那一个），
 // 因此未选中的底座天然得到「无原生权限开关」这条如实结论。
 func nativePermissionEnv(reg *runtime.Registry, runtimeID string, p *PermissionPolicy) (env []string, desc string) {
@@ -71,18 +75,4 @@ func nativePermissionEnv(reg *runtime.Registry, runtimeID string, p *PermissionP
 	// 动作取值与工具键**不在这里归一**：那是该底座的词表（键名与别名规则都不一样），
 	// 属于 adapter 的知识；内核只如实转发。
 	return adapter.Env(mode, p.Default, p.Tools)
-}
-
-// nativePermissionEnvFor 返回该 runtime + 策略下的原生权限 env 并记一行日志（仅实际注入时）。
-// 开关关闭（MATE_NATIVE_PERMISSION=off）→ 恒返回 nil。
-func (s *Service) nativePermissionEnvFor(runtimeID string, p *PermissionPolicy) []string {
-	if !s.NativePermissionEnabled() {
-		return nil
-	}
-	extra, desc := nativePermissionEnv(s.reg, runtimeID, p)
-	if len(extra) == 0 {
-		return nil
-	}
-	glog.Infow(context.Background(), "原生权限映射", "runtime", runtimeID, "detail", desc)
-	return extra
 }

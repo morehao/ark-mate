@@ -64,10 +64,10 @@ func newGenRigOn(t *testing.T, runtimeID string) *genRig {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc.EnableStore(st)
-	// v13：没有可用 vault 时**拒绝**存密钥（fail-closed），所以凡是要建带密钥的供应商的夹具，
+	// v20：密钥写进库（`providers.key`）而不是盘上密文，所以"带密钥的供应商"夹具只要给它一个
+	// 可写的落点（库里那一列，或 memory 模式下的托管文档）就行。
 	// 都必须给一个真实（且私有）的 mate home——正是生产形态。目录在 t.TempDir 下，绝不碰用户环境。
-	svc.agentDir = filepath.Join(t.TempDir(), "agents")
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped}
+	svc.providerDir = filepath.Join(t.TempDir(), "agents")
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
 	return &genRig{svc: svc, orch: orch, bus: bus, runtme: runtimeID}
@@ -114,14 +114,13 @@ func sessionNewLog(t *testing.T) func() []map[string]any {
 // start 建一条钉住 sel 的 a1 会话。
 func (r *genRig) start(t *testing.T, sel *CapabilitySelection) (string, *ActiveSession) {
 	t.Helper()
-	return r.startAs(t, "a1", sel)
+	return r.startAs(t, sel)
 }
 
-// startAs 给指定 agent 建一条会话，返回 id 与当时的句柄。
-func (r *genRig) startAs(t *testing.T, agentID string, sel *CapabilitySelection) (string, *ActiveSession) {
+// startAs 建一条钉住 sel 的会话（v19：会话就是进程归属，没有"给哪个 agent"这一维），返回 id 与当时的句柄。
+func (r *genRig) startAs(t *testing.T, sel *CapabilitySelection) (string, *ActiveSession) {
 	t.Helper()
-	agent, _ := r.svc.AgentByID(agentID)
-	res, err := r.orch.startSessionOn(context.Background(), agent,
+	res, err := r.orch.startSessionOn(context.Background(),
 		StartOptions{Cwd: t.TempDir(), Selection: sel})
 	if err != nil {
 		t.Fatalf("建会话: %v", err)
@@ -201,9 +200,8 @@ func TestGenerationMigration(t *testing.T) {
 
 	// ② 真的改了白名单内的定义（fs 的 args）→ 指纹变了 → 本轮切。
 	r.registerMcp(t, fsServer("v2"))
-	agent, _ := r.svc.AgentByID("a1")
 	sel := ParseCapabilitySelection(r.svc.sessionRec(convID).CapabilityJSON)
-	want := r.svc.capabilityFingerprint(agent, r.runtme, sel)
+	want := r.svc.capabilityFingerprint(r.runtme, sel)
 	if want == as1.Fingerprint {
 		t.Fatal("改了白名单内定义却没换指纹：迁移永远触发不了")
 	}
@@ -386,72 +384,16 @@ func TestMigrationFallback(t *testing.T) {
 		t.Fatalf("迁移失败不得把库里指纹改成没挂上的那一代: %q", fp)
 	}
 	// 诊断留痕：失败这件事必须看得见（否则「能力没换过来」只能靠猜）。
-	r.svc.diagMu.Lock()
-	last, hasDiag := r.svc.lastErrs["a1"]
-	r.svc.diagMu.Unlock()
+	// v19：留痕只有一份（单底座），不再按 agent 分桶。
+	last, hasDiag := r.svc.runtimeLastError()
 	if !hasDiag {
-		t.Fatal("迁移失败应落一条 agent 诊断")
+		t.Fatal("迁移失败应落一条底座诊断")
 	}
 	if last.Code != "generation_switch_failed" {
 		t.Fatalf("诊断码 = %q，期望 generation_switch_failed", last.Code)
 	}
 	if last.SessionID != convID {
 		t.Fatalf("诊断应指认会话: %+v", last)
-	}
-}
-
-// TestPermissionWithdrawalDoesNotFallBack 缩权立刻生效（M3-7 / ADR-13 的不对称规则）：
-// 权限面被收回（基础键变）而新代际建不起来时，**不许回退**——旧进程代表的正是那套已经被
-// 收回的权限面，宁可这一轮带码拒发。
-func TestPermissionWithdrawalDoesNotFallBack(t *testing.T) {
-	// 真 runtime id（dsh）+ 桩命令：原生权限映射按 runtime id 分派，
-	// 只有真 id 才产得出 `DSH_PERMISSION_MODE=`，"收回权限 → 基础键变化"这条链路才走得到。
-	r := newGenRigOn(t, "dsh")
-	r.registerMcp(t, fsServer("v1"))
-	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeWorkspaceWrite}
-	convID, as1 := r.start(t, &CapabilitySelection{Mcps: ptrOf([]string{"fs"})})
-	oldRC := r.orch.connOfClient(as1.client)
-	if oldRC == nil {
-		t.Fatal("应能反查到连接")
-	}
-	if !strings.Contains(oldRC.baseKey, "workspace-write") {
-		t.Fatalf("初始基础键应含 workspace-write: %q", oldRC.baseKey)
-	}
-
-	// 收回权限：workspace-write → read-only。**定义一个字都没动**，变的只是权限面。
-	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}
-	plan := r.orch.planGenerationSwitch(as1, r.svc.sessionRec(convID))
-	if plan.Action != genActionSwitch || !plan.PermChanged {
-		t.Fatalf("收回权限应触发迁移且标为缩权面：%+v", plan)
-	}
-	if plan.FingerprintChanged {
-		t.Fatalf("定义没动，指纹不该变：%+v", plan)
-	}
-
-	r.orch.handoffMaxChars = 0 // 新代际建不起来
-	_, err := r.orch.acquireSession(context.Background(), convID)
-	if err == nil {
-		t.Fatal("缩权面变化 + 新代际建不起来时必须拒发这一轮（不许回退到被收回的权限面）")
-	}
-	ae, ok := acl.As(err)
-	if !ok || ae.Code != "generation_switch_required" {
-		t.Fatalf("错误应带码 generation_switch_required，got %v", err)
-	}
-	// 文案要说明"不会用已经收回的权限面继续跑"（用户得知道为什么这一轮没发出去、该怎么办）。
-	if !strings.Contains(err.Error(), "已经收回") {
-		t.Fatalf("文案应说明不会用已收回的权限面继续跑，got %v", err)
-	}
-	// 会话本身没被弄坏：句柄还在、配置修好后照常可用。
-	if cur := r.orch.session(convID); cur != as1 {
-		t.Fatal("拒发不得把会话句柄弄丢（修好配置后还要能继续）")
-	}
-	r.orch.handoffMaxChars = DefaultHandoffMaxChars
-	as2 := r.boundary(t, convID)
-	if as2 == as1 {
-		t.Fatal("权限面修好后应能迁到新代际")
-	}
-	if rc := r.orch.connOfClient(as2.client); rc == nil || !strings.Contains(rc.baseKey, "read-only") {
-		t.Fatal("新代际必须落在收窄后的权限键上")
 	}
 }
 
@@ -462,12 +404,11 @@ func TestGenerationPool(t *testing.T) {
 	r.registerMcp(t, fsServer("v1"))
 	r.registerMcp(t, capability.McpServer{ID: "git", Name: "git", Transport: capability.TransportStdio, Command: "/bin/echo"})
 	ctx := context.Background()
-	agent, _ := r.svc.AgentByID("a1")
 	spec, _ := r.orch.reg.Get(r.runtme)
 
 	r.orch.SetGenerationLimit(2)
 	// 一条**无人引用**的代际（默认指纹，没有会话挂它）+ 一条**有会话引用**的代际（选定不同 → 指纹不同）。
-	idle, err := r.orch.acquire(ctx, agent, spec, "")
+	idle, err := r.orch.acquire(ctx, spec, "")
 	if err != nil {
 		t.Fatalf("acquire(缺省): %v", err)
 	}
@@ -486,7 +427,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("复用不该新增代际，got %d", n)
 	}
 	// 显式淘汰空闲代际：池子满了，但其中一条无人引用 → 当场淘汰它腾出位置（不报错）。
-	if _, err := r.orch.acquire(ctx, agent, spec, "fp-third"); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, "fp-third"); err != nil {
 		t.Fatalf("有无人引用的代际可淘汰时应允许新建: %v", err)
 	}
 	if n := r.conns(); n != 2 {
@@ -501,7 +442,7 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("仍应为 2 个代际，got %d", n)
 	}
 	// 现在两条**都有会话引用** → 第三条带码拒绝，且绝不悄悄复用一个错的能力集。
-	_, err = r.orch.acquire(ctx, agent, spec, "fp-fourth")
+	_, err = r.orch.acquire(ctx, spec, "fp-fourth")
 	if err == nil {
 		t.Fatal("达上限且都有引用时应拒绝新建代际")
 	}
@@ -519,10 +460,10 @@ func TestGenerationPool(t *testing.T) {
 		t.Fatalf("拒绝时不得改动池子，got %d", n)
 	}
 	// 已达上限仍可复用现有代际（上限只管"新建"，不管"用"）。
-	if _, err := r.orch.acquire(ctx, agent, spec, as1.Fingerprint); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, as1.Fingerprint); err != nil {
 		t.Fatalf("已达上限时复用现有代际不该报错: %v", err)
 	}
-	if _, err := r.orch.acquire(ctx, agent, spec, as2.Fingerprint); err != nil {
+	if _, err := r.orch.acquire(ctx, spec, as2.Fingerprint); err != nil {
 		t.Fatalf("已达上限时复用现有代际不该报错: %v", err)
 	}
 	if n := r.conns(); n != 2 {
@@ -531,7 +472,7 @@ func TestGenerationPool(t *testing.T) {
 	// 0 = 不限制（显式关掉护栏）。
 	r.orch.SetGenerationLimit(0)
 	for _, fp := range []string{"fp-x", "fp-y", "fp-z"} {
-		if _, err := r.orch.acquire(ctx, agent, spec, fp); err != nil {
+		if _, err := r.orch.acquire(ctx, spec, fp); err != nil {
 			t.Fatalf("0 = 不限制时不该拒绝（fp=%s）: %v", fp, err)
 		}
 	}
@@ -579,9 +520,8 @@ func TestEnsureSessionMigratesOnRebuild(t *testing.T) {
 	r.orch.disconnectSession(as1, true)
 
 	r.registerMcp(t, fsServer("v2"))
-	agent, _ := r.svc.AgentByID("a1")
 	sel := ParseCapabilitySelection(r.svc.sessionRec(convID).CapabilityJSON)
-	want := r.svc.capabilityFingerprint(agent, r.runtme, sel)
+	want := r.svc.capabilityFingerprint(r.runtme, sel)
 	if want == oldFP {
 		t.Fatal("改了定义就该算出新指纹")
 	}
@@ -594,131 +534,5 @@ func TestEnsureSessionMigratesOnRebuild(t *testing.T) {
 	}
 	if fp, _ := r.row(t, convID); fp != want {
 		t.Fatalf("重建后库里指纹应更新为 %q，got %q", want, fp)
-	}
-}
-
-// TestStopAgentClosesDriftedGenerations 停 agent 要连**旧权限键下**的代际一起关。
-//
-// 场景：会话在"无原生权限配置"时建起来，之后权限被收窄（基础键变了，代际迁移需要轮次边界，
-// 此时还没发生）→ 这时停 agent。只按"当前配置的基础键"扫会漏掉旧键下的那条代际，
-// 表现就是"agent 已停、旧权限面的进程还在跑，直到空闲回收"。判据只看会话归属就不受漂移影响。
-// 同时验证：与别的 agent 共用的代际**不**因为停 A 而被关。
-func TestStopAgentClosesDriftedGenerations(t *testing.T) {
-	r := newGenRigOn(t, "dsh")
-	ctx := context.Background()
-	r.registerMcp(t, fsServer("v1"))
-	sel := &CapabilitySelection{Mcps: ptrOf([]string{"fs"})}
-
-	// a1 的会话建在"无原生权限配置"的基础键上（此刻没有别的 agent 参与）。
-	convID, as1 := r.start(t, sel)
-	oldClient := as1.client
-	if rc := r.orch.connOfClient(oldClient); rc == nil || !strings.Contains(rc.baseKey, "dsh") {
-		t.Fatalf("初始连接基础键异常: %+v", rc)
-	}
-
-	// 权限被收窄：当前配置的基础键变了，但会话仍挂在旧键的代际上（迁移要等下一个轮次边界）。
-	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}
-	curBase := r.orch.baseKeyFor(r.svc.agents["a1"], mustSpec(t, r, r.runtme))
-	if rc := r.orch.connOfClient(oldClient); rc == nil || rc.baseKey == curBase {
-		t.Fatal("权限收窄后基础键应当已变（否则这个用例根本没测到漂移）")
-	}
-	if n := len(r.orch.generationKeysFor(curBase)); n != 0 {
-		t.Fatalf("新基础键下此刻不该有代际（迁移还没发生），got %d", n)
-	}
-
-	// 停 agent：旧键下的那条代际必须一起关（它装的仍是 a1 的会话）。
-	if err := r.svc.StopAgent(ctx, "a1"); err != nil {
-		t.Fatalf("停 agent: %v", err)
-	}
-	// 拆除是异步收尾（watchConn → dropConn），轮询等它落到 0（沿用既有停 agent 用例的口径）。
-	if n := r.waitConns(t, 0); n != 0 {
-		t.Fatalf("停 agent 后不该留下任何属于它的代际，got %d", n)
-	}
-	if r.orch.session(convID) != nil {
-		t.Fatal("停 agent 后句柄应被摘除（会话记录保留，可续聊）")
-	}
-	if rec := r.svc.sessionRec(convID); rec == nil || rec.ID != convID {
-		t.Fatal("停 agent 不得删会话记录（可续聊性只看会话是否存在）")
-	}
-}
-
-// mustSpec 取注册表里的 spec（测试辅助）。
-func mustSpec(t *testing.T, r *genRig, id string) runtime.Spec {
-	t.Helper()
-	spec, ok := r.orch.reg.Get(id)
-	if !ok {
-		t.Fatalf("runtime 未注册: %s", id)
-	}
-	return spec
-}
-
-// TestStopAgentKeepsSharedGenerations 停 A 不得关掉 A、B **共用**的代际（那是 B 正在用的进程）。
-//
-// 与上一个用例合起来构成本次改动的边界：补扫只认「这条代际上只有本 agent 的会话」。
-func TestStopAgentKeepsSharedGenerations(t *testing.T) {
-	r := newGenRigOn(t, "dsh")
-	ctx := context.Background()
-	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2", State: AgentStateStopped}
-	// M7-3 之后"两个**不同** agent 共用代际"只在没有 MCP 面时成立：网关条目带着 agent scope
-	// （args 里的 `--agent` 不同 ⇒ 指纹不同），所以只要声明了 MCP 面，两个 agent 就各占一个代际。
-	// 这是**保守方向**的代价：宁可多起一个进程，也不能让底座在一个进程里混用两个 agent 的工具面
-	// （底座按进程缓存工具面与否尚无定论，见设计 §10.6-⑤）。代价记在计划/设计文档里。
-	// 本用例要验的是"停 A 不得关掉 B 在用的代际"，故两侧都显式关掉 MCP 面（`mcps: []`）→ 指纹为空、
-	// 二者逐字同键。
-	denyAll := ptrOf([]string{})
-	r.svc.agents["a1"].Mcps = denyAll
-	r.svc.agents["a2"].Mcps = denyAll
-
-	_, a1 := r.startAs(t, "a1", nil)
-	_, a2 := r.startAs(t, "a2", nil)
-	if a1.Fingerprint != "" || a2.Fingerprint != "" {
-		t.Fatalf("显式关闭 MCP 面的缺省路径指纹应为空: %q / %q", a1.Fingerprint, a2.Fingerprint)
-	}
-	if a1.client != a2.client {
-		t.Fatal("同配置（含同一 MCP 面）的两个 agent 应共用代际")
-	}
-	// a1 的权限被收窄（漂移），随后停 a1：这条代际上还有 a2 的会话 → 不能关。
-	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}
-	if err := r.svc.StopAgent(ctx, "a1"); err != nil {
-		t.Fatalf("停 a1: %v", err)
-	}
-	if n := r.conns(); n != 1 {
-		t.Fatalf("共用代际不该因为停 a1 而被关，got %d", n)
-	}
-	if got := r.orch.session(a2.ID); got != a2 {
-		t.Fatal("a2 的会话必须原样可用")
-	}
-	if r.orch.session(a1.ID) != nil {
-		t.Fatal("a1 的会话句柄应被摘除")
-	}
-}
-
-// TestStopAgentClosesWarmGenerationUnderDriftedKey 停 agent 也要收掉**它创建的暖进程**
-// （StartAgent 建、没有任何会话引用）。权限漂移后暖进程落在旧基础键下，前两类扫描都够不着它。
-func TestStopAgentClosesWarmGenerationUnderDriftedKey(t *testing.T) {
-	r := newGenRigOn(t, "dsh")
-	ctx := context.Background()
-	agent, _ := r.svc.AgentByID("a1")
-	spec := mustSpec(t, r, r.runtme)
-
-	// 暖进程：直接 acquire（不经会话，故无人引用）。
-	warm, err := r.orch.acquire(ctx, agent, spec, "")
-	if err != nil {
-		t.Fatalf("暖启动: %v", err)
-	}
-	if n := r.conns(); n != 1 {
-		t.Fatalf("应有 1 个暖代际，got %d", n)
-	}
-	// 权限漂移：当前基础键变了，暖进程仍在旧键下。
-	r.svc.agents["a1"].PermissionPolicy = &PermissionPolicy{NativeMode: NativeModeReadOnly}
-	if rc := r.orch.connOfClient(warm.client); rc == nil ||
-		rc.baseKey == r.orch.baseKeyFor(r.svc.agents["a1"], spec) {
-		t.Fatal("暖代际应留在旧基础键下（否则这个用例没测到漂移）")
-	}
-	if err := r.svc.StopAgent(ctx, "a1"); err != nil {
-		t.Fatalf("停 agent: %v", err)
-	}
-	if n := r.waitConns(t, 0); n != 0 {
-		t.Fatalf("停 agent 应连旧权限键下的暖进程一起收掉，got %d", n)
 	}
 }

@@ -86,7 +86,7 @@ func TestRegisterToolAndSort(t *testing.T) {
 //     `mate-gateway` stdio 条目 —— 于是"该 runtime 声明的传输"不再决定远程 server 的去留
 //     （那正是网关的收益），仅决定 stdio 那一支。
 //   - **网关关（MATE_MCP_GATEWAY=off）**：回到老路 —— 按该 runtime 的 McpTransports 过滤后逐条直连。
-//   - 白名单优先级两态都生效：nil = 全量；非 nil = 命中制；空 = 本 agent 禁用注入。未知 runtime → 不下发。
+//   - 白名单优先级两态都生效：nil = 全量；非 nil = 命中制；空 = 本会话禁用注入。未知 runtime → 不下发。
 func TestMcpServersFor(t *testing.T) {
 	reg := runtime.NewRegistry(
 		runtime.Spec{ID: "stub", McpTransports: []string{"stdio"}},
@@ -105,9 +105,10 @@ func TestMcpServersFor(t *testing.T) {
 	must("evt_sse", capability.TransportSSE)
 	must("web_http", capability.TransportHTTP)
 
-	noBind := &AgentRec{ID: "a0"} // Mcps nil = 未声明 → 全量
-	onlyFS := &AgentRec{ID: "a1", Mcps: ptrOf([]string{"fs_stdio"})}
-	denyAll := &AgentRec{ID: "a2", Mcps: ptrOf([]string{})}
+	// v19：选区就是会话自己钉住的那一份（agent 声明面已撤销），nil = 未声明 → 全量。
+	noBind := &CapabilitySelection{}
+	onlyFS := &CapabilitySelection{Mcps: ptrOf([]string{"fs_stdio"})}
+	denyAll := &CapabilitySelection{Mcps: ptrOf([]string{})}
 
 	// 网关条目断言：一条 stdio 条目、命令是平台自身、参数是 mcp bridge + 稳定 scope。
 	assertGatewayEntry := func(entries []acl.McpServer) {
@@ -120,193 +121,49 @@ func TestMcpServersFor(t *testing.T) {
 			t.Fatalf("网关条目命令应为平台自身可执行文件，got %q", last.Command)
 		}
 		args := strings.Join(last.Args, " ")
-		if !strings.HasPrefix(args, "mcp bridge --agent a0 --runtime stub") {
+		if !strings.HasPrefix(args, "mcp bridge --runtime stub") {
 			t.Fatalf("网关条目参数应是 mcp bridge + 稳定 scope，got %v", last.Args)
 		}
 	}
 
 	// 网关开（默认）：stdio 直连 1 条 + 网关 1 条。注意 stub **只声明 stdio**，而远程 server
 	// 照样经网关可达——这正是 §10.6-① 的收益。
-	got := svc.McpServersFor(noBind, "stub", nil)
+	got := svc.McpServersFor("stub", noBind)
 	if len(got) != 2 || got[0].Name != "fs_stdio" || got[0].Transport != capability.TransportStdio {
 		t.Fatalf("仅 stdio 的 runtime 应取「stdio 直连 + 网关」2 条，got %+v", got)
 	}
 	assertGatewayEntry(got)
-	if got := svc.McpServersFor(noBind, "rtx", nil); len(got) != 2 {
+	if got := svc.McpServersFor("rtx", noBind); len(got) != 2 {
 		t.Fatalf("rtx 未声明白名单应取「stdio 直连 + 网关」2 条（不再逐条直连远程），got %+v", got)
 	}
 	// 白名单只钉 stdio server：直连 1 条 + **网关条目照样在**（条目恒定，不跟定义集走）；
 	// 它的远程面会是空的（网关按同一份白名单取数），所以"钉了 stdio 就没网关条目"不是判据。
-	if got := svc.McpServersFor(onlyFS, "rtx", nil); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
+	if got := svc.McpServersFor("rtx", onlyFS); len(got) != 2 || got[0].Name != "fs_stdio" || got[1].Name != mcp.GatewayServerName {
 		t.Fatalf("白名单 fs_stdio 应取「直连 1 条 + 恒定网关条目」，got %+v", got)
 	}
-	if got := svc.McpServersFor(denyAll, "rtx", nil); len(got) != 0 {
+	if got := svc.McpServersFor("rtx", denyAll); len(got) != 0 {
 		t.Fatalf("空白名单应禁用注入，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "ghost", nil); len(got) != 0 {
+	if got := svc.McpServersFor("ghost", noBind); len(got) != 0 {
 		t.Fatalf("未知 runtime 应不下发，got %+v", got)
 	}
 	// Spec.McpTransports 为空 → 该 runtime 的直连只承载 stdio（ACP 全 agent 必须支持）。
-	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 2 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor("plain", noBind); len(got) != 2 || got[0].Name != "fs_stdio" {
 		t.Fatalf("未声明传输的 runtime 应取「stdio 直连 + 网关」，got %+v", got)
 	}
 
 	// 回退开关：off → 老口径逐条直连（远程按该 runtime 的声明过滤）。
 	svc.SetMcpGatewayEnabled(false)
-	if got := svc.McpServersFor(noBind, "stub", nil); len(got) != 1 || got[0].Name != "fs_stdio" {
+	if got := svc.McpServersFor("stub", noBind); len(got) != 1 || got[0].Name != "fs_stdio" {
 		t.Fatalf("网关关时应回到「仅承载得起的直连」，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "rtx", nil); len(got) != 3 {
+	if got := svc.McpServersFor("rtx", noBind); len(got) != 3 {
 		t.Fatalf("网关关时 rtx 应逐条直连 3 台，got %+v", got)
 	}
-	if got := svc.McpServersFor(noBind, "plain", nil); len(got) != 1 {
+	if got := svc.McpServersFor("plain", noBind); len(got) != 1 {
 		t.Fatalf("网关关时未声明传输的 runtime 应保守仅 stdio，got %+v", got)
 	}
 }
-
-// TestAgentCapabilities 统一能力目录（§8.1）可见性规则：skill 按构建期底座裁剪、
-// MCP 全量 + enabled/runtimes 标注、tool 按归属 server 的启用×可承载过滤。
-func TestAgentCapabilities(t *testing.T) {
-	reg := runtime.NewRegistry(
-		runtime.Spec{ID: "rtx", McpTransports: []string{"stdio", "sse", "http"}},
-	)
-	svc := NewService(reg, eventbus.New())
-	// 底座是构建期常量：把它设成注册表里唯一的那个，能力面才按它推导。
-	setBuildRuntime(t, "rtx")
-	// 本进程解析出 rtx 的 skill 投影。
-	svc.SetSkillProjections([]SkillProjection{skillProj(t.TempDir(), "rtx")})
-	svc.agents["a1"] = &AgentRec{
-		ID: "a1", Name: "A1",
-		Mcps: ptrOf([]string{"fs"}), State: AgentStateStopped,
-	}
-	mustSkill := func(s capability.Skill) {
-		t.Helper()
-		if err := svc.caps.RegisterSkill(&s); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mustSkill(capability.Skill{ID: "plan", Name: "plan"}) // 未声明 runtimes = 全部
-	// 声明只给 ghost 用：ghost 不是本构建的底座 → 不适用（但**必须列出**，不能静默消失）。
-	mustSkill(capability.Skill{ID: "no-src", Name: "no-src", Runtimes: []string{"ghost"}})
-	mustMcp := func(id, transport string) {
-		t.Helper()
-		if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: id, Name: id, Transport: transport, Command: "/usr/local/bin/npx"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mustMcp("fs", capability.TransportStdio)
-	mustMcp("sse_only", capability.TransportSSE)
-	mustMcp("http_ok", capability.TransportHTTP)
-	mustTool := func(tl capability.Tool) {
-		t.Helper()
-		if err := svc.caps.RegisterTool(&tl); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mustTool(capability.Tool{Name: "web_search", Source: capability.ToolSourceBuiltin})
-	mustTool(capability.Tool{Name: "obs_tool", Source: capability.ToolSourceObserved})
-	mustTool(capability.Tool{Name: "fs_read", Source: capability.ToolSourceMCP, McpServer: "fs"})
-	mustTool(capability.Tool{Name: "sse_tool", Source: capability.ToolSourceMCP, McpServer: "sse_only"})
-	mustTool(capability.Tool{Name: "orphan_tool", Source: capability.ToolSourceMCP, McpServer: "not_registered"})
-
-	got, err := svc.AgentCapabilities("a1")
-	if err != nil {
-		t.Fatalf("AgentCapabilities: %v", err)
-	}
-	if got.AgentID != "a1" || len(got.Runtimes) != 1 || got.Runtimes[0] != "rtx" {
-		t.Fatalf("agent/runtimes 不符（构建期底座只报一个）: %+v", got)
-	}
-	// skill：§13.4 S5 起**不再按候选 runtime 静默过滤**——两条都列出；适用性取决于
-	// 「候选 runtime ∩ 技能声明的 runtimes ∩ 已解析投影」，不适用时带人话原因。
-	if len(got.Skills) != 2 {
-		t.Fatalf("skills 应全量列出（含不适用）: %+v", got.Skills)
-	}
-	skByID := map[string]dtocapability.AgentSkillResp{}
-	for _, sk := range got.Skills {
-		skByID[sk.ID] = sk
-	}
-	if plan := skByID["plan"]; !plan.Applicable || !plan.Enabled ||
-		len(plan.Runtimes) != 1 || plan.Runtimes[0] != "rtx" || len(plan.Reasons) != 0 {
-		t.Fatalf("plan 应启用且适用、runtimes 裁到候选∩投影: %+v", plan)
-	}
-	if noSrc := skByID["no-src"]; noSrc.Applicable || len(noSrc.Runtimes) != 0 || len(noSrc.Reasons) == 0 {
-		t.Fatalf("no-src 应不适用（runtimes 空）+ 有原因: %+v", noSrc)
-	}
-	// MCP：全量 3 条；白名单只启用 fs；carriers 就是构建期底座那一个（承载该传输时）。
-	if len(got.McpServers) != 3 {
-		t.Fatalf("mcp_servers 应全量 3 条，got %+v", got.McpServers)
-	}
-	byID := map[string]dtocapability.AgentMcpServerResp{}
-	for _, m := range got.McpServers {
-		byID[m.ID] = m
-	}
-	if m := byID["fs"]; !m.Enabled || len(m.Runtimes) != 1 || m.Runtimes[0] != "rtx" {
-		t.Fatalf("fs 应 enabled+rtx 承载，got %+v", m)
-	}
-	if m := byID["sse_only"]; m.Enabled || len(m.Runtimes) != 1 {
-		t.Fatalf("sse_only 应未启用但 rtx 可承载，got %+v", m)
-	}
-	if m := byID["http_ok"]; m.Enabled {
-		t.Fatalf("http_ok 应未启用（白名单只有 fs），got %+v", m)
-	}
-	// tool：builtin/observed 恒可见；fs_read 可见（fs 启用且可承载）；
-	// sse_tool 被白名单挡；orphan_tool 归属未注册 server → 不可见。
-	names := make([]string, 0, len(got.Tools))
-	for _, tl := range got.Tools {
-		names = append(names, tl.Name)
-	}
-	want := map[string]bool{"web_search": true, "obs_tool": true, "fs_read": true}
-	if len(got.Tools) != len(want) {
-		t.Fatalf("tools 应 %d 条，got %v", len(want), names)
-	}
-	for _, n := range names {
-		if !want[n] {
-			t.Fatalf("tools 含不可见条目 %q（全量 %v）", n, names)
-		}
-	}
-	// notes：候选面下线后，能力面按构建期常量推导，没有"未注册的候选"这种降级说明。
-	if len(got.Notes) != 0 {
-		t.Fatalf("构建期底座已装配，不该有降级说明，got %+v", got.Notes)
-	}
-
-	// mcps: [] → 禁用注入：fs 未启用、fs_read 不可见、notes 记明。
-	svc.agents["a2"] = &AgentRec{ID: "a2", Mcps: ptrOf([]string{}), State: AgentStateStopped}
-	got2, err := svc.AgentCapabilities("a2")
-	if err != nil {
-		t.Fatalf("AgentCapabilities(a2): %v", err)
-	}
-	for _, m := range got2.McpServers {
-		if m.Enabled {
-			t.Fatalf("a2 声明 mcps:[] 应全部未启用，got %+v", m)
-		}
-	}
-	for _, tl := range got2.Tools {
-		if tl.Source == capability.ToolSourceMCP {
-			t.Fatalf("a2 禁用 MCP 时不应出现 mcp 工具: %+v", tl)
-		}
-	}
-	found := false
-	for _, n := range got2.Notes {
-		if strings.Contains(n, "mcps: []") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("a2 notes 应记禁用说明，got %+v", got2.Notes)
-	}
-
-	// 未知 agent → 40401。
-	if _, err := svc.AgentCapabilities("nope"); err == nil {
-		t.Fatal("未知 agent 应报错")
-	} else {
-		var ge gerror.Error
-		if !errors.As(err, &ge) || ge.Code != 40401 {
-			t.Fatalf("未知 agent 应 40401，got %v", err)
-		}
-	}
-}
-
-func ptrOf[T any](v T) *T { return &v }
 
 // TestProbeMcpServer MCP live 探测（P2 §5.2）：http 探测成功 → Tool 目录整体替换 + 归属
 // 标注 + 状态记录；重复探测收敛（旧条目删除）；失败记录 last_probe_error；未知 id → 40401；
@@ -433,32 +290,6 @@ func mustListTools(t *testing.T, svc *Service) []dtocapability.ToolResp {
 		t.Fatal(err)
 	}
 	return out
-}
-
-// TestAgentMcpAllowlistFromDefinitions agent 定义文件 `mcps` 三态：缺省 → nil（全启用）；
-// 声明白名单 → 指针携带；`[]` → 非 nil 空指针（禁用注入）。经 LoadAgentDefinitions 装载。
-func TestAgentMcpAllowlistFromDefinitions(t *testing.T) {
-	dir := t.TempDir()
-	writeCapFile(t, filepath.Join(dir, "a.json"), `{"id":"a","runtimes":["stub"],"mcps":["fs_stdio"]}`)
-	writeCapFile(t, filepath.Join(dir, "b.json"), `{"id":"b","runtimes":["stub"],"mcps":[]}`)
-	writeCapFile(t, filepath.Join(dir, "c.json"), `{"id":"c","runtimes":["stub"]}`)
-
-	svc := NewService(runtime.NewRegistry(runtime.Spec{ID: "stub"}), eventbus.New()) // 定义引用 echo runtime
-	if n := svc.LoadAgentDefinitions(dir); n != 3 {
-		t.Fatalf("期望装载 3 条，got %d", n)
-	}
-	a, _ := svc.AgentByID("a")
-	if a.Mcps == nil || len(*a.Mcps) != 1 || (*a.Mcps)[0] != "fs_stdio" {
-		t.Fatalf("白名单应携带 fs_stdio，got %v", a.Mcps)
-	}
-	b, _ := svc.AgentByID("b")
-	if b.Mcps == nil || len(*b.Mcps) != 0 {
-		t.Fatalf("mcps:[] 应得非 nil 空指针，got %v", b.Mcps)
-	}
-	c, _ := svc.AgentByID("c")
-	if c.Mcps != nil {
-		t.Fatalf("缺省 mcps 应为 nil（全启用），got %v", c.Mcps)
-	}
 }
 
 // TestServiceReconcileSkills 启用物化重校：按投影形态写为 <root>/<id>/SKILL.md 并计数；

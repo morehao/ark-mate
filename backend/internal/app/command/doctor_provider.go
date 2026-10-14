@@ -14,30 +14,32 @@ import (
 
 // 本文件是 `mate doctor` 的 **provider（供应商凭据）与模型清单**那一段（K2）。
 //
-// 分工是硬的：**事实由 `manager.CollectProviderDoctorFacts` 构造**（SQL、vault 与对账算法
+// 分工是硬的：**事实由 `manager.CollectProviderDoctorFacts` 构造**（SQL、凭据分层与对账算法
 // 都在那一侧），本文件只做两件事——打开只读句柄、把事实翻成三档结论与人话。该包的既有风格
 // 是薄打印层，把 SQL 写进这里会让"体检的口径"与"运行时的口径"各长一套。
 //
 // 退出码语义**逐字沿用**既有口径：**"无法校验"记警告；事实与声明不符才判失败**。
 // 逐条对应关系（写下判据，避免下一个人凭感觉调档）：
 //
-//	providers      行数 / 载体：读不到 → warn（无法校验）；库文件在、只读打开失败 → fail（事实坏了）
-//	vault          可用 → ok；尚未创建且**没有任何密文引用** → warn；有密文引用却不可用 → fail
-//	provider refs  悬空引用 = agent 声明了一个不存在的档案 → fail（`CredentialProblem` 同判据）
+//	providers        行数 / 载体：读不到 → warn（无法校验）；库文件在、只读打开失败 → fail（事实坏了）
+//	credentials      托管文档：条目齐、权限 0600 → ok；不在/过宽/有条目没写进去 → warn
+//	                 （**镜像可由库重建**，任何一条都不是"密钥丢了"）；文档形状坏掉或读不动 → fail
+//	provider keys    库里没有密钥的档案 → warn（尚未设置，档案可以先建后补）；全都有 → ok
+//	mcp secrets      `mcp_secrets` 条目 / 孤儿：孤儿 → warn（无害、不自动删，但要被看见）
+//	legacy secrets   旧机制遗留物仍在盘上 → warn（**已迁移，可删**；医生不替用户删）
 //	providers import 对账：只有"库里有、文件里没有"（写面新建后的快照滞后）→ warn；其余 → fail
-//	vault orphans  孤儿密文（删除补偿失败的残留）→ warn：无害、不自动删，但要被看见
-//	models <id>    物化状态与清单条数：未实测只读 → warn；其余 → ok（它是事实，不是不符）
-//	models <id> 对账 取不到运行时广告 → warn（无法校验，**不许**当成"一条都没生效"）
-//	                declared 非空而 advertised 一条都没有 → **单独判高危**（fail）
-//	models <id> 高危 只有上面那种形态才出现的一条失败项（"写了完全没生效"）
+//	models <id>      物化状态与清单条数：未实测只读 → warn；其余 → ok（它是事实，不是不符）
+//	models <id> 对账  取不到运行时广告 → warn（无法校验，**不许**当成"一条都没生效"）
+//	                 declared 非空而 advertised 一条都没有 → **单独判高危**（fail）
+//	models <id> 高危  只有上面那种形态才出现的一条失败项（"写了完全没生效"）
 
 // checkProviderSection 采集 provider 段的事实并翻成检查项。
 //
-// 只读：`store.OpenReadOnly` 不跑迁移；vault 探测不创建 keyfile（见两处注释）。
+// 只读：`store.OpenReadOnly` 不跑迁移；凭据面只读（镜像权限过宽只如实报出，**不自动 chmod**）。
 func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []doctorCheck) {
 	st, storeCheck := openDoctorStore(opts)
 	facts := manager.CollectProviderDoctorFacts(context.Background(), st, manager.ProviderDoctorOptions{
-		Home: opts.Home, AgentDir: opts.AgentDir, DBPath: opts.DBPath,
+		Home: opts.Home, ProviderDir: opts.ProviderDir, DBPath: opts.DBPath,
 	})
 	if st != nil {
 		defer func() { _ = st.Close() }()
@@ -50,14 +52,16 @@ func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []do
 	} else {
 		checks = append(checks, checkProviderCarrier(facts))
 	}
-	checks = append(checks, checkProviderVault(facts))
+	checks = append(checks, checkCredentialsMirror(facts))
 	checks = append(checks, checkProviderKeys(facts))
-	checks = append(checks, checkProviderRefs(facts))
+	checks = append(checks, checkMcpSecrets(facts))
+	checks = append(checks, checkLegacySecretLeftovers(facts))
 	checks = append(checks, checkProviderImport(facts))
-	checks = append(checks, checkProviderOrphans(facts))
 	// v12 新增的四条（T6.2）：缺端点、回退依据、迁移待处置事实、敏感文件清单。
 	checks = append(checks, checkProviderBaseURL(facts))
 	checks = append(checks, checkMigrationBackup(facts))
+	// v19 新增：老布局遗留的迁移备份（只报不处置）。
+	checks = append(checks, checkLegacyMigrationBackups(facts))
 	checks = append(checks, checkMigrationNotes(facts))
 	checks = append(checks, checkMigrationNotesV13(facts))
 	checks = append(checks, checkSensitiveFiles(facts)...)
@@ -78,7 +82,7 @@ func openDoctorStore(opts doctorOptions) (*store.Store, doctorCheck) {
 	if opts.StoreMode == config.StoreModeMemory {
 		return nil, doctorCheck{"providers", doctorWarn,
 			"memory 模式（MATE_STORE=memory，或 MATE_STORE 未设而库文件不存在/为空 → auto 解析成 memory）：" +
-				"provider 档案的载体是 <AgentDir>/providers.json，DB 行数不适用——本段只报 vault 可达性与文件侧快照"}
+				"provider 档案的载体是 <ProviderDir>/providers.json，DB 行数不适用——本段只报凭据文档面与文件侧快照"}
 	}
 	if strings.TrimSpace(opts.DBPath) == "" {
 		return nil, doctorCheck{"providers", doctorWarn, "未配置库文件路径（MATE_DB）：无法校验 provider 档案行"}
@@ -112,43 +116,86 @@ func checkProviderCarrier(facts manager.ProviderDoctorFacts) doctorCheck {
 			orDash(facts.DBPath), facts.ProviderRows, bracketList(facts.ProviderIDs), fileNote)}
 }
 
-// checkProviderVault vault 可达性（K5 的检查项之一：这一段无 fail）。
+// checkCredentialsMirror 托管凭据文档（`<MATE_HOME>/credentials.json`）的形态与库的对账。
 //
-// 分档判据（把"主密钥可不可用"与"有没有真的丢了东西"分开）：
+// 分档判据（**"镜像不对"绝不等于"密钥丢了"**——权威在库，镜像可重建）：
 //
-//	可用                                       → ok
-//	不可用，密文目录里也确实一个 .enc 都没有     → warn（`vault.key` 是第一次写密文时才创建的，
-//	                                             这时"没有主密钥"不丢任何东西）
-//	不可用，但有实际存在的密文                    → fail（**密文永久不可恢复**：事实与声明不符）
-//
-// 注意"档案声明了 key_ref"**不算**"有密文"：那可能是引用悬空（密文从来没写成功过），
-// 它的处置是"重设这条 provider 的 key"，由 `provider keys` 那一条报（见 checkProviderKeys）。
-func checkProviderVault(facts manager.ProviderDoctorFacts) doctorCheck {
-	name := "vault"
-	detail := fmt.Sprintf("锚点=%s 来源=%s：%s", orDash(facts.VaultHome), orDash(facts.VaultSource), orDash(facts.VaultNote))
-	if facts.VaultUsable {
-		return doctorCheck{name, doctorOK, detail}
+//	不存在                                     → warn（还没写过密钥；下次 serve 会按库建它）
+//	权限过宽 / 内容不是 JSON 对象 / 读不动       → fail（平台**拒绝读它**：那是硬约束，
+//	                                            而这条分层会因此整层失效，用户填的密钥不被采用）
+//	条目齐、权限合规                            → ok
+//	库里有而镜像里没有                          → warn（镜像陈旧：重跑一次 serve 即补齐）
+//	镜像里有而库里没有                          → warn（**不自动回灌**：报出引用名让用户处置）
+func checkCredentialsMirror(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "credentials"
+	base := fmt.Sprintf("路径=%s 权限=%s 条目=%d", orDash(facts.CredentialsPath),
+		permWord(facts.CredentialsExists, facts.CredentialsPerm), facts.CredentialsRefs)
+
+	// 文档本身坏掉（不是"还没有"）时判失败：分层读到它就会硬失败，用户填的密钥会**不被采用**。
+	// 判据是"它存在但平台读不了"，与"它还不存在"（正常中间态）严格分开。
+	if facts.CredentialsExists && !facts.CredentialsPermOK {
+		return doctorCheck{name, doctorFail, base + "：**权限不合，平台拒绝读它**——" + orDash(facts.CredentialsNote)}
 	}
-	if !strings.HasPrefix(facts.VaultDirScan, "ok") && !strings.HasPrefix(facts.VaultDirScan, "missing") {
-		return doctorCheck{name, doctorWarn, detail +
-			"；密文目录也读不动（" + facts.VaultDirScan + "）：无法判断有没有密文会因此不可恢复"}
+	if facts.CredentialsExists && facts.CredentialsRefs == 0 {
+		return doctorCheck{name, doctorFail, base + "：**内容不是 `引用 → 值` 的 JSON 对象**——" + orDash(facts.CredentialsNote)}
 	}
-	if len(facts.CiphertextFiles) == 0 {
-		return doctorCheck{name, doctorWarn, detail +
-			"；密文目录里没有任何密文，所以这一项目前不丢东西（第一次写入密钥时主密钥会被自动创建）"}
+	if !facts.CredentialsExists {
+		return doctorCheck{name, doctorWarn, base + "：" + orDash(facts.CredentialsNote)}
 	}
-	return doctorCheck{name, doctorFail, fmt.Sprintf(
-		"%s；但 vault 里实际存在 %d 个密文（%s）——**这些密钥不可恢复**，只能重设对应 provider 的 key",
-		detail, len(facts.CiphertextFiles), bracketList(facts.CiphertextFiles))}
+	if len(facts.MissingInCredentials) > 0 || len(facts.MissingInStore) > 0 {
+		detail := base
+		if len(facts.MissingInCredentials) > 0 {
+			detail += fmt.Sprintf("；库里有而镜像里没有 %d 条（镜像陈旧：重跑一次 `mate serve` 会按库补齐）：%s",
+				len(facts.MissingInCredentials), bracketList(facts.MissingInCredentials))
+		}
+		if len(facts.MissingInStore) > 0 {
+			detail += fmt.Sprintf("；镜像里有而库里没有 %d 条（**不自动回灌**——权威是库）：%s；%s",
+				len(facts.MissingInStore), bracketList(facts.MissingInStore),
+				mirrorOnlyRemedy(facts.MissingInStore))
+		}
+		return doctorCheck{name, doctorWarn, detail}
+	}
+	return doctorCheck{name, doctorOK, base + "：与库一致（层序：继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env）"}
 }
 
-// checkProviderKeys 逐条档案的密钥可得性：DB 行存在但在 vault 里找不到密文 → warn（尚未设密钥）。
+// mirrorOnlyRemedy 给出"镜像里有而库里没有"的**可执行**出路（按引用类别分开说）。
 //
-// 这一条与 `vault` 的分工：vault 回答"主密钥在不在"，它回答"每一条档案此刻能不能注出密钥"。
+// 为什么必须分开：两类引用的出路完全不同，合成一句（"在「设置 · 模型」或 MCP 面板里重新填一次"）
+// 会把一半的用户指向**不存在的入口**——
+//   - `providers/<id>`：密钥在「设置 · 模型」里有写入口，重填一次即与库对齐；
+//   - `store:mcp/<name>`（MCP 密钥）：值的写面这一批**还没有**（面板只能改引用名），能做的只有
+//     把定义里的引用改成 `env:<ENV_NAME>`（值由进程环境或 `.env` 提供）。
 //
-// v13 的形态变化：档案行**不再声明** `key_ref`（引用是 `providerRef(id)` 的纯函数副本），
-// 所以"声明了引用却没有密文"这个状态**结构上不可能**——唯一的真问题是"这条档案还没设密钥"
-// （v12 的 `missingCiphertexts` 那条失败项随之消失，判据换成 vault 目录清单）。
+// 把用户做不到的那一条写成出路，等于没有出路——所以这里逐类说，且只说真能做到的。
+func mirrorOnlyRemedy(refs []string) string {
+	var providers, mcpSecrets []string
+	for _, r := range refs {
+		if strings.HasPrefix(r, manager.ProviderMirrorRefPrefix) {
+			providers = append(providers, r)
+			continue
+		}
+		mcpSecrets = append(mcpSecrets, r)
+	}
+	parts := make([]string, 0, 2)
+	if len(providers) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"供应商密钥（%s）到「设置 · 模型」里重新填一次即对齐，顺手清掉镜像里那条手写项",
+			bracketList(providers)))
+	}
+	if len(mcpSecrets) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"MCP 密钥（%s）把定义里的引用改成 env:<ENV_NAME>（值由进程环境或 `.env` 提供）"+
+				"——库里那份值没有写入口，所以镜像里这条留着只会反复报同一句",
+			bracketList(mcpSecrets)))
+	}
+	return strings.Join(parts, "；")
+}
+
+// checkProviderKeys 逐条档案的密钥可得性：库那一列是空的 → warn（尚未设密钥）。
+//
+// v20 的判据只有一条：`providers.key` 非空（`key_ref` 是派生量，反推不出"有没有值"）。
+// 它把 v19 那种"逐条去问密文目录"的间接判据换成了直接判据——"声明了引用却没有密钥"
+// 这个状态在结构上不存在，剩下的真问题只是"这条档案还没设密钥"。
 func checkProviderKeys(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "provider keys"
 	if facts.Carrier != "db" {
@@ -157,43 +204,78 @@ func checkProviderKeys(facts manager.ProviderDoctorFacts) doctorCheck {
 	if len(facts.ProviderIDs) == 0 {
 		return doctorCheck{name, doctorOK, "没有任何 provider 档案，密钥面为空"}
 	}
-	if !strings.HasPrefix(facts.VaultDirScan, "ok") && !strings.HasPrefix(facts.VaultDirScan, "missing") {
-		// 密文目录读不动：**不许**把"扫不到"当成"没有密文"（那会把读权限问题报成"全都缺密钥"）。
-		return doctorCheck{name, doctorWarn,
-			"密文目录的扫描结论不可信（" + facts.VaultDirScan + "）：密钥面无法校验"}
-	}
 	if len(facts.NoKeyProviders) > 0 {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf(
-			"%d 条档案在 vault 里没有密文（尚未设置密钥）：%s。引用它们的会话不会注入任何密钥变量"+
-				"——要么补密钥，要么清空 agent 的凭据选择（用它底座自身的登录态）",
+			"%d 条档案还没有密钥（`providers.key` 为空）：%s。引用它们的会话不会注入任何密钥变量"+
+				"——在「设置 · 模型」里补一条；或者让一个环境变量提供（名字按 "+
+				"`MATE_<档案 id 折大写>_<8 位哈希>_API_KEY` 派生，设好之后面板会在这条档案上写明"+
+				"生效的是哪个变量；层序上它优先于面板里那条）；或者把引用它的模型条目改挂到别的供应商",
 			len(facts.NoKeyProviders), bracketList(facts.NoKeyProviders))}
 	}
 	return doctorCheck{name, doctorOK, fmt.Sprintf(
-		"%d 条档案在 vault 里都有对应密文（主密钥可用性见 vault 那一条）", len(facts.ProviderIDs))}
+		"%d 条档案都有密钥（库那一列非空 = 唯一判据）", len(facts.ProviderIDs))}
 }
 
-// checkProviderRefs 悬空引用：agent 定义里的 `provider` 指向不存在的档案。
+// checkMcpSecrets MCP 密钥面：条目数与孤儿（定义都没了的那些）。
 //
-// 判失败的判据与 `CredentialProblem` 同源（那条路在拨号前就会以 `credential_missing` 拒发）：
-// 悬空引用必然表现为"本该注入的密钥静默缺失"，属事实与声明不符。
-func checkProviderRefs(facts manager.ProviderDoctorFacts) doctorCheck {
-	name := "provider refs"
+// 为什么只记警告：孤儿**不影响任何一条 server 的可用性**，而且删定义时值留着是**正常**的
+// （用户可能正要把它挂到另一个 server 上）。但它值得被看见——库里躺着一份没人用的密钥，
+// 与"我以为删掉那个 server 就把密钥也删了"是两种不同的认知。
+//
+// 同时如实说出**没有写入口**这件事：面板里能改引用（键名），值的写面这一批还没有，
+// 所以出路只有两条（写进库 / 改用 `env:` 引用），不能让用户以为"在界面上找不到就是坏了"。
+func checkMcpSecrets(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "mcp secrets"
 	if facts.Carrier != "db" {
-		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：悬空引用无从校验"}
+		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：库里的 MCP 密钥面无从校验"}
 	}
-	if len(facts.DanglingRefs) == 0 {
-		return doctorCheck{name, doctorOK, fmt.Sprintf("%d 条档案被引用的部分全部存在（无悬空引用）", facts.ProviderRows)}
+	if len(facts.McpSecretRefs) == 0 {
+		return doctorCheck{name, doctorOK, "库里没有任何 MCP 密钥条目（mcp_secrets 为空）"}
 	}
-	items := make([]string, 0, len(facts.DanglingRefs))
-	for _, d := range facts.DanglingRefs {
-		items = append(items, fmt.Sprintf("%s→%s", d.AgentID, d.ProviderID))
+	detail := fmt.Sprintf("mcp_secrets %d 条：%s", len(facts.McpSecretRefs), bracketList(facts.McpSecretRefs))
+	if len(facts.OrphanMcpSecrets) > 0 {
+		return doctorCheck{name, doctorWarn, detail + fmt.Sprintf(
+			"；其中 %d 条没有任何 MCP 定义引用（孤儿）：%s——无害也不自动删；"+
+				"确认没用之后可以自行删除对应行",
+			len(facts.OrphanMcpSecrets), bracketList(facts.OrphanMcpSecrets))}
 	}
-	return doctorCheck{name, doctorFail, fmt.Sprintf(
-		"%d 条悬空引用（agent 声明了不存在的 provider 档案，那些会话会在拨号前报 credential_missing）：%s",
-		len(items), sampleList(items))}
+	return doctorCheck{name, doctorOK, detail}
+}
+
+// checkLegacySecretLeftovers 旧密钥机制的遗留物（v20 起平台不再读写它们）。
+//
+// **只报不判失败、也绝不替用户删**：那是用户唯一一份旧密钥本体，删除不可逆；而"库里都已经有了"
+// 这件事由 `provider keys` / `mcp secrets` / `credentials` 三条回答。所以这一条永远是 warn
+// （有遗留物时），并把处置权与确认依据写在文案里。
+func checkLegacySecretLeftovers(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "legacy secrets"
+	if !facts.LegacySecretDir && !facts.LegacySecretKeyFile {
+		return doctorCheck{name, doctorOK, "没有旧密钥机制的遗留物（旧密文目录与主密钥文件都不在）"}
+	}
+	found := []string{}
+	if facts.LegacySecretDir {
+		found = append(found, fmt.Sprintf("旧密文目录（%d 个密文）", facts.LegacySecretCount))
+	}
+	if facts.LegacySecretKeyFile {
+		found = append(found, "旧主密钥文件")
+	}
+	return doctorCheck{name, doctorWarn, fmt.Sprintf("锚点=%s 仍在盘上：%s。%s",
+		orDash(facts.LegacySecretAnchor), strings.Join(found, "、"), orDash(facts.LegacySecretNote))}
+}
+
+// permWord 权限位的展示（不存在 → `-`）。
+func permWord(exists bool, perm string) string {
+	if !exists || strings.TrimSpace(perm) == "" {
+		return "-"
+	}
+	return perm
 }
 
 // checkProviderImport 导入对账（`meta.providers_import_mismatch` 的逐条报出）。
+//
+// v19 已删掉「供应商悬空引用」那一条检查：现在"哪条档案被引用"的唯一判据是**模型条目**的
+// `provider_id` 外键，它在 store 的同一事务里判定（`DeleteProviderDefinitionIfUnreferenced`），
+// 不可能留下悬空引用；而旧的"agent 声明了一个不存在的档案"随 agent 面整体删除。
 func checkProviderImport(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "providers import"
 	if facts.Carrier != "db" {
@@ -210,25 +292,6 @@ func checkProviderImport(facts manager.ProviderDoctorFacts) doctorCheck {
 		status = doctorWarn
 	}
 	return doctorCheck{name, status, fmt.Sprintf("导入对账 %s %d 条：%s", verb, len(facts.ImportMismatch), sampleList(facts.ImportMismatch))}
-}
-
-// checkProviderOrphans 孤儿密文（删除补偿失败的残留）。如实列出、不自动删。
-//
-// 为什么只记警告而不是失败：它**不影响任何一条档案的可用性**（没有任何行引用它），
-// 但它是"删除只完成了一半"的证据，可能还有别的用途（人工核对、恢复误删），所以不判失败、
-// 也不自动删——体检命令没有删除权。
-func checkProviderOrphans(facts manager.ProviderDoctorFacts) doctorCheck {
-	name := "vault orphans"
-	if !strings.HasPrefix(facts.VaultDirScan, "ok") && !strings.HasPrefix(facts.VaultDirScan, "missing") {
-		return doctorCheck{name, doctorWarn, "密文目录的扫描结论不可信（" + facts.VaultDirScan + "）：孤儿密文无法校验"}
-	}
-	if len(facts.OrphanCiphertexts) == 0 {
-		return doctorCheck{name, doctorOK, "没有孤儿密文（vault/providers/ 下每个 .enc 都有对应的档案行）"}
-	}
-	return doctorCheck{name, doctorWarn, fmt.Sprintf(
-		"%d 个孤儿密文（`<vault>/providers/*.enc` 没有对应的档案行：删除补偿失败的残留）：%s；"+
-			"体检不自动删——确认没用之后手工删掉对应 .enc",
-		len(facts.OrphanCiphertexts), sampleList(facts.OrphanCiphertexts))}
 }
 
 // checkModalityDeclaration 两侧差异如实可见（ADR-12/A11）：模型输入模态在**声明了交付面**的
@@ -403,14 +466,31 @@ func checkMigrationBackup(facts manager.ProviderDoctorFacts) doctorCheck {
 	name := "迁移备份"
 	if facts.MigrationBackup != "" {
 		return doctorCheck{name, doctorOK, "可回退依据：`" + facts.MigrationBackup +
-			"`（**只管 DB**：密钥不在其内，而本方案不触碰 vault，所以回退不必恢复 vault）"}
+			"`（恢复到哪一份就退到哪一版；v20 起密钥进库，所以这份备份与 `mate.db` 同级敏感，" +
+			"别把它放进共享/同步目录）"}
 	}
 	if facts.RuntimeConfigDigestWritten || facts.ProviderRows > 0 {
-		return doctorCheck{name, doctorWarn, "本机已有资源数据但没有找到 `mate.db.bak-v12-*` / `mate.db.bak-v13-*`：" +
-			"若这个库是从旧版本升上来的，说明备份已被清理——**回退窗口已关闭**（schema 前进之后只能前滚；" +
-			"逃生门是 `mate provider export`）"}
+		return doctorCheck{name, doctorWarn, "本机已有资源数据但没有找到迁移备份（`<数据目录>/backups/mate.db.bak-v*`，" +
+			"或老布局的 `mate.db.bak-v*`）：若这个库是从旧版本升上来的，说明备份已被清理——" +
+			"**回退窗口已关闭**（schema 前进之后只能前滚；逃生门是 `mate provider export`）"}
 	}
 	return doctorCheck{name, doctorOK, "没有需要备份的迁移（这个库不是从旧版本升上来的）"}
+}
+
+// checkLegacyMigrationBackups 报老布局（v19 之前）留在库文件同级的迁移备份。
+//
+// 判 warn 而不是 fail，也**不做任何搬移/删除**：那些文件是**有效退路**（恢复到哪一份就退到
+// 哪一版），只是不再按新布局落盘。医生的职责是让人看见"这里还有 7 个文件、你可以把它们收进
+// `backups/` 或按需删掉"，处置权在用户——自动搬移会改掉回退路径，自动删除更是直接关门。
+func checkLegacyMigrationBackups(facts manager.ProviderDoctorFacts) doctorCheck {
+	name := "备份布局"
+	if len(facts.LegacyMigrationBackups) == 0 {
+		return doctorCheck{name, doctorOK, "迁移备份都在 `<数据目录>/backups/` 下（或本机没有备份）"}
+	}
+	return doctorCheck{name, doctorWarn, fmt.Sprintf(
+		"老布局遗留 %d 个迁移备份仍在数据目录根下（v19 起新备份落 `<数据目录>/backups/`）：%s；"+
+			"它们**照旧可用于回退**，可自行移进 `backups/` 或按需删除——`mate doctor` 不动它们",
+		len(facts.LegacyMigrationBackups), bracketList(facts.LegacyMigrationBackups))}
 }
 
 // checkMigrationNotes 迁移留下的待人工处置事实（默认模型冲突 / 归并冲突 / 无出口字段）。

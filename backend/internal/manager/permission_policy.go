@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
@@ -159,38 +158,4 @@ func autoPermissionDecision(action string, opts []acl.PermissionOption) (acl.Per
 		return acl.PermissionDecision{}, false
 	}
 	return acl.PermissionDecision{Rejected: true, OptionID: id}, true
-}
-
-// policyAction 返回该会话所属 agent 对本次权限请求的既定动作；
-// ok=false 表示无 agent/无策略/动作为 ask（调用方走既有征询路径）。
-func (o *Orchestrator) policyAction(sessionID string, req acl.PermissionRequest) (string, string, bool) {
-	agentID := o.svc.SessionAgentID(sessionID)
-	if agentID == "" {
-		return "", "", false
-	}
-	agent, ok := o.svc.AgentByID(agentID)
-	if !ok || agent.PermissionPolicy == nil {
-		return "", "", false
-	}
-	action := agent.PermissionPolicy.Decide(req.ToolCall.Title, req.ToolCall.Kind)
-	if action == PermissionAllow || action == PermissionDeny {
-		return action, agentID, true
-	}
-	return "", "", false
-}
-
-// toPermissionPolicyResp 内部策略 → 对外表示（nil → nil，缺省不出现字段）。
-func toPermissionPolicyResp(p *PermissionPolicy) *dtoagent.PermissionPolicyResp {
-	if p == nil {
-		return nil
-	}
-	return &dtoagent.PermissionPolicyResp{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
-}
-
-// fromPermissionPolicyResp 对外表示 → 内部策略（nil → nil）。
-func fromPermissionPolicyResp(p *dtoagent.PermissionPolicyResp) *PermissionPolicy {
-	if p == nil {
-		return nil
-	}
-	return &PermissionPolicy{Default: p.Default, Tools: p.Tools, NativeMode: p.NativeMode}
 }

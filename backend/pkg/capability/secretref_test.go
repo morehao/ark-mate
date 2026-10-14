@@ -5,15 +5,19 @@ import (
 	"testing"
 )
 
-// TestValidateSecretRefLexicon 引用词法：只认 vault:/env: 两种，明文一律拒（M1 的核心判据）。
+// TestValidateSecretRefLexicon 引用词法：只认 store:/env: 两种，明文一律拒（M1 的核心判据）。
+//
+// v20 起平台托管的那个前缀是 `store:`（指向库里的 `mcp_secrets`）；文件中出现的旧前缀见文件末尾
+// 的翻译点用例——**本文件是全仓唯一允许写出旧前缀的测试**（守卫白名单里的理由就是这么写的：
+// 判据必须写出它才能证明"认得出、翻得对、并且告警"）。
 func TestValidateSecretRefLexicon(t *testing.T) {
 	valid := []struct{ ref, kind string }{
-		{"vault:providers/default", "vault"},
-		{"vault:mcp/fs-token", "vault"},
-		{"vault:a/B", "vault"},
+		{"store:providers/default", "store"},
+		{"store:mcp/fs-token", "store"},
+		{"store:a/B", "store"},
 		{"env:FS_TOKEN", "env"},
 		{"env:_x9", "env"},
-		{"  vault:mcp/x  ", "vault"}, // 前后空白容忍（TrimSpace）
+		{"  store:mcp/x  ", "store"}, // 前后空白容忍（TrimSpace）
 	}
 	for _, c := range valid {
 		if err := ValidateSecretRef(c.ref); err != nil {
@@ -28,14 +32,14 @@ func TestValidateSecretRefLexicon(t *testing.T) {
 		{"", "为空"},
 		{"sk-live-abcdef", "不接受明文"},
 		{"Bearer abcdef", "不接受明文"},
-		{"vault:", "需为"},
-		{"vault:onlyns", "需为"},
-		{"vault:ns/", "需为"},
-		{"vault:/name", "需为"},
-		{"vault:../x", "非法"},
-		{"vault:ns/..", "非法"},
-		{"vault:ns/na me", "非法"},
-		{"vault:" + strings.Repeat("a", 65) + "/x", "非法"},
+		{"store:", "需为"},
+		{"store:onlyns", "需为"},
+		{"store:ns/", "需为"},
+		{"store:/name", "需为"},
+		{"store:../x", "非法"},
+		{"store:ns/..", "非法"},
+		{"store:ns/na me", "非法"},
+		{"store:" + strings.Repeat("a", 65) + "/x", "非法"},
 		{"env:", "非法"},
 		{"env:1BAD", "非法"},
 		{"env:HAS-DASH", "非法"},
@@ -85,7 +89,7 @@ func TestValidateBindings(t *testing.T) {
 	if err := ValidateSecretBindings("secret_env", map[string]string{"A": "plain-text-secret"}); err == nil {
 		t.Fatal("密钥字典里的明文应被拒")
 	}
-	if err := ValidateSecretBindings("secret_env", map[string]string{"A": "vault:mcp/a"}); err != nil {
+	if err := ValidateSecretBindings("secret_env", map[string]string{"A": "store:mcp/a"}); err != nil {
 		t.Fatalf("合法引用应通过: %v", err)
 	}
 	// 错误文案要能定位到具体键（不然一堆绑定里不知道哪条错）。
@@ -120,7 +124,7 @@ func TestRegisterMcpServerSecretRules(t *testing.T) {
 	// 2) 合法引用通过。
 	m3 := base()
 	m3.Env = map[string]string{"FS_ROOT": "/tmp"}
-	m3.SecretEnv = map[string]string{"FS_TOKEN": "vault:mcp/fs-token"}
+	m3.SecretEnv = map[string]string{"FS_TOKEN": "store:mcp/fs-token"}
 	m3.SecretHeaders = map[string]string{"Authorization": "env:FS_AUTH"}
 	if err := NewRegistry().RegisterMcpServer(m3); err != nil {
 		t.Fatalf("合法引用应通过: %v", err)
@@ -129,13 +133,13 @@ func TestRegisterMcpServerSecretRules(t *testing.T) {
 	// 3) 同名键同时出现在明文与密钥字典 → 拒（不悄悄定优先级）。
 	m4 := base()
 	m4.Env = map[string]string{"TOKEN": "x"}
-	m4.SecretEnv = map[string]string{"TOKEN": "vault:mcp/t"}
+	m4.SecretEnv = map[string]string{"TOKEN": "store:mcp/t"}
 	if err := NewRegistry().RegisterMcpServer(m4); err == nil || !strings.Contains(err.Error(), "键不得重复") {
 		t.Fatalf("同名键应被拒: %v", err)
 	}
 	m5 := base()
 	m5.Headers = map[string]string{"X-Token": "x"}
-	m5.SecretHeaders = map[string]string{"X-Token": "vault:mcp/t"}
+	m5.SecretHeaders = map[string]string{"X-Token": "store:mcp/t"}
 	if err := NewRegistry().RegisterMcpServer(m5); err == nil || !strings.Contains(err.Error(), "键不得重复") {
 		t.Fatalf("同名 header 应被拒: %v", err)
 	}
@@ -150,5 +154,37 @@ func TestRegisterMcpServerSecretRules(t *testing.T) {
 	m7.Command = "npx"
 	if err := NewRegistry().RegisterMcpServer(m7); err == nil {
 		t.Fatal("相对 command 仍应被拒")
+	}
+}
+
+// TestTranslateLegacySecretRef 旧前缀的**唯一翻译点**：认得出、翻得对、并且告警。
+//
+// 为什么这条必须写旧前缀：档案文件（`providers.json`、能力目录里的 `mcp/*.json`）不在库里、
+// v20 迁移改不到它们，所以导入时必须认出旧串并就地翻成 `store:`——不写旧串就测不到"认得出来"。
+// 反过来，**运行时**读到旧串必须判失败（它是坏数据，翻译会掩盖它）：那半在 `internal/manager`。
+func TestTranslateLegacySecretRef(t *testing.T) {
+	// 认得出 + 翻得对（整串剥前缀后拼 `store:`）。
+	for _, tc := range []struct{ in, want string }{
+		{"vault:mcp/fs-token", "store:mcp/fs-token"},
+		{"vault:providers/default", "store:providers/default"},
+		{"  vault:a/B  ", "store:a/B"},
+	} {
+		got, ok := TranslateLegacySecretRef(tc.in)
+		if !ok || got != tc.want {
+			t.Fatalf("TranslateLegacySecretRef(%q) = %q, %v；want %q, true", tc.in, got, ok, tc.want)
+		}
+	}
+	// 新前缀与 env 引用原样返回（不误翻）。
+	for _, ref := range []string{"store:mcp/a", "env:FS_TOKEN", "sk-plaintext"} {
+		if got, ok := TranslateLegacySecretRef(ref); ok || got != ref {
+			t.Fatalf("%q 不该被翻译：got=%q ok=%v", ref, got, ok)
+		}
+	}
+	// 告警要说清三件事：旧机制已删除、档案文件不在库里、只在这条导入路径上翻。
+	warn := LegacySecretRefWarning("vault:mcp/x")
+	for _, want := range []string{"vault:mcp/x", SecretRefLegacyVaultPrefix, SecretRefStorePrefix, "档案文件不在库里", "删除"} {
+		if !strings.Contains(warn, want) {
+			t.Fatalf("告警文案应含 %q: %s", want, warn)
+		}
 	}
 }

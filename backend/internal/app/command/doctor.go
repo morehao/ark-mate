@@ -22,15 +22,17 @@ import (
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/version"
+	"github.com/morehao/ark-mate/pkg/config"
 )
 
 // 本文件是 `mate doctor`（M4-5）：**只读体检**——不装配 App、不监听、不写 MATE_HOME
 // 以外的任何路径。它回答的是"这份部署现在到底装成什么样"，以及"它自己说自己是什么"。
 //
 // K2 起它多读两样东西（**仍然只读**）：`mate.db` 以 SQLite `mode=ro` 打开（不跑迁移，
-// 见 `store.OpenReadOnly`），`<mate home>/vault` 只探测不创建 keyfile。这两处刻意写下来，
-// 因为它们看起来像"什么都没写"而实际会落笔——`mode=ro` 仍可能让 SQLite 重建 `-shm`/`-wal`
-// 两个共享内存面文件；探针也只落在 MATE_HOME 之内。
+// 见 `store.OpenReadOnly`），以及托管凭据文档 `<mate home>/credentials.json` 的权限与形状
+// （只 stat/读，不建文件、不改权限）。这两处刻意写下来，因为它们看起来像"什么都没写"而实际
+// 会落笔——`mode=ro` 仍可能让 SQLite 重建 `-shm`/`-wal` 两个共享内存面文件；探针也只落在
+// MATE_HOME 之内。
 //
 // ## 为什么要有这条命令（而不是"启动失败时看日志"）
 //
@@ -155,8 +157,8 @@ type doctorOptions struct {
 	PayloadsGiven bool
 	ReleaseJSON   string
 	VerifyPayload bool
-	// AgentDir agent 定义目录（K2：provider 档案的**文件侧**载体与 vault 锚点的来源）。
-	AgentDir string
+	// ProviderDir provider 档案目录（K2：档案的**文件侧**载体与旧机制遗留物锚点的来源）。
+	ProviderDir string
 	// DBPath 库文件路径（K2：providers/models 两张表的读取对象）。
 	DBPath string
 	// StoreMode 解析后的持久层模式（sqlite|memory）：memory 形态下 DB 不是 provider 档案的
@@ -203,7 +205,7 @@ func doctor(args []string) {
 		PayloadsDir:   strings.TrimSpace(*payloadsDir),
 		ReleaseJSON:   strings.TrimSpace(*releaseJSON),
 		VerifyPayload: *verifyPayload,
-		AgentDir:      cfg.AgentDir,
+		ProviderDir:   cfg.ProviderDir,
 		DBPath:        cfg.DBPath,
 		StoreMode:     cfg.ResolvedStoreMode(),
 		TranscriptDir: cfg.TranscriptDir,
@@ -361,7 +363,10 @@ func runDoctor(opts doctorOptions) doctorReport {
 func renderDoctorReport(r doctorReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "==> mate doctor（核心 %s / 契约 %s）\n", r.Version, r.APIContract)
-	fmt.Fprintf(&b, "    数据目录 %s\n    检查地址 %s\n", orDash(r.Home), orDash(r.Addr))
+	// 人话这一路把**默认数据目录**渲染成 `~/…`（v19）：`~` 可粘贴，而绝对机器路径会随截图与
+	// 诊断包外流。`--json` 刻意**不**换（那一路是给诊断包/CI 消费的，要的是机器事实：
+	// 逐字可比的绝对路径）。两半的口径各由一条测试钉住（见 doctor_test 的显示名用例）。
+	fmt.Fprintf(&b, "    数据目录 %s\n    检查地址 %s\n", orDash(config.DisplayHome(r.Home)), orDash(r.Addr))
 	if r.VerifyPayload {
 		b.WriteString("    载荷全量复算：已开启\n")
 	}
@@ -373,7 +378,7 @@ func renderDoctorReport(r doctorReport) string {
 		case doctorFail:
 			icon = "❌"
 		}
-		fmt.Fprintf(&b, "  %s %s — %s\n", icon, c.Name, c.Detail)
+		fmt.Fprintf(&b, "  %s %s — %s\n", icon, c.Name, config.DisplayHome(c.Detail))
 	}
 	if r.Passed {
 		fmt.Fprintf(&b, "\n==> 通过：0 项失败，%d 项警告\n", r.Warnings)

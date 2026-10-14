@@ -7,7 +7,11 @@
 package dbclient
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/morehao/golib/dbaccess/dbgorm"
 	"github.com/morehao/golib/glog"
@@ -82,7 +86,89 @@ func Open(path string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dbclient: open %q: %w", path, err)
 	}
+	tightenFilePerms(path)
 	return db, nil
+}
+
+// dbFilePerm 是库文件及其事务旁车文件的权限（v20 起库内含明文密钥）。
+const dbFilePerm = os.FileMode(0o600)
+
+// tightenFilePerms 把库文件收口到 0600，并顺手收口已存在的 `-wal` / `-shm` 旁车。
+//
+// **为什么必须在"打开处"做**：v20 让 `providers.key` 进了库，于是 `mate.db` 从此与
+// `<MATE_HOME>/credentials.json` 同级敏感。而 SQLite 按**进程 umask** 建文件——常见的 `022`
+// 就是 `0644`，于是同一台机器上的其他用户能直接读走明文密钥。这件事**完全静默**：迁移备份
+// （`VACUUM INTO` + 显式 chmod）早就是 0600 了，只有"正在用的那个库"不是，而它恰恰是最常被拷贝、
+// 被同步、被塞进诊断包的那一份。实测 2026-10-14：用户真实数据目录里 `mate.db` 就是 `0644`。
+//
+// 收口失败**只 WARN 不致命**：为了一个权限位拒绝启动整台平台，代价比权限宽更大；事实由
+// `mate doctor` 的敏感文件清单（`providers.sensitiveFiles[]`，`expected` = `0600`）按密钥面报出。
+//
+// 只读挂载（`?mode=ro`）**不动**：那是用户显式声明的只读语义，改权限不是我们该做的事。
+func tightenFilePerms(dsn string) {
+	fsPath, readOnly := splitDSN(dsn)
+	if fsPath == "" || fsPath == memoryDB || readOnly {
+		return
+	}
+	// 只对**能确认是文件落点**的路径动手：绝对路径，或至少带一级目录。
+	// 反例是实测出来的：`file:memdb1?mode=memory` 在 `?` 之前那半长得像个文件名，于是
+	// 第一版收口逻辑在包目录里凭空造出一个空文件 `file:memdb1`。
+	if !filepath.IsAbs(fsPath) && filepath.Dir(fsPath) == "." {
+		return
+	}
+	// 旁车先看一遍（它们可能与库文件不同权：SQLite 用库文件的模式建旁车，但库文件被我们
+	// 上一版改成 0644 之前建出来的旁车会留在旧模式上）。
+	for _, p := range []string{fsPath, fsPath + "-wal", fsPath + "-shm"} {
+		info, err := os.Stat(p)
+		if err != nil {
+			// 库文件不存在 = 还没落盘（首次连接尚未建文件）：按 0600 建一个空文件，
+			// SQLite 把 0 字节文件当空库，于是"第一次建库"也是 0600。
+			// **父目录必须已经存在**：路径写错时不该被我们"修"成一个真实文件。
+			if os.IsNotExist(err) && p == fsPath {
+				if dir := filepath.Dir(fsPath); dir != "" {
+					if _, dErr := os.Stat(dir); dErr == nil {
+						if wErr := os.WriteFile(p, nil, dbFilePerm); wErr != nil {
+							glog.Warnw(context.Background(), "dbclient: 建库文件失败（权限将按 umask 走）",
+								"path", p, "err", wErr)
+						}
+					}
+				}
+			}
+			continue
+		}
+		if info.Mode().Perm() == dbFilePerm {
+			continue
+		}
+		if cErr := os.Chmod(p, dbFilePerm); cErr != nil {
+			glog.Warnw(context.Background(), "dbclient: 收口库文件权限失败（库里含明文密钥）",
+				"path", p, "perm", info.Mode().Perm().String(), "err", cErr)
+			continue
+		}
+		glog.Warnw(context.Background(), "dbclient: 库文件权限过宽，已收口到 0600（v20 起库里含明文密钥）",
+			"path", p, "was", info.Mode().Perm().String())
+	}
+}
+
+// splitDSN 把调用方给的 DSN 拆成（文件系统路径, 是否只读）。
+//
+// 只按 `?` 切（SQLite URI 的参数都在 `?` 之后），并认出 `mode=ro`——**不解析 SQLite URI 的
+// 全部语义**：这里只回答"要 chmod 哪个文件"与"要不要动它"。
+func splitDSN(dsn string) (string, bool) {
+	// 内存库的几种写法都要按**整条 DSN** 认出来，不能只看 `?` 之前那半——`file:memdb1?mode=memory`
+	// 的前半截看起来就像个文件名，第一版就是这么在包目录里造出空文件的。
+	lower := strings.ToLower(dsn)
+	if lower == "" || lower == memoryDB || strings.Contains(lower, ":memory:") ||
+		strings.Contains(lower, "mode=memory") || strings.Contains(lower, "vfs=memdb") {
+		return "", false
+	}
+	fsPath, query, _ := strings.Cut(dsn, "?")
+	readOnly := false
+	for _, kv := range strings.Split(query, "&") {
+		if strings.EqualFold(strings.TrimSpace(kv), "mode=ro") {
+			readOnly = true
+		}
+	}
+	return fsPath, readOnly
 }
 
 // ormLogConfig 是 ORM 层日志配置（zap driver，与全仓 golog 出口一致）。

@@ -20,23 +20,23 @@ func TestSearchSessions(t *testing.T) {
 	svc.SetTranscriptDir(dir)
 	defer svc.closeTranscripts()
 
-	register := func(id, title, agent, runtimeID string, archived bool, at time.Time) {
+	register := func(id, title, runtimeID string, archived bool, at time.Time) {
 		svc.registerSession(&SessionRec{
-			ID: id, AgentID: agent, Status: SessionStatusCompleted,
+			ID: id, RuntimeID: runtimeID, Status: SessionStatusCompleted,
 			Title: title, Archived: archived, CreatedAt: at, UpdatedAt: at,
 		})
-		svc.beginTranscript(id, agent, runtimeID, "/tmp", false)
+		svc.beginTranscript(id, runtimeID, "/tmp", false)
 	}
 	now := time.Now().UTC()
 	// sA：正文两处命中「银河」
-	register("sA", "漫游指南", "agent-stub", "stub", false, now.Add(-3*time.Minute))
+	register("sA", "漫游指南", "stub", false, now.Add(-3*time.Minute))
 	svc.publish(BusUserMessage, "sA", map[string]any{"text": "帮我讲讲银河系漫游指南里的答案"})
 	svc.publish(BusUserMessage, "sA", map[string]any{"text": "银河再展开一点？"})
 	// sB：标题命中「峡谷」，正文大小写不同（Mac）
-	register("sB", "神秘峡谷地图", "agent-stub", "stub", true, now.Add(-2*time.Minute))
+	register("sB", "神秘峡谷地图", "stub", true, now.Add(-2*time.Minute))
 	svc.publish(BusUserMessage, "sB", map[string]any{"text": "MacOS 上怎么装"})
 	// sC：无命中
-	register("sC", "今天吃啥", "agent-stub", "stub", false, now.Add(-1*time.Minute))
+	register("sC", "今天吃啥", "stub", false, now.Add(-1*time.Minute))
 	svc.publish(BusUserMessage, "sC", map[string]any{"text": "推荐一个菜"})
 
 	ctx := context.Background()

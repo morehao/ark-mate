@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtoagent"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -18,7 +17,7 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
-// ——— v12 应用层模型清单：写面失败面、**单一**默认、T2 回落、/agents 的派生只读 ———
+// ——— v12 应用层模型清单：写面失败面、**单一**默认、T2 回落 ———
 //
 // 与 v11 的差别是这条测试线的主题：模型**不带底座维度**，于是 v11 里那套"runtime 必须已声明
 // `ConfigProjection`"的前置校验、逐 runtime 的默认、以及"删默认被拒"全部消失。
@@ -46,7 +45,7 @@ type modelRig struct {
 
 func newModelRig(t *testing.T) *modelRig {
 	t.Helper()
-	r := newGenRig(t) // stub ACP + 真库 + agent a1(runtime=stub)
+	r := newGenRig(t) // stub ACP + 真库（构建期底座 = stub）
 	// 再注册两个**真实 adapter 的声明**（取默认注册表的那一份，避免测试里手抄一份"看起来一样"
 	// 的声明）：默认模型要摊到"已注册 runtime"，对账要借服务该 runtime 的 agent 读目录。
 	//
@@ -64,9 +63,7 @@ func newModelRig(t *testing.T) *modelRig {
 	runtimetest.Register(r.svc.reg, runtime.LaunchSpec{Command: "mate-test-" + runtimetest.ID + "-stub-not-on-path"})
 	// 隔离面由各 spec 自己声明（dsh 的 `DSH_HOME` / 合成底座的 `RTX_HOME`），内核只做机械投影。
 	r.svc.reg.ApplyIsolationEnv(home)
-	// 对账要借"服务该 runtime 的 agent"读目录：内置那条由播种给出，合成那条由夹具显式登记
-	// ——产品里第二个 agent 也是这么来的（内置清单只有一条）。
-	r.svc.agents[runtimetest.ID] = &AgentRec{ID: runtimetest.ID, Name: "RTX"}
+	// v19：对账不再借 agent 读目录（agent 面撤销），夹具只剩"注册表 + 隔离 env"两件事。
 	return &modelRig{genRig: r}
 }
 
@@ -241,78 +238,6 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	// v13 列化之后"生成的值"连落点都没有：整行字段是列，没有自由 JSON 可塞。
 	if row.Name != "" || row.Note != "" || row.InputModalities != "text" {
 		t.Fatalf("内容列应只有平台拥有的字段（name/note/input_modalities）: %+v", row)
-	}
-}
-
-// TestAgentDefaultModelIsDerivedReadOnly：`GET /agents` 的 `default_model` 随默认**自动变**，
-// 没有任何同步写逻辑；键只有**构建期底座**那一个（v12 之前按 `agent.runtimes[]` 求交）。
-func TestAgentDefaultModelIsDerivedReadOnly(t *testing.T) {
-	ctx := context.Background()
-	r := newModelRig(t)
-	// 第二个 agent：派生值与"是哪个 agent"无关（它只跟构建期底座与默认模型有关）。
-	r.svc.agents["a2"] = &AgentRec{ID: "a2", Name: "A2"}
-
-	m1 := r.createModel(t, "p1", "m-1")
-	m2 := r.createModel(t, "p1", "m-2")
-
-	find := func(id string) dtoagent.AgentResp {
-		t.Helper()
-		agents, err := r.svc.ListAgents()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, a := range agents {
-			if a.ID == id {
-				return a
-			}
-		}
-		t.Fatalf("agent %s 不在列表里", id)
-		return dtoagent.AgentResp{}
-	}
-	if dm := find("a1").DefaultModel; len(dm) != 0 {
-		t.Fatalf("尚无默认时不该有 default_model: %+v", dm)
-	}
-	if _, err := r.svc.UpdateModel(ctx, m1.ID, dtomodel.ModelPatchReq{IsDefault: ptr(true)}); err != nil {
-		t.Fatal(err)
-	}
-	// 单一默认摊到**构建期底座**那一个键：两个 agent 拿到同一个值。
-	if dm := find("a1").DefaultModel; len(dm) != 1 || dm[runtime.SelectedRuntime()] != "m-1" {
-		t.Fatalf("a1 的默认应只有构建期底座一个键: %+v", dm)
-	}
-	if dm := find("a2").DefaultModel; len(dm) != 1 || dm[runtime.SelectedRuntime()] != "m-1" {
-		t.Fatalf("a2 与 a1 同源（派生只按构建期底座算）: %+v", dm)
-	}
-	if _, err := r.svc.UpdateModel(ctx, m2.ID, dtomodel.ModelPatchReq{IsDefault: ptr(true)}); err != nil {
-		t.Fatal(err)
-	}
-	if dm := find("a1").DefaultModel; dm[runtime.SelectedRuntime()] != "m-2" {
-		t.Fatalf("a1 的默认应跟随默认值变为 m-2: %+v", dm)
-	}
-}
-
-// TestAgentWriteFaceRejectsDefaultModel：`POST/PATCH /agents` 显式拒绝 `default_model`。
-func TestAgentWriteFaceRejectsDefaultModel(t *testing.T) {
-	ctx := context.Background()
-	r := newModelRig(t)
-	_, err := r.svc.CreateAgent(ctx, dtoagent.AgentCreateReq{
-		ID:           "a-new",
-		DefaultModel: json.RawMessage(`{"stub":"m-1"}`),
-	})
-	if errCode(err) != "default_model_is_derived" || codeOf(err) != 40001 {
-		t.Fatalf("POST /agents 带 default_model 应 40001 拒绝，got %q/%d（%v）", errCode(err), codeOf(err), err)
-	}
-	if !strings.Contains(err.Error(), "设置 · 模型") {
-		t.Fatalf("文案应指路「设置 · 模型」: %v", err)
-	}
-	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{
-		DefaultModel: json.RawMessage(`{"stub":"m-1"}`),
-	}); errCode(err) != "default_model_is_derived" {
-		t.Fatalf("PATCH /agents/:id 带 default_model 应被拒，got %q（%v）", errCode(err), err)
-	}
-	if _, err := r.svc.UpdateAgent(ctx, "a1", dtoagent.AgentUpdateReq{
-		DefaultModel: json.RawMessage(`null`),
-	}); err != nil {
-		t.Fatalf("default_model:null 不该报错: %v", err)
 	}
 }
 

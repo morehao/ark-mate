@@ -395,6 +395,101 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    fail-closed 语义，逐条不变；本次只**新增**上面这些端口与守卫、**删除** opencode 适配面、
 >    **改名**一个构建期覆盖键，没有别的改动。
 
+> **决策变更 v19（agent 概念整个并入 runtime；用户不可自定义 + 数据目录布局参照 DSH，2026-10-14）**：
+> 三件事一次做完，因为它们是同一个判断的三个面：**agent 这个概念在本仓没有独立身份**。
+> ① **用户永远不能自定义 agent**（本轮的直接触发）。此前用户面把 agent 当"可配置的资源"，而它的
+>    每个字段要么是**派生事实**（`is_default` / `session_count` / `default_model`），要么是**平台事实**
+>    （`permission_policy`、`provider`）。撤掉自定义面之后没有剩余字段可写——所以这不是"收紧权限"，
+>    而是这个概念本身不该以"资源"的形态存在。
+> ② **agent 并入 runtime**。`builtinAgents` 只有一行且与 `dsh` 的 Spec 一一对应（`id` 就是 runtime id），
+>    `defaultAgentID()` 本来就返回构建期固定的那个 runtime id；会话已经同时带 `agent_id`（归属）与
+>    `runtime_id`（执行事实，v17 名），事件 payload 甚至两个都带。于是"哪个 agent 在跑"这个问题在仓里
+>    有**两个答案指向同一个东西**——收成一个：只留 runtime。
+>    - **撤掉**：表 `agents`（v19 迁移 drop）、`DefinitionKindAgent`、`dtoagent`/`ctragent`/`svcagent`、
+>      `/agents/*` 全部路由（含 `:id/default`、`:id/start`、`:id/stop`、`:id/capabilities`、
+>      `:id/diagnostics`）、`mate agent import|export`、装配期 agent 目录导入、`/library?kind=agent`、
+>      `mate mcp bridge --agent`、`gateway.Scope.AgentID`、`automations.target.agent_id`、
+>      用量 `group_by=agent` 与 `?agent_id=`、事件 payload 的 `agent_id`、`sessions.agent_id` 列，
+>      以及五个错误码（`agent_not_found`/`agent_exists`/`seed_agent_readonly`/`reserved_agent_id`/
+>      `default_model_is_derived`）。
+>    - **替换而不是新增**：诊断从 `/agents/:id/diagnostics` 改为 **`GET /runtime/diagnostics`**；
+>      原 `/agents/:id/capabilities` 的能力面**折回**既有的 `GET /capabilities`（不新增平行面）；
+>      `GET /meta` **新增** `runtime{id,name,version}`——`/meta` 是既有的装配事实出口，加字段比加路由
+>      便宜（没有路由表churn，也不给用户新的选择面）。
+>    - **`runtime_id` 的立场反转，记在此处**：v17 时 `internal/manager/service.go` 的注释写着
+>      "P0 起不再记录 runtime 身份"；本轮反过来——runtime 是**唯一的身份事实**，那句话随本批删除。
+> ③ **数据目录布局参照 DSH**（`packages/util/home-paths`；抄四条、不抄三条）。抄的是：① 单根 +
+>    环境变量 + **显示名**（默认数据目录在人类可读输出里渲染成 `~/.ark-mate`，绝对路径只留机器面
+>    `--json` / `/meta`）；② 可丢与不可丢分家——迁移备份收进 **`backups/`**（本机实测根下曾累积 7 个
+>    `mate.db.bak-v12…v17`），而**老布局的备份照旧是有效退路**：`mate doctor` 如实报"遗留"并给处置
+>    建议，**绝不自动搬移或删除**（那会改掉回退路径或直接关门）；③ 一词一目录：`agents/` →
+>    `providers/`（`MATE_PROVIDERS`）——撤掉 agent 定义后那个目录只剩 `providers.json` 一件事——
+>    并提供**一次性导入**（新目录没有 `providers.json` 而旧 `<MATE_HOME>/agents/providers.json` 存在时
+>    导入一次 + WARN 指向新路径，**不删旧文件**）；④ 数据单份、安装分权。
+>    **不抄**：`profiles/<入口>/`（DSH 用它分的是**安装**而不是数据；本仓数据本来就单份，真正的痛点是
+>    "两个核抢一个 `mate.db`"，那要靠单持有解决，不是拆数据）、根下 `.env` 放密钥（见 v20，我们走
+>    "库 + 0600 镜像"）、`storages/`（那是它的存储后端抽象，本仓对应物是 `runtime/<id>/` 与
+>    `workspaces/`，概念不同，不硬套）。
+> ④ **新增守卫**：`TestNoAgentVocabulary`（`internal/archtest/vocabulary_test.go` 家族，与 v15 的
+>    `TestNoConversationVocabulary` 同形）钉"被撤掉的 agent 面词汇"零命中，白名单只放**别人的原文**
+>    与历史（ACP 协议自身的 agent 概念、历史迁移 DDL、停在旧版本的测试夹具）；`TestSessionIdentityIsRuntimeOnly`
+>    钉会话身份只剩 runtime（实体 / DAO / 迁移 / 用量聚合四处都不得再有 `agent_id`）。
+> ⑤ **代价如实写**：撤掉 agent 自定义面意味着用户不能再为不同任务准备不同"人格 + 权限组合"。这是
+>    **产品选择**（底座构建期固定、能力由会话级 `capabilities` 与平台默认决定），不是能力退化；
+>    反面代价是本仓少了一层"按任务切分权限"的表达位——将来若要恢复，应作为 **runtime 的会话级配置**
+>    出现，而不是把 agent 概念请回来。
+
+> **决策变更 v20（凭据去 vault 化：密钥进库 + 明文镜像 + 四层回落，2026-10-14）**：
+> 本条**推翻 v13 的硬不变量**「明文密钥结构上进不了库」，所以先写清它换来什么、代价是什么。
+> ① **为什么可以推翻**：vault 的真实收益从来不是"防本机读取"——密钥与密文同目录同属主，而 dsh 那侧的
+>    原生凭据文档（`<$DSH_HOME>/.credentials.yaml`，隔离根内）本来就是**明文**（`pkg/runtime/dsh/credentials.go`
+>    就是写它的那一处）。vault 真正防住的是"密钥进 DB / DB 备份 / 诊断包 / 事件 / transcript"这条链。
+>    既然只要保住那一条收益就够，那么加密带来的复杂度（主密钥的保管与丢失、`vault_unavailable` 与
+>    "密文解不开"两类失败态、写面"vault 与 SQLite 无法同事务"的补偿逻辑及其 H4 故障注入面）
+>    就是**可以省掉的成本**——这正是用户拍板的理由（"虽有加密但成本有点高"）。
+> ② **新形态**：`providers.key` **列**（provider 密钥进库）+ 新表 **`mcp_secrets(ref, value, revision,
+>    updated_at)`**（一个 MCP server 可以有多个 `secret_env`/`secret_headers` 引用，一列装不下；而
+>    `mcp_servers.body` 会进审计表与导入导出载体，明文不能进那儿）+ **`<MATE_HOME>/credentials.json`
+>    作为双写镜像**（严格 `ref → value` 映射，0600，原子写）。
+> ③ **权威与冲突：DB 权威，文件是可重建镜像**。写路径先落库、再双写镜像；镜像写失败只 WARN + 记进
+>    `problems[]`（可从库重建，不阻断也不回滚）；库里没有而文件里有 → **不自动回灌**，`mate doctor`
+>    报出并指路导入。memory 模式（没有库）文件即事实源，那时写失败就是整笔失败。
+> ④ **四层回落**（照 DSH `packages/credentials/credentials-local` 的分层与它自己写明的理由）：
+>    **继承环境（只读，最高）> 托管文件 > `<cwd>/.env` > `<MATE_HOME>/.env`**。继承环境最高是因为
+>    "这次运行的显式意图"不能被静默遮蔽（`DEEPSEEK_API_KEY=… mate serve`、CI secret、容器 `-e`）；
+>    托管文件高于 `.env` 是因为"面板上写的密钥"不能被一份陈旧 `.env` 顶掉；项目级高于用户级是因为
+>    "更具体的位置赢"。**顺带修一个既有静默问题**：dsh 侧的实测口径是"继承环境 > 存储文档"，也就是说
+>    用户导出的同名变量今天就已经赢过平台存的密钥，而平台侧的 `has_key` /「设置 · 模型」对此一无所知
+>    （面板说"已设置"，生效的是另一把）——分层落地后 `describe` 能如实报 `source`。
+> ⑤ **必须守住的不变量**（缺一条就是纯降级）：① 托管文件 0600 且**权限不合 fail-loud**（dsh 自己在
+>    启动与重载都拒绝"可被属主之外读取"的文档，同一口径）；② 密钥绝不进事件 / transcript / 日志 /
+>    错误文案 / 诊断包 / argv（`ps eww`）；③ 继续用 `redact.RegisterDynamicSecret` 登记真值；
+>    ④ 导入导出**不回写明文**；⑤ `has_key` 与 `problems[]` 的语义改写为"分层里读到值 / 权限或文件损坏"。
+> ⑥ **迁移**：一次性把 `vault/{providers,mcp}/*.enc` 解出来写进 `providers.key` / `mcp_secrets` 与镜像
+>    文件。**搬运只读不删**（`ImportLegacyVault` 不删任何东西）：`vault/` 与 `vault.key` 留在盘上，
+>    `mate doctor` 报出「已迁移，可删」并说明密钥已进库，**删除是用户的显式动作**——被撤掉的机制
+>    由医生如实报出、由用户确认后自己删，这一条与「显式拒绝面必须点名被撤掉的键」同一口径：
+>    静默删掉用户的目录比留着它更糟（用户无法事后确认"我的密钥到底搬全了没有"）。
+> ⑦ **代价如实写（这次是真代价，别轻描淡写）**：① **DB 与其备份现在含明文密钥**——`mate.db`、
+>    `backups/mate.db.bak-v*`、诊断包、任何"把库发给我看看"的动作都会带走密钥；于是"备份目录 0700 /
+>    文件 0600"从建议变成**硬要求**，`mate doctor` 的敏感文件清单要把 `mate.db` 与备份一并按密钥面
+>    看待。② 主密钥丢失这条故障类别消失，换成"文件权限 / 内容损坏"。③ 从"库被读走也拿不到密钥"退到
+>    "库被读走就等于密钥泄露"——本机单用户桌面形态下可接受，**共享或多用户机器上不再安全**，
+>    这一条要写进 `docs/deployment.md`。
+> ⑧ **`<cwd>/.env` 那一层的 `cwd` 是显式输入，不是各进程各自的 `os.Getwd()`**（2026-10-14 收尾裁决）：
+>    网关是**底座 spawn 的子进程**，它的 cwd（会话工作区）不是用户选的；核心是自己起的，cwd 可解释。
+>    所以语义定死为「**用户启动 `mate serve` 的那个目录**」，由核心在生成 `mate mcp bridge` 条目时
+>    经该条目的 `env`（`MATE_MCP_CRED_CWD`）交下去——走 `env` 而不是 `Args`，因为 `Args` 逐字进能力
+>    指纹，换个目录启动就会让所有会话换一次底座代际。网关侧优先级：显式入参 > 该环境变量 > 自己的
+>    cwd，**落在第三支时打 WARN**（"两个进程用了不同的 cwd"不许静默）。这条 WARN 按 M7-2 的纪律落在
+>    `<MATE_HOME>/logs/<日期>/ark-mate-mcp_full.log`（网关 stdout 是 JSON-RPC 协议流，诊断不走 stderr）。
+> ⑨ **已知残留（本版刻意不解决，别当成漏做）**：① `mcp_secrets` 的值**没有界面写入口**（面板上填的是
+>    环境变量名），所以 doctor 在 `store:` 引用解析不到时只指路 `env:<ENV_NAME>`，**不写**"把值写进库"
+>    ——写不进去的出路等于没有出路（搬运/导入写进去的值不受影响）；② `SetProviderKey` 不落审计行
+>    （与 v19 的等价动作一致）；③ `UpdateProvider` 非原子（内容 CAS 与 `key` 列两条写，失败在回执
+>    `problems` 里如实报，不是静默）；④ 镜像里的陈旧值在用户重填前一直躺着，解析层**拒绝**"库不确认的
+>    managed 命中"，doctor 用 `missingInStore` 报出且**不自动回灌**。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个

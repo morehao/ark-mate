@@ -1,11 +1,12 @@
 package manager
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
-	"github.com/morehao/ark-mate/internal/vault"
+	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -42,10 +43,10 @@ func rtxSkillProjectionForTest() runtime.Projection {
 // （缺省零回归）的载体——connKey 见到空指纹要保持与今天逐字相同，同配置的两个会话仍共享一个暖进程。
 func TestCapabilityFingerprintDeclaredGate(t *testing.T) {
 	svc := fpRig(t)
-	if got := svc.capabilityFingerprint(&AgentRec{ID: "a"}, "rtx", nil); got != "" {
+	if got := svc.capabilityFingerprint("rtx", nil); got != "" {
 		t.Fatalf("未声明能力选择应得空指纹，got %q", got)
 	}
-	if got := svc.capabilityFingerprint(&AgentRec{ID: "a"}, "rtx", NewCapabilitySelection()); got == "" {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got == "" {
 		t.Fatal("声明了能力选择应有非空指纹")
 	}
 }
@@ -53,16 +54,17 @@ func TestCapabilityFingerprintDeclaredGate(t *testing.T) {
 // TestCapabilityFingerprintMCPSecretValueNotInFingerprint 计划里点名的那条：**改密钥值不改指纹、
 // 改引用名改指纹**。
 //
-// 值为 `vault:mcp/fs-token` 的引用在 vault 里换一份密文（轮换密钥）→ 指纹不变（否则一次密钥
-// 轮换会让所有会话换一次底座进程）；而把引用名换掉（换一把钥匙 / 换一个 vault 条目）→ 指纹变。
+// v20 起密钥值在库里（`mcp_secrets`）：换一份值（轮换密钥）→ 指纹不变（否则一次密钥轮换会让所有
+// 会话换一次底座进程）；而把引用名换掉（换一把钥匙 / 换一个库里条目）→ 指纹变。
 func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	home := t.TempDir()
-	svc := agentTestSvc(t, filepath.Join(home, "agents")) // 设定 agentDir → vault 落在 <home>
-	st, err := vault.Open(home)
-	if err != nil {
-		t.Fatalf("vault.Open: %v", err)
-	}
-	if err := st.Put("vault:mcp/fs-token", vault.KindMcpSecret, []byte("secret-one")); err != nil {
+	svc := providerTestSvc(t, filepath.Join(home, "providers"))
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer func() { _ = st.Close() }()
+	svc.EnableStore(st)
+	ctx := context.Background()
+	const ref = "store:mcp/fs-token"
+	if err := st.SetMcpSecret(ctx, ref, "secret-one"); err != nil {
 		t.Fatal(err)
 	}
 	svc.SetSkillProjections([]SkillProjection{{
@@ -72,7 +74,6 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 			Layout: runtime.LayoutIDToken + "/SKILL.md", Format: capability.FormatSkillMD, Tested: true,
 		},
 	}})
-	agent := &AgentRec{ID: "a"}
 
 	reg := func(secretRef string) {
 		t.Helper()
@@ -86,47 +87,47 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	reg("vault:mcp/fs-token")
-	base := svc.capabilityFingerprint(agent, "stub", NewCapabilitySelection())
+	reg(ref)
+	base := svc.capabilityFingerprint("stub", NewCapabilitySelection())
 	if base == "" {
 		t.Fatal("应有非空指纹")
 	}
 	// 记录一下：解析出来的明文确实存在且会进注入值（对照面）。
-	got := directMcp(svc.McpServersFor(agent, "stub", nil)) // 网关条目另计（它不含密钥）
+	got := directMcp(svc.McpServersFor("stub", nil)) // 网关条目另计（它不含密钥）
 	if len(got) != 1 || got[0].Env["FS_TOKEN"] != "secret-one" {
 		t.Fatalf("注入侧应解析出明文: %+v", got)
 	}
 
 	// 1) 轮换密钥值（同一引用指向的内容变了）→ 指纹不变。
-	if err := st.Put("vault:mcp/fs-token", vault.KindMcpSecret, []byte("secret-two-rotated")); err != nil {
+	if err := st.SetMcpSecret(ctx, ref, "secret-two-rotated"); err != nil {
 		t.Fatal(err)
 	}
-	if again := svc.capabilityFingerprint(agent, "stub", NewCapabilitySelection()); again != base {
+	if again := svc.capabilityFingerprint("stub", NewCapabilitySelection()); again != base {
 		t.Fatalf("轮换密钥值不该改指纹:\n%s\n%s", base, again)
 	}
 	// 2) 换明文 env 的值 → 同样不改指纹（只取键名）。
-	reg("vault:mcp/fs-token")
+	reg(ref)
 	m := svc.caps.ListMcpServers()[0]
 	m.Env = map[string]string{"FS_ROOT": "/other/root"}
 	if err := svc.caps.RegisterMcpServer(&m); err != nil {
 		t.Fatal(err)
 	}
-	if again := svc.capabilityFingerprint(agent, "stub", NewCapabilitySelection()); again != base {
+	if again := svc.capabilityFingerprint("stub", NewCapabilitySelection()); again != base {
 		t.Fatalf("明文 env 的值不该改指纹（只取键名）:\n%s\n%s", base, again)
 	}
 	// 3) 换引用名 → 指纹必须变（换了一把钥匙）。
-	reg("vault:mcp/other-token")
-	if again := svc.capabilityFingerprint(agent, "stub", NewCapabilitySelection()); again == base {
+	reg("store:mcp/other-token")
+	if again := svc.capabilityFingerprint("stub", NewCapabilitySelection()); again == base {
 		t.Fatal("换密钥引用名必须改指纹")
 	}
 	// 4) 换明文 env 的**键名** → 也必须变。
-	reg("vault:mcp/fs-token")
+	reg(ref)
 	m2 := svc.caps.ListMcpServers()[0]
 	m2.Env = map[string]string{"FS_BASE": "/tmp/root"}
 	if err := svc.caps.RegisterMcpServer(&m2); err != nil {
 		t.Fatal(err)
 	}
-	if again := svc.capabilityFingerprint(agent, "stub", NewCapabilitySelection()); again == base {
+	if again := svc.capabilityFingerprint("stub", NewCapabilitySelection()); again == base {
 		t.Fatal("换明文 env 键名必须改指纹")
 	}
 }
@@ -135,7 +136,6 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 // 禁用的、不声明给该 runtime 的都不进（它们对这个进程的能力集没有影响）。
 func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 	svc := fpRig(t)
-	agent := &AgentRec{ID: "a"}
 	must := func(sk capability.Skill) {
 		t.Helper()
 		if err := svc.caps.RegisterSkill(&sk); err != nil {
@@ -143,17 +143,17 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 		}
 	}
 	must(capability.Skill{ID: "alpha", Runtimes: []string{"rtx"}, Body: "# alpha"})
-	base := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection())
+	base := svc.capabilityFingerprint("rtx", NewCapabilitySelection())
 
 	// 加一条不投给 rtx 的 → 指纹不变。
 	must(capability.Skill{ID: "for-dsh", Runtimes: []string{"dsh"}, Body: "# d"})
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got != base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got != base {
 		t.Fatal("不投给该 runtime 的 skill 不该影响指纹")
 	}
 	// 加一条禁用但适用的 → 指纹不变（禁用 = 不投放）。
 	off := false
 	must(capability.Skill{ID: "off", Runtimes: []string{"rtx"}, Body: "# off", Enabled: &off})
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got != base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got != base {
 		t.Fatal("禁用的 skill 不该影响指纹")
 	}
 	// 改已投放 skill 的正文 → 指纹必变。
@@ -161,13 +161,13 @@ func TestCapabilityFingerprintSkillSelection(t *testing.T) {
 	if err := svc.caps.RegisterSkill(&alpha); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got == base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got == base {
 		t.Fatal("正文变了必须改指纹")
 	}
 	// 启用一条新 skill → 指纹必变。
 	on := true
 	must(capability.Skill{ID: "off", Runtimes: []string{"rtx"}, Body: "# off", Enabled: &on})
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got == base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got == base {
 		t.Fatal("新增会投放的 skill 必须改指纹")
 	}
 }
@@ -192,23 +192,22 @@ func TestCapabilityFingerprintBodyDigestReusesSidecarHash(t *testing.T) {
 // 底座升级或投影约定变化后，"这个会话在哪个底座形态上跑的"必须可答。
 func TestCapabilityFingerprintRuntimeShape(t *testing.T) {
 	svc := fpRig(t)
-	agent := &AgentRec{ID: "a"}
 	if err := svc.caps.RegisterSkill(&capability.Skill{ID: "alpha", Body: "# a"}); err != nil {
 		t.Fatal(err)
 	}
-	base := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection())
+	base := svc.capabilityFingerprint("rtx", NewCapabilitySelection())
 
 	sp, _ := svc.regSpec("rtx")
 	sp.Version = "rtx acp v2"
 	svc.reg.Register(sp)
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got == base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got == base {
 		t.Fatal("底座版本变了必须改指纹")
 	}
 	// 还原版本，改投影 root → 也要变。
 	sp.Version = "rtx acp"
 	sp.Projections[0].Root = "${HOME}/.config/rtx/skill"
 	svc.reg.Register(sp)
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got == base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got == base {
 		t.Fatal("投影形态变了必须改指纹")
 	}
 }
@@ -224,11 +223,11 @@ func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 	if parts := svc.projectedSkillParts("remote", nil); len(parts) != 0 {
 		t.Fatalf("无 skill 投影的 runtime 不该有投放片段: %+v", parts)
 	}
-	base := svc.capabilityFingerprint(&AgentRec{ID: "a"}, "remote", NewCapabilitySelection())
+	base := svc.capabilityFingerprint("remote", NewCapabilitySelection())
 	if err := svc.caps.RegisterSkill(&capability.Skill{ID: "beta", Body: "# b"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.capabilityFingerprint(&AgentRec{ID: "a"}, "remote", NewCapabilitySelection()); got != base {
+	if got := svc.capabilityFingerprint("remote", NewCapabilitySelection()); got != base {
 		t.Fatal("无投影时 skill 变化不该改指纹")
 	}
 }
@@ -242,42 +241,42 @@ func TestCapabilityFingerprintNoProjectionMeansNoSkillPart(t *testing.T) {
 func TestCapabilityFingerprintMCPTransportFilter(t *testing.T) {
 	svc := fpRig(t) // rtx: stdio + http
 	svc.SetMcpGatewayEnabled(false)
-	agent := &AgentRec{ID: "a"}
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "fs", Transport: capability.TransportStdio, Command: "/usr/local/bin/npx",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	base := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection())
+	base := svc.capabilityFingerprint("rtx", NewCapabilitySelection())
 	// sse 不在该 runtime 的承载列表里 → 不影响指纹。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "sse", Transport: capability.TransportSSE, URL: "https://x.invalid/sse",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.capabilityFingerprint(agent, "rtx", NewCapabilitySelection()); got != base {
+	if got := svc.capabilityFingerprint("rtx", NewCapabilitySelection()); got != base {
 		t.Fatal("不可承载传输的 server 不该影响指纹")
 	}
-	// agent 白名单：不在名单里的 server 不进指纹。
+	// 会话钉住的白名单（v19：选区只有这一处来源）：不在名单里的 server 不进指纹。
 	one := []string{"fs"}
 	both := []string{"fs", "sse"}
 	both2 := []string{"fs", "http-ok"}
-	onlyFS := svc.capabilityFingerprint(&AgentRec{ID: "a", Mcps: &one}, "rtx", NewCapabilitySelection())
-	if withBoth := svc.capabilityFingerprint(&AgentRec{ID: "a", Mcps: &both}, "rtx", NewCapabilitySelection()); withBoth != onlyFS {
+	onlyFS := svc.capabilityFingerprint("rtx", &CapabilitySelection{Mcps: &one})
+	if withBoth := svc.capabilityFingerprint("rtx", &CapabilitySelection{Mcps: &both}); withBoth != onlyFS {
 		// 白名单里多写了一个**该 runtime 不承载**的 id（sse）：注入集一模一样，所以指纹也必须
 		// 一模一样。"声明了但用不上"要以能力面板里的原因呈现，不是靠多起一个进程来表达。
 		t.Fatal("白名单里的不可承载项不该改变指纹")
 	}
-	// 白名单外再放一个可承载的 server → 指纹必变。
+	// 白名单外再放一个可承载的 server：没被选中 → 指纹不变。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{
 		ID: "http-ok", Transport: capability.TransportHTTP, URL: "https://x.invalid/mcp",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := svc.capabilityFingerprint(&AgentRec{ID: "a", Mcps: &one}, "rtx", NewCapabilitySelection()); got != onlyFS {
+	if got := svc.capabilityFingerprint("rtx", &CapabilitySelection{Mcps: &one}); got != onlyFS {
 		t.Fatal("白名单外新增 server 不该影响指纹（没被选中）")
 	}
-	if got := svc.capabilityFingerprint(&AgentRec{ID: "a", Mcps: &both2}, "rtx", NewCapabilitySelection()); got == onlyFS {
+	// 把它一起选进白名单 → 指纹必变。
+	if got := svc.capabilityFingerprint("rtx", &CapabilitySelection{Mcps: &both2}); got == onlyFS {
 		t.Fatal("选中新增的 server 必须改指纹")
 	}
 }

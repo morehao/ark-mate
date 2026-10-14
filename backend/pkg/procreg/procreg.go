@@ -3,7 +3,7 @@
 // 「daemon 侧进程注册表 JSON 兜底回收孤儿进程」）。
 //
 // 设计要点（宁可漏杀，不可误杀）：
-//   - 每个条目记录 pid / pgid / 命令 / runtime / agent / 启动时刻 / daemon 实例 id；
+//   - 每个条目记录 pid / pgid / 命令 / runtime / 启动时刻 / daemon 实例 id；
 //   - 只有「非本实例」登记的条目才是候选孤儿；
 //   - 进程不存在 → 只清账，不报错；
 //   - 进程存在但当前 pgid 与登记值不一致 → 判定 PID 被复用（或已脱离进程组），跳过并留日志；
@@ -24,12 +24,14 @@ import (
 )
 
 // Entry 一条子进程登记。
+//
+// v19 起没有 `agent_id`：进程归属就是 runtime（底座构建期固定，见 `Runtime`）。老注册表文件里
+// 若还留着那个键，`json.Unmarshal` 会忽略它——读面宽容，不需要迁移。
 type Entry struct {
 	PID       int       `json:"pid"`
 	PGID      int       `json:"pgid"`
 	Command   string    `json:"command"`
 	Runtime   string    `json:"runtime"`
-	AgentID   string    `json:"agent_id"`
 	StartedAt time.Time `json:"started_at"`
 	Instance  string    `json:"instance"`
 }

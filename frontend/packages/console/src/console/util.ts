@@ -1,11 +1,18 @@
-import type { Agent, SessionSummary, StreamEntry } from '@ark-mate/types'
+import type { RuntimeInfo, SessionSummary, StreamEntry } from '@ark-mate/types'
 import type { SessionView } from '../store'
 
-/** 会话标题：服务端已推导（sm.title，可被 PATCH 覆盖）优先；其次首条用户消息/正文；最后「新会话 · <agent>」。 */
+/**
+ * 会话标题：服务端已推导（sm.title，可被 PATCH 覆盖）优先；其次首条用户消息/正文；
+ * 最后「新会话 · <底座名>」。
+ *
+ * `runtimeName` 只影响最后那层兜底（v19 前传的是 agent 列表，用来拼「新会话 · <agent 名>」）：
+ * 一个还没发过言的会话唯一确定的事实就是"它归在哪个底座上"。取不到底座事实时退回短 id，
+ * 不直接摊 36 位平台 uuid（对外 id 展示策略，P3 F4）。
+ */
 export function titleFor(
   sm: SessionSummary | undefined,
   view: SessionView | undefined,
-  agents: Agent[],
+  runtimeName?: string,
 ): string {
   if (sm && sm.title) return sm.title
   if (view) {
@@ -15,20 +22,23 @@ export function titleFor(
     if (assistant?.text) return assistant.text
   }
   if (sm) {
-    const a = agents.find((x) => x.id === sm.agent_id)
-    if (a) return `新会话 · ${a.name}`
-    // agent 已被删除等兜底：不直接摊出 36 位平台 uuid（对外 id 展示策略，P3 F4）。
+    if (runtimeName) return `新会话 · ${runtimeName}`
     return `新会话 · ${shortId(sm.id)}`
   }
   return '新会话'
 }
 
-export function agentOf(agents: Agent[], id: string | undefined): Agent | undefined {
-  return agents.find((a) => a.id === id)
-}
-
-export function agentNameOf(agents: Agent[], id: string | undefined): string {
-  return agentOf(agents, id)?.name ?? id ?? '未知 agent'
+/**
+ * 会话上要显示的底座名（v19 前是 `agentNameOf`）。
+ *
+ * 判据是**会话自己的 `runtime_id`**（执行事实，可能停在别的底座上）而不是构建期固定的那个：
+ * 两者一致时显示展示名，不一致时如实摊 id——拿 meta 的名字去盖会把"这条会话其实跑在别的底座上"
+ * 说成"跑在当前底座上"。`runtime_id` 缺失时回落当前底座，仍缺就报"未知底座"。
+ */
+export function runtimeLabelOf(runtime: RuntimeInfo | null, runtimeId: string | undefined): string {
+  if (!runtimeId) return runtime?.name || runtime?.id || '未知底座'
+  if (runtime && runtimeId === runtime.id) return runtime.name || runtime.id
+  return runtimeId
 }
 
 /**

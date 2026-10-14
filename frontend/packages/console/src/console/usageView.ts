@@ -71,17 +71,17 @@ export function successRate(b: UsageBucket): number | null {
 
 export interface UsageRow {
   key: string
-  /** 展示名（agent_id 或日期）。 */
+  /** 展示名（底座 id 或日期）。 */
   label: string
   bucket: UsageBucket
 }
 
-/** 把汇总桶转成行模型：agent 分组按 runs 降序（同量按 key 升序），day 分组按日期升序。 */
+/** 把汇总桶转成行模型：v19 起只有 day 分组（按日期升序）。 */
 export function usageRows(summary: UsageSummary | null): UsageRow[] {
   if (!summary) return []
   const rows = summary.buckets.map((b) => ({
     key: b.key,
-    label: b.agent_id || b.key,
+    label: b.runtime_id || b.key,
     bucket: b,
   }))
   if (summary.group_by === 'day') return rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))

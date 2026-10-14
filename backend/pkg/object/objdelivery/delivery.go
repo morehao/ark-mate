@@ -69,7 +69,7 @@ const (
 
 // 交付通道词表（设计「交付矩阵」一节）：五条互不替代的通道。
 const (
-	// ChannelDialEnv T1：注入 runtime 子进程 env（provider 凭据、agent 权限策略/凭据选择）。
+	// ChannelDialEnv T1：注入 runtime 子进程 env（provider 凭据、权限策略）。
 	ChannelDialEnv = "dial_env"
 	// ChannelSessionConfig T2：写 ACP 会话的配置项（会话级模型覆盖、默认模型快路径）。
 	ChannelSessionConfig = "session_config"
@@ -112,8 +112,6 @@ const (
 	KindSkill = "skill"
 	// KindMcp MCP server。
 	KindMcp = "mcp"
-	// KindAgent agent 定义（权限策略、凭据选择、mcps 白名单）。
-	KindAgent = "agent"
 	// KindAutomation 自动化定义（平台自身的调度器）。
 	KindAutomation = "automation"
 	// KindTool 工具（派生数据，随所属 MCP server）。
@@ -144,15 +142,10 @@ var table = map[string]Delivery{
 		Note: "把 MCP server 注入会话的能力集（启用 ∩ transport ∩ 白名单）；" +
 			"新会话立即带上，已声明能力的会话在下一个轮次边界迁移",
 	},
-	KindAgent: {
-		Channel: ChannelDialEnv, Effect: EffectNextRun,
-		Note: "agent 的权限策略与凭据选择随子进程 env 下发（nativePermissionEnvFor / <TYPE>_API_KEY）；" +
-			"改它会让引用它的会话在下一轮重建连接",
-	},
 	KindAutomation: {
 		Channel: ChannelNone, Effect: EffectImmediate,
 		Note: "平台自身的调度器：不向任何底座交付，写面立即在平台内生效（下一个调度刻度即可能触发一轮会话）；" +
-			"要改底座侧行为请改它引用的 agent 与凭据",
+			"要改底座侧行为请改它引用的凭据",
 	},
 	KindTool: {
 		Channel: ChannelSessionInject, Effect: EffectNextRun,

@@ -210,3 +210,101 @@ func TestOpenReadOnly(t *testing.T) {
 		t.Error("只读句柄不应能写入")
 	}
 }
+
+// TestOpenTightensDBFilePerms 库文件（及其事务旁车）必须收口到 0600：v20 起库内含明文密钥。
+//
+// 失效方式是**静默**的：SQLite 按进程 umask 建文件（常见的 022 就是 0644），于是同一台机器上的
+// 其他用户能直接把 `providers.key` 的明文读走；而迁移备份与 `<MATE_HOME>/credentials.json` 都是
+// 0600，谁检查都会觉得"已经收口了"。实测 2026-10-14：用户真实数据目录里 `mate.db` 就是 `0644`。
+//
+// 三段判据：① 旧版本建出来的 0644 库文件在打开后被收到 0600（这是真实的升级路径，不是假想）；
+// ② 全新库（打开时文件还不存在）也要 0600；③ `?mode=ro` 是用户显式声明的只读语义，**不动权限**。
+func TestOpenTightensDBFilePerms(t *testing.T) {
+	dir := t.TempDir()
+
+	// ① 已有库文件：模拟旧版本按 umask 建出来的 0644。
+	old := filepath.Join(dir, "old.db")
+	if err := os.WriteFile(old, nil, 0o644); err != nil {
+		t.Fatalf("准备旧库文件: %v", err)
+	}
+	db, err := Open(old)
+	if err != nil {
+		t.Fatalf("open old: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE t(v TEXT)`).Error; err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO t(v) VALUES('x')`).Error; err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if got := mustPerm(t, old); got != 0o600 {
+		t.Errorf("库文件权限 = %o，期望 600（v20 起库内含明文密钥，同机其他用户不该读得到）", got)
+	}
+	// 旁车装的是同一批页面：已出现就必须同权。
+	for _, p := range []string{old + "-wal", old + "-shm"} {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if got := mustPerm(t, p); got != 0o600 {
+			t.Errorf("旁车 %s 权限 = %o，期望 600（它装的是同一批明文页面）", filepath.Base(p), got)
+		}
+	}
+
+	// ② 全新库：文件在打开时还不存在（SQLite 尚未落盘或由我们按 0600 建）。
+	fresh := filepath.Join(dir, "fresh.db")
+	if _, err := Open(fresh); err != nil {
+		t.Fatalf("open fresh: %v", err)
+	}
+	if got := mustPerm(t, fresh); got != 0o600 {
+		t.Errorf("新库文件权限 = %o，期望 600（第一次建库也必须按密钥面走）", got)
+	}
+
+	// ③ 只读挂载不动权限：那是用户显式声明的语义。
+	ro := filepath.Join(dir, "ro.db")
+	roDB, err := Open(ro)
+	if err != nil {
+		t.Fatalf("open ro(prepare): %v", err)
+	}
+	if err := roDB.Exec(`CREATE TABLE t(v TEXT)`).Error; err != nil {
+		t.Fatalf("create table(ro prepare): %v", err)
+	}
+	if err := os.Chmod(ro, 0o644); err != nil {
+		t.Fatalf("chmod ro prepare: %v", err)
+	}
+	if _, err := Open(ro + "?mode=ro"); err != nil {
+		t.Fatalf("open ro: %v", err)
+	}
+	if got := mustPerm(t, ro); got != 0o644 {
+		t.Errorf("只读挂载下权限被改成了 %o——`?mode=ro` 是用户显式声明的只读语义，不该由我们改权限", got)
+	}
+}
+
+// TestOpenMemoryDSNLeavesNoFile 内存库的 DSN 不得在磁盘上留下任何东西。
+//
+// 这条是**实测补的**：收口逻辑按 `?` 切开 DSN 取路径，而 `file:memdb1?mode=memory` 在 `?` 之前
+// 那半看起来就是个文件名——于是第一次跑测试就在**包目录**里凭空造出一个空文件 `file:memdb1`
+// （它随后出现在 `git status` 的未跟踪清单里）。内存库没有文件落点，判据是"它也不该被造出来"。
+func TestOpenMemoryDSNLeavesNoFile(t *testing.T) {
+	const dsn = "file:memdb1?mode=memory"
+	stray := "file:memdb1"
+	defer os.Remove(stray) // 万一判据失效，别把垃圾留在工作区
+	if _, err := os.Stat(stray); err == nil {
+		os.Remove(stray)
+	}
+	if _, err := Open(dsn); err != nil {
+		t.Fatalf("open memdb: %v", err)
+	}
+	if _, err := os.Stat(stray); err == nil {
+		t.Errorf("内存库 DSN %q 在磁盘上留下了文件 %q——收口逻辑把 DSN 当成了路径", dsn, stray)
+	}
+}
+
+// mustPerm 取一个文件的权限位（读不到即失败：判据的输入必须存在）。
+func mustPerm(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
+}

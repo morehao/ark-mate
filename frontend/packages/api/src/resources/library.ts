@@ -4,7 +4,7 @@ import type { LibraryItem } from '@ark-mate/types'
 // ——— M2-4 Library 统一读模型（GET /library） ———
 
 /**
- * 统一能力清单：skill/mcp/agent/tool 四类同构。
+ * 统一能力清单：skill/mcp/tool 三类同构（v19 起没有 agent——它不是一种可投放的能力）。
  *
  * 每条回带**逐 runtime 的 `applicability[]`**（`projected`/`untested`/`not_configured`/
  * `not_applicable`/`disabled` + 人话 `reason`）——**刻意不给「整体可用吗」的合并结论**：

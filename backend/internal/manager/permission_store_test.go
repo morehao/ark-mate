@@ -24,7 +24,7 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc1 := NewService(reg, nil)
 	svc1.EnableStore(st1)
 	orch1 := NewOrchestrator(svc1, reg)
-	svc1.registerSession(&SessionRec{ID: "s1", AgentID: "agent-stub"})
+	svc1.registerSession(&SessionRec{ID: "s1"})
 
 	toolRun := acl.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
 	orch1.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")
@@ -64,8 +64,8 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc2 := NewService(reg, nil)
 	svc2.EnableStore(st2)
 	orch2 := NewOrchestrator(svc2, reg)
-	svc2.registerSession(&SessionRec{ID: "s1", AgentID: "agent-stub"})
-	svc2.registerSession(&SessionRec{ID: "s2", AgentID: "agent-stub"})
+	svc2.registerSession(&SessionRec{ID: "s1"})
+	svc2.registerSession(&SessionRec{ID: "s2"})
 
 	// 恢复前先记录（模拟重启前的历史记忆），恢复后二者叠加。
 	orch2.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")

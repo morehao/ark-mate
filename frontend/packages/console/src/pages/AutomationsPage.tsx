@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Button,
@@ -62,7 +62,6 @@ interface FormValues extends ScheduleFormValues {
   id?: string
   name: string
   enabled: boolean
-  agent_id: string
   cwd: string
   model?: string
   prompt: string
@@ -84,8 +83,6 @@ const toneColor = (tone: 'success' | 'muted' | 'warning' | 'danger'): string => 
 
 export function AutomationsPage() {
   const showToast = useMate((s) => s.showToast)
-  const agents = useMate((s) => s.agents)
-  const refreshAgents = useMate((s) => s.refreshAgents)
   const navigate = useNavigate()
 
   const [rows, setRows] = useState<Automation[]>([])
@@ -111,7 +108,6 @@ export function AutomationsPage() {
 
   useEffect(() => {
     void load()
-    void refreshAgents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -123,11 +119,6 @@ export function AutomationsPage() {
       return undefined
     }
   }
-
-  const agentOptions = useMemo(
-    () => agents.map((a) => ({ label: `${a.name}（${a.id}）`, value: a.id })),
-    [agents],
-  )
 
   // 表单初值走 **`initialValues`**（见下面 editorInitialValues），不在这里命令式写。
   //
@@ -160,7 +151,6 @@ export function AutomationsPage() {
         minute: 0,
         days_of_week: [],
         enabled: true,
-        agent_id: agents[0]?.id ?? 'dsh',
         cwd: '',
         prompt: '',
       }
@@ -259,7 +249,7 @@ export function AutomationsPage() {
             <span style={{ fontSize: 12, color: tokens.error }}>{a.error}</span>
           ) : (
             <span style={{ fontSize: 12, color: tokens.textSecondary }}>
-              {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'} · {a.target.agent_id}
+              {a.next_due_at ? `下次 ${fmtWhen(a.next_due_at)}` : '没有下一次'}
             </span>
           )}
         </div>
@@ -471,11 +461,10 @@ export function AutomationsPage() {
             </Space>
           </Form.Item>
 
-          <Form.Item name="agent_id" label="Agent" rules={[{ required: true, message: '选一个 agent' }]}>
-            <Select options={agentOptions} placeholder="由哪个 agent 执行" />
-          </Form.Item>
-          {/* 这里曾有 "Runtime" 选择器（target.runtime_hint）：底座由构建期固定，用户面没有这个
-              选择面；服务端对带 target.runtime_hint 的写面请求是 40001（显式拒绝）。 */}
+          {/* v19：这一格原来选「由哪个 agent 执行」（`target.agent_id`）。定时任务触发时建的那个
+              会话落在**构建期固定的底座**上，没有第二个候选可选，所以整格删除而不是留个只读展示。
+              它下面那格 "Runtime" 选择器（`target.runtime_hint`）更早一批就已按同一口径删除：
+              底座由构建期固定，服务端对带这些键的写面请求一律 40001（显式拒绝，不静默忽略）。 */}
           <Form.Item
             name="cwd"
             label="工作空间（创建时钉住，须为存在的绝对路径）"
@@ -483,11 +472,11 @@ export function AutomationsPage() {
           >
             <CwdPicker />
           </Form.Item>
-          <Form.Item name="model" label="模型（可空 = 用 agent 默认）">
+          <Form.Item name="model" label="模型（可空 = 用底座默认）">
             <Input placeholder="留空即不指定" />
           </Form.Item>
           <Form.Item name="prompt" label="Prompt" rules={[{ required: true, message: '任务内容不能为空' }]}>
-            <Input.TextArea rows={3} placeholder="每次触发时发给 agent 的话" />
+            <Input.TextArea rows={3} placeholder="每次触发时发给助手的话" />
           </Form.Item>
           <Form.Item name="max_run_duration" label="单轮上限（可空，如 10m）" extra="只收紧，不替代平台既有的轮次超时看门狗">
             <Input placeholder="10m" style={{ width: 160 }} />
@@ -601,7 +590,6 @@ const FIELD_LABEL: Record<string, string> = {
   hour: '时',
   minute: '分',
   days_of_week: '每周的哪几天',
-  agent_id: 'Agent',
   cwd: '工作空间',
   model: '模型',
   prompt: 'Prompt',

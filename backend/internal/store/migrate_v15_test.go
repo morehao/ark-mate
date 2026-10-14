@@ -207,10 +207,13 @@ func TestMigrateV15IsIdempotentOnFreshDB(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("重复迁移应幂等: %v", err)
 	}
+	// 最终形态的表集合（v20 起 16 张：v19 删了 `agents`、v20 加了 `mcp_secrets`）。这条判据问的
+	// 是"最终形态"而不是"v15 当时"，所以它随每一次追加迁移漂移（v15 那一步自己的断言见上面
+	// 按版本重放的那些用例）。
 	var n int64
 	if err := s.db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
 		('meta','sessions','events','runs','messages','permission_memories','inputs','workspaces',
-		 'skills','mcp_servers','agents','automations','providers','models','definition_revisions','schema_migrations')`).
+		 'skills','mcp_servers','mcp_secrets','automations','providers','models','definition_revisions','schema_migrations')`).
 		Row().Scan(&n); err != nil || n != 16 {
 		t.Fatalf("新库应有 16 张表：n=%d err=%v", n, err)
 	}

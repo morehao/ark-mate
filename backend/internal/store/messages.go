@@ -20,7 +20,7 @@ type MessageTextHit struct {
 type MessageHit struct {
 	SessionID    string
 	SessionTitle string
-	AgentID      string
+	RuntimeID    string
 	Role         string
 	MessageID    string
 	RunID        string
@@ -70,7 +70,7 @@ func (s *Store) SearchMessages(ctx context.Context, q string, limit int) ([]Mess
 		out = append(out, MessageHit{
 			SessionID:    h.SessionID,
 			SessionTitle: h.SessionTitle,
-			AgentID:      h.AgentID,
+			RuntimeID:    h.RuntimeID,
 			Role:         h.Role,
 			MessageID:    h.MessageID,
 			RunID:        h.RunID,

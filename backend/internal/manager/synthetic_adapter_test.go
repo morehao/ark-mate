@@ -83,13 +83,16 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	svc.EnableStore(st)
 	t.Cleanup(func() { _ = st.Close() })
-	svc.agentDir = filepath.Join(t.TempDir(), "agents")
+	svc.providerDir = filepath.Join(t.TempDir(), "agents")
 
 	// ② 原生权限：内核按注册表第三张表取端口，**不认识** `RTX_PERMISSION_MODE` 这个名字。
+	//
+	// v19：平台的权限策略来源（agent 定义）已撤销，所以这里直接调**端口契约函数**
+	// `nativePermissionEnv`——它仍是"内核只做转发"这条契约的判据（见 native_permission_test.go）。
 	pol := &PermissionPolicy{NativeMode: NativeModeFullAccess, Tools: map[string]string{"bash": "deny"}}
-	env := svc.nativePermissionEnvFor(runtimetest.ID, pol)
+	env, _ := nativePermissionEnv(reg, runtimetest.ID, pol)
 	if len(env) != 2 {
-		t.Fatalf("合成底座应注入 2 条原生权限 env（模式 + 逐工具项），实际 %v", env)
+		t.Fatalf("合成底座应产出 2 条原生权限 env（模式 + 逐工具项），实际 %v", env)
 	}
 	if !containsEnv(env, runtimetest.PermissionEnvKey+"="+NativeModeFullAccess) {
 		t.Fatalf("模式没被转发到合成底座自己的变量名上: %v", env)
@@ -98,7 +101,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 		t.Fatalf("逐工具项没被投影: %v", env)
 	}
 	// 反证：同一个策略在**没有原生权限端口**的底座上不该注入。
-	if got := svc.nativePermissionEnvFor("stub", pol); len(got) != 0 {
+	if got, _ := nativePermissionEnv(reg, "stub", pol); len(got) != 0 {
 		t.Fatalf("未登记原生权限面的底座不该注入，实际 %v", got)
 	}
 
@@ -139,14 +142,9 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	}
 
 	// ⑤ 真子进程：上面这些 env **真的**到了进程里。
-	svc.agents["a1"] = &AgentRec{ID: "a1", Name: "A1", State: AgentStateStopped, PermissionPolicy: pol}
 	orch := NewOrchestrator(svc, reg)
 	t.Cleanup(orch.Close)
-	agent, _ := svc.AgentByID("a1")
-	if agent == nil {
-		t.Fatal("夹具 agent 应已注入")
-	}
-	res, err := orch.startSessionOn(context.Background(), agent, StartOptions{Cwd: t.TempDir()})
+	res, err := orch.startSessionOn(context.Background(), StartOptions{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("用合成底座建会话（= 真拨号 + 拉起桩子进程）: %v", err)
 	}
@@ -163,12 +161,11 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 			t.Errorf("子进程 env %s = %q，期望 %q（隔离投影没落到真进程上）", k, childEnv[k], v)
 		}
 	}
-	if childEnv[runtimetest.PermissionEnvKey] != NativeModeFullAccess {
-		t.Errorf("子进程 env %s = %q，期望 %q（原生权限投影没落到真进程上）",
-			runtimetest.PermissionEnvKey, childEnv[runtimetest.PermissionEnvKey], NativeModeFullAccess)
-	}
-	if childEnv[runtimetest.InlineConfigKey] != "bash=deny" {
-		t.Errorf("子进程 env %s = %q，期望 bash=deny", runtimetest.InlineConfigKey, childEnv[runtimetest.InlineConfigKey])
+	// 原生权限 env **不在这里**断言到子进程：v19 起平台没有权限策略来源，真实拨号路径上
+	// `nativePermissionEnv` 拿到的永远是 nil 策略 → 一条都不注入（第 ② 段已把端口契约钉住）。
+	// 反过来说，若这里的子进程仍然出现 `RTX_PERMISSION_MODE`，那才是"某处又凭空造出了策略"。
+	if v, ok := childEnv[runtimetest.PermissionEnvKey]; ok && v != "" {
+		t.Errorf("没有策略来源时不该注入原生权限 env，子进程却拿到 %s=%q", runtimetest.PermissionEnvKey, v)
 	}
 }
 

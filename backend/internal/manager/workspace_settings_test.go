@@ -120,7 +120,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	// 影响面：偏好起点只影响"浏览从哪儿起步"；已建会话 cwd 创建即定稿、不回头否决，
 	// 而且**它仍然可以**作为"最近目录"候选被推回来（v14.5：名录外不再意味着"点了必被拒"）。
 	svc.registerSession(&SessionRec{
-		ID: "c-old", AgentID: "a1", Cwd: mustEval(t, outside), UpdatedAt: time.Now().UTC(),
+		ID: "c-old", Cwd: mustEval(t, outside), UpdatedAt: time.Now().UTC(),
 	})
 	recent, err := svc.RecentWorkspaces(10)
 	if err != nil {

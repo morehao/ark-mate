@@ -1,10 +1,6 @@
 import type { Capabilities } from '@ark-mate/desktop-contract'
 import { http } from '../request'
 import type {
-  Agent,
-  AgentCapabilities,
-  AgentDeleteResp,
-  AgentDiagnostics,
   Automation,
   AutomationDeleteResp,
   AutomationPreviewResp,
@@ -36,6 +32,7 @@ import type {
   McpToolCallResult,
   McpWriteResp,
   MessageSearchResp,
+  MetaResp,
   ModelCatalogResp,
   ModelCreateReq,
   ModelDeleteResp,
@@ -43,7 +40,6 @@ import type {
   ModelRow,
   ModelSyncResp,
   ModelsResp,
-  PermissionPolicy,
   PermissionResp,
   PromptReq,
   Provider,
@@ -57,6 +53,7 @@ import type {
   ResolvePermissionReq,
   ResolvePermissionResp,
   RevokeMemoryReq,
+  RuntimeDiagnostics,
   Skill,
   SkillDeleteResp,
   SkillMaterializationResp,
@@ -77,8 +74,6 @@ import type {
 } from '@ark-mate/types'
 
 // ——— mate 控制面 REST（/v1/mate，见 backend/internal/router/routes_*.go） ———
-
-export const listAgents = (): Promise<Agent[]> => http.get<Agent[]>('/mate/agents')
 
 // ——— automation（定时任务，M4）：定义的事实源是文件，接口是编辑器与观察窗 ———
 
@@ -123,9 +118,14 @@ export const listAutomationRuns = (id: string): Promise<AutomationRunsResp> =>
 export const runAutomationNow = (id: string): Promise<AutomationRunResp> =>
   http.post<AutomationRunResp>(`/mate/automations/${encodeURIComponent(id)}/run`)
 
-/** agent 诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。 */
-export const agentDiagnostics = (id: string): Promise<AgentDiagnostics> =>
-  http.get<AgentDiagnostics>(`/mate/agents/${encodeURIComponent(id)}/diagnostics`)
+/**
+ * 底座诊断快照（A3：连接态 + stderr 诊断尾巴 + 最近失败）。
+ *
+ * v19 前这是 `/agents/:id/diagnostics`（按 agent 取），现在底座只有一个、也没有 id 可传——
+ * 所以它是一条**无参**读面。响应形状逐字段不变，只少了 agent 身份（见 `RuntimeDiagnostics`）。
+ */
+export const getRuntimeDiagnostics = (): Promise<RuntimeDiagnostics> =>
+  http.get<RuntimeDiagnostics>('/mate/runtime/diagnostics')
 
 /** 列出未归档会话（`archived=true` 列出已归档；`cwd` 非空 = 只列工作空间精确等于该路径的会话）。 */
 export const listSessions = (archived = false, cwd?: string, workspaceId?: string): Promise<SessionSummary[]> => {
@@ -208,7 +208,15 @@ export const pickDirectoryHost = (): Promise<WorkspacePickResp> =>
  */
 export const getCapabilities = (): Promise<Capabilities> => http.get<Capabilities>('/mate/capabilities')
 
-/** 搜索会话（标题/Agent/用户消息正文；含归档；服务端 updated 降序）。 */
+/**
+ * 装配事实（`GET /meta`）：版本、资产、数据目录，以及**构建期固定的底座身份**（`runtime{}`，v19）。
+ *
+ * 界面上凡是要说"当前用的是哪个底座/哪个版本"的地方都读这里——不要从别处推：
+ * 底座不由用户选，所以这份事实只有服务端答得出（本机装的那份版本是另一回事，见 `payloads[]`）。
+ */
+export const getMeta = (): Promise<MetaResp> => http.get<MetaResp>('/mate/meta')
+
+/** 搜索会话（标题/底座/用户消息正文；含归档；服务端 updated 降序）。 */
 export const sessionSearch = (q: string, limit = 30): Promise<SessionSearchHit[]> => {
   const s = new URLSearchParams({ q, limit: String(limit) })
   return http.get<SessionSearchHit[]>(`/mate/sessions/search?${s.toString()}`)
@@ -236,7 +244,7 @@ export const sessionRuns = (id: string): Promise<{ id: string; runs: SessionRun[
 export const updateSession = (id: string, patch: SessionPatch): Promise<SessionSummary> =>
   http.patch<SessionSummary>(`/mate/sessions/${encodeURIComponent(id)}`, patch)
 
-/** 新建会话：指定 agent + 首轮 prompt，后台即起真实会话；返回 attach 续传水位。 */
+/** 新建会话：首轮 prompt + 可选工作空间/模型，后台即起真实会话；返回 attach 续传水位。 */
 export const createSession = (req: CreateSessionReq): Promise<CreateSessionResp> =>
   http.post<CreateSessionResp>('/mate/sessions', req)
 
@@ -376,11 +384,11 @@ export const updateMcpServer = (id: string, body: CapabilityWriteBody): Promise<
 export const deleteMcpServer = (id: string): Promise<McpDeleteResp> =>
   http.delete<McpDeleteResp>(`/mate/mcps/${encodeURIComponent(id)}`)
 
-// ——— P2 §8.1/§5.2：Agent 统一能力目录 + MCP live 探测 ———
-
-/** 某 Agent 的统一能力目录（skills 已按候选 runtime 裁剪；MCP 带 enabled/runtimes 标注）。 */
-export const getAgentCapabilities = (agentId: string): Promise<AgentCapabilities> =>
-  http.get<AgentCapabilities>(`/mate/agents/${encodeURIComponent(agentId)}/capabilities`)
+// ——— P2 §8.1/§5.2：MCP live 探测 ———
+//
+// v19 撤掉了「某 Agent 视角的统一能力目录」（`GET /agents/:id/capabilities`）：那张面回答的是
+// "按这个 agent 裁剪之后还剩什么"，而 agent 并入构建期固定的 runtime 后退化成 `GET /library` 的抄本。
+// 能力面折回既有的无参读面（`/library` + `/skills`·`/mcps`·`/tools`），这里不新增平行入口。
 
 /** 对某 MCP server 做一次 live tools/list 探测（结果写 Tool 目录，返回本轮增删）。 */
 export const probeMcpServer = (id: string): Promise<McpProbeResult> =>
@@ -424,56 +432,9 @@ export const getMcpPrompt = (
     arguments: args,
   })
 
-// ——— P2 Agent 管理面（definitions 持久化 + 启停 + 热更新 + 删除） ———
-
-/** 注册自定义 agent（provider 为档案 id，可选）。 */
-export const createAgent = (req: {
-  id: string
-  name?: string
-  provider?: string
-  /** MCP 白名单：省略 = 未声明（全量）；`[]` = 禁用全部；非空 = 白名单。 */
-  mcps?: string[]
-}): Promise<Agent> => http.post<Agent>('/mate/agents', req)
-
-/**
- * 热更新 agent 元数据（name/provider/mcps 子集）。
- *
- * `mcps` 三态：**省略键** = 不改；`null` = 清空白名单（回落"未声明" = 全量）；`[]` = 禁用全部；
- * 非空 = 白名单。改白名单会让该 agent 的**空闲**会话句柄作废——下一轮按当前定义重建并按新
- * 白名单注入（有在途轮次或未应答权限/提问的会话顺延到下一次重建）。所以类型是
- * `string[] | null`（不能只写 `string[]`，否则"清空"表达不出来）。
- *
- * **没有 runtimes**：底座由构建期固定（`-X pkg/runtime.BuildRuntime`），写面带 `runtimes` /
- * `routing_policy` 会被服务端 40001 拒绝（显式拒绝，不是静默忽略）。
- */
-export const patchAgent = (
-  id: string,
-  patch: {
-    name?: string
-    provider?: string
-    mcps?: string[] | null
-    permission_policy?: PermissionPolicy
-  },
-): Promise<Agent> => http.patch<Agent>(`/mate/agents/${encodeURIComponent(id)}`, patch)
-
-/** 删除自定义 agent（种子 agent-* 返回只读错误）：返回影响面（绑定会话数 / 摘除的活跃会话数 / 是否当前 Agent）。 */
-export const deleteAgent = (id: string): Promise<AgentDeleteResp> =>
-  http.delete<AgentDeleteResp>(`/mate/agents/${encodeURIComponent(id)}`)
-
-/**
- * 切换「当前 Agent」（全局默认单例：新建会话、模型目录缺省都取它；幂等）。
- * 返回切换后的 agent（`is_default=true`）；选择落 `<AgentDir>/default.json`，重启后保持。
- */
-export const setDefaultAgent = (id: string): Promise<Agent> =>
-  http.post<Agent>(`/mate/agents/${encodeURIComponent(id)}/default`)
-
-/** 启动 agent 对应 runtime 连接（真实进程；已运行幂等）。 */
-export const startAgent = (id: string): Promise<{ id: string; state: string }> =>
-  http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/start`)
-
-/** 停止 agent 对应 runtime 进程（有在途 run 报 agent_busy）。 */
-export const stopAgent = (id: string): Promise<{ id: string; state: string }> =>
-  http.post<{ id: string; state: string }>(`/mate/agents/${encodeURIComponent(id)}/stop`)
+// v19：agent 管理面（注册 / 启停 / 热更新 / 删除 / 切默认）整体撤掉——
+// 底座由构建期固定，用户没有任何选择面；那些动作的接收方（agents 表、`/agents/*`）已不存在。
+// 进程事实改由 `runtimeDiagnostics()` 一条无参读面回答。
 
 // ——— 供应商面（密钥只写不读回） ———
 
@@ -490,7 +451,7 @@ export const createProvider = (req: ProviderCreateReq): Promise<Provider> =>
 export const patchProvider = (id: string, patch: ProviderPatch): Promise<Provider> =>
   http.patch<Provider>(`/mate/providers/${encodeURIComponent(id)}`, patch)
 
-/** 删除一条供应商（幂等；被 agent 或模型引用 → 40901 `provider_in_use` + 引用名单）。 */
+/** 删除一条供应商（幂等；被模型引用 → 40901 `provider_in_use` + 引用名单）。 */
 export const deleteProvider = (id: string): Promise<ProviderDeleteResp> =>
   http.delete<ProviderDeleteResp>(`/mate/providers/${encodeURIComponent(id)}`)
 
@@ -517,16 +478,14 @@ export const listModels = (runtimeId?: string): Promise<ModelsResp> => {
 }
 
 /**
- * 运行时目录读面（`GET /models/catalog?agent=`）：运行时自报的会话配置项投影。
+ * 运行时目录读面（`GET /models/catalog`）：运行时自报的会话配置项投影。
  *
  * 它是**另一个屏幕**（会话级模型选择器）的数据源，`value` 必须原样回传——与平台清单不是一回事。
+ *
+ * v19 起**无参**：原来要带 `?agent=<id>` 指定按哪个 agent 取样，而底座只有一个，
+ * 取样对象没有第二个候选。
  */
-export const listModelCatalog = (agentId?: string): Promise<ModelCatalogResp> => {
-  const p = new URLSearchParams()
-  if (agentId) p.set('agent', agentId)
-  const qs = p.toString()
-  return http.get<ModelCatalogResp>(`/mate/models/catalog${qs ? `?${qs}` : ''}`)
-}
+export const listModelCatalog = (): Promise<ModelCatalogResp> => http.get<ModelCatalogResp>('/mate/models/catalog')
 
 /** 新建一条模型条目（同 `(provider_id, model_id)` 已存在 → 40901 `model_exists`）。 */
 export const createModel = (req: ModelCreateReq): Promise<ModelRow> =>
@@ -551,12 +510,11 @@ export const syncModels = (runtime?: string): Promise<ModelSyncResp> =>
 
 // ——— M3 用量统计 ———
 
-/** 用量汇总（GET /usage/summary）：from/to 半开区间、agent_id、group_by=agent|day。 */
+/** 用量汇总（GET /usage/summary）：from/to 半开区间、group_by=day（v19 起没有 agent 维度）。 */
 export const usageSummary = (q: UsageQuery = {}): Promise<UsageSummary> => {
   const p = new URLSearchParams()
   if (q.from) p.set('from', q.from)
   if (q.to) p.set('to', q.to)
-  if (q.agent_id) p.set('agent_id', q.agent_id)
   if (q.group_by) p.set('group_by', q.group_by)
   const qs = p.toString()
   return http.get<UsageSummary>(`/mate/usage/summary${qs ? `?${qs}` : ''}`)

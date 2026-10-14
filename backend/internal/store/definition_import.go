@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// ——— 存量定义的**一次性导入**（M6-4 能力面；M6-6 起 agent 面共用） ———
+// ——— 存量定义的**一次性导入**（M6-4 能力面；M6-7 起 automation 面共用） ———
 //
 // 与写面（Upsert*Definition）的三点不同，都是刻意的：
 //
@@ -23,8 +23,8 @@ import (
 
 // DefinitionImportItem 一条待导入的定义（调用方已逐条过闸门）。
 type DefinitionImportItem struct {
-	// Kind 见 model.DefinitionKindSkill / DefinitionKindMcp / DefinitionKindAgent /
-	// DefinitionKindAutomation。
+	// Kind 见 model.DefinitionKindSkill / DefinitionKindMcp / DefinitionKindAutomation /
+	// DefinitionKindProvider / DefinitionKindModel。
 	Kind string
 	ID   string
 	// Body 定义正文（承载未知键的完整 JSON）。
@@ -57,8 +57,8 @@ type DefinitionImportResult struct {
 // `ErrAlreadyImported`（**一个字节都不写**）；不一致 → 导入结束后把 marker 写进去。
 // `marker == ""` = 不做标记判据（显式 CLI 导入，每次按行判重）。
 //
-// marker 的键由**域**决定（`imported_capabilities` / `imported_agents` / …）：两个目录的指纹
-// 各自演进，共用一个键会让"只改 agent 目录"把能力面的导入也带着重跑一遍。
+// marker 的键由**域**决定（`imported_capabilities` / `imported_automations` / …）：两个目录的指纹
+// 各自演进，共用一个键会让"只改能力目录"把别的域的导入也带着重跑一遍。
 func (s *Store) ImportDefinitionRows(ctx context.Context, items []DefinitionImportItem, markerKey, marker string) (DefinitionImportResult, error) {
 	var res DefinitionImportResult
 	now := time.Now().UTC()
@@ -118,10 +118,6 @@ func (s *Store) createDefinitionTx(ctx context.Context, tx *gorm.DB, it Definiti
 		})
 	case model.DefinitionKindMcp:
 		return s.mcpServers.WithTx(tx).CreateCAS(ctx, &model.McpServerEntity{
-			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
-		})
-	case model.DefinitionKindAgent:
-		return s.agents.WithTx(tx).CreateCAS(ctx, &model.AgentEntity{
 			ID: it.ID, Body: it.Body, Revision: 1, UpdatedAt: now,
 		})
 	case model.DefinitionKindProvider:

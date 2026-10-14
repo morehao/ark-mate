@@ -62,13 +62,15 @@ type Store struct {
 	// 能力定义事实源（M6-1）：两张定义表 + 一张只追加的变更审计。
 	skills             *dao.SkillDao
 	mcpServers         *dao.McpServerDao
-	agents             *dao.AgentDao
 	automations        *dao.AutomationDao
 	definitionRevision *dao.DefinitionRevisionDao
 
 	// 设置 · 模型（v11）：供应商凭据 + 平台模型清单。
 	providers *dao.ProviderDao
 	models    *dao.ModelDao
+
+	// 凭据（v20）：库是唯一权威——供应商明文密钥 + MCP 引用串的明文值。
+	mcpSecrets *dao.McpSecretDao
 
 	// 工作空间登记（v14）：用户的工作目录这条线的持久身份。
 	workspaces *dao.WorkspaceDao
@@ -109,12 +111,12 @@ func New(db *gorm.DB) *Store {
 
 		skills:             dao.NewSkillDao(getDB),
 		mcpServers:         dao.NewMcpServerDao(getDB),
-		agents:             dao.NewAgentDao(getDB),
 		automations:        dao.NewAutomationDao(getDB),
 		definitionRevision: dao.NewDefinitionRevisionDao(getDB),
 
-		providers: dao.NewProviderDao(getDB),
-		models:    dao.NewModelDao(getDB),
+		providers:  dao.NewProviderDao(getDB),
+		models:     dao.NewModelDao(getDB),
+		mcpSecrets: dao.NewMcpSecretDao(getDB),
 
 		workspaces: dao.NewWorkspaceDao(getDB),
 	}
@@ -122,6 +124,28 @@ func New(db *gorm.DB) *Store {
 
 // DB 暴露底层 gorm 句柄（调试/高级查询用；写路径请走本包方法以保持跨表不变量）。
 func (s *Store) DB() *gorm.DB { return s.db }
+
+// Path 库文件路径（内存库 = 空串）。
+//
+// 存在的理由是**权限面**：v20 起库内含明文密钥，于是"库文件与它的迁移备份属于密钥面"这件事要能被
+// 诊断面问出来（`mate doctor` 按 `<db 目录>/backups/*.bak-*` 展开备份）。内存库没有落点，返回空串
+// ——调用方据此跳过，而不是拿到一个看起来像路径的东西。
+func (s *Store) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
+
+// BackupDir 迁移备份目录（`<db 目录>/backups`，v19 起）。
+//
+// 与 `Path()` 同一个理由：诊断面要按密钥面检查它，而它的位置由库文件位置派生（不是配置项）。
+func (s *Store) BackupDir() string {
+	if s == nil || s.path == "" {
+		return ""
+	}
+	return s.backupDir()
+}
 
 // Close 关闭数据库。
 func (s *Store) Close() error {
@@ -136,8 +160,7 @@ func (s *Store) Close() error {
 
 // GetMeta 读取任意 meta 键（不存在 → ("", false, nil)）。
 //
-// meta 是"目录级/进程级配置与标记"的收口（计数行、导入标记、当前 Agent）——计划 §7 P-8 把
-// `<AgentDir>/default.json` 也放在这里：它是目录级配置而不是某个 agent 的属性。
+// meta 是"目录级/进程级配置与标记"的收口（计数行、导入标记、默认模型等目录级偏好）。
 func (s *Store) GetMeta(ctx context.Context, key string) (string, bool, error) {
 	return s.meta.Get(ctx, key)
 }

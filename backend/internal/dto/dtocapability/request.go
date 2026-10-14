@@ -40,5 +40,5 @@ type SkillWriteReq map[string]json.RawMessage
 
 // McpWriteReq 新建/覆盖一个 MCP server 定义（POST /mcps、PUT /mcps/:id）。语义同上。
 //
-// 密钥仍是**引用**（`vault:`/`env:`）——写面只搬运引用，明文密钥永远不会经这里落盘。
+// 密钥仍是**引用**（`store:`/`env:`）——写面只搬运引用，明文密钥永远不会经这里落盘。
 type McpWriteReq map[string]json.RawMessage

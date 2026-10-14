@@ -1,4 +1,4 @@
-// Package svcruntime 定义底座面的服务端口：provider 档案与运行时派生的模型目录。
+// Package svcruntime 定义底座面的服务端口：provider 档案、运行时派生的模型目录与运行时诊断。
 //
 // **没有 runtime 概览**：底座由构建期固定（backend/pkg/runtime/build.go），用户面不存在
 // "列出有哪些底座"的读面（`GET /runtimes` 已随 agent 候选面一并下线）。
@@ -9,6 +9,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
+	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
 // RuntimeSvc 底座（provider/模型目录）面的服务端口。
@@ -31,14 +32,21 @@ type RuntimeSvc interface {
 	// ProbeProvider 跑一次连接自检（本地段无条件、上游段仅当 req.Upstream）。
 	ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error)
 
+	// RuntimeIdentity 构建期固定的底座身份（`/meta` 的 `runtime` 段：id/name/version）。
+	//
+	// 它是**这个二进制的属性**（`-X pkg/runtime.BuildRuntime=<id>`，不注入 = dsh），所以没有参数、
+	// 也不会失败：id 恒为 `runtime.SelectedRuntime()`，name 取注册表里的展示名（取不到回落 id），
+	// version 取不到即空串（核心不探测本机安装）。
+	RuntimeIdentity(ctx context.Context) dtoruntime.IdentityResp
+
 	// ModelsView 返回 `GET /models` 的读面：平台清单 + **聚合**生效结论（effective/effective_at）
 	// + 逐 runtime 机器面明细（sync[]）。它是**无副作用**的（读上一次同步的持久结论）。
-	ModelsView(ctx context.Context, runtimeID, agentID string, refresh bool) (*dtomodel.ModelsResp, error)
+	ModelsView(ctx context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error)
 
-	// ModelCatalog 返回某 agent 的**运行时派生**模型目录（ACP session config options 投影）。
+	// ModelCatalog 返回**运行时派生**的模型目录（ACP session config options 投影）。
 	// source=session|resume|cache|none 标注取样来源。它是**事实**（运行时广告什么）；
 	// 平台声明的那份是 `models` 表，读面见 ListModels。
-	ModelCatalog(ctx context.Context, agentID string) (*dtomodel.ModelCatalogResp, error)
+	ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error)
 
 	// ListModels 列出**平台声明的模型清单**（v12 起不带 runtime 维度，全量返回）。
 	ListModels(ctx context.Context) ([]dtomodel.ModelResp, error)
@@ -56,4 +64,11 @@ type RuntimeSvc interface {
 	// SyncModels 重新同步（运行时不变量的唯一收敛入口；空 = 全部已注册 runtime）。
 	// 成功路径**不回带 advertised**（那要新进程才拿得到），逐 runtime 如实回结论。
 	SyncModels(ctx context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error)
+
+	// RuntimeDiagnostics 返回 `GET /runtime/diagnostics` 的读面：底座**此刻**的事实
+	// （进程状态、握手结论、stderr 尾巴、最后一条错误与补救指引）。
+	//
+	// v19：它原是 `GET /agents/:id/diagnostics`，agent 概念并入 runtime 后折回这里——
+	// 底座只有一个，路径里再带一个 id 只会暗示"可以选"。**只读**：不主动拨号。
+	RuntimeDiagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, error)
 }

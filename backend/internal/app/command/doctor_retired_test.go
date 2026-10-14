@@ -47,7 +47,7 @@ func newRetiredRig(t *testing.T) *retiredRig {
 	at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 	r.withStore(t, func(st *store.Store) {
 		if err := st.UpsertSession(context.Background(), model.SessionEntity{
-			ID: "ses_gone", AgentID: "a1", Cwd: r.home, ProviderID: "p1", ModelID: "m1",
+			ID: "ses_gone", Cwd: r.home, ProviderID: "p1", ModelID: "m1",
 			RuntimeID: r.gone, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,
 		}); err != nil {
@@ -141,7 +141,7 @@ func TestDoctorRetiredSectionCleanMachineIsOk(t *testing.T) {
 		// 把两条引用都改回"在册"的那个 id（store 门面没有删会话的接口——体检也不该依赖删除）。
 		at := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 		if err := st.UpsertSession(context.Background(), model.SessionEntity{
-			ID: "ses_gone", AgentID: "a1", Cwd: r.home, ProviderID: "p1", ModelID: "m1",
+			ID: "ses_gone", Cwd: r.home, ProviderID: "p1", ModelID: "m1",
 			RuntimeID: r.inService, RuntimeSessionID: "rt_native", Title: "t", Status: "idle",
 			Origin: "manual", CreatedAt: at, UpdatedAt: at,
 		}); err != nil {

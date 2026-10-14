@@ -59,7 +59,7 @@ function PermissionCard({ e }: { e: StreamEntry }) {
   const respond = useMate((s) => s.respondPermission)
   const options = e.optionKinds ?? []
   const resolved = e.resolved ?? false
-  // 兜底「拒绝」在 agent 提供 deny 选项时自动带选首个（拒绝与取消/超时保持可区分）。
+  // 兜底「拒绝」在底座提供 deny 选项时自动带选首个（拒绝与取消/超时保持可区分）。
   const denyOption = options.find((o) => o.kind.startsWith('reject'))?.option_id
 
   return (
@@ -384,7 +384,7 @@ function ElicitationCard({ e }: { e: StreamEntry }) {
                   {e.url}
                 </a>
               )}
-              <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>完成外部操作后回到这里告知 agent（URL 模式演示）。</span>
+              <span style={{ fontSize: 11.5, color: tokens.textSecondary }}>完成外部操作后回到这里告知助手（URL 模式演示）。</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <Button size="small" type="primary" disabled={busy} onClick={submit} style={{ borderRadius: 8, margin: 0 }}>

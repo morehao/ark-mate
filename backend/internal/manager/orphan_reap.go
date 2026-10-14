@@ -51,13 +51,13 @@ func (o *Orchestrator) registerProc(rc *runtimeConn) {
 	}
 	if err := reg.Add(procreg.Entry{
 		PID: info.PID, PGID: info.PGID, Command: info.Command,
-		Runtime: rc.spec.ID, AgentID: rc.agentID,
+		Runtime: rc.spec.ID,
 	}); err != nil {
 		glog.Warnw(context.Background(), "procreg: 登记子进程失败", "pid", info.PID, "err", err)
 		return
 	}
 	glog.Infow(context.Background(), "procreg: 登记 runtime 子进程",
-		"runtime", rc.spec.ID, "agent", rc.agentID, "pid", info.PID, "pgid", info.PGID)
+		"runtime", rc.spec.ID, "pid", info.PID, "pgid", info.PGID)
 }
 
 // unregisterProc 摘除登记（正常回收路径）。

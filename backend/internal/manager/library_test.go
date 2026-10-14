@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +16,8 @@ import (
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
-// libraryRig 一套四类齐全的 Library 夹具：
-// 两个 runtime（一个已解析 skill 投影、一个声明了但未解析）+ skill/mcp/tool/agent 各一条。
+// libraryRig 一套三类齐全的 Library 夹具：
+// 两个 runtime（一个已解析 skill 投影、一个声明了但未解析）+ skill/mcp/tool 三类样本。
 func libraryRig(t *testing.T) *Service {
 	t.Helper()
 	dir := t.TempDir()
@@ -37,14 +35,12 @@ func libraryRig(t *testing.T) *Service {
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: false},
 	}})
-	svc.agents["a-local"] = &AgentRec{ID: "a-local", Name: "本地 agent"}
-	svc.agents["dsh"] = &AgentRec{ID: "dsh", Name: "播种"}
 	return svc
 }
 
 func libCtx() svclibrary.Query { return svclibrary.Query{} }
 
-// TestLibraryKindsAndOrigin 四类齐全 + origin 判据只看"有没有事实源文件"。
+// TestLibraryKindsAndOrigin 三类齐全 + origin 判据只看"有没有事实源文件"。
 func TestLibraryKindsAndOrigin(t *testing.T) {
 	svc := libraryRig(t)
 	ctx := context.Background()
@@ -59,17 +55,6 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	if err := svc.RegisterTool(capability.Tool{Name: "builtin_echo", Source: capability.ToolSourceBuiltin}); err != nil {
 		t.Fatal(err)
 	}
-	// 手工放一份 agent 定义文件（并装载）→ 该 agent 变成 local（判据是文件，不是 id）。
-	agentDir := filepath.Join(t.TempDir(), "agents")
-	if err := os.MkdirAll(agentDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	def := `{"id":"a-local","name":"本地 agent"}`
-	if err := os.WriteFile(filepath.Join(agentDir, "a-local.json"), []byte(def), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	svc.LoadAgentDefinitions(agentDir)
-
 	items, err := svc.ListLibrary(libCtx())
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +63,7 @@ func TestLibraryKindsAndOrigin(t *testing.T) {
 	for _, it := range items {
 		byKind[it.Kind] = append(byKind[it.Kind], it)
 	}
-	for _, k := range []string{dtolibrary.KindSkill, dtolibrary.KindMcp, dtolibrary.KindAgent, dtolibrary.KindTool} {
+	for _, k := range []string{dtolibrary.KindSkill, dtolibrary.KindMcp, dtolibrary.KindTool} {
 		if len(byKind[k]) == 0 {
 			t.Fatalf("Library 缺 %s 类（items=%+v）", k, items)
 		}
@@ -141,6 +126,13 @@ func TestLibraryKindFilterAndQuery(t *testing.T) {
 		t.Fatal("未知 kind 应报错（M5 之前 command 不合法）")
 	} else if numericCode(err) != code.InvalidParam {
 		t.Fatalf("未知 kind 应是 40000，got %d", numericCode(err))
+	}
+	// v19 撤掉了 agent 这一类：`?kind=agent` 必须**显式拒绝**（列出合法取值），
+	// 而不是返回一张空表让用户以为"没有数据"。
+	if _, err := svc.ListLibrary(svclibrary.Query{Kind: "agent"}); err == nil {
+		t.Fatal("已撤掉的 kind=agent 应显式拒绝")
+	} else if numericCode(err) != code.InvalidParam || !strings.Contains(err.Error(), "skill|mcp|tool") {
+		t.Fatalf("kind=agent 应是 40000 且列出合法取值，got %v", err)
 	}
 }
 
@@ -268,39 +260,6 @@ func TestLibraryMcpAndToolApplicability(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"applicability":[]`) {
 		t.Fatalf("空候选的 applicability 必须是 []：%s", raw)
-	}
-}
-
-// TestLibraryAgentApplicability agent 条目只报**构建期底座**那一个的可达性：
-// 已装配 → projected；未装配 → not_applicable。
-//
-// 历史语义是"逐个 agent 声明的候选 runtime 报"，随候选面下线——现在"这个 agent 能不能跑"
-// 只取决于**本二进制认哪个底座、它在不在注册表里**。
-func TestLibraryAgentApplicability(t *testing.T) {
-	svc := libraryRig(t)
-	items, err := svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindAgent, Q: "a-local"})
-	if err != nil || len(items) != 1 {
-		t.Fatalf("应找到 a-local: %+v err=%v", items, err)
-	}
-	if len(items[0].Applicability) != 1 {
-		t.Fatalf("agent 只应报构建期底座那一条: %+v", items[0].Applicability)
-	}
-	a := items[0].Applicability[0]
-	if a.Runtime != runtime.SelectedRuntime() || a.Status != dtolibrary.StatusProjected || !a.OK {
-		t.Fatalf("已装配的构建期底座应 projected：%+v", a)
-	}
-	if !items[0].Enabled {
-		t.Fatal("agent 没有禁用开关，Enabled 恒 true（State 是运行态，不是可用性）")
-	}
-
-	// 构建期底座未装配 → 唯一那条 not_applicable（"agent 不可用"的新判据）。
-	setBuildRuntime(t, "nope")
-	items, err = svc.ListLibrary(svclibrary.Query{Kind: dtolibrary.KindAgent, Q: "a-local"})
-	if err != nil || len(items) != 1 || len(items[0].Applicability) != 1 {
-		t.Fatalf("未装配时也应是恰好一条: %+v err=%v", items, err)
-	}
-	if a := items[0].Applicability[0]; a.Runtime != "nope" || a.Status != dtolibrary.StatusNotApplicable || a.OK {
-		t.Fatalf("未装配的构建期底座应 not_applicable：%+v", a)
 	}
 }
 

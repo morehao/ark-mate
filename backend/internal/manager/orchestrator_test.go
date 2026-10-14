@@ -10,7 +10,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/acl"
-	"github.com/morehao/golib/gerror"
 )
 
 // stubSession 代替 acl.Session（Prompt/Cancel 可按脚本返回）。
@@ -66,9 +65,9 @@ func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
 // TestPromptRunEnded 正常 end_turn → run.ended + completed。
 func TestPromptRunEnded(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "agent-rtx", Runtime: "rtx", sess: &stubSession{stop: "end_turn"}}
+	as := &ActiveSession{ID: "s1", Runtime: "rtx", sess: &stubSession{stop: "end_turn"}}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "agent-rtx"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -89,9 +88,9 @@ func TestPromptRunEnded(t *testing.T) {
 // TestPromptBusy 忙时第二轮返回 run_in_progress。
 func TestPromptBusy(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
+	as := &ActiveSession{ID: "s1", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "first"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -108,9 +107,9 @@ func TestPromptBusy(t *testing.T) {
 // TestCancelRun 取消 → run.cancelled + cancelled 状态。
 func TestCancelRun(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
-	as := &ActiveSession{ID: "s1", AgentID: "a", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
+	as := &ActiveSession{ID: "s1", Runtime: "r", sess: &stubSession{cancelOnCtx: true}}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -127,13 +126,16 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
-// TestServiceRESTErrors 会话动作错误映射为对外错误码（不存在 agent/session → 40401）。
+// TestServiceRESTErrors 会话动作错误映射为对外错误码：**参数不对是 40001、东西不在是 40401**。
+//
+// v19：建会话不再需要解析 agent（agent 面已撤销），但它**必须**落在一个工作空间里——没有 cwd
+// 又没有默认工作空间是"参数不对"（40001），不是"找不到那个东西"（40401）。这条分界就是本用例
+// 的判据：把它错报成 40401 会让用户去查一个并不存在的资源。
 func TestServiceRESTErrors(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{AgentID: "nope", Prompt: "hi"})
-	var ge gerror.Error
-	if !errors.As(err, &ge) || ge.Code != 40401 {
-		t.Fatalf("期望 40401，got %v", err)
+	_, err := svc.CreateSession(context.Background(), dtosession.SessionCreateReq{Prompt: "hi"})
+	if numericCode(err) != 40001 {
+		t.Fatalf("缺工作空间应 40001，got %d（%v）", numericCode(err), err)
 	}
 	if err := svc.CancelRun(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "40401") {
 		t.Fatalf("CancelRun 期望 40401 错误，got %v", err)
@@ -169,11 +171,11 @@ func (s *stuckCancel) Cancel(ctx context.Context) error {
 func TestCancelRunAgentUnresponsive(t *testing.T) {
 	svc, orch, bus := newTestRig(t)
 	as := &ActiveSession{
-		ID: "s1", AgentID: "a", Runtime: "r",
+		ID: "s1", Runtime: "r",
 		sess: &stuckCancel{stubSession: &stubSession{cancelOnCtx: true}},
 	}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -244,11 +246,11 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 	svc, orch, _ := newTestRig(t)
 	c1 := &acl.Client{}
 	as := &ActiveSession{
-		ID: "s1", AgentID: "a", Runtime: "r", client: c1,
+		ID: "s1", Runtime: "r", client: c1,
 		sess: &stubSession{cancelOnCtx: true},
 	}
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", AgentID: "a"})
+	svc.registerSession(&SessionRec{ID: "s1"})
 
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -271,28 +273,27 @@ func TestBusyAttributionLifecycle(t *testing.T) {
 
 // TestEnsureSessionResumeGating 按需重建的门控（ADR-4：执行可丢弃、会话平台拥有）：
 // 可续聊性只看会话是否存在 —— 上一轮终态（completed 等）不是作废判据；真正的不可用才报错
-// （未知会话 / agent 已删 / runtime 未注册）。这里不拨子进程：终态会话应一路走到 runtime 解析，
+// （未知会话 / 构建期底座未装配）。这里不拨子进程：终态会话应一路走到 runtime 解析，
 // 以 runtime_not_found 收尾即证明它没有被状态门拦下。
+//
+// v19 去掉了"目标 agent 已被删"那一支：底座由构建期固定，**"目标不存在"只剩一种形态**
+// ——构建期选定的那个不在注册表里（`runtime_not_found`）。所以两段会话（有 / 无 RuntimeSessionID、
+// interrupted / completed）现在都收敛到同一个错误；它们的差别在重建路径，不在门控。
 func TestEnsureSessionResumeGating(t *testing.T) {
 	svc, orch, _ := newTestRig(t) // 空 runtime 注册表
 	ctx := context.Background()
-	// agent 存在、但**构建期底座未装配**（空注册表 → 解析必然失败；候选面下线后这是构造
-	// "runtime 解析不了"的唯一形态）。
-	svc.mu.Lock()
-	svc.agents["ghost"] = &AgentRec{ID: "ghost", Name: "ghost", State: AgentStateStopped}
-	svc.mu.Unlock()
 	svc.registerSession(&SessionRec{
-		ID: "c-stub", AgentID: "no-such-agent", RuntimeID: "stub", Status: SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
+		ID: "c-stub", RuntimeID: "stub", Status: SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
 	})
 	svc.registerSession(&SessionRec{
-		ID: "c-term", AgentID: "ghost", RuntimeID: "no-such-runtime", Status: SessionStatusCompleted,
+		ID: "c-term", RuntimeID: "no-such-runtime", Status: SessionStatusCompleted,
 		RuntimeSessionID: "x-1",
 	})
 
 	if _, err := orch.Prompt(ctx, "c-stub", "hi"); err == nil {
-		t.Fatal("可续聊但 agent 不存在应 agent_not_found")
-	} else if ae, ok := acl.As(err); !ok || ae.Code != "agent_not_found" {
-		t.Fatalf("期望 agent_not_found，got %v", err)
+		t.Fatal("可续聊但构建期底座未装配应 runtime_not_found")
+	} else if ae, ok := acl.As(err); !ok || ae.Code != "runtime_not_found" {
+		t.Fatalf("期望 runtime_not_found，got %v", err)
 	}
 	// 终态会话（completed）不再按未找到处理：进入 runtime 解析 → 未注册 → runtime_not_found。
 	if _, err := orch.Prompt(ctx, "c-term", "hi"); err == nil {
