@@ -27,6 +27,13 @@ import (
 // 为什么 ② 里的 `id` 不能"加个前缀了事"：`run_<session>-<seq>` 会击穿
 // `^run_[0-9A-HJKMNP-TV-Z]{26}$` 这条形状不变式（与 v15 重铸 `models.id` 同一条纪律）。
 //
+// **本步不伪造事件**（2026-10-14 端到端验收实测后写明）：v22 之前的历史轮**没有** `run.started`
+// 事件（那条事件是本步引入的语义），所以升级后这些行的 `first_seq` 指不到任何 `run.started`——
+// 老库上这条判据会整片非零，这是**事实**不是漏做。事件流是"当时发生了什么"的记录（J4：身份随
+// 数据走），迁移补出来的事件会改 transcript、改 `events` 的身份集合、还会让界面里多出一轮凭空的
+// 「开始」。新轮由 `manager` 的"开轮三连"保证对称（`internal/manager/run.go` 的 Prompt）；
+// 判据见 `TestMigrateV22DoesNotFabricateRunStarted`。
+//
 // 语句里的 `runs` / `messages` / `inputs` / `idx_*` 都是**字面量**（守卫⑤：版本步只许写历史
 // 字面量，绝不引用 `model.TableName*` 常量）。
 var migrationV22 = migration{

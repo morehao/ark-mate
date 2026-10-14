@@ -366,3 +366,68 @@ func countRuns(t *testing.T, s *Store, sessionID string) int64 {
 	}
 	return n
 }
+
+// TestMigrateV22DoesNotFabricateRunStarted v22 只搬**已有的**行，绝不往事件流里补一条
+// `run.started`——即便"补上它"能让每条历史轮都满足「窗口起点指向 `run.started`」这条判据。
+//
+// 这条为什么值得单独钉（2026-10-14 端到端验收实测）：老库里 9/9 条历史轮**都没有** `run.started`
+// （那条事件是 v22 引入的），于是升级后 `runs.first_seq` 指不到任何 `run.started` 事件。这是**事实**，
+// 不是漏做：事件流是"当时发生了什么"的记录（判据 J4：身份随数据走），迁移伪造出来的事件会改变
+// transcript、改变 `events` 的身份集合，还会让用户在界面里看见一轮凭空的「开始」。
+// 这条判据把"不伪造"钉成机器可读的意图，挡的正是那种"为了让判据变绿而补事件"的改动；
+// 新轮的对称性由 `manager` 的"开轮三连"保证（`internal/manager/run.go` 的 Prompt）。
+func TestMigrateV22DoesNotFabricateRunStarted(t *testing.T) {
+	s := openV21ForV22Test(t)
+	at := "2026-05-06T10:00:00Z"
+	if err := s.db.Exec(`INSERT INTO sessions (id, status, created_at, updated_at)
+		VALUES (?, 'completed', ?, ?)`, v22SessionA, at, at).Error; err != nil {
+		t.Fatalf("写会话夹具: %v", err)
+	}
+	// 历史事件流：0 session.created / 1 session.user_message / 2 session.message（**没有** run.started）。
+	for _, ev := range []struct {
+		id, typ string
+		seq     int64
+	}{
+		{"evt_01J9Z6Q0M7X2V8K4B3N5TRW2Q0", "session.created", 0},
+		{"evt_01J9Z6Q0M7X2V8K4B3N5TRW2Q1", "session.user_message", 1},
+		{"evt_01J9Z6Q0M7X2V8K4B3N5TRW2Q2", "session.message", 2},
+	} {
+		if err := s.db.Exec(`INSERT INTO events (id, session_id, seq, type, payload_json, created_at)
+			VALUES (?,?,?,?, '{}', ?)`, ev.id, v22SessionA, ev.seq, ev.typ, at).Error; err != nil {
+			t.Fatalf("写事件夹具 %s: %v", ev.id, err)
+		}
+	}
+	if err := s.db.Exec(`INSERT INTO runs (id, session_id, user_text, status, first_seq, last_seq, started_at, ended_at)
+		VALUES (?,?, '问', 'completed', 1, 2, ?, ?)`,
+		"r-"+v22SessionA+"-1", v22SessionA, at, at).Error; err != nil {
+		t.Fatalf("写 run 夹具: %v", err)
+	}
+	before := eventFingerprint(t, s, v22SessionA)
+
+	migrateUpTo(t, s, 22)
+
+	if after := eventFingerprint(t, s, v22SessionA); after != before {
+		t.Fatalf("迁移动了事件流（v22 只搬已有的行，绝不补 run.started）：\n之前 %s\n之后 %s", before, after)
+	}
+	// 顺带把"历史轮的窗口起点指不到 run.started"写成判据：这是**刻意的不对称**，不是漏做。
+	var dangling int64
+	if err := s.db.Raw(`SELECT COUNT(*) FROM runs r WHERE NOT EXISTS (
+		SELECT 1 FROM events e WHERE e.session_id = r.session_id AND e.seq = r.first_seq AND e.type = 'run.started')`).
+		Row().Scan(&dangling); err != nil {
+		t.Fatalf("查窗口起点: %v", err)
+	}
+	if dangling != 1 {
+		t.Fatalf("历史轮本就该指不到 run.started（期望 1，实际 %d）", dangling)
+	}
+}
+
+// eventFingerprint 取一个会话事件流的指纹（位次 + 类型 + 身份，按位次排序）。
+func eventFingerprint(t *testing.T, s *Store, sessionID string) string {
+	t.Helper()
+	var parts []string
+	if err := s.db.Raw(`SELECT seq || ':' || type || ':' || id FROM events
+		WHERE session_id = ? ORDER BY seq`, sessionID).Scan(&parts).Error; err != nil {
+		t.Fatalf("取事件指纹: %v", err)
+	}
+	return strings.Join(parts, "|")
+}
