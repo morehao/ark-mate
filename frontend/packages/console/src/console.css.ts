@@ -741,6 +741,51 @@ export const consoleStyleSheet = `
     color: ${tokens.textPlaceholder};
   }
 
+  /* 工作空间 chip（DSH 的 WorkspaceChip 形态）：贴在输入卡**上沿左上角**的一行，
+     静息无边框无底色（它不是表单控件，是"我在哪工作"的事实），hover / 展开才出软底。
+     与 fg-ws-pill 的分工：pill 是底栏里的表单控件语言，chip 是卡外的事实语言。 */
+  .fg-ws-chiprow {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding-left: 2px;
+    /* 与卡片之间只留 6px：chip 读作卡片的标题行，不是另一个区块 */
+    margin-bottom: 6px;
+  }
+  .fg-ws-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 360px;
+    min-height: 28px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    color: ${tokens.text};
+    transition: background 0.12s ease;
+  }
+  /* hover / 展开只有**可点的那一个**（按钮）才吃：只读态是同一个类的 span，
+     它没有 :disabled 可匹配，若把 hover 写在类上会照样亮起来——"不可点"必须由形态保证，
+     不能靠调用方自觉。展开态（aria-expanded）也只有选择器的按钮会有。 */
+  button.fg-ws-chip:hover:not(:disabled),
+  .fg-ws-chip[aria-expanded='true'] { background: ${tokens.softFill}; }
+  /* 只读态（已建会话：工作空间创建时定稿、之后不可变）：静态回声——无 hover 反馈、无指针暗示，
+     文案保持满对比度（不让它看着像"禁用/不可用"，它是事实不是按钮）。 */
+  .fg-ws-chip-static { cursor: default; }
+  .fg-ws-chip:disabled { cursor: default; }
+  .fg-ws-chip-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* 工作空间药丸（goose DirSwitcher 的触发按钮形态）：图标 + 目录名，完整路径走 tooltip；
      与同一行的模型药丸共享一套静息形态（hairline 边 + 全圆角 + 小字）。 */
   .fg-ws-pill {
