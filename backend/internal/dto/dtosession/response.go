@@ -158,8 +158,9 @@ type RunResp struct {
 	Status     string `json:"status"` // running | completed | failed | cancelled
 	ErrorCode  string `json:"error_code,omitempty"`
 	StopReason string `json:"stop_reason,omitempty"`
-	// FirstSeq/LastSeq 本轮事件窗口的**会话内**位次；进行中的轮次（M2 起）first_seq 已定、
-	// last_seq 随事件推进（M1 仍是收口时一次写入的闭区间）。
+	// FirstSeq/LastSeq 本轮事件窗口的**会话内**位次（`[first_seq, last_seq]` 闭区间）。
+	// 进行中的轮次（v22 起在库里就有行）：`first_seq` 已定（= 本轮 `run.started` 的位次）、
+	// `last_seq` 为 **-1**（尚未收口——0 是合法位次，不能当"未知"用）、`ended_at` 为空。
 	FirstSeq  int64  `json:"first_seq"`
 	LastSeq   int64  `json:"last_seq"`
 	StartedAt string `json:"started_at"`

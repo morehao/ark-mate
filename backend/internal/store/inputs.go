@@ -25,22 +25,22 @@ const (
 
 // ——— inputs 表（§6 busy input 队列） ———
 
-// CreateInput 写入一条待投递的用户输入。
+// CreateInput 写入一条待投递的用户输入（**会话内位次由 store 分配**，见 dao 注释）。
 func (s *Store) CreateInput(ctx context.Context, in model.InputEntity) error {
 	return s.inputs.Create(ctx, &in)
 }
 
-// ListQueuedInputs 列出某会话待投递的输入（创建时间升序）。
+// ListQueuedInputs 列出某会话待投递的输入（会话内位次升序）。
 func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]model.InputEntity, error) {
 	return s.inputs.ListQueued(ctx, sessionID)
 }
 
-// ListAllQueuedInputs 列出全库待投递输入（跨会话，创建时间升序；启动恢复用）。
+// ListAllQueuedInputs 列出全库待投递输入（跨会话，按会话分组、组内位次升序；启动恢复用）。
 func (s *Store) ListAllQueuedInputs(ctx context.Context) ([]model.InputEntity, error) {
 	return s.inputs.ListAllQueued(ctx)
 }
 
-// HeadQueuedInput 取队首待投递输入（无 → (nil, nil)）。
+// HeadQueuedInput 取队首待投递输入（位次最小；无 → (nil, nil)）。
 func (s *Store) HeadQueuedInput(ctx context.Context, sessionID string) (*model.InputEntity, error) {
 	return s.inputs.Head(ctx, sessionID)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -165,12 +166,20 @@ func (s *Service) rebuildStaleReadModels(ctx context.Context) {
 
 // RebuildSessionReadModels 用 `events` 重建某会话的全部读模型（J7：读模型整体可重建）。
 //
-// M1 阶段只重建 `messages`；`runs` 的重建在 M2 接上（那时 run 变成实体、有自己的起点事件，
-// 重建才有权威依据——现在 runs 的 id 还是 `r-<session>-<first_seq>` 这种从窗口推导出来的东西）。
+// 三段：① `runs` 补缺（`run.started` 事件是权威：缺行→补一行）；② 把**日志里已有终态**却还
+// 停在 running 的行收口（终态那次落库失败的自愈）；③ `messages` 整会话重铺。
+//
+// ①② 只认事件、不认内存：这一轮结束没有，看的是它自己的终态事件在不在日志里。因此
+// `openRun`/`FinishRun` 这两条 best-effort 路径失败留下的洞都能被下一次重建补上（J7 的字面意思）。
 //
 // 做法：读该会话全部事件（会话内位次升序，一次读完）→ 按每个 run 的 `[first_seq, last_seq]`
 // 窗口切片 → **先清该 run 的旧行再插新行**。清是必须的：位次口径换了之后，某个窗口在新口径下
 // 可能一行都不产出，而"空的批次"在插入路径里是 no-op，会把上一代的旧行留在库里。
+//
+// **进行中的轮次（`last_seq = -1`）的窗口在本函数里被夹住**：右端 = 下一轮的 `first_seq - 1`
+// （没有下一轮 = 会话末尾）。不夹的话，一次重启后的重建会把"中断那一轮"之后所有轮次的事件都
+// 算进它——重建出来的 messages 张冠李戴，而这是**只有重建通道**才会暴露的错（live 路径的右端
+// 是终态位次，权威）。
 //
 // 幂等：同一份 events 反复跑得到同一组行（`objid.New` 会铸新 id，但 rows 的**内容**等价；
 // 读模型的身份不承担外部引用——`messages.id` 不出现在任何 wire 契约里）。
@@ -178,26 +187,133 @@ func (s *Service) RebuildSessionReadModels(ctx context.Context, sessionID string
 	if s.st == nil {
 		return nil
 	}
-	runs, err := s.st.ListRuns(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("read models: list runs: %w", err)
-	}
 	all, err := s.sessionEvents(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	// ① 补齐缺失的 run 行（开轮落行是 best-effort：不补的话，那一轮会永久从轮次明细里消失——
+	// 终态找不到开轮行就跳过——而 events 里它明明还在）。
+	if added, err := s.reconcileRunRows(ctx, sessionID, all); err != nil {
+		return fmt.Errorf("read models: reconcile runs: %w", err)
+	} else if added {
+		glog.Infow(ctx, "read models: 从 run.started 补出缺失的 runs 行", "session", sessionID)
+	}
+	runs, err := s.st.ListRuns(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("read models: list runs: %w", err)
+	}
+	if closed := s.closeRunsWithTerminal(sessionID, all, runs); closed {
+		glog.Infow(ctx, "read models: 用日志里的终态事件收口了停在 running 的行", "session", sessionID)
+		runs, err = s.st.ListRuns(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("read models: list runs: %w", err)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("read models: list runs: %w", err)
+	}
+	// 窗口是**按起点排**的（`ListRuns` 按 `started_at` 排，两者在正常情况下同序，但夹取窗口这件事
+	// 只能按位次来——时钟回拨时 started_at 的顺序说了不算）。
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].FirstSeq < runs[j].FirstSeq })
 	// 整会话先清空再按 run 重铺：这样"没有归属 run 的孤儿行"（旧口径留下的）也会一起消失，
 	// 而不是永远留在库里当幽灵消息。
 	if err := s.st.DeleteMessagesBySession(ctx, sessionID); err != nil {
 		return fmt.Errorf("read models: clear messages: %w", err)
 	}
-	for _, r := range runs {
-		window := eventsInWindow(all, r.FirstSeq, r.LastSeq)
+	for i, r := range runs {
+		hi := r.LastSeq
+		if hi < 0 {
+			// 进行中的轮：右端夹到下一轮的起点之前（没有下一轮 → 会话末尾，hi 保持开区间）。
+			if i+1 < len(runs) {
+				hi = runs[i+1].FirstSeq - 1
+			}
+		}
+		window := eventsInWindow(all, r.FirstSeq, hi)
 		if err := s.rebuildRunMessages(ctx, sessionID, r.ID, window); err != nil {
 			return fmt.Errorf("read models: rebuild run %s: %w", r.ID, err)
 		}
 	}
 	return nil
+}
+
+// reconcileRunRows 用 `run.started` 事件补齐**缺失的** run 行（J7：runs 也是投影）。
+//
+// 只补：已存在的行（含崩溃留下的 running 行）既不删也不改——它的 status 是事实，投影推不出来。
+// 行身份**取自事件载荷**（`run_id`），绝不在这里铸新号：读模型不能成为第二个身份铸造点。
+func (s *Service) reconcileRunRows(ctx context.Context, sessionID string, all []model.EventEntity) (bool, error) {
+	rows, err := s.st.ListRuns(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	known := make(map[int64]bool, len(rows))
+	for _, r := range rows {
+		known[r.FirstSeq] = true
+	}
+	added := false
+	for _, e := range all {
+		if e.Type != BusRunStarted || known[e.Seq] {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(e.PayloadJSON), &m); err != nil {
+			glog.Warnw(ctx, "read models: run.started 载荷解不开，跳过", "session", sessionID, "seq", e.Seq)
+			continue
+		}
+		runID, _ := m["run_id"].(string)
+		if runID == "" {
+			glog.Warnw(ctx, "read models: run.started 载荷没有 run_id，跳过", "session", sessionID, "seq", e.Seq)
+			continue
+		}
+		text, _ := m["text"].(string)
+		if err := s.st.CreateRun(ctx, model.RunEntity{
+			ID: runID, SessionID: sessionID, UserText: text,
+			Status: SessionStatusInProgress, FirstSeq: e.Seq, LastSeq: -1, StartedAt: e.CreatedAt,
+		}); err != nil {
+			return added, err
+		}
+		known[e.Seq] = true
+		added = true
+	}
+	return added, nil
+}
+
+// closeRunsWithTerminal 把"日志里已经有本轮终态事件、行却还停在 running"的 run 收口。
+//
+// 这是给终态物化**失败**（`FinishRun` 写库失败只 WARN）自愈用的：那一轮的开轮行还在、终态事件
+// 也在，缺的只是那次 UPDATE。判据不是"猜这一轮结束了"——而是日志里那条终态事件的载荷
+// `run_id` **就是这一轮的身份**（同一支值，从开轮一路带到这里）。
+//
+// 崩溃中断的轮次刻意不受影响：它们没有终态事件，因此仍然留在 running（见 RunEntity 注释）。
+func (s *Service) closeRunsWithTerminal(sessionID string, all []model.EventEntity, runs []model.RunEntity) bool {
+	open := make(map[string]bool, len(runs))
+	for _, r := range runs {
+		if r.LastSeq < 0 {
+			open[r.ID] = true
+		}
+	}
+	if len(open) == 0 {
+		return false
+	}
+	closed := false
+	for _, e := range all {
+		if terminalRunStatus(e.Type) == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(e.PayloadJSON), &m); err != nil {
+			continue
+		}
+		id, _ := m["run_id"].(string)
+		if id == "" || !open[id] {
+			continue
+		}
+		// 复用 live 路径的收口函数（窗口 = `[first_seq, 终态位次]`、user_text 取行里的、首令牌耗时
+		// 相对行里的起点）——"重建"与"运行时"必须是同一段代码，否则两条路会慢慢分叉。
+		s.materializeRun(sessionID, e.Type, m, e.Seq)
+		delete(open, id)
+		closed = true
+	}
+	return closed
 }
 
 // sessionEvents 读某会话的全部事件（位次升序；跨页循环，页大小与恢复注入一致）。
@@ -338,12 +454,86 @@ func terminalRunStatus(typ string) string {
 	return ""
 }
 
-// materializeRun 在 sqlite 模式下把「上一 run 之后到当前终态」的事件窗口物化为 runs 行：
-// 窗口**从本轮首条用户消息起算**（一轮 = 一次用户输入；窗口起点与本轮输入之间夹着的会话级
-// 事件不属本轮，见下方轮界裁剪）；user_text 取窗口首条用户消息；first/last_seq 记录窗口
-// （失败轮输入/统计精确回溯）。
-// 幂等：窗口无新事件（重复调用/无 run）时直接返回。best-effort：失败仅告警。
-func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) {
+// openRun 开一轮：把 run 行以 **running** 写进库（v22 起一轮在**开始**时就有行）。
+//
+// 与 `materializeRun` 的分工：本函数写"这一轮开始了"（first_seq = `run.started` 的位次、
+// last_seq = -1），终态那次只 UPDATE。best-effort：失败仅告警——读模型缺一行不该阻断会话，
+// 而 events 里那条 `run.started` 还在（`reconcileRunRows` 会把它补成行，J7）。
+//
+// `started_at` 取 **`run.started` 事件的落库时刻**（回读那一行），不是 `time.Now()`：本轮起点
+// 的唯一事实源是那条事件，各写各的会让 `runs.started_at` 与事件时间分叉，而 `first_token_ms`
+// 正是相对它算的。
+//
+// **回读到那条事件才开轮**（位次与 type 都对得上）：开轮行是"查询 `run.started` 得到的物化行"，
+// 事件不在（append 失败退化、或位次来自总线而非库）时插一行等于给这一轮编一个不存在的起点——
+// 终态收口会把**别的事件**当成它的窗口。宁可没有行（那条 WARN 就是信号）。
+func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
+	if s.st == nil || runID == "" || firstSeq < 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	evs, _, err := s.st.EventsAfter(ctx, sessionID, firstSeq-1, 1)
+	if err != nil || len(evs) != 1 || evs[0].Seq != firstSeq || evs[0].Type != BusRunStarted {
+		glog.Warnw(context.Background(), "store: 开轮前回读 run.started 失败，跳过开轮行",
+			"session", sessionID, "run", runID, "first_seq", firstSeq, "err", err)
+		return
+	}
+	started := evs[0].CreatedAt
+	r := model.RunEntity{
+		ID: runID, SessionID: sessionID, UserText: text,
+		Status: SessionStatusInProgress,
+		// first_seq 是本轮 `run.started` 的位次（窗口起点从此由行给出，不再由"上一轮的末尾"推导）。
+		FirstSeq: firstSeq,
+		// last_seq = -1 = 还没收口：**0 是合法位次**（v21），拿它当"未知"会让进行中的轮看起来
+		// 已经覆盖了会话第 0 条事件。
+		LastSeq:   -1,
+		StartedAt: started,
+	}
+	if err := s.st.CreateRun(ctx, r); err != nil {
+		glog.Warnw(context.Background(), "store: open run failed", "session", sessionID, "run", runID, "err", err)
+	}
+}
+
+// runRowFor 取本轮的开轮行：先按终态载荷里的 `run_id`；取不到再退到"该会话**唯一**的 running 行"。
+//
+// 兜底路径存在的原因：终态载荷的 `run_id` 是 M2 才加上的，而**开轮行也在 M2 才落**——升级前后
+// 交错的那一轮会只满足一半（有行没 id / 有 id 没行）。三条都落空时返回 false，调用方 WARN 跳过：
+// 没有起点就没有窗口，硬造一个会把别的轮次的事件算进这一轮（比不物化更糟）。
+//
+// **不唯一就不猜**：同一会话里两条 running 行意味着崩溃残轮，那时把终态记在"最近一条"上会
+// 静默地把一轮的窗口/状态写到另一轮身上（读出来毫无异常，只是数字是别的轮的）。
+func (s *Service) runRowFor(ctx context.Context, sessionID, runID string) (model.RunEntity, bool) {
+	if runID != "" {
+		if r, ok, err := s.st.RunByID(ctx, runID); err != nil {
+			glog.Warnw(context.Background(), "store: 读 run 行失败", "session", sessionID, "run", runID, "err", err)
+		} else if ok {
+			return r, true
+		}
+	}
+	rows, err := s.st.RunningRuns(ctx, sessionID)
+	if err != nil {
+		glog.Warnw(context.Background(), "store: 读 running run 失败", "session", sessionID, "err", err)
+		return model.RunEntity{}, false
+	}
+	if len(rows) != 1 {
+		if len(rows) > 1 {
+			glog.Warnw(context.Background(), "store: 该会话有多条 running 行，不猜归属",
+				"session", sessionID, "n", len(rows))
+		}
+		return model.RunEntity{}, false
+	}
+	return rows[0], true
+}
+
+// materializeRun 在 sqlite 模式下把**本轮窗口**收口：窗口 = `[run.first_seq, terminalSeq]`，
+// 起点由开轮行给出（v22 起不再由"上一 run 的 last_seq + 轮界裁剪规则"推导——那套推导曾参与
+// 身份构造，规则一变历史轮次的 id 就跟着变）。
+//
+// 三件写在一次调用里：① UPDATE 行的终态与窗口（含 last_seq）；② user_text 从行读（开轮已写）；
+// ③ 用窗口事件重建 messages。幂等：行已终态时重复调用只会重算同一窗口。
+// best-effort：失败仅告警（events 仍是唯一事实源）。
+func (s *Service) materializeRun(sessionID, typ string, payload map[string]any, terminalSeq int64) {
 	if s.st == nil {
 		return
 	}
@@ -354,12 +544,20 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	last, err := s.st.RunLastSeq(ctx, sessionID)
-	if err != nil {
-		glog.Warnw(context.Background(), "store: run last seq failed", "session", sessionID, "err", err)
+	runID := ""
+	if payload != nil {
+		runID, _ = payload["run_id"].(string)
+	}
+	row, ok := s.runRowFor(ctx, sessionID, runID)
+	if !ok {
+		// M2 之前开出的轮（或直发终态事件的调用方）没有开轮行：没有起点就没有窗口。
+		glog.Warnw(context.Background(), "store: 找不到本轮的开轮行，跳过 runs 物化",
+			"session", sessionID, "run", runID, "type", typ)
 		return
 	}
-	evs, more, err := s.st.EventsAfter(ctx, sessionID, last, 5000)
+	runID = row.ID
+
+	evs, more, err := s.st.EventsAfter(ctx, sessionID, row.FirstSeq-1, 5000)
 	if err != nil {
 		glog.Warnw(context.Background(), "store: run window read failed", "session", sessionID, "err", err)
 		return
@@ -367,29 +565,19 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 	if more {
 		glog.Warnw(context.Background(), "store: run window 超 5000 条被截断", "session", sessionID)
 	}
+	// 窗口右端 = 终态位次（开区间读回来的可能包含更晚的事件：同一会话串行执行，正常不会有，
+	// 但重建/重放路径下"多读"必须是显式裁掉，而不是靠"恰好没有"）。
+	evs = eventsInWindow(evs, row.FirstSeq, terminalSeq)
 	if len(evs) == 0 {
-		return // 无新事件（重复终态调用等）→ 幂等跳过
+		glog.Warnw(context.Background(), "store: run window 为空，跳过 runs 物化",
+			"session", sessionID, "run", runID, "first_seq", row.FirstSeq, "terminal_seq", terminalSeq)
+		return
 	}
-	// 轮界裁剪：窗口起点是「上一 run 的 last_seq」，它与本轮首条用户消息之间可能夹着**会话级**
-	// 事件（session.created / session.resumed / config_options 等）——它们不属于这一轮。不裁掉
-	// 有两个实测后果（2026-10-14 用户报「一问却有三条 messages」）：
-	//  ① messages 物化把 session.created 当成一条 assistant 时间线 → 落出一条正文为空的行；
-	//  ② runID 取裁剪前的首事件 seq，与随后按「首条用户消息」写下的 first_seq 错位
-	//     （id 是 r-…-27 而 first_seq=28），本轮时长/首令牌耗时也把会话前置算进了这一轮。
-	// 找不到用户消息（异常路径：没有 prompt 的终态）则保持原窗口——宁可多算，也不丢一轮。
-	for i, e := range evs {
-		if e.Type == BusUserMessage {
-			evs = evs[i:]
-			break
-		}
-	}
-	firstSeq, lastSeq := evs[0].Seq, evs[len(evs)-1].Seq
-	runID := fmt.Sprintf("r-%s-%d", sessionID, firstSeq)
 
-	userText, stopReason, errCode := "", "", ""
+	stopReason, errCode, payloadText := "", "", ""
 	if payload != nil {
 		if t, _ := payload["text"].(string); t != "" {
-			userText = t
+			payloadText = t
 		}
 		if st, _ := payload["stop_reason"].(string); st != "" {
 			stopReason = st
@@ -398,9 +586,17 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 			errCode = cd
 		}
 	}
-	// user_text 优先取窗口内首条用户消息（覆盖 payload 里的原始文本）。
-	for _, e := range evs {
-		if e.Type == BusUserMessage {
+	// user_text：开轮行是权威（`run.started` 载荷里的原文）；行里空（老数据）才回落到窗口内
+	// 首条用户消息，最后才是终态载荷的 text。
+	userText := row.UserText
+	if userText == "" {
+		userText = payloadText
+	}
+	if userText == "" {
+		for _, e := range evs {
+			if e.Type != BusUserMessage {
+				continue
+			}
 			var m map[string]any
 			if err := json.Unmarshal([]byte(e.PayloadJSON), &m); err == nil {
 				if t, _ := m["text"].(string); t != "" {
@@ -411,10 +607,11 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 		}
 	}
 
-	started := evs[0].CreatedAt
+	// 起止时刻：起点取**行里的**（开轮那一刻），终点取终态事件时刻。
+	started := runStartTime(row.StartedAt, evs[0].CreatedAt)
 	ended := evs[len(evs)-1].CreatedAt
-	// 首令牌耗时：首个 assistant 输出（文本/思考/工具）事件相对**本轮起点（首条用户消息）**的
-	// 时刻；无输出则为 0（与 dto 里 first_token_ms 的口径一致）。
+	// 首令牌耗时：首个 assistant 输出（文本/思考/工具）事件相对**本轮起点**的毫秒差；
+	// 无输出则为 0（与 dto 里 first_token_ms 的口径一致）。
 	var firstTokenMS int64
 	for _, e := range evs {
 		if e.Type == BusMessage || e.Type == BusThought || e.Type == BusToolCall {
@@ -431,20 +628,23 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any) 
 			}
 		}
 	}
-	r := model.RunEntity{
-		ID: runID, SessionID: sessionID, UserText: userText, Status: status,
-		ErrorCode: errCode, StopReason: stopReason, UsageJSON: usageJSON,
-		FirstSeq: firstSeq, LastSeq: lastSeq, FirstTokenMS: firstTokenMS,
-		StartedAt: started, EndedAt: ended,
-	}
-	if err := s.st.CreateRun(ctx, r); err != nil {
-		glog.Warnw(context.Background(), "store: create run failed", "session", sessionID, "run", runID, "err", err)
+	if err := s.st.FinishRun(ctx, runID, model.RunFinishPatch{
+		LastSeq: terminalSeq, Status: status, StopReason: stopReason, ErrorCode: errCode,
+		UsageJSON: usageJSON, FirstTokenMS: firstTokenMS, EndedAt: ended,
+	}); err != nil {
+		glog.Warnw(context.Background(), "store: finish run failed", "session", sessionID, "run", runID, "err", err)
 		return
 	}
-	// 终态补齐（CreateRun 直接带终态写入，FinishRun 幂等再走一遍以统一 ended 口径）。
-	_ = s.st.FinishRun(ctx, runID, status, stopReason, errCode, usageJSON, ended)
 	// 消息物化：同窗口 events → messages 行（user 原文 + assistant 文本片段/时间线/工具最终态）。
 	s.materializeMessages(sessionID, runID, evs)
+}
+
+// runStartTime 取行里的起点时刻；零值（老数据没写 / 行是手工种的）才回落到窗口首事件时刻。
+func runStartTime(row time.Time, fallback time.Time) time.Time {
+	if !row.IsZero() {
+		return row
+	}
+	return fallback
 }
 
 // ListRuns 列出某会话的轮次明细（runs 表，started_at 升序；失败轮重试/统计用）。

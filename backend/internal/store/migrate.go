@@ -724,6 +724,10 @@ var schemaMigrations = []migration{
 	// v21 的版本步本体在 `migrate_v21.go`（它自带一段必须与人讲清楚的**步骤顺序理由**：
 	// 读模型窗口列的重编号必须发生在 `events` 重编号**之前**，否则旧位次消失、映射失去参照）。
 	migrationV21,
+
+	// v22 的版本步本体在 `migrate_v22.go`（自带一段 Go 数据迁移：`runs.id` 从派生串重铸成
+	// `run_<ULID>`，并在同一事务里改指 `messages.run_id`——主键重铸 ⇒ 引用必须一起改）。
+	migrationV22,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

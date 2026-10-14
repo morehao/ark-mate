@@ -141,7 +141,10 @@ func (o *Orchestrator) LatestUsage(sessionID string) (objusage.UsageInfo, bool) 
 }
 
 // publishError 把错误按 acl 分类发布为 run.error（A3：附上 stderr 诊断尾巴，前端错误卡可展开）。
-func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client) {
+//
+// `runID` 是这一轮的身份（v22 起必带）：终态物化要靠它找到开轮行——从 `runs` 里"猜最近一条
+// running"只在单会话串行下碰巧成立，而猜错的代价是这一轮的事件窗口算到别的轮上。
+func (o *Orchestrator) publishError(sessionID, runID string, err error, cli *acl.Client) {
 	ae := acl.Classify(err)
 	tail := ae.StderrTail
 	if len(tail) == 0 && cli != nil {
@@ -150,6 +153,7 @@ func (o *Orchestrator) publishError(sessionID string, err error, cli *acl.Client
 	o.svc.recordRuntimeError(sessionID, ae, tail)
 	payload := map[string]any{
 		"session_id": sessionID,
+		"run_id":     runID,
 		"code":       ae.Code,
 		"class":      string(ae.Class),
 		"details":    ae.Details,

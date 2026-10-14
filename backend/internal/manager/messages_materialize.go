@@ -96,6 +96,12 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.
 		evObj := map[string]any{"seq": e.Seq, "type": e.Type, "payload": m}
 
 		switch e.Type {
+		case BusRunStarted:
+			// 轮次起点**不是消息内容**：它的载荷只有身份与用户原文（后者由紧随其后的
+			// `session.user_message` 落成 user 行）。不显式忽略它，下面的 `default` 分支会把它
+			// 挂在 assistant 行上——而窗口起点就是它，于是每一轮都会先产出一条空正文行
+			//（M3 的白名单投影会把这条规则形式化，本处是 M2 的最小正确处置）。
+			continue
 		case BusUserMessage:
 			flush()
 			text, _ := m["text"].(string)

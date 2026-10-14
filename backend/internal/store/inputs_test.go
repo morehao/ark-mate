@@ -35,13 +35,21 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		}
 	}
 
-	// 队首 = created_at 最早（不是插入顺序）。
+	// 队首 = **会话内位次最小**（v22 起队列顺序由 `seq` 承担，入队即取号）。
+	//
+	// 这里的夹具刻意反着来（先插 created_at 较晚的 i2）：那时 `seq` 才是"排第几"的权威，
+	// 而按 created_at 排要靠 id 兜底同刻——"队列自己的顺序"不该由两个不相关的列拼出来。
+	// 真实入队路径里 `CreatedAt` 就是插入时刻，两种口径同序（只有时钟回拨才会分叉）。
 	head, err := st.HeadQueuedInput(ctx, "c1")
 	if err != nil || head == nil {
 		t.Fatalf("取队首失败: %v/%v", head, err)
 	}
-	if head.ID != "i1" {
-		t.Fatalf("队首应为 i1（创建时间最早），得到 %s", head.ID)
+	if head.ID != "i2" || head.Seq != 0 {
+		t.Fatalf("队首应为先入队的 i2（seq=0），得到 %+v", head)
+	}
+	queued, err := st.ListQueuedInputs(ctx, "c1")
+	if err != nil || len(queued) != 2 || queued[0].ID != "i2" || queued[1].ID != "i1" || queued[1].Seq != 1 {
+		t.Fatalf("队列应按 seq 升序且位次从 0 起: %+v err=%v", queued, err)
 	}
 	// 认领成功一次；同一 id 再认领必须失败（条件更新是并发下的唯一仲裁者）。
 	ok, err := st.ClaimQueuedInput(ctx, "i1", time.Now().UTC())
@@ -84,13 +92,14 @@ func TestInputQueueSchemaAndClaim(t *testing.T) {
 		t.Fatalf("跨会话列待投递失败: %v", err)
 	}
 	// i1 已投递、i2 已删、i3 因跨会话删不命中仍在队、i4/i5 新入队 → 共 3 条，且两个会话都在。
+	// 排序是 `(session_id, seq)`（v22 起 seq 是队列自己的顺序，跨会话快照不再有时钟参与）。
 	wantIDs := []string{"i3", "i4", "i5"}
 	if len(all) != len(wantIDs) {
 		t.Fatalf("应剩 %d 条待投递（i1 已投递 / i2 已删 / i3 跨会话删不命中）: %+v", len(wantIDs), all)
 	}
 	for i, id := range wantIDs {
 		if all[i].ID != id {
-			t.Fatalf("第 %d 条应为 %s（创建时间升序）: %+v", i, id, all)
+			t.Fatalf("第 %d 条应为 %s（会话内位次升序）: %+v", i, id, all)
 		}
 	}
 	if all[2].SessionID != "c2" {

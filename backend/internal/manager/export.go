@@ -250,6 +250,13 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "· %s\n", line)
 			}
+		case BusRunStarted:
+			// 轮次分节：没有它时两轮之间只有一个"轮次结束"，读起来像同一轮的停顿。
+			if md {
+				fmt.Fprintf(&b, "\n---\n\n*轮次开始*\n\n")
+			} else {
+				fmt.Fprintf(&b, "\n[轮次开始]\n\n")
+			}
 		case BusRunEnded:
 			if md {
 				fmt.Fprintf(&b, "\n*轮次结束*\n\n")

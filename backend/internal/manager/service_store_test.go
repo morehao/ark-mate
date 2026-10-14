@@ -163,7 +163,7 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	}
 }
 
-// TestRestoreRebuildsStaleReadModels 重启恢复必须**消费** v21 留下的读模型重建标记：
+// TestRestoreRebuildsStaleReadModels 重启恢复必须**消费**迁移留下的读模型重建标记：
 // 位次口径换了之后，库里那份 `messages`（窗口列按旧全局位次算的）已经不可信。
 //
 // 为什么这条必须有判据：整条链（迁移写标记 → 启动读标记 → 重建 → 清标记）里**任何一段断掉
@@ -178,8 +178,8 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 	svc1 := NewService(testutil.StubRegistry(), eventbus.New())
 	svc1.EnableStore(st1)
 	svc1.registerSession(&SessionRec{ID: "s-rebuild"})
-	svc1.publish(BusUserMessage, "s-rebuild", map[string]any{"session_id": "s-rebuild", "text": "重建我"})
-	svc1.publish(BusRunEnded, "s-rebuild", map[string]any{"session_id": "s-rebuild", "stop_reason": "end_turn"})
+	runID, _, _ := beginRun(t, svc1, "s-rebuild", "重建我")
+	endRun(svc1, "s-rebuild", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	svc1.flushChunks()
 	msgs, err := st1.ListMessages(ctx, "s-rebuild")
 	if err != nil || len(msgs) == 0 {
@@ -216,8 +216,9 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 		if m.SeqLo == 4242 || m.SeqHi == 4242 {
 			t.Fatalf("旧窗口列还在（重建没跑）：%+v", m)
 		}
-		// 新口径的窗口必须落在**会话内位次**区间里（本会话只有 2 条事件：0、1）。
-		if m.SeqLo < 0 || m.SeqHi > 1 || m.SeqLo > m.SeqHi {
+		// 新口径的窗口必须落在**会话内位次**区间里（本会话 3 条事件：0=run.started、
+		// 1=user_message、2=run.ended；窗口从 0 起算——它由开轮行给出，不再"裁到用户消息"）。
+		if m.SeqLo < 0 || m.SeqHi > 2 || m.SeqLo > m.SeqHi {
 			t.Fatalf("重建后的窗口不在会话内位次区间内：%+v", m)
 		}
 	}

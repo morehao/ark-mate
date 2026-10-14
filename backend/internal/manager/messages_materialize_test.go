@@ -26,7 +26,9 @@ func TestMessagesMaterializedAtRunEnd(t *testing.T) {
 	svc.EnableStore(st)
 	svc.registerSession(&SessionRec{ID: "s-msg"})
 
-	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第一问：关键词甲"})
+	// 开轮三连（run.started → 开轮行 → 用户消息）：v22 起没有开轮行就没有窗口，
+	// 终态到达时物化会整轮跳过（不是"少一行"，是一行都不产出）。
+	r1, _, _ := beginRun(t, svc, "s-msg", "第一问：关键词甲")
 	svc.publish(BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
 	svc.publish(BusToolCall, "s-msg", map[string]any{
 		"tool_call_id": "tc1", "kind": "bash", "input": "ls", "text": "run ls"})
@@ -34,12 +36,12 @@ func TestMessagesMaterializedAtRunEnd(t *testing.T) {
 	svc.publish(BusToolUpdate, "s-msg", map[string]any{
 		"tool_call_id": "tc1", "kind": "bash", "output": "a.txt", "ok": true, "text": "done"})
 	svc.publish(BusMessage, "s-msg", map[string]any{"text": "关键词乙", "msg_id": "m1"})
-	svc.publish(BusRunEnded, "s-msg", map[string]any{"stop_reason": "end_turn", "session_id": "s-msg"})
+	endRun(svc, "s-msg", r1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	// 第二段（另一轮）换 msg_id → 应拆出新 assistant 行。
-	svc.publish(BusUserMessage, "s-msg", map[string]any{"text": "第二问"})
+	r2, _, _ := beginRun(t, svc, "s-msg", "第二问")
 	svc.publish(BusMessage, "s-msg", map[string]any{"text": "另一条回答", "msg_id": "m2"})
-	svc.publish(BusRunEnded, "s-msg", map[string]any{"stop_reason": "end_turn"})
+	endRun(svc, "s-msg", r2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	// 直接读 messages 表断言（读模型查询）。
 	hits, err := st.SearchUserMessages(ctx, "s-msg", "关键词")
@@ -113,9 +115,9 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	svc := NewService(reg, eventbus.New())
 	svc.EnableStore(st)
 	svc.registerSession(&SessionRec{ID: "s-s"})
-	svc.publish(BusUserMessage, "s-s", map[string]any{"text": "帮我部署 mate 服务"})
+	runID, _, _ := beginRun(t, svc, "s-s", "帮我部署 mate 服务")
 	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
-	svc.publish(BusRunEnded, "s-s", map[string]any{"stop_reason": "end_turn"})
+	endRun(svc, "s-s", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	hits, err := svc.SearchSessions(ctx, "部署", 5)
 	if err != nil {

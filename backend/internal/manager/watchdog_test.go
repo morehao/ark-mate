@@ -17,9 +17,15 @@ func TestRunTimeoutWatchdog(t *testing.T) {
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	evts := feed(bus, "s1", 2)
-	if len(evts) < 2 || evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunCancelled {
-		t.Fatalf("期望 user_message + run.cancelled（看门狗取消），got %+v", evts)
+	// 三条：开轮（v22 起 `Prompt` 先发 run.started）→ 用户消息 → 看门狗取消。
+	evts := feed(bus, "s1", 3)
+	if len(evts) < 3 || evts[0].Type != BusRunStarted || evts[1].Type != BusUserMessage ||
+		evts[len(evts)-1].Type != BusRunCancelled {
+		t.Fatalf("期望 run.started + user_message + run.cancelled（看门狗取消），got %+v", evts)
+	}
+	// 终态载荷必须带本轮身份：`runs` 收口靠它找开轮行（找不到只能退化成"该会话最近的 running"）。
+	if got, _ := evts[len(evts)-1].Payload.(map[string]any)["run_id"].(string); got == "" {
+		t.Fatalf("run.cancelled 载荷缺 run_id: %+v", evts[len(evts)-1].Payload)
 	}
 	rec, ok := svc.sessions["s1"]
 	if !ok || rec.Status != SessionStatusCancelled {

@@ -44,19 +44,56 @@ func (d *RunDao) WithTx(tx *gorm.DB) *RunDao {
 	return &RunDao{Dao: d.Dao.WithTx(tx)}
 }
 
-// CreateIfAbsent 插入一条 run；同 id 已存在则静默跳过（幂等，重放/重试安全）。
+// CreateIfAbsent 插入一条 run（**开轮**落行：status=running、first_seq 必填、last_seq=-1）。
+//
+// 幂等：`ON CONFLICT DO NOTHING` 覆盖**两个**唯一键——同 `id`（重放同一轮）与同
+// `(session_id, first_seq)`（v22 的 `idx_runs_session_first_seq`）。后者才是真正的幂等键：
+// 重放一次 `run.started` 时 id 可能不同（重铸过），但"这一轮的起点"永远相同。
 func (d *RunDao) CreateIfAbsent(ctx context.Context, r *model.RunEntity) error {
 	return d.DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(r).Error
 }
 
-// Finish 写入 run 终态（status/stop_reason/error_code/usage/ended_at）；行不存在返回 ErrRunNotFound。
-func (d *RunDao) Finish(ctx context.Context, id, status, stopReason, errorCode, usageJSON string, endedAt string) error {
+// GetByID 按 id 取一条 run；不存在 → (零值, false, nil)（不把"没有"当错误往上抛，
+// 终态物化的兜底路径要能区分"没有这一行"与"读库失败"）。
+func (d *RunDao) GetByID(ctx context.Context, id string) (model.RunEntity, bool, error) {
+	var r model.RunEntity
+	err := d.DB(ctx).Where("id = ?", id).Limit(1).Take(&r).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.RunEntity{}, false, nil
+	}
+	if err != nil {
+		return model.RunEntity{}, false, err
+	}
+	return r, true, nil
+}
+
+// RunningRows 取某会话**进行中**的行（first_seq 降序；最多两条）。
+//
+// 只给终态物化的兜底路径用：终态载荷缺 `run_id`（或那个 id 不在库）时，本轮的开轮行只能按
+// "该会话那条 running"找。**刻意返回一页而不是一条**：同一会话里多于一条 running 行意味着
+// 崩溃留下的残轮（那时"最近一条"只是猜测），调用方要能看见"不唯一"并选择不猜。
+func (d *RunDao) RunningRows(ctx context.Context, sessionID string) (model.RunEntityList, error) {
+	var rows model.RunEntityList
+	err := d.DB(ctx).Model(&model.RunEntity{}).
+		Where("session_id = ? AND status = ?", sessionID, "running").
+		Order("first_seq DESC").Limit(2).Find(&rows).Error
+	return rows, err
+}
+
+// Finish 写入 run 收口列（窗口右端 + 终态 + 首令牌耗时）；行不存在返回 ErrRunNotFound。
+//
+// 整组列**同一次 UPDATE**：它们是"这一轮到此为止"的各个面，分两次写会留下"已终态但窗口
+// 还是 -1"的中间态。
+func (d *RunDao) Finish(ctx context.Context, id string, p model.RunFinishPatch) error {
 	res := d.DB(ctx).Model(&model.RunEntity{}).Where("id = ?", id).Updates(map[string]any{
-		"status":      status,
-		"stop_reason": stopReason,
-		"error_code":  errorCode,
-		"usage_json":  usageJSON,
-		"ended_at":    endedAt,
+		"last_seq":       p.LastSeq,
+		"status":         p.Status,
+		"stop_reason":    p.StopReason,
+		"error_code":     p.ErrorCode,
+		"usage_json":     p.UsageJSON,
+		"first_token_ms": p.FirstTokenMS,
+		// 落库文本在这里格式化（map 形式的 Updates 不过 serializer，见 model.LayoutTS）。
+		"ended_at": model.FormatTimeOrNow(p.EndedAt),
 	})
 	if res.Error != nil {
 		return res.Error
@@ -73,23 +110,4 @@ func (d *RunDao) List(ctx context.Context, sessionID string) (model.RunEntityLis
 		BaseCond:  &gormdao.BaseCond{OrderField: "started_at ASC, first_seq ASC"},
 		SessionID: sessionID,
 	})
-}
-
-// LastSeq 返回某会话最后一条 run 的 last_seq（**-1 = 尚无 run**；供下一 run 的事件窗口起点）。
-//
-// v21 把哨兵从 `0` 改成 `-1`：`0` 现在是该会话**第一条事件**的合法位次，而"窗口起点 0"会让
-// `EventsAfter(会话, 0)` 跳过那一条——本会话的 `session.created` 与首条用户消息都在窗口之外，
-// 首轮 run 的 first_seq/时长/首令牌耗时全部错位。产 run 的窗口从这里往上取，所以这个哨兵必须对。
-//
-// 本方法在 M2 随 `RunLastSeq` 一起删除（窗口起点改为读 run 行自己记下的 `first_seq`，
-// 不再由"上一轮的末尾"推导——见设计 D2/E2）。
-func (d *RunDao) LastSeq(ctx context.Context, sessionID string) (int64, error) {
-	var seq int64
-	if err := d.DB(ctx).Model(&model.RunEntity{}).
-		Select("COALESCE(MAX(last_seq), -1)").
-		Where("session_id = ?", sessionID).
-		Scan(&seq).Error; err != nil {
-		return -1, err
-	}
-	return seq, nil
 }

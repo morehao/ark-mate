@@ -103,6 +103,9 @@ func printEvent(evt eventbus.Event) {
 		if text != "" {
 			fmt.Printf("\n💭 %s\n", text)
 		}
+	case manager.BusRunStarted:
+		runID, _ := p["run_id"].(string)
+		fmt.Printf("\n▶ run.started  run_id=%s\n", runID)
 	case manager.BusUserMessage:
 		fmt.Printf("\n👤 %s\n", text)
 	case manager.BusToolCall, manager.BusToolUpdate:

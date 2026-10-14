@@ -77,14 +77,22 @@ export interface RunUsage {
   cost_currency?: string
 }
 
-/** 轮次明细（GET /sessions/:id/runs；runs 表读模型，内存模式为空数组）。 */
+/**
+ * 轮次明细（GET /sessions/:id/runs；runs 表读模型，内存模式为空数组）。
+ *
+ * v22 起**进行中的轮也在列表里**（一轮在用户发 prompt 时就落行，终态只更新同一行）：
+ * 那时 `status === 'running'`、`last_seq === -1`（**未收口**；0 是该会话第一条事件的合法位次，
+ * 不能当"未知"用）、`ended_at` 缺省、`usage` 通常缺省。展示侧据此跳过/占位，别把 -1 当成位次用。
+ */
 export interface SessionRun {
   id: string
   user_text: string
   status: string // running | completed | failed | cancelled
   error_code?: string
   stop_reason?: string
+  /** 窗口起点 = 本轮 `run.started` 的会话内位次（开轮即定）。 */
   first_seq: number
+  /** 窗口终点 = 终态事件的会话内位次；**-1 = 还没收口**（进行中的轮）。 */
   last_seq: number
   started_at: string
   ended_at?: string

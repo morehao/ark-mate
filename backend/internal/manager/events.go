@@ -67,6 +67,13 @@ const (
 	// BusRuntime 会话/runtime 连接态事件（phase/pending_confirmations/can_send；M2「会话态与
 	// runtime 态分离」起发布，M1 预留——payload 契约见设计文档 §4.5）。
 	BusRuntime = "session.runtime"
+	// BusRunStarted 一轮 prompt **开始**（v22 起；durable）。
+	//
+	// payload = {session_id, run_id, runtime?, text}：`run_id` 是这一轮的**身份**
+	// （`run_<ULID>`，与 `runs.id` 同空间），开轮行、终态载荷、WS 帧上都是同一支值。
+	// 它落 durable 存储，所以"进行中的轮"在事件流里有痕迹——`runs` 行因此是**纯投影**，
+	// 崩溃/重启也能从 events 重建（设计 §D2/J7）。
+	BusRunStarted = "run.started"
 	// BusRunEnded 一轮 prompt 正常结束（stop_reason）。
 	BusRunEnded = "run.ended"
 	// BusRunError 一轮 prompt 失败（含稳定 code/分类，对齐 acl.Class）。
