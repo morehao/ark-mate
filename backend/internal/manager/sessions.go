@@ -419,21 +419,32 @@ func (s *Service) CancelRun(ctx context.Context, id string) error {
 //
 // 数据源：sqlite 模式（st != nil）读 events 表——durable、不受 eventbus 内存上限（65536）约束，
 // 「加载更早」可一直翻到会话第一条；内存模式回放 eventbus（进程内）。
-// 语义：after（开区间，seq > after）与 before（开区间，seq < before，返回最近 limit 条并升序排列）
+// 语义：after（开区间，seq > after）、before（开区间，seq < before，返回最近 limit 条并升序排列）
 // 互斥（handler 已拦，服务层再兜一次 → 40001）；has_more 沿当前方向；首尾 seq 一并回带。
+//
+// **游标口径（v21）**：`seq` 是会话内位次、0 是合法值，所以"没有 after"的哨兵是 `-1`（早于该会话
+// 一切事件），由 handler 在缺省时填入；`after = 0` 表示"第 0 条之后"（跳过 `session.created`）。
+// 空页的 FirstSeq/LastSeq 回 **-1**（此前是 0，而 0 现在是一个真实位次，"空"与"第 0 条"必须可分）。
 func (s *Service) SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error) {
 	if !s.hasSession(id) {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
 	}
-	if q.After > 0 && q.HasBefore {
+	if q.After != nil && q.Before != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "history_cursor_conflict",
 			"after 与 before 互斥（一个向后、一个向前）", nil))
 	}
-	if q.After < 0 {
-		q.After = 0
+	// 缺席的游标 = -1（v21 哨兵："没有游标"）。两个方向都**不夹到 0**：0 是会话第一条事件的
+	// 合法位次，夹没了它，首屏/翻页就会丢掉那一条。
+	after, before := int64(-1), int64(-1)
+	if q.After != nil {
+		if after = *q.After; after < -1 {
+			after = -1
+		}
 	}
-	if q.Before < 0 {
-		q.Before = 0
+	if q.Before != nil {
+		if before = *q.Before; before < -1 {
+			before = -1
+		}
 	}
 	if q.Limit < 1 {
 		q.Limit = 1
@@ -449,10 +460,10 @@ func (s *Service) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 	if s.st != nil {
 		var batch []model.EventEntity
 		var err error
-		if q.HasBefore {
-			batch, hasMore, err = s.st.EventsBefore(ctx, id, q.Before, int64(q.Limit))
+		if q.Before != nil {
+			batch, hasMore, err = s.st.EventsBefore(ctx, id, before, int64(q.Limit))
 		} else {
-			batch, hasMore, err = s.st.EventsAfter(ctx, id, q.After, int64(q.Limit))
+			batch, hasMore, err = s.st.EventsAfter(ctx, id, after, int64(q.Limit))
 		}
 		if err != nil {
 			return nil, code.FromError(acl.NewError(acl.ClassService, "history_read_failed",
@@ -465,35 +476,45 @@ func (s *Service) SessionHistory(ctx context.Context, id string, q dtosession.Hi
 			})
 		}
 	} else {
-		all := s.bus.EventsAfter(0)
-		mine := make([]eventbus.Event, 0, len(all))
-		for _, evt := range all {
-			if evt.AggregID != id {
-				continue
-			}
-			if q.HasBefore {
-				if q.Before > 0 && evt.Seq >= q.Before {
-					continue
+		// 内存模式：先取该会话**全部**事件（起点固定 `-1`，与游标无关——游标只决定裁哪一端），
+		// 再按方向裁窗口。起点若跟着一个缺省的 after=0 走，会让"翻更早"这条路径每次静默
+		// 丢掉第 0 条事件。
+		mine := s.bus.EventsAfter(id, -1)
+		if q.Before != nil {
+			// `before < 0` = 从最新往回（哨兵）；`before >= 0` 是"该位次之前"。
+			if before >= 0 {
+				kept := mine[:0]
+				for _, evt := range mine {
+					if evt.Seq < before {
+						kept = append(kept, evt)
+					}
 				}
-			} else if evt.Seq <= q.After {
-				continue
+				mine = kept
 			}
-			mine = append(mine, evt)
-		}
-		if q.HasBefore {
 			// 取窗口末尾 limit 条（保持升序）；窗口外还有更早 → has_more。
 			if len(mine) > q.Limit {
 				hasMore = true
 				mine = mine[len(mine)-q.Limit:]
 			}
-		} else if len(mine) > q.Limit {
-			hasMore = true
-			mine = mine[:q.Limit]
+		} else {
+			if after >= 0 {
+				kept := mine[:0]
+				for _, evt := range mine {
+					if evt.Seq > after {
+						kept = append(kept, evt)
+					}
+				}
+				mine = kept
+			}
+			if len(mine) > q.Limit {
+				hasMore = true
+				mine = mine[:q.Limit]
+			}
 		}
 		events = mine
 	}
 
-	resp := &dtosession.SessionHistoryResp{ID: id, Events: events, HasMore: hasMore}
+	resp := &dtosession.SessionHistoryResp{ID: id, Events: events, HasMore: hasMore, FirstSeq: -1, LastSeq: -1}
 	if len(events) > 0 {
 		resp.FirstSeq = events[0].Seq
 		resp.LastSeq = events[len(events)-1].Seq

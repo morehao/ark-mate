@@ -84,7 +84,9 @@ export interface SessionView {
 const emptyView = (): SessionView => ({
   entries: [],
   streaming: false,
-  lastSeq: 0,
+  // 位次是**会话内**的、0 是合法位次（v21）：初值必须是 -1，否则 `applyEvent` 的
+  // `e.seq <= lastSeq` 去重会把该会话的**第 0 条**（`session.created`/首条用户消息）丢掉。
+  lastSeq: -1,
   hydrating: false,
   queue: [],
   queueSeq: 0,
@@ -570,7 +572,7 @@ let toastSeq = 0
 let transportRef: WsTransport | null = null
 
 /**
- * C2「加载更早」的**冷挂载待裁决**集合：activate 冷挂载（since_seq=0 全量回放）时登记，
+ * C2「加载更早」的**冷挂载待裁决**集合：activate 冷挂载（since_seq=-1 全量回放）时登记，
  * 由该会话到达的**首个帧**裁决——回事件 = 服务端从会话第一条起全给了（已到最早）；
  * 回快照 = 起点已被缓冲淘汰、更早的历史还在（未到最早）。见 applyFrame 两个分支。
  */
@@ -626,13 +628,17 @@ export const useMate = create<MateStore>((set, get) => {
     showToast,
 
     // C2：向服务端翻页加载更早的事件（before 游标）。
-    // 取当前视图最小事件 seq 作为游标（新会话/空视图 → before=0 = 取末尾一页），
-    // 折叠到空视图后整体前插（事件 seq 全小于游标 → 与现有条目天然不重叠），lastSeq 不回退。
+    // 游标 = 当前视图最小已知位次（空视图回落到"服务端水位 + 1" = 最新那一页，见 olderCursor）；
+    // 一个已知位次都没有时省略 before（后端给第一页）。折叠到空视图后整体前插
+    //（事件 seq 全小于游标 → 与现有条目天然不重叠），lastSeq 不回退。
     loadOlder: async (id) => {
       const cur = get().views[id] ?? emptyView()
-      const before = olderCursor(cur.entries)
+      const before = olderCursor(cur.entries, cur.lastSeq)
       try {
-        const page = await sessionHistory(id, { before, limit: HISTORY_PAGE })
+        const page = await sessionHistory(id, {
+          ...(before === null ? {} : { before }),
+          limit: HISTORY_PAGE,
+        })
         let older = emptyView()
         for (const e of page.events) older = applyEvent(older, e)
         set((s) => {
@@ -678,7 +684,9 @@ export const useMate = create<MateStore>((set, get) => {
                 ...s.views,
                 [f.agg_id]: {
                   ...emptyView(),
-                  lastSeq: Math.max(f.event_seq, 0),
+                  // 水位原样落库（`-1` = 该聚合还没有任何事件）：夹到 0 会让水位与
+                  // "第 0 条"撞车，后续到达的 seq 0 事件被去重丢掉。
+                  lastSeq: f.event_seq,
                 },
               },
             }
@@ -688,7 +696,7 @@ export const useMate = create<MateStore>((set, get) => {
             const view = applyEvent(s.views[f.agg_id] ?? emptyView(), f.event)
             // 首个事件即证明已就绪（配合 snapshot 与 hydration 超时兜底）
             if (view.hydrating) view.hydrating = false
-            // 冷挂载（since_seq=0）收到的是**重放**而不是快照 → 服务端把该会话在缓冲里的历史
+            // 冷挂载（since_seq=-1）收到的是**重放**而不是快照 → 服务端把该会话在缓冲里的历史
             // 全给了（缓冲按聚合淘汰，淘汰过就会回快照）——这就是「已到最早」的事实。
             // 记下来，免得只问了一个问题的会话也一直挂着「加载更早的消息」。
             const atStart = coldFullReplay.delete(f.agg_id)
@@ -873,7 +881,7 @@ export const useMate = create<MateStore>((set, get) => {
           // 本地气泡续流）不视为冷挂载。
           const cold = sinceSeq === undefined
           if (cold) {
-            // 冷挂载一律 since_seq=0（全量回放）→ 登记待裁决，由该会话首个帧给出
+            // 冷挂载一律 since_seq=-1（全量回放：含该会话第 0 条）→ 登记待裁决，由该会话首个帧给出
             // 「已到最早 / 还有更早」的事实（applyFrame）。
             coldFullReplay.add(id)
           }

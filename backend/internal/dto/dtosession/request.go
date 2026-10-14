@@ -92,12 +92,19 @@ type CapabilitiesReq struct {
 // HistoryQuery 会话历史分页参数（GET /sessions/:id/history）。
 // After/Before 互斥：After 向后（seq > after，升序）；Before 向前（seq < before，仍升序返回，
 // 用于「加载更早」）。Limit 1..1000（0 → 默认 200）。
+//
+// **游标口径（v21）**：`seq` 是**会话内**位次、0 是合法值（`session.created`），于是 `0`
+// 再也不能兼任"没有游标"的哨兵（它曾经就是）。两个游标都用 `*int64` 表达"可缺席"：
+//   - `nil` = 该方向没有游标：向后 = 从该会话第一条起；向前 = 从最新往回（取末尾一页）；
+//   - `After = &0` = 第 0 条**之后**（跳过它）；`Before = &0` = 第 0 条之前（空页，"已到最早"）。
+//
+// 为什么用指针而不是 `int64 + HasAfter/HasBefore bool`：后者允许"填了值却忘了置标志"这种
+// 组合，而它的表现是**静默**的（从头返回一页，看起来像成功）。指针让"有没有游标"与"游标
+// 是多少"成为同一个事实，那种组合根本写不出来。
 type HistoryQuery struct {
-	After int64
-	// Before 向前游标（seq < Before）；Before=0 且 HasBefore=true = 取末尾一页。
-	Before    int64
-	HasBefore bool
-	Limit     int
+	After  *int64
+	Before *int64
+	Limit  int
 }
 
 // PermissionResolveReq 权限决策请求体。

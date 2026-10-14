@@ -127,13 +127,30 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	svc1.publish(BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
 	svc1.publish(BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
 	svc1.closeTranscripts()
-	before := bus1.EventsAfter(0)
+	before := bus1.EventsAll()
 	if len(before) != 3 {
 		t.Fatalf("第一轮应有 3 条事件，got %d", len(before))
 	}
-	// 前提自检：位次确实交错（否则这条用例区分不了对错实现）。
-	if before[0].AggregID == before[1].AggregID {
-		t.Fatalf("夹具没造成交错（前两条同会话）：%+v", before)
+	// 前提自检：**发布顺序 ≠ `(会话, 位次)` 注入顺序**（否则这条用例区分不了对错实现）。
+	// 两个会话交错发布时必然不同：发布序是 0,1,2 那种跨会话交替，注入序是把同一会话的
+	// 位次收在一起（v21 起位次只在会话内可比，跨会话相对顺序不承载语义）。
+	grouped := []eventbus.Event{}
+	for _, sid := range []string{sesLegacyA, sesLegacyB} {
+		for _, e := range before {
+			if e.AggregID == sid {
+				grouped = append(grouped, e)
+			}
+		}
+	}
+	sameOrder := true
+	for i := range before {
+		if grouped[i].ID != before[i].ID {
+			sameOrder = false
+			break
+		}
+	}
+	if sameOrder {
+		t.Fatalf("夹具没造成「发布序 ≠ 注入序」：%+v", before)
 	}
 
 	// —— 第二轮：**新的** Service + 新的 bus（= 重启），transcript 目录不变。
@@ -143,19 +160,34 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	if sessions, _ := svc2.ListSessions(false, "", ""); len(sessions) != 2 {
 		t.Fatalf("重启后应从 transcript 回灌 2 个会话，got %d", len(sessions))
 	}
-	after := bus2.EventsAfter(0)
+	after := bus2.EventsAll()
 	if len(after) != len(before) {
 		t.Fatalf("重启后事件数应不变：%d → %d", len(before), len(after))
 	}
-	for i := range before {
-		if after[i].ID != before[i].ID || after[i].Seq != before[i].Seq ||
-			after[i].Type != before[i].Type || after[i].AggregID != before[i].AggregID {
-			t.Fatalf("重启后第 %d 条事件的 (id,seq,type,agg) 变了：\n 重启前 (%s,%d,%s,%s)\n 重启后 (%s,%d,%s,%s)\n"+
-				"（同一个事件跨重启必须是同一支身份与同一个位次，且**全局按 seq 归并**"+
-				"——这正是 v17 要钉住的东西）",
-				i, before[i].ID, before[i].Seq, before[i].Type, before[i].AggregID,
-				after[i].ID, after[i].Seq, after[i].Type, after[i].AggregID)
+	// 按**事件身份**比对（v21 起不能按下标：注入顺序是 `(会话, 位次)` 分组有序，与第一轮的
+	// 发布顺序不同，按下标比会把"顺序变了"误报成"身份/位次变了"）。
+	byID := make(map[string]eventbus.Event, len(after))
+	for _, e := range after {
+		byID[e.ID] = e
+	}
+	for _, b := range before {
+		a, ok := byID[b.ID]
+		if !ok {
+			t.Fatalf("重启后少了事件 %s（身份没随数据走）", b.ID)
 		}
+		if a.Seq != b.Seq || a.Type != b.Type || a.AggregID != b.AggregID {
+			t.Fatalf("重启后事件的 (seq,type,agg) 变了：\n 重启前 (%s,%d,%s,%s)\n 重启后 (%s,%d,%s,%s)\n"+
+				"（同一个事件跨重启必须是同一支身份与同一个位次——这正是 v17 要钉住的东西）",
+				b.ID, b.Seq, b.Type, b.AggregID, a.ID, a.Seq, a.Type, a.AggregID)
+		}
+	}
+	// v21 的注入顺序契约：同一会话内位次严格升序（分组有序）。
+	prev := map[string]int64{}
+	for _, e := range after {
+		if p, ok := prev[e.AggregID]; ok && e.Seq <= p {
+			t.Fatalf("会话 %s 的注入位次未升序: %d 之后是 %d", e.AggregID, p, e.Seq)
+		}
+		prev[e.AggregID] = e.Seq
 	}
 	// 身份必须真的是平台形状（不是空串、不是从别处抄来的会话 id）。
 	for _, e := range after {
@@ -165,34 +197,41 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	}
 }
 
-// TestLoadTranscriptsKeepsGlobalSeqOrder 跨文件装载必须按 **seq 全局升序**注入（v17 的核心修法）。
+// TestLoadTranscriptsKeepsPerSessionSeqOrder 装载必须按 **`(会话, seq)` 升序**注入
+// （v17 的"位次不重铸"在 v21 的口径下要的那个顺序）。
 //
-// 为什么这条必须单独测：装载是**逐文件**读的，而文件名（会话 id）的字典序与事件 seq 无关。
-// 旧实现逐文件 `Publish`（进程内取号），于是"先读到的会话"会把 bus 的水位抬高，后面会话的
-// `PublishAt` 只能走取号回落——**位次被改写**，同一个事件每次重启换一个 seq，客户端书签随之失效。
-// 这里让两个会话的 seq 交错（A=1,5；B=2,6），只要实现退回逐文件顺序，B 的两条就会变成 6、7。
-func TestLoadTranscriptsKeepsGlobalSeqOrder(t *testing.T) {
+// 为什么这条必须单独测：装载是**逐文件**读的，而文件名的字典序与事件位次无关——
+// 同一个会话理论上只有一份 transcript，但外部同步/复制会造出第二份。逐文件 `PublishAt` 时，
+// 先读到的那份会把 bus 里**该会话**的水位抬高，后读到那份的小位次只能走"取号回落"——
+// **位次被改写**，同一个事件每次重启换一个 seq，客户端书签随之失效。
+//
+// 夹具就是这么造的：会话 A 有两份文件，字典序在前的那份（`-a`）持有**较大**的位次（5），
+// 在后那份（`-b`）持有较小的位次（1）。按文件名顺序注入 → 5 在前、1 只能被顶到 6；
+// 按 `(会话, 位次)` 注入 → 1、5 原样。
+func TestLoadTranscriptsKeepsPerSessionSeqOrder(t *testing.T) {
 	dir := t.TempDir()
 	headerA := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyA + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
 	headerB := `{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"` + sesLegacyB + `","agent_id":"agent-rtx","runtime":"rtx","created_at":"2026-09-07T03:12:40Z"}`
-	writeTranscriptJSONL(t, dir, sesLegacyA+".jsonl", []string{
+	writeTranscriptJSONL(t, dir, sesLegacyA+"-a.jsonl", []string{
+		headerA,
+		`{"id":"` + evtA2 + `","seq":5,"ts":"2026-09-07T03:12:45Z","type":"session.user_message","payload":{"text":"a5"}}`,
+	})
+	writeTranscriptJSONL(t, dir, sesLegacyA+"-b.jsonl", []string{
 		headerA,
 		`{"id":"` + evtA1 + `","seq":1,"ts":"2026-09-07T03:12:41Z","type":"session.user_message","payload":{"text":"a1"}}`,
-		`{"id":"` + evtA2 + `","seq":5,"ts":"2026-09-07T03:12:45Z","type":"session.user_message","payload":{"text":"a5"}}`,
 	})
 	writeTranscriptJSONL(t, dir, sesLegacyB+".jsonl", []string{
 		headerB,
 		`{"id":"` + evtB1 + `","seq":2,"ts":"2026-09-07T03:12:42Z","type":"session.user_message","payload":{"text":"b2"}}`,
-		`{"id":"` + evtB2 + `","seq":6,"ts":"2026-09-07T03:12:46Z","type":"session.user_message","payload":{"text":"b6"}}`,
 	})
 
 	bus := eventbus.New()
 	svc := NewService(runtime.NewRegistry(), bus)
 	svc.SetTranscriptDir(dir)
 
-	all := bus.EventsAfter(0)
-	if len(all) != 4 {
-		t.Fatalf("期望注入 4 条事件，got %d", len(all))
+	all := bus.EventsAll()
+	if len(all) != 3 {
+		t.Fatalf("期望注入 3 条事件（A 两份文件各 1 条 + B 1 条），got %d: %+v", len(all), all)
 	}
 	want := []struct {
 		seq int64
@@ -200,15 +239,14 @@ func TestLoadTranscriptsKeepsGlobalSeqOrder(t *testing.T) {
 		id  string
 	}{
 		{1, sesLegacyA, evtA1},
-		{2, sesLegacyB, evtB1},
 		{5, sesLegacyA, evtA2},
-		{6, sesLegacyB, evtB2},
+		{2, sesLegacyB, evtB1},
 	}
 	for i, w := range want {
 		if all[i].Seq != w.seq || all[i].AggregID != w.agg || all[i].ID != w.id {
 			t.Fatalf("第 %d 条事件的 (seq,agg,id) = (%d,%s,%s)，期望 (%d,%s,%s)——"+
-				"跨文件必须按 seq 全局归并后再注入", i, all[i].Seq, all[i].AggregID, all[i].ID,
-				w.seq, w.agg, w.id)
+				"同一会话必须先按位次升序再注入（否则小位次会被取号回落顶掉）",
+				i, all[i].Seq, all[i].AggregID, all[i].ID, w.seq, w.agg, w.id)
 		}
 	}
 }
@@ -236,7 +274,7 @@ func TestLoadTranscriptsSkipsV1Schema(t *testing.T) {
 	if got := LegacySchemaSkips() - before; got != 1 {
 		t.Fatalf("被跳过的 v1 文件计数不符: got %d want 1", got)
 	}
-	if events := bus.EventsAfter(0); len(events) != 0 {
+	if events := bus.EventsAll(); len(events) != 0 {
 		t.Fatalf("v1 文件不该注入任何事件，got %d 条", len(events))
 	}
 }
@@ -257,7 +295,7 @@ func TestLoadTranscriptsRejectsLineWithoutIdentity(t *testing.T) {
 	if sessions, _ := svc.ListSessions(false, "", ""); len(sessions) != 0 {
 		t.Fatalf("缺身份的事件行应让整份文件被跳过: %+v", sessions)
 	}
-	if events := bus.EventsAfter(0); len(events) != 0 {
+	if events := bus.EventsAll(); len(events) != 0 {
 		t.Fatalf("跳过的文件不该注入事件，got %d 条", len(events))
 	}
 }

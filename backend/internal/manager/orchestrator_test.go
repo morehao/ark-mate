@@ -45,7 +45,7 @@ func (s *stubSession) Cancel(context.Context) error { return nil }
 
 // feed 收集某聚合最多 want 个 bus 事件（超时 2s 防御）。
 func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
-	sub := bus.Subscribe(0)
+	sub := bus.SubscribeAfter(nil) // 回放 + live：feed 收集该聚合此后可见的全部事件
 	defer bus.Unsubscribe(sub)
 	var out []eventbus.Event
 	timeout := time.After(2 * time.Second)

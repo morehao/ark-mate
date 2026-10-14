@@ -31,12 +31,22 @@ type MessageHit struct {
 }
 
 // CreateMessages 单事务批量插入一轮的 messages 行（可重复调用：同 run_id 先删后插，
-// 保证「从 events 重建」幂等）。
+// 保证「从 events 重建」幂等）。**空批次是 no-op**——重建路径请先显式 DeleteMessagesByRun。
 func (s *Store) CreateMessages(ctx context.Context, msgs []model.MessageEntity) error {
 	if len(msgs) == 0 {
 		return nil
 	}
 	return s.messages.ReplaceRunMessages(ctx, msgs)
+}
+
+// DeleteMessagesByRun 删除某一轮的 messages 行（重建路径专用：空窗口也要清干净，见 dao 注释）。
+func (s *Store) DeleteMessagesByRun(ctx context.Context, runID string) error {
+	return s.messages.DeleteByRun(ctx, runID)
+}
+
+// DeleteMessagesBySession 删除某会话全部 messages 行（整会话重建的起点）。
+func (s *Store) DeleteMessagesBySession(ctx context.Context, sessionID string) error {
+	return s.messages.DeleteBySession(ctx, sessionID)
 }
 
 // SearchUserMessages 在指定会话的 user 消息中做子串检索（大小写不敏感；LIKE 通配转义），

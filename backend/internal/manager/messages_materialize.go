@@ -33,18 +33,31 @@ type msgRowBuilder struct {
 // materializeMessages 把一轮窗口事件物化为 messages 行（assistant 文本片段 + 时间线 + 工具最终态）。
 // best-effort：失败仅告警，不影响 events 事实源。
 func (s *Service) materializeMessages(sessionID, runID string, evs []model.EventEntity) {
-	if s.st == nil || len(evs) == 0 {
-		return
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.rebuildRunMessages(ctx, sessionID, runID, evs); err != nil {
+		glog.Warnw(context.Background(), "store: create messages failed", "session", sessionID, "run", runID, "err", err)
+	}
+}
+
+// rebuildRunMessages 用给定窗口事件重建**一轮**的 messages 行（先清该 run 的旧行再插新行）。
+//
+// 与 `materializeMessages` 的分工：这个是**能报错**的核（重建通道 G7 要能把失败报上去），
+// 那个是其 best-effort 包装（live 路径失败只 WARN，不影响 events 事实源）。
+// 空窗口时也要清——见 `store.DeleteMessagesByRun` 的注释。
+func (s *Service) rebuildRunMessages(ctx context.Context, sessionID, runID string, evs []model.EventEntity) error {
+	if s.st == nil {
+		return nil
 	}
 	rows := buildMessageRows(sessionID, runID, evs)
 	if len(rows) == 0 {
-		return
+		// 空窗口也要**清干净**：位次口径换了之后某个窗口可能一个新行都产不出来，而"空批次"
+		// 在插入路径里是 no-op——不显式删，上一代的旧行会一直留在库里当幽灵消息。
+		// 非空批次不走这条：`CreateMessages` 自己就是"同 run 先删后插"的**单事务**，
+		// 在它外面再删一次只会把原子性拆成两段（中间崩溃 → 该轮消息整段消失）。
+		return s.st.DeleteMessagesByRun(ctx, runID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := s.st.CreateMessages(ctx, rows); err != nil {
-		glog.Warnw(context.Background(), "store: create messages failed", "session", sessionID, "run", runID, "err", err)
-	}
+	return s.st.CreateMessages(ctx, rows)
 }
 
 func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.MessageEntity {
@@ -97,12 +110,14 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.
 			msgID, _ := m["msg_id"].(string)
 			if cur == nil || (msgID != "" && cur.msgID != "" && msgID != cur.msgID) {
 				flush()
-				cur = &msgRowBuilder{role: "assistant", msgID: msgID, createdAt: e.CreatedAt}
+				cur = &msgRowBuilder{role: "assistant", msgID: msgID, seqLo: -1, seqHi: -1, createdAt: e.CreatedAt}
 			} else if cur != nil && cur.msgID == "" && msgID != "" && len(cur.events) > 0 {
 				// 无 msg_id 首段后带出 msg_id → 归属同一 assistant 消息（SDK 补 id 场景）
 				cur.msgID = msgID
 			}
-			if cur.seqLo == 0 {
+			// 初值 -1 而不是 0：v21 起会话第 0 条事件的位次就是 0，用 0 当"还没设过"
+			// 会让"本轮首事件恰好在位次 0"被下一次迭代静默改写（seq_lo 指向第二条）。
+			if cur.seqLo < 0 {
 				cur.seqLo = e.Seq
 			}
 			cur.seqHi = e.Seq
@@ -111,9 +126,9 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.
 		default:
 			// thought/tool/usage/terminal：归属当前 assistant 行（无则开一个空文本行承载时间线）。
 			if cur == nil {
-				cur = &msgRowBuilder{role: "assistant", createdAt: e.CreatedAt}
+				cur = &msgRowBuilder{role: "assistant", seqLo: -1, seqHi: -1, createdAt: e.CreatedAt}
 			}
-			if cur.seqLo == 0 {
+			if cur.seqLo < 0 {
 				cur.seqLo = e.Seq
 			}
 			cur.seqHi = e.Seq

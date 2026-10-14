@@ -97,15 +97,18 @@ type wsClientFrame struct {
 	AggID  string `json:"agg_id"` // attach/detach 目标聚合（session id）
 	// Token 首帧 attach 携带的 stream 面凭据（M1-1；桌面态必需，独立态可选）。
 	// 形状的唯一真源在前端 @ark-mate/desktop-contract 的 buildAttachFrame。
-	Token    string `json:"token"`
-	SinceSeq *int64 `json:"since_seq,omitempty"` // attach 续传游标（省略→snapshot；数字含 0→重放）
+	Token string `json:"token"`
+	// SinceSeq attach 续传游标（**会话内**位次）：省略或负数 = 从该会话第一条起全量回放
+	// （-1 是哨兵）；`>= 0` = 从该条之后增量续传。0 是合法位次（`session.created`），
+	// 不能当"没有游标"用。
+	SinceSeq *int64 `json:"since_seq,omitempty"`
 }
 
 // wsServerFrame 服务端 → 客户端帧。
 type wsServerFrame struct {
 	Type     string          `json:"type"`                // snapshot | event | gap | detached | pong
 	AggID    string          `json:"agg_id,omitempty"`    // 归属聚合
-	EventSeq int64           `json:"event_seq,omitempty"` // snapshot 水位 / event 的 seq / gap 的首丢 seq
+	EventSeq int64           `json:"event_seq,omitempty"` // 该会话水位（snapshot）/ event 的会话内位次 / gap 的首丢位次
 	FromSeq  int64           `json:"from_seq,omitempty"`  // gap：重挂起点（= 首丢 seq）
 	Event    *eventbus.Event `json:"event,omitempty"`     // event 帧载荷（id/type/seq/agg_id/version/payload；`id` 只对 durable 事件存在）
 	Reason   string          `json:"reason,omitempty"`    // detached 原因
@@ -179,8 +182,10 @@ func (h *wsCtr) Handle(c *gin.Context) {
 
 	ws.SetReadLimit(wsMaxMessageSize)
 
-	// live 订阅以当前水位起步（attach 前的历史走 EventsAfter 重放，避免与 live 重叠）。
-	live := h.bus.Subscribe(h.bus.LastSeq())
+	// live 订阅只要增量（v21）：attach 之前的缺口由 EventsAfter(agg, since) 显式重放，
+	// 两条路径各管一段、不重叠。此前这里是 `Subscribe(bus.LastSeq())`（"全局水位之后的"），
+	// 而全局水位在 v21 之后不存在了——**每会话各自一个游标**这件事现在由两条路径的分工表达。
+	live := h.bus.Subscribe()
 	defer h.bus.Unsubscribe(live)
 
 	go h.writeLoop(st)
@@ -280,9 +285,14 @@ func (h *wsCtr) readLoop(st *connState) {
 }
 
 // attach 执行「决策 + 注册」：
-//   - since_seq 省略（nil）→ snapshot（冷挂载：空 state + 水位）+ 后续 live；
-//   - since_seq 提供（≥0）→ EventsAfter(since_seq) 全量/增量重放该聚合 + 后续 live
-//     （UI 冷开启既有会话传 0 = 全量回放重建会话视图；断线重连传 lastSeq = 增量续传）。
+//   - `since_seq` 不传或 `< 0`（**-1 是"从最早一条起"的哨兵**）→ `EventsAfter(agg, -1)`
+//     全量回放该聚合（UI 冷开启既有会话走这条：把会话视图从第一条事件重建起来）+ 后续 live；
+//   - `since_seq >= 0` → 从该位置之后增量续传（断线重连传本地 lastSeq）。
+//
+// v21 之前 `since_seq` 省略是 snapshot（空 state + 水位）、传 0 表示"全量"，而 0 现在是一个
+// **真实存在的位次**（该会话第一条事件 `session.created`）——把 0 当"从头"会让客户端每次冷挂载
+// 都恰好丢掉会话的第一帧（会话标题/创建时间就在那一帧里）。
+// 落在缓冲淘汰水位之前的请求仍回 snapshot（§5.2）。
 //
 // 简化说明：attach 的重放与 live 分属两条入队路径，极端并发下事件可能交错；
 // M1 的 §4.5 冻结面（持锁原子决策 + 单写者重放）再收敛顺序。
@@ -299,25 +309,23 @@ func (h *wsCtr) attach(st *connState, f wsClientFrame) {
 	st.attached[f.AggID] = true
 	st.mu.Unlock()
 
-	if f.SinceSeq == nil {
-		// 冷挂载：整包终态视图（M0 无持久化 → 空 state + 当前水位，客户端以此初始化游标）。
-		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(), State: json.RawMessage(`{}`)})
-		return
+	since := int64(-1)
+	if f.SinceSeq != nil {
+		since = *f.SinceSeq
 	}
-	since := *f.SinceSeq
 	if since < 0 {
-		since = 0
+		since = -1 // 归一：任何负值都是"从该会话最早一条起"
 	}
 	// 淘汰即快照回退（§5.2）：请求起点早于该聚合的缓冲淘汰水位 → 该区间已不可增量续传，
 	// 回整包 snapshot（M0/M1 snapshot 为空终态 + 当前水位，客户端据此重建游标并清空视图）。
-	if low := h.bus.EvictedThrough(f.AggID); low > 0 && since < low {
-		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(), State: json.RawMessage(`{}`)})
+	// 水位 -1 表示该聚合从未淘汰过；v21 之前这里是 `low > 0`，而 0 现在是个合法位次
+	// （淘汰掉会话第 0 条同样意味着"不可续传"），用 0 当"没淘汰"会静默漏判。
+	if low := h.bus.EvictedThrough(f.AggID); low >= 0 && since < low {
+		h.send(st, wsServerFrame{Type: "snapshot", AggID: f.AggID, EventSeq: h.bus.LastSeq(f.AggID), State: json.RawMessage(`{}`)})
 		return
 	}
-	for _, evt := range h.bus.EventsAfter(since) {
-		if evt.AggregID == f.AggID {
-			h.send(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt})
-		}
+	for _, evt := range h.bus.EventsAfter(f.AggID, since) {
+		h.send(st, wsServerFrame{Type: "event", AggID: f.AggID, EventSeq: evt.Seq, Event: &evt})
 	}
 }
 

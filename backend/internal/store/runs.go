@@ -27,6 +27,9 @@ func (s *Store) ListRuns(ctx context.Context, sessionID string) ([]model.RunEnti
 }
 
 // RunLastSeq 返回某会话最后一条 run 的 last_seq（0 = 尚无 run；供下一 run 的事件窗口起点）。
+//
+// v21 起窗口列是**会话内位次**，本方法语义随之收窄；M2 删除它（窗口起点改为读 run 行自己
+// 记下的 `first_seq`，不再由"上一轮的末尾"推导——设计 D2/E2）。
 func (s *Store) RunLastSeq(ctx context.Context, sessionID string) (int64, error) {
 	return s.runs.LastSeq(ctx, sessionID)
 }

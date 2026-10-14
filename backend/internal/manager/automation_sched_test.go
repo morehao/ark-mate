@@ -135,7 +135,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	if rec.startup != automation.StartupRecover {
 		t.Fatalf("期望 recover，got %s", rec.startup)
 	}
-	sub := r.bus.Subscribe(0)
+	sub := r.bus.SubscribeAfter(nil) // 回放 + live：断言的是本轮触发新增了哪些事件
 	defer r.bus.Unsubscribe(sub)
 
 	now := time.Now()

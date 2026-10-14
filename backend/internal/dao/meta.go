@@ -3,8 +3,6 @@ package dao
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/golib/dbaccess/gormdao"
@@ -12,7 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// MetaDao 访问 meta 表（任意键值：全局序号计数、导入标记等）。
+// MetaDao 访问 meta 表（任意键值：导入标记、目录级偏好、读模型重建标记等）。
+//
+// v21 起**不再**承载事件号序：那是每会话一行的 `event_sequence`
+// （`EventSequenceDao.NextSeq`）。本表的键都是"目录/进程级"的事实，没有一个会随会话增长。
 type MetaDao struct {
 	*gormdao.Dao[model.MetaEntity, model.MetaEntityList, string]
 }
@@ -47,28 +48,10 @@ func (d *MetaDao) Set(ctx context.Context, key, value string) error {
 	}).Create(&model.MetaEntity{Key: key, Value: value}).Error
 }
 
-// IncrSeq 在事务内把全局事件序号 +1 并返回新值（events.seq 的唯一分配源）。
-//
-// 必须是事务（调用方持有 tx 并已用 WithTx 绑定）：本仓是单写者模型，
-// 序号分配与事件插入必须原子，否则并发 run 会拿到重号。
-func (d *MetaDao) IncrSeq(ctx context.Context) (int64, error) {
-	cur, ok, err := d.Get(ctx, model.MetaKeyEventsLastSeq)
-	if err != nil {
-		return 0, err
-	}
-	var next int64
-	if ok {
-		parsed, perr := strconv.ParseInt(cur, 10, 64)
-		if perr != nil {
-			return 0, fmt.Errorf("dao: meta %s 值损坏 %q: %w", model.MetaKeyEventsLastSeq, cur, perr)
-		}
-		next = parsed
-	}
-	next++
-	if err := d.Set(ctx, model.MetaKeyEventsLastSeq, strconv.FormatInt(next, 10)); err != nil {
-		return 0, err
-	}
-	return next, nil
+// Delete 删任意键（不存在 → 无错，幂等）。与 Get 同一条理由：gormdao 的 `Delete` 按硬编码的
+// `id` 列定位，对主键列叫 `key` 的本表不适用。
+func (d *MetaDao) Delete(ctx context.Context, key string) error {
+	return d.DB(ctx).Where("key = ?", key).Delete(&model.MetaEntity{}).Error
 }
 
 // WithTx 返回绑定事务的新 DAO（事务内调用不得脱离 tx，否则破坏单写者语义）。

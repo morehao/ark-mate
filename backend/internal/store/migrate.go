@@ -720,6 +720,10 @@ var schemaMigrations = []migration{
 			`UPDATE mcp_servers SET body = replace(body, 'vault:', 'store:')`,
 		},
 	},
+
+	// v21 的版本步本体在 `migrate_v21.go`（它自带一段必须与人讲清楚的**步骤顺序理由**：
+	// 读模型窗口列的重编号必须发生在 `events` 重编号**之前**，否则旧位次消失、映射失去参照）。
+	migrationV21,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

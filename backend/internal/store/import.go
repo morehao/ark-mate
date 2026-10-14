@@ -14,12 +14,14 @@ import (
 type ImportItem struct {
 	Session model.SessionEntity
 	// Events PayloadJSON 已序列化；**ID 必须带**（v17：transcript v2 的事件行身份，原样落库），
-	// Seq 仍然忽略（事务内重分配全局 seq——位次由 DB 这个权威分配，身份随数据走）。
+	// `Seq` 仍然忽略——位次由 DB 这个权威按**本会话**重新分配（v21 起是会话内位次 0 起、
+	// 按本切片的行序推进；transcript 里那个 seq 是写入时那一刻的位次，跨版本可能是全局号，
+	// 拿它当权威会把旧口径的洞带进新库）。
 	Events []model.EventEntity
 }
 
 // ImportBatch 在一个事务内导入一批会话（transcript → DB，P1 迁移关键路径）：
-// 分配全局 seq → 插 events（**按 id 判重**）→ upsert sessions（水位=本会话末条 seq）→
+// 逐会话按行序分配**会话内位次** → 插 events（**按 id 判重**）→ upsert sessions（水位=本会话末条 seq）→
 // 校验 → 设导入标记 → 提交。
 // 任一步失败整体回滚（staging 语义）；marker 与库内 imported_transcripts 一致时幂等返回 ErrAlreadyImported。
 // expectedFiles/expectedEvents > 0 时做导入前后数量校验（防止漏行/错位）。
@@ -28,6 +30,10 @@ type ImportItem struct {
 // （同一身份的两个不同内容意味着这份 transcript 与库里的历史分叉了，静默写入只会让"哪一份是
 // 真的"永远说不清）。计数口径是"导入后**在场**的事件数"（新插 + 已存在且相同），所以
 // expectedEvents 仍然对得上。
+//
+// 位次口径（v21）：每条新事件经 `appendEventTx` 从 `event_sequence(sessionID)` 取号，
+// 所以**新会话**的位次就是本切片的下标（0、1、2…），与 transcript 行序一致；重复导入时
+// 已存在的事件不取号（判重早退），新事件接在既有水位之后——不会出现"跳号"或"改写既有位次"。
 func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker string, expectedFiles, expectedEvents int) (int64, int, error) {
 	var (
 		totalEvents  int64
@@ -56,7 +62,9 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 			if err := s.sessions.WithTx(tx).UpsertForImport(ctx, &conv); err != nil {
 				return err
 			}
-			var lastSeq int64
+			// `lastSeq` 初值 -1 = "这一批一条都没分配/命中"（v21 起位次从 0 起，用 0 当
+			// "还没有"会把"该会话的第一条事件"误判成没有事件、从而不推进水位）。
+			lastSeq := int64(-1)
 			for _, ev := range item.Events {
 				seq, err := s.importEventTx(ctx, tx, conv.ID, ev)
 				if err != nil {
@@ -67,7 +75,7 @@ func (s *Store) ImportBatch(ctx context.Context, items []ImportItem, marker stri
 				}
 				totalEvents++
 			}
-			if lastSeq > 0 {
+			if lastSeq >= 0 {
 				// 只升不降（与 live 路径同一条语义）：跳过重复事件时最后一条在场事件的 seq
 				// 可能比既有水位小，`SetLastSeq` 会把水位拉回去。
 				if err := s.sessions.WithTx(tx).TouchLastSeq(ctx, conv.ID, lastSeq); err != nil {

@@ -256,8 +256,17 @@ func (h *sessionCtr) Cancel(c *gin.Context) {
 	gincontext.Success(c, gin.H{"id": id, "status": "cancelling"})
 }
 
-// History 返回会话事件历史（分页）：query `after`（起点 seq，含之后，默认 0）、
-// `limit`（默认 200，上限 1000）。事件按 seq 升序；翻页用末条 seq 作下页 after。
+// History 返回会话事件历史（分页）：query `after`（起点 seq，开区间）、
+// `before`（反向起点 seq，开区间，用于「加载更早」）、`limit`（默认 200，上限 1000）。
+// 事件按 seq 升序；翻页用末条 seq 作下页 after。
+//
+// **游标口径（v21）**：seq 是**会话内**位次、0 是合法值（`session.created`），所以缺省与
+// 显式 0 是两件事：
+//   - `after` 缺省 = 从该会话第一条起；显式 `after=0` = 第 0 条之后（跳过它）；
+//   - `before` 缺省 = 从最新往回（末尾一页）；显式 `before=0` = 第 0 条之前（空页）。
+//
+// 两件事由**指针的有无**承载（`nil` = 没给），不是由某个哨兵值承载——`0` 已经是合法游标了。
+// 两者都只接受非负整数（负数一律 40000，服务端内部才用 -1 表示"没有游标"）。
 func (h *sessionCtr) History(c *gin.Context) {
 	id := c.Param("id")
 	q := dtosession.HistoryQuery{Limit: 200}
@@ -267,7 +276,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 			gincontext.Fail(c, code.Error(code.InvalidParam, "after 需为非负整数"))
 			return
 		}
-		q.After = n
+		q.After = &n
 	}
 	if v := c.Query("before"); v != "" {
 		n, err := parseNonNeg(v)
@@ -275,10 +284,9 @@ func (h *sessionCtr) History(c *gin.Context) {
 			gincontext.Fail(c, code.Error(code.InvalidParam, "before 需为非负整数"))
 			return
 		}
-		q.Before = n
-		q.HasBefore = true
+		q.Before = &n
 	}
-	if q.After > 0 && q.HasBefore {
+	if q.After != nil && q.Before != nil {
 		gincontext.Fail(c, code.Error(code.InvalidRequest, "after 与 before 互斥（一个向后、一个向前）"))
 		return
 	}

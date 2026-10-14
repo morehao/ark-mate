@@ -23,11 +23,13 @@ const testEventID = "evt_01J9Z6Q0M7X2V8K4B3N5TRW1PD"
 
 // frame 是测试用 WS 帧（松散解析关键字段）。
 type frame struct {
-	Type  string          `json:"type"`
-	AggID string          `json:"agg_id"`
-	Seq   int64           `json:"seq"`
-	State json.RawMessage `json:"state,omitempty"`
-	Event *struct {
+	Type  string `json:"type"`
+	AggID string `json:"agg_id"`
+	Seq   int64  `json:"seq"`
+	// EventSeq 服务端帧的 `event_seq`（snapshot 的会话水位 / gap 的首丢位次）。
+	EventSeq int64           `json:"event_seq"`
+	State    json.RawMessage `json:"state,omitempty"`
+	Event    *struct {
 		Type    string         `json:"type"`
 		Seq     int64          `json:"seq"`
 		AggID   string         `json:"agg_id"`
@@ -112,18 +114,24 @@ func wsRead(t *testing.T, c *websocket.Conn, dst any) {
 	}
 }
 
-// TestWSHandlerAttachSnapshotLivePong 覆盖 §4.5 主路径：
-// attach（无 since → snapshot）→ bus 发布 → event 帧 → ping → pong → detach。
-func TestWSHandlerAttachSnapshotLivePong(t *testing.T) {
+// TestWSHandlerAttachReplayLivePong 覆盖 §4.5 主路径：
+// attach（无 since → 全量回放既有缓冲）→ bus 发布 → event 帧 → ping → pong → detach。
+//
+// v21 之前"不带 since"是 **snapshot**、带 `since_seq=0` 才是全量回放；位次从 0 起之后
+// `0` 是真实位次，于是"没有游标"（省略 / 负数）承担了全量回放，snapshot 只剩淘汰回退一条路
+// （见 TestWSHandlerSnapshotFallbackOnEviction）。
+func TestWSHandlerAttachReplayLivePong(t *testing.T) {
 	bus := eventbus.New()
+	// 挂载前已存在的事件（真实路径里是重启后从 DB 注入 bus 的历史）。
+	pre := bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "pre"})
 	conn := startWS(t, bus)
 
-	// attach 无 since → snapshot
+	// attach 无 since → 全量回放（含位次 0 的那一条）
 	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
-	var snap frame
-	wsRead(t, conn, &snap)
-	if snap.Type != "snapshot" || snap.AggID != "s1" {
-		t.Fatalf("snapshot 帧不符: %+v", snap)
+	var replay frame
+	wsRead(t, conn, &replay)
+	if replay.Type != "event" || replay.AggID != "s1" || replay.Event == nil || replay.Event.Seq != pre.Seq {
+		t.Fatalf("无 since 应全量回放既有事件（含位次 0）: %+v", replay)
 	}
 
 	// bus 发布 → event 帧（按聚合过滤）
@@ -175,17 +183,17 @@ func TestWSHandlerReplayAfterSince(t *testing.T) {
 	}
 }
 
-// TestWSHandlerFullReplaySinceZero 验证 since_seq=0 → 全量回放（UI 冷开启既有会话重建视图）。
-func TestWSHandlerFullReplaySinceZero(t *testing.T) {
+// TestWSHandlerFullReplayWithoutSince 验证**不带** since_seq → 全量回放
+// （UI 冷开启既有会话重建视图），且回放**包含位次 0** 的那一条。
+func TestWSHandlerFullReplayWithoutSince(t *testing.T) {
 	bus := eventbus.New()
-	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "one"}) // seq 1
-	bus.Publish(testEventID, "session.thought", "s1", 1, map[string]any{"text": "t"})   // seq 2
-	bus.Publish(testEventID, "session.message", "s2", 1, map[string]any{"text": "no"})  // seq 3
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "one"}) // s1 seq 0
+	bus.Publish(testEventID, "session.thought", "s1", 1, map[string]any{"text": "t"})   // s1 seq 1
+	bus.Publish(testEventID, "session.message", "s2", 1, map[string]any{"text": "no"})  // s2 seq 0
 
 	conn := startWS(t, bus)
 
-	since := int64(0)
-	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": since})
+	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
 	var seqs []int64
 	for len(seqs) < 2 {
 		var f frame
@@ -195,8 +203,18 @@ func TestWSHandlerFullReplaySinceZero(t *testing.T) {
 		}
 		seqs = append(seqs, f.Event.Seq)
 	}
-	if seqs[0] != 1 || seqs[1] != 2 {
-		t.Fatalf("全量回放序号不符: %v", seqs)
+	if seqs[0] != 0 || seqs[1] != 1 {
+		t.Fatalf("全量回放应含位次 0 且升序: %v", seqs)
+	}
+
+	// 显式 `since_seq=0` 是**另一件事**："位次 0 之后" → 只回放 [1]。
+	// （v21 之前 0 兼作"从头"的哨兵，这一条是那次改动在 WS 边界上的判据。）
+	conn2 := startWS(t, bus)
+	wsWrite(t, conn2, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(0)})
+	var only frame
+	wsRead(t, conn2, &only)
+	if only.Type != "event" || only.Event == nil || only.Event.Seq != 1 {
+		t.Fatalf("since_seq=0 应只回放位次 1: %+v", only)
 	}
 }
 
@@ -206,23 +224,24 @@ func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
 	bus := eventbus.NewWithLimit(2)
 	conn := startWS(t, bus)
 
-	// 同聚合发布 4 条：limit=2，seq1-3 时淘汰水位到 2（seq1/seq2 出缓冲）
-	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "a"}) // seq 1
-	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "b"}) // seq 2
-	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "c"}) // seq 3
-	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "d"}) // seq 4
+	// 同聚合发布 4 条（位次 0..3）：limit=2 → 缓冲只剩 [2,3]，淘汰水位（已淘汰的最高位次）= 1。
+	// v21 起水上位是"淘汰到的最高位次"，`-1` 才是"从未淘汰"——这里 1 是真实位次。
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "a"}) // seq 0
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "b"}) // seq 1
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "c"}) // seq 2
+	bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "d"}) // seq 3
 
-	// since=1 < 水位 2 → snapshot
-	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(1)})
+	// since=0 < 水位 1 → 位次 0/1 已不可增量续传 → snapshot（带当前水位 3）
+	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(0)})
 	var snap frame
 	wsRead(t, conn, &snap)
-	if snap.Type != "snapshot" || snap.AggID != "s1" {
-		t.Fatalf("淘汰回退应回 snapshot，got %+v", snap)
+	if snap.Type != "snapshot" || snap.AggID != "s1" || snap.EventSeq != 3 {
+		t.Fatalf("淘汰回退应回 snapshot（带水位）: %+v", snap)
 	}
 
-	// 第二条连接 since=2（≥ 水位）→ 重放 seq3/seq4
+	// 第二条连接 since=1（≥ 水位）→ 重放 seq2/seq3
 	conn2 := startWS(t, bus)
-	wsWrite(t, conn2, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(2)})
+	wsWrite(t, conn2, map[string]any{"action": "attach", "agg_id": "s1", "since_seq": int64(1)})
 	var seqs []int64
 	for len(seqs) < 2 {
 		var f frame
@@ -232,8 +251,8 @@ func TestWSHandlerSnapshotFallbackOnEviction(t *testing.T) {
 		}
 		seqs = append(seqs, f.Event.Seq)
 	}
-	if seqs[0] != 3 || seqs[1] != 4 {
-		t.Fatalf("水位后重放序号不符: %v", seqs)
+	if seqs[0] != 2 || seqs[1] != 3 {
+		t.Fatalf("水位后重放序号不符（应为 2、3）: %v", seqs)
 	}
 }
 
@@ -276,11 +295,13 @@ func TestWSAttachHandshakeToken(t *testing.T) {
 		conn := dialWS(t, newWSEngineWith(bus, wsSetup{creds: creds}))
 
 		wsHandshake(t, conn, stream)
+		// 挂载前先放一条历史事件：无 since 的全量回放会把它投回来（"订阅成功"的可见证据）。
+		bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "pre"})
 		wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
 		var snap frame
 		wsRead(t, conn, &snap)
-		if snap.Type != "snapshot" || snap.AggID != "s1" {
-			t.Fatalf("握手后应能正常订阅，got %+v", snap)
+		if snap.Type != "event" || snap.AggID != "s1" || snap.Event == nil {
+			t.Fatalf("握手后应能正常订阅（全量回放）: %+v", snap)
 		}
 		bus.Publish(testEventID, "session.message", "s1", 1, map[string]any{"text": "hi"})
 		var evt frame
@@ -346,11 +367,12 @@ func TestWSAttachHandshakeNotRequiredWithoutCredentials(t *testing.T) {
 	bus := eventbus.New()
 	conn := dialWS(t, newWSEngine(bus))
 	wsHandshake(t, conn, "任意值都不校验")
+	bus.Publish(testEventID, "session.created", "s1", 1, map[string]any{"text": "pre"})
 	wsWrite(t, conn, map[string]any{"action": "attach", "agg_id": "s1"})
 	var snap frame
 	wsRead(t, conn, &snap)
-	if snap.Type != "snapshot" || snap.AggID != "s1" {
-		t.Fatalf("未配置凭据时握手后应能订阅，got %+v", snap)
+	if snap.Type != "event" || snap.AggID != "s1" || snap.Event == nil {
+		t.Fatalf("未配置凭据时握手后应能订阅（全量回放）: %+v", snap)
 	}
 }
 

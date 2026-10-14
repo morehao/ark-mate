@@ -21,7 +21,15 @@ var v15TablePlan = []v15TableEntry{
 	// `imported_transcripts` 登记在会话表上：它是「transcript 已导入」的标记，而这条会话面
 	// 整体消失了——不清它，`mate migrate` 会认为"已导入"然后空转（§8.4 ①，静默失效）。
 	{Table: "conversations", Metadata: "meta.imported_transcripts"},
-	{Table: "events", Metadata: "meta.events_last_seq"},
+	// `events` 这一行**曾经**登记 `meta.events_last_seq`（v15 清空 events 后必须清掉那个计数行，
+	// 否则新事件从旧高水位起跳）。v21（2026-10-14）把全局号序整体换成每会话一行的
+	// `event_sequence`，并在**同一次 Migrate 调用里无条件**删掉那个键（v21 永远排在 v15 之后，
+	// 任何走到最新版的库都会经过它），于是本步不再需要清它——那个键在 Migrate 结束时必然不存在。
+	//
+	// 如实记：这不是"忘了清"，是把清理搬到了唯一还懂那个键的版本步里。判据仍然是
+	// `TestDestructiveRebuildIsOneShot` 的第 ④ 段（本表与 DROP 清单一一对应），
+	// 只是 `events` 这一行如今没有元数据要清。**历史 DDL 与 v21 的语句都不回改。**
+	{Table: "events", Metadata: "无"},
 	{Table: "runs", Metadata: "无"},
 	{Table: "messages", Metadata: "无"}, // 可从 events 重建，而 events 也在本次清空之列
 	{Table: "permission_memories", Metadata: "无"},
@@ -57,19 +65,21 @@ type v15IDRecastEntry struct {
 // 全部走裸 SQL：迁移不经过 DAO/CAS，否则会凭空产生 `capability_revisions` 审计行，
 // 也会被 revision 语义约束住——与 v12/v13 的手法一致。
 func migrateV15(ctx context.Context, tx *gorm.DB, s *Store) error {
-	// ① 清 meta 的两个键。
+	// ① 清 `imported_transcripts`。
 	//
-	//    `events_last_seq` 不清 → 新事件的 seq 从旧高水位起跳；
-	//    `imported_transcripts` 不清 → `mate migrate` 撞到标记直接返回 ErrAlreadyImported，
-	//    而本迁移刚把 events 清空 —— 用户得到"已导入"而库里空空如也（§8.4 ①，静默失效）。
+	//    不清它 → `mate migrate` 撞到标记直接返回 ErrAlreadyImported，而本迁移刚把 events
+	//    清空——用户得到"已导入"而库里空空如也（§8.4 ①，静默失效）。
 	//
 	//    刻意清掉而**不是**保留 `imported_providers`（providers 表没重建，标记仍有效）与
 	//    `runtime_config_digest`（模型清空后期望集自然不同，下次同步会重新生成）。
+	//
+	//    同一句里**曾经**还清 `events_last_seq`（v15 清空 events 后必须把计数行归零）。v21 起
+	//    那个键由 v21 步骤无条件删除，本步不再持有它——见 `v15TablePlan` 里 `events` 一行的注。
 	if err := tx.WithContext(ctx).Exec(
-		`DELETE FROM meta WHERE key IN (?, ?)`,
-		model.MetaKeyEventsLastSeq, model.MetaKeyImportMarker,
+		`DELETE FROM meta WHERE key = ?`,
+		model.MetaKeyImportMarker,
 	).Error; err != nil {
-		return fmt.Errorf("清 meta.events_last_seq/imported_transcripts: %w", err)
+		return fmt.Errorf("清 meta.imported_transcripts: %w", err)
 	}
 
 	// ② 清 `automations` 的 5 个运行态列——它们指向已经消失的会话。

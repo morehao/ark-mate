@@ -60,7 +60,8 @@ func TestTranscriptJSONL(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &l1); err != nil {
 		t.Fatalf("行1 解析失败: %v", err)
 	}
-	if l1.Type != BusUserMessage || l1.Seq <= 0 || l1.Payload["text"] != "hi" {
+	// 下界是 0（v21 起会话第一条事件的位次就是 0；`<= 0` 会把正常行判成缺位次）。
+	if l1.Type != BusUserMessage || l1.Seq < 0 || l1.Payload["text"] != "hi" {
 		t.Fatalf("行1 不符: %+v", l1)
 	}
 	var l2 wireTranscriptLine
@@ -68,7 +69,7 @@ func TestTranscriptJSONL(t *testing.T) {
 		t.Fatalf("行2 解析失败: %v", err)
 	}
 	// 身份：transcript 行里的 id 必须与**帧上那一份**逐字相同（不重铸）。
-	busEvents := bus.EventsAfter(0)
+	busEvents := bus.EventsAll()
 	if len(busEvents) != 2 {
 		t.Fatalf("期望 2 条总线事件，got %d", len(busEvents))
 	}
@@ -100,21 +101,23 @@ func TestSessionHistoryPaging(t *testing.T) {
 	svc.publish(BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
 	svc.flushChunks()
 
-	page1, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Limit: 2})
+	// `After: -1` 显式声明"从头"：v21 起 `After` 的零值 0 表示"位次 0 之后"（会跳过第 0 条），
+	// 只有 -1 是"没有游标"。控制器那侧也是这么默认的（见 dtosession.HistoryQuery 注释）。
+	page1, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(-1), Limit: 2})
 	if err != nil {
 		t.Fatalf("history page1: %v", err)
 	}
 	if len(page1.Events) != 2 || !page1.HasMore {
 		t.Fatalf("page1 不符: %+v", page1)
 	}
-	page2, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: page1.Events[1].Seq, Limit: 2})
+	page2, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(page1.Events[1].Seq), Limit: 2})
 	if err != nil {
 		t.Fatalf("history page2: %v", err)
 	}
 	if len(page2.Events) != 2 || !page2.HasMore || page2.Events[0].AggregID != "s1" {
 		t.Fatalf("page2 不符: %+v", page2)
 	}
-	tail, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: page2.Events[1].Seq, Limit: 2})
+	tail, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(page2.Events[1].Seq), Limit: 2})
 	if err != nil {
 		t.Fatalf("history tail: %v", err)
 	}
@@ -123,7 +126,7 @@ func TestSessionHistoryPaging(t *testing.T) {
 	}
 
 	// C2：before 向前分页——从末尾往回翻，升序返回，has_more 指向「更早还有」。
-	lastPage, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: tail.Events[0].Seq, HasBefore: true, Limit: 2})
+	lastPage, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: ptr64(tail.Events[0].Seq), Limit: 2})
 	if err != nil {
 		t.Fatalf("before 分页: %v", err)
 	}
@@ -136,15 +139,16 @@ func TestSessionHistoryPaging(t *testing.T) {
 	if lastPage.LastSeq >= tail.Events[0].Seq {
 		t.Fatalf("before 页末条应早于游标: last=%d cursor=%d", lastPage.LastSeq, tail.Events[0].Seq)
 	}
-	oldest, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: lastPage.FirstSeq, HasBefore: true, Limit: 10})
+	oldest, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: ptr64(lastPage.FirstSeq), Limit: 10})
 	if err != nil {
 		t.Fatalf("before 到底: %v", err)
 	}
-	if len(oldest.Events) != 2 || oldest.HasMore || oldest.FirstSeq != 1 {
-		t.Fatalf("翻到最早一页应 has_more=false 且首条 seq=1: %+v", oldest)
+	if len(oldest.Events) != 2 || oldest.HasMore || oldest.FirstSeq != 0 {
+		t.Fatalf("翻到最早一页应 has_more=false 且首条 seq=0（v21 起最早一条是 0）: %+v", oldest)
 	}
-	// 互斥游标 → 40001（服务层兜底）。
-	if _, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: 1, Before: 2, HasBefore: true}); err == nil {
+	// 互斥游标 → 40001（服务层兜底）。`After: 0` 也要算"给了游标"——它曾经是"没给"的哨兵，
+	// 现在它是合法游标，拿零值当"未设置"会让 after+before 同时存在时静默按 before 处理。
+	if _, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(0), Before: ptr64(2)}); err == nil {
 		t.Fatal("after+before 应报错")
 	} else {
 		var ge gerror.Error
@@ -161,6 +165,9 @@ func TestSessionHistoryPaging(t *testing.T) {
 		}
 	}
 }
+
+// ptr64 取 int64 的地址（构造"给了游标"的 HistoryQuery 用；v21 起游标有无由指针承载）。
+func ptr64(v int64) *int64 { return &v }
 
 func splitNonEmpty(s string) []string {
 	sc := bufio.NewScanner(strings.NewReader(s))
@@ -195,17 +202,26 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	svc.flushChunks()
 
 	// 向后分页（after）。
-	p1, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Limit: 3})
+	p1, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(-1), Limit: 3})
 	if err != nil {
 		t.Fatalf("store history p1: %v", err)
 	}
-	if len(p1.Events) != 3 || !p1.HasMore || p1.FirstSeq == 0 || p1.LastSeq != p1.Events[2].Seq {
-		t.Fatalf("store 首页不符: %+v", p1)
+	if len(p1.Events) != 3 || !p1.HasMore || p1.FirstSeq != 0 || p1.LastSeq != p1.Events[2].Seq {
+		t.Fatalf("store 首页不符（首条应为位次 0）: %+v", p1)
+	}
+	// `After: 0` = "位次 0 **之后**"：跳过第 0 条。这条把 v21 的哨兵改动钉在服务层上
+	// ——零值不再等于"从头"，忘写 -1 的调用方会静默丢掉该会话的第一条事件。
+	skip0, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(0), Limit: 1})
+	if err != nil {
+		t.Fatalf("store history after=0: %v", err)
+	}
+	if len(skip0.Events) != 1 || skip0.Events[0].Seq != 1 {
+		t.Fatalf("After=0 应跳过位次 0: %+v", skip0)
 	}
 	if m, ok := p1.Events[0].Payload.(map[string]any); !ok || m["text"] != "m0" {
 		t.Fatalf("载荷未解码: %#v", p1.Events[0].Payload)
 	}
-	p2, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: p1.LastSeq, Limit: 3})
+	p2, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(p1.LastSeq), Limit: 3})
 	if err != nil {
 		t.Fatalf("store history p2: %v", err)
 	}
@@ -214,7 +230,7 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	}
 
 	// 向前分页（before）：从末页首条往回翻。
-	back, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: p2.FirstSeq, HasBefore: true, Limit: 2})
+	back, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: ptr64(p2.FirstSeq), Limit: 2})
 	if err != nil {
 		t.Fatalf("store history before: %v", err)
 	}
@@ -224,7 +240,7 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	if back.LastSeq >= p2.FirstSeq {
 		t.Fatalf("before 页应早于游标: last=%d cursor=%d", back.LastSeq, p2.FirstSeq)
 	}
-	back0, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: back.FirstSeq, HasBefore: true, Limit: 5})
+	back0, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{Before: ptr64(back.FirstSeq), Limit: 5})
 	if err != nil {
 		t.Fatalf("store history before 到底: %v", err)
 	}

@@ -258,13 +258,16 @@ async function scenarioCredentials(cdp) {
     return await new Promise((resolve) => {
       const ws = new WebSocket(url)
       const out = { opened: false, closed: null, frames: [] }
-      ws.onopen = () => { out.opened = true; ws.send(JSON.stringify({ action: 'attach', token: ${JSON.stringify(boot.stream)} })); setTimeout(() => ws.send(JSON.stringify({ action: 'attach', agg_id: 'accept-probe' })), 100) }
-      ws.onmessage = (ev) => { out.frames.push(JSON.parse(String(ev.data)).type); if (out.frames.includes('snapshot')) { ws.close(); resolve(out) } }
+      // 通道级 attach（握手）→ 再订阅一个**空**聚合 + ping：订阅成功的证据是 pong 回来了
+      // （等价于"握手通过、连接没被 1008 关掉"）。v21 起"无 since_seq"是**全量回放**而不是
+      // snapshot，空聚合没有事件可回放 → 不会有任何 event/snapshot 帧可等（等它就是等超时）。
+      ws.onopen = () => { out.opened = true; ws.send(JSON.stringify({ action: 'attach', token: ${JSON.stringify(boot.stream)} })); setTimeout(() => { ws.send(JSON.stringify({ action: 'attach', agg_id: 'accept-probe' })); ws.send(JSON.stringify({ action: 'ping' })) }, 100) }
+      ws.onmessage = (ev) => { const f = JSON.parse(String(ev.data)); out.frames.push(f.type); if (f.type === 'pong') { ws.close(); resolve(out) } }
       ws.onclose = (ev) => { out.closed = ev.code; resolve(out) }
       setTimeout(() => resolve({ ...out, timeout: true }), 5000)
     })
   `)
-  check('streamToken 走首帧 attach → 正常订阅（收到 snapshot）', attach.frames?.includes('snapshot'), JSON.stringify(attach))
+  check('streamToken 走首帧 attach → 正常订阅（attach 后 ping/pong 往返）', attach.frames?.includes('pong'), JSON.stringify(attach))
 
   const bad = await cdp.evalJs(`
     const url = ${JSON.stringify(boot.base)} + '/v1/mate/ws/events'

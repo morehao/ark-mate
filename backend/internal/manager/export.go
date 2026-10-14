@@ -115,7 +115,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event, bool) {
 	if s.st != nil {
 		var out []eventbus.Event
-		after := int64(0)
+		after := int64(-1)
 		for {
 			batch, more, err := s.st.EventsAfter(ctx, id, after, 1000)
 			if err != nil {
@@ -137,12 +137,9 @@ func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event
 		}
 		return out, false
 	}
-	all := s.bus.EventsAfter(0)
+	all := s.bus.EventsAfter(id, -1)
 	out := make([]eventbus.Event, 0, len(all))
 	for _, e := range all {
-		if e.AggregID != id {
-			continue
-		}
 		if len(out) >= maxExportEvents {
 			return out, true
 		}

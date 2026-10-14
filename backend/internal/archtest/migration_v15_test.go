@@ -104,11 +104,12 @@ var v15InPlaceDrops = []migrationDrop{
 	{File: "migrate_v13.go", Table: "providers", Reason: "v12 的 providers → providers_v13（同表就地列化，无数据丢失）"},
 	{File: "migrate_v13.go", Table: "models", Reason: "v12 的 models → models_v13（同表就地列化，无数据丢失）"},
 	{File: "migrate_v17.go", Table: "events", Reason: "v16 的 events → events_v17（同表就地重铸身份：行数与 seq 逐行保留，**不清空任何数据**）"},
+	{File: "migrate_v21.go", Table: "events", Reason: "v17 的 events → events_v21（同表就地换义位次：id 与行数逐行保留，seq 分会话重编号，**不清空任何数据**）"},
 }
 
 // v19WholeTableDrops 是**整表撤概念**的登记簿（与 v15InPlaceDrops 的「同表就地重写」是两回事）。
 //
-// 为什么单列一张表：就地重写不改行数（v12/v13/v17 都是「建新表 → 灌数 → DROP 旧表 → RENAME」），
+// 为什么单列一张表：就地重写不改行数（v12/v13/v17/v21 都是「建新表 → 灌数 → DROP 旧表 → RENAME」），
 // 而整表撤概念**确实丢行**——`agents` 的定义行不会搬到别处。它必须 owner 单独拍板，
 // 判据同样按 (文件, 表) 匹配（换个文件写同一个表名不算豁免）。
 //
@@ -130,7 +131,7 @@ var migrationStructFields = []string{"version", "name", "statements", "apply", "
 //
 // 四段判据（对应设计 §8.3.2 的 C1/C2/C3 + §8.5 的 R6）：
 //  1. `migration` 结构体字段集合 == 白名单（内核本身零改动）；
-//  2. `DROP TABLE` 只允许出现在登记过的地方（v15 自己那 7 张 + v12/v13/v17 的就地重建）；
+//  2. `DROP TABLE` 只允许出现在登记过的地方（v15 自己那 7 张 + v12/v13/v17/v21 的就地重建）；
 //     匹配按 **(文件, 表)**——只按表名匹配时，新迁移复用历史表名即可静默通过（v17 实测）。
 //  3. v15 的 `name` 写明"破坏性重建（仅此一次）"、`backup == "v15"`；
 //  4. R6：v15 的 DROP 清单 ↔ 元数据清理清单**一一对应**（`v15TablePlan`），
@@ -189,7 +190,7 @@ func TestDestructiveRebuildIsOneShot(t *testing.T) {
 		}
 		t.Fatalf("%s 里的 `DROP TABLE %s` 不在白名单里：\n"+
 			"  · v15 自己（migrate.go）的清单 = %v（只有它允许\"清库重建\"）\n"+
-			"  · v12/v13/v17 的\"建临时表 → 灌数 → DROP → RENAME\"必须登记进 v15InPlaceDrops（写明理由），\n"+
+			"  · v12/v13/v17/v21 的\"建临时表 → 灌数 → DROP → RENAME\"必须登记进 v15InPlaceDrops（写明理由），\n"+
 			"    且判据按 (文件, 表) 匹配——**换个文件写同一个表名不算豁免**\n"+
 			"新增一处 `DROP TABLE` = 又一次静默清空用户历史，必须 owner 单独拍板（设计 §8.3.2 C2）。",
 			d.File, d.Table, v15Drops)

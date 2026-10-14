@@ -137,7 +137,8 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "c1"})
 	orch.byProvider["native-1"] = "c1"
 
-	sub := bus.Subscribe(0)
+	// live-only：订阅之后才触发 sink，断言的是"这一条新事件"。
+	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
 	sink := orch.eventSink("stub")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",

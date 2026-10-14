@@ -51,8 +51,9 @@ func TestRunTimeoutOff(t *testing.T) {
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	// 观察一个超过潜在超时窗口的时间片：不得出现终态自动取消事件。
-	sub := bus.Subscribe(0)
+	// 观察一个超过潜在超时窗口的时间片：不得出现**新**的终态自动取消事件。
+	// live-only：回放历史会把订阅之前的事件立刻投进来，而这里要看的正是订阅之后的这个时间片。
+	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
 	until := time.Now().Add(150 * time.Millisecond)
 	for time.Now().Before(until) {

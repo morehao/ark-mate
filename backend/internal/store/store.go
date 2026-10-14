@@ -2,7 +2,8 @@
 //
 // 设计约束：
 //   - schema_migrations 自管迁移（对齐 zacp store.go 经验：事务 + 幂等 + 版本拒绝启动）；
-//   - events.seq 全局单调（meta.events_last_seq 计数行，单写者 Service.publish 在事务内分配），跨重启连续；
+//   - events.seq 是**会话内**位次（v21；`event_sequence(session_id, seq)` 计数行在单写者事务内分配），
+//     跨重启连续、会话内稠密（0 起）；
 //   - payload 一律序列化为 JSON 文本（含权限决策留痕等结构体载荷，修复「非 map 载荷不入库」缺陷）；
 //   - 迁移导入（transcript → DB）走单事务：staging + 校验 + 失败整体回滚 + meta 导入标记幂等。
 //
@@ -14,17 +15,15 @@
 // ——一个表行类型只能有一个名字（v15 的 Q8：别名块已删；别名与目标同名等于什么都没省）。
 //
 // 为什么还需要这一层（而不是让调用方直接用 dao）：这里承载的全是**跨表不变量**——
-// 全局序号分配与事件插入必须同事务、导入必须整体回滚、会话水位随事件推进。
+// 位次分配与事件插入必须同事务、导入必须整体回滚、会话水位随事件推进。
 // 这些语义横跨多个 DAO，落进任何一个 DAO 都会让它变成「不是 DAO 的东西」。
 package store
 
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/morehao/ark-mate/internal/dao"
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/dbclient"
 	"gorm.io/gorm"
 )
@@ -50,14 +49,15 @@ type Store struct {
 	// 绝不能只体现在那几句 `DROP TABLE` 里：用户看到的应当是**日志里的一句话**。
 	destructiveRebuildNote string
 
-	sessions   *dao.SessionDao
-	events     *dao.EventDao
-	runs       *dao.RunDao
-	messages   *dao.MessageDao
-	memories   *dao.PermissionMemoryDao
-	inputs     *dao.InputDao
-	meta       *dao.MetaDao
-	migrations *dao.SchemaMigrationDao
+	sessions       *dao.SessionDao
+	events         *dao.EventDao
+	eventSequences *dao.EventSequenceDao
+	runs           *dao.RunDao
+	messages       *dao.MessageDao
+	memories       *dao.PermissionMemoryDao
+	inputs         *dao.InputDao
+	meta           *dao.MetaDao
+	migrations     *dao.SchemaMigrationDao
 
 	// 能力定义事实源（M6-1）：两张定义表 + 一张只追加的变更审计。
 	skills             *dao.SkillDao
@@ -99,15 +99,16 @@ func Open(path string) (*Store, error) {
 func New(db *gorm.DB) *Store {
 	getDB := func(ctx context.Context) *gorm.DB { return db.WithContext(ctx) }
 	return &Store{
-		db:         db,
-		sessions:   dao.NewSessionDao(getDB),
-		events:     dao.NewEventDao(getDB),
-		runs:       dao.NewRunDao(getDB),
-		messages:   dao.NewMessageDao(getDB),
-		memories:   dao.NewMemoryDao(getDB),
-		inputs:     dao.NewInputDao(getDB),
-		meta:       dao.NewMetaDao(getDB),
-		migrations: dao.NewMigrationDao(getDB),
+		db:             db,
+		sessions:       dao.NewSessionDao(getDB),
+		events:         dao.NewEventDao(getDB),
+		eventSequences: dao.NewEventSequenceDao(getDB),
+		runs:           dao.NewRunDao(getDB),
+		messages:       dao.NewMessageDao(getDB),
+		memories:       dao.NewMemoryDao(getDB),
+		inputs:         dao.NewInputDao(getDB),
+		meta:           dao.NewMetaDao(getDB),
+		migrations:     dao.NewMigrationDao(getDB),
 
 		skills:             dao.NewSkillDao(getDB),
 		mcpServers:         dao.NewMcpServerDao(getDB),
@@ -156,11 +157,12 @@ func (s *Store) Close() error {
 	return sqlDB.Close()
 }
 
-// ——— meta（计数 / 导入标记 / 任意键值） ———
+// ——— meta（导入标记 / 目录级偏好 / 任意键值） ———
 
 // GetMeta 读取任意 meta 键（不存在 → ("", false, nil)）。
 //
-// meta 是"目录级/进程级配置与标记"的收口（计数行、导入标记、默认模型等目录级偏好）。
+// meta 是"目录级/进程级配置与标记"的收口（导入标记、目录级偏好、读模型重建标记等）。
+// 事件号序**不在这里**：v21 起它是每会话一行的 `event_sequence`（见 events.go 的 appendEventTx）。
 func (s *Store) GetMeta(ctx context.Context, key string) (string, bool, error) {
 	return s.meta.Get(ctx, key)
 }
@@ -170,15 +172,7 @@ func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 	return s.meta.Set(ctx, key, value)
 }
 
-// LastSeq 返回 events_last_seq（0 = 尚无事件）。
-func (s *Store) LastSeq(ctx context.Context) (int64, error) {
-	v, ok, err := s.meta.Get(ctx, model.MetaKeyEventsLastSeq)
-	if err != nil || !ok {
-		return 0, err
-	}
-	var n int64
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-		return 0, fmt.Errorf("store: corrupt seq meta %q: %w", v, err)
-	}
-	return n, nil
+// DeleteMeta 删任意 meta 键（不存在时是 no-op；读模型重建标记消费后清掉用它）。
+func (s *Store) DeleteMeta(ctx context.Context, key string) error {
+	return s.meta.Delete(ctx, key)
 }

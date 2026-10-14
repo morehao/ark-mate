@@ -75,14 +75,21 @@ func (d *RunDao) List(ctx context.Context, sessionID string) (model.RunEntityLis
 	})
 }
 
-// LastSeq 返回某会话最后一条 run 的 last_seq（0 = 尚无 run；供下一 run 的事件窗口起点）。
+// LastSeq 返回某会话最后一条 run 的 last_seq（**-1 = 尚无 run**；供下一 run 的事件窗口起点）。
+//
+// v21 把哨兵从 `0` 改成 `-1`：`0` 现在是该会话**第一条事件**的合法位次，而"窗口起点 0"会让
+// `EventsAfter(会话, 0)` 跳过那一条——本会话的 `session.created` 与首条用户消息都在窗口之外，
+// 首轮 run 的 first_seq/时长/首令牌耗时全部错位。产 run 的窗口从这里往上取，所以这个哨兵必须对。
+//
+// 本方法在 M2 随 `RunLastSeq` 一起删除（窗口起点改为读 run 行自己记下的 `first_seq`，
+// 不再由"上一轮的末尾"推导——见设计 D2/E2）。
 func (d *RunDao) LastSeq(ctx context.Context, sessionID string) (int64, error) {
 	var seq int64
 	if err := d.DB(ctx).Model(&model.RunEntity{}).
-		Select("COALESCE(MAX(last_seq), 0)").
+		Select("COALESCE(MAX(last_seq), -1)").
 		Where("session_id = ?", sessionID).
 		Scan(&seq).Error; err != nil {
-		return 0, err
+		return -1, err
 	}
 	return seq, nil
 }

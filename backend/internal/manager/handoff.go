@@ -9,7 +9,7 @@ func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
 	}
-	all := s.bus.EventsAfter(0)
+	all := s.bus.EventsAfter(sessionID, -1)
 	// 先按「用户轮」聚合：user_message 开新段，其后 message 增量连续拼接为助手段。
 	type seg struct {
 		user string
@@ -18,9 +18,6 @@ func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
 	var segs []seg
 	cur := -1
 	for _, evt := range all {
-		if evt.AggregID != sessionID {
-			continue
-		}
 		m, ok := evt.Payload.(map[string]any)
 		if !ok {
 			continue

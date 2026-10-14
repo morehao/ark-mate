@@ -146,7 +146,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 	orch.publishError("c-x", ae, nil)
 
 	var got map[string]any
-	for _, e := range bus.EventsAfter(0) {
+	for _, e := range bus.EventsAll() {
 		if e.Type == BusRunError && e.AggregID == "c-x" {
 			got, _ = e.Payload.(map[string]any)
 		}

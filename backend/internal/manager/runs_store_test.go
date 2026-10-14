@@ -110,17 +110,20 @@ func TestRunWindowStartsAtUserMessage(t *testing.T) {
 		t.Fatalf("runID 应与 first_seq 同源 %q，got %q", want, r.ID)
 	}
 	// 轮起点 = 首条用户消息的时刻（会话前置那两条不算进本轮时长/首令牌耗时）。
-	evs, _, err := st.EventsAfter(ctx, "s-win", 0, 10)
+	evs, _, err := st.EventsAfter(ctx, "s-win", -1, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var userEv model.EventEntity
+	found := false
 	for _, e := range evs {
 		if e.Seq == u.Seq {
-			userEv = e
+			userEv, found = e, true
 		}
 	}
-	if userEv.Seq == 0 || !r.StartedAt.Equal(userEv.CreatedAt) {
+	// 用 found 而不是 `userEv.Seq == 0` 判"找到了"：v21 起 0 是合法位次，拿零值当"没找到"
+	// 会在首条用户消息恰好位于位次 0 时静默通过（那时 userEv 是零值，断言却看起来成立）。
+	if !found || !r.StartedAt.Equal(userEv.CreatedAt) {
 		t.Fatalf("run 起点应为用户消息时刻 %s，got %s", userEv.CreatedAt, r.StartedAt)
 	}
 	rows, err := st.ListMessages(ctx, "s-win")

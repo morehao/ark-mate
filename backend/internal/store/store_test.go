@@ -59,29 +59,31 @@ func TestSchemaMigrated(t *testing.T) {
 	}
 }
 
-// TestAppendEventSeqMonotonic AppendEvent 全局 seq 单调递增、LastSeq 联动、session.last_seq 触顶。
-func TestAppendEventSeqMonotonic(t *testing.T) {
+// TestAppendEventSeqIsPerSessionDense AppendEvent 的位次是**会话内**的（v21）：
+// 每个会话各自从 0 起、连续无洞、互不影响；session.last_seq 跟着本会话位次走。
+//
+// 反证：把 `appendEventTx` 换回全局取号（v21 之前 meta 计数行那一版）→ s2 的首条事件 seq 是 1
+// 而不是 0，本用例红。
+func TestAppendEventSeqIsPerSessionDense(t *testing.T) {
 	s := openTestDB(t)
 	seedSession(t, s, "s1")
 	seedSession(t, s, "s2")
 
-	s1, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.message", map[string]any{"text": "hi"})
+	s1, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.created", map[string]any{"text": "hi"})
 	if err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	s2a, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s2", "session.user_message", map[string]any{"text": "yo"})
+	s2a, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s2", "session.created", map[string]any{"text": "yo"})
 	if err != nil {
 		t.Fatalf("AppendEvent s2: %v", err)
 	}
-	s1b, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "run.ended", map[string]any{})
+	s1b, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "session.user_message", map[string]any{})
 	if err != nil {
 		t.Fatalf("AppendEvent s1b: %v", err)
 	}
-	if !(s1 < s2a && s2a < s1b) {
-		t.Fatalf("seq 应全局单调: %d %d %d", s1, s2a, s1b)
-	}
-	if last, _ := s.LastSeq(ctxT()); last != s1b {
-		t.Fatalf("LastSeq 应为 %d, got %d", s1b, last)
+	// 每个会话自己的第一条是 0，第二条是 1；交错发布不改变这一点。
+	if s1 != 0 || s2a != 0 || s1b != 1 {
+		t.Fatalf("位次应为「每会话 0 起、稠密」: s1=%d s2=%d s1b=%d", s1, s2a, s1b)
 	}
 	// 会话水位：s1 应到 s1b；s2 到 s2a。
 	for id, want := range map[string]int64{"s1": s1b, "s2": s2a} {
@@ -93,6 +95,48 @@ func TestAppendEventSeqMonotonic(t *testing.T) {
 			t.Fatalf("session %s last_seq 应为 %d, got %d", id, want, sess.LastSeq)
 		}
 	}
+	// event_sequence 计数行 = 该会话最后分配的位次（每会话一行）。
+	for id, want := range map[string]int64{"s1": 1, "s2": 0} {
+		var got int64
+		if err := s.db.Raw(`SELECT seq FROM event_sequence WHERE session_id = ?`, id).Row().Scan(&got); err != nil {
+			t.Fatalf("读 event_sequence(%s): %v", id, err)
+		}
+		if got != want {
+			t.Fatalf("event_sequence(%s)=%d want %d", id, got, want)
+		}
+	}
+}
+
+// sessionWatermarks 返回每个会话当前的最高位次（v21 起没有"全局水位"这个东西，
+// 测试要问"某个会话的号有没有前进"只能按会话问）。
+func sessionWatermarks(t *testing.T, s *Store) map[string]int64 {
+	t.Helper()
+	type row struct {
+		SessionID string
+		Seq       int64
+	}
+	var rows []row
+	if err := s.db.Raw(`SELECT session_id, MAX(seq) AS seq FROM events GROUP BY session_id`).Scan(&rows).Error; err != nil {
+		t.Fatalf("读每会话水位: %v", err)
+	}
+	out := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		out[r.SessionID] = r.Seq
+	}
+	return out
+}
+
+// sameWatermarks 比较两份"会话 → 最高位次"快照（缺失的会话按 -1 比，与"没有事件"一致）。
+func sameWatermarks(a, b map[string]int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
 }
 
 // TestAppendEventUnknownSession 未知会话的事件**被库拦住**——外键又回来了（v1.32.22 起）。
@@ -156,10 +200,14 @@ func TestSessionCRUD(t *testing.T) {
 	if err := s.UpsertSession(ctxT(), base); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	// 覆盖 upsert 不能清零 last_seq。
+	// 覆盖 upsert 不能把 last_seq 写回去（MAX 触顶）。
+	// 注意判据必须落在**非零**位次上：v21 起位次从 0 起，"归零"与"没写过"是同一个值，
+	// 拿 `LastSeq == 0` 当"被清零了"会永远绿（这条断言曾经就是这么写的）。
 	seedSession(t, s, "s1")
-	if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "x", map[string]any{}); err != nil {
-		t.Fatalf("append: %v", err)
+	for i := 0; i < 2; i++ {
+		if _, err := s.AppendEvent(ctxT(), objid.New(objid.Event), "s1", "x", map[string]any{}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
 	}
 	low := base
 	low.LastSeq = 0
@@ -167,8 +215,8 @@ func TestSessionCRUD(t *testing.T) {
 		t.Fatalf("upsert-low: %v", err)
 	}
 	sess, _, _ := s.GetSession(ctxT(), "s1")
-	if sess.LastSeq == 0 {
-		t.Fatal("覆盖 upsert 不应清零 last_seq")
+	if sess.LastSeq != 1 {
+		t.Fatalf("覆盖 upsert 不应把 last_seq 写回去: got %d want 1", sess.LastSeq)
 	}
 
 	pinned := true
@@ -270,9 +318,9 @@ func TestImportBatch(t *testing.T) {
 		t.Fatalf("二次导入: ev=%d err=%v", ev2, err)
 	}
 
-	// 错配校验 → 整体回滚（事件数与全局 seq 均不变）。
+	// 错配校验 → 整体回滚（事件数与**每会话位次**均不变）。
 	before, _ := s.EventCount(ctxT(), "")
-	lastBefore, _ := s.LastSeq(ctxT())
+	lastBefore := sessionWatermarks(t, s)
 	if _, _, err := s.ImportBatch(ctxT(), []ImportItem{mkItem("s-z", newEvents())}, "fp:test-dir-3", 1, 999); err == nil {
 		t.Fatal("错配计数应报错")
 	}
@@ -280,8 +328,8 @@ func TestImportBatch(t *testing.T) {
 	if before != after {
 		t.Fatalf("失败导入应整体回滚: before=%d after=%d", before, after)
 	}
-	if got, _ := s.LastSeq(ctxT()); got != lastBefore {
-		t.Fatalf("回滚后 seq 不应前进: got=%d want=%d", got, lastBefore)
+	if !sameWatermarks(sessionWatermarks(t, s), lastBefore) {
+		t.Fatalf("回滚后位次不应前进: got=%v want=%v", sessionWatermarks(t, s), lastBefore)
 	}
 }
 
@@ -308,7 +356,7 @@ func TestImportBatchEventIdentity(t *testing.T) {
 		t.Fatalf("首次导入: ev=%d err=%v", ev, err)
 	}
 	countBefore, _ := s.EventCount(ctxT(), "")
-	seqBefore, _ := s.LastSeq(ctxT())
+	seqBefore := sessionWatermarks(t, s)
 
 	// ① 同 id 同内容（不同 marker，模拟"清掉 marker 再导一次"）→ 跳过，不新增行，也不报错。
 	ev, _, err := s.ImportBatch(ctxT(), []ImportItem{mk([]model.EventEntity{first})}, "fp-b", 1, 1)
@@ -321,8 +369,8 @@ func TestImportBatchEventIdentity(t *testing.T) {
 	if n, _ := s.EventCount(ctxT(), ""); n != countBefore {
 		t.Fatalf("幂等导入不该新增行: before=%d after=%d", countBefore, n)
 	}
-	if got, _ := s.LastSeq(ctxT()); got != seqBefore {
-		t.Fatalf("全部跳过时不该取号: got=%d want=%d", got, seqBefore)
+	if !sameWatermarks(sessionWatermarks(t, s), seqBefore) {
+		t.Fatalf("全部跳过时不该取号: got=%v want=%v", sessionWatermarks(t, s), seqBefore)
 	}
 
 	// ② 同 id 不同内容 → 报错 + 整批回滚。
@@ -395,7 +443,10 @@ func TestSearchMessages(t *testing.T) {
 }
 
 // TestEventsBefore 反向分页（C2「加载更早」）：seq < before 的最近 limit 条、升序返回、
-// has_more 指向「更早还有」、before=0 取末尾、跨会话不混入。
+// has_more 指向「更早还有」、`before=-1` 取末尾、跨会话不混入。
+//
+// v21 把哨兵从 0 换成了 -1：`0` 现在是该会话第一条事件的位次，于是 `before=0` 的语义从
+// "取末尾一页"变成"第 0 条之前"（空页）——两种都断言，正是这一改的分界。
 func TestEventsBefore(t *testing.T) {
 	s := openTestDB(t)
 	seedSession(t, s, "s1")
@@ -432,13 +483,22 @@ func TestEventsBefore(t *testing.T) {
 		t.Fatalf("最早一页不符: len=%d more=%v %+v", len(oldest), more2, oldest)
 	}
 
-	// before=0 → 取末尾 limit 条（仍升序）。
-	tail, more3, err := s.EventsBefore(ctxT(), "s1", 0, 2)
+	// before=-1 → 取末尾 limit 条（仍升序）。
+	tail, more3, err := s.EventsBefore(ctxT(), "s1", -1, 2)
 	if err != nil {
 		t.Fatalf("EventsBefore tail: %v", err)
 	}
 	if len(tail) != 2 || !more3 || tail[0].Seq != seqs[3] || tail[1].Seq != seqs[4] {
 		t.Fatalf("末尾页不符: len=%d more=%v %+v", len(tail), more3, tail)
+	}
+
+	// before=0 → 「第 0 条之前」：空页、没有更早的（哨兵换成 -1 之后 0 不再是"取末尾"）。
+	empty, more4, err := s.EventsBefore(ctxT(), "s1", 0, 2)
+	if err != nil {
+		t.Fatalf("EventsBefore before=0: %v", err)
+	}
+	if len(empty) != 0 || more4 {
+		t.Fatalf("before=0 应为空页: len=%d more=%v %+v", len(empty), more4, empty)
 	}
 }
 

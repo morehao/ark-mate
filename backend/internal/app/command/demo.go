@@ -54,8 +54,10 @@ func demo(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// 订阅 bus（after=0 → 回放 + live），边跑边打印域事件帧。
-	sub := bus.Subscribe(0)
+	// 订阅 bus（回放全部历史 + live），边跑边打印域事件帧。
+	// `SubscribeAfter(nil)` = 每个聚合都从 -1（最早一条）起回放：demo 要看的正是**全部**事件，
+	// 而"所有聚合"这件事在 v21 之后写不成一个 int64（位次是会话内的量）。
+	sub := bus.SubscribeAfter(nil)
 	defer bus.Unsubscribe(sub)
 	done := make(chan struct{})
 	defer close(done)

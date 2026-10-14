@@ -141,6 +141,9 @@ func (d *SessionDao) UpdateMeta(ctx context.Context, id string, patch model.Sess
 }
 
 // TouchLastSeq 抬高会话水位（幂等：仅当传入 seq 更大时更新，避免回退已推进的水位）。
+//
+// v21 起传入的是**会话内位次**（0 起、稠密）——单调判据逐字不变（同一会话内位次仍然只增不减），
+// 只是比较的双方从"全库号"换成了"本会话号"。
 func (d *SessionDao) TouchLastSeq(ctx context.Context, id string, seq int64) error {
 	return d.DB(ctx).Model(&model.SessionEntity{}).
 		Where("id = ? AND last_seq < ?", id, seq).
@@ -148,6 +151,7 @@ func (d *SessionDao) TouchLastSeq(ctx context.Context, id string, seq int64) err
 }
 
 // SetLastSeq 无条件设置会话水位（导入路径专用：本会话事件全部插入后一次性对齐）。
+// 语义同 TouchLastSeq：传入的是**会话内位次**（v21 起）。
 func (d *SessionDao) SetLastSeq(ctx context.Context, id string, seq int64) error {
 	return d.DB(ctx).Model(&model.SessionEntity{}).
 		Where("id = ?", id).

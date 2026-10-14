@@ -49,6 +49,20 @@ func (d *MessageDao) WithTx(tx *gorm.DB) *MessageDao {
 	return &MessageDao{Dao: d.Dao.WithTx(tx)}
 }
 
+// DeleteByRun 删除某一轮的全部 messages 行（重建路径专用）。
+//
+// 与 `ReplaceRunMessages` 的分工：那条路是"删了必插"（批次为空 → 提前返回，是 no-op），
+// 而重建时必须先清干净——某一轮的窗口在新位次下**可能一行都不产出**，空批次 no-op 会把
+// 上一代的旧行留在库里（读模型看起来"重建成功了"，实际是旧数据）。
+func (d *MessageDao) DeleteByRun(ctx context.Context, runID string) error {
+	return d.DB(ctx).Where("run_id = ?", runID).Delete(&model.MessageEntity{}).Error
+}
+
+// DeleteBySession 删除某会话全部 messages 行（整会话重建的起点）。
+func (d *MessageDao) DeleteBySession(ctx context.Context, sessionID string) error {
+	return d.DB(ctx).Where("session_id = ?", sessionID).Delete(&model.MessageEntity{}).Error
+}
+
 // ReplaceRunMessages 单事务替换某一轮的 messages（先按 run_id 删后插）。
 // 可重复调用：保证「从 events 重建」幂等。
 func (d *MessageDao) ReplaceRunMessages(ctx context.Context, msgs model.MessageEntityList) error {

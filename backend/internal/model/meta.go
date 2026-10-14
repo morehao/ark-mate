@@ -10,7 +10,7 @@ const (
 // 自动当成「插入/更新时取当前时间」，在 Create/Updates 时隐式覆盖调用方传入的值。
 // 本仓的时间全部由调用方显式赋值（含「零值落空串」语义），故一律显式关闭。
 //
-// MetaEntity 是 meta 表的一行（任意键值；events_last_seq 与导入标记都落在这里）。
+// MetaEntity 是 meta 表的一行（任意键值：导入标记、目录级偏好、读模型重建标记等）。
 type MetaEntity struct {
 	Key   string `gorm:"column:key;primaryKey"`
 	Value string `gorm:"column:value;not null"`

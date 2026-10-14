@@ -17,7 +17,7 @@ import (
 
 // registerSession 登记一个新会话，返回记录指针。
 // EnableStore 启用 SQLite 持久层（P1 live 接线）。启用后：
-//   - publish 以 store.AppendEvent 事务内分配的全局 seq 为权威，bus 用 PublishAt 镜像同一号序；
+//   - publish 以 store.AppendEvent 事务内分配的**会话内位次**为权威，bus 用 PublishAt 镜像同一号序；
 //   - registerSession/markSession/UpdateSession 同步写库（sessions 为 DB 权威元数据镜像）；
 //   - transcript recorder 视为停写（serve 装配时不再 SetTranscriptDir）。
 //
@@ -40,8 +40,13 @@ func (s *Service) EnableStore(st *store.Store) {
 }
 
 // RestoreFromStore 启动恢复（sqlite 模式）：从 DB 载入会话记录并把全部已落库事件
-// 注入 eventbus（seq 原样 PublishAt）——重启后 bus 与 DB 共用同一全局号序，
+// 注入 eventbus（seq 原样 PublishAt）——重启后 bus 与 DB 共用**同一套会话内位次**，
 // WS/断线续传游标不漂移，旧会话仍可回放。返回恢复的会话数与注入事件数。
+//
+// 注入顺序（v21）：按 `(session_id, seq)` 复合游标逐页取（`EventsAllBySession`），
+// 于是**每个会话各自升序**。v21 之前这里按全局 seq 升序——那个顺序的意义是"保证全局单号序
+// 不被 PublishAt 改写"，而 v21 起 `nextSeq` 是每会话一张表，跨会话的相对顺序不再影响任何号；
+// 仍要保证的是"组内升序"（复合同序恰好同时给了分组与组内有序）。
 func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 	if s.st == nil {
 		return 0, 0, nil
@@ -86,31 +91,146 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		}
 	}
 
-	// 事件按全局 seq 升序注入（跨会话也保持升序，保证 PublishAt 不倒退/不回退取号）。
+	// 事件按 `(session_id, seq)` 升序注入（会话内升序是唯一有意义的顺序；见函数注释）。
 	if s.bus != nil {
-		var after int64
+		var (
+			afterSession string
+			afterSeq     int64 = -1
+		)
 		for {
-			evs, more, err := s.st.EventsAllAfter(ctx, after, 2000)
+			evs, more, err := s.st.EventsAllBySession(ctx, afterSession, afterSeq, 2000)
 			if err != nil {
 				glog.Warnw(ctx, "restore: read events failed", "err", err)
 				break
 			}
 			for _, ev := range evs {
 				ver[ev.SessionID]++
-				s.bus.PublishAt(ev.Seq, ev.ID, ev.Type, ev.SessionID, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
+				s.bus.PublishAt(ev.SessionID, ev.Seq, ev.ID, ev.Type, ver[ev.SessionID], decodePayload(ev.PayloadJSON))
 				injected++
-				after = ev.Seq
+				afterSession, afterSeq = ev.SessionID, ev.Seq
 			}
 			if !more {
 				break
 			}
 		}
 	}
+	// 读模型重建（v21）：迁移把 `meta.read_models_rebuild` 置成刚跑过的版本号，表示"位次口径换了、
+	// 旧读模型里的窗口列已经不可信"。此处消费它并清标记——**只有这一条路径**（见 model/enum.go）。
+	s.rebuildStaleReadModels(ctx)
 	// §6：重启前排队未投递的输入一律作废——它们等的那一轮已随进程消失，自动重放等于替用户
 	// 按下发送（且上下文已断）。保留行仅作审计（见 inputqueue.go）。
 	s.staleQueuedInputsOnRestore(ctx)
 	glog.Infow(ctx, "store restored", "sessions", sessions, "events", injected)
 	return sessions, injected, nil
+}
+
+// rebuildStaleReadModels 消费 `meta.read_models_rebuild`：有值 = 上一次迁移改动了事件位次口径，
+// 全部会话的读模型（M1：messages；M2 起还有 runs）必须按新位次重建，然后清掉标记。
+//
+// best-effort：任何一步失败只 WARN（标记留着，下次启动重试——比"半个库重建了一半还清了标记"好）。
+func (s *Service) rebuildStaleReadModels(ctx context.Context) {
+	if s.st == nil {
+		return
+	}
+	ver, ok, err := s.st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
+	if err != nil {
+		glog.Warnw(ctx, "read models: 读重建标记失败", "err", err)
+		return
+	}
+	if !ok || ver == "" {
+		return
+	}
+	list, err := s.st.ListSessions(ctx, nil)
+	if err != nil {
+		glog.Warnw(ctx, "read models: 列会话失败（重建跳过）", "err", err)
+		return
+	}
+	failed := 0
+	for _, sess := range list {
+		if err := s.RebuildSessionReadModels(ctx, sess.ID); err != nil {
+			failed++
+			glog.Warnw(ctx, "read models: 会话重建失败", "session", sess.ID, "err", err)
+		}
+	}
+	if failed > 0 {
+		glog.Warnw(ctx, "read models: 重建未全部成功，标记保留待下次重试", "failed", failed, "total", len(list))
+		return
+	}
+	if err := s.st.DeleteMeta(ctx, model.MetaKeyReadModelsRebuild); err != nil {
+		glog.Warnw(ctx, "read models: 清重建标记失败", "err", err)
+		return
+	}
+	glog.Infow(ctx, "read models rebuilt", "migration", ver, "sessions", len(list))
+}
+
+// RebuildSessionReadModels 用 `events` 重建某会话的全部读模型（J7：读模型整体可重建）。
+//
+// M1 阶段只重建 `messages`；`runs` 的重建在 M2 接上（那时 run 变成实体、有自己的起点事件，
+// 重建才有权威依据——现在 runs 的 id 还是 `r-<session>-<first_seq>` 这种从窗口推导出来的东西）。
+//
+// 做法：读该会话全部事件（会话内位次升序，一次读完）→ 按每个 run 的 `[first_seq, last_seq]`
+// 窗口切片 → **先清该 run 的旧行再插新行**。清是必须的：位次口径换了之后，某个窗口在新口径下
+// 可能一行都不产出，而"空的批次"在插入路径里是 no-op，会把上一代的旧行留在库里。
+//
+// 幂等：同一份 events 反复跑得到同一组行（`objid.New` 会铸新 id，但 rows 的**内容**等价；
+// 读模型的身份不承担外部引用——`messages.id` 不出现在任何 wire 契约里）。
+func (s *Service) RebuildSessionReadModels(ctx context.Context, sessionID string) error {
+	if s.st == nil {
+		return nil
+	}
+	runs, err := s.st.ListRuns(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("read models: list runs: %w", err)
+	}
+	all, err := s.sessionEvents(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	// 整会话先清空再按 run 重铺：这样"没有归属 run 的孤儿行"（旧口径留下的）也会一起消失，
+	// 而不是永远留在库里当幽灵消息。
+	if err := s.st.DeleteMessagesBySession(ctx, sessionID); err != nil {
+		return fmt.Errorf("read models: clear messages: %w", err)
+	}
+	for _, r := range runs {
+		window := eventsInWindow(all, r.FirstSeq, r.LastSeq)
+		if err := s.rebuildRunMessages(ctx, sessionID, r.ID, window); err != nil {
+			return fmt.Errorf("read models: rebuild run %s: %w", r.ID, err)
+		}
+	}
+	return nil
+}
+
+// sessionEvents 读某会话的全部事件（位次升序；跨页循环，页大小与恢复注入一致）。
+func (s *Service) sessionEvents(ctx context.Context, sessionID string) ([]model.EventEntity, error) {
+	var all []model.EventEntity
+	after := int64(-1)
+	for {
+		batch, more, err := s.st.EventsAfter(ctx, sessionID, after, 2000)
+		if err != nil {
+			return nil, fmt.Errorf("read models: read events: %w", err)
+		}
+		all = append(all, batch...)
+		if !more || len(batch) == 0 {
+			return all, nil
+		}
+		after = batch[len(batch)-1].Seq
+	}
+}
+
+// eventsInWindow 取 `[lo, hi]` 闭区间内的事件（入参已按 seq 升序）。
+// `hi < 0` = 开区间（M2 起进行中的轮次 last_seq 未知）——此时只按 lo 切。
+func eventsInWindow(evs []model.EventEntity, lo, hi int64) []model.EventEntity {
+	out := make([]model.EventEntity, 0, len(evs))
+	for _, e := range evs {
+		if e.Seq < lo {
+			continue
+		}
+		if hi >= 0 && e.Seq > hi {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // decodePayload 把 events.payload_json 解码回 map（历史/WS 载荷形态），坏 JSON 回落原文串。
