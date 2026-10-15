@@ -73,7 +73,7 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 	}
 	// 解析失败必须**在落库之前**上抛（`appliedModelID` 只在解析成功后才被改写成行 id）。
 	if !strings.Contains(sess, "appliedModelID = &platformID") {
-		t.Fatal("sessions.go 里找不到 `appliedModelID = &platformID`：落库的必须是**解析后的行 id**"+
+		t.Fatal("sessions.go 里找不到 `appliedModelID = &platformID`：落库的必须是**解析后的行 id**" +
 			"（直接落请求原值 = 把运行时的不透明串写回库里）")
 	}
 }
@@ -169,6 +169,29 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 				"（静默回落 = 用户以为选中了 A、实际跑 B）", want)
 		}
 	}
+	// ①' **"拒绝"必须真的是出口，而不是"拒绝之前先悄悄回落"**（2026-10-15 反证实跑换来的一条）：
+	// 光断言"拒绝路径存在"是不够的——在它前面插一段 `if row, ok := defaultModelRow(...) { … }`
+	// 之后，上面那三处字符串**原样还在**，而运行时行为已经变成静默回落（占位符式守卫的典型死法）。
+	// 所以判据落在 `resolveSessionModel` 的**函数体**上（整文件里有别的 `defaultModelRow` 消费者，
+	// 混在一起数会把它们算进来）：默认行的读点恰好一处（空入参那一支），且它出现在**第一个**拒绝
+	// 出口之前；`sessionModelNotFoundErr` 恰好两处（形状不对 / 查不到行，两条都不能少）。
+	body, ok := goFuncBody(modelList, "func (s *Service) resolveSessionModel(")
+	if !ok {
+		t.Fatal("解析不出 `resolveSessionModel` 的函数体（fail-closed：结构判据必须看得见它）")
+	}
+	if c := strings.Count(body, "sessionModelNotFoundErr(trimmed)"); c != 2 {
+		t.Fatalf("`resolveSessionModel` 里 `sessionModelNotFoundErr(trimmed)` 应恰好 2 处"+
+			"（形状不对 + 查不到行），实际 %d 处——少一处就有一条入参能「悄悄过」，"+
+			"多一处通常意味着有人加了第三条路径而不是复用", c)
+	}
+	if c := strings.Count(body, "defaultModelRow("); c != 1 {
+		t.Fatalf("`resolveSessionModel` 里 `defaultModelRow(` 应恰好 1 处（**空入参那一支**），"+
+			"实际 %d 处——多出来的那处几乎一定是「查不到就回落默认」，那正是本守卫要挡的静默偏差", c)
+	}
+	if i, j := strings.Index(body, "defaultModelRow("), strings.Index(body, "sessionModelNotFoundErr(trimmed)"); i > j {
+		t.Fatal("`defaultModelRow(` 必须出现在**第一个拒绝出口之前**（它属于空入参那一支）：" +
+			"出现在拒绝之后 = 「先拒、再回落」，同样是把用户的显式选择换成了另一个模型")
+	}
 	// ② 两个写面都走它（少一个就是"某一条路径还能把不透明值落库"）。
 	start := readStripped(t, filepath.Join(dir, "session_start.go"))
 	sess := readStripped(t, filepath.Join(dir, "sessions.go"))
@@ -194,4 +217,21 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 		t.Fatal("目录注解没有 fail-closed 的「多命中不收录」：两条平台行派生出同一个运行时值时，" +
 			"「随便挑一条」就是静默选错模型")
 	}
+}
+
+// goFuncBody 抽出以 `signature` 开头的那段函数体（到下一个行首 `func ` 为止）。
+//
+// 为什么需要它：结构类判据（"这个调用点只能有一处、且必须在那个调用之前"）**必须落在函数体内**——
+// 同一个文件里常有别的合法消费者（`defaultModelRow` 就有），在整文件上数会把它算进来。
+// 解析不到即 `ok=false`（调用方 fail-closed：函数改名/搬家时必须有人回来对齐这条判据）。
+func goFuncBody(src, signature string) (string, bool) {
+	i := strings.Index(src, signature)
+	if i < 0 {
+		return "", false
+	}
+	rest := src[i:]
+	if j := strings.Index(rest[1:], "\nfunc "); j >= 0 {
+		rest = rest[:j+1]
+	}
+	return rest, true
 }

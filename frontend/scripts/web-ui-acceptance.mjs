@@ -334,7 +334,7 @@ const clickJS = (page, expr) =>
  * 为什么必须有它（2026-10-13 实测，连着两次假红）：保存期间面板 `busy`，而开新卡的那些按钮
  * 带着 `disabled={busy}`——上一张卡还没收起时点「添加模型」，这一下**被 disabled 吃掉**、
  * 什么也不发生（不报错）；而随后那条"等新卡展开"会被**上一张还没收起的卡**满足（两者都是
- * `.fg-editor` 里的 `input#model_id`）。于是脚本以为新卡开了、其实在往旧卡里填，等旧卡的写面
+ * `.fg-editor` 里的 `input#model`）。于是脚本以为新卡开了、其实在往旧卡里填，等旧卡的写面
  * 返回把它收起，现场就变成"元素凭空消失"（dump 实测：`editors: []`、行卡还在、面板还在）。
  * 固定 `sleep(800)` 赌不赢这件事——写面可能同步拉起底座（实测 `/models/catalog` 单次 3.1s）。
  */
@@ -1241,7 +1241,7 @@ async function scenarioSettingsModel(browser) {
     // 按**前缀**扫而不是只删本次那条：中途失败的那几次也会留下同一前缀的夹具。
     // v12 起删默认模型**不再被拒**（B4：连带清空默认），所以不必先清默认。
     for (const m of ((await api('GET', '/models')).json.data?.models ?? [])) {
-      if (!String(m.model_id).startsWith('ui-verify-')) continue
+      if (!String(m.model).startsWith('ui-verify-')) continue
       await api('DELETE', `/models/${m.id}`)
     }
     await api('DELETE', `/providers/${provID}`)
@@ -1421,7 +1421,8 @@ async function scenarioSettingsModel(browser) {
     const patchedProv = ((await api('GET', '/providers')).json.data ?? []).find((p) => p.id === provID)
     check('供应商编辑提交后读面回带新备注', patchedProv?.note === '验收备注', JSON.stringify(patchedProv?.note))
 
-    // ③ 模型：新建 → 出现在清单里（v12 的表单字段是 vendor / model_id）
+    // ③ 模型：新建 → 出现在清单里（v12 的表单字段是 `vendor` / `model_id`；**v24 起上游模型名那一格
+    //     叫 `model`**，wire 键与 `Form.Item name` 同批改名——脚本这里改的是字段 id，别以为只是文案）
     //
     // 改造后模型按**供应商分组**，每组头右侧一个「添加模型」入口。这里必须点**我们这个夹具供应商**
     // 那一组的入口——否则新建卡预选的是别的供应商（选择器能改回来，但那就测不到"分组入口预选对了"）。
@@ -1438,22 +1439,22 @@ async function scenarioSettingsModel(browser) {
     await waitEditorGone(page, '供应商编辑卡收起')
     const openedModel = await clickJS(page, groupAddExpr)
     const modelCardOpen = await page
-      .waitFor(`return !!document.querySelector('.fg-editor input#model_id')`, { label: '模型编辑卡展开', timeout: 8000 })
+      .waitFor(`return !!document.querySelector('.fg-editor input#model')`, { label: '模型编辑卡展开', timeout: 8000 })
       .catch(() => false)
     if (!modelCardOpen) {
       throw new Error('模型编辑卡没展开：clickJS=' + openedModel + ' 组头=' + JSON.stringify(groupHeads))
     }
     const provPick = await selectByFieldID(page, 'vendor', provID)
     check('模型卡的「供应商」已选中该供应商', provPick.ok, provPick.detail)
-    await page.type('document.querySelector(".fg-editor input#model_id")', modelID)
-    check('模型卡的 model_id 已填进去',
-      (await page.evaluate(`return document.querySelector('.fg-editor input#model_id')?.value`)) === modelID,
+    await page.type('document.querySelector(".fg-editor input#model")', modelID)
+    check('模型卡的「模型名」已填进去',
+      (await page.evaluate(`return document.querySelector('.fg-editor input#model')?.value`)) === modelID,
       await page.evaluate(`return JSON.stringify({
-        v: document.querySelector('.fg-editor input#model_id')?.value,
-        html: document.querySelector('.fg-editor input#model_id')?.outerHTML.slice(0, 160),
+        v: document.querySelector('.fg-editor input#model')?.value,
+        html: document.querySelector('.fg-editor input#model')?.outerHTML.slice(0, 160),
         ids: [...document.querySelectorAll('.fg-editor input')].map(i => i.id),
       })`))
-    await page.click(saveBtnExpr('model_id'))
+    await page.click(saveBtnExpr('model'))
     await sleep(350)
     const toast = await page.evaluate(
       `return [...document.querySelectorAll('.ant-message-notice-content')].map(e => e.innerText).join(' | ')`,
@@ -1464,8 +1465,8 @@ async function scenarioSettingsModel(browser) {
     if (!inList) {
       const list = (await api('GET', '/models')).json.data?.models ?? []
       throw new Error('模型没出现在清单里：toast=' + toast +
-        ' 表单里的 model_id=' + await page.evaluate(`return document.querySelector('.fg-editor input#model_id')?.value`) +
-        ' 库里=' + JSON.stringify(list.map((m) => m.model_id)))
+        ' 表单里的 model=' + await page.evaluate(`return document.querySelector('.fg-editor input#model')?.value`) +
+        ' 库里=' + JSON.stringify(list.map((m) => m.model)))
     }
     await sleep(400)
     await page.shot('22-settings-model-created')
@@ -1497,7 +1498,7 @@ async function scenarioSettingsModel(browser) {
       modAfter = await page.evaluate(capTagText)
     }
     check('一键切换后能力标签变成「文本+图片」', modAfter === '文本+图片', JSON.stringify(modAfter))
-    const modRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
+    const modRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model === modelID)
     check('REST 读面回带 input_modalities=["text","image"]',
       JSON.stringify(modRow?.input_modalities) === JSON.stringify(['text', 'image']),
       JSON.stringify(modRow?.input_modalities))
@@ -1517,29 +1518,30 @@ async function scenarioSettingsModel(browser) {
     const cardField = (fieldID, sel) => `(() => {
       const c = ${cardExpr(fieldID)};
       return c ? c.querySelector(${JSON.stringify(sel)}) : null })()`
-    const modelCardField = (id) => cardField('model_id', `input#${id}`)
+    const modelCardField = (id) => cardField('model', `input#${id}`)
     const modelCardSave = `(() => {
-      const c = ${cardExpr('model_id')};
+      const c = ${cardExpr('model')};
       return c ? [...c.querySelectorAll('button')].find(b => /^(保存|创建模型)$/.test((b.innerText||'').replace(/\\s+/g,''))) : null })()`
     const capWrapperExpr = `(() => {
-      const c = ${cardExpr('model_id')};
+      const c = ${cardExpr('model')};
       if (!c) return null;
       return [...c.querySelectorAll('[class*="ant-checkbox-wrapper"]')]
         .find(x => (x.innerText||'').trim() === '图片') || null })()`
-    const editRowExpr = `(() => {
+    const editRowExprFor = (upstream) => `(() => {
       const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
-        .find(x => (x.innerText||'').includes(${JSON.stringify(modelID)}));
+        .find(x => (x.innerText||'').includes(${JSON.stringify(upstream)}));
       return li ? [...li.querySelectorAll('button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '编辑') : null })()`
+    const editRowExpr = editRowExprFor(modelID)
     await waitEditorGone(page, '模型新建卡收起')
     await clickJS(page, editRowExpr)
-    await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '编辑模型卡片展开', timeout: 8000 })
+    await page.waitFor(`return !!(${cardExpr('model')})`, { label: '编辑模型卡片展开', timeout: 8000 })
     await sleep(400)
     const capChecked = await page.evaluate(`const w = ${capWrapperExpr}; return w ? !!w.querySelector('input')?.checked : null`)
     check('编辑模型时「图片」按当前声明回填（表单读得到能力）', capChecked === true, JSON.stringify(capChecked))
     await page.type(modelCardField('note'), '备注改动')
     await page.click(modelCardSave)
     await waitEditorGone(page, '编辑卡收起（这条编辑的写面已返回）')
-    const afterEdit = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID)
+    const afterEdit = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model === modelID)
     check('备注确实改到了（这次编辑真的提交了）', afterEdit?.note === '备注改动', JSON.stringify(afterEdit?.note))
     check('只改备注不动已声明的输入能力（不许静默降级为仅文本）',
       JSON.stringify(afterEdit?.input_modalities) === JSON.stringify(['text', 'image']),
@@ -1547,12 +1549,15 @@ async function scenarioSettingsModel(browser) {
 
     // ③‴ 新建时就能**声明**能力（用户要求：平台没法自动检测，只能让人填）。
     const modelID2 = `${modelID}-vision`
+    // 容量断言用的两个数（刻意选得不等于底座兜底那对 131072/8192——用了它们就分不清是谁写的）。
+    const CAP_IN = 200001
+    const CAP_OUT = 4097
     await waitEditorGone(page, '模型编辑卡收起')
     await clickJS(page, groupAddExpr)
-    await page.waitFor(`return !!(${cardExpr('model_id')})`, { label: '新建模型卡片展开', timeout: 8000 })
+    await page.waitFor(`return !!(${cardExpr('model')})`, { label: '新建模型卡片展开', timeout: 8000 })
     await sleep(400)
     await selectByFieldID(page, 'vendor', provID)
-    await page.type(modelCardField('model_id'), modelID2)
+    await page.type(modelCardField('model'), modelID2)
     if (!(await page.box(capWrapperExpr))) throw new Error('新建模型卡片里找不到「图片」输入能力勾选框')
     // 落到 wrapper **里面那个真实 `input`** 上（不是按坐标点 wrapper）：antd 把这颗 input 藏成
     // 透明 + 绝对定位，按坐标点在实测里出现过「点了、`checked` 仍是 false」（打在了 wrapper 的
@@ -1570,10 +1575,47 @@ async function scenarioSettingsModel(browser) {
     await page.shot('22c-settings-model-capability-form')
     await page.click(modelCardSave)
     await waitEditorGone(page, '新建卡收起（这条新建的写面已返回）')
-    const created2 = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model_id === modelID2)
+    const created2 = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model === modelID2)
     check('新建时勾的「图片」落库为 input_modalities=["text","image"]',
       JSON.stringify(created2?.input_modalities) === JSON.stringify(['text', 'image']),
       JSON.stringify(created2?.input_modalities))
+
+    // ③⁗ 容量声明（v25）：**两个可选数字字段**，留空 = 不声明（由环境兜底），填了 = 平台声明。
+    //     两态都验，因为"没声明"与"声明成某个数"在界面上必须**看得出区别**——
+    //     路由键隔离之后"命中底座内置目录"这条退路已经不存在，未声明的容量就是底座自己的兜底值。
+    //
+    //     (i) 不声明态：刚建的 `modelID2` 没填容量 → 行卡标「容量由环境兜底」、REST 回 null；
+    //     (ii) 声明态：在它的编辑卡里填两个数字 → 保存 → REST 回数值、行卡标出这两个数。
+    const capacityTagExpr = (upstream) => `(() => {
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
+        .find(x => (x.innerText || '').includes(${JSON.stringify(upstream)}));
+      if (!li) return null;
+      const t = [...li.querySelectorAll('span.fg-rowtag')].find(s => /容量|输入|输出/.test((s.innerText||'')));
+      return t || null })()`
+    const capText = async (upstream) =>
+      (await page.evaluate(`const t = ${capacityTagExpr(upstream)}; return t ? (t.innerText||'').trim() : ''`)) || ''
+    const undeclared = await capText(modelID2)
+    check('未声明容量的行卡如实标「容量由环境兜底」', undeclared === '容量由环境兜底', JSON.stringify(undeclared))
+    check('未声明容量的 REST 读面是 null（不是 0）',
+      created2?.max_input_tokens === null && created2?.max_output_tokens === null,
+      JSON.stringify({ in: created2?.max_input_tokens, out: created2?.max_output_tokens }))
+
+    await clickJS(page, editRowExprFor(modelID2))
+    await page.waitFor(`return !!(${cardExpr('model')})`, { label: '编辑模型卡片展开（容量那两条）', timeout: 8000 })
+    await sleep(300)
+    await page.type(modelCardField('max_input_tokens'), String(CAP_IN))
+    await page.type(modelCardField('max_output_tokens'), String(CAP_OUT))
+    await page.shot('22d-settings-model-capacity-form')
+    await page.click(modelCardSave)
+    await waitEditorGone(page, '容量编辑卡收起')
+    const capacityRow = ((await api('GET', '/models')).json.data?.models ?? []).find((m) => m.model === modelID2)
+    check('声明容量后 REST 回带两个数',
+      capacityRow?.max_input_tokens === CAP_IN && capacityRow?.max_output_tokens === CAP_OUT,
+      JSON.stringify({ in: capacityRow?.max_input_tokens, out: capacityRow?.max_output_tokens }))
+    const declaredTag = await capText(modelID2)
+    check('行卡把两个容量如实标出来（不再是「由环境兜底」）',
+      declaredTag.includes(String(CAP_IN)) && declaredTag.includes(String(CAP_OUT)),
+      JSON.stringify(declaredTag))
 
     // ④ 文案纪律（ADR-22）：面板里**不许**出现任何底座词汇，也不许渲染 sync[] 的机器面字段。
     //    词汇表按**构建期固定的那个底座 id** 现算（见 runtimeWordRe），不写死具体底座名。
@@ -1602,8 +1644,8 @@ async function scenarioSettingsModel(browser) {
 
     // ⑤ 设默认 → 界面跟随 → 删掉它**允许**且连带清空（B4）
     const list = (await api('GET', '/models')).json.data?.models ?? []
-    const row = list.find((m) => m.model_id === modelID)
-    if (!row) throw new Error('刚建的模型不在清单里：' + JSON.stringify(list.map((m) => m.model_id)))
+    const row = list.find((m) => m.model === modelID)
+    if (!row) throw new Error('刚建的模型不在清单里：' + JSON.stringify(list.map((m) => m.model)))
     const patched = await api('PATCH', `/models/${row.id}`, { is_default: true })
     check('把该条设为默认（REST）', patched.json.code === 0, JSON.stringify(patched.json).slice(0, 160))
     // 界面上刷新一次（**模型块**的刷新——`btnExpr('刷新')` 会先命中供应商块那个），
