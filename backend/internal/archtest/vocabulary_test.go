@@ -531,3 +531,110 @@ func TestModelEntitiesFollowNamingConvention(t *testing.T) {
 		t.Fatalf("实体数 %d ≠ 表名常量数 %d（一一对应）", len(entities), len(consts))
 	}
 }
+
+// TestModelsVocabularyIsModelNotModelID 守卫⑤（v24 / 计划 §4.M1.T4）。
+//
+// `models.model_id` 在本仓是**一词三义**的一半（另一半是 `models.id`）：前者是"发给上游的模型名"，
+// 后者是"平台铸造的行身份（`mdl_<ULID>`）"——两个都带 `id` 又都不是同一个东西，正是用户
+// 2026-10-15 那句「`models` 中 `id` 和 `model_id` 两个字段也很有歧义」。v24 把前者改名 `model`
+// （定案 §3 辛），此后 `_id` 一律指"指向某表 `id`"。
+//
+// 四面 + 一反向，全部 fail-closed（解析不到即失败，避免改名/搬迁后守卫静默空转）：
+//
+//	① **真 schema**：跑完整迁移的库里 `models` 有 `model`、没有 `model_id`；
+//	② **DTO**：`internal/dto/dtomodel/*.go` 剥注释后零 `model_id`（线上键名唯一事实源）；
+//	③ **前端类型**：`packages/types/src/model.ts` 剥注释后零 `model_id`；
+//	④ **实体 gorm 标签**：`internal/model/model.go` 必须是 `column:model`——标签写错**编译期无感**，
+//	   只有运行时那条 SQL 才报 `no such column`（v16 的 A1 守卫注释里写着同一件事）；
+//	⑤ **反向**（防"改过头"）：`sessions` **必须仍有** `model_id` 列——E8 的陷阱变成机器判据。
+//
+// 为什么不做全仓 grep：`model_id` 在**会话侧**是保留词（`sessions.model_id` → `models.id`，
+// 它名列其名），在**历史迁移**里是必须写出的当时那一版名字。判据按**面**限定（真 schema + DTO +
+// 前端类型 + 一个实体文件），而不是全仓子串——后者要么假红，要么得维护一张长长的白名单。
+func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
+	// ① 真 schema。
+	db := migratedSchemaDB(t)
+	cols := map[string]bool{}
+	rows, err := db.Raw(`PRAGMA table_info(models)`).Rows()
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(models): %v", err)
+	}
+	for rows.Next() {
+		var (
+			cid, notnull, pk int
+			name, ctype      string
+			dflt             *string
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("扫 models 的列: %v", err)
+		}
+		cols[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("关 models 的列游标: %v", err)
+	}
+	if len(cols) == 0 {
+		t.Fatal("models 一列都没读到（fail-closed：真 schema 是这条守卫的根）")
+	}
+	if !cols["model"] {
+		t.Fatal("v24 起 `models` 必须有 `model` 列（发给上游的模型名）")
+	}
+	if cols["model_id"] {
+		t.Fatal("v24 起 `models.model_id` 必须已改名 `model`——它仍然在，说明改名没落地"+
+			"（或有人把它加了回来）")
+	}
+
+	// ② DTO：线上键名的唯一事实源。
+	dtoDir := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel")
+	dtoFiles, err := filepath.Glob(filepath.Join(dtoDir, "*.go"))
+	if err != nil || len(dtoFiles) == 0 {
+		t.Fatalf("扫不到 %s/*.go: %v（fail-closed）", dtoDir, err)
+	}
+	for _, path := range dtoFiles {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", path, err)
+		}
+		src := strings.ToLower(stripLineComments(string(raw)))
+		if idx := strings.Index(src, "model_id"); idx >= 0 {
+			t.Fatalf("%s 剥注释后仍出现 `model_id`——线上键名一律 `model`（v24）",
+				filepath.Base(path))
+		}
+	}
+
+	// ③ 前端类型（fail-closed：文件不在即失败，避免"改名后路径变了"静默空转）。
+	tsPath := filepath.Join(frontendRoot(t), "packages", "types", "src", "model.ts")
+	raw, err := os.ReadFile(tsPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed：前端类型面是这条守卫的一半）", tsPath, err)
+	}
+	if src := strings.ToLower(stripTSComments(string(raw))); strings.Contains(src, "model_id") {
+		t.Fatalf("%s 剥注释后仍出现 `model_id`——前端类型必须跟到线上的 `model`（v24）", tsPath)
+	}
+
+	// ④ 实体 gorm 标签。
+	entityPath := filepath.Join(backendRoot(t), "internal", "model", "model.go")
+	raw, err = os.ReadFile(entityPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed）", entityPath, err)
+	}
+	entitySrc := stripLineComments(string(raw))
+	if !strings.Contains(entitySrc, "column:model;") {
+		t.Fatalf("%s 里找不到 `column:model` 标签——gorm 标签与 DDL 不同步是**编译期无感**的，"+
+			"只有运行时那条 SQL 才报 `no such column`", entityPath)
+	}
+	if strings.Contains(entitySrc, "column:model_id") {
+		t.Fatalf("%s 里仍有 `column:model_id`——实体标签必须跟到 `model`（v24）", entityPath)
+	}
+
+	// ⑤ 反向：会话侧那一列**必须还在**（E8：辰之后它的名字才是对的）。
+	var sessionModelID int64
+	if err := db.Raw(`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='model_id'`).
+		Row().Scan(&sessionModelID); err != nil {
+		t.Fatalf("读 sessions 列集合: %v", err)
+	}
+	if sessionModelID != 1 {
+		t.Fatal("`sessions.model_id` 必须仍在：它指的是 `models.id`（v24 之后这个名字才是对的）。" +
+			"把它一起改名 = 把「改会话语义」与「改列名」混在一起（计划 E8）")
+	}
+}

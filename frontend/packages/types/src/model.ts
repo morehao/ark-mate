@@ -96,9 +96,14 @@ export interface ModelRow {
   id: string
   /** 挂靠的供应商 id。 */
   provider_id: string
-  /** 发给上游的模型 id（**不是**运行时的 value，也不是平台 id）。 */
-  model_id: string
-  /** 展示名（空 = 前端回落显示 model_id）。 */
+  /**
+   * 发给上游的模型名（**不是**运行时的 value，也不是平台 id）。
+   *
+   * v24 从 `model_id` 改名：`_id` 在本仓一律指"指向某表 `id`"，而这一格是外部世界的名字
+   * （生态标准词 `model`）。
+   */
+  model: string
+  /** 展示名（空 = 前端回落显示 model）。 */
   name?: string
   /** 备注（不驱动行为）。 */
   note?: string
@@ -187,7 +192,8 @@ export interface ModelsResp {
 /** `POST /models` 的请求体。**没有 `runtime`**：模型不带底座维度（带 `runtime` 会被 40001 拒）。 */
 export interface ModelCreateReq {
   provider_id: string
-  model_id: string
+  /** 发给上游的模型名（线上键名就是 `model`；v24 从 `model_id` 改名）。 */
+  model: string
   name?: string
   note?: string
   /** 输入模态：`['text']`（默认）| `['text','image']`；非法取值会被 40501 拒。 */

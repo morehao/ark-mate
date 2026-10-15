@@ -200,7 +200,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
-		ID: "mdl_stale", ProviderID: "default", ModelID: "m-1", InputModalities: "text",
+		ID: "mdl_stale", ProviderID: "default", Model: "m-1", InputModalities: "text",
 	}, "t"); err != nil || !created {
 		t.Fatalf("造模型行: created=%v err=%v", created, err)
 	}

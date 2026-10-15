@@ -704,12 +704,12 @@ func missingDeclaredModels(ctx context.Context, s *Service, sample advertisedSam
 	}
 	var out []string
 	for i := range declared {
-		v, err := modelValueFor(s.reg, sample.Runtime, declared[i].ProviderID, declared[i].ModelID)
+		v, err := modelValueFor(s.reg, sample.Runtime, declared[i].ProviderID, declared[i].Model)
 		if err != nil || v == "" {
 			continue
 		}
 		if !advertised[v] {
-			out = append(out, declared[i].ProviderID+"/"+declared[i].ModelID)
+			out = append(out, declared[i].ProviderID+"/"+declared[i].Model)
 		}
 	}
 	sort.Strings(out)

@@ -531,7 +531,7 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 		t.Fatalf("升级后写供应商: ok=%v err=%v", ok, err)
 	}
 	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
-		ID: "md-1", ProviderID: "deepseek-main", ModelID: "deepseek-v4-flash",
+		ID: "md-1", ProviderID: "deepseek-main", Model: "deepseek-v4-flash",
 		Name: "Flash", InputModalities: "text",
 	}, "rest"); err != nil || !ok {
 		t.Fatalf("升级后写模型条目: ok=%v err=%v", ok, err)
@@ -545,11 +545,11 @@ func TestMigrateV10ToV11AddsProviderAndModel(t *testing.T) {
 
 	// ④ v12 起模型面**没有布尔列**了（默认模型是 meta 的单一值）：
 	// 身份列 `model_id` 是**列**，且 `(provider_id, model_id)` 由库级唯一索引保证。
-	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.ModelID != "deepseek-v4-flash" {
+	if md, found, err := s.GetModelDefinition(ctx, "md-1"); err != nil || !found || md.Model != "deepseek-v4-flash" {
 		t.Fatalf("读回模型条目失真: found=%v err=%v row=%+v", found, err, md)
 	}
 	if ok, err := s.CreateModelDefinition(ctx, ModelColumns{
-		ID: "md-2", ProviderID: "deepseek-main", ModelID: "deepseek-v4-flash",
+		ID: "md-2", ProviderID: "deepseek-main", Model: "deepseek-v4-flash",
 	}, "rest"); err != nil || ok {
 		t.Fatalf("同 (provider_id, model_id) 应被唯一索引拦下: ok=%v err=%v", ok, err)
 	}

@@ -75,12 +75,13 @@ interface ProviderFormValues {
 interface ModelFormValues {
   /** 供应商选择（wire 字段是 `provider_id`，只在提交时以对象键拼出来，不进用户可见的字）。 */
   vendor?: string
-  model_id?: string
+  /** 发给上游的模型名（wire 键名 `model`，v24 从 `model_id` 改名）。 */
+  model?: string
   name?: string
   note?: string
   /**
    * 这条模型能接收的输入能力（多选）。**只能由用户在表单里声明**——平台不猜也探测不到：
-   * 一条模型收不收图，取决于真实端点上挂着什么（自建网关后面的模型 id 未必在任何目录里）。
+   * 一条模型收不收图，取决于真实端点上挂着什么（自建网关后面的模型名未必在任何目录里）。
    */
   modalities?: string[]
 }
@@ -129,9 +130,9 @@ function providerLabel(row: Provider): string {
   return row.name || row.id
 }
 
-/** 模型展示名（空则回落上游模型 id）。 */
+/** 模型展示名（空则回落上游模型名）。 */
 function modelLabel(row: ModelRow): string {
-  return row.name || row.model_id
+  return row.name || row.model
 }
 
 type ProviderCardTarget = { mode: 'create' } | { mode: 'edit'; row: Provider }
@@ -164,14 +165,14 @@ function modelFormValues(target: ModelCardTarget, firstVendor?: string): ModelFo
   return target.mode === 'edit'
     ? {
         vendor: target.row.provider_id,
-        model_id: target.row.model_id,
+        model: target.row.model,
         name: target.row.name ?? '',
         note: target.row.note ?? '',
         modalities: capabilitiesOf(target.row),
       }
     // 新建时把每个键都**显式**给空值：`setFieldsValue` 是合并语义，省略的键会继承上一次打开
-    // 残留的值（实测：新建模型时「上游模型 id」框里还留着上一条的 id）。
-    : { vendor: target.vendor ?? firstVendor, model_id: '', name: '', note: '', modalities: ['text'] }
+    // 残留的值（实测：新建模型时「模型名」框里还留着上一条的名字）。
+    : { vendor: target.vendor ?? firstVendor, model: '', name: '', note: '', modalities: ['text'] }
 }
 
 /**
@@ -326,7 +327,7 @@ function ModelForm({ form, target, vendorOptions, busy, noopLine, onSubmit, onCa
   return (
     <EditorShell
       title={editing ? '编辑模型' : '新建模型'}
-      route={editing ? target.row.model_id : undefined}
+      route={editing ? target.row.model : undefined}
       actions={(
         <>
           {noopLine ? <p className="fg-noopline">{noopLine}</p> : null}
@@ -348,14 +349,14 @@ function ModelForm({ form, target, vendorOptions, busy, noopLine, onSubmit, onCa
             <Select disabled={editing} placeholder="选择一个供应商" options={vendorOptions} />
           </Form.Item>
           <Form.Item
-            label="上游模型 id"
-            name="model_id"
-            rules={[{ required: true, message: '模型 id 不能为空' }]}
-            extra={editing ? '发给端点的模型 id，建好之后不再改动。' : '发给端点的模型 id，例如 gpt-4o-mini'}
+            label="模型名"
+            name="model"
+            rules={[{ required: true, message: '模型名不能为空' }]}
+            extra={editing ? '发给端点的模型名，建好之后不再改动。' : '发给端点的模型名，例如 gpt-4o-mini'}
           >
             <Input disabled={editing} placeholder="gpt-4o-mini" autoComplete="off" />
           </Form.Item>
-          <Form.Item label="展示名" name="name" extra="留空则显示上游模型 id">
+          <Form.Item label="展示名" name="name" extra="留空则显示模型名">
             <Input placeholder="可选" autoComplete="off" />
           </Form.Item>
           <Form.Item label="备注" name="note">
@@ -469,7 +470,7 @@ export function ModelSettingsPanel() {
    *     （点保存只报「协议必填」）。当时的结论是"改用 `initialValues`"，但那只修了**第一次**打开。
    *  ② 2026-10-11：`useForm()` 的 store 活在 React 树之外，字段被卸掉、值又被 `preserve={false}`
    *     清掉之后，**第二次打开**的 Form 不再是"首次初始化"，`initialValues` 不再套用——表现是
-   *     **编辑卡片整个是空的**（model_id / 备注都是空串，于是"改备注"什么都不发生，或者更糟：
+   *     **编辑卡片整个是空的**（模型名 / 备注都是空串，于是"改备注"什么都不发生，或者更糟：
    *     按空表单把能力声明改掉）。
    *  ③ 2026-10-11 同日再修：改成在弹窗动画结束时 `resetFields` + `setFieldsValue` —— 仍然不对，
    *     而且更隐蔽：那个时点已经是打开动画之后，用户在动画期间敲进去的字会被一起抹掉。
@@ -478,7 +479,7 @@ export function ModelSettingsPanel() {
    *     我们提前写的值与其一致，两条路都落到同一份数据上。
    *   - 切换对象（A → B）：卡片不重新挂载，`resetFields()` + `setFieldsValue()` 是**唯一**的来源。
    * `resetFields()` 在前：`setFieldsValue` 是**合并**语义，只给一部分键时其余键会保留上一次打开
-   * 的旧值（实测：新建模型时「上游模型 id」框里还留着上一条的 id，再一输入就拼成两个 id）。
+   * 的旧值（实测：新建模型时「模型名」框里还留着上一条的名字，再一输入就拼成两个名字）。
    */
   const fillProviderForm = (target: ProviderCardTarget): void => {
     providerForm.resetFields()
@@ -591,7 +592,7 @@ export function ModelSettingsPanel() {
   // ——— ② 模型 ———
 
   const modelOptions = useMemo(
-    () => (view?.models ?? []).map((m) => ({ value: m.id, label: m.name || m.model_id })),
+    () => (view?.models ?? []).map((m) => ({ value: m.id, label: m.name || m.model })),
     [view],
   )
 
@@ -636,7 +637,7 @@ export function ModelSettingsPanel() {
       const created = await guard(createModel({
         // 对象键是 wire 字段名（不是给用户看的字）。
         provider_id: v.vendor ?? '',
-        model_id: v.model_id ?? '',
+        model: v.model ?? '',
         name: v.name || undefined,
         note: v.note || undefined,
         // 用户在表单里声明的输入能力（新建时总是显式带上，默认就是仅文本）。
@@ -666,7 +667,7 @@ export function ModelSettingsPanel() {
       const updated = await guard(patchModel(row.id, patch))
       if (!updated) return
       closeModelCard()
-      setSavedLine(`已保存「${v.name || row.model_id}」。`)
+      setSavedLine(`已保存「${v.name || row.model}」。`)
       await loadModels()
     }
   }
@@ -1000,12 +1001,12 @@ export function ModelSettingsPanel() {
                     const open = target !== null
                     const image = hasImageInput(row)
                     const capLabel = image
-                      ? `已声明图片输入（${row.model_id}）：点一下改回仅文本`
-                      : `默认只收文本（${row.model_id}）：点一下允许图片`
+                      ? `已声明图片输入（${row.model}）：点一下改回仅文本`
+                      : `默认只收文本（${row.model}）：点一下允许图片`
                     return (
                       <li key={row.id} className="fg-rowcard">
                         <div className="fg-rowhead">
-                          <span className="fg-modelid">{row.model_id}</span>
+                          <span className="fg-modelid">{row.model}</span>
                           <span className="fg-rowmeta">{row.name || '—'}</span>
                           {/* 一键改输入能力：默认 `text` = **图片不会被接受**（这是决定，不是缺陷），
                               所以它必须看得见、也必须一步改得动——多两次点击会显著降低用户改对它的概率。 */}

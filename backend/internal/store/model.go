@@ -15,7 +15,7 @@ import (
 //   - **没有 runtime 维度**：一份清单投给所有已注册底座（ADR-1/B3）；
 //   - **默认模型是单一值**（`meta.MetaKeyDefaultModel`，ADR-21）：它是**用户的偏好**，
 //     不是模型行的属性；
-//   - 列表顺序 = `(provider_id, model_id)` 升序（ADR-6，修 P1 的"UUID 字典序"）。
+//   - 列表顺序 = `(provider_id, model)` 升序（ADR-6，修 P1 的"UUID 字典序"）。
 //
 // 定义行仍走 `commitDefinitionChange`（行 CAS + 同事务一条审计）：这是
 // "一次写面 = 一行 + 一条审计"的既有纪律，与 skills/mcp_servers/agents 同形。
@@ -26,13 +26,13 @@ import (
 type ModelColumns struct {
 	ID              string
 	ProviderID      string
-	ModelID         string
+	Model           string
 	Name            string
 	Note            string
 	InputModalities string
 }
 
-// ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model_id` 不在其中——
+// ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model` 不在其中——
 // 改身份等于换一条资源，不在 PATCH 语义里）。
 type ModelContent struct {
 	Name            string
@@ -45,7 +45,7 @@ type ModelContent struct {
 // 身份两列**进摘要**（它们是这一版内容的一部分）；`revision` / 时间列不进（记账不是内容）。
 func modelRowDigest(cols ModelColumns) string {
 	return rowDigest(map[string]string{
-		"id": cols.ID, "provider_id": cols.ProviderID, "model_id": cols.ModelID,
+		"id": cols.ID, "provider_id": cols.ProviderID, "model": cols.Model,
 		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
 	})
 }
@@ -53,14 +53,14 @@ func modelRowDigest(cols ModelColumns) string {
 // CreateModelDefinition 新建一条模型条目 + 一条审计，同事务。
 //
 // 返回 false 的两种情形都是"没写进去，也没有审计"：
-//   - 同 `(provider_id, model_id)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
+//   - 同 `(provider_id, model)` 已存在（库级唯一索引拦下；调用方翻成 `model_exists`(40901)）；
 //   - 主键 `id` 已存在（并发新建抢先，同一个对外表现）。
 func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, actor string) (bool, error) {
 	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, cols.ID, actor,
 		model.DefinitionActionCreate, modelRowDigest(cols), 0,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelEntity{
-				ID: cols.ID, ProviderID: cols.ProviderID, ModelID: cols.ModelID,
+				ID: cols.ID, ProviderID: cols.ProviderID, Model: cols.Model,
 				Name: cols.Name, Note: cols.Note, InputModalities: cols.InputModalities,
 				Revision: 1, CreatedAt: now, UpdatedAt: now,
 			})
@@ -70,7 +70,7 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 // UpdateModelDefinition 覆盖一条模型条目的**内容列** + 一条审计，同事务。
 //
 // 只碰 `name` / `note` / `input_modalities` / `revision` / `updated_at`——`provider_id` /
-// `model_id` 是身份，改它们等于换一条资源，不在覆盖语义里。
+// `model` 是身份，改它们等于换一条资源，不在覆盖语义里。
 func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content ModelContent, expectedRev int64, actor string) (bool, error) {
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
@@ -137,7 +137,7 @@ func (s *Store) GetModelDefinition(ctx context.Context, id string) (*model.Model
 	return s.models.Get(ctx, id)
 }
 
-// ListModelDefinitions 列出全部模型条目（**`(provider_id, model_id)` 升序**，ADR-6）。
+// ListModelDefinitions 列出全部模型条目（**`(provider_id, model)` 升序**，ADR-6）。
 //
 // v12 起没有"列某 runtime 的清单"这个查询轴：同一份清单投给所有已注册底座。
 func (s *Store) ListModelDefinitions(ctx context.Context) (model.ModelEntityList, error) {
@@ -150,9 +150,9 @@ func (s *Store) ListModelDefinitionsByProvider(ctx context.Context, providerID s
 	return s.models.ListByProvider(ctx, providerID)
 }
 
-// FindModelDefinition 按 `(provider_id, model_id)` 取一条（`model_exists` 判定）。
-func (s *Store) FindModelDefinition(ctx context.Context, providerID, modelID string) (*model.ModelEntity, bool, error) {
-	return s.models.GetByProviderModel(ctx, providerID, modelID)
+// FindModelDefinition 按 `(provider_id, model)` 取一条（`model_exists` 判定）。
+func (s *Store) FindModelDefinition(ctx context.Context, providerID, upstreamModel string) (*model.ModelEntity, bool, error) {
+	return s.models.GetByProviderModel(ctx, providerID, upstreamModel)
 }
 
 // ——— 默认模型：`meta` 里的单一值（ADR-21） ———

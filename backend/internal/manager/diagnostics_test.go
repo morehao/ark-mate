@@ -185,7 +185,7 @@ func TestRuntimeDiagnosticsRemediation(t *testing.T) {
 	defer st.Close()
 	svc.EnableStore(st)
 	if created, err := st.CreateModelDefinition(ctx, store.ModelColumns{
-		ID: "mdl_gone", ProviderID: "gone", ModelID: "m-gone", InputModalities: "text",
+		ID: "mdl_gone", ProviderID: "gone", Model: "m-gone", InputModalities: "text",
 	}, "t"); err != nil || !created {
 		t.Fatalf("造默认模型行: created=%v err=%v", created, err)
 	}

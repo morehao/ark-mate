@@ -732,6 +732,10 @@ var schemaMigrations = []migration{
 	// v23 的版本步本体在 `migrate_v23.go`（`messages` 补会话内序号 `ordinal` 与种类 `kind`，
 	// 并把索引按"整会话读"重排——序号是"投影完不完整"这条不变式的载体）。
 	migrationV23,
+
+	// v24 的版本步本体在 `migrate_v24.go`（**纯改名**：`models.model_id` → `models.model`；
+	// 本步零行为变化，验收判据是 `git diff testdata/` 为空——理由写在该文件头）。
+	migrationV24,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

@@ -87,7 +87,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 		t.Fatalf("写 providers 行: ok=%v err=%v", ok, err)
 	}
 	if ok, err := s.models.CreateCAS(ctx, &model.ModelEntity{
-		ID: "md-1", ProviderID: "pv-1", ModelID: "deepseek-v4-flash",
+		ID: "md-1", ProviderID: "pv-1", Model: "deepseek-v4-flash",
 		Name: "Flash", InputModalities: "text", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}); err != nil || !ok {
 		t.Fatalf("写 models 行: ok=%v err=%v", ok, err)
@@ -147,7 +147,8 @@ func TestOnDiskFormatContract(t *testing.T) {
 		{"providers", "revision", "integer", "1", true},
 		{"providers", "updated_at", "text", at.Format(model.LayoutTS), true},
 		{"models", "provider_id", "text", "pv-1", true},
-		{"models", "model_id", "text", "deepseek-v4-flash", true},
+		// v24：上游真实模型名那一列叫 `model`（`model_id` 是 v24 之前的名字）。
+		{"models", "model", "text", "deepseek-v4-flash", true},
 		{"models", "revision", "integer", "1", true},
 		{"models", "updated_at", "text", at.Format(model.LayoutTS), true},
 	}
@@ -235,7 +236,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetModelDefinition: found=%v err=%v", found, err)
 	}
-	if md.ProviderID != "pv-1" || md.ModelID != "deepseek-v4-flash" ||
+	if md.ProviderID != "pv-1" || md.Model != "deepseek-v4-flash" ||
 		md.Revision != 1 || !md.UpdatedAt.Equal(at) || !md.CreatedAt.Equal(at) ||
 		md.Name != "Flash" || md.InputModalities != "text" {
 		t.Errorf("model 行往返失真: %+v", md)

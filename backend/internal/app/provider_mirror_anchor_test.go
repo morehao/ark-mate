@@ -57,7 +57,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 		t.Fatalf("种子 provider 行: ok=%v err=%v", ok, err)
 	}
 	if ok, err := seed.CreateModelDefinition(ctx, store.ModelColumns{
-		ID: "m1", ProviderID: "yygu", ModelID: "gpt-x", InputModalities: "text",
+		ID: "m1", ProviderID: "yygu", Model: "gpt-x", InputModalities: "text",
 	}, "test"); err != nil || !ok {
 		t.Fatalf("种子 model 行: ok=%v err=%v", ok, err)
 	}

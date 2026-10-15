@@ -259,7 +259,7 @@ func (s *stubSvc) CreateModel(_ context.Context, req dtomodel.ModelCreateReq) (*
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
-	return &dtomodel.ModelResp{ID: "m1", ProviderID: req.ProviderID, ModelID: req.ModelID}, nil
+	return &dtomodel.ModelResp{ID: "m1", ProviderID: req.ProviderID, Model: req.Model}, nil
 }
 func (s *stubSvc) UpdateModel(_ context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error) {
 	if s.providerErr != nil {

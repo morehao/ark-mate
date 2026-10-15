@@ -262,7 +262,7 @@ func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set
 				if rows[i].ProviderID != rows[j].ProviderID {
 					return rows[i].ProviderID < rows[j].ProviderID
 				}
-				return rows[i].ModelID < rows[j].ModelID
+				return rows[i].Model < rows[j].Model
 			})
 			set.Models = append(set.Models, rows...)
 		}
@@ -272,7 +272,7 @@ func (s *Service) buildSet(ctx context.Context, spec runtime.Spec) (resource.Set
 		if set.Models[i].ProviderID != set.Models[j].ProviderID {
 			return set.Models[i].ProviderID < set.Models[j].ProviderID
 		}
-		return set.Models[i].ModelID < set.Models[j].ModelID
+		return set.Models[i].Model < set.Models[j].Model
 	})
 
 	// 默认模型必须仍存在于 Set.Models 里，否则忽略并记 problem（模型被删了 → 默认跟着失效）。
@@ -456,10 +456,10 @@ func (s *Service) declaredModels(ctx context.Context) ([]resource.Model, error) 
 	for i := range rows {
 		name := rows[i].Name
 		if name == "" {
-			name = rows[i].ModelID
+			name = rows[i].Model
 		}
 		out = append(out, resource.Model{
-			ID: rows[i].ID, ProviderID: rows[i].ProviderID, ModelID: rows[i].ModelID, Name: name,
+			ID: rows[i].ID, ProviderID: rows[i].ProviderID, Model: rows[i].Model, Name: name,
 			// **总是带值**（默认 `["text"]`）：adapter 据此总是写底座声明里的 `input`，
 			// 于是"默认 text"是明确值而不是"没设"（ADR-12）。
 			InputModalities: resource.ModalitiesFromColumn(rows[i].InputModalities),
@@ -503,7 +503,7 @@ func setFingerprint(set resource.Set) string {
 	for _, m := range set.Models {
 		// 模态并进指纹：它改变交付字节（dsh 的 `models[].input`），所以它变了代际必须翻——
 		// 否则用户改了"能不能收图"、界面说保存成功，而"下一轮生效"这件事不可观测。
-		write("M", m.ID, m.ProviderID, m.ModelID, m.Name, strings.Join(m.InputModalities, ","))
+		write("M", m.ID, m.ProviderID, m.Model, m.Name, strings.Join(m.InputModalities, ","))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -686,12 +686,12 @@ func missingDeclaredModelsFor(ctx context.Context, s *Service, runtimeID string,
 	}
 	out := []string{}
 	for i := range declared {
-		v, verr := modelValueFor(s.reg, runtimeID, declared[i].ProviderID, declared[i].ModelID)
+		v, verr := modelValueFor(s.reg, runtimeID, declared[i].ProviderID, declared[i].Model)
 		if verr != nil || v == "" {
 			continue
 		}
 		if !have[v] {
-			out = append(out, declared[i].ProviderID+"/"+declared[i].ModelID)
+			out = append(out, declared[i].ProviderID+"/"+declared[i].Model)
 		}
 	}
 	sort.Strings(out)

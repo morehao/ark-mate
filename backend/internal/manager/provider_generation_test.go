@@ -31,7 +31,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	}
 	// v19：注入哪条档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
 	if _, err := r.svc.CreateModel(ctx, dtomodel.ModelCreateReq{
-		ProviderID: "p1", ModelID: "m-1", IsDefault: ptrOf(true),
+		ProviderID: "p1", Model: "m-1", IsDefault: ptrOf(true),
 	}); err != nil {
 		t.Fatalf("建默认模型: %v", err)
 	}

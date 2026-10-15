@@ -43,9 +43,10 @@ type goldenFixtureProvider struct {
 type goldenFixtureModel struct {
 	ID         string // 平台模型 id
 	ProviderID string
-	ModelID    string
-	Name       string
-	Default    bool
+	// Model 发给上游的模型名（v24 起这一列叫 `model`；这里跟到平台词，v11 的 `ModelID` 是历史词）。
+	Model   string
+	Name    string
+	Default bool
 	// Modalities 输入模态（nil = 默认 `[text]`）。夹具里**两类都要有**，否则 B2 的两种形态
 	// 只被覆盖到一种——而"显式 text 覆盖了 catalog"与"用户勾了图片"是两件必须分别可见的事。
 	Modalities []string
@@ -60,13 +61,13 @@ var (
 		{ID: "zeta", Name: "Zeta 直连", Type: "deepseek", BaseURL: "https://zeta.example.com/v1"},
 	}
 	goldenFixtureModels = []goldenFixtureModel{
-		{ID: "m-alpha-1", ProviderID: "alpha-gw", ModelID: "gpt-4o-mini", Name: "小模型·中文",
+		{ID: "m-alpha-1", ProviderID: "alpha-gw", Model: "gpt-4o-mini", Name: "小模型·中文",
 			Modalities: []string{"text", "image"}},
-		{ID: "m-alpha-2", ProviderID: "alpha-gw", ModelID: "gpt-4o", Name: `大模型 "A" \ 备用`},
-		{ID: "m-beta-1", ProviderID: "beta.gw", ModelID: "qwen:7b", Name: "qwen #7b", Default: true},
-		{ID: "m-beta-2", ProviderID: "beta.gw", ModelID: "llama/3-8b", Name: ""},
-		{ID: "m-zeta-1", ProviderID: "zeta", ModelID: "deepseek-chat", Name: "DeepSeek 对话"},
-		{ID: "m-zeta-2", ProviderID: "zeta", ModelID: "deepseek-reasoner", Name: "推理\t模型"},
+		{ID: "m-alpha-2", ProviderID: "alpha-gw", Model: "gpt-4o", Name: `大模型 "A" \ 备用`},
+		{ID: "m-beta-1", ProviderID: "beta.gw", Model: "qwen:7b", Name: "qwen #7b", Default: true},
+		{ID: "m-beta-2", ProviderID: "beta.gw", Model: "llama/3-8b", Name: ""},
+		{ID: "m-zeta-1", ProviderID: "zeta", Model: "deepseek-chat", Name: "DeepSeek 对话"},
+		{ID: "m-zeta-2", ProviderID: "zeta", Model: "deepseek-reasoner", Name: "推理\t模型"},
 	}
 )
 
@@ -74,8 +75,8 @@ const goldenFixtureDefaultModel = "m-beta-1"
 
 // v11FixtureInputs 把夹具翻译成冻结 v11 生成器的输入。
 //
-// 模型按 `ModelID` 排序——这是 v11 的 `collectRuntimeConfigInput` 的真实输入形态（它会对模型做一次
-// 全局 `ModelID` 升序），也是 v12 逐 route 过滤后的数组顺序。**不排就会让数组顺序变**，那属于 A 部分。
+// 模型按**上游模型名**排序——这是 v11 的 `collectRuntimeConfigInput` 的真实输入形态（它会对模型做一次
+// 全局上游名升序），也是 v12 逐 route 过滤后的数组顺序。**不排就会让数组顺序变**，那属于 A 部分。
 //
 // `compat` 是 v11 独有、v12 没有出口的字段（设计 §载体差异的「未迁移字段」清单），所以它由调用方
 // 显式给出（主 golden 传 nil）；不给参数就不动全局夹具，避免用例之间互相污染。
@@ -83,7 +84,7 @@ func v11FixtureInputs(compat map[string]map[string]any) ([]v11Model, map[string]
 	models := make([]v11Model, 0, len(goldenFixtureModels))
 	for _, m := range goldenFixtureModels {
 		models = append(models, v11Model{
-			ModelID:    m.ModelID,
+			ModelID:    m.Model,
 			Name:       m.Name,
 			ProviderID: m.ProviderID,
 			IsDefault:  m.Default,
@@ -120,7 +121,7 @@ func goldenSet() resource.Set {
 	models := make([]resource.Model, 0, len(goldenFixtureModels))
 	for _, m := range goldenFixtureModels {
 		models = append(models, resource.Model{
-			ID: m.ID, ProviderID: m.ProviderID, ModelID: m.ModelID, Name: m.Name,
+			ID: m.ID, ProviderID: m.ProviderID, Model: m.Model, Name: m.Name,
 			// 端口契约是"总是带值"：nil 也要显式给 `[text]`（与编排层的行为一致）。
 			InputModalities: goldenModalities(m),
 		})
@@ -383,10 +384,10 @@ func insertGoldenModelInputs(t *testing.T, text string) string {
 	return strings.Join(out, "\n")
 }
 
-// modalitiesOfUpstream 上游模型 id → 夹具里那条模型声明的模态（找不到就按默认 `[text]`）。
-func modalitiesOfUpstream(modelID string) []string {
+// modalitiesOfUpstream 上游模型名 → 夹具里那条模型声明的模态（找不到就按默认 `[text]`）。
+func modalitiesOfUpstream(upstream string) []string {
 	for _, m := range goldenFixtureModels {
-		if m.ModelID == modelID {
+		if m.Model == upstream {
 			return goldenModalities(m)
 		}
 	}

@@ -31,7 +31,7 @@ type ModelValueAdapter interface {
 	//
 	// 返回错误 = 该形状无法表示这一条（例如底座要求的分隔符恰好出现在 id 里）。内核据此把这条
 	// 声明当作"不可交付"如实上报，而不是塞一个它自己都不认识的值下去。
-	Value(providerID, modelID string) (string, error)
+	Value(providerID, model string) (string, error)
 }
 
 // RegisterModelValue 登记某 runtime 的模型值生成实现（同 ID 后注册覆盖）。

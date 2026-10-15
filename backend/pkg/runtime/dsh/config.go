@@ -310,7 +310,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 		// 目标行 `id: acp`：平台会话真正消费"当前选中"的那一行（实测：只改它 currentValue 就变；
 		// 只改 agent-default-model 则不变）。
 		b = append(b, []byte("- id: acp\n  config:\n")...)
-		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(m.ProviderID), yamlQuote(m.ModelID))...)
+		b = append(b, fmt.Sprintf("    provider: %s\n    model: %s\n", yamlQuote(m.ProviderID), yamlQuote(m.Model))...)
 	}
 
 	// 路由声明：按 route 分组（`llm-pi-ai` 的 `providers.<route>.models[]` 是**整体替换**语义，
@@ -347,7 +347,7 @@ func buildPatch(set resource.Set) ([]byte, error) {
 				if m.ProviderID != route {
 					continue
 				}
-				b = append(b, fmt.Sprintf("          - id: %s\n", yamlQuote(m.ModelID))...)
+				b = append(b, fmt.Sprintf("          - id: %s\n", yamlQuote(m.Model))...)
 				if m.Name != "" {
 					b = append(b, fmt.Sprintf("            name: %s\n", yamlQuote(m.Name))...)
 				}
@@ -374,19 +374,19 @@ func buildPatch(set resource.Set) ([]byte, error) {
 	return b, nil
 }
 
-// sortedModels 把模型按 `(ProviderID, ModelID)` 排序后返回。
+// sortedModels 把模型按 `(ProviderID, Model)` 排序后返回。
 //
 // 为什么要防御性排序：dsh 的 `models[]` 是**数组**（顺序进字节），逐字节 golden 要求"同输入同字节"。
-// 编排层虽然已经按 `(ProviderID, ModelID)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
-// 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的 `ModelID` 升序
-// （v11 的输入就是按 `ModelID` 全局排序的），等价性因此成立。
+// 编排层虽然已经按 `(ProviderID, Model)` 固定顺序（`pkg/resource.Set` 的契约），但这里再排一次
+// 让"顺序"这件事不依赖调用方的记性；且该序在**逐 route 过滤后**恰好是 v11 的上游模型名升序
+// （v11 的输入就是按上游模型名全局排序的），等价性因此成立。
 func sortedModels(in []resource.Model) []resource.Model {
 	out := append([]resource.Model(nil), in...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ProviderID != out[j].ProviderID {
 			return out[i].ProviderID < out[j].ProviderID
 		}
-		return out[i].ModelID < out[j].ModelID
+		return out[i].Model < out[j].Model
 	})
 	return out
 }

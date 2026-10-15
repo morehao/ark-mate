@@ -319,7 +319,7 @@ export const consoleStyleSheet = `
   .fg-diffnote { font-size: 12px; line-height: 1.6; color: ${tokens.textPlaceholder}; }
   .fg-diffnote-inline { margin-left: 6px; color: ${tokens.primary}; cursor: help; }
 
-  /* 差集列表：逐条给出 model_id + 严重度 + 一句可执行的说明。 */
+  /* 差集列表：逐条给出上游模型名 + 严重度 + 一句可执行的说明。 */
   .fg-difflist { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.7; }
   .fg-difflist li { display: flex; gap: 8px; align-items: baseline; }
   .fg-sev { flex: none; font-size: 11px; padding: 0 6px; border-radius: ${tokens.radiusSm}; }

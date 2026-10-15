@@ -191,11 +191,11 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 
 	// 三个供应商（id 升序 p1 < p2 < p3），每个下面按**平台 id 逆序**插入若干条。
 	rows := []store.ModelColumns{
-		{ID: "zzz", ProviderID: "p1", ModelID: "m-a", Name: "A", InputModalities: "text"},
-		{ID: "mmm", ProviderID: "p1", ModelID: "m-b", Name: "B", InputModalities: "text"},
-		{ID: "aaa", ProviderID: "p1", ModelID: "m-c", Name: "C", InputModalities: "text"},
-		{ID: "yyy", ProviderID: "p2", ModelID: "m-0", Name: "0", InputModalities: "text"},
-		{ID: "bbb", ProviderID: "p3", ModelID: "m-z", Name: "Z", InputModalities: "text"},
+		{ID: "zzz", ProviderID: "p1", Model: "m-a", Name: "A", InputModalities: "text"},
+		{ID: "mmm", ProviderID: "p1", Model: "m-b", Name: "B", InputModalities: "text"},
+		{ID: "aaa", ProviderID: "p1", Model: "m-c", Name: "C", InputModalities: "text"},
+		{ID: "yyy", ProviderID: "p2", Model: "m-0", Name: "0", InputModalities: "text"},
+		{ID: "bbb", ProviderID: "p3", Model: "m-z", Name: "Z", InputModalities: "text"},
 	}
 	for _, row := range rows {
 		if ok, err := r.svc.st.CreateModelDefinition(ctx, row, "rest"); err != nil || !ok {
@@ -212,7 +212,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 		t.Fatalf("条数不符: got %d want %d", len(got), len(want))
 	}
 	for i := range want {
-		if pair := got[i].ProviderID + "/" + got[i].ModelID; pair != want[i] {
+		if pair := got[i].ProviderID + "/" + got[i].Model; pair != want[i] {
 			t.Fatalf("第 %d 条顺序不符：got %s，want %s（完整：%v）", i, pair, want[i], modelPairs(got))
 		}
 	}
@@ -220,7 +220,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 	for i := 1; i < len(got); i++ {
 		prev, cur := got[i-1], got[i]
 		if prev.ProviderID > cur.ProviderID ||
-			(prev.ProviderID == cur.ProviderID && prev.ModelID > cur.ModelID) {
+			(prev.ProviderID == cur.ProviderID && prev.Model > cur.Model) {
 			t.Fatalf("顺序不是 (provider_id, model_id) 升序：%v", modelPairs(got))
 		}
 	}
@@ -234,7 +234,7 @@ func TestModelListOrderIsProviderThenModelID(t *testing.T) {
 func modelPairs(list []dtomodel.ModelResp) []string {
 	out := make([]string, 0, len(list))
 	for i := range list {
-		out = append(out, list[i].ProviderID+"/"+list[i].ModelID)
+		out = append(out, list[i].ProviderID+"/"+list[i].Model)
 	}
 	return out
 }

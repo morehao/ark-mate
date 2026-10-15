@@ -60,8 +60,8 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	if err := rejectRuntimeField(req.Runtime); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.ModelID) == "" {
-		return nil, acl.NewError(acl.ClassRequest, "invalid_param", "model_id 必填", nil)
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, acl.NewError(acl.ClassRequest, "invalid_param", "model 必填（发给上游的模型名）", nil)
 	}
 	if err := s.requireProvider(ctx, req.ProviderID); err != nil {
 		return nil, err
@@ -72,14 +72,14 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	}
 	id := objid.New(objid.Model)
 	ok, err := s.st.CreateModelDefinition(ctx, store.ModelColumns{
-		ID: id, ProviderID: req.ProviderID, ModelID: strings.TrimSpace(req.ModelID),
+		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 	}, definitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, modelExistsErr(req.ProviderID, req.ModelID)
+		return nil, modelExistsErr(req.ProviderID, req.Model)
 	}
 	if derefBool(req.IsDefault) {
 		if err := s.st.SetDefaultModelID(ctx, id); err != nil {
@@ -226,7 +226,7 @@ func (s *Service) DefaultModelValueFor(ctx context.Context, runtimeID string) (s
 	if err != nil || !ok {
 		return "", err
 	}
-	v, verr := modelValueFor(s.reg, runtimeID, row.ProviderID, row.ModelID)
+	v, verr := modelValueFor(s.reg, runtimeID, row.ProviderID, row.Model)
 	if verr != nil {
 		// 该 runtime 没有声明模型值形态 = **它不消费平台默认模型**（不是失败）：
 		// 回空串表示"不下发"，与会话侧"没有默认"逐字同一形态。
@@ -263,13 +263,16 @@ func (s *Service) defaultModelRow(ctx context.Context) (*model.ModelEntity, bool
 //
 // `ok=false`（该 id 没有登记实现）= 这个底座不消费平台的模型清单，**不是失败**；调用方按语义
 // 选"回空串（不下发）"或"跳过这条"，所以这里返回的是可判别的错误而不是一个空值。
-func modelValueFor(reg *runtime.Registry, runtimeID, providerID, modelID string) (string, error) {
+//
+// 入参名 v24 从 `modelID` 改成 `model`：它接的是**上游模型名**（`models.model`），不是任何一行的
+// id——改名之前这个名字让"这一列到底是不是 id"要靠读注释才知道。
+func modelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (string, error) {
 	a, ok := reg.ModelValue(runtimeID)
 	if !ok {
 		return "", acl.NewError(acl.ClassUnsupported, "model_value_unsupported",
 			fmt.Sprintf("runtime %q 的模型值形态未声明：平台不为未知底座猜模型值的形状", runtimeID), nil)
 	}
-	return a.Value(providerID, modelID)
+	return a.Value(providerID, model)
 }
 
 // ——— 内部工具 ———
@@ -298,7 +301,7 @@ func normalizeInputModalities(in *[]string) (string, error) {
 // （设计 P2 / 现象：整页 500）在结构上消失了。
 func modelRespFromRow(row *model.ModelEntity) dtomodel.ModelResp {
 	out := dtomodel.ModelResp{
-		ID: row.ID, ProviderID: row.ProviderID, ModelID: row.ModelID,
+		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model,
 		Name: row.Name, Note: row.Note,
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),
 		Revision:        row.Revision,
@@ -433,7 +436,7 @@ func (s *Service) defaultModelByRuntime(ctx context.Context) map[string]string {
 	}
 	out := map[string]string{}
 	for _, spec := range s.reg.List() {
-		out[spec.ID] = row.ModelID
+		out[spec.ID] = row.Model
 	}
 	return out
 }

@@ -11,9 +11,11 @@ type ModelResp struct {
 	ID string `json:"id"`
 	// ProviderID 挂靠的供应商 id。
 	ProviderID string `json:"provider_id"`
-	// ModelID 发给上游的模型 id（**不是**运行时给的不透明 value，也不是平台 id）。
-	ModelID string `json:"model_id"`
-	// Name 展示名（可选；空 = 前端回落显示 ModelID）。
+	// Model 发给上游的模型名（**不是**运行时给的不透明 value，也不是平台 id）——线上键名就叫
+	// `model`（v24 从 `model_id` 改名）。它**不是** `/_id` 家族：那一族一律指"指向某表 `id`"，
+	// 而这一列是外部世界的名字。
+	Model string `json:"model"`
+	// Name 展示名（可选；空 = 前端回落显示 Model）。
 	Name string `json:"name,omitempty"`
 	// Note 备注（不驱动行为）。
 	Note string `json:"note,omitempty"`
@@ -54,7 +56,7 @@ type ModelEffect struct {
 // 而是一个会让人以为模型分底座的陷阱——静默收下就等于承认它有意义。
 type ModelCreateReq struct {
 	ProviderID string  `json:"provider_id" binding:"required"`
-	ModelID    string  `json:"model_id" binding:"required"`
+	Model      string  `json:"model" binding:"required"`
 	Name       *string `json:"name"`
 	Note       *string `json:"note"`
 	// InputModalities 输入模态（`["text"]` | `["text","image"]`）；nil = 默认 `["text"]`。

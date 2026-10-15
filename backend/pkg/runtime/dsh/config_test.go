@@ -31,8 +31,8 @@ func testSet(docPath string) resource.Set {
 				APIKey: "sk-fixture", Ref: resource.RefFor(DefaultRefPattern, "gw")},
 		},
 		Models: []resource.Model{
-			{ID: "m1", ProviderID: "gw", ModelID: "gpt-4o-mini", Name: "小模型"},
-			{ID: "m2", ProviderID: "gw", ModelID: "gpt-4o", Name: "大模型"},
+			{ID: "m1", ProviderID: "gw", Model: "gpt-4o-mini", Name: "小模型"},
+			{ID: "m2", ProviderID: "gw", Model: "gpt-4o", Name: "大模型"},
 		},
 		DefaultModel:      "m2",
 		CredentialDocPath: docPath,

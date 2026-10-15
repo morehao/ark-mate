@@ -139,12 +139,12 @@ type ModelValue struct{}
 //
 // 返回错误的那个分支在这里是**可达的**（分隔符出现在 id 里就编不出来）——它不是装饰：端口契约
 // 要求"编不出来"必须如实交出去，而不是静默拼出一个含歧义的串。
-func (ModelValue) Value(providerID, modelID string) (string, error) {
-	if strings.ContainsAny(providerID+modelID, "/") {
+func (ModelValue) Value(providerID, model string) (string, error) {
+	if strings.ContainsAny(providerID+model, "/") {
 		return "", fmt.Errorf("合成底座的值形态用 %q 作分隔符，而 provider=%q model=%q 里就有它："+
-			"这一条无法无歧义地表示", "/", providerID, modelID)
+			"这一条无法无歧义地表示", "/", providerID, model)
 	}
-	return providerID + "/" + modelID, nil
+	return providerID + "/" + model, nil
 }
 
 // NativePermission 合成底座的原生权限投影（结构化满足 `runtime.NativePermissionAdapter`）。

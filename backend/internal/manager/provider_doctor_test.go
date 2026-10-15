@@ -247,7 +247,7 @@ func TestProviderDoctorHighRisk(t *testing.T) {
 	//    这正是"写了完全没生效"的形态 → 高危。
 	m := r.createModel(t, "p1", "m-1")
 	// 运行时目录里的取值是**不透明串**，由平台的同一份生成规则折出来（v12 起清单行不再回带它）。
-	value, err := modelValueFor(r.svc.reg, runtimetest.ID, m.ProviderID, m.ModelID)
+	value, err := modelValueFor(r.svc.reg, runtimetest.ID, m.ProviderID, m.Model)
 	if err != nil {
 		t.Fatal(err)
 	}
