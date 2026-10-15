@@ -536,7 +536,45 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    "从最早受影响的轮起重重建尾部"，风险表 R4）；③ `messages.tool_details_json` 现在**恒为 `[]`**、
 >    `events_json` 只装该行自己的 `session.message` 增量（列刻意留着，读模型的行形状不随版本跳变；
 >    真正的工具面在事件流里）；④ `mate doctor --rebuild-read-models` 会跑迁移（`store.Open` 自动迁移）——
->    用户跑这条命令的典型时机正是"刚升级完、还没起 serve"，所以这里是特性而不是意外。
+>>   用户跑这条命令的典型时机正是"刚升级完、还没起 serve"，所以这里是特性而不是意外。
+
+> **决策变更 v24（provider/model 的「身份与命名空间」收口：路由键隔离 + 容量声明 + 会话引用改平台 id，2026-10-15）**：
+> 设计全文见 `.dsh/docs/specs/2026-10-15-provider-model-identity-design.md`，执行计划见
+> `.dsh/docs/plans/2026-10-15-provider-model-identity-plan.md`。触发是用户两问——「provider 的主键 id 使用
+> 底层 runtime 的值，db 层不该有自己的主键 id 吗」「`models` 中 `id` 和 `model_id` 两个字段也很有歧义」。
+> 两点都是对的，但**根因不是"缺代理键"**：`providers.id` 本来就是**用户自己起的 slug**（`pkg/object/objid`
+> 早已把"provider 刻意不铸造 id"登记成判据），真正发生的是**同一个字符串被用进了底座的命名空间**。
+> 于是三次收口，各自一个迁移版本、一次原子提交、独立可回滚（`backup: "v24"/"v25"/"v26"`）：
+> ① **命名收口（v24，零行为变化）**：`models.model_id` → `models.model`。`model_id` 在本仓一词三义
+>    （"发给上游的模型名" / `models.id` / `sessions.model_id`），而 `model` 是生态标准词（OpenAI 请求体
+>    `{"model": …}`、QwenWork `byok_custom_models.model` 自注"上游真实模型名"）。此后 `_id` 一律指
+>    "指向某表 `id`"。**判据就是"别的什么都不变"**：`git diff testdata/` 为空。
+> ② **路由键隔离 + 容量声明（v25）**：交给 dsh 的每个路由键带平台保留前缀 `mate-`
+>    （`pkg/runtime/dsh/route_key.go` 是唯一派生点；`config.go` 两处 + `model_value.go` 一处必须同源，
+>    只改一处就是"所有选了模型的会话立刻起不来"），`displayName` 交付**供应商展示名**（空则回落路由键）。
+>    为什么必须隔离：`providers` 的 dict 键**就是交付面**——命中 pi-ai 已装 provider 时，那一家的端点/
+>    协议/展示名/模型目录会变成这条路由的**逐字段默认值**，"平台配了 A、实际按 A 的目录解析出 B"静默发生。
+>    连带一行：隔离后容量不再能从底座内置目录继承，于是 `models` 补 `max_input_tokens`/`max_output_tokens`
+>    （**可空、无 DEFAULT**——0 当不了"未声明"的哨兵，底座 schema 是 `min(1)`；空 = 不下发该字段）。
+> ③ **会话模型引用改平台行 id（v26，定案「辰」）**：`sessions.model_id` **列名保留、语义改**为
+>    "指向 `models.id`"（`mdl_…`）；运行时的不透明值**不落库、不过 wire**，由 adapter 每次现算
+>    （`resolveSessionModel` 是唯一解析点）。`sessions.provider_id` 出列（v19 之后它没有任何写入点、
+>    线上恒空；供应商由**模型行**给出）。目录候选加 `model_id` 注解（指向平台哪一行；空 = 平台未声明 ⇒
+>    不可选），这样"选运行时值、提交平台 id"一次取数就能做到。
+> ④ **机器判据 8 条**（守卫⑤ + ①②③④ + ⑥⑦⑧，`internal/archtest` 69 → 77 条）：命名三面 + 一反向、
+>    路由键前缀、`displayName` 来源、派生单点（静态 + 动态两半）、容量列可空无默认、会话写入点必须经解析、
+>    `sessions.provider_id` 零残留、对不上清单必须**显式拒**。
+> ⑤ **代价（如实写，别当成 bug）**：① **升级后原先靠"路由名恰好命中内置目录"拿到的容量不再生效**
+>    （未声明 = 用底座那句自注 "a guess by construction" 的默认值，界面上如实标"容量由环境兜底"）；
+>    ② `/models` 的键名 `model_id`→`model`、`POST/PATCH /sessions` 的 `model` 从"运行时目录的不透明值"
+>    变成 `mdl_…`（**破坏性 wire 变更**，与 v15 同档）；③ **模型从未被平台声明过的会话，升级后失去模型
+>    选择**——存量回填（`meta.sessions_model_ref_backfill` 标记 + 启动时 `backfillSessionModelRefs`）只认
+>    **唯一命中**，零命中/多命中一律置空并计数（"算不出来"绝不打勾：打勾会把一次失败固化成事实）。
+>    真要让那些会话活下来，出路是**先声明模型再升级**；④ 旧二进制对 v24/v25/v26 库**拒绝启动**，
+>    回退靠 `backups/<db>.bak-vNN-<ts>` + `git revert`（三步彼此独立，不存在"回滚一半"的中间态）。
+> ⑥ **刻意不做**：不加 provider 代理键（`prv_<ULID>`）、不做 `legacy_key`/`migrated_from` 改名能力、
+>    不做 provider 级容量默认、不给 `models.model` 加别名或唯一约束、不解析运行时的不透明值
+>    （比较只走"派生值对派生值"）。
 
 ## 0. 为什么参考 codeg
 
