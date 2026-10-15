@@ -49,18 +49,31 @@ func (d *MessageDao) WithTx(tx *gorm.DB) *MessageDao {
 	return &MessageDao{Dao: d.Dao.WithTx(tx)}
 }
 
-// ReplaceRunMessages 单事务替换某一轮的 messages（先按 run_id 删后插）。
-// 可重复调用：保证「从 events 重建」幂等。
-func (d *MessageDao) ReplaceRunMessages(ctx context.Context, msgs model.MessageEntityList) error {
-	if len(msgs) == 0 {
-		return nil
-	}
+// ReplaceSessionMessages 单事务替换**整个会话**的 messages（先按 session_id 删后插）。
+//
+// 生产上的唯一写路径（`manager` 的整会话重建，E4）：可重复调用 ⇒ "从 events 重建"幂等。
+// 空批次**也要删**（不是 no-op）：一个会话在当前白名单下可能一行都不产出（例如只有思考与
+// 工具步骤），那时"重建成功"必须意味着"库里没有该会话的旧行"，否则上一代的幽灵消息会留下。
+func (d *MessageDao) ReplaceSessionMessages(ctx context.Context, sessionID string, msgs model.MessageEntityList) error {
 	return d.DB(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("run_id = ?", msgs[0].RunID).Delete(&model.MessageEntity{}).Error; err != nil {
+		if err := tx.Where("session_id = ?", sessionID).Delete(&model.MessageEntity{}).Error; err != nil {
 			return err
+		}
+		if len(msgs) == 0 {
+			return nil
 		}
 		return tx.Create(&msgs).Error
 	})
+}
+
+// InsertMessages 裸批量插入（**只给测试直插**：生产的写路径只有 `ReplaceSessionMessages`，
+// 它同时负责"整会话先删"这条不变量）。`ordinal` 由调用方给——`UNIQUE(session_id, ordinal)`
+// 会咬住重号，这正是不变量该有的样子。
+func (d *MessageDao) InsertMessages(ctx context.Context, msgs model.MessageEntityList) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	return d.DB(ctx).Create(&msgs).Error
 }
 
 // List 列出某会话全部消息行（seq 升序，同 seq 按自增 id 升序）。

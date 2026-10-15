@@ -25,6 +25,7 @@ import (
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"github.com/morehao/ark-mate/pkg/credentials"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -148,6 +149,35 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 	t.Cleanup(orch.Close)
 
 	return &rig{Svc: svc, Orch: orch, Bus: bus, St: st}
+}
+
+// beginRun 复刻 `Orchestrator.Prompt` 的**开轮三连**（v22，设计 §D2）：
+// 发布 `run.started` → 落 running 行 → 发布用户消息。
+//
+// 为什么直发事件的用例必须用它：`runs` 收口的窗口起点**由开轮行给出**（`first_seq`），没有那
+// 一行就没有窗口——终态事件到达时物化只会打一条 WARN 然后跳过。走 `Prompt` 要真起 runtime，
+// 所以这里把三连按 Prompt 里的顺序原样复刻一份（顺序本身就是契约：开轮行要写 first_seq，
+// 而 first_seq 就是 `run.started` 的位次）。
+func beginRun(t *testing.T, svc *Service, sessionID, text string) (runID string, started, user eventbus.Event) {
+	t.Helper()
+	runID = objid.New(objid.Run)
+	started = svc.publish(BusRunStarted, sessionID, map[string]any{
+		"session_id": sessionID, "run_id": runID, "runtime": "stub", "text": text,
+	})
+	svc.openRun(sessionID, runID, text, started.Seq)
+	user = svc.publish(BusUserMessage, sessionID, map[string]any{
+		"session_id": sessionID, "runtime": "stub", "text": text,
+	})
+	return runID, started, user
+}
+
+// endRun 发布一个终态事件，载荷与真实路径同形（带该轮身份 `run_id`）。
+func endRun(svc *Service, sessionID, runID, typ string, extra map[string]any) eventbus.Event {
+	payload := map[string]any{"session_id": sessionID, "run_id": runID, "runtime": "stub"}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	return svc.publish(typ, sessionID, payload)
 }
 
 // stubACPSpec 一个**真子进程**的最小 ACP responder（python3），只实现本包测试需要的两个方法：

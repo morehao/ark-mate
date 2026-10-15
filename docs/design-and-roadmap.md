@@ -490,6 +490,54 @@ ACP 内核迁移清单 5.6 / 对齐修正 5.7 / 参照 AionUi 5.8） · §6 Road
 >    `problems` 里如实报，不是静默）；④ 镜像里的陈旧值在用户重填前一直躺着，解析层**拒绝**"库不确认的
 >    managed 命中"，doctor 用 `missingInStore` 报出且**不自动回灌**。
 
+> **决策变更 v21（数据模型 v21：位次回归每会话 + 轮次成为实体 + 消息白名单投影，2026-10-14）**：
+> 设计全文见 `.dsh/docs/specs/2026-10-14-data-model-v21-design.md`。本条**推翻 v17 的「全局位次」半条**
+> （保留 `events.id` 与身份守卫 G2），并顺带拆开另外两处"投影兼职事实"。
+> ① **为什么可以推翻全局位次**：v17 用来支撑全局序的两个消费者（`MAX(seq)` 水位、跨会话回放）
+>    都只服务"让 `PublishAt` 不倒退"这一件事，换成 per-agg 计数之后**跨会话全序今天没有消费者**
+>    （三处落点逐个换宿主）；而保留它的代价是"单会话内的 `seq` 有洞"——用户看到的
+>    「第一条消息的 seq 为什么不是 1」就是它。所以 **`events.seq` = 会话内位次**（0 起、稠密），
+>    取号器拆成 `event_sequence(session_id PK, seq)`，删除 `meta.events_last_seq` 与全局 `idx_events_seq`，
+>    **不新增任何全局序列列**（判据 J2：位次是位次、身份是身份）。
+> ② **`runs` 从终态投影升级为实体**：`run.started` 落库即 INSERT（`id = run_<ULID>`、`status='running'`、
+>    `first_seq` = 该事件的位次、`last_seq = -1` 未收口），终态只 UPDATE，幂等由
+>    `UNIQUE(session_id, first_seq)` 承担（J6：不变量靠约束）。为什么必须补 `run.started` 这条事件：
+>    否则**进行中的轮在事件流里没有痕迹**、`runs` 行也不可从事件重建（破坏 J7）。刻意中断的轮
+>    **永远留在 running**（会话侧记 `interrupted`）——既没成功也没失败，伪终态会污染失败轮列表与
+>    重试入口。
+> ③ **`messages` 改白名单投影**：只有 `session.user_message` / `session.message` 产生行，空正文行
+>    丢弃（与 DSH `deriveEventMessage` 的 `default → null` 同一判据），补 `ordinal`（会话内 1 起、
+>    `UNIQUE(session_id, ordinal)`）与 `kind`（扩展位，当前**恒空串**——J5：不留"以后可能有用"的
+>    半个含义）。终态物化因此改成**整会话重铺**：`ordinal` 是会话内序号，只有整会话重排才保证稠密，
+>    顺带清掉没有归属轮的历史孤儿行；live 路径与重建路径**共用同一段构建代码**（分叉过一次，代价是
+>    "重建之后读模型看起来不一样"）。思考/工具不再进 `messages`——它们本来就没有读模型消费者，
+>    时间线由事件读面渲染。
+> ④ **`inputs` 补会话内位次 `seq`**（`UNIQUE(session_id, seq)`，插入时同一事务取号）：排队顺序从
+>    `created_at, id` 换成 `seq`——"顺序"从此是队列自己的列，不再由时钟与 id 拼出来；
+>    `target_run_id` 降为审计快照（它从来只是内存句柄的 `run_<ULID>`，不是库里的行 id）。
+> ⑤ **一个迁移窗口、三个版本步**（v21 / v22 / v23，各自 `backup: "vNN"`、各自可独立提交与回滚；
+>    不存在"回滚一半"的中间态）。每步末尾把 `meta.read_models_rebuild` 置成该版本号：**口径变了就
+>    重建**，而不写"把旧口径的数搬成新口径"的一次性搬迁代码——重建只有一个实现
+>    （`manager.RebuildSessionReadModels`），消费面两处：启动钩子与 `mate doctor --rebuild-read-models`。
+> ⑥ **`mate doctor` 新增 `read-models` 一段（默认只读）**：孤儿消息（`messages.run_id` 指不到 `runs`）、
+>    空正文行、每会话 `messages.ordinal` 是否 1..N、每会话 `events.seq` 是否 0..N-1、
+>    `messages.events_json` 里的来源类型是否只在白名单内（挡"新事件类型偷偷进 messages"）。
+>    **五条全 0 才 `ok`，任意非 0 即 `fail`**（"事实与声明不符"才影响退出码）；"无法校验"（memory
+>    模式、没有库文件、采集不到）记 warn。`--rebuild-read-models` 是**显式 opt-in 的写动作**——
+>    它是体检报红之后的**出路**，默认路径一个字节都不写（守卫 G7 钉住"只能在开关后面"）。
+> ⑦ **机器判据（新旧六条）**：G1 重写（`events` 三列各司其职、全局序零命中）、G4（`events` 的列白名单
+>    + 不存在只对 `seq` 的 UNIQUE 索引 + 无 `meta.events_last_seq` 读取）、G5（消息白名单投影：
+>    `default` 不开行 + 空正文不产行 + 白名单执行面与声明面同源）、G6（轮次身份是铸造的
+>    `run_<26 位 ULID>` 且 `(session_id, first_seq)` 唯一）、G7（读模型可重建：唯一实现 + 两个消费面
+>    + 写路径只能在开关后面）；冻结事件清单加入 `run.started`（清单 ↔ 前端 `Ev` ↔ README 事件表三处同批）。
+> ⑧ **代价与已知残留（如实写，别当成漏做）**：① 旧二进制对 v21/v22/v23 库**拒绝启动**
+>    （`latestSchemaVersion` 前进），回退只能靠 `backups/<db>.bak-vNN-<ts>` + `git revert`；
+>    ② 整会话重建 messages 在**单会话 > 5k 行**时可能变慢（本版不做增量投影，先按量级验收，超阈值再改
+>    "从最早受影响的轮起重重建尾部"，风险表 R4）；③ `messages.tool_details_json` 现在**恒为 `[]`**、
+>    `events_json` 只装该行自己的 `session.message` 增量（列刻意留着，读模型的行形状不随版本跳变；
+>    真正的工具面在事件流里）；④ `mate doctor --rebuild-read-models` 会跑迁移（`store.Open` 自动迁移）——
+>    用户跑这条命令的典型时机正是"刚升级完、还没起 serve"，所以这里是特性而不是意外。
+
 ## 0. 为什么参考 codeg
 
 codeg（`/Users/morehao/Documents/study/ai-agent/codeg`，Apache-2.0，Rust + Tauri/Next）与 ark-mate 共享同一个

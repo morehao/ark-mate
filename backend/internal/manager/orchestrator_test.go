@@ -45,7 +45,7 @@ func (s *stubSession) Cancel(context.Context) error { return nil }
 
 // feed 收集某聚合最多 want 个 bus 事件（超时 2s 防御）。
 func feed(bus *eventbus.Bus, aggID string, want int) []eventbus.Event {
-	sub := bus.Subscribe(0)
+	sub := bus.SubscribeAfter(nil) // 回放 + live：feed 收集该聚合此后可见的全部事件
 	defer bus.Unsubscribe(sub)
 	var out []eventbus.Event
 	timeout := time.After(2 * time.Second)
@@ -72,12 +72,19 @@ func TestPromptRunEnded(t *testing.T) {
 	if _, err := orch.Prompt(context.Background(), "s1", "hi"); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
-	evts := feed(bus, "s1", 2)
-	if len(evts) < 2 {
-		t.Fatalf("期望 user+run.ended，got %d 事件", len(evts))
+	// v22 起 `Prompt` 的第一条事件是 `run.started`（开轮落行的起点），用户消息紧随其后。
+	evts := feed(bus, "s1", 3)
+	if len(evts) < 3 {
+		t.Fatalf("期望 run.started+user+run.ended，got %d 事件", len(evts))
 	}
-	if evts[0].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunEnded {
+	if evts[0].Type != BusRunStarted || evts[1].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunEnded {
 		t.Fatalf("事件序列不符: %+v", evts)
+	}
+	// 开轮与终态必须报**同一支** run_id：它们指的是同一轮（runs 行的身份在开轮时就定了）。
+	startedID, _ := evts[0].Payload.(map[string]any)["run_id"].(string)
+	endedID, _ := evts[len(evts)-1].Payload.(map[string]any)["run_id"].(string)
+	if startedID == "" || startedID != endedID {
+		t.Fatalf("run.started/run.ended 的 run_id 应同源: started=%q ended=%q", startedID, endedID)
 	}
 	rec, ok := svc.sessions["s1"]
 	if !ok || rec.Status != SessionStatusCompleted {
@@ -117,7 +124,7 @@ func TestCancelRun(t *testing.T) {
 	if err := orch.CancelRun(context.Background(), "s1"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
-	evts := feed(bus, "s1", 2)
+	evts := feed(bus, "s1", 3)
 	if evts[len(evts)-1].Type != BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
@@ -187,8 +194,8 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 	if el := time.Since(start); el > agentCancelTimeout+2*time.Second {
 		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
 	}
-	evts := feed(bus, "s1", 2)
-	if len(evts) < 2 || evts[len(evts)-1].Type != BusRunCancelled {
+	evts := feed(bus, "s1", 3)
+	if len(evts) < 3 || evts[len(evts)-1].Type != BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
 	if svc.sessions["s1"].Status != SessionStatusCancelled {

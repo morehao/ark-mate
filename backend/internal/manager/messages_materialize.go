@@ -10,14 +10,44 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// ——— messages 物化（run 收口，随 materializeRun 同窗口执行） ———
+// ——— messages 物化（**白名单投影**，整会话重建） ———
 //
-// 语义（读模型，从 events 可重建；doc §数据模型/表说明）：
-//   - 一条消息行 = 一个可寻址文本片段：role=user 一行（输入原文）；role=assistant 为一段连续 prose
-//     （BusMessage 增量按 msg_id/时序拼接；msg_id 缺失时同轮连续 prose 合并）。
-//   - 非 prose 事件（thought/tool 交错）不单独成行，进入其归属 assistant 行的事件时间线
-//     （events_json 保留 text/tool/thought 交错序），工具最终态抽到 tool_details_json（按 id 去重）。
-//   - 同一 run 幂等重建：CreateMessages 先删后插（run_id 作用域）。
+// 语义（读模型，从 events 可完整重建；设计 §D3/J5/J7）：
+//
+//   - **白名单**：只有两类事件产出消息行——`session.user_message`（一行 user = 输入原文）与
+//     `session.message`（若干行 assistant = 一段连续 prose，按 `msg_id` 分段）。其余一律
+//     **不产出行**（DSH 的 `default → null`）：thought / tool_* / usage / permission_* /
+//     config_options / run.* / input_* / session.created 都不成行——它们仍在 `events` 里，
+//     时间线由事件读面渲染。"投影"只回答"可检索/可寻址的对话正文有哪几段"；多存一份时间线
+//     等于给同一件事开第二个真相源，而它只会在"投影 vs 事件"不一致时变成噪声。
+//   - **空正文不产行**：拼接结果 `text == ""` 的片段直接丢弃（纯 thought 的一步、失败轮的空
+//     回复）。没有正文的行在检索里永远不命中，在界面上是一个空气泡——它是投影的产物，不是事实。
+//   - **整会话重建**（E4）：一个事务里删掉该会话全部行、按位次重新插入。两个理由：① `ordinal`
+//     是"会话内第几条"，只有整会话重排才能保证 1..N 稠密且唯一；② 幂等不再依赖"同一 run 算出
+//     同一组行"——重放同一份 events 得到内容相同的行（`id` 会重铸，见下）。
+//   - `ordinal` 跨 run 连续（`baseOrdinal` + 行内递增）；`kind` 目前**恒为空串**（扩展位：
+//     "只有将来真要多一种可搜事实时才取值"，J5 一列一义）。
+//
+// 幂等：同一份 events 反复重建得到内容相同的行集合；`messages.id` 每次重铸（它是投影的内部
+// 身份，不出现在任何 wire 契约里——搜索的锚点是 `seq`）。
+
+// messageRowSourceTypes 是 messages 白名单投影的**来源类型集合**（唯一声明处）。
+//
+// 它与 `buildMessageRows` 里那两个 `case` 是同一件事的两种写法：`case` 是执行面（哪些事件成行），
+// 这份列表是**声明面**——`mate doctor` 的 `read-models` 体检拿它判"库里有没有别的事件类型
+// 混进了 messages"（在投影里加一个 `case` 很容易，而它会静默改变读模型的含义：检索会突然
+// 命中思考文本）。两处必须同时改，守卫 G5 钉住这一点。
+var messageRowSourceTypes = []string{BusUserMessage, BusMessage}
+
+// isMessageRowSourceType 判断某个事件类型是否在投影白名单里。
+func isMessageRowSourceType(t string) bool {
+	for _, s := range messageRowSourceTypes {
+		if s == t {
+			return true
+		}
+	}
+	return false
+}
 
 type msgRowBuilder struct {
 	role      string
@@ -26,53 +56,97 @@ type msgRowBuilder struct {
 	seqLo     int64
 	seqHi     int64
 	events    []map[string]any
-	tools     map[string]map[string]any // tool_call_id → 最终态（input/output 合并）
 	createdAt time.Time
 }
 
-// materializeMessages 把一轮窗口事件物化为 messages 行（assistant 文本片段 + 时间线 + 工具最终态）。
-// best-effort：失败仅告警，不影响 events 事实源。
-func (s *Service) materializeMessages(sessionID, runID string, evs []model.EventEntity) {
-	if s.st == nil || len(evs) == 0 {
+// materializeMessages 是 live 路径（run 收口）的 best-effort 包装：失败只 WARN，events 仍是
+// 唯一事实源（下一次重建会把整会话重铺回来）。整会话重铺比"只重铺一轮"重，所以超时给到 5s。
+func (s *Service) materializeMessages(sessionID string) {
+	if s.st == nil {
 		return
 	}
-	rows := buildMessageRows(sessionID, runID, evs)
-	if len(rows) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := s.st.CreateMessages(ctx, rows); err != nil {
-		glog.Warnw(context.Background(), "store: create messages failed", "session", sessionID, "run", runID, "err", err)
+	if err := s.rebuildSessionMessages(ctx, sessionID); err != nil {
+		glog.Warnw(context.Background(), "store: rebuild messages failed", "session", sessionID, "err", err)
 	}
 }
 
-func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.MessageEntity {
+// rebuildSessionMessages 读该会话的事件与 runs，整会话重铺 messages（**能报错**的那一半：
+// 重建通道要把失败报上去；live 路径由 `materializeMessages` 降级成 WARN）。
+func (s *Service) rebuildSessionMessages(ctx context.Context, sessionID string) error {
+	if s.st == nil {
+		return nil
+	}
+	all, err := s.sessionEvents(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	runs, err := s.sessionRuns(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return s.replaceSessionMessages(ctx, sessionID, all, runs)
+}
+
+// replaceSessionMessages 用**已经读好的** events/runs 重铺（重建通道手上有这两份数据，不必再读
+// 一遍；两条路共用同一段构建代码——"运行时"与"重建"分叉过一次，代价是读模型有两套规则）。
+func (s *Service) replaceSessionMessages(ctx context.Context, sessionID string, all []model.EventEntity, runs []model.RunEntity) error {
+	rows := buildSessionMessageRows(sessionID, all, runs)
+	return s.st.ReplaceSessionMessages(ctx, sessionID, rows)
+}
+
+// buildSessionMessageRows 按每个 run 的窗口切片、逐窗构建消息行；`ordinal` 跨窗连续。
+//
+// 进行中的轮（`last_seq = -1`）窗口右端夹到下一轮起点之前（没有下一轮 = 会话末尾）：不夹的话，
+// 一次重启后的重建会把"中断那一轮"之后的事件都算进它。
+func buildSessionMessageRows(sessionID string, all []model.EventEntity, runs []model.RunEntity) []model.MessageEntity {
 	var out []model.MessageEntity
+	for i, r := range runs {
+		hi := r.LastSeq
+		if hi < 0 && i+1 < len(runs) {
+			hi = runs[i+1].FirstSeq - 1
+		}
+		win := eventsInWindow(all, r.FirstSeq, hi)
+		if len(win) == 0 {
+			continue
+		}
+		out = append(out, buildMessageRows(sessionID, r.ID, win, len(out))...)
+	}
+	return out
+}
+
+// buildMessageRows 把**一个窗口**的事件投影成消息行（白名单 + 空正文丢弃 + 序号接续）。
+// `baseOrdinal` = 该窗口之前已经产出的行数（整会话重建时跨轮连续，单窗口重建时给 0）。
+func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdinal int) []model.MessageEntity {
+	var out []model.MessageEntity
+	ordinal := baseOrdinal
 	var cur *msgRowBuilder
+
 	flush := func() {
 		if cur == nil {
 			return
 		}
-		td, err := json.Marshal(toolDetailList(cur.tools))
-		if err != nil {
-			td = []byte("[]")
+		b := cur
+		cur = nil
+		if b.text == "" {
+			// 白名单投影的另一半：**空正文不产行**。纯 thought/工具的一步、失败轮的空回复都落到
+			// 这里——它们没有可检索的正文，落成行只会在界面上留一个空气泡、在"空正文"体检里报一条
+			// 假阳性。事件仍在库里，时间线不缺东西。
+			return
 		}
-		ej, err := json.Marshal(cur.events)
-		if err != nil {
-			ej = []byte("[]")
-		}
-		at := cur.createdAt
+		at := b.createdAt
 		if at.IsZero() {
 			at = time.Now().UTC()
 		}
+		ordinal++
 		out = append(out, model.MessageEntity{
 			ID:        objid.New(objid.Message),
-			SessionID: sessionID, RunID: runID, Role: cur.role, Text: cur.text,
-			EventsJSON: string(ej), ToolDetailsJSON: string(td),
-			SeqLo: cur.seqLo, SeqHi: cur.seqHi, CreatedAt: at,
+			SessionID: sessionID, RunID: runID, Role: b.role, Text: b.text,
+			EventsJSON: mustJSON(b.events), ToolDetailsJSON: "[]",
+			Ordinal: int64(ordinal), Kind: "",
+			SeqLo: b.seqLo, SeqHi: b.seqHi, CreatedAt: at,
 		})
-		cur = nil
 	}
 
 	for _, e := range evs {
@@ -80,88 +154,47 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity) []model.
 		if err := json.Unmarshal([]byte(e.PayloadJSON), &m); err != nil {
 			m = map[string]any{}
 		}
-		evObj := map[string]any{"seq": e.Seq, "type": e.Type, "payload": m}
-
 		switch e.Type {
 		case BusUserMessage:
 			flush()
 			text, _ := m["text"].(string)
+			if text == "" {
+				continue
+			}
+			ordinal++
 			out = append(out, model.MessageEntity{
 				ID:        objid.New(objid.Message),
-				SessionID: sessionID, RunID: runID, Role: "user", Text: text,
-				EventsJSON: mustJSON([]map[string]any{evObj}),
-				SeqLo:      e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
+				SessionID: sessionID, RunID: runID, Role: model.RoleUser, Text: text,
+				EventsJSON:      mustJSON([]map[string]any{{"seq": e.Seq, "type": e.Type, "payload": m}}),
+				ToolDetailsJSON: "[]",
+				Ordinal:         int64(ordinal), Kind: "",
+				SeqLo: e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
 			})
 		case BusMessage:
 			text, _ := m["text"].(string)
 			msgID, _ := m["msg_id"].(string)
 			if cur == nil || (msgID != "" && cur.msgID != "" && msgID != cur.msgID) {
 				flush()
-				cur = &msgRowBuilder{role: "assistant", msgID: msgID, createdAt: e.CreatedAt}
-			} else if cur != nil && cur.msgID == "" && msgID != "" && len(cur.events) > 0 {
-				// 无 msg_id 首段后带出 msg_id → 归属同一 assistant 消息（SDK 补 id 场景）
+				cur = &msgRowBuilder{role: model.RoleAssistant, msgID: msgID, seqLo: -1, seqHi: -1, createdAt: e.CreatedAt}
+			} else if cur.msgID == "" && msgID != "" && len(cur.events) > 0 {
+				// 无 msg_id 的首段之后带出 msg_id → 归属同一 assistant 消息（底座补 id 的场景）。
 				cur.msgID = msgID
 			}
-			if cur.seqLo == 0 {
+			// 初值 -1 而不是 0：v21 起会话第 0 条事件的位次就是 0，用 0 当"还没设过"会让
+			// "本轮首事件恰好在位次 0"被下一次迭代静默改写（seq_lo 指向第二条）。
+			if cur.seqLo < 0 {
 				cur.seqLo = e.Seq
 			}
 			cur.seqHi = e.Seq
 			cur.text += text
-			cur.events = append(cur.events, evObj)
+			cur.events = append(cur.events, map[string]any{"seq": e.Seq, "type": e.Type, "payload": m})
 		default:
-			// thought/tool/usage/terminal：归属当前 assistant 行（无则开一个空文本行承载时间线）。
-			if cur == nil {
-				cur = &msgRowBuilder{role: "assistant", createdAt: e.CreatedAt}
-			}
-			if cur.seqLo == 0 {
-				cur.seqLo = e.Seq
-			}
-			cur.seqHi = e.Seq
-			cur.events = append(cur.events, evObj)
-			if cur.tools == nil {
-				cur.tools = map[string]map[string]any{}
-			}
-			toolDetailsFromEvent(cur.tools, e.Type, m)
+			// 白名单之外的一切（thought/tool_*/usage/permission_*/config_options/run.*/input_*/
+			// session.created…）**不产生消息行**，也不进任何行的正文——时间线由 events 读面渲染。
+			continue
 		}
 	}
 	flush()
-	return out
-}
-
-// toolDetailsFromEvent 把工具事件合入 tool_call_id → 最终态（BusToolCall 记 input，BusToolUpdate 记 output）。
-func toolDetailsFromEvent(tools map[string]map[string]any, typ string, m map[string]any) {
-	id, _ := m["tool_call_id"].(string)
-	if id == "" {
-		return
-	}
-	st, ok := tools[id]
-	if !ok {
-		st = map[string]any{"tool_call_id": id}
-		if k, _ := m["kind"].(string); k != "" {
-			st["kind"] = k
-		}
-		tools[id] = st
-	}
-	switch typ {
-	case BusToolCall:
-		if in, ok := m["input"].(string); ok {
-			st["input"] = in
-		}
-	case BusToolUpdate:
-		if out, ok := m["output"].(string); ok {
-			st["output"] = out
-		}
-		if ok, _ := m["ok"].(bool); ok {
-			st["ok"] = true
-		}
-	}
-}
-
-func toolDetailList(tools map[string]map[string]any) []map[string]any {
-	out := make([]map[string]any, 0, len(tools))
-	for _, st := range tools {
-		out = append(out, st)
-	}
 	return out
 }
 

@@ -24,6 +24,11 @@ type InputEntity struct {
 	// TargetRunID 入队时正在执行的那一轮（审计：用户排在哪一轮后面；不作投递判据——
 	// 那一轮必然先结束，否则队列永远不会被消费）。
 	TargetRunID string `gorm:"column:target_run_id;not null"`
+	// Seq 会话内位次（v22 起；0 起、`UNIQUE(session_id, seq)`，D4）。
+	//
+	// 它取代 `created_at` 成为**队列顺序**的判据：时间戳同刻要靠 id 兜底，而"排第几个"是
+	// 队列本身的语义，不该由两个不相关的列拼出来。`TargetRunID` 从此只是审计快照。
+	Seq int64 `gorm:"column:seq;not null"`
 	// Generation 入队时会话执行代际。投递前比对：不等即作废（旧队列项不得投进
 	// 已重建过底座会话的上下文，见 manager 的 SessionRec.Generation）。
 	Generation int64 `gorm:"column:generation;not null"`

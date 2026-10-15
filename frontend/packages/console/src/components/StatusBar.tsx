@@ -34,7 +34,9 @@ export function StatusBar() {
           ? { color: tokens.error, text: 'WS 断开（自动重连中…）' }
           : { color: tokens.textPlaceholder, text: 'WS 未连接' }
 
-  const seq = activeId ? (views[activeId]?.lastSeq ?? 0) : 0
+  // 位次是**会话内**的（v21）：未 attach 用 0 占位；已 attach 但还没有任何事件是 -1
+  //（0 是合法位次，不能当"没有"）。
+  const seq = activeId ? (views[activeId]?.lastSeq ?? -1) : 0
   const seqText = activeId
     ? `eventbus seq ${seq} · 已 attach ${activeId.length > 16 ? `${activeId.slice(0, 16)}…` : activeId}`
     : `eventbus seq ${seq} · 未 attach 会话（共 ${sessions.length} 个）`

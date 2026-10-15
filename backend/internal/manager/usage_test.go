@@ -32,16 +32,17 @@ func TestUsageSummaryService(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "u2"})
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 100, Size: 1000})
 
-	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第一问"})
+	// 每轮都走开轮三连（v22：轮次是实体，没有开轮行就没有 runs 行可聚合）。
+	runA1, _, _ := beginRun(t, svc, "u1", "第一问")
 	svc.publish(BusMessage, "u1", map[string]any{"text": "答一"})
-	svc.publish(BusRunEnded, "u1", map[string]any{"stop_reason": "end_turn"})
+	endRun(svc, "u1", runA1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
-	svc.publish(BusUserMessage, "u1", map[string]any{"text": "第二问"})
-	svc.publish(BusRunEnded, "u1", map[string]any{"stop_reason": "end_turn"})
+	runA2, _, _ := beginRun(t, svc, "u1", "第二问")
+	endRun(svc, "u1", runA2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
-	svc.publish(BusUserMessage, "u2", map[string]any{"text": "第三问"})
-	svc.publish(BusRunError, "u2", map[string]any{"code": "agent_error", "class": "agent"})
+	runB1, _, _ := beginRun(t, svc, "u2", "第三问")
+	endRun(svc, "u2", runB1, BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
 	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {
@@ -137,7 +138,8 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "c1"})
 	orch.byProvider["native-1"] = "c1"
 
-	sub := bus.Subscribe(0)
+	// live-only：订阅之后才触发 sink，断言的是"这一条新事件"。
+	sub := bus.Subscribe()
 	defer bus.Unsubscribe(sub)
 	sink := orch.eventSink("stub")
 	sink(acl.Event{Kind: acl.KindUsage, SessionID: "native-1",

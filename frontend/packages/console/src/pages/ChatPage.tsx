@@ -288,10 +288,11 @@ export function ChatPage() {
 
   const renderChatHead = () => {
     if (!activeId) return null
-    const seq = view?.lastSeq ?? 0
+    // 位次是会话内的、0 是合法位次（v21）："还没有事件"是 -1，所以判据是 `>= 0`。
+    const seq = view?.lastSeq ?? -1
     const metaText = streaming
       ? '进行中'
-      : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq > 0 ? ` · seq ${seq}` : ''}`
+      : `${activeSum ? statusLabel(activeSum.status) : '未知状态'}${seq >= 0 ? ` · seq ${seq}` : ''}`
     return (
       <div
         style={{

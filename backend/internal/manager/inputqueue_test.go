@@ -121,7 +121,7 @@ func newQueueRig(t *testing.T, sess acpSession, withStore bool) (*Service, *Orch
 }
 
 // busEvents 取当前总线上已发布的事件（含历史；断言用）。
-func busEvents(svc *Service) []eventbus.Event { return svc.bus.EventsAfter(0) }
+func busEvents(svc *Service) []eventbus.Event { return svc.bus.EventsAll() }
 
 // payloadOf 取事件的 map 载荷（域事件载荷恒为 map；非 map 时返回空 map）。
 func payloadOf(ev eventbus.Event) map[string]any {
@@ -489,7 +489,7 @@ func TestQueuedInputsStaledOnRestore(t *testing.T) {
 
 	// 作废必须发 input_cancelled(reason=stale)：前端队列只认事件，只改台账行会让重启后的
 	// 页面留下一条永远投不出、也撤不掉的幻影队列项。
-	evs, _, err := st.EventsAfter(context.Background(), "c1", 0, 100)
+	evs, _, err := st.EventsAfter(context.Background(), "c1", -1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

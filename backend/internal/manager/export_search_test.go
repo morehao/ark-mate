@@ -38,10 +38,12 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
-		// 每行独立 run_id：CreateMessages 按 run_id 先删后插（同一 run 会被覆盖）。
+		// 直插的读模型行：`ordinal` 是**会话内**序号（`UNIQUE(session_id, ordinal)` 会咬重号），
+		// run_id 只是这一行的来源标记（这里没建 runs 行，本用例验的是搜索/导出而非轮次明细）。
 		msgs = append(msgs, model.MessageEntity{ID: objid.New(objid.Message), SessionID: id,
 			RunID: fmt.Sprintf("run-%s-%d", id, i), Role: role,
-			Text: text, SeqLo: seq, SeqHi: seq, CreatedAt: now.Add(time.Duration(i) * time.Second)})
+			Text: text, Ordinal: int64(i) + 1, SeqLo: seq, SeqHi: seq,
+			CreatedAt: now.Add(time.Duration(i) * time.Second)})
 	}
 	if err := st.CreateMessages(ctx, msgs); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
@@ -65,7 +67,9 @@ func TestSearchMessagesSQLite(t *testing.T) {
 		t.Fatalf("命中不符: %+v", resp)
 	}
 	h := resp.Hits[0]
-	if h.SessionID != "c-1" || h.Title != "部署排查" || h.Role != "user" || h.Seq <= 0 {
+	// 锚点判据是 `< 0` 而不是 `<= 0`：v21 起会话第一条消息的 seq 就是 0，"没有锚点"的
+	// 哨兵是 -1（`<= 0` 会把一条正常命中当成缺锚点）。
+	if h.SessionID != "c-1" || h.Title != "部署排查" || h.Role != "user" || h.Seq < 0 {
 		t.Fatalf("命中字段不符: %+v", h)
 	}
 	if !strings.Contains(h.Snippet, "502") {
@@ -125,7 +129,7 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 		t.Fatalf("transcript 命中不符: %+v", resp)
 	}
 	for _, h := range resp.Hits {
-		if h.SessionID != "t-1" || h.Seq <= 0 {
+		if h.SessionID != "t-1" || h.Seq < 0 {
 			t.Fatalf("命中锚点缺失: %+v", h)
 		}
 	}

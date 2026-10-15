@@ -115,7 +115,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event, bool) {
 	if s.st != nil {
 		var out []eventbus.Event
-		after := int64(0)
+		after := int64(-1)
 		for {
 			batch, more, err := s.st.EventsAfter(ctx, id, after, 1000)
 			if err != nil {
@@ -137,12 +137,9 @@ func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event
 		}
 		return out, false
 	}
-	all := s.bus.EventsAfter(0)
+	all := s.bus.EventsAfter(id, -1)
 	out := make([]eventbus.Event, 0, len(all))
 	for _, e := range all {
-		if e.AggregID != id {
-			continue
-		}
 		if len(out) >= maxExportEvents {
 			return out, true
 		}
@@ -252,6 +249,13 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 				fmt.Fprintf(&b, "- %s\n", line)
 			} else {
 				fmt.Fprintf(&b, "· %s\n", line)
+			}
+		case BusRunStarted:
+			// 轮次分节：没有它时两轮之间只有一个"轮次结束"，读起来像同一轮的停顿。
+			if md {
+				fmt.Fprintf(&b, "\n---\n\n*轮次开始*\n\n")
+			} else {
+				fmt.Fprintf(&b, "\n[轮次开始]\n\n")
 			}
 		case BusRunEnded:
 			if md {

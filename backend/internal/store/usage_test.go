@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,11 +10,19 @@ import (
 )
 
 // seedRun 写入一条 run（连带把会话补齐：run 挂在会话上，用量快照也按会话取最后一条）。
+// seedRunSeq 给种子行发**互不相同**的窗口起点。
+//
+// v22 起 `(session_id, first_seq)` 是唯一键，而老夹具一个都不设（全 0）——第二行起会被
+// `ON CONFLICT DO NOTHING` **静默跳过**：看起来"种了 4 行"，库里其实只有 1 行，
+// 而失败信息只会说"计数不符"。这正是这条唯一键要挡的那种静默，夹具必须自己守规矩。
+var seedRunSeq atomic.Int64
+
 func seedRun(t *testing.T, s *Store, runID, sessionID, status string, started, ended time.Time, usageJSON string) {
 	t.Helper()
 	seedCompletedSession(t, s, sessionID)
 	if err := s.CreateRun(ctxT(), model.RunEntity{
 		ID: runID, SessionID: sessionID, Status: status, UsageJSON: usageJSON,
+		FirstSeq: seedRunSeq.Add(1), LastSeq: seedRunSeq.Add(1),
 		StartedAt: started, EndedAt: ended,
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)

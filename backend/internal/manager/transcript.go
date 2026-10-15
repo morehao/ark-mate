@@ -22,7 +22,7 @@ import (
 //
 //	{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"...","agent_id":"...",
 //	 "runtime":"...","cwd":"...","created_at":"..."}
-//	{"id":"evt_...","seq":2,"ts":"...","type":"session.user_message","payload":{...}}
+//	{"id":"evt_...","seq":2,"ts":"...","type":"session.user_message","payload":{...}} // seq = **会话内**位次（v21 起 0 起）
 //
 // **v2 = 事件行多一支 `id`（身份），`seq` 保留（位次）**（2026-10-12，设计
 // `.dsh/docs/specs/2026-10-12-data-model-v17-design.md`）：v1 的 `seq` 在装载时被丢掉、按行号

@@ -9,7 +9,8 @@
  *      并断言 `/runtimes` 与整族 `/agents/*` 都已下线（底座由构建期固定，用户没有选择面）；
  *   2. REST 业务错误仍为 HTTP 200、信封 code!=0（前端 HttpError 读取 code/msg 的契约）；
  *   3. 载荷键形状与 @ark-mate/types 声明一致（`/meta.runtime` 与逐 runtime 可达性）；
- *   4. WS 实时通道帧契约：attach(无 since) → snapshot、ping → pong、detach → detached；
+ *   4. WS 实时通道帧契约：attach(无 since)= 全量回放（空聚合**不发帧**，v21 起不再回 snapshot）、
+ *      ping → pong、detach → detached；
  *   5. 用量视图数据面（C1）：/usage/summary 分组/字段形状 + 非法 group_by 的业务错误
  *      （sqlite 模式）；内存模式按设计 40501 usage_stats_unsupported → 记 PASS 并注明降级。
  *
@@ -329,16 +330,18 @@ async function checkWs() {
       what,
     )
 
-  // attach（无 since_seq）→ snapshot 帧。
+  // attach（无 since_seq）= 从该会话第 0 条起**全量回放**：`e2e-nonexistent` 既没有事件、
+  // 也没有淘汰水位 → 服务端**一帧都不发**（v21 起"无 since"不再是 snapshot；snapshot 现在
+  // 只剩"请求起点早于缓冲淘汰水位"这一条路，见 Go 侧 TestWSHandlerSnapshotFallbackOnEviction）。
+  // 判据用紧随其后的 ping/pong 兜底：attach 与 ping 连发，先到的必须是 pong —— 若服务端回了
+  // event/snapshot，这里的帧序就不是 pong，判据当场红。
   ws.send(JSON.stringify({ action: 'attach', agg_id: 'e2e-nonexistent' }))
-  const snap = await nextFrame('snapshot')
-  // 契约：snapshot 必带 agg_id + state（终态视图，M0 空对象）；event_seq 为水位，omitempty
-  // （bus 尚未有事件时省略 → 视为水位 0）。
-  const seqOk = snap.event_seq === undefined || typeof snap.event_seq === 'number'
-  if (snap.type === 'snapshot' && snap.agg_id === 'e2e-nonexistent' && seqOk && typeof snap.state === 'object') {
-    ok(`attach → snapshot（agg=${snap.agg_id} 水位=${snap.event_seq ?? 0} state=${JSON.stringify(snap.state)}）`)
+  ws.send(JSON.stringify({ action: 'ping' }))
+  const first = await nextFrame('ping/pong（attach 无帧）')
+  if (first.type === 'pong') {
+    ok('attach(无 since)= 全量回放：无事件的聚合不发帧（v21；snapshot 只剩淘汰回退）')
   } else {
-    bad('attach → snapshot', JSON.stringify(snap))
+    bad('attach(无 since) 不应发帧', JSON.stringify(first))
   }
 
   // ping → pong。

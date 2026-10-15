@@ -32,8 +32,13 @@ export const Ev = {
   // payload = {session_id, runtime, commands: CommandInfo[]}；空数组表示"通告了当前没有命令"。
   // 语义边界：这是**发现面**，不是平台声明的能力——执行只是把命令行当普通提示词发出去（ADR-17）。
   Commands: 'session.commands',
-  // —— M2 预留（当前后端不发布；契约见设计文档 §4.5）——
+  // 会话/runtime 连接态（phase/pending_confirmations/can_send）。
   Runtime: 'session.runtime',
+  // 轮次生命周期（v22 起 `run.started` 与三个终态都带 `run_id` = 该轮身份 `run_<ULID>`）。
+  // 前端不把 `run.started` 渲染成条目（界面时间线读的是会话事件流，轮次明细另走
+  // `GET /sessions/:id/runs`），但它在契约里：帧上出现未知 type 时前端只能丢弃，
+  // 而"这一轮开始了"是能对齐 `runs` 行的唯一事实。
+  RunStarted: 'run.started',
   RunEnded: 'run.ended',
   RunError: 'run.error',
   RunCancelled: 'run.cancelled',

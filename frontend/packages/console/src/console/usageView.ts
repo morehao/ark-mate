@@ -138,7 +138,13 @@ export interface RunUsageInfo {
   durationMS: number
 }
 
-/** 从 run 时间戳计算总耗时（ended−started，ms）；未结束/无效 → 0。 */
+/**
+ * 从 run 时间戳计算总耗时（ended−started，ms）；未结束/无效 → 0。
+ *
+ * `ended_at` 缺省有两种来源：**进行中的轮**（v22 起就在 runs 列表里，`last_seq = -1`）与
+ * "行没写终态时间"的老数据。两种都不该显示成 0ms 的"瞬时轮"——调用方（`toRunUsageInfo`）
+ * 在无可展示数据时返回 null，让这一轮根本不进展示行。
+ */
 export function runDurationMS(run: SessionRun): number {
   if (!run?.started_at) return 0
   const s = Date.parse(run.started_at)

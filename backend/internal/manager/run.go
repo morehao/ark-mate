@@ -38,6 +38,15 @@ func (o *Orchestrator) Prompt(ctx context.Context, sessionID, text string) (int6
 	o.markBusy(client, as.ID)
 
 	o.svc.markSession(as.ID, SessionStatusInProgress)
+	// 开轮三连（v22，设计 §D2）：① `run.started` 落库拿到本轮的**起点位次** → ② 开轮行
+	// （`run_<ULID>` 身份与事件载荷同源、`first_seq` = 那个位次）→ ③ 用户消息。
+	//
+	// 顺序不能换：开轮行要写 first_seq，而 first_seq 就是本条事件的位次；用户消息在它之后，
+	// 于是本轮窗口把"用户输入"整个包在里面（窗口起点早于输入，不再需要"轮界裁剪"）。
+	se := o.svc.publish(BusRunStarted, as.ID, map[string]any{
+		"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "text": text,
+	})
+	o.svc.openRun(as.ID, t.id, text, se.Seq)
 	ue := o.svc.publish(BusUserMessage, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "text": text,
 	})
@@ -194,7 +203,9 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 	case userCancel:
 		// 用户取消优先：与停机撞车时，取消是用户意图，不能改写成 interrupted。
 		o.svc.markSession(as.ID, SessionStatusCancelled)
-		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
+		o.svc.publish(BusRunCancelled, as.ID, map[string]any{
+			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
+		})
 		deliverNext = true
 	case intentional:
 		// 主动拆除（daemon 停机 / 显式停 agent）打断的轮次：既不是用户取消也不是失败，
@@ -205,15 +216,17 @@ func (o *Orchestrator) executeRun(as *ActiveSession, t *Run, text string) {
 			"session", as.ID, "runtime", as.Runtime)
 	case cancelled:
 		o.svc.markSession(as.ID, SessionStatusCancelled)
-		o.svc.publish(BusRunCancelled, as.ID, map[string]any{"session_id": as.ID, "stop_reason": stop})
+		o.svc.publish(BusRunCancelled, as.ID, map[string]any{
+			"session_id": as.ID, "run_id": t.id, "stop_reason": stop,
+		})
 		deliverNext = true
 	case err != nil:
 		o.svc.markSession(as.ID, SessionStatusFailed)
-		o.publishError(as.ID, err, client)
+		o.publishError(as.ID, t.id, err, client)
 	default:
 		o.svc.markSession(as.ID, SessionStatusCompleted)
 		o.svc.publish(BusRunEnded, as.ID, map[string]any{
-			"session_id": as.ID, "runtime": as.Runtime, "stop_reason": stop,
+			"session_id": as.ID, "run_id": t.id, "runtime": as.Runtime, "stop_reason": stop,
 		})
 		deliverNext = true
 	}

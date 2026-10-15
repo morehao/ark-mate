@@ -42,7 +42,7 @@ func TestOnDiskFormatContract(t *testing.T) {
 	// 未结束的 run：ended_at 落空串（不是零值时间戳）。
 	if err := s.CreateMessages(ctx, []model.MessageEntity{{
 		ID:        objid.New(objid.Message),
-		SessionID: "c1", RunID: "r1", Role: "user", Text: "hi", SeqLo: 1, SeqHi: 1, CreatedAt: at,
+		SessionID: "c1", RunID: "r1", Role: "user", Text: "hi", Ordinal: 1, SeqLo: 1, SeqHi: 1, CreatedAt: at,
 	}}); err != nil {
 		t.Fatalf("CreateMessages: %v", err)
 	}
@@ -260,7 +260,8 @@ func TestOnDiskFormatContract(t *testing.T) {
 		t.Errorf("未结束的 run，ended_at 应为零值，实际 %s", runs[0].EndedAt)
 	}
 
-	evs, _, err := s.EventsAfter(ctx, "c1", 0, 10)
+	// after=-1：会话第一条事件的位次是 0，用 0 当起点会把它排除在外。
+	evs, _, err := s.EventsAfter(ctx, "c1", -1, 10)
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("EventsAfter: n=%d err=%v", len(evs), err)
 	}
@@ -306,7 +307,14 @@ func TestUpsertForImportKeepsModelSelection(t *testing.T) {
 	if got.Title != "导入标题" {
 		t.Errorf("导入应更新标题，实际 %q", got.Title)
 	}
-	if got.LastSeq == 0 {
-		t.Error("导入后会话水位未推进")
+	// 水位断言不能写 `LastSeq == 0`（v21 起第一条事件的位次就是 0，"没推进"与"推进到 0"同值）：
+	// 改成"该会话确实有 1 条事件，且水位就是那条的位次"。
+	var n, maxSeq int64
+	if err := s.db.Raw(`SELECT COUNT(*), COALESCE(MAX(seq), -1) FROM events WHERE session_id = ?`, "c1").
+		Row().Scan(&n, &maxSeq); err != nil {
+		t.Fatalf("读事件水位: %v", err)
+	}
+	if n != 1 || got.LastSeq != maxSeq {
+		t.Errorf("导入后会话水位应等于该会话最高位次: events=%d last_seq=%d maxSeq=%d", n, got.LastSeq, maxSeq)
 	}
 }

@@ -205,7 +205,7 @@ func TestGenerationMigration(t *testing.T) {
 	if want == as1.Fingerprint {
 		t.Fatal("改了白名单内定义却没换指纹：迁移永远触发不了")
 	}
-	sub := r.bus.Subscribe(0)
+	sub := r.bus.SubscribeAfter(nil) // 回放 + live（drainOne 只等新一代际的 session.resumed）
 	as2 := r.boundary(t, convID)
 	if as2 == as1 {
 		t.Fatal("指纹变化后应在轮次边界换代际")

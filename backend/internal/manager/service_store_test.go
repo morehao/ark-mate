@@ -6,12 +6,29 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
+// sessionMaxSeq 读某会话当前的最高位次。
+//
+// v21 起"号序到哪了"**只能按会话问**（全局水位那行 meta 已删）：所以这里走会话自己的
+// events（`before=-1` = 取末尾一页）而不是某个全局计数。
+func sessionMaxSeq(t *testing.T, st *store.Store, sessionID string) int64 {
+	t.Helper()
+	evs, _, err := st.EventsBefore(context.Background(), sessionID, -1, 1)
+	if err != nil {
+		t.Fatalf("读会话最高位次: %v", err)
+	}
+	if len(evs) == 0 {
+		t.Fatalf("会话 %s 没有任何事件", sessionID)
+	}
+	return evs[0].Seq
+}
+
 // TestSQLiteLivePersistenceAcrossRestart 验证 P1 live 接线核心不变量：
-//  1. publish 落库（events + session.last_seq + 元数据），bus 与 DB 共用同一全局号序；
+//  1. publish 落库（events + session.last_seq + 元数据），bus 与 DB 共用同一套**会话内**位次；
 //  2. markSession/UpdateSession/标题自动推导同步写库；
 //  3. 重启恢复：新 Service + 新 bus 从 DB 载入会话并把事件原样注入（PublishAt），
 //     旧游标可续传；后续新事件 seq 跨重启连续（不重叠、不倒退）。
@@ -42,8 +59,8 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if eMsgSeq != eUser.Seq+1 {
 		t.Fatalf("live seq 应连续: %d %d", eUser.Seq, eMsgSeq)
 	}
-	if got, _ := st1.LastSeq(ctx); got != eMsgSeq {
-		t.Fatalf("DB LastSeq=%d want %d", got, eMsgSeq)
+	if got := sessionMaxSeq(t, st1, "s-live"); got != eMsgSeq {
+		t.Fatalf("DB 会话位次=%d want %d", got, eMsgSeq)
 	}
 	sess1, ok, _ := st1.GetSession(ctx, "s-live")
 	if !ok || sess1.Status != SessionStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
@@ -69,8 +86,8 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	if len(list) != 1 || list[0].Status != SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}
-	// bus 按 DB 号序回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
-	replay := bus2.EventsAfter(eUser.Seq)
+	// bus 按 DB 位次回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
+	replay := bus2.EventsAfter("s-live", eUser.Seq)
 	if len(replay) != 1 || replay[0].Seq != eMsgSeq {
 		t.Fatalf("重启后回放应带 DB 号序: %+v", replay)
 	}
@@ -78,10 +95,10 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc2.publish(BusMessage, "s-live", map[string]any{"text": "继续"})
 	svc2.flushChunks()
 	eNextSeq := eMsgSeq + 1
-	if got, _ := st2.LastSeq(ctx); got != eNextSeq {
+	if got := sessionMaxSeq(t, st2, "s-live"); got != eNextSeq {
 		t.Fatalf("跨重启 seq 应连续: got %d want %d", got, eNextSeq)
 	}
-	evs, more, err := st2.EventsAfter(ctx, "s-live", 0, 10)
+	evs, more, err := st2.EventsAfter(ctx, "s-live", -1, 10)
 	if err != nil || more || len(evs) != 3 {
 		t.Fatalf("DB 事件应 3 条: n=%d more=%v err=%v", len(evs), more, err)
 	}
@@ -90,8 +107,9 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	}
 }
 
-// TestSQLiteRestoreAcrossSessions 恢复注入跨会话也必须全局 seq 升序
-// （防止 PublishAt 遇小号回退取号导致乱序/丢事件）。
+// TestSQLiteRestoreAcrossSessions 恢复注入必须**每个会话各自有序**：
+// v21 起位次只在会话内可比，所以恢复按 `(session_id, seq)` 取（组内升序），
+// 两个会话各自从 0 起。跨会话的相对顺序不承载语义（旧版本要求"全局升序"是因为号是全局的）。
 func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	dbPath := testutil.TempDBPath(t)
 	ctx := context.Background()
@@ -115,20 +133,97 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	if _, _, err := svc2.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	replay := bus2.EventsAfter(0)
+	replay := bus2.EventsAll()
 	if len(replay) != 3 {
 		t.Fatalf("注入应 3 条: %d", len(replay))
 	}
-	for i := 1; i < len(replay); i++ {
-		if replay[i].Seq != replay[i-1].Seq+1 {
-			t.Fatalf("注入非全局升序: %+v", replay)
+	// 组内升序 + 每会话独立从 0 起（s-a 两条 0/1，s-b 一条 0）。
+	byAgg := map[string][]int64{}
+	for _, e := range replay {
+		byAgg[e.AggregID] = append(byAgg[e.AggregID], e.Seq)
+	}
+	for agg, seqs := range byAgg {
+		for i := 1; i < len(seqs); i++ {
+			if seqs[i] != seqs[i-1]+1 {
+				t.Fatalf("聚合 %s 的注入位次不连续: %v", agg, seqs)
+			}
+		}
+		if seqs[0] != 0 {
+			t.Fatalf("聚合 %s 的注入位次应从 0 起: %v", agg, seqs)
 		}
 	}
-	// 新事件接续最大号（③ 合并：先 flush 再查库）。
+	if len(byAgg["s-a"]) != 2 || len(byAgg["s-b"]) != 1 {
+		t.Fatalf("每会话条数不符: %v", byAgg)
+	}
+	// 新事件接续**本会话**最大号（③ 合并：先 flush 再查库）。
 	svc2.publish(BusMessage, "s-a", map[string]any{"i": 3})
 	svc2.flushChunks()
-	wantSeq := replay[len(replay)-1].Seq + 1
-	if got, _ := st2.LastSeq(ctx); got != wantSeq {
-		t.Fatalf("接续号错误: got %d want %d", got, wantSeq)
+	if got, want := sessionMaxSeq(t, st2, "s-a"), int64(2); got != want {
+		t.Fatalf("接续号错误: got %d want %d", got, want)
+	}
+}
+
+// TestRestoreRebuildsStaleReadModels 重启恢复必须**消费**迁移留下的读模型重建标记：
+// 位次口径换了之后，库里那份 `messages`（窗口列按旧全局位次算的）已经不可信。
+//
+// 为什么这条必须有判据：整条链（迁移写标记 → 启动读标记 → 重建 → 清标记）里**任何一段断掉
+// 都是静默的**——库照样能读、界面照样显示，只是每条消息的窗口指向别的轮次事件（正文/时间线
+// 张冠李戴），而没有任何一条别的测试会红。标记若只写不读，甚至不会有任何运行时信号。
+func TestRestoreRebuildsStaleReadModels(t *testing.T) {
+	dbPath := testutil.TempDBPath(t)
+	ctx := context.Background()
+
+	// —— 进程一：跑一轮（用户消息 + 终态），让 runs/messages 由事件物化出来 ——
+	st1 := testutil.OpenStore(t, dbPath)
+	svc1 := NewService(testutil.StubRegistry(), eventbus.New())
+	svc1.EnableStore(st1)
+	svc1.registerSession(&SessionRec{ID: "s-rebuild"})
+	runID, _, _ := beginRun(t, svc1, "s-rebuild", "重建我")
+	endRun(svc1, "s-rebuild", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc1.flushChunks()
+	msgs, err := st1.ListMessages(ctx, "s-rebuild")
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("夹具应先物化出 messages：n=%d err=%v", len(msgs), err)
+	}
+	// 模拟"旧口径留下的读模型"：把窗口列改成一个新口径下不可能出现的值、正文改成哨兵串。
+	// 只改窗口列也够判据，但正文哨兵让失败信息一眼看得出"这份是被改过的旧行"。
+	if err := st1.DB().Exec(`UPDATE messages SET text = 'STALE', seq_lo = 4242, seq_hi = 4242`).Error; err != nil {
+		t.Fatalf("伪造旧读模型: %v", err)
+	}
+	// 迁移会把标记写成刚跑过的版本号（这里手工写，等价于 v21 那一步）。
+	if err := st1.SetMeta(ctx, "read_models_rebuild", "21"); err != nil {
+		t.Fatalf("写重建标记: %v", err)
+	}
+	_ = st1.Close()
+
+	// —— 进程二：重启恢复 ——
+	st2 := testutil.OpenStore(t, dbPath)
+	defer st2.Close()
+	svc2 := NewService(testutil.StubRegistry(), eventbus.New())
+	svc2.EnableStore(st2)
+	if _, _, err := svc2.RestoreFromStore(ctx); err != nil {
+		t.Fatalf("RestoreFromStore: %v", err)
+	}
+
+	rebuilt, err := st2.ListMessages(ctx, "s-rebuild")
+	if err != nil || len(rebuilt) == 0 {
+		t.Fatalf("重建后 messages 不该为空：n=%d err=%v", len(rebuilt), err)
+	}
+	for _, m := range rebuilt {
+		if m.Text == "STALE" {
+			t.Fatalf("旧读模型的行还在（重建没跑）：%+v", m)
+		}
+		if m.SeqLo == 4242 || m.SeqHi == 4242 {
+			t.Fatalf("旧窗口列还在（重建没跑）：%+v", m)
+		}
+		// 新口径的窗口必须落在**会话内位次**区间里（本会话 3 条事件：0=run.started、
+		// 1=user_message、2=run.ended；窗口从 0 起算——它由开轮行给出，不再"裁到用户消息"）。
+		if m.SeqLo < 0 || m.SeqHi > 2 || m.SeqLo > m.SeqHi {
+			t.Fatalf("重建后的窗口不在会话内位次区间内：%+v", m)
+		}
+	}
+	// 标记必须被消费掉（留着它 = 每次启动都白重建一遍，且掩盖"重建其实失败了"这件事）。
+	if v, ok, err := st2.GetMeta(ctx, "read_models_rebuild"); err != nil || ok {
+		t.Fatalf("重建成功后标记应被清掉：ok=%v value=%q err=%v", ok, v, err)
 	}
 }

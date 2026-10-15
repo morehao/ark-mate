@@ -266,3 +266,37 @@ func assertNoBannedWord(t *testing.T, where, text string) {
 		}
 	}
 }
+
+// TestProviderProbeProseAvoidsRuntimeVocabulary A13 的**后端那一半**：设置 · 模型 那一屏渲染的
+// 不只是界面自己的字，还有核心给的自检文案（`GET /providers/:id/check` 的 `detail`/`remedy`，
+// 见 `ModelSettingsPanel.tsx` 里那两个 `<span className="fg-probe-…">`）。A13 判的是**用户读到的
+// 整屏文本**，所以这些串同样在判据里——只扫前端会漏掉这条：前端一个字不改、后端塞一句
+// 「…不会被下发给底座」，面板上照样出现底座词汇（2026-10-14 的动态验收 `面板正文零底座词汇`
+// 命中的就是这一条，当时它只在"某条档案没被挂靠"这一种状态下才渲染出来）。
+//
+// 判据只看**含中文的字面量**：这一屏的用户文案在本仓一律是中文，而 ASCII 字面量是协议键与
+// 依赖路径（`"github.com/…/pkg/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
+// 用户读不到它们，判进来只会逼着守卫加白名单，而白名单是这套守卫最常见的死法。
+// fail-closed：文件读不到、或中文串少到说明提取器/文件已经失效，都当场失败（守卫不许空转）。
+func TestProviderProbeProseAvoidsRuntimeVocabulary(t *testing.T) {
+	path := filepath.Join(backendRoot(t), "internal", "manager", "provider_probe.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（文件被搬走/改名了？本守卫 fail-closed）", path, err)
+	}
+	cjk := regexp.MustCompile(`\p{Han}`)
+	scanned := 0
+	for _, lit := range extractStringLiterals(string(raw)) {
+		if !cjk.MatchString(lit) {
+			continue
+		}
+		scanned++
+		assertNoBannedWord(t, "provider 自检文案（provider_probe.go）", lit)
+	}
+	// 实测（2026-10-14）58 条；阈值取 40 是留给"正常改文案"的余量——真要掉到 40 以下，
+	// 那是文件被换掉或提取器失效，不是文案变短。
+	if scanned < 40 {
+		t.Fatalf("只解析到 %d 条中文自检文案（期望 ≥ 40）：提取器失效或该文件已被换掉，"+
+			"零命中不能算通过（fail-closed）", scanned)
+	}
+}

@@ -24,6 +24,10 @@ import (
 // **v17（transcript v2）**：事件行自带 `id`（身份）与 `seq`（位次），装载面**原样恢复两者**
 // （`PublishAt`），不再按行号重铸 `seq`。于是"同一个事件在两次启动里位次不同"这件事被消掉，
 // 客户端书签里的 `since_seq` 跨重启仍然指向同一条事件。
+//
+// **v21**：`seq` 是**会话内**位次，所以恢复注入只需要"同一会话内升序"（见下方排序），
+// 跨会话的相对顺序不再影响任何号。旧文件里那一列是按旧口径（全局号）写的，装载面照原样恢复
+// ——要把它拉直就走 `mate migrate`（导入路径按行序重排位次）。
 func (s *Service) loadTranscripts() {
 	if s.tx == nil || s.tx.dir == "" {
 		return
@@ -33,7 +37,7 @@ func (s *Service) loadTranscripts() {
 		return
 	}
 	sort.Strings(files)
-	// 先把全部文件读进内存、再按 `seq` **全局归并**注入（理由见下）。
+	// 先把全部文件读进内存、再按 `(会话, seq)` **分组有序**注入（理由见下）。
 	var pending []pendingTranscriptEvent
 	loaded := 0
 	for _, path := range files {
@@ -47,17 +51,24 @@ func (s *Service) loadTranscripts() {
 			pending = append(pending, pendingTranscriptEvent{sessionID: rec.session.ID, line: line})
 		}
 	}
-	// 按 `seq` 全局升序（**不是**按文件名、也不是按逐文件顺序）注入：
-	//   · 文件名字典序与会话的事件 seq 无关。逐文件注入时，先读到的那个会话会把 bus 的
-	//     nextSeq 抬高，后面会话的 PublishAt 只能走"取号回落"往上顶——位次被**改写**，
-	//     于是"恢复出来的 seq"与"transcript 里写的 seq"又不一致了；
-	//   · 全局归并之后送进 PublishAt 的 seq 严格升序，bus 纯镜像，一个号都不改。
-	// 同一个 seq 只可能来自两份互相冲突的文件（seq 全局唯一），用 sort.SliceStable + 文件名序
+	// 按 `(会话 id, seq)` 升序注入（**不是**按文件名、也不是按逐文件顺序）：
+	//   · 文件名字典序与会话的事件位次无关。逐文件注入时，**同一个会话**的若干文件之间
+	//     可能乱序（同一会话理论上只有一份文件，但外部同步/复制会造出第二份），
+	//     乱序送进 `PublishAt` 就会撞"取号回落"——位次被**改写**，于是"恢复出来的 seq"
+	//     与"transcript 里写的 seq"又不一致了；
+	//   · v21 起位次只在会话内可比，所以需要的是"**组内**升序"——按 `(会话, seq)` 排
+	//     同时给了分组与组内有序，而且比 v21 之前的"全局归并"更弱、更好满足。
+	// 同一个 `(会话, seq)` 只可能来自两份互相冲突的文件，用 sort.SliceStable + 文件名序
 	// 定型，保证可复现。
 	if s.bus != nil {
-		sort.SliceStable(pending, func(i, j int) bool { return pending[i].line.seq < pending[j].line.seq })
+		sort.SliceStable(pending, func(i, j int) bool {
+			if pending[i].sessionID != pending[j].sessionID {
+				return pending[i].sessionID < pending[j].sessionID
+			}
+			return pending[i].line.seq < pending[j].line.seq
+		})
 		for _, p := range pending {
-			s.bus.PublishAt(p.line.seq, p.line.id, p.line.typ, p.sessionID, p.line.version, p.line.payload)
+			s.bus.PublishAt(p.sessionID, p.line.seq, p.line.id, p.line.typ, p.line.version, p.line.payload)
 		}
 	}
 	if n := legacyTranscriptSkips.Load(); n > 0 {
@@ -69,7 +80,7 @@ func (s *Service) loadTranscripts() {
 	}
 	if n := legacySchemaSkips.Load(); n > 0 {
 		glog.Warnw(context.Background(),
-			"transcripts: 有 v1 格式（事件行没有 id/seq 身份）的文件被跳过——v17 起事件身份随数据落盘，v1 的 seq 只是文件内位次，回读会把它当成全局水位",
+			"transcripts: 有 v1 格式（事件行没有 id/seq 身份）的文件被跳过——v17 起事件身份随数据落盘，v1 的 seq 只是文件内位次，回读会把它当成会话水位",
 			"skipped", n, "scanned", len(files), "dispose", legacyTranscriptDisposeHint)
 	}
 	glog.Debugw(context.Background(), "transcripts loaded", "loaded", loaded, "scanned", len(files), "events", len(pending))
@@ -77,7 +88,8 @@ func (s *Service) loadTranscripts() {
 
 // pendingTranscriptEvent 是"待注入 bus 的一条事件"（会话 id + 文件内读出的原语）。
 //
-// 存在的理由是把"读文件"与"注入 bus"分成两步：注入必须按 seq 全局有序（见 loadTranscripts）。
+// 存在的理由是把"读文件"与"注入 bus"分成两步：注入必须按**会话分组、组内按 seq 有序**
+// （见 loadTranscripts）。
 type pendingTranscriptEvent struct {
 	sessionID string
 	line      transcriptLine
@@ -105,6 +117,11 @@ func LegacySchemaSkips() int64 { return legacySchemaSkips.Load() }
 //
 // `id`/`seq` 都是文件里写着的值，装载面一个都不重铸（v17）：`version` 仍按**该文件内的行序**
 // 推导（重启稳定，且它只是聚合版本、不跨会话比较）。
+//
+// v21 起 `seq` 是**会话内**位次（0 起）。旧文件（v17–v20 写的）里那一列是全局号——装载面
+// 仍然原样恢复它（file 是 memory 模式的事实源，改它等于改写用户手里的历史），于是那些会话
+// 的位次会**带着旧口径的洞**；新事件接着最大号往后排。要把它拉直就走 `mate migrate` 导进
+// SQLite（导入路径按行序重排位次），这与 v15「旧形状 id 不迁移」是同一条取舍。
 type transcriptLine struct {
 	id      string
 	seq     int64
@@ -191,10 +208,11 @@ func loadTranscriptFile(path string) *transcriptFile {
 		// v2 事件行必须带**合法身份 + 合法位次**。缺任何一样都说明这份文件不是 v2 写的
 		// （手工改动 / 半截写入），整份跳过而不"补一个"——补出来的身份与位次是装载面自己
 		// 发明的，与用户手里那份文件对不上，而这正是 v17 要消灭的东西。
-		if !strings.HasPrefix(ev.ID, objid.Event) || !objid.IsPlatformID(ev.ID) || ev.Seq <= 0 {
+		// v21 起 `seq >= 0` 即合法（0 是会话第一条事件的位次），所以下界是 0 而不是 1。
+		if !strings.HasPrefix(ev.ID, objid.Event) || !objid.IsPlatformID(ev.ID) || ev.Seq < 0 {
 			legacySchemaSkips.Add(1)
 			glog.Warnw(context.Background(),
-				"transcript: 事件行缺 v2 身份（id 形如 evt_<26 位 ULID> 且 seq > 0），整份跳过",
+				"transcript: 事件行缺 v2 身份（id 形如 evt_<26 位 ULID> 且 seq >= 0），整份跳过",
 				"path", path, "line", lineNo, "id", ev.ID, "seq", ev.Seq, "dispose", legacyTranscriptDisposeHint)
 			return nil
 		}

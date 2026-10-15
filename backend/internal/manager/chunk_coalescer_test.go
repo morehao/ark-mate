@@ -214,7 +214,7 @@ func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 	svc.publish(BusToolCall, "cv-merge", map[string]any{"session_id": "cv-merge", "tool": "read"})
 	svc.publish(BusThought, "cv-merge", map[string]any{"session_id": "cv-merge", "msg_id": "t1", "text": "想"})
 
-	rows, _, err := st.EventsAfter(context.Background(), "cv-merge", 0, 10)
+	rows, _, err := st.EventsAfter(context.Background(), "cv-merge", -1, 10)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestPublishCoalescesDeltasAheadOfToolCall(t *testing.T) {
 	// thought 仍在缓冲里（工具卡只 flush 了同会话的全部缓冲？——是的：flush 按会话，
 	// 故 thought 也被落下，只是它在工具卡之后入缓冲，顺序为 文本→工具卡→thought）。
 	svc.flushChunks()
-	rows2, _, _ := st.EventsAfter(context.Background(), "cv-merge", 0, 10)
+	rows2, _, _ := st.EventsAfter(context.Background(), "cv-merge", -1, 10)
 	if len(rows2) != 3 || rows2[2].Type != BusThought {
 		t.Fatalf("尾部落盘不符: %+v", rows2)
 	}
@@ -251,7 +251,7 @@ func TestPublishFlushesDeltasOnRunEnded(t *testing.T) {
 	}
 	svc.publish(BusRunEnded, "cv-end", map[string]any{"session_id": "cv-end", "stop_reason": "end_turn"})
 
-	rows, _, err := st.EventsAfter(context.Background(), "cv-end", 0, 10)
+	rows, _, err := st.EventsAfter(context.Background(), "cv-end", -1, 10)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestCloseTranscriptsFlushesChunks(t *testing.T) {
 	svc.publish(BusMessage, "cv-close", map[string]any{"session_id": "cv-close", "msg_id": "m1", "text": "尾巴"})
 
 	svc.closeTranscripts()
-	rows, _, err := st.EventsAfter(context.Background(), "cv-close", 0, 10)
+	rows, _, err := st.EventsAfter(context.Background(), "cv-close", -1, 10)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("停机应落掉缓冲: n=%d err=%v", len(rows), err)
 	}

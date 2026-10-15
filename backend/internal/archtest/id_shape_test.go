@@ -334,16 +334,24 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 	}
 }
 
-// TestEventSeqStaysTheCursor（G1，v17）：`events` 的**身份**是 `id`、**位次**是 `seq`，两者不得换位。
+// TestEventSeqStaysTheCursor（G1，v17 立、v21 重写）：`events` 的**身份**是 `id`、**位次**是
+// `seq`，两者不得换位；而 v21 起位次是**会话内**的量（`UNIQUE(session_id, seq)`，从 0 起），
+// 不再是全局号序。
 //
 // 为什么单独一条（而不是并进 TestPrimaryKeyShapesStayDeclared）：`events` 是唯一一张**同时**
-// 需要"平台铸造身份"与"全局单调游标"的表，而那两件事各自都有一种静默的失效方式：
+// 需要"平台铸造身份"与"位次游标"的表，而那两件事各自都有一种静默的失效方式：
 //
-//	① 把 `seq` 又写回主键（或把它删掉）——位次的权威分配链断掉，跨会话回放/书签全错；
+//	① 把 `seq` 又写回主键（或把它删掉）——位次的权威分配链断掉，回放/书签全错；
 //	② 让 `id` 参与排序或比较（`ORDER BY id` / `WHERE id > ?`）——铸号顺序**恰好**是 seq 升序
-//	   （迁移与运行时都按 seq 递增铸号），所以它会"看起来对"，直到跨进程/时钟回拨那天才错。
+//	   （迁移与运行时都按 seq 递增铸号），所以它会"看起来对"，直到跨进程/时钟回拨那天才错；
+//	③ 位次的作用域悄悄退回**全库**（唯一约束写成 `UNIQUE(seq)` 或让 `idx_events_seq` 复活）
+//	   ——两个会话就会互相顶号，而"第 0 条"这个概念也随之消失。
 //
-// fail-closed：实体、迁移语句、DAO 任一解析不到 → 红。
+// v21 把 ② 的判据从"扫迁移文本里那条 CREATE UNIQUE INDEX"改成了**读真实 schema**：v17 建过
+// `idx_events_seq`、v21 换表时把它整个丢掉，所以文本扫描会同时看到"建过"和"没了"两个真相
+// （要么假红，要么得写一个 DDL 模拟器）。跑一遍真实迁移读索引定义才是最终形态本身。
+//
+// fail-closed：实体、真实 schema、DAO 任一解析不到 → 红。
 func TestEventSeqStaysTheCursor(t *testing.T) {
 	root := backendRoot(t)
 
@@ -357,39 +365,74 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 	seqRe := regexp.MustCompile(`(?m)^\s*Seq\s+int64\s+` + "`" + `([^` + "`" + `]*)` + "`")
 	sm := seqRe.FindStringSubmatch(body)
 	if sm == nil {
-		t.Fatalf("`EventEntity.Seq` 必须是 `int64`（全局位次，`MAX(seq)` 与跨会话回放都靠它）。\n实际成员体：\n%s", body)
+		t.Fatalf("`EventEntity.Seq` 必须是 `int64`（会话内位次，`MAX(seq)` 与回放都靠它）。\n实际成员体：\n%s", body)
 	}
 	if !strings.Contains(sm[1], "column:seq") {
 		t.Fatalf("`EventEntity.Seq` 的列名必须是 `seq`，实际标签 %q", sm[1])
 	}
 	if strings.Contains(sm[1], "primaryKey") {
-		t.Fatalf("`EventEntity.Seq` 又变成主键了（标签 %q）：位次只在一个聚合/一张表内有序，"+
+		t.Fatalf("`EventEntity.Seq` 又变成主键了（标签 %q）：位次只在**会话内**有序，"+
 			"把它当主键会让「同一个事件在不同重启后换一个 id」这类问题重新长回来", sm[1])
 	}
 
-	// ② 库级表达：`seq` 全局唯一（唯一约束在**换表之后**单独建，不做表内内联 UNIQUE）。
-	//    语句落点在 `migrate_v17.go`（重建 events 的换表四步）而不是 migrate.go 的 statements
-	//    ——索引必须建在**换过来的新表**上，而 statements 阶段新表还没换过来。
-	rebuilt := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "store", "migrate_v17.go")))
-	if !strings.Contains(rebuilt, "CREATE UNIQUE INDEX idx_events_seq ON events(seq)") {
-		t.Fatal("`migrate_v17.go` 里找不到 `CREATE UNIQUE INDEX idx_events_seq ON events(seq)`：" +
-			"`seq` 是**全局**位次（不是某些底座那种 per-aggregate 稠密序号），唯一约束就是这条不变式的落点")
+	// ② 真实 schema：`events` 上的唯一约束必须是 **(session_id, seq)**。
+	//    读索引定义而不是扫 DDL：v17 建过 `idx_events_seq`（全局唯一）、v21 换表时连带丢掉，
+	//    文本里两种真相并存，只有跑完迁移的 schema 才是最终形态。
+	db := migratedSchemaDB(t)
+	var idxSQL string
+	if err := db.Raw(`SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_events_session'`).
+		Row().Scan(&idxSQL); err != nil {
+		t.Fatalf("读 `idx_events_session` 定义（v21 起它必须是 UNIQUE）：%v", err)
 	}
-	if !strings.Contains(rebuilt, "CREATE INDEX idx_events_session ON events(session_id, seq)") {
-		t.Fatal("`migrate_v17.go` 里找不到 `CREATE INDEX idx_events_session ON events(session_id, seq)`：" +
-			"单会话按位次回放是主查询路径（索引名必须是 `idx_events_<用途>`，守卫 A2）")
+	if !strings.HasPrefix(idxSQL, "CREATE UNIQUE INDEX") || !strings.Contains(idxSQL, "events(session_id, seq)") {
+		t.Fatalf("`idx_events_session` 必须是 `CREATE UNIQUE INDEX … ON events(session_id, seq)`，实际 %q："+
+			"位次的作用域就是这条约束——写成 `UNIQUE(seq)` 会让两个会话互相顶号，"+
+			"而「每个会话各自从 0 起」也随之失效", idxSQL)
+	}
+	var n int64
+	if err := db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_events_seq'`).
+		Row().Scan(&n); err != nil {
+		t.Fatalf("查 `idx_events_seq` 是否还在: %v", err)
+	}
+	if n != 0 {
+		t.Fatal("`idx_events_seq`（**全局**位次唯一）又回到了 schema 里：v21 起位次是会话内的量，" +
+			"这条索引的语义已经不存在——它的复活意味着「跨会话全局号序」这个已被推翻的设计又长了回来")
+	}
+	if err := db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_events_session_type'`).
+		Row().Scan(&n); err != nil {
+		t.Fatalf("查 `idx_events_session_type`: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("`idx_events_session_type`（按类型回放）应存在：n=%d", n)
+	}
+	// `event_sequence` 是取号器：主键是**会话**，不是一张全局计数表。
+	var pkCol string
+	if err := db.Raw(`SELECT name FROM pragma_table_info('event_sequence') WHERE pk > 0`).
+		Row().Scan(&pkCol); err != nil {
+		t.Fatalf("读 `event_sequence` 主键（fail-closed）：%v", err)
+	}
+	if pkCol != "session_id" {
+		t.Fatalf("`event_sequence` 的主键必须是 `session_id`（每会话一行计数器），实际 %q", pkCol)
 	}
 
 	// ③ DAO：事件查询只按 `seq` 排序/翻页，不得引入 `id` 序。
 	daoSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "dao", "event.go")))
-	for _, bad := range []string{"ORDER BY id", "Order(\"id\"", "Order(\"id ", "id > ?"} {
+	// `id > ?` 用"前一个字符不是标识符字符"锚定：复合键集比较里的 `session_id > ?` 含有子串
+	// `id > ?`，用裸 Contains 会把它误判成"按事件身份比较"（v21 的 AllBySession 就是这么被误报的）。
+	idCompare := regexp.MustCompile(`(?:^|[^A-Za-z0-9_"'])id\s*>\s*\?`)
+	for _, bad := range []string{"ORDER BY id", "Order(\"id\"", "Order(\"id "} {
 		if strings.Contains(daoSrc, bad) {
-			t.Fatalf("`internal/dao/event.go` 里出现了按 `id` 排序/比较的写法 %q：事件的身份**不参与排序**"+
+			t.Fatalf("`internal/dao/event.go` 里出现了按 `id` 排序的写法 %q：事件的身份**不参与排序**"+
 				"（位次的权威只有 `seq`；铸号顺序恰好同序会让这类错误在很长时间里看不出来）", bad)
 		}
 	}
-	if !strings.Contains(daoSrc, "Order(\"seq") {
-		t.Fatal("`internal/dao/event.go` 里找不到 `Order(\"seq`：事件游标只认 seq（fail-closed，" +
+	if idCompare.MatchString(daoSrc) {
+		t.Fatal("`internal/dao/event.go` 里出现了按 `id` 比较的写法（`id > ?`）：事件的身份**不参与比较**" +
+			"——跨会话翻页用的是复合键 `(session_id, seq)`，而 `session_id > ?` 是它的一部分，" +
+			"别把两者混起来")
+	}
+	if !strings.Contains(daoSrc, "Order(\"seq") && !strings.Contains(daoSrc, "Order(\"session_id ASC, seq ASC\"") {
+		t.Fatal("`internal/dao/event.go` 里找不到按 `seq` 的排序：事件游标只认 seq（fail-closed，" +
 			"否则「游标仍然是 seq」这句话没有任何判据）")
 	}
 }
@@ -426,8 +469,8 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 			"运行时**唯一的**事件铸号点（其余路径只搬运）：少了它，事件就没有身份"},
 		{"internal/manager/publish.go", `AppendEvent\(context\.Background\(\), evtID,`,
 			"① 落库必须带上刚铸的那支 id（不重铸）"},
-		{"internal/manager/publish.go", `PublishAt\(seq, evtID,`,
-			"① 帧上也必须是同一支 id（`PublishAt` 的第二参数）"},
+		{"internal/manager/publish.go", `PublishAt\(sessionID, seq, evtID,`,
+			"① 帧上也必须是同一支 id（`PublishAt` 的第三参数；v21 起第一位是聚合 id）"},
 		{"internal/manager/publish.go", `eventbus\.Event\{ID: evtID,`,
 			"① nil-bus（内存模式无 bus）分支同样带 id"},
 		{"internal/manager/publish.go", `publishSideEffects\(sessionID, evt\.ID,`,
@@ -436,11 +479,11 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 			"② transcript 落盘的 id 来自上游（本函数不再铸号）"},
 		{"internal/manager/transcript.go", `wireTranscriptLine\{ID: eventID,`,
 			"② v2 事件行的第一个字段就是身份"},
-		{"internal/manager/transcript_load.go", `PublishAt\(p\.line\.seq, p\.line\.id,`,
-			"③ memory 模式装载：transcript 的 id/seq 原样注入 bus"},
+		{"internal/manager/transcript_load.go", `PublishAt\(p\.sessionID, p\.line\.seq, p\.line\.id,`,
+			"③ memory 模式装载：transcript 的 id/seq 原样注入 bus（按会话分组）"},
 		{"internal/manager/transcript_load.go", `id: ev\.ID, seq: ev\.Seq,`,
 			"③ 事件行必须先过形状校验再落进内存行"},
-		{"internal/manager/persist.go", `PublishAt\(ev\.Seq, ev\.ID,`,
+		{"internal/manager/persist.go", `PublishAt\(ev\.SessionID, ev\.Seq, ev\.ID,`,
 			"④ sqlite 模式恢复：库里的 id 原样注入 bus"},
 		{"internal/manager/export.go", `ID: e\.ID, Type: e\.Type,`,
 			"⑤ REST 导出的事件带上 id"},

@@ -540,7 +540,9 @@ export function SessionPane({ onCreate }: Props) {
               title={sm.updated_at}
             >
               <span>{relTime(sm.updated_at)}</span>
-              {view && view.lastSeq > 0 && <span style={{ color: tokens.textPlaceholder }}>seq {view.lastSeq}</span>}
+              {view && view.lastSeq >= 0 && (
+                <span style={{ color: tokens.textPlaceholder }}>seq {view.lastSeq}</span>
+              )}
             </span>
           </span>
         </button>

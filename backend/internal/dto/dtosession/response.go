@@ -104,7 +104,7 @@ type SessionCreateResp struct {
 	// RuntimeID 本次会话落在哪个底座上（构建期固定；回带是为了让客户端不必去拼）。
 	RuntimeID string `json:"runtime_id"`
 	Status    string `json:"status"`
-	EventSeq  int64  `json:"event_seq"` // 已发布事件水位（WS attach 续传起点）
+	EventSeq  int64  `json:"event_seq"` // 该会话已发布事件水位（WS attach 续传起点；-1 = 尚无事件）
 	// Cwd / WorkspaceID / WorkspaceTemporary 定稿后的工作空间、它的归属与"是否平台给的"权威标志；
 	// 创建即回读，前端无需二次查询即可显示「在哪里工作」并把会话挂到正确的分组下。
 	Cwd                string `json:"cwd,omitempty"`
@@ -116,7 +116,7 @@ type SessionCreateResp struct {
 type SessionPromptResp struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
-	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位
+	EventSeq int64  `json:"event_seq"` // 直接执行 = user_message 水位；入队 = input_queued 水位（会话内位次）
 	// Queued/InputID 仅 delivery=after_run|interrupt_then_prompt 且会话正忙时出现：
 	// 本次输入已入队，等待当前轮结束投递（可用 DELETE /sessions/:id/inputs/:input_id 撤下）。
 	Queued  bool   `json:"queued,omitempty"`
@@ -145,7 +145,8 @@ type SessionHistoryResp struct {
 	Events []eventbus.Event `json:"events"`
 	// HasMore 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。
 	HasMore bool `json:"has_more"`
-	// FirstSeq/LastSeq 本页首尾事件 seq（空页为 0）；客户端据此继续向前/向后翻页。
+	// FirstSeq/LastSeq 本页首尾事件 seq（**空页为 -1**；v21 起 0 是合法位次，"空"与"第 0 条"必须可分）；
+	// 客户端据此继续向前/向后翻页。
 	FirstSeq int64 `json:"first_seq"`
 	LastSeq  int64 `json:"last_seq"`
 }
@@ -157,10 +158,13 @@ type RunResp struct {
 	Status     string `json:"status"` // running | completed | failed | cancelled
 	ErrorCode  string `json:"error_code,omitempty"`
 	StopReason string `json:"stop_reason,omitempty"`
-	FirstSeq   int64  `json:"first_seq"`
-	LastSeq    int64  `json:"last_seq"`
-	StartedAt  string `json:"started_at"`
-	EndedAt    string `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
+	// FirstSeq/LastSeq 本轮事件窗口的**会话内**位次（`[first_seq, last_seq]` 闭区间）。
+	// 进行中的轮次（v22 起在库里就有行）：`first_seq` 已定（= 本轮 `run.started` 的位次）、
+	// `last_seq` 为 **-1**（尚未收口——0 是合法位次，不能当"未知"用）、`ended_at` 为空。
+	FirstSeq  int64  `json:"first_seq"`
+	LastSeq   int64  `json:"last_seq"`
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at,omitempty"` // 终态时刻（进行中为空）
 	// FirstTokenMS 本轮从用户消息到首个 assistant 输出的耗时（ms；未记录/无输出为 0）。
 	FirstTokenMS int64 `json:"first_token_ms,omitempty"`
 	// Usage 该轮结束后的上下文/费用快照（解析 runs.usage_json；无上报 → nil）。

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/dbclient"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 )
@@ -47,10 +46,15 @@ const v17SessionID = "ses_01J9Z6Q0M7X2V8K4B3N5TRW1QA"
 //	② 每行都有平台形状的 `evt_` 身份且互不相同（铸号撞了 → 主键冲突或更糟：两行同 id）；
 //	③ **按 id 排序 == 按 seq 排序**（铸号顺序即 seq 升序，这条性质不该被悄悄打破）；
 //	④ `meta.events_last_seq` **保留**（与 v15 相反！清掉它 → 下一条新事件从 1 起跳、
-//	   撞上既有行的 UNIQUE(seq)：这是照抄 v15 的人一定会踩的那一脚）；
-//	⑤ 迁移后仍能正常追加新事件（铸号 + 水位推进都还工作）；
-//	⑥ 库级约束是"seq 全局唯一 + (session_id, seq) 索引"，且 UNIQUE 真的会咬人；
-//	⑦ 幂等：再跑一次 `Migrate` 不报错、不动数据。
+//	   撞上既有行的 UNIQUE(seq)：这是照抄 v15 的人一定会踩的那一脚）。
+//	   注：v21 之后这个键由 v21 无条件删除（取号器换成 `event_sequence`），所以本用例停在 v17
+//	   断言它"活着"，v21 那侧有一条相反方向的用例；
+//	⑤ 库级约束是"seq 全局唯一 + (session_id, seq) 索引"，且 UNIQUE 真的会咬人；
+//	⑥ 幂等：再跑一次 `Migrate` 不报错、不动数据。
+//
+// 「迁移后追加新事件」这一段**不在本用例**：`AppendEvent` 走的是当前的取号器，而 v21 起那是
+// `event_sequence` 表（v17 的库上根本不存在）。拿今天的写路径去测一个停在 v17 的库，红的是
+// 夹具而不是迁移——它的判据在 `TestMigrateV21...`（每题只测自己那一版）。
 func TestMigrateV17KeepsEveryEvent(t *testing.T) {
 	ctx := context.Background()
 	s := openV16ForV17Test(t)
@@ -81,7 +85,8 @@ func TestMigrateV17KeepsEveryEvent(t *testing.T) {
 			t.Fatalf("写事件夹具 seq=%d: %v", r.seq, err)
 		}
 	}
-	if err := s.SetMeta(ctx, model.MetaKeyEventsLastSeq, "9"); err != nil {
+	// 字面量（v21 起仓里没有这个常量了）：v15 已经不清它，删除归 v21。
+	if err := s.db.Exec(`INSERT INTO meta (key, value) VALUES ('events_last_seq', '9')`).Error; err != nil {
 		t.Fatalf("写事件水位: %v", err)
 	}
 	// 迁移前：主键还是 seq（钉住"我们确实从旧形态出发"）。
@@ -142,25 +147,12 @@ func TestMigrateV17KeepsEveryEvent(t *testing.T) {
 	}
 
 	// ④ 水位保留。
-	if v, ok, err := s.GetMeta(ctx, model.MetaKeyEventsLastSeq); err != nil || !ok || v != "9" {
-		t.Fatalf("meta.%s 必须保留为 \"9\"（v17 一行不丢，与 v15 清空正好相反）：ok=%v value=%q err=%v",
-			model.MetaKeyEventsLastSeq, ok, v, err)
+	if v, ok, err := s.GetMeta(ctx, "events_last_seq"); err != nil || !ok || v != "9" {
+		t.Fatalf("meta.events_last_seq 必须保留为 \"9\"（v17 一行不丢，与 v15 清空正好相反）：ok=%v value=%q err=%v",
+			ok, v, err)
 	}
 
-	// ⑤ 迁移后照常追加新事件。
-	seq, err := s.AppendEvent(ctx, objid.New(objid.Event), v17SessionID, "session.message",
-		map[string]any{"text": "迁移之后"})
-	if err != nil {
-		t.Fatalf("迁移后追加事件失败: %v", err)
-	}
-	if seq != 10 {
-		t.Fatalf("新事件的 seq 应为 10（水位从保留的 9 继续），实际 %d", seq)
-	}
-	if n, err := s.EventCount(ctx, ""); err != nil || n != int64(len(rows)+1) {
-		t.Fatalf("追加后事件数应 %d：n=%d err=%v", len(rows)+1, n, err)
-	}
-
-	// ⑥ 库级约束。
+	// ⑤ 库级约束。
 	if pk := eventsPrimaryKeyColumn(t, s); pk != "id" {
 		t.Fatalf("v17 后 events 主键应为 id，实际 %q", pk)
 	}
@@ -182,7 +174,7 @@ func TestMigrateV17KeepsEveryEvent(t *testing.T) {
 		t.Fatal("重复的 seq 必须被 UNIQUE(seq) 拦住（seq 是全局位次，不是每会话独立序号）")
 	}
 
-	// ⑦ 幂等。
+	// ⑥ 幂等。
 	before, _ := s.EventCount(ctx, "")
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatalf("重复迁移应幂等: %v", err)
@@ -215,9 +207,8 @@ func TestMigrateV17OnEmptyEvents(t *testing.T) {
 	if n, err := s.EventCount(ctx, ""); err != nil || n != 0 {
 		t.Fatalf("空 events 迁移后仍应为 0 行：n=%d err=%v", n, err)
 	}
-	if seq, err := s.AppendEvent(ctx, objid.New(objid.Event), v17SessionID, "session.message", nil); err != nil || seq != 1 {
-		t.Fatalf("空表迁移后第一条事件应从 1 起跳：seq=%d err=%v", seq, err)
-	}
+	// 「空表迁移后第一条事件的位次」在 v21 起是 **0**（该会话的第一条），由 `migrate_v21_test.go`
+	// 断言；这里停在 v17，所以只能验对账本身没被 0 行误判（上面那条 COUNT 断言）。
 }
 
 // eventsPrimaryKeyColumn 返回 events 的主键列名（fail-closed：没有主键/读不到即失败）。

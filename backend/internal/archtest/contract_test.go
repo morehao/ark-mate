@@ -38,6 +38,7 @@ var frozenEventTypes = []string{
 	"session.input_delivered",
 	"session.input_cancelled",
 	"session.runtime",
+	"run.started",
 	"run.ended",
 	"run.error",
 	"run.cancelled",

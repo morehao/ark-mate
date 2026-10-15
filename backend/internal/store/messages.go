@@ -30,13 +30,16 @@ type MessageHit struct {
 	CreatedAt    time.Time
 }
 
-// CreateMessages 单事务批量插入一轮的 messages 行（可重复调用：同 run_id 先删后插，
-// 保证「从 events 重建」幂等）。
+// ReplaceSessionMessages 单事务重铺某会话的 messages（先删会话全部旧行再插新行；
+// 空批次 = 该会话清空）。这是**生产上的唯一写路径**（manager 的整会话重建）。
+func (s *Store) ReplaceSessionMessages(ctx context.Context, sessionID string, msgs []model.MessageEntity) error {
+	return s.messages.ReplaceSessionMessages(ctx, sessionID, msgs)
+}
+
+// CreateMessages 裸批量插入（**只给测试直插**）。生产的写路径只有 `ReplaceSessionMessages`；
+// 这里刻意不做"先删后插"——直插的行要自己给 `ordinal`（`UNIQUE(session_id, ordinal)` 会咬重号）。
 func (s *Store) CreateMessages(ctx context.Context, msgs []model.MessageEntity) error {
-	if len(msgs) == 0 {
-		return nil
-	}
-	return s.messages.ReplaceRunMessages(ctx, msgs)
+	return s.messages.InsertMessages(ctx, msgs)
 }
 
 // SearchUserMessages 在指定会话的 user 消息中做子串检索（大小写不敏感；LIKE 通配转义），

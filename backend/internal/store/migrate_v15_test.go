@@ -52,8 +52,12 @@ func TestMigrateV15RecastsModelIDs(t *testing.T) {
 		t.Fatalf("写默认模型: %v", err)
 	}
 
-	// 让 v15 的其余清理项都有东西可清（否则"清了"与"什么都没清"看起来一样）。
-	if err := s.SetMeta(ctx, model.MetaKeyEventsLastSeq, "136"); err != nil {
+	// v15 清 `imported_transcripts`（不清 → `mate migrate` 空转）。
+	//
+	// 这里**还**写一行 `events_last_seq`（字面量，v21 起仓里已没有这个常量）：v15 已经不再清它
+	// ——它的取号语义整体被 v21 的 `event_sequence` 取代，删除搬到了 v21 那一步（无条件执行）。
+	// 判据在下面 ⑤：这一行必须**活过** v15，并被 v21 删掉（`migrate_v21_test.go` 钉后半句）。
+	if err := s.db.Exec(`INSERT INTO meta (key, value) VALUES ('events_last_seq', '136')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetMeta(ctx, model.MetaKeyImportMarker, "sha256:deadbeef"); err != nil {
@@ -159,11 +163,14 @@ func TestMigrateV15RecastsModelIDs(t *testing.T) {
 		}
 	}
 
-	// ⑤ 两个 meta 键被清（漏掉它们都是**静默**失效：seq 从旧高水位起跳 / mate migrate 空转）。
-	for _, key := range []string{model.MetaKeyEventsLastSeq, model.MetaKeyImportMarker} {
-		if v, ok, err := s.GetMeta(ctx, key); err != nil || ok {
-			t.Fatalf("meta.%s 应被清掉：ok=%v value=%q err=%v", key, ok, v, err)
-		}
+	// ⑤ `imported_transcripts` 被清（漏掉它是**静默**失效：`mate migrate` 认为已导入然后空转）。
+	if v, ok, err := s.GetMeta(ctx, model.MetaKeyImportMarker); err != nil || ok {
+		t.Fatalf("meta.%s 应被清掉：ok=%v value=%q err=%v", model.MetaKeyImportMarker, ok, v, err)
+	}
+	//    而 `events_last_seq` **必须活着**（v15 只管清空 events 表的数据；那个计数行的语义
+	//    由 v21 接手删除）。写死字面量：这是"停在 v15 那一版"的夹具，常量已在 v21 随语义删除。
+	if v, ok, err := s.GetMeta(ctx, "events_last_seq"); err != nil || !ok || v != "136" {
+		t.Fatalf("v15 不该动 events_last_seq（删除归 v21）：ok=%v value=%q err=%v", ok, v, err)
 	}
 
 	// ⑥ automations：运行态列被清，**`last_fired_at` 保留**（ADR-10：它是"这个 occurrence

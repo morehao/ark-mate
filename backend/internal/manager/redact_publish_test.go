@@ -37,7 +37,7 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 
 	// 1) WS 帧（bus 事件 —— 订阅者/WS 收到的同一份）
 	var frame eventbus.Event
-	for _, e := range svc.bus.EventsAfter(0) {
+	for _, e := range svc.bus.EventsAll() {
 		if e.Type == BusMessage && e.AggregID == "conv-redact" {
 			frame = e
 		}
@@ -51,7 +51,7 @@ func TestPublishRedactsSecretsAtSingleGate(t *testing.T) {
 		t.Fatalf("WS 帧应含占位串: %s", b)
 	}
 	// 2) events 表
-	rows, _, err := st.EventsAfter(context.Background(), "conv-redact", 0, 10)
+	rows, _, err := st.EventsAfter(context.Background(), "conv-redact", -1, 10)
 	if err != nil || len(rows) == 0 {
 		t.Fatalf("事件未落库: n=%d err=%v", len(rows), err)
 	}
@@ -154,7 +154,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 
 	// 1) WS 帧 2) events 表 3) transcript 文件
 	var frame eventbus.Event
-	for _, e := range svc.bus.EventsAfter(0) {
+	for _, e := range svc.bus.EventsAll() {
 		if e.Type == BusMessage && e.AggregID == "conv-dyn-v20" {
 			frame = e
 		}
@@ -162,7 +162,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	if b, _ := json.Marshal(frame); strings.Contains(string(b), key) {
 		t.Fatalf("WS 帧未脱敏（写面/解析面进来的真值必须自动登记）: %s", b)
 	}
-	rows, _, err := st.EventsAfter(ctx, "conv-dyn-v20", 0, 10)
+	rows, _, err := st.EventsAfter(ctx, "conv-dyn-v20", -1, 10)
 	if err != nil || len(rows) == 0 {
 		t.Fatalf("事件未落库: n=%d err=%v", len(rows), err)
 	}
@@ -220,7 +220,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	svc.flushChunks()
 
 	var frame eventbus.Event
-	for _, e := range svc.bus.EventsAfter(0) {
+	for _, e := range svc.bus.EventsAll() {
 		if e.Type == BusRunError && e.AggregID == "conv-mcp-dyn" {
 			frame = e
 		}

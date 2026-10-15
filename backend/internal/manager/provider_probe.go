@@ -13,7 +13,6 @@ import (
 	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
-	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
 // ——— provider 连接自检（M4） ———
@@ -181,13 +180,12 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 	if len(modelIDs) == 0 {
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "refs", Status: probeWarn, Detail: "当前没有模型条目挂靠在这条档案上（事实，不是错误）",
-			Remedy: "在「设置 · 模型」里让它承载模型条目；没有被挂靠的档案不会被下发给底座",
+			Remedy: "在「设置 · 模型」里让它承载模型条目；没有被挂靠的档案不会下发到会话进程",
 		})
 	} else {
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "refs", Status: probePass,
-			Detail: fmt.Sprintf("承载 %d 个模型条目：%v（runtime %v）", len(modelIDs), modelIDs,
-				[]string{runtime.SelectedRuntime()}),
+			Detail: fmt.Sprintf("承载 %d 个模型条目：%v", len(modelIDs), modelIDs),
 		})
 	}
 
@@ -223,7 +221,7 @@ func (s *Service) probeLocalCatalog(ctx context.Context, refName string) []dtopr
 		return []dtoprovider.ProviderCheckResp{{
 			Name: "catalog", Status: probeUnknown,
 			Detail: fmt.Sprintf("运行时模型目录不可读：%v", err),
-			Remedy: "确认构建期固定的那个底座已注册且可启动（见 GET /runtime/diagnostics）",
+			Remedy: "确认本构建的运行时已注册且可启动；仍不行就导出诊断包",
 		}}
 	}
 	unavailable := make([]string, 0, 2)

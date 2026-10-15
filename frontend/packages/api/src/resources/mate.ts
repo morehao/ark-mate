@@ -283,7 +283,7 @@ export interface SessionHistoryPage {
   events: BusEvent[]
   /** 沿当前分页方向是否还有更多：after 分页 = 后面还有；before 分页 = 更早还有。 */
   has_more: boolean
-  /** 本页首尾事件 seq（空页为 0）；继续向前/向后翻页的游标。 */
+  /** 本页首尾事件 seq（**空页为 -1**）；继续向前/向后翻页的游标。 */
   first_seq: number
   last_seq: number
 }
@@ -292,6 +292,12 @@ export interface SessionHistoryPage {
  * 事件回放。`after` 向后（seq > after）、`before` 向前（seq < before，仍升序返回，
  * 用于「加载更早」）——两者互斥（后端 40001）；默认 200/上限 1000。
  * sqlite 模式读 events 表（可一直翻到会话第一条）；内存模式回放 eventbus。
+ *
+ * **游标口径（v21）**：`seq` 是**会话内**位次、0 是合法位次（`session.created`），
+ * 于是"没给游标"与"给了 0"是两件事：
+ *   - 都不给 = 从该会话第 0 条起的第一页；
+ *   - `after=0` = 第 0 条**之后**（跳过它）；`before=0` = 第 0 条之前（空页 = 已到最早）；
+ *   - `before` 只接受非负整数，所以"取最新一页"要由调用方从已知水位推（`watermark + 1`）。
  */
 export const sessionHistory = (
   id: string,

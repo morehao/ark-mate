@@ -129,14 +129,13 @@ type stubSvc struct {
 	cancelID     string
 	cancelErr    error
 
-	historyCalled    bool
-	historyID        string
-	historyAfter     int64
-	historyBefore    int64
-	historyHasBefore bool
-	historyLimit     int
-	historyResp      *dtosession.SessionHistoryResp
-	historyErr       error
+	historyCalled bool
+	historyID     string
+	historyAfter  *int64
+	historyBefore *int64
+	historyLimit  int
+	historyResp   *dtosession.SessionHistoryResp
+	historyErr    error
 
 	memList     []dtosession.MemoryResp
 	revokeID    string
@@ -697,7 +696,6 @@ func (s *stubSvc) SessionHistory(_ context.Context, id string, q dtosession.Hist
 	s.historyID = id
 	s.historyAfter = q.After
 	s.historyBefore = q.Before
-	s.historyHasBefore = q.HasBefore
 	s.historyLimit = q.Limit
 	if s.historyErr != nil {
 		return nil, s.historyErr
@@ -1222,30 +1220,37 @@ func TestHistoryParamParsing(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(svc))
 
-	// 默认 after=0 limit=200。
+	// 默认：两个游标都不给（nil = 该方向没有游标）、limit=200。
 	do(t, r, "GET", "/v1/mate/sessions/s1/history", "")
-	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != 0 || svc.historyBefore != 0 || svc.historyLimit != 200 {
-		t.Fatalf("默认参数不符: %+v %d/%d %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
+	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != nil || svc.historyBefore != nil || svc.historyLimit != 200 {
+		t.Fatalf("默认参数不符: %+v %v/%v %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
 	}
 
 	// 显式 after/limit。
 	svc.historyCalled = false
 	do(t, r, "GET", "/v1/mate/sessions/s1/history?after=7&limit=50", "")
-	if svc.historyAfter != 7 || svc.historyLimit != 50 {
-		t.Fatalf("显式参数不符: after=%d limit=%d", svc.historyAfter, svc.historyLimit)
+	if svc.historyAfter == nil || *svc.historyAfter != 7 || svc.historyLimit != 50 {
+		t.Fatalf("显式参数不符: after=%v limit=%d", svc.historyAfter, svc.historyLimit)
 	}
 
 	// before 游标（C2：向前翻页）；after/before 同时给 → 40001（互斥）。
 	svc.historyCalled = false
 	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=42&limit=5", "")
-	if svc.historyBefore != 42 || svc.historyAfter != 0 || svc.historyLimit != 5 || !svc.historyHasBefore {
-		t.Fatalf("before 参数不符: before=%d after=%d limit=%d has=%v", svc.historyBefore, svc.historyAfter, svc.historyLimit, svc.historyHasBefore)
+	if svc.historyBefore == nil || *svc.historyBefore != 42 || svc.historyAfter != nil || svc.historyLimit != 5 {
+		t.Fatalf("before 参数不符: before=%v after=%v limit=%d", svc.historyBefore, svc.historyAfter, svc.historyLimit)
 	}
-	// before=0 显式给出 = 取末尾一页（HasBefore 区分「未给 before」与「before=0」）。
+	// before=0 显式给出 = "第 0 条之前"（空页）：**给了游标**与"没给"是两件事。
+	// v21 之前这两件事靠 HasBefore 标志区分，现在靠指针——`0` 本身已是合法游标。
 	svc.historyCalled = false
 	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=0", "")
-	if !svc.historyHasBefore || svc.historyBefore != 0 {
-		t.Fatalf("before=0 应置 HasBefore: %+v", svc)
+	if svc.historyBefore == nil || *svc.historyBefore != 0 {
+		t.Fatalf("before=0 应携带游标 0: %+v", svc)
+	}
+	// after=0 同理：它是"第 0 条之后"，也必须有游标（不是"没给"）。
+	svc.historyCalled = false
+	do(t, r, "GET", "/v1/mate/sessions/s1/history?after=0", "")
+	if svc.historyAfter == nil || *svc.historyAfter != 0 {
+		t.Fatalf("after=0 应携带游标 0: %+v", svc)
 	}
 	svc.historyCalled = false
 	envBoth, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&before=2", "")

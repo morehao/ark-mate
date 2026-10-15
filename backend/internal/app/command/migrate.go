@@ -19,7 +19,7 @@ import (
 
 // migrate 把 transcript 目录（默认 ~/.ark-mate/transcripts）全量导入 SQLite（P1 迁移关键路径）：
 //   - 解析全部 *.jsonl（复用 manager 复读器；坏文件告警跳过）；
-//   - 单事务导入（store.ImportBatch：全局 seq 重分配 → events → sessions → 数量校验 → 导入标记）；
+//   - 单事务导入（store.ImportBatch：按会话逐行分配**会话内位次** → events → sessions → 数量校验 → 导入标记）；
 //   - 幂等：同目录指纹已导入过则跳过；任一步失败整体回滚（原 transcript 目录不动）。
 func migrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)

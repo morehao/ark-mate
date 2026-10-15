@@ -77,14 +77,22 @@ export interface RunUsage {
   cost_currency?: string
 }
 
-/** 轮次明细（GET /sessions/:id/runs；runs 表读模型，内存模式为空数组）。 */
+/**
+ * 轮次明细（GET /sessions/:id/runs；runs 表读模型，内存模式为空数组）。
+ *
+ * v22 起**进行中的轮也在列表里**（一轮在用户发 prompt 时就落行，终态只更新同一行）：
+ * 那时 `status === 'running'`、`last_seq === -1`（**未收口**；0 是该会话第一条事件的合法位次，
+ * 不能当"未知"用）、`ended_at` 缺省、`usage` 通常缺省。展示侧据此跳过/占位，别把 -1 当成位次用。
+ */
 export interface SessionRun {
   id: string
   user_text: string
   status: string // running | completed | failed | cancelled
   error_code?: string
   stop_reason?: string
+  /** 窗口起点 = 本轮 `run.started` 的会话内位次（开轮即定）。 */
   first_seq: number
+  /** 窗口终点 = 终态事件的会话内位次；**-1 = 还没收口**（进行中的轮）。 */
   last_seq: number
   started_at: string
   ended_at?: string
@@ -100,15 +108,26 @@ export interface SessionSearchHit extends SessionSummary {
   matches: number
 }
 
-/** 跨会话消息级搜索命中（M3 ②：seq 为锚点，前端据此滚动定位）。 */
+/**
+ * 跨会话消息级搜索命中（`GET /search/messages`）。
+ *
+ * **锚点是 `seq`（会话内事件位次），不是 `message_id`**：v21 起一方会话的位次各自从 0 起、
+ * 稠密；v23 起 `messages` 是 `events` 的白名单投影（只有 user 原文与 assistant 正文成行），
+ * 它整体可重建，所以 `message_id`（`msg_<26 位 ULID>`，**字符串**）随时可能在重建后换一支——
+ * 拿它做"跳到某条消息"的稳定键会在一次重建后失效。前端定位请用 `seq`（并可用 `seq_hi` 圈出
+ * 一行的区间：assistant 的一行由若干条 `session.message` 拼成）。
+ */
 export interface MessageSearchHit {
   session_id: string
   title?: string
   runtime_id?: string
   role: 'user' | 'assistant' | string
+  /** 命中行第一条事件的会话内位次（**定位锚点**）。 */
   seq: number
+  /** 命中行最后一条事件的位次（与 `seq` 相同 = 单事件行）。 */
   seq_hi?: number
-  message_id?: number
+  /** 读模型行的 id（`msg_<ULID>`，字符串）；**重建会换**，不要拿它当稳定键。 */
+  message_id?: string
   run_id?: string
   snippet: string
   created_at: string

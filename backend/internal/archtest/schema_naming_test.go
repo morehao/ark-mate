@@ -11,6 +11,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/dbclient"
+	"gorm.io/gorm"
 
 	// 本守卫要开一个临时库跑真实迁移，而 `dbclient.Open` → `glog.NewLogger` 需要 zap driver：
 	// 日志出口归装配根（`cmd/mate` 的匿名引入），test 二进制不含它（同 `internal/store` 的做法）。
@@ -49,11 +50,11 @@ type schemaIdentifier struct {
 // 就是全小写下划线：它是 v1 起所有表与列的实际形态，不是新规矩。
 var identifierForm = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// migrateToLatestSchema 造一个临时库、跑完整迁移，返回其中的全部具名对象。
+// migratedSchemaDB 造一个临时库、跑完整迁移，返回可读的句柄（连接在测试结束时关闭）。
 //
-// 用**真实迁移**而不是建表 SQL：迁移内核是 schema 的唯一事实源（`internal/store/migrate.go`
-// 的 `schemaMigrations`），A1/A2 要判的就是它跑完之后的样子。
-func migrateToLatestSchema(t *testing.T) []schemaIdentifier {
+// 与 migrateToLatestSchema 的分工：那个把 schema 摊成"具名对象列表"（A1/A2 要的是名字集合），
+// 这个留给需要**原始 SQL / 行内容**的守卫（例如 G1 要读索引定义、G4 要查某个 meta 键在不在）。
+func migratedSchemaDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "schema-naming.db")
 	db, err := dbclient.Open(path)
@@ -64,7 +65,17 @@ func migrateToLatestSchema(t *testing.T) []schemaIdentifier {
 	if err := s.Migrate(context.Background()); err != nil {
 		t.Fatalf("跑完整迁移: %v", err)
 	}
-	defer func() { _ = s.Close() }()
+	t.Cleanup(func() { _ = s.Close() })
+	return db
+}
+
+// migrateToLatestSchema 造一个临时库、跑完整迁移，返回其中的全部具名对象。
+//
+// 用**真实迁移**而不是建表 SQL：迁移内核是 schema 的唯一事实源（`internal/store/migrate.go`
+// 的 `schemaMigrations`），A1/A2 要判的就是它跑完之后的样子。
+func migrateToLatestSchema(t *testing.T) []schemaIdentifier {
+	t.Helper()
+	db := migratedSchemaDB(t)
 
 	var out []schemaIdentifier
 	rows, err := db.Raw(`SELECT type, name, tbl_name FROM sqlite_master

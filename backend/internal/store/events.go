@@ -10,7 +10,7 @@ import (
 )
 
 // AppendEvent 追加一条事件（facts 唯一写入口的落库侧）：
-// 单事务内完成「分配全局 seq（meta.events_last_seq+1）→ 插 events → 更新 session.last_seq」。
+// 单事务内完成「分配**本会话**位次（`event_sequence` upsert 取号）→ 插 events → 更新 session.last_seq」。
 // 调用方保证 session 已存在（sessions 表 FK）。
 // payload 序列化为 JSON 文本（map/结构体均可——结构体载荷此前不入 transcript，见设计文档修复清单 #10）。
 //
@@ -39,13 +39,16 @@ func (s *Store) AppendEventJSON(ctx context.Context, id, sessionID, typ, payload
 	return seq, nil
 }
 
-// appendEventTx 在**已有事务**内追加事件（序号分配 → 落库 → 抬会话水位），
+// appendEventTx 在**已有事务**内追加事件（位次分配 → 落库 → 抬会话水位），
 // 供单条追加与批量导入共用，保证两条路径的事务边界与水位语义完全一致。
 //
 // 注入的 id 原样落库（不校验、不重铸）：live 路径的 id 由 `manager.publishRaw` 铸，
 // 导入路径的 id 来自 transcript 行且**已在 ImportBatch 里过形状与判重**。
+//
+// **位次是会话内的**（v21）：取号器是 `event_sequence(session_id, seq)`，所以第一条事件的
+// seq 是 0、第二条是 1……与会话第一条事件是 `session.created` 这件事逐字对应。
 func (s *Store) appendEventTx(ctx context.Context, tx *gorm.DB, id, sessionID, typ, payloadJSON string) (int64, error) {
-	seq, err := s.meta.WithTx(tx).IncrSeq(ctx)
+	seq, err := s.eventSequences.WithTx(tx).NextSeq(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -68,6 +71,8 @@ func (s *Store) appendEventTx(ctx context.Context, tx *gorm.DB, id, sessionID, t
 
 // EventsAfter 返回某会话 seq > after 的事件（升序，limit 上限；hasMore 表示仍有余量）。
 // 服务端事件回放（history 续传/断线补偿）从 events 表读，不再受内存环缓冲淘汰限制。
+//
+// **after = -1 = 从该会话第 0 条起**（"没有游标"的哨兵）；`after = 0` 表示"第 0 条之后"。
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, after, limit int64) ([]model.EventEntity, bool, error) {
 	return s.events.After(ctx, sessionID, after, limit)
 }
@@ -77,14 +82,17 @@ func (s *Store) EventCount(ctx context.Context, sessionID string) (int64, error)
 	return s.events.Count(ctx, sessionID)
 }
 
-// EventsAllAfter 全表按 seq 升序游标分页（跨会话；重启恢复注入 bus 用，保证全局号序升序回放）。
-func (s *Store) EventsAllAfter(ctx context.Context, after, limit int64) ([]model.EventEntity, bool, error) {
-	return s.events.AllAfter(ctx, after, limit)
+// EventsAllBySession 全表按 `(session_id, seq)` 升序做复合 keyset 分页（跨会话）。
+//
+// 消费面只有一处：重启恢复把历史事件注入 eventbus。v21 起位次是会话内的量、**没有跨会话全序**，
+// 所以注入只需要"组内按 seq 升序"——按 `(session_id, seq)` 取自然同时满足分组与组内有序。
+func (s *Store) EventsAllBySession(ctx context.Context, afterSessionID string, afterSeq, limit int64) ([]model.EventEntity, bool, error) {
+	return s.events.AllBySession(ctx, afterSessionID, afterSeq, limit)
 }
 
 // EventsBefore 反向分页：返回 seq < before 的最近 limit 条事件（结果仍按 seq 升序）。
 // hasMore 表示窗口之外还有更早的事件（即返回的第一条不是该会话最早的一条）。
-// before<=0 时按「从最新往回」处理（等价于取末尾 limit 条）。
+// **before < 0 时按「从最新往回」处理**（哨兵）；`before = 0` = "第 0 条之前" → 空页。
 func (s *Store) EventsBefore(ctx context.Context, sessionID string, before, limit int64) ([]model.EventEntity, bool, error) {
 	return s.events.Before(ctx, sessionID, before, limit)
 }

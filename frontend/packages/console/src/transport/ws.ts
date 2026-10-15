@@ -37,7 +37,12 @@ export class WsTransport {
   /** 最近一次收到服务端帧的时间（OPEN 即置位；stalled 判定依据）。 */
   private lastActivity = 0
 
-  /** aggId → 已确认水位（last applied event_seq；未知=0 → 全量回放） */
+  /**
+   * aggId → 已确认水位（last applied event_seq）。
+   *
+   * 未知 = **-1**（v21：位次是会话内的、0 是合法位次 —— `session.created` 就是第 0 条，
+   * 所以"没有水位"只能是负数；用 0 当哨兵会让冷挂载恰好丢掉第一帧）。
+   */
   private att = new Map<string, number>()
 
   constructor(
@@ -68,9 +73,9 @@ export class WsTransport {
     return this.stream
   }
 
-  /** 订阅一个会话流：sinceSeq 为空时按 lastSeq（无记录则 0 = 全量）。 */
+  /** 订阅一个会话流：sinceSeq 为空时按已确认水位（无记录则 -1 = 全量回放）。 */
   attach(aggId: string, sinceSeq?: number): void {
-    const since = sinceSeq ?? this.att.get(aggId) ?? 0
+    const since = sinceSeq ?? this.att.get(aggId) ?? -1
     this.att.set(aggId, since)
     this.send({ action: 'attach', agg_id: aggId, since_seq: since })
   }
@@ -141,7 +146,7 @@ export class WsTransport {
       // 首帧：通道级 attach（携带凭据，无 agg_id）。必须最先发，且每次重连都要重发。
       this.rawSend(buildAttachFrame(cfg.token))
       // 重连 resync 裁决：按各 agg 已确认水位重新 attach（服务端 EventsAfter 开区间 →
-      // 权威收尾，仅补缺不重复）；水位为 0 的 agg 全量回放（冷挂载/起点已被淘汰）。
+      // 权威收尾，仅补缺不重复）；水位为 -1 的 agg 全量回放（冷挂载/起点已被淘汰）。
       for (const [aggId, since] of this.att) {
         this.rawSend({ action: 'attach', agg_id: aggId, since_seq: since })
       }

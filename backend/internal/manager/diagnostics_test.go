@@ -143,10 +143,10 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 
 	ae := acl.NewError(acl.ClassConnection, "spawn_failed", "runtime 起不来", nil)
 	ae.StderrTail = []string{"line-1", "line-2"}
-	orch.publishError("c-x", ae, nil)
+	orch.publishError("c-x", "run_test0000000000000000000001", ae, nil)
 
 	var got map[string]any
-	for _, e := range bus.EventsAfter(0) {
+	for _, e := range bus.EventsAll() {
 		if e.Type == BusRunError && e.AggregID == "c-x" {
 			got, _ = e.Payload.(map[string]any)
 		}

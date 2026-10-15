@@ -35,27 +35,41 @@ export function stickToBottom(m: ScrollMetrics, threshold = 80): boolean {
 }
 
 /**
- * C2「加载更早」的 before 游标：当前视图中最小的正 seq（无 → 0）。
- * 0 表示「还没有任何事件」——后端把 before=0 当「取末尾一页」处理，正好覆盖冷挂载。
+ * C2「加载更早」的 `before` 游标：当前视图里最小的已知位次；视图为空时用**服务端水位**推。
+ *
+ * 返回 `null` = 一个已知位次都没有（既没有条目、也没有水位）→ 调用方**省略** `before`
+ * （后端从第 0 条起给第一页——"比空更早"唯一说得通的含义）。
+ *
+ * **v21 起 0 是合法位次**（`session.created` 就是第 0 条），所以这里不再把 `0` 当"没有"：
+ *   - 视图里有 seq 0 → 游标就是 0 → `before=0` = "第 0 条之前" → 空页 → 界面如实说"已到最早"；
+ *   - 视图为空（快照回退把视图重置了）→ 游标取 `watermark + 1`：服务端水位是"已应用到的
+ *     最高位次"，`before = watermark + 1` 的开区间正好取回**最新那一页**，与"加载更早"的
+ *     意图一致（若视图里已经有水位之后的实时条目，它们的最小位次更小，游标自然取它）。
  */
-export function olderCursor(entries: StreamEntry[]): number {
-  let min = 0
+export function olderCursor(entries: StreamEntry[], watermark = -1): number | null {
+  let min: number | null = watermark >= 0 ? watermark + 1 : null
   for (const e of entries) {
     const n = e.seq
-    if (typeof n !== 'number' || n <= 0) continue
-    if (min === 0 || n < min) min = n
+    if (typeof n !== 'number' || n < 0) continue
+    if (min === null || n < min) min = n
   }
   return min
 }
 
 /**
  * 把「更早一页」的条目前插到当前条目之前（C2）。
- * 契约：更早页的 seq 全部小于当前最小 seq（服务端 before 开区间保证），故直接拼接即可；
+ * 契约：更早页的 seq 全部小于 `cursor`（服务端 before 开区间保证），故直接拼接即可；
  * 仍做一层防御——过滤掉 seq ≥ `cursor` 的条目，避免异常响应把历史插到中间。
+ * `cursor === null`（省略 before、走"第一页"那条路）时不过滤：没有任何位次可与之比较。
  */
-export function prependOlder(older: StreamEntry[], current: StreamEntry[], cursor: number): StreamEntry[] {
+export function prependOlder(
+  older: StreamEntry[],
+  current: StreamEntry[],
+  cursor: number | null,
+): StreamEntry[] {
   if (older.length === 0) return current
-  const fresh = cursor > 0 ? older.filter((e) => typeof e.seq !== 'number' || e.seq < cursor) : older
+  const fresh =
+    cursor === null ? older : older.filter((e) => typeof e.seq !== 'number' || e.seq < cursor)
   if (fresh.length === 0) return current
   return [...fresh, ...current]
 }

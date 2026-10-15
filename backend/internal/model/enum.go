@@ -30,10 +30,18 @@ const (
 	// InputDeliveryInterruptThenPrompt 取消当前轮，随后投递（服务端原子化）。
 	InputDeliveryInterruptThenPrompt = "interrupt_then_prompt"
 
-	// MetaKeyEventsLastSeq 全局单调事件序号的计数行键（events.seq 的唯一分配源）。
-	MetaKeyEventsLastSeq = "events_last_seq"
 	// MetaKeyImportMarker transcript 导入标记：value = 导入目录指纹（幂等依据）。
 	MetaKeyImportMarker = "imported_transcripts"
+	// MetaKeyReadModelsRebuild **读模型需要重建**的标记（v21）：value = 让读模型失效的那一版号
+	// （如 `"21"`）。空/不存在 = 读模型与 events 一致。
+	//
+	// 为什么用"标记 + 启动重建"而不是在迁移里逐列搬迁：`runs`/`messages` 是 events 的**投影**
+	// （判据 J7），口径变化（位次值域、白名单、ordinal）的正确处置是**重建**而不是"把旧口径的
+	// 数搬成新口径"——后者每个版本都要写一段一次性搬迁代码，而重建只有一个实现。
+	//
+	// 消费面是**唯一的**：`manager.RebuildSessionReadModels`（启动钩子 + `mate doctor
+	// --rebuild-read-models`）。写完即清（清标记与重建同事务边界内应尽力而为）。
+	MetaKeyReadModelsRebuild = "read_models_rebuild"
 	// MetaKeyImportedAutomations automation 定义导入标记（与能力面同构）。
 	MetaKeyImportedAutomations = "imported_automations"
 	// MetaKeyImportedCapabilities 能力定义导入标记：value = 导入目录（skills+mcp 文件清单）的指纹。
