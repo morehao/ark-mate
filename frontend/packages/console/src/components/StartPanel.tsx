@@ -12,9 +12,11 @@ import { CapabilityPicker } from './CapabilityPicker'
 import { FOLLOW_DEFAULT, selectionPayload, type CapabilityChoice } from '../console/capabilityView'
 import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode } from '../console/sendKey'
 
-// 新建会话时记住的「上次所选模型」。
+// 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
 // 旧键名不回填——代价是既有本地选择在改名后一次性回到默认模型。
+// v26 顺带改了一次**值**的形态（旧值是不透明串）：`modelOptions` 里对不上任何 `model_id` 时
+// 就地清掉（下面的 effect），所以旧值不会以"看起来选着、其实发不出去"的形态留在本地。
 const LAST_MODEL_KEY = 'mate.web.lastModel'
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
@@ -116,9 +118,12 @@ export function StartPanel() {
 
   // 本地记住的模型若已不在运行时候选里（换了底座/换了已配置的 provider），就地清掉：
   // 否则会把运行时不再广告的值发出去 → 建会话被拒（宁可回到「跟随默认」，不留死状态）。
+  //
+  // v26：比的是候选的 **`model_id` 注解**（本地存的是平台模型行 id），不再是候选的 `value`
+  // ——后者是底座的词，两者比不出结果，症状是"每次打开都把记住的模型清掉"。
   useEffect(() => {
     if (!model || modelOptions.length === 0) return
-    if (!modelOptions.some((v) => v.value === model)) {
+    if (!modelOptions.some((v) => v.model_id === model)) {
       setModel(null)
       localStorage.removeItem(LAST_MODEL_KEY)
     }

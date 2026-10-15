@@ -36,8 +36,15 @@ type SessionRec struct {
 	// cwd、原生权限 workspace-write 的边界、不可变），WorkspaceID 是**归属事实**（左栏分组）。
 	// 两者不一致是允许的（工作空间登记被删、或目录后来不可用），执行**恒**用 Cwd。
 	WorkspaceID string
-	ProviderID  string // provider 档案 id（会话级模型选择；空 = 跟随默认模型；v16 起列名带 `_id`）
-	ModelID     string // 会话级模型 id（空 = 底座默认；指向 models.model_id，v16 起列名带 `_id`）
+	// ModelID 会话引用的**平台模型行 id**（`mdl_…`；空 = 底座默认）。
+	//
+	// v26 起语义是"存身份、运行时值现算"（定案「辰」，设计 §5.4）：库/内存里只留平台行 id，
+	// 底座认的不透明值由 adapter 每次现算（`modelValueFor`）——路由键改名后旧会话照样活得下来。
+	// 它**不是** `models.model`（那是发给上游的模型名，一个外部世界的字符串）。
+	//
+	// 这里曾有 `ProviderID`：v19 删 agent 面后它没有任何写入点（恒空），v26 删列——
+	// 供应商由**模型行**给出（`models.provider_id`），再存一份就是第二事实源。
+	ModelID string
 	// RuntimeID 本会话的 runtime 身份（v17 起列 `runtime_id`；v19 起它是**唯一的**身份事实）。
 	RuntimeID string
 	// Generation 会话**执行代际**：每次重建执行上下文（连接断开后重连 / 会话被重开）自增。

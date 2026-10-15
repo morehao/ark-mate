@@ -324,13 +324,14 @@ export function SessionDetailDrawer({
                 const modelOptions = modelValues(modelCatalog ?? undefined)
                 if (modelOptions.length === 0) {
                   // 运行时没给出目录（未启动/未登录）：只如实说明，不展示不透明取值串。
-                  return row('模型', s.model ? '已设置（当前无目录）' : '运行时默认')
+                  return row('模型', s.model ? '已设置（当前无平台清单）' : '运行时默认')
                 }
-                // 会话上存的模型若不在当前目录（换过底座/档案），补一个只读项如实显示，
-                // 避免 antd 回落到原始不透明取值串。
+                // v26：会话里存的是**平台模型行 id**，候选上带着 `model_id` 注解——用它反查当前
+                // 选中项。反查不到（模型行被删了 / 换了清单）就补一个只读项**如实显示不可用**，
+                // 而不是显示成空（空会让用户以为这条会话没选模型）。
                 const values =
-                  s.model && !modelOptions.some((v) => v.value === s.model)
-                    ? [{ value: s.model, name: '当前模型（不在目录中）' }, ...modelOptions]
+                  s.model && !modelOptions.some((v) => v.model_id === s.model)
+                    ? [{ value: s.model, name: '当前模型（不在平台清单里）' }, ...modelOptions]
                     : modelOptions
                 return row(
                   '模型',

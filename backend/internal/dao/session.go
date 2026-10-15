@@ -56,7 +56,6 @@ func (d *SessionDao) Upsert(ctx context.Context, c *model.SessionEntity) error {
 			// 记录里的值必然相同（与 capability_fingerprint 同一条理由）。
 			"workspace_id":        c.WorkspaceID,
 			"workspace_temporary": model.FlagValue(c.WorkspaceTemporary),
-			"provider_id":         c.ProviderID,
 			"model_id":            c.ModelID,
 			"runtime_id":          c.RuntimeID,
 			"runtime_session_id":  c.RuntimeSessionID,
@@ -131,13 +130,24 @@ func (d *SessionDao) UpdateMeta(ctx context.Context, id string, patch model.Sess
 	if patch.Status != nil {
 		set["status"] = *patch.Status
 	}
-	if patch.ProviderID != nil {
-		set["provider_id"] = *patch.ProviderID
-	}
 	if patch.ModelID != nil {
 		set["model_id"] = *patch.ModelID
 	}
 	return d.DB(ctx).Model(&model.SessionEntity{}).Where("id = ?", id).Updates(set).Error
+}
+
+// SetModelID **只**写 `model_id` 一列（v26 的存量回填专用：不碰 updated_at）。
+//
+// 为什么不复用 `UpdateMeta`：那个函数**恒刷新 `updated_at`**（对"用户改元数据"是对的），
+// 而回填是一次**数据迁移**——它不该把用户的会话列表按「最近更新」重排一遍（列表是按
+// `updated_at DESC` 排的）。一次性地改写几百行的 updated_at = 用户看到自己的会话顺序整片变了，
+// 而那不是任何一次用户动作引起的。
+//
+// 空串 = "没有模型引用"（`sessions.model_id` 是 `NOT NULL DEFAULT ''`，所以"置空"就是空串，
+// 不是 NULL——列本身不允许 NULL）。
+func (d *SessionDao) SetModelID(ctx context.Context, id, modelID string) error {
+	return d.DB(ctx).Model(&model.SessionEntity{}).Where("id = ?", id).
+		Update("model_id", modelID).Error
 }
 
 // TouchLastSeq 抬高会话水位（幂等：仅当传入 seq 更大时更新，避免回退已推进的水位）。

@@ -584,32 +584,60 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 			"（或有人把它加了回来）")
 	}
 
-	// ② DTO：线上键名的唯一事实源。
-	dtoDir := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel")
-	dtoFiles, err := filepath.Glob(filepath.Join(dtoDir, "*.go"))
-	if err != nil || len(dtoFiles) == 0 {
-		t.Fatalf("扫不到 %s/*.go: %v（fail-closed）", dtoDir, err)
+	// ② DTO：**平台清单那一面**的线上键名。
+	//
+	// 只扫 `list.go`（平台清单的对外面）而不是整个包：同一个包里还有 `response.go` 的**运行时目录面**
+	// （`ConfigOptionValueResp.ModelID` 是"这个候选对应平台哪一行"的**注解**，wire 键就叫
+	// `model_id`，v26 加的）——那是第三个含义、也是**正确**的那个名字（它真的指向 `models.id`）。
+	// 判据按**面**限定：这里问的是"平台清单行里那个'发给上游的模型名'键叫什么"。
+	listPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "list.go")
+	raw, err := os.ReadFile(listPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed：平台清单的线上键名是这条守卫的一半）", listPath, err)
 	}
-	for _, path := range dtoFiles {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读不到 %s: %v", path, err)
-		}
-		src := strings.ToLower(stripLineComments(string(raw)))
-		if idx := strings.Index(src, "model_id"); idx >= 0 {
-			t.Fatalf("%s 剥注释后仍出现 `model_id`——线上键名一律 `model`（v24）",
-				filepath.Base(path))
-		}
+	if idx := strings.Index(strings.ToLower(stripLineComments(string(raw))), "model_id"); idx >= 0 {
+		t.Fatalf("%s 剥注释后仍出现 `model_id`——平台清单行的上游模型名键一律 `model`（v24）", listPath)
+	}
+	// 反向：目录面的注解必须还在（它消失时"候选 → 平台行"这条链就断了，而前端会静默地
+	// 让所有候选都变成"平台未声明"）。
+	catPath := filepath.Join(backendRoot(t), "internal", "dto", "dtomodel", "response.go")
+	raw, err = os.ReadFile(catPath)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed）", catPath, err)
+	}
+	if !strings.Contains(string(raw), "`json:\"model_id,omitempty\"`") {
+		t.Fatalf("%s 里找不到 `json:\"model_id,omitempty\"`：目录候选的**平台行注解**是 v26 的契约，"+
+			"没了它前端只能把所有候选标成「平台未声明」", catPath)
 	}
 
 	// ③ 前端类型（fail-closed：文件不在即失败，避免"改名后路径变了"静默空转）。
 	tsPath := filepath.Join(frontendRoot(t), "packages", "types", "src", "model.ts")
-	raw, err := os.ReadFile(tsPath)
+	raw, err = os.ReadFile(tsPath)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（fail-closed：前端类型面是这条守卫的一半）", tsPath, err)
 	}
-	if src := strings.ToLower(stripTSComments(string(raw))); strings.Contains(src, "model_id") {
-		t.Fatalf("%s 剥注释后仍出现 `model_id`——前端类型必须跟到线上的 `model`（v24）", tsPath)
+	tsSrc := stripTSComments(string(raw))
+	// 只判**平台清单**那两个接口（`ModelRow` / `ModelCreateReq`）的成员，不判整个文件：
+	// 同一个文件里还有目录候选的 `ConfigOptionValue.model_id`——那是 v26 的**注解**
+	// （候选 → 平台行），它真的指向 `models.id`，名字是对的。判据按**面**限定。
+	for _, name := range []string{"ModelRow", "ModelCreateReq"} {
+		body, ok := tsInterfaceBody(tsSrc, name)
+		if !ok {
+			t.Fatalf("在 %s 里解析不出 `export interface %s {…}` 的成员体"+
+				"（fail-closed：退化成「整文件扫」或「什么都不扫」都会让这条守卫失效）", tsPath, name)
+		}
+		if idx := strings.Index(strings.ToLower(body), "model_id"); idx >= 0 {
+			t.Fatalf("%s 的 %s 剥注释后仍出现 `model_id`——平台清单那一面的线上键一律 `model`（v24）",
+				tsPath, name)
+		}
+		if !strings.Contains(body, "model") {
+			t.Fatalf("%s 的 %s 里找不到 `model` 成员：抽取器读空了（fail-closed）", tsPath, name)
+		}
+	}
+	// 反向：目录候选的注解必须还在（它消失时前端会把所有候选静默标成"平台未声明"）。
+	if body, ok := tsInterfaceBody(tsSrc, "ConfigOptionValue"); !ok || !strings.Contains(body, "model_id") {
+		t.Fatalf("%s 的 ConfigOptionValue 里找不到 `model_id` 注解（v26 契约）："+
+			"没了它前端只能把所有候选标成「平台未声明」", tsPath)
 	}
 
 	// ④ 实体 gorm 标签。
@@ -637,4 +665,21 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 		t.Fatal("`sessions.model_id` 必须仍在：它指的是 `models.id`（v24 之后这个名字才是对的）。" +
 			"把它一起改名 = 把「改会话语义」与「改列名」混在一起（计划 E8）")
 	}
+}
+
+// tsInterfaceBody 抽出 `export interface <name> { … }` 的成员体（**不含**花括号本身）。
+//
+// 为什么需要一个抽取器：词汇类判据"扫整个文件"会把同一个文件里**另一个面**的合法字段一起判红
+// （`packages/types/src/model.ts` 同时装着平台清单面与运行时目录面，两面的 `model_id` 含义不同）。
+// 按接口名取成员体是"按面限定"的最小实现，且**解析不到即失败**（调用方 fail-closed）——
+// 改写法（比如换成 `type X = {…}`）时必须有人回来把这行判据对齐，而不是让它静默空转。
+//
+// 收尾用行首的 `}`（本仓的接口一律这样排版）；成员体为空也返回 ok（那由调用方另行判空）。
+func tsInterfaceBody(src, name string) (string, bool) {
+	re := regexp.MustCompile(`(?m)^export interface ` + regexp.QuoteMeta(name) + `\s*\{([\s\S]*?)^\}`)
+	m := re.FindStringSubmatch(src)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }

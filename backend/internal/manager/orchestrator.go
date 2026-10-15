@@ -177,7 +177,9 @@ type StartOptions struct {
 	// WorkspaceID 是归属事实（左栏分组）。这里两个字段一起传，是因为**定稿发生在同一处**
 	// （CreateSession 解析出 ws 之后），分开传会让两条来源有机会不一致。
 	WorkspaceID string
-	// Model 会话级模型（运行时目录里的不透明取值；空 = 跟随底座默认）。
+	// Model 会话级模型。**`Model` 字段装的是平台模型行 id**（`mdl_…`；空 = 用平台默认那一行），
+	// 由 `startSessionOn` 经 `resolveSessionModel` 解析成"行 + 运行时值"——
+	// v26 起库里/wire 上流通的是**身份**，底座认的不透明值由 adapter 现算（设计 §5.4 定案「辰」）。
 	Model runtime.ModelConfig
 	// Origin 会话来源（平台判定，非用户输入）：'' = 人工，'automation:<id>' = 该 automation 触发。
 	// 只用它给会话列表打标与做"某 automation 历次生效运行"的快速路径；不参与任何鉴权判断。

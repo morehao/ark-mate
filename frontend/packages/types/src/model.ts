@@ -34,6 +34,16 @@ export interface ConfigOptionValue {
   /** 平台观测：该值最近被运行时拒绝过（如凭证缺失）。仅提示，最终以运行时为准。 */
   unavailable?: boolean
   unavailable_reason?: string
+  /**
+   * 这个候选对应**平台清单里的哪一行**（`mdl_…`；空 = 平台没有声明过它）——v26 加。
+   *
+   * 会话的 `model` 收的是平台模型行 id，而选择发生在**运行时目录**上，所以注解跟着候选走：
+   * 一次取数就能"选运行时值、提交平台 id"。
+   *
+   * **空 = 客户端选不了它**（服务端会以 40401 拒），界面上要如实标「平台未声明」而不是悄悄过滤——
+   * "底座广告了、平台没声明"正是最该被看见的那条状态。
+   */
+  model_id?: string
 }
 
 /** 一个会话配置项（select 下拉 / boolean 开关）。 */
@@ -265,8 +275,13 @@ export const configOptionByCategory = (
 export const modelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
   configOptionByCategory(resp?.options, 'model')?.values ?? []
 
-/** 模型引用：创建/切换会话时选定的模型（运行时目录里的不透明 value）。 */
+/** 模型引用：创建/切换会话时选定的模型（**平台模型行 id**）。 */
 export interface ModelRef {
-  /** 运行时目录里的模型 value（原样回传；空 = 跟随运行时默认）。 */
+  /**
+   * 平台模型行 id（`mdl_…`；空 = 跟随平台/底座默认）。
+   *
+   * v26 起名副其实：此前这个字段装的是**运行时目录里的不透明 value**（名字里的 `ID` 是假的），
+   * 所以那时它只能原样回传；现在它就是平台行身份，与 `session.model` 同源。
+   */
   modelID?: string
 }

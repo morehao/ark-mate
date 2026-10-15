@@ -160,31 +160,31 @@ func (s *Service) ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp,
 
 	// orch 为 nil = 纯列表装配（测试/无执行面）：退化为空目录，不做任何拨号。
 	if s.orch == nil {
-		return s.catalogResp(spec.ID, catalogFromNone, nil, time.Time{},
+		return s.catalogResp(ctx, spec.ID, catalogFromNone, nil, time.Time{},
 			"本进程未启用执行面（无 Orchestrator），无法从运行时读取模型目录。"), nil
 	}
 
 	// 1) 活会话优先：该会话的配置项就是运行时此刻的真实状态。
 	if opts, ok := s.orch.liveConfigOptions(); ok {
 		s.catalog.put(spec.ID, opts)
-		return s.catalogResp(spec.ID, catalogFromSession, opts, time.Now().UTC(), ""), nil
+		return s.catalogResp(ctx, spec.ID, catalogFromSession, opts, time.Now().UTC(), ""), nil
 	}
 
 	// 2) 缓存。
 	if e, ok := s.catalog.get(spec.ID, defaultCatalogTTL); ok {
-		return s.catalogResp(e.runtime, catalogFromCache, e.options, e.fetchedAt, ""), nil
+		return s.catalogResp(ctx, e.runtime, catalogFromCache, e.options, e.fetchedAt, ""), nil
 	}
 
 	// 3) resume 历史会话读取（只读取样：读完立即 close，不留下任何新会话）。
 	if opts, err := s.fetchCatalogByResume(ctx, spec); err == nil && len(opts) > 0 {
 		s.catalog.put(spec.ID, opts)
-		return s.catalogResp(spec.ID, catalogFromResume, opts, time.Now().UTC(), ""), nil
+		return s.catalogResp(ctx, spec.ID, catalogFromResume, opts, time.Now().UTC(), ""), nil
 	} else if err != nil {
 		s.logCatalogFallback(spec.ID, err)
 	}
 
 	// 4) 无来源：空目录 + 运行时鉴权引导。
-	return s.catalogResp(spec.ID, catalogFromNone, nil, time.Time{},
+	return s.catalogResp(ctx, spec.ID, catalogFromNone, nil, time.Time{},
 		"运行时尚未提供模型目录：还没有会话可供读取，且没有缓存。发送一条消息后目录会自动补全。"), nil
 }
 
@@ -307,9 +307,50 @@ func (s *Service) newestResumableSession() *SessionRec {
 	return out
 }
 
+// modelIDByValue 算"该 runtime 的不透明值 → 平台模型行 id"的注解表（v26，定案「辰」）。
+//
+// 比对的是**派生值对派生值**：对每条平台行算 `modelValueFor`，再与候选逐字比。所以平台
+// **不解析**底座词表（这与"平台不猜底座形状"是同一条纪律），只是把同一份生成规则跑了两处。
+//
+// 多命中按 **fail-closed**（不收录）：两条平台行派生出同一个运行时值时，这个值指不到确定的一行
+// ——随便挑一条就是"静默选错模型"，而它正是这一版最该防的失败。零命中 = 平台没声明过它。
+//
+// memory 模式（没有平台清单载体）返回 nil：所有候选都"未声明"，这是**正确结论**而不是失败。
+func (s *Service) modelIDByValue(ctx context.Context, runtimeID string) map[string]string {
+	if s.st == nil {
+		return nil
+	}
+	rows, err := s.st.ListModelDefinitions(ctx)
+	if err != nil {
+		glog.Warnw(ctx, "读平台模型清单失败（本次目录候选不带平台注解，客户端因此选不了它们）",
+			"runtime", runtimeID, "err", err)
+		return nil
+	}
+	seen := make(map[string]string, len(rows))
+	dup := map[string]bool{}
+	for i := range rows {
+		v, verr := modelValueFor(s.reg, runtimeID, rows[i].ProviderID, rows[i].Model)
+		if verr != nil || v == "" {
+			// 该底座不消费平台清单 / 这一行编不出值：它没有可注解的候选。
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			dup[v] = true
+			continue
+		}
+		seen[v] = rows[i].ID
+	}
+	for v := range dup {
+		delete(seen, v)
+	}
+	return seen
+}
+
 // catalogResp 组装对外响应：选项投影 + 拒绝值标注 + 鉴权引导。
-func (s *Service) catalogResp(runtimeID, source string, opts []acl.ConfigOption,
+func (s *Service) catalogResp(ctx context.Context, runtimeID, source string, opts []acl.ConfigOption,
 	fetchedAt time.Time, note string) *dtomodel.ModelCatalogResp {
+	// 注解表一次算好（逐候选查表，不逐候选扫清单）。
+	byValue := s.modelIDByValue(ctx, runtimeID)
 	resp := &dtomodel.ModelCatalogResp{
 		Runtime: runtimeID,
 		Source:  source,
@@ -342,6 +383,10 @@ func (s *Service) catalogResp(runtimeID, source string, opts []acl.ConfigOption,
 				val.Unavailable = true
 				val.UnavailableReason = reason
 			}
+			// 平台行的注解（v26）：候选值若恰好等于某条平台行派生的运行时值，就带上那一行的 id。
+			// 没有注解 = 平台没声明过它（客户端**选不了**它）——那正是"底座广告了、平台没声明"
+			// 这条最该被看见的状态，界面上如实标出而不是悄悄过滤掉。
+			val.ModelID = byValue[v.Value]
 			item.Values = append(item.Values, val)
 		}
 		resp.Options = append(resp.Options, item)

@@ -740,6 +740,11 @@ var schemaMigrations = []migration{
 	// v25 的版本步本体在 `migrate_v25.go`（`models` 补两个**可空、无 DEFAULT** 的容量列——
 	// 路由键隔离之后容量不再能从底座目录继承，只能由平台声明；理由写在该文件头）。
 	migrationV25,
+
+	// v26 的版本步本体在 `migrate_v26.go`（会话模型引用改**平台行 id**：删掉 v19 之后就没有写入点
+	// 的 `sessions.provider_id`，并给存量 `model_id` 置一个"待回填"标记——回填在应用层做，因为
+	// store 不得 import adapter；理由写在该文件头）。
+	migrationV26,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

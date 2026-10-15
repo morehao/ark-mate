@@ -59,6 +59,13 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	if err := o.svc.validateSelection(opt.Selection, spec.ID); err != nil {
 		return nil, err
 	}
+	// 模型解析（v26 定案「辰」，设计 §5.4）：请求里给的是**平台模型行 id**（空 = 用平台默认那一行），
+	// 这里解析成**行**并现算底座认的不透明值。位次刻意与能力校验并列——都要在**任何副作用之前**
+	// （不建会话/不拉进程/不写库）：一个查不到的模型 id 不该先把底座拉起来再失败。
+	platformModelID, modelCfg, err := o.svc.resolveSessionModel(ctx, spec.ID, opt.Model.Model)
+	if err != nil {
+		return nil, err
+	}
 	// 能力指纹由**选定**现算（M3）：缺省路径 opt.Selection == nil → 空指纹 →
 	// 代际键与引入代际之前逐字相同（R11）。指纹与下面注入用的 opt.Selection 同源，
 	// 不存在"按 A 算指纹、按 B 注入"的可能。
@@ -100,30 +107,12 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// 跨重启稳定定位）；原生 provider id 存 sess/RuntimeSessionID 列，供恢复承载（load/resume）。
 	as := &ActiveSession{ID: convID, Runtime: spec.ID, Fingerprint: fingerprint,
 		client: rc.client, sess: sess, providerID: sess.ID(), proj: runtime.NewProjection(spec, sess)}
-	// 模型回落链（E5/T2 快路径）：**会话显式 model > models.is_default[该 runtime] > 不下发**。
-	//
-	// 三条纪律：
-	//   1. 只读 `models` 表（v19 之前 agent 上还有一份同值的派生投影，随 agent 面删除）；
-	//   2. runtime 取「本次会话实际选中的 runtime」（就是这里的 spec.ID）；
-	//   3. 查不到默认就**不下发**（`opt.Model.Model` 保持空）——把"没有默认"与"默认是某个值"
-	//      分开，并允许底座自身的默认继续生效（零回归的那一支）。
-	//
-	// 为什么这条路径不可省：T5（写配置文件）要**新进程**才生效，且首版 dsh 侧 Tested=false
-	// 只读——只有 T5 的话，dsh 上"设为默认"点了等于没点。
-	if opt.Model.Model == "" {
-		if v, err := o.svc.DefaultModelValueFor(ctx, spec.ID); err != nil {
-			glog.Warnw(ctx, "读取平台默认模型失败（本次不下发，交给底座自己的默认）",
-				"runtime", spec.ID, "err", err)
-		} else if v != "" {
-			opt.Model = runtime.ModelConfig{Model: v}
-		}
-	}
 	// 会话级模型应用（运行时派生模型面的落地，决策记录）：
-	//   - 值必须来自运行时自报目录（category=model），set 的成败即「可用性」判据；
+	//   - 值由 `modelCfg` 给出（平台行 → adapter 现算，见 `resolveSessionModel`）；
 	//   - 运行时**拒绝**该值 → 建会话失败（错误上抛给调用方，绝不静默回落到底座默认模型）；
 	//   - unsupported_*（运行时未广告模型配置项）→ 忽略（无模型语义）；
 	//   - 成功 → 用返回的**全量**配置项刷新平台目录缓存（顺带清掉曾失败值的标记）。
-	if err := o.applyModelOnSession(ctx, as, spec, sess, opt.Model); err != nil {
+	if err := o.applyModelOnSession(ctx, as, spec, sess, modelCfg); err != nil {
 		_ = sess.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
@@ -142,7 +131,8 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 
 	o.svc.registerSession(&SessionRec{ID: as.ID, Cwd: cwd,
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary,
-		ModelID: opt.Model.Model, RuntimeID: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
+		// **落库的是身份**（平台模型行 id），不是运行时值——定案「辰」的核心。
+		ModelID: platformModelID, RuntimeID: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
 		RuntimeSessionID: providerSessID, Status: SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
@@ -328,12 +318,19 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 		return as, reason, nil
 	}
 	if rec.ModelID != "" {
-		if _, err := as.proj.ApplyModel(ctx, runtime.ModelConfig{Model: rec.ModelID}); err != nil {
+		// v26：`rec.ModelID` 是**平台行 id**（库里不再存底座词表的串），所以恢复时必须**重新现算**
+		// 运行时值。算不出来（行被删了 / 存量回填还没跑到）→ **跳过重放**并留痕：恢复不是用户在
+		// 选模型，不该让老会话因为一个失效引用而打不开（与上面 best-effort 的口径一致）。
+		_, recCfg, rerr := o.svc.resolveSessionModel(ctx, spec.ID, rec.ModelID)
+		if rerr != nil || recCfg.Model == "" {
+			glog.Warnw(ctx, "恢复时按平台模型行重算运行时值失败（跳过重放，继续用运行时当前值）",
+				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
+		} else if _, err := as.proj.ApplyModel(ctx, recCfg); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
-				o.svc.catalog.markRejected(spec.ID, rec.ModelID, modelApplyReason(err))
+				o.svc.catalog.markRejected(spec.ID, recCfg.Model, modelApplyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
-				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", err)
+				"session", rec.ID, "runtime", spec.ID, "model", recCfg.Model, "err", err)
 		}
 	} else if len(as.proj.ConfigOptions()) > 0 {
 		o.svc.catalog.put(spec.ID, as.proj.ConfigOptions())

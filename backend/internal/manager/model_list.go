@@ -242,23 +242,16 @@ func (s *Service) ListModels(ctx context.Context) ([]dtomodel.ModelResp, error) 
 
 // DefaultModelValueFor 返回某 runtime 当前默认模型的**不透明值**（无默认 → 空串）。
 //
-// 这是 T2 快路径（会话创建时下发）与 T5 慢路径（物化进配置文件）**共用的取值面**：
-// 两条路读同一个 `meta.default_model`，所以"底座自己认的默认"与"平台下发的默认"逐字同源。
+// v12 起默认是**单一值**（`meta.default_model`），所以这里没有"某 runtime 的默认"这回事——只是把
+// 同一个平台模型 id 按该 runtime 的生成规则折成它认得不透明值。
 //
-// v12 起默认是**单一值**，所以这里没有"某 runtime 的默认"这回事——只是把同一个平台模型 id
-// 按该 runtime 的生成规则折成它认得不透明值。
+// v26 起会话创建路径改走 `resolveSessionModel`（它一次给出"平台行 id + 运行时值"），本函数因此
+// **委托**给同一条实现而不是自己再走一遍 `defaultModelRow` + `modelValueFor`：两份实现会在
+// "某个底座不声明模型值形态"这类边界上分叉，而那种分叉只在一条路径上显现。保留它是为了这个
+// 语义本身（"某 runtime 的默认模型值"）与既有诊断/测试判据。
 func (s *Service) DefaultModelValueFor(ctx context.Context, runtimeID string) (string, error) {
-	row, ok, err := s.defaultModelRow(ctx)
-	if err != nil || !ok {
-		return "", err
-	}
-	v, verr := modelValueFor(s.reg, runtimeID, row.ProviderID, row.Model)
-	if verr != nil {
-		// 该 runtime 没有声明模型值形态 = **它不消费平台默认模型**（不是失败）：
-		// 回空串表示"不下发"，与会话侧"没有默认"逐字同一形态。
-		return "", nil
-	}
-	return v, nil
+	_, cfg, err := s.resolveSessionModel(ctx, runtimeID, "")
+	return cfg.Model, err
 }
 
 // defaultModelRow 读出默认模型那一行（未设 / 指向已删模型 → (nil,false,nil)）。
@@ -302,6 +295,80 @@ func modelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (
 }
 
 // ——— 内部工具 ———
+
+// resolveSessionModel 把"会话请求里的**平台模型行 id**"解析成 (平台行 id, 运行时模型配置)。
+//
+// 语义（v26 定案「辰」，设计 §5.4）：
+//
+//	入参为空          → 用 `meta.default_model` 那一行；没有默认行 → ("", {}, nil) = **不下发**
+//	                    模型（跟随底座自己的默认，与 v26 之前的"零回归那一支"逐字相同）；
+//	入参非空但形状不对 → 40401 `model_not_found`；
+//	入参非空但查不到行 → 40401 `model_not_found`（**复用既有码**，E9：不新增错误码——它此前的用途是
+//	                    "PATCH/DELETE 打到不存在的条目"，这里扩到"会话引用了一个查不到的模型行"，
+//	                    同一个码、同一份引导（刷新列表））。
+//
+// 返回值的第一项是**平台行 id**（落库的那一个）；第二项是**运行时的不透明值**，由 adapter 现算
+// （`modelValueFor`）——它**不落库、不过 wire**（这正是「辰」的核心：库里只留身份）。
+//
+// 纪律：解析失败一律**上抛**，绝不静默回落到底座默认、也绝不静默换成别的模型——"界面显示 A、
+// 实际用 B"正是本仓要消灭的静默偏差（这也是有意偏离 QwenWork 四级回退的那一处）。
+func (s *Service) resolveSessionModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error) {
+	trimmed := strings.TrimSpace(modelID)
+	if trimmed == "" {
+		row, ok, err := s.defaultModelRow(ctx)
+		if err != nil || !ok {
+			// 读不出来 = 无法校验：不下发模型（不是把上一次的选择偷偷用上）。
+			return "", runtime.ModelConfig{}, err
+		}
+		id, cfg, verr := s.modelValueForRow(runtimeID, row.ID, row.ProviderID, row.Model)
+		if verr != nil {
+			if ae, ok := acl.As(verr); ok && ae.Code == "model_value_unsupported" {
+				// 该底座**不消费**平台模型清单 = 它没有模型语义：这里"不下发"是正确结论而不是失败
+				// （与 v26 之前 `DefaultModelValueFor` 回空串的行为逐字相同——零回归的那一支）。
+				return "", runtime.ModelConfig{}, nil
+			}
+			return "", runtime.ModelConfig{}, verr
+		}
+		return id, cfg, nil
+	}
+	if !strings.HasPrefix(trimmed, objid.Model) || !objid.IsPlatformID(trimmed) {
+		// 形状就不对：它不可能是平台行 id（旧形态的不透明值 / 手抄错的串都会落到这里）。
+		return "", runtime.ModelConfig{}, sessionModelNotFoundErr(trimmed)
+	}
+	row, found, err := s.st.GetModelDefinition(ctx, trimmed)
+	if err != nil {
+		return "", runtime.ModelConfig{}, err
+	}
+	if !found {
+		return "", runtime.ModelConfig{}, sessionModelNotFoundErr(trimmed)
+	}
+	return s.modelValueForRow(runtimeID, row.ID, row.ProviderID, row.Model)
+}
+
+// modelValueForRow 把一条**平台模型行**折成 (行 id, 运行时配置)。
+//
+// 独立成函数而不是塞进 `resolveSessionModel` 的两个分支里：两条来源（显式 id / 默认行）必须走
+// **同一段**翻译，否则"显式选的那条"与"默认那条"的运行时值会各长一套（而那种分叉只在某一条路径上显现）。
+func (s *Service) modelValueForRow(runtimeID, rowID, providerID, model string) (string, runtime.ModelConfig, error) {
+	v, err := modelValueFor(s.reg, runtimeID, providerID, model)
+	if err != nil {
+		return "", runtime.ModelConfig{}, err
+	}
+	// `Provider` 是**留痕语义**（仅展示/诊断，不进任何契约）：v26 之前它填的是恒空的
+	// `SessionRec.ProviderID`，现在由**模型行**派生——值终于有来源，含义一个字没变。
+	return rowID, runtime.ModelConfig{Provider: providerID, Model: v}, nil
+}
+
+// sessionModelNotFoundErr 会话引用了平台清单里查不到的模型。
+//
+// 与 `modelNotFoundErr`（"PATCH/DELETE 打到不存在的条目"）**同一个码**（40401），但文案分开：
+// 这里的处境是"这条会话声明的模型已不在清单里"，出路是**重新选一个**（或先把模型声明回来），
+// 而不是"你打错了 id"。码相同是刻意的（E9）——新增一个码要动 `pkg/code`↔README↔前端三条边。
+func sessionModelNotFoundErr(modelID string) error {
+	return acl.NewError(acl.ClassRequest, "model_not_found",
+		fmt.Sprintf("会话声明的模型 %q 不在平台清单里（或它还不是平台模型 id）："+
+			"请到「设置 · 模型」重新选一个——平台只接受自己声明过的模型", modelID), nil)
+}
 
 // normalizeCapacity 校验并归一一个容量声明（v25）。
 //
