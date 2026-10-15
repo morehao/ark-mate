@@ -30,7 +30,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Checkbox, Form, Input, Modal, Select, Space,
+  Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space,
 } from 'antd'
 import type { InputRef } from 'antd'
 import { ExperimentOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
@@ -84,6 +84,14 @@ interface ModelFormValues {
    * 一条模型收不收图，取决于真实端点上挂着什么（自建网关后面的模型名未必在任何目录里）。
    */
   modalities?: string[]
+  /**
+   * 上下文输入上限 / 单次输出上限（v25；留空 = 由环境兜底）。
+   *
+   * 表单里是**可选数字**：留空就是"平台不声明"（落库 NULL），底座的兜底随之生效。改回留空 =
+   * 清除声明（提交时翻译成 `0`，见 `ModelPatchReq` 的注释）。
+   */
+  max_input_tokens?: number
+  max_output_tokens?: number
 }
 
 /**
@@ -118,6 +126,25 @@ function capabilitiesOf(row: ModelRow): string[] {
 /** 一条模型当前是否声明了图片输入（行卡上那个可点的能力标签）。 */
 function hasImageInput(row: ModelRow): boolean {
   return (row.input_modalities ?? []).includes('image')
+}
+
+/**
+ * 容量的行卡文案（v25）。
+ *
+ * **没声明就如实说"由环境兜底"**：路由键隔离之后，"命中底座内置目录"这条退路已经不存在，所以
+ * 未声明的容量就是底座自己那句自注 "a guess by construction" 的默认值——把它显示成一个数字会让
+ * 用户以为那是自己设的。
+ */
+function capacityLabel(row: ModelRow): string {
+  const inTok = row.max_input_tokens
+  const outTok = row.max_output_tokens
+  if (inTok === null && outTok === null) return '容量由环境兜底'
+  const parts: string[] = []
+  if (inTok !== null) parts.push(`输入 ${inTok}`)
+  else parts.push('输入由环境兜底')
+  if (outTok !== null) parts.push(`输出 ${outTok}`)
+  else parts.push('输出由环境兜底')
+  return parts.join(' / ')
 }
 
 /** 两份能力声明是否等价（逐项比较，避免顺序差异被当成"改过了"）。 */
@@ -169,10 +196,18 @@ function modelFormValues(target: ModelCardTarget, firstVendor?: string): ModelFo
         name: target.row.name ?? '',
         note: target.row.note ?? '',
         modalities: capabilitiesOf(target.row),
+        // `null`（未声明）→ `undefined`：`InputNumber` 的空态就是 undefined，两者混用会让
+        // 「没填」与「填了 0」在线上的表现分不开。
+        max_input_tokens: target.row.max_input_tokens ?? undefined,
+        max_output_tokens: target.row.max_output_tokens ?? undefined,
       }
     // 新建时把每个键都**显式**给空值：`setFieldsValue` 是合并语义，省略的键会继承上一次打开
     // 残留的值（实测：新建模型时「模型名」框里还留着上一条的名字）。
-    : { vendor: target.vendor ?? firstVendor, model: '', name: '', note: '', modalities: ['text'] }
+    : {
+        vendor: target.vendor ?? firstVendor,
+        model: '', name: '', note: '', modalities: ['text'],
+        max_input_tokens: undefined, max_output_tokens: undefined,
+      }
 }
 
 /**
@@ -361,6 +396,22 @@ function ModelForm({ form, target, vendorOptions, busy, noopLine, onSubmit, onCa
           </Form.Item>
           <Form.Item label="备注" name="note">
             <Input placeholder="可选" autoComplete="off" />
+          </Form.Item>
+          {/* 容量（v25）：**平台声明**，不是平台探测到的事实。留空 = 不声明——那时底座自己的兜底
+              生效（dsh 的默认值自注 "a guess by construction"），所以行卡上必须如实标出来。 */}
+          <Form.Item
+            label="输入上限"
+            name="max_input_tokens"
+            extra="留空 = 不声明，由环境兜底（不是平台声明的值）"
+          >
+            <InputNumber min={1} step={1024} style={{ width: '100%' }} placeholder="例如 131072" />
+          </Form.Item>
+          <Form.Item
+            label="单次输出上限"
+            name="max_output_tokens"
+            extra="留空 = 不声明，由环境兜底（不是平台声明的值）"
+          >
+            <InputNumber min={1} step={512} style={{ width: '100%' }} placeholder="例如 8192" />
           </Form.Item>
         </div>
         {/* 输入能力：**必须由用户声明**——平台既不猜也不探测（自建网关后面的模型 id
@@ -642,6 +693,9 @@ export function ModelSettingsPanel() {
         note: v.note || undefined,
         // 用户在表单里声明的输入能力（新建时总是显式带上，默认就是仅文本）。
         input_modalities: modalitiesOf(v.modalities),
+        // 容量：留空 = 键不出现（不声明）。
+        max_input_tokens: v.max_input_tokens ?? undefined,
+        max_output_tokens: v.max_output_tokens ?? undefined,
       }))
       if (!created) return
       closeModelCard()
@@ -653,9 +707,26 @@ export function ModelSettingsPanel() {
     }
     if (modelCard?.mode === 'edit') {
       const row = modelCard.row
-      const patch: { name?: string; note?: string; input_modalities?: string[] } = {}
+      const patch: {
+        name?: string
+        note?: string
+        input_modalities?: string[]
+        max_input_tokens?: number
+        max_output_tokens?: number
+      } = {}
       if ((v.name ?? '') !== (row.name ?? '')) patch.name = v.name ?? ''
       if ((v.note ?? '') !== (row.note ?? '')) patch.note = v.note ?? ''
+      // 容量：**只在真的改过时才发**（省略 = 不改）。留空 → `0`（服务端把它翻成"清除声明"）。
+      // 用 `?? null` 归一：`undefined`（没填）与 `null`（清过）在界面上是同一个状态。
+      const capacityOf = (next: number | undefined | null, cur: number | null): number | undefined => {
+        const n = next ?? null
+        if (n === cur) return undefined
+        return n ?? 0
+      }
+      const nextIn = capacityOf(v.max_input_tokens, row.max_input_tokens ?? null)
+      if (nextIn !== undefined) patch.max_input_tokens = nextIn
+      const nextOut = capacityOf(v.max_output_tokens, row.max_output_tokens ?? null)
+      if (nextOut !== undefined) patch.max_output_tokens = nextOut
       // **只在真的改过时才发**：省略 = 不改（wire 语义）。以前写成 `!!v.image_input !== hasImageInput(row)`，
       // 而未注册字段恒为 `undefined`，于是改备注 = 把图片能力静默改回仅文本。
       const nextModalities = modalitiesOf(v.modalities)
@@ -1020,6 +1091,18 @@ export function ModelSettingsPanel() {
                             {image ? '文本+图片' : '文本'}
                           </button>
                           {row.id === (view?.default_model ?? '') && <span className="fg-rowtag fg-info">默认</span>}
+                          {/* 容量（v25）：声明过就标出来；**没声明就如实说"由环境兜底"**——
+                              那时用户看到的上下文上限不是他设的，而是一句猜测（底座的默认值）。 */}
+                          <span
+                            className="fg-rowtag"
+                            title={
+                              row.max_input_tokens === null || row.max_output_tokens === null
+                                ? '未声明的容量由环境兜底（不是平台声明）'
+                                : '这条模型的容量由平台声明'
+                            }
+                          >
+                            {capacityLabel(row)}
+                          </span>
                           {row.note ? <span className="fg-rowmeta">{row.note}</span> : null}
                           <span className="fg-rowactions">
                             <Button size="small" onClick={() => (open ? closeModelCard() : openModelCard({ mode: 'edit', row }))}>

@@ -736,6 +736,10 @@ var schemaMigrations = []migration{
 	// v24 的版本步本体在 `migrate_v24.go`（**纯改名**：`models.model_id` → `models.model`；
 	// 本步零行为变化，验收判据是 `git diff testdata/` 为空——理由写在该文件头）。
 	migrationV24,
+
+	// v25 的版本步本体在 `migrate_v25.go`（`models` 补两个**可空、无 DEFAULT** 的容量列——
+	// 路由键隔离之后容量不再能从底座目录继承，只能由平台声明；理由写在该文件头）。
+	migrationV25,
 }
 
 // latestSchemaVersion 当前支持的最新 schema 版本。

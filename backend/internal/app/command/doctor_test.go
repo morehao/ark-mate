@@ -532,6 +532,7 @@ func TestDoctorReportJSONShape(t *testing.T) {
 	const want = `{"version":"0.1.0","apiContract":"v1","home":"/tmp/mate","addr":"127.0.0.1:10001",` +
 		`"verifyPayload":false,"checks":[{"name":"home","status":"ok","detail":"可写"}],` +
 		`"providers":{"carrier":"","providerRows":0,"providerIds":null,"modelRows":0,` +
+		`"modelsWithoutCapacity":null,"modelsPartialCapacity":null,` +
 		`"runtimeConfigDigestWritten":false,"providersFile":false,"providersBackup":false,` +
 		`"legacySecretDir":false,"legacySecretKeyFile":false,"legacySecretCount":0,` +
 		`"credentialsExists":false,"credentialsPermOk":false,"credentialsRefs":0,` +

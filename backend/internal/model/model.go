@@ -45,6 +45,18 @@ type ModelEntity struct {
 	// （两态取值空间很小，第二张表/JSON 列都不划算）。**总是带值**：`text` 是明确值而不是
 	// "没设"，所以 dsh adapter 总是写 `input`（ADR-12 的代价段：会显式覆盖底座 catalog）。
 	InputModalities string `gorm:"column:input_modalities;not null;default:'text'"`
+	// MaxInputTokens 上下文输入上限（**平台声明**；nil = 未声明）。
+	//
+	// v25 加（路由键隔离的连带决定）：隔离后每条路由都是平台手写的声明，底座内置目录再也命中不了
+	// ——容量不再是"恰好命中目录时侥幸拿到的真值"，只能由平台说。**可空、无 DEFAULT**：0 当不了
+	// "未声明"的哨兵（底座 schema 是 `min(1)`，写 0 会被拒），而 `NOT NULL DEFAULT 0` 会逼着
+	// 每一行携带一个假值。nil = adapter **不下发**该字段。
+	//
+	// 列名刻意**不抄底座的词**（那边叫 `contextWindow`/`maxTokens`）：底座词表不进内核（A9 的精神），
+	// 映射只住在 adapter 里。
+	MaxInputTokens *int64 `gorm:"column:max_input_tokens"`
+	// MaxOutputTokens 单次输出上限（平台声明；nil = 未声明）。语义同 MaxInputTokens。
+	MaxOutputTokens *int64 `gorm:"column:max_output_tokens"`
 	// Revision 写面 CAS 判据（同 SkillEntity.Revision）。
 	Revision int64 `gorm:"column:revision;not null"`
 	// CreatedAt 创建时刻（RFC3339Nano(UTC)；存量行是 `updated_at` 近似值，见 ProviderEntity.CreatedAt）。

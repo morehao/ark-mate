@@ -2,8 +2,10 @@ package dsh
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -179,6 +181,160 @@ func TestSyncModelsUnsupportedWithoutPatchPath(t *testing.T) {
 	if out.Status != resource.StatusUnsupported || len(out.Problems) == 0 {
 		t.Fatalf("未声明落点应报 unsupported 且带可执行出路，实际 %+v", out)
 	}
+}
+
+// TestBuildPatchDeliversCapacityOnlyWhenDeclared v25：容量是**平台声明**——非空才写进底座声明，
+// 空就一个字段都不写（让底座自己的兜底生效，而不是由平台塞一个假值）。
+//
+// 三条判据，各自对应一种静默退化：
+//
+//	① 声明过的模型下**恰恰**出现 `contextWindow:` / `maxTokens:` 各一行，且值就是平台那个数；
+//	② 没声明的模型下**一行都没有**（写成 `contextWindow: 0` 会被底座的 `min(1)` 校验门拒掉，
+//	   而"写了 0"与"没写"在界面上长得一模一样）；
+//	③ 字段名用**底座的词**且只出现在这一处（内核那两列叫 `max_input_tokens`/`max_output_tokens`）
+//	   ——反向断言：产物里不得出现平台的列名。
+func TestBuildPatchDeliversCapacityOnlyWhenDeclared(t *testing.T) {
+	in, out := int64(131072), int64(8192)
+	b, err := buildPatch(resource.Set{
+		Runtime: ID,
+		Providers: []resource.Provider{
+			{ID: "gw", Name: "网关", Protocol: resource.ProtocolOpenAI, BaseURL: "https://gw.example.com/v1"},
+		},
+		Models: []resource.Model{
+			{ID: "m1", ProviderID: "gw", Model: "with-cap", Name: "有容量",
+				InputModalities: []string{resource.ModalityText},
+				MaxInputTokens:  &in, MaxOutputTokens: &out},
+			{ID: "m2", ProviderID: "gw", Model: "no-cap", Name: "没容量",
+				InputModalities: []string{resource.ModalityText}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+
+	// ① 有容量的那一条：值就是平台那个数，且写在 `input` **之前**（与 QwenWork 口径一致：先能力后上限）。
+	wantBlock := "          - id: \"with-cap\"\n" +
+		"            name: \"有容量\"\n" +
+		"            contextWindow: 131072\n" +
+		"            maxTokens: 8192\n" +
+		"            input: [text]\n"
+	if !strings.Contains(got, wantBlock) {
+		t.Fatalf("声明过的容量没有按底座字段名交付：\nwant:\n%s\ngot:\n%s", wantBlock, got)
+	}
+
+	// ② 没容量的那一条：一个字段都不写。
+	noCapBlock := "          - id: \"no-cap\"\n" +
+		"            name: \"没容量\"\n" +
+		"            input: [text]\n"
+	if !strings.Contains(got, noCapBlock) {
+		t.Fatalf("未声明的容量必须**不下发该字段**：\nwant:\n%s\ngot:\n%s", noCapBlock, got)
+	}
+	for _, banned := range []string{"contextWindow: 0", "maxTokens: 0"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("未声明的容量写成了 %q——底座的 `min(1)` 会拒掉它，而「没声明」与「声明成 0」看起来一样", banned)
+		}
+	}
+	// 每个字段名**恰好**出现一次（只有声明过的那条模型）。
+	for _, field := range []string{"contextWindow: ", "maxTokens: "} {
+		if c := strings.Count(got, field); c != 1 {
+			t.Fatalf("`%s` 应恰好出现 1 次（只有声明过的那条），实际 %d 次：\n%s", field, c, got)
+		}
+	}
+
+	// ③ 平台的列名不得出现在产物里（底座词表与内核词表不许混）。
+	for _, banned := range []string{"max_input_tokens", "max_output_tokens"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("产物里出现了内核的列名 %q——交付必须用底座的字段名", banned)
+		}
+	}
+}
+
+// TestDshRouteKeyAgreesBetweenPatchAndModelValue 守卫③（**动态那半**）：配置里声明的路由键与
+// ACP 模型值的第一段必须**逐字同源**。
+//
+// 为什么必须有这一条（静态那半不够）：前者在 `config.go`、后者在 `model_value.go`——**只改一处**
+// 是完全编译得过的，而后果是 `set_config_option` 找不到 provider，**所有选了模型的会话立刻起不来**
+// （计划 R1 就是这个现场）。静态判据只能钉"调用点有几个"，钉不住"两边编出来的串真的相等"，而
+// 后者才是运行时真正消费的东西。
+//
+// 反证（实跑）：把 `model_value.go` 的 `routeKey(providerID)` 改回 `providerID` → 本用例红。
+func TestDshRouteKeyAgreesBetweenPatchAndModelValue(t *testing.T) {
+	set := goldenSet()
+	b, err := buildPatch(set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := patchProviderKeys(t, string(b))
+	if len(keys) == 0 {
+		t.Fatal("patch 里一个 `providers.<k>` 键都没解析到（fail-closed：判据自身失效）")
+	}
+	if len(keys) != len(set.Providers) {
+		t.Fatalf("patch 里的路由键数（%d）与声明的供应商数（%d）不等", len(keys), len(set.Providers))
+	}
+
+	mv := ModelValue{}
+	for _, m := range set.Models {
+		v, merr := mv.Value(m.ProviderID, m.Model)
+		if merr != nil {
+			t.Fatalf("编模型值失败：%v", merr)
+		}
+		var seg []string
+		if uerr := json.Unmarshal([]byte(v), &seg); uerr != nil || len(seg) != 2 {
+			t.Fatalf("dsh 的模型值形态应是长度为 2 的 JSON 数组，实际 %q（err=%v）", v, uerr)
+		}
+		if !keys[seg[0]] {
+			t.Errorf("模型 %s/%s 的 ACP 值第一段是 %q，而 patch 里声明的路由键是 %v——"+
+				"两边分叉 ⇒ `set_config_option` 找不到 provider（所有选了模型的会话起不来）",
+				m.ProviderID, m.Model, seg[0], sortedKeyList(keys))
+		}
+	}
+
+	// 默认模型那一行（`- id: acp` 的 `provider:`）也必须是同一个键集里的一个——它是"新进程起来时
+	// 当前选中"的那一行，与上面两条同等重要。
+	for _, ln := range strings.Split(string(b), "\n") {
+		if !strings.HasPrefix(ln, "    provider: ") {
+			continue
+		}
+		v := strings.Trim(strings.TrimSpace(strings.TrimPrefix(ln, "    provider: ")), `"`)
+		if !keys[v] {
+			t.Errorf("默认模型的 provider 值 %q 不在 patch 声明的路由键里：%v", v, sortedKeyList(keys))
+		}
+	}
+}
+
+// patchProviderKeys 抽出 patch 里 `providers.<k>:` 的键集（缩进 6 + 带引号 = 路由键）。
+func patchProviderKeys(t *testing.T, patch string) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	inProviders := false
+	for _, ln := range strings.Split(patch, "\n") {
+		if strings.HasPrefix(ln, "    providers:") {
+			inProviders = true
+			continue
+		}
+		if !inProviders {
+			continue
+		}
+		if strings.HasPrefix(ln, "      \"") && strings.HasSuffix(ln, "\":") {
+			keys[strings.TrimSuffix(strings.TrimPrefix(ln, "      \""), "\":")] = true
+			continue
+		}
+		if strings.TrimSpace(ln) != "" && !strings.HasPrefix(ln, "      ") {
+			inProviders = false
+		}
+	}
+	return keys
+}
+
+// sortedKeyList 把键集排序后返回（报错信息要确定）。
+func sortedKeyList(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestValidationGateAcceptsCompleteDump(t *testing.T) {

@@ -25,6 +25,12 @@ type ModelResp struct {
 	// 本来支持什么（事实）——两者在 `input` 上会打架，而平台的声明**总是写进底座声明**
 	// （ADR-12 的代价：会覆盖 catalog，所以界面必须让用户能看见并一键改）。
 	InputModalities []string `json:"input_modalities,omitempty"`
+	// MaxInputTokens / MaxOutputTokens **平台声明的容量**（v25；`null` = 未声明）。
+	//
+	// **没有 `omitempty`**：这两个字段的"没声明"是一个**要说出来的事实**——界面据此标注"容量由环境
+	// 兜底（不是平台声明）"，而省略键会让"未声明"与"这台服务版本旧、根本没这个字段"长得一样。
+	MaxInputTokens  *int64 `json:"max_input_tokens"`
+	MaxOutputTokens *int64 `json:"max_output_tokens"`
 	// Revision 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**——同一内容写两次它照样前进，
 	// 而"那一版到底是什么"的内容指纹在审计 digest 里（ADR-13）。
 	Revision int64 `json:"revision"`
@@ -62,6 +68,10 @@ type ModelCreateReq struct {
 	// InputModalities 输入模态（`["text"]` | `["text","image"]`）；nil = 默认 `["text"]`。
 	// 非法取值 → 40501 并列出合法取值（枚举型键的既有纪律：不静默回落）。
 	InputModalities *[]string `json:"input_modalities"`
+	// MaxInputTokens / MaxOutputTokens 平台声明的容量（v25；省略 = 不声明）。
+	// 取值必须 ≥ 1（0 不是合法容量）；非法取值 → 40501。
+	MaxInputTokens  *int64 `json:"max_input_tokens"`
+	MaxOutputTokens *int64 `json:"max_output_tokens"`
 	// IsDefault true = 把这条设为**唯一**默认模型（写进 meta 的单一值，ADR-21）。
 	IsDefault *bool `json:"is_default"`
 	// Runtime 仅为**显式拒收**而存在（A2）。它不是资源字段，任何非 nil 取值都报 40001。
@@ -73,7 +83,19 @@ type ModelPatchReq struct {
 	Name            *string   `json:"name"`
 	Note            *string   `json:"note"`
 	InputModalities *[]string `json:"input_modalities"`
-	IsDefault       *bool     `json:"is_default"`
+	// MaxInputTokens / MaxOutputTokens 平台声明的容量（v25）。**三态**，因为"未声明"是一个要能回得去
+	// 的状态：
+	//
+	//	省略（nil） = 不改
+	//	≥ 1         = 声明成这个数
+	//	0           = **清除声明**（落库为 NULL，回到"由环境兜底"）
+	//
+	// 为什么用 0 当"清除"的哨兵：0 本来就不是合法容量（底座 schema 是 `min(1)`，写 0 会被它的校验门
+	// 拒掉），所以它不会与任何真实取值撞车；负数 → 40501 `invalid_param`。
+	// 为什么不用 `null`：encoding/json 里 `null` 与"键缺失"都落成 nil，两者分不开。
+	MaxInputTokens  *int64 `json:"max_input_tokens"`
+	MaxOutputTokens *int64 `json:"max_output_tokens"`
+	IsDefault       *bool  `json:"is_default"`
 	// Runtime 见 ModelCreateReq：显式拒收（A2）。
 	Runtime *string `json:"runtime"`
 }

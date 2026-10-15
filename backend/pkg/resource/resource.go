@@ -126,6 +126,16 @@ type Model struct {
 	// ——代价是覆盖底座 catalog（底座目录里本来能收图的模型会变成纯文本，除非用户勾选图片）。
 	// 这条代价是拍板结果、不是 bug：界面必须让用户能看见并一键改。
 	InputModalities []string
+	// MaxInputTokens / MaxOutputTokens **平台声明的容量**（v25；nil = 未声明）。
+	//
+	// 为什么是**指针**而不是 int64：nil（未声明）与一个数（声明过）必须可分——adapter 只在非 nil 时
+	// 写底座对应字段，nil 就什么都不写（让底座自己的兜底生效，并在诊断里如实说"这不是平台声明"）。
+	// 0 不是合法容量（底座 schema 是 `min(1)`），写面已把它折成 nil。
+	//
+	// 字段名用平台的词（输入/输出上限），**不抄底座**的 `contextWindow`/`maxTokens`：那是底座词表，
+	// 映射只住在 adapter 里（A9 的精神）。
+	MaxInputTokens  *int64
+	MaxOutputTokens *int64
 }
 
 // Set 某个 runtime 该拿到的**一整份**清单（整份替换语义，不是增量）。

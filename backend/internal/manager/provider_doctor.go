@@ -65,6 +65,17 @@ type ProviderDoctorFacts struct {
 	ProviderIDs []string `json:"providerIds"`
 	// ModelRows 平台模型清单总行数（跨 runtime；K5 的迁移前检查项之一）。
 	ModelRows int `json:"modelRows"`
+	// ModelsWithoutCapacity **两个容量都没声明**的模型（升序 `<provider>/<model>`）。
+	//
+	// v25 起容量只能由平台声明（路由键隔离之后再也命中不了底座内置目录）：没声明的模型会落到
+	// 底座自己的兜底（dsh 的 `DEFAULT_CONTEXT_WINDOW`/`DEFAULT_MAX_TOKENS`，源码自注
+	// "a guess by construction"）。**只报，不判红**——"没声明"是一个合法状态，出路是去
+	// 「设置 · 模型」逐条填。
+	ModelsWithoutCapacity []string `json:"modelsWithoutCapacity"`
+	// ModelsPartialCapacity 只声明了**一个**容量的模型（升序 `<provider>/<model>`）。
+	//
+	// 与上面分开列：部分声明比全未声明更危险——用户以为设过了，实际只有一半是自己的值。
+	ModelsPartialCapacity []string `json:"modelsPartialCapacity"`
 	// RuntimeConfigDigestWritten `meta.runtime_config_digest` 是否被写过
 	// （写过 = 这台机器上已经有物化过的模型配置；K5 的迁移前检查项之一）。
 	RuntimeConfigDigestWritten bool `json:"runtimeConfigDigestWritten"`
@@ -246,20 +257,22 @@ type ProviderRuntimeFacts struct {
 func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts ProviderDoctorOptions) ProviderDoctorFacts {
 	providerDir := strings.TrimSpace(opts.ProviderDir)
 	facts := ProviderDoctorFacts{
-		Carrier:              "unknown",
-		CarrierNote:          "没有可读的持久层：provider 档案的行数、悬空引用与对账都无从校验",
-		DBPath:               strings.TrimSpace(opts.DBPath),
-		ProviderIDs:          []string{},
-		NoKeyProviders:       []string{},
-		ProviderKeysWithKey:  []string{},
-		McpSecretRefs:        []string{},
-		MissingInCredentials: []string{},
-		MissingInStore:       []string{},
-		OrphanMcpSecrets:     []string{},
-		ImportMismatch:       []string{},
-		Runtimes:             []ProviderRuntimeFacts{},
-		MissingBaseURL:       []string{},
-		SensitiveFiles:       []SensitiveFileFacts{},
+		Carrier:               "unknown",
+		CarrierNote:           "没有可读的持久层：provider 档案的行数、悬空引用与对账都无从校验",
+		DBPath:                strings.TrimSpace(opts.DBPath),
+		ProviderIDs:           []string{},
+		NoKeyProviders:        []string{},
+		ProviderKeysWithKey:   []string{},
+		McpSecretRefs:         []string{},
+		MissingInCredentials:  []string{},
+		MissingInStore:        []string{},
+		OrphanMcpSecrets:      []string{},
+		ImportMismatch:        []string{},
+		Runtimes:              []ProviderRuntimeFacts{},
+		MissingBaseURL:        []string{},
+		SensitiveFiles:        []SensitiveFileFacts{},
+		ModelsWithoutCapacity: []string{},
+		ModelsPartialCapacity: []string{},
 	}
 
 	// 文件侧（与载体无关，两种模式都要看）：providers.json 与它的迁移前备份是否存在。
@@ -321,6 +334,17 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		}
 		if models, err := st.ListModelDefinitions(ctx); err == nil {
 			facts.ModelRows = len(models)
+			for i := range models {
+				label := models[i].ProviderID + "/" + models[i].Model
+				switch {
+				case models[i].MaxInputTokens == nil && models[i].MaxOutputTokens == nil:
+					facts.ModelsWithoutCapacity = append(facts.ModelsWithoutCapacity, label)
+				case models[i].MaxInputTokens == nil || models[i].MaxOutputTokens == nil:
+					facts.ModelsPartialCapacity = append(facts.ModelsPartialCapacity, label)
+				}
+			}
+			sort.Strings(facts.ModelsWithoutCapacity)
+			sort.Strings(facts.ModelsPartialCapacity)
 		}
 		if _, ok, err := st.GetMeta(ctx, model.MetaKeyRuntimeConfigDigest); err == nil {
 			facts.RuntimeConfigDigestWritten = ok

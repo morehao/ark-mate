@@ -188,7 +188,8 @@ func TestDefaultModelIsSingleAndDeleteClears(t *testing.T) {
 // 判据是"同一输入产出逐字节相同的值"——本测试用两个**形态不同**的实现把"内核没有内建形态"
 // 这件事钉住：
 //
-//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["<provider>","<model>"]`（JSON 数组）
+//	dsh（真实 adapter，走 `pkg/runtime/dsh`）：`["mate-<provider>","<model>"]`（JSON 数组；第一段是
+//	派生路由键，v25 起带平台保留前缀）
 //	rtx（合成夹具，走 internal/testutil/runtimetest）：`<provider>/<model>`
 //
 // 两者形态**刻意不同**：如果内核还留着一个 `switch runtimeID`，它就必然挑中其中一个形态、
@@ -200,7 +201,8 @@ func TestModelValueForTwoAlgorithmsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != `["deepseek-main","deepseek-v4-flash"]` {
+	// v25 起第一段是**派生后的路由键**（带平台保留前缀）——它与配置里声明的键必须逐字同源。
+	if v != `["mate-deepseek-main","deepseek-v4-flash"]` {
 		t.Fatalf("内置底座的模型值形态不符: %q", v)
 	}
 	var arr []string

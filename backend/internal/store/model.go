@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
@@ -30,24 +31,49 @@ type ModelColumns struct {
 	Name            string
 	Note            string
 	InputModalities string
+	// MaxInputTokens / MaxOutputTokens 平台声明的容量（v25；nil = 未声明）。
+	// 指针而不是 int64：nil 与 0 在这条链路上是**两件事**（0 不是合法容量，见 ModelEntity 的注释）。
+	MaxInputTokens  *int64
+	MaxOutputTokens *int64
 }
 
 // ModelContent 是模型行里**可变的内容列**（身份列 `provider_id`/`model` 不在其中——
 // 改身份等于换一条资源，不在 PATCH 语义里）。
+//
+// 容量在这里是**解析后的最终值**（调用方已把"不改"折成原值、"清除"折成 nil）：本层不做指针语义，
+// 它只写库。
 type ModelContent struct {
 	Name            string
 	Note            string
 	InputModalities string
+	MaxInputTokens  *int64
+	MaxOutputTokens *int64
 }
 
 // digest 这条模型行的规范 JSON 摘要（ADR-10）。
 //
 // 身份两列**进摘要**（它们是这一版内容的一部分）；`revision` / 时间列不进（记账不是内容）。
+//
+// 容量（v25）也进摘要：它是**内容**，改了它交付字节就变。nil 与 0 在这里必须**可区分**——nil 记
+// 空串（"未声明"），有值记十进制（`0` 不是合法容量，落库前已被写面折成 nil）。
 func modelRowDigest(cols ModelColumns) string {
 	return rowDigest(map[string]string{
 		"id": cols.ID, "provider_id": cols.ProviderID, "model": cols.Model,
 		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
+		"max_input_tokens": capacityDigest(cols.MaxInputTokens),
+		"max_output_tokens": capacityDigest(cols.MaxOutputTokens),
 	})
+}
+
+// capacityDigest 容量的摘要形态（nil = 空串；有值 = 十进制）。
+//
+// 为什么不直接 `strconv.FormatInt(*v)` 混着来：nil 解引用会 panic，而 `fmt.Sprint(nil)` 是
+// `<nil>`——那会把"未声明"记成一个看起来像值的串。空串是唯一不会与任何合法取值撞车的形态。
+func capacityDigest(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatInt(*v, 10)
 }
 
 // CreateModelDefinition 新建一条模型条目 + 一条审计，同事务。
@@ -62,6 +88,7 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 			return s.models.WithTx(tx).CreateCAS(ctx, &model.ModelEntity{
 				ID: cols.ID, ProviderID: cols.ProviderID, Model: cols.Model,
 				Name: cols.Name, Note: cols.Note, InputModalities: cols.InputModalities,
+				MaxInputTokens: cols.MaxInputTokens, MaxOutputTokens: cols.MaxOutputTokens,
 				Revision: 1, CreatedAt: now, UpdatedAt: now,
 			})
 		})
@@ -69,17 +96,20 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 
 // UpdateModelDefinition 覆盖一条模型条目的**内容列** + 一条审计，同事务。
 //
-// 只碰 `name` / `note` / `input_modalities` / `revision` / `updated_at`——`provider_id` /
-// `model` 是身份，改它们等于换一条资源，不在覆盖语义里。
+// 只碰 `name` / `note` / `input_modalities` / `max_input_tokens` / `max_output_tokens` /
+// `revision` / `updated_at`——`provider_id` / `model` 是身份，改它们等于换一条资源，不在覆盖语义里。
 func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content ModelContent, expectedRev int64, actor string) (bool, error) {
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
+		"max_input_tokens": capacityDigest(content.MaxInputTokens),
+		"max_output_tokens": capacityDigest(content.MaxOutputTokens),
 	})
 	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, id, actor,
 		model.DefinitionActionUpdate, digest, expectedRev,
 		func(tx *gorm.DB, now time.Time) (bool, error) {
 			return s.models.WithTx(tx).UpdateColumnsCAS(ctx, id, map[string]any{
 				"name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
+				"max_input_tokens": content.MaxInputTokens, "max_output_tokens": content.MaxOutputTokens,
 			}, expectedRev, now)
 		})
 }

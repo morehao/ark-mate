@@ -114,6 +114,16 @@ export interface ModelRow {
    * 「图片不会被接受」，要图片得逐条勾选——所以列表里必须让用户看得见、改得动。
    */
   input_modalities?: string[]
+  /**
+   * 上下文输入上限（**平台声明**；`null` = 未声明）。
+   *
+   * v25 起容量只能由平台声明：路由键加了保留前缀之后，交付的路由再也命中不了底座内置目录，
+   * 于是"没声明"就等于**用底座自己的兜底**（那是一句猜测，不是平台事实）。界面必须把这层区别
+   * 如实标出来（行卡上那句「容量由环境兜底」），不能让用户以为自己看到的是自己设的值。
+   */
+  max_input_tokens: number | null
+  /** 单次输出上限（**平台声明**；`null` = 未声明）。语义同 `max_input_tokens`。 */
+  max_output_tokens: number | null
   /** 写面乐观锁计数（每次成功提交 +1）；**不是内容版本**（内容指纹在审计里）。 */
   revision: number
   updated_at?: string
@@ -194,6 +204,9 @@ export interface ModelCreateReq {
   provider_id: string
   /** 发给上游的模型名（线上键名就是 `model`；v24 从 `model_id` 改名）。 */
   model: string
+  /** 容量声明（v25；省略 = 不声明）。取值必须 ≥ 1。 */
+  max_input_tokens?: number
+  max_output_tokens?: number
   name?: string
   note?: string
   /** 输入模态：`['text']`（默认）| `['text','image']`；非法取值会被 40501 拒。 */
@@ -208,6 +221,18 @@ export interface ModelPatchReq {
   note?: string
   /** 输入模态：`['text']` | `['text','image']`；省略 = 不改。 */
   input_modalities?: string[]
+  /**
+   * 容量（v25）。**三态**：
+   *
+   *  - 省略 = 不改；
+   *  - ≥ 1 = 声明成这个数；
+   *  - `0` = **清除声明**（回到「由环境兜底」）。
+   *
+   * 为什么用 0 而不是 `null` 当「清除」：`null` 与「键缺失」在服务端的 JSON 绑定里都落成 nil，
+   * 分不开；而 0 本来就不是合法容量（底座的 schema 是 `min(1)`），不会与任何真实取值撞车。
+   */
+  max_input_tokens?: number
+  max_output_tokens?: number
   /** true = 设为唯一默认；false = 取消默认（幂等）。 */
   is_default?: boolean
 }

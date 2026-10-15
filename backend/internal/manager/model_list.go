@@ -70,10 +70,19 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 	if err != nil {
 		return nil, err
 	}
+	maxIn, err := normalizeCapacity("max_input_tokens", req.MaxInputTokens)
+	if err != nil {
+		return nil, err
+	}
+	maxOut, err := normalizeCapacity("max_output_tokens", req.MaxOutputTokens)
+	if err != nil {
+		return nil, err
+	}
 	id := objid.New(objid.Model)
 	ok, err := s.st.CreateModelDefinition(ctx, store.ModelColumns{
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
+		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
 	}, definitionWriteActor)
 	if err != nil {
 		return nil, err
@@ -119,6 +128,8 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 		// 列值归一：空列（只可能来自手写行，列默认值是 `text`）也要写成明确值——否则"只改名字"
 		// 这一步会把空串原样写回，让"默认 text"变成第三种落库形态。
 		InputModalities: resource.ModalitiesToColumn(resource.ModalitiesFromColumn(row.InputModalities)),
+		// 容量是**解析后的最终值**：省略 = 保持原值；0 = 清除（nil）；≥1 = 声明。
+		MaxInputTokens: row.MaxInputTokens, MaxOutputTokens: row.MaxOutputTokens,
 	}
 	if patch.Name != nil {
 		content.Name = *patch.Name
@@ -133,7 +144,22 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 		}
 		content.InputModalities = modalities
 	}
-	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil {
+	if patch.MaxInputTokens != nil {
+		v, err := normalizeCapacity("max_input_tokens", patch.MaxInputTokens)
+		if err != nil {
+			return nil, err
+		}
+		content.MaxInputTokens = v
+	}
+	if patch.MaxOutputTokens != nil {
+		v, err := normalizeCapacity("max_output_tokens", patch.MaxOutputTokens)
+		if err != nil {
+			return nil, err
+		}
+		content.MaxOutputTokens = v
+	}
+	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil ||
+		patch.MaxInputTokens != nil || patch.MaxOutputTokens != nil {
 		ok, err := s.st.UpdateModelDefinition(ctx, id, content, row.Revision, definitionWriteActor)
 		if err != nil {
 			return nil, err
@@ -277,6 +303,22 @@ func modelValueFor(reg *runtime.Registry, runtimeID, providerID, model string) (
 
 // ——— 内部工具 ———
 
+// normalizeCapacity 校验并归一一个容量声明（v25）。
+//
+// 三态见 `dtomodel.ModelPatchReq` 的注释：nil = 不改 / 0 = 清除 / ≥1 = 声明。**负数即拒绝**——
+// 枚举与数值型键的既有纪律是"不认识的取值当场报错，不静默回落"，因为容量的静默回落会变成
+// "用户以为设了 8k，实际用的是兜底的 256k"。
+func normalizeCapacity(field string, v *int64) (*int64, error) {
+	if v == nil || *v == 0 {
+		return nil, nil
+	}
+	if *v < 0 {
+		return nil, acl.NewError(acl.ClassRequest, "invalid_param",
+			fmt.Sprintf("%s 必须是 ≥ 1 的整数（0 = 清除这条声明）：收到 %d", field, *v), nil)
+	}
+	return v, nil
+}
+
 // normalizeInputModalities 校验并归一请求里的输入模态（nil = 默认 `["text"]`）。
 //
 // 枚举型键的既有纪律：不认识的取值 → 40501 并**列出合法取值**（不静默回落）。
@@ -304,7 +346,9 @@ func modelRespFromRow(row *model.ModelEntity) dtomodel.ModelResp {
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model,
 		Name: row.Name, Note: row.Note,
 		InputModalities: resource.ModalitiesFromColumn(row.InputModalities),
-		Revision:        row.Revision,
+		// 容量原样透出（nil = null = 未声明）：界面据此如实标"容量由环境兜底（不是平台声明）"。
+		MaxInputTokens: row.MaxInputTokens, MaxOutputTokens: row.MaxOutputTokens,
+		Revision: row.Revision,
 	}
 	if !row.UpdatedAt.IsZero() {
 		out.UpdatedAt = model.FormatTime(row.UpdatedAt)

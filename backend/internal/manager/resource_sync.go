@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -463,9 +464,23 @@ func (s *Service) declaredModels(ctx context.Context) ([]resource.Model, error) 
 			// **总是带值**（默认 `["text"]`）：adapter 据此总是写底座声明里的 `input`，
 			// 于是"默认 text"是明确值而不是"没设"（ADR-12）。
 			InputModalities: resource.ModalitiesFromColumn(rows[i].InputModalities),
+			// 容量（v25）：指针原样透传——nil 与"声明了一个数"是两件事，这里不做任何归一，
+			// 由 adapter 决定"非空才写"。
+			MaxInputTokens: rows[i].MaxInputTokens, MaxOutputTokens: rows[i].MaxOutputTokens,
 		})
 	}
 	return out, nil
+}
+
+// capacitySentinel 把容量折成指纹里的一个**不含歧义**的串：nil → `-`，有值 → 十进制。
+//
+// 为什么不用空串：容量是正整数（写面已把 0 折成 nil），用 `-` 能让"未声明"在任何位置都读得出来，
+// 而空串在拼接型指纹里与"少写一个字段"长得一样。
+func capacitySentinel(v *int64) string {
+	if v == nil {
+		return "-"
+	}
+	return strconv.FormatInt(*v, 10)
 }
 
 // declaredDefaultModelID 读**单一**默认模型（未设 → ""）。
@@ -503,7 +518,11 @@ func setFingerprint(set resource.Set) string {
 	for _, m := range set.Models {
 		// 模态并进指纹：它改变交付字节（dsh 的 `models[].input`），所以它变了代际必须翻——
 		// 否则用户改了"能不能收图"、界面说保存成功，而"下一轮生效"这件事不可观测。
-		write("M", m.ID, m.ProviderID, m.Model, m.Name, strings.Join(m.InputModalities, ","))
+		//
+		// 容量（v25）同理并进指纹：它改变交付字节（`contextWindow`/`maxTokens`）。nil 与"有值"
+		// 必须可分——用 `-` 当"未声明"的哨兵（容量恒为正整数，与任何合法取值都不撞车）。
+		write("M", m.ID, m.ProviderID, m.Model, m.Name, strings.Join(m.InputModalities, ","),
+			capacitySentinel(m.MaxInputTokens), capacitySentinel(m.MaxOutputTokens))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

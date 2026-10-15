@@ -256,11 +256,29 @@ func extractStringLiterals(src string) []string {
 }
 
 // assertNoBannedWord 断言一段面向用户的字里没有禁词。
+//
+// 判据分两档（2026-10-15 v25 加的，起因是那一节第一次出现**协议键**字面量）：
+//
+//	含中文的字面量   → 禁词表**子串**匹配（这一屏的用户文案在本仓一律是中文，子串能抓住
+//	                   「…不会被下发给底座」这类夹在句子里的泄漏）；
+//	纯 ASCII 的字面量 → 只做**整串相等**匹配。理由：ASCII 字面量在这一节是协议键与依赖路径
+//	                   （`"max_input_tokens"`、`"provider_id"` 这类对象键/`Form.Item name`），
+//	                   用户**读不到**它们——拿子串扫它们会把 `"max_input_tokens"` 里的 `token`
+//	                   判成"代码词回流用户面"（假红），而假红是这套守卫最常见的死法。
+//	                   `"provider"` / `"runtime"` 这种**整串就是禁词**的形态照样红（那才是泄漏）。
+//
+// 反证（实跑）：往面板里写一句 `'Runtime 设置'` → 红（含中文那一档的子串匹配）；
+// 写一个整串为 `'runtime'` 的字面量 → 红（ASCII 那一档的整串匹配）。
 func assertNoBannedWord(t *testing.T, where, text string) {
 	t.Helper()
 	low := strings.ToLower(text)
+	cjk := strings.ContainsFunc(text, func(r rune) bool { return r > 0x2E80 })
 	for _, w := range forbiddenSettingsWords {
-		if strings.Contains(low, w) {
+		hit := strings.Contains(low, w)
+		if !cjk {
+			hit = low == w
+		}
+		if hit {
 			t.Errorf("%s = %q 含禁词 %q：设置 · 模型 那一节的用户词是「供应商」「模型」「已生效 / 待生效」；"+
 				"底座名与代码词只许出现在指向接口的映射代码里（对象键、字段访问），不许出现在用户可见的字里", where, text, w)
 		}

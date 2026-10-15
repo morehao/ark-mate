@@ -136,8 +136,9 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 		t.Fatalf("未登记模型值形态的底座应报 model_value_unsupported（不猜形状），got %q", errCode(err))
 	}
 	// 反向：dsh 的形态（JSON 数组）**不在**这份注册表里——它由 dsh 自己登记。
+	// v25：第一段是**派生路由键**（`mate-` + 平台供应商 id），不再是平台 id 本身。
 	if v, err := modelValueFor(runtime.AllBuiltinRegistry(), runtime.DefaultBuildRuntime, "p", "m"); err != nil ||
-		v != `["p","m"]` {
+		v != `["mate-p","m"]` {
 		t.Fatalf("内置底座的形态应由它的 adapter 声明，实际 %q err=%v", v, err)
 	}
 
