@@ -16,6 +16,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/model"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/resource"
@@ -69,15 +70,11 @@ type Service struct {
 	defs *definition.Mechanism
 	// creds 凭据机制的状态（四层凭据面 + 凭据 cwd；见 mechanism/credential）。
 	creds *credential.Store
-	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
-	binding *runtimeBinding
-	autoVer map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
+	// runtimePlane 执行面（P3a-2 分批搬入）：本批装"本进程认的那个底座"的绑定，
+	// 诊断组装面随后一批跟进。它自持锁（`bindingLocked` 那类"须持 s.mu"的约定随之消失）。
+	runtimePlane *runtimeconn.Plane
+	autoVer      map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
 
-	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
-	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
-	diagMu    sync.Mutex
-	lastErr   *runtimeLastErr
-	ambiguous *ambiguityNote
 	// memDefaultWorkspace memory 模式的**默认工作空间**（登记表不存在时的那一份）。
 	//
 	// 它不是"登记项的缓存"：默认工作空间是**平台代建**的东西（进程没起来时它是库里的第一行；
@@ -181,7 +178,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
-	s.binding = newRuntimeBinding(spec, specOK)
+	s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
 	return s
 }
 

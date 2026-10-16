@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -16,69 +17,36 @@ import (
 // maxDiagStderrLines 外露的 stderr 诊断行数上限（超出保留最近若干行）。
 const maxDiagStderrLines = 20
 
-// runtimeLastErr 底座最近一次失败（进程起不来/握手失败/轮次失败）的诊断快照。
-//
-// v19 之前这是**每 agent 一份**的 map；单底座下它天然只有一份，于是收成一个字段——
-// 顺带消灭了"同一底座的两份错误记录谁更新"这类无意义状态。
-type runtimeLastErr struct {
-	At         time.Time
-	SessionID  string
-	Code       string
-	Class      string
-	Details    string
-	StderrTail []string
-}
-
 // recordRuntimeError 记录底座最近一次失败（含 stderr 诊断尾巴）。
 func (s *Service) recordRuntimeError(sessionID string, ae *acl.Error, tail []string) {
 	if ae == nil {
 		return
 	}
-	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	s.lastErr = &runtimeLastErr{
+	s.runtimePlane.RecordError(runtimeconn.LastErr{
 		At:         time.Now().UTC(),
 		SessionID:  sessionID,
 		Code:       ae.Code,
 		Class:      string(ae.Class),
 		Details:    redact.String(ae.Details),
 		StderrTail: acl.TailLines(tail, maxDiagStderrLines),
-	}
-}
-
-// ambiguityNote 是一条「归属歧义」留痕（时间 + 事实描述）。
-type ambiguityNote struct {
-	At     time.Time
-	Detail string
+	})
 }
 
 // noteScopeAmbiguous 记一条「归属歧义」留痕（elicitation 无法归属会话：wire `_meta` 未给 scope
 // 且连接上无唯一在途 run）。覆盖最近一条（重复事件不堆积），随 RuntimeDiagnostics 的
 // remediation 外露——这是「提问卡为什么没出现」的用户可见入口。
 func (s *Service) noteScopeAmbiguous(detail string) {
-	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	s.ambiguous = &ambiguityNote{At: time.Now().UTC(), Detail: detail}
+	s.runtimePlane.NoteScopeAmbiguous(detail)
 }
 
 // scopeNote 读取归属歧义留痕。
-func (s *Service) scopeNote() (ambiguityNote, bool) {
-	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	if s.ambiguous == nil {
-		return ambiguityNote{}, false
-	}
-	return *s.ambiguous, true
+func (s *Service) scopeNote() (runtimeconn.AmbiguityNote, bool) {
+	return s.runtimePlane.ScopeNote()
 }
 
 // runtimeLastError 读取底座的最近失败快照。
-func (s *Service) runtimeLastError() (runtimeLastErr, bool) {
-	s.diagMu.Lock()
-	defer s.diagMu.Unlock()
-	if s.lastErr == nil {
-		return runtimeLastErr{}, false
-	}
-	return *s.lastErr, true
+func (s *Service) runtimeLastError() (runtimeconn.LastErr, bool) {
+	return s.runtimePlane.LastError()
 }
 
 // RuntimeDiagnostics 返回底座的诊断快照（A3：stderr 诊断尾巴外露）。
@@ -144,9 +112,7 @@ func (s *Service) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.Diagnosti
 
 // clearRuntimeLastError 清除最近失败快照（例如用户手动重启底座后：同一进程里不该继续回显旧错）。
 func (s *Service) clearRuntimeLastError() {
-	s.diagMu.Lock()
-	s.lastErr = nil
-	s.diagMu.Unlock()
+	s.runtimePlane.ClearLastError()
 }
 
 // remediationFor 推导底座当前的可执行修复步骤（诊断面给「怎么修」，而不是只有报错）。
