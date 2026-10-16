@@ -1,4 +1,4 @@
-package manager
+package session
 
 import (
 	"context"
@@ -30,8 +30,8 @@ const (
 )
 
 // UsageSummary 聚合用量统计。
-func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
-	if s.st == nil {
+func (pl *Plane) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error) {
+	if pl.st == nil {
 		return nil, code.FromError(acl.NewError(acl.ClassUnsupported, "usage_stats_unsupported",
 			"[usage_stats_unsupported] 内存模式（未启用 store）无 runs 读模型，用量统计不可用（请以 sqlite 模式启动）", nil))
 	}
@@ -64,7 +64,7 @@ func (s *Service) UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_usage_group_by",
 			fmt.Sprintf("[invalid_usage_group_by] group_by 仅支持 day：%q", q.GroupBy), nil))
 	}
-	res, err := s.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to})
+	res, err := pl.st.UsageSummary(ctx, store.UsageQuery{From: from, To: to})
 	if err != nil {
 		return nil, code.FromError(acl.NewError(acl.ClassService, "usage_query_failed",
 			fmt.Sprintf("[usage_query_failed] 用量聚合失败: %v", err), err))

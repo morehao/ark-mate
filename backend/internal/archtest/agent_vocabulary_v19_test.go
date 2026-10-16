@@ -146,6 +146,13 @@ var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 			"这次交接在 Go 里至少要拼一次字段名（DTO 与拒绝面各自已登记，这里是第三处）",
 	},
 	{
+		// 锚 = 用量面那条拒绝函数的定义。它随 `usage.go` 的拒绝面搬进 `domain/session`（P3b-1b），
+		// 所以这里不写路径：写路径的话搬完就得回来改，而"回来改"正是 P0 要消灭的东西。
+		anchor: "func rejectRemovedUsageDimension(",
+		reason: removedKeyRefusalReason + "用量面的 `?agent_id=` 是**读**面的被撤键：它没有 JSON " +
+			"绑定那一层，控制器读不到就等于**静默忽略**——用户以为在看某个底座的用量，拿到的却是全量",
+	},
+	{
 		// 锚 = 清除历史键的那个函数。它随 `automation.go` 搬进 `domain/automation`（P2b）。
 		anchor: "rejectAgentIDInPatch",
 		reason: removedKeyRefusalReason + "清除历史键时的那条 WARN 必须点名它清掉了什么——" +
