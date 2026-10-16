@@ -174,7 +174,7 @@ func (h *capabilityCtr) SetSkillEnabled(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.SetSkillEnabled(c.Request.Context(), id, req.Enabled)
+	resp, err := h.skills.SetSkillEnabled(c.Request.Context(), id, req.Enabled)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -185,7 +185,7 @@ func (h *capabilityCtr) SetSkillEnabled(c *gin.Context) {
 // SkillMaterialization 某 skill 的物化体检（§13.4 S2）：每处物化目标的期望摘要 vs 实测摘要、
 // 以及 status（in_sync/missing/tampered/stale/disabled/user_owned/not_applicable）。只读。
 func (h *capabilityCtr) SkillMaterialization(c *gin.Context) {
-	resp, err := h.svc.SkillMaterialization(c.Param("id"))
+	resp, err := h.skills.SkillMaterialization(c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

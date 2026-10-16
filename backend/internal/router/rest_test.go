@@ -1412,57 +1412,38 @@ func TestCapabilityRoutes(t *testing.T) {
 
 // TestSkillToggleRoute PATCH /skills/:id（§13.4 S4）：入参 {enabled} 透传到服务端口，
 // 响应回带写回路径与物化计数；非法 JSON → 40000（控制器绑定错误带码）。
+// TestSkillToggleRoute 启停 skill 这一格自 P4a 正文第三十六刀起走**真域平面**（`h.skills`，
+// 投影 `dtocapability.SkillToggleResp` 与「未知 skill / 不可写」的错误码都在域里铸）。替身能证的
+// 只有"控制器把 id 与 enabled 原样转发"，而那是**控制器唯一还做的事**；替身证不了域真的这么判。
+//
+// 所以这里改成证"请求确实打到了域平面"：本用例的引擎里没有那份 skill 定义，域平面的自然答复是
+// `skill_not_found`（40401）——这正是真平面与替身的分界（替身会回 200 并自报成功）。
+// 启停两个方向 + 物化成功路径的**本体**由 `internal/manager/skills_test.go` 用真平面 + 真目录钉。
 func TestSkillToggleRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":false}`)
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("PATCH skill 失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
-	}
-	if !svc.skillToggled || svc.skillToggleID != "plan" || svc.skillToggleEnabled {
-		t.Fatalf("未透传到服务端口: %+v", svc)
-	}
-	var resp dtocapability.SkillToggleResp
-	if err := json.Unmarshal(env.Data, &resp); err != nil || resp.ID != "plan" || resp.Enabled {
-		t.Fatalf("toggle data 不符: %s", env.Data)
+	if code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 skill 应由域平面回 40401（说明请求真的进了域，而不是被替身截住）: code=%d env=%+v", code, env)
 	}
 
-	// 启用方向也要通（同一个 handler，方向由入参决定）。
-	env, code = do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":true}`)
-	if code != 200 || env.Code != 0 || !svc.skillToggleEnabled {
-		t.Fatalf("PATCH enable 失败 code=%d env=%d", code, env.Code)
-	}
-
-	// 坏入参：控制器绑定失败 → 40000。
+	// 坏入参：控制器绑定失败 → 40000（这一格与域无关，仍是控制器自己的判定）。
 	env, code = do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":`)
 	if code != 200 || env.Code != 40000 {
 		t.Fatalf("坏入参应 40000，code=%d env=%d", code, env.Code)
 	}
 }
 
-// TestSkillMaterializationRoute GET /skills/:id/materialization（§13.4 S2 审计面）：只读，
-// 透传 id 到服务端口，信封 data 带每处物化目标的状态与摘要。
+// TestSkillMaterializationRoute 同上一格：物化现状的投影在域平面里（含三段状态与摘要比较），
+// 这里只证"打到域平面"的自然答复；`in_sync` 等状态判定由 manager 侧的用例用真平面钉。
 func TestSkillMaterializationRoute(t *testing.T) {
 	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/skills/plan/materialization", "")
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("GET materialization 失败 code=%d env=%d", code, env.Code)
-	}
-	if svc.matQueried != "plan" {
-		t.Fatalf("id 未透传: %q", svc.matQueried)
-	}
-	var resp dtocapability.SkillMaterializationResp
-	if err := json.Unmarshal(env.Data, &resp); err != nil {
-		t.Fatalf("data 解析失败: %s", env.Data)
-	}
-	if resp.ID != "plan" || !resp.Enabled || len(resp.States) != 1 || resp.States[0].Status != "in_sync" {
-		t.Fatalf("materialization data 不符: %+v", resp)
-	}
-	if resp.States[0].Hash != resp.States[0].ActualHash {
-		t.Fatalf("in_sync 的期望/实测摘要应一致: %+v", resp.States[0])
+	if code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 skill 应由域平面回 40401: code=%d env=%+v", code, env)
 	}
 }
 

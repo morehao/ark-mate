@@ -81,7 +81,7 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
 	}
 
 	// —— 禁用 ——
-	resp, err := svc.SetSkillEnabled(context.Background(), "demo", false)
+	resp, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", false)
 	if err != nil {
 		t.Fatalf("禁用失败: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSetSkillEnabledWritesBackAndWithdraws(t *testing.T) {
 	}
 
 	// —— 重新启用 ——
-	resp, err = svc.SetSkillEnabled(context.Background(), "demo", true)
+	resp, err = svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", true)
 	if err != nil {
 		t.Fatalf("启用失败: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 	svc, dir, _ := skillRig(t)
 
 	// 1) 未知 id → 40401（ClassRequest 里的 notFoundCodes 提档：改参数不会有结果，得先把定义建好）。
-	if _, err := svc.SetSkillEnabled(context.Background(), "nope", false); err == nil {
+	if _, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "nope", false); err == nil {
 		t.Fatal("未知 skill 应报错")
 	} else {
 		var ge gerror.Error
@@ -163,7 +163,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// acl 的稳定码不进 gerror 文案（msg = Details），故断言人话 + 信封码两条。
-	_, err := svc.SetSkillEnabled(context.Background(), "in-memory", false)
+	_, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "in-memory", false)
 	if err == nil || !strings.Contains(err.Error(), "没有定义文件") {
 		t.Fatalf("无定义文件应显式失败: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 
 	// 3) 未装载能力目录（capabilityDir 为空）→ 同样显式失败。
 	empty, _, _ := rigWithRuntime(t)
-	if _, err := empty.SetSkillEnabled(context.Background(), "whatever", false); err == nil {
+	if _, err := empty.SkillPlane().SetSkillEnabled(context.Background(), "whatever", false); err == nil {
 		t.Fatal("未装载目录应报错")
 	}
 
@@ -186,7 +186,7 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 	if err := svc.caps.RegisterSkill(&capability.Skill{ID: "broken", Body: "# b"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.SetSkillEnabled(context.Background(), "broken", false)
+	_, err = svc.SkillPlane().SetSkillEnabled(context.Background(), "broken", false)
 	if err == nil || !strings.Contains(err.Error(), "不是合法 JSON 对象") {
 		t.Fatalf("坏定义应显式失败: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSetSkillEnabledReconcileFailureIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetSkillProjections([]skill.Projection{skillProj(bad, "rtx")})
-	resp, err := svc.SetSkillEnabled(context.Background(), "demo", false)
+	resp, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", false)
 	if err != nil {
 		t.Fatalf("重校失败不该让启停整体失败: %v", err)
 	}
@@ -239,7 +239,7 @@ func boolPtr(v bool) *bool { return &v }
 // matStatus 取某 root 的体检状态（测试断言用）。
 func matStatus(t *testing.T, svc *Service, id, root string) dtocapability.SkillMaterializationState {
 	t.Helper()
-	resp, err := svc.SkillMaterialization(id)
+	resp, err := svc.SkillPlane().SkillMaterialization(id)
 	if err != nil {
 		t.Fatalf("SkillMaterialization: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetSkillEnabled(context.Background(), "demo", false); err != nil {
+	if _, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", false); err != nil {
 		t.Fatal(err)
 	}
 	// SetSkillEnabled 已同步重校撤回 → 期望 disabled。
@@ -335,7 +335,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("禁用但副本在应为 stale: %+v", st)
 	}
 	// 先把 demo 改回启用（上面第 8 步把它禁用了，禁用分支优先级更高，会盖住下面要验的状态）。
-	if _, err := svc.SetSkillEnabled(context.Background(), "demo", true); err != nil {
+	if _, err := svc.SkillPlane().SetSkillEnabled(context.Background(), "demo", true); err != nil {
 		t.Fatal(err)
 	}
 	// 9) 投影形态未经端到端实测 → untested（而不是假装 projected）：声明了、根也解得开，
@@ -375,7 +375,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	if err := empty.caps.RegisterSkill(&capability.Skill{ID: "x", Body: "# x"}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := empty.SkillMaterialization("x")
+	resp, err := empty.SkillPlane().SkillMaterialization("x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		t.Fatalf("无物化目标应给 notes: %+v", resp)
 	}
 	// 10) 未知 skill → 40401。
-	if _, err := svc.SkillMaterialization("nope"); err == nil {
+	if _, err := svc.SkillPlane().SkillMaterialization("nope"); err == nil {
 		t.Fatal("未知 skill 应报错")
 	} else if envelopeCode(t, err) != code.NotFound {
 		t.Fatalf("未知 skill 应为 %d，got %v", code.NotFound, err)

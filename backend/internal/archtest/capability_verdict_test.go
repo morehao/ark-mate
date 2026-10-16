@@ -154,4 +154,23 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"而构建、启动、既有测试全都正常。", call)
 		}
 	}
+	// ——— 技能启停 / 物化现状归域平面（P4a 正文第三十六刀）———
+	//
+	// `SetSkillEnabled` 与 `SkillMaterialization` 的投影（两个 DTO）与错误码（`skill_not_found` 等）
+	// 都在 `domain/skill` 的平面里，用例层再留一份声明就只是给"一行转发"留位置。判据取"那两行
+	// 在用例层不存在"：一个方法声明在任何地方都能满足，删掉转发之后声明会**静默地**无事可做。
+	for _, dead := range []string{"SetSkillEnabled(ctx context.Context", "SkillMaterialization(id string"} {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+			t.Errorf("`svccapability` 的接口里又出现 `%s`：投影与错误码都在域平面（`domain/skill`），"+
+				"控制器直接 `h.skills.*`（接口里留声明 = 给一行转发留位置）。", dead)
+		}
+	}
+	if mgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "skills.go"))); strings.Contains(mgr, "func (s *Service) SetSkillEnabled(") ||
+		strings.Contains(mgr, "func (s *Service) SkillMaterialization(") {
+		t.Error("`internal/manager/skills.go` 里又出现技能启停/物化的转发：那两行已删。")
+	}
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))), "func (m *Plane) SetSkillEnabled(") ||
+		!strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "materialization.go"))), "func (m *Plane) SkillMaterialization(") {
+		t.Error("`domain/skill` 里找不到两个本体：判据失锚＝空转。")
+	}
 }

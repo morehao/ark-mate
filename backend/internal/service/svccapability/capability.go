@@ -13,12 +13,6 @@ import (
 // 实现方（internal/manager）以编译期断言 var _ CapabilitySvc = (*T)(nil) 保证一致性。
 type CapabilitySvc interface {
 
-	// SetSkillEnabled 启停一个 skill（§13.4 S4：写回定义文件 + 立刻重校物化；禁用 = overlay 可逆）。
-	SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error)
-
-	// SkillMaterialization 报告某 skill 在每处物化目标上的现状（§13.4 S2：审计/复现面，只读）。
-	SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error)
-
 	// ——— 写面（M2）：能力定义可在面板里增删改，**事实源仍是文件** ———
 	//
 	// 请求体是原文 JSON 对象（`map[string]json.RawMessage`）：`PUT` 的语义是"只改出现过的键"，

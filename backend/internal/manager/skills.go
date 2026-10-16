@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/skill"
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
 // ——— §13.4 S4/S5：技能启停（overlay）与激活（正交） ———
@@ -54,14 +53,4 @@ func (s *Service) ReconcileSkillProjection(p skill.Projection) (int, int, error)
 // TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
 func (s *Service) writeSkillEnabled(ctx context.Context, id string, enabled bool) (string, error) {
 	return s.skillPlane.WriteSkillEnabled(ctx, id, enabled)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
-func (s *Service) SetSkillEnabled(ctx context.Context, id string, enabled bool) (*dtocapability.SkillToggleResp, error) {
-	return s.skillPlane.SetSkillEnabled(ctx, id, enabled)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
-func (s *Service) SkillMaterialization(id string) (*dtocapability.SkillMaterializationResp, error) {
-	return s.skillPlane.SkillMaterialization(id)
 }

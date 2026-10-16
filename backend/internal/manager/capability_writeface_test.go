@@ -452,7 +452,7 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 			wf.seed(t, model.DefinitionKindSkill, "demo",
 				`{"id":"demo","name":"演示","body":"# 正文","my_note":"留着","runtimes":["rtx"]}`)
 
-			if _, err := wf.svc.SetSkillEnabled(ctx, "demo", false); err != nil {
+			if _, err := wf.svc.SkillPlane().SetSkillEnabled(ctx, "demo", false); err != nil {
 				t.Fatalf("禁用失败: %v", err)
 			}
 			got := wf.readDef(t, model.DefinitionKindSkill, "demo")
@@ -488,7 +488,7 @@ func TestSetSkillEnabledIsOverlayOnBothCarriers(t *testing.T) {
 				}
 			}
 
-			if _, err := wf.svc.SetSkillEnabled(ctx, "demo", true); err != nil {
+			if _, err := wf.svc.SkillPlane().SetSkillEnabled(ctx, "demo", true); err != nil {
 				t.Fatalf("启用失败: %v", err)
 			}
 			got = wf.readDef(t, model.DefinitionKindSkill, "demo")

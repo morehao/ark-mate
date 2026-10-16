@@ -266,7 +266,7 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 		t.Fatal("新建后应物化 toggle/SKILL.md")
 	}
 
-	resp, err := r.Svc.SetSkillEnabled(ctx, "toggle", false)
+	resp, err := r.Svc.SkillPlane().SetSkillEnabled(ctx, "toggle", false)
 	if err != nil {
 		t.Fatalf("SetSkillEnabled: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestStoreSkillEnabledTogglesOnlyOneKey(t *testing.T) {
 	}
 
 	// 再启用：写回 enabled:true 且副本回来。
-	if resp, err := r.Svc.SetSkillEnabled(ctx, "toggle", true); err != nil || !resp.Enabled || resp.Written != 1 {
+	if resp, err := r.Svc.SkillPlane().SetSkillEnabled(ctx, "toggle", true); err != nil || !resp.Enabled || resp.Written != 1 {
 		t.Fatalf("启用不符: %+v err=%v", resp, err)
 	}
 	row, _, _ = r.St.GetSkillDefinition(ctx, "toggle")
@@ -309,7 +309,7 @@ func TestStoreSkillEnabledNotPersistable(t *testing.T) {
 	if err := r.Svc.caps.RegisterSkill(&capability.Skill{ID: "injected", Body: "# x"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := r.Svc.SetSkillEnabled(ctx, "injected", false)
+	_, err := r.Svc.SkillPlane().SetSkillEnabled(ctx, "injected", false)
 	if err == nil || !strings.Contains(err.Error(), "没有定义行") {
 		t.Fatalf("应显式失败并给出路: %v", err)
 	}
