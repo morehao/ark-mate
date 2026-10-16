@@ -723,7 +723,8 @@ type envelope struct {
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc,
+		Runtime:  svc,
 		Provider: svc, Model: svc,
 		Capability: svc, Library: svc,
 		// 测试替身**直接**满足用例层端口（它实现了 ExportSessions）；装配期交的是

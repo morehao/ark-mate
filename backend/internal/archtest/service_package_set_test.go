@@ -44,8 +44,16 @@ var servicePackageSet = []string{
 	"svcprovider", "svcruntime", "svcsession", "svcsystem", "svcworkspace",
 }
 
-// serviceRuntimeMethods `svcruntime` 允许声明的方法（多一个都红）。
+// serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。
 var serviceRuntimeMethods = []string{"RuntimeIdentity", "RuntimeDiagnostics"}
+
+// serviceRuntimePlaneMethods `svcruntime` 的**执行面端口**（`Plane`）允许声明的方法。
+//
+// 它们是执行面的口语（`internal/runtimeconn` 的方法名）：用例层在这里只做**命名适配**
+// （`Identity` → `RuntimeIdentity`，路径 `/runtime/...` 是对外契约的口语）。
+// 这条判据与上一条配对：API 端口只许那 2 个、适配端口也只许那 2 个——两边同时被钉住，
+// 才挡得住"把 provider/model 又塞回这个大包"这条回头路。
+var serviceRuntimePlaneMethods = []string{"Identity", "Diagnostics"}
 
 // TestServicePackageSetFollowsADR2 见文件头。
 func TestServicePackageSetFollowsADR2(t *testing.T) {
@@ -83,25 +91,25 @@ func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatalf("%s 下没有生产 .go 文件：判据失锚", dir)
 	}
-	allowed := map[string]bool{}
-	for _, m := range serviceRuntimeMethods {
-		allowed[m] = true
+	allowedByIface := map[string]map[string]bool{
+		"RuntimeSvc": methodSet(serviceRuntimeMethods),
+		"Plane":      methodSet(serviceRuntimePlaneMethods),
 	}
 	found := 0
 	for _, path := range files {
 		src := stripLineComments(readFileOrFatal(t, path))
 		lines := strings.Split(src, "\n")
-		inIface := false
+		iface := ""
 		for _, l := range lines {
-			if interfaceHeadRe.MatchString(l) {
-				inIface = true
+			if m := interfaceHeadRe.FindStringSubmatch(l); m != nil {
+				iface = m[1]
 				continue
 			}
-			if inIface && l == "}" {
-				inIface = false
+			if iface != "" && l == "}" {
+				iface = ""
 				continue
 			}
-			if !inIface {
+			if iface == "" {
 				continue
 			}
 			trimmed := strings.TrimSpace(l)
@@ -110,6 +118,14 @@ func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 			}
 			name := trimmed[:strings.Index(trimmed, "(")]
 			found++
+			allowed, known := allowedByIface[iface]
+			if !known {
+				t.Errorf("`internal/service/svcruntime` 声明了接口 `%s`：这个包只许两个接口——"+
+					"API 端口 `RuntimeSvc`（`RuntimeIdentity`/`RuntimeDiagnostics`）与执行面适配端口 "+
+					"`Plane`（`Identity`/`Diagnostics`）。\n"+
+					"多一个接口 = 又一个「顺手把别的东西塞进来」的入口，而那正是这一刀要消灭的形态。", iface)
+				continue
+			}
 			if !allowed[name] {
 				t.Errorf("`internal/service/svcruntime` 声明了 %q：这个包只装**底座身份与诊断**"+
 					"（ADR-2，P4a）。\n"+
@@ -122,4 +138,13 @@ func TestServiceRuntimeStaysIdentityAndDiagnostics(t *testing.T) {
 	if found == 0 {
 		t.Fatal("`svcruntime` 里一个接口方法都没扫到：接口被改名/搬走了？判据失锚等于空转。")
 	}
+}
+
+// methodSet 造一个方法名集合。
+func methodSet(names []string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[n] = true
+	}
+	return out
 }

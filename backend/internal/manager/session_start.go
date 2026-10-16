@@ -47,13 +47,12 @@ func (o *Orchestrator) StartSession(ctx context.Context, opt StartOptions) (*Cre
 // startSessionOn 在**构建期选定的** runtime 上建立持久 ACP 会话（Service.CreateSession
 // 与 RunOnce 都汇聚于此）。返回的 CreateResult.Runtime 为实际选中的 runtime。
 func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*CreateResult, error) {
-	runtimeID, err := o.svc.ResolveRuntime()
+	// **单点铸码**（P4a）：`runtime_not_found` 只由执行面铸（`runtimeconn.SelectedSpec`）。
+	// 这里原来先 `ResolveRuntime()` 再自己 `reg.Get` 判一次——第二次判定**永远不成立**
+	// （id 就是刚解析出来的那个），而它铸的是**同一个码的第二份文本**：两份文本迟早只改一处。
+	spec, err := o.svc.selectedSpec()
 	if err != nil {
 		return nil, err
-	}
-	spec, ok := o.reg.Get(runtimeID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found", fmt.Sprintf("runtime %q 未注册", runtimeID), nil)
 	}
 	// 能力选定校验（M3-3）：**在建连之前**。位次很关键——它既要在已知 runtime 之后
 	// （可达性是 runtime 相关的），又要在任何副作用之前（不建会话/不拉进程/不写库）。
@@ -180,14 +179,10 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 	// （跨 runtime 续聊，§18 F3）。产品钉在单一底座之后没有第二个候选——若会话记录里的原生 runtime
 	// 与当前不同（改过构建 / 老数据），下面 `connectSession` 的 `sameRuntime` 判据自然为 false，
 	// 走 fresh + handoff memo 重灌，会话照样能续。**这条路径要有真实用例**（M5 验收项）。
-	runtimeID, err := o.svc.ResolveRuntime()
+	// 同 `startSessionOn`：`runtime_not_found` 只由执行面铸（单点）。
+	spec, err := o.svc.selectedSpec()
 	if err != nil {
 		return nil, err
-	}
-	spec, ok := o.reg.Get(runtimeID)
-	if !ok {
-		return nil, acl.NewError(acl.ClassRequest, "runtime_not_found",
-			fmt.Sprintf("runtime %q 未注册，无法重建会话 %q", runtimeID, sessionID), nil)
 	}
 	cwd := rec.Cwd
 	if cwd == "" {

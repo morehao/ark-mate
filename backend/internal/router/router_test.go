@@ -19,6 +19,8 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -61,7 +63,8 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	svc.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc,
+		Runtime:  svcruntime.New(runtimeconn.NewPlaneFor(nil)),
 		Provider: svc, Model: svc,
 		Capability: svc, Library: svc,
 	}, bus, router.Options{Web: assets})
@@ -376,7 +379,8 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc,
+		Runtime:  svcruntime.New(runtimeconn.NewPlaneFor(nil)),
 		Provider: svc, Model: svc,
 		Capability: svc, Library: svc,
 	}, bus, router.Options{Credentials: creds})

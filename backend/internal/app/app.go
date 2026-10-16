@@ -34,6 +34,8 @@ import (
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/version"
@@ -82,6 +84,9 @@ type App struct {
 	bus  *eventbus.Bus
 	svc  *manager.Service
 	orch *manager.Orchestrator
+	// rconn 本次装配的**执行面**（底座绑定 + 诊断状态 + 连接键派生）。
+	// 它由装配层造、同一个实例交给 `svc`（记账）与 API 面 `svcruntime`（读面）——见 WithRuntimePlane。
+	rconn *runtimeconn.Plane
 	// reg 是本次装配的 runtime 注册表（内置 + runtimes.json 的远程端点）。
 	// 留着它是为了在装载定义时能枚举「有哪些 runtime」——skill 投影目标是从**声明**推出来的，
 	// 不是从配置里读出来的（配置只是覆盖）。
@@ -187,7 +192,10 @@ func (a *App) Init(ctx context.Context) error {
 	}
 
 	a.bus = eventbus.New()
-	a.svc = manager.NewService(reg, a.bus)
+	// P4a：执行面由**装配层**造，同一个实例同时交给 Service（记账）与 API 面（读面）——
+	// 两个平面各自记账会让"诊断说 stopped、连接却活着"立刻发生。
+	a.rconn = runtimeconn.NewPlaneFor(reg)
+	a.svc = manager.NewService(reg, a.bus, manager.WithRuntimePlane(a.rconn))
 	a.reg = reg
 
 	// v19 的目录改名一次性导入（`agents/providers.json` → `providers/providers.json`）：
@@ -439,7 +447,9 @@ func (a *App) Init(ctx context.Context) error {
 	// P4a 起端口按 ADR-2 收口：`Runtime` 只管底座身份与诊断，档案与模型清单各有主人；
 	// 检索/用量并入 `Session`，导出归 `System`。
 	ports := router.Ports{
-		Session: a.svc, Workspace: a.svc, Runtime: a.svc,
+		Session: a.svc, Workspace: a.svc,
+		// 底座身份与诊断的**用例实现**在 svcruntime（P4a 正文第二刀），执行面是它的端口。
+		Runtime:  svcruntime.New(a.rconn),
 		Provider: a.svc, Model: a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc,
 		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出事实来源。

@@ -11,6 +11,8 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -274,7 +276,8 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc, Runtime: svc,
+		Session: svc, Workspace: svc,
+		Runtime:  svcruntime.New(runtimeconn.NewPlaneFor(nil)),
 		Provider: svc, Model: svc,
 		Capability: svc, Library: svc,
 	}, eventbus.New())

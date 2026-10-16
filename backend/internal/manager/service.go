@@ -106,7 +106,21 @@ type Service struct {
 }
 
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
-func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
+// Option 装配期的可选注入。
+//
+// **为什么是"可选"而不是必填参数**：`NewService` 有 130+ 处调用点（几乎全在 manager 自己的
+// 测试里，它们只需要"一个能跑的 Service"），而**装配层需要的是"同一个执行面实例"**
+// （它要把这个实例也交给 API 面 `svcruntime.New`）。必填参数会让 130+ 处跟着改，
+// 换来的信息量与这里一样。P5a 的 `registry` 装配表会取代这个缝。
+type Option func(*Service)
+
+// WithRuntimePlane 用装配层提供的执行面（而不是本函数自己造一个）。
+//
+// **必须与 `svcruntime.New` 拿到同一个实例**：两个平面各自记账时，"诊断说 stopped、
+// 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
+func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { s.runtimePlane = pl } }
+
+func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Service {
 	s := &Service{
 		reg:   reg,
 		defs:  definition.New(),
@@ -179,6 +193,9 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
 	s.runtimePlane = runtimeconn.NewPlane(reg, spec, specOK)
+	for _, opt := range opts {
+		opt(s)
+	}
 	// 执行面的两个口子：凭据面（供应商域）现在就能接；连接池读面要等编排器造出来
 	// （见 `attachOrchestrator`）——**早一行拿到的是 nil**，表现是诊断永远报"未连接"（静默）。
 	s.runtimePlane.SetCredentialSource(s)

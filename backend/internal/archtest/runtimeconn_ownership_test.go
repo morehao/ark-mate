@@ -116,3 +116,68 @@ func TestRuntimeBindingIsNotDuplicatedOnService(t *testing.T) {
 			"开发态多半看不见。")
 	}
 }
+
+// ——— P4a 正文第二刀：`runtime_not_found` 的**单点铸码** ———
+//
+// 搬 `RuntimeIdentity`/`RuntimeDiagnostics` 时发现的一处**真实的重复铸码**：`runtime_not_found`
+// 在"构建期选定的那个 runtime 没注册"这条判据上被铸了**三处**——
+//
+//	runtimeconn/binding.go         ✓ 保留（唯一铸码点）
+//	manager/session_start.go       ✗ 已删（`startSessionOn`：`runtimeID` 就是刚解析出来的那个，
+//	                                 紧接着 `reg.Get(runtimeID)` 不可能不命中 ⇒ **永远不可达**）
+//	manager/session_start.go       ✗ 已删（恢复路径，同上）
+//
+// 同一批还发现**同因异码**（**尚未定案，刻意没动**）：manager/model_catalog.go 的 `ModelCatalog`
+// 对**同一个条件**铸的是 `runtime_not_registered`——而那个码**不在** `pkg/code/acl.go` 的映射表里
+// （只有 `runtime_not_found` 在），于是它落到 ClassRequest 的兜底码 40001，而 runtimeconn 那条是
+// 40401。**改它是对外契约变更**（要走 `pkg/code` + README + 前端 `BizCode` 三处同步），
+// 所以登记在 §3.1.61 而不是顺手改；本条守卫只钉**已收敛的那一处**。
+//
+// 判据两段，fail-closed：
+//
+//	① `runtime_not_found` 的 `acl.NewError` 铸码点在 `internal/manager` 里**为零**、
+//	   在 `internal/runtimeconn` 里**恰好一处**；
+//	② `resource_sync.go` 里那个 `runtime_not_found`（校验**用户请求同步的那个 runtime**）
+//	   是**另一个输入**，刻意放行——但它必须仍在（否则说明有人把请求参数校验也删了）。
+func TestRuntimeNotFoundHasSingleMintPoint(t *testing.T) {
+	root := backendRoot(t)
+	internalDir := filepath.Join(root, "internal")
+	files := productionGoFiles(t, internalDir)
+	if len(files) == 0 {
+		t.Fatalf("%s 下没有生产 .go 文件：判据失去检查对象", internalDir)
+	}
+	mint := `acl.NewError(acl.ClassRequest, "runtime_not_found"`
+	inRuntimeconn, inManager, inResourceSync := 0, 0, 0
+	for _, path := range files {
+		body := readFileOrFatal(t, path)
+		n := strings.Count(body, mint)
+		if n == 0 {
+			continue
+		}
+		slash := filepath.ToSlash(rel(root, path))
+		switch {
+		case strings.HasPrefix(slash, "internal/runtimeconn/"):
+			inRuntimeconn += n
+		case filepath.Base(path) == "resource_sync.go":
+			inResourceSync += n
+		case strings.HasPrefix(slash, "internal/manager/"):
+			inManager += n
+			t.Errorf("internal/manager/%s 里铸了 `runtime_not_found`：这条判据的铸码点在执行面"+
+				"（`runtimeconn.SelectedSpec`）。\n"+
+				"同一条判据的第二、第三份文本迟早只改一处——用户看到的「为什么没装配」就会分成两套说法。",
+				filepath.Base(path))
+		}
+	}
+	if inRuntimeconn != 1 {
+		t.Errorf("`internal/runtimeconn` 里 `runtime_not_found` 的铸码点是 %d 处（期望恰好 1）："+
+			"这条判据失锚或被人复制了。", inRuntimeconn)
+	}
+	if inManager != 0 {
+		t.Errorf("`internal/manager` 里仍有 %d 处 `runtime_not_found` 铸码。", inManager)
+	}
+	if inResourceSync != 1 {
+		t.Error("`internal/manager/resource_sync.go` 里那个 `runtime_not_found` 不见了：" +
+			"它校验的是**用户请求同步的那个 runtime**（另一个输入，故放行）——删掉它 = " +
+			"请求一个不在册的 runtime 会被静默当成「同步全部」。")
+	}
+}

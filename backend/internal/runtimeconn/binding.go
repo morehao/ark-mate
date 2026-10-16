@@ -66,6 +66,19 @@ func NewPlane(reg *runtime.Registry, spec runtime.Spec, specOK bool) *Plane {
 	}
 }
 
+// NewPlaneFor 装配层的入口：自己读"构建期选定的那个底座"再建平面。
+//
+// 为什么要有它（而不是让调用方先 `reg.Get(runtime.SelectedRuntime())`）：**"选哪个 + 注册了吗"
+// 这条判据只许有一处**。装配层与 `manager.NewService` 各写一遍，迟早漂移成"装配层认为已注册、
+// 平面认为没注册"——而那时的表现是诊断说 `runtime_not_found`、连接却接得上。
+func NewPlaneFor(reg *runtime.Registry) *Plane {
+	spec, ok := runtime.Spec{}, false
+	if reg != nil {
+		spec, ok = reg.Get(runtime.SelectedRuntime())
+	}
+	return NewPlane(reg, spec, ok)
+}
+
 // SetRegistry 装配期登记注册表（构造期没给时用）。
 func (pl *Plane) SetRegistry(reg *runtime.Registry) { pl.reg = reg }
 

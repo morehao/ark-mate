@@ -1,10 +1,7 @@
 package manager
 
 import (
-	"context"
-
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
@@ -33,11 +30,6 @@ func (s *Service) scopeNote() (runtimeconn.AmbiguityNote, bool) { return s.runti
 
 // TODO(P4b): 删转发（同上）
 func (s *Service) runtimeLastError() (runtimeconn.LastErr, bool) { return s.runtimePlane.LastError() }
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, error) {
-	return s.runtimePlane.Diagnostics(ctx)
-}
 
 // ——— 两个端口的实现（`runtimeconn` 的读面） ———
 

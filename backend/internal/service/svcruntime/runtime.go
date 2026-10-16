@@ -10,6 +10,32 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
+// Plane 执行面（`internal/runtimeconn`）——**这两个方法名是执行面的口语，不是 API 的口语**：
+// 执行面说"身份/诊断"，对外契约说 `RuntimeIdentity`/`RuntimeDiagnostics`（路径 `/runtime/...`）。
+// 命名适配是这一层存在的理由（它是 API 面的一部分），所以这里刻意不做成 getter + 双层转发。
+type Plane interface {
+	Identity(ctx context.Context) dtoruntime.IdentityResp
+	Diagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, error)
+}
+
+// Runtime 底座身份与诊断面的用例实现（P4a：实现从 `manager` 收进这里）。
+type Runtime struct{ plane Plane }
+
+// New 造一个底座面用例（`plane` 由装配层交出）。
+func New(plane Plane) *Runtime { return &Runtime{plane: plane} }
+
+var _ RuntimeSvc = (*Runtime)(nil)
+
+// RuntimeIdentity 见 `svcruntime.RuntimeSvc`。
+func (r *Runtime) RuntimeIdentity(ctx context.Context) dtoruntime.IdentityResp {
+	return r.plane.Identity(ctx)
+}
+
+// RuntimeDiagnostics 见 `svcruntime.RuntimeSvc`。
+func (r *Runtime) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.DiagnosticsResp, error) {
+	return r.plane.Diagnostics(ctx)
+}
+
 // RuntimeSvc 底座身份与诊断面的服务端口。
 //
 // 它只剩两个方法，是**刻意的**：这个包管的是"这个二进制认哪个底座、它此刻怎么样"，
