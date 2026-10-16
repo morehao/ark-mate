@@ -373,7 +373,11 @@ func (s *Service) fetchCatalogByResume(ctx context.Context, spec runtime.Spec) (
 // 一条残留把整个目录打成空，正是这条链最不该有的行为。
 func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeConn) []resumeTarget {
 	// 1) 平台记录（内存集合 + sqlite 兜底）。
-	s.mu.Lock()
+	//
+	// **快照读不持 `s.mu`**（P2b 前置）：`st` 是装配期一次性写的引用（见 `attachStore`），
+	// 不需要与 `s.mu` 同临界区；持锁去请求会话快照会把"manager 锁 → session 锁"这条边固化下来，
+	// 而会话域会回调 workspace 侧——workspace 状态进域平面后就是**锁序反转**（挂死，不是红）。
+	st := s.st
 	var recs []SessionRec
 	for _, r := range s.sessionPlane.Snapshot() {
 		if r.RuntimeSessionID == "" || r.Cwd == "" {
@@ -381,8 +385,6 @@ func (s *Service) catalogResumeCandidates(ctx context.Context, rc *runtimeConn) 
 		}
 		recs = append(recs, r)
 	}
-	st := s.st
-	s.mu.Unlock()
 	if st != nil {
 		// 表量级小；失败即视为"这一侧没有候选"（内存集合那边照常可用）。
 		if list, err := st.ListSessions(context.Background(), nil); err == nil {

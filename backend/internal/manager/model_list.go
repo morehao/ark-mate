@@ -463,9 +463,10 @@ func (s *Service) requireProvider(ctx context.Context, providerID string) error 
 func (s *Service) modelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 	eff := &dtomodel.ModelEffect{Effect: "next_session"}
 	o := s.orch
-	s.mu.Lock()
+	// **快照读不持 `s.mu`**（P2b 前置）：`o` 是装配期回挂的引用，循环体只读快照与它；
+	// 持锁请求会话快照会把"manager 锁 → session 锁"这条边固化下来（见
+	// `manager_lock_order_test.go` 的说明：workspace 状态进域平面后就是锁序反转，表现是挂死）。
 	recs := s.sessionPlane.Snapshot()
-	s.mu.Unlock()
 	for i := range recs {
 		eff.AffectedSessions++
 		if o == nil {

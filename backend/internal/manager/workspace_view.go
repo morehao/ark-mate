@@ -267,9 +267,12 @@ type wsUsage struct {
 // 只排除一类：平台**代建**的临时工作空间（WorkspaceTemporary）——某会话独占的一次性目录，复用无意义。
 // **v14.5 起不再排除"名录外"的目录**：名录已降级为起始点偏好，不再意味着"不可选用"，
 // 所以任何用户真正在里面工作过的目录都可以作为候选推回来。
+//
+// **不持 `s.mu`**（P2b 前置）：这里只读会话快照，不碰任何 `s.mu` 保护的字段，而 s.mu 与
+// 会话域自己的锁是两把锁——在这把锁下面去请求会话快照，等于把"workspace 锁 → session 锁"
+// 这条边固化下来；等 workspace 状态搬进域平面（域锁下调 `Snapshot()`）就与
+// `workspaceDisplayOf` 那条反向回调合成**锁序反转**，而它的表现是 `go test ./...` 挂死、不是红。
 func (s *Service) workspaceUsage() map[string]*wsUsage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	snap := s.sessionPlane.Snapshot()
 	byPath := make(map[string]*wsUsage, len(snap))
 	for i := range snap {

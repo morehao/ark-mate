@@ -262,6 +262,11 @@ func (s *Service) provisionMemoryDefaultWorkspace(dir string) error {
 //
 // 计数与最近使用从**内存会话**现算（与 sqlite 分支逐字同一口径）：归到默认工作空间的历史会话
 // （`workspace_id = ”`）也算在它头上——否则界面上它会永远显示 0 个会话，而点进去却有。
+//
+// **不持 `s.mu`**（P2b 前置）：循环体只读快照与 `def`，不碰任何 `s.mu` 保护的字段。在这里持锁
+// 请求会话快照会把"workspace 锁 → session 锁"这条边固化下来，等 workspace 状态搬进域平面
+// 就与 `workspaceDisplayOf` 的反向回调合成**锁序反转**——表现是挂死，不是红（见
+// `workspace_view.go` 的 `workspaceUsage` 同一条注释）。
 func (s *Service) workspaceRespForMemDefault(def model.WorkspaceEntity) dtoworkspace.WorkspaceResp {
 	resp := dtoworkspace.WorkspaceResp{
 		ID:        def.ID,
@@ -273,8 +278,6 @@ func (s *Service) workspaceRespForMemDefault(def model.WorkspaceEntity) dtoworks
 		CreatedAt: def.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: def.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, rec := range s.sessionPlane.Snapshot() {
 		if rec.WorkspaceID == def.ID || rec.WorkspaceID == "" {
 			resp.Sessions++
