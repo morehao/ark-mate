@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -63,7 +63,7 @@ func automationImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := manager.ImportAutomationDir(context.Background(), st, root,
+	stats, err := automation.ImportAutomationDir(context.Background(), st, root,
 		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automation import: %v（未写入任何内容）\n", err)
@@ -103,7 +103,7 @@ func automationExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := manager.ExportAutomationDir(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := automation.ExportAutomationDir(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automation export: %v\n", err)
 		os.Exit(1)

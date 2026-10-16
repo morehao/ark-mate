@@ -52,6 +52,22 @@ var automationDomainAnchors = map[string][]string{
 		"func (pl *Plane) Mutate(",
 		"func (pl *Plane) SetHost(",
 	},
+	// P4a 正文第四十五刀：存量定义的**导入/导出**也归域。
+	//
+	// 这两个入口此前是 `manager` 的**包级函数**（不是 `*Service` 的方法），乍看像"机制层的东西"，
+	// 但它们按 `automation.ReservedKeys` 把一份文件切成"定义 + 运行态"两半——那是**自动化域的
+	// 知识**，而机制层不许 import 域（`TestMechanismMustNotImportUpward`），所以它的家是
+	// `domain/automation`，与 `carrier.go`（双载体 + 覆盖层）并排。
+	//
+	// 最后两条锚钉的是"**导入框架只有一份实现**"：选项与统计都取自 `mechanism/definition`，
+	// 域里只做"切成两半"的绑定。在域里另写一套导入语义 = 第二个事实源。
+	"import.go": {
+		"func ImportAutomationDir(",
+		"func ExportAutomationDir(",
+		"type ImportStats struct",
+		"definition.DefinitionImportOptions",
+		"definition.DefinitionImportStats",
+	},
 }
 
 // automationManagerThinFiles manager 侧**只许是薄转发/适配**的文件。
@@ -86,6 +102,14 @@ func TestAutomationImplementationLivesInDomain(t *testing.T) {
 	}
 
 	managerDir := filepath.Join(root, "internal", "manager")
+	mgrAll := dirProductionBody(t, managerDir)
+	for _, dead := range []string{"func ImportAutomationDir(", "func ExportAutomationDir("} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：存量定义的导入/导出已随 P4a 正文第四十五刀"+
+				"搬进 `internal/domain/automation/import.go`（那里面要按 `automation.ReservedKeys` 切分"+
+				"定义与运行态，是域的知识；机制层不许 import 域）。", dead)
+		}
+	}
 	for _, f := range automationManagerThinFiles {
 		src := stripLineComments(readFileOrFatal(t, filepath.Join(managerDir, f)))
 		for _, m := range automationManagerImplMarkers {

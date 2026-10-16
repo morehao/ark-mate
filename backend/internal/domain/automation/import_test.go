@@ -1,4 +1,4 @@
-package manager
+package automation
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/testutil"
-	"github.com/morehao/ark-mate/pkg/automation"
+	pkgautomation "github.com/morehao/ark-mate/pkg/automation"
 )
 
 // sameJSONObject 逐键比对两份 JSON 正文（顺序无关；任一份不是 JSON → 立刻失败）。
@@ -37,7 +37,7 @@ func sameJSONObject(t *testing.T, a, b string) bool {
 // ——— M6-7：定时任务的存量搬家（导入 / 导出） ———
 //
 // 与前两个域最大的差别：一个文件里住着**两类东西**（用户写的定义 + 平台写回运行态）。
-// 导入按 `automation.ReservedKeys` 切分，导出反向合成——所以这里的往返断言既比正文、也比运行态列。
+// 导入按 `pkgautomation.ReservedKeys` 切分，导出反向合成——所以这里的往返断言既比正文、也比运行态列。
 
 // automationSeedDir 造一个"存量 AutomationDir"：2 条好定义（一条带运行态）+ 3 条坏定义
 // + 1 个点开头的临时文件（既不算定义也不算坏定义）。
@@ -118,7 +118,7 @@ func TestImportAutomationDirSplitsRuntimeColumns(t *testing.T) {
 		t.Fatalf("recent_runs 未落库: %s", u1.RecentRuns)
 	}
 	// 定义正文里**不得**留着运行态键（P-10：结构上不可写），`state` 是定义键要留着。
-	for _, k := range automation.ReservedKeys {
+	for _, k := range pkgautomation.ReservedKeys {
 		if strings.Contains(u1.Body, `"`+k+`"`) {
 			t.Fatalf("定义正文不该有运行态键 %s: %s", k, u1.Body)
 		}
@@ -138,8 +138,8 @@ func TestImportAutomationDirBoundsRecentRuns(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	cwd := t.TempDir()
-	runs := make([]string, 0, automation.RecentRunsMax+3)
-	for i := 0; i < automation.RecentRunsMax+3; i++ {
+	runs := make([]string, 0, pkgautomation.RecentRunsMax+3)
+	for i := 0; i < pkgautomation.RecentRunsMax+3; i++ {
 		runs = append(runs, `{"status":"completed","trigger":"scheduled"}`)
 	}
 	body := `{"id":"many","name":"运行史很长","enabled":true,` +
@@ -154,12 +154,12 @@ func TestImportAutomationDirBoundsRecentRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "many")
-	var got []automation.RunRecord
+	var got []pkgautomation.RunRecord
 	if err := json.Unmarshal([]byte(row.RecentRuns), &got); err != nil {
 		t.Fatalf("recent_runs 不是数组: %v（%s）", err, row.RecentRuns)
 	}
-	if len(got) != automation.RecentRunsMax {
-		t.Fatalf("运行史列有界（%d），got %d", automation.RecentRunsMax, len(got))
+	if len(got) != pkgautomation.RecentRunsMax {
+		t.Fatalf("运行史列有界（%d），got %d", pkgautomation.RecentRunsMax, len(got))
 	}
 }
 
@@ -213,7 +213,7 @@ func TestImportAutomationDirNeverOverwrites(t *testing.T) {
 	if ok, err := st.UpsertAutomationDefinition(ctx, "u1", panelBody, row.Revision, "rest"); err != nil || !ok {
 		t.Fatalf("面板改一版: ok=%v err=%v", ok, err)
 	}
-	if ok, err := st.SaveAutomationRuntime(ctx, "u1", row.LastFiredAt, store.AutomationRuntimeState{LastFiredAt: "2026-10-09T01:00:00Z", LastStatus: automation.RunCompleted}); err != nil || !ok {
+	if ok, err := st.SaveAutomationRuntime(ctx, "u1", row.LastFiredAt, store.AutomationRuntimeState{LastFiredAt: "2026-10-09T01:00:00Z", LastStatus: pkgautomation.RunCompleted}); err != nil || !ok {
 		t.Fatalf("面板跑一轮: ok=%v err=%v", ok, err)
 	}
 

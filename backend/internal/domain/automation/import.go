@@ -1,11 +1,10 @@
-package manager
+package automation
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	automationdomain "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
@@ -15,7 +14,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
-	"github.com/morehao/ark-mate/pkg/automation"
+	pkgautomation "github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/capability"
 )
 
@@ -28,14 +27,14 @@ import (
 //	`mate automation export`：把库里的定义写回目录（文件从此是**导出物**）。
 //
 // 同一个 `.json` 里既有用户写的定义，也有平台写回的运行态（`last_fired_at` / `recent_runs` / …）。
-// 进库之后后者是**列**（Plan §7 P-10），所以导入要按 `automation.ReservedKeys` 把文件切成两半，
+// 进库之后后者是**列**（Plan §7 P-10），所以导入要按 `pkgautomation.ReservedKeys` 把文件切成两半，
 // 并且**同一个事务**写进去——否则会出现"定义进来了、运行史没进来"的半截状态。导出反向合成。
 //
 // 目录里没有保留文件（不像 `<AgentDir>` 有 `providers.json`/`default.json`），所以每个 `.json`
 // 都是一条定义；点开头的临时文件跳过（C9 的 staging 文件就在同目录）。
 
-// AutomationImportStats 一次 automation 导入的计数 = 域无关计数 + 本域的 Automations 条数。
-type AutomationImportStats struct {
+// ImportStats 一次 automation 导入的计数 = 域无关计数 + 本域的 Automations 条数。
+type ImportStats struct {
 	definition.DefinitionImportStats
 	// Automations 目录里**过了闸门**的条数。
 	Automations int
@@ -48,8 +47,8 @@ type AutomationImportStats struct {
 //
 // **schedule/target 的可执行性不在导入期判定**：那是装载期的事（`buildAutomationRec` 会把
 // `loadErr` 留在列表里让用户看见），而"现在不可执行"不等于"这条定义该丢"——这与文件模式逐字一致。
-func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts definition.DefinitionImportOptions, out io.Writer) (AutomationImportStats, error) {
-	var stats AutomationImportStats
+func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts definition.DefinitionImportOptions, out io.Writer) (ImportStats, error) {
+	var stats ImportStats
 	if st == nil {
 		return stats, errors.New("manager: 导入 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
@@ -119,11 +118,11 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 
 // automationFileBody 把一行（定义正文 + 运行态列）合成**文件形态**的字节（导出与导入归一化共用）。
 //
-// 运行态键按 `pkg/automation.Automation` 的 JSON 形态写回，值用**强类型**（`[]automation.RunRecord`、
+// 运行态键按 `pkg/pkgautomation.Automation` 的 JSON 形态写回，值用**强类型**（`[]pkgautomation.RunRecord`、
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
 func automationFileBody(row *model.AutomationEntity) (string, error) {
-	df, err := capability.DecodeDefinitionDoc(automationdomain.Locator(row.ID), []byte(row.Body))
+	df, err := capability.DecodeDefinitionDoc(Locator(row.ID), []byte(row.Body))
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +151,7 @@ func automationRuntimeStateOf(row *model.AutomationEntity) (store.AutomationRunt
 		RecentRuns:          row.RecentRuns,
 	}
 	if row.RecentRuns != "" && row.RecentRuns != "[]" {
-		var runs []automation.RunRecord
+		var runs []pkgautomation.RunRecord
 		if err := json.Unmarshal([]byte(row.RecentRuns), &runs); err != nil {
 			return rt, fmt.Errorf("recent_runs 不是合法运行史 JSON：%v", err)
 		}
@@ -188,7 +187,7 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRu
 		}
 	}
 	if rt.RecentRuns != "" && rt.RecentRuns != "[]" {
-		var runs []automation.RunRecord
+		var runs []pkgautomation.RunRecord
 		if err := json.Unmarshal([]byte(rt.RecentRuns), &runs); err != nil {
 			return fmt.Errorf("recent_runs 不是合法运行史 JSON：%v", err)
 		}
@@ -200,8 +199,8 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRu
 }
 
 // scanAutomationDir 扫描 `<AutomationDir>/*.json`：逐条切分定义/运行态并过闸门。
-func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem, AutomationImportStats) {
-	stats := AutomationImportStats{DefinitionImportStats: definition.DefinitionImportStats{Dir: dir}}
+func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem, ImportStats) {
+	stats := ImportStats{DefinitionImportStats: definition.DefinitionImportStats{Dir: dir}}
 	files := definition.GlobSorted(dir)
 	items := make([]store.DefinitionImportItem, 0, len(files))
 	kept := make([]string, 0, len(files))
@@ -227,7 +226,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 
 // readAutomationDefinitionFile 读一个定时任务定义文件并**切分**（定义正文 / 运行态 / id）。
 //
-// 文件里的保留键（`automation.ReservedKeys`）一律搬进运行态：不搬的话定义正文里就会留着
+// 文件里的保留键（`pkgautomation.ReservedKeys`）一律搬进运行态：不搬的话定义正文里就会留着
 // `last_fired_at` 这种"写了也不生效"的键，正是 P-10 要结构性排除的东西。
 func readAutomationDefinitionFile(path string) (string, string, *store.AutomationRuntimeState, error) {
 	b, err := os.ReadFile(path)
@@ -260,14 +259,14 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 		return "", "", nil, fmt.Errorf("automation id %q 不能作为定义键（文件名或 id 字段非法）", id)
 	}
 	// 定义正文 = 原文去掉保留键，再把 id 钉成载体键（写面也是这么做的：`patch["id"] = id`）。
-	for _, k := range automation.ReservedKeys {
+	for _, k := range pkgautomation.ReservedKeys {
 		delete(doc, k)
 	}
 	rest, err := json.Marshal(doc)
 	if err != nil {
 		return "", "", nil, err
 	}
-	df, err := capability.DecodeDefinitionDoc(automationdomain.Locator(id), rest)
+	df, err := capability.DecodeDefinitionDoc(Locator(id), rest)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -288,7 +287,7 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.AutomationRuntimeState, error) {
 	rt := store.AutomationRuntimeState{}
 	found := false
-	for _, k := range automation.ReservedKeys {
+	for _, k := range pkgautomation.ReservedKeys {
 		raw, ok := doc[k]
 		if !ok {
 			continue
@@ -328,15 +327,15 @@ func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.Automation
 				return nil, fmt.Errorf("consecutive_failures 须为整数：%v", err)
 			}
 		case "recent_runs":
-			var runs []automation.RunRecord
+			var runs []pkgautomation.RunRecord
 			if err := json.Unmarshal(raw, &runs); err != nil {
 				return nil, fmt.Errorf("recent_runs 须为运行史数组：%v", err)
 			}
 			// 有界：文件可以被人手工塞进 500 条，进库就该回到 RecentRunsMax（列的契约是"有界"）。
-			if len(runs) > automation.RecentRunsMax {
-				runs = runs[:automation.RecentRunsMax]
+			if len(runs) > pkgautomation.RecentRunsMax {
+				runs = runs[:pkgautomation.RecentRunsMax]
 			}
-			rt.RecentRuns = automationdomain.RunsJSON(runs)
+			rt.RecentRuns = RunsJSON(runs)
 		}
 	}
 	if !found {

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
@@ -309,7 +310,7 @@ func (a *App) Init(ctx context.Context) error {
 		// ——所以搬运是"一个文件 → 一行里的两类列"，同一事务，不出现半截状态。
 		//
 		// 两个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让能力面重跑。
-		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
+		if imp, iErr := automation.ImportAutomationDir(ctx, st, cfg.AutomationDir,
 			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 				"err", iErr, "dir", cfg.AutomationDir)
