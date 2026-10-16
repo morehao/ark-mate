@@ -20,7 +20,6 @@ import (
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -64,8 +63,10 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
-		Runtime:  svcruntime.New(runtimeconn.NewPlaneFor(nil)),
-		Provider: svc, Model: svc,
+		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
+		Runtime:  runtimeconn.NewPlaneFor(nil),
+		Provider: svc, ProviderArchives: svc.ProviderPlane(), ProviderCatalog: svc,
+		Model:      svc,
 		Capability: svc, Library: svc,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
@@ -380,8 +381,10 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
-		Runtime:  svcruntime.New(runtimeconn.NewPlaneFor(nil)),
-		Provider: svc, Model: svc,
+		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
+		Runtime:  runtimeconn.NewPlaneFor(nil),
+		Provider: svc, ProviderArchives: svc.ProviderPlane(), ProviderCatalog: svc,
+		Model:      svc,
 		Capability: svc, Library: svc,
 	}, bus, router.Options{Credentials: creds})
 	return engine

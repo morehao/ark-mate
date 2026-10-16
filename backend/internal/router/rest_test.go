@@ -9,9 +9,10 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	"github.com/morehao/ark-mate/internal/dto/dtoexport"
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
@@ -88,9 +89,9 @@ type stubSvc struct {
 	searchMsgResp  *dtosearch.MessageSearchResp
 	searchMsgErr   error
 
-	exportReq  dtoexport.ExportReq
-	exportResp *dtoexport.ExportResp
-	exportErr  error
+	// P4a 起导出用例是**真的**：替身交的是事实（元数据 + 事件序列），不再是假用例。
+	exportMeta   map[string]session.Meta
+	exportEvents map[string][]eventbus.Event
 
 	// automation 面（M4-5）桩状态
 	automations    []dtoautomation.AutomationResp
@@ -562,13 +563,14 @@ func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]dtosessi
 	return nil, nil
 }
 
-// RuntimeIdentity 底座身份桩：`/meta` 的 runtime 段（id/name/version）由路由层从本方法取。
-func (s *stubSvc) RuntimeIdentity(_ context.Context) dtoruntime.IdentityResp {
+// Identity 底座身份桩（P4a：这是**执行面**的口语，`ctrruntime` 用它造 svcruntime 用例；
+// `/meta` 的 runtime 段也直接读它）。
+func (s *stubSvc) Identity(_ context.Context) dtoruntime.IdentityResp {
 	return dtoruntime.IdentityResp{ID: "stub", Name: "Stub", Version: "0.0-stub"}
 }
 
-// RuntimeDiagnostics 底座诊断桩（v19：原 AgentDiagnostics，路径不带 id）。
-func (s *stubSvc) RuntimeDiagnostics(_ context.Context) (*dtoruntime.DiagnosticsResp, error) {
+// Diagnostics 底座诊断桩（v19：原 AgentDiagnostics，路径不带 id）。
+func (s *stubSvc) Diagnostics(_ context.Context) (*dtoruntime.DiagnosticsResp, error) {
 	if s.diagErr != nil {
 		return nil, s.diagErr
 	}
@@ -591,16 +593,39 @@ func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	return &dtosearch.MessageSearchResp{Query: q, Source: "sqlite", Hits: []dtosearch.MessageSearchHit{}}, nil
 }
 
-func (s *stubSvc) ExportSessions(_ context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
-	s.exportReq = req
-	if s.exportErr != nil {
-		return nil, s.exportErr
-	}
-	if s.exportResp != nil {
-		return s.exportResp, nil
-	}
-	return &dtoexport.ExportResp{Format: "markdown", Files: []dtoexport.ExportFile{}}, nil
+// ——— P4a：导出用例的**事实来源**（用例实例由 ctrexport 造，替身只提供事实） ———
+//
+// 以前这里是 `ExportSessions`——替身把**用例本身**也假掉了，于是"渲染口径/上限口径"在路由测试里
+// 从来没有被执行过。P4a 把用例实例的构造搬进 ctrexport 之后，替身只能交事实（会话元数据 + 事件
+// 序列），`TestExportRoute` 走的是真 Exporter。
+func (s *stubSvc) SessionMeta(_ context.Context, id string) (session.Meta, bool) {
+	m, ok := s.exportMeta[id]
+	return m, ok
 }
+
+func (s *stubSvc) SessionEvents(_ context.Context, id string, limit int) ([]eventbus.Event, bool) {
+	ev := s.exportEvents[id]
+	if len(ev) > limit {
+		return ev[:limit], true
+	}
+	return ev, false
+}
+
+// ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
+
+// stubProviderArchives 自检所需的域读面（`ctrprovider.ProviderArchives`）。
+type stubProviderArchives struct{ defs map[string]*provider.Def }
+
+func (s stubProviderArchives) Snapshot(id string) (*provider.Def, bool) {
+	d, ok := s.defs[id]
+	return d, ok
+}
+
+func (s stubProviderArchives) ProviderRefName(id string) string { return "providers/" + id }
+
+func (s stubProviderArchives) ProviderLocator(string) string { return "db:provider/<id>" }
+
+func (s stubProviderArchives) ProviderModelRefsReadOnly(context.Context, string) []string { return nil }
 func (s *stubSvc) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
 	return &dtosession.SessionDetailResp{
 		SessionResp: dtosession.SessionResp{ID: id},
@@ -724,11 +749,13 @@ type envelope struct {
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Session: svc, Workspace: svc,
-		Runtime:  svc,
-		Provider: svc, Model: svc,
+		// 执行面（`Identity`/`Diagnostics`）：用例实例由 ctrruntime 造。
+		Runtime: svc,
+		// 档案四动作 + 自检的两个事实端口：替身只给事实，自检用例（Probe）由 ctrprovider 造。
+		Provider: svc, ProviderArchives: stubProviderArchives{},
+		ProviderCatalog: svc, Model: svc,
 		Capability: svc, Library: svc,
-		// 测试替身**直接**满足用例层端口（它实现了 ExportSessions）；装配期交的是
-		// `svcsystem.New(a.svc)`，但路由只认接口，替身不必走那层。
+		// 事实来源（`SessionMeta`/`SessionEvents`）：导出用例由 ctrexport 造。
 		System: svc,
 	}
 }
@@ -1629,23 +1656,38 @@ func TestMessageSearchRoute(t *testing.T) {
 	}
 }
 
-// TestExportRoute POST /sessions/export：请求体校验 + 响应形状 + 错误映射。
+// TestExportRoute POST /sessions/export：**真**导出用例（P4a：用例实例由 ctrexport 造）+
+// 请求体绑定 + 错误映射。
+//
+// 这条用例以前把 `ExportSessions` 整个假掉了，于是它验的只是"信封能包住一个假响应"。现在替身
+// 只交事实，判据（格式归一、ids 去重、未知会话进 skipped、错误码）都是用例层真的跑出来的。
 func TestExportRoute(t *testing.T) {
-	svc := &stubSvc{exportResp: &dtoexport.ExportResp{
-		GeneratedAt: "2026-09-09T00:00:00Z", Format: "markdown", Exported: 1, TotalBytes: 12,
-		Files: []dtoexport.ExportFile{{SessionID: "c-1", Filename: "部署-c-1.md", Format: "markdown", Bytes: 12, Content: "# 部署\n\nhi"}},
-	}}
+	svc := &stubSvc{
+		exportMeta: map[string]session.Meta{
+			"c-1": {ID: "c-1", Title: "部署", Status: "idle"},
+		},
+		exportEvents: map[string][]eventbus.Event{
+			"c-1": {{ID: "evt_1", Type: "session.run.started", Payload: map[string]any{}}},
+		},
+	}
 	r := newRestEngine(stubDeps(svc))
 
 	env, http := do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"markdown"}`)
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
-	if svc.exportReq.Format != "markdown" || len(svc.exportReq.IDs) != 1 {
-		t.Fatalf("请求透传不符: %+v", svc.exportReq)
+	data := string(env.Data)
+	if !strings.Contains(data, `"session_id":"c-1"`) || !strings.Contains(data, `"exported":1`) {
+		t.Fatalf("响应载荷不符（真 Exporter 应产出一份文件）: %s", data)
 	}
-	if !strings.Contains(string(env.Data), `"filename":"部署-c-1.md"`) || !strings.Contains(string(env.Data), `"total_bytes":12`) {
-		t.Fatalf("响应载荷不符: %s", env.Data)
+	if !strings.Contains(data, ".md") {
+		t.Fatalf("文件名扩展名应随 format 走: %s", data)
+	}
+
+	// 未知会话进 `skipped`（用例层的口径，不再由替身说了算）。
+	env, http = do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1","nope"],"format":"text"}`)
+	if http != 200 || env.Code != 0 || !strings.Contains(string(env.Data), `"skipped":["nope"]`) {
+		t.Fatalf("未知会话应进 skipped: http=%d %+v", http, env)
 	}
 
 	// 缺 ids → 40000（参数绑定失败）。
@@ -1653,10 +1695,8 @@ func TestExportRoute(t *testing.T) {
 	if http != 200 || env.Code != 40000 {
 		t.Fatalf("缺 ids 校验不符: http=%d %+v", http, env)
 	}
-	// 服务错误映射（40001 非法格式）。
-	svc2 := &stubSvc{exportErr: gerror.Error{Code: 40001, Msg: "不支持的导出格式 [invalid_export_format]"}}
-	r2 := newRestEngine(stubDeps(svc2))
-	env, http = do(t, r2, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"pdf"}`)
+	// 非法格式 → 40001（用例层的真判据，替身注入已经不可能）。
+	env, http = do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"pdf"}`)
 	if http != 200 || env.Code != 40001 || !strings.Contains(env.Msg, "invalid_export_format") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}

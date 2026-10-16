@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtolibrary"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
 )
@@ -28,7 +27,7 @@ import (
 //     not_configured/not_applicable/disabled），两处各造一套词就会让用户对着两个页面猜哪个是真的。
 
 // ListLibrary 返回统一能力清单（按 kind、id 排序；排序稳定 → 面板与测试都不会"抖动"）。
-func (s *Service) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, error) {
+func (s *Service) ListLibrary(q skill.Query) ([]dtolibrary.LibraryItem, error) {
 	if q.Kind != "" && !dtolibrary.ValidKinds[q.Kind] {
 		// 未知 kind 报 40000 而不是静默返回空表：静默会让"筛了但没有"与"我拼错了"长得一样。
 		return nil, code.Error(code.InvalidParam,

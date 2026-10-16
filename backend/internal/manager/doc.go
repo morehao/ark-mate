@@ -1,7 +1,9 @@
 // Package manager 编排 Agent 生命周期与会话执行：
 //
-//   - Service：实现 internal/service/svc* 声明的全部领域端口（编译期断言见 ports.go），
-//     数据来自 runtime 注册表 + 进程内会话/Agent 存储
+//   - Service：实现 internal/service/svc* 声明的领域端口（**断言在装配点**：`app.go` 的
+//     `router.Ports` 字面量，见 ports.go 的文件头），数据来自 runtime 注册表 + 进程内会话存储。
+//     P4a 起它**不 import** `service/svc*`：哪些端口由它实现、哪些用例已经搬走，看装配点一行
+//     就够（自检/导出/底座用例的实现已分别在 svcprovider/svcsystem/svcruntime）。
 //   - Orchestrator：把「对一次会话的 ACP 编排」（连接获取 → session/new → prompt →
 //     事件流 → cancel/close）跑通，并把归一化事件 Publish 进 eventbus（agg = session id）
 //   - 能力门控：load/resume/list/fork 依 acl.Capabilities 裁剪（各底座声明的能力集不同，

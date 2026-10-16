@@ -61,7 +61,7 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 
 	// 端口必须真的在（`Source` 是这一刀的关键：用例层不认识 store/domain）。
 	sourceSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsystem", "source.go")))
-	for _, a := range []string{"type Source interface {", "SessionMeta(ctx context.Context, id string) (SessionMeta, bool)", "SessionEvents(ctx context.Context, id string) (events []eventbus.Event, truncated bool)"} {
+	for _, a := range []string{"type Source interface {", "SessionMeta(ctx context.Context, id string) (SessionMeta, bool)", "SessionEvents(ctx context.Context, id string, limit int) (events []eventbus.Event, truncated bool)"} {
 		if !strings.Contains(sourceSrc, a) {
 			t.Errorf("internal/service/svcsystem/source.go 里找不到 %q：端口被改名/搬走了？", a)
 		}
@@ -93,12 +93,21 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 		}
 	}
 
-	// 装配：`app.go` 必须把用例层实例交给路由（交 `a.svc` 会编译不过，但漏掉这一行会变成 nil 端口）。
-	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
-	if !strings.Contains(app, "svcsystem.New(") {
-		t.Error("`internal/app/app.go` 里找不到 `svcsystem.New(`：用例层实例没有装配。" +
+	// 装配：用例实例必须在**控制器**里造（P4a 收口后 `app` 不认识 `service/svc*`）。
+	//
+	// 这条判据的位置换过一次：第一版钉的是 "`app.go` 里有 `svcsystem.New(`"，那是当时的事实。
+	// 收口之后事实变成"`app.go` 交出的是**事实来源**、用例实例由 `ctrexport` 造"——判据跟着
+	// 事实走，否则它会一边保护一个已经不成立的形状、一边放过真正的失效（没人造用例 ⇒ 端口为 nil）。
+	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrexport", "export.go")))
+	if !strings.Contains(ctr, "svcsystem.New(") {
+		t.Error("`internal/controller/ctrexport/export.go` 里找不到 `svcsystem.New(`：用例实例没人造。" +
 			"`Source` 为 nil 时 `ExportSessions` 会在第一次取数时 nil panic——" +
 			"而只测校验分支的单测看不见它。")
+	}
+	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if strings.Contains(app, "svcsystem.") {
+		t.Error("`internal/app/app.go` 里出现 `svcsystem.`：装配点不认识用例层（P4a 收口）。" +
+			"它该交出的是**事实来源**（`System: a.svc`），用例实例由 `ctrexport` 造。")
 	}
 }
 

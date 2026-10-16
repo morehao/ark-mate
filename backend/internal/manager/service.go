@@ -62,6 +62,10 @@ type Service struct {
 	// sessionPlane 会话域（自持一把只保护域内字段的锁；P3b 分批搬入）。
 	sessionPlane *session.Plane
 	// providerPlane 供应商域（内存档案表 + 载体 + 凭据面；自持一把只保护域内字段的锁）。
+	//
+	// P4a 起它的**读面**经 `ProviderPlane()` 交给 `ctrprovider`：自检的用例实现落
+	// `service/svcprovider`，而「谁把域与用例接起来」的落点是**控制器**（除它之外的层不许引用
+	// `service/svc*`）。于是本对象不再持有一个 `*svcprovider.Probe` 字段。
 	providerPlane *provider.Plane
 	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
 	picker *workspace.Picker
@@ -110,13 +114,15 @@ type Service struct {
 //
 // **为什么是"可选"而不是必填参数**：`NewService` 有 130+ 处调用点（几乎全在 manager 自己的
 // 测试里，它们只需要"一个能跑的 Service"），而**装配层需要的是"同一个执行面实例"**
-// （它要把这个实例也交给 API 面 `svcruntime.New`）。必填参数会让 130+ 处跟着改，
+// （它要把这个实例也交给 API 面：P4a 起 `svcruntime.New` 由 `ctrruntime` 在构造函数里调，
+// 用的就是这一份执行面）。必填参数会让 130+ 处跟着改，
 // 换来的信息量与这里一样。P5a 的 `registry` 装配表会取代这个缝。
 type Option func(*Service)
 
 // WithRuntimePlane 用装配层提供的执行面（而不是本函数自己造一个）。
 //
-// **必须与 `svcruntime.New` 拿到同一个实例**：两个平面各自记账时，"诊断说 stopped、
+// **必须与 `svcruntime.New` 拿到同一个实例**（P4a 起那个调用在 `ctrruntime` 里）：
+// 两个平面各自记账时，"诊断说 stopped、
 // 连接却活着"这种分叉会立刻发生（`runtimeconn.Plane` 的进程状态是它自己的字段）。
 func WithRuntimePlane(pl *runtimeconn.Plane) Option { return func(s *Service) { s.runtimePlane = pl } }
 
@@ -204,6 +210,14 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus, opts ...Option) *Servi
 
 // SetBus 注入事件总线（Orchestrator 构造时调用；与 handler.New 共用同一 bus）。
 func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
+
+// ProviderPlane 交出**供应商域**（`ctrprovider` 自检用例的事实来源）。
+//
+// 为什么把域整个交出去而不是转发几个方法：自检的用例层（`service/svcprovider`）已经用
+// `Ports` 把"它只要这四件事实"写清楚了，中间再垫一层同名转发只会多一处需要同步的清单。
+// 与 `runtimeconn.NewPlaneFor`/`WithRuntimePlane` 的分工同形：**同一个实例**交给两个消费面，
+// 两份平面 = 两个事实源。
+func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
 
 // SetNativePermission 开关 B5 原生权限映射（false = 不向底座注入权限配置）。
 func (s *Service) SetNativePermission(enabled bool) {

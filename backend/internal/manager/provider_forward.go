@@ -75,14 +75,6 @@ func (s *Service) CredentialProblem(ctx context.Context) error {
 	return s.providerPlane.CredentialProblem(ctx)
 }
 
-// TODO(P4b): 删转发（`provider_probe.go` / `provider_effect.go` 直接依赖 provider.Plane）
-func (s *Service) providerRefName(providerID string) string {
-	return s.providerPlane.ProviderRefName(providerID)
-}
-
-// TODO(P4b): 删转发（`provider_probe.go` 直接依赖 provider.Plane）
-func (s *Service) providerLocator(id string) string { return s.providerPlane.ProviderLocator(id) }
-
 // TODO(P4b): 删转发（`provider_effect.go` 直接依赖 provider.Plane）
 func (s *Service) providerModelRefsReadOnly(ctx context.Context, providerID string) []string {
 	return s.providerPlane.ProviderModelRefsReadOnly(ctx, providerID)

@@ -24,9 +24,13 @@ type exportCtr struct {
 	svc svcsystem.SystemSvc
 }
 
-// NewExportCtr 构造 ExportCtr。
-func NewExportCtr(svc svcsystem.SystemSvc) ExportCtr {
-	return &exportCtr{svc: svc}
+// NewExportCtr 构造 ExportCtr：交出**事实来源**，在这里造出导出用例。
+//
+// `src` 由装配侧交出（今天 = `*manager.Service`：sqlite 走库、memory 走会话域镜像 + 事件回放），
+// 而 `svcsystem.New` 在**控制器**里调——`app` 与 `router` 都不该 import `service/svc*`
+// （`internal/archtest/svc_layer_consumer_test.go` 钉着这条）。
+func NewExportCtr(src svcsystem.Source) ExportCtr {
+	return &exportCtr{svc: svcsystem.New(src)}
 }
 
 // Sessions 批量导出：POST /sessions/export

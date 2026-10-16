@@ -38,16 +38,30 @@ const AppName = "mate"
 //
 // 与"一个汇总大接口"的区别：这里只是装配点把实现分发给各控制器时的中转结构，
 // 控制器自身仍只持有自己那一片窄接口（见 internal/controller/ctr*）。
+//
+// **字段类型一律取"控制器包里的名字"**（`svcsession.SessionSvc`/`svcprovider.Ports`…），
+// 本包**不 import `internal/service/svc*`**：依赖链是 `router → controller → service`，
+// 路由装配只该认识控制器。这条由 `internal/archtest/svc_layer_consumer_test.go` 钉住——
+// 它的失效是静默的（多加一行 svc import 也能编译，只是把一条本该单向的边变成双向）。
+//
+// `Runtime` 与 `System` 交的是**执行面/事实来源**而不是用例实例：底座用例与导出用例
+// 分别由 `ctrruntime`/`ctrexport` 在构造函数里自己造（`svcruntime.New`/`svcsystem.New`），
+// 因为 `app` 与 `router` 都不该 import `service/svc*`。
 type Ports struct {
-	Session    svcsession.SessionSvc
-	Workspace  svcworkspace.WorkspaceSvc
-	Runtime    svcruntime.RuntimeSvc
-	Provider   svcprovider.ProviderSvc
-	Model      svcmodel.ModelSvc
-	Capability svccapability.CapabilitySvc
-	Automation svcautomation.AutomationSvc
-	Library    svclibrary.LibrarySvc
-	System     svcsystem.SystemSvc
+	Session   svcsession.SessionSvc
+	Workspace svcworkspace.WorkspaceSvc
+	// Runtime 底座执行面（`Identity`/`Diagnostics`），今天 = `*runtimeconn.Plane`。
+	Runtime svcruntime.Plane
+	// Provider 档案面四动作；ProviderArchives/ProviderCatalog 是自检用例的两个事实端口
+	// （分别是供应商域读面与模型目录读面），三者一起交给 `ctrprovider.NewProviderCtr`。
+	Provider         svcprovider.ProviderSvc
+	ProviderArchives svcprovider.Ports
+	ProviderCatalog  svcprovider.Catalog
+	Model            svcmodel.ModelSvc
+	Capability       svccapability.CapabilitySvc
+	Automation       svcautomation.AutomationSvc
+	Library          svclibrary.LibrarySvc
+	System           svcsystem.Source
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。
@@ -160,7 +174,9 @@ func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 		if ports.Runtime == nil {
 			return dtoruntime.IdentityResp{}
 		}
-		return ports.Runtime.RuntimeIdentity(context.Background())
+		// 这里取的是**执行面**的 `Identity`（P4a：`ports.Runtime` 交的是 `*runtimeconn.Plane`）：
+		// 底座身份本来就是它的读面，用例层那一层只是把名字适配成 API 的口语。
+		return ports.Runtime.Identity(context.Background())
 	})
 
 	MountWeb(r, o.Web)

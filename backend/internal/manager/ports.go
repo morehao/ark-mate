@@ -1,41 +1,26 @@
 package manager
 
-import (
-	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svclibrary"
-	"github.com/morehao/ark-mate/internal/service/svcmodel"
-	"github.com/morehao/ark-mate/internal/service/svcprovider"
-	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
-)
-
-// 编译期断言：实现方必须满足控制面声明的全部领域端口。
+// ——— 编译期断言搬去哪了（P4a 起） ———
 //
-// 为什么要有这几行：端口定义（internal/service/svc*）与实现（本包）分处两个包，
-// 而 Go 是结构化满足——装配点若漏传某个端口，错误会推迟到 cmd 层才暴露，报错也只有
-// "missing method"。把断言放在实现侧，端口一变形立刻在本包编译失败，定位成本最低。
+// 这里曾有一组 `var _ svc<领域>.XxxSvc = (*Service)(nil)`（一度 9 条）。它们随 P4a 逐个删掉，
+// 理由有两条，第二条是这一批才定下的：
 //
-// **P4a 正文第二刀**（2026-10-16）：`svcruntime.RuntimeSvc` 的断言也已删掉——底座面
-// （身份 + 诊断）的实现搬进了 `internal/service/svcruntime`。**断言跟着实现走**，两条都是。
+//  1. **断言跟着实现走**。哪一片实现搬进了 `service/svc<领域>`，它的断言就跟着搬进去
+//     （`svcsystem.Exporter`、`svcruntime.Runtime`、`svcprovider.Probe` 各自断言自己那片）——
+//     留在这里的断言会变成"实现已经走了、断言还在替它占位"，下一个人据此以为实现仍在 manager。
 //
-// **P4a 正文第一刀**（2026-10-16）：`svcsystem.SystemSvc` 的断言**已从这里删掉**——
-// 导出的用例实现搬进了 `internal/service/svcsystem`（真实现：校验/错误码出口/渲染），
-// `*Service` 只实现它的 `Source` 端口（`export_source.go`）。断言随之移到用例层：
-// `var _ SystemSvc = (*Exporter)(nil)`。**这正是 P4a 的形状**：端口断言跟着实现走。
+//  2. **除控制器层外的层不许引用 `service/svc*`**（`internal/archtest/svc_layer_consumer_test.go`
+//     钉着这条）。`manager` 是实现层，它 import 用例层只为了写一行断言，等于把一条本该单向的边
+//     变成双向：用例层的任何改名都会牵动实现层，而"实现到底搬到哪一层了"重新变成不可见的。
 //
-// **P4a 第一批**（2026-10-16）：包集按 ADR-2 收口——`svcruntime` 拆出 `svcprovider` 与
-// `svcmodel`（一个控制器只用到一半的两件事不该共用一个接口），三个单方法面
-// `svcsearch`/`svcusage` 并入 `svcsession`、`svcexport` 并入新的 `svcsystem`。
-// 于是断言从 8 条变成 9 条：**拆出来的包各自断言自己那片**，一个控制器漏实现一眼可见。
+// 断言本身没有消失，它**上移到了装配点**——`internal/app/app.go` 的 `router.Ports` 字面量：
 //
-// **现状如实写**：下面 9 条断言如今**全部**打在同一个 `*Service` 上——P4 那次"拆成多个领域实现"
-// 并没有发生，`*Service` 仍是单结构体。按域拆包与按域拆结构是两件事，后者是 P4a 的正文
-// （把实现上提到各自的 `svc<领域>`）；真拆的那天，这些断言随之改为各实现分别断言自己的端口。
-var (
-	_ svcsession.SessionSvc       = (*Service)(nil)
-	_ svcworkspace.WorkspaceSvc   = (*Service)(nil)
-	_ svcprovider.ProviderSvc     = (*Service)(nil)
-	_ svcmodel.ModelSvc           = (*Service)(nil)
-	_ svccapability.CapabilitySvc = (*Service)(nil)
-	_ svclibrary.LibrarySvc       = (*Service)(nil)
-)
+//	Session: a.svc, Workspace: a.svc, … System: a.svc
+//
+// 那里 `a.svc` 少实现任何一个端口的方法都是当场编译失败，而且报错点就在"谁被交给了谁"那一行。
+// 比留在本包更硬：本包的断言只证明"`*Service` 满足某个接口"，装配点的断言证明的是
+// "**被交给路由的那个对象**满足路由要的每个端口"——后者才是真正要保的性质。
+//
+// 本包与端口的其余关系靠**结构满足**维持：方法签名逐字对得上（取值类型与上限入参都下沉在域里
+// 或来自入参，见 `export_source.go` / `library.go` 的文件头）。改签名时两侧一起编译失败，
+// 失败点在装配点。

@@ -1,4 +1,4 @@
-package manager
+package svcprovider
 
 import (
 	"context"
@@ -10,13 +10,19 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/redact"
 	"github.com/morehao/ark-mate/pkg/resource"
 )
 
-// ——— provider 连接自检（M4） ———
+// ——— P4a：供应商连接自检（M4）的**用例层实现** ———
+//
+// 与导出（`svcsystem`）同一模板：用例层拥有**判据与文案**（两段自检各自的检查项、结论口径、
+// 出路写法、响应装配），**不拥有**事实的取法——档案快照来自 `Ports`（供应商域），
+// 运行时目录来自 `Catalog`（模型目录用例）。于是这个包既不 import `manager`、也不 import
+// 持久层，只认供应商域的 `Def` 这一个值对象。
 //
 // 两段，边界是**有意的**：
 //
@@ -37,7 +43,6 @@ const (
 	probePass    = "pass"
 	probeFail    = "fail"
 	probeWarn    = "warn"
-	probeSkip    = "skip"
 	probeUnknown = "unknown"
 )
 
@@ -46,39 +51,77 @@ const (
 // 5s 是"用户盯着一个按钮"的量级；超时即 fail（而不是无限等）。
 const probeUpstreamTimeout = 5 * time.Second
 
-// providerProbe 的可注入面：测试用假 transport 断言"默认零请求"，并模拟四种响应。
+// probeOptions 自检的可注入面：测试用假 transport 断言"默认零请求"，并模拟四种响应。
 type probeOptions struct {
 	// transport 注入的 HTTP transport（nil = http.DefaultTransport）。生产路径不设置它。
 	transport http.RoundTripper
+}
+
+// Ports 自检所需的**供应商域**读面（消费方声明的窄接口，ADR-6）。
+//
+// 刻意收成四个方法：比这再宽就等于把供应商域的内部形态搬到用例层。四个都只读，且都返回
+// **值语义的副本**——域平面自己取锁，用例层不需要、也不该再包一层锁（那会把
+// "用例锁 → 域锁"这条边固化下来，同族教训见 `internal/archtest/manager_lock_order_test.go`）。
+type Ports interface {
+	// Snapshot 取一份**值拷贝**的档案（nil = 不在册）。值语义是判据的一部分：探活要在快照上
+	// 解析密钥并把结论写进回执，后续写入不得改变它。
+	Snapshot(id string) (*provider.Def, bool)
+	// ProviderRefName 该供应商的凭据引用名（逐供应商唯一，ADR-16）——诊断里报的是**键名**，
+	// 绝不报值。
+	ProviderRefName(providerID string) string
+	// ProviderLocator 载体定位串（`db:provider/<id>` / `<dir>/providers.json` / 空）。
+	// 它带资源层的代码词，所以只许经 `locatorKind` 折成用户词之后再进文案（ADR-22）。
+	ProviderLocator(id string) string
+	// ProviderModelRefsReadOnly 有哪些模型条目挂靠在这条档案上（只读，不改任何状态）。
+	ProviderModelRefsReadOnly(ctx context.Context, providerID string) []string
+}
+
+// Catalog 运行时模型目录的读面（消费方声明的窄接口，ADR-6）。
+//
+// 为什么是端口而不是 import `svcmodel`：`service/svc*` 之间不许互相 import
+// （`layer_isolation_test.go` 的 `TestServicePortsMustNotImportEachOther`）——两个用例包互相
+// 认识会让"这份数据归谁"没有答案。自检要的是目录**结论**（source/options/note），
+// 至于那份结论怎么来（活会话 / 缓存 / resume 取样）是模型面的不变量。
+type Catalog interface {
+	ModelCatalog(ctx context.Context) (*dtomodel.ModelCatalogResp, error)
+}
+
+// Probe 供应商自检用例（实现 `Prober.ProbeProvider`）。
+type Probe struct {
+	ports   Ports
+	catalog Catalog
+}
+
+// NewProbe 造一个自检用例（两个端口由装配侧交出；`catalog` 可以为 nil——那表示本进程没有
+// 执行面，`catalog` 那一条会如实记 unknown 而不是崩）。
+func NewProbe(ports Ports, catalog Catalog) *Probe {
+	return &Probe{ports: ports, catalog: catalog}
 }
 
 // ProbeProvider 跑一次连接自检。
 //
 // 返回 `{ok, checks:[{name,status,detail,remedy}]}`。`ok` 是"没有 fail"（warn/unknown/skip 不算失败）
 // ——与 doctor 的口径一致：**无法校验记警告、事实与声明不符才失败**。
-func (s *Service) ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error) {
-	return s.probeProvider(ctx, id, req, probeOptions{})
+func (p *Probe) ProbeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error) {
+	return p.probeProvider(ctx, id, req, probeOptions{})
 }
 
 // probeProvider 带可注入面（测试专用入口；生产只走 ProbeProvider）。
-func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq, opts probeOptions) (*dtoprovider.ProviderProbeResp, error) {
+func (p *Probe) probeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq, opts probeOptions) (*dtoprovider.ProviderProbeResp, error) {
 	if err := provider.ValidateProviderID(id); err != nil {
 		return nil, err
 	}
-	// **不持 `s.mu`**（P4a 守卫）：`Snapshot` 自己取供应商域的锁并返回**值语义**的副本，
-	// 所以随后的读取本身就是竞态安全的——manager 锁在这条路上没有保护对象。
-	// 在域平面外面再包一把锁，会把"manager 锁 → 域锁"这条边固化下来（同族教训见
-	// `internal/archtest/manager_lock_order_test.go`）。
-	d, _ := s.providerPlane.Snapshot(id)
+	// 快照是**值拷贝**（域平面自己取锁）：随后的读取本身就是竞态安全的，用例层不再包锁。
+	d, _ := p.ports.Snapshot(id)
 	var snap provider.Def
 	if d != nil {
 		snap = *d
 	}
 
 	checks := make([]dtoprovider.ProviderCheckResp, 0, 8)
-	checks = append(checks, s.probeLocal(ctx, id, d, &snap)...)
+	checks = append(checks, p.probeLocal(ctx, id, d, &snap)...)
 	if req.Upstream {
-		checks = append(checks, s.probeUpstream(ctx, &snap, opts))
+		checks = append(checks, p.probeUpstream(ctx, &snap, opts))
 	}
 	resp := &dtoprovider.ProviderProbeResp{ID: id, Upstream: req.Upstream, Checks: checks}
 	resp.OK = true
@@ -92,10 +135,10 @@ func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.
 }
 
 // probeLocal 本地段（零出网）。
-func (s *Service) probeLocal(ctx context.Context, id string, d *provider.Def, snap *provider.Def) []dtoprovider.ProviderCheckResp {
+func (p *Probe) probeLocal(ctx context.Context, id string, d *provider.Def, snap *provider.Def) []dtoprovider.ProviderCheckResp {
 	out := make([]dtoprovider.ProviderCheckResp, 0, 7)
 	// 该供应商的凭据引用名（逐供应商唯一，ADR-16）——诊断里报的是**键名**，绝不报值。
-	refName := s.providerRefName(id)
+	refName := p.ports.ProviderRefName(id)
 
 	// ① exists：档案存在。
 	if d == nil {
@@ -106,7 +149,7 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *provider.Def, sn
 		})
 	}
 	out = append(out, dtoprovider.ProviderCheckResp{
-		Name: "exists", Status: probePass, Detail: "这条供应商在册（载体：" + locatorKind(s.providerLocator(id)) + "）",
+		Name: "exists", Status: probePass, Detail: "这条供应商在册（载体：" + locatorKind(p.ports.ProviderLocator(id)) + "）",
 	})
 
 	// ② protocol：本期只支持 OpenAI 兼容端点。
@@ -177,9 +220,8 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *provider.Def, sn
 	}
 
 	// ④ refs：被哪些模型条目挂靠；以及这份凭据有没有真的在环上（v19 起引用者只有模型条目）。
-	modelIDs := s.providerModelRefsReadOnly(ctx, id)
+	modelIDs := p.ports.ProviderModelRefsReadOnly(ctx, id)
 	sort.Strings(modelIDs)
-	inPlay := len(modelIDs) > 0
 	if len(modelIDs) == 0 {
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "refs", Status: probeWarn, Detail: "当前没有模型条目挂靠在这条档案上（事实，不是错误）",
@@ -203,28 +245,39 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *provider.Def, sn
 
 	// ⑥ catalog：引用它的 agent 的模型目录能不能读到、有没有被运行时标成不可用的取值。
 	// 只读现有取样（会话/缓存/resume），**不新建会话**——与 `GET /models` 同一条路径。
-	_ = inPlay
-	out = append(out, s.probeLocalCatalog(ctx, refName)...)
+	out = append(out, p.probeLocalCatalog(ctx, refName)...)
 	return out
 }
 
 // probeLocalCatalog 读一次运行时模型目录（`GET /models` 的同一实现）。
 //
 // 只有**一个**底座有执行面（构建期固定），所以这里没有"逐个 agent 查一次"这回事。
-func (s *Service) probeLocalCatalog(ctx context.Context, refName string) []dtoprovider.ProviderCheckResp {
-	if s.orch == nil {
+//
+// "本进程没有执行面"与"有执行面但目录读不动"是两件事：前者在装配期就定了（`catalog == nil`），
+// 后者是运行期事实——两种都记 unknown（**无法校验**不是失败），但出路不同。
+func (p *Probe) probeLocalCatalog(ctx context.Context, refName string) []dtoprovider.ProviderCheckResp {
+	if p.catalog == nil {
 		return []dtoprovider.ProviderCheckResp{{
 			Name: "catalog", Status: probeUnknown,
 			Detail: "本进程未启用执行面（无 Orchestrator）：无法读运行时模型目录",
 			Remedy: "在 serve 形态下重跑自检",
 		}}
 	}
-	resp, err := s.ModelCatalog(ctx)
+	resp, err := p.catalog.ModelCatalog(ctx)
 	if err != nil {
 		return []dtoprovider.ProviderCheckResp{{
 			Name: "catalog", Status: probeUnknown,
 			Detail: fmt.Sprintf("运行时模型目录不可读：%v", err),
 			Remedy: "确认本构建的运行时已注册且可启动；仍不行就导出诊断包",
+		}}
+	}
+	if resp == nil {
+		// "回 nil 且 nil 错误"是**没有结论**的回执：它是装配缺陷（不是用户事实），所以走与
+		// "读不到"同一条出路，但文案说清这是进程内部的问题（不把它讲成目录事实）。
+		return []dtoprovider.ProviderCheckResp{{
+			Name: "catalog", Status: probeUnknown,
+			Detail: "运行时模型目录读面没有返回结论（内部装配问题）",
+			Remedy: "这属于程序缺陷：导出诊断包并报告（自检本身无法校验目录）",
 		}}
 	}
 	unavailable := make([]string, 0, 2)
@@ -262,8 +315,8 @@ func (s *Service) probeLocalCatalog(ctx context.Context, refName string) []dtopr
 //
 //	pass    —— 2xx（鉴权通过、响应可解析）
 //	fail    —— 401/403（密钥不对）或网络/超时（连不上）
-//	unknown —— 该 type 未登记端点（**无法校验**，不是失败；与 `mate doctor` 的口径一致）
-func (s *Service) probeUpstream(ctx context.Context, snap *provider.Def, opts probeOptions) dtoprovider.ProviderCheckResp {
+//	unknown —— 没有端点（**无法校验**，不是失败；与 `mate doctor` 的口径一致）
+func (p *Probe) probeUpstream(ctx context.Context, snap *provider.Def, opts probeOptions) dtoprovider.ProviderCheckResp {
 	// v12 起上游段就是一次 `GET <base_url>/models` 带 `Authorization: Bearer <key>`——
 	// 按**资源字段**探，而不是 v11 那张"type → 厂商 URL"硬编码表（自建网关因此也能自检）。
 	if strings.TrimSpace(snap.BaseURL) == "" {
@@ -351,15 +404,6 @@ func countModels(resp *http.Response, path string) (int, string) {
 		return 0, "响应里没有模型列表（只判可达性）"
 	}
 	return len(arr), fmt.Sprintf("响应里有 %d 条模型", len(arr))
-}
-
-// knownProviderType 该 type 是否在已知上游类型表里（决定 type 那条 check 是 pass 还是 warn）。
-func knownProviderType(typ string) bool {
-	switch typ {
-	case "openai", "anthropic", "deepseek", "openrouter", "groq":
-		return true
-	}
-	return false
 }
 
 // locatorKind 把载体定位串折成**用户词**（`db` / `file` / `未知`）。

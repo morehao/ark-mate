@@ -35,8 +35,6 @@ import (
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -448,12 +446,17 @@ func (a *App) Init(ctx context.Context) error {
 	// 检索/用量并入 `Session`，导出归 `System`。
 	ports := router.Ports{
 		Session: a.svc, Workspace: a.svc,
-		// 底座身份与诊断的**用例实现**在 svcruntime（P4a 正文第二刀），执行面是它的端口。
-		Runtime:  svcruntime.New(a.rconn),
-		Provider: a.svc, Model: a.svc,
+		// 底座身份与诊断的**用例实现**在 svcruntime（P4a 正文第二刀）：这里交出的是**执行面**
+		// （`*runtimeconn.Plane`），用例实例由 ctrruntime 自己造——`app` 不 import `service/svc*`。
+		Runtime: a.rconn,
+		// 档案四动作 + 自检的两个事实端口：自检用例（svcprovider.Probe）由 ctrprovider 造。
+		Provider: a.svc, ProviderArchives: a.svc.ProviderPlane(), ProviderCatalog: a.svc,
+		Model:      a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc,
-		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出事实来源。
-		System: svcsystem.New(a.svc),
+		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出**事实来源**
+		// （`SessionMeta`/`SessionEvents`），用例实例由 ctrexport 造。这一处的断言力也随之上移：
+		// `a.svc` 不再满足哪个端口，就在这个字面量上当场编译失败。
+		System: a.svc,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

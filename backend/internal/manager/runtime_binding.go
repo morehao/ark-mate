@@ -12,8 +12,9 @@ import (
 // `internal/runtimeconn`（P3a-2 第一刀）。manager 侧只剩一行转发。
 //
 // **P4a 正文第二刀**（2026-10-16）：`RuntimeIdentity` 的转发**已删**——底座面的用例实现
-// 搬进了 `internal/service/svcruntime`（`Runtime` + `Plane` 端口），`router.Ports.Runtime`
-// 由装配层交出该实例。本文件只剩执行面自身的转发（快照/状态/spec 解析）。
+// 搬进了 `internal/service/svcruntime`（`Runtime` + `Plane` 端口）。P4a 收口后 `router.Ports.Runtime`
+// 交的是**执行面本身**（`*runtimeconn.Plane`），用例实例由 `ctrruntime` 造。本文件只剩执行面自身
+// 的转发（快照/状态/spec 解析）。
 //
 // **顺手清掉了五个死符号**（搬完才对得上账）：`bindingLocked`（零调用点）、
 // `requireRuntime` + `runtimeByID`（只被彼此调用，外面无人用——`SelectedSpec` 已经把

@@ -76,7 +76,7 @@ func (e *Exporter) ExportSessions(ctx context.Context, req dtoexport.ExportReq) 
 			resp.Skipped = append(resp.Skipped, id)
 			continue
 		}
-		events, truncated := e.src.SessionEvents(ctx, id)
+		events, truncated := e.src.SessionEvents(ctx, id, MaxExportEvents)
 		if len(events) == 0 {
 			resp.Skipped = append(resp.Skipped, id)
 			continue
