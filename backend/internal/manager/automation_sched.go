@@ -421,8 +421,8 @@ func (s *Service) emitAutomationRun(id string, out automationRunOutcome) {
 	// 与其余事件同一个脱敏闸门（理由里可能带路径/环境串）。
 	payload = redact.Payload(payload).(map[string]any)
 	s.mu.Lock()
-	s.ver[automationOrigin(id)]++
-	v := s.ver[automationOrigin(id)]
+	s.autoVer[automationOrigin(id)]++
+	v := s.autoVer[automationOrigin(id)]
 	s.mu.Unlock()
 	// 刻意**不带事件 id**（第一参数空串）：`automation.run` 只走实时通道、**不落 events 表**
 	// 也不进 transcript，所以它没有 durable 身份——于是"帧上有 id ⟺ 它在 durable 日志里查得到"

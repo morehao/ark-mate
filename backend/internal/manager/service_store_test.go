@@ -256,3 +256,35 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 		t.Fatalf("重建成功后标记应被清掉：ok=%v value=%q err=%v", ok, v, err)
 	}
 }
+
+// TestFirstUserMessageDerivesTitleInMemory 首条用户消息推导出的标题必须**同时**落内存与库。
+//
+// 为什么单开一条：这条路径曾经**没有任何判据**（`derive_title_test.go` 只测纯函数）。于是
+// P3b-1b-ii 把 `s.sessions[id]` 换成返回**副本**的 `Lookup` 之后，`r.Title = derived` 改的是
+// 副本——库里写上了、内存里永远空着（列表读内存 ⇒ 界面看不到标题，重启后才回来），
+// 而当时全量测试**一条都不红**。判据就钉这两侧（内存镜像 + 库），漏一侧都要红。
+func TestFirstUserMessageDerivesTitleInMemory(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(testutil.StubRegistry(), eventbus.New())
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer st.Close()
+	svc.EnableStore(st)
+	svc.registerSession(&SessionRec{ID: "s-title", RuntimeID: "stub"})
+
+	svc.publish(session.BusUserMessage, "s-title", map[string]any{"session_id": "s-title", "text": "第一条用户消息"})
+
+	list, err := svc.ListSessions(false, "", "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListSessions: n=%d err=%v", len(list), err)
+	}
+	if list[0].Title != "第一条用户消息" {
+		t.Fatalf("内存镜像里应已有推导出的标题（列表读的是它）: %q", list[0].Title)
+	}
+	rows, err := st.ListSessions(ctx, nil)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("库里应有 1 条: n=%d err=%v", len(rows), err)
+	}
+	if rows[0].Title != "第一条用户消息" {
+		t.Fatalf("库里也应落上标题: %q", rows[0].Title)
+	}
+}

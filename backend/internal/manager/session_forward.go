@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -145,4 +147,78 @@ func (s *Service) backfillSessionModelRefs(ctx context.Context) {
 // TODO(P4b): 删转发（同上：它是回填用的同一份换算表）
 func (s *Service) runtimeValueToModelID(ctx context.Context, runtimeID string) map[string]string {
 	return s.sessionPlane.RuntimeValueToModelID(ctx, runtimeID)
+}
+
+// ——— 事件出口的过渡期转发（P4b 删） ———
+
+// TODO(P4b): 删转发（写入面直接依赖 session.Plane）
+func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
+	return s.sessionPlane.Publish(typ, sessionID, payload)
+}
+
+// TODO(P4b): 删转发（同上）
+func (s *Service) publishRaw(typ, sessionID string, payload any) eventbus.Event {
+	return s.sessionPlane.PublishRaw(typ, sessionID, payload)
+}
+
+// TODO(P4b): 删转发（同上）
+func (s *Service) flushChunks() { s.sessionPlane.FlushChunks() }
+
+// ——— 输入队列的过渡期别名/转发（P4b 删） ———
+
+// QueuedInput 是域里那份队列项的**类型别名**（全仓只有一份定义）。
+type QueuedInput = session.QueuedInput
+
+// PromptOutcome 同上。
+type PromptOutcome = session.PromptOutcome
+
+// 投递模式（值来自域，别名保证只有一处定义）。
+const (
+	DeliveryReject              = session.DeliveryReject
+	DeliveryAfterRun            = session.DeliveryAfterRun
+	DeliveryInterruptThenPrompt = session.DeliveryInterruptThenPrompt
+)
+
+// 队列项终态（值来自域，别名保证只有一处定义）。
+const (
+	ReasonRunFinished = session.ReasonRunFinished
+	ReasonUserCancel  = session.ReasonUserCancel
+	ReasonDeliverFail = session.ReasonDeliverFail
+	ReasonStale       = session.ReasonStale
+)
+
+// ValidDeliveries 合法投递模式（域里那份的别名视图）。
+var ValidDeliveries = session.ValidDeliveries
+
+// TODO(P4b): 删转发（调用点直接依赖 session 包）
+func NormalizeDelivery(v string) (string, error) { return session.NormalizeDelivery(v) }
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (QueuedInput, error) {
+	return s.sessionPlane.EnqueueInput(ctx, convID, text, delivery, targetRun, generation)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedInput {
+	return s.sessionPlane.ListQueuedInputsOf(ctx, convID)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
+	return s.sessionPlane.ListQueuedInputs(ctx, id)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) claimNextInput(ctx context.Context, convID string, generation int64) (*QueuedInput, bool) {
+	return s.sessionPlane.ClaimNextInput(ctx, convID, generation)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) deleteQueuedInput(ctx context.Context, convID, inputID string) (bool, error) {
+	return s.sessionPlane.DeleteQueuedInput(ctx, convID, inputID)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
+	s.sessionPlane.StaleQueuedInputsOnRestore(ctx)
 }

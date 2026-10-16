@@ -137,8 +137,8 @@ func (r *transcriptRecorder) begin(sessionID, runtimeID, cwd string, workspaceTe
 	r.open[sessionID] = f
 }
 
-// appendLine 追加一个事件原语行（`id` 与 `seq` 都由上游 `publishRaw` 传下来，这里绝不重铸）。
-func (r *transcriptRecorder) appendLine(sessionID, eventID string, seq int64, typ string, payload map[string]any) {
+// AppendLine 追加一个事件原语行（`id` 与 `seq` 都由上游 `publishRaw` 传下来，这里绝不重铸）。
+func (r *transcriptRecorder) AppendLine(sessionID, eventID string, seq int64, typ string, payload map[string]any) {
 	if r == nil || r.dir == "" {
 		return
 	}

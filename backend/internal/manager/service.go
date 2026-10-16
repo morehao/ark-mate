@@ -94,8 +94,8 @@ type Service struct {
 	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
 	binding *runtimeBinding
 	// inputs 会话待投递输入队列（**仅 memory 模式**；sqlite 模式的事实源是 inputs 表）。
-	inputs map[string][]QueuedInput
-	ver    map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
+	inputs  map[string][]QueuedInput
+	autoVer map[string]int64 // 自动化事件的版本计数（`automation:<id>` 聚合）；会话侧那张表在 domain/session
 
 	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
 	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
@@ -142,7 +142,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
 		inputs:           make(map[string][]QueuedInput),
-		ver:              make(map[string]int64),
+		autoVer:          make(map[string]int64),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
@@ -187,6 +187,9 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.coalescer = session.NewCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
 	})
+	// **必须紧跟创建点**：会话域持有的是合并器本身，早一行它还是 nil——表现是"文本增量不再
+	// 合并"（每条增量各占一个位次），而编译、vet、构造期都看不出来（§3.1.38 的同一课）。
+	s.sessionPlane.SetCoalescer(s.coalescer)
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——
 	// 装配期的 `runtime.ProductRegistry` 已经 fail-closed，这里只是把事实记下来供诊断如实外露。
 	spec, specOK := reg.Get(runtime.SelectedRuntime())
@@ -218,9 +221,11 @@ func (s *Service) NativePermissionEnabled() bool {
 func (s *Service) SetTranscriptDir(dir string) {
 	if dir == "" {
 		s.tx = nil
+		s.sessionPlane.SetTranscriptSink(nil)
 		return
 	}
 	s.tx = newTranscriptRecorder(dir)
+	s.sessionPlane.SetTranscriptSink(s.tx)
 	s.loadTranscripts()
 }
 
@@ -241,6 +246,7 @@ func (s *Service) closeTranscripts() {
 	}
 	s.tx.closeAll()
 	s.tx = nil
+	s.sessionPlane.SetTranscriptSink(nil)
 }
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。

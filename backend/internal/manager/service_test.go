@@ -307,19 +307,19 @@ func TestPublishVersionAndBusNil(t *testing.T) {
 	if e1.Seq != -1 || e1.Version != 1 || e2.Seq != -1 || e2.Version != 2 {
 		t.Fatalf("无 bus publish 不符: %+v %+v", e1, e2)
 	}
-	if svc.ver["s1"] != 2 || svc.ver["s2"] != 1 {
-		t.Fatalf("版本计数不符: %v", svc.ver)
+	if svc.sessionPlane.Version("s1") != 2 || svc.sessionPlane.Version("s2") != 1 {
+		t.Fatalf("版本计数不符: s1=%d s2=%d", svc.sessionPlane.Version("s1"), svc.sessionPlane.Version("s2"))
 	}
 	// ③ 合并：同形文本增量 publish 返回零值事件（未分配号序），flush 后才计入版本。
 	if zero := svc.publish(session.BusMessage, "s3", map[string]any{"text": "x"}); zero.Seq != -1 || zero.Version != 0 {
 		t.Fatalf("合并中的增量不应分配号序: %+v", zero)
 	}
-	if svc.ver["s3"] != 0 {
-		t.Fatalf("合并中不应递增版本: %v", svc.ver)
+	if svc.sessionPlane.Version("s3") != 0 {
+		t.Fatalf("合并中不应递增版本: %d", svc.sessionPlane.Version("s3"))
 	}
 	svc.flushChunks()
-	if svc.ver["s3"] != 1 {
-		t.Fatalf("flush 后应递增版本: %v", svc.ver)
+	if svc.sessionPlane.Version("s3") != 1 {
+		t.Fatalf("flush 后应递增版本: %d", svc.sessionPlane.Version("s3"))
 	}
 }
 
@@ -435,7 +435,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	id := "s-title-race"
 	svc.mu.Lock()
 	svc.sessionPlane.RegisterSession(&SessionRec{ID: id, Status: session.SessionStatusInProgress})
-	svc.ver[id] = 0
+	svc.sessionPlane.ResetVersion(id)
 	svc.mu.Unlock()
 
 	var wg sync.WaitGroup

@@ -27,6 +27,15 @@ type Plane struct {
 	sessions map[string]*SessionRec
 	// restoring 正从库恢复（恢复期不逐条回写：刚读出来的东西立刻写回去）。
 	restoring bool
+	// ver 每个会话的事件版本号（进 bus 帧的 version；与库里的位次是两件事）。
+	ver map[string]int64
+	// inputs 进程内排队输入（memory 模式的事实源；sqlite 模式是 inputs 表的镜像/缓存）。
+	inputs map[string][]QueuedInput
+	// coalescer 文本增量合并器（nil = 不合并；停机时 FlushAll）。
+	coalescer *Coalescer
+	// tx wire transcript 旁路（nil = 未启用；**端口**——transcript 面的装载/检索还在 manager，
+	// P3b-2b 整块搬进来之后它变成域内类型）。
+	tx TranscriptSink
 
 	// workspaceDisplayOf 归属展示字段的解析（端口：工作空间登记仍在 manager）。
 	workspaceDisplayOf func(workspaceID string) (string, string)
@@ -47,7 +56,9 @@ type Plane struct {
 }
 
 // NewPlane 造一个会话域。库句柄与用量端口都由装配期注入（端口可后置——离线命令没有编排器）。
-func NewPlane() *Plane { return &Plane{sessions: make(map[string]*SessionRec)} }
+func NewPlane() *Plane {
+	return &Plane{sessions: make(map[string]*SessionRec), ver: make(map[string]int64), inputs: make(map[string][]QueuedInput)}
+}
 
 // Snapshot 会话记录的**副本**切片（读面用；调用方拿不到内部指针，改不动本域状态）。
 func (pl *Plane) Snapshot() []SessionRec {
@@ -100,4 +111,29 @@ func (pl *Plane) SetModelValueSource(fn func(runtimeID, providerID, model string
 // SetStaleInputsOnRestore 装配期登记恢复期的排队输入作废钩子（见字段注释：P3b-2 后并入本域）。
 func (pl *Plane) SetStaleInputsOnRestore(fn func(ctx context.Context)) {
 	pl.staleInputsOnRestore = fn
+}
+
+// SetCoalescer 装配期登记文本增量合并器。
+func (pl *Plane) SetCoalescer(c *Coalescer) { pl.coalescer = c }
+
+// TranscriptSink 事件落 wire transcript 的唯一动作（域只在这一处碰它）。
+type TranscriptSink interface {
+	AppendLine(sessionID, eventID string, seq int64, typ string, payload map[string]any)
+}
+
+// SetTranscriptSink 装配期登记 wire transcript 旁路（nil = 未启用）。
+func (pl *Plane) SetTranscriptSink(sink TranscriptSink) { pl.tx = sink }
+
+// Version 某会话当前的事件版本号（进 bus 帧的 `version`）。
+func (pl *Plane) Version(sessionID string) int64 {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	return pl.ver[sessionID]
+}
+
+// ResetVersion 把某会话的事件版本号清零（测试夹具用：模拟"重启后版本从 1 开始"）。
+func (pl *Plane) ResetVersion(sessionID string) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	pl.ver[sessionID] = 0
 }
