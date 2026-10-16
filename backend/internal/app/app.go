@@ -375,7 +375,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 不回落 serve 进程目录）；workspace_roots 非空时把显式 cwd、目录浏览与**工作空间登记**
 	// 收在白名单内，代建根**自动并入**生效名单（平台自己的目录本就该天然合法，
 	// 不再要求运维成对配置）。
-	if err := a.svc.SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
+	if err := a.svc.WorkspacePlane().SetWorkspacePolicy(cfg.WorkspaceDir, cfg.WorkspaceRoots); err != nil {
 		return usageErr("serve: 工作空间策略非法: %v", err)
 	}
 	// 默认工作空间的建立**必须在配置装载之后**（迁移里拿不到 workspace_dir，见

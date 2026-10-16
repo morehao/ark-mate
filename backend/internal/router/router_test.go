@@ -618,7 +618,7 @@ func TestWorkspaceRoutesWithRoots(t *testing.T) {
 		}
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 
@@ -676,7 +676,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 		t.Fatalf("写 config.json: %v", err)
 	}
 	e, svc := newEngineWithService(t)
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, ""))
@@ -808,7 +808,7 @@ func TestWorkspaceFilesRoute(t *testing.T) {
 	e, svc := newEngineWithService(t)
 
 	// 即便配了"起始点偏好"，看资料也不受它限制（v14.5：名录不是边界）。
-	if err := svc.SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(filepath.Join(root, "tmp"), []string{root}); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 

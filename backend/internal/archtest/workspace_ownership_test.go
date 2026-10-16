@@ -178,6 +178,20 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			}
 		}
 	}
+	// 装配期写事实（P4a 正文第二十二刀）：`SetWorkspacePolicy` 与第十六刀的 `SetBindAddr` 同类——
+	// 策略只有一处入口（`WorkspacePlane()`），多一层转发就会出现"策略写进了 A 平面、读的时候看 B 平面"。
+	{
+		policyMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace.go")))
+		if strings.Contains(policyMgr, "func (s *Service) SetWorkspacePolicy(") {
+			t.Error("`internal/manager/workspace.go` 里又出现 `func (s *Service) SetWorkspacePolicy(`：" +
+				"装配期写事实只有一处入口（`WorkspacePlane().SetWorkspacePolicy`）。")
+		}
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
+			"func (pl *Plane) SetWorkspacePolicy(dir string, roots []string) error") {
+			t.Error("`internal/domain/workspace/policy.go` 里找不到 `SetWorkspacePolicy` 本体：判据失锚＝空转。")
+		}
+	}
+
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
 		"func (pl *Plane) WorkspaceRoots() []string") {
 		t.Error("`internal/domain/workspace/policy.go` 里找不到 `func (pl *Plane) WorkspaceRoots()`：" +

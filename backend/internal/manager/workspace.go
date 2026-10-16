@@ -38,11 +38,6 @@ func ResolveWorkspace(spec string, def *DefaultWorkspaceRef) (WorkspaceResolutio
 // TODO(P4b): 删转发（调用点直接依赖 workspace 包）
 func DiscardWorkspace(res WorkspaceResolution) { workspace.DiscardWorkspace(res) }
 
-// TODO(P4b): 删转发（策略面直接依赖 workspace.Plane）
-func (s *Service) SetWorkspacePolicy(dir string, roots []string) error {
-	return s.planner.SetWorkspacePolicy(dir, roots)
-}
-
 // planner 工作空间域（装配期构造；策略状态在它自己的锁下）。
 //
 // 它是 `Service` 上**唯一**的工作空间策略持有者：字段不再复刻一份，否则"域写一份、manager 读

@@ -56,7 +56,7 @@ func aclCode(t *testing.T, err error) string {
 // mustWorkspacePolicy 装配工作空间策略（测试里不自洽即视为装配错误，直接 Fatal）。
 func mustWorkspacePolicy(t *testing.T, svc *Service, dir string, roots []string) {
 	t.Helper()
-	if err := svc.SetWorkspacePolicy(dir, roots); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(dir, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy(%q, %v): %v", dir, roots, err)
 	}
 }
@@ -577,7 +577,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 
 	// 形式错误仍必须挡住：相对路径的根不是边界。
-	if err := svc.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
 		t.Fatalf("相对工作区根应被拒")
 	}
 	if svc.WorkspacePlane().WorkspaceDir() != "" || len(svc.WorkspacePlane().WorkspaceRoots()) != 0 {

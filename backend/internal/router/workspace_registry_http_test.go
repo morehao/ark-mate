@@ -41,7 +41,7 @@ func registryApp(t *testing.T) (*manager.Service, string, string) {
 
 	// 工作空间根放在**私有临时目录**下（本机隔离纪律：绝不碰 ~/.ark-mate）。
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	if err := svc.EnsureDefaultWorkspace(); err != nil {
@@ -182,7 +182,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	if err := svc.EnsureDefaultWorkspace(); err != nil {
@@ -211,7 +211,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	t.Cleanup(func() { _ = st2.Close() })
 	svc2 := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	svc2.EnableStore(st2)
-	if err := svc2.SetWorkspacePolicy(provision, nil); err != nil {
+	if err := svc2.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}
 	// 幂等：默认工作空间已存在 → 不重建、不改顺序。

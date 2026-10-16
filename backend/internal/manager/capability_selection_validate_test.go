@@ -181,7 +181,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	svc.EnableStore(st)
 	wsDir := t.TempDir()
-	if err := svc.SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(wsDir, nil); err != nil { // 允许代建、白名单不限制
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	// 默认工作空间（v14）= "未指定 cwd"的落点。生产里由装配期建立；测试里必须显式建，

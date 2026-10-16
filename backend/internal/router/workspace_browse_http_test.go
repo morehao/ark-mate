@@ -29,7 +29,7 @@ func browseApp(t *testing.T, roots []string) *manager.Service {
 	t.Helper()
 	svc := manager.NewService(runtime.NewRegistry(), eventbus.New())
 	provision := filepath.Join(t.TempDir(), "workspaces")
-	if err := svc.SetWorkspacePolicy(provision, roots); err != nil {
+	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, roots); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
 	return svc
