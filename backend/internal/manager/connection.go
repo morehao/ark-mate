@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,46 +14,30 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// connKey 计算**基础**连接缓存键：runtime ID + 各 env 组签名（每组内按序 join、组间 \x00 分隔）。
-// 同 runtime 且影响线程行为的 env 组合相同 → 共享暖进程；任一不同 → 各自独立进程。
-// 传入组约定：nativeEnv（原生权限开关）、keyEnv（provider 密钥）、modelEnv（仅进程级模型）。
+// ——— P3a-2 第三刀：连接键 / 代际键的派生搬进 `internal/runtimeconn` ———
 //
-// **这不是代际键**：代际键 = 本键 + 能力指纹，见 generationKey。保留本函数原样是因为
-// "配置相同则共享暖进程"这条既有规则要**逐字**保留（R11）。
+// 它们是**纯函数**（无锁、无 I/O、不碰 Orchestrator 字段），而"代际维度必须都在键里"这件事
+// 只允许有一份实现：两处各算一遍的后果是"迁移判据说不用换进程、acquire 却换了"这种静默分叉。
+// 这里只留转发，好让本包既有调用点（含六个测试文件）零改动。
+
+// TODO(P4b): 删转发（调用点直接依赖 runtimeconn）
 func connKey(runtimeID string, envs ...[]string) string {
-	var parts []string
-	for _, e := range envs {
-		if len(e) == 0 {
-			continue
-		}
-		parts = append(parts, strings.Join(e, "\x00"))
-	}
-	if len(parts) == 0 {
-		return runtimeID
-	}
-	return runtimeID + "\x00" + strings.Join(parts, "\x00")
+	return runtimeconn.ConnKey(runtimeID, envs...)
 }
 
-// generationKey 在基础连接键之上追加**代际维度**：能力指纹 + 平台生成的模型配置指纹（T5）。
-//
-// 两个维度缺一不可，而且它们**必须都在键里**：
-//   - 指纹相同 = 同一套能力 = 复用同一个暖进程；指纹不同 = 各起一个进程（能力集与投影根都是
-//     进程级的，混用等于把 A 会话的 skill 投给 B 会话）。
-//   - 配置指纹（T5）：配置文件是**进程启动时**读的。不把它并进键，改完清单文件已经变了、暖进程
-//     还活着，底座继续用旧清单，而界面显示"已保存"——那是本方案最坏的一种表现。
-//
-// **两者都为空 → 原样返回基础键**：这是 R11（缺省零回归）的落点——既未声明能力选择、
-// 该 runtime 又没有平台模型清单的会话，其键必须与代际机制之前**逐字相同**。
-//
-// 非空时用**带长度前缀**的形态而不是简单拼后缀：`connKey("r", envA)` 是
-// `connKey("r", envA, envB)` 的字符串前缀（env 组之间就是 `\x00` 分隔），拼后缀会让"某个基础键
-// 恰好是另一个基础键的前缀"与"代际后缀"互相串味。长度前缀让基础键自我定界。
+// TODO(P4b): 删转发（同上）
 func generationKey(connKey, fingerprint, configDigest string) string {
-	if fingerprint == "" && configDigest == "" {
-		return connKey
-	}
-	return "gen:" + strconv.Itoa(len(connKey)) + ":" + connKey + ":" + fingerprint + ":" + configDigest
+	return runtimeconn.GenerationKey(connKey, fingerprint, configDigest)
 }
+
+// TODO(P4b): 删转发（同上）
+func dedupeStrings(in []string) []string { return runtimeconn.DedupeStrings(in) }
+
+// TODO(P4b): 删转发（同上）
+func shortGenerationKeys(keys []string) []string { return runtimeconn.ShortGenerationKeys(keys) }
+
+// TODO(P4b): 删转发（同上）
+func connCauseLabel(intentional bool) string { return runtimeconn.ConnCauseLabel(intentional) }
 
 // baseKeyFor 当前配置下的**基础**连接键（runtime + provider env）。
 //
@@ -68,20 +51,6 @@ func generationKey(connKey, fingerprint, configDigest string) string {
 func (o *Orchestrator) baseKeyFor(spec runtime.Spec) string {
 	keyEnv := o.svc.providerEnvFor(spec.ID, o.svc.injectedProviderID(context.Background()))
 	return connKey(spec.ID, keyEnv)
-}
-
-// dedupeStrings 保序去重（小切片，线性扫足够）。
-func dedupeStrings(in []string) []string {
-	seen := make(map[string]bool, len(in))
-	out := in[:0]
-	for _, v := range in {
-		if seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
 }
 
 // connOfClient 反查某客户端所属的连接（无 → nil）。连接数是代际上限量级（个位数），线性扫足够；
@@ -134,23 +103,6 @@ func (o *Orchestrator) admitGeneration(baseKey string) error {
 	return acl.NewError(acl.ClassLimit, "generation_limit_reached",
 		fmt.Sprintf("该配置下的能力代际已达上限 %d（%s）：请复用现有能力集（用同一套技能/MCP 组合）、或等空闲代际被回收后重试；确需更多并发能力集时调大 MATE_GENERATION_LIMIT",
 			limit, strings.Join(shortGenerationKeys(keys), ", ")), nil)
-}
-
-// shortGenerationKeys 把代际键压成"指纹前 8 位"的可读形态（拒绝文案与日志用；键本身太长）。
-func shortGenerationKeys(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if i := strings.LastIndex(k, ":"); i >= 0 && i+1 < len(k) {
-			k = k[i+1:]
-		}
-		if k == "" {
-			k = "缺省"
-		} else if len(k) > 8 {
-			k = k[:8]
-		}
-		out = append(out, k)
-	}
-	return out
 }
 
 // reclaimUnreferenced 回收该基础键下「无在途 run 且无任何会话引用」的代际（`onlyBase` 空 = 全部），
@@ -491,14 +443,6 @@ func (o *Orchestrator) evictSession(as *ActiveSession) {
 		delete(o.sessions, as.ID)
 	}
 	o.mu.Unlock()
-}
-
-// connCauseLabel 连接拆除原因（日志/诊断用）。
-func connCauseLabel(intentional bool) string {
-	if intentional {
-		return "intentional" // 主动：daemon 停机 / 显式停 agent / 空闲回收
-	}
-	return "unexpected" // 意外：对端或子进程断开
 }
 
 func (o *Orchestrator) disconnectSessionAll(rc *runtimeConn) {
