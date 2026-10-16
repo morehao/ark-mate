@@ -44,6 +44,13 @@ var runtimeconnAnchors = []string{
 	"func (pl *Plane) RecordRuntimeError(",
 	"type CredentialSource interface {",
 	"type LiveClientSource interface {",
+	// 第四十八刀：**子进程注册表**（登记 / 摘除 / 回收 / 读取）。
+	"func (pl *Plane) SetProcRegistry(",
+	"func (pl *Plane) ProcRegistry(",
+	"func (pl *Plane) ReapOrphans(",
+	"func (pl *Plane) RegisterProc(",
+	"func (pl *Plane) UnregisterProc(",
+	"procReg *procreg.Registry",
 }
 
 // TestRuntimeBindingLivesInRuntimeconn 绑定与诊断状态必须在 `internal/runtimeconn`，
@@ -51,9 +58,12 @@ var runtimeconnAnchors = []string{
 func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 	root := backendRoot(t)
 	domainDir := filepath.Join(root, "internal", "runtimeconn")
-	joined := ""
-	for _, name := range []string{"binding.go", "diagnostics.go", "ports.go"} {
-		joined += stripLineComments(readFileOrFatal(t, filepath.Join(domainDir, name)))
+	// 扫**整个目录**而不是一份写死的文件清单：第四十八刀加 `procreg.go` 时，写死的清单让新文件的
+	// 锚**从来没被查过**（判据当场红，但根因是扫描面没跟上）。这一条与 `uiSrcRoots()` 那条教训同源：
+	// 扫描面写死一处，新增的文件就静默不设防。
+	joined := dirProductionBody(t, domainDir)
+	if len(joined) < 500 {
+		t.Fatalf("`internal/runtimeconn` 只扫到 %d 字节——扫描面解析错了？（fail-closed）", len(joined))
 	}
 	for _, a := range runtimeconnAnchors {
 		if !strings.Contains(joined, a) {
@@ -72,6 +82,30 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 					"在 `internal/runtimeconn`（P3a-2）。在这里再写一遍会让 `/meta` 的底座身份、"+
 					"诊断的 State 与「怎么修」的出路各说各话，而两边都编译得过。", f, banned)
 			}
+		}
+	}
+
+	// 第四十八刀：**子进程注册表**也只有一份，在执行面。
+	//
+	// 判据两段：① `internal/manager` 里不得再出现动作本体（`reg.Reap(` / `reg.Add(` /
+	// `reg.Remove(`）与那份状态（`procReg *procreg.Registry` 字段）——两份注册表的后果是
+	// **静默**的：登记写一份、回收读另一份，表现为「孤儿回收 `reaped=0` 而进程确实还活着」，
+	// 而所有既有测试照旧绿；② 装配点必须把注册表交给**执行面**（`a.rconn`），不是交给编排器
+	// （后者现在只是它的使用者）。
+	mgrBody := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	for _, banned := range []string{"reg.Reap(", "reg.Add(", "reg.Remove(", "procReg *procreg.Registry"} {
+		if strings.Contains(mgrBody, banned) {
+			t.Errorf("`internal/manager` 里出现 %q：子进程注册表的动作与状态**只有一份实现**，"+
+				"在 `internal/runtimeconn`（P4a 正文第四十八刀，`procreg.go`）。两份的表现是"+
+				"「登记写一份、回收读另一份」，症状为孤儿回收报 `reaped=0` 而进程还活着——"+
+				"没有任何测试会因此变红。", banned)
+		}
+	}
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	for _, want := range []string{"a.rconn.SetProcRegistry(", "a.rconn.ReapOrphans("} {
+		if !strings.Contains(appSrc, want) {
+			t.Errorf("`internal/app/app.go` 里找不到 %q：注册表必须交给**执行面**（`a.rconn`）——"+
+				"交给编排器等于让「哪些子进程是我的」这份事实挂在过渡层上，随它一起被删掉。", want)
 		}
 	}
 }

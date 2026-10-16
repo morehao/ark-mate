@@ -10,7 +10,6 @@ import (
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
-	"github.com/morehao/ark-mate/pkg/procreg"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
@@ -93,7 +92,6 @@ type Orchestrator struct {
 
 	mu       sync.Mutex
 	conns    map[string]*runtimeConn // key = connKey(runtime, 原生权限 env)；同配置共享暖进程
-	procReg  *procreg.Registry       // runtime 子进程注册表（孤儿回收；nil = 禁用）
 	sessions map[string]*ActiveSession
 	// byProvider：原生 provider session id → 平台会话 uuid（P3 双 id）。事件/权限等底层
 	// 回调只携带原生 id（acl.Event.SessionID / PermissionRequest.SessionID），host 侧经此

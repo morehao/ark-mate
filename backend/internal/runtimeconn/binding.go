@@ -7,6 +7,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/pkg/acl"
+	"github.com/morehao/ark-mate/pkg/procreg"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
 
@@ -41,6 +42,8 @@ type Plane struct {
 
 	mu      sync.Mutex
 	binding *Binding
+	// procReg 本进程拉起的底座子进程注册表（nil = 未启用；见 procreg.go）。
+	procReg *procreg.Registry
 
 	// diagMu 独立于 mu：诊断读面（`/runtime/diagnostics` 每次调用）与进程状态变更不该互相等。
 	diagMu    sync.Mutex

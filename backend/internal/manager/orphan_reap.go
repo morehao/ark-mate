@@ -8,32 +8,10 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// SetProcRegistry 注入进程注册表（serve 装配；nil = 不登记）。
-func (o *Orchestrator) SetProcRegistry(r *procreg.Registry) {
-	o.mu.Lock()
-	o.procReg = r
-	o.mu.Unlock()
-}
-
-// ProcRegistry 返回当前注册表（测试/诊断用）。
-func (o *Orchestrator) ProcRegistry() *procreg.Registry {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.procReg
-}
-
-// ReapOrphans 回收上一 daemon 实例遗留的孤儿 runtime 进程（启动时调用一次）。
-func (o *Orchestrator) ReapOrphans(grace time.Duration) (procreg.Report, error) {
-	o.mu.Lock()
-	reg := o.procReg
-	o.mu.Unlock()
-	if reg == nil {
-		return procreg.Report{Disabled: true}, nil
-	}
-	return reg.Reap(grace)
-}
-
-// registerProc 登记刚拉起的子进程（失败只告警，不影响会话可用性）。
+// registerProc 把刚拉起的子进程交给**执行面**登记（P4a 正文第四十八刀：注册表归执行面）。
+//
+// 本函数只做"连接对象 → 注册项"的映射与 pid 落位；登记/告警/回收都在 `runtimeconn.Plane` 里
+// （那是"哪些子进程是我的"的唯一事实源）。
 func (o *Orchestrator) registerProc(rc *runtimeConn) {
 	if rc == nil || rc.client == nil {
 		return
@@ -43,37 +21,21 @@ func (o *Orchestrator) registerProc(rc *runtimeConn) {
 	if info.PID > 0 {
 		rc.pid = info.PID
 	}
-	o.mu.Lock()
-	reg := o.procReg
-	o.mu.Unlock()
-	if reg == nil || info.PID <= 0 {
+	if info.PID <= 0 {
 		return
 	}
-	if err := reg.Add(procreg.Entry{
+	o.svc.runtimePlane.RegisterProc(procreg.Entry{
 		PID: info.PID, PGID: info.PGID, Command: info.Command,
 		Runtime: rc.spec.ID,
-	}); err != nil {
-		glog.Warnw(context.Background(), "procreg: 登记子进程失败", "pid", info.PID, "err", err)
-		return
-	}
-	glog.Infow(context.Background(), "procreg: 登记 runtime 子进程",
-		"runtime", rc.spec.ID, "pid", info.PID, "pgid", info.PGID)
+	})
 }
 
 // unregisterProc 摘除登记（正常回收路径）。
 func (o *Orchestrator) unregisterProc(rc *runtimeConn) {
-	if rc == nil || rc.pid <= 0 {
+	if rc == nil {
 		return
 	}
-	o.mu.Lock()
-	reg := o.procReg
-	o.mu.Unlock()
-	if reg == nil {
-		return
-	}
-	if err := reg.Remove(rc.pid); err != nil {
-		glog.Warnw(context.Background(), "procreg: 摘除子进程登记失败", "pid", rc.pid, "err", err)
-	}
+	o.svc.runtimePlane.UnregisterProc(rc.pid)
 }
 
 // reapIdleOnce 空闲回收单轮：扫全部连接，回收「无在途 run、无任何会话引用、且自建立起空闲

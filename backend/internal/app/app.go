@@ -398,8 +398,8 @@ func (a *App) Init(ctx context.Context) error {
 		if prErr != nil {
 			glog.Warnw(ctx, "serve: 打开进程注册表失败（孤儿回收已禁用）", "path", p, "err", prErr)
 		} else {
-			a.orch.SetProcRegistry(pr)
-			if rep, rErr := a.orch.ReapOrphans(cfg.ReapGrace); rErr != nil {
+			a.rconn.SetProcRegistry(pr)
+			if rep, rErr := a.rconn.ReapOrphans(cfg.ReapGrace); rErr != nil {
 				glog.Warnw(ctx, "serve: 孤儿进程回收失败", "err", rErr)
 			} else if rep.Total() > 0 {
 				glog.Infow(ctx, "serve: 孤儿进程回收", "reaped", len(rep.Reaped),
