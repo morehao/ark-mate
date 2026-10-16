@@ -229,28 +229,6 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 	}, nil
 }
 
-// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）。撤下后发 session.input_cancelled——
-// 队列项的离队必须是一条可回放的事实（前端队列只认事件，不做本地推断）。
-func (s *Service) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error) {
-	if id == "" || inputID == "" {
-		return false, code.FromError(acl.NewError(acl.ClassRequest, "input_required", "session_id 与 input_id 必填", nil))
-	}
-	ok, err := s.deleteQueuedInput(ctx, id, inputID)
-	if err != nil {
-		return false, code.FromError(err)
-	}
-	if ok {
-		runtimeID := ""
-		if rec := s.sessionRec(id); rec != nil {
-			runtimeID = rec.RuntimeID
-		}
-		s.publish(session.BusInputCancelled, id, map[string]any{
-			"session_id": id, "runtime": runtimeID, "input_id": inputID, "reason": ReasonUserCancel,
-		})
-	}
-	return ok, nil
-}
-
 // CancelRun 取消会话进行中的 run（无 run 时幂等 no-op）。
 func (s *Service) CancelRun(ctx context.Context, id string) error {
 	if s.orch == nil {

@@ -59,6 +59,9 @@ type sessionCtr struct {
 	// 与 detail（只读）分开持有：这一族有副作用（把决定投给底座），两族吃的窄端口也因此不同
 	// （`InteractionSource` 纯读 vs `InteractionDelivery` 投递）。
 	interaction svcsession.InteractionSvc
+	// queue 排队输入的**撤下**用例（P4a 正文第四十二刀起在用例层）：请求形状校验 + 幂等口径 +
+	// 「真撤下必须发一条 `session.input_cancelled`」三条语义都在它里面。
+	queue svcsession.QueueSvc
 	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
 	//
 	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
@@ -79,6 +82,7 @@ func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Pl
 		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
 		detail:      svcsession.NewDetail(plane, src),
 		interaction: svcsession.NewInteraction(plane, deliver),
+		queue:       svcsession.NewQueue(plane),
 	}
 }
 
@@ -270,7 +274,7 @@ func (h *sessionCtr) QueuedInputs(c *gin.Context) {
 // DeleteQueuedInput 撤下一条尚未投递的排队输入（§6；已投递/已作废不可撤，幂等）。
 func (h *sessionCtr) DeleteQueuedInput(c *gin.Context) {
 	id, inputID := c.Param("id"), c.Param("input_id")
-	ok, err := h.svc.DeleteQueuedInput(c.Request.Context(), id, inputID)
+	ok, err := h.queue.DeleteQueuedInput(c.Request.Context(), id, inputID)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

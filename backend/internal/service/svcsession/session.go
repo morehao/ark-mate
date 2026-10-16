@@ -27,10 +27,6 @@ type SessionSvc interface {
 
 	// CancelRun 取消进行中的 run（无 run 时幂等 no-op）。
 	CancelRun(ctx context.Context, id string) error
-
-	// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）；返回是否存在待投递项被撤下
-	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
-	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
 	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
 	//
 	// ADR-2：原 `svcsearch` 的单方法面并入这里——它是**会话域**的读面（检索的就是消息）。

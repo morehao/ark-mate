@@ -233,6 +233,45 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		t.Error("`router.Ports` 里找不到 `InteractionDelivery svcsession.InteractionDelivery`（容空白）：" +
 			"投递口必须是装配点交下来的事实。")
 	}
+	// ——— P4a 正文第四十二刀：排队输入的**撤下**也在这一面 ———
+	//
+	// 这一面**不需要新端口**：队列状态与事件出口都在会话域平面里（`Plane.DeleteQueuedInput` /
+	// `Plane.Publish`），用例层直接调它——事实在域里、判据在用例层，中间不再垫一层转发。
+	// 它算真用例是因为三条语义由它自己定：请求形状校验（缺参 → `input_required`）、
+	// 幂等口径（不存在/已投递/已作废一律 false）、以及**真撤下必须发 `session.input_cancelled`**。
+	// 最后一条的失效是静默的：REST 回 `{"deleted":true}`、库里那行真的没了，而前端的队列
+	// 只认事件、不做本地推断——界面里那一行会永远挂着（直到刷新）。
+	queueAnchors := []string{
+		"func NewQueue(plane *session.Plane) QueueSvc",
+		"var _ QueueSvc = (*Queue)(nil)",
+		"func (q *Queue) DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)",
+		`"input_required"`,
+		// 事件出口与原因词都取自**域**（`session.BusInputCancelled` / `session.ReasonUserCancel`）：
+		// 在用例层另写一份字面量会让"事件名改了、发的人没跟"变成静默失效。
+		"session.BusInputCancelled",
+		"session.ReasonUserCancel",
+	}
+	for _, a := range queueAnchors {
+		if !strings.Contains(svcBody, a) {
+			t.Errorf("`internal/service/svcsession` 里找不到 %q：排队输入用例被改名/搬走了"+
+				"（判据挂在它身上，失锚等于空转）。", a)
+		}
+	}
+	if strings.Contains(iface, "DeleteQueuedInput(ctx context.Context") {
+		t.Error("`SessionSvc` 里又声明了 `DeleteQueuedInput(`：这一面有自己的接口（`QueueSvc`），" +
+			"收回去等于同一个用例有两条取用路径。")
+	}
+	if strings.Contains(mgrBody, "func (s *Service) DeleteQueuedInput(") {
+		t.Error("`internal/manager` 里又出现 `func (s *Service) DeleteQueuedInput(`：那一层转发已随" +
+			"P4a 正文第四十二刀删除（私有 `deleteQueuedInput` 仍留着——`run.go` 的回滚路径用它，且那条路径**刻意不发事件**）。")
+	}
+	if !strings.Contains(body, "svcsession.NewQueue(") {
+		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewQueue(`：排队输入用例必须在控制器里造。实际体：\n%s", body)
+	}
+	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) DeleteQueuedInput("); !strings.Contains(b, "h.queue.DeleteQueuedInput(") {
+		t.Errorf("`DeleteQueuedInput` handler 的函数体里没有 `h.queue.DeleteQueuedInput(`："+
+			"撤下排队输入已归用例层，经同包中间函数绕开会让这条判据失去意义。实际体：\n%s", b)
+	}
 }
 
 // interfaceBodyOf 取出 `type X interface {` 到顶格 `}` 之间的正文（含方法签名行）。

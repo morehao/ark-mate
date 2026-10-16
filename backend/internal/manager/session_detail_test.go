@@ -23,3 +23,8 @@ func detailSvc(svc *Service) svcsession.DetailSvc {
 func interactionSvc(svc *Service) svcsession.InteractionSvc {
 	return svcsession.NewInteraction(svc.sessionPlane, svc)
 }
+
+// queueSvc 同理造一次**排队输入**用例（P4a 正文第四十二刀）。它只吃会话域平面一个事实。
+func queueSvc(svc *Service) svcsession.QueueSvc {
+	return svcsession.NewQueue(svc.sessionPlane)
+}

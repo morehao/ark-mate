@@ -363,18 +363,18 @@ func TestDeleteQueuedInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := svc.DeleteQueuedInput(context.Background(), "conv-1", resp.InputID)
+	ok, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-1", resp.InputID)
 	if err != nil || !ok {
 		t.Fatalf("撤下失败: ok=%v err=%v", ok, err)
 	}
 	if left := svc.listQueuedInputs(context.Background(), "conv-1"); len(left) != 0 {
 		t.Fatalf("撤下后队列应为空: %+v", left)
 	}
-	if again, err := svc.DeleteQueuedInput(context.Background(), "conv-1", resp.InputID); err != nil || again {
+	if again, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-1", resp.InputID); err != nil || again {
 		t.Fatalf("重复撤下应幂等 false: %v/%v", again, err)
 	}
 	// 跨会话撤下：换个会话 id 撤不掉（归属由 SQL 双条件钉住）。
-	if other, err := svc.DeleteQueuedInput(context.Background(), "conv-other", resp.InputID); err != nil || other {
+	if other, err := queueSvc(svc).DeleteQueuedInput(context.Background(), "conv-other", resp.InputID); err != nil || other {
 		t.Fatalf("跨会话撤下必须失败: %v/%v", other, err)
 	}
 	var cancelled bool

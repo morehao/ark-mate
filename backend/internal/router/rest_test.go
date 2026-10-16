@@ -99,15 +99,12 @@ type stubSvc struct {
 	createResp   *dtosession.SessionCreateResp
 	createErr    error
 
-	promptCalled    bool
-	promptID        string
-	promptText      string
-	promptDelivery  string
-	inputDeleted    bool
-	inputDeleteID   string
-	inputDeleteConv string
-	promptResp      *dtosession.SessionPromptResp
-	promptErr       error
+	promptCalled   bool
+	promptID       string
+	promptText     string
+	promptDelivery string
+	promptResp     *dtosession.SessionPromptResp
+	promptErr      error
 
 	cancelCalled bool
 	cancelID     string
@@ -455,11 +452,6 @@ func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateR
 		return s.createResp, nil
 	}
 	return &dtosession.SessionCreateResp{ID: "s-new"}, nil
-}
-
-func (s *stubSvc) DeleteQueuedInput(_ context.Context, id, inputID string) (bool, error) {
-	s.inputDeleted, s.inputDeleteID, s.inputDeleteConv = true, inputID, id
-	return true, nil
 }
 
 func (s *stubSvc) PromptSession(_ context.Context, id string, req dtosession.PromptReq) (*dtosession.SessionPromptResp, error) {
@@ -954,6 +946,9 @@ func TestPromptAndCancel(t *testing.T) {
 	deps.SessionPlane.RegisterSession(&session.SessionRec{
 		ID: "s1", RuntimeID: "rtx", Status: "completed", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	})
+	// 事件出口也要接上：撤下排队输入时那一条 `session.input_cancelled` 要能被观察
+	// （域平面未注入总线时事件静默丢弃，只在纯列表/单测场景出现）。
+	deps.SessionPlane.SetBus(deps.Bus)
 	queued, err := deps.SessionPlane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3)
 	if err != nil {
 		t.Fatalf("入队夹具失败: %v", err)
@@ -1011,10 +1006,30 @@ func TestPromptAndCancel(t *testing.T) {
 		t.Fatalf("排队列表字段不符: %+v（期望来自域入队的那一行 %s）", qdata[0], queued.ID)
 	}
 
-	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。
-	env, _ = do(t, r, "DELETE", "/v1/mate/sessions/s1/inputs/in-9", "")
-	if env.Code != 0 || !svc.inputDeleted || svc.inputDeleteID != "in-9" {
-		t.Fatalf("撤下排队输入不符: env=%+v deleted=%v id=%q", env, svc.inputDeleted, svc.inputDeleteID)
+	// §6 撤下排队输入（P4a 正文第四十二刀起走用例层）：撤的是**刚入队那一行**，并且必须真的
+	// 发出一条 `session.input_cancelled`——前端队列只认事件、不做本地推断，漏发它的表现是
+	// 「REST 回 ok、界面那一行永远挂着」。替身时代这两件事都验不到（标志位只证"替身被调用了"）。
+	env, _ = do(t, r, "DELETE", "/v1/mate/sessions/s1/inputs/"+queued.ID, "")
+	if env.Code != 0 || !strings.Contains(string(env.Data), `"deleted":true`) {
+		t.Fatalf("撤下排队输入不符: env=%+v", env)
+	}
+	cancelled := false
+	for _, ev := range deps.Bus.EventsAfter("s1", -1) {
+		if ev.Type != session.BusInputCancelled {
+			continue
+		}
+		if p, _ := ev.Payload.(map[string]any); p["input_id"] == queued.ID && p["reason"] == "user_cancel" {
+			cancelled = true
+		}
+	}
+	if !cancelled {
+		t.Fatalf("撤下排队输入必须发 session.input_cancelled（input_id=%s）: %+v",
+			queued.ID, deps.Bus.EventsAfter("s1", -1))
+	}
+	// 幂等：再撤同一条 → 200 + deleted:false（不存在/已投递/已作废一律 false，不报错）。
+	env, _ = do(t, r, "DELETE", "/v1/mate/sessions/s1/inputs/"+queued.ID, "")
+	if env.Code != 0 || !strings.Contains(string(env.Data), `"deleted":false`) {
+		t.Fatalf("重复撤下应幂等回 deleted:false: %+v", env)
 	}
 
 	// cancel。
