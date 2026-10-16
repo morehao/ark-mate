@@ -26,7 +26,7 @@ import (
 func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetBindAddr("0.0.0.0:10001") // 对外监听 → browse 形态
-	if got := svc.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("对外监听应为 browse 形态: %s", got)
 	}
 	_, _, err := svc.PickDirectoryHost(context.Background())
@@ -47,14 +47,14 @@ func TestPickDirectoryHostReportsUnsupportedOnThisPlatform(t *testing.T) {
 	switch mateRuntime.GOOS {
 	case "darwin":
 		// 本机是 macOS：形态必须是 native（回环 + 非 SSH + 有显示会话）。
-		if got := svc.NativePickerMode(); got != string(workspace.NativePickerHost) {
+		if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerHost) {
 			t.Fatalf("macOS 本机应为 native 形态: %s", got)
 		}
 		// 刻意**不调** PickDirectoryHost：它会真的弹出系统面板并挂住测试。
 	default:
 		// 其它平台（含本仓未实现的 win32）：形态至少要是可判定的两值之一，
 		// 且"不支持"必须以 ErrNativePickUnsupported 表达，而不是笼统 50000。
-		mode := svc.NativePickerMode()
+		mode := svc.Picker().NativePickerMode()
 		if mode != string(workspace.NativePickerHost) && mode != string(workspace.NativePickerBrowse) {
 			t.Fatalf("形态只有 native|browse 两个取值: %q", mode)
 		}
@@ -65,11 +65,11 @@ func TestPickDirectoryHostReportsUnsupportedOnThisPlatform(t *testing.T) {
 func TestSetBindAddrFeedsPickerMode(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	// 未注入地址（""）→ 解析不出来 → 保守判 browse。
-	if got := svc.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("未注入监听地址时应保守判 browse: %s", got)
 	}
 	svc.SetBindAddr("127.0.0.1:10001")
-	got := svc.NativePickerMode()
+	got := svc.Picker().NativePickerMode()
 	if mateRuntime.GOOS == "darwin" && got != string(workspace.NativePickerHost) {
 		t.Fatalf("macOS 注入回环地址后应为 native: %s", got)
 	}
@@ -86,7 +86,7 @@ func TestPickEnvReadsSSHFromProcess(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 2")
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetBindAddr("127.0.0.1:10001")
-	if got := svc.NativePickerMode(); got != string(workspace.NativePickerBrowse) {
+	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("SSH 会话应判 browse（面板会开在没人看的屏幕上）: %s", got)
 	}
 }
@@ -116,7 +116,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetBindAddr("127.0.0.1:10001") // 回环 + 非 SSH + 有显示会话 → native
-	if got := svc.NativePickerMode(); got != string(workspace.NativePickerHost) {
+	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerHost) {
 		t.Fatalf("本机 macOS 应为 native 形态: %s", got)
 	}
 	path, cancelled, err := svc.PickDirectoryHost(context.Background())

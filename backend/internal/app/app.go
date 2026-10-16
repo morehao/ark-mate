@@ -516,7 +516,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
-		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(workspace.NativePickerHost) },
+		HostFacts:   func() bool { return a.svc.Picker().NativePickerMode() == string(workspace.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
 		AssetWatch:  a.assetWatch,

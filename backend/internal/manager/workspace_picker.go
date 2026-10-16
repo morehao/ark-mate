@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+
+	"github.com/morehao/ark-mate/internal/domain/workspace"
 )
 
 // ——— 宿主原生目录选择器：P3d 过渡期的转发层 ———
@@ -20,9 +22,11 @@ import (
 func (s *Service) SetBindAddr(addr string) { s.picker.SetBindAddr(addr) }
 
 // TODO(P4b): 删转发（调用点直接依赖 workspace.Picker）
-func (s *Service) NativePickerMode() string { return s.picker.NativePickerMode() }
-
-// TODO(P4b): 删转发（调用点直接依赖 workspace.Picker）
 func (s *Service) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 	return s.picker.PickDirectoryHost(ctx)
 }
+
+// Picker 宿主目录选择器平面的**事实出口**：它的判定与命令配方是领域实现（P2a-16 搬进
+// `domain/workspace`），`Service` 上那份同名转发已按读模型口径删除（P4a 正文第十五刀）
+// ——"宿主要不要抬系统面板"是**事实读取**，没有校验与错误码，调用点直接用平面。
+func (s *Service) Picker() *workspace.Picker { return s.picker }

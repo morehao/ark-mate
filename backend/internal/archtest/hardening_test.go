@@ -286,6 +286,48 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	if strings.Contains(host, "exec.Command(") == false && strings.Contains(host, "exec.CommandContext(") == false {
 		t.Errorf("%s 最终必须真的 spawn 宿主命令（否则原生那半是空的）", hostPath)
 	}
+
+	// ——— 读模型不进用例层：宿主选目录**判定**这一格（P4a 正文第十五刀）———
+	//
+	// `NativePickerMode` 曾在 `svcworkspace` 的接口里、由 `manager` 一行转发到 `domain/workspace.Picker`。
+	// 它是**纯事实读取**（没有校验、没有错误码、没有响应装配），用例层再包一层就是一行转发——
+	// 与第十一刀会话读模型、第十三刀技能目录同一条口径。失效方式两种，都不会让别的测试变红：
+	//   ① 转发回潮（接口里重新声明，或 manager 里重新出现同名方法）；
+	//   ② **事实出口被绕过**：调用点不去取"装配好的那个 picker"，而是自己造一个
+	//      ——新造的 picker 没有 `bindAddr` 事实，判定会静默变成 browse（本机浏览器入口
+	//      明明能用系统面板却被降级，正是这条口径当年踩过的坑）。
+	root := backendRoot(t)
+	var skillsBody strings.Builder
+	_ = skillsBody
+	var svcBody strings.Builder
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
+		svcBody.WriteString(stripLineComments(readFileOrFatal(t, path)))
+	}
+	if svcSrc := svcBody.String(); svcSrc == "" {
+		t.Fatal("`internal/service/svcworkspace` 下没有生产 .go 文件：守卫失去检查对象")
+	} else if strings.Contains(svcSrc, "NativePickerMode(") {
+		t.Error("`svcworkspace` 里又声明了 `NativePickerMode(`：它是纯事实读取，" +
+			"进用例层只能是一行转发（第十一刀口径）。调用点用 `Picker().NativePickerMode()`。")
+	}
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		if strings.Contains(body, "func (s *Service) NativePickerMode(") {
+			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) NativePickerMode(`："+
+				"那是一行转发（P4a 正文第十五刀）。", filepath.Base(path))
+		}
+	}
+	pickerFact := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_picker.go")))
+	if !strings.Contains(pickerFact, "func (s *Service) Picker() *workspace.Picker") {
+		t.Error("`internal/manager/workspace_picker.go` 里找不到 `func (s *Service) Picker() *workspace.Picker`：" +
+			"判定必须从**装配好的那个 picker**读（它自持 bindAddr 事实），不许就地新造。" +
+			"（判据失锚＝空转）")
+	}
+	appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if !strings.Contains(appSrc, "a.svc.Picker().NativePickerMode()") {
+		t.Error("`internal/app/app.go` 的 HostFacts 里找不到 `a.svc.Picker().NativePickerMode()`：" +
+			"系统面板可用性是从装配好的 picker 读出来的事实；就地 `workspace.NewPicker()` 会丢掉 " +
+			"bindAddr，判定静默变 browse。")
+	}
 }
 
 // stripGoComments 去掉 Go 源码的行注释与块注释（保持字节可忽略：只用于 contains 断言）。

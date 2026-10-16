@@ -16,12 +16,6 @@ type WorkspaceSvc interface {
 	// Web 端无原生目录选择器，故由控制面提供枚举能力。
 	BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error)
 
-	// NativePickerMode 宿主该用哪一套选目录交互：native（能抬系统面板）/ browse（应用内浏览）。
-	//
-	// 判据是宿主事实（绑回环 / 非 SSH / 有显示会话），**与客户端形态无关**——这是"完全参照
-	// 参照实现"的那条：本机浏览器打开控制台也能用上系统面板（见 internal/manager/workspace_picker.go）。
-	NativePickerMode() string
-
 	// PickDirectoryHost 抬一次**宿主原生**目录选择器（系统面板）。
 	//
 	// 返回 (path, false) = 选定；( "", true) = 取消（或超时收回，取消不是错误）；
