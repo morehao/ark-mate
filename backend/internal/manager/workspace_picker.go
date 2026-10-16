@@ -19,9 +19,6 @@ import (
 // `Service.mu`，而"监听地址"与"会话表"本来没有必须原子这一说）。
 
 // TODO(P4b): 删转发（调用点直接依赖 workspace.Picker）
-func (s *Service) SetBindAddr(addr string) { s.picker.SetBindAddr(addr) }
-
-// TODO(P4b): 删转发（调用点直接依赖 workspace.Picker）
 func (s *Service) PickDirectoryHost(ctx context.Context) (string, bool, error) {
 	return s.picker.PickDirectoryHost(ctx)
 }

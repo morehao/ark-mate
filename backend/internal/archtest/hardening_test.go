@@ -317,6 +317,16 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		}
 	}
 	pickerFact := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_picker.go")))
+	if strings.Contains(pickerFact, "func (s *Service) SetBindAddr(") {
+		t.Error("`internal/manager` 里又出现 `func (s *Service) SetBindAddr(`：装配期写事实也只有一处入口" +
+			"（`Picker().SetBindAddr`），多一层转发会让「到底写进了哪个 picker」重新变成可以搞错的事" +
+			"（P4a 正文第十六刀）。")
+	}
+	appSrcForBind := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if !strings.Contains(appSrcForBind, "a.svc.Picker().SetBindAddr(") {
+		t.Error("`internal/app/app.go` 里找不到 `a.svc.Picker().SetBindAddr(`：监听地址是**装配好的那个 " +
+			"picker** 的事实（它参与面板判定），不许经中间层或就地新造。")
+	}
 	if !strings.Contains(pickerFact, "func (s *Service) Picker() *workspace.Picker") {
 		t.Error("`internal/manager/workspace_picker.go` 里找不到 `func (s *Service) Picker() *workspace.Picker`：" +
 			"判定必须从**装配好的那个 picker**读（它自持 bindAddr 事实），不许就地新造。" +

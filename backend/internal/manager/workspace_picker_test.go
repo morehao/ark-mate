@@ -25,7 +25,7 @@ import (
 // 这条挡的是"能力声明与执行面不一致"时的最坏形态：在远程/SSH 场景下弹出一个没人看得见的系统面板。
 func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetBindAddr("0.0.0.0:10001") // 对外监听 → browse 形态
+	svc.Picker().SetBindAddr("0.0.0.0:10001") // 对外监听 → browse 形态
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("对外监听应为 browse 形态: %s", got)
 	}
@@ -42,7 +42,7 @@ func TestPickDirectoryHostUnsupportedWhenNotHost(t *testing.T) {
 // 端点同样给可判定错误；支持时**不去真开面板**（那会把测试挂住）——只断言判定与错误分类。
 func TestPickDirectoryHostReportsUnsupportedOnThisPlatform(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetBindAddr("127.0.0.1:10001")
+	svc.Picker().SetBindAddr("127.0.0.1:10001")
 
 	switch mateRuntime.GOOS {
 	case "darwin":
@@ -68,7 +68,7 @@ func TestSetBindAddrFeedsPickerMode(t *testing.T) {
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("未注入监听地址时应保守判 browse: %s", got)
 	}
-	svc.SetBindAddr("127.0.0.1:10001")
+	svc.Picker().SetBindAddr("127.0.0.1:10001")
 	got := svc.Picker().NativePickerMode()
 	if mateRuntime.GOOS == "darwin" && got != string(workspace.NativePickerHost) {
 		t.Fatalf("macOS 注入回环地址后应为 native: %s", got)
@@ -85,7 +85,7 @@ func TestSetBindAddrFeedsPickerMode(t *testing.T) {
 func TestPickEnvReadsSSHFromProcess(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 2")
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetBindAddr("127.0.0.1:10001")
+	svc.Picker().SetBindAddr("127.0.0.1:10001")
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerBrowse) {
 		t.Fatalf("SSH 会话应判 browse（面板会开在没人看的屏幕上）: %s", got)
 	}
@@ -115,7 +115,7 @@ func TestPickDirectoryHostSpawnsAndParsesHostPicker(t *testing.T) {
 	t.Setenv("PATH", binDir) // 只留假货：确保打的是它
 
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	svc.SetBindAddr("127.0.0.1:10001") // 回环 + 非 SSH + 有显示会话 → native
+	svc.Picker().SetBindAddr("127.0.0.1:10001") // 回环 + 非 SSH + 有显示会话 → native
 	if got := svc.Picker().NativePickerMode(); got != string(workspace.NativePickerHost) {
 		t.Fatalf("本机 macOS 应为 native 形态: %s", got)
 	}
