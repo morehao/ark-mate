@@ -1,4 +1,4 @@
-package manager
+package provider
 
 import (
 	"fmt"
@@ -7,9 +7,9 @@ import (
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
-// modelApplyReason 从运行时错误里提取一句人类可读的「为什么这个值不可用」
+// ModelApplyReason 从运行时错误里提取一句人类可读的「为什么这个值不可用」
 // （用于目录里把该值标灰；最终展示仍以运行时原始信息为准）。
-func modelApplyReason(err error) string {
+func ModelApplyReason(err error) string {
 	if ae, ok := acl.As(err); ok && ae != nil && ae.Details != "" {
 		return ae.Details
 	}

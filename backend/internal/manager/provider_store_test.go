@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
@@ -60,7 +61,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 }`
 	writeLegacyProviders(t, dir, content)
 	before := readProvidersFile(t, dir)
-	beforeStat, err := os.Stat(filepath.Join(dir, providersFileName))
+	beforeStat, err := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
 	if err != nil {
 		t.Fatalf("stat providers.json: %v", err)
 	}
@@ -68,9 +69,9 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	stats, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	stats, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
-		t.Fatalf("ImportProviderFile: %v", err)
+		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	if stats.Already || stats.Providers != 2 || stats.Inserted != 2 || stats.Existing != 0 {
 		t.Fatalf("导入计数不符: %+v", stats)
@@ -83,7 +84,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ① 备份存在，且内容是**迁移前**那份（含明文）。
-	backupPath := filepath.Join(dir, providersBackupName)
+	backupPath := filepath.Join(dir, provider.ProvidersBackupName)
 	bb, err := os.ReadFile(backupPath)
 	if err != nil {
 		t.Fatalf("迁移前备份未写出: %v", err)
@@ -94,7 +95,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 
 	// ② 原文件**一个字节都不变**（不删不回写），mtime 也不动。
 	after := readProvidersFile(t, dir)
-	afterStat, _ := os.Stat(filepath.Join(dir, providersFileName))
+	afterStat, _ := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
 	if after != before {
 		t.Fatalf("providers.json 被改写了:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
@@ -156,7 +157,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ⑤ 幂等：内容没变 → 整体跳过（一个字节都不写）。
-	again, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
+	again, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || !again.Already || again.Inserted != 0 {
 		t.Fatalf("重复导入应整体跳过: %+v err=%v", again, err)
 	}
@@ -232,7 +233,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	dir := filepath.Join(home, "providers")
 	writeLegacyProviders(t, dir, `{"existing":{"id":"existing","type":"deepseek","key_ref":"providers/existing"}}`)
 	before := readProvidersFile(t, dir)
-	beforeStat, err := os.Stat(filepath.Join(dir, providersFileName))
+	beforeStat, err := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
@@ -240,8 +241,8 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	// 先走一次导入，让"文件里的 existing"成为 DB 行的起点（真实升级后的形态）。
-	if _, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
-		t.Fatalf("ImportProviderFile: %v", err)
+	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	svc := NewService(publisherRegistry(), eventbus.New())
 	svc.EnableStore(st)
@@ -270,7 +271,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 
 	// 文件：内容与 mtime 都没变。
 	after := readProvidersFile(t, dir)
-	afterStat, _ := os.Stat(filepath.Join(dir, providersFileName))
+	afterStat, _ := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
 	if after != before {
 		t.Fatalf("sqlite 模式下不应回写 providers.json:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
@@ -344,20 +345,20 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// DryRun 不写盘。
 	dry := filepath.Join(home, "dry")
-	stats, err := ExportProviderFile(ctx, st, dry, true, nil)
+	stats, err := provider.ExportProviderFile(ctx, st, dry, true, nil)
 	if err != nil || stats.Written != 2 {
 		t.Fatalf("dry-run 导出计数不符: %+v err=%v", stats, err)
 	}
-	if _, err := os.Stat(filepath.Join(dry, providersFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dry, provider.ProvidersFileName)); !os.IsNotExist(err) {
 		t.Fatal("--dry-run 不应写盘")
 	}
 	// 真导出两次：逐字节相同（确定性）。
-	if _, err := ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("导出: %v", err)
 	}
 	first := readProvidersFile(t, dir)
 	time.Sleep(10 * time.Millisecond)
-	if _, err := ExportProviderFile(ctx, st, dir, false, nil); err != nil {
+	if _, err := provider.ExportProviderFile(ctx, st, dir, false, nil); err != nil {
 		t.Fatalf("二次导出: %v", err)
 	}
 	if second := readProvidersFile(t, dir); second != first {

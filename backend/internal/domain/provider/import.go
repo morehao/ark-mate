@@ -1,4 +1,4 @@
-package manager
+package provider
 
 import (
 	"context"
@@ -17,10 +17,16 @@ import (
 
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/golib/glog"
 )
+
+// ProvidersFileName provider 档案文件名（**目录级配置**：ProviderDir 下的保留文件）。
+//
+// 它留在文件侧：档案是"这台机器上有哪些上游凭据"，与 agent 定义的生命周期不同。
+const ProvidersFileName = "providers.json"
 
 // ——— 存量 provider 档案的一次性导入与导出（v11 下半；v13 改为列载荷；v20 换密钥面） ———
 //
@@ -40,17 +46,6 @@ import (
 // （旧机制不可用时才跳过的那个分支随机制一起删除），而 `key_ref` 里的**旧前缀**在这条
 // 导入路径上被显式翻译（`capability.TranslateLegacySecretRef`——档案文件不在库里，迁移改不到它们）。
 // 导出**永远不写明文**：`key` 只作为输入存在。
-
-// providersBackupName 迁移前备份的文件名（同目录，0600；**已存在则不覆盖**——
-// 第二次启动不该把第一次的备份冲掉）。
-const providersBackupName = "providers.json.bak-v11"
-
-// providerMismatchExtraMarker 对账不一致里**"库里有、文件里没有"**这一类的判据标记。
-//
-// 它是"写入侧拼串"与"读取侧分档"之间唯一的耦合点，所以提成常量：`mate doctor` 要据它
-// 把"写面新建后快照滞后"（正常，只告警）与"真不一致"（判失败）分开。两侧各手抄一份
-// 中文串，会在某次改文案时静默失效——那时 doctor 会把正常状态报成失败。
-const providerMismatchExtraMarker = "DB 里有、文件里没有"
 
 // ProviderImportStats 一次导入的完整计数 = 域无关计数 + provider 面自己的计数。
 type ProviderImportStats struct {
@@ -91,7 +86,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts d
 	if dir == "" {
 		return stats, nil
 	}
-	path := filepath.Join(dir, providersFileName)
+	path := filepath.Join(dir, ProvidersFileName)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		// 文件不存在 = 没有存量档案要搬（全新机器）。不是错误。
@@ -122,7 +117,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts d
 	// ② 备份（只写一次）。
 	if backup, bErr := backupProviderFile(path, dir); bErr != nil {
 		// 备份失败**必须阻断**：回退窗口的关闭是不可逆动作，没有备份就没有回退路径。
-		return stats, fmt.Errorf("manager: 备份 %s 失败（拒绝在无备份的情况下关闭回退窗口）: %w", providersFileName, bErr)
+		return stats, fmt.Errorf("manager: 备份 %s 失败（拒绝在无备份的情况下关闭回退窗口）: %w", ProvidersFileName, bErr)
 	} else {
 		stats.Backup = backup
 	}
@@ -250,7 +245,7 @@ func scanProviderFile(
 			continue
 		}
 		// id 会进托管文档的键 → 必须过同一道校验；坏 id 逐条跳过并可见。
-		if err := validateProviderID(id); err != nil {
+		if err := ValidateProviderID(id); err != nil {
 			fmt.Fprintf(os.Stderr, "provider import: 跳过 id %q（非法：%v）\n", id, err)
 			continue
 		}
@@ -263,7 +258,7 @@ func scanProviderFile(
 		}
 		baseURL := bodyString(entry, "base_url")
 		if baseURL == "" {
-			baseURL = v11FileBaseURL(&providerFile{
+			baseURL = V11FileBaseURL(&ProviderFile{
 				Type:        bodyString(entry, "type"),
 				Projections: anyToProjections(entry["projections"]),
 			})
@@ -348,7 +343,7 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 	sort.Strings(extra)
 	for _, id := range extra {
 		mismatch = append(mismatch, fmt.Sprintf("%s: %s（写面新建？跑 `mate provider export` 同步文件）",
-			id, providerMismatchExtraMarker))
+			id, ProviderMismatchExtraMarker))
 	}
 	return mismatch
 }
@@ -398,17 +393,17 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 	stats.Written = len(file)
 	if dryRun {
 		if out != nil {
-			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", providersFileName, definition.IndentJSONBlock(string(body)))
+			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", ProvidersFileName, definition.IndentJSONBlock(string(body)))
 		}
 		return stats, nil
 	}
-	if err := writeFileAtomic(filepath.Join(stats.Dir, providersFileName), body, 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(stats.Dir, ProvidersFileName), body, 0o600); err != nil {
 		stats.Written = 0
 		stats.Failed++
 		return stats, err
 	}
 	if out != nil {
-		fmt.Fprintf(out, "  ✓ %s（%d 条档案）\n", providersFileName, len(file))
+		fmt.Fprintf(out, "  ✓ %s（%d 条档案）\n", ProvidersFileName, len(file))
 	}
 	return stats, nil
 }
@@ -417,7 +412,7 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 //
 // 不覆盖是刻意的：第二次启动（或用户手动重跑导入）不该把第一次那份"迁移前真相"冲掉。
 func backupProviderFile(path, dir string) (string, error) {
-	dst := filepath.Join(dir, providersBackupName)
+	dst := filepath.Join(dir, ProvidersBackupName)
 	if _, err := os.Stat(dst); err == nil {
 		return "", nil // 已有备份：保留它
 	}
@@ -463,3 +458,101 @@ func anyToProjections(v any) map[string]any {
 	}
 	return m
 }
+
+// ProviderFile providers.json 的磁盘形状。
+//
+// Key 字段**只读**：用于把 v20 之前的明文档案搬进托管文档；之后一律不再写出（写它等于把
+// 明文放回一个可被复制/备份的文件里，而那正是 v20 想去掉的那份重复）。
+type ProviderFile struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Note     string `json:"note,omitempty"`
+	KeyRef   string `json:"key_ref,omitempty"`
+	Key      string `json:"key,omitempty"`
+	// Type/Projections 是 v11 的遗留（导入时按 v11 → v12 字段映射转换，见 provider_import.go）。
+	Type        string         `json:"type,omitempty"`
+	Projections map[string]any `json:"projections,omitempty"`
+}
+
+// V11FileBaseURL 从 v11 的文件档案里推导端点（`projections.*.baseURL` 优先，其次 type 表）。
+func V11FileBaseURL(d *ProviderFile) string {
+	keys := make([]string, 0, len(d.Projections))
+	for k := range d.Projections {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		frag, ok := d.Projections[k].(map[string]any)
+		if !ok {
+			continue
+		}
+		if v, ok := frag["baseURL"].(string); ok && v != "" {
+			return v
+		}
+	}
+	if ep, ok := v11KnownEndpoints[strings.ToLower(d.Type)]; ok {
+		return ep
+	}
+	return ""
+}
+
+// v11KnownEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/store/migrate_v12.go`
+// 里有一份同源的，那是迁移用的历史快照，这里是导入（逃生门）用的；两处都描述历史，不复用活代码）。
+var v11KnownEndpoints = map[string]string{
+	"openai":     "https://api.openai.com/v1",
+	"deepseek":   "https://api.deepseek.com/v1",
+	"openrouter": "https://openrouter.ai/api/v1",
+	"groq":       "https://api.groq.com/openai/v1",
+}
+
+// bodyString 从已解析的 JSON 对象里取一个字符串键（缺失/类型不符 → 空串）。
+//
+// v13 之后它**只服务文件载体与导入路径**（`providers.json` 的条目仍是自由 JSON）；
+// DB 行是列，不经过这里。
+func bodyString(body map[string]any, key string) string {
+	v, ok := body[key]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+// ValidateProviderID id 词法校验（它进托管文档的键 `providers/<id>` → 必须过引用校验，
+// 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
+func ValidateProviderID(id string) error {
+	if id == "" {
+		return acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
+	}
+	if strings.TrimSpace(id) != id || len(id) > 64 {
+		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
+		}
+	}
+	if id == "." || id == ".." {
+		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
+			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
+	}
+	return nil
+}
+
+// ProvidersBackupName 迁移前备份的文件名（同目录，0600；**已存在则不覆盖**——
+// 第二次启动不该把第一次的备份冲掉）。
+const ProvidersBackupName = "providers.json.bak-v11"
+
+// ProviderMismatchExtraMarker 对账不一致里**"库里有、文件里没有"**这一类的判据标记。
+//
+// 它是"写入侧拼串"与"读取侧分档"之间唯一的耦合点，所以提成常量：`mate doctor` 要据它
+// 把"写面新建后快照滞后"（正常，只告警）与"真不一致"（判失败）分开。两侧各手抄一份
+// 中文串，会在某次改文案时静默失效——那时 doctor 会把正常状态报成失败。
+const ProviderMismatchExtraMarker = "DB 里有、文件里没有"

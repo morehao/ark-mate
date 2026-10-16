@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/config"
 )
@@ -68,7 +68,7 @@ func providerImport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := manager.ImportProviderFile(context.Background(), st, root,
+	stats, err := provider.ImportProviderFile(context.Background(), st, root,
 		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider import: %v\n", err)
@@ -130,7 +130,7 @@ func providerExport(args []string) {
 	}
 	defer st.Close()
 
-	stats, err := manager.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
+	stats, err := provider.ExportProviderFile(context.Background(), st, root, *dryRun, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider export: %v\n", err)
 		os.Exit(1)

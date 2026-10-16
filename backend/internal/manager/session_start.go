@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -327,7 +328,7 @@ func (o *Orchestrator) connectSession(ctx context.Context, recIn *SessionRec,
 				"session", rec.ID, "runtime", spec.ID, "model", rec.ModelID, "err", rerr)
 		} else if _, err := as.proj.ApplyModel(ctx, recCfg); err != nil {
 			if ae, ok := acl.As(err); !ok || !strings.HasPrefix(ae.Code, "unsupported_") {
-				o.svc.catalog.markRejected(spec.ID, recCfg.Model, modelApplyReason(err))
+				o.svc.catalog.markRejected(spec.ID, recCfg.Model, provider.ModelApplyReason(err))
 			}
 			glog.Warnw(ctx, "恢复后重放会话模型失败（忽略，继续用运行时当前值）",
 				"session", rec.ID, "runtime", spec.ID, "model", recCfg.Model, "err", err)
@@ -417,7 +418,7 @@ func (o *Orchestrator) applyModelOnSession(ctx context.Context, as *ActiveSessio
 			"[model_not_supported] runtime "+spec.ID+" 未提供模型配置项，无法应用所选模型", nil)
 	}
 	// 运行时明确拒绝：记录该取值不可用（目录里标灰）后原样上抛。
-	o.svc.catalog.markRejected(spec.ID, model.Model, modelApplyReason(err))
+	o.svc.catalog.markRejected(spec.ID, model.Model, provider.ModelApplyReason(err))
 	glog.Warnw(ctx, "apply model rejected by runtime",
 		"session", as.ID, "runtime", spec.ID, "model", model.Model, "err", err)
 	return err

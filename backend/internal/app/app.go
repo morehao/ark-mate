@@ -28,6 +28,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/middleware"
@@ -310,7 +311,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 与其余三个域的两处形态差异：① 幂等依据是**文件内容指纹**（整个域只有一个文件，而它的内容
 		// 就是全部事实）；② 迁移前**备份** `providers.json.bak-v11`（这是全篇唯一一个不可逆动作——
 		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
-		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.ProviderDir,
+		if imp, iErr := provider.ImportProviderFile(ctx, st, cfg.ProviderDir,
 			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 				"err", iErr, "dir", cfg.ProviderDir)

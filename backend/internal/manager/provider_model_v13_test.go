@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
@@ -76,11 +77,11 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ③ 导入：档案里的历史明文进**同一列**（明文不再"跳过"，因为它有落点了）。
 	legacy := `{"legacy":{"id":"legacy","type":"openai","key":"` + secret + `"}}`
-	if err := os.WriteFile(filepath.Join(dir, providersFileName), []byte(legacy), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, provider.ProvidersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
-		t.Fatalf("ImportProviderFile: %v", err)
+	if _, err := provider.ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
+		t.Fatalf("provider.ImportProviderFile: %v", err)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")
 	if !found {

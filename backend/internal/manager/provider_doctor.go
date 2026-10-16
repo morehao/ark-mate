@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -239,7 +240,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 	// 文件侧（与载体无关，两种模式都要看）：providers.json 与它的迁移前备份是否存在。
 	if providerDir != "" {
 		facts.ProvidersFile = providerFileExists(providerDir)
-		facts.ProvidersBackup = fileExists(filepath.Join(providerDir, providersBackupName))
+		facts.ProvidersBackup = fileExists(filepath.Join(providerDir, provider.ProvidersBackupName))
 	}
 
 	// ——— 凭据面（v20）：库是权威（`providers.key` + `mcp_secrets`），镜像是可重建副本 ———
@@ -565,7 +566,7 @@ func providerMismatchBenignOnly(entries []string) bool {
 		return false
 	}
 	for _, e := range entries {
-		if !strings.Contains(e, providerMismatchExtraMarker) {
+		if !strings.Contains(e, provider.ProviderMismatchExtraMarker) {
 			return false
 		}
 	}

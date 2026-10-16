@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/redact"
@@ -61,7 +62,7 @@ func (s *Service) ProbeProvider(ctx context.Context, id string, req dtoprovider.
 
 // probeProvider 带可注入面（测试专用入口；生产只走 ProbeProvider）。
 func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.ProviderProbeReq, opts probeOptions) (*dtoprovider.ProviderProbeResp, error) {
-	if err := validateProviderID(id); err != nil {
+	if err := provider.ValidateProviderID(id); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
@@ -184,7 +185,7 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 	if err := os.MkdirAll(providerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(providerDir, providersFileName), []byte(`{"p1":{"type":"deepseek"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(providerDir, provider.ProvidersFileName), []byte(`{"p1":{"type":"deepseek"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got := CollectProviderDoctorFacts(context.Background(), nil, ProviderDoctorOptions{Home: home, ProviderDir: providerDir})
@@ -208,7 +209,7 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 
 // TestProviderMismatchBenignOnly 对账分档：只有"库里有、文件里没有"才算快照滞后。
 //
-// 这条分档的判据就是写入侧拼串里的那个标记（`providerMismatchExtraMarker`），所以这里
+// 这条分档的判据就是写入侧拼串里的那个标记（`provider.ProviderMismatchExtraMarker`），所以这里
 // 直接用它造串——**两侧共用同一个常量**，改文案不会让分档悄悄失效。
 func TestProviderMismatchBenignOnly(t *testing.T) {
 	cases := []struct {
@@ -217,11 +218,11 @@ func TestProviderMismatchBenignOnly(t *testing.T) {
 		want    bool
 	}{
 		{"空", nil, false},
-		{"只有快照滞后", []string{"a: " + providerMismatchExtraMarker + "（写面新建？）"}, true},
+		{"只有快照滞后", []string{"a: " + provider.ProviderMismatchExtraMarker + "（写面新建？）"}, true},
 		{"文件里有库里没有", []string{"a: 文件里有、DB 里没有"}, false},
 		{"type 不一致", []string{"a: type 不一致（文件 \"x\" / DB \"y\"）"}, false},
 		{"混合", []string{
-			"a: " + providerMismatchExtraMarker + "（写面新建？）",
+			"a: " + provider.ProviderMismatchExtraMarker + "（写面新建？）",
 			"b: 文件里有、DB 里没有",
 		}, false},
 	}

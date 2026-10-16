@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -32,11 +33,6 @@ func fileExists(p string) bool {
 	_, err := os.Stat(filepath.Clean(p))
 	return err == nil
 }
-
-// providersFileName provider 档案文件名（**目录级配置**：ProviderDir 下的保留文件）。
-//
-// 它留在文件侧：档案是"这台机器上有哪些上游凭据"，与 agent 定义的生命周期不同。
-const providersFileName = "providers.json"
 
 // ——— 供应商（v12）：**一个 OpenAI 兼容端点 + 一把密钥** ———
 //
@@ -96,23 +92,6 @@ func (d *providerDef) applyResolution(k credential.ProviderKey) {
 	}
 }
 
-// providerFile providers.json 的磁盘形状。
-//
-// Key 字段**只读**：用于把 v20 之前的明文档案搬进托管文档；之后一律不再写出（写它等于把
-// 明文放回一个可被复制/备份的文件里，而那正是 v20 想去掉的那份重复）。
-type providerFile struct {
-	ID       string `json:"id"`
-	Name     string `json:"name,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	BaseURL  string `json:"base_url,omitempty"`
-	Note     string `json:"note,omitempty"`
-	KeyRef   string `json:"key_ref,omitempty"`
-	Key      string `json:"key,omitempty"`
-	// Type/Projections 是 v11 的遗留（导入时按 v11 → v12 字段映射转换，见 provider_import.go）。
-	Type        string         `json:"type,omitempty"`
-	Projections map[string]any `json:"projections,omitempty"`
-}
-
 //
 // 单独导出是因为**诊断面要按它分类**：镜像里有而库里没有时，两类引用的出路完全不同——provider
 // 密钥在「设置 · 模型」里有写入口（重填即对齐），而 MCP 密钥的值这一批**没有**写入口（只能把
@@ -129,11 +108,11 @@ func (s *Service) loadProvidersFile(dir string) {
 		return
 	}
 	ctx := context.Background()
-	b, err := os.ReadFile(filepath.Join(dir, providersFileName))
+	b, err := os.ReadFile(filepath.Join(dir, provider.ProvidersFileName))
 	if err != nil {
 		return // 首次/未建 → 空表
 	}
-	var m map[string]*providerFile
+	var m map[string]*provider.ProviderFile
 	if err := json.Unmarshal(b, &m); err != nil {
 		glog.Warnw(ctx, "providers: providers.json 解析失败（忽略）", "err", err)
 		return
@@ -187,46 +166,15 @@ func (s *Service) loadProvidersFile(dir string) {
 //
 // **v11 → v12 字段映射**（迁移逃生门：导入保留对旧 `type` 的识别）：`type` → `protocol`
 // + `base_url`（按冻结的已知端点表推导），`projections` 丢弃（v12 无出口）。
-func providerDefFromFile(id string, d *providerFile) *providerDef {
+func providerDefFromFile(id string, d *provider.ProviderFile) *providerDef {
 	p := &providerDef{ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note}
 	if p.Protocol == "" {
 		p.Protocol = string(resource.ProtocolOpenAI)
 	}
 	if p.BaseURL == "" {
-		p.BaseURL = v11FileBaseURL(d)
+		p.BaseURL = provider.V11FileBaseURL(d)
 	}
 	return p
-}
-
-// v11FileBaseURL 从 v11 的文件档案里推导端点（`projections.*.baseURL` 优先，其次 type 表）。
-func v11FileBaseURL(d *providerFile) string {
-	keys := make([]string, 0, len(d.Projections))
-	for k := range d.Projections {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		frag, ok := d.Projections[k].(map[string]any)
-		if !ok {
-			continue
-		}
-		if v, ok := frag["baseURL"].(string); ok && v != "" {
-			return v
-		}
-	}
-	if ep, ok := v11KnownProviderEndpoints[strings.ToLower(d.Type)]; ok {
-		return ep
-	}
-	return ""
-}
-
-// v11KnownProviderEndpoints v11 的 `type` → 端点（**冻结副本**：`internal/store/migrate_v12.go`
-// 里有一份同源的，那是迁移用的历史快照，这里是导入（逃生门）用的；两处都描述历史，不复用活代码）。
-var v11KnownProviderEndpoints = map[string]string{
-	"openai":     "https://api.openai.com/v1",
-	"deepseek":   "https://api.deepseek.com/v1",
-	"openrouter": "https://openrouter.ai/api/v1",
-	"groq":       "https://api.groq.com/openai/v1",
 }
 
 // persistProvidersFile 原子写 providers.json（内存现状）。
@@ -240,7 +188,7 @@ func (s *Service) persistProvidersFile() error { return s.persistProvidersFileWi
 func (s *Service) persistProvidersFileWith(override *providerDef) error {
 	s.mu.Lock()
 	dir := s.providerDir
-	cp := make(map[string]*providerFile, len(s.providers)+1)
+	cp := make(map[string]*provider.ProviderFile, len(s.providers)+1)
 	for id, d := range s.providers {
 		cp[id] = providerFileOf(id, d)
 	}
@@ -262,7 +210,7 @@ func (s *Service) persistProvidersFileWith(override *providerDef) error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(dir, providersFileName))
+	return os.Rename(tmp, filepath.Join(dir, provider.ProvidersFileName))
 }
 
 // providerFileOf 把内存档案投影成文件载体的一行（**只写引用，绝不写明文**）。
@@ -270,11 +218,11 @@ func (s *Service) persistProvidersFileWith(override *providerDef) error {
 // v20 之前这里有一条"旧机制不可用且确有明文"的降级分支：把明文写回档案，从而让档案成为
 // 第二份密钥副本。托管文档现在**必然**可写（它是 memory 载体的事实源），所以那条分支连同
 // 它带来的"同一个值两处落盘"一起删除。
-func providerFileOf(id string, d *providerDef) *providerFile {
+func providerFileOf(id string, d *providerDef) *provider.ProviderFile {
 	if d == nil {
-		return &providerFile{ID: id}
+		return &provider.ProviderFile{ID: id}
 	}
-	return &providerFile{
+	return &provider.ProviderFile{
 		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
 		KeyRef: credential.ProviderRef(id),
 	}

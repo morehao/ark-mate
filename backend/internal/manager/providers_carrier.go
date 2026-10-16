@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/golib/glog"
 )
@@ -39,7 +40,7 @@ func (s *Service) providerLocator(id string) string {
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, providersFileName)
+	return filepath.Join(dir, provider.ProvidersFileName)
 }
 
 // ——— provider 面的装载入口（v19：agent 面删除后，这里是定义装载的公开面） ———
@@ -213,19 +214,6 @@ func providerFileExists(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, providersFileName))
+	_, err := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
 	return err == nil
-}
-
-// bodyString 从已解析的 JSON 对象里取一个字符串键（缺失/类型不符 → 空串）。
-//
-// v13 之后它**只服务文件载体与导入路径**（`providers.json` 的条目仍是自由 JSON）；
-// DB 行是列，不经过这里。
-func bodyString(body map[string]any, key string) string {
-	v, ok := body[key]
-	if !ok {
-		return ""
-	}
-	s, _ := v.(string)
-	return s
 }

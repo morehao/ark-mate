@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -38,7 +39,7 @@ import (
 
 // CreateProvider 新建一条供应商（POST /providers）。
 func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
-	if err := validateProviderID(req.ID); err != nil {
+	if err := provider.ValidateProviderID(req.ID); err != nil {
 		return nil, err
 	}
 	protocol, err := normalizeProtocol(req.Protocol)
@@ -96,7 +97,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 //   - 清：同一列写空串。**内存与镜像都必须跟着变**——留在托管文档里的那条会在下一次解析时
 //     被"库是权威"的判据否掉（见 `resolveProviderKey`），但把它删干净才是收尾。
 func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	if err := validateProviderID(id); err != nil {
+	if err := provider.ValidateProviderID(id); err != nil {
 		return nil, err
 	}
 
@@ -241,7 +242,7 @@ func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key stri
 // 中间有窗口——并发「删供应商」+「给它加模型」会留下孤儿 model 行（P3）。
 // manager 现在只翻错误码（`provider_in_use`），文案与引用名单形状不变。
 func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
-	if err := validateProviderID(id); err != nil {
+	if err := provider.ValidateProviderID(id); err != nil {
 		return nil, err
 	}
 
@@ -348,32 +349,6 @@ func normalizeProtocol(v string) (string, error) {
 				"原生 anthropic / gemini 协议需要各自的 api 映射与鉴权形态，尚未取证", v), nil)
 	}
 	return string(p), nil
-}
-
-// validateProviderID id 词法校验（它进托管文档的键 `providers/<id>` → 必须过引用校验，
-// 防的是一个带 `/` 或 `..` 的 id 把别的条目覆盖掉）。
-func validateProviderID(id string) error {
-	if id == "" {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id", "provider id 必填", nil)
-	}
-	if strings.TrimSpace(id) != id || len(id) > 64 {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符，且不含首尾空白）", id), nil)
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
-		default:
-			return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-				fmt.Sprintf("provider id %q 非法（仅 a-zA-Z0-9._-，1-64 字符）", id), nil)
-		}
-	}
-	if id == "." || id == ".." {
-		return acl.NewError(acl.ClassRequest, "invalid_provider_id",
-			fmt.Sprintf("provider id %q 非法（不得为 . 或 ..）", id), nil)
-	}
-	return nil
 }
 
 // dialEnvChannel 凭据的交付通道（env 注入那一档；取自静态交付表，避免"一处声明"再多一个漂移点）。
