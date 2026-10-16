@@ -239,8 +239,8 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 
 	// 文件侧（与载体无关，两种模式都要看）：providers.json 与它的迁移前备份是否存在。
 	if providerDir != "" {
-		facts.ProvidersFile = providerFileExists(providerDir)
-		facts.ProvidersBackup = fileExists(filepath.Join(providerDir, provider.ProvidersBackupName))
+		facts.ProvidersFile = provider.ProviderFileExists(providerDir)
+		facts.ProvidersBackup = provider.FileExists(filepath.Join(providerDir, provider.ProvidersBackupName))
 	}
 
 	// ——— 凭据面（v20）：库是权威（`providers.key` + `mcp_secrets`），镜像是可重建副本 ———

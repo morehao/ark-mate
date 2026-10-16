@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/testutil/runtimetest"
 	"net/http"
 	"net/http/httptest"
@@ -136,7 +137,7 @@ func TestProbeUpstreamFourOutcomes(t *testing.T) {
 func probeUpstreamAgainst(t *testing.T, url, protocol, key string) dtoprovider.ProviderCheckResp {
 	t.Helper()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
-	d := &providerDef{ID: "probe-target", Protocol: protocol, BaseURL: url, Key: key}
+	d := &provider.Def{ID: "probe-target", Protocol: protocol, BaseURL: url, Key: key}
 	return svc.probeUpstream(context.Background(), d, probeOptions{})
 }
 

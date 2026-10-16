@@ -209,7 +209,7 @@ func TestProviderStaleMirrorKeyNotAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 镜像里那份是陈旧的（库里已经被清掉了）。
-	doc := svc.credentialDoc()
+	doc := svc.providerPlane.CredentialDoc()
 	if doc == nil {
 		t.Fatal("夹具应装配出托管文档")
 	}

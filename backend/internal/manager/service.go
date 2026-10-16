@@ -3,10 +3,12 @@ package manager
 import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,7 +97,6 @@ type Service struct {
 	// providerDir 定义目录（v19 起只装 `providers.json`；空 = 不落盘，仅内存）。
 	// v20 起它与凭据面无关：密钥在库里，托管文档锚在 `MATE_HOME`（见 SetProviderDir）。
 	providerDir string
-	providers   map[string]*providerDef // provider 档案（P2；同一目录 providers.json 持久化）
 	// workspaceDir 代建工作空间的根目录（未指定 cwd 时在 <root>/<会话id>/ 建）。
 	// 空 = 关闭代建（未指定 cwd 直接报 workspace_required，不回落 os.Getwd()）。
 	// 见 SetWorkspacePolicy / ResolveWorkspace。
@@ -137,6 +138,8 @@ type Service struct {
 	// mcpPlane 连接器平面（实时调用 + 探测；与 skill 平面共用同一份 caps 注册表）。
 	// 探测状态（预算 + 最近一次探测结果）自持在平面内，不再挂在 Service 上。
 	mcpPlane *mcp.Plane
+	// providerPlane 供应商域（内存档案表 + 载体 + 凭据面；自持一把只保护域内字段的锁）。
+	providerPlane *provider.Plane
 	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
 	picker *workspace.Picker
 
@@ -199,7 +202,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		sessions:         make(map[string]*SessionRec),
 		inputs:           make(map[string][]QueuedInput),
 		ver:              make(map[string]int64),
-		providers:        make(map[string]*providerDef),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
@@ -213,6 +215,17 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.mcpPlane = mcp.NewPlane(s.caps, s.defs, s.mcpSecrets)
 	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
 	s.picker = workspace.NewPicker()
+	s.providerPlane = provider.NewPlane(reg, s.creds)
+	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
+	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
+	s.providerPlane.SetEffect(s.providerEffect)
+	s.providerPlane.SetDefaultModel(func(ctx context.Context) (string, bool) {
+		row, ok, err := s.defaultModelRow(ctx)
+		if err != nil || !ok {
+			return "", false
+		}
+		return strings.TrimSpace(row.ProviderID), true
+	})
 
 	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
 	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。

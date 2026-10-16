@@ -66,8 +66,8 @@ func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.
 		return nil, err
 	}
 	s.mu.Lock()
-	d := s.providers[id]
-	var snap providerDef
+	d, _ := s.providerPlane.Snapshot(id)
+	var snap provider.Def
 	if d != nil {
 		snap = *d
 	}
@@ -90,7 +90,7 @@ func (s *Service) probeProvider(ctx context.Context, id string, req dtoprovider.
 }
 
 // probeLocal 本地段（零出网）。
-func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, snap *providerDef) []dtoprovider.ProviderCheckResp {
+func (s *Service) probeLocal(ctx context.Context, id string, d *provider.Def, snap *provider.Def) []dtoprovider.ProviderCheckResp {
 	out := make([]dtoprovider.ProviderCheckResp, 0, 7)
 	// 该供应商的凭据引用名（逐供应商唯一，ADR-16）——诊断里报的是**键名**，绝不报值。
 	refName := s.providerRefName(id)
@@ -160,10 +160,10 @@ func (s *Service) probeLocal(ctx context.Context, id string, d *providerDef, sna
 			Name: "secret", Status: probePass,
 			Detail: "密钥可用（来源 " + string(snap.KeySource) + "），本应注入 " + refName,
 		})
-	case len(snap.keyProblems) > 0:
+	case len(snap.KeyProblems) > 0:
 		out = append(out, dtoprovider.ProviderCheckResp{
 			Name: "secret", Status: probeFail,
-			Detail: "密钥读不出来：" + strings.Join(snap.keyProblems, "；"),
+			Detail: "密钥读不出来：" + strings.Join(snap.KeyProblems, "；"),
 			Remedy: "修掉上面那条（层序是 继承环境 > 托管文档 > <cwd>/.env > <MATE_HOME>/.env；" +
 				"某一层存在但读不动时解析会停下），或在面板里重设一次密钥",
 		})
@@ -261,7 +261,7 @@ func (s *Service) probeLocalCatalog(ctx context.Context, refName string) []dtopr
 //	pass    —— 2xx（鉴权通过、响应可解析）
 //	fail    —— 401/403（密钥不对）或网络/超时（连不上）
 //	unknown —— 该 type 未登记端点（**无法校验**，不是失败；与 `mate doctor` 的口径一致）
-func (s *Service) probeUpstream(ctx context.Context, snap *providerDef, opts probeOptions) dtoprovider.ProviderCheckResp {
+func (s *Service) probeUpstream(ctx context.Context, snap *provider.Def, opts probeOptions) dtoprovider.ProviderCheckResp {
 	// v12 起上游段就是一次 `GET <base_url>/models` 带 `Authorization: Bearer <key>`——
 	// 按**资源字段**探，而不是 v11 那张"type → 厂商 URL"硬编码表（自建网关因此也能自检）。
 	if strings.TrimSpace(snap.BaseURL) == "" {

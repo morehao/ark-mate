@@ -1,4 +1,4 @@
-package manager
+package provider
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -38,8 +37,8 @@ import (
 //   - 密钥写入缺 store 侧的独立审计出口（`SetProviderKey` 只 bump revision），见汇报。
 
 // CreateProvider 新建一条供应商（POST /providers）。
-func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
-	if err := provider.ValidateProviderID(req.ID); err != nil {
+func (pl *Plane) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
+	if err := ValidateProviderID(req.ID); err != nil {
 		return nil, err
 	}
 	protocol, err := normalizeProtocol(req.Protocol)
@@ -47,14 +46,14 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		return nil, err
 	}
 	// ① 已存在？——先看内存（快路径），再让载体自己兜并发（CAS 未命中 → provider_exists）。
-	s.mu.Lock()
-	_, exists := s.providers[req.ID]
-	s.mu.Unlock()
+	pl.mu.Lock()
+	_, exists := pl.providers[req.ID]
+	pl.mu.Unlock()
 	if exists {
 		return nil, providerExistsErr(req.ID)
 	}
 
-	d := &providerDef{ID: req.ID, Protocol: protocol, KeyRef: credential.ProviderRef(req.ID)}
+	d := &Def{ID: req.ID, Protocol: protocol, KeyRef: credential.ProviderRef(req.ID)}
 	if req.Name != nil {
 		d.Name = *req.Name
 	}
@@ -66,7 +65,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 	}
 
 	// ② 载体：新建只 INSERT 行（内容列），密钥随后的 `SetProviderKey` 落在同一行上。
-	if err := s.persistProviderDefinition(ctx, d); err != nil {
+	if err := pl.persistProviderDefinition(ctx, d); err != nil {
 		if isDuplicateDefinition(err) {
 			return nil, providerExistsErr(req.ID)
 		}
@@ -75,17 +74,19 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 
 	// ②b 密钥（与行同库同表；失败即整笔失败——没有第二处要清理）。
 	if req.APIKey != nil && *req.APIKey != "" {
-		if err := s.writeProviderKey(ctx, d, *req.APIKey); err != nil {
+		if err := pl.writeProviderKey(ctx, d, *req.APIKey); err != nil {
 			return nil, err
 		}
 	}
 
 	// ③ 内存。
-	s.mu.Lock()
-	s.providers[d.ID] = d
-	resp := s.providerRespLocked(ctx, d.ID, d)
-	s.mu.Unlock()
-	resp.Effect = s.providerEffect(d.ID)
+	pl.mu.Lock()
+	pl.providers[d.ID] = d
+	resp := pl.providerRespLocked(ctx, d.ID, d)
+	pl.mu.Unlock()
+	if pl.effect != nil {
+		resp.Effect = pl.effect(d.ID)
+	}
 	return &resp, nil
 }
 
@@ -95,20 +96,20 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 //
 //   - 写：`providers.key` 一列，一笔 UPDATE；写成功即整笔成功（没有第二处副本要同步）。
 //   - 清：同一列写空串。**内存与镜像都必须跟着变**——留在托管文档里的那条会在下一次解析时
-//     被"库是权威"的判据否掉（见 `resolveProviderKey`），但把它删干净才是收尾。
-func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	if err := provider.ValidateProviderID(id); err != nil {
+//     被"库是权威"的判据否掉（见 `KeyFor`），但把它删干净才是收尾。
+func (pl *Plane) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
+	if err := ValidateProviderID(id); err != nil {
 		return nil, err
 	}
 
 	// ① 读窗口：取旧值快照（**只读**，不改内存）。
-	s.mu.Lock()
-	old, exists := s.providers[id]
-	var snap providerDef
+	pl.mu.Lock()
+	old, exists := pl.providers[id]
+	var snap Def
 	if exists {
 		snap = *old
 	}
-	s.mu.Unlock()
+	pl.mu.Unlock()
 	if !exists {
 		return nil, acl.NewError(acl.ClassRequest, "provider_not_found",
 			fmt.Sprintf("供应商 %q 不存在：PATCH 只更新、不再顺带新建（要新建用 POST /providers）", id), nil)
@@ -143,7 +144,7 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 
 	// ② 内容列：只有真的改了内容字段才提交（否则会写一条"内容更新"的审计，而内容没变）。
 	if contentChanged {
-		if err := s.persistProviderDefinition(ctx, &next); err != nil {
+		if err := pl.persistProviderDefinition(ctx, &next); err != nil {
 			return nil, err
 		}
 	}
@@ -151,17 +152,17 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 	// ②b 密钥列：nil = 不动；"" = 清；非空 = 覆盖。
 	secretChanged := false
 	if patch.APIKey != nil {
-		if err := s.writeProviderKey(ctx, &next, *patch.APIKey); err != nil {
+		if err := pl.writeProviderKey(ctx, &next, *patch.APIKey); err != nil {
 			return nil, err
 		}
 		secretChanged = true
 	}
 
 	// ③ 内存。
-	s.mu.Lock()
-	s.providers[id] = &next
-	resp := s.providerRespLocked(ctx, id, &next)
-	s.mu.Unlock()
+	pl.mu.Lock()
+	pl.providers[id] = &next
+	resp := pl.providerRespLocked(ctx, id, &next)
+	pl.mu.Unlock()
 
 	// 生效面回执：只有驱动行为的字段变了才说"下一轮生效"；只改 name/note 就如实回 none。
 	if !secretChanged && !contentChanged {
@@ -171,7 +172,9 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 		}
 		return &resp, nil
 	}
-	resp.Effect = s.providerEffect(id)
+	if pl.effect != nil {
+		resp.Effect = pl.effect(id)
+	}
 	return &resp, nil
 }
 
@@ -180,30 +183,30 @@ func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovid
 // 顺序：库 → 内存 → 镜像。**镜像写失败不回滚库、也不让这笔写失败**（它是可重建副本，
 // 为它回滚一次已提交的库写入是本末倒置）；失败进 WARN + 这条回执的 `problems`，
 // 并由 `mate doctor` 的镜像对账段列出来。
-func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key string) error {
+func (pl *Plane) writeProviderKey(ctx context.Context, d *Def, key string) error {
 	key = strings.TrimSpace(key)
-	if s.st == nil {
+	if pl.st == nil {
 		// memory 载体：托管文档就是事实源，写不进去就是**真的没写进去**（拒绝，不假装成功）。
 		// 文档都没装配（数据目录没解析出来）时必须在这里拒绝：否则这条密钥只活在内存里，
 		// 面板回 `has_key=true`、重启后消失——那是本仓最忌讳的一类静默谎报。
-		if s.credentialDoc() == nil {
+		if pl.credentialDoc() == nil {
 			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
 				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+credential.CredentialsFileName+
 					"就是密钥的事实源，这里拒绝一次只在内存里成功的写入", nil)
 		}
 		if key == "" {
-			if err := s.mirrorDelete(d.KeyRef); err != nil {
+			if err := pl.mirrorDelete(d.KeyRef); err != nil {
 				return acl.NewError(acl.ClassRequest, "credentials_write_failed",
 					"清除密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 			}
-		} else if err := s.mirrorSet(d.KeyRef, key); err != nil {
+		} else if err := pl.mirrorSet(d.KeyRef, key); err != nil {
 			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
 				"保存密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 		}
-		d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = key, "", "", nil
+		d.Key, d.KeySource, d.KeyEnvKey, d.KeyProblems = key, "", "", nil
 		return nil
 	}
-	written, err := s.st.SetProviderKey(ctx, d.ID, key)
+	written, err := pl.st.SetProviderKey(ctx, d.ID, key)
 	if err != nil {
 		return acl.NewError(acl.ClassRequest, "credentials_write_failed",
 			"密钥写入失败: "+err.Error(), nil)
@@ -213,20 +216,20 @@ func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key stri
 			fmt.Sprintf("供应商 %q 不存在（写密钥时行已不在）：刷新后重试", d.ID), nil)
 	}
 	// 密钥写入会 bump 行版本（"生效时刻"要可解释）：把最新版本读回来，别让内存里的 revision 落后。
-	if row, found, rerr := s.st.GetProviderDefinition(ctx, d.ID); rerr == nil && found {
+	if row, found, rerr := pl.st.GetProviderDefinition(ctx, d.ID); rerr == nil && found {
 		d.Revision, d.UpdatedAt = row.Revision, row.UpdatedAt
 	}
-	d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = key, "", "", nil
+	d.Key, d.KeySource, d.KeyEnvKey, d.KeyProblems = key, "", "", nil
 	// ④ 镜像双写（失败只 WARN + 进 problems）。
 	if key == "" {
-		if err := s.mirrorDelete(d.KeyRef); err != nil {
-			d.keyProblems = []string{"库里的密钥已清除，但托管文档里那一份删不掉：" + err.Error() +
+		if err := pl.mirrorDelete(d.KeyRef); err != nil {
+			d.KeyProblems = []string{"库里的密钥已清除，但托管文档里那一份删不掉：" + err.Error() +
 				"；镜像可由库重建，`mate doctor` 会列出这条差异"}
 		}
 		return nil
 	}
-	if err := s.mirrorSet(d.KeyRef, key); err != nil {
-		d.keyProblems = []string{"库里的密钥已写成功，但托管文档没跟上：" + err.Error() +
+	if err := pl.mirrorSet(d.KeyRef, key); err != nil {
+		d.KeyProblems = []string{"库里的密钥已写成功，但托管文档没跟上：" + err.Error() +
 			"；镜像可由库重建，`mate doctor` 会列出这条差异"}
 	}
 	return nil
@@ -241,50 +244,50 @@ func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key stri
 // **引用判据在 store 的同一事务里**（v13）：v12 是"manager 先查引用名单、再单独删行"，
 // 中间有窗口——并发「删供应商」+「给它加模型」会留下孤儿 model 行（P3）。
 // manager 现在只翻错误码（`provider_in_use`），文案与引用名单形状不变。
-func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
-	if err := provider.ValidateProviderID(id); err != nil {
+func (pl *Plane) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
+	if err := ValidateProviderID(id); err != nil {
 		return nil, err
 	}
 
 	// v19 起引用面只有"模型条目"（agent 面撤销）：判据在 store 的同一事务里（见下），
 	// 这里只保留"内存里到底有没有这一条"这个幂等判据。
-	s.mu.Lock()
-	_, exists := s.providers[id]
-	s.mu.Unlock()
+	pl.mu.Lock()
+	_, exists := pl.providers[id]
+	pl.mu.Unlock()
 	if !exists {
 		// 幂等：不存在（或本来就没这一条）→ deleted:false 且 code=0。
 		return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
 	}
 	// 文件载体没有事务，引用判据只能先读一次（sqlite 载体在同一事务里判，见下）。
 	// 两种载体的对外承诺相同：被引用 → `provider_in_use` + 名单，绝不级联清空。
-	if s.st == nil {
-		if refs := s.providerModelRefsReadOnly(ctx, id); len(refs) > 0 {
+	if pl.st == nil {
+		if refs := pl.ProviderModelRefsReadOnly(ctx, id); len(refs) > 0 {
 			return nil, acl.NewError(acl.ClassLimit, "provider_in_use",
 				providerInUseMsg(id, refs), nil)
 		}
 	}
 
-	s.mu.Lock()
-	d := s.providers[id]
-	s.mu.Unlock()
+	pl.mu.Lock()
+	d := pl.providers[id]
+	pl.mu.Unlock()
 
-	if s.st == nil {
+	if pl.st == nil {
 		// **文件载体**：先摘内存再落盘——`persistProvidersFile` 序列化的是"内存现状"，
 		// 顺序反了就会把刚删掉的那条原样写回文件（一个只在 memory 模式出现、且完全静默的失败：
 		// 界面上没了、文件里还有，重启后它又回来了）。落盘失败则把内存放回去。
-		s.mu.Lock()
-		delete(s.providers, id)
-		s.mu.Unlock()
-		if err := s.persistProvidersFile(); err != nil {
-			s.mu.Lock()
-			s.providers[id] = d
-			s.mu.Unlock()
+		pl.mu.Lock()
+		delete(pl.providers, id)
+		pl.mu.Unlock()
+		if err := pl.persistProvidersFile(); err != nil {
+			pl.mu.Lock()
+			pl.providers[id] = d
+			pl.mu.Unlock()
 			return nil, err
 		}
 	} else {
 		// **sqlite 载体**：读行取 revision（CAS 判据）→ 同一事务内查引用 + 删行 + 审计。
 		// 密钥是**同一行上的一列**，所以删行即删密钥——没有"行已删而密钥还在"这回事。
-		row, found, err := s.stProviderRow(ctx, id)
+		row, found, err := pl.stProviderRow(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -293,7 +296,7 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 			// 实际库行还在"的不一致被我们主动制造出来。
 			return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
 		}
-		removed, refModels, err := s.removeProviderDefinition(ctx, id, row.Revision)
+		removed, refModels, err := pl.removeProviderDefinition(ctx, id, row.Revision)
 		if err != nil {
 			return nil, err
 		}
@@ -305,15 +308,15 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 			return &dtoprovider.ProviderDeleteResp{Deleted: false}, nil
 		}
 		// 行已删 → 摘内存（列表立刻不再有它）。
-		s.mu.Lock()
-		delete(s.providers, id)
-		s.mu.Unlock()
+		pl.mu.Lock()
+		delete(pl.providers, id)
+		pl.mu.Unlock()
 	}
 
 	// 最后删镜像条目。失败**如实回带**（行已删、镜像里还留着），并交给 doctor 的对账段。
 	resp := &dtoprovider.ProviderDeleteResp{Deleted: true}
 	if d != nil && d.KeyRef != "" {
-		if derr := s.mirrorDelete(d.KeyRef); derr != nil {
+		if derr := pl.mirrorDelete(d.KeyRef); derr != nil {
 			resp.CredentialsLeft = d.KeyRef
 			glog.Warnw(ctx, "credentials: 供应商已删除，但托管文档里那一份删不掉（镜像可由库重建）",
 				"provider", id, "ref", d.KeyRef, "err", derr)
@@ -323,12 +326,12 @@ func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.P
 }
 
 // stProviderRow 读一条 provider 行（memory 载体没有行 → (nil,false,nil) 由调用方处理）。
-func (s *Service) stProviderRow(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
-	if s.st == nil {
+func (pl *Plane) stProviderRow(ctx context.Context, id string) (*model.ProviderEntity, bool, error) {
+	if pl.st == nil {
 		// 文件载体：没有"行"可读，revision 恒 0；删除由文件路径完成（见 removeProviderDefinition）。
 		return &model.ProviderEntity{ID: id}, true, nil
 	}
-	return s.st.GetProviderDefinition(ctx, id)
+	return pl.st.GetProviderDefinition(ctx, id)
 }
 
 // normalizeProtocol 校验并归一协议取值（本期只有 `openai`）。
@@ -372,15 +375,15 @@ func providerInUseMsg(id string, models []string) string {
 	return msg + "。先解开这些引用（在 设置 · 模型 里删掉/改挂那些模型条目），再删除。"
 }
 
-// providerModelRefsReadOnly 挂靠在该 provider 下的模型条目 id（**只读**）。
+// ProviderModelRefsReadOnly 挂靠在该 provider 下的模型条目 id（**只读**）。
 //
 // 判据口径：文件载体用它当**唯一**引用判据（没有事务可借）；sqlite 载体的判据仍在 store 的
 // 同一事务里（`DeleteProviderDefinitionIfUnreferenced`），这里只在需要给文案列名单时读它。
-func (s *Service) providerModelRefsReadOnly(ctx context.Context, providerID string) []string {
-	if s.st == nil {
+func (pl *Plane) ProviderModelRefsReadOnly(ctx context.Context, providerID string) []string {
+	if pl.st == nil {
 		return nil
 	}
-	rows, err := s.st.ListModelDefinitionsByProvider(ctx, providerID)
+	rows, err := pl.st.ListModelDefinitionsByProvider(ctx, providerID)
 	if err != nil {
 		return nil
 	}

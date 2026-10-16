@@ -3,23 +3,13 @@ package manager
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/pkg/logging"
 	"github.com/morehao/golib/glog"
 )
 
-// logAt 按档位分派到 glog。
+// logAt 按档位分派到 glog（唯一实现已落 `pkg/logging.At`——机制/领域层也要用它）。
 //
-// glog 没有"级别作参数"的入口（它是 Debugw/Infow/Warnw/Errorw 四个函数），而装载内核
-// （`loadAgentDefinitionsFromStore` / `reloadCapabilityDefinitions`）只有一个 level 形参：
-// 核心进程用 Info、网关的长命进程用 Debug（每次 tools/list 都重装，Info 会把日志刷成噪声）。
+// TODO(P4b): 删转发（调用点直接依赖 logging.At）
 func logAt(ctx context.Context, level glog.Level, msg string, kvs ...any) {
-	switch level {
-	case glog.DebugLevel:
-		glog.Debugw(ctx, msg, kvs...)
-	case glog.WarnLevel:
-		glog.Warnw(ctx, msg, kvs...)
-	case glog.ErrorLevel:
-		glog.Errorw(ctx, msg, kvs...)
-	default:
-		glog.Infow(ctx, msg, kvs...)
-	}
+	logging.At(ctx, level, msg, kvs...)
 }

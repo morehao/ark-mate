@@ -238,6 +238,21 @@ func (r *Registry) List() []Spec {
 // （真值只有连接期 initialize 的 `promptCapabilities` 知道）。没有出口 = 没有误用路径，
 // 由 archtest 的 `TestStaticCapsImagesHasNoConsumer` 钉住。
 
+// IDs 已注册 runtime id（升序）。
+//
+// 与 `List()` 的区别只在"要不要 Spec"：调用方往往只要 id（交付矩阵要按 runtime 逐条展开、
+// 医生要枚举全部内置底座），拿一整份 Spec 再取 id 会让人以为"没读 Spec 就是没判据"。
+// **升序是刻意的**：它经 `/providers`、`/library` 这类读面外露，顺序漂了会让响应字节随 map
+// 迭代顺序抖动。
+func (r *Registry) IDs() []string {
+	ids := make([]string, 0, len(r.specs))
+	for id := range r.specs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // Require 返回 Spec；未知 ID 返回可读错误（供上层做参数校验）。
 func (r *Registry) Require(id string) (Spec, error) {
 	s, ok := r.Get(id)

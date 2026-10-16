@@ -450,7 +450,7 @@ func (s *Service) requireProvider(ctx context.Context, providerID string) error 
 		}
 	}
 	s.mu.Lock()
-	_, ok := s.providers[providerID]
+	ok := s.providerPlane.Exists(providerID)
 	s.mu.Unlock()
 	if !ok {
 		return acl.NewError(acl.ClassRequest, "provider_not_found",

@@ -1,4 +1,4 @@
-package manager
+package provider
 
 import (
 	"context"
@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/store"
+	"github.com/morehao/ark-mate/pkg/logging"
 	"github.com/morehao/golib/glog"
 )
 
 // ——— provider 档案读写面的**载体**（v11；v13 起 sqlite 侧是资源表） ———
 //
-// 分派判据是 `s.st != nil`：
+// 分派判据是 `pl.st != nil`：
 //
 //	memory 模式：<ProviderDir>/providers.json（typed marshal + 同目录 tmp + rename，逐字节同今天）
 //	sqlite 模式：providers 表（事务 + 行 revision CAS + 同事务一条审计）
@@ -31,16 +31,16 @@ import (
 // 与文件载体的第三处差别是**方向性的**：sqlite 模式下 `providers.json` 降级为导入/导出载体，
 // 写面**一个字节都不回写它**（B4）——"文件与 DB 谁是权威"这个问题因此在这条路上不存在。
 
-// providerLocator 档案的定位串（人类可读）。
-func (s *Service) providerLocator(id string) string {
-	if s.st != nil {
+// ProviderLocator 档案的定位串（人类可读）。
+func (pl *Plane) ProviderLocator(id string) string {
+	if pl.st != nil {
 		return "db:provider/" + id
 	}
-	dir := s.providerDirSnapshot()
+	dir := pl.ProviderDirSnapshot()
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, provider.ProvidersFileName)
+	return filepath.Join(dir, ProvidersFileName)
 }
 
 // ——— provider 面的装载入口（v19：agent 面删除后，这里是定义装载的公开面） ———
@@ -49,16 +49,16 @@ func (s *Service) providerLocator(id string) string {
 // 是导入/导出载体（`mate provider import|export`）与 doctor 的读取对象。**v20 起它不再是任何
 // 密钥的锚点**：托管文档锚在 `MATE_HOME`（`<MATE_HOME>/credentials.json`），密钥本体在库里。
 
-// providerDirSnapshot provider 定义目录的快照（空 = 未启用 definitions 目录）。
-func (s *Service) providerDirSnapshot() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.providerDir
+// ProviderDirSnapshot provider 定义目录的快照（空 = 未启用 definitions 目录）。
+func (pl *Plane) ProviderDirSnapshot() string {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	return pl.providerDir
 }
 
 // SetProviderDir 登记 provider 定义目录（幂等；空串 = 不落盘，仅内存）。
 //
-// 它同时是 `providers.json` 的落点与 `providerLocator` 的取值来源，所以装配期**先行**登记一次
+// 它同时是 `providers.json` 的落点与 `ProviderLocator` 的取值来源，所以装配期**先行**登记一次
 // （顺序敏感，2026-10-11 修）：装配期的 runtime 同步（`EnableStore` → `SyncRuntime` →
 // `providerForSync`）发生在定义装载**之前**，那一刻若 locator 还是空的，报错文案就会指向一个
 // 不存在的路径。
@@ -67,24 +67,24 @@ func (s *Service) providerDirSnapshot() string {
 // `<MATE_HOME>/credentials.json`，两者都不依赖这个目录；sqlite 模式下 `providerForSync`
 // 的回落路径直接从行上的密钥列取值，所以"锚点还不知道"这一类错误结论结构上消失了
 // （v13–v19 的旧机制句柄缓存曾把一句错结论钉死到整个进程，见 `docs/decisions.md` 决策 v20）。
-func (s *Service) SetProviderDir(dir string) {
-	s.mu.Lock()
-	s.providerDir = dir
-	s.mu.Unlock()
+func (pl *Plane) SetProviderDir(dir string) {
+	pl.mu.Lock()
+	pl.providerDir = dir
+	pl.mu.Unlock()
 }
 
 // LoadProviderDefinitions 按**文件载体**装载 provider 档案（memory 模式；返回装载条数）。
 //
 // sqlite 模式走 `LoadProviderDefinitionsFromStore`（另一条路的差别只有"从哪读"）。
-func (s *Service) LoadProviderDefinitions(dir string) int {
-	s.SetProviderDir(dir)
+func (pl *Plane) LoadProviderDefinitions(dir string) int {
+	pl.SetProviderDir(dir)
 	if dir == "" {
 		return 0
 	}
-	s.loadProviders(context.Background(), dir)
-	s.mu.Lock()
-	n := len(s.providers)
-	s.mu.Unlock()
+	pl.loadProviders(context.Background(), dir)
+	pl.mu.Lock()
+	n := len(pl.providers)
+	pl.mu.Unlock()
 	if n > 0 {
 		glog.Infow(context.Background(), "providers: 档案已加载", "count", n, "dir", dir)
 	}
@@ -92,30 +92,30 @@ func (s *Service) LoadProviderDefinitions(dir string) int {
 }
 
 // LoadProviderDefinitionsFromStore 从持久层装载 provider 档案（sqlite 模式）。
-func (s *Service) LoadProviderDefinitionsFromStore(ctx context.Context, dir string) int {
-	return s.loadProviderDefinitionsFromStore(ctx, dir, glog.InfoLevel)
+func (pl *Plane) LoadProviderDefinitionsFromStore(ctx context.Context, dir string) int {
+	return pl.loadProviderDefinitionsFromStore(ctx, dir, glog.InfoLevel)
 }
 
 // ReloadProviderDefinitionsFromStore 重新装载 provider 档案（**网关每次取数前**调用）。
 //
 // 与 `LoadProviderDefinitionsFromStore` 是同一份实现，只有汇总行的日志档位不同（理由同
 // `ReloadCapabilityDefinitions`：网关是个长命进程，每次 tools/list/call 都会重装）。
-func (s *Service) ReloadProviderDefinitionsFromStore(ctx context.Context, dir string) int {
-	return s.loadProviderDefinitionsFromStore(ctx, dir, glog.DebugLevel)
+func (pl *Plane) ReloadProviderDefinitionsFromStore(ctx context.Context, dir string) int {
+	return pl.loadProviderDefinitionsFromStore(ctx, dir, glog.DebugLevel)
 }
 
 // loadProviderDefinitionsFromStore 装载内核（公开入口与网关共用；level 只作用于汇总行）。
-func (s *Service) loadProviderDefinitionsFromStore(ctx context.Context, dir string, level glog.Level) int {
-	s.SetProviderDir(dir)
-	if s.st == nil {
-		return s.LoadProviderDefinitions(dir)
+func (pl *Plane) loadProviderDefinitionsFromStore(ctx context.Context, dir string, level glog.Level) int {
+	pl.SetProviderDir(dir)
+	if pl.st == nil {
+		return pl.LoadProviderDefinitions(dir)
 	}
-	s.loadProviders(ctx, dir)
-	s.mu.Lock()
-	n := len(s.providers)
-	s.mu.Unlock()
+	pl.loadProviders(ctx, dir)
+	pl.mu.Lock()
+	n := len(pl.providers)
+	pl.mu.Unlock()
 	if n > 0 {
-		logAt(ctx, level, "providers: 档案已从持久层装载", "count", n)
+		logging.At(ctx, level, "providers: 档案已从持久层装载", "count", n)
 	}
 	return n
 }
@@ -124,49 +124,49 @@ func (s *Service) loadProviderDefinitionsFromStore(ctx context.Context, dir stri
 //
 // 顺序要求：它必须发生在**任何读 provider 的装配步骤之前**（runtime 配置同步、模型清单
 // 装载、诊断面），否则那些步骤会按"本机没有 provider"得出错结论并把它写进 meta。
-func (s *Service) loadProviders(ctx context.Context, dir string) {
-	if s.st != nil {
-		s.loadProvidersFromStore(ctx, dir)
+func (pl *Plane) loadProviders(ctx context.Context, dir string) {
+	if pl.st != nil {
+		pl.loadProvidersFromStore(ctx, dir)
 		return
 	}
-	s.loadProvidersFile(dir)
+	pl.loadProvidersFile(dir)
 }
 
 // loadProvidersFromStore 从 `providers` 表装载（sqlite 模式）。
 //
 // v20 起"有没有密钥"的权威是**行上的 `key` 列**（非空即有），但读出来的生效值仍走
-// `resolveProviderKey`（四层回落）——于是"进程环境里有同名变量"这类事实在列表上就看得见
+// `KeyFor`（四层回落）——于是"进程环境里有同名变量"这类事实在列表上就看得见
 // （`key_source`），而不是等到某次请求 401 才被发现。
 //
 // 装载期不再有"跳过坏行"的分支：行里没有 JSON 可比坏（设计 P2 的收尾）。列值异常
 // （protocol 不在 CHECK 白名单之类）在库级约束上就已经不可能落库。
-func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
-	rows, err := s.st.ListProviderDefinitions(ctx)
+func (pl *Plane) loadProvidersFromStore(ctx context.Context, dir string) {
+	rows, err := pl.st.ListProviderDefinitions(ctx)
 	if err != nil {
 		glog.Warnw(ctx, "providers: 从持久层装载失败（档案面为空）", "err", err)
 		return
 	}
-	loaded := make(map[string]*providerDef, len(rows))
+	loaded := make(map[string]*Def, len(rows))
 	for i := range rows {
 		row := rows[i]
-		p := &providerDef{
+		p := &Def{
 			ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL, Note: row.Note,
 			// KeyRef 是**派生量**（不再是载体字段）：装载时算一次，供托管文档读写与诊断文案复用。
 			KeyRef:    credential.ProviderRef(row.ID),
 			Revision:  row.Revision,
 			UpdatedAt: row.UpdatedAt,
 		}
-		p.applyResolution(s.resolveProviderKey(ctx, p))
+		p.applyResolution(pl.KeyFor(ctx, p))
 		loaded[row.ID] = p
 	}
-	s.mu.Lock()
-	s.providers = loaded
-	s.mu.Unlock()
+	pl.mu.Lock()
+	pl.providers = loaded
+	pl.mu.Unlock()
 	_ = dir // 目录只在文件载体里参与拼路径；sqlite 模式下它仍被 locator 与导入/导出面用
 }
 
 // providerColumnsOf 把内存档案投影成 store 的列载荷（sqlite 载体的提交物）。
-func providerColumnsOf(d *providerDef) store.ProviderColumns {
+func providerColumnsOf(d *Def) store.ProviderColumns {
 	return store.ProviderColumns{
 		ID: d.ID, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
 	}
@@ -176,18 +176,18 @@ func providerColumnsOf(d *providerDef) store.ProviderColumns {
 //
 // sqlite 模式走行 CAS：`Revision == 0` 是新建，否则仅当行仍等于该版本。
 // 返回 `definition_changed`(40901) 而不是静默覆盖——与其余四个定义面逐字同形。
-func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef) error {
-	if s.st == nil {
+func (pl *Plane) persistProviderDefinition(ctx context.Context, d *Def) error {
+	if pl.st == nil {
 		// 文件载体：写"内存现状 + 这一条"（提交时它还没进内存，见 persistProvidersFileWith 的注释）。
-		return s.persistProvidersFileWith(d)
+		return pl.persistProvidersFileWith(d)
 	}
 	expected := d.Revision
-	ok, err := s.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definition.DefinitionWriteActor)
+	ok, err := pl.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definition.DefinitionWriteActor)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return definition.DefinitionChangedErr(s.providerLocator(d.ID))
+		return definition.DefinitionChangedErr(pl.ProviderLocator(d.ID))
 	}
 	d.Revision = expected + 1
 	d.UpdatedAt = time.Now().UTC()
@@ -202,18 +202,18 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 //     留下孤儿行（设计 P3）。所以删除判据不再由 manager 做。
 //   - memory：文件里没有"引用"可查（模型清单只在 sqlite 有），调用方已先摘内存，
 //     所以这里只把结果落盘一次，不再回内存里判"有没有"——那样会因为已经摘掉而误报 false。
-func (s *Service) removeProviderDefinition(ctx context.Context, id string, expectedRev int64) (bool, []string, error) {
-	if s.st == nil {
-		return true, nil, s.persistProvidersFile()
+func (pl *Plane) removeProviderDefinition(ctx context.Context, id string, expectedRev int64) (bool, []string, error) {
+	if pl.st == nil {
+		return true, nil, pl.persistProvidersFile()
 	}
-	return s.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
+	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
 }
 
-// providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。
-func providerFileExists(dir string) bool {
+// ProviderFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。
+func ProviderFileExists(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, provider.ProvidersFileName))
+	_, err := os.Stat(filepath.Join(dir, ProvidersFileName))
 	return err == nil
 }

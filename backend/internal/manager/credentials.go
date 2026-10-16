@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 
 	"github.com/morehao/ark-mate/pkg/credentials"
@@ -86,9 +87,6 @@ func (s *Service) providerEnvKeyNames(providerID string) []string {
 // 这一条比"一行转发"多一行，是**类型擦除的产物、不是第二份逻辑**：`d` 可能为 nil
 // （`providers.go` 的 `s.providers[id]` 是 map 查找），原实现就带这个守卫；而机制层
 // 已经不认识 `providerDef`，守卫没法跟着搬，只能留在转发层。
-func (s *Service) resolveProviderKey(ctx context.Context, d *providerDef) credential.ProviderKey {
-	if d == nil {
-		return credential.ProviderKey{}
-	}
-	return s.creds.ResolveProviderKey(ctx, d.ID, d.KeyRef)
+func (s *Service) resolveProviderKey(ctx context.Context, d *provider.Def) credential.ProviderKey {
+	return s.providerPlane.KeyFor(ctx, d)
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strconv"
@@ -412,11 +413,11 @@ func (s *Service) resolveCredentialDoc(spec runtime.Spec) (string, error) {
 //
 // 密钥走 `resolveProviderKey`（四层回落的唯一入口）：内存里那条与库里的那一列都是它的输入，
 // 所以这里不再有"两条取密钥的路"（v13–v19 的 `Key` / `KeyRef + 密文句柄` 二选一就是那种分叉）。
-func (s *Service) providerForSync(providerID string) (*providerDef, string, error) {
+func (s *Service) providerForSync(providerID string) (*provider.Def, string, error) {
 	ctx := context.Background()
 	s.mu.Lock()
-	d := s.providers[providerID]
-	var cp *providerDef
+	d, _ := s.providerPlane.Snapshot(providerID)
+	var cp *provider.Def
 	if d != nil {
 		c := *d
 		cp = &c
@@ -429,7 +430,7 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 			if err != nil || !found {
 				return nil, "", err
 			}
-			cp = &providerDef{
+			cp = &provider.Def{
 				ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL,
 				Note: row.Note, KeyRef: credential.ProviderRef(row.ID), Revision: row.Revision,
 			}

@@ -8,6 +8,10 @@
 //
 // 因此**全仓只有本包允许 import "log/slog"**（由 internal/archtest 守卫）。这里不是
 // "还在用 slog"，而是把外部世界唯一会说的一种日志语言翻译进来。
+//
+// 另外它也是「按档位分派到 glog」这一件事的唯一实现（见 `At`）：glog 没有"级别作参数"的入口，
+// 而装载内核（定义装载、档案装载）只有一个 level 形参——核心进程用 Info、网关的长命进程用
+// Debug（每次 tools/list 都重装，Info 会把日志刷成噪声）。
 package logging
 
 import (
@@ -49,3 +53,21 @@ func (handler) Handle(ctx context.Context, r slog.Record) error {
 func (h handler) WithAttrs([]slog.Attr) slog.Handler { return h }
 
 func (h handler) WithGroup(string) slog.Handler { return h }
+
+// At 按档位分派到 glog。
+//
+// glog 没有"级别作参数"的入口（它是 Debugw/Infow/Warnw/Errorw 四个函数），而装载内核
+// （`loadAgentDefinitionsFromStore` / `reloadCapabilityDefinitions` / `loadProviders`）只有一个
+// level 形参：核心进程用 Info、网关的长命进程用 Debug（每次 tools/list 都重装，Info 会把日志刷成噪声）。
+func At(ctx context.Context, level glog.Level, msg string, kvs ...any) {
+	switch level {
+	case glog.DebugLevel:
+		glog.Debugw(ctx, msg, kvs...)
+	case glog.WarnLevel:
+		glog.Warnw(ctx, msg, kvs...)
+	case glog.ErrorLevel:
+		glog.Errorw(ctx, msg, kvs...)
+	default:
+		glog.Infow(ctx, msg, kvs...)
+	}
+}

@@ -145,7 +145,7 @@ func (s *Service) libraryMcps() []dtolibrary.LibraryItem {
 		return nil
 	}
 	servers := s.caps.ListMcpServers()
-	runtimes := s.registeredRuntimeIDs()
+	runtimes := s.reg.IDs()
 	out := make([]dtolibrary.LibraryItem, 0, len(servers))
 	for _, m := range servers {
 		it := dtolibrary.LibraryItem{
@@ -212,7 +212,7 @@ func (s *Service) libraryTools() []dtolibrary.LibraryItem {
 		return nil
 	}
 	tools := s.caps.ListTools()
-	runtimes := s.registeredRuntimeIDs()
+	runtimes := s.reg.IDs()
 	out := make([]dtolibrary.LibraryItem, 0, len(tools))
 	for _, t := range tools {
 		it := dtolibrary.LibraryItem{
@@ -238,20 +238,6 @@ func (s *Service) libraryTools() []dtolibrary.LibraryItem {
 		}
 		out = append(out, it)
 	}
-	return out
-}
-
-// registeredRuntimeIDs 已注册 runtime id（升序，保证响应稳定）。
-func (s *Service) registeredRuntimeIDs() []string {
-	if s.reg == nil {
-		return nil
-	}
-	specs := s.reg.List()
-	out := make([]string, 0, len(specs))
-	for _, sp := range specs {
-		out = append(out, sp.ID)
-	}
-	sort.Strings(out)
 	return out
 }
 

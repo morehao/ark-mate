@@ -35,6 +35,7 @@ func (s *Service) attachStore(st *store.Store) {
 	s.defs.SetStore(st)
 	s.creds.SetStore(st)
 	s.skillPlane.SetStore(st)
+	s.providerPlane.SetStore(st)
 }
 
 func (s *Service) EnableStore(st *store.Store) {
