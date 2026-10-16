@@ -31,7 +31,6 @@ func generationKey(connKey, fingerprint, configDigest string) string {
 }
 
 // TODO(P4b): 删转发（同上）
-func dedupeStrings(in []string) []string { return runtimeconn.DedupeStrings(in) }
 
 // TODO(P4b): 删转发（同上）
 func shortGenerationKeys(keys []string) []string { return runtimeconn.ShortGenerationKeys(keys) }

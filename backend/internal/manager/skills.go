@@ -1,8 +1,6 @@
 package manager
 
 import (
-	"context"
-
 	"github.com/morehao/ark-mate/internal/domain/skill"
 )
 
@@ -38,9 +36,6 @@ func (s *Service) SetSkillProjections(ps []skill.Projection) {
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 skill.Projections）
-func (s *Service) skillProjectionsSnapshot() []skill.Projection { return s.skillPlane.Snapshot() }
-
-// TODO(P4b): 删转发（调用点直接依赖 skill.Projections）
 func (s *Service) skillProjectionFor(runtimeID string) (skill.Projection, bool) {
 	return s.skillPlane.Projections().For(runtimeID)
 }
@@ -48,9 +43,4 @@ func (s *Service) skillProjectionFor(runtimeID string) (skill.Projection, bool) 
 // TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
 func (s *Service) ReconcileSkillProjection(p skill.Projection) (int, int, error) {
 	return s.skillPlane.ReconcileSkillProjection(p)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
-func (s *Service) writeSkillEnabled(ctx context.Context, id string, enabled bool) (string, error) {
-	return s.skillPlane.WriteSkillEnabled(ctx, id, enabled)
 }

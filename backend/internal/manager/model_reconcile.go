@@ -81,15 +81,3 @@ func (s *Service) advertisedSample(ctx context.Context) (advertisedSample, error
 	sort.Slice(out, func(i, j int) bool { return out[i].Value < out[j].Value })
 	return advertisedSample{Runtime: resp.Runtime, Models: out, Source: resp.Source, Note: resp.Note}, nil
 }
-
-// advertisedModels 取运行时目录里的模型候选（读 `GET /models` 的同一实现）。
-//
-// 只要候选、不要来源的调用方用它；**要判"这份事实可不可信"的调用方必须走 `advertisedSample`**
-// （差集与体检都属后者，见 `advertisedSample` 的注释）。
-func (s *Service) advertisedModels(ctx context.Context) ([]dtomodel.AdvertisedModel, error) {
-	sample, err := s.advertisedSample(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return sample.Models, nil
-}

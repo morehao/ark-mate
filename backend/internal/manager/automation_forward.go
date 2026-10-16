@@ -60,11 +60,6 @@ func (s *Service) automationRecByID(id string) (automation.Rec, bool) {
 }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) automationHasActiveRun(rec automation.Rec) bool {
-	return s.automationPlane.HasActiveRun(rec)
-}
-
-// TODO(P4b): 删转发（同上）
 func (s *Service) finishAutomationRun(ctx context.Context, rec automation.Rec, out automation.RunOutcome) automation.RunOutcome {
 	return s.automationPlane.FinishAutomationRun(ctx, rec, out)
 }

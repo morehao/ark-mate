@@ -28,11 +28,6 @@ import (
 // ——— 以下是 P3d 过渡期的**转发层**（纪律：一行 + TODO，不许夹带校验/日志/错误包装）———
 
 // TODO(P4b): 删转发（调用点直接依赖 definition.Mechanism）
-func (s *Service) mirrorValue(ref string) (string, bool) {
-	return credential.MirrorValue(s.credentialDoc(), ref)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 definition.Mechanism）
 func (s *Service) mirrorSet(ref, value string) error {
 	return credential.MirrorSet(s.credentialDoc(), ref, value)
 }
@@ -43,11 +38,6 @@ func (s *Service) mirrorDelete(ref string) error {
 }
 
 // ——— P3d 过渡期转发层（纪律：一行 + TODO）———
-
-// credentialLayered 已登记的四层凭据面（未装配 → nil）。
-//
-// TODO(P4b): 删转发（调用点直接依赖 credential.Store）
-func (s *Service) credentialLayered() *credentials.Layered { return s.creds.Layered() }
 
 // SetCredentials 登记四层凭据面（装配期写一次、之后只读）。
 //
@@ -66,11 +56,6 @@ func (s *Service) credentialCwd() string { return s.creds.Cwd() }
 func (s *Service) credentialDoc() *credentials.Doc { return s.creds.Doc() }
 
 // ——— P3d 过渡期转发层（纪律：一行 + TODO）———
-
-// TODO(P4b): 删转发（调用点直接依赖 credential.Store）
-func (s *Service) matchEnvKey(keys []string, value string) string {
-	return s.creds.MatchEnvKey(keys, value)
-}
 
 // TODO(P4b): 删转发（调用点直接依赖 credential.Store）
 func (s *Service) SyncCredentialMirror(ctx context.Context, reason string) (int, error) {

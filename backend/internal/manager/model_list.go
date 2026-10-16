@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
 )
 
 // ——— 应用层模型清单的写面（v12）：CRUD + **单一**默认模型 + 同步触发 ———
@@ -247,62 +245,3 @@ func (s *Service) ModelEffect(defaultTouched bool) *dtomodel.ModelEffect {
 }
 
 // ——— 派生只读：`GET /agents` 的 `default_model` ———
-
-// defaultModelByRuntime 读一次库里的默认模型（v12 是**单一值**，这里为保持既有 wire 形状
-// 把它摊到每个已注册 runtime 上）。
-//
-// 为什么摊：`GET /agents` 的 `default_model` 是逐 runtime 的 map（那是 agent 读面，不是
-// 「设置 · 模型」的用户面，A14 的断言只针对后者）。读一次就够：`models` 是几十行，
-// 而 `GET /agents` 要对每个 agent 求交——逐 agent 查库会让这个只读接口的 IO 次数随 agent 数增长。
-func (s *Service) defaultModelByRuntime(ctx context.Context) map[string]string {
-	if s.st == nil {
-		return nil
-	}
-	row, ok, err := s.defaultModelRow(ctx)
-	if err != nil {
-		glog.Warnw(ctx, "models: 读默认模型失败（本次 /agents 的 default_model 为空）", "err", err)
-		return nil
-	}
-	if !ok {
-		return nil
-	}
-	out := map[string]string{}
-	for _, spec := range s.reg.List() {
-		out[spec.ID] = row.Model
-	}
-	return out
-}
-
-// derivedDefaultModels 按 agent 的 `runtimes[]` 与默认模型求交。
-//
-// 返回 nil 而不是空 map：`omitempty` 让"这个 agent 没有任何默认"在 wire 上是一个**缺席的键**
-// 而不是 `{}`。
-func derivedDefaultModels(runtimes []string, defaults map[string]string) map[string]string {
-	if len(defaults) == 0 {
-		return nil
-	}
-	var out map[string]string
-	for _, rt := range runtimes {
-		if id, ok := defaults[rt]; ok && id != "" {
-			if out == nil {
-				out = map[string]string{}
-			}
-			out[rt] = id
-		}
-	}
-	return out
-}
-
-// rejectDerivedDefaultModel 显式拒绝 agent 写面里的 `default_model`。
-//
-// 为什么宁可报错也不静默忽略：agent 的 body 会**原样保留未知键**（落盘纪律），所以静默收下
-// 会让它变成一个「写了、存了、什么都不发生」的字段。`null` 视为"没带"。
-func rejectDerivedDefaultModel(raw json.RawMessage) error {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return nil
-	}
-	return acl.NewError(acl.ClassRequest, "default_model_is_derived",
-		"`default_model` 是平台清单的**派生只读**投影，不能写在 agent 上："+
-			"默认模型归属于平台清单，改它请到「设置 · 模型」里点星号（改的是 meta 的单一 default_model）", nil)
-}

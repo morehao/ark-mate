@@ -26,9 +26,6 @@ func (s *Service) recordRuntimeError(sessionID string, ae *acl.Error, tail []str
 func (s *Service) noteScopeAmbiguous(detail string) { s.runtimePlane.NoteScopeAmbiguous(detail) }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) scopeNote() (runtimeconn.AmbiguityNote, bool) { return s.runtimePlane.ScopeNote() }
-
-// TODO(P4b): 删转发（同上）
 func (s *Service) runtimeLastError() (runtimeconn.LastErr, bool) { return s.runtimePlane.LastError() }
 
 // ——— 两个端口的实现（`runtimeconn` 的读面） ———

@@ -123,16 +123,6 @@ func MarshalCapabilitySelection(c *session.CapabilitySelection) string {
 	return session.MarshalCapabilitySelection(c)
 }
 
-// normalizeIDs 见 `session.NormalizeIDs`。
-//
-// TODO(P4b): 删转发（调用点直接依赖 session 包）
-func normalizeIDs(in *[]string) *[]string { return session.NormalizeIDs(in) }
-
-// derefList 见 `session.DerefList`。
-//
-// TODO(P4b): 删转发（调用点直接依赖 session 包）
-func derefList(in *[]string) []string { return session.DerefList(in) }
-
 // regSpec 取已注册 runtime 的 Spec（ok=false = 未注册）。
 //
 // P3c：随指纹装配点从 `capability_fingerprint.go` 搬到这里——调用方（MCP 注入计划、能力事实
