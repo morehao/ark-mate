@@ -1,13 +1,12 @@
-// Package svcprovider 定义**供应商档案**面的服务端口（ADR-2：从 svcruntime 拆出）。
+// Package svcprovider 承载**供应商**域的用例层（档案面 + 自检面；ADR-2 从 svcruntime 拆出）。
 //
 // 拆的依据：provider 的读写/自检与"运行时派生的模型目录"是两件事——前者的不变量是
 // "密钥只写不读回、id 不覆盖"，后者的不变量是"运行时广告什么 vs 平台声明什么"。
 // 共用一个大接口会让两个控制器各自只用到一半（ctrprovider 5 个方法、ctrmodel 6 个）。
 //
-// **P4a 正文第三刀（供应商自检）**：`ProbeProvider` 从 `ProviderSvc` 上摘掉——
-// 它的**实现**已经搬进本包（`probe.go` 的 `Probe`，实现下一条 `Prober`），
-// 而档案四条动作的实现今天仍在 `manager`。用例层"收一条、少一条"的过程在这个包上一眼可见：
-// 端口上剩几个方法，就说明还有几件事没搬完。
+// **P4a 正文第三/四刀**：自检（`ProbeProvider`）与档案四动作的**实现**都已落本包
+// （`probe.go` 的 `Probe` / `archive.go` 的 `Provider`），断言因此也跟着进本包：
+// 一个接口只有一处定义、一份实现，装配点不再持有任何"谁的实现"的知识。
 package svcprovider
 
 import (
@@ -16,12 +15,10 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
-// ProviderSvc 供应商**档案面**的服务端口（增删改查四条）。
+// ProviderSvc 供应商**档案面**的服务接口（增删改查四条）。
 //
-// 实现方以编译期断言 var _ ProviderSvc = (*T)(nil) 保证一致性。今天这四条仍由
-// `*manager.Service` 实现——**断言因此留在装配点**（`app.go` 把 `a.svc` 交给
-// `router.Ports.Provider` 那一刻），而不是留在 `manager`：除控制器层之外的层不许引用
-// `service/svc*`（`internal/archtest/svc_layer_consumer_test.go` 钉着这条）。
+// 实现方是本包的 `Provider`（`archive.go`，断言 `var _ ProviderSvc = (*Provider)(nil)` 就在
+// 那里）——接口、实现、构造三样同一个包，消费方（`ctrprovider`）只认这个接口。
 type ProviderSvc interface {
 	// ListProviders 列出供应商概要（密钥只写不读回；带引用面、模型条数与问题清单）。
 	ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error)

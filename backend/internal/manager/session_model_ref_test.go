@@ -54,7 +54,7 @@ func createProviderAndModel(t *testing.T, svc *Service, providerID, modelName st
 	t.Helper()
 	ctx := context.Background()
 	key, baseURL := "sk-test", "https://api.example.com/v1"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)

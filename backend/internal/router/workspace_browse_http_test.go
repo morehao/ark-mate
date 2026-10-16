@@ -187,7 +187,7 @@ func TestWorkspaceDirCreateHTTPFlow(t *testing.T) {
 func TestWorkspacePickDirectoryRoute(t *testing.T) {
 	// 选定：`{path}`。
 	svc := &stubSvc{pickPath: "/Users/me/proj"}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
 	if env.Code != 0 || !svc.pickCalled {
 		t.Fatalf("选定路径应成功且真的打到端口: %+v called=%v", env, svc.pickCalled)
@@ -202,7 +202,7 @@ func TestWorkspacePickDirectoryRoute(t *testing.T) {
 
 	// 取消：**不是错误**，且必须能与"选了个空路径"分辨（前端据此静默收手）。
 	svc = &stubSvc{pickCancelled: true}
-	r = newRestEngine(stubDeps(svc))
+	r = newRestEngine(stubDeps(t, svc))
 	env, _ = do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
 	if env.Code != 0 {
 		t.Fatalf("取消不该是错误: %+v", env)
@@ -218,7 +218,7 @@ func TestWorkspacePickDirectoryRoute(t *testing.T) {
 	// 宿主没有可用选择器：**可判定**错误（40501），而不是笼统 50000——前端据此回落应用内浏览。
 	// 判据只认码：报文正文由 manager 给（对外是给用户看的中文），拿它当契约会捆住文案。
 	svc = &stubSvc{pickErr: acl.NewError(acl.ClassUnsupported, "native_pick_unsupported", "宿主没有可用的原生选择器", nil)}
-	r = newRestEngine(stubDeps(svc))
+	r = newRestEngine(stubDeps(t, svc))
 	env, _ = do(t, r, "POST", "/v1/mate/workspaces/pick-directory", "")
 	if env.Code != code.NotSupported {
 		t.Fatalf("不支持应 40501: %+v", env)

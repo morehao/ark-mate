@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/morehao/ark-mate/internal/domain/provider"
-	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
 )
 
 // ——— 供应商域：P3d 过渡期的转发层 ———
@@ -13,31 +12,15 @@ import (
 // 已落 `domain/provider`（P3a-1b）。域自持一把只保护域内字段的锁（并发审查见计划 §3.1.35：
 // 29 处临界区零跨域），并持 `st`/`reg`/`creds` 三个注入件与两个端口（写面回执、默认模型）。
 //
-// 本文件只留转发。**转发的名字必须与调用点一致**（控制器、`app.go`、`gateway` 与八个测试文件
-// 都在调它们），所以这里逐个保名。
+// 本文件只留转发。**转发的名字必须与调用点一致**（`app.go` 与几个测试文件都在调它们），
+// 所以这里逐个保名。
+//
+// P4a 正文第四刀已删掉**档案面四条**（`ListProviders`/`CreateProvider`/`UpdateProvider`/
+// `DeleteProvider`）：它们的用例出口现在是 `service/svcprovider`（控制器在那里把 `Provider`
+// 造出来），`manager` 这几行转发已经没有生产调用点——留着只会让"实现搬到哪一层"重新不可见。
 //
 // 刻意**不**转发域内只被本包用到的几个私有入口（`providerDirSnapshot` / `providerModelCount`）：
 // 没有消费者的一行转发就是死代码。
-
-// TODO(P4b): 删转发（调用点直接依赖 provider.Plane）
-func (s *Service) ListProviders(ctx context.Context) ([]dtoprovider.ProviderResp, error) {
-	return s.providerPlane.ListProviders(ctx)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 provider.Plane）
-func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
-	return s.providerPlane.CreateProvider(ctx, req)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 provider.Plane）
-func (s *Service) UpdateProvider(ctx context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	return s.providerPlane.UpdateProvider(ctx, id, patch)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 provider.Plane）
-func (s *Service) DeleteProvider(ctx context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
-	return s.providerPlane.DeleteProvider(ctx, id)
-}
 
 // TODO(P4b): 删转发（调用点直接依赖 provider.Plane）
 func (s *Service) SetProviderDir(dir string) { s.providerPlane.SetProviderDir(dir) }

@@ -38,7 +38,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 
 	key := "sk-abc"
 	// ① POST 成功。
-	resp, err := svc.CreateProvider(ctx, func() dtoprovider.ProviderCreateReq {
+	resp, err := svc.providerPlane.CreateProvider(ctx, func() dtoprovider.ProviderCreateReq {
 		r := providerReq("deepseek-main", &key)
 		r.Note = ptr("主账号")
 		return r
@@ -53,22 +53,22 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 		t.Fatalf("memory 模式的 revision 应为 0（文件载体没有版本号），got %d", resp.Revision)
 	}
 	// ② POST 冲突 → provider_exists(40901)。
-	if _, err := svc.CreateProvider(ctx, providerReq("deepseek-main", nil)); errCode(err) != "provider_exists" {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("deepseek-main", nil)); errCode(err) != "provider_exists" {
 		t.Fatalf("重复新建应 provider_exists，got %q（%v）", errCode(err), err)
 	}
 	// ③ id 非法 → invalid_provider_id。
 	for _, id := range []string{"", "../x", "a/b"} {
-		if _, err := svc.CreateProvider(ctx, providerReq(id, nil)); errCode(err) != "invalid_provider_id" {
+		if _, err := svc.providerPlane.CreateProvider(ctx, providerReq(id, nil)); errCode(err) != "invalid_provider_id" {
 			t.Fatalf("id %q 应 invalid_provider_id，got %q", id, errCode(err))
 		}
 	}
 	// ④ PATCH 不存在 → provider_not_found(40401)。
-	if _, err := svc.UpdateProvider(ctx, "nope", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.example.com/v1")}); errCode(err) != "provider_not_found" {
+	if _, err := svc.providerPlane.UpdateProvider(ctx, "nope", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.example.com/v1")}); errCode(err) != "provider_not_found" {
 		t.Fatalf("PATCH 不存在应 provider_not_found，got %q（%v）", errCode(err), err)
 	}
 
 	// ⑤ PATCH 只改 note → effect=none（不驱动行为的字段不许说"下一轮生效"）。
-	done, err := svc.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")})
+	done, err := svc.providerPlane.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")})
 	if err != nil {
 		t.Fatalf("PATCH note: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	}
 
 	// ⑥ PATCH 端点 → effect=next_run（驱动行为的字段）。
-	changed, err := svc.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
+	changed, err := svc.providerPlane.UpdateProvider(ctx, "deepseek-main", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
 	if err != nil {
 		t.Fatalf("PATCH base_url: %v", err)
 	}
@@ -99,11 +99,11 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	}
 
 	// ⑦ DELETE 幂等：第一次 true，第二次 false 且 code=0（不报错）。
-	del, err := svc.DeleteProvider(ctx, "deepseek-main")
+	del, err := svc.providerPlane.DeleteProvider(ctx, "deepseek-main")
 	if err != nil || !del.Deleted {
 		t.Fatalf("删除应成功: %+v err=%v", del, err)
 	}
-	again, err := svc.DeleteProvider(ctx, "deepseek-main")
+	again, err := svc.providerPlane.DeleteProvider(ctx, "deepseek-main")
 	if err != nil || again.Deleted {
 		t.Fatalf("重复删除应幂等（deleted=false, code=0）: %+v err=%v", again, err)
 	}
@@ -145,7 +145,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 		t.Fatalf("预置行: ok=%v err=%v", ok, err)
 	}
 	key := "sk-ghost"
-	_, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "ghost", Protocol: "openai", APIKey: &key})
+	_, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "ghost", Protocol: "openai", APIKey: &key})
 	if errCode(err) != "provider_exists" {
 		t.Fatalf("CAS 未命中应翻成 provider_exists，got %q（%v）", errCode(err), err)
 	}
@@ -183,7 +183,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	old := "sk-old"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &old}); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &old}); err != nil {
 		t.Fatal(err)
 	}
 	// 让内存里的 revision 过期（模拟"有人在这中间改过载体"）：直接按当前版本再写一次载体。
@@ -198,7 +198,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	}
 	neu := "sk-new"
 	// 一次 PATCH 同时改端点与密钥：内容 CAS 先失败，所以密钥写入不该发生。
-	_, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{
+	_, err := svc.providerPlane.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{
 		BaseURL: ptr("https://api.other.example/v1"), APIKey: &neu,
 	})
 	if errCode(err) != "definition_changed" {
@@ -227,7 +227,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 	ctx := context.Background()
 	r := newGenRig(t) // stub ACP（真子进程）+ 真库
 	key := "sk-old"
-	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &key}); err != nil {
+	if _, err := r.svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &key}); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	// 注入哪条档案由**默认模型**那条清单决定（v19：agent 上的 provider 字段已撤销）。
@@ -247,7 +247,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 
 	// 走 env 通道的底座上，改**密钥**才会换基础键（改了它才谈得上"下一轮拿到新 env"）。
 	neu := "sk-new"
-	changed, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &neu})
+	changed, err := r.svc.providerPlane.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &neu})
 	if err != nil {
 		t.Fatalf("PATCH 密钥: %v", err)
 	}
@@ -299,10 +299,10 @@ func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.SetProviderDir(filepath.Join(t.TempDir(), "providers"))
-	if _, err := svc.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
+	resp, err := svc.providerPlane.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{BaseURL: ptr("https://api.other.example/v1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,10 +318,10 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.SetProviderDir(filepath.Join(home, "providers"))
 	svc.SetCredentials(newTestCredentials(t, home))
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
-	items, _ := svc.ListProviders(context.Background())
+	items, _ := svc.providerPlane.ListProviders(context.Background())
 	if len(items) != 1 {
 		t.Fatalf("列表面不符: %+v", items)
 	}
@@ -337,7 +337,7 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	// 前提下才谈得上"哪个底座拿得到它"）。memory 模式没有清单载体 → 结构上不可能有引用者
 	//（`providerModelRefsReadOnly` 无库即空），所以显式断言这一条，而不是拿 agent 凑引用。
 	setBuildRuntime(t, runtimetest.ID) // v12ProviderRegistry 只注册了合成底座
-	items, _ = svc.ListProviders(context.Background())
+	items, _ = svc.providerPlane.ListProviders(context.Background())
 	if len(items[0].Refs.Models) != 0 || len(items[0].Refs.Runtimes) != 0 {
 		t.Fatalf("memory 模式不该声称有引用者: %+v", items[0].Refs)
 	}
@@ -375,7 +375,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 		t.Fatalf("悬空引用应报 credential_missing 并指向设置 · 模型: %v", err)
 	}
 	// ② 存在但无密钥。
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "nokey", Protocol: "openai"}); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "nokey", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
 	}
 	defaultModel(t, "mdl_nokey", "nokey")

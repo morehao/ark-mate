@@ -127,13 +127,13 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	svc.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "dyn", Protocol: "openai", APIKey: &key,
 	}); err != nil {
 		t.Fatalf("写面存密钥: %v", err)
 	}
 	// 写面回执本身不得回显明文（另一条判据，但放在同一现场里更省事）。
-	items, err := svc.ListProviders(ctx)
+	items, err := svc.providerPlane.ListProviders(ctx)
 	if err != nil || len(items) != 1 || !items[0].HasKey {
 		t.Fatalf("装回读面: n=%d err=%v", len(items), err)
 	}

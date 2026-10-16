@@ -450,7 +450,7 @@ func (a *App) Init(ctx context.Context) error {
 		// （`*runtimeconn.Plane`），用例实例由 ctrruntime 自己造——`app` 不 import `service/svc*`。
 		Runtime: a.rconn,
 		// 档案四动作 + 自检的两个事实端口：自检用例（svcprovider.Probe）由 ctrprovider 造。
-		Provider: a.svc, ProviderArchives: a.svc.ProviderPlane(), ProviderCatalog: a.svc,
+		ProviderPlane: a.svc.ProviderPlane(), ProviderCatalog: a.svc,
 		Model:      a.svc,
 		Capability: a.svc, Automation: a.svc, Library: a.svc,
 		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出**事实来源**

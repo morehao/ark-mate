@@ -100,7 +100,7 @@ func TestStartupResolvesStoredProviderKeyAndWritesMirror(t *testing.T) {
 	})
 
 	// ③ 用户可见的结论：这条档案"有密钥"，且没有任何待处理项。
-	items, err := a.svc.ListProviders(ctx)
+	items, err := a.svc.ProviderPlane().ListProviders(ctx)
 	if err != nil {
 		t.Fatalf("ListProviders: %v", err)
 	}

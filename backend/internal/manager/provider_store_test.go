@@ -167,7 +167,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	svc.EnableStore(st)
 	svc.SetCredentials(newTestCredentials(t, home))
 	svc.LoadProviderDefinitionsFromStore(ctx, dir)
-	items, _ := svc.ListProviders(context.Background())
+	items, _ := svc.providerPlane.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("装载后档案数不符: %+v", items)
 	}
@@ -250,10 +250,10 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 写面：新建一条（走 store）+ 覆盖一条（走 store）。
-	if _, err := svc.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("brand-new", ptr("sk-new-secret"))); err != nil {
 		t.Fatalf("CreateProvider(新建): %v", err)
 	}
-	if _, err := svc.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(ctx, "existing", dtoprovider.ProviderPatchReq{Note: ptr("改了备注")}); err != nil {
 		t.Fatalf("UpdateProvider(覆盖): %v", err)
 	}
 	// 行确实写进了 DB。
@@ -286,7 +286,7 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "providers")
 	svc := providerTestSvc(t, dir) // memory 模式（无持久层）
-	if _, err := svc.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
 	}
 	raw := readProvidersFile(t, dir)
@@ -298,19 +298,19 @@ func TestProviderMemoryCarrierStillUsesFile(t *testing.T) {
 	}
 	// 删除必须**落盘**：文件载体是"先摘内存 → 再序列化"，顺序反了会把刚删的条目原样写回
 	// （界面上没了、文件里还在，重启后它又回来了——完全静默）。
-	if del, err := svc.DeleteProvider(ctx, "p1"); err != nil || !del.Deleted {
+	if del, err := svc.providerPlane.DeleteProvider(ctx, "p1"); err != nil || !del.Deleted {
 		t.Fatalf("删除应成功: %+v err=%v", del, err)
 	}
 	if raw := readProvidersFile(t, dir); strings.Contains(raw, `"p1"`) {
 		t.Fatalf("删除后文件里仍留着该条目（先落盘后摘内存的顺序反了）: %s", raw)
 	}
-	if _, err := svc.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
+	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("p1", ptr("sk-memory-secret"))); err != nil {
 		t.Fatalf("重建用于重启断言: %v", err)
 	}
 
 	// 重启（新 Service，同一目录）→ 档案与注入都还在。
 	svc2 := providerTestSvc(t, dir)
-	items, _ := svc2.ListProviders(context.Background())
+	items, _ := svc2.providerPlane.ListProviders(context.Background())
 	if len(items) != 1 || items[0].ID != "p1" || !items[0].HasKey {
 		t.Fatalf("memory 模式重启后档案丢失: %+v", items)
 	}
@@ -339,7 +339,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	svc.SetCredentials(newTestCredentials(t, home))
 	svc.LoadProviderDefinitionsFromStore(ctx, dir)
 	for _, id := range []string{"p-b", "p-a"} {
-		if _, err := svc.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {
+		if _, err := svc.providerPlane.CreateProvider(ctx, providerReq(id, ptr("sk-"+id))); err != nil {
 			t.Fatalf("CreateProvider(%s): %v", id, err)
 		}
 	}
@@ -376,7 +376,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	}
 	// 回灌：同一台机器上（文件 + 本机密钥面）再装一次即用——与 A4 的"逐字段等价"反向闭合。
 	svcMemory := providerTestSvc(t, dir)
-	items, _ := svcMemory.ListProviders(context.Background())
+	items, _ := svcMemory.providerPlane.ListProviders(context.Background())
 	if len(items) != 2 {
 		t.Fatalf("回灌后档案数不符: %+v", items)
 	}

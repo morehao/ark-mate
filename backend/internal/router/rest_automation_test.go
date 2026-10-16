@@ -90,8 +90,8 @@ func (s *stubSvc) RunAutomationNow(_ context.Context, id string) (*dtoautomation
 }
 
 // autoEngine 只把 automation 端口替换成桩（其余端口仍由同一个 stubSvc 提供）。
-func autoEngine(svc *stubSvc) *gin.Engine {
-	deps := stubDeps(svc)
+func autoEngine(t *testing.T, svc *stubSvc) *gin.Engine {
+	deps := stubDeps(t, svc)
 	deps.Automation = svc
 	return newRestEngine(deps)
 }
@@ -99,7 +99,7 @@ func autoEngine(svc *stubSvc) *gin.Engine {
 // TestAutomationRoutesHappyPath 8 条路由都能通、且控制器把参数原样交到领域层。
 func TestAutomationRoutesHappyPath(t *testing.T) {
 	svc := &stubSvc{automations: []dtoautomation.AutomationResp{{ID: "daily"}}}
-	r := autoEngine(svc)
+	r := autoEngine(t, svc)
 
 	env, _ := do(t, r, "GET", "/v1/mate/automations", "")
 	if env.Code != 0 {
@@ -145,7 +145,7 @@ func TestAutomationRoutesHappyPath(t *testing.T) {
 // 表现是"预览神秘地报 40401 未知 automation preview"——所以用断言钉住。
 func TestAutomationPreviewIsNotAnID(t *testing.T) {
 	svc := &stubSvc{}
-	r := autoEngine(svc)
+	r := autoEngine(t, svc)
 	env, _ := do(t, r, "POST", "/v1/mate/automations/preview", `{"schedule":{"kind":"once","timezone":"UTC","at":"2099-01-01T00:00:00Z"}}`)
 	if env.Code != 0 {
 		t.Fatalf("preview 不该被当成 :id: %+v", env)
@@ -191,7 +191,7 @@ func TestAutomationRoutesErrorCodes(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &stubSvc{autoErr: c.err}
-			r := autoEngine(svc)
+			r := autoEngine(t, svc)
 			env, _ := do(t, r, c.method, c.path, c.body)
 			if env.Code != c.want {
 				t.Fatalf("期望码 %d，got %d（msg=%s）", c.want, env.Code, env.Msg)
@@ -203,7 +203,7 @@ func TestAutomationRoutesErrorCodes(t *testing.T) {
 // TestAutomationBindErrorIsInvalidParam body 不是合法 JSON / 不是对象 → 40000（不是 50000）。
 func TestAutomationBindErrorIsInvalidParam(t *testing.T) {
 	svc := &stubSvc{}
-	r := autoEngine(svc)
+	r := autoEngine(t, svc)
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/v1/mate/automations", `[1,2,3]`},
 		{"PUT", "/v1/mate/automations/d", `not json`},
@@ -219,7 +219,7 @@ func TestAutomationBindErrorIsInvalidParam(t *testing.T) {
 	}
 	// 领域层返回裸错误 → 由 code.FromError 兜成 50000（唯一兜底码），绝不透传
 	svc2 := &stubSvc{autoErr: errors.New("boom")}
-	r2 := autoEngine(svc2)
+	r2 := autoEngine(t, svc2)
 	env, _ := do(t, r2, "GET", "/v1/mate/automations", "")
 	if env.Code != 50000 {
 		t.Fatalf("裸错误应兜底 50000，got %d", env.Code)

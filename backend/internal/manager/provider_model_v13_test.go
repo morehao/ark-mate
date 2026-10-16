@@ -50,7 +50,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
-	resp, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	resp, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "write-face", Protocol: "openai", APIKey: &key,
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 
 	// ② 覆盖写：同一列被换成新值，旧值不留在任何地方。
 	key2 := "sk-rotated-value"
-	if _, err := svc.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
+	if _, err := svc.providerPlane.UpdateProvider(ctx, "write-face", dtoprovider.ProviderPatchReq{APIKey: &key2}); err != nil {
 		t.Fatal(err)
 	}
 	if hits := secretHitsAnywhere(t, st, secret); len(hits) != 0 {
@@ -98,7 +98,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	svc.providerPlane.DeleteForTest("legacy")
 	svc.mu.Unlock()
 	svc.LoadProviderDefinitionsFromStore(ctx, dir)
-	items, _ := svc.ListProviders(ctx)
+	items, _ := svc.providerPlane.ListProviders(ctx)
 	for _, it := range items {
 		if it.ID == "legacy" && !it.HasKey {
 			t.Fatalf("库里那一列有值 → has_key 应为 true: %+v", it)

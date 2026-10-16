@@ -26,7 +26,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	r.svc.mu.Unlock()
 
 	const secret = "sk-a2-secret"
-	if _, err := r.svc.CreateProvider(ctx, providerReq("p1", ptrOf(secret))); err != nil {
+	if _, err := r.svc.providerPlane.CreateProvider(ctx, providerReq("p1", ptrOf(secret))); err != nil {
 		t.Fatalf("建档案: %v", err)
 	}
 	// v19：注入哪条档案由**默认模型**那条清单决定（agent 上的 provider 字段已随 agent 面撤销）。
@@ -48,7 +48,7 @@ func TestProviderKeyChangeSwitchesGenerationNextRun(t *testing.T) {
 	// 端点的改动不在这里验：它影响的是**交付物**（配置内容），其代际效应由同步摘要承载
 	// （ADR-13：摘要并进代际键），而那个摘要只有真正交付过的 runtime 才有。
 	next := "sk-new"
-	resp, err := r.svc.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &next})
+	resp, err := r.svc.providerPlane.UpdateProvider(ctx, "p1", dtoprovider.ProviderPatchReq{APIKey: &next})
 	if err != nil {
 		t.Fatalf("改密钥: %v", err)
 	}

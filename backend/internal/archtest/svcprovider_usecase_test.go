@@ -3,11 +3,12 @@ package archtest
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// ——— P4a 正文第三刀「供应商自检归属」守卫 ———
+// ——— P4a 正文第三/四刀「供应商自检 + 档案归属」守卫 ———
 //
 // 供应商连接自检（M4）从 `manager/provider_probe.go`（`*Service` 的方法 + 域/模型的取数）
 // 搬进 `internal/service/svcprovider`，形状换成与导出同一个模板：
@@ -31,8 +32,15 @@ import (
 //	   `ProviderPlane()`——前者让自检端点 500（nil 用例），后者让自检永远报「档案不在册」
 //	   （域读面恒空）。**两种都只在用户点"测试连接"时才现形**。
 //
+// **P4a 正文第四刀（档案面）**：`ListProviders`/`CreateProvider`/`UpdateProvider`/
+// `DeleteProvider` 四条转发从 `manager/provider_forward.go` 删除，出口换成
+// `svcprovider.Provider`（`archive.go`，实现直接拿域平面）。这一刀的判据是"**转发不许复活**"：
+// `manager` 上再长出这四条方法，控制器就又有了一条绕过用例层的路，而两条路都能编译、都能跑，
+// 只是其中一条没有生效面回执、也不在未来任何迁移的名单里。
+//
 // 反证（实跑）：把 `countModels` 搬回 `manager`（能编译的形态）→ 红；把
-// `ctrprovider` 的 `svcprovider.NewProbe(` 抽掉（改成直接用 `archives`）→ 红。
+// `ctrprovider` 的 `svcprovider.NewProbe(` 抽掉（改成直接用 `archives`）→ 红；
+// 把 `func (s *Service) ListProviders(` 加回 `manager`（真实现的形态，能编译）→ 红。
 
 // probeUseCaseAnchors 用例层必须有的实现锚（**私有实现**，不是薄转发——见 §6.1 的锚点规则）。
 var probeUseCaseAnchors = []string{
@@ -57,6 +65,27 @@ var probeImplementationMarkers = []string{
 	"countModels(",
 	"locatorKind(",
 	"func (p *Probe)",
+}
+
+// archiveForwardMarkers 档案面四条转发（P4a 正文第四刀删掉的形状）。
+//
+// 判据是"**转发不许复活**"：`manager` 上再长出这四条方法，控制器就又有了一条绕过用例层的路，
+// 而两条路都能编译、都能跑，只是其中一条没有生效面回执、也不在任何迁移名单里。
+var archiveForwardMarkers = []string{
+	"func (s *Service) ListProviders(",
+	"func (s *Service) CreateProvider(",
+	"func (s *Service) UpdateProvider(",
+	"func (s *Service) DeleteProvider(",
+}
+
+// archiveUseCaseAnchors 档案用例层的实现锚（**实现**，不是转发：域不变量在域里，用例出口在这）。
+var archiveUseCaseAnchors = []string{
+	"func NewProvider(plane *provider.Plane) ProviderSvc",
+	"var _ ProviderSvc = (*Provider)(nil)",
+	"func (p *Provider) ListProviders(",
+	"func (p *Provider) CreateProvider(",
+	"func (p *Provider) UpdateProvider(",
+	"func (p *Provider) DeleteProvider(",
 }
 
 // TestProviderProbeUseCaseLivesInProviderSvc 见文件头。
@@ -116,6 +145,15 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 					filepath.Base(path), m)
 			}
 		}
+		for _, m := range archiveForwardMarkers {
+			if strings.Contains(body, m) {
+				t.Errorf("internal/manager/%s 里又长出了档案面转发 %q：档案用例的出口是 "+
+					"`internal/service/svcprovider.Provider`（P4a 正文第四刀，控制器自己造）。\n"+
+					"转发复活的后果是控制器多一条绕过用例层的路——两条都能编译、都能跑，"+
+					"只是其中一条没有生效面回执，也不在未来任何迁移名单里。",
+					filepath.Base(path), m)
+			}
+		}
 	}
 
 	// 旧实现文件不得复活（比"文件里的痕迹"更硬：两份实现并存的起点）。
@@ -125,11 +163,54 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 			"`internal/service/svcprovider`（P4a 正文第三刀）；适配在 `ctrprovider`。")
 	}
 
+	// 档案面（第四刀）：实现必须在本包，且四个动作一个不少。
+	archSrc := stripLineComments(readFileOrFatal(t, filepath.Join(dir, "archive.go")))
+	for _, a := range archiveUseCaseAnchors {
+		if !strings.Contains(archSrc, a) {
+			t.Errorf("internal/service/svcprovider/archive.go 里找不到 %q：档案用例的实现被改名/搬走了？"+
+				"（这条守卫的判据就挂在它身上，失锚等于空转）", a)
+		}
+	}
+	// 档案用例层同样只经域平面取事实：不 import 持久层、也不 import `manager`。
+	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/store"`, `"github.com/morehao/ark-mate/internal/manager"`} {
+		if strings.Contains(archSrc, banned) {
+			t.Errorf("`internal/service/svcprovider/archive.go` 里出现 %s：档案用例拿的是域平面"+
+				"（`*provider.Plane`，装配点交下来），不 import 持久层、也不 import `manager`。", banned)
+		}
+	}
+	// 装配点：`router.Ports` 交的是**依赖事实**（域平面），不是用例实例，更不是别名。
+	routerSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
+	// 判据对 gofmt 的**字段对齐**免疫（`ProviderPlane   *provider.Plane`）——本仓栽过一次：
+	// 定长单空格的字段判据在 gofmt 之后假绿（见 `runtimeconn_ownership_test.go` 的注释）。
+	if !regexp.MustCompile(`ProviderPlane\s+\*provider\.Plane`).MatchString(routerSrc) {
+		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `ProviderPlane *provider.Plane`：" +
+			"供应商域平面是交下去的那份**依赖事实**；它不在，控制器就造不出两个用例。")
+	}
+	// 判据同样对字段对齐免疫（`Provider        svcprovider.ProviderSvc`）：第一版写成定长
+	// 单空格，gofmt 之后当场假绿——实测反证时发现的。
+	for _, banned := range []string{
+		`ProviderArchives`,
+		`Provider\s+svcprovider\.ProviderSvc`,
+		`ProviderArchives\s+svcprovider\.Ports`,
+	} {
+		if regexp.MustCompile(banned).MatchString(routerSrc) {
+			t.Errorf("`internal/router/router.go` 里又出现了禁形 %s：那是 P4a 正文第四刀删掉的"+
+				"（装配点持用例实例/端口）。装配只交依赖事实，用例在控制器里造。", banned)
+		}
+	}
+
 	// 装配：控制器必须真的把用例造出来，manager 必须交出域平面。
 	ctr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrprovider", "provider.go")))
-	if !strings.Contains(ctr, "svcprovider.NewProbe(") {
-		t.Error("`internal/controller/ctrprovider/provider.go` 里找不到 `svcprovider.NewProbe(`：" +
-			"自检用例没人造 ⇒ `POST /providers/:id/probe` 直接 500（而只测档案四动作的用例看不见）。")
+	for _, a := range []string{"svcprovider.NewProbe(", "svcprovider.NewProvider("} {
+		if !strings.Contains(ctr, a) {
+			t.Errorf("`internal/controller/ctrprovider/provider.go` 里找不到 %q：用例没人造 ⇒ "+
+				"自检端点直接 500 / 档案面 nil panic（而只测另一条的用例看不见）。", a)
+		}
+	}
+	// 控制器拿到的必须是**域的类型**（依赖事实），不是 `service/*` 的实例。
+	if !strings.Contains(ctr, "*provider.Plane") {
+		t.Error("`internal/controller/ctrprovider/provider.go` 的构造函数里找不到 `*provider.Plane`：" +
+			"控制器该从域平面自己造两个用例，而不是等装配点把实例递进来。")
 	}
 	svcSrc := stripLineComments(readFileOrFatal(t, filepath.Join(mgr, "service.go")))
 	if !strings.Contains(svcSrc, "func (s *Service) ProviderPlane() *provider.Plane") {

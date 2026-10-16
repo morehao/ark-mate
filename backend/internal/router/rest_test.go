@@ -22,10 +22,12 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
+	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
 
@@ -106,8 +108,7 @@ type stubSvc struct {
 	resolvePermErr  *gerror.Error                      // 权限决策桩错误注入
 	resolvePermResp *dtosession.PermissionDecisionResp // 权限决策桩回执（nil = 默认构造）
 
-	providerErr error // P2 provider 桩错误注入
-	providers   []dtoprovider.ProviderResp
+	modelErr error // 模型面桩错误注入（v13 起 provider 档案与自检走真域平面，不再经替身）
 
 	createCalled bool
 	createReq    dtosession.SessionCreateReq
@@ -220,75 +221,45 @@ func (s *stubSvc) RestErr(err error) error {
 	return gerror.Error{Code: 50000, Msg: err.Error()}
 }
 
-func (s *stubSvc) ListProviders(context.Context) ([]dtoprovider.ProviderResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
-	}
-	return s.providers, nil
-}
-func (s *stubSvc) CreateProvider(_ context.Context, req dtoprovider.ProviderCreateReq) (*dtoprovider.ProviderResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
-	}
-	return &dtoprovider.ProviderResp{ID: req.ID, Protocol: req.Protocol, HasKey: req.APIKey != nil && *req.APIKey != ""}, nil
-}
-func (s *stubSvc) UpdateProvider(_ context.Context, id string, patch dtoprovider.ProviderPatchReq) (*dtoprovider.ProviderResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
-	}
-	return &dtoprovider.ProviderResp{ID: id, HasKey: patch.APIKey != nil && *patch.APIKey != ""}, nil
-}
-func (s *stubSvc) DeleteProvider(_ context.Context, id string) (*dtoprovider.ProviderDeleteResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
-	}
-	return &dtoprovider.ProviderDeleteResp{Deleted: true}, nil
-}
-func (s *stubSvc) ProbeProvider(_ context.Context, id string, req dtoprovider.ProviderProbeReq) (*dtoprovider.ProviderProbeResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
-	}
-	return &dtoprovider.ProviderProbeResp{ID: id, Upstream: req.Upstream, OK: true}, nil
-}
 func (s *stubSvc) ListModels(_ context.Context) ([]dtomodel.ModelResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return nil, nil
 }
 func (s *stubSvc) CreateModel(_ context.Context, req dtomodel.ModelCreateReq) (*dtomodel.ModelResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelResp{ID: "m1", ProviderID: req.ProviderID, Model: req.Model}, nil
 }
 func (s *stubSvc) UpdateModel(_ context.Context, id string, patch dtomodel.ModelPatchReq) (*dtomodel.ModelResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelResp{ID: id}, nil
 }
 func (s *stubSvc) DeleteModel(_ context.Context, id string) (*dtomodel.ModelDeleteResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelDeleteResp{Deleted: true}, nil
 }
 func (s *stubSvc) SyncModels(_ context.Context, runtimeID string) (*dtomodel.ModelSyncResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelSyncResp{Applied: []dtomodel.RuntimeSyncResp{{Runtime: runtimeID, Pending: true}}}, nil
 }
 func (s *stubSvc) ModelsView(_ context.Context, runtimeID string, refresh bool) (*dtomodel.ModelsResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelsResp{}, nil
 }
 func (s *stubSvc) ModelCatalog(_ context.Context) (*dtomodel.ModelCatalogResp, error) {
-	if s.providerErr != nil {
-		return nil, s.providerErr
+	if s.modelErr != nil {
+		return nil, s.modelErr
 	}
 	return &dtomodel.ModelCatalogResp{Runtime: "stub", Source: "none"}, nil
 }
@@ -613,19 +584,6 @@ func (s *stubSvc) SessionEvents(_ context.Context, id string, limit int) ([]even
 
 // ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
 
-// stubProviderArchives 自检所需的域读面（`ctrprovider.ProviderArchives`）。
-type stubProviderArchives struct{ defs map[string]*provider.Def }
-
-func (s stubProviderArchives) Snapshot(id string) (*provider.Def, bool) {
-	d, ok := s.defs[id]
-	return d, ok
-}
-
-func (s stubProviderArchives) ProviderRefName(id string) string { return "providers/" + id }
-
-func (s stubProviderArchives) ProviderLocator(string) string { return "db:provider/<id>" }
-
-func (s stubProviderArchives) ProviderModelRefsReadOnly(context.Context, string) []string { return nil }
 func (s *stubSvc) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
 	return &dtosession.SessionDetailResp{
 		SessionResp: dtosession.SessionResp{ID: id},
@@ -746,13 +704,15 @@ type envelope struct {
 }
 
 // stubDeps 用同一个测试替身填满全部领域端口（stubSvc 实现了全部端口）。
-func stubDeps(svc *stubSvc) router.Ports {
+func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	return router.Ports{
 		Session: svc, Workspace: svc,
 		// 执行面（`Identity`/`Diagnostics`）：用例实例由 ctrruntime 造。
 		Runtime: svc,
-		// 档案四动作 + 自检的两个事实端口：替身只给事实，自检用例（Probe）由 ctrprovider 造。
-		Provider: svc, ProviderArchives: stubProviderArchives{},
+		// 供应商域平面是**真对象**（P4a 正文第四刀起，档案与自检两个用例都由 ctrprovider
+		// 从这里造）：档案是域的状态，替身化它等于把"用例读的是哪份状态"也替身掉。
+		// 目录落到临时目录，且不带密钥——本包只验路由与信封，密钥/载体行为在用例层自己的测试里。
+		ProviderPlane:   testProviderPlane(t),
 		ProviderCatalog: svc, Model: svc,
 		Capability: svc, Library: svc,
 		// 事实来源（`SessionMeta`/`SessionEvents`）：导出用例由 ctrexport 造。
@@ -778,7 +738,7 @@ func TestWorkspaceSettingsCtrPassThrough(t *testing.T) {
 		Source: "config.json", Writable: true,
 	}
 	svc := &stubSvc{settingsResp: snap}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "GET", "/v1/mate/settings/workspace", "")
 	if env.Code != 0 {
@@ -840,7 +800,7 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 		registryDelete: &dtoworkspace.WorkspaceDeleteResp{ID: "wsp-1", ReleasedSessions: 12},
 		registryMove:   &dtoworkspace.WorkspaceMoveResp{IDs: []string{"wsp-2", "wsp-1"}},
 	}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	// GET /workspaces：列表原样透出（含 default_id 与 writable——前端靠它们决定"未指定"归哪、
 	// 以及要不要渲染创建入口）。
@@ -940,7 +900,7 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 // 那种坏法是静默的：浏览目录突然报"未知工作空间"。
 func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
 	svc := &stubSvc{browseResp: &dtoworkspace.WorkspaceBrowseResp{Path: "/Users/me"}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "GET", "/v1/mate/workspaces/browse?path=/Users/me", "")
 	if env.Code != 0 {
@@ -963,7 +923,7 @@ func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
 //     所以这里要证的只是透传；领域语义由 manager 的用例覆盖。
 func TestWorkspaceCreateDirRoute(t *testing.T) {
 	svc := &stubSvc{dirResp: &dtoworkspace.WorkspaceDirCreateResp{Path: "/Users/me/proj/新项目"}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/Users/me/proj","name":"新项目"}`)
 	if env.Code != 0 {
@@ -992,7 +952,7 @@ func TestWorkspaceCreateDirRejections(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &stubSvc{dirErr: tc.err}
-			r := newRestEngine(stubDeps(svc))
+			r := newRestEngine(stubDeps(t, svc))
 			env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/p","name":"x"}`)
 			if env.Code != tc.code {
 				t.Fatalf("期望 code=%d，得到 %+v", tc.code, env)
@@ -1031,7 +991,7 @@ func TestListEndpoints(t *testing.T) {
 	svc := &stubSvc{
 		sessions: []dtosession.SessionResp{{ID: "s1", RuntimeID: "rtx", Status: "completed"}},
 	}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != 0 || env.Msg != "success" {
@@ -1053,7 +1013,7 @@ func TestListSessionsWorkspaceQuery(t *testing.T) {
 		ID: "c-1", RuntimeID: "rtx", Status: "completed",
 		Cwd: "/work/alpha", WorkspaceTemporary: true,
 	}}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/sessions?cwd=/work/alpha", "")
 	if code != 200 || env.Code != 0 {
@@ -1094,7 +1054,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 		Totals:  dtousage.UsageBucketResp{Key: "total", Runs: 3, Completed: 2, Failed: 1, DurationMS: 1200},
 		Buckets: []dtousage.UsageBucketResp{{Key: "2026-09-08", Runs: 3}},
 	}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/usage/summary?from=2026-09-01&to=2026-09-09&group_by=day", "")
 	if code != 200 || env.Code != 0 {
@@ -1131,7 +1091,7 @@ func TestUsageSummaryRoute(t *testing.T) {
 // code.Internal(50000) 一个兜底码，且 msg 仍原样带出（不失诊断信息）。
 func TestListFailure(t *testing.T) {
 	svc := &stubSvc{listSessionsErr: errors.New("boom")}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != code.Internal {
 		t.Fatalf("期望 code=%d（Internal），got %+v", code.Internal, env)
@@ -1144,7 +1104,7 @@ func TestListFailure(t *testing.T) {
 // TestCreateSession 正常创建：解析 body → 透传 svc → 信封含 id/event_seq。
 func TestCreateSession(t *testing.T) {
 	svc := &stubSvc{createResp: &dtosession.SessionCreateResp{ID: "s-abc", RuntimeID: "rtx", Status: "in_progress", EventSeq: 9}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi","cwd":"/tmp"}`)
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1163,7 +1123,7 @@ func TestCreateSession(t *testing.T) {
 
 // TestCreateSessionBadBody 非 JSON 请求体 → code 40000。
 func TestCreateSessionBadBody(t *testing.T) {
-	r := newRestEngine(stubDeps(&stubSvc{}))
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `not-json{`)
 	if env.Code != 40000 {
 		t.Fatalf("非 JSON 期望 40000，got %+v", env)
@@ -1173,7 +1133,7 @@ func TestCreateSessionBadBody(t *testing.T) {
 // TestCreateSessionServiceError svc 业务错误原样透出（40901 忙）。
 func TestCreateSessionServiceError(t *testing.T) {
 	svc := &stubSvc{createErr: gerror.Error{Code: 40901, Msg: "run in progress"}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "run in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
@@ -1183,7 +1143,7 @@ func TestCreateSessionServiceError(t *testing.T) {
 // TestPromptAndCancel prompt（校验必填）/cancel 调用透传。
 func TestPromptAndCancel(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	// prompt 缺 prompt → 40000。
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{}`)
@@ -1250,7 +1210,7 @@ func TestPromptAndCancel(t *testing.T) {
 // TestHistoryParamParsing history 分页参数解析与夹取：默认/显式/非法。
 func TestHistoryParamParsing(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	// 默认：两个游标都不给（nil = 该方向没有游标）、limit=200。
 	do(t, r, "GET", "/v1/mate/sessions/s1/history", "")
@@ -1326,7 +1286,7 @@ func TestHistoryParamParsing(t *testing.T) {
 // TestHistorySuccess 正常 history 返回事件数组（含 has_more）。
 func TestHistorySuccess(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&limit=10", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1346,7 +1306,7 @@ func TestPermissionMemoriesList(t *testing.T) {
 		{Title: "运行演示命令 echo hello", Kind: "execute", Decision: "allow", Since: "2026-01-02T03:04:05Z"},
 		{Title: "删除文件", Kind: "execute", Decision: "reject", Since: "2026-01-03T03:04:05Z"},
 	}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/permissions/memories", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1362,7 +1322,7 @@ func TestPermissionMemoriesList(t *testing.T) {
 // TestRevokeMemory 单条撤销（title+kind）与一键撤销（均空）都正确透传。
 func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
@@ -1389,7 +1349,7 @@ func TestElicitationList(t *testing.T) {
 		Message: "请选择一个环境", TimeoutAt: "2026-01-02T03:04:05Z",
 		Schema: map[string]any{"type": "object", "properties": map[string]any{"env": map[string]any{"type": "string", "enum": []any{"dev", "prod"}}}},
 	}}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/elicitations", "")
 	if env.Code != 0 {
 		t.Fatalf("信封不符: %+v", env)
@@ -1403,7 +1363,7 @@ func TestElicitationList(t *testing.T) {
 // TestResolveElicitation POST /sessions/:id/elicitation 决策透传（accept + content）。
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
 	if env.Code != 0 {
@@ -1417,7 +1377,7 @@ func TestResolveElicitation(t *testing.T) {
 // TestResolveElicitationBadBody 缺 elicitation_id/action → code 40000。
 func TestResolveElicitationBadBody(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation", `{"action":"accept"}`)
 	if env.Code != 40000 {
 		t.Fatalf("缺 elicitation_id 应 40000: %+v", env)
@@ -1428,18 +1388,49 @@ func TestResolveElicitationBadBody(t *testing.T) {
 	}
 }
 
-// TestProviderRoutes provider 注入面路由：GET 列表 + PATCH upsert（密钥只写不读回）。
+// TestProviderRoutes provider 档案路由：POST 建 → GET 列出 → PATCH 只更新（不存在 → 40401）。
+//
+// 这条用例在 P4a 正文第四刀之后走的是**真域平面**（`ctrprovider` 从 `Ports.ProviderPlane`
+// 自己造用例），所以它顺带钉住两条真行为：新建不带密钥也能建（自检会把它报成可执行的 fail）、
+// 以及 PATCH 对不存在的 id **不 upsert**（v12 起 `provider_not_found`）——后者以前被替身
+// 无条件 200 盖住了。
 func TestProviderRoutes(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
-	env, code := do(t, r, "PATCH", "/v1/mate/providers/default", `{"type":"openai","model":"gpt-4o","key":"sk-x"}`)
+	r := newRestEngine(stubDeps(t, svc))
+
+	env, code := do(t, r, "POST", "/v1/mate/providers", `{"id":"default","protocol":"openai","base_url":"https://api.example.com"}`)
 	if code != 200 || env.Code != 0 {
-		t.Fatalf("PATCH provider 失败 code=%d env=%d", code, env.Code)
+		t.Fatalf("POST provider 失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
 	}
 	env, code = do(t, r, "GET", "/v1/mate/providers", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("GET providers 失败 code=%d env=%d", code, env.Code)
 	}
+	var items []dtoprovider.ProviderResp
+	if err := json.Unmarshal(env.Data, &items); err != nil || len(items) != 1 || items[0].ID != "default" {
+		t.Fatalf("GET providers data 不符: %s", env.Data)
+	}
+	env, code = do(t, r, "PATCH", "/v1/mate/providers/default", `{"note":"改了备注"}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("PATCH provider 失败 code=%d env=%d msg=%s", code, env.Code, env.Msg)
+	}
+	// 不存在 → `provider_not_found`(40401)（不是 upsert）。
+	env, code = do(t, r, "PATCH", "/v1/mate/providers/nope", `{"note":"x"}`)
+	if code != 200 || env.Code != 40401 {
+		t.Fatalf("PATCH 不存在的 provider 应 40401，code=%d env=%d", code, env.Code)
+	}
+}
+
+// testProviderPlane 造一个**真**供应商域平面（内存态 + 临时目录载体）。
+//
+// 注册表与凭据机制都必须与生产同源（`provider.NewPlane` 的注释：两份 = 两个事实源），
+// 而这里刻意不给密钥：带密钥的写面会落托管文档，那是用例层测试的事，不是路由测试的事。
+func testProviderPlane(t *testing.T) *provider.Plane {
+	t.Helper()
+	reg := goruntime.AllBuiltinRegistry()
+	plane := provider.NewPlane(reg, credential.New(reg))
+	plane.SetProviderDir(t.TempDir())
+	return plane
 }
 
 // TestCapabilityRoutes P1 能力数据面路由：GET /skills /mcps /tools 列出目录（信封 data 数组）。
@@ -1449,7 +1440,7 @@ func TestCapabilityRoutes(t *testing.T) {
 		mcps:   []dtocapability.McpServerResp{{ID: "fs", Transport: "stdio", Command: "npx"}},
 		tools:  []dtocapability.ToolResp{{Name: "web_search", Source: "builtin", Description: "联网搜索"}},
 	}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/skills", "")
 	if code != 200 || env.Code != 0 {
@@ -1483,7 +1474,7 @@ func TestCapabilityRoutes(t *testing.T) {
 // 响应回带写回路径与物化计数；非法 JSON → 40000（控制器绑定错误带码）。
 func TestSkillToggleRoute(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "PATCH", "/v1/mate/skills/plan", `{"enabled":false}`)
 	if code != 200 || env.Code != 0 {
@@ -1514,7 +1505,7 @@ func TestSkillToggleRoute(t *testing.T) {
 // 透传 id 到服务端口，信封 data 带每处物化目标的状态与摘要。
 func TestSkillMaterializationRoute(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/skills/plan/materialization", "")
 	if code != 200 || env.Code != 0 {
@@ -1545,7 +1536,7 @@ func TestProbeMcpServerRoute(t *testing.T) {
 			Tools: []dtocapability.ToolResp{{Name: "read_file", Source: "mcp", McpServer: "fs"}},
 		},
 	}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/probe", "")
 	if code != 200 || env.Code != 0 {
@@ -1576,32 +1567,27 @@ func TestProbeMcpServerRoute(t *testing.T) {
 // 与 README「非 0 为业务错误（40001/40401/…）」契约不符）。
 //
 // v19：这些用例原挂在 agent 端点上（已随 agent 面删除）；映射表本身与端点无关，
-// 现在用**供应商面**（唯一还带完整 acl 分类的写面）钉住四条分类 → 四个码。
+// 只要求"某个端点把一支 acl 错误原样交给信封映射"。
+//
+// P4a 正文第四刀之后改用**会话列表面**（`listSessionsErr`）：供应商面的档案/自检用例
+// 现在由控制器从真域平面构造，替身注入不进去了——而这条用例要钉的是**映射**，不是供应商面。
 func TestErrorEnvelopeMapping(t *testing.T) {
 	cases := []struct {
-		name   string
-		method string
-		path   string
-		body   string
-		err    error
-		code   int
+		name string
+		err  error
+		code int
 	}{
-		{"not_found", "GET", "/v1/mate/providers", "",
-			acl.NewError(acl.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
-		{"request", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
-			acl.NewError(acl.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
-		{"conflict", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
-			acl.NewError(acl.ClassLimit, "provider_exists", "已存在", nil), 40901},
-		{"unsupported", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai","api_key":"sk-x"}`,
-			acl.NewError(acl.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
-		{"upstream", "POST", "/v1/mate/providers", `{"id":"p1","protocol":"openai"}`,
-			acl.NewError(acl.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
+		{"not_found", acl.NewError(acl.ClassRequest, "provider_not_found", "未知供应商", nil), 40401},
+		{"request", acl.NewError(acl.ClassRequest, "invalid_provider_id", "id 非法", nil), 40001},
+		{"conflict", acl.NewError(acl.ClassLimit, "provider_exists", "已存在", nil), 40901},
+		{"unsupported", acl.NewError(acl.ClassUnsupported, "credentials_unsupported", "这套底座不支持托管凭据", nil), 40501},
+		{"upstream", acl.NewError(acl.ClassService, "provider_write_failed", "载体提交失败", nil), 50201},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &stubSvc{providerErr: tc.err}
-			r := newRestEngine(stubDeps(svc))
-			env, http := do(t, r, tc.method, tc.path, tc.body)
+			svc := &stubSvc{listSessionsErr: tc.err}
+			r := newRestEngine(stubDeps(t, svc))
+			env, http := do(t, r, "GET", "/v1/mate/sessions", "")
 			if http != 200 || env.Code != tc.code {
 				t.Fatalf("期望 HTTP 200 code=%d，got http=%d code=%d msg=%q", tc.code, http, env.Code, env.Msg)
 			}
@@ -1610,10 +1596,10 @@ func TestErrorEnvelopeMapping(t *testing.T) {
 			}
 		})
 	}
-	// 已映射错误不得被二次映射（restErr 幂等）。
-	svc := &stubSvc{providerErr: gerror.Error{Code: 40001, Msg: "已映射"}}
-	r := newRestEngine(stubDeps(svc))
-	env, _ := do(t, r, "GET", "/v1/mate/providers", "")
+	// 已映射错误不得被二次映射（FromError 幂等）。
+	svc := &stubSvc{listSessionsErr: gerror.Error{Code: 40001, Msg: "已映射"}}
+	r := newRestEngine(stubDeps(t, svc))
+	env, _ := do(t, r, "GET", "/v1/mate/sessions", "")
 	if env.Code != 40001 || env.Msg != "已映射" {
 		t.Fatalf("已映射错误应透传: %+v", env)
 	}
@@ -1626,7 +1612,7 @@ func TestMessageSearchRoute(t *testing.T) {
 		Query: "502", Source: "sqlite", Total: 1, HasMore: false,
 		Hits: []dtosearch.MessageSearchHit{{SessionID: "c-1", Title: "部署", Role: "user", Seq: 7, Snippet: "网关 502"}},
 	}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, http := do(t, r, "GET", "/v1/mate/search/messages?q=502&limit=5", "")
 	if http != 200 || env.Code != 0 {
@@ -1670,7 +1656,7 @@ func TestExportRoute(t *testing.T) {
 			"c-1": {{ID: "evt_1", Type: "session.run.started", Payload: map[string]any{}}},
 		},
 	}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, http := do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"markdown"}`)
 	if http != 200 || env.Code != 0 {
@@ -1713,7 +1699,7 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 		StderrTail: []string{"[warn] boom"},
 		LastError:  &dtoruntime.LastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
 	}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, http := do(t, r, "GET", "/v1/mate/runtime/diagnostics", "")
 	if http != 200 || env.Code != 0 {
@@ -1733,7 +1719,7 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 
 	// 底层错误 → 信封映射（handler 经 code.FromError）。
 	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "runtime_not_found", "底座未装配", nil)}
-	r2 := newRestEngine(stubDeps(svc2))
+	r2 := newRestEngine(stubDeps(t, svc2))
 	env, http = do(t, r2, "GET", "/v1/mate/runtime/diagnostics", "")
 	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "底座未装配") {
 		t.Fatalf("错误映射不符: http=%d %+v", http, env)
@@ -1744,7 +1730,7 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 // 工具级失败（is_error=true）仍是 code=0，传输/协议错误透传信封码。
 func TestCallMcpToolRoute(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	body := `{"arguments":{"path":"/tmp/a"},"timeout_ms":1500}`
 	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call", body)
@@ -1811,7 +1797,7 @@ func TestCallMcpToolRoute(t *testing.T) {
 // TestMcpResourcesPromptsRoutes B2：资源/提示词四条路由（路径与 body 参数透传、错误码透传）。
 func TestMcpResourcesPromptsRoutes(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, code := do(t, r, "GET", "/v1/mate/mcps/fs/resources", "")
 	if code != 200 || env.Code != 0 || svc.mcpLiveID != "fs" {
@@ -1884,7 +1870,7 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 // 不再是 `{call_id, allowed}` 的请求参数回显。
 func TestResolvePermissionReceiptShape(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, code := do(t, r, "POST", "/v1/mate/sessions/s1/permission",
 		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)
 	if code != 200 || env.Code != 0 {
@@ -1932,7 +1918,7 @@ func (s *stubSvc) ListLibrary(q svclibrary.Query) ([]dtolibrary.LibraryItem, err
 // TestLibraryRouteShape GET /library：过滤参数透传领域层 + 逐 runtime 可达性原样透出 + 领域错误映射。
 func TestLibraryRouteShape(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 
 	env, httpCode := do(t, r, "GET", "/v1/mate/library?kind=skill&q=dem", "")
 	if httpCode != 200 || env.Code != 0 {

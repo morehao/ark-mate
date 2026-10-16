@@ -87,7 +87,7 @@ func (r *modelRig) createModel(t *testing.T, providerID, modelID string, mutate 
 	ctx := context.Background()
 	key := "sk-test"
 	baseURL := "https://api.deepseek.com/v1"
-	if _, err := r.svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := r.svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: providerID, Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil && errCode(err) != "provider_exists" {
 		t.Fatalf("CreateProvider(%s): %v", providerID, err)
@@ -288,7 +288,7 @@ func TestModelListProviderDeleteGuard(t *testing.T) {
 	ctx := context.Background()
 	r := newModelRig(t)
 	_ = r.createModel(t, "p1", "m-a")
-	_, err := r.svc.DeleteProvider(ctx, "p1")
+	_, err := r.svc.providerPlane.DeleteProvider(ctx, "p1")
 	if errCode(err) != "provider_in_use" {
 		t.Fatalf("被模型挂靠的供应商应 provider_in_use，got %q（%v）", errCode(err), err)
 	}

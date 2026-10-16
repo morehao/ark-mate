@@ -277,8 +277,8 @@ func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc,
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
-		Runtime:  runtimeconn.NewPlaneFor(nil),
-		Provider: svc, ProviderArchives: svc.ProviderPlane(), ProviderCatalog: svc,
+		Runtime:       runtimeconn.NewPlaneFor(nil),
+		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
 		Model:      svc,
 		Capability: svc, Library: svc,
 	}, eventbus.New())

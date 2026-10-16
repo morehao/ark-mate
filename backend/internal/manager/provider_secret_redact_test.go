@@ -29,7 +29,7 @@ func TestProviderEnvRegistersDynamicSecret(t *testing.T) {
 
 	key := secret
 	baseURL := "https://api.openai.com/v1"
-	if _, err := svc.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
+	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
 		ID: "p1", Protocol: "openai", BaseURL: &baseURL, APIKey: &key,
 	}); err != nil {
 		t.Fatal(err)

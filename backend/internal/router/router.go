@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
@@ -52,16 +53,16 @@ type Ports struct {
 	Workspace svcworkspace.WorkspaceSvc
 	// Runtime 底座执行面（`Identity`/`Diagnostics`），今天 = `*runtimeconn.Plane`。
 	Runtime svcruntime.Plane
-	// Provider 档案面四动作；ProviderArchives/ProviderCatalog 是自检用例的两个事实端口
-	// （分别是供应商域读面与模型目录读面），三者一起交给 `ctrprovider.NewProviderCtr`。
-	Provider         svcprovider.ProviderSvc
-	ProviderArchives svcprovider.Ports
-	ProviderCatalog  svcprovider.Catalog
-	Model            svcmodel.ModelSvc
-	Capability       svccapability.CapabilitySvc
-	Automation       svcautomation.AutomationSvc
-	Library          svclibrary.LibrarySvc
-	System           svcsystem.Source
+	// ProviderPlane 供应商域平面（**依赖事实**：域的类型，不是 `service/*` 的类型）；
+	// ProviderCatalog 是自检要的模型目录读面。两者一起交给 `ctrprovider.NewProviderCtr`，
+	// 档案用例与自检用例**都在控制器里造**（P4a 正文第四刀）。
+	ProviderPlane   *provider.Plane
+	ProviderCatalog svcprovider.Catalog
+	Model           svcmodel.ModelSvc
+	Capability      svccapability.CapabilitySvc
+	Automation      svcautomation.AutomationSvc
+	Library         svclibrary.LibrarySvc
+	System          svcsystem.Source
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。

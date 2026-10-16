@@ -20,7 +20,7 @@ import (
 // TestCreateSessionRemovedAgentKeyReachesService 会话写面：已下线的 agent 选择键必须原样透传。
 func TestCreateSessionRemovedAgentKeyReachesService(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"agent_id":"agent-rtx","prompt":"hi"}`)
 	if env.Code != 0 {
 		t.Fatalf("传输层不该自己拒绝（判据在 manager）: %+v", env)
@@ -34,7 +34,7 @@ func TestCreateSessionRemovedAgentKeyReachesService(t *testing.T) {
 // （manager 的非空即拒绝见 `usage_removed_dimension_test.go`）。
 func TestUsageSummaryRemovedAgentKeyReachesService(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, code := do(t, r, "GET", "/v1/mate/usage/summary?agent_id=agent-stub&group_by=day", "")
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("信封不符（拒绝对不对是 manager 的事）: http=%d env=%+v", code, env)
@@ -49,7 +49,7 @@ func TestUsageSummaryRemovedAgentKeyReachesService(t *testing.T) {
 // 与 `TestRuntimesEndpointGone` 同一个理由：用户面零 agent 选择入口，历史路径不许再回 200
 // ——静默 200 会让前端以为它还在册。
 func TestAgentsEndpointGone(t *testing.T) {
-	r := newRestEngine(stubDeps(&stubSvc{}))
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 	for _, tc := range []struct{ method, path string }{
 		{"GET", "/v1/mate/agents"},
 		{"POST", "/v1/mate/agents"},
@@ -69,7 +69,7 @@ func TestAgentsEndpointGone(t *testing.T) {
 
 // TestRuntimesEndpointGone `GET /runtimes` 必须**不存在**（用户面零 runtime 选择入口）。
 func TestRuntimesEndpointGone(t *testing.T) {
-	r := newRestEngine(stubDeps(&stubSvc{}))
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 	_, code := do(t, r, "GET", "/v1/mate/runtimes", "")
 	if code == 0 {
 		t.Fatal("GET /v1/mate/runtimes 不该再可用：底座由构建期固定")
@@ -85,7 +85,7 @@ func TestRuntimeDiagnosticsOmitsRemovedAgentIdentity(t *testing.T) {
 		State: "stopped", Runtime: "stub", RuntimeName: "Stub",
 		StderrSource: "none", StderrTail: []string{}, CheckedAt: "2026-09-09T00:00:00Z",
 	}}
-	r := newRestEngine(stubDeps(svc))
+	r := newRestEngine(stubDeps(t, svc))
 	env, http := do(t, r, "GET", "/v1/mate/runtime/diagnostics", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
