@@ -387,7 +387,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 白名单的持久化端口：面板 PUT /settings/workspace 经它写回配置目录（config.json）。
 	// 传入该键的**最终来源**：来源高于配置文件（进程 env / env 文件 / flag）时端口会报"锁定"，
 	// 面板随之转只读——这比"面板显示保存成功、重启后被 env 覆盖"诚实。
-	a.svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfg.ConfigDir, a.sources["workspace_roots"]))
+	a.svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfg.ConfigDir, a.sources["workspace_roots"]))
 
 	a.orch = manager.NewOrchestrator(a.svc, reg)
 	// 进程注册表（M3 v4③）：登记本 daemon 拉起的 runtime 子进程；启动时回收上一实例遗留的

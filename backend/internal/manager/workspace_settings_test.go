@@ -66,7 +66,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, provision, nil) // 未配置偏好起点
 	store := &fakeRootsStore{src: "config.json"}
-	svc.SetWorkspaceSettingsStore(store)
+	svc.WorkspacePlane().SetRootsStore(store)
 
 	// 起步快照：没有偏好起点（prefer_roots=false，无名单可言，故 provision_included 为 false）。
 	resp := svc.WorkspacePlane().Settings()
@@ -161,7 +161,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	}
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{}
-	svc.SetWorkspaceSettingsStore(store)
+	svc.WorkspacePlane().SetRootsStore(store)
 
 	cases := []struct {
 		name  string
@@ -203,7 +203,7 @@ func TestUpdateWorkspaceSettingsLocked(t *testing.T) {
 	root := t.TempDir()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	store := &fakeRootsStore{src: "env(process)", locked: "MATE_WORKSPACE_ROOTS"}
-	svc.SetWorkspaceSettingsStore(store)
+	svc.WorkspacePlane().SetRootsStore(store)
 
 	resp := svc.WorkspacePlane().Settings()
 	if resp.Writable || resp.LockedBy != "MATE_WORKSPACE_ROOTS" {
@@ -229,7 +229,7 @@ func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, t.TempDir())})
 	before := svc.WorkspaceRoots()
-	svc.SetWorkspaceSettingsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
+	svc.WorkspacePlane().SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
 
 	if _, err := svc.UpdateWorkspaceSettings([]string{root}); aclCode(t, err) != "settings_save_failed" {
 		t.Fatalf("应 settings_save_failed: %v", err)

@@ -149,6 +149,29 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Error("`internal/domain/workspace/settings.go` 里找不到 `func (pl *Plane) Settings()`：" +
 			"判据失锚＝空转。")
 	}
+	// 别名与装配期转发（P4a 正文第二十刀）：`type WorkspaceRootsStore = workspace.WorkspaceRootsStore`
+	// 正是第三条硬规矩点名的"端口别名"——一个类型两处定义，接错线时编译器不会拦（两边都满足）。
+	// 装配侧同理只有一处入口：`WorkspacePlane().SetRootsStore(...)`。
+	settingsMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_settings.go")))
+	if strings.Contains(settingsMgr, "type WorkspaceRootsStore =") {
+		t.Error("`internal/manager/workspace_settings.go` 里又出现 `type WorkspaceRootsStore =`：" +
+			"端口别名为第三条硬规矩所禁（一个类型只有一处定义）。")
+	}
+	if strings.Contains(settingsMgr, "func (s *Service) SetWorkspaceSettingsStore(") {
+		t.Error("`internal/manager` 里又出现 `func (s *Service) SetWorkspaceSettingsStore(`：" +
+			"装配期接线也只有一处入口（`WorkspacePlane().SetRootsStore`）。")
+	}
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
+		"rootsStore WorkspaceRootsStore") {
+		t.Error("`internal/domain/workspace/policy.go` 里找不到 `rootsStore WorkspaceRootsStore`：" +
+			"端口的唯一归属是域，判据失锚＝空转。")
+	}
+	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
+	if !strings.Contains(appGo, "a.svc.WorkspacePlane().SetRootsStore(") {
+		t.Error("`internal/app/app.go` 里找不到 `a.svc.WorkspacePlane().SetRootsStore(`：" +
+			"落盘端口必须接到**装配好的那个平面**上（接错一个平面时两边都编译过，表现是设置改了不落盘）。")
+	}
+
 	ctrWork := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrworkspace", "workspace.go")))
 	if !strings.Contains(ctrWork, "h.plane.Settings()") {
 		t.Error("`ctrworkspace` 里找不到 `h.plane.Settings()`：设置面快照要么走域平面、要么走一层转发。")

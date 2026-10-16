@@ -679,7 +679,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	if err := svc.SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, ""))
+	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, ""))
 
 	// 起步：没有偏好起点（prefer_roots=false），可写，来源 = 默认值。
 	env := get(t, e, "/v1/mate/settings/workspace")
@@ -750,7 +750,7 @@ func TestWorkspaceSettingsRoutes(t *testing.T) {
 	}
 
 	// 被更高优先级来源锁定 → 拒绝写并自报只读（面板据此转只读，而不是假装保存成功）。
-	svc.SetWorkspaceSettingsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
+	svc.WorkspacePlane().SetRootsStore(config.NewSettingsStore(cfgDir, config.SourceEnv))
 	env = put(t, e, "/v1/mate/settings/workspace", `{"roots":[]}`)
 	if env.Code != 40001 || !strings.Contains(env.Msg, "settings_locked") {
 		t.Fatalf("锁定时应 settings_locked: %+v", env)
