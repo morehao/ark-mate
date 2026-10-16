@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	automationcore "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -114,10 +115,9 @@ func (r *schedRig) file(t *testing.T, id string) map[string]any {
 // sessionsOf 按 origin 收集会话（"某 automation 历次生效运行"的快速路径）。
 func (r *schedRig) sessionsOf(t *testing.T, id string) []*SessionRec {
 	t.Helper()
-	r.svc.mu.Lock()
-	defer r.svc.mu.Unlock()
-	var out []*SessionRec
+	// **不持 `s.mu`**：`Snapshot` 自己取会话域的锁（与 `manager_lock_order_test.go` 的纪律同源）。
 	snap := r.svc.sessionPlane.Snapshot()
+	var out []*SessionRec
 	for i := range snap {
 		if snap[i].Origin == automationOrigin(id) {
 			out = append(out, &snap[i])
@@ -134,8 +134,8 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	// 上一次触发是 2020 年 → 现在是"停机错过的补跑"（recover）
 	r.writeDaily(t, "daily", "2020-01-01T01:00:00Z")
 	rec, _ := r.svc.automationRecByID("daily")
-	if rec.startup != automation.StartupRecover {
-		t.Fatalf("期望 recover，got %s", rec.startup)
+	if rec.Startup != automation.StartupRecover {
+		t.Fatalf("期望 recover，got %s", rec.Startup)
 	}
 	sub := r.bus.SubscribeAfter(nil) // 回放 + live：断言的是本轮触发新增了哪些事件
 	defer r.bus.Unsubscribe(sub)
@@ -256,9 +256,9 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	// （noRecord，automation_sched.go:184-193）——文件里的 last_status 会停在第一次的 claimed，
 	// 这条用例就假红。钉死游标同时让用例不再依赖"跑测试时真实日期是哪天"。
 	now := time.Date(2026, 10, 9, 2, 30, 0, 0, time.UTC)
-	r.svc.mu.Lock()
-	r.svc.automations["daily"].nextDue = time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
-	r.svc.mu.Unlock()
+	r.svc.automationPlane.Mutate("daily", func(rec *automationcore.Rec) {
+		rec.NextDue = time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
+	})
 	r.svc.automationTick(context.Background(), now)
 	if n := len(r.sessionsOf(t, "daily")); n != 1 {
 		t.Fatalf("首次触发应建 1 个会话，got %d", n)
@@ -268,9 +268,7 @@ func TestAutomationTickOverlapSkips(t *testing.T) {
 	// 该值**必须严格晚于 last_fired_at**（上一次认领 = 01:00Z）：这是真实调度必然满足的不变式
 	// ——NextDue 只在 latest > lastFiredAt 时才给到期点（schedule.go:91-93）。
 	past := now.Add(-time.Hour)
-	r.svc.mu.Lock()
-	r.svc.automations["daily"].nextDue = past
-	r.svc.mu.Unlock()
+	r.svc.automationPlane.Mutate("daily", func(rec *automationcore.Rec) { rec.NextDue = past })
 
 	r.svc.automationTick(context.Background(), now)
 
@@ -394,7 +392,7 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("手动触发: %v", err)
 	}
-	if out.status != automation.RunClaimed || out.trigger != automation.TriggerManual {
+	if out.Status != automation.RunClaimed || out.Trigger != automation.TriggerManual {
 		t.Fatalf("手动触发结果不符: %+v", out)
 	}
 	got := r.file(t, "daily")
@@ -414,8 +412,8 @@ func TestRunAutomationNowManualDoesNotConsumeSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("第二次手动触发: %v", err)
 	}
-	if out2.status != automation.RunOverlap {
-		t.Fatalf("上一次会话还在跑时手动触发应 overlap，got %s", out2.status)
+	if out2.Status != automation.RunOverlap {
+		t.Fatalf("上一次会话还在跑时手动触发应 overlap，got %s", out2.Status)
 	}
 	// 未注册 → 40401；被停用 → 40001
 	if _, err := r.svc.runAutomationNow(context.Background(), "nope"); errCode(err) != "automation_not_found" {
@@ -459,10 +457,7 @@ func TestAutomationSchedulerStartStop(t *testing.T) {
 	// interval=0 = 关闭（不启 goroutine）
 	r2 := newSchedRig(t)
 	r2.svc.StartAutomationScheduler(0)
-	r2.svc.mu.Lock()
-	stop := r2.svc.automationStop
-	r2.svc.mu.Unlock()
-	if stop != nil {
+	if !r2.svc.automationPlane.SchedulerStopped() {
 		t.Fatal("interval=0 不该启动调度 goroutine")
 	}
 }
@@ -601,10 +596,10 @@ func TestAutomationMaxRunDurationWatchdog(t *testing.T) {
 		t.Fatalf("手动触发: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for r.svc.sessionRunning(out.sessionID) && time.Now().Before(deadline) {
+	for r.svc.HostSessionRunning(out.SessionID) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if r.svc.sessionRunning(out.sessionID) {
+	if r.svc.HostSessionRunning(out.SessionID) {
 		t.Fatalf("超过 max_run_duration 后会话应被取消（仍在 in_progress）")
 	}
 	// 桩进程回收由夹具的 t.Cleanup(orch.Close) 负责（先停编排器再关库）。

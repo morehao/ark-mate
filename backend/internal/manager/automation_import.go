@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	automationdomain "github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
@@ -122,7 +123,7 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 // 字符串时间）——`DefinitionFile.Set` 会把它 marshal 成紧凑 JSON 再统一缩进，所以导出物与老文件
 // 载体的写回形态一致，且两次导出逐字节相同。
 func automationFileBody(row *model.AutomationEntity) (string, error) {
-	df, err := capability.DecodeDefinitionDoc(automationLocator(row.ID), []byte(row.Body))
+	df, err := capability.DecodeDefinitionDoc(automationdomain.Locator(row.ID), []byte(row.Body))
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +267,7 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 	if err != nil {
 		return "", "", nil, err
 	}
-	df, err := capability.DecodeDefinitionDoc(automationLocator(id), rest)
+	df, err := capability.DecodeDefinitionDoc(automationdomain.Locator(id), rest)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -335,7 +336,7 @@ func automationRuntimeFromDoc(doc map[string]json.RawMessage) (*store.Automation
 			if len(runs) > automation.RecentRunsMax {
 				runs = runs[:automation.RecentRunsMax]
 			}
-			rt.RecentRuns = automationRunsJSON(runs)
+			rt.RecentRuns = automationdomain.RunsJSON(runs)
 		}
 	}
 	if !found {

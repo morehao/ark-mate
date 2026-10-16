@@ -1,4 +1,4 @@
-package manager
+package automation
 
 import (
 	"context"
@@ -36,23 +36,24 @@ import (
 // `startup`（启动时该干什么，ADR-9 的落点）。它们由时钟决定、且随时可重算，落盘只会
 // 制造第二个事实源。
 
-// automationRec 一条 automation 的注册表记录。
-type automationRec struct {
-	def automation.Automation
-	// nextDue 下次到期时刻（零值 = 没有下一次：已跑完的 once / 已归档 / 装载失败）。
-	nextDue time.Time
-	// startup 启动时的动作（wait | recover | expire | inactive）——由调度器的启动 pass 消费。
-	startup automation.StartupAction
-	// loadErr 装载失败原因（**留在注册表里**而不是静默跳过：用户写了文件却在面板上看不见，
+// Rec 一条 automation 的注册表记录。
+type Rec struct {
+	// Def 定义本体。
+	Def automation.Automation
+	// NextDue 下次到期时刻（零值 = 没有下一次：已跑完的 once / 已归档 / 装载失败）。
+	NextDue time.Time
+	// Startup 启动时的动作（wait | recover | expire | inactive）——由调度器的启动 pass 消费。
+	Startup automation.StartupAction
+	// LoadErr 装载失败原因（**留在注册表里**而不是静默跳过：用户写了文件却在面板上看不见，
 	// 且不知道为什么，是最难排查的一类投诉）。
-	loadErr string
+	LoadErr string
 }
 
 // automationDirFor 取自动化定义目录；未配置 → 显式报错（不静默"内存生效、盘上没留痕"）。
-func (s *Service) automationDirFor(what string) (string, error) {
-	s.mu.Lock()
-	dir := s.automationDir
-	s.mu.Unlock()
+func (pl *Plane) automationDirFor(what string) (string, error) {
+	pl.mu.Lock()
+	dir := pl.dir
+	pl.mu.Unlock()
 	if dir == "" {
 		return "", acl.NewError(acl.ClassRequest, "automation_dir_unset",
 			fmt.Sprintf("未配置自动化目录（MATE_AUTOMATIONS），%s只能内存生效、重启即失；设好目录后重试", what), nil)
@@ -65,10 +66,10 @@ func (s *Service) automationDirFor(what string) (string, error) {
 // 坏定义**留在注册表里带 `loadErr`**（而不是像能力装载那样 WARN 后跳过）：automation 是
 // 用户逐条手写的少量定义，写错一条却"列表里没有、调度也不跑、日志里一行 WARN"很难排查。
 // 返回成功装载的条数（供启动日志）。
-func (s *Service) LoadAutomationDefinitions(dir string) int {
-	s.mu.Lock()
-	s.automationDir = dir
-	s.mu.Unlock()
+func (pl *Plane) LoadAutomationDefinitions(dir string) int {
+	pl.mu.Lock()
+	pl.dir = dir
+	pl.mu.Unlock()
 	if dir == "" {
 		return 0
 	}
@@ -88,33 +89,33 @@ func (s *Service) LoadAutomationDefinitions(dir string) int {
 		id := strings.TrimSuffix(e.Name(), ".json")
 		path := filepath.Join(dir, e.Name())
 		rec := loadAutomationFile(path, id, now)
-		if rec.loadErr == "" {
+		if rec.LoadErr == "" {
 			loaded++
 		} else {
-			glog.Warnw(context.Background(), "automation 定义装载失败（已留在列表里带 error，便于面板显示）", "id", id, "err", rec.loadErr)
+			glog.Warnw(context.Background(), "automation 定义装载失败（已留在列表里带 error，便于面板显示）", "id", id, "err", rec.LoadErr)
 		}
-		s.mu.Lock()
-		if s.automations == nil {
-			s.automations = map[string]*automationRec{}
+		pl.mu.Lock()
+		if pl.recs == nil {
+			pl.recs = map[string]*Rec{}
 		}
-		s.automations[id] = rec
-		s.mu.Unlock()
+		pl.recs[id] = rec
+		pl.mu.Unlock()
 	}
 	return loaded
 }
 
 // loadAutomationFile 读一个定义文件并算出调度态。**不改文件**（装载期的副作用会让每次重启
 // 都改一遍用户文件；"once 过期置 inactive"那类改写由调度器的启动 pass 显式做，M4-4）。
-func loadAutomationFile(path, id string, now time.Time) *automationRec {
+func loadAutomationFile(path, id string, now time.Time) *Rec {
 	// 先把**文件名**记进 id：装载失败时列表仍然要指出"是哪个文件坏了"（否则一条 error
 	// 挂在空 id 上，等于没说）——`buildAutomationRec` 承接这条约定。
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return &automationRec{def: automation.Automation{ID: id}, loadErr: fmt.Sprintf("读取失败：%v", err)}
+		return &Rec{Def: automation.Automation{ID: id}, LoadErr: fmt.Sprintf("读取失败：%v", err)}
 	}
 	var def automation.Automation
 	if err := json.Unmarshal(raw, &def); err != nil {
-		return &automationRec{def: automation.Automation{ID: id}, loadErr: fmt.Sprintf("不是合法 JSON：%v", err)}
+		return &Rec{Def: automation.Automation{ID: id}, LoadErr: fmt.Sprintf("不是合法 JSON：%v", err)}
 	}
 	return buildAutomationRec(def, id, now)
 }
@@ -131,15 +132,15 @@ func loadAutomationFile(path, id string, now time.Time) *automationRec {
 //
 // 容错逐字保留：坏定义**留在列表里带 `loadErr`**（用户写了文件却在面板上看不见、还不知道
 // 为什么，是最难排查的一类投诉）。
-func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir string) int {
-	s.mu.Lock()
-	s.automationDir = dir
-	s.automations = map[string]*automationRec{}
-	s.mu.Unlock()
-	if s.st == nil {
+func (pl *Plane) LoadAutomationDefinitionsFromStore(ctx context.Context, dir string) int {
+	pl.mu.Lock()
+	pl.dir = dir
+	pl.recs = map[string]*Rec{}
+	pl.mu.Unlock()
+	if pl.st == nil {
 		return 0
 	}
-	rows, err := s.st.ListAutomationDefinitions(ctx)
+	rows, err := pl.st.ListAutomationDefinitions(ctx)
 	if err != nil {
 		glog.Warnw(ctx, "automation: 从持久层读定义失败", "err", err)
 		return 0
@@ -148,18 +149,18 @@ func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir st
 	loaded := 0
 	for i := range rows {
 		rec := loadAutomationRow(&rows[i], now)
-		if rec.loadErr == "" {
+		if rec.LoadErr == "" {
 			loaded++
 		} else {
 			glog.Warnw(ctx, "automation 定义装载失败（已留在列表里带 error，便于面板显示）",
-				"id", rows[i].ID, "err", rec.loadErr)
+				"id", rows[i].ID, "err", rec.LoadErr)
 		}
-		s.mu.Lock()
-		if s.automations == nil {
-			s.automations = map[string]*automationRec{}
+		pl.mu.Lock()
+		if pl.recs == nil {
+			pl.recs = map[string]*Rec{}
 		}
-		s.automations[rows[i].ID] = rec
-		s.mu.Unlock()
+		pl.recs[rows[i].ID] = rec
+		pl.mu.Unlock()
 	}
 	return loaded
 }
@@ -168,17 +169,17 @@ func (s *Service) LoadAutomationDefinitionsFromStore(ctx context.Context, dir st
 //
 // 用 `Schedule.Startup` 而不是直接 `NextAfter`：只有它能区分"未到期待跑"与"停机期间错过"，
 // 并且把 `once` 的两条终局（过期未跑 / 已跑完）分开——这正是 ADR-9 的落点。
-func (r *automationRec) applySchedule(now time.Time) {
-	if r.loadErr != "" {
+func (r *Rec) ApplySchedule(now time.Time) {
+	if r.LoadErr != "" {
 		return
 	}
-	action, occ, err := r.def.Schedule.Startup(r.def.LastFiredAt, now)
+	action, occ, err := r.Def.Schedule.Startup(r.Def.LastFiredAt, now)
 	if err != nil {
-		r.loadErr = errText(err)
+		r.LoadErr = errText(err)
 		return
 	}
-	r.startup = action
-	r.nextDue = occ.At
+	r.Startup = action
+	r.NextDue = occ.At
 }
 
 // patchID 从 patch 的 `id` 值取字符串：写面（原文 JSON 对象）给的是 json.RawMessage，
@@ -226,9 +227,9 @@ func notFoundAutomation(id string) error {
 }
 
 // invalidAutomation 定义本身不可执行（装载期就发现了）→ 报出装载期记下的原因，而不是"未知错误"。
-func invalidAutomation(rec automationRec) error {
+func invalidAutomation(rec Rec) error {
 	return acl.NewError(acl.ClassRequest, "definition_invalid",
-		fmt.Sprintf("automation %s 的定义不可执行：%s", rec.def.ID, rec.loadErr), nil)
+		fmt.Sprintf("automation %s 的定义不可执行：%s", rec.Def.ID, rec.LoadErr), nil)
 }
 
 // automationDisabled 用户把它关了（enabled=false）→ 手动触发也拒绝：
@@ -259,14 +260,14 @@ func asACLError(err error, dst **acl.Error) bool {
 // `create=true`：id 已存在 → 40901 `automation_exists`，**绝不覆盖**。
 // `patch` 是"这次要改的键"（覆盖写只改出现过的键 —— C9 第 2 步）；落盘前先按**合并结果**校验，
 // 校验不过 → **零字节落盘**（与能力写面同一条纪律）。
-func (s *Service) writeAutomation(ctx context.Context, id string, patch map[string]any, create bool) (dtoautomation.AutomationResp, error) {
+func (pl *Plane) WriteAutomation(ctx context.Context, id string, patch map[string]any, create bool) (dtoautomation.AutomationResp, error) {
 	// 打开草稿（**这一步就把载体的存在性与当前版本握在手里**：文件 = mtime，DB = 行 revision），
 	// 后面的"合并 → 校验 → 规范化 → 提交"对两种载体逐字相同。
-	draft, err := s.openAutomationDraft(ctx, id)
+	draft, err := pl.openAutomationDraft(ctx, id)
 	if err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
-	exists := draft.existed
+	exists := draft.Existed
 	switch {
 	case create && exists:
 		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassLimit, "automation_exists",
@@ -316,22 +317,22 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 	// 这条 C9 语义不因换载体而变。
 	for _, k := range definition.SortedPatchKeys(patch) {
 		if patch[k] == nil {
-			draft.df.Delete(k)
+			draft.DF.Delete(k)
 			continue
 		}
-		if err := draft.df.Set(k, patch[k]); err != nil {
+		if err := draft.DF.Set(k, patch[k]); err != nil {
 			return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
-				fmt.Sprintf("automation 定义 %s 的键 %q 无法序列化：%v", draft.locator, k, err), err)
+				fmt.Sprintf("automation 定义 %s 的键 %q 无法序列化：%v", draft.Locator, k, err), err)
 		}
 	}
 	// 合并后的**确切字节**先解成强类型再校验：PUT 的语义是"这几个键置成这些值"，
 	// 所以必须校验**合并结果**（而不是只校验 patch 里的键）。
-	merged, err := draft.df.Marshal()
+	merged, err := draft.DF.Marshal()
 	if err != nil {
 		return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("序列化 automation %s 失败：%v", id, err), err)
 	}
-	merged, droppedLegacy, err := dropLegacyRuntimeHint(draft.df, merged, id)
+	merged, droppedLegacy, err := dropLegacyRuntimeHint(draft.DF, merged, id)
 	if err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
@@ -360,99 +361,99 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 					days = append(days, d)
 				}
 				sch["days_of_week"] = days
-				if err := draft.df.Set("schedule", sch); err != nil {
+				if err := draft.DF.Set("schedule", sch); err != nil {
 					return dtoautomation.AutomationResp{}, acl.NewError(acl.ClassService, "definition_write_failed",
 						fmt.Sprintf("写入 automation %s 的规范化 days_of_week 失败：%v", id, err), err)
 				}
 			}
 		}
 	}
-	if err := s.commitAutomationDraft(ctx, draft, create); err != nil {
+	if err := pl.commitAutomationDraft(ctx, draft, create); err != nil {
 		return dtoautomation.AutomationResp{}, err
 	}
 	def.State = automation.NormalizeState(def.State)
-	rec := &automationRec{def: def}
-	rec.applySchedule(time.Now())
-	s.mu.Lock()
-	if s.automations == nil {
-		s.automations = map[string]*automationRec{}
+	rec := &Rec{Def: def}
+	rec.ApplySchedule(time.Now())
+	pl.mu.Lock()
+	if pl.recs == nil {
+		pl.recs = map[string]*Rec{}
 	}
-	s.automations[id] = rec
-	s.mu.Unlock()
-	return rec.view(), nil
+	pl.recs[id] = rec
+	pl.mu.Unlock()
+	return rec.View(), nil
 }
 
 // DeleteAutomationByID 删载体里的定义 + 摘内存条目；幂等（本来就不存在 → deleted:false）。
-func (s *Service) DeleteAutomationByID(ctx context.Context, id string) (bool, error) {
-	removed, err := s.deleteAutomationDefinition(ctx, id)
+func (pl *Plane) DeleteAutomationByID(ctx context.Context, id string) (bool, error) {
+	removed, err := pl.deleteAutomationDefinition(ctx, id)
 	if err != nil {
 		return false, err
 	}
-	s.mu.Lock()
-	delete(s.automations, id)
-	s.mu.Unlock()
+	pl.mu.Lock()
+	delete(pl.recs, id)
+	pl.mu.Unlock()
 	return removed, nil
 }
 
 // ListAutomations 列出注册表（含装载失败的那些，带 `error` 字段），按 id 排序。
-func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]dtoautomation.AutomationResp, 0, len(s.automations))
-	for _, rec := range s.automations {
-		out = append(out, rec.view())
+func (pl *Plane) ListAutomations() ([]dtoautomation.AutomationResp, error) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	out := make([]dtoautomation.AutomationResp, 0, len(pl.recs))
+	for _, rec := range pl.recs {
+		out = append(out, rec.View())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
 // AutomationByID 取一条（含装载失败的那些）。
-func (s *Service) AutomationByID(id string) (dtoautomation.AutomationResp, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.automations[id]
+func (pl *Plane) AutomationByID(id string) (dtoautomation.AutomationResp, bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	rec, ok := pl.recs[id]
 	if !ok {
 		return dtoautomation.AutomationResp{}, false
 	}
-	return rec.view(), true
+	return rec.View(), true
 }
 
-// automationDueSnapshot 取"到期待处理"的快照（调度器每 tick 调用）。
+// DueSnapshot 取"到期待处理"的快照（调度器每 tick 调用）。
 //
 // 过滤掉四类：装载失败、`enabled=false`、非 `active` 状态、以及没有下一次到期的（跑完的 once）。
 // 排序按 `(next_due, id)`——与 openwork `selectDueAutomations` 同序，让同刻到期的多条
 // automation 有稳定顺序（否则测试与运维观察都会飘）。
-func (s *Service) automationDueSnapshot(now time.Time) []automationRec {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]automationRec, 0, len(s.automations))
-	for _, rec := range s.automations {
-		if rec.loadErr != "" || !rec.def.Enabled || !automation.Schedulable(rec.def.State) {
+func (pl *Plane) DueSnapshot(now time.Time) []Rec {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	out := make([]Rec, 0, len(pl.recs))
+	for _, rec := range pl.recs {
+		if rec.LoadErr != "" || !rec.Def.Enabled || !automation.Schedulable(rec.Def.State) {
 			continue
 		}
-		if rec.nextDue.IsZero() || rec.nextDue.After(now) {
+		if rec.NextDue.IsZero() || rec.NextDue.After(now) {
 			continue
 		}
 		r := *rec
-		r.def.Schedule.Normalize()
+		r.Def.Schedule.Normalize()
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if !out[i].nextDue.Equal(out[j].nextDue) {
-			return out[i].nextDue.Before(out[j].nextDue)
+		if !out[i].NextDue.Equal(out[j].NextDue) {
+			return out[i].NextDue.Before(out[j].NextDue)
 		}
-		return out[i].def.ID < out[j].def.ID
+		return out[i].Def.ID < out[j].Def.ID
 	})
 	return out
 }
 
-// automationRecByID 取一份记录副本（调度器执行前用；副本避免持锁跑 agent 会话动作）。
-func (s *Service) automationRecByID(id string) (automationRec, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.automations[id]
+// RecByID 取一份记录副本（调度器执行前用；副本避免持锁跑 agent 会话动作）。
+func (pl *Plane) RecByID(id string) (Rec, bool) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	rec, ok := pl.recs[id]
 	if !ok {
-		return automationRec{}, false
+		return Rec{}, false
 	}
 	return *rec, true
 }
@@ -461,34 +462,37 @@ func (s *Service) automationRecByID(id string) (automationRec, bool) {
 //
 // 判据用"最近一次触发产生的会话仍在 in_progress"：会话自身状态就是最权威的运行态
 // （ADR-4：不建第二套 run 状态机）。
-func (s *Service) automationHasActiveRun(rec automationRec) bool {
+func (pl *Plane) HasActiveRun(rec Rec) bool {
 	// 判据只有一条：**会话状态是不是 in_progress**（不另写一份终态清单——两份清单必然漂移，
 	// 而漂移的后果是"卡住的会话"被当成已结束，于是同一 occurrence 反复重跑）。
-	return s.sessionRunning(rec.def.LastSessionID)
+	if pl.hostOf() == nil {
+		return false
+	}
+	return pl.hostOf().SessionRunning(rec.Def.LastSessionID)
 }
 
 // view 把记录投影成对外视图（时间一律 RFC3339 UTC 文本，与其余接口同格式）。
-func (r *automationRec) view() dtoautomation.AutomationResp {
+func (r *Rec) View() dtoautomation.AutomationResp {
 	v := dtoautomation.AutomationResp{
-		ID:                  r.def.ID,
-		Name:                r.def.Name,
-		Enabled:             r.def.Enabled,
-		State:               automation.NormalizeState(r.def.State),
-		Schedule:            r.def.Schedule,
-		Target:              r.def.Target,
-		MaxRunDuration:      r.def.MaxRunDuration,
-		LastSessionID:       r.def.LastSessionID,
-		LastStatus:          r.def.LastStatus,
-		LastReason:          r.def.LastReason,
-		ConsecutiveFailures: r.def.ConsecutiveFailures,
-		Error:               r.loadErr,
-		RecentRuns:          r.def.RecentRuns,
+		ID:                  r.Def.ID,
+		Name:                r.Def.Name,
+		Enabled:             r.Def.Enabled,
+		State:               automation.NormalizeState(r.Def.State),
+		Schedule:            r.Def.Schedule,
+		Target:              r.Def.Target,
+		MaxRunDuration:      r.Def.MaxRunDuration,
+		LastSessionID:       r.Def.LastSessionID,
+		LastStatus:          r.Def.LastStatus,
+		LastReason:          r.Def.LastReason,
+		ConsecutiveFailures: r.Def.ConsecutiveFailures,
+		Error:               r.LoadErr,
+		RecentRuns:          r.Def.RecentRuns,
 	}
-	if !r.nextDue.IsZero() {
-		v.NextDueAt = r.nextDue.UTC().Format(time.RFC3339)
+	if !r.NextDue.IsZero() {
+		v.NextDueAt = r.NextDue.UTC().Format(time.RFC3339)
 	}
-	if r.def.LastFiredAt != nil {
-		v.LastFiredAt = r.def.LastFiredAt.UTC().Format(time.RFC3339)
+	if r.Def.LastFiredAt != nil {
+		v.LastFiredAt = r.Def.LastFiredAt.UTC().Format(time.RFC3339)
 	}
 	return v
 }

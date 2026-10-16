@@ -300,8 +300,8 @@ func TestAutomationLoadBadDefinitions(t *testing.T) {
 	// due 快照：坏定义与 disabled 都不在
 	due := svc.automationDueSnapshot(time.Now().Add(48 * time.Hour))
 	for _, rec := range due {
-		if rec.def.ID == "broken" || rec.def.ID == "mismatch" || rec.def.ID == "disabled" {
-			t.Fatalf("不该出现在 due 快照里: %s", rec.def.ID)
+		if rec.Def.ID == "broken" || rec.Def.ID == "mismatch" || rec.Def.ID == "disabled" {
+			t.Fatalf("不该出现在 due 快照里: %s", rec.Def.ID)
 		}
 	}
 }
@@ -334,20 +334,20 @@ func TestAutomationDueSnapshot(t *testing.T) {
 		t.Fatalf("装载应为 4，got %d", n)
 	}
 	due := svc.automationDueSnapshot(time.Now())
-	if len(due) != 1 || due[0].def.ID != "a1" {
+	if len(due) != 1 || due[0].Def.ID != "a1" {
 		t.Fatalf("只有 a1 该到期，got %+v", due)
 	}
 	rec, ok := svc.automationRecByID("d4")
-	if !ok || rec.startup != automation.StartupExpire || !rec.nextDue.IsZero() {
-		t.Fatalf("过期的 once 应记 expire 且无 next_due: %+v（startup=%s）", rec, rec.startup)
+	if !ok || rec.Startup != automation.StartupExpire || !rec.NextDue.IsZero() {
+		t.Fatalf("过期的 once 应记 expire 且无 next_due: %+v（startup=%s）", rec, rec.Startup)
 	}
 	// once 未到期 → wait（future）
-	if rec, _ := svc.automationRecByID("b2"); rec.startup != automation.StartupWait {
-		t.Fatalf("未到期的 once 应记 wait，got %s", rec.startup)
+	if rec, _ := svc.automationRecByID("b2"); rec.Startup != automation.StartupWait {
+		t.Fatalf("未到期的 once 应记 wait，got %s", rec.Startup)
 	}
 	// daily + 陈旧的 last_fired_at → recover（ADR-9 的补跑判据）
-	if rec, _ := svc.automationRecByID("a1"); rec.startup != automation.StartupRecover {
-		t.Fatalf("停机错过的 daily 应记 recover，got %s", rec.startup)
+	if rec, _ := svc.automationRecByID("a1"); rec.Startup != automation.StartupRecover {
+		t.Fatalf("停机错过的 daily 应记 recover，got %s", rec.Startup)
 	}
 }
 

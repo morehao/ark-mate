@@ -1,4 +1,4 @@
-package manager
+package automation
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 
 // ——— automation 定义的载体（M6-7） ———
 //
-// 与能力/agent 面同一个判据（`s.st != nil`），但这里的载体分工更细，因为 automation 的载体里
+// 与能力/agent 面同一个判据（`pl.st != nil`），但这里的载体分工更细，因为 automation 的载体里
 // 住着**两种东西**：
 //
 //	memory 模式：`<AutomationDir>/<id>.json` —— 定义与运行态同文件（C9 纪律 + mtime 乐观锁）；
@@ -35,28 +35,28 @@ import (
 //     同一 occurrence 至多触发一次（at-most-once），而文件载体保持"跑完再写回"的历史语义
 //     （崩溃窗口内可能重复跑一次）。这正是 Plan §7 P-12 明说要改的那条失败语义。
 
-// automationLocator automation 定义在 DB 载体里的定位串（与能力面的 `db:skill/<id>` 同形）。
-func automationLocator(id string) string { return "db:automation/" + id }
+// Locator automation 定义在 DB 载体里的定位串（与能力面的 `db:skill/<id>` 同形）。
+func Locator(id string) string { return "db:automation/" + id }
 
-// automationDraft 一份未落盘的定义草稿（两种载体共用一个流程）。
-type automationDraft struct {
-	// id 定义 id（= 文件名 / 行键）——由 openAutomationDraft 填，避免从定位串反推。
-	id string
-	df *capability.DefinitionFile
-	// locator 定位串（DB = `db:automation/<id>`，文件 = 定义文件路径）——错误文案与响应里都用它。
-	locator string
-	// existed 打开时载体里是否已有这一条（`automation_exists` / `automation_not_found` 的判据）。
-	existed bool
-	// file 非 nil = 文件载体（落盘走它的 mtime 乐观锁）；nil = DB 载体（走行 revision CAS）。
-	file *definition.DefinitionDraft
-	// rev DB 载体的行 revision（CAS 期望值）。
-	rev int64
+// Draft 一份未落盘的定义草稿（两种载体共用一个流程）。
+type Draft struct {
+	// ID 定义 id（= 文件名 / 行键）——由 openAutomationDraft 填，避免从定位串反推。
+	ID string
+	DF *capability.DefinitionFile
+	// Locator 定位串（DB = `db:automation/<id>`，文件 = 定义文件路径）——错误文案与响应里都用它。
+	Locator string
+	// Existed 打开时载体里是否已有这一条（`automation_exists` / `automation_not_found` 的判据）。
+	Existed bool
+	// File 非 nil = 文件载体（落盘走它的 mtime 乐观锁）；nil = DB 载体（走行 revision CAS）。
+	File *definition.DefinitionDraft
+	// Rev DB 载体的行 revision（CAS 期望值）。
+	Rev int64
 }
 
 // openAutomationDraft 打开定义草稿（不存在 → 新建草稿；**不落盘**）。
-func (s *Service) openAutomationDraft(ctx context.Context, id string) (*automationDraft, error) {
-	if s.st == nil {
-		dir, err := s.automationDirFor("automation 的增删改")
+func (pl *Plane) openAutomationDraft(ctx context.Context, id string) (*Draft, error) {
+	if pl.st == nil {
+		dir, err := pl.automationDirFor("automation 的增删改")
 		if err != nil {
 			return nil, err
 		}
@@ -64,10 +64,10 @@ func (s *Service) openAutomationDraft(ctx context.Context, id string) (*automati
 		if err != nil {
 			return nil, err
 		}
-		return &automationDraft{id: id, df: d.Doc(), locator: d.Path(), existed: d.Existed(), file: d}, nil
+		return &Draft{ID: id, DF: d.Doc(), Locator: d.Path(), Existed: d.Existed(), File: d}, nil
 	}
-	locator := automationLocator(id)
-	row, found, err := s.st.GetAutomationDefinition(ctx, id)
+	locator := Locator(id)
+	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
 		return nil, acl.NewError(acl.ClassService, "definition_write_failed",
 			fmt.Sprintf("读取 automation 定义 %s 失败：%v", locator, err), err)
@@ -75,7 +75,7 @@ func (s *Service) openAutomationDraft(ctx context.Context, id string) (*automati
 	if !found {
 		// DB 行的新建路径用**内存文档**（`NewDefinitionDoc`）：行没有文件路径，
 		// 文件那三条纪律（staging/原子 rename/权限沿用）由行 revision 的事务承担。
-		return &automationDraft{id: id, df: capability.NewDefinitionDoc(locator), locator: locator}, nil
+		return &Draft{ID: id, DF: capability.NewDefinitionDoc(locator), Locator: locator}, nil
 	}
 	df, err := capability.DecodeDefinitionDoc(locator, []byte(row.Body))
 	if err != nil {
@@ -84,65 +84,65 @@ func (s *Service) openAutomationDraft(ctx context.Context, id string) (*automati
 		return nil, acl.NewError(acl.ClassRequest, "definition_invalid",
 			fmt.Sprintf("automation 定义 %s 不是合法 JSON 对象，先修好或删掉它再写：%v", locator, err), err)
 	}
-	return &automationDraft{id: id, df: df, locator: locator, existed: true, rev: row.Revision}, nil
+	return &Draft{ID: id, DF: df, Locator: locator, Existed: true, Rev: row.Revision}, nil
 }
 
 // commitAutomationDraft 提交草稿（DB：行 CAS + 审计；文件：mtime 乐观锁）。
-func (s *Service) commitAutomationDraft(ctx context.Context, d *automationDraft, create bool) error {
-	if d.file != nil {
-		return definition.SaveDefinition(d.file)
+func (pl *Plane) commitAutomationDraft(ctx context.Context, d *Draft, create bool) error {
+	if d.File != nil {
+		return definition.SaveDefinition(d.File)
 	}
-	body, err := d.df.Marshal()
+	body, err := d.DF.Marshal()
 	if err != nil {
 		return acl.NewError(acl.ClassService, "definition_write_failed",
-			fmt.Sprintf("序列化 automation 定义 %s 失败：%v", d.locator, err), err)
+			fmt.Sprintf("序列化 automation 定义 %s 失败：%v", d.Locator, err), err)
 	}
-	expected := d.rev
+	expected := d.Rev
 	if create {
 		// 新建走"仅当不存在"的 CAS：并发新建时后到的那次返回 `automation_exists`（与文件载体
 		// 的 O_EXCL 语义同解），而不是覆盖别人刚建的定义。
 		expected = 0
 	}
-	ok, err := s.st.UpsertAutomationDefinition(ctx, d.id, string(body), expected, definition.DefinitionWriteActor)
+	ok, err := pl.st.UpsertAutomationDefinition(ctx, d.ID, string(body), expected, definition.DefinitionWriteActor)
 	if err != nil {
 		return acl.NewError(acl.ClassService, "definition_write_failed",
-			fmt.Sprintf("写入 automation 定义 %s 失败：%v", d.locator, err), err)
+			fmt.Sprintf("写入 automation 定义 %s 失败：%v", d.Locator, err), err)
 	}
 	if !ok {
 		if create {
 			return acl.NewError(acl.ClassLimit, "automation_exists",
-				fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", d.id), nil)
+				fmt.Sprintf("automation %s 已存在（换一个 id，或用 PUT 覆盖它）", d.ID), nil)
 		}
-		return definition.DefinitionChangedErr(d.locator)
+		return definition.DefinitionChangedErr(d.Locator)
 	}
 	return nil
 }
 
 // deleteAutomationDefinition 删掉载体里的定义；返回是否真的删掉了（幂等删除）。
-func (s *Service) deleteAutomationDefinition(ctx context.Context, id string) (bool, error) {
-	if s.st == nil {
-		dir, err := s.automationDirFor("automation 的删除")
+func (pl *Plane) deleteAutomationDefinition(ctx context.Context, id string) (bool, error) {
+	if pl.st == nil {
+		dir, err := pl.automationDirFor("automation 的删除")
 		if err != nil {
 			return false, err
 		}
 		return definition.RemoveDefinitionPermanently(dir, "automation", id)
 	}
-	row, found, err := s.st.GetAutomationDefinition(ctx, id)
+	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
 		return false, acl.NewError(acl.ClassService, "definition_delete_failed",
-			fmt.Sprintf("读取 automation 定义 %s 失败：%v", automationLocator(id), err), err)
+			fmt.Sprintf("读取 automation 定义 %s 失败：%v", Locator(id), err), err)
 	}
 	if !found {
 		return false, nil
 	}
-	ok, err := s.st.DeleteAutomationDefinition(ctx, id, row.Revision, definition.DefinitionWriteActor)
+	ok, err := pl.st.DeleteAutomationDefinition(ctx, id, row.Revision, definition.DefinitionWriteActor)
 	if err != nil {
 		return false, acl.NewError(acl.ClassService, "definition_delete_failed",
-			fmt.Sprintf("删除 automation 定义 %s 失败：%v", automationLocator(id), err), err)
+			fmt.Sprintf("删除 automation 定义 %s 失败：%v", Locator(id), err), err)
 	}
 	if !ok {
 		// 删掉别人刚改过的那一版比覆盖更不可逆 → 一律报冲突让用户刷新重试。
-		return false, definition.DefinitionChangedErr(automationLocator(id))
+		return false, definition.DefinitionChangedErr(Locator(id))
 	}
 	return true, nil
 }
@@ -152,7 +152,7 @@ func (s *Service) deleteAutomationDefinition(ctx context.Context, id string) (bo
 // automationRuntimeOf 把强类型定义的运行态抽成列结构（**不含** `state`：它属于定义，见 P-10）。
 func automationRuntimeOf(def automation.Automation) store.AutomationRuntimeState {
 	return store.AutomationRuntimeState{
-		LastFiredAt:         automationLastFiredText(def.LastFiredAt),
+		LastFiredAt:         LastFiredText(def.LastFiredAt),
 		LastStatus:          def.LastStatus,
 		LastReason:          def.LastReason,
 		LastSessionID:       def.LastSessionID,
@@ -160,10 +160,10 @@ func automationRuntimeOf(def automation.Automation) store.AutomationRuntimeState
 	}
 }
 
-// automationLastFiredText 认领游标的文本形态（**唯一格式**：UTC + RFC3339Nano）。
+// LastFiredText 认领游标的文本形态（**唯一格式**：UTC + RFC3339Nano）。
 //
 // 它是 CAS 的比较值，两处写法必须逐字节一致——所以只有这一个函数负责格式化。
-func automationLastFiredText(t *time.Time) string {
+func LastFiredText(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
 	}
@@ -171,7 +171,7 @@ func automationLastFiredText(t *time.Time) string {
 }
 
 // automationRunsJSON 把运行史编成列的文本（空切片 → `[]`，不留 NULL/空串的第二种表示）。
-func automationRunsJSON(runs []automation.RunRecord) string {
+func RunsJSON(runs []automation.RunRecord) string {
 	if runs == nil {
 		runs = []automation.RunRecord{}
 	}
@@ -216,29 +216,29 @@ func automationDefFromRow(row *model.AutomationEntity) (automation.Automation, e
 // buildAutomationRec 从完整定义算出调度态记录（文件装载 / DB 装载 / 运行态写回三处共用）。
 //
 // 坏定义**留在注册表里带 loadErr**（`keyID` 先记进 id，列表才指得出是哪一条坏了）。
-func buildAutomationRec(def automation.Automation, keyID string, now time.Time) *automationRec {
-	rec := &automationRec{def: automation.Automation{ID: keyID}}
+func buildAutomationRec(def automation.Automation, keyID string, now time.Time) *Rec {
+	rec := &Rec{Def: automation.Automation{ID: keyID}}
 	if def.ID != "" && def.ID != keyID {
-		rec.loadErr = fmt.Sprintf("定义里的 id %q 与载体键 %q 不一致", def.ID, keyID)
+		rec.LoadErr = fmt.Sprintf("定义里的 id %q 与载体键 %q 不一致", def.ID, keyID)
 		return rec
 	}
 	def.ID = keyID
 	def.Schedule.Normalize()
 	if err := def.Validate(); err != nil {
-		rec.loadErr = errText(err)
+		rec.LoadErr = errText(err)
 		return rec
 	}
-	rec.def = def
-	rec.def.State = automation.NormalizeState(def.State)
-	rec.applySchedule(now)
+	rec.Def = def
+	rec.Def.State = automation.NormalizeState(def.State)
+	rec.ApplySchedule(now)
 	return rec
 }
 
 // loadAutomationRow 从一行算出记录（JSON 坏 → 带 loadErr 的记录）。
-func loadAutomationRow(row *model.AutomationEntity, now time.Time) *automationRec {
+func loadAutomationRow(row *model.AutomationEntity, now time.Time) *Rec {
 	def, err := automationDefFromRow(row)
 	if err != nil {
-		return &automationRec{def: automation.Automation{ID: row.ID}, loadErr: err.Error()}
+		return &Rec{Def: automation.Automation{ID: row.ID}, LoadErr: err.Error()}
 	}
 	return buildAutomationRec(def, row.ID, now)
 }
@@ -248,23 +248,23 @@ func loadAutomationRow(row *model.AutomationEntity, now time.Time) *automationRe
 // 与文件载体"写回后重新装载这一条"同源：**内存 = 载体**是定义，逐键 merge 迟早漏一个键
 // （历史上 `recent_runs` 就这么漏过一次）。重载失败时保留旧内存态并告警——绝不用一条读坏了
 // 的记录覆盖调度态。
-func (s *Service) reloadAutomationFromStore(ctx context.Context, id string) {
-	row, found, err := s.st.GetAutomationDefinition(ctx, id)
+func (pl *Plane) reloadAutomationFromStore(ctx context.Context, id string) {
+	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil || !found {
 		glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", err, "found", found)
 		return
 	}
 	rec := loadAutomationRow(row, time.Now())
-	if rec.loadErr != "" {
-		glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
+	if rec.LoadErr != "" {
+		glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.LoadErr)
 		return
 	}
-	s.mu.Lock()
-	if s.automations == nil {
-		s.automations = map[string]*automationRec{}
+	pl.mu.Lock()
+	if pl.recs == nil {
+		pl.recs = map[string]*Rec{}
 	}
-	s.automations[id] = rec
-	s.mu.Unlock()
+	pl.recs[id] = rec
+	pl.mu.Unlock()
 }
 
 // ——— 运行态写回与认领（P-12 的落点） ———
@@ -274,9 +274,9 @@ func (s *Service) reloadAutomationFromStore(ctx context.Context, id string) {
 // **平台自己调**，不是用户写面。`overlay` 的键按 `automation.IsReservedKey` 分成两半：
 // 保留键 → 运行态列；其余（目前只有 `state`）→ 定义正文的 map-patch（未知键与其它用户字段
 // 原样保留）。`expectedLastFired` 是认领 CAS 判据（空串 = "从未触发"）。
-func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay map[string]any, expectedLastFired string) error {
-	if s.st == nil {
-		dir, err := s.automationDirFor("automation 运行态写回")
+func (pl *Plane) SaveOverlay(ctx context.Context, id string, overlay map[string]any, expectedLastFired string) error {
+	if pl.st == nil {
+		dir, err := pl.automationDirFor("automation 运行态写回")
 		if err != nil {
 			return err
 		}
@@ -284,17 +284,17 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 			return err
 		}
 		rec := loadAutomationFile(filepath.Join(dir, id+".json"), id, time.Now())
-		if rec.loadErr != "" {
-			glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.loadErr)
+		if rec.LoadErr != "" {
+			glog.Warnw(ctx, "automation 写回后重载失败，保留原内存态", "automation", id, "err", rec.LoadErr)
 			return nil
 		}
-		s.mu.Lock()
-		s.automations[id] = rec
-		s.mu.Unlock()
+		pl.mu.Lock()
+		pl.recs[id] = rec
+		pl.mu.Unlock()
 		return nil
 	}
 
-	row, found, err := s.st.GetAutomationDefinition(ctx, id)
+	row, found, err := pl.st.GetAutomationDefinition(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 	// 会让用户的保存请求无故撞 40901）。
 	body, rev := "", int64(0)
 	if keys := nonReservedKeys(overlay); len(keys) > 0 {
-		df, err := capability.DecodeDefinitionDoc(automationLocator(id), []byte(row.Body))
+		df, err := capability.DecodeDefinitionDoc(Locator(id), []byte(row.Body))
 		if err != nil {
 			return err
 		}
@@ -336,7 +336,7 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 			body, rev = string(next), row.Revision
 		}
 	}
-	ok, err := s.st.SaveAutomationOverlay(ctx, id, store.AutomationOverlay{
+	ok, err := pl.st.SaveAutomationOverlay(ctx, id, store.AutomationOverlay{
 		Body: body, ExpectedRev: rev, ExpectedLastFired: expectedLastFired, Runtime: rt,
 	})
 	if err != nil {
@@ -347,7 +347,7 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 		return acl.NewError(acl.ClassLimit, "definition_changed",
 			fmt.Sprintf("automation %s 在本次运行期间被改动，运行态未写回（下一次触发会带上它）", id), nil)
 	}
-	s.reloadAutomationFromStore(ctx, id)
+	pl.reloadAutomationFromStore(ctx, id)
 	return nil
 }
 
@@ -356,14 +356,14 @@ func (s *Service) saveAutomationOverlay(ctx context.Context, id string, overlay 
 //
 // 认领成功后**立刻**把内存游标刷新到库里那一版：否则下一次 tick 还会拿旧游标判定，
 // 于是"认领成功但记录失败"会变成重复触发——这正是这条设计要挡住的形态。
-func (s *Service) claimAutomationOccurrence(ctx context.Context, rec automationRec, occurrence time.Time) (bool, error) {
-	expected := automationLastFiredText(rec.def.LastFiredAt)
+func (pl *Plane) claimAutomationOccurrence(ctx context.Context, rec Rec, occurrence time.Time) (bool, error) {
+	expected := LastFiredText(rec.Def.LastFiredAt)
 	claimedFor := occurrence.UTC().Format(time.RFC3339Nano)
-	ok, err := s.st.ClaimAutomationOccurrence(ctx, rec.def.ID, expected, claimedFor)
+	ok, err := pl.st.ClaimAutomationOccurrence(ctx, rec.Def.ID, expected, claimedFor)
 	if err != nil || !ok {
 		return ok, err
 	}
-	s.reloadAutomationFromStore(ctx, rec.def.ID)
+	pl.reloadAutomationFromStore(ctx, rec.Def.ID)
 	return true, nil
 }
 
@@ -394,7 +394,7 @@ func int64Of(m map[string]any, key string, fallback int64) int64 {
 func runsJSONOf(v any) string {
 	switch t := v.(type) {
 	case []automation.RunRecord:
-		return automationRunsJSON(t)
+		return RunsJSON(t)
 	case string:
 		return t
 	}

@@ -1,4 +1,4 @@
-package manager
+package automation
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -19,11 +18,9 @@ import (
 // 写面适配的职责只有两件：把原文 JSON 对象转成落盘层要的 patch（`definition.RawPatch`）与把领域视图
 // 转成 DTO。校验/落盘/并发那三件事全在 M4-3/M4-4 的实现里，这里不重复也不绕过。
 
-var _ svcautomation.AutomationSvc = (*Service)(nil)
-
 // GetAutomation 取一条（不存在 → `automation_not_found` 40401）。
-func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error) {
-	v, ok := s.AutomationByID(id)
+func (pl *Plane) GetAutomation(id string) (*dtoautomation.AutomationResp, error) {
+	v, ok := pl.AutomationByID(id)
 	if !ok {
 		return nil, notFoundAutomation(id)
 	}
@@ -31,7 +28,7 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 }
 
 // CreateAutomation 新建定义。`id` 必填（写面 DTO 的原文对象里取，非法类型 → 40000）。
-func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
+func (pl *Plane) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
 	raw, ok := req["id"]
 	if !ok {
 		return nil, definition.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
@@ -40,7 +37,7 @@ func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.Automa
 	if !okStr || id == "" {
 		return nil, definition.InvalidParamErr(`字段 "id" 须为非空字符串`)
 	}
-	v, err := s.writeAutomation(ctx, id, definition.RawPatch(req), true)
+	v, err := pl.WriteAutomation(ctx, id, definition.RawPatch(req), true)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +45,8 @@ func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.Automa
 }
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
-func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	v, err := s.writeAutomation(ctx, id, definition.RawPatch(req), false)
+func (pl *Plane) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
+	v, err := pl.WriteAutomation(ctx, id, definition.RawPatch(req), false)
 	if err != nil {
 		return nil, err
 	}
@@ -57,8 +54,8 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautoma
 }
 
 // DeleteAutomation 删除定义（幂等）。
-func (s *Service) DeleteAutomation(ctx context.Context, id string) (*dtoautomation.AutomationDeleteResp, error) {
-	removed, err := s.DeleteAutomationByID(ctx, id)
+func (pl *Plane) DeleteAutomation(ctx context.Context, id string) (*dtoautomation.AutomationDeleteResp, error) {
+	removed, err := pl.DeleteAutomationByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +64,7 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) (*dtoautomati
 
 // PreviewAutomation 只算未来若干次到期时刻：**不落盘、不建会话**（也不要求定义已存在——
 // 面板里正在编辑、还没保存的 schedule 同样能预览，这正是这个端点的用处）。
-func (s *Service) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dtoautomation.AutomationPreviewResp, error) {
+func (pl *Plane) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dtoautomation.AutomationPreviewResp, error) {
 	if len(req.Schedule) == 0 {
 		return nil, code.Error(code.InvalidParam, "缺少 schedule（预览要算的就是它）")
 	}
@@ -101,8 +98,8 @@ func (s *Service) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dt
 
 // ListAutomationRuns 运行史（最新在前）。定义装载失败时**不假装没有运行史**：
 // 如实报 `definition_invalid`，因为"文件坏了"正是用户此刻要解决的问题。
-func (s *Service) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsResp, error) {
-	v, ok := s.AutomationByID(id)
+func (pl *Plane) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsResp, error) {
+	v, ok := pl.AutomationByID(id)
 	if !ok {
 		return nil, notFoundAutomation(id)
 	}
@@ -119,11 +116,11 @@ func (s *Service) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsRe
 }
 
 // RunAutomationNow 手动触发一次（端口形态）。
-func (s *Service) RunAutomationNow(ctx context.Context, id string) (*dtoautomation.AutomationRunResp, error) {
-	out, err := s.runAutomationNow(ctx, id)
+func (pl *Plane) RunAutomationNow(ctx context.Context, id string) (*dtoautomation.AutomationRunResp, error) {
+	out, err := pl.RunNow(ctx, id)
 	resp := &dtoautomation.AutomationRunResp{
-		ID: id, Status: out.status, Trigger: out.trigger,
-		SessionID: out.sessionID, Reason: out.reason, State: out.state,
+		ID: id, Status: out.Status, Trigger: out.Trigger,
+		SessionID: out.SessionID, Reason: out.Reason, State: out.State,
 	}
 	if err != nil {
 		// 失败也要把结果回带（面板要显示"我点过、没跑成、为什么"）：用 detail 承载

@@ -30,6 +30,8 @@ func (s *Service) attachStore(st *store.Store) {
 	// 漏这一行的表现是**静默**的：`RecentWorkspaces` 把默认工作空间与已登记项当成"未登记"推回来，
 	// 而它只在 sqlite 模式下才现形（memory 模式的登记表在域自己的 `memDefaultWorkspace` 里）。
 	s.planner.SetStore(st)
+	// P2b：自动化域也要拿到库句柄（DB 载体的定义行 + 运行态列）。
+	s.automationPlane.SetStore(st)
 }
 
 func (s *Service) EnableStore(st *store.Store) {

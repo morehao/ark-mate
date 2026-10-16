@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -48,21 +49,8 @@ type Service struct {
 	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
 	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
 	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
-	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
-	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
-	automationDir string
-	automations   map[string]*automationRec
-	// automationStop 调度 goroutine 的停止函数（非 nil = 已启动；StartAutomationScheduler 幂等判据）。
-	automationStop context.CancelFunc
-	// automationDone 调度 goroutine 的退出信号（Stop 等它关闭再返回：停机后不该再有新触发起步）。
-	automationDone chan struct{}
-	// automationRunMu 把「认领判定 → 建会话 → 写回游标」串成临界区。
-	//
-	// 认领判定（`automation.Decide`）是纯函数，纯函数**不提供互斥**：tick 与
-	// `POST /automations/:id/run` 若同时看到"这个 occurrence 还没认领过"，两边都会建会话——
-	// 而 automation 的 prompt 常常有副作用（改代码、发通知），重复跑一次是不可接受的。
-	// 临界区里唯一的慢动作是建会话（子进程握手），而 automation 触发本身稀疏，串行化代价可忽略。
-	automationRunMu sync.Mutex
+	// automationPlane 自动化域（定义注册表 + 排期 + 调度循环；P2b 起状态归它自持锁）。
+	automationPlane *automation.Plane
 	// skillPlane 技能平面（读面 + 重校；与 mcp 平面共用同一份 caps 注册表）。
 	skillPlane *skill.Plane
 	// mcpSecrets 连接器平面的密钥解析面（引用 → 明文；与 creds 共用同一份凭据机制）。
@@ -129,7 +117,6 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
-		autoVer:          make(map[string]int64),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
@@ -145,6 +132,11 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.picker = workspace.NewPicker()
 	// 工作空间域：策略状态在它自己的锁下（P2b 起不再是 Service 的字段）。
 	s.planner = workspace.NewPlane()
+	// 自动化域：定义注册表与调度态都在它自己的锁下（P2b 起不再是 Service 的字段）。
+	// 它需要两样家当（库句柄 + 宿主端口），分别在 `attachStore` 与这里接上——**早一行是 nil**，
+	// 而表现是"该走库的走了内存"或"触发时找不到宿主"（静默）。
+	s.automationPlane = automation.NewPlane()
+	s.automationPlane.SetHost(automationHostAdapter{svc: s})
 	// 会话事实端口（P2b）：workspace 域不拥有会话，只消费这里的两个动作。
 	s.planner.SetSessionSource(s)
 	s.providerPlane = provider.NewPlane(reg, s.creds)
