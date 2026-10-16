@@ -319,19 +319,22 @@ export function SessionDetailDrawer({
                   </span>,
                 )}
               {(() => {
-                // 是否可切换**由运行时说了算**：目录里有 category=model 候选才显示选择器
-                // （不再按 runtime 名硬编码——这是能力面的事实，不是某个底座的特例）。
+                // 是否可切换由**平台清单 ∩ 运行时广告**说了算（v27；`modelValues` 只回平台声明过的
+                // 那些——不再按 runtime 名硬编码，也不再把选不了的广告项摆出来）。没有可选项时
+                // 不摆空下拉（那看着像"模型没了"），只如实说明一行。
                 const modelOptions = modelValues(modelCatalog ?? undefined)
                 if (modelOptions.length === 0) {
-                  // 运行时没给出目录（未启动/未登录）：只如实说明，不展示不透明取值串。
-                  return row('模型', s.model ? '已设置（当前无平台清单）' : '运行时默认')
+                  // 不展示不透明取值串：会话的 `model` 仍是平台行 id，这里没有清掉任何东西。
+                  // 措辞只说"当前没有可选项"，**不说**"没配置"——目录为空可能只是运行时此刻
+                  // 没广告候选（平台清单里其实有模型），把它讲成"没配置"会把人引向错误的方向。
+                  return row('模型', s.model ? '已设置（目录里当前没有可选项）' : '跟随默认（暂无可选模型）')
                 }
                 // v26：会话里存的是**平台模型行 id**，候选上带着 `model_id` 注解——用它反查当前
-                // 选中项。反查不到（模型行被删了 / 换了清单）就补一个只读项**如实显示不可用**，
-                // 而不是显示成空（空会让用户以为这条会话没选模型）。
+                // 选中项。反查不到（模型行被删了 / 换了清单 / 运行时此刻没广告它）就补一个只读项
+                // **如实显示不可用**，而不是显示成空（空会让用户以为这条会话没选模型）。
                 const values =
                   s.model && !modelOptions.some((v) => v.model_id === s.model)
-                    ? [{ value: s.model, name: '当前模型（不在平台清单里）' }, ...modelOptions]
+                    ? [{ value: s.model, name: '当前模型（模型目录里没有它）' }, ...modelOptions]
                     : modelOptions
                 return row(
                   '模型',

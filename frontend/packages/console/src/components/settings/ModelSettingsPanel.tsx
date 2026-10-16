@@ -9,6 +9,11 @@
  *  - **删除 → 确认弹窗**（标题带对象名、描述说清后果），不用气泡确认；
  *  - **新建 → 列表最后一格的虚线整宽按钮**（供应商），模型则挂在每个供应商分组头上；
  *  - **保存成功 → 一行 `role="status"` 提示**（不是飘走就看不见的 toast）；「没有改动」留在卡片里。
+ *  - **默认模型（v28 改）**：它是**全局单一值**（ADR-21），页头只留一行**只读**状态说"现在是哪条"
+ *    （唯一标记 `aria-label="默认模型"`，A14 守卫按它数，恰好一个），**设/取消是每条模型行卡上的
+ *    一个按钮**（默认那条显示「取消默认」，其余显示「设为默认」）。此前"设默认"是页头的一个下拉：
+ *    操作与对象分处两地，选完还得回列表核对哪条变成了默认（用户 2026-10-16 要求改成本形态）。
+ *    注意这**不削弱**"默认只有一个"：单一值仍在服务端，行卡上的两个按钮改的都是同一个值。
  *
  * 命名纪律（A13 守卫钉住）：这一整节面向用户的字（标题 / 正文 / toast / tooltip / 空态 /
  * 错误出路 / 状态标签）只说「供应商」「模型」「已生效 / 待生效」「已保存」。底座名与 `provider`
@@ -642,10 +647,21 @@ export function ModelSettingsPanel() {
 
   // ——— ② 模型 ———
 
-  const modelOptions = useMemo(
-    () => (view?.models ?? []).map((m) => ({ value: m.id, label: m.name || m.model })),
-    [view],
-  )
+  /**
+   * 页头那一行**只读**状态：当前默认模型是谁（名字优先，回落上游模型名；空串 = 没有默认）。
+   *
+   * 为什么读在页头、写在行卡（v28，用户要求）：默认模型是**全局单一值**（ADR-21），"现在是哪条"
+   * 要一眼看得到；而"把哪条设为默认"是**针对某一条的**动作，它就该长在那一条上——先用页头下拉
+   * 选中、再回列表里核对哪条变成了默认，是两处来回对眼睛的账。
+   *
+   * 找不到那行时如实回带平台 id，**不谎报**「未设置」（那会让用户以为默认空着）。
+   */
+  const defaultModelName = useMemo(() => {
+    const id = view?.default_model ?? ''
+    if (!id) return ''
+    const row = (view?.models ?? []).find((m) => m.id === id)
+    return row ? modelLabel(row) : id
+  }, [view])
 
   const vendorOptions = useMemo(
     () => providers.map((p) => ({ value: p.id, label: p.name ? `${p.name}（${p.id}）` : p.id })),
@@ -765,9 +781,12 @@ export function ModelSettingsPanel() {
   }
 
   /**
-   * 设/取消**唯一**默认模型。两个方向都走同一条 PATCH：
+   * 设/取消**唯一**默认模型（v28 起唯一的调用点是行卡上那颗按钮）。两个方向都走同一条 PATCH：
    *  - 选一条 → `is_default: true`（服务端会先清掉旧的那条）；
    *  - 清空 → 对当前默认那条 `is_default: false`（"取消默认"必须真的能取消）。
+   *
+   * 页头那行只读状态读的是 `view.default_model`，所以这里写完必须 `loadModels()`——否则
+   * "点了没反应"会以"页头还写着旧的那条"的样子出现（按钮本身在行卡上会先翻，反而更像已经生效）。
    */
   const setDefaultModel = async (id: string | undefined): Promise<void> => {
     const current = view?.default_model ?? ''
@@ -970,18 +989,12 @@ export function ModelSettingsPanel() {
           hint="清单、默认模型与生效结论"
           extra={(
             <Space size={6}>
-              {/* 唯一的默认模型选择器（A14：结构断言按这个 aria-label 数，恰好一个）。 */}
-              <Select
-                size="small"
-                allowClear
-                aria-label="默认模型"
-                placeholder="默认模型"
-                value={view?.default_model || undefined}
-                style={{ width: 190 }}
-                loading={busy}
-                options={modelOptions}
-                onChange={(v?: string) => void setDefaultModel(v)}
-              />
+              {/* 默认模型：**只读**状态（这一节唯一的 `aria-label="默认模型"`，A14 的结构判据按它数，
+                  恰好一个）。设/取消默认自 v28 起是**行卡上的按钮**——页头只回答"现在是哪条"，
+                  写动作落在具体那一条上。 */}
+              <span className="fg-cfgbar-dim" aria-label="默认模型">
+                {defaultModelName === '' ? '默认模型：未设置' : `默认模型：${defaultModelName}`}
+              </span>
               <Button size="small" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadModels(true)}>
                 刷新
               </Button>
@@ -1071,6 +1084,8 @@ export function ModelSettingsPanel() {
                     const target = modelCard?.mode === 'edit' && modelCard.row.id === row.id ? modelCard : null
                     const open = target !== null
                     const image = hasImageInput(row)
+                    // 当前默认是**单一值**（ADR-21）：行卡只读地标出来，按钮按它显示设/取消。
+                    const isDefault = row.id === (view?.default_model ?? '')
                     const capLabel = image
                       ? `已声明图片输入（${row.model}）：点一下改回仅文本`
                       : `默认只收文本（${row.model}）：点一下允许图片`
@@ -1090,7 +1105,7 @@ export function ModelSettingsPanel() {
                           >
                             {image ? '文本+图片' : '文本'}
                           </button>
-                          {row.id === (view?.default_model ?? '') && <span className="fg-rowtag fg-info">默认</span>}
+                          {isDefault && <span className="fg-rowtag fg-info">默认</span>}
                           {/* 容量（v25）：声明过就标出来；**没声明就如实说"由环境兜底"**——
                               那时用户看到的上下文上限不是他设的，而是一句猜测（底座的默认值）。 */}
                           <span
@@ -1105,6 +1120,17 @@ export function ModelSettingsPanel() {
                           </span>
                           {row.note ? <span className="fg-rowmeta">{row.note}</span> : null}
                           <span className="fg-rowactions">
+                            {/* 设/取消默认：**这一行自己的按钮**（v28 起从页头下拉搬来）。
+                                默认行显示「取消默认」，其余行显示「设为默认」——两个方向都点得到，
+                                所以"取消默认"不是一句做不到的话（服务端也只认这一条单一值）。 */}
+                            <Button
+                              size="small"
+                              disabled={busy}
+                              aria-label={isDefault ? '取消默认模型' : '设为默认模型'}
+                              onClick={() => void setDefaultModel(isDefault ? undefined : row.id)}
+                            >
+                              {isDefault ? '取消默认' : '设为默认'}
+                            </Button>
                             <Button size="small" onClick={() => (open ? closeModelCard() : openModelCard({ mode: 'edit', row }))}>
                               {open ? '收起' : '编辑'}
                             </Button>

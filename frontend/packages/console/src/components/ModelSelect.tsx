@@ -27,11 +27,11 @@ interface ModelSelectProps {
   emptyNote?: ReactNode
 }
 
-/** 下拉项展示：名称 +（描述副文案，第二行）+（标签：不可用 / 平台未声明）。
+/** 下拉项展示：名称 +（描述副文案，第二行）+（标签：不可用）。
  *  两行紧凑行（而不是名称与描述并排一行）——并排会把浮层撑到 550px+，相对 130px 的药丸太重。 */
 function optionLabel(v: ConfigOptionValue): ReactNode {
-  // 「不可用」= 底座拒过（动态事实）；「平台未声明」= 平台清单里没有它（静态事实）。
-  // 两者**必须分开**：一个字段塞两种含义会让那句「不可用」变成假话（见 ConfigOptionValue.model_id）。
+  // 变暗 = 这个候选此刻不该被当成可选项：或者底座拒过它（动态事实），或者平台没有声明过它
+  // （静态事实 —— v27 起这种候选由调用方收窄掉，见下面的组件注释；真出现就只有"补当前模型"那一行）。
   const dim = v.unavailable || !v.model_id ? tokens.textPlaceholder : tokens.text
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, maxWidth: 300 }}>
@@ -51,11 +51,6 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
         {v.unavailable && (
           <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>
             不可用
-          </Tag>
-        )}
-        {!v.model_id && (
-          <Tag style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px' }}>
-            平台未声明
           </Tag>
         )}
       </span>
@@ -82,7 +77,10 @@ function optionLabel(v: ConfigOptionValue): ReactNode {
 /**
  * 模型选择器（会话级模型：值取自运行时目录，经 session/set_config_option 应用）。
  *
- *  - 全部候选来自运行时（底座自报的 config option），平台不内置任何清单；
+ *  - 候选由调用方给，且**只该是平台清单里声明过的那些**（v27：`modelValues` = 运行时广告 ∩
+ *    平台清单）。运行时广告里对不上平台行的候选（`model_id` 为空）**不渲染**——用户要的是
+ *    "设置里配过的模型"，而"底座广告了、平台没声明"是诊断事实（`GET /models` 的 `sync[]`）。
+ *    组件这一层仍按 `disabled: !v.model_id` 兜底（纵深防御：调用方补的"当前模型"那一行就是这种）；
  *  - 按底座下发的分组（values[].group/group_name）分组展示，未分组则扁平；
  *  - 受控值与回调是**平台模型行 id**（v26），候选是不透明串：两层词汇的转换只在本文件里做
  *    （按候选的 `model_id` 注解），别处不许再转一次；
@@ -133,7 +131,7 @@ export function ModelSelect({
     // 过滤用检索串（label 是 JSX，antd 不能直接 search）——只含展示字段，不含 value。
     search: `${v.name} ${v.description ?? ''}`.toLowerCase(),
     // **平台没声明过它** ⇒ 不可选（服务端会以 40401 拒；界面这里只是别让用户白点一次）。
-    // 仍然渲染出来是刻意的：这条状态（底座广告了、平台没声明）最该被看见。
+    // v27 起正常候选都带注解（调用方已收窄），这条只剩"调用方补的当前模型那一行"会命中。
     disabled: !v.model_id,
     // 下拉项要靠它还原完整展示（optionRender 拿到的只有这条 option 本身）。
     model: v,

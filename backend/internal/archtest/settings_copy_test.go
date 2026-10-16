@@ -28,7 +28,8 @@ var forbiddenSettingsWords = []string{
 // A13（用户面零底座词汇）：扫描面是那一节**全部用户可见字符串**（标题 + 正文 + toast + tooltip +
 // 空态 + 错误出路 + 状态标签），判据 = 禁词表命中数 0。
 // A14（默认模型在用户面只有一个）：`GET /models` 的用户面字段里没有逐 runtime 的默认映射
-// （只有单一 `default_model`），且前端只有一个默认模型选择器。
+// （只有单一 `default_model`），且前端只有**一个**默认面（v28：页头一行只读状态 + 每张行卡上
+// 那颗设/取消按钮，改的都是同一个单一值）。
 //
 // 四条纪律（缺一条守卫就会变成噪声或空转）：
 //   - **大小写无关**地判（`Provider` 与 `provider` 是同一种错误）；
@@ -112,7 +113,7 @@ func TestSettingsModelCopyAvoidsProvider(t *testing.T) {
 	}
 
 	assertModelsResponseHasNoPerRuntimeDefault(t)
-	assertPanelHasSingleDefaultSelector(t, src)
+	assertPanelHasSingleDefaultSurface(t, src)
 }
 
 // assertModelsResponseHasNoPerRuntimeDefault A14 的后端半场：读 `dtomodel/list.go` 源码，
@@ -167,22 +168,90 @@ func assertModelsResponseHasNoPerRuntimeDefault(t *testing.T) {
 	}
 }
 
-// assertPanelHasSingleDefaultSelector A14 的前端半场：面板里**只有一个**默认模型选择器。
+// assertPanelHasSingleDefaultSurface A14 的前端半场：默认模型在用户面只有一个面。
 //
-// 判据是结构标记（不是文案）：选择器上带唯一标记 `aria-label="默认模型"`，出现次数必须恰好 1。
-// 行卡上的「默认」标签是**只读**状态标签、不带这个标记，所以不会被算进来；解析不到（0 个）即失败
-// ——否则"删掉默认选择器"也会让守卫绿。
-func assertPanelHasSingleDefaultSelector(t *testing.T, src string) {
+// v28 起这个面**拆成两半**（用户要求：设默认是列表里的一个单独按钮），判据随之分两条：
+//   - **读**：当前默认由页头那一行只读状态给出，唯一结构标记 `aria-label="默认模型"`，出现次数
+//     必须恰好 1（0 个 = 把"现在是哪条"从用户面删掉了——那正是上一版选择器消失后最容易发生的事，
+//     所以解析不到即失败，而不是放宽成"有一个就行"）；
+//   - **写**：设与取消都必须在，且落在行卡那颗按钮上（`设为默认模型` / `取消默认模型` 两个
+//     aria-label 都在）。少任何一个方向 = "能设不能取消"或整个写入口消失，而二者都不会让别的
+//     守卫变红——用户看到的只是"点了没反应"。
+//
+// 行卡上的「默认」标签是**只读**状态标记、不带那个 aria-label，所以不会被算进来。
+func assertPanelHasSingleDefaultSurface(t *testing.T, src string) {
 	t.Helper()
+	// 判据一律落在**剥掉注释的代码**上（见 codeWithoutComments）：注释里写一遍这个标记（本文件与
+	// 面板里都写了）会让原样计数把"属性被删掉"这事故意盖住——注释越多越绿，正是本仓最忌讳的
+	// "守卫静默空转"。
+	code := codeWithoutComments(src)
 	const marker = `aria-label="默认模型"`
-	if n := strings.Count(src, marker); n != 1 {
+	if n := strings.Count(code, marker); n != 1 {
 		t.Errorf("面板里 %q 出现 %d 次（期望恰好 1 次）：默认模型在用户面只有一个，"+
-			"且必须是唯一的那个选择器（行卡上的「默认」标签是只读的、不带这个标记）", marker, n)
+			"页头那行只读状态就是它唯一的读面（行卡上的「默认」标签是只读的、不带这个标记）", marker, n)
+	}
+	// 写面（v28）：行卡那颗按钮，**两个方向**都必须能走。判据是那颗按钮 aria-label 的完整形态
+	// （空白归一后逐字比对），而不是"两个字面量在不在"——后者**会假绿**：本文件的 toast 文案里
+	// 就写着「已把「…」设为默认模型」/「已取消默认模型：…」，只查字面量的话把按钮整个删掉
+	// 照样通过（反证实跑过）。形态比对对改名/重排的代价是**红**：那是 fail-closed 的正确方向
+	// ——改到这里请连着改本判据，而不是把它放宽。
+	const writeFace = `aria-label={isDefault ? '取消默认模型' : '设为默认模型'}`
+	if !strings.Contains(strings.Join(strings.Fields(code), " "), writeFace) {
+		t.Errorf("面板里找不到行卡上的默认按钮（期望 %s）：设/取消默认自 v28 起是**每条模型行卡上的一个"+
+			"按钮**，两个方向都要在——只剩一个方向等于把「取消默认」变成做不到的事，"+
+			"整个写入口消失则会以「点了没反应」的样子出现", writeFace)
 	}
 	// 逐 runtime 的默认映射不许在前端回流（哪怕只是类型名）。
-	if strings.Contains(src, "default_models") {
+	if strings.Contains(code, "default_models") {
 		t.Error("面板里出现了逐 runtime 的默认映射（default_models）：ADR-21 要求前端也只有一个默认值")
 	}
+}
+
+// codeWithoutComments 剥掉 TS/TSX 源码里的注释（`//` 与 `/* */`，含 JSX 的 `{/* … */}`），
+// **字符串字面量原样保留**（A14 那个结构标记本身就在双引号里）。
+//
+// 与 extractStringLiterals 同一个逐字符状态机手法，只是把"抽字面量"换成"抄非注释的代码"：
+// 正则分不开"字符串里的 `//`"与"真注释"，也会被转义引号骗过。
+func codeWithoutComments(src string) string {
+	var b strings.Builder
+	r := []rune(src)
+	for i := 0; i < len(r); {
+		c := r[i]
+		switch {
+		case c == '\'' || c == '"' || c == '`':
+			quote := c
+			b.WriteRune(c)
+			i++
+			for i < len(r) {
+				if r[i] == '\\' && i+1 < len(r) {
+					b.WriteRune(r[i])
+					b.WriteRune(r[i+1])
+					i += 2
+					continue
+				}
+				b.WriteRune(r[i])
+				closed := r[i] == quote
+				i++
+				if closed {
+					break
+				}
+			}
+		case c == '/' && i+1 < len(r) && r[i+1] == '/':
+			for i < len(r) && r[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(r) && r[i+1] == '*':
+			i += 2
+			for i+1 < len(r) && !(r[i] == '*' && r[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			b.WriteRune(c)
+			i++
+		}
+	}
+	return b.String()
 }
 
 // fieldRE 匹配结构体正文里以 name 开头的一个字段声明。

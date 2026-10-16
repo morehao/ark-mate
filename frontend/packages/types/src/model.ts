@@ -2,7 +2,8 @@
  * 模型面（v12）：**两个读面分得很开**，改这个文件前先认清哪一个是哪一个。
  *
  *  - ① **运行时目录面**（`ModelCatalogResp`，`GET /models/catalog`）：运行时（ACP server）
- *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它。
+ *    自报的会话配置项投影，`value` 是**不透明字符串**、必须原样回传。会话级模型选择器用它
+ *    ——v27 起选择器只吃 `modelValues`（= 这份广告与平台清单的**交集**，见它的注释）。
  *  - ② **平台清单面**（`ModelsResp`，`GET /models`）：用户登记的应用层资源（供应商下的模型），
  *    外加**聚合**生效结论。设置 · 模型 那一节用它。
  *
@@ -40,8 +41,8 @@ export interface ConfigOptionValue {
    * 会话的 `model` 收的是平台模型行 id，而选择发生在**运行时目录**上，所以注解跟着候选走：
    * 一次取数就能"选运行时值、提交平台 id"。
    *
-   * **空 = 客户端选不了它**（服务端会以 40401 拒），界面上要如实标「平台未声明」而不是悄悄过滤——
-   * "底座广告了、平台没声明"正是最该被看见的那条状态。
+   * **空 = 客户端选不了它**（服务端会以 40401 拒）。v27 起选择器**不渲染**这类候选
+   * （`modelValues` 只回带注解的那些，见它的注释）——它是诊断事实，不是用户要找的东西。
    */
   model_id?: string
 }
@@ -266,14 +267,39 @@ export const configOptionByCategory = (
 ): ConfigOption | undefined => (options ?? []).find((o) => o.category === category)
 
 /**
- * 会话级模型候选值（无模型项 → 空数组：运行时没有可切换的模型）。
+ * 运行时**广告**的全部模型候选（运行时没有模型项 → 空数组）。
  *
  * **只吃运行时目录面**（`ModelCatalogResp`）：候选取 `options[category=model].values`，
  * 它们的 `value` 是不透明串、必须原样回传给会话接口。平台清单（`ModelsResp`）不喂这里——
  * 那是应用层资源，不是运行时候选。
+ *
+ * ⚠️ **不得直接喂选择器**：它含"平台没声明过"的候选（`model_id` 为空），那些**选不了**
+ * （服务端会以 40401 拒）。选择器吃 `modelValues`；这个函数只剩两个正当消费者：空态说明里
+ * 那句"运行时广告了几个候选"与本地记忆的自愈闸门（目录到没到）。
+ */
+export const advertisedModelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+  configOptionByCategory(resp?.options, 'model')?.values ?? []
+
+/**
+ * 会话级模型候选值 = **运行时广告 ∩ 平台清单**（无交集 → 空数组：没有可切换的模型）——v27。
+ *
+ * 为什么必须收窄（用户原话，2026-10-16：「模型下拉列表应该只出现【设置】中配置的模型」）：
+ * 运行时会广告它认识的**一整份**目录——自己的内置目录 + 平台交付的路由；而平台只认得自己清单
+ * 里的那些行（`models` 表），会话的模型引用也只收平台行 id。把交集之外的候选摆进下拉，用户看到
+ * 的是"设置里没配过的模型"，它既选不了、也不是用户要找的东西。**"广告了、平台没声明"这条事实
+ * 是给排障看的**，落点是诊断面（`GET /models` 的 `sync[].advertised` / `missing`），不是选择器。
  */
 export const modelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
-  configOptionByCategory(resp?.options, 'model')?.values ?? []
+  advertisedModelValues(resp).filter((v) => !!v.model_id)
+
+/**
+ * 运行时广告了、平台清单里没有的候选（v27）。
+ *
+ * **只用来把"下拉为什么这么少/是空的"讲成一句人话**（`model_id` 为空 = 选不了，见类型注释）；
+ * 没有任何渲染面该把它摆成可选项。
+ */
+export const undeclaredModelValues = (resp?: ModelCatalogResp | null): ConfigOptionValue[] =>
+  advertisedModelValues(resp).filter((v) => !v.model_id)
 
 /** 模型引用：创建/切换会话时选定的模型（**平台模型行 id**）。 */
 export interface ModelRef {

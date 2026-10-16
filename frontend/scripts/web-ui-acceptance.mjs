@@ -1235,6 +1235,8 @@ async function scenarioSettingsModel(browser) {
   // 两类都不削弱判据：断言读的始终是**点完之后的状态**（DOM 读面 + REST 读面双重断言）。
   const provID = 'ui-verify-prov'
   const modelID = `ui-verify-${Date.now().toString(36)}`
+  /** 开跑前实例上已有的默认（**不是**本次夹具）：收尾要还回去，见 `cleanup`。 */
+  let preexistingDefault = ''
   const page = await openPage(browser, `${WEB_URL}/`)
   const cleanup = async () => {
     // 逐条 best-effort：夹具是自己造的，跑完必须自己清（顺序：模型 → 供应商，因为模型挂靠供应商）。
@@ -1245,8 +1247,19 @@ async function scenarioSettingsModel(browser) {
       await api('DELETE', `/models/${m.id}`)
     }
     await api('DELETE', `/providers/${provID}`)
+    // **把开跑前那个默认还回去**：本场景要验"设默认"，而服务端的语义是"设新的 = 清掉旧的"，
+    // 加上收尾删掉夹具（连带清空默认），不收尾就等于把用户自己配的默认**静默吃掉**
+    // （2026-10-16 实跑发生过：实例上原本的默认在验收后变成"未设置"）。
+    // 只在"现在是空的"才还（那时候唯一的原因就是本场景动过它）——并发改过的不覆盖。
+    const nowDefault = (await api('GET', '/models')).json.data?.default_model ?? ''
+    if (preexistingDefault && nowDefault === '') {
+      const alive = ((await api('GET', '/models')).json.data?.models ?? []).some((m) => m.id === preexistingDefault)
+      if (alive) await api('PATCH', `/models/${preexistingDefault}`, { is_default: true })
+    }
   }
   try {
+    // 夹具还没建，**先记下这一刻的默认**——它才是收尾要还回去的那条。
+    preexistingDefault = (await api('GET', '/models')).json.data?.default_model ?? ''
     // ① 左栏「设置」→ 弹窗内切到「模型」
     await page.waitFor(textExpr('设置'), { label: '左栏渲染' })
     await page.click(btnExpr('设置'))
@@ -1638,26 +1651,97 @@ async function scenarioSettingsModel(browser) {
     check('保存提示（捕获到时）不承诺"已生效"',
       toast === '' || !/已生效/.test(toast), JSON.stringify(toast).slice(0, 200))
 
-    // A14：默认模型选择器**恰好一个**（结构判据，前端半场的界面版本）。
+    // A14：默认模型在用户面只有一个（结构判据，前端半场的界面版本）。
+    // v28 起这个标记落在**页头那一行只读状态**上（设/取消的动作搬到了行卡按钮），仍然恰好一个。
     const defaultPickers = await page.count('.fg-model-panel [aria-label="默认模型"]')
-    check('默认模型选择器恰好一个（A14）', defaultPickers === 1, `count=${defaultPickers}`)
+    check('默认模型的只读标记恰好一个（A14）', defaultPickers === 1, `count=${defaultPickers}`)
 
-    // ⑤ 设默认 → 界面跟随 → 删掉它**允许**且连带清空（B4）
+    // ⑤ 设默认 → 界面跟随 → **取消** → 再设 → 删掉它**允许**且连带清空（B4）
+    //
+    // v28（用户要求：设默认是列表里的一个单独按钮）：设/取消都是**模型行卡上的那一颗按钮**
+    // （默认那条显示「取消默认」，其余显示「设为默认」）。所以这条链整条**从界面点下去**，
+    // 再以 REST 读面复核——旧版是"REST 设默认 + 只读一眼选择器显示"，界面上的写入口其实
+    // 从没被验过（它被 REST 绕过去了），而"点了没反应"恰恰是这类按钮最常见的坏法。
     const list = (await api('GET', '/models')).json.data?.models ?? []
     const row = list.find((m) => m.model === modelID)
     if (!row) throw new Error('刚建的模型不在清单里：' + JSON.stringify(list.map((m) => m.model)))
-    const patched = await api('PATCH', `/models/${row.id}`, { is_default: true })
-    check('把该条设为默认（REST）', patched.json.code === 0, JSON.stringify(patched.json).slice(0, 160))
-    // 界面上刷新一次（**模型块**的刷新——`btnExpr('刷新')` 会先命中供应商块那个），
-    // 断言选择器真的显示了它（默认是**单一值**，不是逐后端映射）。
-    await clickJS(page,
-      `[...document.querySelectorAll('section[aria-label="模型"] button')].find(b => (b.innerText||'').replace(/\\s+/g,'') === '刷新')`)
-    await sleep(800)
-    const shown = await page.evaluate(
-      `const el = document.querySelector('.fg-model-panel [aria-label="默认模型"]'); return el ? (el.closest('.ant-select')?.innerText || el.value || '') : ''`,
-    )
-    check('界面上的默认模型选择器显示该条', String(shown).includes(modelID), String(shown).slice(0, 120))
+    const modelRowExpr = (upstream) => `(() => {
+      const li = [...document.querySelectorAll('.fg-model-panel section[aria-label="模型"] .fg-rowcard')]
+        .find(x => ((x.querySelector('.fg-modelid') || {}).innerText || '').trim() === ${JSON.stringify(upstream)});
+      return li || null })()`
+    /** 行卡上那颗默认按钮（按 aria-label 取，**两个态各自的标签**）。 */
+    const defaultBtnExpr = (upstream, label) => `(() => {
+      const li = ${modelRowExpr(upstream)};
+      if (!li) return null;
+      return [...li.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || '') === ${JSON.stringify(label)}) || null })()`
+    const rowHasDefaultTag = async (upstream) => await page.evaluate(
+      `const li = ${modelRowExpr(upstream)};
+       return li ? [...li.querySelectorAll('span.fg-rowtag')].some(s => (s.innerText || '').trim() === '默认') : false`)
+    const headerDefaultText = async () => String(await page.evaluate(
+      `const el = document.querySelector('.fg-model-panel [aria-label="默认模型"]'); return el ? (el.innerText || '').trim() : ''`))
+    const restDefault = async () => (await api('GET', '/models')).json.data?.default_model ?? ''
+    // 写面返回后清单会重载（可能拉起底座，实测 `/models/catalog` 单次 3s+），所以**轮询**而不是
+    // 固定 sleep 赌它。
+    const waitDefault = async (want) => {
+      for (let i = 0; i < 60; i++) {
+        if ((await restDefault()) === want) return true
+        await sleep(250)
+      }
+      return false
+    }
+    /**
+     * 等**界面**跟上某一个默认态（行卡标签 + 按钮文案 + 页头那行三处一起看）。
+     *
+     * 为什么必须等 DOM 而不是只等 REST（2026-10-16 实跑撞上）：`PATCH /models/:id` 一返回，
+     * REST 读面就变了，而界面要等面板那次 `GET /models` 落地才重渲染（它会拉起底座算同步状态，
+     * 实测数秒）——只等 REST 就断言，三条"界面跟随"会**假红**，随后按 DOM 找「取消默认」按钮
+     * 自然找不到（`clearClicked=false`），后面整串连锁失败。判据本来就是"界面跟上了没有"，
+     * 所以等的是界面自己。
+     *
+     * 传进去的是**语句体**（`page.waitFor` 会把它包进 `(() => { … })()`）：必须以 `return` 收尾，
+     * **不能**写成 `(() => { … })()` 那种自执行表达式——那样求值结果是 `undefined`，永远等不到
+     * （2026-10-16 第二次实跑撞上：状态全对、三条断言却全红）。
+     */
+    const waitRowDefault = (upstream, want) => page.waitFor(`
+      const li = ${modelRowExpr(upstream)};
+      if (!li) return false;
+      const tagged = [...li.querySelectorAll('span.fg-rowtag')].some(s => (s.innerText || '').trim() === '默认');
+      const label = ${JSON.stringify(want ? '取消默认模型' : '设为默认模型')};
+      const btn = [...li.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || '') === label);
+      const head = (document.querySelector('.fg-model-panel [aria-label="默认模型"]') || {}).innerText || '';
+      const headOk = ${want} ? head.includes(${JSON.stringify(modelID)}) : head.includes('未设置');
+      return tagged === ${want} && !!btn && headOk;`,
+    { label: `界面跟随默认态（${want ? '设为默认' : '取消默认'}）`, timeout: 30000 }).catch(() => false)
+
+    const setClicked = await clickJS(page, defaultBtnExpr(modelID, '设为默认模型'))
+    check('模型行卡上有「设为默认」按钮（独立一颗，点得到）', setClicked === true, String(setClicked))
+    check('点它真的写进了默认（REST 读面）', await waitDefault(row.id), `default=${await restDefault()}`)
+    const followed = await waitRowDefault(modelID, true)
+    const tagged = await rowHasDefaultTag(modelID)
+    const flipped = await page.evaluate(`return !!(${defaultBtnExpr(modelID, '取消默认模型')})`)
+    const headText = await headerDefaultText()
+    check('界面跟随：该行标出「默认」、按钮翻成「取消默认」、页头显示该条',
+      followed === true,
+      `tag=${tagged} flippedBtn=${flipped} head=${JSON.stringify(headText).slice(0, 80)}`)
     await page.shot('23-settings-model-default')
+
+    // 反向：**取消默认必须真的能取消**（它是同一颗按钮的另一态，不是"设了就下不来"）。
+    const clearClicked = await clickJS(page, defaultBtnExpr(modelID, '取消默认模型'))
+    check('同一颗按钮的另一态「取消默认」点得到', clearClicked === true, String(clearClicked))
+    check('点它真的清掉了默认（REST 读面）', await waitDefault(''), JSON.stringify(await restDefault()))
+    const cleared = await waitRowDefault(modelID, false)
+    const untagged = await rowHasDefaultTag(modelID)
+    const headAfter = await headerDefaultText()
+    check('取消后界面跟随：不再标「默认」、按钮翻回「设为默认」、页头说「未设置」',
+      cleared === true,
+      `tag=${untagged} head=${JSON.stringify(headAfter).slice(0, 80)}`)
+
+    // 再设一次：下一步删它时要验服务端**连带清空**（B4），所以得让它又是默认。
+    const resetClicked = await clickJS(page, defaultBtnExpr(modelID, '设为默认模型'))
+    const resetFollowed = await waitRowDefault(modelID, true)
+    check('再设一次（为下一步的删除断言铺状态）',
+      resetClicked === true && resetFollowed === true && await waitDefault(row.id),
+      `click=${resetClicked} follow=${resetFollowed} default=${await restDefault()}`)
 
     const del = await api('DELETE', `/models/${row.id}`)
     check('删掉默认模型**允许**且如实回带 default_cleared（B4）',
