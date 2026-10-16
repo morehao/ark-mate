@@ -50,7 +50,7 @@ func (p providerModelFacts) ModelValue(runtimeID, providerID, model string) (str
 	return modelValueFor(p.svc.reg, runtimeID, providerID, model)
 }
 
-// collectRuntimeModelFacts 逐 runtime 采集模型清单事实（**只读**）。
+// CollectRuntimeModelFacts 逐 runtime 采集模型清单事实（**只读**）。
 //
 // 这里构造一个只读的 Service（不拨号、不落盘）：物化状态与清单读数必须与 `GET /models` 走同一条
 // 取值面——自己再拼一套 SQL 等于把"看到的状态不是真的"引回来。三处只为读而做的事，逐条写下理由：
@@ -65,7 +65,7 @@ func (p providerModelFacts) ModelValue(runtimeID, providerID, model string) (str
 //	  这里只装载每个 runtime 的清单。
 //
 // 判断本身在机制层（`doctor.CollectRuntimeModelFacts`）——本函数只负责把数据面接上去。
-func collectRuntimeModelFacts(ctx context.Context, st *store.Store, home string) []doctor.ProviderRuntimeFacts {
+func CollectRuntimeModelFacts(ctx context.Context, st *store.Store, home string) []doctor.ProviderRuntimeFacts {
 	out := []doctor.ProviderRuntimeFacts{}
 	if st == nil {
 		return out

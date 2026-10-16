@@ -209,8 +209,8 @@ func (pl *Plane) removeProviderDefinition(ctx context.Context, id string, expect
 	return pl.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
 }
 
-// ProviderFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。
-func ProviderFileExists(dir string) bool {
+// providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。
+func providerFileExists(dir string) bool {
 	if dir == "" {
 		return false
 	}

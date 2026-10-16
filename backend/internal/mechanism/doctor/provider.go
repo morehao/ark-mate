@@ -1,18 +1,16 @@
-package manager
+package doctor
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
-	"github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -49,6 +47,19 @@ type ProviderDoctorOptions struct {
 	ProviderDir string
 	// DBPath 库文件路径（只为报告里能印出"载体是谁"；读取动作由调用方完成）。
 	DBPath string
+	// BackupName 迁移前备份的文件名（**由供应商域交下来**：它是"写面写哪个名字、医生查哪个名字"
+	// 这同一件事的两侧，各手抄一份会在某次改名时静默失配）。
+	//
+	// 为什么是入参而不是本包常量：机制层不得 import 领域（`TestMechanismMustNotImportUpward`
+	// 钉住）——那是把机制层变成那个领域的附属品的第一步。组合根把领域事实交下来。
+	BackupName string
+	// ProvidersFileName 档案文件名（同上，由供应商域交下来）。
+	ProvidersFileName string
+	// MismatchExtraMarker 导入对账里**"库里有、文件里没有"**那一类的判据标记（同上，由供应商域交下来）。
+	//
+	// 它是"写入侧拼串"与"本包分档"之间唯一的耦合点：`BenignOnly` 据此把"写面新建后快照滞后"
+	// （正常，只告警）与"真不一致"（判失败）分开。空串 → 一律按"真不一致"处置（fail-closed）。
+	MismatchExtraMarker string
 }
 
 // ProviderDoctorFacts provider 与模型清单段的只读事实（`mate doctor --json` 的 `providers` 段）。
@@ -146,7 +157,7 @@ type ProviderDoctorFacts struct {
 	ImportMismatchBenignOnly bool `json:"importMismatchBenignOnly"`
 
 	// Runtimes 逐 runtime 的清单同步结论与对账（runtime 升序）。
-	Runtimes []doctor.ProviderRuntimeFacts `json:"runtimes"`
+	Runtimes []ProviderRuntimeFacts `json:"runtimes"`
 
 	// MissingBaseURL 缺端点的供应商 id（升序）。
 	//
@@ -211,12 +222,19 @@ type SensitiveFileFacts struct {
 	Note string `json:"note,omitempty"`
 }
 
+// RuntimeModelFactsFunc 采集"逐 runtime 的模型清单事实"的数据面（由实现侧提供）。
+//
+// 为什么是端口：它要按 `GET /models` 的同一条取值面读数（物化状态、运行时广告目录、不透明值
+// 派生），而那些都要会话/装配侧的状态。机制层只消费结论——与 `readmodels.go` 的
+// `ReadModelRebuilder`、`providermodels.go` 的 `ModelFactsSource` 同一手法。
+type RuntimeModelFactsFunc func(ctx context.Context, st *store.Store, home string) []ProviderRuntimeFacts
+
 // CollectProviderDoctorFacts 采集 provider / 模型清单的只读事实。
 //
 // `st` 可以为 nil（memory 模式 / 库读不出来）：那时 DB 派生的事实全部记 unknown，
 // 只保留载体无关的那几条（镜像面与旧机制遗留）。**本函数不写任何东西**（唯一的落笔是 SQLite
 // 只读连接可能重建的 `-shm`/`-wal` 两个共享内存面文件，见 `store.OpenReadOnly` 的注释）。
-func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts ProviderDoctorOptions) ProviderDoctorFacts {
+func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts ProviderDoctorOptions, runtimeFacts RuntimeModelFactsFunc) ProviderDoctorFacts {
 	providerDir := strings.TrimSpace(opts.ProviderDir)
 	facts := ProviderDoctorFacts{
 		Carrier:               "unknown",
@@ -230,7 +248,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 		MissingInStore:        []string{},
 		OrphanMcpSecrets:      []string{},
 		ImportMismatch:        []string{},
-		Runtimes:              []doctor.ProviderRuntimeFacts{},
+		Runtimes:              []ProviderRuntimeFacts{},
 		MissingBaseURL:        []string{},
 		SensitiveFiles:        []SensitiveFileFacts{},
 		ModelsWithoutCapacity: []string{},
@@ -239,8 +257,8 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 
 	// 文件侧（与载体无关，两种模式都要看）：providers.json 与它的迁移前备份是否存在。
 	if providerDir != "" {
-		facts.ProvidersFile = provider.ProviderFileExists(providerDir)
-		facts.ProvidersBackup = provider.FileExists(filepath.Join(providerDir, provider.ProvidersBackupName))
+		facts.ProvidersFile = opts.ProvidersFileName != "" && doctorPathExists(filepath.Join(providerDir, opts.ProvidersFileName))
+		facts.ProvidersBackup = opts.BackupName != "" && doctorPathExists(filepath.Join(providerDir, opts.BackupName))
 	}
 
 	// ——— 凭据面（v20）：库是权威（`providers.key` + `mcp_secrets`），镜像是可重建副本 ———
@@ -317,7 +335,7 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 					facts.ImportMismatch = append(facts.ImportMismatch, line)
 				}
 			}
-			facts.ImportMismatchBenignOnly = providerMismatchBenignOnly(facts.ImportMismatch)
+			facts.ImportMismatchBenignOnly = providerMismatchBenignOnly(facts.ImportMismatch, opts.MismatchExtraMarker)
 		}
 	}
 	facts.SensitiveFiles = collectSensitiveFiles(opts.Home, providerDir, st)
@@ -354,7 +372,11 @@ func CollectProviderDoctorFacts(ctx context.Context, st *store.Store, opts Provi
 	}
 
 	// ——— 模型清单：逐 runtime 的物化状态 + 对账 ———
-	facts.Runtimes = collectRuntimeModelFacts(ctx, st, opts.Home)
+	// 逐 runtime 的清单事实由**实现侧**交下来（它要造一个只读 Service 去读 `GET /models` 的
+	// 同一条取值面——那是会话/装配侧的事，机制层只消费结论）。nil = 没有数据面。
+	if runtimeFacts != nil {
+		facts.Runtimes = runtimeFacts(ctx, st, opts.Home)
+	}
 	return facts
 }
 
@@ -559,14 +581,16 @@ func orphanMcpSecrets(ctx context.Context, st *store.Store, refs []string) []str
 // 把它判成失败会让 `mate doctor` 在每次用过写面之后都红（假红比漏报更能让人忽略这条命令）。
 // 反过来，"文件里有、库里没有"与"type/key_ref 不一致"是真不一致，必须判失败。
 //
-// 判据是**写入侧的同一条字符串**（`reconcileProviderRows` 拼的），所以这里用常量而不是
-// 各自手抄：两处漂移会让这条分档悄悄失效。
-func providerMismatchBenignOnly(entries []string) bool {
-	if len(entries) == 0 {
+// 判据是**写入侧的同一条字符串**（`reconcileProviderRows` 拼的），由调用方经
+// `ProviderDoctorOptions.MismatchExtraMarker` 交下来：两处各手抄一份会在某次改文案时静默失效
+// （那时 doctor 会把正常状态报成失败）。
+func providerMismatchBenignOnly(entries []string, marker string) bool {
+	if marker == "" || len(entries) == 0 {
+		// 没有标记可对 → 一律按"真不一致"处置（fail-closed：宁可疑，不许把真问题当正常）。
 		return false
 	}
 	for _, e := range entries {
-		if !strings.Contains(e, provider.ProviderMismatchExtraMarker) {
+		if !strings.Contains(e, marker) {
 			return false
 		}
 	}
@@ -698,4 +722,16 @@ func statSensitiveFileWith(path, wideNote string) SensitiveFileFacts {
 		f.Note = wideNote
 	}
 	return f
+}
+
+// doctorPathExists 路径是否存在（本包的小工具：机制层不 import 领域，所以不借用供应商域那份）。
+//
+// 它只回答"在不在"，不做任何语义判断——那三行 `os.Stat` 是本包与 `retired_runtime.go` 共用的
+// 手法，不是"第二份实现"。
+func doctorPathExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/mechanism/definition"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"os"
 	"path/filepath"
 	"sort"
@@ -249,7 +250,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 都能跑，主密钥晚点修好也能补上）、单条失败进 Problems 不拖垮整批、**只读不删**
 		// （旧密文目录与主密钥原样留着，删除由用户确认后自己做，`mate doctor` 报"可删"）。
 		// 日志只带引用与条数，**绝不含密钥值**。
-		if anchor := manager.LegacySecretAnchor(cfg.HomeDir, cfg.ProviderDir); anchor != "" {
+		if anchor := doctorfacts.LegacySecretAnchor(cfg.HomeDir, cfg.ProviderDir); anchor != "" {
 			if move, mErr := st.ImportLegacyVault(ctx, anchor); mErr != nil {
 				glog.Warnw(ctx, "serve: 旧密钥搬运未执行（库里的密钥不受影响；跑 `mate doctor` 看遗留物）",
 					"err", mErr, "anchor", anchor)

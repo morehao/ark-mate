@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/manager"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/store"
@@ -16,7 +17,7 @@ import (
 
 // 本文件是 `mate doctor` 的 **provider（供应商凭据）与模型清单**那一段（K2）。
 //
-// 分工是硬的：**事实由 `manager.CollectProviderDoctorFacts` 构造**（SQL、凭据分层与对账算法
+// 分工是硬的：**事实由 `doctorfacts.CollectProviderDoctorFacts` 构造**（SQL、凭据分层与对账算法
 // 都在那一侧），本文件只做两件事——打开只读句柄、把事实翻成三档结论与人话。该包的既有风格
 // 是薄打印层，把 SQL 写进这里会让"体检的口径"与"运行时的口径"各长一套。
 //
@@ -38,11 +39,17 @@ import (
 // checkProviderSection 采集 provider 段的事实并翻成检查项。
 //
 // 只读：`store.OpenReadOnly` 不跑迁移；凭据面只读（镜像权限过宽只如实报出，**不自动 chmod**）。
-func checkProviderSection(opts doctorOptions) (manager.ProviderDoctorFacts, []doctorCheck) {
+func checkProviderSection(opts doctorOptions) (doctorfacts.ProviderDoctorFacts, []doctorCheck) {
 	st, storeCheck := openDoctorStore(opts)
-	facts := manager.CollectProviderDoctorFacts(context.Background(), st, manager.ProviderDoctorOptions{
+	// 逐 runtime 的清单事实由实现侧提供（它要造一个只读 Service 去读 `GET /models` 的同一条取值面）。
+	facts := doctorfacts.CollectProviderDoctorFacts(context.Background(), st, doctorfacts.ProviderDoctorOptions{
 		Home: opts.Home, ProviderDir: opts.ProviderDir, DBPath: opts.DBPath,
-	})
+		// 三个"两侧约定的字符串"由**组合根**从供应商域交下去（机制层不得 import 领域）：
+		// 档案文件名、迁移备份名、导入对账的那条判据标记。
+		ProvidersFileName:   provider.ProvidersFileName,
+		BackupName:          provider.ProvidersBackupName,
+		MismatchExtraMarker: provider.ProviderMismatchExtraMarker,
+	}, manager.CollectRuntimeModelFacts)
 	if st != nil {
 		defer func() { _ = st.Close() }()
 	}
@@ -108,7 +115,7 @@ func openDoctorStore(opts doctorOptions) (*store.Store, doctorCheck) {
 }
 
 // checkProviderCarrier 档案数与载体（覆盖 openDoctorStore 的占位检查）。
-func checkProviderCarrier(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkProviderCarrier(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	fileNote := fmt.Sprintf("providers.json=%s bak-v11=%s",
 		existsWord(facts.ProvidersFile), existsWord(facts.ProvidersBackup))
 	if facts.Carrier != "db" {
@@ -130,7 +137,7 @@ func checkProviderCarrier(facts manager.ProviderDoctorFacts) doctorCheck {
 //	条目齐、权限合规                            → ok
 //	库里有而镜像里没有                          → warn（镜像陈旧：重跑一次 serve 即补齐）
 //	镜像里有而库里没有                          → warn（**不自动回灌**：报出引用名让用户处置）
-func checkCredentialsMirror(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkCredentialsMirror(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "credentials"
 	base := fmt.Sprintf("路径=%s 权限=%s 条目=%d", orDash(facts.CredentialsPath),
 		permWord(facts.CredentialsExists, facts.CredentialsPerm), facts.CredentialsRefs)
@@ -200,7 +207,7 @@ func mirrorOnlyRemedy(refs []string) string {
 // v20 的判据只有一条：`providers.key` 非空（`key_ref` 是派生量，反推不出"有没有值"）。
 // 它把 v19 那种"逐条去问密文目录"的间接判据换成了直接判据——"声明了引用却没有密钥"
 // 这个状态在结构上不存在，剩下的真问题只是"这条档案还没设密钥"。
-func checkProviderKeys(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkProviderKeys(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "provider keys"
 	if facts.Carrier != "db" {
 		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：密钥面无从校验"}
@@ -228,7 +235,7 @@ func checkProviderKeys(facts manager.ProviderDoctorFacts) doctorCheck {
 //
 // 同时如实说出**没有写入口**这件事：面板里能改引用（键名），值的写面这一批还没有，
 // 所以出路只有两条（写进库 / 改用 `env:` 引用），不能让用户以为"在界面上找不到就是坏了"。
-func checkMcpSecrets(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkMcpSecrets(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "mcp secrets"
 	if facts.Carrier != "db" {
 		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：库里的 MCP 密钥面无从校验"}
@@ -251,7 +258,7 @@ func checkMcpSecrets(facts manager.ProviderDoctorFacts) doctorCheck {
 // **只报不判失败、也绝不替用户删**：那是用户唯一一份旧密钥本体，删除不可逆；而"库里都已经有了"
 // 这件事由 `provider keys` / `mcp secrets` / `credentials` 三条回答。所以这一条永远是 warn
 // （有遗留物时），并把处置权与确认依据写在文案里。
-func checkLegacySecretLeftovers(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkLegacySecretLeftovers(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "legacy secrets"
 	if !facts.LegacySecretDir && !facts.LegacySecretKeyFile {
 		return doctorCheck{name, doctorOK, "没有旧密钥机制的遗留物（旧密文目录与主密钥文件都不在）"}
@@ -280,7 +287,7 @@ func permWord(exists bool, perm string) string {
 // v19 已删掉「供应商悬空引用」那一条检查：现在"哪条档案被引用"的唯一判据是**模型条目**的
 // `provider_id` 外键，它在 store 的同一事务里判定（`DeleteProviderDefinitionIfUnreferenced`），
 // 不可能留下悬空引用；而旧的"agent 声明了一个不存在的档案"随 agent 面整体删除。
-func checkProviderImport(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkProviderImport(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "providers import"
 	if facts.Carrier != "db" {
 		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：导入对账无从校验"}
@@ -304,7 +311,7 @@ func checkProviderImport(facts manager.ProviderDoctorFacts) doctorCheck {
 // 为什么要单列一条：同一份平台清单在不同底座上的实际行为不同，而"默认 text"会把底座目录里
 // 原本的收图能力**覆盖掉**（老模型里本来能看图的现在收不了图，除非用户逐条勾选）。这一条让
 // 用户不必等到某个会话失败才知道这件事——它回答的问题是"我勾的图片，到底有没有生效"。
-func checkModalityDeclaration(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkModalityDeclaration(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "模型输入模态"
 	if facts.Carrier != "db" {
 		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：模态声明面无从校验"}
@@ -343,7 +350,7 @@ func checkModalityDeclaration(facts manager.ProviderDoctorFacts) doctorCheck {
 //
 // **不判红**：没声明是一个合法状态（用户可能有意让环境决定），所以最高只到 warn——但要把条数与
 // 具体是哪些**说出来**，并给出路（「设置 · 模型」逐条填）。
-func checkModelCapacity(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkModelCapacity(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "模型容量声明"
 	if facts.Carrier != "db" {
 		return doctorCheck{name, doctorWarn, "载体不是 DB（" + orDash(facts.CarrierNote) + "）：容量声明面无从校验"}
@@ -367,7 +374,7 @@ func checkModelCapacity(facts manager.ProviderDoctorFacts) doctorCheck {
 }
 
 // checkRuntimeModels 逐 runtime 的清单物化状态与差集。
-func checkRuntimeModels(facts manager.ProviderDoctorFacts) []doctorCheck {
+func checkRuntimeModels(facts doctorfacts.ProviderDoctorFacts) []doctorCheck {
 	checks := []doctorCheck{{
 		"models", doctorOK, fmt.Sprintf(
 			"平台模型清单 %d 条（跨 runtime）；meta.runtime_config_digest %s",
@@ -483,7 +490,7 @@ func bracketList(items []string) string {
 //
 // v11 的端点藏在逐底座的 `projections` 里，迁移时推不出来就留空——那些供应商的模型一条也不会
 // 被交付给任何底座，而它看起来只是"一条普通的供应商"。这条把它显式摆出来（fail-loud，附出路）。
-func checkProviderBaseURL(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkProviderBaseURL(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "providers 端点"
 	if len(facts.MissingBaseURL) == 0 {
 		return doctorCheck{name, doctorOK, "每条供应商都有可用的 `base_url`"}
@@ -498,7 +505,7 @@ func checkProviderBaseURL(facts manager.ProviderDoctorFacts) doctorCheck {
 //
 // 「无法校验」的口径：没迁移过 = 不需要备份（OK，不是 warn）；迁移过但找不到备份文件
 // = **回退窗口缺失**（fail：v12 之后旧二进制会拒绝启动，没有备份就只能前滚）。
-func checkMigrationBackup(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkMigrationBackup(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "迁移备份"
 	if facts.MigrationBackup != "" {
 		return doctorCheck{name, doctorOK, "可回退依据：`" + facts.MigrationBackup +
@@ -518,7 +525,7 @@ func checkMigrationBackup(facts manager.ProviderDoctorFacts) doctorCheck {
 // 判 warn 而不是 fail，也**不做任何搬移/删除**：那些文件是**有效退路**（恢复到哪一份就退到
 // 哪一版），只是不再按新布局落盘。医生的职责是让人看见"这里还有 7 个文件、你可以把它们收进
 // `backups/` 或按需删掉"，处置权在用户——自动搬移会改掉回退路径，自动删除更是直接关门。
-func checkLegacyMigrationBackups(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkLegacyMigrationBackups(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "备份布局"
 	if len(facts.LegacyMigrationBackups) == 0 {
 		return doctorCheck{name, doctorOK, "迁移备份都在 `<数据目录>/backups/` 下（或本机没有备份）"}
@@ -532,7 +539,7 @@ func checkLegacyMigrationBackups(facts manager.ProviderDoctorFacts) doctorCheck 
 // checkMigrationNotes 迁移留下的待人工处置事实（默认模型冲突 / 归并冲突 / 无出口字段）。
 //
 // 迁移**不阻塞**这些（B1/R3），但它们必须被看见——否则"未迁移字段"就成了一句没人能验证的话。
-func checkMigrationNotes(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkMigrationNotes(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "迁移对账"
 	n := facts.MigrationNotes
 	if n == nil {
@@ -564,7 +571,7 @@ func checkMigrationNotes(facts manager.ProviderDoctorFacts) doctorCheck {
 // 明文那一条**判 warn 而不是 fail**：库现在**不含**明文（这正是修复），代价是那些供应商
 // 此刻没有密钥（会报 credential_missing）——出路是重设一次，旧值可从备份库取回。
 // 文案指到具体备份文件，**绝不回显密钥值**。
-func checkMigrationNotesV13(facts manager.ProviderDoctorFacts) doctorCheck {
+func checkMigrationNotesV13(facts doctorfacts.ProviderDoctorFacts) doctorCheck {
 	name := "迁移对账 v13"
 	n := facts.MigrationNotesV13
 	if n == nil {
@@ -614,7 +621,7 @@ func checkMigrationNotesV13(facts manager.ProviderDoctorFacts) doctorCheck {
 //
 // 权限宽于 0600 → **fail**（不是 warn）：dsh 对可被属主之外读取的凭据文档是**拒启**，
 // 而这份文档里是明文密钥。无法判定权限（Windows）→ warn，如实说"无法校验"。
-func checkSensitiveFiles(facts manager.ProviderDoctorFacts) []doctorCheck {
+func checkSensitiveFiles(facts doctorfacts.ProviderDoctorFacts) []doctorCheck {
 	if len(facts.SensitiveFiles) == 0 {
 		return []doctorCheck{{"敏感文件", doctorOK, "没有需要单独看待的明文凭据落点"}}
 	}

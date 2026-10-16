@@ -23,8 +23,8 @@ import (
 	"github.com/morehao/golib/glog"
 )
 
-// FileExists 判断路径存在（doctor 与状态面用）。
-func FileExists(p string) bool {
+// fileExists 判断路径存在（doctor 与状态面用）。
+func fileExists(p string) bool {
 	if p == "" {
 		return false
 	}
