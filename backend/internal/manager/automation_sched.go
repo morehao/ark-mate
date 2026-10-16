@@ -461,10 +461,10 @@ func (s *Service) sessionRunning(id string) bool {
 	if id == "" {
 		return false
 	}
-	// 状态**在锁内读出**：`markSession` 归 executeRun 的 goroutine 所有，
-	// 出锁后再读 rec.Status 就是数据竞争（-race 直接报）。
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// **不持 `s.mu`**（P2b 守卫）：`sessionPlane.Lookup` 自己取会话域的锁并返回**副本**，
+	// 所以读 `conv.Status` 本身就是竞态安全的——manager 锁在这条路上没有保护对象。
+	// 在这里持锁调会话域会把"manager 锁 → 会话锁"这条边固化下来，与某条反向回调合成锁序反转
+	// （表现是挂死，不是红；见 `internal/archtest/manager_lock_order_test.go`）。
 	conv, ok := s.sessionPlane.Lookup(id)
 	if !ok {
 		return false

@@ -102,8 +102,7 @@ func (s *Service) sessionMeta(id string) (exportMeta, bool) {
 		return exportMeta{id: c.ID, title: c.Title, runtimeID: c.RuntimeID, status: c.Status,
 			created: c.CreatedAt, updated: c.UpdatedAt}, true
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// **不持 `s.mu`**（P2b 守卫）：`Lookup` 自己取会话域的锁并返回副本。
 	r, ok := s.sessionPlane.Lookup(id)
 	if !ok {
 		return exportMeta{}, false

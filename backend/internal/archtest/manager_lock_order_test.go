@@ -7,63 +7,87 @@ import (
 	"testing"
 )
 
-// ——— P2b 前置：「不许持 manager 的锁去请求会话快照」守卫 ———
+// ——— P2b：「不许持 manager 的锁去调会话域」守卫 ———
 //
 // 背景（2026-10-16 实测）：`manager` 的 `s.mu` 一度**同时**保护三样东西——workspace 策略字段、
 // memory 模式的默认工作空间、以及**会话快照的读顺序**。后者的形态是"持 `s.mu` 调
-// `sessionPlane.Snapshot()`"（`workspace_registry.go` 的 `workspaceRespForMemDefault`、
-// `workspace_view.go` 的 `workspaceUsage` 两处）。
+// `sessionPlane.<动作>()`"。
 //
 // 那是**锁序反转**的雏形，而它的表现是 `go test ./...` **挂死**（不是红——见计划 §10.5.3 教训 1
-// 的同一个家族）：会话域已经会回调 workspace 侧（`SetWorkspaceDisplay` 端口），一旦 workspace
-// 的状态搬进域平面、域锁下再请求会话快照，就得到 `workspace.mu → session.mu`，与那条回调合成
-// 互指的边。P2b 把 workspace 搬进 `domain/workspace` 之前必须先解开它，否则每一次搬迁都在把一条
-// 潜死锁往深处埋。
+// 的同一个家族）：会话域会回调 workspace 侧（`SetWorkspaceDisplay` 端口），一旦被调的域在自己
+// 的锁下再请求 manager 侧，就得到互指的两条边。
 //
-// 判据（静态、可解析）：`internal/manager/**` 里任何**同一函数体内**既出现 `s.mu.Lock()`
-// 又出现 `sessionPlane.Snapshot()` 的地方即红。写成"同一函数体"而不是"同一文件"是因为
-// 同一个文件里两个不相干的函数各做各的并不构成锁序反转。
+// 判据（静态、可解析）：`internal/manager/**` 的生产文件里，任何**同一函数体内**既出现
+// `s.mu.Lock()` 又出现 `sessionPlane.<动作>(` 的地方即红。
 //
-// fail-closed：扫描面为空即失败（目录改名/搬走会让守卫静默空转）。
+// 两条实现上的讲究，都是**实测踩出来的**：
 //
-// 反证（实跑）：把 `workspaceUsage` 里的 `s.mu.Lock()` 加回去 → 红。
+//   - **函数边界只认顶格的 `}`**：第一版用 `strings.TrimSpace(line) == "}"`，于是函数里任何一个
+//     提前 return 的 `if` 块（它的 `}` 也是单独一行）都会被当成函数结束——`providerEffect`
+//     那种"前面有个 early return、后面才持锁取快照"的函数因此**静默漏过**（假绿）。
+//     gofmt 过的代码里顶层函数的收尾 `}` 一定在第 0 列，所以按列判是可靠的。
+//   - **判据放宽到 `sessionPlane.` 全部动作**（不只是 `Snapshot()`）：同族漏网的还有
+//     `Lookup(`（`sessionRunning` / `sessionMeta` 就是）——只钉 `Snapshot()` 等于把"同一个错
+//     的另一种写法"放过去。
+//
+// fail-closed：扫描面为空、或这个包里一处 `s.mu.Lock()` 都没有 → 失败（锁被搬走/改名 = 判据失锚）。
+//
+// 反证（实跑）：把 `s.mu.Lock()` / `defer Unlock` 加回 `workspaceUsage` → 红；
+// 把 `sessionRunning` 的 `s.mu` 加回去 → 红。
 
-// mutexSnapshotFunctions 扫出 manager 生产文件里"持 s.mu 且请求会话快照"的函数名（供报错用）。
-//
-// 实现取的是**够用即止**的形状：Go 的按行扫描 + 函数边界识别（`^func ` 起、`^}` 止）。
-// 不去解析 AST 是因为 `internal/archtest` 一直用文本判据（`stripLineComments` 那一族），
-// 引 AST 会给这条守卫带来它不需要的复杂度；而"持锁 + 快照同处一个函数体"这件事在文本上
-// 没有歧义（两行之间不会有别的函数定义）。
-func mutexSnapshotFunctions(t *testing.T, src string) []string {
+// mutexSessionCallFunctions 扫出 manager 生产文件里"持 s.mu 且调会话域"的函数名（供报错用）。
+func mutexSessionCallFunctions(t *testing.T, src string) []string {
 	t.Helper()
 	var out []string
 	var cur string
-	var locked, snap bool
+	var locked bool
+	var calls []string
 	flush := func() {
-		if cur != "" && locked && snap {
-			out = append(out, cur)
+		if cur != "" && locked && len(calls) > 0 {
+			out = append(out, cur+" → sessionPlane."+strings.Join(dedupeStrings(calls), "/"))
 		}
 	}
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "func ") {
 			flush()
-			cur, locked, snap = funcNameOf(trimmed), false, false
+			cur, locked, calls = funcNameOf(trimmed), false, nil
 			continue
 		}
-		if trimmed == "}" {
+		// **顶格** `}` = 函数体结束；缩进的 `}` 只是某个块的结束（第一版在这里假绿）。
+		if line == "}" {
 			flush()
-			cur, locked, snap = "", false, false
+			cur, locked, calls = "", false, nil
 			continue
 		}
 		if strings.Contains(line, "s.mu.Lock()") {
 			locked = true
 		}
-		if strings.Contains(line, "sessionPlane.Snapshot()") {
-			snap = true
+		for _, m := range sessionPlaneCallRe.FindAllStringSubmatch(line, -1) {
+			calls = append(calls, m[1])
 		}
 	}
 	flush()
+	return out
+}
+
+// sessionPlaneCallRe 抓 `sessionPlane.<动作>(` 的动作名。
+var sessionPlaneCallRe = regexp.MustCompile(`sessionPlane\.([A-Za-z_][A-Za-z0-9_]*)\(`)
+
+// dedupeStrings 保序去重（小切片，线性扫足够）。
+func dedupeStrings(in []string) []string {
+	if len(in) <= 1 {
+		return in
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
 	return out
 }
 
@@ -77,9 +101,9 @@ func funcNameOf(decl string) string {
 	return decl
 }
 
-// TestManagerDoesNotHoldMutexWhileReadingSessionSnapshot 见文件头：manager 不许持 `s.mu`
-// 去请求会话快照。
-func TestManagerDoesNotHoldMutexWhileReadingSessionSnapshot(t *testing.T) {
+// TestManagerDoesNotHoldMutexWhileCallingSessionPlane 见文件头：manager 不许持 `s.mu`
+// 去调会话域。
+func TestManagerDoesNotHoldMutexWhileCallingSessionPlane(t *testing.T) {
 	root := backendRoot(t)
 	dir := filepath.Join(root, "internal", "manager")
 	files := productionGoFiles(t, dir)
@@ -92,13 +116,12 @@ func TestManagerDoesNotHoldMutexWhileReadingSessionSnapshot(t *testing.T) {
 		if strings.Contains(src, "s.mu.Lock()") {
 			locked++
 		}
-		for _, fn := range mutexSnapshotFunctions(t, src) {
-			t.Errorf("internal/manager/%s 的 `%s` 持 `s.mu` 请求会话快照（`sessionPlane.Snapshot()`）："+
-				"这是**锁序反转**的雏形。\n"+
-				"会话域会回调 workspace 侧（`SetWorkspaceDisplay`），于是 workspace 状态搬进域平面后"+
-				"就得到 `workspace.mu → session.mu` 与一条反向回调互指——表现是 `go test ./...`"+
+		for _, fn := range mutexSessionCallFunctions(t, src) {
+			t.Errorf("internal/manager/%s 的 `%s` 持 `s.mu` 调会话域：这是**锁序反转**的雏形。\n"+
+				"会话域会回调 workspace / provider 侧（`SetWorkspaceDisplay` 这类端口），于是"+
+				"\"manager 锁 → 会话锁\" 与某条反向回调合成互指的边——表现是 `go test ./...`"+
 				"**挂死**而不是红。\n"+
-				"处置：把快照读提到锁**外面**（循环体只读快照与入参的，本来就不需要这把锁）。",
+				"处置：把对会话域的调用提到锁**外面**（会话域的方法自己取锁并返回副本，本来就不需要这把锁）。",
 				filepath.Base(path), fn)
 		}
 	}

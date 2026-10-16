@@ -43,9 +43,8 @@ func (s *Service) providerEffect(providerID string) *dtoprovider.ProviderEffect 
 	}
 
 	// 在环上 → 这份声明变了，本机所有会话下一条命轮都会按新声明重开连接（逐会话判是否顺延）。
-	s.mu.Lock()
+	// **不持 `s.mu`**（P2b 守卫）：快照读与下面的循环都只碰副本与会话域自己的动作。
 	recs := s.sessionPlane.Snapshot()
-	s.mu.Unlock()
 
 	for i := range recs {
 		rec := &recs[i]
