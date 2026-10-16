@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 	"testing"
 	"time"
@@ -172,7 +173,7 @@ func TestAutomationDefinitionsStoreRoundTrip(t *testing.T) {
 	}
 	// 被拒的写与重复新建/覆盖不存在的尝试都不得留下审计。
 	for _, r := range revs {
-		if r.Actor != definitionWriteActor {
+		if r.Actor != definition.DefinitionWriteActor {
 			t.Fatalf("审计 actor 不符: %+v", r)
 		}
 	}

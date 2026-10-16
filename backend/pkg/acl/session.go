@@ -149,7 +149,7 @@ func (c *Client) NewSession(ctx context.Context, opt SessionOptions) (*Session, 
 }
 
 // LoadSession 载入既有会话。仅当 agent 声明 loadSession 时可用，否则返回 ClassUnsupported
-// （deepseek-harness 即为该情形，见 docs/architect-design.md §6.2）。
+// （dsh 即为该情形，见 docs/dsh-acp-adaptation.md §2）。
 func (c *Client) LoadSession(ctx context.Context, sessionID string, opt SessionOptions) (*Session, error) {
 	if !c.caps.Raw.LoadSession {
 		return nil, NewError(ClassUnsupported, "load_session_unsupported",

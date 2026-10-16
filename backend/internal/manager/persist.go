@@ -24,8 +24,20 @@ import (
 //   - transcript recorder 视为停写（serve 装配时不再 SetTranscriptDir）。
 //
 // 须在 RestoreFromStore 之前、任何会话动作之前调用。
-func (s *Service) EnableStore(st *store.Store) {
+// attachStore 把库句柄接到**所有持有它的部件**上（Service 自己 + 定义机制 + 凭据机制 + 技能平面）。
+//
+// 为什么要有这个函数：这几处曾经都直接读 `s.st`，"设一次就够了"；拆层之后它们各持一个引用，
+// **漏掉任一个的表现都是静默的**（该走库的走了文件、或反过来——定义只写进内存、凭据读不到库）。
+// 装配路径与 `mate doctor --rebuild-read-models` 那条逃生口都必须经它，**不要各自赋值**。
+func (s *Service) attachStore(st *store.Store) {
 	s.st = st
+	s.defs.SetStore(st)
+	s.creds.SetStore(st)
+	s.skillPlane.SetStore(st)
+}
+
+func (s *Service) EnableStore(st *store.Store) {
+	s.attachStore(st)
 	// T5 的配置指纹随持久层一起装载（它并进代际键，重启后必须仍然生效——
 	// 否则重启会把"已物化的清单"当成"没有清单"，下一轮凭空重换代际）。
 	s.loadRuntimeConfigDigests(context.Background())
@@ -74,7 +86,7 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 			ID: sess.ID, Cwd: sess.Cwd,
 			WorkspaceID:        sess.WorkspaceID,
 			WorkspaceTemporary: sess.WorkspaceTemporary,
-			ModelID: sess.ModelID, RuntimeID: runtime.NormalizeID(sess.RuntimeID),
+			ModelID:            sess.ModelID, RuntimeID: runtime.NormalizeID(sess.RuntimeID),
 			RuntimeSessionID: sess.RuntimeSessionID,
 			Title:            sess.Title, Pinned: sess.Pinned, Archived: sess.Archived,
 			Status: sess.Status, Origin: sess.Origin, CapabilityJSON: sess.CapabilityJSON,

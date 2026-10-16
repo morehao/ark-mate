@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/automation"
@@ -15,7 +16,7 @@ import (
 
 // ——— M4-5：automation 的端口实现（写面适配 + 预览 + 运行史 + 手动触发）———
 //
-// 写面适配的职责只有两件：把原文 JSON 对象转成落盘层要的 patch（`rawPatch`）与把领域视图
+// 写面适配的职责只有两件：把原文 JSON 对象转成落盘层要的 patch（`definition.RawPatch`）与把领域视图
 // 转成 DTO。校验/落盘/并发那三件事全在 M4-3/M4-4 的实现里，这里不重复也不绕过。
 
 var _ svcautomation.AutomationSvc = (*Service)(nil)
@@ -33,13 +34,13 @@ func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error
 func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
 	raw, ok := req["id"]
 	if !ok {
-		return nil, capWriteErrParam("缺少 id（automation 的 id 是文件名，必填且不可改）")
+		return nil, definition.InvalidParamErr("缺少 id（automation 的 id 是文件名，必填且不可改）")
 	}
 	id, okStr := patchID(raw)
 	if !okStr || id == "" {
-		return nil, capWriteErrParam(`字段 "id" 须为非空字符串`)
+		return nil, definition.InvalidParamErr(`字段 "id" 须为非空字符串`)
 	}
-	v, err := s.writeAutomation(ctx, id, rawPatch(req), true)
+	v, err := s.writeAutomation(ctx, id, definition.RawPatch(req), true)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +49,7 @@ func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.Automa
 
 // UpdateAutomation 覆盖写：只改请求体里出现的键（未出现的保留原值；`null` 删键）。
 func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	v, err := s.writeAutomation(ctx, id, rawPatch(req), false)
+	v, err := s.writeAutomation(ctx, id, definition.RawPatch(req), false)
 	if err != nil {
 		return nil, err
 	}

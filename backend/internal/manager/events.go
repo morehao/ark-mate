@@ -1,12 +1,12 @@
 package manager
 
 // 域事件类型（manager Publish 进 eventbus 的 type 判别词；agg_id = session id）。
-// 与设计文档 §4.1 事件模型对齐：token/thought/tool_call/message 归一为「消息类增量 + 终态」。
+// 事件契约见 docs/architecture.md §6.2：token/thought/tool_call/message 归一为「消息类增量 + 终态」。
 const (
 	// BusSessionCreated 会话建立（含 session id）。
 	BusSessionCreated = "session.created"
 	// BusSessionResumed 进程重启后会话按需恢复（P3 F2：acquire → Load/Resume 原生会话 →
-	// 重建投影）。payload = {session_id, agent_id, runtime, reason}；reason=generation（M3-6
+	// 重建投影）。payload = {session_id, runtime, reason}；reason=generation（M3-6
 	// 轮次边界迁到新能力代际）时另带 capability_fingerprint（换到了哪一代）。
 	BusSessionResumed = "session.resumed"
 	// BusUserMessage 用户消息回显。
@@ -24,12 +24,12 @@ const (
 	// BusPermission 权限决策留痕（acl 决策后上抛：payload = acl.PermissionInfo）。
 	BusPermission = "session.permission"
 	// BusConfigOptions 运行时主动推送的会话配置项全量更新（ACP session/config_option_update；
-	// 如 dsh 在 provider 拓扑变化时推）。payload = {session_id, agent_id, runtime, options}
+	// 如 dsh 在 provider 拓扑变化时推）。payload = {session_id, runtime, options}
 	// （options = acl.ConfigOption 切片：运行时配置项的直投影，如模型目录）。
 	BusConfigOptions = "session.config_options"
 	// BusCommands 会话可用命令**全量**列表（ACP session/available_commands_update；
 	// 这是**可选能力**：会通告命令的底座才推，别的底座的 ACP 面不含命令、故永不产生本事件）。
-	// payload = {session_id, agent_id, runtime, commands}
+	// payload = {session_id, runtime, commands}
 	// （commands = acl.CommandInfo 切片 {name, description?, hint?}，顺序由底座给出、平台不重排）。
 	//
 	// 语义边界（ADR-17）：这是**发现面**，不是声明面——命令由底座自报、执行只是把它当
@@ -39,8 +39,10 @@ const (
 	// BusPermissionRequest 权限请求（待确认挂起态；M2 权限策略位起发布，当前默认拒绝不触发——
 	// payload 契约与 use-case 见设计文档 §4.5「权限/确认位（决策 v5④）」）。
 	BusPermissionRequest = "session.permission_request"
-	// BusPermissionPolicy per-agent 默认权限策略自动决策留痕（M2 #7）：payload =
-	// {session_id, agent_id, action(allow|deny), title, kind, allowed, rejected, option_id}。
+	// BusPermissionPolicy 原生权限策略的自动决策留痕（M2 #7；事件名冻结在契约里）：payload =
+	// {session_id, action(allow|deny), title, kind, allowed, rejected, option_id}。
+	// **v19 起平台没有策略来源**（per-agent 默认策略随 agent 面撤销，见 decisions.md「决策 v19」），
+	// 所以今天不会有新事件；常量留着是因为事件 type 是**冻结的对外契约**，删它会动契约快照。
 	BusPermissionPolicy = "session.permission_policy"
 	// BusPermissionResolved 挂起权限终局（用户决策 / 超时自动拒绝 / 会话取消）——前端收敛权限卡的
 	// 唯一事实（不依赖前端时钟）。payload = {session_id, call_id, outcome(selected|cancelled),
@@ -54,13 +56,13 @@ const (
 	// reason(user|timeout|cancel)}。
 	BusElicitationResolved = "session.elicitation_resolved"
 	// BusInputQueued §6：会话正忙，用户输入已入队等待投递（delivery=after_run|interrupt_then_prompt）。
-	// payload = {session_id, agent_id, input_id, text, delivery, target_run_id, generation}。
+	// payload = {session_id, input_id, text, delivery, target_run_id, generation}。
 	// 前端据此在输入区上方渲染队列；收敛靠 input_delivered / input_cancelled。
 	BusInputQueued = "session.input_queued"
-	// BusInputDelivered §6：排队输入已作为新一轮投递出去（payload = {session_id, agent_id,
+	// BusInputDelivered §6：排队输入已作为新一轮投递出去（payload = {session_id,
 	// input_id, delivery, reason(run_finished)}）。其后紧跟该轮的 session.user_message。
 	BusInputDelivered = "session.input_delivered"
-	// BusInputCancelled §6：排队输入离队但**未被投递**（payload = {session_id, agent_id,
+	// BusInputCancelled §6：排队输入离队但**未被投递**（payload = {session_id,
 	// input_id, delivery, reason(user_cancel|deliver_failed)}）。与 delivered 分开是刻意的：
 	// 「撤下」和「发出去了」是两件不同的事实，复用同一个 type 会让前端只能靠猜。
 	BusInputCancelled = "session.input_cancelled"

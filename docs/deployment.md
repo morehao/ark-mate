@@ -1,19 +1,19 @@
 # ark-mate 部署与运维
 
 > 面向**个人 Agent 助手**（两层：底座 + 产品，决策 v8①）的单机部署：单操作员（决策 v3③：无多用户/团队语义、
-> 无登录鉴权）。**交付重心是桌面应用**（决策 v8③）——桌面安装包见
-> [desktop-architecture-design-20260928.md](./desktop-architecture-design-20260928.md)；本文讲的是**服务端形态**与
+> 无登录鉴权）。**交付重心是桌面应用**（决策 v8③）——桌面形态见
+> [architecture.md](./architecture.md) §2 与 [acceptance-matrix.md](./acceptance-matrix.md)；本文讲的是**服务端形态**与
 > 底座运维，它们冻结为**维护态**（保留可用、继续被测试、可修缺陷；**不加新功能、不进主线排期**）。
 > **浏览器入口只是开发过程使用的形态**，不是交付面——服务端形态的界面按「自用 / 开发」对待，不承诺 UI 体验。
 > 本文只写**可复核**的部署形态与参数；除明确标注**未执行**的一项（systemd 单元）外，命令均在本机实跑过
-> （容器镜像 §4 已实跑，见文末「验证记录」）。设计背景见 `docs/design-and-roadmap.md`
-> §M3 与 `docs/agent-runtime-refactor-design-20260908.md`。
+> （容器镜像 §4 已实跑，见文末「验证记录」）。形态与沿革见
+> [architecture.md](./architecture.md) 与 [decisions.md](./decisions.md)。
 
 ## 1. 交付形态（服务端形态，维护态）
 
 | 形态 | 命令 | 产物 | 说明 |
 | --- | --- | --- | --- |
-| **桌面应用（主线交付）** | `make desktop/dist` | dmg / Windows 安装器 | 随包运行时，用户机器不需要 Go / Node / 预装底座；**详见 [desktop 设计](./desktop-architecture-design-20260928.md)**，本文不复述 |
+| **桌面应用（主线交付）** | `make desktop/dist` | dmg / Windows 安装器 | 随包运行时，用户机器不需要 Go / Node / 预装底座；**详见[架构总览](./architecture.md) §2、§8**，本文不复述 |
 | 自建二进制（外挂 dist） | `cd backend && CGO_ENABLED=0 go build -o mate ./cmd/mate` | 二进制 + 需自备一份 `apps/web/dist` | 核心**不再内嵌任何前端资产**（单二进制形态已于 2026-10-10 取消）：起服必须 `./mate serve --web-dir /abs/path/to/apps/web/dist`（或 `MATE_WEB_DIR`），没给就拒绝启动（退出码 3）。**构建不需要 CGO**（2026-10-12 起）：SQLite dialect 随 golib v1.32.22 换成纯 Go 的 `ncruces/go-sqlite3`，`0` 可编可跑、编译不需要 C 工具链（实测 `CC=false` 也编得出）、`GOOS=linux` 交叉编译得到静态产物（`file` 报 `statically linked`，于是下面那条 `FROM scratch` 重新可用），`=1` 则要 C 交叉工具链（实测直接编不过）；代价是体积（golib 实测最小程序 +10.99 MiB）。2026-10-11 前后那版 driver 是 CGO 的，那时的 `0` 会编出运行期连不上库的 stub |
 | 仅后端内核 | `make build` | 无独立产物 | 任何构建都不带资产，`make build` 只编后端；面板要由 `--web-dir` / `MATE_WEB_DIR` 提供，没给即拒启（退出码 3） |
 | 前端产物独立托管 | `make web` | `frontend/apps/web/dist` | 前端可独立部署（需自行把 `/v1` 反代到后端，含 WebSocket 升级） |

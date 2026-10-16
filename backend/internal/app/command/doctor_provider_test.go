@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +63,7 @@ func (r *providerDoctorRig) writeMirror(t *testing.T, perm os.FileMode, values m
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(manager.CredentialsPath(r.home), raw, perm); err != nil {
+	if err := os.WriteFile(credential.CredentialsPath(r.home), raw, perm); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -277,7 +278,7 @@ func TestDoctorProviderSectionReadOnly(t *testing.T) {
 	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatalf("体检改了库文件：size %d→%d mtime %s→%s", before.Size(), after.Size(), before.ModTime(), after.ModTime())
 	}
-	if _, err := os.Lstat(manager.CredentialsPath(r.home)); !os.IsNotExist(err) {
+	if _, err := os.Lstat(credential.CredentialsPath(r.home)); !os.IsNotExist(err) {
 		t.Fatalf("体检创建了托管文档（err=%v）——只读命令没有这个权限", err)
 	}
 	if _, err := os.Lstat(legacyCipher); err != nil {
@@ -344,7 +345,7 @@ func TestRunDoctorProviderSectionNoFailures(t *testing.T) {
 		t.Fatalf("providers 段的键名不是稳定的机器可读形状：%v\n%s", err, b)
 	}
 	p := probe.Providers
-	if p.ProviderRows != 1 || p.CredentialsPath != manager.CredentialsPath(r.home) {
+	if p.ProviderRows != 1 || p.CredentialsPath != credential.CredentialsPath(r.home) {
 		t.Fatalf("键名/取值不对：%+v", p)
 	}
 	if !p.CredentialsExists || p.CredentialsPerm != "0600" || !p.CredentialsPermOK || p.CredentialsRefs != 1 {

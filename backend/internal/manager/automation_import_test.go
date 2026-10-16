@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -71,7 +72,7 @@ func automationSeedDir(t *testing.T) string {
 		`"schedule":{"kind":"weekly","timezone":"UTC","hour":3,"minute":30,"days_of_week":[1]},`+
 		`"target":{"agent_id":"a1","cwd":"`+cwd+`","prompt":"周报"}}`)
 	write("broken.json", `{"id":"broken",`)
-	// id 里带斜杠 = 会变成"子路径"，与写面同一道闸门（`validDefinitionID`）→ 拒收。
+	// id 里带斜杠 = 会变成"子路径"，与写面同一道闸门（`definition.ValidDefinitionID`）→ 拒收。
 	write("slash.json", `{"id":"a/b","name":"id 带斜杠"}`)
 	// 保留键类型不对（`last_fired_at` 写成数字）：**报错**而不是静默丢掉——"我写了它为什么不生效"
 	// 比"这条导不进来"更难排查。
@@ -87,7 +88,7 @@ func TestImportAutomationDirSplitsRuntimeColumns(t *testing.T) {
 	dir := automationSeedDir(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 
-	stats, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil)
+	stats, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
 	if err != nil {
 		t.Fatalf("ImportAutomationDir: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestImportAutomationDirBoundsRecentRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "many")
@@ -167,12 +168,12 @@ func TestImportAutomationDirAutoIsOneShotButExplicitReruns(t *testing.T) {
 	dir := automationSeedDir(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 
-	first, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
+	first, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || first.Already || first.Inserted != 2 {
 		t.Fatalf("首次自动导入不符: %+v err=%v", first, err)
 	}
 	// 目录没变 → 整体跳过（**一个字节都不写**）：用户删掉的行不会自己回来。
-	second, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
+	second, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || !second.Already || second.Inserted != 0 {
 		t.Fatalf("二次自动导入应整体跳过: %+v err=%v", second, err)
 	}
@@ -180,14 +181,14 @@ func TestImportAutomationDirAutoIsOneShotButExplicitReruns(t *testing.T) {
 	if ok, err := st.DeleteAutomationDefinition(ctx, "u1", row.Revision, "rest"); err != nil || !ok {
 		t.Fatalf("删行: ok=%v err=%v", ok, err)
 	}
-	if _, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, _ := st.GetAutomationDefinition(ctx, "u1"); found {
 		t.Fatal("目录没变时自动导入不得把删掉的行带回来")
 	}
 	// 显式导入不看指纹、只看行：文件还在 → 补回来（并带回它当时的运行态）。
-	explicit, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil)
+	explicit, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
 	if err != nil || explicit.Already || explicit.Inserted != 1 || explicit.Existing != 1 {
 		t.Fatalf("显式导入应按行判重补一条: %+v err=%v", explicit, err)
 	}
@@ -202,7 +203,7 @@ func TestImportAutomationDirNeverOverwrites(t *testing.T) {
 	dir := automationSeedDir(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	// 面板上改过的那一版（含平台写回过的运行态）。
-	if _, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "u1")
@@ -216,7 +217,7 @@ func TestImportAutomationDirNeverOverwrites(t *testing.T) {
 		t.Fatalf("面板跑一轮: ok=%v err=%v", ok, err)
 	}
 
-	stats, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil)
+	stats, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +237,7 @@ func TestExportAutomationDirRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	src := automationSeedDir(t)
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportAutomationDir(ctx, st, src, DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, src, definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	dst := t.TempDir()
@@ -265,7 +266,7 @@ func TestExportAutomationDirRoundTrip(t *testing.T) {
 	}
 	// 往返：导出的目录再导进一个**空库**，行（定义 + 运行态）逐字段一致，再导出逐字节相同。
 	st2 := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportAutomationDir(ctx, st2, dst, DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st2, dst, definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	a, _, _ := st.GetAutomationDefinition(ctx, "u1")
@@ -290,7 +291,7 @@ func TestExportAutomationDirRoundTrip(t *testing.T) {
 func TestExportAutomationDirDryRun(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportAutomationDir(ctx, st, automationSeedDir(t), DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, automationSeedDir(t), definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	dst := t.TempDir()
@@ -309,14 +310,14 @@ func TestExportAutomationDirDryRun(t *testing.T) {
 func TestImportExportAutomationDirRequireStore(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	if _, err := ImportAutomationDir(ctx, nil, dir, DefinitionImportOptions{}, nil); err == nil {
+	if _, err := ImportAutomationDir(ctx, nil, dir, definition.DefinitionImportOptions{}, nil); err == nil {
 		t.Fatal("导入需要持久层")
 	}
 	if _, err := ExportAutomationDir(ctx, nil, dir, false, nil); err == nil {
 		t.Fatal("导出需要持久层")
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	stats, err := ImportAutomationDir(ctx, st, "", DefinitionImportOptions{}, nil)
+	stats, err := ImportAutomationDir(ctx, st, "", definition.DefinitionImportOptions{}, nil)
 	if err != nil || stats.Dir != "" || stats.Inserted != 0 {
 		t.Fatalf("空目录的导入应是无声空操作: %+v err=%v", stats, err)
 	}
@@ -338,7 +339,7 @@ func TestImportAutomationDirKeepsBadDefinitionLoadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	stats, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil)
+	stats, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil)
 	if err != nil || stats.Inserted != 1 || stats.Invalid != 0 {
 		t.Fatalf("不可执行但结构完好的定义应照常导入: %+v err=%v", stats, err)
 	}
@@ -360,7 +361,7 @@ func TestImportAutomationDirClockSkewNormalized(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
-	if _, err := ImportAutomationDir(ctx, st, dir, DefinitionImportOptions{}, nil); err != nil {
+	if _, err := ImportAutomationDir(ctx, st, dir, definition.DefinitionImportOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	row, _, _ := st.GetAutomationDefinition(ctx, "tz")

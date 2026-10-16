@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
@@ -78,7 +79,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, providersFileName), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("ImportProviderFile: %v", err)
 	}
 	row, found, _ := st.GetProviderDefinition(ctx, "legacy")

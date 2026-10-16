@@ -16,6 +16,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,7 +28,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
-	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/middleware"
@@ -207,7 +211,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 凭据 cwd **显式登记**（不是让用到的每一处各自 `os.Getwd()`）：它要随网关条目交给网关
 	// **子进程**，而网关的 cwd 是底座给的（会话工作区）——见 `mcp.GatewayCredCwdEnv`。
 	a.svc.SetCredentialCwd(cwd)
-	if layered, mirrorPath, cErr := manager.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
+	if layered, mirrorPath, cErr := credmech.OpenCredentialSource(cfg.HomeDir, cwd); cErr != nil {
 		glog.Warnw(ctx, "serve: 凭据分层未装配（只有库里的那一份可用）", "err", cErr,
 			"home", config.DisplayHome(cfg.HomeDir))
 	} else {
@@ -274,8 +278,8 @@ func (a *App) Init(ctx context.Context) error {
 		// 幂等靠目录指纹（`meta.imported_capabilities`），且**按行判重**（导入绝不覆盖）：
 		// 目录没变 → 一个字节都不写；目录变了 → 只补缺失的行。失败只 WARN 不阻断启动
 		// （能力面为空是可见的，而"起不来"是更坏的一种失败），出路是显式 `mate capability import`。
-		if imp, iErr := manager.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+		if imp, iErr := definition.ImportCapabilityDir(ctx, st, cfg.CapabilityDir,
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量能力定义失败（能力面可能为空；可跑 `mate capability import` 重试）",
 				"err", iErr, "dir", cfg.CapabilityDir)
 		} else if !imp.Already && imp.Inserted+imp.Existing+imp.Invalid+imp.Tools > 0 {
@@ -291,7 +295,7 @@ func (a *App) Init(ctx context.Context) error {
 		//
 		// 两个域各自记指纹（`meta.imported_automations`）：只改 automation 目录不该让能力面重跑。
 		if imp, iErr := manager.ImportAutomationDir(ctx, st, cfg.AutomationDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 automation 定义失败（定时任务面可能为空；可跑 `mate automation import` 重试）",
 				"err", iErr, "dir", cfg.AutomationDir)
 		} else if !imp.Already && imp.Automations+imp.Inserted+imp.Existing+imp.Invalid > 0 {
@@ -307,7 +311,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 就是全部事实）；② 迁移前**备份** `providers.json.bak-v11`（这是全篇唯一一个不可逆动作——
 		// 回退窗口在导入完成后关闭），备份失败即拒绝导入（无备份就没有回退路径）。
 		if imp, iErr := manager.ImportProviderFile(ctx, st, cfg.ProviderDir,
-			manager.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
+			definition.DefinitionImportOptions{Auto: true}, nil); iErr != nil {
 			glog.Warnw(ctx, "serve: 导入存量 provider 档案失败（供应商面可能为空；可跑 `mate provider import` 重试）",
 				"err", iErr, "dir", cfg.ProviderDir)
 		} else if !imp.Already && imp.Providers+imp.Inserted+imp.Existing > 0 {
@@ -325,10 +329,10 @@ func (a *App) Init(ctx context.Context) error {
 		// 那条判据就永远看不到东西了）。失败只 WARN：镜像是可重建副本，不阻断启动。
 		if changed, sErr := a.svc.SyncCredentialMirror(ctx, "serve 装配期"); sErr != nil {
 			glog.Warnw(ctx, "serve: 托管凭据文档未能按库对账（库是权威，键不受影响；`mate doctor` 会列出差异）",
-				"err", sErr, "path", manager.CredentialsPath(cfg.HomeDir))
+				"err", sErr, "path", credmech.CredentialsPath(cfg.HomeDir))
 		} else if changed > 0 {
 			glog.Infow(ctx, "serve: 托管凭据文档已按库对账",
-				"changed", changed, "path", manager.CredentialsPath(cfg.HomeDir))
+				"changed", changed, "path", credmech.CredentialsPath(cfg.HomeDir))
 		}
 		sessions, events, rErr := a.svc.RestoreFromStore(ctx)
 		if rErr != nil {
@@ -480,7 +484,7 @@ func (a *App) Init(ctx context.Context) error {
 
 	a.srv = newHTTPServerOn(ln, router.New(ports, a.bus, router.Options{
 		Credentials: a.credentials(),
-		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(manager.NativePickerHost) },
+		HostFacts:   func() bool { return a.svc.NativePickerMode() == string(workspace.NativePickerHost) },
 		Meta:        a.metaInfo,
 		Web:         assets,
 		AssetWatch:  a.assetWatch,
@@ -594,7 +598,7 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 func (a *App) reconcileSkillProjections() {
 	specs := a.reg.List()
 	sort.Slice(specs, func(i, j int) bool { return specs[i].ID < specs[j].ID })
-	projections := make([]manager.SkillProjection, 0, len(specs))
+	projections := make([]skill.Projection, 0, len(specs))
 	claimed := make(map[string]bool, len(specs))
 	for _, sp := range specs {
 		claimed[sp.ID+":"+string(runtime.ProjectionSkill)] = true
@@ -602,13 +606,13 @@ func (a *App) reconcileSkillProjections() {
 		switch {
 		case err != nil:
 			glog.Warnw(context.Background(), "serve: skill 投影解析失败（该 runtime 不会收到任何技能）", "runtime", sp.ID, "err", err)
-			projections = append(projections, manager.SkillProjection{Runtime: sp.ID, Err: err.Error()})
+			projections = append(projections, skill.Projection{Runtime: sp.ID, Err: err.Error()})
 			continue
 		case !ok:
 			// 该 runtime 没声明 skill 投影（远程端点即此）：不是错误，什么都不做。
 			continue
 		}
-		proj := manager.SkillProjection{Runtime: sp.ID, Projection: p}
+		proj := skill.Projection{Runtime: sp.ID, Projection: p}
 		w, r, mErr := a.svc.ReconcileSkillProjection(proj)
 		if mErr != nil {
 			glog.Warnw(context.Background(), "serve: skill 物化重校失败", "runtime", sp.ID, "root", p.Root, "err", mErr)

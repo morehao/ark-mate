@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"strings"
 
@@ -67,7 +69,7 @@ func providerImport(args []string) {
 	defer st.Close()
 
 	stats, err := manager.ImportProviderFile(context.Background(), st, root,
-		manager.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
+		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "provider import: %v\n", err)
 		os.Exit(1)
@@ -75,10 +77,10 @@ func providerImport(args []string) {
 	// 导入把密钥写进了库 → 顺手把托管镜像按库对账（幂等合并；失败只告警，不改变导入结论：
 	// 库已经写成功了，镜像是可重建副本）。
 	if !*dryRun {
-		if changed, sErr := manager.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
+		if changed, sErr := credential.SyncCredentialMirrorFromStore(context.Background(), st, cfg.HomeDir, "mate provider import"); sErr != nil {
 			fmt.Fprintf(os.Stderr, "  ⚠ 托管凭据文档未按库对账（库是权威、键不受影响）：%v\n", sErr)
 		} else if changed > 0 {
-			fmt.Printf("  托管凭据文档已按库对账：%d 条（%s）\n", changed, manager.CredentialsPath(cfg.HomeDir))
+			fmt.Printf("  托管凭据文档已按库对账：%d 条（%s）\n", changed, credential.CredentialsPath(cfg.HomeDir))
 		}
 	}
 	verb := "新增"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func libraryRig(t *testing.T) *Service {
 	)
 	svc := NewService(reg, eventbus.New())
 	svc.LoadCapabilityDefinitions(dir)
-	svc.SetSkillProjections([]SkillProjection{{
+	svc.SetSkillProjections([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
@@ -172,7 +173,7 @@ func TestLibrarySkillApplicability(t *testing.T) {
 	// 所以这里断言的是"没有它的条目"而不是硬编一个状态——见下一条说明）。
 	// 落点说明：投影列表来自 adapter 声明 + 配置解析，未解析的 runtime 不会出现在列表里；
 	// not_configured 由**声明了但解析失败**的投影产生（p.Err != ""）。
-	svc.SetSkillProjections([]SkillProjection{
+	svc.SetSkillProjections([]skill.Projection{
 		{Runtime: "rtx", Projection: runtime.Projection{Kind: runtime.ProjectionSkill,
 			Root: t.TempDir(), Layout: runtime.LayoutIDToken + "/SKILL.md",
 			Format: capability.FormatSkillMD, Tested: true}},

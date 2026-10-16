@@ -21,7 +21,8 @@ import (
 // 测试包、且大量直接读写未导出字段（svc.agents、o.conns 等），改外部包不现实。
 //
 // 所以边界是：testutil 只放 manager 无关的夹具（echo 注册表、临时 sqlite 库），
-// manager 专属的组合留在 internal/manager/testrig_test.go。
+// manager 专属的组合留在它自己的 `testrig_test.go`（内部测试包的夹具，不跨包复用；
+// 重构后随各领域包的测试一起走）。
 func TestTestutilMustNotImportImplementations(t *testing.T) {
 	root := backendRoot(t)
 	dir := filepath.Join(root, "internal", "testutil")

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,7 +171,7 @@ func writeMirrorFile(t *testing.T, home string, perm os.FileMode, values map[str
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(CredentialsPath(home), raw, perm); err != nil {
+	if err := os.WriteFile(credential.CredentialsPath(home), raw, perm); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -197,7 +198,7 @@ func TestCollectProviderDoctorFactsMemoryMode(t *testing.T) {
 		t.Fatalf("没有 DB 时不该凭空造出 DB 事实：%+v", got)
 	}
 	// 载体无关的那几条仍然要报：托管文档还没有（可重建，不是故障）、没有旧机制遗留物。
-	if got.CredentialsExists || got.CredentialsPermOK || got.CredentialsPath != CredentialsPath(home) {
+	if got.CredentialsExists || got.CredentialsPermOK || got.CredentialsPath != credential.CredentialsPath(home) {
 		t.Fatalf("托管文档面应照常探测并如实报「还没有」：%+v", got)
 	}
 	if got.LegacySecretDir || got.LegacySecretKeyFile || got.LegacySecretCount != 0 {
@@ -322,7 +323,7 @@ func TestReadCredentialsMirror(t *testing.T) {
 	if got.Exists || got.PermOK || !strings.Contains(got.Note, "尚未生成") {
 		t.Fatalf("还没有文档时应如实报「尚未生成」：%+v", got)
 	}
-	if _, err := os.Lstat(CredentialsPath(home)); !os.IsNotExist(err) {
+	if _, err := os.Lstat(credential.CredentialsPath(home)); !os.IsNotExist(err) {
 		t.Fatalf("探测不许创建文档（err=%v）", err)
 	}
 
@@ -334,20 +335,20 @@ func TestReadCredentialsMirror(t *testing.T) {
 	}
 
 	// ③ 权限过宽：**硬失败**那一档，且探测不许顺手 chmod。
-	if err := os.Chmod(CredentialsPath(home), 0o644); err != nil {
+	if err := os.Chmod(credential.CredentialsPath(home), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got = readCredentialsMirror(home)
 	if got.PermOK || !strings.Contains(got.Note, "chmod 600") {
 		t.Fatalf("权限过宽应报出来并给出路：%+v", got)
 	}
-	if fi, err := os.Stat(CredentialsPath(home)); err != nil || fi.Mode().Perm() != 0o644 {
+	if fi, err := os.Stat(credential.CredentialsPath(home)); err != nil || fi.Mode().Perm() != 0o644 {
 		t.Fatalf("探测不许改权限（mode=%v err=%v）", fi.Mode().Perm(), err)
 	}
-	_ = os.Chmod(CredentialsPath(home), 0o600)
+	_ = os.Chmod(credential.CredentialsPath(home), 0o600)
 
 	// ④ 形状坏掉（不是 `引用 → 值` 对象）：可重建，但要说清。
-	if err := os.WriteFile(CredentialsPath(home), []byte("[1,2,3]"), 0o600); err != nil {
+	if err := os.WriteFile(credential.CredentialsPath(home), []byte("[1,2,3]"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got = readCredentialsMirror(home)

@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +29,7 @@ func storeCapRig(t *testing.T) (*rig, string) {
 	t.Helper()
 	r := newRig(t, func(c *rigConfig) { c.store = true })
 	root := t.TempDir()
-	r.Svc.SetSkillProjections([]SkillProjection{skillProj(root, "rtx")})
+	r.Svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
 	return r, root
 }
 
@@ -152,11 +154,11 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	if _, err := r.Svc.CreateSkill(ctx, dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`))); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	repo, err := r.Svc.definitionRepoFor(capSubSkills)
+	repo, err := r.Svc.definitionRepoFor(definition.CapSubSkills)
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, rev, existed, err := repo.open(ctx, "cas-skill", map[string]any{"name": "mine"})
+	doc, rev, existed, err := repo.Open(ctx, "cas-skill", map[string]any{"name": "mine"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +172,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 		t.Fatalf("外部写入应成功: ok=%v err=%v", ok, err)
 	}
 
-	created, conflict, err := repo.commit(ctx, "cas-skill", doc, rev, existed)
+	created, conflict, err := repo.Commit(ctx, "cas-skill", doc, rev, existed)
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -183,7 +185,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	}
 
 	// 「我以为是新建、别人抢先建出来」也走同一条冲突判定（不是 last-write-wins）。
-	doc2, rev2, existed2, err := repo.open(ctx, "race-skill", map[string]any{"name": "mine"})
+	doc2, rev2, existed2, err := repo.Open(ctx, "race-skill", map[string]any{"name": "mine"})
 	if err != nil || existed2 {
 		t.Fatalf("race-skill 应不存在: existed=%v err=%v", existed2, err)
 	}
@@ -193,13 +195,13 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	if ok, err := r.St.UpsertSkillDefinition(ctx, "race-skill", `{"id":"race-skill"}`, 0, "other"); err != nil || !ok {
 		t.Fatalf("抢先新建应成功: ok=%v err=%v", ok, err)
 	}
-	if _, conflict, err := repo.commit(ctx, "race-skill", doc2, rev2, existed2); err != nil || !conflict {
+	if _, conflict, err := repo.Commit(ctx, "race-skill", doc2, rev2, existed2); err != nil || !conflict {
 		t.Fatalf("抢先新建后应判冲突: conflict=%v err=%v", conflict, err)
 	}
 
 	// 冲突到对外信封的映射（与文件载体时代同码同义）：40901 + definition_changed。
-	// 写面里 `conflict → definitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
-	rawErr := definitionChangedErr(repo.locator("cas-skill"))
+	// 写面里 `conflict → definition.DefinitionChangedErr` 是一行直连，所以这里钉住那一行的产物即可。
+	rawErr := definition.DefinitionChangedErr(repo.Locator("cas-skill"))
 	if !strings.Contains(rawErr.Error(), "definition_changed") ||
 		!strings.Contains(rawErr.Error(), "db:skill/cas-skill") {
 		t.Fatalf("冲突错误应带稳定码与定位串: %v", rawErr)

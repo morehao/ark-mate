@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"strings"
 
@@ -63,7 +64,7 @@ func automationImport(args []string) {
 	defer st.Close()
 
 	stats, err := manager.ImportAutomationDir(context.Background(), st, root,
-		manager.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
+		definition.DefinitionImportOptions{DryRun: *dryRun}, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automation import: %v（未写入任何内容）\n", err)
 		os.Exit(1)

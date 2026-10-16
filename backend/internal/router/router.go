@@ -101,7 +101,7 @@ type Options struct {
 // New 构建 gin.Engine 并注册控制面 REST + WS 实时事件路由。
 //
 // bus 是传输层设施（WS 通道的订阅源）而非领域端口，故与 Ports 并列传入。
-// 实时通道契约见 docs/design-and-roadmap.md §4.5。
+// 实时通道契约见 docs/architecture.md §6.2。
 func New(ports Ports, bus *eventbus.Bus, opts ...Options) *gin.Engine {
 	o := opts0(opts)
 	creds := o.Credentials

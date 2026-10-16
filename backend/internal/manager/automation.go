@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
@@ -313,7 +314,7 @@ func (s *Service) writeAutomation(ctx context.Context, id string, patch map[stri
 	patch["id"] = id
 	// 应用 patch（值 nil = 删键；顺序稳定）。文件载体与 DB 载体共用这一步，所以"只改出现过的键"
 	// 这条 C9 语义不因换载体而变。
-	for _, k := range sortedPatchKeys(patch) {
+	for _, k := range definition.SortedPatchKeys(patch) {
 		if patch[k] == nil {
 			draft.df.Delete(k)
 			continue

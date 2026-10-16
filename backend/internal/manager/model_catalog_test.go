@@ -417,4 +417,3 @@ func TestModelCatalogLiveSessionWithoutModelKeepsNote(t *testing.T) {
 		t.Fatal("活会话但零候选也必须带说明（否则界面只剩「运行时未提供模型目录」这类通用话）")
 	}
 }
-

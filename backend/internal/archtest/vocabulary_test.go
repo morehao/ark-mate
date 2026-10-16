@@ -580,7 +580,7 @@ func TestModelsVocabularyIsModelNotModelID(t *testing.T) {
 		t.Fatal("v24 起 `models` 必须有 `model` 列（发给上游的模型名）")
 	}
 	if cols["model_id"] {
-		t.Fatal("v24 起 `models.model_id` 必须已改名 `model`——它仍然在，说明改名没落地"+
+		t.Fatal("v24 起 `models.model_id` 必须已改名 `model`——它仍然在，说明改名没落地" +
 			"（或有人把它加了回来）")
 	}
 

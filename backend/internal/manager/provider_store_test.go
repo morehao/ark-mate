@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +41,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "providers")
 	const legacySecret = "sk-legacy-plaintext-abc123"
-	existingRef := providerRef("deepseek-main")
+	existingRef := credential.ProviderRef("deepseek-main")
 
 	content := `{
   "deepseek-main": {
@@ -66,7 +68,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 
-	stats, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
+	stats, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil {
 		t.Fatalf("ImportProviderFile: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestProviderImportFileEquivalence(t *testing.T) {
 	}
 
 	// ⑤ 幂等：内容没变 → 整体跳过（一个字节都不写）。
-	again, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil)
+	again, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil)
 	if err != nil || !again.Already || again.Inserted != 0 {
 		t.Fatalf("重复导入应整体跳过: %+v err=%v", again, err)
 	}
@@ -238,7 +240,7 @@ func TestProviderWriteBackDisabledInSQLiteMode(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	defer func() { _ = st.Close() }()
 	// 先走一次导入，让"文件里的 existing"成为 DB 行的起点（真实升级后的形态）。
-	if _, err := ImportProviderFile(ctx, st, dir, DefinitionImportOptions{Auto: true}, nil); err != nil {
+	if _, err := ImportProviderFile(ctx, st, dir, definition.DefinitionImportOptions{Auto: true}, nil); err != nil {
 		t.Fatalf("ImportProviderFile: %v", err)
 	}
 	svc := NewService(publisherRegistry(), eventbus.New())
@@ -365,7 +367,7 @@ func TestProviderExportRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(first), &file); err != nil {
 		t.Fatalf("导出物不是合法 JSON: %v", err)
 	}
-	if len(file) != 2 || file["p-a"]["protocol"] != "openai" || file["p-a"]["key_ref"] != providerRef("p-a") {
+	if len(file) != 2 || file["p-a"]["protocol"] != "openai" || file["p-a"]["key_ref"] != credential.ProviderRef("p-a") {
 		t.Fatalf("导出物内容不符: %+v", file)
 	}
 	if strings.Contains(first, "sk-p-a") {

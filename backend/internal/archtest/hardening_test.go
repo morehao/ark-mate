@@ -259,7 +259,13 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	}
 
 	// d. 宿主实现必须在 Go 里存在，且三条判据逐条可查（对齐 dsh 的 resolveDirectoryPickerBackend）。
-	hostPath := filepath.Join(backendRoot(t), "internal", "manager", "workspace_picker.go")
+	//
+	// P0：原先钉着一个精确文件路径（`workspace_picker.go`）。该文件随工作区域搬进
+	// `domain/workspace`（设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在
+	// **符号**上：`nativePickerMode`（宿主判定的纯函数入口）由 `uniqueSourceFile` 保证全仓
+	// 恰好一处声明——0 处 = 判据失去对象（fail-closed），≥2 处 = 出现了第二份宿主判定。
+	hostPath := uniqueSourceFile(t, filepath.Join(backendRoot(t), "internal"), nil,
+		declREFor("nativePickerMode").String(), "宿主目录选择判定 `nativePickerMode`")
 	raw, err := os.ReadFile(hostPath)
 	if err != nil {
 		t.Fatalf("读 %s 失败: %v（宿主实现被删/改名了？守卫失效）", hostPath, err)
@@ -274,11 +280,11 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 		"ErrNativePickUnsupported",   //  无可用选择器必须是可判定错误
 	} {
 		if !strings.Contains(host, want) {
-			t.Errorf("workspace_picker.go 缺少 %q（宿主判定/配方被改动了？）", want)
+			t.Errorf("%s 缺少 %q（宿主判定/配方被改动了？）", hostPath, want)
 		}
 	}
 	if strings.Contains(host, "exec.Command(") == false && strings.Contains(host, "exec.CommandContext(") == false {
-		t.Error("workspace_picker.go 最终必须真的 spawn 宿主命令（否则原生那半是空的）")
+		t.Errorf("%s 最终必须真的 spawn 宿主命令（否则原生那半是空的）", hostPath)
 	}
 }
 

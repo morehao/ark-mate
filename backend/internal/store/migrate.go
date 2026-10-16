@@ -661,7 +661,7 @@ var schemaMigrations = []migration{
 		// v12/v13/v15/v16/v17 同一档。旧二进制对 v19 库是**拒绝启动**（`latestSchemaVersion`
 		// 前进），所以备份是唯一的回退窗口，`mate doctor` 会打印 `<db>.bak-v19-*`。
 		//
-		// v19 的口径（`docs/design-and-roadmap.md`「决策变更 v19」）：agent 与 runtime 是**同一个
+		// v19 的口径（`docs/decisions.md`「决策 v19」）：agent 与 runtime 是**同一个
 		// 东西**（底座由构建期固定、用户不可自定义），所以 agent 这个身份整体取消，会话身份只留
 		// `runtime_id`。本步一次到位，**不留兼容层、不要求旧数据可读**。
 		backup: "v19",

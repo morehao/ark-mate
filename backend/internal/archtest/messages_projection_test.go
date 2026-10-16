@@ -46,11 +46,14 @@ type projectionSource struct {
 	flushDropsEmpty bool
 }
 
-// parseMessagesProjection 解析 `internal/manager/messages_materialize.go` 并读出上面那份事实。
+// parseMessagesProjection 解析声明 `messageRowSourceTypes` 的那个文件（**按符号**定位，不钉
+// 文件路径：它随重构搬 `domain/session` 后判据照旧）并读出上面那份事实。
 func parseMessagesProjection(t *testing.T) projectionSource {
 	t.Helper()
 	root := backendRoot(t)
-	path := filepath.Join(root, "internal", "manager", "messages_materialize.go")
+	path := uniqueSourceFile(t, filepath.Join(root, "internal"),
+		map[string]bool{"archtest": true}, `messageRowSourceTypes\s*=\s*\[\]string\{`,
+		"消息白名单投影的事实源（`messageRowSourceTypes` 的声明处）")
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {

@@ -32,9 +32,9 @@ var adapterImportRE = regexp.MustCompile(`"github\.com/morehao/ark-mate/pkg/runt
 //
 // 为什么这条是"adapter 层"的机器判据：内核要用的只是**端口**（`runtime.Registry` 的 Spec /
 // Syncer / NativePermission），而端口类型住在父包 `pkg/runtime`。一旦内核 import 了
-// `pkg/runtime/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前
-// `internal/manager/native_permission.go` 就是那个样子：`switch runtimeID` +
-// `opencodeActionAliases` + `opencodePermissionConfig`）——症状不是报错，而是
+// `pkg/runtime/dsh`，它多半是在按 id 分派具体底座的知识（本次收口前内核的
+// `native_permission.go` 就是那个样子：`switch runtimeID` + `opencodeActionAliases` +
+// `opencodePermissionConfig`）——症状不是报错，而是
 // **下一个底座接进来时必须回内核改代码**。
 //
 // 判据 fail-closed：扫不到任何 `internal/**` 的 .go 文件即失败（扫描根写错时不许静默空转）。
@@ -90,43 +90,60 @@ func TestInternalDoesNotImportRuntimeAdapters(t *testing.T) {
 // nativeModeConstRE 抠出 `NativeModeXxx = "value"` 形式的常量取值。
 var nativeModeConstRE = regexp.MustCompile(`(?m)^\s*NativeMode[A-Za-z]*\s*=\s*"([^"]*)"`)
 
+// nativeModeWireFileIn 在 `internal/**` 下**按符号**找出声明原生权限模式 wire 常量的那个文件
+// （`NativeMode*` 这一族就是对外契约 `permission_policy.native_mode` 的事实源）。
+//
+// 为什么不钉文件路径：这一族常量随重构搬进领域层（`native_permission.go` 归 `domain/interaction`），
+// 钉路径的判据搬完就成陈旧指针。改成"按符号 + 恰好一处"以后，搬家不影响判据，而在第二个文件里
+// 再抄一份模式词表会被直接数出来——原来的写法只读钉死的那一个文件，看不到第二份。
+//
+// fail-closed：一处都找不到即失败（改名/搬迁会让这条判据静默空转）。
+func nativeModeWireFileIn(t *testing.T, backendRootDir string) string {
+	t.Helper()
+	return uniqueSourceFile(t, filepath.Join(backendRootDir, "internal"),
+		map[string]bool{"archtest": true}, `(?m)^\s*NativeMode[A-Za-z]*\s*=\s*"`,
+		"内核侧 `NativeMode*` wire 常量的声明处")
+}
+
+// nativeModeValuesOf 读一个文件并抠出 `NativeMode*` 常量取值（解析出 0 个即失败——fail-closed）。
+func nativeModeValuesOf(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（改名/搬迁请同步本判据）", path, err)
+	}
+	vals := nativeModeConstRE.FindAllStringSubmatch(stripGoComments(string(raw)), -1)
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		out = append(out, v[1])
+	}
+	if len(out) == 0 {
+		t.Fatalf("%s 里解析出 0 个 NativeMode* 取值：判据已失效（fail-closed）", path)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // TestNativePermissionModeLiteralsMatchWire adapter 侧的原生权限模式字面量必须与内核的
 // wire 常量**逐字相等**。
 //
 // 为什么会有两份：`permission_policy.native_mode` 是**对外契约**（定义文件 / REST / 前端表单），
-// 事实源在内核 `internal/manager`；而 adapter 子包不能 import 内核（上一条判据钉的就是这个方向），
+// 事实源在内核侧声明 `NativeMode*` 常量那一处（现 `manager` 包，重构后随 `native_permission.go`
+// 落 `domain/interaction`）；而 adapter 子包不能 import 内核（上一条判据钉的就是这个方向），
 // 所以它只能自带字面量。同形先例：`dsh.SkillFormat` 与 `capability.FormatSkillMDFrontmatter`。
 //
 // 代价是"两边可能悄悄分叉"，而分叉的表现是**静默**的：内核把一个取值传给 adapter，adapter 落进
 // `default` 分支报"未知 native_mode"——那句话只写进 `desc`，不注入就不落日志，于是
 // "我设了 native_mode 却没反应"看起来像底座自己的默认行为。
 //
-// 判据 fail-closed：任一侧解析出 0 个取值即失败（改名/搬迁会让它静默空转，不许放过）。
+// 判据 fail-closed：任一侧解析出 0 个取值即失败（改名/搬迁会让它静默空转，不许放过）；
+// 内核侧**按符号定位**（不钉文件路径），且要求它全仓恰好一处。
 func TestNativePermissionModeLiteralsMatchWire(t *testing.T) {
 	root := backendRoot(t)
-	read := func(rel string) []string {
-		t.Helper()
-		path := filepath.Join(root, rel)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读不到 %s: %v（路径改了请同步本判据）", rel, err)
-		}
-		vals := nativeModeConstRE.FindAllStringSubmatch(stripGoComments(string(raw)), -1)
-		out := make([]string, 0, len(vals))
-		for _, v := range vals {
-			out = append(out, v[1])
-		}
-		if len(out) == 0 {
-			t.Fatalf("%s 里解析出 0 个 NativeMode* 取值：判据已失效（fail-closed）", rel)
-		}
-		sort.Strings(out)
-		return out
-	}
-
-	wire := read("internal/manager/native_permission.go")
+	wire := nativeModeValuesOf(t, nativeModeWireFileIn(t, root))
 	// 目前的内置适配里只有 dsh 声明了"模式"这一维（原生面是逐动作表的底座不认 mode，
 	// 那种形态的实现按端口契约自己处理——内核不参与）。
-	adapter := read("pkg/runtime/dsh/native_permission.go")
+	adapter := nativeModeValuesOf(t, filepath.Join(root, "pkg", "runtime", "dsh", "native_permission.go"))
 
 	if strings.Join(wire, "\x00") != strings.Join(adapter, "\x00") {
 		t.Errorf("原生权限模式字面量已分叉：\n内核(wire) %v\nadapter    %v\n"+
@@ -153,8 +170,8 @@ var runtimeIDCaseRE = regexp.MustCompile(`(?:case\s+|==\s*|!=\s*)"([a-z0-9][a-z0
 // # 它挡的是什么
 //
 // `TestInternalDoesNotImportRuntimeAdapters` 钉的是"内核 → adapter 包"这条 **import 边**；
-// 但同一类知识还有第二种回流形态：**不 import、只按 id 分派**。本次收口前
-// `internal/manager/model_list.go` 就是教科书样本：
+// 但同一类知识还有第二种回流形态：**不 import、只按 id 分派**。本次收口前内核的 `model_list.go`
+// （`modelValueFor`，现归 `domain/provider`）就是教科书样本：
 //
 //	func modelValueFor(runtimeID, providerID, modelID string) (string, error) {
 //	    switch runtimeID {

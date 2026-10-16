@@ -20,8 +20,8 @@ import (
 // 文件：<dir>/<sessionID>.jsonl
 // 首行 header，之后每行一个事件原语：
 //
-//	{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"...","agent_id":"...",
-//	 "runtime":"...","cwd":"...","created_at":"..."}
+//	{"schema":"ark-mate.wire-transcript.v2","version":2,"session_id":"...","runtime":"...",
+//	 "cwd":"...","workspace_temporary":true,"created_at":"..."}
 //	{"id":"evt_...","seq":2,"ts":"...","type":"session.user_message","payload":{...}} // seq = **会话内**位次（v21 起 0 起）
 //
 // **v2 = 事件行多一支 `id`（身份），`seq` 保留（位次）**（2026-10-12，设计

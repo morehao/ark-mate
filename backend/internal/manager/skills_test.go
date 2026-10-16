@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,15 +38,15 @@ func skillRig(t *testing.T) (svc *Service, dir, root string) {
 		t.Fatalf("空目录应装载 0 条: %d", n)
 	}
 	_ = bus
-	svc.SetSkillProjections([]SkillProjection{skillProj(root, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
 	return svc, dir, root
 }
 
 // skillProj 构造一处**已解析**的 skill 投影（落点 `<id>/SKILL.md`，两个 adapter 当前的原生约定）。
 // Tested=true：这些测试要验的是"物化与审计"这条链，不是"投影形态是否实测过"
 // （untested/not_configured 两个状态另有专门用例）。
-func skillProj(root, runtimeID string) SkillProjection {
-	return SkillProjection{Runtime: runtimeID, Projection: runtime.Projection{
+func skillProj(root, runtimeID string) skill.Projection {
+	return skill.Projection{Runtime: runtimeID, Projection: runtime.Projection{
 		Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: root,
 		Layout: runtime.LayoutIDToken + "/SKILL.md", Format: capability.FormatSkillMD, Tested: true,
 	}}
@@ -201,8 +202,8 @@ func TestSetSkillEnabledErrors(t *testing.T) {
 // 收口成 `skillRuntimeVerdict(sk, 投影)`——**唯一实现**（Library 清单与建会话的选定校验共用它）。
 // 于是这里的输入从"agent 的候选列表"变成"本进程解析出的那一条投影"。
 func TestSkillRuntimeVerdictReasons(t *testing.T) {
-	proj := func(rt string, tested bool, errText string) SkillProjection {
-		return SkillProjection{Runtime: rt, Err: errText, Projection: runtime.Projection{
+	proj := func(rt string, tested bool, errText string) skill.Projection {
+		return skill.Projection{Runtime: rt, Err: errText, Projection: runtime.Projection{
 			Kind: runtime.ProjectionSkill, Root: "/root/" + rt,
 			Layout: runtime.LayoutIDToken + "/SKILL.md", Tested: tested,
 		}}
@@ -245,7 +246,7 @@ func TestSetSkillEnabledReconcileFailureIsReported(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]SkillProjection{skillProj(bad, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(bad, "rtx")})
 	resp, err := svc.SetSkillEnabled(context.Background(), "demo", false)
 	if err != nil {
 		t.Fatalf("重校失败不该让启停整体失败: %v", err)
@@ -296,7 +297,7 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 		"runtimes":["rtx"]}`)
 	svc.LoadCapabilityDefinitions(dir)
 	// 用「按 runtime 分 root」的多 root 路径（单 root 兼容路径不登记归属方，见 addRuntime）。
-	svc.SetSkillProjections([]SkillProjection{skillProj(root, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
 	sk, _ := svc.caps.SkillByID("demo")
 
 	// 1) 还没物化 → missing。
@@ -343,17 +344,17 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(other, "demo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]SkillProjection{skillProj(other, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(other, "rtx")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "user_owned" {
 		t.Fatalf("无标记目录应为 user_owned: %+v", st)
 	}
 	// 7) 该 runtime 没有已实证 format 的 source → not_applicable。
-	svc.SetSkillProjections([]SkillProjection{skillProj(other, "stub")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(other, "stub")})
 	if st = matStatus(t, svc, "demo", other); st.Status != "not_applicable" {
 		t.Fatalf("未声明该 runtime 应为 not_applicable: %+v", st)
 	}
 	// 8) 禁用：副本还在 → stale；重校撤回后 → disabled。
-	svc.SetSkillProjections([]SkillProjection{skillProj(root, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(root, "rtx")})
 	if _, _, err := svc.ReconcileSkillProjection(skillProj(root, "rtx")); err != nil {
 		t.Fatal(err)
 	}
@@ -381,25 +382,25 @@ func TestSkillMaterializationStatuses(t *testing.T) {
 	up := skillProj(untestedRoot, "rtx")
 	up.Projection.Tested = false
 	up.Projection.Note = "只验过内容形态，未验过默认根"
-	svc.SetSkillProjections([]SkillProjection{up})
+	svc.SetSkillProjections([]skill.Projection{up})
 	if st = matStatus(t, svc, "demo", untestedRoot); st.Status != "untested" ||
 		!strings.Contains(st.Detail, "未验过默认根") {
 		t.Fatalf("未实测投影应为 untested 且带上实测备注: %+v", st)
 	}
 	// 10) 投影根解析失败（占位符变量没设 / 落点非法）→ not_configured，且原因可见。
-	badProj := SkillProjection{Runtime: "rtx", Err: "环境变量 HOME 未设置"}
-	svc.SetSkillProjections([]SkillProjection{badProj})
+	badProj := skill.Projection{Runtime: "rtx", Err: "环境变量 HOME 未设置"}
+	svc.SetSkillProjections([]skill.Projection{badProj})
 	if st = matStatus(t, svc, "demo", ""); st.Status != "not_configured" ||
 		!strings.Contains(st.Detail, "HOME 未设置") {
 		t.Fatalf("解析失败的投影应为 not_configured 且给出原因: %+v", st)
 	}
 	// 11) 解析失败的投影不参与重校（Err 非空直接短路，不当成"没有任何技能"而清空目录）。
 	keepRoot := t.TempDir()
-	svc.SetSkillProjections([]SkillProjection{skillProj(keepRoot, "rtx")})
+	svc.SetSkillProjections([]skill.Projection{skillProj(keepRoot, "rtx")})
 	if _, _, err := svc.ReconcileSkillProjection(skillProj(keepRoot, "rtx")); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]SkillProjection{badProj})
+	svc.SetSkillProjections([]skill.Projection{badProj})
 	if w, r, err := svc.ReconcileSkillProjection(badProj); err != nil || w != 0 || r != 0 {
 		t.Fatalf("解析失败的投影应短路重校（不写不删）: w=%d r=%d err=%v", w, r, err)
 	}

@@ -27,11 +27,11 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc1.registerSession(&SessionRec{ID: "s1"})
 
 	toolRun := acl.ToolCallInfo{Title: "跑脚本", Kind: "execute"}
-	orch1.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")
+	orch1.perm.Remember("s1", toolRun, "reject", "option-reject-always")
 	// 同键异侧覆盖：allow 覆盖 reject（同键互斥），DB 应只有一条且为 allow。
-	orch1.perm.Remember("s1", toolRun, memDecisionAllow, "option-allow-always")
+	orch1.perm.Remember("s1", toolRun, "allow", "option-allow-always")
 	toolWrite := acl.ToolCallInfo{Title: "写文件", Kind: "write"}
-	orch1.perm.Remember("s1", toolWrite, memDecisionReject, "option-reject-always")
+	orch1.perm.Remember("s1", toolWrite, "reject", "option-reject-always")
 
 	rows, err := st1.ListMemories(ctx, "s1")
 	if err != nil || len(rows) != 2 {
@@ -68,8 +68,8 @@ func TestPermissionMemoriesPersistAcrossRestart(t *testing.T) {
 	svc2.registerSession(&SessionRec{ID: "s2"})
 
 	// 恢复前先记录（模拟重启前的历史记忆），恢复后二者叠加。
-	orch2.perm.Remember("s1", toolRun, memDecisionReject, "option-reject-always")
-	orch2.perm.Remember("s2", toolWrite, memDecisionAllow, "option-allow-always")
+	orch2.perm.Remember("s1", toolRun, "reject", "option-reject-always")
+	orch2.perm.Remember("s2", toolWrite, "allow", "option-allow-always")
 	if err := orch2.RestoreMemoriesFromStore(ctx); err != nil {
 		t.Fatalf("RestoreMemoriesFromStore: %v", err)
 	}

@@ -120,32 +120,51 @@ func TestRunIdentityIsMintedAndUnique(t *testing.T) {
 		"J6 的\"不变量靠约束\"在**交付的 DDL**里不成立（迁移文本里写了而实际没建出来，同样会走到这里）")
 
 minted:
-	// ④ 铸造点：manager 里必须有且只有 `objid.New(objid.Run)` 铸轮次 id，且**不得**出现派生写法。
-	managerDir := filepath.Join(root, "internal", "manager")
-	mgrs, err := filepath.Glob(filepath.Join(managerDir, "*.go"))
-	if err != nil || len(mgrs) == 0 {
-		t.Fatalf("扫不到 %s/*.go: %v（fail-closed）", managerDir, err)
+	// ④ 铸造点：`internal/` 全树里必须有且只有**一处运行时**铸轮次 id
+	//    （`objid.New(objid.Run)`），且不得出现派生写法。
+	//
+	// 锚点是**符号计数 + 递归扫描**，不是文件路径。为什么：这个点会随包搬家
+	// （`manager/run.go` → 目标 `internal/domain/session`），而 `filepath.Glob(dir, "*.go")`
+	// **不递归**——文件一旦进子目录，判据就静默空转（照样绿，什么都没检查）。
+	// 放宽到整棵树同时是**更强**的判据：派生写法或第二处铸号出现在 `internal/` 任何地方都红。
+	//
+	// 而且"恰好一处"要按**分部**看：`store/migrate_v22.go` 的历史回填也是一处，混成一个
+	// 数字就无法区分「运行时 + 迁移」与「运行时 + 运行时」——后者才是要拦的。
+	internalDir := filepath.Join(root, "internal")
+	treeFiles := goFilesUnder(t, internalDir)
+	if len(treeFiles) == 0 {
+		t.Fatalf("扫不到 %s 下的 Go 文件（fail-closed：守卫会静默空转）", internalDir)
 	}
-	mintedCount := 0
-	for _, p := range mgrs {
-		if strings.HasSuffix(p, "_test.go") {
+	mintedRuntime, mintedMigration, scanned := 0, 0, 0
+	for _, p := range treeFiles {
+		relSlash := filepath.ToSlash(rel(root, p))
+		if strings.HasSuffix(p, "_test.go") || strings.HasPrefix(relSlash, "internal/archtest/") {
 			continue
 		}
+		scanned++
 		src := stripLineComments(readFileOrFatal(t, p))
-		if strings.Contains(src, "objid.New(objid.Run)") {
-			mintedCount++
+		if n := strings.Count(src, "objid.New(objid.Run)"); n > 0 {
+			if strings.Contains(filepath.Base(p), "migrate_v") {
+				mintedMigration += n
+			} else {
+				mintedRuntime += n
+			}
 		}
 		for _, marker := range runIDDerivationMarkers {
 			if strings.Contains(src, marker) {
 				t.Fatalf("%s 里出现了派生轮次 id 的写法 %s：\n"+
 					"v22 起轮次身份一律 `objid.New(objid.Run)`（`run_<26 位 ULID>`）——"+
 					"派生 id 会让\"身份\"跟着窗口规则变，而它跑得通全部读写路径（这正是 M1 那段历史踩过的坑）",
-					p, marker)
+					relSlash, marker)
 			}
 		}
 	}
-	if mintedCount != 1 {
-		t.Fatalf("`internal/manager` 非测试代码里 `objid.New(objid.Run)` 必须**恰好**出现一次（铸造点唯一），实际 %d 处",
-			mintedCount)
+	if scanned == 0 {
+		t.Fatalf("`internal/` 非测试、非 archtest 的扫描面为空（fail-closed）")
+	}
+	if mintedRuntime != 1 || mintedMigration != 1 {
+		t.Fatalf("轮次铸号点的分部变了：运行时 %d 处（want 1）、迁移回填 %d 处（want 1）。\n"+
+			"「运行时只铸一次」这条不变式只在**迁移之外**成立——迁移是历史数据的回填，与运行时铸号"+
+			"是两件事；把两者混成一个数字，等于允许第二条运行时铸号路径存在。", mintedRuntime, mintedMigration)
 	}
 }

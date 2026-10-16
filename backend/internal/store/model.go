@@ -60,7 +60,7 @@ func modelRowDigest(cols ModelColumns) string {
 	return rowDigest(map[string]string{
 		"id": cols.ID, "provider_id": cols.ProviderID, "model": cols.Model,
 		"name": cols.Name, "note": cols.Note, "input_modalities": cols.InputModalities,
-		"max_input_tokens": capacityDigest(cols.MaxInputTokens),
+		"max_input_tokens":  capacityDigest(cols.MaxInputTokens),
 		"max_output_tokens": capacityDigest(cols.MaxOutputTokens),
 	})
 }
@@ -101,7 +101,7 @@ func (s *Store) CreateModelDefinition(ctx context.Context, cols ModelColumns, ac
 func (s *Store) UpdateModelDefinition(ctx context.Context, id string, content ModelContent, expectedRev int64, actor string) (bool, error) {
 	digest := rowDigest(map[string]string{
 		"id": id, "name": content.Name, "note": content.Note, "input_modalities": content.InputModalities,
-		"max_input_tokens": capacityDigest(content.MaxInputTokens),
+		"max_input_tokens":  capacityDigest(content.MaxInputTokens),
 		"max_output_tokens": capacityDigest(content.MaxOutputTokens),
 	})
 	return s.commitDefinitionChange(ctx, model.DefinitionKindModel, id, actor,

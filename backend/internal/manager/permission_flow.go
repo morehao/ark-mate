@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -14,7 +15,7 @@ import (
 //   - 否则发布 session.permission_request 事件（含 call_id/options）并阻塞等待
 //     PermissionsResolve（allow/reject × once/always）；超时或 ctx 取消自动拒绝。
 //
-// 事件发布（publish）注入的给 PermissionManager，避免 manager 依赖 bus。
+// 事件发布（publish）注入的给 interaction.PermissionManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestPermission(ctx context.Context, req acl.PermissionRequest) acl.PermissionDecision {
 	// P3 双 id：权限请求只携带原生 session id → 解析为平台会话 uuid 键控（记忆/挂起/事件
 	// 均以平台会话 id 为键，与 sessions/events/permission_memories 一致）。
@@ -44,25 +45,13 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 }
 
 // PendingPermissions 列出某会话的挂起权限请求（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingPermissions(sessionID string) []PermissionItem {
-	ps := o.perm.pendingForSession(sessionID)
-	out := make([]PermissionItem, 0, len(ps))
-	for _, p := range ps {
-		out = append(out, PermissionItem{
-			CallID:    p.callID,
-			SessionID: p.sessionID,
-			Title:     p.title,
-			ToolCall:  p.toolCall,
-			Options:   p.options,
-			TimeoutAt: p.timeout,
-		})
-	}
-	return out
+func (o *Orchestrator) PendingPermissions(sessionID string) []interaction.PermissionItem {
+	return o.perm.PendingItems(sessionID)
 }
 
 // ResolvePermission 按 call_id 投递决策（allow/reject × once/always），并返回**实际回执**
 // （ACP 形态 selected/cancelled + 有效 option_id；规则见 acl.EffectivePermissionOutcome）。
-// 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 PermissionManager，
+// 拒绝分支不再折叠：optionID（所选 deny 选项）与 always 标记透传给 interaction.PermissionManager，
 // ACP 层对显式拒绝回 Selected{deny 选项}，agent 可区分「拒绝」与「取消/超时」。
 //
 // sessionID 为决策发起方会话（C3 scope 归属）：与挂起项归属不符时按「不存在」处理
@@ -97,7 +86,7 @@ type PermissionDecisionOutcome struct {
 }
 
 // PermissionMemories 列出某会话的会话级权限记忆（allow/reject 双侧；供详情/撤销 UI）。
-func (o *Orchestrator) PermissionMemories(sessionID string) []MemoryItem {
+func (o *Orchestrator) PermissionMemories(sessionID string) []interaction.MemoryItem {
 	return o.perm.List(sessionID)
 }
 
@@ -186,10 +175,10 @@ func (o *Orchestrator) platformSessionIDForProvider(rawProviderID string) string
 //   - 发布 session.elicitation_request 事件（含 elicitation_id/mode/message/schema|url/timeout_at）
 //     并阻塞等待 ElicitationResolve（accept/decline/cancel）；超时或 ctx 取消自动按取消处理。
 //
-// 事件发布（publish）注入给 ElicitationManager，避免 manager 依赖 bus。
+// 事件发布（publish）注入给 interaction.ElicitationManager，避免 manager 依赖 bus。
 func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.ElicitationRequest) acl.ElicitationOutcome {
 	sid := req.SessionID // 断点恢复别名归一
-	publish := func(it ElicitationItem) {
+	publish := func(it interaction.ElicitationItem) {
 		payload := map[string]any{
 			"session_id":     sid,
 			"scope_source":   it.ScopeSource,
@@ -209,22 +198,8 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 }
 
 // PendingElicitations 列出某会话的挂起结构化提问（attach/snapshot 供 UI 重建）。
-func (o *Orchestrator) PendingElicitations(sessionID string) []ElicitationItem {
-	ps := o.elic.pendingForSession(sessionID)
-	out := make([]ElicitationItem, 0, len(ps))
-	for _, p := range ps {
-		out = append(out, ElicitationItem{
-			ID:          p.id,
-			SessionID:   p.sessionID,
-			ScopeSource: p.scopeSource,
-			Mode:        p.mode,
-			Message:     p.message,
-			Schema:      p.schema,
-			URL:         p.url,
-			TimeoutAt:   p.timeout,
-		})
-	}
-	return out
+func (o *Orchestrator) PendingElicitations(sessionID string) []interaction.ElicitationItem {
+	return o.elic.PendingItems(sessionID)
 }
 
 // ResolveElicitation 按 elicitation_id 投递决策（accept/decline/cancel；accept 可带 content）。

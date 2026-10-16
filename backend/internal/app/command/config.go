@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"sort"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/pkg/config"
 )
 
@@ -37,7 +37,7 @@ func configCmd(args []string) {
 				"db":                  cfg.DBPath,
 				"store":               cfg.StoreMode,
 				"providers":           cfg.ProviderDir,
-				"credentials":         manager.CredentialsPath(cfg.HomeDir),
+				"credentials":         credential.CredentialsPath(cfg.HomeDir),
 				"capabilities":        cfg.CapabilityDir,
 				"workspace_dir":       cfg.WorkspaceDir,
 				"workspace_roots":     strings.Join(cfg.WorkspaceRoots, ","),
@@ -105,7 +105,7 @@ func configCmd(args []string) {
 	// 托管凭据文档（v20）：它不是配置项（没有来源、没有覆盖键），而是**数据目录下的落点**，
 	// 与 `db` 同一性质。单列出来是因为"这台机器的密钥写在哪个文件里"正是排障第一个要问的，
 	// 也是唯一一份**可以被复制走的明文**（0600；权限不合平台会拒读）。
-	pf("  %-22s %-38s [%s]\n", "credentials", manager.CredentialsPath(cfg.HomeDir), string(config.SourceDefault))
+	pf("  %-22s %-38s [%s]\n", "credentials", credential.CredentialsPath(cfg.HomeDir), string(config.SourceDefault))
 	pf("  %-22s %-38s [%s]\n", "capabilities", cfg.CapabilityDir, src("capabilities"))
 	// 空 = 关闭代建（未指定 cwd 的建会话请求会报 workspace_required），故用 emptyLabel 明确显示。
 	pf("  %-22s %-38s [%s]\n", "workspace_dir", emptyLabel(cfg.WorkspaceDir), src("workspace_dir"))

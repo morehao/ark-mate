@@ -2,6 +2,7 @@ package manager
 
 import (
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"sort"
 	"strings"
 
@@ -100,7 +101,7 @@ func (s *Service) librarySkills() []dtolibrary.LibraryItem {
 // 判据顺序（先判"平台这边有没有关掉"，再判"落点解析出来没有"，最后才判"实测过没有"）：
 // 关掉是用户的显式决定，最先说；未解析是配置/声明问题；untested 只是"我们还没实测"，
 // 会照常投放——所以它必须排在 projected 之前但排在 not_applicable 之后。
-func skillApplicability(sk capability.Skill, projections []SkillProjection) []dtolibrary.Applicability {
+func skillApplicability(sk capability.Skill, projections []skill.Projection) []dtolibrary.Applicability {
 	out := make([]dtolibrary.Applicability, 0, len(projections))
 	for _, p := range projections {
 		out = append(out, skillRuntimeVerdict(sk, p))
@@ -112,7 +113,7 @@ func skillApplicability(sk capability.Skill, projections []SkillProjection) []dt
 //
 // Library 的逐 runtime 清单与建会话时的选定校验（M3-3）都走它。两处各写一遍必然漂移，
 // 而漂移的表现恰恰是最难自证的一种：「Library 说不可达、建会话却放行」（或反过来）。
-func skillRuntimeVerdict(sk capability.Skill, p SkillProjection) dtolibrary.Applicability {
+func skillRuntimeVerdict(sk capability.Skill, p skill.Projection) dtolibrary.Applicability {
 	rt := p.Runtime
 	switch {
 	case !sk.IsEnabled():
@@ -286,7 +287,7 @@ func libraryMcpDesc(m capability.McpServer) string {
 
 // skillWarningMessages 把 skill 的装载期告警转成 Library 的字符串列表。
 func skillWarningMessages(sk capability.Skill) []string {
-	ws := skillWarnings(sk)
+	ws := skill.Warnings(sk)
 	if len(ws) == 0 {
 		return nil
 	}

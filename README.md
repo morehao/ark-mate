@@ -4,7 +4,7 @@
 
 > A personal agent assistant on top of a reusable agent core — DeepSeek Harness and other ACP-compatible executors behind one control plane. Desktop-first.
 
-**定位（两层，详见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)「决策变更 v8」）**：
+**定位（两层，详见 [docs/positioning.md](docs/positioning.md)；口径变更史见 [docs/decisions.md](docs/decisions.md)「决策 v8」）**：
 1. **底座层** = `mate` 内核：把「多 runtime 统一接入 + 会话与能力数据面 + REST/WS 契约 + 交付形态」做成可复用的一层，面向「把控制面接到自己的 runtime / 自己的前端上」。**runtime 接边有界**：当前内置适配只有 `dsh`（`opencode` 适配已于 2026-10 下线，**adapter 层完整保留**：接一个新底座 = 新建 `pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂三张端口实现，不动框架代码），**不追求数量、不承诺接入任意 ACP 生态**——接入成本在维护面（隔离表三份 / 投影实测 `Tested` / 能力粒度声明 / 随包载荷与 ABI 断言），不在 adapter。
 2. **产品层** = 底座之上的**个人 Agent 助手**：面向「我自己的助手」——建会话、跑起来、看见过程与结果，**聚焦桌面端**（macOS / Windows，随包运行时，用户机器不需要 Go / Node / 预装底座）。
 3. **一份 UI 产物，两种加载方式**：开发态（核心直接服务 `apps/web/dist`）与交付态（Electron 壳加载同一份产物）。**浏览器入口只是开发过程使用的形态**，不是交付面；**两个入口都没有 HMR**（决策变更 v10，2026-10-11）。
@@ -42,9 +42,9 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 > **改 UI 为什么走 `make dev`**：它跑的就是 `frontend/apps/web/dist`——**和交付态同一份产物、同一套
 > `/v1/mate` 契约**。核心直接服务这份产物，所以"你在界面上看到的"就是"要发出去的那份"；代价是**没有 Fast
 > Refresh 了**（改完等一次增量重建、刷新浏览器；2026-10-11 之前那条 vite `:5173` 源码现编译的路已删除，
-> 见 `docs/design-and-roadmap.md` 决策变更 v10 与守卫 `backend/internal/archtest/dev_parity_test.go`）。
+> 见 `docs/decisions.md` 决策 v10 与守卫 `backend/internal/archtest/dev_parity_test.go`）。
 > 桌面态的调试路径（CDP 附渲染进程、`KEEP_SHELL=1`、主进程 `--inspect`）见
-> [docs/desktop-architecture-design-20260928.md](docs/desktop-architecture-design-20260928.md)。
+> [docs/architecture.md](docs/architecture.md) §2、§8。
 > **别同时跑** `make dev` 与 `make desktop/dev`——两个核心共用 `~/.ark-mate/mate.db`。
 
 ## 底座边界（支持谁、不承诺什么）
@@ -67,7 +67,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 - **ACP 直连运行时**：内置适配只有 `dsh`（`dsh --profile acp`）——子进程 stdio 拉起、能力探测、权限请求归一。第二个适配（`opencode`）已于 2026-10 下线，但 **adapter 层与注册表原样保留**：接一个新底座 = 新建 `pkg/runtime/<id>/` + 一个 `<id>Spec()` + 挂三张**端口**实现（`resource.Syncer` / `runtime.NativePermissionAdapter` / `runtime.ModelValueAdapter`），不需要改框架代码。
 - **底座由构建期固定（用户不能选 runtime）**：`pkg/runtime/build.go` 的 `BuildRuntime` 由 `-X` 在**编译期**注入（`make build RUNTIME=<id>`、`make dev|server RUNTIME=<id>`、`make desktop/dist RUNTIME=<id>`、`docker build --build-arg MATE_RUNTIME=<id>`，或裸 `go build -ldflags "-X github.com/morehao/ark-mate/pkg/runtime.BuildRuntime=<id>"`；`<id>` 是占位，写未装配的 id 会启动即失败，当前仓库内置的只有 `dsh`），不注入 = `dsh`。**产品装配只注册选中的那一个**（`runtime.ProductRegistry`；选中的 id 也可以命中 `.ark-mate/config/runtimes.json` 里的远程端点），未注册即**启动失败**——不给"能启动但没底座"的进程。用户面（REST / 控制台）**没有任何** runtime 选择或读取入口：`GET /runtimes` 已删除，`agent` 不再有 `runtimes`/`routing_policy`，automation 不再有 `target.runtime_hint`；带这些键的**写请求**一律 40001 `runtime_selection_removed`（**显式拒绝**，不是静默忽略——静默会让它变成"写了、存了、什么都不发生"的骗人字段），而老定义/老 DB 行里的残留键**读面宽容**（忽略 + WARN，agents 的定义在下次写回时消失，automation 的 `target.runtime_hint` 在下次保存时自愈清除）。运行时身份仍在诊断面（`GET /runtime/diagnostics` 的 `runtime`）与 `/meta` 的 `runtime{id,name,version}` 里如实出现——那是事实，不是选项。`pkg/runtime` 的 adapter 层、注册表与远程接入（A5）**原样保留**：底座层仍是多 runtime 接入，被收窄的是**产品装配与用户面**。
 - **远程 runtime（A5）**：除本地子进程外，同一套 ACP 客户端还可接**远程端点**——`acl.HTTPTransport`（Streamable HTTP：POST 每条消息 + SSE 响应流承载通知/权限请求，另开 GET 长流收无在途请求时的服务端消息，响应头 `Acp-Session-Id` 回带）与 `acl.WSTransport`（一条 WebSocket，一帧一条消息）。远程 runtime 在 `.ark-mate/config/runtimes.json` 声明（`id/name/transport/endpoint/headers`），启动即注册进同一 runtime 注册表；**被构建期选中的那个 id 命中其中一条声明时，实现就来自远端**（未选中的声明不进入本进程的注册表）；传输层不新增依赖、不加第二套客户端（把网络连接伪装成 io 流，握手/权限/elicitation 逻辑与 stdio 完全同构）。远程传输的**服务端半场**在 `pkg/acl`（`ServeWSSession` / `NewRemoteHandler`）；历史上的 `mate acp-serve` 演示子命令已随 echo 底座删除（远程**功能**不受影响，失去的只是开箱演示）。远程 runtime 无 pid（进程注册表/孤儿回收不适用），连接级诊断（建连失败、HTTP 状态、被丢弃的非 JSON 消息）进 `GET /runtime/diagnostics` 的 `stderr_tail`。**统一脱敏闸门**：stderr 尾巴（`pkg/acl.TailLines`）、对外错误文案（`pkg/code.Error`）与全部事件载荷（`manager.publish`，即 events 表/transcript/WS 三处同一份）在离开进程前统一过 `pkg/redact`——命中凭证形状（`sk-*`/`AKIA*`/`ghp_*`/`Bearer`/JWT/PEM 私钥块/`api_key=` 形态）、已登记的真实 provider key（注入时 `RegisterDynamicSecret`）或高熵随机串时替换为 `***`；正常内容（sha256/git 摘要、UUID、长标识符）不被改写。**底座起不来时，REST 信封的 `msg` 会带底座 stderr 的尾巴**（在 `pkg/code` 的 acl→信封投影点并入，最多 5 行、每行按字符截断、走同一个脱敏闸门）：ACP SDK 对传输失败只会回一句通用文案（JSON-RPC `-32603` 的固定 message `Internal error`，且会被换成"底座未完成 ACP 握手就断开"），真因在子进程 stderr 里——不并的话用户只看到 `50001 Internal error`，完整原因却躺在核心日志里（2026-10-09 实测：从含保留键 `.env` 的目录起核心、再建 dsh 会话，就是这个面目）。量纲与选行都刻意与诊断面板不同：面板/事件的 `stderr_tail` 保留 200 行，信封 `msg` 只带 5 行（它进错误气泡与截图）；且**先因后果**——Node（dsh）把原因打在栈**之前**，单纯"取最后 5 行"会只剩一串 `at …` 与 `Node.js v24.x`（这正是第一版实现踩到的坑），所以先认原因行（`Error:`/`panic:`/`Traceback`/`fatal:`…）再从它开始取，Python 这类"原因在最后一行"则由窗口回退覆盖。
-- **结构化提问通道（ACP `elicitation/*`，unstable 契约）**：agent 发起 `elicitation/create`——form 模式携带 JSON Schema 表单（单选/多选/文本/数字/布尔等字段 + required/default/枚举约束）、url 模式携带引导链接——服务端发布 `session.elicitation_request` 事件 → UI 依据 schema 渲染提问卡 → 用户提交（content）/拒绝/取消经 `POST /sessions/:id/elicitation` 决策回流给 agent；超时自动取消（默认 30min，`MATE_ELICITATION_TIMEOUT` 可覆盖）；宿主在 Initialize 中声明 `ClientCapabilities.Elicitation{Form,Url}`。**会话归属（两段式）**：Go SDK（coder/acp-go-sdk v0.13.5）未建模规范 scope 字段、顶层 `sessionId` 在解码时被丢弃，但 elicitation 变体里的 **`_meta` 会被完整保留** → 宿主**先读 `_meta`**（`sessionId`/`session_id`/`conversationId`/`conversation_id`，只认非空字符串，见 `pkg/acl/scope.go`）置 `scope_source=wire`；未命中才按「连接上唯一在途 run」归属（`orchestrator.busyConn`）置 `inferred_inflight`；两者都不成立时置 `ambiguous`——不猜测、按取消回应，并把事实与建议写进底座诊断的 `remediation`（`GET /runtime/diagnostics`），不再无痕消失。归属来源随载荷回带（`scope_source`: `wire` | `inferred_inflight` | `ambiguous`），REST/WS 均可观测。**决策带 scope 校验**：只有登记该提问的会话能决策（`POST /sessions/:id/elicitation` 的 `:id` 与归属会话不符时，与「未知 elicitation_id」同码同文案 40001，不泄露他会话挂起项，挂起项保持不动）。**URL 模式收尾**：agent 发 `elicitation/complete`（unstable 通知，只带 ACP 侧 `elicitationId`）时，宿主按该 id 反查 URL 模式挂起项并以 `accept` 收敛（收敛事件 `action=accept`、`reason=complete`，前端标注「链接流程已完成」，与「用户提交」可区分），不再把卡片挂到超时；已决/重放/非 URL 模式一律无副作用（仅记日志）。规范 scope 解析列为触发式能力位（首个真实 elicitation wire 出现时启用，预案见 `docs/agent-interactions-acp-v1-design-20260907.md` §0/§2.4A）。
+- **结构化提问通道（ACP `elicitation/*`，unstable 契约）**：agent 发起 `elicitation/create`——form 模式携带 JSON Schema 表单（单选/多选/文本/数字/布尔等字段 + required/default/枚举约束）、url 模式携带引导链接——服务端发布 `session.elicitation_request` 事件 → UI 依据 schema 渲染提问卡 → 用户提交（content）/拒绝/取消经 `POST /sessions/:id/elicitation` 决策回流给 agent；超时自动取消（默认 30min，`MATE_ELICITATION_TIMEOUT` 可覆盖）；宿主在 Initialize 中声明 `ClientCapabilities.Elicitation{Form,Url}`。**会话归属（两段式）**：Go SDK（coder/acp-go-sdk v0.13.5）未建模规范 scope 字段、顶层 `sessionId` 在解码时被丢弃，但 elicitation 变体里的 **`_meta` 会被完整保留** → 宿主**先读 `_meta`**（`sessionId`/`session_id`/`conversationId`/`conversation_id`，只认非空字符串，见 `pkg/acl/scope.go`）置 `scope_source=wire`；未命中才按「连接上唯一在途 run」归属（`orchestrator.busyConn`）置 `inferred_inflight`；两者都不成立时置 `ambiguous`——不猜测、按取消回应，并把事实与建议写进底座诊断的 `remediation`（`GET /runtime/diagnostics`），不再无痕消失。归属来源随载荷回带（`scope_source`: `wire` | `inferred_inflight` | `ambiguous`），REST/WS 均可观测。**决策带 scope 校验**：只有登记该提问的会话能决策（`POST /sessions/:id/elicitation` 的 `:id` 与归属会话不符时，与「未知 elicitation_id」同码同文案 40001，不泄露他会话挂起项，挂起项保持不动）。**URL 模式收尾**：agent 发 `elicitation/complete`（unstable 通知，只带 ACP 侧 `elicitationId`）时，宿主按该 id 反查 URL 模式挂起项并以 `accept` 收敛（收敛事件 `action=accept`、`reason=complete`，前端标注「链接流程已完成」，与「用户提交」可区分），不再把卡片挂到超时；已决/重放/非 URL 模式一律无副作用（仅记日志）。规范 scope 解析列为触发式能力位（首个真实 elicitation wire 出现时启用，当前缺口与触发条件见 `docs/unimplemented.md` D1）。
 - **权限确认通道（ACP 一致）**：agent 发起 `session/request_permission` → 服务端发布 `session.permission_request` 事件（含 options：allow/reject × once/always）→ 用户经 `POST /sessions/:id/permission` 决策 → 决策回流给 agent（**显式拒绝带 deny 选项时回 Selected{该选项}，agent 可区分拒绝/取消/超时**；无可选 deny 选项时兜底 Cancelled）。**决策回执如实描述实际投递结果**（`allowed/rejected/always` + 请求 `option_id` + ACP 形态 `outcome`/`selected_option_id`）——`option_id` 缺省或无效时回执给出兜底选中的第一个选项，显式拒绝无 deny 选项时回执 `outcome=cancelled`，不回显请求参数、不猜测。**决策带 scope 校验（C3）**：只有登记该请求的会话能决策——`POST /sessions/:id/permission` 的 `:id` 不存在时 40401（`session_not_found`），与挂起项归属不符时与「未知 call_id」同码同文案 40001，不泄露他会话挂起项且挂起项保持不动（与 elicitation 决策同一口径）；支持会话级权限记忆——「始终允许」与「始终拒绝」**双侧对称、同键互斥覆盖**（决策 `{title, kind, decision: allow|reject}`，可见可撤销：`GET /sessions/:id/permissions/memories` 列出、`POST …/memories/revoke` 单条或一键撤销，旧 `/permissions/always` 路径兼容别名）；挂起超时自动拒绝/取消（默认 30min，`MATE_PERMISSION_TIMEOUT`/`MATE_ELICITATION_TIMEOUT` 可覆盖）；`session/cancel` 按 ACP 规范回 Cancelled 全部挂起。**任何挂起（权限/提问）一旦终局即发布收敛事件**（`session.permission_resolved` / `session.elicitation_resolved`），前端以服务端事件为唯一事实收敛卡片（`timeout_at` 仅作展示，无前端自设时钟）。
 - **免安装免 key 的演示底座已移除（M0）**：内置 `echo` runtime（daemon 自派生 `mate acp-demo` 子进程充当 ACP server，每轮 prompt 发起真实 `session/request_permission`，并可触发结构化提问与失败轮）已**彻底删除**，内置 runtime 收敛为 `dsh`（第二个适配 `opencode` 已于 2026-10 下线，adapter 层保留）。**失去的产品能力如实记录在此**：① 不装 dsh、没有模型 key 也能在面板点通权限确认卡与结构化提问的**首次体验路径消失**；② `mate acp-serve` 与 `mate acp-demo` 子命令一并删除——远程传输**功能不受影响**（`.ark-mate/config/runtimes.json` 声明远程端点照常工作），失去的只是服务端半场的开箱演示；③ 最小容器镜像失去免 key 自检手段，容器内自检须挂真实底座（见 `docs/deployment.md`）。权限/提问通道本身的实现与覆盖**不变**（`pkg/acl/remote_test.go` 的 ws/http 全链路含权限往返；`pkg/acl/elicitation_e2e_test.go` 与 `permission_e2e_test.go` 用自建最小 ACP responder 覆盖 elicitation 四场景与权限 reject/失败轮；台账见 `.dsh/docs/notes/2026-09-22-echo-removal-coverage-ledger.md`）。
 - **能力数据面（Skill/MCP/Tool）**：`<CapabilityDir>/skills|mcp|tools/*.json` 是唯一事实源，坏定义告警跳过（不拖垮整表）。**Skill 正文装载期扫描（§13.2）**：入表前对 `body` 跑 11 条模式（9 条 critical：改写/无视/遗忘指令、角色劫持、插入新指令、system prompt override、`rm -rf`、删除全部文件、套取凭据；2 条 warning：敏感路径引用、可疑命令串联）——**critical 直接拒载**（`RegisterSkill` 报错 → 目录装载告警跳过，绝不进注册表、更不会被物化进 agent 技能目录），物化层再拦一道（导出 API 直接调用也不放行）；warning 放行但记在条目上，经 `GET /skills` 的 `warnings` 暴露（severity/pattern/message），超 5 万字符记 info。规则是**字面匹配**（英文正则）：语序改写/中文改写可绕过，这条边界写在测试里，别当成语义检测。面板「能力」页在 Skill 行显示告警标签（`N 条告警`，hover 逐条列 severity/pattern/说明）。MCP stdio 子进程进**独立进程组**（`pkg/mcp/proc_unix.go`，与 agent 侧 `Setpgid` 同款）：close 连孙进程一起回收——`npx -y …` 会 fork 出 node 层，只杀直接子进程既留孤儿、又让 `Wait()` 卡到孙进程退出。
@@ -97,7 +97,7 @@ make desktop/dev   # 桌面态（Electron 壳 + 真核心）：验壳 / native /
 - **P3 传输可靠性（前端）**：WS 传输增 **stalled 保险丝**（OPEN 后 70s 无任何服务端帧——半开/黑洞连接——主动断开并重连，健康连接每 25s ping→pong 计入活跃度不会误熔断）与**重连 resync 裁决**（重连后按各 agg 已确认水位重新 attach，服务端 EventsAfter 开区间 → 增量续传不重复、权威收尾）。
 - **无外部依赖进程**：实时会话/事件为进程内内存态；**P1 起持久化落 SQLite**（events 事实源 + sessions/runs/messages/permission_memories 读模型投影 + v8 起的**能力定义** `skills`/`mcp_servers` 及其变更审计 `definition_revisions` + `schema_migrations` 自管迁移），`mate migrate` 把现有 transcript 幂等导入（单事务 + 数量校验 + 失败整体回滚，原 transcript 目录不动）；serve 运行态接线已完成（发布持久化、重启恢复、`MATE_STORE=sqlite|memory|auto`）；messages 是**整会话重铺的白名单投影**（v23：只有 user 原文与 assistant 正文片段成行——按 `msg_id` 分段、`ordinal` 会话内 1..N 连续；思考/工具/用量等非对话事件**不产行**，时间线由事件读面渲染；空正文行同样不落库），会话搜索在 sqlite 模式改走 messages 表（无行时回扫 transcript）；跨会话**消息级检索**返回 `seq` 锚点（前端点击命中即跳转定位到该条消息），会话**批量导出**（markdown/text/json）以事件序列为事实源，两种存储模式产物一致；重启后对既有会话 prompt 自动**按需重建**——按记录的 agent/runtime/cwd 重建 ACP 会话（dsh 走原生 resume，未声明原生恢复能力的底座走 handoff memo），事件/权限/提问继续聚合到**同一个平台会话**；会话可续聊性只取决于会话是否存在，**任何已存在的会话（含上一轮 `completed`/`failed`）重启后都可继续提问**，停机等主动拆除不改写会话状态。
 
-里程碑与后续规划见 [docs/design-and-roadmap.md](docs/design-and-roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/agent-runtime-refactor-design-20260908.md](docs/agent-runtime-refactor-design-20260908.md) §20；harness adapter 的源码级适配核实记录见 [docs/dsh-acp-adaptation.md](docs/dsh-acp-adaptation.md)。
+排期见 [docs/roadmap.md](docs/roadmap.md)；**未实现能力与降级清单（唯一汇总口径）**见 [docs/unimplemented.md](docs/unimplemented.md)；内置底座的适配事实见 [docs/dsh-acp-adaptation.md](docs/dsh-acp-adaptation.md)。
 
 ## 快速开始
 
@@ -531,7 +531,7 @@ actor / at / digest，删定义也留痕且 `digest` 为空）。乐观锁从文
 
 **agent 域已随 v19 整体删除**：agent 不再是"一种定义"，所以它没有搬家路径、也没有
 `mate agent import|export`、`meta.imported_agents`/`meta.default_agent` 与 `<AgentDir>/*.json` 的装载面。
-撤掉的依据是"这个域没有独立身份"（`docs/design-and-roadmap.md`「决策变更 v19」）：底座由**构建期固定**，
+撤掉的依据是"这个域没有独立身份"（`docs/decisions.md`「决策 v19」）：底座由**构建期固定**，
 它的每个字段要么是派生事实（`is_default`/`session_count`/`default_model`）、要么是平台事实
 （`permission_policy`/`provider`），撤掉写面之后没有剩余字段可写。会话与能力的归属因此只剩
 `runtime_id` 一个身份列；per-agent 的 `mcps` 白名单随定义载体一起消失，能力的表达位收回到
@@ -617,7 +617,7 @@ make vet / test   # go vet / go test ./...
 #                 ./mate serve --web-dir "$PWD/frontend/apps/web/dist"
 ```
 
-**桌面态调试**（细节见 [desktop 设计](docs/desktop-architecture-design-20260928.md)）：
+**桌面态调试**（细节见[架构总览](docs/architecture.md) §8）：
 
 ```bash
 cd frontend
@@ -774,25 +774,32 @@ backend/                单 Go module（github.com/morehao/ark-mate）
     dao                 单表数据访问（gormdao 泛型 Dao + 各领域 Cond）
     store               持久层门面（句柄 + 跨表事务：序号分配、导入 staging、读模型 API）
     eventbus            进程内事件总线（WS 订阅源）
-    archtest            架构守卫测试（分层边界 + 事件 type 契约快照）
+    archtest            架构守卫（机器判据的唯一集中地，79 条 + 1 条文档引用守卫）
 frontend/               pnpm workspace（apps/* + packages/*）
-  apps/web/             Web 问答控制台（React + antd；src/{store,console,components,pages,transport}）
+  apps/web/             入口 + 组装（main.tsx 挂载 + vite 构建配置）；产物 dist 是唯一一份 UI
   apps/desktop/         桌面产品（Electron 壳：src/ 主进程与 preload、renderer/ 壳静态页、scripts/ 装配与打包）
+  packages/console      @ark-mate/console（界面本体：React + antd + zustand）
   packages/desktop-contract  @ark-mate/desktop-contract（载体契约唯一真源：常量 + 类型 + 纯函数判定；零 Electron 引用）
   packages/tsconfig     @ark-mate/tsconfig（base.json / app.json，同 ark-iam 编译器约定）
   packages/types        @ark-mate/types（REST 信封 / 会话 / WS 帧 / 域事件契约）
   packages/api          @ark-mate/api（axios 客户端 + /v1/mate resources）
   packages/ui           @ark-mate/ui（tokens/themeConfig/AppShell/PageContainer/状态胶囊；DESIGN.md 事实源）
-docs/                   设计/路线图 + runtime 适配核实 + 部署运维
+docs/                   对外/产品面文档（口径、结构、排期、边界）
+  positioning.md        定位与边界（做什么 / 不做什么）
+  decisions.md          决策登记（定位口径的唯一事实源，现有编号体系与空缺见文首）
+  architecture.md       架构总览（分层、数据模型、契约、能力面、目录地图）
+  roadmap.md            排期（L 段承诺 + B/C 段方向）
+  unimplemented.md      未实现能力与降级清单（唯一汇总口径）
+  acceptance-matrix.md  桌面与浏览器的一致性验收矩阵（差异清单 + 靶命令）
+  dsh-acp-adaptation.md 内置底座 dsh 的适配事实
   deployment.md         部署/运维（自建二进制 + 外挂 dist、systemd、容器、环境变量、备份、排障）
-  design-and-roadmap.md 总体设计与 M0–M3 路线图（历史设计记录）
-  agent-runtime-refactor-design-20260908.md  P0–P3 重构设计与逐切片证据（§19.x）；§20 未实现能力/降级清单
 ```
 
-> `docs/` 下的设计文档是**历史设计记录**（含当时的路径命名——会话路径早期叫 sessions、P0 起为
-> sessions）；对外契约以本
-> README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
-> 二者由 `TestReadmeRoutesMatchRouter` 自动守卫。
+> `docs/` 下的文档是**当前有效的对外/产品面口径**（2026-10-16 重建：旧设计文档中仍有效的内容已抽出，
+> 历史整体留在 git 里）。**外部产品的对照与逆向分析不进 `docs/`**——那类材料一律在 `.dsh/docs/`。
+> 对外契约以本 README 的「控制面接口摘要」与实际路由（`backend/internal/router/routes_*.go`）为准，
+> 二者由 `TestReadmeRoutesMatchRouter` 自动守卫；`docs/**` 的相互引用由 `TestDocsReferencesResolve`
+> 守卫（指向不存在的文件即红）。
 
 ## 协议 / License
 

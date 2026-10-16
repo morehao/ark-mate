@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"strings"
 
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
@@ -83,7 +84,7 @@ func (s *Service) CreateModel(ctx context.Context, req dtomodel.ModelCreateReq) 
 		ID: id, ProviderID: req.ProviderID, Model: strings.TrimSpace(req.Model),
 		Name: derefString(req.Name), Note: derefString(req.Note), InputModalities: modalities,
 		MaxInputTokens: maxIn, MaxOutputTokens: maxOut,
-	}, definitionWriteActor)
+	}, definition.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
 	}
@@ -160,12 +161,12 @@ func (s *Service) UpdateModel(ctx context.Context, id string, patch dtomodel.Mod
 	}
 	if patch.Name != nil || patch.Note != nil || patch.InputModalities != nil ||
 		patch.MaxInputTokens != nil || patch.MaxOutputTokens != nil {
-		ok, err := s.st.UpdateModelDefinition(ctx, id, content, row.Revision, definitionWriteActor)
+		ok, err := s.st.UpdateModelDefinition(ctx, id, content, row.Revision, definition.DefinitionWriteActor)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			return nil, definitionChangedErr("db:model/" + id)
+			return nil, definition.DefinitionChangedErr("db:model/" + id)
 		}
 	}
 	// 置/清默认是**两个方向**，都必须被处理：只处理 `true` 会让 `is_default:false` 静默无效。
@@ -209,7 +210,7 @@ func (s *Service) DeleteModel(ctx context.Context, id string) (*dtomodel.ModelDe
 		return &dtomodel.ModelDeleteResp{Deleted: false}, nil
 	}
 	// 删行 + 清默认**同一事务**（v12 是两次独立调用，中间有一个"默认指向已删行"的悬挂窗口）。
-	deleted, cleared, err := s.st.DeleteModelDefinitionAndClearDefault(ctx, id, row.Revision, definitionWriteActor)
+	deleted, cleared, err := s.st.DeleteModelDefinitionAndClearDefault(ctx, id, row.Revision, definition.DefinitionWriteActor)
 	if err != nil {
 		return nil, err
 	}

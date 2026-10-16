@@ -2,6 +2,11 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/mcp"
+	"github.com/morehao/ark-mate/internal/domain/skill"
+	"github.com/morehao/ark-mate/internal/domain/workspace"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,7 +15,6 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/credentials"
 	"github.com/morehao/ark-mate/pkg/resource"
 	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
@@ -101,9 +105,6 @@ type Service struct {
 	// 这里存的是**显式配置**的那一份；对外生效名单还要并上代建根（effectiveWorkspaceRootsLocked）。
 	// 见 SetWorkspacePolicy / withinRoots。
 	workspaceRoots []string
-	// bindAddr 本进程**实际监听**的地址（装配期 net.Listen 之后注入）。
-	// 用途只有一个：判定"宿主能不能抬起系统目录面板"（绑回环才可能，见 workspace_picker.go）。
-	bindAddr string
 	// workspaceRootsStore 白名单的持久化端口（面板 PUT 时写回配置目录；nil = 只读）。
 	// 端口而非直接实现：manager 不碰配置文件，优先级/锁定判定由 infra 报告（见 workspace_settings.go）。
 	workspaceRootsStore WorkspaceRootsStore
@@ -114,7 +115,6 @@ type Service struct {
 	//   - sqlite 模式：**只作导入/导出目录**——事实源是 DB（v8 的 skills/mcp_servers），
 	//     装载走 LoadCapabilityDefinitionsFromStore，写面走 store 的 CAS（M6-3）。
 	// 两种模式都由 LoadCapabilityDefinitions / LoadCapabilityDefinitionsFromStore 登记。
-	capabilityDir string
 	// automationDir / automations 自动化定义目录与注册表（M4-3；LoadAutomationDefinitions 登记）。
 	// 运行态 overlay 写在定义文件里（last_fired_at/state/...），内存只留调度态（nextDue/startup）。
 	automationDir string
@@ -130,10 +130,20 @@ type Service struct {
 	// 而 automation 的 prompt 常常有副作用（改代码、发通知），重复跑一次是不可接受的。
 	// 临界区里唯一的慢动作是建会话（子进程握手），而 automation 触发本身稀疏，串行化代价可忽略。
 	automationRunMu sync.Mutex
-	// skillTargets skill 物化目标（app 启动重校时登记；启停后立刻重校同一组目标）。
-	skillProjections []SkillProjection
+	// skillPlane 技能平面（读面 + 重校；与 mcp 平面共用同一份 caps 注册表）。
+	skillPlane *skill.Plane
+	// mcpSecrets 连接器平面的密钥解析面（引用 → 明文；与 creds 共用同一份凭据机制）。
+	mcpSecrets *mcp.Secrets
+	// mcpPlane 连接器平面（实时调用 + 探测；与 skill 平面共用同一份 caps 注册表）。
+	// 探测状态（预算 + 最近一次探测结果）自持在平面内，不再挂在 Service 上。
+	mcpPlane *mcp.Plane
+	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
+	picker *workspace.Picker
 
-	mu sync.Mutex
+	mu   sync.Mutex
+	defs *definition.Mechanism
+	// creds 凭据机制的状态（四层凭据面 + 凭据 cwd；见 mechanism/credential）。
+	creds *credential.Store
 	// binding 本进程认的那个底座（v19：单实例、构造期建好；见 runtime_binding.go）。
 	binding  *runtimeBinding
 	sessions map[string]*SessionRec
@@ -141,11 +151,6 @@ type Service struct {
 	inputs    map[string][]QueuedInput
 	ver       map[string]int64 // 每 agg(session) 的版本计数（域事件递增）
 	restoring bool             // RestoreFromStore 进行中：registerSession 跳过 DB 回写
-
-	// MCP live 探测状态（P2 §5.2）：独立锁——探测可能耗时，不阻塞会话面。
-	mcpMu           sync.Mutex
-	mcpProbes       map[string]mcpProbeStatus
-	mcpProbeTimeout time.Duration
 
 	// A3 诊断：底座最近一次失败（含 stderr 尾巴）。独立锁，避免与 s.mu 交叉。
 	// 单底座 ⇒ 一份记录（v19 之前是 per-agent 的 map）。
@@ -164,26 +169,6 @@ type Service struct {
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
 	coalescer *chunkCoalescer
-	// creds 四层凭据面（v20；见 credentials.go 与 SetCredentials）：provider 拨号密钥的**唯一**
-	// 解析入口 = 继承环境 > 托管文档（`<MATE_HOME>/credentials.json`）> `<cwd>/.env` > `<home>/.env`
-	// （顺序实现只有 `pkg/credentials` 一份）。
-	//
-	// nil = 未装配（网关/测试的某些路径）：此时只有库里的那一份可用，读面会在 problems 里明说。
-	// **装配期写一次、之后只读**——所以它和 `st` 一样不加锁访问（解析路径会被反复走到，
-	// 而持 `s.mu` 的读模型也要用它）。
-	creds *credentials.Layered
-
-	// credCwd **凭据 cwd**（v20）：`<cwd>/.env` 那一层的 cwd = **用户启动 `mate serve` 的那个
-	// 目录**，由装配期经 `SetCredentialCwd` 显式登记（不是用到时 `os.Getwd()`）。
-	//
-	// 它存在的唯一理由是**要交下去**：网关条目把同一个值经 `mcp.GatewayCredCwdEnv` 交给网关
-	// 子进程，否则底座 spawn 的网关会拿自己的 cwd（会话工作区）去解析同一个引用——两个进程给出
-	// 两个答案，且完全静默。空 = 装配时没登记：条目不带它，网关侧 WARN 后回落（这条 WARN 就是
-	// "两个进程可能不同"的可见性）。
-	//
-	// **装配期写一次、之后只读**（同 `creds`：读它的 `gatewayEntry` 在请求路径上被并发走到，
-	// 加锁反而会让持 `s.mu` 的调用点死锁）。
-	credCwd string
 
 	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
 	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
@@ -205,8 +190,10 @@ type Service struct {
 // NewService 构造 Service。bus 可为 nil（纯列表场景），Orchestrator 会覆盖注入。
 func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s := &Service{
-		reg: reg,
-		bus: bus,
+		reg:   reg,
+		defs:  definition.New(),
+		creds: credential.New(reg),
+		bus:   bus,
 		// 网关默认开启（config 的 auto）：显式在这里置位，避免 atomic.Bool 零值把默认关掉。
 		mcpGatewayWarned: make(map[string]bool),
 		sessions:         make(map[string]*SessionRec),
@@ -215,11 +202,18 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 		providers:        make(map[string]*providerDef),
 		catalog:          newCatalogStore(),
 		caps:             capability.NewRegistry(),
-		mcpProbes:        make(map[string]mcpProbeStatus),
-		mcpProbeTimeout:  defaultMCPProbeTimeout,
 		// 默认开启（nil 策略仍不注入 → 未声明策略的 agent 行为不变）。
 		nativePermEnabled: true,
 	}
+	// 技能平面与 RegisterSkill 共用**同一份**注册表（两份注册表 = 两个事实源）。
+	s.skillPlane = skill.NewPlane(s.caps, s.defs)
+	// 密钥解析面与 provider 凭据面共用**同一份** `credential.Store`（两份 = 同一份引用解析出两个结果）。
+	s.mcpSecrets = mcp.NewSecrets(s.creds)
+	// 连接器平面与 RegisterMcpServer 共用**同一份**注册表与**同一份**密钥解析面。
+	s.mcpPlane = mcp.NewPlane(s.caps, s.defs, s.mcpSecrets)
+	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
+	s.picker = workspace.NewPicker()
+
 	// 网关默认开启（config 的 auto）。放在构造末尾而不是结构体字面量里：atomic.Bool 没法写成
 	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
 	s.mcpGatewayEnabled.Store(true)

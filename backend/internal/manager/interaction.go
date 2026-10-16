@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -55,7 +56,7 @@ func (s *Service) ResolvePermission(ctx context.Context, id, callID, optionID st
 }
 
 // PendingPermissions 直接透传编排器的挂起权限（供 GetSession/ListPendingPermissions 复用）。
-func (s *Service) PendingPermissions(id string) []PermissionItem {
+func (s *Service) PendingPermissions(id string) []interaction.PermissionItem {
 	if s.orch == nil {
 		return nil
 	}
@@ -63,7 +64,7 @@ func (s *Service) PendingPermissions(id string) []PermissionItem {
 }
 
 // PendingElicitations 直接透传编排器的挂起结构化提问（供 ListPendingElicitations 复用）。
-func (s *Service) PendingElicitations(id string) []ElicitationItem {
+func (s *Service) PendingElicitations(id string) []interaction.ElicitationItem {
 	if s.orch == nil {
 		return nil
 	}
@@ -103,7 +104,7 @@ func (s *Service) ResolveElicitation(ctx context.Context, id, elicitationID, act
 }
 
 // PermissionMemories 直接透传编排器的会话级权限记忆（供 GetSession 复用；REST 见 ListPermissionMemories）。
-func (s *Service) PermissionMemories(id string) []MemoryItem {
+func (s *Service) PermissionMemories(id string) []interaction.MemoryItem {
 	if s.orch == nil {
 		return nil
 	}
@@ -137,7 +138,7 @@ func (s *Service) RevokeMemory(ctx context.Context, id, title, kind string) erro
 }
 
 // toPermissionResp 把 manager.PermissionItem 折叠为 dtosession.PermissionResp。
-func toPermissionResp(p PermissionItem) dtosession.PermissionResp {
+func toPermissionResp(p interaction.PermissionItem) dtosession.PermissionResp {
 	opts := make([]dtosession.PermissionOptionResp, 0, len(p.Options))
 	for _, o := range p.Options {
 		opts = append(opts, dtosession.PermissionOptionResp{OptionID: o.OptionID, Name: o.Name, Kind: o.Kind})
@@ -155,7 +156,7 @@ func toPermissionResp(p PermissionItem) dtosession.PermissionResp {
 }
 
 // toElicitationResp 把 manager.ElicitationItem 折叠为 dtosession.ElicitationResp。
-func toElicitationResp(p ElicitationItem) dtosession.ElicitationResp {
+func toElicitationResp(p interaction.ElicitationItem) dtosession.ElicitationResp {
 	resp := dtosession.ElicitationResp{
 		ElicitationID: p.ID,
 		SessionID:     p.SessionID,

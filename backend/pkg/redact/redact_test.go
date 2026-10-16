@@ -47,7 +47,7 @@ func TestStringKeepsBenignContent(t *testing.T) {
 		"/Users/morehao/Documents/practice/go/ark-mate/backend/internal/manager",
 		"/tmp/TestWorkspaceRoutesWithRoots1234/workspaceAbc",
 		"https://api.example.com/v1/chat/completions?model=gpt-4o-mini",
-		"docs/p0-hardening-design-20260911.md",
+		"docs/architecture.md",
 	}
 	for _, in := range benign {
 		if got := String(in); got != in {

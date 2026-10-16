@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/pkg/config"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -37,7 +37,7 @@ func knownRuntimeIDs(cfg config.Config) []string {
 // 事实的那两段（`collectRuntimeModelFacts` / `collectSensitiveFiles`）都按**注册表**枚举，
 // 适配一删，那个底座在报告里就整段消失了：报告一切正常，而磁盘上的东西一个没少。
 //
-// 判据是「**在不在册**」，不是「它是不是某某」——事实由 `manager.CollectRetiredRuntimeFacts`
+// 判据是「**在不在册**」，不是「它是不是某某」——事实由 `doctorfacts.CollectRetiredRuntimeFacts`
 // 采集（那一侧连一个底座名都没有，理由写在该文件头：内核不许认识具体底座）。本文件只做两件事：
 // 给出**在册集合**（判据的输入），把事实翻成四档人话。
 //
@@ -66,7 +66,7 @@ func checkRetiredSection(opts doctorOptions) []doctorCheck {
 	if st != nil {
 		defer func() { _ = st.Close() }()
 	}
-	facts := manager.CollectRetiredRuntimeFacts(context.Background(), st, manager.RetiredRuntimeOptions{
+	facts := doctorfacts.CollectRetiredRuntimeFacts(context.Background(), st, doctorfacts.RetiredRuntimeOptions{
 		Home:            opts.Home,
 		KnownRuntimeIDs: opts.KnownRuntimeIDs,
 		ProjectionDirs:  opts.ProjectionDirs,
@@ -75,7 +75,7 @@ func checkRetiredSection(opts doctorOptions) []doctorCheck {
 }
 
 // renderRetiredChecks 把存量事实翻成检查项（纯函数，便于单测直接喂事实）。
-func renderRetiredChecks(facts manager.RetiredRuntimeFacts) []doctorCheck {
+func renderRetiredChecks(facts doctorfacts.RetiredRuntimeFacts) []doctorCheck {
 	checks := []doctorCheck{
 		checkRetiredHomeDirs(facts),
 		checkRetiredSessions(facts),
@@ -91,7 +91,7 @@ func renderRetiredChecks(facts manager.RetiredRuntimeFacts) []doctorCheck {
 }
 
 // retiredScanNotes 汇总"无法校验"与"判据失效"，并给出各自的可执行出路。
-func retiredScanNotes(facts manager.RetiredRuntimeFacts) []string {
+func retiredScanNotes(facts doctorfacts.RetiredRuntimeFacts) []string {
 	notes := append([]string{}, facts.Notes...)
 	if len(facts.KnownRuntimeIDs) == 0 {
 		// 判据失效是**响亮的错**：在册集合空 ⇒ 每个目录都会被算成遗留 ⇒ 报告必然假红。
@@ -106,7 +106,7 @@ func retiredScanNotes(facts manager.RetiredRuntimeFacts) []string {
 // 为什么这一条最重要：**底座的配置与状态就在这个目录里**，其中可能包括它的原生凭据文档
 // （明文密钥，与 `mate.db` 同等看待）。用户删掉平台适配之后，这些东西还在盘上——报告要做的
 // 是把它指出来（含顶层条目清单，让人一眼看出里面是什么），**不由平台自动删**。
-func checkRetiredHomeDirs(facts manager.RetiredRuntimeFacts) doctorCheck {
+func checkRetiredHomeDirs(facts doctorfacts.RetiredRuntimeFacts) doctorCheck {
 	const name = "retired runtime dirs"
 	switch {
 	case facts.HomeScan == "no_home":
@@ -146,7 +146,7 @@ func checkRetiredHomeDirs(facts manager.RetiredRuntimeFacts) doctorCheck {
 //
 // 后果如实写出来，因为它是**读面正常、用到才报错**这一类里的典型：会话照常列、历史照常读，
 // 只有下一轮 prompt 才会 `runtime_not_found`——不提前说，用户会以为是"这条会话坏了"。
-func checkRetiredSessions(facts manager.RetiredRuntimeFacts) doctorCheck {
+func checkRetiredSessions(facts doctorfacts.RetiredRuntimeFacts) doctorCheck {
 	const name = "retired sessions"
 	if facts.SessionScan != "ok" {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf(
@@ -165,7 +165,7 @@ func checkRetiredSessions(facts manager.RetiredRuntimeFacts) doctorCheck {
 // checkRetiredSkills skill 定义里声明给不在册底座的运行面。
 //
 // 后果：候选集为空 ⇒ 这条 skill **永远不会被投放**，而它在界面上看起来只是"一条普通技能"。
-func checkRetiredSkills(facts manager.RetiredRuntimeFacts) doctorCheck {
+func checkRetiredSkills(facts doctorfacts.RetiredRuntimeFacts) doctorCheck {
 	const name = "retired skills"
 	if facts.SkillScan != "ok" {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf(
@@ -188,7 +188,7 @@ func checkRetiredSkills(facts manager.RetiredRuntimeFacts) doctorCheck {
 //
 // 这类键**形状合法、所以配置解析不报错**，只是永远匹配不上——"我配了投影目录、技能却没投放"
 // 在这里就能被解释掉。
-func checkRetiredProjectionDirs(facts manager.RetiredRuntimeFacts) doctorCheck {
+func checkRetiredProjectionDirs(facts doctorfacts.RetiredRuntimeFacts) doctorCheck {
 	const name = "retired projection dirs"
 	if len(facts.ProjectionRefs) == 0 {
 		return doctorCheck{name, doctorOK, "没有投影覆盖指向不在册底座"}
@@ -204,7 +204,7 @@ func checkRetiredProjectionDirs(facts manager.RetiredRuntimeFacts) doctorCheck {
 }
 
 // retiredSampleIDs 取出样本里的会话 id（升序来自采集侧）。
-func retiredSampleIDs(refs []manager.RetiredRef) []string {
+func retiredSampleIDs(refs []doctorfacts.RetiredRef) []string {
 	out := make([]string, 0, len(refs))
 	for _, r := range refs {
 		out = append(out, r.ID)

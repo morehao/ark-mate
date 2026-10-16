@@ -16,6 +16,25 @@ var staticCapsImagesAllowedFiles = map[string]string{
 	"pkg/runtime/adapters.go": "把 adapter 的静态基线声明汇入 Spec（值拷贝，不做任何判据）",
 }
 
+// connectionFactImages 是**连接期事实**的取值表达式（ACP initialize 广告的能力）。
+//
+// 判据按这个**符号**收集，不按文件路径：它今天写在 `manager` 包里定义 `promptImageSupported` 的那个
+// 文件里，而那个文件会随分层重构搬到 `provider` 域包（设计 §3.4 文件去向表）。路径钉住的
+// 判据在那之后只有两种下场——读不到那个文件而红得莫名其妙，或者被"顺手"改成"任一文件存在即可"
+// 而在**判据层面**悄悄放宽。按符号扫整棵树则两种下场都没有。
+const connectionFactImages = "Capabilities().Images"
+
+// connectionFactImagesConsumers 是 `Capabilities().Images` 在 `internal/` + `pkg/` 的**生产**文件里
+// 的**实测**命中数（2026-10-16 P0 实测：
+// `grep -rn 'Capabilities()\.Images' internal pkg` 在生产文件里恰好 1 处 =
+// `manager` 包里 `promptImageSupported` 的那一行 `v := rc.client.Capabilities().Images`）。
+//
+// 为什么是"恰好 N"而不是"至少一处"：N 就是这条判据的可观测面。0 处 = 连接期事实的消费者被删掉了
+// ——门禁会悄悄退回静态基线，而那正是 ADR-14 要拦的东西；多出来的处 = 有人**又**复制了一份这个
+// 取值表达式，那正是"静态基线 / 连接期事实"两条口径开始分叉的地方，值得有人看一眼。
+// 合法新增消费者时把它改成实测值，并在提交信息里写明理由（这条常量本身就是那份理由的落点）。
+const connectionFactImagesConsumers = 1
+
 // TestStaticCapsImagesHasNoConsumer A11/ADR-14：静态能力基线 `Caps.Images` **不得**有新的读法。
 //
 // 为什么需要一条机器判据：`dsh.Caps.Images = false` 是"按源码声明的保守基线"，而真值取决于
@@ -29,29 +48,28 @@ var staticCapsImagesAllowedFiles = map[string]string{
 // 必须在某处被读）：否则"用连接期事实"只是一句没人执行的话，而门禁会悄悄退回静态值。
 func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 	backend := backendRoot(t)
-	root := filepath.Join(backend, "internal")
-	pkgRoot := filepath.Join(backend, "pkg")
 
 	var offenders []string
-	consumer := ""
+	var consumers []string
+	scanned := 0
 	scanOne := func(path string) {
 		base := filepath.ToSlash(path)
 		rel := base
 		if i := strings.Index(base, "/backend/"); i >= 0 {
 			rel = base[i+len("/backend/"):]
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读 %s: %v", path, err)
+		src := stripLineComments(readFileOrFatal(t, path))
+		scanned++
+		// ① 静态基线：只许出现在汇入点。
+		if strings.Contains(src, ".Caps.Images") {
+			if _, ok := staticCapsImagesAllowedFiles[rel]; !ok {
+				offenders = append(offenders, rel)
+			}
 		}
-		src := stripLineComments(string(raw))
-		if !strings.Contains(src, ".Caps.Images") {
-			return
+		// ② 连接期事实：整棵树上按符号收集（路径无关），命中数下面按"恰好 N"判。
+		if strings.Contains(src, connectionFactImages) {
+			consumers = append(consumers, rel)
 		}
-		if _, ok := staticCapsImagesAllowedFiles[rel]; ok {
-			return
-		}
-		offenders = append(offenders, rel)
 	}
 	walkGo := func(root string) {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -75,8 +93,14 @@ func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 			t.Fatalf("遍历 %s: %v", root, err)
 		}
 	}
-	walkGo(root)
-	walkGo(pkgRoot)
+	walkGo(filepath.Join(backend, "internal"))
+	walkGo(filepath.Join(backend, "pkg"))
+
+	// fail-closed：一片 `.go` 都扫不到时，上面两条判据都会"照样绿"而不再看任何文件。
+	if scanned == 0 {
+		t.Fatal("`internal/` + `pkg/` 下一个生产 .go 文件都没扫到（fail-closed：判据失去对象，" +
+			"空转的守卫比没有守卫更坏——它给出虚假的安心）")
+	}
 
 	if len(offenders) > 0 {
 		t.Fatalf("静态能力基线 `Caps.Images` 出现了新的读法：%v。\n"+
@@ -85,19 +109,13 @@ func TestStaticCapsImagesHasNoConsumer(t *testing.T) {
 			"确实只是声明汇入的话，把它加进 staticCapsImagesAllowedFiles 并写明理由", offenders)
 	}
 
-	// 正向：连接期事实必须有消费者（否则"用连接期事实"是空话）。
-	for _, rel := range []string{"internal/manager/model_catalog.go", "internal/manager/connection.go"} {
-		raw, err := os.ReadFile(filepath.Join(backend, filepath.FromSlash(rel)))
-		if err != nil {
-			t.Fatalf("读 %s: %v（改名前请同步本守卫）", rel, err)
-		}
-		if strings.Contains(string(raw), "Capabilities().Images") {
-			consumer = rel
-			break
-		}
-	}
-	if consumer == "" {
-		t.Fatal("找不到连接期 `Capabilities().Images` 的消费者：ADR-14 要求「本路由能不能收图」" +
-			"以连接期事实为准；把它删掉等于让门禁悄悄退回静态基线（那会给用户一个错误结论）")
+	if len(consumers) != connectionFactImagesConsumers {
+		t.Fatalf("连接期事实 `%s` 在 `internal/` + `pkg/` 的生产文件里实测 **%d 处**（期望 %d）：%v。\n"+
+			"ADR-14 要求「本路由能不能收图」以连接期事实为准，所以它必须有**确实被读**的落点；\n"+
+			"0 处 = 消费者被删掉了（门禁会悄悄退回静态基线，给用户一个错误结论）；\n"+
+			"多于 %d 处 = 又有人复制了一份这个取值表达式，请逐个核对后把 connectionFactImagesConsumers "+
+			"改成实测值并写明理由（判据按符号扫整棵树，不按文件路径——它不随文件搬家失效）",
+			connectionFactImages, len(consumers), connectionFactImagesConsumers, consumers,
+			connectionFactImagesConsumers)
 	}
 }

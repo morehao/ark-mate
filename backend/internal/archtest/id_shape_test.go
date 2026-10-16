@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -18,48 +19,63 @@ import (
 // v17 增补：`events` 也有平台铸造身份（`evt_`），**位次（`seq`）与身份（`id`）分列两列**——
 // 换掉 `provider` 这个词是因为它在「runtime 侧的 ACP 会话」上一直是个内部术语（见 AGENTS.md 消歧表）。
 
-// runtimeShellCallSite 是一个允许调用 `WrapRuntime`/`UnwrapRuntime` 的文件
+// runtimeShellCallSite 是一处**允许调用** `WrapRuntime`/`UnwrapRuntime` 的位置许可
 // （设计 §4.5.3 的 4 包装 / 3 解包表 —— 这是"包装点唯一"这条不变式的机器判据）。
+//
+// 锚点是**包含调用点的函数名**，不是文件路径。为什么换锚：这几个点会随"哪个包拥有它"而搬家
+// （v27 起 `internal/manager` 正被拆成 `internal/domain/*` / `internal/mechanism/*`），而搬家时
+// 变的是**包与接收者类型**，函数名不变。钉路径的守卫在搬家后只有两种结局，都很坏：静默空转
+// （判据指向一个不存在的文件，测试照样绿却什么都没检查）或假红。
+//
+// 函数名锚并不比路径锚弱：调用**按次数精确比对**——少了报"白名单失去对象"，多了报"多了一处调用"。
 type runtimeShellCallSite struct {
-	Path string
-	// Wrap / Unwrap 该文件**必须**出现哪一个（fail-closed：白名单文件里两个都不出现
-	// ⇒ 映射改道了，白名单已经失去对象）。
-	Wrap   bool
-	Unwrap bool
+	// Func 是包含调用点的函数 / 方法名（不含接收者）。匿名函数里的调用归给它外层的具名函数。
+	Func   string
+	Wrap   int // 该函数里 `WrapRuntime(` 的调用次数（精确值）
+	Unwrap int // 同上，`UnwrapRuntime(`
 	Why    string
 }
 
-// runtimeShellCallSites 是唯一允许出现 `rt_` 壳包装/解包的文件。
+// runtimeShellCallSites 是唯一允许出现 `rt_` 壳包装/解包的函数。
 //
 // 多一处即红——它挡的是"顺手在别处也包一层/解一层"：那会让同一个值在不同层有两种形态，
 // 而两种形态**都合法**（一个平台 id 也能被 wrap 成 `rt_ses_…`），于是没有任何运行时信号。
+//
+// 每条 Why 末尾的「目标包」是搬家后的落点（见设计文档 §3.4 的文件去向表）：写在这里是为了
+// 让下一个人搬完文件后知道该去哪儿核对，而不是靠 grep 找。
 var runtimeShellCallSites = []runtimeShellCallSite{
 	{
-		Path: "backend/pkg/object/objid/objid.go", Wrap: true, Unwrap: true,
-		Why: "唯一实现本身（`pkg/object/objid`）——包装/解包都只有这一份代码",
+		Func: "startSessionOn", Wrap: 1, Unwrap: 0,
+		Why: "W1 首次建会话落 rec（源 `manager/session_start.go`，目标包 `internal/domain/session`）",
 	},
 	{
-		Path: "backend/internal/manager/session_start.go", Wrap: true, Unwrap: true,
-		Why: "W1 首次建会话落 rec / W2 原生恢复失败或迁移后换会话（最容易被漏的一处）/ U1 原生恢复前解包",
+		Func: "connectSession", Wrap: 1, Unwrap: 1,
+		Why: "W2 原生恢复失败或迁移后换会话（最容易被漏的一处）/ U1 原生恢复前解包" +
+			"（源 `manager/session_start.go`，目标包 `internal/domain/session`）",
 	},
 	{
 		// v26.1：这一支**只剩解包**了。v15 的 W3（"`session/list` 直出底座原文，包装后才是平台侧的
 		// 值"）是为「同一个变量兼作给底座用与比较/落库用两种语义」而设的；现在目录取样只保留
 		// **原文那一半**——列出的会话直接当 resume 目标使，从不落 rec、也不与包装值比较
 		// （平台记录那半由 U2 解包成原文后比较，两侧同为原文）。于是这里不再有包装调用点：
-		// 白名单若继续写着 `Wrap: true`，这条守卫就会为"已经不存在的东西"发许可——它自己报的那句
+		// 白名单若继续要求包装，这条守卫就会为"已经不存在的东西"发许可——它自己报的那句
 		// 「白名单已经失去对象」正是这个意思。别为了让这条绿而把包装加回来。
-		Path: "backend/internal/manager/model_catalog.go", Wrap: false, Unwrap: true,
-		Why: "U2 探测用 resume 前解包（另见 v15 §4.5.3 的 W3：该包装点已随 v26.1 取样重构消失）",
+		Func: "resumeTargetsFrom", Wrap: 0, Unwrap: 1,
+		Why: "U2 探测用 resume 前解包（源 `manager/model_catalog.go`，目标包 `internal/domain/provider`；" +
+			"另见 v15 §4.5.3 的 W3：该包装点已随 v26.1 取样重构消失）",
 	},
 	{
-		Path: "backend/internal/manager/permission_flow.go", Wrap: true, Unwrap: false,
-		Why: "D-4 修法：wire `_meta` 里的底座 id 要先按 `runtime_session_id` 反查平台会话（包装后比对）",
+		Func: "platformSessionIDForProvider", Wrap: 1, Unwrap: 0,
+		Why: "D-4 修法：wire `_meta` 里的底座 id 要先按 `runtime_session_id` 反查平台会话（包装后比对）" +
+			"（源 `manager/permission_flow.go`，目标包 `internal/domain/interaction`）",
 	},
-	{
-		Path: "backend/pkg/object/objid/objid_test.go", Wrap: true, Unwrap: true,
-		Why: "唯一实现的单测（含三条错误路径）",
-	},
+}
+
+// runtimeShellImplPaths 是「壳包装/解包的**实现本身**与它的单测」——两处都住在 `pkg/`，
+// **不参与**本次 `internal/` 的重划，所以这里继续钉精确路径：它们本来就只该各有一份。
+var runtimeShellImplPaths = []string{
+	"backend/pkg/object/objid/objid.go",
+	"backend/pkg/object/objid/objid_test.go",
 }
 
 // TestRuntimeSessionNeverOnWireAsPlatformID 守卫②：两个 id 词汇不得互串。
@@ -128,10 +144,10 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 		}
 	}
 
-	// ④ 包装/解包调用点白名单。
+	// ④ 包装/解包调用点白名单（按**函数名**累计，见 runtimeShellCallSite）。
 	scanned := 0
-	wraps := 0
-	unwraps := 0
+	implSeen := 0
+	got := map[string][2]int{} // 函数名 → (wrap, unwrap)
 	for _, dir := range []string{
 		filepath.Join(root, "internal"),
 		filepath.Join(root, "pkg"),
@@ -149,42 +165,125 @@ func TestRuntimeSessionNeverOnWireAsPlatformID(t *testing.T) {
 				continue
 			}
 			src := stripLineComments(readFileOrFatal(t, path))
-			w := strings.Count(src, "WrapRuntime(")
-			u := strings.Count(src, "UnwrapRuntime(")
-			// 定义行（`func WrapRuntime(`）不算调用点。
-			if strings.Contains(src, "func WrapRuntime(") {
-				w--
+			if containsStr(runtimeShellImplPaths, relSlash) {
+				// 实现与它的单测：共同点是"这两个名字必须出现在这个文件里"，但**形态不同**——
+				// 实现文件里是**定义**（`func WrapRuntime(` / `func UnwrapRuntime(`，所以它的
+				// 调用点数是 0，按调用点判会把它整个漏掉），单测文件里是调用。故按名字出现判。
+				if !strings.Contains(src, "WrapRuntime") || !strings.Contains(src, "UnwrapRuntime") {
+					t.Fatalf("%s 是 `rt_` 壳包装/解包的实现或它的单测，但里面找不到 `WrapRuntime` / "+
+						"`UnwrapRuntime` 这两个名字：实现被搬走或改名了？fail-closed，别让这条守卫空转", relSlash)
+				}
+				implSeen++
+				continue
 			}
-			if strings.Contains(src, "func UnwrapRuntime(") {
-				u--
-			}
-			if w == 0 && u == 0 {
+			sites := runtimeShellSites(src)
+			if len(sites) == 0 {
 				continue
 			}
 			scanned++
-			allowed, ok := runtimeShellCallSiteFor(relSlash)
-			if !ok {
-				t.Fatalf("%s 调用了 `rt_` 壳的包装/解包（wrap=%d unwrap=%d），但它不在白名单里。\n"+
-					"包装/解包**各只有一个实现、且只在 §4.5.3 那几个边界点上调用**——多一处会让同一个值"+
-					"在不同层有两种形态，而两种形态都合法（没有运行时信号）。要加一处，请同时更新 "+
-					"runtimeShellCallSites 并写明理由。", relSlash, w, u)
+			for _, s := range sites {
+				if _, ok := runtimeShellCallSiteFor(s.fn); !ok {
+					t.Fatalf("%s 的 `%s` 里调用了 `rt_` 壳的包装/解包，但它不在白名单里。\n"+
+						"包装/解包**各只有一个实现、且只在 §4.5.3 那几个边界点上调用**——多一处会让同一个值"+
+						"在不同层有两种形态，而两种形态都合法（没有运行时信号）。要加一处，请同时更新 "+
+						"runtimeShellCallSites（按**函数名**登记）并写明理由。", relSlash, s.fn)
+				}
+				c := got[s.fn]
+				if s.wrap {
+					c[0]++
+				} else {
+					c[1]++
+				}
+				got[s.fn] = c
 			}
-			if allowed.Wrap && w == 0 {
-				t.Fatalf("白名单文件 %s 里没有 `WrapRuntime(` 调用：白名单已经失去对象（映射改道了？）"+
-					"——fail-closed，别让它变成空转的许可", relSlash)
-			}
-			if allowed.Unwrap && u == 0 {
-				t.Fatalf("白名单文件 %s 里没有 `UnwrapRuntime(` 调用：白名单已经失去对象（映射改道了？）",
-					relSlash)
-			}
-			wraps += w
-			unwraps += u
 		}
 	}
-	if scanned == 0 || wraps == 0 || unwraps == 0 {
-		t.Fatalf("包装/解包调用点扫不到（scanned=%d wrap=%d unwrap=%d）——fail-closed，"+
-			"否则「包装点唯一」这条不变式没有任何判据", scanned, wraps, unwraps)
+	if implSeen != len(runtimeShellImplPaths) {
+		t.Fatalf("壳包装/解包的实现文件扫到 %d 个、白名单写着 %d 个（fail-closed：实现被搬走或改名后，"+
+			"「包装点唯一」这条不变式就没有判据了）", implSeen, len(runtimeShellImplPaths))
 	}
+	for _, c := range runtimeShellCallSites {
+		if strings.TrimSpace(c.Why) == "" {
+			t.Fatalf("白名单条目 `%s` 的理由是空的：空理由不算登记", c.Func)
+		}
+		g := got[c.Func]
+		if g[0] == 0 && g[1] == 0 {
+			t.Fatalf("白名单函数 `%s` 里扫不到任何包装/解包调用：白名单已经失去对象（映射改道了？）"+
+				"——fail-closed，别让它变成空转的许可", c.Func)
+		}
+		if g[0] != c.Wrap || g[1] != c.Unwrap {
+			t.Fatalf("`%s` 的包装/解包调用次数变了：got wrap=%d unwrap=%d，want wrap=%d unwrap=%d。\n"+
+				"次数是**精确值**：多了说明有人又包了一层/又解了一层，少了说明某个边界点被搬走或删掉了"+
+				"——两种都要先把 §4.5.3 那张表更新成「现在的真相」，再改这里。", c.Func, g[0], g[1], c.Wrap, c.Unwrap)
+		}
+	}
+	if scanned == 0 || implSeen == 0 {
+		t.Fatalf("包装/解包调用点扫不到（scanned=%d implSeen=%d）——fail-closed，"+
+			"否则「包装点唯一」这条不变式没有任何判据", scanned, implSeen)
+	}
+}
+
+// runtimeShellSite 是一次 `WrapRuntime(` / `UnwrapRuntime(` 调用，以及它所在的**具名函数**。
+type runtimeShellSite struct {
+	fn   string
+	wrap bool
+}
+
+var (
+	// 具名函数声明（`func Name(` 或 `func (recv) Name(`）；匿名函数字面量 `func(` 刻意不匹配
+	// ——闭包里的调用因此归给它外层的具名函数。
+	namedFuncDecl = regexp.MustCompile(`^func (?:\*?\([^)]*\) )?([A-Za-z_]\w*)\(`)
+	// 实现自身的定义行（`func WrapRuntime(`）不算调用点。
+	shellImplDecl = regexp.MustCompile(`^func (?:WrapRuntime|UnwrapRuntime)\(`)
+)
+
+// runtimeShellSites 按**行**扫出一处文件里所有包装/解包调用点，并归到它们所在的具名函数。
+//
+// 为什么按行而不按字节偏移：`stripLineComments` 逐行剥注释、行数不变，所以"最近一个具名函数
+// 声明行"就是所在函数，不需要任何解析器。
+func runtimeShellSites(src string) []runtimeShellSite {
+	var out []runtimeShellSite
+	fn := ""
+	for _, ln := range strings.Split(src, "\n") {
+		if m := namedFuncDecl.FindStringSubmatch(ln); m != nil && !shellImplDecl.MatchString(ln) {
+			fn = m[1]
+		}
+		if shellImplDecl.MatchString(ln) {
+			continue
+		}
+		// `UnwrapRuntime(` 里的小写 `wrapRuntime(` 不匹配 `WrapRuntime(`，两个计数互不污染。
+		for i := 0; i < strings.Count(ln, "WrapRuntime("); i++ {
+			out = append(out, runtimeShellSite{fn: fn, wrap: true})
+		}
+		for i := 0; i < strings.Count(ln, "UnwrapRuntime("); i++ {
+			out = append(out, runtimeShellSite{fn: fn, wrap: false})
+		}
+	}
+	return out
+}
+
+// fileContaining 返回 `dir` 下**唯一**一个含 `sym` 的非测试 Go 文件（返回绝对路径）。
+//
+// fail-closed 两侧都红：0 个 ⇒ 判据已经失去对象（那个符号被删了或改名了）；≥2 个 ⇒ 该符号
+// 不再有唯一持有者（装载面被复制了）——后者正是"按符号而不是按文件路径"换来的新判据。
+func fileContaining(t *testing.T, dir, sym string) string {
+	t.Helper()
+	var hits []string
+	for _, p := range goFilesUnder(t, dir) {
+		if strings.HasSuffix(p, "_test.go") || strings.Contains(filepath.ToSlash(p), "/archtest/") {
+			continue
+		}
+		if strings.Contains(stripLineComments(readFileOrFatal(t, p)), sym) {
+			hits = append(hits, p)
+		}
+	}
+	sort.Strings(hits)
+	if len(hits) != 1 {
+		t.Fatalf("`%s` 下含 %q 的非测试 Go 文件应**恰好一个**，实际 %d 个：%v\n"+
+			"（0 个 ⇒ 该符号被删/改名，判据失去对象；≥2 个 ⇒ 唯一持有者不再唯一——两种都要红，"+
+			"否则这条守卫会静默地不再检查任何东西）", dir, sym, len(hits), hits)
+	}
+	return hits[0]
 }
 
 // matchesJSONField 判断成员体里是否有 `Field string \`... json:"tag"...\“ 形态的字段
@@ -194,13 +293,13 @@ func matchesJSONField(body, field, tag string) bool {
 	return re.MatchString(body)
 }
 
-// runtimeShellCallSiteFor 查白名单。
-func runtimeShellCallSiteFor(rel string) (runtimeShellCallSite, bool) {
+// runtimeShellCallSiteFor 按**函数名**查白名单。
+func runtimeShellCallSiteFor(fn string) (runtimeShellCallSite, bool) {
 	for _, c := range runtimeShellCallSites {
 		if strings.TrimSpace(c.Why) == "" {
 			continue // 空理由不算登记
 		}
-		if c.Path == rel {
+		if c.Func == fn {
 			return c, true
 		}
 	}
@@ -328,15 +427,27 @@ func TestPrimaryKeyShapesStayDeclared(t *testing.T) {
 	}
 
 	// ④ transcript 装载面：不得把 header 的 id 直接当平台 id。
-	tlSrc := stripLineComments(readFileOrFatal(t,
-		filepath.Join(backendRoot(t), "internal", "manager", "transcript_load.go")))
-	if !strings.Contains(tlSrc, "objid.IsPlatformID(") {
-		t.Fatal("`transcript_load.go` 里没有 `objid.IsPlatformID(`：旧形状的会话 id 会被直接当成平台 id" +
-			"（Q10：旧数据不要 ⇒ 跳过 + WARN，不做派生；放行会让数据面出现两种会话 id 形状）")
+	//
+	// 锚点是**闸门调用本身**（`objid.IsPlatformID(h.SessionID)`）：闸门是装载面唯一的形状入口，
+	// 也是搬家时不会变的那一半（文件会移包，这行调用不会）。源 `internal/manager/transcript_load.go`
+	// → 目标 `internal/domain/session/`。
+	//
+	// 这一步同时修掉一条**本来就没在检查**的断言：旧判据找的是 `ID: hdr.SessionID` 直通，而
+	// `hdr.SessionID` 在整个仓库里只出现在一句注释里（`hdr` 还是另一个函数的变量），剥注释后
+	// 永远匹配不到——它一直是空转的。换成按**读取次数**判：`h.SessionID` 在该文件里恰好被读四处
+	// （取 header / 过闸门 / WARN 日志 / 落 rec），多一处就是有人绕开闸门从别处拿了这个 id。
+	tlPath := fileContaining(t, filepath.Join(backendRoot(t), "internal"), "objid.IsPlatformID(h.SessionID)")
+	tlSrc := stripLineComments(readFileOrFatal(t, tlPath))
+	const hSessionIDReads = 4
+	if got := strings.Count(tlSrc, "h.SessionID"); got != hSessionIDReads {
+		t.Fatalf("%s 里 `h.SessionID` 被读了 %d 次（期望 %d）：读点只有「取 header / 过形状闸门 / "+
+			"WARN 日志 / 落 rec」这四处。多一处意味着有人绕开闸门直接用了它，少一处意味着闸门或落 rec "+
+			"被搬走了——两种的后果都是静默的：数据面出现 `ses_…` 与裸 uuid 两种会话 id 形状",
+			tlPath, got, hSessionIDReads)
 	}
-	if strings.Contains(tlSrc, "ID:      hdr.SessionID") || strings.Contains(tlSrc, "ID: hdr.SessionID") {
-		t.Fatal("`transcript_load.go` 里出现了 `ID: hdr.SessionID` 直通：header 的 id 必须先过形状校验" +
-			"（`hdr.SessionID` 只允许出现在校验那一处，落 rec 用校验过的变量）")
+	if !strings.Contains(tlSrc, "sessionID = h.SessionID") {
+		t.Fatalf("%s 里找不到 `sessionID = h.SessionID`：落 rec 用的必须是**过了闸门**的那个变量"+
+			"（`h.SessionID` 只允许出现在校验那一处，落 rec 用校验过的变量）", tlPath)
 	}
 }
 
@@ -459,60 +570,93 @@ func TestEventSeqStaysTheCursor(t *testing.T) {
 //	   查得到"这条不变式的另一半。
 //
 // 判据是**调用点字面量**（正则容空白）：这层的正确性没有运行时信号，只有"这一行还在不在"。
-// fail-closed：任何一处解析不到即红。
+//
+// v27 起锚点是**符号在全树里的出现次数**，不是文件路径：这些点会随包搬家
+// （`internal/manager/*` → `internal/domain/*` / `internal/mechanism/*`），而钉路径的判据
+// 一搬就静默空转。次数是**实测精确值**，两侧都拦：多了说明有人又铸了一支 id / 又开了一条出口
+// （正是要拦的），少了说明某个载体丢了身份。
+//
+// fail-closed：扫描面为空即红；次数不符即红。
 func TestEventIdentityTravelsWithData(t *testing.T) {
 	root := backendRoot(t)
-	read := func(rel ...string) string {
-		t.Helper()
-		return stripLineComments(readFileOrFatal(t, filepath.Join(append([]string{root}, rel...)...)))
-	}
 	cases := []struct {
-		rel  string
-		want string // 正则
-		why  string
+		pat string // 正则
+		n   int    // 全树（非测试、非 archtest）期望出现次数——精确值
+		why string
 	}{
-		{"internal/manager/publish.go", `objid\.New\(objid\.Event\)`,
-			"运行时**唯一的**事件铸号点（其余路径只搬运）：少了它，事件就没有身份"},
-		{"internal/manager/publish.go", `AppendEvent\(context\.Background\(\), evtID,`,
+		{`objid\.New\(objid\.Event\)`, 2,
+			"① 运行时**唯一的**事件铸号点 + v17 迁移的历史回填各一处（分部由 ⑦′ 单独断言）：少了它，事件就没有身份"},
+		{`AppendEvent\(context\.Background\(\), evtID,`, 1,
 			"① 落库必须带上刚铸的那支 id（不重铸）"},
-		{"internal/manager/publish.go", `PublishAt\(sessionID, seq, evtID,`,
+		{`PublishAt\(sessionID, seq, evtID,`, 1,
 			"① 帧上也必须是同一支 id（`PublishAt` 的第三参数；v21 起第一位是聚合 id）"},
-		{"internal/manager/publish.go", `eventbus\.Event\{ID: evtID,`,
+		{`eventbus\.Event\{ID: evtID,`, 1,
 			"① nil-bus（内存模式无 bus）分支同样带 id"},
-		{"internal/manager/publish.go", `publishSideEffects\(sessionID, evt\.ID,`,
+		{`publishSideEffects\(sessionID, evt\.ID,`, 1,
 			"② 副作用（transcript）拿的是**已发布事件**的 id，不是再铸一支"},
-		{"internal/manager/publish.go", `appendLine\(sessionID, eventID,`,
+		{`appendLine\(sessionID, eventID,`, 1,
 			"② transcript 落盘的 id 来自上游（本函数不再铸号）"},
-		{"internal/manager/transcript.go", `wireTranscriptLine\{ID: eventID,`,
+		{`wireTranscriptLine\{ID: eventID,`, 1,
 			"② v2 事件行的第一个字段就是身份"},
-		{"internal/manager/transcript_load.go", `PublishAt\(p\.sessionID, p\.line\.seq, p\.line\.id,`,
+		{`PublishAt\(p\.sessionID, p\.line\.seq, p\.line\.id,`, 1,
 			"③ memory 模式装载：transcript 的 id/seq 原样注入 bus（按会话分组）"},
-		{"internal/manager/transcript_load.go", `id: ev\.ID, seq: ev\.Seq,`,
+		{`id: ev\.ID, seq: ev\.Seq,`, 1,
 			"③ 事件行必须先过形状校验再落进内存行"},
-		{"internal/manager/persist.go", `PublishAt\(ev\.SessionID, ev\.Seq, ev\.ID,`,
+		{`PublishAt\(ev\.SessionID, ev\.Seq, ev\.ID,`, 1,
 			"④ sqlite 模式恢复：库里的 id 原样注入 bus"},
-		{"internal/manager/export.go", `ID: e\.ID, Type: e\.Type,`,
-			"⑤ REST 导出的事件带上 id"},
-		{"internal/manager/sessions.go", `ID: e\.ID, Type: e\.Type,`,
-			"⑤ 会话历史的读模型带上 id"},
-		{"internal/app/command/migrate.go", `model\.EventEntity\{ID: l\.ID,`,
+		{`ID: e\.ID, Type: e\.Type,`, 2,
+			"⑤ 两条读模型出口都带 id（REST 导出 + 会话历史）"},
+		{`model\.EventEntity\{ID: l\.ID,`, 1,
 			"⑥ 导入把 transcript 的 id 交给 store（缺 id 时前面已 fail-loud）"},
-		{"internal/eventbus/bus.go", `Event\{ID: id,`,
-			"帧结构体必须真的把 id 放进去（omitempty 只对「没有身份」的事件生效）"},
-		{"internal/manager/automation_sched.go", `Publish\(\s*""\s*,`,
+		{`Event\{ID: id,`, 1,
+			"⑦ 帧结构体必须真的把 id 放进去（omitempty 只对「没有身份」的事件生效）"},
+		{`Publish\(\s*""\s*,`, 1,
 			"⑦ 只走实时通道的事件刻意不带身份（空串），「帧上有 id ⟺ durable 日志里查得到」才成立"},
 	}
+
+	srcs := eventIdentityScan(t, root)
 	for _, c := range cases {
-		src := read(strings.Split(c.rel, "/")...)
-		if !regexp.MustCompile(c.want).MatchString(src) {
-			t.Fatalf("%s 里找不到 %q —— %s\n"+
-				"（J4：身份必须随数据走到**每一个**载体；少一处，那一处拿到的东西仍然「形状合法」，"+
-				"只是指向别的事件或什么都指不到）", c.rel, c.want, c.why)
+		re := regexp.MustCompile(c.pat)
+		total, where := 0, map[string]int{}
+		for rel, src := range srcs {
+			if n := len(re.FindAllString(src, -1)); n > 0 {
+				total += n
+				where[rel] = n
+			}
+		}
+		if total != c.n {
+			t.Fatalf("%q 在全树出现 %d 次（期望 %d）—— %s\n命中：%s\n"+
+				"（J4：身份必须随数据走到**每一个**载体；次数不符要么是某个载体丢了身份，"+
+				"要么是有人又铸了一支 id / 又开了一条出口——两种都让「帧上那个 id 在库里查得到」不再成立）",
+				c.pat, total, c.n, c.why, formatHits(where))
 		}
 	}
 
+	// ⑦′ 铸号点的**分部**：运行时恰好一处，其余必须都在 `migrate_v*.go` 的历史回填里。
+	// 上表那条 `n: 2` 只说什么都没变；能区分「运行时 + 迁移」与「运行时 + 运行时」的只有这半边。
+	mintRe := regexp.MustCompile(`objid\.New\(objid\.Event\)`)
+	mintRuntime, mintMigration := 0, 0
+	for rel, src := range srcs {
+		n := len(mintRe.FindAllString(src, -1))
+		if n == 0 {
+			continue
+		}
+		if strings.Contains(filepath.Base(rel), "migrate_v") {
+			mintMigration += n
+		} else {
+			mintRuntime += n
+		}
+	}
+	if mintRuntime != 1 || mintMigration != 1 {
+		t.Fatalf("事件铸号点的分部变了：运行时 %d 处（want 1）、迁移回填 %d 处（want 1）。\n"+
+			"「运行时只铸一次」这条不变式只在**迁移之外**成立——迁移是历史数据的回填，与运行时铸号"+
+			"是两件事；把两者混成一个数字，等于允许第二条运行时铸号路径存在。", mintRuntime, mintMigration)
+	}
+
 	// ⑧ 导入判重/分叉：同一支 id 第二次导入必须**逐字节比对内容**再决定跳过还是报错。
-	impSrc := read("internal", "store", "import.go")
+	//    （这一处钉的是 `internal/store` 的精确路径：该包**不在**本次重划范围内。）
+	impSrc := stripLineComments(readFileOrFatal(t,
+		filepath.Join(root, "internal", "store", "import.go")))
 	if !strings.Contains(impSrc, "FindByID(") {
 		t.Fatal("`internal/store/import.go` 里找不到 `FindByID(`：导入不做事件级判重，" +
 			"重复导入要么写第二份同 id 的行（主键冲突）要么整批失败——两种都不是幂等")
@@ -521,4 +665,46 @@ func TestEventIdentityTravelsWithData(t *testing.T) {
 		t.Fatal("`internal/store/import.go` 里找不到「分叉」这条错误：" +
 			"同 id 不同内容必须**报错**而不是静默跳过（静默跳过 = 库里留着两份同 id 不同内容的行）")
 	}
+}
+
+// eventIdentityScan 返回「相对 `backend/` 的斜杠路径 → 剥注释后的源码」。
+//
+// 扫描面 = `internal/` 下的**非测试、非 archtest** 文件：判据是按符号计数，所以必须把守卫自己
+// 与测试排除掉——它们会写同样的字面量（与 knowledge_boundary_test.go、logging_boundary_test.go
+// 同一手法）。fail-closed：一个文件都扫不到即红。
+func eventIdentityScan(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, p := range goFilesUnder(t, filepath.Join(root, "internal")) {
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			t.Fatalf("相对路径: %v", err)
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "internal/archtest/") {
+			continue
+		}
+		out[rel] = stripLineComments(readFileOrFatal(t, p))
+	}
+	if len(out) == 0 {
+		t.Fatal("事件身份守卫的扫描面是空的（fail-closed）：判据会静默空转，等于没有这条守卫")
+	}
+	return out
+}
+
+// formatHits 把"哪个文件命中几次"排成稳定的一行，失败信息里能直接看出是多了还是少了。
+func formatHits(hits map[string]int) string {
+	if len(hits) == 0 {
+		return "（全树零命中）"
+	}
+	keys := make([]string, 0, len(hits))
+	for k := range hits {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s×%d", k, hits[k]))
+	}
+	return strings.Join(parts, " · ")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -480,7 +481,7 @@ func readCredentialsMirror(home string) credentialsMirrorFacts {
 		out.Note = "mate home 解析不出来（不知道该去哪儿找凭据文档）"
 		return out
 	}
-	out.Path = filepath.Join(home, CredentialsFileName)
+	out.Path = filepath.Join(home, credential.CredentialsFileName)
 	fi, err := os.Lstat(out.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -534,7 +535,7 @@ func reconcileCredentialsMirror(m credentialsMirrorFacts, providerIDsWithKey, mc
 	}
 	want := make(map[string]bool, len(providerIDsWithKey)+len(mcpRefs))
 	for _, id := range providerIDsWithKey {
-		want[providerRef(id)] = true
+		want[credential.ProviderRef(id)] = true
 	}
 	for _, ref := range mcpRefs {
 		want[ref] = true
@@ -786,7 +787,7 @@ func collectSensitiveFiles(home, providerDir string, st *store.Store) []Sensitiv
 		out = append(out, statSensitiveFile(path))
 	}
 	// 平台自己那份托管凭据文档（v20：明文、0600，权限不合平台会拒绝读它）。
-	out = append(out, statSensitiveFile(filepath.Join(root, CredentialsFileName)))
+	out = append(out, statSensitiveFile(filepath.Join(root, credential.CredentialsFileName)))
 	// 库本体与它的迁移备份（v20 起库内含明文密钥，于是它们也是**密钥面**）。
 	//
 	// 这一条在 2026-10-14 收尾时从"刻意不列"改成"必须列"：原先的理由是"sqlite 文件的常规权限是

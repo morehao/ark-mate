@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,9 +66,9 @@ func writeFaceFile(t *testing.T, specs ...runtime.Spec) *writeFace {
 // sub 把能力种类映射成目录名（文件载体的目录名 = DB 载体的写面分区名）。
 func subOf(kind string) string {
 	if kind == model.DefinitionKindMcp {
-		return capSubMcps
+		return definition.CapSubMcps
 	}
-	return capSubSkills
+	return definition.CapSubSkills
 }
 
 // expectPath 载体无关地给出写面响应里 `path` 的期望值（人类可读的定位串）。
@@ -214,7 +215,7 @@ func (w *writeFace) failWrites(t *testing.T) {
 		}
 		return
 	}
-	skillsDir := filepath.Join(w.dir, capSubSkills)
+	skillsDir := filepath.Join(w.dir, definition.CapSubSkills)
 	_ = os.RemoveAll(skillsDir)
 	if err := os.WriteFile(skillsDir, []byte("not a dir"), 0o644); err != nil {
 		t.Fatal(err)

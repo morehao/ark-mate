@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func readProvidersFile(t *testing.T, dir string) string {
 // readMirrorValues 读托管镜像（`<home>/credentials.json`）的 `引用 → 值` 映射。
 func readMirrorValues(t *testing.T, home string) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(CredentialsPath(home))
+	raw, err := os.ReadFile(credential.CredentialsPath(home))
 	if err != nil {
 		t.Fatalf("读托管文档: %v", err)
 	}
@@ -280,7 +281,7 @@ func TestProviderKeyRejectedWithoutCredentialDoc(t *testing.T) {
 		t.Fatalf("没有落点时应 credentials_write_failed，got %q（%v）", errCode(err), err)
 	}
 	// 出路必须可执行（用户要知道该修什么）。
-	if !strings.Contains(err.Error(), CredentialsFileName) {
+	if !strings.Contains(err.Error(), credential.CredentialsFileName) {
 		t.Fatalf("出路文案应指向托管文档: %v", err)
 	}
 	// 拒绝 = **一行内存都不留**（不是"半条档案"）。

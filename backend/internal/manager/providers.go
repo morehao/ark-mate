@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,7 +89,7 @@ type providerDef struct {
 // （`pkg/redact` 的第 1 档：按值替换、零误报）。放在这里而不是各通道的注入点上，是因为
 // 密钥现在可能走**原生凭据文档**那条路（`Credential.Tested && NativeDoc != ""`，dsh 就是），
 // 那条路不经过 `providerEnvFor`——只在那里登记会让"平台上唯一真实存在的那把密钥"漏出闸门。
-func (d *providerDef) applyResolution(k providerKey) {
+func (d *providerDef) applyResolution(k credential.ProviderKey) {
 	d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = k.Value, k.Source, k.EnvKey, k.Problems
 	if d.Key != "" {
 		redact.RegisterDynamicSecret(d.Key)
@@ -111,15 +113,12 @@ type providerFile struct {
 	Projections map[string]any `json:"projections,omitempty"`
 }
 
-// ProviderMirrorRefPrefix 托管镜像里 provider 密钥的键前缀（完整键 = 它 + provider id）。
 //
 // 单独导出是因为**诊断面要按它分类**：镜像里有而库里没有时，两类引用的出路完全不同——provider
 // 密钥在「设置 · 模型」里有写入口（重填即对齐），而 MCP 密钥的值这一批**没有**写入口（只能把
 // 定义里的引用改成 `env:`）。两边各写一遍 `"providers/"` 字面量，迟早有一边改了另一边还用旧分类。
-const ProviderMirrorRefPrefix = "providers/"
 
 // providerRef provider id → 托管文档里的键（namespace 只有 providers）。
-func providerRef(id string) string { return ProviderMirrorRefPrefix + id }
 
 // loadProvidersFile 从 <providerDir>/providers.json 装载（文件缺失 → 空表；memory 载体）。
 //
@@ -146,10 +145,10 @@ func (s *Service) loadProvidersFile(dir string) {
 			continue
 		}
 		p := providerDefFromFile(id, d)
-		p.KeyRef = providerRef(id)
+		p.KeyRef = credential.ProviderRef(id)
 		if legacy := d.KeyRef; legacy != "" {
 			if translated, ok := capability.TranslateLegacySecretRef(legacy); ok {
-				warnLegacySecretRef(ctx, legacy, "providers.json 的 key_ref")
+				definition.WarnLegacySecretRef(ctx, legacy, "providers.json 的 key_ref")
 				d.KeyRef = translated
 			}
 		}
@@ -230,12 +229,6 @@ var v11KnownProviderEndpoints = map[string]string{
 	"groq":       "https://api.groq.com/openai/v1",
 }
 
-// warnLegacySecretRef 旧前缀被显式翻译时的 WARN（**唯一的翻译点在 `pkg/capability`**，
-// 文案也由它给：把字面量与判据收在一处，别处只负责说"是在哪儿翻的"）。
-func warnLegacySecretRef(ctx context.Context, ref, where string) {
-	glog.Warnw(ctx, capability.LegacySecretRefWarning(ref), "ref", ref, "where", where)
-}
-
 // persistProvidersFile 原子写 providers.json（内存现状）。
 func (s *Service) persistProvidersFile() error { return s.persistProvidersFileWith(nil) }
 
@@ -283,7 +276,7 @@ func providerFileOf(id string, d *providerDef) *providerFile {
 	}
 	return &providerFile{
 		ID: id, Name: d.Name, Protocol: d.Protocol, BaseURL: d.BaseURL, Note: d.Note,
-		KeyRef: providerRef(id),
+		KeyRef: credential.ProviderRef(id),
 	}
 }
 
@@ -419,7 +412,7 @@ func providerProblems(d *providerDef) []string {
 	switch {
 	case d.Key != "" && d.KeySource == credentials.SourceEnv:
 		out = append(out, "当前生效的密钥来自**继承的进程环境**"+
-			oneKeyInParens(d.KeyEnvKey)+"：它按层序遮住面板里保存的那一条——"+
+			credential.OneKeyInParens(d.KeyEnvKey)+"：它按层序遮住面板里保存的那一条——"+
 			"在面板里轮换密钥不会生效，除非先清掉这个环境变量")
 	case d.Key != "":
 		// 密钥可用：无问题。

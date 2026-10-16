@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
 	"path/filepath"
@@ -52,7 +54,7 @@ const providerMismatchExtraMarker = "DB 里有、文件里没有"
 
 // ProviderImportStats 一次导入的完整计数 = 域无关计数 + provider 面自己的计数。
 type ProviderImportStats struct {
-	DefinitionImportStats
+	definition.DefinitionImportStats
 	// Providers 文件里**过了闸门**的档案条数。
 	Providers int
 	// Backup 本次写下的备份文件路径（空 = 没有写，因为已存在或 DryRun）。
@@ -79,7 +81,7 @@ type ProviderImportStats struct {
 //	⑥ 对账：DB 行集合 == 文件档案集合（比 id / protocol / base_url / "有没有密钥"）→
 //	   不一致只 WARN 并落 `meta.providers_import_mismatch`，**不阻断启动**；
 //	⑦ **不删、不回写**文件（sqlite 模式下它是导入/导出载体）。
-func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (ProviderImportStats, error) {
+func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts definition.DefinitionImportOptions, out io.Writer) (ProviderImportStats, error) {
 	var stats ProviderImportStats
 	if st == nil {
 		return stats, errors.New("manager: 导入 provider 档案需要 sqlite 持久层（MATE_STORE=sqlite）")
@@ -114,7 +116,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 	stats.Providers = len(items)
 	stats.KeyProblems = keyProblems
 	if opts.DryRun {
-		return stats, countDryRun(ctx, st, items, &stats.DefinitionImportStats)
+		return stats, definition.CountDryRun(ctx, st, items, &stats.DefinitionImportStats)
 	}
 
 	// ② 备份（只写一次）。
@@ -130,7 +132,7 @@ func ImportProviderFile(ctx context.Context, st *store.Store, dir string, opts D
 	if opts.Auto {
 		marker = stats.Marker
 	}
-	if err := importDefinitionRows(ctx, st, items, model.MetaKeyImportedProviders, marker,
+	if err := definition.ImportDefinitionRows(ctx, st, items, model.MetaKeyImportedProviders, marker,
 		&stats.DefinitionImportStats, "provider", out); err != nil {
 		return stats, err
 	}
@@ -226,7 +228,7 @@ type providerExpected struct {
 // **明文不再有任何中间落点**：`key` 直接进待写清单，由 `importProviderKeys` 写进库的同一行。
 // v20 之前那个"旧机制不可用就跳过"的分支随机制一起删除——没有"写不进去"的机制了。
 func scanProviderFile(
-	ctx context.Context, raw []byte, path, dir string, opts DefinitionImportOptions, out io.Writer,
+	ctx context.Context, raw []byte, path, dir string, opts definition.DefinitionImportOptions, out io.Writer,
 ) ([]store.DefinitionImportItem, []providerExpected, []providerKeyImport, []string, error) {
 	var file map[string]map[string]any
 	if err := json.Unmarshal(raw, &file); err != nil {
@@ -272,7 +274,7 @@ func scanProviderFile(
 		keyRef := bodyString(entry, "key_ref")
 		if keyRef != "" {
 			if translated, ok := capability.TranslateLegacySecretRef(keyRef); ok {
-				warnLegacySecretRef(ctx, keyRef, path+" 的 key_ref")
+				definition.WarnLegacySecretRef(ctx, keyRef, path+" 的 key_ref")
 				keyRef = translated
 			}
 		}
@@ -358,8 +360,8 @@ func reconcileProviderRows(ctx context.Context, st *store.Store, want []provider
 // **绝不写明文**（v20 起这是一条硬规则）：`key` 只作为输入存在。`key_ref` 只在库里确实有密钥
 // 时才写——它指向托管文档 `<MATE_HOME>/credentials.json` 里的一条，凭一个不存在的引用会让
 // 下次导入的对账报一条假不一致。
-func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
-	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
+func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (definition.DefinitionExportStats, error) {
+	stats := definition.DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
 		return stats, errors.New("manager: 导出 provider 档案需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
@@ -383,7 +385,7 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 			entry["note"] = rows[i].Note
 		}
 		if strings.TrimSpace(rows[i].Key) != "" {
-			entry["key_ref"] = providerRef(rows[i].ID)
+			entry["key_ref"] = credential.ProviderRef(rows[i].ID)
 		}
 		entry["id"] = rows[i].ID
 		file[rows[i].ID] = entry
@@ -396,7 +398,7 @@ func ExportProviderFile(ctx context.Context, st *store.Store, dir string, dryRun
 	stats.Written = len(file)
 	if dryRun {
 		if out != nil {
-			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", providersFileName, indentJSONBlock(string(body)))
+			fmt.Fprintf(out, "  ── %s（--dry-run，未写盘）\n%s", providersFileName, definition.IndentJSONBlock(string(body)))
 		}
 		return stats, nil
 	}

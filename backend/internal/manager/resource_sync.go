@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strconv"
 	"strings"
@@ -430,7 +431,7 @@ func (s *Service) providerForSync(providerID string) (*providerDef, string, erro
 			}
 			cp = &providerDef{
 				ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL,
-				Note: row.Note, KeyRef: providerRef(row.ID), Revision: row.Revision,
+				Note: row.Note, KeyRef: credential.ProviderRef(row.ID), Revision: row.Revision,
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -88,20 +89,20 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 	// ② 原生权限：内核按注册表第三张表取端口，**不认识** `RTX_PERMISSION_MODE` 这个名字。
 	//
 	// v19：平台的权限策略来源（agent 定义）已撤销，所以这里直接调**端口契约函数**
-	// `nativePermissionEnv`——它仍是"内核只做转发"这条契约的判据（见 native_permission_test.go）。
-	pol := &PermissionPolicy{NativeMode: NativeModeFullAccess, Tools: map[string]string{"bash": "deny"}}
-	env, _ := nativePermissionEnv(reg, runtimetest.ID, pol)
+	// `interaction.NativePermissionEnv`——它仍是"内核只做转发"这条契约的判据（见 native_permission_test.go）。
+	pol := &interaction.PermissionPolicy{NativeMode: interaction.NativeModeFullAccess, Tools: map[string]string{"bash": "deny"}}
+	env, _ := interaction.NativePermissionEnv(reg, runtimetest.ID, pol)
 	if len(env) != 2 {
 		t.Fatalf("合成底座应产出 2 条原生权限 env（模式 + 逐工具项），实际 %v", env)
 	}
-	if !containsEnv(env, runtimetest.PermissionEnvKey+"="+NativeModeFullAccess) {
+	if !containsEnv(env, runtimetest.PermissionEnvKey+"="+interaction.NativeModeFullAccess) {
 		t.Fatalf("模式没被转发到合成底座自己的变量名上: %v", env)
 	}
 	if !containsEnv(env, runtimetest.InlineConfigKey+"=bash=deny") {
 		t.Fatalf("逐工具项没被投影: %v", env)
 	}
 	// 反证：同一个策略在**没有原生权限端口**的底座上不该注入。
-	if got, _ := nativePermissionEnv(reg, "stub", pol); len(got) != 0 {
+	if got, _ := interaction.NativePermissionEnv(reg, "stub", pol); len(got) != 0 {
 		t.Fatalf("未登记原生权限面的底座不该注入，实际 %v", got)
 	}
 
@@ -163,7 +164,7 @@ func TestSyntheticAdapterIsFirstClass(t *testing.T) {
 		}
 	}
 	// 原生权限 env **不在这里**断言到子进程：v19 起平台没有权限策略来源，真实拨号路径上
-	// `nativePermissionEnv` 拿到的永远是 nil 策略 → 一条都不注入（第 ② 段已把端口契约钉住）。
+	// `interaction.NativePermissionEnv` 拿到的永远是 nil 策略 → 一条都不注入（第 ② 段已把端口契约钉住）。
 	// 反过来说，若这里的子进程仍然出现 `RTX_PERMISSION_MODE`，那才是"某处又凭空造出了策略"。
 	if v, ok := childEnv[runtimetest.PermissionEnvKey]; ok && v != "" {
 		t.Errorf("没有策略来源时不该注入原生权限 env，子进程却拿到 %s=%q", runtimetest.PermissionEnvKey, v)

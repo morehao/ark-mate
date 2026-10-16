@@ -143,7 +143,7 @@ func (d *SessionDao) UpdateMeta(ctx context.Context, id string, patch model.Sess
 // `updated_at DESC` 排的）。一次性地改写几百行的 updated_at = 用户看到自己的会话顺序整片变了，
 // 而那不是任何一次用户动作引起的。
 //
-// 空串 = "没有模型引用"（`sessions.model_id` 是 `NOT NULL DEFAULT ''`，所以"置空"就是空串，
+// 空串 = "没有模型引用"（`sessions.model_id` 是 `NOT NULL DEFAULT ”`，所以"置空"就是空串，
 // 不是 NULL——列本身不允许 NULL）。
 func (d *SessionDao) SetModelID(ctx context.Context, id, modelID string) error {
 	return d.DB(ctx).Model(&model.SessionEntity{}).Where("id = ?", id).

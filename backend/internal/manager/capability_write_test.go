@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"errors"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,8 +16,8 @@ import (
 	"github.com/morehao/golib/gerror"
 )
 
-// 本文件是**文件载体**（memory 模式 / 导入导出共用）那一层的单测：`writeDefinition` /
-// `openDefinition` / `removeDefinitionPermanently` 与 C9 的落盘纪律（未知键保留、原子替换、
+// 本文件是**文件载体**（memory 模式 / 导入导出共用）那一层的单测：`definition.WriteDefinition` /
+// `definition.OpenDefinition` / `definition.RemoveDefinitionPermanently` 与 C9 的落盘纪律（未知键保留、原子替换、
 // 权限沿用、mtime 乐观锁）。DB 载体的同一批对外语义在 `capability_writeface_test.go`
 // （同一套断言跑两种载体）与 `capability_write_store_test.go`（事务 + revision CAS）。
 //
@@ -56,7 +57,7 @@ func TestWriteDefinitionCreatesAndPreserves(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "skills")
 
 	// 新建：文件里只有 patch 的键。
-	if err := writeDefinition(dir, "skill", "demo", map[string]any{"id": "demo", "body": "# demo"}); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"id": "demo", "body": "# demo"}); err != nil {
 		t.Fatalf("新建失败: %v", err)
 	}
 	path := filepath.Join(dir, "demo.json")
@@ -76,7 +77,7 @@ func TestWriteDefinitionCreatesAndPreserves(t *testing.T) {
 	}
 
 	// 更新一个键 → 未知键与未提及的键必须原样在。
-	if err := writeDefinition(dir, "skill", "demo", map[string]any{"enabled": false}); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"enabled": false}); err != nil {
 		t.Fatalf("更新失败: %v", err)
 	}
 	got = readDef(t, path)
@@ -112,7 +113,7 @@ func TestWriteDefinitionNilDeletesKey(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"id":"demo","name":"Demo","enabled":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeDefinition(dir, "skill", "demo", map[string]any{"name": nil, "enabled": false}); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"name": nil, "enabled": false}); err != nil {
 		t.Fatalf("写失败: %v", err)
 	}
 	got := readDef(t, path)
@@ -128,7 +129,7 @@ func TestWriteDefinitionNilDeletesKey(t *testing.T) {
 // 幂等不是"结果一样"，而是"没有多余的写"——每次无谓重写都会让下游（migrate/编辑器）看到假变更。
 func TestWriteDefinitionIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "skills")
-	if err := writeDefinition(dir, "skill", "demo", map[string]any{"id": "demo", "body": "# demo"}); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"id": "demo", "body": "# demo"}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "demo.json")
@@ -137,11 +138,11 @@ func TestWriteDefinitionIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 空 patch。
-	if err := writeDefinition(dir, "skill", "demo", nil); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
 	// 同值 patch（注意：值相同但排版不同——文件里是 2 空格缩进，patch 是紧凑 JSON）。
-	if err := writeDefinition(dir, "skill", "demo", map[string]any{"body": "# demo"}); err != nil {
+	if err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"body": "# demo"}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(path)
@@ -161,7 +162,7 @@ func TestWriteDefinitionIdempotent(t *testing.T) {
 // **语义映射**：冲突必须落成"请重试"的 40901，而不是含混的 50000——用户的动作完全不同
 // （刷新重试 vs 报障）。
 func TestWriteDefinitionConflictMapsToDefinitionChanged(t *testing.T) {
-	err := definitionSaveErr("/tmp/x/demo.json", &capability.ConflictError{Msg: "被外部改动"})
+	err := definition.DefinitionSaveErr("/tmp/x/demo.json", &capability.ConflictError{Msg: "被外部改动"})
 	if got := errCode(err); got != "definition_changed" {
 		t.Fatalf("冲突应映射成 definition_changed，got %q（%v）", got, err)
 	}
@@ -170,7 +171,7 @@ func TestWriteDefinitionConflictMapsToDefinitionChanged(t *testing.T) {
 		t.Fatalf("冲突应是 40901，got %d", n)
 	}
 	// IO 失败仍是 50000（不是"请重试"，而是"服务端出错了"）。
-	ioErr := definitionSaveErr("/tmp/x/demo.json", errors.New("disk on fire"))
+	ioErr := definition.DefinitionSaveErr("/tmp/x/demo.json", errors.New("disk on fire"))
 	if got := errCode(ioErr); got != "definition_write_failed" {
 		t.Fatalf("IO 失败应是 definition_write_failed，got %q", got)
 	}
@@ -182,7 +183,7 @@ func TestWriteDefinitionRejectsBadID(t *testing.T) {
 	base := t.TempDir()
 	dir := filepath.Join(base, "skills")
 	for _, bad := range []string{"", ".", "..", "../evil", "a/b", `a\b`, "a/../b", strings.Repeat("x", 65)} {
-		err := writeDefinition(dir, "skill", bad, map[string]any{"id": bad})
+		err := definition.WriteDefinition(dir, "skill", bad, map[string]any{"id": bad})
 		if err == nil {
 			t.Fatalf("id %q 应被拒", bad)
 		}
@@ -216,7 +217,7 @@ func TestWriteDefinitionBrokenFileIsUserError(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`["not","an","object"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := writeDefinition(dir, "skill", "demo", map[string]any{"enabled": false})
+	err := definition.WriteDefinition(dir, "skill", "demo", map[string]any{"enabled": false})
 	if err == nil {
 		t.Fatal("坏文件应报错而不是覆盖它")
 	}
@@ -234,14 +235,14 @@ func TestWriteDefinitionBrokenFileIsUserError(t *testing.T) {
 // （DELETE 的语义是"让它不在"，不是"证明它曾在"）。
 func TestRemoveDefinitionIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mcp")
-	if err := writeDefinition(dir, "mcp", "fs", map[string]any{"id": "fs"}); err != nil {
+	if err := definition.WriteDefinition(dir, "mcp", "fs", map[string]any{"id": "fs"}); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := removeDefinitionPermanently(dir, "mcp", "fs")
+	ok, err := definition.RemoveDefinitionPermanently(dir, "mcp", "fs")
 	if err != nil || !ok {
 		t.Fatalf("首次删除应 true: ok=%v err=%v", ok, err)
 	}
-	ok, err = removeDefinitionPermanently(dir, "mcp", "fs")
+	ok, err = definition.RemoveDefinitionPermanently(dir, "mcp", "fs")
 	if err != nil || ok {
 		t.Fatalf("再次删除应 false 且无错: ok=%v err=%v", ok, err)
 	}
@@ -253,7 +254,7 @@ func TestRemoveDefinitionIdempotent(t *testing.T) {
 // TestCapabilityDirUnsetIsActionable 未配置能力目录 → `capability_dir_unset`（40001）且文案给出路。
 func TestCapabilityDirUnsetIsActionable(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), nil) // capabilityDir 为空
-	if _, err := svc.capabilityDirFor(capSubSkills); err == nil {
+	if _, err := svc.capabilityDirFor(definition.CapSubSkills); err == nil {
 		t.Fatal("未配置目录应报错")
 	} else if got := errCode(err); got != "capability_dir_unset" {
 		t.Fatalf("错误码应为 capability_dir_unset，got %q", got)

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -107,9 +108,9 @@ type Orchestrator struct {
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
 
 	// perm 管理挂起权限请求（允许/拒绝 × once/always + 会话级始终允许记忆 + 超时自动拒）。
-	perm *PermissionManager
+	perm *interaction.PermissionManager
 	// elic 管理挂起结构化提问（elicitation/create：表单/URL + 超时自动取消）。
-	elic *ElicitationManager
+	elic *interaction.ElicitationManager
 
 	// usageMu/usage 保护「每平台会话最近一次 ACP 用量快照」（M3 用量统计：run 收口时
 	// 随 runs.usage_json 落库；底座不上报时无条目）。
@@ -208,8 +209,8 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		sessions:        make(map[string]*ActiveSession),
 		byProvider:      make(map[string]string),
 		inflight:        newInFlightTracker(),
-		perm:            NewPermissionManager(DefaultPermissionTimeout),
-		elic:            NewElicitationManager(DefaultElicitationTimeout),
+		perm:            interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
+		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
 		handoffMaxChars: DefaultHandoffMaxChars,
 		generationLimit: DefaultGenerationLimit,
@@ -258,12 +259,10 @@ func (o *Orchestrator) RestoreMemoriesFromStore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	items := make([]MemoryItem, 0, len(rows))
+	items := make([]interaction.MemoryItem, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, MemoryItem{
-			sessionID: r.SessionID, Title: r.Title, Kind: r.Kind,
-			Decision: r.Decision, Since: r.CreatedAt,
-		})
+		items = append(items, interaction.NewMemoryItem(
+			r.SessionID, r.Title, r.Kind, r.Decision, r.CreatedAt))
 	}
 	o.perm.LoadMemories(items)
 	glog.Infow(ctx, "permission memories restored", "count", len(items))

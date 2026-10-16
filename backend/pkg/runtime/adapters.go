@@ -56,7 +56,7 @@ func dshSpec() Spec {
 		Notes: dsh.Notes + "\n\n" + dshModelConfigEvidence,
 		// SetupSteps 该底座未就绪时的可执行修复步骤（诊断面 remediation 外露）。
 		SetupSteps: []string{
-			"安装含 acp profile 模板的 dsh（npm @next 0.1.2-rc.1+；latest 0.1.1-rc.2 缺该模板），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
+			"安装含 `acp` profile 模板的 dsh（缺模板时报 profile \"acp\" does not exist；随包载荷 pin 的版本满足这条），确认 `dsh --profile acp` 可启动且 dsh 在 PATH 中",
 			"准备 DEEPSEEK_API_KEY（子进程环境透传）：给该 agent 绑定 provider 档案，或让 daemon 进程环境带上该变量",
 		},
 		Projections: []Projection{dshSkillProjection()},

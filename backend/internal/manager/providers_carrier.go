@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"os"
 	"path/filepath"
 	"time"
@@ -63,7 +65,7 @@ func (s *Service) providerDirSnapshot() string {
 // **v20 起这条顺序不再是"密钥能不能读到"的前提**：密钥面在库（`providers.key`）与
 // `<MATE_HOME>/credentials.json`，两者都不依赖这个目录；sqlite 模式下 `providerForSync`
 // 的回落路径直接从行上的密钥列取值，所以"锚点还不知道"这一类错误结论结构上消失了
-// （v13–v19 的旧机制句柄缓存曾把一句错结论钉死到整个进程，见 `docs/design-and-roadmap.md` 决策 v20）。
+// （v13–v19 的旧机制句柄缓存曾把一句错结论钉死到整个进程，见 `docs/decisions.md` 决策 v20）。
 func (s *Service) SetProviderDir(dir string) {
 	s.mu.Lock()
 	s.providerDir = dir
@@ -149,7 +151,7 @@ func (s *Service) loadProvidersFromStore(ctx context.Context, dir string) {
 		p := &providerDef{
 			ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL, Note: row.Note,
 			// KeyRef 是**派生量**（不再是载体字段）：装载时算一次，供托管文档读写与诊断文案复用。
-			KeyRef:    providerRef(row.ID),
+			KeyRef:    credential.ProviderRef(row.ID),
 			Revision:  row.Revision,
 			UpdatedAt: row.UpdatedAt,
 		}
@@ -179,12 +181,12 @@ func (s *Service) persistProviderDefinition(ctx context.Context, d *providerDef)
 		return s.persistProvidersFileWith(d)
 	}
 	expected := d.Revision
-	ok, err := s.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definitionWriteActor)
+	ok, err := s.st.UpsertProviderDefinition(ctx, providerColumnsOf(d), expected, definition.DefinitionWriteActor)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return definitionChangedErr(s.providerLocator(d.ID))
+		return definition.DefinitionChangedErr(s.providerLocator(d.ID))
 	}
 	d.Revision = expected + 1
 	d.UpdatedAt = time.Now().UTC()
@@ -203,7 +205,7 @@ func (s *Service) removeProviderDefinition(ctx context.Context, id string, expec
 	if s.st == nil {
 		return true, nil, s.persistProvidersFile()
 	}
-	return s.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definitionWriteActor)
+	return s.st.DeleteProviderDefinitionIfUnreferenced(ctx, id, expectedRev, definition.DefinitionWriteActor)
 }
 
 // providerFileExists `<ProviderDir>/providers.json` 是否存在（doctor 与迁移提示用）。

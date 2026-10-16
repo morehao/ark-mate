@@ -96,15 +96,16 @@ type Spec struct {
 	McpTransports []string
 	// ManagesOwnContext 后端自管上下文/工具（对应 §4.2 ManagesOwnContext；§6.2 三投影均 true）。
 	ManagesOwnContext bool
-	// ModeMapping 统一权限模式（§5.5）→ 该 runtime 原生 mode。实测结论（2026-09-08）：
-	// 两家底座的权限面形态**各异**（一家是 mode env + approval 预设、另一家是逐动作 permission 表，
-	// ACP 面上没有 mode 参数），均无与平台四统一模式一一对应的原生词表 → 空 = 有据结论，
-	// 不臆造（见 design doc §15）；统一模式语义落平台 permission 面。
+	// ModeMapping 统一权限模式 → 该 runtime 原生 mode。实测结论：各底座的权限面形态**各异**
+	// （有的是 mode env + approval 预设、有的是逐动作 permission 表，ACP 面上没有 mode 参数），
+	// 没有可直接套用的原生词表 → **空 = 有据结论，不臆造**；统一模式语义落平台 permission 面。
+	// 这张表与 ModeMapping 的消费者是同一个端口（`NativePermissionAdapter`），本轮在册的实现只
+	// 声明 `native_mode`（走端口、不走本表），留空因此是正确的。
 	ModeMapping map[string][]string
 	// SetupSteps 该底座未就绪时的可执行修复步骤（安装/登录等，来自 adapter 的既有知识）。
-	// 消费面：/agents/:id/diagnostics 的 remediation（诊断面据此给出「怎么修」而不是只有报错）。
+	// 消费面：GET /runtime/diagnostics 的 remediation（诊断面据此给出「怎么修」而不是只有报错）。
 	SetupSteps []string
-	Notes      string // 约束/注意事项（harness 仅 fresh 等，REST 层面暂不外露）
+	Notes      string // 约束/注意事项（adapter 的既有知识，如不支持哪些 ACP 方法）；经 GET /runtime/diagnostics 外露
 	// Projections 该 runtime 承载各类能力的**原生形态**声明（投影契约，见 projection.go）。
 	// 空 = 该 runtime 不承载任何平台可投影的能力（远程端点即如此 → not_applicable）。
 	Projections []Projection

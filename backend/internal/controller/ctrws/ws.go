@@ -61,7 +61,7 @@ type Options struct {
 //
 // 传输层使用 github.com/coder/websocket（context 化 API：Read/Write/Ping 带 ctx，
 // 控制帧（ping/pong/close）由库自动应答，Ping 需与 Reader 并发执行，见其 conn.go 注释）。
-// 契约见 docs/design-and-roadmap.md §4.5。
+// 契约见 docs/architecture.md §6.2。
 type wsCtr struct {
 	bus   *eventbus.Bus
 	creds *credential.Set

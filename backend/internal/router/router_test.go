@@ -2,6 +2,7 @@ package router_test
 
 import (
 	"encoding/json"
+	credmech "github.com/morehao/ark-mate/internal/mechanism/credential"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -49,7 +50,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// 文档没装配会被**显式拒绝**（`credentials_write_failed`：拒绝一次只在内存里成功的写入）。
 	// home 与 providerDir 都在 `t.TempDir()` 下，绝不碰用户环境（`~/.ark-mate`）。
 	home := t.TempDir()
-	creds, _, err := manager.OpenCredentialSource(home, home)
+	creds, _, err := credmech.OpenCredentialSource(home, home)
 	if err != nil {
 		t.Fatalf("装配凭据分层: %v", err)
 	}

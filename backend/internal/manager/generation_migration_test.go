@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morehao/ark-mate/internal/domain/interaction"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -324,14 +325,26 @@ func TestGenerationMigrationDefersWhileBusy(t *testing.T) {
 	if plan := r.orch.planGenerationSwitch(as2, r.svc.sessionRec(convID)); plan.Action != genActionSwitch {
 		t.Fatalf("空闲且键变化时应可切，got %s（%s）", plan.Action, plan.Reason)
 	}
-	r.orch.elic.pending["pending-1"] = &pendingElicitation{sessionID: convID}
+	// 走**真实注册路径**挂起一条提问：`elic` 已独立成 `domain/interaction`，manager 的测试
+	// 不再直接捅它私有的 pending 表（那本来也不该是 manager 测试的份内事）。`RegisterAndWait`
+	// 在登记之后立刻回调 `publish`，所以那个回调就是"已挂起"的可靠信号。
+	regCtx, cancelReg := context.WithCancel(context.Background())
+	defer cancelReg()
+	registered := make(chan struct{})
+	go func() {
+		r.orch.elic.RegisterAndWait(regCtx, convID,
+			acl.ElicitationRequest{Mode: "form", Message: "probe"},
+			func(interaction.ElicitationItem) { close(registered) })
+	}()
+	<-registered
 	if plan := r.orch.planGenerationSwitch(as2, r.svc.sessionRec(convID)); plan.Action != genActionDefer {
 		t.Fatalf("有挂起提问时应顺延，got %s（%s）", plan.Action, plan.Reason)
 	}
 	if got := r.boundary(t, convID); got != as2 {
 		t.Fatal("有挂起提问时不得换代际")
 	}
-	delete(r.orch.elic.pending, "pending-1")
+	r.orch.elic.CancelSession(convID)
+	cancelReg()
 	if got := r.boundary(t, convID); got == as2 {
 		t.Fatal("挂起项收敛后应在下一个轮次边界完成迁移")
 	}

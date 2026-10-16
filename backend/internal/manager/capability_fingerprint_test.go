@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"path/filepath"
 	"testing"
 
@@ -21,7 +22,7 @@ func fpRig(t *testing.T) *Service {
 		Projections:     []runtime.Projection{rtxSkillProjectionForTest()},
 	})
 	svc := NewService(reg, eventbus.New())
-	svc.SetSkillProjections([]SkillProjection{{
+	svc.SetSkillProjections([]skill.Projection{{
 		Runtime: "rtx",
 		Projection: runtime.Projection{
 			Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: t.TempDir(),
@@ -67,7 +68,7 @@ func TestCapabilityFingerprintMCPSecretValueNotInFingerprint(t *testing.T) {
 	if err := st.SetMcpSecret(ctx, ref, "secret-one"); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetSkillProjections([]SkillProjection{{
+	svc.SetSkillProjections([]skill.Projection{{
 		Runtime: "stub",
 		Projection: runtime.Projection{
 			Kind: runtime.ProjectionSkill, Scope: runtime.ScopeGlobal, Root: t.TempDir(),

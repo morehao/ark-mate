@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,7 +154,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 		t.Fatalf("载体没提交时不该写密钥列: v=%q found=%v err=%v", v, found, kErr)
 	}
 	// 托管文档：要么根本还没建（这条路径一次都没走到），要么建了但不含这条引用。
-	if _, err := os.Lstat(CredentialsPath(home)); err == nil {
+	if _, err := os.Lstat(credential.CredentialsPath(home)); err == nil {
 		if values := readMirrorValues(t, home); len(values) != 0 {
 			t.Fatalf("托管文档不该有残留: %+v", values)
 		}

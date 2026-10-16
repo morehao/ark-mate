@@ -4,15 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strings"
+	"github.com/morehao/ark-mate/internal/domain/skill"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
-	"github.com/morehao/ark-mate/pkg/redact"
-	"github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/glog"
 )
 
@@ -51,10 +48,8 @@ func (s *Service) LoadCapabilityDefinitions(dir string) int {
 		return 0
 	}
 	// 登记目录：导入/导出与（M6-3 之前的）启停写回都按它定位（没有它就只能内存生效，报错给出路）。
-	s.mu.Lock()
-	s.capabilityDir = dir
-	s.mu.Unlock()
-	return s.caps.LoadDir(dir, normalizeSkillRuntimeDecls).Total()
+	s.defs.SetDir(dir)
+	return s.caps.LoadDir(dir, skill.NormalizeRuntimeDecls).Total()
 }
 
 // LoadCapabilityDefinitionsFromStore 从持久层装载能力定义（sqlite 模式的事实源，M6-2）。
@@ -83,15 +78,12 @@ func (s *Service) ReloadCapabilityDefinitions(ctx context.Context) (int, error) 
 	return s.reloadCapabilityDefinitions(ctx, "", glog.DebugLevel)
 }
 
-// normalizeSkillRuntimeDecls 把 skill 的投放声明归一到当前 runtime 标识（历史别名，
+// skill.NormalizeRuntimeDecls 把 skill 的投放声明归一到当前 runtime 标识（历史别名，
 // 见 runtime.NormalizeID）。它是 `capability.LoadDir` 的归一钩子，也用在 DB 装载与写面。
 //
 // **必须做，不是美化**：老定义写着 `runtimes: ["deepseekharness"]`，而平台现在拿 `dsh` 去比对
 // ——不归一，这条技能**再也不投放**，而界面上它仍是"已启用"（静默失效，正是本仓反复被咬的那类）。
 // 归一后，写面/重校会把新值落回定义文件，别名自然会收敛掉。
-func normalizeSkillRuntimeDecls(sk *capability.Skill) {
-	sk.Runtimes = runtime.NormalizeIDs(sk.Runtimes)
-}
 
 // reloadCapabilityDefinitions 装载内核（公开入口与网关共用；level 只作用于汇总行）。
 func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir string, level glog.Level) (int, error) {
@@ -99,9 +91,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 		return 0, fmt.Errorf("能力注册表或持久层未初始化")
 	}
 	if importDir != "" {
-		s.mu.Lock()
-		s.capabilityDir = importDir
-		s.mu.Unlock()
+		s.defs.SetDir(importDir)
 	}
 	// 装进**独立的**新注册表再整体换入（不是"先 Reset 再逐条注册"）：后者会在共享面上留下
 	// 一个空的/半装的可观测中间态，而网关每次取数前都重装定义 ⇒ 并发调用必然撞上它
@@ -129,7 +119,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 			}
 			sk.ID = row.ID
 		}
-		normalizeSkillRuntimeDecls(&sk)
+		skill.NormalizeRuntimeDecls(&sk)
 		// SourceFile 刻意**不填**：DB 化之后"文件来源"不再成立（计划 §9 的风险项），
 		// 库视图的来源口径在 M6-5/M6-6 统一重定义为 db / builtin / imported。
 		if err := fresh.RegisterSkill(&sk); err != nil {
@@ -173,20 +163,6 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 // RegisterTool 注册/覆盖一个工具目录条目（平台 builtin / 观察兜底 / P2 MCP live）。
 func (s *Service) RegisterTool(t capability.Tool) error {
 	return s.caps.RegisterTool(&t)
-}
-
-// ListSkills 返回 Skill 目录（按 ID 排序）。
-func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) {
-	items := s.caps.ListSkills()
-	out := make([]dtocapability.SkillResp, 0, len(items))
-	for _, sk := range items {
-		out = append(out, dtocapability.SkillResp{
-			ID: sk.ID, Name: sk.Name, Description: sk.Description, Body: sk.Body,
-			Runtimes: append([]string(nil), sk.Runtimes...), Scope: sk.EffectiveScope(),
-			Enabled: sk.IsEnabled(), Warnings: skillWarnings(sk),
-		})
-	}
-	return out, nil
 }
 
 // ListMcpServers 返回 MCP 注册表（按 ID 排序）。headers/凭证只存内部供 P2 注入，不读回。
@@ -244,115 +220,26 @@ func (s *Service) supportedMcpTransports(runtimeID string) ([]string, bool) {
 	return spec.McpTransports, true
 }
 
-// unresolvedSecretKeys 列出"绑了引用但当前解析不出来"的密钥键（只读体检，不取回值）。
+// ——— P3d 过渡期转发层（纪律：一行 + TODO）———
 //
-// `store:` 引用用 `McpSecret` 判存在（**读回一个值只为判空**，但那条路上本来就要读它：
-// 列表端点不该造第二套"存在性"判据，否则"列表说能解析、注入时说不行"会分叉）。
+// 密钥解析面（引用 → 明文、存在性体检、脱敏登记）已落 `domain/mcp.Secrets`（P2a-13）。
+// 保留这三个同名转发是因为 `mcp_secret_test.go` 是**跨域集成测试**（真 Service + 真库 +
+// 托管镜像对账），它验的正是"装配期注入的那份凭据面"——搬到 `domain/mcp` 的会是另一批纯单测，
+// 两件事不互相替代。整个 mcp 平面搬完（P2a 的 mcp 那一半）再一起收口。
+
+// TODO(P4b): 删转发（调用点直接依赖 mcp.Secrets）
 func (s *Service) unresolvedSecretKeys(m capability.McpServer) []string {
-	var out []string
-	for _, k := range capability.KeysOf(m.SecretEnv) {
-		if !s.secretRefResolvable(m.SecretEnv[k]) {
-			out = append(out, k)
-		}
-	}
-	for _, k := range capability.KeysOf(m.SecretHeaders) {
-		if !s.secretRefResolvable(m.SecretHeaders[k]) {
-			out = append(out, k)
-		}
-	}
-	return out
+	return s.mcpSecrets.UnresolvedKeys(m)
 }
 
-// secretRefResolvable 报告一条引用当前是否"看起来能解析"（词法已在校验期保证，这里只看存在性）。
-func (s *Service) secretRefResolvable(ref string) bool {
-	switch capability.SecretRefKind(ref) {
-	case "store":
-		_, err := s.resolveStoreSecret(context.Background(), strings.TrimSpace(ref))
-		return err == nil
-	case "env":
-		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
-		return os.Getenv(name) != ""
-	default:
-		return false
-	}
-}
-
-// resolveMcpSecrets 把 server 的明文绑定与密钥引用合成**最终注入值**：
-//
-//	Env（明文）+ SecretEnv（store:/env: 引用解析后）→ 环境变量
-//	Headers（明文）+ SecretHeaders（解析后）        → header
-//
-// 任一引用解析失败 → 返回全部失败原因（调用方据此跳过注入 + 告警）。失败原因**只含键名与引用**，
-// 绝不含密钥值本身——日志不该成为泄漏面。
+// TODO(P4b): 删转发（调用点直接依赖 mcp.Secrets）
 func (s *Service) resolveMcpSecrets(m capability.McpServer) (env, headers map[string]string, problems []string) {
-	env = make(map[string]string, len(m.Env)+len(m.SecretEnv))
-	headers = make(map[string]string, len(m.Headers)+len(m.SecretHeaders))
-	for k, v := range m.Env {
-		env[k] = v
-	}
-	for k, v := range m.Headers {
-		headers[k] = v
-	}
-	apply := func(field string, bindings map[string]string, dst map[string]string) {
-		for _, k := range capability.KeysOf(bindings) {
-			ref := bindings[k]
-			val, err := s.resolveSecretRef(ref)
-			if err != nil {
-				problems = append(problems, fmt.Sprintf("%s[%q] 引用 %q 无法解析：%v", field, k, ref, err))
-				continue
-			}
-			dst[k] = val
-		}
-	}
-	apply("secret_env", m.SecretEnv, env)
-	apply("secret_headers", m.SecretHeaders, headers)
-	return env, headers, problems
+	return s.mcpSecrets.Resolve(m)
 }
 
-// resolveSecretRef 解析一条密钥引用：
-//
-//	store:<ns>/<name>  查库里的 `mcp_secrets`（v20 起密钥的权威；没有库时查托管文档）
-//	env:<NAME>         进程环境变量（容器/CI 注入；盘上不留痕）
-//
-// 解析不出来**不是"静默跳过"**，而是明确失败：让 MCP server 带着空密钥跑起来，问题会以
-// "tools/list 返回 401"的面目出现在很远的地方。
-//
-// 旧前缀（v20 之前那套密文机制）在这里**不翻译**：库里的引用已由迁移改写，运行时读到它
-// 就是坏数据，翻译只会掩盖它。档案文件里的旧前缀由导入路径显式翻译（见 `TranslateLegacySecretRef`）。
+// TODO(P4b): 删转发（测试直接依赖 mcp.Secrets）
 func (s *Service) resolveSecretRef(ref string) (string, error) {
-	if err := capability.ValidateSecretRef(ref); err != nil {
-		return "", err
-	}
-	var (
-		val string
-		err error
-	)
-	switch capability.SecretRefKind(ref) {
-	case "store":
-		val, err = s.resolveStoreSecret(context.Background(), strings.TrimSpace(ref))
-	case "env":
-		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), capability.SecretRefEnvPrefix))
-		if v := os.Getenv(name); v != "" {
-			val = v
-		} else {
-			err = fmt.Errorf("环境变量 %s 未设置或为空", name)
-		}
-	default:
-		return "", fmt.Errorf("不支持的引用 %q（本期只有 %s<namespace>/<name> 与 %s<ENV_NAME>）",
-			ref, capability.SecretRefStorePrefix, capability.SecretRefEnvPrefix)
-	}
-	if err != nil {
-		return "", err
-	}
-	// 解析出来的明文登记进脱敏闸门的动态表（`pkg/redact` 的第 1 档：按值替换、零误报）。
-	//
-	// 为什么 MCP 密钥也要登记（v19 及更早只有 provider key 登记）：这些值会被塞进 stdio
-	// 子进程的环境变量/请求头，而子进程把凭据打进 stderr 是最常见的形态（"401，token=…"）。
-	// 那串会经 `run.error` 的 `stderr_tail` 与事件载荷外露——不登记就只能靠形状正则，
-	// 而真实密钥往往没有任何可辨识形状。这里是全仓唯一把引用变成明文的地方，登记放在这里
-	// 意味着"凡是被解析过的密钥值，离开进程前必被替换"。
-	redact.RegisterDynamicSecret(val)
-	return val, nil
+	return s.mcpSecrets.ResolveRef(ref)
 }
 
 // McpServersFor 选出可注入某 runtime 的 MCP server 子集（P2 §5.2/§5.3）：
@@ -401,12 +288,6 @@ func (s *Service) McpServersFor(runtimeID string, sel *CapabilitySelection) []ac
 }
 
 // skillWarnings 把注册表的装载期告警转成 REST 读模型（两处共用一个转换，免漂移）。
-func skillWarnings(sk capability.Skill) []dtocapability.SkillWarningResp {
-	out := make([]dtocapability.SkillWarningResp, 0, len(sk.Warnings))
-	for _, w := range sk.Warnings {
-		out = append(out, dtocapability.SkillWarningResp{
-			Severity: w.Severity.String(), Pattern: w.Pattern, Message: w.Message,
-		})
-	}
-	return out
-}
+
+// TODO(P4b): 删转发（调用点直接依赖 skill.Plane）
+func (s *Service) ListSkills() ([]dtocapability.SkillResp, error) { return s.skillPlane.ListSkills() }

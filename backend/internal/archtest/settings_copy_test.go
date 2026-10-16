@@ -365,8 +365,16 @@ func assertNoBannedWord(t *testing.T, where, text string) {
 // 依赖路径（`"github.com/…/pkg/runtime"`、`"max_tokens"`、`"data:image/png;base64,…"`）——
 // 用户读不到它们，判进来只会逼着守卫加白名单，而白名单是这套守卫最常见的死法。
 // fail-closed：文件读不到、或中文串少到说明提取器/文件已经失效，都当场失败（守卫不许空转）。
+//
+// P0：原先钉着一个精确文件路径（`provider_probe.go`）。该文件随供应商域搬进 `domain/provider`
+// （设计 §3.4），钉路径在搬家后只会"读不到文件"（假红）。判据改锚在**符号**上：`probeLocal`
+// （自检检查表的构造入口，这些 `detail`/`remedy` 文案就产在它和它的同族函数里）。刻意**不锚
+// 导出的 `ProbeProvider`**——它在 `service/svcprovider` 很可能只剩一行转发，锚到它会让判据
+// 盯错文件。锚点由 `uniqueSourceFile` 保证全仓恰好一处（0 处 = 判据失去对象，≥2 处 = 自检实现
+// 有了第二份），下面的 `scanned >= 40` 是第二道 fail-closed 兜底。
 func TestProviderProbeProseAvoidsRuntimeVocabulary(t *testing.T) {
-	path := filepath.Join(backendRoot(t), "internal", "manager", "provider_probe.go")
+	path := uniqueSourceFile(t, filepath.Join(backendRoot(t), "internal"), nil,
+		declREFor("probeLocal").String(), "供应商自检检查表构造入口 `probeLocal`")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("读不到 %s: %v（文件被搬走/改名了？本守卫 fail-closed）", path, err)
@@ -378,7 +386,7 @@ func TestProviderProbeProseAvoidsRuntimeVocabulary(t *testing.T) {
 			continue
 		}
 		scanned++
-		assertNoBannedWord(t, "provider 自检文案（provider_probe.go）", lit)
+		assertNoBannedWord(t, "provider 自检文案（"+path+"）", lit)
 	}
 	// 实测（2026-10-14）58 条；阈值取 40 是留给"正常改文案"的余量——真要掉到 40 以下，
 	// 那是文件被换掉或提取器失效，不是文案变短。

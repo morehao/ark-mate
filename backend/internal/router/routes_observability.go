@@ -17,7 +17,7 @@ func registerUsage(v1 *gin.RouterGroup, ports Ports) {
 }
 
 // registerStream 实时事件通道（`/ws/events`）：订阅 eventbus → 按会话聚合推送
-// event/snapshot 帧，契约见 docs/design-and-roadmap.md §4.5。
+// event/snapshot 帧，契约见 docs/architecture.md §6.2。
 //
 // **鉴权在带内**：这条路由不挂 REST 凭据中间件，因为浏览器无法为 WS 握手设置请求头，
 // 而令牌又不允许进 URL（M1-1）。取而代之的是首帧 `attach` 携带 stream 面凭据，

@@ -29,13 +29,6 @@ import { CardHeader } from './CardHeader'
  * provider 配置不在这里（那是同级「模型」那一节的职责），避免同一个设置有两个入口。
  */
 
-/** 计划中的能力（本页曾以静态清单承载，保留以免信息丢失；权威清单见 docs/design-and-roadmap.md §5.3）。 */
-const P3_ITEMS = [
-  '能力基线 / 权限请求裁剪入口（工具权限交互面）',
-  '消息搜索分页与全文高亮（服务端 messages 表已落库）',
-  '多会话编排与批量调度面',
-]
-
 /** 来源标签：把服务端的 source 直译成"这个值现在从哪来"。 */
 const SOURCE_LABEL: Record<string, string> = {
   default: '默认值',
@@ -261,18 +254,6 @@ export function GeneralSettingsPanel() {
             {dirty && <span style={{ fontSize: 12, color: tokens.textPlaceholder }}>有未保存的改动</span>}
           </Space>
         )}
-      </div>
-
-      <CardHeader
-        title="仍属后续计划"
-        hint="见 docs/design-and-roadmap.md §5.3"
-      />
-      <div style={{ padding: '12px 16px' }}>
-        <ul style={{ margin: 0, paddingLeft: 20, color: tokens.text, fontSize: 13, lineHeight: 2 }}>
-          {P3_ITEMS.map((t) => (
-            <li key={t}>{t}</li>
-          ))}
-        </ul>
       </div>
 
       {picking && (

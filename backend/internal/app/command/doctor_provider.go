@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,7 +173,7 @@ func checkCredentialsMirror(facts manager.ProviderDoctorFacts) doctorCheck {
 func mirrorOnlyRemedy(refs []string) string {
 	var providers, mcpSecrets []string
 	for _, r := range refs {
-		if strings.HasPrefix(r, manager.ProviderMirrorRefPrefix) {
+		if strings.HasPrefix(r, credential.ProviderMirrorRefPrefix) {
 			providers = append(providers, r)
 			continue
 		}

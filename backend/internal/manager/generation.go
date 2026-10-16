@@ -125,7 +125,7 @@ func (o *Orchestrator) planGenerationSwitch(as *ActiveSession, rec *SessionRec) 
 		plan.Reason = "会话忙碌状态不可读：保守顺延"
 		return plan
 	}
-	if o.perm.pendingCount(as.ID) > 0 || o.elic.pendingCount(as.ID) > 0 {
+	if o.perm.PendingCount(as.ID) > 0 || o.elic.PendingCount(as.ID) > 0 {
 		plan.Action = genActionDefer
 		plan.Reason = "有未应答的权限/提问：顺延到下一轮"
 		return plan

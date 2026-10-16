@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/definition"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ import (
 
 // AutomationImportStats 一次 automation 导入的计数 = 域无关计数 + 本域的 Automations 条数。
 type AutomationImportStats struct {
-	DefinitionImportStats
+	definition.DefinitionImportStats
 	// Automations 目录里**过了闸门**的条数。
 	Automations int
 }
@@ -46,7 +47,7 @@ type AutomationImportStats struct {
 //
 // **schedule/target 的可执行性不在导入期判定**：那是装载期的事（`buildAutomationRec` 会把
 // `loadErr` 留在列表里让用户看见），而"现在不可执行"不等于"这条定义该丢"——这与文件模式逐字一致。
-func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts DefinitionImportOptions, out io.Writer) (AutomationImportStats, error) {
+func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts definition.DefinitionImportOptions, out io.Writer) (AutomationImportStats, error) {
 	var stats AutomationImportStats
 	if st == nil {
 		return stats, errors.New("manager: 导入 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
@@ -60,13 +61,13 @@ func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts 
 	items, scanStats := scanAutomationDir(dir, out)
 	stats = scanStats
 	if opts.DryRun {
-		return stats, countDryRun(ctx, st, items, &stats.DefinitionImportStats)
+		return stats, definition.CountDryRun(ctx, st, items, &stats.DefinitionImportStats)
 	}
 	marker := ""
 	if opts.Auto {
 		marker = stats.Marker
 	}
-	if err := importDefinitionRows(ctx, st, items, model.MetaKeyImportedAutomations, marker,
+	if err := definition.ImportDefinitionRows(ctx, st, items, model.MetaKeyImportedAutomations, marker,
 		&stats.DefinitionImportStats, "automation", out); err != nil {
 		return stats, err
 	}
@@ -78,8 +79,8 @@ func ImportAutomationDir(ctx context.Context, st *store.Store, dir string, opts 
 // 每条行都经 `automationFileBody` 归一（定义键 + 运行态键合成一个文件），所以"导出两次逐字节
 // 相同"与"导出 → 空库导入 → 再导出逐字节相同"成立；写盘走 `capability.WriteDefinitionFile`
 // （同目录 staging + 原子 rename + 沿用已有文件权限）。
-func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (DefinitionExportStats, error) {
-	stats := DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
+func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRun bool, out io.Writer) (definition.DefinitionExportStats, error) {
+	stats := definition.DefinitionExportStats{Dir: strings.TrimSpace(dir), DryRun: dryRun}
 	if st == nil {
 		return stats, errors.New("manager: 导出 automation 定义需要 sqlite 持久层（MATE_STORE=sqlite）")
 	}
@@ -90,10 +91,10 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 	if err != nil {
 		return stats, err
 	}
-	outRows := make([]exportRow, 0, len(rows))
+	outRows := make([]definition.ExportRow, 0, len(rows))
 	for i := range rows {
 		rel := rows[i].ID + ".json"
-		if !validDefinitionID(rows[i].ID) {
+		if !definition.ValidDefinitionID(rows[i].ID) {
 			// 行 id 非法（手工塞进去的）：**不写**——否则会造出一个下次装载就报错的文件名。
 			stats.Failed++
 			if out != nil {
@@ -109,9 +110,9 @@ func ExportAutomationDir(ctx context.Context, st *store.Store, dir string, dryRu
 			}
 			continue
 		}
-		outRows = append(outRows, exportRow{Label: rel, Path: filepath.Join(stats.Dir, rel), Body: []byte(body)})
+		outRows = append(outRows, definition.ExportRow{Label: rel, Path: filepath.Join(stats.Dir, rel), Body: []byte(body)})
 	}
-	writeExportRows(outRows, dryRun, &stats, "automation", out)
+	definition.WriteExportRows(outRows, dryRun, &stats, "automation", out)
 	return stats, nil
 }
 
@@ -199,8 +200,8 @@ func applyAutomationRuntime(df *capability.DefinitionFile, rt store.AutomationRu
 
 // scanAutomationDir 扫描 `<AutomationDir>/*.json`：逐条切分定义/运行态并过闸门。
 func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem, AutomationImportStats) {
-	stats := AutomationImportStats{DefinitionImportStats: DefinitionImportStats{Dir: dir}}
-	files := globSorted(dir)
+	stats := AutomationImportStats{DefinitionImportStats: definition.DefinitionImportStats{Dir: dir}}
+	files := definition.GlobSorted(dir)
 	items := make([]store.DefinitionImportItem, 0, len(files))
 	kept := make([]string, 0, len(files))
 	for _, path := range files {
@@ -211,7 +212,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 		body, id, rt, err := readAutomationDefinitionFile(path)
 		if err != nil {
 			stats.Invalid++
-			warnFile(out, "automation", path, err)
+			definition.WarnFile(out, "automation", path, err)
 			continue
 		}
 		items = append(items, store.DefinitionImportItem{
@@ -219,7 +220,7 @@ func scanAutomationDir(dir string, out io.Writer) ([]store.DefinitionImportItem,
 		})
 		stats.Automations++
 	}
-	stats.Marker = fingerprintPaths(kept)
+	stats.Marker = definition.FingerprintPaths(kept)
 	return items, stats
 }
 
@@ -254,7 +255,7 @@ func readAutomationDefinitionFile(path string) (string, string, *store.Automatio
 			id = s
 		}
 	}
-	if !validDefinitionID(id) {
+	if !definition.ValidDefinitionID(id) {
 		return "", "", nil, fmt.Errorf("automation id %q 不能作为定义键（文件名或 id 字段非法）", id)
 	}
 	// 定义正文 = 原文去掉保留键，再把 id 钉成载体键（写面也是这么做的：`patch["id"] = id`）。

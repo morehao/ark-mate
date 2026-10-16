@@ -18,6 +18,13 @@ import (
 // （SDK 的 `Agent` 接口、`AuthMethods` 的 `agent` 变体），`pkg/acl` 必须能照原文写；`~/.agents/skills`
 // 是平台与底座的**共享投放根**，也与本概念无关。所以禁词表列的是**被撤掉的那批标识符**，
 // 与 v15 的 `conversation`、v16 的 `capability_revision`、v17 的 `provider_session` 同形。
+//
+// P0（2026-10-16 分层重构前置）：本文件里对 `manager` 包内**具体文件**的精确路径依赖已清掉，
+// 改成「包 + 符号」的**路径无关锚**——那批文件在 P1~P4 会搬进 `domain/*`、
+// `mechanism/*`、`runtimeconn`（设计 §3.4 文件去向表）。为什么必须现在改：路径钉住的
+// 登记在搬家后有两条**都不会报错**的下场——① 登记悬空（白名单里 `migrate_v19_test.go` 那条今天就
+// 指向一个不存在的文件，没有任何判据会红）；② 有人为了让红变绿，把"按路径"放宽成"任一文件存在即可"，
+// 于是整条判据悄悄不再检查任何东西。
 
 // legacyAgentVocabulary 是 v19 起禁止的旧词（**小写化后**做子串匹配）。
 //
@@ -47,14 +54,35 @@ var legacyAgentVocabulary = []string{
 	"mate/agents", "/agents/",
 }
 
-// agentVocabularyWhitelist 是**允许**出现上述旧词的扫描点（相对仓库根路径前缀）。
+// agentVocabularyWhitelistEntry 一条登记：**目录/文件前缀**或**路径无关锚**恰好一种，外加理由。
+//
+//   - `path`：相对仓库根的前缀（豁免整棵目录时用）。只给**落点稳定**的登记——本次分层重构不动
+//     `internal/store`、`internal/router`、`pkg/config`、`internal/dto`、`internal/controller`。
+//   - `anchor`：**路径无关锚**——一个只出现在**唯一一个**被扫描文件里的符号；含它的那个文件被豁免。
+//     `manager` 包里这几个落点会搬家（设计 §3.4 文件去向表），所以它们只有锚、没有路径：
+//     符号跟着文件走，登记不会因为一次目录改名而悬空。
+//
+// 两种锚都必须带非空判据（`strings.HasPrefix(rel, "")` 恒为真，空 `path` 会**静默豁免每一个文件**）；
+// 锚型的"恰好一个文件 + 那个文件里真的有被守词"由 agentVocabularyWhitelistSelfCheck 在扫描前自检。
+type agentVocabularyWhitelistEntry struct {
+	path   string
+	anchor string
+	reason string
+}
+
+// key 只用于报错文案。
+func (w agentVocabularyWhitelistEntry) key() string {
+	if w.anchor != "" {
+		return "锚 " + w.anchor
+	}
+	return w.path
+}
+
+// agentVocabularyWhitelist 是**允许**出现上述旧词的扫描点。
 //
 // 与 conversation / capability_revision 的白名单同一纪律：逐条写明理由（空理由同样判红）。
 // 白名单是"这次确实改不了/不该改"的登记簿，不是"懒得改"的垃圾桶。
-var agentVocabularyWhitelist = []struct {
-	path   string
-	reason string
-}{
+var agentVocabularyWhitelist = []agentVocabularyWhitelistEntry{
 	{
 		path: "backend/internal/store/migrate.go",
 		reason: "迁移内核纪律：**追加迁移 = 在尾部新增，绝不回改历史**。所以这个文件里必然有两类旧词——" +
@@ -105,17 +133,21 @@ var agentVocabularyWhitelist = []struct {
 			"（JSON 绑定默认丢弃未知键，删掉这个字段就等于把「用户以为指定了 agent」变成静默 no-op）",
 	},
 	{
-		path: "backend/internal/manager/reject_removed_keys.go",
+		// 锚 = 拒绝函数的定义。它随 `reject_removed_keys.go` 一起搬进 `mechanism/definition`（P1b），
+		// 所以这里不写路径：写路径的话，搬完就得回来改，而"回来改"正是 P0 要消灭的东西。
+		anchor: "func rejectRemovedAgentSelection(",
 		reason: removedKeyRefusalReason + "**拒绝**必须点名它拒的是哪个键，否则用户拿到的" +
 			"只是一句「参数不对」，改不动",
 	},
 	{
-		path: "backend/internal/manager/sessions.go",
+		// 锚 = 那次交接本身（调用点把 raw 值交给拒绝函数）。它随 `sessions.go` 搬进 `domain/session`（P3b）。
+		anchor: "rejectRemovedAgentSelection(req.AgentID)",
 		reason: removedKeyRefusalReason + "调用点要把接住的那个 raw 值交给拒绝函数——" +
 			"这次交接在 Go 里至少要拼一次字段名（DTO 与拒绝面各自已登记，这里是第三处）",
 	},
 	{
-		path: "backend/internal/manager/automation.go",
+		// 锚 = 清除历史键的那个函数。它随 `automation.go` 搬进 `domain/automation`（P2b）。
+		anchor: "rejectAgentIDInPatch",
 		reason: removedKeyRefusalReason + "清除历史键时的那条 WARN 必须点名它清掉了什么——" +
 			"只写「已下线的键已清除」，用户翻自己的自动化定义时对不上是哪一行",
 	},
@@ -131,18 +163,23 @@ var agentVocabularyWhitelist = []struct {
 			"`group_by` 只认 `day` 的那条校验口径一致），否则用户只拿到一句「参数不对」，改不动",
 	},
 	{
-		path: "backend/internal/manager/transcript_load_test.go",
+		// 锚 = 那份**冻结的历史产物**本身：v19 之前的 transcript header 里 `agent_id` 与 `runtime`
+		// 并排出现。它随 `transcript_load_test.go` 搬进 `domain/session`（P3c）。
+		anchor: `"agent_id":"agent-rtx","runtime":"rtx"`,
 		reason: "**磁盘上真实存在过的历史产物**：v19 之前的 transcript header 里就有 `agent_id` 字段" +
 			"（它和 `runtime` 并排出现），用户机器上的旧 transcript 文件将来也要靠这条路径读回来。" +
 			"夹具按当时那一版写，测的才是「旧文件还能装载」而不是「新 header 能解析」",
 	},
 	{
-		path: "backend/internal/manager/automation_import_test.go",
+		// 锚 = 造那份夹具的助手（v19 之前的自动化定义就是它写出来的）。它随
+		// `automation_import_test.go` 搬进 `mechanism/definition`（P1b）。
+		anchor: "automationSeedDir",
 		reason: "**停在 v19 之前的自动化定义夹具**：`target.agent_id` 是当年用户写在文件里的键，" +
 			"这条用例测的正是「导入旧定义时把已下线的键清掉并 WARN」——它必须写出旧键，否则测不到清除",
 	},
 	{
-		path: "backend/internal/manager/usage_removed_dimension_test.go",
+		// 锚 = 那条反向断言用例的函数名。它随 `usage_removed_dimension_test.go` 搬进 `domain/session`（P3b）。
+		anchor: "TestUsageSummaryRejectsRemovedAgentDimension",
 		reason: negativeAssertionReason + "这条用例专门钉「用量面收到已下线的筛选键 → 40001 " +
 			"`agent_selection_removed`」，构造请求就必须写出那个键",
 	},
@@ -151,12 +188,11 @@ var agentVocabularyWhitelist = []struct {
 		reason: negativeAssertionReason + "传输层这一半钉的是相反的义务：「已下线的键**原样透传**给 " +
 			"service，不由控制器自作聪明地丢掉」（丢弃会让用户以为筛选生效了）——判据里必然出现键名",
 	},
-	{
-		path: "backend/internal/manager/usage_test.go",
-		reason: "反向断言的**判据字面量**：这条用例专门证明「带 `agent_id` → 40001 " +
-			"`agent_selection_removed`」，它必须写出那个被撤掉的键名才能构造请求（与 `router_test.go` " +
-			"里禁历史名的理由同形——守卫扫自己必然自证其罪）",
-	},
+	// 原先还有一条针对 `manager` 包内那个用量用例（文件基名 `usage_test.go`）的登记，**已删除**：
+	// 那个文件剥注释后**一个被守词都没有**（它里面唯一的裸词 `agent` 不在禁词表里；真正构造被撤键的是
+	// `usage_removed_dimension_test.go`，已单独登记）。留着它就是一条"豁免不到任何东西"的死登记：
+	// 它挡不住任何东西，却会在下一个被撤的词写进那个文件时**静默**顶掉判据。
+	// 锚型登记的第 3 条自检（命中的文件里真的有被守词）就是为了让这种烂账当场红。
 }
 
 // negativeAssertionReason 是"反向断言的判据字面量"的共用理由。
@@ -183,18 +219,120 @@ const historicalAgentFixtureReason = "「停在 v19 之前」的历史迁移用�
 	"写裸 SQL（`conversations`/`sessions` 在 v19 之前都有 `agent_id` 列），再断言迁移之后它真的没了" +
 	"（迁移内核纪律：夹具按当时那一版写，绝不回改历史；同 conversation/capability_revision 的测试侧镜像）"
 
-// allowedByAgentVocabularyWhitelist 命中白名单即跳过（前缀匹配，便于豁免整棵目录）。
-func allowedByAgentVocabularyWhitelist(t *testing.T, rel string) bool {
+// firstHitInAgentVocabulary 返回 src（**已剥注释**）里按禁词表顺序第一个命中的旧词与它的下标。
+//
+// 抽出来是为了让"主扫描"与"登记自检"共用同一份判据：两处各写一遍，迟早在"谁算命中"上漂开——
+// 而漂开的方向恰好是自检看不见的那种。
+func firstHitInAgentVocabulary(src string) (string, int) {
+	lower := strings.ToLower(src)
+	for _, banned := range legacyAgentVocabulary {
+		if idx := strings.Index(lower, banned); idx >= 0 {
+			return banned, idx
+		}
+	}
+	return "", -1
+}
+
+// allowedByAgentVocabularyWhitelist 命中白名单即跳过。
+//
+// 匹配两种锚：`path` 是前缀（对 `rel`），`anchor` 是**内容**（对 `src`）。两处都带非空判据：空 `path` 的
+// `strings.HasPrefix(rel, "")` 恒为真，会把**每一个**文件都静默豁免掉。
+func allowedByAgentVocabularyWhitelist(t *testing.T, rel, src string) bool {
 	t.Helper()
 	for _, w := range agentVocabularyWhitelist {
 		if strings.TrimSpace(w.reason) == "" {
-			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.path)
+			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.key())
 		}
-		if strings.HasPrefix(rel, w.path) {
+		if w.path != "" && strings.HasPrefix(rel, w.path) {
+			return true
+		}
+		if w.anchor != "" && strings.Contains(src, w.anchor) {
 			return true
 		}
 	}
 	return false
+}
+
+// agentVocabularyWhitelistSelfCheck 是**登记自检**（在扫判据之前跑），三条全部 fail-closed：
+//
+//  1. 理由非空——白名单是登记簿，不是垃圾桶；
+//  2. 锚型登记必须命中**恰好一个**被扫描文件。0 个 = 文件没了 / 那个符号被改名了：登记已经悬空，
+//     **而悬空是静默的**（同一个文件里 `migrate_v19_test.go` 那条今天就指向一个不存在的文件，
+//     没有任何判据会红）；≥2 个 = 锚太宽——换一个包放一个同符号的文件就能蹭到整份豁免，
+//     那比原来的路径登记**更松**，所以必须当场红；
+//  3. 命中的那个文件剥注释后必须**真的**含被守词。否则这条登记豁免不到任何东西，留着只会在下一个
+//     被撤的词写进来时静默顶掉判据（`usage_test.go` 那条就是这样，已删）。
+//
+// 前缀型登记这里只查理由：它们指向的是本次分层重构**不动**的落点，"前缀悬空"是另一批账
+// （同一条纪律将来要一起收）。
+func agentVocabularyWhitelistSelfCheck(t *testing.T, files []string) {
+	t.Helper()
+	for _, w := range agentVocabularyWhitelist {
+		if strings.TrimSpace(w.reason) == "" {
+			t.Fatalf("白名单 %q 的理由为空——白名单是登记簿，不是垃圾桶", w.key())
+		}
+		if w.anchor == "" {
+			if w.path == "" {
+				t.Fatalf("白名单里有既没有 path 也没有 anchor 的登记（理由：%q）——"+
+					"两种锚都没有的登记会静默豁免**每一个**文件", w.reason)
+			}
+			continue
+		}
+		got := anchoredFiles(t, files, w.anchor)
+		switch {
+		case len(got) == 0:
+			t.Fatalf("白名单锚 %q 在扫描面里**一个文件都没命中**——文件没了，或者那个符号被改名了。"+
+				"这条登记已经悬空：悬空**不会**让任何判据变红（它只会让本来该豁免的那处旧词变成假红），"+
+				"而「下一个人照着一条悬空的登记去找事实源」正是这类禁区登记最容易烂掉的方式。"+
+				"请把锚重新指到那个落点上（按符号，不按路径）", w.anchor)
+		case len(got) > 1:
+			t.Fatalf("白名单锚 %q 命中 %d 个文件：%v——锚太宽。按锚登记的前提是「含这个符号的文件"+
+				"**恰好一个**」；放宽了就等于多开一条豁免通道（换一个包放一个同符号的文件即可），"+
+				"那比路径登记更松。请换一个只出现在目标文件里的符号", w.anchor, len(got), got)
+		}
+		if banned, _ := firstHitInAgentVocabulary(strippedSourceOrFatal(t, got[0])); banned == "" {
+			t.Fatalf("白名单锚 %q 定位到 %s，但那里剥注释后**一个被守词都没有**——这条登记已经豁免不到"+
+				"任何东西。留着的死登记挡不住任何东西，却会在下一个被撤的词写进来时**静默**顶掉判据："+
+				"要么删掉它，要么把锚指到真正需要豁免的那一处", w.anchor, got[0])
+		}
+	}
+}
+
+// strippedSourceOrFatal 读文件并剥注释（`.go` 走 `stripLineComments`，其余走 `stripTSComments`），
+// 读不到即 fatal。
+//
+// 剥注释是这几条词汇判据的**共同前提**：注释里写"v19 之前这里叫 agent_id"是**解释**，不是残留词汇
+// （前端那批解释性注释正是这么写的）。抽出来共用，是因为"哪一半算源码"一旦在两处漂开，
+// 漂掉的那一半就是静默的。本包的 `vault_vocabulary_v20_test.go` 也用它。
+func strippedSourceOrFatal(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读不到 %s: %v（fail-closed：判据失去对象）", path, err)
+	}
+	src := string(raw)
+	if strings.HasSuffix(path, ".go") {
+		return stripLineComments(src)
+	}
+	return stripTSComments(src)
+}
+
+// anchoredFiles 在扫描面里找出**含锚**的文件（按内容匹配，与路径无关；结果已排序）。
+//
+// 锚是"这个落点独有的符号"：文件搬家时符号跟着走，所以登记不会随目录改名而失效。它比路径登记
+// **严**的地方有两处，都由调用方断言：① 恰好命中一个文件；② 那个文件里真的还有被守的东西
+// （见 agentVocabularyWhitelistSelfCheck 与 `sessionIdentityUsageAnchor` 的用法）。
+// 本包的 `vault_vocabulary_v20_test.go` 也用它。
+func anchoredFiles(t *testing.T, files []string, anchor string) []string {
+	t.Helper()
+	var got []string
+	for _, path := range files {
+		if strings.Contains(strippedSourceOrFatal(t, path), anchor) {
+			got = append(got, path)
+		}
+	}
+	sort.Strings(got)
+	return got
 }
 
 // TestNoAgentVocabulary 词汇收口（v19 的机器判据之一）。
@@ -210,7 +348,8 @@ func allowedByAgentVocabularyWhitelist(t *testing.T, rel string) bool {
 // （前端那批解释性注释正是这么写的）。
 //
 // fail-closed：扫描面解析不到（文件数为 0）即失败——否则改名结束后这条守卫会静默空转，
-// 而"空转的守卫"比没有守卫更坏（它给出虚假的安心）。
+// 而"空转的守卫"比没有守卫更坏（它给出虚假的安心）。白名单自己的悬空/过宽/死登记同样判失败
+// （见 agentVocabularyWhitelistSelfCheck）：那三种烂法今天都不会让任何判据变红。
 func TestNoAgentVocabulary(t *testing.T) {
 	root, files := vocabularyScanFace(t)
 	if len(files) < 100 {
@@ -223,6 +362,9 @@ func TestNoAgentVocabulary(t *testing.T) {
 	}
 	files = append(files, scripts...)
 
+	// 先自检登记，再扫判据：登记烂了的话，"绿"是假的。
+	agentVocabularyWhitelistSelfCheck(t, files)
+
 	scanned := 0
 	var hits []string
 	for _, path := range files {
@@ -231,27 +373,14 @@ func TestNoAgentVocabulary(t *testing.T) {
 			t.Fatalf("相对路径: %v", err)
 		}
 		relSlash := filepath.ToSlash(rel)
-		if allowedByAgentVocabularyWhitelist(t, relSlash) {
+		src := strippedSourceOrFatal(t, path)
+		if allowedByAgentVocabularyWhitelist(t, relSlash, src) {
 			continue
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("读不到 %s: %v", rel, err)
-		}
-		src := string(raw)
-		if strings.HasSuffix(path, ".go") {
-			src = stripLineComments(src)
-		} else {
-			src = stripTSComments(src)
-		}
 		scanned++
-		lower := strings.ToLower(src)
-		for _, banned := range legacyAgentVocabulary {
-			if idx := strings.Index(lower, banned); idx >= 0 {
-				line := 1 + strings.Count(src[:idx], "\n")
-				hits = append(hits, relSlash+":"+itoa(line)+" 命中 "+banned)
-				break
-			}
+		if banned, idx := firstHitInAgentVocabulary(src); banned != "" {
+			line := 1 + strings.Count(src[:idx], "\n")
+			hits = append(hits, relSlash+":"+itoa(line)+" 命中 "+banned)
 		}
 	}
 	if scanned == 0 {
@@ -267,13 +396,29 @@ func TestNoAgentVocabulary(t *testing.T) {
 	}
 }
 
-// 会话身份的落点：实体 / DAO / 迁移 / 用量聚合。少查一处，那一处就能把 `agent_id` 带回来而不响。
+// sessionIdentityFiles 是落点**稳定**的那几处会话身份落点（相对 backend 根）。
+//
+// 本次分层重构不动 `internal/model`、`internal/dao`、`internal/store`（设计 §3.4），所以它们按路径
+// 登记是安全的；会搬家的那一处（用量聚合）走 sessionIdentityUsageAnchor。
+//
+// 注意 `internal/store/migrate.go` 是 P0 补进来的：下面 TestSessionIdentityIsRuntimeOnly 里那条
+// "必须真的有一条 `DROP COLUMN agent_id`"的分支此前**从未执行**过（那张表里一直没有它，
+// 分支是死代码——实测把期望值改成不存在的串，测试照样绿），而这条正向断言正是 migrate.go 被
+// 白名单放行之后唯一的补偿。删掉迁移里那行语句不会有任何别的测试变红。
 var sessionIdentityFiles = []string{
 	filepath.Join("internal", "model", "session.go"),
 	filepath.Join("internal", "dao", "session.go"),
 	filepath.Join("internal", "store", "usage.go"),
-	filepath.Join("internal", "manager", "usage.go"),
+	filepath.Join("internal", "store", "migrate.go"),
 }
+
+// sessionIdentityUsageAnchor 定位第四处落点「用量聚合」。
+//
+// 它**只有锚、没有路径**：用量聚合那一份在 P0 时点住在 `manager` 包的 `usage.go` 里，
+// 方案 §3.4 的去向是 `domain/session/`（文件去向对照表）。路径登记在搬家当天就会失效——而失效的
+// 表现是 `os.ReadFile` 失败、守卫红得莫名其妙，逼着人回来改（P0 的全部目的就是让后面 11 批不必再动
+// 守卫）。锚是那个文件独有的口径常量，跟着文件走。锚命中不是恰好一个即 fatal。
+const sessionIdentityUsageAnchor = "usageContextSemantics"
 
 // TestSessionIdentityIsRuntimeOnly 会话身份只剩 `runtime_id`（v19 的机器判据之二）。
 //
@@ -285,23 +430,54 @@ var sessionIdentityFiles = []string{
 //  2. DAO（`dao/session.go`）：列映射里不得有 agent 身份；
 //  3. 迁移（`store/migrate.go`）：必须**真的**有一条 `ALTER TABLE sessions DROP COLUMN agent_id`
 //     ——删掉这条语句不会有任何别的测试变红，而用户库里的那一列会一直留着；
-//  4. 用量聚合（`store/usage.go` + `manager/usage.go`）：不得再按 agent 分组/回填（照旧按 runtime）。
+//  4. 用量聚合（`store/usage.go` + 用量那一份）：不得再按 agent 分组/回填（照旧按 runtime）。
 //
-// fail-closed：任一文件读不到、或实体里找不到 `column:runtime_id`，都当场判失败——"改名/搬迁后
-// 这条守卫静默空转"是它唯一危险的失效方式。
+// fail-closed：任一落点读不到、锚命中不是恰好一个、或实体里找不到 `column:runtime_id`，
+// 都当场判失败——"改名/搬迁后这条守卫静默空转"是它唯一危险的失效方式。
 func TestSessionIdentityIsRuntimeOnly(t *testing.T) {
-	root := backendRoot(t)
+	backend := backendRoot(t)
+	faceRoot, files := vocabularyScanFace(t)
 
+	// 落点 = 稳定的路径 + 一处按锚定位的（报错文案里给出 rel，判据作用在绝对路径上）。
+	type identityTarget struct {
+		rel  string
+		path string
+		// kind：该落点额外要求的**正向**判据（"" = 只查"不得有 agent 身份"）。
+		kind string
+	}
+	targets := make([]identityTarget, 0, len(sessionIdentityFiles)+1)
 	for _, rel := range sessionIdentityFiles {
-		path := filepath.Join(root, rel)
-		raw, err := os.ReadFile(path)
+		kind := ""
+		switch rel {
+		case filepath.Join("internal", "model", "session.go"):
+			kind = "entity"
+		case filepath.Join("internal", "store", "migrate.go"):
+			kind = "migration"
+		}
+		targets = append(targets, identityTarget{rel: rel, path: filepath.Join(backend, rel), kind: kind})
+	}
+	anchored := anchoredFiles(t, files, sessionIdentityUsageAnchor)
+	if len(anchored) != 1 {
+		t.Fatalf("用量聚合落点的锚 %q 命中 %d 个文件：%v——期望**恰好一个**。"+
+			"0 个 = 那个文件没了、或口径常量被改名（fail-closed：本条判据会静默失去对象）；"+
+			"多于一个 = 锚太宽（换一个文件写同一行就能绕开「不得再出现 agent 身份」）",
+			sessionIdentityUsageAnchor, len(anchored), anchored)
+	}
+	usageRel, err := filepath.Rel(faceRoot, anchored[0])
+	if err != nil {
+		t.Fatalf("相对路径: %v", err)
+	}
+	targets = append(targets, identityTarget{rel: filepath.ToSlash(usageRel), path: anchored[0]})
+
+	for _, tg := range targets {
+		raw, err := os.ReadFile(tg.path)
 		if err != nil {
-			t.Fatalf("读不到 %s（%v）——fail-closed：判据失去对象", rel, err)
+			t.Fatalf("读不到 %s（%v）——fail-closed：判据失去对象", tg.rel, err)
 		}
 		src := stripLineComments(string(raw))
 
 		// ③ 迁移是正向判据（白名单文件里必然有旧列名），单独处理。
-		if rel == filepath.Join("internal", "store", "migrate.go") {
+		if tg.kind == "migration" {
 			const want = "ALTER TABLE sessions DROP COLUMN agent_id"
 			if !strings.Contains(src, want) {
 				t.Fatalf("v19 的迁移里找不到 `%s`——删掉它不会有别的测试变红，"+
@@ -314,16 +490,16 @@ func TestSessionIdentityIsRuntimeOnly(t *testing.T) {
 			if idx := strings.Index(src, banned); idx >= 0 {
 				line := 1 + strings.Count(src[:idx], "\n")
 				t.Fatalf("v19 起会话身份只有 `runtime_id`，但 %s:%d 仍出现 %q——"+
-					"agent 概念已整体并入 runtime（见 docs/design-and-roadmap.md「决策变更 v19」）",
-					rel, line, banned)
+					"agent 概念已整体并入 runtime（见 docs/decisions.md「决策 v19」）",
+					tg.rel, line, banned)
 			}
 		}
 
 		// R1：实体那一份要**正向**证明身份还在（只看"没有 agent"是不够的——把 runtime_id
 		// 一起删掉，零命中判据照样绿）。
-		if rel == filepath.Join("internal", "model", "session.go") {
+		if tg.kind == "entity" {
 			if !strings.Contains(src, "column:runtime_id") {
-				t.Fatalf("%s 里找不到 `column:runtime_id`——会话身份必须留在实体上（fail-closed：解析不到即失败）", rel)
+				t.Fatalf("%s 里找不到 `column:runtime_id`——会话身份必须留在实体上（fail-closed：解析不到即失败）", tg.rel)
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"sort"
 	"strings"
 
@@ -52,7 +53,7 @@ func (s *Service) CreateProvider(ctx context.Context, req dtoprovider.ProviderCr
 		return nil, providerExistsErr(req.ID)
 	}
 
-	d := &providerDef{ID: req.ID, Protocol: protocol, KeyRef: providerRef(req.ID)}
+	d := &providerDef{ID: req.ID, Protocol: protocol, KeyRef: credential.ProviderRef(req.ID)}
 	if req.Name != nil {
 		d.Name = *req.Name
 	}
@@ -186,17 +187,17 @@ func (s *Service) writeProviderKey(ctx context.Context, d *providerDef, key stri
 		// 面板回 `has_key=true`、重启后消失——那是本仓最忌讳的一类静默谎报。
 		if s.credentialDoc() == nil {
 			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
-				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+CredentialsFileName+
+				"没有可写的凭据落点（托管文档未装配）：memory 模式下 "+credential.CredentialsFileName+
 					"就是密钥的事实源，这里拒绝一次只在内存里成功的写入", nil)
 		}
 		if key == "" {
 			if err := s.mirrorDelete(d.KeyRef); err != nil {
 				return acl.NewError(acl.ClassRequest, "credentials_write_failed",
-					"清除密钥失败（托管文档 "+CredentialsFileName+" 写不动）: "+err.Error(), nil)
+					"清除密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 			}
 		} else if err := s.mirrorSet(d.KeyRef, key); err != nil {
 			return acl.NewError(acl.ClassRequest, "credentials_write_failed",
-				"保存密钥失败（托管文档 "+CredentialsFileName+" 写不动）: "+err.Error(), nil)
+				"保存密钥失败（托管文档 "+credential.CredentialsFileName+" 写不动）: "+err.Error(), nil)
 		}
 		d.Key, d.KeySource, d.KeyEnvKey, d.keyProblems = key, "", "", nil
 		return nil

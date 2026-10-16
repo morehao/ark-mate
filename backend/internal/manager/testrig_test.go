@@ -16,6 +16,7 @@ package manager
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,7 +73,7 @@ func newTestCredentials(t *testing.T, home string) *credentials.Layered {
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := OpenCredentialSource(home, cwd)
+	l, _, err := credential.OpenCredentialSource(home, cwd)
 	if err != nil {
 		t.Fatalf("装配凭据面: %v", err)
 	}

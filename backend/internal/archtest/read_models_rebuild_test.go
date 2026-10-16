@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -105,22 +106,34 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 	var g rebuildGuard
 	fset := token.NewFileSet()
 
-	// ① manager 侧：全部非测试源码。
-	managerDir := filepath.Join(root, "internal", "manager")
-	entries, err := os.ReadDir(managerDir)
-	if err != nil {
-		t.Fatalf("读 %s 失败: %v", rel(root, managerDir), err)
-	}
+	// ① 实现与触发者侧：`internal/` 全树的非测试源码（**递归**）。
+	//
+	// 为什么是整棵树而不是 `internal/manager/*.go`：实现与两个触发者会随包搬家
+	// （`persist.go` → 目标 `internal/domain/session`、`read_model_doctor.go` → 目标
+	// `internal/mechanism/doctor`），而 `os.ReadDir` **不递归**——文件一进子目录，扫描要么
+	// 静默空转、要么"解析到一些但恰好漏掉关键的那几个"。放宽到整棵树同时是**更强**的判据：
+	// 下面 `implCallers` / `rebuildAllCallers` 都是**精确值**断言，少一个 = 有触发者被搬走，
+	// 多一个 = 有人在别处又写了一段循环（两份实现的开始，正是本守卫挡的第一类坏法）。
+	internalDir := filepath.Join(root, "internal")
 	parsed := 0
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
+	walkErr := filepath.WalkDir(internalDir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
 		}
-		path := filepath.Join(managerDir, name)
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s 失败: %v", rel(root, path), err)
+		if d.IsDir() {
+			// 跳过 testdata 与 archtest 自身：前者不是生产源码，后者的判据字面量就写着这几个
+			// 函数名（与 knowledge_boundary_test.go、logging_boundary_test.go 同一手法）。
+			if d.Name() == "testdata" || d.Name() == "archtest" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+		file, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			return fmt.Errorf("解析 %s 失败: %w", rel(root, path), perr)
 		}
 		parsed++
 		for _, decl := range file.Decls {
@@ -149,9 +162,13 @@ func collectRebuildGuard(t *testing.T, root string) rebuildGuard {
 				return true
 			})
 		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("递归遍历 %s 失败: %v", rel(root, internalDir), walkErr)
 	}
 	if parsed == 0 {
-		t.Fatalf("`internal/manager` 下没解析到任何非测试 Go 文件（守卫会静默空转，fail-closed）")
+		t.Fatalf("`internal/` 下没解析到任何非测试 Go 文件（守卫会静默空转，fail-closed）")
 	}
 
 	// ② doctor 侧：开关 + 条件分支。

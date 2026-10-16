@@ -152,6 +152,6 @@ func RebuildAllReadModels(ctx context.Context, st *store.Store) (int, int, error
 	}
 	svc := NewService(goruntime.AllBuiltinRegistry(), nil)
 	defer svc.coalescer.Close()
-	svc.st = st
+	svc.attachStore(st)
 	return svc.rebuildAllReadModels(ctx)
 }
