@@ -22,11 +22,11 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
@@ -55,8 +55,9 @@ const AppName = "mate"
 type Ports struct {
 	Session   svcsession.SessionSvc
 	Workspace svcworkspace.WorkspaceSvc
-	// Runtime 底座执行面（`Identity`/`Diagnostics`），今天 = `*runtimeconn.Plane`。
-	Runtime svcruntime.Plane
+	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
+	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
+	Runtime *runtimeconn.Plane
 	// ProviderPlane 供应商域平面（**依赖事实**：域的类型，不是 `service/*` 的类型）；
 	// ProviderCatalog 是自检要的模型目录读面。两者一起交给 `ctrprovider.NewProviderCtr`，
 	// 档案用例与自检用例**都在控制器里造**（P4a 正文第四刀）。

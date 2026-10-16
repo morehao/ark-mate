@@ -17,7 +17,6 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
@@ -25,6 +24,7 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/runtimeconn"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -83,9 +83,6 @@ type stubSvc struct {
 	registryRenameTitle  string
 	registryID           string
 	registryMoveBefore   string
-
-	diagResp *dtoruntime.DiagnosticsResp
-	diagErr  error
 
 	searchMsgQuery string
 	searchMsgLimit int
@@ -534,24 +531,6 @@ func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]dtosessi
 	return nil, nil
 }
 
-// Identity 底座身份桩（P4a：这是**执行面**的口语，`ctrruntime` 用它造 svcruntime 用例；
-// `/meta` 的 runtime 段也直接读它）。
-func (s *stubSvc) Identity(_ context.Context) dtoruntime.IdentityResp {
-	return dtoruntime.IdentityResp{ID: "stub", Name: "Stub", Version: "0.0-stub"}
-}
-
-// Diagnostics 底座诊断桩（v19：原 AgentDiagnostics，路径不带 id）。
-func (s *stubSvc) Diagnostics(_ context.Context) (*dtoruntime.DiagnosticsResp, error) {
-	if s.diagErr != nil {
-		return nil, s.diagErr
-	}
-	if s.diagResp != nil {
-		return s.diagResp, nil
-	}
-	return &dtoruntime.DiagnosticsResp{State: "stopped", Runtime: "stub", StderrSource: "none",
-		StderrTail: []string{}, CheckedAt: "2026-09-09T00:00:00Z"}, nil
-}
-
 // ——— M3 ② 消息检索 / 批量导出桩 ———
 func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	s.searchMsgQuery, s.searchMsgLimit = q, limit
@@ -714,8 +693,9 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
 		Session: svc, Workspace: svc,
-		// 执行面（`Identity`/`Diagnostics`）：用例实例由 ctrruntime 造。
-		Runtime: svc,
+		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
+		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
+		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),
 		// 供应商域平面是**真对象**（P4a 正文第四刀起，档案与自检两个用例都由 ctrprovider
 		// 从这里造）：档案是域的状态，替身化它等于把"用例读的是哪份状态"也替身掉。
 		// 目录落到临时目录，且不带密钥——本包只验路由与信封，密钥/载体行为在用例层自己的测试里。
@@ -1699,17 +1679,13 @@ func TestExportRoute(t *testing.T) {
 	}
 }
 
-// TestRuntimeDiagnosticsRoute GET /runtime/diagnostics：载荷形状（stderr 尾巴 + 最近失败）+ 错误映射。
+// TestRuntimeDiagnosticsRoute GET /runtime/diagnostics：真执行面（P4a 正文第七刀）。
 //
-// v19：路径不带 id（原 `GET /agents/:id/diagnostics`）——底座由构建期固定，身份由响应里的
-// `runtime` 回答，不再有"哪个 agent 的诊断"这一问。
+// 替身撤掉之后这条用例验的是**装配与读面**：`Ports.Runtime` 交的是执行面本身，用例在
+// `ctrruntime` 里造，诊断读的是此刻的进程态（没有活连接 → `stopped` + `stderr_source: none`）。
+// 形状里的"stderr 尾巴 + 最近失败"两段由执行面自己的用例覆盖（`internal/runtimeconn`）。
 func TestRuntimeDiagnosticsRoute(t *testing.T) {
-	svc := &stubSvc{diagResp: &dtoruntime.DiagnosticsResp{
-		State: "stopped", Runtime: "stub", RuntimeName: "Stub", Command: "sh",
-		Connected: false, StderrSource: "last_error", CheckedAt: "2026-09-09T00:00:00Z",
-		StderrTail: []string{"[warn] boom"},
-		LastError:  &dtoruntime.LastErrorResp{At: "2026-09-09T00:00:00Z", Code: "timeout", Class: "connection", Details: "握手超时"},
-	}}
+	svc := &stubSvc{}
 	r := newRestEngine(stubDeps(t, svc))
 
 	env, http := do(t, r, "GET", "/v1/mate/runtime/diagnostics", "")
@@ -1717,7 +1693,10 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
 	}
 	body := string(env.Data)
-	for _, want := range []string{`"runtime":"stub"`, `"runtime_name":"Stub"`, `"stderr_source":"last_error"`, `"[warn] boom"`, `"code":"timeout"`, `"connected":false`} {
+	for _, want := range []string{
+		`"runtime":"` + goruntime.SelectedRuntime() + `"`,
+		`"state":"stopped"`, `"connected":false`, `"stderr_source":"none"`, `"stderr_tail":[]`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("响应缺 %s: %s", want, body)
 		}
@@ -1726,14 +1705,6 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 	// 判据落在响应形状上（`rest_removed_agent_key_test.go` 有逐字的那一条）。
 	if strings.Contains(body, `"runtimes"`) {
 		t.Fatalf("诊断面不该出现 runtimes: %s", body)
-	}
-
-	// 底层错误 → 信封映射（handler 经 code.FromError）。
-	svc2 := &stubSvc{diagErr: acl.NewError(acl.ClassRequest, "runtime_not_found", "底座未装配", nil)}
-	r2 := newRestEngine(stubDeps(t, svc2))
-	env, http = do(t, r2, "GET", "/v1/mate/runtime/diagnostics", "")
-	if http != 200 || env.Code != 40401 || !strings.Contains(env.Msg, "底座未装配") {
-		t.Fatalf("错误映射不符: http=%d %+v", http, env)
 	}
 }
 

@@ -3,8 +3,6 @@ package router_test
 import (
 	"strings"
 	"testing"
-
-	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 )
 
 // ——— 已下线键的传输面（v19「显式拒绝面」） ———
@@ -81,11 +79,9 @@ func TestRuntimesEndpointGone(t *testing.T) {
 // 这一条与上面两条方向相反：那两条钉"传输层不吞掉历史键"，这条钉"新读面不回带被撤掉的概念"
 // （形状判据，避免它从别的字段缝回来）。
 func TestRuntimeDiagnosticsOmitsRemovedAgentIdentity(t *testing.T) {
-	svc := &stubSvc{diagResp: &dtoruntime.DiagnosticsResp{
-		State: "stopped", Runtime: "stub", RuntimeName: "Stub",
-		StderrSource: "none", StderrTail: []string{}, CheckedAt: "2026-09-09T00:00:00Z",
-	}}
-	r := newRestEngine(stubDeps(t, svc))
+	// P4a 正文第七刀起：诊断读的是**真执行面**（替身已随那一刀删掉）——判据仍然逐字，
+	// 判的是"真读面也不回带被撤掉的概念"。
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 	env, http := do(t, r, "GET", "/v1/mate/runtime/diagnostics", "")
 	if http != 200 || env.Code != 0 {
 		t.Fatalf("信封不符: http=%d %+v", http, env)
