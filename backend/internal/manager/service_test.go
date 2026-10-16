@@ -333,7 +333,7 @@ func TestSessionHistoryClamp(t *testing.T) {
 	svc.flushChunks()
 
 	// `-5` 是"比任何位次都小"的显式游标（服务端夹到哨兵 -1 = 从头）；limit 0 → 1。
-	p, err := svc.SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(-5), Limit: 0})
+	p, err := historySvc(svc).SessionHistory(context.Background(), "s1", dtosession.HistoryQuery{After: ptr64(-5), Limit: 0})
 	if err != nil {
 		t.Fatalf("SessionHistory: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -120,14 +121,6 @@ type stubSvc struct {
 	cancelCalled bool
 	cancelID     string
 	cancelErr    error
-
-	historyCalled bool
-	historyID     string
-	historyAfter  *int64
-	historyBefore *int64
-	historyLimit  int
-	historyResp   *dtosession.SessionHistoryResp
-	historyErr    error
 
 	memList     []dtosession.MemoryResp
 	revokeID    string
@@ -626,20 +619,6 @@ func (s *stubSvc) CancelRun(_ context.Context, id string) error {
 	s.cancelCalled = true
 	s.cancelID = id
 	return s.cancelErr
-}
-func (s *stubSvc) SessionHistory(_ context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error) {
-	s.historyCalled = true
-	s.historyID = id
-	s.historyAfter = q.After
-	s.historyBefore = q.Before
-	s.historyLimit = q.Limit
-	if s.historyErr != nil {
-		return nil, s.historyErr
-	}
-	if s.historyResp != nil {
-		return s.historyResp, nil
-	}
-	return &dtosession.SessionHistoryResp{ID: id}, nil
 }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
@@ -1173,97 +1152,124 @@ func TestPromptAndCancel(t *testing.T) {
 	}
 }
 
-// TestHistoryParamParsing history 分页参数解析与夹取：默认/显式/非法。
+// TestHistoryParamParsing 历史读面的**窗口语义**（端点 → 控制器参数 → 用例 → 会话域/总线）。
+//
+// P4a 正文第十刀把这面从 `manager` 上提到 `svcsession.History`，router 侧因此失去"替身转告参数"
+// 这种证据——`svc.historyAfter` 那类标志位断言撤掉之后，**参数被忽略**与"参数生效但恰好没差别"
+// 会变得无法区分（默认 after=-1 与显式 after=0 只差一条事件，而下限钳制、方向互斥都在这一面里）。
+// 所以改成**真平面 + 真事件**：播 3 条（seq 0/1/2）再看**回来的窗口本身**。
 func TestHistoryParamParsing(t *testing.T) {
-	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
-
-	// 默认：两个游标都不给（nil = 该方向没有游标）、limit=200。
-	do(t, r, "GET", "/v1/mate/sessions/s1/history", "")
-	if !svc.historyCalled || svc.historyID != "s1" || svc.historyAfter != nil || svc.historyBefore != nil || svc.historyLimit != 200 {
-		t.Fatalf("默认参数不符: %+v %v/%v %d", svc.historyID, svc.historyAfter, svc.historyBefore, svc.historyLimit)
+	deps := stubDeps(t, &stubSvc{})
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	for seq := int64(0); seq < 3; seq++ {
+		deps.Bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, map[string]any{"n": seq})
 	}
+	r := newRestEngine(deps)
 
-	// 显式 after/limit。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?after=7&limit=50", "")
-	if svc.historyAfter == nil || *svc.historyAfter != 7 || svc.historyLimit != 50 {
-		t.Fatalf("显式参数不符: after=%v limit=%d", svc.historyAfter, svc.historyLimit)
+	// 默认：不给游标 = after 的哨兵 `-1`（早于一切事件），limit 默认 200 ⇒ 全部。
+	page := histPageOf(t, r, "/v1/mate/sessions/s1/history")
+	if got := page.seqs(); !equalSeqs(got, []int64{0, 1, 2}) || page.HasMore || page.FirstSeq != 0 || page.LastSeq != 2 {
+		t.Fatalf("默认参数应回全部三条: %+v", page)
 	}
 
-	// before 游标（C2：向前翻页）；after/before 同时给 → 40001（互斥）。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=42&limit=5", "")
-	if svc.historyBefore == nil || *svc.historyBefore != 42 || svc.historyAfter != nil || svc.historyLimit != 5 {
-		t.Fatalf("before 参数不符: before=%v after=%v limit=%d", svc.historyBefore, svc.historyAfter, svc.historyLimit)
-	}
-	// before=0 显式给出 = "第 0 条之前"（空页）：**给了游标**与"没给"是两件事。
-	// v21 之前这两件事靠 HasBefore 标志区分，现在靠指针——`0` 本身已是合法游标。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?before=0", "")
-	if svc.historyBefore == nil || *svc.historyBefore != 0 {
-		t.Fatalf("before=0 应携带游标 0: %+v", svc)
-	}
-	// after=0 同理：它是"第 0 条之后"，也必须有游标（不是"没给"）。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?after=0", "")
-	if svc.historyAfter == nil || *svc.historyAfter != 0 {
-		t.Fatalf("after=0 应携带游标 0: %+v", svc)
-	}
-	svc.historyCalled = false
-	envBoth, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&before=2", "")
-	if envBoth.Code != 40001 {
-		t.Fatalf("after+before 期望 40001，got %+v", envBoth)
-	}
-	envBadBefore, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?before=-3", "")
-	if envBadBefore.Code != 40000 {
-		t.Fatalf("负 before 期望 40000，got %+v", envBadBefore)
+	// 显式 after=0 与默认**不是**一回事：`0` 是合法位次，它跳过第 0 条。
+	// （把两者混起来正是"翻更早"那条路径静默丢第一条的成因。）
+	page = histPageOf(t, r, "/v1/mate/sessions/s1/history?after=0")
+	if got := page.seqs(); !equalSeqs(got, []int64{1, 2}) {
+		t.Fatalf("显式 after=0 应跳过第 0 条: %+v", page)
 	}
 
-	// limit 上限 1000 夹取。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?limit=999999", "")
-	if svc.historyLimit != 1000 {
-		t.Fatalf("limit 应夹到 1000，got %d", svc.historyLimit)
+	// before（向前翻页）取"该位次之前"。
+	page = histPageOf(t, r, "/v1/mate/sessions/s1/history?before=2")
+	if got := page.seqs(); !equalSeqs(got, []int64{0, 1}) || page.HasMore {
+		t.Fatalf("before=2 应回 seq<2 的两条: %+v", page)
+	}
+	// before=0 显式给出 = "第 0 条之前" ⇒ 空页（"给了游标"与"没给"是两件事）。
+	page = histPageOf(t, r, "/v1/mate/sessions/s1/history?before=0")
+	if len(page.seqs()) != 0 {
+		t.Fatalf("before=0 应是空页: %+v", page)
 	}
 
-	// limit=0 → 1。
-	svc.historyCalled = false
-	do(t, r, "GET", "/v1/mate/sessions/s1/history?limit=0", "")
-	if svc.historyLimit != 1 {
-		t.Fatalf("limit=0 应夹到 1，got %d", svc.historyLimit)
+	// limit：1 条 + 沿当前方向还有更多。
+	page = histPageOf(t, r, "/v1/mate/sessions/s1/history?limit=1")
+	if got := page.seqs(); !equalSeqs(got, []int64{0}) || !page.HasMore {
+		t.Fatalf("limit=1 应回一条且 has_more: %+v", page)
+	}
+	// limit=0 钳到 1（0 条不是合法页大小：客户端会以为"没有历史"）。
+	page = histPageOf(t, r, "/v1/mate/sessions/s1/history?limit=0")
+	if got := page.seqs(); !equalSeqs(got, []int64{0}) {
+		t.Fatalf("limit=0 应钳到 1: %+v", page)
+	}
+	// 上限 1000：造 1001 条，恰好回 1000 + has_more。
+	depsBig := stubDeps(t, &stubSvc{})
+	depsBig.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	for seq := int64(0); seq < 1001; seq++ {
+		depsBig.Bus.PublishAt("s1", seq, fmt.Sprintf("evt_%d", seq), "session.message", 1, nil)
+	}
+	big := histPageOf(t, newRestEngine(depsBig), "/v1/mate/sessions/s1/history?limit=999999")
+	if len(big.seqs()) != 1000 || !big.HasMore || big.LastSeq != 999 {
+		t.Fatalf("limit 应钳到 1000: len=%d has_more=%v last=%d", len(big.seqs()), big.HasMore, big.LastSeq)
 	}
 
-	// 非法 after → 40000。
-	svc.historyCalled = false
-	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=-1", "")
-	if env.Code != 40000 {
-		t.Fatalf("负 after 期望 40000，got %+v", env)
+	// 会话不存在 ⇒ 40401（这一条以前由替身自己判，现在由用例判）。
+	if env, _ := do(t, r, "GET", "/v1/mate/sessions/nope/history", ""); env.Code != 40401 {
+		t.Fatalf("未知会话期望 40401，got %+v", env)
 	}
-	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/history?after=abc", "")
-	if env.Code != 40000 {
-		t.Fatalf("非数字 after 期望 40000，got %+v", env)
+
+	// 方向互斥 ⇒ 40001（控制器拦，两个游标同时给没有合理解释）。
+	if env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&before=2", ""); env.Code != 40001 {
+		t.Fatalf("after+before 期望 40001，got %+v", env)
 	}
-	if svc.historyCalled {
-		t.Fatal("非法参数不应触达 svc")
+	// 非法游标 ⇒ 40000（负数与非数字都不接受；`-1` 是服务端内部哨兵，不是对外值）。
+	for _, q := range []string{"before=-3", "after=-1", "after=abc", "limit=x"} {
+		if env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?"+q, ""); env.Code != 40000 {
+			t.Fatalf("%s 期望 40000，got %+v", q, env)
+		}
 	}
 }
 
-// TestHistorySuccess 正常 history 返回事件数组（含 has_more）。
-func TestHistorySuccess(t *testing.T) {
-	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
-	env, _ := do(t, r, "GET", "/v1/mate/sessions/s1/history?after=1&limit=10", "")
+// histPage 历史信封的判据视图（窗口本身，而不是"替身收到了什么"）。
+type histPage struct {
+	Events []struct {
+		Seq  int64  `json:"seq"`
+		Type string `json:"type"`
+	} `json:"events"`
+	HasMore  bool  `json:"has_more"`
+	FirstSeq int64 `json:"first_seq"`
+	LastSeq  int64 `json:"last_seq"`
+}
+
+func (p histPage) seqs() []int64 {
+	out := make([]int64, 0, len(p.Events))
+	for _, e := range p.Events {
+		out = append(out, e.Seq)
+	}
+	return out
+}
+
+func equalSeqs(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func histPageOf(t *testing.T, r *gin.Engine, url string) histPage {
+	t.Helper()
+	env, _ := do(t, r, "GET", url, "")
 	if env.Code != 0 {
-		t.Fatalf("信封不符: %+v", env)
+		t.Fatalf("%s 期望成功，got %+v", url, env)
 	}
-	var out struct {
-		ID      string `json:"id"`
-		HasMore bool   `json:"has_more"`
+	var page histPage
+	if err := json.Unmarshal(env.Data, &page); err != nil {
+		t.Fatalf("%s data 解析失败: %s", url, env.Data)
 	}
-	if err := json.Unmarshal(env.Data, &out); err != nil || out.ID != "s1" {
-		t.Fatalf("history data 不符: %s", env.Data)
-	}
+	return page
 }
 
 // TestPermissionMemoriesList GET /sessions/:id/permissions/memories 返回会话级权限记忆（含 decision 侧）。

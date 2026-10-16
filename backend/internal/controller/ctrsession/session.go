@@ -11,8 +11,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -43,11 +46,16 @@ var _ SessionCtr = (*sessionCtr)(nil)
 // SessionHandler 处理会话相关 REST 请求（列表 + search + create/prompt/cancel/history + 元数据 + 权限）。
 type sessionCtr struct {
 	svc svcsession.SessionSvc
+	// hist 会话历史**读面**（P4a 正文第十刀起在用例层，与 `svc` 分开按面持有）。
+	hist svcsession.HistorySvc
 }
 
 // NewSessionCtr 构造 SessionCtr。
-func NewSessionCtr(svc svcsession.SessionSvc) SessionCtr {
-	return &sessionCtr{svc: svc}
+//
+// 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线）：
+// 历史读面的用例在这里造（P4a 正文第十刀），其余 18 个方法的实现仍在 `manager`（逐刀搬）。
+func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus) SessionCtr {
+	return &sessionCtr{svc: svc, hist: svcsession.NewHistory(st, plane, bus)}
 }
 
 // List 列出全部会话（query `archived` 控制是否包含已归档；默认仅未归档）。
@@ -304,7 +312,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 	if q.Limit > 1000 {
 		q.Limit = 1000
 	}
-	resp, err := h.svc.SessionHistory(c.Request.Context(), id, q)
+	resp, err := h.hist.SessionHistory(c.Request.Context(), id, q)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

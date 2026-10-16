@@ -47,10 +47,6 @@ type SessionSvc interface {
 	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
 	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
 
-	// SessionHistory 返回会话的事件历史（sqlite 模式读 events 表，内存模式回放 eventbus；
-	// after（向后）/before（向前）互斥游标 + limit 分页）。
-	SessionHistory(ctx context.Context, id string, q dtosession.HistoryQuery) (*dtosession.SessionHistoryResp, error)
-
 	// ListRuns 列出某会话的轮次明细（runs 表读模型：状态/耗时/usage/失败轮回溯；内存模式返回空）。
 	ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error)
 
