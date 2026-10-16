@@ -774,7 +774,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 
 	// 截断：造出超过上限的子目录（上限是常量，这里只验"越界即置位 + 条数不超上限"）。
 	many := t.TempDir()
-	for i := 0; i <= browseEntryLimit; i++ {
+	for i := 0; i <= workspace.BrowseEntryLimit; i++ {
 		if err := os.Mkdir(filepath.Join(many, fmt.Sprintf("d%05d", i)), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -783,7 +783,7 @@ func TestBrowseWorkspaceMarksHiddenAndTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BrowseWorkspace(大目录): %v", err)
 	}
-	if len(big.Entries) != browseEntryLimit || !big.Truncated {
+	if len(big.Entries) != workspace.BrowseEntryLimit || !big.Truncated {
 		t.Fatalf("超上限应截断并置位: len=%d truncated=%v", len(big.Entries), big.Truncated)
 	}
 }

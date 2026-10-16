@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/acl"
 )
 
@@ -334,6 +335,15 @@ type Plane struct {
 	// roots **显式配置**的起始点偏好（'' 时读面返回 nil = 不限制）。
 	// 对外生效名单还要并上代建根，见 effectiveWorkspaceRootsLocked。
 	roots []string
+	// rootsStore 白名单的持久化端口（nil = 只读）。**装配期一次性注入**，之后只读引用——
+	// 它的方法（Status/Save）是 infra I/O，**不持本锁调用**（见 rootsStoreRef）。
+	rootsStore WorkspaceRootsStore
+
+	// st 库句柄（登记表读写；nil = memory 模式）。**装配期一次性注入**，本锁不保护它
+	// （P2b 前置已把"持锁请求会话/库"这类边清零）。
+	st *store.Store
+	// sessions 会话事实来源（本域不拥有会话，见 ports.go）。
+	sessions SessionSource
 }
 
 // NewPlane 造一个工作空间域（策略字段默认全空 = 不限制、不代建）。

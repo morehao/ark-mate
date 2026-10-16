@@ -26,6 +26,10 @@ func (s *Service) attachStore(st *store.Store) {
 	s.skillPlane.SetStore(st)
 	s.providerPlane.SetStore(st)
 	s.sessionPlane.SetStore(st)
+	// P2b：工作空间域也要拿到库句柄（登记表读写 + "最近使用"排除已登记路径）。
+	// 漏这一行的表现是**静默**的：`RecentWorkspaces` 把默认工作空间与已登记项当成"未登记"推回来，
+	// 而它只在 sqlite 模式下才现形（memory 模式的登记表在域自己的 `memDefaultWorkspace` 里）。
+	s.planner.SetStore(st)
 }
 
 func (s *Service) EnableStore(st *store.Store) {
