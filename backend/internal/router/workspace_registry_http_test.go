@@ -44,7 +44,7 @@ func registryApp(t *testing.T) (*manager.Service, string, string) {
 	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 	if err := svc.WorkspacePlane().SetWorkspacePolicy(provision, nil); err != nil {
 		t.Fatalf("SetWorkspacePolicy: %v", err)
 	}
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 	dir1, dir2 := t.TempDir(), t.TempDir()
@@ -215,7 +215,7 @@ func TestWorkspaceRegistryPersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("SetWorkspacePolicy(重启): %v", err)
 	}
 	// 幂等：默认工作空间已存在 → 不重建、不改顺序。
-	if err := svc2.EnsureDefaultWorkspace(); err != nil {
+	if err := svc2.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace(重启): %v", err)
 	}
 	after, err := svc2.WorkspacePlane().WorkspaceRegistry()

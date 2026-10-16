@@ -6,7 +6,6 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/model"
 )
 
 // ——— P2b：工作空间登记表的过渡期转发与别名（最后一刀） ———
@@ -22,14 +21,6 @@ import (
 // TODO(P4b): 删转发（同上）
 func (s *Service) CreateRegisteredWorkspace(path, title string, strict bool) (*dtoworkspace.WorkspaceResp, error) {
 	return s.planner.CreateRegisteredWorkspace(path, title, strict)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) EnsureDefaultWorkspace() error { return s.planner.EnsureDefaultWorkspace() }
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) DefaultWorkspace() (model.WorkspaceEntity, bool, error) {
-	return s.planner.DefaultWorkspace()
 }
 
 // TODO(P4b): 删转发（同上）

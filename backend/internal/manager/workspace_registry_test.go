@@ -35,10 +35,10 @@ func registryRig(t *testing.T, roots []string) (*rig, string) {
 func TestWorkspaceRegistryDefaultIsProvisioned(t *testing.T) {
 	r, provision := registryRig(t, nil)
 
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
-	def, ok, err := r.Svc.DefaultWorkspace()
+	def, ok, err := r.Svc.WorkspacePlane().DefaultWorkspace()
 	if err != nil || !ok {
 		t.Fatalf("装配后应有默认工作空间: ok=%v err=%v", ok, err)
 	}
@@ -60,7 +60,7 @@ func TestWorkspaceRegistryDefaultIsProvisioned(t *testing.T) {
 	}
 
 	// 幂等：再调一次不出第二行。
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("重复 EnsureDefaultWorkspace: %v", err)
 	}
 	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
@@ -83,10 +83,10 @@ func TestWorkspaceRegistryNoProvisionNoDefault(t *testing.T) {
 	r := newRig(t, func(c *rigConfig) { c.store = true })
 	mustWorkspacePolicy(t, r.Svc, "", nil)
 
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("代建关闭时 EnsureDefaultWorkspace 应静默通过: %v", err)
 	}
-	if _, ok, _ := r.Svc.DefaultWorkspace(); ok {
+	if _, ok, _ := r.Svc.WorkspacePlane().DefaultWorkspace(); ok {
 		t.Fatal("代建关闭时不该有默认工作空间")
 	}
 	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()
@@ -167,10 +167,10 @@ func TestWorkspaceRegistryGetOrCreateAndStrict(t *testing.T) {
 // 并到默认那一行，界面会显示"默认工作空间 0 个会话"而点进去有会话——那种不一致没有任何解释余地。
 func TestWorkspaceRegistryListAggregatesLegacyIntoDefault(t *testing.T) {
 	r, _ := registryRig(t, nil)
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
-	def, _, _ := r.Svc.DefaultWorkspace()
+	def, _, _ := r.Svc.WorkspacePlane().DefaultWorkspace()
 
 	// 两条历史会话（workspace_id 留空）+ 一条显式归属普通工作空间。
 	userDir := t.TempDir()
@@ -239,10 +239,10 @@ func TestWorkspaceRegistryMissingDirStillListed(t *testing.T) {
 // TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown 默认不可删；未知 id → 40401。
 func TestWorkspaceRegistryDeleteDefaultRefusedAndUnknown(t *testing.T) {
 	r, _ := registryRig(t, nil)
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
-	def, _, _ := r.Svc.DefaultWorkspace()
+	def, _, _ := r.Svc.WorkspacePlane().DefaultWorkspace()
 
 	_, err := r.Svc.WorkspacePlane().DeleteRegisteredWorkspace(def.ID)
 	if err == nil {
@@ -373,10 +373,10 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	provision := filepath.Join(t.TempDir(), "workspaces")
 	mustWorkspacePolicy(t, r.Svc, provision, nil)
 
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("memory 模式下 EnsureDefaultWorkspace 应建出默认工作空间: %v", err)
 	}
-	def, ok, err := r.Svc.DefaultWorkspace()
+	def, ok, err := r.Svc.WorkspacePlane().DefaultWorkspace()
 	if err != nil || !ok {
 		t.Fatalf("memory 模式下装配后应有默认工作空间: ok=%v err=%v", ok, err)
 	}
@@ -441,10 +441,10 @@ func TestWorkspaceRegistryMemoryNoProvisionNoDefault(t *testing.T) {
 	r := newRig(t, func(c *rigConfig) { c.store = false })
 	mustWorkspacePolicy(t, r.Svc, "", nil)
 
-	if err := r.Svc.EnsureDefaultWorkspace(); err != nil {
+	if err := r.Svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("代建关闭时 EnsureDefaultWorkspace 应静默通过: %v", err)
 	}
-	if _, ok, _ := r.Svc.DefaultWorkspace(); ok {
+	if _, ok, _ := r.Svc.WorkspacePlane().DefaultWorkspace(); ok {
 		t.Fatal("代建关闭时不该有默认工作空间")
 	}
 	list, err := r.Svc.WorkspacePlane().WorkspaceRegistry()

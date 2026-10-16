@@ -275,7 +275,21 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：那一行转发已删。", dead)
 			}
 		}
+		// 默认工作空间的两条（P4a 正文第二十八刀）：`EnsureDefaultWorkspace` / `DefaultWorkspace`
+		// 也走域平面——它们是"这个平面自己的默认项"，读/建都只有一处入口。
+		for _, dead := range []string{"func (s *Service) EnsureDefaultWorkspace(", "func (s *Service) DefaultWorkspace("} {
+			if strings.Contains(regMgr, dead) {
+				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：默认工作空间归域平面"+
+					"（`WorkspacePlane()`），转发会让「谁建的那一行」不可判定。", dead)
+			}
+		}
 		reg := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "registry.go")))
+		for _, must := range []string{"func (pl *Plane) EnsureDefaultWorkspace(", "func (pl *Plane) DefaultWorkspace("} {
+			if !strings.Contains(reg, must) {
+				t.Errorf("`internal/domain/workspace/registry.go` 里找不到 %q：判据失锚＝空转。", must)
+			}
+		}
+
 		for _, must := range []string{"func (pl *Plane) RenameRegisteredWorkspace(", "func (pl *Plane) DeleteRegisteredWorkspace(", "func (pl *Plane) MoveRegisteredWorkspace("} {
 			if !strings.Contains(reg, must) {
 				t.Errorf("`internal/domain/workspace/registry.go` 里找不到 %q：判据失锚＝空转。", must)

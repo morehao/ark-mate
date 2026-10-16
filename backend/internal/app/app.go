@@ -381,7 +381,7 @@ func (a *App) Init(ctx context.Context) error {
 	// 默认工作空间的建立**必须在配置装载之后**（迁移里拿不到 workspace_dir，见
 	// store/migrate_v14.go）：幂等，且只在登记表为空时创建——删掉它之后不再自动重建
 	// （用户删了它、下次启动它又回来，而界面上没有任何东西解释这件事）。
-	if err := a.svc.EnsureDefaultWorkspace(); err != nil {
+	if err := a.svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		return usageErr("serve: 建立默认工作空间失败: %v", err)
 	}
 	// 白名单的持久化端口：面板 PUT /settings/workspace 经它写回配置目录（config.json）。

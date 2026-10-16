@@ -283,7 +283,7 @@ func TestCreateSessionFailureLeavesNoPerSessionDir(t *testing.T) {
 	st := testutil.OpenStore(t, testutil.TempDBPath(t))
 	t.Cleanup(func() { _ = st.Close() })
 	svc.EnableStore(st)
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 

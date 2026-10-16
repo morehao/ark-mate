@@ -186,7 +186,7 @@ func TestCreateSessionRejectsUnreachableWithoutSideEffects(t *testing.T) {
 	}
 	// 默认工作空间（v14）= "未指定 cwd"的落点。生产里由装配期建立；测试里必须显式建，
 	// 否则未指定 cwd 的请求会报 workspace_required 而不是走到它要验的那一步。
-	if err := svc.EnsureDefaultWorkspace(); err != nil {
+	if err := svc.WorkspacePlane().EnsureDefaultWorkspace(); err != nil {
 		t.Fatalf("EnsureDefaultWorkspace: %v", err)
 	}
 
