@@ -44,14 +44,18 @@ const AppName = "mate"
 // 与"一个汇总大接口"的区别：这里只是装配点把实现分发给各控制器时的中转结构，
 // 控制器自身仍只持有自己那一片窄接口（见 internal/controller/ctr*）。
 //
-// **字段类型一律取"控制器包里的名字"**（`svcsession.SessionSvc`/`svcprovider.Ports`…），
-// 本包**不 import `internal/service/svc*`**：依赖链是 `router → controller → service`，
-// 路由装配只该认识控制器。这条由 `internal/archtest/svc_layer_consumer_test.go` 钉住——
-// 它的失效是静默的（多加一行 svc import 也能编译，只是把一条本该单向的边变成双向）。
+// **最终形状：每一格都是"依赖事实"**（域平面 / 执行面 / 注册表 / 库句柄 / 配置读取口），
+// 用例实例一律由控制器在自己的构造函数里造（`svcruntime.New` / `svcsystem.New` /
+// `svclibrary.NewLibrary` / `svcautomation.New`…）。本包**不 import `internal/service/svc*`**：
+// 依赖链是 `router → controller → service`，路由装配只该认识控制器。
+// 这条由 `internal/archtest/svc_layer_consumer_test.go` 钉住——它的失效是静默的
+// （多加一行 svc import 也能编译，只是把一条本该单向的边变成双向）。
 //
-// `Runtime` 与 `System` 交的是**执行面/事实来源**而不是用例实例：底座用例与导出用例
-// 分别由 `ctrruntime`/`ctrexport` 在构造函数里自己造（`svcruntime.New`/`svcsystem.New`），
-// 因为 `app` 与 `router` 都不该 import `service/svc*`。
+// **过渡期**：仍有几格是 `service/svc*` 的类型（`Session`/`Workspace`/`Capability`/
+// `ProviderCatalog`/`Model`/`ModelHost`）——它们各自的实现还在 `manager`，控制器暂时造不出来。
+// 每迁完一个域就少一格（已消失的：`Library`/`Runtime`/`System`/`Automation`，见 P4a 正文各刀的记录），
+// 全部迁完时这几行会**自己消失**（白名单 `transitionalServiceImporters` 也是同一张进度表）。
+// 别在过渡期往里加新的 svc 格：那正是 2026-10-16 被判定为"骚操作"的那批别名的来路。
 type Ports struct {
 	Session   svcsession.SessionSvc
 	Workspace svcworkspace.WorkspaceSvc
