@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
 	"strings"
 	"time"
@@ -101,8 +102,8 @@ func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
 		sessions++
 		// interrupted 收敛：残留 in_progress（崩溃/重启中断，无终态）→ 可操作态（列表可停止/重发）。
 		// 事件保持原样：续聊时 materializeRun 以「上一 run 之后」窗口重建本轮，不受影响。
-		if rec.Status == SessionStatusInProgress {
-			s.markSession(rec.ID, SessionStatusInterrupted)
+		if rec.Status == session.SessionStatusInProgress {
+			s.markSession(rec.ID, session.SessionStatusInterrupted)
 			interrupted++
 		}
 	}
@@ -385,7 +386,7 @@ func (s *Service) reconcileRunRows(ctx context.Context, sessionID string, all []
 	}
 	added := false
 	for _, e := range all {
-		if e.Type != BusRunStarted || known[e.Seq] {
+		if e.Type != session.BusRunStarted || known[e.Seq] {
 			continue
 		}
 		var m map[string]any
@@ -401,7 +402,7 @@ func (s *Service) reconcileRunRows(ctx context.Context, sessionID string, all []
 		text, _ := m["text"].(string)
 		if err := s.st.CreateRun(ctx, model.RunEntity{
 			ID: runID, SessionID: sessionID, UserText: text,
-			Status: SessionStatusInProgress, FirstSeq: e.Seq, LastSeq: -1, StartedAt: e.CreatedAt,
+			Status: session.SessionStatusInProgress, FirstSeq: e.Seq, LastSeq: -1, StartedAt: e.CreatedAt,
 		}); err != nil {
 			return added, err
 		}
@@ -577,12 +578,12 @@ func (s *Service) memoryRows(ctx context.Context) ([]model.PermissionMemoryEntit
 // terminalRunStatus 终态事件类型 → run 终态。
 func terminalRunStatus(typ string) string {
 	switch typ {
-	case BusRunEnded:
-		return SessionStatusCompleted
-	case BusRunError:
-		return SessionStatusFailed
-	case BusRunCancelled:
-		return SessionStatusCancelled
+	case session.BusRunEnded:
+		return session.SessionStatusCompleted
+	case session.BusRunError:
+		return session.SessionStatusFailed
+	case session.BusRunCancelled:
+		return session.SessionStatusCancelled
 	}
 	return ""
 }
@@ -607,7 +608,7 @@ func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	evs, _, err := s.st.EventsAfter(ctx, sessionID, firstSeq-1, 1)
-	if err != nil || len(evs) != 1 || evs[0].Seq != firstSeq || evs[0].Type != BusRunStarted {
+	if err != nil || len(evs) != 1 || evs[0].Seq != firstSeq || evs[0].Type != session.BusRunStarted {
 		glog.Warnw(context.Background(), "store: 开轮前回读 run.started 失败，跳过开轮行",
 			"session", sessionID, "run", runID, "first_seq", firstSeq, "err", err)
 		return
@@ -615,7 +616,7 @@ func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
 	started := evs[0].CreatedAt
 	r := model.RunEntity{
 		ID: runID, SessionID: sessionID, UserText: text,
-		Status: SessionStatusInProgress,
+		Status: session.SessionStatusInProgress,
 		// first_seq 是本轮 `run.started` 的位次（窗口起点从此由行给出，不再由"上一轮的末尾"推导）。
 		FirstSeq: firstSeq,
 		// last_seq = -1 = 还没收口：**0 是合法位次**（v21），拿它当"未知"会让进行中的轮看起来
@@ -727,7 +728,7 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any, 
 	}
 	if userText == "" {
 		for _, e := range evs {
-			if e.Type != BusUserMessage {
+			if e.Type != session.BusUserMessage {
 				continue
 			}
 			var m map[string]any
@@ -747,7 +748,7 @@ func (s *Service) materializeRun(sessionID, typ string, payload map[string]any, 
 	// 无输出则为 0（与 dto 里 first_token_ms 的口径一致）。
 	var firstTokenMS int64
 	for _, e := range evs {
-		if e.Type == BusMessage || e.Type == BusThought || e.Type == BusToolCall {
+		if e.Type == session.BusMessage || e.Type == session.BusThought || e.Type == session.BusToolCall {
 			firstTokenMS = e.CreatedAt.Sub(started).Milliseconds()
 			break
 		}

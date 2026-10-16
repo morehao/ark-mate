@@ -16,6 +16,7 @@ package manager
 // （`import cycle not allowed in test`）。详见 internal/testutil 的包注释。
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
 	"os"
 	"path/filepath"
@@ -162,11 +163,11 @@ func newRig(t *testing.T, mutate ...func(*rigConfig)) *rig {
 func beginRun(t *testing.T, svc *Service, sessionID, text string) (runID string, started, user eventbus.Event) {
 	t.Helper()
 	runID = objid.New(objid.Run)
-	started = svc.publish(BusRunStarted, sessionID, map[string]any{
+	started = svc.publish(session.BusRunStarted, sessionID, map[string]any{
 		"session_id": sessionID, "run_id": runID, "runtime": "stub", "text": text,
 	})
 	svc.openRun(sessionID, runID, text, started.Seq)
-	user = svc.publish(BusUserMessage, sessionID, map[string]any{
+	user = svc.publish(session.BusUserMessage, sessionID, map[string]any{
 		"session_id": sessionID, "runtime": "stub", "text": text,
 	})
 	return runID, started, user

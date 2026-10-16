@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"sort"
@@ -160,7 +161,7 @@ func scanTranscriptMessages(dir, sessionID, qLower string) []transcriptMessageHi
 	var out []transcriptMessageHit
 	for _, ev := range readTranscriptEvents(f) {
 		switch ev.Type {
-		case BusUserMessage, BusMessage:
+		case session.BusUserMessage, session.BusMessage:
 		default:
 			continue
 		}
@@ -169,7 +170,7 @@ func scanTranscriptMessages(dir, sessionID, qLower string) []transcriptMessageHi
 			continue
 		}
 		role := "assistant"
-		if ev.Type == BusUserMessage {
+		if ev.Type == session.BusUserMessage {
 			role = "user"
 		}
 		out = append(out, transcriptMessageHit{Role: role, Seq: ev.Seq, Text: text})

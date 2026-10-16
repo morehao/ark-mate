@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"time"
 
@@ -23,20 +24,20 @@ import (
 // 前端按 msg_id 追加同一条消息的渲染逻辑无需改动。
 func (s *Service) publish(typ, sessionID string, payload any) eventbus.Event {
 	if c := s.coalescer; c != nil {
-		if m, ok := payload.(map[string]any); ok && c.offers(typ) {
-			c.add(typ, sessionID, m)
+		if m, ok := payload.(map[string]any); ok && c.Offers(typ) {
+			c.Add(typ, sessionID, m)
 			// 返回"没有事件"的零值框架 + 位次哨兵 -1：v21 起 0 是该会话第一条事件的**合法位次**，
 			// 用它表示"缓冲中、还没取号"会让调用方把"已在缓冲"误读成"已落成第 0 条"。
 			return eventbus.Event{Seq: -1}
 		}
-		c.flush(sessionID)
+		c.Flush(sessionID)
 	}
 	return s.publishRaw(typ, sessionID, payload)
 }
 
 // flushChunks 落掉全部缓冲增量（停机/关闭 transcript 前调用，避免丢尾部文本）。
 func (s *Service) flushChunks() {
-	s.coalescer.flushAll()
+	s.coalescer.FlushAll()
 }
 
 // publishRaw 把域事件发布进 eventbus（agg = sessionID；每 agg 版本递增），
@@ -110,7 +111,7 @@ func (s *Service) publishSideEffects(sessionID, eventID, typ string, m map[strin
 	}
 	// 会话标题自动推导：首个用户消息作为标题（截断）。PATCH 可覆盖（见 UpdateSession）。
 	// 须持 s.mu 写 Title（与 UpdateSession/sessionResp 并发读写作同步，避免数据竞争）。
-	if typ == BusUserMessage {
+	if typ == session.BusUserMessage {
 		var derived string
 		s.mu.Lock()
 		if r, ok := s.sessions[sessionID]; ok && strings.TrimSpace(r.Title) == "" {

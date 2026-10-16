@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"strings"
 
@@ -73,7 +74,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	fingerprint := o.svc.capabilityFingerprint(spec.ID, opt.Selection)
 	rc, err := o.acquire(ctx, spec, fingerprint)
 	if err != nil {
-		o.svc.setRuntimeState(AgentStateStopped)
+		o.svc.setRuntimeState(session.AgentStateStopped)
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。这一句原来在 `StartAgent`（v19 之前那个"暖启动"入口，
 		// 已随 agent 面删除）；今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
@@ -134,15 +135,15 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 		WorkspaceID: opt.WorkspaceID, WorkspaceTemporary: opt.WorkspaceTemporary,
 		// **落库的是身份**（平台模型行 id），不是运行时值——定案「辰」的核心。
 		ModelID: platformModelID, RuntimeID: spec.ID, Fingerprint: fingerprint, Origin: opt.Origin,
-		RuntimeSessionID: providerSessID, Status: SessionStatusInProgress,
+		RuntimeSessionID: providerSessID, Status: session.SessionStatusInProgress,
 		// 钉住的选定**与指纹一起**落库（M3-3 起）：两者必须同源，缺一则恢复路径
 		// 要么注入集不对、要么代际挂错。
 		CapabilityJSON: MarshalCapabilitySelection(opt.Selection)})
 	o.svc.beginTranscript(as.ID, spec.ID, cwd, opt.WorkspaceTemporary) // wire transcript header（未启用时 no-op）
-	evt := o.svc.publish(BusSessionCreated, as.ID, map[string]any{
+	evt := o.svc.publish(session.BusSessionCreated, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": spec.ID,
 	})
-	return &CreateResult{SessionID: as.ID, Runtime: spec.ID, Status: SessionStatusInProgress, EventSeq: evt.Seq}, nil
+	return &CreateResult{SessionID: as.ID, Runtime: spec.ID, Status: session.SessionStatusInProgress, EventSeq: evt.Seq}, nil
 }
 
 // ensureSession 返回活跃会话；不在活跃集合但平台有记录时按需重建。
@@ -370,7 +371,7 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 	// §6：执行上下文刚被重建（本次拿到了新的连接/会话）→ 会话执行代际自增。
 	// 排队输入比对的就是这个值：重建之后，为旧上下文排的队不再成立（见 inputqueue.go）。
 	o.svc.bumpGeneration(as.ID)
-	o.svc.markSession(as.ID, SessionStatusInProgress)
+	o.svc.markSession(as.ID, session.SessionStatusInProgress)
 	payload := map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "reason": reason,
 	}
@@ -378,7 +379,7 @@ func (o *Orchestrator) attachSession(as *ActiveSession, reason string) {
 		// 迁移事件：把**换到了哪一代**带上（审计要把"第 N 轮到第 M 轮用的哪套能力"串起来）。
 		payload["capability_fingerprint"] = as.Fingerprint
 	}
-	o.svc.publish(BusSessionResumed, as.ID, payload)
+	o.svc.publish(session.BusSessionResumed, as.ID, payload)
 }
 
 // applyModelOnSession 把模型应用到一条会话上（建会话与「会话内改模型」共用同一路径）。

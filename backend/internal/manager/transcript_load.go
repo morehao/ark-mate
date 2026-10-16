@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"sort"
@@ -220,7 +221,7 @@ func loadTranscriptFile(path string) *transcriptFile {
 		if ev.TS != "" {
 			lastTS = ev.TS
 		}
-		if !titleSet && ev.Type == BusUserMessage {
+		if !titleSet && ev.Type == session.BusUserMessage {
 			if text, _ := ev.Payload["text"].(string); text != "" {
 				firstUserText = deriveTitle(text)
 				titleSet = true
@@ -265,14 +266,14 @@ func loadTranscriptFile(path string) *transcriptFile {
 // （可能是会话进行中或进程被中断，用户可经「停止」自愈，见 serverBusy 逻辑）。
 func statusFromLastEventType(ltype string) string {
 	switch ltype {
-	case BusRunError:
-		return SessionStatusFailed
-	case BusRunCancelled:
-		return SessionStatusCancelled
-	case BusRunEnded:
-		return SessionStatusCompleted
+	case session.BusRunError:
+		return session.SessionStatusFailed
+	case session.BusRunCancelled:
+		return session.SessionStatusCancelled
+	case session.BusRunEnded:
+		return session.SessionStatusCompleted
 	default:
-		return SessionStatusInProgress
+		return session.SessionStatusInProgress
 	}
 }
 

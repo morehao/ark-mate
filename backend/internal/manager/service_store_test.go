@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -45,12 +46,12 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 
 	svc1.registerSession(&SessionRec{ID: "s-live"})
 	// 首个用户消息 → 标题自动推导（应同步写库）。
-	eUser := svc1.publish(BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
+	eUser := svc1.publish(session.BusUserMessage, "s-live", map[string]any{"session_id": "s-live", "text": "计算 1+1"})
 	// ③ 文本增量合并：publish 进缓冲并返回零值事件，号序在 flush 落库时才分配。
-	svc1.publish(BusMessage, "s-live", map[string]any{"text": "答案是 2"})
+	svc1.publish(session.BusMessage, "s-live", map[string]any{"text": "答案是 2"})
 	svc1.flushChunks()
 	eMsgSeq := eUser.Seq + 1
-	svc1.markSession("s-live", SessionStatusCompleted)
+	svc1.markSession("s-live", session.SessionStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
 	if _, err := svc1.UpdateSession(ctx, "s-live", dtosession.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
@@ -63,7 +64,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("DB 会话位次=%d want %d", got, eMsgSeq)
 	}
 	sess1, ok, _ := st1.GetSession(ctx, "s-live")
-	if !ok || sess1.Status != SessionStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
+	if !ok || sess1.Status != session.SessionStatusCompleted || sess1.LastSeq != eMsgSeq || !sess1.Pinned {
 		t.Fatalf("DB 会话元数据未同步: %+v ok=%v", sess1, ok)
 	}
 	_ = st1.Close() // 释放文件句柄，模拟进程退出
@@ -83,7 +84,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("恢复统计: sessions=%d events=%d", n, injected)
 	}
 	list, _ := svc2.ListSessions(false, "", "")
-	if len(list) != 1 || list[0].Status != SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
+	if len(list) != 1 || list[0].Status != session.SessionStatusCompleted || list[0].Title != "用户改的标题" || !list[0].Pinned {
 		t.Fatalf("恢复后会话元数据不符: %+v", list)
 	}
 	// bus 按 DB 位次回放（旧游标可续传）：after=eUser.Seq → 只剩 eMsg。
@@ -92,7 +93,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 		t.Fatalf("重启后回放应带 DB 号序: %+v", replay)
 	}
 	// 新事件 seq 跨重启连续（③ 合并：publish 进缓冲，flush 后才分配号序）。
-	svc2.publish(BusMessage, "s-live", map[string]any{"text": "继续"})
+	svc2.publish(session.BusMessage, "s-live", map[string]any{"text": "继续"})
 	svc2.flushChunks()
 	eNextSeq := eMsgSeq + 1
 	if got := sessionMaxSeq(t, st2, "s-live"); got != eNextSeq {
@@ -119,9 +120,9 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 	// 手动制造交错号序：s-a 先事件、s-b 后事件、s-a 再事件（ListSessions 按 updated_at 降序可能先 s-a 后 s-b）。
 	svc.registerSession(&SessionRec{ID: "s-a"})
 	svc.registerSession(&SessionRec{ID: "s-b"})
-	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 1})
-	_ = svc.publish(BusMessage, "s-b", map[string]any{"i": 1})
-	_ = svc.publish(BusMessage, "s-a", map[string]any{"i": 2})
+	_ = svc.publish(session.BusMessage, "s-a", map[string]any{"i": 1})
+	_ = svc.publish(session.BusMessage, "s-b", map[string]any{"i": 1})
+	_ = svc.publish(session.BusMessage, "s-a", map[string]any{"i": 2})
 	svc.flushChunks() // ③ 落盘后再关库（否则缓冲里的增量随进程消失）
 	_ = st.Close()
 
@@ -156,7 +157,7 @@ func TestSQLiteRestoreAcrossSessions(t *testing.T) {
 		t.Fatalf("每会话条数不符: %v", byAgg)
 	}
 	// 新事件接续**本会话**最大号（③ 合并：先 flush 再查库）。
-	svc2.publish(BusMessage, "s-a", map[string]any{"i": 3})
+	svc2.publish(session.BusMessage, "s-a", map[string]any{"i": 3})
 	svc2.flushChunks()
 	if got, want := sessionMaxSeq(t, st2, "s-a"), int64(2); got != want {
 		t.Fatalf("接续号错误: got %d want %d", got, want)
@@ -179,7 +180,7 @@ func TestRestoreRebuildsStaleReadModels(t *testing.T) {
 	svc1.EnableStore(st1)
 	svc1.registerSession(&SessionRec{ID: "s-rebuild"})
 	runID, _, _ := beginRun(t, svc1, "s-rebuild", "重建我")
-	endRun(svc1, "s-rebuild", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	endRun(svc1, "s-rebuild", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	svc1.flushChunks()
 	msgs, err := st1.ListMessages(ctx, "s-rebuild")
 	if err != nil || len(msgs) == 0 {

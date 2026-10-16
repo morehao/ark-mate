@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,7 +219,7 @@ func TestAutomationTickFiresAndAdvances(t *testing.T) {
 	for ev.Type == "" {
 		select {
 		case e := <-sub.C:
-			if e.Type == BusAutomationRun {
+			if e.Type == session.BusAutomationRun {
 				ev = e
 			}
 		case <-deadline:

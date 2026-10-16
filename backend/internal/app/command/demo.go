@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"time"
 
@@ -93,33 +94,33 @@ func printEvent(evt eventbus.Event) {
 	text, _ := p["text"].(string)
 	sid, _ := p["session_id"].(string)
 	switch evt.Type {
-	case manager.BusSessionCreated:
+	case session.BusSessionCreated:
 		fmt.Printf("🆕 session.created  id=%s\n", sid)
-	case manager.BusMessage:
+	case session.BusMessage:
 		if text != "" {
 			fmt.Print(text)
 		}
-	case manager.BusThought:
+	case session.BusThought:
 		if text != "" {
 			fmt.Printf("\n💭 %s\n", text)
 		}
-	case manager.BusRunStarted:
+	case session.BusRunStarted:
 		runID, _ := p["run_id"].(string)
 		fmt.Printf("\n▶ run.started  run_id=%s\n", runID)
-	case manager.BusUserMessage:
+	case session.BusUserMessage:
 		fmt.Printf("\n👤 %s\n", text)
-	case manager.BusToolCall, manager.BusToolUpdate:
+	case session.BusToolCall, session.BusToolUpdate:
 		title, _ := p["title"].(string)
 		status, _ := p["status"].(string)
 		fmt.Printf("\n🛠 %s %s [%s]\n", evt.Type, title, status)
-	case manager.BusRunEnded:
+	case session.BusRunEnded:
 		stop, _ := p["stop_reason"].(string)
 		fmt.Printf("\n✅ run.ended  stop_reason=%q\n", stop)
-	case manager.BusRunError:
+	case session.BusRunError:
 		code, _ := p["code"].(string)
 		cls, _ := p["class"].(string)
 		fmt.Printf("\n❌ run.error  code=%s class=%s\n", code, cls)
-	case manager.BusRunCancelled:
+	case session.BusRunCancelled:
 		fmt.Printf("\n⛔ run.cancelled\n")
 	}
 }

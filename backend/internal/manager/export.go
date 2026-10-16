@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"time"
 
@@ -213,19 +214,19 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 		payload, _ := ev.Payload.(map[string]any)
 		text := payloadString(payload, "text")
 		switch ev.Type {
-		case BusUserMessage:
+		case session.BusUserMessage:
 			if md {
 				fmt.Fprintf(&b, "## 用户\n\n%s\n\n", text)
 			} else {
 				fmt.Fprintf(&b, "[用户] %s\n\n", text)
 			}
-		case BusMessage:
+		case session.BusMessage:
 			if md {
 				fmt.Fprintf(&b, "## 助手\n\n%s\n\n", text)
 			} else {
 				fmt.Fprintf(&b, "[助手] %s\n\n", text)
 			}
-		case BusThought:
+		case session.BusThought:
 			if text == "" {
 				continue
 			}
@@ -234,7 +235,7 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "(思考) %s\n\n", text)
 			}
-		case BusToolCall, BusToolUpdate:
+		case session.BusToolCall, session.BusToolUpdate:
 			t := payloadString(payload, "title")
 			kind := payloadString(payload, "kind")
 			status := payloadString(payload, "status")
@@ -250,20 +251,20 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "· %s\n", line)
 			}
-		case BusRunStarted:
+		case session.BusRunStarted:
 			// 轮次分节：没有它时两轮之间只有一个"轮次结束"，读起来像同一轮的停顿。
 			if md {
 				fmt.Fprintf(&b, "\n---\n\n*轮次开始*\n\n")
 			} else {
 				fmt.Fprintf(&b, "\n[轮次开始]\n\n")
 			}
-		case BusRunEnded:
+		case session.BusRunEnded:
 			if md {
 				fmt.Fprintf(&b, "\n*轮次结束*\n\n")
 			} else {
 				fmt.Fprintf(&b, "\n[轮次结束]\n\n")
 			}
-		case BusRunError:
+		case session.BusRunError:
 			msg := payloadString(payload, "error")
 			if msg == "" {
 				msg = payloadString(payload, "msg")
@@ -273,7 +274,7 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 			} else {
 				fmt.Fprintf(&b, "\n[轮次失败] %s\n\n", msg)
 			}
-		case BusRunCancelled:
+		case session.BusRunCancelled:
 			if md {
 				fmt.Fprintf(&b, "\n*已取消*\n\n")
 			} else {

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,7 +72,7 @@ func TestRuntimeDiagnosticsStartFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
-	if diag.State != AgentStateStopped || diag.Connected || diag.Runtime != "broken" {
+	if diag.State != session.AgentStateStopped || diag.Connected || diag.Runtime != "broken" {
 		t.Fatalf("诊断态不符: %+v", diag)
 	}
 	if diag.LastError == nil || diag.LastError.Class == "" || diag.LastError.Code == "" {
@@ -104,7 +105,7 @@ func TestRuntimeDiagnosticsLiveTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeDiagnostics: %v", err)
 	}
-	if !diag.Connected || diag.PID <= 0 || diag.State != AgentStateRunning {
+	if !diag.Connected || diag.PID <= 0 || diag.State != session.AgentStateRunning {
 		t.Fatalf("连接态不符: %+v", diag)
 	}
 	if diag.StderrSource != "live" {
@@ -147,7 +148,7 @@ func TestPublishErrorCarriesStderrTail(t *testing.T) {
 
 	var got map[string]any
 	for _, e := range bus.EventsAll() {
-		if e.Type == BusRunError && e.AggregID == "c-x" {
+		if e.Type == session.BusRunError && e.AggregID == "c-x" {
 			got, _ = e.Payload.(map[string]any)
 		}
 	}

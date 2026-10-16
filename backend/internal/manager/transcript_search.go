@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,7 +128,7 @@ func scanTranscriptText(dir, sessionID, qLower string) (string, int, bool) {
 			continue
 		}
 		var ev wireTranscriptLine
-		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != BusUserMessage {
+		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != session.BusUserMessage {
 			continue
 		}
 		text, _ := ev.Payload["text"].(string)

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"time"
 
@@ -100,7 +101,7 @@ func (s *Service) RuntimeDiagnostics(ctx context.Context) (*dtoruntime.Diagnosti
 		StderrSource: "none",
 	}
 	if resp.State == "" {
-		resp.State = AgentStateStopped
+		resp.State = session.AgentStateStopped
 	}
 	specOK := specErr == nil
 	if specOK {

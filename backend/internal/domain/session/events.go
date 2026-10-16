@@ -1,6 +1,10 @@
-package manager
+package session
 
-// 域事件类型（manager Publish 进 eventbus 的 type 判别词；agg_id = session id）。
+// 域事件类型（会话事件进 eventbus 的 type 判别词；agg_id = session id）。
+//
+// 归属：这些常量是**会话域的词汇**（P3c 把它们从 manager 搬进来）——事件说的就是会话身上发生的事。
+// 冻结清单与前端 `Ev` 联合类型由 archtest 按符号钉住（`TestEventTypeContractFrozen` /
+// `TestFrontendEventTypesMatchRegistry`），所以搬包不影响那两条判据。
 // 事件契约见 docs/architecture.md §6.2：token/thought/tool_call/message 归一为「消息类增量 + 终态」。
 const (
 	// BusSessionCreated 会话建立（含 session id）。

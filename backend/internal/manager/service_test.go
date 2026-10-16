@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestEventSinkMapping(t *testing.T) {
 
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindMessage, Payload: acl.MessageDelta{Text: "hi"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindThought, Payload: acl.ThoughtDelta{Text: "think"}})
-	// agent 回传的 user_message 是会话镜像（宿主已在 Prompt 提交时发布 BusUserMessage）→ eventSink 丢弃。
+	// agent 回传的 user_message 是会话镜像（宿主已在 Prompt 提交时发布 session.BusUserMessage）→ eventSink 丢弃。
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindUserMessage, Payload: acl.MessageDelta{Text: "me"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolCall, Payload: acl.ToolCallInfo{ID: "c1", Title: "edit", Status: "pending"}})
 	sink(acl.Event{SessionID: "s1", Kind: acl.KindToolUpdate, Payload: acl.ToolCallInfo{ID: "c1", Status: "completed"}})
@@ -66,7 +67,7 @@ func TestEventSinkMapping(t *testing.T) {
 	for _, e := range evs {
 		types = append(types, e.Type)
 	}
-	want := []string{BusMessage, BusThought, BusToolCall, BusToolUpdate, BusUsage, "session.permission"}
+	want := []string{session.BusMessage, session.BusThought, session.BusToolCall, session.BusToolUpdate, session.BusUsage, "session.permission"}
 	for i := range want {
 		if types[i] != want[i] {
 			t.Fatalf("type 序列不符: %v", types)
@@ -128,7 +129,7 @@ func TestEventSinkCommands(t *testing.T) {
 	case <-afterShort():
 		t.Fatal("未收到 session.commands 事件")
 	}
-	if ev.Type != BusCommands {
+	if ev.Type != session.BusCommands {
 		t.Fatalf("事件 type 不符: %s", ev.Type)
 	}
 	if ev.AggregID != "conv-1" {
@@ -179,18 +180,18 @@ func TestDisconnectIdleSession(t *testing.T) {
 	as := &ActiveSession{ID: "s1", Runtime: "rtx"} // client nil
 	rc := &runtimeConn{client: nil}                // client 亦 nil → 相等匹配
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
 	orch.dropConn(rc)
 
-	if got := svc.sessions["s1"].Status; got != SessionStatusCompleted {
+	if got := svc.sessions["s1"].Status; got != session.SessionStatusCompleted {
 		t.Fatalf("空闲会话的上一轮终态不应被断连改写: %s", got)
 	}
 	if bus.Published() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: published=%d want %d", bus.Published(), before)
 	}
-	if st := svc.runtimeBindingSnapshot().State; st != AgentStateStopped {
+	if st := svc.runtimeBindingSnapshot().State; st != session.AgentStateStopped {
 		t.Fatalf("底座状态应 stopped: %s", st)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
@@ -220,12 +221,12 @@ func TestIntentionalTeardownKeepsIdleSession(t *testing.T) {
 	rc := &runtimeConn{client: nil}
 	rc.intentional.Store(true)
 	orch.sessions["s1"] = as
-	svc.registerSession(&SessionRec{ID: "s1", Status: SessionStatusCompleted})
+	svc.registerSession(&SessionRec{ID: "s1", Status: session.SessionStatusCompleted})
 	before := bus.Published()
 
 	orch.dropConn(rc)
 
-	if got := svc.sessions["s1"].Status; got != SessionStatusCompleted {
+	if got := svc.sessions["s1"].Status; got != session.SessionStatusCompleted {
 		t.Fatalf("主动停机不得改写会话状态（completed 应保持）: %s", got)
 	}
 	if bus.Published() != before {
@@ -259,14 +260,14 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if rec := svc.sessionRec("s1"); rec != nil {
-			if got = rec.Status; got == SessionStatusInterrupted {
+			if got = rec.Status; got == session.SessionStatusInterrupted {
 				break
 			}
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	if got != SessionStatusInterrupted {
+	if got != session.SessionStatusInterrupted {
 		t.Fatalf("主动拆除打断的轮次应归 interrupted: %s", got)
 	}
 	// 停机期间只应新增 user_message（Prompt 时发布）；不得有 run.error / run.cancelled。
@@ -283,7 +284,7 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 	// 竞态恰好可能落在订阅之前——那一段正是本用例要看的（v21 之前这里用 `LastSeq()` 做
 	// 数量断言，位次分会话之后那个量没有意义了，改成按类型/聚合直查）。
 	for _, e := range bus.EventsAll() {
-		if e.AggregID == "s1" && (e.Type == BusRunError || e.Type == BusRunCancelled) {
+		if e.AggregID == "s1" && (e.Type == session.BusRunError || e.Type == session.BusRunCancelled) {
 			t.Fatalf("主动拆除不应发布终态事件: %s", e.Type)
 		}
 	}
@@ -298,9 +299,9 @@ func TestIntentionalTeardownInterruptsInFlightRun(t *testing.T) {
 func TestPublishVersionAndBusNil(t *testing.T) {
 	reg := runtime.NewRegistry(runtime.Spec{ID: "x", Name: "X"})
 	svc := NewService(reg, nil) // bus = nil
-	e1 := svc.publish(BusToolCall, "s1", map[string]any{"tool": "a"})
-	e2 := svc.publish(BusToolCall, "s1", map[string]any{"tool": "b"})
-	_ = svc.publish(BusToolCall, "s2", map[string]any{"tool": "c"})
+	e1 := svc.publish(session.BusToolCall, "s1", map[string]any{"tool": "a"})
+	e2 := svc.publish(session.BusToolCall, "s1", map[string]any{"tool": "b"})
+	_ = svc.publish(session.BusToolCall, "s2", map[string]any{"tool": "c"})
 	// Seq 是 -1 而不是 0：v21 起 0 是**真实位次**（没有持久层时 bus 就是号序权威，
 	// 但这里 bus=nil，谁都没分配号）——"没号"必须与"第 0 条"区分开。
 	if e1.Seq != -1 || e1.Version != 1 || e2.Seq != -1 || e2.Version != 2 {
@@ -310,7 +311,7 @@ func TestPublishVersionAndBusNil(t *testing.T) {
 		t.Fatalf("版本计数不符: %v", svc.ver)
 	}
 	// ③ 合并：同形文本增量 publish 返回零值事件（未分配号序），flush 后才计入版本。
-	if zero := svc.publish(BusMessage, "s3", map[string]any{"text": "x"}); zero.Seq != -1 || zero.Version != 0 {
+	if zero := svc.publish(session.BusMessage, "s3", map[string]any{"text": "x"}); zero.Seq != -1 || zero.Version != 0 {
 		t.Fatalf("合并中的增量不应分配号序: %+v", zero)
 	}
 	if svc.ver["s3"] != 0 {
@@ -327,8 +328,8 @@ func TestSessionHistoryClamp(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	svc.registerSession(&SessionRec{ID: "s1"})
 	// 两条不同消息（msg_id 不同 → 形状不同 → 不合并），分页断言才成立。
-	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m1", "text": "one"})
-	svc.publish(BusMessage, "s1", map[string]any{"msg_id": "m2", "text": "two"})
+	svc.publish(session.BusMessage, "s1", map[string]any{"msg_id": "m1", "text": "one"})
+	svc.publish(session.BusMessage, "s1", map[string]any{"msg_id": "m2", "text": "two"})
 	svc.flushChunks()
 
 	// `-5` 是"比任何位次都小"的显式游标（服务端夹到哨兵 -1 = 从头）；limit 0 → 1。
@@ -427,13 +428,13 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	}
 }
 
-// TestPublishTitleConcurrentUpdate 并发下 BusUserMessage 标题自动推导与 PATCH 覆盖标题
+// TestPublishTitleConcurrentUpdate 并发下 session.BusUserMessage 标题自动推导与 PATCH 覆盖标题
 // 都须持锁（旧实现 publish 在锁外读写 Title → 数据竞争）；-race 下本用例作为守门测试。
 func TestPublishTitleConcurrentUpdate(t *testing.T) {
 	svc, _, _ := newTestRig(t)
 	id := "s-title-race"
 	svc.mu.Lock()
-	svc.sessions[id] = &SessionRec{ID: id, Status: SessionStatusInProgress}
+	svc.sessions[id] = &SessionRec{ID: id, Status: session.SessionStatusInProgress}
 	svc.ver[id] = 0
 	svc.mu.Unlock()
 
@@ -449,7 +450,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 					return
 				default:
 				}
-				_ = svc.publish(BusUserMessage, id, map[string]any{
+				_ = svc.publish(session.BusUserMessage, id, map[string]any{
 					"session_id": id, "runtime": "rtx", "text": fmt.Sprintf("消息 %d-%d", n, j),
 				})
 			}

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/model"
@@ -37,7 +38,7 @@ import (
 // 这份列表是**声明面**——`mate doctor` 的 `read-models` 体检拿它判"库里有没有别的事件类型
 // 混进了 messages"（在投影里加一个 `case` 很容易，而它会静默改变读模型的含义：检索会突然
 // 命中思考文本）。两处必须同时改，守卫 G5 钉住这一点。
-var messageRowSourceTypes = []string{BusUserMessage, BusMessage}
+var messageRowSourceTypes = []string{session.BusUserMessage, session.BusMessage}
 
 // isMessageRowSourceType 判断某个事件类型是否在投影白名单里。
 func isMessageRowSourceType(t string) bool {
@@ -155,7 +156,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 			m = map[string]any{}
 		}
 		switch e.Type {
-		case BusUserMessage:
+		case session.BusUserMessage:
 			flush()
 			text, _ := m["text"].(string)
 			if text == "" {
@@ -170,7 +171,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 				Ordinal:         int64(ordinal), Kind: "",
 				SeqLo: e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
 			})
-		case BusMessage:
+		case session.BusMessage:
 			text, _ := m["text"].(string)
 			msgID, _ := m["msg_id"].(string)
 			if cur == nil || (msgID != "" && cur.msgID != "" && msgID != cur.msgID) {

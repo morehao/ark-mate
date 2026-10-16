@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
@@ -171,7 +172,7 @@ type Service struct {
 	memDefaultWorkspace *model.WorkspaceEntity
 
 	// coalescer ③ 文本增量合并器（NewService 构造时创建；见 chunk_coalescer.go）。
-	coalescer *chunkCoalescer
+	coalescer *session.Coalescer
 
 	// defWarned 装载期"同一条定义问题只 WARN 一次"的记账（key = 域:id@revision）。
 	// 装载会被反复调用（启动、导入、**网关每次取数**），不记账就会把一条坏定义刷成日志洪水，
@@ -231,7 +232,7 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 复合字面量字段，且这里"默认值"的意图要一眼可见（off 由装配期显式关）。
 	s.mcpGatewayEnabled.Store(true)
 	// ③ 流式增量合并：flushFn 直连 publishRaw（绕过合并入口，避免自递归）。
-	s.coalescer = newChunkCoalescer(func(typ, sessionID string, payload any) {
+	s.coalescer = session.NewCoalescer(func(typ, sessionID string, payload any) {
 		s.publishRaw(typ, sessionID, payload)
 	})
 	// 绑定构建期选定的那个底座（v19：单实例）。`specOK=false`（未注册）不是这里报错——

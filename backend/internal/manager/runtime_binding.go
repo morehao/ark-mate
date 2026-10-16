@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
@@ -31,7 +32,7 @@ type runtimeBinding struct {
 	ID string
 	// Name 底座展示名（取自注册表里的 Spec；取不到时回落 ID）。
 	Name string
-	// State 底座进程状态：running | stopped（见 AgentStateRunning/Stopped）。
+	// State 底座进程状态：running | stopped（见 session.AgentStateRunning/Stopped）。
 	// 由 `s.mu` 保护；**唯一的写入方**是连接的建立与拆除。
 	State string
 }
@@ -44,7 +45,7 @@ func newRuntimeBinding(spec runtime.Spec, specOK bool) *runtimeBinding {
 	if specOK && spec.Name != "" {
 		name = spec.Name
 	}
-	return &runtimeBinding{ID: id, Name: name, State: AgentStateStopped}
+	return &runtimeBinding{ID: id, Name: name, State: session.AgentStateStopped}
 }
 
 // bindingLocked 取绑定指针（调用方须持 s.mu）。
@@ -61,7 +62,7 @@ func (s *Service) runtimeBindingSnapshot() runtimeBinding {
 	defer s.mu.Unlock()
 	rb := s.binding
 	if rb == nil {
-		return runtimeBinding{ID: runtime.SelectedRuntime(), Name: runtime.SelectedRuntime(), State: AgentStateStopped}
+		return runtimeBinding{ID: runtime.SelectedRuntime(), Name: runtime.SelectedRuntime(), State: session.AgentStateStopped}
 	}
 	return *rb
 }

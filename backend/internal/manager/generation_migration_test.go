@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -239,7 +240,7 @@ func TestGenerationMigration(t *testing.T) {
 		t.Fatalf("迁移不得改动选定明细（变的只是它解析出的代际）: %q", capJSON)
 	}
 	// 事件：迁移必须可被看到（前端据此提示"能力已更新"）。
-	evt := drainOne(sub, convID, BusSessionResumed)
+	evt := drainOne(sub, convID, session.BusSessionResumed)
 	r.bus.Unsubscribe(sub)
 	if evt == nil {
 		t.Fatal("迁移应发布 session.resumed（reason=generation）")

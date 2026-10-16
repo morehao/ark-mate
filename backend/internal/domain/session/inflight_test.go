@@ -1,4 +1,4 @@
-package manager
+package session
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 // 唯一在途 → SoleOwner 归属；无在途/多会话并发在途 → 空串不猜测；
 // Mark/Unmark 幂等；Clear 作废连接登记；nil client 安全。
 func TestInFlightTracker(t *testing.T) {
-	tr := newInFlightTracker()
+	tr := NewInFlightTracker()
 	// nil client 安全。
 	tr.Mark(nil, "x")
 	if tr.SoleOwner(nil) != "" || tr.Len(nil) != 0 {
@@ -73,7 +73,7 @@ func TestInFlightTracker(t *testing.T) {
 // TestInFlightTrackerConcurrent 并发安全：多 goroutine Mark/Unmark/SoleOwner/Len 竞争下
 // 计数最终归零且不 panic（race 检测覆盖）。
 func TestInFlightTrackerConcurrent(t *testing.T) {
-	tr := newInFlightTracker()
+	tr := NewInFlightTracker()
 	var c acl.Client
 	const (
 		workers = 8

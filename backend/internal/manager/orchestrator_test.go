@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestPromptRunEnded(t *testing.T) {
 	if len(evts) < 3 {
 		t.Fatalf("期望 run.started+user+run.ended，got %d 事件", len(evts))
 	}
-	if evts[0].Type != BusRunStarted || evts[1].Type != BusUserMessage || evts[len(evts)-1].Type != BusRunEnded {
+	if evts[0].Type != session.BusRunStarted || evts[1].Type != session.BusUserMessage || evts[len(evts)-1].Type != session.BusRunEnded {
 		t.Fatalf("事件序列不符: %+v", evts)
 	}
 	// 开轮与终态必须报**同一支** run_id：它们指的是同一轮（runs 行的身份在开轮时就定了）。
@@ -87,7 +88,7 @@ func TestPromptRunEnded(t *testing.T) {
 		t.Fatalf("run.started/run.ended 的 run_id 应同源: started=%q ended=%q", startedID, endedID)
 	}
 	rec, ok := svc.sessions["s1"]
-	if !ok || rec.Status != SessionStatusCompleted {
+	if !ok || rec.Status != session.SessionStatusCompleted {
 		t.Fatalf("会话状态应 completed: %+v", rec)
 	}
 }
@@ -125,10 +126,10 @@ func TestCancelRun(t *testing.T) {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	evts := feed(bus, "s1", 3)
-	if evts[len(evts)-1].Type != BusRunCancelled {
+	if evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
+	if svc.sessions["s1"].Status != session.SessionStatusCancelled {
 		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
 	}
 }
@@ -195,18 +196,18 @@ func TestCancelRunAgentUnresponsive(t *testing.T) {
 		t.Fatalf("CancelRun 被无响应 agent 拖住: %v（agentCancelTimeout=%v）", el, agentCancelTimeout)
 	}
 	evts := feed(bus, "s1", 3)
-	if len(evts) < 3 || evts[len(evts)-1].Type != BusRunCancelled {
+	if len(evts) < 3 || evts[len(evts)-1].Type != session.BusRunCancelled {
 		t.Fatalf("期望 run.cancelled，got %+v", evts)
 	}
-	if svc.sessions["s1"].Status != SessionStatusCancelled {
+	if svc.sessions["s1"].Status != session.SessionStatusCancelled {
 		t.Fatalf("状态应 cancelled: %v", svc.sessions["s1"].Status)
 	}
 }
 
-// TestBusyAttributionHelpers 验证在途归属表（§17 E1：inFlightTracker 语义同 §1.5 修订）：
+// TestBusyAttributionHelpers 验证在途归属表（§17 E1：session.InFlightTracker 语义同 §1.5 修订）：
 // 登记/撤销/唯一性判定/nil 安全（经 Orchestrator 委托方法覆盖）。
 func TestBusyAttributionHelpers(t *testing.T) {
-	orch := &Orchestrator{inflight: newInFlightTracker()}
+	orch := &Orchestrator{inflight: session.NewInFlightTracker()}
 	c1 := &acl.Client{}
 	c2 := &acl.Client{}
 
@@ -290,10 +291,10 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 	svc, orch, _ := newTestRig(t) // 空 runtime 注册表
 	ctx := context.Background()
 	svc.registerSession(&SessionRec{
-		ID: "c-stub", RuntimeID: "stub", Status: SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
+		ID: "c-stub", RuntimeID: "stub", Status: session.SessionStatusInterrupted, // 无 RuntimeSessionID → memo 兜底候选
 	})
 	svc.registerSession(&SessionRec{
-		ID: "c-term", RuntimeID: "no-such-runtime", Status: SessionStatusCompleted,
+		ID: "c-term", RuntimeID: "no-such-runtime", Status: session.SessionStatusCompleted,
 		RuntimeSessionID: "x-1",
 	})
 
@@ -318,12 +319,12 @@ func TestEnsureSessionResumeGating(t *testing.T) {
 // TestHandoffMemoBudget P3 F3 memo 压缩：用户原文收录 + 助手聚合、跨轮分隔、预算截断保最新。
 func TestHandoffMemoBudget(t *testing.T) {
 	svc, _, _ := newTestRig(t)
-	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到A"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "补充A"})
-	svc.publish(BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
-	svc.publish(BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
-	svc.publish(BusMessage, "cv1", map[string]any{"text": "收到B"})
+	svc.publish(session.BusUserMessage, "cv1", map[string]any{"text": "任务A：第一轮要求"})
+	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "收到A"})
+	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "补充A"})
+	svc.publish(session.BusThought, "cv1", map[string]any{"text": "噪音思考"}) // 不入 memo
+	svc.publish(session.BusUserMessage, "cv1", map[string]any{"text": "任务B：第二轮要求"})
+	svc.publish(session.BusMessage, "cv1", map[string]any{"text": "收到B"})
 	svc.flushChunks() // ③ 合并缓冲落盘后再算 memo
 
 	memo := svc.HandoffMemo("cv1", 6000)

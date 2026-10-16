@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ func seedSearchSession(t *testing.T, svc *Service, st *store.Store, id, title st
 	var msgs []model.MessageEntity
 	for i, pair := range texts {
 		role, text := pair[0], pair[1]
-		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, BusUserMessage, map[string]any{"text": text})
+		seq, err := st.AppendEvent(ctx, objid.New(objid.Event), id, session.BusUserMessage, map[string]any{"text": text})
 		if err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
@@ -116,8 +117,8 @@ func TestSearchMessagesTranscriptFallback(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "t-1", Title: "内存会话"})
 	svc.beginTranscript("t-1", "stub", "/tmp", false)
 	defer svc.closeTranscripts()
-	svc.publish(BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
-	svc.publish(BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
+	svc.publish(session.BusUserMessage, "t-1", map[string]any{"text": "内存里的关键词 needle"})
+	svc.publish(session.BusMessage, "t-1", map[string]any{"text": "助手也提到 needle"})
 	// ③ 文本增量攒批：断言前手动落盘（生产由 25ms 窗口 / 终态事件 / 阈值触发）。
 	svc.flushChunks()
 
@@ -142,10 +143,10 @@ func TestExportSessions(t *testing.T) {
 		[2]string{"user", "第一问"},
 		[2]string{"assistant", "第一答"})
 	// 追加思考/工具/终态事件（导出渲染覆盖）。
-	svc.publish(BusThought, "e-1", map[string]any{"text": "先想一下"})
-	svc.publish(BusToolCall, "e-1", map[string]any{"title": "运行 ls", "kind": "execute", "status": "in_progress"})
-	svc.publish(BusRunEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
-	svc.publish(BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
+	svc.publish(session.BusThought, "e-1", map[string]any{"text": "先想一下"})
+	svc.publish(session.BusToolCall, "e-1", map[string]any{"title": "运行 ls", "kind": "execute", "status": "in_progress"})
+	svc.publish(session.BusRunEnded, "e-1", map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusUserMessage, "e-2", map[string]any{"text": "另一会话"})
 
 	for _, format := range []string{"markdown", "text", "json"} {
 		resp, err := svc.ExportSessions(ctx, dtoexport.ExportReq{IDs: []string{"e-1"}, Format: format})

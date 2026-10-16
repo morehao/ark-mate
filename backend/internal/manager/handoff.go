@@ -1,5 +1,7 @@
 package manager
 
+import "github.com/morehao/ark-mate/internal/domain/session"
+
 // HandoffMemo 把会话历史压成 bounded 摘要（§5.6/§18 F3，跨 runtime / 无原生 resume 兜底）。
 // 数据源：eventbus（sqlite 模式重启由 store 回灌 → 恢复后全量可用）；纯 memory 模式进程重启
 // 无历史保留 → 空摘要（best-effort，不臆造内容）。
@@ -27,10 +29,10 @@ func (s *Service) HandoffMemo(sessionID string, maxChars int) string {
 			continue
 		}
 		switch evt.Type {
-		case BusUserMessage:
+		case session.BusUserMessage:
 			segs = append(segs, seg{user: txt})
 			cur = len(segs) - 1
-		case BusMessage:
+		case session.BusMessage:
 			if cur < 0 {
 				segs = append(segs, seg{})
 				cur = len(segs) - 1

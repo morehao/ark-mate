@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
 
@@ -42,19 +43,19 @@ func TestMessagesMaterializedAtRunEnd(t *testing.T) {
 	// 开轮三连（run.started → 开轮行 → 用户消息）：v22 起没有开轮行就没有窗口，
 	// 终态到达时物化会整轮跳过（不是"少一行"，是一行都不产出）。
 	r1, _, _ := beginRun(t, svc, "s-msg", "第一问：关键词甲")
-	svc.publish(BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
-	svc.publish(BusToolCall, "s-msg", map[string]any{
+	svc.publish(session.BusThought, "s-msg", map[string]any{"text": "思考中", "msg_id": "m1"})
+	svc.publish(session.BusToolCall, "s-msg", map[string]any{
 		"tool_call_id": "tc1", "kind": "bash", "input": "ls", "text": "run ls"})
-	svc.publish(BusMessage, "s-msg", map[string]any{"text": "第一段回答，含", "msg_id": "m1"})
-	svc.publish(BusToolUpdate, "s-msg", map[string]any{
+	svc.publish(session.BusMessage, "s-msg", map[string]any{"text": "第一段回答，含", "msg_id": "m1"})
+	svc.publish(session.BusToolUpdate, "s-msg", map[string]any{
 		"tool_call_id": "tc1", "kind": "bash", "output": "a.txt", "ok": true, "text": "done"})
-	svc.publish(BusMessage, "s-msg", map[string]any{"text": "关键词乙", "msg_id": "m1"})
-	endRun(svc, "s-msg", r1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-msg", map[string]any{"text": "关键词乙", "msg_id": "m1"})
+	endRun(svc, "s-msg", r1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	// 第二段（另一轮）换 msg_id → 应拆出新 assistant 行。
 	r2, _, _ := beginRun(t, svc, "s-msg", "第二问")
-	svc.publish(BusMessage, "s-msg", map[string]any{"text": "另一条回答", "msg_id": "m2"})
-	endRun(svc, "s-msg", r2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-msg", map[string]any{"text": "另一条回答", "msg_id": "m2"})
+	endRun(svc, "s-msg", r2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	// 检索面（生产上的唯一消费者）先看：user 行命中 UserMessage 检索。
 	hits, err := st.SearchUserMessages(ctx, "s-msg", "关键词")
@@ -131,11 +132,11 @@ func TestMaterializeIgnoresNonMessageEvents(t *testing.T) {
 	svc, st := newMsgRig(t, "s-ignore")
 
 	runID, _, _ := beginRun(t, svc, "s-ignore", "问一句")
-	svc.publish(BusConfigOptions, "s-ignore", map[string]any{"options": []any{}})
-	svc.publish(BusUsage, "s-ignore", map[string]any{"input_tokens": 3, "output_tokens": 5})
-	svc.publish(BusPermissionRequest, "s-ignore", map[string]any{"request_id": "p1", "title": "t"})
-	svc.publish(BusMessage, "s-ignore", map[string]any{"text": "答一句", "msg_id": "m1"})
-	endRun(svc, "s-ignore", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusConfigOptions, "s-ignore", map[string]any{"options": []any{}})
+	svc.publish(session.BusUsage, "s-ignore", map[string]any{"input_tokens": 3, "output_tokens": 5})
+	svc.publish(session.BusPermissionRequest, "s-ignore", map[string]any{"request_id": "p1", "title": "t"})
+	svc.publish(session.BusMessage, "s-ignore", map[string]any{"text": "答一句", "msg_id": "m1"})
+	endRun(svc, "s-ignore", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	rows, err := queryMessages(ctx, st, "s-ignore")
 	if err != nil {
@@ -163,9 +164,9 @@ func TestMaterializeDropsEmptyAssistantRow(t *testing.T) {
 	svc, st := newMsgRig(t, "s-empty")
 
 	runID, _, _ := beginRun(t, svc, "s-empty", "只思考不回答")
-	svc.publish(BusThought, "s-empty", map[string]any{"text": "想了很多", "msg_id": "m1"})
-	svc.publish(BusUsage, "s-empty", map[string]any{"input_tokens": 1})
-	endRun(svc, "s-empty", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusThought, "s-empty", map[string]any{"text": "想了很多", "msg_id": "m1"})
+	svc.publish(session.BusUsage, "s-empty", map[string]any{"input_tokens": 1})
+	endRun(svc, "s-empty", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	rows, err := queryMessages(ctx, st, "s-empty")
 	if err != nil {
@@ -176,8 +177,8 @@ func TestMaterializeDropsEmptyAssistantRow(t *testing.T) {
 	}
 	// 空文本的 message 增量同样不产行（`text = ''` 是白名单事件，但不产空行）。
 	r2, _, _ := beginRun(t, svc, "s-empty", "空回复")
-	svc.publish(BusMessage, "s-empty", map[string]any{"text": "", "msg_id": "m2"})
-	endRun(svc, "s-empty", r2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-empty", map[string]any{"text": "", "msg_id": "m2"})
+	endRun(svc, "s-empty", r2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	if rows, err = queryMessages(ctx, st, "s-empty"); err != nil || len(rows) != 2 {
 		t.Fatalf("空正文增量不该产行: %d 行 err=%v", len(rows), err)
 	}
@@ -190,8 +191,8 @@ func TestMaterializeFailedRunWithNoAssistantText(t *testing.T) {
 	svc, st := newMsgRig(t, "s-fail")
 
 	runID, _, _ := beginRun(t, svc, "s-fail", "会失败的一问")
-	svc.publish(BusToolCall, "s-fail", map[string]any{"tool_call_id": "tc1", "title": "bash"})
-	endRun(svc, "s-fail", runID, BusRunError, map[string]any{"code": "runtime_error", "class": "runtime"})
+	svc.publish(session.BusToolCall, "s-fail", map[string]any{"tool_call_id": "tc1", "title": "bash"})
+	endRun(svc, "s-fail", runID, session.BusRunError, map[string]any{"code": "runtime_error", "class": "runtime"})
 
 	rows, err := queryMessages(ctx, st, "s-fail")
 	if err != nil {
@@ -204,7 +205,7 @@ func TestMaterializeFailedRunWithNoAssistantText(t *testing.T) {
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("轮次行应在: %+v err=%v", runs, err)
 	}
-	if runs[0].Status != SessionStatusFailed || runs[0].ErrorCode != "runtime_error" {
+	if runs[0].Status != session.SessionStatusFailed || runs[0].ErrorCode != "runtime_error" {
 		t.Fatalf("失败事实应在 runs 行上: %+v", runs[0])
 	}
 }
@@ -220,8 +221,8 @@ func TestMessageOrdinalIsDensePerSession(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		suffix := string(rune('A' + i))
 		runID, _, _ := beginRun(t, svc, "s-ord", "第 "+suffix+" 问")
-		svc.publish(BusMessage, "s-ord", map[string]any{"text": "答" + suffix, "msg_id": "m" + suffix})
-		endRun(svc, "s-ord", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+		svc.publish(session.BusMessage, "s-ord", map[string]any{"text": "答" + suffix, "msg_id": "m" + suffix})
+		endRun(svc, "s-ord", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	}
 
 	rows, err := queryMessages(ctx, st, "s-ord")
@@ -247,12 +248,12 @@ func TestRebuildIsIdempotent(t *testing.T) {
 	svc, st := newMsgRig(t, "s-idem")
 
 	r1, _, _ := beginRun(t, svc, "s-idem", "第一问")
-	svc.publish(BusThought, "s-idem", map[string]any{"text": "想", "msg_id": "t1"})
-	svc.publish(BusMessage, "s-idem", map[string]any{"text": "答一", "msg_id": "m1"})
-	endRun(svc, "s-idem", r1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusThought, "s-idem", map[string]any{"text": "想", "msg_id": "t1"})
+	svc.publish(session.BusMessage, "s-idem", map[string]any{"text": "答一", "msg_id": "m1"})
+	endRun(svc, "s-idem", r1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	r2, _, _ := beginRun(t, svc, "s-idem", "第二问")
-	svc.publish(BusMessage, "s-idem", map[string]any{"text": "答二", "msg_id": "m2"})
-	endRun(svc, "s-idem", r2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-idem", map[string]any{"text": "答二", "msg_id": "m2"})
+	endRun(svc, "s-idem", r2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	before, err := queryMessages(ctx, st, "s-idem")
 	if err != nil {
@@ -304,8 +305,8 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	svc.EnableStore(st)
 	svc.registerSession(&SessionRec{ID: "s-s"})
 	runID, _, _ := beginRun(t, svc, "s-s", "帮我部署 mate 服务")
-	svc.publish(BusMessage, "s-s", map[string]any{"text": "好的"})
-	endRun(svc, "s-s", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-s", map[string]any{"text": "好的"})
+	endRun(svc, "s-s", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	hits, err := svc.SearchSessions(ctx, "部署", 5)
 	if err != nil {

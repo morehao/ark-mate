@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"regexp"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestUpdateSessionModelStoresPlatformID(t *testing.T) {
 	// 会话记录直接登记（不经 ACP）：`UpdateSession` 找不到活句柄时会走"只更新元数据"那一支。
 	seed := func(id string) {
 		r.svc.registerSession(&SessionRec{ID: id, Cwd: t.TempDir(), RuntimeID: r.runtme,
-			Status: SessionStatusInProgress})
+			Status: session.SessionStatusInProgress})
 	}
 	readModel := func(id string) string {
 		got, ok, err := r.svc.st.GetSession(ctx, id)

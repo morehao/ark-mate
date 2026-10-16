@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"regexp"
 	"testing"
 	"time"
@@ -39,15 +40,15 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	// 开轮即落行：此刻这一轮**在库里**（v22 之前要等终态才有行）。
 	if rows, err := st.ListRuns(ctx, "s-run"); err != nil || len(rows) != 1 {
 		t.Fatalf("开轮后应 1 条 run: n=%d err=%v", len(rows), err)
-	} else if rows[0].Status != SessionStatusInProgress || rows[0].LastSeq != -1 || !rows[0].EndedAt.IsZero() {
+	} else if rows[0].Status != session.SessionStatusInProgress || rows[0].LastSeq != -1 || !rows[0].EndedAt.IsZero() {
 		t.Fatalf("进行中的行应 status=running / last_seq=-1 / ended_at 空: %+v", rows[0])
 	}
-	svc.publish(BusMessage, "s-run", map[string]any{"text": "回答一"})
-	end1 := endRun(svc, "s-run", r1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-run", map[string]any{"text": "回答一"})
+	end1 := endRun(svc, "s-run", r1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	// 第二轮：失败。
 	r2, s2, _ := beginRun(t, svc, "s-run", "第二问（会失败）")
-	errEnd := endRun(svc, "s-run", r2, BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
+	errEnd := endRun(svc, "s-run", r2, session.BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
 	runs, err := st.ListRuns(ctx, "s-run")
 	if err != nil || len(runs) != 2 {
@@ -60,13 +61,13 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	if !runIDShape.MatchString(r0.ID) {
 		t.Fatalf("run id 应为 %s 形状: %q", runIDShape, r0.ID)
 	}
-	if r0.Status != SessionStatusCompleted || r0.UserText != "第一问" || r0.StopReason != "end_turn" {
+	if r0.Status != session.SessionStatusCompleted || r0.UserText != "第一问" || r0.StopReason != "end_turn" {
 		t.Fatalf("run0 不符: %+v", r0)
 	}
 	if r0.FirstSeq != s1.Seq || r0.LastSeq != end1.Seq {
 		t.Fatalf("run0 窗口应为「run.started → 终态」: %+v (s1=%d end1=%d)", r0, s1.Seq, end1.Seq)
 	}
-	if r1row.ID != r2 || r1row.Status != SessionStatusFailed || r1row.UserText != "第二问（会失败）" || r1row.ErrorCode != "agent_error" {
+	if r1row.ID != r2 || r1row.Status != session.SessionStatusFailed || r1row.UserText != "第二问（会失败）" || r1row.ErrorCode != "agent_error" {
 		t.Fatalf("run1 不符: %+v", r1row)
 	}
 	if r1row.FirstSeq != s2.Seq || r1row.LastSeq != errEnd.Seq {
@@ -85,7 +86,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRuns: n=%d err=%v", len(items), err)
 	}
-	if items[1].ErrorCode != "agent_error" || items[0].Status != SessionStatusCompleted {
+	if items[1].ErrorCode != "agent_error" || items[0].Status != session.SessionStatusCompleted {
 		t.Fatalf("ListRuns 内容不符: %+v", items)
 	}
 
@@ -113,11 +114,11 @@ func TestRunWindowStartsAtRunStarted(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "s-win"})
 
 	// 会话前置事件（真实路径由 session_start / ensureSession 发出，先于本轮 run.started）。
-	svc.publish(BusSessionCreated, "s-win", map[string]any{"session_id": "s-win", "runtime": "stub"})
-	svc.publish(BusSessionResumed, "s-win", map[string]any{"session_id": "s-win", "reason": "restart"})
+	svc.publish(session.BusSessionCreated, "s-win", map[string]any{"session_id": "s-win", "runtime": "stub"})
+	svc.publish(session.BusSessionResumed, "s-win", map[string]any{"session_id": "s-win", "reason": "restart"})
 	runID, started, u := beginRun(t, svc, "s-win", "你好")
-	svc.publish(BusMessage, "s-win", map[string]any{"msg_id": "m1", "text": "你好呀"})
-	end := endRun(svc, "s-win", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-win", map[string]any{"msg_id": "m1", "text": "你好呀"})
+	end := endRun(svc, "s-win", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	runs, err := st.ListRuns(ctx, "s-win")
 	if err != nil || len(runs) != 1 {
@@ -151,7 +152,7 @@ func TestRunWindowStartsAtRunStarted(t *testing.T) {
 	if !found || !r.StartedAt.Equal(startedEv.CreatedAt) {
 		t.Fatalf("run 起点应为 run.started 事件时刻 %s，got %s", startedEv.CreatedAt, r.StartedAt)
 	}
-	if r.Status != SessionStatusCompleted || r.UserText != "你好" {
+	if r.Status != session.SessionStatusCompleted || r.UserText != "你好" {
 		t.Fatalf("run 内容不符: %+v", r)
 	}
 	rows, err := st.ListMessages(ctx, "s-win")
@@ -183,8 +184,8 @@ func TestOpenRunIsIdempotent(t *testing.T) {
 
 	// 两条真实的 `run.started`（开轮行的起点**必须**是库里真有的那条事件：位次或 type 对不上
 	// 时 `openRun` 会跳过——给不存在的起点插行等于让终态去收口别的事件）。
-	startedA := svc.publish(BusRunStarted, "s-idem", map[string]any{"session_id": "s-idem", "text": "a"})
-	startedB := svc.publish(BusRunStarted, "s-idem", map[string]any{"session_id": "s-idem", "text": "b"})
+	startedA := svc.publish(session.BusRunStarted, "s-idem", map[string]any{"session_id": "s-idem", "text": "a"})
+	startedB := svc.publish(session.BusRunStarted, "s-idem", map[string]any{"session_id": "s-idem", "text": "b"})
 
 	// 同一轮的起点重放两次，用的是**不同 id**（模拟"重铸后再重放"）。
 	svc.openRun("s-idem", objid.New(objid.Run), "重复投递的输入", startedA.Seq)
@@ -202,7 +203,7 @@ func TestOpenRunIsIdempotent(t *testing.T) {
 		t.Fatalf("同 (session_id, first_seq) 与同 id 的重放都不该插新行: %+v", rows)
 	}
 	for _, r := range rows {
-		if r.Status != SessionStatusInProgress || r.LastSeq != -1 || r.FirstSeq < 0 {
+		if r.Status != session.SessionStatusInProgress || r.LastSeq != -1 || r.FirstSeq < 0 {
 			t.Fatalf("开轮行形状不符: %+v", r)
 		}
 	}
@@ -229,7 +230,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 	svc1.EnableStore(st1)
 	svc1.registerSession(&SessionRec{ID: "s-crash"})
 	runID, started, _ := beginRun(t, svc1, "s-crash", "这一轮会中断")
-	svc1.publish(BusMessage, "s-crash", map[string]any{"text": "答到一半"})
+	svc1.publish(session.BusMessage, "s-crash", map[string]any{"text": "答到一半"})
 	svc1.flushChunks() // 增量先落盘（否则丢失的不是本用例要验的东西）
 	_ = st1.Close()    // 进程没了：没有终态事件
 
@@ -240,7 +241,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 		t.Fatalf("重启后应仍有 1 条 run: n=%d err=%v", len(rows), err)
 	}
 	r := rows[0]
-	if r.ID != runID || r.Status != SessionStatusInProgress || r.LastSeq != -1 || !r.EndedAt.IsZero() {
+	if r.ID != runID || r.Status != session.SessionStatusInProgress || r.LastSeq != -1 || !r.EndedAt.IsZero() {
 		t.Fatalf("中断的轮应原样留在库里: %+v", r)
 	}
 	if r.FirstSeq != started.Seq || r.UserText != "这一轮会中断" {
@@ -252,7 +253,7 @@ func TestRunningRunSurvivesRestart(t *testing.T) {
 	if _, _, err := svc2.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
-	if rows, err := st2.ListRuns(ctx, "s-crash"); err != nil || len(rows) != 1 || rows[0].Status != SessionStatusInProgress {
+	if rows, err := st2.ListRuns(ctx, "s-crash"); err != nil || len(rows) != 1 || rows[0].Status != session.SessionStatusInProgress {
 		t.Fatalf("恢复不应改写 running 行: %+v err=%v", rows, err)
 	}
 }
@@ -326,8 +327,8 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 	svc.registerSession(&SessionRec{ID: "s-repair"})
 
 	runID, started, _ := beginRun(t, svc, "s-repair", "重建这一轮")
-	svc.publish(BusMessage, "s-repair", map[string]any{"text": "答一"})
-	end := endRun(svc, "s-repair", runID, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "s-repair", map[string]any{"text": "答一"})
+	end := endRun(svc, "s-repair", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 	if rows, err := st.ListRuns(ctx, "s-repair"); err != nil || len(rows) != 1 {
 		t.Fatalf("夹具应已物化 1 条 run: %+v err=%v", rows, err)
 	}
@@ -352,7 +353,7 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 	if r.ID != runID || r.FirstSeq != started.Seq || r.UserText != "重建这一轮" {
 		t.Fatalf("补出来的行身份/起点/输入不符（应全部取自 run.started）: %+v", r)
 	}
-	if r.Status != SessionStatusCompleted || r.StopReason != "end_turn" || r.LastSeq != end.Seq || r.EndedAt.IsZero() {
+	if r.Status != session.SessionStatusCompleted || r.StopReason != "end_turn" || r.LastSeq != end.Seq || r.EndedAt.IsZero() {
 		t.Fatalf("补出来的行必须用日志里的终态收口（不是留在 running 的幽灵行）: %+v", r)
 	}
 	msgs, err := st.ListMessages(ctx, "s-repair")

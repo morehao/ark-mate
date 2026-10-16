@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"testing"
 	"time"
@@ -34,15 +35,15 @@ func TestUsageSummaryService(t *testing.T) {
 
 	// 每轮都走开轮三连（v22：轮次是实体，没有开轮行就没有 runs 行可聚合）。
 	runA1, _, _ := beginRun(t, svc, "u1", "第一问")
-	svc.publish(BusMessage, "u1", map[string]any{"text": "答一"})
-	endRun(svc, "u1", runA1, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	svc.publish(session.BusMessage, "u1", map[string]any{"text": "答一"})
+	endRun(svc, "u1", runA1, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	orch.recordUsage("u1", objusage.UsageInfo{Used: 250, Size: 1000, CostAmount: 0.5, CostCurrency: "USD"})
 	runA2, _, _ := beginRun(t, svc, "u1", "第二问")
-	endRun(svc, "u1", runA2, BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+	endRun(svc, "u1", runA2, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
 	runB1, _, _ := beginRun(t, svc, "u2", "第三问")
-	endRun(svc, "u2", runB1, BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
+	endRun(svc, "u2", runB1, session.BusRunError, map[string]any{"code": "agent_error", "class": "agent"})
 
 	resp, err := svc.UsageSummary(ctx, dtousage.UsageQueryReq{})
 	if err != nil {
@@ -147,8 +148,8 @@ func TestOrchestratorUsageEvent(t *testing.T) {
 
 	select {
 	case e := <-sub.C:
-		if e.Type != BusUsage || e.AggregID != "c1" {
-			t.Fatalf("期望 %s/c1，got %s/%s", BusUsage, e.Type, e.AggregID)
+		if e.Type != session.BusUsage || e.AggregID != "c1" {
+			t.Fatalf("期望 %s/c1，got %s/%s", session.BusUsage, e.Type, e.AggregID)
 		}
 		p, _ := e.Payload.(map[string]any)
 		if p["session_id"] != "c1" || p["runtime"] != "stub" ||

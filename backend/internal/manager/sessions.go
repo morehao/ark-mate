@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"sort"
 	"strings"
 	"time"
@@ -360,7 +361,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 			return nil, code.FromError(err)
 		}
 		resp.EventSeq = seq
-		resp.Status = SessionStatusInProgress
+		resp.Status = session.SessionStatusInProgress
 	}
 	return resp, nil
 }
@@ -390,7 +391,7 @@ func (s *Service) PromptSession(ctx context.Context, id string, req dtosession.P
 		return nil, code.FromError(err)
 	}
 	return &dtosession.SessionPromptResp{
-		ID: id, Status: SessionStatusInProgress, EventSeq: out.EventSeq,
+		ID: id, Status: session.SessionStatusInProgress, EventSeq: out.EventSeq,
 		Queued: out.Queued, InputID: out.InputID,
 	}, nil
 }
@@ -410,7 +411,7 @@ func (s *Service) DeleteQueuedInput(ctx context.Context, id, inputID string) (bo
 		if rec := s.sessionRec(id); rec != nil {
 			runtimeID = rec.RuntimeID
 		}
-		s.publish(BusInputCancelled, id, map[string]any{
+		s.publish(session.BusInputCancelled, id, map[string]any{
 			"session_id": id, "runtime": runtimeID, "input_id": inputID, "reason": ReasonUserCancel,
 		})
 	}

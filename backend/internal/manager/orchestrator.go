@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,9 +101,9 @@ type Orchestrator struct {
 	byProvider map[string]string
 	reapStop   context.CancelFunc // 空闲回收 goroutine 停止（Close 时调用）
 
-	// inflight 记录每连接上正在执行 run 的会话（inFlightTracker：§17 E1 显式化簿记，
+	// inflight 记录每连接上正在执行 run 的会话（session.InFlightTracker：§17 E1 显式化簿记，
 	// 语义同 §1.5 决策修订——连接上唯一在途才归属，多会话并发在途不猜测）。
-	inflight *inFlightTracker
+	inflight *session.InFlightTracker
 	// migMu 串行化代际迁移（M3-6）：罕见操作，一把全局锁足够；不设它会两个并发轮次各迁一次。
 	migMu    sync.Mutex
 	allowAll bool // 调试/冒烟用：放行一切权限请求（默认拒绝）
@@ -208,7 +209,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		conns:           make(map[string]*runtimeConn),
 		sessions:        make(map[string]*ActiveSession),
 		byProvider:      make(map[string]string),
-		inflight:        newInFlightTracker(),
+		inflight:        session.NewInFlightTracker(),
 		perm:            interaction.NewPermissionManager(interaction.DefaultPermissionTimeout),
 		elic:            interaction.NewElicitationManager(interaction.DefaultElicitationTimeout),
 		usage:           make(map[string]objusage.UsageInfo),
@@ -222,7 +223,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 		if d.Allowed || (d.Rejected && d.OptionID != "") {
 			outcome = "selected"
 		}
-		o.svc.publish(BusPermissionResolved, sessionID, map[string]any{
+		o.svc.publish(session.BusPermissionResolved, sessionID, map[string]any{
 			"session_id": sessionID,
 			"call_id":    callID,
 			"outcome":    outcome,
@@ -238,7 +239,7 @@ func NewOrchestrator(svc *Service, reg *runtime.Registry) *Orchestrator {
 	// 挂起提问一旦有终局（accept/decline/cancel/超时自动取消/会话取消），发布收敛事件
 	// （session.elicitation_resolved），前端据此收敛提问卡——服务端事件是唯一事实。
 	o.elic.SetOnResolved(func(sessionID, id, reason string, d acl.ElicitationOutcome) {
-		o.svc.publish(BusElicitationResolved, sessionID, map[string]any{
+		o.svc.publish(session.BusElicitationResolved, sessionID, map[string]any{
 			"session_id":     sessionID,
 			"elicitation_id": id,
 			"action":         d.Action,
@@ -327,7 +328,7 @@ func (o *Orchestrator) Close() {
 		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
 		rc.intentional.Store(true)
 		o.disconnectSessionAll(rc)
-		o.svc.setRuntimeState(AgentStateStopped)
+		o.svc.setRuntimeState(session.AgentStateStopped)
 		o.unregisterProc(rc)
 		if rc.client != nil {
 			_ = rc.client.Close()

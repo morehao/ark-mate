@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 		t.Fatalf("期望回灌 1 个会话，got %d: %+v", len(sessions), sessions)
 	}
 	s := sessions[0]
-	if s.ID != sesLegacyA || s.Title != "列出当前目录文件" || s.Status != SessionStatusCompleted {
+	if s.ID != sesLegacyA || s.Title != "列出当前目录文件" || s.Status != session.SessionStatusCompleted {
 		t.Fatalf("回灌元数据不符: %+v", s)
 	}
 	if s.CreatedAt == "" || s.UpdatedAt == "" {
@@ -83,7 +84,7 @@ func TestLoadTranscriptsReseed(t *testing.T) {
 	if len(hist.Events) != 3 {
 		t.Fatalf("期望注入 3 条事件，got %d", len(hist.Events))
 	}
-	if hist.Events[0].AggregID != sesLegacyA || hist.Events[2].Type != BusRunEnded {
+	if hist.Events[0].AggregID != sesLegacyA || hist.Events[2].Type != session.BusRunEnded {
 		t.Fatalf("注入事件不符: %+v", hist.Events)
 	}
 	// v17：身份与位次都**原样恢复**（不再按行号重铸 seq）。
@@ -122,10 +123,10 @@ func TestMemoryModeRestartKeepsEventIdentity(t *testing.T) {
 	svc1 := NewService(reg, bus1)
 	svc1.SetTranscriptDir(dir)
 	svc1.beginTranscript(sesLegacyA, "rtx", "/tmp", false)
-	svc1.publish(BusUserMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a1"})
+	svc1.publish(session.BusUserMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a1"})
 	svc1.beginTranscript(sesLegacyB, "rtx", "/tmp", false)
-	svc1.publish(BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
-	svc1.publish(BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
+	svc1.publish(session.BusMessage, sesLegacyB, map[string]any{"session_id": sesLegacyB, "text": "b1"})
+	svc1.publish(session.BusMessage, sesLegacyA, map[string]any{"session_id": sesLegacyA, "text": "a2"})
 	svc1.closeTranscripts()
 	before := bus1.EventsAll()
 	if len(before) != 3 {
@@ -335,7 +336,7 @@ func TestLoadTranscriptsNoTerminal(t *testing.T) {
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	svc.SetTranscriptDir(dir)
 	sessions, _ := svc.ListSessions(false, "", "")
-	if len(sessions) != 1 || sessions[0].Status != SessionStatusInProgress {
+	if len(sessions) != 1 || sessions[0].Status != session.SessionStatusInProgress {
 		t.Fatalf("无终态应为 in_progress: %+v", sessions)
 	}
 }

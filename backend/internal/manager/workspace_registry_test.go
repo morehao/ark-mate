@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -342,7 +343,7 @@ func seedStoreSession(t *testing.T, st *store.Store, id, cwd, workspaceID string
 	now := time.Now().UTC()
 	if err := st.UpsertSession(context.Background(), model.SessionEntity{
 		ID: id, Cwd: cwd, WorkspaceID: workspaceID,
-		Status: SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
+		Status: session.SessionStatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("写会话行 %s: %v", id, err)
 	}

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"testing"
 
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -20,8 +21,8 @@ func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
 	// 第一次进程：登记一个中断中 + 一个已完成会话（写库）。
 	s1 := NewService(reg, eventbus.New())
 	s1.EnableStore(st)
-	s1.registerSession(&SessionRec{ID: "s-int", Status: SessionStatusInProgress})
-	s1.registerSession(&SessionRec{ID: "s-done", Status: SessionStatusCompleted})
+	s1.registerSession(&SessionRec{ID: "s-int", Status: session.SessionStatusInProgress})
+	s1.registerSession(&SessionRec{ID: "s-done", Status: session.SessionStatusCompleted})
 
 	// 第二次进程（重启）：恢复后 in_progress → interrupted，completed 原样保留。
 	s2 := NewService(reg, eventbus.New())
@@ -29,10 +30,10 @@ func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
 	if _, _, err := s2.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("RestoreFromStore: %v", err)
 	}
-	if got := s2.sessionRec("s-int"); got == nil || got.Status != SessionStatusInterrupted {
+	if got := s2.sessionRec("s-int"); got == nil || got.Status != session.SessionStatusInterrupted {
 		t.Fatalf("s-int 应收敛为 interrupted, got %+v", got)
 	}
-	if got := s2.sessionRec("s-done"); got == nil || got.Status != SessionStatusCompleted {
+	if got := s2.sessionRec("s-done"); got == nil || got.Status != session.SessionStatusCompleted {
 		t.Fatalf("s-done 不应被改动: %+v", got)
 	}
 	// DB 侧同步更新（再次重启也保持 interrupted）。
@@ -41,7 +42,7 @@ func TestRestoreMarksInProgressAsInterrupted(t *testing.T) {
 	if _, _, err := s3.RestoreFromStore(ctx); err != nil {
 		t.Fatalf("二次 RestoreFromStore: %v", err)
 	}
-	if got := s3.sessionRec("s-int"); got == nil || got.Status != SessionStatusInterrupted {
+	if got := s3.sessionRec("s-int"); got == nil || got.Status != session.SessionStatusInterrupted {
 		t.Fatalf("二次重启仍应为 interrupted: %+v", got)
 	}
 }

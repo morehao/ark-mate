@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +37,8 @@ func TestTranscriptJSONL(t *testing.T) {
 	defer svc.closeTranscripts()
 
 	svc.beginTranscript("s1", "rtx", "/tmp", false)
-	svc.publish(BusUserMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "text": "hi"})
-	svc.publish(BusMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "text": "hello"})
+	svc.publish(session.BusUserMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "text": "hi"})
+	svc.publish(session.BusMessage, "s1", map[string]any{"session_id": "s1", "runtime": "rtx", "text": "hello"})
 	svc.closeTranscripts()
 
 	path := filepath.Join(dir, "s1.jsonl")
@@ -61,7 +62,7 @@ func TestTranscriptJSONL(t *testing.T) {
 		t.Fatalf("行1 解析失败: %v", err)
 	}
 	// 下界是 0（v21 起会话第一条事件的位次就是 0；`<= 0` 会把正常行判成缺位次）。
-	if l1.Type != BusUserMessage || l1.Seq < 0 || l1.Payload["text"] != "hi" {
+	if l1.Type != session.BusUserMessage || l1.Seq < 0 || l1.Payload["text"] != "hi" {
 		t.Fatalf("行1 不符: %+v", l1)
 	}
 	var l2 wireTranscriptLine
@@ -96,9 +97,9 @@ func TestSessionHistoryPaging(t *testing.T) {
 
 	// ③ 文本增量合并：不同 msg_id = 不同消息，5 条各自成事件（断言前 flush 落盘）。
 	for i := 0; i < 5; i++ {
-		svc.publish(BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": "msg"})
+		svc.publish(session.BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": "msg"})
 	}
-	svc.publish(BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
+	svc.publish(session.BusThought, "s2", map[string]any{"text": "other"}) // 另一聚合不混入
 	svc.flushChunks()
 
 	// `After: -1` 显式声明"从头"：v21 起 `After` 的零值 0 表示"位次 0 之后"（会跳过第 0 条），
@@ -196,9 +197,9 @@ func TestSessionHistoryStoreBacked(t *testing.T) {
 	svc.EnableStore(st)
 	svc.registerSession(&SessionRec{ID: "s1"})
 	for i := 0; i < 5; i++ {
-		svc.publish(BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": fmt.Sprintf("m%d", i)})
+		svc.publish(session.BusMessage, "s1", map[string]any{"msg_id": fmt.Sprintf("m%d", i), "text": fmt.Sprintf("m%d", i)})
 	}
-	svc.publish(BusMessage, "s2", map[string]any{"text": "other"})
+	svc.publish(session.BusMessage, "s2", map[string]any{"text": "other"})
 	svc.flushChunks()
 
 	// 向后分页（after）。

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 	"github.com/morehao/golib/glog"
@@ -25,7 +26,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 		var payload any
 		switch ev.Kind {
 		case acl.KindMessage:
-			typ = BusMessage
+			typ = session.BusMessage
 			if d, ok := ev.Payload.(acl.MessageDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
@@ -33,7 +34,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 				}
 			}
 		case acl.KindThought:
-			typ = BusThought
+			typ = session.BusThought
 			if d, ok := ev.Payload.(acl.ThoughtDelta); ok {
 				payload = map[string]any{"session_id": ev.SessionID, "runtime": runtimeID, "text": d.Text}
 				if d.MessageID != "" {
@@ -41,22 +42,22 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 				}
 			}
 		case acl.KindToolCall:
-			typ = BusToolCall
+			typ = session.BusToolCall
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
 				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
 		case acl.KindToolUpdate:
-			typ = BusToolUpdate
+			typ = session.BusToolUpdate
 			if d, ok := ev.Payload.(acl.ToolCallInfo); ok {
 				payload = toolPayload(ev.SessionID, runtimeID, d)
 			}
 		case acl.KindUserMessage:
-			// 用户消息以宿主侧 Prompt 提交时发布的 BusUserMessage（orchestrator.Prompt）为唯一来源；
+			// 用户消息以宿主侧 Prompt 提交时发布的 session.BusUserMessage（orchestrator.Prompt）为唯一来源；
 			// agent 回传的 user_message 只是会话镜像（normalizeUpdate 归一），若再转发会造成
 			// 同一条用户输入在流/历史里双入。这里丢弃镜像，不再发布。
 			glog.Debugw(context.Background(), "skip agent-echoed user_message (host publishes user input)", "session", ev.SessionID)
 		case acl.KindUsage:
-			typ = BusUsage
+			typ = session.BusUsage
 			// ev.SessionID 已在上方解析为平台会话 uuid（cid）。
 			p := map[string]any{"session_id": ev.SessionID, "runtime": runtimeID}
 			if d, ok := ev.Payload.(objusage.UsageInfo); ok {
@@ -68,7 +69,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 			}
 			payload = p
 		case acl.KindPermission:
-			typ = BusPermission
+			typ = session.BusPermission
 			payload = ev.Payload
 		case acl.KindConfigOptions:
 			// 运行时主动推送全量配置项（dsh 在 provider 拓扑变化时推）：
@@ -77,7 +78,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 				if d.SessionID != "" {
 					o.svc.catalog.put(runtimeID, d.Options)
 				}
-				typ = BusConfigOptions
+				typ = session.BusConfigOptions
 				payload = map[string]any{
 					"session_id": ev.SessionID,
 					"runtime":    runtimeID,
@@ -89,7 +90,7 @@ func (o *Orchestrator) eventSink(runtimeID string) func(acl.Event) {
 			// 纯转发：平台不缓存、不合并、不做会话快照——会话重开时本事件经 since_seq
 			// 全量回放即可重建，故无需 REST 读端点（ADR-17）。
 			if d, ok := ev.Payload.(acl.CommandsInfo); ok {
-				typ = BusCommands
+				typ = session.BusCommands
 				payload = map[string]any{
 					"session_id": ev.SessionID,
 					"runtime":    runtimeID,
@@ -161,5 +162,5 @@ func (o *Orchestrator) publishError(sessionID, runID string, err error, cli *acl
 	if len(tail) > 0 {
 		payload["stderr_tail"] = tail
 	}
-	o.svc.publish(BusRunError, sessionID, payload)
+	o.svc.publish(session.BusRunError, sessionID, payload)
 }

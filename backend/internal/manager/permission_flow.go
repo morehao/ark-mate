@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	interaction "github.com/morehao/ark-mate/internal/domain/interaction"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"time"
 
 	"github.com/morehao/ark-mate/pkg/acl"
@@ -30,7 +31,7 @@ func (o *Orchestrator) requestPermission(ctx context.Context, req acl.Permission
 		return d
 	}
 	publish := func(callID, title string, tool acl.ToolCallInfo, opts []acl.PermissionOption, timeout time.Time) {
-		o.svc.publish(BusPermissionRequest, sid, map[string]any{
+		o.svc.publish(session.BusPermissionRequest, sid, map[string]any{
 			"session_id":   sid,
 			"call_id":      callID,
 			"title":        title,
@@ -192,7 +193,7 @@ func (o *Orchestrator) requestElicitation(ctx context.Context, req acl.Elicitati
 		} else {
 			payload["url"] = it.URL
 		}
-		o.svc.publish(BusElicitationRequest, sid, payload)
+		o.svc.publish(session.BusElicitationRequest, sid, payload)
 	}
 	return o.elic.RegisterAndWait(ctx, sid, req, publish)
 }

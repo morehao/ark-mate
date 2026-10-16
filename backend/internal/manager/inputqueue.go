@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"strings"
 	"time"
 
@@ -254,7 +255,7 @@ func (s *Service) staleQueuedInputsOnRestore(ctx context.Context) {
 	glog.Warnw(ctx, "重启前有排队未投递的输入，已全部置作废（未被投递；请在会话里重发）", "count", n)
 	for _, r := range pending {
 		// 会话身份此刻未必可知（会话尚未重建）；载荷以 input_id 为准，前端按 id 收敛。
-		s.publish(BusInputCancelled, r.SessionID, map[string]any{
+		s.publish(session.BusInputCancelled, r.SessionID, map[string]any{
 			"session_id": r.SessionID, "input_id": r.ID,
 			"delivery": r.Delivery, "reason": ReasonStale,
 		})
@@ -289,13 +290,13 @@ func (o *Orchestrator) deliverQueued(as *ActiveSession) {
 	// 前端会看到队列项凭空消失而其文本从未作为 user_message 出现过。
 	if _, err := o.Prompt(context.Background(), as.ID, q.Text); err != nil {
 		glog.Warnw(context.Background(), "排队输入投递失败", "session", as.ID, "input_id", q.ID, "err", err)
-		o.svc.publish(BusInputCancelled, as.ID, map[string]any{
+		o.svc.publish(session.BusInputCancelled, as.ID, map[string]any{
 			"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
 			"delivery": q.Delivery, "reason": ReasonDeliverFail,
 		})
 		return
 	}
-	o.svc.publish(BusInputDelivered, as.ID, map[string]any{
+	o.svc.publish(session.BusInputDelivered, as.ID, map[string]any{
 		"session_id": as.ID, "runtime": as.Runtime, "input_id": q.ID,
 		"delivery": q.Delivery, "reason": ReasonRunFinished,
 	})
