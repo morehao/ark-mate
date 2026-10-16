@@ -98,7 +98,7 @@ func workspaceMatches(recWorkspaceID, wantID, defaultID string) bool {
 // 否则下一个人会顺手在这里加一次查库，而症状是偶发死锁。
 func (pl *Plane) ToSessionRespOf(r *SessionRec) dtosession.SessionResp {
 	return dtosession.SessionResp{
-		Capabilities:       pl.capabilityViewOf(r),
+		Capabilities:       pl.SessionCapabilitiesRespOf(r),
 		ID:                 r.ID,
 		RuntimeSessionID:   r.RuntimeSessionID,
 		RuntimeID:          r.RuntimeID,

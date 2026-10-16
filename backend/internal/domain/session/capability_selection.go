@@ -1,4 +1,4 @@
-package manager
+package session
 
 import (
 	"context"
@@ -7,14 +7,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/golib/glog"
 )
 
 // ——— M3 能力选定（会话级子集） ———
 //
-// 语义只有三态，且**逐 kind 独立**（与 AgentRec.Mcps 同构）：
+// 语义只有三态，且**逐 kind 独立**：
 //
-//	nil           该 kind 未声明 → 回落上一层（MCP 走 agent.Mcps 白名单；skill 走 runtimes 声明）
+//	nil           该 kind 未声明 → 回落上一层（skill 走它自己的 runtimes 声明）
 //	非 nil 空数组  **这一类一个都不要**（不是"全部"——那样用户就没法表达"这个会话不要任何 MCP"）
 //	非 nil 非空    白名单
 //
@@ -22,10 +23,13 @@ import (
 // `nil` = 未传（缺省路径，**行为与引入代际之前逐字相同**）；非 nil = 声明了（哪怕字段全空）。
 // 这个区分是刻意的：代际绑定是"用户钉住了一套能力"，而"什么都没填"是一个合法的钉子
 // （代价只是可能多一个内容相同但指纹不同的代际，属于可见的浪费，不是静默的错误行为）。
+//
+// P3c：随 `capability_fingerprint.go` 从 `internal/manager` 搬进会话域——它是**会话钉住的
+// 那一份选定**（落 `sessions.capability_json` 列、进代际指纹），归属会话这个聚合。
 type CapabilitySelection struct {
 	// Skills 选定的 skill id 白名单（nil = 未声明 → 按 skill 自己的 runtimes 声明投放）。
 	Skills *[]string `json:"skills,omitempty"`
-	// Mcps 选定的 MCP server id 白名单（nil = 未声明 → 回落 agent.Mcps）。
+	// Mcps 选定的 MCP server id 白名单（nil = 未声明 → 全量）。
 	Mcps *[]string `json:"mcps,omitempty"`
 }
 
@@ -46,13 +50,15 @@ func (c *CapabilitySelection) normalized() *CapabilitySelection {
 		return nil
 	}
 	return &CapabilitySelection{
-		Skills: normalizeIDs(c.Skills),
-		Mcps:   normalizeIDs(c.Mcps),
+		Skills: NormalizeIDs(c.Skills),
+		Mcps:   NormalizeIDs(c.Mcps),
 	}
 }
 
-// normalizeIDs 去空串、去重、升序；nil 保持 nil（"未声明"不能被规范化成"空集"）。
-func normalizeIDs(in *[]string) *[]string {
+// NormalizeIDs 去空串、去重、升序；nil 保持 nil（"未声明"不能被规范化成"空集"）。
+//
+// 导出：建会话的请求面（`manager`）也要按同一条规则规范化用户传进来的 id 列表。
+func NormalizeIDs(in *[]string) *[]string {
 	if in == nil {
 		return nil
 	}
@@ -113,28 +119,62 @@ func (c *CapabilitySelection) String() string {
 	if c == nil {
 		return "(未声明能力选择)"
 	}
-	return fmt.Sprintf("skills=%v mcps=%v", derefIDs(c.Skills), derefIDs(c.Mcps))
+	return fmt.Sprintf("skills=%v mcps=%v", DerefIDs(c.Skills), DerefIDs(c.Mcps))
 }
 
-// derefIDs nil 安全的取值（日志用；nil 显示为 "<未声明>"，空数组显示为 "[]"）。
-func derefIDs(in *[]string) string {
+// DerefIDs nil 安全的取值（日志用；nil 显示为 "<未声明>"，空数组显示为 "[]"）。
+func DerefIDs(in *[]string) string {
 	if in == nil {
 		return "<未声明>"
 	}
 	return fmt.Sprintf("%v", *in)
 }
 
-// CapabilityIDs 取某 kind 的选定 id 集（nil 安全；供 Library/输入卡回显）。
-func (c *CapabilitySelection) SkillIDs() []string { return derefList(c.Skills) }
+// SkillIDs 取 skill 选定的 id 集（nil 安全；供 Library/输入卡回显）。
+func (c *CapabilitySelection) SkillIDs() []string { return DerefList(c.Skills) }
 
 // McpIDs 同 SkillIDs（MCP 侧）。
-func (c *CapabilitySelection) McpIDs() []string { return derefList(c.Mcps) }
+func (c *CapabilitySelection) McpIDs() []string { return DerefList(c.Mcps) }
 
-func derefList(in *[]string) []string {
+// DerefList 把 `*[]string` 解成**副本**切片（nil → nil）。
+//
+// 导出：读面回显与请求面归一都走它（两份实现会在"nil 还是空切片"这条语义上分叉——那正是
+// `omitempty` 与三态语义的分界）。
+func DerefList(in *[]string) []string {
 	if in == nil {
 		return nil
 	}
 	out := make([]string, len(*in))
 	copy(out, *in)
 	return out
+}
+
+// SessionCapabilitiesRespOf 把会话钉住的选定折叠成对外形态（nil = 未声明 → 缺省路径）。
+//
+// 判据是**记录本身**（CapabilityJSON 空 = 未声明），不是"指纹是否为空"：
+// 两者今天同向（未声明 ⇔ 空指纹），但记录才是事实源，回显不该依赖一个派生量。
+//
+// P3c：随选定值对象进域——它读的是本域的记录字段，此前靠 `capabilityViewOf` 端口在
+// manager 侧实现（那个端口因此删掉）。
+func (pl *Plane) SessionCapabilitiesRespOf(rec *SessionRec) *dtosession.SessionCapabilitiesResp {
+	if rec == nil || strings.TrimSpace(rec.CapabilityJSON) == "" {
+		return nil
+	}
+	sel := ParseCapabilitySelection(rec.CapabilityJSON)
+	if sel == nil {
+		return nil
+	}
+	// 逐 kind 原样回显：**缺键 = 未声明该 kind**（回落上一层），`[]` = 明确一个都不要。
+	// 不做"未声明就补空数组"的归一——那会把两个语义相反的状态画成同一个样子，
+	// 用户看到 `skills: []` 会以为"这个会话没有技能"，实际是"投给它的全部技能"。
+	var skills, mcps *[]string
+	if sel.Skills != nil {
+		v := DerefList(sel.Skills)
+		skills = &v
+	}
+	if sel.Mcps != nil {
+		v := DerefList(sel.Mcps)
+		mcps = &v
+	}
+	return &dtosession.SessionCapabilitiesResp{Skills: skills, Mcps: mcps, Fingerprint: rec.Fingerprint}
 }

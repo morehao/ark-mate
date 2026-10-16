@@ -155,9 +155,14 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	s.providerPlane = provider.NewPlane(reg, s.creds)
 	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
 	s.sessionPlane = session.NewPlane()
-	// 会话读面的两个端口：归属展示（工作空间登记面）与能力选定回显（能力代际面，P3c 才搬）。
+	// 会话读面的端口：归属展示（工作空间登记面）在 manager。能力选定回显与指纹装配点
+	// P3c 起都在域内（`SessionCapabilitiesRespOf` / `CapabilityFingerprint`），不再需要回显端口。
 	s.sessionPlane.SetWorkspaceDisplay(s.workspaceDisplayOf)
-	s.sessionPlane.SetCapabilityView(toCapabilitiesResp)
+	// 能力事实提供者（P3c）：指纹的装配点在域，事实（注册表 / skill 投影 / MCP 注入计划）在这边。
+	// **必须紧跟 `caps`/`reg` 的就位**：早一行登记会让指纹少算一段——静默，且只在"代际该不该切"
+	// 这种慢变量上现形。
+	s.sessionPlane.SetCapabilityFacts(s)
+	s.sessionPlane.SetCapabilityLookup(s)
 	// 会话域的其余端口：事件总线（恢复时按库位次注回）、模型行↔底座运行时值的换算、
 	// 以及恢复期"作废重启前排队输入"的钩子（**临时**：输入队列 P3b-2 搬进来后就地调用）。
 	s.sessionPlane.SetBus(bus)

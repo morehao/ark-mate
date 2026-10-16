@@ -26,36 +26,8 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *CapabilitySele
 	if req == nil {
 		return nil
 	}
-	return &CapabilitySelection{Skills: normalizeIDs(req.Skills), Mcps: normalizeIDs(req.Mcps)}
-}
-
-// toCapabilitiesResp 把会话钉住的选定折叠成对外形态（nil = 未声明 → 缺省路径）。
-//
-// 判据是**记录本身**（CapabilityJSON 空 = 未声明），不是"指纹是否为空"：
-// 两者今天同向（未声明 ⇔ 空指纹），但记录才是事实源，回显不该依赖一个派生量。
-func toCapabilitiesResp(r *SessionRec) *dtosession.SessionCapabilitiesResp {
-	if r == nil || strings.TrimSpace(r.CapabilityJSON) == "" {
-		return nil
-	}
-	sel := ParseCapabilitySelection(r.CapabilityJSON)
-	if sel == nil {
-		return nil
-	}
-	// 逐 kind 原样回显：**缺键 = 未声明该 kind**（回落上一层），`[]` = 明确一个都不要。
-	// 不做"未声明就补空数组"的归一——那会把两个语义相反的状态画成同一个样子，
-	// 用户看到 `skills: []` 会以为"这个会话没有技能"，实际是"投给它的全部技能"。
-	var skills, mcps *[]string
-	if sel.Skills != nil {
-		v := derefList(sel.Skills)
-		skills = &v
-	}
-	if sel.Mcps != nil {
-		v := derefList(sel.Mcps)
-		mcps = &v
-	}
-	return &dtosession.SessionCapabilitiesResp{
-		Skills: skills, Mcps: mcps, Fingerprint: r.Fingerprint,
-	}
+	// P3c：选定值对象与规范化都在 `domain/session`（`NormalizeIDs` 是那条规则的唯一实现）。
+	return &CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps)}
 }
 
 // GetSession 返回单会话详情（元数据 + 挂起权限 + 会话级始终允许记忆）。

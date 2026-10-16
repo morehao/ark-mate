@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
@@ -33,16 +32,18 @@ type Plane struct {
 	inputs map[string][]QueuedInput
 	// coalescer 文本增量合并器（nil = 不合并；停机时 FlushAll）。
 	coalescer *Coalescer
+
+	// capFacts 能力事实提供者（P3c：能力指纹的装配点在**本域**，但事实要读 runtime 注册表 /
+	// skill 投影面 / MCP 注入计划——那三样只有装配侧够得着）。nil = 未登记（只按 runtime id 算）。
+	capFacts CapabilityFactsProvider
+	// capLookup 能力定义查表（P3c：选定校验要按 id 取定义 + 判可达性事实）。nil = 未登记。
+	capLookup CapabilityLookup
 	// tx wire transcript 旁路（nil = 未启用）。P3b-2b 起是**域内类型**——临时端口
 	// `TranscriptSink` 随装载/检索面一起搬进来后删掉（它此前存在的唯一理由是那半还在 manager）。
 	tx *transcriptRecorder
 
 	// workspaceDisplayOf 归属展示字段的解析（端口：工作空间登记仍在 manager）。
 	workspaceDisplayOf func(workspaceID string) (string, string)
-	// capabilityViewOf 会话记录 → 能力选定回显（端口：`CapabilitySelection` 是能力代际面，
-	// P3c 才搬进本域；会话读面不该为了一个回显字段把整个代际面拖进来）。
-	capabilityViewOf func(rec *SessionRec) *dtosession.SessionCapabilitiesResp
-
 	// modelValueFor 平台模型行 ↔ 底座运行时值的换算（端口：逐 runtime 形态不同，属 adapter 面）。
 	modelValueFor func(runtimeID, providerID, model string) (string, error)
 	// staleInputsOnRestore 恢复时作废"重启前排队未投递"的输入（**临时端口**：输入队列 P3b-2 才搬进
@@ -74,11 +75,6 @@ func (pl *Plane) Snapshot() []SessionRec {
 // SetWorkspaceDisplay 装配期登记归属展示解析（工作空间登记面）。
 func (pl *Plane) SetWorkspaceDisplay(fn func(workspaceID string) (string, string)) {
 	pl.workspaceDisplayOf = fn
-}
-
-// SetCapabilityView 装配期登记能力选定回显投影（能力代际面）。
-func (pl *Plane) SetCapabilityView(fn func(rec *SessionRec) *dtosession.SessionCapabilitiesResp) {
-	pl.capabilityViewOf = fn
 }
 
 // SetStore 装配期登记库句柄。**必须在装配期调用**：构造时按值传一个当时的 `st` 会永远停在
@@ -115,6 +111,15 @@ func (pl *Plane) SetStaleInputsOnRestore(fn func(ctx context.Context)) {
 
 // SetCoalescer 装配期登记文本增量合并器。
 func (pl *Plane) SetCoalescer(c *Coalescer) { pl.coalescer = c }
+
+// SetCapabilityFacts 装配期登记能力事实提供者（P3c：指纹装配点已在本域）。
+//
+// 必须是显式 setter 而不是构造期传参：装配顺序里 `caps`/`reg`/网关开关都要先就位，早一行登记
+// 拿到的是"还没装载完的注册表"——表现是**指纹少算一段**，只在"代际该不该切"这种慢变量上现形。
+func (pl *Plane) SetCapabilityFacts(p CapabilityFactsProvider) { pl.capFacts = p }
+
+// SetCapabilityLookup 装配期登记能力定义查表（P3c：选定校验用）。
+func (pl *Plane) SetCapabilityLookup(l CapabilityLookup) { pl.capLookup = l }
 
 // Version 某会话当前的事件版本号（进 bus 帧的 `version`）。
 func (pl *Plane) Version(sessionID string) int64 {

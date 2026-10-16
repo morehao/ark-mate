@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/dto/dtosession"
 	"github.com/morehao/ark-mate/internal/eventbus"
 )
 
@@ -19,17 +18,17 @@ import (
 
 // testPlane 造一个只带总线与 transcript 目录的会话域（内存模式）。
 //
-// 两个读面端口也接上**最小实现**：`ListSessions`/`ToSessionRespOf` 会走
-// `workspaceDisplayOf` 与 `capabilityViewOf`，而它们是**函数字段**——没接就是 nil 调用，
-// 直接 panic（这不是"接口端口的 nil 接收者"那类问题，函数值没有接收者）。最小实现保持
-// "id 原样、无标题 / 无能力回显"（域内测试不验归属展示与代际回显那两面）。
+// 归属展示端口接上**最小实现**：`ListSessions` 会走 `workspaceDisplayOf`，而它是**函数字段**
+// ——没接就是 nil 调用，直接 panic（这不是"接口端口的 nil 接收者"那类问题，函数值没有接收者）。
+// 最小实现保持"id 原样、无标题"（域内测试不验归属展示那一面）。
+//
+// 能力选定回显 P3c 起不再需要端口（`SessionCapabilitiesRespOf` 在域内）。
 func testPlane(t *testing.T, dir string) (*Plane, *eventbus.Bus) {
 	t.Helper()
 	bus := eventbus.New()
 	pl := NewPlane()
 	pl.SetBus(bus)
 	pl.SetWorkspaceDisplay(func(workspaceID string) (string, string) { return workspaceID, "" })
-	pl.SetCapabilityView(func(*SessionRec) *dtosession.SessionCapabilitiesResp { return nil })
 	if dir != "" {
 		pl.SetTranscriptDir(dir)
 	}

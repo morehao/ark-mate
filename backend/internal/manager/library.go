@@ -2,6 +2,8 @@ package manager
 
 import (
 	"fmt"
+
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"sort"
 	"strings"
@@ -109,34 +111,20 @@ func skillApplicability(sk capability.Skill, projections []skill.Projection) []d
 	return out
 }
 
-// skillRuntimeVerdict 单个 (skill, 投影) 的可达性判定——**唯一实现**。
+// skillRuntimeVerdict 单个 (skill, 投影) 的可达性判定——**薄适配**（P3c）。
 //
-// Library 的逐 runtime 清单与建会话时的选定校验（M3-3）都走它。两处各写一遍必然漂移，
-// 而漂移的表现恰恰是最难自证的一种：「Library 说不可达、建会话却放行」（或反过来）。
+// **唯一实现**在 `domain/session.SkillVerdict`：Library 的逐 runtime 清单与建会话时的选定校验
+// （M3-3）都走那一份。两处各写一遍必然漂移，而漂移的表现恰恰是最难自证的一种：
+// 「Library 说不可达、建会话却放行」（或反过来）。
 func skillRuntimeVerdict(sk capability.Skill, p skill.Projection) dtolibrary.Applicability {
-	rt := p.Runtime
-	switch {
-	case !sk.IsEnabled():
-		return dtolibrary.Applicability{Runtime: rt, OK: false,
-			Status: dtolibrary.StatusDisabled,
-			Reason: "该 skill 已被禁用（enabled:false）：改回 enabled:true 即可恢复"}
-	case !sk.AppliesToRuntime(rt):
-		return dtolibrary.Applicability{Runtime: rt, OK: false,
-			Status: dtolibrary.StatusNotApplicable,
-			Reason: fmt.Sprintf("该 skill 的 runtimes 白名单没有 %q（要投给它就把 %q 加进 runtimes，或清空 runtimes 表示全部）", rt, rt)}
-	case p.Err != "":
-		return dtolibrary.Applicability{Runtime: rt, OK: false,
-			Status: dtolibrary.StatusNotConfigured,
-			Reason: fmt.Sprintf("%s 声明了 skill 投影但本进程没解析出落点：%s（检查 MATE_PROJECTION_DIRS 是否配了 %s:skill）", rt, p.Err, rt)}
-	case !p.Projection.Tested:
-		return dtolibrary.Applicability{Runtime: rt, OK: true,
-			Status: dtolibrary.StatusUntested,
-			Reason: fmt.Sprintf("%s 的投影声明尚未经实测：会照常投放到 %s，但不担保底座开箱读到它", rt, p.Projection.Root)}
-	default:
-		return dtolibrary.Applicability{Runtime: rt, OK: true,
-			Status: dtolibrary.StatusProjected,
-			Reason: fmt.Sprintf("投放到 %s（%s）", p.Projection.Root, p.Projection.Layout)}
-	}
+	// P3c：判决本体已落 `domain/session`（唯一实现）；这里只把事实交过去、把结果套回读模型形态。
+	// 状态集与文案**逐字未改**——Library 与"建会话被拒"必须永远同向。
+	v := session.SkillVerdict(sk, session.SkillVerdictFacts{
+		Runtime:      p.Runtime,
+		Projection:   session.ProjectedSkillOf(p.Runtime, p.Projection, p.Err),
+		ProjectionOK: true,
+	})
+	return dtolibrary.Applicability{Runtime: p.Runtime, OK: v.OK, Status: v.Status, Reason: v.Reason}
 }
 
 // libraryMcps MCP 条目 + 逐 runtime 可达性（按 transport 承载）。
@@ -175,35 +163,12 @@ func mcpApplicability(m capability.McpServer, runtimes []string, s *Service) []d
 	return out
 }
 
-// mcpRuntimeVerdict 单个 (server, runtime) 的可达性判定——**唯一实现**（理由同 skillRuntimeVerdict）。
+// mcpRuntimeVerdict 单个 (server, runtime) 的可达性判定——**薄适配**（P3c；理由同 skillRuntimeVerdict）。
 func mcpRuntimeVerdict(m capability.McpServer, rt string, s *Service) dtolibrary.Applicability {
-	supported, known := s.supportedMcpTransports(rt)
-	carried := false
-	for _, t := range supported {
-		if t == m.Transport {
-			carried = true
-			break
-		}
-	}
-	switch {
-	case !m.IsEnabled():
-		return dtolibrary.Applicability{Runtime: rt, OK: false,
-			Status: dtolibrary.StatusDisabled, Reason: "该 server 已被禁用（enabled:false）"}
-	case s.McpGatewayEnabled() && known && capability.IsRemoteTransport(m.Transport):
-		// M7-3：远程 server 对每个已注册 runtime 都可达——底座拿到的是**一条 stdio 条目**，
-		// 真正的 sse/http 由平台网关代连。故这里不再按底座声明的承载能力判"不适用"。
-		return dtolibrary.Applicability{Runtime: rt, OK: true,
-			Status: dtolibrary.StatusProjected,
-			Reason: fmt.Sprintf("经平台 MCP 网关代连（对底座是一条 stdio 条目；远端传输 %s）——开关 MATE_MCP_GATEWAY=off 可回到直连口径", m.Transport)}
-	case !carried:
-		return dtolibrary.Applicability{Runtime: rt, OK: false,
-			Status: dtolibrary.StatusNotApplicable,
-			Reason: fmt.Sprintf("%s 不承载 %s 传输（它支持：%s）", rt, m.Transport, strings.Join(supported, "/"))}
-	default:
-		return dtolibrary.Applicability{Runtime: rt, OK: true,
-			Status: dtolibrary.StatusProjected,
-			Reason: fmt.Sprintf("以 %s 传输注入（会话的 mcps 选定与 agent 白名单都未声明时默认全量）", m.Transport)}
-	}
+	// P3c：判决本体已落 `domain/session`（唯一实现）。事实（承载哪些传输 / 在不在册 / 网关开关）
+	// 由装配侧如实交出——域只消费结论。
+	v := session.McpVerdict(m, s.McpVerdictFacts(rt))
+	return dtolibrary.Applicability{Runtime: rt, OK: v.OK, Status: v.Status, Reason: v.Reason}
 }
 
 // libraryTools Tool 条目 + 归属 server 的可承载 runtime（builtin/observed 对所有 runtime 可达）。
