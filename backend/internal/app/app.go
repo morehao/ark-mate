@@ -691,10 +691,13 @@ func (a *App) Run(ctx context.Context) error {
 
 	// MCP 自动探测（B4；MATE_MCP_AUTO_PROBE=startup，默认 off）：HTTP 起来后后台逐个探测，
 	// 不阻塞服务启动；结果与显式 POST /mcps/:id/probe 一致（写 Tool 目录 + 探测状态）。
+	//
+	// P4a 正文第三十八刀：`manager` 那两条转发已删，这里直接经**事实出口** `McpPlane()` 取平面
+	// （与 `a.svc.Picker().NativePickerMode()` 同一形状：装配点交事实，不交转发）。
 	if a.cfg.McpAutoProbe == config.McpAutoProbeStartup {
 		go func() {
 			glog.Infow(ctx, "serve: MCP 自动探测已启用（startup 模式，后台逐个探测已注册 server）")
-			_ = a.svc.AutoProbeMcpServers(ctx)
+			_ = a.svc.McpPlane().AutoProbe(ctx)
 		}()
 	}
 

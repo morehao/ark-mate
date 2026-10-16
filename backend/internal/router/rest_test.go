@@ -141,10 +141,6 @@ type stubSvc struct {
 
 	// M2-4 Library 桩
 
-	probeResp *dtocapability.McpProbeResp // P2 §5.2 MCP live 探测桩
-	probeErr  error
-	probeID   string
-
 	callMcpResp *dtocapability.McpToolCallResp // B1 tools/call 桩
 	callMcpErr  error
 	callMcpID   string
@@ -354,16 +350,6 @@ func (s *stubSvc) GetMcpPrompt(_ context.Context, id, name string, req dtocapabi
 		return nil, s.mcpLiveErr
 	}
 	return &dtocapability.McpPromptGetResp{ServerID: id, Name: name, Messages: []dtocapability.McpPromptMessage{{Role: "user", Content: json.RawMessage(`{"type":"text","text":"hi"}`)}}}, nil
-}
-func (s *stubSvc) ProbeMcpServer(_ context.Context, id string) (*dtocapability.McpProbeResp, error) {
-	s.probeID = id
-	if s.probeErr != nil {
-		return nil, s.probeErr
-	}
-	if s.probeResp != nil {
-		return s.probeResp, nil
-	}
-	return &dtocapability.McpProbeResp{ID: id, ProbedAt: "2026-09-09T00:00:00Z"}, nil
 }
 func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	s.browsePath, s.browseHidden = path, includeHidden
@@ -1447,40 +1433,35 @@ func TestSkillMaterializationRoute(t *testing.T) {
 	}
 }
 
-// TestProbeMcpServerRoute P2 §5.2 MCP live 探测路由：POST /mcps/:id/probe 返回探测结果；
-// 未知 server 透传 40401；未知传输透传 40501。
+// TestProbeMcpServerRoute P2 §5.2 MCP live 探测路由：POST /mcps/:id/probe 的错误经信封透出。
+//
+// P4a 正文第三十八刀：探测面归域平面（`h.mcpPlane.Probe`），替身的
+// `probeResp`/`probeErr`/`probeID` 三个注入点随之退场——按"替身退场"的既定口径，这一层只证
+// **真域平面能自然产生的那个码原样透出**：
+//
+//	· 未知 server → 40401（域里铸的 `mcp_server_not_found`）
+//	· 已注册但连不上 → 50201（域真的去连了，失败码同样是域铸的）
+//
+// "探测成功 → Tool 目录整体替换 / 状态写回"那条路要一台真 MCP server（httptest），
+// 在 `internal/manager` 的 `TestProbeMcpServer` 里覆盖；替身时代这里的"成功"是测试自己编的响应，
+// 它能证明的只有"控制器把 X 原样转发"，证明不了"X 本身对"。
 func TestProbeMcpServerRoute(t *testing.T) {
-	svc := &stubSvc{
-		probeResp: &dtocapability.McpProbeResp{
-			ID: "fs", Transport: "stdio", ServerName: "helper", ProbedAt: "2026-09-09T10:00:00Z",
-			Added: 2, Removed: 1, ToolCount: 2,
-			Tools: []dtocapability.ToolResp{{Name: "read_file", Source: "mcp", McpServer: "fs"}},
-		},
-	}
-	r := newRestEngine(stubDeps(t, svc))
+	svc := &stubSvc{}
+	deps := stubDeps(t, svc)
+	r := newRestEngine(deps)
 
-	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/probe", "")
-	if code != 200 || env.Code != 0 {
-		t.Fatalf("POST probe 失败 code=%d env=%d", code, env.Code)
-	}
-	var got dtocapability.McpProbeResp
-	if err := json.Unmarshal(env.Data, &got); err != nil {
-		t.Fatalf("data 反序列化失败: %v (%s)", err, env.Data)
-	}
-	if got.ID != "fs" || svc.probeID != "fs" || got.Added != 2 || got.ToolCount != 2 {
-		t.Fatalf("探测结果不符: %+v stub=%q", got, svc.probeID)
-	}
-	if len(got.Tools) != 1 || got.Tools[0].McpServer != "fs" {
-		t.Fatalf("tools 不符: %+v", got.Tools)
-	}
-
-	svc.probeErr = gerror.Error{Code: 40401, Msg: `未知 MCP server "nope"`}
 	if env, code := do(t, r, "POST", "/v1/mate/mcps/nope/probe", ""); code != 200 || env.Code != 40401 {
-		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
+		t.Fatalf("未知 server 应由域平面回 40401，got http=%d code=%d env=%+v", code, env.Code, env)
 	}
-	svc.probeErr = gerror.Error{Code: 40501, Msg: "MCP 未知传输（不臆造）"}
-	if env, code := do(t, r, "POST", "/v1/mate/mcps/weird1/probe", ""); code != 200 || env.Code != 40501 {
-		t.Fatalf("未知传输应 40501，got http=%d code=%d", code, env.Code)
+
+	// 注册一个连不上的 http server：域会真的发请求，连接失败码（50201）原样透出。
+	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+		ID: "down", Name: "down", Transport: capability.TransportHTTP, URL: "http://127.0.0.1:1/mcp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/down/probe", ""); code != 200 || env.Code != 50201 {
+		t.Fatalf("连不上应 50201，got http=%d code=%d env=%+v", code, env.Code, env)
 	}
 }
 

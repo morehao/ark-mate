@@ -184,7 +184,10 @@ func TestMcpServersFor(t *testing.T) {
 
 // TestProbeMcpServer MCP live 探测（P2 §5.2）：http 探测成功 → Tool 目录整体替换 + 归属
 // 标注 + 状态记录；重复探测收敛（旧条目删除）；失败记录 last_probe_error；未知 id → 40401；
-// sse 传输明确降级 → 40501（ClassUnsupported）。
+// sse 端点不可达 → 50201（连接失败）。
+//
+// P4a 正文第三十八刀起经 `McpPlane().Probe` 调用（`manager` 那两条转发已删）：这一层验的是
+// **装配起来的那份 Service + 真平面 + 真远端**，与域自己的纯单测不互相替代。
 func TestProbeMcpServer(t *testing.T) {
 	// 可切换返回的 tools/list 结果（验证「整体替换」语义）。
 	tools := []map[string]any{{"name": "read_file", "description": "读文件"}}
@@ -222,9 +225,9 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := svc.ProbeMcpServer(context.Background(), "h")
+	got, err := svc.McpPlane().Probe(context.Background(), "h")
 	if err != nil {
-		t.Fatalf("ProbeMcpServer: %v", err)
+		t.Fatalf("Plane.Probe: %v", err)
 	}
 	if got.ServerName != "mgr-helper" || got.ServerVersion != "3.1" || got.Added != 1 || got.Removed != 1 || got.ToolCount != 1 {
 		t.Fatalf("探测结果不符: %+v", got)
@@ -255,7 +258,7 @@ func TestProbeMcpServer(t *testing.T) {
 
 	// 第二轮：server 只剩 write_file → read_file 删除、write_file 写入（整体替换）。
 	tools = []map[string]any{{"name": "write_file"}}
-	got2, err := svc.ProbeMcpServer(context.Background(), "h")
+	got2, err := svc.McpPlane().Probe(context.Background(), "h")
 	if err != nil {
 		t.Fatalf("二次探测: %v", err)
 	}
@@ -270,8 +273,8 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatalf("二次探测后目录不符（远程工具应带 serverID 前缀）: %+v", names)
 	}
 
-	// 未知 id → 40401；sse 传输 → 40501（明确降级，不臆造）。
-	if _, err := svc.ProbeMcpServer(context.Background(), "nope"); err == nil {
+	// 未知 id → 40401；sse 端点不可达 → 50201（不臆造成功）。
+	if _, err := svc.McpPlane().Probe(context.Background(), "nope"); err == nil {
 		t.Fatal("未知 server 应报错")
 	} else {
 		var ge gerror.Error
@@ -283,7 +286,7 @@ func TestProbeMcpServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	// sse（B3 起已支持）指向不可达端点 → 50201 连接失败（不再是不支持 40501）。
-	if _, err := svc.ProbeMcpServer(context.Background(), "sse1"); err == nil {
+	if _, err := svc.McpPlane().Probe(context.Background(), "sse1"); err == nil {
 		t.Fatal("sse 不可达应报错")
 	} else {
 		var ge gerror.Error
@@ -615,8 +618,8 @@ func TestAutoProbeMcpServers(t *testing.T) {
 		}
 	}
 
-	if err := svc.AutoProbeMcpServers(context.Background()); err != nil {
-		t.Fatalf("AutoProbeMcpServers 应为尽力而为（不返回单个失败）: %v", err)
+	if err := svc.McpPlane().AutoProbe(context.Background()); err != nil {
+		t.Fatalf("AutoProbe 应为尽力而为（不返回单个失败）: %v", err)
 	}
 	tools := svc.caps.ListTools()
 	names := make([]string, 0, len(tools))
@@ -642,7 +645,7 @@ func TestAutoProbeMcpServers(t *testing.T) {
 	// ctx 取消：立即返回 ctx.Err()。
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := svc.AutoProbeMcpServers(ctx); err == nil {
+	if err := svc.McpPlane().AutoProbe(ctx); err == nil {
 		t.Fatal("ctx 已取消应返回错误")
 	}
 }

@@ -2,6 +2,7 @@ package archtest
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -206,5 +207,47 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "plane.go"))), "func (m *Plane) SetSkillEnabled(") ||
 		!strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "skill", "materialization.go"))), "func (m *Plane) SkillMaterialization(") {
 		t.Error("`domain/skill` 里找不到两个本体：判据失锚＝空转。")
+	}
+
+	// ——— 探测面两条 + 一条死转发归域平面（P4a 正文第三十八刀）———
+	//
+	// `ProbeMcpServer` / `AutoProbeMcpServers` 的投影（`McpProbeResp`）与错误码
+	//（`mcp_server_not_found` / 连接失败 50201）都在 `domain/mcp.Plane` 里折好，用例层再留声明
+	// 就只是给"一行转发"留位置；`SetMcpProbeTimeout` 是**零调用点的死转发**（域里的
+	// `SetProbeTimeout` 仍在，由域自己的测试用）。判据钉四段，缺哪一段都有一种静默失效：
+	//
+	//	① 接口里零命中那两条：留声明 = 给一行转发留位置（`manager` 的实现也会跟着回来）；
+	//	② `manager/mcp_probe.go` 零命中三个函数：转发回流（该文件此后只剩说明头）；
+	//	③ 域里两个本体必须在：失锚＝空转（方法改名/搬走时这条判据会**静默变绿**）；
+	//	④ 控制器真的接在**这份**平面上：`h.mcpPlane.Probe(` 必须出现在 `ProbeMcpServer`
+	//	   的**函数体**里——少了它，调用点自己 `mcp.NewPlane(...)` 也能编译，而那份新平面
+	//	   没有注册表、探测恒 40401（"接错平面"是这一族最贵的错，见 §3.1 的 3y/3η）。
+	for _, dead := range []string{"ProbeMcpServer(ctx context.Context", "AutoProbeMcpServers("} {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+			t.Errorf("`svccapability` 的接口里又出现 `%s`：探测面归域平面（`domain/mcp.Plane.Probe`/"+
+				"`.AutoProbe`），接口里留声明 = 给一行转发留位置。", dead)
+		}
+	}
+	probeFace := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "mcp_probe.go")))
+	for _, dead := range []string{"func (s *Service) ProbeMcpServer(", "func (s *Service) AutoProbeMcpServers(",
+		"func (s *Service) SetMcpProbeTimeout("} {
+		if strings.Contains(probeFace, dead) {
+			t.Errorf("`internal/manager/mcp_probe.go` 里又出现 `%s`：那三条已随 P4a 正文第三十八刀删除"+
+				"（探测面走 `a.svc.McpPlane()` / `h.mcpPlane`）。", dead)
+		}
+	}
+	for _, must := range []string{"func (p *Plane) Probe(", "func (p *Plane) AutoProbe("} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "mcp", "probe.go"))), must) {
+			t.Errorf("`domain/mcp/probe.go` 里找不到 %q：判据失锚＝空转（方法被改名/搬走时这条判据不会红）。", must)
+		}
+	}
+	capCtr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrcapability", "capability.go")))
+	if !regexp.MustCompile(`mcpPlane\s+\*mcp\.Plane`).MatchString(capCtr) {
+		t.Error("`ctrcapability` 里找不到 `mcpPlane *mcp.Plane` 字段（容空白）：探测面由控制器直接消费域平面，" +
+			"而它必须是装配点交下来的**那一份**（自己 `mcp.NewPlane(...)` 会得到一份没有注册表的平面）。")
+	}
+	if body := funcBodyOf(t, capCtr, "func (h *capabilityCtr) ProbeMcpServer("); !strings.Contains(body, "h.mcpPlane.Probe(") {
+		t.Error("`ProbeMcpServer` handler 的函数体里没有 `h.mcpPlane.Probe(`：探测面已归域平面，" +
+			"经同包中间函数或另造平面都会让这条判据失去意义（前者把落点藏起来，后者接错平面）。")
 	}
 }

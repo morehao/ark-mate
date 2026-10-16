@@ -288,7 +288,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "mcp_secret_unresolved") {
 		t.Fatalf("错误里应有稳定 code，便于排障：%v", err)
 	}
-	if _, err := svc.ProbeMcpServer(context.Background(), "broken"); err == nil {
+	if _, err := svc.McpPlane().Probe(context.Background(), "broken"); err == nil {
 		t.Fatal("密钥解析失败时探测应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("探测路径同样应是 40001，got %d（%v）", numericCode(err), err)

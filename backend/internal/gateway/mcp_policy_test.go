@@ -79,7 +79,7 @@ func TestProbeAndGatewayFacesMatch(t *testing.T) {
 	if n := svc.LoadCapabilityDefinitionsFromStore(ctx, ""); n == 0 {
 		t.Fatal("装载能力定义：应读到 1 条")
 	}
-	probe, err := svc.ProbeMcpServer(ctx, "gh")
+	probe, err := svc.McpPlane().Probe(ctx, "gh")
 	if err != nil {
 		t.Fatalf("探测: %v", err)
 	}

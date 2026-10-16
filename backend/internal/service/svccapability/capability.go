@@ -1,5 +1,5 @@
-// Package svccapability 定义能力数据面的服务端口：
-// Skill / MCP server / Tool 目录，以及 MCP 的 live 探测、资源与提示词。
+// Package svccapability 承载能力数据面的用例与端口：
+// Skill / MCP server / Tool 目录，以及 MCP 的 live 交互（资源与提示词）。
 package svccapability
 
 import (
@@ -8,20 +8,25 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtocapability"
 )
 
-// CapabilitySvc 能力数据面的服务端口。
+// CapabilitySvc 能力数据面**还没搬完的那半边**的过渡端口。
 //
-// 实现方（internal/manager）以编译期断言 var _ CapabilitySvc = (*T)(nil) 保证一致性。
+// **剩余形状（P4a 正文第三十八刀之后）**：这里只剩 MCP live 五条。此前陆续搬走的：
+//
+//	第十二刀 `ListTools`（工具目录读模型 → `Tools`，本包内）
+//	第十三刀 `ListSkills`（技能目录的投影本来就在 `domain/skill` 里）
+//	第十四刀 `ListMcpServers`（多源折一的读模型 → `Servers`，本包内）
+//	第三十六刀 `SetSkillEnabled` / `SkillMaterialization`（投影与错误码都在域平面）
+//	第三十七刀 定义写面六条（`WriteSkill` / `WriteServer` / `DeleteServer` 在域平面）
+//	第三十八刀 探测面两条 + 一条死转发（`ProbeMcpServer` / `AutoProbeMcpServers` /
+//	          `SetMcpProbeTimeout` → `domain/mcp.Plane.Probe` / `.AutoProbe`）
+//
+// 搬走它们时都不需要新端口：域平面的方法**本来就折好 DTO 与错误码**，用例层再包一层就是
+// 一行转发——那正是第三条硬规矩判定为骚操作的形状（见 AGENTS.md「用例层的三条硬规矩」）。
+//
+// **live 五条搬完时这个接口就空了**——那时它必须与 `router.Ports.Capability`、
+// `capabilityCtr.svc` 字段一起删掉：一个空接口在任何地方都能满足，编译器不会提醒任何调用点，
+// 留着只会让人以为"能力面还有一个端口"。
 type CapabilitySvc interface {
-
-	// ——— 写面（M2）：能力定义可在面板里增删改，**事实源仍是文件** ———
-	//
-	// 请求体是原文 JSON 对象（`map[string]json.RawMessage`）：`PUT` 的语义是"只改出现过的键"，
-	// 键的出现与否是语义而不是编码细节（见 dtocapability.SkillWriteReq 的注释）。
-	// 三条纪律对所有写面方法一致：先过注册闸门校验 → 通过才落盘（C9）→ 落盘失败回滚内存。
-
-	// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测并写 Tool 目录（P2 §5.2）。
-	ProbeMcpServer(ctx context.Context, id string) (*dtocapability.McpProbeResp, error)
-
 	// CallMcpTool 调用某 MCP server 的工具（B1：tools/call；独立会话，不做连接池）。
 	CallMcpTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error)
 

@@ -215,8 +215,6 @@ func (h *capabilityCtr) ListTools(c *gin.Context) {
 	gincontext.Success(c, items)
 }
 
-// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
-// 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
 // CallMcpTool 调用 MCP server 的工具（B1：tools/call）。
 func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 	var req dtocapability.McpToolCallReq
@@ -284,8 +282,13 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 	gincontext.Success(c, resp)
 }
 
+// ProbeMcpServer 对某 MCP server 做一次 live tools/list 探测（P2 §5.2）：结果写 Tool 目录并
+// 返回本轮增删。失败时错误码进信封（并已记录 last_probe_error，可由 GET /mcps 读回）。
+//
+// P4a 正文第三十八刀：探测面归域平面——用例层再包一层只会得到一行转发，故控制器直接调
+// `h.mcpPlane.Probe`（DTO 与错误码本来就在 `domain/mcp` 里折好）。
 func (h *capabilityCtr) ProbeMcpServer(c *gin.Context) {
-	resp, err := h.svc.ProbeMcpServer(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.Probe(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
