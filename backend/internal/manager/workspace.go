@@ -43,15 +43,6 @@ func (s *Service) SetWorkspacePolicy(dir string, roots []string) error {
 	return s.planner.SetWorkspacePolicy(dir, roots)
 }
 
-// TODO(P4b): 删转发（同上）
-func (s *Service) SetWorkspaceRoots(roots []string) error { return s.planner.SetWorkspaceRoots(roots) }
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) WorkspaceDir() string { return s.planner.WorkspaceDir() }
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) WorkspaceRoots() []string { return s.planner.WorkspaceRoots() }
-
 // planner 工作空间域（装配期构造；策略状态在它自己的锁下）。
 //
 // 它是 `Service` 上**唯一**的工作空间策略持有者：字段不再复刻一份，否则"域写一份、manager 读

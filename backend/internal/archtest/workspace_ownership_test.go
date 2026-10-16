@@ -166,6 +166,24 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		t.Error("`internal/domain/workspace/policy.go` 里找不到 `rootsStore WorkspaceRootsStore`：" +
 			"端口的唯一归属是域，判据失锚＝空转。")
 	}
+	// 策略事实的读取（P4a 正文第二十一刀）：`WorkspaceDir()` / `WorkspaceRoots()` 是**纯事实读取**
+	// （无 DTO、无错误码），`Service` 上那两条转发连同零调用点的 `SetWorkspaceRoots` 一起删。
+	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
+		body := stripLineComments(readFileOrFatal(t, path))
+		for _, dead := range []string{"func (s *Service) WorkspaceDir(", "func (s *Service) WorkspaceRoots(", "func (s *Service) SetWorkspaceRoots("} {
+			if strings.Contains(body, dead) {
+				t.Errorf("internal/manager/%s 里又出现 `%s`：策略事实只有一处入口"+
+					"（`WorkspacePlane()`），多一层转发就会有人读到另一个平面（P4a 正文第二十一刀）。",
+					filepath.Base(path), dead)
+			}
+		}
+	}
+	if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "policy.go"))),
+		"func (pl *Plane) WorkspaceRoots() []string") {
+		t.Error("`internal/domain/workspace/policy.go` 里找不到 `func (pl *Plane) WorkspaceRoots()`：" +
+			"判据失锚＝空转。")
+	}
+
 	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
 	if !strings.Contains(appGo, "a.svc.WorkspacePlane().SetRootsStore(") {
 		t.Error("`internal/app/app.go` 里找不到 `a.svc.WorkspacePlane().SetRootsStore(`：" +

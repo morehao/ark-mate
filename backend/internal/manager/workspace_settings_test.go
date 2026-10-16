@@ -180,7 +180,7 @@ func TestUpdateWorkspaceSettingsValidation(t *testing.T) {
 	if len(store.saved) != 0 {
 		t.Fatalf("校验失败不该落盘: %+v", store.saved)
 	}
-	if got := svc.WorkspaceRoots(); len(got) != 0 {
+	if got := svc.WorkspacePlane().WorkspaceRoots(); len(got) != 0 {
 		t.Fatalf("校验失败不该改动内存策略: %v", got)
 	}
 
@@ -228,13 +228,13 @@ func TestUpdateWorkspaceSettingsSaveFailure(t *testing.T) {
 	root := t.TempDir()
 	svc := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, svc, "", []string{mustEval(t, t.TempDir())})
-	before := svc.WorkspaceRoots()
+	before := svc.WorkspacePlane().WorkspaceRoots()
 	svc.WorkspacePlane().SetRootsStore(&fakeRootsStore{saveErr: errors.New("磁盘只读")})
 
 	if _, err := svc.UpdateWorkspaceSettings([]string{root}); aclCode(t, err) != "settings_save_failed" {
 		t.Fatalf("应 settings_save_failed: %v", err)
 	}
-	after := svc.WorkspaceRoots()
+	after := svc.WorkspacePlane().WorkspaceRoots()
 	if len(after) != len(before) || after[0] != before[0] {
 		t.Fatalf("落盘失败不该改动内存策略: before=%v after=%v", before, after)
 	}

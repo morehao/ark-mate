@@ -580,15 +580,15 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	if err := svc.SetWorkspacePolicy("", []string{"relative/root"}); err == nil {
 		t.Fatalf("相对工作区根应被拒")
 	}
-	if svc.WorkspaceDir() != "" || len(svc.WorkspaceRoots()) != 0 {
-		t.Fatalf("失败的设置不应改动策略: dir=%q roots=%v", svc.WorkspaceDir(), svc.WorkspaceRoots())
+	if svc.WorkspacePlane().WorkspaceDir() != "" || len(svc.WorkspacePlane().WorkspaceRoots()) != 0 {
+		t.Fatalf("失败的设置不应改动策略: dir=%q roots=%v", svc.WorkspacePlane().WorkspaceDir(), svc.WorkspacePlane().WorkspaceRoots())
 	}
 
 	// 代建根刻意**不预先创建**：平台自己按需创建它，判定不能因为"目录还没建"就误判
 	// （macOS 上 /var 与 /private/var 会踩这个坑）。
 	provision := filepath.Join(outside, "tmp")
 	mustWorkspacePolicy(t, svc, provision, []string{root})
-	got := svc.WorkspaceRoots()
+	got := svc.WorkspacePlane().WorkspaceRoots()
 	if len(got) != 2 {
 		t.Fatalf("生效名单应为「配置的根 + 隐式并入的代建根」: %v", got)
 	}
@@ -615,7 +615,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	// 代建根已经落在某个配置根内时不再重复追加（避免 roots 里出现冗余项）。
 	nested := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, nested, filepath.Join(root, "tmp"), []string{root})
-	if got := nested.WorkspaceRoots(); len(got) != 1 {
+	if got := nested.WorkspacePlane().WorkspaceRoots(); len(got) != 1 {
 		t.Fatalf("代建根已在配置根内时不应重复追加: %v", got)
 	}
 
@@ -623,7 +623,7 @@ func TestSetWorkspacePolicyMergesProvisionDir(t *testing.T) {
 	// （那会让默认配置的用户突然选不了自己的项目目录）。
 	open := NewService(runtime.NewRegistry(), eventbus.New())
 	mustWorkspacePolicy(t, open, provision, nil)
-	if got := open.WorkspaceRoots(); len(got) != 0 {
+	if got := open.WorkspacePlane().WorkspaceRoots(); len(got) != 0 {
 		t.Fatalf("未配置白名单应保持「不限制」: %v", got)
 	}
 }
