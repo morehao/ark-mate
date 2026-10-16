@@ -15,3 +15,11 @@ import (
 func detailSvc(svc *Service) svcsession.DetailSvc {
 	return svcsession.NewDetail(svc.sessionPlane, svc)
 }
+
+// interactionSvc 同理造一次**动作面**用例（P4a 正文第四十一刀）。
+//
+// `svc` 同时是两个窄端口的提供者：只读三条（`InteractionSource`）与投递三条
+// （`InteractionDelivery`）——它在 `manager` 侧就是这两族适配器的落点。
+func interactionSvc(svc *Service) svcsession.InteractionSvc {
+	return svcsession.NewInteraction(svc.sessionPlane, svc)
+}

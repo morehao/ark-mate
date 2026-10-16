@@ -426,26 +426,24 @@ func (s *stubSvc) PendingElicitations(string) []interaction.ElicitationItem {
 	return s.elicitations
 }
 
-func (s *stubSvc) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error) {
+// ResolvePermission 投递口替身：只回**域回执**（Kind/OptionID），DTO 由用例层折。
+func (s *stubSvc) ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (interaction.DecisionOutcome, bool, error) {
 	if s.resolvePermErr != nil {
-		return nil, *s.resolvePermErr
+		return interaction.DecisionOutcome{}, false, *s.resolvePermErr
 	}
-	return &dtosession.PermissionDecisionResp{
-		CallID: callID, Allowed: allowed, Rejected: !allowed, Always: always,
-		OptionID: optionID, Outcome: "selected", SelectedOptionID: optionID,
-	}, nil
+	return interaction.DecisionOutcome{Kind: "selected", OptionID: optionID}, true, nil
 }
-func (s *stubSvc) RevokeMemory(_ context.Context, id, title, kind string) error {
-	s.revokeID = id
+func (s *stubSvc) RevokeMemory(sessionID, title, kind string) (bool, error) {
+	s.revokeID = sessionID
 	s.revokeTitle = title
 	s.revokeKind = kind
-	return s.revokeErr
+	return true, s.revokeErr
 }
-func (s *stubSvc) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error {
+func (s *stubSvc) ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error) {
 	s.resolvedElicID = elicitationID
 	s.resolvedElicAction = action
 	s.resolvedElicContent = content
-	return s.resolveElicErr
+	return true, s.resolveElicErr
 }
 func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error) {
 	s.createCalled = true
@@ -512,7 +510,7 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
-		Session: svc, InteractionSource: svc,
+		Session: svc, InteractionSource: svc, InteractionDelivery: svc,
 		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
 		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
 		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),
@@ -1219,7 +1217,9 @@ func TestPendingPermissionsList(t *testing.T) {
 // TestRevokeMemory 单条撤销（title+kind）与一键撤销（均空）都正确透传。
 func TestRevokeMemory(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
 
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/permissions/memories/revoke",
 		`{"title":"运行演示命令 echo hello","kind":"execute"}`)
@@ -1278,7 +1278,9 @@ func TestElicitationList(t *testing.T) {
 // TestResolveElicitation POST /sessions/:id/elicitation 决策透传（accept + content）。
 func TestResolveElicitation(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/elicitation",
 		`{"elicitation_id":"el-abc","action":"accept","content":{"env":"prod"}}`)
 	if env.Code != 0 {
@@ -1286,6 +1288,11 @@ func TestResolveElicitation(t *testing.T) {
 	}
 	if svc.resolvedElicID != "el-abc" || svc.resolvedElicAction != "accept" || svc.resolvedElicContent["env"] != "prod" {
 		t.Fatalf("决策透传不符: %+v", svc)
+	}
+	// 未知会话 → 40401（用例层的存在性判据，替身时代不存在）。
+	if env, _ := do(t, r, "POST", "/v1/mate/sessions/nope/elicitation",
+		`{"elicitation_id":"el-abc","action":"accept"}`); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
 	}
 }
 
@@ -1847,7 +1854,9 @@ func TestMcpResourcesPromptsRoutes(t *testing.T) {
 // 不再是 `{call_id, allowed}` 的请求参数回显。
 func TestResolvePermissionReceiptShape(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1"})
+	r := newRestEngine(deps)
 	env, code := do(t, r, "POST", "/v1/mate/sessions/s1/permission",
 		`{"call_id":"tc1","option_id":"allow_always","always":true,"allowed":true}`)
 	if code != 200 || env.Code != 0 {

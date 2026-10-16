@@ -88,7 +88,7 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 		t.Fatalf("他会话不应看到挂起项: %+v err=%v", other, err)
 	}
 
-	err = svc.ResolveElicitation(context.Background(), "intruder", it.ID, "accept", map[string]any{"k": "v"})
+	err = interactionSvc(svc).ResolveElicitation(context.Background(), "intruder", it.ID, "accept", map[string]any{"k": "v"})
 	if err == nil {
 		t.Fatal("跨会话决策应报错")
 	}
@@ -103,7 +103,7 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 		t.Fatal("跨会话决策不得清除挂起项")
 	}
 
-	if err := svc.ResolveElicitation(context.Background(), "owner", it.ID, "accept", map[string]any{"k": "v"}); err != nil {
+	if err := interactionSvc(svc).ResolveElicitation(context.Background(), "owner", it.ID, "accept", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("归属会话决策应成功: %v", err)
 	}
 	<-done // 等待 RegisterAndWait 消费决策并清表（异步删除）
@@ -111,7 +111,7 @@ func TestServiceResolveElicitationScope(t *testing.T) {
 		t.Fatal("决策后应清除挂起项")
 	}
 	// 未知会话仍是 40401（会话不存在，先于 elicitation 校验）。
-	if err := svc.ResolveElicitation(context.Background(), "ghost", it.ID, "accept", nil); err == nil {
+	if err := interactionSvc(svc).ResolveElicitation(context.Background(), "ghost", it.ID, "accept", nil); err == nil {
 		t.Fatal("未知会话应报错")
 	}
 }

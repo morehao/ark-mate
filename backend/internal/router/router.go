@@ -62,6 +62,11 @@ type Ports struct {
 	// 那份状态归**执行面**持有（`Orchestrator` 私有字段），而详情读面用例（`svcsession.NewDetail`）
 	// 在 ctrsession 里造——所以装配点交的是这三条**窄端口**，不是执行面本身（P4a 正文第四十刀）。
 	InteractionSource svcsession.InteractionSource
+	// InteractionDelivery 三条动作面的投递口（权限决策 / 提问决策 / 记忆撤销）。
+	//
+	// 与只读那三条分开：这一族有副作用（把决定送进正在跑的那一轮）。签名只吃**域值对象**，
+	// 所以实现它的是 `manager` 侧的适配器，而不是执行面本身（P4a 正文第四十一刀）。
+	InteractionDelivery svcsession.InteractionDelivery
 	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
 	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
 	Runtime *runtimeconn.Plane

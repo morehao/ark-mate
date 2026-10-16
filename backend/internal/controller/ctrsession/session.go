@@ -54,6 +54,11 @@ type sessionCtr struct {
 	// `session_not_found`，而四条出口共用同一份投影（详情里的 pending/memories 就是那两条列表的
 	// 结果），所以它们一起搬、一起持有。
 	detail svcsession.DetailSvc
+	// interaction 会话交互的**动作面**（P4a 正文第四十一刀起在用例层）：权限/提问决策 + 记忆撤销。
+	//
+	// 与 detail（只读）分开持有：这一族有副作用（把决定投给底座），两族吃的窄端口也因此不同
+	// （`InteractionSource` 纯读 vs `InteractionDelivery` 投递）。
+	interaction svcsession.InteractionSvc
 	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
 	//
 	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
@@ -69,10 +74,11 @@ type sessionCtr struct {
 // 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
 // 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
 func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus,
-	src svcsession.InteractionSource) SessionCtr {
+	src svcsession.InteractionSource, deliver svcsession.InteractionDelivery) SessionCtr {
 	return &sessionCtr{
 		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
-		detail: svcsession.NewDetail(plane, src),
+		detail:      svcsession.NewDetail(plane, src),
+		interaction: svcsession.NewInteraction(plane, deliver),
 	}
 }
 
@@ -171,7 +177,7 @@ func (h *sessionCtr) RevokeMemory(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.svc.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
+	if err := h.interaction.RevokeMemory(c.Request.Context(), c.Param("id"), req.Title, req.Kind); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}
@@ -185,7 +191,7 @@ func (h *sessionCtr) ResolvePermission(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
+	resp, err := h.interaction.ResolvePermission(c.Request.Context(), c.Param("id"), req.CallID, req.OptionID, req.Always, req.Allowed)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -210,7 +216,7 @@ func (h *sessionCtr) ResolveElicitation(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	if err := h.svc.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
+	if err := h.interaction.ResolveElicitation(c.Request.Context(), c.Param("id"), req.ElicitationID, req.Action, req.Content); err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
 	}

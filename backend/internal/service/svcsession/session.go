@@ -31,15 +31,6 @@ type SessionSvc interface {
 	// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）；返回是否存在待投递项被撤下
 	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
 	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
-
-	// ResolvePermission 按 call_id 决策（allow/reject × once/always），返回实际回执。
-	ResolvePermission(ctx context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error)
-
-	// RevokeMemory 撤销会话级权限记忆（title+kind 均空 = 一键撤销全部）。
-	RevokeMemory(ctx context.Context, id, title, kind string) error
-
-	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
-	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
 	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
 	//
 	// ADR-2：原 `svcsearch` 的单方法面并入这里——它是**会话域**的读面（检索的就是消息）。

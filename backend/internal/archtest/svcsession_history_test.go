@@ -79,9 +79,9 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
-	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc,[\s\S]*?src svcsession\.InteractionSource\) SessionCtr`).MatchString(ctrSrc) {
+	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc,[\s\S]*?src svcsession\.InteractionSource,[\s\S]*?deliver svcsession\.InteractionDelivery\) SessionCtr`).MatchString(ctrSrc) {
 		t.Error("`ctrsession.NewSessionCtr` 的签名变了：它必须拿到**依赖事实**（会话面过渡端口 + 库句柄 + " +
-			"会话域平面 + 事件总线 + 交互事实来源），两个读面用例都在函数体里造。")
+			"会话域平面 + 事件总线 + 交互事实来源 + 投递口），三个用例都在函数体里造。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func NewSessionCtr(")
 	if !strings.Contains(body, "svcsession.NewHistory(") {
@@ -156,6 +156,82 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
 		t.Error("`router.Ports` 里找不到 `InteractionSource svcsession.InteractionSource`（容空白）：" +
 			"装配点交的该是这三条窄端口事实，而不是执行面本身（`Orchestrator` 的私有状态）。")
+	}
+
+	// ——— P4a 正文第四十一刀：交互**动作面**三条（权限决策 / 提问决策 / 记忆撤销）也在这个包里 ———
+	//
+	// 与只读那四条的分界不是"读 vs 写"这种表面说法，而是**要不要把决定投递给底座**：只读只在自己
+	// 的状态里取数（`InteractionSource`），这三条要走执行面把决定送进正在跑的那一轮
+	// （`InteractionDelivery`）。两族端口因此刻意分开——合成一个接口会让"只想列一下挂起项"的
+	// 调用方也拿到投递能力（与 `domain/mcp` 把 `Secrets` 与实时面分开是同一条理由）。
+	interactionAnchors := []string{
+		"func NewInteraction(plane *session.Plane, deliver InteractionDelivery) InteractionSvc",
+		"var _ InteractionSvc = (*Interaction)(nil)",
+		"func (h *Interaction) ResolvePermission(_ context.Context, id, callID, optionID string, always, allowed bool) (*dtosession.PermissionDecisionResp, error)",
+		"func (h *Interaction) ResolveElicitation(_ context.Context, id, elicitationID, action string, content map[string]any) error",
+		"func (h *Interaction) RevokeMemory(_ context.Context, id, title, kind string) error",
+		// 两个"不是域回执"的码：它们是这一层的判据（跨会话/已过期一律按不存在处理）。
+		`"permission_not_found"`,
+		`"elicitation_not_found"`,
+		// 投递口的三个签名必须**只吃域值对象**——这是适配器能落在 `manager` 的前提
+		// （本包不许 import svc，端口一旦用 svc 自己声明的值类型，适配器就没有落点）。
+		"type InteractionDelivery interface {",
+		"ResolvePermission(sessionID, callID, optionID string, always, allowed bool) (interaction.DecisionOutcome, bool, error)",
+		"ResolveElicitation(sessionID, elicitationID, action string, content map[string]any) (bool, error)",
+		"RevokeMemory(sessionID, title, kind string) (bool, error)",
+	}
+	for _, a := range interactionAnchors {
+		if !strings.Contains(svcBody, a) {
+			t.Errorf("`internal/service/svcsession` 里找不到 %q：交互动作面被改名/搬走了"+
+				"（判据挂在它身上，失锚等于空转）。", a)
+		}
+	}
+	// ②″ 接口不许把这三条收回去。
+	for _, dead := range []string{"ResolvePermission(ctx context.Context", "ResolveElicitation(ctx context.Context",
+		"RevokeMemory(ctx context.Context"} {
+		if strings.Contains(iface, dead) {
+			t.Errorf("`SessionSvc` 里又声明了 `%s`：这一面有自己的接口（`InteractionSvc`），"+
+				"收回去等于同一个用例有两条取用路径。", dead)
+		}
+	}
+	// ①″ manager 侧不得再有**DTO 版**实现（那三条已变成投递适配器）。
+	//
+	// 这一段的"接口侧回潮"判据（②″）在本刀之后其实**编译器也会拦**：端口方法占用了同名，
+	// `*Service` 上再放一个 DTO 版 `ResolvePermission(ctx, …)` 就同时破坏了 `SessionSvc` 的
+	// 满足关系——实测：把这个实现加回去，产品树当场编译失败，守卫根本没机会跑。所以这一族的
+	// 可证伪面落在下面那条**投影**判据上（它能写出可编译的夹具）。留着字面量判据不是冗余：
+	// 谁把端口方法改名腾出名字（一次真实的重构），它就是唯一还站着的那道闸。
+	for _, dead := range []string{"func (s *Service) ResolvePermission(ctx context.Context,",
+		"func (s *Service) ResolveElicitation(ctx context.Context,",
+		"func (s *Service) RevokeMemory(ctx context.Context,"} {
+		if strings.Contains(mgrBody, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：动作面已归用例层，"+
+				"manager 侧只剩**投递适配器**（签名只吃域值对象，见 `InteractionDelivery`）。", dead)
+		}
+	}
+	// ①‴ manager 侧不得再**组装**这两个 DTO（响应装配跟着用例走）。
+	//
+	// 这是这一族里唯一能写出**可编译夹具**的判据，也是真正的失效形态：谁在 manager 里又折一份
+	// `PermissionDecisionResp`（例如为了少走一层），两份装配立刻分叉——一份把 `outcome` 取自域回执、
+	// 另一份回显请求参数，而「界面说已允许、底座收到取消」就是这么来的。
+	for _, dead := range []string{"dtosession.PermissionDecisionResp{", "dtosession.ElicitationResp{"} {
+		if strings.Contains(mgrBody, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：这两个 DTO 的装配已归 `service/svcsession`"+
+				"（`Interaction`），manager 侧只交**域值对象**。", dead)
+		}
+	}
+	// ③″ 用例实例同样在控制器构造函数里造，且装配点必须交出投递口。
+	if !strings.Contains(body, "svcsession.NewInteraction(") {
+		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewInteraction(`：动作面用例必须在控制器里造。实际体：\n%s", body)
+	}
+	if !strings.Contains(routesSrc, "ports.InteractionDelivery") {
+		t.Error("`internal/router/routes_session.go` 没有把 `ports.InteractionDelivery` 交给 `NewSessionCtr`：" +
+			"漏交会让投递口为 nil，决策时 nil 接口调方法直接 panic。")
+	}
+	if !regexp.MustCompile(`InteractionDelivery\s+svcsession\.InteractionDelivery`).MatchString(
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
+		t.Error("`router.Ports` 里找不到 `InteractionDelivery svcsession.InteractionDelivery`（容空白）：" +
+			"投递口必须是装配点交下来的事实。")
 	}
 }
 

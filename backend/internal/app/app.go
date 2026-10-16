@@ -451,7 +451,7 @@ func (a *App) Init(ctx context.Context) error {
 	// P4a 起端口按 ADR-2 收口：`Runtime` 只管底座身份与诊断，档案与模型清单各有主人；
 	// 检索/用量并入 `Session`，导出归 `System`。
 	ports := router.Ports{
-		Session: a.svc, InteractionSource: a.svc,
+		Session: a.svc, InteractionSource: a.svc, InteractionDelivery: a.svc,
 		// 底座身份与诊断的**用例实现**在 svcruntime（P4a 正文第二刀）：这里交出的是**执行面**
 		// （`*runtimeconn.Plane`），用例实例由 ctrruntime 自己造——`app` 不 import `service/svc*`。
 		Runtime: a.rconn,
