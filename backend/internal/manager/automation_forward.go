@@ -51,11 +51,6 @@ func (s *Service) DeleteAutomationByID(ctx context.Context, id string) (bool, er
 }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) ListAutomations() ([]dtoautomation.AutomationResp, error) {
-	return s.automationPlane.ListAutomations()
-}
-
-// TODO(P4b): 删转发（同上）
 func (s *Service) AutomationByID(id string) (dtoautomation.AutomationResp, bool) {
 	return s.automationPlane.AutomationByID(id)
 }
@@ -87,41 +82,6 @@ func (s *Service) StartAutomationScheduler(interval time.Duration) {
 
 // TODO(P4b): 删转发（同上）
 func (s *Service) StopAutomationScheduler() { s.automationPlane.StopAutomationScheduler() }
-
-// TODO(P4b): 删转发（rest 面直接依赖 automation.Plane）
-func (s *Service) GetAutomation(id string) (*dtoautomation.AutomationResp, error) {
-	return s.automationPlane.GetAutomation(id)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) CreateAutomation(ctx context.Context, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	return s.automationPlane.CreateAutomation(ctx, req)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) UpdateAutomation(ctx context.Context, id string, req dtoautomation.AutomationWriteReq) (*dtoautomation.AutomationResp, error) {
-	return s.automationPlane.UpdateAutomation(ctx, id, req)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) DeleteAutomation(ctx context.Context, id string) (*dtoautomation.AutomationDeleteResp, error) {
-	return s.automationPlane.DeleteAutomation(ctx, id)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) PreviewAutomation(req dtoautomation.AutomationPreviewReq) (*dtoautomation.AutomationPreviewResp, error) {
-	return s.automationPlane.PreviewAutomation(req)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) ListAutomationRuns(id string) (*dtoautomation.AutomationRunsResp, error) {
-	return s.automationPlane.ListAutomationRuns(id)
-}
-
-// TODO(P4b): 删转发（同上）
-func (s *Service) RunAutomationNow(ctx context.Context, id string) (*dtoautomation.AutomationRunResp, error) {
-	return s.automationPlane.RunAutomationNow(ctx, id)
-}
 
 // ——— 域内动作的测试可达入口（P2b） ———
 //

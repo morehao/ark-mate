@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/controller/ctrsystem"
 	"github.com/morehao/ark-mate/internal/credential"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
 	"github.com/morehao/ark-mate/internal/domain/session"
@@ -24,7 +25,6 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
@@ -69,9 +69,9 @@ type Ports struct {
 	Model svcmodel.ModelSvc
 	// ModelHost 写面之外的模型面（读一条的投影 / 生效面回执 / 同步触发），过渡期端口；
 	// 与 Store、ProviderPlane 一起交给 `ctrmodel.NewModelCtr`，写面用例在控制器里造。
-	ModelHost  svcmodel.Host
-	Capability svccapability.CapabilitySvc
-	Automation svcautomation.AutomationSvc
+	ModelHost       svcmodel.Host
+	Capability      svccapability.CapabilitySvc
+	AutomationPlane *automation.Plane
 	// Library 读模型的事实来源（P4a 正文第六刀）：三张能力表 + 技能投影 + 运行期事实。
 	// 用例实例（`svclibrary.NewLibrary`）由 ctrlibrary 自己造——`app`/`router` 都不 import svc。
 	Capabilities *capability.Registry

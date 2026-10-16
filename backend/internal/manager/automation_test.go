@@ -10,6 +10,7 @@ import (
 
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/eventbus"
+	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/automation"
 	"github.com/morehao/ark-mate/pkg/runtime"
 )
@@ -35,10 +36,18 @@ func writeAutomationFile(t *testing.T, path, body string) {
 	}
 }
 
+// autoSvc 取自动化面的**用例层**（P4a 正文第九刀起 REST 面在 `svcautomation`，不再由 Service 提供）。
+//
+// 测试经它与"真 Service + 真域平面"驱动——这层的实现搬走了，但夹具链一个字不用改：
+// 平面还是那个平面，用例只是换了个所有者。
+func autoSvc(svc *Service) svcautomation.AutomationSvc {
+	return svcautomation.New(svc.automationPlane)
+}
+
 // mustListAutomations 列出注册表（端口签名带 error，测试里不关心 err）。
 func (s *Service) mustListAutomations(t *testing.T) []dtoautomation.AutomationResp {
 	t.Helper()
-	items, err := s.ListAutomations()
+	items, err := autoSvc(s).ListAutomations()
 	if err != nil {
 		t.Fatalf("ListAutomations: %v", err)
 	}

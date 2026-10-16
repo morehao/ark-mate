@@ -395,18 +395,6 @@ func (pl *Plane) DeleteAutomationByID(ctx context.Context, id string) (bool, err
 	return removed, nil
 }
 
-// ListAutomations 列出注册表（含装载失败的那些，带 `error` 字段），按 id 排序。
-func (pl *Plane) ListAutomations() ([]dtoautomation.AutomationResp, error) {
-	pl.mu.Lock()
-	defer pl.mu.Unlock()
-	out := make([]dtoautomation.AutomationResp, 0, len(pl.recs))
-	for _, rec := range pl.recs {
-		out = append(out, rec.View())
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
-}
-
 // AutomationByID 取一条（含装载失败的那些）。
 func (pl *Plane) AutomationByID(id string) (dtoautomation.AutomationResp, bool) {
 	pl.mu.Lock()

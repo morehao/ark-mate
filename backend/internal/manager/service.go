@@ -223,6 +223,12 @@ func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
 // 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
 func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }
 
+// AutomationPlane 交出自动化域平面（装配点按**依赖事实**把它交给 router，P4a 正文第九刀）。
+//
+// 自动化面的用例（DTO 折叠 + 错误码出口）在 `service/svcautomation`，由 `ctrautomation`
+// 自己造；装配点只交事实。
+func (s *Service) AutomationPlane() *automation.Plane { return s.automationPlane }
+
 // CapabilityRegistry / SkillPlane / McpSecrets 交出能力面的三份**事实来源**
 // （`ctrlibrary` 的读模型用例要用它们，P4a 正文第六刀）。
 //

@@ -3,10 +3,14 @@
 // 与其余控制器同一条纪律：只依赖 internal/service/svcautomation 的窄端口，错误一律经
 // gincontext 落到统一响应信封（`TestControllerErrorExitsCarryCode` 守卫：不得透传裸 err，
 // 否则客户端拿到的是 code:-1）。
+//
+// P4a 正文第九刀起，本控制器拿到的**不是**用例实例而是依赖事实（`*automation.Plane`），
+// 用例在构造函数里造（`svcautomation.New`）——装配点为此少持一格 svc 类型。
 package ctrautomation
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/morehao/ark-mate/internal/domain/automation"
 	"github.com/morehao/ark-mate/internal/dto/dtoautomation"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/pkg/code"
@@ -31,9 +35,9 @@ type automationCtr struct {
 	svc svcautomation.AutomationSvc
 }
 
-// NewAutomationCtr 构造 AutomationCtr。
-func NewAutomationCtr(svc svcautomation.AutomationSvc) AutomationCtr {
-	return &automationCtr{svc: svc}
+// NewAutomationCtr 构造 AutomationCtr：拿自动化域平面这个**依赖事实**，用例在这里造。
+func NewAutomationCtr(plane *automation.Plane) AutomationCtr {
+	return &automationCtr{svc: svcautomation.New(plane)}
 }
 
 // ListAutomations 列出全部 automation（含定义装载失败的那些，带 `error` 字段）。

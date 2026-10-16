@@ -225,7 +225,7 @@ func TestAutomationStoreLoaderToleranceAndRuntime(t *testing.T) {
 		t.Fatalf("认领游标/state 不符: %+v", goodResp)
 	}
 	// 坏行的运行史读不出来是**定义不可执行**（40001，而不是"没有运行史"）。
-	if _, err := svc.ListAutomationRuns("broken"); errCode(err) != "definition_invalid" {
+	if _, err := autoSvc(svc).ListAutomationRuns("broken"); errCode(err) != "definition_invalid" {
 		t.Fatalf("坏定义的运行史应报 definition_invalid，got %v", err)
 	}
 }
