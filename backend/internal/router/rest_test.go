@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -730,18 +732,32 @@ func TestWorkspaceRegistryCtrPassThrough(t *testing.T) {
 // ——一旦它变了（或有人把路由挪到另一个 group 里重建），`browse` 会被当成 id 打进改名/删除。
 // 那种坏法是静默的：浏览目录突然报"未知工作空间"。
 func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
-	svc := &stubSvc{browseResp: &dtoworkspace.WorkspaceBrowseResp{Path: "/Users/me"}}
-	r := newRestEngine(stubDeps(t, svc))
+	// 自 P4a 正文第三十二刀起浏览面走**真域平面**（投影 + 路径校验都在域里），所以这里不再造
+	// 替身响应，而是给它一个**真存在的临时目录**：能证明的比原来更强——静态段没被 `:id` 抢走，
+	// 且域平面真的读到了盘上那一份（`browse` 若被当成 id，会走登记表读面而报 40001）。
+	dir := t.TempDir()
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 
-	env, _ := do(t, r, "GET", "/v1/mate/workspaces/browse?path=/Users/me", "")
+	env, _ := do(t, r, "GET", "/v1/mate/workspaces/browse?path="+dir, "")
 	if env.Code != 0 {
 		t.Fatalf("GET /workspaces/browse 应打到 Browse 而不是被 :id 抢走: %+v", env)
 	}
-	if svc.browsePath != "/Users/me" {
-		t.Fatalf("Browse 未收到 path（说明被当成 id 打到了别的 handler）: %q", svc.browsePath)
+	var got dtoworkspace.WorkspaceBrowseResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 解析: %v", err)
 	}
-	if svc.registryID != "" {
-		t.Fatalf("Browse 不该走到带参 handler: registryID=%q", svc.registryID)
+	// 域里做了符号链接规范化（macOS 的 `/var` → `/private/var`），所以按**规范化后**的期望值比。
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if got.Path != resolved {
+		t.Fatalf("浏览结果应指向请求的那条路径（被当成 id 打歪了）: got=%q want=%q", got.Path, resolved)
+	}
+	// 静态段与带参段的**形状不同**：带参 GET 走登记表读面（返回 `items` 列表），浏览面回的是
+	// 单目录的形状（`path` + `entries`/`crumbs`）。这里断言浏览面特有的那两格在。
+	if got.Crumbs == nil {
+		t.Fatalf("浏览面必须回 crumbs 祖先链（被 :id 抢走时不会有它）: %+v", got)
 	}
 }
 
@@ -750,41 +766,55 @@ func TestWorkspaceStaticRoutesBeatParamRoute(t *testing.T) {
 // 两层守卫，缺一不可：
 //   - **路径不能被 `/workspaces/:id` 的写路由抢走**：本组同时有 `POST /workspaces/:id/move`，
 //     而 `dirs` 是静态段。抢走的坏法是静默的——「新建文件夹」突然报"未知工作空间"；
-//   - **参数原样到端口**：控制器在本轮没有任何领域判断（单段名 / 越界 / 已存在全在 manager），
-//     所以这里要证的只是透传；领域语义由 manager 的用例覆盖。
+//   - **参数原样到端口**：这一半自第三十二刀起由**真域平面**证明——给它一个真存在的父目录，
+//     建出来的目录必须在盘上真的出现（替身自报做不到这一点）。
 func TestWorkspaceCreateDirRoute(t *testing.T) {
-	svc := &stubSvc{dirResp: &dtoworkspace.WorkspaceDirCreateResp{Path: "/Users/me/proj/新项目"}}
-	r := newRestEngine(stubDeps(t, svc))
+	parent := t.TempDir()
+	r := newRestEngine(stubDeps(t, &stubSvc{}))
 
-	env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/Users/me/proj","name":"新项目"}`)
+	env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"`+parent+`","name":"新项目"}`)
 	if env.Code != 0 {
 		t.Fatalf("POST /workspaces/dirs 应成功: %+v", env)
 	}
-	if svc.dirParent != "/Users/me/proj" || svc.dirName != "新项目" {
-		t.Fatalf("CreateWorkspaceDir 未收到原样参数: parent=%q name=%q", svc.dirParent, svc.dirName)
+	var got dtoworkspace.WorkspaceDirCreateResp
+	if err := json.Unmarshal(env.Data, &got); err != nil {
+		t.Fatalf("data 解析: %v", err)
 	}
-	if svc.registryID != "" {
-		t.Fatalf("不该走到带参 handler: registryID=%q", svc.registryID)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if want := filepath.Join(resolved, "新项目"); got.Path != want {
+		t.Fatalf("建目录应回新建的那条路径: got=%q want=%q", got.Path, want)
+	}
+	if st, err := os.Stat(got.Path); err != nil || !st.IsDir() {
+		t.Fatalf("目录必须真的建出来（真平面 + 真盘）: err=%v path=%q", err, got.Path)
 	}
 }
 
 // TestWorkspaceCreateDirRejections 三种拒绝必须是三个不同的码：
 // 越界 40001 / 名字非法 40000 / 已存在 40901——它们的界面引导不同（改路径 vs 改名）。
+//
+// 自第三十二刀起这一组用**真平面 + 真盘**造三种情形（替身伪造错误码只能证明"控制器会转发"，
+// 证明不了"域真的这么判"）：越界 = 白名单外的父目录、名字非法 = 带分隔符、已存在 = 同名的先建一次。
 func TestWorkspaceCreateDirRejections(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Mkdir(filepath.Join(parent, "已有"), 0o755); err != nil {
+		t.Fatalf("夹具建目录失败: %v", err)
+	}
 	cases := []struct {
 		name string
-		err  error
+		body string
 		code int
 	}{
-		{"名字非法", acl.NewError(acl.ClassRequest, "workspace_invalid", "目录名不能包含路径分隔符", nil), code.InvalidRequest},
-		{"名字非法", acl.NewError(acl.ClassRequest, "workspace_invalid", "名字非法", nil), code.InvalidRequest},
-		{"已存在", acl.NewError(acl.ClassLimit, "workspace_exists", "目录已存在", nil), code.Conflict},
+		{"父目录不存在（= 越界/不可访问）", `{"parent":"/nope/not-here","name":"x"}`, 40001},
+		{"名字非法（含分隔符）", `{"parent":"` + parent + `","name":"a/b"}`, 40001},
+		{"已存在", `{"parent":"` + parent + `","name":"已有"}`, 40901},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &stubSvc{dirErr: tc.err}
-			r := newRestEngine(stubDeps(t, svc))
-			env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", `{"parent":"/p","name":"x"}`)
+			r := newRestEngine(stubDeps(t, &stubSvc{}))
+			env, _ := do(t, r, "POST", "/v1/mate/workspaces/dirs", tc.body)
 			if env.Code != tc.code {
 				t.Fatalf("期望 code=%d，得到 %+v", tc.code, env)
 			}

@@ -131,6 +131,26 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		"func (pl *Plane) WorkspaceRegistry() (*dtoworkspace.WorkspaceListResp, error)") {
 		t.Error("`internal/domain/workspace/registry.go` 里找不到登记表读模型本体：判据失锚＝空转。")
 	}
+	// 只读辅助四条（P4a 正文第三十二刀）：浏览 / 建目录 / 列内容 / 最近使用——接口声明与 manager
+	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码与 DTO 都在域里铸（`workspace_invalid`
+	// / `workspace_exists` / `workspace_not_found`），所以用例层再包一层仍然只是一行转发。
+	for _, dead := range []string{"BrowseWorkspace(path string", "CreateWorkspaceDir(parent, name string", "ListWorkspaceFiles(path string", "RecentWorkspaces(limit int"} {
+		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go"))), dead) {
+			t.Errorf("`svcworkspace` 的接口里又出现 `%s`：投影与错误码都在域平面里。", dead)
+		}
+	}
+	if vm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_view.go"))); strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
+		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
+		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
+		t.Error("`internal/manager/workspace_view.go` 里又出现只读辅助面的转发：那四条已删。")
+	}
+	view := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "workspace", "view.go")))
+	for _, must := range []string{"func (pl *Plane) BrowseWorkspace(", "func (pl *Plane) CreateWorkspaceDir(", "func (pl *Plane) ListWorkspaceFiles(", "func (pl *Plane) RecentWorkspaces("} {
+		if !strings.Contains(view, must) {
+			t.Errorf("`internal/domain/workspace/view.go` 里找不到 %q：判据失锚＝空转。", must)
+		}
+	}
+
 	// 设置面写（P4a 正文第三十一刀）：`UpdateWorkspaceSettings` 同样归域平面（写面：校验 + 三个
 	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
 	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。

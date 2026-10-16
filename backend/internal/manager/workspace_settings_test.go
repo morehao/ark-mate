@@ -98,7 +98,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := svc.BrowseWorkspace(outside, false); err != nil {
+	if _, err := svc.WorkspacePlane().BrowseWorkspace(outside, false); err != nil {
 		t.Fatalf("更新偏好后名录外目录仍应可浏览（名录不是边界）: %v", err)
 	}
 	// 代建根也要放行——默认工作空间就在它下面（未指定 cwd 的落点）。
@@ -109,7 +109,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	if _, err := workspace.ResolveWorkspace("", &workspace.DefaultWorkspaceRef{ID: "wsp-default", Path: defDir}); err != nil {
 		t.Fatalf("默认工作空间应始终可选（代建根隐式并入）: %v", err)
 	}
-	if _, err := svc.BrowseWorkspace(provision, false); err != nil {
+	if _, err := svc.WorkspacePlane().BrowseWorkspace(provision, false); err != nil {
 		t.Fatalf("代建根应始终可浏览: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestUpdateWorkspaceSettings(t *testing.T) {
 	svc.registerSession(&SessionRec{
 		ID: "c-old", Cwd: mustEval(t, outside), UpdatedAt: time.Now().UTC(),
 	})
-	recent, err := svc.RecentWorkspaces(10)
+	recent, err := svc.WorkspacePlane().RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}

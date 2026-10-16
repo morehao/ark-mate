@@ -73,7 +73,7 @@ func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, picker DirectoryPicker, plan
 func (h *workspaceCtr) Browse(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
-	resp, err := h.svc.BrowseWorkspace(path, includeHidden)
+	resp, err := h.plane.BrowseWorkspace(path, includeHidden)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -92,7 +92,7 @@ func (h *workspaceCtr) CreateDir(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CreateWorkspaceDir(req.Parent, req.Name)
+	resp, err := h.plane.CreateWorkspaceDir(req.Parent, req.Name)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -132,7 +132,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 		}
 		limit = n
 	}
-	list, err := h.svc.RecentWorkspaces(limit)
+	list, err := h.plane.RecentWorkspaces(limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -147,7 +147,7 @@ func (h *workspaceCtr) Recent(c *gin.Context) {
 func (h *workspaceCtr) Files(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	includeHidden := c.Query("hidden") == "true"
-	resp, err := h.svc.ListWorkspaceFiles(path, includeHidden)
+	resp, err := h.plane.ListWorkspaceFiles(path, includeHidden)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

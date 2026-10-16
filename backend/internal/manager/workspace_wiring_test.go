@@ -274,7 +274,7 @@ func TestRecentWorkspacesExcludesRegistered(t *testing.T) {
 	r.svc.registerSession(&SessionRec{ID: "c-reg", Cwd: ws.Path, WorkspaceID: ws.ID})
 	r.svc.registerSession(&SessionRec{ID: "c-loose", Cwd: mustEval(t, looseDir)})
 
-	recent, err := r.svc.RecentWorkspaces(10)
+	recent, err := r.svc.WorkspacePlane().RecentWorkspaces(10)
 	if err != nil {
 		t.Fatalf("RecentWorkspaces: %v", err)
 	}
