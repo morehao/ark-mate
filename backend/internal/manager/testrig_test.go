@@ -62,7 +62,7 @@ func providerTestSvc(t *testing.T, providerDir string) *Service {
 		// 再装载 `providers.json`（它顺带登记定义目录）。顺序与 `internal/app` 逐条同形——
 		// 反过来，memory 模式下装载时读到的密钥就会按"凭据面未装配"处理。
 		svc.SetCredentials(newTestCredentials(t, filepath.Dir(providerDir)))
-		svc.LoadProviderDefinitions(providerDir)
+		svc.providerPlane.LoadProviderDefinitions(providerDir)
 	}
 	return svc
 }

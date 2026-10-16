@@ -187,7 +187,7 @@ func TestGenerationPerFingerprint(t *testing.T) {
 		t.Fatalf("同指纹应复用连接，got %d 条", n)
 	}
 	// 全部代际都在同一个基础键下：代际**池上限**正是按这个数判的（超了要淘汰无人引用的那条）。
-	base := connKey(spec.ID, r.Svc.providerEnvFor(spec.ID, r.Svc.injectedProviderID(ctx)))
+	base := connKey(spec.ID, r.Svc.providerPlane.ProviderEnvFor(spec.ID, r.Svc.providerPlane.InjectedProviderID(ctx)))
 	if n := len(r.Orch.generationKeysFor(base)); n != 3 {
 		t.Fatalf("三代际应同属一个基础键: %d", n)
 	}

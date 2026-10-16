@@ -49,7 +49,7 @@ func connCauseLabel(intentional bool) string { return runtimeconn.ConnCauseLabel
 // 供应商（见 providerEnvFor / CredentialProblem），所以这个键与"哪个会话在跑"无关——
 // 单底座下它就是"这台机器上的这一份配置"。
 func (o *Orchestrator) baseKeyFor(spec runtime.Spec) string {
-	keyEnv := o.svc.providerEnvFor(spec.ID, o.svc.injectedProviderID(context.Background()))
+	keyEnv := o.svc.providerPlane.ProviderEnvFor(spec.ID, o.svc.providerPlane.InjectedProviderID(context.Background()))
 	return connKey(spec.ID, keyEnv)
 }
 
@@ -214,7 +214,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 	if err := o.admitGeneration(baseKey); err != nil {
 		return nil, err
 	}
-	keyEnv := o.svc.providerEnvFor(spec.ID, o.svc.injectedProviderID(ctx))
+	keyEnv := o.svc.providerPlane.ProviderEnvFor(spec.ID, o.svc.providerPlane.InjectedProviderID(ctx))
 
 	args := resolveArgs(spec.Launch.Args, RunOptions{ConfigPath: ""})
 	var env []string

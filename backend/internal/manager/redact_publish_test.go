@@ -124,7 +124,7 @@ func TestProviderKeyValueIsRedactedAfterWriteFace(t *testing.T) {
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 
 	key := "zq7-not-a-known-shape-42" // 形状上谁都认不出来
 	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{
@@ -189,7 +189,7 @@ func TestMcpSecretValueIsRedactedAfterResolution(t *testing.T) {
 	svc, st := newSearchRig(t)
 	home := t.TempDir()
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 	svc.EnableStore(st)
 
 	const ref = "store:mcp/dyn-token"

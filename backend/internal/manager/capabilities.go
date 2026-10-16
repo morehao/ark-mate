@@ -8,6 +8,7 @@ import (
 
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
+	"github.com/morehao/ark-mate/pkg/logging"
 	"github.com/morehao/golib/glog"
 )
 
@@ -154,7 +155,7 @@ func (s *Service) reloadCapabilityDefinitions(ctx context.Context, importDir str
 
 	// 一次换面：此后所有读者看到的是完整的新目录。
 	s.caps.ReplaceAll(fresh)
-	logAt(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
+	logging.At(ctx, level, "capability: 定义已从持久层装载", "skills", len(skills), "mcps", len(mcps), "adopted", total)
 	return total, nil
 }
 

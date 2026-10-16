@@ -291,7 +291,7 @@ func TestCreateSessionDefaultPathUnchanged(t *testing.T) {
 	}
 	spec, _ := orch.reg.Get("stub")
 	// v19：基础键只剩"构建期底座 + 声明默认模型的供应商 env"（原生权限面没有策略来源）。
-	base := connKey(spec.ID, svc.providerEnvFor(spec.ID, svc.injectedProviderID(context.Background())))
+	base := connKey(spec.ID, svc.providerPlane.ProviderEnvFor(spec.ID, svc.providerPlane.InjectedProviderID(context.Background())))
 	if got := generationKey(base, rec.Fingerprint, ""); got != base {
 		t.Fatal("缺省路径的代际键必须与基础键逐字相同（R11）")
 	}

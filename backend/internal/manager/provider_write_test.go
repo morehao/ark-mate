@@ -33,7 +33,7 @@ func TestProviderWriteFaceCRUD(t *testing.T) {
 	svc := r.Svc
 	// 凭据面：memory 模式下托管文档就是密钥的事实源（与装配期同一条路径）。
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.SetProviderDir(dir)
+	svc.providerPlane.SetProviderDir(dir)
 
 	key := "sk-abc"
 	// ① POST 成功。
@@ -137,7 +137,7 @@ func TestProviderCreateDoesNotWriteKeyWhenRowExists(t *testing.T) {
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// 载体里先放一行（内存不知道）→ 写面读内存判定"不存在"，于是走新建 → CAS 未命中。
 	if ok, err := st.UpsertProviderDefinition(ctx, store.ProviderColumns{ID: "ghost", Protocol: "openai"}, 0, "rest"); err != nil || !ok {
@@ -179,7 +179,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
 	svc.EnableStore(st)
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	old := "sk-old"
 	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "p1", Protocol: "openai", APIKey: &old}); err != nil {
@@ -211,7 +211,7 @@ func TestProviderUpdateKeepsKeyWhenContentCasFails(t *testing.T) {
 		t.Fatalf("镜像里也应是旧值，得到 %q", got)
 	}
 	// 内存也没被改脏（写面的承诺：载体提交成功之前内存一个字段都不动）。
-	if env := svc.providerEnvFor(runtimetest.ID, "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
+	if env := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "p1"); len(env) != 1 || !strings.HasSuffix(env[0], "_API_KEY="+old) {
 		t.Fatalf("失败的写面不该改内存: %v", env)
 	}
 }
@@ -294,7 +294,7 @@ func TestProviderEffectIsSameSourceAsGenerationPlan(t *testing.T) {
 func TestProviderEffectNilWithoutOrchestrator(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.SetProviderDir(filepath.Join(t.TempDir(), "providers"))
+	svc.providerPlane.SetProviderDir(filepath.Join(t.TempDir(), "providers"))
 	if _, err := svc.providerPlane.CreateProvider(ctx, providerReq("p1", nil)); err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestProviderProblemsSurfaceBeforeSession(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 	svc.SetCredentials(newTestCredentials(t, home))
 	if _, err := svc.providerPlane.CreateProvider(ctx, dtoprovider.ProviderCreateReq{ID: "no-key", Protocol: "openai"}); err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestCredentialProblemPointsAtModelSettings(t *testing.T) {
 	st := testutil.OpenStore(t, filepath.Join(home, "mate.db"))
 	defer func() { _ = st.Close() }()
 	svc := NewService(v12ProviderRegistry(), eventbus.New())
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.providerPlane.SetProviderDir(filepath.Join(home, "providers"))
 	svc.EnableStore(st)
 
 	defaultModel := func(t *testing.T, id, providerID string) {

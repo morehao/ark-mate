@@ -35,7 +35,7 @@ func TestProviderEnvRegistersDynamicSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 生产路径：注入子进程之前会把生效密钥登记进 redact（`providerEnvFor` 是唯一入口）。
-	_ = svc.providerEnvFor(runtimetest.ID, "p1")
+	_ = svc.providerPlane.ProviderEnvFor(runtimetest.ID, "p1")
 	if got := redact.String("出错时带出了 " + secret); strings.Contains(got, secret) {
 		t.Fatalf("providerEnvFor 没有登记动态密钥，redact 原样返回了真值: %q", got)
 	}

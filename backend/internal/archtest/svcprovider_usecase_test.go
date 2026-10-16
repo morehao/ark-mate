@@ -217,4 +217,55 @@ func TestProviderProbeUseCaseLivesInProviderSvc(t *testing.T) {
 		t.Error("`internal/manager/service.go` 里找不到 `ProviderPlane()`：控制器拿不到供应商域平面 ⇒ " +
 			"自检的域读面恒空，表现是**永远**报「档案不在册」（只在用户点\"测试连接\"时才现形）。")
 	}
+
+	// ——— P4a 正文第四十六刀：**剩下七条转发清零**，调用点直连域平面 ———
+	//
+	// 失效方式与前面几条同源但更细：转发层每留一条，"这段实现到底在哪一层"就少一处可见，
+	// 而一行转发的正确性完全等价于被转发的那一行——**没有任何行为会因此变红**，所以判据只能
+	// 钉"它不在"与"调用点直连"两头。七条是：四条装配入口（`SetProviderDir` /
+	// `LoadProviderDefinitions` / `LoadProviderDefinitionsFromStore` /
+	// `ReloadProviderDefinitionsFromStore`）与三条包内转发（`providerEnvFor` /
+	// `injectedProviderID` / `providerModelRefsReadOnly`）。
+	mgrAll := dirProductionBody(t, mgr)
+	for _, dead := range []string{
+		"func (s *Service) SetProviderDir(",
+		"func (s *Service) LoadProviderDefinitions(",
+		"func (s *Service) LoadProviderDefinitionsFromStore(",
+		"func (s *Service) ReloadProviderDefinitionsFromStore(",
+		"func (s *Service) providerEnvFor(",
+		"func (s *Service) injectedProviderID(",
+		"func (s *Service) providerModelRefsReadOnly(",
+	} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：供应商域的过渡转发已随 P4a 正文第四十六刀清零"+
+				"（调用点直连 `provider.Plane`）。转发层的存在没有判据价值——一行转发的正确性等价于"+
+				"被转发的那一行，而它让「实现在哪一层」重新不可见。", dead)
+		}
+	}
+	// 调用点那一头：装配与 gateway 必须**直连域平面**（少了这条，删掉转发只会把调用点改成
+	// 另一个名字的转发，判据形同虚设）。
+	for _, c := range []struct{ file, want, why string }{
+		{"internal/app/app.go", "a.svc.ProviderPlane().LoadProviderDefinitionsFromStore(",
+			"serve 的装载入口"},
+		{"internal/app/app.go", "a.svc.ProviderPlane().SetProviderDir(",
+			"serve 的目录入口"},
+		{"internal/gateway/source.go", "s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(",
+			"gateway 的换代重载"},
+		{"internal/manager/connection.go", "o.svc.providerPlane.ProviderEnvFor(",
+			"建连时的密钥注入"},
+		{"internal/manager/provider_effect.go", "s.providerPlane.ProviderModelRefsReadOnly(",
+			"写面回执的引用统计"},
+	} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
+			t.Errorf("`%s` 里找不到 `%s`（%s）：调用点必须直连域平面。"+
+				"漏了会让这一条链悄悄退回某个中间层。", c.file, c.want, c.why)
+		}
+	}
+	// 顺带把**日志转发**那一条钉住（同批清零的另一个文件）：`logAt` 是 `pkg/logging.At` 的一行转发，
+	// manager 的 `logging.go` 已随本刀删除。
+	if strings.Contains(mgrAll, "func logAt(") {
+		t.Error("`internal/manager` 里又出现 `func logAt(`：日志出口的唯一实现是 `pkg/logging.At`" +
+			"（P4a 正文第四十六刀删掉了 manager 的一行转发）。多出来的这一层会让「日志走哪个出口」" +
+			"重新有两处答案，而 `TestOnlyLoggingPackageImportsSlog` 只看 slog 那一头，看不见它。")
+	}
 }

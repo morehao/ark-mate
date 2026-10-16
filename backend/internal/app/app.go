@@ -254,7 +254,7 @@ func (a *App) Init(ctx context.Context) error {
 		// 定义目录**先行登记**（顺序敏感，2026-10-11 修）：下面 `EnableStore` 会立刻做一次
 		// 装配期 runtime 同步，那一刻 `providerLocator` 已经要有确定值（否则报错文案指向空路径）。
 		// v20 起它与密钥无关——密钥面在库与托管文档里，都不依赖这个目录（见 `SetProviderDir`）。
-		a.svc.SetProviderDir(cfg.ProviderDir)
+		a.svc.ProviderPlane().SetProviderDir(cfg.ProviderDir)
 
 		// 旧密钥的一次性搬运（v20 迁移的第二步）：**必须在 EnableStore 之前**——那一次同步就要
 		// 读 provider 密钥，而此刻库里的密钥可能还只在旧密文里。搬完再同步，"哪些供应商有密钥"
@@ -588,9 +588,9 @@ func (a *App) loadDefinitions(ctx context.Context, mode string) error {
 	// providers.json 仍在文件侧（计划 §7 P-9）：memory 模式下它是事实源，sqlite 模式下它是
 	// 导入/导出载体（v20 起它**不再是任何密钥的锚点**——密钥在库与 `<MATE_HOME>/credentials.json`）。
 	if mode == config.StoreModeSQLite {
-		a.svc.LoadProviderDefinitionsFromStore(ctx, cfg.ProviderDir)
+		a.svc.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, cfg.ProviderDir)
 	} else {
-		a.svc.LoadProviderDefinitions(cfg.ProviderDir)
+		a.svc.ProviderPlane().LoadProviderDefinitions(cfg.ProviderDir)
 	}
 	// 能力数据面（P1 / M6-2）：**按持久层模式分派**——sqlite 模式下 DB 是事实源（v8 的
 	// skills/mcp_servers），memory 模式下文件仍是装载源。

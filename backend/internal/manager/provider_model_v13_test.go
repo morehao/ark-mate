@@ -46,7 +46,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	svc := NewService(v12ProviderRegistry(), nil)
 	svc.EnableStore(st)
 	svc.SetCredentials(newTestCredentials(t, home))
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 
 	// ① 写面：带密钥新建 → 落进那一列，回执不回显明文。
 	key := secret
@@ -97,7 +97,7 @@ func TestProviderKeyHasExactlyOneColumnInStore(t *testing.T) {
 	svc.mu.Lock()
 	svc.providerPlane.DeleteForTest("legacy")
 	svc.mu.Unlock()
-	svc.LoadProviderDefinitionsFromStore(ctx, dir)
+	svc.providerPlane.LoadProviderDefinitionsFromStore(ctx, dir)
 	items, _ := svc.providerPlane.ListProviders(ctx)
 	for _, it := range items {
 		if it.ID == "legacy" && !it.HasKey {

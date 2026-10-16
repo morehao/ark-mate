@@ -201,11 +201,11 @@ func NewSource(ctx context.Context, opts SourceOptions) (*MateSource, error) {
 	}
 	if s.st != nil {
 		s.svc.EnableStore(s.st)
-		s.svc.LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
+		s.svc.ProviderPlane().LoadProviderDefinitionsFromStore(ctx, opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitionsFromStore(ctx, opts.Cfg.CapabilityDir)
 	} else {
 		// memory 模式没有持久层：文件是唯一事实源（与核心进程逐条一致）。
-		s.svc.LoadProviderDefinitions(opts.Cfg.ProviderDir)
+		s.svc.ProviderPlane().LoadProviderDefinitions(opts.Cfg.ProviderDir)
 		s.svc.LoadCapabilityDefinitions(opts.Cfg.CapabilityDir)
 	}
 	s.lastReload = s.now()
@@ -412,7 +412,7 @@ func (s *MateSource) reload(ctx context.Context) error {
 	// provider 面也要重读：密钥引用解析与"这条档案还在不在"都在它上面。
 	// `providerDir` 必须原样传回：`providers.json` 在文件侧（locator 的取值来源），传空会静默
 	// 把密钥解析面砍掉（症状是"所有引用都解析不了"，而不是报错）。
-	s.svc.ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
+	s.svc.ProviderPlane().ReloadProviderDefinitionsFromStore(ctx, s.providerDir)
 	return nil
 }
 

@@ -60,7 +60,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	// （层序本身由 `pkg/credentials` 的用例与 manager 的用例覆盖）。
 	creds.Env = func(string) string { return "" }
 	svc.SetCredentials(creds)
-	svc.SetProviderDir(filepath.Join(home, "providers"))
+	svc.ProviderPlane().SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Session:        svc,

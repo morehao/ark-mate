@@ -43,12 +43,12 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	// env 注入：**逐供应商派生的引用名**（v11 的 `<TYPE>_API_KEY` 已删，ADR-16）。
 	// 判据不是"名字长什么样"而是"两条供应商拿到两个不同的名字"——同一把密钥命中两条 route
 	// 正是 v11 的真实缺陷（A12 的回归点）。
-	envs := svc.providerEnvFor(runtimetest.ID, "default")
+	envs := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default")
 	if len(envs) != 1 || !strings.HasPrefix(envs[0], "MATE_DEFAULT_") || !strings.HasSuffix(envs[0], "_API_KEY=sk-secret-abc") {
 		t.Fatalf("env 注入不符（应为逐供应商派生名）: %+v", envs)
 	}
 	_, _ = svc.providerPlane.CreateProvider(ctx, providerReq("ds", &key))
-	got := svc.providerEnvFor(runtimetest.ID, "ds")
+	got := svc.providerPlane.ProviderEnvFor(runtimetest.ID, "ds")
 	if len(got) != 1 || !strings.HasPrefix(got[0], "MATE_DS_") {
 		t.Fatalf("第二条供应商也该有自己的引用名: %+v", got)
 	}
@@ -59,7 +59,7 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 	// 清除：key 空串 → has_key=false、env nil。
 	clear := ""
 	_, _ = svc.providerPlane.UpdateProvider(ctx, "default", dtoprovider.ProviderPatchReq{APIKey: &clear})
-	if svc.providerEnvFor(runtimetest.ID, "default") != nil {
+	if svc.providerPlane.ProviderEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("清除后不应注入 env")
 	}
 	items, _ = svc.providerPlane.ListProviders(context.Background())
@@ -71,10 +71,10 @@ func TestProviderRegistryWriteOnceReadNever(t *testing.T) {
 
 	// 重启（新 Service 同目录）→ 档案装载（含 ds 仍有 key、default 无 key）。
 	svc2 := providerTestSvc(t, dir)
-	if svc2.providerEnvFor(runtimetest.ID, "ds") == nil {
+	if svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "ds") == nil {
 		t.Fatal("重启后 ds key 应仍在")
 	}
-	if svc2.providerEnvFor(runtimetest.ID, "default") != nil {
+	if svc2.providerPlane.ProviderEnvFor(runtimetest.ID, "default") != nil {
 		t.Fatal("重启后 default 清除应保持")
 	}
 }
