@@ -44,14 +44,6 @@ func (s *Service) sessionResp(id string) dtosession.SessionResp {
 	return s.sessionPlane.SessionResp(id)
 }
 
-// TODO(P4b): 删转发（检索面直接依赖 session.Plane）
-//
-// SearchSessions 与 SearchMessages 读的是**本域的两份事实**（内存会话表 + transcript 旁路），
-// P3b-2b 随 `transcript_search.go` / `messages_search.go` 一起搬进域。
-func (s *Service) SearchSessions(ctx context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error) {
-	return s.sessionPlane.SearchSessions(ctx, q, limit)
-}
-
 // TODO(P4b): 删转发（同上）
 func (s *Service) SearchMessages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	return s.sessionPlane.SearchMessages(ctx, q, limit)
@@ -123,11 +115,6 @@ func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
 // HandoffMemo 读的是**会话域的事件面**（`pl.bus`），P3b-2b 随会话域搬走。
 func (s *Service) handoffMemo(sessionID string, maxChars int) string {
 	return s.sessionPlane.HandoffMemo(sessionID, maxChars)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error) {
-	return s.sessionPlane.ListRuns(ctx, id)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
@@ -217,11 +204,6 @@ func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targ
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
 func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedInput {
 	return s.sessionPlane.ListQueuedInputsOf(ctx, convID)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error) {
-	return s.sessionPlane.ListQueuedInputs(ctx, id)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）

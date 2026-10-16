@@ -308,7 +308,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 	svc.publish(session.BusMessage, "s-s", map[string]any{"text": "好的"})
 	endRun(svc, "s-s", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
 
-	hits, err := svc.SearchSessions(ctx, "部署", 5)
+	hits, err := sessionPlaneOf(svc).SearchSessions(ctx, "部署", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestSearchSessionsPrefersMessagesTable(t *testing.T) {
 		t.Fatalf("matches 应 ≥1: %+v", hits[0])
 	}
 	// 无关词不命中。
-	if h2, _ := svc.SearchSessions(ctx, "不存在词xyz", 5); len(h2) != 0 {
+	if h2, _ := sessionPlaneOf(svc).SearchSessions(ctx, "不存在词xyz", 5); len(h2) != 0 {
 		t.Fatalf("无关词不应命中: %+v", h2)
 	}
 }

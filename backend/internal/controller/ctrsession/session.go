@@ -101,7 +101,7 @@ func (h *sessionCtr) Search(c *gin.Context) {
 			limit = n
 		}
 	}
-	hits, err := h.svc.SearchSessions(c.Request.Context(), q, limit)
+	hits, err := h.plane.SearchSessions(c.Request.Context(), q, limit)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -243,7 +243,7 @@ func (h *sessionCtr) Prompt(c *gin.Context) {
 
 // QueuedInputs 列出待投递的排队输入（§6 当前态；前端冷挂载/刷新后重建队列视图）。
 func (h *sessionCtr) QueuedInputs(c *gin.Context) {
-	resp, err := h.svc.ListQueuedInputs(c.Request.Context(), c.Param("id"))
+	resp, err := h.plane.ListQueuedInputs(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -331,7 +331,7 @@ func (h *sessionCtr) History(c *gin.Context) {
 // Runs 列出某会话的轮次明细（runs 表读模型；内存模式返回空数组）。
 func (h *sessionCtr) Runs(c *gin.Context) {
 	id := c.Param("id")
-	runs, err := h.svc.ListRuns(c.Request.Context(), id)
+	runs, err := h.plane.ListRuns(c.Request.Context(), id)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

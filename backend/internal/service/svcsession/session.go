@@ -15,9 +15,6 @@ import (
 // **只放用例**：读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）不在这里——它们由控制器
 // 直接经域平面取（见 `ctrsession` 的 `plane` 字段注释）。
 type SessionSvc interface {
-	// SearchSessions 按关键词搜索会话（标题/Agent/正文；含归档；updated 降序截断 limit）。
-	SearchSessions(ctx context.Context, q string, limit int) ([]dtosession.SessionSearchHit, error)
-
 	// GetSession 返回单会话详情（含元数据 + 挂起权限）。
 	GetSession(ctx context.Context, id string) (*dtosession.SessionDetailResp, error)
 
@@ -34,14 +31,9 @@ type SessionSvc interface {
 	// CancelRun 取消进行中的 run（无 run 时幂等 no-op）。
 	CancelRun(ctx context.Context, id string) error
 
-	// ListQueuedInputs 列出某会话待投递的排队输入（§6；冷挂载/刷新后重建队列视图）。
-	ListQueuedInputs(ctx context.Context, id string) ([]dtosession.QueuedInputResp, error)
 	// DeleteQueuedInput 撤下一条尚未投递的排队输入（§6）；返回是否存在待投递项被撤下
 	// （已投递/已作废是台账行，不可撤；不存在的 id 幂等返回 false）。
 	DeleteQueuedInput(ctx context.Context, id, inputID string) (bool, error)
-
-	// ListRuns 列出某会话的轮次明细（runs 表读模型：状态/耗时/usage/失败轮回溯；内存模式返回空）。
-	ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error)
 
 	// ListPendingPermissions 列出某会话的挂起权限请求。
 	ListPendingPermissions(ctx context.Context, id string) ([]dtosession.PermissionResp, error)

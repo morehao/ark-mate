@@ -48,6 +48,31 @@ func TestSessionReadFaceSkipsEmptyUseCaseLayer(t *testing.T) {
 		}
 	}
 
+	// ①② 同一判据按**读模型名单**跑一遍：名单在此单点声明。
+	//
+	// 读模型是**枚举得出**的（无校验 / 无错误码 / 无装配、实现与域锁绑死），不是"看着像"，
+	// 所以名单写死在这里——新增一个读模型进 `SessionSvc` 会立刻红，而不是等人去发现。
+	// 第十一刀后半场 +3：`SearchSessions` / `ListRuns` / `ListQueuedInputs`（前两个替身恒
+	// 返回空、第三个替身返回固定行，路由测试改成真平面后都换成了真事实）。
+	readModels := []string{"ListSessions", "SearchSessions", "ListRuns", "ListQueuedInputs"}
+	ctrSrcAll := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	ifaceAll := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
+	for _, m := range readModels {
+		if !strings.Contains(domBody, "func (pl *Plane) "+m+"(") {
+			t.Errorf("域平面里找不到 `func (pl *Plane) %s(`：读模型本体必须只有一份且在域里。", m)
+		}
+		if strings.Contains(ifaceAll, m+"(") {
+			t.Errorf("`SessionSvc` 里又声明了读模型 `%s(`：进用例层只能是一行转发（被判定为骚操作的形状）。", m)
+		}
+		if strings.Contains(mgrAll, "func (s *Service) "+m+"(") {
+			t.Errorf("`internal/manager` 里又出现 `func (s *Service) %s(`：那一行转发已按 P4b 口径删除。", m)
+		}
+		if !strings.Contains(ctrSrcAll, "h.plane."+m+"(") {
+			t.Errorf("`ctrsession` 里没有任何 `h.plane.%s(` 调用点：读模型要从域平面取，不能走转发。", m)
+		}
+	}
+
 	// ① 用例层不得把读模型收成转发。
 	iface := interfaceBodyOf(t, readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcsession", "session.go")), "type SessionSvc interface {")
 	if strings.Contains(iface, "ListSessions(") {

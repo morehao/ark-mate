@@ -108,8 +108,6 @@ type stubSvc struct {
 	inputDeleted    bool
 	inputDeleteID   string
 	inputDeleteConv string
-	inputsListed    bool
-	inputsListConv  string
 	promptResp      *dtosession.SessionPromptResp
 	promptErr       error
 
@@ -500,10 +498,6 @@ func (s *stubSvc) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wo
 	return s.registryMove, nil
 }
 
-func (s *stubSvc) SearchSessions(_ context.Context, _ string, _ int) ([]dtosession.SessionSearchHit, error) {
-	return nil, nil
-}
-
 // ——— M3 ② 消息检索 / 批量导出桩 ———
 func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error) {
 	s.searchMsgQuery, s.searchMsgLimit = q, limit
@@ -578,12 +572,6 @@ func (s *stubSvc) CreateSession(_ context.Context, req dtosession.SessionCreateR
 	}
 	return &dtosession.SessionCreateResp{ID: "s-new"}, nil
 }
-func (s *stubSvc) ListQueuedInputs(_ context.Context, id string) ([]dtosession.QueuedInputResp, error) {
-	s.inputsListed, s.inputsListConv = true, id
-	return []dtosession.QueuedInputResp{
-		{ID: "in-8", Text: "排队一", Delivery: "after_run", TargetRunID: "t1", Generation: 3},
-	}, nil
-}
 
 func (s *stubSvc) DeleteQueuedInput(_ context.Context, id, inputID string) (bool, error) {
 	s.inputDeleted, s.inputDeleteID, s.inputDeleteConv = true, inputID, id
@@ -610,9 +598,6 @@ func (s *stubSvc) CancelRun(_ context.Context, id string) error {
 }
 
 // ListRuns 桩：默认空 runs（详情/统计路径不依赖其返回）。
-func (s *stubSvc) ListRuns(_ context.Context, id string) ([]dtosession.RunResp, error) {
-	return []dtosession.RunResp{}, nil
-}
 
 // ——— 测试基建 ———
 
@@ -1104,7 +1089,16 @@ func TestCreateSessionServiceError(t *testing.T) {
 // TestPromptAndCancel prompt（校验必填）/cancel 调用透传。
 func TestPromptAndCancel(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	// 排队输入的**读模型**归域平面（P4a 正文第十一刀），所以夹具要有真会话与真入队。
+	deps.SessionPlane.RegisterSession(&session.SessionRec{
+		ID: "s1", RuntimeID: "rtx", Status: "completed", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	queued, err := deps.SessionPlane.EnqueueInput(context.Background(), "s1", "排队一", "after_run", "t1", 3)
+	if err != nil {
+		t.Fatalf("入队夹具失败: %v", err)
+	}
+	r := newRestEngine(deps)
 
 	// prompt 缺 prompt → 40000。
 	env, _ := do(t, r, "POST", "/v1/mate/sessions/s1/prompt", `{}`)
@@ -1129,11 +1123,19 @@ func TestPromptAndCancel(t *testing.T) {
 	if env.Code != 0 || svc.promptDelivery != "after_run" {
 		t.Fatalf("delivery 未透传: env=%+v got=%q", env, svc.promptDelivery)
 	}
-	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：载荷形状按前端所需字段断言。
+	// §6 列出待投递输入（冷挂载重建队列的当前态入口）：走**真域平面**，载荷形状按前端所需字段断言。
+	//
+	// 原来这里只断言"替身收到了 id"（`inputsListed`/`inputsListConv` 两个标志位）。那判据
+	// 无法区分「id 真的传下去了」与「列表恒空」——换成真会话 + 真入队之后，回来的就是
+	// 刚入队那一行（id 由平台铸造），顺带把未知会话必须 40401 这条也验进去。
 	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/inputs", "")
-	if env.Code != 0 || !svc.inputsListed || svc.inputsListConv != "s1" {
-		t.Fatalf("列出排队输入不符: env=%+v listed=%v conv=%q", env, svc.inputsListed, svc.inputsListConv)
+	if env.Code != 0 {
+		t.Fatalf("列出排队输入不符: env=%+v", env)
 	}
+	if env, _ = do(t, r, "GET", "/v1/mate/sessions/nope/inputs", ""); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401，got %+v", env)
+	}
+	env, _ = do(t, r, "GET", "/v1/mate/sessions/s1/inputs", "")
 	var qdata []struct {
 		InputID     string `json:"input_id"`
 		Text        string `json:"text"`
@@ -1144,8 +1146,9 @@ func TestPromptAndCancel(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &qdata); err != nil || len(qdata) != 1 {
 		t.Fatalf("排队列表 data 不符: %s", env.Data)
 	}
-	if qdata[0].InputID != "in-8" || qdata[0].Delivery != "after_run" || qdata[0].Generation != 3 {
-		t.Fatalf("排队列表字段不符: %+v", qdata[0])
+	if qdata[0].InputID != queued.ID || qdata[0].Text != "排队一" ||
+		qdata[0].Delivery != "after_run" || qdata[0].TargetRunID != "t1" || qdata[0].Generation != 3 {
+		t.Fatalf("排队列表字段不符: %+v（期望来自域入队的那一行 %s）", qdata[0], queued.ID)
 	}
 
 	// §6 撤下排队输入：路径参数 :input_id 正确接线（拼错即 404，路由守卫与用例双保险）。

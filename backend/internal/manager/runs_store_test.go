@@ -84,7 +84,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 	}
 
 	// Service 读面。
-	items, err := svc.ListRuns(ctx, "s-run")
+	items, err := sessionPlaneOf(svc).ListRuns(ctx, "s-run")
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRuns: n=%d err=%v", len(items), err)
 	}
@@ -94,7 +94,7 @@ func TestRunMaterializationAtRunEnd(t *testing.T) {
 
 	// 内存模式（无 store）→ 空读模型。
 	memSvc := NewService(reg, nil)
-	if empty, err := memSvc.ListRuns(ctx, "s-run"); err != nil || len(empty) != 0 {
+	if empty, err := sessionPlaneOf(memSvc).ListRuns(ctx, "s-run"); err != nil || len(empty) != 0 {
 		t.Fatalf("内存模式 ListRuns 应为空: %+v err=%v", empty, err)
 	}
 }
@@ -290,7 +290,7 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	seed("failed", `{"used":150,"size":128000,"cost_amount":0.5,"cost_currency":"USD"}`, 0, 10)
 	seed("cancelled", ``, 0, 20)
 
-	items, err := svc.ListRuns(ctx, "s-usage")
+	items, err := sessionPlaneOf(svc).ListRuns(ctx, "s-usage")
 	if err != nil || len(items) != 3 {
 		t.Fatalf("ListRuns: n=%d err=%v", len(items), err)
 	}
