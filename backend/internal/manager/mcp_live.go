@@ -1,53 +1,28 @@
 package manager
 
-import (
-	"context"
-
-	"github.com/morehao/ark-mate/internal/dto/dtocapability"
-	mcpclient "github.com/morehao/ark-mate/pkg/mcp"
-)
-
-// ——— 连接器（MCP）实时面：P3d 过渡期的转发层 ———
+// ——— 连接器（MCP）实时面（已清空：实现全在 `domain/mcp`）———
 //
-// 实时面（工具调用、资源、提示词；以及"取条目 + 解析密钥成明文"的唯一入口 `liveServer`）
-// 已落 `domain/mcp.Plane`（P2a-14）。这里只留一行转发，调用点（`ctrcapability` 与测试）不变。
+// 实时面（工具调用、资源、提示词；以及"取条目 + 解析密钥成明文"的唯一入口 `LiveServer`）早在
+// P2a-14 就落进了 `domain/mcp.Plane`；P4a 正文第三十九刀把这里最后六条一行转发与
+// `svccapability.CapabilitySvc` 的对应声明一起删掉：
 //
-// 为什么它和密钥面（`domain/mcp.Secrets`）分两个类型：密钥解析是**纯函数式**的
+//	`CallMcpTool`      → 控制器直接 `h.mcpPlane.CallTool(ctx, id, tool, req)`
+//	`ListMcpResources` → `h.mcpPlane.ListResources(ctx, id)`
+//	`ReadMcpResource`  → `h.mcpPlane.ReadResource(ctx, id, uri)`
+//	`ListMcpPrompts`   → `h.mcpPlane.ListPrompts(ctx, id)`
+//	`GetMcpPrompt`     → `h.mcpPlane.GetPrompt(ctx, id, name, req)`
+//	`mcpLiveServer`    → 跨面集成测试改调 `svc.McpPlane().LiveServer(id)`
+//
+// 最后一条值得单独记一句：它此前**唯一**的存在理由是给 `mcp_secret_test.go` 当入口，而那是个
+// 包内测试（`package manager`）——它本来就能直接走 `svc.McpPlane()`。为"测试少写几个字"留一条
+// 转发，正是第三条硬规矩点名的形状（`svccapability` 的同名声明也随之失去最后一个消费者）。
+// 那条用例要验的性质一句话没变：**装配起来的那份 Service**（真注册表 + 真库 + 真凭据面）上，
+// 明文与解析后的密钥一起进客户端输入——它钉的是 2026-10-09 实测过的跨面缺陷（"会话里能用、
+// 探测必失败"）。
+//
+// 为什么实时面与密钥面（`domain/mcp.Secrets`）分两个类型：密钥解析是**纯函数式**的
 // （引用 → 明文，无状态），实时面要拿注册表里的条目、要按平面自己的预算发请求。合成一个
 // 类型会让"只想解析一条引用"的调用方（网关、写面体检）也拿到客户端能力。
-
-// TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
-func (s *Service) CallMcpTool(ctx context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
-	return s.mcpPlane.CallTool(ctx, id, tool, req)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
-func (s *Service) ListMcpResources(ctx context.Context, id string) (*dtocapability.McpResourcesResp, error) {
-	return s.mcpPlane.ListResources(ctx, id)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
-func (s *Service) ReadMcpResource(ctx context.Context, id, uri string) (*dtocapability.McpResourceReadResp, error) {
-	return s.mcpPlane.ReadResource(ctx, id, uri)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
-func (s *Service) ListMcpPrompts(ctx context.Context, id string) (*dtocapability.McpPromptsResp, error) {
-	return s.mcpPlane.ListPrompts(ctx, id)
-}
-
-// TODO(P4b): 删转发（调用点直接依赖 mcp.Plane）
-func (s *Service) GetMcpPrompt(ctx context.Context, id, name string, req dtocapability.McpPromptGetReq) (*dtocapability.McpPromptGetResp, error) {
-	return s.mcpPlane.GetPrompt(ctx, id, name, req)
-}
-
-// TODO(P4b): 删转发（**跨面集成测试**直接依赖 mcp.Plane.LiveServer）
 //
-// 为什么留这一条而不是让测试改指平面：`mcp_secret_test.go` 的
-// `TestMcpLiveAndProbeCarryResolvedEnv` 钉的是一个**实测过的跨面缺陷**（2026-10-09）——"会话里
-// 能用、探测必失败"只是因为探测/调用面不带 `Env`。它验的是**装配起来的那份 Service**（真注册表 +
-// 真库 + 真凭据面），而"明文与解析后的密钥一起进客户端输入"这件事必须在**同一个**入口上被断言。
-// 平面自己的单测（假注册表 + 假凭据面）无法替代它。
-func (s *Service) mcpLiveServer(id string) (mcpclient.Server, error) {
-	return s.mcpPlane.LiveServer(id)
-}
+// 留这条说明是因为**函数删了、文件还在**：下一个人看到空文件才知道这里的实现去哪了，
+// 而不是以为漏搬了（与 `skills_write.go` / `mcps_write.go` / `mcp_probe.go` 同一处置）。

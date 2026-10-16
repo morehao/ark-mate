@@ -155,13 +155,30 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"而构建、启动、既有测试全都正常。", call)
 		}
 	}
+	// capSrc 是 `svccapability` 包**全部生产文件**拼起来的正文（剥注释后）。
+	//
+	// 为什么按目录扫而不是钉单个文件：P4a 正文第三十九刀把那个端口文件（`capability.go`）整个
+	// 删掉了，钉路径的判据会当场变成 `readFileOrFatal` 的 Fatal；而"文件被删"本身又不能作为判据
+	// ——把接口换个文件名重新添回来就绕过去了。按目录扫同时解决这两件事，并且顺带把下面三批
+	// "接口里不许有声明"的判据收紧成"包里任何地方都不许有"。
+	capFiles := productionGoFiles(t, filepath.Join(root, "internal", "service", "svccapability"))
+	if len(capFiles) == 0 {
+		t.Fatal("`internal/service/svccapability` 下扫不到任何生产文件：判据失锚（目录被搬走/改名？），不许静默通过")
+	}
+	var capBuf strings.Builder
+	for _, f := range capFiles {
+		capBuf.WriteString(stripLineComments(readFileOrFatal(t, f)))
+		capBuf.WriteString("\n")
+	}
+	capSrc := capBuf.String()
+
 	// ——— 技能启停 / 物化现状归域平面（P4a 正文第三十六刀）———
 	//
 	// `SetSkillEnabled` 与 `SkillMaterialization` 的投影（两个 DTO）与错误码（`skill_not_found` 等）
 	// 都在 `domain/skill` 的平面里，用例层再留一份声明就只是给"一行转发"留位置。判据取"那两行
 	// 在用例层不存在"：一个方法声明在任何地方都能满足，删掉转发之后声明会**静默地**无事可做。
 	for _, dead := range []string{"SetSkillEnabled(ctx context.Context", "SkillMaterialization(id string"} {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+		if strings.Contains(capSrc, dead) {
 			t.Errorf("`svccapability` 的接口里又出现 `%s`：投影与错误码都在域平面（`domain/skill`），"+
 				"控制器直接 `h.skills.*`（接口里留声明 = 给一行转发留位置）。", dead)
 		}
@@ -180,7 +197,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	// 本体（`WriteSkill`/`DeleteSkill`/`WriteServer`/`DeleteServer`）必须在（失锚＝空转）。
 	for _, dead := range []string{"CreateSkill(ctx context.Context", "UpdateSkill(ctx context.Context", "DeleteSkill(ctx context.Context",
 		"CreateMcpServer(ctx context.Context", "UpdateMcpServer(ctx context.Context", "DeleteMcpServer(ctx context.Context"} {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+		if strings.Contains(capSrc, dead) {
 			t.Errorf("`svccapability` 的接口里又出现 `%s`：写面归域平面（`WriteSkill`/`WriteServer`），"+
 				"接口里留声明 = 给一行转发留位置。", dead)
 		}
@@ -223,7 +240,7 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	//	   的**函数体**里——少了它，调用点自己 `mcp.NewPlane(...)` 也能编译，而那份新平面
 	//	   没有注册表、探测恒 40401（"接错平面"是这一族最贵的错，见 §3.1 的 3y/3η）。
 	for _, dead := range []string{"ProbeMcpServer(ctx context.Context", "AutoProbeMcpServers("} {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svccapability", "capability.go"))), dead) {
+		if strings.Contains(capSrc, dead) {
 			t.Errorf("`svccapability` 的接口里又出现 `%s`：探测面归域平面（`domain/mcp.Plane.Probe`/"+
 				"`.AutoProbe`），接口里留声明 = 给一行转发留位置。", dead)
 		}
@@ -249,5 +266,69 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 	if body := funcBodyOf(t, capCtr, "func (h *capabilityCtr) ProbeMcpServer("); !strings.Contains(body, "h.mcpPlane.Probe(") {
 		t.Error("`ProbeMcpServer` handler 的函数体里没有 `h.mcpPlane.Probe(`：探测面已归域平面，" +
 			"经同包中间函数或另造平面都会让这条判据失去意义（前者把落点藏起来，后者接错平面）。")
+	}
+
+	// ——— MCP live 五条归域平面 + **空接口摘除**（P4a 正文第三十九刀）———
+	//
+	// 五条 live 面（工具调用 / 资源 / 提示词 ×3）与 `mcpLiveServer` 是这一族最后的一行转发；
+	// 搬完它们 `CapabilitySvc` 就**空了**。空接口在任何地方都能满足、编译器不提醒任何调用点，
+	// 所以这一刀的判据必须**同时**钉住"接口不存在"与"三处装配格不复存在"——只钉一半，另一半
+	// 就是"这个空接口随时可以被重新填上"（`svcworkspace` 第三十三/三十四刀踩过的正是这个形状）。
+	//
+	//	① 包内零命中 `CapabilitySvc`（**含将来新增的文件**）：空接口回潮即红；
+	//	② `manager/mcp_live.go` 零命中六条转发：转发回流（该文件此后只剩说明头）；
+	//	③ `domain/mcp/live.go` 六个本体必须在：失锚＝空转；
+	//	④ 控制器**五个 handler 的函数体**各自必须真的调 `h.mcpPlane.X(`——少了它，handler 可以
+	//	   经同包中间函数取、也可以自己 `mcp.NewPlane(...)`（后者拿到的平面没有注册表）；
+	//	⑤ `router.Ports` 不再有 `Capability` 那一格、`app.go` 不再有 `Capability: a.svc`——
+	//	   少这一条，"端口没了但装配点还留着"会看起来一样（而端口类型已经不存在，那一格
+	//	   只能靠再引入一个别名/接口来填，正是第三条硬规矩禁的形状）。
+	if strings.Contains(capSrc, "CapabilitySvc") {
+		t.Error("`internal/service/svccapability` 的生产文件里又出现 `CapabilitySvc`：" +
+			"那个接口已随 P4a 正文第三十九刀删除（写面/探测面/live 五条全归域平面），" +
+			"本包只剩 `Tools` / `Servers` 两个读模型用例。空接口回潮的表现是「能力面还有一个端口」，" +
+			"而编译器不会提醒任何调用点。")
+	}
+	liveFace := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "mcp_live.go")))
+	for _, dead := range []string{"func (s *Service) CallMcpTool(", "func (s *Service) ListMcpResources(",
+		"func (s *Service) ReadMcpResource(", "func (s *Service) ListMcpPrompts(",
+		"func (s *Service) GetMcpPrompt(", "func (s *Service) mcpLiveServer("} {
+		if strings.Contains(liveFace, dead) {
+			t.Errorf("`internal/manager/mcp_live.go` 里又出现 `%s`：那六条已随 P4a 正文第三十九刀删除"+
+				"（live 面走 `h.mcpPlane.*`，跨面集成测试走 `svc.McpPlane().LiveServer`）。", dead)
+		}
+	}
+	liveSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "domain", "mcp", "live.go")))
+	for _, must := range []string{"func (p *Plane) CallTool(", "func (p *Plane) LiveServer(",
+		"func (p *Plane) ListResources(", "func (p *Plane) ReadResource(",
+		"func (p *Plane) ListPrompts(", "func (p *Plane) GetPrompt("} {
+		if !strings.Contains(liveSrc, must) {
+			t.Errorf("`domain/mcp/live.go` 里找不到 %q：判据失锚＝空转（方法被改名/搬走时这条判据不会红）。", must)
+		}
+	}
+	for _, c := range []struct{ handler, call string }{
+		{"func (h *capabilityCtr) CallMcpTool(", "h.mcpPlane.CallTool("},
+		{"func (h *capabilityCtr) ListMcpResources(", "h.mcpPlane.ListResources("},
+		{"func (h *capabilityCtr) ReadMcpResource(", "h.mcpPlane.ReadResource("},
+		{"func (h *capabilityCtr) ListMcpPrompts(", "h.mcpPlane.ListPrompts("},
+		{"func (h *capabilityCtr) GetMcpPrompt(", "h.mcpPlane.GetPrompt("},
+	} {
+		if body := funcBodyOf(t, capCtr, c.handler); !strings.Contains(body, c.call) {
+			t.Errorf("%s 的函数体里没有 %q：live 面归域平面后控制器必须直接消费**装配点交下来的**"+
+				"那份平面（经同包中间函数或另造平面都会让这条判据失去意义）。", c.handler, c.call)
+		}
+	}
+	if strings.Contains(capCtr, "svccapability.CapabilitySvc") || strings.Contains(capCtr, "h.svc.") {
+		t.Error("`ctrcapability` 里又出现 `svccapability.CapabilitySvc` / `h.svc.`：那个字段已随" +
+			"第三十九刀摘除（控制器只持依赖事实 + 本包内构造的两个读模型用例）。")
+	}
+	routerSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
+	if regexp.MustCompile(`(?m)^\s*Capability\s`).MatchString(routerSrc) {
+		t.Error("`internal/router/router.go` 的 `Ports` 里又出现 `Capability` 那一格：能力面已全部归" +
+			"域平面 / 本包读模型，装配点不该再交一个 svc 实例（要交就交依赖事实）。")
+	}
+	if appSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go"))); strings.Contains(appSrc, "Capability: a.svc") {
+		t.Error("`internal/app/app.go` 的 `router.Ports` 字面量里又出现 `Capability: a.svc`：" +
+			"那一格已随第三十九刀摘除。")
 	}
 }

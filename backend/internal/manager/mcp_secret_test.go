@@ -263,7 +263,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}
 
 	// 1) 调用面（mcpLiveServer）：明文 + 解析后的密钥一起进 mcp.Server。
-	got, err := svc.mcpLiveServer("live")
+	got, err := svc.McpPlane().LiveServer("live")
 	if err != nil {
 		t.Fatalf("mcpLiveServer: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestMcpLiveAndProbeCarryResolvedEnv(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.mcpLiveServer("broken"); err == nil {
+	if _, err := svc.McpPlane().LiveServer("broken"); err == nil {
 		t.Fatal("密钥解析失败时调用面应报错")
 	} else if numericCode(err) != code.InvalidRequest {
 		t.Fatalf("应是 40001（配置问题），got %d（%v）", numericCode(err), err)

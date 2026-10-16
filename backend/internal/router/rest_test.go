@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -138,20 +139,6 @@ type stubSvc struct {
 	mcpWritten    string
 	mcpWriteID    string
 	mcpWriteReq   dtocapability.McpWriteReq
-
-	// M2-4 Library 桩
-
-	callMcpResp *dtocapability.McpToolCallResp // B1 tools/call 桩
-	callMcpErr  error
-	callMcpID   string
-	callMcpTool string
-	callMcpReq  dtocapability.McpToolCallReq
-
-	mcpLiveID   string // B2 资源/提示词桩
-	mcpLiveURI  string
-	mcpLiveName string
-	mcpLiveArgs map[string]string
-	mcpLiveErr  error
 
 	usageResp  *dtousage.UsageSummaryResp // M3 GET /usage/summary 桩
 	usageQuery dtousage.UsageQueryReq     // 捕获查询参数
@@ -312,44 +299,6 @@ func (s *stubSvc) UsageSummary(_ context.Context, q dtousage.UsageQueryReq) (*dt
 		return s.usageResp, nil
 	}
 	return &dtousage.UsageSummaryResp{GroupBy: "agent", Source: "sqlite", Buckets: []dtousage.UsageBucketResp{}}, nil
-}
-func (s *stubSvc) CallMcpTool(_ context.Context, id, tool string, req dtocapability.McpToolCallReq) (*dtocapability.McpToolCallResp, error) {
-	s.callMcpID, s.callMcpTool, s.callMcpReq = id, tool, req
-	if s.callMcpErr != nil {
-		return nil, s.callMcpErr
-	}
-	if s.callMcpResp != nil {
-		return s.callMcpResp, nil
-	}
-	return &dtocapability.McpToolCallResp{ServerID: id, Tool: tool, Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"ok"}`)}, Text: "ok"}, nil
-}
-func (s *stubSvc) ListMcpResources(_ context.Context, id string) (*dtocapability.McpResourcesResp, error) {
-	s.mcpLiveID = id
-	if s.mcpLiveErr != nil {
-		return nil, s.mcpLiveErr
-	}
-	return &dtocapability.McpResourcesResp{ServerID: id, Resources: []dtocapability.McpResourceResp{{URI: "file:///tmp/a.txt", MimeType: "text/plain"}}}, nil
-}
-func (s *stubSvc) ReadMcpResource(_ context.Context, id, uri string) (*dtocapability.McpResourceReadResp, error) {
-	s.mcpLiveID, s.mcpLiveURI = id, uri
-	if s.mcpLiveErr != nil {
-		return nil, s.mcpLiveErr
-	}
-	return &dtocapability.McpResourceReadResp{ServerID: id, URI: uri, Contents: []dtocapability.McpResourceContent{{URI: uri, Text: "hi"}}}, nil
-}
-func (s *stubSvc) ListMcpPrompts(_ context.Context, id string) (*dtocapability.McpPromptsResp, error) {
-	s.mcpLiveID = id
-	if s.mcpLiveErr != nil {
-		return nil, s.mcpLiveErr
-	}
-	return &dtocapability.McpPromptsResp{ServerID: id, Prompts: []dtocapability.McpPromptResp{{Name: "greet"}}}, nil
-}
-func (s *stubSvc) GetMcpPrompt(_ context.Context, id, name string, req dtocapability.McpPromptGetReq) (*dtocapability.McpPromptGetResp, error) {
-	s.mcpLiveID, s.mcpLiveName, s.mcpLiveArgs = id, name, req.Arguments
-	if s.mcpLiveErr != nil {
-		return nil, s.mcpLiveErr
-	}
-	return &dtocapability.McpPromptGetResp{ServerID: id, Name: name, Messages: []dtocapability.McpPromptMessage{{Role: "user", Content: json.RawMessage(`{"type":"text","text":"hi"}`)}}}, nil
 }
 func (s *stubSvc) BrowseWorkspace(path string, includeHidden bool) (*dtoworkspace.WorkspaceBrowseResp, error) {
 	s.browsePath, s.browseHidden = path, includeHidden
@@ -574,7 +523,6 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		// 目录落到临时目录，且不带密钥——本包只验路由与信封，密钥/载体行为在用例层自己的测试里。
 		ProviderPlane:   testProviderPlane(t),
 		ProviderCatalog: svc, Model: svc,
-		Capability: svc,
 		// Library 读模型（P4a 正文第六刀起）：域/包事实是**真对象**，用例实例由 ctrlibrary 造
 		// ——替身化事实等于把"读模型读的是哪份注册表"也替身掉。
 		Capabilities: caps, SkillPlane: skills, Registry: goruntime.AllBuiltinRegistry(),
@@ -1632,142 +1580,205 @@ func TestRuntimeDiagnosticsRoute(t *testing.T) {
 	}
 }
 
-// TestCallMcpToolRoute B1 MCP 工具调用路由：参数透传（server/tool/arguments/timeout_ms）、
-// 工具级失败（is_error=true）仍是 code=0，传输/协议错误透传信封码。
+// fakeMcpServer 一台最小的 MCP JSON-RPC 假服务器（http 传输），**答复里回显收到的参数**。
+//
+// 为什么路由层也要一台真服务器（P4a 正文第三十九刀）：MCP live 五条归域平面之后，替身的
+// `callMcpResp`/`callMcpErr`/`mcpLiveID`/`mcpLiveErr` 全部退场——路由这一层要证的不再是
+// "控制器把参数原样转发给替身"（那种判据在真实现把参数丢掉时**照样绿**），而是"参数真的走进了域、
+// 并被真的发给了 server"。回显让 id/tool/uri/name/arguments 与"空 body = 零参数"都成了
+// **能从响应里读出来**的事实。
+//
+// 与 `internal/manager` 那台假服务器同一手法而**刻意不复用**：那是包内夹具（`package manager`），
+// 两个包的用例各自持有自己的夹具，比把夹具提到一个"谁都能改"的公共位置更不容易漂。
+func fakeMcpServer(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+				URI       string          `json:"uri"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		text := func(s string) []map[string]any {
+			return []map[string]any{{"type": "text", "text": s}}
+		}
+		var result map[string]any
+		switch msg.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-06-18",
+				"serverInfo": map[string]any{"name": "router-fake", "version": "1.0"}}
+		case "tools/call":
+			if msg.Params.Name == "boom" {
+				result = map[string]any{"content": text("工具内部失败"), "isError": true}
+			} else {
+				result = map[string]any{"content": text("called " + msg.Params.Name + " args " + string(msg.Params.Arguments))}
+			}
+		case "resources/list":
+			result = map[string]any{"resources": []map[string]any{{"uri": "file:///tmp/a.txt", "mimeType": "text/plain"}}}
+		case "resources/templates/list":
+			result = map[string]any{"resourceTemplates": []map[string]any{}}
+		case "resources/read":
+			result = map[string]any{"contents": []map[string]any{
+				{"uri": msg.Params.URI, "mimeType": "text/plain", "text": "read " + msg.Params.URI}}}
+		case "prompts/list":
+			result = map[string]any{"prompts": []map[string]any{{"name": "greet"}}}
+		case "prompts/get":
+			result = map[string]any{"messages": []map[string]any{{"role": "user",
+				"content": map[string]any{"type": "text", "text": "greet " + msg.Params.Name + " args " + string(msg.Params.Arguments)}}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": result})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// registerFakeMcp 在**装配点交下去的那份能力注册表**上注册一个指向假服务器的 http server
+// （plane 与读模型用的是同一张表，见 stubDeps）。
+func registerFakeMcp(t *testing.T, deps router.Ports, id, url string) {
+	t.Helper()
+	if err := deps.Capabilities.RegisterMcpServer(&capability.McpServer{
+		ID: id, Name: id, Transport: capability.TransportHTTP, URL: url,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCallMcpToolRoute B1 MCP 工具调用路由：server/tool/arguments/timeout_ms **真的到了 server**；
+// 工具级失败（is_error=true）仍是 code=0；非法 body 40000；未知 server 40401；连不上 50201。
 func TestCallMcpToolRoute(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	registerFakeMcp(t, deps, "fs", fakeMcpServer(t))
+	r := newRestEngine(deps)
 
-	body := `{"arguments":{"path":"/tmp/a"},"timeout_ms":1500}`
-	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call", body)
+	env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call",
+		`{"arguments":{"path":"/tmp/a"},"timeout_ms":1500}`)
 	if code != 200 || env.Code != 0 {
 		t.Fatalf("POST call 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
-	}
-	if svc.callMcpID != "fs" || svc.callMcpTool != "read_file" {
-		t.Fatalf("路径参数未透传: id=%q tool=%q", svc.callMcpID, svc.callMcpTool)
-	}
-	if string(svc.callMcpReq.Arguments) != `{"path":"/tmp/a"}` || svc.callMcpReq.TimeoutMS != 1500 {
-		t.Fatalf("请求体未透传: %+v", svc.callMcpReq)
 	}
 	var got dtocapability.McpToolCallResp
 	if err := json.Unmarshal(env.Data, &got); err != nil {
 		t.Fatalf("data 反序列化失败: %v", err)
 	}
-	if got.Text != "ok" || len(got.Content) != 1 {
-		t.Fatalf("结果不符: %+v", got)
+	if got.ServerID != "fs" || got.Tool != "read_file" {
+		t.Fatalf("回执身份不符: %+v", got)
+	}
+	if !strings.Contains(got.Text, "called read_file") || !strings.Contains(got.Text, `{"path":"/tmp/a"}`) {
+		t.Fatalf("tool/arguments 未透传到 server: %q", got.Text)
 	}
 
-	// 空 body = 无参数调用（不应报参数错误）。
-	svc.callMcpReq = dtocapability.McpToolCallReq{}
-	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/t/call", ""); code != 200 || env.Code != 0 {
+	// 空 body = 无参数调用（不该报参数错误，也不该带上任何 arguments）。
+	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/tools/plain/call", "")
+	if code != 200 || env.Code != 0 {
 		t.Fatalf("空 body 应放行，got http=%d code=%d", code, env.Code)
 	}
-	if len(svc.callMcpReq.Arguments) != 0 || svc.callMcpReq.TimeoutMS != 0 {
-		t.Fatalf("空 body 应零值: %+v", svc.callMcpReq)
+	var bare dtocapability.McpToolCallResp
+	_ = json.Unmarshal(env.Data, &bare)
+	if bare.Tool != "plain" || !strings.Contains(bare.Text, "called plain args ") {
+		t.Fatalf("空 body 应零参数调用: %q", bare.Text)
 	}
 
-	// 非法 JSON body → 40000（参数错误）。
+	// 非法 JSON body → 40000（控制器判，不走平面）。
 	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/tools/t/call", "{oops"); code != 200 || env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
 	}
 
-	// 工具级失败：仍 code=0，is_error 表达。
-	svc.callMcpResp = &dtocapability.McpToolCallResp{
-		ServerID: "fs", Tool: "read_file", IsError: true,
-		Content: []json.RawMessage{json.RawMessage(`{"type":"text","text":"权限不足"}`)}, Text: "权限不足",
-	}
-	env, _ = do(t, r, "POST", "/v1/mate/mcps/fs/tools/read_file/call", "")
+	// 工具级失败：仍 code=0，is_error 表达（服务端把自己当成"答复"而不是"平台错误"）。
+	env, _ = do(t, r, "POST", "/v1/mate/mcps/fs/tools/boom/call", "")
 	var failed dtocapability.McpToolCallResp
 	_ = json.Unmarshal(env.Data, &failed)
 	if env.Code != 0 || !failed.IsError {
 		t.Fatalf("工具级失败应 code=0 + is_error=true，got code=%d %+v", env.Code, failed)
 	}
 
-	// 未知 server → 40401；传输不支持 → 40501；超时 → 40901。
-	svc.callMcpResp = nil
-	for _, tc := range []struct {
-		err  error
-		want int
-	}{
-		{gerror.Error{Code: 40401, Msg: `未知 MCP server "nope"`}, 40401},
-		{gerror.Error{Code: 40501, Msg: "MCP sse 传输暂不支持"}, 40501},
-		{gerror.Error{Code: 40901, Msg: "[mcp_timeout] tools/call 失败"}, 40901},
-	} {
-		svc.callMcpErr = tc.err
-		if env, code := do(t, r, "POST", "/v1/mate/mcps/x/tools/t/call", ""); code != 200 || env.Code != tc.want {
-			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
-		}
+	// 未知 server → 40401（域里铸的码经信封透出）。
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/nope/tools/t/call", ""); code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
+	}
+	// 已注册但连不上 → 50201（域真的发了请求）。
+	registerFakeMcp(t, deps, "down", "http://127.0.0.1:1/mcp")
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/down/tools/t/call", ""); code != 200 || env.Code != 50201 {
+		t.Fatalf("连不上应 50201，got http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
 }
 
-// TestMcpResourcesPromptsRoutes B2：资源/提示词四条路由（路径与 body 参数透传、错误码透传）。
+// TestMcpResourcesPromptsRoutes B2：资源/提示词四条路由——uri/name/arguments 真的到了 server
+// （响应回显），非法 body 40000、缺 uri 由**域**回 40001、未知 server 40401。
 func TestMcpResourcesPromptsRoutes(t *testing.T) {
 	svc := &stubSvc{}
-	r := newRestEngine(stubDeps(t, svc))
+	deps := stubDeps(t, svc)
+	registerFakeMcp(t, deps, "fs", fakeMcpServer(t))
+	r := newRestEngine(deps)
 
 	env, code := do(t, r, "GET", "/v1/mate/mcps/fs/resources", "")
-	if code != 200 || env.Code != 0 || svc.mcpLiveID != "fs" {
-		t.Fatalf("GET resources 失败 http=%d code=%d id=%q", code, env.Code, svc.mcpLiveID)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("GET resources 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
 	var res dtocapability.McpResourcesResp
 	_ = json.Unmarshal(env.Data, &res)
-	if len(res.Resources) != 1 || res.Resources[0].URI != "file:///tmp/a.txt" {
+	if res.ServerID != "fs" || len(res.Resources) != 1 || res.Resources[0].URI != "file:///tmp/a.txt" {
 		t.Fatalf("资源结果不符: %+v", res)
 	}
 
 	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/resources/read", `{"uri":"file:///tmp/a.txt"}`)
-	if code != 200 || env.Code != 0 || svc.mcpLiveURI != "file:///tmp/a.txt" {
-		t.Fatalf("POST resources/read 失败 http=%d code=%d uri=%q", code, env.Code, svc.mcpLiveURI)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("POST resources/read 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
 	var rd dtocapability.McpResourceReadResp
 	_ = json.Unmarshal(env.Data, &rd)
-	if len(rd.Contents) != 1 || rd.Contents[0].Text != "hi" {
-		t.Fatalf("读取结果不符: %+v", rd)
+	if len(rd.Contents) != 1 || rd.Contents[0].Text != "read file:///tmp/a.txt" {
+		t.Fatalf("uri 未透传到 server: %+v", rd.Contents)
 	}
-	// 缺 uri → 桩返回空（真实实现报 40001）；非法 JSON → 40000。
+	// 非法 JSON → 40000（控制器）；缺 uri → 40001（域里判，控制器不代判）。
 	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/resources/read", "{oops"); code != 200 || env.Code != 40000 {
 		t.Fatalf("非法 body 应 40000，got http=%d code=%d", code, env.Code)
+	}
+	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/resources/read", "{}"); code != 200 || env.Code != 40001 {
+		t.Fatalf("缺 uri 应由域回 40001，got http=%d code=%d", code, env.Code)
 	}
 
 	env, code = do(t, r, "GET", "/v1/mate/mcps/fs/prompts", "")
 	if code != 200 || env.Code != 0 {
-		t.Fatalf("GET prompts 失败 http=%d code=%d", code, env.Code)
+		t.Fatalf("GET prompts 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
 	var ps dtocapability.McpPromptsResp
 	_ = json.Unmarshal(env.Data, &ps)
-	if len(ps.Prompts) != 1 || ps.Prompts[0].Name != "greet" {
+	if ps.ServerID != "fs" || len(ps.Prompts) != 1 || ps.Prompts[0].Name != "greet" {
 		t.Fatalf("提示词列表不符: %+v", ps)
 	}
 
 	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/prompts/greet/get", `{"arguments":{"who":"世界"}}`)
-	if code != 200 || env.Code != 0 || svc.mcpLiveName != "greet" || svc.mcpLiveArgs["who"] != "世界" {
-		t.Fatalf("POST prompts/get 失败 http=%d code=%d name=%q args=%v", code, env.Code, svc.mcpLiveName, svc.mcpLiveArgs)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("POST prompts/get 失败 http=%d code=%d body=%s", code, env.Code, env.Data)
 	}
 	var gp dtocapability.McpPromptGetResp
 	_ = json.Unmarshal(env.Data, &gp)
-	if len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
-		t.Fatalf("提示词结果不符: %+v", gp)
+	if len(gp.Messages) != 1 || !strings.Contains(string(gp.Messages[0].Content), "世界") {
+		t.Fatalf("name/arguments 未透传到 server: %+v", gp.Messages)
 	}
-	// 空 body = 无参数取用。
-	svc.mcpLiveArgs = map[string]string{"x": "y"}
-	if env, code := do(t, r, "POST", "/v1/mate/mcps/fs/prompts/greet/get", ""); code != 200 || env.Code != 0 || len(svc.mcpLiveArgs) != 0 {
-		t.Fatalf("空 body 应零值，got http=%d code=%d args=%v", code, env.Code, svc.mcpLiveArgs)
+	// 空 body = 无参数取用（域只在有参数时才带 arguments）。
+	env, code = do(t, r, "POST", "/v1/mate/mcps/fs/prompts/greet/get", "")
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("空 body 应放行，got http=%d code=%d", code, env.Code)
+	}
+	var gpBare dtocapability.McpPromptGetResp
+	_ = json.Unmarshal(env.Data, &gpBare)
+	if len(gpBare.Messages) != 1 || strings.Contains(string(gpBare.Messages[0].Content), "世界") {
+		t.Fatalf("空 body 应零参数: %+v", gpBare.Messages)
 	}
 
-	// 错误码透传：40401 / 40501 / 50201。
-	for _, tc := range []struct {
-		err  error
-		want int
-		path string
-	}{
-		{gerror.Error{Code: 40401, Msg: "未知 MCP server"}, 40401, "/v1/mate/mcps/nope/resources"},
-		{gerror.Error{Code: 40501, Msg: "未知传输"}, 40501, "/v1/mate/mcps/s/prompts"},
-		{gerror.Error{Code: 50201, Msg: "[mcp_resource_read_failed] x"}, 50201, "/v1/mate/mcps/fs/resources"},
-	} {
-		svc.mcpLiveErr = tc.err
-		if env, code := do(t, r, "GET", tc.path, ""); code != 200 || env.Code != tc.want {
-			t.Fatalf("错误码透传不符 want=%d got http=%d code=%d", tc.want, code, env.Code)
-		}
+	// 未知 server → 40401（四条路由共用同一个域入口，这里取资源面为代表）。
+	if env, code := do(t, r, "GET", "/v1/mate/mcps/nope/resources", ""); code != 200 || env.Code != 40401 {
+		t.Fatalf("未知 server 应 40401，got http=%d code=%d", code, env.Code)
 	}
 }
 

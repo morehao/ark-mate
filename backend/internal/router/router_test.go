@@ -69,8 +69,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
-		Model:      svc,
-		Capability: svc,
+		Model: svc,
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
 		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,
@@ -396,8 +395,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
 		ProviderPlane: svc.ProviderPlane(), ProviderCatalog: svc,
-		Model:      svc,
-		Capability: svc,
+		Model: svc,
 		// Library 读模型（P4a 正文第六刀）：域/包事实由装配点交下来，用例实例在控制器里造。
 		Capabilities: svc.CapabilityRegistry(), SkillPlane: svc.SkillPlane(), Registry: reg,
 		McpSecrets: svc.McpSecrets(), McpGatewayEnabled: svc.McpGatewayEnabled,

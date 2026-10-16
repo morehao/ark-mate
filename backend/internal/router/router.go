@@ -26,7 +26,6 @@ import (
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
-	"github.com/morehao/ark-mate/internal/service/svccapability"
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
@@ -51,9 +50,9 @@ const AppName = "mate"
 // 这条由 `internal/archtest/svc_layer_consumer_test.go` 钉住——它的失效是静默的
 // （多加一行 svc import 也能编译，只是把一条本该单向的边变成双向）。
 //
-// **过渡期**：仍有几格是 `service/svc*` 的类型（`Session`/`Workspace`/`Capability`/
-// `ProviderCatalog`/`Model`/`ModelHost`）——它们各自的实现还在 `manager`，控制器暂时造不出来。
-// 每迁完一个域就少一格（已消失的：`Library`/`Runtime`/`System`/`Automation`，见 P4a 正文各刀的记录），
+// **过渡期**：仍有几格是 `service/svc*` 的类型（`Session`/`ProviderCatalog`/`Model`/`ModelHost`）
+// ——它们各自的实现还在 `manager`，控制器暂时造不出来。每迁完一个域就少一格
+// （已消失的：`Library`/`Runtime`/`System`/`Automation`/`Capability`，见 P4a 正文各刀的记录），
 // 全部迁完时这几行会**自己消失**（白名单 `transitionalServiceImporters` 也是同一张进度表）。
 // 别在过渡期往里加新的 svc 格：那正是 2026-10-16 被判定为"骚操作"的那批别名的来路。
 type Ports struct {
@@ -73,7 +72,6 @@ type Ports struct {
 	// ModelHost 写面之外的模型面（读一条的投影 / 生效面回执 / 同步触发），过渡期端口；
 	// 与 Store、ProviderPlane 一起交给 `ctrmodel.NewModelCtr`，写面用例在控制器里造。
 	ModelHost       svcmodel.Host
-	Capability      svccapability.CapabilitySvc
 	AutomationPlane *automation.Plane
 	// Library 读模型的事实来源（P4a 正文第六刀）：三张能力表 + 技能投影 + 运行期事实。
 	// 用例实例（`svclibrary.NewLibrary`）由 ctrlibrary 自己造——`app`/`router` 都不 import svc。

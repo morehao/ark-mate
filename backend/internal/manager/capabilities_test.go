@@ -402,7 +402,7 @@ func TestCallMcpTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := svc.CallMcpTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
+	got, err := svc.McpPlane().CallTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{"path":"/tmp/a"}`)})
 	if err != nil {
 		t.Fatalf("CallMcpTool: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 工具级失败：不是平台错误。
-	gotErr, err := svc.CallMcpTool(context.Background(), "h", "boom", dtocapability.McpToolCallReq{})
+	gotErr, err := svc.McpPlane().CallTool(context.Background(), "h", "boom", dtocapability.McpToolCallReq{})
 	if err != nil {
 		t.Fatalf("工具级失败不应报错: %v", err)
 	}
@@ -426,22 +426,22 @@ func TestCallMcpTool(t *testing.T) {
 	}
 
 	// 未知 server → 40401。
-	if _, err := svc.CallMcpTool(context.Background(), "nope", "t", dtocapability.McpToolCallReq{}); restCode(err) != 40401 {
+	if _, err := svc.McpPlane().CallTool(context.Background(), "nope", "t", dtocapability.McpToolCallReq{}); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
 	// sse（B3 起已支持）指向不可达端点 → 连接失败 50201（不再是不支持 40501）。
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CallMcpTool(context.Background(), "s", "t", dtocapability.McpToolCallReq{}); restCode(err) != 50201 {
+	if _, err := svc.McpPlane().CallTool(context.Background(), "s", "t", dtocapability.McpToolCallReq{}); restCode(err) != 50201 {
 		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 	// 非法 arguments → 40001（ClassRequest）。
-	if _, err := svc.CallMcpTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
+	if _, err := svc.McpPlane().CallTool(context.Background(), "h", "read_file", dtocapability.McpToolCallReq{Arguments: json.RawMessage(`{oops`)}); restCode(err) != 40001 {
 		t.Fatalf("非法 arguments 应 40001，got %v", err)
 	}
 	// 空工具名 → 40001。
-	if _, err := svc.CallMcpTool(context.Background(), "h", "", dtocapability.McpToolCallReq{}); restCode(err) != 40001 {
+	if _, err := svc.McpPlane().CallTool(context.Background(), "h", "", dtocapability.McpToolCallReq{}); restCode(err) != 40001 {
 		t.Fatalf("空工具名应 40001，got %v", err)
 	}
 }
@@ -472,7 +472,7 @@ func TestCallMcpToolTimeout(t *testing.T) {
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "slow", Name: "Slow", Transport: capability.TransportHTTP, URL: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.CallMcpTool(context.Background(), "slow", "t", dtocapability.McpToolCallReq{TimeoutMS: 50})
+	_, err := svc.McpPlane().CallTool(context.Background(), "slow", "t", dtocapability.McpToolCallReq{TimeoutMS: 50})
 	if restCode(err) != 40901 {
 		t.Fatalf("超时应 40901，got %v (code=%d)", err, restCode(err))
 	}
@@ -523,7 +523,7 @@ func TestMcpResourcesPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := svc.ListMcpResources(context.Background(), "h")
+	res, err := svc.McpPlane().ListResources(context.Background(), "h")
 	if err != nil {
 		t.Fatalf("ListMcpResources: %v", err)
 	}
@@ -538,18 +538,18 @@ func TestMcpResourcesPrompts(t *testing.T) {
 		t.Fatalf("模板不符: %+v", res)
 	}
 
-	rd, err := svc.ReadMcpResource(context.Background(), "h", "file:///tmp/a.txt")
+	rd, err := svc.McpPlane().ReadResource(context.Background(), "h", "file:///tmp/a.txt")
 	if err != nil {
 		t.Fatalf("ReadMcpResource: %v", err)
 	}
 	if len(rd.Contents) != 1 || rd.Contents[0].Text != "内容" || rd.URI != "file:///tmp/a.txt" {
 		t.Fatalf("读取结果不符: %+v", rd)
 	}
-	if _, err := svc.ReadMcpResource(context.Background(), "h", "  "); restCode(err) != 40001 {
+	if _, err := svc.McpPlane().ReadResource(context.Background(), "h", "  "); restCode(err) != 40001 {
 		t.Fatalf("空 uri 应 40001，got %v", err)
 	}
 
-	ps, err := svc.ListMcpPrompts(context.Background(), "h")
+	ps, err := svc.McpPlane().ListPrompts(context.Background(), "h")
 	if err != nil {
 		t.Fatalf("ListMcpPrompts: %v", err)
 	}
@@ -558,25 +558,25 @@ func TestMcpResourcesPrompts(t *testing.T) {
 		t.Fatalf("提示词列表不符: %+v", ps)
 	}
 
-	gp, err := svc.GetMcpPrompt(context.Background(), "h", "greet", dtocapability.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
+	gp, err := svc.McpPlane().GetPrompt(context.Background(), "h", "greet", dtocapability.McpPromptGetReq{Arguments: map[string]string{"who": "世界"}})
 	if err != nil {
 		t.Fatalf("GetMcpPrompt: %v", err)
 	}
 	if gp.Description != "问候模板" || len(gp.Messages) != 1 || gp.Messages[0].Role != "user" {
 		t.Fatalf("提示词结果不符: %+v", gp)
 	}
-	if _, err := svc.GetMcpPrompt(context.Background(), "h", "", dtocapability.McpPromptGetReq{}); restCode(err) != 40001 {
+	if _, err := svc.McpPlane().GetPrompt(context.Background(), "h", "", dtocapability.McpPromptGetReq{}); restCode(err) != 40001 {
 		t.Fatalf("空提示词名应 40001，got %v", err)
 	}
 
 	// 未知 server → 40401；sse → 40501。
-	if _, err := svc.ListMcpResources(context.Background(), "nope"); restCode(err) != 40401 {
+	if _, err := svc.McpPlane().ListResources(context.Background(), "nope"); restCode(err) != 40401 {
 		t.Fatalf("未知 server 应 40401，got %v", err)
 	}
 	if err := svc.caps.RegisterMcpServer(&capability.McpServer{ID: "s", Name: "S", Transport: capability.TransportSSE, URL: "http://127.0.0.1:1/sse"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ListMcpPrompts(context.Background(), "s"); restCode(err) != 50201 {
+	if _, err := svc.McpPlane().ListPrompts(context.Background(), "s"); restCode(err) != 50201 {
 		t.Fatalf("sse 不可达应 50201，got %v", err)
 	}
 }

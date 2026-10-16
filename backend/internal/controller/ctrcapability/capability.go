@@ -42,21 +42,25 @@ type CapabilityCtr interface {
 var _ CapabilityCtr = (*capabilityCtr)(nil)
 
 // CapabilityHandler 处理能力数据面 REST（P1：Skill/MCP/Tool 目录列出；注入属 P2）。
+//
+// P4a 正文第三十九刀之后这里**没有** `svc svccapability.CapabilitySvc` 字段：那个接口已经空了
+// （写面 / 探测面 / live 五条都归了域平面），空接口留在控制器上只会让人以为"还有一格端口"。
+// 现在持有的全是**依赖事实**（能力注册表 / 技能平面 / MCP 平面 / 密钥面）与本包内构造的两个
+// 读模型用例。
 type capabilityCtr struct {
-	svc svccapability.CapabilitySvc
 	// tools 工具目录**读模型**（P4a 正文第十二刀起在本包内构造）。
 	//
-	// 「只读」这一面没有请求校验、没有错误码出口，装配点交下来的只有注册表这一个事实，
-	// 所以不跟其余 16 个方法一起等——控制器按面持有。
+	// 它留在用例层而不是让控制器直接用注册表：工具目录要**投影**
+	// （`capability.Tool` → DTO，而 `pkg/` 不能 import `internal/dto`）。
 	tools svccapability.ToolCatalog
-	// skills 技能目录**读模型**（P4a 正文第十三刀起由域平面直接提供）。
+	// skills 技能目录（P4a 正文第十三刀起由域平面直接提供）。
 	//
-	// 与 `tools` 的区别值得记：工具目录要**投影**（`capability.Tool` → DTO，`pkg/` 不能
-	// import `internal/dto`），所以落用例层；技能目录的投影在域平面里（`skill.Plane.ListSkills`
+	// 与 `tools` 的区别值得记：技能目录的投影在域平面里（`skill.Plane.ListSkills`
 	// 已经把 `capability.Skill` 折成 `dtocapability.SkillResp`，含 warnings 与 scope 判定），
 	// 用例层再包一层就只是一行转发——那正是第十一刀判定为骚操作的形状。
 	skills *skill.Plane
-	// mcpPlane MCP 定义**写面**的平面（P4a 正文第三十七刀：写面归域平面，控制器直接调）。
+	// mcpPlane MCP 域平面（P4a 正文第三十七/三十八/三十九刀：写面、探测面、live 五条全在这里，
+	// 控制器直接调——DTO 与错误码本来就在域里折好）。
 	mcpPlane *mcp.Plane
 	// mcp MCP 注册表**读模型**（P4a 正文第十四刀起在本包内构造）。
 	//
@@ -65,11 +69,11 @@ type capabilityCtr struct {
 	mcp svccapability.McpCatalog
 }
 
-// NewCapabilityCtr 构造 CapabilityCtr（`caps` 是能力注册表事实，用例实例在构造里造）。
-func NewCapabilityCtr(svc svccapability.CapabilitySvc, caps *capability.Registry, skills *skill.Plane,
+// NewCapabilityCtr 构造 CapabilityCtr（四个参数都是**依赖事实**，用例实例在构造里造）。
+func NewCapabilityCtr(caps *capability.Registry, skills *skill.Plane,
 	mcpPlane *mcp.Plane, mcpSecrets *mcp.Secrets) CapabilityCtr {
 	return &capabilityCtr{
-		svc: svc, tools: svccapability.NewTools(caps), skills: skills, mcpPlane: mcpPlane,
+		tools: svccapability.NewTools(caps), skills: skills, mcpPlane: mcpPlane,
 		mcp: svccapability.NewServers(caps, mcpPlane, mcpSecrets),
 	}
 }
@@ -223,7 +227,7 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.CallMcpTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
+	resp, err := h.mcpPlane.CallTool(c.Request.Context(), c.Param("id"), c.Param("tool"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -233,7 +237,7 @@ func (h *capabilityCtr) CallMcpTool(c *gin.Context) {
 
 // ListMcpResources 拉取 MCP server 的资源列表（B2：resources/list + resources/templates/list）。
 func (h *capabilityCtr) ListMcpResources(c *gin.Context) {
-	resp, err := h.svc.ListMcpResources(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.ListResources(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -248,7 +252,7 @@ func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.ReadMcpResource(c.Request.Context(), c.Param("id"), req.URI)
+	resp, err := h.mcpPlane.ReadResource(c.Request.Context(), c.Param("id"), req.URI)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -258,7 +262,7 @@ func (h *capabilityCtr) ReadMcpResource(c *gin.Context) {
 
 // ListMcpPrompts 拉取 MCP server 的提示词模板（B2：prompts/list）。
 func (h *capabilityCtr) ListMcpPrompts(c *gin.Context) {
-	resp, err := h.svc.ListMcpPrompts(c.Request.Context(), c.Param("id"))
+	resp, err := h.mcpPlane.ListPrompts(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return
@@ -274,7 +278,7 @@ func (h *capabilityCtr) GetMcpPrompt(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.GetMcpPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
+	resp, err := h.mcpPlane.GetPrompt(c.Request.Context(), c.Param("id"), c.Param("name"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

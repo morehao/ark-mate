@@ -11,7 +11,7 @@ import (
 // live 面均为显式触发、不做隐式启动探测（行为不回归）；资源与提示词 live 拉取，不落盘/不目录化。
 // 工具名与提示词名不含 "/"——gin 路径参数不匹配斜杠。
 func registerCapability(v1 *gin.RouterGroup, ports Ports) {
-	ctr := ctrcapability.NewCapabilityCtr(ports.Capability, ports.Capabilities, ports.SkillPlane,
+	ctr := ctrcapability.NewCapabilityCtr(ports.Capabilities, ports.SkillPlane,
 		ports.McpPlane, ports.McpSecrets)
 
 	v1.GET("/skills", ctr.ListSkills)
