@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
@@ -254,7 +254,7 @@ func collectFactsForTest(t *testing.T, dbPath string) readModelDriftView {
 		t.Fatalf("只读开库: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	f := doctorfacts.CollectReadModelDoctorFacts(context.Background(), st, manager.MessageRowSourceTypes())
+	f := doctorfacts.CollectReadModelDoctorFacts(context.Background(), st, session.MessageRowSourceTypes())
 	return readModelDriftView{
 		Orphans: f.OrphanMessages, EmptyBodies: f.EmptyBodies,
 		BadOrdinalSessions: f.BadOrdinalSessions, BadEventSeqSessions: f.BadEventSeqSessions,

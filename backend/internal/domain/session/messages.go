@@ -1,14 +1,12 @@
-package manager
+package session
 
 import (
 	"context"
 	"encoding/json"
-	"github.com/morehao/ark-mate/internal/domain/session"
-	"time"
-
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/golib/glog"
+	"time"
 )
 
 // ——— messages 物化（**白名单投影**，整会话重建） ———
@@ -38,7 +36,7 @@ import (
 // 这份列表是**声明面**——`mate doctor` 的 `read-models` 体检拿它判"库里有没有别的事件类型
 // 混进了 messages"（在投影里加一个 `case` 很容易，而它会静默改变读模型的含义：检索会突然
 // 命中思考文本）。两处必须同时改，守卫 G5 钉住这一点。
-var messageRowSourceTypes = []string{session.BusUserMessage, session.BusMessage}
+var messageRowSourceTypes = []string{BusUserMessage, BusMessage}
 
 // isMessageRowSourceType 判断某个事件类型是否在投影白名单里。
 func isMessageRowSourceType(t string) bool {
@@ -60,41 +58,41 @@ type msgRowBuilder struct {
 	createdAt time.Time
 }
 
-// materializeMessages 是 live 路径（run 收口）的 best-effort 包装：失败只 WARN，events 仍是
+// MaterializeMessages 是 live 路径（run 收口）的 best-effort 包装：失败只 WARN，events 仍是
 // 唯一事实源（下一次重建会把整会话重铺回来）。整会话重铺比"只重铺一轮"重，所以超时给到 5s。
-func (s *Service) materializeMessages(sessionID string) {
-	if s.st == nil {
+func (pl *Plane) MaterializeMessages(sessionID string) {
+	if pl.st == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := s.rebuildSessionMessages(ctx, sessionID); err != nil {
+	if err := pl.RebuildSessionMessages(ctx, sessionID); err != nil {
 		glog.Warnw(context.Background(), "store: rebuild messages failed", "session", sessionID, "err", err)
 	}
 }
 
-// rebuildSessionMessages 读该会话的事件与 runs，整会话重铺 messages（**能报错**的那一半：
-// 重建通道要把失败报上去；live 路径由 `materializeMessages` 降级成 WARN）。
-func (s *Service) rebuildSessionMessages(ctx context.Context, sessionID string) error {
-	if s.st == nil {
+// RebuildSessionMessages 读该会话的事件与 runs，整会话重铺 messages（**能报错**的那一半：
+// 重建通道要把失败报上去；live 路径由 `MaterializeMessages` 降级成 WARN）。
+func (pl *Plane) RebuildSessionMessages(ctx context.Context, sessionID string) error {
+	if pl.st == nil {
 		return nil
 	}
-	all, err := s.sessionEvents(ctx, sessionID)
+	all, err := pl.SessionEvents(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	runs, err := s.sessionRuns(ctx, sessionID)
+	runs, err := pl.SessionRuns(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	return s.replaceSessionMessages(ctx, sessionID, all, runs)
+	return pl.ReplaceSessionMessages(ctx, sessionID, all, runs)
 }
 
-// replaceSessionMessages 用**已经读好的** events/runs 重铺（重建通道手上有这两份数据，不必再读
+// ReplaceSessionMessages 用**已经读好的** events/runs 重铺（重建通道手上有这两份数据，不必再读
 // 一遍；两条路共用同一段构建代码——"运行时"与"重建"分叉过一次，代价是读模型有两套规则）。
-func (s *Service) replaceSessionMessages(ctx context.Context, sessionID string, all []model.EventEntity, runs []model.RunEntity) error {
+func (pl *Plane) ReplaceSessionMessages(ctx context.Context, sessionID string, all []model.EventEntity, runs []model.RunEntity) error {
 	rows := buildSessionMessageRows(sessionID, all, runs)
-	return s.st.ReplaceSessionMessages(ctx, sessionID, rows)
+	return pl.st.ReplaceSessionMessages(ctx, sessionID, rows)
 }
 
 // buildSessionMessageRows 按每个 run 的窗口切片、逐窗构建消息行；`ordinal` 跨窗连续。
@@ -156,7 +154,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 			m = map[string]any{}
 		}
 		switch e.Type {
-		case session.BusUserMessage:
+		case BusUserMessage:
 			flush()
 			text, _ := m["text"].(string)
 			if text == "" {
@@ -171,7 +169,7 @@ func buildMessageRows(sessionID, runID string, evs []model.EventEntity, baseOrdi
 				Ordinal:         int64(ordinal), Kind: "",
 				SeqLo: e.Seq, SeqHi: e.Seq, CreatedAt: e.CreatedAt,
 			})
-		case session.BusMessage:
+		case BusMessage:
 			text, _ := m["text"].(string)
 			msgID, _ := m["msg_id"].(string)
 			if cur == nil || (msgID != "" && cur.msgID != "" && msgID != cur.msgID) {
@@ -205,4 +203,12 @@ func mustJSON(v any) string {
 		return "[]"
 	}
 	return string(b)
+}
+
+// MessageRowSourceTypes 白名单投影的来源类型集合（**只读副本**）。
+//
+// 调用方是组合根：`mate doctor` 的 read-models 体检要拿它判"库里有没有别的事件类型混进
+// messages"，而体检判据在机制层、不许 import 会话侧——由组合根把这份事实交下去。
+func MessageRowSourceTypes() []string {
+	return append([]string(nil), messageRowSourceTypes...)
 }

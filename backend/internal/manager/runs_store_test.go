@@ -11,6 +11,8 @@ import (
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/object/objid"
+	"github.com/morehao/ark-mate/pkg/object/objusage"
+	"strings"
 )
 
 // runIDShape 轮次身份的形状：`run_` + 26 位 Crockford Base32（v22 起重铸，不再是由
@@ -306,6 +308,42 @@ func TestRunUsageExposedInListRuns(t *testing.T) {
 	}
 }
 
+// TestRunUsageLandsInRunRowThroughTheSessionPlane 用量快照必须**经会话域写进 runs 行**。
+//
+// 为什么单开一条：`MaterializeRun` 收口时写的 `usage_json` 来自**执行面内存**（编排器的
+// `LatestUsage`），而 P3b-1a 把这条取值改成了经端口交下去（`Plane.SetUsageSource`，在
+// `attachOrchestrator` 里接线）。**接线漏了的表现是静默的**：用量那一列永远是空串，界面上
+// 只是"没有用量"，没有任何东西会红——所以这条判据钉的就是那根线。
+func TestRunUsageLandsInRunRowThroughTheSessionPlane(t *testing.T) {
+	ctx := context.Background()
+	reg := testutil.StubRegistry()
+	svc := NewService(reg, eventbus.New())
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	defer st.Close()
+	svc.EnableStore(st)
+	// 造编排器 = 走真实接线（`NewOrchestrator` 末尾回挂，端口在那里接上）。
+	orch := NewOrchestrator(svc, reg)
+	defer orch.Close()
+	svc.registerSession(&SessionRec{ID: "s-usage-wire"})
+
+	runID, _, _ := beginRun(t, svc, "s-usage-wire", "问一句")
+	// 执行面记一次用量上报（真实路径由 event_sink 在收到 usage 事件时调用）。
+	orch.recordUsage("s-usage-wire", objusage.UsageInfo{Used: 321, Size: 128000})
+	endRun(svc, "s-usage-wire", runID, session.BusRunEnded, map[string]any{"stop_reason": "end_turn"})
+
+	rows, err := st.ListRuns(ctx, "s-usage-wire")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("应有 1 条 run: n=%d err=%v", len(rows), err)
+	}
+	if rows[0].UsageJSON == "" {
+		t.Fatal("用量快照没写进 runs.usage_json——会话域的用量端口没接上？" +
+			"（`attachOrchestrator` 里的 `SetUsageSource` 是唯一接线点）")
+	}
+	if !strings.Contains(rows[0].UsageJSON, "321") {
+		t.Fatalf("usage_json 应带上报的数值: %q", rows[0].UsageJSON)
+	}
+}
+
 // TestRebuildRepairsMissingRunRow 重建通道必须能把**开轮落行失败**留下的洞补上（J7）。
 //
 // 为什么这条必须有判据：「runs 是纯投影」这句话有两种失效方式，都不会让别的测试变红——
@@ -341,7 +379,7 @@ func TestRebuildRepairsMissingRunRow(t *testing.T) {
 		t.Fatalf("清 messages: %v", err)
 	}
 
-	if err := svc.RebuildSessionReadModels(ctx, "s-repair"); err != nil {
+	if err := svc.sessionPlane.RebuildSessionReadModels(ctx, "s-repair"); err != nil {
 		t.Fatalf("RebuildSessionReadModels: %v", err)
 	}
 

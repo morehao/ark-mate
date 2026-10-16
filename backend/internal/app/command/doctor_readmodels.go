@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/morehao/ark-mate/internal/manager"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	doctorfacts "github.com/morehao/ark-mate/internal/mechanism/doctor"
 	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/store"
@@ -60,7 +60,7 @@ func checkReadModels(opts doctorOptions) []doctorCheck {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	facts := doctorfacts.CollectReadModelDoctorFacts(ctx, st, manager.MessageRowSourceTypes())
+	facts := doctorfacts.CollectReadModelDoctorFacts(ctx, st, session.MessageRowSourceTypes())
 	if facts.Note != "" {
 		return []doctorCheck{{name, doctorWarn, readModelUnverifiableDetail(ctx, st, facts.Note)}}
 	}
@@ -101,10 +101,11 @@ func checkReadModelRebuild(opts doctorOptions) []doctorCheck {
 	// 先记下标记：重建成功后要把它清掉（否则下一次启动会**再**全量重建一遍——结果一样，
 	// 但白花一次启动时间，而"标记"这件事本身就变成噪声）。
 	pending, hadPending, _ := st.GetMeta(ctx, model.MetaKeyReadModelsRebuild)
-	// 循环在机制层；"重建一个会话"的实现（与启动钩子共用同一份）在会话侧，经接线面交下去。
-	rb := manager.NewReadModelRebuilder(st)
-	defer rb.Close()
-	total, failed, err := doctorfacts.RebuildAllReadModels(ctx, st, rb)
+	// 循环在机制层；"重建一个会话"的实现（与启动钩子共用同一份）在会话域——组合根直接把
+	// 会话平面交下去（`domain/session` 是下层，命令层 import 它没有任何越界）。
+	pl := session.NewPlane()
+	pl.SetStore(st)
+	total, failed, err := doctorfacts.RebuildAllReadModels(ctx, st, pl)
 	if err != nil {
 		return []doctorCheck{{name, doctorFail, "重建读模型失败：" + err.Error()}}
 	}

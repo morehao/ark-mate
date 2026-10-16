@@ -263,7 +263,7 @@ func TestRebuildIsIdempotent(t *testing.T) {
 		t.Fatal("前提：终态物化应已铺出消息行")
 	}
 	for i := 0; i < 2; i++ {
-		if err := svc.RebuildSessionReadModels(ctx, "s-idem"); err != nil {
+		if err := svc.sessionPlane.RebuildSessionReadModels(ctx, "s-idem"); err != nil {
 			t.Fatalf("RebuildSessionReadModels: %v", err)
 		}
 	}

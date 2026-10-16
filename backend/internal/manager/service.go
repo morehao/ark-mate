@@ -139,6 +139,8 @@ type Service struct {
 	// mcpPlane 连接器平面（实时调用 + 探测；与 skill 平面共用同一份 caps 注册表）。
 	// 探测状态（预算 + 最近一次探测结果）自持在平面内，不再挂在 Service 上。
 	mcpPlane *mcp.Plane
+	// sessionPlane 会话域（自持一把只保护域内字段的锁；P3b 分批搬入）。
+	sessionPlane *session.Plane
 	// providerPlane 供应商域（内存档案表 + 载体 + 凭据面；自持一把只保护域内字段的锁）。
 	providerPlane *provider.Plane
 	// picker 原生目录选择器（宿主事实判定 + 命令配方 + spawn）。自持"监听地址"一个事实。
@@ -217,6 +219,8 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 选择器无外部依赖（宿主事实每次调用现采），构造期建一个即可。
 	s.picker = workspace.NewPicker()
 	s.providerPlane = provider.NewPlane(reg, s.creds)
+	// 会话域：本批只装库句柄与用量端口（其余端口随 P3b-1b/2 接上）。
+	s.sessionPlane = session.NewPlane()
 	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
 	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
 	s.providerPlane.SetEffect(s.providerEffect)
@@ -364,7 +368,13 @@ func (s *Service) markSession(id, status string) {
 }
 
 // attachOrchestrator 由 NewOrchestrator 回挂；Service 的会话动作委托给它。
-func (s *Service) attachOrchestrator(o *Orchestrator) { s.orch = o }
+func (s *Service) attachOrchestrator(o *Orchestrator) {
+	s.orch = o
+	// 会话域的用量端口：读的是执行面内存里的"每会话最近一次上报"（`LatestUsage`）。
+	if o != nil {
+		s.sessionPlane.SetUsageSource(o.LatestUsage)
+	}
+}
 
 // hasSession 判断会话是否在本进程登记。
 func (s *Service) hasSession(id string) bool {
