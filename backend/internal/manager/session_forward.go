@@ -169,12 +169,6 @@ func (s *Service) flushChunks() { s.sessionPlane.FlushChunks() }
 
 // ——— 输入队列的过渡期别名/转发（P4b 删） ———
 
-// QueuedInput 是域里那份队列项的**类型别名**（全仓只有一份定义）。
-type QueuedInput = session.QueuedInput
-
-// PromptOutcome 同上。
-type PromptOutcome = session.PromptOutcome
-
 // 投递模式（值来自域，别名保证只有一处定义）。
 const (
 	DeliveryReject              = session.DeliveryReject
@@ -197,17 +191,17 @@ var ValidDeliveries = session.ValidDeliveries
 func NormalizeDelivery(v string) (string, error) { return session.NormalizeDelivery(v) }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (QueuedInput, error) {
+func (s *Service) enqueueInput(ctx context.Context, convID, text, delivery, targetRun string, generation int64) (session.QueuedInput, error) {
 	return s.sessionPlane.EnqueueInput(ctx, convID, text, delivery, targetRun, generation)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) listQueuedInputs(ctx context.Context, convID string) []QueuedInput {
+func (s *Service) listQueuedInputs(ctx context.Context, convID string) []session.QueuedInput {
 	return s.sessionPlane.ListQueuedInputsOf(ctx, convID)
 }
 
 // TODO(P4b): 删转发（调用点直接依赖 session.Plane）
-func (s *Service) claimNextInput(ctx context.Context, convID string, generation int64) (*QueuedInput, bool) {
+func (s *Service) claimNextInput(ctx context.Context, convID string, generation int64) (*session.QueuedInput, bool) {
 	return s.sessionPlane.ClaimNextInput(ctx, convID, generation)
 }
 

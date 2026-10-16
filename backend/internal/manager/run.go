@@ -102,18 +102,18 @@ func (o *Orchestrator) acquireSession(ctx context.Context, sessionID string) (*A
 //     顺序是刻意的——反过来（先取消再入队）会在「取消已生效、executeRun 已收尾取队」与
 //     「本函数还没入队」之间留一个窗口，那一项将永远不被投递。入队后再复查一次空闲，
 //     闭合「取消前旧轮已自然结束」的另一半窗口（认领是条件更新，两边都跑也只会投一次）。
-func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (PromptOutcome, error) {
+func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, delivery string) (session.PromptOutcome, error) {
 	mode, err := NormalizeDelivery(delivery)
 	if err != nil {
-		return PromptOutcome{}, err
+		return session.PromptOutcome{}, err
 	}
 	if mode == DeliveryReject {
 		seq, err := o.Prompt(ctx, sessionID, text)
-		return PromptOutcome{EventSeq: seq}, err
+		return session.PromptOutcome{EventSeq: seq}, err
 	}
 	as, err := o.acquireSession(ctx, sessionID)
 	if err != nil {
-		return PromptOutcome{}, err
+		return session.PromptOutcome{}, err
 	}
 	as.mu.Lock()
 	busy, runID := as.busy, ""
@@ -124,11 +124,11 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, 
 	if !busy {
 		// 空闲：直接执行（与 reject 路径同语义——没有「等的那一轮」，不该留下队列行）。
 		seq, err := o.Prompt(ctx, sessionID, text)
-		return PromptOutcome{EventSeq: seq}, err
+		return session.PromptOutcome{EventSeq: seq}, err
 	}
 	q, err := o.svc.enqueueInput(ctx, sessionID, text, mode, runID, o.svc.sessionGeneration(sessionID))
 	if err != nil {
-		return PromptOutcome{}, err
+		return session.PromptOutcome{}, err
 	}
 	evt := o.svc.publish(session.BusInputQueued, sessionID, map[string]any{
 		"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID, "text": q.Text,
@@ -145,11 +145,11 @@ func (o *Orchestrator) PromptWithDelivery(ctx context.Context, sessionID, text, 
 				"session_id": sessionID, "runtime": as.Runtime, "input_id": q.ID,
 				"delivery": q.Delivery, "reason": ReasonDeliverFail,
 			})
-			return PromptOutcome{}, cerr
+			return session.PromptOutcome{}, cerr
 		}
 	}
 	o.deliverQueued(as) // 空闲复查（见函数注释：闭合窗口；认领条件更新保证只投一次）
-	return PromptOutcome{EventSeq: evt.Seq, Queued: true, InputID: q.ID}, nil
+	return session.PromptOutcome{EventSeq: evt.Seq, Queued: true, InputID: q.ID}, nil
 }
 
 // watchdogRun 单轮超时兜底：超时后走 CancelRun 的有界取消路径（agent 无响应也本地解除），

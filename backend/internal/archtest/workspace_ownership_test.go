@@ -224,8 +224,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		"runtimeBinding":       "internal/manager/runtime_binding.go",
 		"runtimeSpec":          "internal/manager/runtime_binding.go",
 		"SessionRec":           "internal/manager/session_forward.go",
-		"QueuedInput":          "internal/manager/session_forward.go",
-		"PromptOutcome":        "internal/manager/session_forward.go",
 	}
 	aliasRe := regexp.MustCompile(`(?m)^type ([A-Za-z0-9_]+) = `)
 	aliasSeen := 0
