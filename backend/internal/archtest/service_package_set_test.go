@@ -20,7 +20,10 @@ import (
 // 现状（P4a 第一批收口后）：
 //
 //	svcsession    会话 + 检索 + 用量（`svcsearch`/`svcusage` 并入）
-//	svcworkspace  工作空间
+//
+// `svcworkspace` 已于 P4a 正文第三十四刀删除（工作空间域实现全在 `domain/workspace`，控制器直接
+// 持 `WorkspacePlane()`）——这正是这条守卫要防的第 ③ 种失效的**正当版本**：包集变了，守卫同步改，
+// 而不是让守卫静默空转。
 //	svcruntime    底座身份与诊断（**只剩 2 个方法**）
 //	svcprovider   供应商档案（从 svcruntime 拆出）
 //	svcmodel      模型清单与目录（从 svcruntime 拆出）
@@ -41,7 +44,7 @@ import (
 // servicePackageSet ADR-2 定下的用例层包集（**恰好**这些）。
 var servicePackageSet = []string{
 	"svcautomation", "svccapability", "svclibrary", "svcmodel",
-	"svcprovider", "svcruntime", "svcsession", "svcsystem", "svcworkspace",
+	"svcprovider", "svcruntime", "svcsession", "svcsystem",
 }
 
 // serviceRuntimeMethods `svcruntime` 的 **API 端口**（`RuntimeSvc`）允许声明的方法（多一个都红）。

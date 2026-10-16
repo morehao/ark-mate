@@ -289,9 +289,10 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 
 	// ——— 读模型不进用例层：宿主选目录**判定**这一格（P4a 正文第十五刀）———
 	//
-	// `NativePickerMode` 曾在 `svcworkspace` 的接口里、由 `manager` 一行转发到 `domain/workspace.Picker`。
-	// 它是**纯事实读取**（没有校验、没有错误码、没有响应装配），用例层再包一层就是一行转发——
-	// 与第十一刀会话读模型、第十三刀技能目录同一条口径。失效方式两种，都不会让别的测试变红：
+	// `NativePickerMode` 曾在 `svcworkspace` 的接口里（那个包已于第三十四刀整体删除）、由 `manager`
+	// 一行转发到 `domain/workspace.Picker`。它是**纯事实读取**（没有校验、没有错误码、没有响应装配），
+	// 用例层再包一层就是一行转发——与第十一刀会话读模型、第十三刀技能目录同一条口径。失效方式两种，
+	// 都不会让别的测试变红：
 	//   ① 转发回潮（接口里重新声明，或 manager 里重新出现同名方法）；
 	//   ② **事实出口被绕过**：调用点不去取"装配好的那个 picker"，而是自己造一个
 	//      ——新造的 picker 没有 `bindAddr` 事实，判定会静默变成 browse（本机浏览器入口
@@ -299,16 +300,9 @@ func TestDirectoryPickerIsTwoStateHostResolved(t *testing.T) {
 	root := backendRoot(t)
 	var skillsBody strings.Builder
 	_ = skillsBody
-	var svcBody strings.Builder
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
-		svcBody.WriteString(stripLineComments(readFileOrFatal(t, path)))
-	}
-	if svcSrc := svcBody.String(); svcSrc == "" {
-		t.Fatal("`internal/service/svcworkspace` 下没有生产 .go 文件：守卫失去检查对象")
-	} else if strings.Contains(svcSrc, "NativePickerMode(") {
-		t.Error("`svcworkspace` 里又声明了 `NativePickerMode(`：它是纯事实读取，" +
-			"进用例层只能是一行转发（第十一刀口径）。调用点用 `Picker().NativePickerMode()`。")
-	}
+	// `svcworkspace` 那一格（第十五刀的判据）随端口包在第三十四刀整体删除而撤掉：包不存在了，
+	// "接口里不许再声明 `NativePickerMode(`"这条判据已由 `TestWorkspaceImplementationLivesInDomain`
+	// 末尾的"端口包不存在"接住（一条判据取代一族判据）。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		if strings.Contains(body, "func (s *Service) NativePickerMode(") {

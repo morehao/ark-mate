@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -109,16 +110,8 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	}
 	// ——— 读模型不进用例层：登记表列表（P4a 正文第十八刀）———
 	//
-	// `WorkspaceRegistry` 曾在 `svcworkspace` 的接口里、由 manager 一行转发到 `workspace.Plane`。
-	// 域里那份已经把登记表折成 `dtoworkspace.WorkspaceListResp`（含 default_id / writable），
-	// 用例层再包一层就只是一行转发——与第十一刀会话读模型、第十三刀技能目录同一条口径。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
-		body := stripLineComments(readFileOrFatal(t, path))
-		if strings.Contains(body, "WorkspaceRegistry()") {
-			t.Errorf("`svcworkspace` 里又声明了 `WorkspaceRegistry()`：读模型的投影在域平面里，"+
-				"这一层再包一次就是一行转发（%s）。控制器直接经 `h.plane` 取。", filepath.Base(path))
-		}
-	}
+	// `WorkspaceRegistry` 曾在 `svcworkspace` 的接口里、由 manager 一行转发到 `workspace.Plane`；
+	// 那个包已在第三十四刀整体删除（见本文件末尾的"端口包不存在"判据）。
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
 		body := stripLineComments(readFileOrFatal(t, path))
 		if strings.Contains(body, "func (s *Service) WorkspaceRegistry(") {
@@ -134,11 +127,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 只读辅助四条（P4a 正文第三十二刀）：浏览 / 建目录 / 列内容 / 最近使用——接口声明与 manager
 	// 转发一起删，控制器直接 `h.plane.*`。它们虽然**带错误出口**，但码与 DTO 都在域里铸（`workspace_invalid`
 	// / `workspace_exists` / `workspace_not_found`），所以用例层再包一层仍然只是一行转发。
-	for _, dead := range []string{"BrowseWorkspace(path string", "CreateWorkspaceDir(parent, name string", "ListWorkspaceFiles(path string", "RecentWorkspaces(limit int"} {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go"))), dead) {
-			t.Errorf("`svcworkspace` 的接口里又出现 `%s`：投影与错误码都在域平面里。", dead)
-		}
-	}
 	if vm := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_view.go"))); strings.Contains(vm, "func (s *Service) BrowseWorkspace(") ||
 		strings.Contains(vm, "func (s *Service) CreateWorkspaceDir(") || strings.Contains(vm, "func (s *Service) ListWorkspaceFiles(") ||
 		strings.Contains(vm, "func (s *Service) RecentWorkspaces(") {
@@ -154,9 +142,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 设置面写（P4a 正文第三十一刀）：`UpdateWorkspaceSettings` 同样归域平面（写面：校验 + 三个
 	// 语义码 + 落盘都在域里），接口声明与 manager 转发一起删。控制器侧不再有替身可伪造语义码 ——
 	// "锁定 / 只读 / 非法目录"三条由配置面测试用真策略钉。
-	if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go"))), "UpdateWorkspaceSettings(") {
-		t.Error("`svcworkspace` 的接口里又出现 `UpdateWorkspaceSettings(`：写面归域平面（`UpdateSettings`）。")
-	}
 	if strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_settings.go"))), "func (s *Service) UpdateWorkspaceSettings(") {
 		t.Error("`internal/manager/workspace_settings.go` 里又出现 `UpdateWorkspaceSettings(` 转发：那一行已删。")
 	}
@@ -167,12 +152,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 
 	// 设置面快照（P4a 正文第十九刀）：域里 `Plane.Settings()` 同样已经折好 DTO（含
 	// configured / prefer_roots / source / locked_by），用例层再包一层就只是一行转发。
-	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "service", "svcworkspace")) {
-		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "WorkspaceSettings()") {
-			t.Errorf("`svcworkspace` 里又声明了 `WorkspaceSettings()`：投影在域平面里（%s），"+
-				"这一层再包一次就是一行转发。控制器直接经 `h.plane.Settings()` 取。", filepath.Base(path))
-		}
-	}
 	for _, path := range productionGoFiles(t, filepath.Join(root, "internal", "manager")) {
 		if strings.Contains(stripLineComments(readFileOrFatal(t, path)), "func (s *Service) WorkspaceSettings(") {
 			t.Errorf("internal/manager/%s 里又出现 `func (s *Service) WorkspaceSettings(`："+
@@ -287,6 +266,17 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			"判据失锚＝空转。")
 	}
 
+	// ——— 端口包已删除（P4a 正文第三十四刀）———
+	//
+	// 工作空间域的实现全部归 `domain/workspace` 的平面，控制器直接持 `WorkspacePlane()`；端口包
+	// `internal/service/svcworkspace` 连同它在 `router.Ports` 上的那一格一起删除。**判据是"目录
+	// 不存在"而不是"目录里没有方法"**：一个空接口在任何地方都能满足，留着它编译器不会提醒任何人，
+	// 而它随时可以再长出方法（那时"用例层已被清空"这句话就不再成立）。
+	if _, err := os.Stat(filepath.Join(root, "internal", "service", "svcworkspace")); err == nil {
+		t.Error("`internal/service/svcworkspace` 又出现了：本域实现全在 `domain/workspace`，" +
+			"端口包删掉之后不该回来（P4a 正文第三十四刀）。")
+	}
+
 	appGo := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
 	if !strings.Contains(appGo, "a.svc.WorkspacePlane().SetRootsStore(") {
 		t.Error("`internal/app/app.go` 里找不到 `a.svc.WorkspacePlane().SetRootsStore(`：" +
@@ -296,13 +286,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 写面的三条（P4a 正文第二十七刀）：Rename/Delete/Move 的投影（DTO + 三个错误码）都在域平面，
 	// 用例层接口里**不许再留声明**——留着就只是给"一行转发"留位置。
 	{
-		svcWs := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "service", "svcworkspace", "workspace.go")))
-		for _, dead := range []string{"RenameRegisteredWorkspace(", "DeleteRegisteredWorkspace(", "MoveRegisteredWorkspace("} {
-			if strings.Contains(svcWs, dead) {
-				t.Errorf("`svcworkspace` 的接口里又出现 `%s`：这三条写面的投影在域平面里，"+
-					"控制器直接 `h.plane.*`（接口里留声明 = 给一行转发留位置）。", dead)
-			}
-		}
 		regMgr := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "workspace_registry.go")))
 		for _, dead := range []string{"func (s *Service) RenameRegisteredWorkspace(", "func (s *Service) DeleteRegisteredWorkspace(", "func (s *Service) MoveRegisteredWorkspace("} {
 			if strings.Contains(regMgr, dead) {
@@ -311,10 +294,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 		}
 		// 登记表最后一条写面（P4a 正文第二十九刀）：`CreateRegisteredWorkspace` 也走域平面，
 		// 接口与 manager 转发一起删（接口里留声明 = `*manager.Service` 还得实现它 = 一行转发）。
-		if strings.Contains(svcWs, "CreateRegisteredWorkspace(") {
-			t.Error("`svcworkspace` 的接口里又出现 `CreateRegisteredWorkspace(`：投影在域平面里，" +
-				"控制器直接 `h.plane.*`。")
-		}
 		if strings.Contains(regMgr, "func (s *Service) CreateRegisteredWorkspace(") {
 			t.Error("`internal/manager/workspace_registry.go` 里又出现 `func (s *Service) CreateRegisteredWorkspace(`：" +
 				"那一行转发已删。")
