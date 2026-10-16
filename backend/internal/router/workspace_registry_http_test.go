@@ -276,7 +276,7 @@ func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc, Runtime: svc,
 		Provider: svc, Model: svc,
-		Capability: svc, Library: svc, System: svc,
+		Capability: svc, Library: svc,
 	}, eventbus.New())
 	var rd *strings.Reader
 	rd = strings.NewReader(body)

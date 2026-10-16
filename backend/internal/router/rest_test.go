@@ -725,7 +725,10 @@ func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Session: svc, Workspace: svc, Runtime: svc,
 		Provider: svc, Model: svc,
-		Capability: svc, Library: svc, System: svc,
+		Capability: svc, Library: svc,
+		// 测试替身**直接**满足用例层端口（它实现了 ExportSessions）；装配期交的是
+		// `svcsystem.New(a.svc)`，但路由只认接口，替身不必走那层。
+		System: svc,
 	}
 }
 

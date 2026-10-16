@@ -1,4 +1,4 @@
-package manager
+package svcsystem
 
 import (
 	"context"
@@ -14,16 +14,33 @@ import (
 	"github.com/morehao/ark-mate/pkg/code"
 )
 
+// ——— P4a：导出的**用例层实现** ———
+//
+// 它拥有：参数校验与归一（格式、ids 去重、上限）、错误码出口、响应装配、渲染。
+// 它**不拥有**：会话元数据与事件序列的取法（那是 `Source` 端口，见 source.go）——
+// 于是这个包既不 import `manager` 也不 import `store`/`domain/session`。
+
+// Exporter 导出用例（实现 `SystemSvc`）。
+type Exporter struct{ src Source }
+
+// New 造一个导出用例（`src` 由装配侧交出）。
+func New(src Source) *Exporter { return &Exporter{src: src} }
+
+var _ SystemSvc = (*Exporter)(nil)
+
 // 导出上限（超出显式标注 truncated，不静默截断）。
 const (
-	maxExportIDs       = 50
-	maxExportEvents    = 20000
+	// MaxExportIDs 单次导出的会话数上限（用例口径）。
+	MaxExportIDs = 50
+	// MaxExportEvents 单次导出的事件上限（**导出用例的口径**：适配器也要按它截断，
+	// 否则"取数"与"渲染"会各自截一次，而成品里看不出是哪一次生效）。
+	MaxExportEvents    = 20000
 	maxExportBytesEach = 4 << 20 // 单会话正文上限 4 MiB
 )
 
 // ExportSessions 批量导出会话（M3 ②）。事实源与前端渲染一致：事件序列（sqlite=events 表；
 // memory=eventbus/transcript 回放），因此两模式产物一致。未知/无事件会话进 skipped 明确列出。
-func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
+func (e *Exporter) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (*dtoexport.ExportResp, error) {
 	format := strings.ToLower(strings.TrimSpace(req.Format))
 	if format == "" {
 		format = "markdown"
@@ -47,19 +64,19 @@ func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (
 	if len(ids) == 0 {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "invalid_export_ids", "ids 不能为空 [invalid_export_ids]", nil))
 	}
-	if len(ids) > maxExportIDs {
+	if len(ids) > MaxExportIDs {
 		return nil, code.FromError(acl.NewError(acl.ClassRequest, "export_too_many_ids",
-			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", maxExportIDs, len(ids)), nil))
+			fmt.Sprintf("一次最多导出 %d 个会话（收到 %d）[export_too_many_ids]", MaxExportIDs, len(ids)), nil))
 	}
 
 	resp := &dtoexport.ExportResp{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Format: format, Files: []dtoexport.ExportFile{}}
 	for _, id := range ids {
-		meta, ok := s.sessionMeta(id)
+		meta, ok := e.src.SessionMeta(ctx, id)
 		if !ok {
 			resp.Skipped = append(resp.Skipped, id)
 			continue
 		}
-		events, truncated := s.exportEvents(ctx, id)
+		events, truncated := e.src.SessionEvents(ctx, id)
 		if len(events) == 0 {
 			resp.Skipped = append(resp.Skipped, id)
 			continue
@@ -71,10 +88,10 @@ func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (
 		}
 		resp.Files = append(resp.Files, dtoexport.ExportFile{
 			SessionID: id,
-			Title:     meta.title,
-			RuntimeID: meta.runtimeID,
-			Status:    meta.status,
-			Filename:  exportFilename(id, meta.title, format),
+			Title:     meta.Title,
+			RuntimeID: meta.RuntimeID,
+			Status:    meta.Status,
+			Filename:  exportFilename(id, meta.Title, format),
 			Format:    format,
 			Events:    len(events),
 			Bytes:     len(content),
@@ -87,67 +104,7 @@ func (s *Service) ExportSessions(ctx context.Context, req dtoexport.ExportReq) (
 	return resp, nil
 }
 
-// exportMeta 导出用会话元数据（sqlite 走库，memory 走内存镜像）。
-type exportMeta struct {
-	id, title, runtimeID, status string
-	created, updated             time.Time
-}
-
-func (s *Service) sessionMeta(id string) (exportMeta, bool) {
-	if s.st != nil {
-		c, ok, err := s.st.GetSession(context.Background(), id)
-		if err != nil || !ok {
-			return exportMeta{}, false
-		}
-		return exportMeta{id: c.ID, title: c.Title, runtimeID: c.RuntimeID, status: c.Status,
-			created: c.CreatedAt, updated: c.UpdatedAt}, true
-	}
-	// **不持 `s.mu`**（P2b 守卫）：`Lookup` 自己取会话域的锁并返回副本。
-	r, ok := s.sessionPlane.Lookup(id)
-	if !ok {
-		return exportMeta{}, false
-	}
-	return exportMeta{id: r.ID, title: r.Title, runtimeID: r.RuntimeID, status: r.Status,
-		created: r.CreatedAt, updated: r.UpdatedAt}, true
-}
-
 // exportEvents 取会话事件（升序；截断上限明确返回 truncated）。
-func (s *Service) exportEvents(ctx context.Context, id string) ([]eventbus.Event, bool) {
-	if s.st != nil {
-		var out []eventbus.Event
-		after := int64(-1)
-		for {
-			batch, more, err := s.st.EventsAfter(ctx, id, after, 1000)
-			if err != nil {
-				return out, false
-			}
-			for _, e := range batch {
-				if len(out) >= maxExportEvents {
-					return out, true
-				}
-				out = append(out, eventbus.Event{
-					ID: e.ID, Type: e.Type, Seq: e.Seq, AggregID: e.SessionID,
-					Payload: decodePayload(e.PayloadJSON),
-				})
-				after = e.Seq
-			}
-			if !more || len(batch) == 0 {
-				break
-			}
-		}
-		return out, false
-	}
-	all := s.bus.EventsAfter(id, -1)
-	out := make([]eventbus.Event, 0, len(all))
-	for _, e := range all {
-		if len(out) >= maxExportEvents {
-			return out, true
-		}
-		out = append(out, e)
-	}
-	return out, false
-}
-
 // exportFilename 生成安全文件名（去除路径分隔与控制字符；含会话短 id 防重名）。
 func exportFilename(id, title, format string) string {
 	ext := map[string]string{"markdown": "md", "text": "txt", "json": "json"}[format]
@@ -175,13 +132,13 @@ func exportFilename(id, title, format string) string {
 }
 
 // renderExport 按格式渲染（事件序列 → 单文件正文）。
-func renderExport(meta exportMeta, events []eventbus.Event, format string) string {
+func renderExport(meta SessionMeta, events []eventbus.Event, format string) string {
 	if format == "json" {
 		doc := map[string]any{
 			"session": map[string]any{
-				"id": meta.id, "title": meta.title, "runtime_id": meta.runtimeID, "status": meta.status,
-				"created_at": meta.created.UTC().Format(time.RFC3339),
-				"updated_at": meta.updated.UTC().Format(time.RFC3339),
+				"id": meta.ID, "title": meta.Title, "runtime_id": meta.RuntimeID, "status": meta.Status,
+				"created_at": meta.Created.UTC().Format(time.RFC3339),
+				"updated_at": meta.Updated.UTC().Format(time.RFC3339),
 			},
 			"events": events,
 		}
@@ -194,19 +151,19 @@ func renderExport(meta exportMeta, events []eventbus.Event, format string) strin
 
 	md := format == "markdown"
 	var b strings.Builder
-	title := meta.title
+	title := meta.Title
 	if title == "" {
-		title = meta.id
+		title = meta.ID
 	}
 	if md {
 		fmt.Fprintf(&b, "# %s\n\n", title)
 		fmt.Fprintf(&b, "- 会话：`%s`\n- 底座：`%s`\n- 状态：`%s`\n- 创建：%s\n- 更新：%s\n- 事件数：%d\n\n---\n\n",
-			meta.id, meta.runtimeID, meta.status,
-			meta.created.UTC().Format(time.RFC3339), meta.updated.UTC().Format(time.RFC3339), len(events))
+			meta.ID, meta.RuntimeID, meta.Status,
+			meta.Created.UTC().Format(time.RFC3339), meta.Updated.UTC().Format(time.RFC3339), len(events))
 	} else {
 		fmt.Fprintf(&b, "%s\n会话: %s\n底座: %s\n状态: %s\n创建: %s\n更新: %s\n事件数: %d\n%s\n\n",
-			title, meta.id, meta.runtimeID, meta.status,
-			meta.created.UTC().Format(time.RFC3339), meta.updated.UTC().Format(time.RFC3339), len(events),
+			title, meta.ID, meta.RuntimeID, meta.Status,
+			meta.Created.UTC().Format(time.RFC3339), meta.Updated.UTC().Format(time.RFC3339), len(events),
 			strings.Repeat("-", 60))
 	}
 	for _, ev := range events {

@@ -34,6 +34,7 @@ import (
 	"github.com/morehao/ark-mate/internal/manager"
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/router"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/internal/version"
 	"github.com/morehao/ark-mate/pkg/config"
@@ -440,7 +441,9 @@ func (a *App) Init(ctx context.Context) error {
 	ports := router.Ports{
 		Session: a.svc, Workspace: a.svc, Runtime: a.svc,
 		Provider: a.svc, Model: a.svc,
-		Capability: a.svc, Automation: a.svc, Library: a.svc, System: a.svc,
+		Capability: a.svc, Automation: a.svc, Library: a.svc,
+		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出事实来源。
+		System: svcsystem.New(a.svc),
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

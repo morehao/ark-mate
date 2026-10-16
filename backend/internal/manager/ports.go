@@ -7,7 +7,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 )
 
@@ -16,6 +15,11 @@ import (
 // 为什么要有这几行：端口定义（internal/service/svc*）与实现（本包）分处两个包，
 // 而 Go 是结构化满足——装配点若漏传某个端口，错误会推迟到 cmd 层才暴露，报错也只有
 // "missing method"。把断言放在实现侧，端口一变形立刻在本包编译失败，定位成本最低。
+//
+// **P4a 正文第一刀**（2026-10-16）：`svcsystem.SystemSvc` 的断言**已从这里删掉**——
+// 导出的用例实现搬进了 `internal/service/svcsystem`（真实现：校验/错误码出口/渲染），
+// `*Service` 只实现它的 `Source` 端口（`export_source.go`）。断言随之移到用例层：
+// `var _ SystemSvc = (*Exporter)(nil)`。**这正是 P4a 的形状**：端口断言跟着实现走。
 //
 // **P4a 第一批**（2026-10-16）：包集按 ADR-2 收口——`svcruntime` 拆出 `svcprovider` 与
 // `svcmodel`（一个控制器只用到一半的两件事不该共用一个接口），三个单方法面
@@ -32,6 +36,5 @@ var (
 	_ svcprovider.ProviderSvc     = (*Service)(nil)
 	_ svcmodel.ModelSvc           = (*Service)(nil)
 	_ svccapability.CapabilitySvc = (*Service)(nil)
-	_ svcsystem.SystemSvc         = (*Service)(nil)
 	_ svclibrary.LibrarySvc       = (*Service)(nil)
 )
