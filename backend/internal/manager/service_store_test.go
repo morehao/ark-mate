@@ -82,7 +82,7 @@ func TestSQLiteLivePersistenceAcrossRestart(t *testing.T) {
 	svc1.markSession("s-live", session.SessionStatusCompleted)
 	pinned := true
 	title := "用户改的标题"
-	if _, err := svc1.UpdateSession(ctx, "s-live", dtosession.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
+	if _, err := metaSvc(svc1).UpdateSession(ctx, "s-live", dtosession.SessionPatch{Pinned: &pinned, Title: &title}); err != nil {
 		t.Fatalf("UpdateSession: %v", err)
 	}
 	if eMsgSeq != eUser.Seq+1 {

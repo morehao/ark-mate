@@ -465,7 +465,7 @@ func TestPublishTitleConcurrentUpdate(t *testing.T) {
 				default:
 				}
 				title := fmt.Sprintf("PATCH 标题 %d-%d", n, j)
-				_, _ = svc.UpdateSession(context.Background(), id, dtosession.SessionPatch{Title: &title})
+				_, _ = metaSvc(svc).UpdateSession(context.Background(), id, dtosession.SessionPatch{Title: &title})
 			}
 		}(i)
 	}

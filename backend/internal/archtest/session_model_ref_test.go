@@ -73,9 +73,19 @@ func TestSessionModelRefIsPlatformID(t *testing.T) {
 
 	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
-	if !strings.Contains(sess, "resolveSessionModel(ctx, sessionRuntime, *patch.Model)") {
-		t.Fatal("PATCH 路径没有把 `*patch.Model` 当**平台行 id** 解析" +
-			"（`resolveSessionModel(ctx, sessionRuntime, *patch.Model)`）")
+	// P4a 正文第四十四刀把 PATCH 写面搬进了 `service/svcsession`（`Meta.UpdateSession`），模型解析
+	// 改经 `MetaDeps.ResolveModel` 端口——**判据一字不改，锚跟着对象走**：链路变成两段，判据也分两段。
+	// 缺任一段都有一种静默失效：只钉用例侧，适配器忘了转发就没人拦；只钉适配器侧，用例自己
+	// 把请求原值落库也看不出来。
+	if !strings.Contains(sess, "ResolveModel(ctx, sessionRuntime, *patch.Model)") {
+		t.Fatal("PATCH 路径没有把 `*patch.Model` 当**平台行 id** 交给解析端口" +
+			"（`... ResolveModel(ctx, sessionRuntime, *patch.Model)`）")
+	}
+	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
+	if !strings.Contains(depsSrc, "s.resolveSessionModel(ctx, runtimeID, modelID)") {
+		t.Fatal("`ResolveModel` 适配器没有走 `resolveSessionModel`：解析链断在适配器上时，" +
+			"表现正是「把底座的不透明串写回库里」——而两端各自看都像在正常工作")
 	}
 	if strings.Contains(sess, "r.ModelID = *patch.Model") {
 		t.Fatal("PATCH 路径里仍在把 `*patch.Model`（请求原值）直接落库——必须先解析")
@@ -212,8 +222,13 @@ func TestModelSelectionIsLimitedToPlatformList(t *testing.T) {
 		declREFor("startSessionOn").String(), "建会话的落 rec 写路径 `startSessionOn`"))
 	sess := readStripped(t, uniqueSourceFile(t, internalDir, nil,
 		declREFor("UpdateSession").String(), "PATCH 写面 `UpdateSession`"))
-	if !strings.Contains(start, "resolveSessionModel(") || !strings.Contains(sess, "resolveSessionModel(") {
-		t.Fatal("建会话与 PATCH 两条写面都必须经 `resolveSessionModel`")
+	// P4a 正文第四十四刀之后 PATCH 那半的链路分两段（用例 → 端口 → 适配器），判据随之分两段。
+	depsSrc := readStripped(t, uniqueSourceFile(t, internalDir, nil,
+		`(?m)^func \(s \*Service\) ResolveModel\(`, "模型解析端口的实现 `ResolveModel`"))
+	if !strings.Contains(start, "resolveSessionModel(") || !strings.Contains(sess, "ResolveModel(") ||
+		!strings.Contains(depsSrc, "resolveSessionModel(") {
+		t.Fatal("建会话与 PATCH 两条写面都必须经 `resolveSessionModel`（PATCH 那一半现在是" +
+			"「用例调端口 `ResolveModel` → 适配器调 `resolveSessionModel`」两段，缺任一段都等于绕过解析）")
 	}
 	// ③ 复用既有错误码（E9）：`model_not_found` 仍映射到 40401。
 	aclCode := readStripped(t, filepath.Join(backendRoot(t), "pkg", "code", "acl.go"))

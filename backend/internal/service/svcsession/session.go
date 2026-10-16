@@ -25,9 +25,6 @@ import (
 // 会话面的其余部分已按**面**切开，各有自己的接口：`HistorySvc`（第十刀）/ `DetailSvc`（第四十刀）/
 // `InteractionSvc`（第四十一刀）/ `QueueSvc`（第四十二刀）——**不要把新面塞回这里**（守卫有反向判据）。
 type SessionSvc interface {
-	// UpdateSession 更新会话元数据（title/pinned/archived 子集更新）。
-	UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error)
-
 	// CreateSession 建立会话并（可选）启动首轮 prompt（后台执行，事件经 WS 出流）。
 	CreateSession(ctx context.Context, req dtosession.SessionCreateReq) (*dtosession.SessionCreateResp, error)
 

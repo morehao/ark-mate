@@ -67,6 +67,11 @@ type Ports struct {
 	// 与只读那三条分开：这一族有副作用（把决定送进正在跑的那一轮）。签名只吃**域值对象**，
 	// 所以实现它的是 `manager` 侧的适配器，而不是执行面本身（P4a 正文第四十一刀）。
 	InteractionDelivery svcsession.InteractionDelivery
+	// SessionMetaDeps 会话元数据写面的三份依赖（模型解析 / 投递 / 落库）。
+	//
+	// 端口签名只吃**域/pkg 类型**（`runtime.ModelConfig` / `model.SessionMetaPatch`），
+	// 所以实现它的是 `manager` 侧的适配器（P4a 正文第四十四刀）。
+	SessionMetaDeps svcsession.MetaDeps
 	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
 	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
 	Runtime *runtimeconn.Plane

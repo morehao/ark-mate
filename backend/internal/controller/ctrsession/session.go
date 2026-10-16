@@ -62,6 +62,10 @@ type sessionCtr struct {
 	// queue 排队输入的**撤下**用例（P4a 正文第四十二刀起在用例层）：请求形状校验 + 幂等口径 +
 	// 「真撤下必须发一条 `session.input_cancelled`」三条语义都在它里面。
 	queue svcsession.QueueSvc
+	// meta 会话**元数据写面**用例（P4a 正文第四十四刀起在用例层）：子集更新 + 会话内改模型。
+	//
+	// 它吃两个依赖：域平面（就地改 + 回读投影）与一个三方法窄端口（模型解析 / 投递 / 落库）。
+	meta svcsession.MetaSvc
 	// plane 会话域平面：**只读模型**直接由它提供（P4a 正文第十一刀）。
 	//
 	// 读模型（列表 / 单条 / 轮次 / 排队输入 / 检索 / 用量）没有请求校验、错误码出口与响应装配，
@@ -77,12 +81,14 @@ type sessionCtr struct {
 // 拿到的是**依赖事实**（会话面过渡期端口 + 库句柄 + 会话域平面 + 事件总线 + 交互事实来源）：
 // 历史读面（第十刀）与详情读面（第四十刀）两个用例在这里造，其余方法的实现仍在 `manager`（逐刀搬）。
 func NewSessionCtr(svc svcsession.SessionSvc, st *store.Store, plane *session.Plane, bus *eventbus.Bus,
-	src svcsession.InteractionSource, deliver svcsession.InteractionDelivery) SessionCtr {
+	src svcsession.InteractionSource, deliver svcsession.InteractionDelivery,
+	metaDeps svcsession.MetaDeps) SessionCtr {
 	return &sessionCtr{
 		svc: svc, hist: svcsession.NewHistory(st, plane, bus), plane: plane,
 		detail:      svcsession.NewDetail(plane, src),
 		interaction: svcsession.NewInteraction(plane, deliver),
 		queue:       svcsession.NewQueue(plane),
+		meta:        svcsession.NewMeta(plane, metaDeps),
 	}
 }
 
@@ -146,7 +152,7 @@ func (h *sessionCtr) Update(c *gin.Context) {
 		gincontext.Fail(c, code.Error(code.InvalidParam, "参数错误: "+err.Error()))
 		return
 	}
-	resp, err := h.svc.UpdateSession(c.Request.Context(), c.Param("id"), req)
+	resp, err := h.meta.UpdateSession(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		gincontext.Fail(c, code.FromError(err))
 		return

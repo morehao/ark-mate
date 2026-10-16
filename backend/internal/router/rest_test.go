@@ -133,6 +133,17 @@ type stubSvc struct {
 	mcpWritten    string
 	mcpWriteID    string
 	mcpWriteReq   dtocapability.McpWriteReq
+
+	// 会话元数据写面的三份依赖（P4a 正文第四十四刀）。
+	resolvedModelRuntime string
+	resolvedModelID      string
+	resolveModelErr      error
+	appliedModelSession  string
+	appliedModelCfg      goruntime.ModelConfig
+	applyModelErr        error
+	applyModelInactive   bool // ApplyModel 回 false（会话不活跃）
+	metaPatchedID        string
+	metaPatch            model.SessionMetaPatch
 }
 
 // RestErr 桩：与 manager 一致——已映射错误透传，acl 错误按分类映射（测试只关心 acl→信封码）。
@@ -369,18 +380,23 @@ func (s *stubSvc) MoveRegisteredWorkspace(id, beforeID string) (*dtoworkspace.Wo
 // ——— M3 ② 消息检索 / 批量导出桩 ———
 // ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
 
-func (s *stubSvc) UpdateSession(_ context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
-	resp := dtosession.SessionResp{ID: id}
-	if patch.Title != nil {
-		resp.Title = *patch.Title
+// ——— 会话元数据写面的三份依赖（P4a 正文第四十四刀）：端口只吃域/pkg 类型 ———
+//
+// 替身不再提供"折好的 SessionResp"——那一层现在真的在用例里跑（子集语义、模型解析失败即上抛、
+// 落库口径），替身只交这三份事实。
+func (s *stubSvc) ResolveModel(_ context.Context, runtimeID, modelID string) (string, goruntime.ModelConfig, error) {
+	s.resolvedModelRuntime, s.resolvedModelID = runtimeID, modelID
+	if s.resolveModelErr != nil {
+		return "", goruntime.ModelConfig{}, s.resolveModelErr
 	}
-	if patch.Pinned != nil {
-		resp.Pinned = *patch.Pinned
-	}
-	if patch.Archived != nil {
-		resp.Archived = *patch.Archived
-	}
-	return &resp, nil
+	return modelID, goruntime.ModelConfig{Model: modelID}, nil
+}
+func (s *stubSvc) ApplyModel(_ context.Context, sessionID string, cfg goruntime.ModelConfig) (bool, error) {
+	s.appliedModelSession, s.appliedModelCfg = sessionID, cfg
+	return !s.applyModelInactive, s.applyModelErr
+}
+func (s *stubSvc) UpdateMeta(_ context.Context, id string, meta model.SessionMetaPatch) {
+	s.metaPatchedID, s.metaPatch = id, meta
 }
 
 // ——— 会话交互面的三份事实（P4a 正文第四十刀）：端口吃**域值对象**，投影在用例层 ———
@@ -472,7 +488,7 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
-		Session: svc, InteractionSource: svc, InteractionDelivery: svc,
+		Session: svc, InteractionSource: svc, InteractionDelivery: svc, SessionMetaDeps: svc,
 		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
 		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
 		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),
@@ -915,6 +931,68 @@ func TestCreateSessionServiceError(t *testing.T) {
 	env, _ := do(t, r, "POST", "/v1/mate/sessions", `{"prompt":"hi"}`)
 	if env.Code != 40901 || !strings.Contains(env.Msg, "run in progress") {
 		t.Fatalf("服务错误未透出: %+v", env)
+	}
+}
+
+// TestUpdateSessionRoute PATCH /sessions/:id：会话**元数据写面**（P4a 正文第四十四刀起在用例层）。
+//
+// 这一面此前在路由层**一条用例都没有**（旧替身折一个 SessionResp 就完事）。现在替身只交三份依赖，
+// 判据因此落在用例真的跑出来的东西上：nil 字段不更新、模型变更把**解析出的身份**写进会话记录、
+// 以及"模型解析失败时**一个字节都不落库**"（落库那一格是替身记的，正是要看它有没有被调到）。
+func TestUpdateSessionRoute(t *testing.T) {
+	svc := &stubSvc{}
+	deps := stubDeps(t, svc)
+	deps.SessionPlane.RegisterSession(&session.SessionRec{ID: "s1", Title: "旧标题", RuntimeID: "rtx"})
+	r := newRestEngine(deps)
+
+	// ① 子集更新：只改出现过的键，回读投影与域里的记录一致。
+	env, code := do(t, r, "PATCH", "/v1/mate/sessions/s1", `{"title":"新标题","pinned":true}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("信封不符: http=%d env=%+v", code, env)
+	}
+	var resp dtosession.SessionResp
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		t.Fatalf("data 解析: %v", err)
+	}
+	if resp.ID != "s1" || resp.Title != "新标题" || !resp.Pinned {
+		t.Fatalf("回执不符: %+v", resp)
+	}
+	rec := deps.SessionPlane.Rec("s1")
+	if rec == nil || rec.Title != "新标题" || !rec.Pinned || rec.Archived {
+		t.Fatalf("域里的记录不符（`archived` 没传就不该动）: %+v", rec)
+	}
+	if svc.metaPatchedID != "s1" || svc.metaPatch.Title == nil || *svc.metaPatch.Title != "新标题" {
+		t.Fatalf("元数据应落库一次: id=%q patch=%+v", svc.metaPatchedID, svc.metaPatch)
+	}
+
+	// ② 会话内改模型：**落进记录的是解析出的平台行身份**（不是请求原文，也不是运行时值），
+	//    运行时值经投递面送进执行面。
+	mdlID := objid.New(objid.Model)
+	env, code = do(t, r, "PATCH", "/v1/mate/sessions/s1", `{"model":"`+mdlID+`"}`)
+	if code != 200 || env.Code != 0 {
+		t.Fatalf("改模型信封不符: http=%d env=%+v", code, env)
+	}
+	if rec := deps.SessionPlane.Rec("s1"); rec == nil || rec.ModelID != mdlID {
+		t.Fatalf("会话记录里应是平台行身份: %+v", rec)
+	}
+	if svc.resolvedModelRuntime != "rtx" || svc.resolvedModelID != mdlID {
+		t.Fatalf("解析应带上会话的 runtime 身份: runtime=%q id=%q", svc.resolvedModelRuntime, svc.resolvedModelID)
+	}
+	if svc.appliedModelSession != "s1" || svc.appliedModelCfg.Model != mdlID {
+		t.Fatalf("投递面没收到解析出的运行时值: %+v", svc.appliedModelCfg)
+	}
+
+	// ③ 模型解析失败 → 上抛，且**落库那一格一次都不该被调到**（"一个字节都不落库"）。
+	svc.metaPatchedID = ""
+	svc.resolveModelErr = gerror.Error{Code: 40401, Msg: "模型行不存在"}
+	env, _ = do(t, r, "PATCH", "/v1/mate/sessions/s1", `{"model":"`+mdlID+`"}`)
+	if env.Code != 40401 || svc.metaPatchedID != "" {
+		t.Fatalf("解析失败应上抛且不落库: env=%+v metaPatchedID=%q", env, svc.metaPatchedID)
+	}
+
+	// ④ 未知会话 → 40401（域的存在性判据）。
+	if env, _ := do(t, r, "PATCH", "/v1/mate/sessions/nope", `{"title":"x"}`); env.Code != 40401 {
+		t.Fatalf("未知会话应 40401: %+v", env)
 	}
 }
 

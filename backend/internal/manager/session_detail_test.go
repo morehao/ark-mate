@@ -28,3 +28,9 @@ func interactionSvc(svc *Service) svcsession.InteractionSvc {
 func queueSvc(svc *Service) svcsession.QueueSvc {
 	return svcsession.NewQueue(svc.sessionPlane)
 }
+
+// metaSvc 同理造一次**元数据写面**用例（P4a 正文第四十四刀）：域平面 + 三方法窄端口。
+// `svc` 既是平面的事实来源，也是那三份依赖的提供者（`MetaDeps`）。
+func metaSvc(svc *Service) svcsession.MetaSvc {
+	return svcsession.NewMeta(svc.sessionPlane, svc)
+}

@@ -6,15 +6,12 @@ import (
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"strings"
-	"time"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
-	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/ark-mate/pkg/object/objid"
 	"github.com/morehao/ark-mate/pkg/runtime"
-	"github.com/morehao/golib/glog"
 )
 
 // capabilitySelectionFromReq 请求 DTO → 内部选定。
@@ -28,69 +25,6 @@ func capabilitySelectionFromReq(req *dtosession.CapabilitiesReq) *CapabilitySele
 	}
 	// P3c：选定值对象与规范化都在 `domain/session`（`NormalizeIDs` 是那条规则的唯一实现）。
 	return &CapabilitySelection{Skills: session.NormalizeIDs(req.Skills), Mcps: session.NormalizeIDs(req.Mcps)}
-}
-
-// UpdateSession 更新会话元数据（title/pinned/archived 子集；nil 字段不更新）。
-// sqlite 模式下同步写库（sessions 为 DB 权威元数据镜像）。
-func (s *Service) UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error) {
-	// 记录改在**会话域自己的锁**下（该域自持锁，见计划 §3.1.40 的并发审查结论）。
-	var sessionRuntime string
-	if !s.sessionPlane.Mutate(id, func(r *SessionRec) {
-		if patch.Title != nil {
-			r.Title = *patch.Title
-		}
-		if patch.Pinned != nil {
-			r.Pinned = *patch.Pinned
-		}
-		if patch.Archived != nil {
-			r.Archived = *patch.Archived
-		}
-		// 会话的 runtime 身份在**持锁区**里读出来（它在会话建立后不再变，但"不变"不该靠约定：
-		// 解锁之后再读字段，读到的就可能是另一个 goroutine 刚写过的值）。
-		sessionRuntime = r.RuntimeID
-		r.UpdatedAt = time.Now().UTC()
-	}) {
-		return nil, code.FromError(acl.NewError(acl.ClassRequest, "session_not_found", fmt.Sprintf("未知会话 %q", id), nil))
-	}
-
-	// 会话内改模型：活会话经 session/set_config_option 立即生效（运行时是唯一判据）；
-	// 失败即上抛且**不落元数据**（避免「界面显示新模型、实际仍用旧的」的静默偏差）。
-	// 会话不活跃（未启动/已断连）→ 只更新元数据，下次恢复会话时生效。
-	//
-	// v26：`patch.Model` 是**平台模型行 id**，必须先在**活跃集合之外**解析成"行 + 运行时值"
-	// （解析要读库，而上面那段持锁区不许读库——症状是偶发死锁）。解析失败即上抛（40401），
-	// **一个字节都不落库**：静默换模型是这一版最该防的失败。
-	appliedModelID := patch.Model
-	if patch.Model != nil {
-		platformID, cfg, err := s.resolveSessionModel(ctx, sessionRuntime, *patch.Model)
-		if err != nil {
-			return nil, code.FromError(err)
-		}
-		applied, err := s.orch.ApplySessionModel(ctx, id, cfg)
-		if err != nil {
-			return nil, code.FromError(err)
-		}
-		if !applied {
-			glog.Debugw(ctx, "会话不在活跃集合，模型变更仅更新元数据", "session", id)
-		}
-		s.sessionPlane.Mutate(id, func(r *SessionRec) {
-			// **落库的是身份**（平台行 id），不是运行时值——定案「辰」的核心。
-			r.ModelID = platformID
-			r.UpdatedAt = time.Now().UTC()
-		})
-		appliedModelID = &platformID
-	}
-
-	if s.st != nil {
-		meta := model.SessionMetaPatch{Title: patch.Title, Pinned: patch.Pinned, Archived: patch.Archived, ModelID: appliedModelID}
-		ctx2, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		defer cancel()
-		if err := s.st.UpdateSessionMeta(ctx2, id, meta); err != nil {
-			glog.Warnw(ctx, "store: update session meta failed", "session", id, "err", err)
-		}
-	}
-	resp := s.sessionPlane.SessionResp(id)
-	return &resp, nil
 }
 
 // CreateSession 在 agent 对应 runtime 上建立会话，若携带 prompt 则同步发起首轮

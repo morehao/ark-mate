@@ -161,7 +161,7 @@ func TestUpdateSessionModelStoresPlatformID(t *testing.T) {
 	// ① 合法平台行 id → 库里就是它（不是运行时值）。
 	const okID = "ses_01J9Z6Q0M7X2V8K4B3N5TRW2Q1"
 	seed(okID)
-	if _, err := r.svc.UpdateSession(ctx, okID, dtosession.SessionPatch{Model: ptr(row.ID)}); err != nil {
+	if _, err := metaSvc(r.svc).UpdateSession(ctx, okID, dtosession.SessionPatch{Model: ptr(row.ID)}); err != nil {
 		t.Fatalf("切换到一个清单里的模型应成功: %v", err)
 	}
 	if got := readModel(okID); got != row.ID {
@@ -175,7 +175,7 @@ func TestUpdateSessionModelStoresPlatformID(t *testing.T) {
 	const badID = "ses_01J9Z6Q0M7X2V8K4B3N5TRW2Q2"
 	seed(badID)
 	before := readModel(badID)
-	if _, err := r.svc.UpdateSession(ctx, badID, dtosession.SessionPatch{Model: ptr("p1/m-1")}); numericCode(err) != 40401 {
+	if _, err := metaSvc(r.svc).UpdateSession(ctx, badID, dtosession.SessionPatch{Model: ptr("p1/m-1")}); numericCode(err) != 40401 {
 		t.Fatalf("运行时值不应被接受（它是**另一个词**）：应 40401 model_not_found，got %d（%v）",
 			numericCode(err), err)
 	}
@@ -184,7 +184,7 @@ func TestUpdateSessionModelStoresPlatformID(t *testing.T) {
 	}
 
 	// ③ 清单里没有的 id → 同样被拒且不落库。
-	if _, err := r.svc.UpdateSession(ctx, badID, dtosession.SessionPatch{Model: ptr(objid.New(objid.Model))}); numericCode(err) != 40401 {
+	if _, err := metaSvc(r.svc).UpdateSession(ctx, badID, dtosession.SessionPatch{Model: ptr(objid.New(objid.Model))}); numericCode(err) != 40401 {
 		t.Fatalf("查不到的模型行应 40401 model_not_found，got %d", numericCode(err))
 	}
 	if got := readModel(badID); got != before {

@@ -79,9 +79,9 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 
 	// ③ 用例实例必须在**控制器的构造函数里**造（判据钉在函数体上，不是整文件）。
 	ctrSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "controller", "ctrsession", "session.go")))
-	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc,[\s\S]*?src svcsession\.InteractionSource,[\s\S]*?deliver svcsession\.InteractionDelivery\) SessionCtr`).MatchString(ctrSrc) {
+	if !regexp.MustCompile(`func NewSessionCtr\(svc svcsession\.SessionSvc,[\s\S]*?src svcsession\.InteractionSource,[\s\S]*?deliver svcsession\.InteractionDelivery,[\s\S]*?metaDeps svcsession\.MetaDeps\) SessionCtr`).MatchString(ctrSrc) {
 		t.Error("`ctrsession.NewSessionCtr` 的签名变了：它必须拿到**依赖事实**（会话面过渡端口 + 库句柄 + " +
-			"会话域平面 + 事件总线 + 交互事实来源 + 投递口），三个用例都在函数体里造。")
+			"会话域平面 + 事件总线 + 交互事实来源 + 投递口 + 元数据三份依赖），四个用例都在函数体里造。")
 	}
 	body := funcBodyOf(t, ctrSrc, "func NewSessionCtr(")
 	if !strings.Contains(body, "svcsession.NewHistory(") {
@@ -271,6 +271,56 @@ func TestSessionHistoryUseCaseLivesInSessionSvc(t *testing.T) {
 	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) DeleteQueuedInput("); !strings.Contains(b, "h.queue.DeleteQueuedInput(") {
 		t.Errorf("`DeleteQueuedInput` handler 的函数体里没有 `h.queue.DeleteQueuedInput(`："+
 			"撤下排队输入已归用例层，经同包中间函数绕开会让这条判据失去意义。实际体：\n%s", b)
+	}
+	// ——— P4a 正文第四十四刀：会话**元数据写面**（子集更新 + 会话内改模型）也在这一面 ———
+	//
+	// 这一面的判据长在用例层：nil 字段不更新、「解析失败即上抛且一个字节都不落库」、
+	// 「落进记录的是**身份**（平台行 id）而不是运行时值」。域平面只提供"在会话自己的锁下就地改"。
+	// 三个依赖走一个三方法窄端口（签名只吃域/pkg 类型 ⇒ 适配器能在 `manager` 里实现）。
+	metaAnchors := []string{
+		"func NewMeta(plane *session.Plane, deps MetaDeps) MetaSvc",
+		"var _ MetaSvc = (*Meta)(nil)",
+		"func (m *Meta) UpdateSession(ctx context.Context, id string, patch dtosession.SessionPatch) (*dtosession.SessionResp, error)",
+		// 就地改必须走**域自己的锁**（自带锁的平面手法），而不是用例层自己加锁。
+		"m.plane.Mutate(id,",
+		// 身份 vs 运行时值：落进记录的是解析出的**平台行 id**。
+		"r.ModelID = platformID",
+		"appliedModelID = &platformID",
+		// 端口三行签名（只吃域/pkg 类型）。
+		"type MetaDeps interface {",
+		"ResolveModel(ctx context.Context, runtimeID, modelID string) (string, runtime.ModelConfig, error)",
+		"ApplyModel(ctx context.Context, sessionID string, cfg runtime.ModelConfig) (bool, error)",
+		"UpdateMeta(ctx context.Context, id string, meta model.SessionMetaPatch)",
+	}
+	for _, a := range metaAnchors {
+		if !strings.Contains(svcBody, a) {
+			t.Errorf("`internal/service/svcsession` 里找不到 %q：元数据写面被改名/搬走了"+
+				"（判据挂在它身上，失锚等于空转）。", a)
+		}
+	}
+	if strings.Contains(iface, "UpdateSession(ctx context.Context") {
+		t.Error("`SessionSvc` 里又声明了 `UpdateSession(`：这一面有自己的接口（`MetaSvc`），" +
+			"收回去等于同一个用例有两条取用路径。")
+	}
+	if strings.Contains(mgrBody, "func (s *Service) UpdateSession(") {
+		t.Error("`internal/manager` 里又出现 `func (s *Service) UpdateSession(`：那一层实现已随" +
+			"P4a 正文第四十四刀删除（`manager` 侧只剩 `ResolveModel` / `ApplyModel` / `UpdateMeta` 三个适配器）。")
+	}
+	if !strings.Contains(body, "svcsession.NewMeta(") {
+		t.Errorf("`NewSessionCtr` 的函数体里找不到 `svcsession.NewMeta(`：元数据写面用例必须在控制器里造。实际体：\n%s", body)
+	}
+	if !strings.Contains(routesSrc, "ports.SessionMetaDeps") {
+		t.Error("`internal/router/routes_session.go` 没有把 `ports.SessionMetaDeps` 交给 `NewSessionCtr`：" +
+			"漏交会让那三份依赖为 nil，改模型时 nil 接口调方法直接 panic。")
+	}
+	if !regexp.MustCompile(`SessionMetaDeps\s+svcsession\.MetaDeps`).MatchString(
+		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))) {
+		t.Error("`router.Ports` 里找不到 `SessionMetaDeps svcsession.MetaDeps`（容空白）：" +
+			"那三份依赖必须是装配点交下来的事实。")
+	}
+	if b := funcBodyOf(t, ctrSrc, "func (h *sessionCtr) Update("); !strings.Contains(b, "h.meta.UpdateSession(") {
+		t.Errorf("`Update` handler 的函数体里没有 `h.meta.UpdateSession(`："+
+			"元数据写面已归用例层，经同包中间函数绕开会让这条判据失去意义。实际体：\n%s", b)
 	}
 }
 

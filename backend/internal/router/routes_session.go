@@ -14,7 +14,7 @@ import (
 // 保持与历史路由表一致的解析优先级。
 func registerSession(v1 *gin.RouterGroup, ports Ports) {
 	ctr := ctrsession.NewSessionCtr(ports.Session, ports.Store, ports.SessionPlane, ports.Bus,
-		ports.InteractionSource, ports.InteractionDelivery)
+		ports.InteractionSource, ports.InteractionDelivery, ports.SessionMetaDeps)
 	search := ctrsearch.NewSearchCtr(ports.SessionPlane)
 	export := ctrexport.NewExportCtr(ports.Store, ports.SessionPlane, ports.Bus)
 
