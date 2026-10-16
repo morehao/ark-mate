@@ -465,10 +465,9 @@ func (a *App) Init(ctx context.Context) error {
 		// 用例实例由 ctrlibrary 自己造。
 		Capabilities: a.svc.CapabilityRegistry(), SkillPlane: a.svc.SkillPlane(),
 		Registry: a.reg, McpSecrets: a.svc.McpSecrets(), McpGatewayEnabled: a.svc.McpGatewayEnabled,
-		// P4a 起"用例实现"不再等于 manager：导出搬进了 svcsystem，manager 交出**事实来源**
-		// （`SessionMeta`/`SessionEvents`），用例实例由 ctrexport 造。这一处的断言力也随之上移：
-		// `a.svc` 不再满足哪个端口，就在这个字面量上当场编译失败。
-		System: a.svc,
+		// 导出（P4a 正文第八刀）：三份**依赖事实**（模型面已在上面交出 Store）——事实来源
+		// （`svcsystem.NewSource`）与用例实例（`svcsystem.New`）都由 ctrexport 造。
+		SessionPlane: a.svc.SessionPlane(), Bus: a.bus,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

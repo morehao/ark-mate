@@ -219,6 +219,10 @@ func (s *Service) SetBus(bus *eventbus.Bus) { s.bus = bus }
 // 两份平面 = 两个事实源。
 func (s *Service) ProviderPlane() *provider.Plane { return s.providerPlane }
 
+// SessionPlane 交会话域平面（**依赖事实**）：导出用例的事实来源（`svcsystem.NewSource`）
+// 由 `ctrexport` 用它与 Store/Bus 一起在自己的构造函数里造（P4a 正文第八刀）。
+func (s *Service) SessionPlane() *session.Plane { return s.sessionPlane }
+
 // CapabilityRegistry / SkillPlane / McpSecrets 交出能力面的三份**事实来源**
 // （`ctrlibrary` 的读模型用例要用它们，P4a 正文第六刀）。
 //

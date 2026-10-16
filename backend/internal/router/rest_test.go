@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
@@ -23,11 +24,14 @@ import (
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
 	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/mechanism/credential"
+	"github.com/morehao/ark-mate/internal/model"
 	"github.com/morehao/ark-mate/internal/router"
 	"github.com/morehao/ark-mate/internal/runtimeconn"
+	"github.com/morehao/ark-mate/internal/testutil"
 	"github.com/morehao/ark-mate/pkg/acl"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/code"
+	"github.com/morehao/ark-mate/pkg/object/objid"
 	goruntime "github.com/morehao/ark-mate/pkg/runtime"
 	"github.com/morehao/golib/gerror"
 )
@@ -88,10 +92,6 @@ type stubSvc struct {
 	searchMsgLimit int
 	searchMsgResp  *dtosearch.MessageSearchResp
 	searchMsgErr   error
-
-	// P4a 起导出用例是**真的**：替身交的是事实（元数据 + 事件序列），不再是假用例。
-	exportMeta   map[string]session.Meta
-	exportEvents map[string][]eventbus.Event
 
 	// automation 面（M4-5）桩状态
 	automations    []dtoautomation.AutomationResp
@@ -543,24 +543,6 @@ func (s *stubSvc) SearchMessages(_ context.Context, q string, limit int) (*dtose
 	return &dtosearch.MessageSearchResp{Query: q, Source: "sqlite", Hits: []dtosearch.MessageSearchHit{}}, nil
 }
 
-// ——— P4a：导出用例的**事实来源**（用例实例由 ctrexport 造，替身只提供事实） ———
-//
-// 以前这里是 `ExportSessions`——替身把**用例本身**也假掉了，于是"渲染口径/上限口径"在路由测试里
-// 从来没有被执行过。P4a 把用例实例的构造搬进 ctrexport 之后，替身只能交事实（会话元数据 + 事件
-// 序列），`TestExportRoute` 走的是真 Exporter。
-func (s *stubSvc) SessionMeta(_ context.Context, id string) (session.Meta, bool) {
-	m, ok := s.exportMeta[id]
-	return m, ok
-}
-
-func (s *stubSvc) SessionEvents(_ context.Context, id string, limit int) ([]eventbus.Event, bool) {
-	ev := s.exportEvents[id]
-	if len(ev) > limit {
-		return ev[:limit], true
-	}
-	return ev, false
-}
-
 // ——— P4a：自检用例的**供应商域读面**替身（同上：只交事实） ———
 
 func (s *stubSvc) GetSession(_ context.Context, id string) (*dtosession.SessionDetailResp, error) {
@@ -706,8 +688,9 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 		// ——替身化事实等于把"读模型读的是哪份注册表"也替身掉。
 		Capabilities: caps, SkillPlane: skills, Registry: goruntime.AllBuiltinRegistry(),
 		McpSecrets: mcp.NewSecrets(credential.New(reg)), McpGatewayEnabled: func() bool { return true },
-		// 事实来源（`SessionMeta`/`SessionEvents`）：导出用例由 ctrexport 造。
-		System: svc,
+		// 导出（P4a 正文第八刀）：会话域平面与事件总线是**真对象**（事实来源由 ctrexport 造），
+		// sqlite 载体那份 Store 由具体用例按需注入（`stubDeps(...).Store = st`）。
+		SessionPlane: session.NewPlane(), Bus: eventbus.New(),
 	}
 }
 
@@ -1639,15 +1622,25 @@ func TestMessageSearchRoute(t *testing.T) {
 // 这条用例以前把 `ExportSessions` 整个假掉了，于是它验的只是"信封能包住一个假响应"。现在替身
 // 只交事实，判据（格式归一、ids 去重、未知会话进 skipped、错误码）都是用例层真的跑出来的。
 func TestExportRoute(t *testing.T) {
-	svc := &stubSvc{
-		exportMeta: map[string]session.Meta{
-			"c-1": {ID: "c-1", Title: "部署", Status: "idle"},
-		},
-		exportEvents: map[string][]eventbus.Event{
-			"c-1": {{ID: "evt_1", Type: "session.run.started", Payload: map[string]any{}}},
-		},
+	// 事实这一层也是**真的**（P4a 正文第八刀）：sqlite 载体 + 真会话行/事件行，替身已撤掉
+	// ——否则"导出读的是哪份事实"又会被替身盖住。
+	st := testutil.OpenStore(t, testutil.TempDBPath(t))
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := st.UpsertSession(ctx, model.SessionEntity{
+		ID: "c-1", Cwd: t.TempDir(), Title: "部署", Status: "idle",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
 	}
-	r := newRestEngine(stubDeps(t, svc))
+	if _, err := st.AppendEvent(ctx, objid.New(objid.Event), "c-1", "session.run.started",
+		map[string]any{"run_id": "run_1"}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	deps := stubDeps(t, &stubSvc{})
+	deps.Store = st
+	r := newRestEngine(deps)
 
 	env, http := do(t, r, "POST", "/v1/mate/sessions/export", `{"ids":["c-1"],"format":"markdown"}`)
 	if http != 200 || env.Code != 0 {

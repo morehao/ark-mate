@@ -15,7 +15,7 @@ import (
 func registerSession(v1 *gin.RouterGroup, ports Ports) {
 	ctr := ctrsession.NewSessionCtr(ports.Session)
 	search := ctrsearch.NewSearchCtr(ports.Session)
-	export := ctrexport.NewExportCtr(ports.System)
+	export := ctrexport.NewExportCtr(ports.Store, ports.SessionPlane, ports.Bus)
 
 	v1.GET("/sessions", ctr.List)
 	v1.GET("/sessions/search", ctr.Search)

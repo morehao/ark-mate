@@ -18,6 +18,7 @@ import (
 	"github.com/morehao/ark-mate/internal/credential"
 	"github.com/morehao/ark-mate/internal/domain/mcp"
 	"github.com/morehao/ark-mate/internal/domain/provider"
+	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/domain/skill"
 	"github.com/morehao/ark-mate/internal/dto/dtoruntime"
 	"github.com/morehao/ark-mate/internal/eventbus"
@@ -28,7 +29,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
@@ -80,7 +80,10 @@ type Ports struct {
 	McpSecrets   *mcp.Secrets
 	// McpGatewayEnabled 平台 MCP 网关开关（**运行期可变**，所以是读取口而不是快照值）。
 	McpGatewayEnabled func() bool
-	System            svcsystem.Source
+	// SessionPlane 会话域平面 + Bus 事件总线（**依赖事实**）：导出用例与它的事实来源都由
+	// ctrexport 在自己的构造函数里造（P4a 正文第八刀）；`Store` 那一格复用上面模型面的句柄。
+	SessionPlane *session.Plane
+	Bus          *eventbus.Bus
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。

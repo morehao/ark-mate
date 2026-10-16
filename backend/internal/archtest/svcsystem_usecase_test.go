@@ -3,6 +3,7 @@ package archtest
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -66,12 +67,19 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 			t.Errorf("internal/service/svcsystem/source.go 里找不到 %q：端口被改名/搬走了？", a)
 		}
 	}
-	// 用例层不得 import 持久层或领域（那正是端口的用途）。
-	for _, banned := range []string{`"github.com/morehao/ark-mate/internal/store"`, `"github.com/morehao/ark-mate/internal/manager"`} {
-		if strings.Contains(sourceSrc+src, banned) {
-			t.Errorf("`internal/service/svcsystem` 里出现 %s：用例层通过**端口**取事实（ADR-6），"+
-				"它不 import 持久层、也不 import `manager`。", banned)
-		}
+	// 用例**本体**不得 import 持久层（那正是端口的用途）。
+	//
+	// P4a 正文第八刀起这条判据只压在 `export.go` 上：事实来源的适配器（`source_facts.go`）
+	// 与用例同包，而它**必须**读库——把 store 的禁令留在整包上，等于逼适配器搬到别处去
+	// （那正是"实现与它的名字分家"的老毛病）。禁止项拆成两半：整包禁 `manager`（用例层
+	// 不认识过渡层），`export.go` 另禁 `store`。
+	if strings.Contains(src+sourceSrc, `"github.com/morehao/ark-mate/internal/manager"`) {
+		t.Error("`internal/service/svcsystem` 里出现 `internal/manager`：用例层通过**端口**取事实（ADR-6），" +
+			"它不认识过渡层。")
+	}
+	if strings.Contains(src, `"github.com/morehao/ark-mate/internal/store"`) {
+		t.Error("`internal/service/svcsystem/export.go` 里出现 `internal/store`：用例本体只认 `Source` 端口，" +
+			"读库是适配器（`source_facts.go`）的事。")
 	}
 
 	// manager 侧：不得再有实现痕迹。
@@ -107,7 +115,38 @@ func TestExportUseCaseLivesInSystemSvc(t *testing.T) {
 	app := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "app", "app.go")))
 	if strings.Contains(app, "svcsystem.") {
 		t.Error("`internal/app/app.go` 里出现 `svcsystem.`：装配点不认识用例层（P4a 收口）。" +
-			"它该交出的是**事实来源**（`System: a.svc`），用例实例由 `ctrexport` 造。")
+			"它该交出的是**依赖事实**（`SessionPlane: a.svc.SessionPlane(), Bus: a.bus`），" +
+			"事实来源与用例实例都由 `ctrexport` 造。")
+	}
+	// P4a 正文第八刀：适配器搬进用例层、Ports 换成三份事实。
+	//
+	// 这三种失效都不会让别的测试变红：
+	//
+	//	① 适配器回流到 `manager`（两份取数，sqlite/memory 的产物口径静默分叉）；
+	//	② `Ports` 那一格写回 `svcsystem.Source`（router 又 import 用例包）；
+	//	③ 控制器不再造事实来源（`Source` 为 nil ⇒ 第一次取数 nil panic，而只测校验分支看不见）。
+	portsSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "router", "router.go")))
+	if !regexp.MustCompile(`SessionPlane\s+\*session\.Plane`).MatchString(portsSrc) ||
+		!regexp.MustCompile(`Bus\s+\*eventbus\.Bus`).MatchString(portsSrc) {
+		t.Error("`internal/router/router.go` 的 `Ports` 里找不到 `SessionPlane *session.Plane` 与 " +
+			"`Bus *eventbus.Bus`：导出的事实来源靠这两份依赖事实，用例与来源都在 `ctrexport` 里造。")
+	}
+	if strings.Contains(portsSrc, "svcsystem") {
+		t.Error("`internal/router/router.go` 里出现 `svcsystem`：装配点只放依赖事实，" +
+			"用例层的类型不外溢到 router。")
+	}
+	// 判据钉在 **`NewExportCtr` 的函数体**里，而不是整文件的字面量。
+	//
+	// 这条判据的第一版是整文件 `strings.Contains(ctr, "svcsystem.NewSource(")`，**实测假绿**：
+	// 把构造挪进同包一个中间函数（`newSystemSource(st, plane, bus)`）之后，字面量仍在文件里，
+	// 守卫照样通过——而那正是"一行转发"这条规矩要拦的形态。函数体是能被解析出来的，就按它判。
+	body := funcBodyOf(t, ctr, "func NewExportCtr(")
+	for _, a := range []string{"svcsystem.New(", "svcsystem.NewSource("} {
+		if !strings.Contains(body, a) {
+			t.Errorf("`internal/controller/ctrexport/export.go` 的 `NewExportCtr` 函数体里找不到 %q："+
+				"三份依赖事实必须在**这里**造出事实来源与用例（挪进同包的中间函数 = 一行转发，"+
+				"而跳过构造 ⇒ `Source` 为 nil，只测校验分支的单测看不见）。", a)
+		}
 	}
 }
 
@@ -122,4 +161,86 @@ func TestManagerExportFileIsGone(t *testing.T) {
 			"（P4a）。\n两边并存的表现是**渲染口径与上限口径分叉**——例如一边按 4 MiB 截断、" +
 			"另一边没有，而两条路径都编译得过。")
 	}
+}
+
+// systemSourceAdapterAnchors 事实来源适配器必须有的锚（在**用例层**，与用例同包）。
+//
+// 判据挂在具体符号上而不只挂"包里有 store 的 import"：后者在适配器被换成一层薄转发
+// （例如把 `SessionEvents` 委托给别处）时照样通过，而那正是要拦的形态。
+var systemSourceAdapterAnchors = []string{
+	"func NewSource(st *store.Store, plane *session.Plane, bus *eventbus.Bus) Source",
+	"var _ Source = (*Facts)(nil)",
+	"func (f *Facts) SessionMeta(ctx context.Context, id string) (SessionMeta, bool)",
+	"func (f *Facts) SessionEvents(ctx context.Context, id string, limit int) ([]eventbus.Event, bool)",
+	"session.DecodePayload(",
+}
+
+// TestSystemSourceAdapterLivesInSystemSvc 事实来源的适配器归用例层（P4a 正文第八刀）。
+//
+// 它挡的是三种静默失效：
+//
+//	① 适配器回流 `manager`（`func (s *Service) SessionEvents(` 回来）：两份取数的产物口径会分叉，
+//	   而两边都编译得过、都有一套自己的测试；
+//	② `Ports` 那一格写回 svc 类型（`svcsystem.Source`）：装配点为了声明一格而 import 用例包，
+//	   "只说依赖事实"这条口径当场破掉；
+//	③ 用例层丢了适配器锚（改名/搬走）：判据失锚，守卫会静默空转。
+func TestSystemSourceAdapterLivesInSystemSvc(t *testing.T) {
+	root := backendRoot(t)
+	dir := filepath.Join(root, "internal", "service", "svcsystem")
+	files := goFilesUnder(t, dir)
+	if len(files) == 0 {
+		t.Fatalf("%s 下没有 .go 文件：守卫失去检查对象", dir)
+	}
+	var body strings.Builder
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		body.WriteString(stripLineComments(readFileOrFatal(t, path)))
+	}
+	src := body.String()
+	for _, a := range systemSourceAdapterAnchors {
+		if !strings.Contains(src, a) {
+			t.Errorf("`internal/service/svcsystem` 里找不到 %q：事实来源的适配器被改名/搬走了"+
+				"（它是这一刀的判据本身，失锚等于空转）。", a)
+		}
+	}
+
+	// ① 适配器不得回流 manager。
+	mgr := filepath.Join(root, "internal", "manager")
+	mgrFiles := productionGoFiles(t, mgr)
+	if len(mgrFiles) == 0 {
+		t.Fatalf("%s 下没有生产 .go 文件：守卫失去检查对象", mgr)
+	}
+	for _, path := range mgrFiles {
+		mgrBody := stripLineComments(readFileOrFatal(t, path))
+		for _, m := range []string{"func (s *Service) SessionMeta(", "func (s *Service) SessionEvents("} {
+			if strings.Contains(mgrBody, m) {
+				t.Errorf("internal/manager/%s 里出现 %q：事实来源的适配器只有一份，在 "+
+					"`internal/service/svcsystem`（P4a 正文第八刀）。", filepath.Base(path), m)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(mgr, "export_source.go")); err == nil {
+		t.Error("`internal/manager/export_source.go` 又存在了：两份取数口径（sqlite/memory）会静默分叉。")
+	}
+}
+
+// funcBodyOf 取出以 `sig` 开头的那个**顶格函数**的函数体（到下一个顶格 `}` 为止）。
+//
+// 与 `interfaceBody` 同一手法：判据要落在函数体上时，先把体切出来——否则同包里的中间函数、
+// 或另一个函数里的同名字面量都会把守卫喂绿（`manager_lock_order_test.go` 的函数边界那套同理）。
+// 找不到 `sig` 即 Fatal：判据失锚不许静默。
+func funcBodyOf(t *testing.T, src, sig string) string {
+	t.Helper()
+	i := strings.Index(src, sig)
+	if i < 0 {
+		t.Fatalf("找不到 %q：判据失锚（函数被改名/搬走了）", sig)
+	}
+	rest := src[i:]
+	if j := strings.Index(rest, "\n}"); j >= 0 {
+		return rest[:j]
+	}
+	t.Fatalf("%q 的函数体没有顶格 `}` 收尾：源码形态变了，判据需要跟着改", sig)
+	return ""
 }
