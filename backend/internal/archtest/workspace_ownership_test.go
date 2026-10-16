@@ -301,6 +301,20 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 			}
 		}
 
+		// 两条**包内私有**转发（P4a 正文第三十刀）：`resolveTargetWorkspace` / `workspaceIDByPath`
+		// 没有接口声明，所以它们不会被"接口里少一行"这类判据抓到——只能按符号名点掉。
+		for _, dead := range []string{"func (s *Service) resolveTargetWorkspace(", "func (s *Service) workspaceIDByPath("} {
+			if strings.Contains(regMgr, dead) {
+				t.Errorf("`internal/manager/workspace_registry.go` 里又出现 `%s`：包内调用点直接写"+
+					"`s.planner.*`／`WorkspacePlane()`，私有转发同样是「多一层就多一处可读错的地方」。", dead)
+			}
+		}
+		for _, must := range []string{"func (pl *Plane) ResolveTargetWorkspace(", "func (pl *Plane) WorkspaceIDByPath("} {
+			if !strings.Contains(reg, must) {
+				t.Errorf("`internal/domain/workspace/registry.go` 里找不到 %q：判据失锚＝空转。", must)
+			}
+		}
+
 		if !strings.Contains(reg, "func (pl *Plane) CreateRegisteredWorkspace(") {
 			t.Error("`internal/domain/workspace/registry.go` 里找不到 `CreateRegisteredWorkspace` 本体：判据失锚＝空转。")
 		}

@@ -139,7 +139,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	// 归属目标：显式 `workspace_id` 优先（选择器选中了某个登记项），否则用默认工作空间。
 	// 两者都给出且不一致 → 拒绝：猜用户的意图迟早猜错，而这一处猜错的后果是会话跑错目录
 	// （那个目录正是原生权限 workspace-write 的沙箱边界）。
-	target, assignment, err := s.resolveTargetWorkspace(req.WorkspaceID)
+	target, assignment, err := s.planner.ResolveTargetWorkspace(req.WorkspaceID)
 	if err != nil {
 		return nil, code.FromError(err)
 	}
@@ -181,7 +181,7 @@ func (s *Service) CreateSession(ctx context.Context, req dtosession.SessionCreat
 	if assignment != "" {
 		ws.WorkspaceID = assignment
 	} else if ws.WorkspaceID == "" {
-		ws.WorkspaceID = s.workspaceIDByPath(ctx, ws.Path)
+		ws.WorkspaceID = s.planner.WorkspaceIDByPath(ctx, ws.Path)
 	}
 	// 能力选定（M3）：`capabilities` 未传 → nil，与引入本字段之前逐字节相同。
 	// 传了（哪怕 `{}`）→ 声明了：两个 kind 各自 nil（不限制）或白名单，由 DTO 的指针区分。

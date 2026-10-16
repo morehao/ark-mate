@@ -414,7 +414,7 @@ func TestWorkspaceRegistryDefaultIsProvisionedInMemory(t *testing.T) {
 	}
 
 	// 归属解析：建会话未指定 cwd 时，cwd 与 workspace_id 都落在这一条上。
-	target, assignment, err := r.Svc.resolveTargetWorkspace("")
+	target, assignment, err := r.Svc.WorkspacePlane().ResolveTargetWorkspace("")
 	if err != nil || target == nil {
 		t.Fatalf("未指定 cwd 时应解析到默认工作空间: target=%+v err=%v", target, err)
 	}
