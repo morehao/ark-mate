@@ -63,7 +63,7 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	svc.SetProviderDir(filepath.Join(home, "providers"))
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc,
+		Session:        svc,
 		WorkspacePlane: svc.WorkspacePlane(),
 		Picker:         svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
@@ -390,7 +390,7 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	bus := eventbus.New()
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc,
+		Session:        svc,
 		WorkspacePlane: svc.WorkspacePlane(),
 		Picker:         svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。

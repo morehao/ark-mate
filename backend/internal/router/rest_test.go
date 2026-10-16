@@ -579,7 +579,7 @@ func stubDeps(t *testing.T, svc *stubSvc) router.Ports {
 	caps := capability.NewRegistry()
 	skills := skill.NewPlane(caps, nil)
 	return router.Ports{
-		Session: svc, Workspace: svc,
+		Session: svc,
 		// 执行面（`Identity`/`Diagnostics`）是**真对象**：用例实例由 ctrruntime 造，而底座诊断
 		// 读的就是执行面此刻的事实——替身化它等于把"诊断读的是哪份进程态"也替身掉。
 		Runtime: runtimeconn.NewPlaneFor(goruntime.AllBuiltinRegistry()),

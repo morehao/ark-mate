@@ -30,7 +30,6 @@ import (
 	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/capability"
 	"github.com/morehao/ark-mate/pkg/runtime"
@@ -58,8 +57,7 @@ const AppName = "mate"
 // 全部迁完时这几行会**自己消失**（白名单 `transitionalServiceImporters` 也是同一张进度表）。
 // 别在过渡期往里加新的 svc 格：那正是 2026-10-16 被判定为"骚操作"的那批别名的来路。
 type Ports struct {
-	Session   svcsession.SessionSvc
-	Workspace svcworkspace.WorkspaceSvc
+	Session svcsession.SessionSvc
 	// Runtime 底座**执行面本身**（`*runtimeconn.Plane`；P4a 正文第七刀）——`app` 交的是依赖事实，
 	// 底座面的用例（`svcruntime.New`）由 `ctrruntime` 在自己的构造函数里造。
 	Runtime *runtimeconn.Plane

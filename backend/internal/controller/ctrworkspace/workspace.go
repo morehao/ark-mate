@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/domain/workspace"
 	"github.com/morehao/ark-mate/internal/dto/dtoworkspace"
-	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -51,7 +50,6 @@ type DirectoryPicker interface {
 }
 
 type workspaceCtr struct {
-	svc svcworkspace.WorkspaceSvc
 	// picker 宿主目录选择器（事实来自 `router.Ports.Picker`）。
 	picker DirectoryPicker
 	// plane 工作空间域平面：**读模型**（登记表列表）直接经它取——域里已经折好 DTO，
@@ -60,8 +58,8 @@ type workspaceCtr struct {
 }
 
 // NewWorkspaceCtr 构造 WorkspaceCtr。
-func NewWorkspaceCtr(svc svcworkspace.WorkspaceSvc, picker DirectoryPicker, plane *workspace.Plane) WorkspaceCtr {
-	return &workspaceCtr{svc: svc, picker: picker, plane: plane}
+func NewWorkspaceCtr(picker DirectoryPicker, plane *workspace.Plane) WorkspaceCtr {
+	return &workspaceCtr{picker: picker, plane: plane}
 }
 
 // Browse 列出某绝对路径下的子目录（query `path` 缺省 = 首个工作区根，未配白名单时 = 服务进程家目录；

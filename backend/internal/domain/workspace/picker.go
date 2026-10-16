@@ -202,7 +202,8 @@ func (p *Picker) SetBindAddr(addr string) {
 
 // NativePickerMode 返回本宿主该用哪一套选目录交互（前端经 `/capabilities` 的 `native-dialog` 读它）。
 //
-// 返回字符串而不是枚举类型：端口（`svcworkspace`）不该 import 本域的类型，而这两个取值就是
+// 返回字符串而不是枚举类型：消费方（原来是 `svcworkspace` 端口，P4a 正文第三十三刀起是
+// 控制器的本地接口 `DirectoryPicker`）不该 import 本域的类型，而这两个取值就是
 // wire 上的两个词。枚举只在本包内部用于判定。
 func (p *Picker) NativePickerMode() string {
 	return string(nativePickerMode(p.pickEnv()))

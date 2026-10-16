@@ -275,7 +275,7 @@ func TestWorkspaceRegistryMemoryModeIsReadOnlyHTTP(t *testing.T) {
 func doRaw(t *testing.T, svc *manager.Service, method, path, body string) []byte {
 	t.Helper()
 	engine := router.New(router.Ports{
-		Session: svc, Workspace: svc,
+		Session:        svc,
 		WorkspacePlane: svc.WorkspacePlane(), Picker: svc.Picker(),
 		// 执行面 + 自检的两个事实端口（P4a：用例实例由控制器造，装配点只交事实）。
 		Runtime:       runtimeconn.NewPlaneFor(nil),
