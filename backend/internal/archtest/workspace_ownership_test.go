@@ -218,8 +218,6 @@ func TestWorkspaceImplementationLivesInDomain(t *testing.T) {
 	// 判据只认顶格的 `type X = `：方法体里的类型断言/赋值不在此列。
 	registeredAliases := map[string]string{
 		"CapabilitySelection": "internal/manager/capability_facts.go",
-		"runtimeBinding":      "internal/manager/runtime_binding.go",
-		"runtimeSpec":         "internal/manager/runtime_binding.go",
 		"SessionRec":          "internal/manager/session_forward.go",
 	}
 	aliasRe := regexp.MustCompile(`(?m)^type ([A-Za-z0-9_]+) = `)

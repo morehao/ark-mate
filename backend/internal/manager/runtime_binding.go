@@ -21,11 +21,10 @@ import (
 // "构建期选定那个没注册"报得更准）、`runtimeCtx` + `runtimeRequestTimeout`（零调用点）。
 // 它们与 §3.1.47 清掉的 `Service.inputs` 是同一类："编译全绿、看起来还在用"。
 
-// runtimeBinding 是域里那份绑定的**类型别名**（全仓只有域里那一份定义）。
-type runtimeBinding = runtimeconn.Binding
-
+// 别名已删（P4a 正文第二十六刀）：`runtimeBinding` 曾把 `runtimeconn.Binding` 换个名字挂在
+// manager 上。**别名让「谁是这个类型的主人」不可判定**（第三条硬规矩），调用点直接写全名。
 // TODO(P4b): 删转发（调用点直接依赖 runtimeconn.Plane）
-func (s *Service) runtimeBindingSnapshot() runtimeBinding { return s.runtimePlane.Snapshot() }
+func (s *Service) runtimeBindingSnapshot() runtimeconn.Binding { return s.runtimePlane.Snapshot() }
 
 // TODO(P4b): 删转发（同上）
 func (s *Service) setRuntimeState(state string) { s.runtimePlane.SetState(state) }
@@ -34,8 +33,7 @@ func (s *Service) setRuntimeState(state string) { s.runtimePlane.SetState(state)
 func (s *Service) ResolveRuntime() (string, error) { return s.runtimePlane.Resolve() }
 
 // TODO(P4b): 删转发（同上）
-func (s *Service) selectedSpec() (runtimeSpec, error) { return s.runtimePlane.SelectedSpec() }
+func (s *Service) selectedSpec() (runtime.Spec, error) { return s.runtimePlane.SelectedSpec() }
 
-// runtimeSpec 是 `pkg/runtime.Spec` 的别名视图（`selectedSpec` 的返回类型；
-// 调用点原本就直接用 `runtime.Spec`，这里只为让转发签名读起来短一点）。
-type runtimeSpec = runtime.Spec
+// `runtimeSpec` 别名同样已删（P4a 正文第二十六刀）：调用点本来就直接写 `runtime.Spec`，
+// 别名只是让转发签名读起来短一点——**短不是账目干净**。
