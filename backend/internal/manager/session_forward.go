@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"time"
 
 	"github.com/morehao/ark-mate/internal/domain/session"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
@@ -99,4 +100,49 @@ func deriveTitle(text string) string { return session.DeriveTitle(text) }
 // TODO(P4b): 删转发（`GetSession`/`UpdateSession` 还在 manager，随 P3b-2/P4a 走）
 func (s *Service) toSessionResp(r *SessionRec) dtosession.SessionResp {
 	return s.sessionPlane.ToSessionRespOf(r)
+}
+
+// TODO(P4b): 删转发（轮次与权限记忆的落库面直接依赖 session.Plane）
+func (s *Service) openRun(sessionID, runID, text string, firstSeq int64) {
+	s.sessionPlane.OpenRun(sessionID, runID, text, firstSeq)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) ListRuns(ctx context.Context, id string) ([]dtosession.RunResp, error) {
+	return s.sessionPlane.ListRuns(ctx, id)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) persistMemoryAdd(sessionID, title, kind, decision string, since time.Time) {
+	s.sessionPlane.PersistMemoryAdd(sessionID, title, kind, decision, since)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) persistMemoryDel(sessionID, title, kind string) {
+	s.sessionPlane.PersistMemoryDel(sessionID, title, kind)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) persistMemoryDelAll(sessionID string) {
+	s.sessionPlane.PersistMemoryDelAll(sessionID)
+}
+
+// TODO(P4b): 删转发（调用点直接依赖 session.Plane）
+func (s *Service) memoryRows(ctx context.Context) ([]model.PermissionMemoryEntity, error) {
+	return s.sessionPlane.MemoryRows(ctx)
+}
+
+// TODO(P4b): 删转发（启动恢复面直接依赖 session.Plane）
+func (s *Service) RestoreFromStore(ctx context.Context) (int, int, error) {
+	return s.sessionPlane.Restore(ctx)
+}
+
+// TODO(P4b): 删转发（模型引用回填面直接依赖 session.Plane）
+func (s *Service) backfillSessionModelRefs(ctx context.Context) {
+	s.sessionPlane.BackfillSessionModelRefs(ctx)
+}
+
+// TODO(P4b): 删转发（同上：它是回填用的同一份换算表）
+func (s *Service) runtimeValueToModelID(ctx context.Context, runtimeID string) map[string]string {
+	return s.sessionPlane.RuntimeValueToModelID(ctx, runtimeID)
 }

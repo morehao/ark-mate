@@ -162,6 +162,13 @@ func NewService(reg *runtime.Registry, bus *eventbus.Bus) *Service {
 	// 会话读面的两个端口：归属展示（工作空间登记面）与能力选定回显（能力代际面，P3c 才搬）。
 	s.sessionPlane.SetWorkspaceDisplay(s.workspaceDisplayOf)
 	s.sessionPlane.SetCapabilityView(toCapabilitiesResp)
+	// 会话域的其余端口：事件总线（恢复时按库位次注回）、模型行↔底座运行时值的换算、
+	// 以及恢复期"作废重启前排队输入"的钩子（**临时**：输入队列 P3b-2 搬进来后就地调用）。
+	s.sessionPlane.SetBus(bus)
+	s.sessionPlane.SetModelValueSource(func(runtimeID, providerID, model string) (string, error) {
+		return modelValueFor(s.reg, runtimeID, providerID, model)
+	})
+	s.sessionPlane.SetStaleInputsOnRestore(s.staleQueuedInputsOnRestore)
 	// 两个端口都读会话/模型面（编排侧），在装配期接上；`demo`/`migrate` 这类没有编排器的
 	// 场景下 `effect` 恒 nil（回执为 nil，与拆分前逐字同义）。
 	s.providerPlane.SetEffect(s.providerEffect)

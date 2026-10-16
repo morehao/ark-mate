@@ -1,9 +1,11 @@
 package session
 
 import (
+	"context"
 	"sync"
 
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/eventbus"
 	"github.com/morehao/ark-mate/internal/store"
 	"github.com/morehao/ark-mate/pkg/object/objusage"
 )
@@ -17,6 +19,8 @@ import (
 type Plane struct {
 	mu sync.Mutex
 	st *store.Store
+	// bus 事件总线（恢复时按 DB 位次把已落库事件注回去；与库共用同一套会话内位次）。
+	bus *eventbus.Bus
 
 	// sessions 进程内会话记录（v14 起 sqlite 模式只是**镜像**：库是元数据权威，内存是执行上下文）。
 	// 它由**本域自己的锁**保护（并发审查结论：会话的临界区 0 处跨域，见计划 §3.1.40/§3.1.43）。
@@ -29,6 +33,12 @@ type Plane struct {
 	// capabilityViewOf 会话记录 → 能力选定回显（端口：`CapabilitySelection` 是能力代际面，
 	// P3c 才搬进本域；会话读面不该为了一个回显字段把整个代际面拖进来）。
 	capabilityViewOf func(rec *SessionRec) *dtosession.SessionCapabilitiesResp
+
+	// modelValueFor 平台模型行 ↔ 底座运行时值的换算（端口：逐 runtime 形态不同，属 adapter 面）。
+	modelValueFor func(runtimeID, providerID, model string) (string, error)
+	// staleInputsOnRestore 恢复时作废"重启前排队未投递"的输入（**临时端口**：输入队列 P3b-2 才搬进
+	// 本域，届时这条线变成域内调用）。
+	staleInputsOnRestore func(ctx context.Context)
 
 	// usageOf 取某会话最近一次上报的用量快照（**端口**：它读的是执行面
 	// `Orchestrator.LatestUsage` 的内存表，属 runtimeconn；nil = 没有编排器，同拆分前
@@ -77,4 +87,17 @@ func (pl *Plane) SetRestoring(v bool) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	pl.restoring = v
+}
+
+// SetBus 装配期登记事件总线。
+func (pl *Plane) SetBus(bus *eventbus.Bus) { pl.bus = bus }
+
+// SetModelValueSource 装配期登记"平台模型行 ↔ 底座运行时值"的换算。
+func (pl *Plane) SetModelValueSource(fn func(runtimeID, providerID, model string) (string, error)) {
+	pl.modelValueFor = fn
+}
+
+// SetStaleInputsOnRestore 装配期登记恢复期的排队输入作废钩子（见字段注释：P3b-2 后并入本域）。
+func (pl *Plane) SetStaleInputsOnRestore(fn func(ctx context.Context)) {
+	pl.staleInputsOnRestore = fn
 }
