@@ -285,3 +285,23 @@ export interface ModelRef {
    */
   modelID?: string
 }
+
+/**
+ * 平台模型行 id 的形状（`mdl_` + 26 位 Crockford ULID，由 `pkg/object/objid` 铸造）。
+ *
+ * 与后端守卫里的 `sessionModelIDForm`（`internal/archtest`）**同源**：那条是"库里存的必须是
+ * 平台行 id"，这条是"客户端手上拿的必须是平台行 id"。
+ */
+export const PLATFORM_MODEL_ID_PATTERN = /^mdl_[0-9A-HJKMNP-TV-Z]{26}$/
+
+/**
+ * 这个值是不是平台模型行 id。
+ *
+ * **为什么客户端需要一个形状判据**：本地记住的"上次所选模型"（`mate.web.lastModel`）可能来自
+ * v26 之前——那时它存的是**运行时目录里的不透明 value**（dsh 形如 `["yygu","deepseek-flash"]`）。
+ * 那种值在本地看着像"已经选好一个模型"，发出去却会被平台以 40401 拒（平台只接受自己声明过的
+ * 模型），而它与合法值在界面上**长得一模一样**——所以判据必须落在形状上、且**不依赖目录到没到**
+ * （目录为空是"还不知道"，不是"可以继续用一个形状就不对的值"）。
+ */
+export const isPlatformModelID = (value: string | null | undefined): value is string =>
+  typeof value === 'string' && PLATFORM_MODEL_ID_PATTERN.test(value)

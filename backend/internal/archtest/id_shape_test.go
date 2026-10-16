@@ -43,8 +43,14 @@ var runtimeShellCallSites = []runtimeShellCallSite{
 		Why: "W1 首次建会话落 rec / W2 原生恢复失败或迁移后换会话（最容易被漏的一处）/ U1 原生恢复前解包",
 	},
 	{
-		Path: "backend/internal/manager/model_catalog.go", Wrap: true, Unwrap: true,
-		Why: "W3 `session/list` 直出底座原文（第二个最容易漏的点）/ U2 探测用 resume 前解包",
+		// v26.1：这一支**只剩解包**了。v15 的 W3（"`session/list` 直出底座原文，包装后才是平台侧的
+		// 值"）是为「同一个变量兼作给底座用与比较/落库用两种语义」而设的；现在目录取样只保留
+		// **原文那一半**——列出的会话直接当 resume 目标使，从不落 rec、也不与包装值比较
+		// （平台记录那半由 U2 解包成原文后比较，两侧同为原文）。于是这里不再有包装调用点：
+		// 白名单若继续写着 `Wrap: true`，这条守卫就会为"已经不存在的东西"发许可——它自己报的那句
+		// 「白名单已经失去对象」正是这个意思。别为了让这条绿而把包装加回来。
+		Path: "backend/internal/manager/model_catalog.go", Wrap: false, Unwrap: true,
+		Why: "U2 探测用 resume 前解包（另见 v15 §4.5.3 的 W3：该包装点已随 v26.1 取样重构消失）",
 	},
 	{
 		Path: "backend/internal/manager/permission_flow.go", Wrap: true, Unwrap: false,

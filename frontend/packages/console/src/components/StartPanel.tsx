@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import { tokens } from '@ark-mate/ui'
-import { modelValues } from '@ark-mate/types'
+import { modelValues, isPlatformModelID } from '@ark-mate/types'
 import { useMate } from '../store'
 import { ModelSelect } from './ModelSelect'
 import { WorkspacePicker, type WorkspaceChoice } from './WorkspacePicker'
@@ -15,9 +15,26 @@ import { getSendKey, sendKeyHint, shouldSendKey, toggleSendKey, type SendKeyMode
 // 新建会话时记住的「上次所选模型」——存的是**平台模型行 id**（`mdl_…`；v26 起）。
 // 键名前缀随 M0-1 的前端产品包改名统一为 `mate.web.*`（与其它前端持久键同前缀）；
 // 旧键名不回填——代价是既有本地选择在改名后一次性回到默认模型。
-// v26 顺带改了一次**值**的形态（旧值是不透明串）：`modelOptions` 里对不上任何 `model_id` 时
-// 就地清掉（下面的 effect），所以旧值不会以"看起来选着、其实发不出去"的形态留在本地。
+//
+// v26 顺带改了一次**值**的形态（旧值是不透明串），于是这个键有了两层自愈（见 `readStoredModel`
+// 与下面的 effect）：**形状不对的无条件清掉**（不等目录），形状对但已不在候选里的等目录到了再清。
+// 为什么要分两层：2026-10-15 的真实事故是"等目录"等成了一个死锁——目录为空的那些天里，
+// 旧值一直留着，而每次发送都被平台以 40401 拒（下拉里又没有别的候选可换）。
 const LAST_MODEL_KEY = 'mate.web.lastModel'
+
+// 本地记住的模型 → 平台行 id 或 `null`。
+//
+// 形状不对（v26 之前的运行时 value，如 `["yygu","deepseek-flash"]`）**当场丢弃**：平台只接受
+// 自己声明过的模型，这种值发出去必被拒，而它在界面上与合法值长得一模一样。
+const readStoredModel = (): string | null => {
+  const v = localStorage.getItem(LAST_MODEL_KEY)?.trim()
+  if (!v) return null
+  if (!isPlatformModelID(v)) {
+    localStorage.removeItem(LAST_MODEL_KEY)
+    return null
+  }
+  return v
+}
 
 // 示例指令（参照 AionUi /guid「试试这些指令」：`pages/guid/GuidPage.tsx`）
 const EXAMPLES = [
@@ -46,10 +63,8 @@ export function StartPanel() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendMode, setSendMode] = useState<SendKeyMode>(getSendKey)
-  const [model, setModel] = useState<string | null>(() => {
-    const v = localStorage.getItem(LAST_MODEL_KEY)
-    return v && v.trim() ? v : null
-  })
+  // 初值只认**形状合法**的本地记忆（`readStoredModel`：形状不对的当场丢弃，不等目录）。
+  const [model, setModel] = useState<string | null>(readStoredModel)
   // 工作空间选择（v14）：`null` = 未指定（会话落在**默认工作空间**）；否则是选中的登记 id
   // （v14.3 起这里只剩 id：选择面删掉「输入路径」后，前端不再产生裸绝对路径这种值）。
   //
@@ -116,13 +131,22 @@ export function StartPanel() {
     void loadModelCatalog()
   }, [loadModelCatalog])
 
-  // 本地记住的模型若已不在运行时候选里（换了底座/换了已配置的 provider），就地清掉：
-  // 否则会把运行时不再广告的值发出去 → 建会话被拒（宁可回到「跟随默认」，不留死状态）。
+  // 本地记住的模型的自愈分两层，**形状那一层不许等目录**：
   //
-  // v26：比的是候选的 **`model_id` 注解**（本地存的是平台模型行 id），不再是候选的 `value`
-  // ——后者是底座的词，两者比不出结果，症状是"每次打开都把记住的模型清掉"。
+  //	① 形状不对（v26 之前的运行时 value，或别的底座的词）：无条件清掉。等目录到齐再清是个
+  //	   死锁——目录为空时那句 `return` 会让旧值永远留着，于是每次发送都被 40401 拒，而下拉里
+  //	   一个候选都没有、用户无从替换（2026-10-15 的真实事故）；
+  //	② 形状对但已不在运行时候选里（换了底座 / 模型行被删）：等目录到了再判——目录为空只代表
+  //	   "还不知道"，不代表"没有"。比的是候选的 **`model_id` 注解**（本地存的是平台模型行 id），
+  //	   不是候选的 `value`（那是底座的词，两者比不出结果，症状是"每次打开都把记住的模型清掉"）。
   useEffect(() => {
-    if (!model || modelOptions.length === 0) return
+    if (!model) return
+    if (!isPlatformModelID(model)) {
+      setModel(null)
+      localStorage.removeItem(LAST_MODEL_KEY)
+      return
+    }
+    if (modelOptions.length === 0) return
     if (!modelOptions.some((v) => v.model_id === model)) {
       setModel(null)
       localStorage.removeItem(LAST_MODEL_KEY)
@@ -138,15 +162,19 @@ export function StartPanel() {
     if (!canSend) return
     setSending(true)
     try {
+      // 出口再判一次**形状**（纵深防御：状态只该由上面两条路写进来，但那两条路都不该是
+      // "不合法值能发出去"的唯一保证）。形状不对 → 一个字都不带，回到「跟随默认」——
+      // 平台只接受自己声明过的模型，带一个形状不对的值只会换来一次 40401。
+      const picked = isPlatformModelID(model) ? model : null
       const id = await createAndRun(
         draft.trim(),
-        model ? { modelID: model } : undefined,
+        picked ? { modelID: picked } : undefined,
         workspace.id,
         // UI 三态（null = 未限制）→ wire 形态（键缺失 = 未限制）：两个 kind 都没限制时返回
         // undefined，请求体里连 capabilities 键都不出现。转换只此一处，别的层不再判。
         selectionPayload(capabilities),
       )
-      if (model) localStorage.setItem(LAST_MODEL_KEY, model)
+      if (picked) localStorage.setItem(LAST_MODEL_KEY, picked)
       if (id) navigate(`/sessions/${id}`)
     } finally {
       setSending(false)
