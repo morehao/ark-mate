@@ -208,12 +208,15 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"接口里留声明 = 给一行转发留位置。", dead)
 		}
 	}
-	writeFaces := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "skills_write.go"))) +
-		stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "mcps_write.go")))
+	// 扫描面是**整个 manager 生产目录**（P4a 正文第五十二刀删掉了 `skills_write.go` / `mcps_write.go`
+	// 两个只剩说明头的文件；写死文件名会 Fatal，而写成整目录**同时变强**：那六行转发放回任何
+	// 文件都红——本批第五次踩「判据写死在某个文件名上」，处置一律如此）。
+	writeFaces := mgrAll
 	for _, dead := range []string{"func (s *Service) CreateSkill(", "func (s *Service) UpdateSkill(", "func (s *Service) DeleteSkill(",
 		"func (s *Service) CreateMcpServer(", "func (s *Service) UpdateMcpServer(", "func (s *Service) DeleteMcpServer("} {
 		if strings.Contains(writeFaces, dead) {
-			t.Errorf("`internal/manager/{%s,mcps_write.go}` 里又出现 `%s`：那一行转发已删。", "skills_write.go", dead)
+			t.Errorf("`internal/manager` 里又出现 `%s`：技能/MCP 写面的一行转发已删"+
+				"（实现全在 `domain/skill` / `domain/mcp` 的写面，控制器直接 `h.skills.*` / `h.mcps.*`）。", dead)
 		}
 	}
 	for _, must := range []string{"func (m *Plane) WriteSkill(", "func (m *Plane) DeleteSkill("} {
@@ -251,11 +254,12 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 				"`.AutoProbe`），接口里留声明 = 给一行转发留位置。", dead)
 		}
 	}
-	probeFace := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", "mcp_probe.go")))
+	// 同一个理由（第五十二刀删掉了 `mcp_probe.go` 这个说明头文件）：按整目录扫。
+	probeFace := mgrAll
 	for _, dead := range []string{"func (s *Service) ProbeMcpServer(", "func (s *Service) AutoProbeMcpServers(",
 		"func (s *Service) SetMcpProbeTimeout("} {
 		if strings.Contains(probeFace, dead) {
-			t.Errorf("`internal/manager/mcp_probe.go` 里又出现 `%s`：那三条已随 P4a 正文第三十八刀删除"+
+			t.Errorf("`internal/manager` 里又出现 `%s`：那三条已随 P4a 正文第三十八刀删除"+
 				"（探测面走 `a.svc.McpPlane()` / `h.mcpPlane`）。", dead)
 		}
 	}
