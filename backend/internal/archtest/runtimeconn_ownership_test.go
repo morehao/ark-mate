@@ -72,8 +72,11 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		}
 	}
 
-	// manager 侧：两个转发文件里不得再出现状态与判定（组装面第二刀之后也不该留判据文案）。
-	for _, f := range []string{"runtime_binding.go", "diagnostics.go"} {
+	// manager 侧：诊断的组装面不得再出现判据文案。
+	//
+	// `runtime_binding.go` 已随 P4a 正文第四十九刀**整个删除**（它只剩执行面自身的四条一行转发），
+	// 所以这条判据的扫描面从"两个文件"收成一个；那四条转发改由下面的**符号判据**钉。
+	for _, f := range []string{"diagnostics.go"} {
 		thin := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "manager", f)))
 		for _, banned := range []string{"sync.Mutex", "runtime.SelectedRuntime()", "acl.NewError(",
 			"runtime.Installed(", "looksLikeAuthFailure("} {
@@ -106,6 +109,33 @@ func TestRuntimeBindingLivesInRuntimeconn(t *testing.T) {
 		if !strings.Contains(appSrc, want) {
 			t.Errorf("`internal/app/app.go` 里找不到 %q：注册表必须交给**执行面**（`a.rconn`）——"+
 				"交给编排器等于让「哪些子进程是我的」这份事实挂在过渡层上，随它一起被删掉。", want)
+		}
+	}
+
+	// 第四十九刀：执行面自身的**四条一行转发**清零（`runtime_binding.go` 整个文件随之删除）。
+	//
+	// 这一族与供应商那七条（第四十六刀）同形：一行转发的正确性完全等价于被转发的那一行，
+	// 所以它写错与否都不会让任何测试变红，而它让「这段实现在哪一层」重新不可见。
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	for _, dead := range []string{
+		"func (s *Service) runtimeBindingSnapshot(",
+		"func (s *Service) setRuntimeState(",
+		"func (s *Service) ResolveRuntime(",
+		"func (s *Service) selectedSpec(",
+	} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：执行面自身的转发已随 P4a 正文第四十九刀清零"+
+				"（调用点直连 `runtimePlane`）。", dead)
+		}
+	}
+	for _, c := range []struct{ file, want, why string }{
+		{"internal/manager/connection.go", "o.svc.runtimePlane.SetState(", "建连/拆连时的进程状态"},
+		{"internal/manager/session_start.go", "o.svc.runtimePlane.SelectedSpec(", "建会话时的 spec 解析"},
+		{"internal/manager/orchestrator.go", "o.svc.runtimePlane.SetState(", "句柄作废时的状态回落"},
+	} {
+		if !strings.Contains(stripLineComments(readFileOrFatal(t, filepath.Join(root, c.file))), c.want) {
+			t.Errorf("`%s` 里找不到 `%s`（%s）：调用点必须直连执行面。"+
+				"漏了会让这一条链悄悄退回某个中间层。", c.file, c.want, c.why)
 		}
 	}
 }

@@ -280,7 +280,7 @@ func (o *Orchestrator) acquire(ctx context.Context, spec runtime.Spec, fingerpri
 		"fork", sc.Fork != nil,
 		"close", sc.Close != nil)
 
-	o.svc.setRuntimeState(session.AgentStateRunning)
+	o.svc.runtimePlane.SetState(session.AgentStateRunning)
 	rc = &runtimeConn{client: client, spec: spec, key: key, baseKey: baseKey,
 		configDigest: cfgDigest, started: time.Now()}
 	o.registerProc(rc)
@@ -377,7 +377,7 @@ func (o *Orchestrator) dropConn(rc *runtimeConn) {
 	// 状态回落仅当仍是该 runtime 的当前连接（旧连接收尾不得覆盖新连接的 running——
 	// 空闲回收后立刻被会话按需重拨的场景）。
 	if ownerBefore {
-		o.svc.setRuntimeState(session.AgentStateStopped)
+		o.svc.runtimePlane.SetState(session.AgentStateStopped)
 	}
 	if len(victims) > 0 {
 		glog.Infow(context.Background(), "连接拆除：会话句柄作废（会话保留，下次 prompt 按需重建）",

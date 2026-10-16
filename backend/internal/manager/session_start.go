@@ -50,7 +50,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	// **单点铸码**（P4a）：`runtime_not_found` 只由执行面铸（`runtimeconn.SelectedSpec`）。
 	// 这里原来先 `ResolveRuntime()` 再自己 `reg.Get` 判一次——第二次判定**永远不成立**
 	// （id 就是刚解析出来的那个），而它铸的是**同一个码的第二份文本**：两份文本迟早只改一处。
-	spec, err := o.svc.selectedSpec()
+	spec, err := o.svc.runtimePlane.SelectedSpec()
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (o *Orchestrator) startSessionOn(ctx context.Context, opt StartOptions) (*C
 	fingerprint := o.svc.capabilityFingerprint(spec.ID, opt.Selection)
 	rc, err := o.acquire(ctx, spec, fingerprint)
 	if err != nil {
-		o.svc.setRuntimeState(session.AgentStateStopped)
+		o.svc.runtimePlane.SetState(session.AgentStateStopped)
 		// A3：底座起不来 / 握手失败时记诊断（含该阶段的 stderr 尾巴），供
 		// `GET /runtime/diagnostics` 外露。这一句原来在 `StartAgent`（v19 之前那个"暖启动"入口，
 		// 已随 agent 面删除）；今天唯一的启动路径就是"建会话把它拉起来"，所以落在这里。
@@ -180,7 +180,7 @@ func (o *Orchestrator) ensureSession(ctx context.Context, sessionID string) (*Ac
 	// 与当前不同（改过构建 / 老数据），下面 `connectSession` 的 `sameRuntime` 判据自然为 false，
 	// 走 fresh + handoff memo 重灌，会话照样能续。**这条路径要有真实用例**（M5 验收项）。
 	// 同 `startSessionOn`：`runtime_not_found` 只由执行面铸（单点）。
-	spec, err := o.svc.selectedSpec()
+	spec, err := o.svc.runtimePlane.SelectedSpec()
 	if err != nil {
 		return nil, err
 	}

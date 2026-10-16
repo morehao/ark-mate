@@ -191,7 +191,7 @@ func TestDisconnectIdleSession(t *testing.T) {
 	if bus.Published() != before {
 		t.Fatalf("断连不应伪造会话事件（run.error 等）: published=%d want %d", bus.Published(), before)
 	}
-	if st := svc.runtimeBindingSnapshot().State; st != session.AgentStateStopped {
+	if st := svc.runtimePlane.Snapshot().State; st != session.AgentStateStopped {
 		t.Fatalf("底座状态应 stopped: %s", st)
 	}
 	// 句柄作废并摘出活跃集合（下次 prompt 才能重建），平台侧会话记录保留。
@@ -414,14 +414,14 @@ func TestServiceResolveRuntimeUsesBuildRuntime(t *testing.T) {
 	// 已装配：原样返回构建期常量（不是"注册表里第一个"，也不是 agent 的候选）。
 	svc, _, _ := rigWithRuntime(t, runtime.Spec{ID: "stub", Name: "Stub"})
 	setBuildRuntime(t, "stub")
-	if id, err := svc.ResolveRuntime(); err != nil || id != "stub" {
+	if id, err := svc.runtimePlane.Resolve(); err != nil || id != "stub" {
 		t.Fatalf("应返回构建期底座 stub，id=%q err=%v", id, err)
 	}
 
 	// 未装配：明确报 runtime_not_found（不静默回落到注册表里的别的底座）。
 	empty := NewService(runtime.NewRegistry(), nil)
 	setBuildRuntime(t, "stub")
-	_, err := empty.ResolveRuntime()
+	_, err := empty.runtimePlane.Resolve()
 	var ae *acl.Error
 	if !errors.As(err, &ae) || ae.Code != "runtime_not_found" {
 		t.Fatalf("空注册表应报 runtime_not_found，got %v", err)

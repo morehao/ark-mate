@@ -154,7 +154,7 @@ func TestStoreSkillWriteFaceConflictIsNotLastWriteWins(t *testing.T) {
 	if _, err := r.Svc.SkillPlane().WriteSkill(ctx, "", dtocapability.SkillWriteReq(rawObj(t, "id", `"cas-skill"`, "name", `"orig"`)), true); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	repo, err := r.Svc.definitionRepoFor(definition.CapSubSkills)
+	repo, err := r.Svc.defs.DefinitionRepoFor(definition.CapSubSkills)
 	if err != nil {
 		t.Fatal(err)
 	}

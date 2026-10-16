@@ -362,14 +362,14 @@ func (s *MateSource) servers(ctx context.Context) ([]gatewayServer, error) {
 	if err := s.reload(ctx); err != nil {
 		return nil, err
 	}
-	defs, err := s.svc.GatewayMcpFace(runtime.SelectedRuntime(), s.pinned)
+	defs, err := s.svc.McpPlane().GatewayFace(runtime.SelectedRuntime(), s.pinned)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]gatewayServer, 0, len(defs))
 	for _, def := range defs {
 		// 远程传输只用得到 header（env 是 stdio 子进程的注入面，而 stdio 不进网关）。
-		_, headers, problems := s.svc.ResolveMcpSecrets(def)
+		_, headers, problems := s.svc.McpPlane().ResolveSecrets(def)
 		if len(problems) > 0 {
 			if !s.warnOnce("secret:" + def.ID) {
 				glog.Warnw(ctx, "mcp 网关: 密钥引用解析失败，跳过该 server", "server", def.ID, "problems", problems)

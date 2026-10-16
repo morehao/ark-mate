@@ -326,7 +326,7 @@ func (o *Orchestrator) Close() {
 		// 主动停机：先置原因再拆除 —— 停机不是连接故障，不能把会话写成失败态。
 		rc.intentional.Store(true)
 		o.disconnectSessionAll(rc)
-		o.svc.setRuntimeState(session.AgentStateStopped)
+		o.svc.runtimePlane.SetState(session.AgentStateStopped)
 		o.unregisterProc(rc)
 		if rc.client != nil {
 			_ = rc.client.Close()

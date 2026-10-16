@@ -331,4 +331,31 @@ func TestCapabilityWiringIsAttached(t *testing.T) {
 		t.Error("`internal/app/app.go` 的 `router.Ports` 字面量里又出现 `Capability: a.svc`：" +
 			"那一格已随第三十九刀摘除。")
 	}
+
+	// 第四十九刀：能力/定义面的**四条一行转发**清零（`gateway_face.go` 与 `definition_forward.go`
+	// 两个文件整个删除）。
+	//
+	// 两族都属"定义怎么被取用"这一面：网关要的那份 server 定义（未解析密钥）与密钥解析、
+	// 以及定义机制的 repo / 能力目录取用。它们原先保留同名公开方法只是因为调用点拿到的是
+	// `*Service`；转发删掉之后调用点直接写 `McpPlane()` / `defs`——**名字变了**，
+	// 而"这段实现在哪一层"重新变得可判定。
+	mgrAll := dirProductionBody(t, filepath.Join(root, "internal", "manager"))
+	for _, dead := range []string{
+		"func (s *Service) GatewayMcpFace(",
+		"func (s *Service) ResolveMcpSecrets(",
+		"func (s *Service) definitionRepoFor(",
+		"func (s *Service) capabilityDirFor(",
+	} {
+		if strings.Contains(mgrAll, dead) {
+			t.Errorf("`internal/manager` 里又出现 `%s`：能力/定义面的过渡转发已随 P4a 正文第四十九刀"+
+				"清零（调用点直连 `McpPlane()` / `defs`）。", dead)
+		}
+	}
+	gwSrc := stripLineComments(readFileOrFatal(t, filepath.Join(root, "internal", "gateway", "source.go")))
+	for _, want := range []string{"s.svc.McpPlane().GatewayFace(", "s.svc.McpPlane().ResolveSecrets("} {
+		if !strings.Contains(gwSrc, want) {
+			t.Errorf("`internal/gateway/source.go` 里找不到 `%s`：网关装配必须直连 MCP 平面。"+
+				"漏了会让这一条链悄悄退回某个中间层。", want)
+		}
+	}
 }

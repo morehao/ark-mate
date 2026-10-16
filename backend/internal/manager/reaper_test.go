@@ -26,7 +26,7 @@ func TestReapIdleOnceBasic(t *testing.T) {
 	if ok {
 		t.Fatal("连接应已摘除")
 	}
-	if st := svc.runtimeBindingSnapshot().State; st != session.AgentStateStopped {
+	if st := svc.runtimePlane.Snapshot().State; st != session.AgentStateStopped {
 		t.Fatalf("回收后状态应 stopped: %s", st)
 	}
 }
@@ -78,10 +78,10 @@ func TestReapThenReacquireState(t *testing.T) {
 	o.mu.Lock()
 	o.conns["stub"] = newer
 	o.mu.Unlock()
-	svc.setRuntimeState(session.AgentStateRunning)
+	svc.runtimePlane.SetState(session.AgentStateRunning)
 	// 旧连接收尾 dropConn：ownerBefore=false → 状态不回落（仍 running）。
 	o.dropConn(old)
-	if st := svc.runtimeBindingSnapshot().State; st == session.AgentStateStopped {
+	if st := svc.runtimePlane.Snapshot().State; st == session.AgentStateStopped {
 		t.Fatal("旧连接收尾不应把新连接 running 置 stopped")
 	}
 }
