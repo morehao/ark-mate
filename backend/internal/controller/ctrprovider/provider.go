@@ -7,7 +7,7 @@ package ctrprovider
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtoprovider"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -25,11 +25,11 @@ var _ ProviderCtr = (*providerCtr)(nil)
 
 // ProviderHandler 处理 Provider 档案 REST（P2 注入面：密钥只写不读回）。
 type providerCtr struct {
-	svc svcruntime.RuntimeSvc
+	svc svcprovider.ProviderSvc
 }
 
 // NewProviderCtr 构造 ProviderCtr。
-func NewProviderCtr(svc svcruntime.RuntimeSvc) ProviderCtr {
+func NewProviderCtr(svc svcprovider.ProviderSvc) ProviderCtr {
 	return &providerCtr{svc: svc}
 }
 

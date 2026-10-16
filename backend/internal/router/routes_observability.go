@@ -12,7 +12,7 @@ import (
 // registerUsage 用量统计（M3 首项）：runs 计数/时长 + 会话上下文/费用快照聚合
 // （memory 模式返回 40501）。只读，挂在 rest 面凭据中间件之后。
 func registerUsage(v1 *gin.RouterGroup, ports Ports) {
-	usage := ctrusage.NewUsageCtr(ports.Usage)
+	usage := ctrusage.NewUsageCtr(ports.Session)
 	v1.GET("/usage/summary", usage.Summary)
 }
 

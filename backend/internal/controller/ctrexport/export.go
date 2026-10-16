@@ -7,7 +7,7 @@ package ctrexport
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtoexport"
-	"github.com/morehao/ark-mate/internal/service/svcexport"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -21,11 +21,11 @@ var _ ExportCtr = (*exportCtr)(nil)
 
 // ExportHandler 处理会话批量导出（M3 ②：JSON / 纯文本 / Markdown）。
 type exportCtr struct {
-	svc svcexport.ExportSvc
+	svc svcsystem.SystemSvc
 }
 
 // NewExportCtr 构造 ExportCtr。
-func NewExportCtr(svc svcexport.ExportSvc) ExportCtr {
+func NewExportCtr(svc svcsystem.SystemSvc) ExportCtr {
 	return &exportCtr{svc: svc}
 }
 

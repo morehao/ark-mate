@@ -7,7 +7,7 @@ package ctrusage
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtousage"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -21,11 +21,11 @@ var _ UsageCtr = (*usageCtr)(nil)
 
 // UsageHandler 用量统计 REST（M3 首项：GET /usage/summary）。
 type usageCtr struct {
-	svc svcusage.UsageSvc
+	svc svcsession.SessionSvc
 }
 
 // NewUsageCtr 构造 UsageCtr。
-func NewUsageCtr(svc svcusage.UsageSvc) UsageCtr {
+func NewUsageCtr(svc svcsession.SessionSvc) UsageCtr {
 	return &usageCtr{svc: svc}
 }
 

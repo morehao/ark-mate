@@ -724,7 +724,8 @@ type envelope struct {
 func stubDeps(svc *stubSvc) router.Ports {
 	return router.Ports{
 		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Provider: svc, Model: svc,
+		Capability: svc, Library: svc, System: svc,
 	}
 }
 

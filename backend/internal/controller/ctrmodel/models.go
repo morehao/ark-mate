@@ -7,7 +7,7 @@ package ctrmodel
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/morehao/ark-mate/internal/dto/dtomodel"
-	"github.com/morehao/ark-mate/internal/service/svcruntime"
+	"github.com/morehao/ark-mate/internal/service/svcmodel"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -28,11 +28,11 @@ var _ ModelCtr = (*modelCtr)(nil)
 //
 // 只依赖一个端口（svcruntime）：底座由构建期固定（v19），"问哪个底座"不再是一个参数。
 type modelCtr struct {
-	svc svcruntime.RuntimeSvc
+	svc svcmodel.ModelSvc
 }
 
 // NewModelCtr 构造 ModelCtr。
-func NewModelCtr(svc svcruntime.RuntimeSvc) ModelCtr {
+func NewModelCtr(svc svcmodel.ModelSvc) ModelCtr {
 	return &modelCtr{svc: svc}
 }
 

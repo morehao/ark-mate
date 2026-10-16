@@ -21,12 +21,12 @@ import (
 	"github.com/morehao/ark-mate/internal/middleware"
 	"github.com/morehao/ark-mate/internal/service/svcautomation"
 	"github.com/morehao/ark-mate/internal/service/svccapability"
-	"github.com/morehao/ark-mate/internal/service/svcexport"
 	"github.com/morehao/ark-mate/internal/service/svclibrary"
+	"github.com/morehao/ark-mate/internal/service/svcmodel"
+	"github.com/morehao/ark-mate/internal/service/svcprovider"
 	"github.com/morehao/ark-mate/internal/service/svcruntime"
-	"github.com/morehao/ark-mate/internal/service/svcsearch"
 	"github.com/morehao/ark-mate/internal/service/svcsession"
-	"github.com/morehao/ark-mate/internal/service/svcusage"
+	"github.com/morehao/ark-mate/internal/service/svcsystem"
 	"github.com/morehao/ark-mate/internal/service/svcworkspace"
 	"github.com/morehao/golib/biz/gserver/ginserver"
 )
@@ -42,12 +42,12 @@ type Ports struct {
 	Session    svcsession.SessionSvc
 	Workspace  svcworkspace.WorkspaceSvc
 	Runtime    svcruntime.RuntimeSvc
+	Provider   svcprovider.ProviderSvc
+	Model      svcmodel.ModelSvc
 	Capability svccapability.CapabilitySvc
 	Automation svcautomation.AutomationSvc
 	Library    svclibrary.LibrarySvc
-	Usage      svcusage.UsageSvc
-	Search     svcsearch.SearchSvc
-	Export     svcexport.ExportSvc
+	System     svcsystem.SystemSvc
 }
 
 // CapabilityHostFacts 报告"宿主能不能抬起系统目录面板"（`native-dialog` 的可用性判据）。

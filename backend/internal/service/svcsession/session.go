@@ -5,7 +5,9 @@ package svcsession
 import (
 	"context"
 
+	"github.com/morehao/ark-mate/internal/dto/dtosearch"
 	"github.com/morehao/ark-mate/internal/dto/dtosession"
+	"github.com/morehao/ark-mate/internal/dto/dtousage"
 )
 
 // SessionSvc 会话面的服务端口。
@@ -69,4 +71,12 @@ type SessionSvc interface {
 
 	// ResolveElicitation 按 elicitation_id 决策（accept/decline/cancel）。
 	ResolveElicitation(ctx context.Context, id, elicitationID, action string, content map[string]any) error
+	// SearchMessages 跨会话消息级检索（M3 ②：全局消息搜索 + 锚点跳转）。
+	//
+	// ADR-2：原 `svcsearch` 的单方法面并入这里——它是**会话域**的读面（检索的就是消息）。
+	SearchMessages(ctx context.Context, q string, limit int) (*dtosearch.MessageSearchResp, error)
+	// UsageSummary 聚合用量统计（M3 首项：runs 计数/时长 + 会话上下文/费用快照）。
+	//
+	// ADR-2：原 `svcusage` 的单方法面并入这里——runs 与上下文快照都挂在会话上。
+	UsageSummary(ctx context.Context, q dtousage.UsageQueryReq) (*dtousage.UsageSummaryResp, error)
 }

@@ -435,9 +435,12 @@ func (a *App) Init(ctx context.Context) error {
 
 	// 装配各领域服务端口。当前 manager.Service 是单一聚合，同时满足全部端口；
 	// 端口声明与实现分离后，装配点成为"谁提供什么能力"的唯一可见处。
+	// P4a 起端口按 ADR-2 收口：`Runtime` 只管底座身份与诊断，档案与模型清单各有主人；
+	// 检索/用量并入 `Session`，导出归 `System`。
 	ports := router.Ports{
 		Session: a.svc, Workspace: a.svc, Runtime: a.svc,
-		Capability: a.svc, Automation: a.svc, Library: a.svc, Usage: a.svc, Search: a.svc, Export: a.svc,
+		Provider: a.svc, Model: a.svc,
+		Capability: a.svc, Automation: a.svc, Library: a.svc, System: a.svc,
 	}
 	// 资产层（M2-1）：资产来自调用方给的目录（`--web-dir` / `MATE_WEB_DIR`），
 	// 没给即**拒绝启动**（退出码 3）。放在监听之前：装错资产时不该先占住端口再报错。

@@ -62,7 +62,8 @@ func newEngineWithService(t *testing.T) (*gin.Engine, *manager.Service) {
 	assets, _ := router.ResolveAssets("")
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Provider: svc, Model: svc,
+		Capability: svc, Library: svc, System: svc,
 	}, bus, router.Options{Web: assets})
 	return engine, svc
 }
@@ -376,7 +377,8 @@ func newAuthEngine(creds *credential.Set) *gin.Engine {
 	svc := manager.NewService(reg, bus)
 	engine := router.New(router.Ports{
 		Session: svc, Workspace: svc, Runtime: svc,
-		Capability: svc, Library: svc, Usage: svc, Search: svc, Export: svc,
+		Provider: svc, Model: svc,
+		Capability: svc, Library: svc, System: svc,
 	}, bus, router.Options{Credentials: creds})
 	return engine
 }

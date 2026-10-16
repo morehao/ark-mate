@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morehao/ark-mate/internal/service/svcsearch"
+	"github.com/morehao/ark-mate/internal/service/svcsession"
 	"github.com/morehao/ark-mate/pkg/code"
 	"github.com/morehao/golib/biz/gcontext/gincontext"
 )
@@ -23,11 +23,11 @@ var _ SearchCtr = (*searchCtr)(nil)
 
 // SearchHandler 处理跨会话消息检索（M3 ②：全局消息搜索 + 锚点跳转）。
 type searchCtr struct {
-	svc svcsearch.SearchSvc
+	svc svcsession.SessionSvc
 }
 
 // NewSearchCtr 构造 SearchCtr。
-func NewSearchCtr(svc svcsearch.SearchSvc) SearchCtr {
+func NewSearchCtr(svc svcsession.SessionSvc) SearchCtr {
 	return &searchCtr{svc: svc}
 }
 
